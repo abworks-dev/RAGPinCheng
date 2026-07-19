@@ -1,149 +1,127 @@
-# CLAUDE.md
+- # RAGPinCheng Claude Code 项目入口
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+  ## 角色与目标
 
-## Project
+  你是 RAGPinCheng 的软件工程协作者。用户负责业务目标、产品边界和高风险操作的最终决策。
 
-Chinese-language enterprise knowledge base ("品成 BIM 知识库") for an internal BIM consultancy. The company's main business is producing Revit / CAD models and drawings for clients, plus developing asset-management software. This RAG unifies the company's accumulated assets — **industry standards & codes, customer requirements, internal standards, past project deliverables / retrospectives, and training-video transcripts** — so staff can quickly look up standards, look up prior project experience, and onboard new hires. The product is a general BIM knowledge base, **not a steel-structure-specific assistant**; early test docs happened to be steel-structure codes but the corpus is intentionally broad.
+  本项目是面向 BIM 咨询企业的中文内部知识库，覆盖行业规范、客户标准、公司标准、项目资料和培训视频转写稿。它是企业文档 RAG，不是钢结构专用助手，也不是已实现的 BIM 模型检查 Agent。
 
-PDFs in `docs/` are parsed to markdown, chunked, embedded with BGE-M3, indexed in a local Qdrant store with parent text in SQLite, retrieved via a dense+sparse RRF hybrid plus a BGE-reranker-v2-m3 cross-encoder pass, and answered by Zhipu GLM-4 with citations. A `ChatSession` layer orchestrates multi-turn conversations (rewrite → retrieve → merge → generate, both sync and streaming). Two frontends consume it: a Streamlit app (`app.py`) and a FastAPI (`api/`) + React/Vite (`frontend/`) web UI that streams answers over SSE.
+  ## 事实优先级
 
-## Commands
+  发生冲突时按以下顺序判断：
 
-All commands run from the repo root, with the project venv (`.venv`) activated.
+  1. 当前环境的可复核运行结果与测试；
+  2. 当前 Commit 源码、Schema和配置；
+  3. README、部署指南和架构文档；
+  4. 本文件与 `.claude/rules/` 中的开发约定；
+  5. TODO、历史记录和推测。
 
-- **Install dependencies**: `pip install -r requirements.txt` (local dev). **There are two requirements files**: `requirements.txt` (full local set) and `requirements-prod.txt` (Docker image — excludes `mineru[core]` and `streamlit`; torch is installed separately in the Dockerfile). **A new runtime dependency must be added to BOTH files**, or the container crashes on import.
-- **Run the Streamlit UI**: `streamlit run app.py`
-- **Run the FastAPI backend** (also serves the React SPA in production): `uvicorn api.main:app --reload --port 8000`. Lifespan: (1) migrates `parents.sqlite`, (2) creates / migrates `data/app.sqlite` (users + auth_sessions + conversations + messages), (3) seeds the admin account from `ADMIN_EMPLOYEE_ID`/`ADMIN_PASSWORD` if no admin row exists, (4) warms BGE-M3 + the reranker (set `API_SKIP_WARMUP=1` to skip), (5) starts an hourly sweeper that hard-deletes conversations idle >30 days and expired auth sessions. If `frontend/dist/` exists (built React bundle, baked into the Docker image), it's mounted at `/` with SPA fallback via `SPAStaticFiles` — so the backend serves both `/api/*` and the SPA from one process in production. In local dev `frontend/dist/` doesn't exist; Vite serves the SPA at :5173 and proxies `/api/*` to :8000, so CORS kicks in. CORS allows `http://localhost:5173` by default and sends `Access-Control-Allow-Credentials: true` so the auth cookie can flow cross-origin in dev; override with comma-separated `API_CORS_ORIGINS`.
-- **Run the React frontend** (Vite dev server on :5173): `cd frontend && npm install && npm run dev`. Production build: `npm run build`. Talks to the FastAPI backend over `/api/*`.
-- **Maintenance: rename / drop stale category labels in Qdrant payload** (no re-embedding): `python scripts/migrate_categories.py [--dry-run] [--drop-uncategorized]`. Currently renames `transcriptions` → `教学视频` and patches `source_path` accordingly.
-- **Build / extend the index** (parse PDFs → chunk → embed → upsert): `python scripts/build_index.py`
-  - **Incremental by default** — re-running with new PDFs in `docs/` keeps existing indexed content (deterministic UUIDv5 IDs mean same content overwrites in place, new content is appended).
-  - `--force-parse` re-parses PDFs even if cached markdown exists in `data/parsed/`.
-  - `--reset` drops the Qdrant collection and wipes `parents.sqlite` before building (full rebuild from scratch — use after changing chunking or embedding logic).
-- **Single-doc isolation test**: `python scripts/test_single_doc.py "<path-to-pdf>"` — wipes Qdrant + parents.sqlite, indexes only that PDF, drops into a REPL. Intentionally destructive; use `build_index.py` for non-destructive incremental indexing.
-- **Retrieval smoke test** (no LLM, no API key needed): `python scripts/test_retrieve.py "<question>"` (or no arg for default probes).
-- **LLM endpoint health check**: `python scripts/check_llm.py` — probes the generation + rewrite models (tiny chat completion each, 15s timeout, no SDK retries) and prints per-model latency. Same probe is exposed at `GET /api/llm_health` (30s-cached; `?force=true` bypasses) for surfacing Zhipu outages in the UI. Logic lives in `src/llm_health.py`.
-- **Concurrency smoke tests** (regression guards for past race fixes, run in a fresh process): `python scripts/smoke_concurrent_cold_load.py` (parallel first-load of embedder + reranker — guards the double-checked-locking fix for the MPS "meta tensor" crash) and `python scripts/smoke_concurrent_retrieve.py` (parallel `retrieve()` calls — guards the Qdrant server-mode migration).
-- **Interactive RAG agent with full debug output** (requires `ZHIPU_API_KEY`): `python scripts/eval_query.py ["<seed question>"]`. Drops into a REPL after the optional seed turn; slash commands: `/reset`, `/history`, `/verbose N`, `/full`, `/short`, `/exit`. Routes through the same `ChatSession` as the Streamlit app, so eval reproduces UI behavior exactly.
-- **Eval harness** (golden-set regression for retrieval + no-answer compliance):
-  - Sample parents for synthesis: `python scripts/sample_for_eval.py [--seed N] [--factual N --table-formula N ...]`. Writes `src/eval/sampled_parents.json`.
-  - Synthesize Q/A drafts: spawn an Agent (Claude Code subagent, no API key) with `src/eval/sampled_parents.json` and per-kind generation rules → it writes `src/eval/drafts.jsonl`. User then hand-reviews into `src/eval/golden.jsonl`.
-  - Append hand-written items (12 multi-turn pairs + 6 no-answer): `python scripts/append_handwritten.py` (idempotent by id; edit the `PAIRS` / `NO_ANSWER` literals in the script to extend).
-  - Run baseline: `python scripts/run_eval_retrieval.py` (requires `ZHIPU_API_KEY`). Solo retrieval-graded items call `retrieve()` directly (no LLM); multi-turn pairs and no_answer items go through full `ChatSession.ask()`. Prints Recall@1/@5 + MRR@5 by kind; writes per-item log to `src/eval/runs/run_<ts>.jsonl`.
-  - Diff two runs: `python scripts/diff_eval_runs.py <baseline.jsonl> <candidate.jsonl>` — surfaces fixed / regressed items and rank shifts.
+  不要把 README 历史评测数字、旧快照问题或文档描述写成当前已验证结果。
 
-No test suite, lint, or typecheck is configured.
+  ## 工作前必须做
 
-## Required environment (.env)
+  1. 阅读与任务相关的入口、调用链、类型和配置；
+  2. 检查 `git status --short --branch`，保护用户已有修改；
+  3. 区分只读调查、普通实现、高风险修改和破坏性操作；
+  4. 说明最小修改面、验证方式和明确不做的内容；
+  5. 中高风险任务先调查和计划，再实施。
 
-- `ZHIPU_API_KEY` — Zhipu GLM (OpenAI-compatible at `https://open.bigmodel.cn/api/paas/v4/`). Required for generation, not for retrieval.
-- `MINERU_API_KEY` — if set, `src/ingest.py` uses the MinerU cloud API (fast, ~1 min/PDF). If unset, falls back to local `mineru` CLI (slow, CPU-only).
-- `QDRANT_URL` — URL of the Qdrant server (default `http://localhost:6333`). In docker-compose this is overridden to `http://qdrant:6333` to reach the in-cluster service.
-- `LLM_MODEL` — overrides the default Zhipu generation model (default `glm-4.7-flashx`, see `src/config.py`).
-- `LLM_REWRITE_MODEL` — model used only for the query-rewrite step (default `glm-4.5-air`). Cheap/fast on purpose so multi-turn follow-ups stay snappy while answer generation uses the stronger `LLM_MODEL`.
-- `ADMIN_EMPLOYEE_ID`, `ADMIN_PASSWORD`, (optional) `ADMIN_REAL_NAME` — used **once** on first boot to seed an admin account in `data/app.sqlite` if no admin row exists. Idempotent: subsequent boots are no-ops as long as an admin is present. If an account with that `employee_id` already exists, the bootstrap promotes it rather than failing on the UNIQUE constraint.
-- `SESSION_COOKIE_SECURE` — defaults to `true`. Set to `false` only when running over plain HTTP (local dev / VPN-only deployments behind a TLS terminator). With HTTPS in production, leave unset.
-- `CHAT_RATE_LIMIT_PER_MIN` (default 20), `CHAT_RATE_LIMIT_BURST` (default = per-min value) — per-user token-bucket rate limit on the chat endpoint (`api/rate_limit.py`). In-process state only (fine for the single-container deployment; move to Redis if ever scaled horizontally). Protects the serialized BGE-M3 embedder/reranker (`_encode_lock`) from one user starving everyone else.
+  不要因为发现邻近问题而自动扩大范围。
 
-## Architecture
+  ## 架构地图
 
-The pipeline has four data stages owned by `src/` modules, plus a session orchestration layer that sits on top for multi-turn conversations. Code uses dataclasses to pass typed records between stages — read the dataclass at the top of each file to understand its contract.
+  ```text
+  docs/ → MinerU/Markdown ingest → Parent/Child chunk
+  → BGE-M3 Dense+Sparse → Qdrant Child + parents.sqlite Parent
+  → RRF/code boost → BGE reranker → ChatSession
+  → GLM answer/citations → FastAPI SSE → React
+  ```
 
-1. **Ingest** (`src/ingest.py`): walks `docs/<category>/*.pdf` and produces `data/parsed/<safe_stem>.md`. Cloud path = presign → PUT upload → submit task → poll → download (zip or .md). The folder under `docs/` becomes the `category` metadata. Markdown is cached; re-runs skip already-parsed PDFs unless `--force`. The cloud-parse function `_cloud_parse_batch` accepts an `on_status` callback that fires `"uploading"` (S3 PUT) → `"queued_mineru"` (waiting in MinerU's queue) → `"parsing"` (when any part first reports `state="running"`), letting the admin upload UI show meaningful sub-stage progress instead of one opaque "parsing" badge.
-   - **Video transcripts** (`docs/教学视频/*.md`) are picked up here too via `iter_transcripts()`. Any `.md` filename is accepted; only files starting with `智能纪要：` are skipped (decision: index transcripts only so every video citation carries a timestamp). They are *already* markdown — no parse pass needed; the file is consumed directly. `doc_title` is read from the first `**文字记录：<title>**` line of the file; the filename stem is a fallback. Each transcript ParsedDoc carries `doc_type="transcript"` and `category="教学视频"`.
-   - **Markdown-as-document** (anywhere outside `docs/教学视频/`): `.md` files in any other category are treated as already-parsed PDF equivalents — `doc_type="pdf"`, chunked via the header-anchored branch in `chunk.py`, no MinerU pass. Both entry points support this: the admin UI (disambiguator in `api/routes_admin.py:_classify_doc_type(filename, category)`) and `build_index.py` (via `iter_markdown_docs()` in `ingest.py`, which yields `.md` under `docs/` excluding `教学视频/`). The rule is identical in both: `.pdf` is always `"pdf"`; `.md` is `"transcript"` iff the category is `教学视频`, else `"pdf"`. There's no per-file user toggle — the category is the signal.
+  - `src/`：RAG核心；
+  - `api/`：FastAPI、鉴权、会话持久化、管理员和索引队列；
+  - `frontend/`：React/Vite界面；
+  - `prompts/`：所有Prompt正文；
+  - `scripts/`：索引、调试、评测和维护脚本；
+  - `docker/`：生产容器；
+  - `data/parents.sqlite`：可重建的RAG Parent状态；
+  - `data/app.sqlite`：不可随索引Reset删除的用户与会话状态。
 
-2. **Chunk** (`src/chunk.py`): parent-child chunking on the markdown. Branches on `ParsedDoc.doc_type`:
-   - **Transcripts** (`doc_type="transcript"`) go through `chunk_transcript`: `TRANSCRIPT_TURN_RE` splits the file by `说话人 N HH:MM:SS` markers. Each speaker turn becomes one atomic child carrying its own `start_time`; consecutive turns are greedy-packed into parents up to `PARENT_SIZE`. The parent inherits the **first** child's timestamp, which is what gets rendered in citations. No header-splitter, no table/formula detection — transcripts are flat prose.
-   - **PDFs** (`doc_type="pdf"`) use the original header-anchored path described below.
+  ## 领域规则地图
 
-   Both Parent and Child dataclasses carry `doc_type` and an optional `start_time`. PDFs leave `start_time=None`.
-   - `MarkdownHeaderTextSplitter` (#/##/###) → header-anchored sections form parents. Oversized sections are further split by `RecursiveCharacterTextSplitter` (PARENT_SIZE=1200 chars).
-   - Children (CHILD_SIZE=256) are produced **per parent**, but tables (HTML `<table>` blocks, pipe `| ... |` tables) and `$$ ... $$` formula blocks are detected by `_find_protected_spans` / `_split_protected` and emitted as **atomic children** — never split mid-row or mid-LaTeX. Each child carries a `content_type` of `prose | table | formula`.
-   - **Table-atomicity overrides PARENT_SIZE**: HTML tables up to `ATOMIC_TABLE_MAX = 2 * PARENT_SIZE` stay in a single parent even when they overflow the regular parent budget. Larger HTML tables are row-split by `_split_table_with_header`, which **prepends the original first `<tr>` (header row) to every fragment** so each chunk still carries its column labels.
-   - Each child's `embed_text` prepends `doc_title > section_path` so embeddings see the heading context.
-   - IDs are deterministic UUIDv5 (see `_stable_id`). `parent_id` hashes the **full parent text**, not a prefix — header-propagated table fragments share their first ~80 chars (the column row) and would otherwise collide.
+  - 修改 `src/**`、`scripts/**`、`prompts/**`：遵守 `.claude/rules/rag-pipeline.md`；
+  - 修改 `api/**`、Python依赖或数据库：遵守 `.claude/rules/python-backend.md`；
+  - 修改 `frontend/**`：遵守 `.claude/rules/frontend.md`；
+  - 涉及认证、数据、部署、外部API或破坏性操作：遵守 `.claude/rules/security.md`。
 
-3. **Table summarization** (`src/table_summary.py`, runs between chunking and indexing): for each `content_type="table"` child the chunker produced, calls a cheap LLM (`TABLE_SUMMARY_MODEL`, default `glm-4.5-air`) to generate a 1–3 sentence Chinese natural-language summary of the table's subject + key columns, then prepends `【表格摘要】<summary>\n\n` to both `child.text` (Qdrant payload — what the reranker sees) and `child.embed_text` (what BGE-M3 encodes). The parent's stored text is **never** modified — the LLM still sees the raw table at answer time. Summaries are cached in `parents.sqlite:table_summaries` keyed by `sha256(table_text + doc_title + section_path)`, so re-running an admin job re-uses prior summaries at zero LLM cost. The `child_id` is recomputed from the new text so a fresh summary triggers a re-embed on upsert (deterministic IDs still mean idempotent re-runs). Skips tables shorter than `TABLE_SUMMARY_MIN_CHARS=200`; truncates input over `TABLE_SUMMARY_MAX_CHARS=8000` before the LLM call. Disable globally with `TABLE_SUMMARY_ENABLED=0`. **Failure is graceful**: missing `ZHIPU_API_KEY` or any LLM error logs once and leaves the child untouched — indexing finishes with raw-table embeddings (pre-feature behavior). Retrofitting onto an existing index: the admin upload path's `_purge_existing()` cleans up automatically; for `build_index.py`, run `--reset` once so the old (un-summarized) table chunks aren't left as orphans.
+  Rules 由 Claude Code 根据路径配置自动发现；本段是职责地图，不是手动加载脚本。跨目录任务可能同时适用多份 Rules。
 
-4. **Index** (`src/index.py`): two stores.
-   - **Qdrant** (server mode, reached via `QDRANT_URL`, default `http://localhost:6333`) holds children with two named vectors: `dense` (1024-d cosine) and `sparse`. The backend opens **one** `QdrantClient` per process (singleton via `lru_cache` in `src/index.py:_client`) and reuses it for every read/write — never call `.close()` on it. `_ensure_collection` creates the collection only if missing; the collection is dropped only when `index_children(..., reset=True)` is passed (or via `reset_index()`). Default path is upsert, relying on deterministic IDs to overwrite same-content points in place.
-   - **SQLite** at `data/parents.sqlite` holds full parent text keyed by `parent_id`. `store_parents` uses `INSERT OR REPLACE`; only wiped when `reset=True`.
-   - Embeddings come from `src/embed.py` — a `BGEM3FlagModel` (BGE-M3) that returns dense + lexical-sparse in one pass. The model is `lru_cache`d; first load downloads weights.
+  ## 常用命令
 
-5. **Retrieve + Rerank + Generate** (`src/retrieve.py`, `src/rerank.py`, `src/generate.py`):
-   - `retrieve(query, categories=None)` runs Qdrant's native `query_points` with up to three `Prefetch`es fused by `FusionQuery(RRF)`: dense (semantic), sparse (lexical), and — only when the query mentions a standard code like `GB 50017` — a sparse **code-boost** prefetch restricted to children whose `text` literally contains the code (via the full-text payload index). Over-fetches `RERANK_TOP_K` children, then optionally applies a Qdrant `category` equality filter.
-   - **Cross-encoder rerank** (`src/rerank.py`): BGE-reranker-v2-m3 re-scores each `(query, child_text)` pair so the top-k handed to the LLM reflects fine-grained relevance, not just RRF order. Disable with `RERANK_ENABLED=False` to fall back to RRF. The reranker is also used by `retrieve_for_turn` to rescore carry-forward parents so their scores live on the same scale as fresh hits.
-   - After rerank, children are deduped by `parent_id` (best-reranked child wins) and parents are expanded from SQLite into `RetrievedParent` dataclasses (carry the cross-encoder `score`, the underlying `rrf_score`, and matched child snippets).
-   - `generate(query, parents, history, budget)` packs parents into `<source>` blocks up to the per-turn `budget` (chars). The block shape branches on `doc_type`: PDFs render as `<source id=… doc=… section=… type="pdf">`, transcripts as `<source id=… doc=… time="HH:MM:SS" type="transcript">`. History turns are interleaved as native chat messages, then Zhipu is called via the `openai` SDK. The system prompt forces Chinese, dual citation formats (`[doc §section]` for PDFs, `[doc @HH:MM:SS]` for transcripts), and "资料中未找到相关内容。" on miss — do not weaken these rules without intent.
-   - `stream_generate(...)` returns `(GenerationPrep, Iterator[str])` for token streaming. The prep object carries the source list / messages / budget so the UI can render headers before the first token arrives.
-   - `rewrite_query(history, question)` does one cheap LLM call to rewrite a follow-up question into a standalone one using recent chat history, so retrieval works across turns. Returns `question` unchanged on empty history or any error (best-effort, never raises).
+  所有命令从仓库根目录执行；Python命令使用项目 `.venv`。
 
-6. **Session orchestration** (`src/session.py`): `ChatSession.ask(query, categories=None)` drives the 5-stage per-turn pipeline: **① rewrite → ② retrieve fresh → ③ merge with carry-forward → ④ generate → ⑤ update state**. `ask_stream(query, categories=None)` is the streaming variant — returns `(StreamingTurnPrep, Iterator[str])`; after the generator exhausts (or is closed), `self.last_turn_result` holds the full `TurnResult`. Both `app.py`, `scripts/eval_query.py`, and the FastAPI `chat` endpoint go through this — never call `retrieve()` / `generate()` directly from UI/CLI code, route through `ChatSession`.
-   - **Carry-forward**: `retrieve_for_turn` appends the top `CARRY_SOURCES` (=2) parents from the previous turn to the fresh retrieval, deduped by `parent_id`, **rescored against the current query** via the cross-encoder so they sort on the same scale. When `categories` is set, carry-forward parents outside the filter are dropped — otherwise a category switch (e.g. 行业规范 → 教学视频) would leak last turn's off-category sources in.
-   - **Dynamic context budget**: `budget = MAX_CONTEXT_CHARS - history_chars - RESERVE_CHARS` (RESERVE_CHARS=700). History grows turn-by-turn; sources are the elastic component that shrinks to fit.
-   - **History window**: only the last `HISTORY_TURNS` (=4) user/assistant pairs are fed to `generate()`. The full message log lives in `SessionState.messages` for replay, but the LLM only sees the recent window.
-   - **Channel separation** (load-bearing invariant): the conversation channel (`SessionState.messages`) is text only — `<source>` blocks are **never** stored in assistant messages. The knowledge channel (`SessionState.last_sources`, typed `RetrievedParent` objects) carries sources for the next turn's carry-forward and for the UI. The two never mix inside the message list sent to the LLM. If you change how sources are surfaced, preserve this split — leaking source XML into stored assistant content will pollute future-turn history.
-   - `TurnResult` bundles the answer with telemetry (rewrite applied, fresh/final source counts, history chars, budget, per-stage timings) for debug panels and the eval CLI.
+  ```text
+  后端开发：uvicorn api.main:app --reload --port 8000
+  前端开发：cd frontend && npm install && npm run dev
+  前端验证：cd frontend && npm run build
+  检索冒烟：python scripts/test_retrieve.py "<question>"
+  LLM健康：python scripts/check_llm.py
+  完整调试：python scripts/eval_query.py "<question>"
+  检索评测：python scripts/run_eval_retrieval.py
+  Docker构建：docker compose -f docker/docker-compose.yml build
+  Docker状态：docker compose -f docker/docker-compose.yml ps
+  ```
 
-7. **Eval module** (`src/eval/`): typed records + retrieval-graded golden set living next to the code.
-   - `types.py` — `EvalItem` dataclass with `kind ∈ {factual, table_formula, code_lookup, transcript, multi_turn, no_answer}`. Grading is parent-id set-based (`expected_parent_ids`); no LLM judge, deterministic.
-   - `sample.py` — weighted sampling from `parents.sqlite` by kind. Buckets are disjoint by `parent_id`; allocation order is transcript → table_formula → code_lookup → factual so most-restrictive pools don't starve. Deterministic given `--seed`.
-   - `metrics.py` — Recall@k, MRR computed on retrieved parent_id sequences.
-   - `io.py` — JSONL load/save for `EvalItem`.
-   - `golden.jsonl` — curated set; `drafts.jsonl` — pre-review synth output; `runs/run_<ts>.jsonl` — per-item logs from `run_eval_retrieval.py`.
-   - **Grading model**: retrieval-graded kinds (factual / table_formula / code_lookup / transcript / multi_turn) hit iff any `expected_parent_id` appears in the top-k returned. `no_answer` items must produce `资料中未找到相关内容。` as the answer prefix (the prompt forces a trailing `**资料来源：**` footer even on refusals, so `startswith` is the correct check, not `==`).
-   - **Multi-turn grading**: turn-1 and turn-2 are both recorded; turn-2 is the one that actually tests the rewriter + carry-forward. Pairs share a single `ChatSession` instance; everything else uses a fresh one. When a multi-turn pair's source parent also fails as a solo, the t1/t2 misses are *inherited* — when interpreting multi-turn metrics, check whether the underlying solo item passed first.
+  没有统一Python测试、Lint或类型检查时，不得声称“全部测试通过”；应列出实际执行的检查和缺口。
 
-8. **HTTP layer** (`api/`): a thin FastAPI wrapper around `ChatSession`. Routers are split by concern and all mounted under `/api`: `routes.py` (cross-cutting), `routes_auth.py` (login/register/logout/me), `routes_chat.py` (conversations + SSE chat), `routes_admin.py` (admin-only dashboard endpoints, **including** the corpus management surface — `GET /admin/index/category-tree`, `POST /admin/upload`, `GET /admin/index/jobs`, `POST /admin/index/jobs/{id}/retry`, `DELETE /admin/index/jobs/{id}`, `GET /admin/index/documents`, `DELETE /admin/index/documents`). Per-request auth is a server-side session cookie (`pc_sid`); see the **Auth + persistence** section below.
+  ## 核心不变量
 
-   `routes.py` (cross-cutting) keeps:
-   - `POST /sessions` → `{session_id}`; `GET /sessions/{id}` returns the message log; `DELETE /sessions/{id}` evicts.
-   - `POST /sessions/{id}/chat` returns an SSE stream (`sse-starlette`) with four event types: `prep` (search query, budget, used sources up-front), `token` (streamed text deltas), `done` (final answer text, sources, timings), and `error`. The handler offloads the sync `ChatSession.ask_stream` call and per-chunk iteration to worker threads with `asyncio.to_thread` so the event loop stays responsive; client disconnects close the underlying generator so partial state still flushes via the `try/finally` in `_wrap_stream`.
-   - `GET /health`, `GET /config`, `GET /categories` — observability + filter UI metadata. `GET /llm_health` — probes upstream Zhipu models via `src/llm_health.py` (30s in-process cache, `?force=true` to bypass) so flashx/air outages show in the UI instead of manifesting as silent 16-second stalls inside `ChatSession.ask`.
-   - **Chat rate limiting**: `routes_chat.py` calls `chat_limiter.try_acquire(user.id)` (token bucket in `api/rate_limit.py`) before each turn; over-limit returns 429 with a retry-after. Tune via `CHAT_RATE_LIMIT_PER_MIN` / `CHAT_RATE_LIMIT_BURST`.
-   - `POST /feedback` — appends one JSON record per call to `data/feedback.jsonl` for offline review. Two kinds: `answer` (👍/👎 on a turn) and `citation` (a specific source was wrong). See `api/feedback.py`.
-   - **Conversation runtime** (`api/conversation_runtime.py`, replaces the old in-memory `session_store.py`): every chat turn hydrates a fresh `ChatSession` from `data/app.sqlite` (replays `messages`, restores `last_sources` from the `conversations.last_sources_json` JSON snapshot so carry-forward survives reloads and process restarts), drives the existing `ask_stream` pipeline, then writes the new user + assistant rows and updates the conversation. Per-conversation `asyncio.Lock` instances in `_locks` serialize concurrent turns on the same conversation, same invariant the old session store enforced. Title is generated from the first user message and updated on turn 1 only.
+  - 新UI和脚本不得绕过 `ChatSession` 复制 rewrite/retrieve/carry/budget/generate 逻辑；
+  - HTTP聊天必须经 `api/conversation_runtime.py` 完成恢复、锁和持久化；
+  - Prompt正文只放 `prompts/*.md`，不要内联到Python；
+  - 配置集中在 `src/config.py`，Session预算常量留在 `src/session.py`；
+  - `parents.sqlite` 与 `app.sqlite` 职责必须分离；
+  - Qdrant Client是进程级长连接，不要随请求关闭；
+  - SSE和 `SourceDTO` 变化必须同步后端Schema、前端类型和消费代码；
+  - 新Python运行依赖需同步 `requirements.txt` 与 `requirements-prod.txt`，除非明确只属于本地或生产；
+  - 修改Chunk、ID、Embedding或索引Schema时必须说明是否需要全量重建及回滚；
+  - 当前公开版视频只确认时间戳引用；“媒体播放链路”只能描述为补充报告中的候选实现，不得写成现有能力。
 
-9. **Auth + persistence** (`api/db.py`, `api/auth.py`, `api/routes_auth.py`, `api/routes_admin.py`):
-   - **App DB** lives at `data/app.sqlite` (kept separate from `parents.sqlite` so the RAG-index `--reset` path can't wipe user data). Four tables: `users` (`employee_id` login + argon2 password_hash + role ∈ {user, admin}; note the product now presents this field as 用户名/username in all UI copy and error messages — the column/API field name stays `employee_id` for compat, don't rename one without the other), `auth_sessions` (server-side session rows; cookie value IS the row PK, 30-day sliding window), `conversations` (per-user resumable threads with `last_sources_json` for carry-forward + `last_search_query` for the rewriter cache), `messages` (one row per role turn, with assistant rows carrying `sources_json`). `PRAGMA foreign_keys = ON` is set on every connection so cascades from users → conversations → messages work.
-   - **Auth transport** is an HTTP-only `pc_sid` cookie (`SameSite=Lax; Path=/api`; `Secure` unless `SESSION_COOKIE_SECURE=false`). Revocation = delete the `auth_sessions` row (e.g. patching a user to inactive or resetting their password also drops all their sessions). CSRF: `auth_sessions.csrf_token` is returned by `/api/auth/me` and required as `X-CSRF-Token` on every mutating request (`require_csrf` dependency). FastAPI deps: `optional_user` / `require_user` / `require_admin` / `require_csrf` / `require_csrf_admin` — apply the strictest one your endpoint needs.
-   - **Admin bootstrap**: `bootstrap_admin_from_env()` runs in the lifespan. If no admin exists and `ADMIN_EMPLOYEE_ID`+`ADMIN_PASSWORD` are set, it seeds one (or promotes an existing user with that employee_id). Idempotent on subsequent boots.
-   - **30-day retention**: hourly sweeper (`conversation_runtime.sweep_once`) hard-deletes `conversations` whose `updated_at < now − 30d` and `auth_sessions` past their `expires_at`. Cascade-delete handles messages. Manual trigger for ops/tests: `POST /api/admin/sweep`.
-   - **Frontend mirror**: `frontend/src/context/AuthContext.tsx` calls `/api/auth/me` once on boot, populates `setCsrfToken` in `api/client.ts`. `client.ts` injects `credentials: 'include'` and `X-CSRF-Token` on mutating requests; a 401 callback bounces to `/login`. Routes: `/login`, `/register`, `/` (chat), `/admin` (admin-only).
+  ## 数据与安全底线
 
-10. **Admin upload + indexing queue** (`api/indexing.py`, `src/indexing_pipeline.py`, `api/routes_admin.py`): web-facing path for adding documents without dropping into the shell. The admin UI's `资料管理` tab posts multipart files to `POST /api/admin/upload`; each file lands at `docs/<category>/[<subcategory>/]<filename>` (filesystem mirrors `build_index.py`'s convention so a later `--reset` rebuild stays correct) and becomes one row in `index_jobs`.
-   - **Single-file pipeline** (`src/indexing_pipeline.py:index_single`): reuses the existing primitives (`_cloud_parse` / `_local_parse`, `chunk_document`, `store_parents`, `index_children`) so any chunker/embedder change picks up automatically. Branches on `(doc_type, file_suffix)`: `.pdf` → MinerU; `.md` + `doc_type="transcript"` → transcript chunker; `.md` + `doc_type="pdf"` → markdown-as-document (no parse, header-anchored chunking). Calls `_purge_existing(source_path)` before re-upsert so changed-content re-uploads can't leave orphaned chunks behind.
-   - **FIFO queue, single worker** (`api/indexing.py`): one `asyncio.Queue[int]` and one worker task drains it sequentially. Serialization is load-bearing — BGE-M3 inference and `parents.sqlite` writes contend badly under parallel work, and concurrent indexing also stalls chat embeddings via the `_encode_lock` in `src/embed.py`. The worker offloads the CPU-bound pipeline to `loop.run_in_executor` so the event loop stays responsive for the rest of the API.
-   - **Status chain** (persisted to `index_jobs.status`): `pending → uploading → queued_mineru → parsing → chunking → embedding → done | failed`. `.md` files skip `uploading`/`queued_mineru`/`parsing` and start at `chunking` (no MinerU call). Cached PDFs (markdown already exists under `data/parsed/`) jump straight to `parsing`. The frontend (`AdminDashboard.tsx:JobStatusCell`) polls jobs every 3s while anything is active and renders an elapsed-time chip + per-stage hint.
-   - **Crash recovery** (`resume_pending_on_boot`, called from lifespan): any rows left in `pending` are re-enqueued; rows mid-flight (`uploading`/`parsing`/`chunking`/`embedding`) become zombies on restart and are flipped to `failed` with a "请重试" note so admins see a clear retry signal rather than a stuck status.
-   - **Two-level categories**: `src/config.py:SECOND_LEVEL_CATEGORIES` is the source of truth for categories that require a subcategory on upload (currently `{"客户标准"}` — customer name). The upload endpoint rejects missing subcategories for these, and `_derive_category_and_company` in `indexing_pipeline.py` mirrors the same logic so the subcategory becomes the `company` payload field for downstream filtering. Flat categories reject a stray `subcategory` rather than silently accepting it.
-   - **Filename validation** (`_SAFE_NAME_RE` in `routes_admin.py`): both `category` and uploaded filenames must match an allowlist (`\w`, hyphen, dot, commas, apostrophes, CJK + Latin brackets, space). Tight enough to prevent path traversal; permissive enough for real document names. Loosen it only when you have a concrete filename type that legitimately needs the new chars.
+  - 不读取、输出、提交或写入真实API Key、密码、Cookie、用户对话和客户文档；
+  - 不提交 `.env`、SQLite、Qdrant存储、模型缓存或真实 `docs/`；
+  - 不在生产或未知环境执行Reset、删除、迁移和部署；
+  - 认证改动必须验证匿名、普通用户、管理员和CSRF路径；
+  - 外部MinerU/GLM调用涉及资料外发，使用真实业务数据前必须确认授权。
 
-## Prompts
+  以下操作必须先说明目标环境、影响数据、备份和恢复方式并取得确认：
 
-All prompt text lives in `prompts/*.md` — **never inline prompt strings in Python code**. The loader is `src/prompts.py` (`load_prompt(name)` / `render_prompt(name, **kwargs)`, both `lru_cache`d). Current prompts:
+  - `python scripts/build_index.py --reset`；
+  - `python scripts/test_single_doc.py`；
+  - 删除Qdrant Collection或操作运行中的Volume；
+  - 删除文档及索引；
+  - 数据库破坏性迁移；
+  - `docker compose down -v`；
+  - 生产部署、密钥轮换和用户数据操作。
 
-- `answer_system.md` — main QA system prompt (role = BIM-company internal knowledge assistant; enforces citations, no-answer behavior, Revit/CAD answers preferring company practice over generic best practice).
-- `answer_user.md` — user-message template with `{context}` and `{query}` placeholders.
-- `rewrite_system.md` — standalone-query rewrite system prompt.
-- `rewrite_user.md` — rewrite user-message template with `{history}` and `{question}` placeholders.
-- `table_summary_system.md` / `table_summary_user.md` — table-summarization prompts used by `src/table_summary.py` at index time.
+  ## 验证要求
 
-To add a new prompt: drop a `.md` in `prompts/`, then call `load_prompt("name")` or `render_prompt("name", **kw)`.
+  - Python局部修改：至少做语法/import检查和相关脚本冒烟；
+  - 前端修改：运行 `npm run build`；
+  - API/Auth修改：验证鉴权、CSRF、失败状态和持久化；
+  - RAG修改：先检索冒烟，再按影响运行黄金集并比较退化；
+  - Docker修改：至少验证Compose配置/构建；
+  - 文档修改：核对命令、代码和当前版本。
 
-## Things to know when editing
+  不要为获得通过结果而修改黄金集、跳过失败项或删除保护逻辑。
 
-- **Config is centralized** in `src/config.py` — chunk sizes, top-k values, collection name, model IDs all live there. Session-orchestration constants (`RESERVE_CHARS`, `HISTORY_TURNS`, `CARRY_SOURCES`) live at the top of `src/session.py`. Don't sprinkle constants elsewhere.
-- **Indexing is incremental by default** — `_ensure_collection` creates the collection only if missing, and `store_parents` uses `INSERT OR REPLACE`. Deterministic UUIDv5 IDs (from `_stable_id` in `chunk.py`) mean re-indexing the same content overwrites in place. Adding new PDFs to `docs/` and re-running `scripts/build_index.py` appends them without touching existing entries. For destructive rebuilds (changed chunking / embedding logic), pass `--reset` to `build_index.py` or call `src.index.reset_index()`. `scripts/test_single_doc.py` always wipes (intentional for isolation testing).
-- **PARENT_SIZE / CHILD_SIZE are in characters**, not tokens. Chinese text is ~1 char per token, so they double as a rough token budget.
-- **Qdrant runs as a separate server process.** The backend holds one long-lived `QdrantClient(url=QDRANT_URL)` per process (singleton at `src/index.py:_client`). Do **not** call `.close()` on it — the next caller will get a dead client. To inspect or wipe data, talk to Qdrant directly (e.g. `curl http://localhost:6333/collections`) rather than touching the storage volume files while the server is running.
-- **The protected-block regexes in `chunk.py` matter**: if PDFs start producing differently-shaped tables or inline math, update `HTML_TABLE_RE` / `PIPE_TABLE_RE` / `FORMULA_RE` rather than letting them split mid-row. For oversized HTML tables, also check `_split_table_with_header` still finds the `<tr>` header row to propagate.
-- **The category metadata** is derived from the first folder under `docs/`. Adding a new PDF directly in `docs/` (with no subfolder) produces `category="uncategorized"`. The intended top-level categories are `行业规范` (industry codes), `客户标准` (customer requirements), `公司内部标准` (internal standards), `项目资料` (project deliverables / retrospectives), and `教学视频` (training-video transcripts). Of these, **only `客户标准` is two-level** (`客户标准/<customer>/<file>`) — listed in `src/config.py:SECOND_LEVEL_CATEGORIES`. The second-level folder becomes the `company` payload field on every parent/child. All other categories are flat; adding a new two-level category means adding it to `SECOND_LEVEL_CATEGORIES`. Existing subfolders may still reflect early test material (steel-structure codes); broaden naturally as more BIM / Revit / asset-management content is ingested.
-- **Scratch / reference files at repo root** are not part of the runtime: `TODO` (running todo list), `部署指南_IT.md` (Chinese intranet-deployment guide handed to the customer's IT staff — firewall/port-80 exposure + maintenance ops), `gpu部署` (GPU deployment runbook for the production server, see the GPU bullet below), `README.md` / `README_zh.md` (user-facing quick starts). Don't treat them as authoritative — code + this CLAUDE.md are the source of truth.
-- **Docker files live in `docker/`**: `docker/docker-compose.yml`, `docker/Dockerfile.backend`, `docker/Dockerfile.backend.dockerignore`. Production deploys two services — `qdrant` (vector store) and `backend` (FastAPI + React bundle in one image). The backend Dockerfile is multi-stage: a `node:20-alpine` stage runs `npm run build` to produce `frontend/dist/`, then the Python runtime stage copies that into `/app/frontend/dist`. `api/main.py` detects the directory at startup and mounts it at `/` via the `SPAStaticFiles` subclass — same-origin, no nginx, no proxy. The mount is registered AFTER `/api/*` routers so route precedence is correct. In local dev `frontend/dist` doesn't exist (you run `npm run dev` on :5173 against the backend on :8000), so the mount is skipped and the backend runs API-only. Env wiring: the repo-root `.env` is the single source of truth. `docker/.env` is a symlink to `../.env` so Compose v2's project-dir-based `.env` discovery works (needed for compose-time substitutions like `${BUILD_PLATFORM}`); the backend service also lists it under `env_file:` so all keys land in the container at runtime without enumerating each one in `environment:`. The `environment:` block carries only values that must be forced regardless of `.env` — currently just `QDRANT_URL=http://qdrant:6333` so a host `.env` pointing at localhost can't break the in-cluster connection. Code defaults in `src/config.py` and `api/auth.py` cover any keys missing from `.env`. Run all `docker compose` commands with `-f docker/docker-compose.yml` from the repo root.
-- **GPU (production server: RTX 5060 Ti, Blackwell sm_120)**: vector compute (BGE-M3 embed + reranker) runs on GPU in production. No application code is device-specific — `src/embed.py:_pick_device()` auto-selects `cuda` → `mps` → `cpu`, and fp16 is enabled only on cuda. Three independent gates must ALL hold for the container to see the GPU (any miss silently falls back to CPU): (1) the Dockerfile installs torch from the **cu128** index (`torch>=2.7` — the default pip / cu126 wheels are not compiled for sm_120 and fail at runtime with "no kernel image is available"), (2) the compose `backend` service has the nvidia `deploy.resources.reservations.devices` block, (3) the host has NVIDIA driver ≥ 570 + NVIDIA Container Toolkit configured. Full runbook in `gpu部署` at repo root. To build for a CPU-only host, swap the Dockerfile index back to `.../whl/cpu` and drop the compose GPU reservation.
-- **Don't bypass `ChatSession`** for new UIs or scripts — replicating the rewrite/carry/budget/channel-separation logic in another caller is how invariants drift. Add new entry points by instantiating `ChatSession` and consuming `TurnResult` (sync) or `(StreamingTurnPrep, Iterator[str])` + `last_turn_result` (streaming). For HTTP, route through `api/conversation_runtime.py` so DB hydration + per-conversation locking + persistence happen consistently — do not poke the `messages` / `conversations` tables from a new endpoint directly.
-- **Two SQLite files, distinct roles**: `data/parents.sqlite` is RAG-corpus state owned by `src/index.py` and recreated by `build_index.py --reset`. `data/app.sqlite` is runtime app state (users, conversations, auth sessions) owned by `api/db.py` and only ever migrated forward. Never co-locate them.
-- **Frontend ↔ backend contract**: the SSE event payloads (`prep` / `token` / `done` / `error`) and `SourceDTO` shape in `api/schemas.py` are consumed by `frontend/src/hooks/useChat.ts` and rendered by `Message.tsx` / `SourcesPanel.tsx` / `FeedbackBar.tsx`. Citation parsing for the two doc types lives in `frontend/src/components/citations.ts`; KaTeX rendering goes through `remark-math` + `rehype-katex` in `react-markdown`. Changes to event shape or `SourceDTO` need matching frontend updates.
+  ## 完成交付
+
+  最终汇报：
+
+  - 实际修改文件；
+  - 用户可观察行为变化；
+  - 执行过的验证及结果；
+  - 未执行的验证和原因；
+  - 数据、兼容、部署和回滚风险；
+  - 仍需用户决定的事项。
