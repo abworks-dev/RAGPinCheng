@@ -12,8 +12,8 @@ __pycache__/
 .venv/
 venv/
 docs/
-CLAUDE.md
-.claude/
+CLAUDE.local.md
+.claude/settings.local.json
 rag_cheatsheet.html
 
 # Frontend (Node / Vite)
