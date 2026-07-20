@@ -14,7 +14,6 @@ venv/
 docs/
 CLAUDE.local.md
 .claude/settings.local.json
-rag_cheatsheet.html
 
 # Frontend (Node / Vite)
 node_modules/

@@ -1,33 +1,31 @@
-# Production compose for the PinCheng RAG system.
+# 品丞 RAG 系统生产环境 Compose 配置
 #
-# Two services: qdrant (vector store) and backend (FastAPI + React bundle in
-# one image). The backend serves both /api/* and the React SPA at / — no
-# separate frontend container or nginx proxy.
+# 两个服务：qdrant（向量数据库）和 backend（FastAPI + React 打包成单一镜像）。
+# backend 同时提供 /api/* 接口和 React 前端页面，无需单独的前端容器或 nginx 反代。
 #
-# Run all commands from the repo root:
+# 所有命令在仓库根目录执行：
 #   docker compose -f docker/docker-compose.yml build
 #   docker compose -f docker/docker-compose.yml up -d
 #   docker compose -f docker/docker-compose.yml logs -f backend
 #   docker compose -f docker/docker-compose.yml exec backend python scripts/build_index.py
 #   docker compose -f docker/docker-compose.yml down
 #
-# Env wiring: the repo-root `.env` is the single source of truth. `docker/.env`
-# is a symlink to it, so compose-time substitution (e.g. ${BUILD_PLATFORM})
-# resolves; the backend also loads it via `env_file:` for container runtime
-# injection. Required keys: ZHIPU_API_KEY, MINERU_API_KEY, ADMIN_EMPLOYEE_ID,
-# ADMIN_PASSWORD, (optional) LLM_MODEL, LLM_REWRITE_MODEL, HF_ENDPOINT.
+# 环境变量配置：仓库根目录的 `.env` 是唯一配置源。`docker/.env` 是软链接指向它，
+# 这样 compose 构建时的变量替换（如 ${BUILD_PLATFORM}）和容器运行时的 env_file:
+# 都能正常工作。必填配置项：ZHIPU_API_KEY, MINERU_API_KEY, ADMIN_EMPLOYEE_ID,
+# ADMIN_PASSWORD；可选配置：LLM_MODEL, LLM_REWRITE_MODEL, HF_ENDPOINT。
 
 services:
   qdrant:
     image: qdrant/qdrant:latest
     restart: unless-stopped
     volumes:
-      # Persistent index storage. Separate from the `data` bind mount so the
-      # Qdrant server fully owns its on-disk format and can be upgraded
-      # independently. Survives `docker compose down`; only removed with `-v`.
+      # Qdrant 索引持久化存储。与 data 目录分开管理，保证 Qdrant 完全拥有自己的
+      # 磁盘格式，可以独立升级。执行 `docker compose down` 不会删除此 volume，
+      # 只有加 `-v` 才会删除。
       - qdrant_storage:/qdrant/storage
-    # No `ports:` — only the backend talks to Qdrant, and it does so over the
-    # compose network. Uncomment to expose the dashboard at :6333 for debugging:
+    # 不暴露端口 — 只有 backend 会通过 compose 内网访问 Qdrant。
+    # 如需调试面板，取消 ports: 注释，通过 :6333 访问 Qdrant Dashboard：
     # ports:
     #   - "6333:6333"
     healthcheck:
@@ -46,22 +44,22 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile.backend
-      # Target architecture is parameterized — defaults to amd64 (production
-      # server). Override per-invocation for local Mac testing:
-      #     BUILD_PLATFORM=linux/arm64 docker compose -f docker/docker-compose.yml build
-      # Or set it in .env to make it sticky for one machine.
-      platforms:
-        - ${BUILD_PLATFORM:-linux/amd64}
+      # 目标架构参数化 — 仅用于 Apple Silicon Mac 交叉编译（arm64 → amd64）
+      # 到生产服务器。在原生 x86_64 服务器上请保持禁用，因为它会破坏 Docker 层缓存：
+      # buildx 的 platforms 匹配会增加额外约束条件，即使文件没变化也经常导致
+      # torch 安装层（约 2GB）缓存失效。如需在 Mac 上构建，取消下面两行注释。
+      # platforms:
+      #   - ${BUILD_PLATFORM:-linux/amd64}
     image: pincheng-rag-backend:latest
     restart: unless-stopped
-    # GPU passthrough — Compose v2 equivalent of `docker run --gpus all`.
-    # Requires the NVIDIA Container Toolkit on the host (one-time:
+    # GPU 透传 — Compose v2 等价于 `docker run --gpus all`。
+    # 主机需要先安装 NVIDIA Container Toolkit（一次性操作）：
     #   sudo apt-get install -y nvidia-container-toolkit
     #   sudo nvidia-ctk runtime configure --runtime=docker
     #   sudo systemctl restart docker
-    # ). Without the toolkit this block is a silent no-op and the backend
-    # stays on CPU. With it, the cu128 torch wheel sees the RTX 5060 Ti and
-    # src/embed.py:_pick_device() returns "cuda".
+    # 没有 toolkit 时这个块会静默忽略，backend 自动回退到 CPU 模式。
+    # 配置正确时，cu128 的 torch 轮子会识别到 RTX 5060 Ti，
+    # src/embed.py:_pick_device() 会返回 "cuda"。
     deploy:
       resources:
         reservations:
@@ -73,41 +71,37 @@ services:
       qdrant:
         condition: service_healthy
     env_file:
-      # Injects all keys from the repo-root .env into the container so we don't
-      # have to enumerate them in `environment:`. Code defaults in
-      # src/config.py and api/auth.py cover any keys missing from .env.
+      # 把仓库根目录 .env 的所有变量注入容器，不需要在 environment: 逐一列出。
+      # .env 中缺失的变量会使用 src/config.py 和 api/auth.py 中的默认值。
       - ../.env
     environment:
-      # In-cluster Qdrant — the backend reaches it by compose service name.
-      # Forced literal (not ${QDRANT_URL}) so a host-side .env that points
-      # to http://localhost:6333 for local scripts cannot leak in and break
-      # the container's connection to the qdrant service.
+      # 容器内 Qdrant 地址 — backend 通过 compose 服务名直接访问。
+      # 这里强制写死，不使用 ${QDRANT_URL}，防止主机本地调试用的
+      # http://localhost:6333 泄漏到容器内，导致无法连接 qdrant 服务。
       QDRANT_URL: http://qdrant:6333
     volumes:
-      # Persistent state — parsed markdown cache, parents.sqlite, app.sqlite
-      # (users + conversations), feedback.jsonl. Lives on the host disk;
-      # the image stays stateless. Qdrant has its own volume above.
+      # 持久化状态 — Markdown 解析缓存、parents.sqlite（向量索引元数据）、
+      # app.sqlite（用户 + 对话）、feedback.jsonl。数据存在主机磁盘上，
+      # 镜像保持无状态。Qdrant 有自己的独立 volume（见上方）。
       - ../data:/app/data
-      # Source PDFs — needed only when running scripts/build_index.py inside
-      # the container. Mounted read-write so MinerU can drop split PDFs back
-      # alongside originals if needed.
+      # 源 PDF 文档 — 只在容器内执行 scripts/build_index.py 时需要。
+      # 读写挂载，MinerU 拆分后的 PDF 可以写回原目录。
       - ../docs:/app/docs
-      # HuggingFace model cache — separate named volume so first-boot
-      # downloads of BGE-M3 + reranker (~3 GB) survive container recreation.
+      # HuggingFace 模型缓存 — 独立命名 volume，保证第一次启动下载的
+      # BGE-M3 + reranker（约 3 GB）在容器重建后不会丢失。
       - hf_cache:/root/.cache/huggingface
     ports:
-      # Publicly exposed entry point. Maps host :80 to the container's
-      # uvicorn on :8000 — same URL as the old nginx setup, just one fewer
-      # hop. Put a company reverse proxy / TLS terminator in front for HTTPS.
+      # 对外暴露入口。主机 80 端口映射到容器 uvicorn 8000 端口 —
+      # 与旧 nginx 方案 URL 一致，减少一跳。生产环境建议在前面加公司
+      # 反向代理 / TLS 终端做 HTTPS。
       - "80:8000"
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8000/api/health"]
       interval: 30s
       timeout: 5s
       retries: 3
-      # Long start_period: first container start downloads ~3 GB of model
-      # weights into hf_cache before /api/health is reachable. Subsequent
-      # restarts complete in seconds.
+      # 较长的启动宽限期：第一次启动需要下载约 3 GB 模型权重到 hf_cache，
+      # 之后 /api/health 才可达。后续重启几秒内即可完成。
       start_period: 15m
     logging:
       driver: json-file
@@ -117,21 +111,20 @@ services:
 
 volumes:
   hf_cache:
-    # Survives `docker compose down`; only removed with `docker compose down -v`.
+    # 执行 docker compose down 不会删除；只有 docker compose down -v 才会删除。
   qdrant_storage:
-    # Persistent Qdrant index. Survives `docker compose down`; only removed
-    # with `docker compose down -v`. To inspect contents, exec into the
-    # qdrant container — do NOT touch the files from the host while the
-    # container is running.
+    # Qdrant 索引持久化。执行 docker compose down 不会删除；
+    # 只有 docker compose down -v 才会删除。如需查看索引内容，请 exec
+    # 进入 qdrant 容器 — 容器运行时不要从主机直接操作这些文件。
 
 # -----------------------------------------------------------------------------
-# Build cheat-sheet
+# 构建速查手册
 # -----------------------------------------------------------------------------
-# Build for the production server (default, x86_64):
+# 为生产服务器构建（默认，x86_64）：
 #     docker compose -f docker/docker-compose.yml build
 #
-# Build natively on an Apple Silicon Mac for fast local testing:
+# 在 Apple Silicon Mac 上原生构建快速本地测试：
 #     BUILD_PLATFORM=linux/arm64 docker compose -f docker/docker-compose.yml build
 #
-# Make the override sticky for one machine — add to .env:
+# 让某台机器永久使用这个配置 — 加到 .env：
 #     BUILD_PLATFORM=linux/arm64
