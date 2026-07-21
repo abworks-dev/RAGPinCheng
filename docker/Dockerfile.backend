@@ -66,6 +66,9 @@ WORKDIR /app
 # back to .../whl/cpu and drop the compose GPU reservation.
 # Pinning to an EXACT version instead of a range lets Docker cache this layer
 # properly — pip won't check for newer point releases on every build.
+# This is the official CUDA 12.8 wheel source required for RTX 5060 Ti
+# Blackwell (sm_120). Download takes 2-5 minutes from China but only
+# happens ONCE — the layer is cached permanently after first build.
 RUN pip install --index-url https://download.pytorch.org/whl/cu128 \
         "torch==2.7.0"
 
