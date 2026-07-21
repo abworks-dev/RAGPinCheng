@@ -2,9 +2,10 @@
 # the built React/Vite SPA at /. Replaces the previous backend + frontend
 # two-container setup. One image, one process, fewer moving parts.
 #
-# Target platform is set in docker-compose.yml (build.platforms). On an
-# Apple Silicon Mac, that pins linux/amd64 so the resulting image runs
-# natively on the x86_64 server.
+# Cross-platform build support: docker-compose.yml DISABLED build.platforms
+# by default for best Docker layer caching on native x86_64 servers.
+# For Apple Silicon Macs that need to build amd64 images for the server,
+# uncomment the platforms section in docker-compose.yml to force emulation.
 
 # ── Stage 1: build the React/Vite bundle ───────────────────────────────────
 FROM node:20-alpine AS frontend-build
@@ -63,8 +64,13 @@ WORKDIR /app
 #     (see docker-compose.yml backend.deploy.resources).
 # To go back to a CPU-only build (e.g. a host with no GPU), swap the index
 # back to .../whl/cpu and drop the compose GPU reservation.
+# Pinning to an EXACT version instead of a range lets Docker cache this layer
+# properly — pip won't check for newer point releases on every build.
+# This is the official CUDA 12.8 wheel source required for RTX 5060 Ti
+# Blackwell (sm_120). Download takes 2-5 minutes from China but only
+# happens ONCE — the layer is cached permanently after first build.
 RUN pip install --index-url https://download.pytorch.org/whl/cu128 \
-        "torch>=2.7"
+        "torch==2.7.0"
 
 # 2) Production Python deps.
 COPY requirements-prod.txt ./

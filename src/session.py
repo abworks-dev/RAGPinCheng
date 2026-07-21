@@ -23,6 +23,7 @@ from typing import Iterator
 
 from .config import MAX_CONTEXT_CHARS
 from .generate import Answer, GenerationPrep, generate, rewrite_query, stream_generate
+from .query_guard import QueryValidation, validate_search_query
 from .rerank import rerank_scores
 from .retrieve import RetrievedParent, retrieve
 
@@ -117,6 +118,9 @@ class TurnResult:
     # Per-call breakdown so we can attribute spend to the cheap rewrite model
     # vs the more expensive answer model. Keys: "rewrite", "generate".
     usage_by_call: dict = field(default_factory=dict)
+    # Query guard telemetry: populated when the guard rejected the query,
+    # identifying which rule triggered.
+    guard_reason: str = ""
 
 
 @dataclass
@@ -137,6 +141,7 @@ class StreamingTurnPrep:
     budget: int
     timings: dict[str, float]
     no_source_fallback: bool = False
+    guard_reason: str = ""
 
 
 _USAGE_KEYS = ("prompt_tokens", "completion_tokens", "total_tokens")
@@ -290,6 +295,38 @@ class ChatSession:
         )
         timings["rewrite"] = rewrite_t
         rewrite_applied = search_query != query
+        has_history = bool(self.state.messages)
+
+        # ①a QUERY GUARD — block ambiguous input before retrieval
+        # IMPORTANT: Validate the ORIGINAL user query, NOT the rewritten one.
+        # The rewrite model may "intelligently" complete "22" into
+        # "22 细部工程适用于哪些项目", which would bypass numeric detection.
+        guard = validate_search_query(query, has_history=has_history)
+        if not guard.passed:
+            # Guard rejection: return early without retrieving or generating.
+            # IMPORTANT: we DON'T clear last_sources here, so the user can
+            # follow up with additional context and still reference prior turns.
+            self.state.append_turn(query, guard.message, sources_for_ui=[])
+            self.state.last_search_query = search_query
+            timings["guard"] = 0.0
+            timings["retrieve"] = 0.0
+            timings["generate"] = 0.0
+            timings["total"] = sum(timings.values())
+            result = TurnResult(
+                answer_text=guard.message,
+                sources=[],
+                search_query=search_query,
+                fresh_sources=[],
+                final_sources=[],
+                answer=None,
+                history_chars=0,
+                budget=0,
+                rewrite_applied=rewrite_applied,
+                timings=timings,
+                guard_reason=guard.reason,
+            )
+            self.last_turn_result = result
+            return result
 
         # ② RETRIEVE + ③ MERGE
         t = perf_counter()
@@ -319,6 +356,7 @@ class ChatSession:
                 budget=0,
                 rewrite_applied=rewrite_applied,
                 timings=timings,
+                guard_reason="",
             )
             self.last_turn_result = result
             return result
@@ -357,6 +395,7 @@ class ChatSession:
             timings=timings,
             usage=usage_total,
             usage_by_call=usage_by_call,
+            guard_reason="",
         )
         self.last_turn_result = result
         return result
@@ -381,6 +420,48 @@ class ChatSession:
         )
         timings["rewrite"] = rewrite_t
         rewrite_applied = search_query != query
+        has_history = bool(self.state.messages)
+
+        # ①a QUERY GUARD — block ambiguous input before retrieval
+        # IMPORTANT: Validate the ORIGINAL user query, NOT the rewritten one.
+        # The rewrite model may "intelligently" complete "22" into
+        # "22 细部工程适用于哪些项目", which would bypass numeric detection.
+        guard = validate_search_query(query, has_history=has_history)
+        if not guard.passed:
+            # Guard rejection: return early without retrieving or generating.
+            # IMPORTANT: we DON'T clear last_sources here, so the user can
+            # follow up with additional context and still reference prior turns.
+            prep = StreamingTurnPrep(
+                search_query=search_query,
+                rewrite_applied=rewrite_applied,
+                fresh_sources=[],
+                final_sources=[],
+                used_sources=[],
+                history_chars=0,
+                budget=0,
+                timings=dict(timings),
+                no_source_fallback=True,
+                guard_reason=guard.reason,
+            )
+
+            def _fallback_iter() -> Iterator[str]:
+                yield guard.message
+
+            stream = self._wrap_stream(
+                _fallback_iter(),
+                query=query,
+                search_query=search_query,
+                rewrite_applied=rewrite_applied,
+                fresh_sources=[],
+                final_sources=[],
+                gen_prep=None,
+                history_chars=0,
+                budget=0,
+                timings_so_far=dict(timings),
+                rewrite_usage=dict(rewrite_usage),
+                guard_reason=guard.reason,
+            )
+            return prep, stream
 
         # ② RETRIEVE + ③ MERGE
         t = perf_counter()
@@ -421,6 +502,7 @@ class ChatSession:
                 budget=0,
                 timings_so_far=dict(timings),
                 rewrite_usage=dict(rewrite_usage),
+                guard_reason="",
             )
             return prep, stream
 
@@ -475,6 +557,7 @@ class ChatSession:
         budget: int,
         timings_so_far: dict[str, float],
         rewrite_usage: dict,
+        guard_reason: str = "",
     ) -> Iterator[str]:
         """Accumulate streamed text, time the generate stage, then finalize.
 
@@ -506,6 +589,7 @@ class ChatSession:
                 budget=budget,
                 timings=timings,
                 rewrite_usage=rewrite_usage,
+                guard_reason=guard_reason,
             )
 
     def _finalize_streaming_turn(
@@ -522,12 +606,18 @@ class ChatSession:
         budget: int,
         timings: dict[str, float],
         rewrite_usage: dict,
+        guard_reason: str = "",
     ) -> None:
         """Mirror of the ⑤ UPDATE STATE block in `ask()`, for the streaming path."""
         if gen_prep is None:
-            # no-source fallback
+            # no-source fallback or guard rejection
             self.state.append_turn(query, full_text, sources_for_ui=[])
-            self.state.last_sources = []
+            # IMPORTANT: Don't clear last_sources on guard rejection —
+            # the user may follow up with context that references prior turns.
+            if guard_reason:
+                pass  # keep last_sources intact
+            else:
+                self.state.last_sources = []
             self.state.last_search_query = search_query
             usage_total, usage_by_call = _aggregate_usage(rewrite_usage, {})
             self.last_turn_result = TurnResult(
@@ -543,6 +633,7 @@ class ChatSession:
                 timings=timings,
                 usage=usage_total,
                 usage_by_call=usage_by_call,
+                guard_reason=guard_reason,
             )
             return
 
@@ -575,4 +666,5 @@ class ChatSession:
             timings=timings,
             usage=usage_total,
             usage_by_call=usage_by_call,
+            guard_reason="",
         )
