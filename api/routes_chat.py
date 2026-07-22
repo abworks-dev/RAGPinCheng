@@ -224,6 +224,12 @@ async def chat(
                     except StopIteration:
                         return _STOP
 
+                # Send a heartbeat ping every 15s during long silences.
+                # SSE comments (lines starting with :) are ignored by parsers
+                # but keep the TCP connection alive through reverse proxies.
+                ping_event = ServerSentEvent(data="", comment="ping")
+                last_activity = asyncio.get_event_loop().time()
+
                 while True:
                     if await request.is_disconnected():
                         try:
@@ -231,7 +237,30 @@ async def chat(
                         except Exception:
                             pass
                         break
-                    chunk = await asyncio.to_thread(_next_chunk)
+
+                    now = asyncio.get_event_loop().time()
+                    time_since_last = now - last_activity
+                    if time_since_last > 15:
+                        yield ping_event
+                        last_activity = now
+                        # Wait briefly before checking again — the token may
+                        # arrive right after we send the ping.
+                        await asyncio.sleep(0.05)
+                        continue
+
+                    # Wait for the next token with a short timeout so we can
+                    # periodically check for disconnect and send heartbeats.
+                    try:
+                        chunk = await asyncio.wait_for(
+                            asyncio.to_thread(_next_chunk),
+                            timeout=15 - time_since_last,
+                        )
+                    except asyncio.TimeoutError:
+                        # No token arrived before our ping window — send a
+                        # heartbeat at the top of the next loop.
+                        continue
+
+                    last_activity = asyncio.get_event_loop().time()
                     if chunk is _STOP:
                         break
                     if chunk:
