@@ -42,9 +42,11 @@ export function stripMarkdown(text: string): string {
       .replace(/\|/g, " ")
       // 12. 移除表格分隔行 (|---|---|)
       .replace(/^[-:\s|]+$/gm, "")
-      // 13. 清理多余的空白行（连续多行空行合并为一行）
+      // 13. 移除 HTML 标签（如 <sub>1</sub>, <table>, <tr>, <td> 等）
+      .replace(/<[^>]*>/g, "")
+      // 14. 清理多余的空白行（连续多行空行合并为一行）
       .replace(/\n\s*\n\s*\n/g, "\n\n")
-      // 14. 移除行首行尾的空白
+      // 15. 移除行首行尾的空白
       .trim()
   );
 }
