@@ -17,7 +17,9 @@
 
 services:
   qdrant:
-    image: qdrant/qdrant:latest
+    # 固定补丁版本，避免 `latest` 在普通部署时静默升级存储引擎。
+    # 升级前先创建 Qdrant 快照，并在测试环境验证索引兼容性。
+    image: qdrant/qdrant:v1.18.3
     restart: unless-stopped
     volumes:
       # Qdrant 索引持久化存储。与 data 目录分开管理，保证 Qdrant 完全拥有自己的
