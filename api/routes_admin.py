@@ -631,7 +631,7 @@ def _validate_transcript_markdown(md_bytes: bytes) -> None:
     # At least one "说话人 HH:MM:SS" or "说话人 MM:SS" line
     # Use character class to match both regular 人 (U+4EBA) and
     # Kangxi radical ⼈ (U+2F08) which look identical but are different code points.
-    has_speaker = bool(re.search(r"说话[人⼈]\s+\d{1,2}:\d{2}", text))
+    has_speaker = bool(re.search(r"说话[人⼈]\s+\d+\s+\d{1,2}:\d{2}", text))
     if not has_speaker:
         raise HTTPException(
             status_code=400,
