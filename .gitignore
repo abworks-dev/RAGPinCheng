@@ -12,14 +12,10 @@ __pycache__/
 *.pyc
 .venv/
 venv/
-# Real business documents stay ignored; only versioned project knowledge maps
-# under these two directories are allowed into Git.
+# Real business documents stay in docs/ and are not tracked by Git.
+# Project knowledge maps (features, decisions, user acceptance) live in
+# project-docs/ and ARE tracked by Git.
 docs/*
-!docs/features/
-!docs/features/**
-!docs/decisions/
-!docs/decisions/**
-!docs/USER_ACCEPTANCE.md
 CLAUDE.local.md
 .claude/settings.local.json
 

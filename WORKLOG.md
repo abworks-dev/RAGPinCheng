@@ -14,8 +14,8 @@
 ### 建立轻量用户验收交接规则
 
 - 完成：在项目入口增加简短用户验收门禁，将详细规范拆分到独立文档，并在功能文档模板增加验收入口；明确区分 Agent 技术验证、“代码完成，待用户验收”和用户明确确认后的“用户验收通过”。
-- 文件：`CLAUDE.md`、`docs/USER_ACCEPTANCE.md`、`docs/features/TEMPLATE.md`、`.gitignore`、`WORKLOG.md`（未修改业务代码）
-- 验证：`git diff --check` 通过；验收规范相对链接均可解析；`docs/USER_ACCEPTANCE.md` 已通过 Git 忽略例外进入待跟踪状态；差异核对确认本任务未修改业务代码，因纯文档规则调整未运行业务构建或测试。
+- 文件：`CLAUDE.md`、`project-docs/USER_ACCEPTANCE.md`、`project-docs/features/TEMPLATE.md`、`.gitignore`、`WORKLOG.md`（未修改业务代码）
+- 验证：`git diff --check` 通过；验收规范相对链接均可解析；`project-docs/USER_ACCEPTANCE.md` 已通过 Git 忽略例外进入待跟踪状态；差异核对确认本任务未修改业务代码，因纯文档规则调整未运行业务构建或测试。
 
 ### 核对功能完成后的用户验收规则
 
@@ -43,7 +43,7 @@
 - 验证：前端 `npm run build` 通过 ✅（TypeScript + Vite 构建成功，仅有一个 KaTeX CSS 预存警告）；Python 文件经逐行审阅语法正确
 
 - 完成：将已选定的视频资产、人工转录测试、未来自动转录复用、鉴权 Range 播放和前端播放器方案整理为首份 ADR；明确设计已批准但第一阶段尚未授权执行，并从决策索引与视频转录功能文档建立入口。
-- 文件：`docs/decisions/0001-video-transcript-player.md`、`docs/decisions/README.md`、`docs/features/transcript-pipeline.md`、`WORKLOG.md`（未修改业务代码）
+- 文件：`project-docs/decisions/0001-video-transcript-player.md`、`project-docs/decisions/README.md`、`project-docs/features/transcript-pipeline.md`、`WORKLOG.md`（未修改业务代码）
 - 验证：按 ADR 模板核对背景、决策、备选、影响、回滚，并补充实施范围、文件清单、执行顺序和验证矩阵；未运行构建或业务测试。
 - 待办/风险：Claude Code 实施前仍须取得用户明确的“批准执行第一阶段”；自动转录、生产部署、全量 Reset 和真实媒体删除不在授权范围。
 
@@ -182,8 +182,8 @@
 ### 21:41 — 建立 Agent 功能知识地图
 
 - 完成：创建功能总索引、统一模板、六条核心功能链路文档及 ADR 入口/模板；在 `CLAUDE.md` 中加入按目标功能和直接依赖渐进读取、源码复核、状态区分与同步维护规则；精确调整 Git 忽略规则，只放行功能知识与决策 Markdown，继续忽略真实业务资料。
-- 文件：`.gitignore`、`CLAUDE.md`、`docs/features/*`、`docs/decisions/*`、`WORKLOG.md`
-- 验证：全部 Markdown 相对链接可解析；文档列出的源码路径均存在；`git diff --check` 通过；确认 `docs/features` 与 `docs/decisions` 可进入版本控制，其他 `docs/*` 仍保持忽略；未修改业务代码，未运行构建或业务测试。
+- 文件：`.gitignore`、`CLAUDE.md`、`project-docs/features/*`、`project-docs/decisions/*`、`WORKLOG.md`
+- 验证：全部 Markdown 相对链接可解析；文档列出的源码路径均存在；`git diff --check` 通过；确认 `project-docs/features` 与 `project-docs/decisions` 可进入版本控制，其他 `docs/*` 仍保持忽略；未修改业务代码，未运行构建或业务测试。
 - 待办/风险：功能地图需要在功能边界、契约、主要入口、依赖或验证方式变化时持续同步；当前未创建未经批准的具体 ADR。
 
 ### 21:50 — 排查联网检索与浏览器超时
