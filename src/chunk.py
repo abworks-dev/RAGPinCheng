@@ -310,7 +310,7 @@ def _split_children(parent_text: str) -> list[tuple[str, str]]:
 
 
 TRANSCRIPT_TURN_RE = re.compile(
-    r"^说话人\s+\d+\s+(\d{1,2}:\d{2}:\d{2})\s*$",
+    r"^#*\s*说话[人⼈]\s+\d+\s+(\d{1,2}:\d{2}(?::\d{2})?)\s*$",
     re.MULTILINE,
 )
 

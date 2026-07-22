@@ -16,7 +16,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 
-from src.config import DOCS_DIR, MEDIA_DIR, SECOND_LEVEL_CATEGORIES
+from src.config import DOCS_DIR, MEDIA_DIR, MAX_VIDEO_UPLOAD_MB, SECOND_LEVEL_CATEGORIES
 from src.indexing_pipeline import (
     delete_document as delete_indexed_document,
     list_indexed_documents,
@@ -628,8 +628,10 @@ def _validate_transcript_markdown(md_bytes: bytes) -> None:
         raise HTTPException(status_code=400, detail="转录稿必须是 UTF-8 编码")
 
     import re
-    # At least one "说话人 HH:MM:SS" or "Speaker HH:MM:SS" line
-    has_speaker = bool(re.search(r"说话人\s+\d{1,2}:\d{2}:\d{2}", text))
+    # At least one "说话人 HH:MM:SS" or "说话人 MM:SS" line
+    # Use character class to match both regular 人 (U+4EBA) and
+    # Kangxi radical ⼈ (U+2F08) which look identical but are different code points.
+    has_speaker = bool(re.search(r"说话[人⼈]\s+\d{1,2}:\d{2}", text))
     if not has_speaker:
         raise HTTPException(
             status_code=400,
@@ -670,30 +672,48 @@ async def upload_media(
     if not transcript_name or not transcript_name.lower().endswith(".md"):
         raise HTTPException(status_code=400, detail="转录稿必须是 .md 格式")
 
-    # Read and validate transcript BEFORE touching disk
+    # Validate transcript BEFORE touching disk
     transcript_bytes = await transcript.read()
     try:
         _validate_transcript_markdown(transcript_bytes)
     except HTTPException:
         raise
 
-    # Read video bytes to validate not empty
-    video_bytes = await video.read()
-    if len(video_bytes) == 0:
-        raise HTTPException(status_code=400, detail="视频文件不能为空")
-
     # Generate stable media_id
     media_id = str(uuid.uuid4())
     now = int(time.time())
 
-    # Write video to media directory
+    # Write video to disk in chunks (streaming, not loading all into memory)
+    MAX_VIDEO_BYTES = MAX_VIDEO_UPLOAD_MB * 1024 * 1024
     media_dir = MEDIA_DIR / media_id
     media_dir.mkdir(parents=True, exist_ok=True)
     video_path = media_dir / "original.mp4"
+    total_video = 0
     try:
-        video_path.write_bytes(video_bytes)
+        with video_path.open("wb") as fh:
+            while True:
+                chunk = await video.read(1024 * 1024)  # 1 MB chunks
+                if not chunk:
+                    break
+                total_video += len(chunk)
+                if total_video > MAX_VIDEO_BYTES:
+                    fh.close()
+                    video_path.unlink()
+                    media_dir.rmdir()
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"视频文件超过 {MAX_VIDEO_UPLOAD_MB}MB 上限",
+                    )
+                fh.write(chunk)
+    except HTTPException:
+        raise
     except OSError as exc:
         raise HTTPException(status_code=500, detail=f"写入视频失败：{exc}")
+
+    if total_video == 0:
+        video_path.unlink()
+        media_dir.rmdir()
+        raise HTTPException(status_code=400, detail="视频文件不能为空")
 
     # Write transcript to docs/教学视频 directory with naming convention
     # that ties it back to the media asset.
@@ -728,7 +748,7 @@ async def upload_media(
             video_name,
             f"{media_id}/original.mp4",
             "video/mp4",
-            len(video_bytes),
+            total_video,
             str(transcript_path),
             "uploaded",
             "transcript_ready",
