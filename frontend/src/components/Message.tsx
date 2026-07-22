@@ -1,15 +1,19 @@
+import React, { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
-import type { ChatMessage } from "../types";
+import type { ChatMessage, Source } from "../types";
 import { SourcesPanel } from "./SourcesPanel";
 import { DebugPanel } from "./DebugPanel";
 import { FeedbackBar } from "./FeedbackBar";
 import {
+  CITATION_EVENT,
+  CITATION_HOVER_EVENT,
   dispatchCitation,
   linkifyCitations,
   resolveCitation,
+  type CitationHoverDetail,
 } from "./citations";
 
 // Demote inline `$$...$$` to `$...$` so KaTeX renders it inline instead of as
@@ -38,6 +42,76 @@ function StageIndicator({ msg }: { msg: ChatMessage }) {
   return <div className="text-muted text-sm">{label}</div>;
 }
 
+// Renders a citation superscript with tooltip preview.
+// Matches the Perplexity-style [1] corner marker instead of blue inline links.
+function CitationMarker({
+  href,
+  sources,
+  messageId,
+  children,
+}: {
+  href: string;
+  sources: Source[];
+  messageId: string;
+  children: React.ReactNode;
+}) {
+  const idx = resolveCitation(href, sources);
+  const source = idx >= 0 ? sources[idx] : null;
+  const [isHovered, setIsHovered] = useState(false);
+  const [isHighlighted, setIsHighlighted] = useState(false);
+
+  // Listen for hover events from SourcesPanel (card → in-message highlight).
+  useEffect(() => {
+    function onHover(e: Event) {
+      const detail = (e as CustomEvent<CitationHoverDetail>).detail;
+      if (detail.messageId !== messageId) return;
+      setIsHighlighted(detail.sourceIndex === idx);
+    }
+    window.addEventListener(CITATION_HOVER_EVENT, onHover);
+    return () => window.removeEventListener(CITATION_HOVER_EVENT, onHover);
+  }, [messageId, idx]);
+
+  if (!source) {
+    // Fallback: no matching source found — render as plain text.
+    return <span className="text-gray-500">{children}</span>;
+  }
+
+  // Tooltip preview text: first 120 chars of the source.
+  const preview = source.text.length > 120 ? source.text.slice(0, 120) + "…" : source.text;
+
+  return (
+    <>
+      <sup
+        className={`inline-flex cursor-pointer font-sans text-[0.7em] align-top px-1 rounded transition-colors ${
+          isHighlighted
+            ? "bg-accent text-white scale-110"
+            : "bg-blue-100 text-blue-700 hover:bg-blue-200"
+        }`}
+        onMouseEnter={() => setIsHovered(true)}
+        onMouseLeave={() => setIsHovered(false)}
+        onClick={(e) => {
+          e.preventDefault();
+          if (idx >= 0) dispatchCitation({ messageId, sourceIndex: idx });
+        }}
+      >
+        {idx + 1}
+      </sup>
+
+      {/* Tooltip: positioned above the superscript. */}
+      {isHovered && (
+        <div className="absolute z-50 left-0 -translate-y-full -mt-1 w-72 max-w-full bg-white border border-gray-200 rounded-lg shadow-xl p-3 text-xs">
+          <div className="font-medium text-gray-900 mb-1 truncate">{source.doc_title}</div>
+          <div className="text-gray-500 mb-2">
+            {source.doc_type === "transcript" ? `@${source.start_time || ""}` : `§${source.section_path || ""}`}
+          </div>
+          <div className="text-gray-600 whitespace-pre-wrap leading-relaxed">{preview}</div>
+          <div className="text-gray-400 mt-2 text-[10px]">点击跳转到完整来源</div>
+        </div>
+      )}
+    </>
+  );
+}
+
 export function Message({
   msg,
   conversationId,
@@ -62,7 +136,7 @@ export function Message({
           <div className="whitespace-pre-wrap break-words">{msg.content}</div>
         ) : (
           <>
-            <div className={"prose-tight " + (msg.streaming && msg.content ? "caret" : "")}>
+            <div className={"prose-tight relative " + (msg.streaming && msg.content ? "caret" : "")}>
               {msg.content ? (
                 <ReactMarkdown
                   remarkPlugins={[remarkGfm, remarkMath]}
@@ -71,19 +145,14 @@ export function Message({
                     a: ({ href, children, ...props }) => {
                       if (href && href.startsWith("#cite-")) {
                         return (
-                          <a
+                          <CitationMarker
                             href={href}
-                            onClick={(e) => {
-                              e.preventDefault();
-                              const idx = resolveCitation(href, msg.sources || []);
-                              if (idx >= 0) {
-                                dispatchCitation({ messageId: msg.id, sourceIndex: idx });
-                              }
-                            }}
-                            className="text-accent underline decoration-dotted underline-offset-2 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded px-0.5 cursor-pointer"
+                            sources={msg.sources || []}
+                            messageId={msg.id}
+                            {...props}
                           >
                             {children}
-                          </a>
+                          </CitationMarker>
                         );
                       }
                       return (

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
-import { CITATION_EVENT, type CitationDetail } from "./citations";
+import { CITATION_EVENT, CITATION_HOVER_EVENT, type CitationDetail, type CitationHoverDetail } from "./citations";
 import type { Source } from "../types";
 
 function locator(s: Source): string {
@@ -42,6 +42,22 @@ function SourceCard({
   const hasBreadcrumb = crumbs.length > 1;
   const canExpand = truncated;
 
+  // Hover → highlight citations in the message body (bidirectional sync).
+  function handleMouseEnter() {
+    window.dispatchEvent(
+      new CustomEvent<CitationHoverDetail>(CITATION_HOVER_EVENT, {
+        detail: { messageId, sourceIndex: i },
+      }),
+    );
+  }
+  function handleMouseLeave() {
+    window.dispatchEvent(
+      new CustomEvent<CitationHoverDetail>(CITATION_HOVER_EVENT, {
+        detail: { messageId, sourceIndex: null },
+      }),
+    );
+  }
+
   async function submit() {
     setSubmitting(true);
     setErr(null);
@@ -72,11 +88,13 @@ function SourceCard({
       id={id}
       ref={cardRef}
       className={
-        "border-l-2 pl-3 transition-colors duration-500 " +
+        "border-l-2 pl-3 transition-all duration-300 cursor-pointer " +
         (highlight
           ? "border-accent bg-blue-50 dark:bg-blue-900/20"
-          : "border-gray-200 dark:border-gray-700")
+          : "border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800/50")
       }
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="font-medium text-ink">

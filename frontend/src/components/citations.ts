@@ -6,10 +6,17 @@
 import type { Source } from "../types";
 
 export const CITATION_EVENT = "pincheng:citation-click";
+// Sent from SourcesPanel when hovering a source card to highlight the citation in-message.
+export const CITATION_HOVER_EVENT = "pincheng:citation-hover";
 
 export type CitationDetail = {
   messageId: string;
   sourceIndex: number;
+};
+
+export type CitationHoverDetail = {
+  messageId: string;
+  sourceIndex: number | null; // null = clear highlight
 };
 
 // Group 1 = doc title, Group 2 = section path. Negative lookahead avoids
