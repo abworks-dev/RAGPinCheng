@@ -2,6 +2,22 @@
 
 由 Claude Code 在每次任务完成后按日期追加。这里只记录实际完成的工作、验证结果以及必要的待办或风险。
 
+## 2026-07-23
+
+### 整理视频播放器方案供 Claude Code 执行
+
+- 完成：将已选定的视频资产、人工转录测试、未来自动转录复用、鉴权 Range 播放和前端播放器方案整理为首份 ADR；明确设计已批准但第一阶段尚未授权执行，并从决策索引与视频转录功能文档建立入口。
+- 文件：`docs/decisions/0001-video-transcript-player.md`、`docs/decisions/README.md`、`docs/features/transcript-pipeline.md`、`WORKLOG.md`（未修改业务代码）
+- 验证：按 ADR 模板核对背景、决策、备选、影响、回滚，并补充实施范围、文件清单、执行顺序和验证矩阵；未运行构建或业务测试。
+- 待办/风险：Claude Code 实施前仍须取得用户明确的“批准执行第一阶段”；自动转录、生产部署、全量 Reset 和真实媒体删除不在授权范围。
+
+### 视频转录播放器确定方案
+
+- 完成：根据用户选定的本地媒体目录、MP4、FastAPI 鉴权 Range、全体登录用户访问、右侧播放器抽屉、引用点击播放和首期仅做时间点播放，收敛视频资产、人工转录测试与未来自动转录共用的确定方案；明确媒体登记进入 app.sqlite、索引 Parent 仅保存 media_id，未来自动转录复用同一规范化转录与索引入口。
+- 文件：`WORKLOG.md`（未修改业务代码）
+- 验证：对照当前管理端上传、索引任务、转录分块、来源 DTO、认证、前端引用事件及 Docker 挂载边界复核方案；未运行构建或业务测试。
+- 待办/风险：方案属于 R2，需用户明确批准后方可实施；第一期不实现语音识别，后续自动转录模型、资源调度和失败恢复作为独立 R2 阶段实施。
+
 ## 2026-07-22
 
 ### Codex 辅助角色与审批门禁
@@ -112,6 +128,62 @@
 - 完成：将历史 TODO 重新整理为 Markdown 格式的 Roadmap，按优先级分类（高/中/增强/运维），补充设计方案细节、涉及文件和状态标记；同时添加已完成功能的历史记录，方便追踪项目进展；删除旧的纯文本 `TODO` 文件。
 - 文件：`TODO.md`（新建）、`TODO`（删除旧文件）
 - 验证：已核对所有待办项与代码中的设计注释，格式符合 Markdown 标准；未修改业务代码。
+
+### 21:31 — 调查视频转录播放器集成基础
+
+- 完成：追踪视频转录数据从解析分块、Qdrant/SQLite、检索与回答生成、API DTO 到前端引用角标和来源面板的完整链路；确认时间戳引用及来源卡片定位已实现，媒体 URL、视频文件关联、媒体访问路由、播放器与时间点跳转尚未实现。
+- 文件：`WORKLOG.md`（未修改业务代码）
+- 验证：只读核查 `src/chunk.py`、`src/index.py`、`src/retrieve.py`、`src/session.py`、`src/generate.py`、`api/schemas.py`、`api/conversation_runtime.py`、`api/main.py`、`frontend/src/types.ts`、`frontend/src/components/citations.ts`、`frontend/src/components/Message.tsx`、`frontend/src/components/SourcesPanel.tsx` 和 `frontend/package.json`；未运行构建或测试。
+- 待办/风险：后续实现涉及索引数据契约、后端媒体授权/分段传输和前端交互，属于跨模块 R2 修改，需先确定视频存储与访问方式并审批方案。
+
+### 21:34 — 建议建立功能地图
+
+- 完成：评估大规模项目下 Agent 的功能上下文管理方式；建议建立轻量、可检索的功能地图，记录功能入口、跨模块调用链、数据契约、验证命令、依赖关系和已知边界，并由 `CLAUDE.md` 规定设计前按相关功能文档核查。
+- 文件：`WORKLOG.md`（未修改业务代码）
+- 验证：结合当前项目目录、协作规则及视频转录链路调查结果进行架构分析；未运行构建或测试。
+- 待办/风险：功能文档必须有更新责任和代码事实校验机制，否则可能演变为过期文档并误导 Agent。
+
+### 21:41 — 建立 Agent 功能知识地图
+
+- 完成：创建功能总索引、统一模板、六条核心功能链路文档及 ADR 入口/模板；在 `CLAUDE.md` 中加入按目标功能和直接依赖渐进读取、源码复核、状态区分与同步维护规则；精确调整 Git 忽略规则，只放行功能知识与决策 Markdown，继续忽略真实业务资料。
+- 文件：`.gitignore`、`CLAUDE.md`、`docs/features/*`、`docs/decisions/*`、`WORKLOG.md`
+- 验证：全部 Markdown 相对链接可解析；文档列出的源码路径均存在；`git diff --check` 通过；确认 `docs/features` 与 `docs/decisions` 可进入版本控制，其他 `docs/*` 仍保持忽略；未修改业务代码，未运行构建或业务测试。
+- 待办/风险：功能地图需要在功能边界、契约、主要入口、依赖或验证方式变化时持续同步；当前未创建未经批准的具体 ADR。
+
+### 21:50 — 排查联网检索与浏览器超时
+
+- 完成：定位通用网页检索与内置浏览器的两类独立故障；确认网页检索网关对搜索和已知 URL 均立即返回 HTTP 404，属于平台侧故障；确认内置浏览器可联网，但首次导航受 `ab.chatgpt.com` 初始化 POST 的 10 秒超时和本地 Google 转发链路影响，轻量页面约 26 秒、Google 搜索约 25 秒，默认 30 秒执行预算容易越界。提高到 60 秒后浏览器搜索成功。
+- 文件：`WORKLOG.md`（未修改业务代码或系统网络配置）
+- 验证：直接 HTTPS 成功读取 Anthropic、OpenAI、Backstage、C4、Microsoft 和 Thoughtworks 页面；检查 DNS、hosts、WinHTTP 代理及本机 443 监听，确认 Google 由 `Steam++.Accelerator.exe` 经 hosts 映射到 `127.0.0.1` 转发；内置浏览器成功打开 `example.com`、OpenAI 文档和 Google 搜索结果。
+- 待办/风险：未修改 hosts、Steam++、Clash Verge 或浏览器插件；网页检索网关 404 需由平台恢复，当前可使用官方 URL 直读或给浏览器调用预留 60–120 秒作为绕行。
+
+### 22:07 — 调研功能知识地图的行业先例
+
+- 完成：核对 Agent 分层项目指令、Docs-as-Code/软件目录、C4 分层架构地图及轻量 ADR 四类成熟实践；确认当前“功能地图 + Agent 按依赖读取 + ADR + TODO/WORKLOG 分离”没有单一统一标准名称，但各组成部分均有官方规范和规模化采用案例，组合方向成立。
+- 文件：`WORKLOG.md`（未修改业务代码或功能地图）
+- 验证：读取并交叉核对 Anthropic Claude Code memory、OpenAI AGENTS.md 指南、AGENTS.md 开放格式、Backstage Software Catalog/TechDocs、C4 Model、Microsoft ADR 与 Thoughtworks Technology Radar 官方资料；Backstage 页面披露 5000+ 文档站点和约 10000 日均访问，AGENTS.md 页面披露被 60000+ 开源项目采用。
+- 待办/风险：成功前提是保持文档短小、与代码同库、按范围渐进加载并持续校验；功能文档若缺少所有者、变更触发规则或链接检查，仍可能过期并误导 Agent。
+
+### 23:34 — 沉淀功能知识地图设计到 AB-Knowledge
+
+- 完成：在外部 Obsidian Vault `AB-Knowledge` 的品成 BIM 项目协作改进子树中新建《RAGPinCheng 功能知识地图与 Agent 渐进式项目上下文设计》，记录已实施结构、文档职责、Agent 读取流程、视频转录示例、成功条件与行业先例；同步更新该子树 MOC 的第 06 条入口。
+- 文件：`E:/Knowledge/Obsidian/AB-Knowledge/20-Projects/品成BIM知识库分析/06-Claude Code协作改进/06-功能知识地图与Agent渐进式项目上下文设计.md`、同目录 `Claude Code协作改进索引.md`、`WORKLOG.md`
+- 验证：读取目标 Vault 治理 SSOT、MOC 和相关笔记并完成查重；新笔记 5 个 Wiki-link 均唯一解析；8 个外部参考均为官方直达页；目标 Vault 中本任务只新增一篇笔记并修改一份索引。
+- 待办/风险：当前会话未提供知识库要求的 `capture-knowledge` Skill，已按同一治理规则人工完成；目标 Vault 原有大量无关未提交修改和迁移删除，本任务未触碰。
+
+### 视频转录播放器集成现状与开源实现调研
+
+- 完成：基于当前源码复核转录分块、索引、检索、来源 DTO、引用角标和来源面板链路；确认时间戳引用与来源定位已完成，媒体资产关联、鉴权播放、HTTP Range、播放器及时间点跳转尚未实现；参考 Able Player、MediaCMS 与轻量 React 视频转录播放器的实现方式，形成分阶段候选设计。
+- 文件：`WORKLOG.md`（未修改业务代码）
+- 验证：只读核对项目规则、功能地图及相关前后端源码；通过 GitHub 仓库页面核对交互式转录、播放器时间同步、媒体权限、HLS/字幕等实现思路；未运行构建或业务测试。
+- 待办/风险：后续实现涉及媒体数据契约、认证访问、部署挂载和前端交互，属于 R2 修改；需先确定视频存储方式与上传/关联流程，再经方案审批实施。
+
+### 视频播放器分阶段可选方案整理
+
+- 完成：按媒体来源与存储、上传关联、播放传输、前端交互、转录同步和后续扩展阶段整理适合当前 FastAPI、React、Docker 单体架构的可行选项及推荐默认值，供用户选择后收敛为确定实施方案。
+- 文件：`WORKLOG.md`（未修改业务代码）
+- 验证：结合当前视频转录调用链、认证方式、Docker 挂载和管理端上传能力进行方案边界复核；未运行构建或业务测试。
+- 待办/风险：需用户确认关键选项后形成唯一 R2 实施方案并重新审批；本轮不构成执行授权。
 
 ## 2026-07-20
 
