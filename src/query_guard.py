@@ -53,6 +53,10 @@ _SECTION_ONLY_RE = re.compile(r"^\s*[\d．.]+\s*$")
 # Purely numeric/punctuation: optional whitespace around digits/punctuation only.
 _PURE_NOISE_RE = re.compile(r"^\s*[\d\W_]+\s*$")
 
+# Pure digits only — no Chinese characters, no letters.
+# "222" matches; "那 22 呢" does not.
+_PURE_DIGITS_ONLY_RE = re.compile(r"^\s*\d[\d\s．.]*\s*$")
+
 
 @dataclass
 class QueryValidation:
@@ -154,11 +158,46 @@ def validate_search_query(search_query: str, *, has_history: bool) -> QueryValid
                     '"22 号构件的构造要求是什么？"'
                 ),
             )
+        # With history, numeric-dominant is allowed because it could be
+        # a legitimate follow-up (e.g., "那 22 呢?"). But pure digits still
+        # need a hint — the history might not contain any document reference.
+        if _PURE_NOISE_RE.match(stripped):
+            return QueryValidation.reject(
+                reason="numeric_only",
+                message=(
+                    f'你的问题"{stripped}"信息不足。请补充具体的查询对象，'
+                    '例如 "在上个规范中第 22 节的要求是什么？"'
+                ),
+            )
         return QueryValidation.ok()
 
     # Professional domain term found → user is asking about something specific.
     if _contains_professional_term(stripped):
         return QueryValidation.ok()
+
+    # Pure digits only — no Chinese characters, no letters.
+    # ALWAYS reject, even with history. "222" is meaningless without context;
+    # the rewriter will turn it into "What is 222?" but the history may not
+    # contain any document reference that gives 222 meaning.
+    # Legitimate follow-ups like "那 22 呢?" will have Chinese characters
+    # and pass this check.
+    if _PURE_DIGITS_ONLY_RE.match(stripped):
+        if not has_history:
+            return QueryValidation.reject(
+                reason="numeric_only",
+                message=(
+                    f'你的问题"{stripped}"信息不足。请补充要查询的对象，'
+                    '例如 "GB 50327 第 11 节讲了什么？" 或 '
+                    '"11 号构件的要求是什么？"'
+                ),
+            )
+        return QueryValidation.reject(
+            reason="numeric_only",
+            message=(
+                f'你的问题"{stripped}"信息不足。请补充具体的查询对象，'
+                '例如 "在上个规范中第 22 节的要求是什么？"'
+            ),
+        )
 
     # Pure noise (digits and/or punctuation only) with no other content.
     # Strict on first turn; lenient with history (the rewriter might have
@@ -175,8 +214,26 @@ def validate_search_query(search_query: str, *, has_history: bool) -> QueryValid
             )
         return QueryValidation.ok()
 
+    # Numeric-dominant query (e.g., "22 细部工程") — the rewriter may append
+    # generic filler words around a pure number, but it's still fundamentally ambiguous.
+    # Strict on first turn regardless of appended context.
+    if _is_numeric_dominant(stripped, threshold=0.4):
+        if not has_history:
+            return QueryValidation.reject(
+                reason="numeric_dominant",
+                message=(
+                    f'你的问题"{stripped}"信息不足，主要为数字。请补充具体上下文，'
+                    '例如 "第 22 节讲了什么内容？" 或 '
+                    '"22 号构件的构造要求是什么？"'
+                ),
+            )
+        # With history, numeric-dominant is allowed because it could be
+        # a legitimate follow-up like "那第 22 条呢?" with non-numeric particles.
+        return QueryValidation.ok()
+
     # Isolated section number with no surrounding document context.
     # "11.1" → reject; "GB 50017 11.1" → passed by the code check above.
+    # With history, this could be a legitimate follow-up like "那 11.1 呢?".
     if _SECTION_ONLY_RE.match(stripped):
         if not has_history:
             return QueryValidation.reject(
