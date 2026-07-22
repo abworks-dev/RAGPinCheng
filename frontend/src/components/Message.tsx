@@ -43,7 +43,7 @@ function StageIndicator({ msg }: { msg: ChatMessage }) {
 }
 
 // Renders a citation superscript with tooltip preview.
-// Matches the Perplexity-style [1] corner marker instead of blue inline links.
+// WPS-style clean badge: subtle background, no harsh borders, precise vertical alignment.
 function CitationMarker({
   href,
   sources,
@@ -81,33 +81,35 @@ function CitationMarker({
 
   return (
     <>
-      <sup
-        className={`inline-flex cursor-pointer font-sans text-[0.7em] align-top px-1 rounded transition-colors ${
-          isHighlighted
-            ? "bg-accent text-white scale-110"
-            : "bg-blue-100 text-blue-700 hover:bg-blue-200"
-        }`}
-        onMouseEnter={() => setIsHovered(true)}
-        onMouseLeave={() => setIsHovered(false)}
-        onClick={(e) => {
-          e.preventDefault();
-          if (idx >= 0) dispatchCitation({ messageId, sourceIndex: idx });
-        }}
-      >
-        {idx + 1}
-      </sup>
+      <sup className="relative top-[-0.35em] align-baseline">
+        <a
+          className={`inline-flex items-center justify-center cursor-pointer font-sans text-[11px] h-[18px] min-w-[18px] px-1 rounded transition-all ${
+            isHighlighted
+              ? "bg-accent text-white scale-110"
+              : "bg-gray-100 text-gray-600 hover:bg-gray-200 border border-gray-200"
+          }`}
+          onMouseEnter={() => setIsHovered(true)}
+          onMouseLeave={() => setIsHovered(false)}
+          onClick={(e) => {
+            e.preventDefault();
+            if (idx >= 0) dispatchCitation({ messageId, sourceIndex: idx });
+          }}
+        >
+          {idx + 1}
+        </a>
 
-      {/* Tooltip: positioned above the superscript. */}
-      {isHovered && (
-        <div className="absolute z-50 left-0 -translate-y-full -mt-1 w-72 max-w-full bg-white border border-gray-200 rounded-lg shadow-xl p-3 text-xs">
-          <div className="font-medium text-gray-900 mb-1 truncate">{source.doc_title}</div>
-          <div className="text-gray-500 mb-2">
-            {source.doc_type === "transcript" ? `@${source.start_time || ""}` : `§${source.section_path || ""}`}
+        {/* Tooltip: positioned above the superscript. */}
+        {isHovered && (
+          <div className="absolute z-50 left-0 -translate-y-full -mt-1 w-72 max-w-full bg-white border border-gray-200 rounded-lg shadow-xl p-3 text-xs">
+            <div className="font-medium text-gray-900 mb-1 truncate">{source.doc_title}</div>
+            <div className="text-gray-500 mb-2">
+              {source.doc_type === "transcript" ? `@${source.start_time || ""}` : `§${source.section_path || ""}`}
+            </div>
+            <div className="text-gray-600 whitespace-pre-wrap leading-relaxed">{preview}</div>
+            <div className="text-gray-400 mt-2 text-[10px]">点击跳转到完整来源</div>
           </div>
-          <div className="text-gray-600 whitespace-pre-wrap leading-relaxed">{preview}</div>
-          <div className="text-gray-400 mt-2 text-[10px]">点击跳转到完整来源</div>
-        </div>
-      )}
+        )}
+      </sup>
     </>
   );
 }

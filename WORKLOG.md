@@ -4,6 +4,25 @@
 
 ## 2026-07-22
 
+### 修复引用角标垂直偏移与样式
+
+- **问题原因**：原角标使用 `align-top` + `inline-flex` 在 `<sup>` 上，数字显示位置偏上且缺少边框；WPS 采用 `<sup>` 包裹 `<a>` 的结构，垂直定位更精确。
+- **修改内容**：
+  - DOM 结构改为 `sup > a`（与 WPS 一致）
+  - 垂直对齐：`top-[-0.35em] align-baseline` 精确控制
+  - 尺寸固定：`h-[18px] min-w-[18px] text-[11px]`
+  - 样式：浅灰背景 `bg-gray-100` + 细边框 `border-gray-200` + 圆角，与正文融合自然
+  - tooltip 移入 `<sup>` 内部，定位更准确
+- **文件**：`frontend/src/components/Message.tsx`
+- **验证**：前端构建通过 ✅
+
+### 18:44 — 调查 WPS 风格引用角标
+
+- 完成：定位现有回答角标、悬浮预览与来源面板实现，确认可在保留当前引用解析和数据结构的前提下复刻 WPS 风格；给出 Firefox 中采集目标元素 DOM 与样式的范围。
+- 文件：`WORKLOG.md`（未修改业务代码）
+- 验证：只读检查 `Message.tsx`、`citations.ts`、`SourcesPanel.tsx`、`index.css` 和前端类型；未运行前端构建。
+- 待办/风险：当前截图未包含已生成答案及引用浮层，精确还原仍需角标常态、悬停态和展开来源态的 DOM/样式或截图。
+
 ### 修复 SSE 流超时导致的 network error
 
 - **问题原因**：SSE 流在 LLM 生成停顿超过 30 秒时，被反向代理（Nginx/Cloudflare）或浏览器因空闲超时断开，导致用户看到 `⚠️ network error`。
