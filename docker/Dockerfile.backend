@@ -103,4 +103,6 @@ EXPOSE 8000
 # Single worker on purpose: BGE-M3 + reranker hold ~3-4 GB resident; multi-worker
 # would multiply RAM with no throughput gain on a CPU-only host (torch releases
 # the GIL during inference, so a single worker already overlaps I/O and compute).
-CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+# `--timeout-keep-alive 300` keeps long SSE streams from disconnecting prematurely
+# (default is only 5s, which is a common source of network errors in production).
+CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--timeout-keep-alive", "300"]
