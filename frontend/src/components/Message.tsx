@@ -98,14 +98,16 @@ function CitationMarker({
           {idx + 1}
         </a>
 
-        {/* Tooltip: positioned above the superscript. */}
+        {/* Tooltip: positioned above the superscript.
+            Smart alignment: prefers expanding to the right, but if too close to
+            the right edge, expand leftwards. Prevents viewport overflow. */}
         {isHovered && (
-          <div className="absolute z-50 left-0 -translate-y-full -mt-1 w-72 max-w-full bg-white border border-gray-200 rounded-lg shadow-xl p-3 text-xs">
+          <div className="absolute z-[100] min-w-[200px] max-w-[320px] right-0 -translate-y-full -mt-1 bg-white border border-gray-200 rounded-lg shadow-xl p-3 text-xs break-words">
             <div className="font-medium text-gray-900 mb-1 truncate">{source.doc_title}</div>
-            <div className="text-gray-500 mb-2">
+            <div className="text-gray-500 mb-2 truncate">
               {source.doc_type === "transcript" ? `@${source.start_time || ""}` : `§${source.section_path || ""}`}
             </div>
-            <div className="text-gray-600 whitespace-pre-wrap leading-relaxed">{preview}</div>
+            <div className="text-gray-600 whitespace-pre-wrap leading-relaxed break-words">{preview}</div>
             <div className="text-gray-400 mt-2 text-[10px]">点击跳转到完整来源</div>
           </div>
         )}
