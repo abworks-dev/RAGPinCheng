@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -59,6 +59,8 @@ function CitationMarker({
   const source = idx >= 0 ? sources[idx] : null;
   const [isHovered, setIsHovered] = useState(false);
   const [isHighlighted, setIsHighlighted] = useState(false);
+  const [showBelow, setShowBelow] = useState(false);
+  const tooltipRef = useRef<HTMLDivElement>(null);
 
   // Listen for hover events from SourcesPanel (card → in-message highlight).
   useEffect(() => {
@@ -70,6 +72,19 @@ function CitationMarker({
     window.addEventListener(CITATION_HOVER_EVENT, onHover);
     return () => window.removeEventListener(CITATION_HOVER_EVENT, onHover);
   }, [messageId, idx]);
+
+  // Smart vertical positioning: flip to below if overflowing viewport top.
+  useLayoutEffect(() => {
+    if (!isHovered || !tooltipRef.current) {
+      setShowBelow(false);
+      return;
+    }
+    const rect = tooltipRef.current.getBoundingClientRect();
+    // If tooltip top edge is above viewport (with 10px margin), flip to below
+    if (rect.top < 10) {
+      setShowBelow(true);
+    }
+  }, [isHovered]);
 
   if (!source) {
     // Fallback: no matching source found — render as plain text.
@@ -100,11 +115,17 @@ function CitationMarker({
           {idx + 1}
         </a>
 
-        {/* Tooltip: positioned above the superscript.
-            Smart alignment: prefers expanding to the right, but if too close to
-            the right edge, expand leftwards. Prevents viewport overflow. */}
+        {/* Tooltip: smart vertical positioning.
+            Default: above the superscript (with tiny overlap to prevent gap flicker).
+            If overflowing viewport top: flip to below (via showBelow state).
+            Horizontal alignment: left-0 (rightwards) to avoid sidebar clipping. */}
         {isHovered && (
-          <div className="absolute z-[100] min-w-[200px] max-w-[320px] left-0 bottom-[100%] mb-0.5 bg-white border border-gray-200 rounded-lg shadow-xl p-3 text-xs break-words">
+          <div
+            ref={tooltipRef}
+            className={`absolute z-[100] min-w-[200px] max-w-[320px] left-0 bg-white border border-gray-200 rounded-lg shadow-xl p-3 text-xs break-words ${
+              showBelow ? "top-[100%] mt-0.5" : "bottom-[100%] mb-0.5"
+            }`}
+          >
             <div className="font-medium text-gray-900 mb-1 truncate">{source.doc_title}</div>
             <div className="text-gray-500 mb-2 truncate">
               {source.doc_type === "transcript" ? `@${source.start_time || ""}` : `§${source.section_path || ""}`}
