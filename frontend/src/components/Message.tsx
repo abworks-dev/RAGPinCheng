@@ -4,6 +4,7 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import type { ChatMessage, Source } from "../types";
+import { stripMarkdown } from "../utils/markdown";
 import { SourcesPanel } from "./SourcesPanel";
 import { DebugPanel } from "./DebugPanel";
 import { FeedbackBar } from "./FeedbackBar";
@@ -91,8 +92,9 @@ function CitationMarker({
     return <span className="text-gray-500">{children}</span>;
   }
 
-  // Tooltip preview text: first 120 chars of the source.
-  const preview = source.text.length > 120 ? source.text.slice(0, 120) + "…" : source.text;
+  // Tooltip preview text: first 120 chars of the source, with markdown syntax stripped.
+  const cleanText = stripMarkdown(source.text);
+  const preview = cleanText.length > 120 ? cleanText.slice(0, 120) + "…" : cleanText;
 
   return (
     <>
@@ -105,7 +107,7 @@ function CitationMarker({
           className={`inline-flex items-center justify-center cursor-pointer font-sans text-[11px] h-[18px] min-w-[18px] px-1 rounded transition-all ${
             isHighlighted
               ? "bg-accent text-white scale-110"
-              : "bg-gray-100 text-gray-600 hover:bg-gray-200 border border-gray-200"
+              : "bg-gray-100 text-gray-600 hover:bg-gray-200 dark:hover:bg-gray-700 border border-gray-200"
           }`}
           onClick={(e) => {
             e.preventDefault();

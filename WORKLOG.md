@@ -4,6 +4,18 @@
 
 ## 2026-07-22
 
+### Codex 辅助角色与审批门禁
+
+- 完成：新增 Codex 协作入口，明确 Claude Code 是主要开发者、Codex 是辅助协作者；规定任务先做 `R0–R3` 评级，`R2/R3` 展示方案并等待明确批准后方可执行。
+- 文件：`AGENTS.md`、`WORKLOG.md`
+- 验证：已按批准方案核对角色分工、授权语义、重新审批条件、执行边界和回滚要求；未修改或运行项目业务代码。
+
+### 20:20 — 增加 Claude 方案审批门禁
+
+- 完成：在项目入口加入 `R0–R3` 风险评级；规定 `R2/R3` 任务提交方案后必须停止，只有用户明确批准后才能执行，范围或风险变化时需重新审批。
+- 文件：`CLAUDE.md`、`WORKLOG.md`
+- 验证：已检查规则差异，确认保留并衔接原有 Reset、删除、生产部署等专项确认要求；未运行项目业务测试。
+
 ### 修复引用角标 tooltip 闪烁无法停留的问题
 
 - **问题原因**：`onMouseEnter/onMouseLeave` 只绑定在 `<a>` 角标上，而 tooltip 是兄弟元素。鼠标从角标移到 tooltip 时触发 `onMouseLeave` → tooltip 消失 → 鼠标回到角标 → 无限闪烁。
@@ -18,7 +30,7 @@
 - **修复方案**：将 `right-0` 改为 `left-0`，让 tooltip 从角标**向右展开**，避开左侧侧边栏。
 - **文件**：`frontend/src/components/Message.tsx`
 
-### 修复引用角标 tooltip 在页面顶部被视口遮挡的问题
+### 修复引用角标 tooltip 在顶部被视口遮挡的问题
 
 - **问题原因**：tooltip 固定显示在角标上方（`bottom-[100%]`）。当角标靠近视口顶部时（如页面滚动到第一条回答），tooltip 上边缘会超出视口，内容被截断。
 - **修复方案**：
@@ -26,6 +38,14 @@
   - 若 tooltip 上边缘距视口顶部 < 10px，动态切换到下方显示（`top-[100%]`）
   - 两种定位都保留微小间距（`mb-0.5` / `mt-0.5`）防止鼠标移动时闪烁
 - **文件**：`frontend/src/components/Message.tsx`
+- **验证**：前端 `npm run build` 构建通过 ✅
+
+### 修复暗黑模式下对话列表标题颜色过深的问题
+
+- **问题原因**：`ConversationList.tsx` 使用 `text-ink/90`——这是 Tailwind 的 opacity 语法，生成硬编码的 `color: rgb(31, 41, 55) / 0.9;`。暗黑模式的 `.dark .text-ink` 覆盖只对纯 `text-ink` 类有效，导致标题颜色仍是深灰色，与深色背景融为一体。
+- **修复方案**：改为 `text-ink opacity-90`，`opacity` 不影响颜色通道，暗黑模式的颜色覆盖能正常生效。
+- **附加修复**：给引用角标 hover 状态添加 `dark:hover:bg-gray-700`，与暗黑模式背景协调。
+- **文件**：`frontend/src/components/ConversationList.tsx`、`frontend/src/components/Message.tsx`
 - **验证**：前端 `npm run build` 构建通过 ✅
 
 ### 修复第二次输入纯数字仍会检索的问题
@@ -66,6 +86,19 @@
   - 添加 `last_activity` 时间跟踪
   - 每 15 秒无活动时发送 `ping_event`（SSE 注释，前端自动忽略）
   - 使用 `asyncio.wait_for` + 短超时循环实现心跳窗口
+
+### 优化参考来源预览移除 Markdown 语法标记
+
+- **问题原因**：参考来源的预览文本直接显示原始 Markdown 源代码，用户看到大量 `####` 标题标记和表格语法，影响可读性。
+- **解决方案**：新增 `stripMarkdown()` 工具函数，在预览显示前移除 Markdown 语法标记：
+  - 移除标题标记 `#`、代码块 `` ` ``、粗体 `**`、斜体 `*`
+  - 移除链接、图片、列表、引用、水平分割线标记
+  - 清理表格管道符号和多余空白行
+- **文件**：`frontend/src/utils/markdown.ts`（新建）、`frontend/src/components/Message.tsx`、`frontend/src/components/SourcesPanel.tsx`
+- **影响范围**：
+  - 角标 Tooltip 预览（120 字符）
+  - 参考来源面板的文本预览（400 字符，支持展开）
+- **验证**：前端 `npm run build` 构建通过 ✅
 - **验证**：代码语法检查通过，逻辑与现有流处理兼容。
 
 ### 移除 LLM 输出中的"资料来源"重复项
@@ -73,6 +106,12 @@
 - 完成：修改 `answer_system.md` Prompt，移除要求 LLM 在正文末尾追加"**资料来源：**"小节的指令。因为前端已经通过独立的折叠面板展示参考来源，LLM 再输出一遍会导致重复显示。
 - 文件：`prompts/answer_system.md`
 - 验证：已核对 Prompt 修改内容；新生成的回答将不再包含"资料来源："标题和列表，只保留行内引用标注。
+
+### 整理并优化 Roadmap TODO 文档
+
+- 完成：将历史 TODO 重新整理为 Markdown 格式的 Roadmap，按优先级分类（高/中/增强/运维），补充设计方案细节、涉及文件和状态标记；同时添加已完成功能的历史记录，方便追踪项目进展。
+- 文件：`TODO.md`（新建）
+- 验证：已核对所有待办项与代码中的设计注释，格式符合 Markdown 标准；未修改业务代码。
 
 ## 2026-07-20
 

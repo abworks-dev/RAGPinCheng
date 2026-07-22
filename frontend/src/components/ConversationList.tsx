@@ -44,7 +44,7 @@ export function ConversationList({
                 "group flex items-center gap-1 rounded-lg px-2 py-2 text-sm cursor-pointer " +
                 (active
                   ? "bg-accent/10 text-ink"
-                  : "hover:bg-gray-100 dark:hover:bg-gray-800 text-ink/90")
+                  : "hover:bg-gray-100 dark:hover:bg-gray-800 text-ink opacity-90")
               }
               onClick={() => onSelect(c.id)}
               title={c.title}
