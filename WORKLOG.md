@@ -14,8 +14,17 @@
 
 ### 修复引用角标 tooltip 在左侧被侧边栏遮挡的问题
 
-- **问题原因**：tooltip 使用 `right-0` 定位，从角标**向左展开**。当角标靠近页面左侧时，tooltip 会延伸到侧边栏（`<aside>`）区域，被其背景和内容遮挡。同时代码注释中提到的"智能对齐"实际上并未实现。
-- **修复方案**：将 `right-0` 改为 `left-0`，让 tooltip 从角标**向右展开**，避免进入左侧侧边栏区域。
+- **问题原因**：tooltip 使用 `right-0` 定位，从角标**向左展开**。当角标靠近页面左侧时，tooltip 会延伸到侧边栏（`<aside>`）区域，被其背景和边框遮挡。
+- **修复方案**：将 `right-0` 改为 `left-0`，让 tooltip 从角标**向右展开**，避开左侧侧边栏。
+- **文件**：`frontend/src/components/Message.tsx`
+
+### 修复引用角标 tooltip 在页面顶部被视口遮挡的问题
+
+- **问题原因**：tooltip 固定显示在角标上方（`bottom-[100%]`）。当角标靠近视口顶部时（如页面滚动到第一条回答），tooltip 上边缘会超出视口，内容被截断。
+- **修复方案**：
+  - 使用 `useLayoutEffect` 在渲染后即时检测 tooltip 的 `getBoundingClientRect()`
+  - 若 tooltip 上边缘距视口顶部 < 10px，动态切换到下方显示（`top-[100%]`）
+  - 两种定位都保留微小间距（`mb-0.5` / `mt-0.5`）防止鼠标移动时闪烁
 - **文件**：`frontend/src/components/Message.tsx`
 - **验证**：前端 `npm run build` 构建通过 ✅
 
