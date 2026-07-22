@@ -106,6 +106,7 @@ class Parent:
     doc_type: str = "pdf"            # "pdf" | "transcript"
     start_time: str | None = None    # HH:MM:SS, only for transcripts
     company: str | None = None       # only set for category=="公司内部标准"
+    media_id: str | None = None      # associated video asset if any
 
 
 @dataclass
@@ -122,6 +123,7 @@ class Child:
     doc_type: str = "pdf"            # "pdf" | "transcript"
     start_time: str | None = None    # HH:MM:SS, only for transcripts
     company: str | None = None       # only set for category=="公司内部标准"
+    media_id: str | None = None      # associated video asset if any
 
 
 def _stable_id(*parts: str) -> str:
@@ -372,6 +374,7 @@ def chunk_transcript(doc: ParsedDoc) -> tuple[list[Parent], list[Child]]:
                 doc_type="transcript",
                 start_time=first_ts,
                 company=doc.company,
+                media_id=doc.media_id,
             )
         )
         for ts, body in group:
@@ -392,6 +395,7 @@ def chunk_transcript(doc: ParsedDoc) -> tuple[list[Parent], list[Child]]:
                     doc_type="transcript",
                     start_time=ts,
                     company=doc.company,
+                    media_id=doc.media_id,
                 )
             )
     return parents, children

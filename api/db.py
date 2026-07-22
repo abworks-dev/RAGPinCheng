@@ -71,6 +71,7 @@ CREATE TABLE IF NOT EXISTS index_jobs (
     doc_type      TEXT NOT NULL,            -- 'pdf' | 'transcript'
     source_path   TEXT NOT NULL,            -- absolute path on disk under docs/
     file_size     INTEGER NOT NULL,
+    media_id      TEXT,                     -- nullable: associated media asset
     status        TEXT NOT NULL DEFAULT 'pending',
                                             -- pending | parsing | chunking | embedding | done | failed
     error         TEXT,
@@ -83,6 +84,27 @@ CREATE INDEX IF NOT EXISTS idx_index_jobs_status_created
     ON index_jobs (status, created_at);
 CREATE INDEX IF NOT EXISTS idx_index_jobs_created_desc
     ON index_jobs (created_at DESC);
+
+CREATE TABLE IF NOT EXISTS media_assets (
+    media_id               TEXT PRIMARY KEY,
+    title                  TEXT NOT NULL,
+    original_filename      TEXT NOT NULL,
+    storage_rel_path       TEXT NOT NULL,
+    mime_type              TEXT NOT NULL,
+    file_size              INTEGER NOT NULL,
+    sha256                 TEXT,
+    transcript_source_path TEXT,
+    transcript_origin      TEXT NOT NULL,  -- uploaded | generated
+    status                 TEXT NOT NULL,  -- uploading | uploaded | transcribing | transcript_ready | indexing | ready | failed
+    created_by             INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at             INTEGER NOT NULL,
+    updated_at             INTEGER NOT NULL,
+    error                  TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_media_assets_status
+    ON media_assets (status);
+CREATE INDEX IF NOT EXISTS idx_media_assets_created_desc
+    ON media_assets (created_at DESC);
 """
 
 
@@ -110,10 +132,18 @@ def connect() -> sqlite3.Connection:
 
 
 def init_db() -> None:
-    """Create tables and indexes if missing. Idempotent; safe on every boot."""
+    """Create tables and indexes if missing. Idempotent; safe on every boot.
+
+    Also performs forward-only schema migrations: missing columns are added
+    in place so existing databases work after a code update without downtime.
+    """
     conn = connect()
     try:
         conn.executescript(SCHEMA)
+        # Migrate index_jobs: add media_id if missing
+        existing = {row[1] for row in conn.execute("PRAGMA table_info(index_jobs)").fetchall()}
+        if "media_id" not in existing:
+            conn.execute("ALTER TABLE index_jobs ADD COLUMN media_id TEXT")
         conn.commit()
     finally:
         conn.close()

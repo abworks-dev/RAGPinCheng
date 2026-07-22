@@ -277,6 +277,7 @@ class ChatSession:
                 "parent_id": p.parent_id,
                 "doc_type": p.doc_type,
                 "start_time": p.start_time,
+                "media_id": p.media_id,
             }
             for p in parents
         ]

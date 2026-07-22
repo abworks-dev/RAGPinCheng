@@ -13,6 +13,7 @@ import type {
   IndexJob,
   IndexedDocument,
   LlmHealth,
+  MediaAsset,
 } from "../types";
 
 // Mutating methods send X-CSRF-Token. Cookies always go along via credentials.
@@ -211,4 +212,38 @@ export const api = {
       "/api/admin/index/documents",
       { method: "DELETE", body: JSON.stringify({ source_path, delete_file }) },
     ),
+
+  // admin: media
+  uploadMediaVideo: async (video: File, transcript: File, title: string) => {
+    const fd = new FormData();
+    fd.append("video", video, video.name);
+    fd.append("transcript", transcript, transcript.name);
+    fd.append("title", title);
+    const method = "POST";
+    const csrf = csrfToken;
+    const headers: Record<string, string> = {};
+    if (csrf) headers["X-CSRF-Token"] = csrf;
+    const res = await fetch("/api/admin/media", {
+      method,
+      headers,
+      body: fd,
+      credentials: "include",
+    });
+    if (res.status === 401 && unauthorizedHandler) {
+      try { unauthorizedHandler(); } catch { /* noop */ }
+    }
+    if (!res.ok) {
+      const txt = await res.text().catch(() => "");
+      let detail = txt;
+      try {
+        const parsed = JSON.parse(txt);
+        if (parsed && typeof parsed.detail === "string") detail = parsed.detail;
+      } catch {
+        /* keep raw */
+      }
+      throw new ApiError(res.status, txt, `${res.status} ${res.statusText}${detail ? `: ${detail}` : ""}`);
+    }
+    return (await res.json()) as MediaAsset;
+  },
+  listMediaAssets: () => jsonFetch<MediaAsset[]>("/api/media"),
 };

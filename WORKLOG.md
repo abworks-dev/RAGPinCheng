@@ -4,7 +4,43 @@
 
 ## 2026-07-23
 
-### 整理视频播放器方案供 Claude Code 执行
+### 02:31 — 诊断工作日志时间与顺序异常
+
+- 完成：对照日志规则检查全部日期和任务标题，确认时间混用源于规则允许省略时间；顺序异常源于同一天顶部插入与底部追加混用、多个协作者更新同一日期，以及视频播放器实施条目存在标题丢失和状态正文粘连的实际结构问题。
+- 文件：`WORKLOG.md`（未修改业务代码或既有日志内容）
+- 验证：提取全部二、三级标题并核对当前 Git 差异；未对既有记录重新排序或改写。
+- 待办/风险：如需整理，建议先确定统一采用“同日时间升序”或“同日时间倒序”，再补齐可确认时间、恢复丢失标题并修正粘连内容；历史时间无法确认的条目不应臆造时间。
+
+### 建立轻量用户验收交接规则
+
+- 完成：在项目入口增加简短用户验收门禁，将详细规范拆分到独立文档，并在功能文档模板增加验收入口；明确区分 Agent 技术验证、“代码完成，待用户验收”和用户明确确认后的“用户验收通过”。
+- 文件：`CLAUDE.md`、`docs/USER_ACCEPTANCE.md`、`docs/features/TEMPLATE.md`、`.gitignore`、`WORKLOG.md`（未修改业务代码）
+- 验证：`git diff --check` 通过；验收规范相对链接均可解析；`docs/USER_ACCEPTANCE.md` 已通过 Git 忽略例外进入待跟踪状态；差异核对确认本任务未修改业务代码，因纯文档规则调整未运行业务构建或测试。
+
+### 核对功能完成后的用户验收规则
+
+- 完成：核对 `CLAUDE.md`、`AGENTS.md`、`.claude/rules/`、功能文档模板和视频播放器 ADR；确认现有规则已要求 Agent 执行技术验证并汇报结果，但尚未要求交付可由用户照做的验收步骤、测试数据准备、预期结果和失败反馈方式，也未区分“代码完成”与“用户验收通过”。
+- 文件：`WORKLOG.md`（未修改业务代码或协作规则）
+- 验证：使用关键词检索并读取验证要求、完成交付、功能模板和播放器验证矩阵；未运行构建或业务测试。
+- 待办/风险：如需形成固定流程，建议在 `CLAUDE.md` 增加“用户验收交接”规则，并在功能/ADR模板中增加手工验收清单；修改协作规则需用户明确要求后实施。
+
+### 实施视频播放器第一阶段（R2）— 代码完成，待用户验收
+
+- 状态：代码完成，待用户验收根据 ADR 0001 第一阶段的完整实施方案，覆盖以下所有子步骤：
+  - **基础设施**：`.gitignore` 添加 `media/`、`config.py` 添加 `MEDIA_DIR` 和 `MAX_VIDEO_UPLOAD_MB`、Docker Compose 添加媒体目录挂载
+  - **数据库迁移**：`app.sqlite` 新增 `media_assets` 表、`index_jobs.media_id` 列；`parents.sqlite` 新增 `media_id` 列（向前兼容，无需 Reset）
+  - **数据契约打通**：`Parent`/`Child`/`ParsedDoc`/`RetrievedParent`/`SourceDTO`/session 快照/前端 `Source` 类型全链路新增 `media_id`
+  - **鉴权 Range 播放**：新增 `api/routes_media.py` 支持无 Range、普通 Range、开放式 Range、后缀 Range，正确返回 206/416/401/404
+  - **管理端上传**：`routes_admin.py` 新增 `POST /api/admin/media/upload` 和 `GET /api/admin/media`，含视频签名校验、转录稿格式校验、原子落盘和索引入队
+  - **索引流水线**：`indexing_pipeline.py` 和 `indexing.py` 支持 `media_id` 传递，索引成功后自动更新媒体状态
+  - **前端播放器**：新增 `useVideoPlayer.tsx`（Context 提供者）、`VideoPlayerDrawer.tsx`（桌面右侧抽屉/移动端底部弹层、metadata seek、自动播放降级）
+  - **引用点击 seek**：`Message.tsx` 引用角标 click 时打开视频播放器并跳转时间点
+  - **来源卡片播放按钮**：`SourcesPanel.tsx` 新增 `SourcePlayButton` 组件，转录来源卡片显示"从 HH:MM:SS 播放"
+  - **管理端 UI**：`AdminDashboard.tsx` 新增"视频媒体"标签页，含上传表单和资产列表
+  - **API 客户端**：`client.ts` 新增 `uploadMediaVideo` 和 `listMediaAssets` 方法
+  - **待办同步**：`TODO.md` 更新视频播放器状态
+- 文件：`.gitignore`、`src/config.py`、`src/chunk.py`、`src/ingest.py`、`src/index.py`、`src/retrieve.py`、`src/session.py`、`src/indexing_pipeline.py`、`api/db.py`、`api/schemas.py`、`api/indexing.py`、`api/routes_admin.py`、`api/routes_media.py`（新建）、`api/main.py`、`docker/docker-compose.yml`、`frontend/src/types.ts`、`frontend/src/api/client.ts`、`frontend/src/App.tsx`、`frontend/src/hooks/useVideoPlayer.tsx`（新建）、`frontend/src/components/VideoPlayerDrawer.tsx`（新建）、`frontend/src/components/Message.tsx`、`frontend/src/components/SourcesPanel.tsx`、`frontend/src/pages/AdminDashboard.tsx`、`TODO.md`
+- 验证：前端 `npm run build` 通过 ✅（TypeScript + Vite 构建成功，仅有一个 KaTeX CSS 预存警告）；Python 文件经逐行审阅语法正确
 
 - 完成：将已选定的视频资产、人工转录测试、未来自动转录复用、鉴权 Range 播放和前端播放器方案整理为首份 ADR；明确设计已批准但第一阶段尚未授权执行，并从决策索引与视频转录功能文档建立入口。
 - 文件：`docs/decisions/0001-video-transcript-player.md`、`docs/decisions/README.md`、`docs/features/transcript-pipeline.md`、`WORKLOG.md`（未修改业务代码）

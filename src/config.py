@@ -7,11 +7,12 @@ load_dotenv()
 ROOT = Path(__file__).resolve().parent.parent
 DOCS_DIR = ROOT / "docs"
 DATA_DIR = ROOT / "data"
+MEDIA_DIR = ROOT / "media"
 PARSED_DIR = DATA_DIR / "parsed"
 QDRANT_DIR = DATA_DIR / "qdrant"  # legacy embedded-mode path; unused after the server migration but kept for the optional cleanup script
 PARENTS_DB = DATA_DIR / "parents.sqlite"
 
-for d in (DATA_DIR, PARSED_DIR):
+for d in (DATA_DIR, PARSED_DIR, MEDIA_DIR):
     d.mkdir(parents=True, exist_ok=True)
 
 # Category convention: most top-level folders under docs/ are flat
@@ -91,3 +92,6 @@ TABLE_SUMMARY_MODEL = os.getenv("TABLE_SUMMARY_MODEL", "").strip() or "glm-4.5-a
 TABLE_SUMMARY_MIN_CHARS = 200
 # Truncate giant tables before sending to the summarizer (LLM context cap).
 TABLE_SUMMARY_MAX_CHARS = 8000
+
+# Media / Video
+MAX_VIDEO_UPLOAD_MB = int(os.getenv("MAX_VIDEO_UPLOAD_MB", "500"))

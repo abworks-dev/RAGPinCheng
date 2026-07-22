@@ -8,6 +8,7 @@ export type Source = {
   text: string;
   doc_type: string;
   start_time: string | null;
+  media_id: string | null;
 };
 
 export type PrepData = {
@@ -217,4 +218,17 @@ export type LlmHealth = {
   checked_at: number;
   cached: boolean;
   models: LlmModelHealth[];
+};
+
+export type MediaAsset = {
+  media_id: string;
+  title: string;
+  original_filename: string;
+  mime_type: string;
+  file_size: number;
+  transcript_origin: string | null;
+  status: string;
+  created_at: number;
+  updated_at: number;
+  error: string | null;
 };

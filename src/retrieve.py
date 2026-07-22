@@ -50,6 +50,7 @@ class RetrievedParent:
     doc_type: str = "pdf"
     start_time: str | None = None
     company: str | None = None
+    media_id: str | None = None  # associated video asset if any
     rrf_score: float = 0.0
 
 
@@ -282,6 +283,7 @@ def retrieve(
                 doc_type=p.get("doc_type") or "pdf",
                 start_time=p.get("start_time"),
                 company=p.get("company"),
+                media_id=p.get("media_id"),
                 rrf_score=parent_rrf.get(pid, 0.0),
             )
         )
