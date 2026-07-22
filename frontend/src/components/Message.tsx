@@ -104,7 +104,7 @@ function CitationMarker({
             Smart alignment: prefers expanding to the right, but if too close to
             the right edge, expand leftwards. Prevents viewport overflow. */}
         {isHovered && (
-          <div className="absolute z-[100] min-w-[200px] max-w-[320px] right-0 bottom-[100%] mb-0.5 bg-white border border-gray-200 rounded-lg shadow-xl p-3 text-xs break-words">
+          <div className="absolute z-[100] min-w-[200px] max-w-[320px] left-0 bottom-[100%] mb-0.5 bg-white border border-gray-200 rounded-lg shadow-xl p-3 text-xs break-words">
             <div className="font-medium text-gray-900 mb-1 truncate">{source.doc_title}</div>
             <div className="text-gray-500 mb-2 truncate">
               {source.doc_type === "transcript" ? `@${source.start_time || ""}` : `§${source.section_path || ""}`}

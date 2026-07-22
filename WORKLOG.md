@@ -12,6 +12,13 @@
   - 用 `bottom-[100%] mb-0.5` 替代 `-translate-y-full`，让 tooltip 底部略微重叠角标（无视觉间隙）
 - **文件**：`frontend/src/components/Message.tsx`
 
+### 修复引用角标 tooltip 在左侧被侧边栏遮挡的问题
+
+- **问题原因**：tooltip 使用 `right-0` 定位，从角标**向左展开**。当角标靠近页面左侧时，tooltip 会延伸到侧边栏（`<aside>`）区域，被其背景和内容遮挡。同时代码注释中提到的"智能对齐"实际上并未实现。
+- **修复方案**：将 `right-0` 改为 `left-0`，让 tooltip 从角标**向右展开**，避免进入左侧侧边栏区域。
+- **文件**：`frontend/src/components/Message.tsx`
+- **验证**：前端 `npm run build` 构建通过 ✅
+
 ### 修复第二次输入纯数字仍会检索的问题
 
 - **问题根源**：`query_guard.py` 中 `has_history=True` 时对纯数字输入无条件放行，导致第二轮输入 "222" 被改写成 "222 是什么" 后走检索流程，但历史对话中没有任何文档上下文，返回页码匹配的垃圾结果。
