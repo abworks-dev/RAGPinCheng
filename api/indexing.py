@@ -35,6 +35,7 @@ def create_job(
     doc_type: str,
     source_path: Path,
     file_size: int,
+    media_id: str | None = None,
 ) -> int:
     """Insert a pending job row, return its id."""
     now = int(time.time())
@@ -42,9 +43,9 @@ def create_job(
     try:
         cur = conn.execute(
             "INSERT INTO index_jobs (user_id, filename, category, doc_type, "
-            "source_path, file_size, status, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)",
-            (user_id, filename, category, doc_type, str(source_path), file_size, now),
+            "source_path, file_size, media_id, status, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)",
+            (user_id, filename, category, doc_type, str(source_path), file_size, media_id, now),
         )
         conn.commit()
         return int(cur.lastrowid)
@@ -87,7 +88,7 @@ async def _run_one(job_id: int) -> None:
     conn = connect()
     try:
         row = conn.execute(
-            "SELECT source_path, doc_type, status FROM index_jobs WHERE id = ?",
+            "SELECT source_path, doc_type, status, media_id FROM index_jobs WHERE id = ?",
             (job_id,),
         ).fetchone()
     finally:
@@ -102,6 +103,8 @@ async def _run_one(job_id: int) -> None:
 
     source_path = Path(row["source_path"])
     doc_type = row["doc_type"]
+    media_id = row["media_id"]  # may be None
+
     # `.md` files (transcript or regular document) skip the MinerU upload/queue
     # phases entirely — they're already markdown on disk. Start at "chunking"
     # so the badge doesn't briefly flash a misleading "uploading" state.
@@ -122,8 +125,11 @@ async def _run_one(job_id: int) -> None:
         # (and other admin requests) stay responsive while embedding runs.
         result = await loop.run_in_executor(
             None,
-            lambda: index_single(source_path, doc_type, on_status),
+            lambda: index_single(source_path, doc_type, on_status, media_id=media_id),
         )
+        # If this was a media upload, mark it ready after successful indexing
+        if media_id:
+            _update_media_status(media_id, "ready")
         _update_status(
             job_id,
             status="done",
@@ -140,12 +146,30 @@ async def _run_one(job_id: int) -> None:
         )
     except Exception as exc:  # noqa: BLE001 — propagate via DB, not crash worker
         logger.exception("indexing job %s failed", job_id)
+        # If this was a media upload, mark it failed too
+        if media_id:
+            _update_media_status(media_id, "failed", error=str(exc)[:2000])
         _update_status(
             job_id,
             status="failed",
             finished_at=int(time.time()),
             error=str(exc)[:2000],
         )
+
+
+def _update_media_status(media_id: str, status: str, error: str | None = None) -> None:
+    """Update a media_assets row status."""
+    fields = {"status": status, "updated_at": int(time.time())}
+    if error is not None:
+        fields["error"] = error
+    cols = ", ".join(f"{k} = ?" for k in fields)
+    params = list(fields.values()) + [media_id]
+    conn = connect()
+    try:
+        conn.execute(f"UPDATE media_assets SET {cols} WHERE media_id = ?", params)
+        conn.commit()
+    finally:
+        conn.close()
 
 
 async def _worker_loop() -> None:

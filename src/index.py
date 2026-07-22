@@ -99,7 +99,8 @@ def _init_parents_db(reset: bool = False) -> sqlite3.Connection:
             text TEXT,
             doc_type TEXT,
             start_time TEXT,
-            company TEXT
+            company TEXT,
+            media_id TEXT
         )
         """
     )
@@ -110,6 +111,8 @@ def _init_parents_db(reset: bool = False) -> sqlite3.Connection:
         conn.execute("ALTER TABLE parents ADD COLUMN start_time TEXT")
     if "company" not in existing:
         conn.execute("ALTER TABLE parents ADD COLUMN company TEXT")
+    if "media_id" not in existing:
+        conn.execute("ALTER TABLE parents ADD COLUMN media_id TEXT")
     if reset:
         conn.execute("DELETE FROM parents")
     return conn
@@ -140,13 +143,14 @@ def store_parents(parents: Iterable[Parent], reset: bool = False) -> None:
             p.doc_type,
             p.start_time,
             p.company,
+            p.media_id,
         )
         for p in parents
     ]
     conn.executemany(
         "INSERT OR REPLACE INTO parents "
-        "(parent_id, doc_title, category, section_path, source_path, text, doc_type, start_time, company) "
-        "VALUES (?,?,?,?,?,?,?,?,?)",
+        "(parent_id, doc_title, category, section_path, source_path, text, doc_type, start_time, company, media_id) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?)",
         rows,
     )
     conn.commit()
@@ -161,7 +165,7 @@ def fetch_parents(parent_ids: list[str]) -> dict[str, dict]:
     placeholders = ",".join("?" * len(parent_ids))
     rows = conn.execute(
         f"SELECT parent_id, doc_title, category, section_path, source_path, text, "
-        f"doc_type, start_time, company "
+        f"doc_type, start_time, company, media_id "
         f"FROM parents WHERE parent_id IN ({placeholders})",
         parent_ids,
     ).fetchall()
@@ -177,6 +181,7 @@ def fetch_parents(parent_ids: list[str]) -> dict[str, dict]:
             "doc_type": r[6] or "pdf",
             "start_time": r[7],
             "company": r[8],
+            "media_id": r[9],
         }
         for r in rows
     }

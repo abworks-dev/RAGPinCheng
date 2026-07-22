@@ -86,6 +86,8 @@ services:
       # app.sqlite（用户 + 对话）、feedback.jsonl。数据存在主机磁盘上，
       # 镜像保持无状态。Qdrant 有自己的独立 volume（见上方）。
       - ../data:/app/data
+      # 视频媒体文件 — 上传的 MP4 保存在这里，通过鉴权路由访问。
+      - ../media:/app/media
       # 源 PDF 文档 — 只在容器内执行 scripts/build_index.py 时需要。
       # 读写挂载，MinerU 拆分后的 PDF 可以写回原目录。
       - ../docs:/app/docs

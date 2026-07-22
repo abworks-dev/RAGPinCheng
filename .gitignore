@@ -7,6 +7,7 @@ data/app.sqlite
 data/app.sqlite-shm
 data/app.sqlite-wal
 data/feedback.jsonl
+media/
 __pycache__/
 *.pyc
 .venv/
@@ -18,6 +19,7 @@ docs/*
 !docs/features/**
 !docs/decisions/
 !docs/decisions/**
+!docs/USER_ACCEPTANCE.md
 CLAUDE.local.md
 .claude/settings.local.json
 

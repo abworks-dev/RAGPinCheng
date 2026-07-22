@@ -8,6 +8,7 @@ import { stripMarkdown } from "../utils/markdown";
 import { SourcesPanel } from "./SourcesPanel";
 import { DebugPanel } from "./DebugPanel";
 import { FeedbackBar } from "./FeedbackBar";
+import { timestampToSeconds, useVideoPlayer } from "../hooks/useVideoPlayer";
 import {
   CITATION_EVENT,
   CITATION_HOVER_EVENT,
@@ -62,6 +63,7 @@ function CitationMarker({
   const [isHighlighted, setIsHighlighted] = useState(false);
   const [showBelow, setShowBelow] = useState(false);
   const tooltipRef = useRef<HTMLDivElement>(null);
+  const { open: openPlayer } = useVideoPlayer();
 
   // Listen for hover events from SourcesPanel (card → in-message highlight).
   useEffect(() => {
@@ -111,7 +113,18 @@ function CitationMarker({
           }`}
           onClick={(e) => {
             e.preventDefault();
-            if (idx >= 0) dispatchCitation({ messageId, sourceIndex: idx });
+            if (idx >= 0) {
+              dispatchCitation({ messageId, sourceIndex: idx });
+              // For transcript citations with media, also open the video player
+              if (source.doc_type === "transcript" && source.media_id) {
+                openPlayer({
+                  mediaId: source.media_id,
+                  title: source.doc_title,
+                  startSeconds: timestampToSeconds(source.start_time),
+                  fromSource: false,
+                });
+              }
+            }
           }}
         >
           {idx + 1}
@@ -129,11 +142,25 @@ function CitationMarker({
             }`}
           >
             <div className="font-medium text-gray-900 mb-1 truncate">{source.doc_title}</div>
-            <div className="text-gray-500 mb-2 truncate">
-              {source.doc_type === "transcript" ? `@${source.start_time || ""}` : `§${source.section_path || ""}`}
+            <div className="text-gray-500 mb-2 truncate flex items-center gap-1.5">
+              {source.doc_type === "transcript" ? (
+                <>
+                  {source.media_id && (
+                    <svg className="w-3.5 h-3.5 text-accent" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M9.5 7.5l7 4.5-7 4.5v-9z" />
+                    </svg>
+                  )}
+                  @{source.start_time || ""}
+                </>
+              ) : (
+                `§${source.section_path || ""}`
+              )}
             </div>
             <div className="text-gray-600 whitespace-pre-wrap leading-relaxed break-words">{preview}</div>
-            <div className="text-gray-400 mt-2 text-[10px]">点击跳转到完整来源</div>
+            <div className="text-gray-400 mt-2 text-[10px]">
+              点击跳转到完整来源
+              {source.doc_type === "transcript" && source.media_id && " 并播放视频"}
+            </div>
           </div>
         )}
       </sup>

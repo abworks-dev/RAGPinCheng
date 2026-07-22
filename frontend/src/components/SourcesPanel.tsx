@@ -3,6 +3,7 @@ import { api } from "../api/client";
 import { CITATION_EVENT, CITATION_HOVER_EVENT, type CitationDetail, type CitationHoverDetail } from "./citations";
 import type { Source } from "../types";
 import { stripMarkdown } from "../utils/markdown";
+import { timestampToSeconds, useVideoPlayer } from "../hooks/useVideoPlayer";
 
 function locator(s: Source): string {
   if (s.doc_type === "transcript" && s.start_time) return `🎬 @${s.start_time}`;
@@ -136,6 +137,14 @@ function SourceCard({
           {expanded ? "收起" : "展开"}
         </button>
       )}
+      {/* Video play button — only for transcripts with media */}
+      {s.doc_type === "transcript" && s.media_id && (
+        <SourcePlayButton
+          mediaId={s.media_id}
+          title={s.doc_title}
+          startTime={s.start_time}
+        />
+      )}
       {reportOpen && (
         <div className="mt-2 flex flex-col gap-1.5">
           <textarea
@@ -159,6 +168,46 @@ function SourceCard({
         </div>
       )}
     </li>
+  );
+}
+
+/**
+ * Play button for transcript sources. Opens the video player drawer
+ * at the timestamp corresponding to this source chunk.
+ */
+function SourcePlayButton({
+  mediaId,
+  title,
+  startTime,
+}: {
+  mediaId: string;
+  title: string;
+  startTime: string | null;
+}) {
+  const { open } = useVideoPlayer();
+
+  function handlePlay(e: React.MouseEvent) {
+    e.stopPropagation();
+    open({
+      mediaId,
+      title,
+      startSeconds: timestampToSeconds(startTime),
+      fromSource: true,
+    });
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={handlePlay}
+      className="mt-2 flex items-center gap-1.5 text-xs text-accent hover:underline"
+    >
+      <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+        <circle cx="12" cy="12" r="10" fillOpacity={0.15} />
+        <path d="M9.5 7.5l7 4.5-7 4.5v-9z" />
+      </svg>
+      从 {startTime || "00:00:00"} 播放
+    </button>
   );
 }
 

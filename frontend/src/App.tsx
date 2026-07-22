@@ -1,5 +1,7 @@
 import { Navigate, Route, BrowserRouter as Router, Routes } from "react-router-dom";
 import { ChatLayout } from "./components/ChatLayout";
+import { VideoPlayerDrawer } from "./components/VideoPlayerDrawer";
+import { VideoPlayerProvider } from "./hooks/useVideoPlayer";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { AdminDashboard } from "./pages/AdminDashboard";
 import { LoginPage } from "./pages/LoginPage";
@@ -39,41 +41,44 @@ export default function App() {
   return (
     <Router>
       <AuthProvider>
-        <Routes>
-          <Route
-            path="/login"
-            element={
-              <RedirectIfAuthed>
-                <LoginPage />
-              </RedirectIfAuthed>
-            }
-          />
-          <Route
-            path="/register"
-            element={
-              <RedirectIfAuthed>
-                <RegisterPage />
-              </RedirectIfAuthed>
-            }
-          />
-          <Route
-            path="/admin"
-            element={
-              <RequireAdmin>
-                <AdminDashboard />
-              </RequireAdmin>
-            }
-          />
-          <Route
-            path="/"
-            element={
-              <RequireAuth>
-                <ChatLayout />
-              </RequireAuth>
-            }
-          />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+        <VideoPlayerProvider>
+          <Routes>
+            <Route
+              path="/login"
+              element={
+                <RedirectIfAuthed>
+                  <LoginPage />
+                </RedirectIfAuthed>
+              }
+            />
+            <Route
+              path="/register"
+              element={
+                <RedirectIfAuthed>
+                  <RegisterPage />
+                </RedirectIfAuthed>
+              }
+            />
+            <Route
+              path="/admin"
+              element={
+                <RequireAdmin>
+                  <AdminDashboard />
+                </RequireAdmin>
+              }
+            />
+            <Route
+              path="/"
+              element={
+                <RequireAuth>
+                  <ChatLayout />
+                </RequireAuth>
+              }
+            />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+          <VideoPlayerDrawer />
+        </VideoPlayerProvider>
       </AuthProvider>
     </Router>
   );

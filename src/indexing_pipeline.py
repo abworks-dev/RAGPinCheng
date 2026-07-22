@@ -120,7 +120,7 @@ def _build_pdf_doc(source_path: Path, on_status: StatusFn) -> ParsedDoc:
     )
 
 
-def _build_transcript_doc(source_path: Path) -> ParsedDoc:
+def _build_transcript_doc(source_path: Path, media_id: str | None = None) -> ParsedDoc:
     """Build a ParsedDoc directly from a transcript .md (no parse pass)."""
     category, company = _derive_category_and_company(source_path)
     return ParsedDoc(
@@ -130,6 +130,7 @@ def _build_transcript_doc(source_path: Path) -> ParsedDoc:
         markdown_path=source_path,
         doc_type="transcript",
         company=company,
+        media_id=media_id,
     )
 
 
@@ -157,6 +158,7 @@ def index_single(
     source_path: Path,
     doc_type: str,
     on_status: StatusFn = lambda _s: None,
+    media_id: str | None = None,
 ) -> IndexResult:
     """Run the full pipeline on one file.
 
@@ -167,12 +169,16 @@ def index_single(
     `on_status` is invoked with one of:
       "parsing" | "chunking" | "embedding"
     so the admin job runner can persist progress to the index_jobs row.
+
+    `media_id` associates this document with a media_assets entry (for
+    transcript videos). When set, the Parent dataclass carries media_id
+    through the pipeline so Sources can resolve playback URLs.
     """
     if doc_type not in ("pdf", "transcript"):
         raise ValueError(f"unsupported doc_type: {doc_type!r}")
 
     if doc_type == "transcript":
-        doc = _build_transcript_doc(source_path)
+        doc = _build_transcript_doc(source_path, media_id=media_id)
     elif source_path.suffix.lower() == ".md":
         # Non-transcript markdown — already markdown, skip the parse pass.
         # Chunker still uses the PDF (header-anchored) branch via doc_type="pdf".

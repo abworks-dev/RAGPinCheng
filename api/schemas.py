@@ -208,6 +208,20 @@ class SourceDTO(BaseModel):
     text: str
     doc_type: str
     start_time: str | None = None
+    media_id: str | None = None
+
+
+class MediaAssetDTO(BaseModel):
+    media_id: str
+    title: str
+    original_filename: str
+    mime_type: str
+    file_size: int
+    transcript_origin: str | None = None
+    status: str
+    created_at: int
+    updated_at: int
+    error: str | None = None
 
 
 class MessageDTO(BaseModel):
@@ -321,4 +335,5 @@ def source_to_dto(d: dict[str, Any]) -> SourceDTO:
         text=d.get("text") or "",
         doc_type=d.get("doc_type") or "pdf",
         start_time=d.get("start_time"),
+        media_id=d.get("media_id"),
     )

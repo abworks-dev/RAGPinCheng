@@ -27,6 +27,7 @@ from .routes import router as core_router
 from .routes_admin import router as admin_router
 from .routes_auth import router as auth_router
 from .routes_chat import router as chat_router
+from .routes_media import router as media_router
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("api")
@@ -138,6 +139,7 @@ app.include_router(core_router, prefix="/api")
 app.include_router(auth_router, prefix="/api")
 app.include_router(chat_router, prefix="/api")
 app.include_router(admin_router, prefix="/api")
+app.include_router(media_router, prefix="/api")
 
 
 # ── React SPA hosting ──────────────────────────────────────────────────────

@@ -16,7 +16,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 
-from src.config import DOCS_DIR, SECOND_LEVEL_CATEGORIES
+from src.config import DOCS_DIR, MEDIA_DIR, SECOND_LEVEL_CATEGORIES
 from src.indexing_pipeline import (
     delete_document as delete_indexed_document,
     list_indexed_documents,
@@ -49,6 +49,7 @@ from .schemas import (
     IndexJobListResponse,
     IndexedDocumentDTO,
     IndexedDocumentListResponse,
+    MediaAssetDTO,
     SweepResponse,
     UploadResponse,
 )
@@ -606,3 +607,204 @@ def delete_document(
         parents_deleted=result["parents_deleted"],
         file_deleted=bool(result["file_deleted"]),
     )
+
+
+# ── media upload (video + transcript) ───────────────────────────────────────
+
+
+_MP4_MIME_TYPES = {"video/mp4", "application/octet-stream"}
+_ALLOWED_VIDEO_EXTS = {".mp4"}
+
+
+def _validate_transcript_markdown(md_bytes: bytes) -> None:
+    """Raise HTTPException if the markdown doesn't look like a transcript.
+
+    A valid transcript must have at least one speaker timestamp line.
+    This is a lightweight check; the chunker does full validation downstream.
+    """
+    try:
+        text = md_bytes.decode("utf-8")
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=400, detail="转录稿必须是 UTF-8 编码")
+
+    import re
+    # At least one "说话人 HH:MM:SS" or "Speaker HH:MM:SS" line
+    has_speaker = bool(re.search(r"说话人\s+\d{1,2}:\d{2}:\d{2}", text))
+    if not has_speaker:
+        raise HTTPException(
+            status_code=400,
+            detail="转录稿格式错误：缺少 `说话人 HH:MM:SS` 格式标记",
+        )
+
+
+@router.post("/media", response_model=MediaAssetDTO)
+async def upload_media(
+    video: UploadFile = File(...),
+    transcript: UploadFile = File(...),
+    title: str = Form(...),
+    admin: CurrentUser = Depends(require_csrf_admin),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> MediaAssetDTO:
+    """Upload a video + transcript pair and enqueue indexing.
+
+    Files are written to `media/<media_id>/original.mp4` for the video, and
+    `docs/教学视频/<title>__<media_id前8位>.md` for the transcript. After a
+    successful write, a media_assets row is created, an index_job is enqueued,
+    and the worker will handle the rest.
+
+    First phase only supports MP4 + Markdown pairs; automatic speech-to-text
+    will be added later as a separate stage.
+    """
+    import uuid
+
+    video_name = (video.filename or "").strip()
+    transcript_name = (transcript.filename or "").strip()
+    clean_title = title.strip()
+
+    if not clean_title or len(clean_title) > 200:
+        raise HTTPException(status_code=400, detail="标题不能为空且不能超过 200 字符")
+
+    if not video_name or Path(video_name).suffix.lower() not in _ALLOWED_VIDEO_EXTS:
+        raise HTTPException(status_code=400, detail="只支持 .mp4 视频文件")
+
+    if not transcript_name or not transcript_name.lower().endswith(".md"):
+        raise HTTPException(status_code=400, detail="转录稿必须是 .md 格式")
+
+    # Read and validate transcript BEFORE touching disk
+    transcript_bytes = await transcript.read()
+    try:
+        _validate_transcript_markdown(transcript_bytes)
+    except HTTPException:
+        raise
+
+    # Read video bytes to validate not empty
+    video_bytes = await video.read()
+    if len(video_bytes) == 0:
+        raise HTTPException(status_code=400, detail="视频文件不能为空")
+
+    # Generate stable media_id
+    media_id = str(uuid.uuid4())
+    now = int(time.time())
+
+    # Write video to media directory
+    media_dir = MEDIA_DIR / media_id
+    media_dir.mkdir(parents=True, exist_ok=True)
+    video_path = media_dir / "original.mp4"
+    try:
+        video_path.write_bytes(video_bytes)
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"写入视频失败：{exc}")
+
+    # Write transcript to docs/教学视频 directory with naming convention
+    # that ties it back to the media asset.
+    safe_title = re.sub(r"[\\/:*?\"<>|]", "_", clean_title)[:60]
+    transcript_filename = f"{safe_title}__{media_id[:8]}.md"
+    transcript_dir = DOCS_DIR / TRANSCRIPT_CATEGORY
+    transcript_dir.mkdir(parents=True, exist_ok=True)
+    transcript_path = transcript_dir / transcript_filename
+    try:
+        transcript_path.write_bytes(transcript_bytes)
+    except OSError as exc:
+        # Clean up the video if transcript write fails
+        try:
+            video_path.unlink()
+            media_dir.rmdir()
+        except OSError:
+            pass
+        raise HTTPException(status_code=500, detail=f"写入转录稿失败：{exc}")
+
+    # Create media_assets row
+    conn.execute(
+        """
+        INSERT INTO media_assets
+        (media_id, title, original_filename, storage_rel_path,
+         mime_type, file_size, transcript_source_path,
+         transcript_origin, status, created_by, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            media_id,
+            clean_title,
+            video_name,
+            f"{media_id}/original.mp4",
+            "video/mp4",
+            len(video_bytes),
+            str(transcript_path),
+            "uploaded",
+            "transcript_ready",
+            admin.id,
+            now,
+            now,
+        ),
+    )
+    conn.commit()
+
+    # Enqueue the indexing job — ties the transcript to the media_id
+    job_id = create_job(
+        user_id=admin.id,
+        filename=transcript_filename,
+        category=TRANSCRIPT_CATEGORY,
+        doc_type="transcript",
+        source_path=transcript_path,
+        file_size=len(transcript_bytes),
+        media_id=media_id,
+    )
+    enqueue(job_id)
+
+    # Return the media asset
+    row = conn.execute(
+        """
+        SELECT media_id, title, original_filename, mime_type, file_size,
+               transcript_origin, status, created_at, updated_at, error
+        FROM media_assets
+        WHERE media_id = ?
+        """,
+        (media_id,),
+    ).fetchone()
+
+    return MediaAssetDTO(
+        media_id=row["media_id"],
+        title=row["title"],
+        original_filename=row["original_filename"],
+        mime_type=row["mime_type"],
+        file_size=row["file_size"],
+        transcript_origin=row["transcript_origin"],
+        status=row["status"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+        error=row["error"],
+    )
+
+
+@router.get("/media", response_model=list[MediaAssetDTO])
+def list_media_assets(
+    limit: int = Query(100, ge=1, le=500),
+    _admin: CurrentUser = Depends(require_admin),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> list[MediaAssetDTO]:
+    """List all media assets."""
+    rows = conn.execute(
+        """
+        SELECT media_id, title, original_filename, mime_type, file_size,
+               transcript_origin, status, created_at, updated_at, error
+        FROM media_assets
+        ORDER BY created_at DESC
+        LIMIT ?
+        """,
+        (limit,),
+    ).fetchall()
+    return [
+        MediaAssetDTO(
+            media_id=r["media_id"],
+            title=r["title"],
+            original_filename=r["original_filename"],
+            mime_type=r["mime_type"],
+            file_size=r["file_size"],
+            transcript_origin=r["transcript_origin"],
+            status=r["status"],
+            created_at=r["created_at"],
+            updated_at=r["updated_at"],
+            error=r["error"],
+        )
+        for r in rows
+    ]

@@ -42,6 +42,7 @@ class ParsedDoc:
     markdown_path: Path
     doc_type: str = "pdf"  # "pdf" | "transcript"
     company: str | None = None  # second-level folder under 公司内部标准/
+    media_id: str | None = None  # associated video asset if any
 
 
 def _safe_stem(pdf: Path) -> str:
