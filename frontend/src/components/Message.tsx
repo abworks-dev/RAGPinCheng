@@ -62,6 +62,7 @@ function CitationMarker({
   const [isHovered, setIsHovered] = useState(false);
   const [isHighlighted, setIsHighlighted] = useState(false);
   const [showBelow, setShowBelow] = useState(false);
+  const [showRightAligned, setShowRightAligned] = useState(false);
   const tooltipRef = useRef<HTMLDivElement>(null);
   const { open: openPlayer } = useVideoPlayer();
 
@@ -76,16 +77,22 @@ function CitationMarker({
     return () => window.removeEventListener(CITATION_HOVER_EVENT, onHover);
   }, [messageId, idx]);
 
-  // Smart vertical positioning: flip to below if overflowing viewport top.
+  // Smart vertical and horizontal positioning: flip to below if overflowing viewport top,
+  // flip to right-aligned if overflowing viewport right edge.
   useLayoutEffect(() => {
     if (!isHovered || !tooltipRef.current) {
       setShowBelow(false);
+      setShowRightAligned(false);
       return;
     }
     const rect = tooltipRef.current.getBoundingClientRect();
     // If tooltip top edge is above viewport (with 10px margin), flip to below
     if (rect.top < 10) {
       setShowBelow(true);
+    }
+    // If tooltip right edge is beyond viewport (with 10px margin), flip to leftwards
+    if (rect.right > window.innerWidth - 10) {
+      setShowRightAligned(true);
     }
   }, [isHovered]);
 
@@ -130,16 +137,17 @@ function CitationMarker({
           {idx + 1}
         </a>
 
-        {/* Tooltip: smart vertical positioning.
+        {/* Tooltip: smart vertical and horizontal positioning.
             Default: above the superscript (with tiny overlap to prevent gap flicker).
             If overflowing viewport top: flip to below (via showBelow state).
-            Horizontal alignment: left-0 (rightwards) to avoid sidebar clipping. */}
+            Horizontal alignment: left-0 (rightwards) by default to avoid sidebar clipping.
+            If overflowing viewport right edge: flip to right-0 (leftwards) via showRightAligned state. */}
         {isHovered && (
           <div
             ref={tooltipRef}
-            className={`absolute z-[100] min-w-[200px] max-w-[320px] left-0 bg-white border border-gray-200 rounded-lg shadow-xl p-3 text-xs break-words ${
+            className={`absolute z-[100] min-w-[200px] max-w-[320px] bg-white border border-gray-200 rounded-lg shadow-xl p-3 text-xs break-words ${
               showBelow ? "top-[100%] mt-0.5" : "bottom-[100%] mb-0.5"
-            }`}
+            } ${showRightAligned ? "right-0" : "left-0"}`}
           >
             <div className="font-medium text-gray-900 mb-1 truncate">{source.doc_title}</div>
             <div className="text-gray-500 mb-2 truncate flex items-center gap-1.5">
