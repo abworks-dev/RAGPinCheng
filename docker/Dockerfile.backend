@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1.7
+
 # Combined image — FastAPI + ChatSession + BGE-M3 + reranker, also serves
 # the built React/Vite SPA at /. Replaces the previous backend + frontend
 # two-container setup. One image, one process, fewer moving parts.
@@ -15,7 +17,8 @@ WORKDIR /build
 # Cache npm install separately from the source — only re-runs when package
 # files change, not on every code edit.
 COPY frontend/package.json frontend/package-lock.json* ./
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm,sharing=locked \
+    npm ci
 
 COPY frontend/ ./
 RUN npm run build
@@ -27,8 +30,8 @@ FROM python:3.11-slim
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_CACHE_DIR=/root/.cache/pip \
     LANG=C.UTF-8 \
     LC_ALL=C.UTF-8 \
     HF_HOME=/root/.cache/huggingface
@@ -41,11 +44,14 @@ ENV PYTHONUNBUFFERED=1 \
 #   zlib1g-dev      — `zlib-state` (transitive dep via FlagEmbedding →
 #                     ir-datasets) has no arm64 wheel on PyPI; building from
 #                     source needs zlib.h
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    rm -f /etc/apt/apt.conf.d/docker-clean \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
         curl \
         build-essential \
-        zlib1g-dev \
-    && rm -rf /var/lib/apt/lists/*
+        zlib1g-dev
 
 WORKDIR /app
 
@@ -69,12 +75,14 @@ WORKDIR /app
 # This is the official CUDA 12.8 wheel source required for RTX 5060 Ti
 # Blackwell (sm_120). Download takes 2-5 minutes from China but only
 # happens ONCE — the layer is cached permanently after first build.
-RUN pip install --index-url https://download.pytorch.org/whl/cu128 \
+RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
+    pip install --index-url https://download.pytorch.org/whl/cu128 \
         "torch==2.7.0"
 
 # 2) Production Python deps.
 COPY requirements-prod.txt ./
-RUN pip install -r requirements-prod.txt
+RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
+    pip install -r requirements-prod.txt
 
 # 3) Application code. Everything the runtime + scripts/build_index.py needs.
 COPY src/ ./src/
