@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import { CITATION_EVENT, CITATION_HOVER_EVENT, type CitationDetail, type CitationHoverDetail } from "./citations";
 import type { Source } from "../types";
+import { stripMarkdown } from "../utils/markdown";
 
 function locator(s: Source): string {
   if (s.doc_type === "transcript" && s.start_time) return `🎬 @${s.start_time}`;
@@ -37,7 +38,8 @@ function SourceCard({
   const [err, setErr] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
   const PREVIEW_CHARS = 400;
-  const truncated = s.text.length > PREVIEW_CHARS;
+  const cleanText = stripMarkdown(s.text);
+  const truncated = cleanText.length > PREVIEW_CHARS;
   const crumbs = s.doc_type === "transcript" ? [] : breadcrumbParts(s.section_path || "");
   const hasBreadcrumb = crumbs.length > 1;
   const canExpand = truncated;
@@ -123,7 +125,7 @@ function SourceCard({
           (expanded ? "max-h-96 overflow-y-auto pr-1" : "line-clamp-6")
         }
       >
-        {expanded || !truncated ? s.text : s.text.slice(0, PREVIEW_CHARS) + "…"}
+        {expanded || !truncated ? cleanText : cleanText.slice(0, PREVIEW_CHARS) + "…"}
       </div>
       {canExpand && (
         <button
