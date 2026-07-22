@@ -4,6 +4,14 @@
 
 ## 2026-07-22
 
+### 修复引用角标 tooltip 闪烁无法停留的问题
+
+- **问题原因**：`onMouseEnter/onMouseLeave` 只绑定在 `<a>` 角标上，而 tooltip 是兄弟元素。鼠标从角标移到 tooltip 时触发 `onMouseLeave` → tooltip 消失 → 鼠标回到角标 → 无限闪烁。
+- **修复方案**：
+  - hover 事件移到外层 `<sup>` 上（角标 + tooltip 都在里面）
+  - 用 `bottom-[100%] mb-0.5` 替代 `-translate-y-full`，让 tooltip 底部略微重叠角标（无视觉间隙）
+- **文件**：`frontend/src/components/Message.tsx`
+
 ### 修复第二次输入纯数字仍会检索的问题
 
 - **问题根源**：`query_guard.py` 中 `has_history=True` 时对纯数字输入无条件放行，导致第二轮输入 "222" 被改写成 "222 是什么" 后走检索流程，但历史对话中没有任何文档上下文，返回页码匹配的垃圾结果。
