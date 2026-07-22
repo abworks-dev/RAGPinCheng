@@ -740,7 +740,7 @@ async def upload_media(
         (media_id, title, original_filename, storage_rel_path,
          mime_type, file_size, transcript_source_path,
          transcript_origin, status, created_by, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             media_id,
