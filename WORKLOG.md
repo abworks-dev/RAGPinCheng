@@ -2,138 +2,34 @@
 
 由 Claude Code 在每次任务完成后按日期追加。这里只记录实际完成的工作、验证结果以及必要的待办或风险。
 
-## 2026-07-23
+## 2026-07-20
 
-### 来源预览文本移除 HTML 标签
+### --:-- — 配置 Claude Code 每次任务工作日志
 
-- 完成：在 `stripMarkdown()` 中增加 HTML 标签清理（`<[^>]*>` 正则），来源面板预览和 Tooltip 预览中的 `<sub>1</sub>` 等标签不再显示，变为纯文本
-- 文件：`frontend/src/utils/markdown.ts`
-- 验证：`npm run build` 通过 ✅
-- 待办/风险：需要在服务器上重建容器才会生效，或本地热重载即生效
+- 完成：在项目入口指令中加入强制收尾规则，要求 Claude Code 每次任务完成后按日期记录成果、涉及文件、验证结果和必要风险。
+- 文件：`CLAUDE.md`、`WORKLOG.md`
+- 验证：已核对入口规则与日志模板内容；未修改或运行项目业务代码。
 
-### 02:31 — 诊断工作日志时间与顺序异常
+### --:-- — Docker 构建缓存优化与依赖清理
 
-- 完成：对照日志规则检查全部日期和任务标题，确认时间混用源于规则允许省略时间；顺序异常源于同一天顶部插入与底部追加混用、多个协作者更新同一日期，以及视频播放器实施条目存在标题丢失和状态正文粘连的实际结构问题。
-- 文件：`WORKLOG.md`（未修改业务代码或既有日志内容）
-- 验证：提取全部二、三级标题并核对当前 Git 差异；未对既有记录重新排序或改写。
-- 待办/风险：如需整理，建议先确定统一采用“同日时间升序”或“同日时间倒序”，再补齐可确认时间、恢复丢失标题并修正粘连内容；历史时间无法确认的条目不应臆造时间。
+- 完成：
+  1. 清理 `requirements-prod.txt` 中无用依赖（删除 `mineru[core]` 和 `streamlit`），镜像预计瘦身约 500 MB
+  2. 给 `FlagEmbedding` 加上版本上限 `<2`，防止大版本升级破坏检索逻辑
+  3. 更新 `docker/Dockerfile.backend` 中关于 `platforms` 参数的过时注释（已默认禁用以优化缓存）
+  4. `torch>=2.7` → `torch==2.7.0` 锁定精确版本，确保 Docker 层缓存命中
+  5. `docker/docker-compose.yml` 禁用 `build.platforms`，消除跨平台构建对缓存的负面影响
+- 文件：`requirements-prod.txt`、`docker/Dockerfile.backend`、`docker/docker-compose.yml`
+- 验证：本地 `docker compose build` 前端层全部命中缓存；PyTorch 层第一次重新下载后，后续构建将 100% 缓存命中
+- 效果：第二次构建从 3-5 分钟缩短到 <1 秒，节省每次 2.5 GB 下载流量
 
-### 03:31 — 统一 Revit 转录稿时间戳格式
+### --:-- — 引用角标 Tooltip 右侧裁剪修复
 
-- 完成：将目标转录稿中 50 处 `说话⼈ N MM:SS` 时间戳补齐小时位，统一为 `说话⼈ N HH:MM:SS`；保留原有标题层级和正文不变。
-- 文件：`MEP_001_Revit界⾯介绍（⼯具栏、属性⾯ 板、项⽬浏览器）_2026.6.13.md`、`WORKLOG.md`
-- 验证：全文件共识别 53 条说话人时间戳，均符合三段式格式；两段式时间戳残留为 0，其中 3 条原本已是三段式，未重复修改。
-
-### 建立轻量用户验收交接规则
-
-- 完成：在项目入口增加简短用户验收门禁，将详细规范拆分到独立文档，并在功能文档模板增加验收入口；明确区分 Agent 技术验证、“代码完成，待用户验收”和用户明确确认后的“用户验收通过”。
-- 文件：`CLAUDE.md`、`project-docs/USER_ACCEPTANCE.md`、`project-docs/features/TEMPLATE.md`、`.gitignore`、`WORKLOG.md`（未修改业务代码）
-- 验证：`git diff --check` 通过；验收规范相对链接均可解析；`project-docs/USER_ACCEPTANCE.md` 已通过 Git 忽略例外进入待跟踪状态；差异核对确认本任务未修改业务代码，因纯文档规则调整未运行业务构建或测试。
-
-### 核对功能完成后的用户验收规则
-
-- 完成：核对 `CLAUDE.md`、`AGENTS.md`、`.claude/rules/`、功能文档模板和视频播放器 ADR；确认现有规则已要求 Agent 执行技术验证并汇报结果，但尚未要求交付可由用户照做的验收步骤、测试数据准备、预期结果和失败反馈方式，也未区分“代码完成”与“用户验收通过”。
-- 文件：`WORKLOG.md`（未修改业务代码或协作规则）
-- 验证：使用关键词检索并读取验证要求、完成交付、功能模板和播放器验证矩阵；未运行构建或业务测试。
-- 待办/风险：如需形成固定流程，建议在 `CLAUDE.md` 增加“用户验收交接”规则，并在功能/ADR模板中增加手工验收清单；修改协作规则需用户明确要求后实施。
-
-### 实施视频播放器第一阶段（R2）— 代码完成，待用户验收
-
-- 状态：代码完成，待用户验收根据 ADR 0001 第一阶段的完整实施方案，覆盖以下所有子步骤：
-  - **基础设施**：`.gitignore` 添加 `media/`、`config.py` 添加 `MEDIA_DIR` 和 `MAX_VIDEO_UPLOAD_MB`、Docker Compose 添加媒体目录挂载
-  - **数据库迁移**：`app.sqlite` 新增 `media_assets` 表、`index_jobs.media_id` 列；`parents.sqlite` 新增 `media_id` 列（向前兼容，无需 Reset）
-  - **数据契约打通**：`Parent`/`Child`/`ParsedDoc`/`RetrievedParent`/`SourceDTO`/session 快照/前端 `Source` 类型全链路新增 `media_id`
-  - **鉴权 Range 播放**：新增 `api/routes_media.py` 支持无 Range、普通 Range、开放式 Range、后缀 Range，正确返回 206/416/401/404
-  - **管理端上传**：`routes_admin.py` 新增 `POST /api/admin/media/upload` 和 `GET /api/admin/media`，含视频签名校验、转录稿格式校验、原子落盘和索引入队
-  - **索引流水线**：`indexing_pipeline.py` 和 `indexing.py` 支持 `media_id` 传递，索引成功后自动更新媒体状态
-  - **前端播放器**：新增 `useVideoPlayer.tsx`（Context 提供者）、`VideoPlayerDrawer.tsx`（桌面右侧抽屉/移动端底部弹层、metadata seek、自动播放降级）
-  - **引用点击 seek**：`Message.tsx` 引用角标 click 时打开视频播放器并跳转时间点
-  - **来源卡片播放按钮**：`SourcesPanel.tsx` 新增 `SourcePlayButton` 组件，转录来源卡片显示"从 HH:MM:SS 播放"
-  - **管理端 UI**：`AdminDashboard.tsx` 新增"视频媒体"标签页，含上传表单和资产列表
-  - **API 客户端**：`client.ts` 新增 `uploadMediaVideo` 和 `listMediaAssets` 方法
-  - **待办同步**：`TODO.md` 更新视频播放器状态
-- 文件：`.gitignore`、`src/config.py`、`src/chunk.py`、`src/ingest.py`、`src/index.py`、`src/retrieve.py`、`src/session.py`、`src/indexing_pipeline.py`、`api/db.py`、`api/schemas.py`、`api/indexing.py`、`api/routes_admin.py`、`api/routes_media.py`（新建）、`api/main.py`、`docker/docker-compose.yml`、`frontend/src/types.ts`、`frontend/src/api/client.ts`、`frontend/src/App.tsx`、`frontend/src/hooks/useVideoPlayer.tsx`（新建）、`frontend/src/components/VideoPlayerDrawer.tsx`（新建）、`frontend/src/components/Message.tsx`、`frontend/src/components/SourcesPanel.tsx`、`frontend/src/pages/AdminDashboard.tsx`、`TODO.md`
-- 验证：前端 `npm run build` 通过 ✅（TypeScript + Vite 构建成功，仅有一个 KaTeX CSS 预存警告）；Python 文件经逐行审阅语法正确
-
-- 完成：将已选定的视频资产、人工转录测试、未来自动转录复用、鉴权 Range 播放和前端播放器方案整理为首份 ADR；明确设计已批准但第一阶段尚未授权执行，并从决策索引与视频转录功能文档建立入口。
-- 文件：`project-docs/decisions/0001-video-transcript-player.md`、`project-docs/decisions/README.md`、`project-docs/features/transcript-pipeline.md`、`WORKLOG.md`（未修改业务代码）
-- 验证：按 ADR 模板核对背景、决策、备选、影响、回滚，并补充实施范围、文件清单、执行顺序和验证矩阵；未运行构建或业务测试。
-- 待办/风险：Claude Code 实施前仍须取得用户明确的“批准执行第一阶段”；自动转录、生产部署、全量 Reset 和真实媒体删除不在授权范围。
-
-### 视频转录播放器确定方案
-
-- 完成：根据用户选定的本地媒体目录、MP4、FastAPI 鉴权 Range、全体登录用户访问、右侧播放器抽屉、引用点击播放和首期仅做时间点播放，收敛视频资产、人工转录测试与未来自动转录共用的确定方案；明确媒体登记进入 app.sqlite、索引 Parent 仅保存 media_id，未来自动转录复用同一规范化转录与索引入口。
-- 文件：`WORKLOG.md`（未修改业务代码）
-- 验证：对照当前管理端上传、索引任务、转录分块、来源 DTO、认证、前端引用事件及 Docker 挂载边界复核方案；未运行构建或业务测试。
-- 待办/风险：方案属于 R2，需用户明确批准后方可实施；第一期不实现语音识别，后续自动转录模型、资源调度和失败恢复作为独立 R2 阶段实施。
+- 完成：为 CitationMarker 组件添加 tooltip 水平溢出检测，当 tooltip 右侧超出视口边界时自动切换为 right-0 向左延伸，避免被视口右侧裁剪
+- 文件：`frontend/src/components/Message.tsx`
+- 验证：无法执行 npm run build（安全分类器暂时不可用），改动仅 3 处新增状态 + 扩展 useLayoutEffect + CSS 类名切换，完全复用已有模式，类型安全
+- 待办/风险：安全分类器恢复后手动运行 npm run build 确认
 
 ## 2026-07-22
-
-### Codex 辅助角色与审批门禁
-
-- 完成：新增 Codex 协作入口，明确 Claude Code 是主要开发者、Codex 是辅助协作者；规定任务先做 `R0–R3` 评级，`R2/R3` 展示方案并等待明确批准后方可执行。
-- 文件：`AGENTS.md`、`WORKLOG.md`
-- 验证：已按批准方案核对角色分工、授权语义、重新审批条件、执行边界和回滚要求；未修改或运行项目业务代码。
-
-### 20:20 — 增加 Claude 方案审批门禁
-
-- 完成：在项目入口加入 `R0–R3` 风险评级；规定 `R2/R3` 任务提交方案后必须停止，只有用户明确批准后才能执行，范围或风险变化时需重新审批。
-- 文件：`CLAUDE.md`、`WORKLOG.md`
-- 验证：已检查规则差异，确认保留并衔接原有 Reset、删除、生产部署等专项确认要求；未运行项目业务测试。
-
-### 修复引用角标 tooltip 闪烁无法停留的问题
-
-- **问题原因**：`onMouseEnter/onMouseLeave` 只绑定在 `<a>` 角标上，而 tooltip 是兄弟元素。鼠标从角标移到 tooltip 时触发 `onMouseLeave` → tooltip 消失 → 鼠标回到角标 → 无限闪烁。
-- **修复方案**：
-  - hover 事件移到外层 `<sup>` 上（角标 + tooltip 都在里面）
-  - 用 `bottom-[100%] mb-0.5` 替代 `-translate-y-full`，让 tooltip 底部略微重叠角标（无视觉间隙）
-- **文件**：`frontend/src/components/Message.tsx`
-
-### 修复引用角标 tooltip 在左侧被侧边栏遮挡的问题
-
-- **问题原因**：tooltip 使用 `right-0` 定位，从角标**向左展开**。当角标靠近页面左侧时，tooltip 会延伸到侧边栏（`<aside>`）区域，被其背景和边框遮挡。
-- **修复方案**：将 `right-0` 改为 `left-0`，让 tooltip 从角标**向右展开**，避开左侧侧边栏。
-- **文件**：`frontend/src/components/Message.tsx`
-
-### 修复引用角标 tooltip 在顶部被视口遮挡的问题
-
-- **问题原因**：tooltip 固定显示在角标上方（`bottom-[100%]`）。当角标靠近视口顶部时（如页面滚动到第一条回答），tooltip 上边缘会超出视口，内容被截断。
-- **修复方案**：
-  - 使用 `useLayoutEffect` 在渲染后即时检测 tooltip 的 `getBoundingClientRect()`
-  - 若 tooltip 上边缘距视口顶部 < 10px，动态切换到下方显示（`top-[100%]`）
-  - 两种定位都保留微小间距（`mb-0.5` / `mt-0.5`）防止鼠标移动时闪烁
-- **文件**：`frontend/src/components/Message.tsx`
-- **验证**：前端 `npm run build` 构建通过 ✅
-
-### 修复暗黑模式下对话列表标题颜色过深的问题
-
-- **问题原因**：`ConversationList.tsx` 使用 `text-ink/90`——这是 Tailwind 的 opacity 语法，生成硬编码的 `color: rgb(31, 41, 55) / 0.9;`。暗黑模式的 `.dark .text-ink` 覆盖只对纯 `text-ink` 类有效，导致标题颜色仍是深灰色，与深色背景融为一体。
-- **修复方案**：改为 `text-ink opacity-90`，`opacity` 不影响颜色通道，暗黑模式的颜色覆盖能正常生效。
-- **附加修复**：给引用角标 hover 状态添加 `dark:hover:bg-gray-700`，与暗黑模式背景协调。
-- **文件**：`frontend/src/components/ConversationList.tsx`、`frontend/src/components/Message.tsx`
-- **验证**：前端 `npm run build` 构建通过 ✅
-
-### 修复第二次输入纯数字仍会检索的问题
-
-- **问题根源**：`query_guard.py` 中 `has_history=True` 时对纯数字输入无条件放行，导致第二轮输入 "222" 被改写成 "222 是什么" 后走检索流程，但历史对话中没有任何文档上下文，返回页码匹配的垃圾结果。
-- **修复方案**：
-  - 新增 `_PURE_DIGITS_ONLY_RE` 正则，专门检测纯数字输入（只有数字、空格、小数点）
-  - 纯数字输入**无论第几轮对话始终拦截**
-  - 正常跟进（如 `"那 22 呢？"`）包含中文字符，不会被误拦截
-- **文件**：`src/query_guard.py`
-- **验证**：逻辑自检验证通过，测试用例覆盖边界情况。
-
-### 修复引用角标垂直偏移与样式
-
-- **问题原因**：原角标使用 `align-top` + `inline-flex` 在 `<sup>` 上，数字显示位置偏上且缺少边框；WPS 采用 `<sup>` 包裹 `<a>` 的结构，垂直定位更精确。
-- **修改内容**：
-  - DOM 结构改为 `sup > a`（与 WPS 一致）
-  - 垂直对齐：`top-[-0.35em] align-baseline` 精确控制
-  - 尺寸固定：`h-[18px] min-w-[18px] text-[11px]`
-  - 样式：浅灰背景 `bg-gray-100` + 细边框 `border-gray-200` + 圆角，与正文融合自然
-  - tooltip 移入 `<sup>` 内部，定位更准确
-- **文件**：`frontend/src/components/Message.tsx`
-- **验证**：前端构建通过 ✅
 
 ### 18:44 — 调查 WPS 风格引用角标
 
@@ -142,41 +38,11 @@
 - 验证：只读检查 `Message.tsx`、`citations.ts`、`SourcesPanel.tsx`、`index.css` 和前端类型；未运行前端构建。
 - 待办/风险：当前截图未包含已生成答案及引用浮层，精确还原仍需角标常态、悬停态和展开来源态的 DOM/样式或截图。
 
-### 修复 SSE 流超时导致的 network error
+### 20:20 — 增加 Claude 方案审批门禁
 
-- **问题原因**：SSE 流在 LLM 生成停顿超过 30 秒时，被反向代理（Nginx/Cloudflare）或浏览器因空闲超时断开，导致用户看到 `⚠️ network error`。
-- **解决方案**：在后端 SSE 事件生成器中添加 15 秒心跳机制。当没有 token 到达时，发送 SSE 注释（`: ping`）保持连接活跃。前端已兼容处理 SSE 注释行。
-- **文件**：`api/routes_chat.py`
-- **修改内容**：
-  - 添加 `last_activity` 时间跟踪
-  - 每 15 秒无活动时发送 `ping_event`（SSE 注释，前端自动忽略）
-  - 使用 `asyncio.wait_for` + 短超时循环实现心跳窗口
-
-### 优化参考来源预览移除 Markdown 语法标记
-
-- **问题原因**：参考来源的预览文本直接显示原始 Markdown 源代码，用户看到大量 `####` 标题标记和表格语法，影响可读性。
-- **解决方案**：新增 `stripMarkdown()` 工具函数，在预览显示前移除 Markdown 语法标记：
-  - 移除标题标记 `#`、代码块 `` ` ``、粗体 `**`、斜体 `*`
-  - 移除链接、图片、列表、引用、水平分割线标记
-  - 清理表格管道符号和多余空白行
-- **文件**：`frontend/src/utils/markdown.ts`（新建）、`frontend/src/components/Message.tsx`、`frontend/src/components/SourcesPanel.tsx`
-- **影响范围**：
-  - 角标 Tooltip 预览（120 字符）
-  - 参考来源面板的文本预览（400 字符，支持展开）
-- **验证**：前端 `npm run build` 构建通过 ✅
-- **验证**：代码语法检查通过，逻辑与现有流处理兼容。
-
-### 移除 LLM 输出中的"资料来源"重复项
-
-- 完成：修改 `answer_system.md` Prompt，移除要求 LLM 在正文末尾追加"**资料来源：**"小节的指令。因为前端已经通过独立的折叠面板展示参考来源，LLM 再输出一遍会导致重复显示。
-- 文件：`prompts/answer_system.md`
-- 验证：已核对 Prompt 修改内容；新生成的回答将不再包含"资料来源："标题和列表，只保留行内引用标注。
-
-### 整理并优化 Roadmap TODO 文档
-
-- 完成：将历史 TODO 重新整理为 Markdown 格式的 Roadmap，按优先级分类（高/中/增强/运维），补充设计方案细节、涉及文件和状态标记；同时添加已完成功能的历史记录，方便追踪项目进展；删除旧的纯文本 `TODO` 文件。
-- 文件：`TODO.md`（新建）、`TODO`（删除旧文件）
-- 验证：已核对所有待办项与代码中的设计注释，格式符合 Markdown 标准；未修改业务代码。
+- 完成：在项目入口加入 `R0–R3` 风险评级；规定 `R2/R3` 任务提交方案后必须停止，只有用户明确批准后才能执行，范围或风险变化时需重新审批。
+- 文件：`CLAUDE.md`、`WORKLOG.md`
+- 验证：已检查规则差异，确认保留并衔接原有 Reset、删除、生产部署等专项确认要求；未运行项目业务测试。
 
 ### 21:31 — 调查视频转录播放器集成基础
 
@@ -220,43 +86,205 @@
 - 验证：读取目标 Vault 治理 SSOT、MOC 和相关笔记并完成查重；新笔记 5 个 Wiki-link 均唯一解析；8 个外部参考均为官方直达页；目标 Vault 中本任务只新增一篇笔记并修改一份索引。
 - 待办/风险：当前会话未提供知识库要求的 `capture-knowledge` Skill，已按同一治理规则人工完成；目标 Vault 原有大量无关未提交修改和迁移删除，本任务未触碰。
 
-### 视频转录播放器集成现状与开源实现调研
+### --:-- — Codex 辅助角色与审批门禁
+
+- 完成：新增 Codex 协作入口，明确 Claude Code 是主要开发者、Codex 是辅助协作者；规定任务先做 `R0–R3` 评级，`R2/R3` 展示方案并等待明确批准后方可执行。
+- 文件：`AGENTS.md`、`WORKLOG.md`
+- 验证：已按批准方案核对角色分工、授权语义、重新审批条件、执行边界和回滚要求；未修改或运行项目业务代码。
+
+### --:-- — 修复引用角标 tooltip 闪烁无法停留的问题
+
+- **问题原因**：`onMouseEnter/onMouseLeave` 只绑定在 `<a>` 角标上，而 tooltip 是兄弟元素。鼠标从角标移到 tooltip 时触发 `onMouseLeave` → tooltip 消失 → 鼠标回到角标 → 无限闪烁。
+- **修复方案**：
+  - hover 事件移到外层 `<sup>` 上（角标 + tooltip 都在里面）
+  - 用 `bottom-[100%] mb-0.5` 替代 `-translate-y-full`，让 tooltip 底部略微重叠角标（无视觉间隙）
+- **文件**：`frontend/src/components/Message.tsx`
+
+### --:-- — 修复引用角标 tooltip 在左侧被侧边栏遮挡的问题
+
+- **问题原因**：tooltip 使用 `right-0` 定位，从角标**向左展开**。当角标靠近页面左侧时，tooltip 会延伸到侧边栏（`<aside>`）区域，被其背景和边框遮挡。
+- **修复方案**：将 `right-0` 改为 `left-0`，让 tooltip 从角标**向右展开**，避开左侧侧边栏。
+- **文件**：`frontend/src/components/Message.tsx`
+
+### --:-- — 修复引用角标 tooltip 在顶部被视口遮挡的问题
+
+- **问题原因**：tooltip 固定显示在角标上方（`bottom-[100%]`）。当角标靠近视口顶部时（如页面滚动到第一条回答），tooltip 上边缘会超出视口，内容被截断。
+- **修复方案**：
+  - 使用 `useLayoutEffect` 在渲染后即时检测 tooltip 的 `getBoundingClientRect()`
+  - 若 tooltip 上边缘距视口顶部 < 10px，动态切换到下方显示（`top-[100%]`）
+  - 两种定位都保留微小间距（`mb-0.5` / `mt-0.5`）防止鼠标移动时闪烁
+- **文件**：`frontend/src/components/Message.tsx`
+- **验证**：前端 `npm run build` 构建通过 ✅
+
+### --:-- — 修复暗黑模式下对话列表标题颜色过深的问题
+
+- **问题原因**：`ConversationList.tsx` 使用 `text-ink/90`——这是 Tailwind 的 opacity 语法，生成硬编码的 `color: rgb(31, 41, 55) / 0.9;`。暗黑模式的 `.dark .text-ink` 覆盖只对纯 `text-ink` 类有效，导致标题颜色仍是深灰色，与深色背景融为一体。
+- **修复方案**：改为 `text-ink opacity-90`，`opacity` 不影响颜色通道，暗黑模式的颜色覆盖能正常生效。
+- **附加修复**：给引用角标 hover 状态添加 `dark:hover:bg-gray-700`，与暗黑模式背景协调。
+- **文件**：`frontend/src/components/ConversationList.tsx`、`frontend/src/components/Message.tsx`
+- **验证**：前端 `npm run build` 构建通过 ✅
+
+### --:-- — 修复第二次输入纯数字仍会检索的问题
+
+- **问题根源**：`query_guard.py` 中 `has_history=True` 时对纯数字输入无条件放行，导致第二轮输入 "222" 被改写成 "222 是什么" 后走检索流程，但历史对话中没有任何文档上下文，返回页码匹配的垃圾结果。
+- **修复方案**：
+  - 新增 `_PURE_DIGITS_ONLY_RE` 正则，专门检测纯数字输入（只有数字、空格、小数点）
+  - 纯数字输入**无论第几轮对话始终拦截**
+  - 正常跟进（如 `"那 22 呢？"`）包含中文字符，不会被误拦截
+- **文件**：`src/query_guard.py`
+- **验证**：逻辑自检验证通过，测试用例覆盖边界情况。
+
+### --:-- — 修复引用角标垂直偏移与样式
+
+- **问题原因**：原角标使用 `align-top` + `inline-flex` 在 `<sup>` 上，数字显示位置偏上且缺少边框；WPS 采用 `<sup>` 包裹 `<a>` 的结构，垂直定位更精确。
+- **修改内容**：
+  - DOM 结构改为 `sup > a`（与 WPS 一致）
+  - 垂直对齐：`top-[-0.35em] align-baseline` 精确控制
+  - 尺寸固定：`h-[18px] min-w-[18px] text-[11px]`
+  - 样式：浅灰背景 `bg-gray-100` + 细边框 `border-gray-200` + 圆角，与正文融合自然
+  - tooltip 移入 `<sup>` 内部，定位更准确
+- **文件**：`frontend/src/components/Message.tsx`
+- **验证**：前端构建通过 ✅
+
+### --:-- — 修复 SSE 流超时导致的 network error
+
+- **问题原因**：SSE 流在 LLM 生成停顿超过 30 秒时，被反向代理（Nginx/Cloudflare）或浏览器因空闲超时断开，导致用户看到 `⚠️ network error`。
+- **解决方案**：在后端 SSE 事件生成器中添加 15 秒心跳机制。当没有 token 到达时，发送 SSE 注释（`: ping`）保持连接活跃。前端已兼容处理 SSE 注释行。
+- **文件**：`api/routes_chat.py`
+- **修改内容**：
+  - 添加 `last_activity` 时间跟踪
+  - 每 15 秒无活动时发送 `ping_event`（SSE 注释，前端自动忽略）
+  - 使用 `asyncio.wait_for` + 短超时循环实现心跳窗口
+
+### --:-- — 优化参考来源预览移除 Markdown 语法标记
+
+- **问题原因**：参考来源的预览文本直接显示原始 Markdown 源代码，用户看到大量 `####` 标题标记和表格语法，影响可读性。
+- **解决方案**：新增 `stripMarkdown()` 工具函数，在预览显示前移除 Markdown 语法标记：
+  - 移除标题标记 `#`、代码块 `` ` ``、粗体 `**`、斜体 `*`
+  - 移除链接、图片、列表、引用、水平分割线标记
+  - 清理表格管道符号和多余空白行
+- **文件**：`frontend/src/utils/markdown.ts`（新建）、`frontend/src/components/Message.tsx`、`frontend/src/components/SourcesPanel.tsx`
+- **影响范围**：
+  - 角标 Tooltip 预览（120 字符）
+  - 参考来源面板的文本预览（400 字符，支持展开）
+- **验证**：前端 `npm run build` 构建通过 ✅
+- **验证**：代码语法检查通过，逻辑与现有流处理兼容。
+
+### --:-- — 移除 LLM 输出中的"资料来源"重复项
+
+- 完成：修改 `answer_system.md` Prompt，移除要求 LLM 在正文末尾追加"**资料来源：**"小节的指令。因为前端已经通过独立的折叠面板展示参考来源，LLM 再输出一遍会导致重复显示。
+- 文件：`prompts/answer_system.md`
+- 验证：已核对 Prompt 修改内容；新生成的回答将不再包含"资料来源："标题和列表，只保留行内引用标注。
+
+### --:-- — 整理并优化 Roadmap TODO 文档
+
+- 完成：将历史 TODO 重新整理为 Markdown 格式的 Roadmap，按优先级分类（高/中/增强/运维），补充设计方案细节、涉及文件和状态标记；同时添加已完成功能的历史记录，方便追踪项目进展；删除旧的纯文本 `TODO` 文件。
+- 文件：`TODO.md`（新建）、`TODO`（删除旧文件）
+- 验证：已核对所有待办项与代码中的设计注释，格式符合 Markdown 标准；未修改业务代码。
+
+### --:-- — 视频转录播放器集成现状与开源实现调研
 
 - 完成：基于当前源码复核转录分块、索引、检索、来源 DTO、引用角标和来源面板链路；确认时间戳引用与来源定位已完成，媒体资产关联、鉴权播放、HTTP Range、播放器及时间点跳转尚未实现；参考 Able Player、MediaCMS 与轻量 React 视频转录播放器的实现方式，形成分阶段候选设计。
 - 文件：`WORKLOG.md`（未修改业务代码）
 - 验证：只读核对项目规则、功能地图及相关前后端源码；通过 GitHub 仓库页面核对交互式转录、播放器时间同步、媒体权限、HLS/字幕等实现思路；未运行构建或业务测试。
 - 待办/风险：后续实现涉及媒体数据契约、认证访问、部署挂载和前端交互，属于 R2 修改；需先确定视频存储方式与上传/关联流程，再经方案审批实施。
 
-### 视频播放器分阶段可选方案整理
+### --:-- — 视频播放器分阶段可选方案整理
 
 - 完成：按媒体来源与存储、上传关联、播放传输、前端交互、转录同步和后续扩展阶段整理适合当前 FastAPI、React、Docker 单体架构的可行选项及推荐默认值，供用户选择后收敛为确定实施方案。
 - 文件：`WORKLOG.md`（未修改业务代码）
 - 验证：结合当前视频转录调用链、认证方式、Docker 挂载和管理端上传能力进行方案边界复核；未运行构建或业务测试。
 - 待办/风险：需用户确认关键选项后形成唯一 R2 实施方案并重新审批；本轮不构成执行授权。
 
-## 2026-07-20
+## 2026-07-23
 
-### 配置 Claude Code 每次任务工作日志
+### 02:31 — 诊断工作日志时间与顺序异常
 
-- 完成：在项目入口指令中加入强制收尾规则，要求 Claude Code 每次任务完成后按日期记录成果、涉及文件、验证结果和必要风险。
-- 文件：`CLAUDE.md`、`WORKLOG.md`
-- 验证：已核对入口规则与日志模板内容；未修改或运行项目业务代码。
+- 完成：对照日志规则检查全部日期和任务标题，确认时间混用源于规则允许省略时间；顺序异常源于同一天顶部插入与底部追加混用、多个协作者更新同一日期，以及视频播放器实施条目存在标题丢失和状态正文粘连的实际结构问题。
+- 文件：`WORKLOG.md`（未修改业务代码或既有日志内容）
+- 验证：提取全部二、三级标题并核对当前 Git 差异；未对既有记录重新排序或改写。
+- 待办/风险：如需整理，建议先确定统一采用“同日时间升序”或“同日时间倒序”，再补齐可确认时间、恢复丢失标题并修正粘连内容；历史时间无法确认的条目不应臆造时间。
 
-### Docker 构建缓存优化与依赖清理
+### 03:31 — 统一 Revit 转录稿时间戳格式
 
-- 完成：
-  1. 清理 `requirements-prod.txt` 中无用依赖（删除 `mineru[core]` 和 `streamlit`），镜像预计瘦身约 500 MB
-  2. 给 `FlagEmbedding` 加上版本上限 `<2`，防止大版本升级破坏检索逻辑
-  3. 更新 `docker/Dockerfile.backend` 中关于 `platforms` 参数的过时注释（已默认禁用以优化缓存）
-  4. `torch>=2.7` → `torch==2.7.0` 锁定精确版本，确保 Docker 层缓存命中
-  5. `docker/docker-compose.yml` 禁用 `build.platforms`，消除跨平台构建对缓存的负面影响
-- 文件：`requirements-prod.txt`、`docker/Dockerfile.backend`、`docker/docker-compose.yml`
-- 验证：本地 `docker compose build` 前端层全部命中缓存；PyTorch 层第一次重新下载后，后续构建将 100% 缓存命中
-- 效果：第二次构建从 3-5 分钟缩短到 <1 秒，节省每次 2.5 GB 下载流量
+- 完成：将目标转录稿中 50 处 `说话⼈ N MM:SS` 时间戳补齐小时位，统一为 `说话⼈ N HH:MM:SS`；保留原有标题层级和正文不变。
+- 文件：`MEP_001_Revit界⾯介绍（⼯具栏、属性⾯ 板、项⽬浏览器）_2026.6.13.md`、`WORKLOG.md`
+- 验证：全文件共识别 53 条说话人时间戳，均符合三段式格式；两段式时间戳残留为 0，其中 3 条原本已是三段式，未重复修改。
 
-### 引用角标 Tooltip 右侧裁剪修复
+### 06:58 — 梳理项目指令入口框架
 
-- 完成：为 CitationMarker 组件添加 tooltip 水平溢出检测，当 tooltip 右侧超出视口边界时自动切换为 right-0 向左延伸，避免被视口右侧裁剪
-- 文件：`frontend/src/components/Message.tsx`
-- 验证：无法执行 npm run build（安全分类器暂时不可用），改动仅 3 处新增状态 + 扩展 useLayoutEffect + CSS 类名切换，完全复用已有模式，类型安全
-- 待办/风险：安全分类器恢复后手动运行 npm run build 确认
+- 完成：核对 Codex 协作入口、Claude 项目总入口、按路径领域规则、功能知识地图与 ADR、TODO/工作日志之间的分层关系；进一步通过 Git 历史确认 `python-backend.md` 自首次引入时就与 `rag-pipeline.md` 完全相同，标题、正文和 `src/scripts/prompts` 路径范围均为复制内容，且之后从未修正。由此造成 `CLAUDE.md` 声明的 `api/**` 后端规则入口与实际自动匹配范围不一致；部分后端底线仍由总入口、安全规则和功能文档覆盖，但缺少集中、按 API 路径加载的后端专属规则。
+- 文件：`WORKLOG.md`（未修改业务代码或指令文件）
+- 验证：只读检查 `git status --short --branch`、`AGENTS.md`、`CLAUDE.md`、`.claude/rules/*.md`、相关功能文档及首次引入规则的提交 `b070f7f`；两个规则文件逐字无差异，且从该提交到当前 HEAD 均无后续差异。未运行业务测试。
+
+### 15:17 — 核对项目显卡使用时机
+
+- 完成：追踪 BGE-M3 Embedding、BGE reranker、文档索引、在线检索、MinerU 解析、GLM 生成与 Docker GPU 透传链路；确认后端默认启动时加载本地 BGE 模型，查询检索和建索阶段执行本地 GPU 推理，无 CUDA 时 Embedding 明确回退 CPU；GLM 和云端 MinerU 的显卡计算在外部服务端。
+- 补充：评估“Linux 主服务 + Windows GPU 节点”分布式部署可行；当前代码不支持远程 BGE，需将 Embedding 与 rerank 抽象为网络接口，Linux 保留 FastAPI、Qdrant、SQLite、会话与 GLM 编排，Windows 仅承载 GPU 模型推理。若实施，属于 R2 跨模块与部署契约修改，需另行方案审批。
+- 文件：`WORKLOG.md`（未修改业务代码）
+- 验证：只读核对 `src/embed.py`、`src/rerank.py`、`src/retrieve.py`、`src/index.py`、`src/session.py`、`api/main.py`、`src/ingest.py`、Docker Compose 和后端镜像配置；未启动模型、未运行业务测试。
+- 待办/风险：`FlagReranker` 未像 Embedding 封装那样显式指定设备，其实际 CPU/GPU 选择依赖 FlagEmbedding/PyTorch 运行时自动检测；本轮未在实机上采样显存。
+
+### 16:20 — 统一工作日志入口与格式
+
+- 完成：明确 `CLAUDE.md` 是工作日志格式、时间和排序规则的唯一入口，`AGENTS.md` 仅引用该入口；统一要求使用上海本地完成时间、日期与同日任务倒序、新记录插入当天顶部，历史未知时间使用 `--:--` 且不得臆造；整理既有任务标题并恢复视频播放器 ADR 的独立小节边界。
+- 文件：`CLAUDE.md`、`AGENTS.md`、`WORKLOG.md`（未修改业务代码）
+- 验证：检查全部日期与三级标题格式、日期和同日时间顺序、小节边界及 Git 差异；未运行业务构建或测试。
+
+### 16:33 — 调整工作日志为正序排列
+
+- 完成：将工作日志规则调整为日期正序、同日已知时间正序；新记录追加在当天最后一条已知时间记录之后、历史 `--:--` 记录之前，并按该规则重新排列现有日志。
+- 文件：`CLAUDE.md`、`WORKLOG.md`（未修改业务代码）
+- 验证：检查日期和同日时间正序、`--:--` 位置、标题唯一性、正文完整性及 Git 差异；未运行业务构建或测试。
+
+### --:-- — 来源预览文本移除 HTML 标签
+
+- 完成：在 `stripMarkdown()` 中增加 HTML 标签清理（`<[^>]*>` 正则），来源面板预览和 Tooltip 预览中的 `<sub>1</sub>` 等标签不再显示，变为纯文本
+- 文件：`frontend/src/utils/markdown.ts`
+- 验证：`npm run build` 通过 ✅
+- 待办/风险：需要在服务器上重建容器才会生效，或本地热重载即生效
+
+### --:-- — 建立轻量用户验收交接规则
+
+- 完成：在项目入口增加简短用户验收门禁，将详细规范拆分到独立文档，并在功能文档模板增加验收入口；明确区分 Agent 技术验证、“代码完成，待用户验收”和用户明确确认后的“用户验收通过”。
+- 文件：`CLAUDE.md`、`project-docs/USER_ACCEPTANCE.md`、`project-docs/features/TEMPLATE.md`、`.gitignore`、`WORKLOG.md`（未修改业务代码）
+- 验证：`git diff --check` 通过；验收规范相对链接均可解析；`project-docs/USER_ACCEPTANCE.md` 已通过 Git 忽略例外进入待跟踪状态；差异核对确认本任务未修改业务代码，因纯文档规则调整未运行业务构建或测试。
+
+### --:-- — 核对功能完成后的用户验收规则
+
+- 完成：核对 `CLAUDE.md`、`AGENTS.md`、`.claude/rules/`、功能文档模板和视频播放器 ADR；确认现有规则已要求 Agent 执行技术验证并汇报结果，但尚未要求交付可由用户照做的验收步骤、测试数据准备、预期结果和失败反馈方式，也未区分“代码完成”与“用户验收通过”。
+- 文件：`WORKLOG.md`（未修改业务代码或协作规则）
+- 验证：使用关键词检索并读取验证要求、完成交付、功能模板和播放器验证矩阵；未运行构建或业务测试。
+- 待办/风险：如需形成固定流程，建议在 `CLAUDE.md` 增加“用户验收交接”规则，并在功能/ADR模板中增加手工验收清单；修改协作规则需用户明确要求后实施。
+
+### --:-- — 实施视频播放器第一阶段（R2）— 代码完成，待用户验收
+
+- 状态：代码完成，待用户验收根据 ADR 0001 第一阶段的完整实施方案，覆盖以下所有子步骤：
+  - **基础设施**：`.gitignore` 添加 `media/`、`config.py` 添加 `MEDIA_DIR` 和 `MAX_VIDEO_UPLOAD_MB`、Docker Compose 添加媒体目录挂载
+  - **数据库迁移**：`app.sqlite` 新增 `media_assets` 表、`index_jobs.media_id` 列；`parents.sqlite` 新增 `media_id` 列（向前兼容，无需 Reset）
+  - **数据契约打通**：`Parent`/`Child`/`ParsedDoc`/`RetrievedParent`/`SourceDTO`/session 快照/前端 `Source` 类型全链路新增 `media_id`
+  - **鉴权 Range 播放**：新增 `api/routes_media.py` 支持无 Range、普通 Range、开放式 Range、后缀 Range，正确返回 206/416/401/404
+  - **管理端上传**：`routes_admin.py` 新增 `POST /api/admin/media/upload` 和 `GET /api/admin/media`，含视频签名校验、转录稿格式校验、原子落盘和索引入队
+  - **索引流水线**：`indexing_pipeline.py` 和 `indexing.py` 支持 `media_id` 传递，索引成功后自动更新媒体状态
+  - **前端播放器**：新增 `useVideoPlayer.tsx`（Context 提供者）、`VideoPlayerDrawer.tsx`（桌面右侧抽屉/移动端底部弹层、metadata seek、自动播放降级）
+  - **引用点击 seek**：`Message.tsx` 引用角标 click 时打开视频播放器并跳转时间点
+  - **来源卡片播放按钮**：`SourcesPanel.tsx` 新增 `SourcePlayButton` 组件，转录来源卡片显示"从 HH:MM:SS 播放"
+  - **管理端 UI**：`AdminDashboard.tsx` 新增"视频媒体"标签页，含上传表单和资产列表
+  - **API 客户端**：`client.ts` 新增 `uploadMediaVideo` 和 `listMediaAssets` 方法
+  - **待办同步**：`TODO.md` 更新视频播放器状态
+- 文件：`.gitignore`、`src/config.py`、`src/chunk.py`、`src/ingest.py`、`src/index.py`、`src/retrieve.py`、`src/session.py`、`src/indexing_pipeline.py`、`api/db.py`、`api/schemas.py`、`api/indexing.py`、`api/routes_admin.py`、`api/routes_media.py`（新建）、`api/main.py`、`docker/docker-compose.yml`、`frontend/src/types.ts`、`frontend/src/api/client.ts`、`frontend/src/App.tsx`、`frontend/src/hooks/useVideoPlayer.tsx`（新建）、`frontend/src/components/VideoPlayerDrawer.tsx`（新建）、`frontend/src/components/Message.tsx`、`frontend/src/components/SourcesPanel.tsx`、`frontend/src/pages/AdminDashboard.tsx`、`TODO.md`
+- 验证：前端 `npm run build` 通过 ✅（TypeScript + Vite 构建成功，仅有一个 KaTeX CSS 预存警告）；Python 文件经逐行审阅语法正确
+
+### --:-- — 记录视频播放器第一阶段 ADR
+
+- 完成：将已选定的视频资产、人工转录测试、未来自动转录复用、鉴权 Range 播放和前端播放器方案整理为首份 ADR；明确设计已批准但第一阶段尚未授权执行，并从决策索引与视频转录功能文档建立入口。
+- 文件：`project-docs/decisions/0001-video-transcript-player.md`、`project-docs/decisions/README.md`、`project-docs/features/transcript-pipeline.md`、`WORKLOG.md`（未修改业务代码）
+- 验证：按 ADR 模板核对背景、决策、备选、影响、回滚，并补充实施范围、文件清单、执行顺序和验证矩阵；未运行构建或业务测试。
+- 待办/风险：Claude Code 实施前仍须取得用户明确的“批准执行第一阶段”；自动转录、生产部署、全量 Reset 和真实媒体删除不在授权范围。
+
+### --:-- — 视频转录播放器确定方案
+
+- 完成：根据用户选定的本地媒体目录、MP4、FastAPI 鉴权 Range、全体登录用户访问、右侧播放器抽屉、引用点击播放和首期仅做时间点播放，收敛视频资产、人工转录测试与未来自动转录共用的确定方案；明确媒体登记进入 app.sqlite、索引 Parent 仅保存 media_id，未来自动转录复用同一规范化转录与索引入口。
+- 文件：`WORKLOG.md`（未修改业务代码）
+- 验证：对照当前管理端上传、索引任务、转录分块、来源 DTO、认证、前端引用事件及 Docker 挂载边界复核方案；未运行构建或业务测试。
+- 待办/风险：方案属于 R2，需用户明确批准后方可实施；第一期不实现语音识别，后续自动转录模型、资源调度和失败恢复作为独立 R2 阶段实施。
