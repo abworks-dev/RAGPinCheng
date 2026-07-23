@@ -5,14 +5,18 @@ import type { Source } from "../types";
 import { stripMarkdown } from "../utils/markdown";
 import { timestampToSeconds, useVideoPlayer } from "../hooks/useVideoPlayer";
 
+function stripHtml(text: string): string {
+  return text.replace(/<[^>]*>/g, "");
+}
+
 function locator(s: Source): string {
   if (s.doc_type === "transcript" && s.start_time) return `🎬 @${s.start_time}`;
-  const leaf = (s.section_path || "").split(" > ").pop() || "";
+  const leaf = stripHtml((s.section_path || "").split(" > ").pop() || "");
   return `§${leaf || "(无)"}`;
 }
 
 function breadcrumbParts(section_path: string): string[] {
-  return section_path.split(" > ").filter(Boolean);
+  return section_path.split(" > ").filter(Boolean).map(stripHtml);
 }
 
 function SourceCard({
