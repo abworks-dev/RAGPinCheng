@@ -161,7 +161,7 @@ function CitationMarker({
                   @{source.start_time || ""}
                 </>
               ) : (
-                `§${source.section_path || ""}`
+                `§${((source.section_path || "").replace(/<[^>]*>/g, ""))}`
               )}
             </div>
             <div className="text-gray-600 whitespace-pre-wrap leading-relaxed break-words">{preview}</div>
