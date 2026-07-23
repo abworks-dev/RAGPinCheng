@@ -27,6 +27,7 @@ function SourceCard({
   cardRef,
   conversationId,
   messageId,
+  searchQuery,
 }: {
   s: Source;
   i: number;
@@ -35,6 +36,7 @@ function SourceCard({
   cardRef: (el: HTMLLIElement | null) => void;
   conversationId: string | null;
   messageId: string;
+  searchQuery?: string;
 }) {
   const [reportOpen, setReportOpen] = useState(false);
   const [note, setNote] = useState("");
@@ -48,6 +50,23 @@ function SourceCard({
   const crumbs = s.doc_type === "transcript" ? [] : breadcrumbParts(s.section_path || "");
   const hasBreadcrumb = crumbs.length > 1;
   const canExpand = truncated;
+
+  // Highlight keywords from the search query in the source text.
+  function highlightText(text: string): string {
+    if (!searchQuery) return text;
+    // Split query into individual meaningful keywords (Chinese chars + English words)
+    const keywords = searchQuery
+      .replace(/[^\w一-鿿]/g, " ")
+      .split(/\s+/)
+      .filter((k) => k.length >= 2)
+      .sort((a, b) => b.length - a.length); // longer matches first to avoid partial overlap
+    if (keywords.length === 0) return text;
+    const escaped = keywords.map((k) => k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+    const pattern = new RegExp(`(${escaped.join("|")})`, "gi");
+    return text.replace(pattern, "<mark class='bg-yellow-200 dark:bg-yellow-700/60 rounded px-0.5'>$1</mark>");
+  }
+
+  const highlightedText = highlightText(cleanText);
 
   // Hover → highlight citations in the message body (bidirectional sync).
   function handleMouseEnter() {
@@ -129,9 +148,12 @@ function SourceCard({
           "text-xs text-gray-600 mt-1 whitespace-pre-wrap " +
           (expanded ? "max-h-96 overflow-y-auto pr-1" : "line-clamp-6")
         }
-      >
-        {expanded || !truncated ? cleanText : cleanText.slice(0, PREVIEW_CHARS) + "…"}
-      </div>
+        dangerouslySetInnerHTML={{
+          __html: expanded || !truncated
+            ? highlightedText
+            : highlightText(cleanText.slice(0, PREVIEW_CHARS)) + "…",
+        }}
+      />
       {canExpand && (
         <button
           type="button"
@@ -219,10 +241,12 @@ export function SourcesPanel({
   sources,
   messageId,
   conversationId,
+  searchQuery,
 }: {
   sources: Source[];
   messageId: string;
   conversationId: string | null;
+  searchQuery?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [highlightIdx, setHighlightIdx] = useState<number | null>(null);
@@ -270,6 +294,7 @@ export function SourcesPanel({
               }}
               conversationId={conversationId}
               messageId={messageId}
+              searchQuery={searchQuery}
             />
           ))}
         </ol>

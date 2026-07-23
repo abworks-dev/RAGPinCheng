@@ -242,6 +242,7 @@ export function Message({
                 sources={msg.sources}
                 messageId={msg.id}
                 conversationId={conversationId}
+                searchQuery={msg.prep?.search_query || msg.query}
               />
             )}
             {!msg.streaming && !msg.error && msg.content && (
