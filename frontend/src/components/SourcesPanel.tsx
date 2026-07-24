@@ -135,9 +135,6 @@ function SourceCard({
           {sent ? "已报告" : "⚠ 报错"}
         </button>
       </div>
-      <div className="text-xs text-muted mt-0.5">
-        分类: <code className="bg-gray-100 px-1 rounded">{s.category || "—"}</code>
-      </div>
       {hasBreadcrumb && (
         <div className="text-xs text-muted mt-1 leading-relaxed break-words">
           § {crumbs.join(" › ")}
@@ -270,6 +267,31 @@ export function SourcesPanel({
   }, [messageId]);
 
   if (!sources?.length) return null;
+
+  // Group sources by category, preserving original order within each group.
+  const CATEGORY_LABELS: Record<string, string> = {
+    "教学视频": "🎬 教学视频",
+    "培训视频": "🎬 培训视频",
+    "公司标准": "📋 公司标准",
+    "客户标准": "📋 客户标准",
+    "行业规范": "📋 行业规范",
+    "设计规范": "📋 设计规范",
+    "uncategorized": "📄 其他",
+  };
+  const groups: { category: string; sources: Source[]; indices: number[] }[] = [];
+  const groupMap = new Map<string, { category: string; sources: Source[]; indices: number[] }>();
+  sources.forEach((s, i) => {
+    const cat = s.category || "uncategorized";
+    let g = groupMap.get(cat);
+    if (!g) {
+      g = { category: cat, sources: [], indices: [] };
+      groupMap.set(cat, g);
+      groups.push(g);
+    }
+    g.sources.push(s);
+    g.indices.push(i);
+  });
+
   return (
     <div className="mt-3 border border-gray-200 rounded-lg bg-white/60">
       <button
@@ -281,22 +303,79 @@ export function SourcesPanel({
         <span className="text-xs">{open ? "收起" : "展开"}</span>
       </button>
       {open && (
-        <ol className="px-4 py-2 space-y-3 text-sm">
-          {sources.map((s, i) => (
-            <SourceCard
-              key={s.parent_id + i}
-              s={s}
-              i={i}
-              id={`src-${messageId}-${i}`}
-              highlight={highlightIdx === i}
-              cardRef={(el) => {
-                refs.current[i] = el;
-              }}
-              conversationId={conversationId}
+        <div className="px-4 py-2 space-y-4 text-sm">
+          {groups.map((g) => (
+            <GroupedSources
+              key={g.category}
+              category={g.category}
+              label={CATEGORY_LABELS[g.category] || `📄 ${g.category}`}
+              sources={g.sources}
+              indices={g.indices}
               messageId={messageId}
+              conversationId={conversationId}
               searchQuery={searchQuery}
+              highlightIdx={highlightIdx}
+              cardRefs={refs}
             />
           ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function GroupedSources({
+  category,
+  label,
+  sources,
+  indices,
+  messageId,
+  conversationId,
+  searchQuery,
+  highlightIdx,
+  cardRefs,
+}: {
+  category: string;
+  label: string;
+  sources: Source[];
+  indices: number[];
+  messageId: string;
+  conversationId: string | null;
+  searchQuery?: string;
+  highlightIdx: number | null;
+  cardRefs: React.MutableRefObject<Record<number, HTMLLIElement | null>>;
+}) {
+  const [collapsed, setCollapsed] = useState(false);
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setCollapsed((c) => !c)}
+        className="w-full text-left flex items-center gap-1.5 text-xs font-medium text-muted hover:text-ink transition-colors mb-1.5"
+      >
+        <span className="text-[10px]">{collapsed ? "▶" : "▼"}</span>
+        <span>{label}</span>
+        <span className="text-[10px] opacity-60">({sources.length})</span>
+      </button>
+      {!collapsed && (
+        <ol className="space-y-3">
+          {sources.map((s, j) => {
+            const globalIdx = indices[j];
+            return (
+              <SourceCard
+                key={s.parent_id + j}
+                s={s}
+                i={globalIdx}
+                id={`src-${messageId}-${globalIdx}`}
+                highlight={highlightIdx === globalIdx}
+                cardRef={(el) => { cardRefs.current[globalIdx] = el; }}
+                conversationId={conversationId}
+                messageId={messageId}
+                searchQuery={searchQuery}
+              />
+            );
+          })}
         </ol>
       )}
     </div>
