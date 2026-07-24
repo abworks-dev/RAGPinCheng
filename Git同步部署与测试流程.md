@@ -23,6 +23,43 @@
   → 成功结束或回滚
 ```
 
+## 1.1 GitHub Actions 快速部署
+
+仓库提供两个工作流：
+
+- `.github/workflows/ci.yml`：在 Pull Request 和 `master` 推送时执行 Python 语法检查、前端生产构建和 Compose 配置检查；
+- `.github/workflows/deploy-production.yml`：只允许维护者从 Actions 页面手动触发并勾选生产确认框，再由生产服务器的 self-hosted runner 执行部署。CI 成功不会自动发布。
+
+推荐将正式仓库迁移为独立 Private 仓库。GitHub Free 私有仓库不依赖 Environment 审批，本项目以 `workflow_dispatch` 手动触发作为单人发布确认；创建私有仓库、迁移 Git 历史和切换开发机/服务器 `origin` 需单独执行，本工作流不会自动修改远端。
+
+生产 runner 需要以下标签：
+
+```text
+self-hosted, windows, production, gpu
+```
+
+服务器需要安装 runner，并让其服务账号具备访问 `${PRODUCTION_REPO_PATH}`、`${PRODUCTION_BACKUP_DIRECTORY}`、Git 和 Docker 的权限。不要把 `.env`、API Key、管理员密码或生产数据放入 GitHub Actions。
+
+如果构建需要代理，在 GitHub 仓库的 **Settings → Secrets and variables → Actions → Variables** 中配置仓库级非敏感变量：
+
+```text
+DEPLOY_HTTP_PROXY=http://${PRIVATE_ZEROTIER_IPV4}:7897
+```
+
+发布脚本 `scripts/deploy-production.ps1` 只允许从干净的 `master` 分支快进部署。它会记录旧 Commit、检查 Compose、构建并重建服务、轮询 `/api/health`；失败时尝试重建旧 Commit。若待发布差异包含数据库或索引结构敏感文件，部署会停止，要求先备份应用数据和 Qdrant，再按本指南人工审查部署。脚本不会执行 `down -v`、索引 Reset、数据库迁移或数据目录清理。
+
+首次使用前，在生产服务器手动确认：
+
+```powershell
+cd ${PRODUCTION_REPO_PATH}
+git pull --ff-only origin master
+git status
+docker compose -f docker/docker-compose.yml config --quiet
+Test-Path scripts\deploy-production.ps1
+```
+
+最后一条命令只确认部署脚本已经同步，不会执行生产部署。日常发布进入 GitHub **Actions → Deploy production → Run workflow**，选择 `master`、勾选生产确认框后运行。每次发布前仍须确认数据备份和可回滚版本；CI 成功本身不会触发部署。
+
 ## 2. 数据保护原则
 
 以下内容属于生产数据，不通过 Git 同步：

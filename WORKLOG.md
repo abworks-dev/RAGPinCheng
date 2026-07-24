@@ -237,6 +237,60 @@
 - 文件：`CLAUDE.md`、`WORKLOG.md`（未修改业务代码）
 - 验证：检查日期和同日时间正序、`--:--` 位置、标题唯一性、正文完整性及 Git 差异；未运行业务构建或测试。
 
+### 16:53 — 实施 GitHub Actions 快速部署
+
+- 完成：在用户批准 R2 方案后新增 CI 与生产部署工作流；CI 检查 Python 语法、前端生产构建和 Compose 配置，生产工作流经 `production` Environment 审批后调用 Windows self-hosted runner；部署脚本限制干净 `master` 快进更新，记录新旧版本、复用 Docker 缓存、检查健康状态、失败时尝试回滚，并阻止数据库/索引敏感文件自动发布。
+- 文件：`.github/workflows/ci.yml`、`.github/workflows/deploy-production.yml`、`scripts/deploy-production.ps1`、`Git同步部署与测试流程.md`、`WORKLOG.md`（未修改业务代码）
+- 验证：PowerShell 语法解析、Python `compileall`、前端 `npm run build`、`docker compose config --quiet` 和 `git diff --check` 均通过；前端保留既有 CSS 语法及包体积警告。未连接生产服务器、未安装 runner、未触发部署；本地缺少项目 `.venv` 和 YAML 解析依赖，未运行 pytest 或独立 YAML 解析器。
+- 待办/风险：需在 GitHub 创建带审批人的 `production` Environment，并在生产服务器安装带 `self-hosted, windows, production, gpu` 标签的 runner；首次发布前仍须备份应用数据和 Qdrant、确认旧版本可恢复，并人工验收登录、历史数据、问答引用和 GPU。
+
+### 16:59 — 说明 GitHub 生产环境审批配置
+
+- 完成：结合当前 `abworks-dev/RAGPinCheng` 仓库和部署工作流的 `environment: production` 配置，整理 GitHub Environment 创建、required reviewers、禁止自审、部署分支限制和首次审批操作步骤，并标明私有仓库套餐可能影响审批规则可用性。
+- 文件：`WORKLOG.md`（未修改业务代码或 GitHub 外部设置）
+- 验证：核对本地远端仓库地址、生产工作流环境名和当前工作区状态；未登录或修改 GitHub 设置，官方文档在线查询本轮返回异常。
+- 待办/风险：用户需在仓库 Settings 中完成配置；若页面不显示 Deployment protection rules 或 Required reviewers，应先核对仓库可见性、组织策略和 GitHub 套餐。
+
+### 17:04 — 明确单人维护的部署审批方式
+
+- 完成：确认单人维护无需他人审批；建议将维护者本人设为 `production` reviewer 且不启用 `Prevent self-review`，保留上线前的单人二次确认，避免 `master` CI 成功后直接自动部署。
+- 文件：`WORKLOG.md`（未修改业务代码、工作流或 GitHub 外部设置）
+- 验证：对照当前生产工作流同时支持 CI 成功触发和手动触发的行为复核；未修改 GitHub 设置或触发部署。
+
+### 17:10 — 说明 Windows 生产 runner 安装流程
+
+- 完成：针对生产服务器 `${PRODUCTION_REPO_PATH}`、Docker Desktop 和 GPU 部署方式，整理 GitHub 仓库级 Windows x64 self-hosted runner 的下载、注册、`production,gpu` 附加标签、交互试跑、服务化、Docker 权限和离线处理步骤；明确默认标签会自动提供 `self-hosted` 与 `Windows`。
+- 文件：`WORKLOG.md`（未修改业务代码、工作流或 GitHub 外部设置）
+- 验证：核对当前部署工作流要求的 runner 标签和固定生产路径；未连接生产服务器、未使用注册 Token、未安装或启动 runner。
+- 待办/风险：用户需在生产服务器以管理员身份按 GitHub 页面即时命令注册；注册 Token 不得共享或写入仓库，服务账号必须能够访问 Docker、生产仓库和备份目录。
+
+### 17:15 — 区分 Runner 安装包与工作流构件
+
+- 完成：澄清“下载工作流程构件”用于获取 Actions 运行产物，不是 self-hosted runner 安装入口；提供当前仓库 Windows x64 runner 设置直达路径和页面识别要点。
+- 文件：`WORKLOG.md`（未修改业务代码、工作流或 GitHub 外部设置）
+- 验证：对照仓库级 runner 安装目标核对页面用途；未下载文件、未使用注册 Token、未安装 runner。
+
+### 17:17 — 确认 Runner 页面并处理 Token 暴露风险
+
+- 完成：确认用户已进入正确的 Windows x64 self-hosted runner 安装页面；提示停止使用已粘贴到对话中的临时注册 Token、重新生成并仅在生产服务器本地使用，同时说明公开仓库 runner 的额外安全边界和 `production,gpu` 标签填写位置。
+- 文件：`WORKLOG.md`（未修改业务代码、工作流或 GitHub 外部设置）
+- 验证：核对页面所示 runner 版本、Windows x64 下载/校验/解压/配置流程与当前工作流标签要求；未下载文件、未注册或启动 runner。
+- 待办/风险：公开仓库的 self-hosted runner 风险高于私有仓库；不得让 Pull Request 或不受信任分支直接使用生产 runner，临时 Token 不得再次共享。
+
+### 17:20 — 评估公开 Fork 的生产 Runner 方案
+
+- 完成：结合企业内部 RAG 与生产服务器权限边界，建议先迁移到独立私有仓库再注册 self-hosted runner；说明公开 Fork 通常不能单独改为私有、公共历史不会因新建私库而消失，以及继续使用公开仓库时需改成仅手动部署并加强隔离的备选边界。
+- 文件：`WORKLOG.md`（未修改业务代码、工作流、远端仓库或 GitHub 设置）
+- 验证：核对当前 `origin` 为公开 Fork、生产工作流使用固定服务器目录和 self-hosted 标签；未迁移仓库、未修改可见性、未注册 runner。
+- 待办/风险：新建私有仓库、切换远端和收紧部署触发方式属于 R2 协作与部署配置变更，需形成具体迁移方案并获批后执行；公开仓库既有历史仍需单独做敏感信息审计。
+
+### 18:10 — 核对私有仓库与 Actions 免费额度
+
+- 完成：依据 GitHub 官方定价和 Actions 计费页面确认 GitHub Free 包含不限数量的公开/私有仓库及每月 2,000 分钟 CI/CD，self-hosted runner 的 Actions 使用免费；进一步确认 Free 私有仓库不能配置 Environment，个人 Pro/组织 Team 虽可创建私有 Environment，但 required reviewers 等保护规则在 Free/Pro/Team 上仅适用于公开仓库。结合当前单人维护场景，建议采用“私有仓库 + 仅 `workflow_dispatch` 手动发布”替代付费环境审批。
+- 文件：`WORKLOG.md`（未修改业务代码、工作流、远端仓库或计费设置）
+- 验证：只读访问 GitHub 官方 Pricing、Actions Billing 与 Environment 管理页面并核对当前条款；未创建私有仓库、未产生 Actions 运行或费用。
+- 待办/风险：GitHub 定价可能调整；构件、缓存、Packages、LFS 和超额 GitHub-hosted runner 使用有独立配额或计费，实际用量应在 Billing 页面设置预算和提醒。
+
 ### --:-- — 来源预览文本移除 HTML 标签
 
 - 完成：在 `stripMarkdown()` 中增加 HTML 标签清理（`<[^>]*>` 正则），来源面板预览和 Tooltip 预览中的 `<sub>1</sub>` 等标签不再显示，变为纯文本
@@ -288,3 +342,40 @@
 - 文件：`WORKLOG.md`（未修改业务代码）
 - 验证：对照当前管理端上传、索引任务、转录分块、来源 DTO、认证、前端引用事件及 Docker 挂载边界复核方案；未运行构建或业务测试。
 - 待办/风险：方案属于 R2，需用户明确批准后方可实施；第一期不实现语音识别，后续自动转录模型、资源调度和失败恢复作为独立 R2 阶段实施。
+
+## 2026-07-24
+
+### 11:14 — 改为私有仓库免费手动部署
+
+- 完成：按用户批准的 R2 方案将生产工作流改为仅支持 `workflow_dispatch` 手动触发，并增加必选生产确认框；删除 CI 成功后的自动发布和 `production` Environment 依赖，代理设置改为仓库级 Actions Variable。同步修订首次脚本同步和日常发布说明，避免 GitHub Free 私有仓库依赖不可用的环境审批功能。
+- 文件：`.github/workflows/deploy-production.yml`、`Git同步部署与测试流程.md`、`WORKLOG.md`（未修改业务代码）
+- 验证：人工核对工作流触发条件、输入表达式、runner 标签和代理变量引用；检索确认活动工作流与部署文档不再包含 `workflow_run` 或 `environment: production`；`git diff --check` 通过。未创建或迁移私有仓库、未注册 runner、未触发生产部署。
+- 待办/风险：需由用户创建独立私有仓库并切换开发机和生产服务器 `origin`，在仓库级 Actions Variables 配置可选的 `DEPLOY_HTTP_PROXY`，再注册生产 runner；首次部署前仍须备份应用数据和 Qdrant 并确认回滚版本。
+
+### 12:17 — 确定私有仓库命名与保留策略
+
+- 完成：建议将现有公开 Fork 重命名为 `RAGPinCheng-public`，再创建独立私有仓库 `RAGPinCheng`，从而保留正式仓库原名称且避免直接删除；说明复用旧名称会终止 GitHub 对重命名前地址的自动重定向，因此需显式更新开发机、生产服务器和集成中的远端地址。
+- 文件：`WORKLOG.md`（未修改业务代码、工作流、远端仓库或 GitHub 设置）
+- 验证：只读核对 GitHub 官方仓库重命名文档；未重命名、删除、归档或创建任何远端仓库。
+- 待办/风险：仓库重命名、创建私库、切换远端属于 R2 外部协作配置变更；删除公开仓库属于 R3 破坏性操作，迁移和验证完成前不应执行。
+
+### 12:19 — 说明仓库改名对服务器拉取的影响
+
+- 完成：明确公开仓库仅重命名后 GitHub 会继续重定向旧 Git 地址，服务器拉取通常不立即失效；重新创建同名私有仓库后重定向终止，服务器旧地址将指向新私库，必须提前完成代码推送和私库认证。建议先以不同名称建立私库并验证开发机、服务器和部署链路，再决定是否交换正式名称。
+- 文件：`WORKLOG.md`（未修改业务代码、工作流、远端仓库或服务器配置）
+- 验证：对照 GitHub 官方重命名重定向规则与当前服务器通过 `origin/master` 拉取的部署脚本复核；未重命名仓库、切换远端或连接生产服务器。
+- 待办/风险：名称复用期间若私库尚未就绪或服务器凭据无权访问，`git fetch/pull` 会失败；现有运行容器不受 Git 远端改名直接影响。
+
+### 12:20 — 给出公开仓库改名后的迁移顺序
+
+- 完成：在用户完成公开仓库改名后，确认本地 `origin` 仍使用旧 URL；给出先将开发机和生产服务器远端显式改到 `RAGPinCheng-public`、再创建空白私有 `RAGPinCheng`、推送验证后切换生产远端的无中断顺序。
+- 文件：`WORKLOG.md`（未修改业务代码、Git 远端、远程仓库或服务器配置）
+- 验证：只读检查本地远端地址和工作区状态，确认部署工作流与说明仍处于未提交状态；未推送、未创建私库、未连接生产服务器。
+- 待办/风险：在同名私库创建前应先修正两台机器的公开远端地址；本地尚有本任务的工作流、部署脚本和文档改动，迁移时需明确提交到新私库，不应误推回公开仓库。
+
+### 12:30 — 核对新私库迁移前状态
+
+- 完成：确认新建的私有 `abworks-dev/RAGPinCheng` 为空，公开 `RAGPinCheng-public` 的 `master` 与本地 HEAD `242a4ea` 一致；识别本地 `origin` 已因名称复用指向新私库，但 `origin/master` 仍只是旧的本地跟踪引用，尚不能代表私库已有代码。整理新增公开远端、提交部署文件、推送私库和远端校验的 R2 执行范围。
+- 文件：`WORKLOG.md`（未修改业务代码、Git 远端或远程仓库）
+- 验证：只读检查 `git remote -v`、工作区状态、最近提交，并使用 `git ls-remote` 分别核对私库与公开仓库；未提交、未推送、未切换生产服务器。
+- 待办/风险：需用户批准后才能修改本地远端、提交并推送；首次推送会触发私库 CI，但手动生产部署不会自动触发。
