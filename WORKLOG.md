@@ -375,7 +375,7 @@
 
 ### 12:30 — 核对新私库迁移前状态
 
-- 完成：确认新建的私有 `abworks-dev/RAGPinCheng` 为空，公开 `RAGPinCheng-public` 的 `master` 与本地 HEAD `242a4ea` 一致；识别本地 `origin` 已因名称复用指向新私库，但 `origin/master` 仍只是旧的本地跟踪引用，尚不能代表私库已有代码。整理新增公开远端、提交部署文件、推送私库和远端校验的 R2 执行范围。
-- 文件：`WORKLOG.md`（未修改业务代码、Git 远端或远程仓库）
-- 验证：只读检查 `git remote -v`、工作区状态、最近提交，并使用 `git ls-remote` 分别核对私库与公开仓库；未提交、未推送、未切换生产服务器。
-- 待办/风险：需用户批准后才能修改本地远端、提交并推送；首次推送会触发私库 CI，但手动生产部署不会自动触发。
+- 完成：确认新建的私有 `abworks-dev/RAGPinCheng` 初始为空、公开 `RAGPinCheng-public` 与本地迁移基线均为 `242a4ea`；在用户批准后将公开仓库登记为 `public`、私库登记为 `origin`，提交 GitHub Actions、生产部署脚本和部署文档，并首次推送完整 `master` 历史到私库。本地 `master` 已改为跟踪 `origin/master`。
+- 文件：`.github/workflows/ci.yml`、`.github/workflows/deploy-production.yml`、`scripts/deploy-production.ps1`、`Git同步部署与测试流程.md`、`WORKLOG.md`（未修改业务代码）
+- 验证：`git diff --cached --check` 通过；首次部署提交为 `9bfa6bd`；远端复核确认私库和本地均为 `9bfa6bd`，公开仓库仍为 `242a4ea`，未收到部署配置；推送触发私库 CI，但手动生产部署未触发。未切换生产服务器或注册 runner。
+- 待办/风险：需查看私库 CI 结果；随后在生产服务器配置私库认证并切换 `origin`，该步骤涉及生产部署链路，执行前需再次确认目标与回滚方式。
