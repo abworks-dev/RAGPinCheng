@@ -8,6 +8,13 @@ on:
         description: Confirm deployment of origin/master to production
         required: true
         type: boolean
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+    branches:
+      - master
 
 permissions:
   contents: read
@@ -18,7 +25,7 @@ concurrency:
 
 jobs:
   deploy:
-    if: ${{ inputs.confirm_production }}
+    if: ${{ (github.event_name == 'workflow_dispatch' && inputs.confirm_production == true) || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') }}
     runs-on:
       - self-hosted
       - windows
