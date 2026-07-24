@@ -43,6 +43,8 @@ function SourceCard({
   const [submitting, setSubmitting] = useState(false);
   const [sent, setSent] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [copyErr, setCopyErr] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
   const PREVIEW_CHARS = 400;
   const cleanText = stripMarkdown(s.text);
@@ -126,15 +128,36 @@ function SourceCard({
         <div className="font-medium text-ink">
           {i + 1}. [{s.doc_title}] <span className="text-muted">{locator(s)}</span>
         </div>
-        <button
-          type="button"
-          title="报告引用有误"
-          onClick={() => setReportOpen((v) => !v)}
-          className="text-xs text-muted hover:text-red-600 shrink-0"
-        >
-          {sent ? "已报告" : "⚠ 报错"}
-        </button>
+        <div className="flex items-center gap-1 shrink-0">
+          <button
+            type="button"
+            title="复制来源"
+            onClick={async () => {
+              try {
+                const text = `[${s.doc_title}] ${locator(s)}\n${s.section_path || ""}\n\n${stripMarkdown(s.text)}`;
+                await navigator.clipboard.writeText(text);
+                setCopied(true);
+                setCopyErr(null);
+                window.setTimeout(() => setCopied(false), 1500);
+              } catch (e: any) {
+                setCopyErr(e?.message || "复制失败");
+              }
+            }}
+            className="text-xs text-muted hover:text-accent transition-colors"
+          >
+            {copied ? "✓ 已复制" : "📋 复制"}
+          </button>
+          <button
+            type="button"
+            title="报告引用有误"
+            onClick={() => setReportOpen((v) => !v)}
+            className="text-xs text-muted hover:text-red-600"
+          >
+            {sent ? "已报告" : "⚠ 报错"}
+          </button>
+        </div>
       </div>
+      {copyErr && <div className="text-xs text-red-600 mt-1">{copyErr}</div>}
       {hasBreadcrumb && (
         <div className="text-xs text-muted mt-1 leading-relaxed break-words">
           § {crumbs.join(" › ")}
