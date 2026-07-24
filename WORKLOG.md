@@ -393,3 +393,12 @@
 - 文件：`WORKLOG.md`（未修改业务代码、工作流、GitHub 设置或生产服务器）
 - 验证：核对私库最新已推送提交为 `946306f`，并由用户反馈私库 CI 已通过；根据用户提供的生产服务器命令结果确认 `docker version`、`docker compose version` 和 `nvidia-smi` 均正常；由用户确认 Deploy Key 已添加且未授予写权限；用户测试默认 SSH 地址读取私库时出现 `Permission denied (publickey)`，判断为 Git 未指定专用 Deploy Key；指导配置 SSH Host 别名后，用户确认私库读取成功且 master 为 `946306f`；生产目录只读检查显示工作区干净，当前 HEAD 为公开基线 `242a4ea`，`origin` 仍为旧同名 HTTPS 地址；未连接生产服务器。
 - 待办/风险：用户已批准切换生产远端并快进同步私库；生产远端已确认切为 `origin` SSH 私库、`public` 公开备份、`upstream` 原作者仓库，生产目录已快进同步到私库最新 `946306f` 且工作区干净；检查 `D:\actions-runner\.runner` 不存在，判断 runner 尚未完成注册或当前目录不是已配置 runner 目录；用户已重新下载并解压 GitHub Actions Runner，确认存在 `config.cmd`；首次注册返回 GitHub API 404，判断需重新从私库 Runner 页面生成与该仓库匹配的新 token；用户反馈 runner 后续已配置完成，GitHub 显示在线、标签正确且 Windows 服务 Running；生产部署前检查确认 `.env` 存在、HEAD 为 `946306f`、工作区干净、Docker Compose 配置无错误，仓库变量 `DEPLOY_HTTP_PROXY` 未设置且按当前网络条件可为空；用户在 GitHub Code 页面确认 `.github/workflows/deploy-production.yml` 已存在且包含 `workflow_dispatch`，刷新后 GitHub Actions 已显示 `Deploy production` 手动运行入口；首次手动部署在 runner 执行临时 PowerShell 脚本时被 Windows Execution Policy 拒绝，调整后重新运行 workflow 已绿色通过，用户确认生产容器状态正常。
+
+## 2026-07-25
+
+### 00:06 — 改为 CI 成功后自动部署
+
+- 完成：按用户批准的 R2 方案，将生产部署 workflow 保留手动 `workflow_dispatch` 入口，同时新增 `workflow_run` 触发，使 `master` 分支 CI 成功后自动触发生产部署；失败或未完成的 CI 不会触发部署。
+- 文件：`.github/workflows/deploy-production.yml`、`WORKLOG.md`
+- 验证：核对 `CI` 工作流名称与 `deploy-production.yml` 的 `workflow_run.workflows` 匹配；`git diff --check` 通过；人工核对 job 条件仅允许手动确认或 CI success 进入部署。未触发生产部署。
+- 待办/风险：该提交推送到 `master` 后会先运行 CI，CI 成功将自动触发生产部署；后续任何直接推送到 `master` 且 CI 通过的提交都会影响生产，日常半成品应推到功能分支而不是 `master`。
