@@ -379,3 +379,17 @@
 - 文件：`.github/workflows/ci.yml`、`.github/workflows/deploy-production.yml`、`scripts/deploy-production.ps1`、`Git同步部署与测试流程.md`、`WORKLOG.md`（未修改业务代码）
 - 验证：`git diff --cached --check` 通过；首次部署提交为 `9bfa6bd`；远端复核确认私库和本地均为 `9bfa6bd`，公开仓库仍为 `242a4ea`，未收到部署配置；推送触发私库 CI，但手动生产部署未触发。未切换生产服务器或注册 runner。
 - 待办/风险：需查看私库 CI 结果；随后在生产服务器配置私库认证并切换 `origin`，该步骤涉及生产部署链路，执行前需再次确认目标与回滚方式。
+
+### 12:35 — 规划生产服务器切换私库
+
+- 完成：在私库首次推送完成后，规划以只读 GitHub Deploy Key 为生产服务器配置私库访问，保留 `public` 远端作为回滚入口；将生产机远端切换、快进同步部署文件、Runner 服务账号和 Docker 权限验证拆分为受控步骤，明确同步代码不等于启动生产部署。
+- 文件：`WORKLOG.md`（未修改业务代码、生产服务器、GitHub Deploy Key 或远端配置）
+- 验证：核对本地工作区干净、`master` 跟踪私库 `origin/master`，且 `public` 与 `upstream` 远端仍保留；未读取私库 CI 状态、未连接生产服务器。
+- 待办/风险：执行前需确认私库 CI 已通过和生产 Runner 使用的 Windows 账号；生产服务器生成的私钥不得离开服务器，切换 `origin` 与拉取代码属于 R2 部署链路变更，需用户明确批准。
+
+### 12:37 — 启动生产私库访问分步引导
+
+- 完成：将生产服务器私库接入拆分为逐步确认流程，指导用户在私库 Actions 页面核对最新 CI 的分支、提交和检查结果；用户已确认 CI 绿色通过。继续确认生产服务器当前 Windows 账号为 `fjpcsever\administrator`，且 Docker、Docker Compose 和 NVIDIA GPU 命令均可用，可作为生产 Runner 执行账号；用户已在私库添加只读 Deploy Key，未勾选写权限。
+- 文件：`WORKLOG.md`（未修改业务代码、工作流、GitHub 设置或生产服务器）
+- 验证：核对私库最新已推送提交为 `946306f`，并由用户反馈私库 CI 已通过；根据用户提供的生产服务器命令结果确认 `docker version`、`docker compose version` 和 `nvidia-smi` 均正常；由用户确认 Deploy Key 已添加且未授予写权限；用户测试默认 SSH 地址读取私库时出现 `Permission denied (publickey)`，判断为 Git 未指定专用 Deploy Key；指导配置 SSH Host 别名后，用户确认私库读取成功且 master 为 `946306f`；生产目录只读检查显示工作区干净，当前 HEAD 为公开基线 `242a4ea`，`origin` 仍为旧同名 HTTPS 地址；未连接生产服务器。
+- 待办/风险：用户已批准切换生产远端并快进同步私库；生产远端已确认切为 `origin` SSH 私库、`public` 公开备份、`upstream` 原作者仓库，生产目录已快进同步到私库最新 `946306f` 且工作区干净；检查 `D:\actions-runner\.runner` 不存在，判断 runner 尚未完成注册或当前目录不是已配置 runner 目录；用户已重新下载并解压 GitHub Actions Runner，确认存在 `config.cmd`；首次注册返回 GitHub API 404，判断需重新从私库 Runner 页面生成与该仓库匹配的新 token；用户反馈 runner 后续已配置完成，GitHub 显示在线、标签正确且 Windows 服务 Running；生产部署前检查确认 `.env` 存在、HEAD 为 `946306f`、工作区干净、Docker Compose 配置无错误，仓库变量 `DEPLOY_HTTP_PROXY` 未设置且按当前网络条件可为空；用户在 GitHub Code 页面确认 `.github/workflows/deploy-production.yml` 已存在且包含 `workflow_dispatch`，刷新后 GitHub Actions 已显示 `Deploy production` 手动运行入口；首次手动部署在 runner 执行临时 PowerShell 脚本时被 Windows Execution Policy 拒绝，调整后重新运行 workflow 已绿色通过，用户确认生产容器状态正常。
