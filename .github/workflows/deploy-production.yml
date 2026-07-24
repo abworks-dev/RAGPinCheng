@@ -1,3 +1,4 @@
+# Manual production deployment
 name: Deploy production
 
 on:
