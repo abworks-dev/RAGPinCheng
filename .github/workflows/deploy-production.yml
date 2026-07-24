@@ -1,0 +1,46 @@
+name: Deploy production
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_production:
+        description: Confirm deployment of origin/master to production
+        required: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-deployment
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: ${{ inputs.confirm_production }}
+    runs-on:
+      - self-hosted
+      - windows
+      - production
+      - gpu
+    timeout-minutes: 60
+
+    steps:
+      - name: Deploy master on production server
+        shell: powershell
+        env:
+          DEPLOY_HTTP_PROXY: ${{ vars.DEPLOY_HTTP_PROXY }}
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+
+          $parameters = @{
+            RepositoryPath = 'D:\RAGPinCheng'
+            BackupDirectory = 'D:\RAGBackups'
+          }
+
+          if ($env:DEPLOY_HTTP_PROXY) {
+            $parameters.ProxyUrl = $env:DEPLOY_HTTP_PROXY
+          }
+
+          & 'D:\RAGPinCheng\scripts\deploy-production.ps1' @parameters
