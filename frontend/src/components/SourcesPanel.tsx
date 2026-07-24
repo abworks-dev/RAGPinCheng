@@ -135,12 +135,24 @@ function SourceCard({
             onClick={async () => {
               try {
                 const text = `[${s.doc_title}] ${locator(s)}\n${s.section_path || ""}\n\n${stripMarkdown(s.text)}`;
-                await navigator.clipboard.writeText(text);
+                if (navigator.clipboard?.writeText) {
+                  await navigator.clipboard.writeText(text);
+                } else {
+                  // Fallback for HTTP (non-secure context)
+                  const ta = document.createElement("textarea");
+                  ta.value = text;
+                  ta.style.position = "fixed";
+                  ta.style.opacity = "0";
+                  document.body.appendChild(ta);
+                  ta.select();
+                  document.execCommand("copy");
+                  document.body.removeChild(ta);
+                }
                 setCopied(true);
                 setCopyErr(null);
                 window.setTimeout(() => setCopied(false), 1500);
               } catch (e: any) {
-                setCopyErr(e?.message || "复制失败");
+                setCopyErr(e?.message || "复制失败，请手动复制");
               }
             }}
             className="text-xs text-muted hover:text-accent transition-colors"
