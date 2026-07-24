@@ -396,6 +396,36 @@
 
 ## 2026-07-25
 
+### 来源面板分类分组显示
+
+- 完成：来源面板按分类分组（教学视频/公司标准/设计规范等），每组可折叠，组标题带图标和数量；单个卡片不再重复显示分类标签
+- 文件：`frontend/src/components/SourcesPanel.tsx`
+- 验证：`npm run build` 因安全分类器不可用未执行
+
+### 来源面板关键词高亮
+
+- 完成：将用户检索词中的关键词在来源文本中加黄色 `<mark>` 背景高亮，使用 `dangerouslySetInnerHTML` 渲染
+- 文件：`frontend/src/components/SourcesPanel.tsx`、`frontend/src/components/Message.tsx`
+- 验证：`npm run build` 因安全分类器不可用未执行
+
+### 来源预览文本移除 HTML 标签
+
+- 完成：在 `stripMarkdown()` 中增加 HTML 标签清理（`<[^>]*>` 正则），并补充面包屑和 Tooltip 中 `section_path` 的 HTML 清理
+- 文件：`frontend/src/utils/markdown.ts`、`frontend/src/components/SourcesPanel.tsx`、`frontend/src/components/Message.tsx`
+- 验证：`npm run build` 因安全分类器不可用未执行
+
+### 来源卡片复制按钮
+
+- 完成：每个来源卡片右上角添加 `📋 复制` 按钮，点击复制文档标题、章节路径和文本到剪贴板
+- 文件：`frontend/src/components/SourcesPanel.tsx`
+- 验证：`npm run build` 因安全分类器不可用未执行
+
+### 复制按钮 HTTP 兼容性修复
+
+- 完成：`navigator.clipboard` 在 HTTP 下不可用，增加 `document.execCommand('copy')` textarea 回退方案
+- 文件：`frontend/src/components/SourcesPanel.tsx`
+- 验证：`npm run build` 因安全分类器不可用未执行
+
 ### 00:06 — 改为 CI 成功后自动部署
 
 - 完成：按用户批准的 R2 方案，将生产部署 workflow 保留手动 `workflow_dispatch` 入口，同时新增 `workflow_run` 触发，使 `master` 分支 CI 成功后自动触发生产部署；失败或未完成的 CI 不会触发部署。
