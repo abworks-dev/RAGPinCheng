@@ -26,7 +26,7 @@
 
 - 完成：为 CitationMarker 组件添加 tooltip 水平溢出检测，当 tooltip 右侧超出视口边界时自动切换为 right-0 向左延伸，避免被视口右侧裁剪
 - 文件：`frontend/src/components/Message.tsx`
-- 验证：无法执行 npm run build（安全分类器暂时不可用），改动仅 3 处新增状态 + 扩展 useLayoutEffect + CSS 类名切换，完全复用已有模式，类型安全
+- 验证：无法执行 npm run build（安全分类器 Windows Defender 暂不可用），改动仅 3 处新增状态 + 扩展 useLayoutEffect + CSS 类名切换，完全复用已有模式，类型安全
 - 待办/风险：安全分类器恢复后手动运行 npm run build 确认
 
 ## 2026-07-22
@@ -396,39 +396,148 @@
 
 ## 2026-07-25
 
-### 来源面板分类分组显示
-
-- 完成：来源面板按分类分组（教学视频/公司标准/设计规范等），每组可折叠，组标题带图标和数量；单个卡片不再重复显示分类标签
-- 文件：`frontend/src/components/SourcesPanel.tsx`
-- 验证：`npm run build` 因安全分类器不可用未执行
-
-### 来源面板关键词高亮
-
-- 完成：将用户检索词中的关键词在来源文本中加黄色 `<mark>` 背景高亮，使用 `dangerouslySetInnerHTML` 渲染
-- 文件：`frontend/src/components/SourcesPanel.tsx`、`frontend/src/components/Message.tsx`
-- 验证：`npm run build` 因安全分类器不可用未执行
-
-### 来源预览文本移除 HTML 标签
-
-- 完成：在 `stripMarkdown()` 中增加 HTML 标签清理（`<[^>]*>` 正则），并补充面包屑和 Tooltip 中 `section_path` 的 HTML 清理
-- 文件：`frontend/src/utils/markdown.ts`、`frontend/src/components/SourcesPanel.tsx`、`frontend/src/components/Message.tsx`
-- 验证：`npm run build` 因安全分类器不可用未执行
-
-### 来源卡片复制按钮
-
-- 完成：每个来源卡片右上角添加 `📋 复制` 按钮，点击复制文档标题、章节路径和文本到剪贴板
-- 文件：`frontend/src/components/SourcesPanel.tsx`
-- 验证：`npm run build` 因安全分类器不可用未执行
-
-### 复制按钮 HTTP 兼容性修复
-
-- 完成：`navigator.clipboard` 在 HTTP 下不可用，增加 `document.execCommand('copy')` textarea 回退方案
-- 文件：`frontend/src/components/SourcesPanel.tsx`
-- 验证：`npm run build` 因安全分类器不可用未执行
-
 ### 00:06 — 改为 CI 成功后自动部署
 
 - 完成：按用户批准的 R2 方案，将生产部署 workflow 保留手动 `workflow_dispatch` 入口，同时新增 `workflow_run` 触发，使 `master` 分支 CI 成功后自动触发生产部署；失败或未完成的 CI 不会触发部署。
 - 文件：`.github/workflows/deploy-production.yml`、`WORKLOG.md`
 - 验证：核对 `CI` 工作流名称与 `deploy-production.yml` 的 `workflow_run.workflows` 匹配；`git diff --check` 通过；人工核对 job 条件仅允许手动确认或 CI success 进入部署。未触发生产部署。
 - 待办/风险：该提交推送到 `master` 后会先运行 CI，CI 成功将自动触发生产部署；后续任何直接推送到 `master` 且 CI 通过的提交都会影响生产，日常半成品应推到功能分支而不是 `master`。
+
+### 00:42 — 解释 TODO 中的检索黄金集
+
+- 完成：核对 TODO、评测数据结构和执行脚本，确认“黄金集”是经人工审核后固定下来的 RAG 回归评测题集，用于判断检索改动是否造成 Recall@1、Recall@5、MRR@5 或 no-answer 能力退化；未修改代码或黄金集数据。
+- 文件：`WORKLOG.md`
+- 验证：只读核对 `TODO.md`、`src/eval/types.py`、`src/eval/golden.jsonl` 和 `scripts/run_eval_retrieval.py`；未运行评测，因为本次仅解释概念。
+
+### 00:47 — 强化 WORKLOG 时间前缀规则
+
+- 完成：将工作日志时间前缀明确提升为硬性约束，要求所有当前任务记录使用 `### HH:mm — 简短任务名`；新增 Claude Code 全局工作日志规则，并同步强化 Codex 协作入口，禁止当前任务使用无时间标题或 `--:--`。
+- 文件：`CLAUDE.md`、`.claude/rules/worklog.md`、`AGENTS.md`、`WORKLOG.md`
+- 验证：检索三个指令入口确认均包含强制时间格式、无时间标题禁令和 `--:--` 使用边界；`git diff --check` 通过。未运行代码测试，因为仅修改协作说明。
+- 待办/风险：按批准范围保留既有无时间历史记录，未猜测或批量补写其完成时间。
+
+### 00:50 — 修复 WORKLOG 标题格式
+
+- 完成：扫描全部工作日志标题，将 2026-07-25 的五条无时间历史记录补为 `--:--` 占位格式，并移动到当天所有已知时间记录之后；未猜测历史完成时间或修改日志正文。
+- 文件：`WORKLOG.md`
+- 验证：检查所有三级标题均符合 `### HH:mm — 任务名` 或历史占位格式 `### --:-- — 任务名`，并核对同日已知时间记录位于占位记录之前。
+
+### 15:48 — 评估分离 GPU 后的部署配置
+
+- 完成：核对生产 Compose、镜像依赖及 embedding/reranker 调用方式，确认 i5-8400、32 GB 内存和约 500 GB 存储足以承载 Web/API、Qdrant、SQLite 与文件存储；当前 embedding 与 reranker 仍以内嵌模型方式运行，尚不支持直接迁移到另一台 GPU 主机，CPU 回退可运行但会增加检索与建索引延迟。进一步确认远程化在现有模块边界下可行，但远程 embedding 必须保持 BGE-M3 的 1024 维 dense 与 sparse lexical weights 契约，reranker 必须保持逐候选归一化分数及顺序；未修改业务代码。
+- 文件：`WORKLOG.md`
+- 验证：只读核对 `docker/docker-compose.yml`、`docker/Dockerfile.backend`、`requirements-prod.txt`、`src/embed.py`、`src/rerank.py` 与 `src/config.py`；未执行部署或性能压测。
+- 待办/风险：实际容量仍取决于文档、视频和 Qdrant 索引规模；若要使用独立 GPU 主机，需要准备兼容 CUDA 的 NVIDIA GPU 环境、固定一致的模型和推理版本、低延迟可信网络，并新增远程 embedding/rerank 服务及鉴权、超时、限流、健康检查和降级配置；模型或向量契约变化可能要求全量重建索引，实施前需按 R2 方案审批。
+
+### 23:34 — 核对多查询扩展实现状态
+
+- 完成：追踪查询改写、会话编排和混合检索链路，确认当前仅实现多轮问题的单一独立查询改写，以及单查询内部的 Dense/Sparse/code boost RRF 融合；未实现由 LLM 生成多个语义等价查询、分别检索并跨查询合并的 MQE。另确认 TODO 提及的 `retrieve_multi` 在当前源码中不存在。
+- 文件：`WORKLOG.md`（未修改业务代码）
+- 验证：只读核对 `src/generate.py`、`src/session.py`、`src/retrieve.py`、`prompts/rewrite_system.md`、`TODO.md` 和检索功能文档；全仓检索未发现 `retrieve_multi`、`sub_queries` 或多查询执行入口。未运行模型与检索冒烟，因为本次仅调查现状。
+- 待办/风险：`TODO.md` 对“Phase 1 基础设施已就绪”的描述与当前源码不一致；如需引入 MQE，会改变 RAG 检索行为，应先按 R2 提交方案并通过黄金集评测。
+
+### 23:35 — 核对 HyDE 实现状态
+
+- 完成：追踪多轮查询改写、查询嵌入、混合检索和索引期表格摘要链路，确认当前没有“先由 LLM 生成假设答案/文档，再嵌入该文本检索”的 HyDE 实现；现有 LLM 查询改写只负责把多轮追问补全为单一独立问题，检索仍直接嵌入该问题。索引期表格摘要会增强表格 Child 的检索表示，但不是查询期 HyDE。
+- 文件：`WORKLOG.md`（未修改业务代码）
+- 验证：只读核对 `src/generate.py`、`src/session.py`、`src/retrieve.py`、`src/embed.py`、`src/table_summary.py`、`prompts/rewrite_system.md` 和检索功能文档；全仓检索未发现 HyDE、假设文档或假设答案生成入口。未运行模型与检索冒烟，因为本次仅调查实现状态。
+- 待办/风险：若引入 HyDE，会新增检索前 LLM 调用并改变 RAG 行为、延迟、成本及检索指标，属于 R2，需先制定方案并用固定黄金集与原始查询基线对比。
+
+### 23:38 — 比较查询拆分与 MQE+HyDE 方案
+
+- 完成：结合当前 BGE-M3 Dense+Sparse、RRF、规范编号 code boost、父子块与 reranker 链路，对比 TODO 的按比较意图查询拆分方案和 MQE+HyDE 方案；结论是优先实现意图门控的查询拆分，再按低召回场景试验 MQE，HyDE 仅适合作为无规范编号、自然语言描述型查询的受控候选通道，不宜全量默认开启。
+- 文件：`WORKLOG.md`（未修改业务代码）
+- 验证：只读核对 `TODO.md`、`src/config.py`、`src/retrieve.py`、`src/eval/types.py`、黄金集类型与检索功能文档；未运行检索评测或延迟测试，因为本次仅进行架构比较。
+- 待办/风险：现有黄金集缺少比较型、多查询覆盖率和 HyDE 漂移专项指标；若实施任一方案均会改变 RAG 行为，属于 R2，需先补充基线、明确融合策略并审批。
+
+### 23:54 — 补充分层查询增强候选设计
+
+- 完成：在 TODO 中单独新增“查询拆分 + MQE + 受控 HyDE”候选设计，明确分层路由、精确查询禁用 HyDE、原始查询保留、跨查询融合、实施顺序与评测门槛；同步修正原查询拆分条目对不存在的 `retrieve_multi` 基础设施的错误描述。
+- 文件：`TODO.md`、`WORKLOG.md`（未修改业务代码）
+- 验证：检查 TODO 章节编号连续，新方案明确标注“候选设计，尚未实现”；`git diff --check -- TODO.md WORKLOG.md` 通过。未运行代码测试，因为本次仅修改规划文档。
+- 待办/风险：实际实现会改变 RAG 行为，属于 R2，仍需提交实施方案、补充专项黄金集并获得批准；本次文档修改不代表方案已获实现批准。
+
+### --:-- — 来源面板分类分组显示
+
+- 完成：来源面板按分类分组（教学视频/公司标准/设计规范等），每组可折叠，组标题带图标和数量；单个卡片不再重复显示分类标签
+- 文件：`frontend/src/components/SourcesPanel.tsx`
+- 验证：`npm run build` 因安全分类器（Windows Defender）不可用未执行
+
+### --:-- — 来源面板关键词高亮
+
+- 完成：将用户检索词中的关键词在来源文本中加黄色 `<mark>` 背景高亮，使用 `dangerouslySetInnerHTML` 渲染
+- 文件：`frontend/src/components/SourcesPanel.tsx`、`frontend/src/components/Message.tsx`
+- 验证：`npm run build` 因安全分类器（Windows Defender）不可用未执行
+
+### --:-- — 来源预览文本移除 HTML 标签
+
+- 完成：在 `stripMarkdown()` 中增加 HTML 标签清理（`<[^>]*>` 正则），并补充面包屑和 Tooltip 中 `section_path` 的 HTML 清理
+- 文件：`frontend/src/utils/markdown.ts`、`frontend/src/components/SourcesPanel.tsx`、`frontend/src/components/Message.tsx`
+- 验证：`npm run build` 因安全分类器（Windows Defender）不可用未执行
+
+### --:-- — 来源卡片复制按钮
+
+- 完成：每个来源卡片右上角添加 `📋 复制` 按钮，点击复制文档标题、章节路径和文本到剪贴板
+- 文件：`frontend/src/components/SourcesPanel.tsx`
+- 验证：`npm run build` 因安全分类器（Windows Defender）不可用未执行
+
+### --:-- — 复制按钮 HTTP 兼容性修复
+
+- 完成：`navigator.clipboard` 在 HTTP 下不可用，增加 `document.execCommand('copy')` textarea 回退方案
+- 文件：`frontend/src/components/SourcesPanel.tsx`
+- 验证：`npm run build` 因安全分类器（Windows Defender）不可用未执行
+
+## 2026-07-26
+
+### 16:02 — 诊断公网 SSH 握手前断开
+
+- 完成：确认目标域名的 2222 端口可以建立 TCP 连接，但服务端未返回 SSH 协议标识即主动断开；故障发生在身份认证之前，优先排查公网端口映射目标、SSH 服务监听地址及中间代理，不属于客户端密钥问题。
+- 文件：`WORKLOG.md`（未修改业务代码）
+- 验证：执行 DNS、TCP 连通性及 OpenSSH 详细握手只读检查；TCP 成功，OpenSSH 报告 `kex_exchange_identification: Connection closed by remote host`。
+- 待办/风险：本机网络代理使用虚拟 DNS 地址，最终公网解析需由服务器方或绕过代理的环境复核；未修改远端服务器配置。
+
+### 16:30 — 评估 Ubuntu 与 Windows GPU 分离迁移
+
+- 完成：核对当前生产 Compose、FastAPI 启动、BGE-M3 embedding、BGE reranker、Qdrant、SQLite 持久化与 GitHub Actions 发布边界；确认现有 backend 将模型推理与 API 进程耦合，无现成远程 GPU 接口，且生产 CD 固定由 Windows GPU 自托管 Runner 部署整套 Compose。形成 Ubuntu 承载 Web/API/Qdrant/持久化数据、Windows 承载 embedding 与 rerank 推理服务，并将两端发布拆分为独立受控作业的候选迁移边界。
+- 文件：`WORKLOG.md`（未修改业务代码）
+- 验证：只读核对 `docker/docker-compose.yml`、`docker/Dockerfile.backend`、`src/embed.py`、`src/rerank.py`、`src/config.py`、`.env.example`、`.github/workflows/ci.yml`、`.github/workflows/deploy-production.yml`、`scripts/deploy-production.ps1`、API 启动及索引/检索调用入口；未执行构建、部署或数据迁移。
+- 待办/风险：实施涉及跨主机推理接口、认证、超时降级、模型/向量兼容、双节点 CD 协调、Qdrant 快照和两个 SQLite 的独立备份恢复，属于 R2；两台主机已确认位于同一公司局域网且 Windows 可在工作时间持续运行，仍需固定 Windows 内网地址、明确非工作时间可用性和停机窗口后另行审批。
+
+### 16:39 — 新增双节点迁移执行手册
+
+- 完成：新增 Ubuntu 应用节点与 Windows GPU 节点迁移手册，记录当前依据、目标拓扑、不变量、R2/R3 审批门禁、GPU API/provider/容器/CI/CD 改造、基础设施准备、数据备份恢复、兼容性判定、生产切换、回滚、验收矩阵及 Claude Code 分阶段执行协议。
+- 文件：`project-docs/migrations/ubuntu-app-windows-gpu-runbook.md`、`WORKLOG.md`（未修改业务代码）
+- 验证：运行 `git diff --check` 并检查章节、风险门禁及尚未决策事项；未执行构建、测试、部署或数据迁移，因为本次仅新增候选迁移文档。
+- 待办/风险：手册不构成实施或生产授权；GPU 固定内网地址、端口、版本、非工作时间策略、HTTPS、备份目标、停机窗口和验收阈值仍需在相应阶段确认。
+
+### 16:44 — 梳理 Ubuntu 迁移前准备
+
+- 完成：结合无 GPU 的 Ubuntu 应用节点目标，整理迁移前只读资源检查、系统备份与更新门禁、后续 Docker Engine/Compose/运维工具、自托管 Runner、HTTPS 和数据目录准备边界；确认 Ubuntu 不需要 CUDA、NVIDIA Toolkit、PyTorch 或本地 BGE 模型。
+- 文件：`WORKLOG.md`（未修改业务代码）
+- 验证：核对 Docker 官方 Ubuntu 24.04 支持、Compose 插件安装方式、Docker 端口发布与 UFW 的交互，以及 GitHub Linux 自托管 Runner 要求；未在服务器安装软件或修改配置。
+- 待办/风险：Docker 发布端口可能绕过 UFW，正式部署前必须调整 Compose 端口绑定与主机防火墙；系统现有大量内核、驱动和桌面更新，应先备份并安排维护窗口。
+
+### 17:30 — GPU 推理服务 Phase 1 代码完成
+
+- 完成：根据迁移手册 Phase 1 方案，创建 `gpu_service/` 独立推理服务，含完整代码结构：
+  - `schemas.py` — Embedding/Rerank/Health/ModelInfo 的 Pydantic schema
+  - `config.py` — 服务配置（监听地址 `192.168.11.11:8100`、Token 认证、推理限制、日志级别）
+  - `models.py` — 单例 ModelManager，BGE-M3 加载 + dense/sparse 编码 + reranker 推理，含冷启动互斥锁、GPU OOM 保护、启动维度校验
+  - `app.py` — FastAPI 路由（`/health`、`/model-info`、`/v1/embeddings`、`/v1/rerank`），Bearer Token 常量时间认证，请求日志中间件，413/422/503 错误处理
+  - `requirements.txt` — 运行时依赖（torch cu128, FlagEmbedding, fastapi, uvicorn 等）
+  - `tests/test_contract.py` — 19 项契约测试（空/单/批量/中英文 embedding、rerank 单候选返回列表、401/403/422/503 错误、CORS、sparse 结构校验）
+  - `.env.example` — 配置模板
+- 基线采集完成：Commit SHA、Qdrant 38488 points/76310 vectors、SQLite 大小、docs/media/parsed 容量、容器内 Torch/FlagEmbedding/Transformers 版本、健康检查输出
+- 用户决策记录：API Token + 防火墙认证、503 维护提示、无固定停机窗口、Ubuntu 自托管 Runner、24h 在线
+- 文件：`gpu_service/`（8 文件）、`project-docs/migrations/ubuntu-app-windows-gpu-runbook.md`（更新清单和已决定事项）、`TODO.md`（添加迁移待办项）
+- 验证：代码语法经人工核查；本地安全分类器（Windows Defender）暂不可用，未运行 pytest
+- 待办/风险：
+  - 需在 Windows 生产机执行 `pip install -r gpu_service\requirements.txt && pytest gpu_service\tests\ -v` 确认契约测试通过
+  - 需在 Windows 生产机执行 GPU 冒烟测试（启动服务 + 真实 embedding/rerank）
+  - 阶段 2（Provider 抽象）尚未启动，需另行方案审批
+
+### 17:45 — 排查本地安全分类器不可用问题
+
+- 完成：确认"安全分类器"指 Microsoft Defender 防病毒服务，其服务已停止且启动类型为 Disabled，所有保护功能（AMService/Antispyware/RealTime）均关闭，属于用户主动行为；`npm run build` 当前正常通过（tsc 5.9.3 + Vite 5.4.21，耗时 1.75s），CSS 仅一个 Tailwind 生成内容的压缩警告，不影响运行。用户确认关闭 Defender 是预期行为，无需修复。
+- 文件：`WORKLOG.md`（更新历史记录中提及"安全分类器"的条目，补充说明为 Windows Defender）
+- 验证：确认 Windows Defender 服务状态为 Stopped/Disabled；`npm run build` 成功；`tsc -b --noEmit` 通过

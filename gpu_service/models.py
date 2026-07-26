@@ -1,0 +1,157 @@
+from __future__ import annotations
+
+import logging
+import threading
+from typing import Tuple
+
+import torch
+
+from gpu_service.config import EMBED_DIM, EMBED_MODEL, RERANKER_MODEL
+
+logger = logging.getLogger(__name__)
+
+
+class ModelManager:
+    """Singleton model manager for BGE-M3 embedding + reranker.
+
+    Both models are loaded once and shared across requests.  A threading lock
+    prevents multiple workers from loading simultaneously (cold-start race),
+    and a simple semaphore prevents embedding + rerank from running concurrently
+    and blowing GPU memory.
+    """
+
+    _instance: ModelManager | None = None
+    _lock: threading.Lock = threading.Lock()
+    _load_lock: threading.Lock = threading.Lock()
+    _gpu_semaphore: threading.Semaphore = threading.Semaphore(1)
+
+    def __new__(cls) -> ModelManager:
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    inst = super().__new__(cls)
+                    inst._initialized = False
+                    inst._embed_model = None
+                    inst._reranker = None
+                    inst._device = "cpu"
+                    cls._instance = inst
+        return cls._instance
+
+    # ── Public API ──────────────────────────────────────────────────────────
+
+    @property
+    def is_loaded(self) -> bool:
+        return self._initialized and self._embed_model is not None
+
+    @property
+    def device(self) -> str:
+        return self._device
+
+    def load(self) -> None:
+        """Load both models into GPU memory.  Thread-safe; only one caller
+        proceeds, others block until loading completes."""
+        if self._initialized:
+            return
+        with self._load_lock:
+            if self._initialized:
+                return
+            self._do_load()
+
+    def embed(self, texts: list[str], normalize: bool = True) -> list[dict]:
+        """Compute dense + sparse embeddings.
+
+        Returns a list of dicts with keys *dense*, *sparse_indices*,
+        *sparse_values*.
+        """
+        if not self._initialized:
+            raise RuntimeError("ModelManager not loaded — call load() first")
+
+        with self._gpu_semaphore:
+            output = self._embed_model.encode(
+                texts,
+                return_dense=True,
+                return_sparse=True,
+                normalize_embeddings=normalize,
+            )
+            # output is a dict with keys:
+            #   dense_vecs  -> np.ndarray shape (N, 1024)
+            #   lexical_weights -> list[dict[int, float]]  (sparse)
+            dense_vecs = output["dense_vecs"]
+            lexical_weights = output["lexical_weights"]
+
+            results = []
+            for i in range(len(texts)):
+                # Sparse: sort indices/values by index for deterministic output
+                indices = sorted(lexical_weights[i].keys())
+                values = [float(lexical_weights[i][idx]) for idx in indices]
+                results.append({
+                    "dense": dense_vecs[i].tolist(),
+                    "sparse_indices": indices,
+                    "sparse_values": values,
+                })
+            return results
+
+    def rerank(self, query: str, passages: list[str], use_header: bool = True) -> list[float]:
+        """Compute reranker scores for query vs each passage."""
+        if not self._initialized:
+            raise RuntimeError("ModelManager not loaded — call load() first")
+
+        with self._gpu_semaphore:
+            if use_header:
+                scores = self._reranker.compute_score(
+                    [[query, p] for p in passages], normalize=True
+                )
+            else:
+                scores = self._reranker.compute_score(
+                    [[query, p] for p in passages], normalize=True
+                )
+            # compute_score returns list[float] for single-query
+            return [float(s) for s in scores]
+
+    # ── Internal ────────────────────────────────────────────────────────────
+
+    def _pick_device(self) -> str:
+        if torch.cuda.is_available():
+            return "cuda"
+        return "cpu"
+
+    def _do_load(self) -> None:
+        self._device = self._pick_device()
+        use_fp16 = self._device == "cuda"
+
+        logger.info(
+            "loading embed model %s on device=%s fp16=%s",
+            EMBED_MODEL, self._device, use_fp16,
+        )
+        from FlagEmbedding import BGEM3FlagModel
+
+        self._embed_model = BGEM3FlagModel(
+            EMBED_MODEL,
+            devices=self._device,
+            use_fp16=use_fp16,
+        )
+
+        logger.info(
+            "loading reranker model %s on device=%s fp16=%s",
+            RERANKER_MODEL, self._device, use_fp16,
+        )
+        from FlagEmbedding import FlagReranker
+
+        self._reranker = FlagReranker(
+            RERANKER_MODEL,
+            devices=self._device,
+            use_fp16=use_fp16,
+        )
+
+        # Quick sanity check: embed a short string to confirm dim and CUDA
+        _test = self._embed_model.encode(
+            ["sanity"], return_dense=True, return_sparse=True, normalize_embeddings=True
+        )
+        actual_dim = _test["dense_vecs"].shape[1]
+        if actual_dim != EMBED_DIM:
+            raise RuntimeError(
+                f"Embedding dimension mismatch: expected {EMBED_DIM}, got {actual_dim}"
+            )
+
+        logger.info("both models loaded successfully (dim=%d, device=%s)", actual_dim, self._device)
+        self._initialized = True
