@@ -39,22 +39,14 @@ ENV PYTHONUNBUFFERED=1 \
     LC_ALL=C.UTF-8
 
 # Minimal system deps:
-#   curl            — used by the healthcheck
-#   build-essential — pip compiles any wheel that doesn't ship prebuilt for
-#                     the target arch (mainly an arm64 concern; most amd64
-#                     wheels are prebuilt on PyPI)
-# Uses Tsinghua mirror for faster apt downloads in China.
+#   curl  — used by the healthcheck
+# Only install what the amd64 runtime actually needs.  build-essential is
+# omitted because all wheels on amd64 are prebuilt on PyPI.
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
-    rm -f /etc/apt/apt.conf.d/docker-clean \
-    && rm -rf /etc/apt/sources.list.d/*.sources /etc/apt/sources.list \
-    && echo "deb https://mirrors.tuna.tsinghua.edu.cn/debian/ trixie main contrib non-free non-free-firmware" > /etc/apt/sources.list \
-    && echo "deb https://mirrors.tuna.tsinghua.edu.cn/debian/ trixie-updates main contrib non-free non-free-firmware" >> /etc/apt/sources.list \
-    && echo "deb https://mirrors.tuna.tsinghua.edu.cn/debian-security trixie-security main contrib non-free non-free-firmware" >> /etc/apt/sources.list \
-    && apt-get update \
+    apt-get update \
     && apt-get install -y --no-install-recommends \
-        curl \
-        build-essential
+        curl
 
 WORKDIR /app
 
