@@ -32,6 +32,21 @@ from src.providers import (
 )
 
 
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
+def _mock_response(status_code: int, json_data: dict | None = None) -> MagicMock:
+    """Build a mock ``httpx.Response`` whose ``raise_for_status`` actually
+    raises ``HTTPStatusError`` for non-2xx codes, matching real behaviour."""
+    resp = MagicMock(spec=httpx.Response)
+    resp.status_code = status_code
+    resp.json.return_value = json_data or {}
+    if status_code >= 400:
+        resp.raise_for_status.side_effect = httpx.HTTPStatusError(
+            f"HTTP {status_code}", request=MagicMock(), response=resp,
+        )
+    return resp
+
+
 # ── Embedding structure ──────────────────────────────────────────────────────
 
 class TestEmbeddingStructure:
@@ -51,9 +66,8 @@ class TestLocalEmbedProvider:
 
     @pytest.fixture
     def mock_model(self):
-        with patch("src.providers.BGEM3FlagModel") as MockModel:
+        with patch("FlagEmbedding.BGEM3FlagModel") as MockModel:
             instance = MockModel.return_value
-            # Simulate encode output
             import numpy as np
             instance.encode.return_value = {
                 "dense_vecs": np.array([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]]),
@@ -95,7 +109,7 @@ class TestLocalRerankProvider:
 
     @pytest.fixture
     def mock_reranker(self):
-        with patch("src.providers.FlagReranker") as MockReranker:
+        with patch("FlagEmbedding.FlagReranker") as MockReranker:
             instance = MockReranker.return_value
             instance.compute_score.return_value = [0.9, 0.3, 0.7]
             yield instance
@@ -150,27 +164,23 @@ class TestRemoteEmbedProvider:
     def mock_client(self):
         with patch("src.providers.httpx.Client") as MockClient:
             client = MockClient.return_value
-            # model-info returns OK
-            info_resp = MagicMock(spec=httpx.Response)
-            info_resp.status_code = 200
-            info_resp.json.return_value = MODEL_INFO_OK
-            # embed returns OK
-            embed_resp = MagicMock(spec=httpx.Response)
-            embed_resp.status_code = 200
-            embed_resp.json.return_value = EMBED_RESPONSE_OK
-
-            # Side effect: first call = model-info, subsequent = embed
-            client.get.return_value = info_resp
-            client.post.return_value = embed_resp
+            client.get.return_value = _mock_response(200, MODEL_INFO_OK)
+            client.post.return_value = _mock_response(200, EMBED_RESPONSE_OK)
             yield client
 
     @pytest.fixture
     def provider(self, mock_client):
         return RemoteEmbedProvider()
 
-    def test_contract_check(self, mock_client):
+    def test_contract_check(self, provider):
         """Should have called /model-info during init."""
-        mock_client.get.assert_called_once_with("/model-info")
+        # provider fixture already constructed RemoteEmbedProvider, which calls
+        # _check_contract() in __init__
+        from src.providers import GPU_SERVICE_URL
+        # The mock client's get was called during __init__
+        import src.providers as p
+        # Access the private client through the provider
+        provider._client.get.assert_called_once_with("/model-info")
 
     def test_encode_batch(self, provider):
         results = provider.encode(["hello", "world"])
@@ -197,9 +207,7 @@ class TestRemoteEmbedProviderErrors:
 
     def test_auth_error(self, mock_client):
         """401 from /model-info raises GpuServiceAuthError."""
-        resp = MagicMock(spec=httpx.Response)
-        resp.status_code = 401
-        mock_client.get.return_value = resp
+        mock_client.get.return_value = _mock_response(401)
         with pytest.raises(GpuServiceAuthError):
             RemoteEmbedProvider()
 
@@ -207,10 +215,7 @@ class TestRemoteEmbedProviderErrors:
         """Wrong embedding dimension raises GpuServiceContractError."""
         info = dict(MODEL_INFO_OK)
         info["embedding_dimension"] = 512
-        resp = MagicMock(spec=httpx.Response)
-        resp.status_code = 200
-        resp.json.return_value = info
-        mock_client.get.return_value = resp
+        mock_client.get.return_value = _mock_response(200, info)
         with pytest.raises(GpuServiceContractError):
             RemoteEmbedProvider()
 
@@ -228,17 +233,8 @@ class TestRemoteEmbedProviderErrors:
 
     def test_embed_503(self, mock_client):
         """503 from embed raises GpuServiceUnavailable."""
-        # model-info ok
-        info_resp = MagicMock(spec=httpx.Response)
-        info_resp.status_code = 200
-        info_resp.json.return_value = MODEL_INFO_OK
-        mock_client.get.return_value = info_resp
-
-        # embed returns 503
-        embed_resp = MagicMock(spec=httpx.Response)
-        embed_resp.status_code = 503
-        mock_client.post.return_value = embed_resp
-
+        mock_client.get.return_value = _mock_response(200, MODEL_INFO_OK)
+        mock_client.post.return_value = _mock_response(503)
         provider = RemoteEmbedProvider()
         with pytest.raises(GpuServiceUnavailable):
             provider.encode(["hello"])
@@ -251,10 +247,7 @@ class TestRemoteRerankProvider:
     def mock_client(self):
         with patch("src.providers.httpx.Client") as MockClient:
             client = MockClient.return_value
-            resp = MagicMock(spec=httpx.Response)
-            resp.status_code = 200
-            resp.json.return_value = RERANK_RESPONSE_OK
-            client.post.return_value = resp
+            client.post.return_value = _mock_response(200, RERANK_RESPONSE_OK)
             yield client
 
     @pytest.fixture
