@@ -43,10 +43,14 @@ ENV PYTHONUNBUFFERED=1 \
 #   build-essential — pip compiles any wheel that doesn't ship prebuilt for
 #                     the target arch (mainly an arm64 concern; most amd64
 #                     wheels are prebuilt on PyPI)
+# Uses Tsinghua mirror for faster apt downloads in China.
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
-    sed -i 's/deb.debian.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.list.d/debian.sources \
-    && rm -f /etc/apt/apt.conf.d/docker-clean \
+    rm -f /etc/apt/apt.conf.d/docker-clean \
+    && rm -rf /etc/apt/sources.list.d/*.sources /etc/apt/sources.list \
+    && echo "deb https://mirrors.tuna.tsinghua.edu.cn/debian/ trixie main contrib non-free non-free-firmware" > /etc/apt/sources.list \
+    && echo "deb https://mirrors.tuna.tsinghua.edu.cn/debian/ trixie-updates main contrib non-free non-free-firmware" >> /etc/apt/sources.list \
+    && echo "deb https://mirrors.tuna.tsinghua.edu.cn/debian-security trixie-security main contrib non-free non-free-firmware" >> /etc/apt/sources.list \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
         curl \
