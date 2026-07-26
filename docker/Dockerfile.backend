@@ -45,7 +45,8 @@ ENV PYTHONUNBUFFERED=1 \
 #                     wheels are prebuilt on PyPI)
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
-    rm -f /etc/apt/apt.conf.d/docker-clean \
+    sed -i 's/deb.debian.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.list.d/debian.sources \
+    && rm -f /etc/apt/apt.conf.d/docker-clean \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
         curl \
@@ -55,9 +56,10 @@ WORKDIR /app
 
 # Production Python deps — no GPU dependencies (torch, FlagEmbedding, etc.)
 # since those run on the separate Windows GPU inference service.
+# Uses Tsinghua mirror for faster pip downloads in China.
 COPY requirements-prod.txt ./
 RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
-    pip install -r requirements-prod.txt
+    pip install -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements-prod.txt
 
 # 2) Application code. Everything the runtime + scripts/build_index.py needs.
 COPY src/ ./src/
