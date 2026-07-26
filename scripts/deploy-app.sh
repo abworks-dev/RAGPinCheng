@@ -63,13 +63,13 @@ fi
 echo "  GPU service OK (api=$API_VER, dim=$EMBED_DIM)"
 
 # ── 3. Pull latest code ───────────────────────────────────────────────────
-if [ "${SKIP_GIT_PULL:-0}" != "1" ]; then
-    echo ">> Pulling latest code"
-    cd "$REPO_PATH"
-    git pull origin master
-else
-    echo ">> Skipping git pull (using checked-out code)"
+echo ">> Pulling latest code"
+cd "$REPO_PATH"
+# Use GitHub Actions token for authentication
+if [ -n "${GIT_TOKEN:-}" ]; then
+    git remote set-url origin "https://x-access-token:${GIT_TOKEN}@github.com/abworks-dev/RAGPinCheng.git"
 fi
+git pull origin master
 
 # ── 4. Backup current state ───────────────────────────────────────────────
 echo ">> Backing up current state to ${BACKUP_PATH}"
