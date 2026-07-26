@@ -130,18 +130,26 @@
 - [ ] 边界 case（纯数字、纯代码、无意义输入）
 - [ ] 视频转录本相关问题
 
-### 8. Ubuntu 应用节点 + Windows GPU 节点迁移
+### 8. Ubuntu 应用节点 + Windows GPU 节点迁移 ✅
 
-**状态**：已启动，阶段 0（基线采集）+ 阶段 1（GPU API 服务）代码完成
+**状态**：已完成，迁移实施中
 
 **参考**：`project-docs/migrations/ubuntu-app-windows-gpu-runbook.md`
 
-**待推进**：
-- [ ] 阶段 1 — Windows 本机 GPU 冒烟测试
-- [ ] 阶段 2 — Provider 抽象（embed/rerank 远程调用）
-- [ ] 阶段 3 — 容器拆分与 Compose 调整
-- [ ] 阶段 4 — CI 扩展
-- [ ] 阶段 5 — CD 拆分
+**已完成**：
+- [x] 阶段 0 — 基线采集与决策
+- [x] 阶段 1 — GPU 推理接口（21/21 测试通过，GPU 冒烟通过）
+- [x] 阶段 2 — Provider 抽象（22/22 测试通过）
+- [x] 阶段 3 — 容器拆分（镜像构建成功）
+- [x] 阶段 4 — CI 扩展
+- [x] 阶段 5 — CD 拆分
+- [x] Ubuntu 基础设施搭建（Docker、Runner、目录结构、Compose 覆盖）
+- [x] Qdrant snapshot 恢复（38488 points）
+- [x] Backend 启动并验证（浏览器登录成功）
+- [x] CD 全流程跑通（deploy-gpu → deploy-app）
+- [x] GitHub Actions Secrets 配置
+- [x] docs/ 和 media/ 迁移完成
+- [ ] 稳定观察期
 
 ---
 

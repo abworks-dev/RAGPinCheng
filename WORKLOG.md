@@ -678,6 +678,17 @@
 - 状态：Ubuntu backend 已启动，Qdrant 38488 points 正常，GPU 远程推理契约验证通过，浏览器登录成功并可提问
 - 文件：`api/main.py`、`.github/workflows/ci.yml`
 - 验证：`curl http://localhost/api/health` 返回 200 OK；`curl http://localhost/api/config` 返回配置正确；浏览器登录成功
+
+### 21:20 — CD 全流程修复与验证通过
+
+- 完成：修复 CD 部署全链路，从 `git push` 到自动部署两台服务器全部跑通
+  - Windows GPU 部署（`deploy-gpu`）：修复 NETWORK SERVICE 账号执行问题（`$PID` 变量冲突、`git pull` stderr 处理、pip GBK 编码问题、Python 路径硬编码）
+  - Ubuntu 应用部署（`deploy-app`）：修复 Docker 权限（`bimtrans` 加入 docker 组）、`prod.env` 文件权限（`/data/secrets` 改为 `0750 pincheng-ops`）、Compose 覆盖文件路径
+  - CI 测试：`test-providers` 缺少 `python-dotenv` 依赖、`FlagEmbedding` 未安装时跳过测试（`pytest.importorskip`）
+  - 共提交 12 次修复，最后一次 CD 全流程通过
+- 文件：`scripts/deploy-gpu.ps1`、`scripts/deploy-app.sh`、`.github/workflows/deploy-production.yml`、`tests/test_providers.py`
+- 验证：CD 全流程成功（deploy-gpu ✅ → deploy-app ✅），Ubuntu 后端健康检查通过，API 配置正确
+- 待办：Qdrant 健康检查警告（容器内无 curl），但不影响运行
 - 文档：`project-docs/migrations/ubuntu-app-windows-gpu-runbook.md`（更新待办清单和决策记录）
 
 ## 2026-07-27

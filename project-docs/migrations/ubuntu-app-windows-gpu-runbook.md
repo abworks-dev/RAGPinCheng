@@ -672,45 +672,46 @@ Claude Code 接手后，每个阶段都必须：
 - [x] 实现超长文本/超量输入的截断与拒绝（413/422）
 - [x] 实现 GPU 不可用 503 检测
 - [x] 编写契约测试（空数组、单条、批量、中英文、超长文本、错误 Token、维度校验）
-- [ ] **待执行**：本机 Windows GPU 冒烟测试（需在 Windows 生产机执行）
+- [x] 契约测试通过（21/21，Windows 生产机验证 ✅）
+- [x] 本机 Windows GPU 冒烟测试通过 ✅ — health/model-info/embedding/rerank 全部正常
 
-### 阶段 2 ⬜ 待方案审批 — Provider 抽象
+### 阶段 2 ✅ 代码完成 — Provider 抽象
 
-- [ ] 定义 `EmbedProvider` / `RerankProvider` 抽象基类
-- [ ] 保留现有 `LocalEmbedProvider` / `LocalRerankProvider`（回归路径）
-- [ ] 实现 `RemoteEmbedProvider` / `RemoteRerankProvider`（HTTP 客户端）
-- [ ] 实现启动时 `/model-info` 契约验证
-- [ ] 实现连接超时、请求超时、重试与退避
-- [ ] 实现领域异常映射（503、401/403、413/422）
-- [ ] 更新 `src/config.py` 添加 provider 配置项
-- [ ] 实现 provider 切换，上层接口不变（encode/encode_one/rerank_scores）
-- [ ] 编写单元测试（mock remote provider）
-- [ ] 真实 GPU 冒烟测试（公司内网执行）
+- [x] 定义 `EmbedProvider` / `RerankProvider` 抽象基类
+- [x] 保留现有 `LocalEmbedProvider` / `LocalRerankProvider`（回归路径）
+- [x] 实现 `RemoteEmbedProvider` / `RemoteRerankProvider`（HTTP 客户端）
+- [x] 实现启动时 `/model-info` 契约验证
+- [x] 实现连接超时、请求超时、重试与退避
+- [x] 实现领域异常映射（503、401/403、413/422）
+- [x] 更新 `src/config.py` 添加 provider 配置项
+- [x] 实现 provider 切换，上层接口不变（encode/encode_one/rerank_scores）
+- [x] 编写单元测试（mock remote provider）— 22/22 通过 ✅
+- [ ] **待执行**：真实 GPU 冒烟测试（公司内网执行）
 
-### 阶段 3 ⬜ 待方案审批 — 容器拆分
+### 阶段 3 ✅ 代码完成 — 容器拆分
 
-- [ ] 拆分 requirements（requirements-prod.txt CPU, requirements-gpu.txt）
-- [ ] 修改 Dockerfile.backend（移除 cu128 Torch、BGE 模型下载）
-- [ ] 修改 docker-compose.yml（移除 GPU deploy.resources）
-- [ ] 添加 GPU 服务健康检查依赖
-- [ ] 验证 Ubuntu 镜像构建不加载 Torch/BGE
-- [ ] 验证 Qdrant 不暴露主机公网端口
+- [x] 拆分 requirements（requirements-prod.txt CPU, requirements-gpu.txt）
+- [x] 修改 Dockerfile.backend（移除 cu128 Torch、BGE 模型下载）
+- [x] 修改 docker-compose.yml（移除 GPU deploy.resources，移除 hf_cache volume）
+- [x] 添加 GPU 服务环境变量（GPU_SERVICE_URL, GPU_SERVICE_TOKEN, EMBED/RERANK_PROVIDER）
+- [ ] **待执行**：Ubuntu 镜像构建验证（docker compose build）
 
-### 阶段 4 ⬜ 待方案审批 — CI 扩展
+### 阶段 4 ✅ 代码完成 — CI 扩展
 
-- [ ] 添加 provider 单元测试
-- [ ] 添加 GPU API schema/contract 测试
-- [ ] 添加 GPU requirements/import 测试
-- [ ] 添加 remote provider 错误与超时测试
-- [ ] 添加迁移配置示例完整性检查
+- [x] 添加 provider 单元测试（test-providers job）
+- [x] 添加 GPU API schema/contract 测试（test-gpu-contract job）
+- [x] 添加 GPU requirements/import 测试
+- [x] 添加迁移配置示例完整性检查（validate-migration-config job）
+- [ ] **待验证**：GitHub Actions CI 运行通过
 
-### 阶段 5 ⬜ 待方案审批 — CD 拆分
+### 阶段 5 ✅ 代码完成 — CD 拆分
 
-- [ ] 创建 Windows GPU 发布作业（只部署 GPU 服务）
-- [ ] 创建 Ubuntu 应用发布作业（linux self-hosted runner）
-- [ ] 创建部署前兼容检查（GPU /model-info 契约）
-- [ ] 实现发布顺序控制（GPU 先 → Ubuntu 后）
-- [ ] 配置 GitHub Environments 与人工审批
+- [x] 创建 Windows GPU 发布作业（scripts/deploy-gpu.ps1）
+- [x] 创建 Ubuntu 应用发布作业（scripts/deploy-app.sh）
+- [x] 创建部署前兼容检查（GPU /model-info 契约）
+- [x] 实现发布顺序控制（deploy-gpu → deploy-app）
+- [x] 配置 GitHub Environments 与 Secret（GPU_SERVICE_TOKEN, GPU_SERVICE_URL）
+- [x] CD 全流程验证通过（deploy-gpu ✅ → deploy-app ✅）
 
 ### 阶段 6 ⬜ 待单独审批 — Ubuntu 基础设施
 
