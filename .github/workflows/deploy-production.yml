@@ -72,11 +72,17 @@ jobs:
     timeout-minutes: 30
 
     steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          path: repo
+
       - name: Deploy Ubuntu application node
         env:
           GPU_SERVICE_URL: ${{ vars.GPU_SERVICE_URL }}
-          REPO_PATH: /data/workspace/projects/ragpincheng
+          REPO_PATH: ${{ github.workspace }}/repo
           BACKUP_DIR: /data/backup/databases/ragpincheng
+          SKIP_GIT_PULL: "1"
         run: |
           set -euo pipefail
           bash "${REPO_PATH}/scripts/deploy-app.sh"

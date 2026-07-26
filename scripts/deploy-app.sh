@@ -50,9 +50,13 @@ fi
 echo "  GPU service OK (api=$API_VER, dim=$EMBED_DIM)"
 
 # ── 3. Pull latest code ───────────────────────────────────────────────────
-echo ">> Pulling latest code"
-cd "$REPO_PATH"
-git pull origin master
+if [ "${SKIP_GIT_PULL:-0}" != "1" ]; then
+    echo ">> Pulling latest code"
+    cd "$REPO_PATH"
+    git pull origin master
+else
+    echo ">> Skipping git pull (using checked-out code)"
+fi
 
 # ── 4. Backup current state ───────────────────────────────────────────────
 echo ">> Backing up current state to ${BACKUP_PATH}"
