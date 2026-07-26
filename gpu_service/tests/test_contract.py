@@ -12,7 +12,7 @@ Run with:
 from __future__ import annotations
 
 import json
-from unittest.mock import patch
+from unittest.mock import patch, PropertyMock
 
 import pytest
 from fastapi import status
@@ -48,7 +48,7 @@ def reset_model_manager():
     # Force the manager to appear unloaded by default
     with patch.object(_model_manager, "_initialized", False):
         with patch.object(_model_manager, "_embed_model", None):
-            with patch.object(_model_manager, "is_loaded", False):
+            with patch.object(type(_model_manager), "is_loaded", new_callable=PropertyMock, return_value=False):
                 yield
 
 
@@ -57,7 +57,7 @@ def model_loaded():
     """Patch the manager to report loaded and return mock results."""
     with patch.object(_model_manager, "_initialized", True):
         with patch.object(_model_manager, "_embed_model", object()):  # truthy sentinel
-            with patch.object(_model_manager, "is_loaded", True):
+            with patch.object(type(_model_manager), "is_loaded", new_callable=PropertyMock, return_value=True):
                 with patch.object(_model_manager, "_device", "cuda"):
                     with patch.object(_model_manager, "embed", return_value=MOCK_EMBED_RESULT):
                         with patch.object(_model_manager, "rerank", return_value=[0.9, 0.3]):
