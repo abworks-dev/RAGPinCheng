@@ -80,8 +80,13 @@ if ($gitExitCode -ne 0) {
 Write-Step "Updating Python dependencies"
 $oldPref = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
-$pipResult = & $PipExe install -i https://pypi.tuna.tsinghua.edu.cn/simple -r "$ServiceDir\requirements.txt" 2>&1
+# Read requirements with UTF-8 to avoid GBK decode issues, write to temp ASCII file
+$reqContent = Get-Content -Path "$ServiceDir\requirements.txt" -Encoding UTF8 | Where-Object { $_ -match '\S' -and $_ -notmatch '^\s*#' }
+$tempReq = Join-Path $env:TEMP "gpu_reqs_$([System.IO.Path]::GetRandomFileName())"
+$reqContent | Out-File -FilePath $tempReq -Encoding ASCII
+$pipResult = & $PipExe install -i https://pypi.tuna.tsinghua.edu.cn/simple -r $tempReq 2>&1
 $pipExitCode = $LASTEXITCODE
+Remove-Item -Force $tempReq -ErrorAction SilentlyContinue
 $ErrorActionPreference = $oldPref
 if ($pipExitCode -ne 0) {
     Write-Warning "pip install failed (exit $pipExitCode): $pipResult"
@@ -107,8 +112,8 @@ Write-Step "Restarting GPU service"
 # Stop any existing process on port 8100
 $existing = netstat -ano | findstr ":8100 " | Select-String "LISTENING"
 if ($existing) {
-    $pid = $existing.ToString().Trim().Split()[-1]
-    Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue
+    $processId = $existing.ToString().Trim().Split()[-1]
+    Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 2
 }
 
