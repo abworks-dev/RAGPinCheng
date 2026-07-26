@@ -71,13 +71,21 @@ class ModelManager:
                 texts,
                 return_dense=True,
                 return_sparse=True,
-                normalize_embeddings=normalize,
             )
             # output is a dict with keys:
             #   dense_vecs  -> np.ndarray shape (N, 1024)
             #   lexical_weights -> list[dict[int, float]]  (sparse)
             dense_vecs = output["dense_vecs"]
             lexical_weights = output["lexical_weights"]
+
+            # BGEM3FlagModel.encode() does not support normalize_embeddings
+            # in all versions; we normalise manually here.
+            if normalize:
+                import numpy as np
+                norms = np.linalg.norm(dense_vecs, axis=1, keepdims=True)
+                # Avoid division by zero for zero vectors.
+                norms = np.where(norms == 0, 1.0, norms)
+                dense_vecs = dense_vecs / norms
 
             results = []
             for i in range(len(texts)):
@@ -145,7 +153,7 @@ class ModelManager:
 
         # Quick sanity check: embed a short string to confirm dim and CUDA
         _test = self._embed_model.encode(
-            ["sanity"], return_dense=True, return_sparse=True, normalize_embeddings=True
+            ["sanity"], return_dense=True, return_sparse=True,
         )
         actual_dim = _test["dense_vecs"].shape[1]
         if actual_dim != EMBED_DIM:
