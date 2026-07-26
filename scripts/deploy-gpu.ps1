@@ -64,7 +64,11 @@ $gitToken = $env:GIT_TOKEN
 if ($gitToken) {
     git remote set-url origin "https://x-access-token:${gitToken}@github.com/abworks-dev/RAGPinCheng.git" 2>$null
 }
-git pull origin master 2>&1 | Out-String | ForEach-Object { Write-Host $_ }
+try {
+    git pull origin master 2>&1 | Out-String | ForEach-Object { Write-Host $_ }
+} catch {
+    # git writes informational messages to stderr; ignore non-fatal output.
+}
 
 # ── 4. Update dependencies ─────────────────────────────────────────────────
 Write-Step "Updating Python dependencies"
