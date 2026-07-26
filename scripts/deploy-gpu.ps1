@@ -49,7 +49,7 @@ if (-not (Test-Path $RepositoryPath)) {
 if (-not (Test-Path $ServiceDir)) {
     throw "GPU service directory not found: $ServiceDir"
 }
-if (-not (Test-Command $PythonExe)) {
+if (-not (Test-Path $PythonExe)) {
     throw "Python not found at $PythonExe"
 }
 
