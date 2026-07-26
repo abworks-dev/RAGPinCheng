@@ -43,7 +43,9 @@ docker compose -f docker/docker-compose.yml up -d
 docker compose -f docker/docker-compose.yml logs -f backend   # watch first-boot model download (~3 GB)
 ```
 
-First boot takes 5–15 min while BGE-M3 + reranker weights download. The backend image bundles the built React app (multi-stage Dockerfile runs `npm run build` in a node stage), so there's no separate frontend container or nginx proxy.
+First boot takes ~30s (no GPU model downloads). The backend image bundles the built React app (multi-stage Dockerfile runs `npm run build` in a node stage), so there's no separate frontend container or nginx proxy.
+
+**Architecture:** GPU inference (BGE-M3 embedding + BGE-reranker) runs on a separate Windows GPU host, accessed via HTTP. The Ubuntu host runs only the API backend + Qdrant vector database. See `project-docs/migrations/ubuntu-app-windows-gpu-runbook.md` for details.
 
 **Accessing the app** once `docker compose ps` shows `backend` as `healthy`:
 

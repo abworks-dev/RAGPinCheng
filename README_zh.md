@@ -43,7 +43,9 @@ docker compose -f docker/docker-compose.yml up -d
 docker compose -f docker/docker-compose.yml logs -f backend   # 看首次模型下载进度（约 3 GB）
 ```
 
-首次启动因下载 BGE-M3 + 重排序权重需 5～15 分钟。后端镜像通过多阶段构建：node 阶段执行 `npm run build` 产出 React 静态资源，Python 阶段直接挂载提供，无需独立的前端容器或 nginx 反向代理。
+首次启动约 30 秒（无需下载 GPU 模型）。后端镜像通过多阶段构建：node 阶段执行 `npm run build` 产出 React 静态资源，Python 阶段直接挂载提供，无需独立的前端容器或 nginx 反向代理。
+
+**架构说明：** GPU 推理（BGE-M3 embedding + BGE-reranker）运行在独立的 Windows GPU 主机上，通过 HTTP 远程调用。Ubuntu 主机只运行 API 后端 + Qdrant 向量数据库。详见 `project-docs/migrations/ubuntu-app-windows-gpu-runbook.md`。
 
 **访问前端**（等 `docker compose ps` 显示 `backend` 为 `healthy` 后）：
 
