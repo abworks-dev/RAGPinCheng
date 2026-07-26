@@ -64,17 +64,27 @@ $gitToken = $env:GIT_TOKEN
 if ($gitToken) {
     git remote set-url origin "https://x-access-token:${gitToken}@github.com/abworks-dev/RAGPinCheng.git" 2>$null
 }
-try {
-    git pull origin master 2>&1 | Out-String | ForEach-Object { Write-Host $_ }
-} catch {
-    # git writes informational messages to stderr; ignore non-fatal output.
+# git writes informational messages to stderr; redirect to stdout.
+# $ErrorActionPreference=Stop treats native stderr as errors, so we
+# temporarily set Continue and check $LASTEXITCODE instead.
+$oldPref = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
+$gitOutput = git pull origin master 2>&1
+$gitExitCode = $LASTEXITCODE
+$ErrorActionPreference = $oldPref
+if ($gitExitCode -ne 0) {
+    Write-Warning "git pull failed (exit $gitExitCode): $gitOutput"
 }
 
 # ── 4. Update dependencies ─────────────────────────────────────────────────
 Write-Step "Updating Python dependencies"
+$oldPref = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
 $pipResult = & $PipExe install -i https://pypi.tuna.tsinghua.edu.cn/simple -r "$ServiceDir\requirements.txt" 2>&1
-if ($LASTEXITCODE -ne 0) {
-    Write-Warning "pip install failed: $pipResult"
+$pipExitCode = $LASTEXITCODE
+$ErrorActionPreference = $oldPref
+if ($pipExitCode -ne 0) {
+    Write-Warning "pip install failed (exit $pipExitCode): $pipResult"
 }
 
 # ── 5. Create/update .env for GPU service ──────────────────────────────────
