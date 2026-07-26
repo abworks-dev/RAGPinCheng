@@ -23,6 +23,7 @@ $ErrorActionPreference = 'Stop'
 # Python path — NETWORK SERVICE account doesn't inherit user PATH,
 # so use the full absolute path.
 $PythonExe = "${PRODUCTION_PYTHON_PATH}"
+$PipExe = "C:\Program Files\Python310\Scripts\pip.exe"
 
 # ── Resolve paths ───────────────────────────────────────────────────────────
 $ServiceDir = Join-Path $RepositoryPath "gpu_service"
@@ -60,13 +61,18 @@ Copy-Item -Recurse -Force "$ServiceDir\*" -Destination $BackupPath
 Copy-Item -Force "$RepositoryPath\requirements-gpu.txt" -Destination $BackupPath
 
 # ── 3. Pull latest code ────────────────────────────────────────────────────
-Write-Step "Pulling latest code"
-Set-Location $RepositoryPath
-git pull origin master
+if ($env:SKIP_GIT_PULL -ne "1") {
+    Write-Step "Pulling latest code"
+    Set-Location $RepositoryPath
+    git config --global --add safe.directory $RepositoryPath 2>$null
+    git pull origin master 2>&1
+} else {
+    Write-Step "Skipping git pull (using checked-out code)"
+}
 
 # ── 4. Update dependencies ─────────────────────────────────────────────────
 Write-Step "Updating Python dependencies"
-pip install -i https://pypi.tuna.tsinghua.edu.cn/simple -r "$ServiceDir\requirements.txt" 2>&1 | Out-Null
+& $PipExe install -i https://pypi.tuna.tsinghua.edu.cn/simple -r "$ServiceDir\requirements.txt" 2>&1 | Out-Null
 
 # ── 5. Create/update .env for GPU service ──────────────────────────────────
 Write-Step "Configuring GPU service"
