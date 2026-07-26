@@ -13,9 +13,21 @@ set -euo pipefail
 REPO_PATH="${REPO_PATH:-/data/workspace/projects/ragpincheng}"
 BACKUP_DIR="${BACKUP_DIR:-/data/backup/databases/ragpincheng}"
 DATA_PATH="${DATA_PATH:-/data/services/docker/data/ragpincheng/prod/app}"
-COMPOSE_FILE="${REPO_PATH}/docker/docker-compose.yml"
+COMPOSE_BASE="${REPO_PATH}/docker/docker-compose.yml"
+COMPOSE_OVERRIDE="/data/services/docker/compose/ragpincheng/prod/compose.prod.yaml"
+COMPOSE_ENV_FILE="/data/secrets/ragpincheng/prod.env"
+COMPOSE_PROJECT="ragpincheng-prod"
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 BACKUP_PATH="${BACKUP_DIR}/app-backup-${TIMESTAMP}"
+
+# Helper: build the full compose command with project, files, and env file.
+compose() {
+    docker compose -p "$COMPOSE_PROJECT" \
+        -f "$COMPOSE_BASE" \
+        -f "$COMPOSE_OVERRIDE" \
+        --env-file "$COMPOSE_ENV_FILE" \
+        "$@"
+}
 
 echo "========================================="
 echo " Ubuntu App Deploy — ${TIMESTAMP}"
@@ -25,7 +37,7 @@ echo "========================================="
 echo ">> Checking prerequisites"
 command -v docker >/dev/null 2>&1 || { echo "docker not found"; exit 1; }
 [ -d "$REPO_PATH" ] || { echo "REPO_PATH not found: $REPO_PATH"; exit 1; }
-[ -f "$COMPOSE_FILE" ] || { echo "Compose file not found: $COMPOSE_FILE"; exit 1; }
+[ -f "$COMPOSE_BASE" ] || { echo "Compose file not found: $COMPOSE_BASE"; exit 1; }
 
 # ── 2. Verify GPU service contract ────────────────────────────────────────
 echo ">> Checking GPU service contract"
@@ -75,18 +87,18 @@ docker images pincheng-rag-backend:latest --format "{{.ID}}" > "${BACKUP_PATH}/i
 
 # ── 5. Validate Docker Compose configuration ──────────────────────────────
 echo ">> Validating Compose configuration"
-docker compose -f "$COMPOSE_FILE" config --quiet || {
+compose config --quiet || {
     echo "ERROR: Invalid Compose configuration"
     exit 1
 }
 
 # ── 6. Build new backend image ────────────────────────────────────────────
 echo ">> Building backend image"
-docker compose -f "$COMPOSE_FILE" build backend 2>&1 | tail -5
+compose build backend 2>&1 | tail -5
 
 # ── 7. Deploy (rolling update) ────────────────────────────────────────────
 echo ">> Deploying services"
-docker compose -f "$COMPOSE_FILE" up -d --no-deps backend 2>&1
+compose up -d --no-deps backend 2>&1
 
 # ── 8. Wait for health ────────────────────────────────────────────────────
 echo ">> Waiting for backend health check"
@@ -102,7 +114,7 @@ done
 
 # ── 9. Qdrant health check ────────────────────────────────────────────────
 echo ">> Checking Qdrant"
-docker compose -f "$COMPOSE_FILE" exec qdrant curl -fsS http://localhost:6333/collections/pincheng_docs \
+compose exec qdrant curl -fsS http://localhost:6333/collections/pincheng_docs \
     | python3 -c "import sys,json; d=json.load(sys.stdin); print(f'  Qdrant OK: {d[\"result\"][\"points_count\"]} points')" \
     2>/dev/null || echo "  WARNING: Qdrant health check failed"
 
