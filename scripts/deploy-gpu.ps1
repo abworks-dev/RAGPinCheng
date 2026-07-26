@@ -64,7 +64,7 @@ $gitToken = $env:GIT_TOKEN
 if ($gitToken) {
     git remote set-url origin "https://x-access-token:${gitToken}@github.com/abworks-dev/RAGPinCheng.git" 2>$null
 }
-git pull origin master 2>&1
+git pull origin master 2>&1 | Out-String | ForEach-Object { Write-Host $_ }
 
 # ── 4. Update dependencies ─────────────────────────────────────────────────
 Write-Step "Updating Python dependencies"
