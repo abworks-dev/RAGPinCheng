@@ -82,6 +82,7 @@ jobs:
           GPU_SERVICE_URL: ${{ vars.GPU_SERVICE_URL }}
           REPO_PATH: ${{ github.workspace }}/repo
           BACKUP_DIR: /data/backup/databases/ragpincheng
+          DATA_PATH: /data/services/docker/data/ragpincheng/prod/app
           SKIP_GIT_PULL: "1"
         run: |
           set -euo pipefail
