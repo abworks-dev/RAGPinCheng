@@ -20,6 +20,10 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+# Python path — NETWORK SERVICE account doesn't inherit user PATH,
+# so use the full absolute path.
+$PythonExe = "C:\Program Files\Python310\python.exe"
+
 # ── Resolve paths ───────────────────────────────────────────────────────────
 $ServiceDir = Join-Path $RepositoryPath "gpu_service"
 $Timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
@@ -45,8 +49,8 @@ if (-not (Test-Path $RepositoryPath)) {
 if (-not (Test-Path $ServiceDir)) {
     throw "GPU service directory not found: $ServiceDir"
 }
-if (-not (Test-Command "python")) {
-    throw "Python not found in PATH"
+if (-not (Test-Command $PythonExe)) {
+    throw "Python not found at $PythonExe"
 }
 
 # ── 2. Backup current service ──────────────────────────────────────────────
@@ -70,7 +74,7 @@ $EnvFile = "$ServiceDir\.env"
 $Token = $env:GPU_SERVICE_TOKEN
 if (-not $Token) {
     Write-Warning "GPU_SERVICE_TOKEN not set in environment; generating a new one"
-    $Token = & python -c "import secrets; print(secrets.token_hex(32))"
+    $Token = & $PythonExe -c "import secrets; print(secrets.token_hex(32))"
 }
 @"
 GPU_SERVICE_TOKEN=$Token
@@ -92,7 +96,7 @@ if ($existing) {
 # Start the service in a new background process
 $logFile = "$RepositoryPath\gpu_service.log"
 $psi = New-Object System.Diagnostics.ProcessStartInfo
-$psi.FileName = "python.exe"
+$psi.FileName = $PythonExe
 $psi.Arguments = "-m gpu_service.app"
 $psi.WorkingDirectory = $RepositoryPath
 $psi.UseShellExecute = $false
@@ -127,7 +131,7 @@ if (-not $healthy) {
 # ── 8. Smoke test ──────────────────────────────────────────────────────────
 Write-Step "Running smoke tests"
 # Test embedding
-$embedResult = & python -c @"
+$embedResult = & $PythonExe -c @"
 import requests, json
 r = requests.post('http://192.168.11.11:8100/v1/embeddings',
     headers={'Authorization': 'Bearer $Token', 'Content-Type': 'application/json'},
@@ -145,7 +149,7 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host "  $embedResult"
 
 # Test rerank
-$rerankResult = & python -c @"
+$rerankResult = & $PythonExe -c @"
 import requests, json
 r = requests.post('http://192.168.11.11:8100/v1/rerank',
     headers={'Authorization': 'Bearer $Token', 'Content-Type': 'application/json'},
