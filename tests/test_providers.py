@@ -64,6 +64,10 @@ class TestEmbeddingStructure:
 class TestLocalEmbedProvider:
     """Local provider with mocked BGEM3FlagModel."""
 
+    @pytest.fixture(autouse=True)
+    def _skip_if_no_flagembedding(self):
+        pytest.importorskip("FlagEmbedding", reason="FlagEmbedding not installed")
+
     @pytest.fixture
     def mock_model(self):
         with patch("FlagEmbedding.BGEM3FlagModel") as MockModel:
@@ -106,6 +110,10 @@ class TestLocalEmbedProvider:
 
 class TestLocalRerankProvider:
     """Local reranker with mocked FlagReranker."""
+
+    @pytest.fixture(autouse=True)
+    def _skip_if_no_flagembedding(self):
+        pytest.importorskip("FlagEmbedding", reason="FlagEmbedding not installed")
 
     @pytest.fixture
     def mock_reranker(self):
