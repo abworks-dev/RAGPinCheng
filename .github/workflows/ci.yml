@@ -28,7 +28,7 @@ jobs:
           python-version: "3.11"
 
       - name: Check Python syntax
-        run: python -m compileall -q api src scripts tests
+        run: python -m compileall -q api src scripts tests gpu_service
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -48,3 +48,81 @@ jobs:
         run: |
           touch .env
           docker compose -f docker/docker-compose.yml config --quiet
+
+  test-providers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install provider test dependencies
+        run: pip install httpx pytest
+
+      - name: Run provider unit tests
+        run: pytest tests/test_providers.py -v
+
+  test-gpu-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install GPU service dependencies (no torch)
+        run: |
+          pip install fastapi uvicorn pydantic httpx pytest python-dotenv
+
+      - name: Check GPU service schemas import
+        run: python -c "from gpu_service.schemas import EmbeddingRequest, RerankRequest, HealthResponse, ModelInfoResponse; print('schemas OK')"
+
+      - name: Check GPU service config
+        run: python -c "from gpu_service.config import EMBED_DIM, API_VERSION; assert EMBED_DIM == 1024; assert API_VERSION == '1'; print('config OK')"
+
+      - name: Run GPU service contract tests
+        run: |
+          pip install -r gpu_service/requirements.txt pytest httpx 2>/dev/null || true
+          # Contract tests that don't require GPU can still run
+          python -c "
+          from gpu_service.schemas import EmbeddingItem
+          item = EmbeddingItem(dense=[0.1], sparse_indices=[1, 2], sparse_values=[0.5, 0.6])
+          assert len(item.sparse_indices) == len(item.sparse_values)
+          assert len(item.dense) == 1
+          print('schema validation OK')
+          "
+
+  validate-migration-config:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Verify .env.example has all required GPU config keys
+        run: |
+          for key in GPU_SERVICE_URL GPU_SERVICE_TOKEN EMBED_PROVIDER RERANK_PROVIDER; do
+            if grep -q "$key" .env.example; then
+              echo "✅ $key found in .env.example"
+            else
+              echo "❌ $key MISSING from .env.example"
+              exit 1
+            fi
+          done

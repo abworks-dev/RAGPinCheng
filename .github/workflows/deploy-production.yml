@@ -1,4 +1,12 @@
-# Manual production deployment
+# Production deployment — two-node topology
+#
+# 1. deploy-gpu:  Windows GPU host  — update inference service
+# 2. deploy-app:  Ubuntu app host   — update backend + Qdrant (depends on 1)
+#
+# Triggered by:
+#   - CI success on master (auto)
+#   - workflow_dispatch (manual)
+
 name: Deploy production
 
 on:
@@ -24,20 +32,22 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  deploy:
+  # ── Job 1: Windows GPU inference service ────────────────────────────────
+  deploy-gpu:
     if: ${{ (github.event_name == 'workflow_dispatch' && inputs.confirm_production == true) || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') }}
     runs-on:
       - self-hosted
       - windows
       - production
       - gpu
-    timeout-minutes: 60
+    timeout-minutes: 30
 
     steps:
-      - name: Deploy master on production server
+      - name: Deploy GPU inference service
         shell: powershell
         env:
           DEPLOY_HTTP_PROXY: ${{ vars.DEPLOY_HTTP_PROXY }}
+          GPU_SERVICE_TOKEN: ${{ secrets.GPU_SERVICE_TOKEN }}
         run: |
           Set-StrictMode -Version Latest
           $ErrorActionPreference = 'Stop'
@@ -51,4 +61,26 @@ jobs:
             $parameters.ProxyUrl = $env:DEPLOY_HTTP_PROXY
           }
 
-          & '${PRODUCTION_REPO_PATH}\scripts\deploy-production.ps1' @parameters
+          & '${PRODUCTION_REPO_PATH}\scripts\deploy-gpu.ps1' @parameters
+
+  # ── Job 2: Ubuntu application node (backend + Qdrant) ───────────────────
+  deploy-app:
+    if: ${{ always() && !cancelled() && !failure() }}
+    needs: [deploy-gpu]
+    runs-on:
+      - self-hosted
+      - linux
+      - ubuntu
+      - production
+      - app
+    timeout-minutes: 30
+
+    steps:
+      - name: Deploy Ubuntu application node
+        env:
+          GPU_SERVICE_URL: ${{ vars.GPU_SERVICE_URL }}
+          REPO_PATH: /opt/RAGPinCheng
+          BACKUP_DIR: /opt/RAGBackups
+        run: |
+          set -euo pipefail
+          bash "${REPO_PATH}/scripts/deploy-app.sh"
