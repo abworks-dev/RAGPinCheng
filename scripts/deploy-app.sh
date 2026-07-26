@@ -12,6 +12,7 @@ set -euo pipefail
 
 REPO_PATH="${REPO_PATH:-/data/workspace/projects/ragpincheng}"
 BACKUP_DIR="${BACKUP_DIR:-/data/backup/databases/ragpincheng}"
+DATA_PATH="${DATA_PATH:-/data/services/docker/data/ragpincheng/prod/app}"
 COMPOSE_FILE="${REPO_PATH}/docker/docker-compose.yml"
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 BACKUP_PATH="${BACKUP_DIR}/app-backup-${TIMESTAMP}"
@@ -63,11 +64,11 @@ echo ">> Backing up current state to ${BACKUP_PATH}"
 mkdir -p "$BACKUP_DIR"
 mkdir -p "$BACKUP_PATH"
 # Backup SQLite databases
-if [ -f "$REPO_PATH/data/app.sqlite" ]; then
-    cp "$REPO_PATH/data/app.sqlite" "${BACKUP_PATH}/app.sqlite"
+if [ -f "$DATA_PATH/app.sqlite" ]; then
+    cp "$DATA_PATH/app.sqlite" "${BACKUP_PATH}/app.sqlite"
 fi
-if [ -f "$REPO_PATH/data/parents.sqlite" ]; then
-    cp "$REPO_PATH/data/parents.sqlite" "${BACKUP_PATH}/parents.sqlite"
+if [ -f "$DATA_PATH/parents.sqlite" ]; then
+    cp "$DATA_PATH/parents.sqlite" "${BACKUP_PATH}/parents.sqlite"
 fi
 # Record current Docker image hash
 docker images pincheng-rag-backend:latest --format "{{.ID}}" > "${BACKUP_PATH}/image-hash.txt" 2>/dev/null || true
