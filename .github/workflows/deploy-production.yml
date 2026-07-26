@@ -48,20 +48,16 @@ jobs:
         env:
           DEPLOY_HTTP_PROXY: ${{ vars.DEPLOY_HTTP_PROXY }}
           GPU_SERVICE_TOKEN: ${{ secrets.GPU_SERVICE_TOKEN }}
+          REPO_PATH: D:\RAGPinCheng
+          BACKUP_DIR: D:\RAGBackups
         run: |
           Set-StrictMode -Version Latest
           $ErrorActionPreference = 'Stop'
 
-          $parameters = @{
-            RepositoryPath = 'D:\RAGPinCheng'
-            BackupDirectory = 'D:\RAGBackups'
-          }
-
-          if ($env:DEPLOY_HTTP_PROXY) {
-            $parameters.ProxyUrl = $env:DEPLOY_HTTP_PROXY
-          }
-
-          & 'D:\RAGPinCheng\scripts\deploy-gpu.ps1' @parameters
+          & "${env:REPO_PATH}\scripts\deploy-gpu.ps1" `
+            -RepositoryPath $env:REPO_PATH `
+            -BackupDirectory $env:BACKUP_DIR `
+            -ProxyUrl $env:DEPLOY_HTTP_PROXY
 
   # ── Job 2: Ubuntu application node (backend + Qdrant) ───────────────────
   deploy-app:
@@ -79,8 +75,8 @@ jobs:
       - name: Deploy Ubuntu application node
         env:
           GPU_SERVICE_URL: ${{ vars.GPU_SERVICE_URL }}
-          REPO_PATH: /opt/RAGPinCheng
-          BACKUP_DIR: /opt/RAGBackups
+          REPO_PATH: /data/workspace/projects/ragpincheng
+          BACKUP_DIR: /data/backup/databases/ragpincheng
         run: |
           set -euo pipefail
           bash "${REPO_PATH}/scripts/deploy-app.sh"
