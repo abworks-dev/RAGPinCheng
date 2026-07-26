@@ -10,8 +10,8 @@
 
 set -euo pipefail
 
-REPO_PATH="${REPO_PATH:-/opt/RAGPinCheng}"
-BACKUP_DIR="${BACKUP_DIR:-/opt/RAGBackups}"
+REPO_PATH="${REPO_PATH:-${PRODUCTION_APP_REPO_PATH}}"
+BACKUP_DIR="${BACKUP_DIR:-${PRODUCTION_APP_BACKUP_DIRECTORY}}"
 COMPOSE_FILE="${REPO_PATH}/docker/docker-compose.yml"
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 BACKUP_PATH="${BACKUP_DIR}/app-backup-${TIMESTAMP}"
