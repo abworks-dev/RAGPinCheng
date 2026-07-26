@@ -1,7 +1,11 @@
-# 品丞 RAG 系统生产环境 Compose 配置
+# 品丞 RAG 系统生产环境 Compose 配置（Ubuntu 应用节点）
 #
 # 两个服务：qdrant（向量数据库）和 backend（FastAPI + React 打包成单一镜像）。
 # backend 同时提供 /api/* 接口和 React 前端页面，无需单独的前端容器或 nginx 反代。
+#
+# GPU 推理（BGE-M3 embedding + BGE-reranker）运行在独立的 Windows GPU 服务上，
+# 通过内网 HTTP 访问。backend 通过 EMBED_PROVIDER=remote / RERANK_PROVIDER=remote
+# 配置切换到远程 GPU 服务。
 #
 # 所有命令在仓库根目录执行：
 #   docker compose -f docker/docker-compose.yml build
@@ -13,7 +17,7 @@
 # 环境变量配置：仓库根目录的 `.env` 是唯一配置源。`docker/.env` 是软链接指向它，
 # 这样 compose 构建时的变量替换（如 ${BUILD_PLATFORM}）和容器运行时的 env_file:
 # 都能正常工作。必填配置项：ZHIPU_API_KEY, MINERU_API_KEY, ADMIN_EMPLOYEE_ID,
-# ADMIN_PASSWORD；可选配置：LLM_MODEL, LLM_REWRITE_MODEL, HF_ENDPOINT。
+# ADMIN_PASSWORD；GPU 服务：GPU_SERVICE_URL, GPU_SERVICE_TOKEN
 
 services:
   qdrant:
@@ -54,21 +58,8 @@ services:
       #   - ${BUILD_PLATFORM:-linux/amd64}
     image: pincheng-rag-backend:latest
     restart: unless-stopped
-    # GPU 透传 — Compose v2 等价于 `docker run --gpus all`。
-    # 主机需要先安装 NVIDIA Container Toolkit（一次性操作）：
-    #   sudo apt-get install -y nvidia-container-toolkit
-    #   sudo nvidia-ctk runtime configure --runtime=docker
-    #   sudo systemctl restart docker
-    # 没有 toolkit 时这个块会静默忽略，backend 自动回退到 CPU 模式。
-    # 配置正确时，cu128 的 torch 轮子会识别到 RTX 5060 Ti，
-    # src/embed.py:_pick_device() 会返回 "cuda"。
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+    # No GPU reservation — embedding and reranking run on the separate Windows
+    # GPU inference service (gpu_service/) accessed via HTTP.
     depends_on:
       qdrant:
         condition: service_healthy
@@ -81,6 +72,12 @@ services:
       # 这里强制写死，不使用 ${QDRANT_URL}，防止主机本地调试用的
       # http://localhost:6333 泄漏到容器内，导致无法连接 qdrant 服务。
       QDRANT_URL: http://qdrant:6333
+      # GPU 推理服务地址 — 生产环境指向 Windows GPU 主机内网地址。
+      # 在 .env 中设置：GPU_SERVICE_URL=http://${PRIVATE_IPV4}:8100
+      GPU_SERVICE_URL: ${GPU_SERVICE_URL:-http://${PRIVATE_IPV4}:8100}
+      GPU_SERVICE_TOKEN: ${GPU_SERVICE_TOKEN:-}
+      EMBED_PROVIDER: ${EMBED_PROVIDER:-remote}
+      RERANK_PROVIDER: ${RERANK_PROVIDER:-remote}
     volumes:
       # 持久化状态 — Markdown 解析缓存、parents.sqlite（向量索引元数据）、
       # app.sqlite（用户 + 对话）、feedback.jsonl。数据存在主机磁盘上，
@@ -91,9 +88,6 @@ services:
       # 源 PDF 文档 — 只在容器内执行 scripts/build_index.py 时需要。
       # 读写挂载，MinerU 拆分后的 PDF 可以写回原目录。
       - ../docs:/app/docs
-      # HuggingFace 模型缓存 — 独立命名 volume，保证第一次启动下载的
-      # BGE-M3 + reranker（约 3 GB）在容器重建后不会丢失。
-      - hf_cache:/root/.cache/huggingface
     ports:
       # 对外暴露入口。主机 80 端口映射到容器 uvicorn 8000 端口 —
       # 与旧 nginx 方案 URL 一致，减少一跳。生产环境建议在前面加公司
@@ -104,9 +98,8 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
-      # 较长的启动宽限期：第一次启动需要下载约 3 GB 模型权重到 hf_cache，
-      # 之后 /api/health 才可达。后续重启几秒内即可完成。
-      start_period: 15m
+      # 没有 GPU 模型需要下载，启动很快。设为 30s 以覆盖首次 pip install。
+      start_period: 30s
     logging:
       driver: json-file
       options:
@@ -114,8 +107,6 @@ services:
         max-file: "5"
 
 volumes:
-  hf_cache:
-    # 执行 docker compose down 不会删除；只有 docker compose down -v 才会删除。
   qdrant_storage:
     # Qdrant 索引持久化。执行 docker compose down 不会删除；
     # 只有 docker compose down -v 才会删除。如需查看索引内容，请 exec

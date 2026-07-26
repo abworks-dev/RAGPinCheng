@@ -1,8 +1,11 @@
 # syntax=docker/dockerfile:1.7
 
-# Combined image — FastAPI + ChatSession + BGE-M3 + reranker, also serves
-# the built React/Vite SPA at /. Replaces the previous backend + frontend
-# two-container setup. One image, one process, fewer moving parts.
+# Combined image — FastAPI + ChatSession + Qdrant client + React SPA.
+# No GPU dependencies (torch, BGE models) — those run on the separate
+# Windows GPU inference service (gpu_service/).
+#
+# The backend configures EMBED_PROVIDER=remote and RERANK_PROVIDER=remote
+# to delegate embedding and reranking to the GPU service over HTTP.
 #
 # Cross-platform build support: docker-compose.yml DISABLED build.platforms
 # by default for best Docker layer caching on native x86_64 servers.
@@ -33,64 +36,36 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_CACHE_DIR=/root/.cache/pip \
     LANG=C.UTF-8 \
-    LC_ALL=C.UTF-8 \
-    HF_HOME=/root/.cache/huggingface
+    LC_ALL=C.UTF-8
 
 # Minimal system deps:
 #   curl            — used by the healthcheck
 #   build-essential — pip compiles any wheel that doesn't ship prebuilt for
 #                     the target arch (mainly an arm64 concern; most amd64
 #                     wheels are prebuilt on PyPI)
-#   zlib1g-dev      — `zlib-state` (transitive dep via FlagEmbedding →
-#                     ir-datasets) has no arm64 wheel on PyPI; building from
-#                     source needs zlib.h
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
     rm -f /etc/apt/apt.conf.d/docker-clean \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
         curl \
-        build-essential \
-        zlib1g-dev
+        build-essential
 
 WORKDIR /app
 
-# 1) Install CUDA-enabled torch first. FlagEmbedding depends on torch; pinning
-#    the wheel here means the later `pip install` sees torch as already
-#    satisfied and won't pull a different build.
-# cu128 (CUDA 12.8) is REQUIRED for the RTX 5060 Ti — it's Blackwell (sm_120),
-# and the default pip / cu126 wheels are NOT compiled for sm_120, so they fail
-# at runtime with "no kernel image is available for execution on the device".
-# The cu128 index serves torch>=2.7, the first release built for sm_120.
-# (torch>=2.6 is also needed to satisfy transformers' CVE-2025-32434 check,
-# which refuses to load BGE-M3's .bin weights on older torch — cu128 clears it.)
-# Host prerequisites for this to actually reach the GPU:
-#   - NVIDIA driver >= 570 on the host (Blackwell support)
-#   - NVIDIA Container Toolkit installed + `docker compose` GPU reservation
-#     (see docker-compose.yml backend.deploy.resources).
-# To go back to a CPU-only build (e.g. a host with no GPU), swap the index
-# back to .../whl/cpu and drop the compose GPU reservation.
-# Pinning to an EXACT version instead of a range lets Docker cache this layer
-# properly — pip won't check for newer point releases on every build.
-# This is the official CUDA 12.8 wheel source required for RTX 5060 Ti
-# Blackwell (sm_120). Download takes 2-5 minutes from China but only
-# happens ONCE — the layer is cached permanently after first build.
-RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
-    pip install --index-url https://download.pytorch.org/whl/cu128 \
-        "torch==2.7.0"
-
-# 2) Production Python deps.
+# Production Python deps — no GPU dependencies (torch, FlagEmbedding, etc.)
+# since those run on the separate Windows GPU inference service.
 COPY requirements-prod.txt ./
 RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
     pip install -r requirements-prod.txt
 
-# 3) Application code. Everything the runtime + scripts/build_index.py needs.
+# 2) Application code. Everything the runtime + scripts/build_index.py needs.
 COPY src/ ./src/
 COPY api/ ./api/
 COPY prompts/ ./prompts/
 COPY scripts/ ./scripts/
 
-# 4) React bundle from the build stage. api/main.py detects this directory
+# 3) React bundle from the build stage. api/main.py detects this directory
 #    and mounts it at / with SPA fallback.
 COPY --from=frontend-build /build/dist /app/frontend/dist
 
@@ -100,9 +75,8 @@ RUN mkdir -p /app/docs /app/data
 
 EXPOSE 8000
 
-# Single worker on purpose: BGE-M3 + reranker hold ~3-4 GB resident; multi-worker
-# would multiply RAM with no throughput gain on a CPU-only host (torch releases
-# the GIL during inference, so a single worker already overlaps I/O and compute).
+# Single worker on purpose: the backend is I/O-bound (HTTP calls to GPU service
+# and Qdrant), so a single worker already overlaps I/O and compute.
 # `--timeout-keep-alive 300` keeps long SSE streams from disconnecting prematurely
 # (default is only 5s, which is a common source of network errors in production).
 CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--timeout-keep-alive", "300"]
