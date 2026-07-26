@@ -73,18 +73,13 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-        with:
-          path: repo
-
       - name: Deploy Ubuntu application node
         env:
           GPU_SERVICE_URL: ${{ vars.GPU_SERVICE_URL }}
-          REPO_PATH: ${{ github.workspace }}/repo
+          REPO_PATH: ${PRODUCTION_APP_REPO_PATH}
           BACKUP_DIR: ${PRODUCTION_APP_BACKUP_DIRECTORY}
           DATA_PATH: ${PRODUCTION_APP_DATA_PATH}
-          SKIP_GIT_PULL: "1"
+          GIT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           bash "${REPO_PATH}/scripts/deploy-app.sh"
