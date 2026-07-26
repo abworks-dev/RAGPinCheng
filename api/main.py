@@ -92,14 +92,19 @@ async def lifespan(app: FastAPI):
 
     # Warm heavy models on startup so the first request isn't slow.
     # Mirrors the @st.cache_resource warmups in app.py.
+    # With remote provider (EMBED_PROVIDER=remote), this verifies the GPU
+    # service contract (/model-info).  With local provider, it loads the
+    # in-process BGE model.
     if os.getenv("API_SKIP_WARMUP") != "1":
-        logger.info("warming embed model (BGE-M3)...")
-        from src.embed import get_model
-        get_model()
-        if RERANK_ENABLED:
-            logger.info("warming reranker (BGE-reranker-v2-m3)...")
-            from src.rerank import get_reranker
-            get_reranker()
+        logger.info("initializing embed provider...")
+        try:
+            from src.providers import get_embed_provider, get_rerank_provider
+            get_embed_provider()
+            if RERANK_ENABLED:
+                logger.info("initializing rerank provider...")
+                get_rerank_provider()
+        except Exception as exc:
+            logger.warning("provider warmup failed: %s (service will retry on first request)", exc)
 
     sweeper_task = asyncio.create_task(_sweeper_loop())
     # Indexing worker: started before resuming pending jobs so the queue
