@@ -68,7 +68,10 @@ git pull origin master 2>&1 | Out-String | ForEach-Object { Write-Host $_ }
 
 # ── 4. Update dependencies ─────────────────────────────────────────────────
 Write-Step "Updating Python dependencies"
-& $PipExe install -i https://pypi.tuna.tsinghua.edu.cn/simple -r "$ServiceDir\requirements.txt" 2>&1 | Out-Null
+$pipResult = & $PipExe install -i https://pypi.tuna.tsinghua.edu.cn/simple -r "$ServiceDir\requirements.txt" 2>&1
+if ($LASTEXITCODE -ne 0) {
+    Write-Warning "pip install failed: $pipResult"
+}
 
 # ── 5. Create/update .env for GPU service ──────────────────────────────────
 Write-Step "Configuring GPU service"
