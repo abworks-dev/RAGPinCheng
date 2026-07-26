@@ -1,22 +1,36 @@
 # 品成 BIM 知识库 — 内网部署指南（IT 人员）
 
-服务已由开发人员在服务器上完成基本配置并启动。本文档说明如何将其暴露到公司内网，以及后续维护操作。
+应用已迁移为双节点架构：
+- **Ubuntu 应用节点**（${PRIVATE_IPV4}）：运行 Web 服务 + Qdrant 向量数据库
+- **Windows GPU 节点**（${PRIVATE_IPV4}）：运行 GPU 推理服务
+
+服务已由开发人员完成配置并启动。本文档说明基本验证和运维操作。
 
 ---
 
 ## 第一步：验证服务正常运行
 
-```cmd
-curl http://localhost/api/health
+### Ubuntu 应用节点
+
+```bash
+curl http://${PRIVATE_IPV4}/api/health
 ```
 
-应返回：`{"status":"ok"}`
+应返回：`{"status":"ok","children":38488,"parents":20024}`
+
+### Windows GPU 节点
+
+```bash
+curl http://${PRIVATE_IPV4}:8100/health
+```
+
+应返回：`{"status":"ok","model_loaded":true}`
 
 ---
 
 ## 第二步：开放防火墙端口
 
-**方式一：命令行（管理员 PowerShell）**
+**Ubuntu 应用节点（${PRIVATE_IPV4}）：**
 
 ```powershell
 netsh advfirewall firewall add rule name="品成知识库 Port 80" dir=in action=allow protocol=TCP localport=80
