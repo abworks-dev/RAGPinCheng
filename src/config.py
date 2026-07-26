@@ -57,6 +57,19 @@ RERANK_ENABLED = True
 # section headers) at rerank time.
 RERANK_USE_HEADER = True
 
+# Embedding / rerank provider — "local" (in-process BGE) or "remote" (GPU service)
+EMBED_PROVIDER = os.getenv("EMBED_PROVIDER", "local")
+RERANK_PROVIDER = os.getenv("RERANK_PROVIDER", "local")
+
+# Remote GPU service — only used when the provider above is "remote"
+GPU_SERVICE_URL = os.getenv("GPU_SERVICE_URL", "http://${PRIVATE_IPV4}:8100")
+GPU_SERVICE_TOKEN = os.getenv("GPU_SERVICE_TOKEN", "")
+GPU_CONNECT_TIMEOUT = int(os.getenv("GPU_CONNECT_TIMEOUT", "10"))  # seconds
+GPU_READ_TIMEOUT = int(os.getenv("GPU_READ_TIMEOUT", "60"))  # seconds
+GPU_MAX_RETRIES = int(os.getenv("GPU_MAX_RETRIES", "3"))
+GPU_EXPECTED_API_VERSION = "1"
+GPU_EXPECTED_EMBED_DIM = 1024
+
 # Qdrant
 COLLECTION = "pincheng_docs"
 # Qdrant server URL. The backend talks to a separate Qdrant process over
