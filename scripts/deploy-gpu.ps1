@@ -36,11 +36,6 @@ function Write-Step {
     Write-Host "`n>> $Message" -ForegroundColor Cyan
 }
 
-function Test-Command {
-    param([string]$Name)
-    $null = Get-Command $Name -ErrorAction SilentlyContinue
-}
-
 # ── 1. Check prerequisites ─────────────────────────────────────────────────
 Write-Step "Checking prerequisites"
 
@@ -61,14 +56,15 @@ Copy-Item -Recurse -Force "$ServiceDir\*" -Destination $BackupPath
 Copy-Item -Force "$RepositoryPath\requirements-gpu.txt" -Destination $BackupPath
 
 # ── 3. Pull latest code ────────────────────────────────────────────────────
-if ($env:SKIP_GIT_PULL -ne "1") {
-    Write-Step "Pulling latest code"
-    Set-Location $RepositoryPath
-    git config --global --add safe.directory $RepositoryPath 2>$null
-    git pull origin master 2>&1
-} else {
-    Write-Step "Skipping git pull (using checked-out code)"
+Write-Step "Pulling latest code"
+Set-Location $RepositoryPath
+git config --global --add safe.directory $RepositoryPath 2>$null
+# Use GitHub Actions token for auth (available as GITHUB_TOKEN env var)
+$gitToken = $env:GIT_TOKEN
+if ($gitToken) {
+    git remote set-url origin "https://x-access-token:${gitToken}@github.com/abworks-dev/RAGPinCheng.git" 2>$null
 }
+git pull origin master 2>&1
 
 # ── 4. Update dependencies ─────────────────────────────────────────────────
 Write-Step "Updating Python dependencies"
