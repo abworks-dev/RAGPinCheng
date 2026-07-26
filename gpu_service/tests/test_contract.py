@@ -48,17 +48,20 @@ def reset_model_manager():
     # Force the manager to appear unloaded by default
     with patch.object(_model_manager, "_initialized", False):
         with patch.object(_model_manager, "_embed_model", None):
-            yield
+            with patch.object(_model_manager, "is_loaded", False):
+                yield
 
 
 @pytest.fixture
 def model_loaded():
     """Patch the manager to report loaded and return mock results."""
     with patch.object(_model_manager, "_initialized", True):
-        with patch.object(_model_manager, "_device", "cuda"):
-            with patch.object(_model_manager, "embed", return_value=MOCK_EMBED_RESULT):
-                with patch.object(_model_manager, "rerank", return_value=[0.9, 0.3]):
-                    yield
+        with patch.object(_model_manager, "_embed_model", object()):  # truthy sentinel
+            with patch.object(_model_manager, "is_loaded", True):
+                with patch.object(_model_manager, "_device", "cuda"):
+                    with patch.object(_model_manager, "embed", return_value=MOCK_EMBED_RESULT):
+                        with patch.object(_model_manager, "rerank", return_value=[0.9, 0.3]):
+                            yield
 
 
 # ── Health ───────────────────────────────────────────────────────────────────
@@ -220,7 +223,7 @@ def test_embed_order_stable(model_loaded):
 
 def test_cors_headers():
     """CORS should allow Ubuntu backend requests."""
-    resp = client.options("/health", headers={"Origin": "http://192.168.11.12"})
+    resp = client.get("/health", headers={"Origin": "http://192.168.11.12"})
     assert resp.status_code == status.HTTP_200_OK
     assert "Access-Control-Allow-Origin" in resp.headers
 
