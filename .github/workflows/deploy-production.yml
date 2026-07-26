@@ -43,6 +43,11 @@ jobs:
     timeout-minutes: 30
 
     steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          path: D:\RAGPinCheng
+
       - name: Deploy GPU inference service
         shell: powershell
         env:
@@ -50,6 +55,7 @@ jobs:
           GPU_SERVICE_TOKEN: ${{ secrets.GPU_SERVICE_TOKEN }}
           REPO_PATH: D:\RAGPinCheng
           BACKUP_DIR: D:\RAGBackups
+          SKIP_GIT_PULL: "1"
         run: |
           Set-StrictMode -Version Latest
           $ErrorActionPreference = 'Stop'
