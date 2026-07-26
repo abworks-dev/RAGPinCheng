@@ -63,7 +63,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install provider test dependencies
-        run: pip install httpx pytest
+        run: pip install httpx pytest python-dotenv
 
       - name: Run provider unit tests
         run: pytest tests/test_providers.py -v
@@ -84,6 +84,7 @@ jobs:
       - name: Install GPU service dependencies (no torch)
         run: |
           pip install fastapi uvicorn pydantic httpx pytest python-dotenv
+          pip install -r requirements-prod.txt 2>/dev/null || true
 
       - name: Check GPU service schemas import
         run: python -c "from gpu_service.schemas import EmbeddingRequest, RerankRequest, HealthResponse, ModelInfoResponse; print('schemas OK')"
