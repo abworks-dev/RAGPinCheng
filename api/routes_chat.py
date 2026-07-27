@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import threading
 import sqlite3
 from typing import AsyncIterator
 
@@ -217,10 +218,12 @@ async def chat(
                 })
 
                 _STOP = object()
+                _generator_lock = threading.Lock()
 
                 def _next_chunk():
                     try:
-                        return next(persistent_stream)
+                        with _generator_lock:
+                            return next(persistent_stream)
                     except StopIteration:
                         return _STOP
 
