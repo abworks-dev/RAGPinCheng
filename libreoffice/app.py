@@ -114,21 +114,31 @@ async def recalculate(file: UploadFile):
         input_path.write_bytes(content)
 
         async with _concurrency_sem:
-            # LibreOffice recalculates formulas when opening and saving a file.
-            # --convert-to xlsx forces a save even if the input is already xlsx,
-            # which triggers formula recalculation and writes cached values.
+            # LibreOffice recalculates formulas when opening a file.
+            # Convert to ODS first (native format, full recalculation),
+            # then convert back to XLSX with cached values.
+            # Step 1: xlsx → ods (forces recalculation)
             await _run_libreoffice([
                 "libreoffice", "--headless",
-                "--convert-to", "xlsx:Calc MS Excel 2007 XML:UTF8",
+                "--convert-to", "ods",
                 "--outdir", str(output_dir),
                 str(input_path),
             ])
+            # Step 2: ods → xlsx (writes cached values)
+            ods_files = list(output_dir.glob("*.ods"))
+            if not ods_files:
+                # LibreOffice might have written to the input directory
+                ods_files = list(work_dir.glob("*.ods"))
+            if ods_files:
+                await _run_libreoffice([
+                    "libreoffice", "--headless",
+                    "--convert-to", "xlsx:Calc MS Excel 2007 XML",
+                    "--outdir", str(output_dir),
+                    str(ods_files[0]),
+                ])
 
-        # Find the output file
-        out_files = list(output_dir.iterdir())
-        if not out_files:
-            # Try the current directory as fallback
-            out_files = list(Path("/tmp/libreoffice-home").glob("*.xlsx"))
+        # Find the output XLSX file (from step 2)
+        out_files = list(output_dir.glob("*.xlsx"))
         if not out_files:
             raise HTTPException(status_code=500, detail="LibreOffice produced no output")
 
