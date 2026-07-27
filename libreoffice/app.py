@@ -56,7 +56,9 @@ async def _run_libreoffice(args: list[str], timeout: int = CONVERSION_TIMEOUT) -
     )
 
     try:
-        stdout, stderr = await asyncio.wait_for(proc.wait(), timeout=timeout)
+        stdout, stderr = await asyncio.wait_for(
+            proc.communicate(), timeout=timeout
+        )
     except asyncio.TimeoutError:
         proc.kill()
         await proc.wait()
