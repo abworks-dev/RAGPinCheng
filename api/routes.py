@@ -152,6 +152,14 @@ def get_pdf(parent_id: str, _user_id: int = Depends(require_user)) -> Response:
     if not pdf_path.exists() or not pdf_path.is_file():
         raise HTTPException(status_code=404, detail="PDF file not found")
 
+    # 有些 source_path 指向 .md 文件（非教学视频的 markdown 被标记为
+    # doc_type="pdf"），浏览器无法渲染 Markdown 为 PDF。
+    if pdf_path.suffix.lower() not in (".pdf",):
+        raise HTTPException(
+            status_code=400,
+            detail=f"源文件是 {pdf_path.suffix} 格式，不是 PDF，无法预览。"
+        )
+
     return FileResponse(
         path=str(pdf_path),
         media_type="application/pdf",
