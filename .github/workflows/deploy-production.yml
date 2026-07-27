@@ -62,7 +62,7 @@ jobs:
 
   # ── Job 2: Ubuntu application node (backend + Qdrant) ───────────────────
   deploy-app:
-    if: ${{ always() && !cancelled() && !failure() }}
+    if: ${{ needs.deploy-gpu.result == 'success' }}
     needs: [deploy-gpu]
     runs-on:
       - self-hosted
