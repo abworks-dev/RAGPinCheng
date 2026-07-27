@@ -839,9 +839,9 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 const STATUS_HINTS: Record<string, string> = {
-  uploading: "正在上传文件至 MinerU…",
-  queued_mineru: "文件已提交，等待 MinerU 服务器开始解析（通常需 1–3 分钟）",
-  parsing: "MinerU 正在解析 PDF…",
+  uploading: "正在上传文件…",
+  queued_mineru: "文件已提交，等待解析器开始处理…",
+  parsing: "解析中…",
   chunking: "切块中…",
   summarizing: "正在为表格生成检索摘要…",
   embedding: "向量嵌入中…",
