@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 import "react-pdf/dist/esm/Page/AnnotationLayer.css";
 import "react-pdf/dist/esm/Page/TextLayer.css";
@@ -14,6 +14,12 @@ export function PdfPreview() {
   const [scale, setScale] = useState(1.0);
 
   const open = state.parentId !== null;
+
+  // Reset loading state when switching documents.
+  useEffect(() => {
+    setNumPages(null);
+    setLoading(true);
+  }, [state.parentId]);
 
   const onDocumentLoadSuccess = useCallback(
     ({ numPages: n }: { numPages: number }) => {
@@ -143,6 +149,7 @@ export function PdfPreview() {
           )}
           {state.parentId && (
             <Document
+              key={state.parentId}
               file={`/api/pdf/${state.parentId}`}
               onLoadSuccess={onDocumentLoadSuccess}
               onLoadError={onDocumentLoadError}
