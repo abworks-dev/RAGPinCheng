@@ -1054,7 +1054,8 @@ function UploadCard({
     <div className="rounded-lg border border-gray-200 bg-panel p-4">
       <h2 className="font-semibold mb-3">上传资料</h2>
       <p className="text-xs text-muted mb-3">
-        支持 <code>.pdf</code>（自动经 MinerU 解析）与 <code>.md</code>。
+        支持 <code>.pdf</code>（自动经 MinerU 解析）、<code>.docx</code>（自动经 Docling 解析）、
+        <code>.xlsx</code>、<code>.pptx</code> 与 <code>.md</code>。
         在「教学视频」分类下上传的 <code>.md</code> 会按转写格式（说话人 + 时间戳）处理，
         其它分类下则作为普通 Markdown 文档（按标题切分）处理。
         可一次选择多个文件，会依次排队；处理过程中可继续聊天，但响应可能变慢。
@@ -1135,7 +1136,7 @@ function UploadCard({
             id="corpus-upload-input"
             type="file"
             multiple
-            accept=".pdf,.md"
+            accept=".pdf,.md,.docx,.xlsx,.pptx"
             onChange={(e) => setFiles(Array.from(e.target.files || []))}
             className="text-sm"
           />
@@ -1268,9 +1269,15 @@ function DocumentsCard({
                 <td className="px-2 py-1.5 text-muted">
                   {d.doc_type === "transcript"
                     ? "教学视频转写"
-                    : d.source_path.toLowerCase().endsWith(".md")
-                      ? "Markdown 文档"
-                      : "PDF"}
+                    : d.doc_type === "docx"
+                      ? "Word 文档"
+                      : d.doc_type === "xlsx"
+                        ? "Excel 表格"
+                        : d.doc_type === "pptx"
+                          ? "PPT 演示"
+                          : d.source_path.toLowerCase().endsWith(".md")
+                            ? "Markdown 文档"
+                            : "PDF"}
                 </td>
                 <td className="px-2 py-1.5 text-right">{d.parent_count}</td>
                 <td className="px-2 py-1.5">
