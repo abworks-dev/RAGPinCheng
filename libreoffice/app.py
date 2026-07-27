@@ -17,7 +17,8 @@ import time
 import uuid
 from pathlib import Path
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException, UploadFile, status
+from fastapi import FastAPI, HTTPException, UploadFile, status
+from starlette.background import BackgroundTask
 from fastapi.responses import FileResponse
 
 logging.basicConfig(
