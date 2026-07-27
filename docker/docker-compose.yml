@@ -1,6 +1,7 @@
 # 品丞 RAG 系统生产环境 Compose 配置（Ubuntu 应用节点）
 #
-# 两个服务：qdrant（向量数据库）和 backend（FastAPI + React 打包成单一镜像）。
+# 三个服务：qdrant（向量数据库）、backend（FastAPI + React 打包成单一镜像）
+# 和 libreoffice（Office 文档转换服务）。
 # backend 同时提供 /api/* 接口和 React 前端页面，无需单独的前端容器或 nginx 反代。
 #
 # GPU 推理（BGE-M3 embedding + BGE-reranker）运行在独立的 Windows GPU 服务上，
@@ -106,7 +107,7 @@ services:
         max-size: "10m"
         max-file: "5"
 
-libreoffice:
+  libreoffice:
     image: pincheng-libreoffice:latest
     build:
       context: ../libreoffice
@@ -128,10 +129,12 @@ libreoffice:
 
 volumes:
   qdrant_storage:
-  libreoffice_data:
     # Qdrant 索引持久化。执行 docker compose down 不会删除；
     # 只有 docker compose down -v 才会删除。如需查看索引内容，请 exec
     # 进入 qdrant 容器 — 容器运行时不要从主机直接操作这些文件。
+  libreoffice_data:
+    # LibreOffice 转换临时数据。执行 docker compose down 不会删除；
+    # 只有 docker compose down -v 才会删除。
 
 # -----------------------------------------------------------------------------
 # 构建速查手册
