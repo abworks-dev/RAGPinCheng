@@ -214,16 +214,18 @@
   IndexJobDTO: id, filename, category, doc_type, source_path, file_size, status, error, ...
 ```
 
-### 待决策事项
+### 已确认决策
 
-1. **DOCX 结构锚点** — 用于引用定位的 `paragraph_anchor` 如何生成并长期稳定使用什么策略（段落 ID / 文本哈希 / 序号偏移）？
-2. **XLSX 虚拟表格组件** — 选用哪个 React 虚拟表格库（`@tanstack/react-virtual` + 自行渲染 / `react-data-grid` / AG Grid Community），需核验许可证是否满足生产使用要求
-3. **SheetJS 授权** — SheetJS Community Edition 是否满足生产使用（非 GPL，需确认）
-4. **LibreOffice 部署方式** — 安装进现有 backend 镜像 / 独立转换容器 / 独立转换 worker，需从镜像体积、进程隔离、并发、字体安装、升级和故障影响综合评估
-5. **旧版 .doc/.xls/.ppt** — 是否第一阶段支持（需要 LibreOffice 全职转换，且预览无法用原生格式）
-6. **部分成功状态** — 索引成功但预览失败时，是否允许状态为"部分成功"（检索可用 + 预览不可用 + 可单独重试预览）
-7. **Schema 迁移** — Office 文档是否需要新的 `doc_type` 值（如 `docx`/`xlsx`/`pptx`），以及是否需要新增字段（`preview_path`、`page_number`、`sheet_name`、`cell_range`、`paragraph_anchor` 等），是否需要 `parents.sqlite` 迁移
-8. **复杂 DOCX 自动降级** — 当 Docling Slim 解析失败时，是否允许自动降级为 PDF → MinerU 管道（需显式标记，避免静默行为）
+| # | 问题 | 决策 |
+|---|------|------|
+| 1 | DOCX 结构锚点 | 文本哈希（段落前 50 字符的哈希值） |
+| 2 | XLSX 虚拟表格组件 | `@tanstack/react-virtual` + 自行渲染（MIT 许可证） |
+| 3 | SheetJS 授权 | ✅ CE 版（Apache 2.0）满足生产使用要求 |
+| 4 | LibreOffice 部署方式 | 独立容器（新增 `libreoffice` 服务，不放入 backend 镜像） |
+| 5 | 旧版 .doc/.xls/.ppt | 第一版不支持，延后到第二版 |
+| 6 | 部分成功状态 | 允许，索引成功 + 预览失败显示"预览暂不可用"，可单独重试预览 |
+| 7 | Schema 迁移 | 需要，新增 `doc_type` 值：`docx`/`xlsx`/`pptx`，不再复用 `doc_type="pdf"` |
+| 8 | 复杂 DOCX 自动降级 | 允许，但需显式标记 `parsed_via="mineru_fallback"`，`doc_type` 仍标记为 `docx` |
 
 ### 阶段 1：契约与样本基线
 
