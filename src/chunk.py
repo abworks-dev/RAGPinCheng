@@ -439,7 +439,7 @@ def chunk_document(doc: ParsedDoc) -> tuple[list[Parent], list[Child]]:
                     category=doc.category,
                     section_path=section_path,
                     source_path=str(doc.source_path),
-                    doc_type="pdf",
+                    doc_type=doc.doc_type,
                     company=doc.company,
                 )
             )
@@ -457,7 +457,7 @@ def chunk_document(doc: ParsedDoc) -> tuple[list[Parent], list[Child]]:
                         section_path=section_path,
                         source_path=str(doc.source_path),
                         content_type=ctype,
-                        doc_type="pdf",
+                        doc_type=doc.doc_type,
                         company=doc.company,
                     )
                 )
