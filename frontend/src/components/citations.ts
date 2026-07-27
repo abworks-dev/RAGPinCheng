@@ -27,9 +27,10 @@ const PDF_RE = /(?:\[([^\]]+?)\]|([^\[\]\n§]+?))\s*§\s*([^\[\]\n]+?)(?!\()/g;
 const VID_RE = /(?:\[([^\]]+?)\]|([^\[\]\n@]+?))\s*@\s*(\d{1,2}:\d{2}(?::\d{2})?)(?!\()/g;
 
 export function linkifyCitations(markdown: string): string {
-  // First pass: numbered references [N] → [N](#cite-num:N)
+  // First pass: numbered references [N] or [Ntext] → [N](#cite-num:N)
+  // The LLM sometimes outputs [1专业项目文件、中心文件命名] instead of just [1].
   let result = markdown.replace(
-    /\[(\d+)\](?!\()/g,
+    /\[(\d+)[^\]]*?\](?!\()/g,
     (m, num) => `[${num}](#cite-num:${num})`,
   );
   // Second pass: also handle [doc @time] and [doc §section] patterns
