@@ -64,9 +64,12 @@ async def _run_libreoffice(args: list[str], timeout: int = CONVERSION_TIMEOUT) -
         await proc.wait()
         raise RuntimeError(f"LibreOffice timed out after {timeout}s")
 
-    if proc.returncode != 0:
+    if proc.returncode not in (0, 1):
         err_text = (stderr or b"").decode("utf-8", errors="replace")[:500]
         raise RuntimeError(f"LibreOffice exit code {proc.returncode}: {err_text}")
+    # Exit code 1 with javaldx warning is non-fatal (missing Java)
+    if proc.returncode == 1 and stderr and b"javaldx" in stderr:
+        logger.warning("LibreOffice javaldx warning (non-fatal, missing Java)")
 
 
 @app.get("/health")
