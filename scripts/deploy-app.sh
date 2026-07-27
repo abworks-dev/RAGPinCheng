@@ -22,7 +22,7 @@ BACKUP_PATH="${BACKUP_DIR}/app-backup-${TIMESTAMP}"
 
 # Helper: build the full compose command with project, files, and env file.
 compose() {
-    docker compose -p "$COMPOSE_PROJECT" \
+    sudo docker compose -p "$COMPOSE_PROJECT" \
         -f "$COMPOSE_BASE" \
         -f "$COMPOSE_OVERRIDE" \
         --env-file "$COMPOSE_ENV_FILE" \
@@ -114,7 +114,8 @@ done
 
 # ── 9. Qdrant health check ────────────────────────────────────────────────
 echo ">> Checking Qdrant"
-compose exec qdrant curl -fsS http://localhost:6333/collections/pincheng_docs \
+# Qdrant container doesn't have curl — use backend container to check.
+compose exec backend curl -fsS http://qdrant:6333/collections/pincheng_docs \
     | python3 -c "import sys,json; d=json.load(sys.stdin); print(f'  Qdrant OK: {d[\"result\"][\"points_count\"]} points')" \
     2>/dev/null || echo "  WARNING: Qdrant health check failed"
 
