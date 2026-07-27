@@ -129,6 +129,7 @@ def get_pdf(parent_id: str, _user_id: int = Depends(require_user)) -> Response:
     """
     import sqlite3
     conn = sqlite3.connect(str(PARENTS_DB))
+    conn.row_factory = sqlite3.Row
     try:
         row = conn.execute(
             "SELECT source_path, doc_type FROM parents WHERE parent_id = ?",
