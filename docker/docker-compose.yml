@@ -79,6 +79,8 @@ services:
       GPU_SERVICE_TOKEN: ${GPU_SERVICE_TOKEN:-}
       EMBED_PROVIDER: ${EMBED_PROVIDER:-remote}
       RERANK_PROVIDER: ${RERANK_PROVIDER:-remote}
+      # LibreOffice 转换服务地址 — 在同一 Docker 网络内，通过服务名访问。
+      LIBREOFFICE_URL: ${LIBREOFFICE_URL:-http://libreoffice:8101}
     volumes:
       # 持久化状态 — Markdown 解析缓存、parents.sqlite（向量索引元数据）、
       # app.sqlite（用户 + 对话）、feedback.jsonl。数据存在主机磁盘上，
