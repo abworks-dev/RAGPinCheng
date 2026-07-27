@@ -108,3 +108,7 @@ TABLE_SUMMARY_MAX_CHARS = 8000
 
 # Media / Video
 MAX_VIDEO_UPLOAD_MB = int(os.getenv("MAX_VIDEO_UPLOAD_MB", "1024"))
+
+# LibreOffice conversion service
+LIBREOFFICE_URL = os.getenv("LIBREOFFICE_URL", "http://libreoffice:8101")
+LIBREOFFICE_TIMEOUT = int(os.getenv("LIBREOFFICE_TIMEOUT", "120"))  # seconds

@@ -42,6 +42,7 @@ from .office_convert import (
     _md_path_for_office,
     convert_docx_to_markdown,
     convert_xlsx_to_markdown,
+    recalculate_xlsx,
 )
 
 StatusFn = Callable[[str], None]
@@ -184,7 +185,12 @@ def _build_docx_doc(source_path: Path, on_status: StatusFn) -> ParsedDoc:
 
 
 def _build_xlsx_doc(source_path: Path, on_status: StatusFn) -> ParsedDoc:
-    """Parse an XLSX via openpyxl and cache the markdown under data/parsed/."""
+    """Parse an XLSX via openpyxl and cache the markdown under data/parsed/.
+
+    First attempts to recalculate formulas via LibreOffice so that cached
+    values are available. If LibreOffice is unreachable, falls back to
+    parsing without recalculation (formula cells will show as uncached).
+    """
     PARSED_DIR.mkdir(parents=True, exist_ok=True)
     md_path = _md_path_for_office(source_path, PARSED_DIR)
 
@@ -192,7 +198,22 @@ def _build_xlsx_doc(source_path: Path, on_status: StatusFn) -> ParsedDoc:
         on_status("parsing")
         markdown = md_path.read_text(encoding="utf-8")
     else:
-        markdown, _meta = convert_xlsx_to_markdown(source_path)
+        # Try to recalculate formulas via LibreOffice
+        recalc_path = None
+        try:
+            recalc_path = recalculate_xlsx(source_path)
+            convert_path = recalc_path
+        except Exception as exc:
+            logger.warning("LibreOffice recalculation failed, using original: %s", exc)
+            convert_path = source_path
+
+        try:
+            markdown, _meta = convert_xlsx_to_markdown(convert_path)
+        finally:
+            # Clean up the recalculated temp file
+            if recalc_path and recalc_path.exists():
+                recalc_path.unlink(missing_ok=True)
+
         md_path.write_text(markdown, encoding="utf-8")
 
     category, company = _derive_category_and_company(source_path)

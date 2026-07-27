@@ -106,8 +106,29 @@ services:
         max-size: "10m"
         max-file: "5"
 
+libreoffice:
+    image: pincheng-libreoffice:latest
+    build:
+      context: ../libreoffice
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    volumes:
+      - libreoffice_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8101/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
 volumes:
   qdrant_storage:
+  libreoffice_data:
     # Qdrant 索引持久化。执行 docker compose down 不会删除；
     # 只有 docker compose down -v 才会删除。如需查看索引内容，请 exec
     # 进入 qdrant 容器 — 容器运行时不要从主机直接操作这些文件。
