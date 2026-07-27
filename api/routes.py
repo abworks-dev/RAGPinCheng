@@ -120,6 +120,56 @@ def get_categories() -> CategoriesResponse:
     return CategoriesResponse(categories=list_categories())
 
 
+@router.get("/source/{parent_id}/raw")
+def get_source_file(parent_id: str, _user_id: int = Depends(require_user)) -> Response:
+    """Serve the original source file for a given parent_id.
+
+    Works for any doc_type (pdf, docx, xlsx, pptx, etc.). Looks up the
+    source_path in parents.sqlite and returns the file with the correct
+    MIME type.
+    """
+    import sqlite3
+    conn = sqlite3.connect(str(PARENTS_DB))
+    conn.row_factory = sqlite3.Row
+    try:
+        row = conn.execute(
+            "SELECT source_path, doc_type FROM parents WHERE parent_id = ?",
+            (parent_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Parent not found")
+
+    raw = row["source_path"]
+    file_path = Path(raw) if Path(raw).is_absolute() else DOCS_DIR / raw
+
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(status_code=404, detail="Source file not found")
+
+    # Map file extension to MIME type
+    suffix = file_path.suffix.lower()
+    mime_map = {
+        ".pdf": "application/pdf",
+        ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        ".doc": "application/msword",
+        ".xls": "application/vnd.ms-excel",
+        ".ppt": "application/vnd.ms-powerpoint",
+        ".md": "text/markdown",
+    }
+    media_type = mime_map.get(suffix, "application/octet-stream")
+
+    return FileResponse(
+        path=str(file_path),
+        media_type=media_type,
+        filename=file_path.name,
+        headers={"Accept-Ranges": "bytes"},
+    )
+
+
 @router.get("/pdf/{parent_id}")
 def get_pdf(parent_id: str, _user_id: int = Depends(require_user)) -> Response:
     """Serve the original PDF file for a given parent_id.

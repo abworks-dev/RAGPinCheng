@@ -3,6 +3,7 @@ import { Document, Page, pdfjs } from "react-pdf";
 import "react-pdf/dist/esm/Page/AnnotationLayer.css";
 import "react-pdf/dist/esm/Page/TextLayer.css";
 import { usePdfPreview } from "../hooks/usePdfPreview";
+import { DocxPreview } from "./DocxPreview";
 
 // PDF.js worker — use the CDN build so we don't need to bundle it.
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
@@ -14,6 +15,7 @@ export function PdfPreview() {
   const [scale, setScale] = useState(1.0);
 
   const open = state.parentId !== null;
+  const isDocx = state.docType === "docx";
 
   // Reset loading state when switching documents.
   useEffect(() => {
@@ -69,33 +71,43 @@ export function PdfPreview() {
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700 shrink-0">
           <div className="min-w-0 flex-1">
-            <h3 className="text-sm font-medium truncate">{state.title}</h3>
-            {numPages && (
+            <h3 className="text-sm font-medium truncate">
+              {isDocx ? "📄 " : "📕 "}
+              {state.title}
+            </h3>
+            {!isDocx && numPages && (
               <p className="text-xs text-muted">
                 {state.pageNumber} / {numPages} 页
               </p>
             )}
+            {isDocx && (
+              <p className="text-xs text-muted">Word 文档</p>
+            )}
           </div>
           <div className="flex items-center gap-1 ml-4">
-            <button
-              type="button"
-              onClick={zoomOut}
-              className="px-2 py-1 text-xs border border-gray-300 rounded hover:bg-gray-100 dark:hover:bg-gray-800"
-              title="缩小"
-            >
-              −
-            </button>
-            <span className="text-xs text-muted w-10 text-center">
-              {Math.round(scale * 100)}%
-            </span>
-            <button
-              type="button"
-              onClick={zoomIn}
-              className="px-2 py-1 text-xs border border-gray-300 rounded hover:bg-gray-100 dark:hover:bg-gray-800"
-              title="放大"
-            >
-              +
-            </button>
+            {!isDocx && (
+              <>
+                <button
+                  type="button"
+                  onClick={zoomOut}
+                  className="px-2 py-1 text-xs border border-gray-300 rounded hover:bg-gray-100 dark:hover:bg-gray-800"
+                  title="缩小"
+                >
+                  −
+                </button>
+                <span className="text-xs text-muted w-10 text-center">
+                  {Math.round(scale * 100)}%
+                </span>
+                <button
+                  type="button"
+                  onClick={zoomIn}
+                  className="px-2 py-1 text-xs border border-gray-300 rounded hover:bg-gray-100 dark:hover:bg-gray-800"
+                  title="放大"
+                >
+                  +
+                </button>
+              </>
+            )}
             <button
               type="button"
               onClick={close}
@@ -106,8 +118,8 @@ export function PdfPreview() {
           </div>
         </div>
 
-        {/* Page navigation */}
-        {numPages && numPages > 1 && (
+        {/* Page navigation (PDF only) */}
+        {!isDocx && numPages && numPages > 1 && (
           <div className="flex items-center justify-center gap-2 px-4 py-2 border-b border-gray-100 dark:border-gray-800 shrink-0">
             <button
               type="button"
@@ -140,36 +152,46 @@ export function PdfPreview() {
           </div>
         )}
 
-        {/* PDF viewer */}
+        {/* Content area */}
         <div className="flex-1 overflow-y-auto bg-gray-100 dark:bg-gray-800">
-          {loading && (
-            <div className="flex items-center justify-center h-full text-sm text-muted">
-              加载 PDF…
-            </div>
-          )}
-          {state.parentId && (
-            <Document
-              key={state.parentId}
-              file={`/api/pdf/${state.parentId}`}
-              onLoadSuccess={onDocumentLoadSuccess}
-              onLoadError={onDocumentLoadError}
-              loading={<div className="flex items-center justify-center h-full text-sm text-muted">加载 PDF…</div>}
-            >
-              <div className="flex justify-center py-4">
-                <Page
-                  pageNumber={state.pageNumber}
-                  scale={scale}
-                  renderTextLayer={true}
-                  renderAnnotationLayer={true}
-                  className="shadow-md"
-                />
-              </div>
-            </Document>
-          )}
-          {!loading && !numPages && (
-            <div className="flex items-center justify-center h-full text-sm text-muted">
-              PDF 加载失败
-            </div>
+          {isDocx ? (
+            <DocxPreview
+              parentId={state.parentId!}
+              onLoad={() => setLoading(false)}
+              onError={() => setLoading(false)}
+            />
+          ) : (
+            <>
+              {loading && (
+                <div className="flex items-center justify-center h-full text-sm text-muted">
+                  加载 PDF…
+                </div>
+              )}
+              {state.parentId && (
+                <Document
+                  key={state.parentId}
+                  file={`/api/pdf/${state.parentId}`}
+                  onLoadSuccess={onDocumentLoadSuccess}
+                  onLoadError={onDocumentLoadError}
+                  loading={<div className="flex items-center justify-center h-full text-sm text-muted">加载 PDF…</div>}
+                >
+                  <div className="flex justify-center py-4">
+                    <Page
+                      pageNumber={state.pageNumber}
+                      scale={scale}
+                      renderTextLayer={true}
+                      renderAnnotationLayer={true}
+                      className="shadow-md"
+                    />
+                  </div>
+                </Document>
+              )}
+              {!loading && !numPages && (
+                <div className="flex items-center justify-center h-full text-sm text-muted">
+                  PDF 加载失败
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>
