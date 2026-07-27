@@ -36,7 +36,7 @@ export function DocxPreview({
         if (cancelled || !containerRef.current) return;
         const container: HTMLElement = containerRef.current;
 
-        await renderAsync(blob, container, null, {
+        await renderAsync(blob, container, undefined, {
           className: "docx-viewer",
           inWrapper: true,
           ignoreWidth: true,
