@@ -311,6 +311,51 @@ _SAFE_NAME_RE = re.compile(r"^[\w\-.,，''’（）()【】\[\] ]+$")
 import os as _os
 MAX_UPLOAD_BYTES = int(_os.getenv("MAX_UPLOAD_MB", "200")) * 1024 * 1024
 
+# Office file security constants
+_MAX_ZIP_BOMB_RATIO = 200  # max decompression ratio for zip bomb protection
+
+
+def _verify_office_signature(path: Path, ext: str) -> bool:
+    """Verify the file starts with PK\x03\x04 (ZIP header) for Office formats."""
+    if ext not in (".docx", ".xlsx", ".pptx"):
+        return True
+    try:
+        header = path.read_bytes()[:4]
+        return header.startswith(b"PK\x03\x04")
+    except OSError:
+        return False
+
+
+def _check_zip_bomb(path: Path) -> bool:
+    """Check if the file is a zip bomb. Returns True if safe."""
+    import zipfile
+    try:
+        with zipfile.ZipFile(path) as zf:
+            compressed = 0
+            uncompressed = 0
+            for info in zf.infolist():
+                compressed += info.compress_size
+                uncompressed += info.file_size
+            if compressed > 0 and uncompressed / compressed > _MAX_ZIP_BOMB_RATIO:
+                return False
+        return True
+    except (zipfile.BadZipFile, OSError):
+        return False
+
+
+def _check_office_macros(path: Path) -> bool:
+    """Check if a ZIP-based Office file contains VBA macros. Returns True if found."""
+    import zipfile
+    try:
+        with zipfile.ZipFile(path) as zf:
+            for name in zf.namelist():
+                lower = name.lower()
+                if "vba" in lower or "macro" in lower or "vbaproject" in lower:
+                    return True
+        return False
+    except (zipfile.BadZipFile, OSError):
+        return False
+
 
 def _job_row_to_dto(r: sqlite3.Row) -> IndexJobDTO:
     stats = {}
@@ -464,7 +509,7 @@ async def upload_documents(
             continue
         doc_type = _classify_doc_type(name, cat)
         if doc_type is None:
-            skipped.append({"filename": name, "reason": "仅支持 .pdf 和 .md"})
+            skipped.append({"filename": name, "reason": "仅支持 .pdf、.md、.docx、.xlsx、.pptx"})
             continue
 
         target = category_dir / name
@@ -498,6 +543,25 @@ async def upload_documents(
             continue
         if total > MAX_UPLOAD_BYTES:
             continue  # already skipped above
+
+        # Office file security checks (after file is on disk)
+        ext = Path(name).suffix.lower()
+        if ext in (".docx", ".xlsx", ".pptx"):
+            # 1. Magic bytes signature check
+            if not _verify_office_signature(target, ext):
+                target.unlink()
+                skipped.append({"filename": name, "reason": "文件格式校验失败（文件头不匹配）"})
+                continue
+            # 2. Zip bomb check
+            if not _check_zip_bomb(target):
+                target.unlink()
+                skipped.append({"filename": name, "reason": "文件压缩比异常，疑似 zip bomb"})
+                continue
+            # 3. Macro check
+            if _check_office_macros(target):
+                target.unlink()
+                skipped.append({"filename": name, "reason": "不支持带宏的 Office 文件"})
+                continue
 
         job_id = create_job(
             user_id=admin.id,

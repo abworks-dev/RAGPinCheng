@@ -183,6 +183,14 @@ def index_single(
         # Non-transcript markdown — already markdown, skip the parse pass.
         # Chunker still uses the PDF (header-anchored) branch via doc_type="pdf".
         doc = _build_markdown_doc(source_path)
+    elif doc_type in ("docx", "xlsx", "pptx"):
+        # Office document parsing — will be implemented in Phase 3/5/7.
+        # Currently the file is saved and the job is created, but parsing
+        # fails with a clear message until the converter is installed.
+        raise NotImplementedError(
+            f"Office document parsing ({doc_type}) not yet implemented. "
+            f"See TODO: Office 文档支持 — 阶段 3/5/7"
+        )
     else:
         doc = _build_pdf_doc(source_path, on_status)
 
