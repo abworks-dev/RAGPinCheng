@@ -27,8 +27,13 @@ const PDF_RE = /(?:\[([^\]]+?)\]|([^\[\]\n§]+?))\s*§\s*([^\[\]\n]+?)(?!\()/g;
 const VID_RE = /(?:\[([^\]]+?)\]|([^\[\]\n@]+?))\s*@\s*(\d{1,2}:\d{2}(?::\d{2})?)(?!\()/g;
 
 export function linkifyCitations(markdown: string): string {
-  // Run PDF after video so a transcript title containing "§" doesn't get hit.
-  return markdown
+  // First pass: numbered references [N] → [N](#cite-num:N)
+  let result = markdown.replace(
+    /\[(\d+)\](?!\()/g,
+    (m, num) => `[${num}](#cite-num:${num})`,
+  );
+  // Second pass: also handle [doc @time] and [doc §section] patterns
+  result = result
     .replace(VID_RE, (m, bracketed, unbracketed, time) => {
       const doc = (bracketed || unbracketed || "").trim();
       if (!doc) return m;
@@ -41,10 +46,17 @@ export function linkifyCitations(markdown: string): string {
       const href = `#cite-pdf:${encodeURIComponent(doc)}::${encodeURIComponent(section.trim())}`;
       return `[${doc} § ${section.trim()}](${href})`;
     });
+  return result;
 }
 
 export function resolveCitation(href: string, sources: Source[]): number {
-  // href looks like `#cite-pdf:<doc>::<section>` or `#cite-vid:<doc>::<time>`.
+  // Numbered reference: #cite-num:N → source index N-1
+  const numMatch = href.match(/^#cite-num:(\d+)$/);
+  if (numMatch) {
+    const idx = parseInt(numMatch[1], 10) - 1;
+    return idx >= 0 && idx < sources.length ? idx : -1;
+  }
+  // Legacy: href looks like `#cite-pdf:<doc>::<section>` or `#cite-vid:<doc>::<time>`.
   const m = href.match(/^#cite-(pdf|vid):(.+?)::(.+)$/);
   if (!m) return -1;
   const [, kind, encDoc, encTail] = m;
