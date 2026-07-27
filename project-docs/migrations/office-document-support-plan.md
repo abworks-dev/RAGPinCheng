@@ -124,16 +124,18 @@ DocumentPreview
 - 兼容预览切换（原生渲染失真时切换为 PDF 预览）
 - 移动端行为
 
-## 8. 待决策事项
+## 8. 已确认决策
 
-1. **DOCX 结构锚点**：段落 ID / 文本哈希 / 序号偏移，用于引用定位
-2. **XLSX 虚拟表格组件**：`@tanstack/react-virtual` / `react-data-grid` / AG Grid Community，需核验许可证
-3. **SheetJS 授权**：Community Edition 是否满足生产使用
-4. **LibreOffice 部署方式**：backend 镜像 / 独立容器 / 独立 worker
-5. **旧版 .doc/.xls/.ppt**：是否第一版支持
-6. **部分成功状态**：索引成功但预览失败是否允许
-7. **Schema 迁移**：是否需要新的 `doc_type` 值和字段
-8. **复杂 DOCX 自动降级**：是否允许自动降级为 PDF → MinerU
+| # | 问题 | 决策 |
+|---|------|------|
+| 1 | DOCX 结构锚点 | 文本哈希（段落前 50 字符的哈希值） |
+| 2 | XLSX 虚拟表格组件 | `@tanstack/react-virtual` + 自行渲染（MIT 许可证） |
+| 3 | SheetJS 授权 | ✅ CE 版（Apache 2.0）满足生产使用要求 |
+| 4 | LibreOffice 部署方式 | 独立容器（新增 `libreoffice` 服务，不放入 backend 镜像） |
+| 5 | 旧版 .doc/.xls/.ppt | 第一版不支持，延后到第二版 |
+| 6 | 部分成功状态 | 允许，索引成功 + 预览失败显示"预览暂不可用"，可单独重试预览 |
+| 7 | Schema 迁移 | 需要，新增 `doc_type` 值：`docx`/`xlsx`/`pptx`，不再复用 `doc_type="pdf"` |
+| 8 | 复杂 DOCX 自动降级 | 允许，但需显式标记 `parsed_via="mineru_fallback"`，`doc_type` 仍标记为 `docx` |
 
 ## 9. 实施阶段
 
