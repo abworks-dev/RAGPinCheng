@@ -3,7 +3,7 @@
 Provides converters for:
 - DOCX → Markdown (via Docling Slim)
 - PPTX → Markdown (via Docling Slim)
-- XLSX → Markdown (via openpyxl, in Phase 5)
+- XLSX → Markdown (via openpyxl)
 
 Each converter returns the Markdown string and metadata about the conversion.
 """
@@ -95,8 +95,53 @@ _MAX_XLSX_ROWS_PER_CHUNK = 50
 _MAX_XLSX_COLS_PER_CHUNK = 20
 
 
-def _format_cell_value(cell: Any) -> str:
-    """Format a cell value for Markdown table output.
+def _format_cell_pair(
+    formula_cell: Any,
+    value_cell: Any,
+) -> str:
+    """Format a cell pair (formula + optional cached value) for Markdown.
+
+    Rules:
+      - Regular value (no formula) → formatted as before
+      - Formula with cached value → formatted value + formula annotation
+      - Formula without cached value → formula expression + no-cache marker
+      - Genuinely empty cell → empty string
+    """
+    from openpyxl.cell.cell import TYPE_FORMULA
+
+    is_formula = formula_cell.data_type == TYPE_FORMULA
+    formula_expr = str(formula_cell.value) if is_formula else None
+
+    # Check if the value cell holds a cached result.
+    # Use a sentinel to distinguish 0 / False from None.
+    _SENTINEL = object()
+    cached = value_cell.value if value_cell is not None else _SENTINEL
+    has_cached = cached is not _SENTINEL and cached is not None
+
+    if not is_formula:
+        # Regular (non-formula) cell — format as before.
+        return _format_plain_value(formula_cell)
+
+    # ── Formula cell ─────────────────────────────────────────────────────
+    number_format = formula_cell.number_format or ""
+
+    if has_cached:
+        # Format the cached value with the formula cell's number format.
+        # Create a temporary cell-like object so _format_plain_value can
+        # read .value and .number_format.
+        class _TempCell:
+            pass
+        tmp = _TempCell()
+        tmp.value = cached
+        tmp.number_format = number_format
+        formatted = _format_plain_value(tmp)
+        return f"{formatted}（公式：{formula_expr}）"
+    else:
+        return f"公式：{formula_expr}（未缓存计算结果）"
+
+
+def _format_plain_value(cell: Any) -> str:
+    """Format a cell's value for Markdown table output.
 
     Handles dates, percentages, currency, and other formatted values.
     Falls back to the raw value if formatting fails.
@@ -104,20 +149,21 @@ def _format_cell_value(cell: Any) -> str:
     if cell.value is None:
         return ""
     try:
+        nf = (cell.number_format or "").lower()
         # Number format contains date patterns
-        if cell.number_format and any(kw in (cell.number_format or "").lower() for kw in ("yyyy", "mm", "dd", "日期")):
+        if nf and any(kw in nf for kw in ("yyyy", "mm", "dd", "日期")):
             try:
                 return cell.value.strftime("%Y-%m-%d") if hasattr(cell.value, "strftime") else str(cell.value)
             except (ValueError, AttributeError):
                 pass
         # Percentage
-        if cell.number_format and "%" in (cell.number_format or ""):
+        if nf and "%" in nf:
             try:
                 return f"{float(cell.value) * 100:.1f}%"
             except (ValueError, TypeError):
                 pass
         # Currency / accounting
-        if cell.number_format and any(kw in (cell.number_format or "").lower() for kw in ("¥", "$", "￥", "元")):
+        if nf and any(kw in nf for kw in ("¥", "$", "￥", "元")):
             try:
                 return f"{float(cell.value):.2f}"
             except (ValueError, TypeError):
@@ -127,11 +173,13 @@ def _format_cell_value(cell: Any) -> str:
     return str(cell.value)
 
 
-def _detect_data_region(sheet: Any) -> tuple[int, int, int, int]:
-    """Detect the rectangular data region of a sheet.
+def _detect_data_region_from_formula(sheet: Any) -> tuple[int, int, int, int]:
+    """Detect the rectangular data region using the formula sheet.
 
-    Returns (min_row, min_col, max_row, max_col) based on the
-    used range, excluding completely empty rows/columns at the edges.
+    Unlike the value sheet, the formula sheet retains formula expressions,
+    so cells with uncached formulas are not mistaken for empty cells.
+
+    Returns (min_row, min_col, max_row, max_col).
     """
     if sheet.max_row is None or sheet.max_column is None:
         return (1, 1, 0, 0)
@@ -155,18 +203,22 @@ def _detect_data_region(sheet: Any) -> tuple[int, int, int, int]:
 
 
 def _sheet_to_markdown_tables(
-    sheet: Any,
+    formula_ws: Any,
+    value_ws: Any,
     sheet_name: str,
 ) -> list[dict[str, Any]]:
     """Convert a single sheet to one or more Markdown table chunks.
 
+    Uses the formula worksheet for cell values/formulas and the value
+    worksheet for cached calculation results.
+
     Returns a list of dicts with keys: "markdown", "sheet_name", "cell_range".
     Large tables are split into multiple chunks.
     """
-    if sheet.max_row is None or sheet.max_column is None:
+    if formula_ws.max_row is None or formula_ws.max_column is None:
         return []
 
-    min_row, min_col, max_row, max_col = _detect_data_region(sheet)
+    min_row, min_col, max_row, max_col = _detect_data_region_from_formula(formula_ws)
     if max_row < min_row or max_col < min_col:
         return []
 
@@ -175,8 +227,9 @@ def _sheet_to_markdown_tables(
     for row_idx in range(min_row, max_row + 1):
         row_data: list[str] = []
         for col_idx in range(min_col, max_col + 1):
-            cell = sheet.cell(row=row_idx, column=col_idx)
-            row_data.append(_format_cell_value(cell))
+            f_cell = formula_ws.cell(row=row_idx, column=col_idx)
+            v_cell = value_ws.cell(row=row_idx, column=col_idx) if value_ws is not None else None
+            row_data.append(_format_cell_pair(f_cell, v_cell))
         all_rows.append(row_data)
 
     if not all_rows:
@@ -248,6 +301,10 @@ def _col_letter(n: int) -> str:
 def convert_xlsx_to_markdown(path: Path) -> tuple[str, list[dict[str, Any]]]:
     """Convert an XLSX file to Markdown using openpyxl.
 
+    Loads the workbook twice — once for formulas (data_only=False) and once
+    for cached values (data_only=True) — so that formula cells without a
+    cached result are not silently dropped.
+
     Returns:
         (markdown_string, sheets_metadata)
         sheets_metadata is a list of dicts with keys "sheet_name" and "cell_range"
@@ -263,19 +320,40 @@ def convert_xlsx_to_markdown(path: Path) -> tuple[str, list[dict[str, Any]]]:
     logger.info("converting XLSX: %s", path.name)
     start = time.time()
 
-    wb = openpyxl.load_workbook(path, data_only=True, read_only=False)
+    formula_wb = openpyxl.load_workbook(path, data_only=False, read_only=False)
+    value_wb = openpyxl.load_workbook(path, data_only=True, read_only=False)
+
+    uncached_count = 0
     chunks: list[dict[str, Any]] = []
 
-    for sheet_name in wb.sheetnames:
-        ws = wb[sheet_name]
-        # Skip hidden sheets
-        if ws.sheet_state in ("hidden", "veryHidden"):
-            logger.info("  skipping hidden sheet: %s", sheet_name)
-            continue
-        sheet_chunks = _sheet_to_markdown_tables(ws, sheet_name)
-        chunks.extend(sheet_chunks)
+    try:
+        for sheet_name in formula_wb.sheetnames:
+            formula_ws = formula_wb[sheet_name]
+            # Skip hidden sheets
+            if formula_ws.sheet_state in ("hidden", "veryHidden"):
+                logger.info("  skipping hidden sheet: %s", sheet_name)
+                continue
+            value_ws = value_wb[sheet_name] if sheet_name in value_wb.sheetnames else None
+            sheet_chunks = _sheet_to_markdown_tables(formula_ws, value_ws, sheet_name)
+            chunks.extend(sheet_chunks)
 
-    wb.close()
+            # Count uncached formula cells for aggregate logging
+            for row in formula_ws.iter_rows(min_row=1, max_row=formula_ws.max_row or 0, max_col=formula_ws.max_column or 0):
+                for cell in row:
+                    from openpyxl.cell.cell import TYPE_FORMULA
+                    if cell.data_type == TYPE_FORMULA and cell.value is not None:
+                        v = value_ws.cell(row=cell.row, column=cell.column).value if value_ws else None
+                        if v is None:
+                            uncached_count += 1
+    finally:
+        formula_wb.close()
+        value_wb.close()
+
+    if uncached_count:
+        logger.info(
+            "XLSX conversion: %d formula cells have no cached result",
+            uncached_count,
+        )
 
     # Combine all chunks into a single markdown string
     markdown = "\n".join(c["markdown"] for c in chunks)
@@ -289,7 +367,7 @@ def convert_xlsx_to_markdown(path: Path) -> tuple[str, list[dict[str, Any]]]:
     elapsed = time.time() - start
     logger.info(
         "XLSX conversion done: %s (%d sheets, %d chunks, %d chars, %.1fs)",
-        path.name, len(wb.sheetnames), len(chunks), len(markdown), elapsed,
+        path.name, len(formula_wb.sheetnames), len(chunks), len(markdown), elapsed,
     )
 
     return markdown, sheets_metadata
