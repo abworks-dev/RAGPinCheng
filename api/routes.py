@@ -6,15 +6,20 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import FileResponse, Response
 
 from src.config import (
     COLLECTION,
+    DOCS_DIR,
     EMBED_MODEL,
     LLM_MODEL,
     LLM_REWRITE_MODEL,
+    PARENTS_DB,
     RERANK_ENABLED,
     RERANKER_MODEL,
 )
@@ -113,3 +118,42 @@ def post_feedback(
 @router.get("/categories", response_model=CategoriesResponse)
 def get_categories() -> CategoriesResponse:
     return CategoriesResponse(categories=list_categories())
+
+
+@router.get("/pdf/{parent_id}")
+def get_pdf(parent_id: str, _user_id: int = Depends(require_user)) -> Response:
+    """Serve the original PDF file for a given parent_id.
+
+    Looks up the source_path in parents.sqlite, resolves it against DOCS_DIR,
+    and returns the PDF file. Only works for ``doc_type="pdf"`` parents.
+    """
+    import sqlite3
+    conn = sqlite3.connect(str(PARENTS_DB))
+    try:
+        row = conn.execute(
+            "SELECT source_path, doc_type FROM parents WHERE parent_id = ?",
+            (parent_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Parent not found")
+    if row["doc_type"] != "pdf":
+        raise HTTPException(status_code=400, detail="Not a PDF document")
+
+    # source_path is stored as an absolute path inside the container, e.g.
+    # /app/docs/行业规范/GB50017-2017.pdf.  If it's not absolute, resolve
+    # relative to DOCS_DIR.
+    raw = row["source_path"]
+    pdf_path = Path(raw) if Path(raw).is_absolute() else DOCS_DIR / raw
+
+    if not pdf_path.exists() or not pdf_path.is_file():
+        raise HTTPException(status_code=404, detail="PDF file not found")
+
+    return FileResponse(
+        path=str(pdf_path),
+        media_type="application/pdf",
+        filename=pdf_path.name,
+        headers={"Accept-Ranges": "bytes"},
+    )

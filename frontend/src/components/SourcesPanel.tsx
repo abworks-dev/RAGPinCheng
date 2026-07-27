@@ -4,6 +4,7 @@ import { CITATION_EVENT, CITATION_HOVER_EVENT, type CitationDetail, type Citatio
 import type { Source } from "../types";
 import { stripMarkdown } from "../utils/markdown";
 import { timestampToSeconds, useVideoPlayer } from "../hooks/useVideoPlayer";
+import { usePdfPreview } from "../hooks/usePdfPreview";
 
 function stripHtml(text: string): string {
   return text.replace(/<[^>]*>/g, "");
@@ -159,6 +160,9 @@ function SourceCard({
           >
             {copied ? "✓ 已复制" : "📋 复制"}
           </button>
+          {s.doc_type === "pdf" && (
+            <PdfPreviewButton parentId={s.parent_id} title={s.doc_title} />
+          )}
           <button
             type="button"
             title="报告引用有误"
@@ -226,6 +230,29 @@ function SourceCard({
         </div>
       )}
     </li>
+  );
+}
+
+/**
+ * PDF preview button. Opens the PDF preview panel for this source.
+ */
+function PdfPreviewButton({ parentId, title }: { parentId: string; title: string }) {
+  const { open } = usePdfPreview();
+
+  function handleClick(e: React.MouseEvent) {
+    e.stopPropagation();
+    open(parentId, title);
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      className="text-xs text-accent hover:underline"
+      title="PDF 预览"
+    >
+      📄 PDF 预览
+    </button>
   );
 }
 
