@@ -41,6 +41,7 @@ from .ingest import (
 from .office_convert import (
     _md_path_for_office,
     convert_docx_to_markdown,
+    convert_xlsx_to_markdown,
 )
 
 StatusFn = Callable[[str], None]
@@ -182,6 +183,29 @@ def _build_docx_doc(source_path: Path, on_status: StatusFn) -> ParsedDoc:
     )
 
 
+def _build_xlsx_doc(source_path: Path, on_status: StatusFn) -> ParsedDoc:
+    """Parse an XLSX via openpyxl and cache the markdown under data/parsed/."""
+    PARSED_DIR.mkdir(parents=True, exist_ok=True)
+    md_path = _md_path_for_office(source_path, PARSED_DIR)
+
+    if md_path.exists():
+        on_status("parsing")
+        markdown = md_path.read_text(encoding="utf-8")
+    else:
+        markdown, _meta = convert_xlsx_to_markdown(source_path)
+        md_path.write_text(markdown, encoding="utf-8")
+
+    category, company = _derive_category_and_company(source_path)
+    return ParsedDoc(
+        source_path=source_path,
+        category=category,
+        doc_title=source_path.stem,
+        markdown_path=md_path,
+        doc_type="xlsx",
+        company=company,
+    )
+
+
 def index_single(
     source_path: Path,
     doc_type: str,
@@ -213,11 +237,13 @@ def index_single(
         doc = _build_markdown_doc(source_path)
     elif doc_type == "docx":
         doc = _build_docx_doc(source_path, on_status)
-    elif doc_type in ("xlsx", "pptx"):
-        # Will be implemented in Phase 5/7.
+    elif doc_type == "xlsx":
+        doc = _build_xlsx_doc(source_path, on_status)
+    elif doc_type == "pptx":
+        # Will be implemented in Phase 7.
         raise NotImplementedError(
             f"Office document parsing ({doc_type}) not yet implemented. "
-            f"See TODO: Office 文档支持 — 阶段 5/7"
+            f"See TODO: Office 文档支持 — 阶段 7"
         )
     else:
         doc = _build_pdf_doc(source_path, on_status)
