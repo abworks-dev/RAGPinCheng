@@ -298,6 +298,38 @@ def _col_letter(n: int) -> str:
     return letters
 
 
+def recalculate_xlsx(path: Path) -> Path:
+    """Recalculate XLSX formulas via LibreOffice service.
+
+    Returns the path to a temporary file with cached formula values.
+    The caller is responsible for cleanup.
+    """
+    import httpx
+    from .config import LIBREOFFICE_URL, LIBREOFFICE_TIMEOUT
+
+    logger.info("recalculating XLSX via LibreOffice: %s", path.name)
+    start = time.time()
+
+    with httpx.Client(timeout=LIBREOFFICE_TIMEOUT) as client:
+        with open(path, "rb") as fh:
+            resp = client.post(
+                f"{LIBREOFFICE_URL}/v1/recalculate",
+                files={"file": (path.name, fh, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+            )
+        if resp.status_code != 200:
+            raise RuntimeError(
+                f"LibreOffice recalculation failed (HTTP {resp.status_code}): {resp.text[:200]}"
+            )
+
+    # Save the recalculated file to a temp location
+    temp = path.with_suffix(path.stem + ".recalculated" + path.suffix)
+    temp.write_bytes(resp.content)
+
+    elapsed = time.time() - start
+    logger.info("recalculation done: %s (%.1fs)", path.name, elapsed)
+    return temp
+
+
 def convert_xlsx_to_markdown(path: Path) -> tuple[str, list[dict[str, Any]]]:
     """Convert an XLSX file to Markdown using openpyxl.
 
