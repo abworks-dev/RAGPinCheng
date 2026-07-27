@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1.7
-
 # Combined image — FastAPI + ChatSession + Qdrant client + React SPA.
 # No GPU dependencies (torch, BGE models) — those run on the separate
 # Windows GPU inference service (gpu_service/).
