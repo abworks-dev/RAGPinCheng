@@ -1,17 +1,19 @@
 import { createContext, useCallback, useContext, useMemo, useState } from "react";
 
 export interface PdfPreviewState {
-  /** The parent_id of the PDF source to preview, or null if closed. */
+  /** The parent_id of the source to preview, or null if closed. */
   parentId: string | null;
   /** The document title shown in the panel header. */
   title: string;
-  /** Optional initial page number (1-indexed). */
+  /** The document type for choosing the correct renderer. */
+  docType: string;
+  /** Optional initial page number (1-indexed, PDF only). */
   pageNumber: number;
 }
 
 interface PdfPreviewContextValue {
   state: PdfPreviewState;
-  open: (parentId: string, title: string, pageNumber?: number) => void;
+  open: (parentId: string, title: string, docType?: string, pageNumber?: number) => void;
   close: () => void;
   setPage: (page: number) => void;
 }
@@ -22,15 +24,16 @@ export function PdfPreviewProvider({ children }: { children: React.ReactNode }) 
   const [state, setState] = useState<PdfPreviewState>({
     parentId: null,
     title: "",
+    docType: "pdf",
     pageNumber: 1,
   });
 
-  const open = useCallback((parentId: string, title: string, pageNumber = 1) => {
-    setState({ parentId, title, pageNumber });
+  const open = useCallback((parentId: string, title: string, docType = "pdf", pageNumber = 1) => {
+    setState({ parentId, title, docType, pageNumber });
   }, []);
 
   const close = useCallback(() => {
-    setState({ parentId: null, title: "", pageNumber: 1 });
+    setState({ parentId: null, title: "", docType: "pdf", pageNumber: 1 });
   }, []);
 
   const setPage = useCallback((page: number) => {

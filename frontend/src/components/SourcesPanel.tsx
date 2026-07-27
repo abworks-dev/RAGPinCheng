@@ -160,8 +160,8 @@ function SourceCard({
           >
             {copied ? "✓ 已复制" : "📋 复制"}
           </button>
-          {s.doc_type === "pdf" && (
-            <PdfPreviewButton parentId={s.parent_id} title={s.doc_title} />
+          {(s.doc_type === "pdf" || s.doc_type === "docx") && (
+            <PdfPreviewButton parentId={s.parent_id} title={s.doc_title} docType={s.doc_type} />
           )}
           <button
             type="button"
@@ -236,12 +236,13 @@ function SourceCard({
 /**
  * PDF preview button. Opens the PDF preview panel for this source.
  */
-function PdfPreviewButton({ parentId, title }: { parentId: string; title: string }) {
+function PdfPreviewButton({ parentId, title, docType }: { parentId: string; title: string; docType?: string }) {
   const { open } = usePdfPreview();
+  const isDocx = docType === "docx";
 
   function handleClick(e: React.MouseEvent) {
     e.stopPropagation();
-    open(parentId, title);
+    open(parentId, title, docType || "pdf");
   }
 
   return (
@@ -249,9 +250,9 @@ function PdfPreviewButton({ parentId, title }: { parentId: string; title: string
       type="button"
       onClick={handleClick}
       className="text-xs text-accent hover:underline"
-      title="PDF 预览"
+      title={isDocx ? "DOCX 预览" : "PDF 预览"}
     >
-      📄 PDF 预览
+      {isDocx ? "📄 DOCX 预览" : "📄 PDF 预览"}
     </button>
   );
 }
