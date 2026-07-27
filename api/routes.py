@@ -150,7 +150,16 @@ def get_pdf(parent_id: str, _user_id: int = Depends(require_user)) -> Response:
     pdf_path = Path(raw) if Path(raw).is_absolute() else DOCS_DIR / raw
 
     if not pdf_path.exists() or not pdf_path.is_file():
-        raise HTTPException(status_code=404, detail="PDF file not found")
+        # Fallback: search by filename in case the directory structure changed
+        # during migration (e.g. wget flattened the top-level category folders).
+        filename = pdf_path.name
+        if not filename:
+            raise HTTPException(status_code=404, detail="PDF file not found")
+        # Search recursively up to 3 levels deep to avoid scanning the entire tree.
+        matches = sorted(DOCS_DIR.rglob(filename))
+        if not matches:
+            raise HTTPException(status_code=404, detail="PDF file not found")
+        pdf_path = matches[0]
 
     # 有些 source_path 指向 .md 文件（非教学视频的 markdown 被标记为
     # doc_type="pdf"），浏览器无法渲染 Markdown 为 PDF。
