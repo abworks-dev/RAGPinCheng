@@ -322,7 +322,7 @@ def recalculate_xlsx(path: Path) -> Path:
             )
 
     # Save the recalculated file to a temp location
-    temp = path.with_suffix(path.stem + ".recalculated" + path.suffix)
+    temp = path.parent / (path.stem + ".recalculated" + path.suffix)
     temp.write_bytes(resp.content)
 
     elapsed = time.time() - start
