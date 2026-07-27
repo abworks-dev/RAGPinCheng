@@ -13,12 +13,11 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
-import tempfile
 import time
 import uuid
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, UploadFile, status
+from fastapi import BackgroundTasks, FastAPI, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
 
 logging.basicConfig(
@@ -101,6 +100,17 @@ async def health():
         raise HTTPException(status_code=503, detail=f"LibreOffice unavailable: {exc}")
 
 
+def _cleanup_dirs(dirs: list[Path]) -> None:
+    """Clean up temporary directories."""
+    import shutil
+    for p in dirs:
+        if p.exists():
+            if p.is_dir():
+                shutil.rmtree(p, ignore_errors=True)
+            else:
+                p.unlink(missing_ok=True)
+
+
 @app.post("/v1/recalculate")
 async def recalculate(file: UploadFile):
     """Recalculate XLSX formulas and return a file with cached values.
@@ -130,9 +140,6 @@ async def recalculate(file: UploadFile):
         input_path.write_bytes(content)
 
         async with _concurrency_sem:
-            # LibreOffice recalculates formulas when opening a file.
-            # Convert to ODS first (native format, full recalculation),
-            # then convert back to XLSX with cached values.
             # Step 1: xlsx → ods (forces recalculation)
             await _run_libreoffice([
                 "libreoffice", "--headless",
@@ -143,7 +150,6 @@ async def recalculate(file: UploadFile):
             # Step 2: ods → xlsx (writes cached values)
             ods_files = list(output_dir.glob("*.ods"))
             if not ods_files:
-                # LibreOffice might have written to the input directory
                 ods_files = list(work_dir.glob("*.ods"))
             if ods_files:
                 await _run_libreoffice([
@@ -153,34 +159,28 @@ async def recalculate(file: UploadFile):
                     str(ods_files[0]),
                 ])
 
-        # Find the output XLSX file (from step 2)
+        # Find the output XLSX file
         out_files = list(output_dir.glob("*.xlsx"))
         if not out_files:
             raise HTTPException(status_code=500, detail="LibreOffice produced no output")
 
         output_path = out_files[0]
+        cleanup_dirs = [work_dir, output_dir]
+
         return FileResponse(
             path=str(output_path),
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             filename=file.filename or "output.xlsx",
+            background=BackgroundTask(_cleanup_dirs, cleanup_dirs),
         )
 
     except HTTPException:
-        raise
-    except HTTPException:
+        _cleanup_dirs([work_dir, output_dir])
         raise
     except Exception as exc:
         logger.error("recalculation failed: %s", exc, exc_info=True)
+        _cleanup_dirs([work_dir, output_dir])
         raise HTTPException(status_code=500, detail=str(exc))
-    finally:
-        # Clean up temp files
-        for p in [input_path, output_dir, work_dir]:
-            if p.exists():
-                import shutil
-                if p.is_dir():
-                    shutil.rmtree(p, ignore_errors=True)
-                else:
-                    p.unlink(missing_ok=True)
 
 
 @app.post("/v1/convert")
@@ -221,25 +221,22 @@ async def convert(file: UploadFile, target_format: str = "pdf"):
 
         output_path = out_files[0]
         media_type = "application/pdf" if target_format == "pdf" else "application/octet-stream"
+        cleanup_dirs = [work_dir, output_dir]
+
         return FileResponse(
             path=str(output_path),
             media_type=media_type,
             filename=output_path.name,
+            background=BackgroundTask(_cleanup_dirs, cleanup_dirs),
         )
 
     except HTTPException:
+        _cleanup_dirs([work_dir, output_dir])
         raise
     except Exception as exc:
         logger.error("conversion failed: %s", exc)
+        _cleanup_dirs([work_dir, output_dir])
         raise HTTPException(status_code=500, detail=str(exc))
-    finally:
-        for p in [input_path, output_dir, work_dir]:
-            if p.exists():
-                import shutil
-                if p.is_dir():
-                    shutil.rmtree(p, ignore_errors=True)
-                else:
-                    p.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":
