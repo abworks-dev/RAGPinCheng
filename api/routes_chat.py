@@ -236,7 +236,8 @@ async def chat(
                 while True:
                     if await request.is_disconnected():
                         try:
-                            persistent_stream.close()
+                            with _generator_lock:
+                                persistent_stream.close()
                         except Exception:
                             pass
                         break
