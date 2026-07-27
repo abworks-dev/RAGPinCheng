@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Iterator
 
+import httpx
 from openai import OpenAI
 
 from .config import (
@@ -93,7 +94,11 @@ def _build_context(
 def _client() -> OpenAI:
     if not ZHIPU_API_KEY:
         raise RuntimeError("ZHIPU_API_KEY is not set. Add it to .env.")
-    return OpenAI(api_key=ZHIPU_API_KEY, base_url=ZHIPU_BASE_URL)
+    return OpenAI(
+        api_key=ZHIPU_API_KEY,
+        base_url=ZHIPU_BASE_URL,
+        timeout=httpx.Timeout(120.0, connect=30.0, read=120.0, write=30.0),
+    )
 
 
 def _prepare_generation(
