@@ -114,15 +114,21 @@ async def recalculate(file: UploadFile):
         input_path.write_bytes(content)
 
         async with _concurrency_sem:
+            # LibreOffice recalculates formulas when opening and saving a file.
+            # --convert-to xlsx forces a save even if the input is already xlsx,
+            # which triggers formula recalculation and writes cached values.
             await _run_libreoffice([
-                "libreoffice", "--headless", "--norestore",
-                "--calc",  # Force Calc mode for formula recalculation
-                f"--outdir", str(output_dir),
+                "libreoffice", "--headless",
+                "--convert-to", "xlsx:Calc MS Excel 2007 XML:UTF8",
+                "--outdir", str(output_dir),
                 str(input_path),
             ])
 
         # Find the output file
         out_files = list(output_dir.iterdir())
+        if not out_files:
+            # Try the current directory as fallback
+            out_files = list(Path("/tmp/libreoffice-home").glob("*.xlsx"))
         if not out_files:
             raise HTTPException(status_code=500, detail="LibreOffice produced no output")
 
