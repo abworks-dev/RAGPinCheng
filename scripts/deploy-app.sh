@@ -22,7 +22,7 @@ BACKUP_PATH="${BACKUP_DIR}/app-backup-${TIMESTAMP}"
 
 # Helper: build the full compose command with project, files, and env file.
 compose() {
-    sudo docker compose -p "$COMPOSE_PROJECT" \
+    docker compose -p "$COMPOSE_PROJECT" \
         -f "$COMPOSE_BASE" \
         -f "$COMPOSE_OVERRIDE" \
         --env-file "$COMPOSE_ENV_FILE" \
