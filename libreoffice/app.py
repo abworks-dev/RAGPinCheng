@@ -43,10 +43,15 @@ _SUPPORTED_INPUT = {".docx", ".xlsx", ".pptx", ".doc", ".xls", ".ppt"}
 _RECALC_EXTS = {".xlsx", ".xls"}
 
 
-async def _run_libreoffice(args: list[str], timeout: int = CONVERSION_TIMEOUT) -> None:
-    """Run a LibreOffice command with timeout and resource limits."""
+async def _run_libreoffice(args: list[str], timeout: int = CONVERSION_TIMEOUT) -> str:
+    """Run a LibreOffice command with timeout and resource limits.
+
+    Returns the stdout output.
+    """
     env = os.environ.copy()
     env["HOME"] = "/tmp/libreoffice-home"
+
+    logger.info("running: %s", " ".join(str(a) for a in args))
 
     proc = await asyncio.create_subprocess_exec(
         *args,
@@ -64,12 +69,21 @@ async def _run_libreoffice(args: list[str], timeout: int = CONVERSION_TIMEOUT) -
         await proc.wait()
         raise RuntimeError(f"LibreOffice timed out after {timeout}s")
 
+    stdout_text = (stdout or b"").decode("utf-8", errors="replace")
+    stderr_text = (stderr or b"").decode("utf-8", errors="replace")
+
     if proc.returncode not in (0, 1):
-        err_text = (stderr or b"").decode("utf-8", errors="replace")[:500]
-        raise RuntimeError(f"LibreOffice exit code {proc.returncode}: {err_text}")
+        raise RuntimeError(
+            f"LibreOffice exit code {proc.returncode}: {stderr_text[:500]}"
+        )
     # Exit code 1 with javaldx warning is non-fatal (missing Java)
     if proc.returncode == 1 and stderr and b"javaldx" in stderr:
         logger.warning("LibreOffice javaldx warning (non-fatal, missing Java)")
+
+    if stderr_text:
+        logger.info("LibreOffice stderr: %s", stderr_text[:500])
+
+    return stdout_text
 
 
 @app.get("/health")
@@ -151,8 +165,10 @@ async def recalculate(file: UploadFile):
 
     except HTTPException:
         raise
+    except HTTPException:
+        raise
     except Exception as exc:
-        logger.error("recalculation failed: %s", exc)
+        logger.error("recalculation failed: %s", exc, exc_info=True)
         raise HTTPException(status_code=500, detail=str(exc))
     finally:
         # Clean up temp files
