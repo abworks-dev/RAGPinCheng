@@ -122,7 +122,9 @@ async def recalculate(file: UploadFile):
     work_dir.mkdir(parents=True, exist_ok=True)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    input_path = work_dir / (file.filename or "input.xlsx")
+    # Use a simple ASCII filename — LibreOffice may not handle Chinese chars in paths
+    safe_name = "input.xlsx"
+    input_path = work_dir / safe_name
 
     try:
         input_path.write_bytes(content)
@@ -200,7 +202,7 @@ async def convert(file: UploadFile, target_format: str = "pdf"):
     work_dir.mkdir(parents=True, exist_ok=True)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    input_path = work_dir / (file.filename or f"input{ext}")
+    input_path = work_dir / f"input{ext}"
 
     try:
         input_path.write_bytes(content)
