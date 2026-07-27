@@ -20,21 +20,26 @@ export type CitationHoverDetail = {
 };
 
 // Group 1 = doc title, Group 2 = section path. Negative lookahead avoids
-// eating real markdown links `[label](url)`.
-const PDF_RE = /\[([^\]\n[]+?)\s*§\s*([^\]\n[]+?)\](?!\()/g;
-// Video citations: [doc @HH:MM[:SS]]
-const VID_RE = /\[([^\]\n[]+?)\s*@\s*(\d{1,2}:\d{2}(?::\d{2})?)\](?!\()/g;
+// eating real markdown links `[label](url)`. Both bracketed and bare forms
+// are matched — the LLM occasionally omits the `[...]` wrapper.
+const PDF_RE = /(?:\[([^\]]+?)\]|([^\[\]\n§]+?))\s*§\s*([^\[\]\n]+?)(?!\()/g;
+// Video citations: [doc @HH:MM[:SS]] or doc @HH:MM[:SS] (without brackets)
+const VID_RE = /(?:\[([^\]]+?)\]|([^\[\]\n@]+?))\s*@\s*(\d{1,2}:\d{2}(?::\d{2})?)(?!\()/g;
 
 export function linkifyCitations(markdown: string): string {
   // Run PDF after video so a transcript title containing "§" doesn't get hit.
   return markdown
-    .replace(VID_RE, (m, doc, time) => {
-      const href = `#cite-vid:${encodeURIComponent(doc.trim())}::${encodeURIComponent(time.trim())}`;
-      return `[${m.slice(1, -1)}](${href})`;
+    .replace(VID_RE, (m, bracketed, unbracketed, time) => {
+      const doc = (bracketed || unbracketed || "").trim();
+      if (!doc) return m;
+      const href = `#cite-vid:${encodeURIComponent(doc)}::${encodeURIComponent(time.trim())}`;
+      return `[${doc}](${href})`;
     })
-    .replace(PDF_RE, (m, doc, section) => {
-      const href = `#cite-pdf:${encodeURIComponent(doc.trim())}::${encodeURIComponent(section.trim())}`;
-      return `[${m.slice(1, -1)}](${href})`;
+    .replace(PDF_RE, (m, bracketed, unbracketed, section) => {
+      const doc = (bracketed || unbracketed || "").trim();
+      if (!doc) return m;
+      const href = `#cite-pdf:${encodeURIComponent(doc)}::${encodeURIComponent(section.trim())}`;
+      return `[${doc} § ${section.trim()}](${href})`;
     });
 }
 
