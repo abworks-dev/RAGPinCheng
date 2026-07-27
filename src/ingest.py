@@ -40,9 +40,12 @@ class ParsedDoc:
     category: str
     doc_title: str
     markdown_path: Path
-    doc_type: str = "pdf"  # "pdf" | "transcript"
+    doc_type: str = "pdf"  # "pdf" | "transcript" | "docx" | "xlsx" | "pptx"
     company: str | None = None  # second-level folder under 公司内部标准/
     media_id: str | None = None  # associated video asset if any
+    # Office document preview fields
+    preview_path: Path | None = None  # path to preview file (e.g. PDF for PPTX)
+    parsed_via: str | None = None  # "docling" | "openpyxl" | "mineru_fallback"
 
 
 def _safe_stem(pdf: Path) -> str:

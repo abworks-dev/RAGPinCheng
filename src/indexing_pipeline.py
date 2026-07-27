@@ -174,7 +174,7 @@ def index_single(
     transcript videos). When set, the Parent dataclass carries media_id
     through the pipeline so Sources can resolve playback URLs.
     """
-    if doc_type not in ("pdf", "transcript"):
+    if doc_type not in ("pdf", "transcript", "docx", "xlsx", "pptx"):
         raise ValueError(f"unsupported doc_type: {doc_type!r}")
 
     if doc_type == "transcript":

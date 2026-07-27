@@ -206,9 +206,14 @@ class SourceDTO(BaseModel):
     score: float
     rrf_score: float = 0.0
     text: str
-    doc_type: str
+    doc_type: str  # "pdf" | "transcript" | "docx" | "xlsx" | "pptx"
     start_time: str | None = None
     media_id: str | None = None
+    # Office document fields
+    sheet_name: str | None = None
+    cell_range: str | None = None
+    slide_number: int | None = None
+    paragraph_anchor: str | None = None
 
 
 class MediaAssetDTO(BaseModel):
@@ -336,4 +341,8 @@ def source_to_dto(d: dict[str, Any]) -> SourceDTO:
         doc_type=d.get("doc_type") or "pdf",
         start_time=d.get("start_time"),
         media_id=d.get("media_id"),
+        sheet_name=d.get("sheet_name"),
+        cell_range=d.get("cell_range"),
+        slide_number=d.get("slide_number"),
+        paragraph_anchor=d.get("paragraph_anchor"),
     )
