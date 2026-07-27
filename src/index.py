@@ -113,6 +113,14 @@ def _init_parents_db(reset: bool = False) -> sqlite3.Connection:
         conn.execute("ALTER TABLE parents ADD COLUMN company TEXT")
     if "media_id" not in existing:
         conn.execute("ALTER TABLE parents ADD COLUMN media_id TEXT")
+    if "sheet_name" not in existing:
+        conn.execute("ALTER TABLE parents ADD COLUMN sheet_name TEXT")
+    if "cell_range" not in existing:
+        conn.execute("ALTER TABLE parents ADD COLUMN cell_range TEXT")
+    if "slide_number" not in existing:
+        conn.execute("ALTER TABLE parents ADD COLUMN slide_number INTEGER")
+    if "paragraph_anchor" not in existing:
+        conn.execute("ALTER TABLE parents ADD COLUMN paragraph_anchor TEXT")
     if reset:
         conn.execute("DELETE FROM parents")
     return conn
@@ -144,13 +152,18 @@ def store_parents(parents: Iterable[Parent], reset: bool = False) -> None:
             p.start_time,
             p.company,
             p.media_id,
+            p.sheet_name,
+            p.cell_range,
+            p.slide_number,
+            p.paragraph_anchor,
         )
         for p in parents
     ]
     conn.executemany(
         "INSERT OR REPLACE INTO parents "
-        "(parent_id, doc_title, category, section_path, source_path, text, doc_type, start_time, company, media_id) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?)",
+        "(parent_id, doc_title, category, section_path, source_path, text, doc_type, "
+        "start_time, company, media_id, sheet_name, cell_range, slide_number, paragraph_anchor) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         rows,
     )
     conn.commit()
@@ -182,6 +195,10 @@ def fetch_parents(parent_ids: list[str]) -> dict[str, dict]:
             "start_time": r[7],
             "company": r[8],
             "media_id": r[9],
+            "sheet_name": r[10] if len(r) > 10 else None,
+            "cell_range": r[11] if len(r) > 11 else None,
+            "slide_number": r[12] if len(r) > 12 else None,
+            "paragraph_anchor": r[13] if len(r) > 13 else None,
         }
         for r in rows
     }
@@ -254,6 +271,11 @@ def index_children(children: list[Child], reset: bool = False) -> None:
                         "doc_type": c.doc_type,
                         "start_time": c.start_time,
                         "company": c.company,
+                        # Office document fields (optional; omitted when None)
+                        **({"sheet_name": c.sheet_name} if c.sheet_name else {}),
+                        **({"cell_range": c.cell_range} if c.cell_range else {}),
+                        **({"slide_number": c.slide_number} if c.slide_number is not None else {}),
+                        **({"paragraph_anchor": c.paragraph_anchor} if c.paragraph_anchor else {}),
                     },
                 )
             )

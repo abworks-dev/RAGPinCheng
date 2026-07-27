@@ -6,9 +6,14 @@ export type Source = {
   score: number;
   rrf_score: number;
   text: string;
-  doc_type: string;
+  doc_type: string; // "pdf" | "transcript" | "docx" | "xlsx" | "pptx"
   start_time: string | null;
   media_id: string | null;
+  // Office document fields
+  sheet_name: string | null;
+  cell_range: string | null;
+  slide_number: number | null;
+  paragraph_anchor: string | null;
 };
 
 export type PrepData = {

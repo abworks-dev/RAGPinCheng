@@ -103,10 +103,15 @@ class Parent:
     category: str
     section_path: str
     source_path: str
-    doc_type: str = "pdf"            # "pdf" | "transcript"
+    doc_type: str = "pdf"            # "pdf" | "transcript" | "docx" | "xlsx" | "pptx"
     start_time: str | None = None    # HH:MM:SS, only for transcripts
     company: str | None = None       # only set for category=="公司内部标准"
     media_id: str | None = None      # associated video asset if any
+    # Office document fields
+    sheet_name: str | None = None    # XLSX: spreadsheet name
+    cell_range: str | None = None    # XLSX: cell range (e.g. "A1:F12")
+    slide_number: int | None = None  # PPTX: slide number
+    paragraph_anchor: str | None = None  # DOCX: text-hash anchor for citation jumping
 
 
 @dataclass
@@ -120,8 +125,13 @@ class Child:
     section_path: str
     source_path: str
     content_type: str  # prose | table | formula
-    doc_type: str = "pdf"            # "pdf" | "transcript"
+    doc_type: str = "pdf"            # "pdf" | "transcript" | "docx" | "xlsx" | "pptx"
     start_time: str | None = None    # HH:MM:SS, only for transcripts
+    # Office document fields
+    sheet_name: str | None = None    # XLSX: spreadsheet name
+    cell_range: str | None = None    # XLSX: cell range (e.g. "A1:F12")
+    slide_number: int | None = None  # PPTX: slide number
+    paragraph_anchor: str | None = None  # DOCX: text-hash anchor for citation jumping
     company: str | None = None       # only set for category=="公司内部标准"
     media_id: str | None = None      # associated video asset if any
 

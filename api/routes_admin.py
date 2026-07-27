@@ -353,12 +353,22 @@ def _classify_doc_type(filename: str, category: str) -> str | None:
     is treated as a regular markdown document (chunked like a parsed PDF).
     Non-transcript markdown reuses `doc_type="pdf"` so the chunker takes the
     header-anchored branch — semantically a markdown doc IS a parsed PDF.
+
+    Office documents are accepted with their native doc_type:
+    `.docx` → "docx", `.xlsx` → "xlsx", `.pptx` → "pptx"
+    Legacy `.doc`/`.xls`/`.ppt` are NOT supported in the first version.
     """
     lower = filename.lower()
     if lower.endswith(".pdf"):
         return "pdf"
     if lower.endswith(".md"):
         return "transcript" if category == TRANSCRIPT_CATEGORY else "pdf"
+    if lower.endswith(".docx"):
+        return "docx"
+    if lower.endswith(".xlsx"):
+        return "xlsx"
+    if lower.endswith(".pptx"):
+        return "pptx"
     return None
 
 
