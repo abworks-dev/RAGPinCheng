@@ -305,7 +305,6 @@ def index_single(
         doc = _build_xlsx_doc(source_path, on_status)
     elif doc_type == "pptx":
         doc = _build_pptx_doc(source_path, on_status)
-        )
     else:
         doc = _build_pdf_doc(source_path, on_status)
 
