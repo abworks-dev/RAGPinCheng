@@ -163,12 +163,15 @@ export function PdfPreview() {
           {isDocx ? (
             <DocxPreview
               parentId={state.parentId!}
+              paragraphAnchor={state.location.paragraphAnchor}
               onLoad={() => setLoading(false)}
               onError={() => setLoading(false)}
             />
           ) : isXlsx ? (
             <SpreadsheetPreview
               parentId={state.parentId!}
+              sheetName={state.location.sheetName}
+              cellRange={state.location.cellRange}
               onLoad={() => setLoading(false)}
               onError={() => setLoading(false)}
             />
