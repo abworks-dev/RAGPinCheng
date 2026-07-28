@@ -11,12 +11,16 @@ const MAX_ROWS = 5000;
 const MAX_COLS = 100;
 
 export function SpreadsheetPreview({
+  sheetName,
+  cellRange,
   parentId,
   onLoad,
   onError,
 }: {
   parentId: string;
   onLoad?: () => void;
+  sheetName?: string | null;
+  cellRange?: string | null;
   onError?: (err: string) => void;
 }) {
   const [sheets, setSheets] = useState<SheetData[]>([]);
@@ -65,6 +69,23 @@ export function SpreadsheetPreview({
           setSheets(allSheets);
           setLoading(false);
           onLoad?.();
+
+          // Navigate to target sheet if provided
+          if (sheetName) {
+            var idx = allSheets.findIndex(function(s) { return s.name === sheetName; });
+            if (idx >= 0) setActiveSheet(idx);
+          }
+          // Scroll to target row if cellRange is provided
+          if (cellRange) {
+            var match = cellRange.match(/d+/);
+            if (match) {
+              var targetRow = parseInt(match[0], 10);
+              setTimeout(function() {
+                var rows = document.querySelectorAll(".\" + scrollRef.current.className.split(" ").join(".") + " tbody tr");
+                if (rows[targetRow]) rows[targetRow].scrollIntoView({ behavior: "smooth", block: "center" });
+              }, 100);
+            }
+          }
         }
       } catch (e: any) {
         if (!cancelled) {

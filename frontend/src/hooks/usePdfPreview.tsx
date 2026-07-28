@@ -1,5 +1,16 @@
 import { createContext, useCallback, useContext, useMemo, useState } from "react";
 
+export interface PdfPreviewLocation {
+  /** XLSX: switch to this sheet */
+  sheetName?: string | null;
+  /** XLSX: cell range to highlight (e.g. "A1:F12") */
+  cellRange?: string | null;
+  /** PPTX: slide number to jump to */
+  slideNumber?: number | null;
+  /** DOCX: paragraph anchor hash to scroll to */
+  paragraphAnchor?: string | null;
+}
+
 export interface PdfPreviewState {
   /** The parent_id of the source to preview, or null if closed. */
   parentId: string | null;
@@ -9,11 +20,13 @@ export interface PdfPreviewState {
   docType: string;
   /** Optional initial page number (1-indexed, PDF only). */
   pageNumber: number;
+  /** Location parameters for citation jumping. */
+  location: PdfPreviewLocation;
 }
 
 interface PdfPreviewContextValue {
   state: PdfPreviewState;
-  open: (parentId: string, title: string, docType?: string, pageNumber?: number) => void;
+  open: (parentId: string, title: string, docType?: string, pageNumber?: number, location?: PdfPreviewLocation) => void;
   close: () => void;
   setPage: (page: number) => void;
 }
@@ -26,14 +39,18 @@ export function PdfPreviewProvider({ children }: { children: React.ReactNode }) 
     title: "",
     docType: "pdf",
     pageNumber: 1,
+    location: {},
   });
 
-  const open = useCallback((parentId: string, title: string, docType = "pdf", pageNumber = 1) => {
-    setState({ parentId, title, docType, pageNumber });
-  }, []);
+  const open = useCallback(
+    (parentId: string, title: string, docType = "pdf", pageNumber = 1, location: PdfPreviewLocation = {}) => {
+      setState({ parentId, title, docType, pageNumber, location });
+    },
+    [],
+  );
 
   const close = useCallback(() => {
-    setState({ parentId: null, title: "", docType: "pdf", pageNumber: 1 });
+    setState({ parentId: null, title: "", docType: "pdf", pageNumber: 1, location: {} });
   }, []);
 
   const setPage = useCallback((page: number) => {
