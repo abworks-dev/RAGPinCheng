@@ -18,9 +18,9 @@ export function SpreadsheetPreview({
   onError,
 }: {
   parentId: string;
-  onLoad?: () => void;
   sheetName?: string | null;
   cellRange?: string | null;
+  onLoad?: () => void;
   onError?: (err: string) => void;
 }) {
   const [sheets, setSheets] = useState<SheetData[]>([]);
@@ -72,11 +72,11 @@ export function SpreadsheetPreview({
 
           // Navigate to target sheet if provided
           if (sheetName) {
-            var idx = allSheets.findIndex(function(s) { return s.name === sheetName; });
+            const idx = allSheets.findIndex((s) => s.name === sheetName);
             if (idx >= 0) setActiveSheet(idx);
           }
-          // Scroll to target row if cellRange is provided
-          if (cellRange) {
+        }
+      } catch (e: any) {
         if (!cancelled) {
           const msg = e?.message || String(e);
           setError(msg);
