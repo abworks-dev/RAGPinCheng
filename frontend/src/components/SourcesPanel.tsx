@@ -241,7 +241,6 @@ function PdfPreviewButton({ parentId, title, docType }: { parentId: string; titl
   const isDocx = docType === "docx";
   const isXlsx = docType === "xlsx";
   const isPptx = docType === "pptx";
-  const isXlsx = docType === "xlsx";
 
   function handleClick(e: React.MouseEvent) {
     e.stopPropagation();
