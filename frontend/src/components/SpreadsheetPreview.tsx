@@ -77,17 +77,6 @@ export function SpreadsheetPreview({
           }
           // Scroll to target row if cellRange is provided
           if (cellRange) {
-            var match = cellRange.match(/d+/);
-            if (match) {
-              var targetRow = parseInt(match[0], 10);
-              setTimeout(function() {
-                var rows = document.querySelectorAll(".\" + scrollRef.current.className.split(" ").join(".") + " tbody tr");
-                if (rows[targetRow]) rows[targetRow].scrollIntoView({ behavior: "smooth", block: "center" });
-              }, 100);
-            }
-          }
-        }
-      } catch (e: any) {
         if (!cancelled) {
           const msg = e?.message || String(e);
           setError(msg);
