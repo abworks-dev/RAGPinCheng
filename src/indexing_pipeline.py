@@ -305,10 +305,6 @@ def index_single(
         doc = _build_xlsx_doc(source_path, on_status)
     elif doc_type == "pptx":
         doc = _build_pptx_doc(source_path, on_status)
-        # Will be implemented in Phase 7.
-        raise NotImplementedError(
-            f"Office document parsing ({doc_type}) not yet implemented. "
-            f"See TODO: Office 文档支持 — 阶段 7"
         )
     else:
         doc = _build_pdf_doc(source_path, on_status)
