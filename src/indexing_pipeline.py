@@ -44,6 +44,8 @@ from .ingest import (
 from .office_convert import (
     _md_path_for_office,
     convert_docx_to_markdown,
+    convert_pptx_to_markdown,
+    convert_pptx_to_pdf,
     convert_xlsx_to_markdown,
     recalculate_xlsx,
 )
@@ -230,6 +232,44 @@ def _build_xlsx_doc(source_path: Path, on_status: StatusFn) -> ParsedDoc:
     )
 
 
+
+def _build_pptx_doc(source_path: Path, on_status: StatusFn) -> ParsedDoc:
+    """Parse a PPTX via Docling and cache the markdown under data/parsed/.
+
+    Also converts the PPTX to PDF via LibreOffice for preview.
+    """
+    PARSED_DIR.mkdir(parents=True, exist_ok=True)
+    md_path = _md_path_for_office(source_path, PARSED_DIR)
+
+    if md_path.exists():
+        on_status("parsing")
+        markdown = md_path.read_text(encoding="utf-8")
+    else:
+        try:
+            on_status("parsing")
+            markdown, _slides = convert_pptx_to_markdown(source_path)
+            md_path.write_text(markdown, encoding="utf-8")
+            # Convert to PDF for preview via LibreOffice
+            try:
+                convert_pptx_to_pdf(source_path)
+            except Exception as exc:
+                logger.warning("PPTX to PDF conversion failed (non-fatal): %s", exc)
+        except Exception as exc:
+            logger.error("PPTX parsing failed: %s", exc)
+            raise
+
+    category, company = _derive_category_and_company(source_path)
+    return ParsedDoc(
+        source_path=source_path,
+        category=category,
+        doc_title=source_path.stem,
+        markdown_path=md_path,
+        doc_type="pptx",
+        company=company,
+    )
+
+
+
 def index_single(
     source_path: Path,
     doc_type: str,
@@ -264,6 +304,7 @@ def index_single(
     elif doc_type == "xlsx":
         doc = _build_xlsx_doc(source_path, on_status)
     elif doc_type == "pptx":
+        doc = _build_pptx_doc(source_path, on_status)
         # Will be implemented in Phase 7.
         raise NotImplementedError(
             f"Office document parsing ({doc_type}) not yet implemented. "

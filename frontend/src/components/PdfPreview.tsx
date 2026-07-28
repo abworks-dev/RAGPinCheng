@@ -18,6 +18,7 @@ export function PdfPreview() {
   const open = state.parentId !== null;
   const isDocx = state.docType === "docx";
   const isXlsx = state.docType === "xlsx";
+  const isPptx = state.docType === "pptx";
 
   // Reset loading state when switching documents.
   useEffect(() => {
