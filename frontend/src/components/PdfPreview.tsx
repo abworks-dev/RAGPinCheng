@@ -4,6 +4,7 @@ import "react-pdf/dist/esm/Page/AnnotationLayer.css";
 import "react-pdf/dist/esm/Page/TextLayer.css";
 import { usePdfPreview } from "../hooks/usePdfPreview";
 import { DocxPreview } from "./DocxPreview";
+import { SpreadsheetPreview } from "./SpreadsheetPreview";
 
 // PDF.js worker — use the CDN build so we don't need to bundle it.
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
@@ -16,6 +17,7 @@ export function PdfPreview() {
 
   const open = state.parentId !== null;
   const isDocx = state.docType === "docx";
+  const isXlsx = state.docType === "xlsx";
 
   // Reset loading state when switching documents.
   useEffect(() => {
@@ -83,9 +85,12 @@ export function PdfPreview() {
             {isDocx && (
               <p className="text-xs text-muted">Word 文档</p>
             )}
+            {isXlsx && (
+              <p className="text-xs text-muted">Excel 表格</p>
+            )}
           </div>
           <div className="flex items-center gap-1 ml-4">
-            {!isDocx && (
+            {!isDocx && !isXlsx && (
               <>
                 <button
                   type="button"
@@ -119,7 +124,7 @@ export function PdfPreview() {
         </div>
 
         {/* Page navigation (PDF only) */}
-        {!isDocx && numPages && numPages > 1 && (
+        {!isDocx && !isXlsx && numPages && numPages > 1 && (
           <div className="flex items-center justify-center gap-2 px-4 py-2 border-b border-gray-100 dark:border-gray-800 shrink-0">
             <button
               type="button"
@@ -156,6 +161,12 @@ export function PdfPreview() {
         <div className="flex-1 overflow-y-auto bg-gray-100 dark:bg-gray-800">
           {isDocx ? (
             <DocxPreview
+              parentId={state.parentId!}
+              onLoad={() => setLoading(false)}
+              onError={() => setLoading(false)}
+            />
+          ) : isXlsx ? (
+            <SpreadsheetPreview
               parentId={state.parentId!}
               onLoad={() => setLoading(false)}
               onError={() => setLoading(false)}
