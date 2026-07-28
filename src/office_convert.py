@@ -405,6 +405,90 @@ def convert_xlsx_to_markdown(path: Path) -> tuple[str, list[dict[str, Any]]]:
     return markdown, sheets_metadata
 
 
+# ── PPTX converter ──────────────────────────────────────────────────────────
+
+
+def convert_pptx_to_markdown(path: Path) -> tuple[str, list[dict[str, Any]]]:
+    """Convert a PPTX file to Markdown using Docling Slim.
+
+    Each slide is separated by a ``---`` marker in the output.
+    The anchors list includes slide numbers for citation jumping.
+
+    Returns:
+        (markdown_string, slides_metadata)
+        slides_metadata is a list of dicts with keys "slide_number" and "text".
+    """
+    try:
+        from docling.document_converter import DocumentConverter
+    except ImportError:
+        raise ImportError(
+            "docling is not installed. Run: pip install docling"
+        )
+
+    logger.info("converting PPTX: %s", path.name)
+    start = time.time()
+
+    converter = DocumentConverter()
+    result = converter.convert(str(path))
+    doc = result.document
+    markdown = doc.export_to_markdown()
+
+    # Count slides by heading markers
+    slides: list[dict[str, Any]] = []
+    slide_num = 0
+    for line in markdown.split("\n"):
+        stripped = line.strip()
+        if stripped.startswith("#") and len(stripped) > 10:
+            slide_num += 1
+            slides.append({
+                "slide_number": slide_num,
+                "text": stripped.lstrip("#").strip()[:50],
+            })
+
+    slide_count = max(slide_num, 1)
+
+    elapsed = time.time() - start
+    logger.info(
+        "PPTX conversion done: %s (%d slides, %d chars, %.1fs)",
+        path.name, slide_count, len(markdown), elapsed,
+    )
+
+    return markdown, slides
+
+
+def convert_pptx_to_pdf(path: Path) -> Path:
+    """Convert a PPTX file to PDF using LibreOffice service.
+
+    Returns the path to the generated PDF file.
+    The caller is responsible for cleanup.
+    """
+    import httpx
+    from .config import LIBREOFFICE_URL, LIBREOFFICE_TIMEOUT
+
+    logger.info("converting PPTX to PDF via LibreOffice: %s", path.name)
+    start = time.time()
+
+    with httpx.Client(timeout=LIBREOFFICE_TIMEOUT) as client:
+        with open(path, "rb") as fh:
+            resp = client.post(
+                f"{LIBREOFFICE_URL}/v1/convert",
+                params={"target_format": "pdf"},
+                files={"file": (path.name, fh, "application/vnd.openxmlformats-officedocument.presentationml.presentation")},
+            )
+        if resp.status_code != 200:
+            raise RuntimeError(
+                f"PPTX to PDF conversion failed (HTTP {resp.status_code}): {resp.text[:200]}"
+            )
+
+    # Save the PDF to a temp location next to the source
+    pdf_path = path.with_suffix(".preview.pdf")
+    pdf_path.write_bytes(resp.content)
+
+    elapsed = time.time() - start
+    logger.info("PPTX to PDF done: %s (%.1fs)", path.name, elapsed)
+    return pdf_path
+
+
 def _md_path_for_office(source_path: Path, parsed_dir: Path) -> Path:
     """Generate the cached Markdown path for an Office document.
 
