@@ -217,7 +217,8 @@ def _build_xlsx_doc(source_path: Path, on_status: StatusFn) -> ParsedDoc:
         finally:
             # Clean up the recalculated temp file
             if recalc_path and recalc_path.exists():
-                recalc_path.unlink(missing_ok=True)
+                recalc_path.rename(source_path.with_suffix(".preview.xlsx"))
+                logger.info("saved preview XLSX: %s", source_path.with_suffix(".preview.xlsx").name)
 
         md_path.write_text(markdown, encoding="utf-8")
 
