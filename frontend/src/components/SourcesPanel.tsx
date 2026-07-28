@@ -254,9 +254,11 @@ function PdfPreviewButton({ parentId, title, docType, sheetName, cellRange, slid
   const isPptx = docType === "pptx";
 
   function handleClick(e: React.MouseEvent) {
+  function handleClick(e: React.MouseEvent) {
     e.stopPropagation();
-    const initialPage = (docType === "pptx" open(parentId, title, docType || "pdf", 1, { sheetName, cellRange, slideNumber, paragraphAnchor });open(parentId, title, docType || "pdf", 1, { sheetName, cellRange, slideNumber, paragraphAnchor }); slideNumber) ? slideNumber : 1;
+    const initialPage = (docType === "pptx" && slideNumber) ? slideNumber : 1;
     open(parentId, title, docType || "pdf", initialPage, { sheetName, cellRange, slideNumber, paragraphAnchor });
+  }
   }
 
   const label = isDocx ? "DOCX 预览" : isXlsx ? "XLSX 预览" : isPptx ? "PPTX 预览" : "PDF 预览";
