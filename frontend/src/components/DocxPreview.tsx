@@ -6,10 +6,12 @@ import { useEffect, useRef, useState } from "react";
  */
 export function DocxPreview({
   parentId,
+  paragraphAnchor,
   onLoad,
   onError,
 }: {
   parentId: string;
+  paragraphAnchor?: string | null;
   onLoad?: () => void;
   onError?: (err: string) => void;
 }) {
@@ -46,25 +48,6 @@ export function DocxPreview({
         if (!cancelled) {
           setLoading(false);
           onLoad?.();
-
-          // Scroll to paragraph anchor if provided
-          if (paragraphAnchor && containerRef.current) {
-            const elements = containerRef.current.querySelectorAll("p, h1, h2, h3, h4, li");
-            for (const el of elements) {
-              const text = (el.textContent || "").trim();
-              if (text.length > 10) {
-                crypto.subtle.digest("SHA-256", new TextEncoder().encode(text.slice(0, 50)))
-                  .then(function(hash) {
-                    var hex = Array.from(new Uint8Array(hash)).slice(0, 4)
-                      .map(function(b) { return b.toString(16).padStart(2, "0"); }).join("");
-                    if (hex === paragraphAnchor) {
-                      el.scrollIntoView({ behavior: "smooth", block: "center" });
-                      el.style.backgroundColor = "rgba(255, 255, 0, 0.2)";
-                    }
-                  });
-              }
-            }
-          }
         }
       } catch (e: any) {
         if (!cancelled) {
