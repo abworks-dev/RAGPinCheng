@@ -145,6 +145,12 @@ def get_source_file(parent_id: str, _user_id: int = Depends(require_user)) -> Re
     raw = row["source_path"]
     file_path = Path(raw) if Path(raw).is_absolute() else DOCS_DIR / raw
 
+    # For XLSX, serve the preview file (with cached formula values) if available
+    if row["doc_type"] == "xlsx":
+        preview_path = file_path.with_suffix(".preview.xlsx")
+        if preview_path.exists():
+            file_path = preview_path
+
     if not file_path.exists() or not file_path.is_file():
         raise HTTPException(status_code=404, detail="Source file not found")
 
