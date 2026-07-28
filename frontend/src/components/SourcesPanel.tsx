@@ -161,7 +161,10 @@ function SourceCard({
             {copied ? "✓ 已复制" : "📋 复制"}
           </button>
           {(s.doc_type === "pdf" || s.doc_type === "docx" || s.doc_type === "xlsx" || s.doc_type === "pptx") && (
-            <PdfPreviewButton parentId={s.parent_id} title={s.doc_title} docType={s.doc_type} />
+            <PdfPreviewButton
+            parentId={s.parent_id} title={s.doc_title} docType={s.doc_type}
+            sheetName={s.sheet_name} cellRange={s.cell_range}
+            slideNumber={s.slide_number} paragraphAnchor={s.paragraph_anchor} />
           )}
           <button
             type="button"
@@ -236,7 +239,15 @@ function SourceCard({
 /**
  * PDF preview button. Opens the PDF preview panel for this source.
  */
-function PdfPreviewButton({ parentId, title, docType }: { parentId: string; title: string; docType?: string }) {
+function PdfPreviewButton({ parentId, title, docType, sheetName, cellRange, slideNumber, paragraphAnchor }: {
+  parentId: string;
+  title: string;
+  docType?: string;
+  sheetName?: string | null;
+  cellRange?: string | null;
+  slideNumber?: number | null;
+  paragraphAnchor?: string | null;
+}) {
   const { open } = usePdfPreview();
   const isDocx = docType === "docx";
   const isXlsx = docType === "xlsx";
@@ -244,7 +255,8 @@ function PdfPreviewButton({ parentId, title, docType }: { parentId: string; titl
 
   function handleClick(e: React.MouseEvent) {
     e.stopPropagation();
-    open(parentId, title, docType || "pdf");
+    const initialPage = (docType === "pptx" open(parentId, title, docType || "pdf", 1, { sheetName, cellRange, slideNumber, paragraphAnchor });open(parentId, title, docType || "pdf", 1, { sheetName, cellRange, slideNumber, paragraphAnchor }); slideNumber) ? slideNumber : 1;
+    open(parentId, title, docType || "pdf", initialPage, { sheetName, cellRange, slideNumber, paragraphAnchor });
   }
 
   const label = isDocx ? "DOCX 预览" : isXlsx ? "XLSX 预览" : isPptx ? "PPTX 预览" : "PDF 预览";
