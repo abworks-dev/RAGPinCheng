@@ -50,11 +50,68 @@ class GenerationPrep:
     usage: dict = field(default_factory=dict)
 
 
+def _render_source(p: RetrievedParent, n: int) -> str:
+    """Render one <source> block with a 1-based citation index `n`."""
+    company_attr = f' company="{p.company}"' if p.company else ""
+    if p.doc_type == "transcript" and p.start_time:
+        return (
+            f'<source index="{n}" id="{p.parent_id[:8]}" doc="{p.doc_title}" '
+            f'category="{p.category}"{company_attr} '
+            f'time="{p.start_time}" type="transcript">\n'
+            f"{p.text}\n"
+            f"</source>"
+        )
+    # Show the LLM only the leaf of the breadcrumb (e.g. `(5) 钢材耐腐蚀性差`)
+    # instead of the full path `第1章 概述 > 1.1 ... > 1.1.1 ... > (5) ...`.
+    # Inline citations stay short and readable; the full breadcrumb is
+    # exposed in the SourcesPanel expand view.
+    section_leaf = p.section_path.split(" > ")[-1] if p.section_path else ""
+    return (
+        f'<source index="{n}" id="{p.parent_id[:8]}" doc="{p.doc_title}" '
+        f'category="{p.category}"{company_attr} '
+        f'section="{section_leaf}" type="pdf">\n'
+        f"{p.text}\n"
+        f"</source>"
+    )
+
+
+def _interleave_by_subquery(parents: list[RetrievedParent]) -> list[RetrievedParent]:
+    """Round-robin parents across their `subquery_idx` groups, preserving each
+    group's internal order. So every comparison side contributes its top hit
+    before any side contributes its second — ensuring both sides survive a
+    budget cutoff downstream. Groups are visited in first-appearance order.
+    """
+    groups: dict[object, list[RetrievedParent]] = {}
+    order: list[object] = []
+    for p in parents:
+        key = p.subquery_idx
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append(p)
+    result: list[RetrievedParent] = []
+    i = 0
+    while any(i < len(groups[k]) for k in order):
+        for k in order:
+            if i < len(groups[k]):
+                result.append(groups[k][i])
+        i += 1
+    return result
+
+
 def _build_context(
     parents: list[RetrievedParent],
     budget: int,
 ) -> tuple[str, list[RetrievedParent]]:
-    """Pack as many parents as fit under `budget` chars. Always keep at least one."""
+    """Pack as many parents as fit under `budget` chars. Always keep at least one.
+
+    Decomposed path (any parent carries `subquery_idx`): interleave sources
+    round-robin across sub-queries first, so each comparison side gets a turn
+    before the budget fills. Single-query path: original sequential order,
+    byte-for-byte unchanged.
+    """
+    if any(p.subquery_idx is not None for p in parents):
+        parents = _interleave_by_subquery(parents)
     blocks: list[str] = []
     used: list[RetrievedParent] = []
     total = 0
@@ -63,30 +120,7 @@ def _build_context(
         # which is the SAME order (and subset) the UI receives as `sources[]`,
         # so `[N]` in the answer resolves to `sources[N-1]` on the frontend.
         n = len(used) + 1
-        company_attr = f' company="{p.company}"' if p.company else ""
-        if p.doc_type == "transcript" and p.start_time:
-            block = (
-                f'<source index="{n}" id="{p.parent_id[:8]}" doc="{p.doc_title}" '
-                f'category="{p.category}"{company_attr} '
-                f'time="{p.start_time}" type="transcript">\n'
-                f"{p.text}\n"
-                f"</source>"
-            )
-        else:
-            # Show the LLM only the leaf of the breadcrumb (e.g. `(5) 钢材耐腐蚀性差`)
-            # instead of the full path `第1章 概述 > 1.1 ... > 1.1.1 ... > (5) ...`.
-            # Inline citations stay short and readable; the full breadcrumb is
-            # exposed in the SourcesPanel expand view.
-            section_leaf = (
-                p.section_path.split(" > ")[-1] if p.section_path else ""
-            )
-            block = (
-                f'<source index="{n}" id="{p.parent_id[:8]}" doc="{p.doc_title}" '
-                f'category="{p.category}"{company_attr} '
-                f'section="{section_leaf}" type="pdf">\n'
-                f"{p.text}\n"
-                f"</source>"
-            )
+        block = _render_source(p, n)
         if total + len(block) > budget and used:
             break
         blocks.append(block)

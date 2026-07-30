@@ -61,6 +61,10 @@ DECOMPOSE_MIN_QUOTA_PER_SUBQUERY = 2
 # Final parent cap for the decomposed path (wider than FINAL_TOP_K so both sides
 # fit; still trimmed by MAX_CONTEXT_CHARS downstream).
 DECOMPOSE_FINAL_TOP_K = 8
+# Context budget for the decomposed path (wider than MAX_CONTEXT_CHARS so both
+# sides of a comparison fit into the LLM context; used only when the query was
+# split into sub-queries). Single-query path keeps MAX_CONTEXT_CHARS.
+DECOMPOSE_MAX_CONTEXT_CHARS = 8000
 
 # Reranker (cross-encoder). Set RERANK_ENABLED=False to disable and fall back
 # to RRF order from Qdrant.
