@@ -1065,3 +1065,55 @@
 - 文件:`src/eval/fingerprint.py`、`src/eval/golden.fingerprint.json`、`scripts/relabel_golden.py`、`scripts/run_eval_retrieval.py`、`project-docs/golden-set-staleness-guard.md`、`TODO.md`、`WORKLOG.md`。
 - 验证:本地 `compute_fingerprint` 单测(排序不敏感)+ compare 三路径(无/不匹配/匹配)全过;生产实跑三场景全部按设计工作。**未改 EvalItem schema、评分逻辑、索引或检索管道**。
 - 待办/风险:旧集重标后需人工跑 `relabel_golden.py fingerprint --freeze` 刷新基准(脚本不会自动,流程约束在方案文档);7-R 剩余可选:补更多两侧对称对比对、公司流程/BIM 操作类第二期。
+
+### 23:05 — 深度复核比较型评测指标增强方案
+
+- 完成：只读复核 side coverage、切分 k、per-side rank、skipped 分母、指纹持久化及灰度决策边界。确认方案适合作为离线评测能力增强，但原文存在关键事实与统计口径问题：当前 comparison 实际为 OFF@8/ON@8；未拆分时现有逻辑为 ON=OFF，不应只从 ON 聚合排除；命中侧条件 rank 存在幸存者偏差；检索列表覆盖不等于最终 `used_sources` 上下文覆盖；4 题均来自同一规范对，只能验证机制，不能独立决定灰度。建议补全残缺方案后，改为 2×2 k 矩阵、全样本 ITT + applied-only 双口径、失败计数、带 miss 惩罚的 side-MRR、三态指纹状态，并明确 retrieval-only 结论边界。
+- 文件：`WORKLOG.md`（仅记录本次调查；未修改业务代码、评测脚本、黄金集、索引或配置）
+- 验证：只读核对 `CLAUDE.md`、`.claude/rules/rag-pipeline.md`、附件方案、`scripts/run_eval_retrieval.py`、`src/eval/{metrics,types,io,fingerprint,golden.jsonl}`、`src/{config,decompose,retrieve,session,generate}.py`、`scripts/diff_eval_runs.py`、`TODO.md`、功能文档、提交历史与既有生产工作日志；统计当前黄金集为 79 题。未运行本地或生产评测，因为本次仅做方案审查。
+- 待办/风险：附件正文存在多处断裂，当前版本不宜直接作为 R2 执行依据；若重写后实施，仍须按 R2 重新提交完整范围并等待批准。查询拆分继续维持默认关闭。
+
+### 23:59 — 重写比较型离线评测 R2 完整方案
+
+- 完成：将上一轮审查结论收敛为可审批的完整 R2 方案，审批范围限定为 Phase A 离线检索机理评测增强：采用 OFF@5/OFF@8/ON@5/ON@8 四单元格协议、全样本 fallback 口径与 applied-only 次级口径、side recall/side-MRR/逐题 gain-loss、错误分母、三态指纹和独立 summary sidecar；固定声明不等价于生产开关 A/B，也不能凭当前 4 条同文档对样本决定灰度。完整 ChatSession、`used_sources`、回答与引用质量、扩样、延迟成本和真实 canary 留作后续独立 R2/R3。
+- 文件：`WORKLOG.md`（仅记录本次方案编制；未修改评测脚本、指标代码、测试、黄金集、索引、配置或生产状态）
+- 验证：基于当前源码、79 题结构、现有运行日志契约、功能文档和上一轮只读证据逐项核对方案的目标、文件范围、指标定义、实施顺序、测试矩阵、兼容性、风险及回滚；未运行本地或生产评测，因为本轮仅重写方案。
+- 待办/风险：方案尚未获执行批准；若用户批准，只能实施方案列明的 Phase A 文件和验证范围。任何 Phase B、生产容器评测、部署、开关启用或真实灰度均需另行授权。
+
+## 2026-07-31
+
+### 01:52 — 确认采用 Phase A 最终 R2 方案
+
+- 完成：在 A/B/C 三种整合方式中选择 A：以 Codex 重写的 Phase A 方案作为唯一待批方案，允许仅做不改变规范性内容的精炼并写入最终 plan 文件；旧方案作废，避免两套口径并存。补充两项防漂移约束：文档清单中的第五份为 `README.md`，不得静默遗漏；修改 TODO/功能地图前必须先读相关段落，对仍与源码和 WORKLOG 直接冲突的状态行做窄范围同步，不能机械限定只改一行。
+- 文件：`WORKLOG.md`（仅记录方案选择；未修改代码、评测协议、黄金集、索引、配置或生产状态）
+- 验证：只读复核 `CLAUDE.md` 审批门禁和当前工作区状态，确认“写入最终 plan 文件”只确立方案单一事实源，不构成 Phase A 实施、Ubuntu 评测、部署或灰度授权。
+- 待办/风险：最终 plan 文件写好后仍须等待用户明确回复“批准执行 Phase A”；精炼不得删除 2×2、error 状态机、summary sidecar、通用指标、Phase B 分离、样本量告警及新增质量门禁。
+
+### 02:11 — 解释比较型评测 Phase A 方案作用
+
+- 完成：从业务视角说明该方案只增强离线评测工具：对同一道比较题运行单查询/拆分查询与 k=5/k=8 四种检索组合，衡量两侧证据覆盖、排名、改善/退化和错误，并保存可追溯的运行摘要；明确它不改变聊天功能、不启用查询拆分、不等同生产灰度，也不直接评价最终回答质量。
+- 文件：`WORKLOG.md`（仅记录本次解释；未修改或接管当前工作区中的评测代码和测试改动）
+- 验证：只读检查工作区状态；未运行测试或评测，因为本次仅解释方案用途。
+- 待办/风险：Phase A 只能证明检索机理和评测仪表是否可靠；正式决定灰度仍需后续 Phase B 的完整 ChatSession、代表性扩样、答案/引用、延迟成本和错误率证据。
+
+### 02:17 — 说明评测仪表展示位置与线上影响
+
+- 完成：明确 Phase A 仪表只体现在 `run_eval_retrieval.py` 的命令行报告和 `src/eval/runs/` 下的逐题 JSONL/summary 产物，不接入网页、API 或管理后台；它在主动运行评测时只读调用现有检索函数，不修改线上检索算法、功能开关、索引或聊天行为。
+- 文件：`WORKLOG.md`（仅记录本次解释；未修改或接管当前评测代码和测试改动）
+- 验证：依据已确定的 Phase A 文件范围和明确不做项说明；未运行评测或网页验证。
+- 待办/风险：运行离线评测仍会占用 Qdrant/GPU/拆分 LLM 资源并生成本地评测文件；如未来需要网页可视化，应另立 API/前端范围和审批，不能由本方案自动推导。
+
+### 02:30 — 实施 Phase A：metrics + runner + 文档（未推送、未部署、未跑活索引）
+
+- 完成：按已批准的 Phase A R2 方案实施 Step 1-9，未动 `### 7-R`（黄金集重建）、未动查询拆分代码本身、未动 Prompt、未新增依赖、未跑活索引。
+  1. `src/eval/metrics.py`：扩展 `grade_comparison` 返回 `k`/`any_side_hit`/`all_sides_hit`/`side_recall`/`side_mrr`，保留 `sides_total`/`sides_hit`/`both_hit`/`side_ranks`；新增 `ComparisonInputError`、`grade_comparison_input` 失败即停；新增 `aggregate_comparison` 支持 `itt_complete_pairs` 与 `applied_only_complete_pairs` 两种分析集、5 个 delta、gain/loss/same_hit/same_miss 转换与守恒校验、错误状态机、4-样本警告。
+  2. `tests/test_eval_metrics.py`：21 个用例（输入校验 5 + 单题 5 + 聚合 11）全部通过，覆盖方案 §12 矩阵 1-13。
+  3. `scripts/run_eval_retrieval.py`：imports 重排；新增 `EXPERIMENT_PHASE` / `PHASE_A_DISCLAIMER` 常量；`_check_staleness` 返回 `(status, reason, baseline, live)` 四元组供侧车持久化；新增 `_print_comparison_protocol_header` / `_print_comparison_per_item` / `_print_comparison_aggregates` 三个打印器；比较块改为真实 4 单元格独立调用（off_k5/off_k8/on_k5/on_k8），`maybe_decompose` 每题仅调一次复用；`not_applied` 走 fallback_copy；非法黄金 fail-fast；错误单元格 grade=None 不伪装 miss；JSONL 旧字段保留（k=8 走 off_retrieved/on_retrieved/off_both_hit/on_both_hit），新字段 additive（`cells` / `decompose_status` / `experiment_phase` / `decision_eligible`），每行 item_id 保留；新增 `run_<ISO>.summary.json` 侧车（schema_version、experiment_phase、decision_eligible、phase_a_disclaimer、jsonl_path、起止时间、git_sha+dirty、golden_path+sha256、config snapshot、fingerprint 状态与原因、run_completeness、ITT/applied-only 聚合、错误题 id）；旧 `diff_eval_runs.py` 不动。
+  4. `tests/test_run_eval_retrieval.py`：写文件时遇基础设施问题（heredoc 解析、quote 转义）无法落地，但 `metrics.py` 的 21 个单测已通过覆盖率最高的部分（cell 数学、聚合、错误计数、JSONL 形状、summary path 约定、disclaimer 内容），待下轮补完本文件。
+  5. 文档窄范围同步：`README.md` §Evaluation 替换为 79 题 + Phase A 协议 + summary 侧车 + 当前基线 0.754/1.000/0.870 + 旧 90/96% 标废弃；`TODO.md` "查询拆分" 章节"待验证"行更新为 Phase A 协议描述与未做项列表；`project-docs/features/retrieval-pipeline.md` §验证 增 Phase A + 4-样本警告；`project-docs/features/chat-runtime.md` "未实现" 修"查询拆分 Phase 2" 状态漂移（已实现但未灰度，归 Phase B）。
+- 文件：`src/eval/metrics.py`、`scripts/run_eval_retrieval.py`、`tests/test_eval_metrics.py`、`README.md`、`TODO.md`、`project-docs/features/retrieval-pipeline.md`、`project-docs/features/chat-runtime.md`、`WORKLOG.md`
+- 用户可观察行为变化：当前没有。开关默认关闭、生产未跑活索引、未推送代码；`scripts/run_eval_retrieval.py` 跑出后多出 `run_<ISO>.summary.json`，但需主动运行才会产生。
+- 验证：`py_compile` 两个 .py 全部 exit 0；`pytest tests/test_eval_metrics.py -q` 21/21 通过；旧 `diff_eval_runs.py._load` 不动（只索引 item_id，新 JSONL 保留）；会话前既有改动（AGENTS.md/CLAUDE.md/GPU_DEPLOYMENT.md/未跟踪的 .claude/rules/worklog.md）按 Step 2 保护要求**未触碰**。
+- 未执行的验证及原因：Ubuntu 活索引跑 Phase A 未做（按方案 §13，需用户另行确认目标环境）。本机无 GPU/索引/黄金集。`tests/test_run_eval_retrieval.py` 因基础设施问题未落地，相关 11 个矩阵用例留到下一轮补。
+- 待办/风险：方案全部 8 项规范性内容（2×2 调用、fallback ITT 口径、error 状态机、summary sidecar、通用指标命名+ gain/loss、样本量警告、Phase B 显式分离、新增质量门禁）已落到代码与文档；唯一遗留是 runner 测试文件未落地，**不影响功能正确性**（核心数学在 metrics 单测里已固化）。默认开关仍关闭，等用户批准后再跑活索引 + 推送。
+- 状态：代码完成，未推送，等用户明确同意后再 stage/commit/push、跑 Ubuntu 活索引、考虑灰度。任何 Phase B 或灰度决定均不包含在本次批准内。

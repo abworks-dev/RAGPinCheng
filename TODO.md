@@ -24,8 +24,9 @@
 - [x] 启发式触发 gate：query 含 `对比|比较|相比|区别|差异|不同点|异同|分别|各自|VS|vs` 等标记时才调用 LLM，预计触发率 <5%/turn
 - [x] 新增 `retrieve_multi`：多子查询召回、跨查询 RRF 融合、每子查询最低配额（`DECOMPOSE_MIN_QUOTA_PER_SUBQUERY=2`）、按原始问题全局 rerank、截断到 `DECOMPOSE_FINAL_TOP_K=8`
 - [x] `ask`/`ask_stream` 经统一 `_fresh_retrieve` 对称接入；开关关闭时与旧行为逐字节等价
-- [ ] 待验证：黄金集补充比较型用例；开关开/关的 Recall@1/@5/MRR/no-answer 与多主题覆盖率对比；触发率、每轮额外 LLM 调用与 P50/P95 延迟遥测（需容器/Ubuntu 节点补跑）
-- [ ] 待灰度：验证收益且延迟/成本可接受后再默认开启
+- [x] 离线评测协议 Phase A（2026-07-30，commit 待推送）：`scripts/run_eval_retrieval.py` 2×2 真实调用（off_k5/off_k8/on_k5/on_k8）、两种分析集（ITT、applied-only）、错误状态机、独立 `run_<ISO>.summary.json` 侧车。**只评估 retrieval 机制，不等价于生产开关 A/B；decision_eligible=false**。
+- [ ] 待验证：Ubuntu 生产容器跑 Phase A — 输出 ITT 下 `delta_all_sides_hit_rate`、5 个 contrast、gain/loss；当前基线 0.754/1.000/0.870 不退化即可信（与查询拆分重构 + 预算截断修复的零回归结论对齐）。完整 ChatSession 开关 A/B、延迟/Token 成本、回答质量、引用支持度属 Phase B。
+- [ ] 待灰度：Phase A 量化收益且延迟/成本可接受后再默认开启（Phase B 单独方案 + 单独审批）。
 
 **✅ 预算截断已修复（2026-07-30，拆分感知上下文预算）**：
 - 原缺陷：`_build_context` 顺序线性打包 + `MAX_CONTEXT_CHARS=6000` 截断，拆分场景排在前的一侧填满预算、另一侧被截，LLM 只见一侧遂拒答。

@@ -64,13 +64,23 @@ ChatSession
 
 - 先执行单问题检索冒烟；
 - 按影响运行固定黄金集，分别报告 Recall@1、Recall@5、MRR 和 no-answer；
-- 对规范编号、表格公式、转录本和多轮案例做定向检查。
+- 对规范编号、表格公式、转录本和多轮案例做定向检查；
+- 比较题（4 条同池 GB50189/GB55015 规范）走 Phase A 2×2 离线协议：
+  `scripts/run_eval_retrieval.py --kinds comparison` 跑出
+  off_k5/off_k8/on_k5/on_k8 四单元格真实调用 + ITT/applied-only 两种分析集
+  + 5 个 contrast + gain/loss，结论写进
+  `src/eval/runs/run_<ISO>.summary.json` 侧车。**Phase A 仅评估
+  retrieval 机制，不等价于生产开关 A/B；decision_eligible=false**。
+  生产真实开关 A/B、上下文打包、回答质量、延迟与成本归 Phase B。
 
 ## 已知限制
 
-- 当前检索质量依赖本地索引与模型状态，README 的历史指标不能代替本次验证。
+- 当前检索质量依赖本地索引与模型状态，README 的历史指标不能代替本次验证；
+- Phase A 4 条比较题样本过薄（且全部是同一文档对、均带强规范编号），任何 delta>0
+  须警惕"虚假高收益"，仅供机制层面参考，灰度决策仍需 Phase B。
 
 ## 相关决策
 
-- 暂无独立 ADR。
+- 暂无独立 ADR；查询拆分的 Phase A 评测方案见 plan 文件
+  `C:/Users/ASUS/.claude/plans/lexical-wobbling-fairy.md`（本仓库外）。
 
