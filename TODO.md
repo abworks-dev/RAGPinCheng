@@ -27,9 +27,16 @@
 - [ ] 待验证：黄金集补充比较型用例；开关开/关的 Recall@1/@5/MRR/no-answer 与多主题覆盖率对比；触发率、每轮额外 LLM 调用与 P50/P95 延迟遥测（需容器/Ubuntu 节点补跑）
 - [ ] 待灰度：验证收益且延迟/成本可接受后再默认开启
 
+**✅ 预算截断已修复（2026-07-30，拆分感知上下文预算）**：
+- 原缺陷：`_build_context` 顺序线性打包 + `MAX_CONTEXT_CHARS=6000` 截断，拆分场景排在前的一侧填满预算、另一侧被截，LLM 只见一侧遂拒答。
+- 修复：`RetrievedParent` 加 `subquery_idx`；`retrieve_multi` 标注每个 parent 所属子查询；`_build_context` 检测到 `subquery_idx` 时按子查询 **interleave 轮流打包**（每侧先出 top，再出次优），保证预算耗尽前两侧都入选；拆分场景改用更宽的 `DECOMPOSE_MAX_CONTEXT_CHARS=8000`（`_context_budget` 依据 `subquery_idx` 自动选择）。单查询/普通路径逻辑不变。
+- 本机单测验证：interleave 轮流顺序、单查询顺序不变、拆分场景两侧都存活（对照旧顺序逻辑只留一侧）、budget 选择（普通 5300 / 拆分 7300）。
+- [ ] 待生产冒烟：Ubuntu 容器开启开关重跑比较题，确认两侧都进上下文、回答变为真正对比（不再拒答）。
+- 现状：**仍维持默认关闭**；灰度开启前仍需比较型黄金集量化收益（见 `### 7-R`）。
+
 **涉及文件**：
 - 新增 `prompts/decompose_system.md`、`prompts/decompose_user.md`、`src/decompose.py`
-- 修改 `src/retrieve.py`（`retrieve_multi` + 抽出共享召回/去重）、`src/session.py`、`src/config.py`
+- 修改 `src/retrieve.py`（`retrieve_multi` + 共享召回/去重 + `subquery_idx`）、`src/generate.py`（`_render_source`/`_interleave_by_subquery`/`_build_context`）、`src/session.py`（`_context_budget`）、`src/config.py`（`DECOMPOSE_MAX_CONTEXT_CHARS`）
 - 补充黄金集对比型测试用例（待办）
 
 ### 2. 分层查询增强（查询拆分 + MQE + 受控 HyDE）
@@ -134,6 +141,112 @@
 - [ ] 多轮对话案例
 - [ ] 边界 case（纯数字、纯代码、无意义输入）
 - [ ] 视频转录本相关问题
+
+> ⚠️ 上方"当前基线 R@1=90% / R@5=96%"是 2026-05 旧索引上的历史数字，**已失效**。当前生产索引上该黄金集实测全 0 命中，原因见下方"检索黄金集重建"。在完成重建前，本节的"扩展"待办无法量化验证；扩展应在重建之后进行。
+
+### 7-R. 检索黄金集重建（Golden Set Rebuild）— R2，未获实施授权
+
+**优先级**：🔴 高（阻塞 Phase 2 查询拆分收益量化——commit 9bf065a 默认关闭，开启前需要能量化收益的黄金集）
+
+**状态**：调查完成，方案待批准。尚未修改业务代码/黄金集，尚未开始 R2 实施。
+
+**关联**：本节是上方"7. 检索黄金集扩展"的前置修复。扩展（对比型/多轮/边界/转录用例）应在重建、标尺恢复后进行，二者不要合并。
+
+#### 现状与根因（已逐项源码核对，2026-07-30）
+
+已核对文件：`scripts/run_eval_retrieval.py`、`src/eval/metrics.py`、`src/eval/types.py`、`src/eval/sample.py`、`scripts/sample_for_eval.py`、`src/chunk.py`、`prompts/answer_system.md`、`src/indexing_pipeline.py`。
+
+- **评分口径**：检索题（factual/table_formula/code_lookup/transcript/multi_turn，实测本地黄金集共 91 条）绕过 ChatSession 直接调 `retrieve()`，按 `grade_one()` 做 **parent_id 集合命中**（retrieved 里任一 id ∈ `expected_parent_ids` 即算命中，取首个命中的 1-based 名次算 R@1/R@5/MRR@5）。no_answer（6 条）走完整 `ChatSession.ask()`。本地黄金集 kind 实际分布：factual 36 / table_formula 14 / code_lookup 11 / transcript 6 / multi_turn 24（12 对）/ no_answer 6，合计 97。
+- **parent_id 生成**（`src/chunk.py` `_stable_id`）：`uuid5(NAMESPACE, "||".join(parts))`。PDF 用 `(doc_title, section_path, parent_text)`，转录用 `(doc_title, "transcript", first_ts, parent_text)`。即 id = 文档标题 + 章节路径 + **父块全文** 的确定性哈希。
+- **何时会变**：id 是确定性的——同一 `doc_title/section_path/parent_text` 重复索引会得到**相同** id。只有当以下任一改变时 id 才变：文档被重新解析导致正文文本不同（MinerU 输出变化）、分块参数或切分/标题归一逻辑改变（`PARENT_SIZE`、`_normalize_heading_levels`、`_split_parents`）、或文档标题/章节路径变化。因此"文档重新索引后 id 全变"精确表述是：**当前生产索引是在重新解析/重新分块后的语料上建立的，父块正文与旧标注时不同**，而非"只要重跑就会变"。
+- **根因**：`expected_parent_ids` 存的是单个旧 UUID，与当前索引的 parent_id 集合无交集 → 91 道检索题集合命中恒为 0。此为全 0 的主因，与"缺料/检索坏/查询拆分重构"无关。
+
+#### 需修正/补充的背景要点（对照核对结果）
+
+- [ ] **no-answer 判定不是精确 `==`，而是 `startswith`**：`_grade_no_answer()` 用 `answer_text.strip().startswith("资料中未找到相关内容。")`（脚本 docstring/表头写的"== equals"与实现不一致，属脚本内部措辞 bug）。
+- [ ] **更关键的口径冲突**：脚本期望前缀是"资料中未找到相关内容。"，但当前 `prompts/answer_system.md` 第 1 条指示模型答"**未找到相关内容**"（无"资料中"前缀、无句号），第 9 条明确要求**不要**在正文追加"资料来源"列表。而脚本注释（第 51–58 行）仍假设"prompt 会强制追加资料来源脚注，故用 startswith"。→ prompt 已演进、脚本判定短语已过期，no-answer 判不合规是 **prompt 输出与评分短语不匹配**，比"口径对不上"更具体：连前缀都对不上。
+- [ ] **生产索引具体数字（123 篇 / GB 32 篇 / 分类计数）无法在本地只读环境复核**：`list_indexed_documents()` 机制存在且可产出该清单，但具体数字来自用户生产实跑，本次未在生产核对，记为"用户侧已观察、待实施阶段用同一函数固化"。
+
+#### 现成能力盘点（决定重建走哪条路）
+
+- [ ] `src/eval/sample.py` + `scripts/sample_for_eval.py` **可复用**：从 `parents.sqlite` 按 kind 加权采样 → `sampled_parents.json`（确定性 seed），仅覆盖 factual/table_formula/code_lookup/transcript；multi_turn 与 no_answer 需人工写。→ 支撑"重采样"路线（方案 B）。
+- [ ] **不存在**"从当前索引反向回填 `expected_parent_ids`"的现成脚本；需新增一个小工具。→ 影响"半自动回填"路线（方案 A）成本。
+- [ ] **可复用的重标资产**：`golden.jsonl` 每条含 `notes`（答案原文片段，如"首段：通过扩钻和刨边消除局部硬化区")与 `question`、`source_parent_id`（旧）。`notes`/`question` 保留了 ground-truth 语义，可用来在当前索引里重新定位正确父块，是方案 A 的关键依据。`drafts.jsonl`（68 条合成草稿）亦可参考。
+
+#### 重建策略候选与取舍（实施前二选一或组合，需用户拍板）
+
+- [ ] **方案 A — 半自动回填 ID（保留题目，仅重标 `expected_parent_ids`）**
+  - 做法：新增只读脚本，对每条检索题用 `retrieve(question)` 取回 top-K 候选父块，结合 `notes`/`question` 语义，由人工（或 Agent 辅助）确认真正正确的父块并回填其当前 parent_id；命中多父块时按 `types.py` 说明允许 `expected_parent_ids` 扩为多值。
+  - 优点：最大程度保留人工已校对的题目质量与难度分布（尤其 multi_turn 承接题、code_lookup 点名题）；改动面小、可逐条 diff 审阅。
+  - 缺点：需人工确认每条，工作量与题量成正比；对已从语料中消失的旧父块，题目可能需改写或删除。
+- [ ] **方案 B — 重采样重建（`sample.py` 从当前 parents 重采样并重新合成题目）**
+  - 做法：`sample_for_eval.py` 生成新 `sampled_parents.json` → Agent 合成器产出 `drafts.jsonl` → 人工评审入 `golden.jsonl`；multi_turn/no_answer 仍人工补。
+  - 优点：题目与当前索引天然一致；覆盖面可按新配额重新平衡。
+  - 缺点：抛弃现有已校对题目；合成+评审成本高；难度/主题分布需重新把关。
+- [ ] **组合建议（默认倾向）**：检索题主体走 **A**（保住题库价值并恢复标尺最快），对旧父块已消失、或需补齐的 kind（对比型/边界/转录）走 **B** 增量补充。最终由用户在方案评审时确定 A/B/组合比例。
+- [ ] **题目文本 vs 仅重标 ID 的边界**：默认"题目文本保留、仅重标 ID"；仅当某题所依据的事实在当前语料中已不存在或表述实质变化时，才改写或下线该题，并在 `notes` 记录原因。
+
+#### no-answer 判定与当前 prompt 对齐（重建同批修复）
+
+- [ ] 统一"标准拒答短语"的**单一事实源**：或修 `prompts/answer_system.md` 使拒答固定输出脚本期望短语，或修 `run_eval_retrieval.py`（含 docstring/表头/`_grade_no_answer`）使其匹配 prompt 实际短语；二选一，避免两处再次漂移。（属 prompt/评分契约改动，本身即 R2，需与重建一并审批。）
+- [ ] 判定语义确认：保留 `startswith` 以容忍尾部脚注，还是收紧为规范化后精确匹配——取决于对齐后 prompt 是否仍可能追加内容。
+
+#### 防止未来再次陈旧
+
+- [ ] 评测运行时记录**索引指纹**（如 parents 行数 + parent_id 集合的哈希/采样），写入 run 日志；启动时与黄金集标注时的指纹比对，不匹配则显著告警"黄金集可能已陈旧"，避免再次静默全 0。
+- [ ] 建立"索引重建后重跑标注校准"的流程/脚本入口（方案 A 的回填脚本可复用为校准工具），并在 `README`/`WORKLOG` 记录该约定。
+
+#### 是否区分"检索黄金集"与"生成质量评测"
+
+- [ ] 明确二分：本节只负责**检索**黄金集（parent_id 集合命中，确定性、无 LLM 裁判）；答案文案/引用正确性属"生成质量评测"，另立项，不混入本次重建，以免把不确定的生成判定引入确定性检索标尺。
+
+#### 数据契约
+
+- [ ] `EvalItem`（`src/eval/types.py`）Schema 不变即可满足方案 A（仅 `expected_parent_ids` 取值更新，可扩多值）；如需记录"本条依据的当前索引指纹/重标日期"，评估新增可选字段（不改现有必填字段，保持旧行可读）。
+
+#### 预计修改文件（候选，实施前重新确认）
+
+- [ ] `src/eval/golden.jsonl`（重标 `expected_parent_ids`；本次禁止改，仅规划）
+- [ ] 新增 `scripts/relabel_golden.py`（只读检索 + 人工确认回填/校准工具）
+- [ ] `scripts/run_eval_retrieval.py` 与/或 `prompts/answer_system.md`（no-answer 口径对齐、索引指纹记录）
+- [ ] 可能：`src/eval/sample.py` / `sampled_parents.json`（走方案 B 增量补充时）
+
+#### 分阶段步骤（候选）
+
+- [x] **阶段 0—1 tooling（2026-07-30 交付）**：新增 `scripts/relabel_golden.py`（fingerprint + candidates 子命令）；修 `run_eval_retrieval.py` no-answer 口径对齐 prompt（`"未找到相关内容"` substring match，覆盖 session.py 硬编码 fallback 与 LLM 两条路径）；`.gitignore` 新增 `src/eval/relabel/`。经本地 compile + 单元测试，无活索引环境 graceful exit。**上述代码变动待用户验收**，验收后需在 Ubuntu 生产节点跑 `fingerprint` 固化石锤、`candidates` 产出审阅清单。
+- [ ] 阶段 2：人工/Agent 逐条确认，生成新 `golden.jsonl`（先写副本，不覆盖原文件）。
+- [ ] 阶段 3：索引指纹记录（在 `fingerprint` 子命令中已实现，待实施阶段 0 时固化到日志）。
+- [ ] 阶段 4：在真实索引上重跑 `run_eval_retrieval.py`，确立**新基线**（不得沿用 2026-05 旧数字）。
+- [ ] 阶段 5：补充对比型/多轮/边界/转录用例（接续"7. 检索黄金集扩展"）。
+
+#### 自动化验证 / 真实索引验证
+
+- [ ] 回填脚本单测：给定构造 parents 与题目，校验候选检索与 ID 回填逻辑。
+- [ ] 真实索引：重跑检索评测，R@1/R@5/MRR@5 恢复到非零合理区间；no-answer 合规率随口径修复回升；结果与新指纹一并存档。
+
+#### 风险 / 兼容性 / 回滚
+
+- [ ] 风险：重标引入人工偏差（把主题相关但非出处的父块误标为正确）——用 top-K 人工确认 + `notes` 对照缓解。
+- [ ] 兼容性：`EvalItem` Schema 尽量不破坏；如加字段用可选默认，保证旧 run 日志与 `io.load_jsonl` 仍可读。
+- [ ] 回滚：新黄金集先写副本、经 diff 审阅再替换；保留旧 `golden.jsonl`（git 历史 + 备份）可随时回退。
+
+#### 是否需要索引重建
+
+- [ ] **否**。本方案针对黄金集与评测脚本，不触碰索引；反而依赖"当前索引保持不变"来重标。若实施期间语料再次重建，需重跑校准。
+
+#### 用户决定（2026-07-30 已定）
+
+- [x] **重建路线：组合，以 A 为主**——检索题主体走半自动回填（方案 A），仅对旧父块已消失或需补齐的 kind 用方案 B 增量补充。
+- [x] **no-answer 口径：改脚本对齐 prompt**——以 `prompts/answer_system.md` 为准（线上生效契约），修 `run_eval_retrieval.py`（docstring/表头/`_grade_no_answer`）匹配 prompt 实际短语；不改动线上回答行为。
+
+#### 仍需用户决定的事项（可延后至实施前）
+
+- [ ] 是否新增 `EvalItem` 可选字段记录指纹/重标日期。
+- [ ] 目标题量与 kind 配额是否沿用现状（97）还是调整。
+
+#### R2 审批提示
+
+- [ ] 本节为 R2，涉及评测契约与 prompt 输出口径；**尚未获实施授权**。实施前需用户看方案后明确"批准执行"；方案范围或风险升级需重新审批。
 
 ### 8. Ubuntu 应用节点 + Windows GPU 节点迁移 ✅
 
