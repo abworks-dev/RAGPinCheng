@@ -109,14 +109,34 @@ python scripts/eval_query.py "Q345 钢手工焊用什么焊条？"
 
 ## Evaluation
 
-A retrieval-graded golden set lives in `src/eval/` (~97 items across 6 question kinds).
+A retrieval-graded golden set lives in `src/eval/`. As of 2026-07-30 the
+rebuilt set has 79 items: 32 factual, 4 table_formula, 23 code_lookup,
+10 multi_turn (5 pairs), 6 no_answer, 4 comparison.
 
 ```bash
-python scripts/run_eval_retrieval.py          # prints R@1, R@5, MRR@5 by kind
-python scripts/diff_eval_runs.py <a>.jsonl <b>.jsonl   # compare two runs
+python scripts/run_eval_retrieval.py                       # prints by-kind R@1, R@5, MRR@5
+python scripts/run_eval_retrieval.py --kinds comparison   # only comparison items
+python scripts/run_eval_retrieval.py --strict-staleness  # fail on fingerprint drift
+python scripts/diff_eval_runs.py <a>.jsonl <b>.jsonl    # compare two runs (legacy)
 ```
 
-Baseline (May 2026): **R@1 = 90%, R@5 = 96%, no-answer compliance = 100%**.
+The current run also writes `src/eval/runs/run_<ISO>.summary.json`
+sidecar with the run protocol metadata (config snapshot, fingerprint
+status, ITT / applied-only aggregates, fixed `decision_eligible=false`
+Phase A disclaimer). The JSONL stays per-item only; `diff_eval_runs.py`
+indexes by `item_id` and keeps working unchanged.
+
+**Phase A disclaimer** (always printed for the comparison section): the
+comparison path runs `retrieve()` vs `retrieve_multi()` **in-process**,
+not through the production `QUERY_DECOMPOSE_ENABLED` switch, and does
+not exercise rewrite / guard / carry / context packaging / answer
+quality. Phase A output is **descriptive, not decision-grade** — it
+exists to measure the retrieval mechanism, not to justify enabling the
+flag. Real A/B on a canary environment is Phase B (separate plan).
+
+Current baseline (production index, 2026-07-30): **R@1 ≈ 75.4%, R@5 = 100%, MRR@5 ≈ 0.870, no-answer 6/6**. (The
+older "R@1 = 90%, R@5 = 96%" line reflects a now-superseded
+steel-structure corpus; do not compare the two numbers directly.)
 
 ---
 
