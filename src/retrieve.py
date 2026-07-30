@@ -29,6 +29,7 @@ from .config import (
     DECOMPOSE_MIN_QUOTA_PER_SUBQUERY,
     DENSE_TOP_K,
     FINAL_TOP_K,
+    RERANK_BATCH_CAP,
     RERANK_ENABLED,
     RERANK_TOP_K,
     RERANK_USE_HEADER,
@@ -334,6 +335,54 @@ def retrieve(
     return _dedup_to_parents(scored, child_rrf, top_k)
 
 
+def _cap_children_for_rerank(
+    per_sub_children: list[list[str]],
+    fused: dict[str, float],
+    cap: int,
+) -> list[str]:
+    """Pick <= cap child_ids to send to the reranker, without starving a side.
+
+    The multi-query union can exceed the rerank service's batch limit. We can't
+    just take the global top-cap by fused score — that may drop a whole
+    sub-query's head and re-create the "only one side retrieved" problem. So:
+      1. Reserve the head of EACH sub-query: cap // n_sub ids per side (deduped).
+      2. Fill the remaining slots by fused RRF score, best-first.
+    Returns a de-duplicated list of <= cap child_ids. If the union already fits,
+    the caller skips this and keeps every id.
+    """
+    n_sub = max(1, len(per_sub_children))
+    reserve_per_sub = max(1, cap // n_sub)
+    picked: list[str] = []
+    seen: set[str] = set()
+
+    # 1. Per-sub-query head reservation.
+    for ordered_ids in per_sub_children:
+        taken = 0
+        for cid in ordered_ids:
+            if taken >= reserve_per_sub or len(picked) >= cap:
+                break
+            if cid in seen:
+                continue
+            seen.add(cid)
+            picked.append(cid)
+            taken += 1
+
+    # 2. Fill the rest by fused score.
+    if len(picked) < cap:
+        rest = sorted(
+            (cid for cid in fused if cid not in seen),
+            key=lambda c: fused[c],
+            reverse=True,
+        )
+        for cid in rest:
+            if len(picked) >= cap:
+                break
+            seen.add(cid)
+            picked.append(cid)
+
+    return picked
+
+
 def retrieve_multi(
     sub_queries: list[str],
     original_query: str,
@@ -385,7 +434,14 @@ def retrieve_multi(
         return []
 
     # ── 2. Build a fused child ordering, then re-rank against ORIGINAL query ───
+    # Cap the union before rerank: the GPU rerank service rejects > MAX_BATCH_SIZE
+    # passages in one call, and the multi-query union can exceed it. Reserve each
+    # sub-query's head so no side is starved, then fill by fused score.
     all_child_ids = list(child_point.keys())
+    if len(all_child_ids) > RERANK_BATCH_CAP:
+        all_child_ids = _cap_children_for_rerank(
+            per_sub_children, child_rrf_fused, RERANK_BATCH_CAP
+        )
     points = [child_point[cid] for cid in all_child_ids]
 
     if RERANK_ENABLED:
