@@ -59,10 +59,14 @@ def _build_context(
     used: list[RetrievedParent] = []
     total = 0
     for p in parents:
+        # 1-based index the LLM cites as `[N]`. It is assigned in packing order,
+        # which is the SAME order (and subset) the UI receives as `sources[]`,
+        # so `[N]` in the answer resolves to `sources[N-1]` on the frontend.
+        n = len(used) + 1
         company_attr = f' company="{p.company}"' if p.company else ""
         if p.doc_type == "transcript" and p.start_time:
             block = (
-                f'<source id="{p.parent_id[:8]}" doc="{p.doc_title}" '
+                f'<source index="{n}" id="{p.parent_id[:8]}" doc="{p.doc_title}" '
                 f'category="{p.category}"{company_attr} '
                 f'time="{p.start_time}" type="transcript">\n'
                 f"{p.text}\n"
@@ -77,7 +81,7 @@ def _build_context(
                 p.section_path.split(" > ")[-1] if p.section_path else ""
             )
             block = (
-                f'<source id="{p.parent_id[:8]}" doc="{p.doc_title}" '
+                f'<source index="{n}" id="{p.parent_id[:8]}" doc="{p.doc_title}" '
                 f'category="{p.category}"{company_attr} '
                 f'section="{section_leaf}" type="pdf">\n'
                 f"{p.text}\n"

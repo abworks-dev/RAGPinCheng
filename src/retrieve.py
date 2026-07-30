@@ -248,6 +248,11 @@ def retrieve(
     parent_score: dict[str, float] = {}
     parent_rrf: dict[str, float] = {}
     parent_children: dict[str, list[str]] = {}
+    # Timestamp of the best-scoring child per parent (transcripts only). `scored`
+    # is already ordered best-first, so the child that first admits a parent IS
+    # its top hit. We surface THIS time for playback instead of the parent's
+    # first-turn time, so a citation seeks to the sentence actually matched.
+    parent_hit_time: dict[str, str | None] = {}
     for point, score in scored:
         pid = point.payload["parent_id"]
         snippet = point.payload["text"][:120].replace("\n", " ")
@@ -264,6 +269,7 @@ def retrieve(
         parent_rrf[pid] = child_rrf.get(child_id, 0.0)
         parent_order.append(pid)
         parent_children[pid] = [snippet]
+        parent_hit_time[pid] = point.payload.get("start_time")
     parents = fetch_parents(parent_order)
     out: list[RetrievedParent] = []
     for pid in parent_order:
@@ -281,7 +287,11 @@ def retrieve(
                 score=parent_score[pid],
                 matched_children=parent_children[pid],
                 doc_type=p.get("doc_type") or "pdf",
-                start_time=p.get("start_time"),
+                # Prefer the matched child's timestamp so playback seeks to the
+                # sentence actually hit; fall back to the parent's first-turn
+                # time when the child payload lacks one (older index / non-
+                # transcript docs), which keeps legacy behavior safe.
+                start_time=parent_hit_time.get(pid) or p.get("start_time"),
                 company=p.get("company"),
                 media_id=p.get("media_id"),
                 rrf_score=parent_rrf.get(pid, 0.0),

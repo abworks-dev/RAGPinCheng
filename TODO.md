@@ -90,7 +90,7 @@
 - `media_id` 已通过数据契约完整传递
 
 **待实现**：
-- [ ] 自动语音识别（Whisper）集成
+- [ ] 自动语音识别集成 —— 已独立拆分为下方「🎬 视频自动转录（FunASR）— 候选方案，待 R2 批准」，本条不再单列 Whisper
 - [ ] 视频播放过程中同步高亮当前说话人段落
 - [ ] 播放进度持久化与恢复
 - [ ] 移动端底部弹层优化
@@ -180,6 +180,216 @@
 
 ---
 
+
+## 🎬 视频自动转录（FunASR）— 候选方案，待 R2 批准
+
+> **状态**：候选设计，尚未批准实施，尚未修改任何业务代码。本节所有 FunASR 性能、显存、准确率数字均为“需实测”，不得当作当前事实。
+> **依据**：本节由一次只读源码复核形成，替代原「视频播放器第二阶段」中“自动语音识别（Whisper）集成”一条；ADR `0001` 第 9 节原倾向 `faster-whisper`，本节在核对现状后改为倾向 FunASR，最终引擎选择仍需 R2 审批。
+> **前置**：视频转录链路第一阶段（MP4 + 人工 Markdown → 索引 → 鉴权 Range 播放）已实现（见 `project-docs/features/transcript-pipeline.md`）。本方案只替换“转录稿的产生方式”，复用其后全部绑定、索引、检索、引用、播放链路。
+
+### 目标与用户价值
+
+- [ ] 管理员只上传 MP4，即可后台自动生成符合现有 `chunk_transcript()` 规范的转录 Markdown，自动进入现有索引链路，最终可检索、可引用、可跳播；
+- [ ] 完整保留现有「MP4 + 人工 Markdown 直接索引」旧流程，不得退化；
+- [ ] 消除人工逐句转写教学视频的成本，同时把转录质量、时间戳、专业术语的可控性留在企业内网，不外发资料。
+
+### 当前代码事实（已逐项源码核对，2026-07-30）
+
+- [ ] 上传接口 `POST /api/admin/media`（`api/routes_admin.py:716`）**当前强制同时上传 `video`(.mp4) + `transcript`(.md)**，二者缺一即 400；自动转录必须把 `transcript` 改为可选。
+- [ ] `media_assets` 表（`api/db.py:88`）**已存在**，且 `status` 注释已预留 `uploading|uploaded|transcribing|transcript_ready|indexing|ready|failed`，`transcript_origin` 已预留 `uploaded|generated`；但当前上传逻辑直接写入 `status='transcript_ready'`、`transcript_origin='uploaded'`（`api/routes_admin.py` 媒体分支），从未使用 `transcribing`/`generated`。
+- [ ] `index_jobs.media_id`（`api/db.py:74`，nullable）**已存在**并由 worker 透传给 `index_single(..., media_id=...)`（`api/indexing.py:136`）。`index_jobs.status` 目前只有 `pending|parsing|chunking|embedding|summarizing|done|failed`，**不含任何转录状态**，转录任务不适合直接塞进 `index_jobs`。
+- [ ] 索引 worker 是**单队列、单并发、FIFO**（`api/indexing.py`），CPU 密集流程在 `run_in_executor` 线程跑；进程重启时非 `done/failed` 任务被标记 `failed` 待人工重试（`resume_pending_on_boot`）。
+- [ ] 部署为**双节点**：Ubuntu 应用节点（无 GPU，跑 FastAPI+Qdrant+SQLite+`docs/`+`media/`）+ Windows RTX 5060 Ti 节点（跑 `gpu_service/`，仅 BGE-M3 embedding + reranker）。见 `project-docs/migrations/ubuntu-app-windows-gpu-runbook.md`。视频文件落盘在 Ubuntu 侧 `media/<media_id>/original.mp4`（`src/config.py:MEDIA_DIR`）。
+- [ ] `gpu_service`（`gpu_service/app.py`、`models.py`）：Bearer Token 鉴权、`/health`、`/model-info`、`/v1/embeddings`、`/v1/rerank`；`ModelManager` 为单例，`_gpu_semaphore = Semaphore(1)` **串行化 embedding 与 rerank**，两模型自启动起常驻显存；`MAX_REQUEST_BYTES` 默认 1MB（`gpu_service/config.py:23`），不足以传音频。
+- [ ] 后端通过 `EMBED_PROVIDER`/`RERANK_PROVIDER=remote` 经 `src/providers.py` 的 httpx 客户端调用 GPU 节点，启动时用 `/model-info` 校验 API version/dim 契约。
+- [ ] 依赖现状：torch 需 cu128 且 `>=2.7`（Blackwell sm_120 首个支持版本，`GPU_DEPLOYMENT.md`）、`FlagEmbedding>=1.3,<2`、`transformers>=4.46,<5`（`requirements*.txt`、`gpu_service/requirements.txt`）；**无 funasr / modelscope / av(PyAV) / onnxruntime / ffmpeg 依赖**。
+- [ ] 转录 Markdown 精确格式：分块靠正则 `^#*\s*说话[人⼈]\s+\d+\s+(\d{1,2}:\d{2}(?::\d{2})?)\s*$`（`src/chunk.py:322`），即每段以「说话人 <序号> <MM:SS 或 HH:MM:SS>」独占一行、其后为正文；上传校验（`api/routes_admin.py:693`）只要求 UTF-8 且至少一条该标记行。首个标记之前的内容（标题/元信息表）会被丢弃。
+- [ ] Parent/Child 时间戳传递：`chunk_transcript()`（`src/chunk.py:346`）中 Parent 继承**组内第一条** turn 的 `first_ts`；每个 Child 携带**自身** turn 的 `ts`。写入时 **Child 的 `start_time` 已进入 Qdrant payload**（`src/index.py:272`），Parent 的 `start_time` 进入 parents.sqlite（`src/index.py:152`）。
+- [ ] **引用时间戳确为 Parent 首句时间，而非实际命中 Child 时间**：`retrieve.py` 按 `parent_id` 去重后只 `fetch_parents()` 取 Parent 行，`RetrievedParent.start_time = p.get("start_time")`（Parent 值，`src/retrieve.py:284`），命中 Child 的 payload 时间在去重时被丢弃；`generate.py:63` 与 `session.py:279` 均用 Parent 的 `start_time`。**此为已确认缺陷，非本方案引入。**
+- [ ] 任务重试 `POST /api/admin/index/jobs/{job_id}/retry`（`api/routes_admin.py:607`）对 `failed|done` 任务重跑 `index_single`，**输入是磁盘上的 `.md` source_path，不触发任何 ASR**——这正好是“转录成功但索引失败时不重复 ASR”的现成基础。
+- [ ] 近期 Office 改造（阶段 1–9）扩展了 `index_single` 的 `doc_type` 分发与 `data/parsed/` 缓存、`SourceDTO` 字段，但**未改动媒体上传接口、`index_jobs` 结构或 media 播放链路**，与本方案无冲突。
+
+### 推荐架构（核对现状后的结论，可在 R2 阶段调整）
+
+- [ ] **ASR 独立进程，部署在 Windows GPU 节点，但与 `gpu_service` 分离为独立服务/端口**（例如 `asr_service`），不塞进现有 `gpu_service` 进程：
+  - 理由 1：`gpu_service` 的 `_gpu_semaphore(1)` 串行化设计是为在线低延迟 embed/rerank 服务的；ASR 长任务（分钟级）若共用同一信号量会**阻塞在线检索**。
+  - 理由 2：ASR 依赖（funasr/modelscope/PyAV）体量大且与推理依赖解耦，独立进程便于按需加载、崩溃隔离、单独重启。
+  - 理由 3：ASR 与 embed/rerank 需**跨进程共享同一张 16GB 卡**，用独立进程 + 一个**跨进程 GPU 互斥（文件锁 / 独立信号量服务 / 显存预算约定）**比进程内信号量更清晰。
+- [ ] **音频提取（PyAV）在 Ubuntu 应用节点完成**，只把 16kHz 单声道音频（分块）经内网发到 Windows ASR 服务：
+  - 理由：视频原文件在 Ubuntu 侧；Ubuntu 无 GPU，PyAV/FFmpeg 解码是 CPU 工作，放应用节点避免大文件二次搬运，也让 GPU 节点只做纯 ASR。
+  - `gpu_service` 现有 `MAX_REQUEST_BYTES=1MB` 不够传音频；ASR 服务需独立、更大的请求体上限或改用分块流式上传。
+- [ ] **新增独立 `transcription_jobs` 表（app.sqlite），不复用 `index_jobs`**：转录是媒体生命周期的一环，语义、状态机、重试粒度都与文档索引不同；混用会污染 `index_jobs` 的 `doc_type/source_path` 契约。转录完成后**再**照旧创建 `index_jobs`（doc_type=transcript, media_id 关联），两阶段解耦。
+- [ ] **幂等分层**：媒体状态机负责“是否已生成转录稿”，索引任务负责“是否已索引”。转录产物（权威 JSON + 生成的 .md）落盘后，索引失败只重跑 `index_jobs`（不重跑 ASR）；只有转录产物缺失才重跑转录。
+
+### 备选方案与取舍
+
+- [ ] **ASR 塞进 `gpu_service` 同进程**：省一个服务，但长任务阻塞在线检索、依赖耦合、难以独立扩缩——**不推荐**。
+- [ ] **ASR 跑在 Ubuntu 应用节点（CPU）**：无需跨节点传音频，但 Ubuntu 无 GPU，Paraformer CPU 转录慢且抢占应用 CPU——**不推荐**。
+- [ ] **引擎改用 `faster-whisper`（ADR 0001 原倾向）**：多语种更强、社区大，但中文标点/热词生态不如 FunASR，且 Whisper 系已被本任务明确排除在第一阶段外——**本方案倾向 FunASR，faster-whisper 仅作 Phase 0 对照项记录，不实现**。
+- [ ] **转录任务复用 `index_jobs`**：省一张表，但状态机与契约冲突、重试粒度错配——**不推荐**。
+- [ ] **音频提取放 Windows GPU 节点**：GPU 节点承担解码 CPU 负载并需接收整段视频，放大跨节点传输——**不推荐**，除非实测 Ubuntu 解码成为瓶颈。
+
+### 第一阶段范围（Phase 1，最小可用自动转录）
+
+- [ ] 管理端上传单个 MP4（不带 Markdown）→ 音频提取 → FunASR 转录（含 VAD + 自动标点 + BIM 热词）→ 生成权威 JSON → 生成 `chunk_transcript()` 兼容 Markdown → 自动创建 `index_jobs` → 复用现有索引/检索/引用/播放；
+- [ ] 保留旧「MP4 + 人工 Markdown」上传路径；
+- [ ] 第一阶段说话人统一标记为「说话人 1」（不做说话人分离）；
+- [ ] 管理端显示媒体状态、转录进度、失败原因与重试；
+- [ ] 自动转录功能开关（关闭时上传接口回退为“必须提供 Markdown”的旧行为）。
+
+### 明确不做（第一阶段排除，除非调查证明是必需基础）
+
+- [ ] 生产部署、真实客户视频测试、真实姓名/声纹识别、说话人分离；
+- [ ] 在线转录稿编辑器、逐字字幕高亮、HLS、视频转码、缩略图；
+- [ ] Whisper / WhisperX / Qwen3-ASR / 云端 ASR；
+- [ ] NAS/共享盘迁移、多实例分布式转录队列、自动删除媒体、全量索引 Reset。
+
+### 数据契约
+
+- [ ] **权威中间产物：结构化 JSON**（转录的唯一权威结果，Markdown 由它派生）：
+  ```json
+  {
+    "schema_version": 1,
+    "engine": "funasr",
+    "model": "paraformer-zh",
+    "media_id": "<uuid>",
+    "audio_sha256": "<hex>",
+    "hotwords_version": "<可选>",
+    "segments": [
+      { "start_ms": 12000, "end_ms": 16800, "speaker": "speaker_1", "text": "首先建立项目基点" }
+    ]
+  }
+  ```
+- [ ] JSON 落盘位置候选：`media/<media_id>/transcript.json`（与视频同目录，属可重建派生产物，随媒体删除一并清理）；`partial` 写 `transcript.partial.json`，全部完成后**原子 rename** 为 `transcript.json`。
+- [ ] 生成的 Markdown 落盘沿用现有约定：`docs/教学视频/<安全标题>__<media_id前8位>.md`，且 `transcript_origin='generated'`。
+- [ ] JSON→Markdown formatter 必须产出严格匹配 `TRANSCRIPT_TURN_RE` 的「说话人 1 HH:MM:SS」行；毫秒时间戳需转为 `HH:MM:SS`（校验分块可解析）。
+- [ ] 校验规则：空段过滤、`start_ms<=end_ms`、段按 `start_ms` 单调不减、分块合并处去重与边界重叠处理、至少一条有效段否则整体判失败。
+
+### 状态机（候选，需 R2 确认归属）
+
+- [ ] **媒体状态（media_assets.status）**：`uploading → uploaded →（自动模式）extracting_audio → transcribing → transcript_ready → indexing → ready`，失败置 `failed`；人工模式仍 `uploading → transcript_ready → indexing → ready`。
+- [ ] **转录任务状态（transcription_jobs.status，候选）**：`pending → extracting → transcribing → merging → writing → done|failed`。
+- [ ] **索引任务状态**：沿用现有 `index_jobs`，不新增转录语义。
+- [ ] 避免多 worker 覆盖状态：转录 worker 只写 `transcription_jobs` 与 media 的转录相关字段；索引 worker 只写 `index_jobs` 与 media 的 `indexing/ready`；用**单并发队列 + 明确字段归属**防竞争。
+- [ ] 进程重启恢复：仿 `resume_pending_on_boot`，非终态转录任务标记 `failed`（附“重启中止，请重试”）供人工重试，避免僵尸中间态。
+
+### 是否新增 `transcription_jobs`（候选字段，**不实际建表**）
+
+- [ ] 候选字段：`id PK`、`media_id`（唯一约束，一个媒体一条活动转录任务）、`status`、`engine`、`model`、`audio_sha256`、`error`、`progress`（0–100 或已处理秒数）、`created_at`、`started_at`、`finished_at`、`transcript_json_path`。
+- [ ] 幂等：`(media_id, audio_sha256)` 已有 `done` 记录且 JSON 存在时，跳过 ASR 直接进入索引。
+- [ ] 兼容迁移：与现有做法一致，`init_db()` 内 `CREATE TABLE IF NOT EXISTS` + `PRAGMA table_info` 增列，**向前兼容、不破坏旧库、不需要索引 Reset**。
+
+### BIM 热词
+
+- [ ] 热词接口需 Phase 0 实测确认 Paraformer 的实际热词传入方式（FunASR `hotword` 参数 / 独立热词文件）及数量/长度上限；
+- [ ] 仓库内维护**通用 BIM 术语表**（可入库），部署环境敏感词（客户名/项目名）放**部署侧配置**（`.env` 或挂载文件），二者分离；
+- [ ] 需实测热词是否损害普通词准确率（对照有/无热词的 CER）。
+
+### GPU 调度（结论需真实测量，不得只按参数量推断显存）
+
+- [ ] 单张 RTX 5060 Ti 16GB 需同时承载 BGE-M3 + reranker（常驻）+ Paraformer/VAD/CT-Punc；
+- [ ] 候选策略：ASR 模型**延迟加载 + 空闲卸载**（转录任务间隙释放显存），在线 embed/rerank 优先级更高；
+- [ ] 跨进程 GPU 协调：ASR 服务与 `gpu_service` 用**跨进程互斥**（文件锁/信号量），ASR 大批处理时让路在线检索；
+- [ ] OOM 隔离：ASR 服务 OOM 只影响转录任务并快速返回明确错误，不得拖垮在线检索（对齐 runbook「GPU 不可用快速 503」不变量）；
+- [ ] 健康接口需能区分 BGE 与 ASR 两类模型的加载状态；
+- [ ] **验证门槛**：`- [ ] 在非生产环境实测 ASR 单独、ASR+BGE 并发时的峰值显存、是否 OOM、在线检索 P50/P95 延迟退化`，未实测前不得写“16GB 足够”。
+
+### 精确时间戳修复（✅ 已选定方案 A，已实施，2026-07-30）
+
+> **决策**：采用**方案 A（覆盖 `start_time` 单字段）**，不采用方案 B（新增 `best_child_start_time` 独立字段）。
+> 理由：当前全链路只有“显示 / LLM 引用注入 / 跳播”三个消费者，均应使用命中段时间，无任何代码需要 Parent 首句时间；方案 A 改动仅 1 层（`src/retrieve.py`），数据契约、`SourceDTO`、前端类型均不变，且天然保证“LLM 引用时间 = 显示 = 跳播”三者一致。方案 B 会跨 6 层改契约、命中“SourceDTO 变化需同步”不变量，且若不同步改 `generate` 注入时间则引用匹配会错位——收益仅为未来“同时展示段落起点+命中点”的预留，可推迟到播放器第二阶段。
+
+- [x] 已确认现状：命中 Child 时间被丢弃，播放跳到 Parent 首句（见“当前代码事实”）。
+- [x] 关键发现已复核：**Child 的 `start_time` 已在 Qdrant payload 中**（`src/index.py:272`），且在 `query_points(with_payload=True)` 结果可直接读到。
+- [x] 方案 A 实施：在 `retrieve.py` 去重循环记录每个 parent 首次命中（即最佳命中）Child 的 `payload.start_time`，构造 `RetrievedParent` 时以其覆盖 `start_time`，该 Child 无时间时回退 Parent `start_time`。下游 `generate`/`session`/`SourceDTO`/前端零改动自动继承。
+- [x] **结论确认：无需修改 Qdrant payload、无需重建索引**（payload 已含所需字段）。
+- [x] 旧会话：已持久化 `sources_json` 保留旧值，恢复时按旧值显示，不报错、不迁移。
+- [ ] 后续（非阻塞）：如播放器第二阶段需同时展示“段落起点 + 命中点”，届时再评估是否引入方案 B 的独立字段。
+
+### 预计修改文件（候选，实施前重新确认）
+
+- [ ] 新增：`src/asr/`（音频提取 PyAV、分块、JSON schema、JSON→Markdown formatter）、`asr_service/`（Windows GPU 独立服务）或在 `gpu_service` 外并列、`api/transcription.py`（转录任务队列/worker）。
+- [ ] 修改：`api/routes_admin.py`（媒体上传改 transcript 可选 + 自动模式分支）、`api/db.py`（`transcription_jobs` 迁移）、`api/indexing.py`（转录完成后建索引 job）、`src/config.py`（ASR 服务 URL/Token、热词路径、功能开关、音频分块参数）、`requirements*.txt` 与 `asr_service` 依赖清单。
+- [ ] 精确时间戳修复涉及：`src/retrieve.py`、`src/generate.py`（可选）、`src/session.py`、`api/schemas.py`、`frontend/src/types.ts`、`frontend/src/components/Message.tsx`、`SourcesPanel.tsx`。
+- [ ] 前端：`frontend/src/pages/AdminDashboard.tsx`（上传模式选择、转录进度、失败重试、开关降级）。
+
+### 分阶段实施步骤
+
+- [ ] **Phase 0 技术验证**：许可证核查；funasr/modelscope/PyAV 与 torch2.7-cu128 / transformers<5 / Blackwell sm_120 兼容性；模型下载与缓存位置；短音频转录正确性；毫秒时间戳有效性；热词接口与收益；ASR 单独 + ASR/BGE 并发峰值显存实测；对在线检索延迟影响实测。
+- [ ] **Phase 1 结构化转录基础**：PyAV 音频提取（16kHz 单声道）；分块与合并去重；权威 JSON schema；JSON→Markdown formatter（严格匹配 `TRANSCRIPT_TURN_RE`）；原子写入；单元测试（无需 GPU 的 formatter/合并/校验测试）。
+- [ ] **Phase 2 任务与恢复**：`transcription_jobs` 表；媒体/转录/索引三段状态机；`(media_id, audio_sha256)` 幂等；进度上报；失败重试；进程重启恢复；转录成功后自动建 `index_jobs`。
+- [ ] **Phase 3 GPU 服务集成**：Windows 独立 ASR 服务（内部 Bearer 鉴权、请求体上限、超时、并发=1、跨进程 GPU 互斥、OOM 隔离、健康检查）；后端 provider/客户端；契约（mock）测试。
+- [ ] **Phase 4 管理端**：自动/人工模式切换、进度、错误、重试、功能关闭降级。
+- [ ] **Phase 5 检索与引用**：自动转录产物定向索引；最佳命中 Child 时间修复；旧会话兼容；视频跳播端到端验证。
+- [ ] **Phase 6 验收与灰度**：见下方验证与验收。
+
+### 自动化验证
+
+- [ ] formatter/合并/校验/时间转换的纯单元测试（不依赖 GPU/模型）；
+- [ ] 转录任务状态机与幂等的单元测试（mock ASR）；
+- [ ] ASR 服务契约 mock 测试（鉴权、超时、413、503、OOM 路径）；
+- [ ] 前端 `npm run build`；
+- [ ] 精确时间戳修复的检索冒烟（`scripts/test_retrieve.py`）与既有转录黄金集不退化。
+
+### 真实 GPU 验证（非生产环境）
+
+- [ ] 在非生产环境实测 Paraformer-zh + FSMN-VAD + CT-Punc 端到端转录与时间戳；
+- [ ] 在非生产环境实测 ASR 单独与 ASR+BGE 并发的峰值显存、是否 OOM；
+- [ ] 在非生产环境实测每小时视频的转录耗时与在线检索 P50/P95 延迟退化；
+- [ ] 在非生产环境实测 BIM 热词对术语与普通词 CER 的影响。
+
+### RAG 回归验证
+
+- [ ] 自动转录产物走完整索引后，检索能命中且引用/跳播正确；
+- [ ] 精确时间戳修复后，对既有转录黄金集比较 Recall@1、Recall@5、MRR、no-answer 保持率，确认无退化；
+- [ ] 确认 `media_id`/`best_child_start_time` 不进入 Embedding 文本、不改变排序。
+
+### 用户验收（代码完成后按 `docs/USER_ACCEPTANCE.md` 提供）
+
+- [ ] 前置条件、非敏感测试视频、上传（自动/人工）操作步骤、预期转录/索引/检索/跳播结果、失败与重试检查、清理方式；
+- [ ] 明确“Reset/删除/生产部署/真实客户视频”不作为普通验收步骤，需单独审批。
+
+### 风险
+
+- [ ] FunASR 与 torch2.7-cu128 / transformers<5 / Blackwell sm_120 的兼容性未经证实（Phase 0 必须先验证）；
+- [ ] 16GB 单卡 ASR 与在线 BGE 争用可能导致 OOM 或检索延迟退化（需实测）；
+- [ ] 长视频转录耗时长，需异步任务与进度反馈，避免请求超时；
+- [ ] 生成 Markdown 若不严格匹配分块正则会导致检索为空；
+- [ ] 跨节点音频传输带来磁盘/网络压力；
+- [ ] 热词过多可能损害普通词准确率。
+
+### 兼容性
+
+- [ ] 人工转录旧流程完全保留；
+- [ ] 新增 `transcription_jobs` 与可空列均为向前兼容迁移，旧库原地可用；
+- [ ] 精确时间戳修复候选结论为**不改 Qdrant payload、不重建索引**（实现前需冒烟复核 payload 确含 child `start_time`）。
+
+### 回滚
+
+- [ ] 功能开关关闭：上传回退为“必须提供人工 Markdown”，不触发 ASR；
+- [ ] 停用 ASR 服务不影响在线检索与既有播放；
+- [ ] 保留已生成 JSON/Markdown/视频文件供恢复，删除媒体须单独明确确认；
+- [ ] 精确时间戳修复可独立回退（前端回退用 Parent start_time）。
+
+### 是否需要索引重建
+
+- [ ] 自动转录新产物：仅对新媒体**定向索引**，不需要全量 Reset；
+- [ ] 精确时间戳修复：候选结论**不需要重建**（payload 已含 child 时间），但**必须在实现前用现有索引冒烟复核后再最终确认**，不得未经核对就断言。
+
+### 仍需用户决定的事项
+
+- [ ] 引擎最终确认：FunASR（推荐）vs ADR 0001 原倾向 faster-whisper；
+- [ ] ASR 服务形态：Windows 独立 `asr_service`（推荐）vs 扩展 `gpu_service`；
+- [ ] 是否新增 `transcription_jobs`（推荐）vs 扩展 `index_jobs`；
+- [ ] 精确时间戳修复是否与自动转录合并为同一 R2，还是拆成独立小改先行；
+- [ ] BIM 热词来源与敏感词管理边界；
+- [ ] Phase 0 实测在哪台非生产环境进行。
+
+### R2 审批提示
+
+> 本节仅为候选设计。后续任一实施步骤均属 R2（涉及依赖、数据库结构、GPU 服务、上传契约、RAG 行为），必须由用户阅读本方案后明确回复“批准执行”。方案范围扩大或风险升级需重新评级、重新审批。**尚未修改业务代码，尚未开始 R2 实施。**
+
+---
 
 ## 🔷 Office 文档支持（待审批方案）
 

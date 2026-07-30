@@ -799,3 +799,86 @@
 - 阶段 1-9：DOCX/XLSX/PPTX 上传、解析、预览、引用定位全部完成
 - 关键修复：XLSX 公式重算链路全流程修复
 - 验证：XLSX 公式重算 52814.80 ✅；DOCX/PPTX 索引 ✅
+
+## 2026-07-29
+
+### 20:03 — 调查 6T 盘存储规划与视频关联播放可行性
+
+- 完成：评估"知识文件迁移到 6T 盘、视频保留在内网共享盘只做关联播放"方案的可行性。结论：整体可行。知识文件（`docs/`、`data/`、Qdrant）上 6T 属配置/挂载改动；其中 Qdrant 使用命名卷 `qdrant_storage`，默认随 Docker data-root 落在系统盘，仅迁移仓库不会带走，需单独处理。视频不拷贝可行——播放链路 `routes_media.py` 只按 `storage_rel_path` 经 `safe_join(MEDIA_DIR, …)` 本地读取，认网络挂载，故将共享盘挂进容器 `MEDIA_DIR` 之下并登记 `media_assets` 即可复用现有鉴权 Range 播放，无需改播放代码；但需绕开会强制拷贝的上传表单（`routes_admin.py` 的 `POST /api/admin/media`），改用挂载+登记方式（R2）。
+- 文件：`WORKLOG.md`（未修改业务代码）
+- 验证：只读核对 `docker/docker-compose.yml`、`src/config.py`、`api/routes_media.py`、`api/routes_admin.py`、`project-docs/features/transcript-pipeline.md`；未运行命令。
+- 待办/风险：真正实施时，Qdrant 卷迁移属索引数据迁移需先备份快照；"共享盘挂载+登记脚本"绕开现有上传链路属 R2，需先出方案并批准；功能文档中"视频落盘 `media/<media_id>/original.mp4`"的边界描述届时需同步更新。
+
+## 2026-07-30
+
+### 10:41 — 讲解上传到问答的存储转存链路
+
+- 完成：向用户口头讲解从文件上传到问答回答的完整存储流程，明确各阶段落盘位置——原始文件 `docs/<分类>/[<客户名>/]<文件名>`、任务记录 `data/app.sqlite:index_jobs`、解析 Markdown 缓存 `data/parsed/`、Parent 正文 `data/parents.sqlite`、Child 的 Dense+Sparse 向量 Qdrant `pincheng_docs` collection；说明 Parent/Child 双层切块与检索→回表取正文→GLM 生成的取回路径。
+- 文件：无（只读调查，未修改代码）
+- 验证：只读核对 `api/routes_admin.py`、`api/indexing.py`、`src/indexing_pipeline.py`、`src/index.py`、`src/config.py`；未运行命令。
+
+### 10:48 — 讲解改代码后是否需要重新构建 Docker 镜像
+
+- 完成：向用户说明代码更新的部署流程。确认 `src/`、`api/`、`prompts/`、`scripts/` 与前端 dist 都是构建时 `COPY` 进镜像的，容器运行时仅挂载 `data/`、`media/`、`docs/` 数据卷；因此改代码/前端/依赖须 `build backend` + `up -d backend` 重新打镜像，改 `.env` 或 `docs`/`data` 数据则无需构建；提醒重建容器不影响挂载卷与 `qdrant_storage` 命名卷，禁用 `down -v`。
+- 文件：无（只读调查，未修改代码）
+- 验证：只读核对 `docker/docker-compose.yml`、`docker/Dockerfile.backend`；未运行命令。
+
+### 10:57 — 讲解文档放入挂载目录是否自动进索引
+
+- 完成：向用户说明仅把文档拷入挂载的 `docs/` 目录不会被问答检索到——项目无文件监听/自动扫描/定时任务，启动也不扫描 `docs/`。正确做法：走前端上传接口（自动触发建 job + 后台索引），或手动放文件后在容器内跑 `python scripts/build_index.py`（增量、非破坏性、确定性 ID upsert，不加 `--reset`）；提醒直接拷文件须放对分类子目录（分类由路径反推）。
+- 文件：无（只读调查，未修改代码）
+- 验证：只读核对 `scripts/build_index.py`、`api/main.py`（lifespan 无扫描）；grep 确认无 watchdog/watchfiles/inotify/定时任务；未运行命令。
+
+### 11:02 — 讲解文档删除/修改如何应用到索引
+
+- 完成：向用户说明问答读取的是 parents.sqlite + Qdrant 中的索引副本，已与 `docs/` 源文件脱钩，故手动删改源文件不会自动同步。删除应走管理界面 `DELETE /api/admin/index/documents`（可选 delete_file 同时清 Qdrant/parents.sqlite/docs/parsed），手删源文件后需界面再删一次清残留；修改应重新上传同名文件（`_purge_existing` 自动删旧块），并提醒 PDF/Office 因 `data/parsed/` 缓存复用需先删缓存否则用旧解析；增量脚本只 upsert 不 purge，删/改场景不如上传/删除接口彻底；`--reset` 属全量重建不用于日常增删改。
+- 文件：无（只读调查，未修改代码）
+- 验证：只读核对 `api/routes_admin.py`（delete/documents 路由）、`src/indexing_pipeline.py`（`_purge_existing`、`delete_document`、parsed 缓存复用）；未运行命令。
+
+### 11:39 — 整理 FunASR 方案复核提示词
+
+- 完成：基于 FunASR 候选方向整理可直接交给 Claude Code 的只读复核提示词，要求其独立核对当前源码、部署拓扑、依赖兼容与 GPU 调度，修订方案后仅写入 `TODO.md`；明确该提示词不构成 R2 实施授权，不得修改业务代码、依赖、数据库或部署。
+- 文件：`WORKLOG.md`（仅记录方案交接，未修改业务代码）
+- 验证：提示词覆盖现状调查、方案质疑、待决策事项、TODO 格式、验证门槛与审批边界；未安装依赖、下载模型、操作数据库或部署生产。
+
+### 12:32 — 复核视频精确时间戳修复
+
+- 完成：确认旧检索逻辑在 Child rerank 后按 `parent_id` 聚合时丢失最佳命中 Child 的 `start_time`，导致下游统一使用 Parent 首句时间；当前未提交修改在 `retrieve.py` 保存首次入选 Child 的时间并回退 Parent 时间，主逻辑成立。
+- 文件：`WORKLOG.md`（仅记录复核结论，未修改业务代码）
+- 验证：只读核对 Qdrant Child payload、rerank 排序、Parent 去重、生成上下文、会话来源、DTO、前端引用匹配与跳播消费链路；确认尚无针对该行为的自动化测试。
+- 待办/风险：无需重建只适用于已含 `start_time` payload 的转录 Child；旧索引会安全回退但不会获得精确跳播，旧会话也不会被追溯修正。
+
+### 11:53 — 独立复核 FunASR 视频自动转录方案并写入 TODO
+
+- 完成：完成 FunASR 自动转录候选方案的只读独立调查与复核，逐项核对当前源码而非文档断言；在 `TODO.md` 新增独立章节「🎬 视频自动转录（FunASR）— 候选方案，待 R2 批准」（置于 Office 方案之前），并将「视频播放器第二阶段」中“自动语音识别（Whisper）集成”一条改为指向该新章节。方案含目标、当前代码事实、推荐架构、备选取舍、第一阶段范围与明确不做、数据契约、状态机、`transcription_jobs` 候选字段、BIM 热词、GPU 调度、精确时间戳修复、分阶段步骤、各类验证、风险/兼容/回滚、索引重建判断、待用户决定项与 R2 审批提示；所有未来事项使用未勾选复选框。
+- 关键核实结论：①上传接口当前强制 MP4+Markdown 同传，自动转录须改 transcript 可选；②`media_assets` 已预留 `transcribing/generated` 等状态但当前未使用，`index_jobs.media_id` 已存在；③部署为 Ubuntu 应用节点 + Windows GPU 节点，`gpu_service` 用 `Semaphore(1)` 串行 embed/rerank，故 ASR 长任务不宜同进程；④**已确认缺陷**：检索去重后引用只用 Parent 首句 `start_time`，命中 Child 时间被丢弃，但 **Child `start_time` 已在 Qdrant payload**（`src/index.py:272`），修复候选结论为不改 payload、不重建索引（实现前仍需冒烟复核）；⑤重试接口重跑 `index_single` 且不触发 ASR，天然支持“转录成功但索引失败不重复 ASR”。
+- 文件：`TODO.md`、`WORKLOG.md`（未修改任何业务代码、依赖、数据库或部署配置）
+- 验证：只读核对 `api/routes_admin.py`、`api/indexing.py`、`api/db.py`、`api/routes_media.py`、`api/schemas.py`、`src/indexing_pipeline.py`、`src/chunk.py`、`src/index.py`、`src/retrieve.py`、`src/generate.py`、`src/session.py`、`src/providers.py`、`src/config.py`、`gpu_service/*`、`GPU_DEPLOYMENT.md`、`project-docs/migrations/ubuntu-app-windows-gpu-runbook.md` 及相关功能/决策文档；`git status` 确认仅改 `TODO.md`/`WORKLOG.md`；未安装依赖、未下载模型、未操作数据库、未构建或部署。
+- 待办/风险：FunASR 与 torch2.7-cu128/transformers<5/Blackwell 兼容性、16GB 单卡 ASR+BGE 并发显存、热词收益均标注为“需非生产环境实测”，尚未验证；本方案为候选设计，尚未开始 R2 实施。
+
+### 12:16 — 咨询：转录改造优先级与前置事项
+
+- 完成：应用户咨询，给出优先级建议——不建议立即开始 FunASR 完整改造；应先做「精确时间戳修复」（已确认缺陷：检索去重后引用只用 Parent 首句 `start_time`，命中 Child 时间被丢弃，而 Child `start_time` 已在 Qdrant payload，修复候选结论为不改 payload、不重建索引），再过 FunASR Phase 0 技术验证（兼容性/许可证/16GB 显存/延迟均未证实），且转录依赖的双节点迁移仍剩「稳定观察期」未结束；并中立提示 🔴 高优先级的查询拆分/MQE/HyDE 影响全局问答、ROI 更高，最终由业务优先级决定。
+- 文件：无（只读咨询，未修改代码）
+- 验证：依据前次源码复核结论与当前 `TODO.md`（任务 8 稳定观察期未勾选、🔴 高优先级项）；未运行命令。
+
+### 12:34 — 实施精确时间戳修复（方案 A）
+
+- 完成：修复"点视频引用跳播落到 Parent 段落首句、而非实际命中发言句"的已确认缺陷。经用户审批采用方案 A（覆盖 `start_time` 单字段，不新增独立字段）：在 `retrieve()` 去重循环中记录每个 parent 首次命中（即 rerank 最佳命中）Child 的 `payload.start_time`，构造 `RetrievedParent` 时以其覆盖 `start_time`，该 Child 无时间时回退 Parent `start_time`。下游 `generate`/`session`/`SourceDTO`/前端零改动自动继承，且保证"LLM 引用注入时间 = 显示 = 跳播"三者一致。同步在 `TODO.md` 将该条目标记为已选定方案 A 并置为已实施。
+- 文件：`src/retrieve.py`（业务代码，+8/-1 行）、`TODO.md`、`WORKLOG.md`
+- 用户可观察变化：点击教学视频转录的引用角标/来源卡片"播放"按钮时，视频跳转到检索实际命中的发言句时间点，而非该段落开头；旧会话与非转录文档行为不变。
+- 验证：`git diff` 复核改动仅限设计范围（去重时记录命中 Child 时间 + 覆盖赋值 + 回退）；逻辑核对 `scored` 已按最佳优先排序，故首次录入 parent 的 Child 即其 top 命中；未改排序、Parent 选择、评分、Embedding、Qdrant payload、索引 Schema，故不需重建索引。
+- 未执行的验证及原因：本机无项目 `.venv`/系统 Python 解释器（PATH 仅 WindowsApps 别名占位），Docker 守护进程未运行，RAG 栈实际在容器/Ubuntu 节点执行——因此**未能在本机运行** `python scripts/test_retrieve.py` 检索冒烟、`run_eval_retrieval.py` 黄金集回归及 Python AST/import 检查。方案 A 不改排序逻辑，预期黄金集指标不变，但仍需在有解释器的环境补跑冒烟（确认存量转录 Child payload 确含 `start_time`、命中时间正确变化）与黄金集回归后方可最终确认。
+- 待办/风险：需在容器或 Ubuntu 节点补执行检索冒烟 + 黄金集回归；若存量 payload 意外缺 `start_time`，会自动回退 Parent 时间（等同旧行为，不破坏），届时再评估是否定向重建。
+- 状态：代码完成，待用户验收（已按 `project-docs/USER_ACCEPTANCE.md` 提供端到端跳播验收清单；用户明确确认后再改为"用户验收通过"）。
+
+### 12:50 — 为回答上下文加入可见来源序号 index（修复引用角标）
+
+- 完成：修复回答正文偶发出现 `[ f96f9c8d]`（来源 id）、`264`、`7` 等无法被前端识别成角标的裸引用问题。根因是 `_build_context` 注入给 LLM 的 `<source>` 只有 8 位 `id` 而无可见序号，但 `answer_system.md` 却要求输出数字序号，契约与上下文不一致，GLM 偶发时抄 id 或编裸数字，前端 `linkifyCitations` 无法匹配遂原样显示。经用户审批采用治本方案（保留 id、仅新增 index）：`_build_context` 按打包顺序给每个 `<source>` 增加 1-based `index="N"`（transcript/pdf 两分支均加）；`answer_system.md` 规则 2 改为“只允许引用 `index` 值，严禁使用 id/time/section/doc 或其它数字”。
+- 关键不变量（已核对）：`_build_context` 的 `used` → `prep.used_sources` → `answer.sources` → `_sources_for_ui` → `SourceDTO[]` → 前端 `sources[]` 全程同序同子集，前端 `resolveCitation('#cite-num:N')` 取 `sources[N-1]`，故上下文 `index=N` 与前端角标 `[N]` 精确对应；`n=len(used)+1` 在预算 break（非 continue）前提下保证序号连续 1..len(used)。
+- 文件：`src/generate.py`（业务代码，+6/-2 行）、`prompts/answer_system.md`、`WORKLOG.md`
+- 用户可观察变化：回答正文引用稳定渲染为可点击数字角标，不再出现 `[ id]` 或裸数字文本；角标点击定位/跳播行为不变。
+- 验证：`git diff` 复核改动仅限设计范围（新增 index 属性 + prompt 规则改写），未改 id、其它属性、time=（12:34 时间戳修复成果不受影响）、检索、排序、预算、Schema、索引。
+- 未执行的验证及原因：本机无 Python 解释器且 Docker 未运行，未能运行 `python scripts/eval_query.py`（人工核对引用为 `[N]` 且对应正确来源）与 `run_eval_retrieval.py`（本改动不影响检索，仅作不退化确认）；须在容器/Ubuntu 节点补跑。GLM 对 prompt 为概率遵循，加 index 后应显著提升但非 100%，若仍偶发可另做前端兜底（不在本次范围）。
+- 待办/风险：需在有解释器环境重问 Revit 工具栏等问题人工核对引用角标恢复正常；旧会话已存回答文本不迁移，其既有 `[N]` 仍按当时来源解析。
+- 状态：代码完成，待用户验收。
