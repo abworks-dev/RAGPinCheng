@@ -31,9 +31,9 @@ from time import perf_counter
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.config import ZHIPU_API_KEY
+from src.config import DECOMPOSE_FINAL_TOP_K, ZHIPU_API_KEY
 from src.eval.io import load_jsonl
-from src.eval.metrics import RetrievalEvalRow, grade_one, summarize
+from src.eval.metrics import RetrievalEvalRow, grade_comparison, grade_one, summarize
 from src.eval.types import EvalItem
 from src.retrieve import retrieve
 from src.session import ChatSession
@@ -140,6 +140,28 @@ def _print_summary(rows: list[RetrievalEvalRow], no_answer_results: list[dict]) 
                 print(f"      head: {r['answer_text'][:100].replace(chr(10),' ')}")
 
 
+def _print_comparison(results: list[dict], k: int) -> None:
+    if not results:
+        return
+    print()
+    print("=" * 64)
+    print(f" Comparison both-sides coverage @{k} (off vs on decomposition)")
+    print("=" * 64)
+    n = len(results)
+    off_both = sum(1 for r in results if r["off"]["both_hit"])
+    on_both = sum(1 for r in results if r["on"]["both_hit"])
+    print(f"  items: {n}")
+    print(f"  both_hit  OFF (single-query): {off_both}/{n}  ({off_both/n:.3f})")
+    print(f"  both_hit  ON  (decomposed) : {on_both}/{n}  ({on_both/n:.3f})")
+    print(f"  decomposition payoff       : {(on_both-off_both)/n:+.3f}")
+    print()
+    for r in results:
+        o, n_ = r["off"], r["on"]
+        print(f"    {r['item_id']}  off[{o['sides_hit']}/{o['sides_total']}]"
+              f" on[{n_['sides_hit']}/{n_['sides_total']}]"
+              f" decomposed={r['decomposed']}")
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--golden", type=Path, default=GOLDEN)
@@ -189,6 +211,8 @@ def main() -> None:
     #   to carry), but skips the LLM generation call → ~3x faster.
     # - no_answer: needs full ChatSession.ask() to get answer text.
     for i, it in enumerate(solos, 1):
+        if it.kind == "comparison":
+            continue  # graded separately below (needs both-sides + off/on split)
         try:
             if it.kind == "no_answer":
                 session = ChatSession()
@@ -267,9 +291,53 @@ def main() -> None:
             })
         print(f"[pair {j:>2}/{len(pair_ids)}] {pid}  done")
 
+    # Comparison items — graded on BOTH-sides coverage, off vs on decomposition.
+    # "off": single-query retrieve() (what a comparison query gets today when
+    #        QUERY_DECOMPOSE_ENABLED is false).
+    # "on":  retrieve_multi() over the LLM-decomposed sub-queries (the Phase-2
+    #        path). The gap between the two is the decomposition payoff this
+    #        golden set exists to quantify.
+    comparisons = [it for it in solos if it.kind == "comparison"]
+    comparison_results: list[dict] = []
+    if comparisons:
+        from src.decompose import maybe_decompose
+        from src.retrieve import retrieve_multi
+        K = DECOMPOSE_FINAL_TOP_K
+        for c, it in enumerate(comparisons, 1):
+            try:
+                off = [p.parent_id for p in retrieve(it.question, top_k=K)]
+                dec = maybe_decompose(it.question)
+                if dec.decompose and len(dec.sub_queries) >= 2:
+                    on = [p.parent_id for p in retrieve_multi(
+                        dec.sub_queries, it.question, top_k=K)]
+                else:
+                    on = off  # decomposer declined; on-path == off-path
+            except Exception as exc:  # noqa: BLE001
+                print(f"[eval] {it.id} FAILED: {exc}")
+                per_item_log.append({"item_id": it.id, "error": str(exc)})
+                continue
+            g_off = grade_comparison(it.expected_sides, off, K)
+            g_on = grade_comparison(it.expected_sides, on, K)
+            comparison_results.append({
+                "item_id": it.id, "off": g_off, "on": g_on,
+                "decomposed": bool(dec.decompose),
+                "sub_queries": dec.sub_queries if dec.decompose else [],
+            })
+            per_item_log.append({
+                "item_id": it.id, "kind": it.kind,
+                "expected_sides": it.expected_sides,
+                "off_retrieved": off, "on_retrieved": on,
+                "off_both_hit": g_off["both_hit"], "on_both_hit": g_on["both_hit"],
+                "decomposed": bool(dec.decompose),
+                "sub_queries": dec.sub_queries if dec.decompose else [],
+            })
+            print(f"[cmp {c:>2}/{len(comparisons)}] {it.id}  "
+                  f"off both_hit={g_off['both_hit']}  on both_hit={g_on['both_hit']}")
+
     elapsed = perf_counter() - t_start
 
     _print_summary(rows, no_answer_results)
+    _print_comparison(comparison_results, DECOMPOSE_FINAL_TOP_K)
     print()
     print(f"[eval] elapsed {elapsed:.1f}s")
 
