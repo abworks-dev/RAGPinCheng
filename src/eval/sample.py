@@ -4,15 +4,20 @@ Produces `sampled_parents.json`: a list of parent records bucketed by
 question-kind. A separate synthesizer (run via the Agent tool, not an API
 key) reads this file and generates Q/A drafts per kind.
 
-Sampling rules (per CLAUDE.md kind mix for ~120 final items):
-- factual (60):       prose-only parents from PDF docs, length-weighted so
-                      tiny header stubs don't dominate.
-- table_formula (24): parents whose text contains an HTML table, pipe table,
+Sampling rules (Phase-1 rebuild: 规范/标准/图集 only, ~85 retrieval items):
+- factual (40):       prose-only parents, length-weighted so tiny header
+                      stubs don't dominate.
+- table_formula (20): parents whose text contains an HTML table, pipe table,
                       or $$...$$ block.
-- code_lookup (12):   parents whose text matches a standard-code pattern
-                      (GB/JGJ/DBJ/CECS/GB-T) followed by digits.
-- transcript (6):     parents from docs/教学视频 (doc_type='transcript'),
-                      spread across distinct transcript files.
+- code_lookup (25):   parents whose text matches a standard-code pattern
+                      (GB/JGJ/DBJ/CECS/GB-T) followed by digits — our
+                      strongest material (abundant GB standards).
+- transcript (0):     excluded in Phase 1 (company-process phase covers it).
+
+Phase-1 filters (both on by default): only 设计规范 + 客户标准 categories
+(ALLOWED_CATEGORIES); drop image-link / table-scaffolding debris blocks
+(_is_noise_parent). Pass allowed_categories=None / apply_noise_filter=False
+to restore legacy behavior.
 
 multi_turn and no_answer are NOT sampled here — the user writes those by
 hand directly into golden.jsonl.
@@ -46,11 +51,30 @@ CODE_RE = re.compile(r"\b(?:GB(?:\s*/\s*T)?|JGJ|DBJ|CECS)\s*\d+", re.IGNORECASE)
 # stubs, ToC fragments, or page-number debris. They generate poor Qs.
 MIN_PARENT_CHARS = 200
 
+# Phase-1 golden-set rebuild: only sample from "规范/标准/图集" categories.
+# Company-internal process docs (BIM modeling, MEP, etc.) are excluded from
+# Phase 1 — they need a different question type and will be covered in a
+# later project phase.
+ALLOWED_CATEGORIES = frozenset({"设计规范", "客户标准"})
+
+# Reject a parent block when more than this fraction of its text is made up
+# of image-markdown links (e.g. `![](images/xxx.jpg)`). These are OCR/PDF
+# rendering artifacts — they contain no human-readable knowledge.
+MAX_IMAGE_LINK_RATIO = 0.15
+
+# Reject a parent block when ≥ N consecutive lines are all table-header
+# content (starts with `<td>`, `<th>`, or a pipe-table delimiter). These
+# are fragmented table-scaffolding blocks, not standalone knowledge.
+MAX_CONSECUTIVE_TABLE_HEADER_LINES = 8
+
+# Regex to detect image-markdown links: `![]( ... )`
+IMAGE_LINK_RE = re.compile(r"!\[.*?\]\(.*?\)")
+
 DEFAULT_QUOTAS: dict[str, int] = {
-    "factual": 60,
-    "table_formula": 24,
-    "code_lookup": 12,
-    "transcript": 6,
+    "factual": 40,         # Phase 1: fewer, stricter (only prose from 规范+客户标准)
+    "table_formula": 20,   # tables in standards/client docs
+    "code_lookup": 25,     # our strongest material — abundant GB standards
+    "transcript": 0,       # Phase 1: excluded (belongs to company-process phase)
 }
 
 
@@ -115,6 +139,56 @@ def _has_code(text: str) -> bool:
     return bool(CODE_RE.search(text))
 
 
+def _image_link_ratio(text: str) -> float:
+    """Fraction of the text length taken up by image-markdown links."""
+    if not text:
+        return 0.0
+    img_chars = sum(len(m.group(0)) for m in IMAGE_LINK_RE.finditer(text))
+    return img_chars / len(text)
+
+
+def _is_table_header_line(line: str) -> bool:
+    s = line.strip()
+    if not s:
+        return False
+    # HTML table scaffolding, or a markdown pipe-table row.
+    return (
+        s.startswith("<td")
+        or s.startswith("<th")
+        or s.startswith("<tr")
+        or s.startswith("<table")
+        or (s.startswith("|") and s.endswith("|"))
+    )
+
+
+def _max_consecutive_table_header_lines(text: str) -> int:
+    best = cur = 0
+    for line in text.splitlines():
+        if _is_table_header_line(line):
+            cur += 1
+            best = max(best, cur)
+        else:
+            cur = 0
+    return best
+
+
+def _is_noise_parent(text: str) -> bool:
+    """True if the parent is rendering/OCR debris rather than knowledge.
+
+    Filters the noise patterns observed in the Phase-1 sampling preview:
+      - blocks dominated by image-markdown links (化粪池图集 `![](images/…)`);
+      - long runs of pure table-scaffolding rows (signature/index blocks,
+        header-only fragments like the 图集 审核/校对 boxes).
+    Length is handled separately by MIN_PARENT_CHARS. This is intentionally
+    conservative — it targets clearly-unusable blocks, not merely short ones.
+    """
+    if _image_link_ratio(text) > MAX_IMAGE_LINK_RATIO:
+        return True
+    if _max_consecutive_table_header_lines(text) > MAX_CONSECUTIVE_TABLE_HEADER_LINES:
+        return True
+    return False
+
+
 def _weighted_sample(
     rng: random.Random,
     candidates: list[ParentRow],
@@ -167,6 +241,8 @@ def _spread_across_docs(
 def sample_parents(
     seed: int = 42,
     quotas: dict[str, int] | None = None,
+    allowed_categories: frozenset[str] | None = ALLOWED_CATEGORIES,
+    apply_noise_filter: bool = True,
 ) -> dict[str, list[dict[str, Any]]]:
     """Return a dict of `{kind: [parent_payload, ...]}`, ready to dump as JSON.
 
@@ -174,10 +250,20 @@ def sample_parents(
     won't reappear in factual or code_lookup. Order of allocation:
     transcript → table_formula → code_lookup → factual (most-restrictive
     pools first so they don't starve).
+
+    Phase-1 filters (both defaulted on for the rebuild):
+      - allowed_categories: keep only parents whose category is in this set
+        (设计规范 + 客户标准). Pass None to disable (legacy behavior).
+      - apply_noise_filter: drop image-link-dominated / table-scaffolding
+        debris blocks (see _is_noise_parent). Pass False to disable.
     """
     quotas = quotas or DEFAULT_QUOTAS
     rng = random.Random(seed)
     all_parents = [p for p in _load_parents() if p.text_len >= MIN_PARENT_CHARS]
+    if allowed_categories is not None:
+        all_parents = [p for p in all_parents if p.category in allowed_categories]
+    if apply_noise_filter:
+        all_parents = [p for p in all_parents if not _is_noise_parent(p.text)]
 
     taken: set[str] = set()
 
@@ -231,11 +317,23 @@ def write_sampled(
     out_path: Path,
     seed: int = 42,
     quotas: dict[str, int] | None = None,
+    allowed_categories: frozenset[str] | None = ALLOWED_CATEGORIES,
+    apply_noise_filter: bool = True,
 ) -> dict[str, int]:
     """Sample and write JSON. Returns a per-kind count summary."""
-    buckets = sample_parents(seed=seed, quotas=quotas)
+    buckets = sample_parents(
+        seed=seed,
+        quotas=quotas,
+        allowed_categories=allowed_categories,
+        apply_noise_filter=apply_noise_filter,
+    )
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {"seed": seed, "buckets": buckets}
+    payload = {
+        "seed": seed,
+        "allowed_categories": sorted(allowed_categories) if allowed_categories else None,
+        "noise_filter": apply_noise_filter,
+        "buckets": buckets,
+    }
     out_path.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2),
         encoding="utf-8",

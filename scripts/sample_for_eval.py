@@ -16,7 +16,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.eval.sample import DEFAULT_QUOTAS, write_sampled
+from src.eval.sample import ALLOWED_CATEGORIES, DEFAULT_QUOTAS, write_sampled
 
 OUT_PATH = Path(__file__).resolve().parent.parent / "src" / "eval" / "sampled_parents.json"
 
@@ -28,6 +28,15 @@ def main() -> None:
     p.add_argument("--table-formula", type=int, default=DEFAULT_QUOTAS["table_formula"])
     p.add_argument("--code-lookup", type=int, default=DEFAULT_QUOTAS["code_lookup"])
     p.add_argument("--transcript", type=int, default=DEFAULT_QUOTAS["transcript"])
+    p.add_argument(
+        "--categories", type=str, default=",".join(sorted(ALLOWED_CATEGORIES)),
+        help="Comma-separated category whitelist (default: 设计规范,客户标准). "
+             "Pass 'all' to disable the filter (legacy behavior).",
+    )
+    p.add_argument(
+        "--no-noise-filter", action="store_true",
+        help="Disable the image-link / table-scaffolding debris filter.",
+    )
     p.add_argument("--out", type=Path, default=OUT_PATH)
     args = p.parse_args()
 
@@ -37,8 +46,20 @@ def main() -> None:
         "code_lookup": args.code_lookup,
         "transcript": args.transcript,
     }
-    counts = write_sampled(args.out, seed=args.seed, quotas=quotas)
-    print(f"[sample] seed={args.seed} → {args.out}")
+    if args.categories.strip().lower() == "all":
+        allowed = None
+    else:
+        allowed = frozenset(
+            c.strip() for c in args.categories.split(",") if c.strip()
+        )
+    counts = write_sampled(
+        args.out, seed=args.seed, quotas=quotas,
+        allowed_categories=allowed,
+        apply_noise_filter=not args.no_noise_filter,
+    )
+    cat_desc = "all" if allowed is None else "、".join(sorted(allowed))
+    print(f"[sample] seed={args.seed} categories={cat_desc} "
+          f"noise_filter={not args.no_noise_filter} → {args.out}")
     for kind, want in quotas.items():
         got = counts.get(kind, 0)
         flag = "" if got == want else f"  (wanted {want})"
