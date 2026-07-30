@@ -232,7 +232,12 @@
 - [x] **阶段 2 完成(2026-07-30)**：生产采样→Agent 合成→人工审核→新 `golden.jsonl`(75题:factual32/table_formula4/code_lookup23/multi_turn10/no_answer6)。table_formula 因当前语料图集类表格噪声高,按用户决定只保留 4 个高质量题。
 - [x] **阶段 4 完成(2026-07-30)——新基线确立**：生产实跑 `run_eval_retrieval.py`。检索题 R@1=75.4% / **R@5=100%** / MRR@5=0.870;分类 factual R@1=84.4%、code_lookup 78.3%、table_formula 75.0%、multi_turn R@1=40%(t2 走 ChatSession 后 R@5=100%,承接机制有效);**no_answer 合规 6/6=100%**。可检索性预验证经 2 轮修正(修 3 题问点偏离/父块认错),最终仅 2 个 multi_turn-t2 单独 retrieve 未命中(预期,评测走 ChatSession 已救回)。
 - [ ] 阶段 3：索引指纹记录集成到 `run_eval_retrieval.py` 启动流程(需评估优先级,防未来陈旧)。
-- [ ] 阶段 5：补充对比型用例(接续"7. 检索黄金集扩展");公司流程/BIM 操作类评测第二期另立项。
+- [x] **阶段 5(部分)完成(2026-07-30)——补对比型用例**：新增 kind `comparison` + `EvalItem.expected_sides`(可选,向后兼容) + `grade_comparison`(两侧都命中才算 both_hit) + 评测脚本 off(单查询)/on(拆分)对比报告。golden.jsonl 加 4 条 GB50189↔GB55015 对比题(79题)。生产验证:ON both_hit 4/4、OFF 3/4,comparison-0004 是干净的拆分收益样本(off False→on True)。**关键教训**:expected_sides 必须用实际召回块标注(数据驱动),不能从采样池猜——初版从85块采样池选id,与索引全量id不交集,导致全0。commit b3d5616/0824ca5/bd54afb。
+- [ ] 阶段 5(剩余)：公司流程/BIM 操作类评测第二期另立项;可继续补更多对比对(需两侧内容对称+实际召回验证)。
+
+#### 🔴 发现的独立生产 bug(需另立项,非本任务)
+
+- [ ] **`retrieve_multi` passages 超限**:`src/retrieve.py` 的 `retrieve_multi` 合并多子查询召回后,传给 reranker 的 passages 可能 >100,触发 `rerank returned HTTP 422: List should have at most 100 items`。开启 `QUERY_DECOMPOSE_ENABLED` 后生产会踩(对比题验证时 comparison-0004 实际触发)。修复需在 rerank 前对合并后的 child 列表去重/截断到 100。属检索核心逻辑改动,R2,单独评估。
 
 #### 自动化验证 / 真实索引验证
 
