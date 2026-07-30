@@ -1022,3 +1022,25 @@
 - 文件：`TODO.md`(7-R 状态收尾)、`WORKLOG.md`。未改代码/黄金集/索引。
 - 验证：无需运行(仅状态标记);新基线已于 18:20 条目经生产实跑确立。
 - 待办/风险：可选增量阶段未启动,不阻塞;如后续语料重建需重跑 `sample_for_eval.py`+`run_eval_retrieval.py` 刷新基线。
+
+### 18:28 — 解释 Recall@1 与 Recall@5
+
+- 完成：说明 R@1/R@5 衡量正确证据是否出现在检索结果前 1/前 5，而非最终回答质量；结合新基线解释 69 条检索题中约 75.4% 首位命中、全部题前五命中，以及这对 top-1 排序优化的含义。
+- 文件：`WORKLOG.md`（仅记录本次说明；未修改代码、黄金集或索引）
+- 验证：依据新黄金集 75 条中 6 条 no-answer、其余 69 条检索题及生产基线指标进行换算说明；未重新运行评测。
+
+### 18:37 — 用新基线复核查询拆分改动在普通题上零回归
+
+- 完成：在 Ubuntu 生产容器用重建后的新黄金集(75 条)跑 `run_eval_retrieval.py`(开关默认关闭),验证查询拆分改动对普通问答零回归。处理了 pull 冲突:本地有一份自建 75 条 golden(未跟踪)+ `sampled_parents.json` 本地修改,与远程 553a802(删除并 gitignore sampled_parents、写入跟踪版 golden)冲突;已备份本地版(`~/golden_local_myversion.jsonl`、`~/sampled_local_myversion.json`)后 checkout/rm 清理并 pull 到 5102944。
+- 结果(与 553a802 新基线逐项一致):OVERALL R@1=0.754 / R@5=1.000 / MRR@5=0.870,no-answer 6/6 —— 四项与基线一字不差,坐实开关关闭时 `retrieve()` 重构(`_recall_scored`+`_dedup_to_parents`)、`_build_context` interleave 分支、`_context_budget`、新增 `subquery_idx` 字段对普通问答路径零回归。分项:factual R@1=0.844(32)、code_lookup 0.783(23)、table_formula 0.750(4)、multi_turn 0.400/R@5=1.000(10,t2 top-1 偏弱属既有特性,不走拆分)。
+- 文件：`WORKLOG.md`(仅记录;未修改业务代码/黄金集/索引)
+- 验证：生产容器跑 75 条黄金集(88.4s,只读检索+生成),逐项对照新基线全等。
+- 待办/风险：新黄金集仍无比较型(comparison)用例,查询拆分**开启后的收益仍无法量化**,只有主观冒烟;灰度 `QUERY_DECOMPOSE_ENABLED=true` 前需补比较型用例并跑开关开/关对比。本地自建 golden 版本已备份于用户家目录,与远程版差异未合并(远程版已作基线,暂以远程为准)。
+
+### 19:17 — 补比较型黄金集用例 + 两侧覆盖评分
+
+- 完成：为 comparison(对比A与B)型用例建评分与数据。新增 kind `comparison`、`EvalItem.expected_sides`(可选,list[list],向后兼容)、`grade_comparison`(每侧 top-k 都命中才算 both_hit,不改 grade_one)、`run_eval_retrieval.py` comparison 分支(off 单查询 vs on 拆分 retrieve_multi,报告 both-sides 覆盖率与拆分收益)。golden.jsonl 加 4 条 GB50189↔GB55015 对比题(79题)。经多轮生产验证与修正,最终 **ON both_hit 4/4、OFF 3/4**,comparison-0004 为干净拆分收益样本(off False→on True)。
+- 文件：`src/eval/types.py`、`src/eval/metrics.py`、`scripts/run_eval_retrieval.py`、`src/eval/golden.jsonl`、`TODO.md`、`WORKLOG.md`。commit b3d5616/0824ca5/bd54afb。
+- 关键教训(已记 TODO)：expected_sides 初版从 85 块采样池选 id,但检索返回索引全量 id,两套不交集→全 0 both_hit。改为**用生产实际召回块反标**(数据驱动)后达标。诚实定位:4 题中仅 0004 证明拆分增量,另 3 题单查询也覆盖两侧,故它们验证"两侧覆盖"而非纯拆分收益,已在 notes 标注不夸大。
+- 验证：本地 `grade_comparison` 单测(两侧/单侧/都不中/top-k截断)全过、EvalItem 往返兼容;生产 both_hit off3/on4、逐题 off/on 明细。旧 79 题评分逻辑与结果不受影响(grade_one 未改、expected_sides 默认空)。
+- 待办/风险：**发现独立生产 bug**——`retrieve_multi` 合并多子查询后 passages 可能 >100,触发 rerank HTTP 422(开启拆分即踩,comparison-0004 实测触发),已记 TODO 待另立项修复(改 src/retrieve.py,R2)。对比题 4 题中 3 题拆分增量不显著,后续可补更多两侧对称的对。
