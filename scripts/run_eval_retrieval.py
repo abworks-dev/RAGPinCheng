@@ -884,14 +884,19 @@ def main() -> None:
     # Per-item and aggregate tables.
     _print_comparison_per_item(comparison_results)
     # Aggregate over the 2x2 grid: each comparison item produces one record
-    # in each k-bucket (k=5 and k=8). The record carries all 4 cells; the
-    # aggregator picks off_k{k} / on_k{k} for its k. Without this, the
-    # aggregator sees only the partial cell set and reports n_paired=0.
+    # in each k-bucket (k=5 and k=8). The aggregator reads flat `off` /
+    # `on` keys per k (it["off"] / it["on"]); the contrast block below
+    # reads the per-k cells off_k5 / off_k8 / on_k5 / on_k8 directly.
+    # We keep both shapes for clarity.
     cells_by_k: dict[int, list[dict]] = {5: [], 8: []}
     for r in comparison_results:
         for k in (5, 8):
-            if r.get(f"off_k{k}") is not None and r.get(f"on_k{k}") is not None:
+            off_g = r.get(f"off_k{k}")
+            on_g = r.get(f"on_k{k}")
+            if off_g is not None and on_g is not None:
                 cells_by_k[k].append({
+                    "off": off_g,
+                    "on": on_g,
                     "off_k5": r.get("off_k5"),
                     "off_k8": r.get("off_k8"),
                     "on_k5": r.get("on_k5"),
