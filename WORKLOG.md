@@ -870,7 +870,7 @@
 - 验证：`git diff` 复核改动仅限设计范围（去重时记录命中 Child 时间 + 覆盖赋值 + 回退）；逻辑核对 `scored` 已按最佳优先排序，故首次录入 parent 的 Child 即其 top 命中；未改排序、Parent 选择、评分、Embedding、Qdrant payload、索引 Schema，故不需重建索引。
 - 未执行的验证及原因：本机无项目 `.venv`/系统 Python 解释器（PATH 仅 WindowsApps 别名占位），Docker 守护进程未运行，RAG 栈实际在容器/Ubuntu 节点执行——因此**未能在本机运行** `python scripts/test_retrieve.py` 检索冒烟、`run_eval_retrieval.py` 黄金集回归及 Python AST/import 检查。方案 A 不改排序逻辑，预期黄金集指标不变，但仍需在有解释器的环境补跑冒烟（确认存量转录 Child payload 确含 `start_time`、命中时间正确变化）与黄金集回归后方可最终确认。
 - 待办/风险：需在容器或 Ubuntu 节点补执行检索冒烟 + 黄金集回归；若存量 payload 意外缺 `start_time`，会自动回退 Parent 时间（等同旧行为，不破坏），届时再评估是否定向重建。
-- 状态：代码完成，待用户验收（已按 `project-docs/USER_ACCEPTANCE.md` 提供端到端跳播验收清单；用户明确确认后再改为"用户验收通过"）。
+- 状态：用户验收通过（2026-07-30 13:07）。用户实测教学视频转录问答，三条来源的显示/跳播时间均晚于各自 Parent 段落首句、且精确落在段落内实际命中的发言段（如 @00:54:22 对应正文中 `说话人 00:54:22`、@00:11:10 对应 `说话人 00:11:10`），确认跳播定位到命中句而非段落开头。
 
 ### 12:50 — 为回答上下文加入可见来源序号 index（修复引用角标）
 
@@ -881,4 +881,29 @@
 - 验证：`git diff` 复核改动仅限设计范围（新增 index 属性 + prompt 规则改写），未改 id、其它属性、time=（12:34 时间戳修复成果不受影响）、检索、排序、预算、Schema、索引。
 - 未执行的验证及原因：本机无 Python 解释器且 Docker 未运行，未能运行 `python scripts/eval_query.py`（人工核对引用为 `[N]` 且对应正确来源）与 `run_eval_retrieval.py`（本改动不影响检索，仅作不退化确认）；须在容器/Ubuntu 节点补跑。GLM 对 prompt 为概率遵循，加 index 后应显著提升但非 100%，若仍偶发可另做前端兜底（不在本次范围）。
 - 待办/风险：需在有解释器环境重问 Revit 工具栏等问题人工核对引用角标恢复正常；旧会话已存回答文本不迁移，其既有 `[N]` 仍按当时来源解析。
-- 状态：代码完成，待用户验收。
+- 状态：用户验收通过（2026-07-30 13:02，用户确认部署后引用角标恢复正常显示可点击数字角标）。
+
+### 13:09 — 标记双节点迁移稳定观察期结束
+
+- 完成：应用户确认，将 Ubuntu 应用节点 + Windows GPU 节点迁移的"稳定观察期"标记为结束。`TODO.md` 任务 8 的 `- [ ] 稳定观察期` 勾选为完成并注明确认日期；`ubuntu-app-windows-gpu-runbook.md` 阶段 9 的 `- [ ] 进入稳定观察期` 同步勾选并加注。仅改状态标记，未改迁移架构、脚本或配置。
+- 明确不做：runbook 阶段 10「旧环境退役」仍为 R3、`- [ ]` 未勾选，退役/删除旧环境须用户单独逐项批准，本次不触碰该门禁。
+- 文件：`TODO.md`、`project-docs/migrations/ubuntu-app-windows-gpu-runbook.md`、`WORKLOG.md`
+- 验证：`grep` 复核"稳定观察期"全部出现位置，仅更新两处待办勾选，未改 R3 退役条目与其它内容；未修改代码，未执行部署或数据操作。
+
+### 13:36 — 实现比较意图查询拆分 / 多跳检索（Phase 2 核心，默认关闭）
+
+- 完成：经用户 R2 批准，实现 TODO 🔴 高优先级「查询拆分 / 多跳检索」核心。功能开关 `QUERY_DECOMPOSE_ENABLED` 默认关闭，关闭时检索路径与旧行为逐字节等价。链路：启发式 gate（比较标记正则命中才调 LLM）→ `LLM_REWRITE_MODEL` 判定并返回严格 JSON `{decompose, sub_queries≤3}`（解析失败/单子查询安全回退不拆分）→ `retrieve_multi` 多子查询召回、跨查询 RRF 融合、每子查询最低配额（保证比较两侧都进上下文）、按原始问题全局 rerank、截断 `DECOMPOSE_FINAL_TOP_K=8` → 返回与 `retrieve` 同构的 `list[RetrievedParent]`，下游 carry/generate/budget/UI 零改动。
+- 关键设计：把 `retrieve()` 的召回段抽为 `_recall_scored`、去重扩展段抽为 `_dedup_to_parents` 供单/多查询共用，`retrieve()` 对外签名与行为不变；`ask`/`ask_stream` 经统一 `_fresh_retrieve` 对称接入，避免两入口逻辑漂移；`retrieve_multi` 用 `final_pids`（截断后集合）构建 scored，保证配额保留的 parent 不被全局分挤出。
+- 文件：新增 `prompts/decompose_system.md`、`prompts/decompose_user.md`、`src/decompose.py`；修改 `src/retrieve.py`、`src/session.py`、`src/config.py`；同步 `TODO.md`、`WORKLOG.md`
+- 用户可观察变化：开关关闭（当前默认）时无变化；开启后，比较型问题（如“对比A与B…”“客户A和客户B的不同要求”）能对每一侧分别检索、两侧证据都进上下文与引用。
+- 验证：`git diff` 复核改动范围；人工核对 `retrieve()` 重构后逻辑与原实现等价（同一 `_recall_scored`+`_dedup_to_parents`）、`retrieve_multi` 配额/RRF/截断逻辑、session 两处对称接入、config 开关默认 False、decompose 异常全回退。**补充（14:10 本机搭好 3.11 venv 后已执行）**：`python -m compileall api src scripts gpu_service` 通过（exit 0）；decompose 纯逻辑单测 9 组全过（gate 正则、JSON happy/code-fence/prose 包裹/false/单子查询回退/去重截断3/垃圾输入安全 false/非字符串过滤）；config 常量默认值核对（False/3/2/8）；AST 结构核对 retrieve/session/decompose 目标函数齐全。
+- 未执行的验证及原因：需活索引+模型+GPU 的 `scripts/eval_query.py` 拆分冒烟、`run_eval_retrieval.py` 黄金集回归本机无法有效执行（无 torch/Qdrant 索引/GPU 服务），须在 Ubuntu 节点补跑。开关关闭时预期黄金集指标与现状完全一致（零回归），开启后的收益与延迟/成本待黄金集补充比较型用例后评估。
+- 待办/风险：需补跑上述 Python 验证；黄金集需新增比较型用例；GLM 拆分判定为概率遵循，已用保守 gate + 不确定不拆 + 默认关闭三重保护；`retrieve_multi` 每子查询各跑一次召回+rerank，触发时延迟与 GPU 负载上升（仅 <5% 触发轮次）。
+- 状态：代码完成，默认关闭未影响现网；开启前须黄金集验证，属待用户/后续灰度决策。
+
+### 14:10 — 搭建本机 Python 3.11 venv 并跑本地验证
+
+- 完成：本机此前无可用 Python 解释器（仅注册表残留 3.13、PATH 上是 WindowsApps 占位）。经用户同意，用 winget 装系统 Python 3.12.10（主力）+ 3.11.9（贴 CI），为本项目用 `py -3.11` 建 `.venv`（3.11.9）。装轻依赖 `python-dotenv`，跑通查询拆分功能的本地验证（compileall + decompose 单测 + config/AST 核对，均通过，详见 13:36 条目补充）。
+- 文件：无业务代码改动（仅新增本机 `.venv/`，已被 `.gitignore` 忽略，不入库）；`WORKLOG.md`
+- 验证：`py -0p` 确认 3.12/3.11 均注册；`.venv` Python 版本 3.11.9；`git check-ignore .venv` 确认已忽略。临时测试脚本用后已删除。
+- 待办/风险：完整检索/黄金集验证仍需在 Ubuntu 节点（有活索引+模型+GPU）执行；本机 venv 未装 torch 等重依赖（无 GPU，按需再装）。

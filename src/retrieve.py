@@ -25,6 +25,8 @@ from qdrant_client import models
 from .config import (
     CODE_BOOST_TOP_K,
     COLLECTION,
+    DECOMPOSE_FINAL_TOP_K,
+    DECOMPOSE_MIN_QUOTA_PER_SUBQUERY,
     DENSE_TOP_K,
     FINAL_TOP_K,
     RERANK_ENABLED,
@@ -162,11 +164,14 @@ def _merge_filters(*filters: models.Filter | None) -> models.Filter | None:
     return models.Filter(must=must) if must else None
 
 
-def retrieve(
-    query: str,
-    top_k: int = FINAL_TOP_K,
-    categories: list[str] | None = None,
-) -> list[RetrievedParent]:
+def _recall_scored(query: str, categories: list[str] | None):
+    """Run one query's dense+sparse (+code-boost) recall and rerank.
+
+    Returns (scored, child_rrf) where:
+      - scored: list of (point, rerank_or_rrf_score) ordered best-first
+      - child_rrf: {child_id: rrf_score} preserved before rerank reordering
+    Empty recall returns ([], {}).
+    """
     _bootstrap_indexes()
     emb = encode_one(query)
     code_variants = _extract_code_variants(query)
@@ -213,7 +218,7 @@ def retrieve(
 
     points = list(result.points)
     if not points:
-        return []
+        return [], {}
 
     # Preserve RRF score per child before reranking overwrites ordering.
     child_rrf: dict[str, float] = {str(p.id): p.score for p in points}
@@ -242,6 +247,19 @@ def retrieve(
     else:
         scored = [(p, p.score) for p in points]
 
+    return scored, child_rrf
+
+
+def _dedup_to_parents(
+    scored: list,
+    child_rrf: dict[str, float],
+    top_k: int,
+) -> list[RetrievedParent]:
+    """Dedupe reranked children by parent_id and expand to RetrievedParent.
+
+    Shared by the single-query and multi-query paths so both use identical
+    dedupe / best-child-time / parent-expansion semantics.
+    """
     # Dedupe children by parent_id, keeping the best score per parent.
     # rrf_score for a parent = best RRF score among its matched children.
     parent_order: list[str] = []
@@ -298,3 +316,137 @@ def retrieve(
             )
         )
     return out
+
+
+def retrieve(
+    query: str,
+    top_k: int = FINAL_TOP_K,
+    categories: list[str] | None = None,
+) -> list[RetrievedParent]:
+    scored, child_rrf = _recall_scored(query, categories)
+    if not scored:
+        return []
+    return _dedup_to_parents(scored, child_rrf, top_k)
+
+
+def retrieve_multi(
+    sub_queries: list[str],
+    original_query: str,
+    top_k: int = DECOMPOSE_FINAL_TOP_K,
+    categories: list[str] | None = None,
+    min_quota_per_subquery: int = DECOMPOSE_MIN_QUOTA_PER_SUBQUERY,
+) -> list[RetrievedParent]:
+    """Comparison-intent multi-query retrieval.
+
+    Runs each sub-query's recall independently, then fuses:
+      1. Cross-query RRF over each sub-query's child ranking (rank-based, so we
+         never compare raw scores across channels).
+      2. A per-sub-query minimum quota of parents, guaranteeing each side of a
+         comparison survives even if another side scores higher globally.
+      3. A final global rerank against the ORIGINAL user query so the returned
+         order reflects the user's actual intent, then trim to `top_k`.
+
+    Returns the same `list[RetrievedParent]` shape as `retrieve()`, so all
+    downstream stages (carry-forward, generate, budget, UI) are unchanged.
+    Falls back to single-query `retrieve(original_query)` when fewer than two
+    usable sub-queries are provided.
+    """
+    subs = [s.strip() for s in sub_queries if s and s.strip()]
+    if len(subs) < 2:
+        return retrieve(original_query, top_k=top_k, categories=categories)
+
+    # ── 1. Per-sub-query recall + cross-query RRF over child rankings ──────────
+    RRF_K = 60  # standard RRF damping constant
+    child_rrf_fused: dict[str, float] = {}
+    child_point: dict[str, object] = {}
+    # Ordered child_ids per sub-query, best-first (post-rerank order).
+    per_sub_children: list[list[str]] = []
+
+    for sq in subs:
+        scored, _child_rrf = _recall_scored(sq, categories)
+        ordered_ids: list[str] = []
+        for rank, (point, _score) in enumerate(scored):
+            cid = str(point.id)
+            ordered_ids.append(cid)
+            child_point.setdefault(cid, point)
+            child_rrf_fused[cid] = child_rrf_fused.get(cid, 0.0) + 1.0 / (RRF_K + rank)
+        per_sub_children.append(ordered_ids)
+
+    if not child_point:
+        return []
+
+    # ── 2. Build a fused child ordering, then re-rank against ORIGINAL query ───
+    all_child_ids = list(child_point.keys())
+    points = [child_point[cid] for cid in all_child_ids]
+
+    if RERANK_ENABLED:
+        if RERANK_USE_HEADER:
+            passages = [
+                f"{p.payload.get('doc_title','')} > "
+                f"{p.payload.get('section_path','')}\n\n"
+                f"{p.payload.get('text','')}"
+                for p in points
+            ]
+        else:
+            passages = [p.payload["text"] for p in points]
+        ce_scores = rerank_scores(original_query, passages)
+        global_score = {cid: float(s) for cid, s in zip(all_child_ids, ce_scores)}
+    else:
+        # No cross-encoder: fall back to fused RRF as the global score.
+        global_score = {cid: child_rrf_fused[cid] for cid in all_child_ids}
+
+    # ── 3. Quota pass: reserve top parents per sub-query, then fill by global ──
+    # First, map each child to its parent and remember, per sub-query, the
+    # parent order (using that sub-query's own best-first child ranking).
+    def _pid(cid: str) -> str:
+        return child_point[cid].payload["parent_id"]
+
+    selected_pids: list[str] = []
+    seen_pids: set[str] = set()
+
+    # 3a. Quota — walk each sub-query's ranking, admit up to N distinct parents.
+    for ordered_ids in per_sub_children:
+        admitted = 0
+        for cid in ordered_ids:
+            if admitted >= min_quota_per_subquery:
+                break
+            pid = _pid(cid)
+            if pid in seen_pids:
+                continue
+            seen_pids.add(pid)
+            selected_pids.append(pid)
+            admitted += 1
+
+    # 3b. Fill remaining slots by global (original-query) rerank score.
+    remaining_children = sorted(
+        (cid for cid in all_child_ids if _pid(cid) not in seen_pids),
+        key=lambda cid: global_score[cid],
+        reverse=True,
+    )
+    for cid in remaining_children:
+        if len(selected_pids) >= top_k:
+            break
+        pid = _pid(cid)
+        if pid in seen_pids:
+            continue
+        seen_pids.add(pid)
+        selected_pids.append(pid)
+
+    selected_pids = selected_pids[:top_k]
+    final_pids = set(selected_pids)
+
+    # ── 4. Build a `scored`-shaped list over ONLY the finally-selected parents,
+    # ordered best-first by global (original-query) score, then reuse the shared
+    # dedupe/expansion so time/rrf/snippet semantics match the single-query path.
+    # Because there are at most `top_k` distinct selected parents, the cap inside
+    # `_dedup_to_parents` admits ALL of them — quota-reserved parents can't be
+    # squeezed out by global score here; global score only sets their order.
+    scored_children = sorted(
+        (cid for cid in all_child_ids if _pid(cid) in final_pids),
+        key=lambda cid: global_score[cid],
+        reverse=True,
+    )
+    scored = [(child_point[cid], global_score[cid]) for cid in scored_children]
+    child_rrf = {cid: child_rrf_fused[cid] for cid in all_child_ids}
+
+    return _dedup_to_parents(scored, child_rrf, top_k)
