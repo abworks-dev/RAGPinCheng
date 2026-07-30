@@ -1051,3 +1051,10 @@
 - 文件：`src/config.py`、`src/retrieve.py`、`project-docs/fix-retrieve-multi-rerank-overflow.md`、`TODO.md`、`WORKLOG.md`。commit 79bbf9e。
 - 验证：本地 `_cap_children_for_rerank` 单测全过(3子查询各40 → 96条、每侧前32条保留;2子查询各60 → 每侧前48条保留;小集合全保留;无重复);**生产**:comparison-0004 不再报 422,从"崩溃"变成正常 off[1/2]→on[2/2] 干净展示拆分价值;both-sides coverage ON 4/4、OFF 3/4、payoff+0.25(与修复前一致,证明 cap 保底没把任何一侧挤出)。
 - 待办/风险：TODO 中此 bug 标记为已修;单查询路径未触碰,等下次全量回归(79 题)进一步坐实零影响(本轮仅跑了 comparison 4 题)。如需可继续:补几条能强证明拆分增量的对比对、阶段3 索引指纹防陈旧。
+
+### 22:16 — 全量 79 题回归:修复对单查询路径零影响
+
+- 完成：跑 `run_eval_retrieval.py` 全量 79 题,验证 `retrieve_multi` 的 cap 修复对 69 道普通检索题(走 `retrieve()`)+ 5 对 multi_turn(走 ChatSession)+ 6 条 no_answer(走 ChatSession)+ 4 条 comparison(走 `retrieve`/`retrieve_multi`)均无影响。**结果与基线 553a802 完全一致(逐项数字一字不差)**:OVERALL R@1=0.754、R@5=1.000、MRR@5=0.870;factual/code_lookup/table_formula/multi_turn 分项 R@1 全部与基线相同;no_answer 6/6;comparison both_hit OFF 3/4 ON 4/4 payoff+0.25。**坐实 retrieve() 单查询路径完全未受影响**。
+- 文件：`WORKLOG.md`(仅记录;未改任何业务代码/黄金集/索引)
+- 验证：生产全量 79 题实跑 100.9s(只读检索+生成,无 LLM judge),逐项对照 553a802 基线全等。
+- 待办/风险：零回归证据已落地;剩余可选:补更多两侧对称对比对、阶段3 索引指纹防陈旧。
