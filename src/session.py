@@ -21,7 +21,7 @@ from dataclasses import dataclass, field, replace
 from time import perf_counter
 from typing import Iterator
 
-from .config import MAX_CONTEXT_CHARS, QUERY_DECOMPOSE_ENABLED
+from .config import DECOMPOSE_MAX_CONTEXT_CHARS, MAX_CONTEXT_CHARS, QUERY_DECOMPOSE_ENABLED
 from .decompose import maybe_decompose
 from .generate import Answer, GenerationPrep, generate, rewrite_query, stream_generate
 from .query_guard import QueryValidation, validate_search_query
@@ -39,6 +39,23 @@ HISTORY_TURNS = 4
 # How many of the previous turn's top sources to carry forward into the next
 # retrieval as a safety net for thin follow-ups.
 CARRY_SOURCES = 2
+
+
+def _context_budget(
+    final_sources: list["RetrievedParent"], history_chars: int
+) -> int:
+    """Char budget for the answer context.
+
+    Uses the wider DECOMPOSE_MAX_CONTEXT_CHARS when this turn took the
+    decomposed path (any source carries a subquery_idx), so both comparison
+    sides fit; otherwise the normal MAX_CONTEXT_CHARS.
+    """
+    base = (
+        DECOMPOSE_MAX_CONTEXT_CHARS
+        if any(getattr(p, "subquery_idx", None) is not None for p in final_sources)
+        else MAX_CONTEXT_CHARS
+    )
+    return max(base - history_chars - RESERVE_CHARS, 0)
 
 
 @dataclass
@@ -397,7 +414,7 @@ class ChatSession:
         # ④ GENERATE with history + dynamic budget.
         history_msgs = self.state.history_for_llm(k=HISTORY_TURNS)
         history_chars = sum(len(m["content"]) for m in history_msgs)
-        budget = max(MAX_CONTEXT_CHARS - history_chars - RESERVE_CHARS, 0)
+        budget = _context_budget(final_sources, history_chars)
         t = perf_counter()
         answer = generate(
             query=query,
@@ -542,7 +559,7 @@ class ChatSession:
         # ④ STREAM GENERATE with history + dynamic budget.
         history_msgs = self.state.history_for_llm(k=HISTORY_TURNS)
         history_chars = sum(len(m["content"]) for m in history_msgs)
-        budget = max(MAX_CONTEXT_CHARS - history_chars - RESERVE_CHARS, 0)
+        budget = _context_budget(final_sources, history_chars)
         gen_prep, raw_stream = stream_generate(
             query=query,
             parents=final_sources,

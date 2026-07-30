@@ -17,7 +17,7 @@ Pipeline per call:
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import lru_cache
 
 from qdrant_client import models
@@ -54,6 +54,11 @@ class RetrievedParent:
     company: str | None = None
     media_id: str | None = None  # associated video asset if any
     rrf_score: float = 0.0
+    # Which sub-query (0-based) this parent was retrieved for, in the decomposed
+    # multi-query path. None for the normal single-query path. Used by
+    # `_build_context` to interleave sources so every comparison side survives
+    # the context budget.
+    subquery_idx: int | None = None
 
 
 # Matches BIM-relevant standard codes (case-insensitive, half-width and
@@ -359,16 +364,20 @@ def retrieve_multi(
     RRF_K = 60  # standard RRF damping constant
     child_rrf_fused: dict[str, float] = {}
     child_point: dict[str, object] = {}
+    # Track which sub-query each child was first seen in (0-based).
+    child_to_subq: dict[str, int] = {}
     # Ordered child_ids per sub-query, best-first (post-rerank order).
     per_sub_children: list[list[str]] = []
 
-    for sq in subs:
+    for si, sq in enumerate(subs):
         scored, _child_rrf = _recall_scored(sq, categories)
         ordered_ids: list[str] = []
         for rank, (point, _score) in enumerate(scored):
             cid = str(point.id)
             ordered_ids.append(cid)
             child_point.setdefault(cid, point)
+            if cid not in child_to_subq:
+                child_to_subq[cid] = si
             child_rrf_fused[cid] = child_rrf_fused.get(cid, 0.0) + 1.0 / (RRF_K + rank)
         per_sub_children.append(ordered_ids)
 
@@ -449,4 +458,15 @@ def retrieve_multi(
     scored = [(child_point[cid], global_score[cid]) for cid in scored_children]
     child_rrf = {cid: child_rrf_fused[cid] for cid in all_child_ids}
 
-    return _dedup_to_parents(scored, child_rrf, top_k)
+    out = _dedup_to_parents(scored, child_rrf, top_k)
+
+    # Tag each returned parent with the sub-query it belongs to, so
+    # `_build_context` can interleave sources and keep every comparison side in
+    # the budget. A parent's sub-query = that of its best-scoring (first-admitted)
+    # child, which is the child appearing earliest in `scored_children`.
+    pid_to_subq: dict[str, int] = {}
+    for cid in scored_children:
+        pid = _pid(cid)
+        if pid not in pid_to_subq:
+            pid_to_subq[pid] = child_to_subq.get(cid, 0)
+    return [replace(p, subquery_idx=pid_to_subq.get(p.parent_id)) for p in out]
