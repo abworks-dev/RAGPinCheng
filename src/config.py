@@ -44,6 +44,13 @@ SPARSE_TOP_K = 60
 CODE_BOOST_TOP_K = 40
 # Children handed to the cross-encoder reranker before parent dedupe.
 RERANK_TOP_K = 40
+# Hard cap on the number of passages sent to the reranker in ONE call. The
+# multi-query (decomposition) path unions up to DECOMPOSE_MAX_SUBQUERIES ×
+# RERANK_TOP_K children, which can exceed the GPU rerank service's
+# MAX_BATCH_SIZE (100) and return HTTP 422. Must stay <= that server limit;
+# 96 leaves a small margin. Single-query retrieve() is naturally <=RERANK_TOP_K
+# and never hits this.
+RERANK_BATCH_CAP = 96
 FINAL_TOP_K = 5
 MAX_CONTEXT_CHARS = 6000
 
