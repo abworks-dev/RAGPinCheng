@@ -947,4 +947,46 @@
 - 用户可观察变化：开关关闭（默认）时无变化；开启后比较型问题两侧证据都进上下文，回答从"未找到相关内容"变为真正的双侧对比。
 - 验证：本机 3.11 venv 装轻依赖（requests/tqdm/langchain-text-splitters/pypdf/httpx/openai，qdrant 用 stub）；`compileall api src scripts gpu_service` 通过；6 组单测全过——interleave 轮流顺序 `[a0,b0,a1,b1,a2]`、首现分组顺序保留、单查询顺序不变、**拆分场景紧预算下两侧都存活 `[a0,b0]`（对照剥离 subquery_idx 的旧顺序逻辑只留 `[a0,a1]` 单侧，复现原缺陷）**、budget 选择（普通 5300 / 拆分 7300=8000−700）。临时测试脚本用后删除。
 - 未执行的验证及原因：需活索引+GPU 的生产端到端冒烟（开关开启比较题确认回答变对比）未跑，须在 Ubuntu 容器补做；本机无 torch/qdrant/索引。
+
+### 15:48 — 提交并推送黄金集重建工具（方案A：轻量部署）
+
+- 完成：经用户批准，选择性提交黄金集重建工具并推送，供 Ubuntu 生产节点 `git pull` + `docker cp` 临时使用（方案 A，不重建镜像、不中断服务）。提交前只读核对工作区，发现混入其他会话的在制品（`src/generate.py`/`session.py`/`retrieve.py`/`config.py` 的查询拆分预算修复、`CLAUDE.md` 大改等共 7 文件），**显式仅 add 本任务 5 文件**，保护其余改动留在工作区。
+- 文件（本次提交 `96bd539`）：`scripts/relabel_golden.py`(新增)、`scripts/run_eval_retrieval.py`、`TODO.md`、`WORKLOG.md`、`.gitignore`
+- 验证：`git diff --cached --stat` 确认暂存区只含 5 文件；提交后 `git log` 确认其余 7 文件仍未暂存、内容未动；push 成功 `9bf065a..72a7cce`。
+- 修正：首次提交误用 PowerShell here-string 语法（`@'...'@`）致提交标题被污染为 `@`，已 `git commit --amend -F` 重写标题并 `git push --force-with-lease` 覆盖（`72a7cce`→`96bd539`，仅改提交信息、文件内容不变，force-with-lease 防误伤他人更新）。
+- 待办/风险：`docker cp` 进容器的脚本随容器重启失效（方案 A 一次性校准够用）；若需永久入镜像须另行 R3 重建部署。阶段 0（生产 `fingerprint` 石锤陈旧）、阶段 1（`candidates` 出审阅清单）待用户在 Ubuntu 执行。黄金集本身仍未修改。
+
+### 16:02 — 生产冒烟通过：查询拆分端到端可用（预算截断修复验证）
+
+- 完成：在 Ubuntu 生产容器验证预算截断修复。同题（对比 GB 50189 与 GB 55015 围护结构要求）开启 `QUERY_DECOMPOSE_ENABLED=true`，确认 `budget=7300`（`DECOMPOSE_MAX_CONTEXT_CHARS=8000 − RESERVE=700`）——修复决定性地生效；interleave 保住 GB 50189 进上下文；LLM 给出 6 个维度的完整对比回答（引用 `[1][2][4][5][6]` 引 55015、`[7]` 引 50189），不再"未找到相关内容"。对比修复前同题（14:59）预算 5300 截断仅一侧、拒答，本次验证了修复与设计目标一致。
+- 文件：`WORKLOG.md`（未修改业务代码）
+- 验证：生产容器单轮冒烟（只读检索+生成）；`budget=7300/6000` 硬证据 + interleave 两侧都进上下文 + 回答变成真正双侧对比。`context_chars=6987` 证实 7300 预算容纳了比 6000 更多的内容。
+- 待办/风险：**仍维持默认关闭**，灰度开启前仍需比较型黄金集量化收益（见 `### 7-R`）；`generate` 耗时 19.29s / total 26s 高于单查询（因上下文更长+输出更长的对比），属拆分场景固有成本，仅影响 <5% 触发轮次。
 - 待办/风险：生产冒烟待补；灰度开启 `QUERY_DECOMPOSE_ENABLED=true` 前仍需比较型黄金集量化收益（见 `### 7-R`），当前维持默认关闭。本次仅改本任务 4 个源码文件 + 共享文档，未触碰并行黄金集任务的 `scripts/relabel_golden.py`、`run_eval_retrieval.py`、`.gitignore`。
+
+### 16:15 — 黄金集生产验证:根因升级为语料域替换,转方案B全重建
+
+- 完成：在 Ubuntu 生产容器实跑重建工具,坐实并升级根因。`fingerprint`:当前索引 20088 父块/122 篇文档(公司标准/客户标准/设计规范/培训视频/教学视频),旧黄金集 67 个 distinct expected id 与当前集合 `∩=0` → CONFIRMED stale。`candidates --limit 3` + 全量文档清单诊断发现**更深根因**:旧黄金集 91 题全是钢结构主题(冲孔硬化区/桁架节点板/Q345焊条等),但当前 122 篇**无一篇钢结构规范**(设计规范全是混凝土/给排水/防火/暖通/节能/热工/电气;公司标准是 BIM 建模/机电算量/管综)。即**语料域已整体替换**,不只是 ID 变化——旧题在当前语料无答案,方案 A(半自动回填)前提失效。经 AskUserQuestion 与用户确认:转**方案 B 全重建**(sample.py 重采样→合成新题),旧钢结构黄金集**归档保留**(不删、不作当前基线)。据此重写 TODO `7-R`:根因升级为两层(ID过时+语料域替换,后者主导)、方案 A 标注否决、方案 B 转为主选、分阶段步骤更新、no_answer 旧题需重设(暖通/混凝土现已在语料内)。
+- 文件：`TODO.md`(`7-R` 大幅修订)、`WORKLOG.md`。业务代码/黄金集未改。
+- 验证：生产 `fingerprint`(∩=0)、`candidates`(3题候选全为热工/暖通/节能,与钢结构 notes 完全不符,rank-1 rerank 分仅 0.08)、`sqlite` 全文档标题清单(122篇,确认无钢结构规范)。均为只读,未写库、未改索引、未动黄金集。
+- 待办/风险：方案 B 全重建属 R2,**尚未获实施授权**(本次仅确认方向,实施 sample+合成+评审须另行批准)。旧黄金集归档、新 kind 配额、no_answer 重设为待实施项。**遗留疑问**:钢结构语料为何不在当前索引(历史上是否存在过/是否有意移除),用户未追查,如需可另立只读调查。
+
+### 16:57 — 解释黄金集重建的评测范围决策
+
+- 完成：说明抽样结果后的交互提示是在重建黄金集前确定产品评测边界，而非执行命令；解释“只覆盖规范”“规范与公司流程同时覆盖”“分期建设”三个选项对题型、评分确定性和审核成本的影响，并给出分期方案的建议。
+- 文件：`WORKLOG.md`（仅记录本次解释；未修改代码、黄金集或方案）
+- 验证：依据当前抽样结论和已记录的方案 B 重建背景进行解释；未运行评测或生产操作。
+
+### 16:59 — 黄金集方案B抽样预览 + 评测范围分期决策
+
+- 完成：在生产容器跑零风险抽样预览(`sample_parents(seed=42)` 纯内存,不落盘、不碰索引/黄金集),按 4 类抽样看当前语料出题料质量。判读:transcript(培训视频)好但全"怎么做"型;code_lookup(GB 规范)质量最好、是当前语料强项;table_formula/factual 参差,混入约一到两成噪声块(图集签署栏人名、`![](images/...)` 图片链接残块、纯目录/图集号)。经 AskUserQuestion 与用户确认评测范围:**分期——第一期只建规范/标准/图集类**(确定性强好评分),**公司流程/BIM 操作类另立项**(题形态"怎么做"、难客观打分,后续专门设计评分)。据此更新 TODO `7-R`:方案 B 实施要点补充范围分期、抽样质量过滤(现有 MIN_PARENT_CHARS=200 不足)、配额重定(提高 code_lookup/table_formula、第一期排除 transcript)、candidates 用途转为新题可检索性验证;新增"公司流程类第二期另立项"占位小节。
+- 文件：`TODO.md`(`7-R` 方案 B 要点修订 + 第二期占位)、`WORKLOG.md`。业务代码/黄金集/索引未改。
+- 验证：生产抽样预览为只读内存操作,确定性 seed,无产物落盘;输出人工判读噪声比例与语料形态。未运行评测、未写库。
+- 待办/风险：方案 B 第一期实施(加 category 过滤+质量过滤的重采样、Agent 合成、人工评审、定新基线)属 R2,**尚未获实施授权**,仅完成方向与范围对齐。抽样质量过滤规则、新配额、no_answer 重设、旧集归档路径均为待实施项。
+
+### 17:21 — 方案B第一期实施:sample.py 过滤/配额 + 归档旧集(R2 已批准)
+
+- 完成：用户按文件级方案批准执行方案 B 第一期。据此:(1) `src/eval/sample.py` 加三项——`ALLOWED_CATEGORIES={设计规范,客户标准}` 白名单、`_is_noise_parent` 质量过滤(剔图片链接占比>15% 的块、连续表头/签注行>8 的脚手架块)、新配额 `factual40/table_formula20/code_lookup25/transcript0`;`sample_parents`/`write_sampled` 加 `allowed_categories`/`apply_noise_filter` 参数(默认开,可关回旧行为)。(2) `scripts/sample_for_eval.py` CLI 暴露 `--categories`/`--no-noise-filter`。(3) 旧 `golden.jsonl`→`src/eval/archive/golden_steel_legacy.jsonl`、`drafts.jsonl`→`archive/drafts_steel_legacy.jsonl`(git mv 保留历史),加 `archive/README.md` 说明废弃原因。
+- 文件：`src/eval/sample.py`、`scripts/sample_for_eval.py`、`src/eval/archive/{golden_steel_legacy,drafts_steel_legacy}.jsonl`(移动)、`src/eval/archive/README.md`(新增)、`TODO.md`、`WORKLOG.md`
+- 验证：`py_compile` 两文件通过;过滤单测全过——图片块(ratio 0.95)判噪声、纯表头12行判噪声、正文+小表格通过、纯正文通过、配额与白名单常量符合预期。`run_eval_retrieval.py` 的 GOLDEN 常量**有意不改**(仍指 golden.jsonl),新集产出前直接跑会 FileNotFoundError,避免误用废弃数据当基线(archive/README 已说明)。未连生产、未 commit。
+- 待办/风险：`sampled_parents.json` 仍是旧钢结构采样,待生产跑新 `sample_for_eval.py` 覆盖。**下一步(阶段2)需生产执行**:docker cp 新 sample.py/sample_for_eval.py 进容器 → 跑 `sample_for_eval.py` 产新 `sampled_parents.json` → 我读它合成候选题。未 commit/push(按上次流程,推送需另行授权)。

@@ -152,14 +152,13 @@
 
 **关联**：本节是上方"7. 检索黄金集扩展"的前置修复。扩展（对比型/多轮/边界/转录用例）应在重建、标尺恢复后进行，二者不要合并。
 
-#### 现状与根因（已逐项源码核对，2026-07-30）
+#### 根因（经生产验证升级，2026-07-30）
 
-已核对文件：`scripts/run_eval_retrieval.py`、`src/eval/metrics.py`、`src/eval/types.py`、`src/eval/sample.py`、`scripts/sample_for_eval.py`、`src/chunk.py`、`prompts/answer_system.md`、`src/indexing_pipeline.py`。
+**两层根因,主次分明:**
 
-- **评分口径**：检索题（factual/table_formula/code_lookup/transcript/multi_turn，实测本地黄金集共 91 条）绕过 ChatSession 直接调 `retrieve()`，按 `grade_one()` 做 **parent_id 集合命中**（retrieved 里任一 id ∈ `expected_parent_ids` 即算命中，取首个命中的 1-based 名次算 R@1/R@5/MRR@5）。no_answer（6 条）走完整 `ChatSession.ask()`。本地黄金集 kind 实际分布：factual 36 / table_formula 14 / code_lookup 11 / transcript 6 / multi_turn 24（12 对）/ no_answer 6，合计 97。
-- **parent_id 生成**（`src/chunk.py` `_stable_id`）：`uuid5(NAMESPACE, "||".join(parts))`。PDF 用 `(doc_title, section_path, parent_text)`，转录用 `(doc_title, "transcript", first_ts, parent_text)`。即 id = 文档标题 + 章节路径 + **父块全文** 的确定性哈希。
-- **何时会变**：id 是确定性的——同一 `doc_title/section_path/parent_text` 重复索引会得到**相同** id。只有当以下任一改变时 id 才变：文档被重新解析导致正文文本不同（MinerU 输出变化）、分块参数或切分/标题归一逻辑改变（`PARENT_SIZE`、`_normalize_heading_levels`、`_split_parents`）、或文档标题/章节路径变化。因此"文档重新索引后 id 全变"精确表述是：**当前生产索引是在重新解析/重新分块后的语料上建立的，父块正文与旧标注时不同**，而非"只要重跑就会变"。
-- **根因**：`expected_parent_ids` 存的是单个旧 UUID，与当前索引的 parent_id 集合无交集 → 91 道检索题集合命中恒为 0。此为全 0 的主因，与"缺料/检索坏/查询拆分重构"无关。
+1. **表层——ID 过时**: `expected_parent_ids` 存旧 UUID,与当前索引集合无交集。fingerprint 已在生产坐实:`∩ live index = 0`(67 个旧 id ≈ 20088 个当前 id 零交集)。
+
+2. **深层——语料域整体替换(主导因素)**: 生产 `candidates` 抽样验证发现,旧黄金集 91 道检索题**全部是钢结构主题**(冲孔硬化区/墙架柱/桁架节点板/柱人孔/应变速率/Q345 焊条/螺栓螺纹长度……),但当前 122 篇索引**无一篇钢结构规范**。当前设计规范全是:混凝土、给排水、防火、暖通、节能、热工、电气、防雷、消防、化粪池、检查井、砌体。公司标准是 BIM 建模/机电算量/管综/出图流程。这不是"题还在只是 ID 变了"——是**很多旧题在当前语料里根本没有答案**,方案 A 前提失效。
 
 #### 需修正/补充的背景要点（对照核对结果）
 
@@ -173,18 +172,32 @@
 - [ ] **不存在**"从当前索引反向回填 `expected_parent_ids`"的现成脚本；需新增一个小工具。→ 影响"半自动回填"路线（方案 A）成本。
 - [ ] **可复用的重标资产**：`golden.jsonl` 每条含 `notes`（答案原文片段，如"首段：通过扩钻和刨边消除局部硬化区")与 `question`、`source_parent_id`（旧）。`notes`/`question` 保留了 ground-truth 语义，可用来在当前索引里重新定位正确父块，是方案 A 的关键依据。`drafts.jsonl`（68 条合成草稿）亦可参考。
 
-#### 重建策略候选与取舍（实施前二选一或组合，需用户拍板）
+#### 已定路线（用户 2026-07-30 生产验证后拍板）
 
-- [ ] **方案 A — 半自动回填 ID（保留题目，仅重标 `expected_parent_ids`）**
-  - 做法：新增只读脚本，对每条检索题用 `retrieve(question)` 取回 top-K 候选父块，结合 `notes`/`question` 语义，由人工（或 Agent 辅助）确认真正正确的父块并回填其当前 parent_id；命中多父块时按 `types.py` 说明允许 `expected_parent_ids` 扩为多值。
-  - 优点：最大程度保留人工已校对的题目质量与难度分布（尤其 multi_turn 承接题、code_lookup 点名题）；改动面小、可逐条 diff 审阅。
-  - 缺点：需人工确认每条，工作量与题量成正比；对已从语料中消失的旧父块，题目可能需改写或删除。
-- [ ] **方案 B — 重采样重建（`sample.py` 从当前 parents 重采样并重新合成题目）**
-  - 做法：`sample_for_eval.py` 生成新 `sampled_parents.json` → Agent 合成器产出 `drafts.jsonl` → 人工评审入 `golden.jsonl`；multi_turn/no_answer 仍人工补。
-  - 优点：题目与当前索引天然一致；覆盖面可按新配额重新平衡。
-  - 缺点：抛弃现有已校对题目；合成+评审成本高；难度/主题分布需重新把关。
-- [ ] **组合建议（默认倾向）**：检索题主体走 **A**（保住题库价值并恢复标尺最快），对旧父块已消失、或需补齐的 kind（对比型/边界/转录）走 **B** 增量补充。最终由用户在方案评审时确定 A/B/组合比例。
-- [ ] **题目文本 vs 仅重标 ID 的边界**：默认"题目文本保留、仅重标 ID"；仅当某题所依据的事实在当前语料中已不存在或表述实质变化时，才改写或下线该题，并在 `notes` 记录原因。
+- [x] **转方案 B 全重建**：生产 `candidates` 验证坐实方案 A 前提失效(旧题无对应语料),改用 `sample.py` 从当前 20088 个父块重采样 → Agent 合成面向真实语料(BIM/机电/建筑规范)的全新题 → 人工评审入 `golden.jsonl`。
+- [x] **旧钢结构黄金集归档保留**：`golden.jsonl` 归档为历史参考(重命名或移入子目录),不删除、不再作为当前基线,保留人工标注痕迹。
+- [x] no-answer 口径：改脚本对齐 prompt(已于 commit 96bd539 交付)。
+
+#### 已否决方案（记录取舍,勿重提）
+
+- ~~**方案 A — 半自动回填 ID**~~：**前提失效,已否决**。生产验证显示旧题主题(钢结构)与当前语料域(BIM/机电/建筑规范)不重叠,90% 以上旧题在当前索引无正确父块可回填。`relabel_golden.py candidates` 工具本身仍有用(用于新题的候选辅助与未来校准),但"回填旧题 ID"这一用法作废。
+- ~~组合(以 A 为主)~~：随 A 否决而作废。
+
+#### 重采样重建（方案 B）实施要点
+
+**范围决策（用户 2026-07-30 定）：分期——第一期只建规范类,公司流程类另立项。**
+
+- [x] **评测范围：分期**。第一期黄金集只覆盖**规范/标准/图集类**(GB 规范、中海客户标准、图集)的"查数值/查条文"题——确定性强、好评分、与旧集同型。**公司流程/BIM 操作类**(建模要点、机电算量、管综、培训视频 transcript)因题形态是"怎么做"、难客观打分,**单独立项**,后续设计专门评测方式,不混入第一期。
+- [ ] `sample_for_eval.py` 从当前 `parents.sqlite` 重采样,产出新 `sampled_parents.json`。**第一期只从设计规范/客户标准类文档抽样**(需给 `sample.py` 加 category/doc 过滤,当前它不区分来源)。
+- [ ] **抽样质量过滤(抽样预览发现,必做)**：现有 `MIN_PARENT_CHARS=200` 不足,预览抽到约一到两成噪声块——图集签署栏(人名如"审核/校对")、`![](images/...)` 图片链接残块、纯目录/图集号、无数据表头。需加过滤:剔除图片链接占比高、纯签署/目录、全表头无数据行的父块。
+- [ ] kind 配额需按当前语料重新定。抽样预览结论:**当前语料强项是 GB 规范**(code_lookup 料极多、质量好),建议提高 code_lookup/table_formula 配额;factual 保留但只取规范类;transcript **第一期排除**(归入公司流程另立项)。
+- [ ] Agent 合成器读 `sampled_parents.json` 产 `drafts.jsonl` → 人工评审 → 新 `golden.jsonl`。Agent 可做初筛(答案是否出自父块、可检索性、难度、去重),终审与抽查(15-20题)由用户/领域同事把关;出题与审题尽量分离视角,降低同源偏差。
+- [ ] no_answer 题需重设:旧的 6 条(幕墙/Revit窗族/暖通冷负荷/装配式/工作集/钢筋混凝土抗震)有些现在**语料里已有**(暖通、混凝土规范都在),不再是"域外",需换成真正当前语料覆盖不到的主题。
+- [ ] `candidates` 子命令用途转正:不再用于"回填旧题",改为**新题合成后的可检索性反向验证**(跑 retrieve 确认新题目标父块进 top-5)。
+
+#### 公司流程/BIM 操作类评测（第二期,另立项占位）
+
+- [ ] 待第一期规范类基线恢复后设计。覆盖:BIM 建模流程、机电算量、管综要点、培训视频 transcript。题形态是"操作要点/怎么做",非"查数值",评分方式需专门设计(可能需 LLM 裁判或要点覆盖率,不同于确定性 parent_id 命中)。属独立项目,不与第一期混。
 
 #### no-answer 判定与当前 prompt 对齐（重建同批修复）
 
@@ -213,10 +226,12 @@
 
 #### 分阶段步骤（候选）
 
-- [x] **阶段 0—1 tooling（2026-07-30 交付）**：新增 `scripts/relabel_golden.py`（fingerprint + candidates 子命令）；修 `run_eval_retrieval.py` no-answer 口径对齐 prompt（`"未找到相关内容"` substring match，覆盖 session.py 硬编码 fallback 与 LLM 两条路径）；`.gitignore` 新增 `src/eval/relabel/`。经本地 compile + 单元测试，无活索引环境 graceful exit。**上述代码变动待用户验收**，验收后需在 Ubuntu 生产节点跑 `fingerprint` 固化石锤、`candidates` 产出审阅清单。
-- [ ] 阶段 2：人工/Agent 逐条确认，生成新 `golden.jsonl`（先写副本，不覆盖原文件）。
-- [ ] 阶段 3：索引指纹记录（在 `fingerprint` 子命令中已实现，待实施阶段 0 时固化到日志）。
-- [ ] 阶段 4：在真实索引上重跑 `run_eval_retrieval.py`，确立**新基线**（不得沿用 2026-05 旧数字）。
+- [x] **阶段 0 生产验证(2026-07-30 完成)**：在生产实跑 `fingerprint` 坐实 ∩=0、`candidates --limit 3` 验证候选,发现语料域替换(钢结构→BIM/机电/建筑规范),方案 A 否决,转向 B。
+- [x] no-answer 口径修复(commit 96bd539 交付)。
+- [x] **阶段 1 代码(2026-07-30 交付)**：`sample.py` 加 category 白名单(设计规范+客户标准)、质量过滤(_is_noise_parent: 剔图片链接块/签注/纯表头)、新配额(factual40/code25/table20/transcript0);`sample_for_eval.py` CLI 暴露新参数;旧 `golden.jsonl`/`drafts.jsonl` 归档到 `src/eval/archive/`。本地 compile + 过滤单测通过。**待生产执行**:`sample_for_eval.py` 产出新 `sampled_parents.json`(需 docker cp 新代码进容器)。
+- [ ] 阶段 2：Agent 合成器读 `sampled_parents.json` 产 `drafts.jsonl` → 人工评审 → 新 `golden.jsonl`。
+- [ ] 阶段 3：索引指纹记录集成到 `run_eval_retrieval.py` 启动流程(需评估优先级)。
+- [ ] 阶段 4：在新 `golden.jsonl` 上重跑 `run_eval_retrieval.py`,确立**新基线**。
 - [ ] 阶段 5：补充对比型/多轮/边界/转录用例（接续"7. 检索黄金集扩展"）。
 
 #### 自动化验证 / 真实索引验证
@@ -234,10 +249,12 @@
 
 - [ ] **否**。本方案针对黄金集与评测脚本，不触碰索引；反而依赖"当前索引保持不变"来重标。若实施期间语料再次重建，需重跑校准。
 
-#### 用户决定（2026-07-30 已定）
+#### 用户决定（2026-07-30 已定，含生产验证后升级）
 
-- [x] **重建路线：组合，以 A 为主**——检索题主体走半自动回填（方案 A），仅对旧父块已消失或需补齐的 kind 用方案 B 增量补充。
-- [x] **no-answer 口径：改脚本对齐 prompt**——以 `prompts/answer_system.md` 为准（线上生效契约），修 `run_eval_retrieval.py`（docstring/表头/`_grade_no_answer`）匹配 prompt 实际短语；不改动线上回答行为。
+- [x] **重建路线：方案 B 全重建**——旧钢结构黄金集与当前语料域(BIM/机电/建筑规范)不重叠,方案 A 前提失效。改用 `sample.py` 从当前 20088 个父块重采样,合成面向真实语料的全新题。
+- [x] **旧钢结构黄金集归档保留**——重命名/移入子目录,不删除,不再作为当前基线。
+- [x] **no-answer 口径：改脚本对齐 prompt**——以 `prompts/answer_system.md` 为准(线上生效契约),修 `run_eval_retrieval.py`(docstring/表头/`_grade_no_answer`)匹配 prompt 实际短语；不改动线上回答行为。(已于 commit 96bd539 交付)
+- [x] **重建策略 A → 否决**：因语料域不重叠,无法回填旧题。
 
 #### 仍需用户决定的事项（可延后至实施前）
 
