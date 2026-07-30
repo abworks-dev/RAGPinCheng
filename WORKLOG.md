@@ -1044,3 +1044,10 @@
 - 关键教训(已记 TODO)：expected_sides 初版从 85 块采样池选 id,但检索返回索引全量 id,两套不交集→全 0 both_hit。改为**用生产实际召回块反标**(数据驱动)后达标。诚实定位:4 题中仅 0004 证明拆分增量,另 3 题单查询也覆盖两侧,故它们验证"两侧覆盖"而非纯拆分收益,已在 notes 标注不夸大。
 - 验证：本地 `grade_comparison` 单测(两侧/单侧/都不中/top-k截断)全过、EvalItem 往返兼容;生产 both_hit off3/on4、逐题 off/on 明细。旧 79 题评分逻辑与结果不受影响(grade_one 未改、expected_sides 默认空)。
 - 待办/风险：**发现独立生产 bug**——`retrieve_multi` 合并多子查询后 passages 可能 >100,触发 rerank HTTP 422(开启拆分即踩,comparison-0004 实测触发),已记 TODO 待另立项修复(改 src/retrieve.py,R2)。对比题 4 题中 3 题拆分增量不显著,后续可补更多两侧对称的对。
+
+### 22:13 — 修复 retrieve_multi passages>100 触发 rerank HTTP 422(R2)
+
+- 完成：按 `project-docs/fix-retrieve-multi-rerank-overflow.md` 方案 A 实施。**根因**:`retrieve_multi` 合并多子查询召回后(最多 3×40=120 条 child)一次性送 rerank,超 gpu_service `MAX_BATCH_SIZE=100` → 422。**修法**:`src/config.py` 新增 `RERANK_BATCH_CAP=96`(留余量);`src/retrieve.py` 新增 `_cap_children_for_rerank`(每子查询保底 cap//n_sub 条不被截,再按 RRF 融合分补足),在 `retrieve_multi` 组装 `all_child_ids` 后送 rerank 前应用;union≤cap 时行为不变,单查询 `retrieve()` 完全不动。方案文档 `project-docs/fix-retrieve-multi-rerank-overflow.md` 入库。
+- 文件：`src/config.py`、`src/retrieve.py`、`project-docs/fix-retrieve-multi-rerank-overflow.md`、`TODO.md`、`WORKLOG.md`。commit 79bbf9e。
+- 验证：本地 `_cap_children_for_rerank` 单测全过(3子查询各40 → 96条、每侧前32条保留;2子查询各60 → 每侧前48条保留;小集合全保留;无重复);**生产**:comparison-0004 不再报 422,从"崩溃"变成正常 off[1/2]→on[2/2] 干净展示拆分价值;both-sides coverage ON 4/4、OFF 3/4、payoff+0.25(与修复前一致,证明 cap 保底没把任何一侧挤出)。
+- 待办/风险：TODO 中此 bug 标记为已修;单查询路径未触碰,等下次全量回归(79 题)进一步坐实零影响(本轮仅跑了 comparison 4 题)。如需可继续:补几条能强证明拆分增量的对比对、阶段3 索引指纹防陈旧。

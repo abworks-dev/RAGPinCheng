@@ -237,7 +237,7 @@
 
 #### 🔴 发现的独立生产 bug(需另立项,非本任务)
 
-- [ ] **`retrieve_multi` passages 超限**:`src/retrieve.py` 的 `retrieve_multi` 合并多子查询召回后,传给 reranker 的 passages 可能 >100,触发 `rerank returned HTTP 422: List should have at most 100 items`。开启 `QUERY_DECOMPOSE_ENABLED` 后生产会踩(对比题验证时 comparison-0004 实际触发)。修复需在 rerank 前对合并后的 child 列表去重/截断到 100。属检索核心逻辑改动,R2,单独评估。
+- [x] **`retrieve_multi` passages 超限——已修复(2026-07-30,commit 79bbf9e)**:`retrieve_multi` 合并多子查询召回(最多 3×40=120)一次性送 rerank,超 gpu_service `MAX_BATCH_SIZE=100` → HTTP 422。修法(方案见 `project-docs/fix-retrieve-multi-rerank-overflow.md`):新增 `RERANK_BATCH_CAP=96` + `_cap_children_for_rerank`(每子查询保底 cap//n_sub 条不被截,再按 RRF 融合分补足),union≤cap 时行为不变、单查询路径不受影响。本地单测通过;生产验证:comparison-0004 不再 422、both_hit ON 4/4 OFF 3/4、payoff+0.25。
 
 #### 自动化验证 / 真实索引验证
 
