@@ -31,6 +31,37 @@ def grade_one(expected: list[str], retrieved: list[str]) -> int | None:
     return None
 
 
+def grade_comparison(
+    expected_sides: list[list[str]], retrieved: list[str], k: int
+) -> dict:
+    """Grade a comparison item: EVERY side must be hit within top-k.
+
+    Unlike grade_one (any-hit), a comparison "compare A vs B" is only useful
+    when both A's and B's parents are retrieved — otherwise the LLM sees one
+    side and can't compare. So we require at least one hit per side.
+
+    Returns a dict:
+      - sides_total:   number of sides
+      - sides_hit:     how many sides had >=1 parent in retrieved[:k]
+      - both_hit:      True iff every side was hit (the headline metric)
+      - side_ranks:    per-side best 1-based rank in retrieved (None if missed)
+    """
+    top = retrieved[:k]
+    side_ranks: list[int | None] = []
+    for side in expected_sides:
+        side_set = set(side)
+        rank = next((i for i, pid in enumerate(top, 1) if pid in side_set), None)
+        side_ranks.append(rank)
+    sides_total = len(expected_sides)
+    sides_hit = sum(1 for r in side_ranks if r is not None)
+    return {
+        "sides_total": sides_total,
+        "sides_hit": sides_hit,
+        "both_hit": sides_total > 0 and sides_hit == sides_total,
+        "side_ranks": side_ranks,
+    }
+
+
 def recall_at_k(rows: list[RetrievalEvalRow], k: int) -> float:
     """Fraction of items where any expected parent appeared in top-k."""
     if not rows:

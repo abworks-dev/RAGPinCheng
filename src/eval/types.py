@@ -22,6 +22,7 @@ Kind = Literal[
     "transcript",     # transcript parent, expects @HH:MM:SS citation
     "multi_turn",     # 2-turn conversation; turn-1 + turn-2
     "no_answer",      # outside the corpus; must return 资料中未找到相关内容。
+    "comparison",     # "compare A vs B"; BOTH sides must be retrieved
 ]
 
 
@@ -38,6 +39,11 @@ class EvalItem:
     # Optional fields for special kinds.
     followup_question: str = ""  # multi_turn turn-2
     expected_substrings: list[str] = field(default_factory=list)
+    # comparison: each inner list holds one side's candidate parent_ids. A
+    # comparison is "covered" only when EVERY side has at least one hit in the
+    # retrieved set (see metrics.grade_comparison). Empty for all other kinds,
+    # so from_dict on legacy rows is unaffected.
+    expected_sides: list[list[str]] = field(default_factory=list)
     # Reviewer notes — free-text, never graded against.
     notes: str = ""
 
@@ -58,5 +64,6 @@ class EvalItem:
             source_parent_id=d.get("source_parent_id", ""),
             followup_question=d.get("followup_question", ""),
             expected_substrings=list(d.get("expected_substrings", [])),
+            expected_sides=[list(s) for s in d.get("expected_sides", [])],
             notes=d.get("notes", ""),
         )
