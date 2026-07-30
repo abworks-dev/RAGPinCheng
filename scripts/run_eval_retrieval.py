@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sqlite3
 import sys
 from collections import defaultdict
 from datetime import datetime
@@ -31,7 +32,8 @@ from time import perf_counter
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.config import DECOMPOSE_FINAL_TOP_K, ZHIPU_API_KEY
+from src.config import DECOMPOSE_FINAL_TOP_K, PARENTS_DB, ZHIPU_API_KEY
+from src.eval.fingerprint import compare, compute_fingerprint, load_baseline
 from src.eval.io import load_jsonl
 from src.eval.metrics import RetrievalEvalRow, grade_comparison, grade_one, summarize
 from src.eval.types import EvalItem
@@ -42,6 +44,66 @@ GOLDEN = Path(__file__).resolve().parent.parent / "src" / "eval" / "golden.jsonl
 RUNS_DIR = Path(__file__).resolve().parent.parent / "src" / "eval" / "runs"
 
 NO_ANSWER_TEXT = "未找到相关内容"
+
+
+def _load_live_parent_ids() -> list[str]:
+    """Read the live parent_id set straight from parents.sqlite. No Qdrant."""
+    conn = sqlite3.connect(PARENTS_DB)
+    try:
+        rows = conn.execute("SELECT parent_id FROM parents").fetchall()
+    finally:
+        conn.close()
+    return sorted(r[0] for r in rows)
+
+
+def _check_staleness(strict: bool) -> None:
+    """Compare live index fingerprint to the frozen baseline; warn or fail.
+
+    The baseline lives at src/eval/golden.fingerprint.json. The live set is
+    read from parents.sqlite directly (no Qdrant, no model). On drift we
+    print a clearly-marked warning and (under --strict-staleness) exit 2.
+    We never block by default — a stale golden set is still useful to grade
+    (the resulting 0/100 may itself be the signal), but it should be hard
+    to miss.
+    """
+    baseline = load_baseline()
+    if baseline is None:
+        print("[eval] no baseline fingerprint (src/eval/golden.fingerprint.json) — "
+              "skip staleness check. Run `relabel_golden.py fingerprint --freeze` "
+              "after a golden-set rebuild to create one.")
+        return
+    try:
+        live = compute_fingerprint(_load_live_parent_ids())
+    except Exception as exc:  # noqa: BLE001 — never let a check crash the run
+        print(f"[eval] [warn] could not compute live fingerprint: {exc}")
+        return
+    diff = compare(live, baseline)
+    if diff["match"]:
+        print(f"[eval] staleness OK (parent_count={live['parent_count']}, "
+              f"frozen_at={baseline.get('frozen_at', '?')})")
+        return
+    print()
+    print("!" * 64)
+    print("!!  WARNING: golden-set fingerprint MISMATCH")
+    print("!")
+    print(f"!  live      : parent_count={live['parent_count']} "
+          f"sha256={live['parent_id_sha256']}")
+    print(f"!  baseline  : parent_count={baseline.get('parent_count')} "
+          f"sha256={baseline.get('parent_id_sha256')}  "
+          f"frozen_at={baseline.get('frozen_at', '?')}")
+    cd = diff.get("count_delta")
+    if cd is not None:
+        print(f"!  count_delta        : {cd:+d} parents")
+    print(f"!  sha256_changed    : {diff.get('sha256_changed')}")
+    print("!  → The golden set may have gone stale. expected_parent_ids no longer")
+    print("!    match the live index. Results below may be misleading (R@K ≈ 0,")
+    print("!    not because retrieval broke, but because the labels are out of date).")
+    print("!  Action: rebuild the golden set, then `relabel_golden.py fingerprint")
+    print("!  --freeze` to refresh the baseline. See project-docs/golden-set-staleness-guard.md.")
+    print("!" * 64)
+    print()
+    if strict:
+        raise SystemExit(2)
 
 
 def _ask(session: ChatSession, question: str) -> tuple[list[str], str, dict]:
@@ -173,10 +235,21 @@ def main() -> None:
         "--kinds", type=str, default="",
         help="Comma-separated kinds to include. Empty = all."
     )
+    p.add_argument(
+        "--strict-staleness", action="store_true",
+        help="Exit non-zero if the live index fingerprint has drifted from the "
+             "baseline in src/eval/golden.fingerprint.json. Default: warn only, "
+             "still run the eval.",
+    )
     args = p.parse_args()
 
     if not ZHIPU_API_KEY:
         raise SystemExit("ZHIPU_API_KEY missing — set in .env before running.")
+
+    # Staleness check — compute live fingerprint and compare to the baseline
+    # frozen alongside the golden set. Non-fatal by default; loud warning if
+    # drift is detected, exit non-zero under --strict-staleness.
+    _check_staleness(args.strict_staleness)
 
     items: list[EvalItem] = load_jsonl(args.golden)
     if args.kinds:
