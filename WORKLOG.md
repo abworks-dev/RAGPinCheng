@@ -1058,3 +1058,10 @@
 - 文件：`WORKLOG.md`(仅记录;未改任何业务代码/黄金集/索引)
 - 验证：生产全量 79 题实跑 100.9s(只读检索+生成,无 LLM judge),逐项对照 553a802 基线全等。
 - 待办/风险：零回归证据已落地;剩余可选:补更多两侧对称对比对、阶段3 索引指纹防陈旧。
+
+### 22:34 — 阶段3:索引指纹防陈旧告警机制交付(commit 240cb29)
+
+- 完成:按 `project-docs/golden-set-staleness-guard.md` 方案实施并生产三路径验证。**新增**:`src/eval/fingerprint.py`(compute/load/write/compare)+ `src/eval/golden.fingerprint.json`(基准 sidecar,parent_count=20088, sha256=8478af62..., frozen_at=2026-07-30T22:30+08:00)+ `run_eval_retrieval.py` 启动校验(非阻断) + `--strict-staleness` 标志(SystemExit 2)+ `relabel_golden.py fingerprint --freeze`(重标后冻结新基准)。**生产三路径全部按预期**:①匹配→首行 `[eval] staleness OK` 正常跑;②篡改 baseline(只动 sha256 前8位、模拟"只重解析"最隐蔽陈旧)→ 打印 `!!! WARNING ...` 段(显眼区块,含 live/baseline 对比、count_delta=+0、sha256_changed=True、"R@K≈0 是标注陈旧不是检索坏了"解释、修复指引),评测仍继续;③同篡改 + `--strict-staleness` → SystemExit 2 退出码 2,评测不进入循环。
+- 文件:`src/eval/fingerprint.py`、`src/eval/golden.fingerprint.json`、`scripts/relabel_golden.py`、`scripts/run_eval_retrieval.py`、`project-docs/golden-set-staleness-guard.md`、`TODO.md`、`WORKLOG.md`。
+- 验证:本地 `compute_fingerprint` 单测(排序不敏感)+ compare 三路径(无/不匹配/匹配)全过;生产实跑三场景全部按设计工作。**未改 EvalItem schema、评分逻辑、索引或检索管道**。
+- 待办/风险:旧集重标后需人工跑 `relabel_golden.py fingerprint --freeze` 刷新基准(脚本不会自动,流程约束在方案文档);7-R 剩余可选:补更多两侧对称对比对、公司流程/BIM 操作类第二期。
