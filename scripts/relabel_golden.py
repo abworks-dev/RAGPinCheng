@@ -30,7 +30,6 @@ parent_id. Picking is a human step.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import sqlite3
 import sys
@@ -40,6 +39,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.config import PARENTS_DB
+from src.eval.fingerprint import FINGERPRINT_PATH, compute_fingerprint, write_baseline
 from src.eval.io import load_jsonl
 from src.eval.types import EvalItem
 
@@ -68,23 +68,12 @@ def _load_parent_ids(db_path: Path = PARENTS_DB) -> list[str]:
     return sorted(r[0] for r in rows)
 
 
-def _index_fingerprint(parent_ids: list[str]) -> dict:
-    """A stable fingerprint of the current index's parent_id set.
-
-    count + sha256 over the sorted, newline-joined ids. Two indexes with the
-    same fingerprint have the identical parent_id set → any golden set labelled
-    against one is valid against the other.
-    """
-    h = hashlib.sha256("\n".join(parent_ids).encode("utf-8")).hexdigest()
-    return {"parent_count": len(parent_ids), "parent_id_sha256": h}
-
-
 # ── subcommand: fingerprint ───────────────────────────────────────────────────
 
 def cmd_fingerprint(args: argparse.Namespace) -> None:
     parent_ids = _load_parent_ids(args.db)
     live_set = set(parent_ids)
-    fp = _index_fingerprint(parent_ids)
+    fp = compute_fingerprint(parent_ids)
 
     print("=" * 68)
     print(" Live index fingerprint (parents.sqlite)")
@@ -133,6 +122,12 @@ def cmd_fingerprint(args: argparse.Namespace) -> None:
         print("    index. This is a labelling problem, not a retrieval problem.")
     else:
         print("  → Partial overlap; some labels still valid. Inspect per-item.")
+
+    if args.freeze:
+        write_baseline(fp)
+        print()
+        print(f"[fingerprint] baseline frozen → {FINGERPRINT_PATH}")
+        print("[fingerprint] this becomes the staleness baseline for future eval runs.")
 
     if args.json:
         out = {
@@ -232,6 +227,11 @@ def main() -> None:
 
     fp = sub.add_parser("fingerprint", help="Phase 0: index fingerprint + stale-label proof")
     fp.add_argument("--json", action="store_true", help="also write a JSON artifact")
+    fp.add_argument(
+        "--freeze", action="store_true",
+        help="Write this fingerprint as the staleness baseline (src/eval/golden.fingerprint.json). "
+             "Run this right after a golden-set rebuild so future eval runs have a fresh anchor.",
+    )
     fp.set_defaults(func=cmd_fingerprint)
 
     ca = sub.add_parser("candidates", help="Phase 1: per-item top-K review sheet")
