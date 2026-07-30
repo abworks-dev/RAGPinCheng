@@ -990,3 +990,28 @@
 - 文件：`src/eval/sample.py`、`scripts/sample_for_eval.py`、`src/eval/archive/{golden_steel_legacy,drafts_steel_legacy}.jsonl`(移动)、`src/eval/archive/README.md`(新增)、`TODO.md`、`WORKLOG.md`
 - 验证：`py_compile` 两文件通过;过滤单测全过——图片块(ratio 0.95)判噪声、纯表头12行判噪声、正文+小表格通过、纯正文通过、配额与白名单常量符合预期。`run_eval_retrieval.py` 的 GOLDEN 常量**有意不改**(仍指 golden.jsonl),新集产出前直接跑会 FileNotFoundError,避免误用废弃数据当基线(archive/README 已说明)。未连生产、未 commit。
 - 待办/风险：`sampled_parents.json` 仍是旧钢结构采样,待生产跑新 `sample_for_eval.py` 覆盖。**下一步(阶段2)需生产执行**:docker cp 新 sample.py/sample_for_eval.py 进容器 → 跑 `sample_for_eval.py` 产新 `sampled_parents.json` → 我读它合成候选题。未 commit/push(按上次流程,推送需另行授权)。
+
+### 17:59 — 说明必须使用黄金集的项目场景
+
+- 完成：说明黄金集并非所有项目的形式性必需品，但在高风险知识问答、频繁调整检索链路、模型或索引升级、需要上线门禁和多方案量化比较时是事实上的必要基础；结合本项目的查询拆分、分块与索引重建等场景说明用途。
+- 文件：`WORKLOG.md`（仅记录本次说明；未修改代码、黄金集或索引）
+- 验证：依据当前 RAG 评测链路和项目已有改造场景进行说明；未运行评测或生产操作。
+
+### 18:03 — 解释黄金集的测试运行方式
+
+- 完成：说明黄金集属于 RAG 回归评测数据，介绍固定问题送入检索、收集返回 Parent ID、与人工标注证据比较并汇总 Recall@1、Recall@5、MRR 和拒答合规率的流程；区分黄金集评测与普通单元测试，并提示当前新黄金集仍处于重建过程。
+- 文件：`WORKLOG.md`（仅记录本次说明；未修改代码、黄金集或索引）
+- 验证：依据 `scripts/run_eval_retrieval.py` 与 `src/eval/metrics.py` 的既有评测机制解释；未实际运行评测。
+
+### 18:05 — 说明修改黄金集对项目功能的影响
+
+- 完成：说明单独修改黄金集数据不会改变线上聊天、检索、生成或索引行为，只会改变评测覆盖与指标；同时指出不当修改会使版本比较失真，并说明评测脚本、配置或业务链路同步修改时可能产生额外影响。
+- 文件：`WORKLOG.md`（仅记录本次说明；未修改代码、黄金集或索引）
+- 验证：依据黄金集仅由离线评测脚本读取的当前架构进行影响分析；未运行评测或生产操作。
+
+### 18:20 — 黄金集方案B重建完成:75题新集 + 生产新基线确立
+
+- 完成：完成方案 B 第一期黄金集重建全流程。生产采样(85父块)→Agent 逐父块合成候选题→人工逐条审核(剔版权页/图集签注/OCR噪声等)→新 `src/eval/golden.jsonl`(75题:factual32/table_formula4/code_lookup23/multi_turn5对/no_answer6)。table_formula 因当前语料图集类表格噪声高,按用户决定只保留 4 个高质量题。生产两阶段验证:(1) 可检索性预验证发现 5 处未命中,修正 3 题(2题问点太泛被同主题父块挤掉、1题原本认错父块把§10.2采暖块配了§11.1消防题),复验降到仅 2 个 multi_turn-t2(预期);(2) 完整 `run_eval_retrieval.py` 确立**新基线**:检索题 R@1=75.4%/R@5=100%/MRR@5=0.870,no_answer 合规 6/6=100%,multi_turn t2 走 ChatSession 后 R@5=100%(承接机制有效)。
+- 文件：`src/eval/golden.jsonl`(重建,75题)、`TODO.md`(7-R 阶段2/4 标记完成+新基线、旧基线告警更新)、`WORKLOG.md`。审核中间产物在 `src/eval/relabel/`(已 gitignore)。
+- 验证：本机 `load_jsonl` 校验格式(75题、multi_turn配对完整、检索题均有 expected);生产可检索性 R@5=100%、完整评测 no_answer 100%。旧钢结构黄金集已归档 `src/eval/archive/`。
+- 待办/风险：新集属"代码完成,建议用户抽查 15-20 题核对专业正确性"(Agent 合成+自审有同源偏差,终审宜人工);阶段3(索引指纹防陈旧)、阶段5(对比型用例、公司流程类第二期)未做。no_answer 的域外性已由生产实跑坐实(6条全拒答,无误召回)。
