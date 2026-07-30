@@ -142,7 +142,7 @@
 - [ ] 边界 case（纯数字、纯代码、无意义输入）
 - [ ] 视频转录本相关问题
 
-> ⚠️ 上方"当前基线 R@1=90% / R@5=96%"是 2026-05 旧索引上的历史数字，**已失效**。当前生产索引上该黄金集实测全 0 命中，原因见下方"检索黄金集重建"。在完成重建前，本节的"扩展"待办无法量化验证；扩展应在重建之后进行。
+> ⚠️ 上方"当前基线 R@1=90% / R@5=96%"是 2026-05 旧钢结构索引上的历史数字，**已废弃**。当前生产索引的新基线(2026-07-30 重建后)：检索题 R@1=75.4% / R@5=100% / MRR@5=0.870，no_answer 合规 100%(75题)。详见下方"7-R 检索黄金集重建"。
 
 ### 7-R. 检索黄金集重建（Golden Set Rebuild）— R2，未获实施授权
 
@@ -229,10 +229,10 @@
 - [x] **阶段 0 生产验证(2026-07-30 完成)**：在生产实跑 `fingerprint` 坐实 ∩=0、`candidates --limit 3` 验证候选,发现语料域替换(钢结构→BIM/机电/建筑规范),方案 A 否决,转向 B。
 - [x] no-answer 口径修复(commit 96bd539 交付)。
 - [x] **阶段 1 代码(2026-07-30 交付)**：`sample.py` 加 category 白名单(设计规范+客户标准)、质量过滤(_is_noise_parent: 剔图片链接块/签注/纯表头)、新配额(factual40/code25/table20/transcript0);`sample_for_eval.py` CLI 暴露新参数;旧 `golden.jsonl`/`drafts.jsonl` 归档到 `src/eval/archive/`。本地 compile + 过滤单测通过。**待生产执行**:`sample_for_eval.py` 产出新 `sampled_parents.json`(需 docker cp 新代码进容器)。
-- [ ] 阶段 2：Agent 合成器读 `sampled_parents.json` 产 `drafts.jsonl` → 人工评审 → 新 `golden.jsonl`。
-- [ ] 阶段 3：索引指纹记录集成到 `run_eval_retrieval.py` 启动流程(需评估优先级)。
-- [ ] 阶段 4：在新 `golden.jsonl` 上重跑 `run_eval_retrieval.py`,确立**新基线**。
-- [ ] 阶段 5：补充对比型/多轮/边界/转录用例（接续"7. 检索黄金集扩展"）。
+- [x] **阶段 2 完成(2026-07-30)**：生产采样→Agent 合成→人工审核→新 `golden.jsonl`(75题:factual32/table_formula4/code_lookup23/multi_turn10/no_answer6)。table_formula 因当前语料图集类表格噪声高,按用户决定只保留 4 个高质量题。
+- [x] **阶段 4 完成(2026-07-30)——新基线确立**：生产实跑 `run_eval_retrieval.py`。检索题 R@1=75.4% / **R@5=100%** / MRR@5=0.870;分类 factual R@1=84.4%、code_lookup 78.3%、table_formula 75.0%、multi_turn R@1=40%(t2 走 ChatSession 后 R@5=100%,承接机制有效);**no_answer 合规 6/6=100%**。可检索性预验证经 2 轮修正(修 3 题问点偏离/父块认错),最终仅 2 个 multi_turn-t2 单独 retrieve 未命中(预期,评测走 ChatSession 已救回)。
+- [ ] 阶段 3：索引指纹记录集成到 `run_eval_retrieval.py` 启动流程(需评估优先级,防未来陈旧)。
+- [ ] 阶段 5：补充对比型用例(接续"7. 检索黄金集扩展");公司流程/BIM 操作类评测第二期另立项。
 
 #### 自动化验证 / 真实索引验证
 
