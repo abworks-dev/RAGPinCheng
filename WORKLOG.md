@@ -907,3 +907,44 @@
 - 文件：无业务代码改动（仅新增本机 `.venv/`，已被 `.gitignore` 忽略，不入库）；`WORKLOG.md`
 - 验证：`py -0p` 确认 3.12/3.11 均注册；`.venv` Python 版本 3.11.9；`git check-ignore .venv` 确认已忽略。临时测试脚本用后已删除。
 - 待办/风险：完整检索/黄金集验证仍需在 Ubuntu 节点（有活索引+模型+GPU）执行；本机 venv 未装 torch 等重依赖（无 GPU，按需再装）。
+
+### 14:52 — 调查并制定检索黄金集重建方案（R2，仅规划）
+
+- 完成：只读核对评测链路后，将"检索黄金集重建"方案写入 `TODO.md`（新增独立章节 `### 7-R`，全部未来事项用 `- [ ]`）。核实并修正背景：(1) 根因确为 `expected_parent_ids` 陈旧——`_stable_id=uuid5(doc_title,section_path,parent_text)` 确定性，当前生产索引语料经重新解析/分块后父块正文变化，旧单 UUID 与当前集合无交集，91 检索题集合命中恒 0；(2) 精确化"重跑就变"表述为"重解析/重分块才变"；(3) no-answer 判定是 `startswith` 非 `==`（脚本 docstring 与实现不符），且更关键是 `answer_system.md` 已改为输出"未找到相关内容"、不再追加资料来源脚注，与脚本期望短语"资料中未找到相关内容。"不匹配——比"口径对不上"更具体；(4) `sample.py`/`sample_for_eval.py` 可复用（支撑重采样），但**无**现成 ID 反向回填脚本（半自动回填需新增工具）；(5) 生产 123 篇/GB32 等具体数字本地无法复核，标注为待实施期用 `list_indexed_documents()` 固化。方案给出 A(半自动回填)/B(重采样)/组合取舍、no-answer 口径对齐、索引指纹防陈旧、检索vs生成评测二分、数据契约、分阶段步骤、验证、风险回滚、仍需用户决定项、R2 审批提示。
+- 文件：`TODO.md`（新增 `### 7-R` 章节并在"7. 检索黄金集扩展"上方加旧基线失效告警）、`WORKLOG.md`
+- 验证：只读核对 `scripts/run_eval_retrieval.py`、`src/eval/{metrics,types,sample,io}.py`、`scripts/sample_for_eval.py`、`src/chunk.py`（`_stable_id`）、`prompts/answer_system.md`、`src/indexing_pipeline.py`（`list_indexed_documents`）；`grep` 统计本地黄金集 kind 分布（factual36/table_formula14/code_lookup11/transcript6/multi_turn24/no_answer6=97）。未运行任何有副作用命令。
+- 待办/风险：R2 方案仅规划，**尚未获实施授权**；未修改业务代码/黄金集，未重建索引。生产语料具体数字待实施阶段在生产核对。
+
+### 14:59 — 查询拆分生产冒烟：拆分生效但发现"预算截断"缺陷
+
+- 完成：在 Ubuntu 生产容器对已部署的查询拆分做干净单轮冒烟（`-e QUERY_DECOMPOSE_ENABLED=true`，比较题"对比公共建筑节能设计标准和建筑节能与可再生能源利用通用规范对围护结构的要求"），确认功能与缺陷。
+- 确认生效（硬证据）：`[RETRIEVAL] fresh=8`（默认 `FINAL_TOP_K=5`，8 = `DECOMPOSE_FINAL_TOP_K`，仅 `retrieve_multi` 路径会返回 8）证明环境变量真正传入容器、`maybe_decompose` 判定拆分、走了多路检索；检索层两侧规范均召回（前 6 条 GB 55015 + 第 7/8 条 GB 50189 公共建筑节能），retrieve 耗时 5.14s 亦印证多次召回。
+- 发现缺陷（端到端不达标）：检索层召回了两侧，但 `_build_context`（`src/generate.py:61-91`）按 `parents` 顺序线性打包、`total+len(block)>budget` 即 `break`，在 `MAX_CONTEXT_CHARS=6000` 下前 5 条（全是 GB 55015，正文很长）就填满预算，配额召回的另一侧 GB 50189 被截断未进上下文；LLM 只看到一部规范，遂答"未找到相关内容"。即 `retrieve_multi` 的"每侧最低配额"成果在生成层预算处被吃掉——属方案未覆盖的下游交互缺口，非 bug 而是设计不完整。
+- 更正前一轮误判：13:36~上一次交互式 `eval_query.py` 逐行贴多行 `docker` 命令，导致命令行被当成"问题"喂入 RAG、环境变量从未生效；当时"对比成功"实为普通检索偶然两侧召回，不能作为拆分生效证据，已收回。本轮单行非交互命令才是可靠验证。
+- 结论：拆分检索层有效；端到端因预算截断仍不可用；**维持默认关闭，不灰度开启**（现网零影响，已部署代码安全）。
+- 文件：`WORKLOG.md`、`TODO.md`（在"查询拆分"章节补记已知限制/待补项）
+- 验证：生产容器单轮冒烟（只读检索+生成，未写数据）；核对 `src/generate.py:_build_context` 打包/截断逻辑确认根因。
+- 待办/风险：需补"拆分感知上下文预算（interleave 保证两侧入选）"的 R2 小改（本轮已出方案，未实施）；量化仍依赖比较型黄金集重建（见 `### 7-R`）。未修改业务代码。
+
+### 15:05 — 解释项目中的检索黄金集
+
+- 完成：只读核对黄金集数据、类型和评分脚本，确认它是 97 条经筛选固定的 RAG 回归评测题，主要按问题预期命中的 Parent UUID 评价检索排序，另含 6 条 no-answer 拒答检查；说明其不是业务知识库或答案正文集。当前 91 条检索题绑定旧索引 Parent UUID，在当前生产索引上已陈旧，不能再用历史指标代表当前效果。
+- 文件：`WORKLOG.md`（仅记录本次调查；未修改代码或黄金集）
+- 验证：核对 `src/eval/golden.jsonl`、`src/eval/types.py`、`src/eval/metrics.py`、`scripts/run_eval_retrieval.py`、`README.md` 和 `TODO.md`；未运行评测，因为本次仅解释现状且当前黄金集已知失效。
+- 待办/风险：重建方案位于 `TODO.md` 的 `7-R`，属于 R2 且尚未获执行批准；重建前不可用旧基线判断新检索方案优劣。
+
+### 15:13 — 黄金集重建阶段0—1工具 + no-answer口径对齐（R2 已批准实施）
+
+- 完成：用户锁定"组合(以A为主)"重建路线与"改脚本对齐 prompt"的 no-answer 口径并批准执行。据此交付：(1) 新增只读工具 `scripts/relabel_golden.py`——`fingerprint` 子命令读 `parents.sqlite` 算索引指纹(parent 行数+全 id 集合 sha256)、按类别列文档清单、计算旧 `expected_parent_ids` 与当前 id 集合交集以石锤陈旧；`candidates` 子命令对每条检索题跑 `retrieve()` 出 top-K 候选并连同原 `notes`/旧 id 写入审阅清单(不写黄金集、不写库)。(2) 修 `run_eval_retrieval.py` no-answer 判定：短语改为 `"未找到相关内容"` 用 substring 匹配，覆盖 `answer_system.md` 的 LLM 拒答与 `src/session.py` 两处硬编码 fallback `"资料中未找到相关内容。"`；同步修正过期 docstring/表头/注释。(3) `.gitignore` 新增 `src/eval/relabel/`。
+- 文件：`scripts/relabel_golden.py`(新增)、`scripts/run_eval_retrieval.py`、`.gitignore`、`TODO.md`(`7-R` 阶段0—1标记交付)、`WORKLOG.md`
+- 验证：`py_compile` 两脚本通过；`relabel_golden.py --help`/子命令 help 正常;无索引环境 `fingerprint` graceful exit(不崩不写);`git check-ignore` 确认 `src/eval/relabel/` 已忽略;`_grade_no_answer` 逻辑 5 例单测全通过(LLM 短语/fallback 全串/带脚注/实质答案/空串)。未连生产索引、未跑真实评测、未改黄金集。
+- 待办/风险：阶段0(生产跑 fingerprint 固化石锤)、阶段1(生产跑 candidates 出审阅清单)需在 Ubuntu 活索引节点执行，本机无索引;代码变动待用户验收(验收步骤见下一条回复)。黄金集本身仍未修改。
+
+### 15:30 — 修复查询拆分"预算截断"缺陷（拆分感知上下文预算，R2 已批准实施）
+
+- 完成：经用户 R2 批准，修复 14:59 发现的缺陷（拆分检索层两侧召回，但 `_build_context` 顺序打包 + 6000 预算把另一侧截断，LLM 只见一侧遂拒答）。按用户选定：保底用"调高总预算"、分组用"精确子查询标注"、顺序"先修 B"。实现：(1) `RetrievedParent` 加可空 `subquery_idx`；(2) `retrieve_multi` 给每个返回 parent 标注其所属子查询（= 最佳命中 child 的子查询）；(3) `generate` 抽出 `_render_source`、新增 `_interleave_by_subquery`，`_build_context` 检测到 `subquery_idx` 时按子查询 interleave 轮流打包（每侧先出 top、再出次优），单查询路径逐字节不变；(4) `config` 加 `DECOMPOSE_MAX_CONTEXT_CHARS=8000`；(5) `session` 加 `_context_budget`，拆分场景（final_sources 带 subquery_idx）用 8000、否则 6000，`ask`/`ask_stream` 两处对称改。
+- 文件：`src/config.py`、`src/retrieve.py`、`src/generate.py`、`src/session.py`、`TODO.md`、`WORKLOG.md`
+- 用户可观察变化：开关关闭（默认）时无变化；开启后比较型问题两侧证据都进上下文，回答从"未找到相关内容"变为真正的双侧对比。
+- 验证：本机 3.11 venv 装轻依赖（requests/tqdm/langchain-text-splitters/pypdf/httpx/openai，qdrant 用 stub）；`compileall api src scripts gpu_service` 通过；6 组单测全过——interleave 轮流顺序 `[a0,b0,a1,b1,a2]`、首现分组顺序保留、单查询顺序不变、**拆分场景紧预算下两侧都存活 `[a0,b0]`（对照剥离 subquery_idx 的旧顺序逻辑只留 `[a0,a1]` 单侧，复现原缺陷）**、budget 选择（普通 5300 / 拆分 7300=8000−700）。临时测试脚本用后删除。
+- 未执行的验证及原因：需活索引+GPU 的生产端到端冒烟（开关开启比较题确认回答变对比）未跑，须在 Ubuntu 容器补做；本机无 torch/qdrant/索引。
+- 待办/风险：生产冒烟待补；灰度开启 `QUERY_DECOMPOSE_ENABLED=true` 前仍需比较型黄金集量化收益（见 `### 7-R`），当前维持默认关闭。本次仅改本任务 4 个源码文件 + 共享文档，未触碰并行黄金集任务的 `scripts/relabel_golden.py`、`run_eval_retrieval.py`、`.gitignore`。

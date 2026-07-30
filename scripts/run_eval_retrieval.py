@@ -4,8 +4,11 @@ What gets measured:
   - Retrieval-graded kinds (factual / table_formula / code_lookup /
     transcript / multi_turn): Recall@1, Recall@5, MRR@5 against
     `expected_parent_ids`, computed over `TurnResult.final_sources`.
-  - no_answer items: answer text must equal "资料中未找到相关内容。"
-    (the contract enforced by the system prompt).
+  - no_answer items: answer text must contain the refusal phrase
+    "未找到相关内容" (the contract enforced by prompts/answer_system.md,
+    rule 1). The prompt no longer prepends "资料中" nor appends a
+    source-list footer, so we match the phrase as a substring rather
+    than an exact string.
 
 Multi-turn pairs share a single ChatSession instance so turn-2 exercises
 the rewriter + carry-forward. We grade both turns; turn-2 is the one
@@ -38,7 +41,7 @@ from src.session import ChatSession
 GOLDEN = Path(__file__).resolve().parent.parent / "src" / "eval" / "golden.jsonl"
 RUNS_DIR = Path(__file__).resolve().parent.parent / "src" / "eval" / "runs"
 
-NO_ANSWER_TEXT = "资料中未找到相关内容。"
+NO_ANSWER_TEXT = "未找到相关内容"
 
 
 def _ask(session: ChatSession, question: str) -> tuple[list[str], str, dict]:
@@ -49,13 +52,17 @@ def _ask(session: ChatSession, question: str) -> tuple[list[str], str, dict]:
 
 
 def _grade_no_answer(answer_text: str) -> bool:
-    # The prompt forces a trailing **资料来源：** footer even on refusals,
-    # so the canonical refusal phrase appears as a prefix, not the whole
-    # message. startswith() catches the correct behavior; an exact == would
-    # produce false negatives. If the LLM ever appends a hallucinated
-    # answer AFTER the refusal phrase, we'd want a stricter check, but
-    # that hasn't been observed in baseline.
-    return answer_text.strip().startswith(NO_ANSWER_TEXT)
+    # Two runtime no-answer paths exist and substring match covers both:
+    #   1. LLM path (sources retrieved, no answer found): prompts/
+    #      answer_system.md rule 1 → "未找到相关内容" (no "资料中" prefix,
+    #      no source footer — rule 9 forbids it).
+    #   2. No-source escape hatch (retrieval returns nothing): the hardcoded
+    #      fallback in src/session.py → "资料中未找到相关内容。", which itself
+    #      contains "未找到相关内容".
+    # Matching the phrase as a substring accepts both without false negatives;
+    # the phrase is specific enough that a genuine substantive answer won't
+    # contain it. An exact/startswith check would miss path 1.
+    return NO_ANSWER_TEXT in answer_text.strip()
 
 
 def _print_summary(rows: list[RetrievalEvalRow], no_answer_results: list[dict]) -> None:
@@ -119,7 +126,7 @@ def _print_summary(rows: list[RetrievalEvalRow], no_answer_results: list[dict]) 
     # No-answer compliance.
     print()
     print("=" * 64)
-    print(" No-answer compliance (answer_text == '资料中未找到相关内容。')")
+    print(" No-answer compliance (answer_text contains '未找到相关内容')")
     print("=" * 64)
     if no_answer_results:
         ok = sum(1 for r in no_answer_results if r["compliant"])
