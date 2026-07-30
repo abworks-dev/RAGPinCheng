@@ -8,6 +8,8 @@
 
 ### 1. 查询拆分 / 多跳检索 — Phase 2
 
+**状态**：核心已实现（默认关闭，开关 `QUERY_DECOMPOSE_ENABLED`，待黄金集验证收益后灰度开启）。2026-07-30 实施。
+
 **适用场景**：用户提问需要对比/合并多个实体或主题，但**没有规范编号**做为确定性触发信号。
 
 示例问题：
@@ -15,17 +17,20 @@
 - "客户A和客户B对图层命名的不同要求"
 - "钢结构和混凝土结构在BIM建模流程上的差异"
 
-**设计方案**：
-- [ ] 新增 Prompt `prompts/decompose_system.md`
-- [ ] 使用便宜模型（`LLM_REWRITE_MODEL = glm-4.5-air`）判断是否需要拆分
-- [ ] 返回 JSON 格式：`{"decompose": bool, "sub_queries": [...]}`，最多 3 个子查询
-- [ ] 启发式触发 gate：query 包含 `对比|比较|区别|差异|分别|VS|vs` 等比较标记时才调用 LLM，预计触发率 <5%/turn
-- [ ] 新增 `retrieve_multi` 多路检索、Parent 去重、覆盖约束与全局重排；当前源码尚无该入口
+**已实现**：
+- [x] 新增 Prompt `prompts/decompose_system.md`（+ `decompose_user.md`）
+- [x] 使用便宜模型（`LLM_REWRITE_MODEL`，默认 glm-4.5-air）判断是否需要拆分
+- [x] 返回 JSON 格式：`{"decompose": bool, "sub_queries": [...]}`，最多 3 个子查询；解析失败/单子查询安全回退不拆分
+- [x] 启发式触发 gate：query 含 `对比|比较|相比|区别|差异|不同点|异同|分别|各自|VS|vs` 等标记时才调用 LLM，预计触发率 <5%/turn
+- [x] 新增 `retrieve_multi`：多子查询召回、跨查询 RRF 融合、每子查询最低配额（`DECOMPOSE_MIN_QUOTA_PER_SUBQUERY=2`）、按原始问题全局 rerank、截断到 `DECOMPOSE_FINAL_TOP_K=8`
+- [x] `ask`/`ask_stream` 经统一 `_fresh_retrieve` 对称接入；开关关闭时与旧行为逐字节等价
+- [ ] 待验证：黄金集补充比较型用例；开关开/关的 Recall@1/@5/MRR/no-answer 与多主题覆盖率对比；触发率、每轮额外 LLM 调用与 P50/P95 延迟遥测（需容器/Ubuntu 节点补跑）
+- [ ] 待灰度：验证收益且延迟/成本可接受后再默认开启
 
 **涉及文件**：
-- 新增 `prompts/decompose_system.md`
-- 修改 `src/session.py` 或新增 `src/decompose.py`
-- 补充黄金集对比型测试用例
+- 新增 `prompts/decompose_system.md`、`prompts/decompose_user.md`、`src/decompose.py`
+- 修改 `src/retrieve.py`（`retrieve_multi` + 抽出共享召回/去重）、`src/session.py`、`src/config.py`
+- 补充黄金集对比型测试用例（待办）
 
 ### 2. 分层查询增强（查询拆分 + MQE + 受控 HyDE）
 
@@ -149,7 +154,7 @@
 - [x] CD 全流程跑通（deploy-gpu → deploy-app）
 - [x] GitHub Actions Secrets 配置
 - [x] docs/ 和 media/ 迁移完成
-- [ ] 稳定观察期
+- [x] 稳定观察期（2026-07-30 用户确认结束）
 
 ---
 

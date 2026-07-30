@@ -21,11 +21,12 @@ from dataclasses import dataclass, field, replace
 from time import perf_counter
 from typing import Iterator
 
-from .config import MAX_CONTEXT_CHARS
+from .config import MAX_CONTEXT_CHARS, QUERY_DECOMPOSE_ENABLED
+from .decompose import maybe_decompose
 from .generate import Answer, GenerationPrep, generate, rewrite_query, stream_generate
 from .query_guard import QueryValidation, validate_search_query
 from .rerank import rerank_scores
-from .retrieve import RetrievedParent, retrieve
+from .retrieve import RetrievedParent, retrieve, retrieve_multi
 
 # Fixed reserve (chars) inside MAX_CONTEXT_CHARS for system prompt + question
 # scaffolding + answer_user template overhead. Leaves the remainder for history
@@ -263,6 +264,37 @@ class ChatSession:
         rewritten = rewrite_query(prior, query, usage_out=usage_out)
         return rewritten, perf_counter() - t0
 
+    def _fresh_retrieve(
+        self,
+        search_query: str,
+        categories: list[str] | None,
+        debug: dict | None = None,
+    ) -> list[RetrievedParent]:
+        """Fresh retrieval with optional comparison-intent decomposition.
+
+        Shared by `ask` and `ask_stream` so both entry points take the exact
+        same path. When QUERY_DECOMPOSE_ENABLED is off (default), this is a
+        plain `retrieve(search_query)` — byte-for-byte the previous behavior.
+        Decomposition latency stays folded into the caller's `retrieve` timing;
+        gate/applied telemetry is recorded into `debug` when provided.
+        """
+        if not QUERY_DECOMPOSE_ENABLED:
+            return retrieve(search_query, categories=categories)
+
+        decision = maybe_decompose(search_query)
+        if debug is not None:
+            debug["decompose_gate_hit"] = decision.gate_hit
+            debug["decompose_applied"] = decision.decompose
+            debug["decompose_sub_queries"] = list(decision.sub_queries)
+            if decision.usage:
+                debug["decompose_usage"] = dict(decision.usage)
+
+        if decision.decompose:
+            return retrieve_multi(
+                decision.sub_queries, search_query, categories=categories,
+            )
+        return retrieve(search_query, categories=categories)
+
     def _sources_for_ui(
         self, parents: list[RetrievedParent]
     ) -> list[dict]:
@@ -331,7 +363,7 @@ class ChatSession:
 
         # ② RETRIEVE + ③ MERGE
         t = perf_counter()
-        fresh_sources = retrieve(search_query, categories=categories)
+        fresh_sources = self._fresh_retrieve(search_query, categories)
         final_sources = retrieve_for_turn(
             fresh_sources, self.state.last_sources, search_query,
             categories=categories,
@@ -466,7 +498,7 @@ class ChatSession:
 
         # ② RETRIEVE + ③ MERGE
         t = perf_counter()
-        fresh_sources = retrieve(search_query, categories=categories)
+        fresh_sources = self._fresh_retrieve(search_query, categories)
         final_sources = retrieve_for_turn(
             fresh_sources, self.state.last_sources, search_query,
             categories=categories,

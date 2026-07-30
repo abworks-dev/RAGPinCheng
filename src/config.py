@@ -47,6 +47,21 @@ RERANK_TOP_K = 40
 FINAL_TOP_K = 5
 MAX_CONTEXT_CHARS = 6000
 
+# Query decomposition / multi-hop retrieval (Phase 2 — comparison intent only).
+# When a question compares/contrasts multiple entities but carries no standard
+# code as a deterministic trigger, split it into sub-queries and retrieve each
+# separately so both sides survive into the context. Default OFF: enabling
+# changes retrieval behavior and must be validated on the golden set first.
+QUERY_DECOMPOSE_ENABLED = os.getenv("QUERY_DECOMPOSE_ENABLED", "").strip().lower() in ("1", "true", "yes", "on")
+# Max sub-queries produced by the decomposer.
+DECOMPOSE_MAX_SUBQUERIES = 3
+# Minimum parents each sub-query reserves in the fused result, so a high-scoring
+# side can't fully squeeze out the other side of a comparison.
+DECOMPOSE_MIN_QUOTA_PER_SUBQUERY = 2
+# Final parent cap for the decomposed path (wider than FINAL_TOP_K so both sides
+# fit; still trimmed by MAX_CONTEXT_CHARS downstream).
+DECOMPOSE_FINAL_TOP_K = 8
+
 # Reranker (cross-encoder). Set RERANK_ENABLED=False to disable and fall back
 # to RRF order from Qdrant.
 RERANKER_MODEL = "BAAI/bge-reranker-v2-m3"
