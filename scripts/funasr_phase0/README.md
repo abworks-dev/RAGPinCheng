@@ -124,6 +124,18 @@ This sandbox MUST NOT:
    local copy. Embed / Rerank P95 are compared separately; rolling
    60s windows. No waiting 1h to judge degradation.
 10. The parent enforces the license audit before it creates a GPU worker.
+    Audit schema v2 uses `License-Expression`, recognized classifiers, then a
+    short `License` declaration; long bundled notices are hashed separately so
+    NumPy/SciPy notices cannot be mistaken for the package's primary license.
+    Model verification requires a staged `LICENSE` declaration or model-card
+    `license:` field and is bound to the configured revision plus all staged
+    file hashes. An expected license alone is never `VERIFIED`.
+    Tier 0/2/3 or otherwise unverified artifacts require an exact external
+    approval at `<reports_root>/license-approvals.json`; copy
+    `license-approvals.example.json`, then bind each entry to the current
+    config and evidence SHA-256. Wildcards, stale config hashes, expired
+    approvals and changed evidence fail closed. The approval file stays outside
+    Git and is a compliance record, not a replacement for legal review.
 11. GPU entry scripts take `--config`, require a current approval window and
     reject direct execution without a parent nonce guard.
     `shared_production_gpu_confirmed: true` and a current
@@ -167,8 +179,8 @@ details. The production sandbox uses `C:\FunASR-Phase0\venv`
 
 ## Validation
 
-- 74/74 focused CPU-only unit, entry-point and PowerShell behavior tests
-  passed together after the third-review closeout.
+- Focused CPU-only unit, entry-point and PowerShell behavior tests are the
+  required validation set; the current result is recorded in `WORKLOG.md`.
 - 20/20 sandbox Python source/test files compiled in memory without writing
   bytecode.
 - 3/3 PowerShell files passed the Windows PowerShell 5.1 parser.

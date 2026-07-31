@@ -22,7 +22,7 @@
     "iic/SenseVoiceSmall"
   ],
   "allowed_asr_revisions": [
-    "v1.0.0"
+    "7bf452403abd7353a300cd760f7adae7701c92c1"
   ],
   "vad_model_id": "iic/speech_fsmn_vad_zh-cn-16k-common-pytorch",
   "vad_model_revision": "v2.0.4",
