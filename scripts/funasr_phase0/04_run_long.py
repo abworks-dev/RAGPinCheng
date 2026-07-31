@@ -163,7 +163,9 @@ def main(argv: list[str] | None = None) -> int:
         bim_term_metrics, cer, code_metrics, segment_metrics, Segment, rtf,
         realtime_speedup,
     )
-    from scripts.funasr_phase0.lib_runtime import require_guarded_worker
+    from scripts.funasr_phase0.lib_runtime import (
+        enable_offline_model_access, require_guarded_worker, resolve_staged_model,
+    )
 
     cfg = load_config(args.config)
     try:
@@ -274,11 +276,19 @@ def main(argv: list[str] | None = None) -> int:
     print(">> loading ASR model (one-time per worker)")
     t_model_start = time.monotonic()
     model_id, revision = selected_asr_model(cfg)
+    try:
+        local_model = resolve_staged_model(cfg, model_id)
+        local_vad_model = resolve_staged_model(cfg, cfg.vad_model_id)
+        local_punc_model = resolve_staged_model(cfg, cfg.punc_model_id)
+    except RuntimeError as e:
+        print(f"!! local model gate rejected: {e}")
+        return 1
+    enable_offline_model_access()
     from funasr import AutoModel
     model = AutoModel(
-        model=model_id, model_revision=revision,
-        vad_model=cfg.vad_model_id, vad_model_revision=cfg.vad_model_revision,
-        punc_model=cfg.punc_model_id, punc_model_revision=cfg.punc_model_revision,
+        model=str(local_model),
+        vad_model=str(local_vad_model),
+        punc_model=str(local_punc_model),
         device="cuda", disable_update=True,
     )
     cold_start_s = time.monotonic() - t_model_start

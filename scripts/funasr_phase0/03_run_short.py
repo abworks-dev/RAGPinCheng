@@ -65,7 +65,9 @@ def main(argv: list[str] | None = None) -> int:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
     from scripts.funasr_phase0.lib_config import load_config, gate_for_gpu_entry, ConfigGateError
     from scripts.funasr_phase0.lib_config import selected_asr_model
-    from scripts.funasr_phase0.lib_runtime import require_guarded_worker
+    from scripts.funasr_phase0.lib_runtime import (
+        enable_offline_model_access, require_guarded_worker, resolve_staged_model,
+    )
     from scripts.funasr_phase0.lib_metrics import (
         cer, code_metrics, bim_term_metrics, segment_metrics, Segment,
         rtf, realtime_speedup, CER_NORM_VERSION,
@@ -121,7 +123,7 @@ def main(argv: list[str] | None = None) -> int:
         if not _SAFE_ID_RE.fullmatch(sid):
             print(f"!! unsafe sample id: {sid!r}")
             return 1
-        audio = Path(s["audio"]).resolve()
+        audio = (manifest_path.parent / Path(s["audio"])).resolve()
         try:
             audio.relative_to(testdata_root)
         except ValueError:
@@ -130,6 +132,18 @@ def main(argv: list[str] | None = None) -> int:
         if not audio.is_file():
             print(f"!! sample {sid} audio not found: {audio}")
             return 1
+
+    # Resolve every model locally before importing FunASR.  There is no hub
+    # fallback in a guarded worker.
+    model_id, revision = selected_asr_model(cfg)
+    try:
+        local_model = resolve_staged_model(cfg, model_id)
+        local_vad_model = resolve_staged_model(cfg, cfg.vad_model_id)
+        local_punc_model = resolve_staged_model(cfg, cfg.punc_model_id)
+    except RuntimeError as e:
+        print(f"!! local model gate rejected: {e}")
+        return 1
+    enable_offline_model_access()
 
     # Load model ONCE
     print(">> loading ASR model (one-time per worker)")
@@ -141,17 +155,12 @@ def main(argv: list[str] | None = None) -> int:
     except ImportError as e:
         print(f"!! funasr import failed: {e}")
         return 1
-    # Determine model id: first in allowed list (validated in config)
-    model_id, revision = selected_asr_model(cfg)
     model_load_meta.update({"model_id": model_id, "revision": revision})
     try:
         model = AutoModel(
-            model=model_id,
-            model_revision=revision,
-            vad_model=cfg.vad_model_id,
-            vad_model_revision=cfg.vad_model_revision,
-            punc_model=cfg.punc_model_id,
-            punc_model_revision=cfg.punc_model_revision,
+            model=str(local_model),
+            vad_model=str(local_vad_model),
+            punc_model=str(local_punc_model),
             device=args.device,
             disable_update=True,
         )
@@ -166,7 +175,7 @@ def main(argv: list[str] | None = None) -> int:
     print(">> warm-up (first reviewed sample, full ASR+VAD+punc pipeline)")
     t_warm_start = time.monotonic()
     warm_id = samples[0]["id"]
-    warm_audio = Path(samples[0]["audio"]).resolve()
+    warm_audio = (manifest_path.parent / Path(samples[0]["audio"])).resolve()
     try:
         torch.cuda.empty_cache()
         torch.cuda.reset_peak_memory_stats()
@@ -190,6 +199,9 @@ def main(argv: list[str] | None = None) -> int:
     model_load_meta["vad_model_revision"] = cfg.vad_model_revision
     model_load_meta["punc_model_id"] = cfg.punc_model_id
     model_load_meta["punc_model_revision"] = cfg.punc_model_revision
+    model_load_meta["local_model_path"] = str(local_model)
+    model_load_meta["local_vad_model_path"] = str(local_vad_model)
+    model_load_meta["local_punc_model_path"] = str(local_punc_model)
 
     rows: list[dict] = []
     failures: list[dict] = []
@@ -197,7 +209,7 @@ def main(argv: list[str] | None = None) -> int:
 
     for i, s in enumerate(samples):
         sid = s["id"]
-        audio = Path(s["audio"]).resolve()
+        audio = (manifest_path.parent / Path(s["audio"])).resolve()
         ref_text = s.get("reference_text", "")
         ref_segs = [Segment(**x) for x in s.get("reference_segments", [])]
         sample_sha = _file_sha256(audio)

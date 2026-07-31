@@ -241,6 +241,7 @@ class GuardedProcess:
         env[GUARD_ENV_NONCE] = self.nonce
         env["MODELSCOPE_CACHE"] = str((Path(self.cfg.models_root) / "modelscope").resolve())
         env["HF_HOME"] = str((Path(self.cfg.models_root) / "huggingface").resolve())
+        env.update(_OFFLINE_MODEL_ENV)
         popen_kwargs: dict[str, Any] = {"env": env, "stdout": self.stdout,
                                        "stderr": subprocess.STDOUT if self.stdout else None}
         if os.name == "nt":
@@ -354,3 +355,34 @@ class GuardedProcess:
 def worker_command(script_name: str, args: list[str]) -> list[str]:
     script = Path(__file__).resolve().parent / script_name
     return [sys.executable, str(script), *args]
+
+
+_OFFLINE_MODEL_ENV = {
+    "MODELSCOPE_OFFLINE": "1",
+    "HF_HUB_OFFLINE": "1",
+    "TRANSFORMERS_OFFLINE": "1",
+}
+_MODEL_CONFIG_NAMES = ("configuration.json", "config.json")
+_MODEL_WEIGHT_PATTERNS = ("*.pt", "*.bin", "*.safetensors")
+
+
+def enable_offline_model_access() -> None:
+    """Prevent guarded ASR workers from falling back to any model hub."""
+    os.environ.update(_OFFLINE_MODEL_ENV)
+
+
+def resolve_staged_model(cfg: Any, model_id: str) -> Path:
+    """Resolve and validate a model staged below the approved models root."""
+    models_root = Path(cfg.models_root).resolve()
+    model_path = (models_root / Path(*model_id.split("/"))).resolve()
+    try:
+        model_path.relative_to(models_root)
+    except ValueError as exc:
+        raise RuntimeError(f"model {model_id!r} resolves outside models_root") from exc
+    if not model_path.is_dir():
+        raise RuntimeError(f"staged model directory not found: {model_path}")
+    if not any((model_path / name).is_file() for name in _MODEL_CONFIG_NAMES):
+        raise RuntimeError(f"staged model configuration not found: {model_path}")
+    if not any(any(model_path.glob(pattern)) for pattern in _MODEL_WEIGHT_PATTERNS):
+        raise RuntimeError(f"staged model weights not found: {model_path}")
+    return model_path

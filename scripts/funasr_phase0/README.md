@@ -63,7 +63,8 @@
    SHA and confirm the production worktree is clean before pulling.
 2. R3-1: during the approved window, run `setup_venv.ps1` to create the isolated
    venv and freeze the resolved dependency set.
-3. R3-2: configure only SenseVoiceSmall `v1.0.0`, the pinned VAD and punctuation
+3. R3-2: configure only SenseVoiceSmall at fixed commit
+   `7bf452403abd7353a300cd760f7adae7701c92c1`, the pinned VAD and punctuation
    models; download into the isolated model root; run `lib_license_audit.py` and
    stop on every blocker.
 4. R3-3: run `01_measure_bge_baseline.py --config ...` for the 5-minute BGE-only
@@ -154,6 +155,11 @@ This sandbox MUST NOT:
     64 KiB per line; optional `license_evidence` is preserved as an advisory.
 15. Short-sample warm-up uses the first reviewed manifest sample so VAD,
     ASR and punctuation paths are exercised before measured inference.
+16. Short and long ASR workers resolve ASR, VAD and punctuation models only
+    from `<models_root>/<model_id>`, require both configuration and weight
+    files before importing FunASR, and force ModelScope/Hugging Face offline
+    mode. Missing local files fail closed; model-hub fallback is forbidden.
+    Relative short-sample audio paths are resolved from the manifest directory.
 
 ## What is NOT in this directory (unchanged)
 
