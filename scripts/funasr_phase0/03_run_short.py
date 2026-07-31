@@ -36,6 +36,16 @@ REQUIRED_SHORT_SCENARIOS = frozenset({
     "background_music", "long_silence", "bim_terms", "noise_with_bim",
 })
 _SAFE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+CONTEXTUAL_PARAFORMER_MODEL_ID = (
+    "iic/speech_paraformer-large-contextual_asr_nat-zh-cn-16k-common-vocab8404"
+)
+HOTWORD_PROFILES: dict[str, tuple[str, ...]] = {
+    "off": (),
+    "bim-v1": (
+        "超声波探伤", "初拧", "终拧", "摩擦面", "高强螺栓", "建筑信息模型",
+    ),
+}
+CONTEXTUAL_CLAS_SCALE = 1.0
 
 
 def _file_sha256(p: Path) -> str:
@@ -72,6 +82,33 @@ def _character_diff(reference: str, hypothesis: str) -> list[dict]:
     ]
 
 
+def _resolve_hotword_profile(profile: str, model_id: str) -> tuple[str | None, str]:
+    """Resolve a fixed profile; arbitrary strings, files and URLs are forbidden."""
+    try:
+        words = HOTWORD_PROFILES[profile]
+    except KeyError as exc:
+        raise ValueError(f"unknown hotword profile: {profile!r}") from exc
+    if profile != "off" and model_id != CONTEXTUAL_PARAFORMER_MODEL_ID:
+        raise ValueError(
+            f"hotword profile {profile!r} requires {CONTEXTUAL_PARAFORMER_MODEL_ID}"
+        )
+    text = " ".join(words) if words else None
+    digest = hashlib.sha256((text or "").encode("utf-8")).hexdigest()
+    return text, digest
+
+
+def _checkpoint_dir(checkpoints_root: str, run_id: str, profile: str) -> Path:
+    base = Path(checkpoints_root) / run_id / "03_run_short"
+    return base if profile == "off" else base / profile
+
+
+def _generation_kwargs(input_path: Path, hotword_text: str | None) -> dict:
+    kwargs = {"input": str(input_path), "batch_size_s": 60, "is_final": True}
+    if hotword_text:
+        kwargs.update(hotword=hotword_text, clas_scale=CONTEXTUAL_CLAS_SCALE)
+    return kwargs
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--config", required=True)
@@ -81,6 +118,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--out", default=None)
     p.add_argument("--diagnostic-sample-id", default=None)
     p.add_argument("--include-diagnostic-text", action="store_true")
+    p.add_argument(
+        "--hotword-profile", default="off", choices=sorted(HOTWORD_PROFILES),
+        help="fixed preregistered model-level hotword profile",
+    )
     args = p.parse_args(argv)
 
     if bool(args.diagnostic_sample_id) != bool(args.include_diagnostic_text):
@@ -112,7 +153,18 @@ def main(argv: list[str] | None = None) -> int:
 
     testdata_root = Path(cfg.testdata_root).resolve()
     manifests_root = testdata_root
-    ckpt_dir = Path(cfg.checkpoints_root) / cfg.run_id / "03_run_short"
+    model_id, revision = selected_asr_model(cfg)
+    try:
+        hotword_text, hotword_sha256 = _resolve_hotword_profile(
+            args.hotword_profile, model_id
+        )
+    except ValueError as e:
+        print(f"!! hotword profile rejected: {e}")
+        return 1
+
+    ckpt_dir = _checkpoint_dir(
+        cfg.checkpoints_root, cfg.run_id, args.hotword_profile
+    )
     ckpt_dir.mkdir(parents=True, exist_ok=True)
     log_dir = Path(cfg.logs_root) / cfg.run_id / "03_run_short"
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -174,7 +226,6 @@ def main(argv: list[str] | None = None) -> int:
 
     # Resolve every model locally before importing FunASR.  There is no hub
     # fallback in a guarded worker.
-    model_id, revision = selected_asr_model(cfg)
     try:
         local_model = resolve_staged_model(cfg, model_id)
         local_vad_model = resolve_staged_model(cfg, cfg.vad_model_id)
@@ -187,7 +238,15 @@ def main(argv: list[str] | None = None) -> int:
     # Load model ONCE
     print(">> loading ASR model (one-time per worker)")
     t_model_start = time.monotonic()
-    model_load_meta: dict = {"device": args.device, "model_id": None, "revision": None, "config_hash": None}
+    model_load_meta: dict = {
+        "device": args.device,
+        "model_id": None,
+        "revision": None,
+        "config_hash": None,
+        "hotword_profile": args.hotword_profile,
+        "hotword_sha256": hotword_sha256,
+        "clas_scale": CONTEXTUAL_CLAS_SCALE if hotword_text else None,
+    }
     import torch  # noqa: F401  (import for side-effects / availability)
     try:
         from funasr import AutoModel
@@ -218,7 +277,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         torch.cuda.empty_cache()
         torch.cuda.reset_peak_memory_stats()
-        warm_result = model.generate(input=str(warm_audio), batch_size_s=60, is_final=True)
+        warm_result = model.generate(**_generation_kwargs(warm_audio, hotword_text))
         _ = warm_result  # ensure no lazy reference; result is discarded
     except Exception as e:  # noqa: BLE001
         print(f"!! warm-up failed on first sample {warm_id}: {e}")
@@ -233,6 +292,13 @@ def main(argv: list[str] | None = None) -> int:
         f"{cfg.punc_model_id}|{cfg.punc_model_revision}|{args.device}|{cfg.config_sha256}"
     ).encode("utf-8")
     config_hash = hashlib.sha256(cfg_hash_input).hexdigest()
+    if hotword_text:
+        config_hash = hashlib.sha256(
+            (
+                f"{config_hash}|hotword_profile={args.hotword_profile}|"
+                f"hotword_sha256={hotword_sha256}|clas_scale={CONTEXTUAL_CLAS_SCALE}"
+            ).encode("utf-8")
+        ).hexdigest()
     model_load_meta["config_hash"] = config_hash
     model_load_meta["vad_model_id"] = cfg.vad_model_id
     model_load_meta["vad_model_revision"] = cfg.vad_model_revision
@@ -285,7 +351,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             torch.cuda.empty_cache()
             torch.cuda.reset_peak_memory_stats()
-            result = model.generate(input=str(audio), batch_size_s=60, is_final=True)
+            result = model.generate(**_generation_kwargs(audio, hotword_text))
         except Exception as e:  # noqa: BLE001
             failures.append({"id": sid, "error": f"{type(e).__name__}: {e}"})
             print(f"   [{i+1}/{len(samples)}] {sid} FAIL: {e}")
@@ -348,6 +414,9 @@ def main(argv: list[str] | None = None) -> int:
             "model_id": model_id, "revision": revision,
             "config_hash": config_hash,
             "device": args.device,
+            "hotword_profile": args.hotword_profile,
+            "hotword_sha256": hotword_sha256,
+            "clas_scale": CONTEXTUAL_CLAS_SCALE if hotword_text else None,
             "audio_duration_s": round(dur_s, 3),
             "pure_inference_s": round(pure_inference_s, 3),
             "end_to_end_s": round(time.monotonic() - sample_started, 3),
@@ -420,6 +489,9 @@ def _write_report(cfg, rows, failures, threshold_failures, cold_start_s, warm_up
         "model": model_load_meta,
         "config_hash": config_hash,
         "diagnostic_sample_id": diagnostic_sample_id,
+        "hotword_profile": model_load_meta["hotword_profile"],
+        "hotword_sha256": model_load_meta["hotword_sha256"],
+        "clas_scale": model_load_meta["clas_scale"],
         "timing": {
             "cold_start_s": round(cold_start_s, 3),
             "warm_up_s": round(warm_up_s, 3),

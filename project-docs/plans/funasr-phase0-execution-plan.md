@@ -16,6 +16,15 @@
 - 已批准维护窗口：`2026-07-31 18:57:06` 至 `2026-07-31 22:57:06`（Asia/Shanghai）。外部配置必须使用等价的带 `+08:00` ISO-8601 时间；到期后 R3-1～R3-5 自动重新阻塞。
 - R3-1 首次执行在 pip 自升级处安全停止：Windows venv 必须通过 `python.exe -m pip` 更新 pip，且 PowerShell 5.1 会把原生 stderr 提升为 `NativeCommandError`。修复后的脚本统一使用 venv Python 模块调用、按原生退出码判定，并复用已创建但未完成的 venv。
 
+## 0.2 Contextual Paraformer A/B 批准记录（2026-08-01）
+
+- SenseVoiceSmall 原始短样本与未见 holdout 均未满足冻结质量门禁；上下文显式替换在 holdout 中正向 `0/5`、反例 `2/3`，因此不进入集成。
+- 新候选固定为 `iic/speech_paraformer-large-contextual_asr_nat-zh-cn-16k-common-vocab8404@6c4333d3114b38f1ab6aabecf1702c70a7b0df56`（ModelScope `v2.0.5` 解引用 commit）；预期许可证 Apache-2.0，模型仓库约 879 MiB，`model.pt` 预期 SHA-256 为 `2d448b72b2b5e5fdf9ba865ff54c8c207f5cf8fced742b0160ef505b026c44a7`。
+- 测试窗口：`2026-08-01 04:30:00` 至 `09:30:00`（Asia/Shanghai）；现场负责人 `bim-admin`。
+- 仅允许同一冻结 8 样本的 A/B：`off` 与固定 `bim-v1`。热词为 `超声波探伤 初拧 终拧 摩擦面 高强螺栓 建筑信息模型`，`clas_scale=1.0`；禁止任意字符串、文件或 URL 热词，禁止看到结果后调参。
+- 允许下载该固定模型并验证 commit、总大小与权重哈希；禁止依赖安装、服务重启、阈值/reference/热词/scale 修改、长音频和 BGE 共存压测。
+- 热词臂必须达到 5 条正向样本全部 `CER <= 0.15` 且 BIM 召回 `>= 0.70`，3 条反例不得相对 `off` 退化；任一不满足即停止，不继续调参。
+
 ## 0. 用户已明确的硬约束（执行前再次确认）
 
 - 当前公司 Windows GPU 主机处于**开发调试窗口**，无其他用户使用线上服务；

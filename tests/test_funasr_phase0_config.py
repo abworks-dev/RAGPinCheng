@@ -58,6 +58,31 @@ def write_config(path: Path, data: dict) -> None:
 
 
 class TestConfig(unittest.TestCase):
+    def test_contextual_paraformer_exact_id_and_revision_are_allowed(self):
+        with tempfile.TemporaryDirectory() as td:
+            data = valid_config(td)
+            data["allowed_asr_model_ids"] = [
+                "iic/speech_paraformer-large-contextual_asr_nat-zh-cn-16k-common-vocab8404"
+            ]
+            data["allowed_asr_revisions"] = [
+                "6c4333d3114b38f1ab6aabecf1702c70a7b0df56"
+            ]
+            path = Path(td) / "cfg.json"
+            write_config(path, data)
+            cfg = load_config(path)
+            self.assertEqual(cfg.allowed_asr_model_ids, tuple(data["allowed_asr_model_ids"]))
+
+    def test_contextual_paraformer_near_miss_id_is_rejected(self):
+        with tempfile.TemporaryDirectory() as td:
+            data = valid_config(td)
+            data["allowed_asr_model_ids"] = [
+                "iic/speech_paraformer-large-contextual_asr_nat-zh-cn-16k-common-vocab8404-typo"
+            ]
+            path = Path(td) / "cfg.json"
+            write_config(path, data)
+            with self.assertRaisesRegex(ValueError, "non-whitelisted"):
+                load_config(path)
+
     def test_naive_window_is_rejected(self):
         with tempfile.TemporaryDirectory() as td:
             data = valid_config(td)

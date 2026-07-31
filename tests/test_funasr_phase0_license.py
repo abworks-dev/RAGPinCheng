@@ -128,6 +128,14 @@ class TestPackageEvidence(unittest.TestCase):
 
 
 class TestModelEvidence(unittest.TestCase):
+    def test_contextual_paraformer_has_exact_apache_expected_evidence(self):
+        model_id = (
+            "iic/speech_paraformer-large-contextual_asr_nat-zh-cn-16k-common-vocab8404"
+        )
+        source, expected = audit.DEFAULT_EXPECTED_MODELS[model_id]
+        self.assertEqual(expected, "Apache-2.0")
+        self.assertEqual(source, f"https://www.modelscope.cn/models/{model_id}")
+
     def test_model_card_frontmatter_is_actual_evidence_and_revision_is_bound(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

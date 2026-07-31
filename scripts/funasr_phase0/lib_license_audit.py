@@ -440,6 +440,11 @@ def render_markdown(pkgs: list[PkgInfo], models: list[ModelEntry], out: Path,
 
 DEFAULT_EXPECTED_MODELS = {
     "iic/SenseVoiceSmall": ("https://www.modelscope.cn/models/iic/SenseVoiceSmall", "Apache-2.0"),
+    "iic/speech_paraformer-large-contextual_asr_nat-zh-cn-16k-common-vocab8404": (
+        "https://www.modelscope.cn/models/iic/"
+        "speech_paraformer-large-contextual_asr_nat-zh-cn-16k-common-vocab8404",
+        "Apache-2.0",
+    ),
     "iic/speech_fsmn_vad_zh-cn-16k-common-pytorch": (
         "https://www.modelscope.cn/models/iic/speech_fsmn_vad_zh-cn-16k-common-pytorch", "Apache-2.0"),
     "iic/punc_ct-transformer_zh-cn-common-vocab272727-pytorch": (
