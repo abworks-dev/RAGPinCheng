@@ -1,0 +1,50 @@
+{
+  "schema_version": "phase0-config/2",
+  "run_id": "REPLACE_WITH_APPROVED_RUN_ID",
+  "approved_window_start": "2099-01-01T00:00:00+00:00",
+  "approved_window_end": "2099-01-01T00:30:00+00:00",
+  "shared_production_gpu_confirmed": false,
+  "bge_base_url": "http://127.0.0.1:18100",
+  "bge_expected_model": "BAAI/bge-m3",
+  "bge_expected_reranker": "BAAI/bge-reranker-v2-m3",
+  "bge_expected_device": "cuda",
+  "bge_expected_torch_version": "2.7.0+cu128",
+  "embed_rpm": 20,
+  "rerank_rpm": 10,
+  "baseline_duration_s": 300,
+  "testdata_root": "REPLACE_WITH_APPROVED_TESTDATA_DIR",
+  "models_root": "REPLACE_WITH_APPROVED_MODELS_DIR",
+  "reports_root": "REPLACE_WITH_APPROVED_REPORTS_DIR",
+  "logs_root": "REPLACE_WITH_APPROVED_LOGS_DIR",
+  "checkpoints_root": "REPLACE_WITH_APPROVED_CHECKPOINTS_DIR",
+  "audio_chunk_s": 60.0,
+  "allowed_asr_model_ids": [
+    "iic/SenseVoiceSmall"
+  ],
+  "allowed_asr_revisions": [
+    "v1.0.0"
+  ],
+  "vad_model_id": "iic/speech_fsmn_vad_zh-cn-16k-common-pytorch",
+  "vad_model_revision": "v2.0.4",
+  "punc_model_id": "iic/punc_ct-transformer_zh-cn-common-vocab272727-pytorch",
+  "punc_model_revision": "v2.0.4",
+  "short_sample_tolerance_s": 0.0,
+  "thresholds": {
+    "bge_p95_degradation_pct": 100.0,
+    "bge_error_rate_pct": 0.5,
+    "bge_5xx_consecutive": 3,
+    "asr_peak_vram_gb": 8.0,
+    "asr_steady_vram_gb": 6.0,
+    "combined_vram_max_gb": 14.0,
+    "disk_free_min_gb": 5.0,
+    "short_failure_rate_pct": 0.0,
+    "long_failure_rate_pct": 5.0,
+    "cer_max_clear": 0.10,
+    "cer_max_bim": 0.15,
+    "bim_term_recall_min": 0.70,
+    "code_recall_min": 0.95,
+    "rtf_max": 0.6,
+    "timestamp_p95_drift_ms_short": 1500.0,
+    "timestamp_p95_drift_ms_long": 3000.0
+  }
+}
