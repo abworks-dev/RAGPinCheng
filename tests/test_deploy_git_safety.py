@@ -46,6 +46,16 @@ class TestDeployGitSafety(unittest.TestCase):
                 self.assertNotIn("http.sslVerify=false", text)
                 self.assertNotIn("git config --global http.proxy", text)
 
+    def test_windows_fetch_uses_optional_proxy_http11_and_bounded_retry(self):
+        for text in (self.workflow, self.windows):
+            with self.subTest(source="workflow" if text is self.workflow else "windows"):
+                self.assertIn("DEPLOY_HTTP_PROXY" if text is self.workflow else "ProxyUrl", text)
+                self.assertIn("http.version=HTTP/1.1", text)
+                self.assertIn("1..4", text)
+                self.assertIn("[math]::Pow(2, $attempt)", text)
+                self.assertNotIn("http.sslVerify=false", text)
+                self.assertNotIn("git config --global http.proxy", text)
+
     def test_windows_pull_failure_is_not_warning_only(self):
         self.assertNotIn('Write-Warning "git pull failed', self.windows)
         self.assertIn('throw "git fetch failed', self.windows)

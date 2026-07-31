@@ -62,9 +62,28 @@ jobs:
           $basic = [Convert]::ToBase64String(
             [Text.Encoding]::ASCII.GetBytes("x-access-token:$env:GIT_TOKEN")
           )
-          git -c "http.extraHeader=AUTHORIZATION: basic $basic" fetch `
-            https://github.com/abworks-dev/RAGPinCheng.git $env:DEPLOY_COMMIT_SHA
-          if ($LASTEXITCODE -ne 0) { throw "Bootstrap fetch failed" }
+          $proxyArgs = @()
+          if ($env:DEPLOY_HTTP_PROXY) {
+            $proxyArgs = @("-c", "http.proxy=$env:DEPLOY_HTTP_PROXY")
+          }
+          $fetched = $false
+          foreach ($attempt in 1..4) {
+            $gitArgs = @("-c", "http.version=HTTP/1.1") + $proxyArgs + @(
+              "-c", "http.extraHeader=AUTHORIZATION: basic $basic", "fetch",
+              "https://github.com/abworks-dev/RAGPinCheng.git", $env:DEPLOY_COMMIT_SHA
+            )
+            & git @gitArgs
+            if ($LASTEXITCODE -eq 0) {
+              $fetched = $true
+              break
+            }
+            if ($attempt -lt 4) {
+              $delay = [math]::Pow(2, $attempt)
+              Write-Warning "Bootstrap fetch attempt $attempt/4 failed; retrying in ${delay}s"
+              Start-Sleep -Seconds $delay
+            }
+          }
+          if (-not $fetched) { throw "Bootstrap fetch failed after 4 attempts" }
           git merge --ff-only $env:DEPLOY_COMMIT_SHA
           if ($LASTEXITCODE -ne 0) { throw "Bootstrap fast-forward failed" }
 

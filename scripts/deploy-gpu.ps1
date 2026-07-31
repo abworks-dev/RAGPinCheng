@@ -81,12 +81,32 @@ if ($headBefore.Trim() -ne $CommitSha.ToLowerInvariant()) {
     $basic = [Convert]::ToBase64String(
         [Text.Encoding]::ASCII.GetBytes("x-access-token:$gitToken")
     )
-    $gitOutput = git -c "http.extraHeader=AUTHORIZATION: basic $basic" fetch `
-        https://github.com/abworks-dev/RAGPinCheng.git $CommitSha 2>&1
-    $gitExitCode = $LASTEXITCODE
-    if ($gitExitCode -ne 0) {
+    $proxyArgs = @()
+    if ($ProxyUrl) {
+        $proxyArgs = @("-c", "http.proxy=$ProxyUrl")
+    }
+    $fetched = $false
+    $gitOutput = @()
+    foreach ($attempt in 1..4) {
+        $gitArgs = @("-c", "http.version=HTTP/1.1") + $proxyArgs + @(
+            "-c", "http.extraHeader=AUTHORIZATION: basic $basic", "fetch",
+            "https://github.com/abworks-dev/RAGPinCheng.git", $CommitSha
+        )
+        $gitOutput = & git @gitArgs 2>&1
+        $gitExitCode = $LASTEXITCODE
+        if ($gitExitCode -eq 0) {
+            $fetched = $true
+            break
+        }
+        if ($attempt -lt 4) {
+            $delay = [math]::Pow(2, $attempt)
+            Write-Warning "git fetch attempt $attempt/4 failed; retrying in ${delay}s"
+            Start-Sleep -Seconds $delay
+        }
+    }
+    if (-not $fetched) {
         $ErrorActionPreference = $oldPref
-        throw "git fetch failed (exit $gitExitCode): $gitOutput"
+        throw "git fetch failed after 4 attempts (last exit $gitExitCode): $gitOutput"
     }
     $gitOutput = git merge --ff-only $CommitSha 2>&1
     $gitExitCode = $LASTEXITCODE
