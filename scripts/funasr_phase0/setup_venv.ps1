@@ -71,6 +71,39 @@ function Fail {
     exit 1
 }
 
+function Invoke-PipLogged {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string[]]$PipArguments,
+        [Parameter(Mandatory = $true)]
+        [string]$FailureMessage,
+        [switch]$ReplaceLog
+    )
+
+    # Windows venvs refuse to upgrade pip through the generated pip launcher; invoke the
+    # module with the venv interpreter instead.  PowerShell 5.1 can also turn a
+    # native program's stderr into a terminating NativeCommandError while the
+    # script-wide preference is Stop, so capture it under Continue and decide
+    # success solely from the native exit code.
+    $oldPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        if ($ReplaceLog) {
+            & $VenvPython -m pip @PipArguments 2>&1 |
+                Tee-Object -FilePath $installLog | Out-Null
+        } else {
+            & $VenvPython -m pip @PipArguments 2>&1 |
+                Tee-Object -FilePath $installLog -Append | Out-Null
+        }
+        $pipExitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $oldPreference
+    }
+    if ($pipExitCode -ne 0) {
+        Fail "$FailureMessage (exit $pipExitCode). See $installLog."
+    }
+}
+
 # ── 0. Pre-flight: refuse bad venv locations ────────────────────────────────
 Write-Step "0) Pre-flight location check"
 $bad_prefixes = @(
@@ -112,7 +145,6 @@ if (-not $venvExisted) {
     Write-Host "  (exists) reusing $VenvDir"
 }
 $VenvPython = Join-Path $VenvDir "Scripts\python.exe"
-$VenvPip = Join-Path $VenvDir "Scripts\pip.exe"
 if (-not (Test-Path $VenvPython)) { Fail "venv python missing: $VenvPython" }
 
 if ($SkipInstall) {
@@ -120,29 +152,43 @@ if ($SkipInstall) {
 } else {
     # ── 3. Upgrade pip ───────────────────────────────────────────────────────
     Write-Step "3) Upgrade pip (via $PypiIndex)"
-    & $VenvPip install --upgrade pip -i $PypiIndex 2>&1 | Tee-Object -FilePath $installLog -Append | Out-Null
-    if ($LASTEXITCODE -ne 0) { Fail "pip upgrade failed (exit $LASTEXITCODE). See $installLog." }
+    Invoke-PipLogged -PipArguments @("install", "--upgrade", "pip", "-i", $PypiIndex) `
+        -FailureMessage "pip upgrade failed"
 
     # ── 4. Install torch + torchaudio from cu128 index ONLY ─────────────────
     Write-Step "4) Install torch + torchaudio (cu128 index ONLY)"
     Write-Host "  index: $TorchIndex"
-    & $VenvPip install --index-url $TorchIndex "torch==2.7.0" "torchaudio==2.7.0" 2>&1 | Tee-Object -Append -FilePath $installLog | Out-Null
-    if ($LASTEXITCODE -ne 0) { Fail "torch install failed (exit $LASTEXITCODE). See $installLog." }
+    Invoke-PipLogged -PipArguments @(
+        "install", "--index-url", $TorchIndex,
+        "torch==2.7.0", "torchaudio==2.7.0"
+    ) -FailureMessage "torch install failed"
 
     # ── 5. Install everything else from approved mirror ────────────────────
     Write-Step "5) Install requirements-asr.txt (via $PypiIndex)"
-    & $VenvPip install -i $PypiIndex -r $RequirementsFile 2>&1 | Tee-Object -Append -FilePath $installLog | Out-Null
-    if ($LASTEXITCODE -ne 0) { Fail "deps install failed (exit $LASTEXITCODE). See $installLog." }
+    Invoke-PipLogged -PipArguments @(
+        "install", "-i", $PypiIndex, "-r", $RequirementsFile
+    ) -FailureMessage "deps install failed"
 
     # ── 6. Run pip check ────────────────────────────────────────────────────
     Write-Step "6) pip check"
-    & $VenvPip check 2>&1 | Tee-Object -Append -FilePath $installLog | Out-Null
-    if ($LASTEXITCODE -ne 0) { Fail "pip check found conflicts. See $installLog." }
+    Invoke-PipLogged -PipArguments @("check") `
+        -FailureMessage "pip check found conflicts"
 }
 
 # ── 7. Freeze snapshot + SHA-256 of freeze ───────────────────────────────────
 Write-Step "7) Write freeze snapshot + SHA-256"
-& $VenvPip freeze 2>&1 | Tee-Object -FilePath $freezeLog | Out-Null
+$oldPreference = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
+try {
+    & $VenvPython -m pip freeze 2>&1 |
+        Tee-Object -FilePath $freezeLog | Out-Null
+    $freezeExitCode = $LASTEXITCODE
+} finally {
+    $ErrorActionPreference = $oldPreference
+}
+if ($freezeExitCode -ne 0) {
+    Fail "pip freeze failed (exit $freezeExitCode). See $freezeLog."
+}
 $freezeSha = (Get-FileHash -Algorithm SHA256 -Path $freezeLog).Hash
 Write-Host "  freeze log: $freezeLog"
 Write-Host "  freeze sha256: $freezeSha"

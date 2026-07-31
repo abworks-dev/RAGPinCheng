@@ -13,7 +13,8 @@
 - 模型范围：仅 `iic/SenseVoiceSmall@v1.0.0`；VAD 固定 `iic/speech_fsmn_vad_zh-cn-16k-common-pytorch@v2.0.4`；标点固定 `iic/punc_ct-transformer_zh-cn-common-vocab272727-pytorch@v2.0.4`。
 - 下载范围：允许批准的 PyTorch 索引、PyPI 镜像与 ModelScope；模型和缓存只能进入 `${QUALIFICATION_SANDBOX_ROOT}\models`。
 - 样本：8 个短样本及人工 reference 已准备，且确认非敏感。
-- **尚缺维护窗口的明确起止时间**。在补齐 `Asia/Shanghai` 起止时间前，只允许 GitHub 推送和只读预检；禁止依赖安装、模型下载和 GPU 执行。外部配置的批准窗口必须与用户补充的时间完全一致。
+- 已批准维护窗口：`2026-07-31 18:57:06` 至 `2026-07-31 22:57:06`（Asia/Shanghai）。外部配置必须使用等价的带 `+08:00` ISO-8601 时间；到期后 R3-1～R3-5 自动重新阻塞。
+- R3-1 首次执行在 pip 自升级处安全停止：Windows venv 必须通过 `python.exe -m pip` 更新 pip，且 PowerShell 5.1 会把原生 stderr 提升为 `NativeCommandError`。修复后的脚本统一使用 venv Python 模块调用、按原生退出码判定，并复用已创建但未完成的 venv。
 
 ## 0. 用户已明确的硬约束（执行前再次确认）
 
@@ -110,7 +111,7 @@ curl -s -H "Authorization: Bearer $env:GPU_SERVICE_TOKEN" http://${PRIVATE_IPV4}
 | R3 步骤 | 名称 | 本批状态 | 主要产出 / 门禁 |
 |---|---|---|---|
 | R3-0 | 主机只读预检与 Git 同步核对 | 已批准 | GPU/BGE/磁盘/进程快照；旧 SHA；干净工作区；不改服务 |
-| R3-1 | 独立 venv 与依赖 | 已批准但等待维护窗口 | `pip freeze`、requirements SHA、CUDA 可用；不触碰 `gpu_service` 环境 |
+| R3-1 | 独立 venv 与依赖 | 执行中；首次 pip 自升级失败后待修复重试 | `pip freeze`、requirements SHA、CUDA 可用；不触碰 `gpu_service` 环境 |
 | R3-2 | 单一模型下载与许可证门禁 | 已批准但等待维护窗口 | 仅 SenseVoiceSmall/VAD/punc 固定 revision；license blocker 为 0 |
 | R3-3 | BGE-only 5 分钟基线 | 已批准但等待维护窗口 | embed 20 rpm + rerank 10 rpm；错误或健康异常立即停止 |
 | R3-4 | 受控 CUDA 兼容性冒烟 | 已批准但等待维护窗口 | CUDA、模型身份、真实加载/推理链路和恢复验证通过 |
@@ -217,7 +218,7 @@ Codex 当前会话没有已确认的生产主机远程命令通道。代码经 G
 
 ## 10. 尚待用户补充
 
-仅剩维护窗口：提供明确的 `YYYY-MM-DD HH:mm` 至 `YYYY-MM-DD HH:mm`（Asia/Shanghai）。窗口之外不得执行 R3-1～R3-5。R3-5 报告复核前，不得进入 1h、2h、4h 或 BGE 共存测试。
+维护窗口已批准为 `2026-07-31 18:57:06` 至 `22:57:06`（Asia/Shanghai）。窗口之外不得执行 R3-1～R3-5；如修复和安装未能在窗口内完成，须重新批准新窗口。R3-5 报告复核前，不得进入 1h、2h、4h 或 BGE 共存测试。
 
 以下表格保留为历史决策记录，其中超出 R3-0～R3-5 的事项不构成本次授权。
 

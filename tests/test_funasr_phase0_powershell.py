@@ -113,6 +113,21 @@ class TestPowerShell51Parser(unittest.TestCase):
                 self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
 
 
+class TestSetupVenvContract(unittest.TestCase):
+    def test_pip_is_invoked_through_venv_python(self):
+        source = PS_SETUP.read_text(encoding="utf-8")
+        self.assertNotIn('Scripts\\pip.exe', source)
+        self.assertNotIn('& $VenvPip', source)
+        self.assertIn('& $VenvPython -m pip @PipArguments', source)
+        self.assertIn('& $VenvPython -m pip freeze', source)
+
+    def test_native_stderr_is_not_a_false_powershell_failure(self):
+        source = PS_SETUP.read_text(encoding="utf-8")
+        self.assertIn("$ErrorActionPreference = 'Continue'", source)
+        self.assertIn('$pipExitCode = $LASTEXITCODE', source)
+        self.assertIn('$freezeExitCode = $LASTEXITCODE', source)
+
+
 class TestEmergencyStopBehavior(unittest.TestCase):
     def setUp(self):
         if _ps_exe() is None:
