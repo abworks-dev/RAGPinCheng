@@ -218,6 +218,8 @@ class TestShortManifestGate(unittest.TestCase):
                     "id": f"s-{i}", "audio": audio.name, "scenario": scenario,
                     "reference_text": "a", "reference_segments": [],
                     "source_url": "https://example.invalid/sample", "license": "CC0",
+                    "self_made": "non-sensitive synthetic fixture",
+                    "is_internal_recording": False,
                     "annotation_version": "1",
                 })
             manifest.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
@@ -275,6 +277,65 @@ class TestShortManifestGate(unittest.TestCase):
             self.assertEqual(payload["n_threshold_failures"], 8)
             self.assertEqual(payload["model"]["warmup_sample_id"], "s-0")
             self.assertEqual(payload["model"]["revision"], "v1.0.0")
+            self.assertIsNone(payload["diagnostic_sample_id"])
+            self.assertTrue(all("diagnostic" not in row for row in payload["rows"]))
+
+            diagnostic_out = root / cfg.run_id / "diagnostic.json"
+            with mock.patch.dict(os.environ, guarded_env(root, cfg, "03_run_short"), clear=False), \
+                 mock.patch.dict(__import__("sys").modules, {
+                     "torch": types.SimpleNamespace(cuda=FakeCuda()),
+                     "funasr": types.SimpleNamespace(AutoModel=FakeModel),
+                     "soundfile": FakeSoundFile,
+                 }):
+                diagnostic_rc = SHORT.main([
+                    "--config", str(cfg_path), "--manifest", str(manifest),
+                    "--diagnostic-sample-id", "s-0", "--include-diagnostic-text",
+                    "--out", str(diagnostic_out),
+                ])
+            self.assertEqual(diagnostic_rc, 2)
+            self.assertEqual(len(captured["generate_inputs"]), 2)
+            diagnostic_payload = json.loads(diagnostic_out.read_text(encoding="utf-8"))
+            self.assertEqual(diagnostic_payload["diagnostic_sample_id"], "s-0")
+            diagnostic_rows = [
+                row for row in diagnostic_payload["rows"] if "diagnostic" in row
+            ]
+            self.assertEqual(len(diagnostic_rows), 1)
+            self.assertEqual(diagnostic_rows[0]["diagnostic"]["reference_text"], "a")
+            self.assertEqual(diagnostic_rows[0]["diagnostic"]["hypothesis_text"], "b")
+            self.assertEqual(
+                diagnostic_rows[0]["diagnostic"]["character_diff"][0]["operation"],
+                "replace",
+            )
+            checkpoint = json.loads(
+                (root / cfg.run_id / "03_run_short" / "s-0.json").read_text(encoding="utf-8")
+            )
+            self.assertNotIn("diagnostic", checkpoint)
+
+    def test_diagnostic_text_rejects_non_self_made_sample(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            cfg_path = root / "cfg.json"
+            data = valid_config(td)
+            write_config(cfg_path, data)
+            cfg = lib_config.load_config(cfg_path)
+            rows = []
+            for i, scenario in enumerate(sorted(SHORT.REQUIRED_SHORT_SCENARIOS)):
+                audio = root / f"s{i}.wav"
+                with wave.open(str(audio), "wb") as wf:
+                    wf.setnchannels(1); wf.setsampwidth(2); wf.setframerate(16000)
+                    wf.writeframes(b"\x00\x00" * 1600)
+                rows.append({
+                    "id": f"s-{i}", "audio": audio.name, "scenario": scenario,
+                    "is_internal_recording": False,
+                })
+            manifest = root / "short.jsonl"
+            manifest.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+            with mock.patch.dict(os.environ, guarded_env(root, cfg, "03_run_short"), clear=False):
+                rc = SHORT.main([
+                    "--config", str(cfg_path), "--manifest", str(manifest),
+                    "--diagnostic-sample-id", "s-0", "--include-diagnostic-text",
+                ])
+            self.assertEqual(rc, 1)
 
     def test_missing_staged_weights_fail_before_funasr_import(self):
         with tempfile.TemporaryDirectory() as td:

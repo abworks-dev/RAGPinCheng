@@ -160,6 +160,12 @@ This sandbox MUST NOT:
     files before importing FunASR, and force ModelScope/Hugging Face offline
     mode. Missing local files fail closed; model-hub fallback is forbidden.
     Relative short-sample audio paths are resolved from the manifest directory.
+17. Short-sample diagnostic text is opt-in only: pass both
+    `--diagnostic-sample-id <id>` and `--include-diagnostic-text` through
+    `00_run_guarded.py`. The target must be marked self-made and non-internal.
+    Only that sample bypasses checkpoint reuse; reference, hypothesis and a
+    character diff appear in the one diagnostic report. Checkpoints remain
+    text-free, thresholds are unchanged, and all other samples are reused.
 
 ## What is NOT in this directory (unchanged)
 
