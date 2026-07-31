@@ -78,6 +78,14 @@
 Keep `06_emergency_stop.ps1 -ConfigPath ... -ListOnly` ready and use `-WhatIf`
 before the window. `07_verify_bge.ps1 -ConfigPath ...` is the recovery check.
 
+R3-1 note (2026-07-31): the first production-host attempt stopped safely while
+upgrading pip because Windows venvs reject self-upgrade through `pip.exe` and
+PowerShell 5.1 promoted native stderr to `NativeCommandError`. The installer now
+uses the venv's `python.exe -m pip` for upgrade/install/check/freeze, captures
+stderr under `Continue`, and still fails closed on the native exit code. An
+already-created incomplete venv is intentionally reused; no manual package
+commands or directory deletion are required.
+
 ## Hard isolation rules (unchanged)
 
 This sandbox MUST NOT:
