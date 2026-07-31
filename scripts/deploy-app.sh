@@ -19,6 +19,12 @@ COMPOSE_ENV_FILE="${PRODUCTION_APP_ENV_FILE}"
 COMPOSE_PROJECT="ragpincheng-prod"
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 BACKUP_PATH="${BACKUP_DIR}/app-backup-${TIMESTAMP}"
+DEPLOY_COMMIT_SHA="${DEPLOY_COMMIT_SHA:?DEPLOY_COMMIT_SHA is required}"
+
+if [[ ! "$DEPLOY_COMMIT_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
+    echo "ERROR: DEPLOY_COMMIT_SHA must be a full 40-character commit SHA"
+    exit 1
+fi
 
 # Helper: build the full compose command with project, files, and env file.
 compose() {
@@ -62,14 +68,22 @@ if [ "$EMBED_DIM" != "1024" ]; then
 fi
 echo "  GPU service OK (api=$API_VER, dim=$EMBED_DIM)"
 
-# ── 3. Pull latest code ───────────────────────────────────────────────────
-echo ">> Pulling latest code"
+# ── 3. Synchronize exact approved commit ─────────────────────────────────
+echo ">> Synchronizing exact commit ${DEPLOY_COMMIT_SHA}"
 cd "$REPO_PATH"
-# Use GitHub Actions token for authentication
-if [ -n "${GIT_TOKEN:-}" ]; then
-    git remote set-url origin "https://x-access-token:${GIT_TOKEN}@github.com/abworks-dev/RAGPinCheng.git"
+CURRENT_HEAD="$(git rev-parse HEAD)"
+if [ "$CURRENT_HEAD" != "$DEPLOY_COMMIT_SHA" ]; then
+    : "${GIT_TOKEN:?GIT_TOKEN is required when checkout is not at DEPLOY_COMMIT_SHA}"
+    BASIC_AUTH="$(printf 'x-access-token:%s' "$GIT_TOKEN" | base64 | tr -d '\n')"
+    git -c "http.extraHeader=AUTHORIZATION: basic ${BASIC_AUTH}" fetch \
+        https://github.com/abworks-dev/RAGPinCheng.git "$DEPLOY_COMMIT_SHA"
+    git merge --ff-only "$DEPLOY_COMMIT_SHA"
 fi
-git pull origin master
+ACTUAL_HEAD="$(git rev-parse HEAD)"
+if [ "$ACTUAL_HEAD" != "$DEPLOY_COMMIT_SHA" ]; then
+    echo "ERROR: deployed HEAD mismatch: expected ${DEPLOY_COMMIT_SHA}, found ${ACTUAL_HEAD}"
+    exit 1
+fi
 
 # ── 4. Backup current state ───────────────────────────────────────────────
 echo ">> Backing up current state to ${BACKUP_PATH}"

@@ -14,6 +14,10 @@ param(
     [Parameter(Mandatory)]
     [string]$BackupDirectory,
 
+    [Parameter(Mandatory)]
+    [ValidatePattern('^[0-9a-fA-F]{40}$')]
+    [string]$CommitSha,
+
     [string]$ProxyUrl = ""
 )
 
@@ -55,25 +59,47 @@ New-Item -ItemType Directory -Force -Path $BackupPath | Out-Null
 Copy-Item -Recurse -Force "$ServiceDir\*" -Destination $BackupPath
 Copy-Item -Force "$RepositoryPath\requirements-gpu.txt" -Destination $BackupPath
 
-# ── 3. Pull latest code ────────────────────────────────────────────────────
-Write-Step "Pulling latest code"
+# ── 3. Synchronize exact approved commit ───────────────────────────────────
+Write-Step "Synchronizing exact commit $CommitSha"
 Set-Location $RepositoryPath
 git config --global --add safe.directory $RepositoryPath 2>$null
-# Use GitHub Actions token for auth (available as GITHUB_TOKEN env var)
-$gitToken = $env:GIT_TOKEN
-if ($gitToken) {
-    git remote set-url origin "https://x-access-token:${gitToken}@github.com/abworks-dev/RAGPinCheng.git" 2>$null
-}
-# git writes informational messages to stderr; redirect to stdout.
-# $ErrorActionPreference=Stop treats native stderr as errors, so we
-# temporarily set Continue and check $LASTEXITCODE instead.
 $oldPref = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
-$gitOutput = git pull origin master 2>&1
-$gitExitCode = $LASTEXITCODE
+$headBefore = git rev-parse HEAD 2>&1
+$headExitCode = $LASTEXITCODE
+if ($headExitCode -ne 0) {
+    $ErrorActionPreference = $oldPref
+    throw "Unable to read repository HEAD: $headBefore"
+}
+
+if ($headBefore.Trim() -ne $CommitSha.ToLowerInvariant()) {
+    $gitToken = $env:GIT_TOKEN
+    if (-not $gitToken) {
+        $ErrorActionPreference = $oldPref
+        throw "GIT_TOKEN is required when the runner checkout is not already at CommitSha"
+    }
+    $basic = [Convert]::ToBase64String(
+        [Text.Encoding]::ASCII.GetBytes("x-access-token:$gitToken")
+    )
+    $gitOutput = git -c "http.extraHeader=AUTHORIZATION: basic $basic" fetch `
+        https://github.com/abworks-dev/RAGPinCheng.git $CommitSha 2>&1
+    $gitExitCode = $LASTEXITCODE
+    if ($gitExitCode -ne 0) {
+        $ErrorActionPreference = $oldPref
+        throw "git fetch failed (exit $gitExitCode): $gitOutput"
+    }
+    $gitOutput = git merge --ff-only $CommitSha 2>&1
+    $gitExitCode = $LASTEXITCODE
+    if ($gitExitCode -ne 0) {
+        $ErrorActionPreference = $oldPref
+        throw "git fast-forward failed (exit $gitExitCode): $gitOutput"
+    }
+}
+$headAfter = (git rev-parse HEAD 2>&1).Trim()
+$verifyExitCode = $LASTEXITCODE
 $ErrorActionPreference = $oldPref
-if ($gitExitCode -ne 0) {
-    Write-Warning "git pull failed (exit $gitExitCode): $gitOutput"
+if ($verifyExitCode -ne 0 -or $headAfter -ne $CommitSha.ToLowerInvariant()) {
+    throw "Deployed HEAD mismatch: expected $CommitSha, found $headAfter"
 }
 
 # ── 4. Update dependencies ─────────────────────────────────────────────────

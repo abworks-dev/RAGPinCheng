@@ -51,14 +51,28 @@ jobs:
           REPO_PATH: ${PRODUCTION_REPO_PATH}
           BACKUP_DIR: ${PRODUCTION_BACKUP_DIRECTORY}
           GIT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEPLOY_COMMIT_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
         run: |
           Set-StrictMode -Version Latest
           $ErrorActionPreference = 'Stop'
 
+          # Bootstrap the runner checkout before invoking the repository script.
+          # The HTTP header is process-local; origin and .git/config are untouched.
+          Set-Location $env:REPO_PATH
+          $basic = [Convert]::ToBase64String(
+            [Text.Encoding]::ASCII.GetBytes("x-access-token:$env:GIT_TOKEN")
+          )
+          git -c "http.extraHeader=AUTHORIZATION: basic $basic" fetch `
+            https://github.com/abworks-dev/RAGPinCheng.git $env:DEPLOY_COMMIT_SHA
+          if ($LASTEXITCODE -ne 0) { throw "Bootstrap fetch failed" }
+          git merge --ff-only $env:DEPLOY_COMMIT_SHA
+          if ($LASTEXITCODE -ne 0) { throw "Bootstrap fast-forward failed" }
+
           & "${env:REPO_PATH}\scripts\deploy-gpu.ps1" `
             -RepositoryPath $env:REPO_PATH `
             -BackupDirectory $env:BACKUP_DIR `
-            -ProxyUrl $env:DEPLOY_HTTP_PROXY
+            -ProxyUrl $env:DEPLOY_HTTP_PROXY `
+            -CommitSha $env:DEPLOY_COMMIT_SHA
 
   # ── Job 2: Ubuntu application node (backend + Qdrant) ───────────────────
   deploy-app:
@@ -80,6 +94,12 @@ jobs:
           BACKUP_DIR: ${PRODUCTION_APP_BACKUP_DIRECTORY}
           DATA_PATH: ${PRODUCTION_APP_DATA_PATH}
           GIT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEPLOY_COMMIT_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
         run: |
           set -euo pipefail
+          cd "${REPO_PATH}"
+          BASIC_AUTH="$(printf 'x-access-token:%s' "${GIT_TOKEN}" | base64 | tr -d '\n')"
+          git -c "http.extraHeader=AUTHORIZATION: basic ${BASIC_AUTH}" fetch \
+            https://github.com/abworks-dev/RAGPinCheng.git "${DEPLOY_COMMIT_SHA}"
+          git merge --ff-only "${DEPLOY_COMMIT_SHA}"
           bash "${REPO_PATH}/scripts/deploy-app.sh"
