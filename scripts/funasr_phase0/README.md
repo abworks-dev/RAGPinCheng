@@ -5,7 +5,7 @@
 > directory contains **test scaffolding only** — it MUST NOT be imported by
 > `gpu_service/`, `src/`, `api/`, or `frontend/`.
 
-## Status (2026-07-31, R3 first batch approved; maintenance window pending)
+## Status (2026-08-01, Contextual Paraformer A/B batch approved)
 
 - 13 Python files + 3 PowerShell files + 1 requirements + 1 example
   config + 1 README = 19 files in this directory.
@@ -15,11 +15,13 @@
   launcher owns license gating, active-run registration, monitoring,
   process-tree termination and BGE recovery verification.
 - Independent third review is complete and the R2 sandbox repair is closed.
-- **Not yet** executed on the production Windows GPU host. The user approved
-  only R3-0 through R3-5, with `iic/SenseVoiceSmall@v1.0.0` as the sole ASR
-  model. The approval did not include a concrete maintenance-window start/end,
-  so dependency installation, model download and GPU execution remain blocked
-  until those timestamps are supplied and written to the external config.
+- SenseVoiceSmall R3 short testing completed but did not meet the frozen quality
+  gate. Deterministic postprocessing was rejected by an unseen holdout because
+  it covered 0/5 positive samples and changed 1/3 negative controls.
+- The user approved a bounded Contextual Paraformer A/B batch for
+  `iic/speech_paraformer-large-contextual_asr_nat-zh-cn-16k-common-vocab8404`
+  at commit `6c4333d3114b38f1ab6aabecf1702c70a7b0df56`. No other ASR model,
+  dependency installation, threshold change or long-input test is included.
 
 ## Files (19 total)
 
@@ -166,6 +168,14 @@ This sandbox MUST NOT:
     Only that sample bypasses checkpoint reuse; reference, hypothesis and a
     character diff appear in the one diagnostic report. Checkpoints remain
     text-free, thresholds are unchanged, and all other samples are reused.
+18. Contextual Paraformer model-level biasing is exposed only as
+    `--hotword-profile bim-v1`. The fixed literal terms are `超声波探伤`,
+    `初拧`, `终拧`, `摩擦面`, `高强螺栓`, and `建筑信息模型`; `clas_scale`
+    is fixed at `1.0`. Arbitrary strings, files and URLs are not accepted.
+    The default `off` profile preserves the existing SenseVoice path and
+    checkpoint layout. `bim-v1` uses a separate checkpoint namespace and its
+    profile, content digest and scale are bound into reports and checkpoint
+    identity.
 
 ## What is NOT in this directory (unchanged)
 

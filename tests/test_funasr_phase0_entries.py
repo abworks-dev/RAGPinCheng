@@ -168,6 +168,32 @@ class TestLicenseBeforeSpawn(unittest.TestCase):
 
 
 class TestShortManifestGate(unittest.TestCase):
+    def test_fixed_contextual_hotword_profile_is_model_bound_and_isolated(self):
+        model_id = SHORT.CONTEXTUAL_PARAFORMER_MODEL_ID
+        text, digest = SHORT._resolve_hotword_profile("bim-v1", model_id)
+        self.assertEqual(
+            text,
+            "超声波探伤 初拧 终拧 摩擦面 高强螺栓 建筑信息模型",
+        )
+        self.assertEqual(len(digest), 64)
+        self.assertEqual(
+            SHORT._checkpoint_dir("C:/checkpoints", "run-1", "off"),
+            Path("C:/checkpoints") / "run-1" / "03_run_short",
+        )
+        self.assertEqual(
+            SHORT._checkpoint_dir("C:/checkpoints", "run-1", "bim-v1"),
+            Path("C:/checkpoints") / "run-1" / "03_run_short" / "bim-v1",
+        )
+        kwargs = SHORT._generation_kwargs(Path("sample.wav"), text)
+        self.assertEqual(kwargs["hotword"], text)
+        self.assertEqual(kwargs["clas_scale"], 1.0)
+
+    def test_hotword_profile_rejects_sensevoice_and_arbitrary_profile(self):
+        with self.assertRaisesRegex(ValueError, "requires"):
+            SHORT._resolve_hotword_profile("bim-v1", "iic/SenseVoiceSmall")
+        with self.assertRaisesRegex(ValueError, "unknown"):
+            SHORT._resolve_hotword_profile("https://example.invalid/hotwords", "iic/SenseVoiceSmall")
+
     @staticmethod
     def _stage_models(root: Path, data: dict) -> dict[str, Path]:
         staged = {}
@@ -234,8 +260,10 @@ class TestShortManifestGate(unittest.TestCase):
                         )
                     }
                     captured["generate_inputs"] = []
+                    captured["generate_kwargs"] = []
                 def generate(self, **kwargs):
                     captured["generate_inputs"].append(kwargs["input"])
+                    captured["generate_kwargs"].append(dict(kwargs))
                     return [{"text": "b", "sentence_info": []}]
 
             class FakeCuda:
@@ -271,12 +299,18 @@ class TestShortManifestGate(unittest.TestCase):
             self.assertEqual(len(captured["generate_inputs"]), 9)
             self.assertEqual(captured["generate_inputs"][0], str(root / "s0.wav"))
             self.assertEqual(captured["generate_inputs"][1], str(root / "s0.wav"))
+            self.assertTrue(all(
+                "hotword" not in kwargs and "clas_scale" not in kwargs
+                for kwargs in captured["generate_kwargs"]
+            ))
             report = next((root / cfg.run_id).glob("03_run_short-*.json"))
             payload = json.loads(report.read_text(encoding="utf-8"))
             self.assertFalse(payload["ok"])
             self.assertEqual(payload["n_threshold_failures"], 8)
             self.assertEqual(payload["model"]["warmup_sample_id"], "s-0")
             self.assertEqual(payload["model"]["revision"], "v1.0.0")
+            self.assertEqual(payload["hotword_profile"], "off")
+            self.assertIsNone(payload["clas_scale"])
             self.assertIsNone(payload["diagnostic_sample_id"])
             self.assertTrue(all("diagnostic" not in row for row in payload["rows"]))
 

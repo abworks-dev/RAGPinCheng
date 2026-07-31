@@ -97,6 +97,7 @@ _ALLOWED_MODELS = {
     "paraformer-zh",
     "paraformer-large",
     "iic/SenseVoiceSmall",
+    "iic/speech_paraformer-large-contextual_asr_nat-zh-cn-16k-common-vocab8404",
     "damo/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
     "damo/speech_paraformer-large-contextual_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
     "iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
