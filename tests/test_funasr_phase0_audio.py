@@ -149,6 +149,19 @@ class TestCheckpointValidation(unittest.TestCase):
 
 
 class TestLongEntry(unittest.TestCase):
+    @staticmethod
+    def _stage_models(root: Path, data: dict) -> dict[str, Path]:
+        staged = {}
+        for model_id in (
+            data["allowed_asr_model_ids"][0], data["vad_model_id"], data["punc_model_id"],
+        ):
+            model_dir = root.joinpath(*model_id.split("/"))
+            model_dir.mkdir(parents=True, exist_ok=True)
+            (model_dir / "configuration.json").write_text("{}", encoding="utf-8")
+            (model_dir / "model.pt").write_bytes(b"test-weight")
+            staged[model_id] = model_dir.resolve()
+        return staged
+
     def test_real_entry_passes_revisions_and_uses_actual_last_duration(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -158,6 +171,7 @@ class TestLongEntry(unittest.TestCase):
             data = valid_config(td)
             data["audio_chunk_s"] = 1.0
             data["thresholds"]["rtf_max"] = 10.0
+            staged = self._stage_models(root, data)
             write_config(cfg_path, data)
             cfg = lib_config.load_config(cfg_path)
             reference = root / "reference.json"
@@ -188,6 +202,11 @@ class TestLongEntry(unittest.TestCase):
             class FakeModel:
                 def __init__(self, **kwargs):
                     captured.update(kwargs)
+                    captured["offline_env"] = {
+                        name: os.environ.get(name) for name in (
+                            "MODELSCOPE_OFFLINE", "HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE",
+                        )
+                    }
 
                 def generate(self, input, **_kwargs):
                     with wave.open(str(input), "rb") as wf:
@@ -226,8 +245,15 @@ class TestLongEntry(unittest.TestCase):
                 rc = LONG.main(["--config", str(cfg_path), "--input", str(audio),
                                 "--reference", str(reference), "--chunk-s", "1"])
             self.assertEqual(rc, 0)
-            self.assertEqual(captured["model_revision"], "v1.0.0")
-            self.assertEqual(captured["vad_model_revision"], "v2.0.4")
+            self.assertEqual(captured["model"], str(staged[data["allowed_asr_model_ids"][0]]))
+            self.assertEqual(captured["vad_model"], str(staged[data["vad_model_id"]]))
+            self.assertEqual(captured["punc_model"], str(staged[data["punc_model_id"]]))
+            self.assertNotIn("model_revision", captured)
+            self.assertEqual(captured["offline_env"], {
+                "MODELSCOPE_OFFLINE": "1",
+                "HF_HUB_OFFLINE": "1",
+                "TRANSFORMERS_OFFLINE": "1",
+            })
             reports = list((root / cfg.run_id).glob("04_run_long-*.json"))
             self.assertEqual(len(reports), 1)
             payload = json.loads(reports[0].read_text(encoding="utf-8"))

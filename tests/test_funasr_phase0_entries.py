@@ -4,6 +4,7 @@ import importlib.util
 import json
 import os
 import hashlib
+import sys
 import tempfile
 import types
 import unittest
@@ -113,11 +114,16 @@ class TestLicenseBeforeSpawn(unittest.TestCase):
             runtime = lib_runtime.GuardedProcess(
                 cfg, str(cfg_path), "03_run_short", ["fake-python"], baseline=baseline,
             )
+            popen = mock.Mock(return_value=FakeProc())
             with mock.patch.object(lib_runtime, "enforce_license_gate"), \
-                 mock.patch.object(lib_runtime.subprocess, "Popen", return_value=FakeProc()), \
+                 mock.patch.object(lib_runtime.subprocess, "Popen", popen), \
                  mock.patch.object(lib_runtime, "Monitor", FakeMonitor), \
                  mock.patch.object(lib_runtime, "verify_bge", return_value={"ok": True}):
                 runtime.start()
+                worker_env = popen.call_args.kwargs["env"]
+                self.assertEqual(worker_env["MODELSCOPE_OFFLINE"], "1")
+                self.assertEqual(worker_env["HF_HUB_OFFLINE"], "1")
+                self.assertEqual(worker_env["TRANSFORMERS_OFFLINE"], "1")
                 self.assertTrue(runtime.active_path.exists())
                 active = json.loads(runtime.active_path.read_text(encoding="utf-8"))
                 self.assertEqual(active["worker_pid"], 43210)
@@ -162,6 +168,22 @@ class TestLicenseBeforeSpawn(unittest.TestCase):
 
 
 class TestShortManifestGate(unittest.TestCase):
+    @staticmethod
+    def _stage_models(root: Path, data: dict) -> dict[str, Path]:
+        staged = {}
+        identities = [
+            data["allowed_asr_model_ids"][0],
+            data["vad_model_id"],
+            data["punc_model_id"],
+        ]
+        for model_id in identities:
+            model_dir = root.joinpath(*model_id.split("/"))
+            model_dir.mkdir(parents=True, exist_ok=True)
+            (model_dir / "configuration.json").write_text("{}", encoding="utf-8")
+            (model_dir / "model.pt").write_bytes(b"test-weight")
+            staged[model_id] = model_dir.resolve()
+        return staged
+
     def test_empty_manifest_fails_before_model_import(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -181,6 +203,7 @@ class TestShortManifestGate(unittest.TestCase):
             cfg_path = root / "cfg.json"
             data = valid_config(td)
             data["thresholds"]["rtf_max"] = 10.0
+            staged = self._stage_models(root, data)
             write_config(cfg_path, data)
             cfg = lib_config.load_config(cfg_path)
             scenarios = sorted(SHORT.REQUIRED_SHORT_SCENARIOS)
@@ -192,7 +215,7 @@ class TestShortManifestGate(unittest.TestCase):
                     wf.setnchannels(1); wf.setsampwidth(2); wf.setframerate(16000)
                     wf.writeframes(b"\x00\x00" * 1600)
                 rows.append({
-                    "id": f"s-{i}", "audio": str(audio), "scenario": scenario,
+                    "id": f"s-{i}", "audio": audio.name, "scenario": scenario,
                     "reference_text": "a", "reference_segments": [],
                     "source_url": "https://example.invalid/sample", "license": "CC0",
                     "annotation_version": "1",
@@ -203,6 +226,11 @@ class TestShortManifestGate(unittest.TestCase):
             class FakeModel:
                 def __init__(self, **kwargs):
                     captured.update(kwargs)
+                    captured["offline_env"] = {
+                        name: os.environ.get(name) for name in (
+                            "MODELSCOPE_OFFLINE", "HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE",
+                        )
+                    }
                     captured["generate_inputs"] = []
                 def generate(self, **kwargs):
                     captured["generate_inputs"].append(kwargs["input"])
@@ -216,14 +244,28 @@ class TestShortManifestGate(unittest.TestCase):
                 @staticmethod
                 def max_memory_allocated(): return 0
 
+            class FakeSoundFile:
+                @staticmethod
+                def info(_path):
+                    return types.SimpleNamespace(frames=1600, samplerate=16000)
+
             with mock.patch.dict(os.environ, guarded_env(root, cfg, "03_run_short"), clear=False), \
                  mock.patch.dict(__import__("sys").modules, {
                      "torch": types.SimpleNamespace(cuda=FakeCuda()),
                      "funasr": types.SimpleNamespace(AutoModel=FakeModel),
+                     "soundfile": FakeSoundFile,
                  }):
                 rc = SHORT.main(["--config", str(cfg_path), "--manifest", str(manifest)])
             self.assertEqual(rc, 2)
-            self.assertEqual(captured["model_revision"], "v1.0.0")
+            self.assertEqual(captured["model"], str(staged[data["allowed_asr_model_ids"][0]]))
+            self.assertEqual(captured["vad_model"], str(staged[data["vad_model_id"]]))
+            self.assertEqual(captured["punc_model"], str(staged[data["punc_model_id"]]))
+            self.assertNotIn("model_revision", captured)
+            self.assertEqual(captured["offline_env"], {
+                "MODELSCOPE_OFFLINE": "1",
+                "HF_HUB_OFFLINE": "1",
+                "TRANSFORMERS_OFFLINE": "1",
+            })
             self.assertEqual(len(captured["generate_inputs"]), 9)
             self.assertEqual(captured["generate_inputs"][0], str(root / "s0.wav"))
             self.assertEqual(captured["generate_inputs"][1], str(root / "s0.wav"))
@@ -232,6 +274,31 @@ class TestShortManifestGate(unittest.TestCase):
             self.assertFalse(payload["ok"])
             self.assertEqual(payload["n_threshold_failures"], 8)
             self.assertEqual(payload["model"]["warmup_sample_id"], "s-0")
+            self.assertEqual(payload["model"]["revision"], "v1.0.0")
+
+    def test_missing_staged_weights_fail_before_funasr_import(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            cfg_path = root / "cfg.json"
+            data = valid_config(td)
+            write_config(cfg_path, data)
+            cfg = lib_config.load_config(cfg_path)
+            incomplete_model = root.joinpath(*data["allowed_asr_model_ids"][0].split("/"))
+            incomplete_model.mkdir(parents=True)
+            (incomplete_model / "configuration.json").write_text("{}", encoding="utf-8")
+            rows = []
+            for i, scenario in enumerate(sorted(SHORT.REQUIRED_SHORT_SCENARIOS)):
+                audio = root / f"s{i}.wav"
+                with wave.open(str(audio), "wb") as wf:
+                    wf.setnchannels(1); wf.setsampwidth(2); wf.setframerate(16000)
+                    wf.writeframes(b"\x00\x00" * 1600)
+                rows.append({"id": f"s-{i}", "audio": audio.name, "scenario": scenario})
+            manifest = root / "short.jsonl"
+            manifest.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+            with mock.patch.dict(os.environ, guarded_env(root, cfg, "03_run_short"), clear=False), \
+                 mock.patch.dict(sys.modules, {"funasr": None}):
+                rc = SHORT.main(["--config", str(cfg_path), "--manifest", str(manifest)])
+            self.assertEqual(rc, 1)
 
 
 class TestAnnotationContract(unittest.TestCase):
