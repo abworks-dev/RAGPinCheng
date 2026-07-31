@@ -23,7 +23,7 @@ AUDIT_SCHEMA_VERSION = "phase0-license-audit/2"
 APPROVAL_SCHEMA_VERSION = "phase0-license-approvals/1"
 
 SPDX_TIER = {
-    "MIT": 1, "Apache-2.0": 1, "BSD-2-Clause": 1, "BSD-3-Clause": 1,
+    "MIT": 1, "MIT-0": 1, "Apache-2.0": 1, "BSD-2-Clause": 1, "BSD-3-Clause": 1,
     "ISC": 1, "Zlib": 1, "Python-2.0": 1, "PSF-2.0": 1,
     "MPL-2.0": 2, "LGPL-2.0": 2, "LGPL-2.0+": 2,
     "LGPL-2.0-only": 2, "LGPL-2.0-or-later": 2, "LGPL-2.1": 2,
@@ -43,6 +43,7 @@ _ALIASES = {
     "http://www.apache.org/licenses/license-2.0": "Apache-2.0",
     "https://www.apache.org/licenses/license-2.0": "Apache-2.0",
     "mit license": "MIT", "the mit license": "MIT", "bsd license": "BSD-3-Clause",
+    "bsd": "BSD-3-Clause",
     "bsd-3-clause license": "BSD-3-Clause", "bsd 3-clause license": "BSD-3-Clause",
     "mozilla public license 2.0": "MPL-2.0",
 }
@@ -116,9 +117,63 @@ class PkgInfo:
     constituents: list[str]
     homepage: str
     notice_sha256: str | None
+    license_files_sha256: dict[str, str]
     evidence_sha256: str
     approved: bool = False
     approval_reason: str | None = None
+
+
+def _is_license_path(value: str) -> bool:
+    path = value.replace("\\", "/").casefold()
+    name = path.rsplit("/", 1)[-1]
+    return (name in {"license", "license.md", "license.txt", "copying", "copying.txt"}
+            or "/licenses/" in f"/{path}")
+
+
+def _license_document_declaration(text: str) -> str | None:
+    """Recognize standard license bodies without fuzzy NOTICE classification."""
+    low = text[:131072].casefold()
+    if "apache license" in low and "version 2.0" in low:
+        return "Apache-2.0"
+    if "permission is hereby granted, free of charge" in low:
+        return "MIT"
+    if "redistribution and use in source and binary forms" in low:
+        if "neither the name" in low or "may be used to endorse or promote" in low:
+            return "BSD-3-Clause"
+        return "BSD-2-Clause"
+    if "mozilla public license" in low and "version 2.0" in low:
+        return "MPL-2.0"
+    if "gnu lesser general public license" in low:
+        return "LGPL-3.0-or-later" if "version 3" in low else "LGPL-2.1-or-later"
+    if "gnu affero general public license" in low:
+        return "AGPL-3.0-or-later"
+    if "gnu general public license" in low:
+        return "GPL-3.0-or-later" if "version 3" in low else "GPL-2.0-or-later"
+    return None
+
+
+def _collect_distribution_license_files(dist: Any) -> tuple[dict[str, str], list[tuple[str, str]]]:
+    """Return hashes and recognized declarations from installed dist evidence."""
+    declared_paths = set(dist.metadata.get_all("License-File") or [])
+    for item in dist.files or []:
+        item_text = str(item)
+        if _is_license_path(item_text):
+            declared_paths.add(item_text)
+    hashes: dict[str, str] = {}
+    declarations: list[tuple[str, str]] = []
+    for relative in sorted(declared_paths):
+        try:
+            path = Path(dist.locate_file(relative))
+            if not path.is_file() or path.stat().st_size > 1_048_576:
+                continue
+            raw = path.read_bytes()
+            hashes[str(relative).replace("\\", "/")] = _sha256_bytes(raw)
+            declaration = _license_document_declaration(raw.decode("utf-8", errors="replace"))
+            if declaration:
+                declarations.append((str(relative).replace("\\", "/"), declaration))
+        except (OSError, ValueError, TypeError):
+            continue
+    return hashes, declarations
 
 
 def _package_info(dist: Any) -> PkgInfo:
@@ -134,6 +189,9 @@ def _package_info(dist: Any) -> PkgInfo:
     candidates.extend(("classifier", c) for c in classifiers)
     if _short_declaration(field):
         candidates.append(("license-field", field))
+    license_files, file_declarations = _collect_distribution_license_files(dist)
+    candidates.extend((f"license-file:{path}", declaration)
+                      for path, declaration in file_declarations)
     for source, candidate in candidates:
         tier, constituents, normalized = classify_license(candidate)
         if tier:
@@ -146,6 +204,7 @@ def _package_info(dist: Any) -> PkgInfo:
         "type": "package", "name": metadata.get("Name") or dist.name,
         "version": dist.version or "?", "selected_source": selected_source,
         "selected_license": selected, "notice_sha256": notice_sha,
+        "license_files_sha256": license_files,
     }
     return PkgInfo(
         name=str(evidence["name"]), version=str(evidence["version"]),
@@ -155,7 +214,8 @@ def _package_info(dist: Any) -> PkgInfo:
         license_classifiers=classifiers, selected_source=selected_source,
         selected_license=selected, tier=tier, constituents=constituents,
         homepage=(metadata.get("Home-page") or "").strip(),
-        notice_sha256=notice_sha, evidence_sha256=_canonical_json_sha(evidence),
+        notice_sha256=notice_sha, license_files_sha256=license_files,
+        evidence_sha256=_canonical_json_sha(evidence),
     )
 
 
@@ -347,12 +407,13 @@ def render_markdown(pkgs: list[PkgInfo], models: list[ModelEntry], out: Path,
         "Tier 0/2/3 and unverified model evidence are blocked unless an exact external approval matches.",
         "Bundled notices are recorded separately and never replace authoritative package declarations.",
         "", "## Installed packages", "",
-        "| Package | Version | Tier | Selected declaration | Source | Notice SHA-256 | Approved |",
-        "|---|---|---:|---|---|---|---|",
+        "| Package | Version | Tier | Selected declaration | Source | License files | Notice SHA-256 | Approved |",
+        "|---|---|---:|---|---|---:|---|---|",
     ]
     for pkg in sorted(pkgs, key=lambda item: (-item.tier, item.name.casefold())):
         lines.append(f"| {pkg.name} | {pkg.version} | {pkg.tier} | {_markdown_escape(pkg.selected_license)} | "
-                     f"{pkg.selected_source} | {_markdown_escape(pkg.notice_sha256)} | {pkg.approved} |")
+                     f"{pkg.selected_source} | {len(pkg.license_files_sha256)} | "
+                     f"{_markdown_escape(pkg.notice_sha256)} | {pkg.approved} |")
     lines += ["", "## Staged models", "",
               "| Model | Revision | Status | Tier | Declaration | Evidence source | Files | Approved |",
               "|---|---|---|---:|---|---|---:|---|"]
