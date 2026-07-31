@@ -36,6 +36,16 @@ class TestDeployGitSafety(unittest.TestCase):
         for text in (self.workflow, self.windows, self.linux):
             self.assertIn("http.extraHeader=AUTHORIZATION: basic", text)
 
+    def test_linux_fetch_uses_optional_proxy_http11_and_bounded_retry(self):
+        for text in (self.workflow, self.linux):
+            with self.subTest(source="workflow" if text is self.workflow else "linux"):
+                self.assertIn("DEPLOY_HTTP_PROXY", text)
+                self.assertIn("http.version=HTTP/1.1", text)
+                self.assertIn("1 2 3 4", text)
+                self.assertIn("2 **", text)
+                self.assertNotIn("http.sslVerify=false", text)
+                self.assertNotIn("git config --global http.proxy", text)
+
     def test_windows_pull_failure_is_not_warning_only(self):
         self.assertNotIn('Write-Warning "git pull failed', self.windows)
         self.assertIn('throw "git fetch failed', self.windows)

@@ -95,11 +95,28 @@ jobs:
           DATA_PATH: /data/services/docker/data/ragpincheng/prod/app
           GIT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DEPLOY_COMMIT_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+          DEPLOY_HTTP_PROXY: ${{ vars.DEPLOY_HTTP_PROXY }}
         run: |
           set -euo pipefail
           cd "${REPO_PATH}"
           BASIC_AUTH="$(printf 'x-access-token:%s' "${GIT_TOKEN}" | base64 | tr -d '\n')"
-          git -c "http.extraHeader=AUTHORIZATION: basic ${BASIC_AUTH}" fetch \
-            https://github.com/abworks-dev/RAGPinCheng.git "${DEPLOY_COMMIT_SHA}"
+          PROXY_ARGS=()
+          if [ -n "${DEPLOY_HTTP_PROXY:-}" ]; then
+            PROXY_ARGS=(-c "http.proxy=${DEPLOY_HTTP_PROXY}")
+          fi
+          for ATTEMPT in 1 2 3 4; do
+            if git -c http.version=HTTP/1.1 "${PROXY_ARGS[@]}" \
+              -c "http.extraHeader=AUTHORIZATION: basic ${BASIC_AUTH}" fetch \
+              https://github.com/abworks-dev/RAGPinCheng.git "${DEPLOY_COMMIT_SHA}"; then
+              break
+            fi
+            if [ "${ATTEMPT}" -eq 4 ]; then
+              echo "ERROR: bootstrap fetch failed after 4 attempts"
+              exit 1
+            fi
+            DELAY=$((2 ** ATTEMPT))
+            echo "Bootstrap fetch attempt ${ATTEMPT}/4 failed; retrying in ${DELAY}s"
+            sleep "${DELAY}"
+          done
           git merge --ff-only "${DEPLOY_COMMIT_SHA}"
           bash "${REPO_PATH}/scripts/deploy-app.sh"

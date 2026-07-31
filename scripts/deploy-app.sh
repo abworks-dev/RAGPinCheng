@@ -26,6 +26,31 @@ if [[ ! "$DEPLOY_COMMIT_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
     exit 1
 fi
 
+git_fetch_exact_commit() {
+    local commit_sha="$1"
+    local basic_auth attempt delay
+    local -a proxy_args=()
+    : "${GIT_TOKEN:?GIT_TOKEN is required to fetch the approved commit}"
+    basic_auth="$(printf 'x-access-token:%s' "$GIT_TOKEN" | base64 | tr -d '\n')"
+    if [ -n "${DEPLOY_HTTP_PROXY:-}" ]; then
+        proxy_args=(-c "http.proxy=${DEPLOY_HTTP_PROXY}")
+    fi
+    for attempt in 1 2 3 4; do
+        if git -c http.version=HTTP/1.1 "${proxy_args[@]}" \
+            -c "http.extraHeader=AUTHORIZATION: basic ${basic_auth}" fetch \
+            https://github.com/abworks-dev/RAGPinCheng.git "$commit_sha"; then
+            return 0
+        fi
+        if [ "$attempt" -eq 4 ]; then
+            echo "ERROR: git fetch failed after 4 attempts"
+            return 1
+        fi
+        delay=$((2 ** attempt))
+        echo "Git fetch attempt ${attempt}/4 failed; retrying in ${delay}s"
+        sleep "$delay"
+    done
+}
+
 # Helper: build the full compose command with project, files, and env file.
 compose() {
     docker compose -p "$COMPOSE_PROJECT" \
@@ -73,10 +98,7 @@ echo ">> Synchronizing exact commit ${DEPLOY_COMMIT_SHA}"
 cd "$REPO_PATH"
 CURRENT_HEAD="$(git rev-parse HEAD)"
 if [ "$CURRENT_HEAD" != "$DEPLOY_COMMIT_SHA" ]; then
-    : "${GIT_TOKEN:?GIT_TOKEN is required when checkout is not at DEPLOY_COMMIT_SHA}"
-    BASIC_AUTH="$(printf 'x-access-token:%s' "$GIT_TOKEN" | base64 | tr -d '\n')"
-    git -c "http.extraHeader=AUTHORIZATION: basic ${BASIC_AUTH}" fetch \
-        https://github.com/abworks-dev/RAGPinCheng.git "$DEPLOY_COMMIT_SHA"
+    git_fetch_exact_commit "$DEPLOY_COMMIT_SHA"
     git merge --ff-only "$DEPLOY_COMMIT_SHA"
 fi
 ACTUAL_HEAD="$(git rev-parse HEAD)"
