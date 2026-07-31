@@ -1,0 +1,46 @@
+# Phase 0 ASR sandbox — runtime dependencies.
+#
+# Install with TWO separate pip invocations (per R2 fix spec §九):
+#
+#   # 1) Torch + torchaudio from the cu128 index ONLY
+#   pip install -i https://download.pytorch.org/whl/cu128 \
+#       torch==2.7.0 torchaudio==2.7.0
+#
+#   # 2) Everything else from the approved mirror
+#   pip install -i https://pypi.tuna.tsinghua.edu.cn/simple \
+#       -r scripts/funasr_phase0/requirements-asr.txt
+#
+# Then run `pip check` and verify `python -c "import torch; print(torch.__version__)"`
+# contains `+cu128`.
+#
+# python-Levenshtein was REMOVED (R2 fix §六) — lib_metrics uses pure-Python
+# edit distance. This also removes the GPL-2.0-or-later risk flagged in
+# lib_license_audit.
+#
+# This file is the SECOND-INSTALL only (everything except torch/torchaudio).
+
+# ASR engine + model hub
+funasr>=1.2,<2
+modelscope>=1.20,<2
+
+# Audio decode (canonical name is `av`; PyAV)
+av>=12,<19
+soundfile>=0.12
+
+# Pure-Python edit distance (no GPL): rolled into lib_metrics, no extra dep.
+
+# Inference backends
+onnxruntime>=1.17,<2
+
+# Production-aligned version pins (must match gpu_service/requirements.txt)
+transformers>=4.46,<5
+huggingface-hub>=0.34,<1
+safetensors>=0.4
+tokenizers>=0.20,<0.24
+
+# Misc
+requests>=2.32
+tqdm>=4.66
+pyyaml>=6
+packaging>=23
+numpy>=1.24,<2
