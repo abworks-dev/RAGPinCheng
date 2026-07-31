@@ -12,7 +12,8 @@ from scripts.funasr_phase0 import lib_license_audit as audit
 
 
 def fake_dist(name: str, version: str, *, expression: str = "", license_field: str = "",
-              classifiers: list[str] | None = None):
+              classifiers: list[str] | None = None, root: Path | None = None,
+              files: list[str] | None = None, license_files: list[str] | None = None):
     metadata = Message()
     metadata["Name"] = name
     if expression:
@@ -21,7 +22,11 @@ def fake_dist(name: str, version: str, *, expression: str = "", license_field: s
         metadata["License"] = license_field
     for classifier in classifiers or []:
         metadata["Classifier"] = classifier
-    return SimpleNamespace(name=name, version=version, metadata=metadata)
+    for license_file in license_files or []:
+        metadata["License-File"] = license_file
+    base = root or Path(".")
+    return SimpleNamespace(name=name, version=version, metadata=metadata,
+                           files=files or [], locate_file=lambda item: base / str(item))
 
 
 class TestPackageEvidence(unittest.TestCase):
@@ -54,6 +59,72 @@ class TestPackageEvidence(unittest.TestCase):
         ):
             with self.subTest(declaration=declaration):
                 self.assertIn(expected, audit.classify_license(declaration)[1])
+
+    def test_mit_zero_and_generic_bsd_are_recognized(self):
+        self.assertEqual(audit.classify_license("MIT-0")[:2], (1, ["MIT-0"]))
+        self.assertEqual(audit.classify_license("BSD")[:2], (1, ["BSD-3-Clause"]))
+
+    def test_dist_info_license_file_supplies_primary_evidence(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            relative = "demo-1.0.dist-info/licenses/LICENSE"
+            path = root / relative
+            path.parent.mkdir(parents=True)
+            path.write_text(
+                "MIT License\n\nPermission is hereby granted, free of charge, "
+                "to any person obtaining a copy...",
+                encoding="utf-8",
+            )
+            pkg = audit._package_info(fake_dist(
+                "demo", "1.0", root=root, files=[relative], license_files=[relative],
+            ))
+            self.assertEqual(pkg.tier, 1)
+            self.assertEqual(pkg.selected_license, "MIT")
+            self.assertEqual(pkg.selected_source, f"license-file:{relative}")
+            self.assertEqual(list(pkg.license_files_sha256), [relative])
+            self.assertEqual(len(pkg.license_files_sha256[relative]), 64)
+
+    def test_license_file_hash_changes_package_evidence_digest(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            relative = "pkg.dist-info/LICENSE"
+            path = root / relative
+            path.parent.mkdir(parents=True)
+            path.write_text("Permission is hereby granted, free of charge", encoding="utf-8")
+            first = audit._package_info(fake_dist("pkg", "1", root=root, files=[relative]))
+            path.write_text("Permission is hereby granted, free of charge, changed", encoding="utf-8")
+            second = audit._package_info(fake_dist("pkg", "1", root=root, files=[relative]))
+            self.assertNotEqual(first.evidence_sha256, second.evidence_sha256)
+
+    def test_oversized_license_file_is_not_read_or_used(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            relative = "pkg.dist-info/LICENSE"
+            path = root / relative
+            path.parent.mkdir(parents=True)
+            path.write_bytes(b"x" * (1_048_576 + 1))
+            pkg = audit._package_info(fake_dist("pkg", "1", root=root, files=[relative]))
+            self.assertEqual(pkg.tier, 0)
+            self.assertEqual(pkg.license_files_sha256, {})
+
+    def test_custom_evaluation_license_is_hashed_but_remains_blocked(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            relative = "kaldiio.dist-info/LICENSE"
+            path = root / relative
+            path.parent.mkdir(parents=True)
+            path.write_text(
+                "SOFTWARE LICENSE AGREEMENT FOR EVALUATION\n"
+                "a nontransferable license to use internally for testing and evaluating",
+                encoding="utf-8",
+            )
+            pkg = audit._package_info(fake_dist(
+                "kaldiio", "2.18.1", root=root, files=[relative],
+            ))
+            self.assertEqual(pkg.tier, 0)
+            self.assertEqual(pkg.selected_license, "UNKNOWN")
+            self.assertIn(relative, pkg.license_files_sha256)
+            self.assertTrue(audit._package_blocked(pkg))
 
 
 class TestModelEvidence(unittest.TestCase):

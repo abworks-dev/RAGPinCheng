@@ -125,8 +125,12 @@ This sandbox MUST NOT:
    60s windows. No waiting 1h to judge degradation.
 10. The parent enforces the license audit before it creates a GPU worker.
     Audit schema v2 uses `License-Expression`, recognized classifiers, then a
-    short `License` declaration; long bundled notices are hashed separately so
+    short `License` declaration, then installed wheel `License-File` /
+    `.dist-info/licenses/` evidence. License-file paths and SHA-256 values are
+    included in the approval digest. Long bundled notices are hashed separately so
     NumPy/SciPy notices cannot be mistaken for the package's primary license.
+    Custom evaluation/research-only license documents are retained as evidence
+    but remain Tier 0 blockers; they are never inferred to be permissive.
     Model verification requires a staged `LICENSE` declaration or model-card
     `license:` field and is bound to the configured revision plus all staged
     file hashes. An expected license alone is never `VERIFIED`.
