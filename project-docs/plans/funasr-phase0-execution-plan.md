@@ -211,6 +211,9 @@ Codex 当前会话没有已确认的生产主机远程命令通道。代码经 G
 
 - 每完成一步立即在 `WORKLOG.md` 追加 `### HH:mm — 步 N 名称`；
 - 最终报告：`${QUALIFICATION_SANDBOX_ROOT}\reports\phase0-report.md` + `metrics.csv` + `license-matrix.md` + `raw-logs/`；
+- 许可门禁使用 schema v2：优先采用 PEP 639 `License-Expression`、已识别 classifier、短许可证声明；长 NOTICE 单独留存摘要，不作为主许可证分类依据；
+- 模型必须从实际 `LICENSE` 或模型卡 `license:` 取得证据，并绑定模型 ID、固定 revision、全部文件 SHA-256 与配置 SHA-256；仅有预期许可证不得标为已验证；
+- Tier 0/2/3 或模型证据异常时，只接受仓库外 `reports_root/license-approvals.json` 的精确人工审批；审批须绑定当前证据摘要，禁止通配、过期或跨配置复用；
 - 通过条件全部满足后给三选一建议：
   1. FunASR 通过 → 提交 Phase 1 方案；
   2. 触发退出条件 → 建议另批 faster-whisper；

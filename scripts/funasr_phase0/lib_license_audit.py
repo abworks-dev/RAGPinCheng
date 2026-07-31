@@ -1,25 +1,8 @@
-"""Phase 0 ASR sandbox — license audit utility (R2 fix).
+"""Fail-closed license evidence audit for the FunASR Phase 0 sandbox.
 
-Behavior per R2 spec §九:
-  - Scans actually-installed packages via importlib.metadata; reads License
-    field plus PEP 639 / License :: classifier; computes tier.
-  - Scans actually-staged model directories under the models_root; reads
-    LICENSE / model card; records revision, source URL, file SHA-256.
-  - Hardcoded entries are treated as "expected value" only — never as
-    "verified fact". A hardcoded entry without an actual installed/staged
-    file is reported as EXPECTED_MISSING.
-  - Compound licenses (e.g. "MIT OR Apache-2.0") take the HIGHEST tier of
-    any constituent license.
-  - Tier 2 (LGPL / MPL), tier 3 (GPL / AGPL), and tier 0 (UNKNOWN) all
-    require explicit manual review; the audit exit code is non-zero if
-    any of these exist UNAPPROVED.
-  - --report-only mode writes the audit but DOES NOT affect exit code;
-    main GPU entry scripts must not invoke audit in --report-only mode.
-
-Run:
-  C:\\FunASR-Phase0\\venv\\Scripts\\python.exe ^
-    E:\\Repository\\Github\\RAGPinCheng\\scripts\\funasr_phase0\\lib_license_audit.py ^
-    --config phase0-config.json
+The audit distinguishes declared package/model licenses from bundled notices.
+Tier 0/2/3 artifacts require an exact, external approval bound to the current
+evidence digest.  Expected model licenses are comparison hints only.
 """
 from __future__ import annotations
 
@@ -30,407 +13,437 @@ import json
 import os
 import re
 import sys
-from collections.abc import Iterable
-from dataclasses import dataclass, field
-from datetime import datetime
+from collections.abc import Iterable, Mapping
+from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-AUDIT_SCHEMA_VERSION = "phase0-license-audit/1"
+AUDIT_SCHEMA_VERSION = "phase0-license-audit/2"
+APPROVAL_SCHEMA_VERSION = "phase0-license-approvals/1"
 
-# ─────────────────────────────────────────────────────────────────────────────
-# License classification
-# ─────────────────────────────────────────────────────────────────────────────
-
-# SPDX short names -> base tier
 SPDX_TIER = {
     "MIT": 1, "Apache-2.0": 1, "BSD-2-Clause": 1, "BSD-3-Clause": 1,
-    "ISC": 1, "MPL-2.0": 2, "Zlib": 1, "Python-2.0": 1, "PSF-2.0": 1,
-    "LGPL-2.0": 2, "LGPL-2.0+": 2, "LGPL-2.1": 2, "LGPL-2.1+": 2,
-    "LGPL-3.0": 2, "LGPL-3.0+": 2,
-    "GPL-2.0": 3, "GPL-2.0+": 3, "GPL-3.0": 3, "GPL-3.0+": 3,
-    "AGPL-3.0": 3, "AGPL-3.0+": 3,
-    "CC0-1.0": 1, "CC-BY-4.0": 1, "CC-BY-SA-4.0": 2,
+    "ISC": 1, "Zlib": 1, "Python-2.0": 1, "PSF-2.0": 1,
+    "MPL-2.0": 2, "LGPL-2.0": 2, "LGPL-2.0+": 2,
+    "LGPL-2.0-only": 2, "LGPL-2.0-or-later": 2, "LGPL-2.1": 2,
+    "LGPL-2.1+": 2, "LGPL-2.1-only": 2, "LGPL-2.1-or-later": 2,
+    "LGPL-3.0": 2, "LGPL-3.0+": 2, "LGPL-3.0-only": 2,
+    "LGPL-3.0-or-later": 2, "GPL-2.0": 3, "GPL-2.0+": 3,
+    "GPL-2.0-only": 3, "GPL-2.0-or-later": 3, "GPL-3.0": 3,
+    "GPL-3.0+": 3, "GPL-3.0-only": 3, "GPL-3.0-or-later": 3,
+    "AGPL-3.0": 3, "AGPL-3.0+": 3, "AGPL-3.0-only": 3,
+    "AGPL-3.0-or-later": 3, "CC0-1.0": 1, "CC-BY-4.0": 1,
+    "CC-BY-SA-4.0": 2,
 }
 
-# Substring matches (PEP 639 / classifier text)
-_TOK_TIER = [
-    ("Affero General Public License", 3), ("AGPL", 3),
-    ("GNU General Public License", 3), ("GPL-3", 3), ("GPL-2", 3),
-    ("GNU Lesser General Public", 2), ("Lesser General Public", 2), ("LGPL", 2),
-    ("Mozilla Public License", 2), ("MPL", 2),
-    ("Apache License", 1), ("BSD", 1), ("ISC", 1), ("MIT License", 1),
-]
+_ALIASES = {
+    "apache license 2.0": "Apache-2.0", "apache software license": "Apache-2.0",
+    "apache 2.0 license": "Apache-2.0", "apache-2.0 license": "Apache-2.0",
+    "http://www.apache.org/licenses/license-2.0": "Apache-2.0",
+    "https://www.apache.org/licenses/license-2.0": "Apache-2.0",
+    "mit license": "MIT", "the mit license": "MIT", "bsd license": "BSD-3-Clause",
+    "bsd-3-clause license": "BSD-3-Clause", "bsd 3-clause license": "BSD-3-Clause",
+    "mozilla public license 2.0": "MPL-2.0",
+}
 
 
-def _split_compound(s: str) -> list[str]:
-    """Split 'MIT OR Apache-2.0' / 'MIT AND (GPL-2.0 OR MIT)' into parts.
-
-    Splits on top-level OR/AND/WITH, also strips surrounding parens.
-    """
-    s = (s or "").strip()
-    out = [s]
-    for sep in (" OR ", " AND ", " WITH "):
-        new: list[str] = []
-        for part in out:
-            new.extend(p.strip() for p in part.split(sep))
-        out = new
-    cleaned: list[str] = []
-    for p in out:
-        p = p.strip().strip("()").strip()
-        if p:
-            cleaned.append(p)
-    return cleaned
+def _sha256_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
 
 
-def classify_license(license_str: str | None) -> tuple[int, list[str], str]:
-    """Return (tier, constituent_names, normalized_display).
+def _canonical_json_sha(value: Any) -> str:
+    return _sha256_bytes(json.dumps(value, sort_keys=True, separators=(",", ":"),
+                                    ensure_ascii=False).encode("utf-8"))
 
-    tier: 0=unknown, 1=permissive, 2=weak-copyleft, 3=strong-copyleft
-    constituent_names: SPDX short names recognized
-    """
-    if not license_str:
+
+def _sha256_file(path: Path, chunk: int = 1 << 20) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(chunk), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def _license_tokens(value: str) -> list[str]:
+    value = re.sub(r"[()]", " ", value.strip())
+    return [part.strip() for part in re.split(r"\s+(?:AND|OR|WITH)\s+", value,
+                                               flags=re.IGNORECASE) if part.strip()]
+
+
+def _normalize_token(token: str) -> str | None:
+    exact = token.strip().rstrip("./").strip()
+    if exact in SPDX_TIER:
+        return exact
+    alias = _ALIASES.get(exact.casefold())
+    if alias:
+        return alias
+    # Classifier tails include a family prefix, e.g. OSI Approved :: MIT License.
+    for phrase, normalized in _ALIASES.items():
+        if exact.casefold().endswith(phrase):
+            return normalized
+    return None
+
+
+def classify_license(value: str | None) -> tuple[int, list[str], str]:
+    """Classify a declaration, never an arbitrary full license/NOTICE body."""
+    if not value or not value.strip():
         return 0, [], "UNKNOWN"
-    parts = _split_compound(license_str)
-    constituents: list[str] = []
-    tier = 0
-    for p in parts:
-        # Try SPDX exact match
-        p_strip = p.strip().strip("()")
-        for sp, t in SPDX_TIER.items():
-            if sp in p_strip or p_strip == sp:
-                if sp not in constituents:
-                    constituents.append(sp)
-                if t > tier:
-                    tier = t
-                break
-        else:
-            for tok, t in _TOK_TIER:
-                if tok in p:
-                    if tok not in constituents:
-                        constituents.append(tok)
-                    if t > tier:
-                        tier = t
-                    break
-    return tier, constituents, license_str
+    normalized: list[str] = []
+    for token in _license_tokens(value):
+        item = _normalize_token(token)
+        if item and item not in normalized:
+            normalized.append(item)
+    if not normalized:
+        return 0, [], value.strip()
+    return max(SPDX_TIER[item] for item in normalized), normalized, " AND ".join(normalized)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Package metadata
-# ─────────────────────────────────────────────────────────────────────────────
+def _short_declaration(value: str) -> bool:
+    return bool(value) and len(value) <= 256 and "\n" not in value and "\r" not in value
+
 
 @dataclass
 class PkgInfo:
     name: str
     version: str
+    license_expression: str
     license_field: str
-    license_classifier: str
+    license_classifiers: list[str]
+    selected_source: str
+    selected_license: str
     tier: int
     constituents: list[str]
     homepage: str
+    notice_sha256: str | None
+    evidence_sha256: str
+    approved: bool = False
+    approval_reason: str | None = None
+
+
+def _package_info(dist: Any) -> PkgInfo:
+    metadata = dist.metadata
+    expression = (metadata.get("License-Expression") or "").strip()
+    field = (metadata.get("License") or "").strip()
+    classifiers = [c for c in (metadata.get_all("Classifier") or [])
+                   if c.startswith("License ::")]
+    selected_source, selected = "none", "UNKNOWN"
+    candidates: list[tuple[str, str]] = []
+    if expression:
+        candidates.append(("license-expression", expression))
+    candidates.extend(("classifier", c) for c in classifiers)
+    if _short_declaration(field):
+        candidates.append(("license-field", field))
+    for source, candidate in candidates:
+        tier, constituents, normalized = classify_license(candidate)
+        if tier:
+            selected_source, selected = source, normalized
+            break
+    else:
+        tier, constituents = 0, []
+    notice_sha = _sha256_bytes(field.encode("utf-8")) if field and not _short_declaration(field) else None
+    evidence = {
+        "type": "package", "name": metadata.get("Name") or dist.name,
+        "version": dist.version or "?", "selected_source": selected_source,
+        "selected_license": selected, "notice_sha256": notice_sha,
+    }
+    return PkgInfo(
+        name=str(evidence["name"]), version=str(evidence["version"]),
+        license_expression=expression,
+        license_field=(field if _short_declaration(field) else
+                       ("[bundled notice recorded by SHA-256]" if field else "")),
+        license_classifiers=classifiers, selected_source=selected_source,
+        selected_license=selected, tier=tier, constituents=constituents,
+        homepage=(metadata.get("Home-page") or "").strip(),
+        notice_sha256=notice_sha, evidence_sha256=_canonical_json_sha(evidence),
+    )
 
 
 def collect_pkg_licenses(names: Iterable[str] | None = None) -> list[PkgInfo]:
-    out: list[PkgInfo] = []
     if names is None:
-        names = sorted({d.metadata["Name"] for d in ilm.distributions() if d.metadata.get("Name")})
+        names = sorted({d.metadata["Name"] for d in ilm.distributions()
+                        if d.metadata.get("Name")})
+    result: list[PkgInfo] = []
     for name in names:
         try:
-            dist = ilm.distribution(name)
+            result.append(_package_info(ilm.distribution(name)))
         except ilm.PackageNotFoundError:
             continue
-        license_field = (dist.metadata.get("License") or "").strip()
-        classifiers = dist.metadata.get_all("Classifier") or []
-        license_classifier = ""
-        for c in classifiers:
-            if c.startswith("License ::"):
-                license_classifier = c.split(" :: ", 2)[-1]
-                break
-        combined = license_field or license_classifier or "UNKNOWN"
-        tier, constituents, _ = classify_license(combined)
-        out.append(PkgInfo(
-            name=name,
-            version=dist.version or "?",
-            license_field=license_field,
-            license_classifier=license_classifier,
-            tier=tier,
-            constituents=constituents,
-            homepage=(dist.metadata.get("Home-page") or "").strip(),
-        ))
-    return out
+    return result
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Model files on disk
-# ─────────────────────────────────────────────────────────────────────────────
 
 @dataclass
 class ModelEntry:
     model_id: str
+    revision: str
     source_url: str
     expected_license: str
     expected_tier: int
-    expected_constituents: list[str]
     found_path: str | None
-    found_license_text: str | None
+    declared_license: str | None
+    declaration_source: str | None
     found_license_tier: int
     found_files_sha256: dict[str, str]
-    found_model_card_excerpt: str | None
-    status: str  # "VERIFIED" / "EXPECTED_MISSING" / "LICENSE_MISMATCH"
+    evidence_sha256: str
+    status: str
+    approved: bool = False
+    approval_reason: str | None = None
 
 
-def _sha256_file(p: Path, chunk: int = 1 << 16) -> str:
-    h = hashlib.sha256()
-    with p.open("rb") as f:
-        for c in iter(lambda: f.read(chunk), b""):
-            h.update(c)
-    return h.hexdigest()
+def _model_card_license(text: str) -> str | None:
+    head = text[:8192]
+    match = re.search(r"(?im)^\s*license\s*:\s*['\"]?([^\r\n'\"]+)", head)
+    return match.group(1).strip() if match else None
 
 
-def _scan_model_dir(model_root: Path, model_id: str) -> tuple[Path | None, dict[str, str], str | None, str | None]:
-    """Look for a directory under model_root that matches model_id's tail."""
-    if not model_root.exists():
-        return None, {}, None, None
+def _license_text_declaration(text: str) -> str | None:
+    low = text[:4096].casefold()
+    patterns = [
+        ("apache license", "Apache-2.0"), ("mit license", "MIT"),
+        ("mozilla public license", "MPL-2.0"),
+        ("gnu lesser general public license", "LGPL-3.0-or-later"),
+        ("gnu affero general public license", "AGPL-3.0-or-later"),
+        ("gnu general public license", "GPL-3.0-or-later"),
+        ("bsd 3-clause", "BSD-3-Clause"),
+    ]
+    return next((value for phrase, value in patterns if phrase in low), None)
+
+
+def _find_model_dir(root: Path, model_id: str) -> Path | None:
     target = model_id.replace("/", os.sep)
-    candidates = (
-        model_root / target,
-        model_root / "modelscope" / target,
-        model_root / "modelscope" / "hub" / target,
-        model_root / "hub" / target,
-    )
-    candidate = next((p for p in candidates if p.is_dir()), None)
-    if candidate is None:
-        return None, {}, None, None
-    sha: dict[str, str] = {}
-    license_text: str | None = None
-    card: str | None = None
-    for p in candidate.rglob("*"):
-        if not p.is_file():
-            continue
-        try:
-            sha[str(p.relative_to(candidate))] = _sha256_file(p)
-        except OSError:
-            continue
-        if p.name.lower() in {"license", "license.md", "license.txt"}:
-            try:
-                license_text = p.read_text(encoding="utf-8", errors="replace")
-            except OSError:
-                pass
-        if p.name.lower() in {"readme.md", "modelcard.md", "model_card.md"} or p.name == "README.md":
-            try:
-                card = p.read_text(encoding="utf-8", errors="replace")[:2000]
-            except OSError:
-                pass
-    return candidate, sha, license_text, card
+    return next((p for p in (root / target, root / "modelscope" / target,
+                             root / "modelscope" / "hub" / target,
+                             root / "hub" / target) if p.is_dir()), None)
 
 
 def scan_models(model_root: Path, expected: Iterable[dict[str, str]]) -> list[ModelEntry]:
-    out: list[ModelEntry] = []
-    for ex in expected:
-        mid = ex["model_id"]
-        url = ex.get("source_url", "")
-        exp_lic = ex.get("expected_license", "UNKNOWN")
-        exp_tier, exp_con, _ = classify_license(exp_lic)
-        found_path, sha, license_text, card = _scan_model_dir(model_root, mid)
-        if found_path is None:
-            out.append(ModelEntry(
-                model_id=mid, source_url=url,
-                expected_license=exp_lic, expected_tier=exp_tier,
-                expected_constituents=exp_con,
-                found_path=None, found_license_text=None, found_license_tier=0,
-                found_files_sha256={}, found_model_card_excerpt=None,
-                status="EXPECTED_MISSING",
-            ))
-            continue
-        license_to_check = license_text or exp_lic
-        found_tier, found_con, _ = classify_license(license_to_check)
-        status = "VERIFIED" if found_tier <= exp_tier else "LICENSE_MISMATCH"
-        out.append(ModelEntry(
-            model_id=mid, source_url=url,
-            expected_license=exp_lic, expected_tier=exp_tier,
-            expected_constituents=exp_con,
-            found_path=str(found_path), found_license_text=license_text,
-            found_license_tier=found_tier,
-            found_files_sha256=sha, found_model_card_excerpt=card,
-            status=status,
+    result: list[ModelEntry] = []
+    for spec in expected:
+        model_id, revision = spec["model_id"], spec["revision"]
+        expected_license = spec.get("expected_license", "UNKNOWN")
+        expected_tier = classify_license(expected_license)[0]
+        model_dir = _find_model_dir(model_root, model_id)
+        hashes: dict[str, str] = {}
+        declared: str | None = None
+        source: str | None = None
+        if model_dir:
+            for path in sorted(model_dir.rglob("*")):
+                if not path.is_file():
+                    continue
+                rel = path.relative_to(model_dir).as_posix()
+                try:
+                    hashes[rel] = _sha256_file(path)
+                    if path.name.casefold() in {"license", "license.md", "license.txt"}:
+                        text = path.read_text(encoding="utf-8", errors="replace")
+                        declaration = _license_text_declaration(text)
+                        if declaration and not declared:
+                            declared, source = declaration, rel
+                    elif path.name.casefold() in {"readme.md", "modelcard.md", "model_card.md"}:
+                        text = path.read_text(encoding="utf-8", errors="replace")
+                        declaration = _model_card_license(text)
+                        if declaration and not declared:
+                            declared, source = declaration, f"{rel}:frontmatter"
+                except OSError:
+                    continue
+        found_tier = classify_license(declared)[0]
+        if not model_dir:
+            status = "EXPECTED_MISSING"
+        elif not hashes:
+            status = "NO_ARTIFACT_EVIDENCE"
+        elif not declared:
+            status = "NO_LICENSE_EVIDENCE"
+        elif found_tier == 0:
+            status = "UNRECOGNIZED_LICENSE"
+        elif expected_tier and found_tier != expected_tier:
+            status = "LICENSE_MISMATCH"
+        else:
+            status = "VERIFIED"
+        evidence = {
+            "type": "model", "model_id": model_id, "revision": revision,
+            "declared_license": declared, "declaration_source": source,
+            "files_sha256": hashes,
+        }
+        result.append(ModelEntry(
+            model_id=model_id, revision=revision,
+            source_url=spec.get("source_url", ""), expected_license=expected_license,
+            expected_tier=expected_tier, found_path=str(model_dir) if model_dir else None,
+            declared_license=declared, declaration_source=source,
+            found_license_tier=found_tier, found_files_sha256=hashes,
+            evidence_sha256=_canonical_json_sha(evidence), status=status,
         ))
-    return out
+    return result
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Rendering
-# ─────────────────────────────────────────────────────────────────────────────
+def _load_approvals(path: Path | None, config_sha256: str) -> dict[tuple[str, str, str], dict[str, Any]]:
+    if path is None or not path.exists():
+        return {}
+    raw = json.loads(path.read_text(encoding="utf-8-sig"))
+    if raw.get("schema_version") != APPROVAL_SCHEMA_VERSION:
+        raise ValueError("unsupported license approval schema")
+    if raw.get("config_sha256") != config_sha256:
+        raise ValueError("license approval config_sha256 is stale or mismatched")
+    approvals: dict[tuple[str, str, str], dict[str, Any]] = {}
+    now = datetime.now(timezone.utc)
+    for item in raw.get("approvals", []):
+        if not isinstance(item, Mapping):
+            raise ValueError("approval entries must be objects")
+        required = {"artifact_type", "name", "version_or_revision", "evidence_sha256",
+                    "approved_by", "approved_at", "reason"}
+        if not required.issubset(item) or any(not str(item[k]).strip() for k in required):
+            raise ValueError("approval entry has missing/empty required fields")
+        if "*" in (item["name"], item["version_or_revision"], item["evidence_sha256"]):
+            raise ValueError("wildcards are forbidden in license approvals")
+        approved_at = datetime.fromisoformat(str(item["approved_at"]).replace("Z", "+00:00"))
+        if approved_at.tzinfo is None:
+            raise ValueError("approved_at must include a UTC offset")
+        expires = item.get("expires_at")
+        if expires:
+            expiry = datetime.fromisoformat(str(expires).replace("Z", "+00:00"))
+            if expiry.tzinfo is None:
+                raise ValueError("expires_at must include a UTC offset")
+            if expiry <= now:
+                continue
+        key = (str(item["artifact_type"]), str(item["name"]),
+               str(item["version_or_revision"]))
+        if key in approvals:
+            raise ValueError(f"duplicate approval for {key}")
+        approvals[key] = dict(item)
+    return approvals
 
 
-def _tier_mark(t: int) -> str:
-    return {0: "❓0", 1: "✅1", 2: "⚠️2", 3: "⛔3"}.get(t, "?")
+def _apply_approvals(pkgs: list[PkgInfo], models: list[ModelEntry], approvals: dict[tuple[str, str, str], dict[str, Any]]) -> None:
+    for pkg in pkgs:
+        item = approvals.get(("package", pkg.name, pkg.version))
+        if item and item["evidence_sha256"] == pkg.evidence_sha256:
+            pkg.approved, pkg.approval_reason = True, str(item["reason"])
+    for model in models:
+        item = approvals.get(("model", model.model_id, model.revision))
+        if item and item["evidence_sha256"] == model.evidence_sha256:
+            model.approved, model.approval_reason = True, str(item["reason"])
 
 
-def render_markdown(pkgs: list[PkgInfo], models: list[ModelEntry], out: Path) -> dict[str, Any]:
+def _package_blocked(pkg: PkgInfo) -> bool:
+    return pkg.tier in (0, 2, 3) and not pkg.approved
+
+
+def _model_blocked(model: ModelEntry) -> bool:
+    return (model.status != "VERIFIED" or model.found_license_tier in (0, 2, 3)) and not model.approved
+
+
+def _markdown_escape(value: Any, limit: int = 80) -> str:
+    return str(value or "")[:limit].replace("|", "\\|").replace("\n", " ")
+
+
+def render_markdown(pkgs: list[PkgInfo], models: list[ModelEntry], out: Path,
+                    config_sha256: str, approval_path: Path | None) -> dict[str, Any]:
     out.parent.mkdir(parents=True, exist_ok=True)
-    lines: list[str] = []
-    lines.append("# FunASR Phase 0 License Audit")
-    lines.append("")
-    lines.append(f"- Schema: {AUDIT_SCHEMA_VERSION}")
-    lines.append(f"- Generated: {datetime.now().isoformat(timespec='seconds')}")
-    lines.append("- Tier 1 = permissive (MIT/Apache/BSD/…) — OK")
-    lines.append("- Tier 2 = weak-copyleft (LGPL / MPL) — **manual review**")
-    lines.append("- Tier 3 = strong-copyleft (GPL / AGPL) — **manual review**")
-    lines.append("- Tier 0 = unknown — **manual review**")
-    lines.append("")
-    lines.append("## Actually-installed packages")
-    lines.append("")
-    lines.append("| Package | Version | Tier | License (field) | License (classifier) | Constituents |")
-    lines.append("|---|---|---|---|---|---|")
-    for p in sorted(pkgs, key=lambda x: (-x.tier, x.name.lower())):
-        fld = (p.license_field or "")[:60].replace("|", "\\|")
-        cls = (p.license_classifier or "")[:60].replace("|", "\\|")
-        con = ", ".join(p.constituents)[:60]
-        lines.append(f"| {p.name} | {p.version} | {_tier_mark(p.tier)} | {fld} | {cls} | {con} |")
-    lines.append("")
-    lines.append("## Staged model directories (actual files on disk)")
-    lines.append("")
-    lines.append("| Model | Status | Tier (expected / found) | License (expected / found) | n_files |")
-    lines.append("|---|---|---|---|---|")
-    for m in models:
-        lic_exp = m.expected_license[:30]
-        lic_fnd = (m.found_license_text or "")[:30].replace("\n", " ")
-        lines.append(
-            f"| {m.model_id} | {m.status} | {_tier_mark(m.expected_tier)} / {_tier_mark(m.found_license_tier)} | "
-            f"{lic_exp} / {lic_fnd} | {len(m.found_files_sha256)} |"
-        )
-    lines.append("")
-    lines.append("## Action items (must be zero or explicitly approved to proceed)")
-    needs = [p for p in pkgs if p.tier in (0, 2, 3)]
-    needs += [m for m in models if m.found_license_tier in (0, 2, 3)
-              or m.expected_tier in (0, 2, 3) or m.status != "VERIFIED"]
-    if needs:
-        lines.append("")
-        for x in needs:
-            if isinstance(x, PkgInfo):
-                lines.append(f"- [Pip] `{x.name}=={x.version}` tier={x.tier} field='{x.license_field}'")
+    blockers: list[PkgInfo | ModelEntry] = [p for p in pkgs if _package_blocked(p)]
+    blockers += [m for m in models if _model_blocked(m)]
+    lines = [
+        "# FunASR Phase 0 License Audit", "", f"- Schema: {AUDIT_SCHEMA_VERSION}",
+        f"- Generated: {datetime.now(timezone.utc).isoformat(timespec='seconds')}",
+        f"- Config SHA-256: `{config_sha256}`",
+        f"- Approval file: `{approval_path if approval_path else 'not supplied'}`", "",
+        "Tier 0/2/3 and unverified model evidence are blocked unless an exact external approval matches.",
+        "Bundled notices are recorded separately and never replace authoritative package declarations.",
+        "", "## Installed packages", "",
+        "| Package | Version | Tier | Selected declaration | Source | Notice SHA-256 | Approved |",
+        "|---|---|---:|---|---|---|---|",
+    ]
+    for pkg in sorted(pkgs, key=lambda item: (-item.tier, item.name.casefold())):
+        lines.append(f"| {pkg.name} | {pkg.version} | {pkg.tier} | {_markdown_escape(pkg.selected_license)} | "
+                     f"{pkg.selected_source} | {_markdown_escape(pkg.notice_sha256)} | {pkg.approved} |")
+    lines += ["", "## Staged models", "",
+              "| Model | Revision | Status | Tier | Declaration | Evidence source | Files | Approved |",
+              "|---|---|---|---:|---|---|---:|---|"]
+    for model in models:
+        lines.append(f"| {model.model_id} | {model.revision} | {model.status} | "
+                     f"{model.found_license_tier} | {_markdown_escape(model.declared_license)} | "
+                     f"{_markdown_escape(model.declaration_source)} | {len(model.found_files_sha256)} | {model.approved} |")
+    lines += ["", "## Blockers", ""]
+    if blockers:
+        for item in blockers:
+            if isinstance(item, PkgInfo):
+                lines.append(f"- Package `{item.name}=={item.version}` tier={item.tier}; evidence `{item.evidence_sha256}`")
             else:
-                lines.append(
-                    f"- [Model] {x.model_id} status={x.status} "
-                    f"expected_tier={x.expected_tier} found_tier={x.found_license_tier}"
-                )
-    summary = {
-        "schema_version": AUDIT_SCHEMA_VERSION,
-        "generated_at": datetime.now().isoformat(timespec="seconds"),
-        "n_packages": len(pkgs),
-        "n_models": len(models),
-        "needs_review": [x for x in needs],
-    }
-    lines.append("")
-    lines.append(f"## Summary")
-    lines.append(f"- packages: {len(pkgs)}; models: {len(models)}; needs_review: {len(needs)}")
+                lines.append(f"- Model `{item.model_id}@{item.revision}` status={item.status}; evidence `{item.evidence_sha256}`")
+    else:
+        lines.append("- None")
+    lines += ["", "## Summary", "",
+              f"- packages: {len(pkgs)}; models: {len(models)}; blockers: {len(blockers)}"]
     out.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    return summary
+    return {"schema_version": AUDIT_SCHEMA_VERSION,
+            "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "config_sha256": config_sha256, "blockers": blockers}
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Entry point
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-# Default expected models (treated as "expected", not "verified")
-DEFAULT_EXPECTED_MODELS: list[dict[str, str]] = [
-    {
-        "model_id": "iic/SenseVoiceSmall",
-        "source_url": "https://www.modelscope.cn/models/iic/SenseVoiceSmall",
-        "expected_license": "Apache-2.0",
-    },
-    {
-        "model_id": "damo/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
-        "source_url": "https://www.modelscope.cn/models/damo/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
-        "expected_license": "Apache-2.0",
-    },
-    {
-        "model_id": "iic/speech_fsmn_vad_zh-cn-16k-common-pytorch",
-        "source_url": "https://www.modelscope.cn/models/iic/speech_fsmn_vad_zh-cn-16k-common-pytorch",
-        "expected_license": "Apache-2.0",
-    },
-    {
-        "model_id": "iic/punc_ct-transformer_zh-cn-common-vocab272727-pytorch",
-        "source_url": "https://www.modelscope.cn/models/iic/punc_ct-transformer_zh-cn-common-vocab272727-pytorch",
-        "expected_license": "Apache-2.0",
-    },
-]
+DEFAULT_EXPECTED_MODELS = {
+    "iic/SenseVoiceSmall": ("https://www.modelscope.cn/models/iic/SenseVoiceSmall", "Apache-2.0"),
+    "iic/speech_fsmn_vad_zh-cn-16k-common-pytorch": (
+        "https://www.modelscope.cn/models/iic/speech_fsmn_vad_zh-cn-16k-common-pytorch", "Apache-2.0"),
+    "iic/punc_ct-transformer_zh-cn-common-vocab272727-pytorch": (
+        "https://www.modelscope.cn/models/iic/punc_ct-transformer_zh-cn-common-vocab272727-pytorch", "Apache-2.0"),
+}
 
 
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser()
-    p.add_argument("--config", required=True, help="phase0-config.json")
-    p.add_argument("--report-only", action="store_true",
-                   help="write report but DO NOT enforce non-zero exit on blockers")
-    p.add_argument("--out", default=None)
-    args = p.parse_args(argv)
-
-    # Defer import to avoid path issues; entry scripts already on sys.path
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", required=True)
+    parser.add_argument("--approvals", help="external exact-match approval JSON")
+    parser.add_argument("--report-only", action="store_true")
+    parser.add_argument("--out")
+    args = parser.parse_args(argv)
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
     from scripts.funasr_phase0.lib_config import load_config
     cfg = load_config(args.config)
-
+    revisions = dict(zip(cfg.allowed_asr_model_ids, cfg.allowed_asr_revisions))
+    revisions[cfg.vad_model_id] = cfg.vad_model_revision
+    revisions[cfg.punc_model_id] = cfg.punc_model_revision
+    specs = []
+    for model_id, revision in revisions.items():
+        source, expected = DEFAULT_EXPECTED_MODELS.get(
+            model_id, (f"https://www.modelscope.cn/models/{model_id}", "UNKNOWN"))
+        specs.append({"model_id": model_id, "revision": revision,
+                      "source_url": source, "expected_license": expected})
     pkgs = collect_pkg_licenses()
-    expected_by_id = {row["model_id"]: row for row in DEFAULT_EXPECTED_MODELS}
-    configured_ids = [*cfg.allowed_asr_model_ids, cfg.vad_model_id, cfg.punc_model_id]
-    expected_models = []
-    for model_id in dict.fromkeys(configured_ids):
-        expected_models.append(expected_by_id.get(model_id, {
-            "model_id": model_id,
-            "source_url": f"https://www.modelscope.cn/models/{model_id}",
-            "expected_license": "UNKNOWN",
-        }))
-    models = scan_models(Path(cfg.models_root), expected_models)
-    out_path = Path(args.out) if args.out else (
-        Path(cfg.reports_root) / f"license-audit-{datetime.now():%Y%m%d-%H%M%S}.md"
-    )
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    summary = render_markdown(pkgs, models, out_path)
-
-    # Also write the JSON sidecar for machine consumption
-    sidecar = out_path.with_suffix(".json")
-    # summary["needs_review"] may contain PkgInfo / ModelEntry objects; serialize defensively
-    def _ser(x: Any) -> Any:
-        if isinstance(x, PkgInfo):
-            return {"type": "pkg", "name": x.name, "version": x.version,
-                    "tier": x.tier, "license_field": x.license_field}
-        if isinstance(x, ModelEntry):
-            return {"type": "model", "model_id": x.model_id, "status": x.status,
-                    "expected_tier": x.expected_tier, "found_tier": x.found_license_tier}
-        return str(x)
+    models = scan_models(Path(cfg.models_root), specs)
+    reports_root = Path(cfg.reports_root).resolve()
+    approval_path = (Path(args.approvals).resolve() if args.approvals else
+                     reports_root / "license-approvals.json")
+    try:
+        approval_path.relative_to(reports_root)
+    except ValueError:
+        print(">> approval file must be inside reports_root", file=sys.stderr)
+        return 3
+    try:
+        approvals = _load_approvals(approval_path if approval_path.exists() else None,
+                                    cfg.config_sha256)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        print(f">> invalid approval file: {exc}", file=sys.stderr)
+        return 3
+    _apply_approvals(pkgs, models, approvals)
+    out = Path(args.out) if args.out else Path(cfg.reports_root) / f"license-audit-{datetime.now():%Y%m%d-%H%M%S}.md"
+    summary = render_markdown(pkgs, models, out, cfg.config_sha256,
+                              approval_path if approval_path.exists() else None)
+    sidecar = out.with_suffix(".json")
     sidecar.write_text(json.dumps({
-        "schema_version": summary["schema_version"],
-        "generated_at": summary["generated_at"],
-        "n_packages": summary["n_packages"],
-        "n_models": summary["n_models"],
-        "needs_review": [_ser(x) for x in summary["needs_review"]],
-        "packages": [
-            {"name": p.name, "version": p.version, "tier": p.tier,
-             "license_field": p.license_field, "license_classifier": p.license_classifier,
-             "constituents": p.constituents, "homepage": p.homepage}
-            for p in pkgs
-        ],
-        "models": [
-            {"model_id": m.model_id, "status": m.status, "expected_tier": m.expected_tier,
-             "found_tier": m.found_license_tier, "expected_license": m.expected_license,
-             "found_license_excerpt": (m.found_license_text or "")[:300],
-             "n_files": len(m.found_files_sha256), "files_sha256": m.found_files_sha256,
-             "source_url": m.source_url, "found_path": m.found_path}
-            for m in models
-        ],
+        "schema_version": summary["schema_version"], "generated_at": summary["generated_at"],
+        "config_sha256": cfg.config_sha256,
+        "approval_file": str(approval_path) if approval_path.exists() else None,
+        "packages": [asdict(item) for item in pkgs],
+        "models": [asdict(item) for item in models],
+        "blockers": [({"type": "package", "name": x.name, "version": x.version,
+                        "evidence_sha256": x.evidence_sha256} if isinstance(x, PkgInfo) else
+                       {"type": "model", "name": x.model_id, "revision": x.revision,
+                        "evidence_sha256": x.evidence_sha256}) for x in summary["blockers"]],
     }, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f">> wrote {out_path}")
+    print(f">> wrote {out}")
     print(f">> wrote {sidecar}")
-
-    blockers = [p for p in pkgs if p.tier in (0, 2, 3)]
-    blockers += [m for m in models if m.found_license_tier in (0, 2, 3)
-                 or m.expected_tier in (0, 2, 3) or m.status != "VERIFIED"]
-    if blockers and not args.report_only:
-        print(f">> {len(blockers)} blocker(s) found; refusing to exit 0")
+    if summary["blockers"] and not args.report_only:
+        print(f">> {len(summary['blockers'])} blocker(s); refusing GPU execution")
         return 2
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main())
