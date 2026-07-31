@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import difflib
 import hashlib
 import json
 import os
@@ -53,6 +54,24 @@ def _atomic_json_dump(path: Path, payload: dict) -> None:
     os.replace(tmp, path)
 
 
+def _character_diff(reference: str, hypothesis: str) -> list[dict]:
+    """Return compact non-equal character spans for explicit diagnostics."""
+    matcher = difflib.SequenceMatcher(a=reference, b=hypothesis, autojunk=False)
+    return [
+        {
+            "operation": tag,
+            "reference_start": i1,
+            "reference_end": i2,
+            "hypothesis_start": j1,
+            "hypothesis_end": j2,
+            "reference_text": reference[i1:i2],
+            "hypothesis_text": hypothesis[j1:j2],
+        }
+        for tag, i1, i2, j1, j2 in matcher.get_opcodes()
+        if tag != "equal"
+    ]
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--config", required=True)
@@ -60,7 +79,14 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--device", default="cuda", choices=["cuda"],
                    help="only 'cuda' is allowed; CPU is removed per R2 spec")
     p.add_argument("--out", default=None)
+    p.add_argument("--diagnostic-sample-id", default=None)
+    p.add_argument("--include-diagnostic-text", action="store_true")
     args = p.parse_args(argv)
+
+    if bool(args.diagnostic_sample_id) != bool(args.include_diagnostic_text):
+        p.error(
+            "--diagnostic-sample-id and --include-diagnostic-text must be used together"
+        )
 
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
     from scripts.funasr_phase0.lib_config import load_config, gate_for_gpu_entry, ConfigGateError
@@ -116,6 +142,19 @@ def main(argv: list[str] | None = None) -> int:
             f"scenario; got={sorted(scenarios)}"
         )
         return 1
+    diagnostic_sample = None
+    if args.diagnostic_sample_id:
+        diagnostic_sample = next(
+            (s for s in samples if str(s.get("id", "")) == args.diagnostic_sample_id),
+            None,
+        )
+        if diagnostic_sample is None:
+            print(f"!! diagnostic sample not found: {args.diagnostic_sample_id}")
+            return 1
+        if (not str(diagnostic_sample.get("self_made", "")).strip()
+                or diagnostic_sample.get("is_internal_recording") is not False):
+            print("!! diagnostic text is allowed only for a self-made, non-internal sample")
+            return 1
 
     # Validate samples are inside testdata_root
     for s in samples:
@@ -228,7 +267,8 @@ def main(argv: list[str] | None = None) -> int:
                         and ck.get("schema_version") == SHORT_SCHEMA_VERSION
                         and ck.get("config_hash") == config_hash
                         and ck.get("model_id") == model_id
-                        and ck.get("revision") == revision):
+                        and ck.get("revision") == revision
+                        and sid != args.diagnostic_sample_id):
                     print(f"   [{i+1}/{len(samples)}] {sid} reusing checkpoint")
                     rows.append(ck)
                     if ck.get("ok") is not True:
@@ -323,8 +363,19 @@ def main(argv: list[str] | None = None) -> int:
             "ok": verdict_ok,
             "timestamp": dt.datetime.now().isoformat(timespec="seconds"),
         }
-        # Atomic checkpoint
+        # The checkpoint is always text-free. Explicit diagnostic text is
+        # added only to the in-memory report row after the atomic checkpoint.
         _atomic_json_dump(ckpt_path, row)
+        if sid == args.diagnostic_sample_id:
+            row = {
+                **row,
+                "diagnostic": {
+                    "non_sensitive_self_made": True,
+                    "reference_text": ref_text,
+                    "hypothesis_text": full_text,
+                    "character_diff": _character_diff(ref_text, full_text),
+                },
+            }
         rows.append(row)
         if not verdict_ok:
             threshold_failures.append({
@@ -340,16 +391,19 @@ def main(argv: list[str] | None = None) -> int:
         print(f"!! processing failures={len(failures)} threshold failures={len(threshold_failures)}")
         # Write report anyway, but exit non-zero
         _write_report(cfg, rows, failures, threshold_failures, cold_start_s,
-                      warm_up_s, model_load_meta, config_hash, args.out)
+                      warm_up_s, model_load_meta, config_hash, args.out,
+                      args.diagnostic_sample_id)
         return 2
 
     _write_report(cfg, rows, failures, threshold_failures, cold_start_s,
-                  warm_up_s, model_load_meta, config_hash, args.out)
+                  warm_up_s, model_load_meta, config_hash, args.out,
+                  args.diagnostic_sample_id)
     return 0
 
 
 def _write_report(cfg, rows, failures, threshold_failures, cold_start_s, warm_up_s,
-                  model_load_meta, config_hash, out_override=None) -> None:
+                  model_load_meta, config_hash, out_override=None,
+                  diagnostic_sample_id=None) -> None:
     reports_dir = Path(cfg.reports_root) / cfg.run_id
     reports_dir.mkdir(parents=True, exist_ok=True)
     out = (Path(out_override).resolve() if out_override else
@@ -365,6 +419,7 @@ def _write_report(cfg, rows, failures, threshold_failures, cold_start_s, warm_up
         "timestamp": dt.datetime.now().isoformat(timespec="seconds"),
         "model": model_load_meta,
         "config_hash": config_hash,
+        "diagnostic_sample_id": diagnostic_sample_id,
         "timing": {
             "cold_start_s": round(cold_start_s, 3),
             "warm_up_s": round(warm_up_s, 3),
