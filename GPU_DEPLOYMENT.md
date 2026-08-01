@@ -1,5 +1,13 @@
 # GPU 部署（RTX 5060 Ti / Blackwell sm_120）
 
+> ⚠️ **架构变更说明（2026-07-26）**
+> 生产环境已从单机 Windows 部署迁移为双节点架构：
+> - **Ubuntu 应用节点**：运行 backend + Qdrant，无 GPU
+> - **Windows GPU 节点**：运行独立 GPU 推理服务（`gpu_service/`）
+>
+> 本文档保留作为 GPU 技术参考，但不再描述当前生产部署方式。
+> 新架构详情见 `project-docs/migrations/ubuntu-app-windows-gpu-runbook.md`。
+
 服务器：GeForce RTX 5060 Ti（Blackwell，compute capability sm_120） + i7-10700F。
 目标：让向量计算（BGE-M3 嵌入 + BGE-reranker 重排）跑在 GPU 上。
 
