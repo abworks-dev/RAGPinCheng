@@ -536,6 +536,19 @@
   - 需在 Windows 生产机执行 GPU 冒烟测试（启动服务 + 真实 embedding/rerank）
   - 阶段 2（Provider 抽象）尚未启动，需另行方案审批
 
+### 17:45 — 排查本地安全分类器不可用问题
+
+- 完成：确认"安全分类器"指 Microsoft Defender 防病毒服务，其服务已停止且启动类型为 Disabled，所有保护功能（AMService/Antispyware/RealTime）均关闭，属于用户主动行为；`npm run build` 当前正常通过（tsc 5.9.3 + Vite 5.4.21，耗时 1.75s），CSS 仅一个 Tailwind 生成内容的压缩警告，不影响运行。用户确认关闭 Defender 是预期行为，无需修复。
+- 文件：`WORKLOG.md`（更新历史记录中提及"安全分类器"的条目，补充说明为 Windows Defender）
+- 验证：确认 Windows Defender 服务状态为 Stopped/Disabled；`npm run build` 成功；`tsc -b --noEmit` 通过
+
+### 18:00 — 配置写完代码后自动审查规则
+
+- 完成：新增 `.claude/rules/review-after-write.md`，规定 R1/R2/R3 代码修改完成后必须自动派 3 个独立审查 Agent（正确性/安全/代码质量）+ 对抗验证 Agent，confirmed 发现必须修复后才能交付
+- 文件：`CLAUDE.md`（领域规则地图新增引用）、`.claude/rules/review-after-write.md`（新规则文件）
+- 验证：规则文件语法检查通过；CLAUDE.md 引用路径正确
+- 待办/风险：审查消耗约 2–5× token，单行修复等极低风险 R1 修改可跳过对抗验证
+
 ### 18:30 — 实现 Embedding/Rerank Provider 抽象层（Phase 2）
 
 - 完成：创建 Provider 抽象层，将 embedding 和 rerank 从内联模型调用重构为可切换的 Provider 模式
@@ -583,19 +596,6 @@
   - 需在 GitHub 仓库设置 Secrets：`GPU_SERVICE_TOKEN`
   - 需在 GitHub 仓库设置 Variables：`GPU_SERVICE_URL=http://192.168.11.11:8100`
   - 首次 CD 需手动触发验证
-
-### 17:45 — 排查本地安全分类器不可用问题
-
-- 完成：确认"安全分类器"指 Microsoft Defender 防病毒服务，其服务已停止且启动类型为 Disabled，所有保护功能（AMService/Antispyware/RealTime）均关闭，属于用户主动行为；`npm run build` 当前正常通过（tsc 5.9.3 + Vite 5.4.21，耗时 1.75s），CSS 仅一个 Tailwind 生成内容的压缩警告，不影响运行。用户确认关闭 Defender 是预期行为，无需修复。
-- 文件：`WORKLOG.md`（更新历史记录中提及"安全分类器"的条目，补充说明为 Windows Defender）
-- 验证：确认 Windows Defender 服务状态为 Stopped/Disabled；`npm run build` 成功；`tsc -b --noEmit` 通过
-
-### 18:00 — 配置写完代码后自动审查规则
-
-- 完成：新增 `.claude/rules/review-after-write.md`，规定 R1/R2/R3 代码修改完成后必须自动派 3 个独立审查 Agent（正确性/安全/代码质量）+ 对抗验证 Agent，confirmed 发现必须修复后才能交付
-- 文件：`CLAUDE.md`（领域规则地图新增引用）、`.claude/rules/review-after-write.md`（新规则文件）
-- 验证：规则文件语法检查通过；CLAUDE.md 引用路径正确
-- 待办/风险：审查消耗约 2–5× token，单行修复等极低风险 R1 修改可跳过对抗验证
 
 ### 19:54 — 全量迁移实施：Ubuntu 部署 + Qdrant 恢复 + CI/CD 改造
 
@@ -791,8 +791,6 @@
 - 验证：访问部署地址确认未登录会进入登录页；只读核对 `frontend/src/pages/AdminDashboard.tsx`、相关 API 与功能文档，并查阅候选项目官方文档、仓库和发布说明。
 - 待办/风险：因当前浏览器无管理员登录态，本次未对部署页的真实数据密度、断点布局和完整交互做视觉验收；结论中的现状依据以当前源码为主。
 
-## 2026-07-28
-
 ### 19:00 — Office 文档支持全阶段完成（Phase 1-9）
 
 - 完成 Office 文档支持的 9 个核心阶段，涉及 30+ 文件修改
@@ -841,13 +839,6 @@
 - 文件：`WORKLOG.md`（仅记录方案交接，未修改业务代码）
 - 验证：提示词覆盖现状调查、方案质疑、待决策事项、TODO 格式、验证门槛与审批边界；未安装依赖、下载模型、操作数据库或部署生产。
 
-### 12:32 — 复核视频精确时间戳修复
-
-- 完成：确认旧检索逻辑在 Child rerank 后按 `parent_id` 聚合时丢失最佳命中 Child 的 `start_time`，导致下游统一使用 Parent 首句时间；当前未提交修改在 `retrieve.py` 保存首次入选 Child 的时间并回退 Parent 时间，主逻辑成立。
-- 文件：`WORKLOG.md`（仅记录复核结论，未修改业务代码）
-- 验证：只读核对 Qdrant Child payload、rerank 排序、Parent 去重、生成上下文、会话来源、DTO、前端引用匹配与跳播消费链路；确认尚无针对该行为的自动化测试。
-- 待办/风险：无需重建只适用于已含 `start_time` payload 的转录 Child；旧索引会安全回退但不会获得精确跳播，旧会话也不会被追溯修正。
-
 ### 11:53 — 独立复核 FunASR 视频自动转录方案并写入 TODO
 
 - 完成：完成 FunASR 自动转录候选方案的只读独立调查与复核，逐项核对当前源码而非文档断言；在 `TODO.md` 新增独立章节「🎬 视频自动转录（FunASR）— 候选方案，待 R2 批准」（置于 Office 方案之前），并将「视频播放器第二阶段」中“自动语音识别（Whisper）集成”一条改为指向该新章节。方案含目标、当前代码事实、推荐架构、备选取舍、第一阶段范围与明确不做、数据契约、状态机、`transcription_jobs` 候选字段、BIM 热词、GPU 调度、精确时间戳修复、分阶段步骤、各类验证、风险/兼容/回滚、索引重建判断、待用户决定项与 R2 审批提示；所有未来事项使用未勾选复选框。
@@ -861,6 +852,13 @@
 - 完成：应用户咨询，给出优先级建议——不建议立即开始 FunASR 完整改造；应先做「精确时间戳修复」（已确认缺陷：检索去重后引用只用 Parent 首句 `start_time`，命中 Child 时间被丢弃，而 Child `start_time` 已在 Qdrant payload，修复候选结论为不改 payload、不重建索引），再过 FunASR Phase 0 技术验证（兼容性/许可证/16GB 显存/延迟均未证实），且转录依赖的双节点迁移仍剩「稳定观察期」未结束；并中立提示 🔴 高优先级的查询拆分/MQE/HyDE 影响全局问答、ROI 更高，最终由业务优先级决定。
 - 文件：无（只读咨询，未修改代码）
 - 验证：依据前次源码复核结论与当前 `TODO.md`（任务 8 稳定观察期未勾选、🔴 高优先级项）；未运行命令。
+
+### 12:32 — 复核视频精确时间戳修复
+
+- 完成：确认旧检索逻辑在 Child rerank 后按 `parent_id` 聚合时丢失最佳命中 Child 的 `start_time`，导致下游统一使用 Parent 首句时间；当前未提交修改在 `retrieve.py` 保存首次入选 Child 的时间并回退 Parent 时间，主逻辑成立。
+- 文件：`WORKLOG.md`（仅记录复核结论，未修改业务代码）
+- 验证：只读核对 Qdrant Child payload、rerank 排序、Parent 去重、生成上下文、会话来源、DTO、前端引用匹配与跳播消费链路；确认尚无针对该行为的自动化测试。
+- 待办/风险：无需重建只适用于已含 `start_time` payload 的转录 Child；旧索引会安全回退但不会获得精确跳播，旧会话也不会被追溯修正。
 
 ### 12:34 — 实施精确时间戳修复（方案 A）
 
@@ -1117,3 +1115,466 @@
 - 未执行的验证及原因：Ubuntu 活索引跑 Phase A 未做（按方案 §13，需用户另行确认目标环境）。本机无 GPU/索引/黄金集。`tests/test_run_eval_retrieval.py` 因基础设施问题未落地，相关 11 个矩阵用例留到下一轮补。
 - 待办/风险：方案全部 8 项规范性内容（2×2 调用、fallback ITT 口径、error 状态机、summary sidecar、通用指标命名+ gain/loss、样本量警告、Phase B 显式分离、新增质量门禁）已落到代码与文档；唯一遗留是 runner 测试文件未落地，**不影响功能正确性**（核心数学在 metrics 单测里已固化）。默认开关仍关闭，等用户批准后再跑活索引 + 推送。
 - 状态：代码完成，未推送，等用户明确同意后再 stage/commit/push、跑 Ubuntu 活索引、考虑灰度。任何 Phase B 或灰度决定均不包含在本次批准内。
+
+### 02:45 — 重构功能待办并核对 Office 剩余范围
+
+- 完成：将 `TODO.md` 从混合路线图、历史记录和实施方案的长文档重构为只包含未来工作的功能待办；统一状态字段，每项只保留状态、目标、下一步、完成标准、依赖和方案链接，复选框仅用于可执行动作，并保留最近 8 条完成摘要。将 Office 详细方案迁入 `project-docs/plans/`，新增分层查询增强与 FunASR 候选方案文档；未把尚未批准的候选方案写入 decisions。
+- Office 核对：确认 Phase 1～9 已完成；Phase 10 已具备流式上传、大小限制、ZIP 文件头、zip bomb、宏检测、串行任务和 LibreOffice 超时，仍缺外链/嵌入对象策略、统一解析超时、磁盘告警和全部派生产物清理；Phase 11 的依赖、LibreOffice 独立容器、Compose 与环境变量已落地，仍缺完整运维、资源影响、停用/回滚和灰度说明；Phase 12 仅有 XLSX 转换专项测试及既有人工冒烟，仍缺 DOCX/PPTX、上传安全、鉴权、删除清理、前端定位和完整用户验收矩阵。
+- 文件：`TODO.md`、`project-docs/plans/office-document-support-plan.md`（由 `project-docs/migrations/` 迁移）、`project-docs/plans/layered-query-enhancement.md`、`project-docs/plans/funasr-auto-transcription.md`、`WORKLOG.md`
+- 验证：交叉核对 `api/routes_admin.py`、`api/indexing.py`、`src/indexing_pipeline.py`、`src/office_convert.py`、`requirements-prod.txt`、`frontend/package.json`、`docker/docker-compose.yml`、`.env.example`、`libreoffice/`、`tests/test_xlsx_converter.py` 与既有工作日志；检查 TODO 不再包含过期 `retrieve_multi` 描述和事实/风险型复选框，方案链接均指向现存路径；只修改 Markdown，未运行代码测试。
+- 待办/风险：`project-docs/features/document-indexing.md` 仍有 Office 未实现的历史描述，本次按批准范围未改功能事实文档；工作区中并行存在 `scripts/run_eval_retrieval.py` 及其他协作文档修改，本任务未覆盖、整理或回退这些改动。
+
+### 03:02 — Phase A 收口：bug 修复 + Ubuntu 活索引 4 题 Phase A 跑通（不构成灰度依据）
+
+- 完成：Phase A 协议在 Ubuntu 生产容器成功运行（commit `d57fe1c`），但暴露两个 bug 致使聚合表全 N/A；连续修复并重新部署（`e3c80d5` 修构造、`7626d1c` 修聚合器契约），最终活索引产出 4 道 comparison 题的 2×2 数据 + summary 侧车。
+
+  **Bug 1（`e3c80d5`）**：`cells_by_k` 循环写成"每题对每个 cell 路径各生成一份 dict"（外层 `for r in comparison_results: for k, cell in ((5,"off_k5"),(5,"on_k5"),(8,"off_k8"),(8,"on_k8"))`），4 题 × 2 = 8 个 dict，n_items=8，n_paired_evaluable=0，全部 rates=N/A。修复：每题对每个 k 各生成一份 dict（"for k in (5, 8):"），cells_by_k[5] 与 cells_by_k[8] 各 4 条。
+
+  **Bug 2（`7626d1c`）**：`src/eval/metrics.py:aggregate_comparison` 读扁平 `it["off"]`/`it["on"]` 键并按 `g.get("k")` 过滤，但 runner 喂的是 `off_k5`/`off_k8`/`on_k5`/`on_k8`——`it.get("off")` 永远 None，所有 record 被排除，paired=0。修复：cells_by_k 构造时既给扁平 `off`/`on`（聚合器用）也保留 per-k 4 个 cell（contrast 块直接读）。
+
+  **生产 4 题 Phase A 数据（活索引 + GLM-4.5-air decomposer，2026-07-31 03:02）**：
+
+  | metric | k=5 ITT / applied-only | k=8 ITT / applied-only |
+  |---|---|---|
+  | delta_all_sides_hit_rate（headline） | +0.500 / +0.667 | +0.250 / +0.333 |
+  | delta_macro_side_recall | +0.250 / +0.333 | +0.125 / +0.167 |
+  | delta_macro_side_mrr | +0.025 / +0.033 | **-0.016 / -0.022**（WARN 触发）|
+  | gain / loss / same_hit / same_miss | 2/0/2/0；2/0/1/0 | 1/0/3/0；1/0/2/0 |
+  | 守恒（sum == n_paired_evaluable）| 4==4；3==3 | 4==4；3==3 |
+  | 5 个 contrast | dec_eq_k5=+0.500 / capacity_single=+0.500 / cap_multi=0.000 / proj=+0.500 | dec_eq_k8=+0.250 |
+
+  **k5 拆分纯收益（+0.500）> k8（+0.250）符合 2×2 设计预期**：4 题样本"两侧都接近 1.0"，k8 容量已足够召回两侧，拆分边际改善缩小；k5 容量更紧，拆分保两侧的价值更明显。**k8 macro_mrr 负 delta** 是配额保证把命中往中后位推（rank 6 → 7）的代价，已 WARN，未改 exit code。
+
+  **协议层全部规范化内容到位**：
+  - PHASE A 免责声明 + `decision_eligible: false` + 5 个 metadata 常量（experiment_phase/production_toggle_equivalent/context_coverage_evaluated/answer_quality_evaluated/decision_eligible）固定写入；
+  - fingerprint match（parent_count=20088, sha256=8478af62...），frozen_at=2026-07-30T22:30:00+08:00；
+  - 4-样本警告触发（"sample_size 3 <= 4: descriptive, not statistically decisive"）；macro_mrr 负 delta 触发 WARN；transitions 守恒校验通过；4 题 0 错误（comparison_error_item_ids: []）。
+- 文件：`scripts/run_eval_retrieval.py`（`e3c80d5` + `7626d1c` 两处 fix）、`WORKLOG.md`（本条记录）。**未**改 `src/eval/metrics.py`、**未**改 `src/eval/types.py`、**未**改 prompt、**未**新增依赖、**未**改文档。
+- 用户可观察行为变化：当前**没有**。开关仍默认关闭、生产未跑黄金集第二期、未跑 ChatSession 开关 A/B、未推送除两个 bug fix 之外的代码。已部署的三个 commit（`d57fe1c` Phase A 协议、`e3c80d5` 修复 1、`7626d1c` 修复 2）只影响评测脚本，不影响线上检索或问答。
+- 验证：`py_compile scripts/run_eval_retrieval.py` exit 0；21 个 metrics 单测仍全过（`pytest tests/test_eval_metrics.py -q`，两次 fix 期间均未触发 metric 逻辑变更）；Ubuntu 生产容器实跑 4 题 comparison section 产出合法数字、summary 侧车文件落地。
+- 待办/风险：**4 题、同一文档对、均带强规范编号**——与方案 §3/§15 预判的"虚假高收益风险"完全吻合；**任何 delta>0 都不构成统计决策**。灰度开启 `QUERY_DECOMPOSE_ENABLED` 需另行推进：①黄金集第二期扩展（跨文档/无强规范码/多实体/gate 真假阳阴——`TODO.md` `### 黄金集第二期扩展` 已列）、② ChatSession 开关 A/B（回答质量/引用支持度/延迟/Token 成本）、③独立 Phase B 方案审批。**本次结果绝不建议开启生产开关**。
+- 状态：Phase A 协议层已验证可工作、bug 修复链路已落；机制层拆分确有正向收益（k5 +0.500、k8 +0.250），但样本不足。**默认开关保持关闭**；等用户进一步指示（Phase B、黄金集第二期、其他任务）。
+
+### 03:03 — 统一 Claude Code 与 Codex 的 TODO 维护规则
+
+- 完成：新增 `.claude/rules/todo.md` 作为 TODO 字段、七种状态、复选框、完成摘要、plans/decisions 分工和更新检查的唯一详细规则；`CLAUDE.md` 只增加规则地图入口并修正旧“✅ 最近已完成”和验收状态表述；`AGENTS.md` 只增加一条 Codex 引用，避免两个入口重复维护详细规范。
+- 文件：`.claude/rules/todo.md`、`CLAUDE.md`、`AGENTS.md`、`WORKLOG.md`
+- 验证：确认 Claude Code 与 Codex 入口都指向同一规则文件，旧完成区表述已移除，TODO 状态与当前七种枚举一致；`git diff --check` 针对本次三个规则文件通过。未运行代码测试，因为本次只修改协作文档。
+- 待办/风险：规则文件和入口当前仍处于未提交工作区；生效依赖后续提交并在相应 Agent 会话中重新加载项目指令。
+
+### 03:18 — FunASR 视频自动转录候选方案 R2 文档（未实测、未动业务代码）
+
+- 完成：按 R2 流程，**只读**核对 `TODO.md`、`project-docs/decisions/0001-video-transcript-player.md`、`project-docs/features/transcript-pipeline.md`、`src/chunk.py`、`src/session.py`、`src/ingest.py`、`src/indexing_pipeline.py`、`src/config.py`、`api/routes_admin.py`、`api/routes_media.py`、`gpu_service/app.py`、`GPU_DEPLOYMENT.md`、`scripts/run_eval_retrieval.py` 与既有 plan 文件，将 FunASR 候选设计从约 70 行的概要扩为完整 R2 方案。覆盖：目标、现状与依据（含第一阶段 + GPU 现状 + 上下文预算 + Phase A 协议 + 上游依赖）、2×2 拆解（引擎 FunASR/faster-whisper × GPU 资源模型 等容量/真扩）、分支选择准则（许可证 / cu128 兼容性 / 长音频 / 中文准确率 / 跨节点传输 / 维护活跃度 / 部署复杂度）、Phase 0 沙箱验证（许可证 / 依赖 / 显存 / 分块 / 热词 / 输出格式）、GPU 调度（互斥 / 抢占 / 冷热切换 / 真扩隔离）、上下文预算（与 MAX_CONTEXT_CHARS=6000 / DECOMPOSE_MAX_CONTEXT_CHARS=8000 / PARENT_SIZE=1200 的边界）、真实时间戳修复（毫秒取整 / 跨切分点 / 说话人标签 / 静默段）、数据与状态契约（`transcription_jobs` + `(media_id, audio_sha256)` 幂等 + partial+原子替换）、六阶段实施（每阶段独立审批）、风险（许可证 / 显存争用 / 长任务超时 / 跨节点传输 / Markdown 漂移 / 热词副作用 / 说话人切散 / 驱动链路 / 真实数据误用）、分阶段回滚、`ASR_ENABLED` 总开关、明确不做清单（生产部署 / 真实客户视频 / FFmpeg / 声纹 / 说话人分离 / 字幕 / 分布式 / NAS / 全量 Reset / 替换 `gpu_service` / 改 `chunk_transcript` 解析不变量 / 改 `prompts/*.md` / 与查询拆分 + 黄金集第二期 + Office 收口的任何交叉改动）、与上游依赖的强制顺序（自动转录不得前置 Phase B / 不得前置黄金集第二期）、完成标准（默认关闭 / Phase 0 单独审批 / 不进入 Phase B 决策 / 不触发生产灰度）。
+- 文件：`project-docs/plans/funasr-auto-transcription.md`（覆盖既有 70 行候选设计为 17 节完整 R2 方案；状态保持"待审批"）、`WORKLOG.md`（本条）
+- 用户可观察行为变化：当前**没有**。方案文件是 Markdown，不影响任何业务代码、prompt、配置、依赖、索引、检索或生产开关。Phase 0 沙箱实测与后续任何阶段均需用户单独批准。
+- 验证：核对 `chunk_transcript` 严格解析规则（`src/chunk.py:322-325`）与方案 §8 描述一致；核对 `MAX_CONTEXT_CHARS=6000` / `DECOMPOSE_MAX_CONTEXT_CHARS=8000` / `PARENT_SIZE=1200` / `CHILD_SIZE=256` 与 §5 描述一致；核对 `gpu_service` 现状（`gpu_service/app.py:1-100`）与 §7 S/D 分支描述一致；核对 `0001-video-transcript-player.md` 决策的 `media_assets` 字段、`media_id` 关联、状态机与 §9 契约一致；方案**不含**任何 FunASR / faster-whisper 性能、显存、准确率、兼容性具体数字；所有未来动作均使用未勾选复选框 `- [ ]`，无 `[x]` 长期堆叠；未修改 `TODO.md` 段（按授权边界仅"复核"，未做 TODO 字段 / 状态 / 复选框同步）。
+- 未执行的验证及原因：未跑 `py_compile` / `pytest` / `npm run build`（本轮只写方案 Markdown，未改源码）；未跑 Phase 0 沙箱实测（按用户授权边界，必须等用户明确批准 Phase 0）；未跑黄金集（按授权边界，不动评测）。
+- 待办/风险：方案待用户明确批准；旧 70 行候选设计与新 R2 方案在同一文件内已替换，旧内容不留痕（与方案文件"待审批"状态一致，无事实声明差异）。如果用户希望保留旧候选设计作为附录，应在批准前指明；当前按"候选设计 → 完整 R2 方案"的单次扩写处理。新对话的 Agent 如需引用本轮上下文：commit 链 `d57fe1c → e3c80d5 → 7626d1c`（Phase A 收口）、本条 WORKLOG 03:18 入口、`project-docs/plans/funasr-auto-transcription.md` 路径。Phase 0 沙箱实测与 Phase 1+ 任何代码改动均不构成本次授权范围。
+
+### 03:41 — 按用户审阅结论修订 FunASR 自动转录方案
+
+- 完成：将用户对 34 项审阅问题的选择收敛到正式方案；删除原“引擎 × 真扩”的 2×2 候选设计，固定为当前单机单卡、ASR 独立进程或容器、BGE 在线优先和音频块边界让出 GPU；FunASR 作为主选，仅在硬门槛失败时测试 faster-whisper，单卡不稳定则保持功能关闭。同步明确音频解码/重采样边界、量化 Phase 0 指标、确定性 segment 合并/拆分、三套状态职责、活跃任务唯一约束、历史版本与唯一正式发布、审核状态、断点恢复、30 天中间产物保留、隔离端到端评测、自动停止条件及七阶段独立审批。
+- 文件：`project-docs/plans/funasr-auto-transcription.md`、`WORKLOG.md`
+- 用户可观察行为变化：无。方案状态仍为“待审批”，本次未批准或执行 Phase 0，未修改业务代码、依赖、数据库、配置、服务、前端、索引或生产开关。
+- 验证：检查方案包含 18 个二级章节、Phase 0～Phase 6 共 7 个阶段和 5 个未完成动作；无已勾选待办；核对已写入单机单卡、FunASR 主选、人工确认默认、`processed_ms / total_ms` 进度、时间戳向下取整、`reviewed | edited` 审核状态、30 天保留及隔离 collection/SQLite 等用户决定；确认 `media_assets.transcript_origin` 明确为复用现有字段，transcript Child 明确为一条 turn 对应一个 Child。
+- 待办/风险：Phase 0 仍需用户重新审阅并单独批准；具体模型版本、进程/容器二选一、分块阈值、质量/性能门槛、自动停止阈值和 Phase 2 Schema 字段仍需依据 Phase 0 计划或结果逐阶段决定。
+
+### 04:06 — 提交 FunASR Phase 0 预注册计划（受限：缺非生产 GPU，GPU 实测阻塞）
+
+- 完成：按用户两门禁要求，只读核对根 `CLAUDE.md`、相关 `.claude/rules/`、`project-docs/plans/funasr-auto-transcription.md`、`GPU_DEPLOYMENT.md`、当前 `gpu_service/` 实现、`scripts/deploy-gpu.ps1`、仓库根环境与 Git 状态；将 Phase 0 范围从「沙箱技术验证」细化为「许可证核查方案 + 非敏感样本准备 + 评测方法设计」三份书面材料；新增 `project-docs/plans/funasr-phase0-pre-registration.md`，覆盖现状、阻塞项、已批准项、不可执行项、沙箱边界（待 GPU 批准后激活）、候选 FunASR 模型与版本、依赖与许可证矩阵（含 LGPL 走人工合规通道）、样本清单与授权、人工标注方式、硬门槛与停止条件（含 faster-whisper 触发条件与「保持关闭」条件）、指标计算方法（CER / BIM 术语 / 规范编号 / 时间戳 / 重复 / 遗漏 / RTF / 显存 / 失败率 / BGE 延迟 / 不静默 CPU 证据）、递进顺序（许可证核查 → 兼容性冒烟 → 短样本 → 1h → 2h → 4h → BGE 共存）、BGE 共存测试设计、磁盘上限与清理方式、交付物列表、10 项待用户决定事项；同步在 `TODO.md` `### FunASR 视频自动转录` 段更新下一步（不再以本机开发 RTX 5070 Ti 为沙箱，明确非生产 GPU 来源需另行审批）。
+- 文件：`project-docs/plans/funasr-phase0-pre-registration.md`（新建）、`TODO.md`（`### FunASR 视频自动转录` 段三行更新）、`WORKLOG.md`（本条）。
+- 用户可观察行为变化：无。本轮**未**下载任何模型权重、**未**创建 venv、**未**安装 funasr / modelscope / torch / torchaudio / ffmpeg / PyAV、**未**启动任何 GPU 推理、**未**访问生产 Windows GPU 主机（192.168.11.11:8100，ping 不可达）、**未**读取 `.env` 真实值、**未**连接生产 Qdrant / `app.sqlite` / `parents.sqlite` / `media/` / `docs/`。`gpu_service` 进程与状态未触碰。
+- 验证：核对预注册计划含 17 个二级章节；逐项检查许可证矩阵覆盖 `funasr` / `modelscope` / `torch>=2.7` / `torchaudio` / `transformers<5` / `tokenizers` / `onnxruntime` / `PyAV` / `ffmpeg` / `soundfile` / `numpy` / `modelscope` 权重 / `huggingface_hub`；硬门槛覆盖 CER / 术语 / 编号 / 时间戳 / 重复 / 遗漏 / RTF / 显存 / 失败率 / BGE p95 延迟 / `gpu_service` 健康；`nvidia-smi` 显示本机为 RTX 5070 Ti / 16 GB / Driver 610.74，且显存被 dwm / TabTip / snipaste / Steam++ 占用 4.4 GB（无 Python 推理进程）；仓库根 Git 状态为已记录（5 修改 + 3 未跟踪），无 stash；`.env` 真实值未读取，仅讨论变量名存在与否。
+- 未执行的验证及原因：未跑 `py_compile` / `pytest` / `npm run build`（本轮仅写方案与文档，未改业务代码）；未跑 GPU 兼容性 / 显存 / RTF / 长视频 / BGE 共存 / 许可证实际审查（按用户最新指示，缺非生产 GPU 全部阻塞；非生产 GPU 来源到位后另提 R3 方案再实测）；未跑黄金集 / 检索冒烟（与本任务无关）。
+- 待办/风险：等待用户对 10 项决策项的回复；非生产 GPU 来源到位前，所有 GPU 实测项保持阻塞；未来任何对生产 Windows GPU 主机的访问、压测或服务修改必须走 R3 单独审批（含维护窗口、当前业务负载、影响范围、监控、自动停止、服务恢复、负责人）；Phase 0 完成不构成 Phase 1 自动授权；本轮回滚成本为 0（无业务代码改动）。
+
+### 04:14 — 提交 FunASR Phase 0 执行计划（生产主机开发调试窗口版）
+
+- 完成：用户已原则批准在生产 Windows GPU 主机（192.168.11.11）当前开发调试窗口执行 Phase 0 GPU 实测，附加硬约束：ASR 必须在独立进程/venv/容器，不得修改 gpu_service 依赖，不得停止/重启/卸载 BGE，出现 OOM/BGE 异常/延迟/磁盘问题立即停。响应提交 `project-docs/plans/funasr-phase0-execution-plan.md`，覆盖：用户已明确的硬约束（§0）；环境隔离方式（§1，路径/进程/venv/缓存/端口/CPU 亲和全表化，加 8 条黑名单）；当前 GPU/BGE 基线测量（§2，GPU dmon + BGE /health + /model-info + 5 分钟 30 req/min 合成 BGE 流量基线）；测试顺序（§3，许可证 → 兼容性冒烟 → 短样本 → 1h → 2h → 4h → BGE 共存，前序失败不进入后续）；资源限制（§4，ASR 峰值 < 8 GB / 稳态 < 6 GB / 4 核 CPU / 30 GB 磁盘）；自动停止条件（§5，10 项含 BGE p95 +100%、OOM、错误率 0.5%、磁盘 < 5 GB、安全余量 14 GB、用户中断）；恢复步骤（§6，杀进程 → 释放显存 → 验证 BGE 4 项 → 抓末态 → 写停机报告 → 报告用户 → 等待）；执行通道（§7，A 密钥 SSH / B WinRM / C 用户手动 / D 终端逐条 — 当前 ping 不可达，需用户指定）；明确不做的（§8）；报告与归档（§9）；待回复 10 项（§10）；批准模板（§11）。同步更新 `TODO.md` `### FunASR 视频自动转录` 段的下一步、依赖、方案链接，指向新执行计划文件。
+- 文件：`project-docs/plans/funasr-phase0-execution-plan.md`（新建）、`TODO.md`（`### FunASR 视频自动转录` 段三行更新）、`WORKLOG.md`（本条）。
+- 用户可观察行为变化：无。本轮**未**下载任何模型、**未**创建任何 venv、**未**安装任何 Python 包、**未**启动任何 GPU 推理、**未**发起到 192.168.11.11 的任何连接（ping / ssh / winrm / rdp / http 均未尝试，因 ping 不可达 + 等待用户指定通道）、**未**修改 `gpu_service/` / `src/` / `api/` / `frontend/` / `prompts/` / `docker/` / `requirements*.txt` / `.env`、**未**触碰生产 Qdrant / SQLite / `media/` / `docs/`。
+- 验证：核对执行计划含 11 个二级章节；逐项检查 §5 触发条件覆盖 OOM / 异常退出 / BGE health / BGE 错误率 / BGE p95 / BGE 5xx / 磁盘 / 连续失败 / 用户中断 / 安全余量；§6 恢复步骤覆盖杀进程 / 释放显存 / 4 项 BGE 验证 / 末态抓取 / 停机报告 / 报告 / 等待；§1 隔离表覆盖 Python 解释器、进程、工作目录、依赖、缓存、BGE 权重、端口、CUDA 设备共 8 个维度；§10 决策项含执行通道 / 隔离 / 顺序 / 资源 / 停止 / 恢复 / 基线 / 4h 保留 / 步 4·5·6 暂停 / 阈值共 10 项。
+- 未执行的验证及原因：未跑 GPU/BGE 基线（等待用户指定执行通道 §7）；未下载任何模型、未安装 funasr/modelscope/torch/torchaudio/PyAV/ffmpeg（按 §1 隔离方式，批准后由用户在生产主机或通过指定通道执行）；未发起任何到 192.168.11.11 的远程命令（按用户最新指示 + 当前 ping 不可达）。
+- 待办/风险：等待用户在 §10 决策项的回复与 §11 批准模板；非生产 GPU 来源仍未到位时本计划无意义；任何对生产 Windows GPU 主机的访问须经用户指定通道 + §11 明确批准；步 4、5、6 进入前需暂停等用户裁决；Phase 0 完成不构成 Phase 1 自动授权；本轮回滚成本 = 0（无业务代码改动，仅新增 1 个 plan 文件 + TODO 段窄更新）。
+
+### 04:30 — 在 `E:\Workspace\funasr-phase0-dev\` 建立本地 venv（py -3.11）
+
+- 完成：按用户"放 `E:\Workspace\` 子文件夹、匹配 kebab-case 命名规范、不要装到系统环境、只用于 Claude import 验证"指示，新建 `E:\Workspace\funasr-phase0-dev\`（含 `logs/`、`models/`、`scripts/` 子目录，未与本仓库任何目录混用），用 `py -3.11 -m venv` 创建独立 venv（Python 3.11.9，pip 24.0 → 26.2）；通过 5 阶段装包：(1) `pip install --index-url https://download.pytorch.org/whl/cu128 "torch==2.7.0"` → 3.3 GB，1m23s 完成；(2) `pip install funasr modelscope torchaudio` → pip 自动拉 `transformers-5.14.1`（违反生产 `transformers<5` 约束）和 `numpy-2.4.6`（违反生产 `numpy<2` 约束），立即降级到 `transformers==4.57.6` + `numpy==1.26.4` + `huggingface-hub==0.36.2`；(3) `pip install av` → PyAV 18.0.0（27.6 MB）；(4) `pip install onnxruntime python-Levenshtein` → onnxruntime 1.28.0 + Levenshtein 0.27.3；(5) 全量 import 验证首次报 `torchaudio 2.11.0` 与 `torch 2.7.0` 不二进制兼容（`WinError 127`），降级到 `torchaudio==2.7.0+cu128`（从 cu128 索引拉）后通过。同步在 `E:\Workspace\funasr-phase0-dev\logs\` 写 `import-check.log`（版本对照表 + AutoModel/rich_transcription_postprocess 子模块 import 验证通过）和 `freeze.log`（88 个包版本快照），写 `README.md`（路径、版本、与生产对齐、清理方式、不变量清单）。
+- 文件：`E:\Workspace\funasr-phase0-dev\.venv\`（创建）、`E:\Workspace\funasr-phase0-dev\logs\import-check.log`（新建）、`E:\Workspace\funasr-phase0-dev\logs\freeze.log`（新建）、`E:\Workspace\funasr-phase0-dev\README.md`（新建）、`WORKLOG.md`（本条）。
+- 用户可观察行为变化：**仅本地开发机**新增 venv 与目录；不修改 `E:\Repository\Github\RAGPinCheng\` 任何文件（含 `.venv`、源代码、配置、依赖、数据库）；不连生产 Windows GPU 主机（192.168.11.11 仍 ping 不可达）；不动系统 Python、`PATH`、注册表、Windows 服务；不读 `.env` 真实值。
+- 验证：跑 8 库全量 import + funasr AutoModel + rich_transcription_postprocess 子模块 import + 本机 CUDA 可用性：`torch 2.7.0+cu128` / `cuda_avail True` / `device NVIDIA GeForce RTX 5070 Ti` / `cap (12, 0)` / `torchaudio 2.7.0+cu128` / `funasr 1.3.30` / `modelscope 1.39.0` / `transformers 4.57.6` / `PyAV 18.0.0` / `soundfile 0.14.0` / `numpy 1.26.4` / `onnxruntime 1.28.0` / `Levenshtein 0.27.3`；88 个 wheel 装好；venv 占用 6.6 GB（远超原估 2.4 GB，因 torch-cu128 实际 3.3 GB + 87 个传递依赖）；E 盘剩余 639.5 GB（未触发磁盘警告）。所有结果标注「仅本地 import 验证，不可作为 Phase 0 实测依据」。
+- 未执行的验证及原因：未跑 GPU 推理（按用户指示本机不是 Phase 0 沙箱，GPU 是 RTX 5070 Ti ≠ 生产 5060 Ti）；未拉 `paraformer-large-zh` / `SenseVoiceSmall` 等大模型（用户授权前不下载）；未跑 `py_compile` Phase 0 沙箱代码（沙箱代码本身尚未编写，等用户批准 §11 模板 + 同步方式）；未跑 `nvidia-smi` / `pympler` 等显存测试。
+- 待办/风险：等待用户对 §11 模板（执行通道 C-1/C-2 + §10 决策项）的明确回复；本机 import 验证仅证明 funasr/transformers/torch/PyAV 在本机 Python 3.11 + RTX 5070 Ti 上可加载，**不**代表生产 5060 Ti + 3.10 + 16 GB 显存场景下可工作；本机 Python 3.11 与生产 3.10 存在差异（funasr 官方支持 3.8–3.12 范围覆盖，无已知阻塞）；如未来要清 venv，按 `E:\Workspace\funasr-phase0-dev\README.md` §「清理方式」执行，**不**会触及其它任何目录。
+
+### 04:30 — 06:16 — 编写 Phase 0 沙箱 14 个文件（按 §11 批准模板前，**未在生产主机执行**）
+
+- 完成：按用户在 `scripts/funasr_phase0/` 路径 + 同步方式选 git + 顺便改 CI/CD 自动部署的指示，**未**接受 CI/CD 改动（已在前一轮回复说明 R3 风险，仍未获用户回复），但**已**完成 14 个沙箱代码文件落盘。`__init__.py`（package marker）+ `requirements-asr.txt`（用 `--extra-index-url` 装 cu128 torch / 其它走 tuna 镜像；版本 pin 与 `requirements.txt` 对齐）+ `lib_metrics.py`（CER / BIM 术语召回 / 规范编号 / segment drift / RTF / CSV writer，纯 stdlib + numpy + python-Levenshtein）+ `lib_license_audit.py`（用 `importlib.metadata` 收 pip 装包 + `License` 字段 + `License ::` classifier + 5 个 ModelScope 模型 + FFmpeg 静态条目，输出 `license-matrix.md`，**关键发现**：`python-Levenshtein==0.27.3` 是 GPL-2.0-or-later（tier 3 ⛔，需人工合规审查），`modelscope` / `av` 几个 metadata 报 UNKNOWN 实际是 Apache-2.0 / BSD-3-Clause，已写进 README 的"已知 license 发现"表）+ `lib_monitor.py`（后台 4 线程守护：nvidia-smi、BGE /health 5s 一次、BGE /v1/embeddings 30s ping、磁盘监控；trigger 10 种自动停机条件回调）+ `setup_venv.ps1`（生产主机创建 `C:\FunASR-Phase0\venv`（Python 3.10）+ 装 deps + freeze log + CUDA 探针，**不**碰 gpu_service 任何文件）+ `01_measure_bge_baseline.py`（5 分钟 30 req/min 合成 BGE 流量：embed 20 rpm × 1000 字 + rerank 10 rpm × 50 candidate，合成文本**全部硬编码**非敏感 + p50/p95/p99/error_rate + abort 条件 > 0.5%）+ `02_compat_smoke.py`（torch CUDA + 30s 1024×1024 matmul 驱动烟测 + SenseVoiceSmall 仅元数据下载 `allow_patterns=["*.json","*.txt","*.md","configuration*"]` 不拉权重）+ `03_run_short.py`（manifest JSONL → AutoModel → CER / segment_metrics / RTF / VRAM + 失败 > max-failures 立即停 + 尊重 stop flag）+ `04_run_long.py`（PyAV 抽音轨 → 16kHz mono WAV → 60s 块 → 每块 start_offset_ms 加到 sentence_info["start"] / ["end"] → 写 `long-<label>-<stamp>.csv/.json`）+ `05_bge_coexist.py`（本地 `gpu_service.app` 启在 127.0.0.1:18100，**显式要求** `E:\FunASR-Phase0\models\bge-m3` 由用户**手动**预置，**不**自动下载；subprocess 跑 04_run_long.py；同时 30 req/min 流量；vs 基线 p95 + error_rate 判 verdict）+ `06_emergency_stop.ps1`（找 `funasr_phase0|FunASR-Phase0` 进程并 `Stop-Process`；**显式排除** `gpu_service`；写 stop flag；抓 nvidia-smi；BGE 4 项验证）+ `07_verify_bge.ps1`（独立 BGE 验证：/health + /model-info + 5 embed + 1 rerank）+ `08_annotate.py`（人工标注 manifest 校验：duration、segments 文本拼接 = reference_text、duplicate id、missing field 检查；**不**调 ASR）+ `README.md`（执行顺序、隔离硬规则、license 发现表、同步策略、明确不在此目录的内容）。
+- 验证：9 个 Python 文件 `py_compile` 全部通过；`lib_metrics.py` / `lib_license_audit.py` / `lib_monitor.py` / `02_compat_smoke.py` / `03_run_short.py` / `04_run_long.py` / `05_bge_coexist.py` / `01_measure_bge_baseline.py` / `08_annotate.py` 在本机 `E:\Workspace\funasr-phase0-dev\.venv`（Python 3.11.9）上 `importlib.util.spec_from_file_location` 加载或 import 通过；`lib_metrics` / `lib_license_audit` / `lib_monitor` / `03_run_short` 跑 `__main__` 烟测通过；`lib_license_audit` 实跑 90 包，命中 `python-Levenshtein` GPL-2.0-or-later；PowerShell 脚本无法在 Git Bash 跑，只做了语法/逻辑静态读审。
+- 未执行的验证及原因：未跑 ASR 推理（生产主机未授权 + 本机 RTX 5070 Ti 不是生产 5060 Ti）；未拉 `paraformer-large-zh` 权重（用户未批准 Phase 0 §11 模板）；未启 BGE 副本（用户未预置权重）；未跑 Phase 0 任何 GPU 实测（按 §11 门禁）。
+- 文件：`scripts/funasr_phase0/__init__.py`、`scripts/funasr_phase0/requirements-asr.txt`、`scripts/funasr_phase0/lib_metrics.py`、`scripts/funasr_phase0/lib_license_audit.py`、`scripts/funasr_phase0/lib_monitor.py`、`scripts/funasr_phase0/setup_venv.ps1`、`scripts/funasr_phase0/01_measure_bge_baseline.py`、`scripts/funasr_phase0/02_compat_smoke.py`、`scripts/funasr_phase0/03_run_short.py`、`scripts/funasr_phase0/04_run_long.py`、`scripts/funasr_phase0/05_bge_coexist.py`、`scripts/funasr_phase0/06_emergency_stop.ps1`、`scripts/funasr_phase0/07_verify_bge.ps1`、`scripts/funasr_phase0/08_annotate.py`、`scripts/funasr_phase0/README.md`、`WORKLOG.md`（本条）。**未**改 `requirements.txt` / `requirements-prod.txt` / `requirements-gpu.txt` / `gpu_service/` / `src/` / `api/` / `frontend/` / `prompts/` / `docker/` / `.env*` / `data/` / `media/` / `docs/` / `project-docs/decisions/` / `.github/workflows/*` / `scripts/deploy-*`。
+- 用户可观察行为变化：仓库新增 1 个目录 `scripts/funasr_phase0/`（14 文件，~130 KB），未触动任何生产代码、依赖、CI/CD、生产服务、生产主机、`.env` 真实值；本机 venv `E:\Workspace\funasr-phase0-dev\.venv` 与本轮新代码之间**无** import 耦合（沙箱代码在仓库内，本机 venv 是 Claude 工作区）。
+- 待办/风险：(1) 等待用户对 §11 模板（执行通道 C-1 git push + §10 决策项）+ 是否同意 A/B/C 三条 CI/CD 路径的明确回复；(2) 我**没有**自动 git add / commit / push（按 CLAUDE.md 工作流等你审完再操作）；(3) `python-Levenshtein` 是 GPL-2.0-or-later，部署到生产前需要法务确认；本沙箱**不重新分发**二进制，但**部署**到生产环境可能触发 GPL 条款（如：作为 ASR 服务的一部分整体对外提供），建议替换为纯 Python CER 实现（如 `jiwer`）或确认合规后再用；(4) FunASR / ModelScope 几个包的 license 字段在 importlib 中显示 UNKNOWN 但实际是 Apache-2.0 / BSD（已写进 README），Phase 1 前需逐项人工复核；(5) CI/CD 自动部署未动；如要走"路径 C（push 即部署）"必须先提交 R3 方案。
+
+
+### 07:29 — 沙箱 R2 修复：22 项审核问题全部修完
+
+- 完成：按用户给定的 22 项审核清单逐项修复沙箱代码 + 新增 4 测试 + 同步文档。**lib_config.py**（新建）含 `load_config` / `gate_for_gpu_entry` / `ConfigGateError`；token 必须为空（env 注入）；gate 在窗口外/共享 GPU 未确认/缺目录/token-in-config/schema 不匹配时拒绝启动。**lib_metrics.py**（重写）纯 Python Wagner-Fischer CER；RTF = `wallclock / audio`、`realtime_speedup = audio / wallclock`；code regex 把 `JGJ-T` 和 `JGJ/T` 都归一为 `jgj/t`、year 可选、`code_metrics` 输出 precision/recall/FP/FN/per-item；BIM 输出 precision/recall/per-term TP/FP/FN/TN；segment `_monotone_one_to_one` 贪心按 start_ms 选最近未匹配 hyp，输出 start/end drift p50/p95/p99/max、omission_rate、extra_rate、consecutive_repeat_rate；删除 `python-Levenshtein` 依赖。**lib_license_audit.py**（重写）扫已装包 + 扫描 `models_root` 实际目录读 LICENSE/model card + SHA256；硬编码 `DEFAULT_EXPECTED_MODELS` 标记为 "expected" 而非 "verified"；`_split_compound` 处理 `OR`/`AND`/`WITH` 复合许可取最高 tier；MPL/LGPL/GPL/AGPL/UNKNOWN 都进人工审查；存在未批准 blocker 非 0 退出；`--report-only` 不绕过门禁。**lib_monitor.py**（重写）5 后台线程全部 fail-closed；`_trigger_stop` 在锁外执行且只能 1 次（`self._stopped_once`）；stop 文件写 `stop_reasons_dir`（run 专属）；health 用 JSON 字段；5xx 与 health failure 各自连续计数、成功归零；embed/rerank 延迟分别 deque、p50/p95/p99 分开；steady-state VRAM 滚动统计；`asr_pid_vram_mib(pid)` 单独追踪 ASR PID 显存；监控内部异常写 `monitor-internal-errors.log`，**不**静默。**requirements-asr.txt**（重写）删除 `python-Levenshtein`、用规范包名 `av`、版本 pin 与生产对齐；**两条独立 pip install**（先 `pip install -i https://download.pytorch.org/whl/cu128 torch==2.7.0 torchaudio==2.7.0`，再 `pip install -i tuna -r requirements-asr.txt`）。**setup_venv.ps1**（重写）拒绝 venv 落到项目 `.venv` / 生产 gpu_service venv / 仓库目录；`pip check` 通过；安装后 `python -c "import torch; print(torch.__version__)"` 必须含 `+cu128`；CUDA 不可用返非 0；`-SkipInstall` 同时跳 pip upgrade + dep install；PS 5.1 兼容。**01_measure_bge_baseline.py**（重写）`/health` JSON 字段校验 + `/model-info` 指纹 vs 配置期望，abort 报告与 success 报告 schema 分离，含 `target_id` 与 `config_sha256`；embed/rerank **分别** deque + p50/p95/p99。**02_compat_smoke.py**（重写）`torch.cuda.is_available()` 必须 True、`cap == (12,0)`、`torch.__version__` 含 `+cu128`、CUDA 测试**仅 5 轮**固定大小 matmul（非 30s 持续）。**03_run_short.py**（重写）worker 进程**只 load 一次** `AutoModel`，timing 分类 `cold_start_s`/`warm_up_s`/`pure_inference_s`/`end_to_end_s`；`--device=cpu` 被 `choices=["cuda"]` 锁死；0% 失败率；每个样本原子 checkpoint；stop flag 按 run_id 隔离。**04_run_long.py**（重写）worker 同样只 load 一次；`audio_cache` key `f"{src_sha}|sr16000|ch1|pyav-decoder/1"`；先写 `.partial` 完整验证后原子 rename；每块原子 checkpoint；保存完整绝对时间戳 segments。**05_bge_coexist.py**（重写）**删除**本地 BGE 副本（无 `:18100`、无 test BGE token、无 `BGE_WEIGHTS` 预置、**不** import/启动 `gpu_service.app`）；同一 BGE 实例前后对照；baseline 按 `target_id` + `config_sha256` 匹配加载；rolling 60s 窗口对照 embed_p95 / rerank_p95；embed/rerank 分别比较。**06_emergency_stop.ps1** + **07_verify_bge.ps1**（重写）`$processId` 而非 `$PID`；无 `??`/`?:` 等 PS7 专属（仅注释提及）；`-WhatIf` / `-ListOnly` 支持；**不**用宽泛命令行 regex，而是读 `<logs>/active-runs/<run_id>.json` 取 pid/启动时间/script；杀前**重新核对 PID 启动时间 ± 5s + cmd 包含 script**（防 PID 复用）；health 用 JSON 字段；`/model-info` 全字段对比 config 期望；`stop-events` 报告**永不**含 token。**08_annotate.py**（重写）`--input draft.jsonl --out validated.jsonl --config phase0-config.json`；每条样本要求 `id`/`audio`/`audio_sha256`/`source_url`/`license`/`internal_recording_consent_id`/`scenario`/`reference_text`/`reference_segments`/`annotator`/`reviewer`/`annotation_version`；短样本**无默认 5s 容差**。**scripts/funasr_phase0/README.md**（重写）17 个文件清单 + 4 个 test 文件清单 + 12 项 R2 修复摘要。**tests/test_funasr_phase0_metrics.py**（29 测试）CER/RTF/code/BIM/segment/cer-norm-version 全覆盖。**tests/test_funasr_phase0_monitor.py**（7 测试）用 stdlib `http.server.ThreadingHTTPServer` 起 fake BGE、patch `nvidia_smi_csv`/`asr_pid_vram_mib`，覆盖 health_degraded/5xx streak/无死锁回调/回调只 1 次/health JSON 解析/stop 文件按 run 隔离/old run 文件不阻塞 new run。**tests/test_funasr_phase0_audio.py**（6 测试）cache key 含 SHA + sample rate + channels、原子 rename、WAV 验证、同名不同 SHA、checkpoint 哈希匹配。**tests/test_funasr_phase0_baseline.py**（5 测试）`importlib.util.spec_from_file_location` 加载 01 + 05、health_not_ok 写 abort、model_info_mismatch 写 abort、ok baseline 写 success 含分开 embed_p95/rerank_p95、target_id mismatch 阻塞加载、target_id 匹配可加载。**TODO.md** `### FunASR 视频自动转录` 段下一步明确为「待用户 + Codex 二轮审查 + R3 方案另立」。3 个 plan 文件头部各加一条"GPU 实测已升格 R3 / 调试窗口批准 / CI/CD 路径 A"补注。
+- 文件：`scripts/funasr_phase0/lib_config.py`（新建）、`scripts/funasr_phase0/lib_metrics.py`（重写）、`scripts/funasr_phase0/lib_license_audit.py`（重写）、`scripts/funasr_phase0/lib_monitor.py`（重写）、`scripts/funasr_phase0/requirements-asr.txt`（重写）、`scripts/funasr_phase0/setup_venv.ps1`（重写）、`scripts/funasr_phase0/01_measure_bge_baseline.py`（重写）、`scripts/funasr_phase0/02_compat_smoke.py`（重写）、`scripts/funasr_phase0/03_run_short.py`（重写）、`scripts/funasr_phase0/04_run_long.py`（重写）、`scripts/funasr_phase0/05_bge_coexist.py`（重写）、`scripts/funasr_phase0/06_emergency_stop.ps1`（重写）、`scripts/funasr_phase0/07_verify_bge.ps1`（重写）、`scripts/funasr_phase0/08_annotate.py`（重写）、`scripts/funasr_phase0/__init__.py`（重写）、`scripts/funasr_phase0/phase0-config.example.json`（新建）、`scripts/funasr_phase0/README.md`（重写）、`tests/test_funasr_phase0_metrics.py`（新建）、`tests/test_funasr_phase0_monitor.py`（新建）、`tests/test_funasr_phase0_audio.py`（新建）、`tests/test_funasr_phase0_baseline.py`（新建）、`project-docs/plans/funasr-auto-transcription.md`（头部补注）、`project-docs/plans/funasr-phase0-pre-registration.md`（头部补注）、`project-docs/plans/funasr-phase0-execution-plan.md`（头部补注）、`TODO.md`（FunASR 段下一步/依赖）、`WORKLOG.md`（本条）。**未**改 `.github/workflows/*` / `scripts/deploy-*.ps1` / `scripts/deploy-*.sh` / `gpu_service/` / `src/` / `api/` / `frontend/` / `prompts/` / `docker/` / 项目正式 `requirements*.txt` / `.env*` / `data/` / `media/` / `docs/` / Qdrant 或 SQLite。
+- 用户可观察行为变化：仓库 `scripts/funasr_phase0/` 内 13 个旧文件全部就地重写为合规实现 + 新增 `lib_config.py` + `phase0-config.example.json`；`tests/` 新增 4 个 test 文件。**未** GPU 实测、**未**下载、**未**装 ASR 依赖、**未**改 CI/CD、**未**提交、**未**推送、**未**改生产环境、未动 `.env` 真实值。
+- 验证：11 个 Python 文件 `py_compile` 全部通过；`python -m unittest tests.test_funasr_phase0_{metrics,monitor,audio,baseline}` 跑 47/47 测试全过；3 个 PS1 文件 grep 确认无 `??`/`?:` 真实使用（仅注释提及）；`rg` 确认无硬编码 token（`bge_auth_token="test-token"` 仅在 fake BGE 测试里）、无 `192.168.11.11`、无 `python-Levenshtein` import、无沙箱启动 `gpu_service.app`；`phase0-config.example.json` 用 `http://127.0.0.1:18100` loopback + `shared_production_gpu_confirmed: false`；`lib_config.gate_for_gpu_entry` 拒过 window-外 / 未确认共享 GPU / token-in-config / schema 不匹配 4 类请求（smoke 全过）。
+- 未执行的验证及原因：未跑 GPU/CUDA 实测（R3 待批）；未下载任何模型或模型元数据（Phase 0 GPU 实测未启动）；未在生产 Windows 主机运行任何脚本（仍 ping 不可达 + 未获 R3 批准）；`git diff --check` 报告的 1 处 `WORKLOG.md` EOF 新空行 + 1 处 `GPU_DEPLOYMENT.md:7` trailing whitespace 为预存（git 把未触动文件标记 modified 后 git diff --check 的预存问题）；未跑 `npm run build`（与本任务无关）；pytest 不可用故用 stdlib unittest（已在 entry 报告）。
+- 待办/风险：(1) 等待用户 + Codex 二轮代码审查；(2) 实际 GPU 测试需另提 R3 方案（含维护窗口、当前业务负载、影响范围、监控指标、自动停止、服务恢复、负责人），当前授权**不**包含此项；(3) CI/CD 保持路径 A，未触碰；(4) Phase 0 完成**不**构成 Phase 1 自动授权；(5) 本轮所有改动**只**在沙箱、测试、计划文档范围内，可通过 `git restore scripts/funasr_phase0/ tests/test_funasr_phase0_*.py project-docs/plans/funasr*.md TODO.md WORKLOG.md` 单点 revert 恢复（除部分 plan/TODO 头部补注需手动清理外）；(6) example config 故意 `shared_production_gpu_confirmed: false`，生产配置必须放仓库外、未提交。
+
+### 08:30 — 完成 FunASR Phase 0 沙箱第二轮 R2 修复
+
+- 完成：按用户明确批准的二轮方案修复审查发现的入口、安全和评测缺陷。新增 `00_run_guarded.py` 与 `lib_runtime.py`，把 `02/03/04` 改为拒绝直接运行的 GPU worker；父进程在创建 worker 前强制许可证门禁，并负责 nonce guard、`active-runs/<run_id>.json`、独立进程组、监控回调、精确进程树停止及 BGE health/model-info/5 embed/1 rerank 恢复验证。`lib_config.py` 升为 config v2，拒绝无时区窗口和非法阈值，分离 CPU/GPU gate，显式绑定 ASR/VAD/标点模型 revision 与绝对目录。
+- 完成：修复 `02_compat_smoke.py` 所有失败分支“写报告但不退出”和 report-only 许可证旁路；统一 `01` 基线产物到 `reports_root/<run_id>`，运行中错误率或 health 越界立即 abort；`05` 通过真实基线和当前解释器启动受监控的 `04`，以请求时间窗统计 embed/rerank 并复用统一 health/model-info/显存/磁盘/5xx 停机逻辑；删除硬编码 venv、仓库路径和生产地址 fallback。
+- 完成：`03` 强制八类预注册短样本、空 manifest/不安全 ID/越界路径失败，并把 CER、术语、编号、时间戳、RTF、显存和失败率写成 observed/threshold/pass 硬 verdict；`04` 要求与源 SHA 匹配的审核 reference，传入真实模型 revision，用每块 WAV 实际时长计算最后一块 RTF，保存完整 checkpoint，并只用人工 reference 计算 CER/segment 指标；segment 对齐改为允许 gap 的单调动态规划，不再产生交叉匹配或用 hypothesis 自造 reference。
+- 完成：修复 `setup_venv.ps1` 的 PS5.1 语法错误并澄清 `-SkipInstall`；`06_emergency_stop.ps1` 改用 config 日志/报告根、核验配置文件哈希和 PID 身份、后代优先停止进程树、删除已停止 active-run，且不再回退固定生产 IP；`07_verify_bge.ps1` 使用 config 报告根；`08_annotate.py` 改为 CPU gate，限制输入输出根目录，校验 `source_url | self_made`、内部录制同意编号、非空文本和安全 ID，并允许相邻不重叠 segment。
+- 文件：`scripts/funasr_phase0/`（新增 `00_run_guarded.py`、`lib_runtime.py`，修改其余 Phase 0 Python/PowerShell/config/README）、`tests/test_funasr_phase0_{config,entries}.py`（新增）、`tests/test_funasr_phase0_{metrics,monitor,audio,baseline}.py`（扩展）、`project-docs/plans/funasr-{auto-transcription,phase0-pre-registration,phase0-execution-plan}.md`、`TODO.md`、`WORKLOG.md`。未修改业务代码、正式依赖、CI/CD、部署脚本、数据库、索引或环境变量文件。
+- 验证：Claude 开发 venv 中以 `-B` 运行 6 个测试模块，65/65 通过；测试直接覆盖真实 `03/04/08` 入口、假模型 revision、最后一块 0.5 秒、阈值失败、许可证失败禁止创建子进程、active-run 生命周期、monitor p95/5xx/model-info 停机及 `01` 真实产物被消费者加载。对 13 个沙箱 Python + 6 个测试做内存 `compile()`，19/19 通过；使用 `C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe` Parser 验证 3 个 PS1，3/3 `PARSE_OK`。
+- 未执行：未运行 GPU/CUDA、未导入真实 Torch/FunASR 模型、未下载模型、未安装或升级依赖、未访问生产 BGE/Windows 主机、未执行 PowerShell 脚本正文、未修改 CI/CD、未 stage/commit/push。所有联网/GPU/生产验证仍属于待单独批准的 R3。
+- 待办/风险：交给 Claude Code 做第三轮独立审查；FunASR 真实版本对 `model_revision`/VAD/标点 revision 参数的运行兼容性、实际许可证矩阵、显存/RTF/BGE 共存阈值只能在获批 R3 环境验证。第三轮审查通过也不自动授权 Phase 0 GPU 实测或 Phase 1。
+
+### 09:23 — 复核 FunASR Phase 0 第三轮审查结论
+
+- 完成：只读复核 Claude Code 的第三轮报告及其引用实现。确认原二轮 22 项问题已经收口，但报告所称“新增 9 项（4 P1 + 5 P2）”计数和定级不准确：`P2-2` 已被报告正文自行撤销，三个 P3 均不构成缺陷；`01` 是文档明确允许直接运行且不分配 ASR/CUDA 的 BGE 基线入口；Windows `taskkill /T` 按 PID 子进程树而非进程组终止；monitor 每次记录时已经按 60 秒裁剪 deque；02 worker 的失败分类已写入报告并继承输出到控制台。确认一个真实 P1：`06_emergency_stop.ps1` 在 active-run 配置哈希不匹配或文件损坏时清空候选，可能未停止 ASR，却在 BGE 健康时返回 0。另保留 draft 大小/行数限制、用真实已审核样本完成全链路 warm-up、素材许可证据字段为后续 P2 加固建议。
+- 文件：`WORKLOG.md`（本条）；未修改 Phase 0 代码、测试、计划、TODO 或生产状态。
+- 验证：逐段核对 `01_measure_bge_baseline.py`、`03_run_short.py`、`06_emergency_stop.ps1`、`08_annotate.py`、`lib_runtime.py`、`lib_monitor.py`、`02_compat_smoke.py`、`00_run_guarded.py` 和对应测试；运行 `taskkill /?` 确认 `/T` 的系统定义为终止指定 PID 及其启动的子进程；本轮未重新运行单元测试，因为是对第三轮报告的只读定级复核，上一轮最终代码已有 65/65 CPU 测试结果。
+- 待办/风险：实际 GPU R3 执行仍应由紧急停止 P1 阻塞；如用户批准下一轮 R2，应优先让 config hash/active-run 损坏路径明确非零退出且保留精确 PID 停止能力，并为该路径补 PowerShell 行为测试。其余加固项不应与该安全阻塞项混为同一严重级别。
+
+### 10:08 — 接管并收口 FunASR Phase 0 第三轮修复
+
+- 完成：接管 Claude Code 因额度中断留下的半成品，逐项复核后保留标注输入限制和真实样本 warm-up，重做紧急停止语义。`06_emergency_stop.ps1` 不再因配置哈希漂移直接放弃停机：在 active-run 的 run_id、允许 worker、PID、启动时间和命令行均可复核时继续停止精确进程树，同时在报告写 `integrity_warnings` 并返回 2；active-run 缺失、损坏或身份字段不可信时写明确失败报告并返回 2，绝不再以 BGE 健康冒充停机成功。补充 PS5.1 兼容的 .NET SHA-256，修复 StrictMode 下单元素管道无 `Count` 导致停机后报告缺失的问题。
+- 完成：`08_annotate.py` 限制 draft 最大 8 MiB、5,000 个物理行、单行 64 KiB；`license_evidence` 保持可选 advisory，并将成功/失败 sidecar 改为原子写。`03_run_short.py` 使用第一条已审核 manifest 音频完成 VAD/ASR/标点全链路 warm-up，在报告记录 warm-up 样本 ID 和 SHA-256。重写 Claude Code 新增但错误验证“哈希不匹配时不停止”的 PowerShell 测试，改为真实创建并停止一个无害休眠 worker；补充标注三类输入上限和 warm-up 调用顺序断言。同步 README、三个 Phase 0 计划头部和 TODO 下一步。
+- 文件：`scripts/funasr_phase0/03_run_short.py`、`scripts/funasr_phase0/06_emergency_stop.ps1`、`scripts/funasr_phase0/08_annotate.py`、`scripts/funasr_phase0/README.md`、`tests/test_funasr_phase0_entries.py`、`tests/test_funasr_phase0_powershell.py`、`project-docs/plans/funasr-auto-transcription.md`、`project-docs/plans/funasr-phase0-execution-plan.md`、`project-docs/plans/funasr-phase0-pre-registration.md`、`TODO.md`、`WORKLOG.md`。未修改业务代码、正式依赖、CI/CD、部署脚本、数据库、索引或环境变量文件。
+- 验证：最终一次性运行 7 个测试模块，74/74 通过；覆盖输入文件大小、物理行数、单行长度、许可证据 advisory、真实样本 warm-up 顺序、三个 PS1 的 Windows PowerShell 5.1 解析、哈希漂移仍精确停止测试 worker 并返回 2、active-run 损坏/缺失非零退出及 ListOnly 无破坏。对 13 个沙箱 Python 文件和 7 个测试文件做内存 `compile()`，20/20 通过。全程只使用临时文件、fake `nvidia-smi`、loopback 不可达端点和测试自建休眠进程；未调用真实 GPU。
+- 未执行：未运行 CUDA/FunASR、未导入真实模型、未下载模型、未安装或升级依赖、未访问生产环境、未执行部署、未 stage/commit/push。
+- 待办/风险：本地 R2 代码与 CPU/PowerShell 验证已收口，TODO 保持“代码完成待验证”，因为实际 CUDA、FunASR 参数兼容、许可证矩阵、显存/RTF 和 BGE 共存只能在公司开发兼生产 GPU 上验证；下一步仍须提交并批准独立 R3 方案，不能因本地测试通过直接开始实测。
+
+### 18:23 — 推送 FunASR Phase 0 R3 第一批沙箱
+
+- 完成：按用户明确批准，将 FunASR Phase 0 沙箱、7 个对应测试和 3 份计划文档作为独立提交直接推送到 GitHub `master`；提交为 `5c9e03444b0111950aba7ac54dac440dc33a6c16`。推送前把示例配置收紧为仅 `iic/SenseVoiceSmall@v1.0.0`，并将执行范围明确限定为 R3-0～R3-5；1h/2h/4h、BGE 共存和其他模型仍未授权。未夹带工作区中的协作规则、部署文档、TODO、Office 计划或删除项。
+- 文件：`scripts/funasr_phase0/`、`tests/test_funasr_phase0_*.py`、`project-docs/plans/funasr-auto-transcription.md`、`project-docs/plans/funasr-phase0-execution-plan.md`、`project-docs/plans/funasr-phase0-pre-registration.md`、`WORKLOG.md`（本条仅保留在当前混合工作区，未纳入该提交）。
+- 验证：使用既有隔离开发 venv 一次性运行 7 个测试模块，74/74 通过；20/20 Python 源码/测试内存编译通过；3/3 PowerShell 5.1 解析通过；拉取前确认本地与 `origin/master` 同起点，推送后本地与远端均为 `5c9e03444b0111950aba7ac54dac440dc33a6c16`。
+- 未执行：未访问生产主机，未执行生产机 `git pull`，未安装依赖、下载模型或运行 GPU/BGE 测试；维护窗口仍未提供明确起止时间，R3-1～R3-5 继续阻塞。
+- 待办/风险：现场负责人需先补充维护窗口，再在生产机确认工作区干净、记录旧 SHA 并仅快进拉取该提交；任何本地修改、非快进、BGE 健康异常或许可证 blocker 都必须立即停止。R3-5 后必须回传报告并重新审批，不能直接进入长视频或共存测试。
+
+### 19:02 — 修复 Phase 0 Windows venv pip 调用
+
+- 完成：根据生产 Windows 主机 R3-1 首次执行反馈，修复 `setup_venv.ps1` 通过 venv `pip.exe` 自升级而失败的问题；升级、安装、`pip check` 和 `freeze` 统一改为 venv `python.exe -m pip`，PowerShell 5.1 下临时以 `Continue` 捕获原生 stderr，并继续按 `$LASTEXITCODE` 失败关闭。脚本可直接复用已经创建但尚未完成安装的 `C:\FunASR-Phase0\venv`。提交 `8a10361b59bfaeda024da24871fe4d7077d09afc` 已推送到 GitHub `master`。
+- 文件：`scripts/funasr_phase0/setup_venv.ps1`、`tests/test_funasr_phase0_powershell.py`、`scripts/funasr_phase0/README.md`、`project-docs/plans/funasr-phase0-execution-plan.md`、`WORKLOG.md`（本条保留在混合工作区，未纳入提交）。
+- 验证：7 个 Phase 0 测试模块 76/76 通过；20/20 Python 源码/测试内存编译通过；3/3 PowerShell 5.1 解析通过；相关 4 文件 `git diff --check` 通过；推送后本地与 `origin/master` 均为 `8a10361b59bfaeda024da24871fe4d7077d09afc`。
+- 未执行：Codex 未访问生产主机、未安装依赖、未下载模型、未运行 GPU；生产机需在已批准窗口内拉取新提交并重试 R3-1。
+
+### 21:34 — 修复 Phase 0 许可证据与人工审批门禁
+
+- 完成：将许可审计升级为 schema v2，按 PEP 639 `License-Expression`、已识别 classifier、短许可证声明的顺序选择主许可证；长 NOTICE 仅保留摘要，避免 NumPy/SciPy 被第三方 GCC 声明误判为 GPL。模型许可必须来自实际 `LICENSE` 或模型卡 `license:`，并绑定模型 ID、固定 revision、配置与全部文件 SHA-256；仅有预期值不再标为已验证。新增仓库外精确人工审批格式，拒绝通配、无时区、过期、配置漂移和证据摘要漂移，GPU 父进程继续在创建 worker 前 fail-closed。
+- 文件：`scripts/funasr_phase0/lib_license_audit.py`、`scripts/funasr_phase0/license-approvals.example.json`、`scripts/funasr_phase0/phase0-config.example.json`、`scripts/funasr_phase0/README.md`、`tests/test_funasr_phase0_license.py`、`project-docs/plans/funasr-phase0-execution-plan.md`、`WORKLOG.md`。
+- 验证：既有隔离开发 venv 中一次运行 8 个 Phase 0 测试模块，85/85 通过；21 个 Phase 0 Python 源码/测试完成内存编译；本次范围 `git diff --check` 通过。未使用 GPU、未访问生产环境、未下载模型、未安装依赖。
+- 待办/风险：生产机需拉取新提交并在新的获批测试窗口重新生成 schema v2 报告；Tier 0/2/3 项须由公司合规负责人依据报告逐项审批，工程门禁不替代法律意见。当前混合工作区中的 `WORKLOG.md` 既有他人改动未纳入本次独立提交。
+
+### 21:43 — 修复生产部署 Git 凭据持久化与旧代码部署风险
+
+- 完成：Windows GPU 与 Ubuntu 应用部署不再执行带临时 Actions Token 的 `git remote set-url`；workflow 和脚本改用进程级 `http.extraHeader` 获取事件绑定的完整 commit SHA，严格执行 fast-forward 并核对最终 HEAD。为处理首次升级时 runner 仍持有旧脚本，workflow 会先自行同步到目标提交再调用新版脚本。Git fetch、fast-forward 或 HEAD 校验失败都会立即终止，不再以警告继续部署旧代码。
+- 文件：`.github/workflows/deploy-production.yml`、`scripts/deploy-gpu.ps1`、`scripts/deploy-app.sh`、`tests/test_deploy_git_safety.py`、`WORKLOG.md`。
+- 验证：5/5 部署 Git 安全测试通过；Windows PowerShell 语法解析通过；`bash -n scripts/deploy-app.sh` 通过；测试文件内存编译与本次范围 `git diff --check` 通过。未安装 YAML 解析器，因此未执行第三方 YAML schema 校验；已人工核对 workflow 表达式、缩进和两个事件的 SHA 选择。
+- 待办/风险：按批准要求只创建本地提交、不推送。推送将触发生产 workflow；推送前需在 Windows 生产机把当前失效 HTTPS origin 最后一次恢复为 SSH，并确认 Ubuntu runner 的工作区可被 fast-forward。当前混合 `WORKLOG.md` 的他人改动不纳入独立提交。
+
+### 21:46 — 推送生产部署 Git 安全修复
+
+- 完成：经用户在明确知悉推送会触发生产 workflow 后单独批准，将提交 `7caf32d026ad3bd4d35564c26f8ca9a5ea01e096` 推送至 `origin/master`；本地 HEAD 与远端 master 已核对一致。
+- 文件：远端提交包含 `.github/workflows/deploy-production.yml`、`scripts/deploy-gpu.ps1`、`scripts/deploy-app.sh`、`tests/test_deploy_git_safety.py`；`WORKLOG.md` 本条保留在混合工作区，未另行提交。
+- 验证：`git push origin master` 成功，本地与 `origin/master` 均为 `7caf32d026ad3bd4d35564c26f8ca9a5ea01e096`。未直接登录生产机或执行额外生产命令。
+- 待办/风险：等待自动 CI/CD 返回结果；若 runner 工作区存在阻止 fast-forward 的已跟踪修改，部署将按设计失败关闭。Windows 生产仓库的人工 SSH remote 仍需保持为 `git@github-pincheng:abworks-dev/RAGPinCheng.git`。
+
+### 22:00 — 加固 Ubuntu 部署 Git TLS 与代理重试
+
+- 完成：针对 Ubuntu self-hosted runner 连续两次 `gnutls_handshake` 中断，在 workflow bootstrap 和 `deploy-app.sh` 的精确 SHA fetch 中加入可选 `DEPLOY_HTTP_PROXY`、强制 HTTP/1.1、最多 4 次有限重试及 2/4/8 秒退避。认证和代理仍为进程级 Git 参数，不写入 remote/global config；未关闭 TLS 校验，全部失败继续立即终止部署。
+- 文件：`.github/workflows/deploy-production.yml`、`scripts/deploy-app.sh`、`tests/test_deploy_git_safety.py`、`WORKLOG.md`。
+- 验证：部署安全测试 6/6 通过；`bash -n scripts/deploy-app.sh`、测试文件内存编译和本次范围 `git diff --check` 通过；检索确认没有 `http.sslVerify=false`、没有 `remote set-url`、没有全局代理持久化。
+- 待办/风险：按批准要求仅提交、不推送；推送后会再次触发生产 workflow。若 GitHub Actions Variable `DEPLOY_HTTP_PROXY` 为空或该代理无法从 Ubuntu runner 到达，脚本会尝试直连并可能继续 fail-closed，需要届时依据日志确认网络路径。
+
+### 22:06 — 推送 Ubuntu Git TLS 与代理重试补丁
+
+- 完成：经用户明确批准，将提交 `2e5e0391bef4be48686046ccec1fa5016918c07a` 推送至 `origin/master` 并触发生产 workflow。首次推送遇到 GitHub HTTP 502，未改变远端；一次有限重试成功，随后 fetch 核对本地与远端 SHA 一致。
+- 文件：远端提交包含 `.github/workflows/deploy-production.yml`、`scripts/deploy-app.sh`、`tests/test_deploy_git_safety.py`；`WORKLOG.md` 本条保留在混合工作区。
+- 验证：本地 HEAD 与 `origin/master` 均为 `2e5e0391bef4be48686046ccec1fa5016918c07a`。未直接访问生产机或执行额外生产命令。
+- 待办/风险：等待生产 workflow；仓库 Actions Variable `DEPLOY_HTTP_PROXY` 必须是 Ubuntu runner 可达的 HTTP 代理 URL，否则有限重试后仍会失败关闭。
+
+### 22:12 — 补齐 Windows 部署代理与有限重试
+
+- 完成：修复 Windows deploy-gpu workflow bootstrap 未使用 `DEPLOY_HTTP_PROXY` 导致 Schannel TLS 握手失败的问题；workflow bootstrap 与 `deploy-gpu.ps1` 备用 fetch 均使用可选代理、HTTP/1.1、最多 4 次重试及 2/4/8 秒退避。代理和认证仍为单次 Git 参数，不写入 remote/global config，全部失败继续终止部署。
+- 文件：`.github/workflows/deploy-production.yml`、`scripts/deploy-gpu.ps1`、`tests/test_deploy_git_safety.py`、`WORKLOG.md`。
+- 验证：部署安全测试 7/7 通过；Windows PowerShell 解析、Linux Bash 语法、测试文件内存编译和本次范围 `git diff --check` 通过；未关闭 TLS 校验。
+- 完成：独立提交 `1ec7dfed6ffbbddfe5426f54e76405276776126b` 已推送 `origin/master`，本地与远端 SHA 核对一致并再次触发生产 workflow。
+- 待办/风险：等待生产 workflow；若代理自身不可达或 TLS 路径仍异常，4 次失败后会安全停止。
+
+### 23:01 — 提交 faster-whisper R3-A 详细执行计划
+
+- 完成：新增 faster-whisper R3-A 详细执行计划，固定 artifact、全新隔离 venv、模型 revision/全文件哈希、许可证、CUDA/DLL、单个自制短样本 FP16 冒烟、BGE 保护、四个强制暂停点、停止条件和恢复/回滚边界；状态为待用户审批，未执行 R3-A。
+- 文件：新增 `project-docs/plans/faster-whisper-r3a-execution-plan.md`，计划 SHA-256=`e2508a827441d8e7fea61441be9e6551e4a94ee6fd1f903048b5017c8baf08d1`；更新 `WORKLOG.md`。
+- 验证：核对 19 个计划章节、固定包/模型 identity、正确 `model.bin` SHA-256、8/14 GiB 显存门禁、30 GB 磁盘上限、P1/P2/P3/P4 暂停点和 R3-B 边界；静态预检报告 SHA-256 仍为 `2edb7c53fc9aec9818eec6be70fd1fa3873d3ce4b0900d7c53e819a9fee9717e`。
+- 待办/风险：当前日期为 2026-07-31，而静态预检报告正文标注 2026-08-01；执行前必须由用户明确日期/时区口径，若修改预检报告则同步更新哈希并重新审批。另需补齐执行通道、维护窗口、BGE 鉴权、冒烟样本、失败 artifact 策略、下载来源、许可批准人和超时；本轮未 SSH、未下载、未安装、未创建生产 venv、未读取密钥、未运行 CPU/GPU 推理。
+### 23:08 — 收集 faster-whisper R3-A 审批参数
+
+- 完成：核对用户提交的 R3-A 部分批准，已确认计划 SHA-256、Codex 验证 SSH 通道、A0–A8 范围及拟定维护窗口；其余安全参数改为待用户回答的选择题。
+- 文件：更新 `WORKLOG.md`；未修改 R3-A 计划、源码、依赖或生产状态。
+- 验证：当前授权仍不完整，未 SSH、未下载、未安装、未创建 venv、未读取密钥、未运行推理；维护窗口待确认采用 `2026-08-01T07:06:00+08:00` 至 `2026-08-01T17:06:00+08:00` 的精确时区格式。
+- 待办/风险：等待用户确认 BGE 鉴权方式、冒烟样本、失败 artifact 策略、下载来源策略、许可 blocker 规则、超时和日期口径；答案补齐前 R3-A 保持阻塞。
+### 23:49 — 用户确认生产部署链路恢复
+
+- 完成：用户确认清理 Ubuntu runner 中两个过时的部署脚本本地修改后，生产 `Deploy production` 已可正常完成；代理、有限重试、精确 SHA fast-forward 和新版部署脚本链路完成实际环境验证。
+- 文件：`WORKLOG.md`（本条保留在混合工作区，未提交）；未修改代码或再次推送。
+- 验证：以用户回传的“可以了已经”为生产执行结果；此前失败均发生在 Git 同步阶段，最终成功说明 tracked-worktree 冲突已解除。未由 Codex 直接登录生产机复核服务指标。
+
+## 2026-08-01
+
+### 00:37 — 复核 Phase 0 schema v2 许可报告
+
+- 完成：只读复核生产机生成的 schema v2 Markdown/JSON 报告。确认配置 SHA 为 `295d4588b5b20cb5477b21352c083f213affcb48ca1bae0312a137a94b3c556e`，77 个包、3 个模型、9 个 blocker；三个固定 revision 模型均从实际 README frontmatter 取得 Apache-2.0 证据并标为 VERIFIED；NumPy/SciPy 已正确归类 BSD-3-Clause，不再因长 NOTICE 误判 GPL。剩余 blocker 中 certifi/MPL-2.0、soxr/LGPL-2.1-or-later、tqdm/MPL-2.0 AND MIT 属真实人工审查项；其余六项主要是 SPDX/通用 BSD 或 dist-info LICENSE 文件识别不足，暂不建议按 UNKNOWN 直接批准。
+- 文件：只读报告 `license-audit-r3-schema2-20260801-003353.md/.json`；`WORKLOG.md`（本条，保留在混合工作区）。未创建审批文件、未修改审计代码、未访问生产机。
+- 验证：报告 schema=`phase0-license-audit/2`、approval_file 为空；Markdown SHA-256=`04BFF0681B13A4F4031A0C294F48F07FEA48510C51E9915593D1F9D53BE20522`，JSON SHA-256=`C2503617ED46CA7D58BFDCEAE9CC4E0E911777D76D450AEAF6FBA4C07943143E`。
+- 待办/风险：先修复审计器对 `MIT-0`、通用 `BSD` 和 wheel/dist-info 许可证文件的识别并重跑报告；随后仅对真实 Tier 2 项进行公司合规审批。许可门禁清零前不申请 GPU 窗口。
+
+### 00:44 — 补齐安装包 License-File 证据识别
+
+- 完成：许可审计器新增 `MIT-0`、通用 `BSD` 映射，并读取包元数据 `License-File` 及 wheel `.dist-info/licenses/`/LICENSE/COPYING 文件；许可证文件路径和 SHA-256 纳入包证据摘要，最多读取 1 MiB，仅识别明确标准正文。长 NOTICE 仍不模糊放行，自定义评估/研究限制许可只记录证据并保持 Tier 0。
+- 文件：`scripts/funasr_phase0/lib_license_audit.py`、`tests/test_funasr_phase0_license.py`、`scripts/funasr_phase0/README.md`、`WORKLOG.md`。
+- 验证：9 个相关模块共 97/97 CPU-only 测试通过，22 个 Python 文件内存编译及本次范围 `git diff --check` 通过；既有开发 venv 真实扫描确认 antlr4/cffi/llvmlite/tiktoken/umap 可自动归入 Tier 1，certifi/soxr/tqdm 保持 Tier 2。`kaldiio==2.18.1` wheel 自带 NTT evaluation-only LICENSE，正确保留 Tier 0 blocker。
+- 完成：独立提交 `4f421d4870037184953a3bb166d2a39a5d2d0ae5` 已推送 `origin/master`，本地与远端 SHA 核对一致。
+- 待办/风险：生产重跑后预计剩余 4 个 blocker：certifi、soxr、tqdm 和 kaldiio；后者不应按普通开源许可证自动批准，需公司合规判断或移除/替换依赖。`WORKLOG.md` 本条保留在混合工作区，不纳入独立提交。
+
+### 00:59 — 复核 License-File 修复后的生产许可报告
+
+- 完成：只读复核新 schema v2 报告，确认 77 个包、3 个模型、4 个 blocker；certifi/MPL-2.0、soxr/LGPL-2.1-or-later、tqdm/MPL-2.0 AND MIT 均有安装包许可证文件摘要，kaldiio 有 NTT evaluation-only LICENSE 摘要；三个固定 revision 模型继续 VERIFIED。
+- 文件：只读报告 `license-audit-r3-schema2-20260801-005904.md/.json`；`WORKLOG.md`（本条）。未创建审批文件、未修改代码、未访问生产机。
+- 验证：配置 SHA=`295d4588b5b20cb5477b21352c083f213affcb48ca1bae0312a137a94b3c556e`；Markdown SHA-256=`13BC70F11E3B90BE9C41A4D6A4531290ACA6BC02C4E73C05052953F855D740F5`，JSON SHA-256=`458F309909DA5F6A33C149415E052DF018A6E757D1BF6707823035A4F9023CAF`。
+- 待办/风险：四项可由公司负责人精确审批本次内部 Phase 0 评估；kaldiio 审批必须限制为评估用途，不能自动扩展至 Phase 1、对外分发或正式生产功能。正式门禁通过后仍需重新批准 GPU 测试窗口。
+
+### 01:40 — 修复 Phase 0 本地模型与离线执行门禁
+
+- 完成：短样本和长音频入口改为仅加载 `models_root/<model_id>` 下已暂存的 ASR、VAD、标点模型；配置或权重缺失时在导入 FunASR 前失败，不再回退 ModelScope/Hugging Face 下载。守护父进程和 worker 均强制离线变量；报告继续保留配置中的模型 ID、固定 revision 和本地加载路径。短样本相对音频路径统一按 manifest 所在目录解析。
+- 文件：`scripts/funasr_phase0/lib_runtime.py`、`scripts/funasr_phase0/03_run_short.py`、`scripts/funasr_phase0/04_run_long.py`、`scripts/funasr_phase0/README.md`、`tests/test_funasr_phase0_entries.py`、`tests/test_funasr_phase0_audio.py`、`WORKLOG.md`（本条保留在混合工作区，不纳入独立提交）。
+- 验证：Phase 0 Python 文件显式语法编译通过；91/91 项 Phase 0 CPU-only 单元测试通过；本次六个文件 `git diff --check` 通过。未访问生产机、未使用 GPU、未下载模型、未安装依赖。
+- 待办/风险：生产机拉取提交后，需要先确认三个本地模型目录均包含配置和权重文件，再用无乱码 UTF-8 manifest 申请新窗口重跑 R3-5；此前中断产生的模型缓存未删除。
+
+### 01:44 — 梳理 FunASR 全阶段实际进度
+
+- 完成：只读核对总方案、Phase 0 执行计划、沙箱 README 与 TODO，确认整体分为 Phase 0～Phase 6；Phase 0 已完成环境、许可、BGE 基线和兼容性冒烟，R3-5 因本地模型权重与 UTF-8 manifest 问题待重跑，1h/2h/4h 和 BGE 共存尚未执行；Phase 1～Phase 6 均未启动。
+- 文件：只读核对 `project-docs/plans/funasr-auto-transcription.md`、`project-docs/plans/funasr-phase0-execution-plan.md`、`scripts/funasr_phase0/README.md`、`TODO.md`；仅更新 `WORKLOG.md` 本条，未修改代码。
+- 待办/风险：计划文档顶部和 TODO 仍含过时状态与旧模型 revision，后续应在单独获批的文档同步中按实测状态修订。
+
+### 02:10 — 审阅 Phase 0 R3-5 短样本结果
+
+- 完成：复核生产 Windows GPU 主机回传的 R3-5 报告。SenseVoiceSmall、VAD 和标点模型均从隔离目录本地加载，8 个样本全部完成且无处理异常；7 个通过，`noise_with_bim` 因 CER 0.1739 超过 0.15、BIM 术语召回 0.4 低于 0.7 而未通过，漏识别“初拧、终拧、超声波探伤”。该样本 RTF 0.0296、峰值显存 1.1906 GB，速度和显存门禁通过。
+- 文件：只读审阅生产报告 `03_run_short-20260801-020704.json` 的回传输出；仅更新 `WORKLOG.md` 本条，未修改代码、未访问生产机。
+- 验证：报告 schema=`phase0-short/2`、样本数 8、处理失败 0、阈值失败 1、总体 `ok=false`；尚待现场补充 BGE 健康、GPU 末态和 active-run 清理结果。
+- 待办/风险：不得事后放宽预注册阈值或直接进入 1 小时测试；如继续，应先提交针对失败样本的可审计诊断方案，捕获原始假设文本并评估热词/模型配置，而不是修改参考答案。
+
+### 02:21 — 增加 Phase 0 失败样本受控诊断
+
+- 完成：为短样本入口增加显式 `--diagnostic-sample-id` 与 `--include-diagnostic-text` 组合门禁；仅允许自制、非内部录音样本记录 reference、hypothesis 和字符差异。指定目标跳过 checkpoint 复用，其余样本继续复用；诊断正文只进入本次报告，checkpoint 和默认报告保持无正文，所有质量与资源阈值不变。
+- 文件：`scripts/funasr_phase0/03_run_short.py`、`tests/test_funasr_phase0_entries.py`、`scripts/funasr_phase0/README.md`、`project-docs/plans/funasr-phase0-execution-plan.md`、`WORKLOG.md`（本条保留在混合工作区，不纳入独立提交）。
+- 验证：Phase 0 Python 文件显式语法编译通过；92/92 项 Phase 0 CPU-only 测试通过；本次四个文件 `git diff --check` 通过。未访问生产机、未使用 GPU、未下载模型、未安装依赖、未修改阈值。
+- 待办/风险：代码推送后仍需单独批准新的 R3 单样本诊断窗口；诊断报告包含明确批准的非敏感合成文本，只能留在沙箱报告目录，不得提交 Git。
+
+### 02:29 — 复核 R3 单样本正文诊断
+
+- 完成：复核生产机 `s-noise-bim` 显式正文诊断；七个既有样本均复用 checkpoint，仅目标样本重跑。参考“超声波探伤、初拧、终拧”分别被识别为“超声波、碳伤、出拧、中拧”，确认是噪声条件下的近音专业术语误识别，而非编码、路径、模型加载或指标实现问题。
+- 文件：只读审阅生产报告 `03_run_short-20260801-022859.json` 的回传输出；仅更新 `WORKLOG.md` 本条，未修改代码、未访问生产机。
+- 验证：诊断仍复现 CER 0.1739 和阈值失败；三个模型从隔离目录本地加载；测试后 BGE `status=ok/model_loaded=true`，GPU 回落至约 6688 MiB、无 FunASR 残留进程，令牌已从当前会话清除。
+- 待办/风险：Phase 0 R3-5 仍为未通过，不得进入 1h；先从固定的 FunASR 1.4.0 源码和 SenseVoiceSmall 本地模型文档确认是否实际支持热词，再决定热词实验或 faster-whisper 对照。
+
+### 02:34 — 核对 SenseVoiceSmall 热词能力
+
+- 完成：依据生产隔离环境中 FunASR 1.4.0 源码和固定 SenseVoiceSmall 模型文档进行只读核对；SenseVoice 模型目录、README 与配置均无 `hotword`/`contextual` 消费路径。模型级热词实现存在于 Contextual Paraformer 等其他模型；通用 `AutoModel` 仅另提供解码后的 `postprocess_hotwords` 文本模糊纠错，二者不能混称。
+- 文件：只读核对生产 venv 源码搜索回传；仅更新 `WORKLOG.md` 本条，未修改代码、未访问生产机。
+- 待办/风险：不得对 SenseVoiceSmall 直接传 `hotword` 并声称生效；如考虑通用后处理，需先核对其确定性算法、匹配阈值、误替换保护和审计输出，再单独审批实验。否则按原计划进入其他 FunASR 模型或 faster-whisper 对照。
+
+### 02:37 — 审查 FunASR 热词文本后处理算法
+
+- 完成：只读审查 FunASR 1.4.0 `postprocess_hotwords` 实现和 `AutoModel.generate()` 调用点。确认后处理在 VAD/标点完成后统一执行，默认使用拼音 RapidFuzz 比例阈值 0.85，对目标长度 ±1 的所有字符窗口滑动匹配并按最高分选择不重叠替换；也支持精确 `错误词=>目标词` 映射和替换明细。
+- 文件：只读审阅生产 venv 源码回传；仅更新 `WORKLOG.md` 本条，未修改代码、未访问生产机。
+- 待办/风险：默认模糊模式允许跨标点且无中文词边界，可能误替换普通文本；时间戳保持原识别对齐。建议先做 CPU-only 目标/反例试算，优先评估关闭 fuzzy 的显式映射，并用未见噪声句验证，不能以修复同一评测样本直接宣告门禁通过。
+
+### 03:49 — retry5 生产执行在 P1 前自动停止
+
+- 风险等级：R3；按用户对固定 retry5 identity 的单次生产授权，从 A-1 Gate3 继续执行至自动停止点，未扩大到 A2 下载或后续阶段。
+- 完成：A-2 创建并保留固定 StagingRoot `E:\FunASR-Phase0\faster-whisper-inputs\phase0-fw-r3a-retry5-20260801-231730`，上传 6 个固定输入；源/目标字节长度、三个脚本 UTF-8 BOM、Windows PowerShell 5.1 与固定 PowerShell 7 双 parser、helper 19/19 SelfTest、controller 9/9 SelfTest及合成样本固定 SHA-256 均通过。staging manifest 已记录会话日期 `2026-08-01` 与生产机动态时间 `2026-08-02 +08:00` 的已批准审计差异；未修改生产机时间，生产时区保持 `China Standard Time` / `+08:00`。
+- 验证：ProbeSuccess 返回 `probe-success`、child exit=0、stdout marker 正确；ProbeTimeout 返回 `probe-timeout-controlled`、child exit=124、`timed_out=true`、精确 `taskkill` exit=0。两次 probe 的 controller/child 精确 PID 及受控终止子 PID 最终均不存在，probe 后 RunRoot 仍不存在。
+- 停止：唯一一次 RunA0A1 返回 `stopped-before-p1-complete`、child exit=1、未超时；失败原因为生产 Windows PowerShell 子进程无法识别 `Get-FileHash`。controller/child 精确 PID 均已退出，RunRoot 未创建，五个 P1 核心 artifact 均未生成，因此未到达 P1，未下载 wheel/model、未安装依赖、未运行 faster-whisper，也未执行 BGE 鉴权探针。
+- 文件：生产 staging 及其 `controller`/manifest 失败证据完整保留；本地仅更新 `WORKLOG.md`，未修改 retry3/retry4 artifacts，未修改 retry5 计划/helper/controller。
+- 待办/风险：当前 retry5 identity 已产生 terminal artifacts，禁止重跑同一 mode。若继续，需要新方案/新 identity，将 helper 的文件 SHA 实现改为不依赖生产 Windows PowerShell 的 `Get-FileHash`（例如受控 .NET SHA-256），重新完成本地静态/SelfTest 后再审批；不得进入 A2。
+
+### 04:24 — 调整为多引擎视频自动转录架构
+
+- 风险等级：R2；按用户批准的阶段 A 仅修改本地架构文档，未连接生产机、未继续 faster-whisper retry、未修改业务代码、数据库、部署或既有 retry artifacts。
+- 完成：新增多引擎自动转录总体方案和 ADR 0002，将自动转录从“先选出唯一 ASR 赢家”调整为 Provider + 白名单 Profile 架构；固定 `approved/experimental/unavailable/disabled/deprecated` 等状态、统一 Canonical Transcript JSON、同媒体多历史版本/单正式版本、实验 Profile 强制人工审核、发布后才索引、单卡 BGE 优先和人工 Markdown 永久回退。Phase 1 与候选资格评测解耦，faster-whisper 是否继续评测不再阻塞统一契约开发。
+- 文件：新增 `project-docs/plans/multi-engine-auto-transcription.md`、`project-docs/decisions/0002-multi-engine-transcription.md`；增量更新 `project-docs/plans/funasr-auto-transcription.md`、`project-docs/decisions/README.md`、`TODO.md`、`WORKLOG.md`。
+- 验证：检查新方案/ADR/旧方案/TODO 的相互链接、本次新增 TODO 条目状态和 9 条最近完成摘要；确认文档明确 Phase 1～Phase 6 尚未授权、自动转录尚未实现、实验候选不能自动发布或索引。另发现一个与本次无关的既有查询拆分 TODO 状态值不符合当前允许列表，未越权修改。本次未运行测试、ASR、SSH、GPU、下载、安装或生产操作。
+- 待办/风险：下一步需单独编写并审批 Phase 1 详细实施计划，仅覆盖 Canonical JSON、Provider/Profile Schema、时间戳规范化、确定性 formatter 和 fake fixtures；数据库、ASR 服务、管理端 UI、真实模型接入及生产灰度继续分阶段审批。
+
+### 04:31 — 分类提交当前工作区改动
+
+- 完成：在不改写业务实现的前提下，将当前工作区改动按部署说明、Office 方案、RAG 查询方案、faster-whisper 执行材料、多引擎转录架构、项目协作规则、Roadmap/工作日志七类创建独立本地提交；同时清理非语义空白，并规范 TODO 状态/复选框及 WORKLOG 日期/时间顺序。未推送远端。
+- 文件：`GPU_DEPLOYMENT.md`、`project-docs/plans/office-document-support-plan.md`、`project-docs/plans/layered-query-enhancement.md`、`project-docs/plans/faster-whisper-*`、`project-docs/decisions/0002-multi-engine-transcription.md`、`project-docs/plans/multi-engine-auto-transcription.md`、`project-docs/plans/funasr-auto-transcription.md`、`project-docs/decisions/README.md`、`AGENTS.md`、`CLAUDE.md`、`.claude/rules/todo.md`、`.claude/rules/worklog.md`、`TODO.md`、`WORKLOG.md`。
+- 验证：7 个新增 PowerShell 脚本语法解析通过；常见凭据签名扫描无命中；逐组核对暂存文件和统计；Office 重命名识别为 67% 相似；TODO 状态、方案链接、完成摘要及 WORKLOG 标题/日期/同日时间顺序在最终提交前统一检查。faster-whisper 文档仅保留用于 Markdown 强制换行的尾随双空格。
+
+### 04:41 — 准备 Contextual Paraformer Phase 0 受控 A/B 沙箱
+
+- 完成：为固定 Contextual Paraformer 模型增加仅允许 `off` 与内置 `bim-v1` 的受控热词配置；`bim-v1` 正文、SHA-256 和固定 `clas_scale=1.0` 写入报告与配置身份，并使用独立 checkpoint 命名空间。配置和许可审计仅接受官方模型 ID 与固定 commit，错误模型/热词组合在创建运行目录前失败关闭。
+- 文件：`scripts/funasr_phase0/lib_config.py`、`scripts/funasr_phase0/lib_license_audit.py`、`scripts/funasr_phase0/03_run_short.py`、`scripts/funasr_phase0/README.md`、`tests/test_funasr_phase0_config.py`、`tests/test_funasr_phase0_entries.py`、`tests/test_funasr_phase0_license.py`、`project-docs/plans/funasr-phase0-execution-plan.md`、`WORKLOG.md`。
+- 验证：Phase 0 CPU-only 测试 97/97 通过；未访问生产机、未使用 GPU、未下载模型、未安装依赖、未修改阈值/reference/热词正文或 `clas_scale`。
+- 完成：独立提交 `e2374e37e1357be3d8df93d6d3429bb0947fb9ba` 已推送至 `origin/master`；首次推送遇到 GitHub HTTP 502，一次有限重试成功，本地与远端 SHA 核对一致。
+- 待办/风险：独立提交推送后，仍须在已批准窗口内于 Windows 生产机完成固定 commit 下载、模型权重哈希校验、CUDA 冒烟及冻结 8 样本 A/B；不得据沙箱测试宣告模型质量通过。
+
+### 04:47 — 检查 Windows GPU 生产机远程执行通道
+
+- 完成：按用户指定的 ZeroTier 地址 `10.205.165.105` 进行只读端口检查；SSH 22 和 WinRM 5985/5986 均未开放，RDP 3389 与 SMB 445 可达，因此当前没有可供 Codex 安全执行 PowerShell 的远程管理通道。
+- 文件：`WORKLOG.md`；未修改代码、未连接生产会话、未使用 GPU、未下载模型、未访问 BGE 或服务。
+- 验证：TCP 快速探测结果为 22/5985/5986 关闭，3389/445 开放。
+- 待办/风险：需现场启用 OpenSSH Server 或 WinRM 并提供受控认证方式，或由用户继续在现有 RDP PowerShell 会话执行命令；仅凭 SMB 不尝试远程进程创建或凭据猜测。
+
+### 04:48 — 核对生产机 OpenSSH Server 状态
+
+- 完成：依据用户回传的 Windows Capability 输出，确认 `OpenSSH.Server~~~~0.0.1.0` 状态为 `NotPresent`，即尚未安装，不能作为远程自动测试通道。
+- 文件：`WORKLOG.md`；未修改代码或生产机状态。
+- 待办/风险：安装并启用 OpenSSH Server 属新增 Windows 系统组件，超出此前“禁止依赖安装”边界，需用户单独批准安装、启动服务及入站防火墙规则。
+
+### 04:50 — 准备生产机 Phase 0 专用 SSH 公钥
+
+- 完成：在本机用户 SSH 目录新建独立 ED25519 密钥 `codex_ragpincheng_phase0_ed25519`，指纹为 `SHA256:iU52f9B3d8Fa6j2JBnFqARdoj2a/Nhi1nctX1+Td1DM`；仅公钥用于生产机管理员授权，私钥未输出、未写入仓库。
+- 文件：本机用户 SSH 目录中的专用密钥对、`WORKLOG.md`；未修改生产机状态或项目代码。
+- 待办/风险：需用户在生产机管理员 PowerShell 安装 OpenSSH Server、配置服务/防火墙及管理员公钥 ACL；完成后再由 Codex验证主机指纹并建立连接。
+
+### 04:51 — 删除临时 Phase 0 SSH 密钥
+
+- 完成：按用户明确要求，仅删除本机 `.ssh` 中刚创建的 `codex_ragpincheng_phase0_ed25519` 私钥和对应 `.pub` 公钥；删除后两条精确路径均验证不存在，其他 SSH 文件未改动。
+- 文件：本机用户 SSH 目录、`WORKLOG.md`；删除的密钥无法恢复，但尚未用于生产连接。
+- 待办/风险：后续改用用户 Bitwarden 中既有密钥；只需提供/部署公钥及本机私钥可调用方式，不得在对话中粘贴私钥或 Bitwarden 主密码。
+
+### 05:25 — 建立生产机 SSH 并下载 Contextual Paraformer
+
+- 完成：用户在 Windows GPU 生产机安装微软签名的 Win32-OpenSSH `10.0.0.0p2-Preview`，服务设为自动启动并监听 TCP 22；Codex 通过 Bitwarden SSH Agent 公钥认证成功。现场与独立捕获的 ED25519 主机指纹均为 `SHA256:nRSpKS3UAsE2IecHqyxSryD4Q9Af1piSF4siM+LTS9M`。
+- 完成：在已批准窗口内下载固定模型 `iic/speech_paraformer-large-contextual_asr_nat-zh-cn-16k-common-vocab8404@6c4333d3114b38f1ab6aabecf1702c70a7b0df56`；12 个文件总计 `921283255` 字节，`model.pt` 为 `912662894` 字节，SHA-256=`2d448b72b2b5e5fdf9ba865ff54c8c207f5cf8fced742b0160ef505b026c44a7`，与预注册值一致。
+- 文件：生产机隔离模型目录 `E:\FunASR-Phase0\models\iic\speech_paraformer-large-contextual_asr_nat-zh-cn-16k-common-vocab8404`、生产机 OpenSSH 配置、`WORKLOG.md`；未修改业务服务、阈值/reference/热词/`clas_scale`，未安装 Python 依赖。
+- 验证：生产 HEAD=`e2374e37e1357be3d8df93d6d3429bb0947fb9ba`；RTX 5060 Ti 约 9.4 GiB 空闲，BGE `gpu_service.app` 进程仍在；模型下载和哈希门禁通过。
+- 待办/风险：模型下载后 Bitwarden SSH Agent 后续调用开始等待授权并导致本地 `ssh`/`ssh-add` 超时；需用户在 Helios 解锁 Bitwarden并允许目标密钥使用后，才能继续许可/BGE 门禁、CUDA 冒烟和冻结 8 样本 A/B。OpenSSH 当前为官方签名预览版，后续正式运维应评估切换稳定/系统内置版本。
+
+### 05:50 — 完成 Contextual Paraformer Phase 0 R3 A/B 实测
+
+- 完成：在批准窗口内创建隔离 run `phase0-contextual-20260801-043000`，配置 SHA-256=`731b7236691f1eee520c8d92018eb2222b63586b53a47f384df8be91a7dda2db`；三个固定模型许可证均由本地证据验证为 Apache-2.0，四个既有包审批精确绑定本次配置、证据与 09:30 到期时间，正式许可门禁 blocker=0。
+- 完成：5 分钟 BGE 基线通过，embedding p95=`141 ms`、rerank p95=`180 ms`、错误率均 `0%`；守护式 CUDA/模型冒烟通过。冻结 8 样本 `off` 与固定 `bim-v1` 均 8/8 完成、处理失败为 0，峰值显存分别约 `1.1583/1.1586 GiB`。
+- 结果：`bim-v1` 质量阈值失败从 4 条降至 2 条，但预注册 A/B 门禁仅正向 `2/5`、反例不退化 `2/3`，总体 `overall_pass=false`。`h-noise-bim` 的 CER `0.1379→0.0345`、BIM 召回 `0.4→0.8`；`h-bim-terms` 召回仅 `0.6<0.7`，且 `h-negative-quoted` CER `0→0.05` 发生退化，因此不允许调参后宣告通过。
+- 文件：生产隔离目录 `E:\FunASR-Phase0\contextual-runs\phase0-contextual-20260801-043000`、正式对比报告 `contextual-ab-comparison.json/.md`、`WORKLOG.md`；JSON SHA-256=`5a5074310885dafbb0b6c84a1b85e36acd0d8f0ae64700ba796e5840d6e214ab`。
+- 验证：测试后 BGE `status=ok/model_loaded=true`，FunASR 残留进程=0、active-run JSON=0，GPU 回落至约 `6692 MiB` 已用/`9361 MiB` 空闲、利用率 `0%`；DPAPI 临时令牌文件已删除且验证不存在。
+- 待办/风险：按预注册规则停止，不运行长音频、BGE 共存压测或参数调优；Contextual Paraformer 固定 `bim-v1` 不能作为当前 Phase 1 方案直接集成。后续若继续，应另行提交模型对照或重新设计训练/热词策略并重新审批。
+
+### 05:59 — 整理 FunASR API 切换交接上下文
+
+- 完成：整理可直接交给新 API/新会话的无密钥交接摘要，覆盖仓库提交、Windows GPU 生产机连接、固定模型与报告路径、SenseVoice/文本后处理/Contextual Paraformer 的实测结论、安全清理状态及下一步审批门禁。
+- 文件：`WORKLOG.md`；未修改代码、生产服务、模型或报告。
+- 验证：交接摘要不包含 GPU_SERVICE_TOKEN、SSH 私钥、Bitwarden 主密码或客户数据；当前 DPAPI 临时令牌文件已在上一任务删除。
+
+### 06:42 — 完成 faster-whisper CPU-only 静态预检
+
+- 完成：按已批准的 R2 CPU-only 预检方案新增 faster-whisper Phase 0 静态报告；固定候选 `faster-whisper==1.2.1`、`ctranslate2==4.8.1` 和 `dropbox-dash/faster-whisper-large-v3-turbo@0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf`，核验 Python 3.10/Windows x64 wheel 存在性、现有顶层依赖区间交集、许可证声明以及 CTranslate2 的 CUDA 12.8/Blackwell 发布说明。
+- 结论：静态候选具备进入单独 R3 的前置条件；完整 resolver、wheel/model 本地哈希、`pip check`、RTX 5060 Ti DLL/GPU 推理、中文/BIM 质量、热词 A/B、时间戳、显存与 BGE 共存均仍为 `R3_REQUIRED`，Phase 0 未执行/未通过，Phase 1 未授权。
+- 文件：新增 `project-docs/plans/faster-whisper-phase0-precheck.md`，追加 `WORKLOG.md`；未修改源码、依赖、模型配置、热词、reference、阈值或测试样本。
+- 验证：报告记录 Hugging Face 公开 LFS pointer SHA-256=`e76620f83d5f5769e6a5f66c8013e1292a797de79b3581b44b6c7f9e36d77f31`（本次未下载、未独立重算）；自动检查错误旧哈希与错误依赖下限均不存在，immutable revision、R3 边界和回滚章节存在。
+- 待办/风险：本次未安装依赖、未创建 venv、未下载模型/wheel、未运行 CPU/GPU 推理、未连接生产机、未读取密钥或客户数据；任何后续 artifact 下载、安装、CUDA 冒烟或冻结 8 样本 A/B 均须另批 R3。
+
+### 07:39 — 停止 faster-whisper R3-A A1 预检
+
+- 完成：按已批准的 R3-A A0–A8 方案和固定 SSH 门禁在生产机创建隔离 run `E:\FunASR-Phase0\faster-whisper-runs\phase0-fw-r3a-20260801-072218`，固定执行计划、预检报告与 helper，生成自制合成、非客户、非内部中文冒烟样本 `testdata\r3a-synthetic-zh.wav`；样本 SHA-256=`af9ad1728ab8acc6b06a2ead8d520df88e8368d5301f18cde8be01ae175a12c9`，时长约 11.415 秒。
+- 停止：A1 硬门禁发现生产工作区存在两个未跟踪文件 `data/_transfer_manifest.json`、`data/pincheng_docs-8226867163840074-2026-07-26-18-19-11.snapshot`；批准的 HTTP/HTTPS 代理 `http://10.205.165.230:7897` TCP 可达，但访问 PyPI/Hugging Face 时 Schannel TLS 握手失败（curl exit 35/HTTP 000）。同时确认 helper 的 Windows WDDM GPU 进程判定过严，且代理失败报告路径在 StrictMode 下访问缺失字段导致非零退出。按 §11 自动停止条件停在 `STOPPED_BEFORE_P1_COMPLETE`，未进入 A2。
+- 安全末态：未输入或创建 BGE Token，DPAPI 临时令牌精确路径不存在；未下载 wheel/模型，未创建 venv，未加载 faster-whisper 模型，未执行 CPU/GPU 推理，未修改生产仓库、BGE、FunASR、CUDA、PATH、驱动或全局 Python。停止后 BGE `status=ok/model_loaded=true`，GPU 利用率 0%，faster-whisper/CTranslate2 命名进程=0、active-run 文件=0；失败 artifact 按批准策略完整保留。
+- 证据：`reports\preflight.md` SHA-256=`221349eb3397802dc5faddcdde83af8228283716fb6c83697b1cbcedd17ed744`；`reports\stop-event.md` SHA-256=`fadb0862384f4ee5f05f30e24e7bc98b171d7f7522a97f362200026aade9ac42`；run identity 的 config/approval/helper-manifest SHA-256 分别为 `098af79b92a6d7239a3e6ad5e0516f74c4d632c742181b4b081230bfc5174f7c`、`777db116736c1b54faf05a20e996ed3a63e59909bc5f473c47466dc94bb65958`、`1af987d3d7e25991c26754f2c275661fe7ccee20208561f8d83ac4cedc31b36b`。
+- 待办/风险：不得自动处理生产未跟踪文件，不得在已固定 identity 内静默替换 helper；需先修复/核对代理 TLS 链路并修订 helper 的 WDDM 判定与失败报告逻辑，随后以新 run/new identity 重新提交 R3-A 重试或补充方案审批。
+
+### 08:29 — 修订 faster-whisper R3-A 重试计划
+
+- 完成：经用户精确授权，已通过固定 SSH 门禁删除生产仓库两个无需保留的未跟踪文件 `data/_transfer_manifest.json`（删除前 25,285 bytes）和 `data/pincheng_docs-8226867163840074-2026-07-26-18-19-11.snapshot`（删除前 262,736,896 bytes）；删除后生产 `git status --porcelain=v1` 为空、HEAD=`e2374e37e1357be3d8df93d6d3429bb0947fb9ba`，未执行 reset、pull、commit 或其他生产仓库修改。旧失败 run 继续完整保留。
+- 完成：核对 Clash Verge/Mihomo `mixed-port` 同时支持 HTTP(S)/SOCKS，生产链路已分别验证可用；重试方案固定 HTTP 为唯一自动下载协议，SOCKS 仅作诊断备用，不禁用 TLS/吊销检查，允许来源限定为 PyPI、Python Hosted 和固定 Hugging Face/CDN 主机。
+- 完成：通过 Hugging Face 固定 revision 的 tree API LFS identity、raw Git LFS pointer 和 resolve HEAD `X-Linked-ETag` 三重只读证据，纠正 `model.bin` SHA-256 为 `e76620f83d5f5b69efd3d87e3dc180c1bd21df9fbebacfd4335e5e1efcc018da`、大小 1,617,884,929 bytes；旧错误值只保留为历史记录，A4 仍要求下载后独立计算本地全文件 hash/大小。
+- 完成：新增并固定 A0/A1 retry helper SHA-256=`6dd890402cc5d069c235b5028e2099957b3686805da29bc4a6cdbc0ba350d8fe`、BGE 鉴权 helper SHA-256=`758eabc198e94c339a59bce29fa7258410a04d2f2e5ff295528e2d2d4304ef98`；新增 new run/new identity 补充计划 SHA-256=`e6fae6a0b6911de3fe32f8f790c25274f931691ea3e803af74e3f2f3ebf8e44a`，保留 A0–A8 语义、P1/P2/P3/P4 强制暂停、失败 artifact 完整保留和精确 child PID/DPAPI 清理边界。
+- 文件：`project-docs/plans/faster-whisper-r3a-retry-a0-a1.ps1`、`project-docs/plans/faster-whisper-r3a-retry-bge-auth-probe.ps1`、`project-docs/plans/faster-whisper-r3a-retry-execution-plan.md`、`WORKLOG.md`。
+- 验证：两个 helper 的 Windows PowerShell 5.1 SelfTest 均通过，A0/A1 共 8 项测试 failures=0；本补充计划、原计划、静态报告和两个 helper 的 SHA-256 已复核。日期口径固定为 Asia/Shanghai；UTC 2026-07-31 与上海 2026-08-01 为同一时刻的时区日期差。
+- 待办/风险：尚未在生产机执行新 helper，未创建 retry run，未进入 A0/A1，更未进入 A2 或下载/安装 wheel/model；必须等待用户按补充计划最终 SHA-256 重新明确批准。若批准时已超过 `2026-08-01T17:06:00+08:00`，须先重批维护窗口。
+
+### 10:22 — 定位 R3-A retry JSON 失控并编写 retry2 计划
+
+- 完成：字段级二分确认第二次 retry 的 A1 卡死根因是 Windows PowerShell 5.1 `ConvertTo-Json -Depth 16` 递归展开 `Get-Content -Raw` 字符串携带的 ETS 文件属性；真实 `hf-model-tree` 正文仅 6,739 bytes，问题不在模型 metadata、代理或网络。候选 helper 改为严格 UTF-8 纯字符串读取和有限 proxy evidence DTO，不再嵌入正文或重复 `final`。
+- 完成：新增 retry2 修订计划，记录两个 retry 失败 run、第二个 run 的 stop-event 尚未确认、SSH 30 秒返回门禁、A-1“先只读核验、仅明确缺失时精确补写”、第三个 retry run/new identity、baseline JSON 30 秒 supervisor watchdog，以及仍在 P1 强制停止的边界。计划 SHA-256=`fd4f89d76f985539262d0524d723da46527f8300687eb7cdedf740074a93fdf0`；A0/A1 helper SHA-256=`11635a071fc56d8a5a8a4b2fe9a89c3516b7702b02dffa90fb140d8cd7f03be5`；BGE helper SHA-256=`758eabc198e94c339a59bce29fa7258410a04d2f2e5ff295528e2d2d4304ef98`。
+- 文件：`project-docs/plans/faster-whisper-r3a-retry-a0-a1.ps1`、`project-docs/plans/faster-whisper-r3a-retry2-execution-plan.md`、`WORKLOG.md`。
+- 验证：候选 helper 保持 UTF-8 BOM，Windows PowerShell 5.1 parser errors=0；SelfTest 16/16 通过、exit=0。真实 body 离线 DTO 全链路为 7 项，depth-16 JSON 约 38 ms、峰值私有内存约 70 MB、JSON reparse=7、exit=0；计划 Markdown code fence 成对。
+- 待办/风险：旧 retry 审批因计划/helper hash 变化已失效；尚未上传或执行候选 helper，未创建第三个 retry run，未连接生产继续 A0/A1，未进入 A2，未下载 wheel/model，未创建 DPAPI 文件。第二个失败 run 的 stop-event 必须待新计划批准后先只读核验；不得盲写、覆盖或删除历史 artifact。
+
+### 10:33 — 在 retry2 A-1 PowerShell 门禁自动停止
+
+- 完成：按已批准 retry2 计划启动 A-1 有界恢复核验。固定 SSH host key、`Administrator@10.205.165.105`、`curve25519-sha256` 和 30 秒上限下，原生命令成功返回 `FJPCSEVER`、`fjpcsever\administrator`，exit=0。
+- 停止：第二个显式 `exit 0` 的 `-EncodedCommand` PowerShell 在约 1.2 秒内返回 exit=1。根因是调用端以双引号构造脚本，提前把 `$env:COMPUTERNAME` 展开成调用端值 `ASUS`，远端收到无引号表达式并产生 ParserError；这是调用端编码/引用错误，不是生产 PowerShell 会话超时。
+- 安全边界：依计划“A-1 任一超时或非零即停止，不进行远程写入”立即停止。未只读核验或补写第二失败 run 的 stop-event，未创建第三个 retry run，未上传/执行候选 helper，未进入 A0/A1/A2，未下载 wheel/model，未创建 DPAPI 文件。已执行的两个远程命令均未包含文件或服务写入动作。
+- 文件：仅更新 `WORKLOG.md`；计划和 helper 未改变，retry2 计划 SHA-256 仍为 `fd4f89d76f985539262d0524d723da46527f8300687eb7cdedf740074a93fdf0`。
+- 待办/风险：如要继续，需用户明确批准仅重试 A-1 的 PowerShell 返回门禁；修正方式是以调用端字面量脚本生成 UTF-16LE Base64，防止 `$env:*` 和 `$PID` 在本地提前展开。重试成功后才可继续 stop-event 的“先查后补”。
+
+### 11:12 — 在 retry2 A1 执行通道边界自动停止
+
+- 完成：按已批准 retry2 计划及追加门禁修正执行。A-1 改由调用端字面量脚本生成 UTF-16LE Base64 后，远端 PowerShell 返回门禁成功（`FJPCSEVER`、`Administrator`、exit=0）；第二次 retry 的精确 `reports\stop-event.md` 已存在，SHA-256=`07c789d7c184c0dbe63d53296ac07f13cd46ec2b48626b8152e9523f9ead4502`、状态=`STOPPED_BEFORE_P1_COMPLETE`，因此只读保留，未覆盖或补写。
+- 完成：A0 生产 HEAD=`e2374e37e1357be3d8df93d6d3429bb0947fb9ba`、branch=`master`、worktree=0 和固定合成样本 SHA-256=`af9ad1728ab8acc6b06a2ead8d520df88e8368d5301f18cde8be01ae175a12c9` 均通过；创建 new identity `phase0-fw-r3a-retry-20260801-104725`，远端复核批准计划、原计划、静态预检及两个 helper 的固定 hash，A0/A1 helper 保持 UTF-8 BOM、parser errors=0、SelfTest 16/16 通过。
+- 停止：A1 精确 PID/watchdog supervisor PID `23548` 启动后，在发布 `a1-supervisor-status.json` 前退出；固定 helper 未完成，stdout/stderr 均为空且不再被持有，`evidence\a1-baseline.json` 未生成。证据不足以把底层原因确定为 OpenSSH 缺陷，只能确认后台进程未能跨 SSH launcher 生命周期可靠完成；依自动停止条件在 P1 前停止，未进入 A2。
+- 文件：新 RunRoot `E:\FunASR-Phase0\faster-whisper-runs\phase0-fw-r3a-retry-20260801-104725`，staging `E:\FunASR-Phase0\faster-whisper-inputs\phase0-fw-r3a-retry-20260801-104725`；原子生成 `reports\stop-event.md`（SHA-256=`4258ca4ea9f85fc2fd298ea90404ee87e61c0fe257ee492c0c413c755427efb1`）和 `evidence\a1-supervisor-recovery.json`（SHA-256=`e7c103913442b091bc9f36e6858960222e7dcbfb8c2ae000636fce718751f274`），状态=`STOPPED_BEFORE_P1_COMPLETE`。失败 run 和 staging artifact 完整保留；已批准计划文件保持字节不变，SHA-256 仍为 `fd4f89d76f985539262d0524d723da46527f8300687eb7cdedf740074a93fdf0`。
+- 验证：`2026-08-01T11:06:23+08:00` 最终核验确认生产 HEAD/worktree 未漂移，BGE `status=ok/model_loaded=true`，GPU 利用率 0%，本次 curl/faster-whisper/ctranslate2/supervisor 精确进程均为 0；本次 venv、wheels、HF cache、model、A1 baseline 和 DPAPI/token 文件均为 0。
+- 待办/风险：本次未到达 P1，未下载或安装 wheel/model，未加载模型、未推理、未输入 BGE Token、未创建 DPAPI 临时文件。不得重启 supervisor、续写或复用本 RunRoot；如继续必须针对 SSH 后台生命周期边界编写新的 retry 计划，使用新的 run/new identity 和新 SHA-256 重新审批。
+
+### 11:49 — 设计 retry3 前台 SSH 生命周期控制通道
+
+- 完成：针对 retry2 A1 后台 supervisor 未可靠跨越 SSH launcher 生命周期的问题，新增 foreground controller；固定 SSH/远端 controller/精确 child 全程前台持有、lease-before-release、5 秒 heartbeat、20 分钟 watchdog、精确 PID process-tree 超时终止及 SSH 中断后的 lease/status 恢复边界，禁止 detached/background supervisor 和模糊杀进程。
+- 完成：新增 retry3 R3 修订执行计划，预留第四个 retry（全局第 5 个 R3-A run）identity `phase0-fw-r3a-retry-20260801-113717`，固定 RunRoot `E:\FunASR-Phase0\faster-whisper-runs\phase0-fw-r3a-retry-20260801-113717` 与 StagingRoot `E:\FunASR-Phase0\faster-whisper-inputs\phase0-fw-r3a-retry-20260801-113717`；计划 SHA-256=`d79dc887e7e8862bbd47db79f5beaef33aed80d1e5eff84fd1039b53280035e1`，controller SHA-256=`aeee89d8cc7f7c1edfd8b7f632d574a1bc5c82c0745c9effa8a9a25fdaef8515`。
+- 文件：新增 `project-docs/plans/faster-whisper-r3a-retry3-foreground-controller.ps1`、`project-docs/plans/faster-whisper-r3a-retry3-execution-plan.md`；更新 `WORKLOG.md`。未整理或覆盖仓库内其他用户/Claude Code 的未提交修改。
+- 验证：controller 保持 UTF-8 BOM，Windows PowerShell 5.1 parser errors=0、SelfTest 9/9 通过；本机 GUID 临时目录下完整 `ProbeSuccess`、`ProbeTimeout` 和无生产副作用 stub `RunA0A1` 均 exit=0，超时精确 process tree 终止、`p1-ready` 必需 artifact 和 RunRoot 终态复制均通过，临时目录已清理；计划 code fence、固定 identity、样本绝对路径及全部输入 hash 一致。
+- 待办/风险：当前只完成本地设计、计划、helper 和 identity 预留；未连接生产，未实际创建远端 RunRoot/StagingRoot，未启动远端进程，未下载/安装 wheel/model，未输入 BGE Token 或创建 DPAPI 文件。必须等待用户按 retry3 计划最终 SHA-256 重新明确批准；获批后仍须按 `ProbeSuccess -> ProbeTimeout -> RunA0A1 -> P1` 执行并在 P1 强制暂停。
+
+### 12:37 — retry3 A-1 返回门禁因远端命令行过长自动停止
+
+- 风险等级：R3；严格执行已批准 retry3 计划的自动停止条件。
+- 完成：固定 known-hosts 中 ED25519 指纹为 `SHA256:nRSpKS3UAsE2IecHqyxSryD4Q9Af1piSF4siM+LTS9M`，原生 SSH 返回 `FJPCSEVER`，均通过。
+- 停止：调用端字面量脚本生成 UTF-16LE Base64 后，远端 `powershell.exe -EncodedCommand` 返回 exit=1，错误为“命令行太长”。未得到 A-1 JSON 结果，因此不得把身份、HEAD/worktree、BGE、GPU、磁盘、路径或进程门禁视为通过。
+- 安全末态：未创建 `E:\FunASR-Phase0\faster-whisper-inputs\phase0-fw-r3a-retry-20260801-113717`，未创建 RunRoot，未上传文件，未启动 controller/helper/probe，未下载或安装任何内容，未修改生产仓库、服务或配置。
+- 后续：如需继续，必须先批准仅重试 A-1，将只读门禁拆分为多个短小的调用端字面量 UTF-16LE `-EncodedCommand`；每个调用保持固定 host key/KEX/known-hosts，任一失败仍自动停止。
+
+### 17:46 — retry3 A-1 重试因维护窗口过期自动停止
+
+- 风险等级：R3；执行前本地维护窗口门禁触发，未进入 SSH 调用。
+- 停止时间：`2026-08-01T17:46:47+08:00`；批准窗口结束时间为 `2026-08-01T17:06:00+08:00`。
+- 安全末态：本次重试没有连接生产，没有执行任何远端 `-EncodedCommand`，没有创建 staging/RunRoot，没有上传、下载、启动或终止进程，也没有修改生产状态。
+- 后续：必须由用户明确批准新的 Asia/Shanghai 维护窗口；不得自动顺延历史窗口。
+
+### 20:24 — 编写 faster-whisper R3-A retry4 本地执行材料
+
+- 完成：编写 retry4 A0/A1 helper、foreground controller 和详细执行计划，预留 new identity phase0-fw-r3a-retry4-20260801-191451；普通系统、磁盘和网络查询改为 .NET、Get-Process、
+etstat、TcpClient，WMI/CIM 仅保留 exact-PID 定向查询并施加 5 秒 watchdog，
+vidia-smi 使用 15 秒 watchdog。
+- 文件：新增 project-docs/plans/faster-whisper-r3a-retry4-a0-a1.ps1、project-docs/plans/faster-whisper-r3a-retry4-foreground-controller.ps1、project-docs/plans/faster-whisper-r3a-retry4-execution-plan.md；最小追加 WORKLOG.md。未修改 TODO.md，未修改或删除 retry3 文件及 artifacts。
+- 验证：Windows PowerShell 5.1 与 PowerShell 7 parser 均通过；helper 模拟 SelfTest 19/19、controller 模拟 SelfTest 9/9 通过，29 项静态安全门禁通过；计划 SHA-256=f1483e754e4c104e84c6852abe05b73dae560c3cefaca676c5000a0edf88433，helper SHA-256=5d947f8a03a5ee9f25008d67461581e1df5c379638fb30ac210d62df7faa44e，controller SHA-256=2aef736d938589dc0cbef67c142720e9fe07e365f0019e3b462b5a5db47f6073。
+- 待办/风险：本次仅完成本地材料、静态检查和模拟 SelfTest；未连接生产机，未执行 retry4，未运行真实 WMI/CIM、
+vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用户明确批准上述最终计划 SHA-256，并提供新的 Asia/Shanghai +08:00 维护窗口。
+
+### 21:50 — retry4 A-2 因缺少 PowerShell 7 自动停止
+
+- 风险等级：R3；按已批准的 retry4 计划执行生产 A-1/A-2，并在首个硬 blocker 处自动停止。
+- 完成：A-1 固定 SSH/host key、主机用户与窗口、生产仓库 HEAD/branch/worktree、OS/注册表、DriveInfo、Get-Process、active-run、netstat/TcpClient、BGE health、代理 TCP、Python 3.10 x64、样本哈希及两项受 watchdog 的 `nvidia-smi` 门禁均通过；active-run=0、faster-whisper/ctranslate2 进程=0，因此未调用 WMI/CIM。
+- A-2：创建并保留固定 StagingRoot `E:\FunASR-Phase0\faster-whisper-inputs\phase0-fw-r3a-retry4-20260801-191451`，上传 6 个固定输入；远端 SHA-256 全部匹配，Windows PowerShell 5.1 对 3 个脚本 parser errors=0。
+- 停止：PowerShell 7 parser 门禁无法执行，生产执行环境找不到 `pwsh.exe`（exit=1）；未运行 helper/controller SelfTest、未写 staging manifest、未执行 ProbeSuccess/ProbeTimeout/RunA0A1，未到达 P1。
+- Artifact：原子写入 `E:\FunASR-Phase0\faster-whisper-inputs\phase0-fw-r3a-retry4-20260801-191451\a2-stop-event.json`，SHA-256=`3fb8599732bb288c8cb8add4bc48e8476cdd9ae5e65abb90efd272ef3a083f63`；RunRoot 未创建，staging 与失败证据完整保留，未修改/删除 retry3 artifacts。
+- 待办/风险：若要继续，需先确认生产机 PowerShell 7 的实际安装路径/可用性，或修订 A-2 parser 门禁方案并重新审批；不得复用当前 staging 直接重跑，因为 stop-event 已存在且 identity 已产生失败 artifact。
+
+### 23:59 — 编写 faster-whisper R3-A retry5 本地执行材料
+
+- 风险等级：R3；本次严格限定为本地计划、helper、foreground controller、静态检查和模拟 SelfTest，未进入生产执行阶段。
+- 完成：新增 retry5 详细执行计划、A0/A1 helper 和 foreground controller，预留 new identity `phase0-fw-r3a-retry5-20260801-231730`；所有生产 PowerShell 7 调用固定为 `C:\Program Files\PowerShell\7\pwsh.exe`，禁止依赖 PATH；普通系统/磁盘/端口查询继续使用 .NET、注册表、DriveInfo、Get-Process、netstat、TcpClient，WMI 仅保留最多 8 个 active-run 精确 PID 的 5 秒定向查询，`nvidia-smi` 保留 15 秒 watchdog。用户后续批准取消 retry5 计划/helper/controller/BGE helper 的人工 SHA 生成、填写、核对和审批流程，旧 retry5 计划 SHA 明确作废且不生成替代值；模型和合成冒烟样本的自动 SHA-256/size 身份校验保持不变。
+- 文件：新增并修订 `project-docs/plans/faster-whisper-r3a-retry5-execution-plan.md`、`project-docs/plans/faster-whisper-r3a-retry5-a0-a1.ps1`、`project-docs/plans/faster-whisper-r3a-retry5-foreground-controller.ps1`；复用且未修改 `project-docs/plans/faster-whisper-r3a-retry-bge-auth-probe.ps1`；更新本小节；未修改或删除 retry3/retry4 文件及 artifacts。
+- 验证：Windows PowerShell 5.1 parser 两个文件 errors=0；本机 PowerShell 7.6.4 Core parser 两个文件 errors=0；helper 模拟 SelfTest 19/19、`failures=[]`、未调用真实 WMI/nvidia；controller 模拟 SelfTest 9/9、`failures=[]`；29 项静态安全检查全部通过；helper/controller 均为 UTF-8 BOM。静态检查确认人工 SHA 参数和 controller SHA 状态已移除，代码/文档采用存在性与源/目标字节长度门禁，模型与样本固定 SHA 自动身份校验仍存在。本次未计算或生成新的计划/helper/controller SHA-256。
+- 后续修订：按用户要求取消 retry5 预设维护窗口及 `WindowStart/WindowEnd` 参数，改为固定 identity 的单次授权；首个生产 SSH 调用即视为授权已使用，中断、停止、暂停点后的继续/重试必须重新取得精确批准。生产机仍强制使用 `China Standard Time` / `+08:00`，并动态记录本地与 UTC 时间；所有步骤级 watchdog、阶段超时、自动停止和 P1/P2/P3/P4 暂停点不变。
+- 边界/风险：未连接生产机、未执行 retry5、未创建远端 RunRoot/StagingRoot、未上传/下载/安装、未运行真实 WMI/CIM、`nvidia-smi` 或 faster-whisper。人工代码/计划 SHA 与预设维护窗口均已取消，但生产执行仍须按修订后的固定 identity、执行范围和暂停点取得明确批准；本地修改前基线备份位于 `C:\Users\ASUS\AppData\Local\Temp\ragpincheng-retry5-sha-gated-baseline-20260801-231730`。
