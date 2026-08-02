@@ -30,6 +30,7 @@ def test_all_three_fake_providers_use_same_pipeline_contract(provider_type):
     ("invalid_member",ProviderErrorCode.provider_contract_violation),
     ("invalid_failure",ProviderErrorCode.provider_contract_violation),
     ("invalid_candidate",ProviderErrorCode.invalid_provider_output),
+    ("invalid_candidate_artifact",ProviderErrorCode.invalid_provider_output),
     ("mutate_input",ProviderErrorCode.execution_config_mutated),
     ("mutate_execution",ProviderErrorCode.execution_config_mutated),
 ])
@@ -47,6 +48,20 @@ def test_failure_never_calls_normalizer(monkeypatch):
     i,p,e,s=make_execution_bundle()
     result=pipeline.execute_transcription(FAKE_PROVIDER_TYPES[0]("permanent_failure"),i,e,profile_snapshot=s)
     assert isinstance(result,ProviderFailure) and not called
+
+
+def test_corrupted_candidate_never_calls_normalizer(monkeypatch):
+    called=False
+    def forbidden(*args,**kwargs):
+        nonlocal called; called=True; raise AssertionError
+    monkeypatch.setattr(pipeline,"normalize_candidate",forbidden)
+    i,p,e,s=make_execution_bundle()
+    result=pipeline.execute_transcription(
+        FAKE_PROVIDER_TYPES[0]("invalid_candidate_artifact"),i,e,profile_snapshot=s,
+    )
+    assert isinstance(result,ProviderFailure)
+    assert result.error_code is ProviderErrorCode.invalid_provider_output
+    assert not called
 
 
 def test_candidate_has_no_warning_or_identity_escape_fields():

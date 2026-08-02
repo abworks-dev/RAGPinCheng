@@ -76,6 +76,16 @@ def _validate_returned_failure(
         return False
 
 
+def _validate_returned_candidate(result: ProviderCandidate) -> ProviderCandidate | None:
+    try:
+        # Provider-owned frozen objects can still be corrupted through low-level
+        # mutation.  Rebuild the complete nested Candidate through its strict
+        # JSON boundary and pass only that detached value to the normalizer.
+        return ProviderCandidate.from_json_dict(result.to_json_dict())
+    except Exception:
+        return None
+
+
 def _candidate_matches_execution(
     result: ProviderCandidate,
     input_ref: TranscriptionInputRef,
@@ -163,11 +173,14 @@ def execute_transcription(
         return _failure(provider_key, ProviderErrorCode.provider_contract_violation)
     if type(result) is not ProviderCandidate:
         return _failure(provider_key, ProviderErrorCode.provider_contract_violation)
-    if not _candidate_matches_execution(result, input_ref, execution_config):
+    strict_candidate = _validate_returned_candidate(result)
+    if strict_candidate is None:
+        return _failure(provider_key, ProviderErrorCode.invalid_provider_output)
+    if not _candidate_matches_execution(strict_candidate, input_ref, execution_config):
         return _failure(provider_key, ProviderErrorCode.invalid_provider_output)
 
     try:
-        return normalize_candidate(input_ref, result, profile_snapshot, execution_config)
+        return normalize_candidate(input_ref, strict_candidate, profile_snapshot, execution_config)
     except ContractValidationError:
         return _failure(provider_key, ProviderErrorCode.invalid_provider_output)
     except Exception:
