@@ -27,6 +27,8 @@ from src.transcription.provider_protocol import (
     TransientProviderError,
 )
 from src.transcription.types import (
+    ArtifactKind,
+    ArtifactReference,
     NormalizerConfig,
     ProfileAdmission,
     ProfileQualification,
@@ -172,6 +174,17 @@ class _FakeProviderBase:
         if self.behavior == "invalid_candidate":
             candidate = make_candidate(self.key, duration_ms=input_ref.duration_ms)
             object.__setattr__(candidate, "duration_ms", input_ref.duration_ms + 1)
+            return candidate
+        if self.behavior == "invalid_candidate_artifact":
+            candidate = make_candidate(self.key, duration_ms=input_ref.duration_ms)
+            artifact = ArtifactReference(
+                "provider-diagnostic",
+                ArtifactKind.provider_diagnostic,
+                "d" * 64,
+                1,
+            )
+            object.__setattr__(artifact, "kind", "private_debug")
+            object.__setattr__(candidate, "artifact_refs", (artifact,))
             return candidate
         if self.behavior == "mutate_input":
             original = input_ref.duration_ms
