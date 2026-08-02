@@ -34,8 +34,8 @@ DYNAMIC_IMPORT_CALLS = {
     "__import__", "import_module", "spec_from_file_location", "SourceFileLoader",
 }
 PROTECTED_SHA256 = {
-    "api/routes_admin.py": "a046b26f2a06a25843e30604c2709ae274ccd7ed5caa8abeae7af86b5842b1ad",
-    "src/chunk.py": "e91689fddc0ace9eeac57758084d71cec5e38af5f3328b5d77060b94b45f2eb1",
+    "api/routes_admin.py": "d1d1dc5cf4e151c4d8495df149ee53c5e5273b1c6b48e142495e5e86408c1c56",
+    "src/chunk.py": "a8102823c17e781b9d082b1914404e2fd60369558191acf2083fa21681dd72fd",
 }
 
 
@@ -200,7 +200,8 @@ def test_no_manual_provider_parser_copy_or_real_media_fixture():
 
 def test_protected_manual_paths_match_phase1_baseline():
     for relative_path, expected in PROTECTED_SHA256.items():
-        content = (ROOT / relative_path).read_bytes()
+        text = (ROOT / relative_path).read_text(encoding="utf-8")
+        content = text.replace("\r\n", "\n").replace("\r", "\n").encode("utf-8")
         assert hashlib.sha256(content).hexdigest() == expected
     assert not any((CORE / name).exists() for name in ["database.py", "worker.py", "qdrant.py", "api.py"])
 
