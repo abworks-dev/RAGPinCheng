@@ -155,15 +155,15 @@
 
 ### 多引擎视频自动转录
 
-- 状态：待审批
+- 状态：进行中
 - 目标：建立引擎无关的转录、审核、版本发布和索引流水线，让管理员从受控 Profile 中选择 FunASR、faster-whisper 或人工稿路径。
 - 下一步：
-  - [ ] 编写并审批 Phase 1 详细实施计划，仅实现 Canonical Transcript JSON、Provider/Profile Schema、时间戳规范化和确定性 Markdown formatter，并使用固定夹具与 fake providers 验证。
-  - [ ] Phase 1 验证后，分别提交 Phase 2～Phase 6 的任务/版本、ASR 服务、管理端 UI、隔离端到端和生产灰度方案。
+  - [ ] 在具备仓库既有 admin 依赖的远端 CI 中复跑 Phase 1+2 transcription suite，要求零失败、零跳过。
+  - [ ] Phase 2 验证完成后，单独编写并审批 Phase 3 ASR 服务与真实 Provider 接入方案。
   - [ ] 独立决定是否继续 faster-whisper 资格评测；候选评测不再阻塞 Phase 1，也不因已有实现自动开放为正式选项。
 - 完成标准：人工转录流程不退化；管理员只能选择服务端白名单 Profile；同一媒体可保留多个历史版本但只有一个正式发布版本；实验 Profile 强制审核且无法绕过发布门禁进入索引；至少一个 `approved` Profile 完成隔离端到端验证后才讨论生产灰度。
-- 依赖：已批准的多引擎 ADR；各 Phase 独立 R2 审批；候选模型生产资格和真实数据操作另按 R3 审批；单卡 GPU 保持 BGE 优先。
-- 方案链接：`project-docs/plans/multi-engine-auto-transcription.md`、`project-docs/decisions/0002-multi-engine-transcription.md`、`project-docs/plans/funasr-auto-transcription.md`
+- 依赖：Phase 1 已合并并由 CI 验证；Phase 2 持久化/发布内核已完成本地验证、待远端 CI；各后续 Phase 独立 R2 审批；候选模型生产资格和真实数据操作另按 R3 审批；单卡 GPU 保持 BGE 优先。
+- 方案链接：`project-docs/plans/multi-engine-auto-transcription.md`、`project-docs/plans/multi-engine-transcription-phase1.md`、`project-docs/plans/multi-engine-transcription-phase2.md`、`project-docs/decisions/0002-multi-engine-transcription.md`、`project-docs/plans/funasr-auto-transcription.md`
 
 ---
 
