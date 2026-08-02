@@ -412,6 +412,8 @@ processed_ms / total_ms
 
 ### Phase 1 — 音频提取、Canonical JSON 与确定性 formatter
 
+> 历史范围说明：本节是 FunASR 单引擎方案时期的旧 Phase 1 划分。当前多引擎 Phase 1 以 [多引擎视频自动转录 Phase 1 详细计划](multi-engine-transcription-phase1.md) 为准；音频提取已移出当前 Phase 1，真实 FunASR/faster-whisper 依赖、模型执行、网络、数据库和人工 Markdown 路径改造均不在当前 Phase 1 范围内。
+
 - 范围：音频提取适配器、JSON Schema、时间戳规范化、短 segment 合并、超长 segment 拆分、JSON→Markdown formatter；
 - 使用固定测试夹具，不连接生产服务和数据库；
 - 验证：Schema、取整、跨块 offset、空音轨、空 segment、UTF-8、过短/超长 segment、重复执行一致性；
