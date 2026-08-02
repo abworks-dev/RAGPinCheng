@@ -1595,3 +1595,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 验证：针对性测试 6/6 通过；前端全量 Vitest 8 个文件、35 项测试通过；TypeScript project build 与 Vite production build 通过（406 modules transformed）；`git diff --check` 通过。保留既有 React Router future warning、CSS minify warning 和主包大于 500 kB 警告。
 - 边界：保留 `adminListAllConversations(200)`、`adminGetConversation(id)`、三字段筛选及只读消息展示契约；未修改 API、认证、CSRF、数据库、用户操作、资料上传、索引、媒体、问答、SSE、引用或预览链路。经用户明确批准，本提交在本地门禁通过后直接推送 `master`，CI 成功后由现有工作流自动部署生产环境。
 - 后续视觉收口：根据生产截图移除三处重复数量中的两处，压缩筛选区，降低列表选中态饱和度并增加左侧强调线；修复深色模式下助手 Badge 与背景融为一体的问题，并限制用户/助手消息宽度与正文行长。针对性测试 6/6、全量前端测试 35/35、TypeScript 与 Vite production build 再次通过；该补充修复尚未推送生产，原始引用 ID 的解析与公共布局确认继续保持在本次范围外。
+
+### 07:03 — 统一管理端用户管理页面
+
+- 完成：将管理端用户管理页迁移到现有语义 Token 与基础组件，统一页面标题、筛选区、用户表格、角色与启停状态 Badge、操作按钮、加载/空数据/错误反馈，以及用户对话只读详情层；小屏保留横向表格滚动并将对话详情改为纵向布局。
+- 文件：`frontend/src/pages/admin/AdminUsersPage.tsx`、新增 `frontend/src/pages/admin/AdminUsersPage.test.tsx`、`WORKLOG.md`。
+- 验证：针对性测试 8/8 通过；前端全量 Vitest 9 个文件、43 项测试通过；TypeScript project build 与 Vite production build 通过（406 modules transformed）；`git diff --check` 通过。保留既有 React Router future warning、CSS minify warning 和主包大于 500 kB 警告。
+- 边界：保留 `adminListUsers()`、`adminPatchUser()`、`adminListUserConversations()`、`adminGetConversation()` 的调用、刷新时机和参数契约；保留启停、角色切换、密码重置及原生 `confirm`/`prompt`/`alert` 行为。未修改 API、认证、CSRF、后端、依赖、全局样式、问答、SSE、引用、预览、上传、索引或其他管理页面；本提交仅在独立分支本地完成，尚未推送或部署。
