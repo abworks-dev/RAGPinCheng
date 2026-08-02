@@ -1578,3 +1578,12 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 验证：Windows PowerShell 5.1 parser 两个文件 errors=0；本机 PowerShell 7.6.4 Core parser 两个文件 errors=0；helper 模拟 SelfTest 19/19、`failures=[]`、未调用真实 WMI/nvidia；controller 模拟 SelfTest 9/9、`failures=[]`；29 项静态安全检查全部通过；helper/controller 均为 UTF-8 BOM。静态检查确认人工 SHA 参数和 controller SHA 状态已移除，代码/文档采用存在性与源/目标字节长度门禁，模型与样本固定 SHA 自动身份校验仍存在。本次未计算或生成新的计划/helper/controller SHA-256。
 - 后续修订：按用户要求取消 retry5 预设维护窗口及 `WindowStart/WindowEnd` 参数，改为固定 identity 的单次授权；首个生产 SSH 调用即视为授权已使用，中断、停止、暂停点后的继续/重试必须重新取得精确批准。生产机仍强制使用 `China Standard Time` / `+08:00`，并动态记录本地与 UTC 时间；所有步骤级 watchdog、阶段超时、自动停止和 P1/P2/P3/P4 暂停点不变。
 - 边界/风险：未连接生产机、未执行 retry5、未创建远端 RunRoot/StagingRoot、未上传/下载/安装、未运行真实 WMI/CIM、`nvidia-smi` 或 faster-whisper。人工代码/计划 SHA 与预设维护窗口均已取消，但生产执行仍须按修订后的固定 identity、执行范围和暂停点取得明确批准；本地修改前基线备份位于 `C:\Users\ASUS\AppData\Local\Temp\ragpincheng-retry5-sha-gated-baseline-20260801-231730`。
+
+## 2026-08-03
+
+### 05:29 — 修复 Phase 1 Candidate 边界并更新 PR
+
+- 完成：Provider Candidate 在进入 normalizer 前必须经严格 JSON Schema 重建，低层篡改的嵌套 artifact 统一归一化为永久 `invalid_provider_output`；PR #1 已 rebase 到最新 `master`，唯一总体计划文档冲突按获批 Phase 1 契约解决，状态恢复为 `MERGEABLE/CLEAN`。
+- 文件：`src/transcription/pipeline.py`、`tests/transcription_fixture_helpers.py`、`tests/test_transcription_provider_contract.py`、`.gitattributes`、`project-docs/plans/multi-engine-auto-transcription.md`、`WORKLOG.md`。
+- 验证：scoped 契约/静态测试 54 passed；Windows 本地完整 Phase 1 测试 123 passed、1 skipped（本地缺少既有 admin 导入依赖）；GitHub Actions 最新基线 transcription job 124 passed、0 skipped，五项 CI 全部通过；`compileall`、`git diff --check`、受保护路径和依赖范围检查通过。
+- 边界：未修改数据库、API、UI、worker、Qdrant、真实引擎或运行时依赖；未修改 `api/routes_admin.py`、`src/chunk.py`、`TODO.md`，也未触碰主工作区并行修改。
