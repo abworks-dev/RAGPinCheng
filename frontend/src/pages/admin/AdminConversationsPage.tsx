@@ -1,12 +1,29 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../../api/client";
+import { Badge } from "../../components/ui/badge";
+import { Button } from "../../components/ui/button";
+import { Card, CardContent } from "../../components/ui/card";
+import { EmptyState } from "../../components/ui/empty-state";
+import { ErrorState } from "../../components/ui/error-state";
+import { Input } from "../../components/ui/input";
+import { LoadingState } from "../../components/ui/loading-state";
+import { cn } from "../../lib/utils";
 import type { AdminConversation, ConversationState } from "../../types";
 import { formatAdminDate } from "./admin-formatters";
+
+const roleLabels: Record<ConversationState["messages"][number]["role"], string> = {
+  user: "用户",
+  assistant: "助手",
+  system: "系统",
+};
+
 export function AdminConversationsPage() {
   const [list, setList] = useState<AdminConversation[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<ConversationState | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [detailError, setDetailError] = useState<string | null>(null);
+  const [loadingConversationId, setLoadingConversationId] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
 
   useEffect(() => {
@@ -36,80 +53,184 @@ export function AdminConversationsPage() {
     );
   }, [list, filter]);
 
+  async function selectConversation(conversation: AdminConversation) {
+    setDetailError(null);
+    setLoadingConversationId(conversation.id);
+    try {
+      const state = await api.adminGetConversation(conversation.id);
+      setSelected(state);
+    } catch (e: any) {
+      setDetailError(e?.message || String(e));
+    } finally {
+      setLoadingConversationId(null);
+    }
+  }
+
   return (
-    <div className="space-y-3 h-[calc(100vh-220px)] flex flex-col">
-      <div className="flex items-center gap-3">
-        <input
-          type="search"
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          placeholder="按姓名、用户名或对话标题筛选…"
-          className="w-80 rounded-lg border border-gray-300 px-3 py-1.5 text-sm bg-bg"
-        />
-        <span className="text-xs text-muted">
-          {filter ? `${visible.length} / ${list.length}` : `${list.length} 条对话`}
-        </span>
-        {filter && (
-          <button
-            type="button"
-            onClick={() => setFilter("")}
-            className="text-xs text-accent hover:underline"
-          >
-            清空
-          </button>
-        )}
-      </div>
-      <div className="grid grid-cols-12 gap-4 flex-1 min-h-0">
-        <div className="col-span-5 overflow-y-auto rounded-lg border border-gray-200 bg-panel">
-          {error && <div className="p-3 text-sm text-red-600">{error}</div>}
-          {loading && <div className="p-3 text-sm text-muted">加载中…</div>}
-          {!loading && visible.length === 0 && (
-            <div className="p-3 text-xs text-muted">
-              {filter ? `没有匹配 “${filter}” 的对话` : "（暂无对话）"}
-            </div>
-          )}
-          {visible.map((c) => (
-            <button
-              key={c.id}
-              type="button"
-              onClick={async () => {
-                try {
-                  const state = await api.adminGetConversation(c.id);
-                  setSelected(state);
-                } catch (e: any) {
-                  alert(e?.message || String(e));
-                }
-              }}
-              className={
-                "w-full text-left px-3 py-2 text-sm border-b border-gray-100 dark:border-gray-800 " +
-                (selected?.id === c.id ? "bg-accent/10" : "hover:bg-gray-100 dark:hover:bg-gray-800")
-              }
-            >
-              <div className="truncate font-medium">{c.title}</div>
-              <div className="text-[11px] text-muted">
-                {c.real_name} · {c.employee_id} · {formatAdminDate(c.updated_at)} · {c.turn_index} 轮
+    <section className="space-y-5" aria-labelledby="admin-conversations-title">
+      <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="text-ui-xs font-medium uppercase tracking-[0.14em] text-primary">内容审阅</p>
+          <h1 id="admin-conversations-title" className="mt-1 text-ui-2xl font-semibold tracking-tight text-foreground">
+            对话管理
+          </h1>
+          <p className="mt-1 text-ui-sm text-muted-foreground">按用户或主题查找近期对话，并在详情区查看完整消息。</p>
+        </div>
+        <Badge variant="secondary" className="w-fit">
+          {list.length} 条对话
+        </Badge>
+      </header>
+
+      <Card className="shadow-surface">
+        <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-end sm:justify-between">
+          <div className="w-full sm:max-w-xl">
+            <label htmlFor="conversation-filter" className="mb-1.5 block text-ui-sm font-medium text-foreground">
+              筛选对话
+            </label>
+            <Input
+              id="conversation-filter"
+              type="search"
+              value={filter}
+              onChange={(event) => setFilter(event.target.value)}
+              placeholder="输入姓名、用户名或对话标题…"
+            />
+          </div>
+          <div className="flex min-h-control-md items-center gap-3">
+            <span className="text-ui-xs text-muted-foreground" aria-live="polite">
+              {filter ? `显示 ${visible.length} / ${list.length} 条` : `共 ${list.length} 条`}
+            </span>
+            {filter && (
+              <Button variant="ghost" size="sm" onClick={() => setFilter("")}>
+                清空筛选
+              </Button>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {error ? (
+        <ErrorState title="对话列表加载失败" description={error} />
+      ) : loading ? (
+        <Card>
+          <LoadingState className="min-h-56" label="正在加载对话…" />
+        </Card>
+      ) : list.length === 0 ? (
+        <EmptyState title="暂无对话" description="当前还没有可供管理员查看的对话记录。" />
+      ) : (
+        <div className="grid gap-4 xl:h-[calc(100vh-17rem)] xl:min-h-[34rem] xl:grid-cols-[minmax(19rem,0.9fr)_minmax(0,1.5fr)]">
+          <Card className="flex min-h-0 flex-col overflow-hidden shadow-surface">
+            <div className="flex items-center justify-between border-b border-border px-4 py-3">
+              <div>
+                <h2 className="text-ui-sm font-semibold text-foreground">对话列表</h2>
+                <p className="text-ui-xs text-muted-foreground">按最近更新时间排列</p>
               </div>
-            </button>
-          ))}
-        </div>
-        <div className="col-span-7 overflow-y-auto rounded-lg border border-gray-200 bg-panel p-3 space-y-3">
-          {!selected && <div className="text-sm text-muted">从左侧选择一条对话查看消息。</div>}
-          {selected?.messages.map((m, i) => (
-            <div
-              key={i}
-              className={
-                "rounded-lg px-3 py-2 text-sm whitespace-pre-wrap " +
-                (m.role === "user"
-                  ? "bg-accent/10"
-                  : "bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700")
-              }
-            >
-              <div className="text-[11px] text-muted mb-1">{m.role}</div>
-              {m.content}
+              <Badge variant="outline">{visible.length} 条</Badge>
             </div>
-          ))}
+
+            {visible.length === 0 ? (
+              <EmptyState
+                className="m-4 flex-1 border-0 bg-surface-muted"
+                title="没有匹配的对话"
+                description={`没有找到与“${filter}”匹配的姓名、用户名或标题。`}
+                action={
+                  <Button variant="outline" size="sm" onClick={() => setFilter("")}>
+                    清空筛选
+                  </Button>
+                }
+              />
+            ) : (
+              <div className="max-h-[28rem] divide-y divide-border overflow-y-auto xl:max-h-none xl:flex-1" role="list">
+                {visible.map((conversation) => {
+                  const active = selected?.id === conversation.id;
+                  const detailLoading = loadingConversationId === conversation.id;
+                  return (
+                    <div key={conversation.id} role="listitem">
+                      <button
+                        type="button"
+                        aria-pressed={active}
+                        onClick={() => selectConversation(conversation)}
+                        disabled={loadingConversationId !== null}
+                        className={cn(
+                          "w-full px-4 py-3 text-left transition-colors duration-normal focus-visible:relative focus-visible:z-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-wait disabled:opacity-70",
+                          active ? "bg-ui-accent text-ui-accent-foreground" : "bg-card hover:bg-surface-muted",
+                        )}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="truncate text-ui-sm font-medium text-foreground">{conversation.title}</p>
+                            <p className="mt-1 truncate text-ui-xs text-muted-foreground">
+                              {conversation.real_name} · {conversation.employee_id}
+                            </p>
+                          </div>
+                          <Badge variant={active ? "info" : "secondary"} className="shrink-0">
+                            {conversation.turn_index} 轮
+                          </Badge>
+                        </div>
+                        <p className="mt-2 text-ui-xs text-muted-foreground">
+                          {detailLoading ? "正在载入详情…" : `更新于 ${formatAdminDate(conversation.updated_at)}`}
+                        </p>
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </Card>
+
+          <Card className="flex min-h-[28rem] min-w-0 flex-col overflow-hidden shadow-surface xl:min-h-0">
+            <div className="border-b border-border px-4 py-3 sm:px-5">
+              <h2 className="text-ui-sm font-semibold text-foreground">对话详情</h2>
+              <p className="text-ui-xs text-muted-foreground">只读查看用户与助手的消息内容</p>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-5">
+              {detailError ? (
+                <ErrorState title="对话详情加载失败" description={detailError} />
+              ) : loadingConversationId ? (
+                <LoadingState className="min-h-48" label="正在加载对话详情…" />
+              ) : !selected ? (
+                <EmptyState
+                  className="min-h-56 border-0 bg-surface-muted"
+                  title="选择一条对话"
+                  description="从左侧列表选择对话后，可在这里查看完整消息。"
+                />
+              ) : (
+                <div className="space-y-5">
+                  <div className="border-b border-border pb-4">
+                    <h3 className="text-ui-lg font-semibold text-foreground">{selected.title}</h3>
+                    <p className="mt-1 text-ui-xs text-muted-foreground">
+                      创建于 {formatAdminDate(selected.created_at)} · 更新于 {formatAdminDate(selected.updated_at)} · {selected.turn_index} 轮
+                    </p>
+                  </div>
+
+                  <div className="space-y-3">
+                    {selected.messages.map((message, index) => {
+                      const isUser = message.role === "user";
+                      return (
+                        <article
+                          key={message.id ?? `${message.role}-${index}`}
+                          className={cn(
+                            "rounded-ui-xl border px-4 py-3",
+                            isUser ? "border-primary/20 bg-primary/10" : "border-border bg-surface-muted",
+                          )}
+                        >
+                          <div className="mb-2 flex items-center justify-between gap-3">
+                            <Badge variant={isUser ? "info" : "secondary"}>{roleLabels[message.role]}</Badge>
+                            {message.created_at && (
+                              <span className="text-ui-xs text-muted-foreground">{formatAdminDate(message.created_at)}</span>
+                            )}
+                          </div>
+                          <p className="whitespace-pre-wrap break-words text-ui-sm leading-relaxed text-foreground">{message.content}</p>
+                        </article>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          </Card>
         </div>
-      </div>
-    </div>
+      )}
+    </section>
   );
 }
