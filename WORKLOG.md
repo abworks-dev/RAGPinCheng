@@ -1588,6 +1588,13 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 验证：scoped 契约/静态测试 54 passed；Windows 本地完整 Phase 1 测试 123 passed、1 skipped（本地缺少既有 admin 导入依赖）；GitHub Actions 最新基线 transcription job 124 passed、0 skipped，五项 CI 全部通过；`compileall`、`git diff --check`、受保护路径和依赖范围检查通过。
 - 边界：未修改数据库、API、UI、worker、Qdrant、真实引擎或运行时依赖；未修改 `api/routes_admin.py`、`src/chunk.py`、`TODO.md`，也未触碰主工作区并行修改。
 
+### 06:01 — 编写多引擎转录 Phase 2 详细计划
+
+- 完成：新增 Phase 2 R2 待审批实施计划，冻结独立 publication index job、独立正式版本 head、Canonical/Markdown 存储边界、幂等 attempt、审核/发布事务、恢复动作和 migration 前 SQLite backup 契约。
+- 文件：新增 `project-docs/plans/multi-engine-transcription-phase2.md`；最小追加 `WORKLOG.md`。未修改 `TODO.md`、代码、数据库、CI 或受保护路径。
+- 验证：计划基于 `origin/master@c25c15115a6c4ddab6cdc11f7fdd8348d008b466`，20 个章节、24 项完成标准、5 项待审批冻结选择及验收映射完整；引用路径存在，Markdown fence 成对，无冲突标记或尾随空白。
+- 边界：当前仍待用户审批；未开始 Phase 2 代码实施，未执行迁移或测试，未访问真实 `app.sqlite`、API/UI、worker、Qdrant、网络、真实引擎或生产数据。任何真实迁移、索引或生产执行仍须独立 R3 审批。
+
 ### 06:09 — 统一管理端对话管理页面
 
 - 完成：将管理端对话页迁移到现有语义 Token 与基础组件，统一页面标题、筛选区、对话列表、选中态、详情消息、加载、空数据和错误反馈；桌面端保留双栏审阅，小屏自动改为纵向布局。详情读取失败由原生 `alert` 改为页面内错误状态。
@@ -1596,9 +1603,22 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 边界：保留 `adminListAllConversations(200)`、`adminGetConversation(id)`、三字段筛选及只读消息展示契约；未修改 API、认证、CSRF、数据库、用户操作、资料上传、索引、媒体、问答、SSE、引用或预览链路。经用户明确批准，本提交在本地门禁通过后直接推送 `master`，CI 成功后由现有工作流自动部署生产环境。
 - 后续视觉收口：根据生产截图移除三处重复数量中的两处，压缩筛选区，降低列表选中态饱和度并增加左侧强调线；修复深色模式下助手 Badge 与背景融为一体的问题，并限制用户/助手消息宽度与正文行长。针对性测试 6/6、全量前端测试 35/35、TypeScript 与 Vite production build 再次通过；该补充修复尚未推送生产，原始引用 ID 的解析与公共布局确认继续保持在本次范围外。
 
+### 06:45 — 实施多引擎转录 Phase 2 持久化内核
+
+- 完成：按获批 R2 计划实现纯 Python/SQLite 的任务、版本、artifact、审核、publication-only 候选索引、正式 head、恢复 action、添加式 migration ledger 和 migration 前一致性 backup；结果流保持 Phase 1 Canonical/formatter 边界，真实索引由 fake `PublicationIndexPort` 隔离。
+- 文件：新增 `src/transcription/persistence.py`、`src/transcription/workflow.py`、`api/db_backup.py`、`api/db_migrations.py`、`api/transcription_artifacts.py`、`api/transcription_store.py`、9 组 Phase 2 测试和 legacy SQL fixture；最小修改 `api/db.py`、`src/transcription/__init__.py`、Phase 1 static/helper、Phase 2 计划、功能文档、`TODO.md` 与本日志。
+- 验证：Phase 2 九组专项 67 passed；Phase 1+2 transcription suite 190 passed、1 skipped；skip 仅因本地环境缺少仓库既有 FastAPI admin 导入依赖，未通过安装新依赖规避，既有 GitHub CI 基线对此项为 0 skipped。`compileall`、`git diff --check`、24 项完成标准/5 项冻结选择、CI glob、无新增依赖和 protected-path 检查通过。
+- 边界/风险：未执行真实 `data/app.sqlite` migration，未接 API/UI/worker/Qdrant/真实 Provider/网络/生产，未修改 CI、requirements 或人工 Markdown/索引路径；无用户可观察行为变化，因此不需要手工用户验收。最新 `master` 的并行前端提交与 WORKLOG 已在独立分支 rebase 中按时间保留且无代码冲突；当前仅剩远端 CI 零跳过复跑。
+
 ### 07:03 — 统一管理端用户管理页面
 
 - 完成：将管理端用户管理页迁移到现有语义 Token 与基础组件，统一页面标题、筛选区、用户表格、角色与启停状态 Badge、操作按钮、加载/空数据/错误反馈，以及用户对话只读详情层；小屏保留横向表格滚动并将对话详情改为纵向布局。
 - 文件：`frontend/src/pages/admin/AdminUsersPage.tsx`、新增 `frontend/src/pages/admin/AdminUsersPage.test.tsx`、`WORKLOG.md`。
 - 验证：针对性测试 8/8 通过；前端全量 Vitest 9 个文件、43 项测试通过；TypeScript project build 与 Vite production build 通过（406 modules transformed）；`git diff --check` 通过。保留既有 React Router future warning、CSS minify warning 和主包大于 500 kB 警告。
 - 边界：保留 `adminListUsers()`、`adminPatchUser()`、`adminListUserConversations()`、`adminGetConversation()` 的调用、刷新时机和参数契约；保留启停、角色切换、密码重置及原生 `confirm`/`prompt`/`alert` 行为。未修改 API、认证、CSRF、后端、依赖、全局样式、问答、SSE、引用、预览、上传、索引或其他管理页面；本提交仅在独立分支本地完成，尚未推送或部署。
+
+### 07:13 — 整合 Phase 2 独立提交到最新基线
+
+- 完成：在 `codex/multi-engine-transcription-phase2` 独立分支提交 Phase 2，并 rebase 到 `origin/master@94645e6`；唯一 WORKLOG 冲突按时间保留双方记录，远端前端代码没有冲突或改写。
+- 验证：最新基线重新运行 Phase 1+2 transcription suite 为 190 passed、1 skipped，`compileall` 与提交级 `git diff --check` 通过；本地工作区干净。
+- 边界/风险：CI 只接受 PR 或 `master` push；遵守“不跟进 PR”要求，未创建 PR、未推送分支、未直接推送 `master`。远端零跳过验证仍待后续明确选择触发方式。
