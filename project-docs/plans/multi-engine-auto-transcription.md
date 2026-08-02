@@ -1,17 +1,18 @@
 # 多引擎视频自动转录 — 总体实施方案
 
-- 状态：**架构方向已批准；阶段 A 文档调整已授权；Phase 1～Phase 6 尚未授权执行**
+- 状态：**架构方向已批准；阶段 A 与 Phase 1 详细计划文档已授权；Phase 1～Phase 6 代码实施尚未授权**
 - 风险等级：**R2**（涉及 ASR Provider、配置档案、`app.sqlite` Schema、后台任务、管理端 API/UI、版本发布、索引门禁和单卡 GPU 调度）
 - 批准日期：2026-08-01
 - 关联决策：[0002 — 多引擎视频自动转录与管理员选择](../decisions/0002-multi-engine-transcription.md)
+- Phase 1 详细计划：[多引擎视频自动转录 Phase 1](multi-engine-transcription-phase1.md)
 - FunASR 候选专项计划：[FunASR 视频自动转录](funasr-auto-transcription.md)
 - faster-whisper 候选材料：[faster-whisper Phase 0 静态预检](faster-whisper-phase0-precheck.md)
 
-> 本方案是自动转录的总方案。FunASR、faster-whisper 及未来模型均作为可插拔候选，不再以“选出唯一赢家”作为统一流水线开发的前置条件。候选通过技术验证不自动授权业务集成；Phase 1～Phase 6 仍须逐阶段提交详细实施方案并单独审批。
+> 本方案是自动转录的总方案。FunASR、faster-whisper 及未来模型均作为可插拔候选，不再以“选出唯一赢家”作为统一流水线开发的前置条件。候选通过技术验证不自动授权业务集成；Phase 1 以独立详细计划为当前约束来源，Phase 1～Phase 6 的代码实施仍须逐阶段单独审批。
 
 ## 1. 目标
 
-允许管理员上传 MP4 后选择受控的转录配置，由后台调用相应 ASR Provider，统一生成 Canonical Transcript JSON 和确定性 Markdown；同一媒体可保留多个转录版本，但只有经审核并明确发布的唯一正式版本可以进入索引。
+允许管理员上传 MP4 后选择受控的转录配置，由后台调用相应 ASR Provider Adapter 生成引擎中立 Candidate，经唯一 normalizer 生成 Canonical Transcript JSON，再输出确定性 Markdown；同一媒体可保留多个转录版本，只有经审核并进入 `publishing` 的候选版本可以构建候选发布索引，索引成功后才能原子提升为唯一正式版本。
 
 目标能力：
 
@@ -53,9 +54,11 @@
 
 ### 3.1 Provider 与 Profile 分离
 
-- **Provider** 是受控的引擎适配器，例如 SenseVoice、Contextual Paraformer、faster-whisper 或人工稿适配器。
-- **Profile** 是管理员可选择的白名单配置档案，固定 Provider、模型、revision、有效参数、热词版本、资格状态和审核策略。
-- 管理员只能提交 `profile_id`，不能提交任意模型路径、下载地址、热词正文或底层解码参数。
+- **Provider** 是受控的自动转录引擎适配器，例如 SenseVoice、Contextual Paraformer 或 faster-whisper；Adapter 只把受控执行配置转换为引擎中立 Candidate 或结构化 Failure，Canonical 只能由统一 normalizer 构造；Provider 不负责资格、审核、发布或索引策略。
+- **Profile** 是管理员可选择的服务端白名单配置档案，固定 Provider、模型、revision、有效参数和热词版本，并分别关联资格、准入和派生发布策略。
+- **Provider 可用性** 是运行环境事实，不属于 Profile 资格状态。
+- 管理员只能提交 `profile_id`，不能提交任意模型路径、下载地址、热词正文、底层解码参数或发布策略覆盖。
+- 人工 Markdown 是独立受保护的输入路径，不是 Provider，也不是 ASR Profile。
 
 候选 Profile 示例：
 
@@ -64,43 +67,42 @@ system-recommended
 funasr-general-zh-v1
 funasr-bim-hotword-v1
 faster-whisper-zh-v1
-manual-transcript
 ```
 
-### 3.2 Profile 状态
+### 3.2 Profile 资格、准入与可用性
 
-统一使用：
+不得用一个 Profile 状态枚举混合三个不同维度：
 
 ```text
-pending_evaluation  待评测
-approved            正式可用
-experimental        实验性可用
-unavailable         当前运行环境不可用
-disabled            禁止新任务
-deprecated          停止新增任务，仅保留历史
+ProfileQualification：pending_evaluation | experimental | qualification_approved
+ProfileAdmission：enabled | disabled | deprecated
+ProviderAvailability：available | unavailable
 ```
 
 规则：
 
-- `approved` 才能成为 `system-recommended` 的目标；
-- `experimental` 仅管理员可选，强制人工审核，禁止自动发布和自动索引；
-- `unavailable` 显示原因但不可提交；
-- `disabled/deprecated` 不影响历史任务和已发布转录稿的只读访问；
-- 资格状态是经过审批的产品状态，运行时健康状态不能自行把候选升级为 `approved`。
+- 只有 `qualification_approved` 才能成为 `system-recommended` 的目标；
+- `experimental` 强制派生 `requires_review=true`、`auto_publish=false`、`auto_index=false`，矛盾组合必须由 Schema 拒绝；
+- `unavailable` 只描述当前运行环境，显示脱敏原因但不可提交，且不能改变资格；
+- `disabled/deprecated` 不影响历史任务和已发布转录稿的只读访问；`deprecated` 禁止新任务和新重试、仅允许旧候选显式人工继续，`disabled` 阻止尚未完成的发布动作；
+- 任务保存不可变 Profile 快照，发布时使用快照与当前策略中更严格者；后续资格提升不能取消旧任务已有的审核要求。
+
+任务执行、人工审核、正式发布和索引还必须分别使用 `TranscriptionJobStatus`、`TranscriptionJobStage`、`ReviewStatus`、`PublicationStatus`、`PublicationIndexStatus`，完整类型和值见 Phase 1 详细计划。
 
 ### 3.3 多版本、单正式版本
 
 - 同一媒体可以保留多个成功转录历史版本；
 - 同一媒体同时最多一个 `pending/running` 转录任务；
-- 转录成功只产生候选版本，不覆盖当前正式版本；
+- 转录成功只产生候选版本，不覆盖当前正式版本，也不等同于已审核、已发布或已索引；
 - 同一媒体同时只能有一个正式发布版本；
-- 只有发布成功的版本可以创建索引任务；
-- 新版本发布或索引失败时，旧正式版本继续可用；
+- 只有审核通过且进入 `publishing` 的候选版本可以创建绑定 `candidate_version_id` 的 publication index job；
+- 候选索引成功后，才原子更新当前正式版本指针并标记 `published`；
+- 新版本发布或索引失败时，旧正式版本指针和旧正式索引继续可用；
 - 删除真实媒体、版本或 artifacts 仍须单独审批。
 
 ### 3.4 Phase 1 与候选评测解耦
 
-统一 Canonical JSON、formatter、Provider Protocol 和 fake fixtures 可以在没有正式 `approved` ASR 的情况下开发验证。没有正式引擎时：
+统一 Canonical JSON、formatter、Provider Protocol 和 fake fixtures 可以在没有 `qualification_approved` ASR 的情况下开发验证。没有正式引擎时：
 
 - 人工 Markdown 路径继续可用；
 - 自动转录部署开关保持关闭；
@@ -120,17 +122,18 @@ class TranscriptionProvider:
     def transcribe(
         self,
         audio_path: Path,
-        profile: TranscriptionProfile,
+        execution: TranscriptionExecutionConfig,
         checkpoint_dir: Path,
     ) -> CanonicalTranscript: ...
 ```
 
-首批候选适配器：
+Provider 只接收不可变 `TranscriptionInputRef` 与服务端可信 Registry 解析出的不可变执行配置，不接收 Profile 资格、审核、发布或索引策略。首批自动转录候选适配器：
 
-- `ManualTranscriptProvider`；
 - `FunASRSenseVoiceProvider`；
 - `FunASRContextualParaformerProvider`；
 - `FasterWhisperProvider`。
+
+人工 Markdown 继续走现有上传、验证、原始字节保存和索引路径；不注册 `ManualTranscriptProvider`。未来如需导入 Canonical，应使用独立 `ManualTranscriptImporter` 概念。
 
 未通过资格或没有继续价值的适配器可以保留代码和历史证据，但默认不注册或标记为 `disabled`。
 
@@ -142,56 +145,25 @@ Profile 应由服务端版本化白名单提供，并至少包含：
 - Provider、模型 ID、固定 revision；
 - 影响结果的固定配置和 `config_hash`；
 - 热词/词表版本身份，但不向前端返回敏感正文；
-- 资格状态、强制审核和自动发布策略；
+- 分开的资格、准入和派生发布策略；experimental 的强制审核、禁止自动发布/索引由 Schema 保证；
 - 语言、时间戳、热词等能力声明；
-- 当前运行可用性和脱敏不可用原因；
+- 独立 Provider 可用性和脱敏不可用原因；
 - 最近一次资格评测摘要及证据引用。
 
-运行任务必须保存 Profile 快照，避免注册表后续变化改写历史含义。
+运行任务必须保存不可变 Profile 快照；发布时采用任务快照与当前 Profile 策略中更严格者，避免注册表后续变化改写历史含义或放宽审核门禁。
 
 ## 5. Canonical Transcript JSON
 
-所有 Provider 必须先转换成统一 Schema，再进入 formatter：
-
-```json
-{
-  "schema": "canonical-transcript/1",
-  "media_id": "uuid",
-  "audio_sha256": "sha256",
-  "profile": {
-    "profile_id": "funasr-bim-hotword-v1",
-    "engine": "funasr",
-    "model": "contextual-paraformer",
-    "model_revision": "immutable-revision",
-    "config_hash": "sha256"
-  },
-  "language": "zh",
-  "duration_ms": 120000,
-  "segments": [
-    {
-      "id": 0,
-      "start_ms": 0,
-      "end_ms": 4200,
-      "text": "今天介绍钢结构施工的基本要求。",
-      "confidence": null
-    }
-  ],
-  "warnings": [],
-  "metrics": {
-    "processing_ms": 5400,
-    "peak_gpu_memory_mb": 1186
-  }
-}
-```
+Provider Adapter 只返回引擎中立 Candidate 或结构化 Failure；只有唯一 normalizer 可以结合同一不可变 input ref、执行配置和 Profile 快照构造 Canonical Transcript。精确字段、严格 Schema、Canonical JSON bytes 和哈希规则只在 [Phase 1 详细实施计划](multi-engine-transcription-phase1.md) 第 7～8 节定义，本总体方案不复制第二套 Schema。
 
 约束：
 
-- 时间统一为非负整数毫秒；
-- 不强制所有引擎提供置信度，也不跨模型直接比较置信度；
-- segment 顺序、重叠、空文本和越界必须由 Schema/normalizer 明确处理；
-- 原始引擎输出可作为受控审计 artifact，但不能直接进入索引；
-- JSON→Markdown formatter 必须确定性运行，不调用生成式 LLM；
-- 同一 Canonical JSON 重复格式化必须产生字节一致结果；
+- Canonical 根对象及所有嵌套对象拒绝额外字段，只包含 JSON-native、引擎中立值；
+- Profile 快照只保留受控身份、资格/准入/发布策略快照、版本和哈希，不泄漏模型路径、URL、原始引擎对象或运行时 metrics；
+- 时间统一为非负整数毫秒；不强制所有引擎提供置信度，也不跨模型直接比较置信度；
+- segment 顺序、重叠、空文本和越界由唯一 normalizer 按冻结算法处理；
+- 原始引擎输出可作为受控审计 artifact reference，但不能直接进入 Canonical、formatter 或索引；
+- JSON→Markdown formatter 确定性运行，不调用生成式 LLM；同一 Canonical 和显式 title 必须产生字节一致结果；
 - formatter 继续输出现有 `chunk_transcript()` 可解析的“说话人 + 时间戳 + 正文”格式。
 
 ## 6. 任务、版本和发布契约
@@ -229,17 +201,27 @@ Profile 应由服务端版本化白名单提供，并至少包含：
 
 ### 6.3 状态边界
 
+状态必须按领域类型分开：
+
 ```text
-转录任务：pending → running → succeeded | failed | cancelled
-候选版本：draft → awaiting_review → approved | rejected
-正式版本：approved → publishing → published
-索引任务：pending → parsing → chunking → embedding → done | failed
+TranscriptionJobStatus：pending → running → succeeded | failed | cancelled
+TranscriptionJobStage：validating_input | transcribing | normalizing | formatting
+ReviewStatus：not_required | awaiting_review → review_approved | review_rejected
+PublicationStatus：not_published → publishing → published | publication_failed
+PublicationIndexStatus：pending → parsing → chunking → embedding → done | failed（仅 candidate transcript 的 publication-only 状态，不替代现有通用 `index_jobs.status`）
+```
+
+执行 stage 不得包含审核、发布或索引阶段。发布顺序固定为：
+
+```text
+review_gate_satisfied → publishing → candidate publication index done
+→ atomically promote current_published_version_id → published
 ```
 
 必须保持：
 
 ```text
-ASR succeeded ≠ reviewed ≠ published ≠ indexed
+ASR succeeded ≠ review_approved ≠ published ≠ index done
 ```
 
 ## 7. 管理端行为
@@ -267,7 +249,7 @@ UI 必须显示：
 - 使用另一个 Profile 创建新的顺序任务；
 - 比较历史版本；
 - 审核候选版本；
-- 明确发布一个版本并触发定向索引。
+- 对满足 `review_gate_satisfied` 的候选发起发布，创建候选定向索引；索引成功后再原子切换正式版本。
 
 前端隐藏不是权限控制；所有 Profile 白名单、管理员权限、CSRF、状态迁移和发布门禁必须由后端强制。
 
@@ -294,16 +276,21 @@ UI 必须显示：
 
 ### Phase 1 — 引擎无关转录契约
 
-- Canonical JSON Schema；
-- Provider Protocol 和 Profile Schema；
-- 时间戳 normalizer；
+详细范围、类型不变量和完成标准见 [Phase 1 详细实施计划](multi-engine-transcription-phase1.md)。本阶段仅包含：
+
+- Candidate/ProviderFailure、Canonical JSON 严格 Schema，以及 Candidate → Canonical 的唯一 normalizer 入口；
+- Provider Protocol、可信 Profile Definition、深层不可变执行配置和最小请求 Schema；
+- 正交状态类型、experimental policy 和纯发布 guard；
+- 时间戳/segment normalizer；
 - 确定性 JSON→Markdown formatter；
-- 仅使用固定夹具和 fake providers；
-- 不安装真实 ASR，不连接生产服务和数据库。
+- 固定夹具、三个 fake providers 和契约测试；
+- 不修改人工 Markdown 路径；
+- 不安装真实 ASR，不提取音频，不连接网络、生产服务、数据库或 UI。
 
 ### Phase 2 — 任务、版本与恢复
 
 - `transcription_jobs`、`transcript_versions` 和正式版本指针；
+- 数据库发布事务、候选索引完成后的正式指针原子切换、候选/旧索引隔离和失败时旧索引保护；
 - 活跃任务唯一约束、幂等、checkpoint、审核和发布状态；
 - `app.sqlite` 兼容迁移、备份和恢复方案；
 - 保留当前人工上传路径。
@@ -329,14 +316,14 @@ UI 必须显示：
 
 ```text
 MP4 → 选择 Profile → 音频提取 → 转录 → Canonical JSON
-→ Markdown → 审核 → 发布 → 索引 → 检索 → 引用 → 跳播
+→ Markdown → 审核 → publishing → 候选索引 → 原子发布 → 检索 → 引用 → 跳播
 ```
 
 同时验证人工稿不退化、多版本、失败隔离、实验引擎审核门禁和旧正式版本保护。
 
 ### Phase 6 — 生产灰度
 
-- 只允许经过审批的 `approved` Profile；
+- 只允许经过审批的 `qualification_approved` Profile；
 - 自动转录部署开关默认关闭；
 - 明确允许数据分类、容量、监控、停止和回滚；
 - 生产操作和真实数据按 R3 逐项审批。
@@ -346,10 +333,10 @@ MP4 → 选择 Profile → 音频提取 → 转录 → Canonical JSON
 ### Phase 1
 
 - Schema 合法/非法输入；
-- 空音轨、空 segment、重叠和越界时间戳；
+- 空候选 segment 集合、空文本、重叠和越界时间戳；
 - 跨块 offset、毫秒取整、中文 UTF-8；
 - 过短合并、超长拆分和重复执行字节一致性；
-- FunASR、faster-whisper 和人工稿 fake fixtures；
+- 三个自动转录 fake Provider fixtures；人工 Markdown 只验证现有路径未进入修改集，不伪装为 Provider；
 - formatter 不调用 LLM。
 
 ### Phase 2～4
@@ -403,7 +390,7 @@ MP4 → 选择 Profile → 音频提取 → 转录 → Canonical JSON
 ## 14. 后续审批顺序
 
 1. 阶段 A：本地架构文档调整；
-2. 单独编写并审批 Phase 1 详细实施计划；
+2. 审批并按 [Phase 1 详细实施计划](multi-engine-transcription-phase1.md) 实施纯 Python 契约；
 3. Phase 1 完成并验证后，再分别审批 Phase 2～Phase 6；
 4. faster-whisper 是否继续资格评测作为独立事项决定，不阻塞 Phase 1；
 5. 任一生产执行、真实数据、删除或部署继续按 R3 精确审批。

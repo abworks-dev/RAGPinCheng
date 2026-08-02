@@ -1,0 +1,39 @@
+{
+  "parents": [
+    {
+      "text": "说话人 00:00:00\n你好，世界。\n\n说话人 00:00:01\nSecond line.",
+      "doc_title": "自动转录测试",
+      "category": "教学视频",
+      "section_path": "transcript",
+      "doc_type": "transcript",
+      "start_time": "00:00:00",
+      "media_id": "123e4567-e89b-12d3-a456-426614174000"
+    }
+  ],
+  "children": [
+    {
+      "parent_id_matches": true,
+      "text": "说话人 00:00:00\n你好，世界。",
+      "embed_text": "自动转录测试 @00:00:00\n\n你好，世界。",
+      "doc_title": "自动转录测试",
+      "category": "教学视频",
+      "section_path": "transcript",
+      "content_type": "prose",
+      "doc_type": "transcript",
+      "start_time": "00:00:00",
+      "media_id": "123e4567-e89b-12d3-a456-426614174000"
+    },
+    {
+      "parent_id_matches": true,
+      "text": "说话人 00:00:01\nSecond line.",
+      "embed_text": "自动转录测试 @00:00:01\n\nSecond line.",
+      "doc_title": "自动转录测试",
+      "category": "教学视频",
+      "section_path": "transcript",
+      "content_type": "prose",
+      "doc_type": "transcript",
+      "start_time": "00:00:01",
+      "media_id": "123e4567-e89b-12d3-a456-426614174000"
+    }
+  ]
+}
