@@ -1587,3 +1587,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`src/transcription/pipeline.py`、`tests/transcription_fixture_helpers.py`、`tests/test_transcription_provider_contract.py`、`.gitattributes`、`project-docs/plans/multi-engine-auto-transcription.md`、`WORKLOG.md`。
 - 验证：scoped 契约/静态测试 54 passed；Windows 本地完整 Phase 1 测试 123 passed、1 skipped（本地缺少既有 admin 导入依赖）；GitHub Actions 最新基线 transcription job 124 passed、0 skipped，五项 CI 全部通过；`compileall`、`git diff --check`、受保护路径和依赖范围检查通过。
 - 边界：未修改数据库、API、UI、worker、Qdrant、真实引擎或运行时依赖；未修改 `api/routes_admin.py`、`src/chunk.py`、`TODO.md`，也未触碰主工作区并行修改。
+
+### 06:09 — 统一管理端对话管理页面
+
+- 完成：将管理端对话页迁移到现有语义 Token 与基础组件，统一页面标题、筛选区、对话列表、选中态、详情消息、加载、空数据和错误反馈；桌面端保留双栏审阅，小屏自动改为纵向布局。详情读取失败由原生 `alert` 改为页面内错误状态。
+- 文件：`frontend/src/pages/admin/AdminConversationsPage.tsx`、新增 `frontend/src/pages/admin/AdminConversationsPage.test.tsx`、`WORKLOG.md`。
+- 验证：针对性测试 6/6 通过；前端全量 Vitest 8 个文件、35 项测试通过；TypeScript project build 与 Vite production build 通过（406 modules transformed）；`git diff --check` 通过。保留既有 React Router future warning、CSS minify warning 和主包大于 500 kB 警告。
+- 边界：保留 `adminListAllConversations(200)`、`adminGetConversation(id)`、三字段筛选及只读消息展示契约；未修改 API、认证、CSRF、数据库、用户操作、资料上传、索引、媒体、问答、SSE、引用或预览链路。经用户明确批准，本提交在本地门禁通过后直接推送 `master`，CI 成功后由现有工作流自动部署生产环境。
