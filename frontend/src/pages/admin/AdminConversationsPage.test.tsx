@@ -63,6 +63,8 @@ describe("AdminConversationsPage", () => {
     expect(screen.getByText("正在加载对话…")).toBeInTheDocument();
     expect(await screen.findByText("项目交付标准")).toBeInTheDocument();
     expect(screen.getByText("机电模型检查")).toBeInTheDocument();
+    expect(screen.getAllByText("共 2 条")).toHaveLength(1);
+    expect(screen.queryByText("2 条对话")).not.toBeInTheDocument();
     expect(mocks.adminListAllConversations).toHaveBeenCalledTimes(1);
     expect(mocks.adminListAllConversations).toHaveBeenCalledWith(200);
   });
@@ -106,10 +108,13 @@ describe("AdminConversationsPage", () => {
     mocks.adminGetConversation.mockResolvedValue(conversationState);
 
     render(<AdminConversationsPage />);
-    fireEvent.click(await screen.findByRole("button", { name: /项目交付标准/ }));
+    const selectedButton = await screen.findByRole("button", { name: /项目交付标准/ });
+    fireEvent.click(selectedButton);
 
     expect(await screen.findByText("交付前需要检查哪些内容？")).toBeInTheDocument();
     expect(screen.getByText("建议依次核对模型、图纸和交付清单。")).toBeInTheDocument();
+    expect(selectedButton).toHaveClass("border-l-primary", "bg-primary/10");
+    expect(screen.getByText("助手")).toHaveClass("border-border", "bg-card");
     expect(mocks.adminGetConversation).toHaveBeenCalledTimes(1);
     expect(mocks.adminGetConversation).toHaveBeenCalledWith("conversation-1");
   });
