@@ -80,6 +80,7 @@ docs/ → MinerU/Markdown ingest → Parent/Child chunk
 - 修改 `src/**`、`scripts/**`、`prompts/**`：遵守 `.claude/rules/rag-pipeline.md`；
 - 修改 `api/**`、Python依赖或数据库：遵守 `.claude/rules/python-backend.md`；
 - 修改 `frontend/**`：遵守 `.claude/rules/frontend.md`；
+- 修改 `tests/**` 或 `.github/workflows/**`：遵守 `.claude/rules/testing.md`；
 - 涉及认证、数据、部署、外部API或破坏性操作：遵守 `.claude/rules/security.md`。
 - 修改 `TODO.md`、`project-docs/plans/**` 或 `project-docs/decisions/**`：遵守 `.claude/rules/todo.md`。
 
