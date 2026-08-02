@@ -4,7 +4,18 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
+import sqlite3
 from typing import Any
+
+from api.db import connect, init_db
+from api.transcription_artifacts import LocalTranscriptionArtifactStore
+from api.transcription_store import SQLiteTranscriptionStore
+from src.transcription.canonical import CanonicalTranscript
+from src.transcription.persistence import (
+    INDEX_RECEIPT_SCHEMA_VERSION,
+    PublicationIndexReceipt,
+)
+from src.transcription.workflow import build_pending_job
 
 from src.transcription.candidate import CandidateSegment
 from src.transcription.profile import (
@@ -32,6 +43,7 @@ from src.transcription.types import (
     NormalizerConfig,
     ProfileAdmission,
     ProfileQualification,
+    PublicationIndexStatus,
     TimeUnit,
     TranscriptionInputRef,
 )
@@ -42,6 +54,10 @@ CANDIDATE_VERSION_ID = "123e4567-e89b-12d3-a456-426614174001"
 INPUT_SHA256 = "a" * 64
 CANONICAL_SHA256 = "b" * 64
 MARKDOWN_SHA256 = "c" * 64
+JOB_ID = "123e4567-e89b-12d3-a456-426614174010"
+REQUEST_ID = "123e4567-e89b-12d3-a456-426614174011"
+VERSION_ID = "123e4567-e89b-12d3-a456-426614174012"
+INDEX_JOB_ID = "123e4567-e89b-12d3-a456-426614174013"
 
 
 def load_json(name: str) -> Any:
@@ -212,3 +228,72 @@ class FakeGammaProvider(_FakeProviderBase):
 
 
 FAKE_PROVIDER_TYPES = (FakeAlphaProvider, FakeBetaProvider, FakeGammaProvider)
+
+
+def make_canonical() -> CanonicalTranscript:
+    return CanonicalTranscript.from_json_dict(load_json("canonical.json"))
+
+
+def make_phase2_store(tmp_path: Path) -> tuple[sqlite3.Connection, SQLiteTranscriptionStore, LocalTranscriptionArtifactStore]:
+    db_path = tmp_path / "app.sqlite"
+    init_db(db_path, backup_dir=tmp_path / "backups")
+    conn = connect(db_path)
+    conn.execute(
+        """INSERT INTO media_assets(
+            media_id,title,original_filename,storage_rel_path,mime_type,file_size,sha256,
+            transcript_source_path,transcript_origin,status,created_by,created_at,updated_at,error
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            MEDIA_ID, "Fixture video", "fixture.mp4", "fixture/original.mp4", "video/mp4", 1,
+            INPUT_SHA256, None, "generated", "uploaded", None, 1, 1, None,
+        ),
+    )
+    conn.commit()
+    return conn, SQLiteTranscriptionStore(conn), LocalTranscriptionArtifactStore((tmp_path / "artifacts").resolve())
+
+
+def make_pending_job(*, job_id: str = JOB_ID, request_id: str = REQUEST_ID, attempt: int = 1, created_at: int = 10):
+    input_ref, _profile, execution, snapshot = make_execution_bundle()
+    return build_pending_job(
+        job_id=job_id,
+        request_idempotency_key=request_id,
+        attempt_number=attempt,
+        input_ref=input_ref,
+        execution=execution,
+        snapshot=snapshot,
+        created_at=created_at,
+    )
+
+
+@dataclass(slots=True)
+class FakePublicationIndexPort:
+    behavior: str = "done"
+    calls: int = 0
+
+    def index_candidate(self, request):
+        self.calls += 1
+        if self.behavior == "invalid":
+            return {"raw": object()}
+        if self.behavior == "failed":
+            return PublicationIndexReceipt(
+                INDEX_RECEIPT_SCHEMA_VERSION,
+                request.index_job_id,
+                request.transcript_version_id,
+                request.candidate_version_id,
+                request.canonical_sha256,
+                request.markdown_sha256,
+                request.target_index_id,
+                PublicationIndexStatus.failed,
+                "index_adapter_failed",
+                "fake index adapter failed",
+            )
+        return PublicationIndexReceipt(
+            INDEX_RECEIPT_SCHEMA_VERSION,
+            request.index_job_id,
+            request.transcript_version_id,
+            request.candidate_version_id,
+            request.canonical_sha256,
+            request.markdown_sha256,
+            request.target_index_id,
+            PublicationIndexStatus.done,
+        )

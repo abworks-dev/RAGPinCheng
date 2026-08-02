@@ -8,8 +8,12 @@ user data.
 from __future__ import annotations
 
 import sqlite3
+import time
 from pathlib import Path
 from typing import Iterator
+
+from api.db_backup import create_migration_backup
+from api.db_migrations import apply_all, has_pending_ddl, read_schema_inventory
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 APP_DB_PATH = REPO_ROOT / "data" / "app.sqlite"
@@ -118,33 +122,39 @@ def _apply_pragmas(conn: sqlite3.Connection) -> None:
     conn.execute("PRAGMA synchronous = NORMAL")
 
 
-def connect() -> sqlite3.Connection:
+def connect(db_path: Path | None = None) -> sqlite3.Connection:
     """Open a connection with the standard pragmas applied.
 
     Caller owns the lifecycle (close it when done). For request handlers,
     use `get_db` as a FastAPI dependency instead.
     """
-    APP_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(APP_DB_PATH, check_same_thread=False)
+    path = APP_DB_PATH if db_path is None else db_path
+    if not isinstance(path, Path):
+        raise TypeError("db_path_must_be_path")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(path, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     _apply_pragmas(conn)
     return conn
 
 
-def init_db() -> None:
+def init_db(db_path: Path | None = None, *, backup_dir: Path | None = None) -> None:
     """Create tables and indexes if missing. Idempotent; safe on every boot.
 
     Also performs forward-only schema migrations: missing columns are added
     in place so existing databases work after a code update without downtime.
     """
-    conn = connect()
+    path = APP_DB_PATH if db_path is None else db_path
+    base_tables = frozenset({"users", "auth_sessions", "conversations", "messages", "index_jobs", "media_assets"})
+    pending = has_pending_ddl(path, base_tables=base_tables)
+    if path.exists() and pending:
+        target_dir = backup_dir or path.parent / "backups"
+        _tables, _columns, applied = read_schema_inventory(path)
+        old_schema_version = applied[-1][0] if applied else 0
+        create_migration_backup(path, target_dir, old_schema_version=old_schema_version)
+    conn = connect(path)
     try:
-        conn.executescript(SCHEMA)
-        # Migrate index_jobs: add media_id if missing
-        existing = {row[1] for row in conn.execute("PRAGMA table_info(index_jobs)").fetchall()}
-        if "media_id" not in existing:
-            conn.execute("ALTER TABLE index_jobs ADD COLUMN media_id TEXT")
-        conn.commit()
+        apply_all(conn, base_schema=SCHEMA, applied_at=int(time.time()))
     finally:
         conn.close()
 
