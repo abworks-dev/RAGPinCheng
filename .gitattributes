@@ -1,0 +1,2 @@
+# Transcript Markdown fixtures are byte-level formatter/parser contracts.
+tests/fixtures/transcription/*.md text eol=lf

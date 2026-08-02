@@ -1,0 +1,39 @@
+{
+  "parents": [
+    {
+      "text": "说话人 00:00\n第一段。\n\n说话人 00:00:05\nSecond manual line.",
+      "doc_title": "人工转录测试",
+      "category": "教学视频",
+      "section_path": "transcript",
+      "doc_type": "transcript",
+      "start_time": "00:00",
+      "media_id": "123e4567-e89b-12d3-a456-426614174000"
+    }
+  ],
+  "children": [
+    {
+      "parent_id_matches": true,
+      "text": "说话人 00:00\n第一段。",
+      "embed_text": "人工转录测试 @00:00\n\n第一段。",
+      "doc_title": "人工转录测试",
+      "category": "教学视频",
+      "section_path": "transcript",
+      "content_type": "prose",
+      "doc_type": "transcript",
+      "start_time": "00:00",
+      "media_id": "123e4567-e89b-12d3-a456-426614174000"
+    },
+    {
+      "parent_id_matches": true,
+      "text": "说话人 00:00:05\nSecond manual line.",
+      "embed_text": "人工转录测试 @00:00:05\n\nSecond manual line.",
+      "doc_title": "人工转录测试",
+      "category": "教学视频",
+      "section_path": "transcript",
+      "content_type": "prose",
+      "doc_type": "transcript",
+      "start_time": "00:00:05",
+      "media_id": "123e4567-e89b-12d3-a456-426614174000"
+    }
+  ]
+}
