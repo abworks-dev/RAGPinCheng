@@ -68,23 +68,18 @@ export function AdminConversationsPage() {
 
   return (
     <section className="space-y-5" aria-labelledby="admin-conversations-title">
-      <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <p className="text-ui-xs font-medium uppercase tracking-[0.14em] text-primary">内容审阅</p>
-          <h1 id="admin-conversations-title" className="mt-1 text-ui-2xl font-semibold tracking-tight text-foreground">
-            对话管理
-          </h1>
-          <p className="mt-1 text-ui-sm text-muted-foreground">按用户或主题查找近期对话，并在详情区查看完整消息。</p>
-        </div>
-        <Badge variant="secondary" className="w-fit">
-          {list.length} 条对话
-        </Badge>
+      <header>
+        <p className="text-ui-xs font-medium uppercase tracking-[0.14em] text-primary">内容审阅</p>
+        <h1 id="admin-conversations-title" className="mt-1 text-ui-2xl font-semibold tracking-tight text-foreground">
+          对话管理
+        </h1>
+        <p className="mt-1 text-ui-sm text-muted-foreground">按用户或主题查找近期对话，并在详情区查看完整消息。</p>
       </header>
 
       <Card className="shadow-surface">
-        <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-end sm:justify-between">
+        <CardContent className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between sm:p-4">
           <div className="w-full sm:max-w-xl">
-            <label htmlFor="conversation-filter" className="mb-1.5 block text-ui-sm font-medium text-foreground">
+            <label htmlFor="conversation-filter" className="sr-only">
               筛选对话
             </label>
             <Input
@@ -95,7 +90,7 @@ export function AdminConversationsPage() {
               placeholder="输入姓名、用户名或对话标题…"
             />
           </div>
-          <div className="flex min-h-control-md items-center gap-3">
+          <div className="flex min-h-control-md shrink-0 items-center gap-3">
             <span className="text-ui-xs text-muted-foreground" aria-live="polite">
               {filter ? `显示 ${visible.length} / ${list.length} 条` : `共 ${list.length} 条`}
             </span>
@@ -119,12 +114,9 @@ export function AdminConversationsPage() {
       ) : (
         <div className="grid gap-4 xl:h-[calc(100vh-17rem)] xl:min-h-[34rem] xl:grid-cols-[minmax(19rem,0.9fr)_minmax(0,1.5fr)]">
           <Card className="flex min-h-0 flex-col overflow-hidden shadow-surface">
-            <div className="flex items-center justify-between border-b border-border px-4 py-3">
-              <div>
-                <h2 className="text-ui-sm font-semibold text-foreground">对话列表</h2>
-                <p className="text-ui-xs text-muted-foreground">按最近更新时间排列</p>
-              </div>
-              <Badge variant="outline">{visible.length} 条</Badge>
+            <div className="border-b border-border px-4 py-3">
+              <h2 className="text-ui-sm font-semibold text-foreground">对话列表</h2>
+              <p className="text-ui-xs text-muted-foreground">按最近更新时间排列</p>
             </div>
 
             {visible.length === 0 ? (
@@ -151,8 +143,10 @@ export function AdminConversationsPage() {
                         onClick={() => selectConversation(conversation)}
                         disabled={loadingConversationId !== null}
                         className={cn(
-                          "w-full px-4 py-3 text-left transition-colors duration-normal focus-visible:relative focus-visible:z-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-wait disabled:opacity-70",
-                          active ? "bg-ui-accent text-ui-accent-foreground" : "bg-card hover:bg-surface-muted",
+                          "w-full border-l-2 px-4 py-3 text-left transition-colors duration-normal focus-visible:relative focus-visible:z-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-wait disabled:opacity-70",
+                          active
+                            ? "border-l-primary bg-primary/10"
+                            : "border-l-transparent bg-card hover:bg-surface-muted",
                         )}
                       >
                         <div className="flex items-start justify-between gap-3">
@@ -211,16 +205,25 @@ export function AdminConversationsPage() {
                           key={message.id ?? `${message.role}-${index}`}
                           className={cn(
                             "rounded-ui-xl border px-4 py-3",
-                            isUser ? "border-primary/20 bg-primary/10" : "border-border bg-surface-muted",
+                            isUser
+                              ? "ml-auto w-fit max-w-[88%] border-primary/20 bg-primary/10"
+                              : "mr-auto w-full max-w-3xl border-border bg-surface-muted",
                           )}
                         >
                           <div className="mb-2 flex items-center justify-between gap-3">
-                            <Badge variant={isUser ? "info" : "secondary"}>{roleLabels[message.role]}</Badge>
+                            <Badge
+                              variant={message.role === "user" ? "info" : message.role === "system" ? "warning" : "outline"}
+                              className={message.role === "assistant" ? "border-border bg-card" : undefined}
+                            >
+                              {roleLabels[message.role]}
+                            </Badge>
                             {message.created_at && (
                               <span className="text-ui-xs text-muted-foreground">{formatAdminDate(message.created_at)}</span>
                             )}
                           </div>
-                          <p className="whitespace-pre-wrap break-words text-ui-sm leading-relaxed text-foreground">{message.content}</p>
+                          <p className="max-w-[72ch] whitespace-pre-wrap break-words text-ui-sm leading-relaxed text-foreground">
+                            {message.content}
+                          </p>
                         </article>
                       );
                     })}
