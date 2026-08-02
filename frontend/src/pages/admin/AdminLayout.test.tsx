@@ -70,15 +70,28 @@ describe("AdminLayout tab boundary", () => {
     vi.clearAllMocks();
   });
 
-  it("keeps the tab order and mounts only the selected page", () => {
+  it("keeps the admin identity and return navigation visible", () => {
     render(
       <MemoryRouter>
         <AdminLayout />
       </MemoryRouter>,
     );
 
-    const navigation = screen.getByRole("navigation");
-    expect(within(navigation).getAllByRole("button").map((button) => button.textContent)).toEqual([
+    expect(screen.getByText("品成 BIM 知识库")).toBeInTheDocument();
+    expect(screen.getByText("测试管理员（admin-test）")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /返回对话/ })).toHaveAttribute("href", "/");
+    expect(screen.getByRole("button", { name: "退出" })).toBeInTheDocument();
+  });
+
+  it("keeps the tab order, current marker, and mounts only the selected page", () => {
+    render(
+      <MemoryRouter>
+        <AdminLayout />
+      </MemoryRouter>,
+    );
+
+    const navigation = screen.getByRole("navigation", { name: "管理功能" });
+    expect(within(navigation).getAllByRole("button").map((button) => button.textContent?.trim())).toEqual([
       "用户",
       "对话",
       "资料管理",
@@ -87,10 +100,13 @@ describe("AdminLayout tab boundary", () => {
       "反馈",
     ]);
 
+    expect(screen.getByRole("button", { name: "用户" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByText("用户页面内容")).toBeInTheDocument();
     expect(screen.queryByText("对话页面内容")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "对话" }));
+    expect(screen.getByRole("button", { name: "对话" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("button", { name: "用户" })).not.toHaveAttribute("aria-current");
     expect(screen.getByText("对话页面内容")).toBeInTheDocument();
     expect(screen.queryByText("用户页面内容")).not.toBeInTheDocument();
 

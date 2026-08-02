@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
+import { Button, buttonVariants } from "../../components/ui/button";
 import { useAuth } from "../../context/AuthContext";
+import { cn } from "../../lib/utils";
 import { AdminConversationsPage } from "./AdminConversationsPage";
 import { AdminDocumentsPage } from "./AdminDocumentsPage";
 import { AdminFeedbackPage } from "./AdminFeedbackPage";
@@ -10,73 +12,106 @@ import { AdminUsersPage } from "./AdminUsersPage";
 
 type Tab = "users" | "conversations" | "corpus" | "media" | "stats" | "feedback";
 
+const tabs: [Tab, string][] = [
+  ["users", "用户"],
+  ["conversations", "对话"],
+  ["corpus", "资料管理"],
+  ["media", "视频媒体"],
+  ["stats", "概览"],
+  ["feedback", "反馈"],
+];
+
 export function AdminLayout() {
   const { state, logout } = useAuth();
   const [tab, setTab] = useState<Tab>("users");
 
   return (
-    <div className="h-full flex flex-col bg-bg">
-      <header className="border-b border-gray-200 bg-panel px-6 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <span className="text-lg">🛠️</span>
-          <h1 className="font-semibold">管理后台 · 品成 BIM 知识库</h1>
-        </div>
-        <div className="flex items-center gap-3 text-sm">
-          <Link to="/" className="text-accent hover:underline">
-            ← 返回对话
-          </Link>
-          {state.status === "authed" && (
-            <span className="text-muted">
-              {state.user.real_name}（{state.user.employee_id}）
+    <div className="min-h-full bg-admin-background text-foreground">
+      <header className="sticky top-0 z-sticky border-b border-border bg-admin-surface/95 backdrop-blur">
+        <div className="mx-auto flex min-h-16 max-w-[1600px] items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
+          <div className="flex min-w-0 items-center gap-3">
+            <span
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-ui-lg bg-primary text-ui-sm font-semibold text-primary-foreground shadow-surface"
+              aria-hidden="true"
+            >
+              品
             </span>
-          )}
-          <button
-            type="button"
-            onClick={async () => {
-              await logout();
-              window.location.href = "/login";
-            }}
-            className="text-muted hover:text-red-600"
-          >
-            退出
-          </button>
+            <div className="min-w-0">
+              <p className="truncate text-ui-sm font-semibold text-foreground sm:text-ui-base">品成 BIM 知识库</p>
+              <p className="hidden text-ui-xs text-muted-foreground sm:block">管理工作台</p>
+            </div>
+          </div>
+
+          <div className="flex shrink-0 items-center gap-1 sm:gap-2">
+            {state.status === "authed" && (
+              <span className="hidden max-w-56 truncate text-ui-sm text-muted-foreground xl:inline">
+                {state.user.real_name}（{state.user.employee_id}）
+              </span>
+            )}
+            <Link to="/" className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "px-2 sm:px-3")}>
+              <span aria-hidden="true">←</span>
+              <span className="hidden sm:inline">返回对话</span>
+              <span className="sm:hidden">返回</span>
+            </Link>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="px-2 text-muted-foreground hover:text-destructive sm:px-3"
+              onClick={async () => {
+                await logout();
+                window.location.href = "/login";
+              }}
+            >
+              退出
+            </Button>
+          </div>
         </div>
       </header>
 
-      <div className="border-b border-gray-200 bg-panel px-6">
-        <nav className="flex gap-1">
-          {([
-            ["users", "用户"],
-            ["conversations", "对话"],
-            ["corpus", "资料管理"],
-            ["media", "视频媒体"],
-            ["stats", "概览"],
-            ["feedback", "反馈"],
-          ] as [Tab, string][]).map(([key, label]) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => setTab(key)}
-              className={
-                "px-4 py-2 text-sm border-b-2 -mb-px " +
-                (tab === key
-                  ? "border-accent text-accent"
-                  : "border-transparent text-muted hover:text-ink")
-              }
-            >
-              {label}
-            </button>
-          ))}
-        </nav>
-      </div>
+      <div className="mx-auto flex max-w-[1600px] flex-col lg:min-h-[calc(100vh-4rem)] lg:flex-row">
+        <aside className="shrink-0 border-b border-border bg-admin-surface lg:w-64 lg:border-b-0 lg:border-r">
+          <div className="px-3 py-3 lg:p-4">
+            <p className="mb-2 hidden px-3 text-ui-xs font-medium uppercase tracking-[0.14em] text-muted-foreground lg:block">
+              管理功能
+            </p>
+            <nav aria-label="管理功能" className="flex gap-1 overflow-x-auto pb-1 lg:flex-col lg:overflow-visible lg:pb-0">
+              {tabs.map(([key, label]) => {
+                const active = tab === key;
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => setTab(key)}
+                    aria-current={active ? "page" : undefined}
+                    className={cn(
+                      "flex h-control-md shrink-0 items-center gap-3 rounded-ui-lg px-3 text-ui-sm font-medium transition-colors duration-normal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                      active
+                        ? "bg-primary text-primary-foreground shadow-surface"
+                        : "text-muted-foreground hover:bg-surface-muted hover:text-foreground",
+                    )}
+                  >
+                    <span
+                      className={cn("h-2 w-2 rounded-full", active ? "bg-primary-foreground" : "bg-border")}
+                      aria-hidden="true"
+                    />
+                    {label}
+                  </button>
+                );
+              })}
+            </nav>
+          </div>
+        </aside>
 
-      <div className="flex-1 overflow-y-auto p-6">
-        {tab === "users" && <AdminUsersPage />}
-        {tab === "conversations" && <AdminConversationsPage />}
-        {tab === "corpus" && <AdminDocumentsPage />}
-        {tab === "media" && <AdminMediaPage />}
-        {tab === "stats" && <AdminOverviewPage />}
-        {tab === "feedback" && <AdminFeedbackPage />}
+        <main className="min-w-0 flex-1 p-4 sm:p-6 lg:p-8">
+          <div className="mx-auto max-w-7xl">
+            {tab === "users" && <AdminUsersPage />}
+            {tab === "conversations" && <AdminConversationsPage />}
+            {tab === "corpus" && <AdminDocumentsPage />}
+            {tab === "media" && <AdminMediaPage />}
+            {tab === "stats" && <AdminOverviewPage />}
+            {tab === "feedback" && <AdminFeedbackPage />}
+          </div>
+        </main>
       </div>
     </div>
   );
