@@ -49,6 +49,26 @@ jobs:
           touch .env
           docker compose -f docker/docker-compose.yml config --quiet
 
+  test-transcription-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install declared Python contract-test dependencies
+        run: |
+          pip install pytest requests pypdf langchain-text-splitters qdrant-client openai python-dotenv tqdm fastapi sse-starlette passlib[argon2] python-multipart
+
+      - name: Run Phase 1 transcription contract tests
+        run: pytest tests/test_transcription*.py tests/test_transcript_manual_regression.py -v
+
   test-providers:
     runs-on: ubuntu-latest
     timeout-minutes: 10

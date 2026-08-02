@@ -1,0 +1,24 @@
+{
+  "provider_key": "fake-alpha",
+  "language": "zh-CN",
+  "duration_ms": 70000,
+  "segments": [
+    {
+      "original_position": 0,
+      "start_value": "0",
+      "end_value": "1.500",
+      "time_unit": "seconds",
+      "text": "你好，世界。",
+      "confidence": 0.9
+    },
+    {
+      "original_position": 1,
+      "start_value": "1.500",
+      "end_value": "3",
+      "time_unit": "seconds",
+      "text": "Second line.",
+      "confidence": null
+    }
+  ],
+  "artifact_refs": []
+}
