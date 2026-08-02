@@ -1,0 +1,21 @@
+# Windows ASR service dependencies excluding CUDA Torch.
+# R3B installs torch/torchaudio from the approved cu128 index first.
+fastapi>=0.115,<1
+uvicorn[standard]>=0.32,<1
+pydantic>=2,<3
+httpx>=0.27,<1
+python-dotenv>=1,<2
+funasr>=1.2,<2
+modelscope>=1.20,<2
+av>=12,<19
+soundfile>=0.12,<1
+onnxruntime>=1.17,<2
+transformers>=4.46,<5
+huggingface-hub>=0.34,<1
+safetensors>=0.4,<1
+tokenizers>=0.20,<0.24
+requests>=2.32,<3
+tqdm>=4.66,<5
+pyyaml>=6,<7
+packaging>=23,<26
+numpy>=1.24,<2
