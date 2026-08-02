@@ -6,6 +6,7 @@ import { AuthProvider, useAuth } from "./context/AuthContext";
 import { AdminDashboard } from "./pages/AdminDashboard";
 import { LoginPage } from "./pages/LoginPage";
 import { RegisterPage } from "./pages/RegisterPage";
+import { Toaster } from "./components/ui/toast";
 
 function FullPageLoader({ label }: { label: string }) {
   return (
@@ -78,6 +79,7 @@ export default function App() {
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
           <VideoPlayerDrawer />
+          <Toaster />
         </VideoPlayerProvider>
       </AuthProvider>
     </Router>

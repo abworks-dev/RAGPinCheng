@@ -1,12 +1,14 @@
 # Office 文档上传、解析与只读预览支持方案
 
-> 状态：候选方案，尚未实施。  
+> 状态：Phase 1～9 已完成；Phase 10～12 部分完成，剩余工作以 `TODO.md` 为准。
 > 适用项目：RAGPinCheng  
 > 使用者：Claude Code、Codex 和项目维护人员。
 
+本文件保留 Office 能力的整体设计和实施背景，不作为完成事实清单。完成时间、实际修改和验证结果以 `WORKLOG.md` 为准。
+
 ## 1. 目标
 
-在现有 RAG 管道中增加对 Word（.docx）、Excel（.xlsx）、PowerPoint（.pptx）文档的支持，包括：
+在现有 RAG 管道中维护 Word（.docx）、Excel（.xlsx）、PowerPoint（.pptx）文档支持，包括：
 - 上传与安全校验
 - 索引解析（供 RAG 检索）
 - 前端只读预览（右侧面板）
@@ -35,7 +37,7 @@ XLSX → openpyxl 专用转换器 ───────────────�
 
 ## 4. 数据契约变更
 
-### 新增字段
+### 已接入字段
 
 | 字段 | 所属对象 | 说明 |
 |------|---------|------|
@@ -43,9 +45,7 @@ XLSX → openpyxl 专用转换器 ───────────────�
 | `sheet_name` | `Parent`/`Child`/Qdrant payload | XLSX 工作表名 |
 | `cell_range` | `Parent`/`Child`/Qdrant payload | XLSX 单元格区域（如 `A1:F12`） |
 | `slide_number` | `Parent`/`Child`/Qdrant payload | PPTX 幻灯片编号 |
-| `paragraph_anchor` | `Parent`/`Child`/Qdrant payload | DOCX 段落锚点（待决策具体方案） |
-| `preview_path` | `ParsedDoc` | 预览文件路径（如 PPTX 转换的 PDF） |
-| `preview_status` | 索引任务 | 预览生成状态 |
+| `paragraph_anchor` | `Parent`/`Child`/Qdrant payload | DOCX 段落锚点 |
 
 ### 兼容性
 
@@ -68,11 +68,8 @@ XLSX → openpyxl 专用转换器 ───────────────�
 
 ### 安全校验
 
-- 扩展名 + MIME 类型 + 文件签名（magic bytes）三重校验
-- 压缩炸弹检测（zip bomb）
-- 宏文件检测（拒绝带 VBA 的 Office 文件）
-- 外部链接检测
-- 超大文件检测（复用现有 `MAX_UPLOAD_BYTES`）
+- 已实现：扩展名分类、ZIP 文件头校验、压缩炸弹检测、宏文件拒绝和上传大小限制。
+- 待补齐：MIME/OOXML 内容类型的精细校验、外部链接及嵌入对象策略。
 
 ## 6. 索引解析
 
@@ -137,19 +134,41 @@ DocumentPreview
 | 7 | Schema 迁移 | 需要，新增 `doc_type` 值：`docx`/`xlsx`/`pptx`，不再复用 `doc_type="pdf"` |
 | 8 | 复杂 DOCX 自动降级 | 允许，但需显式标记 `parsed_via="mineru_fallback"`，`doc_type` 仍标记为 `docx` |
 
-## 9. 实施阶段
+## 9. 实施阶段与当前状态
 
-| 阶段 | 内容 | 依赖 |
+| 阶段 | 内容 | 状态 |
 |------|------|------|
-| 1 | 契约与样本基线 | 无 |
-| 2 | Office 上传和公共解析接口 | 1 |
-| 3 | DOCX 索引解析 | 2 |
-| 4 | DOCX 前端预览 | 3 |
-| 5 | XLSX 索引解析 | 2 |
-| 6 | XLSX 前端预览 | 5 |
-| 7 | PPTX 索引与预览 | 2, 8 |
-| 8 | LibreOffice 转换服务 | 7 |
-| 9 | 引用定位 | 4, 6, 7 |
-| 10 | 安全、性能和故障恢复 | 2-8 |
-| 11 | Docker 与生产发布 | 2-8, 10 |
-| 12 | 自动化测试和用户验收 | 2-11 |
+| 1 | 契约与样本基线 | 已完成 |
+| 2 | Office 上传和公共解析接口 | 已完成 |
+| 3 | DOCX 索引解析 | 已完成 |
+| 4 | DOCX 前端预览 | 已完成 |
+| 5 | XLSX 索引解析 | 已完成 |
+| 6 | XLSX 前端预览 | 已完成 |
+| 7 | PPTX 索引与预览 | 已完成 |
+| 8 | LibreOffice 转换服务 | 已完成 |
+| 9 | 引用定位 | 已完成 |
+| 10 | 安全、性能和故障恢复 | 部分完成 |
+| 11 | Docker 与生产发布 | 部分完成 |
+| 12 | 自动化测试和用户验收 | 部分完成 |
+
+## 10. Phase 10～12 核对结论（2026-07-31）
+
+### 已有基础
+
+- 上传采用流式写盘并限制单文件大小。
+- Office ZIP 文件头、压缩比和宏内容已有检查。
+- 索引任务由单 worker 串行处理；LibreOffice HTTP 调用有超时。
+- 删除入口会清理 Qdrant、parents.sqlite、原文件和同 stem 的解析 Markdown。
+- Docling、openpyxl、docx-preview、SheetJS、LibreOffice 独立容器、Compose 环境变量均已落地。
+- `tests/test_xlsx_converter.py` 覆盖部分 XLSX 值格式、公式、隐藏 Sheet、数据区域和定位元数据。
+
+### 仍需完成
+
+- 外部链接/嵌入对象检测、统一解析超时、磁盘空间告警。
+- 删除时补齐 `.preview.pdf`、`.preview.xlsx` 等全部派生产物，并增加自动化验证。
+- 完善 Office/LibreOffice 部署、健康检查、资源影响、停用和回滚说明。
+- 评估独立功能开关与灰度策略。
+- 增加 DOCX/PPTX、上传安全、鉴权、失败重试、删除清理和前端引用定位测试。
+- 形成非敏感样本的完整用户验收矩阵。
+
+这些剩余项的可执行清单只保留在 `TODO.md`，避免本方案再次成为第二份待办。
