@@ -5,13 +5,15 @@ without requiring a real GPU or loaded models.  They use the FastAPI
 TestClient and mock the ModelManager to return deterministic values.
 
 Run with:
-    pip install -r gpu_service\requirements.txt pytest httpx
-    pytest gpu_service\tests\ -v
+    pip install fastapi uvicorn pydantic httpx pytest python-dotenv
+    pytest gpu_service/tests/test_contract.py -v
 """
 
 from __future__ import annotations
 
 import json
+import sys
+import types
 from unittest.mock import patch, PropertyMock
 
 import pytest
@@ -22,7 +24,21 @@ from fastapi.testclient import TestClient
 import os
 os.environ["GPU_SERVICE_TOKEN"] = "test-token-123"
 
-from gpu_service.app import app, _model_manager
+torch_stub = types.ModuleType("torch")
+torch_stub.__version__ = "test-stub"
+torch_stub.cuda = types.SimpleNamespace(
+    is_available=lambda: False,
+    empty_cache=lambda: None,
+)
+sys.modules.setdefault("torch", torch_stub)
+flag_embedding_stub = types.ModuleType("FlagEmbedding")
+flag_embedding_stub.__version__ = "test-stub"
+transformers_stub = types.ModuleType("transformers")
+transformers_stub.__version__ = "test-stub"
+sys.modules.setdefault("FlagEmbedding", flag_embedding_stub)
+sys.modules.setdefault("transformers", transformers_stub)
+
+from gpu_service.app import app, _activity_tracker, _model_manager
 from gpu_service.schemas import (
     EmbeddingResponse,
     HealthResponse,
@@ -46,6 +62,7 @@ MOCK_EMBED_RESULT = [
 def reset_model_manager():
     """Reset the singleton between tests so is_loaded state is clean."""
     # Force the manager to appear unloaded by default
+    _activity_tracker.reset_for_tests()
     with patch.object(_model_manager, "_initialized", False):
         with patch.object(_model_manager, "_embed_model", None):
             with patch.object(type(_model_manager), "is_loaded", new_callable=PropertyMock, return_value=False):
@@ -80,6 +97,74 @@ def test_health_loaded(model_loaded):
     data = HealthResponse(**resp.json())
     assert data.status == "ok"
     assert data.model_loaded is True
+
+
+
+
+# ── Authenticated activity ──────────────────────────────────────────────────
+
+def test_activity_requires_auth():
+    assert client.get("/v1/activity").status_code == status.HTTP_401_UNAUTHORIZED
+    assert client.get(
+        "/v1/activity", headers={"Authorization": "Bearer wrong-token"}
+    ).status_code == status.HTTP_403_FORBIDDEN
+
+
+def test_activity_is_fail_closed_when_model_unloaded():
+    resp = client.get("/v1/activity", headers=AUTH_HEADER)
+    assert resp.status_code == status.HTTP_200_OK
+    assert resp.json() == {
+        "api_version": "gpu-activity/1",
+        "model_loaded": False,
+        "inflight_requests": 0,
+        "asr_chunk_allowed": False,
+    }
+
+
+def test_activity_allows_asr_only_when_loaded_and_idle(model_loaded):
+    idle = client.get("/v1/activity", headers=AUTH_HEADER).json()
+    assert idle == {
+        "api_version": "gpu-activity/1",
+        "model_loaded": True,
+        "inflight_requests": 0,
+        "asr_chunk_allowed": True,
+    }
+    with _activity_tracker.inference():
+        busy = client.get("/v1/activity", headers=AUTH_HEADER).json()
+        assert busy["inflight_requests"] == 1
+        assert busy["asr_chunk_allowed"] is False
+    assert _activity_tracker.count() == 0
+
+
+def test_activity_tracker_releases_count_after_failure():
+    with pytest.raises(RuntimeError):
+        with _activity_tracker.inference():
+            raise RuntimeError("boom")
+    assert _activity_tracker.count() == 0
+
+
+def test_embedding_and_rerank_calls_are_counted_as_inflight(model_loaded):
+    def embed_side_effect(*_args, **_kwargs):
+        assert _activity_tracker.count() == 1
+        return MOCK_EMBED_RESULT
+
+    def rerank_side_effect(*_args, **_kwargs):
+        assert _activity_tracker.count() == 1
+        return [0.9, 0.3]
+
+    with patch.object(_model_manager, "embed", side_effect=embed_side_effect):
+        assert client.post(
+            "/v1/embeddings", json={"texts": ["hello"]}, headers=AUTH_HEADER
+        ).status_code == status.HTTP_200_OK
+    assert _activity_tracker.count() == 0
+
+    with patch.object(_model_manager, "rerank", side_effect=rerank_side_effect):
+        assert client.post(
+            "/v1/rerank",
+            json={"query": "q", "passages": ["p"]},
+            headers=AUTH_HEADER,
+        ).status_code == status.HTTP_200_OK
+    assert _activity_tracker.count() == 0
 
 
 # ── Model Info ───────────────────────────────────────────────────────────────

@@ -1594,6 +1594,13 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 新增 `project-docs/plans/multi-engine-transcription-phase3.md`，冻结独立 `asr_service`、Provider Registry、可恢复上传/job、单卡调度、BGE 优先端口、experimental FunASR adapter、无 GPU 测试和回滚边界。
 - 本轮未实施 Phase 3 代码，未安装依赖，未访问真实模型、GPU、生产服务、真实媒体、数据库或 Qdrant；计划等待用户明确审批。
 
+### 04:50 — 实施 Windows ASR R3A 仓库部署通道
+
+- 完成：在独立 worktree 中实现 Windows ASR 固定目录与配置所有权、严格离线 SenseVoice manifest 校验、GPU service 受鉴权 `/v1/activity`、fail-closed BGE 优先级探针、独立启动/部署/验收 PowerShell 脚本、手动 production workflow、Windows 专用依赖声明及 CI 合约接线；scoped review 进一步要求 manifest 完整枚举除自身外的全部模型常规文件并拒绝符号链接或未列出文件。
+- 文件：修改 `.env.example`、`.github/workflows/ci.yml`、`TODO.md`、`asr_service/**`、`gpu_service/**`；新增 `.github/workflows/deploy-asr-production.yml`、`scripts/start-asr-service.ps1`、`scripts/deploy-asr.ps1`、`scripts/verify-asr-service.ps1`、`tests/test_asr_deployment_static.py`、`project-docs/plans/multi-engine-transcription-phase5c-windows-asr-deployment.md`。
+- 验证：R3A 纯离线测试 77/77 通过；Python `compileall`、三份 PowerShell 脚本语法解析、两份 workflow YAML 解析和 `git diff --check` 通过。PR #8 首轮远端 CI 的 `test-asr-service-contract`、`test-gpu-contract`、`test-providers`、`test-transcription-contracts`、`test-transcription-phase5`、`validate`、`validate-migration-config` 七个 job 全部通过；其中本地因缺少 FastAPI 未运行的 ASR API/auth 与 GPU contract 测试已由 CI 覆盖。
+- 边界：未连接生产主机、未安装依赖、未下载模型、未修改防火墙、未写入生产 Token、未启动服务，也未迁移现有 GPU service Python 环境；R3B/R3C 仍需另行逐项审批。
+
 ### 05:29 — 修复 Phase 1 Candidate 边界并更新 PR
 
 - 完成：Provider Candidate 在进入 normalizer 前必须经严格 JSON Schema 重建，低层篡改的嵌套 artifact 统一归一化为永久 `invalid_provider_output`；PR #1 已 rebase 到最新 `master`，唯一总体计划文档冲突按获批 Phase 1 契约解决，状态恢复为 `MERGEABLE/CLEAN`。
