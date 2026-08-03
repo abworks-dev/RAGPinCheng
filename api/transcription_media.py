@@ -146,6 +146,9 @@ class FileTranscriptionInputSource:
         if input_ref != self.prepared.input_ref:
             raise ContractValidationError("input_reference_mismatch", "input_ref")
         require_int(part_size_bytes, "part_size_bytes", positive=True)
+        preflight_sha256, preflight_size = _sha256_file(self.prepared.path)
+        if preflight_size != input_ref.size_bytes or preflight_sha256 != input_ref.content_sha256:
+            raise ContractValidationError("input_content_mismatch", "input_ref")
         digest = hashlib.sha256()
         offset = 0
         with self.prepared.path.open("rb") as handle:
