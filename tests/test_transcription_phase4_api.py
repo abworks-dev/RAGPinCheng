@@ -4,8 +4,6 @@ import asyncio
 
 import pytest
 
-pytest.importorskip("fastapi")
-
 from pydantic import ValidationError
 from fastapi import HTTPException
 
