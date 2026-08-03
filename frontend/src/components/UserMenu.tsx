@@ -2,8 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { useTheme } from "../hooks/useTheme";
+import { ChevronUp, LogOut, Moon, Shield, Sun } from "lucide-react";
 
-export function UserMenu() {
+export function UserMenu({ collapsed = false }: { collapsed?: boolean }) {
   const { state, logout } = useAuth();
   const [theme, toggleTheme] = useTheme();
   const [open, setOpen] = useState(false);
@@ -28,28 +29,30 @@ export function UserMenu() {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center gap-3 rounded-lg px-2 py-2 hover:bg-gray-100 dark:hover:bg-gray-800"
+        title={collapsed ? u.real_name : undefined}
+        className={`flex items-center rounded-ui-md hover:bg-secondary ${collapsed ? "size-10 justify-center p-1" : "w-full gap-3 px-2 py-2"}`}
       >
         <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-accent text-white text-sm font-semibold">
           {initials}
         </span>
-        <div className="flex-1 min-w-0 text-left">
+        {!collapsed && <div className="flex-1 min-w-0 text-left">
           <div className="text-sm truncate">{u.real_name}</div>
           <div className="text-[11px] text-muted truncate">用户名 {u.employee_id}</div>
-        </div>
-        <span className="text-muted text-xs">▾</span>
+        </div>}
+        {!collapsed && <ChevronUp className={`size-4 text-muted-foreground transition-transform ${open ? "" : "rotate-180"}`} />}
       </button>
       {open && (
-        <div className="absolute bottom-12 left-0 right-0 rounded-lg border border-gray-200 bg-panel shadow-lg py-1 z-10">
+        <div className={`absolute bottom-12 z-dropdown rounded-ui-md border border-border bg-popover p-1.5 text-popover-foreground shadow-overlay ${collapsed ? "left-12 w-48" : "left-0 right-0"}`}>
           <button
             type="button"
             onClick={() => {
               toggleTheme();
               setOpen(false);
             }}
-            className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-800"
+            className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-left text-sm hover:bg-secondary"
           >
-            {theme === "dark" ? "☀️ 浅色模式" : "🌙 深色模式"}
+            {theme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}
+            {theme === "dark" ? "浅色模式" : "深色模式"}
           </button>
           {u.role === "admin" && (
             <button
@@ -58,9 +61,10 @@ export function UserMenu() {
                 setOpen(false);
                 navigate("/admin");
               }}
-              className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-800"
+              className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-left text-sm hover:bg-secondary"
             >
-              🛠️ 管理后台
+              <Shield className="size-4" />
+              管理后台
             </button>
           )}
           <button
@@ -70,8 +74,9 @@ export function UserMenu() {
               await logout();
               navigate("/login");
             }}
-            className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-800 text-red-600"
+            className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-left text-sm text-destructive hover:bg-destructive/10"
           >
+            <LogOut className="size-4" />
             退出登录
           </button>
         </div>

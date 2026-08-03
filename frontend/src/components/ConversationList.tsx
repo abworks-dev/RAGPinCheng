@@ -1,4 +1,5 @@
 import type { Conversation } from "../types";
+import { Trash2 } from "lucide-react";
 
 function formatRelative(ts: number): string {
   const diff = Date.now() / 1000 - ts;
@@ -33,9 +34,25 @@ export function ConversationList({
       </div>
     );
   }
+
+  const now = Date.now() / 1000;
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const todayStartSeconds = todayStart.getTime() / 1000;
+  const groups = [
+    { label: "今天", items: conversations.filter((conversation) => conversation.updated_at >= todayStartSeconds) },
+    { label: "7 天内", items: conversations.filter((conversation) => conversation.updated_at < todayStartSeconds && now - conversation.updated_at < 7 * 86400) },
+    { label: "30 天内", items: conversations.filter((conversation) => now - conversation.updated_at >= 7 * 86400 && now - conversation.updated_at < 30 * 86400) },
+    { label: "更早", items: conversations.filter((conversation) => now - conversation.updated_at >= 30 * 86400) },
+  ].filter((group) => group.items.length > 0);
+
   return (
-    <ul className="space-y-0.5">
-      {conversations.map((c) => {
+    <div className="space-y-5">
+      {groups.map((group) => (
+        <section key={group.label}>
+          <h2 className="mb-1.5 px-2 text-[11px] font-medium text-muted-foreground">{group.label}</h2>
+          <ul className="space-y-0.5">
+      {group.items.map((c) => {
         const active = c.id === currentId;
         return (
           <li key={c.id}>
@@ -61,15 +78,18 @@ export function ConversationList({
                     onDelete(c.id);
                   }
                 }}
-                className="opacity-0 group-hover:opacity-100 text-muted hover:text-red-600 text-xs px-1"
+                className="inline-flex size-7 items-center justify-center rounded-ui-sm text-muted opacity-0 hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
                 title="删除对话"
               >
-                ✕
+                <Trash2 className="size-3.5" />
               </button>
             </div>
           </li>
         );
       })}
-    </ul>
+          </ul>
+        </section>
+      ))}
+    </div>
   );
 }
