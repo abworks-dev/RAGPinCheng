@@ -1631,3 +1631,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`frontend/src/pages/admin/AdminConversationsPage.tsx`、`frontend/src/pages/admin/AdminConversationsPage.test.tsx`、`WORKLOG.md`。
 - 验证：针对性测试 6/6、前端全量 Vitest 11 个文件 52/52 通过；TypeScript 与 Vite production build 通过（406 modules transformed）；`git diff --check` 通过。保留既有 React Router future warning、CSS minify warning 和主包大于 500 kB 警告。
 - 边界：仅修改独立对话管理页及其回归测试，未修改用户管理页中的相似布局、API、认证、数据、依赖或全局样式；尚未使用真实管理员账号完成生产视觉验收。推送 `master` 后将由现有 CI 成功事件自动触发生产部署。
+
+### 09:47 — 统一管理端资料管理与索引任务页面
+
+- 完成：将管理端资料管理与索引任务页迁移到现有语义 Token 与基础组件，统一页面标题、上传与分类表单、文件选择反馈、已索引资料表格、索引任务状态、操作按钮，以及加载、空数据、错误反馈与原位重试；小屏保留横向表格滚动。
+- 文件：`frontend/src/pages/admin/AdminDocumentsPage.tsx`、新增 `frontend/src/pages/admin/AdminDocumentsPage.test.tsx`、`WORKLOG.md`。
+- 验证：针对性测试 8/8 通过；前端全量 Vitest 12 个文件、60/60 项测试通过；TypeScript project build 与 Vite production build 通过（406 modules transformed）；`git diff --check` 通过。保留既有 React Router future warning、CSS minify warning 和主包大于 500 kB 警告。
+- 边界：保留三接口初始并行加载、多文件上传与分类参数、活跃任务每 3 秒轮询、完成后刷新资料、资料两阶段删除确认、终态任务重试与记录删除契约；保留原生 `alert`、`confirm`，未修改 API、认证、CSRF、Cookie、FormData、后端、依赖、全局样式或其他页面，未操作真实资料；生产视觉验收尚未执行。
