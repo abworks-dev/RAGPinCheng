@@ -1581,6 +1581,12 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 
 ## 2026-08-03
 
+### 08:41 — 编写多引擎转录 Phase 3 R2 详细计划
+
+- 只读核验 Phase 1 唯一 Provider 结果流、Profile Registry、Phase 2 持久化/checkpoint、人工媒体路径、独立 GPU 服务和 CI 边界。
+- 新增 `project-docs/plans/multi-engine-transcription-phase3.md`，冻结独立 `asr_service`、Provider Registry、可恢复上传/job、单卡调度、BGE 优先端口、experimental FunASR adapter、无 GPU 测试和回滚边界。
+- 本轮未实施 Phase 3 代码，未安装依赖，未访问真实模型、GPU、生产服务、真实媒体、数据库或 Qdrant；计划等待用户明确审批。
+
 ### 05:29 — 修复 Phase 1 Candidate 边界并更新 PR
 
 - 完成：Provider Candidate 在进入 normalizer 前必须经严格 JSON Schema 重建，低层篡改的嵌套 artifact 统一归一化为永久 `invalid_provider_output`；PR #1 已 rebase 到最新 `master`，唯一总体计划文档冲突按获批 Phase 1 契约解决，状态恢复为 `MERGEABLE/CLEAN`。
@@ -1622,3 +1628,15 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 完成：在 `codex/multi-engine-transcription-phase2` 独立分支提交 Phase 2，并 rebase 到 `origin/master@94645e6`；唯一 WORKLOG 冲突按时间保留双方记录，远端前端代码没有冲突或改写。
 - 验证：最新基线重新运行 Phase 1+2 transcription suite 为 190 passed、1 skipped，`compileall` 与提交级 `git diff --check` 通过；本地工作区干净。
 - 边界/风险：已将独立分支 `codex/multi-engine-transcription-phase2` 推送到 `origin`，未创建 PR、未合并、未直接推送 `master`。普通分支 push 不触发当前 CI；GitHub Actions 状态查询另遇 HTTP 502，因此远端零跳过验证仍待后续明确选择触发方式。
+
+### 08:26 — 梳理多引擎转录阶段与最终目标
+
+- 完成：只读核对多引擎自动转录总体方案、ADR、Phase 1/2 计划、功能地图、当前源码目录、测试清单与最新工作记录；确认总体按阶段 A 加 Phase 1～6 推进，并汇总当前完成度、最终端到端能力和明确排除项。
+- 文件：仅更新 `WORKLOG.md`；未修改代码、配置、数据库、索引或部署状态。
+- 验证：核对当前 HEAD 指向 `codex/multi-engine-transcription-phase2`，Phase 1/2 源码与 17 个 transcription 测试文件存在；终端受环境策略阻止，未能重新执行 `git status` 或测试，结论采用源码、计划和既有可复核日志交叉验证。
+
+### 08:37 — 详解多引擎转录阶段与领域名词
+
+- 完成：在前述阶段梳理基础上，进一步核对总体方案、Phase 1/2 详细计划及 `src/transcription/`、SQLite Store/Migration 的实际类型与状态机，整理 Provider、Profile、Candidate、Canonical、Normalizer、Formatter、任务、版本、审核、发布、候选索引、正式 head、checkpoint、恢复和 GPU 调度等概念的职责、边界与设计用意。
+- 文件：仅更新 `WORKLOG.md`；未修改业务代码、配置、数据库、索引、API、前端或部署状态。
+- 验证：通过计划文档与当前类型/持久化代码交叉核对名词和值域；未重新运行测试或生产链路。
