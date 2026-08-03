@@ -62,5 +62,55 @@ def test_recovery_requeues_pending_but_marks_running_failed(tmp_path):
         recovered = SQLiteTranscriptionStore(verify).load_job(job.id)
         assert recovered.status is TranscriptionJobStatus.failed
         assert recovered.failure_error_code == "worker_restarted"
+        media = verify.execute(
+            "SELECT status,error FROM media_assets WHERE media_id=?", (job.media_id,)
+        ).fetchone()
+        assert tuple(media) == ("failed", "worker_restarted")
+    finally:
+        verify.close()
+
+
+def test_event_and_composite_cancellation_probes_are_fail_closed():
+    from threading import Event
+
+    from api.transcription_runtime import CompositeCancellationProbe, EventCancellationProbe
+
+    first = Event()
+    second = Event()
+    combined = CompositeCancellationProbe(
+        (EventCancellationProbe(first), EventCancellationProbe(second))
+    )
+    assert combined.is_cancel_requested() is False
+    second.set()
+    assert combined.is_cancel_requested() is True
+
+
+def test_worker_factory_failure_records_terminal_failure(tmp_path, monkeypatch):
+    import asyncio
+    from threading import Event
+
+    import api.transcription_worker as worker
+
+    conn, store, _artifacts = make_phase2_store(tmp_path)
+    job = store.create_job(make_pending_job(created_at=10))
+    conn.close()
+    db_path = tmp_path / "app.sqlite"
+
+    def broken_factory():
+        raise RuntimeError("bootstrap failed")
+
+    monkeypatch.setattr(worker, "_service_factory", broken_factory)
+    monkeypatch.setattr(worker, "connect", lambda: connect(db_path))
+    asyncio.run(worker._run_one(job.id, Event()))
+
+    verify = connect(db_path)
+    try:
+        current = SQLiteTranscriptionStore(verify).load_job(job.id)
+        assert current.status is TranscriptionJobStatus.failed
+        assert current.failure_error_code == "worker_bootstrap_failed"
+        media = verify.execute(
+            "SELECT status,error FROM media_assets WHERE media_id=?", (job.media_id,)
+        ).fetchone()
+        assert tuple(media) == ("failed", "worker_bootstrap_failed")
     finally:
         verify.close()

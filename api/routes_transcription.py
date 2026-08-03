@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import time
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from src.config import (
     ASR_CONNECT_TIMEOUT_SECONDS,
@@ -125,6 +125,28 @@ def list_profiles(
         )
         for item in entries
     ]
+
+
+@router.get("/jobs", response_model=list[TranscriptionJobDTO])
+def list_jobs(
+    media_id: str | None = None,
+    latest_per_media: bool = True,
+    limit: int = Query(100, ge=1, le=500),
+    _admin: CurrentUser = Depends(require_admin),
+) -> list[TranscriptionJobDTO]:
+    conn = connect()
+    try:
+        try:
+            jobs = SQLiteTranscriptionStore(conn).list_jobs(
+                media_id=media_id,
+                latest_per_media=latest_per_media,
+                limit=limit,
+            )
+        except ContractValidationError:
+            raise HTTPException(status_code=400, detail="转录任务查询参数不合法")
+        return [_job_dto(job) for job in jobs]
+    finally:
+        conn.close()
 
 
 @router.get("/jobs/{job_id}", response_model=TranscriptionJobDTO)

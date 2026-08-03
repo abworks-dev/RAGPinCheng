@@ -14,6 +14,8 @@ import type {
   IndexedDocument,
   LlmHealth,
   MediaAsset,
+  TranscriptionJob,
+  TranscriptionProfile,
 } from "../types";
 
 // Mutating methods send X-CSRF-Token. Cookies always go along via credentials.
@@ -245,5 +247,53 @@ export const api = {
     }
     return (await res.json()) as MediaAsset;
   },
-  listMediaAssets: () => jsonFetch<MediaAsset[]>("/api/media"),
+  uploadAutomaticMediaVideo: async (
+    video: File,
+    title: string,
+    profileId: string,
+    requestIdempotencyKey: string,
+  ) => {
+    const fd = new FormData();
+    fd.append("video", video, video.name);
+    fd.append("title", title);
+    fd.append("profile_id", profileId);
+    fd.append("request_idempotency_key", requestIdempotencyKey);
+    const headers: Record<string, string> = {};
+    if (csrfToken) headers["X-CSRF-Token"] = csrfToken;
+    const res = await fetch("/api/admin/media", {
+      method: "POST",
+      headers,
+      body: fd,
+      credentials: "include",
+    });
+    if (res.status === 401 && unauthorizedHandler) {
+      try { unauthorizedHandler(); } catch { /* noop */ }
+    }
+    if (!res.ok) {
+      const txt = await res.text().catch(() => "");
+      let detail = txt;
+      try {
+        const parsed = JSON.parse(txt);
+        if (parsed && typeof parsed.detail === "string") detail = parsed.detail;
+      } catch { /* keep raw */ }
+      throw new ApiError(res.status, txt, `${res.status} ${res.statusText}${detail ? `: ${detail}` : ""}`);
+    }
+    return (await res.json()) as MediaAsset;
+  },
+  listMediaAssets: () => jsonFetch<MediaAsset[]>("/api/admin/media"),
+  listTranscriptionProfiles: () =>
+    jsonFetch<TranscriptionProfile[]>("/api/admin/transcription/profiles"),
+  listTranscriptionJobs: (latestPerMedia = true, limit = 100) =>
+    jsonFetch<TranscriptionJob[]>(
+      `/api/admin/transcription/jobs?latest_per_media=${latestPerMedia}&limit=${limit}`,
+    ),
+  getTranscriptionJob: (jobId: string) =>
+    jsonFetch<TranscriptionJob>(`/api/admin/transcription/jobs/${jobId}`),
+  cancelTranscriptionJob: (jobId: string) =>
+    jsonFetch<TranscriptionJob>(`/api/admin/transcription/jobs/${jobId}/cancel`, { method: "POST" }),
+  retryTranscription: (mediaId: string, profileId: string, requestIdempotencyKey: string) =>
+    jsonFetch<TranscriptionJob>(`/api/admin/transcription/media/${mediaId}/retry`, {
+      method: "POST",
+      body: JSON.stringify({ profile_id: profileId, request_idempotency_key: requestIdempotencyKey }),
+    }),
 };

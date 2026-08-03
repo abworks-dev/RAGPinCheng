@@ -257,3 +257,29 @@ def test_error_summary_rejects_sensitive_or_multiline_text(tmp_path):
                 now=20,
             )
     conn.close()
+
+
+def test_list_jobs_defaults_to_latest_attempt_and_supports_bounded_history(tmp_path):
+    conn, store, _artifacts = make_phase2_store(tmp_path)
+    original = store.create_job(make_pending_job(created_at=10))
+    store.cancel_job(original.id, now=20)
+    retry = make_pending_job(
+        job_id="123e4567-e89b-12d3-a456-426614174020",
+        request_id="123e4567-e89b-12d3-a456-426614174021",
+        attempt=2,
+        created_at=21,
+    )
+    store.create_job(retry)
+
+    assert [job.id for job in store.list_jobs()] == [retry.id]
+    assert [job.id for job in store.list_jobs(latest_per_media=False)] == [retry.id, original.id]
+    assert [job.id for job in store.list_jobs(media_id=original.media_id)] == [retry.id]
+    assert store.list_jobs(media_id="123e4567-e89b-12d3-a456-426614174099") == ()
+    assert [job.id for job in store.list_jobs(latest_per_media=False, limit=1)] == [retry.id]
+    with pytest.raises(ContractValidationError):
+        store.list_jobs(limit=0)
+    with pytest.raises(ContractValidationError):
+        store.list_jobs(limit=501)
+    with pytest.raises(ContractValidationError):
+        store.list_jobs(latest_per_media=1)
+    conn.close()
