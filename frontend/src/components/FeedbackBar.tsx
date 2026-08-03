@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Copy, ThumbsDown } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Check, Copy, ThumbsDown } from "lucide-react";
 import { api } from "../api/client";
 import type { ChatMessage } from "../types";
 import { Button } from "./ui/button";
@@ -50,6 +50,12 @@ export function FeedbackBar({
   const [submitting, setSubmitting] = useState(false);
   const [sent, setSent] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const copyResetTimer = useRef<number | null>(null);
+
+  useEffect(() => () => {
+    if (copyResetTimer.current !== null) window.clearTimeout(copyResetTimer.current);
+  }, []);
 
   async function submit() {
     const trimmed = note.trim();
@@ -101,16 +107,26 @@ export function FeedbackBar({
   async function handleCopy() {
     try {
       await copyText(msg.content);
-      toast.success("回答已复制");
+      setCopied(true);
+      if (copyResetTimer.current !== null) window.clearTimeout(copyResetTimer.current);
+      copyResetTimer.current = window.setTimeout(() => {
+        setCopied(false);
+        copyResetTimer.current = null;
+      }, 1400);
     } catch {
+      setCopied(false);
       toast.error("复制失败，请稍后重试");
     }
   }
 
   return (
     <div className="ml-auto flex shrink-0 items-center gap-1" aria-label="回答操作">
-      <IconButton label="复制回答" onClick={handleCopy}>
-        <Copy className="size-4" />
+      <IconButton
+        label={copied ? "回答已复制" : "复制回答"}
+        onClick={handleCopy}
+        className={copied ? "text-success hover:text-success" : undefined}
+      >
+        {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
       </IconButton>
 
       <Dialog open={open} onOpenChange={handleOpenChange}>

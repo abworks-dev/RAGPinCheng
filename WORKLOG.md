@@ -1755,3 +1755,9 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 完成：左侧会话列表底部与对话输入器上沿增加非交互式渐隐遮罩，移除输入器和右侧来源栏的硬分割线；长对话离开底部超过阈值时，在输入器正上方显示圆形下箭头按钮，点击后平滑回到底部，并与最新多轮对话导航和流式跟随逻辑协同工作。
 - 文件：仅修改用户端 `MessageList.tsx`、`Composer.tsx`、`Sidebar.tsx`、`ChatLayout.tsx`、`styles/index.css` 及 `MessageList.test.tsx`；未修改管理端业务、API、SSE、RAG 或后端逻辑。
 - 验证：前端全量 Vitest 21 个文件、88/88 项测试通过；`npm run build` 通过（2019 modules transformed）；`git diff --check` 无内容错误。浏览器预览正常进入登录页，但当前无登录态，真实长对话视觉点击回归受登录条件限制。
+
+### 15:05 — 修复回答复制的原位反馈
+
+- 完成：修正完成回答实际使用的 `FeedbackBar` 复制入口；复制成功后不再弹出右上角“回答已复制”，而是在原按钮位置显示绿色勾选，1400ms 后恢复复制图标；连续点击会重置恢复计时，组件卸载时会清理计时器，复制失败仍保留错误提示。
+- 文件：仅修改 `frontend/src/components/FeedbackBar.tsx`、对应测试与 `WORKLOG.md`；未修改反馈提交、消息内容、引用、管理端、API、SSE、RAG 或后端业务。
+- 验证：复制反馈专项 Vitest 5/5 通过；前端全量 Vitest 21 个文件、88/88 项测试通过；`npm run build` 通过（2019 modules transformed）；`git diff --check` 无内容错误。
