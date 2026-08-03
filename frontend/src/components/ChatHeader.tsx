@@ -1,4 +1,4 @@
-import { Menu, PanelRightClose, PanelRightOpen } from "./ui/icons";
+import { Menu, PanelRightClose, PanelRightOpen } from "lucide-react";
 import { IconButton } from "./ui/icon-button";
 
 export function ChatHeader({

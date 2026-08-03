@@ -1650,3 +1650,9 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 完成：将用户问答页调整为响应式会话导航、文档式回答阅读区和来源核验工作区；知识范围筛选移入输入器，引用点击与来源持久选择保持双向联动，并统一 PDF、DOCX、XLSX、PPTX 与视频的宽侧栏/移动端全屏预览外壳及互斥遮罩。
 - 文件：仅修改 `frontend/src/components/`、`frontend/src/hooks/usePdfPreview.tsx`、`frontend/src/hooks/useVideoPlayer.tsx` 与 `WORKLOG.md`；未修改管理端页面、API、认证、CSRF、SSE、RAG、索引或后端业务。
 - 验证：`npm run build` 通过（411 modules transformed）；前端 Vitest 9 个文件、43 项测试全部通过；浏览器在 1440×900、1280×800、1024×768、768×1024、390×844 五个视口检查登录页面均无水平溢出、无控制台 error，仅保留既有 React Router future warning。浏览器无登录态，因此聊天数据、来源选择和资源预览未完成真实后端端到端回归。
+
+### 10:54 — 优化问答来源视觉与检索反馈
+
+- 完成：扩大用户端会话侧栏和来源核验栏；以 `lucide-react` 替换 P0 临时符号图标；在回答顶部增加由实际来源数量与分类动态生成的检索摘要和绿色状态点，在回答底部增加“查看 X 个来源”定位按钮；来源列表与引用详情调整为更接近 shadcn/ui 的边框、选中态、层级和强调引用样式。
+- 文件：仅修改用户端聊天组件、`frontend/package.json`、`frontend/package-lock.json` 与 `WORKLOG.md`；未修改管理端页面、API、认证、CSRF、SSE、RAG、索引或后端业务。
+- 验证：`npm run build` 通过（1960 modules transformed）；前端 Vitest 9 个文件、43 项测试全部通过；`git diff --check` 无内容错误。浏览器仍无登录态，带真实来源的回答态和来源定位交互未完成浏览器端到端视觉验收。

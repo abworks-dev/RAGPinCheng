@@ -5,7 +5,7 @@ import "react-pdf/dist/esm/Page/TextLayer.css";
 import { usePdfPreview } from "../hooks/usePdfPreview";
 import { DocxPreview } from "./DocxPreview";
 import { SpreadsheetPreview } from "./SpreadsheetPreview";
-import { Minus, Plus } from "./ui/icons";
+import { Minus, Plus } from "lucide-react";
 import { ResourcePreviewShell } from "./ResourcePreviewShell";
 
 // PDF.js worker — use the CDN build so we don't need to bundle it.

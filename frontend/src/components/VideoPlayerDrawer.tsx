@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useVideoPlayer } from "../hooks/useVideoPlayer";
-import { Pause, Play, Volume2, VolumeX } from "./ui/icons";
+import { Pause, Play, Volume2, VolumeX } from "lucide-react";
 import { ResourcePreviewShell } from "./ResourcePreviewShell";
 
 export function VideoPlayerDrawer() {

@@ -1,4 +1,4 @@
-import { X } from "./ui/icons";
+import { X } from "lucide-react";
 import type { ReactNode } from "react";
 import { IconButton } from "./ui/icon-button";
 

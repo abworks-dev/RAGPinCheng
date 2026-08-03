@@ -7,6 +7,7 @@ import type { ChatMessage, Source } from "../types";
 import { stripMarkdown } from "../utils/markdown";
 import { FeedbackBar } from "./FeedbackBar";
 import { timestampToSeconds, useVideoPlayer } from "../hooks/useVideoPlayer";
+import { Files } from "lucide-react";
 import {
   CITATION_EVENT,
   CITATION_HOVER_EVENT,
@@ -40,6 +41,20 @@ function StageIndicator({ msg }: { msg: ChatMessage }) {
   } else if (stage === "streaming" && !msg.content) label = "📝 正在生成回答…";
   if (!label) return null;
   return <div className="text-muted text-sm">{label}</div>;
+}
+
+function RetrievalSummary({ sources }: { sources: Source[] }) {
+  const categories = Array.from(new Set(sources.map((source) => source.category).filter(Boolean)));
+  const categoryLabel = categories.length > 0 ? categories.slice(0, 3).join("、") : "企业知识库";
+  return (
+    <div className="mb-4 flex items-center gap-2 text-xs text-muted-foreground">
+      <span className="relative flex size-2.5 shrink-0">
+        <span className="absolute inline-flex size-full animate-ping rounded-full bg-success opacity-30" />
+        <span className="relative inline-flex size-2.5 rounded-full bg-success" />
+      </span>
+      <span>已检索 {sources.length} 份资料，回答基于{categoryLabel}</span>
+    </div>
+  );
 }
 
 // Renders a citation superscript with tooltip preview.
@@ -196,6 +211,7 @@ export function Message({
           <div className="whitespace-pre-wrap break-words">{msg.content}</div>
         ) : (
           <>
+            {!msg.streaming && msg.sources && msg.sources.length > 0 && <RetrievalSummary sources={msg.sources} />}
             <div className={"prose-tight relative " + (msg.streaming && msg.content ? "caret" : "")}>
               {msg.content ? (
                 <ReactMarkdown
@@ -231,6 +247,18 @@ export function Message({
             {msg.error && (
               <div className="mt-2 text-sm text-red-600 bg-red-50 border border-red-200 rounded p-2">
                 ⚠️ {msg.error}
+              </div>
+            )}
+            {!msg.streaming && !msg.error && msg.sources && msg.sources.length > 0 && (
+              <div className="mt-5 border-t border-border pt-3">
+                <button
+                  type="button"
+                  onClick={() => dispatchCitation({ messageId: msg.id, sourceIndex: 0 })}
+                  className="inline-flex h-9 items-center gap-2 rounded-ui-md border border-border bg-card px-3 text-xs font-medium text-foreground shadow-sm transition-colors hover:border-primary/40 hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <Files className="size-4 text-primary" />
+                  查看 {msg.sources.length} 个来源
+                </button>
               </div>
             )}
             {!msg.streaming && !msg.error && msg.content && (

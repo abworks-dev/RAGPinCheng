@@ -1,5 +1,5 @@
 import { useEffect, type ReactNode } from "react";
-import { X } from "./icons";
+import { X } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { IconButton } from "./icon-button";
 
