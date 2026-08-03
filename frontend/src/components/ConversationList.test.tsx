@@ -22,7 +22,7 @@ describe("ConversationList date groups", () => {
     render(
       <ConversationList
         conversations={[
-          conversation("today", "今日对话", 0.2),
+          conversation("today", "今日对话", 0),
           conversation("week", "本周对话", 3),
           conversation("month", "本月对话", 12),
           conversation("older", "更早对话", 45),

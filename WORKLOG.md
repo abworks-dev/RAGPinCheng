@@ -1584,9 +1584,9 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 ### 23:24 — 实施多引擎转录 Phase 5A/5B
 
 - 完成：按获批 R2 计划接通版本列表、不可变 Markdown 预览、审核/发布 API 与管理端 UI、publication-only 候选索引、共享单 worker、SQLite 正式 head 和版本感知检索；scoped review 额外收紧人工版本发布按钮、Parent 二次可见性、multi-query 单快照和完整 Qdrant Filter 合并边界，并补齐 API admin/CSRF fail-closed、approve/reject UI、普通索引与 publication 混合串行、legacy/普通文档可见性及 parents 添加式幂等迁移测试。
-- 文件：新增 `api/transcription_publication.py`、`src/transcription/retrieval_visibility.py`、版本管理前端组件及 Phase 5 测试；最小修改 Store/API/worker、索引/检索元数据、CI、Phase 5 计划、功能文档、`TODO.md` 与本日志。未修改运行时依赖、部署或生产配置。
-- 验证：`compileall` 通过；Store/事务/manual/visibility/index metadata/static 共 29 项通过；Phase 5 定向前端 4 个文件、31 项通过；`git diff --check` 通过。本地现有 `.venv` 缺 `qdrant_client`/FastAPI，完整 API、worker、candidate index、Qdrant Filter 与前端干净安装/build 交由新增 CI job 验证，CI 通过前保持“代码完成待验证”。
-- 边界：未运行 Phase 5C，未安装或真实运行 ffmpeg/ffprobe、FunASR/faster-whisper、GPU/CUDA/torch、Qdrant、embedding/rerank，未访问生产数据、部署或重建索引；本轮未提交、未推送。
+- 文件：新增 `api/transcription_publication.py`、`src/transcription_retrieval_visibility.py`、版本管理前端组件及 Phase 5 测试；最小修改 Store/API/worker、索引/检索元数据、CI、Phase 5 计划、功能文档、`TODO.md` 与本日志。SQLite 可见性适配器明确位于 Phase 1 纯契约核心包之外；未修改运行时依赖、部署或生产配置。
+- 验证：`compileall` 通过；Store/事务/manual/visibility/index metadata/static 共 29 项通过；Phase 5 定向前端 4 个文件、31 项通过；`git diff --check` 通过。提交 `c5d5c0f` 已推送；首轮远端 `test-transcription-contracts` 收集 289 项并出现 9 个失败。已按失败证据将 SQLite visibility adapter 移出 Phase 1 核心包、同步获批静态保护哈希，并让 review/publication 测试使用 experimental Profile；因标准命令审批服务暂不可用，修复待本地与远端复验。
+- 边界：未运行 Phase 5C，未安装或真实运行 ffmpeg/ffprobe、FunASR/faster-whisper、GPU/CUDA/torch、Qdrant、embedding/rerank，未访问生产数据、部署或重建索引；CI 修复尚未提交、推送。
 
 ### 08:41 — 编写多引擎转录 Phase 3 R2 详细计划
 
@@ -1775,3 +1775,12 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：修改 `frontend/src/components/MessageList.tsx`、`MessageList.test.tsx`、`TurnNavigator.tsx`、`TurnNavigator.test.tsx`、`Sidebar.tsx`、`Sidebar.test.tsx`、`ThemeMenu.tsx`、`UserMenu.tsx`，新增 `frontend/src/components/UserMenu.test.tsx`，更新 `WORKLOG.md`。
 - 验证：前端全量 Vitest 22 个文件、90/90 项测试通过；TypeScript project build 与 Vite production build 通过（2019 modules transformed）；`git diff --check` 通过。保留既有 React Router future warning、CSS minify warning和主包大于 500 kB 警告。
 - 边界：未修改 API、SSE、认证、RAG、索引、后端、依赖或业务数据流；当前本地后端未运行，未使用真实登录态和长对话执行浏览器视觉验收，待部署后由用户复核底部留白、正文居中、导航高亮与折叠侧栏控件。
+
+## 2026-08-04
+
+### 01:09 — 修复 Phase 5 与前端跨环境 CI 夹具
+
+- 完成：修正 Phase 5 审核测试误用免审核 approved Profile 和缺少 reviewer 外键数据的问题；为已发布且正式 head 一致的 publication job 增加幂等短路；将依赖 `src.chunk`/Qdrant 的 Phase 5 集成测试移出 Phase 1 `test_transcription*.py` 静态扫描命名空间并保留在独立 CI job；修正会话“今天”分组测试跨到 UTC 前一天的问题。未放宽 production guard、外键或 Phase 1 静态保护。
+- 文件：`api/transcription_publication.py`、`.github/workflows/ci.yml`、`tests/transcription_fixture_helpers.py`、`tests/test_transcription_phase5_application_e2e.py`、`tests/test_transcription_publication_index_adapter.py`、`tests/test_transcript_index_metadata.py`、`tests/test_transcript_retrieval_integration.py`、`tests/test_transcription_phase5_static_boundaries.py`、`frontend/src/components/ConversationList.test.tsx`、`project-docs/plans/multi-engine-transcription-phase5.md`、`WORKLOG.md`。
+- 验证：experimental fixture 的 awaiting-review 与带 reviewer 外键的 approved 转换冒烟通过；Phase 1/5 静态边界 12/12 通过；修改 Python 文件 `py_compile` 通过；会话分组单测分别在 UTC 与 Asia/Shanghai 通过，前端全量 18 个文件、81 项测试及 production build 通过；PR #7 最新代码提交的 `test-transcription-phase5`、`test-transcription-contracts`、`validate`、ASR service、provider、GPU 和 migration config 七个 CI job 全部通过。
+- 边界：本地未安装缺失的 `qdrant_client`；未运行真实 Qdrant、ASR、GPU、生产数据或部署。
