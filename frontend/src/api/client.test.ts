@@ -152,3 +152,59 @@ describe("api client", () => {
     expect(unauthorized).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("Phase 4B transcription API contracts", () => {
+  it("uses the administrator media endpoint and lists recoverable tasks", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(jsonResponse([]));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.listMediaAssets();
+    await api.listTranscriptionProfiles();
+    await api.listTranscriptionJobs(true, 25);
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/admin/media", expect.objectContaining({ credentials: "include" }));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/admin/transcription/profiles", expect.objectContaining({ credentials: "include" }));
+    expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/admin/transcription/jobs?latest_per_media=true&limit=25", expect.objectContaining({ credentials: "include" }));
+  });
+
+  it("uploads automatic media as exact FormData without forcing Content-Type", async () => {
+    setCsrfToken("csrf-asr");
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ media_id: "media-1", transcription_job_id: "job-1" }));
+    vi.stubGlobal("fetch", fetchMock);
+    const video = new File(["video"], "training.mp4", { type: "video/mp4" });
+
+    await api.uploadAutomaticMediaVideo(video, "培训视频", "profile-1", "11111111-1111-4111-8111-111111111111");
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/admin/media");
+    expect(init).toMatchObject({ method: "POST", credentials: "include", headers: { "X-CSRF-Token": "csrf-asr" } });
+    expect(init.headers).not.toHaveProperty("content-type");
+    const form = init.body as FormData;
+    expect((form.get("video") as File).name).toBe("training.mp4");
+    expect(form.get("title")).toBe("培训视频");
+    expect(form.get("profile_id")).toBe("profile-1");
+    expect(form.get("request_idempotency_key")).toBe("11111111-1111-4111-8111-111111111111");
+    expect(form.get("transcript")).toBeNull();
+  });
+
+  it("preserves CSRF protection for cancellation and retry", async () => {
+    setCsrfToken("csrf-asr");
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ status: "cancelled" }))
+      .mockResolvedValueOnce(jsonResponse({ status: "pending" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.cancelTranscriptionJob("job-1");
+    await api.retryTranscription("media-1", "profile-1", "22222222-2222-4222-8222-222222222222");
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/admin/transcription/jobs/job-1/cancel", expect.objectContaining({ method: "POST", headers: { "X-CSRF-Token": "csrf-asr" } }));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/admin/transcription/media/media-1/retry", expect.objectContaining({
+      method: "POST",
+      headers: { "content-type": "application/json", "X-CSRF-Token": "csrf-asr" },
+      body: JSON.stringify({ profile_id: "profile-1", request_idempotency_key: "22222222-2222-4222-8222-222222222222" }),
+    }));
+  });
+});

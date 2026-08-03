@@ -151,3 +151,28 @@ def test_cancelled_job_is_terminal_and_worker_does_not_revive_it(tmp_path):
     finally:
         conn.close()
     assert service.run_job(job.id) == cancelled
+
+
+def test_process_shutdown_never_persists_a_success_version(tmp_path):
+    from threading import Event
+
+    from api.transcription_runtime import EventCancellationProbe
+
+    service, factory = make_service(tmp_path)
+    job = service.create_pending_job(
+        media_id=MEDIA_ID,
+        profile_id="funasr-sensevoice-zh-experimental-v1",
+        request_idempotency_key=REQUEST_ID,
+        created_by=1,
+    )
+    shutdown = Event()
+    shutdown.set()
+    result = service.run_job(job.id, EventCancellationProbe(shutdown))
+    assert result.status is TranscriptionJobStatus.running
+    assert result.result_version_id is None
+    conn = factory()
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM transcript_versions").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM index_jobs").fetchone()[0] == 0
+    finally:
+        conn.close()

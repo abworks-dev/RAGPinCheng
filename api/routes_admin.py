@@ -754,15 +754,10 @@ async def upload_media(
     if automatic:
         if not profile_id or request_idempotency_key is None:
             raise HTTPException(status_code=400, detail="自动转录必须提供 profile_id 和幂等键")
-        if not ASR_ENABLED or not ASR_SERVICE_TOKEN:
-            raise HTTPException(status_code=503, detail="自动转录当前不可用")
         try:
             validate_uuid(request_idempotency_key, "request_idempotency_key")
-            build_transcription_service().resolve_profile(
-                profile_id, ProfileOperation.new_attempt
-            )
         except ContractValidationError:
-            raise HTTPException(status_code=400, detail="未知或不可用的转录 Profile")
+            raise HTTPException(status_code=400, detail="自动转录幂等键不合法")
         transcript_bytes = None
     else:
         if profile_id is not None or request_idempotency_key is not None:
@@ -772,11 +767,73 @@ async def upload_media(
         transcript_bytes = await transcript.read()
         _validate_transcript_markdown(transcript_bytes)
 
+    # A repeated automatic request must resolve before creating another media row
+    # or writing another permanent media directory.  The uploaded bytes are read
+    # only to verify the request identity bound to the existing key.
+    MAX_VIDEO_BYTES = MAX_VIDEO_UPLOAD_MB * 1024 * 1024
+    if automatic:
+        existing = conn.execute(
+            """
+            SELECT j.id AS job_id,j.profile_id,j.created_by,
+                   m.media_id,m.title,m.original_filename,m.mime_type,m.file_size,
+                   m.sha256,m.transcript_origin,m.status,m.created_at,m.updated_at,m.error
+            FROM transcription_jobs j
+            JOIN media_assets m ON m.media_id=j.media_id
+            WHERE j.request_idempotency_key=?
+            """,
+            (request_idempotency_key,),
+        ).fetchone()
+        if existing is not None:
+            retry_size = 0
+            retry_digest = hashlib.sha256()
+            while True:
+                chunk = await video.read(1024 * 1024)
+                if not chunk:
+                    break
+                retry_size += len(chunk)
+                if retry_size > MAX_VIDEO_BYTES:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"视频文件超过 {MAX_VIDEO_UPLOAD_MB}MB 上限",
+                    )
+                retry_digest.update(chunk)
+            if retry_size == 0:
+                raise HTTPException(status_code=400, detail="视频文件不能为空")
+            same_identity = (
+                existing["created_by"] == admin.id
+                and existing["profile_id"] == profile_id
+                and existing["title"] == clean_title
+                and existing["file_size"] == retry_size
+                and existing["sha256"] == retry_digest.hexdigest()
+            )
+            if not same_identity:
+                raise HTTPException(status_code=409, detail="幂等键与自动转录请求不匹配")
+            return MediaAssetDTO(
+                media_id=existing["media_id"],
+                title=existing["title"],
+                original_filename=existing["original_filename"],
+                mime_type=existing["mime_type"],
+                file_size=existing["file_size"],
+                transcript_origin=existing["transcript_origin"],
+                status=existing["status"],
+                created_at=existing["created_at"],
+                updated_at=existing["updated_at"],
+                error=existing["error"],
+                transcription_job_id=existing["job_id"],
+            )
+        if not ASR_ENABLED or not ASR_SERVICE_TOKEN:
+            raise HTTPException(status_code=503, detail="自动转录当前不可用")
+        try:
+            build_transcription_service().resolve_profile(
+                profile_id, ProfileOperation.new_attempt
+            )
+        except ContractValidationError:
+            raise HTTPException(status_code=400, detail="未知或不可用的转录 Profile")
+
     media_id = str(uuid.uuid4())
     now = int(time.time())
 
     # Write video to disk in chunks (streaming, not loading all into memory)
-    MAX_VIDEO_BYTES = MAX_VIDEO_UPLOAD_MB * 1024 * 1024
     media_dir = MEDIA_DIR / media_id
     media_dir.mkdir(parents=True, exist_ok=True)
     video_path = media_dir / "original.mp4"

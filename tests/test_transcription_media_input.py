@@ -72,3 +72,11 @@ def test_symlink_or_unknown_media_identity_fails_closed(tmp_path):
     preparer = make_preparer(tmp_path)
     with pytest.raises(ContractValidationError):
         preparer.prepare("../outside")
+
+
+def test_file_input_source_fails_before_yield_when_prepared_identity_changed(tmp_path):
+    prepared = make_preparer(tmp_path).prepare(MEDIA_ID)
+    prepared.path.write_bytes(prepared.path.read_bytes() + b"tampered")
+    parts = FileTranscriptionInputSource(prepared).iter_parts(prepared.input_ref, 1024)
+    with pytest.raises(ContractValidationError, match="input_content_mismatch"):
+        next(parts)

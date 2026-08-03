@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, replace
+from threading import Event
 from typing import Callable
 
 from src.transcription.asr_service_contract import ServiceCapabilities
@@ -15,7 +16,7 @@ from src.transcription.profile import (
 from src.transcription.profile_catalog import build_phase3_profile_catalog
 from src.transcription.provider_registry import ProviderFactory, ProviderRuntimePorts
 from src.transcription.remote_provider import HttpxAsrServiceClient, RemoteAsrProvider
-from src.transcription.runtime_ports import ProviderRuntimeState
+from src.transcription.runtime_ports import CancellationProbe, ProviderRuntimeState
 from src.transcription.types import (
     ContractValidationError,
     TranscriptionJobStage,
@@ -163,3 +164,23 @@ class StoreCancellationProbe:
             )
         finally:
             conn.close()
+
+
+@dataclass(frozen=True, slots=True)
+class EventCancellationProbe:
+    event: Event
+
+    def is_cancel_requested(self) -> bool:
+        return self.event.is_set()
+
+
+@dataclass(frozen=True, slots=True)
+class CompositeCancellationProbe:
+    probes: tuple[CancellationProbe, ...]
+
+    def __post_init__(self) -> None:
+        if not self.probes:
+            raise ContractValidationError("empty_cancellation_probes", "probes")
+
+    def is_cancel_requested(self) -> bool:
+        return any(probe.is_cancel_requested() for probe in self.probes)

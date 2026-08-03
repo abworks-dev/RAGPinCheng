@@ -47,6 +47,7 @@ from src.transcription.types import (
     TranscriptionJobStatus,
     canonical_json_bytes,
     reject_unknown_fields,
+    require_int,
     sha256_hex,
     validate_sha256,
     validate_uuid,
@@ -569,6 +570,39 @@ class SQLiteTranscriptionStore:
             if changed != 1:
                 raise StoreConflictError("promotion_transition_conflict")
         return self.load_version(version_id)
+
+    def list_jobs(
+        self,
+        *,
+        media_id: str | None = None,
+        latest_per_media: bool = True,
+        limit: int = 100,
+    ) -> tuple[TranscriptionJobRecord, ...]:
+        if media_id is not None:
+            validate_uuid(media_id, "media_id")
+        if type(latest_per_media) is not bool:
+            raise ContractValidationError("invalid_bool", "latest_per_media")
+        require_int(limit, "limit", positive=True)
+        if limit > 500:
+            raise ContractValidationError("limit_out_of_range", "limit")
+        clauses: list[str] = []
+        params: list[object] = []
+        if media_id is not None:
+            clauses.append("j.media_id=?")
+            params.append(media_id)
+        if latest_per_media:
+            clauses.append(
+                "j.attempt_number=(SELECT MAX(j2.attempt_number) "
+                "FROM transcription_jobs j2 WHERE j2.media_id=j.media_id)"
+            )
+        where = " WHERE " + " AND ".join(clauses) if clauses else ""
+        rows = self._conn.execute(
+            "SELECT j.id FROM transcription_jobs j"
+            + where
+            + " ORDER BY j.updated_at DESC,j.media_id ASC LIMIT ?",
+            (*params, limit),
+        ).fetchall()
+        return tuple(self._load_job_row(row["id"]) for row in rows)
 
     def load_job(self, job_id: str) -> TranscriptionJobRecord:
         validate_uuid(job_id, "job_id")
