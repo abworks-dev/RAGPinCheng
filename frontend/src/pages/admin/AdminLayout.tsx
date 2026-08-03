@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
+import { ArrowLeft } from "lucide-react";
 import { AppBrand } from "../../components/AppBrand";
 import { Button, buttonVariants } from "../../components/ui/button";
 import { useAuth } from "../../context/AuthContext";
@@ -39,7 +40,7 @@ export function AdminLayout() {
               </span>
             )}
             <Link to="/" className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "px-2 sm:px-3")}>
-              <span aria-hidden="true">←</span>
+              <ArrowLeft className="size-4" aria-hidden="true" />
               <span className="hidden sm:inline">返回对话</span>
               <span className="sm:hidden">返回</span>
             </Link>

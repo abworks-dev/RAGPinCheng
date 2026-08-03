@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { RefreshCw, Search } from "lucide-react";
 import type { ChatMessage } from "../types";
 
 export function DebugPanel({ msg }: { msg: ChatMessage }) {
@@ -14,15 +15,17 @@ export function DebugPanel({ msg }: { msg: ChatMessage }) {
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="underline decoration-dotted hover:text-ink"
+        className="inline-flex items-center gap-1 underline decoration-dotted hover:text-ink"
       >
-        🔍 调试信息
+        <Search className="size-3.5" aria-hidden="true" />
+        调试信息
       </button>
       {open && (
         <div className="mt-1 p-2 bg-gray-50 border border-gray-200 rounded">
           {prep?.rewrite_applied && (
-            <div>
-              🔄 检索改写：<code>{prep.search_query}</code>
+            <div className="flex items-start gap-1">
+              <RefreshCw className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+              <span>检索改写：<code>{prep.search_query}</code></span>
             </div>
           )}
           <div>

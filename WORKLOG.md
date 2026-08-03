@@ -1742,3 +1742,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 完成：主题选项统一为“明亮模式”和“夜间模式”；移除用户侧栏外框、品牌区及底部控件分割线，并固定主题图标和头像在侧栏折叠前后的左侧位置；收紧共享品牌标题与工作台副标题字号，使用户端和管理端品牌区同步；移除管理端顶栏及左导航边界；会话列表不再显示逐条相对时间，仅保留今天、7 天内、30 天内和更早分组。
 - 文件：修改 `AppBrand.tsx`、`Sidebar.tsx`、`ThemeMenu.tsx`、`UserMenu.tsx`、`ConversationList.tsx`、`AdminLayout.tsx` 及对应测试和 `WORKLOG.md`；未修改管理端业务页面、API、认证、RAG、转录或后端逻辑。
 - 验证：前端全量 Vitest 19 个文件、77/77 项测试通过；`npm run build` 通过（2018 modules transformed）；`git diff --check` 无内容错误。保留既有 React Router future warning、CSS minify warning和主包大于 500 kB 警告；浏览器无登录态，真实用户侧栏和管理页仍待登录后视觉验收。
+
+### 14:20 — 完善多轮对话导航与回答状态
+
+- 完成：全局滚动条统一为细轨道、圆角滑块和透明背景，消息区接入既有自动隐藏机制；新增桌面端多轮对话快速导航，收起时仅显示轮次刻度，悬停或聚焦后展开问题列表，当前轮次和悬停轮次使用语义重点色，移动端自动隐藏；修复消息列表每次渲染都强制置底的问题，点击历史引用角标或“查看 X 个来源”后不再跳到最后一轮，同时保留新增消息和贴近底部时的流式自动跟随；回答顶部统一展示检索、组织、流式输出、完成及无来源状态，流式正文出现后仍保留绿色输出提示，无来源回答使用红色状态点和说明；来源核验的视频、文档、复制、报错、加载、翻页、关闭等残留 Emoji、字符图标和手写 SVG 统一替换为现有 Lucide 视觉语言。
+- 文件：新增 `frontend/src/components/TurnNavigator.tsx`、`TurnNavigator.test.tsx`、`MessageList.test.tsx`；修改 `frontend/src/components/MessageList.tsx`、`Message.tsx`、`Message.test.tsx`、`SourceWorkspace.tsx`、`SourcesPanel.tsx`、`DebugPanel.tsx`、`PdfPreview.tsx`、`VideoPlayerDrawer.tsx`、`frontend/src/pages/admin/AdminLayout.tsx`、`AdminUsersPage.tsx`、`AdminDocumentsPage.tsx`、`frontend/src/styles/index.css`、`WORKLOG.md`。
+- 验证：目标 Vitest 4 个文件、13/13 项通过；前端全量 Vitest 21 个文件、86/86 项通过；TypeScript project build 与 Vite production build 通过（2019 modules transformed）；使用仅监听本机的虚构账号、七轮对话、文档与视频来源完成 1440×900 桌面和 390×844 移动端浏览器检查，确认展开导航不遮挡正文、历史来源打开后仍停留原轮次、流式状态持续可见、视频 Lucide 图标生效、移动端无横向溢出且控制台无 error；静态扫描无用户可见 Emoji 或手写 SVG，`git diff --check` 通过。保留既有 React Router future warning、CSS minify warning和主包大于 500 kB 警告。
+- 边界：未修改认证、CSRF、API、SSE 协议、`useChat`、`chatStream`、RAG、索引、后端或依赖；虚构 Mock API 和临时文件已清理，未提交真实反馈或访问生产数据。真实账号和真实长对话验收待用户执行；推送与 CI/CD 状态以 Git 和远端检查结果为准。

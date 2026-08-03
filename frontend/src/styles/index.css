@@ -8,6 +8,31 @@ html, body, #root {
   height: 100%;
 }
 
+* {
+  scrollbar-color: rgb(var(--muted-foreground) / 0.38) transparent;
+  scrollbar-width: thin;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  min-height: 2rem;
+  border: 3px solid transparent;
+  border-radius: 9999px;
+  background-color: rgb(var(--muted-foreground) / 0.38);
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background-color: rgb(var(--muted-foreground) / 0.62);
+}
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 .scrollbar-auto-hide {
   scrollbar-color: transparent transparent;
   scrollbar-width: thin;

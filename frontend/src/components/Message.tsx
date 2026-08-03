@@ -7,7 +7,7 @@ import type { ChatMessage, Source } from "../types";
 import { stripMarkdown } from "../utils/markdown";
 import { FeedbackBar } from "./FeedbackBar";
 import { timestampToSeconds, useVideoPlayer } from "../hooks/useVideoPlayer";
-import { Files } from "lucide-react";
+import { CircleAlert, CirclePlay, Files } from "lucide-react";
 import {
   CITATION_EVENT,
   CITATION_HOVER_EVENT,
@@ -30,37 +30,52 @@ function normalizeMath(src: string): string {
   });
 }
 
-function StageIndicator({ msg }: { msg: ChatMessage }) {
-  const stage = msg.stage;
-  if (!stage || stage === "done") return null;
-  let label = "";
-  if (stage === "retrieving") label = "正在理解问题并检索企业知识…";
-  else if (stage === "generating") {
-    const n = msg.prep?.final_count ?? msg.sources?.length ?? 0;
-    label = `已找到 ${n} 份相关资料，正在整理回答…`;
-  } else if (stage === "streaming" && !msg.content) label = "正在组织回答…";
-  if (!label) return null;
-  return (
-    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-      <span className="relative flex size-2.5 shrink-0">
-        <span className="absolute inline-flex size-full animate-ping rounded-full bg-warning opacity-30" />
-        <span className="relative inline-flex size-2.5 rounded-full bg-warning" />
-      </span>
-      {label}
-    </div>
-  );
-}
+function AnswerStatus({ msg }: { msg: ChatMessage }) {
+  if (msg.error) return null;
 
-function RetrievalSummary({ sources }: { sources: Source[] }) {
+  const sources = msg.sources?.length ? msg.sources : msg.prep?.used_sources || [];
+  const sourceCount = sources.length || msg.prep?.final_count || 0;
+  const stage = msg.stage || (msg.streaming ? "streaming" : msg.content ? "done" : undefined);
+  const noSources = msg.prep?.no_source_fallback === true || (stage !== "retrieving" && sourceCount === 0);
   const categories = Array.from(new Set(sources.map((source) => source.category).filter(Boolean)));
   const categoryLabel = categories.length > 0 ? categories.slice(0, 3).join("、") : "企业知识库";
+  let label: string | null = null;
+  let tone: "warning" | "success" | "destructive" = "success";
+  let pulse = false;
+
+  if (stage === "retrieving") {
+    label = "正在理解问题并检索企业知识…";
+    tone = "warning";
+    pulse = true;
+  } else if (stage === "generating") {
+    label = noSources
+      ? "未检索到可用资料，正在组织回复…"
+      : `已检索 ${sourceCount} 份资料，正在组织回答…`;
+    tone = noSources ? "destructive" : "success";
+    pulse = true;
+  } else if (stage === "streaming") {
+    label = noSources
+      ? "未检索到可用资料，正在输出回复…"
+      : `正在输出回答，基于 ${sourceCount} 份资料`;
+    tone = noSources ? "destructive" : "success";
+    pulse = true;
+  } else if (stage === "done" && msg.content) {
+    label = noSources
+      ? "未检索到可用资料，本回答没有知识库来源"
+      : `已检索 ${sourceCount} 份资料，回答基于${categoryLabel}`;
+    tone = noSources ? "destructive" : "success";
+  }
+
+  if (!label) return null;
+  const dotClass = tone === "warning" ? "bg-warning" : tone === "destructive" ? "bg-destructive" : "bg-success";
+
   return (
-    <div className="mb-4 flex items-center gap-2 text-xs text-muted-foreground">
+    <div className="mb-4 flex items-center gap-2 text-xs text-muted-foreground" role="status">
       <span className="relative flex size-2.5 shrink-0">
-        <span className="absolute inline-flex size-full animate-ping rounded-full bg-success opacity-30" />
-        <span className="relative inline-flex size-2.5 rounded-full bg-success" />
+        {pulse && <span className={`absolute inline-flex size-full animate-ping rounded-full opacity-30 ${dotClass}`} />}
+        <span className={`relative inline-flex size-2.5 rounded-full ${dotClass}`} />
       </span>
-      <span>已检索 {sources.length} 份资料，回答基于{categoryLabel}</span>
+      <span>{label}</span>
     </div>
   );
 }
@@ -175,9 +190,7 @@ function CitationMarker({
               {source.doc_type === "transcript" ? (
                 <>
                   {source.media_id && (
-                    <svg className="w-3.5 h-3.5 text-accent" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M9.5 7.5l7 4.5-7 4.5v-9z" />
-                    </svg>
+                    <CirclePlay className="size-3.5 text-primary" aria-hidden="true" />
                   )}
                   @{source.start_time || ""}
                 </>
@@ -223,7 +236,7 @@ export function Message({
           <div className="whitespace-pre-wrap break-words">{msg.content}</div>
         ) : (
           <>
-            {!msg.streaming && msg.sources && msg.sources.length > 0 && <RetrievalSummary sources={msg.sources} />}
+            <AnswerStatus msg={msg} />
             <div className={"prose-tight relative " + (msg.streaming && msg.content ? "caret" : "")}>
               {msg.content ? (
                 <ReactMarkdown
@@ -254,11 +267,11 @@ export function Message({
                   {linkifyCitations(normalizeMath(msg.content))}
                 </ReactMarkdown>
               ) : null}
-              <StageIndicator msg={msg} />
             </div>
             {msg.error && (
-              <div className="mt-2 text-sm text-red-600 bg-red-50 border border-red-200 rounded p-2">
-                ⚠️ {msg.error}
+              <div className="mt-2 flex items-start gap-2 rounded-ui-md border border-destructive/30 bg-destructive/10 p-2 text-sm text-destructive">
+                <CircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+                <span>{msg.error}</span>
               </div>
             )}
             {!msg.streaming && !msg.error && msg.content && (

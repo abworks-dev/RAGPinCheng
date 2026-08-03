@@ -1,16 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
+  Check,
   ChevronDown,
   ChevronRight,
   Clipboard,
-  Copy,
+  CirclePlay,
   FileSpreadsheet,
   FileText,
-  Film,
   LocateFixed,
   PanelRightClose,
-  Play,
+  Presentation,
+  Video,
 } from "lucide-react";
 import { api } from "../api/client";
 import { usePdfPreview } from "../hooks/usePdfPreview";
@@ -59,8 +60,9 @@ function sourceLocator(source: Source): string {
 }
 
 function SourceTypeIcon({ source }: { source: Source }) {
-  if (source.doc_type === "transcript") return <Film className="size-4" />;
+  if (source.doc_type === "transcript") return <Video className="size-4" />;
   if (source.doc_type === "xlsx") return <FileSpreadsheet className="size-4" />;
+  if (source.doc_type === "pptx") return <Presentation className="size-4" />;
   return <FileText className="size-4" />;
 }
 
@@ -384,7 +386,7 @@ function SourceDetail({
           }
           className="inline-flex h-9 items-center justify-center gap-1.5 rounded-ui-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
         >
-          {source.doc_type === "transcript" ? <Play className="size-3.5" /> : <FileText className="size-3.5" />}
+          {source.doc_type === "transcript" ? <CirclePlay className="size-3.5" /> : <SourceTypeIcon source={source} />}
           打开完整资料
         </button>
         <button
@@ -392,7 +394,7 @@ function SourceDetail({
           onClick={copySource}
           className="inline-flex h-9 items-center justify-center gap-1.5 rounded-ui-md border border-border px-3 text-xs font-medium text-foreground hover:bg-secondary"
         >
-          {copied ? <Copy className="size-3.5 text-success" /> : <Clipboard className="size-3.5" />}
+          {copied ? <Check className="size-3.5 text-success" /> : <Clipboard className="size-3.5" />}
           {copied ? "已复制" : "复制来源"}
         </button>
       </div>
