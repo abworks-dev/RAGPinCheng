@@ -19,7 +19,8 @@ export function ChatLayout() {
   const [conversationsLoading, setConversationsLoading] = useState(true);
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [conversationDrawerOpen, setConversationDrawerOpen] = useState(false);
-  const [sourceOpen, setSourceOpen] = useState(() => window.matchMedia("(min-width: 1280px)").matches);
+  const [sourceOpen, setSourceOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   const refreshConversations = useCallback(async () => {
     try {
@@ -88,7 +89,7 @@ export function ChatLayout() {
   const sourceCount = [...messages].reverse().find((message) => message.sources?.length)?.sources?.length || 0;
   const scopeLabel = selected.length === 0 ? "全部企业知识" : selected.length === 1 ? selected[0] : `${selected.length} 个范围`;
 
-  const sidebar = (
+  const sidebar = (collapsed: boolean, onToggleCollapsed?: () => void) => (
     <Sidebar
       conversations={conversations}
       conversationsLoading={conversationsLoading}
@@ -100,13 +101,17 @@ export function ChatLayout() {
       onToggle={toggleCategory}
       onClearCategories={() => setSelected([])}
       onNewChat={onNewChat}
+      collapsed={collapsed}
+      onToggleCollapsed={onToggleCollapsed}
     />
   );
 
   return (
     <PdfPreviewProvider>
       <div className="flex h-full min-w-0 overflow-hidden bg-background text-foreground">
-        <div className="hidden h-full shrink-0 lg:block">{sidebar}</div>
+        <div className="hidden h-full shrink-0 lg:block">
+          {sidebar(sidebarCollapsed, () => setSidebarCollapsed((value) => !value))}
+        </div>
         <main className="flex min-w-0 flex-1 flex-col">
           <ChatHeader
             title={currentConversation?.title || "品成 BIM 知识库"}
@@ -134,7 +139,7 @@ export function ChatLayout() {
         )}
       </div>
       <Drawer open={conversationDrawerOpen} onClose={() => setConversationDrawerOpen(false)} title="会话导航">
-        {sidebar}
+        {sidebar(false)}
       </Drawer>
       <Drawer open={sourceOpen} onClose={() => setSourceOpen(false)} title="来源核验" side="right" className="xl:hidden">
         <SourceWorkspace messages={messages} conversationId={currentId} />

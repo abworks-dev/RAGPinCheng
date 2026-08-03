@@ -1656,3 +1656,9 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 完成：扩大用户端会话侧栏和来源核验栏；以 `lucide-react` 替换 P0 临时符号图标；在回答顶部增加由实际来源数量与分类动态生成的检索摘要和绿色状态点，在回答底部增加“查看 X 个来源”定位按钮；来源列表与引用详情调整为更接近 shadcn/ui 的边框、选中态、层级和强调引用样式。
 - 文件：仅修改用户端聊天组件、`frontend/package.json`、`frontend/package-lock.json` 与 `WORKLOG.md`；未修改管理端页面、API、认证、CSRF、SSE、RAG、索引或后端业务。
 - 验证：`npm run build` 通过（1960 modules transformed）；前端 Vitest 9 个文件、43 项测试全部通过；`git diff --check` 无内容错误。浏览器仍无登录态，带真实来源的回答态和来源定位交互未完成浏览器端到端视觉验收。
+
+### 11:24 — 完善问答侧栏与来源开合交互
+
+- 完成：登录后的来源核验栏改为默认关闭，使空状态和输入器在主内容区居中；桌面会话侧栏增加 272px 与 64px 两态收缩控制，收起后保留品牌、新建对话和用户入口；用户菜单迁移为 Lucide 图标和紧凑浮层；会话按本地自然日分为今天、7 天内、30 天内和更早；来源展开时隐藏聊天标题栏按钮，仅保留来源栏右上角一个带数量的收缩按钮。
+- 文件：仅修改用户端 `ChatLayout`、`Sidebar`、`ConversationList`、`UserMenu`、`ChatHeader`、`SourceWorkspace`，新增会话分组测试并更新 `WORKLOG.md`；未修改管理端、API、认证、CSRF、SSE、RAG、索引或后端业务。
+- 验证：`npm run build` 通过（1960 modules transformed）；前端 Vitest 10 个文件、44 项测试全部通过；`git diff --check` 无内容错误。浏览器无登录态，桌面收缩、用户菜单和来源开合仍待登录后视觉验收。

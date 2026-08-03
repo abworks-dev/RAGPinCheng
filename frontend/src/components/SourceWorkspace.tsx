@@ -23,7 +23,6 @@ import {
   type CitationDetail,
   type CitationHoverDetail,
 } from "./citations";
-import { IconButton } from "./ui/icon-button";
 
 type SourceSet = {
   messageId: string;
@@ -232,9 +231,10 @@ function WorkspaceHeader({ count, onClose }: { count: number; onClose?: () => vo
         <p className="text-[11px] text-muted-foreground">{count ? `${count} 项回答依据` : "等待检索结果"}</p>
       </div>
       {onClose && (
-        <IconButton label="收起来源" onClick={onClose}>
+        <button type="button" aria-label="收起来源" title="收起来源" onClick={onClose} className="inline-flex h-9 items-center gap-1.5 rounded-ui-md px-2 text-muted-foreground hover:bg-secondary hover:text-foreground">
+          {count > 0 && <span className="min-w-5 rounded-full bg-ui-accent px-1.5 py-0.5 text-[11px] font-medium text-ui-accent-foreground">{count}</span>}
           <PanelRightClose className="size-4" />
-        </IconButton>
+        </button>
       )}
     </div>
   );
