@@ -1,30 +1,38 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 
-type Theme = "light" | "dark";
+export type ThemePreference = "system" | "light" | "dark";
 const KEY = "pincheng-theme";
 
-function detect(): Theme {
-  if (typeof document === "undefined") return "light";
-  return document.documentElement.classList.contains("dark") ? "dark" : "light";
+function detectPreference(): ThemePreference {
+  if (typeof window === "undefined") return "system";
+  try {
+    const saved = localStorage.getItem(KEY);
+    if (saved === "light" || saved === "dark" || saved === "system") return saved;
+  } catch {
+    /* use the system preference */
+  }
+  return "system";
 }
 
-export function useTheme(): [Theme, () => void] {
-  const [theme, setTheme] = useState<Theme>(detect);
+export function useTheme(): [ThemePreference, (theme: ThemePreference) => void] {
+  const [theme, setTheme] = useState<ThemePreference>(detectPreference);
 
   useEffect(() => {
     const root = document.documentElement;
-    if (theme === "dark") root.classList.add("dark");
-    else root.classList.remove("dark");
+    const media = typeof window.matchMedia === "function"
+      ? window.matchMedia("(prefers-color-scheme: dark)")
+      : null;
+    const apply = () => root.classList.toggle("dark", theme === "dark" || (theme === "system" && Boolean(media?.matches)));
+
+    apply();
+    if (theme === "system") media?.addEventListener("change", apply);
     try {
       localStorage.setItem(KEY, theme);
     } catch {
       /* noop */
     }
+    return () => media?.removeEventListener("change", apply);
   }, [theme]);
 
-  const toggle = useCallback(() => {
-    setTheme((t) => (t === "dark" ? "light" : "dark"));
-  }, []);
-
-  return [theme, toggle];
+  return [theme, setTheme];
 }
