@@ -28,7 +28,7 @@ export function AdminLayout() {
   return (
     <div className="min-h-full bg-admin-background text-foreground">
       <header className="sticky top-0 z-sticky border-b border-border bg-admin-surface/95 backdrop-blur">
-        <div className="mx-auto flex min-h-16 max-w-[1600px] items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
+        <div className="flex min-h-16 items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
           <div className="flex min-w-0 items-center gap-3">
             <span
               className="flex h-9 w-9 shrink-0 items-center justify-center rounded-ui-lg bg-primary text-ui-sm font-semibold text-primary-foreground shadow-surface"
@@ -68,7 +68,7 @@ export function AdminLayout() {
         </div>
       </header>
 
-      <div className="mx-auto flex max-w-[1600px] flex-col lg:min-h-[calc(100vh-4rem)] lg:flex-row">
+      <div className="flex flex-col lg:min-h-[calc(100vh-4rem)] lg:flex-row">
         <aside className="shrink-0 border-b border-border bg-admin-surface lg:w-64 lg:border-b-0 lg:border-r">
           <div className="px-3 py-3 lg:p-4">
             <p className="mb-2 hidden px-3 text-ui-xs font-medium uppercase tracking-[0.14em] text-muted-foreground lg:block">
