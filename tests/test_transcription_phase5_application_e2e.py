@@ -3,6 +3,8 @@ from __future__ import annotations
 import pytest
 
 from api.transcription_publication import TranscriptionPublicationApplicationService
+from api.transcription_store import SQLiteTranscriptionStore
+from src.transcription.profile import ProfileRegistry
 from src.transcription.types import ContractValidationError, ProfileQualification, ReviewStatus, PublicationIndexStatus
 from tests.test_transcription_publication_transaction import persist_candidate
 from tests.transcription_fixture_helpers import make_profile, seed_admin_user
@@ -10,9 +12,9 @@ from tests.transcription_fixture_helpers import make_profile, seed_admin_user
 
 def _service(conn, artifacts, profile, tmp_path):
     return TranscriptionPublicationApplicationService(
-        store=__import__("api.transcription_store", fromlist=["SQLiteTranscriptionStore"]).SQLiteTranscriptionStore(conn),
+        store=SQLiteTranscriptionStore(conn),
         artifacts=artifacts,
-        profiles=__import__("src.transcription.profile", fromlist=["ProfileRegistry"]).ProfileRegistry((profile,)),
+        profiles=ProfileRegistry((profile,)),
         docs_root=tmp_path,
         media_title=lambda _media_id: "Fixture video",
     )
