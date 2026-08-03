@@ -1624,3 +1624,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`frontend/src/pages/admin/AdminMediaPage.tsx`、新增 `frontend/src/pages/admin/AdminMediaPage.test.tsx`、`WORKLOG.md`。
 - 验证：针对性测试 5/5 通过；前端全量 Vitest 11 个文件、52 项测试通过；TypeScript project build 与 Vite production build 通过（406 modules transformed）。保留既有 React Router future warning、CSS minify warning 和主包大于 500 kB 警告。
 - 边界：保留 `api.uploadMediaVideo(video, transcript, title)`、`api.listMediaAssets()`、FormData、CSRF、Cookie、后端上传与索引契约；未修改 API、类型、依赖、全局样式或其他页面。本阶段尚未提交、推送或部署，也未使用真实媒体文件和管理账号完成联调验收。
+
+### 09:40 — 修复管理端助手消息宽度
+
+- 完成：将“对话管理 → 对话详情”中的助手消息容器由全宽改为按内容收缩，并保留 `max-w-3xl` 上限与自动换行；短回答不再铺满详情栏。
+- 文件：`frontend/src/pages/admin/AdminConversationsPage.tsx`、`frontend/src/pages/admin/AdminConversationsPage.test.tsx`、`WORKLOG.md`。
+- 验证：针对性测试 6/6、前端全量 Vitest 11 个文件 52/52 通过；TypeScript 与 Vite production build 通过（406 modules transformed）；`git diff --check` 通过。保留既有 React Router future warning、CSS minify warning 和主包大于 500 kB 警告。
+- 边界：仅修改独立对话管理页及其回归测试，未修改用户管理页中的相似布局、API、认证、数据、依赖或全局样式；尚未使用真实管理员账号完成生产视觉验收。推送 `master` 后将由现有 CI 成功事件自动触发生产部署。
