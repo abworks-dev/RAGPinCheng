@@ -70,7 +70,7 @@ def test_phase5_tests_do_not_import_real_asr_media_or_gpu_packages():
     ]
     source_paths = [
         ROOT / "api" / "transcription_publication.py",
-        ROOT / "src" / "transcription" / "retrieval_visibility.py",
+        ROOT / "src" / "transcription_retrieval_visibility.py",
     ]
     for path in test_paths + source_paths:
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))

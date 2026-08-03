@@ -39,7 +39,7 @@ from .config import (
 from .embed import encode_one
 from .index import _client, _ensure_payload_indexes, fetch_parents
 from .rerank import rerank_scores
-from .transcription.retrieval_visibility import (
+from .transcription_retrieval_visibility import (
     PublishedTranscriptSnapshot,
     PublishedTranscriptVisibilityPort,
     SQLitePublishedTranscriptVisibility,

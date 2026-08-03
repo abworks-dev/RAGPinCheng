@@ -1,6 +1,6 @@
 # 多引擎视频自动转录 Phase 5 — 隔离端到端与版本感知发布
 
-- 状态：**R2 已批准；Phase 5A/5B 代码完成待远端 CI 验证；Phase 5C 未授权**
+- 状态：**R2 已批准；Phase 5A/5B 首轮远端 CI 失败，最小修复待验证；Phase 5C 未授权**
 - 风险等级：**R2**（涉及转录版本审核/发布 API、后台索引编排、Parent/Child 与 Qdrant payload 兼容、检索可见性、管理端 UI 和 CI）
 - 调查日期：2026-08-03（Asia/Shanghai）
 - 代码调查基线：`origin/master@b323023aaf47e628379163470eb30c39f6d3554e`
@@ -195,7 +195,7 @@ Chat/RAG retrieve
 - `src/transcription/` 继续拥有领域契约和端口，不依赖 FastAPI、React、Qdrant service 进程或具体 ASR 引擎。
 - `api/` 拥有 app.sqlite Schema/写事务、artifact、管理命令、worker 配置和 PublicationIndexPort 的应用适配器。
 - `src/chunk.py`、`src/index.py`、`src/indexing_pipeline.py` 只增加可选的版本索引元数据；普通文档和 legacy transcript 调用不传时保持原行为。
-- `src/transcription/retrieval_visibility.py` 拥有可见性端口及基于共享 `APP_DB_PATH` 的只读 SQLite adapter；只读取并校验 head/version，不执行 Schema 初始化或写事务，也不导入 `api`。`src/retrieve.py` 默认使用该 adapter，并允许测试注入同一端口。
+- `src/transcription_retrieval_visibility.py` 拥有可见性端口及基于共享 `APP_DB_PATH` 的只读 SQLite adapter；该 Phase 5 模块位于 Phase 1 纯契约核心包之外，只读取并校验 head/version，不执行 Schema 初始化或写事务，也不导入 `api`。`src/retrieve.py` 默认使用该 adapter，并允许测试注入同一端口。
 - Provider/normalizer/formatter 不参与审核、发布、Qdrant 或可见性判断。
 - 不按 Provider 名称、模型名或 `profile_id` 在索引/检索核心中分支。
 
@@ -361,7 +361,7 @@ Phase 5C 执行前必须明确：目标主机、数据分类、Profile 资格候
 | 文件 | 职责 |
 |---|---|
 | `api/transcription_publication.py` | Publication application service；版本列表/preview/review/publish；实现受控 `PublicationIndexPort` adapter；加载 version/artifact/media 并生成结构化 receipt。 |
-| `src/transcription/retrieval_visibility.py` | 定义 published-head snapshot/port、严格 UUID 与一致性校验，并实现基于共享 `APP_DB_PATH` 的只读 SQLite adapter；只读 join `media_transcript_heads`/`transcript_versions`，不初始化或写入 app.sqlite。 |
+| `src/transcription_retrieval_visibility.py` | 在 Phase 1 纯契约核心包之外定义 published-head snapshot/port、严格 UUID 与一致性校验，并实现基于共享 `APP_DB_PATH` 的只读 SQLite adapter；只读 join `media_transcript_heads`/`transcript_versions`，不初始化或写入 app.sqlite。 |
 
 ### 7.2 修改后端文件
 
@@ -693,4 +693,5 @@ build_index --reset
 - Candidate 索引继续写入既有 collection，但携带 immutable `transcript_version_id` / `publication_target_id`；正式可见性只读取 `app.sqlite` head，legacy/普通文档缺少版本字段时保持可见。
 - 本地无外部资源验证已通过：Python Store/事务/manual/visibility/index metadata/static 共 29 项；Phase 5 定向前端共 31 项；`compileall` 与 `git diff --check` 通过。
 - 本地环境缺少 `qdrant_client`、FastAPI 等既有测试依赖，相关 API、worker、candidate index 与 Qdrant Filter 组合测试交由新增的 `test-transcription-phase5` CI job 在干净环境验证；CI 通过前状态保持“代码完成待验证”。
+- 首轮远端 `test-transcription-contracts` 收集 289 项并出现 9 个失败：Phase 5 SQLite visibility adapter 误入 Phase 1 纯契约核心包、获批索引/检索修改后的静态保护哈希未同步，以及 Phase 5 review 测试误用无需审核的 approved Profile fixture。最小修复已将 adapter 移至 `src/transcription_retrieval_visibility.py`、同步获批基线并改用 experimental Profile；标准命令通道暂不可用，修复仍待本地/远端复验。
 - Phase 5C 未授权、未执行；未安装或真实运行 ffmpeg/ffprobe、ASR、GPU、Qdrant、embedding/rerank，未访问生产数据，未新增运行时第三方依赖。
