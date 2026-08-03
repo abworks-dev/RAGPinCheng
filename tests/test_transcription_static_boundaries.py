@@ -20,9 +20,21 @@ ALLOWED = {
     "pipeline": {"types", "profile", "provider_protocol", "normalizer", "canonical"},
     "formatter": {"types", "canonical"},
     "policy": {"types", "profile"},
+    "persistence": {"types", "profile", "provider_protocol", "canonical"},
+    "workflow": {"types", "profile", "provider_protocol", "canonical", "persistence", "policy"},
+    "runtime_ports": {"types"},
+    "provider_registry": {"types", "provider_protocol", "runtime_ports"},
+    "asr_service_contract": {"types", "candidate", "provider_protocol"},
+    "remote_provider": {
+        "types", "profile", "provider_protocol", "runtime_ports",
+        "provider_registry", "asr_service_contract",
+    },
+    "profile_catalog": {"types", "profile", "asr_service_contract"},
     "__init__": {
         "types", "candidate", "profile", "provider_protocol", "canonical",
-        "normalizer", "pipeline", "formatter", "policy",
+        "normalizer", "pipeline", "formatter", "policy", "persistence", "workflow",
+        "runtime_ports", "provider_registry", "asr_service_contract",
+        "remote_provider", "profile_catalog",
     },
 }
 FORBIDDEN_IMPORT_ROOTS = {
@@ -114,7 +126,14 @@ def test_all_scoped_python_rejects_forbidden_and_dynamic_imports():
     for path in scoped_python_files():
         modules = imported_modules(path)
         roots = {module.split(".", 1)[0].lower() for module in modules}
-        assert not roots & FORBIDDEN_IMPORT_ROOTS, (path, roots & FORBIDDEN_IMPORT_ROOTS)
+        forbidden = FORBIDDEN_IMPORT_ROOTS
+        if not path.is_relative_to(CORE):
+            forbidden = forbidden - {"sqlite3", "sqlalchemy"}
+        if path == CORE / "remote_provider.py":
+            forbidden = forbidden - {"httpx"}
+        if path.name == "test_transcription_remote_provider.py":
+            forbidden = forbidden - {"httpx"}
+        assert not roots & forbidden, (path, roots & forbidden)
         dynamic = {
             call_name(node)
             for node in ast.walk(tree(path))
@@ -193,7 +212,7 @@ def test_no_manual_provider_parser_copy_or_real_media_fixture():
     assert "TRANSCRIPT_TURN_RE" not in helper
     assert "importorskip" not in manual_test
     assert "ASR_ENABLED" not in helper + manual_test
-    assert all(path.suffix in {".json", ".md", ".sha256"} for path in FIXTURES.rglob("*"))
+    assert all(path.suffix in {".json", ".md", ".sha256", ".sql"} for path in FIXTURES.rglob("*"))
     candidate_fixture = json.loads((FIXTURES / "candidate.json").read_text(encoding="utf-8"))
     assert "warnings" not in candidate_fixture
 

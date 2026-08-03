@@ -30,6 +30,11 @@ class ProviderErrorCode(Enum):
     invalid_provider_output = "invalid_provider_output"
     execution_config_mutated = "execution_config_mutated"
     provider_contract_violation = "provider_contract_violation"
+    provider_oom = "provider_oom"
+    provider_cancelled = "provider_cancelled"
+    input_too_large = "input_too_large"
+    input_unavailable = "input_unavailable"
+    service_contract_mismatch = "service_contract_mismatch"
 
 
 class ProviderFailureClassification(Enum):
