@@ -60,6 +60,9 @@ describe("AdminUsersPage", () => {
     expect(screen.getByText("李工")).toBeInTheDocument();
     expect(screen.getByText("共 2 位用户")).toBeInTheDocument();
     expect(screen.getByText("已停用")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "停用账号" })[0]).toHaveClass("border-destructive/50");
+    expect(screen.getAllByRole("button", { name: "设为管理员" })[0]).toHaveClass("border-border");
+    expect(screen.getAllByRole("button", { name: "重置密码" })[0]).toHaveClass("bg-secondary");
     expect(mocks.adminListUsers).toHaveBeenCalledTimes(1);
   });
 
@@ -93,7 +96,7 @@ describe("AdminUsersPage", () => {
     mocks.adminPatchUser.mockResolvedValue(users[0]);
 
     render(<AdminUsersPage />);
-    fireEvent.click(await screen.findByRole("button", { name: "停用" }));
+    fireEvent.click(await screen.findByRole("button", { name: "停用账号" }));
 
     await waitFor(() => expect(mocks.adminPatchUser).toHaveBeenCalledWith(1, { is_active: false }));
     await waitFor(() => expect(mocks.adminListUsers).toHaveBeenCalledTimes(2));
