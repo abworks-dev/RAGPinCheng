@@ -1617,3 +1617,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`frontend/src/pages/admin/AdminFeedbackPage.tsx`、新增 `frontend/src/pages/admin/AdminFeedbackPage.test.tsx`、`WORKLOG.md`。
 - 验证：针对性测试 4/4 通过；前端全量 Vitest 10 个文件、47 项测试通过；TypeScript project build 与 Vite production build 通过（406 modules transformed）；`git diff --check` 通过。保留既有 React Router future warning、CSS minify warning 和主包大于 500 kB 警告。
 - 边界：保留 `adminFeedback(200)` 的 API、参数与初始加载时机，未修改认证、CSRF、后端、依赖、全局样式、问答、SSE、引用、预览、上传、索引或其他管理页面；本阶段尚未提交、推送或部署，也未使用真实管理账号进行生产视觉验收。
+
+### 09:10 — 统一管理端视频媒体页面
+
+- 完成：将管理端视频媒体页迁移到现有语义 Token 与基础组件，统一页面标题、上传卡片、文件选择反馈、媒体表格、状态 Badge、加载/空数据/错误反馈与原位重试；成功上传后清空标题和原生文件输入并刷新列表，小屏支持表格横向滚动。
+- 文件：`frontend/src/pages/admin/AdminMediaPage.tsx`、新增 `frontend/src/pages/admin/AdminMediaPage.test.tsx`、`WORKLOG.md`。
+- 验证：针对性测试 5/5 通过；前端全量 Vitest 11 个文件、52 项测试通过；TypeScript project build 与 Vite production build 通过（406 modules transformed）。保留既有 React Router future warning、CSS minify warning 和主包大于 500 kB 警告。
+- 边界：保留 `api.uploadMediaVideo(video, transcript, title)`、`api.listMediaAssets()`、FormData、CSRF、Cookie、后端上传与索引契约；未修改 API、类型、依赖、全局样式或其他页面。本阶段尚未提交、推送或部署，也未使用真实媒体文件和管理账号完成联调验收。
