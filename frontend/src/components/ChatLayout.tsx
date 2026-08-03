@@ -7,6 +7,10 @@ import { MessageList } from "./MessageList";
 import { PdfPreview } from "./PdfPreview";
 import { PdfPreviewProvider } from "../hooks/usePdfPreview";
 import { Sidebar } from "./Sidebar";
+import { ChatHeader } from "./ChatHeader";
+import { SourceWorkspace } from "./SourceWorkspace";
+import { Drawer } from "./ui/drawer";
+import { CITATION_EVENT } from "./citations";
 
 export function ChatLayout() {
   const [categories, setCategories] = useState<string[]>([]);
@@ -14,6 +18,8 @@ export function ChatLayout() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [conversationsLoading, setConversationsLoading] = useState(true);
   const [currentId, setCurrentId] = useState<string | null>(null);
+  const [conversationDrawerOpen, setConversationDrawerOpen] = useState(false);
+  const [sourceOpen, setSourceOpen] = useState(() => window.matchMedia("(min-width: 1280px)").matches);
 
   const refreshConversations = useCallback(async () => {
     try {
@@ -32,6 +38,12 @@ export function ChatLayout() {
     refreshConversations();
   }, [refreshConversations]);
 
+  useEffect(() => {
+    const openSources = () => setSourceOpen(true);
+    window.addEventListener(CITATION_EVENT, openSources);
+    return () => window.removeEventListener(CITATION_EVENT, openSources);
+  }, []);
+
   const { messages, send, sending, loading } = useChat({
     conversationId: currentId,
     onConversationCreated: (id) => {
@@ -45,10 +57,12 @@ export function ChatLayout() {
 
   const onSelectConversation = useCallback((id: string) => {
     setCurrentId(id);
+    setConversationDrawerOpen(false);
   }, []);
 
   const onNewChat = useCallback(() => {
     setCurrentId(null);
+    setConversationDrawerOpen(false);
   }, []);
 
   const onDeleteConversation = useCallback(
@@ -70,36 +84,61 @@ export function ChatLayout() {
     );
   }
 
+  const currentConversation = conversations.find((conversation) => conversation.id === currentId);
+  const sourceCount = [...messages].reverse().find((message) => message.sources?.length)?.sources?.length || 0;
+  const scopeLabel = selected.length === 0 ? "全部企业知识" : selected.length === 1 ? selected[0] : `${selected.length} 个范围`;
+
+  const sidebar = (
+    <Sidebar
+      conversations={conversations}
+      conversationsLoading={conversationsLoading}
+      currentConversationId={currentId}
+      onSelectConversation={onSelectConversation}
+      onDeleteConversation={onDeleteConversation}
+      categories={categories}
+      selected={selected}
+      onToggle={toggleCategory}
+      onClearCategories={() => setSelected([])}
+      onNewChat={onNewChat}
+    />
+  );
+
   return (
     <PdfPreviewProvider>
-      <div className="h-full flex">
-        <Sidebar
-          conversations={conversations}
-          conversationsLoading={conversationsLoading}
-          currentConversationId={currentId}
-          onSelectConversation={onSelectConversation}
-          onDeleteConversation={onDeleteConversation}
-          categories={categories}
-          selected={selected}
-          onToggle={toggleCategory}
-          onClearCategories={() => setSelected([])}
-          onNewChat={onNewChat}
-        />
-        <main className="flex-1 flex flex-col min-w-0">
-          <header className="px-6 py-3 border-b border-gray-200 bg-bg/80 backdrop-blur-sm flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span className="text-lg">📚</span>
-              <span className="font-semibold">品成 BIM 知识库</span>
-            </div>
-            {loading && <div className="text-xs text-muted">加载历史…</div>}
-          </header>
+      <div className="flex h-full min-w-0 overflow-hidden bg-background text-foreground">
+        <div className="hidden h-full shrink-0 lg:block">{sidebar}</div>
+        <main className="flex min-w-0 flex-1 flex-col">
+          <ChatHeader
+            title={currentConversation?.title || "品成 BIM 知识库"}
+            scopeLabel={scopeLabel}
+            loading={loading}
+            sourceCount={sourceCount}
+            sourceOpen={sourceOpen}
+            onOpenConversations={() => setConversationDrawerOpen(true)}
+            onToggleSources={() => setSourceOpen((value) => !value)}
+          />
           <MessageList messages={messages} conversationId={currentId} />
           <Composer
             onSend={(t) => send(t, selected)}
             disabled={sending || loading}
+            categories={categories}
+            selected={selected}
+            onToggleCategory={toggleCategory}
+            onClearCategories={() => setSelected([])}
           />
         </main>
+        {sourceOpen && (
+          <div className="hidden h-full w-[21.5rem] shrink-0 border-l border-border xl:block">
+            <SourceWorkspace messages={messages} conversationId={currentId} onClose={() => setSourceOpen(false)} />
+          </div>
+        )}
       </div>
+      <Drawer open={conversationDrawerOpen} onClose={() => setConversationDrawerOpen(false)} title="会话导航">
+        {sidebar}
+      </Drawer>
+      <Drawer open={sourceOpen} onClose={() => setSourceOpen(false)} title="来源核验" side="right" className="xl:hidden">
+        <SourceWorkspace messages={messages} conversationId={currentId} />
+      </Drawer>
       <PdfPreview />
     </PdfPreviewProvider>
   );

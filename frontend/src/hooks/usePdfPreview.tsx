@@ -44,6 +44,7 @@ export function PdfPreviewProvider({ children }: { children: React.ReactNode }) 
 
   const open = useCallback(
     (parentId: string, title: string, docType = "pdf", pageNumber = 1, location: PdfPreviewLocation = {}) => {
+      window.dispatchEvent(new CustomEvent("resource-preview-open", { detail: { kind: "document" } }));
       setState({ parentId, title, docType, pageNumber, location });
     },
     [],

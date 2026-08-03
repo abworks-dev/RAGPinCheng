@@ -1645,3 +1645,8 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`frontend/src/pages/admin/AdminDocumentsPage.tsx`、新增 `frontend/src/pages/admin/AdminDocumentsPage.test.tsx`、`WORKLOG.md`。
 - 验证：针对性测试 8/8 通过；前端全量 Vitest 12 个文件、60/60 项测试通过；TypeScript project build 与 Vite production build 通过（406 modules transformed）；`git diff --check` 通过。保留既有 React Router future warning、CSS minify warning 和主包大于 500 kB 警告。
 - 边界：保留三接口初始并行加载、多文件上传与分类参数、活跃任务每 3 秒轮询、完成后刷新资料、资料两阶段删除确认、终态任务重试与记录删除契约；保留原生 `alert`、`confirm`，未修改 API、认证、CSRF、Cookie、FormData、后端、依赖、全局样式或其他页面，未操作真实资料；生产视觉验收尚未执行。
+### 10:17 — 实施知识库问答工作区 P0
+
+- 完成：将用户问答页调整为响应式会话导航、文档式回答阅读区和来源核验工作区；知识范围筛选移入输入器，引用点击与来源持久选择保持双向联动，并统一 PDF、DOCX、XLSX、PPTX 与视频的宽侧栏/移动端全屏预览外壳及互斥遮罩。
+- 文件：仅修改 `frontend/src/components/`、`frontend/src/hooks/usePdfPreview.tsx`、`frontend/src/hooks/useVideoPlayer.tsx` 与 `WORKLOG.md`；未修改管理端页面、API、认证、CSRF、SSE、RAG、索引或后端业务。
+- 验证：`npm run build` 通过（411 modules transformed）；前端 Vitest 9 个文件、43 项测试全部通过；浏览器在 1440×900、1280×800、1024×768、768×1024、390×844 五个视口检查登录页面均无水平溢出、无控制台 error，仅保留既有 React Router future warning。浏览器无登录态，因此聊天数据、来源选择和资源预览未完成真实后端端到端回归。

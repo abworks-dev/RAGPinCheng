@@ -1,11 +1,21 @@
 import { useEffect, useRef, useState } from "react";
+import { Send } from "./ui/icons";
+import { KnowledgeScopePicker } from "./KnowledgeScopePicker";
 
 export function Composer({
   onSend,
   disabled,
+  categories,
+  selected,
+  onToggleCategory,
+  onClearCategories,
 }: {
   onSend: (text: string) => void;
   disabled: boolean;
+  categories: string[];
+  selected: string[];
+  onToggleCategory: (category: string) => void;
+  onClearCategories: () => void;
 }) {
   const [text, setText] = useState("");
   const ref = useRef<HTMLTextAreaElement | null>(null);
@@ -26,8 +36,8 @@ export function Composer({
   }
 
   return (
-    <div className="border-t border-gray-200 bg-bg px-4 py-3">
-      <div className="max-w-3xl mx-auto flex items-end gap-2">
+    <div className="shrink-0 border-t border-border bg-background px-3 py-3 sm:px-5">
+      <div className="mx-auto max-w-[50rem] rounded-ui-lg border border-input bg-card p-2 shadow-surface focus-within:ring-2 focus-within:ring-ring/30">
         <textarea
           ref={ref}
           rows={1}
@@ -39,19 +49,17 @@ export function Composer({
               submit();
             }
           }}
-          placeholder="请输入问题…  （Enter 发送，Shift+Enter 换行）"
-          className="flex-1 resize-none rounded-2xl border border-gray-300 bg-white px-4 py-3 text-sm leading-relaxed focus:outline-none focus:ring-2 focus:ring-accent/60"
+          placeholder="向企业知识库提问"
+          className="block max-h-60 min-h-11 w-full resize-none bg-transparent px-2 py-2 text-sm leading-relaxed text-foreground placeholder:text-muted-foreground focus:outline-none"
         />
-        <button
-          type="button"
-          onClick={submit}
-          disabled={disabled || !text.trim()}
-          className="rounded-xl bg-accent text-white px-4 py-3 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed hover:bg-blue-700"
-        >
-          {disabled ? "回答中…" : "发送"}
-        </button>
+        <div className="flex min-h-9 items-center justify-between gap-2 border-t border-border pt-2">
+          <KnowledgeScopePicker categories={categories} selected={selected} onToggle={onToggleCategory} onClear={onClearCategories} compact />
+          <button type="button" aria-label="发送问题" title="发送" onClick={submit} disabled={disabled || !text.trim()} className="inline-flex size-9 shrink-0 items-center justify-center rounded-ui-md bg-primary text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40">
+            <Send className="size-4" />
+          </button>
+        </div>
       </div>
-      <div className="text-center text-xs text-muted mt-2">
+      <div className="mt-2 text-center text-[11px] text-muted-foreground">
         资料来源仅供参考。生成内容可能存在差错，请以正式规范文本为准。
       </div>
     </div>

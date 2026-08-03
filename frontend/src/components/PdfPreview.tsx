@@ -5,6 +5,8 @@ import "react-pdf/dist/esm/Page/TextLayer.css";
 import { usePdfPreview } from "../hooks/usePdfPreview";
 import { DocxPreview } from "./DocxPreview";
 import { SpreadsheetPreview } from "./SpreadsheetPreview";
+import { Minus, Plus } from "./ui/icons";
+import { ResourcePreviewShell } from "./ResourcePreviewShell";
 
 // PDF.js worker — use the CDN build so we don't need to bundle it.
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
@@ -25,6 +27,14 @@ export function PdfPreview() {
     setNumPages(null);
     setLoading(true);
   }, [state.parentId]);
+
+  useEffect(() => {
+    const onPreviewOpen = (event: Event) => {
+      if ((event as CustomEvent<{ kind: string }>).detail?.kind === "video") close();
+    };
+    window.addEventListener("resource-preview-open", onPreviewOpen);
+    return () => window.removeEventListener("resource-preview-open", onPreviewOpen);
+  }, [close]);
 
   const onDocumentLoadSuccess = useCallback(
     ({ numPages: n }: { numPages: number }) => {
@@ -54,79 +64,27 @@ export function PdfPreview() {
     setScale((s) => Math.max(s - 0.25, 0.5));
   }
 
-  return (
-    <>
-      {/* Backdrop */}
-      {open && (
-        <div
-          className="fixed inset-0 bg-black/20 z-30"
-          onClick={close}
-        />
-      )}
-
-      {/* Slide-in panel */}
-      <div
-        className={
-          "fixed top-0 right-0 h-full w-[42rem] max-w-[90vw] bg-white dark:bg-gray-900 shadow-2xl z-40 flex flex-col transition-transform duration-300 " +
-          (open ? "translate-x-0" : "translate-x-full")
-        }
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700 shrink-0">
-          <div className="min-w-0 flex-1">
-            <h3 className="text-sm font-medium truncate">
-              {isDocx ? "📄 " : "📕 "}
-              {state.title}
-            </h3>
-            {!isDocx && numPages && (
-              <p className="text-xs text-muted">
-                {state.pageNumber} / {numPages} 页
-              </p>
-            )}
-            {isDocx && (
-              <p className="text-xs text-muted">Word 文档</p>
-            )}
-            {isXlsx && (
-              <p className="text-xs text-muted">Excel 表格</p>
-            )}
-          </div>
-          <div className="flex items-center gap-1 ml-4">
+  const typeLabel = isDocx ? "Word 文档" : isXlsx ? "Excel 表格" : isPptx ? "演示文稿" : numPages ? `${state.pageNumber} / ${numPages} 页` : "PDF 文档";
+  const toolbar = !isDocx && !isXlsx ? (
+    <div className="flex items-center gap-1">
             {!isDocx && !isXlsx && (
               <>
-                <button
-                  type="button"
-                  onClick={zoomOut}
-                  className="px-2 py-1 text-xs border border-gray-300 rounded hover:bg-gray-100 dark:hover:bg-gray-800"
-                  title="缩小"
-                >
-                  −
-                </button>
-                <span className="text-xs text-muted w-10 text-center">
+                <button type="button" aria-label="缩小" onClick={zoomOut} className="inline-flex size-8 items-center justify-center rounded-ui-md hover:bg-secondary"><Minus className="size-4" /></button>
+                <span className="w-10 text-center text-xs text-muted-foreground">
                   {Math.round(scale * 100)}%
                 </span>
-                <button
-                  type="button"
-                  onClick={zoomIn}
-                  className="px-2 py-1 text-xs border border-gray-300 rounded hover:bg-gray-100 dark:hover:bg-gray-800"
-                  title="放大"
-                >
-                  +
-                </button>
+                <button type="button" aria-label="放大" onClick={zoomIn} className="inline-flex size-8 items-center justify-center rounded-ui-md hover:bg-secondary"><Plus className="size-4" /></button>
               </>
             )}
-            <button
-              type="button"
-              onClick={close}
-              className="ml-2 px-2 py-1 text-xs text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded"
-            >
-              ✕ 关闭
-            </button>
-          </div>
-        </div>
+    </div>
+  ) : null;
+
+  return (
+    <ResourcePreviewShell open={open} title={state.title} subtitle={typeLabel} onClose={close} toolbar={toolbar}>
 
         {/* Page navigation (PDF only) */}
         {!isDocx && !isXlsx && numPages && numPages > 1 && (
-          <div className="flex items-center justify-center gap-2 px-4 py-2 border-b border-gray-100 dark:border-gray-800 shrink-0">
+          <div className="flex shrink-0 items-center justify-center gap-2 border-b border-border px-4 py-2">
             <button
               type="button"
               onClick={handlePrevPage}
@@ -159,7 +117,7 @@ export function PdfPreview() {
         )}
 
         {/* Content area */}
-        <div className="flex-1 overflow-y-auto bg-gray-100 dark:bg-gray-800">
+        <div className="h-full overflow-auto bg-secondary">
           {isDocx ? (
             <DocxPreview
               parentId={state.parentId!}
@@ -209,7 +167,6 @@ export function PdfPreview() {
             </>
           )}
         </div>
-      </div>
-    </>
+    </ResourcePreviewShell>
   );
 }

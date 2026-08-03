@@ -5,8 +5,6 @@ import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import type { ChatMessage, Source } from "../types";
 import { stripMarkdown } from "../utils/markdown";
-import { SourcesPanel } from "./SourcesPanel";
-import { DebugPanel } from "./DebugPanel";
 import { FeedbackBar } from "./FeedbackBar";
 import { timestampToSeconds, useVideoPlayer } from "../hooks/useVideoPlayer";
 import {
@@ -187,13 +185,11 @@ export function Message({
 }) {
   const isUser = msg.role === "user";
   return (
-    <div className={`w-full flex ${isUser ? "justify-end" : "justify-start"} px-4`}>
+    <article className={`mx-auto flex w-full max-w-[50rem] ${isUser ? "justify-end" : "justify-start"} px-4 py-4`}>
       <div
         className={
-          "max-w-3xl w-full rounded-2xl px-4 py-3 " +
-          (isUser
-            ? "bg-accent text-white ml-12"
-            : "bg-panel border border-gray-200 mr-12")
+          (isUser ? "max-w-[70%] rounded-ui-lg bg-primary px-4 py-3 text-primary-foreground" : "min-w-0 w-full") +
+          ""
         }
       >
         {isUser ? (
@@ -237,21 +233,12 @@ export function Message({
                 ⚠️ {msg.error}
               </div>
             )}
-            {msg.sources && msg.sources.length > 0 && (
-              <SourcesPanel
-                sources={msg.sources}
-                messageId={msg.id}
-                conversationId={conversationId}
-                searchQuery={msg.prep?.search_query || msg.query}
-              />
-            )}
             {!msg.streaming && !msg.error && msg.content && (
               <FeedbackBar msg={msg} conversationId={conversationId} turnIndex={turnIndex} />
             )}
-            <DebugPanel msg={msg} />
           </>
         )}
       </div>
-    </div>
+    </article>
   );
 }
