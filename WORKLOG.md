@@ -1706,3 +1706,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：新增 `asr_service/`、`src/transcription/asr_service_contract.py`、`profile_catalog.py`、`provider_registry.py`、`remote_provider.py`、`runtime_ports.py` 及 Phase 3 测试；最小修改 Profile/Provider 契约、配置示例、主依赖中的既有 `httpx` 声明、CI、静态边界、Phase 3 计划、功能文档和 `TODO.md`。未触碰并行 frontend 修改，也未修改数据库 Schema、应用 API/UI/worker、Qdrant、`gpu_service`、Canonical、normalizer、formatter 或 `pipeline.py`。
 - 验证：review 修复定向 suite `49 passed`；最新 master 基线完整 transcription/manual/service 回归 `276 passed, 1 skipped`；`tests/test_providers.py` 为 `16 passed, 6 skipped`；`compileall` 与提交级 `git diff --check` 通过。本地跳过仅因 `.venv` 缺 FastAPI；PR #5 CI 六个 job 全部通过，其中 transcription 为 `239 passed`，ASR service/API/auth 为 `90 passed`、零 skip。
 - 边界/风险：两侧默认关闭，未下载模型、未导入真实 FunASR/torch 执行推理，未访问网络/GPU/真实媒体/数据库/生产；Phase 3 尚未接应用上传、Store、worker、管理员 UI 或索引，因此没有用户可见自动转录能力。Phase 4 未开始。
+
+### 12:25 — 统一问答品牌与回答反馈操作
+
+- 完成：新增共享品牌锁定组件，管理端保持原视觉，对话侧栏改为“品”字品牌图标、站点名称与“知识问答工作台”副标题，收起时品牌图标兼作展开控制；助手完整回答底部统一为来源按钮居左、复制与差评图标居右，复制结果使用 Toast 反馈；差评改为可访问 Dialog，支持“有害/不安全、虚假信息、没有帮助、其他”原因和补充说明，成功后保留复制能力并标记反馈已提交。
+- 文件：新增 `frontend/src/components/AppBrand.tsx`、`frontend/src/components/ui/dialog.tsx`、`frontend/src/components/FeedbackBar.test.tsx`、`frontend/src/components/Message.test.tsx`、`frontend/src/components/Sidebar.test.tsx`；修改 `frontend/src/components/FeedbackBar.tsx`、`frontend/src/components/Message.tsx`、`frontend/src/components/Sidebar.tsx`、`frontend/src/components/ui/icon-button.tsx`、`frontend/src/pages/admin/AdminLayout.tsx`、`frontend/package.json`、`frontend/package-lock.json`、`WORKLOG.md`。
+- 验证：新增专项测试 3 个文件、10/10 项通过；前端全量 Vitest 16 个文件、71/71 项通过；TypeScript project build 与 Vite production build 通过（2016 modules transformed）；使用仅监听本机的虚构账号、会话、回答和来源数据完成桌面端及 390×844 移动端视觉检查，确认品牌、回答操作栏、Dialog 初始焦点、按钮布局和横向溢出均正常；`git diff --check` 通过。保留既有 React Router future warning、CSS minify warning 和主包大于 500 kB 警告。
+- 边界：仅新增 `@radix-ui/react-dialog`；反馈仍调用既有 `/api/feedback` 并保留 `conversation_id`、`turn_index`、`message_id`、`query`、`answer_text` 关联字段，原因和说明仅组合进原 `note`；未修改 API client、类型、认证、CSRF、SSE、引用、来源面板、预览、后端或数据库，未提交真实反馈，临时本地服务已关闭，本地 `master` 尚未推送或部署。

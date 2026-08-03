@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
+import { AppBrand } from "../../components/AppBrand";
 import { Button, buttonVariants } from "../../components/ui/button";
 import { useAuth } from "../../context/AuthContext";
 import { cn } from "../../lib/utils";
@@ -29,18 +30,7 @@ export function AdminLayout() {
     <div className="min-h-full bg-admin-background text-foreground">
       <header className="sticky top-0 z-sticky border-b border-border bg-admin-surface/95 backdrop-blur">
         <div className="flex min-h-16 items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
-          <div className="flex min-w-0 items-center gap-3">
-            <span
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-ui-lg bg-primary text-ui-sm font-semibold text-primary-foreground shadow-surface"
-              aria-hidden="true"
-            >
-              品
-            </span>
-            <div className="min-w-0">
-              <p className="truncate text-ui-sm font-semibold text-foreground sm:text-ui-base">品成 BIM 知识库</p>
-              <p className="hidden text-ui-xs text-muted-foreground sm:block">管理工作台</p>
-            </div>
-          </div>
+          <AppBrand subtitle="管理工作台" subtitleClassName="hidden sm:block" />
 
           <div className="flex shrink-0 items-center gap-1 sm:gap-2">
             {state.status === "authed" && (
