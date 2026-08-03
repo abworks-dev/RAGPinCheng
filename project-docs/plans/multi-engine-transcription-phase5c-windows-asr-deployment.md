@@ -56,7 +56,7 @@ ASR 仅在四个字段均合法、模型已加载、inflight 为 0 且明确允�
 
 - Scheduled Task 名称：`RAGPinCheng-ASR`。
 - R3B 初始运行账号：`Administrator`，作为显式安全例外。
-- 补偿措施：配置目录 ACL 仅 Administrators/SYSTEM；Token 仅从 env 文件进入进程；防火墙未来只允许 `${PRIVATE_IPV4}` 访问 8200；服务与 GPU 8100 独立。
+- 补偿措施：配置目录 ACL 中 Administrators/SYSTEM 拥有 Full Control，受信任的 GitHub Actions runner 执行身份 NETWORK SERVICE 仅拥有 Modify，用于受控 payload 部署和 Environment Secret 注入；Token 仅从 env 文件进入进程；防火墙未来只允许 `${PRIVATE_IPV4}` 访问 8200；服务与 GPU 8100 独立。
 - 后续迁移到低权限服务账号属于独立 R3，不在 R3A。
 
 ## 4. R3A 仓库实施
