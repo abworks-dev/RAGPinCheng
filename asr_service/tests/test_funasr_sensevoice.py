@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 from asr_service.engine_protocol import (
@@ -86,3 +87,19 @@ def test_missing_cache_fails_closed_without_importing_engine(monkeypatch):
     assert capabilities.available is False
     assert capabilities.unavailable_reason_code == "model-cache-unavailable"
     assert calls == []
+
+
+def test_production_engine_loads_exact_local_model_path(monkeypatch):
+    calls = install_fake_modules(monkeypatch)
+    local_path = Path(r"${PRODUCTION_DATA_ROOT}\RAGPinCheng-ASR\models\SenseVoiceSmall\7bf452403abd7353a300cd760f7adae7701c92c1")
+    engine = FunAsrSenseVoiceEngine(
+        model_cache_ready=lambda: True,
+        model_path=local_path,
+    )
+    engine.transcribe_chunk(
+        PreparedAudioChunk(0, 0, 1000, b"audio"), SENSEVOICE_SERVICE_CONFIG
+    )
+    kwargs = next(item for item in calls if isinstance(item, dict))
+    assert kwargs["model"] == str(local_path)
+    assert kwargs["local_files_only"] is True
+    assert kwargs["disable_update"] is True

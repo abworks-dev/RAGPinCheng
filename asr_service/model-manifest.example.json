@@ -1,0 +1,13 @@
+{
+  "schema_version": "asr-model-manifest/1",
+  "model_id": "iic/SenseVoiceSmall",
+  "model_revision": "7bf452403abd7353a300cd760f7adae7701c92c1",
+  "model_path": "SenseVoiceSmall/7bf452403abd7353a300cd760f7adae7701c92c1",
+  "files": [
+    {
+      "path": "replace-with-relative-model-file",
+      "size_bytes": 0,
+      "sha256": "replace-with-64-character-lowercase-sha256"
+    }
+  ]
+}

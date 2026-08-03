@@ -4,6 +4,7 @@ import hashlib
 import time
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from asr_service.app import create_app
@@ -31,8 +32,10 @@ def settings(tmp_path: Path, *, enabled=True) -> AsrServiceSettings:
         2,
         1000,
         3,
-        "",
-        "",
+        "http://127.0.0.1:8100/v1/activity",
+        "gpu-probe-token",
+        tmp_path / "models",
+        tmp_path / "model-manifest.json",
     )
 
 
@@ -164,3 +167,8 @@ def test_disabled_service_exposes_no_profiles_and_requires_no_token(tmp_path):
     )
     client = TestClient(create_app(disabled))
     assert client.get("/health").json()["status"] == "disabled"
+
+
+def test_enabled_default_wiring_rejects_unverified_model_cache(tmp_path):
+    with pytest.raises(RuntimeError, match="ASR model cache unavailable"):
+        create_app(settings(tmp_path))

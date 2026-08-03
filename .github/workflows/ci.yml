@@ -127,7 +127,7 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install pytest fastapi httpx python-dotenv
-      - run: pytest tests/test_transcription_asr_service_contract.py tests/test_transcription_provider_registry.py tests/test_transcription_profile_catalog.py tests/test_transcription_remote_provider.py asr_service/tests -v
+      - run: pytest tests/test_transcription_asr_service_contract.py tests/test_transcription_provider_registry.py tests/test_transcription_profile_catalog.py tests/test_transcription_remote_provider.py tests/test_asr_deployment_static.py asr_service/tests -v
 
   test-gpu-contract:
     runs-on: ubuntu-latest
@@ -142,28 +142,11 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install GPU service dependencies (no torch)
-        run: |
-          pip install fastapi uvicorn pydantic httpx pytest python-dotenv
-          pip install -r requirements-prod.txt 2>/dev/null || true
+      - name: Install GPU contract-test dependencies without GPU packages
+        run: pip install fastapi uvicorn pydantic httpx pytest python-dotenv
 
-      - name: Check GPU service schemas import
-        run: python -c "from gpu_service.schemas import EmbeddingRequest, RerankRequest, HealthResponse, ModelInfoResponse; print('schemas OK')"
-
-      - name: Check GPU service config
-        run: python -c "from gpu_service.config import EMBED_DIM, API_VERSION; assert EMBED_DIM == 1024; assert API_VERSION == '1'; print('config OK')"
-
-      - name: Run GPU service contract tests
-        run: |
-          pip install -r gpu_service/requirements.txt pytest httpx 2>/dev/null || true
-          # Contract tests that don't require GPU can still run
-          python -c "
-          from gpu_service.schemas import EmbeddingItem
-          item = EmbeddingItem(dense=[0.1], sparse_indices=[1, 2], sparse_values=[0.5, 0.6])
-          assert len(item.sparse_indices) == len(item.sparse_values)
-          assert len(item.dense) == 1
-          print('schema validation OK')
-          "
+      - name: Run GPU service contract tests with the test-local torch stub
+        run: pytest gpu_service/tests/test_contract.py -v
 
   validate-migration-config:
     runs-on: ubuntu-latest

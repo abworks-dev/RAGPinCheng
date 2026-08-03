@@ -15,10 +15,12 @@ from src.transcription.runtime_ports import InputPart
 from src.transcription.types import ContractValidationError
 
 from .auth import require_bearer
+from .bge_priority_probe import HttpBgePriorityProbe
 from .config import AsrServiceSettings
 from .engine_protocol import SENSEVOICE_SERVICE_CONFIG
 from .engine_registry import EngineRegistration, EngineRegistry
 from .engines.funasr_sensevoice import FunAsrSenseVoiceEngine
+from .model_cache import validate_sensevoice_cache
 from .scheduler import FixedBgePriorityProbe, Scheduler
 from .storage import LocalJobRepository
 
@@ -62,20 +64,35 @@ def create_app(
             settings.max_upload_part_bytes,
         )
     )
-    scheduler = scheduler or Scheduler(
-        repo,
-        EngineRegistry(
-            (
-                EngineRegistration(
-                    FunAsrSenseVoiceEngine(), SENSEVOICE_SERVICE_CONFIG
-                ),
+    if scheduler is None:
+        cache = validate_sensevoice_cache(
+            settings.model_cache_root, settings.model_manifest_path
+        )
+        if settings.enabled and not cache.available:
+            raise RuntimeError(f"ASR model cache unavailable: {cache.reason_code}")
+        engine = FunAsrSenseVoiceEngine(
+            model_cache_ready=lambda: cache.available,
+            model_path=cache.model_path,
+            unavailable_reason_code=cache.reason_code,
+        )
+        probe = (
+            HttpBgePriorityProbe(
+                settings.bge_priority_probe_url,
+                settings.bge_priority_probe_token,
+                settings.bge_probe_connect_timeout_seconds,
+                settings.bge_probe_request_timeout_seconds,
             )
-        ),
-        FixedBgePriorityProbe(),
-        queue_limit=settings.max_queue_length,
-        failure_limit=settings.consecutive_failure_limit,
-        enabled=settings.enabled,
-    )
+            if settings.bge_priority_probe_url
+            else FixedBgePriorityProbe()
+        )
+        scheduler = Scheduler(
+            repo,
+            EngineRegistry((EngineRegistration(engine, SENSEVOICE_SERVICE_CONFIG),)),
+            probe,
+            queue_limit=settings.max_queue_length,
+            failure_limit=settings.consecutive_failure_limit,
+            enabled=settings.enabled,
+        )
     stop_event = Event()
 
     @asynccontextmanager
