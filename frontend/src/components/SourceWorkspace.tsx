@@ -16,6 +16,7 @@ import { api } from "../api/client";
 import { usePdfPreview } from "../hooks/usePdfPreview";
 import { timestampToSeconds, useVideoPlayer } from "../hooks/useVideoPlayer";
 import type { ChatMessage, Source } from "../types";
+import { useAutoHideScrollbar } from "../hooks/useAutoHideScrollbar";
 import { stripMarkdown } from "../utils/markdown";
 import {
   CITATION_EVENT,
@@ -89,32 +90,37 @@ export function SourceWorkspace({
   messages,
   conversationId,
   onClose,
+  selectedMessageId,
+  onSelectedMessageChange,
 }: {
   messages: ChatMessage[];
   conversationId: string | null;
   onClose?: () => void;
+  selectedMessageId?: string | null;
+  onSelectedMessageChange?: (messageId: string) => void;
 }) {
   const sets = useMemo(() => sourceSetsFromMessages(messages), [messages]);
   const latest = sets[sets.length - 1];
-  const [activeMessageId, setActiveMessageId] = useState<string | null>(latest?.messageId || null);
   const [activeIndex, setActiveIndex] = useState(0);
+  const sourceListScroll = useAutoHideScrollbar<HTMLDivElement>();
   const listRefs = useRef<Record<number, HTMLButtonElement | null>>({});
+  const activeMessageId = selectedMessageId || latest?.messageId || null;
   const activeSet = sets.find((set) => set.messageId === activeMessageId) || latest;
   const source = activeSet?.sources[activeIndex] || activeSet?.sources[0];
   const safeIndex = source ? Math.max(0, activeSet!.sources.indexOf(source)) : 0;
 
   useEffect(() => {
     if (latest && !sets.some((set) => set.messageId === activeMessageId)) {
-      setActiveMessageId(latest.messageId);
+      onSelectedMessageChange?.(latest.messageId);
       setActiveIndex(0);
     }
-  }, [activeMessageId, latest, sets]);
+  }, [activeMessageId, latest, onSelectedMessageChange, sets]);
 
   useEffect(() => {
     const onCitation = (event: Event) => {
       const detail = (event as CustomEvent<CitationDetail>).detail;
       if (!detail || !sets.some((set) => set.messageId === detail.messageId)) return;
-      setActiveMessageId(detail.messageId);
+      onSelectedMessageChange?.(detail.messageId);
       setActiveIndex(detail.sourceIndex);
       requestAnimationFrame(() => {
         listRefs.current[detail.sourceIndex]?.scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -122,10 +128,10 @@ export function SourceWorkspace({
     };
     window.addEventListener(CITATION_EVENT, onCitation);
     return () => window.removeEventListener(CITATION_EVENT, onCitation);
-  }, [sets]);
+  }, [onSelectedMessageChange, sets]);
 
   const selectSource = (messageId: string, index: number) => {
-    setActiveMessageId(messageId);
+    onSelectedMessageChange?.(messageId);
     setActiveIndex(index);
     window.dispatchEvent(
       new CustomEvent<CitationHoverDetail>(CITATION_HOVER_EVENT, {
@@ -158,7 +164,7 @@ export function SourceWorkspace({
           <select
             value={activeSet.messageId}
             onChange={(event) => {
-              setActiveMessageId(event.target.value);
+              onSelectedMessageChange?.(event.target.value);
               setActiveIndex(0);
             }}
             className="h-9 w-full rounded-ui-md border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
@@ -172,7 +178,11 @@ export function SourceWorkspace({
         </label>
       )}
       <div className="grid min-h-0 flex-1 grid-rows-[minmax(12rem,0.9fr)_minmax(16rem,1.1fr)]">
-        <div className="overflow-y-auto border-b border-border p-3">
+        <div
+          ref={sourceListScroll.ref}
+          {...sourceListScroll.interactionProps}
+          className={`overflow-y-auto border-b border-border p-3 ${sourceListScroll.className}`}
+        >
           {activeSet.sources.map((item, index) => (
             <button
               key={`${item.parent_id}-${index}`}
@@ -260,6 +270,7 @@ function SourceDetail({
   const [reporting, setReporting] = useState(false);
   const [note, setNote] = useState("");
   const [status, setStatus] = useState<string | null>(null);
+  const detailScroll = useAutoHideScrollbar<HTMLDivElement>();
   const text = stripMarkdown(source.text);
   const visibleText = expanded || text.length <= 900 ? text : `${text.slice(0, 900)}…`;
 
@@ -324,7 +335,11 @@ function SourceDetail({
   };
 
   return (
-    <div className="min-h-0 overflow-y-auto px-4 py-4">
+    <div
+      ref={detailScroll.ref}
+      {...detailScroll.interactionProps}
+      className={`min-h-0 overflow-y-auto px-4 py-4 ${detailScroll.className}`}
+    >
       <div className="flex items-start gap-3">
         <span className="flex size-8 shrink-0 items-center justify-center rounded-ui-md bg-ui-accent text-ui-accent-foreground">
           <SourceTypeIcon source={source} />

@@ -4,6 +4,7 @@ import { ConversationList } from "./ConversationList";
 import { UserMenu } from "./UserMenu";
 import { PanelLeftClose, Plus } from "lucide-react";
 import { IconButton } from "./ui/icon-button";
+import { useAutoHideScrollbar } from "../hooks/useAutoHideScrollbar";
 
 export function Sidebar({
   conversations,
@@ -32,6 +33,7 @@ export function Sidebar({
   collapsed?: boolean;
   onToggleCollapsed?: () => void;
 }) {
+  const conversationScroll = useAutoHideScrollbar<HTMLDivElement>();
   return (
     <aside className={`flex h-full shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-[width] duration-normal ${collapsed ? "w-16" : "w-[17rem]"}`}>
       <div className="border-b border-sidebar-border px-3 py-3">
@@ -68,7 +70,11 @@ export function Sidebar({
         </button>
       </div>
 
-      <div className={`min-h-0 flex-1 overflow-y-auto py-3 ${collapsed ? "px-1" : "px-2"}`}>
+      <div
+        ref={conversationScroll.ref}
+        {...conversationScroll.interactionProps}
+        className={`min-h-0 flex-1 overflow-y-auto py-3 ${conversationScroll.className} ${collapsed ? "px-1" : "px-2"}`}
+      >
         {!collapsed && (
         <ConversationList
           conversations={conversations}

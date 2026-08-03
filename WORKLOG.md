@@ -1713,3 +1713,20 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：新增 `frontend/src/components/AppBrand.tsx`、`frontend/src/components/ui/dialog.tsx`、`frontend/src/components/FeedbackBar.test.tsx`、`frontend/src/components/Message.test.tsx`、`frontend/src/components/Sidebar.test.tsx`；修改 `frontend/src/components/FeedbackBar.tsx`、`frontend/src/components/Message.tsx`、`frontend/src/components/Sidebar.tsx`、`frontend/src/components/ui/icon-button.tsx`、`frontend/src/pages/admin/AdminLayout.tsx`、`frontend/package.json`、`frontend/package-lock.json`、`WORKLOG.md`。
 - 验证：新增专项测试 3 个文件、10/10 项通过；前端全量 Vitest 16 个文件、71/71 项通过；TypeScript project build 与 Vite production build 通过（2016 modules transformed）；使用仅监听本机的虚构账号、会话、回答和来源数据完成桌面端及 390×844 移动端视觉检查，确认品牌、回答操作栏、Dialog 初始焦点、按钮布局和横向溢出均正常；`git diff --check` 通过。保留既有 React Router future warning、CSS minify warning 和主包大于 500 kB 警告。
 - 边界：仅新增 `@radix-ui/react-dialog`；反馈仍调用既有 `/api/feedback` 并保留 `conversation_id`、`turn_index`、`message_id`、`query`、`answer_text` 关联字段，原因和说明仅组合进原 `note`；未修改 API client、类型、认证、CSRF、SSE、引用、来源面板、预览、后端或数据库，未提交真实反馈，临时本地服务已关闭，本地 `master` 尚未推送或部署。
+### 12:31 — 修复引用角标与来源选中同步
+
+- 完成：修复从右侧来源选中角标 5 后再点击正文角标 2 时，右侧已切换但正文仍高亮角标 5 的状态残留；公共引用分发现在同时广播来源定位和持久选中事件，使正文角标、查看来源按钮与右侧来源保持单一同步选中状态。
+- 文件：仅修改 `frontend/src/components/citations.ts`、对应测试与 `WORKLOG.md`；未修改管理端、API、RAG 或后端业务。
+- 验证：引用专项 Vitest 8/8 通过，新增双事件同步回归用例；`npm run build` 通过（1960 modules transformed）；`git diff --check` 无内容错误。
+
+### 12:35 — 增加侧栏滚动条自动隐藏
+
+- 完成：新增可复用的自动隐藏滚动条 hook 和细滚动条样式，应用于左侧会话列表、右侧来源列表及引用详情；滚动、鼠标进入/移动或聚焦时显示，空闲 900ms 后隐藏，鼠标移出后快速收起，并保持滚动槽宽度稳定以避免内容跳动。
+- 文件：新增 `frontend/src/hooks/useAutoHideScrollbar.ts` 及测试，修改 `Sidebar.tsx`、`SourceWorkspace.tsx`、`styles/index.css` 和 `WORKLOG.md`；未修改管理端或业务数据逻辑。
+- 验证：自动隐藏专项 Vitest 1/1 通过；`npm run build` 通过（1961 modules transformed）；`git diff --check` 无内容错误。
+
+### 12:52 — 协调空对话输入器与来源轮次状态
+
+- 完成：空对话和新建对话时将欢迎内容与输入器置于页面中部，首条消息出现后恢复底部输入器；新建及切换对话自动关闭来源栏；来源栏当前回答轮次提升为统一受控状态，同一回答的“查看 X 个来源”按钮支持再次点击收起并保持唯一选中；检索和生成阶段改为黄色状态点及更明确文案；所有完成回答增加无弹窗复制按钮和短暂勾选反馈；桌面来源栏通过宽度与透明度过渡实现平滑开合。
+- 文件：仅修改用户端 `ChatLayout`、`MessageList`、`Composer`、`Message`、`SourceWorkspace` 与 `WORKLOG.md`；未修改管理端、API、SSE、RAG 或后端业务。
+- 验证：前端全量 Vitest 14 个文件、63 项测试全部通过；`npm run build` 通过（1961 modules transformed）；`git diff --check` 无内容错误。浏览器无登录态，真实对话轮次切换和来源栏动画仍待登录后视觉验收。
