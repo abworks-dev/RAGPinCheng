@@ -1618,6 +1618,13 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 验证：针对性测试 4/4 通过；前端全量 Vitest 10 个文件、47 项测试通过；TypeScript project build 与 Vite production build 通过（406 modules transformed）；`git diff --check` 通过。保留既有 React Router future warning、CSS minify warning 和主包大于 500 kB 警告。
 - 边界：保留 `adminFeedback(200)` 的 API、参数与初始加载时机，未修改认证、CSRF、后端、依赖、全局样式、问答、SSE、引用、预览、上传、索引或其他管理页面；本阶段尚未提交、推送或部署，也未使用真实管理账号进行生产视觉验收。
 
+### 09:09 — 修复管理端侧边栏贴边布局
+
+- 完成：移除管理端顶部栏和主体外层的 `1600px` 居中宽度限制，使桌面端侧边栏背景与边框贴住视口左侧，同时保留主内容 `max-w-7xl` 阅读宽度及移动端横向导航行为。
+- 文件：`frontend/src/pages/admin/AdminLayout.tsx`、`WORKLOG.md`。
+- 验证：`AdminLayout.test.tsx` 针对性测试 2/2 通过；TypeScript project build 与 Vite production build 通过（406 modules transformed）；保留既有 React Router future warning、CSS minify warning 和主包大于 500 kB 警告。
+- 边界：未修改侧边栏宽度、标签切换逻辑、管理页面业务组件、API、认证、数据、依赖或全局样式；尚未使用真实管理员账号进行浏览器视觉验收。
+
 ### 09:10 — 统一管理端视频媒体页面
 
 - 完成：将管理端视频媒体页迁移到现有语义 Token 与基础组件，统一页面标题、上传卡片、文件选择反馈、媒体表格、状态 Badge、加载/空数据/错误反馈与原位重试；成功上传后清空标题和原生文件输入并刷新列表，小屏支持表格横向滚动。
