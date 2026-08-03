@@ -28,7 +28,7 @@ jobs:
           python-version: "3.11"
 
       - name: Check Python syntax
-        run: python -m compileall -q api src scripts tests gpu_service
+        run: python -m compileall -q api src scripts tests gpu_service asr_service
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -64,7 +64,7 @@ jobs:
 
       - name: Install declared Python contract-test dependencies
         run: |
-          pip install pytest requests pypdf langchain-text-splitters qdrant-client openai python-dotenv tqdm fastapi sse-starlette passlib[argon2] python-multipart
+          pip install pytest requests httpx pypdf langchain-text-splitters qdrant-client openai python-dotenv tqdm fastapi sse-starlette passlib[argon2] python-multipart
 
       - name: Run Phase 1 transcription contract tests
         run: pytest tests/test_transcription*.py tests/test_transcript_manual_regression.py -v
@@ -87,6 +87,17 @@ jobs:
 
       - name: Run provider unit tests
         run: pytest tests/test_providers.py -v
+
+  test-asr-service-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install pytest fastapi httpx python-dotenv
+      - run: pytest tests/test_transcription_asr_service_contract.py tests/test_transcription_provider_registry.py tests/test_transcription_profile_catalog.py tests/test_transcription_remote_provider.py asr_service/tests -v
 
   test-gpu-contract:
     runs-on: ubuntu-latest

@@ -1699,3 +1699,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 完成：登录后的来源核验栏改为默认关闭，使空状态和输入器在主内容区居中；桌面会话侧栏增加 272px 与 64px 两态收缩控制，收起后保留品牌、新建对话和用户入口；用户菜单迁移为 Lucide 图标和紧凑浮层；会话按本地自然日分为今天、7 天内、30 天内和更早；来源展开时隐藏聊天标题栏按钮，仅保留来源栏右上角一个带数量的收缩按钮。
 - 文件：仅修改用户端 `ChatLayout`、`Sidebar`、`ConversationList`、`UserMenu`、`ChatHeader`、`SourceWorkspace`，新增会话分组测试并更新 `WORKLOG.md`；未修改管理端、API、认证、CSRF、SSE、RAG、索引或后端业务。
 - 验证：`npm run build` 通过（1960 modules transformed）；前端 Vitest 10 个文件、44 项测试全部通过；`git diff --check` 无内容错误。浏览器无登录态，桌面收缩、用户菜单和来源开合仍待登录后视觉验收。
+
+### 11:47 — 实施多引擎转录 Phase 3 独立服务与 remote Provider
+
+- 完成：按获批 R2 计划实现纯 Python service DTO、Provider Registry、runtime ports、固定 experimental SenseVoice Profile、短请求 remote Provider、独立 FastAPI 服务、本地内容寻址 spool、FIFO 单 active/BGE fail-closed/OOM latch 调度器、fake engine 与 lazy FunASR adapter；模型固定为 `iic/SenseVoiceSmall@7bf452403abd7353a300cd760f7adae7701c92c1`，唯一结果流仍为 `ProviderCandidate | ProviderFailure -> pipeline.py -> normalizer -> Canonical`。提交前 scoped review 补齐 FastAPI lifespan 驱动的单线程 scheduler loop，并收紧 remote deadline、取消竞态、队列状态锁、服务端 Profile config 和本地模型/CUDA fail-closed 边界。
+- 文件：新增 `asr_service/`、`src/transcription/asr_service_contract.py`、`profile_catalog.py`、`provider_registry.py`、`remote_provider.py`、`runtime_ports.py` 及 Phase 3 测试；最小修改 Profile/Provider 契约、配置示例、主依赖中的既有 `httpx` 声明、CI、静态边界、Phase 3 计划、功能文档和 `TODO.md`。未触碰并行 frontend 修改，也未修改数据库 Schema、应用 API/UI/worker、Qdrant、`gpu_service`、Canonical、normalizer、formatter 或 `pipeline.py`。
+- 验证：review 修复定向 suite `49 passed`；完整 transcription/manual/service 回归 `276 passed, 1 skipped`；`tests/test_providers.py` 为 `16 passed, 6 skipped`；`compileall` 与 `git diff --check` 通过。唯一 transcription skip 和未收集的新增 API/auth、既有 GPU contract 均因本地 `.venv` 缺 FastAPI；未安装依赖规避环境差异，CI 已明确安装 FastAPI/httpx 并收集 `asr_service/tests`，要求零 skip。
+- 边界/风险：两侧默认关闭，未下载模型、未导入真实 FunASR/torch 执行推理，未访问网络/GPU/真实媒体/数据库/生产；Phase 3 尚未接应用上传、Store、worker、管理员 UI 或索引，因此没有用户可见自动转录能力。远端 CI 结果仍待验证，Phase 4 未开始。

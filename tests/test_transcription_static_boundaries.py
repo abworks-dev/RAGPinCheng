@@ -22,9 +22,19 @@ ALLOWED = {
     "policy": {"types", "profile"},
     "persistence": {"types", "profile", "provider_protocol", "canonical"},
     "workflow": {"types", "profile", "provider_protocol", "canonical", "persistence", "policy"},
+    "runtime_ports": {"types"},
+    "provider_registry": {"types", "provider_protocol", "runtime_ports"},
+    "asr_service_contract": {"types", "candidate", "provider_protocol"},
+    "remote_provider": {
+        "types", "profile", "provider_protocol", "runtime_ports",
+        "provider_registry", "asr_service_contract",
+    },
+    "profile_catalog": {"types", "profile", "asr_service_contract"},
     "__init__": {
         "types", "candidate", "profile", "provider_protocol", "canonical",
         "normalizer", "pipeline", "formatter", "policy", "persistence", "workflow",
+        "runtime_ports", "provider_registry", "asr_service_contract",
+        "remote_provider", "profile_catalog",
     },
 }
 FORBIDDEN_IMPORT_ROOTS = {
@@ -119,6 +129,10 @@ def test_all_scoped_python_rejects_forbidden_and_dynamic_imports():
         forbidden = FORBIDDEN_IMPORT_ROOTS
         if not path.is_relative_to(CORE):
             forbidden = forbidden - {"sqlite3", "sqlalchemy"}
+        if path == CORE / "remote_provider.py":
+            forbidden = forbidden - {"httpx"}
+        if path.name == "test_transcription_remote_provider.py":
+            forbidden = forbidden - {"httpx"}
         assert not roots & forbidden, (path, roots & forbidden)
         dynamic = {
             call_name(node)
