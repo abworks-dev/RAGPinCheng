@@ -45,6 +45,13 @@ describe("MessageList", () => {
     expect(turns[1].messages.map((message) => message.id)).toEqual(["user-2", "assistant-2"]);
   });
 
+  it("keeps the message column centered and reserves space below the latest answer", () => {
+    const { container } = render(<MessageList messages={messages} conversationId="conversation-1" />);
+
+    expect(container.querySelector("[data-message-scroll-container]")).not.toHaveClass("xl:pr-64", "2xl:pr-64");
+    expect(container.querySelector("[data-message-bottom-spacer]")).toHaveClass("h-20", "sm:h-24");
+  });
+
   it("does not jump to the bottom when opening sources for an earlier answer", () => {
     function Harness() {
       const [sourceMessageId, setSourceMessageId] = useState<string | null>(null);

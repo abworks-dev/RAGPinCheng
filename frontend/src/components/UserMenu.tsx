@@ -28,9 +28,9 @@ export function UserMenu({ collapsed = false }: { collapsed?: boolean }) {
         type="button"
         onClick={() => setOpen((v) => !v)}
         title={collapsed ? u.real_name : undefined}
-        className={`flex h-10 items-center gap-3 rounded-ui-md px-2 hover:bg-secondary ${collapsed ? "w-10" : "w-full"}`}
+        className={`flex h-10 items-center rounded-ui-md hover:bg-secondary ${collapsed ? "w-10 justify-center p-1" : "w-full gap-3 px-2"}`}
       >
-        <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-accent text-white text-sm font-semibold">
+        <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent text-white text-sm font-semibold">
           {initials}
         </span>
         {!collapsed && <div className="flex-1 min-w-0 text-left">

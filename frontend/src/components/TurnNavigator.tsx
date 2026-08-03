@@ -50,15 +50,15 @@ export function TurnNavigator({
                   title={expanded ? undefined : turn.label}
                   onClick={() => onNavigate(turn.id)}
                   className={`group/turn flex h-7 w-full items-center rounded-ui-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
-                    expanded ? "gap-2 px-2" : "justify-end"
-                  } ${active ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-secondary hover:text-foreground"}`}
+                    expanded ? "gap-2 px-2" : "justify-end bg-transparent px-1 hover:bg-transparent"
+                  } ${active ? (expanded ? "bg-primary/10 text-primary" : "text-primary") : (expanded ? "text-muted-foreground hover:bg-secondary hover:text-foreground" : "text-muted-foreground hover:text-foreground")}`}
                 >
                   {expanded && <span className="min-w-0 flex-1 truncate text-left text-xs">{turn.label}</span>}
                   <span
                     aria-hidden="true"
                     className={`h-0.5 shrink-0 rounded-full transition-[width,background-color] ${
                       active
-                        ? "w-3 bg-primary"
+                        ? "w-4 bg-primary"
                         : "w-2 bg-muted-foreground/45 group-hover/turn:w-3 group-hover/turn:bg-foreground/60"
                     }`}
                   />

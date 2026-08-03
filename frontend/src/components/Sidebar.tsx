@@ -90,10 +90,8 @@ export function Sidebar({
         </div>
       </div>
 
-      <div className="px-2 py-1.5">
+      <div className={`space-y-1 py-2 ${collapsed ? "px-3" : "px-2"}`}>
         <ThemeMenu collapsed={collapsed} />
-      </div>
-      <div className="px-2 py-2">
         <UserMenu collapsed={collapsed} />
       </div>
     </aside>
