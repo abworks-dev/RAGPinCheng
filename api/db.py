@@ -14,9 +14,7 @@ from typing import Iterator
 
 from api.db_backup import create_migration_backup
 from api.db_migrations import apply_all, has_pending_ddl, read_schema_inventory
-
-REPO_ROOT = Path(__file__).resolve().parent.parent
-APP_DB_PATH = REPO_ROOT / "data" / "app.sqlite"
+from src.config import APP_DB_PATH
 
 
 SCHEMA = """

@@ -332,6 +332,28 @@ def index_single(
     return IndexResult(parents=len(parents), children=len(children))
 
 
+def index_transcript_candidate(
+    doc: ParsedDoc,
+    on_status: StatusFn = lambda _s: None,
+) -> IndexResult:
+    """Index one immutable transcript version without source-level purge.
+
+    The caller owns artifact verification and temporary materialization.  This
+    function deliberately cannot route through ``index_single`` because that
+    path purges every row/point sharing a source identity.
+    """
+    if type(doc) is not ParsedDoc or doc.doc_type != "transcript":
+        raise ValueError("candidate indexing requires a transcript ParsedDoc")
+    if not doc.media_id or not doc.transcript_version_id or not doc.publication_target_id:
+        raise ValueError("candidate indexing requires media/version/target identity")
+    on_status("chunking")
+    parents, children = chunk_document(doc)
+    on_status("embedding")
+    store_parents(parents)
+    index_children(children)
+    return IndexResult(parents=len(parents), children=len(children))
+
+
 # ── document listing / deletion (admin "manage indexed docs") ─────────────
 
 
