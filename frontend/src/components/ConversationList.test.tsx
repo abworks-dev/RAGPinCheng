@@ -38,5 +38,6 @@ describe("ConversationList date groups", () => {
     expect(screen.getByRole("heading", { name: "7 天内" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "30 天内" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "更早" })).toBeInTheDocument();
+    expect(screen.queryByText(/分钟前|小时前|天前/)).not.toBeInTheDocument();
   });
 });

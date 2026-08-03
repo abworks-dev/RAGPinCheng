@@ -71,7 +71,7 @@ describe("AdminLayout tab boundary", () => {
   });
 
   it("keeps the admin identity and return navigation visible", () => {
-    render(
+    const { container } = render(
       <MemoryRouter>
         <AdminLayout />
       </MemoryRouter>,
@@ -81,6 +81,8 @@ describe("AdminLayout tab boundary", () => {
     expect(screen.getByText("测试管理员（admin-test）")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /返回对话/ })).toHaveAttribute("href", "/");
     expect(screen.getByRole("button", { name: "退出" })).toBeInTheDocument();
+    expect(container.querySelector("header")).not.toHaveClass("border-b");
+    expect(container.querySelector("aside")).not.toHaveClass("border-r");
   });
 
   it("keeps the tab order, current marker, and mounts only the selected page", () => {

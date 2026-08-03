@@ -1736,3 +1736,9 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 完成：固定左侧品牌图标在展开和收起状态下的水平位置，折叠后以品牌图标作为展开入口；将主题切换从头像菜单独立到头像上方，支持默认跟随系统、明亮和夜间三种模式，并在跟随系统时实时响应浏览器配色变化；无来源的新对话不再显示右上来源按钮，来源栏展开态按钮补齐“来源”文字。
 - 文件：修改用户端 `Sidebar.tsx`、`UserMenu.tsx`、`ChatHeader.tsx`、`SourceWorkspace.tsx`、`useTheme.ts`，新增 `ThemeMenu.tsx` 及主题和来源按钮测试；未修改管理端、API、认证、RAG 或后端业务。
 - 验证：主题与来源按钮专项 Vitest 2 个文件、4 项测试全部通过；`npm run build` 通过（1962 modules transformed）；`git diff --check` 无内容错误。浏览器无登录态，登录后的侧栏动画、主题菜单和来源栏展开态仍待真实会话视觉验收。
+
+### 14:13 — 精简导航品牌与会话列表
+
+- 完成：主题选项统一为“明亮模式”和“夜间模式”；移除用户侧栏外框、品牌区及底部控件分割线，并固定主题图标和头像在侧栏折叠前后的左侧位置；收紧共享品牌标题与工作台副标题字号，使用户端和管理端品牌区同步；移除管理端顶栏及左导航边界；会话列表不再显示逐条相对时间，仅保留今天、7 天内、30 天内和更早分组。
+- 文件：修改 `AppBrand.tsx`、`Sidebar.tsx`、`ThemeMenu.tsx`、`UserMenu.tsx`、`ConversationList.tsx`、`AdminLayout.tsx` 及对应测试和 `WORKLOG.md`；未修改管理端业务页面、API、认证、RAG、转录或后端逻辑。
+- 验证：前端全量 Vitest 19 个文件、77/77 项测试通过；`npm run build` 通过（2018 modules transformed）；`git diff --check` 无内容错误。保留既有 React Router future warning、CSS minify warning和主包大于 500 kB 警告；浏览器无登录态，真实用户侧栏和管理页仍待登录后视觉验收。

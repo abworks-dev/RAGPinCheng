@@ -21,8 +21,8 @@ export function AppBrand({
       </span>
       {!collapsed && (
         <div className="min-w-0">
-          <p className="truncate text-ui-sm font-semibold text-foreground sm:text-ui-base">品成 BIM 知识库</p>
-          <p className={cn("truncate text-ui-xs text-muted-foreground", subtitleClassName)}>{subtitle}</p>
+          <p className="truncate text-sm font-semibold leading-5 text-foreground">品成 BIM 知识库</p>
+          <p className={cn("truncate text-[11px] leading-4 text-muted-foreground", subtitleClassName)}>{subtitle}</p>
         </div>
       )}
     </div>

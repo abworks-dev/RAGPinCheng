@@ -31,11 +31,13 @@ function renderSidebar(collapsed: boolean, onToggleCollapsed = vi.fn()) {
 
 describe("Sidebar brand", () => {
   it("shows the shared brand lockup in the expanded sidebar", () => {
-    renderSidebar(false);
+    const { container } = renderSidebar(false);
 
     expect(screen.getByText("品成 BIM 知识库")).toBeInTheDocument();
     expect(screen.getByText("知识问答工作台")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "收起会话侧栏" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "主题：跟随系统" })).toHaveClass("px-2", "w-full");
+    expect(container.querySelector("aside")).not.toHaveClass("border-r");
   });
 
   it("uses the brand mark as the expand control in the collapsed sidebar", () => {
@@ -44,6 +46,7 @@ describe("Sidebar brand", () => {
 
     expect(screen.queryByText("品成 BIM 知识库")).not.toBeInTheDocument();
     expect(screen.getByText("品")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "主题：跟随系统" })).toHaveClass("px-2", "w-10");
     fireEvent.click(screen.getByRole("button", { name: "展开会话侧栏" }));
     expect(onToggleCollapsed).toHaveBeenCalledOnce();
   });
