@@ -28,7 +28,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Validate immutable revision
-        shell: pwsh
+        shell: powershell
         run: |
           if ("${{ inputs.commit_sha }}" -notmatch '^[0-9a-fA-F]{40}$') {
             throw "commit_sha must be a full 40-character SHA"
@@ -41,7 +41,7 @@ jobs:
           fetch-depth: 1
 
       - name: Deploy repository payload
-        shell: pwsh
+        shell: powershell
         env:
           ASR_SERVICE_TOKEN: ${{ secrets.ASR_SERVICE_TOKEN }}
         run: |
