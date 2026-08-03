@@ -244,6 +244,7 @@ function WorkspaceHeader({ count, onClose }: { count: number; onClose?: () => vo
         <button type="button" aria-label="收起来源" title="收起来源" onClick={onClose} className="inline-flex h-9 items-center gap-1.5 rounded-ui-md px-2 text-muted-foreground hover:bg-secondary hover:text-foreground">
           {count > 0 && <span className="min-w-5 rounded-full bg-ui-accent px-1.5 py-0.5 text-[11px] font-medium text-ui-accent-foreground">{count}</span>}
           <PanelRightClose className="size-4" />
+          <span className="text-xs">来源</span>
         </button>
       )}
     </div>

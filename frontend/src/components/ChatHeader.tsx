@@ -29,7 +29,7 @@ export function ChatHeader({
           {loading ? "正在加载会话" : `知识范围：${scopeLabel}`}
         </p>
       </div>
-      {!sourceOpen && <button
+      {!sourceOpen && sourceCount > 0 && <button
         type="button"
         onClick={onToggleSources}
         className="inline-flex h-9 items-center gap-2 rounded-ui-md px-2.5 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
