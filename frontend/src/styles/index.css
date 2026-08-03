@@ -57,6 +57,32 @@ html, body, #root {
   background-color: rgb(var(--muted-foreground) / 0.7);
 }
 
+.scroll-fade-bottom::after,
+.scroll-fade-top::before {
+  position: absolute;
+  z-index: 2;
+  display: block;
+  content: "";
+  pointer-events: none;
+}
+.scroll-fade-bottom::after {
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 2.5rem;
+  background: linear-gradient(to bottom, rgb(var(--sidebar) / 0), rgb(var(--sidebar)) 85%);
+}
+.scroll-fade-top {
+  position: relative;
+}
+.scroll-fade-top::before {
+  top: -2rem;
+  right: 0;
+  left: 0;
+  height: 2rem;
+  background: linear-gradient(to bottom, rgb(var(--background) / 0), rgb(var(--background)) 90%);
+}
+
 /* Tighter list spacing inside chat bubbles */
 .prose-tight ul, .prose-tight ol {
   margin: 0.25rem 0;

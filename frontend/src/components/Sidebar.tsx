@@ -71,11 +71,12 @@ export function Sidebar({
         </button>
       </div>
 
-      <div
-        ref={conversationScroll.ref}
-        {...conversationScroll.interactionProps}
-        className={`min-h-0 flex-1 overflow-y-auto py-3 ${conversationScroll.className} ${collapsed ? "px-1" : "px-2"}`}
-      >
+      <div className="scroll-fade-bottom relative min-h-0 flex-1">
+        <div
+          ref={conversationScroll.ref}
+          {...conversationScroll.interactionProps}
+          className={`h-full overflow-y-auto py-3 ${conversationScroll.className} ${collapsed ? "px-1" : "px-2"}`}
+        >
         {!collapsed && (
         <ConversationList
           conversations={conversations}
@@ -86,6 +87,7 @@ export function Sidebar({
         />
         )}
 
+        </div>
       </div>
 
       <div className="px-2 py-1.5">

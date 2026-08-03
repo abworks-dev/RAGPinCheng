@@ -1,3 +1,4 @@
+import { ArrowDown } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChatMessage } from "../types";
 import { useAutoHideScrollbar } from "../hooks/useAutoHideScrollbar";
@@ -50,6 +51,7 @@ export function MessageList({
   const shouldFollowOutput = useRef(true);
   const scrollFrame = useRef<number | null>(null);
   const [activeTurnId, setActiveTurnId] = useState<string | null>(null);
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const scrollbar = useAutoHideScrollbar<HTMLDivElement>();
   const turns = useMemo(() => groupMessagesIntoTurns(messages), [messages]);
   const lastMessage = messages[messages.length - 1];
@@ -71,7 +73,9 @@ export function MessageList({
     scrollbar.interactionProps.onScroll();
     const container = scrollbar.ref.current;
     if (container) {
-      shouldFollowOutput.current = container.scrollHeight - container.scrollTop - container.clientHeight < 80;
+      const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+      shouldFollowOutput.current = distanceFromBottom < 80;
+      setShowScrollToBottom(distanceFromBottom > 96);
     }
     if (scrollFrame.current !== null) window.cancelAnimationFrame(scrollFrame.current);
     scrollFrame.current = window.requestAnimationFrame(updateActiveTurn);
@@ -82,6 +86,15 @@ export function MessageList({
     const latestTurn = turns[turns.length - 1];
     if (latestTurn) setActiveTurnId(latestTurn.id);
   }, [turns]);
+
+  const smoothlyScrollToBottom = useCallback(() => {
+    const container = scrollbar.ref.current;
+    container?.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
+    shouldFollowOutput.current = true;
+    setShowScrollToBottom(false);
+    const latestTurn = turns[turns.length - 1];
+    if (latestTurn) setActiveTurnId(latestTurn.id);
+  }, [scrollbar.ref, turns]);
 
   useEffect(() => {
     const conversationChanged = previousConversationId.current !== conversationId;
@@ -170,6 +183,17 @@ export function MessageList({
         onNavigate={navigateToTurn}
         className={sourceOpen ? "hidden 2xl:block" : "hidden xl:block"}
       />
+      {showScrollToBottom && (
+        <button
+          type="button"
+          aria-label="回到底部"
+          title="回到底部"
+          onClick={smoothlyScrollToBottom}
+          className="absolute bottom-3 left-1/2 z-10 inline-flex size-9 -translate-x-1/2 items-center justify-center rounded-full border border-border bg-card text-muted-foreground shadow-surface transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <ArrowDown className="size-4" />
+        </button>
+      )}
     </div>
   );
 }
