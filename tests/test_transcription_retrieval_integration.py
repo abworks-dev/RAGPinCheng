@@ -6,7 +6,7 @@ import pytest
 from qdrant_client import models
 
 from src import retrieve
-from src.transcription.retrieval_visibility import PublishedTranscriptSnapshot
+from src.transcription_retrieval_visibility import PublishedTranscriptSnapshot
 
 VISIBLE_VERSION = "123e4567-e89b-12d3-a456-426614174001"
 HIDDEN_VERSION = "123e4567-e89b-12d3-a456-426614174002"
