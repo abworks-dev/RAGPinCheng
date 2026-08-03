@@ -135,17 +135,25 @@ TABLE_SUMMARY_MAX_CHARS = 8000
 # Media / Video
 MAX_VIDEO_UPLOAD_MB = int(os.getenv("MAX_VIDEO_UPLOAD_MB", "1024"))
 
-# Independent ASR service (Phase 3 contract only; no application worker wiring).
+# Independent ASR service and Phase 4 application wiring.
 ASR_ENABLED = os.getenv("ASR_ENABLED", "").strip().lower() in ("1", "true", "yes", "on")
 ASR_SERVICE_URL = os.getenv("ASR_SERVICE_URL", "http://127.0.0.1:8200")
 ASR_SERVICE_TOKEN = os.getenv("ASR_SERVICE_TOKEN", "")
 ASR_CONNECT_TIMEOUT_SECONDS = int(os.getenv("ASR_CONNECT_TIMEOUT_SECONDS", "10"))
 ASR_REQUEST_TIMEOUT_SECONDS = int(os.getenv("ASR_REQUEST_TIMEOUT_SECONDS", "60"))
+ASR_JOB_TIMEOUT_SECONDS = int(os.getenv("ASR_JOB_TIMEOUT_SECONDS", "7200"))
 ASR_POLL_INTERVAL_MS = int(os.getenv("ASR_POLL_INTERVAL_MS", "1000"))
 ASR_UPLOAD_PART_BYTES = int(os.getenv("ASR_UPLOAD_PART_BYTES", "8388608"))
 ASR_EXPECTED_API_VERSION = os.getenv(
     "ASR_EXPECTED_API_VERSION", "asr-service/1"
 )
+ASR_FFMPEG_PATH = os.getenv("ASR_FFMPEG_PATH", "ffmpeg").strip() or "ffmpeg"
+ASR_MEDIA_PREP_TIMEOUT_SECONDS = int(
+    os.getenv("ASR_MEDIA_PREP_TIMEOUT_SECONDS", "1800")
+)
+TRANSCRIPTION_ARTIFACT_DIR = Path(
+    os.getenv("TRANSCRIPTION_ARTIFACT_DIR", str(ROOT / "data" / "transcription-artifacts"))
+).resolve()
 
 # LibreOffice conversion service
 LIBREOFFICE_URL = os.getenv("LIBREOFFICE_URL") or "http://libreoffice:8101"
