@@ -46,7 +46,9 @@ describe("Sidebar brand", () => {
 
     expect(screen.queryByText("品成 BIM 知识库")).not.toBeInTheDocument();
     expect(screen.getByText("品")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "主题：跟随系统" })).toHaveClass("px-2", "w-10");
+    const themeButton = screen.getByRole("button", { name: "主题：跟随系统" });
+    expect(themeButton).toHaveClass("w-10", "justify-center", "p-0");
+    expect(themeButton.parentElement?.parentElement).toHaveClass("px-3");
     fireEvent.click(screen.getByRole("button", { name: "展开会话侧栏" }));
     expect(onToggleCollapsed).toHaveBeenCalledOnce();
   });

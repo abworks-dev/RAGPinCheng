@@ -31,7 +31,7 @@ export function ThemeMenu({ collapsed = false }: { collapsed?: boolean }) {
         title={`主题：${current.label}`}
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
-        className={`flex h-10 items-center gap-3 rounded-ui-md px-2 text-muted-foreground hover:bg-secondary hover:text-foreground ${collapsed ? "w-10" : "w-full"}`}
+        className={`flex h-10 items-center rounded-ui-md text-muted-foreground hover:bg-secondary hover:text-foreground ${collapsed ? "w-10 justify-center p-0" : "w-full gap-3 px-2"}`}
       >
         <CurrentIcon className="size-4 shrink-0" />
         {!collapsed && <span className="text-sm">{current.label}</span>}

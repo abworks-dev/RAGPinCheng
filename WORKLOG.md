@@ -1761,3 +1761,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 完成：修正完成回答实际使用的 `FeedbackBar` 复制入口；复制成功后不再弹出右上角“回答已复制”，而是在原按钮位置显示绿色勾选，1400ms 后恢复复制图标；连续点击会重置恢复计时，组件卸载时会清理计时器，复制失败仍保留错误提示。
 - 文件：仅修改 `frontend/src/components/FeedbackBar.tsx`、对应测试与 `WORKLOG.md`；未修改反馈提交、消息内容、引用、管理端、API、SSE、RAG 或后端业务。
 - 验证：复制反馈专项 Vitest 5/5 通过；前端全量 Vitest 21 个文件、88/88 项测试通过；`npm run build` 通过（2019 modules transformed）；`git diff --check` 无内容错误。
+
+### 15:11 — 修复聊天底部与导航对齐
+
+- 完成：为消息列表底部增加响应式安全留白，避免最新流式回答及操作区被底部输入器遮挡；移除快速轮次导航对消息正文施加的桌面端右侧内边距，使内容列继续以聊天主区域严格居中；收起态当前轮次改为透明背景和主色刻度，消除异常方块高亮；统一收起侧栏底部控件宽度与容器内边距，使主题按钮和用户头像居中，并通过固定头像收缩行为保持正圆。
+- 文件：修改 `frontend/src/components/MessageList.tsx`、`MessageList.test.tsx`、`TurnNavigator.tsx`、`TurnNavigator.test.tsx`、`Sidebar.tsx`、`Sidebar.test.tsx`、`ThemeMenu.tsx`、`UserMenu.tsx`，新增 `frontend/src/components/UserMenu.test.tsx`，更新 `WORKLOG.md`。
+- 验证：前端全量 Vitest 22 个文件、90/90 项测试通过；TypeScript project build 与 Vite production build 通过（2019 modules transformed）；`git diff --check` 通过。保留既有 React Router future warning、CSS minify warning和主包大于 500 kB 警告。
+- 边界：未修改 API、SSE、认证、RAG、索引、后端、依赖或业务数据流；当前本地后端未运行，未使用真实登录态和长对话执行浏览器视觉验收，待部署后由用户复核底部留白、正文居中、导航高亮与折叠侧栏控件。

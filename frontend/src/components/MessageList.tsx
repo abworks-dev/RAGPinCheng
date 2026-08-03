@@ -149,7 +149,8 @@ export function MessageList({
     <div className="relative min-h-0 flex-1">
       <div
         ref={scrollbar.ref}
-        className={`h-full overflow-y-auto py-6 ${turns.length > 1 ? (sourceOpen ? "2xl:pr-64" : "xl:pr-64") : ""} ${scrollbar.className}`}
+        data-message-scroll-container
+        className={`h-full overflow-y-auto py-6 ${scrollbar.className}`}
         onScroll={handleScroll}
         onMouseEnter={scrollbar.interactionProps.onMouseEnter}
         onMouseMove={scrollbar.interactionProps.onMouseMove}
@@ -175,7 +176,7 @@ export function MessageList({
             ))}
           </section>
         ))}
-        <div ref={bottomRef} />
+        <div ref={bottomRef} aria-hidden="true" className="h-20 sm:h-24" data-message-bottom-spacer />
       </div>
       <TurnNavigator
         turns={turns}
