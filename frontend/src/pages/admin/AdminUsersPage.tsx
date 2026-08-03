@@ -194,19 +194,29 @@ export function AdminUsersPage() {
                       {formatAdminDate(user.created_at)}
                     </td>
                     <td className="px-4 py-3">
-                      <div className="flex flex-wrap items-center gap-1">
+                      <div className="flex flex-wrap items-center gap-2">
                         <Button
-                          variant="ghost"
+                          variant="outline"
                           size="sm"
-                          className={user.is_active ? "text-destructive" : "text-success"}
+                          className={cn(
+                            "shadow-sm",
+                            user.is_active
+                              ? "border-destructive/50 bg-destructive/10 text-destructive hover:border-destructive/70 hover:bg-destructive/20 hover:text-destructive"
+                              : "border-success/50 bg-success/10 text-success hover:border-success/70 hover:bg-success/20 hover:text-success",
+                          )}
                           onClick={() => toggleActive(user)}
                         >
-                          {user.is_active ? "停用" : "启用"}
+                          {user.is_active ? "停用账号" : "启用账号"}
                         </Button>
-                        <Button variant="ghost" size="sm" onClick={() => toggleRole(user)}>
-                          {user.role === "admin" ? "降为用户" : "升为管理员"}
+                        <Button variant="outline" size="sm" className="bg-card shadow-sm" onClick={() => toggleRole(user)}>
+                          {user.role === "admin" ? "降为用户" : "设为管理员"}
                         </Button>
-                        <Button variant="ghost" size="sm" onClick={() => resetPw(user)}>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          className="border border-border shadow-sm"
+                          onClick={() => resetPw(user)}
+                        >
                           重置密码
                         </Button>
                       </div>

@@ -1602,3 +1602,11 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`frontend/src/pages/admin/AdminUsersPage.tsx`、新增 `frontend/src/pages/admin/AdminUsersPage.test.tsx`、`WORKLOG.md`。
 - 验证：针对性测试 8/8 通过；前端全量 Vitest 9 个文件、43 项测试通过；TypeScript project build 与 Vite production build 通过（406 modules transformed）；`git diff --check` 通过。保留既有 React Router future warning、CSS minify warning 和主包大于 500 kB 警告。
 - 边界：保留 `adminListUsers()`、`adminPatchUser()`、`adminListUserConversations()`、`adminGetConversation()` 的调用、刷新时机和参数契约；保留启停、角色切换、密码重置及原生 `confirm`/`prompt`/`alert` 行为。未修改 API、认证、CSRF、后端、依赖、全局样式、问答、SSE、引用、预览、上传、索引或其他管理页面；本提交仅在独立分支本地完成，尚未推送或部署。
+
+
+### 07:16 — 增强用户管理操作按钮可见性
+
+- 完成：根据生产截图增强用户管理操作列的按钮可见性；启停操作改为带状态色边框与浅底的描边按钮，角色操作改为标准描边按钮，密码重置改为次级实底按钮，并统一按钮间距、阴影和更明确的“停用账号/启用账号/设为管理员”文案。
+- 文件：`frontend/src/pages/admin/AdminUsersPage.tsx`、`frontend/src/pages/admin/AdminUsersPage.test.tsx`、`WORKLOG.md`。
+- 验证：针对性测试 8/8、前端全量测试 43/43 通过；TypeScript 与 Vite production build 通过（406 modules transformed）；`git diff --check` 通过。保留既有 React Router future warning、CSS minify warning 和主包大于 500 kB 警告。
+- 边界：仅修改按钮视觉和显示文案，保留 `adminPatchUser()` 参数、刷新时机以及原生 `confirm`/`prompt`/`alert` 行为；未加入自我停用限制或新的确认逻辑，未修改 API、认证、后端、依赖、全局样式或其他页面。
