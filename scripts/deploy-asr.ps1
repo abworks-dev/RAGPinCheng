@@ -70,7 +70,12 @@ if (-not [string]::IsNullOrWhiteSpace($env:ASR_SERVICE_TOKEN)) {
     if (-not $replaced) { $lines += "ASR_SERVICE_TOKEN=$env:ASR_SERVICE_TOKEN" }
     Set-Content -LiteralPath $envFile -Value $lines -Encoding utf8
 }
-& icacls.exe $configRoot /inheritance:r /grant:r "Administrators:(OI)(CI)F" "SYSTEM:(OI)(CI)F" | Out-Null
+& icacls.exe $configRoot `
+    /inheritance:r `
+    /grant:r `
+    "*S-1-5-32-544:(OI)(CI)F" `
+    "*S-1-5-18:(OI)(CI)F" `
+    "*S-1-5-20:(OI)(CI)M" | Out-Null
 
 if ($InstallDependencies) {
     if (-not (Test-Path -LiteralPath (Join-Path $venvRoot "Scripts\python.exe"))) {
