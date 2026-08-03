@@ -46,7 +46,6 @@ DYNAMIC_IMPORT_CALLS = {
     "__import__", "import_module", "spec_from_file_location", "SourceFileLoader",
 }
 PROTECTED_SHA256 = {
-    "api/routes_admin.py": "d1d1dc5cf4e151c4d8495df149ee53c5e5273b1c6b48e142495e5e86408c1c56",
     "src/chunk.py": "a8102823c17e781b9d082b1914404e2fd60369558191acf2083fa21681dd72fd",
 }
 

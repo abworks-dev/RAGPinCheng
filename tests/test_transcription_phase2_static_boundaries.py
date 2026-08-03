@@ -13,7 +13,6 @@ ADAPTERS = (
     ROOT / "api" / "transcription_store.py",
 )
 PROTECTED = {
-    "api/routes_admin.py": "d1d1dc5cf4e151c4d8495df149ee53c5e5273b1c6b48e142495e5e86408c1c56",
     "api/routes_media.py": "bba0b53767961c90e06e948cfecb659e33a395db1538a9f4f2acd4800087eb14",
     "api/indexing.py": "9abe3f09f26b36344a76f63e51813de28956e86a145e49fc79a131bc5b1c8fa1",
     "src/chunk.py": "a8102823c17e781b9d082b1914404e2fd60369558191acf2083fa21681dd72fd",

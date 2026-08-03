@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 # ── auth ────────────────────────────────────────────────────────────────────
@@ -227,6 +227,45 @@ class MediaAssetDTO(BaseModel):
     created_at: int
     updated_at: int
     error: str | None = None
+    transcription_job_id: str | None = None
+
+
+class TranscriptionProfileDTO(BaseModel):
+    profile_id: str
+    display_name: str
+    description: str
+    qualification: str
+    admission: str
+    availability: str
+    unavailable_reason_code: str | None = None
+    requires_review: bool
+    auto_publish: bool
+    auto_index: bool
+
+
+class TranscriptionJobDTO(BaseModel):
+    job_id: str
+    media_id: str
+    attempt_number: int
+    profile_id: str
+    status: str
+    stage: str | None
+    processed_ms: int
+    total_ms: int
+    failure_error_code: str | None
+    error_summary: str | None
+    result_version_id: str | None
+    created_at: int
+    started_at: int | None
+    finished_at: int | None
+    updated_at: int
+
+
+class RetryTranscriptionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    profile_id: str
+    request_idempotency_key: str
 
 
 class MessageDTO(BaseModel):

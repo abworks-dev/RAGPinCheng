@@ -7,6 +7,8 @@ use `require_admin`; mutating endpoints add the CSRF check via
 """
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import json
 import logging
 import re
@@ -16,11 +18,20 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 
-from src.config import DOCS_DIR, MEDIA_DIR, MAX_VIDEO_UPLOAD_MB, SECOND_LEVEL_CATEGORIES
+from src.config import (
+    ASR_ENABLED,
+    ASR_SERVICE_TOKEN,
+    DOCS_DIR,
+    MEDIA_DIR,
+    MAX_VIDEO_UPLOAD_MB,
+    SECOND_LEVEL_CATEGORIES,
+)
 from src.indexing_pipeline import (
     delete_document as delete_indexed_document,
     list_indexed_documents,
 )
+from src.transcription.profile import ProfileOperation
+from src.transcription.types import ContractValidationError, validate_uuid
 
 from .auth import (
     CurrentUser,
@@ -32,6 +43,7 @@ from .conversation_runtime import sweep_once
 from .db import get_db
 from .feedback import FEEDBACK_PATH
 from .indexing import create_job, enqueue
+from .routes_transcription import build_transcription_service
 from .schemas import (
     AdminConversationListResponse,
     AdminConversationSummaryDTO,
@@ -53,6 +65,8 @@ from .schemas import (
     SweepResponse,
     UploadResponse,
 )
+from .transcription_store import StoreConflictError
+from .transcription_worker import enqueue as enqueue_transcription
 
 logger = logging.getLogger("api.routes_admin")
 
@@ -713,29 +727,23 @@ def _validate_transcript_markdown(md_bytes: bytes) -> None:
         )
 
 
-@router.post("/media", response_model=MediaAssetDTO)
+@router.post("/media", response_model=MediaAssetDTO, response_model_exclude_none=True)
 async def upload_media(
     video: UploadFile = File(...),
-    transcript: UploadFile = File(...),
     title: str = Form(...),
+    transcript: UploadFile | None = File(None),
+    profile_id: str | None = Form(None),
+    request_idempotency_key: str | None = Form(None),
     admin: CurrentUser = Depends(require_csrf_admin),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> MediaAssetDTO:
-    """Upload a video + transcript pair and enqueue indexing.
-
-    Files are written to `media/<media_id>/original.mp4` for the video, and
-    `docs/教学视频/<title>__<media_id前8位>.md` for the transcript. After a
-    successful write, a media_assets row is created, an index_job is enqueued,
-    and the worker will handle the rest.
-
-    First phase only supports MP4 + Markdown pairs; automatic speech-to-text
-    will be added later as a separate stage.
-    """
+    """Upload one MP4 with either a manual transcript or a trusted Profile."""
     import uuid
 
     video_name = (video.filename or "").strip()
-    transcript_name = (transcript.filename or "").strip()
+    transcript_name = (transcript.filename or "").strip() if transcript else ""
     clean_title = title.strip()
+    automatic = transcript is None
 
     if not clean_title or len(clean_title) > 200:
         raise HTTPException(status_code=400, detail="标题不能为空且不能超过 200 字符")
@@ -743,17 +751,27 @@ async def upload_media(
     if not video_name or Path(video_name).suffix.lower() not in _ALLOWED_VIDEO_EXTS:
         raise HTTPException(status_code=400, detail="只支持 .mp4 视频文件")
 
-    if not transcript_name or not transcript_name.lower().endswith(".md"):
-        raise HTTPException(status_code=400, detail="转录稿必须是 .md 格式")
-
-    # Validate transcript BEFORE touching disk
-    transcript_bytes = await transcript.read()
-    try:
+    if automatic:
+        if not profile_id or request_idempotency_key is None:
+            raise HTTPException(status_code=400, detail="自动转录必须提供 profile_id 和幂等键")
+        if not ASR_ENABLED or not ASR_SERVICE_TOKEN:
+            raise HTTPException(status_code=503, detail="自动转录当前不可用")
+        try:
+            validate_uuid(request_idempotency_key, "request_idempotency_key")
+            build_transcription_service().resolve_profile(
+                profile_id, ProfileOperation.new_attempt
+            )
+        except ContractValidationError:
+            raise HTTPException(status_code=400, detail="未知或不可用的转录 Profile")
+        transcript_bytes = None
+    else:
+        if profile_id is not None or request_idempotency_key is not None:
+            raise HTTPException(status_code=400, detail="人工转录不得同时指定自动转录参数")
+        if not transcript_name.lower().endswith(".md"):
+            raise HTTPException(status_code=400, detail="转录稿必须是 .md 格式")
+        transcript_bytes = await transcript.read()
         _validate_transcript_markdown(transcript_bytes)
-    except HTTPException:
-        raise
 
-    # Generate stable media_id
     media_id = str(uuid.uuid4())
     now = int(time.time())
 
@@ -763,6 +781,7 @@ async def upload_media(
     media_dir.mkdir(parents=True, exist_ok=True)
     video_path = media_dir / "original.mp4"
     total_video = 0
+    video_digest = hashlib.sha256()
     try:
         with video_path.open("wb") as fh:
             while True:
@@ -779,6 +798,7 @@ async def upload_media(
                         detail=f"视频文件超过 {MAX_VIDEO_UPLOAD_MB}MB 上限",
                     )
                 fh.write(chunk)
+                video_digest.update(chunk)
     except HTTPException:
         raise
     except OSError as exc:
@@ -789,32 +809,41 @@ async def upload_media(
         media_dir.rmdir()
         raise HTTPException(status_code=400, detail="视频文件不能为空")
 
-    # Write transcript to docs/教学视频 directory with naming convention
-    # that ties it back to the media asset.
-    safe_title = re.sub(r"[\\/:*?\"<>|]", "_", clean_title)[:60]
-    transcript_filename = f"{safe_title}__{media_id[:8]}.md"
-    transcript_dir = DOCS_DIR / TRANSCRIPT_CATEGORY
-    transcript_dir.mkdir(parents=True, exist_ok=True)
-    transcript_path = transcript_dir / transcript_filename
-    try:
-        transcript_path.write_bytes(transcript_bytes)
-    except OSError as exc:
-        # Clean up the video if transcript write fails
+    if automatic:
         try:
-            video_path.unlink()
-            media_dir.rmdir()
-        except OSError:
-            pass
-        raise HTTPException(status_code=500, detail=f"写入转录稿失败：{exc}")
+            await asyncio.to_thread(build_transcription_service().preparer.prepare, media_id)
+        except (ContractValidationError, OSError):
+            video_path.unlink(missing_ok=True)
+            try:
+                media_dir.rmdir()
+            except OSError:
+                pass
+            raise HTTPException(status_code=503, detail="无法准备视频音频轨道")
+        transcript_filename = None
+        transcript_path = None
+    else:
+        safe_title = re.sub(r"[\\/:*?\"<>|]", "_", clean_title)[:60]
+        transcript_filename = f"{safe_title}__{media_id[:8]}.md"
+        transcript_dir = DOCS_DIR / TRANSCRIPT_CATEGORY
+        transcript_dir.mkdir(parents=True, exist_ok=True)
+        transcript_path = transcript_dir / transcript_filename
+        try:
+            transcript_path.write_bytes(transcript_bytes)
+        except OSError as exc:
+            video_path.unlink(missing_ok=True)
+            try:
+                media_dir.rmdir()
+            except OSError:
+                pass
+            raise HTTPException(status_code=500, detail=f"写入转录稿失败：{exc}")
 
-    # Create media_assets row
     conn.execute(
         """
         INSERT INTO media_assets
         (media_id, title, original_filename, storage_rel_path,
-         mime_type, file_size, transcript_source_path,
+         mime_type, file_size, sha256, transcript_source_path,
          transcript_origin, status, created_by, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             media_id,
@@ -823,9 +852,10 @@ async def upload_media(
             f"{media_id}/original.mp4",
             "video/mp4",
             total_video,
-            str(transcript_path),
-            "uploaded",
-            "transcript_ready",
+            video_digest.hexdigest() if automatic else None,
+            None if transcript_path is None else str(transcript_path),
+            "generated" if automatic else "uploaded",
+            "uploaded" if automatic else "transcript_ready",
             admin.id,
             now,
             now,
@@ -833,17 +863,42 @@ async def upload_media(
     )
     conn.commit()
 
-    # Enqueue the indexing job — ties the transcript to the media_id
-    job_id = create_job(
-        user_id=admin.id,
-        filename=transcript_filename,
-        category=TRANSCRIPT_CATEGORY,
-        doc_type="transcript",
-        source_path=transcript_path,
-        file_size=len(transcript_bytes),
-        media_id=media_id,
-    )
-    enqueue(job_id)
+    transcription_job_id = None
+    if automatic:
+        try:
+            transcription_job = build_transcription_service().create_pending_job(
+                media_id=media_id,
+                profile_id=profile_id,
+                request_idempotency_key=request_idempotency_key,
+                created_by=admin.id,
+            )
+            transcription_job_id = transcription_job.id
+            enqueue_transcription(transcription_job.id)
+        except StoreConflictError:
+            conn.execute(
+                "UPDATE media_assets SET status='failed',error=?,updated_at=? WHERE media_id=?",
+                ("request idempotency key belongs to another media asset", int(time.time()), media_id),
+            )
+            conn.commit()
+            raise HTTPException(status_code=409, detail="幂等键已用于其他媒体")
+        except (ContractValidationError, OSError):
+            conn.execute(
+                "UPDATE media_assets SET status='failed',error=?,updated_at=? WHERE media_id=?",
+                ("automatic transcription job could not be created", int(time.time()), media_id),
+            )
+            conn.commit()
+            raise HTTPException(status_code=500, detail="无法创建自动转录任务")
+    else:
+        job_id = create_job(
+            user_id=admin.id,
+            filename=transcript_filename,
+            category=TRANSCRIPT_CATEGORY,
+            doc_type="transcript",
+            source_path=transcript_path,
+            file_size=len(transcript_bytes),
+            media_id=media_id,
+        )
+        enqueue(job_id)
 
     # Return the media asset
     row = conn.execute(
@@ -867,6 +922,7 @@ async def upload_media(
         created_at=row["created_at"],
         updated_at=row["updated_at"],
         error=row["error"],
+        transcription_job_id=transcription_job_id,
     )
 
 
