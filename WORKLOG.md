@@ -1780,7 +1780,7 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 
 ### 01:09 — 修复 Phase 5 与前端跨环境 CI 夹具
 
-- 完成：修正 Phase 5 应用和 publication adapter 测试误用免审核 approved Profile 的问题，显式改用与当前 catalog 一致的 experimental Profile；修正会话“今天”分组测试把 4.8 小时前样例跨到 UTC 前一天的问题，改为冻结时刻本身。未修改生产 Store、审核状态机、Profile catalog 或组件分组逻辑。
-- 文件：`tests/test_transcription_phase5_application_e2e.py`、`tests/test_transcription_publication_index_adapter.py`、`frontend/src/components/ConversationList.test.tsx`、`WORKLOG.md`。
-- 验证：experimental fixture 冒烟确认 `ReviewStatus.awaiting_review`；两项 Python 测试文件 `py_compile` 通过；会话分组单测分别在 UTC 与 Asia/Shanghai 通过，主工作区前端全量 18 个文件、81 项测试及 production build 通过；`git diff --check` 通过。
+- 完成：修正 Phase 5 应用和 publication adapter 测试误用免审核 approved Profile 的问题，显式改用与当前 catalog 一致的 experimental Profile，并为审核路径创建满足 `reviewed_by` 外键的固定管理员 fixture；修正会话“今天”分组测试把 4.8 小时前样例跨到 UTC 前一天的问题，改为冻结时刻本身。未修改生产 Store、外键、审核状态机、Profile catalog 或组件分组逻辑。
+- 文件：`tests/transcription_fixture_helpers.py`、`tests/test_transcription_phase5_application_e2e.py`、`tests/test_transcription_publication_index_adapter.py`、`frontend/src/components/ConversationList.test.tsx`、`WORKLOG.md`。
+- 验证：experimental fixture 冒烟确认 `ReviewStatus.awaiting_review`，带 reviewer 外键的审核转换确认 `ReviewStatus.review_approved`；三项 Python 测试文件 `py_compile` 通过；会话分组单测分别在 UTC 与 Asia/Shanghai 通过，主工作区前端全量 18 个文件、81 项测试及 production build 通过；`git diff --check` 通过。
 - 待办/风险：本地 `.venv` 缺少 `qdrant_client`，Phase 5 两个测试文件在收集阶段被既有依赖阻断，完整 28 项 Phase 5 job 仍需 GitHub Actions 在依赖齐全的 Linux 环境复跑确认；未安装依赖、未运行 Qdrant、真实 ASR、GPU、生产数据或部署。

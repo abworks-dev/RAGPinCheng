@@ -5,7 +5,7 @@ import pytest
 from api.transcription_publication import TranscriptionPublicationApplicationService
 from src.transcription.types import ContractValidationError, ProfileQualification, ReviewStatus, PublicationIndexStatus
 from tests.test_transcription_publication_transaction import persist_candidate
-from tests.transcription_fixture_helpers import make_profile
+from tests.transcription_fixture_helpers import make_profile, seed_admin_user
 
 
 def _service(conn, artifacts, profile, tmp_path):
@@ -32,6 +32,7 @@ def test_review_publish_worker_path_is_idempotent(tmp_path, monkeypatch):
     profile = make_profile(qualification=ProfileQualification.experimental)
     conn, store, workflow, _port, profile, version = persist_candidate(tmp_path, profile=profile)
     service = _service(conn, workflow.artifacts, profile, tmp_path)
+    seed_admin_user(conn)
     store.review_version(version.id, approved=True, reviewed_by=1, review_note="ok", now=40)
     result = service.publish(version.id)
     assert result["reused"] is False

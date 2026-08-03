@@ -60,6 +60,14 @@ VERSION_ID = "123e4567-e89b-12d3-a456-426614174012"
 INDEX_JOB_ID = "123e4567-e89b-12d3-a456-426614174013"
 
 
+def seed_admin_user(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        "INSERT INTO users(id,employee_id,real_name,password_hash,role,is_active,created_at) "
+        "VALUES (1,'admin','Admin','x','admin',1,1)"
+    )
+    conn.commit()
+
+
 def load_json(name: str) -> Any:
     return json.loads((FIXTURE_DIR / name).read_text(encoding="utf-8"))
 
