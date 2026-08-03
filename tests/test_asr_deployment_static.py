@@ -31,6 +31,8 @@ def test_manual_workflow_has_safe_defaults_and_immutable_revision():
     assert "production-asr" in workflow
     assert "runs-on: [self-hosted, Windows, X64, asr-production]" in workflow
     assert workflow.count("default: false") == 2
+    assert workflow.count("shell: powershell") == 2
+    assert "shell: pwsh" not in workflow
     assert re.search(r"install_dependencies:.*?default: false", workflow, re.DOTALL)
     assert re.search(r"activate_service:.*?default: false", workflow, re.DOTALL)
     assert "secrets.ASR_SERVICE_TOKEN" in workflow
