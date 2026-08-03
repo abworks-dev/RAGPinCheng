@@ -112,7 +112,10 @@ describe("AdminConversationsPage", () => {
     fireEvent.click(selectedButton);
 
     expect(await screen.findByText("交付前需要检查哪些内容？")).toBeInTheDocument();
-    expect(screen.getByText("建议依次核对模型、图纸和交付清单。")).toBeInTheDocument();
+    const assistantMessage = screen.getByText("建议依次核对模型、图纸和交付清单。");
+    expect(assistantMessage).toBeInTheDocument();
+    expect(assistantMessage.closest("article")).toHaveClass("w-fit", "max-w-3xl");
+    expect(assistantMessage.closest("article")).not.toHaveClass("w-full");
     expect(selectedButton).toHaveClass("border-l-primary", "bg-primary/10");
     expect(screen.getByText("助手")).toHaveClass("border-border", "bg-card");
     expect(mocks.adminGetConversation).toHaveBeenCalledTimes(1);

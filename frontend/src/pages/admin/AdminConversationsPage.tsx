@@ -207,7 +207,7 @@ export function AdminConversationsPage() {
                             "rounded-ui-xl border px-4 py-3",
                             isUser
                               ? "ml-auto w-fit max-w-[88%] border-primary/20 bg-primary/10"
-                              : "mr-auto w-full max-w-3xl border-border bg-surface-muted",
+                              : "mr-auto w-fit max-w-3xl border-border bg-surface-muted",
                           )}
                         >
                           <div className="mb-2 flex items-center justify-between gap-3">
