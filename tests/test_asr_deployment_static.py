@@ -87,3 +87,22 @@ def test_root_and_windows_env_templates_are_not_merged():
     assert "ASR_MODEL_CACHE_ROOT" not in backend
     assert "Windows ASR service configuration only" in windows
     assert "ASR_ENABLED=" not in windows
+
+
+def test_backend_image_installs_and_deployment_verifies_ffmpeg_tools():
+    dockerfile = read("docker/Dockerfile.backend")
+    runtime = dockerfile.split("FROM python:3.11-slim", 1)[1]
+    system_deps = runtime.split("WORKDIR /app", 1)[0]
+    assert re.search(
+        r"apt-get install -y --no-install-recommends.*\bcurl\b.*\bffmpeg\b",
+        system_deps,
+        re.DOTALL,
+    )
+
+    deploy = read("scripts/deploy-app.sh")
+    media_check = 'echo ">> Verifying backend media tools"'
+    assert "compose exec -T backend sh -lc" in deploy
+    assert "command -v ffmpeg" in deploy
+    assert "command -v ffprobe" in deploy
+    assert deploy.index("compose up -d --no-deps backend") < deploy.index(media_check)
+    assert deploy.index(media_check) < deploy.index("Waiting for backend health check")
