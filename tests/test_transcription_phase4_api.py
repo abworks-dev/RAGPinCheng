@@ -94,10 +94,17 @@ def test_automatic_upload_replays_existing_request_when_asr_is_now_unavailable(
 
     video_bytes = b"same-video-bytes"
     conn, store, _artifacts = make_phase2_store(tmp_path)
-    job = store.create_job(replace(make_pending_job(), created_by=1))
+    cursor = conn.execute(
+        """INSERT INTO users(employee_id,real_name,password_hash,role,is_active,created_at)
+        VALUES (?,?,?,?,?,?)""",
+        ("admin", "Admin", "x", "admin", 1, 1),
+    )
+    admin_id = int(cursor.lastrowid)
+    conn.commit()
+    job = store.create_job(replace(make_pending_job(), created_by=admin_id))
     conn.execute(
-        "UPDATE media_assets SET file_size=?,sha256=? WHERE media_id=?",
-        (len(video_bytes), hashlib.sha256(video_bytes).hexdigest(), job.media_id),
+        "UPDATE media_assets SET created_by=?,file_size=?,sha256=? WHERE media_id=?",
+        (admin_id, len(video_bytes), hashlib.sha256(video_bytes).hexdigest(), job.media_id),
     )
     conn.commit()
 
@@ -119,7 +126,7 @@ def test_automatic_upload_replays_existing_request_when_asr_is_now_unavailable(
     monkeypatch.setattr(routes_admin, "ASR_ENABLED", False)
     monkeypatch.setattr(routes_admin, "ASR_SERVICE_TOKEN", "")
     monkeypatch.setattr(routes_admin, "build_transcription_service", unexpected_service_build)
-    admin = CurrentUser(1, "admin", "Admin", "admin", "csrf")
+    admin = CurrentUser(admin_id, "admin", "Admin", "admin", "csrf")
     try:
         replayed = asyncio.run(
             upload_media(
