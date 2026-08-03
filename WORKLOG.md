@@ -1610,3 +1610,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`frontend/src/pages/admin/AdminUsersPage.tsx`、`frontend/src/pages/admin/AdminUsersPage.test.tsx`、`WORKLOG.md`。
 - 验证：针对性测试 8/8、前端全量测试 43/43 通过；TypeScript 与 Vite production build 通过（406 modules transformed）；`git diff --check` 通过。保留既有 React Router future warning、CSS minify warning 和主包大于 500 kB 警告。
 - 边界：仅修改按钮视觉和显示文案，保留 `adminPatchUser()` 参数、刷新时机以及原生 `confirm`/`prompt`/`alert` 行为；未加入自我停用限制或新的确认逻辑，未修改 API、认证、后端、依赖、全局样式或其他页面。
+
+### 08:12 — 统一管理端反馈页面
+
+- 完成：将管理端反馈页迁移到现有语义 Token 与基础组件，统一页面标题、反馈概览、反馈卡片、类型/评价 Badge、关联问题、补充说明、来源信息和回答折叠区；新增加载、空数据、错误反馈与原位重试状态，并保留最近 200 条反馈的加载契约。
+- 文件：`frontend/src/pages/admin/AdminFeedbackPage.tsx`、新增 `frontend/src/pages/admin/AdminFeedbackPage.test.tsx`、`WORKLOG.md`。
+- 验证：针对性测试 4/4 通过；前端全量 Vitest 10 个文件、47 项测试通过；TypeScript project build 与 Vite production build 通过（406 modules transformed）；`git diff --check` 通过。保留既有 React Router future warning、CSS minify warning 和主包大于 500 kB 警告。
+- 边界：保留 `adminFeedback(200)` 的 API、参数与初始加载时机，未修改认证、CSRF、后端、依赖、全局样式、问答、SSE、引用、预览、上传、索引或其他管理页面；本阶段尚未提交、推送或部署，也未使用真实管理账号进行生产视觉验收。
