@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Send } from "./ui/icons";
+import { Send } from "lucide-react";
 import { KnowledgeScopePicker } from "./KnowledgeScopePicker";
 
 export function Composer({

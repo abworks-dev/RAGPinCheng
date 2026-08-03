@@ -128,7 +128,7 @@ export function ChatLayout() {
           />
         </main>
         {sourceOpen && (
-          <div className="hidden h-full w-[21.5rem] shrink-0 border-l border-border xl:block">
+          <div className="hidden h-full w-[23rem] shrink-0 border-l border-border xl:block">
             <SourceWorkspace messages={messages} conversationId={currentId} onClose={() => setSourceOpen(false)} />
           </div>
         )}

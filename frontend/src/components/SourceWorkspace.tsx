@@ -11,7 +11,7 @@ import {
   LocateFixed,
   PanelRightClose,
   Play,
-} from "./ui/icons";
+} from "lucide-react";
 import { api } from "../api/client";
 import { usePdfPreview } from "../hooks/usePdfPreview";
 import { timestampToSeconds, useVideoPlayer } from "../hooks/useVideoPlayer";
@@ -172,8 +172,8 @@ export function SourceWorkspace({
           </select>
         </label>
       )}
-      <div className="grid min-h-0 flex-1 grid-rows-[minmax(9rem,0.8fr)_minmax(14rem,1.2fr)]">
-        <div className="overflow-y-auto border-b border-border p-2">
+      <div className="grid min-h-0 flex-1 grid-rows-[minmax(12rem,0.9fr)_minmax(16rem,1.1fr)]">
+        <div className="overflow-y-auto border-b border-border p-3">
           {activeSet.sources.map((item, index) => (
             <button
               key={`${item.parent_id}-${index}`}
@@ -183,26 +183,28 @@ export function SourceWorkspace({
               type="button"
               onClick={() => selectSource(activeSet.messageId, index)}
               className={
-                "mb-1 flex w-full items-start gap-2 rounded-ui-md px-2.5 py-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring " +
-                (safeIndex === index ? "bg-ui-accent text-foreground" : "hover:bg-secondary")
+                "mb-2 flex w-full items-start gap-2.5 rounded-ui-md border px-3 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring " +
+                (safeIndex === index
+                  ? "border-primary/70 bg-primary/10 text-foreground shadow-sm"
+                  : "border-border bg-card hover:border-primary/30 hover:bg-secondary/60")
               }
             >
               <span
                 className={
                   "mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-ui-sm text-xs font-semibold " +
                   (safeIndex === index
-                    ? "bg-citation text-citation-foreground"
-                    : "bg-secondary text-muted-foreground")
+                    ? "bg-primary text-primary-foreground"
+                    : "border border-border bg-secondary text-muted-foreground")
                 }
               >
                 {index + 1}
               </span>
               <span className="min-w-0 flex-1">
-                <span className="flex items-center gap-1.5 text-xs font-medium">
+                <span className="flex items-center gap-1.5 text-sm font-medium">
                   <SourceTypeIcon source={item} />
                   <span className="truncate">{item.doc_title}</span>
                 </span>
-                <span className="mt-1 block truncate text-[11px] text-muted-foreground">
+                <span className="mt-1.5 block truncate text-xs text-muted-foreground">
                   {item.category || "未分类"} · {sourceLocator(item)}
                 </span>
               </span>
@@ -332,7 +334,7 @@ function SourceDetail({
           <h3 className="mt-0.5 break-words text-sm font-semibold text-foreground">{source.doc_title}</h3>
         </div>
       </div>
-      <div className="mt-4 rounded-ui-md bg-secondary px-3 py-2.5">
+      <div className="mt-4 rounded-ui-md border border-border bg-secondary/70 px-3 py-2.5">
         <div className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
           <LocateFixed className="size-3.5" />
           定位
@@ -341,7 +343,7 @@ function SourceDetail({
       </div>
       <div className="mt-4">
         <div className="mb-2 text-[11px] font-medium text-muted-foreground">引用原文</div>
-        <p className="whitespace-pre-wrap break-words text-xs leading-6 text-foreground">
+        <p className="whitespace-pre-wrap break-words border-l-2 border-info bg-info/10 px-3 py-2.5 text-xs leading-6 text-foreground">
           {matchesQuery(visibleText, searchQuery)}
         </p>
         {text.length > 900 && (

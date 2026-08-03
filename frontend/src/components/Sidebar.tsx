@@ -1,6 +1,7 @@
 import type { Conversation } from "../types";
 import { ConversationList } from "./ConversationList";
 import { UserMenu } from "./UserMenu";
+import { Plus } from "lucide-react";
 
 export function Sidebar({
   conversations,
@@ -26,15 +27,16 @@ export function Sidebar({
   onNewChat: () => void;
 }) {
   return (
-    <aside className="flex h-full w-[14.5rem] shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground">
+    <aside className="flex h-full w-[17rem] shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground">
       <div className="border-b border-sidebar-border px-3 py-3">
         <div className="mb-3 px-1 text-sm font-semibold">品成 BIM 知识库</div>
         <button
           type="button"
           onClick={onNewChat}
-          className="h-9 w-full rounded-ui-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:opacity-90"
+          className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-ui-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:opacity-90"
         >
-          + 新建对话
+          <Plus className="size-4" />
+          新建对话
         </button>
       </div>
 

@@ -1,4 +1,4 @@
-import { Check, ChevronDown, Layers3, X } from "./ui/icons";
+import { Check, ChevronDown, Layers3, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 export function KnowledgeScopePicker({
