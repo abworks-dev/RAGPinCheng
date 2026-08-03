@@ -120,6 +120,20 @@ describe("AdminMediaPage", () => {
     expect(screen.getByText("远端服务暂不可用")).toBeInTheDocument();
   });
 
+  it("renders when randomUUID is unavailable in an insecure HTTP context", async () => {
+    vi.stubGlobal("crypto", {
+      getRandomValues: vi.fn((bytes: Uint8Array) => {
+        bytes.fill(7);
+        return bytes;
+      }),
+    });
+
+    render(<AdminMediaPage />);
+
+    expect(await screen.findByText("项目交付培训")).toBeInTheDocument();
+    expect(screen.getByText("共 2 个视频")).toBeInTheDocument();
+  });
+
   it("keeps the manual MP4 plus Markdown path unchanged", async () => {
     mocks.listMediaAssets.mockResolvedValueOnce([]).mockResolvedValueOnce(assets);
     const video = new File(["video-bytes"], "training.mp4", { type: "video/mp4" });
