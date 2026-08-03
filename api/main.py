@@ -18,6 +18,7 @@ from starlette.staticfiles import StaticFiles
 from starlette.types import Scope
 
 from src.config import RERANK_ENABLED
+from src.config import ASR_ENABLED, ASR_SERVICE_TOKEN
 
 from .auth import bootstrap_admin_from_env
 from .conversation_runtime import sweep_once
@@ -28,6 +29,13 @@ from .routes_admin import router as admin_router
 from .routes_auth import router as auth_router
 from .routes_chat import router as chat_router
 from .routes_media import router as media_router
+from .routes_transcription import build_transcription_service, router as transcription_router
+from .transcription_worker import (
+    configure as configure_transcription_worker,
+    recover_on_boot as recover_transcription_on_boot,
+    start_worker as start_transcription_worker,
+    stop_worker as stop_transcription_worker,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("api")
@@ -111,6 +119,13 @@ async def lifespan(app: FastAPI):
     # has a consumer ready when resume_pending_on_boot enqueues them.
     await start_worker()
     resume_pending_on_boot()
+    configure_transcription_worker(build_transcription_service)
+    transcription_runtime_ready = ASR_ENABLED and bool(ASR_SERVICE_TOKEN)
+    if transcription_runtime_ready:
+        await start_transcription_worker()
+        recover_transcription_on_boot()
+    else:
+        recover_transcription_on_boot(enqueue_pending=False)
     logger.info("api ready")
     try:
         yield
@@ -120,6 +135,8 @@ async def lifespan(app: FastAPI):
             await sweeper_task
         except (asyncio.CancelledError, Exception):
             pass
+        if transcription_runtime_ready:
+            await stop_transcription_worker()
         await stop_worker()
 
 
@@ -145,6 +162,7 @@ app.include_router(auth_router, prefix="/api")
 app.include_router(chat_router, prefix="/api")
 app.include_router(admin_router, prefix="/api")
 app.include_router(media_router, prefix="/api")
+app.include_router(transcription_router, prefix="/api")
 
 
 # ── React SPA hosting ──────────────────────────────────────────────────────
