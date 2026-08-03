@@ -155,15 +155,16 @@
 
 ### 多引擎视频自动转录
 
-- 状态：进行中
-- 目标：建立引擎无关的转录、审核、版本发布和索引流水线，让管理员从受控 Profile 中选择 FunASR、faster-whisper 或人工稿路径。
+- 状态：代码完成待验证
+- 目标：建立引擎无关的转录、审核、版本发布和索引流水线，让管理员只能从服务端白名单 Profile 中启动自动转录，同时永久保留人工 Markdown 路径。
 - 下一步：
-  - [ ] 在安装 FastAPI/httpx 且无 GPU/真实 ASR 依赖的远端 CI 中复跑 Phase 1～3 transcription、manual 与 `asr_service` contract suite，要求零失败、零跳过。
-  - [ ] CI 验证通过后，只读调查并单独编写、审批 Phase 4 应用 API/worker 接线 R2 计划。
-  - [ ] 独立决定是否继续 faster-whisper 资格评测；候选评测不再阻塞 Phase 1，也不因已有实现自动开放为正式选项。
-- 完成标准：人工转录流程不退化；管理员只能选择服务端白名单 Profile；同一媒体可保留多个历史版本但只有一个正式发布版本；实验 Profile 强制审核且无法绕过发布门禁进入索引；至少一个 `approved` Profile 完成隔离端到端验证后才讨论生产灰度。
-- 依赖：Phase 1 已合并并由 CI 验证；Phase 2 持久化内核和 Phase 3 独立服务/remote Provider 契约已完成本地纯 Python 验证、待远端 CI；Phase 3 尚未接应用 API/UI/worker/Qdrant，真实引擎未运行；各后续 Phase 独立 R2 审批，真实数据操作另按 R3 审批；单卡 GPU 保持 BGE 优先。
-- 方案链接：`project-docs/plans/multi-engine-auto-transcription.md`、`project-docs/plans/multi-engine-transcription-phase1.md`、`project-docs/plans/multi-engine-transcription-phase2.md`、`project-docs/plans/multi-engine-transcription-phase3.md`、`project-docs/decisions/0002-multi-engine-transcription.md`、`project-docs/plans/funasr-auto-transcription.md`
+  - [ ] 由远端 CI 在干净环境验证 Phase 5 API、worker、candidate index、Qdrant Filter 组合、完整前端测试与构建，要求新增 job 零失败、零跳过且既有 jobs 不退化。
+  - [ ] CI 通过后进行 scoped code review 和用户验收；不得把本地缺依赖的测试写成已通过。
+  - [ ] 如需进入 Phase 5C，先提交真实隔离环境的 Profile、模型 revision、媒体、GPU、Qdrant、最长运行时间、停止和清理方案并单独审批。
+  - [ ] 独立决定是否继续 faster-whisper 资格评测；候选评测不因已有实现自动开放为正式选项。
+- 完成标准：人工转录流程不退化；管理员只能选择服务端白名单 Profile；同一媒体可保留多个历史版本且只有 `app.sqlite` head 指向的版本进入正式检索；experimental Profile 强制审核；至少一个 `qualification_approved` Profile 完成隔离端到端验证后才讨论生产灰度。
+- 依赖：Phase 1～4B 已形成契约、持久化、remote Provider 与应用上传/worker/UI 前半段；Phase 5A/5B 已实现版本审阅、发布、候选索引和检索可见性，待远端 CI；Phase 5C、真实引擎/GPU/Qdrant 和生产数据均未执行；真实数据操作另按 R3 审批，单卡 GPU 保持 BGE 优先。
+- 方案链接：`project-docs/plans/multi-engine-auto-transcription.md`、`project-docs/plans/multi-engine-transcription-phase1.md`、`project-docs/plans/multi-engine-transcription-phase2.md`、`project-docs/plans/multi-engine-transcription-phase3.md`、`project-docs/plans/multi-engine-transcription-phase5.md`、`project-docs/decisions/0002-multi-engine-transcription.md`、`project-docs/plans/funasr-auto-transcription.md`
 
 ---
 

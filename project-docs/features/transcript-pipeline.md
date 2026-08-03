@@ -1,13 +1,13 @@
 # 视频转录链路
 
-- 状态：人工上传/播放链路已实现；多引擎 Phase 3 独立服务与 remote Provider 契约代码完成待远端 CI，尚未接线或部署
+- 状态：人工上传/播放链路与多引擎 Phase 5A/5B 应用闭环代码已实现，待远端 CI；Phase 5C 真实隔离验证未执行
 - 最后核对：2026-08-03
 
 ## 用户可观察能力
 
-教学视频转录稿可以被索引和检索，回答能够显示带时间戳的视频引用，点击引用定位到来源卡片并打开视频播放器。管理员可上传 MP4+Markdown 转录稿对，系统自动绑定、索引并提供认证播放。
+教学视频转录稿可以被索引和检索，回答能够显示带时间戳的视频引用，点击引用定位到来源卡片并打开视频播放器。管理员既可继续上传 MP4+Markdown 转录稿对，也可上传单个 MP4 并选择服务端白名单 Profile 启动自动转录任务。
 
-Phase 2/3 没有改变上述用户可观察行为。当前新增的是未接应用 API/UI、worker 或 Qdrant 的持久化内核、独立 ASR 服务和 remote Provider 契约。
+Phase 5A/5B 已接通版本列表、只读 Markdown 预览、人工审核、显式发布、候选索引与正式 head 检索过滤。转录成功、审核通过、发布中和正式检索可见仍是独立状态；真实 ASR/GPU/Qdrant 端到端尚未运行。
 
 ## 当前边界
 
@@ -32,29 +32,18 @@ Phase 2/3 没有改变上述用户可观察行为。当前新增的是未接应�
 
 - 视频字幕轨道生成与同步；
 
-### 已实现但未接线：多引擎转录 Phase 2 内核
+### 已接线：多引擎转录 Phase 2～5B
 
-- 添加式 SQLite migration ledger，以及 migration 前 `sqlite3.Connection.backup()`、完整性验证和只恢复到新路径的工具；
-- 独立 `transcription_jobs`、`transcript_versions`、artifact refs、publication-only index jobs 和正式版本 head；
-- 幂等 request key、递增 attempt、同媒体单 active job、严格 checkpoint 和稳定失败码；
-- Canonical JSON 严格加载与 hash 回比，自动 Markdown 使用受控内容寻址文件；
-- 审核、候选索引 receipt、单个 `BEGIN IMMEDIATE` head promote、supersedes 和恢复 action；
-- fake `PublicationIndexPort` 只验证逻辑隔离，不写真实 Qdrant；
-- legacy 人工稿不 backfill，无 head 时继续现有路径。
+- Phase 2 的 `transcription_jobs`、`transcript_versions`、artifact refs、publication-only index jobs 和正式版本 head 已由应用层 Store/服务使用；
+- Phase 3 remote Provider 仍只返回严格 `ProviderCandidate | ProviderFailure`，由 `pipeline.py` 独占 normalizer/Canonical 结果流；
+- 管理端单 MP4 + `profile_id` 上传、任务状态/取消/恢复已接入应用 API 和后台 worker；人工 MP4+Markdown 路径保持独立；
+- 管理端按媒体 lazy 加载版本历史，可预览不可变 Markdown、提交审核备注、批准/拒绝并显式发布；人工版本不提供可用的自动发布动作；
+- publication adapter 只走 `chunk_document → store_parents → index_children`，不调用 purge、reset 或普通 `index_single`；
+- Parent、Child 和 Qdrant payload 添加 nullable `transcript_version_id` / `publication_target_id`，legacy stable ID 算法保持不变；
+- 正式可见性唯一读取 `app.sqlite.media_transcript_heads.current_version_id`；Qdrant recall 和 Parent expansion 使用同一快照，损坏/缺失 head 对 versioned transcript fail closed，legacy/普通文档继续可见；
+- 普通索引与 publication 索引共用现有单 worker/单队列，publication job 支持幂等恢复与失败状态持久化。
 
-这些模块尚未接入新 endpoint、管理员 UI、真实 Provider 或索引 worker，也没有在真实 `data/app.sqlite` 上执行迁移。
-
-### 已实现但未接线：多引擎转录 Phase 3 服务与 Provider
-
-- 新增严格的 service DTO、上传 manifest、job/checkpoint/result 状态和有限错误码；
-- 新增内容寻址本地 spool、分 part 幂等上传、全量 SHA-256、原子 JSON/result/checkpoint 和重启恢复；
-- 新增 FIFO、单 active、BGE fail-closed、磁盘/连续失败/OOM latch 调度器；
-- 新增 Provider Registry、运行时输入/progress/cancel 窄端口和短请求 `HttpxAsrServiceClient`；
-- 新增固定 `iic/SenseVoiceSmall@7bf452403abd7353a300cd760f7adae7701c92c1` 的 experimental Profile 和 lazy FunASR adapter；
-- remote Provider 只返回严格 `ProviderCandidate | ProviderFailure`，仍由既有 `pipeline.py` 独占 normalizer/Canonical 结果流；
-- 两侧默认关闭；真实 FunASR/torch 依赖只在服务专属依赖文件，未安装、未下载模型、未执行 GPU 推理。
-
-这些模块尚未接入应用上传 API、管理员 UI、应用 worker、Phase 2 Store 或 Qdrant，也未部署独立服务，因此不产生用户可见自动转录能力。
+真实 ffmpeg/ASR/GPU/Qdrant 服务、真实 embedding/rerank、生产数据和 Phase 5C 尚未执行，因此当前只证明离线代码闭环，不构成真实引擎或生产资格结论。
 
 ## 入口与调用链
 
@@ -75,27 +64,21 @@ Phase 2/3 没有改变上述用户可观察行为。当前新增的是未接应�
 → GET /api/media/{media_id} (鉴权 Range 播放)
 ```
 
-Phase 2 未接线的内部结果流：
+自动转录与版本发布结果流：
 
 ```text
-Phase 1 Canonical Transcript + deterministic Markdown bytes
-→ LocalTranscriptionArtifactStore（内容寻址）
-→ SQLiteTranscriptionStore.record_success（candidate version）
-→ review guard
-→ fake PublicationIndexPort request/receipt
-→ SQLiteTranscriptionStore.promote（单事务 head 切换）
-```
-
-Phase 3 未接线的 Provider 结果流：
-
-```text
-TranscriptionInputSource parts
+单 MP4 + profile_id
+→ 应用转录任务/worker
+→ audio preparation port
 → independent asr_service create/upload/start/poll/result
 → RemoteAsrProvider
 → ProviderCandidate | ProviderFailure
-→ pipeline.py
-→ normalize_candidate
-→ CanonicalTranscript
+→ pipeline.py → normalize_candidate → CanonicalTranscript
+→ deterministic Markdown + candidate transcript version
+→ 管理员审核
+→ publication-only candidate index
+→ SQLiteTranscriptionStore.promote（单事务 head 切换）
+→ 检索按同一 head snapshot 过滤 Qdrant Child 与 parents.sqlite Parent
 ```
 
 ## 关键文件
@@ -111,10 +94,13 @@ TranscriptionInputSource parts
 - `api/routes_admin.py`（媒体上传）
 - `api/indexing.py`（media_id 传递）
 - `api/db.py`、`api/db_migrations.py`、`api/db_backup.py`（Phase 2 添加式 Schema 与备份）
-- `api/transcription_store.py`、`api/transcription_artifacts.py`（Phase 2 未接线适配器）
+- `api/transcription_store.py`、`api/transcription_artifacts.py`、`api/transcription_publication.py`（版本、artifact 与发布应用服务）
 - `src/transcription/persistence.py`、`src/transcription/workflow.py`（Phase 2 领域端口与编排）
 - `src/transcription/asr_service_contract.py`、`provider_registry.py`、`remote_provider.py`、`runtime_ports.py`（Phase 3 后端契约）
 - `src/transcription/profile_catalog.py`（Phase 3 experimental Profile catalog）
+- `src/transcription/retrieval_visibility.py`（Phase 5 SQLite head 只读快照）
+- `api/routes_transcription.py`、`api/indexing.py`（转录/版本 API 与共享 worker）
+- `frontend/src/components/TranscriptionVersionPanel.tsx`（版本审阅与发布）
 - `asr_service/`（Phase 3 独立服务、存储、调度和 engine adapter）
 - `frontend/src/components/citations.ts`
 - `frontend/src/components/SourcesPanel.tsx`（播放按钮）
@@ -130,7 +116,7 @@ TranscriptionInputSource parts
 | `start_time` | 转录稿解析 | 是 | 引用时间戳 HH:MM:SS |
 | `media_id` | 上传时生成 UUID | 是 | 关联 media_assets 表，驱动播放器 |
 | `media_url`（API 动态构造） | 由 media_id 生成 | 是 | 不存储，动态构造 `/api/media/{media_id}` |
-| `transcript_version_id` | Phase 2 Store | 是 | 候选/历史版本身份；尚未进入现有索引 payload |
+| `transcript_version_id` | transcript version | 是 | immutable 候选/历史版本身份；进入 Parent/Child 与 Qdrant payload |
 | `current_version_id` | `media_transcript_heads` | 是 | SQLite 当前正式版本指针；legacy media 可以没有 head |
 
 ## 依赖与下游消费者
@@ -147,26 +133,29 @@ TranscriptionInputSource parts
 - 非法 Range 返回 416；
 - `media_id` 不进入 Embedding 文本，不影响检索排序；
 - 旧会话缺少 `media_id` 时正常降级（无播放按钮，不报错）；
-- 新媒体字段是向前兼容的 nullable 列，不需要索引 Reset。
-- Phase 2 新表为添加式迁移；不删除旧表、不回填人工稿、不触发索引 Reset；真实迁移和恢复仍需独立审批。
+- 新媒体和版本字段是向前兼容的 nullable 列，不需要索引 Reset；legacy stable ID 保持。
+- Phase 2 新表为添加式迁移；不删除旧表、不回填人工稿、不触发索引 Reset。
+- `app.sqlite` current head 是唯一正式可见性事实；versioned transcript 在 head DB 损坏/缺失时 fail closed，legacy/普通文档继续可见。
+- experimental Profile 不能自动发布或自动索引；人工 Markdown 路径不经过 Provider。
 
 ## 验证
 
 - 当前链路：转录解析、时间戳索引、检索命中、回答引用、前端匹配；
 - 播放链路：匿名 401、登录用户 200/206、未知媒体 404、路径穿越 404；
 - Phase 2：临时 SQLite migration/backup、Store 事务、artifact hash、publication head、recovery、人工稿不回填和静态依赖边界；
-- Phase 3：纯 Python service/remote scoped tests、完整 transcription/manual 回归、mock engine、存储恢复、调度和静态依赖边界；API/auth 合同由安装 FastAPI 的远端 CI 执行；
-- 前端变化运行 `npm run build`，RAG 字段变化运行检索冒烟和相关黄金集。
+- Phase 3/4：纯 Python service/remote、应用任务/worker、mock engine、存储恢复、取消/恢复和静态依赖边界；
+- Phase 5：Store/事务/manual/visibility/index metadata/static 本地 29 项通过；版本管理定向前端 31 项通过；API、worker、candidate index、Qdrant Filter 与完整前端 build 由独立 CI job 验证；
+- Phase 5C 真实 ffmpeg/ASR/GPU/Qdrant E2E 未运行。
 
 ## 已知限制
 
 - 第一阶段只支持 MP4 格式，不支持其他视频容器；
 - 播放器只做时间点 seek，不做完整交互式转录同步高亮；
-- 无已接线的自动语音识别，转录稿仍需人工上传；
-- Phase 2/3 尚无应用 API/UI/worker/Qdrant 接线，真实引擎未运行，不产生自动转录用户能力；
+- 自动转录应用链路和管理端版本工作流已接线，但真实 ASR/ffmpeg/GPU/Qdrant E2E 未运行；
+- 当前唯一实际 Profile 仍是 experimental，必须人工审核和显式发布，尚无 `qualification_approved` Profile；
 - 支持范围播放但无 HLS 自适应码率。
 
 ## 相关决策
 
 - [0001 — 视频转录播放器与媒体资产流水线](../decisions/0001-video-transcript-player.md) 第一阶段已实施完成。
-- [0002 — 多引擎视频自动转录与管理员选择](../decisions/0002-multi-engine-transcription.md)；实施基线见 [Phase 2](../plans/multi-engine-transcription-phase2.md) 与 [Phase 3](../plans/multi-engine-transcription-phase3.md) 详细计划。
+- [0002 — 多引擎视频自动转录与管理员选择](../decisions/0002-multi-engine-transcription.md)；实施基线见 [Phase 2](../plans/multi-engine-transcription-phase2.md)、[Phase 3](../plans/multi-engine-transcription-phase3.md) 与 [Phase 5](../plans/multi-engine-transcription-phase5.md) 详细计划。

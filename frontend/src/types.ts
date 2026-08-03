@@ -248,6 +248,54 @@ export type TranscriptionJob = {
   updated_at: number;
 };
 
+
+export type TranscriptVersion = {
+  version_id: string;
+  media_id: string;
+  source: "automatic" | "manual" | string;
+  profile_id: string | null;
+  provider_key: string | null;
+  model_id: string | null;
+  model_revision: string | null;
+  review_status: string;
+  reviewed_by: number | null;
+  reviewed_at: number | null;
+  review_note: string | null;
+  publication_status: string;
+  published_at: number | null;
+  supersedes_version_id: string | null;
+  markdown_sha256: string;
+  created_at: number;
+  updated_at: number;
+  is_current: boolean;
+};
+
+export type TranscriptMarkdownPreview = {
+  version_id: string;
+  markdown: string;
+  markdown_sha256: string;
+};
+
+export type TranscriptPublicationJob = {
+  index_job_id: string;
+  transcript_version_id: string;
+  attempt_number: number;
+  target_index_id: string;
+  status: "pending" | "parsing" | "chunking" | "embedding" | "done" | "failed" | string;
+  error_code: string | null;
+  error_summary: string | null;
+  created_at: number;
+  started_at: number | null;
+  finished_at: number | null;
+  updated_at: number;
+};
+
+export type PublishTranscriptVersionResult = {
+  version: TranscriptVersion;
+  job: TranscriptPublicationJob | null;
+  reused: boolean;
+};
+
 export type LlmHealth = {
   ok: boolean;
   key_present: boolean;

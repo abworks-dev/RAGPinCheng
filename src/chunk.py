@@ -107,6 +107,8 @@ class Parent:
     start_time: str | None = None    # HH:MM:SS, only for transcripts
     company: str | None = None       # only set for category=="公司内部标准"
     media_id: str | None = None      # associated video asset if any
+    transcript_version_id: str | None = None
+    publication_target_id: str | None = None
     # Office document fields
     sheet_name: str | None = None    # XLSX: spreadsheet name
     cell_range: str | None = None    # XLSX: cell range (e.g. "A1:F12")
@@ -134,6 +136,8 @@ class Child:
     paragraph_anchor: str | None = None  # DOCX: text-hash anchor for citation jumping
     company: str | None = None       # only set for category=="公司内部标准"
     media_id: str | None = None      # associated video asset if any
+    transcript_version_id: str | None = None
+    publication_target_id: str | None = None
 
 
 def _stable_id(*parts: str) -> str:
@@ -348,6 +352,8 @@ def chunk_transcript(doc: ParsedDoc) -> tuple[list[Parent], list[Child]]:
     consecutive turns up to PARENT_SIZE. Parent inherits first child's
     start_time so citations can render `[doc @HH:MM:SS]`.
     """
+    if (doc.transcript_version_id is None) != (doc.publication_target_id is None):
+        raise ValueError("transcript version and publication target must be provided together")
     markdown = doc.markdown_path.read_text(encoding="utf-8")
     turns = _parse_transcript_turns(markdown)
     parents: list[Parent] = []
@@ -372,7 +378,11 @@ def chunk_transcript(doc: ParsedDoc) -> tuple[list[Parent], list[Child]]:
     for group in groups:
         first_ts = group[0][0]
         parent_text = "\n\n".join(f"说话人 {ts}\n{body}" for ts, body in group)
-        parent_id = _stable_id(doc.doc_title, "transcript", first_ts, parent_text)
+        parent_id = (
+            _stable_id(doc.transcript_version_id, doc.doc_title, "transcript", first_ts, parent_text)
+            if doc.transcript_version_id
+            else _stable_id(doc.doc_title, "transcript", first_ts, parent_text)
+        )
         parents.append(
             Parent(
                 parent_id=parent_id,
@@ -385,6 +395,8 @@ def chunk_transcript(doc: ParsedDoc) -> tuple[list[Parent], list[Child]]:
                 start_time=first_ts,
                 company=doc.company,
                 media_id=doc.media_id,
+                transcript_version_id=doc.transcript_version_id,
+                publication_target_id=doc.publication_target_id,
             )
         )
         for ts, body in group:
@@ -406,6 +418,8 @@ def chunk_transcript(doc: ParsedDoc) -> tuple[list[Parent], list[Child]]:
                     start_time=ts,
                     company=doc.company,
                     media_id=doc.media_id,
+                    transcript_version_id=doc.transcript_version_id,
+                    publication_target_id=doc.publication_target_id,
                 )
             )
     return parents, children

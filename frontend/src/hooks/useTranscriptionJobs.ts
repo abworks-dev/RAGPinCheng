@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api/client";
-import type { TranscriptionJob } from "../types";
+import type { TranscriptPublicationJob, TranscriptionJob } from "../types";
 
 const ACTIVE_STATUSES = new Set(["pending", "running"]);
 
@@ -50,4 +50,42 @@ export function useTranscriptionJobs() {
   }, []);
 
   return { jobs, jobsByMediaId, error, refreshJobs, replaceJob };
+}
+
+
+const ACTIVE_PUBLICATION_STATUSES = new Set(["pending", "parsing", "chunking", "embedding"]);
+
+export function useTranscriptPublicationJob(indexJobId: string | null) {
+  const [job, setJob] = useState<TranscriptPublicationJob | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const requestInFlight = useRef(false);
+
+  const refreshJob = useCallback(async (surfaceError = true) => {
+    if (!indexJobId || requestInFlight.current) return;
+    requestInFlight.current = true;
+    try {
+      const latest = await api.getTranscriptPublicationJob(indexJobId);
+      setJob(latest);
+      setError(null);
+    } catch (caught: any) {
+      if (surfaceError) setError(caught?.message || String(caught));
+    } finally {
+      requestInFlight.current = false;
+    }
+  }, [indexJobId]);
+
+  useEffect(() => {
+    setJob(null);
+    setError(null);
+    if (indexJobId) void refreshJob();
+  }, [indexJobId, refreshJob]);
+
+  const isActive = job !== null && ACTIVE_PUBLICATION_STATUSES.has(job.status);
+  useEffect(() => {
+    if (!isActive) return;
+    const timer = window.setInterval(() => void refreshJob(false), 3000);
+    return () => window.clearInterval(timer);
+  }, [isActive, refreshJob]);
+
+  return { job, error, refreshJob };
 }
