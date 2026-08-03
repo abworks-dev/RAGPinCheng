@@ -405,7 +405,7 @@ Phase 5C 执行前必须明确：目标主机、数据分类、Profile 资格候
 | `tests/test_transcription_retrieval_visibility.py`（新增） | Candidate 隐藏、head 切换、旧 head 保护、legacy/普通文档兼容、所有 recall 分支过滤。 |
 | `tests/test_transcription_phase5_api.py`（新增） | admin/普通用户/匿名/CSRF、DTO、preview、review、publish 幂等和冲突。 |
 | `tests/test_transcription_phase5_worker.py`（新增） | 单队列串行、恢复、重复入队、shutdown 和 promotion-ready。 |
-| `tests/test_transcription_index_metadata.py`（新增） | Parent/Child/parents/Qdrant payload nullable 字段与跨版本 ID。 |
+| `tests/test_transcript_index_metadata.py`（新增） | Parent/Child/parents/Qdrant payload nullable 字段与跨版本 ID。 |
 | `tests/test_transcription_publication_transaction.py` | 保留既有测试并补充应用 adapter receipt 与恢复组合；不删除原 guard 测试。 |
 | `tests/test_transcript_manual_regression.py` | 增加 legacy 无 version 字段仍保持 golden 的断言。 |
 | `tests/test_transcription_static_boundaries.py` | 禁止 Provider 名称分支、禁止真实 ASR/ffmpeg/GPU/网络依赖进入 Phase 5A/5B 测试。 |
@@ -534,7 +534,7 @@ python -m pytest `
   tests/test_transcription_retrieval_visibility.py `
   tests/test_transcription_phase5_api.py `
   tests/test_transcription_phase5_worker.py `
-  tests/test_transcription_index_metadata.py -v
+  tests/test_transcript_index_metadata.py -v
 python -m pytest tests/test_transcription*.py tests/test_transcript_manual_regression.py -v
 python -m pytest tests/test_retrieve.py tests/test_indexing_pipeline.py -v
 ```

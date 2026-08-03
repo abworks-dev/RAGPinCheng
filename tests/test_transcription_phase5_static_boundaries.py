@@ -61,10 +61,10 @@ def test_phase5_tests_do_not_import_real_asr_media_or_gpu_packages():
             "test_transcription_phase5_application_e2e.py",
             "test_transcription_publication_index_adapter.py",
             "test_transcription_retrieval_visibility.py",
-            "test_transcription_retrieval_integration.py",
+            "test_transcript_retrieval_integration.py",
             "test_transcription_phase5_api.py",
             "test_transcription_phase5_worker.py",
-            "test_transcription_index_metadata.py",
+            "test_transcript_index_metadata.py",
             "test_transcription_phase5_static_boundaries.py",
         )
     ]

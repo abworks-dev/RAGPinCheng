@@ -242,6 +242,11 @@ class TranscriptionPublicationApplicationService:
 
     def promote_ready(self, version_id: str) -> None:
         version = self.store.load_version(version_id)
+        if (
+            version.publication_status is PublicationStatus.published
+            and self.store.current_head(version.media_id) == version.id
+        ):
+            return
         job = self.store.latest_publication_job(version_id)
         if version.profile_id is None or job is None or job["status"] != PublicationIndexStatus.done.value:
             return
