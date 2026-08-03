@@ -4,8 +4,8 @@ import { useTheme, type ThemePreference } from "../hooks/useTheme";
 
 const options: Array<{ value: ThemePreference; label: string; icon: typeof Monitor }> = [
   { value: "system", label: "跟随系统", icon: Monitor },
-  { value: "light", label: "明亮", icon: Sun },
-  { value: "dark", label: "夜间", icon: Moon },
+  { value: "light", label: "明亮模式", icon: Sun },
+  { value: "dark", label: "夜间模式", icon: Moon },
 ];
 
 export function ThemeMenu({ collapsed = false }: { collapsed?: boolean }) {
@@ -31,7 +31,7 @@ export function ThemeMenu({ collapsed = false }: { collapsed?: boolean }) {
         title={`主题：${current.label}`}
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
-        className={`flex h-10 items-center rounded-ui-md text-muted-foreground hover:bg-secondary hover:text-foreground ${collapsed ? "w-full justify-center" : "w-full gap-3 px-3"}`}
+        className={`flex h-10 items-center gap-3 rounded-ui-md px-2 text-muted-foreground hover:bg-secondary hover:text-foreground ${collapsed ? "w-10" : "w-full"}`}
       >
         <CurrentIcon className="size-4 shrink-0" />
         {!collapsed && <span className="text-sm">{current.label}</span>}

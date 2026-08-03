@@ -28,7 +28,7 @@ export function AdminLayout() {
 
   return (
     <div className="min-h-full bg-admin-background text-foreground">
-      <header className="sticky top-0 z-sticky border-b border-border bg-admin-surface/95 backdrop-blur">
+      <header className="sticky top-0 z-sticky bg-admin-surface/95 backdrop-blur">
         <div className="flex min-h-16 items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
           <AppBrand subtitle="管理工作台" subtitleClassName="hidden sm:block" />
 
@@ -59,7 +59,7 @@ export function AdminLayout() {
       </header>
 
       <div className="flex flex-col lg:min-h-[calc(100vh-4rem)] lg:flex-row">
-        <aside className="shrink-0 border-b border-border bg-admin-surface lg:w-64 lg:border-b-0 lg:border-r">
+        <aside className="shrink-0 bg-admin-surface lg:w-64">
           <div className="px-3 py-3 lg:p-4">
             <p className="mb-2 hidden px-3 text-ui-xs font-medium uppercase tracking-[0.14em] text-muted-foreground lg:block">
               管理功能

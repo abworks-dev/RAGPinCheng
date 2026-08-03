@@ -36,8 +36,8 @@ export function Sidebar({
 }) {
   const conversationScroll = useAutoHideScrollbar<HTMLDivElement>();
   return (
-    <aside className={`flex h-full shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-[width] duration-normal ${collapsed ? "w-16" : "w-[17rem]"}`}>
-      <div className="border-b border-sidebar-border px-3 py-3">
+    <aside className={`flex h-full shrink-0 flex-col bg-sidebar text-sidebar-foreground transition-[width] duration-normal ${collapsed ? "w-16" : "w-[17rem]"}`}>
+      <div className="px-3 py-3">
         <div className="mb-3 flex h-9 items-center justify-between gap-2">
           {collapsed && onToggleCollapsed ? (
             <button
@@ -88,10 +88,10 @@ export function Sidebar({
 
       </div>
 
-      <div className="border-t border-sidebar-border px-2 py-1.5">
+      <div className="px-2 py-1.5">
         <ThemeMenu collapsed={collapsed} />
       </div>
-      <div className="border-t border-sidebar-border px-2 py-2">
+      <div className="px-2 py-2">
         <UserMenu collapsed={collapsed} />
       </div>
     </aside>
