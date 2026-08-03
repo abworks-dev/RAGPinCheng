@@ -9,6 +9,7 @@ import { ErrorState } from "../../components/ui/error-state";
 import { Input } from "../../components/ui/input";
 import { LoadingState } from "../../components/ui/loading-state";
 import { useTranscriptionJobs } from "../../hooks/useTranscriptionJobs";
+import { createRequestId } from "../../lib/request-id";
 import type { MediaAsset, TranscriptionJob, TranscriptionProfile } from "../../types";
 import { formatAdminDate, formatBytes } from "./admin-formatters";
 
@@ -64,13 +65,13 @@ export function AdminMediaPage() {
   const [transcriptFile, setTranscriptFile] = useState<File | null>(null);
   const [title, setTitle] = useState("");
   const [profileId, setProfileId] = useState("");
-  const idempotencyKey = useRef(crypto.randomUUID());
+  const idempotencyKey = useRef(createRequestId());
   const retryIdempotencyKeys = useRef(new Map<string, string>());
   const videoInputRef = useRef<HTMLInputElement>(null);
   const transcriptInputRef = useRef<HTMLInputElement>(null);
   const { jobsByMediaId, error: jobsError, refreshJobs, replaceJob } = useTranscriptionJobs();
 
-  const rotateRequestIdentity = () => { idempotencyKey.current = crypto.randomUUID(); };
+  const rotateRequestIdentity = () => { idempotencyKey.current = createRequestId(); };
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -139,7 +140,7 @@ export function AdminMediaPage() {
   async function retryJob(job: TranscriptionJob) {
     let requestKey = retryIdempotencyKeys.current.get(job.job_id);
     if (!requestKey) {
-      requestKey = crypto.randomUUID();
+      requestKey = createRequestId();
       retryIdempotencyKeys.current.set(job.job_id, requestKey);
     }
     try {
