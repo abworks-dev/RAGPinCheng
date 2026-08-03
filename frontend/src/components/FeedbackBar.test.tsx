@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatMessage } from "../types";
 import { FeedbackBar } from "./FeedbackBar";
@@ -39,13 +39,20 @@ describe("FeedbackBar", () => {
     mocks.sendFeedback.mockResolvedValue({ ok: true });
   });
 
-  it("copies the complete answer and reports success", async () => {
+  it("copies the complete answer and shows a temporary inline check without a toast", async () => {
+    vi.useFakeTimers();
     renderFeedback();
 
     fireEvent.click(screen.getByRole("button", { name: "复制回答" }));
 
-    await waitFor(() => expect(mocks.copy).toHaveBeenCalledWith(message.content));
-    expect(mocks.toastSuccess).toHaveBeenCalledWith("回答已复制");
+    await act(async () => {});
+    expect(mocks.copy).toHaveBeenCalledWith(message.content);
+    expect(screen.getByRole("button", { name: "回答已复制" })).toHaveClass("text-success");
+    expect(mocks.toastSuccess).not.toHaveBeenCalledWith("回答已复制");
+
+    act(() => vi.advanceTimersByTime(1400));
+    expect(screen.getByRole("button", { name: "复制回答" })).toBeInTheDocument();
+    vi.useRealTimers();
   });
 
   it("reports clipboard failures without changing feedback state", async () => {
