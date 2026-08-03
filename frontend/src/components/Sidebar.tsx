@@ -1,7 +1,8 @@
 import type { Conversation } from "../types";
+import { AppBrand } from "./AppBrand";
 import { ConversationList } from "./ConversationList";
 import { UserMenu } from "./UserMenu";
-import { Building2, PanelLeftClose, PanelLeftOpen, Plus } from "lucide-react";
+import { PanelLeftClose, Plus } from "lucide-react";
 import { IconButton } from "./ui/icon-button";
 
 export function Sidebar({
@@ -34,15 +35,26 @@ export function Sidebar({
   return (
     <aside className={`flex h-full shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-[width] duration-normal ${collapsed ? "w-16" : "w-[17rem]"}`}>
       <div className="border-b border-sidebar-border px-3 py-3">
-        <div className={`mb-3 flex h-9 items-center ${collapsed ? "justify-center" : "justify-between"}`}>
-          <div className="flex min-w-0 items-center gap-2">
-            <Building2 className="size-5 shrink-0 text-primary" />
-            {!collapsed && <span className="truncate text-sm font-semibold">品成 BIM 知识库</span>}
-          </div>
-          {onToggleCollapsed && (
-            <IconButton label={collapsed ? "展开会话侧栏" : "收起会话侧栏"} onClick={onToggleCollapsed}>
-              {collapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
-            </IconButton>
+        <div className={`mb-3 flex h-9 items-center ${collapsed ? "justify-center" : "justify-between gap-2"}`}>
+          {collapsed && onToggleCollapsed ? (
+            <button
+              type="button"
+              title="展开会话侧栏"
+              aria-label="展开会话侧栏"
+              onClick={onToggleCollapsed}
+              className="rounded-ui-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <AppBrand subtitle="知识问答工作台" collapsed />
+            </button>
+          ) : (
+            <>
+              <AppBrand subtitle="知识问答工作台" />
+              {onToggleCollapsed && (
+                <IconButton label="收起会话侧栏" onClick={onToggleCollapsed}>
+                  <PanelLeftClose className="size-4" />
+                </IconButton>
+              )}
+            </>
           )}
         </div>
         <button

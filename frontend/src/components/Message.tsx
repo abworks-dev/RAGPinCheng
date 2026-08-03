@@ -249,20 +249,20 @@ export function Message({
                 ⚠️ {msg.error}
               </div>
             )}
-            {!msg.streaming && !msg.error && msg.sources && msg.sources.length > 0 && (
-              <div className="mt-5 border-t border-border pt-3">
-                <button
-                  type="button"
-                  onClick={() => dispatchCitation({ messageId: msg.id, sourceIndex: 0 })}
-                  className="inline-flex h-9 items-center gap-2 rounded-ui-md border border-border bg-card px-3 text-xs font-medium text-foreground shadow-sm transition-colors hover:border-primary/40 hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                >
-                  <Files className="size-4 text-primary" />
-                  查看 {msg.sources.length} 个来源
-                </button>
-              </div>
-            )}
             {!msg.streaming && !msg.error && msg.content && (
-              <FeedbackBar msg={msg} conversationId={conversationId} turnIndex={turnIndex} />
+              <div className="mt-5 flex min-h-9 items-center justify-between gap-3 border-t border-border pt-3">
+                {msg.sources && msg.sources.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => dispatchCitation({ messageId: msg.id, sourceIndex: 0 })}
+                    className="inline-flex h-9 items-center gap-2 rounded-ui-md border border-border bg-card px-3 text-xs font-medium text-foreground shadow-sm transition-colors hover:border-primary/40 hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <Files className="size-4 text-primary" />
+                    查看 {msg.sources.length} 个来源
+                  </button>
+                )}
+                <FeedbackBar msg={msg} conversationId={conversationId} turnIndex={turnIndex} />
+              </div>
             )}
           </>
         )}
