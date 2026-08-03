@@ -2,7 +2,7 @@
 
 ## 0. 文档状态与审批边界
 
-- 当前状态：**R2 详细计划，等待用户审批代码实施**。
+- 当前状态：**R2 详细计划，已获用户批准进入代码实施**。
 - 当前代码基线：`codex/multi-engine-transcription-phase2` 分支上已完成的 Phase 1/Phase 2 契约与持久化核心。
 - 上位架构基线：
   - [多引擎视频自动转录总体方案](multi-engine-auto-transcription.md)
@@ -409,7 +409,7 @@ profile_id: funasr-sensevoice-zh-experimental-v1
 provider_key: funasr-sensevoice
 service_profile_id: funasr-sensevoice-small-v1
 model_id: iic/SenseVoiceSmall
-model_revision: v1.0.0
+model_revision: 7bf452403abd7353a300cd760f7adae7701c92c1
 qualification: experimental
 admission: enabled
 language: zh-CN
@@ -649,7 +649,7 @@ class AsrEngine(Protocol):
 新增 `asr_service/engines/funasr_sensevoice.py`：
 
 - 只接受 service registry 注入的固定 Profile config；
-- 固定 `iic/SenseVoiceSmall@v1.0.0`；
+- 固定 `iic/SenseVoiceSmall@7bf452403abd7353a300cd760f7adae7701c92c1`；
 - 禁止请求覆盖模型 ID、revision、cache path、device、decoder、热词或发布策略；
 - 真实 FunASR/torch import 只能发生在 adapter 初始化路径；
 - 模块 import、Schema、fake tests 不触发真实引擎 import；
@@ -957,69 +957,69 @@ Phase 3 修改集不得包含：
 
 ## 23. 完成标准与唯一验证映射
 
-1. `pipeline.py` 仍是唯一调用 `TranscriptionProvider.transcribe()` 的生产模块。  
+1. `pipeline.py` 仍是唯一调用 `TranscriptionProvider.transcribe()` 的生产模块。
    映射：`tests/test_transcription_static_boundaries.py` AST 调用扫描。
-2. `TranscriptionProvider.transcribe()` 仍为 input+execution 两参数契约。  
+2. `TranscriptionProvider.transcribe()` 仍为 input+execution 两参数契约。
    映射：`tests/test_transcription_provider_contract.py::test_phase3_preserves_two_argument_protocol`。
-3. Provider Registry 拒绝 duplicate/unknown/factory key mismatch，且无引擎名称分支。  
+3. Provider Registry 拒绝 duplicate/unknown/factory key mismatch，且无引擎名称分支。
    映射：`tests/test_transcription_provider_registry.py` + AST 扫描。
-4. `profile.py` 继续拥有 ProfileRegistry/resolve_profile/操作矩阵。  
+4. `profile.py` 继续拥有 ProfileRegistry/resolve_profile/操作矩阵。
    映射：既有 profile 测试 + `test_transcription_profile_catalog.py`。
-5. 管理员请求仍只接受 `profile_id`。  
+5. 管理员请求仍只接受 `profile_id`。
    映射：既有 strict request 负测，新增 catalog URL/path/config override 负测。
-6. 只登记一个 `funasr-sensevoice-zh-experimental-v1` Profile。  
+6. 只登记一个 `funasr-sensevoice-zh-experimental-v1` Profile。
    映射：catalog 精确集合断言。
-7. 首批 Profile 固定 `iic/SenseVoiceSmall@v1.0.0` 且 experimental。  
+7. 首批 Profile 固定 `iic/SenseVoiceSmall@7bf452403abd7353a300cd760f7adae7701c92c1` 且 experimental。
    映射：catalog golden JSON。
-8. experimental 强制 `requires_review=true/auto_publish=false/auto_index=false`。  
+8. experimental 强制 `requires_review=true/auto_publish=false/auto_index=false`。
    映射：既有 policy matrix + catalog 测试。
-9. faster-whisper、Contextual Paraformer 和 qualification-approved Profile 未注册。  
+9. faster-whisper、Contextual Paraformer 和 qualification-approved Profile 未注册。
    映射：catalog exact-set + static scan。
-10. `TranscriptionInputRef` 不新增路径/URL/bytes 字段。  
+10. `TranscriptionInputRef` 不新增路径/URL/bytes 字段。
     映射：strict field-set 测试。
-11. 输入只能经 `TranscriptionInputSource` parts 读取并验证全量 size/hash。  
+11. 输入只能经 `TranscriptionInputSource` parts 读取并验证全量 size/hash。
     映射：remote Provider input matrix。
-12. 公共 DTO 对所有对象严格拒绝未知字段和未知 schema version。  
+12. 公共 DTO 对所有对象严格拒绝未知字段和未知 schema version。
     映射：参数化 nested injection 测试。
-13. Candidate/service result 均无 warnings；Canonical warnings 只由 normalizer 生成。  
+13. Candidate/service result 均无 warnings；Canonical warnings 只由 normalizer 生成。
     映射：DTO unknown-field 负测 + pipeline/normalizer 回归。
-14. 所有长任务操作均通过有界 create/upload/start/poll/cancel/result 请求完成。  
+14. 所有长任务操作均通过有界 create/upload/start/poll/cancel/result 请求完成。
     映射：fake HTTP transport 调用序列精确断言。
-15. 相同 client identity 幂等，相同 identity 不同 metadata 409。  
+15. 相同 client identity 幂等，相同 identity 不同 metadata 409。
     映射：API contract 和 storage 测试。
-16. 上传 part 连续、内容寻址、可重传，洞/冲突/hash mismatch/超限唯一失败。  
+16. 上传 part 连续、内容寻址、可重传，洞/冲突/hash mismatch/超限唯一失败。
     映射：upload 参数化矩阵。
-17. 服务 job 状态和转换只允许本计划列出的精确集合。  
+17. 服务 job 状态和转换只允许本计划列出的精确集合。
     映射：完整 transition table 参数化测试。
-18. 服务重启不会永久遗留 running；terminal/cancelled 不复活。  
+18. 服务重启不会永久遗留 running；terminal/cancelled 不复活。
     映射：storage+scheduler 重启 golden 测试。
-19. 每个引擎 chunk 成功并原子写 checkpoint 后才推进 processed_ms。  
+19. 每个引擎 chunk 成功并原子写 checkpoint 后才推进 processed_ms。
     映射：故障注入 scheduler/storage 测试。
-20. 同时最多一个 active ASR job。  
+20. 同时最多一个 active ASR job。
     映射：并发 fake engine barrier 测试。
-21. BGE probe 非 allow 时不启动新 chunk，probe unavailable fail-closed。  
+21. BGE probe 非 allow 时不启动新 chunk，probe unavailable fail-closed。
     映射：scheduler decision matrix。
-22. OOM 触发 latch、返回结构化 failure、禁止 CPU fallback。  
+22. OOM 触发 latch、返回结构化 failure、禁止 CPU fallback。
     映射：mock FunASR OOM + scheduler latch + 静态设备扫描。
-23. 远程 adapter 的 401/403/409/413/503/timeout/OOM/cancel/invalid result 映射唯一。  
+23. 远程 adapter 的 401/403/409/413/503/timeout/OOM/cancel/invalid result 映射唯一。
     映射：`test_transcription_remote_provider.py` 参数化表。
-24. timeout 先 best-effort cancel，且不会产生 Candidate/Canonical。  
+24. timeout 先 best-effort cancel，且不会产生 Candidate/Canonical。
     映射：精确 HTTP 调用顺序 + pipeline 负测。
-25. FunASR/torch 只允许在 `asr_service/engines/funasr_sensevoice.py` lazy import。  
+25. FunASR/torch 只允许在 `asr_service/engines/funasr_sensevoice.py` lazy import。
     映射：AST import/dynamic import 扫描。
-26. 无真实引擎依赖时可 import/collect/run 全部 Phase 3 contract tests。  
+26. 无真实引擎依赖时可 import/collect/run 全部 Phase 3 contract tests。
     映射：CI 无 GPU job。
-27. `asr_service` 不导入应用 DB、Qdrant、Canonical、normalizer、formatter、worker 或 UI。  
+27. `asr_service` 不导入应用 DB、Qdrant、Canonical、normalizer、formatter、worker 或 UI。
     映射：service static boundary。
-28. 后端核心不导入 FunASR、torch、CUDA、PyAV、FFmpeg 或 faster-whisper。  
+28. 后端核心不导入 FunASR、torch、CUDA、PyAV、FFmpeg 或 faster-whisper。
     映射：backend static boundary。
-29. 人工 Markdown、chunk parser、媒体播放和 Phase 1/2 测试不退化。  
+29. 人工 Markdown、chunk parser、媒体播放和 Phase 1/2 测试不退化。
     映射：现有全量相关测试 + 受保护文件修改集检查。
-30. CI compile/test 明确收集 `asr_service`，无 skip/xfail/条件性成功。  
+30. CI compile/test 明确收集 `asr_service`，无 skip/xfail/条件性成功。
     映射：workflow 静态断言 + CI 实际结果。
-31. 主 requirements 不新增真实 ASR/GPU 依赖，真实引擎依赖只在服务专属文件。  
+31. 主 requirements 不新增真实 ASR/GPU 依赖，真实引擎依赖只在服务专属文件。
     映射：requirements 精确扫描。
-32. 默认 `ASR_ENABLED=false`、`ASR_SERVICE_ENABLED=false`，且本阶段不修改生产部署。  
+32. 默认 `ASR_ENABLED=false`、`ASR_SERVICE_ENABLED=false`，且本阶段不修改生产部署。
     映射：config/.env 测试 + git diff path allowlist。
 
 以上 32 项全部必须可自动判定；不得以“人工观察正常”代替测试或静态检查。
@@ -1165,7 +1165,7 @@ Phase 3 未部署、未迁移数据库、未写真实数据时：
 
 1. 当前分支包含 Phase 1/2 最终提交且工作区无无关修改；
 2. `scripts/funasr_phase0/requirements-asr.txt` 的 pin 与 Phase 0 固定材料一致；
-3. `iic/SenseVoiceSmall@v1.0.0` 仍是仓库记录的固定候选；
+3. `iic/SenseVoiceSmall@7bf452403abd7353a300cd760f7adae7701c92c1` 仍是仓库记录的固定候选；
 4. 主后端已声明 `httpx`；若未声明，只能在现有主依赖中补齐已经被生产代码使用的依赖，不得引入另一 HTTP 库；
 5. CI 的 Phase 1/2 当前基线可通过。
 
@@ -1187,7 +1187,7 @@ Phase 3 未部署、未迁移数据库、未写真实数据时：
 
 本计划已给出推荐默认值，审批时只需确认：
 
-1. 是否同意 Phase 3 首批只实现 `FunASR SenseVoiceSmall@v1.0.0` experimental，不实现 Contextual Paraformer/faster-whisper；
+1. 是否同意 Phase 3 首批只实现 `FunASR SenseVoiceSmall@7bf452403abd7353a300cd760f7adae7701c92c1` experimental，不实现 Contextual Paraformer/faster-whisper；
 2. 是否同意 Phase 3 的 BGE 优先只实现严格 probe 端口和 fail-closed scheduler，不修改 `gpu_service`、不进行真实并发压测；
 3. 是否同意 Phase 3 只保证独立服务的 job/chunk 恢复，应用数据库 checkpoint/worker 接线延后 Phase 4；
 4. 是否同意 Phase 3 不实现音频提取和当前 `media_assets` adapter，只提供 `TranscriptionInputSource` 端口与 fake；
@@ -1211,4 +1211,3 @@ Phase 3 未部署、未迁移数据库、未写真实数据时：
 - 下载模型；
 - 运行网络、GPU 或真实媒体测试；
 - 修改数据库、API、UI、worker、Qdrant 或生产部署。
-

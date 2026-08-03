@@ -54,7 +54,8 @@ def test_phase1_core_and_phase2_workflow_have_no_adapter_dependencies():
 def test_phase2_code_has_no_real_engine_network_qdrant_or_subprocess_imports():
     paths = [*CORE.glob("*.py"), *ADAPTERS]
     for path in paths:
-        assert not imports(path) & FORBIDDEN, path
+        forbidden = FORBIDDEN - ({"httpx"} if path.name == "remote_provider.py" else set())
+        assert not imports(path) & forbidden, path
         text = path.read_text(encoding="utf-8").lower()
         assert "manualtranscriptprovider" not in text
         assert "__import__(" not in text
