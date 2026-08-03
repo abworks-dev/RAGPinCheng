@@ -10,7 +10,7 @@ import { Sidebar } from "./Sidebar";
 import { ChatHeader } from "./ChatHeader";
 import { SourceWorkspace } from "./SourceWorkspace";
 import { Drawer } from "./ui/drawer";
-import { CITATION_EVENT } from "./citations";
+import { CITATION_EVENT, dispatchCitation, type CitationDetail } from "./citations";
 
 export function ChatLayout() {
   const [categories, setCategories] = useState<string[]>([]);
@@ -21,6 +21,7 @@ export function ChatLayout() {
   const [conversationDrawerOpen, setConversationDrawerOpen] = useState(false);
   const [sourceOpen, setSourceOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [activeSourceMessageId, setActiveSourceMessageId] = useState<string | null>(null);
 
   const refreshConversations = useCallback(async () => {
     try {
@@ -40,7 +41,11 @@ export function ChatLayout() {
   }, [refreshConversations]);
 
   useEffect(() => {
-    const openSources = () => setSourceOpen(true);
+    const openSources = (event: Event) => {
+      const detail = (event as CustomEvent<CitationDetail>).detail;
+      if (detail?.messageId) setActiveSourceMessageId(detail.messageId);
+      setSourceOpen(true);
+    };
     window.addEventListener(CITATION_EVENT, openSources);
     return () => window.removeEventListener(CITATION_EVENT, openSources);
   }, []);
@@ -59,11 +64,15 @@ export function ChatLayout() {
   const onSelectConversation = useCallback((id: string) => {
     setCurrentId(id);
     setConversationDrawerOpen(false);
+    setSourceOpen(false);
+    setActiveSourceMessageId(null);
   }, []);
 
   const onNewChat = useCallback(() => {
     setCurrentId(null);
     setConversationDrawerOpen(false);
+    setSourceOpen(false);
+    setActiveSourceMessageId(null);
   }, []);
 
   const onDeleteConversation = useCallback(
@@ -88,6 +97,15 @@ export function ChatLayout() {
   const currentConversation = conversations.find((conversation) => conversation.id === currentId);
   const sourceCount = [...messages].reverse().find((message) => message.sources?.length)?.sources?.length || 0;
   const scopeLabel = selected.length === 0 ? "全部企业知识" : selected.length === 1 ? selected[0] : `${selected.length} 个范围`;
+
+  const toggleMessageSources = useCallback((messageId: string) => {
+    if (sourceOpen && activeSourceMessageId === messageId) {
+      setSourceOpen(false);
+      return;
+    }
+    setActiveSourceMessageId(messageId);
+    dispatchCitation({ messageId, sourceIndex: 0 });
+  }, [activeSourceMessageId, sourceOpen]);
 
   const sidebar = (collapsed: boolean, onToggleCollapsed?: () => void) => (
     <Sidebar
@@ -122,7 +140,27 @@ export function ChatLayout() {
             onOpenConversations={() => setConversationDrawerOpen(true)}
             onToggleSources={() => setSourceOpen((value) => !value)}
           />
-          <MessageList messages={messages} conversationId={currentId} />
+          {messages.length === 0 ? (
+            <div className="flex min-h-0 flex-1 flex-col justify-center gap-7 py-8">
+              <MessageList messages={messages} conversationId={currentId} centeredEmpty />
+              <Composer
+                centered
+                onSend={(t) => send(t, selected)}
+                disabled={sending || loading}
+                categories={categories}
+                selected={selected}
+                onToggleCategory={toggleCategory}
+                onClearCategories={() => setSelected([])}
+              />
+            </div>
+          ) : <>
+          <MessageList
+            messages={messages}
+            conversationId={currentId}
+            sourceOpen={sourceOpen}
+            activeSourceMessageId={activeSourceMessageId}
+            onToggleSources={toggleMessageSources}
+          />
           <Composer
             onSend={(t) => send(t, selected)}
             disabled={sending || loading}
@@ -131,18 +169,19 @@ export function ChatLayout() {
             onToggleCategory={toggleCategory}
             onClearCategories={() => setSelected([])}
           />
+          </>}
         </main>
-        {sourceOpen && (
-          <div className="hidden h-full w-[23rem] shrink-0 border-l border-border xl:block">
-            <SourceWorkspace messages={messages} conversationId={currentId} onClose={() => setSourceOpen(false)} />
+          <div className={`hidden h-full shrink-0 overflow-hidden transition-[width,opacity] duration-slow xl:block ${sourceOpen ? "w-[23rem] border-l border-border opacity-100" : "w-0 opacity-0"}`}>
+            <div className="h-full w-[23rem]">
+            <SourceWorkspace messages={messages} conversationId={currentId} selectedMessageId={activeSourceMessageId} onSelectedMessageChange={setActiveSourceMessageId} onClose={() => setSourceOpen(false)} />
+            </div>
           </div>
-        )}
       </div>
       <Drawer open={conversationDrawerOpen} onClose={() => setConversationDrawerOpen(false)} title="会话导航">
         {sidebar(false)}
       </Drawer>
       <Drawer open={sourceOpen} onClose={() => setSourceOpen(false)} title="来源核验" side="right" className="xl:hidden">
-        <SourceWorkspace messages={messages} conversationId={currentId} />
+        <SourceWorkspace messages={messages} conversationId={currentId} selectedMessageId={activeSourceMessageId} onSelectedMessageChange={setActiveSourceMessageId} />
       </Drawer>
       <PdfPreview />
     </PdfPreviewProvider>
