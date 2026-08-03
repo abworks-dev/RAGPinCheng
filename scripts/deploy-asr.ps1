@@ -13,8 +13,13 @@ param(
 $ErrorActionPreference = "Stop"
 $taskName = "RAGPinCheng-ASR"
 $resolvedSource = (Resolve-Path -LiteralPath $SourceRoot).Path
-$actualSha = (& git -C $resolvedSource rev-parse HEAD).Trim()
-if ($LASTEXITCODE -ne 0 -or $actualSha -ne $CommitSha.ToLowerInvariant()) {
+$safeDirectory = $resolvedSource.Replace("\", "/")
+$actualShaOutput = & git -c "safe.directory=$safeDirectory" -C $resolvedSource rev-parse HEAD
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($actualShaOutput)) {
+    throw "Unable to read the checked-out commit SHA"
+}
+$actualSha = ([string]$actualShaOutput).Trim()
+if ($actualSha -ne $CommitSha.ToLowerInvariant()) {
     throw "Checked-out commit does not match the requested full SHA"
 }
 
