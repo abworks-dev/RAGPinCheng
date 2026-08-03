@@ -31,6 +31,8 @@ def test_manual_workflow_has_safe_defaults_and_immutable_revision():
     assert "production-asr" in workflow
     assert "runs-on: [self-hosted, Windows, X64, asr-production]" in workflow
     assert workflow.count("default: false") == 2
+    assert re.search(r"install_dependencies:.*?default: false", workflow, re.DOTALL)
+    assert re.search(r"activate_service:.*?default: false", workflow, re.DOTALL)
     assert "secrets.ASR_SERVICE_TOKEN" in workflow
     assert "inputs.commit_sha" in workflow
     assert "40-character" in workflow
@@ -62,6 +64,21 @@ def test_service_secret_is_not_passed_on_scheduled_task_command_line():
     assert "asr.env" not in action_line
     assert 'UserId "Administrator"' in deploy
     assert "-LogonType S4U" in deploy
+
+
+def test_config_acl_preserves_trusted_runner_modify_without_full_control():
+    deploy = read("scripts/deploy-asr.ps1")
+    assert "/inheritance:r" in deploy
+    assert "/grant:r" in deploy
+    assert '"*S-1-5-32-544:(OI)(CI)F"' in deploy
+    assert '"*S-1-5-18:(OI)(CI)F"' in deploy
+    network_service_acl_lines = [
+        line for line in deploy.splitlines() if "*S-1-5-20:" in line
+    ]
+    assert network_service_acl_lines == ['    "*S-1-5-20:(OI)(CI)M" | Out-Null']
+    assert "(OI)(CI)F" not in network_service_acl_lines[0]
+    assert "if ($InstallDependencies)" in deploy
+    assert "if ($ActivateService)" in deploy
 
 
 def test_gpu_activity_contract_and_ci_are_real_but_dependency_light():
