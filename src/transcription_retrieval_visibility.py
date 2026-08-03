@@ -1,6 +1,6 @@
 """Read-only published transcript visibility for retrieval.
 
-The authoritative publication fact lives in app.sqlite.  This adapter never
+The authoritative publication fact lives in app.sqlite. This adapter never
 initializes or writes schema; failures therefore hide versioned transcript
 candidates while leaving legacy payloads visible at the retrieval boundary.
 """
@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
-from .types import ContractValidationError, validate_uuid
+from .transcription.types import ContractValidationError, validate_uuid
 
 
 @dataclass(frozen=True, slots=True)

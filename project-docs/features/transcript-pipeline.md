@@ -98,7 +98,7 @@ Phase 5A/5B 已接通版本列表、只读 Markdown 预览、人工审核、显�
 - `src/transcription/persistence.py`、`src/transcription/workflow.py`（Phase 2 领域端口与编排）
 - `src/transcription/asr_service_contract.py`、`provider_registry.py`、`remote_provider.py`、`runtime_ports.py`（Phase 3 后端契约）
 - `src/transcription/profile_catalog.py`（Phase 3 experimental Profile catalog）
-- `src/transcription/retrieval_visibility.py`（Phase 5 SQLite head 只读快照）
+- `src/transcription_retrieval_visibility.py`（Phase 5 SQLite head 只读快照，位于 Phase 1 纯契约核心之外）
 - `api/routes_transcription.py`、`api/indexing.py`（转录/版本 API 与共享 worker）
 - `frontend/src/components/TranscriptionVersionPanel.tsx`（版本审阅与发布）
 - `asr_service/`（Phase 3 独立服务、存储、调度和 engine adapter）

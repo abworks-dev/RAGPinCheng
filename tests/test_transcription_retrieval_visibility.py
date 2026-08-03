@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 
-from src.transcription.retrieval_visibility import SQLitePublishedTranscriptVisibility
+from src.transcription_retrieval_visibility import SQLitePublishedTranscriptVisibility
 
 MEDIA = "123e4567-e89b-12d3-a456-426614174000"
 VERSION = "123e4567-e89b-12d3-a456-426614174001"
@@ -46,4 +46,3 @@ def test_missing_database_fails_closed_for_versioned_but_keeps_legacy_visible(tm
     assert snapshot.healthy is False
     assert snapshot.allows(None)
     assert not snapshot.allows(VERSION)
-

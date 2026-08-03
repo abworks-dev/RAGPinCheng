@@ -3,12 +3,15 @@ from __future__ import annotations
 from pathlib import Path
 
 from api.transcription_publication import QdrantTranscriptPublicationIndexAdapter
-from src.transcription.types import PublicationIndexStatus
+from src.transcription.types import ProfileQualification, PublicationIndexStatus
 from tests.test_transcription_publication_transaction import persist_candidate
+from tests.transcription_fixture_helpers import make_profile, seed_admin_user
 
 
 def test_adapter_materializes_logical_source_without_purge(tmp_path, monkeypatch):
-    conn, store, workflow, _port, profile, version = persist_candidate(tmp_path)
+    profile = make_profile(qualification=ProfileQualification.experimental)
+    conn, store, workflow, _port, profile, version = persist_candidate(tmp_path, profile=profile)
+    seed_admin_user(conn)
     store.review_version(version.id, approved=True, reviewed_by=1, review_note="ok", now=40)
     workflow.begin_publication(version_id=version.id, index_job_id="123e4567-e89b-12d3-a456-426614174013", current_profile=profile, explicit_admin_action=False, attempt_number=1, now=41)
     request = store.load_index_request("123e4567-e89b-12d3-a456-426614174013")
@@ -30,7 +33,9 @@ def test_adapter_materializes_logical_source_without_purge(tmp_path, monkeypatch
 
 
 def test_adapter_returns_sanitized_failure_on_bad_artifact(tmp_path):
-    conn, store, workflow, _port, profile, version = persist_candidate(tmp_path)
+    profile = make_profile(qualification=ProfileQualification.experimental)
+    conn, store, workflow, _port, profile, version = persist_candidate(tmp_path, profile=profile)
+    seed_admin_user(conn)
     store.review_version(version.id, approved=True, reviewed_by=1, review_note="ok", now=40)
     workflow.begin_publication(version_id=version.id, index_job_id="123e4567-e89b-12d3-a456-426614174013", current_profile=profile, explicit_admin_action=False, attempt_number=1, now=41)
     ref = version.markdown_ref
