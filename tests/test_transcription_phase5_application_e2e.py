@@ -19,7 +19,8 @@ def _service(conn, artifacts, profile, tmp_path):
 
 
 def test_automatic_version_requires_review_before_publish(tmp_path):
-    conn, store, _workflow, _port, profile, version = persist_candidate(tmp_path)
+    profile = make_profile(qualification=ProfileQualification.experimental)
+    conn, store, _workflow, _port, profile, version = persist_candidate(tmp_path, profile=profile)
     service = _service(conn, _workflow.artifacts, profile, tmp_path)
     assert version.review_status is ReviewStatus.awaiting_review
     with pytest.raises(ContractValidationError):
@@ -28,7 +29,8 @@ def test_automatic_version_requires_review_before_publish(tmp_path):
 
 
 def test_review_publish_worker_path_is_idempotent(tmp_path, monkeypatch):
-    conn, store, workflow, _port, profile, version = persist_candidate(tmp_path)
+    profile = make_profile(qualification=ProfileQualification.experimental)
+    conn, store, workflow, _port, profile, version = persist_candidate(tmp_path, profile=profile)
     service = _service(conn, workflow.artifacts, profile, tmp_path)
     store.review_version(version.id, approved=True, reviewed_by=1, review_note="ok", now=40)
     result = service.publish(version.id)

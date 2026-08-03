@@ -1775,3 +1775,12 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：修改 `frontend/src/components/MessageList.tsx`、`MessageList.test.tsx`、`TurnNavigator.tsx`、`TurnNavigator.test.tsx`、`Sidebar.tsx`、`Sidebar.test.tsx`、`ThemeMenu.tsx`、`UserMenu.tsx`，新增 `frontend/src/components/UserMenu.test.tsx`，更新 `WORKLOG.md`。
 - 验证：前端全量 Vitest 22 个文件、90/90 项测试通过；TypeScript project build 与 Vite production build 通过（2019 modules transformed）；`git diff --check` 通过。保留既有 React Router future warning、CSS minify warning和主包大于 500 kB 警告。
 - 边界：未修改 API、SSE、认证、RAG、索引、后端、依赖或业务数据流；当前本地后端未运行，未使用真实登录态和长对话执行浏览器视觉验收，待部署后由用户复核底部留白、正文居中、导航高亮与折叠侧栏控件。
+
+## 2026-08-04
+
+### 01:09 — 修复 Phase 5 与前端跨环境 CI 夹具
+
+- 完成：修正 Phase 5 应用和 publication adapter 测试误用免审核 approved Profile 的问题，显式改用与当前 catalog 一致的 experimental Profile；修正会话“今天”分组测试把 4.8 小时前样例跨到 UTC 前一天的问题，改为冻结时刻本身。未修改生产 Store、审核状态机、Profile catalog 或组件分组逻辑。
+- 文件：`tests/test_transcription_phase5_application_e2e.py`、`tests/test_transcription_publication_index_adapter.py`、`frontend/src/components/ConversationList.test.tsx`、`WORKLOG.md`。
+- 验证：experimental fixture 冒烟确认 `ReviewStatus.awaiting_review`；两项 Python 测试文件 `py_compile` 通过；会话分组单测分别在 UTC 与 Asia/Shanghai 通过，主工作区前端全量 18 个文件、81 项测试及 production build 通过；`git diff --check` 通过。
+- 待办/风险：本地 `.venv` 缺少 `qdrant_client`，Phase 5 两个测试文件在收集阶段被既有依赖阻断，完整 28 项 Phase 5 job 仍需 GitHub Actions 在依赖齐全的 Linux 环境复跑确认；未安装依赖、未运行 Qdrant、真实 ASR、GPU、生产数据或部署。
