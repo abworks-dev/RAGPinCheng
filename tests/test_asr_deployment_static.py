@@ -42,6 +42,14 @@ def test_manual_workflow_has_safe_defaults_and_immutable_revision():
     assert "pull_request:" not in workflow
 
 
+def test_git_sha_validation_uses_command_scoped_safe_directory():
+    deploy = read("scripts/deploy-asr.ps1")
+    assert '$safeDirectory = $resolvedSource.Replace("\\", "/")' in deploy
+    assert 'git -c "safe.directory=$safeDirectory" -C $resolvedSource rev-parse HEAD' in deploy
+    assert "git config --global" not in deploy
+    assert deploy.index("[string]::IsNullOrWhiteSpace($actualShaOutput)") < deploy.index("([string]$actualShaOutput).Trim()")
+
+
 def test_deploy_script_never_downloads_models_or_changes_firewall():
     deploy = read("scripts/deploy-asr.ps1").lower()
     forbidden = (
