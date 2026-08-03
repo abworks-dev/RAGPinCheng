@@ -1621,4 +1621,4 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 
 - 完成：在 `codex/multi-engine-transcription-phase2` 独立分支提交 Phase 2，并 rebase 到 `origin/master@94645e6`；唯一 WORKLOG 冲突按时间保留双方记录，远端前端代码没有冲突或改写。
 - 验证：最新基线重新运行 Phase 1+2 transcription suite 为 190 passed、1 skipped，`compileall` 与提交级 `git diff --check` 通过；本地工作区干净。
-- 边界/风险：CI 只接受 PR 或 `master` push；遵守“不跟进 PR”要求，未创建 PR、未推送分支、未直接推送 `master`。远端零跳过验证仍待后续明确选择触发方式。
+- 边界/风险：已将独立分支 `codex/multi-engine-transcription-phase2` 推送到 `origin`，未创建 PR、未合并、未直接推送 `master`。普通分支 push 不触发当前 CI；GitHub Actions 状态查询另遇 HTTP 502，因此远端零跳过验证仍待后续明确选择触发方式。
