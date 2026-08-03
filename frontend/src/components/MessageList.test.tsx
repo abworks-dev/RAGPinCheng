@@ -74,4 +74,34 @@ describe("MessageList", () => {
 
     expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
   });
+
+  it("shows a bottom button away from the end and scrolls smoothly when clicked", () => {
+    const { container } = render(<MessageList messages={messages} conversationId="conversation-1" />);
+    const scroller = container.querySelector(".overflow-y-auto") as HTMLDivElement;
+    Object.defineProperties(scroller, {
+      scrollHeight: { configurable: true, value: 1000 },
+      clientHeight: { configurable: true, value: 400 },
+      scrollTop: { configurable: true, writable: true, value: 100 },
+    });
+    scroller.scrollTo = vi.fn();
+
+    fireEvent.scroll(scroller);
+    fireEvent.click(screen.getByRole("button", { name: "回到底部" }));
+
+    expect(scroller.scrollTo).toHaveBeenCalledWith({ top: 1000, behavior: "smooth" });
+  });
+
+  it("keeps the bottom button hidden near the end", () => {
+    const { container } = render(<MessageList messages={messages} conversationId="conversation-1" />);
+    const scroller = container.querySelector(".overflow-y-auto") as HTMLDivElement;
+    Object.defineProperties(scroller, {
+      scrollHeight: { configurable: true, value: 1000 },
+      clientHeight: { configurable: true, value: 400 },
+      scrollTop: { configurable: true, writable: true, value: 550 },
+    });
+
+    fireEvent.scroll(scroller);
+
+    expect(screen.queryByRole("button", { name: "回到底部" })).not.toBeInTheDocument();
+  });
 });

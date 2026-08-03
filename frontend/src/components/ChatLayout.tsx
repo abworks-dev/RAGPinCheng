@@ -171,7 +171,7 @@ export function ChatLayout() {
           />
           </>}
         </main>
-          <div className={`hidden h-full shrink-0 overflow-hidden transition-[width,opacity] duration-slow xl:block ${sourceOpen ? "w-[23rem] border-l border-border opacity-100" : "w-0 opacity-0"}`}>
+          <div className={`hidden h-full shrink-0 overflow-hidden transition-[width,opacity] duration-slow xl:block ${sourceOpen ? "w-[23rem] opacity-100" : "w-0 opacity-0"}`}>
             <div className="h-full w-[23rem]">
             <SourceWorkspace messages={messages} conversationId={currentId} selectedMessageId={activeSourceMessageId} onSelectedMessageChange={setActiveSourceMessageId} onClose={() => setSourceOpen(false)} />
             </div>

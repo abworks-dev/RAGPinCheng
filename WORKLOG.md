@@ -1749,3 +1749,9 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：新增 `frontend/src/components/TurnNavigator.tsx`、`TurnNavigator.test.tsx`、`MessageList.test.tsx`；修改 `frontend/src/components/MessageList.tsx`、`Message.tsx`、`Message.test.tsx`、`SourceWorkspace.tsx`、`SourcesPanel.tsx`、`DebugPanel.tsx`、`PdfPreview.tsx`、`VideoPlayerDrawer.tsx`、`frontend/src/pages/admin/AdminLayout.tsx`、`AdminUsersPage.tsx`、`AdminDocumentsPage.tsx`、`frontend/src/styles/index.css`、`WORKLOG.md`。
 - 验证：目标 Vitest 4 个文件、13/13 项通过；前端全量 Vitest 21 个文件、86/86 项通过；TypeScript project build 与 Vite production build 通过（2019 modules transformed）；使用仅监听本机的虚构账号、七轮对话、文档与视频来源完成 1440×900 桌面和 390×844 移动端浏览器检查，确认展开导航不遮挡正文、历史来源打开后仍停留原轮次、流式状态持续可见、视频 Lucide 图标生效、移动端无横向溢出且控制台无 error；静态扫描无用户可见 Emoji 或手写 SVG，`git diff --check` 通过。保留既有 React Router future warning、CSS minify warning和主包大于 500 kB 警告。
 - 边界：未修改认证、CSRF、API、SSE 协议、`useChat`、`chatStream`、RAG、索引、后端或依赖；虚构 Mock API 和临时文件已清理，未提交真实反馈或访问生产数据。真实账号和真实长对话验收待用户执行；推送与 CI/CD 状态以 Git 和远端检查结果为准。
+
+### 14:37 — 增加滚动边缘渐隐与回到底部入口
+
+- 完成：左侧会话列表底部与对话输入器上沿增加非交互式渐隐遮罩，移除输入器和右侧来源栏的硬分割线；长对话离开底部超过阈值时，在输入器正上方显示圆形下箭头按钮，点击后平滑回到底部，并与最新多轮对话导航和流式跟随逻辑协同工作。
+- 文件：仅修改用户端 `MessageList.tsx`、`Composer.tsx`、`Sidebar.tsx`、`ChatLayout.tsx`、`styles/index.css` 及 `MessageList.test.tsx`；未修改管理端业务、API、SSE、RAG 或后端逻辑。
+- 验证：前端全量 Vitest 21 个文件、88/88 项测试通过；`npm run build` 通过（2019 modules transformed）；`git diff --check` 无内容错误。浏览器预览正常进入登录页，但当前无登录态，真实长对话视觉点击回归受登录条件限制。
