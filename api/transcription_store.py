@@ -12,6 +12,7 @@ from src.transcription.canonical import CanonicalTranscript
 from src.transcription.persistence import (
     ALL_JOB_FAILURE_CODES,
     CHECKPOINT_SCHEMA_VERSION,
+    INDEX_RECEIPT_SCHEMA_VERSION,
     PUBLICATION_INDEX_FAILURE_CODES,
     ManagedMarkdownRef,
     MarkdownStorageKind,
@@ -492,6 +493,40 @@ class SQLiteTranscriptionStore:
                     (now, receipt.transcript_version_id),
                 )
 
+    def fail_publication_job(
+        self,
+        index_job_id: str,
+        *,
+        error_code: str,
+        error_summary: str,
+        now: int,
+    ) -> None:
+        """Fail a persisted non-terminal publication job without trusting adapter output."""
+        validate_uuid(index_job_id, "index_job_id")
+        validate_single_line(error_code, "error_code", maximum=100)
+        validate_single_line(error_summary, "error_summary", maximum=500)
+        with self._transaction():
+            row = self._conn.execute(
+                "SELECT transcript_version_id,status FROM transcript_publication_index_jobs WHERE id=?",
+                (index_job_id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(index_job_id)
+            status = PublicationIndexStatus(row["status"])
+            if status in (PublicationIndexStatus.done, PublicationIndexStatus.failed):
+                return
+            self._conn.execute(
+                """UPDATE transcript_publication_index_jobs
+                   SET status='failed',error_code=?,error_summary=?,started_at=COALESCE(started_at,?),
+                       finished_at=?,updated_at=? WHERE id=?""",
+                (error_code, error_summary, now, now, now, index_job_id),
+            )
+            self._conn.execute(
+                """UPDATE transcript_versions SET publication_status='publication_failed',updated_at=?
+                   WHERE id=? AND publication_status='publishing'""",
+                (now, row["transcript_version_id"]),
+            )
+
     def load_index_request(self, index_job_id: str) -> PublicationIndexRequest:
         validate_uuid(index_job_id, "index_job_id")
         row = self._conn.execute(
@@ -711,6 +746,56 @@ class SQLiteTranscriptionStore:
         if row["version_media_id"] != media_id or row["publication_status"] != PublicationStatus.published.value:
             raise PersistedStateError("invalid_media_transcript_head")
         return row["current_version_id"]
+
+    def list_versions(self, media_id: str) -> tuple[TranscriptVersionRecord, ...]:
+        validate_uuid(media_id, "media_id")
+        rows = self._conn.execute(
+            "SELECT id FROM transcript_versions WHERE media_id=? ORDER BY created_at DESC,id DESC",
+            (media_id,),
+        ).fetchall()
+        return tuple(self.load_version(row["id"]) for row in rows)
+
+    def load_publication_job(self, index_job_id: str) -> dict[str, object]:
+        validate_uuid(index_job_id, "index_job_id")
+        row = self._conn.execute(
+            "SELECT * FROM transcript_publication_index_jobs WHERE id=?", (index_job_id,)
+        ).fetchone()
+        if row is None:
+            raise KeyError(index_job_id)
+        return dict(row)
+
+    def latest_publication_job(self, version_id: str) -> dict[str, object] | None:
+        validate_uuid(version_id, "version_id")
+        row = self._conn.execute(
+            """SELECT * FROM transcript_publication_index_jobs
+               WHERE transcript_version_id=? ORDER BY attempt_number DESC LIMIT 1""",
+            (version_id,),
+        ).fetchone()
+        return None if row is None else dict(row)
+
+    def next_publication_attempt(self, version_id: str) -> int:
+        validate_uuid(version_id, "version_id")
+        row = self._conn.execute(
+            "SELECT COALESCE(MAX(attempt_number),0)+1 AS attempt FROM transcript_publication_index_jobs WHERE transcript_version_id=?",
+            (version_id,),
+        ).fetchone()
+        return int(row["attempt"])
+
+    def record_index_stage(self, index_job_id: str, status: PublicationIndexStatus, *, now: int) -> None:
+        request = self.load_index_request(index_job_id)
+        self.record_index_receipt(
+            PublicationIndexReceipt(
+                INDEX_RECEIPT_SCHEMA_VERSION,
+                request.index_job_id,
+                request.transcript_version_id,
+                request.candidate_version_id,
+                request.canonical_sha256,
+                request.markdown_sha256,
+                request.target_index_id,
+                status,
+            ),
+            now=now,
+        )
 
     def audit_and_recover(self, *, now: int) -> tuple[RecoveryAction, ...]:
         actions: list[RecoveryAction] = []

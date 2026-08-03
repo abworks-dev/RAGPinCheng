@@ -23,13 +23,23 @@ from src.config import ASR_ENABLED, ASR_SERVICE_TOKEN
 from .auth import bootstrap_admin_from_env
 from .conversation_runtime import sweep_once
 from .db import init_db
-from .indexing import resume_pending_on_boot, start_worker, stop_worker
+from .indexing import (
+    configure_publication_runner,
+    resume_pending_on_boot,
+    start_worker,
+    stop_worker,
+)
 from .routes import router as core_router
 from .routes_admin import router as admin_router
 from .routes_auth import router as auth_router
 from .routes_chat import router as chat_router
 from .routes_media import router as media_router
-from .routes_transcription import build_transcription_service, router as transcription_router
+from .routes_transcription import (
+    build_transcription_service,
+    recover_publications_on_boot,
+    run_publication_index_job,
+    router as transcription_router,
+)
 from .transcription_worker import (
     configure as configure_transcription_worker,
     recover_on_boot as recover_transcription_on_boot,
@@ -117,8 +127,10 @@ async def lifespan(app: FastAPI):
     sweeper_task = asyncio.create_task(_sweeper_loop())
     # Indexing worker: started before resuming pending jobs so the queue
     # has a consumer ready when resume_pending_on_boot enqueues them.
+    configure_publication_runner(run_publication_index_job)
     await start_worker()
     resume_pending_on_boot()
+    recover_publications_on_boot()
     configure_transcription_worker(build_transcription_service)
     transcription_runtime_ready = ASR_ENABLED and bool(ASR_SERVICE_TOKEN)
     if transcription_runtime_ready:
@@ -138,6 +150,7 @@ async def lifespan(app: FastAPI):
         if transcription_runtime_ready:
             await stop_transcription_worker()
         await stop_worker()
+        configure_publication_runner(None)
 
 
 app = FastAPI(title="PinCheng RAG API", version="0.2.0", lifespan=lifespan)

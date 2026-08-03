@@ -261,6 +261,66 @@ class TranscriptionJobDTO(BaseModel):
     updated_at: int
 
 
+class TranscriptVersionDTO(BaseModel):
+    version_id: str
+    media_id: str
+    source: str
+    profile_id: str | None
+    provider_key: str | None
+    model_id: str | None
+    model_revision: str | None
+    review_status: str
+    reviewed_by: int | None
+    reviewed_at: int | None
+    review_note: str | None
+    publication_status: str
+    published_at: int | None
+    supersedes_version_id: str | None
+    markdown_sha256: str
+    created_at: int
+    updated_at: int
+    is_current: bool = False
+
+
+class TranscriptMarkdownPreviewDTO(BaseModel):
+    version_id: str
+    markdown: str
+    markdown_sha256: str
+
+
+class ReviewTranscriptVersionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    approved: bool
+    review_note: str | None = None
+
+
+class PublishTranscriptVersionRequest(BaseModel):
+    """Strict empty command body; all publication controls are server-owned."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class TranscriptPublicationJobDTO(BaseModel):
+    index_job_id: str
+    transcript_version_id: str
+    attempt_number: int
+    target_index_id: str
+    status: str
+    error_code: str | None
+    error_summary: str | None
+    created_at: int
+    started_at: int | None
+    finished_at: int | None
+    updated_at: int
+
+
+class PublishTranscriptVersionResponse(BaseModel):
+    version: TranscriptVersionDTO
+    job: TranscriptPublicationJobDTO | None
+    reused: bool
+
+
 class RetryTranscriptionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

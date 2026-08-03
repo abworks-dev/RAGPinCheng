@@ -13,7 +13,9 @@ import asyncio
 import json
 import logging
 import time
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable, TypeAlias
 
 from src.indexing_pipeline import index_single
 
@@ -21,8 +23,32 @@ from .db import connect
 
 logger = logging.getLogger("api.indexing")
 
-_queue: asyncio.Queue[int] = asyncio.Queue()
+@dataclass(frozen=True, slots=True)
+class DocumentIndexJob:
+    job_id: int
+
+
+@dataclass(frozen=True, slots=True)
+class TranscriptPublicationJob:
+    index_job_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class StopIndexWorker:
+    pass
+
+
+IndexWorkItem: TypeAlias = DocumentIndexJob | TranscriptPublicationJob | StopIndexWorker
+_queue: asyncio.Queue[IndexWorkItem] = asyncio.Queue()
 _worker_task: asyncio.Task | None = None
+_publication_runner: Callable[[str], None] | None = None
+_publication_queue_ids: set[str] = set()
+_stopping = False
+
+
+def configure_publication_runner(runner: Callable[[str], None] | None) -> None:
+    global _publication_runner
+    _publication_runner = runner
 
 
 # ── job row helpers ────────────────────────────────────────────────────────
@@ -72,12 +98,36 @@ def enqueue(job_id: int) -> None:
     # asyncio.Queue.put_nowait is the right tool here — we're not awaiting.
     # If called from a sync context with no running loop, the queue is still
     # process-global so the worker (which IS in the loop) will pick it up.
-    _queue.put_nowait(job_id)
+    _queue.put_nowait(DocumentIndexJob(job_id))
+
+
+def enqueue_publication(index_job_id: str) -> bool:
+    """Enqueue once per process; persisted status remains the source of truth."""
+    if index_job_id in _publication_queue_ids:
+        return False
+    _publication_queue_ids.add(index_job_id)
+    _queue.put_nowait(TranscriptPublicationJob(index_job_id))
+    return True
 
 
 def queue_depth() -> int:
     """Approximate # of pending jobs waiting in the queue."""
     return _queue.qsize()
+
+
+def _discard_stop_markers() -> None:
+    """Remove stale shutdown sentinels while preserving persisted work items."""
+    pending: list[IndexWorkItem] = []
+    while True:
+        try:
+            item = _queue.get_nowait()
+        except asyncio.QueueEmpty:
+            break
+        _queue.task_done()
+        if not isinstance(item, StopIndexWorker):
+            pending.append(item)
+    for item in pending:
+        _queue.put_nowait(item)
 
 
 # ── worker loop ────────────────────────────────────────────────────────────
@@ -184,35 +234,51 @@ async def _worker_loop() -> None:
     logger.info("indexing worker started")
     while True:
         try:
-            job_id = await _queue.get()
+            item = await _queue.get()
         except asyncio.CancelledError:
             break
         try:
-            await _run_one(job_id)
+            if isinstance(item, StopIndexWorker):
+                return
+            if isinstance(item, DocumentIndexJob):
+                await _run_one(item.job_id)
+            elif _publication_runner is None:
+                logger.error("publication runner is not configured; job %s remains pending", item.index_job_id)
+            else:
+                loop = asyncio.get_running_loop()
+                await loop.run_in_executor(None, lambda: _publication_runner(item.index_job_id))
         except Exception:
-            # _run_one already catches and persists; this is defense in depth.
             logger.exception("worker iteration crashed; continuing")
         finally:
+            if isinstance(item, TranscriptPublicationJob):
+                _publication_queue_ids.discard(item.index_job_id)
             _queue.task_done()
+        if _stopping:
+            return
 
 
 async def start_worker() -> None:
     """Idempotent: start the worker task if not already running."""
-    global _worker_task
+    global _worker_task, _stopping
+    _stopping = False
+    _discard_stop_markers()
     if _worker_task is None or _worker_task.done():
         _worker_task = asyncio.create_task(_worker_loop())
 
 
 async def stop_worker() -> None:
-    global _worker_task
+    """Gracefully stop after the current item; never cancel an in-flight runner."""
+    global _worker_task, _stopping
     if _worker_task is None:
         return
-    _worker_task.cancel()
+    _stopping = True
+    _queue.put_nowait(StopIndexWorker())
     try:
         await _worker_task
     except (asyncio.CancelledError, Exception):
         pass
     _worker_task = None
+    _discard_stop_markers()
 
 
 def resume_pending_on_boot() -> None:
@@ -232,7 +298,7 @@ def resume_pending_on_boot() -> None:
         for r in rows:
             if r["status"] == "pending":
                 # Truly never started — safe to re-queue.
-                _queue.put_nowait(int(r["id"]))
+                enqueue(int(r["id"]))
             else:
                 conn.execute(
                     "UPDATE index_jobs SET status='failed', error=?, finished_at=? "

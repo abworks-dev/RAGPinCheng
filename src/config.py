@@ -11,6 +11,7 @@ MEDIA_DIR = ROOT / "media"
 PARSED_DIR = DATA_DIR / "parsed"
 QDRANT_DIR = DATA_DIR / "qdrant"  # legacy embedded-mode path; unused after the server migration but kept for the optional cleanup script
 PARENTS_DB = DATA_DIR / "parents.sqlite"
+APP_DB_PATH = Path(os.getenv("APP_DB_PATH", str(DATA_DIR / "app.sqlite")))
 
 for d in (DATA_DIR, PARSED_DIR, MEDIA_DIR):
     d.mkdir(parents=True, exist_ok=True)
