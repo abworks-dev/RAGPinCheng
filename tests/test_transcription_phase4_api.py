@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+from dataclasses import replace
 
 import pytest
 
@@ -11,6 +13,7 @@ from api.auth import CurrentUser, require_admin, require_csrf_admin
 from api.routes_admin import router as admin_router, upload_media
 from api.routes_transcription import router as transcription_router
 from api.schemas import RetryTranscriptionRequest
+from tests.transcription_fixture_helpers import make_pending_job, make_phase2_store
 
 
 def route_for(router, path: str, method: str):
@@ -25,6 +28,7 @@ def dependency_calls(route):
 
 def test_management_reads_require_admin_and_mutations_require_csrf_admin():
     profiles = route_for(transcription_router, "/admin/transcription/profiles", "GET")
+    listing = route_for(transcription_router, "/admin/transcription/jobs", "GET")
     detail = route_for(transcription_router, "/admin/transcription/jobs/{job_id}", "GET")
     cancel = route_for(
         transcription_router, "/admin/transcription/jobs/{job_id}/cancel", "POST"
@@ -34,6 +38,7 @@ def test_management_reads_require_admin_and_mutations_require_csrf_admin():
     )
     upload = route_for(admin_router, "/admin/media", "POST")
     assert require_admin in dependency_calls(profiles)
+    assert require_admin in dependency_calls(listing)
     assert require_admin in dependency_calls(detail)
     assert require_csrf_admin in dependency_calls(cancel)
     assert require_csrf_admin in dependency_calls(retry)
@@ -80,3 +85,56 @@ def test_manual_upload_rejects_automatic_controls_before_reading():
             )
         )
     assert caught.value.status_code == 400
+
+
+def test_automatic_upload_replays_existing_request_when_asr_is_now_unavailable(
+    tmp_path, monkeypatch
+):
+    import api.routes_admin as routes_admin
+
+    video_bytes = b"same-video-bytes"
+    conn, store, _artifacts = make_phase2_store(tmp_path)
+    job = store.create_job(replace(make_pending_job(), created_by=1))
+    conn.execute(
+        "UPDATE media_assets SET file_size=?,sha256=? WHERE media_id=?",
+        (len(video_bytes), hashlib.sha256(video_bytes).hexdigest(), job.media_id),
+    )
+    conn.commit()
+
+    class Video:
+        filename = "fixture.mp4"
+
+        def __init__(self):
+            self._sent = False
+
+        async def read(self, _size=-1):
+            if self._sent:
+                return b""
+            self._sent = True
+            return video_bytes
+
+    def unexpected_service_build():
+        raise AssertionError("idempotent replay must not resolve current ASR configuration")
+
+    monkeypatch.setattr(routes_admin, "ASR_ENABLED", False)
+    monkeypatch.setattr(routes_admin, "ASR_SERVICE_TOKEN", "")
+    monkeypatch.setattr(routes_admin, "build_transcription_service", unexpected_service_build)
+    admin = CurrentUser(1, "admin", "Admin", "admin", "csrf")
+    try:
+        replayed = asyncio.run(
+            upload_media(
+                Video(),
+                "Fixture video",
+                None,
+                job.profile_id,
+                job.request_idempotency_key,
+                admin,
+                conn,
+            )
+        )
+        assert replayed.media_id == job.media_id
+        assert replayed.transcription_job_id == job.id
+        assert conn.execute("SELECT COUNT(*) FROM media_assets").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM transcription_jobs").fetchone()[0] == 1
+    finally:
+        conn.close()

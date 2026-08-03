@@ -215,6 +215,39 @@ export type LlmModelHealth = {
   error: string | null;
 };
 
+export type TranscriptionProfile = {
+  profile_id: string;
+  display_name: string;
+  description: string;
+  qualification: string;
+  admission: string;
+  availability: string;
+  unavailable_reason_code: string | null;
+  requires_review: boolean;
+  auto_publish: boolean;
+  auto_index: boolean;
+};
+
+export type TranscriptionJobStatus = "pending" | "running" | "succeeded" | "failed" | "cancelled";
+
+export type TranscriptionJob = {
+  job_id: string;
+  media_id: string;
+  attempt_number: number;
+  profile_id: string;
+  status: TranscriptionJobStatus;
+  stage: string | null;
+  processed_ms: number;
+  total_ms: number;
+  failure_error_code: string | null;
+  error_summary: string | null;
+  result_version_id: string | null;
+  created_at: number;
+  started_at: number | null;
+  finished_at: number | null;
+  updated_at: number;
+};
+
 export type LlmHealth = {
   ok: boolean;
   key_present: boolean;
@@ -236,4 +269,5 @@ export type MediaAsset = {
   created_at: number;
   updated_at: number;
   error: string | null;
+  transcription_job_id?: string | null;
 };

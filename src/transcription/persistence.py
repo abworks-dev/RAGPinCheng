@@ -69,7 +69,7 @@ class RecoveryActionKind(Enum):
 
 
 PHASE2_JOB_FAILURE_CODES = frozenset(
-    {"worker_restarted", "invalid_persisted_state", "artifact_write_failed"}
+    {"worker_restarted", "worker_bootstrap_failed", "invalid_persisted_state", "artifact_write_failed"}
 )
 PUBLICATION_INDEX_FAILURE_CODES = frozenset(
     {
@@ -601,6 +601,14 @@ class TranscriptionStore(Protocol):
     def create_job(self, record: TranscriptionJobRecord) -> TranscriptionJobRecord: ...
 
     def load_job(self, job_id: str) -> TranscriptionJobRecord: ...
+
+    def list_jobs(
+        self,
+        *,
+        media_id: str | None = None,
+        latest_per_media: bool = True,
+        limit: int = 100,
+    ) -> tuple[TranscriptionJobRecord, ...]: ...
 
     def load_version(self, version_id: str) -> TranscriptVersionRecord: ...
 

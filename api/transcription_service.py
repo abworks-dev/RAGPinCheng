@@ -14,6 +14,7 @@ from src.transcription.persistence import (
     TranscriptionJobRecord,
 )
 from src.transcription.pipeline import execute_transcription
+from src.transcription.runtime_ports import CancellationProbe
 from src.transcription.profile import (
     ProfileOperation,
     ProfileRegistry,
@@ -43,7 +44,7 @@ from src.transcription.workflow import TranscriptionPersistenceWorkflow, build_p
 from .db import connect
 from .transcription_artifacts import LocalTranscriptionArtifactStore
 from .transcription_media import FfmpegMediaAudioPreparer, FileTranscriptionInputSource
-from .transcription_runtime import StoreCancellationProbe, StoreProgressSink
+from .transcription_runtime import CompositeCancellationProbe, StoreCancellationProbe, StoreProgressSink
 from .transcription_store import SQLiteTranscriptionStore, StoreConflictError
 
 
@@ -137,7 +138,9 @@ class TranscriptionApplicationService:
         finally:
             conn.close()
 
-    def run_job(self, job_id: str) -> TranscriptionJobRecord:
+    def run_job(
+        self, job_id: str, process_cancellation: CancellationProbe | None = None
+    ) -> TranscriptionJobRecord:
         validate_uuid(job_id, "job_id")
         conn = self.connect_factory()
         store = SQLiteTranscriptionStore(conn)
@@ -176,10 +179,16 @@ class TranscriptionApplicationService:
                 expected_updated_at=job.updated_at,
                 now=self._next_now(job, self.clock),
             )
+            persisted_cancellation = StoreCancellationProbe(job_id, self.connect_factory)
+            cancellation: CancellationProbe = persisted_cancellation
+            if process_cancellation is not None:
+                cancellation = CompositeCancellationProbe(
+                    (persisted_cancellation, process_cancellation)
+                )
             ports = ProviderRuntimePorts(
                 FileTranscriptionInputSource(prepared),
                 StoreProgressSink(job_id, self.connect_factory, self.clock),
-                StoreCancellationProbe(job_id, self.connect_factory),
+                cancellation,
             )
             provider = self.providers.resolve(job.provider_key, ports)
             if type(provider) is ProviderResolutionFailure:
@@ -215,8 +224,9 @@ class TranscriptionApplicationService:
                 return failed
 
             current = store.load_job(job_id)
-            if current.status is TranscriptionJobStatus.cancelled:
-                self._set_media_summary(conn, current.media_id, "uploaded")
+            if cancellation.is_cancel_requested():
+                if current.status is TranscriptionJobStatus.cancelled:
+                    self._set_media_summary(conn, current.media_id, "uploaded")
                 return current
             current = store.mark_running(
                 job_id,
@@ -253,6 +263,8 @@ class TranscriptionApplicationService:
             workflow = TranscriptionPersistenceWorkflow(
                 store, self.artifacts, _NoPublicationIndex()
             )
+            if cancellation.is_cancel_requested():
+                return store.load_job(job_id)
             workflow.persist_success(
                 job_id=job_id,
                 version_id=str(uuid.uuid4()),
