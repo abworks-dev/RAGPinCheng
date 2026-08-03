@@ -135,6 +135,18 @@ TABLE_SUMMARY_MAX_CHARS = 8000
 # Media / Video
 MAX_VIDEO_UPLOAD_MB = int(os.getenv("MAX_VIDEO_UPLOAD_MB", "1024"))
 
+# Independent ASR service (Phase 3 contract only; no application worker wiring).
+ASR_ENABLED = os.getenv("ASR_ENABLED", "").strip().lower() in ("1", "true", "yes", "on")
+ASR_SERVICE_URL = os.getenv("ASR_SERVICE_URL", "http://127.0.0.1:8200")
+ASR_SERVICE_TOKEN = os.getenv("ASR_SERVICE_TOKEN", "")
+ASR_CONNECT_TIMEOUT_SECONDS = int(os.getenv("ASR_CONNECT_TIMEOUT_SECONDS", "10"))
+ASR_REQUEST_TIMEOUT_SECONDS = int(os.getenv("ASR_REQUEST_TIMEOUT_SECONDS", "60"))
+ASR_POLL_INTERVAL_MS = int(os.getenv("ASR_POLL_INTERVAL_MS", "1000"))
+ASR_UPLOAD_PART_BYTES = int(os.getenv("ASR_UPLOAD_PART_BYTES", "8388608"))
+ASR_EXPECTED_API_VERSION = os.getenv(
+    "ASR_EXPECTED_API_VERSION", "asr-service/1"
+)
+
 # LibreOffice conversion service
 LIBREOFFICE_URL = os.getenv("LIBREOFFICE_URL") or "http://libreoffice:8101"
 LIBREOFFICE_TIMEOUT = int(os.getenv("LIBREOFFICE_TIMEOUT", "120"))  # seconds
