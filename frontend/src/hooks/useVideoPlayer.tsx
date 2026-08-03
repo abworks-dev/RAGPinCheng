@@ -21,6 +21,7 @@ export function VideoPlayerProvider({ children }: { children: ReactNode }) {
   const [currentRequest, setCurrentRequest] = useState<PlayerRequest | null>(null);
 
   const open = (request: PlayerRequest) => {
+    window.dispatchEvent(new CustomEvent("resource-preview-open", { detail: { kind: "video" } }));
     setCurrentRequest(request);
     setIsOpen(true);
   };
