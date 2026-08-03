@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { X } from "lucide-react";
 import { api } from "../../api/client";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
@@ -277,7 +278,7 @@ function UserConversationsDrillIn({
             <p className="truncate text-ui-xs text-muted-foreground">用户名 {user.employee_id} · 只读查看</p>
           </div>
           <Button variant="ghost" size="icon" onClick={onClose} aria-label="关闭用户对话">
-            <span aria-hidden="true">✕</span>
+            <X className="size-4" aria-hidden="true" />
           </Button>
         </div>
 

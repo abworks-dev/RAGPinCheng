@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useVideoPlayer } from "../hooks/useVideoPlayer";
-import { Pause, Play, Volume2, VolumeX } from "lucide-react";
+import { LoaderCircle, Pause, Play, Volume2, VolumeX } from "lucide-react";
 import { ResourcePreviewShell } from "./ResourcePreviewShell";
 
 export function VideoPlayerDrawer() {
@@ -108,21 +108,7 @@ export function VideoPlayerDrawer() {
           {isLoading && (
             <div className="absolute inset-0 flex items-center justify-center text-gray-400">
               <div className="flex flex-col items-center gap-2">
-                <svg className="w-8 h-8 animate-spin" viewBox="0 0 24 24" fill="none">
-                  <circle
-                    cx="12"
-                    cy="12"
-                    r="10"
-                    stroke="currentColor"
-                    strokeWidth="4"
-                    strokeOpacity={0.25}
-                  />
-                  <path
-                    fill="currentColor"
-                    fillOpacity={0.75}
-                    d="M4 12a8 8 0 018-8v4l3-3-3-3v4a8 8 0 00-8 8h4z"
-                  />
-                </svg>
+                <LoaderCircle className="size-8 animate-spin" aria-hidden="true" />
                 <span className="text-sm">加载中...</span>
               </div>
             </div>
@@ -161,7 +147,7 @@ export function VideoPlayerDrawer() {
           <div className="mt-4 flex items-center gap-3">
             <button
               onClick={togglePlay}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors"
+              className="inline-flex items-center gap-2 rounded-ui-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:opacity-90"
             >
               {isPlaying ? <><Pause className="size-4" />暂停</> : <><Play className="size-4" />播放</>}
             </button>
@@ -169,6 +155,7 @@ export function VideoPlayerDrawer() {
               onClick={toggleMute}
               className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
               title={isMuted ? "取消静音" : "静音"}
+              aria-label={isMuted ? "取消静音" : "静音"}
             >
               {isMuted ? <VolumeX className="size-5" /> : <Volume2 className="size-5" />}
             </button>

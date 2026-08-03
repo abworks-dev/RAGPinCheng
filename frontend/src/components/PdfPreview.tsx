@@ -5,7 +5,7 @@ import "react-pdf/dist/esm/Page/TextLayer.css";
 import { usePdfPreview } from "../hooks/usePdfPreview";
 import { DocxPreview } from "./DocxPreview";
 import { SpreadsheetPreview } from "./SpreadsheetPreview";
-import { Minus, Plus } from "lucide-react";
+import { ArrowLeft, ArrowRight, Minus, Plus } from "lucide-react";
 import { ResourcePreviewShell } from "./ResourcePreviewShell";
 
 // PDF.js worker — use the CDN build so we don't need to bundle it.
@@ -89,9 +89,10 @@ export function PdfPreview() {
               type="button"
               onClick={handlePrevPage}
               disabled={state.pageNumber <= 1}
-              className="px-3 py-1 text-xs border border-gray-300 rounded hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-30"
+              className="inline-flex items-center gap-1 px-3 py-1 text-xs border border-gray-300 rounded hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-30"
             >
-              ← 上一页
+              <ArrowLeft className="size-3.5" aria-hidden="true" />
+              上一页
             </button>
             <input
               type="number"
@@ -109,9 +110,10 @@ export function PdfPreview() {
               type="button"
               onClick={handleNextPage}
               disabled={numPages === null || state.pageNumber >= numPages}
-              className="px-3 py-1 text-xs border border-gray-300 rounded hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-30"
+              className="inline-flex items-center gap-1 px-3 py-1 text-xs border border-gray-300 rounded hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-30"
             >
-              下一页 →
+              下一页
+              <ArrowRight className="size-3.5" aria-hidden="true" />
             </button>
           </div>
         )}

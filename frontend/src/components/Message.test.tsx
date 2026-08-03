@@ -39,6 +39,19 @@ function assistant(overrides: Partial<ChatMessage> = {}): ChatMessage {
   };
 }
 
+function prep(finalCount: number, noSourceFallback = false) {
+  return {
+    search_query: "测试查询",
+    rewrite_applied: false,
+    history_chars: 0,
+    budget: 1000,
+    fresh_count: finalCount,
+    final_count: finalCount,
+    used_sources: finalCount ? [source] : [],
+    no_source_fallback: noSourceFallback,
+  };
+}
+
 describe("Message assistant actions", () => {
   it("places sources on the left and answer actions in the same footer", () => {
     render(<Message msg={assistant()} conversationId="conversation-1" turnIndex={1} />);
@@ -66,5 +79,51 @@ describe("Message assistant actions", () => {
       <Message msg={assistant({ streaming: false, error: "生成失败" })} conversationId="conversation-1" turnIndex={1} />,
     );
     expect(screen.queryByLabelText("回答操作")).not.toBeInTheDocument();
+  });
+
+  it("keeps a success status visible while answer content is streaming", () => {
+    render(
+      <Message
+        msg={assistant({ content: "正在生成的回答", streaming: true, stage: "streaming", prep: prep(1) })}
+        conversationId="conversation-1"
+        turnIndex={1}
+      />,
+    );
+
+    const status = screen.getByRole("status");
+    expect(status).toHaveTextContent("正在输出回答，基于 1 份资料");
+    expect(status.querySelector(".bg-success")).toBeInTheDocument();
+  });
+
+  it("shows a destructive status when streaming without retrieved sources", () => {
+    render(
+      <Message
+        msg={assistant({
+          content: "通用回复",
+          sources: [],
+          streaming: true,
+          stage: "streaming",
+          prep: prep(0, true),
+        })}
+        conversationId="conversation-1"
+        turnIndex={1}
+      />,
+    );
+
+    const status = screen.getByRole("status");
+    expect(status).toHaveTextContent("未检索到可用资料，正在输出回复");
+    expect(status.querySelector(".bg-destructive")).toBeInTheDocument();
+  });
+
+  it("keeps the no-source warning after the answer is complete", () => {
+    render(
+      <Message
+        msg={assistant({ content: "通用回复", sources: [], streaming: false, stage: "done", prep: prep(0, true) })}
+        conversationId="conversation-1"
+        turnIndex={1}
+      />,
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent("未检索到可用资料，本回答没有知识库来源");
   });
 });

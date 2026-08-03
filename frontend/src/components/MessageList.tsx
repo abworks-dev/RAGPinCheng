@@ -1,6 +1,32 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChatMessage } from "../types";
+import { useAutoHideScrollbar } from "../hooks/useAutoHideScrollbar";
 import { Message } from "./Message";
+import { TurnNavigator, type TurnNavigationItem } from "./TurnNavigator";
+
+type MessageTurn = TurnNavigationItem & {
+  messages: ChatMessage[];
+  turnIndex: number;
+};
+
+export function groupMessagesIntoTurns(messages: ChatMessage[]): MessageTurn[] {
+  const turns: MessageTurn[] = [];
+
+  messages.forEach((message) => {
+    if (message.role === "user" || turns.length === 0) {
+      turns.push({
+        id: message.id,
+        label: message.content.trim() || `第 ${turns.length + 1} 轮对话`,
+        messages: [message],
+        turnIndex: turns.length + 1,
+      });
+      return;
+    }
+    turns[turns.length - 1].messages.push(message);
+  });
+
+  return turns;
+}
 
 export function MessageList({
   messages,
@@ -18,10 +44,71 @@ export function MessageList({
   onToggleSources?: (messageId: string) => void;
 }) {
   const bottomRef = useRef<HTMLDivElement | null>(null);
-  // Auto-scroll on every render so streaming tokens stay in view.
-  useEffect(() => {
+  const turnRefs = useRef<Record<string, HTMLElement | null>>({});
+  const previousConversationId = useRef<string | null>(conversationId);
+  const previousMessageCount = useRef(0);
+  const shouldFollowOutput = useRef(true);
+  const scrollFrame = useRef<number | null>(null);
+  const [activeTurnId, setActiveTurnId] = useState<string | null>(null);
+  const scrollbar = useAutoHideScrollbar<HTMLDivElement>();
+  const turns = useMemo(() => groupMessagesIntoTurns(messages), [messages]);
+  const lastMessage = messages[messages.length - 1];
+  const streamSignature = `${lastMessage?.id || ""}:${lastMessage?.content.length || 0}:${lastMessage?.stage || ""}:${lastMessage?.streaming ? 1 : 0}`;
+
+  const updateActiveTurn = useCallback(() => {
+    const container = scrollbar.ref.current;
+    if (!container || turns.length === 0) return;
+    const anchor = container.getBoundingClientRect().top + Math.min(120, container.clientHeight * 0.25);
+    let active = turns[0].id;
+    for (const turn of turns) {
+      const element = turnRefs.current[turn.id];
+      if (element && element.getBoundingClientRect().top <= anchor) active = turn.id;
+    }
+    setActiveTurnId(active);
+  }, [scrollbar.ref, turns]);
+
+  const handleScroll = useCallback(() => {
+    scrollbar.interactionProps.onScroll();
+    const container = scrollbar.ref.current;
+    if (container) {
+      shouldFollowOutput.current = container.scrollHeight - container.scrollTop - container.clientHeight < 80;
+    }
+    if (scrollFrame.current !== null) window.cancelAnimationFrame(scrollFrame.current);
+    scrollFrame.current = window.requestAnimationFrame(updateActiveTurn);
+  }, [scrollbar.interactionProps, scrollbar.ref, updateActiveTurn]);
+
+  const scrollToBottom = useCallback(() => {
     bottomRef.current?.scrollIntoView({ block: "end" });
-  });
+    const latestTurn = turns[turns.length - 1];
+    if (latestTurn) setActiveTurnId(latestTurn.id);
+  }, [turns]);
+
+  useEffect(() => {
+    const conversationChanged = previousConversationId.current !== conversationId;
+    const messageAdded = messages.length > previousMessageCount.current;
+    if (conversationChanged || messageAdded || (lastMessage?.streaming && shouldFollowOutput.current)) {
+      scrollToBottom();
+    }
+    previousConversationId.current = conversationId;
+    previousMessageCount.current = messages.length;
+  }, [conversationId, lastMessage?.streaming, messages.length, scrollToBottom, streamSignature]);
+
+  useEffect(() => {
+    updateActiveTurn();
+    return () => {
+      if (scrollFrame.current !== null) window.cancelAnimationFrame(scrollFrame.current);
+    };
+  }, [turns, updateActiveTurn]);
+
+  const navigateToTurn = useCallback((turnId: string) => {
+    shouldFollowOutput.current = false;
+    setActiveTurnId(turnId);
+    const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    turnRefs.current[turnId]?.scrollIntoView({
+      behavior: reducedMotion ? "auto" : "smooth",
+      block: "start",
+    });
+  }, []);
 
   if (messages.length === 0) {
     return (
@@ -46,24 +133,43 @@ export function MessageList({
   }
 
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto py-6">
-      {(() => {
-        let turn = 0;
-        return messages.map((m) => {
-          if (m.role === "user") turn += 1;
-          return (
+    <div className="relative min-h-0 flex-1">
+      <div
+        ref={scrollbar.ref}
+        className={`h-full overflow-y-auto py-6 ${turns.length > 1 ? (sourceOpen ? "2xl:pr-64" : "xl:pr-64") : ""} ${scrollbar.className}`}
+        onScroll={handleScroll}
+        onMouseEnter={scrollbar.interactionProps.onMouseEnter}
+        onMouseMove={scrollbar.interactionProps.onMouseMove}
+        onMouseLeave={scrollbar.interactionProps.onMouseLeave}
+        onFocus={scrollbar.interactionProps.onFocus}
+      >
+        {turns.map((turn) => (
+          <section
+            key={turn.id}
+            ref={(element) => { turnRefs.current[turn.id] = element; }}
+            data-turn-id={turn.id}
+            className="scroll-mt-6"
+          >
+            {turn.messages.map((message) => (
             <Message
-              key={m.id}
-              msg={m}
+              key={message.id}
+              msg={message}
               conversationId={conversationId}
-              turnIndex={m.role === "assistant" ? turn : turn}
-              sourcesSelected={sourceOpen && activeSourceMessageId === m.id}
+              turnIndex={turn.turnIndex}
+              sourcesSelected={sourceOpen && activeSourceMessageId === message.id}
               onToggleSources={onToggleSources}
             />
-          );
-        });
-      })()}
-      <div ref={bottomRef} />
+            ))}
+          </section>
+        ))}
+        <div ref={bottomRef} />
+      </div>
+      <TurnNavigator
+        turns={turns}
+        activeTurnId={activeTurnId}
+        onNavigate={navigateToTurn}
+        className={sourceOpen ? "hidden 2xl:block" : "hidden xl:block"}
+      />
     </div>
   );
 }

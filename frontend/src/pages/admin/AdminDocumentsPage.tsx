@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { LoaderCircle } from "lucide-react";
 import { api } from "../../api/client";
 import { Alert, AlertDescription, AlertTitle } from "../../components/ui/alert";
 import { Badge } from "../../components/ui/badge";
@@ -555,10 +556,7 @@ function JobStatusCell({ job }: { job: IndexJob }) {
     <div>
       <Badge variant={meta?.variant ?? "secondary"} className="gap-1.5">
         {isActive && (
-          <svg className="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4l3-3-3-3v4a8 8 0 00-8 8h4z" />
-          </svg>
+          <LoaderCircle className="size-3 animate-spin" aria-hidden="true" />
         )}
         {meta?.label ?? job.status}
         {elapsed && <span className="opacity-70">{elapsed}</span>}
