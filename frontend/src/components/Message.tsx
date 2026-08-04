@@ -6,7 +6,6 @@ import rehypeKatex from "rehype-katex";
 import type { ChatMessage, Source } from "../types";
 import { stripMarkdown } from "../utils/markdown";
 import { FeedbackBar } from "./FeedbackBar";
-import { timestampToSeconds, useVideoPlayer } from "../hooks/useVideoPlayer";
 import { Check, CircleAlert, CirclePlay, Copy, Files, Pencil, Send, X } from "lucide-react";
 import {
   CITATION_EVENT,
@@ -104,8 +103,6 @@ function CitationMarker({
   const [showRightAligned, setShowRightAligned] = useState(false);
   const tooltipRef = useRef<HTMLSpanElement>(null);
   const closeTimerRef = useRef<number | null>(null);
-  const { open: openPlayer } = useVideoPlayer();
-
   const cancelClose = () => {
     if (closeTimerRef.current !== null) {
       window.clearTimeout(closeTimerRef.current);
@@ -184,15 +181,6 @@ function CitationMarker({
             e.preventDefault();
             if (idx >= 0) {
               dispatchCitation({ messageId, sourceIndex: idx });
-              // For transcript citations with media, also open the video player
-              if (source.doc_type === "transcript" && source.media_id) {
-                openPlayer({
-                  mediaId: source.media_id,
-                  title: source.doc_title,
-                  startSeconds: timestampToSeconds(source.start_time),
-                  fromSource: false,
-                });
-              }
             }
           }}
         >
@@ -229,8 +217,7 @@ function CitationMarker({
             </span>
             <span className="block whitespace-pre-wrap break-words leading-relaxed text-popover-foreground/85">{preview}</span>
             <span className="mt-2 block text-[10px] text-muted-foreground">
-              点击跳转到完整来源
-              {source.doc_type === "transcript" && source.media_id && " 并播放视频"}
+              点击打开来源核验
             </span>
           </span>
         )}

@@ -38,12 +38,17 @@ function cleanSection(source: Source): string {
 }
 
 function sourceLocator(source: Source): string {
-  if (source.doc_type === "transcript") return source.start_time ? `视频 ${source.start_time}` : "视频片段";
+  if (source.doc_type === "transcript") return source.start_time || "未提供时间";
   if (source.doc_type === "xlsx" && (source.sheet_name || source.cell_range)) {
     return [source.sheet_name, source.cell_range].filter(Boolean).join(" · ");
   }
   if (source.doc_type === "pptx" && source.slide_number) return `第 ${source.slide_number} 页`;
   return cleanSection(source) || "未提供定位信息";
+}
+
+function sourceDisplayTitle(source: Source): string {
+  if (source.doc_type !== "transcript") return source.doc_title;
+  return source.doc_title.replace(/__[0-9a-f]{8}$/i, "");
 }
 
 function SourceTypeIcon({ source }: { source: Source }) {
@@ -202,11 +207,20 @@ export function SourceWorkspace({
               </span>
               <span className="min-w-0 flex-1">
                 <span className="flex items-center gap-1.5 text-sm font-medium">
-                  <SourceTypeIcon source={item} />
-                  <span className="truncate">{item.doc_title}</span>
+                  <span
+                    className={
+                      item.doc_type === "transcript"
+                        ? "flex size-6 shrink-0 items-center justify-center rounded-ui-sm bg-info/15 text-info"
+                        : "shrink-0 text-muted-foreground"
+                    }
+                  >
+                    <SourceTypeIcon source={item} />
+                  </span>
+                  <span className="truncate">{sourceDisplayTitle(item)}</span>
                 </span>
                 <span className="mt-1.5 block truncate text-xs text-muted-foreground">
-                  {item.category || "未分类"} · {sourceLocator(item)}
+                  {item.category || "未分类"} ·{" "}
+                  {item.doc_type === "transcript" ? `时间 ${sourceLocator(item)}` : sourceLocator(item)}
                 </span>
               </span>
               <ChevronRight className="mt-1 size-3.5 shrink-0 text-muted-foreground" />
@@ -258,16 +272,17 @@ function SourceDetail({
   const text = stripMarkdown(source.text);
   const visibleText = expanded || text.length <= 900 ? text : `${text.slice(0, 900)}…`;
 
+  const playVideoAtLocation = () => {
+    if (!source.media_id) return;
+    openVideo({
+      mediaId: source.media_id,
+      title: sourceDisplayTitle(source),
+      startSeconds: timestampToSeconds(source.start_time),
+      fromSource: true,
+    });
+  };
+
   const openFullResource = () => {
-    if (source.doc_type === "transcript" && source.media_id) {
-      openVideo({
-        mediaId: source.media_id,
-        title: source.doc_title,
-        startSeconds: timestampToSeconds(source.start_time),
-        fromSource: true,
-      });
-      return;
-    }
     if (["pdf", "docx", "xlsx", "pptx"].includes(source.doc_type)) {
       openDocument(
         source.parent_id,
@@ -322,15 +337,33 @@ function SourceDetail({
         </span>
         <div className="min-w-0">
           <div className="text-xs text-muted-foreground">来源 {sourceIndex + 1} · {source.category || "未分类"}</div>
-          <h3 className="mt-0.5 break-words text-sm font-semibold text-foreground">{source.doc_title}</h3>
+          <h3 className="mt-0.5 break-words text-sm font-semibold text-foreground">{sourceDisplayTitle(source)}</h3>
         </div>
       </div>
       <div className="mt-4 rounded-ui-md border border-border bg-secondary/70 px-3 py-2.5">
-        <div className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
-          <LocateFixed className="size-3.5" />
-          定位
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
+              <LocateFixed className="size-3.5" />
+              定位
+            </div>
+            <p className="mt-1 break-words text-xs leading-relaxed text-foreground">
+              {source.doc_type === "transcript" ? `视频 ${sourceLocator(source)}` : sourceLocator(source)}
+            </p>
+          </div>
+          {source.doc_type === "transcript" && (
+            <button
+              type="button"
+              onClick={playVideoAtLocation}
+              disabled={!source.media_id}
+              aria-label={`从 ${sourceLocator(source)} 播放视频`}
+              className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-ui-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <CirclePlay className="size-3.5" />
+              播放
+            </button>
+          )}
         </div>
-        <p className="mt-1 break-words text-xs leading-relaxed text-foreground">{sourceLocator(source)}</p>
       </div>
       <div className="mt-4">
         <div className="mb-2 flex items-center justify-between gap-3">
@@ -367,20 +400,18 @@ function SourceDetail({
           </button>
         )}
       </div>
-      <div className="mt-5 grid grid-cols-2 gap-2">
-        <button
-          type="button"
-          onClick={openFullResource}
-          disabled={
-            source.doc_type === "transcript"
-              ? !source.media_id
-              : !["pdf", "docx", "xlsx", "pptx"].includes(source.doc_type)
-          }
-          className="inline-flex h-9 items-center justify-center gap-1.5 rounded-ui-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          {source.doc_type === "transcript" ? <CirclePlay className="size-3.5" /> : <SourceTypeIcon source={source} />}
-          打开完整资料
-        </button>
+      <div className={`mt-5 grid gap-2 ${source.doc_type === "transcript" ? "grid-cols-1" : "grid-cols-2"}`}>
+        {source.doc_type !== "transcript" && (
+          <button
+            type="button"
+            onClick={openFullResource}
+            disabled={!["pdf", "docx", "xlsx", "pptx"].includes(source.doc_type)}
+            className="inline-flex h-9 items-center justify-center gap-1.5 rounded-ui-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <SourceTypeIcon source={source} />
+            打开完整资料
+          </button>
+        )}
         <button
           type="button"
           onClick={copySource}

@@ -2047,3 +2047,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：新增 `scripts/build_internal_jieba_wheel.py`、`tests/test_asr_internal_wheel.py`；修改 `.github/workflows/qualify-faster-whisper-production.yml`、`scripts/qualify-faster-whisper-production.ps1`、`tests/test_asr_deployment_static.py`、统一 R3 方案与 `TODO.md`。
 - 验证：受控 wheel 单元与部署静态测试 36/36 通过；R3 wheel、部署、模型准备和 faster-whisper 资格定向回归 83/83 通过；workflow YAML、Python 编译、PowerShell AST 与 `git diff --check` 通过。
 - 待办/风险：尚未提交、推送、创建 PR、运行远端 CI 或真实资格 workflow；真实双重构建、Windows run-local 依赖解析、模型/CUDA/8 样本门禁仍须在合并后使用新的完整 master SHA 验证。未修改 production freeze、生产 ASR venv、服务、Scheduled Task、防火墙、Ubuntu、数据库、Qdrant、模型或 Profile admission。
+
+### 07:31 — 调整视频来源核验与播放入口
+
+- 完成：视频引用角标点击现只打开并定位来源核验，不再联动弹出播放器；视频回答依据项采用独立媒体图标层级、隐藏内部 `__8位ID` 绑定尾缀并简化分类与时间文案；视频播放入口移至来源详情“定位”区域右侧，点击后按引用时间自动跳转并播放，原详情底部的重复播放入口已移除。
+- 文件：`frontend/src/components/Message.tsx`、`frontend/src/components/Message.test.tsx`、`frontend/src/components/SourceWorkspace.tsx`、`frontend/src/components/SourceWorkspace.test.tsx`、`WORKLOG.md`。
+- 验证：消息与来源工作区专项 Vitest 2 个文件、15/15 项测试通过；TypeScript project build 与 Vite production build 通过（2026 modules transformed）；`git diff --check` 通过。首次复用旧依赖目录时因缺少锁文件已声明的 Radix Dialog 无法完成 TypeScript 构建，按最新锁文件在隔离工作区安装依赖后构建通过；构建保留既有 CSS 语法与主包大于 500 kB 警告，依赖审计仍报告既有 10 项风险。
+- 待办/风险：功能处于待用户验收；尚未在真实登录会话中对视频播放器自动 seek、窄屏来源抽屉和明暗主题完成浏览器视觉验收。本轮未修改 API、媒体鉴权、数据契约、索引、依赖声明或部署。
