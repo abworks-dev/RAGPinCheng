@@ -70,6 +70,18 @@ describe("AdminLayout tab boundary", () => {
     vi.clearAllMocks();
   });
 
+  it("reserves a stable root scrollbar gutter only while mounted", () => {
+    const { unmount } = render(
+      <MemoryRouter>
+        <AdminLayout />
+      </MemoryRouter>,
+    );
+
+    expect(document.documentElement).toHaveClass("admin-scrollbar-stable");
+    unmount();
+    expect(document.documentElement).not.toHaveClass("admin-scrollbar-stable");
+  });
+
   it("moves theme and admin actions to the bottom of the sidebar", () => {
     const { container } = render(
       <MemoryRouter>

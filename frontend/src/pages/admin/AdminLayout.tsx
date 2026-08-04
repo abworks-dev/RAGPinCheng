@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AppBrand } from "../../components/AppBrand";
 import { ThemeMenu } from "../../components/ThemeMenu";
 import { UserMenu } from "../../components/UserMenu";
@@ -23,6 +23,11 @@ const tabs: [Tab, string][] = [
 
 export function AdminLayout() {
   const [tab, setTab] = useState<Tab>("users");
+
+  useEffect(() => {
+    document.documentElement.classList.add("admin-scrollbar-stable");
+    return () => document.documentElement.classList.remove("admin-scrollbar-stable");
+  }, []);
 
   return (
     <div className="min-h-full bg-admin-background text-foreground">

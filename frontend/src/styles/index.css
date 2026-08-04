@@ -8,6 +8,10 @@ html, body, #root {
   height: 100%;
 }
 
+html.admin-scrollbar-stable {
+  scrollbar-gutter: stable;
+}
+
 * {
   scrollbar-color: rgb(var(--muted-foreground) / 0.38) transparent;
   scrollbar-width: thin;
