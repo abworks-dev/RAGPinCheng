@@ -52,6 +52,11 @@ SHA 和显式执行开关，仅注入 `ASR_DEPENDENCY_PROXY`。上传 artifact �
 版本约束和输入文件 SHA-256；URL、代理、Token、绝对路径和完整 freeze 禁止上传。
 诊断得到精确冲突后必须停止，修改 pin、约束或隔离结构仍需重新审批。
 
+精确诊断不得把“包依赖某名称”与该名称的兼容固定版本误判为版本冲突。只有以下证据可形成
+`blocker_confirmed`：pip 明确报告同一 requirement 无可用版本且无匹配 binary distribution；
+或 pip 冲突段同时给出同一 requirement 的带比较符依赖约束和 production constraint。
+结果必须记录受影响 requirement 与诊断种类；证据不完整时保持失败关闭。
+
 ### 2.1 仓库基线
 
 - PR #34 已合并到 `master`；
