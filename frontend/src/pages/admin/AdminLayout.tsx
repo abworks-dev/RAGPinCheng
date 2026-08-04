@@ -33,7 +33,7 @@ export function AdminLayout() {
       </header>
 
       <div className="flex flex-col lg:min-h-[calc(100vh-4rem)] lg:flex-row">
-        <aside className="flex shrink-0 flex-col bg-admin-surface lg:h-[calc(100vh-4rem)] lg:w-64">
+        <aside className="flex shrink-0 flex-col bg-admin-surface lg:sticky lg:top-16 lg:h-[calc(100vh-4rem)] lg:w-64 lg:self-start">
           <div className="px-3 py-3 lg:p-4 lg:pb-3">
             <p className="mb-2 hidden px-3 text-ui-xs font-medium uppercase tracking-[0.14em] text-muted-foreground lg:block">
               管理功能
