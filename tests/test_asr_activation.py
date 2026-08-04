@@ -203,6 +203,18 @@ def test_activation_script_uses_fixed_firewall_and_fail_closed_rollback():
     assert "Stop-ScheduledTask" in script
     assert "Unregister-ScheduledTask" in script
     assert "Remove-NetFirewallRule -Name $firewallRuleName" in script
+    assert "function Stop-VerifiedAsrListeners" in script
+    assert "sys._base_executable" in script
+    assert "Get-CimInstance Win32_Process" in script
+    assert (
+        '\'"{0}" -m uvicorn asr_service.app:create_app --factory '
+        "--host 0.0.0.0 --port 8200' -f"
+    ) in script
+    assert "Refusing to stop an unexpected process listening on TCP 8200" in script
+    assert "Stop-Process -Id $processId -Force" in script
+    assert script.index("Remove-NetFirewallRule -Name $firewallRuleName") < script.index(
+        "Stop-VerifiedAsrListeners", script.index("function Invoke-ActivationRollback")
+    )
     assert "model_cache_available=" in script
     assert "Register-ScheduledTask" in script
     assert "Start-ScheduledTask" in script
@@ -224,6 +236,10 @@ def test_local_verifier_has_unique_enabled_profile_and_gpu_assertions():
     assert '$health.status -ne "ok"' in script
     assert '"funasr-sensevoice-small-v1"' in script
     assert "$profiles.Count -ne 1" in script
+    assert (
+        'Invoke-RestMethod -Method Get -Uri "$AsrUrl/v1/capabilities" '
+        "-Headers $asrHeaders -TimeoutSec 120"
+    ) in script
     assert "Assert-ExactPropertyNames" in script
     assert '$activity.api_version -ne $expectedGpuVersion' in script
     assert "-not $activity.model_loaded" in script

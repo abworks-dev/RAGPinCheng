@@ -70,7 +70,7 @@ if ($health.status -ne "ok" -or $health.api_version -ne $expectedAsrVersion) {
 }
 
 $asrHeaders = @{ Authorization = "Bearer $($values['ASR_SERVICE_TOKEN'])" }
-$capabilities = Invoke-RestMethod -Method Get -Uri "$AsrUrl/v1/capabilities" -Headers $asrHeaders -TimeoutSec 10
+$capabilities = Invoke-RestMethod -Method Get -Uri "$AsrUrl/v1/capabilities" -Headers $asrHeaders -TimeoutSec 120
 Assert-ExactPropertyNames -Value $capabilities -Expected @(
     "api_version",
     "service_profiles",

@@ -91,7 +91,7 @@ ASR 仅在四个字段均合法、模型已加载、inflight 为 0 且明确允�
 2. 激活前要求固定模型 Manifest 有效、服务端配置仍为 `ASR_SERVICE_ENABLED=false`、Scheduled Task 不存在、TCP 8200 未监听，且不存在会应用到任意程序/服务或 ASR venv Python、并覆盖 8200 的其他已启用入站 Allow 规则；其他程序、App Package 或特定 Windows 服务的规则不属于 ASR 暴露面，不修改也不误判。
 3. 部署同一 SHA 的 payload 后，备份服务端配置，原子改为 `ASR_SERVICE_ENABLED=true`；注册并启动固定名称 `RAGPinCheng-ASR` 的 Administrator/S4U Scheduled Task。
 4. 新建唯一防火墙规则 `RAGPinCheng-ASR-8200-from-Ubuntu`，只允许 `${PRIVATE_IPV4}` 访问 Windows TCP 8200；规则字段、端口和远端地址均严格复核。
-5. Windows 本机严格验证 `/health`、受鉴权 `/v1/capabilities` 和 GPU `/v1/activity` 的唯一字段集合、版本、固定 experimental Profile 与值域。
+5. Windows 本机严格验证 `/health`、受鉴权 `/v1/capabilities` 和 GPU `/v1/activity` 的唯一字段集合、版本、固定 experimental Profile 与值域；health 继续使用 10 秒请求上限，首次 capabilities 允许最多 120 秒完成本地 Torch/FunASR/CUDA 能力探测，响应后仍执行相同严格断言。
 6. Ubuntu production runner 读取既有 `prod.env`，要求 ASR 客户端三个关键键各出现一次、`ASR_ENABLED=false`、URL 固定且 Token 与 `production-asr` Secret 匹配，再从 `${PRIVATE_IPV4}` 验证 Windows health/capabilities。
 7. Windows 本机激活失败时脚本立即按本次 activation state 自动回滚；激活时将回滚入口复制到受保护的 state 目录，Ubuntu 跨节点验证失败时 workflow 无需再次 checkout 即可回到 Windows，停止并注销任务、删除本轮固定防火墙规则、恢复启用前配置并确认 8200 关闭。
 8. 本轮不修改 Ubuntu `prod.env`，不重启 backend，不上传媒体，不调用 `/v1/jobs`，不创建转录任务，也不访问数据库、Qdrant 或 artifact。
@@ -107,7 +107,7 @@ ASR 仅在四个字段均合法、模型已加载、inflight 为 0 且明确允�
 ## 8. 回滚
 
 - 仓库：单独 revert R3A 提交。
-- Windows 激活：按 activation ID 使用受保护的 `activation-state.json` 与 `asr.env.before`；只修改固定 Scheduled Task 和固定防火墙规则，恢复 `ASR_SERVICE_ENABLED=false` 并确认 8200 不再监听。紧急人工回滚允许由较新的受保护 master workflow 执行，但 state schema、activation ID、任务动作和防火墙字段仍必须匹配。
+- Windows 激活：按 activation ID 使用受保护的 `activation-state.json` 与 `asr.env.before`；只修改固定 Scheduled Task 和固定防火墙规则，恢复 `ASR_SERVICE_ENABLED=false`。Scheduled Task 注销后若 Uvicorn 子进程仍占用 8200，只在底层 Python 路径和完整命令行均与固定 ASR 启动命令精确匹配时强制终止，其他进程一律拒绝处理，随后确认 8200 不再监听。紧急人工回滚允许由较新的受保护 master workflow 执行，但 state schema、activation ID、任务动作和防火墙字段仍必须匹配。
 - Windows 程序：payload 部署失败由既有 `deploy-asr.ps1` 恢复上一版本；激活后回滚保留已部署但停用的 payload 及备份审计证据，不自动删除模型、日志或 staging。
 - Ubuntu：保持或恢复 `ASR_ENABLED=false`；人工 Markdown 路径不受影响。
 - 数据：R3A 不创建生产数据；后续不得自动删除模型、spool、artifact 或日志，清理由独立审批执行。
