@@ -165,16 +165,30 @@ class UploadResponse(BaseModel):
 
 
 class IndexedDocumentDTO(BaseModel):
+    document_id: str
     source_path: str
+    display_path: str
+    filename: str
     doc_title: str
     category: str
     doc_type: str
     company: str | None
     parent_count: int
+    child_count: int | None = None
+    file_size: int | None = None
+    status: str
+    is_indexed: bool
+    latest_job_id: int | None = None
+    error_summary: str | None = None
+    uploaded_by: str | None = None
+    created_at: int | None = None
+    updated_at: int | None = None
 
 
 class IndexedDocumentListResponse(BaseModel):
     documents: list[IndexedDocumentDTO]
+    total: int
+    status_counts: dict[str, int]
 
 
 class CategoryNodeDTO(BaseModel):

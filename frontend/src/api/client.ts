@@ -11,7 +11,7 @@ import type {
   FeedbackPayload,
   Health,
   IndexJob,
-  IndexedDocument,
+  IndexedDocumentList,
   LlmHealth,
   MediaAsset,
   TranscriptionJob,
@@ -229,8 +229,24 @@ export const api = {
     jsonFetch<IndexJob>(`/api/admin/index/jobs/${id}/retry`, { method: "POST" }),
   adminDeleteIndexJob: (id: number) =>
     jsonFetch<void>(`/api/admin/index/jobs/${id}`, { method: "DELETE" }),
-  adminListIndexedDocuments: () =>
-    jsonFetch<{ documents: IndexedDocument[] }>("/api/admin/index/documents"),
+  adminListIndexedDocuments: (params?: {
+    query?: string;
+    category?: string;
+    doc_type?: string;
+    status?: string;
+    limit?: number;
+    offset?: number;
+  }) => {
+    const search = new URLSearchParams();
+    if (params?.query) search.set("query", params.query);
+    if (params?.category) search.set("category", params.category);
+    if (params?.doc_type) search.set("doc_type", params.doc_type);
+    if (params?.status) search.set("status", params.status);
+    if (params?.limit != null) search.set("limit", String(params.limit));
+    if (params?.offset != null) search.set("offset", String(params.offset));
+    const suffix = search.toString();
+    return jsonFetch<IndexedDocumentList>(`/api/admin/index/documents${suffix ? `?${suffix}` : ""}`);
+  },
   adminDeleteIndexedDocument: (source_path: string, delete_file: boolean) =>
     jsonFetch<{ parents_deleted: number; file_deleted: boolean }>(
       "/api/admin/index/documents",

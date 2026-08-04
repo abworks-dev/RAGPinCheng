@@ -665,23 +665,158 @@ def delete_index_job(
     conn.commit()
 
 
+_ACTIVE_INDEX_STATUSES = {
+    "pending",
+    "uploading",
+    "queued_mineru",
+    "parsing",
+    "chunking",
+    "summarizing",
+    "embedding",
+}
+
+
+def _document_status_group(value: str) -> str:
+    if value in _ACTIVE_INDEX_STATUSES:
+        return "processing"
+    if value == "failed":
+        return "failed"
+    if value == "done":
+        return "ready"
+    return "other"
+
+
 @router.get("/index/documents", response_model=IndexedDocumentListResponse)
 def list_documents(
+    query: str = Query("", max_length=200),
+    category: str | None = Query(None, max_length=100),
+    doc_type: str | None = Query(None, max_length=50),
+    status: str | None = Query(None, max_length=50),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
     _admin: CurrentUser = Depends(require_admin),
+    conn: sqlite3.Connection = Depends(get_db),
 ) -> IndexedDocumentListResponse:
-    docs = list_indexed_documents()
-    return IndexedDocumentListResponse(
-        documents=[
+    indexed_by_path = {d.source_path: d for d in list_indexed_documents()}
+    latest_jobs = conn.execute(
+        """
+        SELECT j.*, u.real_name
+        FROM index_jobs j
+        LEFT JOIN users u ON u.id=j.user_id
+        WHERE j.id=(
+            SELECT MAX(j2.id)
+            FROM index_jobs j2
+            WHERE j2.source_path=j.source_path
+        )
+        ORDER BY j.created_at DESC, j.id DESC
+        """
+    ).fetchall()
+    jobs_by_path = {str(row["source_path"]): row for row in latest_jobs}
+    all_paths = set(indexed_by_path) | set(jobs_by_path)
+    documents: list[IndexedDocumentDTO] = []
+
+    for source_path in all_paths:
+        indexed = indexed_by_path.get(source_path)
+        job = jobs_by_path.get(source_path)
+        job_stats: dict[str, object] = {}
+        if job is not None and job["stats_json"]:
+            try:
+                job_stats = json.loads(job["stats_json"]) or {}
+            except (TypeError, ValueError):
+                job_stats = {}
+
+        path = Path(source_path)
+        item_category = indexed.category if indexed else str(job["category"])
+        item_type = indexed.doc_type if indexed else str(job["doc_type"])
+        company = indexed.company if indexed else None
+        if company is None and item_category in SECOND_LEVEL_CATEGORIES:
+            try:
+                relative_parts = path.relative_to(DOCS_DIR).parts
+                company = relative_parts[1] if len(relative_parts) > 2 else None
+            except ValueError:
+                company = None
+        display_parts = [item_category]
+        if company:
+            display_parts.append(company)
+        display_parts.append(path.name)
+
+        latest_status = str(job["status"]) if job is not None else "done"
+        is_indexed = indexed is not None
+        error_summary = None
+        if latest_status == "failed":
+            error_summary = "资料处理失败，可重试或在索引活动中查看详情。"
+        documents.append(
             IndexedDocumentDTO(
-                source_path=d.source_path,
-                doc_title=d.doc_title,
-                category=d.category,
-                doc_type=d.doc_type,
-                company=d.company,
-                parent_count=d.parent_count,
+                document_id=hashlib.sha256(source_path.encode("utf-8")).hexdigest()[:24],
+                source_path=source_path,
+                display_path=" / ".join(display_parts),
+                filename=str(job["filename"]) if job is not None else path.name,
+                doc_title=indexed.doc_title if indexed else path.stem,
+                category=item_category,
+                doc_type=item_type,
+                company=company,
+                parent_count=indexed.parent_count if indexed else 0,
+                child_count=(
+                    int(job_stats["children"])
+                    if isinstance(job_stats.get("children"), int)
+                    else None
+                ),
+                file_size=int(job["file_size"]) if job is not None else None,
+                status=latest_status,
+                is_indexed=is_indexed,
+                latest_job_id=int(job["id"]) if job is not None else None,
+                error_summary=error_summary,
+                uploaded_by=(
+                    str(job["real_name"])
+                    if job is not None and job["real_name"]
+                    else None
+                ),
+                created_at=int(job["created_at"]) if job is not None else None,
+                updated_at=(
+                    int(job["finished_at"] or job["started_at"] or job["created_at"])
+                    if job is not None
+                    else None
+                ),
             )
-            for d in docs
+        )
+
+    normalized_query = query.strip().casefold()
+    filtered = [
+        item
+        for item in documents
+        if (
+            not normalized_query
+            or normalized_query in item.doc_title.casefold()
+            or normalized_query in item.filename.casefold()
+            or normalized_query in item.category.casefold()
+            or normalized_query in (item.company or "").casefold()
+        )
+        and (category is None or item.category == category)
+        and (doc_type is None or item.doc_type == doc_type)
+    ]
+    status_counts: dict[str, int] = {}
+    for item in filtered:
+        group = _document_status_group(item.status)
+        status_counts[group] = status_counts.get(group, 0) + 1
+    if status is not None:
+        filtered = [
+            item
+            for item in filtered
+            if _document_status_group(item.status) == status or item.status == status
         ]
+    filtered.sort(
+        key=lambda item: (
+            item.updated_at is not None,
+            item.updated_at or 0,
+            item.doc_title.casefold(),
+        ),
+        reverse=True,
+    )
+    total = len(filtered)
+    return IndexedDocumentListResponse(
+        documents=filtered[offset : offset + limit],
+        total=total,
+        status_counts=status_counts,
     )
 
 
