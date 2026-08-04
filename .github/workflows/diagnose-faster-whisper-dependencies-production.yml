@@ -1,0 +1,102 @@
+name: Diagnose faster-whisper Dependencies Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: "Full 40-character merged master SHA to diagnose"
+        required: true
+        type: string
+      execute_diagnosis:
+        description: "Read fixed R3 evidence and replay dependency resolution only when required"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-asr-faster-whisper-dependency-diagnosis
+  cancel-in-progress: false
+
+jobs:
+  diagnose:
+    environment: production-asr
+    runs-on: [self-hosted, Windows, X64, asr-production]
+    timeout-minutes: 30
+    steps:
+      - name: Validate immutable revision and explicit diagnostic gate
+        shell: powershell
+        run: |
+          if ("${{ inputs.commit_sha }}" -notmatch '^[0-9a-fA-F]{40}$') {
+            throw "commit_sha must be a full 40-character SHA"
+          }
+          if ("${{ inputs.commit_sha }}".ToLowerInvariant() -ne "${{ github.sha }}".ToLowerInvariant()) {
+            throw "commit_sha must equal the workflow dispatch revision"
+          }
+          if ("${{ github.ref }}" -ne "refs/heads/master") {
+            throw "diagnosis must be dispatched from master"
+          }
+          if (-not [System.Convert]::ToBoolean("${{ inputs.execute_diagnosis }}")) {
+            throw "execute_diagnosis must be explicitly enabled"
+          }
+
+      - name: Check out requested merged revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 1
+
+      - name: Diagnose fixed R3 dependency conflict
+        shell: powershell
+        env:
+          ASR_DEPENDENCY_PROXY: ${{ secrets.ASR_DEPENDENCY_PROXY }}
+        run: |
+          $params = @{
+            CommitSha = "${{ inputs.commit_sha }}"
+            SourceRoot = "${{ github.workspace }}"
+            RunId = "${{ github.run_id }}"
+            ExecuteDiagnosis = [System.Convert]::ToBoolean("${{ inputs.execute_diagnosis }}")
+            SummaryPath = "${{ runner.temp }}\faster-whisper-r3-dependency-${{ github.run_id }}\dependency-diagnostic.json"
+          }
+          & "${{ github.workspace }}\scripts\diagnose-faster-whisper-dependencies.ps1" @params
+
+      - name: Publish sanitized dependency diagnosis
+        if: ${{ always() }}
+        shell: powershell
+        run: |
+          $path = "${{ runner.temp }}\faster-whisper-r3-dependency-${{ github.run_id }}\dependency-diagnostic.json"
+          if (Test-Path -LiteralPath $path -PathType Leaf) {
+            $result = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
+            $lines = @(
+              "## faster-whisper R3 dependency diagnosis",
+              "",
+              "- Status: ``$($result.status)``",
+              "- Failure code: ``$($result.failure_code)``",
+              "- Source run: ``$($result.source_run_id)``",
+              "- Resolver replayed: ``$($result.resolver_replayed)``",
+              "- Profile admission: ``$($result.profile_admission)``",
+              "- Production services modified: ``$($result.production_services_modified)``"
+            )
+            if (@($result.conflict_lines).Count -gt 0) {
+              $lines += ""
+              $lines += "### Sanitized conflict"
+              foreach ($line in @($result.conflict_lines)) {
+                $lines += "- ``$line``"
+              }
+            }
+            $lines -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding UTF8
+          } else {
+            "Dependency diagnosis ended before a sanitized result could be written." |
+              Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding UTF8
+          }
+
+      - name: Upload sanitized dependency diagnosis
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: faster-whisper-r3-dependency-${{ github.run_id }}
+          path: ${{ runner.temp }}\faster-whisper-r3-dependency-${{ github.run_id }}\dependency-diagnostic.json
+          if-no-files-found: warn
+          retention-days: 14
