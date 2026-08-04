@@ -1988,3 +1988,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`src/indexing_pipeline.py`、`api/routes_admin.py`、`api/schemas.py`、`frontend/src/api/client.ts`、`frontend/src/pages/admin/AdminDocumentsPage.tsx`、相关前后端测试、资料索引功能文档、PR1 实施说明与 `TODO.md`。
 - 验证：后端资料聚合、删除响应和源文件状态专项测试 7/7 通过；资料页与 API client 专项 21/21 通过；前端全量 Vitest 27 个文件、128/128 项通过；TypeScript project build 与 Vite production build通过（2025 modules transformed）。构建保留既有 React Router future warning、CSS minify warning 和主包大于 500 kB 警告。
 - 待办/风险：代码完成，待用户使用可清理的非敏感资料验收；未访问或删除真实资料，未连接真实 Qdrant/生产数据库，未部署、未重建索引。历史任务仍保留在“索引活动”中作为审计记录。
+
+### 06:50 — 统一管理面板与对话页侧栏样式
+
+- 完成：在最新 `master` 管理布局上保留侧栏固定定位、底部主题菜单和账户菜单，将桌面侧栏宽度从 16rem 调整为与对话页一致的 17rem，并复用对话侧栏的背景与前景主题令牌；保留主分支现有的无分隔线设计。
+- 文件：`frontend/src/pages/admin/AdminLayout.tsx`、`frontend/src/pages/admin/AdminLayout.test.tsx`、`WORKLOG.md`。
+- 验证：管理布局专项 Vitest 3/3 通过；TypeScript project build 与 Vite production build 通过（2025 modules transformed）；`git diff --check` 通过。构建保留既有 React Router future warning、CSS minify warning 和主包大于 500 kB 警告。
+- 待办/风险：尚未使用真实管理员登录会话进行桌面与移动端视觉验收；未修改业务逻辑、API、认证、数据、依赖或部署配置。
