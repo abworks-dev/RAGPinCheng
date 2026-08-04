@@ -94,6 +94,19 @@ production freeze：
 7. 本方案只服务于隔离资格 run，不写入生产 ASR venv，不修改服务、防火墙、Ubuntu、
    数据库、Qdrant、模型或 Profile admission。
 
+### 2.0.4 受控 wheel 资格重跑结果（2026-08-05）
+
+- PR #45 的 7 项 CI 全部通过，合并 master SHA：
+  `34eab650ed9402512296a835c24cef656dbcb60f`；
+- qualification run `30960326875` 的 GitHub-hosted `build-internal-wheel` job 成功，
+  固定 sdist 的校验、双重构建、wheel hash 一致性和 artifact 上传均通过；
+- Windows job 成功下载同 run 的受控 bundle，随后隔离资格仍以
+  `dependency_preparation_failed` 失败；
+- 脱敏 verdict 确认 `profile_admission=disabled`、
+  `production_services_modified=false`，未进入 Profile 开放；
+- 当前证据不足以判定新的精确依赖 blocker。本阶段到此停止；读取更详细的依赖证据、
+  修改其他 pin/约束或再次重跑须另行审批。
+
 ### 2.1 仓库基线
 
 - PR #34 已合并到 `master`；
