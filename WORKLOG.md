@@ -1859,3 +1859,8 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`asr_service/engines/funasr_sensevoice.py`、`asr_service/tests/test_funasr_sensevoice.py`、`frontend/src/pages/admin/AdminMediaPage.tsx`、`frontend/src/pages/admin/AdminMediaPage.test.tsx`、`scripts/deploy-asr.ps1`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
 - 验证：SenseVoice adapter、engine contract 与静态边界专项 `20 passed`；前端全量 Vitest 26 个文件、116/116 项通过；TypeScript project build 与 Vite production build 通过（2023 modules transformed）；Windows ASR 部署、激活、模型准备与 Git 安全专项 `52 passed, 6 subtests passed`；相关 PowerShell AST、Python `py_compile` 和 `git diff --check` 通过。完整 ASR/Phase 5 本地收集因当前 Python 环境缺少 `fastapi`、`qdrant_client` 未运行，交由现有 CI 干净环境验证。
 - 边界/风险：Windows 热更新现在仅在严格核验自有 Scheduled Task 和 8200 监听进程后停服换版，等待端口释放并执行本机契约验证；失败时保留原始异常、归档失败版本、恢复备份并按原运行状态重启，未请求激活时拒绝替换运行中服务。未新增依赖，未修改 Provider/Canonical、数据库、索引、Profile、模型 revision、Token 或防火墙；Ubuntu `ASR_ENABLED=false`，首个测试版本继续保持待审核、未发布、未索引。Windows ASR 重新部署及新测试视频复验仍待本提交 CI/合并后执行。
+### 03:17 — 增加顶部滚动边缘渐隐
+
+- 完成：在左侧会话列表与中央消息列表的固定顶部下方增加非交互式滚动边缘渐隐，分别匹配侧栏和页面背景；内容滚入 Logo/新建对话区及聊天标题区时柔和淡出，不影响按钮、滚动条、会话选择或消息交互。
+- 文件：修改 `frontend/src/components/Sidebar.tsx`、`MessageList.tsx`、`styles/index.css` 及对应测试与 `WORKLOG.md`；未修改管理端、消息数据、来源、API、SSE、RAG 或后端业务。
+- 验证：顶部渐隐专项 Vitest 2 个文件、9/9 项通过；前端全量 Vitest 26 个文件、117/117 项通过；`npm run build` 通过（2023 modules transformed）；`git diff --check` 无内容错误。保留既有 CSS minify 与主包大于 500 kB 警告。
