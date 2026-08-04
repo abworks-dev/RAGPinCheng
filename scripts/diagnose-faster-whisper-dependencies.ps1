@@ -188,25 +188,26 @@ function Convert-ToSanitizedResolverEvidence {
         if ([string]::IsNullOrWhiteSpace($line) -or $line.Length -gt 500) { continue }
         if ($line -match '(?i)(token|authorization|cookie|password|secret|proxy)') { continue }
         if ($line -match 'https?://') { continue }
-        if ($line -match '(?i)[a-z]:[\\/]') { continue }
-        if ($line.ToCharArray() | Where-Object { [int]$_ -gt 127 }) { continue }
-        $clean = $line -replace '^(?i)ERROR:\s*', ''
-        if ($clean -eq "The conflict is caused by:") {
-            $sawConflictHeader = $true
-            continue
-        }
 
         if (
-            $clean -match '^(?i)Could not find a version that satisfies the requirement\s+(?<package>[A-Za-z0-9_.-]+)'
+            $line -match '(?i)Could not find a version that satisfies the requirement\s+(?<package>[A-Za-z0-9_.-]+)'
         ) {
             [void]$missingVersionTargets.Add((Get-NormalizedPackageName -Name $Matches.package))
             continue
         }
 
         if (
-            $clean -match '^(?i)No matching distribution found for\s+(?<package>[A-Za-z0-9_.-]+)'
+            $line -match '(?i)No matching distribution found for\s+(?<package>[A-Za-z0-9_.-]+)'
         ) {
             [void]$noMatchingTargets.Add((Get-NormalizedPackageName -Name $Matches.package))
+            continue
+        }
+
+        if ($line -match '(?i)[a-z]:[\\/]') { continue }
+        if ($line.ToCharArray() | Where-Object { [int]$_ -gt 127 }) { continue }
+        $clean = $line -replace '^(?i)ERROR:\s*', ''
+        if ($clean -eq "The conflict is caused by:") {
+            $sawConflictHeader = $true
             continue
         }
 
@@ -286,8 +287,8 @@ function Assert-SanitizerSelfTest {
     }
 
     $distributionSample = @(
-        "ERROR: Could not find a version that satisfies the requirement jieba (from funasr)",
-        "ERROR: No matching distribution found for jieba",
+        "D:\private\python.exe : ERROR: Could not find a version that satisfies the requirement jieba (from funasr)",
+        "D:\private\python.exe : ERROR: No matching distribution found for jieba",
         "The user requested (constraint) jieba==0.42.1"
     )
     $distribution = Convert-ToSanitizedResolverEvidence -Lines $distributionSample
@@ -295,7 +296,8 @@ function Assert-SanitizerSelfTest {
         $distribution.Kind -ne "binary_distribution_unavailable" -or
         $distribution.Requirement -ne "jieba" -or
         @($distribution.Lines).Count -ne 2 -or
-        $distribution.Lines[1] -ne "No matching binary distribution found for jieba"
+        $distribution.Lines[1] -ne "No matching binary distribution found for jieba" -or
+        @($distribution.Lines | Where-Object { $_ -match '(?i)[a-z]:[\\/]' }).Count -ne 0
     ) {
         throw "Binary distribution sanitizer self-test failed"
     }
