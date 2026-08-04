@@ -7,14 +7,18 @@ from typing import Protocol
 
 from .provider_protocol import TranscriptionProvider
 from .runtime_ports import CancellationProbe, ProviderProgressSink, TranscriptionInputSource
-from .types import ContractValidationError, require_exact_enum, validate_provider_key
+from .types import ContractValidationError, require_exact_enum, validate_provider_key, validate_uuid
 
 
 @dataclass(frozen=True, slots=True)
 class ProviderRuntimePorts:
+    application_job_id: str
     input_source: TranscriptionInputSource
     progress_sink: ProviderProgressSink
     cancellation_probe: CancellationProbe
+
+    def __post_init__(self) -> None:
+        validate_uuid(self.application_job_id, "application_job_id")
 
 
 class ProviderFactory(Protocol):
