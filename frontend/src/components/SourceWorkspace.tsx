@@ -348,7 +348,26 @@ function SourceDetail({
         <p className="mt-1 break-words text-xs leading-relaxed text-foreground">{sourceLocator(source)}</p>
       </div>
       <div className="mt-4">
-        <div className="mb-2 text-[11px] font-medium text-muted-foreground">引用原文</div>
+        <div className="mb-2 flex items-center justify-between gap-3">
+          <span className="text-[11px] font-medium text-muted-foreground">引用原文</span>
+          <FeedbackDialog
+            category="引用问题"
+            description="选择这条引用存在的问题，帮助我们改进来源核验质量。"
+            reasons={citationFeedbackReasons}
+            notePlaceholder="可选：补充说明这条引用的问题"
+            successMessage="引用问题已提交"
+            onSubmit={submitReport}
+            trigger={
+              <button
+                type="button"
+                className="inline-flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground hover:text-destructive"
+              >
+                <AlertTriangle className="size-3" />
+                报告问题
+              </button>
+            }
+          />
+        </div>
         <p className="whitespace-pre-wrap break-words border-l-2 border-info bg-info/10 px-3 py-2.5 text-xs leading-6 text-foreground">
           {matchesQuery(visibleText, searchQuery)}
         </p>
@@ -386,23 +405,6 @@ function SourceDetail({
           {copied ? "已复制" : "复制来源"}
         </button>
       </div>
-      <FeedbackDialog
-        category="引用问题"
-        description="选择这条引用存在的问题，帮助我们改进来源核验质量。"
-        reasons={citationFeedbackReasons}
-        notePlaceholder="可选：补充说明这条引用的问题"
-        successMessage="引用问题已提交"
-        onSubmit={submitReport}
-        trigger={
-          <button
-            type="button"
-            className="mt-3 inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-destructive"
-          >
-            <AlertTriangle className="size-3.5" />
-            报告引用问题
-          </button>
-        }
-      />
       {status && <p className="mt-2 text-xs text-muted-foreground">{status}</p>}
     </div>
   );
