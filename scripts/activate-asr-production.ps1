@@ -95,7 +95,7 @@ function Assert-RequiredConfiguration {
     if ($Values["ASR_MODEL_LOCAL_FILES_ONLY"] -ne "true") {
         throw "ASR_MODEL_LOCAL_FILES_ONLY must remain true"
     }
-    if ($Values["BGE_PRIORITY_PROBE_URL"] -ne "http://127.0.0.1:8100/v1/activity") {
+    if ($Values["BGE_PRIORITY_PROBE_URL"] -ne "http://192.168.11.11:8100/v1/activity") {
         throw "BGE priority probe URL must remain the fixed local GPU activity endpoint"
     }
 }
