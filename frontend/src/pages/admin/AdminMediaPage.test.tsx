@@ -178,6 +178,39 @@ describe("AdminMediaPage", () => {
     expect(mocks.listTranscriptionJobs).toHaveBeenCalledTimes(1);
   });
 
+  it("refreshes the media badge once when an active job reaches a terminal state", async () => {
+    const transcribingAsset = {
+      ...assets[0],
+      transcript_origin: "generated",
+      status: "transcribing",
+    };
+    const readyAsset = { ...transcribingAsset, status: "transcript_ready" };
+    const runningJob = {
+      ...succeededJob,
+      status: "running" as const,
+      stage: "transcribing",
+      processed_ms: 500,
+      finished_at: null,
+      result_version_id: null,
+    };
+    mocks.listMediaAssets
+      .mockResolvedValueOnce([transcribingAsset])
+      .mockResolvedValueOnce([readyAsset]);
+    mocks.listTranscriptionJobs
+      .mockResolvedValueOnce([runningJob])
+      .mockResolvedValueOnce([succeededJob]);
+
+    render(<AdminMediaPage />);
+
+    expect(await screen.findByText("自动转录中")).toBeInTheDocument();
+    await waitFor(
+      () => expect(mocks.listMediaAssets).toHaveBeenCalledTimes(2),
+      { timeout: 4500 },
+    );
+    expect(await screen.findByText("转写草稿就绪")).toBeInTheDocument();
+    expect(mocks.listMediaAssets).toHaveBeenCalledTimes(2);
+  });
+
   it("preserves upload fields and request identity after an automatic upload failure", async () => {
     mocks.listMediaAssets.mockResolvedValue([]);
     mocks.uploadAutomaticMediaVideo.mockRejectedValueOnce(new Error("上传服务暂不可用"));

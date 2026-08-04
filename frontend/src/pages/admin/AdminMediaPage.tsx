@@ -33,6 +33,7 @@ const stageLabels: Record<string, string> = {
   normalizing: "规范化",
   formatting: "生成 Markdown",
 };
+const activeJobStatuses = new Set(["pending", "running"]);
 
 function MediaStatusBadge({ status }: { status: string }) {
   const meta = mediaStatusMeta[status];
@@ -68,9 +69,10 @@ export function AdminMediaPage() {
   const [profileId, setProfileId] = useState("");
   const idempotencyKey = useRef(createRequestId());
   const retryIdempotencyKeys = useRef(new Map<string, string>());
+  const previousJobStatuses = useRef(new Map<string, string>());
   const videoInputRef = useRef<HTMLInputElement>(null);
   const transcriptInputRef = useRef<HTMLInputElement>(null);
-  const { jobsByMediaId, error: jobsError, refreshJobs, replaceJob } = useTranscriptionJobs();
+  const { jobs, jobsByMediaId, error: jobsError, refreshJobs, replaceJob } = useTranscriptionJobs();
 
   const rotateRequestIdentity = () => { idempotencyKey.current = createRequestId(); };
 
@@ -88,6 +90,19 @@ export function AdminMediaPage() {
   }, []);
 
   useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => {
+    const currentStatuses = new Map(jobs.map((job) => [job.job_id, job.status]));
+    const reachedTerminalState = jobs.some((job) => {
+      const previousStatus = previousJobStatuses.current.get(job.job_id);
+      return (
+        previousStatus !== undefined &&
+        activeJobStatuses.has(previousStatus) &&
+        !activeJobStatuses.has(job.status)
+      );
+    });
+    previousJobStatuses.current = currentStatuses;
+    if (reachedTerminalState) void refresh();
+  }, [jobs, refresh]);
   useEffect(() => {
     api.listTranscriptionProfiles()
       .then((items) => {
