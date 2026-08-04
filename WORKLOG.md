@@ -1824,3 +1824,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 完成：通过 GitHub Actions 手动执行生产模型准备 run `#30908870300`，固定 checkout `545c6d6fcc8b82a5980d3f7da5c525a61bf12b9c`，成功准备并验证 `iic/SenseVoiceSmall@7bf452403abd7353a300cd760f7adae7701c92c1` 的 `asr-model-manifest/1` 缓存。
 - 验证：workflow 结论为 success；日志确认 `model_cache_available=True`、`reason_code=available`，固定模型 revision 匹配；Scheduled Task 全程保持停止，TCP 8200 保持未监听。
 - 边界：未启动 ASR 服务、未注册任务、未修改防火墙、未启用 Ubuntu ASR、未读取或输出 Token；未进入 R3C。
+
+### 20:43 — 收敛风险审批与交付粒度
+
+- 完成：将 R2/R3 审批单位明确为独立风险边界，同一获批阶段默认覆盖实现、测试、CI 修复、提交/PR/合并、受控 workflow、同范围重试、验证和日志收口；禁止因临时失败或内部步骤创建微阶段，并明确具体目标已在获批方案中列明时不重复确认。
+- 文件：`AGENTS.md`、`CLAUDE.md`、`.claude/rules/worklog.md`、`WORKLOG.md`。
+- 验证：三份规则的关键条款一致性扫描和 `git diff --check` 通过；确认仍保留新增权限、密钥、网络/防火墙、真实数据、业务流量、不可逆影响和回滚失效时的重新审批门禁。
+- 边界：未修改业务代码、部署 workflow、生产配置、TODO 或计划文件，未执行生产操作。
