@@ -1812,3 +1812,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`frontend/src/components/Message.tsx`、`WORKLOG.md`。
 - 验证：`npm run build` 通过（1964 modules transformed）；构建仍报告既有 CSS 语法警告和主包大于 500 kB 警告。
 - 待办/风险：尚未使用带连续引用角标的真实回答进行浏览器视觉验收；远端整合与推送仍暂停。
+
+### 04:32 — 增加消息复制与回答重新生成
+
+- 完成：为用户提问增加复制按钮，为最后一轮助手回答增加紧邻复制按钮的重新生成入口；重新生成从目标轮之前恢复既有 `ChatSession` 流程，保留旧回答、来源和检索状态为可切换版本，后续上下文只采用当前有效版本；存在后续追问时禁用历史回答重新生成，失败时恢复原回答。新增向后兼容的回答版本、有效版本指针和轮次分类范围表，不覆盖基础消息正文，不增加会话轮次。
+- 文件：`api/conversation_runtime.py`、`api/db_migrations.py`、`api/routes_chat.py`、`api/schemas.py`、`frontend/src/api/chatStream.ts`、`frontend/src/components/ChatLayout.tsx`、`frontend/src/components/Message.tsx`、`frontend/src/components/MessageList.tsx`、`frontend/src/hooks/useChat.ts`、`frontend/src/types.ts`、`frontend/src/components/Message.test.tsx`、`tests/test_answer_regeneration.py`、`tests/test_transcription_db_migrations.py`、`project-docs/features/chat-runtime.md`、`WORKLOG.md`。
+- 验证：后端回答版本与迁移专项测试 13/13 通过；Python 语法检查通过；前端全量 Vitest 19 个文件、85/85 项测试通过；TypeScript 检查与 Vite production build 通过（1964 modules transformed）；`git diff --check` 通过。构建保留既有 CSS minify、主包大于 500 kB 与 React Router future warning。
+- 待办/风险：功能处于待用户验收；尚未连接真实 LLM、真实登录会话或生产数据库执行端到端重新生成，未部署。首次启动将按现有迁移流程备份并为 `app.sqlite` 新增三个版本表，不需要重建 Qdrant 索引。

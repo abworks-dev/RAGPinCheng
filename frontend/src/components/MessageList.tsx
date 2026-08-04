@@ -9,6 +9,9 @@ export function MessageList({
   sourceOpen = false,
   activeSourceMessageId = null,
   onToggleSources,
+  sending = false,
+  onRegenerate,
+  onViewAnswerVersion,
 }: {
   messages: ChatMessage[];
   conversationId: string | null;
@@ -16,6 +19,9 @@ export function MessageList({
   sourceOpen?: boolean;
   activeSourceMessageId?: string | null;
   onToggleSources?: (messageId: string) => void;
+  sending?: boolean;
+  onRegenerate?: (messageId: string) => void;
+  onViewAnswerVersion?: (messageId: string, versionIndex: number) => void;
 }) {
   const bottomRef = useRef<HTMLDivElement | null>(null);
   // Auto-scroll on every render so streaming tokens stay in view.
@@ -49,6 +55,7 @@ export function MessageList({
     <div className="min-h-0 flex-1 overflow-y-auto py-6">
       {(() => {
         let turn = 0;
+        const latestAssistantId = [...messages].reverse().find((message) => message.role === "assistant")?.id;
         return messages.map((m) => {
           if (m.role === "user") turn += 1;
           return (
@@ -59,6 +66,9 @@ export function MessageList({
               turnIndex={m.role === "assistant" ? turn : turn}
               sourcesSelected={sourceOpen && activeSourceMessageId === m.id}
               onToggleSources={onToggleSources}
+              canRegenerate={m.role === "assistant" && m.id === latestAssistantId && !sending && !m.streaming}
+              onRegenerate={onRegenerate}
+              onViewAnswerVersion={onViewAnswerVersion}
             />
           );
         });
