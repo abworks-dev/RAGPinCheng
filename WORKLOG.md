@@ -1979,5 +1979,5 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 
 - 完成：按获批 R3 方案新增默认关闭的 `production-asr` 依赖诊断 workflow 和纯 ASCII Windows PowerShell 入口；固定读取 source run `30955067671`，优先复用既有 resolver 日志，不足时只在独立 venv 重放 pip dry-run。诊断严格校验 production freeze、组合 requirements 和文件身份，只输出脱敏冲突行与 SHA-256，拒绝 URL、代理、Token、绝对路径和完整 freeze；不安装依赖、不下载模型、不启动服务或 CUDA。
 - 文件：新增 `.github/workflows/diagnose-faster-whisper-dependencies-production.yml`、`scripts/diagnose-faster-whisper-dependencies.ps1`；修改 `tests/test_asr_deployment_static.py` 和 `project-docs/plans/faster-whisper-r3-unified-qualification.md`。
-- 验证：Windows PowerShell 5.1 AST、workflow YAML、脱敏函数内存自检和 `git diff --check` 通过；R3 专项 48/48 通过；本地无外部服务的 ASR/Profile/Remote Provider/部署回归 323/323 通过。
-- 待办/风险：尚未推送、创建 PR、运行远端 CI 或执行生产诊断 workflow；诊断结果出来后仍不得自动修改依赖 pin、production freeze、隔离结构或 Profile admission。
+- 验证：初版经 PR #40 的 7 项 CI 全绿后合并为 `889a4c82fb04e40d9f1f6cbc319826bdf6d14f04`；生产诊断 run `30956817205` 安全完成 dry-run 和脱敏 artifact 上传，但暴露出初版会把兼容的裸依赖误判为冲突，未形成判定唯一的证据。最小修复改为区分 binary distribution 不可用与带版本比较符的约束冲突，并显式清理成功步骤退出码；Windows PowerShell 5.1 AST、workflow YAML、脱敏器正/负自检和 `git diff --check` 通过，R3 定向测试 72/72 通过。
+- 待办/风险：最小修复尚未推送、创建 PR 或运行远端 CI；修复合并后需重跑诊断。诊断结果出来后仍不得自动修改依赖 pin、production freeze、隔离结构或 Profile admission。
