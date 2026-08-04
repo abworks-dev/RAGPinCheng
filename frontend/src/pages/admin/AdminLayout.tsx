@@ -1,9 +1,7 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
-import { ArrowLeft } from "lucide-react";
 import { AppBrand } from "../../components/AppBrand";
-import { Button, buttonVariants } from "../../components/ui/button";
-import { useAuth } from "../../context/AuthContext";
+import { ThemeMenu } from "../../components/ThemeMenu";
+import { UserMenu } from "../../components/UserMenu";
 import { cn } from "../../lib/utils";
 import { AdminConversationsPage } from "./AdminConversationsPage";
 import { AdminDocumentsPage } from "./AdminDocumentsPage";
@@ -24,44 +22,19 @@ const tabs: [Tab, string][] = [
 ];
 
 export function AdminLayout() {
-  const { state, logout } = useAuth();
   const [tab, setTab] = useState<Tab>("users");
 
   return (
     <div className="min-h-full bg-admin-background text-foreground">
       <header className="sticky top-0 z-sticky bg-admin-surface/95 backdrop-blur">
-        <div className="flex min-h-16 items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
+        <div className="flex min-h-16 items-center px-4 sm:px-6 lg:px-8">
           <AppBrand subtitle="管理工作台" subtitleClassName="hidden sm:block" />
-
-          <div className="flex shrink-0 items-center gap-1 sm:gap-2">
-            {state.status === "authed" && (
-              <span className="hidden max-w-56 truncate text-ui-sm text-muted-foreground xl:inline">
-                {state.user.real_name}（{state.user.employee_id}）
-              </span>
-            )}
-            <Link to="/" className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "px-2 sm:px-3")}>
-              <ArrowLeft className="size-4" aria-hidden="true" />
-              <span className="hidden sm:inline">返回对话</span>
-              <span className="sm:hidden">返回</span>
-            </Link>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="px-2 text-muted-foreground hover:text-destructive sm:px-3"
-              onClick={async () => {
-                await logout();
-                window.location.href = "/login";
-              }}
-            >
-              退出
-            </Button>
-          </div>
         </div>
       </header>
 
       <div className="flex flex-col lg:min-h-[calc(100vh-4rem)] lg:flex-row">
-        <aside className="shrink-0 bg-admin-surface lg:w-64">
-          <div className="px-3 py-3 lg:p-4">
+        <aside className="flex shrink-0 flex-col bg-admin-surface lg:h-[calc(100vh-4rem)] lg:w-64">
+          <div className="px-3 py-3 lg:p-4 lg:pb-3">
             <p className="mb-2 hidden px-3 text-ui-xs font-medium uppercase tracking-[0.14em] text-muted-foreground lg:block">
               管理功能
             </p>
@@ -90,6 +63,10 @@ export function AdminLayout() {
                 );
               })}
             </nav>
+          </div>
+          <div className="mt-auto space-y-1 px-2 py-2">
+            <ThemeMenu />
+            <UserMenu adminContext />
           </div>
         </aside>
 
