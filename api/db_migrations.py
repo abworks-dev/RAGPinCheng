@@ -119,7 +119,32 @@ PHASE2_STATEMENTS = (
     )""",
 )
 
-MIGRATIONS = (Migration(1, "multi_engine_transcription_phase2", PHASE2_STATEMENTS),)
+ANSWER_VERSION_STATEMENTS = (
+    """CREATE TABLE message_answer_versions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        assistant_message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+        version_index INTEGER NOT NULL CHECK (version_index > 0),
+        content TEXT NOT NULL,
+        sources_json TEXT,
+        final_sources_json TEXT,
+        search_query TEXT NOT NULL DEFAULT '',
+        created_at INTEGER NOT NULL,
+        UNIQUE(assistant_message_id, version_index)
+    )""",
+    """CREATE TABLE message_answer_heads (
+        assistant_message_id INTEGER PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+        active_version_id INTEGER NOT NULL UNIQUE REFERENCES message_answer_versions(id) ON DELETE CASCADE
+    )""",
+    """CREATE TABLE message_turn_requests (
+        user_message_id INTEGER PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+        categories_json TEXT
+    )""",
+)
+
+MIGRATIONS = (
+    Migration(1, "multi_engine_transcription_phase2", PHASE2_STATEMENTS),
+    Migration(2, "answer_regeneration_versions", ANSWER_VERSION_STATEMENTS),
+)
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 PHASE2_TABLES = frozenset(
     {
@@ -129,6 +154,9 @@ PHASE2_TABLES = frozenset(
         "transcript_publication_index_jobs",
         "media_transcript_heads",
     }
+)
+ANSWER_VERSION_TABLES = frozenset(
+    {"message_answer_versions", "message_answer_heads", "message_turn_requests"}
 )
 
 
@@ -189,6 +217,8 @@ def has_pending_ddl(path: Path, *, base_tables: frozenset[str]) -> bool:
     validate_applied_migrations(applied)
     if any(version == 1 for version, _name in applied) and not PHASE2_TABLES.issubset(tables):
         raise RuntimeError("migration_schema_mismatch")
+    if any(version == 2 for version, _name in applied) and not ANSWER_VERSION_TABLES.issubset(tables):
+        raise RuntimeError("migration_schema_mismatch")
     if not base_tables.issubset(tables):
         return True
     if "index_jobs" in tables and "media_id" not in index_columns:
@@ -231,6 +261,8 @@ def apply_all(conn: sqlite3.Connection, *, base_schema: str, applied_at: int) ->
             row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
         }
         if not PHASE2_TABLES.issubset(tables):
+            raise RuntimeError("migration_schema_mismatch")
+        if not ANSWER_VERSION_TABLES.issubset(tables):
             raise RuntimeError("migration_schema_mismatch")
         if conn.execute("PRAGMA foreign_key_check").fetchone() is not None:
             raise RuntimeError("migration_foreign_key_check_failed")

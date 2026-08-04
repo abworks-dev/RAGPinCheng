@@ -54,6 +54,16 @@ export type ChatMessage = {
   streaming?: boolean;
   stage?: ChatStage;
   error?: string;
+  answerVersions?: AnswerVersion[];
+  viewedVersionIndex?: number;
+};
+
+export type AnswerVersion = {
+  id: string;
+  versionIndex: number;
+  content: string;
+  sources?: Source[];
+  isActive: boolean;
 };
 
 export type AuthUser = {
@@ -85,6 +95,14 @@ export type ConversationState = {
     content: string;
     sources_for_ui?: Source[] | null;
     created_at?: number;
+    answer_versions?: {
+      id: number;
+      version_index: number;
+      content: string;
+      sources_for_ui?: Source[] | null;
+      created_at: number;
+      is_active: boolean;
+    }[] | null;
   }[];
 };
 

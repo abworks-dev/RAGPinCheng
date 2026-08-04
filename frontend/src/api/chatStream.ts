@@ -9,7 +9,11 @@ import { getCsrfToken } from "./client";
  */
 export async function* streamChat(
   conversationId: string,
-  body: { query: string; categories?: string[] | null },
+  body: {
+    query?: string;
+    categories?: string[] | null;
+    regenerate_assistant_message_id?: number;
+  },
   signal?: AbortSignal,
 ): AsyncGenerator<ChatEvent, void, void> {
   const headers: Record<string, string> = {

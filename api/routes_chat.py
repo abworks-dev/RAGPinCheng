@@ -24,8 +24,10 @@ from .conversation_runtime import (
     get_conversation,
     get_lock,
     hydrate_session,
+    list_answer_versions,
     list_conversations,
     list_messages,
+    prepare_regeneration,
     wrap_stream_with_persistence,
 )
 from .db import get_db
@@ -104,6 +106,25 @@ def get_my_conversation(
                 else None
             ),
             created_at=m["created_at"],
+            answer_versions=(
+                [
+                    {
+                        "id": v["id"],
+                        "version_index": v["version_index"],
+                        "content": v["content"],
+                        "sources_for_ui": (
+                            [source_to_dto(s) for s in json.loads(v["sources_json"])]
+                            if v["sources_json"]
+                            else None
+                        ),
+                        "created_at": v["created_at"],
+                        "is_active": bool(v["is_active"]),
+                    }
+                    for v in list_answer_versions(conn, m["id"])
+                ]
+                if m["role"] == "assistant"
+                else None
+            ),
         )
         for m in msgs_rows
     ]
@@ -142,6 +163,8 @@ async def chat(
     request: Request,
     user: CurrentUser = Depends(require_csrf),
 ) -> EventSourceResponse:
+    if body.regenerate_assistant_message_id is None and not body.query:
+        raise HTTPException(status_code=422, detail="query is required")
     # Per-user rate limit. Reject early — before doing DB work or hydration —
     # so a hot-spinning client can't queue up expensive turns we'll just
     # discard. 429 with Retry-After is the standard contract.
@@ -162,12 +185,26 @@ async def chat(
             "SELECT user_id, turn_index FROM conversations WHERE id = ?",
             (conversation_id,),
         ).fetchone()
+        latest_assistant_id = (
+            pre_conn.execute(
+                "SELECT id FROM messages WHERE conversation_id = ? AND role = 'assistant' "
+                "ORDER BY id DESC LIMIT 1",
+                (conversation_id,),
+            ).fetchone()
+            if body.regenerate_assistant_message_id is not None
+            else None
+        )
     finally:
         pre_conn.close()
     if row is None:
         raise HTTPException(status_code=404, detail="conversation not found")
     if row["user_id"] != user.id:
         raise HTTPException(status_code=403, detail="forbidden")
+    if body.regenerate_assistant_message_id is not None and (
+        latest_assistant_id is None
+        or latest_assistant_id["id"] != body.regenerate_assistant_message_id
+    ):
+        raise HTTPException(status_code=409, detail="only latest answer can be regenerated")
     is_first_turn = int(row["turn_index"]) == 0
 
     lock = get_lock(conversation_id)
@@ -180,24 +217,38 @@ async def chat(
                 # see the same stale snapshot.
                 hydrate_conn = db_connect()
                 try:
-                    conv_row = hydrate_conn.execute(
-                        "SELECT * FROM conversations WHERE id = ?",
-                        (conversation_id,),
-                    ).fetchone()
-                    session = hydrate_session(hydrate_conn, conv_row)
+                    if body.regenerate_assistant_message_id is not None:
+                        try:
+                            session, query, categories = prepare_regeneration(
+                                hydrate_conn,
+                                conversation_id,
+                                body.regenerate_assistant_message_id,
+                            )
+                        except ValueError as exc:
+                            raise HTTPException(status_code=409, detail=str(exc)) from exc
+                    else:
+                        conv_row = hydrate_conn.execute(
+                            "SELECT * FROM conversations WHERE id = ?",
+                            (conversation_id,),
+                        ).fetchone()
+                        session = hydrate_session(hydrate_conn, conv_row)
+                        query = body.query or ""
+                        categories = body.categories
                 finally:
                     hydrate_conn.close()
 
                 prep, raw_stream = await asyncio.to_thread(
                     session.ask_stream,
-                    body.query,
-                    body.categories,
+                    query,
+                    categories,
                 )
 
                 plan = TurnPersistencePlan(
                     conversation_id=conversation_id,
-                    user_text=body.query,
+                    user_text=query,
                     is_first_turn=is_first_turn,
+                    categories=categories,
+                    regenerate_assistant_message_id=body.regenerate_assistant_message_id,
                 )
                 persistent_stream = wrap_stream_with_persistence(
                     raw_stream, session, plan

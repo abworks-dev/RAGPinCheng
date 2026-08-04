@@ -65,6 +65,14 @@ export function useChat({
             sources: m.sources_for_ui || undefined,
             query: m.role === "assistant" ? lastUserContent : undefined,
             stage: "done",
+            answerVersions: m.answer_versions?.map((version) => ({
+              id: String(version.id),
+              versionIndex: version.version_index,
+              content: version.content,
+              sources: version.sources_for_ui || undefined,
+              isActive: version.is_active,
+            })),
+            viewedVersionIndex: m.answer_versions?.find((version) => version.is_active)?.version_index,
           };
         });
         setMessages(replayed);
@@ -203,5 +211,137 @@ export function useChat({
     [sending, conversationId, onConversationCreated, onConversationUpdated],
   );
 
-  return { messages, send, sending, loading, error };
+  const regenerate = useCallback(
+    async (assistantMessageId: string) => {
+      if (sending || !conversationId || !/^\d+$/.test(assistantMessageId)) return;
+      const snapshot = messages.find((message) => message.id === assistantMessageId);
+      if (!snapshot || snapshot.role !== "assistant") return;
+
+      setSending(true);
+      abortRef.current?.abort();
+      const ctrl = new AbortController();
+      abortRef.current = ctrl;
+      setMessages((prev) =>
+        prev.map((message) =>
+          message.id === assistantMessageId
+            ? {
+                ...message,
+                content: "",
+                sources: undefined,
+                error: undefined,
+                streaming: true,
+                stage: "retrieving",
+              }
+            : message,
+        ),
+      );
+
+      let completed = false;
+      try {
+        for await (const ev of streamChat(
+          conversationId,
+          { regenerate_assistant_message_id: Number(assistantMessageId) },
+          ctrl.signal,
+        )) {
+          if (ev.type === "prep") {
+            setMessages((prev) =>
+              prev.map((message) =>
+                message.id === assistantMessageId
+                  ? { ...message, prep: ev.data, sources: ev.data.used_sources, stage: "generating" }
+                  : message,
+              ),
+            );
+          } else if (ev.type === "token") {
+            setMessages((prev) =>
+              prev.map((message) =>
+                message.id === assistantMessageId
+                  ? { ...message, content: message.content + ev.data.text, stage: "streaming" }
+                  : message,
+              ),
+            );
+          } else if (ev.type === "done") {
+            completed = true;
+            setMessages((prev) =>
+              prev.map((message) => {
+                if (message.id !== assistantMessageId) return message;
+                const oldVersions = message.answerVersions?.length
+                  ? message.answerVersions
+                  : [{
+                      id: `${assistantMessageId}-original`,
+                      versionIndex: 1,
+                      content: snapshot.content,
+                      sources: snapshot.sources,
+                      isActive: true,
+                    }];
+                const nextIndex = Math.max(...oldVersions.map((version) => version.versionIndex)) + 1;
+                return {
+                  ...message,
+                  content: ev.data.answer_text || message.content,
+                  sources: ev.data.sources,
+                  done: ev.data,
+                  streaming: false,
+                  stage: "done",
+                  answerVersions: [
+                    ...oldVersions.map((version) => ({ ...version, isActive: false })),
+                    {
+                      id: `${assistantMessageId}-pending-${nextIndex}`,
+                      versionIndex: nextIndex,
+                      content: ev.data.answer_text || message.content,
+                      sources: ev.data.sources,
+                      isActive: true,
+                    },
+                  ],
+                  viewedVersionIndex: nextIndex,
+                };
+              }),
+            );
+          } else if (ev.type === "error") {
+            throw new Error(ev.data.message);
+          }
+        }
+      } catch (e: any) {
+        const message = e?.name === "AbortError" ? "重新生成已中止" : e?.message || String(e);
+        setMessages((prev) =>
+          prev.map((item) =>
+            item.id === assistantMessageId
+              ? { ...snapshot, error: message, streaming: false, stage: "done" }
+              : item,
+          ),
+        );
+      } finally {
+        if (!completed) {
+          setMessages((prev) =>
+            prev.map((item) =>
+              item.id === assistantMessageId && item.streaming
+                ? { ...snapshot, streaming: false, stage: "done" }
+                : item,
+            ),
+          );
+        }
+        setSending(false);
+        onConversationUpdated?.(conversationId);
+      }
+    },
+    [conversationId, messages, onConversationUpdated, sending],
+  );
+
+  const viewAnswerVersion = useCallback((assistantMessageId: string, versionIndex: number) => {
+    setMessages((prev) =>
+      prev.map((message) => {
+        if (message.id !== assistantMessageId) return message;
+        const version = message.answerVersions?.find((item) => item.versionIndex === versionIndex);
+        return version
+          ? {
+              ...message,
+              content: version.content,
+              sources: version.sources,
+              viewedVersionIndex: version.versionIndex,
+              error: undefined,
+            }
+          : message;
+      }),
+    );
+  }, []);
+
+  return { messages, send, regenerate, viewAnswerVersion, sending, loading, error };
 }
