@@ -87,7 +87,7 @@ ASR 仅在四个字段均合法、模型已加载、inflight 为 0 且明确允�
 本轮获批范围只验证基础设施和服务契约，不承载业务流量：
 
 1. 只允许完整 master SHA 通过 `workflow_dispatch` 执行；默认操作为只读 preflight，显式 `activate` 才能激活。
-2. 激活前要求固定模型 Manifest 有效、服务端配置仍为 `ASR_SERVICE_ENABLED=false`、Scheduled Task 不存在、TCP 8200 未监听，且不存在覆盖 8200 的其他已启用入站 Allow 规则。
+2. 激活前要求固定模型 Manifest 有效、服务端配置仍为 `ASR_SERVICE_ENABLED=false`、Scheduled Task 不存在、TCP 8200 未监听，且不存在会应用到任意程序/服务或 ASR venv Python、并覆盖 8200 的其他已启用入站 Allow 规则；其他程序、App Package 或特定 Windows 服务的规则不属于 ASR 暴露面，不修改也不误判。
 3. 部署同一 SHA 的 payload 后，备份服务端配置，原子改为 `ASR_SERVICE_ENABLED=true`；注册并启动固定名称 `RAGPinCheng-ASR` 的 Administrator/S4U Scheduled Task。
 4. 新建唯一防火墙规则 `RAGPinCheng-ASR-8200-from-Ubuntu`，只允许 `192.168.11.12` 访问 Windows TCP 8200；规则字段、端口和远端地址均严格复核。
 5. Windows 本机严格验证 `/health`、受鉴权 `/v1/capabilities` 和 GPU `/v1/activity` 的唯一字段集合、版本、固定 experimental Profile 与值域。
