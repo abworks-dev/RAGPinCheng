@@ -445,6 +445,10 @@ def test_faster_whisper_qualification_freezes_dependencies_model_and_gates():
     assert "torchaudio==2.7.0+cu128" in script
     assert "requirements-windows.txt" in script
     assert "requirements-faster-whisper.txt" in script
+    assert '$RequirementsSource = $ResolvedSource.Replace("\\", "/")' in script
+    assert "-r $RequirementsSource/asr_service/requirements-windows.txt" in script
+    assert "-r $RequirementsSource/asr_service/requirements-faster-whisper.txt" in script
+    assert "-r $ResolvedSource\\asr_service\\" not in script
     assert "--only-binary=:all:" in script
     assert "--no-index" in script
     assert "pip\", \"check" in script
