@@ -1,7 +1,8 @@
 # faster-whisper R3 统一资格验证实施方案
 
-> 状态：已于 2026-08-05 获用户批准；统一生产资格 workflow 已合并，首次执行因固定样本
-> Manifest 缺失而在下载前失败关闭；固定 Windows TTS 样本准备通道已获批实施。
+> 状态：已于 2026-08-05 完成仓库实施、固定 Windows TTS 样本准备和生产 workflow
+> 执行；固定 8 样本已生成并通过严格 Manifest 校验，但最终 verdict 为
+> `dependency_preparation_failed`，faster-whisper 尚未取得 R3 资格，Profile 准入保持关闭。
 > 日期口径：2026-08-05，Asia/Shanghai。
 > 风险等级：R3（Windows 生产 GPU 主机上的依赖解析、模型下载与真实 CUDA 推理）。
 > 唯一执行基线：本文件取代历史 `faster-whisper-r3a-*` 方案作为后续执行入口；
@@ -25,6 +26,18 @@ R3 只形成资格结论。即使全部通过，也不自动修改
 ASR 生产 venv，不产生管理员可见的新建任务能力。
 
 ## 2. 已确认基线
+
+### 2.0 最新执行结论
+
+- 固定样本准备、编码修复和 pip 路径修复分别经 PR #36、#37、#38 合并；
+- workflow `30955067671` 复用并严格校验了固定 8 样本；
+- 组合依赖解析在 `requirements-windows.txt` 的 FunASR 项报告版本冲突，
+  verdict 为 `dependency_preparation_failed`；
+- 模型下载、临时 18200 服务、CUDA 推理和质量门禁均未开始；
+- 脱敏 verdict 记录 `production_services_modified=false`、
+  `profile_admission=disabled`；
+- 在明确冲突包及重新批准依赖/约束方案前，不得放宽 production freeze、修改固定依赖
+  或启用 faster-whisper Profile。
 
 ### 2.1 仓库基线
 
