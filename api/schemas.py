@@ -106,6 +106,7 @@ class AdminConversationListResponse(BaseModel):
 
 
 class AdminFeedbackEntry(BaseModel):
+    feedback_id: str
     ts: str | None = None
     kind: str | None = None
     rating: str | None = None
@@ -121,11 +122,27 @@ class AdminFeedbackEntry(BaseModel):
     conversation_id: str | None = None
     turn_index: int | None = None
     message_id: str | None = None
+    status: Literal["pending", "in_progress", "resolved", "archived"] = "pending"
+    resolution: Literal["knowledge_fixed", "answer_improved", "no_action", "duplicate", "other"] | None = None
+    admin_note: str | None = None
+    assignee_user_id: int | None = None
+    assignee_name: str | None = None
+    updated_at: int | None = None
+    resolved_at: int | None = None
 
 
 class AdminFeedbackResponse(BaseModel):
     entries: list[AdminFeedbackEntry]
     total: int
+    page: int
+    page_size: int
+    counts: dict[str, int]
+
+
+class AdminFeedbackPatchRequest(BaseModel):
+    status: Literal["pending", "in_progress", "resolved", "archived"]
+    resolution: Literal["knowledge_fixed", "answer_improved", "no_action", "duplicate", "other"] | None = None
+    admin_note: str | None = Field(default=None, max_length=2000)
 
 
 class SweepResponse(BaseModel):

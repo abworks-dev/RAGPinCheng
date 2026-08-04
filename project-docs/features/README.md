@@ -29,6 +29,7 @@
 | 引用与来源面板 | 已实现 | `SourceDTO` / `citations.ts` | 对话运行时 | [citations-and-sources.md](citations-and-sources.md) |
 | 视频转录链路 | 部分实现 | `chunk_transcript` | 文档索引、引用与来源 | [transcript-pipeline.md](transcript-pipeline.md) |
 | 认证与授权 | 已实现 | `require_user` / `require_csrf` | app.sqlite、Cookie | [authentication.md](authentication.md) |
+| 反馈处理工作流 | 已实现 | `/api/admin/feedback` | feedback.jsonl、app.sqlite、管理员权限 | [feedback-management.md](feedback-management.md) |
 
 ## 新增或更新文档
 

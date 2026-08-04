@@ -1,6 +1,7 @@
 import type {
   AdminConversation,
   AdminFeedbackEntry,
+  AdminFeedbackResponse,
   AdminStats,
   AdminUser,
   ApiConfig,
@@ -175,10 +176,32 @@ export const api = {
   adminGetConversation: (id: string) =>
     jsonFetch<ConversationState>(`/api/conversations/${id}`),
   adminStats: () => jsonFetch<AdminStats>("/api/admin/stats"),
-  adminFeedback: (limit = 200) =>
-    jsonFetch<{ entries: AdminFeedbackEntry[]; total: number }>(
-      `/api/admin/feedback?limit=${limit}`,
-    ),
+  adminFeedback: (params: {
+    status?: string;
+    kind?: string;
+    rating?: string;
+    q?: string;
+    page?: number;
+    page_size?: number;
+  } = {}) => {
+    const query = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== "") query.set(key, String(value));
+    });
+    return jsonFetch<AdminFeedbackResponse>(`/api/admin/feedback?${query.toString()}`);
+  },
+  adminPatchFeedback: (
+    id: string,
+    body: {
+      status: AdminFeedbackEntry["status"];
+      resolution?: AdminFeedbackEntry["resolution"];
+      admin_note?: string;
+    },
+  ) =>
+    jsonFetch<AdminFeedbackEntry>(`/api/admin/feedback/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
   adminSweep: () =>
     jsonFetch<{ deleted_conversations: number; deleted_auth_sessions: number }>(
       "/api/admin/sweep",
