@@ -56,6 +56,9 @@ SHA 和显式执行开关，仅注入 `ASR_DEPENDENCY_PROXY`。上传 artifact �
 `blocker_confirmed`：pip 明确报告同一 requirement 无可用版本且无匹配 binary distribution；
 或 pip 冲突段同时给出同一 requirement 的带比较符依赖约束和 production constraint。
 结果必须记录受影响 requirement 与诊断种类；证据不完整时保持失败关闭。
+若完整 resolver 只给出裸依赖与同名 production constraint，可对该单一固定 constraint
+执行同 index、同 freeze、`--only-binary=:all:` 的隔离 pip dry-run；只有单包探针明确返回
+无匹配 binary distribution 时才能确认该 blocker，探针成功或错误种类不明确时继续失败关闭。
 
 ### 2.1 仓库基线
 
