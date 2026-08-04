@@ -46,6 +46,12 @@ if ($env:HOST -ne "192.168.11.11") {
 if ($env:PORT -ne "8100") {
     throw "GPU service PORT must be 8100"
 }
+if ($env:HF_HUB_OFFLINE -ne "1") {
+    throw "GPU service HF_HUB_OFFLINE must be 1"
+}
+if ($env:TRANSFORMERS_OFFLINE -ne "1") {
+    throw "GPU service TRANSFORMERS_OFFLINE must be 1"
+}
 
 $logFile = Join-Path $RepositoryPath "gpu_service.log"
 $errorLogFile = Join-Path $RepositoryPath "gpu_service.error.log"
