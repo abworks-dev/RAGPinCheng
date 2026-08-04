@@ -1838,3 +1838,9 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`.github/workflows/activate-asr-production.yml`、`.github/workflows/ci.yml`、`scripts/activate-asr-production.ps1`、`scripts/verify-asr-service.ps1`、`scripts/verify_asr_from_ubuntu.py`、`tests/test_asr_activation.py`、`project-docs/plans/multi-engine-transcription-phase5c-windows-asr-deployment.md`、`WORKLOG.md`。
 - 验证：激活、既有部署和模型缓存专项测试 `42 passed`；本地可运行的 ASR/Provider 回归 `146 passed`；Python `py_compile`、PowerShell AST 解析、WORKLOG 标题格式和 `git diff --check` 通过；PR #19～#22 各七个 CI job 全部通过。生产 preflight 已依次验证并修复 Windows checkout、受控 GPU probe Token 和防火墙规则归属判断；管理员前台 runner 随后成功完成 preflight、payload、配置、任务与防火墙步骤，但 Uvicorn 未健康且自动回滚成功。零字节启动日志确认 Windows PowerShell 5.1 把 Uvicorn 正常 stderr 当成终止错误；已将 `Continue` 严格限制在 Uvicorn 原生命令期间并恢复原策略、传播真实退出码，该修复的 CI 与生产重跑继续由同一交付完成。
 - 边界/风险：尚未在此提交时改变生产服务、防火墙或任务状态；生产执行保持 Ubuntu ASR 关闭，不上传媒体、不调用任务 API、不创建转录任务，不访问数据库、Qdrant 或 artifact。生产验收结果以不可变 workflow run 审计，失败时必须确认自动回滚结果。
+
+### 22:13 — 统一回答与引用问题反馈弹窗
+
+- 完成：新增共享反馈弹窗，在问题类型前展示由入口固定的“问题分类”；回答下方入口固定为“回答问题”，保留有害/不安全、虚假信息、没有帮助、其他类型；来源核验的“报告引用问题”移除内嵌表单，改用同一弹窗并固定为“引用问题”，提供引用内容不符、来源定位错误、资料已过时、其他类型。
+- 文件：新增 `frontend/src/components/FeedbackDialog.tsx` 及测试，修改 `FeedbackBar.tsx`、`FeedbackBar.test.tsx`、`SourceWorkspace.tsx` 与 `WORKLOG.md`；未修改反馈 API、管理端、消息、引用定位、RAG 或后端业务。
+- 验证：反馈专项 Vitest 2 个文件、6/6 项通过；前端全量 Vitest 26 个文件、114/114 项通过；`npm run build` 通过（2023 modules transformed）；`git diff --check` 无内容错误。保留既有 CSS minify 与主包大于 500 kB 警告。
