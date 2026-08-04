@@ -393,6 +393,72 @@ def test_faster_whisper_synthetic_sample_preparation_is_fixed_and_gated():
     assert "app.sqlite" not in script
 
 
+def test_faster_whisper_dependency_diagnosis_is_manual_fixed_and_sanitized():
+    workflow = read(
+        ".github/workflows/diagnose-faster-whisper-dependencies-production.yml"
+    )
+    script = read("scripts/diagnose-faster-whisper-dependencies.ps1")
+    lowered = script.lower()
+
+    assert "workflow_dispatch:" in workflow
+    assert "push:" not in workflow
+    assert "pull_request:" not in workflow
+    assert "production-asr" in workflow
+    assert "runs-on: [self-hosted, Windows, X64, asr-production]" in workflow
+    assert "timeout-minutes: 30" in workflow
+    assert workflow.count("default: false") == 1
+    assert "execute_diagnosis must be explicitly enabled" in workflow
+    assert "commit_sha must equal the workflow dispatch revision" in workflow
+    assert "diagnosis must be dispatched from master" in workflow
+    assert "secrets.ASR_DEPENDENCY_PROXY" in workflow
+    assert "secrets.ASR_MODEL_DOWNLOAD_PROXY" not in workflow
+    assert "secrets.GPU_SERVICE_TOKEN" not in workflow
+    assert "secrets.ASR_SERVICE_TOKEN" not in workflow
+    assert "source_run_id:" not in workflow
+    assert "model_id:" not in workflow
+    assert "revision:" not in workflow
+
+    assert '$SourceRunId = "30955067671"' in script
+    assert "production-freeze.txt" in script
+    assert "pip-download.log" in script
+    assert "qualification-requirements.txt" in script
+    assert "Convert-ToSanitizedConflictLines" in script
+    assert "Assert-SanitizerSelfTest" in script
+    assert "Assert-ProductionFreeze" in script
+    assert "Assert-FixedCombinedRequirements" in script
+    assert "Source production freeze contains a non-registry constraint" in script
+    assert "Source combined requirements do not match the fixed contract" in script
+    assert "faster-whisper-r3-dependency-diagnostic/1" in script
+    assert "--dry-run" in script
+    assert "--ignore-installed" in script
+    assert "--only-binary=:all:" in script
+    assert "--no-cache-dir" in script
+    assert "resolver-replay.log" in script
+    assert "conflict_details_insufficient" in script
+    assert "resolution_succeeded_unexpectedly" in script
+    assert "production_services_modified = $false" in script
+    assert 'profile_admission = "disabled"' in script
+    assert script.isascii()
+
+    assert "Remove-Item" not in script
+    assert "Start-ScheduledTask" not in script
+    assert "Stop-ScheduledTask" not in script
+    assert "Register-ScheduledTask" not in script
+    assert "Unregister-ScheduledTask" not in script
+    assert "New-NetFirewallRule" not in script
+    assert "Set-NetFirewallRule" not in script
+    assert "Remove-NetFirewallRule" not in script
+    assert "netsh advfirewall" not in lowered
+    assert "Start-Process" not in script
+    assert "ASR_ENABLED" not in script
+    assert "prod.env" not in lowered
+    assert "ASR_MODEL_DOWNLOAD_PROXY" not in script
+    assert "GPU_SERVICE_TOKEN" not in script
+    assert "ASR_SERVICE_TOKEN" not in script
+    assert "Qdrant" not in script
+    assert "app.sqlite" not in script
+
+
 def test_faster_whisper_qualification_is_isolated_from_production_mutations():
     script = read("scripts/qualify-faster-whisper-production.ps1")
     lowered = script.lower()
