@@ -39,6 +39,8 @@ class AsrServiceSettings:
     bge_probe_connect_timeout_seconds: float = 3.0
     bge_probe_request_timeout_seconds: float = 5.0
     log_dir: Path | None = None
+    faster_whisper_model_cache_root: Path | None = None
+    faster_whisper_model_manifest_path: Path | None = None
 
     @classmethod
     def from_env(cls) -> "AsrServiceSettings":
@@ -61,6 +63,8 @@ class AsrServiceSettings:
             float(os.getenv("BGE_PRIORITY_PROBE_CONNECT_TIMEOUT_SECONDS", "3")),
             float(os.getenv("BGE_PRIORITY_PROBE_REQUEST_TIMEOUT_SECONDS", "5")),
             _optional_path("ASR_LOG_DIR"),
+            _optional_path("ASR_FASTER_WHISPER_MODEL_CACHE_ROOT"),
+            _optional_path("ASR_FASTER_WHISPER_MODEL_MANIFEST_PATH"),
         )
 
     def validate_for_startup(self) -> None:
@@ -89,6 +93,14 @@ class AsrServiceSettings:
             raise RuntimeError("local model cache and manifest are required when service is enabled")
         if not self.model_local_files_only:
             raise RuntimeError("ASR_MODEL_LOCAL_FILES_ONLY must remain true")
+        if (
+            self.faster_whisper_model_cache_root is None
+        ) != (
+            self.faster_whisper_model_manifest_path is None
+        ):
+            raise RuntimeError(
+                "faster-whisper model cache and manifest must be configured together"
+            )
         if (
             not self.host or self.port <= 0 or self.port > 65535
             or self.max_input_bytes <= 0 or self.max_upload_part_bytes <= 0
