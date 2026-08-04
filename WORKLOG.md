@@ -1877,3 +1877,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`frontend/src/components/ChatLayout.tsx`、`frontend/src/components/SourceWorkspace.tsx`、`frontend/src/components/citations.ts`、`frontend/src/components/citations.test.ts`、`WORKLOG.md`；未修改来源数据、API、SSE、RAG、后端或其他页面样式。
 - 验证：引用切换专项 Vitest 9/9 通过；前端全量 Vitest 26 个文件、118/118 项通过；TypeScript project build 与 Vite production build 通过（2023 modules transformed）；`git diff --check` 通过。保留既有 React Router future warning、CSS minify warning 和主包大于 500 kB 警告。
 - 待办/风险：未使用真实登录会话进行浏览器视觉验收；待用户在桌面端及移动端分别复核面板初始关闭、初始打开和连续切换不同角标三种交互。
+
+### 03:54 — 修复对话轮次快速导航高亮滞后
+
+- 完成：程序化平滑滚动期间锁定用户点击的目标轮次，避免滚动监听在动画途中按旧位置把高亮覆盖回上一轮；滚动停止 160ms 后解除锁定并恢复正常 Scroll Spy 判定。
+- 文件：`frontend/src/components/MessageList.tsx`、`frontend/src/components/MessageList.test.tsx`、`WORKLOG.md`；未修改消息数据、会话接口、来源面板、RAG 或后端逻辑。
+- 验证：新增平滑滚动经过上一轮时仍保持目标高亮的回归测试；`MessageList.test.tsx` 7/7 通过。生产构建已执行到 1683 modules transformed，随后因复用的主工作区依赖缺少既有 `@radix-ui/react-dialog` 而失败，属于隔离工作树依赖不完整，未安装或修改依赖。
+- 待办/风险：尚未在真实长对话页面进行视觉验收；需在该工作树依赖完整的环境中补跑完整 TypeScript 与 production build。
