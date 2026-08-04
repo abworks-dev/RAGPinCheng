@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Button, buttonVariants } from "../../components/ui/button";
 import { useAuth } from "../../context/AuthContext";
@@ -24,6 +24,11 @@ const tabs: [Tab, string][] = [
 export function AdminLayout() {
   const { state, logout } = useAuth();
   const [tab, setTab] = useState<Tab>("users");
+
+  useEffect(() => {
+    document.documentElement.classList.add("admin-scrollbar-stable");
+    return () => document.documentElement.classList.remove("admin-scrollbar-stable");
+  }, []);
 
   return (
     <div className="min-h-full bg-admin-background text-foreground">
