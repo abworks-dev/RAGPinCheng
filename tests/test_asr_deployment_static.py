@@ -426,6 +426,7 @@ def test_faster_whisper_dependency_diagnosis_is_manual_fixed_and_sanitized():
     assert "binary_distribution_unavailable" in script
     assert "version_constraint_conflict" in script
     assert "No matching binary distribution found for" in script
+    assert 'D:\\private\\python.exe : ERROR: No matching distribution found for jieba' in script
     assert "diagnosis_kind = $DiagnosisKind" in script
     assert "affected_requirement = $AffectedRequirement" in script
     assert "exit 0" in script
