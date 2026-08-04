@@ -294,6 +294,9 @@ def test_inactive_deploy_refuses_to_replace_a_running_service():
 
 def test_faster_whisper_qualification_workflow_is_manual_immutable_and_gated():
     workflow = read(".github/workflows/qualify-faster-whisper-production.yml")
+    build_job = workflow.split("  build-internal-wheel:", 1)[1].split(
+        "\n  qualify:", 1
+    )[0]
     assert "workflow_dispatch:" in workflow
     assert "push:" not in workflow
     assert "pull_request:" not in workflow
@@ -314,6 +317,19 @@ def test_faster_whisper_qualification_workflow_is_manual_immutable_and_gated():
     assert "secrets.ASR_SERVICE_TOKEN" not in workflow
     assert "activate_service" not in workflow.lower()
     assert "operation:" not in workflow
+    assert "runs-on: ubuntu-latest" in build_job
+    assert "timeout-minutes: 30" in build_job
+    assert "scripts/build_internal_jieba_wheel.py build" in build_job
+    assert "actions/upload-artifact@v4" in build_job
+    assert "jieba-internal-wheel-${{ github.run_id }}" in build_job
+    assert "secrets." not in build_job
+    assert "production-asr" not in build_job
+    assert "ASR_SERVICE_TOKEN" not in build_job
+    assert "ASR_MODEL_DOWNLOAD_PROXY" not in build_job
+    assert "GPU_SERVICE_TOKEN" not in build_job
+    assert "actions/download-artifact@v4" in workflow
+    assert "InternalWheelBundlePath" in workflow
+    assert "needs: build-internal-wheel" in workflow
 
 
 def test_faster_whisper_synthetic_sample_preparation_is_fixed_and_gated():
@@ -528,6 +544,14 @@ def test_faster_whisper_qualification_freezes_dependencies_model_and_gates():
     assert "-r $RequirementsSource/asr_service/requirements-faster-whisper.txt" in script
     assert "-r $ResolvedSource\\asr_service\\" not in script
     assert "--only-binary=:all:" in script
+    assert "InternalWheelBundlePath" in script
+    assert "build_internal_jieba_wheel.py" in script
+    assert '"validate"' in script
+    assert '"--find-links", $ResolvedInternalWheelBundle' in script
+    assert "internal://jieba/0.42.1/$wheelSha256" in script
+    assert "internal_wheel_manifest_sha256" in script
+    assert "Controlled internal wheel changed before wheelhouse recording" in script
+    assert "Controlled internal wheel was not resolved into the wheelhouse" in script
     assert "--no-index" in script
     assert "pip\", \"check" in script
     assert "license-matrix.json" in script

@@ -75,6 +75,25 @@ SHA 和显式执行开关，仅注入 `ASR_DEPENDENCY_PROXY`。上传 artifact �
 或生产配置。后续若选择构建受控内部 wheel、放宽 binary-only 规则或调整环境隔离，必须提交新的
 R3 方案并单独审批。
 
+### 2.0.3 已批准的受控 wheel 解决方案（2026-08-05）
+
+采用受控内部 wheel，不放宽 `--only-binary=:all:`，不修改 `jieba==0.42.1` pin 或
+production freeze：
+
+1. GitHub-hosted Ubuntu job 只从固定 `files.pythonhosted.org` URL 下载
+   `jieba-0.42.1.tar.gz`，在任何源码执行前校验固定大小和 SHA-256；
+2. 使用 Python 3.11、`setuptools==80.9.0`、`wheel==0.45.1` 和固定
+   `SOURCE_DATE_EPOCH` 独立构建两次，只有文件名和 SHA-256 完全一致才生成 bundle；
+3. bundle 只允许一个 pure-Python `*-none-any.whl` 和严格
+   `asr-internal-wheel-manifest/1`，拒绝未知字段、路径逃逸、符号链接、原生二进制和身份漂移；
+4. 同一 workflow 通过 artifact 将 bundle 传给 Windows `production-asr` job；
+5. Windows 在创建资格 venv 前重新校验完整 SHA/run 身份和 Manifest，只把受控 bundle
+   作为 `pip download --find-links` 来源，仍保留全局 `--only-binary=:all:`；
+6. 内部 wheel 必须实际进入 run-local wheelhouse，并以受控内部身份、大小和 SHA-256
+   记录；其他 wheel 继续绑定公开下载 URL；
+7. 本方案只服务于隔离资格 run，不写入生产 ASR venv，不修改服务、防火墙、Ubuntu、
+   数据库、Qdrant、模型或 Profile admission。
+
 ### 2.1 仓库基线
 
 - PR #34 已合并到 `master`；
@@ -264,6 +283,7 @@ samples[8]
 | 文件 | 职责 |
 |---|---|
 | `.github/workflows/qualify-faster-whisper-production.yml` | 单一手动 R3 workflow；绑定完整 master SHA、`production-asr` Environment、Windows runner、并发锁和显式执行开关 |
+| `scripts/build_internal_jieba_wheel.py` | 固定下载、双重可复现构建和严格校验 `jieba==0.42.1` 受控 pure-Python wheel bundle |
 | `scripts/qualify-faster-whisper-production.ps1` | Windows 总编排：preflight、wheelhouse、隔离 venv、模型准备、临时服务、GPU/BGE 监控、清理和最终 verdict |
 | `scripts/prepare_faster_whisper_model.py` | 固定 Hugging Face repo/revision 下载、staging、普通文件/无 symlink 检查、全文件 Manifest 和本机 hash 校验 |
 | `scripts/run_faster_whisper_qualification.py` | 严格读取 8 样本 Manifest，通过隔离 ASR HTTP + Remote Provider + pipeline 生成 Canonical/Markdown，计算质量与时间戳指标 |
@@ -358,7 +378,9 @@ prepare_synthetic_samples=false|true（默认 false）
    - `asr_service/requirements-windows.txt`；
    - `asr_service/requirements-faster-whisper.txt`；
 4. 现有生产 freeze 作为共享包约束，证明 FunASR 与 faster-whisper 可以共存；
-5. 只接受 Windows x64 binary wheel，禁止 sdist、VCS URL、editable、可变 branch；
+5. 只接受 binary wheel，禁止在 Windows 资格 job 构建 sdist、使用 VCS URL、editable 或
+   可变 branch；唯一例外是前置 GitHub-hosted job 从固定 URL/大小/SHA-256 的
+   `jieba 0.42.1` sdist 双重构建并校验得到的受控 pure-Python wheel；
 6. wheelhouse 按文件名排序记录 URL、大小和 SHA-256；
 7. 从同一 wheelhouse 离线安装资格 venv；
 8. 运行 `pip check`、完整 freeze、模块来源校验和许可证审计；
