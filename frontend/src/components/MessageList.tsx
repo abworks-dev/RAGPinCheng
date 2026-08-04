@@ -37,6 +37,7 @@ export function MessageList({
   activeSourceMessageId = null,
   onToggleSources,
   sending = false,
+  onEditQuestion,
   onRegenerate,
   onViewAnswerVersion,
 }: {
@@ -47,6 +48,7 @@ export function MessageList({
   activeSourceMessageId?: string | null;
   onToggleSources?: (messageId: string) => void;
   sending?: boolean;
+  onEditQuestion?: (messageId: string, content: string) => void;
   onRegenerate?: (messageId: string) => void;
   onViewAnswerVersion?: (messageId: string, versionIndex: number) => void;
 }) {
@@ -173,6 +175,9 @@ export function MessageList({
   const latestAssistantId = [...messages]
     .reverse()
     .find((message) => message.role === "assistant")?.id;
+  const latestUserId = [...messages]
+    .reverse()
+    .find((message) => message.role === "user")?.id;
 
   return (
     <div className="scroll-fade-content-start relative min-h-0 flex-1">
@@ -201,6 +206,12 @@ export function MessageList({
               turnIndex={turn.turnIndex}
               sourcesSelected={sourceOpen && activeSourceMessageId === message.id}
               onToggleSources={onToggleSources}
+              canEdit={
+                message.role === "user"
+                && message.id === latestUserId
+                && !sending
+              }
+              onEdit={onEditQuestion}
               canRegenerate={
                 message.role === "assistant"
                 && message.id === latestAssistantId

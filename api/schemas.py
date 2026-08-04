@@ -32,9 +32,12 @@ class AuthMeResponse(BaseModel):
 
 
 class ChatRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     query: str | None = Field(default=None, min_length=1)
     categories: list[str] | None = None
     regenerate_assistant_message_id: int | None = None
+    edit_user_message_id: int | None = None
 
 
 class ConversationSummaryDTO(BaseModel):
@@ -379,6 +382,15 @@ class AnswerVersionDTO(BaseModel):
     sources_for_ui: list[SourceDTO] | None = None
     created_at: int
     is_active: bool
+    user_version_id: int | None = None
+
+
+class UserQuestionVersionDTO(BaseModel):
+    id: int
+    version_index: int
+    content: str
+    created_at: int
+    is_active: bool
 
 
 class MessageDTO(BaseModel):
@@ -388,6 +400,7 @@ class MessageDTO(BaseModel):
     sources_for_ui: list[SourceDTO] | None = None
     created_at: int | None = None
     answer_versions: list[AnswerVersionDTO] | None = None
+    user_versions: list[UserQuestionVersionDTO] | None = None
 
 
 class ConversationStateDTO(BaseModel):

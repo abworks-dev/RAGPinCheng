@@ -56,8 +56,19 @@ export function useChat({
         // turn so the FeedbackBar has `query` to ship — otherwise resumed
         // conversations would send feedback with only `answer_text`.
         let lastUserContent: string | undefined;
+        let lastUserVersionId: string | undefined;
         const replayed: ChatMessage[] = state.messages.map((m) => {
-          if (m.role === "user") lastUserContent = m.content;
+          if (m.role === "user") {
+            lastUserContent = m.content;
+            lastUserVersionId = m.user_versions?.find((version) => version.is_active)?.id != null
+              ? String(m.user_versions.find((version) => version.is_active)!.id)
+              : undefined;
+          }
+          const visibleAnswerVersions = m.role === "assistant" && lastUserVersionId
+            ? m.answer_versions?.filter(
+                (version) => String(version.user_version_id) === lastUserVersionId,
+              )
+            : m.answer_versions;
           return {
             id: m.id != null ? String(m.id) : newId(),
             role: m.role,
@@ -65,14 +76,23 @@ export function useChat({
             sources: m.sources_for_ui || undefined,
             query: m.role === "assistant" ? lastUserContent : undefined,
             stage: "done",
-            answerVersions: m.answer_versions?.map((version) => ({
+            answerVersions: visibleAnswerVersions?.map((version) => ({
               id: String(version.id),
               versionIndex: version.version_index,
               content: version.content,
               sources: version.sources_for_ui || undefined,
               isActive: version.is_active,
+              userVersionId: version.user_version_id != null ? String(version.user_version_id) : undefined,
             })),
-            viewedVersionIndex: m.answer_versions?.find((version) => version.is_active)?.version_index,
+            viewedVersionIndex: visibleAnswerVersions?.find((version) => version.is_active)?.version_index,
+            userVersions: m.user_versions?.map((version) => ({
+              id: String(version.id),
+              versionIndex: version.version_index,
+              content: version.content,
+              createdAt: version.created_at,
+              isActive: version.is_active,
+            })),
+            activeUserVersionId: lastUserVersionId,
           };
         });
         setMessages(replayed);
@@ -328,6 +348,153 @@ export function useChat({
     [conversationId, messages, onConversationUpdated, sending],
   );
 
+  const editQuestion = useCallback(
+    async (userMessageId: string, editedContent: string) => {
+      const query = editedContent.trim();
+      if (sending || !conversationId || !query || !/^\d+$/.test(userMessageId)) return;
+      const userIndex = messages.findIndex((message) => message.id === userMessageId);
+      const userSnapshot = messages[userIndex];
+      const answerSnapshot = messages[userIndex + 1];
+      if (
+        !userSnapshot ||
+        userSnapshot.role !== "user" ||
+        !answerSnapshot ||
+        answerSnapshot.role !== "assistant" ||
+        userSnapshot.content === query
+      ) return;
+
+      setSending(true);
+      abortRef.current?.abort();
+      const ctrl = new AbortController();
+      abortRef.current = ctrl;
+      setMessages((prev) =>
+        prev.map((message) => {
+          if (message.id === userMessageId) return { ...message, content: query };
+          if (message.id === answerSnapshot.id) {
+            return {
+              ...message,
+              content: "",
+              sources: undefined,
+              error: undefined,
+              streaming: true,
+              stage: "retrieving",
+              query,
+            };
+          }
+          return message;
+        }),
+      );
+
+      let completed = false;
+      try {
+        for await (const ev of streamChat(
+          conversationId,
+          { query, edit_user_message_id: Number(userMessageId) },
+          ctrl.signal,
+        )) {
+          if (ev.type === "prep") {
+            setMessages((prev) =>
+              prev.map((message) =>
+                message.id === answerSnapshot.id
+                  ? { ...message, prep: ev.data, sources: ev.data.used_sources, stage: "generating" }
+                  : message,
+              ),
+            );
+          } else if (ev.type === "token") {
+            setMessages((prev) =>
+              prev.map((message) =>
+                message.id === answerSnapshot.id
+                  ? { ...message, content: message.content + ev.data.text, stage: "streaming" }
+                  : message,
+              ),
+            );
+          } else if (ev.type === "done") {
+            completed = true;
+            const pendingUserVersionId = `${userMessageId}-pending-edit`;
+            setMessages((prev) =>
+              prev.map((message) => {
+                if (message.id === userMessageId) {
+                  const oldVersions = message.userVersions?.length
+                    ? message.userVersions
+                    : [{
+                        id: `${userMessageId}-original`,
+                        versionIndex: 1,
+                        content: userSnapshot.content,
+                        createdAt: Math.floor(Date.now() / 1000),
+                        isActive: true,
+                      }];
+                  const nextIndex = Math.max(...oldVersions.map((version) => version.versionIndex)) + 1;
+                  return {
+                    ...message,
+                    content: query,
+                    userVersions: [
+                      ...oldVersions.map((version) => ({ ...version, isActive: false })),
+                      {
+                        id: pendingUserVersionId,
+                        versionIndex: nextIndex,
+                        content: query,
+                        createdAt: Math.floor(Date.now() / 1000),
+                        isActive: true,
+                      },
+                    ],
+                    activeUserVersionId: pendingUserVersionId,
+                  };
+                }
+                if (message.id === answerSnapshot.id) {
+                  return {
+                    ...message,
+                    content: ev.data.answer_text || message.content,
+                    sources: ev.data.sources,
+                    done: ev.data,
+                    streaming: false,
+                    stage: "done",
+                    query,
+                    answerVersions: [{
+                      id: `${answerSnapshot.id}-pending-edit`,
+                      versionIndex: 1,
+                      content: ev.data.answer_text || message.content,
+                      sources: ev.data.sources,
+                      isActive: true,
+                      userVersionId: pendingUserVersionId,
+                    }],
+                    viewedVersionIndex: 1,
+                  };
+                }
+                return message;
+              }),
+            );
+          } else if (ev.type === "error") {
+            throw new Error(ev.data.message);
+          }
+        }
+      } catch (e: any) {
+        const editError = e?.name === "AbortError" ? "编辑已中止" : e?.message || String(e);
+        setMessages((prev) =>
+          prev.map((message) => {
+            if (message.id === userMessageId) return userSnapshot;
+            if (message.id === answerSnapshot.id) {
+              return { ...answerSnapshot, error: editError, streaming: false, stage: "done" };
+            }
+            return message;
+          }),
+        );
+      } finally {
+        if (!completed) {
+          setMessages((prev) =>
+            prev.map((message) =>
+              message.id === answerSnapshot.id && message.streaming
+                ? { ...answerSnapshot, streaming: false, stage: "done" }
+                : message,
+            ),
+          );
+        }
+        setSending(false);
+        onConversationUpdated?.(conversationId);
+      }
+    },
+    [conversationId, messages, onConversationUpdated, sending],
+  );
+
   const viewAnswerVersion = useCallback((assistantMessageId: string, versionIndex: number) => {
     setMessages((prev) =>
       prev.map((message) => {
@@ -346,5 +513,5 @@ export function useChat({
     );
   }, []);
 
-  return { messages, send, regenerate, viewAnswerVersion, sending, loading, error };
+  return { messages, send, regenerate, editQuestion, viewAnswerVersion, sending, loading, error };
 }

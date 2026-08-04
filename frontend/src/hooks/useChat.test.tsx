@@ -59,4 +59,51 @@ describe("useChat persisted message identity", () => {
       streaming: false,
     });
   });
+
+  it("edits the latest persisted question and replaces its paired answer", async () => {
+    mocks.getConversation.mockResolvedValue({
+      id: "conversation-1",
+      title: "测试",
+      user_id: 1,
+      created_at: 1,
+      updated_at: 1,
+      turn_index: 1,
+      messages: [
+        { id: 10, role: "user", content: "原问题" },
+        { id: 11, role: "assistant", content: "原回答", answer_versions: [] },
+      ],
+    });
+    mocks.streamChat.mockImplementation(async function* () {
+      yield {
+        type: "done",
+        data: {
+          answer_text: "编辑后的回答",
+          assistant_message_id: 11,
+          timings: {},
+          sources: [],
+          history_chars: 0,
+          budget: 0,
+        },
+      };
+    });
+    const { result } = renderHook(() => useChat({ conversationId: "conversation-1" }));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await act(async () => {
+      await result.current.editQuestion("10", "编辑后的问题");
+    });
+
+    expect(mocks.streamChat).toHaveBeenCalledWith(
+      "conversation-1",
+      { query: "编辑后的问题", edit_user_message_id: 10 },
+      expect.any(AbortSignal),
+    );
+    expect(result.current.messages[0].content).toBe("编辑后的问题");
+    expect(result.current.messages[1]).toMatchObject({
+      id: "11",
+      content: "编辑后的回答",
+      query: "编辑后的问题",
+      streaming: false,
+    });
+  });
 });
