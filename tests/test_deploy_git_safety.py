@@ -91,6 +91,10 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertIn("GPU_SERVICE_TOKEN must not be empty", self.windows_start)
         self.assertIn("GPU service HOST must be 192.168.11.11", self.windows_start)
         self.assertIn("GPU service PORT must be 8100", self.windows_start)
+        self.assertIn("HF_HUB_OFFLINE=1", self.windows)
+        self.assertIn("TRANSFORMERS_OFFLINE=1", self.windows)
+        self.assertIn("GPU service HF_HUB_OFFLINE must be 1", self.windows_start)
+        self.assertIn("GPU service TRANSFORMERS_OFFLINE must be 1", self.windows_start)
         self.assertNotIn("GIT_TOKEN", self.windows_start)
         self.assertNotIn("RUNNER_TRACKING_ID", self.windows_start)
 

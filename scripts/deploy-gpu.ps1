@@ -213,6 +213,8 @@ GPU_SERVICE_TOKEN=$Token
 HOST=192.168.11.11
 PORT=8100
 LOG_LEVEL=INFO
+HF_HUB_OFFLINE=1
+TRANSFORMERS_OFFLINE=1
 "@ | Set-Content -Path $EnvFile -Encoding UTF8
 
 # ── 6. Register and start the managed service task ─────────────────────────
