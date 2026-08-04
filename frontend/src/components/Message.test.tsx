@@ -280,4 +280,31 @@ describe("Message assistant actions", () => {
     fireEvent.click(screen.getByRole("button", { name: "查看上一个回答" }));
     expect(viewVersion).toHaveBeenCalledWith("12", 1);
   });
+
+  it("keeps a citation tooltip open while moving from the marker into the tooltip", () => {
+    vi.useFakeTimers();
+    render(
+      <Message
+        msg={assistant({ content: "命名规则见[1]。" })}
+        conversationId="conversation-1"
+        turnIndex={1}
+      />,
+    );
+
+    const marker = screen.getByRole("superscript");
+    fireEvent.mouseEnter(marker);
+    const tooltip = screen.getByRole("tooltip");
+    expect(tooltip).toHaveTextContent("测试标准");
+    expect(tooltip).toHaveClass("bg-popover", "text-popover-foreground", "top-full");
+
+    fireEvent.mouseLeave(marker);
+    fireEvent.mouseEnter(tooltip);
+    act(() => vi.advanceTimersByTime(150));
+    expect(screen.getByRole("tooltip")).toBeInTheDocument();
+
+    fireEvent.mouseLeave(tooltip);
+    act(() => vi.advanceTimersByTime(150));
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+    vi.useRealTimers();
+  });
 });

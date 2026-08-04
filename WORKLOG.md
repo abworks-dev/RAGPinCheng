@@ -2033,3 +2033,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`frontend/src/components/ChatLayout.tsx`、`frontend/src/components/SourceWorkspace.tsx`、`frontend/src/components/sourceSelection.ts`、`frontend/src/components/sourceSelection.test.ts`、`WORKLOG.md`。
 - 验证：来源选择与标题按钮专项 Vitest 2 个文件、5/5 项通过；TypeScript project build 与 Vite production build 通过（2026 modules transformed）；`git diff --check` 通过。构建保留既有 CSS 语法和主包大于 500 kB 警告。
 - 待办/风险：尚未使用含多个不同来源数量回答的真实会话进行桌面和移动端视觉验收；未修改 API、数据结构、RAG、依赖或部署。
+
+### 07:20 — 修复引用角标悬浮框异常
+
+- 完成：在最新 `master` 上将引用悬浮框统一为主题语义色，恢复深色模式下不可见的来源标题；消除角标与浮层之间的命中空隙，改为可取消的 150ms 延迟关闭，使鼠标可稳定移入浮层；保留视口边缘自动翻转，并将浮层改为段落内合法的行内容器。
+- 文件：`frontend/src/components/Message.tsx`、`frontend/src/components/Message.test.tsx`、`WORKLOG.md`。
+- 验证：悬浮框专项测试 12/12 通过；前端全量 Vitest 28 个文件、139/139 项通过；TypeScript project build 与 Vite production build 通过（2026 modules transformed）；`git diff --check` 通过。首次复用旧工作区依赖时有 3 个测试文件因缺少最新锁文件已声明的 Radix Dialog 而无法收集，按最新锁文件安装隔离依赖后全部通过；构建保留既有 CSS 语法、主包大于 500 kB 与 React Router future warning。
+- 待办/风险：尚未使用带来源的真实会话完成明暗主题、视口顶部/右侧翻转和鼠标移入浮层的浏览器视觉验收；依赖审计报告既有 10 项风险，本轮未修改依赖或锁文件，也未运行自动修复。
