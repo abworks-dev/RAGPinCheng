@@ -70,6 +70,7 @@ describe("FeedbackBar", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "这个回答不好" }));
     expect(screen.getByRole("dialog", { name: "反馈" })).toBeInTheDocument();
+    expect(screen.getByLabelText("问题分类：回答问题")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "提交" })).toBeDisabled();
 
     fireEvent.click(screen.getByRole("button", { name: "虚假信息" }));

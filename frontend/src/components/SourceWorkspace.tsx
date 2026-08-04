@@ -25,6 +25,9 @@ import {
   type CitationDetail,
   type CitationHoverDetail,
 } from "./citations";
+import { FeedbackDialog, type FeedbackSubmission } from "./FeedbackDialog";
+
+const citationFeedbackReasons = ["引用内容不符", "来源定位错误", "资料已过时", "其他"] as const;
 
 type SourceSet = {
   messageId: string;
@@ -270,8 +273,6 @@ function SourceDetail({
   const { open: openVideo } = useVideoPlayer();
   const [expanded, setExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [reporting, setReporting] = useState(false);
-  const [note, setNote] = useState("");
   const [status, setStatus] = useState<string | null>(null);
   const detailScroll = useAutoHideScrollbar<HTMLDivElement>();
   const text = stripMarkdown(source.text);
@@ -315,26 +316,18 @@ function SourceDetail({
     }
   };
 
-  const submitReport = async () => {
-    setStatus(null);
-    try {
-      await api.sendFeedback({
-        kind: "citation",
-        note: note.trim() || undefined,
-        conversation_id: conversationId,
-        message_id: messageId,
-        parent_id: source.parent_id,
-        doc_title: source.doc_title,
-        section_path: source.section_path,
-        start_time: source.start_time,
-        category: source.category,
-      });
-      setStatus("引用问题已提交。");
-      setReporting(false);
-      setNote("");
-    } catch (error: any) {
-      setStatus(error?.message || "提交失败，请稍后重试。");
-    }
+  const submitReport = async ({ reason, note }: FeedbackSubmission) => {
+    await api.sendFeedback({
+      kind: "citation",
+      note: note ? `原因：${reason}\n补充：${note}` : `原因：${reason}`,
+      conversation_id: conversationId,
+      message_id: messageId,
+      parent_id: source.parent_id,
+      doc_title: source.doc_title,
+      section_path: source.section_path,
+      start_time: source.start_time,
+      category: source.category,
+    });
   };
 
   return (
@@ -398,32 +391,23 @@ function SourceDetail({
           {copied ? "已复制" : "复制来源"}
         </button>
       </div>
-      <button
-        type="button"
-        onClick={() => setReporting((value) => !value)}
-        className="mt-3 inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-destructive"
-      >
-        <AlertTriangle className="size-3.5" />
-        报告引用问题
-      </button>
-      {reporting && (
-        <div className="mt-3 rounded-ui-md border border-border p-3">
-          <textarea
-            rows={3}
-            value={note}
-            onChange={(event) => setNote(event.target.value)}
-            placeholder="可选：说明这条引用的问题"
-            className="w-full resize-none rounded-ui-md border border-input bg-background px-2.5 py-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-          />
+      <FeedbackDialog
+        category="引用问题"
+        description="选择这条引用存在的问题，帮助我们改进来源核验质量。"
+        reasons={citationFeedbackReasons}
+        notePlaceholder="可选：补充说明这条引用的问题"
+        successMessage="引用问题已提交"
+        onSubmit={submitReport}
+        trigger={
           <button
             type="button"
-            onClick={submitReport}
-            className="mt-2 h-8 rounded-ui-md bg-destructive px-3 text-xs font-medium text-destructive-foreground"
+            className="mt-3 inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-destructive"
           >
-            提交报告
+            <AlertTriangle className="size-3.5" />
+            报告引用问题
           </button>
-        </div>
-      )}
+        }
+      />
       {status && <p className="mt-2 text-xs text-muted-foreground">{status}</p>}
     </div>
   );
