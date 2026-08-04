@@ -1870,3 +1870,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 完成：将桌面端来源开关从不足的固定宽度改为内容自适应的最小宽度，并为按钮、开合图标、“来源”文字和数量徽标增加禁止换行及禁止收缩保护，修复窄按钮中“来源”被拆成两行的问题，同时保持展开与收起位置、顺序和无动画切换不变。
 - 文件：`frontend/src/components/ChatHeader.tsx`、`frontend/src/components/ChatHeader.test.tsx`、`WORKLOG.md`；未修改来源面板数据、引用联动、布局开合、API、SSE、RAG 或后端业务。
 - 验证：来源按钮定向 Vitest 3/3 通过；前端全量 Vitest 26 个文件、117/117 项通过；TypeScript project build 与 Vite production build 通过（2023 modules transformed）；`git diff --check` 通过。保留既有 React Router future warning、CSS minify warning 和主包大于 500 kB 警告。
+
+### 03:36 — 修复回答角标与来源高亮切换
+
+- 完成：将来源面板开合、回答轮次和当前引用高亮拆分为独立状态；点击回答角标时始终打开并定位来源面板，高亮对应角标和来源卡片，再次点击同一角标仅取消两侧高亮且保持面板打开；面板原本打开或关闭、桌面布局或移动端抽屉均使用同一持久化选择状态。
+- 文件：`frontend/src/components/ChatLayout.tsx`、`frontend/src/components/SourceWorkspace.tsx`、`frontend/src/components/citations.ts`、`frontend/src/components/citations.test.ts`、`WORKLOG.md`；未修改来源数据、API、SSE、RAG、后端或其他页面样式。
+- 验证：引用切换专项 Vitest 9/9 通过；前端全量 Vitest 26 个文件、118/118 项通过；TypeScript project build 与 Vite production build 通过（2023 modules transformed）；`git diff --check` 通过。保留既有 React Router future warning、CSS minify warning 和主包大于 500 kB 警告。
+- 待办/风险：未使用真实登录会话进行浏览器视觉验收；待用户在桌面端及移动端分别复核面板初始关闭、初始打开和连续切换不同角标三种交互。

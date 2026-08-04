@@ -94,12 +94,16 @@ export function SourceWorkspace({
   messages,
   conversationId,
   selectedMessageId,
+  highlightedSourceIndex = null,
   onSelectedMessageChange,
+  onSourceHighlightChange,
 }: {
   messages: ChatMessage[];
   conversationId: string | null;
   selectedMessageId?: string | null;
+  highlightedSourceIndex?: number | null;
   onSelectedMessageChange?: (messageId: string) => void;
+  onSourceHighlightChange?: (messageId: string, sourceIndex: number) => void;
 }) {
   const sets = useMemo(() => sourceSetsFromMessages(messages), [messages]);
   const latest = sets[sets.length - 1];
@@ -134,6 +138,7 @@ export function SourceWorkspace({
 
   const selectSource = (messageId: string, index: number) => {
     onSelectedMessageChange?.(messageId);
+    onSourceHighlightChange?.(messageId, index);
     setActiveIndex(index);
     window.dispatchEvent(
       new CustomEvent<CitationHoverDetail>(CITATION_HOVER_EVENT, {
@@ -195,7 +200,7 @@ export function SourceWorkspace({
               onClick={() => selectSource(activeSet.messageId, index)}
               className={
                 "mb-2 flex w-full items-start gap-2.5 rounded-ui-md border px-3 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring " +
-                (safeIndex === index
+                (highlightedSourceIndex === index
                   ? "border-primary/70 bg-primary/10 text-foreground shadow-sm"
                   : "border-border bg-card hover:border-primary/30 hover:bg-secondary/60")
               }
@@ -203,7 +208,7 @@ export function SourceWorkspace({
               <span
                 className={
                   "mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-ui-sm text-xs font-semibold " +
-                  (safeIndex === index
+                  (highlightedSourceIndex === index
                     ? "bg-primary text-primary-foreground"
                     : "border border-border bg-secondary text-muted-foreground")
                 }
