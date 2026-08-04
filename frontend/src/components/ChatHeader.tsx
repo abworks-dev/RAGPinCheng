@@ -36,11 +36,11 @@ export function ChatHeader({
           title={sourceOpen ? "收起来源" : "展开来源"}
           aria-expanded={sourceOpen}
           onClick={onToggleSources}
-          className={`${sourceOpen ? "hidden xl:inline-flex" : "inline-flex"} h-9 w-[5.75rem] shrink-0 items-center justify-center gap-2 rounded-ui-md px-2.5 text-xs text-muted-foreground transition-none hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring xl:fixed xl:right-4 xl:top-2.5 xl:z-overlay`}
+          className={`${sourceOpen ? "hidden xl:inline-flex" : "inline-flex"} h-9 min-w-[6.25rem] shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-ui-md px-2.5 text-xs text-muted-foreground transition-none hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring xl:fixed xl:right-4 xl:top-2.5 xl:z-overlay`}
         >
-          {sourceOpen ? <PanelRightClose className="size-4" /> : <PanelRightOpen className="size-4" />}
-          <span>来源</span>
-          <span className="flex min-w-5 items-center justify-center rounded-full bg-ui-accent px-1.5 py-0.5 text-[11px] font-medium text-ui-accent-foreground">
+          {sourceOpen ? <PanelRightClose className="size-4 shrink-0" /> : <PanelRightOpen className="size-4 shrink-0" />}
+          <span className="shrink-0">来源</span>
+          <span className="flex min-w-5 shrink-0 items-center justify-center rounded-full bg-ui-accent px-1.5 py-0.5 text-[11px] font-medium text-ui-accent-foreground">
             {sourceCount}
           </span>
         </button>

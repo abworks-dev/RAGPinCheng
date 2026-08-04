@@ -1864,3 +1864,9 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 完成：在左侧会话列表与中央消息列表的固定顶部下方增加非交互式滚动边缘渐隐，分别匹配侧栏和页面背景；内容滚入 Logo/新建对话区及聊天标题区时柔和淡出，不影响按钮、滚动条、会话选择或消息交互。
 - 文件：修改 `frontend/src/components/Sidebar.tsx`、`MessageList.tsx`、`styles/index.css` 及对应测试与 `WORKLOG.md`；未修改管理端、消息数据、来源、API、SSE、RAG 或后端业务。
 - 验证：顶部渐隐专项 Vitest 2 个文件、9/9 项通过；前端全量 Vitest 26 个文件、117/117 项通过；`npm run build` 通过（2023 modules transformed）；`git diff --check` 无内容错误。保留既有 CSS minify 与主包大于 500 kB 警告。
+
+### 03:20 — 修复来源开关文字换行
+
+- 完成：将桌面端来源开关从不足的固定宽度改为内容自适应的最小宽度，并为按钮、开合图标、“来源”文字和数量徽标增加禁止换行及禁止收缩保护，修复窄按钮中“来源”被拆成两行的问题，同时保持展开与收起位置、顺序和无动画切换不变。
+- 文件：`frontend/src/components/ChatHeader.tsx`、`frontend/src/components/ChatHeader.test.tsx`、`WORKLOG.md`；未修改来源面板数据、引用联动、布局开合、API、SSE、RAG 或后端业务。
+- 验证：来源按钮定向 Vitest 3/3 通过；前端全量 Vitest 26 个文件、117/117 项通过；TypeScript project build 与 Vite production build 通过（2023 modules transformed）；`git diff --check` 通过。保留既有 React Router future warning、CSS minify warning 和主包大于 500 kB 警告。
