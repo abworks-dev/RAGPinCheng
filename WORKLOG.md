@@ -1805,3 +1805,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：当前工作区除 `.codex-worktrees/` 外的全部已跟踪和新增业务文件。
 - 验证：`git diff --check` 通过；前端最近一次 `npm run build` 通过（1964 modules transformed），各项专项与全量测试结果见本日志对应功能记录。
 - 待办/风险：`origin/master` 比当前分支多 77 个提交且当前分支有 4 个独有提交，无法直接快进推送；禁止强推覆盖远端历史，需先安全整合远端分支。
+
+### 04:10 — 微调相邻引用角标间距
+
+- 完成：为正文引用角标增加左右各 1px 的水平留白，使连续角标之间形成轻微间距，保留原有尺寸、位置、悬浮提示和点击交互。
+- 文件：`frontend/src/components/Message.tsx`、`WORKLOG.md`。
+- 验证：`npm run build` 通过（1964 modules transformed）；构建仍报告既有 CSS 语法警告和主包大于 500 kB 警告。
+- 待办/风险：尚未使用带连续引用角标的真实回答进行浏览器视觉验收；远端整合与推送仍暂停。

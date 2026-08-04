@@ -129,7 +129,7 @@ function CitationMarker({
   return (
     <>
       <sup
-        className="relative top-[-0.35em] align-baseline"
+        className="relative top-[-0.35em] mx-px align-baseline"
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
       >
