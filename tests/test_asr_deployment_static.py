@@ -30,6 +30,7 @@ def test_manual_workflow_has_safe_defaults_and_immutable_revision():
     assert "workflow_dispatch:" in workflow
     assert "production-asr" in workflow
     assert "runs-on: [self-hosted, Windows, X64, asr-production]" in workflow
+    assert workflow.count("timeout-minutes: 60") == 1
     assert workflow.count("default: false") == 2
     assert workflow.count("shell: powershell") == 2
     assert "shell: pwsh" not in workflow
