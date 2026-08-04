@@ -61,6 +61,33 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertIn('throw "git fetch failed', self.windows)
         self.assertIn('throw "git fast-forward failed', self.windows)
 
+    def test_windows_gpu_service_survives_runner_cleanup_without_checkout_token(self):
+        self.assertIn('"RUNNER_TRACKING_ID"', self.windows)
+        self.assertIn('"GIT_TOKEN"', self.windows)
+        self.assertGreaterEqual(
+            self.windows.count("[Environment]::SetEnvironmentVariable("),
+            4,
+        )
+        self.assertIn("$null,", self.windows)
+        self.assertIn("$runnerTrackingId,", self.windows)
+        self.assertIn("$gitTokenForRestore,", self.windows)
+        self.assertIn("$process = Start-Process", self.windows)
+        self.assertNotIn("$psi.RedirectStandardOutput = $true", self.windows)
+        self.assertNotIn("$psi.RedirectStandardError = $true", self.windows)
+
+    def test_windows_gpu_service_persists_logs_and_cleans_failed_child(self):
+        self.assertIn('$logFile = "$RepositoryPath\\gpu_service.log"', self.windows)
+        self.assertIn(
+            '$errorLogFile = "$RepositoryPath\\gpu_service.error.log"',
+            self.windows,
+        )
+        self.assertIn("-RedirectStandardOutput $logFile", self.windows)
+        self.assertIn("-RedirectStandardError $errorLogFile", self.windows)
+        self.assertIn("Get-Content -LiteralPath $path -Tail 120", self.windows)
+        self.assertIn("if (-not $process.HasExited)", self.windows)
+        self.assertIn("Stop-Process -Id $process.Id -Force", self.windows)
+        self.assertIn('throw "GPU service health check failed"', self.windows)
+
 
 if __name__ == "__main__":
     unittest.main()
