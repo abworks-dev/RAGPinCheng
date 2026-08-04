@@ -1805,3 +1805,9 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`.github/workflows/deploy-asr-production.yml`、`scripts/deploy-asr.ps1`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
 - 验证：PowerShell AST 解析通过；代理范围静态测试及既有 ASR 部署静态测试 `12 passed`；Python 测试文件编译通过；`git diff --check` 通过。远端 CI、合并及生产依赖安装重跑待后续验证。
 - 边界/风险：未读取或输出 Token 值，未下载模型，未启动 Scheduled Task，未修改防火墙或生产服务状态；本地未运行需要 FastAPI 的 ASR service 测试。
+### 12:50 — 延长 Windows ASR 依赖安装时限
+
+- 完成：根据 R3B-B4 生产重跑证据，将 Windows ASR 手动部署 workflow 的 job 超时从 30 分钟提高到获批的 60 分钟；保持 `install_dependencies`、`activate_service` 默认关闭，并添加唯一超时值的静态保护。
+- 文件：`.github/workflows/deploy-asr-production.yml`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
+- 验证：ASR 部署静态测试 `12 passed`；Python 测试文件编译通过；`git diff --check` 通过。前序 R3B-B4 第二次尝试确认代理生效，Torch 下载达到约 898.1 kB/s，并在 30 分钟上限时完成约 2.2/3.3 GB；R3B-B5 远端 CI、合并与 60 分钟生产重跑待后续验证。
+- 边界/风险：未改变依赖版本、代理范围、服务配置或激活行为；未下载模型、未修改防火墙、未启动 Scheduled Task。若 pip 不复用下载进度，60 分钟仍可能不足。
