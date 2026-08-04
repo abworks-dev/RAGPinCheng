@@ -52,7 +52,12 @@ jobs:
           }
 
       - name: Check out requested revision
+        if: ${{ inputs.operation != 'rollback' }}
         uses: actions/checkout@v4
+        env:
+          HTTP_PROXY: ${{ secrets.ASR_DEPENDENCY_PROXY }}
+          HTTPS_PROXY: ${{ secrets.ASR_DEPENDENCY_PROXY }}
+          NO_PROXY: 127.0.0.1,localhost,192.168.11.11,192.168.11.12
         with:
           ref: ${{ inputs.commit_sha }}
           fetch-depth: 1
@@ -68,13 +73,23 @@ jobs:
           } else {
             "${{ github.run_id }}"
           }
+          $scriptPath = if ($operation -eq "rollback") {
+            "D:\ServiceData\RAGPinCheng-ASR\config\activation-backups\$activationId\activate-asr-production.ps1"
+          } else {
+            "${{ github.workspace }}\scripts\activate-asr-production.ps1"
+          }
+          if (-not (Test-Path -LiteralPath $scriptPath -PathType Leaf)) {
+            throw "ASR activation management script is missing"
+          }
           $params = @{
             Mode = (Get-Culture).TextInfo.ToTitleCase($operation)
             CommitSha = "${{ inputs.commit_sha }}"
             ActivationId = $activationId
-            SourceRoot = "${{ github.workspace }}"
           }
-          & "${{ github.workspace }}\scripts\activate-asr-production.ps1" @params
+          if ($operation -ne "rollback") {
+            $params.SourceRoot = "${{ github.workspace }}"
+          }
+          & $scriptPath @params
 
   verify-ubuntu:
     if: ${{ inputs.operation == 'activate' }}
@@ -105,19 +120,17 @@ jobs:
     runs-on: [self-hosted, Windows, X64, asr-production]
     timeout-minutes: 10
     steps:
-      - name: Check out requested revision
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.commit_sha }}
-          fetch-depth: 1
-
       - name: Roll back failed cross-node activation
         shell: powershell
         run: |
+          $activationId = "${{ github.run_id }}"
+          $scriptPath = "D:\ServiceData\RAGPinCheng-ASR\config\activation-backups\$activationId\activate-asr-production.ps1"
+          if (-not (Test-Path -LiteralPath $scriptPath -PathType Leaf)) {
+            throw "Protected ASR rollback script is missing"
+          }
           $params = @{
             Mode = "Rollback"
             CommitSha = "${{ inputs.commit_sha }}"
-            ActivationId = "${{ github.run_id }}"
-            SourceRoot = "${{ github.workspace }}"
+            ActivationId = $activationId
           }
-          & "${{ github.workspace }}\scripts\activate-asr-production.ps1" @params
+          & $scriptPath @params

@@ -92,7 +92,7 @@ ASR 仅在四个字段均合法、模型已加载、inflight 为 0 且明确允�
 4. 新建唯一防火墙规则 `RAGPinCheng-ASR-8200-from-Ubuntu`，只允许 `192.168.11.12` 访问 Windows TCP 8200；规则字段、端口和远端地址均严格复核。
 5. Windows 本机严格验证 `/health`、受鉴权 `/v1/capabilities` 和 GPU `/v1/activity` 的唯一字段集合、版本、固定 experimental Profile 与值域。
 6. Ubuntu production runner 读取既有 `prod.env`，要求 ASR 客户端三个关键键各出现一次、`ASR_ENABLED=false`、URL 固定且 Token 与 `production-asr` Secret 匹配，再从 `192.168.11.12` 验证 Windows health/capabilities。
-7. Windows 本机激活失败时脚本立即按本次 activation state 自动回滚；Ubuntu 跨节点验证失败时 workflow 自动回到 Windows，停止并注销任务、删除本轮固定防火墙规则、恢复启用前配置并确认 8200 关闭。
+7. Windows 本机激活失败时脚本立即按本次 activation state 自动回滚；激活时将回滚入口复制到受保护的 state 目录，Ubuntu 跨节点验证失败时 workflow 无需再次 checkout 即可回到 Windows，停止并注销任务、删除本轮固定防火墙规则、恢复启用前配置并确认 8200 关闭。
 8. 本轮不修改 Ubuntu `prod.env`，不重启 backend，不上传媒体，不调用 `/v1/jobs`，不创建转录任务，也不访问数据库、Qdrant 或 artifact。
 
 ## 7. 后续业务端到端验收（不在本轮）

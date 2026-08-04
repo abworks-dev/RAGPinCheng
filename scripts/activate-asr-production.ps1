@@ -24,6 +24,7 @@ $stateRoot = Join-Path $configRoot "activation-backups"
 $stateDirectory = Join-Path $stateRoot $ActivationId
 $statePath = Join-Path $stateDirectory "activation-state.json"
 $configBackup = Join-Path $stateDirectory "asr.env.before"
+$rollbackScriptPath = Join-Path $stateDirectory "activate-asr-production.ps1"
 $venvPython = Join-Path $ProgramRoot "venv\Scripts\python.exe"
 $serviceStartScript = Join-Path $ProgramRoot "scripts\start-asr-service.ps1"
 $localVerifier = Join-Path $ProgramRoot "scripts\verify-asr-service.ps1"
@@ -183,6 +184,7 @@ function Write-State {
         commit_sha = $CommitSha.ToLowerInvariant()
         status = $Status
         config_backup = $configBackup
+        rollback_script = $rollbackScriptPath
         firewall_rule_name = $firewallRuleName
         firewall_created = $FirewallCreated
         task_name = $taskName
@@ -337,6 +339,7 @@ try {
     Assert-ModelCache
 
     New-Item -ItemType Directory -Path $stateDirectory -Force | Out-Null
+    Copy-Item -LiteralPath $PSCommandPath -Destination $rollbackScriptPath
     Copy-Item -LiteralPath $envFile -Destination $configBackup
     Write-State -Status "prepared" -FirewallCreated $false -TaskCreated $false
 
