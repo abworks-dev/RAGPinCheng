@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import type { ChatMessage, Source } from "../types";
 import { Message } from "./Message";
 
+const videoPlayerOpen = vi.hoisted(() => vi.fn());
+
 vi.mock("./FeedbackBar", () => ({
   FeedbackBar: ({
     msg,
@@ -38,7 +40,7 @@ vi.mock("./FeedbackBar", () => ({
 
 vi.mock("../hooks/useVideoPlayer", () => ({
   timestampToSeconds: () => 0,
-  useVideoPlayer: () => ({ open: vi.fn() }),
+  useVideoPlayer: () => ({ open: videoPlayerOpen }),
 }));
 
 const source: Source = {
@@ -306,5 +308,36 @@ describe("Message assistant actions", () => {
     act(() => vi.advanceTimersByTime(150));
     expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
     vi.useRealTimers();
+  });
+
+  it("opens source verification without opening the player for video citations", () => {
+    const videoSource: Source = {
+      ...source,
+      doc_title: "Revit界面介绍__7d44513f",
+      doc_type: "transcript",
+      start_time: "00:00:01",
+      media_id: "media-1",
+    };
+    const citationListener = vi.fn();
+    window.addEventListener("pincheng:citation-click", citationListener);
+
+    render(
+      <Message
+        msg={assistant({
+          id: "assistant-video",
+          content: "工具栏用法见[Revit界面介绍__7d44513f @00:00:01]。",
+          sources: [videoSource],
+        })}
+        conversationId="conversation-1"
+        turnIndex={1}
+      />,
+    );
+
+    const marker = screen.getByRole("superscript").querySelector("a");
+    expect(marker).not.toBeNull();
+    fireEvent.click(marker!);
+    expect(citationListener).toHaveBeenCalledTimes(1);
+    expect(videoPlayerOpen).not.toHaveBeenCalled();
+    window.removeEventListener("pincheng:citation-click", citationListener);
   });
 });
