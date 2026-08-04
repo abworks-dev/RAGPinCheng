@@ -25,24 +25,9 @@ import {
   type CitationHoverDetail,
 } from "./citations";
 import { FeedbackDialog, type FeedbackSubmission } from "./FeedbackDialog";
+import { sourceSetsFromMessages } from "./sourceSelection";
 
 const citationFeedbackReasons = ["引用内容不符", "来源定位错误", "资料已过时", "其他"] as const;
-
-type SourceSet = {
-  messageId: string;
-  sources: Source[];
-  searchQuery?: string;
-};
-
-function sourceSetsFromMessages(messages: ChatMessage[]): SourceSet[] {
-  return messages
-    .filter((message) => message.role === "assistant" && message.sources?.length)
-    .map((message) => ({
-      messageId: message.id,
-      sources: message.sources || [],
-      searchQuery: message.prep?.search_query || message.query,
-    }));
-}
 
 function cleanSection(source: Source): string {
   return (source.section_path || "")
