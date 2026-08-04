@@ -1952,3 +1952,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：新增 `.github/workflows/qualify-faster-whisper-production.yml`、`scripts/qualify-faster-whisper-production.ps1`、`scripts/prepare_faster_whisper_model.py`、`scripts/run_faster_whisper_qualification.py`、`asr_service/faster-whisper-qualification-manifest.example.json`、`asr_service/tests/test_faster_whisper_qualification.py` 和统一 R3 方案；最小更新 `tests/test_asr_deployment_static.py`、转录功能文档与 `TODO.md`。
 - 验证：R3 专项与生产静态边界 46/46 通过；全部本地可用 ASR service/Profile/Remote Provider/部署和激活相关回归 221/221 通过；Python `compileall`、PowerShell AST 与 `git diff --check` 通过。当前本机既有 `.venv` 仍缺 FastAPI，因此 `asr_service/tests/test_api_contract.py` 与 `test_auth.py` 未本地收集，须由现有 `test-asr-service-contract` CI 在干净环境验证。
 - 待办/风险：尚未提交、推送、创建 PR 或运行远端 CI；尚未安装真实 faster-whisper 依赖、下载模型、读取生产样本、启动 18200 或执行 CUDA。生产资格 workflow 还要求 Windows 固定输入目录存在 8 个已声明的非敏感 PCM WAV 及严格 `manifest.json`；缺失或身份不符会在下载前失败关闭。
+
+### 05:49 — 固定管理面板桌面侧栏
+
+- 完成：为管理面板桌面端侧栏增加粘滞定位、顶部栏偏移和独立对齐，使页面内容向下滚动时侧栏始终固定在顶部栏下方，左下角主题与管理员菜单保持可见；移动端布局不变。
+- 文件：`frontend/src/pages/admin/AdminLayout.tsx`、`frontend/src/pages/admin/AdminLayout.test.tsx`、`WORKLOG.md`。
+- 验证：管理布局定向 Vitest 2/2 通过；TypeScript project build 与 Vite production build 通过（2024 modules transformed）；`git diff --check` 通过。保留既有 React Router future warning、CSS minify warning 和主包大于 500 kB 警告。
+- 待办/风险：尚未使用真实管理员登录会话进行浏览器滚动验收；未修改业务组件、API、认证、数据、依赖或部署配置。
