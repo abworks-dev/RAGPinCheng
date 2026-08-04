@@ -129,6 +129,27 @@ describe("api client", () => {
     );
   });
 
+  it("serializes document lifecycle filters for server-side pagination", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({ documents: [], total: 0, status_counts: {} }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.adminListIndexedDocuments({
+      query: "施工 标准",
+      category: "公司标准",
+      doc_type: "pdf",
+      status: "failed",
+      limit: 25,
+      offset: 50,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/admin/index/documents?query=%E6%96%BD%E5%B7%A5+%E6%A0%87%E5%87%86&category=%E5%85%AC%E5%8F%B8%E6%A0%87%E5%87%86&doc_type=pdf&status=failed&limit=25&offset=50",
+      expect.objectContaining({ credentials: "include", headers: {} }),
+    );
+  });
+
   it("invokes the 401 handler and exposes structured ApiError data", async () => {
     const unauthorized = vi.fn();
     setUnauthorizedHandler(unauthorized);

@@ -1966,3 +1966,11 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：新增 `scripts/prepare-faster-whisper-qualification-samples.ps1`；修改 `.github/workflows/qualify-faster-whisper-production.yml`、`tests/test_asr_deployment_static.py` 和 `project-docs/plans/faster-whisper-r3-unified-qualification.md`。
 - 验证：workflow YAML、严格 Manifest 单段/空段数组序列化及 `git diff --check` 通过；R3 专项 47/47 通过；本地无外部服务的 ASR/Profile/Remote Provider/部署回归 322/322 通过；PR #36、编码修复 PR #37 和路径修复 PR #38 的 7 项 CI 均全部通过，依次以 `45a4ebe6d97847348e6add9c33349d12dadc4fde`、`41de4fefb5dac1649c0590bb4ed75030064151b2`、`60054b588144547370bb1b5357830599e02f093a` 合并。生产 workflow `30954369811` 暴露并关闭 Windows PowerShell 5.1 无 BOM UTF-8 中文解析问题；`30954705433` 成功生成和严格校验固定 8 样本并暴露 pip 反斜杠路径问题；最终 `30955067671` 幂等复用样本后在 production freeze 与组合依赖解析处得到 `dependency_preparation_failed`，未进入模型下载、18200 服务或 CUDA 推理。脱敏 verdict 确认 `production_services_modified=false`、`profile_admission=disabled`。
 - 待办/风险：faster-whisper R3 未通过；后续必须先确认 production freeze 与 FunASR 项的精确冲突包，再对依赖 pin、约束或隔离方式提交新方案审批。未启动或修改 ASR/GPU 生产服务、Scheduled Task、防火墙、Ubuntu、数据库、Qdrant、业务媒体或 Profile admission。
+
+### 06:03 — 落地管理端资料管理工作流 PR1
+
+- 完成：按获批 R2 方案将资料管理页改为资料列表优先；后端合并 Parent 索引与同一源文件最新索引任务，纳入尚未索引的处理中/失败资料并提供统计、搜索、分类、类型、语义状态筛选和服务端分页；前端新增上传抽屉、多文件队列、状态总览、当前生命周期、行操作菜单和默认保留源文件的安全删除确认，索引任务降为折叠活动视图。主列表隐藏绝对源路径并对失败摘要脱敏，无数据库迁移。
+- 文件：`api/routes_admin.py`、`api/schemas.py`、`frontend/src/api/client.ts`、`frontend/src/types.ts`、`frontend/src/pages/admin/AdminDocumentsPage.tsx`、新增 `frontend/src/components/ui/sheet.tsx`、相关前后端测试、`project-docs/plans/admin-document-management-pr1.md`、资料索引功能文档与 `TODO.md`。
+- 验证：后端资料聚合与状态筛选专项测试 2/2 通过，修改 Python 文件语法检查通过；前端全量 Vitest 27 个文件、127/127 项通过；TypeScript project build 与 Vite production build通过（2025 modules transformed）；虚构数据下完成桌面浏览器资料列表、上传抽屉和行操作菜单视觉检查。构建保留既有 React Router future warning、CSS minify warning 和主包大于 500 kB 警告。
+- 用户验收：2026-08-05 06:06，用户明确确认“验收通过”，本任务状态更新为已完成。
+- 边界/风险：未部署、未删除真实资料、未重建索引。资料 ID 由部署内源路径哈希派生，跨部署移动源目录不保证不变；窄屏仍采用横向表格滚动。
