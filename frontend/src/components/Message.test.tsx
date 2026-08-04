@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { ChatMessage, Source } from "../types";
 import { Message } from "./Message";
@@ -156,11 +156,16 @@ describe("Message assistant actions", () => {
     expect(screen.getByRole("status")).toHaveTextContent("未检索到可用资料，本回答没有知识库来源");
   });
 
-  it("copies a user question from the action below the bubble", async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined);
+  it("copies a user question over the HTTP fallback and shows a temporary check", async () => {
+    vi.useFakeTimers();
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
-      value: { writeText },
+      value: undefined,
+    });
+    const execCommand = vi.fn().mockReturnValue(true);
+    Object.defineProperty(document, "execCommand", {
+      configurable: true,
+      value: execCommand,
     });
 
     render(
@@ -171,7 +176,13 @@ describe("Message assistant actions", () => {
       />,
     );
     fireEvent.click(screen.getByRole("button", { name: "复制提问" }));
-    expect(writeText).toHaveBeenCalledWith("如何命名模型？");
+    await act(async () => {});
+    expect(execCommand).toHaveBeenCalledWith("copy");
+    expect(screen.getByRole("button", { name: "提问已复制" })).toHaveClass("text-success");
+
+    act(() => vi.advanceTimersByTime(1400));
+    expect(screen.getByRole("button", { name: "复制提问" })).toBeInTheDocument();
+    vi.useRealTimers();
   });
 
   it("places regeneration beside copy and disables non-latest answers", () => {
