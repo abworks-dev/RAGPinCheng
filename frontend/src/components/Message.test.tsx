@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { ChatMessage, Source } from "../types";
 import { Message } from "./Message";
@@ -125,5 +125,19 @@ describe("Message assistant actions", () => {
     );
 
     expect(screen.getByRole("status")).toHaveTextContent("未检索到可用资料，本回答没有知识库来源");
+  });
+
+  it("keeps a citation preview open when the parent message rerenders", () => {
+    const citedMessage = assistant({ content: "请查看来源 [1]。" });
+    const { container, rerender } = render(
+      <Message msg={citedMessage} conversationId="conversation-1" turnIndex={1} />,
+    );
+
+    fireEvent.mouseEnter(container.querySelector("sup")!);
+    expect(screen.getByText("点击跳转到完整来源")).toBeInTheDocument();
+
+    rerender(<Message msg={citedMessage} conversationId="conversation-1" turnIndex={2} />);
+
+    expect(screen.getByText("点击跳转到完整来源")).toBeInTheDocument();
   });
 });

@@ -1891,3 +1891,17 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`frontend/src/components/MessageList.tsx`、`frontend/src/components/MessageList.test.tsx`、`WORKLOG.md`；未修改消息数据、会话接口、来源面板、RAG 或后端逻辑。
 - 验证：新增平滑滚动经过上一轮时仍保持目标高亮的回归测试；`MessageList.test.tsx` 7/7 通过。生产构建已执行到 1683 modules transformed，随后因复用的主工作区依赖缺少既有 `@radix-ui/react-dialog` 而失败，属于隔离工作树依赖不完整，未安装或修改依赖。
 - 待办/风险：尚未在真实长对话页面进行视觉验收；需在该工作树依赖完整的环境中补跑完整 TypeScript 与 production build。
+
+### 04:05 — 统一来源按钮与当前回答数量
+
+- 完成：顶部来源按钮改为与来源核验面板共用同一套回答选择规则；存在有效当前高亮回答时显示该回答的来源数，未选择或选择失效时回退到最后一条有来源回答，修复按钮数量与面板“当前对话”数量不一致。
+- 文件：`frontend/src/components/ChatLayout.tsx`、`frontend/src/components/SourceWorkspace.tsx`、`frontend/src/components/sourceSelection.ts`、`frontend/src/components/sourceSelection.test.ts`、`WORKLOG.md`；未修改来源数据、引用定位、API、SSE、RAG 或后端逻辑。
+- 验证：来源选择与顶部按钮专项 Vitest 2 个文件、5/5 项通过。TypeScript 检查因复用的主工作区依赖缺少既有 `@radix-ui/react-dialog` 而失败，未安装或修改依赖。
+- 待办/风险：尚未在真实长对话页面执行视觉验收；需在依赖完整环境补跑完整 TypeScript 与 production build。
+
+### 04:10 — 排查引用角标悬浮卡片自动关闭
+
+- 完成：确认消息区自动隐藏滚动条在鼠标停止约 900ms 后触发父级重渲染，而 ReactMarkdown 原先每次创建新的匿名链接渲染器，导致引用角标被卸载重建并丢失悬浮状态；现已改为模块级稳定链接组件，并通过 Context 注入当前消息和来源，父级重渲染不再关闭悬浮卡片。
+- 文件：`frontend/src/components/Message.tsx`、`frontend/src/components/Message.test.tsx`、`WORKLOG.md`；未修改滚动条时序、引用数据、点击定位、API、SSE、RAG 或后端逻辑。
+- 验证：新增父级重渲染后悬浮卡片保持显示的回归测试；角标悬浮、来源数量和顶部按钮专项 Vitest 3 个文件、12/12 项通过。TypeScript 检查仍因复用的主工作区依赖缺少既有 `@radix-ui/react-dialog` 而失败，未安装或修改依赖。
+- 待办/风险：测试保留了悬浮卡片 `<div>` 位于 Markdown 段落内的既有 DOM nesting 警告，本次未扩大范围调整其渲染层级；尚未在真实长回答页面进行视觉验收。

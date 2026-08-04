@@ -1,5 +1,5 @@
-import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
-import ReactMarkdown from "react-markdown";
+import React, { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
+import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
@@ -210,6 +210,40 @@ function CitationMarker({
   );
 }
 
+type CitationRenderContextValue = {
+  sources: Source[];
+  messageId: string;
+};
+
+const CitationRenderContext = createContext<CitationRenderContextValue>({
+  sources: [],
+  messageId: "",
+});
+
+function MarkdownLink({
+  href,
+  children,
+  ...props
+}: React.ComponentPropsWithoutRef<"a">) {
+  const { sources, messageId } = useContext(CitationRenderContext);
+  if (href?.startsWith("#cite-")) {
+    return (
+      <CitationMarker href={href} sources={sources} messageId={messageId}>
+        {children}
+      </CitationMarker>
+    );
+  }
+  return (
+    <a href={href} target="_blank" rel="noopener noreferrer" {...props}>
+      {children}
+    </a>
+  );
+}
+
+const markdownComponents: Components = {
+  a: MarkdownLink,
+};
+
 export function Message({
   msg,
   conversationId,
@@ -239,33 +273,15 @@ export function Message({
             <AnswerStatus msg={msg} />
             <div className={"prose-tight relative " + (msg.streaming && msg.content ? "caret" : "")}>
               {msg.content ? (
-                <ReactMarkdown
-                  remarkPlugins={[remarkGfm, remarkMath]}
-                  rehypePlugins={[rehypeKatex]}
-                  components={{
-                    a: ({ href, children, ...props }) => {
-                      if (href && href.startsWith("#cite-")) {
-                        return (
-                          <CitationMarker
-                            href={href}
-                            sources={msg.sources || []}
-                            messageId={msg.id}
-                            {...props}
-                          >
-                            {children}
-                          </CitationMarker>
-                        );
-                      }
-                      return (
-                        <a href={href} target="_blank" rel="noopener noreferrer" {...props}>
-                          {children}
-                        </a>
-                      );
-                    },
-                  }}
-                >
-                  {linkifyCitations(normalizeMath(msg.content))}
-                </ReactMarkdown>
+                <CitationRenderContext.Provider value={{ sources: msg.sources || [], messageId: msg.id }}>
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm, remarkMath]}
+                    rehypePlugins={[rehypeKatex]}
+                    components={markdownComponents}
+                  >
+                    {linkifyCitations(normalizeMath(msg.content))}
+                  </ReactMarkdown>
+                </CitationRenderContext.Provider>
               ) : null}
             </div>
             {msg.error && (
