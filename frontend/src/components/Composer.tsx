@@ -9,6 +9,7 @@ export function Composer({
   selected,
   onToggleCategory,
   onClearCategories,
+  centered = false,
 }: {
   onSend: (text: string) => void;
   disabled: boolean;
@@ -16,6 +17,7 @@ export function Composer({
   selected: string[];
   onToggleCategory: (category: string) => void;
   onClearCategories: () => void;
+  centered?: boolean;
 }) {
   const [text, setText] = useState("");
   const ref = useRef<HTMLTextAreaElement | null>(null);
@@ -36,7 +38,7 @@ export function Composer({
   }
 
   return (
-    <div className="shrink-0 border-t border-border bg-background px-3 py-3 sm:px-5">
+    <div className={`shrink-0 bg-background px-3 py-3 sm:px-5 ${centered ? "border-t-0" : "border-t border-border"}`}>
       <div className="mx-auto max-w-[50rem] rounded-ui-lg border border-input bg-card p-2 shadow-surface focus-within:ring-2 focus-within:ring-ring/30">
         <textarea
           ref={ref}

@@ -9,13 +9,13 @@ import {
   FileText,
   Film,
   LocateFixed,
-  PanelRightClose,
   Play,
 } from "lucide-react";
 import { api } from "../api/client";
 import { usePdfPreview } from "../hooks/usePdfPreview";
 import { timestampToSeconds, useVideoPlayer } from "../hooks/useVideoPlayer";
 import type { ChatMessage, Source } from "../types";
+import { useAutoHideScrollbar } from "../hooks/useAutoHideScrollbar";
 import { stripMarkdown } from "../utils/markdown";
 import {
   CITATION_EVENT,
@@ -88,33 +88,36 @@ function matchesQuery(text: string, query?: string): React.ReactNode {
 export function SourceWorkspace({
   messages,
   conversationId,
-  onClose,
+  selectedMessageId,
+  onSelectedMessageChange,
 }: {
   messages: ChatMessage[];
   conversationId: string | null;
-  onClose?: () => void;
+  selectedMessageId?: string | null;
+  onSelectedMessageChange?: (messageId: string) => void;
 }) {
   const sets = useMemo(() => sourceSetsFromMessages(messages), [messages]);
   const latest = sets[sets.length - 1];
-  const [activeMessageId, setActiveMessageId] = useState<string | null>(latest?.messageId || null);
   const [activeIndex, setActiveIndex] = useState(0);
+  const sourceListScroll = useAutoHideScrollbar<HTMLDivElement>();
   const listRefs = useRef<Record<number, HTMLButtonElement | null>>({});
+  const activeMessageId = selectedMessageId || latest?.messageId || null;
   const activeSet = sets.find((set) => set.messageId === activeMessageId) || latest;
   const source = activeSet?.sources[activeIndex] || activeSet?.sources[0];
   const safeIndex = source ? Math.max(0, activeSet!.sources.indexOf(source)) : 0;
 
   useEffect(() => {
     if (latest && !sets.some((set) => set.messageId === activeMessageId)) {
-      setActiveMessageId(latest.messageId);
+      onSelectedMessageChange?.(latest.messageId);
       setActiveIndex(0);
     }
-  }, [activeMessageId, latest, sets]);
+  }, [activeMessageId, latest, onSelectedMessageChange, sets]);
 
   useEffect(() => {
     const onCitation = (event: Event) => {
       const detail = (event as CustomEvent<CitationDetail>).detail;
       if (!detail || !sets.some((set) => set.messageId === detail.messageId)) return;
-      setActiveMessageId(detail.messageId);
+      onSelectedMessageChange?.(detail.messageId);
       setActiveIndex(detail.sourceIndex);
       requestAnimationFrame(() => {
         listRefs.current[detail.sourceIndex]?.scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -122,10 +125,10 @@ export function SourceWorkspace({
     };
     window.addEventListener(CITATION_EVENT, onCitation);
     return () => window.removeEventListener(CITATION_EVENT, onCitation);
-  }, [sets]);
+  }, [onSelectedMessageChange, sets]);
 
   const selectSource = (messageId: string, index: number) => {
-    setActiveMessageId(messageId);
+    onSelectedMessageChange?.(messageId);
     setActiveIndex(index);
     window.dispatchEvent(
       new CustomEvent<CitationHoverDetail>(CITATION_HOVER_EVENT, {
@@ -137,7 +140,7 @@ export function SourceWorkspace({
   if (!activeSet || !source) {
     return (
       <aside className="flex h-full flex-col bg-card">
-        <WorkspaceHeader count={0} onClose={onClose} />
+        <WorkspaceHeader count={0} />
         <div className="flex flex-1 flex-col items-center justify-center px-8 text-center">
           <Clipboard className="mb-3 size-8 text-muted-foreground/60" />
           <h2 className="text-sm font-medium text-foreground">暂无可核验来源</h2>
@@ -151,14 +154,14 @@ export function SourceWorkspace({
 
   return (
     <aside className="flex h-full min-h-0 flex-col bg-card">
-      <WorkspaceHeader count={activeSet.sources.length} onClose={onClose} />
+      <WorkspaceHeader count={activeSet.sources.length} />
       {sets.length > 1 && (
         <label className="border-b border-border px-4 py-3">
           <span className="mb-1 block text-[11px] font-medium text-muted-foreground">回答轮次</span>
           <select
             value={activeSet.messageId}
             onChange={(event) => {
-              setActiveMessageId(event.target.value);
+              onSelectedMessageChange?.(event.target.value);
               setActiveIndex(0);
             }}
             className="h-9 w-full rounded-ui-md border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
@@ -172,7 +175,11 @@ export function SourceWorkspace({
         </label>
       )}
       <div className="grid min-h-0 flex-1 grid-rows-[minmax(12rem,0.9fr)_minmax(16rem,1.1fr)]">
-        <div className="overflow-y-auto border-b border-border p-3">
+        <div
+          ref={sourceListScroll.ref}
+          {...sourceListScroll.interactionProps}
+          className={`overflow-y-auto border-b border-border p-3 ${sourceListScroll.className}`}
+        >
           {activeSet.sources.map((item, index) => (
             <button
               key={`${item.parent_id}-${index}`}
@@ -223,19 +230,13 @@ export function SourceWorkspace({
   );
 }
 
-function WorkspaceHeader({ count, onClose }: { count: number; onClose?: () => void }) {
+function WorkspaceHeader({ count }: { count: number }) {
   return (
-    <div className="flex h-14 shrink-0 items-center justify-between border-b border-border px-4">
+    <div className="flex h-14 shrink-0 items-center border-b border-border px-4">
       <div>
         <h2 className="text-sm font-semibold text-foreground">来源核验</h2>
         <p className="text-[11px] text-muted-foreground">{count ? `${count} 项回答依据` : "等待检索结果"}</p>
       </div>
-      {onClose && (
-        <button type="button" aria-label="收起来源" title="收起来源" onClick={onClose} className="inline-flex h-9 items-center gap-1.5 rounded-ui-md px-2 text-muted-foreground hover:bg-secondary hover:text-foreground">
-          {count > 0 && <span className="min-w-5 rounded-full bg-ui-accent px-1.5 py-0.5 text-[11px] font-medium text-ui-accent-foreground">{count}</span>}
-          <PanelRightClose className="size-4" />
-        </button>
-      )}
     </div>
   );
 }
@@ -260,6 +261,7 @@ function SourceDetail({
   const [reporting, setReporting] = useState(false);
   const [note, setNote] = useState("");
   const [status, setStatus] = useState<string | null>(null);
+  const detailScroll = useAutoHideScrollbar<HTMLDivElement>();
   const text = stripMarkdown(source.text);
   const visibleText = expanded || text.length <= 900 ? text : `${text.slice(0, 900)}…`;
 
@@ -324,7 +326,11 @@ function SourceDetail({
   };
 
   return (
-    <div className="min-h-0 overflow-y-auto px-4 py-4">
+    <div
+      ref={detailScroll.ref}
+      {...detailScroll.interactionProps}
+      className={`min-h-0 overflow-y-auto px-4 py-4 ${detailScroll.className}`}
+    >
       <div className="flex items-start gap-3">
         <span className="flex size-8 shrink-0 items-center justify-center rounded-ui-md bg-ui-accent text-ui-accent-foreground">
           <SourceTypeIcon source={source} />
@@ -342,7 +348,17 @@ function SourceDetail({
         <p className="mt-1 break-words text-xs leading-relaxed text-foreground">{sourceLocator(source)}</p>
       </div>
       <div className="mt-4">
-        <div className="mb-2 text-[11px] font-medium text-muted-foreground">引用原文</div>
+        <div className="mb-2 flex items-center justify-between gap-3">
+          <span className="text-[11px] font-medium text-muted-foreground">引用原文</span>
+          <button
+            type="button"
+            onClick={() => setReporting((value) => !value)}
+            className="inline-flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground hover:text-destructive"
+          >
+            <AlertTriangle className="size-3" />
+            报告问题
+          </button>
+        </div>
         <p className="whitespace-pre-wrap break-words border-l-2 border-info bg-info/10 px-3 py-2.5 text-xs leading-6 text-foreground">
           {matchesQuery(visibleText, searchQuery)}
         </p>
@@ -380,14 +396,6 @@ function SourceDetail({
           {copied ? "已复制" : "复制来源"}
         </button>
       </div>
-      <button
-        type="button"
-        onClick={() => setReporting((value) => !value)}
-        className="mt-3 inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-destructive"
-      >
-        <AlertTriangle className="size-3.5" />
-        报告引用问题
-      </button>
       {reporting && (
         <div className="mt-3 rounded-ui-md border border-border p-3">
           <textarea
