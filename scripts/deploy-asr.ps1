@@ -141,12 +141,43 @@ if ($InstallDependencies) {
         if ($LASTEXITCODE -ne 0 -or ([string]$venvVersion).Trim() -ne "3.11") {
             throw "ASR venv must use Python 3.11"
         }
-        & $venvPython -m pip install --index-url https://download.pytorch.org/whl/cu128 torch==2.7.0 torchaudio==2.7.0
-        if ($LASTEXITCODE -ne 0) { throw "CUDA Torch installation failed" }
-        & $venvPython -m pip install -r (Join-Path $staging "requirements-windows.txt")
-        if ($LASTEXITCODE -ne 0) { throw "ASR dependency installation failed" }
-        & $venvPython -m pip check
-        if ($LASTEXITCODE -ne 0) { throw "ASR dependency check failed" }
+        $dependencyProxy = [string]$env:ASR_DEPENDENCY_PROXY
+        if ([string]::IsNullOrWhiteSpace($dependencyProxy)) {
+            throw "ASR_DEPENDENCY_PROXY is required when InstallDependencies is enabled"
+        }
+        $proxyUri = $null
+        if (-not [System.Uri]::TryCreate($dependencyProxy, [System.UriKind]::Absolute, [ref]$proxyUri) -or
+            $proxyUri.Scheme -notin @("http", "https") -or
+            [string]::IsNullOrWhiteSpace($proxyUri.Host) -or
+            $dependencyProxy.Contains("`r") -or
+            $dependencyProxy.Contains("`n")) {
+            throw "ASR_DEPENDENCY_PROXY must be an absolute HTTP(S) URL"
+        }
+
+        $savedProxyEnvironment = @{}
+        foreach ($name in @("HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY")) {
+            $variable = Get-Item -LiteralPath ("Env:{0}" -f $name) -ErrorAction SilentlyContinue
+            $savedProxyEnvironment[$name] = if ($null -eq $variable) { $null } else { [string]$variable.Value }
+        }
+        try {
+            $env:HTTP_PROXY = $dependencyProxy
+            $env:HTTPS_PROXY = $dependencyProxy
+            $env:NO_PROXY = "127.0.0.1,localhost,192.168.11.11,192.168.11.12"
+            & $venvPython -m pip install --index-url https://download.pytorch.org/whl/cu128 torch==2.7.0 torchaudio==2.7.0
+            if ($LASTEXITCODE -ne 0) { throw "CUDA Torch installation failed" }
+            & $venvPython -m pip install -r (Join-Path $staging "requirements-windows.txt")
+            if ($LASTEXITCODE -ne 0) { throw "ASR dependency installation failed" }
+            & $venvPython -m pip check
+            if ($LASTEXITCODE -ne 0) { throw "ASR dependency check failed" }
+        } finally {
+            foreach ($name in $savedProxyEnvironment.Keys) {
+                [System.Environment]::SetEnvironmentVariable(
+                    $name,
+                    $savedProxyEnvironment[$name],
+                    [System.EnvironmentVariableTarget]::Process
+                )
+            }
+        }
     } catch {
         Move-StagingToBackup -Path $staging -Reason "failed"
         throw
