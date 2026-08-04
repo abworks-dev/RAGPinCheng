@@ -5,24 +5,9 @@ import type { ChatMessage } from "../types";
 import { FeedbackDialog, type FeedbackSubmission } from "./FeedbackDialog";
 import { IconButton } from "./ui/icon-button";
 import { toast } from "./ui/toast";
+import { copyText } from "../utils/clipboard";
 
 const feedbackReasons = ["有害/不安全", "虚假信息", "没有帮助", "其他"] as const;
-async function copyText(text: string) {
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text);
-    return;
-  }
-
-  const textarea = document.createElement("textarea");
-  textarea.value = text;
-  textarea.style.position = "fixed";
-  textarea.style.opacity = "0";
-  document.body.appendChild(textarea);
-  textarea.select();
-  const copied = document.execCommand("copy");
-  textarea.remove();
-  if (!copied) throw new Error("copy command failed");
-}
 
 export function FeedbackBar({
   msg,
@@ -83,23 +68,6 @@ export function FeedbackBar({
 
   return (
     <div className="ml-auto flex shrink-0 items-center gap-1" aria-label="回答操作">
-      <IconButton
-        label={copied ? "回答已复制" : "复制回答"}
-        onClick={handleCopy}
-        className={copied ? "text-success hover:text-success" : undefined}
-      >
-        {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
-      </IconButton>
-
-      <IconButton
-        label="重新生成回答"
-        title={canRegenerate ? "重新生成回答" : "后续对话已基于此回答生成，不能重新生成"}
-        disabled={!canRegenerate}
-        onClick={() => onRegenerate?.(msg.id)}
-      >
-        <RefreshCw className="size-4" />
-      </IconButton>
-
       {msg.answerVersions && msg.answerVersions.length > 1 && (
         <div className="inline-flex items-center gap-0.5 text-xs text-muted-foreground" aria-label="回答版本">
           <IconButton
@@ -127,6 +95,23 @@ export function FeedbackBar({
           </IconButton>
         </div>
       )}
+
+      <IconButton
+        label="重新生成回答"
+        title={canRegenerate ? "重新生成回答" : "后续对话已基于此回答生成，不能重新生成"}
+        disabled={!canRegenerate}
+        onClick={() => onRegenerate?.(msg.id)}
+      >
+        <RefreshCw className="size-4" />
+      </IconButton>
+
+      <IconButton
+        label={copied ? "回答已复制" : "复制回答"}
+        onClick={handleCopy}
+        className={copied ? "text-success hover:text-success" : undefined}
+      >
+        {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
+      </IconButton>
 
       <FeedbackDialog
         category="回答问题"

@@ -65,7 +65,7 @@ describe("FeedbackBar", () => {
     expect(screen.getByRole("button", { name: "这个回答不好" })).toBeEnabled();
   });
 
-  it("places regeneration immediately after copy and switches retained versions", () => {
+  it("places regeneration and version switching before copy", () => {
     const regenerate = vi.fn();
     const viewVersion = vi.fn();
     const versionedMessage: ChatMessage = {
@@ -89,7 +89,9 @@ describe("FeedbackBar", () => {
 
     const copy = screen.getByRole("button", { name: "复制回答" });
     const regenerateButton = screen.getByRole("button", { name: "重新生成回答" });
-    expect(copy.nextElementSibling).toBe(regenerateButton);
+    const versions = screen.getByLabelText("回答版本");
+    expect(versions.nextElementSibling).toBe(regenerateButton);
+    expect(regenerateButton.nextElementSibling).toBe(copy);
 
     fireEvent.click(regenerateButton);
     expect(regenerate).toHaveBeenCalledWith(message.id);

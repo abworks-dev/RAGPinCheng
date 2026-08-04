@@ -16,6 +16,7 @@ import {
   resolveCitation,
   type CitationHoverDetail,
 } from "./citations";
+import { copyText } from "../utils/clipboard";
 
 // Demote inline `$$...$$` to `$...$` so KaTeX renders it inline instead of as
 // a block break. Standalone display blocks on their own line are kept.
@@ -231,12 +232,21 @@ export function Message({
 }) {
   const isUser = msg.role === "user";
   const [copied, setCopied] = useState(false);
+  const copyResetTimer = useRef<number | null>(null);
+
+  useEffect(() => () => {
+    if (copyResetTimer.current !== null) window.clearTimeout(copyResetTimer.current);
+  }, []);
 
   const copyContent = async () => {
     try {
-      await navigator.clipboard.writeText(msg.content);
+      await copyText(msg.content);
       setCopied(true);
-      window.setTimeout(() => setCopied(false), 1400);
+      if (copyResetTimer.current !== null) window.clearTimeout(copyResetTimer.current);
+      copyResetTimer.current = window.setTimeout(() => {
+        setCopied(false);
+        copyResetTimer.current = null;
+      }, 1400);
     } catch {
       setCopied(false);
     }
@@ -256,10 +266,10 @@ export function Message({
             </div>
             <button
               type="button"
-              aria-label="复制提问"
-              title="复制提问"
+              aria-label={copied ? "提问已复制" : "复制提问"}
+              title={copied ? "提问已复制" : "复制提问"}
               onClick={copyContent}
-              className="mt-2 inline-flex size-8 items-center justify-center rounded-ui-md text-muted-foreground hover:bg-secondary hover:text-foreground"
+              className={`mt-2 inline-flex size-8 items-center justify-center rounded-ui-md hover:bg-secondary ${copied ? "text-success hover:text-success" : "text-muted-foreground hover:text-foreground"}`}
             >
               {copied ? <Check className="size-4 text-success" /> : <Copy className="size-4" />}
             </button>
