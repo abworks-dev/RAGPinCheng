@@ -2069,3 +2069,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`frontend/src/components/citations.ts`、`frontend/src/components/FeedbackBar.tsx`、`frontend/src/components/FeedbackBar.test.tsx`、`WORKLOG.md`。
 - 验证：消息、回答操作、来源工作区和管理布局专项 Vitest 25/25 通过；前端全量 Vitest 29 个文件、143/143 项通过；TypeScript project build 与 Vite production build 通过（2026 modules transformed）；`git diff --check` 通过。构建保留既有 CSS 语法、主包大于 500 kB 与 React Router future warning。
 - 待办/风险：功能处于待用户验收；尚未在真实登录会话中使用长回答执行浏览器剪贴板验收。本轮未修改 API、引用数据契约、RAG、依赖、数据或部署。
+
+### 07:40 — 发布前端交互修复到 master
+
+- 完成：在最新 `origin/master` 隔离工作区中整合并复核视频来源播放、管理页稳定滚动槽和回答复制角标清理；远端已先行包含视频来源提交，本次以普通 fast-forward 将剩余两个提交推送到 `origin/master`，未使用强推，未提交 `.codex-worktrees/`。
+- 文件：本次发布涉及的前端源码、测试与 `WORKLOG.md`；未修改依赖、API、数据、RAG 或部署配置。
+- 验证：rebase 到推送前最新 `origin/master` 后，前端全量 Vitest 29 个文件、143/143 项通过；TypeScript project build、Vite production build 与 `git diff --check` 通过；推送后本地 HEAD 与 `origin/master` 均为 `2c732e488bb715de88e56175e2bf55ecdc4ac3a7`。
+- 待办/风险：尚未进行真实登录会话的浏览器剪贴板、视频 seek 和管理页长短页面视觉验收；构建保留既有 CSS 语法、主包大于 500 kB 与 React Router future warning。
