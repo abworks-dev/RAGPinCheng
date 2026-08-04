@@ -5,9 +5,17 @@ import { Message } from "./Message";
 export function MessageList({
   messages,
   conversationId,
+  centeredEmpty = false,
+  sourceOpen = false,
+  activeSourceMessageId = null,
+  onToggleSources,
 }: {
   messages: ChatMessage[];
   conversationId: string | null;
+  centeredEmpty?: boolean;
+  sourceOpen?: boolean;
+  activeSourceMessageId?: string | null;
+  onToggleSources?: (messageId: string) => void;
 }) {
   const bottomRef = useRef<HTMLDivElement | null>(null);
   // Auto-scroll on every render so streaming tokens stay in view.
@@ -17,7 +25,7 @@ export function MessageList({
 
   if (messages.length === 0) {
     return (
-      <div className="flex flex-1 items-center justify-center px-6 text-center">
+      <div className={`flex items-center justify-center px-6 text-center ${centeredEmpty ? "flex-none" : "flex-1"}`}>
         <div className="max-w-lg">
           <h1 className="text-xl font-semibold text-foreground">从企业知识中找到可靠答案</h1>
           <p className="text-muted mt-2">
@@ -49,6 +57,8 @@ export function MessageList({
               msg={m}
               conversationId={conversationId}
               turnIndex={m.role === "assistant" ? turn : turn}
+              sourcesSelected={sourceOpen && activeSourceMessageId === m.id}
+              onToggleSources={onToggleSources}
             />
           );
         });

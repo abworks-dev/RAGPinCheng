@@ -1654,6 +1654,54 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 完成：在前述阶段梳理基础上，进一步核对总体方案、Phase 1/2 详细计划及 `src/transcription/`、SQLite Store/Migration 的实际类型与状态机，整理 Provider、Profile、Candidate、Canonical、Normalizer、Formatter、任务、版本、审核、发布、候选索引、正式 head、checkpoint、恢复和 GPU 调度等概念的职责、边界与设计用意。
 - 文件：仅更新 `WORKLOG.md`；未修改业务代码、配置、数据库、索引、API、前端或部署状态。
 - 验证：通过计划文档与当前类型/持久化代码交叉核对名词和值域；未重新运行测试或生产链路。
+### 09:04 — 调研知识库问答页面布局
+
+- 完成：对当前聊天首页、会话侧栏、分类筛选和输入区进行只读评估，并对照 Glean、Notion AI、Microsoft 365 Copilot 等企业搜索与 AI 问答产品，总结首屏任务入口、检索范围可见性、会话管理和引用信任设计的改进优先级；未修改代码。
+- 文件：仅更新 `WORKLOG.md`。
+- 验证：核对截图与 `ChatLayout.tsx`、`Sidebar.tsx`、`MessageList.tsx`、`Composer.tsx`、`ConversationList.tsx`、`Message.tsx`、`SourcesPanel.tsx` 当前实现；查阅同类产品官方页面与官方文档。
+
+### 09:32 — 清理已合入主线的 Codex 分支
+
+- 完成：确认 `codex/admin-conversations-ui`、`codex/admin-feedback-ui`、`codex/admin-media-ui`、`codex/admin-p2-foundation`、`codex/admin-users-ui`、`codex/frontend-foundation` 均已包含在 `origin/master@9c34467` 后，移除三个干净的关联 worktree，删除六条本地分支，并删除远端仍存在的 media、p2-foundation、frontend-foundation 分支。
+- 文件：仅更新 `WORKLOG.md`；Git refs 新增六个 `backup/codex-cleanup-20260803/*` 本地恢复标签。
+- 验证：删除前复核六个分支均为最新 `origin/master` 的祖先且关联 worktree 无未提交修改；删除后确认目标本地及远端分支均不存在、六个恢复标签均指向原分支提交。
+- 边界：未修改或清理 `codex/fix-admin-sidebar-alignment`、`codex/multi-engine-transcription-phase2`、`codex/multi-engine-transcription-phase3`，未触碰 detached 临时 worktree、admin-users worktree及并行进行中的 Phase 3 代码改动。
+
+### 10:17 — 实施知识库问答工作区 P0
+
+- 完成：将用户问答页调整为响应式会话导航、文档式回答阅读区和来源核验工作区；知识范围筛选移入输入器，引用点击与来源持久选择保持双向联动，并统一 PDF、DOCX、XLSX、PPTX 与视频的宽侧栏/移动端全屏预览外壳及互斥遮罩。
+- 文件：仅修改 `frontend/src/components/`、`frontend/src/hooks/usePdfPreview.tsx`、`frontend/src/hooks/useVideoPlayer.tsx` 与 `WORKLOG.md`；未修改管理端页面、API、认证、CSRF、SSE、RAG、索引或后端业务。
+- 验证：`npm run build` 通过（411 modules transformed）；前端 Vitest 9 个文件、43 项测试全部通过；浏览器在 1440×900、1280×800、1024×768、768×1024、390×844 五个视口检查登录页面均无水平溢出、无控制台 error，仅保留既有 React Router future warning。浏览器无登录态，因此聊天数据、来源选择和资源预览未完成真实后端端到端回归。
+
+### 10:54 — 优化问答来源视觉与检索反馈
+
+- 完成：扩大用户端会话侧栏和来源核验栏；以 `lucide-react` 替换 P0 临时符号图标；在回答顶部增加由实际来源数量与分类动态生成的检索摘要和绿色状态点，在回答底部增加“查看 X 个来源”定位按钮；来源列表与引用详情调整为更接近 shadcn/ui 的边框、选中态、层级和强调引用样式。
+- 文件：仅修改用户端聊天组件、`frontend/package.json`、`frontend/package-lock.json` 与 `WORKLOG.md`；未修改管理端页面、API、认证、CSRF、SSE、RAG、索引或后端业务。
+- 验证：`npm run build` 通过（1960 modules transformed）；前端 Vitest 9 个文件、43 项测试全部通过；`git diff --check` 无内容错误。浏览器仍无登录态，带真实来源的回答态和来源定位交互未完成浏览器端到端视觉验收。
+
+### 11:24 — 完善问答侧栏与来源开合交互
+
+- 完成：登录后的来源核验栏改为默认关闭，使空状态和输入器在主内容区居中；桌面会话侧栏增加 272px 与 64px 两态收缩控制，收起后保留品牌、新建对话和用户入口；用户菜单迁移为 Lucide 图标和紧凑浮层；会话按本地自然日分为今天、7 天内、30 天内和更早；来源展开时隐藏聊天标题栏按钮，仅保留来源栏右上角一个带数量的收缩按钮。
+- 文件：仅修改用户端 `ChatLayout`、`Sidebar`、`ConversationList`、`UserMenu`、`ChatHeader`、`SourceWorkspace`，新增会话分组测试并更新 `WORKLOG.md`；未修改管理端、API、认证、CSRF、SSE、RAG、索引或后端业务。
+- 验证：`npm run build` 通过（1960 modules transformed）；前端 Vitest 10 个文件、44 项测试全部通过；`git diff --check` 无内容错误。浏览器无登录态，桌面收缩、用户菜单和来源开合仍待登录后视觉验收。
+
+### 12:31 — 修复引用角标与来源选中同步
+
+- 完成：修复从右侧来源选中角标 5 后再点击正文角标 2 时，右侧已切换但正文仍高亮角标 5 的状态残留；公共引用分发现在同时广播来源定位和持久选中事件，使正文角标、查看来源按钮与右侧来源保持单一同步选中状态。
+- 文件：仅修改 `frontend/src/components/citations.ts`、对应测试与 `WORKLOG.md`；未修改管理端、API、RAG 或后端业务。
+- 验证：引用专项 Vitest 8/8 通过，新增双事件同步回归用例；`npm run build` 通过（1960 modules transformed）；`git diff --check` 无内容错误。
+
+### 12:35 — 增加侧栏滚动条自动隐藏
+
+- 完成：新增可复用的自动隐藏滚动条 hook 和细滚动条样式，应用于左侧会话列表、右侧来源列表及引用详情；滚动、鼠标进入/移动或聚焦时显示，空闲 900ms 后隐藏，鼠标移出后快速收起，并保持滚动槽宽度稳定以避免内容跳动。
+- 文件：新增 `frontend/src/hooks/useAutoHideScrollbar.ts` 及测试，修改 `Sidebar.tsx`、`SourceWorkspace.tsx`、`styles/index.css` 和 `WORKLOG.md`；未修改管理端或业务数据逻辑。
+- 验证：自动隐藏专项 Vitest 1/1 通过；`npm run build` 通过（1961 modules transformed）；`git diff --check` 无内容错误。
+
+### 12:52 — 协调空对话输入器与来源轮次状态
+
+- 完成：空对话和新建对话时将欢迎内容与输入器置于页面中部，首条消息出现后恢复底部输入器；新建及切换对话自动关闭来源栏；来源栏当前回答轮次提升为统一受控状态，同一回答的“查看 X 个来源”按钮支持再次点击收起并保持唯一选中；检索和生成阶段改为黄色状态点及更明确文案；所有完成回答增加无弹窗复制按钮和短暂勾选反馈；桌面来源栏通过宽度与透明度过渡实现平滑开合。
+- 文件：仅修改用户端 `ChatLayout`、`MessageList`、`Composer`、`Message`、`SourceWorkspace` 与 `WORKLOG.md`；未修改管理端、API、SSE、RAG 或后端业务。
+- 验证：前端全量 Vitest 14 个文件、63 项测试全部通过；`npm run build` 通过（1961 modules transformed）；`git diff --check` 无内容错误。浏览器无登录态，真实对话轮次切换和来源栏动画仍待登录后视觉验收。
 
 ### 09:09 — 修复管理端侧边栏贴边布局
 
@@ -1706,3 +1754,54 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：新增 `asr_service/`、`src/transcription/asr_service_contract.py`、`profile_catalog.py`、`provider_registry.py`、`remote_provider.py`、`runtime_ports.py` 及 Phase 3 测试；最小修改 Profile/Provider 契约、配置示例、主依赖中的既有 `httpx` 声明、CI、静态边界、Phase 3 计划、功能文档和 `TODO.md`。未触碰并行 frontend 修改，也未修改数据库 Schema、应用 API/UI/worker、Qdrant、`gpu_service`、Canonical、normalizer、formatter 或 `pipeline.py`。
 - 验证：review 修复定向 suite `49 passed`；最新 master 基线完整 transcription/manual/service 回归 `276 passed, 1 skipped`；`tests/test_providers.py` 为 `16 passed, 6 skipped`；`compileall` 与提交级 `git diff --check` 通过。本地跳过仅因 `.venv` 缺 FastAPI；PR #5 CI 六个 job 全部通过，其中 transcription 为 `239 passed`，ASR service/API/auth 为 `90 passed`、零 skip。
 - 边界/风险：两侧默认关闭，未下载模型、未导入真实 FunASR/torch 执行推理，未访问网络/GPU/真实媒体/数据库/生产；Phase 3 尚未接应用上传、Store、worker、管理员 UI 或索引，因此没有用户可见自动转录能力。Phase 4 未开始。
+
+### 13:09 — 优化侧栏主题与来源按钮一致性
+
+- 完成：固定左侧品牌图标在展开和收起状态下的水平位置，折叠后以品牌图标作为展开入口；将主题切换从头像菜单独立到头像上方，支持默认跟随系统、明亮和夜间三种模式，并在跟随系统时实时响应浏览器配色变化；无来源的新对话不再显示右上来源按钮，来源栏展开态按钮补齐“来源”文字。
+- 文件：修改用户端 `Sidebar.tsx`、`UserMenu.tsx`、`ChatHeader.tsx`、`SourceWorkspace.tsx`、`useTheme.ts`，新增 `ThemeMenu.tsx` 及主题和来源按钮测试；未修改管理端、API、认证、RAG 或后端业务。
+- 验证：主题与来源按钮专项 Vitest 2 个文件、4 项测试全部通过；`npm run build` 通过（1962 modules transformed）；`git diff --check` 无内容错误。浏览器无登录态，登录后的侧栏动画、主题菜单和来源栏展开态仍待真实会话视觉验收。
+
+### 21:37 — 编写多引擎转录 Phase 5 R2 计划
+
+- 完成：基于 `origin/master@b323023` 只读核验上传、转录、审核发布内核、索引、检索、引用和播放器调用链，新增 Phase 5 隔离端到端与版本感知发布详细计划；确认现有 `index_single()` 不能直接用于 Candidate，版本审核/发布应用接线和正式 head 检索过滤是实施前置。
+- 文件：新增 `project-docs/plans/multi-engine-transcription-phase5.md`，最小更新 `TODO.md` 和 `WORKLOG.md`；未修改业务代码、测试、配置、数据库、索引或外部状态，未触碰已有前端并行修改。
+- 验证：完成文档范围、链接、24 项完成标准、精确文件清单和外部资源门禁的静态复核；未运行测试、ffmpeg、ASR、GPU、Qdrant 或生产数据。
+- 待办/风险：Phase 5A/5B 代码实施待 R2 审批及第 17 节四项决定；Phase 5C 真实适配器验证另行审批，且当前没有 `qualification_approved` Profile。
+
+### 21:49 — 定位视频媒体页面空白故障
+
+- 完成：只读核对管理端页面源码、现有测试和浏览器控制台日志，确认 `AdminMediaPage` 在 `http://10.205.165.80` 非安全上下文中渲染时直接调用 `crypto.randomUUID()`，浏览器不提供该函数并触发未捕获异常，导致视频媒体页整页空白；资料管理页当前已恢复，第三方统计请求被拦截与本故障无关。
+- 文件：未修改业务代码或测试；仅追加 `WORKLOG.md`，未触碰现有前端并行修改。
+- 验证：`AdminDocumentsPage.test.tsx` 与 `AdminMediaPage.test.tsx` 共 15 项测试通过；测试因 stub `crypto.randomUUID` 未覆盖非安全 HTTP 环境。
+- 待办/风险：需以 R1 最小修复替换三个直接 `crypto.randomUUID()` 调用为兼容的客户端 UUID/幂等键生成函数，并增加 `crypto.randomUUID` 缺失回归测试；HTTPS 部署也能规避现象，但前端仍应失败安全。
+
+### 21:56 — 修复视频媒体页面 HTTP 白屏
+
+- 完成：新增客户端请求 ID 兼容生成器，优先使用 `crypto.randomUUID()`，缺失时使用 `crypto.getRandomValues()` 生成规范 UUID v4，Web Crypto 整体不可用时使用时间戳、递增序号和本地随机数组合生成 UUID v4；将 `AdminMediaPage` 上传、成功后轮换和任务重试三处直接调用统一替换，避免局域网 HTTP 非安全上下文因 `randomUUID` 缺失导致整页崩溃。
+- 文件：`frontend/src/lib/request-id.ts`、`frontend/src/lib/request-id.test.ts`、`frontend/src/pages/admin/AdminMediaPage.tsx`、`frontend/src/pages/admin/AdminMediaPage.test.tsx`、`WORKLOG.md`；未修改 API、数据库、worker、Qdrant、真实 ASR 或其他并行前端文件。
+- 验证：请求 ID 与视频媒体页专项 Vitest 共 11 项通过；`npm run build` 通过（1964 modules transformed）；目标文件 `git diff --check` 通过。构建仍报告既有 CSS 语法和大 chunk 警告，本次未扩大范围处理。
+
+## 2026-08-04
+
+### 22:11 — 固定来源开关并精简会话标题栏
+
+- 完成：桌面端来源按钮改为固定在视口右上角，展开与收起保持相同宽度、内容顺序和数量徽标，仅切换开合图标并显式取消按钮过渡；移除来源面板内重复且随宽度变化移动的关闭按钮；会话标题由 14px 微调为 15px，并移除标题栏底部分割线。
+- 文件：`frontend/src/components/ChatHeader.tsx`、`frontend/src/components/ChatHeader.test.tsx`、`frontend/src/components/ChatLayout.tsx`、`frontend/src/components/SourceWorkspace.tsx`、`WORKLOG.md`；保留并行进行中的来源轮次、滚动条和聊天布局未提交修改。
+- 验证：来源按钮定向 Vitest 3/3 通过；前端全量 Vitest 18 个文件、82/82 项测试通过；TypeScript project build 与 Vite production build 通过（1964 modules transformed）。构建仍保留既有 React Router future warning、CSS minify warning 和主包大于 500 kB 警告。
+- 待办/风险：尚未使用带来源的真实会话完成桌面端开合位置和移动端抽屉视觉验收；本轮未提交、推送或部署。
+
+## 2026-08-05
+
+### 03:31 — 调整来源引用问题入口
+
+- 完成：将来源核验面板底部的“报告引用问题”入口移动到“引用原文”标题行右侧，并精简为警示小图标与“报告问题”；保留原有表单展开和提交逻辑。
+- 文件：`frontend/src/components/SourceWorkspace.tsx`、`WORKLOG.md`；保留该组件及仓库中的其他未提交修改。
+- 验证：`npm run build` 通过（1964 modules transformed）；构建仍报告既有 CSS 语法警告和主包大于 500 kB 警告。
+- 待办/风险：尚未使用带来源的真实会话进行视觉验收；本轮未提交、推送或部署。
+
+### 03:51 — 整理当前工作区发布提交
+
+- 完成：按用户确认范围整理当前工作区的业务代码、测试、文档和工作日志，明确排除 `.codex-worktrees/` 临时目录，并执行提交前内容检查。
+- 文件：当前工作区除 `.codex-worktrees/` 外的全部已跟踪和新增业务文件。
+- 验证：`git diff --check` 通过；前端最近一次 `npm run build` 通过（1964 modules transformed），各项专项与全量测试结果见本日志对应功能记录。
+- 待办/风险：`origin/master` 比当前分支多 77 个提交且当前分支有 4 个独有提交，无法直接快进推送；禁止强推覆盖远端历史，需先安全整合远端分支。

@@ -7,7 +7,7 @@ import type { ChatMessage, Source } from "../types";
 import { stripMarkdown } from "../utils/markdown";
 import { FeedbackBar } from "./FeedbackBar";
 import { timestampToSeconds, useVideoPlayer } from "../hooks/useVideoPlayer";
-import { Files } from "lucide-react";
+import { Check, Copy, Files } from "lucide-react";
 import {
   CITATION_EVENT,
   CITATION_HOVER_EVENT,
@@ -34,13 +34,21 @@ function StageIndicator({ msg }: { msg: ChatMessage }) {
   const stage = msg.stage;
   if (!stage || stage === "done") return null;
   let label = "";
-  if (stage === "retrieving") label = "🔎 改写问题并检索资料中…";
+  if (stage === "retrieving") label = "正在理解问题并检索企业知识…";
   else if (stage === "generating") {
     const n = msg.prep?.final_count ?? msg.sources?.length ?? 0;
-    label = `📝 已检索到 ${n} 条来源，正在生成回答…`;
-  } else if (stage === "streaming" && !msg.content) label = "📝 正在生成回答…";
+    label = `已找到 ${n} 份相关资料，正在整理回答…`;
+  } else if (stage === "streaming" && !msg.content) label = "正在组织回答…";
   if (!label) return null;
-  return <div className="text-muted text-sm">{label}</div>;
+  return (
+    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+      <span className="relative flex size-2.5 shrink-0">
+        <span className="absolute inline-flex size-full animate-ping rounded-full bg-warning opacity-30" />
+        <span className="relative inline-flex size-2.5 rounded-full bg-warning" />
+      </span>
+      {label}
+    </div>
+  );
 }
 
 function RetrievalSummary({ sources }: { sources: Source[] }) {
@@ -193,12 +201,27 @@ export function Message({
   msg,
   conversationId,
   turnIndex,
+  sourcesSelected = false,
+  onToggleSources,
 }: {
   msg: ChatMessage;
   conversationId: string | null;
   turnIndex: number;
+  sourcesSelected?: boolean;
+  onToggleSources?: (messageId: string) => void;
 }) {
   const isUser = msg.role === "user";
+  const [copied, setCopied] = useState(false);
+
+  const copyAnswer = async () => {
+    try {
+      await navigator.clipboard.writeText(msg.content);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1400);
+    } catch {
+      setCopied(false);
+    }
+  };
   return (
     <article className={`mx-auto flex w-full max-w-[50rem] ${isUser ? "justify-end" : "justify-start"} px-4 py-4`}>
       <div
@@ -249,15 +272,20 @@ export function Message({
                 ⚠️ {msg.error}
               </div>
             )}
-            {!msg.streaming && !msg.error && msg.sources && msg.sources.length > 0 && (
-              <div className="mt-5 border-t border-border pt-3">
+            {!msg.streaming && !msg.error && msg.content && (
+              <div className="mt-5 flex items-center gap-2 border-t border-border pt-3">
+                {msg.sources && msg.sources.length > 0 && (
                 <button
                   type="button"
-                  onClick={() => dispatchCitation({ messageId: msg.id, sourceIndex: 0 })}
-                  className="inline-flex h-9 items-center gap-2 rounded-ui-md border border-border bg-card px-3 text-xs font-medium text-foreground shadow-sm transition-colors hover:border-primary/40 hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  onClick={() => onToggleSources?.(msg.id)}
+                  className={`inline-flex h-9 items-center gap-2 rounded-ui-md border px-3 text-xs font-medium shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${sourcesSelected ? "border-primary bg-primary/10 text-primary" : "border-border bg-card text-foreground hover:border-primary/40 hover:bg-secondary"}`}
                 >
                   <Files className="size-4 text-primary" />
                   查看 {msg.sources.length} 个来源
+                </button>
+                )}
+                <button type="button" aria-label="复制回答" title="复制回答" onClick={copyAnswer} className="inline-flex size-9 items-center justify-center rounded-ui-md border border-border bg-card text-muted-foreground shadow-sm hover:bg-secondary hover:text-foreground">
+                  {copied ? <Check className="size-4 text-success" /> : <Copy className="size-4" />}
                 </button>
               </div>
             )}

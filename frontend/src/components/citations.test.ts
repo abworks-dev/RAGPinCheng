@@ -1,5 +1,11 @@
-import { describe, expect, it } from "vitest";
-import { linkifyCitations, resolveCitation } from "./citations";
+import { describe, expect, it, vi } from "vitest";
+import {
+  CITATION_EVENT,
+  CITATION_HOVER_EVENT,
+  dispatchCitation,
+  linkifyCitations,
+  resolveCitation,
+} from "./citations";
 import type { Source } from "../types";
 
 function source(overrides: Partial<Source> = {}): Source {
@@ -83,5 +89,23 @@ describe("citation parsing", () => {
     const sources = [source()];
     expect(resolveCitation("#cite-num:2", sources)).toBe(-1);
     expect(resolveCitation("#not-a-citation", sources)).toBe(-1);
+  });
+
+  it("synchronizes source navigation and persistent citation selection", () => {
+    const onNavigate = vi.fn();
+    const onSelect = vi.fn();
+    window.addEventListener(CITATION_EVENT, onNavigate);
+    window.addEventListener(CITATION_HOVER_EVENT, onSelect);
+
+    dispatchCitation({ messageId: "answer-2", sourceIndex: 1 });
+
+    expect(onNavigate).toHaveBeenCalledWith(
+      expect.objectContaining({ detail: { messageId: "answer-2", sourceIndex: 1 } }),
+    );
+    expect(onSelect).toHaveBeenCalledWith(
+      expect.objectContaining({ detail: { messageId: "answer-2", sourceIndex: 1 } }),
+    );
+    window.removeEventListener(CITATION_EVENT, onNavigate);
+    window.removeEventListener(CITATION_HOVER_EVENT, onSelect);
   });
 });

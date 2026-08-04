@@ -1,12 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import { useTheme } from "../hooks/useTheme";
-import { ChevronUp, LogOut, Moon, Shield, Sun } from "lucide-react";
+import { ChevronUp, LogOut, Shield } from "lucide-react";
 
 export function UserMenu({ collapsed = false }: { collapsed?: boolean }) {
   const { state, logout } = useAuth();
-  const [theme, toggleTheme] = useTheme();
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
   const ref = useRef<HTMLDivElement | null>(null);
@@ -43,17 +41,6 @@ export function UserMenu({ collapsed = false }: { collapsed?: boolean }) {
       </button>
       {open && (
         <div className={`absolute bottom-12 z-dropdown rounded-ui-md border border-border bg-popover p-1.5 text-popover-foreground shadow-overlay ${collapsed ? "left-12 w-48" : "left-0 right-0"}`}>
-          <button
-            type="button"
-            onClick={() => {
-              toggleTheme();
-              setOpen(false);
-            }}
-            className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-left text-sm hover:bg-secondary"
-          >
-            {theme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}
-            {theme === "dark" ? "浅色模式" : "深色模式"}
-          </button>
           {u.role === "admin" && (
             <button
               type="button"
