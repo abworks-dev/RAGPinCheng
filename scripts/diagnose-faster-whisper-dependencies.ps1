@@ -34,6 +34,8 @@ $ResolverExitCode = -1
 $ConflictLines = @()
 $DiagnosisKind = "unknown"
 $AffectedRequirement = ""
+$FocusedProbeExecuted = $false
+$FocusedProbeExitCode = -1
 $ProductionFreezeSha256 = ""
 $CombinedRequirementsSha256 = ""
 $WindowsRequirementsSha256 = ""
@@ -178,7 +180,9 @@ function Convert-ToSanitizedResolverEvidence {
     param([Parameter(Mandatory = $true)][object[]]$Lines)
 
     $dependencyLines = @{}
+    $bareDependencyTargets = New-Object "System.Collections.Generic.HashSet[string]"
     $constraintLines = @{}
+    $constraintRequirements = @{}
     $missingVersionTargets = New-Object "System.Collections.Generic.HashSet[string]"
     $noMatchingTargets = New-Object "System.Collections.Generic.HashSet[string]"
     $sawConflictHeader = $false
@@ -222,11 +226,21 @@ function Convert-ToSanitizedResolverEvidence {
         }
 
         if (
-            $clean -match '^The user requested \(constraint\)\s+(?<package>[A-Za-z0-9_.-]+)(?<spec>(?:==|!=|<=|>=|~=|<|>).+)$'
+            $clean -match '^(?<owner>[A-Za-z0-9_.-]+)\s+(?<owner_version>[A-Za-z0-9+_.-]+)\s+depends on\s+(?<package>[A-Za-z0-9_.-]+)$'
         ) {
-            $target = Get-NormalizedPackageName -Name $Matches.package
+            [void]$bareDependencyTargets.Add((Get-NormalizedPackageName -Name $Matches.package))
+            continue
+        }
+
+        if (
+            $clean -match '^The user requested \(constraint\)\s+(?<package>[A-Za-z0-9_.-]+)(?<spec>(?:==|!=|<=|>=|~=|<|>)[A-Za-z0-9+_.!*,~-]+)$'
+        ) {
+            $package = [string]$Matches.package
+            $spec = [string]$Matches.spec
+            $target = Get-NormalizedPackageName -Name $package
             if (-not $constraintLines.ContainsKey($target)) {
                 $constraintLines[$target] = $clean
+                $constraintRequirements[$target] = $package + $spec
             }
         }
     }
@@ -242,6 +256,8 @@ function Convert-ToSanitizedResolverEvidence {
             Kind = "binary_distribution_unavailable"
             Requirement = $target
             Lines = @($result)
+            ProbeRequirement = ""
+            ProbeConstraint = ""
         }
     }
 
@@ -256,7 +272,20 @@ function Convert-ToSanitizedResolverEvidence {
                     [string]$dependencyLines[$target],
                     [string]$constraintLines[$target]
                 )
+                ProbeRequirement = ""
+                ProbeConstraint = ""
             }
+        }
+    }
+
+    foreach ($target in @($bareDependencyTargets | Sort-Object)) {
+        if (-not $constraintRequirements.ContainsKey($target)) { continue }
+        return [pscustomobject]@{
+            Kind = "unknown"
+            Requirement = ""
+            Lines = @()
+            ProbeRequirement = $target
+            ProbeConstraint = [string]$constraintRequirements[$target]
         }
     }
 
@@ -264,6 +293,8 @@ function Convert-ToSanitizedResolverEvidence {
         Kind = "unknown"
         Requirement = ""
         Lines = @()
+        ProbeRequirement = ""
+        ProbeConstraint = ""
     }
 }
 
@@ -307,7 +338,11 @@ function Assert-SanitizerSelfTest {
         "funasr 1.4.1 depends on jieba",
         "The user requested (constraint) jieba==0.42.1"
     )
-    if ($compatibleBareDependency.Kind -ne "unknown") {
+    if (
+        $compatibleBareDependency.Kind -ne "unknown" -or
+        $compatibleBareDependency.ProbeRequirement -ne "jieba" -or
+        $compatibleBareDependency.ProbeConstraint -ne "jieba==0.42.1"
+    ) {
         throw "Compatible bare dependency must not be reported as a conflict"
     }
 }
@@ -349,6 +384,8 @@ function Write-SanitizedResult {
         resolver_exit_code = $ResolverExitCode
         diagnosis_kind = $DiagnosisKind
         affected_requirement = $AffectedRequirement
+        focused_probe_executed = $FocusedProbeExecuted
+        focused_probe_exit_code = $FocusedProbeExitCode
         conflict_lines = @($ConflictLines)
         profile_admission = "disabled"
         production_services_modified = $false
@@ -468,6 +505,59 @@ try {
         $DiagnosisKind = $evidence.Kind
         $AffectedRequirement = $evidence.Requirement
         $ConflictLines = @($evidence.Lines)
+
+        if (
+            $DiagnosisKind -eq "unknown" -and
+            -not [string]::IsNullOrWhiteSpace([string]$evidence.ProbeConstraint)
+        ) {
+            $FailureCode = "focused_probe_failed"
+            $FocusedProbeExecuted = $true
+            $AffectedRequirement = [string]$evidence.ProbeRequirement
+            $focusedOutput = @()
+            $previousPreference = $ErrorActionPreference
+            try {
+                $ErrorActionPreference = "Continue"
+                Set-ScopedProxy -Proxy $env:ASR_DEPENDENCY_PROXY
+                try {
+                    $focusedOutput = @(
+                        & $DiagnosticPython -m pip install `
+                            --dry-run `
+                            --ignore-installed `
+                            --only-binary=:all: `
+                            --no-cache-dir `
+                            --index-url "https://pypi.org/simple" `
+                            --extra-index-url "https://download.pytorch.org/whl/cu128" `
+                            --constraint $ProductionFreeze `
+                            $evidence.ProbeConstraint `
+                            2>&1
+                    )
+                    $FocusedProbeExitCode = $LASTEXITCODE
+                } finally {
+                    Clear-ScopedProxy
+                }
+            } finally {
+                $ErrorActionPreference = $previousPreference
+            }
+            [System.IO.File]::WriteAllLines(
+                (Join-Path $DiagnosticLogRoot "focused-binary-probe.log"),
+                [string[]]@($focusedOutput | ForEach-Object { [string]$_ }),
+                (New-Object System.Text.UTF8Encoding($false))
+            )
+            if ($FocusedProbeExitCode -eq 0) {
+                $FailureCode = "focused_probe_succeeded"
+                throw "Focused binary-only requirement probe succeeded; candidate is not the blocker"
+            }
+            $focusedEvidence = Convert-ToSanitizedResolverEvidence -Lines $focusedOutput
+            if ($focusedEvidence.Kind -ne "binary_distribution_unavailable") {
+                throw "Focused binary-only requirement probe failed without an exact unavailable-distribution signal"
+            }
+            $DiagnosisKind = $focusedEvidence.Kind
+            $AffectedRequirement = $focusedEvidence.Requirement
+            $ConflictLines = @(
+                "The user requested (constraint) $($evidence.ProbeConstraint)",
+                "No matching binary distribution found for $AffectedRequirement"
+            )
+        }
     } else {
         $ResolverExitCode = 1
     }
