@@ -1,4 +1,4 @@
-"""Strict, local-only SenseVoice model manifest validation."""
+"""Strict, local-only ASR model manifest validation."""
 from __future__ import annotations
 
 import hashlib
@@ -11,6 +11,11 @@ MODEL_MANIFEST_VERSION = "asr-model-manifest/1"
 SENSEVOICE_MODEL_ID = "iic/SenseVoiceSmall"
 SENSEVOICE_REVISION = "7bf452403abd7353a300cd760f7adae7701c92c1"
 SENSEVOICE_RELATIVE_PATH = f"SenseVoiceSmall/{SENSEVOICE_REVISION}"
+FASTER_WHISPER_MODEL_ID = "dropbox-dash/faster-whisper-large-v3-turbo"
+FASTER_WHISPER_REVISION = "0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf"
+FASTER_WHISPER_RELATIVE_PATH = (
+    f"faster-whisper-large-v3-turbo/{FASTER_WHISPER_REVISION}"
+)
 _SHA256_RE = re.compile(r"[0-9a-f]{64}")
 
 
@@ -33,9 +38,13 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def validate_sensevoice_cache(
+def _validate_model_cache(
     cache_root: Path | None,
     manifest_path: Path | None,
+    *,
+    expected_model_id: str,
+    expected_revision: str,
+    expected_relative_path: str,
 ) -> ModelCacheStatus:
     """Validate an offline model tree without importing engines or using network."""
     if cache_root is None or manifest_path is None:
@@ -57,11 +66,11 @@ def validate_sensevoice_cache(
         if data["schema_version"] != MODEL_MANIFEST_VERSION:
             return _unavailable("model-manifest-version-mismatch")
         if (
-            data["model_id"] != SENSEVOICE_MODEL_ID
-            or data["model_revision"] != SENSEVOICE_REVISION
+            data["model_id"] != expected_model_id
+            or data["model_revision"] != expected_revision
         ):
             return _unavailable("model-identity-mismatch")
-        if data["model_path"] != SENSEVOICE_RELATIVE_PATH:
+        if data["model_path"] != expected_relative_path:
             return _unavailable("model-path-invalid")
         model_path = (root / Path(*PurePosixPath(data["model_path"]).parts)).resolve(
             strict=True
@@ -126,3 +135,29 @@ def validate_sensevoice_cache(
         return ModelCacheStatus(True, "available", model_path)
     except (OSError, RuntimeError, ValueError, json.JSONDecodeError):
         return _unavailable("model-cache-unavailable")
+
+
+def validate_sensevoice_cache(
+    cache_root: Path | None,
+    manifest_path: Path | None,
+) -> ModelCacheStatus:
+    return _validate_model_cache(
+        cache_root,
+        manifest_path,
+        expected_model_id=SENSEVOICE_MODEL_ID,
+        expected_revision=SENSEVOICE_REVISION,
+        expected_relative_path=SENSEVOICE_RELATIVE_PATH,
+    )
+
+
+def validate_faster_whisper_cache(
+    cache_root: Path | None,
+    manifest_path: Path | None,
+) -> ModelCacheStatus:
+    return _validate_model_cache(
+        cache_root,
+        manifest_path,
+        expected_model_id=FASTER_WHISPER_MODEL_ID,
+        expected_revision=FASTER_WHISPER_REVISION,
+        expected_relative_path=FASTER_WHISPER_RELATIVE_PATH,
+    )

@@ -22,7 +22,11 @@ from src.config import (
     TRANSCRIPTION_ARTIFACT_DIR,
 )
 from src.transcription.profile import ProfileOperation
-from src.transcription.profile_catalog import build_phase3_profile_catalog
+from src.transcription.profile_catalog import (
+    FASTER_WHISPER_PROVIDER_KEY,
+    FUNASR_SENSEVOICE_PROVIDER_KEY,
+    build_phase3_profile_catalog,
+)
 from src.transcription.provider_registry import ProviderRegistry
 from src.transcription.types import ContractValidationError, TranscriptionJobStatus
 
@@ -61,15 +65,22 @@ def build_transcription_service() -> TranscriptionApplicationService:
         poll_interval_ms=ASR_POLL_INTERVAL_MS,
         expected_api_version=ASR_EXPECTED_API_VERSION,
     )
-    factory = RemoteAsrProviderFactory(
-        ASR_SERVICE_URL,
-        ASR_SERVICE_TOKEN,
-        ASR_CONNECT_TIMEOUT_SECONDS,
-        ASR_REQUEST_TIMEOUT_SECONDS,
+    factories = tuple(
+        RemoteAsrProviderFactory(
+            ASR_SERVICE_URL,
+            ASR_SERVICE_TOKEN,
+            ASR_CONNECT_TIMEOUT_SECONDS,
+            ASR_REQUEST_TIMEOUT_SECONDS,
+            provider_key,
+        )
+        for provider_key in (
+            FASTER_WHISPER_PROVIDER_KEY,
+            FUNASR_SENSEVOICE_PROVIDER_KEY,
+        )
     )
     return TranscriptionApplicationService(
         profiles=profiles,
-        providers=ProviderRegistry((factory,)),
+        providers=ProviderRegistry(factories),
         preparer=FfmpegMediaAudioPreparer(
             MEDIA_DIR.resolve(), ASR_FFMPEG_PATH, ASR_MEDIA_PREP_TIMEOUT_SECONDS
         ),
@@ -137,6 +148,7 @@ def list_profiles(
                 ASR_SERVICE_TOKEN,
                 ASR_CONNECT_TIMEOUT_SECONDS,
                 ASR_REQUEST_TIMEOUT_SECONDS,
+                FUNASR_SENSEVOICE_PROVIDER_KEY,
             ).capabilities()
             healthy = True
         except Exception:

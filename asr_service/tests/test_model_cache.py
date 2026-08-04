@@ -6,25 +6,37 @@ import json
 import pytest
 
 from asr_service.model_cache import (
+    FASTER_WHISPER_MODEL_ID,
+    FASTER_WHISPER_RELATIVE_PATH,
+    FASTER_WHISPER_REVISION,
     MODEL_MANIFEST_VERSION,
     SENSEVOICE_MODEL_ID,
+    SENSEVOICE_RELATIVE_PATH,
     SENSEVOICE_REVISION,
+    validate_faster_whisper_cache,
     validate_sensevoice_cache,
 )
 
 
-def make_cache(tmp_path, *, mutate=None):
+def make_cache(
+    tmp_path,
+    *,
+    mutate=None,
+    model_id=SENSEVOICE_MODEL_ID,
+    revision=SENSEVOICE_REVISION,
+    relative_path=SENSEVOICE_RELATIVE_PATH,
+):
     root = tmp_path / "models"
-    model = root / "SenseVoiceSmall" / SENSEVOICE_REVISION
+    model = root.joinpath(*relative_path.split("/"))
     model.mkdir(parents=True)
     content = b"offline-model-bytes"
     artifact = model / "model.bin"
     artifact.write_bytes(content)
     payload = {
         "schema_version": MODEL_MANIFEST_VERSION,
-        "model_id": SENSEVOICE_MODEL_ID,
-        "model_revision": SENSEVOICE_REVISION,
-        "model_path": f"SenseVoiceSmall/{SENSEVOICE_REVISION}",
+        "model_id": model_id,
+        "model_revision": revision,
+        "model_path": relative_path,
         "files": [{
             "path": "model.bin",
             "size_bytes": len(content),
@@ -44,6 +56,21 @@ def test_valid_manifest_resolves_exact_local_model_path(tmp_path):
     assert status.available is True
     assert status.reason_code == "available"
     assert status.model_path == model.resolve()
+
+
+def test_valid_faster_whisper_manifest_resolves_only_pinned_revision(tmp_path):
+    root, manifest, model = make_cache(
+        tmp_path,
+        model_id=FASTER_WHISPER_MODEL_ID,
+        revision=FASTER_WHISPER_REVISION,
+        relative_path=FASTER_WHISPER_RELATIVE_PATH,
+    )
+    status = validate_faster_whisper_cache(root, manifest)
+    assert status.available is True
+    assert status.model_path == model.resolve()
+    assert validate_sensevoice_cache(root, manifest).reason_code == (
+        "model-identity-mismatch"
+    )
 
 
 @pytest.mark.parametrize(
@@ -97,3 +124,6 @@ def test_manifest_and_file_path_escape_cache_are_rejected(tmp_path):
 def test_unconfigured_or_missing_cache_is_unavailable(tmp_path):
     assert validate_sensevoice_cache(None, None).reason_code == "model-cache-unconfigured"
     assert validate_sensevoice_cache(tmp_path / "missing", tmp_path / "missing.json").available is False
+    assert validate_faster_whisper_cache(None, None).reason_code == (
+        "model-cache-unconfigured"
+    )

@@ -9,6 +9,7 @@ from typing import Callable
 from src.transcription.asr_service_contract import ServiceCapabilities
 from src.transcription.persistence import CHECKPOINT_SCHEMA_VERSION, TranscriptionCheckpoint
 from src.transcription.profile import (
+    FasterWhisperRemoteConfig,
     ProfileRegistry,
     RemoteAsrServiceConfig,
     TranscriptionProfileDefinition,
@@ -23,6 +24,7 @@ from src.transcription.types import (
     TranscriptionJobStatus,
     require_exact_enum,
     require_int,
+    validate_provider_key,
     validate_uuid,
 )
 
@@ -33,31 +35,42 @@ from .transcription_store import SQLiteTranscriptionStore, StoreConflictError
 def build_phase4_profile_registry(
     *, upload_part_bytes: int, poll_interval_ms: int, expected_api_version: str
 ) -> ProfileRegistry:
-    base = build_phase3_profile_catalog()[0].profile
-    provider_config = replace(
-        base.provider_config,
-        upload_part_bytes=upload_part_bytes,
-        poll_interval_ms=poll_interval_ms,
-        expected_api_version=expected_api_version,
-    )
-    profile = TranscriptionProfileDefinition.create(
-        profile_id=base.profile_id,
-        display_name=base.display_name,
-        description=base.description,
-        provider_key=base.provider_key,
-        provider_config=provider_config,
-        normalizer_config=base.normalizer_config,
-        qualification=base.qualification,
-        admission=base.admission,
-        release_policy=base.release_policy,
-        profile_definition_version=base.profile_definition_version,
-        provider_adapter_version=base.provider_adapter_version,
-        canonical_schema_version=base.canonical_schema_version,
-        normalizer_version=base.normalizer_version,
-        formatter_version=base.formatter_version,
-        evidence_refs=base.evidence_refs,
-    )
-    return ProfileRegistry((profile,))
+    profiles: list[TranscriptionProfileDefinition] = []
+    for entry in build_phase3_profile_catalog():
+        base = entry.profile
+        if type(base.provider_config) not in (
+            RemoteAsrServiceConfig,
+            FasterWhisperRemoteConfig,
+        ):
+            raise ContractValidationError(
+                "invalid_provider_config", "provider_config"
+            )
+        provider_config = replace(
+            base.provider_config,
+            upload_part_bytes=upload_part_bytes,
+            poll_interval_ms=poll_interval_ms,
+            expected_api_version=expected_api_version,
+        )
+        profiles.append(
+            TranscriptionProfileDefinition.create(
+                profile_id=base.profile_id,
+                display_name=base.display_name,
+                description=base.description,
+                provider_key=base.provider_key,
+                provider_config=provider_config,
+                normalizer_config=base.normalizer_config,
+                qualification=base.qualification,
+                admission=base.admission,
+                release_policy=base.release_policy,
+                profile_definition_version=base.profile_definition_version,
+                provider_adapter_version=base.provider_adapter_version,
+                canonical_schema_version=base.canonical_schema_version,
+                normalizer_version=base.normalizer_version,
+                formatter_version=base.formatter_version,
+                evidence_refs=base.evidence_refs,
+            )
+        )
+    return ProfileRegistry(tuple(profiles))
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,7 +79,10 @@ class RemoteAsrProviderFactory:
     token: str
     connect_timeout_seconds: float
     request_timeout_seconds: float
-    provider_key: str = "funasr-sensevoice"
+    provider_key: str
+
+    def __post_init__(self) -> None:
+        validate_provider_key(self.provider_key)
 
     def create(self, ports: ProviderRuntimePorts) -> RemoteAsrProvider:
         return RemoteAsrProvider(
@@ -77,6 +93,7 @@ class RemoteAsrProviderFactory:
                 self.request_timeout_seconds,
             ),
             ports,
+            self.provider_key,
         )
 
     def capabilities(self) -> ServiceCapabilities:

@@ -21,6 +21,8 @@ ENV_KEYS = (
     "ASR_MODEL_CACHE_ROOT",
     "ASR_MODEL_MANIFEST_PATH",
     "ASR_MODEL_LOCAL_FILES_ONLY",
+    "ASR_FASTER_WHISPER_MODEL_CACHE_ROOT",
+    "ASR_FASTER_WHISPER_MODEL_MANIFEST_PATH",
     "BGE_PRIORITY_PROBE_CONNECT_TIMEOUT_SECONDS",
     "BGE_PRIORITY_PROBE_REQUEST_TIMEOUT_SECONDS",
     "ASR_LOG_DIR",
@@ -87,3 +89,21 @@ def test_local_files_only_cannot_be_disabled(monkeypatch):
     monkeypatch.setenv("ASR_MODEL_LOCAL_FILES_ONLY", "false")
     with pytest.raises(RuntimeError, match="must remain true"):
         AsrServiceSettings.from_env().validate_for_startup()
+
+
+def test_optional_faster_whisper_cache_requires_an_exact_pair(monkeypatch, tmp_path):
+    for key in ENV_KEYS:
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv(
+        "ASR_FASTER_WHISPER_MODEL_CACHE_ROOT", str(tmp_path / "models")
+    )
+    with pytest.raises(RuntimeError, match="configured together"):
+        AsrServiceSettings.from_env().validate_for_startup()
+
+    monkeypatch.setenv(
+        "ASR_FASTER_WHISPER_MODEL_MANIFEST_PATH",
+        str(tmp_path / "model-manifest.json"),
+    )
+    settings = AsrServiceSettings.from_env()
+    settings.validate_for_startup()
+    assert settings.faster_whisper_model_cache_root == tmp_path / "models"

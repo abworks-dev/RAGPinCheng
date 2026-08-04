@@ -17,10 +17,17 @@ from src.transcription.types import ContractValidationError
 from .auth import require_bearer
 from .bge_priority_probe import HttpBgePriorityProbe
 from .config import AsrServiceSettings
-from .engine_protocol import SENSEVOICE_SERVICE_CONFIG
+from .engine_protocol import (
+    FASTER_WHISPER_SERVICE_CONFIG,
+    SENSEVOICE_SERVICE_CONFIG,
+)
 from .engine_registry import EngineRegistration, EngineRegistry
+from .engines.faster_whisper import FasterWhisperEngine
 from .engines.funasr_sensevoice import FunAsrSenseVoiceEngine
-from .model_cache import validate_sensevoice_cache
+from .model_cache import (
+    validate_faster_whisper_cache,
+    validate_sensevoice_cache,
+)
 from .scheduler import FixedBgePriorityProbe, Scheduler
 from .storage import LocalJobRepository
 
@@ -70,10 +77,19 @@ def create_app(
         )
         if settings.enabled and not cache.available:
             raise RuntimeError(f"ASR model cache unavailable: {cache.reason_code}")
-        engine = FunAsrSenseVoiceEngine(
+        sensevoice_engine = FunAsrSenseVoiceEngine(
             model_cache_ready=lambda: cache.available,
             model_path=cache.model_path,
             unavailable_reason_code=cache.reason_code,
+        )
+        faster_whisper_cache = validate_faster_whisper_cache(
+            settings.faster_whisper_model_cache_root,
+            settings.faster_whisper_model_manifest_path,
+        )
+        faster_whisper_engine = FasterWhisperEngine(
+            model_cache_ready=lambda: faster_whisper_cache.available,
+            model_path=faster_whisper_cache.model_path,
+            unavailable_reason_code=faster_whisper_cache.reason_code,
         )
         probe = (
             HttpBgePriorityProbe(
@@ -87,7 +103,16 @@ def create_app(
         )
         scheduler = Scheduler(
             repo,
-            EngineRegistry((EngineRegistration(engine, SENSEVOICE_SERVICE_CONFIG),)),
+            EngineRegistry(
+                (
+                    EngineRegistration(
+                        faster_whisper_engine, FASTER_WHISPER_SERVICE_CONFIG
+                    ),
+                    EngineRegistration(
+                        sensevoice_engine, SENSEVOICE_SERVICE_CONFIG
+                    ),
+                )
+            ),
             probe,
             queue_limit=settings.max_queue_length,
             failure_limit=settings.consecutive_failure_limit,
