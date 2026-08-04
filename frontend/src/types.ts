@@ -158,12 +158,30 @@ export type IndexJob = {
 };
 
 export type IndexedDocument = {
+  document_id: string;
   source_path: string;
+  display_path: string;
+  filename: string;
   doc_title: string;
   category: string;
   doc_type: string;
   company: string | null;
   parent_count: number;
+  child_count: number | null;
+  file_size: number | null;
+  status: string;
+  is_indexed: boolean;
+  latest_job_id: number | null;
+  error_summary: string | null;
+  uploaded_by: string | null;
+  created_at: number | null;
+  updated_at: number | null;
+};
+
+export type IndexedDocumentList = {
+  documents: IndexedDocument[];
+  total: number;
+  status_counts: Record<string, number>;
 };
 
 export type CategoryNode = {
