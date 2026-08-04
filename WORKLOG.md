@@ -2002,3 +2002,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`frontend/src/components/Sidebar.tsx`、`frontend/src/components/Sidebar.test.tsx`、`WORKLOG.md`。
 - 验证：侧栏专项 Vitest 3/3 通过；TypeScript project build 与 Vite production build 通过（2025 modules transformed）；`git diff --check` 通过。构建保留既有 CSS 语法警告和主包大于 500 kB 警告。
 - 待办/风险：尚未使用真实登录会话完成浏览器视觉验收；未修改消息区或来源区渐隐、API、后端、数据与依赖声明。
+
+### 06:54 — 建立反馈处理闭环
+
+- 完成：将只读反馈日志页升级为管理员处理队列，新增待处理、处理中、已完成、已归档状态，支持处理结果、备注、处理人、重新打开、归档恢复、关键词与类型/评价/状态筛选和服务端分页；原始 JSONL 保持追加式，新记录使用 UUID，历史记录生成稳定兼容 ID，不提供永久删除。
+- 文件：`api/db_migrations.py`、`api/feedback.py`、`api/routes_admin.py`、`api/schemas.py`、`frontend/src/api/client.ts`、`frontend/src/types.ts`、`frontend/src/pages/admin/AdminFeedbackPage.tsx`、相关前后端测试、`project-docs/features/feedback-management.md`、功能地图与 `WORKLOG.md`。
+- 验证：反馈与数据库迁移专项测试 12 项通过，接口级用例因当前项目 `.venv` 缺少 FastAPI 而明确跳过 1 项；前端全量 Vitest 27 个文件、128/128 项通过；TypeScript 与 Vite production build 通过（2025 modules transformed）；`git diff --check` 通过。构建保留既有 CSS minify 与主包大于 500 kB 警告。
+- 待办/风险：尚未在包含完整后端依赖的环境验证管理员鉴权/CSRF 接口用例，也未使用真实管理员会话进行浏览器人工验收；状态更新采用最后写入生效，未提供多人同时编辑冲突提示；依赖安装报告的既有审计风险未在本次升级依赖。
