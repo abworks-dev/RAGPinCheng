@@ -1,0 +1,576 @@
+# faster-whisper R3 统一资格验证实施方案
+
+> 状态：已于 2026-08-05 获用户批准，R3 仓库实施与统一生产资格 workflow 进行中。
+> 日期口径：2026-08-05，Asia/Shanghai。
+> 风险等级：R3（Windows 生产 GPU 主机上的依赖解析、模型下载与真实 CUDA 推理）。
+> 唯一执行基线：本文件取代历史 `faster-whisper-r3a-*` 方案作为后续执行入口；
+> 历史文件只保留为失败与审计记录，不得继续执行。
+
+## 1. 目标
+
+在 faster-whisper R2 代码已经合并但 Profile 准入保持关闭的前提下，用一个统一、
+可审计、失败关闭的 R3 阶段回答以下问题：
+
+1. Windows Python 3.11 能否解析并隔离安装固定 faster-whisper/CTranslate2 依赖；
+2. 固定模型 revision 能否下载并通过全文件 Manifest 与公开 `model.bin` 身份校验；
+3. RTX 5060 Ti 能否以 CUDA FP16 加载并运行当前 R2 的精确解码配置；
+4. 当前 ASR service、Remote Provider、pipeline、normalizer、Canonical 和 formatter
+   能否在隔离端口完成真实结果流；
+5. 固定非敏感短样本是否满足预注册质量、时间戳、RTF 和资源门禁；
+6. 验证全过程是否保持 BGE 优先，并且不影响现有 SenseVoice 生产服务。
+
+R3 只形成资格结论。即使全部通过，也不自动修改
+`faster-whisper-zh-experimental-v1` 的 `admission=disabled`，不自动部署到当前
+ASR 生产 venv，不产生管理员可见的新建任务能力。
+
+## 2. 已确认基线
+
+### 2.1 仓库基线
+
+- PR #34 已合并到 `master`；
+- merge commit：
+  `43996495c018c00fa6e473c418f57732a08744ea`；
+- PR 头提交：
+  `343fb68208a465eaf6a8367db63e1d0ed9549aaf`；
+- CI run `30948925502` 的 7 个检查全部成功；
+- faster-whisper R2 Profile 固定为：
+
+```text
+provider_key=faster-whisper
+application_profile_id=faster-whisper-zh-experimental-v1
+service_profile_id=faster-whisper-large-v3-turbo-v1
+qualification=experimental
+admission=disabled
+```
+
+### 2.2 固定候选
+
+```text
+python=3.11
+faster-whisper=1.2.1
+ctranslate2=4.8.1
+model_id=dropbox-dash/faster-whisper-large-v3-turbo
+model_revision=0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf
+device=cuda
+compute_type=float16
+language=zh
+task=transcribe
+beam_size=1
+temperature=0.0
+vad_filter=false
+condition_on_previous_text=false
+word_timestamps=false
+hotwords=null
+local_files_only=true
+```
+
+模型 `model.bin` 的冻结公开身份为：
+
+```text
+size_bytes=1617884929
+sha256=e76620f83d5f5769e6a5f66c8013e1292a797de79b3581b44b6c7f9e36d77f31
+```
+
+R3 必须在本机重新计算大小与 SHA-256；公开值只作为比对基线。
+
+### 2.3 当前生产拓扑
+
+执行前必须重新只读核验，不能只依赖历史记录：
+
+```text
+Windows GPU / ASR: ${PRIVATE_IPV4}
+Ubuntu backend:    ${PRIVATE_IPV4}
+GPU service:       RAGPinCheng-GPU / TCP 8100
+ASR service:       RAGPinCheng-ASR / TCP 8200
+GitHub runner:     ${PRODUCTION_HOSTNAME} / Administrator / asr-production
+ASR program root:  ${PRODUCTION_SERVICE_ROOT}\RAGPinCheng-ASR
+ASR data root:     ${PRODUCTION_DATA_ROOT}\RAGPinCheng-ASR
+```
+
+## 3. 统一执行原则
+
+本方案只有一个 R3 执行单元：
+
+```text
+仓库工具实现、测试、PR、CI、合并
+→ 一次显式 production-asr workflow
+→ 自动 preflight
+→ 隔离依赖与模型准备
+→ CUDA / 全链路 / 样本 / 资源验证
+→ 自动清理临时进程
+→ 单一 PASS / FAIL 报告
+```
+
+不再拆成 B1/B2、retry1～retry5 或多个手工暂停点。同一获批范围内的代码修复、
+CI 修复和可证明幂等的 workflow 重试属于同一交付；只有出现新增权限、路径、
+Secret、模型、依赖、样本来源、生产服务切换或回滚失效时才重新审批。
+
+## 4. 隔离策略
+
+### 4.1 固定目录
+
+```text
+资格程序根：
+${PRODUCTION_SERVICE_ROOT}\RAGPinCheng-ASR\qualification\faster-whisper
+
+每次运行：
+${PRODUCTION_SERVICE_ROOT}\RAGPinCheng-ASR\qualification\faster-whisper\runs\<github.run_id>\
+
+固定样本入口：
+${PRODUCTION_DATA_ROOT}\RAGPinCheng-ASR\qualification\faster-whisper\inputs\
+
+固定样本 Manifest：
+${PRODUCTION_DATA_ROOT}\RAGPinCheng-ASR\qualification\faster-whisper\inputs\manifest.json
+
+模型最终目录：
+${PRODUCTION_DATA_ROOT}\RAGPinCheng-ASR\models\faster-whisper-large-v3-turbo\
+0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf\
+
+模型 Manifest：
+上述目录下的 model-manifest.json
+
+隔离 ASR 地址：
+http://127.0.0.1:18200
+```
+
+每次运行的 venv、wheelhouse、spool、日志、报告和临时配置全部位于该 run 目录。
+不得写入全局 Python、用户级 Hugging Face cache、现有 ASR venv、GPU service
+venv 或仓库工作区。
+
+### 4.2 现有生产服务
+
+R3 不停止、不重启、不重新注册以下 Scheduled Task：
+
+- `RAGPinCheng-GPU`；
+- `RAGPinCheng-ASR`。
+
+R3 不修改：
+
+- TCP 8100/8200 防火墙；
+- 当前 ASR 生产 venv；
+- `${PRODUCTION_DATA_ROOT}\RAGPinCheng-ASR\config\asr.env`；
+- Ubuntu `prod.env`；
+- Ubuntu `ASR_ENABLED`；
+- backend 容器。
+
+隔离服务只绑定 `127.0.0.1:18200`，不增加防火墙规则，不接受其他主机连接。
+
+## 5. 固定样本包
+
+推荐复用已经审核过的 8 个非敏感短样本语义与阈值，但复制到 §4.1 的固定输入目录，
+不得直接依赖历史 run 的可变路径。
+
+Manifest 必须是严格 JSON，至少包含：
+
+```text
+schema_version=faster-whisper-qualification-samples/1
+sample_set_id
+annotation_version
+samples[8]
+```
+
+每个样本必须包含：
+
+- 安全 slug `id`；
+- 相对 WAV 路径；
+- 小写 SHA-256；
+- `duration_ms`；
+- `scenario`；
+- `reference_text`；
+- `reference_segments`：五个正向样本必须至少一段，三个负向控制必须为空；
+- `self_made=true`；
+- `is_internal_recording=false`；
+- `contains_customer_data=false`。
+
+样本集合固定为 5 个正向样本和 3 个负向控制，至少覆盖：
+
+- 清晰普通中文；
+- BIM 术语；
+- 规范编号；
+- 带噪声 BIM 中文；
+- 中英混合；
+- 不含 BIM 术语和规范编号的负向语音。
+
+音频必须是 16 kHz、mono、PCM WAV，单条不超过 60 秒。Manifest、音频数目、
+路径、hash 或 reference 任一不匹配即停止。R3 不从应用媒体目录、客户文件、
+数据库、artifact 或 Qdrant 中提取样本。
+
+## 6. 拟新增和修改文件
+
+### 6.1 R3 实施时新增
+
+| 文件 | 职责 |
+|---|---|
+| `.github/workflows/qualify-faster-whisper-production.yml` | 单一手动 R3 workflow；绑定完整 master SHA、`production-asr` Environment、Windows runner、并发锁和显式执行开关 |
+| `scripts/qualify-faster-whisper-production.ps1` | Windows 总编排：preflight、wheelhouse、隔离 venv、模型准备、临时服务、GPU/BGE 监控、清理和最终 verdict |
+| `scripts/prepare_faster_whisper_model.py` | 固定 Hugging Face repo/revision 下载、staging、普通文件/无 symlink 检查、全文件 Manifest 和本机 hash 校验 |
+| `scripts/run_faster_whisper_qualification.py` | 严格读取 8 样本 Manifest，通过隔离 ASR HTTP + Remote Provider + pipeline 生成 Canonical/Markdown，计算质量与时间戳指标 |
+| `asr_service/faster-whisper-qualification-manifest.example.json` | 不含真实音频或内部文本的严格 Manifest 模板 |
+| `asr_service/tests/test_faster_whisper_qualification.py` | 模型准备、Manifest、指标、报告、失败关闭和无真实依赖测试 |
+
+### 6.2 R3 实施时最小修改
+
+| 文件 | 修改内容 |
+|---|---|
+| `tests/test_asr_deployment_static.py` | 静态验证 workflow 默认关闭、固定 runner/目录/端口、无服务激活/防火墙/Ubuntu 改写、Secret 不回显 |
+| `project-docs/features/transcript-pipeline.md` | 仅在真实执行后按证据记录资格状态；失败不得写成可用 |
+| `TODO.md` | 维护 R3 审批、执行和后续 admission 决策 |
+| `WORKLOG.md` | 记录实际实现、CI 和真实执行结论 |
+
+现有 `.github/workflows/ci.yml` 的 `test-asr-service-contract` 已收集全部
+`asr_service/tests`，因此预计不需要修改；若新增测试没有被实际收集，才允许在同一
+R3 范围内做最小 CI 接线。
+
+## 7. 明确不修改的文件和能力
+
+R3 不修改：
+
+- `src/transcription/profile.py`；
+- `src/transcription/profile_catalog.py`；
+- `src/transcription/pipeline.py`；
+- Candidate、Canonical、normalizer、formatter；
+- 数据库 Schema、迁移、Store 和状态模型；
+- 上传 API、管理端 UI、worker；
+- Qdrant、BGE 模型和检索链路；
+- `scripts/deploy-asr.ps1`；
+- `scripts/activate-asr-production.ps1`；
+- `scripts/prepare-asr-model.ps1`；
+- 现有 ASR/GPU Scheduled Task 和防火墙；
+- 根 requirements、生产 backend requirements；
+- 当前 `asr_service/requirements-windows.txt`。
+
+R3 不安装到现有生产 ASR venv，不创建真实应用转录任务，不审核、发布或索引稿件。
+
+## 8. Workflow 输入与 Secret
+
+workflow 只接受：
+
+```text
+commit_sha=<完整 40 位、已合并 master SHA>
+execute_qualification=false|true（默认 false）
+```
+
+`commit_sha` 必须等于 workflow dispatch revision。不得接受自由模型 ID、revision、
+设备、compute type、解码参数、目录、端口或样本路径。
+
+只允许使用既有 `production-asr` Environment 中的：
+
+- `ASR_DEPENDENCY_PROXY`；
+- `ASR_MODEL_DOWNLOAD_PROXY`；
+- `GPU_SERVICE_TOKEN`。
+
+不需要 `ASR_SERVICE_TOKEN`。隔离服务使用进程内随机临时 Token，运行结束即失效。
+所有代理只作用于下载子进程，finally 中恢复 runner 环境。任何 Token 不得写入报告、
+日志、命令行或 GitHub step summary。
+
+## 9. 统一执行步骤
+
+### 9.1 Preflight
+
+1. 校验完整 SHA、checkout HEAD、分支为已合并 master；
+2. 校验 runner 服务账户为 `Administrator`；
+3. 校验机器级 Python 3.11、64 位、pip 可运行；
+4. 校验目标 GPU 为 RTX 5060 Ti，CTranslate2 可见 CUDA 前不得运行模型；
+5. 校验 D 盘至少 30 GiB 可用；
+6. 校验 8100、8200 当前健康；
+7. 校验 BGE `model_loaded=true`、`inflight_requests=0`、
+   `asr_chunk_allowed=true`；
+8. 校验 `RAGPinCheng-GPU`、`RAGPinCheng-ASR` 均在运行；
+9. 校验 18200 未监听，且不存在本方案拥有的活动资格进程；
+10. 校验固定样本包和 Manifest；
+11. 快照生产 ASR capabilities、Scheduled Task 定义、监听端口和防火墙相关规则，
+    只记录非敏感摘要。
+
+任一失败直接结束，不创建 venv、不下载依赖或模型。
+
+### 9.2 Wheel、依赖与许可证
+
+1. 只读记录当前生产 ASR venv 的 `pip freeze --all` 和 `pip check`；
+2. 在 run 目录创建全新 Python 3.11 venv；
+3. 解析：
+   - `torch==2.7.0`、`torchaudio==2.7.0` 的 cu128 Windows wheel；
+   - `asr_service/requirements-windows.txt`；
+   - `asr_service/requirements-faster-whisper.txt`；
+4. 现有生产 freeze 作为共享包约束，证明 FunASR 与 faster-whisper 可以共存；
+5. 只接受 Windows x64 binary wheel，禁止 sdist、VCS URL、editable、可变 branch；
+6. wheelhouse 按文件名排序记录 URL、大小和 SHA-256；
+7. 从同一 wheelhouse 离线安装资格 venv；
+8. 运行 `pip check`、完整 freeze、模块来源校验和许可证审计；
+9. 顶层固定版本必须精确匹配，依赖不得来自生产 venv、用户 site 或全局 site。
+
+以下任一情况判定失败：
+
+- resolver 冲突；
+- 需要修改现有生产 venv；
+- 缺少 binary wheel；
+- `pip check` 失败；
+- 顶层版本漂移；
+- 出现 GPL/AGPL/SSPL 或未知/无法确认许可证；
+- wheel hash 在下载与安装间变化。
+
+### 9.3 固定模型准备
+
+1. 只通过 `huggingface_hub.snapshot_download` 请求固定 repo/revision；
+2. 下载目录限定在本次 run staging；
+3. 拒绝 symlink、非常规文件、空目录和下载器返回 staging 外路径；
+4. 对全部文件计算大小与小写 SHA-256；
+5. 独立核对 `model.bin` 固定大小与 SHA-256；
+6. 生成严格 `asr-model-manifest/1`；
+7. 使用当前 `validate_faster_whisper_cache()` 对 staging 和最终目录各验证一次；
+8. 最终目录已存在且有效则幂等复用；已存在但无效则停止，不覆盖、不删除。
+
+失败 staging 和证据保留在本次 run，不自动删除；不得把部分下载目录发布为模型缓存。
+
+### 9.4 CUDA 与临时 ASR service
+
+1. 资格 venv 中验证：
+   - `ctranslate2==4.8.1`；
+   - CUDA device count 大于 0；
+   - CUDA 支持 `float16`；
+   - 无 CPU/INT8 fallback；
+2. 创建 run-local env、spool、日志和临时 Token；
+3. 以精确 PID 启动：
+
+```text
+python -m uvicorn asr_service.app:create_app
+--factory --host 127.0.0.1 --port 18200
+```
+
+4. 隔离配置指向：
+   - 当前有效 SenseVoice Manifest；
+   - 新 faster-whisper Manifest；
+   - run-local spool/log；
+   - 现有 BGE `/v1/activity`；
+5. `/health` 必须为 `asr-service/1`；
+6. `/v1/capabilities` 必须按排序暴露两个精确 service Profile；
+7. 生产 8200 的 health/capabilities 必须保持与 preflight 快照一致。
+
+### 9.5 8 样本全链路资格验证
+
+每条样本都必须走：
+
+```text
+WAV bytes
+→ loopback ASR service
+→ faster-whisper engine
+→ ProviderCandidate
+→ RemoteAsrProvider
+→ pipeline.py
+→ normalizer
+→ Canonical Transcript
+→ Markdown formatter
+→ 现有 transcript parser
+```
+
+不得直接调用模型后跳过 Provider/pipeline，也不得用测试 Fake 替代真实引擎。
+
+固定通过阈值：
+
+| 门禁 | 阈值 |
+|---|---|
+| 处理失败率 | `0%` |
+| 清晰样本 CER | `<= 0.10` |
+| BIM/噪声样本 CER | `<= 0.15` |
+| BIM 术语召回 | `>= 0.70` |
+| 规范编号召回 | `>= 0.95` |
+| 短样本起始时间戳 P95 漂移 | `<= 1500 ms` |
+| 每条样本 RTF | `<= 0.60` |
+| 负向样本 BIM/编号新增误报 | `0` |
+| Canonical/Markdown/parser | 全部成功且确定性复跑一致 |
+
+阈值在执行前冻结。不得看结果后修改 reference、归一化、参数或阈值再宣告同一轮通过。
+
+### 9.6 GPU、BGE 与末态
+
+运行期间每秒采集：
+
+- 整卡显存；
+- 资格进程 PID；
+- GPU utilization；
+- BGE activity；
+- 生产 8100/8200 健康。
+
+固定资源门禁：
+
+```text
+资格运行相对 baseline 的峰值显存增量 < 8 GiB
+整卡峰值显存 < 14 GiB
+BGE 全程 model_loaded=true
+BGE 全程 inflight_requests=0 且 asr_chunk_allowed=true
+无 CUDA OOM
+```
+
+若 BGE 变忙、健康失败、达到显存门禁或出现 OOM，立即取消当前资格任务并终止本方案
+精确拥有的 18200 子进程；不得终止 GPU service、生产 ASR 或其他 Python 进程。
+
+finally 必须：
+
+1. 终止并等待精确资格 PID；
+2. 确认 18200 已释放；
+3. 确认无资格子进程残留；
+4. 确认 8100/8200 正常；
+5. 确认两个 Scheduled Task 定义和状态未变；
+6. 确认防火墙快照未变；
+7. 确认 faster-whisper application Profile 仍为 disabled。
+
+## 10. 报告与隐私
+
+完整报告保存在本次 run：
+
+```text
+evidence\preflight.json
+evidence\production-freeze.txt
+evidence\wheel-manifest.json
+evidence\license-matrix.json
+evidence\model-manifest.json
+evidence\gpu-samples.jsonl
+reports\sample-results.json
+reports\qualification-summary.json
+logs\qualification-service.log
+```
+
+GitHub Actions 只上传和展示脱敏摘要：
+
+- commit/model/package identity；
+- 文件数、总大小和 Manifest SHA-256；
+- 指标 observed/threshold/pass；
+- 资源峰值；
+- 最终 PASS/FAIL 和失败代码。
+
+不上传音频、reference、hypothesis、Token、完整环境变量、进程命令行或生产路径之外的
+文件内容。完整文本只留在 Administrator ACL 保护的本机 run 目录。
+
+## 11. 自动停止条件
+
+任一条件触发统一 `FAIL`：
+
+- checkout/identity/runner/目录不符；
+- 生产 8100/8200 或 Scheduled Task 基线异常；
+- BGE 忙或不健康；
+- 样本身份、来源声明或 hash 不符；
+- resolver、wheel、许可证或 `pip check` 失败；
+- 模型 revision、Manifest、大小或 hash 不符；
+- CUDA/FP16/DLL 不可用；
+- 临时服务契约不符；
+- 任一质量、时间戳、RTF 或资源门禁不通过；
+- 需要 CPU、INT8、其他模型、其他 revision、VAD、hotwords 或参数调整；
+- 无法证明只终止本次资格进程；
+- 用户要求停止。
+
+失败只保留证据并恢复临时进程末态，不自动换模型、降级、调参、开放 Profile 或进入
+新的 retry 方案。
+
+## 12. 测试矩阵
+
+### 12.1 本地/CI，不安装真实引擎
+
+- workflow 默认关闭、完整 SHA、runner、concurrency、timeout；
+- PowerShell 路径、PID ownership、finally 清理和禁止命令扫描；
+- 代理仅作用于下载；
+- Secret 不进入命令行或报告；
+- sample Manifest 所有对象严格未知字段拒绝；
+- 路径逃逸、symlink、hash/size/revision 错误；
+- wheelhouse 拒绝 sdist/VCS/editable；
+- license blocker；
+- 模型 staging/final 幂等与无效目录失败关闭；
+- 质量阈值边界；
+- 脱敏报告不含文本和 Token；
+- 模拟 BGE busy、OOM、超时、孤儿进程和 cleanup failure；
+- 现有 SenseVoice/Profile/ASR 部署测试不退化。
+
+建议验证命令：
+
+```text
+python -m pytest asr_service/tests/test_faster_whisper_qualification.py -v
+python -m pytest tests/test_asr_deployment_static.py tests/test_asr_activation.py -v
+python -m pytest asr_service/tests tests/test_transcription_asr_service_contract.py
+  tests/test_transcription_profile_catalog.py
+  tests/test_transcription_remote_provider.py -v
+python -m compileall -q scripts asr_service tests
+git diff --check
+```
+
+### 12.2 真实 R3
+
+- workflow 使用新合并的完整 master SHA；
+- 一次完整运行；
+- PASS 后复跑只允许验证幂等模型缓存和新 run 隔离，不覆盖旧 run；
+- GitHub workflow、Windows 本机报告和最终 commit identity 三方一致。
+
+## 13. 完成标准
+
+只有以下全部满足，R3 才为 `PASS`：
+
+1. 仓库实现经过 scoped review、CI、独立 PR 并合并；
+2. workflow 绑定合并后的完整 master SHA；
+3. 生产 freeze、资格 venv、wheel Manifest、license audit 全部通过；
+4. 固定模型全文件 Manifest 和 `model.bin` 身份通过；
+5. RTX 5060 Ti CUDA FP16 加载与精确参数通过；
+6. 隔离服务同时暴露两个固定 service Profile；
+7. 8/8 样本完成且所有质量、时间戳和 RTF 门禁通过；
+8. Candidate → Canonical → Markdown → parser 全链路通过；
+9. GPU/BGE 资源门禁通过；
+10. 无业务媒体、数据库、Qdrant、发布或索引操作；
+11. 生产 8100/8200、Scheduled Task、防火墙和 Ubuntu 配置保持不变；
+12. 18200 关闭、资格进程无残留；
+13. application Profile 仍为 `experimental + disabled`；
+14. 形成脱敏单一 PASS/FAIL 报告并记录 WORKLOG。
+
+部分通过、工具通过但样本失败、单样本成功或资源未测均不得写成 R3 通过。
+
+## 14. 风险与回滚
+
+### 风险
+
+- 约 1.6 GiB 模型和完整 wheelhouse 会占用磁盘并依赖外网代理；
+- CTranslate2 CUDA wheel、驱动和 Blackwell 支持可能在真实主机失败；
+- 隔离推理仍与 BGE、生产 ASR 共享同一 GPU；
+- 现有 8 样本可能证明模型质量不足；
+- Windows WDDM 下进程级显存可能不可用，因此以整卡 baseline 增量作为硬门禁。
+
+### 回滚
+
+- 仓库：revert R3 工具提交；R2 Provider 代码无需回滚；
+- 进程：finally 只终止本次精确 PID，释放 18200；
+- venv/wheel/report：均为 run-local、未被生产服务引用，失败后保留审计；
+- 模型：新增模型目录在 Profile disabled 时不会被生产使用；失败 staging 不提升；
+- 生产：现有 ASR/GPU 服务、env、防火墙、Ubuntu backend 不发生写入，无需数据恢复；
+- 数据：不接触 SQLite/Qdrant，因此无数据库或索引回滚。
+
+R3 不自动递归删除 run、wheelhouse、模型或失败 staging。后续清理需按精确目录另行确认。
+
+## 15. R3 通过后的下一步
+
+R3 PASS 后只提交结论，不自动继续。若用户决定开放 faster-whisper，需要另行批准一个
+最小生产启用变更：
+
+1. 用 R3 wheel Manifest 将已验证依赖接入生产 ASR venv 的可回滚部署；
+2. 将固定模型路径写入 ASR 生产 env；
+3. 热更新并验证 8200 同时暴露两个 Profile；
+4. 将 application Profile `admission` 从 `disabled` 改为 `enabled`；
+5. 仍保持 `experimental`、强制人工审核、禁止自动发布和自动索引；
+6. 用一个非敏感应用任务做最终验收。
+
+若 R3 FAIL，则保持当前生产状态，不进入启用阶段。
+
+## 16. 审批时需确认
+
+批准本方案时需同时确认：
+
+1. 使用固定 8 样本结构和 §9.5 的既有阈值；
+2. 样本只允许自制/公开授权、非客户、非内部资料；
+3. 允许在 Windows 生产 GPU 主机创建隔离 run、资格 venv、wheelhouse 和固定模型缓存；
+4. 允许通过既有两个代理 Secret 下载 wheel 与固定模型；
+5. 允许在 BGE 空闲时运行真实 CUDA FP16，但不制造 BGE 并发压测；
+6. 允许失败时保留审计 artifact，不自动删除；
+7. 同意 R3 PASS 后仍需另批 production admission，不自动开放。
+
+建议审批语句：
+
+```text
+批准 faster-whisper R3 统一资格验证实施方案；按固定 8 个非敏感样本和既有阈值，
+完成仓库工具、测试、PR、CI、合并及一次 production-asr 资格 workflow。
+允许隔离依赖安装、固定模型下载和真实 CUDA FP16 推理；不修改现有生产 ASR/GPU
+服务、Ubuntu 配置、防火墙、数据库、Qdrant 或 Profile admission。失败按方案自动
+停止并保留审计，R3 通过后仍不自动启用 faster-whisper。
+```
