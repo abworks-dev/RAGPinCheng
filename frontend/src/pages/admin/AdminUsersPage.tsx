@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { X } from "lucide-react";
+import { KeyRound, MoreHorizontal, ShieldCheck, UserCheck, UserRound, UserX, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { api } from "../../api/client";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
@@ -157,7 +158,7 @@ export function AdminUsersPage() {
                   <th scope="col" className="px-4 py-3 text-right font-medium">对话</th>
                   <th scope="col" className="hidden px-4 py-3 text-left font-medium lg:table-cell">最近登录</th>
                   <th scope="col" className="hidden px-4 py-3 text-left font-medium xl:table-cell">注册时间</th>
-                  <th scope="col" className="px-4 py-3 text-left font-medium">操作</th>
+                  <th scope="col" className="w-20 px-4 py-3 text-right font-medium">操作</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
@@ -194,33 +195,13 @@ export function AdminUsersPage() {
                     <td className="hidden whitespace-nowrap px-4 py-3 text-muted-foreground xl:table-cell">
                       {formatAdminDate(user.created_at)}
                     </td>
-                    <td className="px-4 py-3">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className={cn(
-                            "shadow-sm",
-                            user.is_active
-                              ? "border-destructive/50 bg-destructive/10 text-destructive hover:border-destructive/70 hover:bg-destructive/20 hover:text-destructive"
-                              : "border-success/50 bg-success/10 text-success hover:border-success/70 hover:bg-success/20 hover:text-success",
-                          )}
-                          onClick={() => toggleActive(user)}
-                        >
-                          {user.is_active ? "停用账号" : "启用账号"}
-                        </Button>
-                        <Button variant="outline" size="sm" className="bg-card shadow-sm" onClick={() => toggleRole(user)}>
-                          {user.role === "admin" ? "降为用户" : "设为管理员"}
-                        </Button>
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          className="border border-border shadow-sm"
-                          onClick={() => resetPw(user)}
-                        >
-                          重置密码
-                        </Button>
-                      </div>
+                    <td className="px-4 py-3 text-right">
+                      <UserActionsMenu
+                        user={user}
+                        onToggleActive={() => toggleActive(user)}
+                        onToggleRole={() => toggleRole(user)}
+                        onResetPassword={() => resetPw(user)}
+                      />
                     </td>
                   </tr>
                 ))}
@@ -237,6 +218,138 @@ export function AdminUsersPage() {
         />
       )}
     </section>
+  );
+}
+
+function UserActionsMenu({
+  user,
+  onToggleActive,
+  onToggleRole,
+  onResetPassword,
+}: {
+  user: AdminUser;
+  onToggleActive: () => void;
+  onToggleRole: () => void;
+  onResetPassword: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [position, setPosition] = useState({ top: 0, right: 0 });
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const closeIfOutside = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (!triggerRef.current?.contains(target) && !menuRef.current?.contains(target)) {
+        setOpen(false);
+      }
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
+    };
+    const closeOnViewportChange = () => setOpen(false);
+
+    document.addEventListener("mousedown", closeIfOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    window.addEventListener("resize", closeOnViewportChange);
+    window.addEventListener("scroll", closeOnViewportChange, true);
+    return () => {
+      document.removeEventListener("mousedown", closeIfOutside);
+      document.removeEventListener("keydown", closeOnEscape);
+      window.removeEventListener("resize", closeOnViewportChange);
+      window.removeEventListener("scroll", closeOnViewportChange, true);
+    };
+  }, [open]);
+
+  function toggleMenu() {
+    if (!open && triggerRef.current) {
+      const rect = triggerRef.current.getBoundingClientRect();
+      setPosition({
+        top: rect.bottom + 6,
+        right: Math.max(12, window.innerWidth - rect.right),
+      });
+    }
+    setOpen((value) => !value);
+  }
+
+  function run(action: () => void) {
+    setOpen(false);
+    action();
+  }
+
+  return (
+    <>
+      <Button
+        ref={triggerRef}
+        variant="ghost"
+        size="icon"
+        className="h-control-sm w-control-sm text-muted-foreground hover:text-foreground"
+        aria-label={`管理 ${user.real_name}`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={toggleMenu}
+      >
+        <MoreHorizontal className="size-4" aria-hidden="true" />
+      </Button>
+      {open &&
+        createPortal(
+          <div
+            ref={menuRef}
+            role="menu"
+            aria-label={`${user.real_name}的账号操作`}
+            className="fixed z-dropdown w-44 overflow-hidden rounded-ui-lg border border-border bg-popover p-1.5 text-left text-popover-foreground shadow-overlay"
+            style={{ top: position.top, right: position.right }}
+          >
+            <button
+              type="button"
+              role="menuitem"
+              className="flex w-full items-center gap-2.5 rounded-ui-md px-2.5 py-2 text-ui-sm transition-colors hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              onClick={() => run(onToggleRole)}
+            >
+              {user.role === "admin" ? (
+                <UserRound className="size-4 text-muted-foreground" aria-hidden="true" />
+              ) : (
+                <ShieldCheck className="size-4 text-muted-foreground" aria-hidden="true" />
+              )}
+              {user.role === "admin" ? "降为普通用户" : "设为管理员"}
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className="flex w-full items-center gap-2.5 rounded-ui-md px-2.5 py-2 text-ui-sm transition-colors hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              onClick={() => run(onResetPassword)}
+            >
+              <KeyRound className="size-4 text-muted-foreground" aria-hidden="true" />
+              重置密码
+            </button>
+            <div className="my-1 border-t border-border" role="separator" />
+            <button
+              type="button"
+              role="menuitem"
+              className={cn(
+                "flex w-full items-center gap-2.5 rounded-ui-md px-2.5 py-2 text-ui-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                user.is_active
+                  ? "text-destructive hover:bg-destructive/10"
+                  : "text-success hover:bg-success/10",
+              )}
+              onClick={() => run(onToggleActive)}
+            >
+              {user.is_active ? (
+                <UserX className="size-4" aria-hidden="true" />
+              ) : (
+                <UserCheck className="size-4" aria-hidden="true" />
+              )}
+              {user.is_active ? "停用账号" : "启用账号"}
+            </button>
+          </div>,
+          document.body,
+        )}
+    </>
   );
 }
 
