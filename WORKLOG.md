@@ -1871,6 +1871,12 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`frontend/src/components/ChatHeader.tsx`、`frontend/src/components/ChatHeader.test.tsx`、`WORKLOG.md`；未修改来源面板数据、引用联动、布局开合、API、SSE、RAG 或后端业务。
 - 验证：来源按钮定向 Vitest 3/3 通过；前端全量 Vitest 26 个文件、117/117 项通过；TypeScript project build 与 Vite production build 通过（2023 modules transformed）；`git diff --check` 通过。保留既有 React Router future warning、CSS minify warning 和主包大于 500 kB 警告。
 
+### 03:32 — 对齐侧栏主题切换图标
+
+- 完成：将问答页侧栏主题切换按钮的展开态左内边距增加 8px，使显示器、太阳和月亮图标中心与收起态及下方用户头像中心保持一致，主题文字随图标同步调整。
+- 文件：`frontend/src/components/ThemeMenu.tsx`、`frontend/src/components/Sidebar.test.tsx`、`WORKLOG.md`；未修改主题切换逻辑、侧栏宽度、用户菜单或后端业务。
+- 验证：侧栏专项 Vitest 2/2 项通过；TypeScript project build 与 Vite production build 通过（2023 modules transformed）；保留既有 CSS minify 与主包大于 500 kB 警告。
+
 ### 03:34 — 加固转录管理流程与重复媒体请求身份
 
 - 完成：按获批 R2 PR 1 将 `transcription_jobs.id` 冻结为 Provider runtime 的应用调用身份，使同一应用任务的网络重试生成相同服务请求 ID、同一媒体的新应用重试任务生成不同 ID；安全解析 ASR 服务 `detail.code` 并区分服务身份冲突和契约不匹配；任务 API 增加面向管理员的 `code/message/retryable` 失败对象，上传与重试幂等冲突保留在应用 API 层。修复前端审核状态误用 `approved/rejected` 的 P0 问题，媒体列表改为唯一当前阶段、独立索引状态、最近 100 条客户端快捷筛选和受失败策略控制的重试入口，移除表格行内大型版本卡片。
