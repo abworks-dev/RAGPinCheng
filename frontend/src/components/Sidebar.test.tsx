@@ -38,6 +38,7 @@ describe("Sidebar brand", () => {
     expect(screen.getByRole("button", { name: "收起会话侧栏" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "主题：跟随系统" })).toHaveClass("px-2", "w-full");
     expect(container.querySelector("aside")).not.toHaveClass("border-r");
+    expect(container.querySelector(".scroll-fade-sidebar-start")).toBeInTheDocument();
   });
 
   it("uses the brand mark as the expand control in the collapsed sidebar", () => {

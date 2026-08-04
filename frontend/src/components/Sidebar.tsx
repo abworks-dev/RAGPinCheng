@@ -71,7 +71,7 @@ export function Sidebar({
         </button>
       </div>
 
-      <div className="scroll-fade-bottom relative min-h-0 flex-1">
+      <div className="scroll-fade-bottom scroll-fade-sidebar-start relative min-h-0 flex-1">
         <div
           ref={conversationScroll.ref}
           {...conversationScroll.interactionProps}

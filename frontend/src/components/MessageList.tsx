@@ -146,7 +146,7 @@ export function MessageList({
   }
 
   return (
-    <div className="relative min-h-0 flex-1">
+    <div className="scroll-fade-content-start relative min-h-0 flex-1">
       <div
         ref={scrollbar.ref}
         data-message-scroll-container

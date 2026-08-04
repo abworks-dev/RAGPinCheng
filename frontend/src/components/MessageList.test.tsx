@@ -45,6 +45,12 @@ describe("MessageList", () => {
     expect(turns[1].messages.map((message) => message.id)).toEqual(["user-2", "assistant-2"]);
   });
 
+  it("adds a non-interactive fade boundary below the chat header", () => {
+    const { container } = render(<MessageList messages={messages} conversationId="conversation-1" />);
+
+    expect(container.firstElementChild).toHaveClass("scroll-fade-content-start");
+  });
+
   it("keeps the message column centered and reserves space below the latest answer", () => {
     const { container } = render(<MessageList messages={messages} conversationId="conversation-1" />);
 

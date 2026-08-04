@@ -58,6 +58,8 @@ html, body, #root {
 }
 
 .scroll-fade-bottom::after,
+.scroll-fade-sidebar-start::before,
+.scroll-fade-content-start::before,
 .scroll-fade-top::before {
   position: absolute;
   z-index: 2;
@@ -71,6 +73,19 @@ html, body, #root {
   left: 0;
   height: 2.5rem;
   background: linear-gradient(to bottom, rgb(var(--sidebar) / 0), rgb(var(--sidebar)) 85%);
+}
+.scroll-fade-sidebar-start::before,
+.scroll-fade-content-start::before {
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 2.5rem;
+}
+.scroll-fade-sidebar-start::before {
+  background: linear-gradient(to bottom, rgb(var(--sidebar)) 15%, rgb(var(--sidebar) / 0));
+}
+.scroll-fade-content-start::before {
+  background: linear-gradient(to bottom, rgb(var(--background)) 15%, rgb(var(--background) / 0));
 }
 .scroll-fade-top {
   position: relative;
