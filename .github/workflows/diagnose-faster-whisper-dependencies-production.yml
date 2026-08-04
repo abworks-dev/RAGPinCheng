@@ -74,6 +74,8 @@ jobs:
               "",
               "- Status: ``$($result.status)``",
               "- Failure code: ``$($result.failure_code)``",
+              "- Diagnosis kind: ``$($result.diagnosis_kind)``",
+              "- Affected requirement: ``$($result.affected_requirement)``",
               "- Source run: ``$($result.source_run_id)``",
               "- Resolver replayed: ``$($result.resolver_replayed)``",
               "- Profile admission: ``$($result.profile_admission)``",

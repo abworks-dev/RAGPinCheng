@@ -32,6 +32,8 @@ $FailureCode = "diagnostic_preflight_failed"
 $ResolverReplayed = $false
 $ResolverExitCode = -1
 $ConflictLines = @()
+$DiagnosisKind = "unknown"
+$AffectedRequirement = ""
 $ProductionFreezeSha256 = ""
 $CombinedRequirementsSha256 = ""
 $WindowsRequirementsSha256 = ""
@@ -167,10 +169,20 @@ function Clear-ScopedProxy {
     }
 }
 
-function Convert-ToSanitizedConflictLines {
+function Get-NormalizedPackageName {
+    param([Parameter(Mandatory = $true)][string]$Name)
+    return $Name.ToLowerInvariant().Replace("_", "-").Replace(".", "-")
+}
+
+function Convert-ToSanitizedResolverEvidence {
     param([Parameter(Mandatory = $true)][object[]]$Lines)
 
-    $result = New-Object "System.Collections.Generic.List[string]"
+    $dependencyLines = @{}
+    $constraintLines = @{}
+    $missingVersionTargets = New-Object "System.Collections.Generic.HashSet[string]"
+    $noMatchingTargets = New-Object "System.Collections.Generic.HashSet[string]"
+    $sawConflictHeader = $false
+
     foreach ($raw in $Lines) {
         $line = ([string]$raw).Trim()
         if ([string]::IsNullOrWhiteSpace($line) -or $line.Length -gt 500) { continue }
@@ -178,31 +190,123 @@ function Convert-ToSanitizedConflictLines {
         if ($line -match 'https?://') { continue }
         if ($line -match '(?i)[a-z]:[\\/]') { continue }
         if ($line.ToCharArray() | Where-Object { [int]$_ -gt 127 }) { continue }
-        if ($line -notmatch '(?i)(cannot install|conflict is caused by|depends on|requested|constraint|resolutionimpossible|conflicting dependencies)') {
+        $clean = $line -replace '^(?i)ERROR:\s*', ''
+        if ($clean -eq "The conflict is caused by:") {
+            $sawConflictHeader = $true
             continue
         }
-        if (-not $result.Contains($line)) {
-            $result.Add($line)
+
+        if (
+            $clean -match '^(?i)Could not find a version that satisfies the requirement\s+(?<package>[A-Za-z0-9_.-]+)'
+        ) {
+            [void]$missingVersionTargets.Add((Get-NormalizedPackageName -Name $Matches.package))
+            continue
+        }
+
+        if (
+            $clean -match '^(?i)No matching distribution found for\s+(?<package>[A-Za-z0-9_.-]+)'
+        ) {
+            [void]$noMatchingTargets.Add((Get-NormalizedPackageName -Name $Matches.package))
+            continue
+        }
+
+        if (
+            $clean -match '^(?<owner>[A-Za-z0-9_.-]+)\s+(?<owner_version>[A-Za-z0-9+_.-]+)\s+depends on\s+(?<package>[A-Za-z0-9_.-]+)(?<spec>(?:==|!=|<=|>=|~=|<|>).+)$'
+        ) {
+            $target = Get-NormalizedPackageName -Name $Matches.package
+            if (-not $dependencyLines.ContainsKey($target)) {
+                $dependencyLines[$target] = $clean
+            }
+            continue
+        }
+
+        if (
+            $clean -match '^The user requested \(constraint\)\s+(?<package>[A-Za-z0-9_.-]+)(?<spec>(?:==|!=|<=|>=|~=|<|>).+)$'
+        ) {
+            $target = Get-NormalizedPackageName -Name $Matches.package
+            if (-not $constraintLines.ContainsKey($target)) {
+                $constraintLines[$target] = $clean
+            }
         }
     }
-    return @($result)
+
+    foreach ($target in @($missingVersionTargets | Sort-Object)) {
+        if (-not $noMatchingTargets.Contains($target)) { continue }
+        $result = New-Object "System.Collections.Generic.List[string]"
+        if ($constraintLines.ContainsKey($target)) {
+            [void]$result.Add([string]$constraintLines[$target])
+        }
+        [void]$result.Add("No matching binary distribution found for $target")
+        return [pscustomobject]@{
+            Kind = "binary_distribution_unavailable"
+            Requirement = $target
+            Lines = @($result)
+        }
+    }
+
+    if ($sawConflictHeader) {
+        foreach ($target in @($dependencyLines.Keys | Sort-Object)) {
+            if (-not $constraintLines.ContainsKey($target)) { continue }
+            return [pscustomobject]@{
+                Kind = "version_constraint_conflict"
+                Requirement = $target
+                Lines = @(
+                    "The conflict is caused by:",
+                    [string]$dependencyLines[$target],
+                    [string]$constraintLines[$target]
+                )
+            }
+        }
+    }
+
+    return [pscustomobject]@{
+        Kind = "unknown"
+        Requirement = ""
+        Lines = @()
+    }
 }
 
 function Assert-SanitizerSelfTest {
     $sample = @(
         "The conflict is caused by:",
         "funasr 1.2.7 depends on numpy<2",
+        "The user requested (constraint) numpy==2.0.0",
         "proxy token=do-not-emit",
         "See https://example.invalid/private",
         "Read D:\private\freeze.txt"
     )
-    $safe = @(Convert-ToSanitizedConflictLines -Lines $sample)
+    $safe = Convert-ToSanitizedResolverEvidence -Lines $sample
     if (
-        $safe.Count -ne 2 -or
-        $safe[0] -ne "The conflict is caused by:" -or
-        $safe[1] -ne "funasr 1.2.7 depends on numpy<2"
+        $safe.Kind -ne "version_constraint_conflict" -or
+        $safe.Requirement -ne "numpy" -or
+        @($safe.Lines).Count -ne 3 -or
+        $safe.Lines[1] -ne "funasr 1.2.7 depends on numpy<2"
     ) {
         throw "Dependency conflict sanitizer self-test failed"
+    }
+
+    $distributionSample = @(
+        "ERROR: Could not find a version that satisfies the requirement jieba (from funasr)",
+        "ERROR: No matching distribution found for jieba",
+        "The user requested (constraint) jieba==0.42.1"
+    )
+    $distribution = Convert-ToSanitizedResolverEvidence -Lines $distributionSample
+    if (
+        $distribution.Kind -ne "binary_distribution_unavailable" -or
+        $distribution.Requirement -ne "jieba" -or
+        @($distribution.Lines).Count -ne 2 -or
+        $distribution.Lines[1] -ne "No matching binary distribution found for jieba"
+    ) {
+        throw "Binary distribution sanitizer self-test failed"
+    }
+
+    $compatibleBareDependency = Convert-ToSanitizedResolverEvidence -Lines @(
+        "The conflict is caused by:",
+        "funasr 1.4.1 depends on jieba",
+        "The user requested (constraint) jieba==0.42.1"
+    )
+    if ($compatibleBareDependency.Kind -ne "unknown") {
+        throw "Compatible bare dependency must not be reported as a conflict"
     }
 }
 
@@ -241,6 +345,8 @@ function Write-SanitizedResult {
         faster_whisper_requirements_sha256 = $FasterWhisperRequirementsSha256
         resolver_replayed = $ResolverReplayed
         resolver_exit_code = $ResolverExitCode
+        diagnosis_kind = $DiagnosisKind
+        affected_requirement = $AffectedRequirement
         conflict_lines = @($ConflictLines)
         profile_admission = "disabled"
         production_services_modified = $false
@@ -305,13 +411,13 @@ try {
 
     if (Test-Path -LiteralPath $OriginalResolverLog -PathType Leaf) {
         $existingLines = @(Get-Content -LiteralPath $OriginalResolverLog -Encoding UTF8)
-        $ConflictLines = @(Convert-ToSanitizedConflictLines -Lines $existingLines)
+        $evidence = Convert-ToSanitizedResolverEvidence -Lines $existingLines
+        $DiagnosisKind = $evidence.Kind
+        $AffectedRequirement = $evidence.Requirement
+        $ConflictLines = @($evidence.Lines)
     }
 
-    if (
-        $ConflictLines.Count -lt 2 -or
-        -not @($ConflictLines | Where-Object { $_ -match '(?i)depends on|constraint' }).Count
-    ) {
+    if ($DiagnosisKind -eq "unknown") {
         $FailureCode = "resolver_replay_failed"
         if ([string]::IsNullOrWhiteSpace($env:ASR_DEPENDENCY_PROXY)) {
             throw "ASR_DEPENDENCY_PROXY is required when resolver replay is needed"
@@ -356,22 +462,22 @@ try {
             $FailureCode = "resolution_succeeded_unexpectedly"
             throw "Dependency resolution unexpectedly succeeded; refusing to infer the previous conflict"
         }
-        $ConflictLines = @(Convert-ToSanitizedConflictLines -Lines $resolverOutput)
+        $evidence = Convert-ToSanitizedResolverEvidence -Lines $resolverOutput
+        $DiagnosisKind = $evidence.Kind
+        $AffectedRequirement = $evidence.Requirement
+        $ConflictLines = @($evidence.Lines)
     } else {
         $ResolverExitCode = 1
     }
 
-    if (
-        $ConflictLines.Count -lt 2 -or
-        -not @($ConflictLines | Where-Object { $_ -match '(?i)depends on|constraint' }).Count
-    ) {
+    if ($DiagnosisKind -eq "unknown" -or $ConflictLines.Count -lt 2) {
         $FailureCode = "conflict_details_insufficient"
         throw "Resolver output did not contain a complete sanitizable dependency conflict"
     }
 
     $FailureCode = "none"
-    Write-SanitizedResult -Status "conflict_confirmed" -Code $FailureCode
-    Write-Host "Sanitized faster-whisper dependency conflict confirmed"
+    Write-SanitizedResult -Status "blocker_confirmed" -Code $FailureCode
+    Write-Host "Sanitized faster-whisper dependency blocker confirmed"
 } catch {
     try {
         Write-SanitizedResult -Status "diagnostic_failed" -Code $FailureCode
@@ -379,3 +485,5 @@ try {
     }
     throw
 }
+
+exit 0
