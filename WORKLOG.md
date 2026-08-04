@@ -1791,3 +1791,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`api/transcription_publication.py`、`.github/workflows/ci.yml`、`tests/transcription_fixture_helpers.py`、`tests/test_transcription_phase5_application_e2e.py`、`tests/test_transcription_publication_index_adapter.py`、`tests/test_transcript_index_metadata.py`、`tests/test_transcript_retrieval_integration.py`、`tests/test_transcription_phase5_static_boundaries.py`、`frontend/src/components/ConversationList.test.tsx`、`project-docs/plans/multi-engine-transcription-phase5.md`、`WORKLOG.md`。
 - 验证：experimental fixture 的 awaiting-review 与带 reviewer 外键的 approved 转换冒烟通过；Phase 1/5 静态边界 12/12 通过；修改 Python 文件 `py_compile` 通过；会话分组单测分别在 UTC 与 Asia/Shanghai 通过，前端全量 18 个文件、81 项测试及 production build 通过；PR #7 最新代码提交的 `test-transcription-phase5`、`test-transcription-contracts`、`validate`、ASR service、provider、GPU 和 migration config 七个 CI job 全部通过。
 - 边界：本地未安装缺失的 `qdrant_client`；未运行真实 Qdrant、ASR、GPU、生产数据或部署。
+
+### 08:49 — 修复 Windows ASR Python 解析与 staging 重试
+
+- 完成：部署脚本改为仅从 HKLM 与 `Program Files` 解析并运行时验证机器级 Python 3.11，不再依赖 Administrator 用户级 `py.exe`；同一 SHA 的残留 staging 与依赖安装失败 staging 分别移动到 `stale-staging-*`、`failed-staging-*` 备份，避免删除审计证据并允许后续重试。
+- 文件：`scripts/deploy-asr.ps1`、`tests/test_asr_deployment_static.py`、`project-docs/plans/multi-engine-transcription-phase5c-windows-asr-deployment.md`、`WORKLOG.md`。
+- 验证：PowerShell 语法解析通过；Python 测试文件编译通过；在本机未安装 pytest 的前提下直接执行静态测试模块，11/11 项通过；`git diff --check` 通过。远端 CI、合并及生产 R3B-B3 重试按获批流程继续验证。
+- 边界：未读取或输出 Token，未删除生产 staging，未下载模型，未修改防火墙，未注册或启动 Scheduled Task，未启用 Ubuntu ASR 客户端，未运行真实媒体或真实 ASR。

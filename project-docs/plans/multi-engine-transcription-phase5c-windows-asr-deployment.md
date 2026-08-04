@@ -76,7 +76,8 @@ ASR 仅在四个字段均合法、模型已加载、inflight 为 0 且明确允�
 1. 在 Windows 建立固定目录、专用 `venv` 和配置 ACL。
 2. 由管理员写入 ASR 与 GPU probe Token；两端 Token 必须匹配各自调用方。
 3. 通过现有 GPU service 部署流程更新 GPU service 代码并验证受鉴权 `/v1/activity`；保持其现有 Python 环境，不在 R3B 中迁移运行时。
-4. 安装明确锁定的 Python/CUDA/FunASR 依赖。
+4. 安装明确锁定的 Python/CUDA/FunASR 依赖；创建专用 `venv` 时只从 HKLM 或 `Program Files` 解析机器级 Python 3.11，并以运行时版本探针拒绝 Python 3.10、用户级 Launcher 或其他版本。
+   同一完整 SHA 的残留 staging 不删除，先移动到 `backups` 的 `stale-staging-*`；依赖安装失败的 staging 移动为 `failed-staging-*`，保证后续重试可恢复且保留审计证据。
 5. 离线准备固定 revision 模型，生成并复核 manifest。
 6. 配置仅允许 `${PRIVATE_IPV4} -> ${PRIVATE_IPV4}:8200` 的防火墙规则。
 7. 注册但先不对业务开放 Scheduled Task，执行 health/capabilities/activity 验证。

@@ -67,6 +67,29 @@ def test_deploy_script_never_downloads_models_or_changes_firewall():
     assert "^[0-9a-fA-F]{40}$" in read("scripts/deploy-asr.ps1")
 
 
+def test_deploy_uses_only_machine_wide_python_311_for_venv_creation():
+    deploy = read("scripts/deploy-asr.ps1")
+    assert "function Get-MachinePython311" in deploy
+    assert r"HKEY_LOCAL_MACHINE\SOFTWARE\Python\PythonCore\3.11\InstallPath" in deploy
+    assert r"HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\Python\PythonCore\3.11\InstallPath" in deploy
+    assert '$env:ProgramW6432' in deploy
+    assert r'"Python311\python.exe"' in deploy
+    assert "py -3.11" not in deploy
+    assert "HKEY_CURRENT_USER" not in deploy
+    assert '([string]$versionOutput).Trim() -eq "3.11"' in deploy
+    assert '([string]$venvVersion).Trim() -ne "3.11"' in deploy
+
+
+def test_deploy_archives_stale_and_failed_staging_without_deleting_it():
+    deploy = read("scripts/deploy-asr.ps1")
+    assert "function Move-StagingToBackup" in deploy
+    assert 'Move-StagingToBackup -Path $staging -Reason "stale"' in deploy
+    assert 'Move-StagingToBackup -Path $staging -Reason "failed"' in deploy
+    assert '"{0}-staging-{1}-{2}"' in deploy
+    assert 'throw "Staging directory already exists' not in deploy
+    assert "Remove-Item" not in deploy
+
+
 def test_service_secret_is_not_passed_on_scheduled_task_command_line():
     deploy = read("scripts/deploy-asr.ps1")
     action_line = next(line for line in deploy.splitlines() if "New-ScheduledTaskAction" in line)
