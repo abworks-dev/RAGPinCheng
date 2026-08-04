@@ -66,6 +66,7 @@ jobs:
         shell: powershell
         env:
           ASR_SERVICE_TOKEN: ${{ secrets.ASR_SERVICE_TOKEN }}
+          BGE_PRIORITY_PROBE_TOKEN: ${{ secrets.GPU_SERVICE_TOKEN }}
         run: |
           $operation = "${{ inputs.operation }}"
           $activationId = if ($operation -eq "rollback") {
