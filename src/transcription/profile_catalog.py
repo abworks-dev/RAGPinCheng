@@ -1,10 +1,11 @@
-"""Static server-side Phase 3 Profile catalog."""
+"""Static server-side transcription Profile catalog."""
 from __future__ import annotations
 
 from dataclasses import dataclass
 
 from .asr_service_contract import ServiceCapabilities
 from .profile import (
+    FasterWhisperRemoteConfig,
     ProfileRegistry,
     ReleasePolicy,
     RemoteAsrServiceConfig,
@@ -16,6 +17,12 @@ from .types import (
     ProfileQualification,
     ProviderAvailability,
 )
+
+FASTER_WHISPER_PROFILE_ID = "faster-whisper-zh-experimental-v1"
+FASTER_WHISPER_PROVIDER_KEY = "faster-whisper"
+FASTER_WHISPER_SERVICE_PROFILE_ID = "faster-whisper-large-v3-turbo-v1"
+FASTER_WHISPER_MODEL_ID = "dropbox-dash/faster-whisper-large-v3-turbo"
+FASTER_WHISPER_MODEL_REVISION = "0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf"
 
 FUNASR_SENSEVOICE_PROFILE_ID = "funasr-sensevoice-zh-experimental-v1"
 FUNASR_SENSEVOICE_PROVIDER_KEY = "funasr-sensevoice"
@@ -31,50 +38,78 @@ class ProfileCatalogEntry:
     unavailable_reason_code: str | None
 
 
+def _availability(
+    service_profile_id: str,
+    *,
+    service_enabled: bool,
+    service_healthy: bool,
+    service_capabilities: ServiceCapabilities | None,
+) -> tuple[ProviderAvailability, str | None]:
+    if not service_enabled:
+        return ProviderAvailability.unavailable, "asr_service_disabled"
+    if not service_healthy:
+        return ProviderAvailability.unavailable, "asr_service_unhealthy"
+    if service_capabilities is None:
+        return ProviderAvailability.unavailable, "asr_service_contract_unavailable"
+    if (
+        service_capabilities.api_version != "asr-service/1"
+        or service_profile_id not in service_capabilities.service_profiles
+    ):
+        return ProviderAvailability.unavailable, "asr_service_contract_mismatch"
+    return ProviderAvailability.available, None
+
+
+def _profiles() -> tuple[TranscriptionProfileDefinition, ...]:
+    profiles = (
+        TranscriptionProfileDefinition.create(
+            profile_id=FASTER_WHISPER_PROFILE_ID,
+            display_name="faster-whisper 中文实验配置",
+            description=(
+                "固定 large-v3-turbo 模型与 revision；R2 仅完成代码接线，"
+                "准入保持关闭。"
+            ),
+            provider_key=FASTER_WHISPER_PROVIDER_KEY,
+            provider_config=FasterWhisperRemoteConfig(),
+            normalizer_config=NormalizerConfig(2, 500, 1000),
+            qualification=ProfileQualification.experimental,
+            admission=ProfileAdmission.disabled,
+            release_policy=ReleasePolicy(True, False, False),
+            evidence_refs=(
+                "project-docs/plans/faster-whisper-provider-integration.md",
+            ),
+        ),
+        TranscriptionProfileDefinition.create(
+            profile_id=FUNASR_SENSEVOICE_PROFILE_ID,
+            display_name="FunASR SenseVoice 中文实验配置",
+            description="固定模型与 revision；必须人工审核，禁止自动发布和自动索引。",
+            provider_key=FUNASR_SENSEVOICE_PROVIDER_KEY,
+            provider_config=RemoteAsrServiceConfig(),
+            normalizer_config=NormalizerConfig(2, 500, 1000),
+            qualification=ProfileQualification.experimental,
+            admission=ProfileAdmission.enabled,
+            release_policy=ReleasePolicy(True, False, False),
+            evidence_refs=("scripts/funasr_phase0/phase0-config.example.json",),
+        ),
+    )
+    return tuple(sorted(profiles, key=lambda profile: profile.profile_id))
+
+
 def build_phase3_profile_catalog(
     *,
     service_enabled: bool = False,
     service_healthy: bool = False,
     service_capabilities: ServiceCapabilities | None = None,
 ) -> tuple[ProfileCatalogEntry, ...]:
-    profile = TranscriptionProfileDefinition.create(
-        profile_id=FUNASR_SENSEVOICE_PROFILE_ID,
-        display_name="FunASR SenseVoice 中文实验配置",
-        description="固定模型与 revision；必须人工审核，禁止自动发布和自动索引。",
-        provider_key=FUNASR_SENSEVOICE_PROVIDER_KEY,
-        provider_config=RemoteAsrServiceConfig(),
-        normalizer_config=NormalizerConfig(2, 500, 1000),
-        qualification=ProfileQualification.experimental,
-        admission=ProfileAdmission.enabled,
-        release_policy=ReleasePolicy(True, False, False),
-        evidence_refs=("scripts/funasr_phase0/phase0-config.example.json",),
-    )
-    if not service_enabled:
-        availability = ProviderAvailability.unavailable
-        unavailable_reason = "asr_service_disabled"
-    elif not service_healthy:
-        availability = ProviderAvailability.unavailable
-        unavailable_reason = "asr_service_unhealthy"
-    elif service_capabilities is None:
-        availability = ProviderAvailability.unavailable
-        unavailable_reason = "asr_service_contract_unavailable"
-    elif (
-        service_capabilities.api_version != "asr-service/1"
-        or FUNASR_SENSEVOICE_SERVICE_PROFILE_ID
-        not in service_capabilities.service_profiles
-    ):
-        availability = ProviderAvailability.unavailable
-        unavailable_reason = "asr_service_contract_mismatch"
-    else:
-        availability = ProviderAvailability.available
-        unavailable_reason = None
-    return (
-        ProfileCatalogEntry(
-            profile,
-            availability,
-            unavailable_reason,
-        ),
-    )
+    entries: list[ProfileCatalogEntry] = []
+    for profile in _profiles():
+        availability, reason = _availability(
+            profile.provider_config.service_profile_id,
+            service_enabled=service_enabled,
+            service_healthy=service_healthy,
+            service_capabilities=service_capabilities,
+        )
+        entries.append(ProfileCatalogEntry(profile, availability, reason))
+    return tuple(entries)
 
 
 def build_phase3_profile_registry() -> ProfileRegistry:

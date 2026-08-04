@@ -1898,3 +1898,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`frontend/src/components/SourceWorkspace.tsx`、`frontend/src/components/Message.tsx`、`WORKLOG.md`。
 - 验证：基于最新 `origin/master` 的 TypeScript project build 与 Vite production build 通过（2023 modules transformed）；`git diff --check` 通过。构建仍保留既有 CSS minify 与主包大于 500 kB 警告。
 - 待办/风险：尚未使用真实登录会话进行浏览器视觉验收；未修改 API、SSE、RAG、数据库或后端业务。
+
+### 04:28 — 接入准入关闭的 faster-whisper Provider
+
+- 完成：按获批 R2 将固定 `faster-whisper==1.2.1`、`ctranslate2==4.8.1` 和 `dropbox-dash/faster-whisper-large-v3-turbo@0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf` 接入既有 Profile/remote Provider/ASR EngineRegistry；adapter 仅惰性导入真实依赖，固定本地 CUDA FP16 与解码参数，严格归一化 segment 毫秒并输出 `EngineChunkCandidate | ProviderFailure`。应用 Profile 保持 `experimental + disabled`，唯一结果流仍为 `pipeline.py → normalizer → Canonical → formatter`。scoped review 补强了两个可信远程配置对各自 `service_profile_id` 的精确锁定，禁止合法 slug 之间交叉替换。
+- 文件：新增 `asr_service/engines/faster_whisper.py`、隔离依赖与模型 Manifest 示例、adapter 测试和 `project-docs/plans/faster-whisper-provider-integration.md`；最小修改可信 Profile/catalog、remote Provider factory、应用组装、ASR service config/app/model cache/engine contract、相关测试、功能文档与 `TODO.md`。未修改数据库、API Schema、前端、worker、Qdrant、BGE、Canonical、normalizer、formatter、pipeline 或生产部署 workflow。
+- 验证：无 FastAPI、无真实引擎的 ASR/Provider/应用回归 `187 passed`；Phase 1 类型、Profile、Canonical、normalizer、formatter、policy 与静态边界回归 `189 passed`；修改代码和测试 `py_compile` 通过，`git diff --check` 通过。现有 CI 的 `test-asr-service-contract` 会自动收集新增 adapter 测试，无需修改 workflow。
+- 待办/风险：本机项目 `.venv` 缺少既有 `fastapi`，因此 `asr_service/tests/test_api_contract.py` 和 `tests/test_transcription_phase4_api.py` 未在本地执行，必须由远端 CI 验证；本轮未安装依赖、未下载模型、未运行 ffmpeg/真实 ASR/GPU、未部署或修改 Windows/Ubuntu 配置。后续 R3 依赖、模型、CUDA、资源和短样本门禁通过前不得启用 faster-whisper admission。

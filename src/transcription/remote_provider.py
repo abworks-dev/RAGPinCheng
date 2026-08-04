@@ -17,7 +17,12 @@ from .asr_service_contract import (
     ServiceJobState,
     ServiceResult,
 )
-from .profile import RemoteAsrServiceConfig, TranscriptionExecutionConfig
+from .profile import (
+    FasterWhisperRemoteConfig,
+    RemoteAsrServiceConfig,
+    RemoteProviderConfig,
+    TranscriptionExecutionConfig,
+)
 from .provider_protocol import (
     ProviderCapabilities,
     ProviderErrorCode,
@@ -33,6 +38,7 @@ from .types import (
     TranscriptionInputRef,
     canonical_json_bytes,
     sha256_hex,
+    validate_provider_key,
     validate_uuid,
 )
 
@@ -267,7 +273,7 @@ def compute_client_request_id(
 ) -> str:
     validate_uuid(application_job_id, "application_job_id")
     config = execution.provider_config
-    if type(config) is not RemoteAsrServiceConfig:
+    if type(config) not in (RemoteAsrServiceConfig, FasterWhisperRemoteConfig):
         raise ContractValidationError("invalid_provider_config", "provider_config")
     return sha256_hex(
         canonical_json_bytes(
@@ -289,9 +295,12 @@ def compute_client_request_id(
 class RemoteAsrProvider:
     client: AsrServiceClient
     ports: ProviderRuntimePorts
-    _provider_key: str = "funasr-sensevoice"
+    _provider_key: str
     monotonic: Callable[[], float] = time.monotonic
     sleep: Callable[[float], None] = time.sleep
+
+    def __post_init__(self) -> None:
+        validate_provider_key(self._provider_key)
 
     @property
     def provider_key(self) -> str:
@@ -338,7 +347,7 @@ class RemoteAsrProvider:
         self,
         job_id: str,
         input_ref: TranscriptionInputRef,
-        config: RemoteAsrServiceConfig,
+        config: RemoteProviderConfig,
         deadline: float,
         timeout_ms: int,
     ) -> ProviderFailure | None:
@@ -385,7 +394,11 @@ class RemoteAsrProvider:
                 self.provider_key, ProviderErrorCode.service_contract_mismatch
             )
         config = execution.provider_config
-        if type(config) is not RemoteAsrServiceConfig:
+        if type(config) not in (RemoteAsrServiceConfig, FasterWhisperRemoteConfig):
+            return _failure(
+                self.provider_key, ProviderErrorCode.service_contract_mismatch
+            )
+        if config.config_kind != self.provider_key:
             return _failure(
                 self.provider_key, ProviderErrorCode.service_contract_mismatch
             )

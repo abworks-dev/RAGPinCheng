@@ -11,7 +11,11 @@ from fastapi import HTTPException
 
 from api.auth import CurrentUser, require_admin, require_csrf_admin
 from api.routes_admin import router as admin_router, upload_media
-from api.routes_transcription import _failure_dto, router as transcription_router
+from api.routes_transcription import (
+    _failure_dto,
+    build_transcription_service,
+    router as transcription_router,
+)
 from api.schemas import RetryTranscriptionRequest
 from tests.transcription_fixture_helpers import make_pending_job, make_phase2_store
 
@@ -68,6 +72,18 @@ def test_failure_dto_exposes_safe_message_and_retry_policy():
     assert identity_conflict.code == "service_request_identity_conflict"
     assert identity_conflict.retryable is False
     assert "identity_conflict" not in identity_conflict.message
+
+
+def test_application_runtime_registers_both_remote_provider_keys():
+    service = build_transcription_service()
+    assert tuple(item.profile_id for item in service.profiles.definitions) == (
+        "faster-whisper-zh-experimental-v1",
+        "funasr-sensevoice-zh-experimental-v1",
+    )
+    assert tuple(item.provider_key for item in service.providers.factories) == (
+        "faster-whisper",
+        "funasr-sensevoice",
+    )
 
 
 def test_upload_rejects_missing_mode_before_reading_or_writing():

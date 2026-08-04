@@ -1,6 +1,6 @@
 # 视频转录链路
 
-- 状态：人工上传/播放链路与多引擎 Phase 5A/5B 应用闭环代码已实现，待远端 CI；Phase 5C 真实隔离验证未执行
+- 状态：人工上传/播放链路与多引擎 Phase 5A/5B 应用闭环已实现；faster-whisper R2 代码接线完成待远端 CI，准入保持关闭
 - 最后核对：2026-08-05
 
 ## 用户可观察能力
@@ -45,8 +45,16 @@ Phase 5A/5B 已接通版本列表、只读 Markdown 预览、人工审核、显�
 - Parent、Child 和 Qdrant payload 添加 nullable `transcript_version_id` / `publication_target_id`，legacy stable ID 算法保持不变；
 - 正式可见性唯一读取 `app.sqlite.media_transcript_heads.current_version_id`；Qdrant recall 和 Parent expansion 使用同一快照，损坏/缺失 head 对 versioned transcript fail closed，legacy/普通文档继续可见；
 - 普通索引与 publication 索引共用现有单 worker/单队列，publication job 支持幂等恢复与失败状态持久化。
+- Profile catalog 现包含已启用的 experimental SenseVoice 和准入关闭的 experimental
+  faster-whisper；二者复用同一 Remote Provider 与唯一 Candidate → Canonical 结果流；
+- ASR service 注册两个固定 service Profile；faster-whisper 缓存/依赖缺失时仅该
+  Profile 不可用，不阻止现有 SenseVoice 服务启动；
+- faster-whisper adapter 固定
+  `dropbox-dash/faster-whisper-large-v3-turbo@0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf`
+  与 CUDA FP16 参数，但 R2 未安装依赖、下载模型或运行推理。
 
-真实 ffmpeg/ASR/GPU/Qdrant 服务、真实 embedding/rerank、生产数据和 Phase 5C 尚未执行，因此当前只证明离线代码闭环，不构成真实引擎或生产资格结论。
+SenseVoice 已完成独立生产短媒体验收；faster-whisper 仍未完成依赖、模型、CUDA、
+质量、资源或生产验证，因此其 R2 接线不构成运行或生产资格结论。
 
 ## 入口与调用链
 
@@ -105,6 +113,8 @@ Phase 5A/5B 已接通版本列表、只读 Markdown 预览、人工审核、显�
 - `api/routes_transcription.py`、`api/indexing.py`（转录/版本 API 与共享 worker）
 - `frontend/src/components/TranscriptionVersionPanel.tsx`（版本审阅与发布）
 - `asr_service/`（Phase 3 独立服务、存储、调度和 engine adapter）
+- `asr_service/engines/faster_whisper.py`、`requirements-faster-whisper.txt`
+  （准入关闭的可选引擎 adapter 与隔离依赖声明）
 - `frontend/src/components/citations.ts`
 - `frontend/src/components/SourcesPanel.tsx`（播放按钮）
 - `frontend/src/components/Message.tsx`（引用 click seek）
@@ -152,13 +162,17 @@ Phase 5A/5B 已接通版本列表、只读 Markdown 预览、人工审核、显�
 - Phase 5：Store/事务/manual/visibility/index metadata/static 本地 29 项通过；版本管理定向前端 31 项通过；API、worker、candidate index、Qdrant Filter 与完整前端 build 由独立 CI job 验证；
 - Phase 5C 真实 ffmpeg/ASR/GPU/Qdrant E2E 未运行。
 - 管理流程加固：Provider/应用/API 定向 40 项通过；变基到最新 master 后 Provider/应用身份定向 31 项与前端定向 34 项通过，前端 production build 通过；远端 CI、真实服务和生产回归未执行。
+- faster-whisper R2：无 FastAPI、无真实引擎的 ASR/Provider/应用回归
+  187 项通过；Phase 1 核心契约与静态边界 189 项通过；API/FastAPI 组合待远端 CI。
 
 ## 已知限制
 
 - 第一阶段只支持 MP4 格式，不支持其他视频容器；
 - 播放器只做时间点 seek，不做完整交互式转录同步高亮；
-- 自动转录应用链路和管理端版本工作流已接线，但真实 ASR/ffmpeg/GPU/Qdrant E2E 未运行；
-- 当前唯一实际 Profile 仍是 experimental，必须人工审核和显式发布，尚无 `qualification_approved` Profile；
+- SenseVoice 短媒体自动转录已完成生产验收，但候选稿发布/Qdrant 正式可见性 E2E
+  尚未执行；faster-whisper 真实依赖、模型、CUDA 和推理均未运行；
+- 当前唯一允许新建任务的自动 Profile 仍是 experimental SenseVoice；faster-whisper
+  experimental Profile 可见但 admission 为 disabled；尚无 `qualification_approved` Profile；
 - 支持范围播放但无 HLS 自适应码率。
 - 媒体快捷筛选是最近 100 条的客户端筛选，不是服务端全库查询；独立转写工作台基础版仍待后续 PR。
 
@@ -167,3 +181,5 @@ Phase 5A/5B 已接通版本列表、只读 Markdown 预览、人工审核、显�
 - [0001 — 视频转录播放器与媒体资产流水线](../decisions/0001-video-transcript-player.md) 第一阶段已实施完成。
 - [0002 — 多引擎视频自动转录与管理员选择](../decisions/0002-multi-engine-transcription.md)；实施基线见 [Phase 2](../plans/multi-engine-transcription-phase2.md)、[Phase 3](../plans/multi-engine-transcription-phase3.md) 与 [Phase 5](../plans/multi-engine-transcription-phase5.md) 详细计划。
 - [转录管理流程加固](../plans/transcription-admin-workflow-hardening.md) 记录 Phase 5 后续 PR 1/PR 2 的独立范围。
+- [faster-whisper Provider 接入](../plans/faster-whisper-provider-integration.md)
+  记录 R2 代码边界与后续 R3 资格门禁。

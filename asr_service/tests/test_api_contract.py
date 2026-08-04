@@ -9,9 +9,13 @@ from fastapi.testclient import TestClient
 
 from asr_service.app import create_app
 from asr_service.config import AsrServiceSettings
-from asr_service.engine_protocol import SENSEVOICE_SERVICE_CONFIG
+from asr_service.engine_protocol import (
+    FASTER_WHISPER_SERVICE_CONFIG,
+    SENSEVOICE_SERVICE_CONFIG,
+)
 from asr_service.engine_registry import EngineRegistration, EngineRegistry
 from asr_service.engines.fake import FakeEngine
+from asr_service.model_cache import ModelCacheStatus
 from asr_service.scheduler import BgePriorityDecision, FixedBgePriorityProbe, Scheduler
 from asr_service.storage import LocalJobRepository
 from src.transcription.asr_service_contract import ASR_API_VERSION, CreateJobRequest
@@ -50,7 +54,18 @@ def app_for(tmp_path: Path):
     )
     scheduler = Scheduler(
         repo,
-        EngineRegistry((EngineRegistration(FakeEngine(), SENSEVOICE_SERVICE_CONFIG),)),
+        EngineRegistry(
+            (
+                EngineRegistration(
+                    FakeEngine(
+                        provider_key="faster-whisper",
+                        service_profile_id="faster-whisper-large-v3-turbo-v1",
+                    ),
+                    FASTER_WHISPER_SERVICE_CONFIG,
+                ),
+                EngineRegistration(FakeEngine(), SENSEVOICE_SERVICE_CONFIG),
+            )
+        ),
         FixedBgePriorityProbe(BgePriorityDecision.allow),
         queue_limit=config.max_queue_length,
         failure_limit=config.consecutive_failure_limit,
@@ -118,6 +133,15 @@ def test_api_create_upload_complete_start_poll_result_sequence(tmp_path):
         assert result.json()["result_kind"] == "candidate"
 
 
+def test_capabilities_expose_each_available_registered_profile(tmp_path):
+    with TestClient(app_for(tmp_path)) as client:
+        payload = client.get("/v1/capabilities", headers=headers()).json()
+    assert payload["service_profiles"] == [
+        "faster-whisper-large-v3-turbo-v1",
+        "funasr-sensevoice-small-v1",
+    ]
+
+
 def test_api_errors_are_finite_and_do_not_leak_paths_or_body(tmp_path):
     client = TestClient(app_for(tmp_path))
     missing = "22222222-2222-4222-8222-222222222222"
@@ -172,3 +196,23 @@ def test_disabled_service_exposes_no_profiles_and_requires_no_token(tmp_path):
 def test_enabled_default_wiring_rejects_unverified_model_cache(tmp_path):
     with pytest.raises(RuntimeError, match="ASR model cache unavailable"):
         create_app(settings(tmp_path))
+
+
+def test_enabled_default_wiring_does_not_require_optional_faster_cache(
+    tmp_path, monkeypatch
+):
+    model_path = (tmp_path / "models" / "sensevoice").resolve()
+    monkeypatch.setattr(
+        "asr_service.app.validate_sensevoice_cache",
+        lambda *_args: ModelCacheStatus(True, "available", model_path),
+    )
+    monkeypatch.setattr(
+        "asr_service.app.validate_faster_whisper_cache",
+        lambda *_args: ModelCacheStatus(False, "model-cache-unconfigured"),
+    )
+    app = create_app(settings(tmp_path))
+    registrations = app.state.asr_scheduler.engines.registrations
+    assert tuple(item.config.service_profile_id for item in registrations) == (
+        "faster-whisper-large-v3-turbo-v1",
+        "funasr-sensevoice-small-v1",
+    )
