@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 from types import SimpleNamespace
 
-from api.routes_admin import list_documents
+from api.routes_admin import delete_document, list_documents
 
 
 def _connection() -> sqlite3.Connection:
@@ -150,7 +150,19 @@ def test_document_listing_supports_server_side_status_filter(monkeypatch):
         ],
     )
     conn.commit()
-    monkeypatch.setattr("api.routes_admin.list_indexed_documents", lambda: [])
+    monkeypatch.setattr(
+        "api.routes_admin.list_indexed_documents",
+        lambda: [
+            SimpleNamespace(
+                source_path="ready.pdf",
+                doc_title="已索引资料",
+                category="公司标准",
+                doc_type="pdf",
+                company=None,
+                parent_count=1,
+            )
+        ],
+    )
 
     result = list_documents(
         query="",
@@ -167,3 +179,53 @@ def test_document_listing_supports_server_side_status_filter(monkeypatch):
     assert result.documents[0].filename == "queued.pdf"
     assert result.status_counts == {"ready": 1, "processing": 1}
     conn.close()
+
+
+def test_document_listing_does_not_resurrect_deleted_completed_job(monkeypatch):
+    conn = _connection()
+    conn.execute(
+        """
+        INSERT INTO index_jobs(
+            id,user_id,filename,category,doc_type,source_path,file_size,status,
+            error,stats_json,created_at,started_at,finished_at
+        ) VALUES (1,1,'deleted.pdf','公司标准','pdf','deleted.pdf',1,'done',NULL,NULL,1,1,2)
+        """
+    )
+    conn.commit()
+    monkeypatch.setattr("api.routes_admin.list_indexed_documents", lambda: [])
+
+    result = list_documents(
+        query="",
+        category=None,
+        doc_type=None,
+        status=None,
+        limit=100,
+        offset=0,
+        _admin=object(),
+        conn=conn,
+    )
+
+    assert result.total == 0
+    assert result.documents == []
+    assert result.status_counts == {}
+    conn.close()
+
+
+def test_delete_document_exposes_file_delete_status(monkeypatch):
+    monkeypatch.setattr(
+        "api.routes_admin.delete_indexed_document",
+        lambda source_path, delete_file: {
+            "parents_deleted": 3,
+            "file_deleted": False,
+            "file_delete_status": "failed",
+        },
+    )
+
+    result = delete_document(
+        body=SimpleNamespace(source_path="docs/locked.pdf", delete_file=True),
+        _admin=object(),
+    )
+
+    assert result.parents_deleted == 3
+    assert result.file_deleted is False
+    assert result.file_delete_status == "failed"

@@ -712,7 +712,14 @@ def list_documents(
         """
     ).fetchall()
     jobs_by_path = {str(row["source_path"]): row for row in latest_jobs}
-    all_paths = set(indexed_by_path) | set(jobs_by_path)
+    # A completed job is historical evidence, not a live document by itself.
+    # Once its Parent rows are removed, do not resurrect it as a ready item.
+    visible_job_paths = {
+        source_path
+        for source_path, row in jobs_by_path.items()
+        if str(row["status"]) != "done"
+    }
+    all_paths = set(indexed_by_path) | visible_job_paths
     documents: list[IndexedDocumentDTO] = []
 
     for source_path in all_paths:
@@ -829,6 +836,7 @@ def delete_document(
     return DeleteDocumentResponse(
         parents_deleted=result["parents_deleted"],
         file_deleted=bool(result["file_deleted"]),
+        file_delete_status=str(result["file_delete_status"]),
     )
 
 

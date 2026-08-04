@@ -102,7 +102,11 @@ describe("AdminDocumentsPage", () => {
     mocks.adminListIndexedDocuments.mockResolvedValue(listing);
     mocks.adminListIndexJobs.mockResolvedValue({ jobs });
     mocks.adminUploadDocuments.mockResolvedValue({ accepted: [jobs[0]], skipped: [] });
-    mocks.adminDeleteIndexedDocument.mockResolvedValue({ parents_deleted: 12, file_deleted: false });
+    mocks.adminDeleteIndexedDocument.mockResolvedValue({
+      parents_deleted: 12,
+      file_deleted: false,
+      file_delete_status: "not_requested",
+    });
     mocks.adminRetryIndexJob.mockResolvedValue(jobs[0]);
     mocks.adminDeleteIndexJob.mockResolvedValue(undefined);
   });
@@ -204,6 +208,28 @@ describe("AdminDocumentsPage", () => {
       readyDocument.source_path,
       true,
     ));
+  });
+
+  it("warns when the index was removed but deleting the source file failed", async () => {
+    mocks.adminDeleteIndexedDocument.mockResolvedValueOnce({
+      parents_deleted: 12,
+      file_deleted: false,
+      file_delete_status: "failed",
+    });
+    render(<AdminDocumentsPage />);
+    await screen.findByText("企业交付标准");
+
+    fireEvent.click(screen.getByLabelText("打开 企业交付标准 的操作菜单"));
+    fireEvent.click(screen.getByRole("button", { name: "移除资料" }));
+    const dialog = await screen.findByRole("dialog", { name: "移除资料" });
+    fireEvent.click(within(dialog).getByRole("radio", { name: /同时删除源文件/ }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "删除资料和源文件" }));
+
+    expect(await within(dialog).findByText("删除未完全完成")).toBeInTheDocument();
+    expect(within(dialog).getByText(/知识库索引已移除，但源文件删除失败/)).toBeInTheDocument();
+    expect(mocks.adminListIndexedDocuments).toHaveBeenCalledTimes(1);
+    fireEvent.click(within(dialog).getByRole("button", { name: "取消" }));
+    await waitFor(() => expect(mocks.adminListIndexedDocuments).toHaveBeenCalledTimes(2));
   });
 
   it("retries a failed document from its lifecycle row", async () => {
