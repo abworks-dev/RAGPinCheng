@@ -105,23 +105,32 @@ $envFile = Join-Path $configRoot "asr.env"
 if (-not (Test-Path -LiteralPath $envFile)) {
     Copy-Item -LiteralPath (Join-Path $resolvedSource "asr_service\.env.example") -Destination $envFile
 }
-if (-not [string]::IsNullOrWhiteSpace($env:ASR_SERVICE_TOKEN)) {
-    if ($env:ASR_SERVICE_TOKEN.Contains("`r") -or $env:ASR_SERVICE_TOKEN.Contains("`n")) {
-        throw "ASR_SERVICE_TOKEN must be one line"
+function Set-ProtectedConfigSecret {
+    param(
+        [string]$Name,
+        [string]$Value
+    )
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return
+    }
+    if ($Value.Contains("`r") -or $Value.Contains("`n")) {
+        throw "$Name must be one line"
     }
     $lines = Get-Content -LiteralPath $envFile -Encoding UTF8
     $replaced = $false
     $lines = $lines | ForEach-Object {
-        if ($_ -match '^ASR_SERVICE_TOKEN=') {
+        if ($_ -match ("^{0}=" -f [regex]::Escape($Name))) {
             $replaced = $true
-            "ASR_SERVICE_TOKEN=$env:ASR_SERVICE_TOKEN"
+            "$Name=$Value"
         } else {
             $_
         }
     }
-    if (-not $replaced) { $lines += "ASR_SERVICE_TOKEN=$env:ASR_SERVICE_TOKEN" }
+    if (-not $replaced) { $lines += "$Name=$Value" }
     Set-Content -LiteralPath $envFile -Value $lines -Encoding utf8
 }
+Set-ProtectedConfigSecret -Name "ASR_SERVICE_TOKEN" -Value $env:ASR_SERVICE_TOKEN
+Set-ProtectedConfigSecret -Name "BGE_PRIORITY_PROBE_TOKEN" -Value $env:BGE_PRIORITY_PROBE_TOKEN
 & icacls.exe $configRoot `
     /inheritance:r `
     /grant:r `

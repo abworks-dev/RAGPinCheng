@@ -55,7 +55,8 @@ function Read-StrictEnv {
 function Assert-RequiredConfiguration {
     param(
         [hashtable]$Values,
-        [string]$ExpectedEnabled
+        [string]$ExpectedEnabled,
+        [switch]$AllowInjectedProbeToken
     )
     foreach ($required in @(
         "ASR_SERVICE_ENABLED",
@@ -68,6 +69,19 @@ function Assert-RequiredConfiguration {
         "BGE_PRIORITY_PROBE_URL",
         "BGE_PRIORITY_PROBE_TOKEN"
     )) {
+        if (
+            $required -eq "BGE_PRIORITY_PROBE_TOKEN" -and
+            $AllowInjectedProbeToken -and
+            -not [string]::IsNullOrWhiteSpace($env:BGE_PRIORITY_PROBE_TOKEN)
+        ) {
+            if (
+                $env:BGE_PRIORITY_PROBE_TOKEN.Contains("`r") -or
+                $env:BGE_PRIORITY_PROBE_TOKEN.Contains("`n")
+            ) {
+                throw "Injected BGE priority probe token must be one line"
+            }
+            continue
+        }
         if (-not $Values.ContainsKey($required) -or [string]::IsNullOrWhiteSpace($Values[$required])) {
             throw "Required ASR setting is empty: $required"
         }
@@ -295,7 +309,7 @@ function Invoke-Preflight {
         throw "Checked-out commit does not match the requested full SHA"
     }
     $parsed = Read-StrictEnv -Path $envFile
-    Assert-RequiredConfiguration -Values $parsed.Values -ExpectedEnabled "false"
+    Assert-RequiredConfiguration -Values $parsed.Values -ExpectedEnabled "false" -AllowInjectedProbeToken
     Assert-ModelCache
     if (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) {
         throw "RAGPinCheng-ASR Scheduled Task must not exist before first activation"

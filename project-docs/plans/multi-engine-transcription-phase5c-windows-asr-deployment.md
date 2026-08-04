@@ -28,7 +28,7 @@ ${PRODUCTION_DATA_ROOT}\RAGPinCheng-ASR\
 - Windows ASR 服务端只读取 `${PRODUCTION_DATA_ROOT}\RAGPinCheng-ASR\config\asr.env`，模板是 `asr_service/.env.example`。
 - Ubuntu backend 客户端继续读取生产 `prod.env`，模板是根 `.env.example` 中的 `ASR_ENABLED`、`ASR_SERVICE_URL` 等客户端键。
 - 两份 env 不能拼接。Token 值不进入仓库、命令行、Scheduled Task XML 或日志。
-- `BGE_PRIORITY_PROBE_TOKEN` 必须与现有 GPU service 的 `GPU_SERVICE_TOKEN` 完全一致；它是 ASR 调用 GPU `/v1/activity` 时使用的 Bearer Token，不与 Ubuntu backend 调用 ASR 的 `ASR_SERVICE_TOKEN` 混用。
+- `BGE_PRIORITY_PROBE_TOKEN` 必须与现有 GPU service 的 `GPU_SERVICE_TOKEN` 完全一致；它是 ASR 调用 GPU `/v1/activity` 时使用的 Bearer Token，不与 Ubuntu backend 调用 ASR 的 `ASR_SERVICE_TOKEN` 混用。激活 workflow 只把既有仓库级 `GPU_SERVICE_TOKEN` Secret 映射到进程内的 `BGE_PRIORITY_PROBE_TOKEN`，payload 部署时写入受保护的 Windows ASR env，不输出或复制 Token 到命令行、任务定义和日志。
 - 现有 GPU service 保持原 Python 环境；本阶段只增加鉴权 `GET /v1/activity`。
 
 ## 3. 运行契约
