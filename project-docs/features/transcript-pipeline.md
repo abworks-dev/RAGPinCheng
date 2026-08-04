@@ -1,6 +1,6 @@
 # 视频转录链路
 
-- 状态：人工上传/播放链路与多引擎 Phase 5A/5B 应用闭环已实现；faster-whisper R2 代码接线完成待远端 CI，准入保持关闭
+- 状态：人工上传/播放链路与多引擎 Phase 5A/5B 应用闭环已实现；faster-whisper R2 已合并且 CI 通过，准入保持关闭
 - 最后核对：2026-08-05
 
 ## 用户可观察能力
@@ -163,7 +163,11 @@ SenseVoice 已完成独立生产短媒体验收；faster-whisper 仍未完成依
 - Phase 5C 真实 ffmpeg/ASR/GPU/Qdrant E2E 未运行。
 - 管理流程加固：Provider/应用/API 定向 40 项通过；变基到最新 master 后 Provider/应用身份定向 31 项与前端定向 34 项通过，前端 production build 通过；远端 CI、真实服务和生产回归未执行。
 - faster-whisper R2：无 FastAPI、无真实引擎的 ASR/Provider/应用回归
-  187 项通过；Phase 1 核心契约与静态边界 189 项通过；API/FastAPI 组合待远端 CI。
+  187 项通过；Phase 1 核心契约与静态边界 189 项通过；PR #34 的 7 个远端 CI
+  检查全部成功并已合并。真实依赖、模型、CUDA 和质量资格仍待 R3。
+- faster-whisper R3：统一资格 workflow、隔离编排、固定模型准备、严格 8 样本
+  Manifest、质量/资源门禁和无真实引擎测试已在独立分支实现，尚待 scoped review、
+  远端 CI、合并及真实 Windows CUDA 执行；当前不能据此认定 faster-whisper 可用。
 
 ## 已知限制
 
@@ -183,3 +187,5 @@ SenseVoice 已完成独立生产短媒体验收；faster-whisper 仍未完成依
 - [转录管理流程加固](../plans/transcription-admin-workflow-hardening.md) 记录 Phase 5 后续 PR 1/PR 2 的独立范围。
 - [faster-whisper Provider 接入](../plans/faster-whisper-provider-integration.md)
   记录 R2 代码边界与后续 R3 资格门禁。
+- [faster-whisper R3 统一资格验证](../plans/faster-whisper-r3-unified-qualification.md)
+  是后续依赖、模型、CUDA、质量与资源实测的唯一执行基线。
