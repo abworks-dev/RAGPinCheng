@@ -35,6 +35,7 @@ class ProviderErrorCode(Enum):
     input_too_large = "input_too_large"
     input_unavailable = "input_unavailable"
     service_contract_mismatch = "service_contract_mismatch"
+    service_request_identity_conflict = "service_request_identity_conflict"
 
 
 class ProviderFailureClassification(Enum):

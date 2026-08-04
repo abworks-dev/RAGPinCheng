@@ -230,6 +230,12 @@ export type TranscriptionProfile = {
 
 export type TranscriptionJobStatus = "pending" | "running" | "succeeded" | "failed" | "cancelled";
 
+export type TranscriptionFailure = {
+  code: string;
+  message: string;
+  retryable: boolean;
+};
+
 export type TranscriptionJob = {
   job_id: string;
   media_id: string;
@@ -241,6 +247,7 @@ export type TranscriptionJob = {
   total_ms: number;
   failure_error_code: string | null;
   error_summary: string | null;
+  failure: TranscriptionFailure | null;
   result_version_id: string | null;
   created_at: number;
   started_at: number | null;
@@ -248,6 +255,17 @@ export type TranscriptionJob = {
   updated_at: number;
 };
 
+export type TranscriptReviewStatus =
+  | "not_required"
+  | "awaiting_review"
+  | "review_approved"
+  | "review_rejected";
+
+export type TranscriptPublicationStatus =
+  | "not_published"
+  | "publishing"
+  | "published"
+  | "publication_failed";
 
 export type TranscriptVersion = {
   version_id: string;
@@ -257,11 +275,11 @@ export type TranscriptVersion = {
   provider_key: string | null;
   model_id: string | null;
   model_revision: string | null;
-  review_status: string;
+  review_status: TranscriptReviewStatus;
   reviewed_by: number | null;
   reviewed_at: number | null;
   review_note: string | null;
-  publication_status: string;
+  publication_status: TranscriptPublicationStatus;
   published_at: number | null;
   supersedes_version_id: string | null;
   markdown_sha256: string;
@@ -318,4 +336,8 @@ export type MediaAsset = {
   updated_at: number;
   error: string | null;
   transcription_job_id?: string | null;
+  review_status?: TranscriptReviewStatus | null;
+  publication_status?: TranscriptPublicationStatus | null;
+  publication_index_status?: "pending" | "parsing" | "chunking" | "embedding" | "done" | "failed" | null;
+  is_current_version?: boolean;
 };

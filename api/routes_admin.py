@@ -807,7 +807,14 @@ async def upload_media(
                 and existing["sha256"] == retry_digest.hexdigest()
             )
             if not same_identity:
-                raise HTTPException(status_code=409, detail="幂等键与自动转录请求不匹配")
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "upload_idempotency_conflict",
+                        "message": "本次提交与原上传请求不一致，请重新提交。",
+                        "retryable": False,
+                    },
+                )
             return MediaAssetDTO(
                 media_id=existing["media_id"],
                 title=existing["title"],
@@ -937,7 +944,14 @@ async def upload_media(
                 ("request idempotency key belongs to another media asset", int(time.time()), media_id),
             )
             conn.commit()
-            raise HTTPException(status_code=409, detail="幂等键已用于其他媒体")
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "upload_idempotency_conflict",
+                    "message": "本次提交与原上传请求不一致，请重新提交。",
+                    "retryable": False,
+                },
+            )
         except (ContractValidationError, OSError):
             conn.execute(
                 "UPDATE media_assets SET status='failed',error=?,updated_at=? WHERE media_id=?",
@@ -992,10 +1006,26 @@ def list_media_assets(
     """List all media assets."""
     rows = conn.execute(
         """
-        SELECT media_id, title, original_filename, mime_type, file_size,
-               transcript_origin, status, created_at, updated_at, error
-        FROM media_assets
-        ORDER BY created_at DESC
+        SELECT m.media_id, m.title, m.original_filename, m.mime_type, m.file_size,
+               m.transcript_origin, m.status, m.created_at, m.updated_at, m.error,
+               v.review_status, v.publication_status,
+               CASE WHEN h.current_version_id=v.id THEN 1 ELSE 0 END AS is_current_version,
+               (
+                   SELECT p.status
+                   FROM transcript_publication_index_jobs p
+                   WHERE p.transcript_version_id=v.id
+                   ORDER BY p.attempt_number DESC
+                   LIMIT 1
+               ) AS publication_index_status
+        FROM media_assets m
+        LEFT JOIN transcript_versions v ON v.id=(
+            SELECT v2.id FROM transcript_versions v2
+            WHERE v2.media_id=m.media_id
+            ORDER BY v2.created_at DESC, v2.id DESC
+            LIMIT 1
+        )
+        LEFT JOIN media_transcript_heads h ON h.media_id=m.media_id
+        ORDER BY m.created_at DESC
         LIMIT ?
         """,
         (limit,),
@@ -1012,6 +1042,10 @@ def list_media_assets(
             created_at=r["created_at"],
             updated_at=r["updated_at"],
             error=r["error"],
+            review_status=r["review_status"],
+            publication_status=r["publication_status"],
+            publication_index_status=r["publication_index_status"],
+            is_current_version=bool(r["is_current_version"]),
         )
         for r in rows
     ]

@@ -10,8 +10,9 @@ import { Input } from "./ui/input";
 function statusLabel(status: string) {
   return ({
     awaiting_review: "待审核",
-    approved: "审核通过",
-    rejected: "审核拒绝",
+    review_approved: "审核通过",
+    review_rejected: "审核拒绝",
+    not_required: "无需审核",
     draft: "草稿",
     publishing: "发布中",
     published: "已发布",
@@ -25,8 +26,8 @@ function statusLabel(status: string) {
   } as Record<string, string>)[status] ?? status;
 }
 
-export function TranscriptionVersionPanel({ mediaId, refreshToken }: { mediaId: string; refreshToken?: string | null }) {
-  const [expanded, setExpanded] = useState(false);
+export function TranscriptionVersionPanel({ mediaId, refreshToken, embedded = false }: { mediaId: string; refreshToken?: string | null; embedded?: boolean }) {
+  const [expanded, setExpanded] = useState(embedded);
   const [versions, setVersions] = useState<TranscriptVersion[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -98,19 +99,18 @@ export function TranscriptionVersionPanel({ mediaId, refreshToken }: { mediaId: 
 
   return (
     <div className="mt-3 border-t border-border pt-3">
-      <Button size="sm" variant="outline" onClick={() => setExpanded((value) => !value)}>
+      {!embedded && <Button size="sm" variant="outline" onClick={() => setExpanded((value) => !value)}>
         {expanded ? "收起转录版本" : "审阅转录版本"}
-      </Button>
+      </Button>}
       {expanded && (
         <div className="mt-3 min-w-[26rem] space-y-3">
-          <p className="text-ui-xs font-medium text-muted-foreground">转录成功 ≠ 已审核 ≠ 已发布 ≠ 已进入正式检索</p>
           {(error || publicationError) && <Alert variant="destructive" role="alert"><AlertTitle>转录版本操作失败</AlertTitle><AlertDescription>{error || publicationError}</AlertDescription></Alert>}
           {publicationJob && <p className="text-ui-xs text-muted-foreground">候选索引：{statusLabel(publicationJob.status)}{publicationJob.error_summary ? ` · ${publicationJob.error_summary}` : ""}</p>}
           {loading && versions.length === 0 ? <p className="text-ui-xs text-muted-foreground">正在加载转录版本…</p> : null}
           {!loading && versions.length === 0 ? <p className="text-ui-xs text-muted-foreground">暂无可审阅转录版本。</p> : null}
           {versions.map((version) => {
             const busy = busyVersionId === version.version_id;
-            const canPublish = version.source === "automatic" && version.review_status === "approved" && version.publication_status !== "published" && version.publication_status !== "publishing";
+            const canPublish = version.source === "automatic" && version.review_status === "review_approved" && (version.publication_status === "not_published" || version.publication_status === "publication_failed");
             return (
               <div key={version.version_id} className="rounded-ui-md border border-border bg-background p-3">
                 <div className="flex flex-wrap items-center gap-2">
