@@ -2090,3 +2090,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`frontend/src/components/PdfPreview.tsx`、`frontend/src/components/PdfPreview.test.tsx`、`WORKLOG.md`；未修改 PDF API、索引、数据库、依赖、DOCX/XLSX 渲染或其他并行前端文件。
 - 验证：在最新 `origin/master` 隔离工作树中，PDF 预览专项 Vitest 5/5 通过；前端全量 Vitest 30 个文件、148/148 项通过；TypeScript project build 与 Vite production build 通过（2026 modules transformed）；目标文件 `git diff --check` 通过。构建保留既有 CSS 语法、主包大于 500 kB 与 React Router future warning。
 - 待办/风险：功能处于待用户验收；尚未使用真实纵向/横向 PDF 在浏览器中验证容器自适应、放大后四向拖动、文字复制和窄屏工具栏。回滚只需恢复 `PdfPreview.tsx` 并移除对应专项测试。
+
+### 07:51 — 发布 PDF 预览改进到 master
+
+- 完成：从最新 `origin/master` 建立隔离工作树，仅整合 PDF 预览实现、专项测试及对应工作日志，以普通 fast-forward 将功能提交 `787860f813ecfebdb0f259fe14677c7022c44aa9` 推送到 `origin/master`；未使用强推，也未提交主工作区的其他并行修改或 `.codex-worktrees/`。
+- 文件：`frontend/src/components/PdfPreview.tsx`、`frontend/src/components/PdfPreview.test.tsx`、`WORKLOG.md`。
+- 验证：推送前 PDF 专项 Vitest 5/5、前端全量 Vitest 30 个文件 148/148、TypeScript project build、Vite production build 与 `git diff --check` 全部通过；推送后远端 `master` 与功能提交均为 `787860f813ecfebdb0f259fe14677c7022c44aa9`。
+- 待办/风险：仍待真实纵向/横向 PDF 的浏览器视觉验收；依赖安装审计报告锁文件既有 10 项风险，本轮未运行自动修复、未修改依赖、API、数据、RAG 或部署配置。
