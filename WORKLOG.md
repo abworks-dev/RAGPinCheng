@@ -1819,3 +1819,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`api/conversation_runtime.py`、`api/db_migrations.py`、`api/routes_chat.py`、`api/schemas.py`、`frontend/src/api/chatStream.ts`、`frontend/src/components/ChatLayout.tsx`、`frontend/src/components/Message.tsx`、`frontend/src/components/MessageList.tsx`、`frontend/src/hooks/useChat.ts`、`frontend/src/types.ts`、`frontend/src/components/Message.test.tsx`、`tests/test_answer_regeneration.py`、`tests/test_transcription_db_migrations.py`、`project-docs/features/chat-runtime.md`、`WORKLOG.md`。
 - 验证：后端回答版本与迁移专项测试 13/13 通过；Python 语法检查通过；前端全量 Vitest 19 个文件、85/85 项测试通过；TypeScript 检查与 Vite production build 通过（1964 modules transformed）；`git diff --check` 通过。构建保留既有 CSS minify、主包大于 500 kB 与 React Router future warning。
 - 待办/风险：功能处于待用户验收；尚未连接真实 LLM、真实登录会话或生产数据库执行端到端重新生成，未部署。首次启动将按现有迁移流程备份并为 `app.sqlite` 新增三个版本表，不需要重建 Qdrant 索引。
+
+### 07:19 — 稳定管理面板滚动槽
+
+- 完成：确认长页面出现浏览器纵向滚动条后会缩小可用宽度，使居中内容向左偏移半个滚动条宽度；管理面板挂载期间现会为根页面预留稳定滚动槽，短页与长页保持同一水平居中基准，离开管理面板后自动清理。
+- 文件：`frontend/src/pages/admin/AdminLayout.tsx`、`frontend/src/pages/admin/AdminLayout.test.tsx`、`frontend/src/styles/index.css`、`WORKLOG.md`；保留上述文件及仓库内其他并行未提交修改。
+- 验证：管理布局专项 Vitest 4/4 通过；TypeScript project build 与 Vite production build 通过（1965 modules transformed）。构建保留既有 CSS 语法与主包大于 500 kB 警告。
+- 待办/风险：功能处于待用户验收；尚未在真实管理员登录态下切换长短页面做浏览器视觉对比。本轮未修改 API、数据、依赖或部署，回滚只需移除管理布局生命周期类及对应 CSS。
