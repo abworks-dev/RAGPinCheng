@@ -1,6 +1,6 @@
 # 视频转录链路
 
-- 状态：人工上传/播放链路与多引擎 Phase 5A/5B 应用闭环已实现；faster-whisper R2 已合并且 CI 通过，准入保持关闭
+- 状态：人工上传/播放链路与多引擎 Phase 5A/5B 应用闭环已实现；faster-whisper R2 已合并，R3 依赖资格失败且准入保持关闭
 - 最后核对：2026-08-05
 
 ## 用户可观察能力
@@ -53,8 +53,10 @@ Phase 5A/5B 已接通版本列表、只读 Markdown 预览、人工审核、显�
   `dropbox-dash/faster-whisper-large-v3-turbo@0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf`
   与 CUDA FP16 参数，但 R2 未安装依赖、下载模型或运行推理。
 
-SenseVoice 已完成独立生产短媒体验收；faster-whisper 仍未完成依赖、模型、CUDA、
-质量、资源或生产验证，因此其 R2 接线不构成运行或生产资格结论。
+SenseVoice 已完成独立生产短媒体验收。faster-whisper 的固定 8 个非敏感 Windows
+TTS 样本已生成并通过严格 Manifest 校验，但生产 R3 workflow 在组合依赖解析阶段
+得到 `dependency_preparation_failed`；模型、CUDA、质量和资源门禁均未运行，因此
+其 R2 接线不构成运行或生产资格结论。
 
 ## 入口与调用链
 
