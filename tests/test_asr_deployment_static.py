@@ -299,8 +299,11 @@ def test_faster_whisper_qualification_workflow_is_manual_immutable_and_gated():
     assert "production-asr" in workflow
     assert "runs-on: [self-hosted, Windows, X64, asr-production]" in workflow
     assert "timeout-minutes: 180" in workflow
-    assert workflow.count("default: false") == 1
+    assert workflow.count("default: false") == 2
     assert "execute_qualification must be explicitly enabled" in workflow
+    assert "prepare_synthetic_samples:" in workflow
+    assert "if: ${{ inputs.prepare_synthetic_samples }}" in workflow
+    assert "prepare-faster-whisper-qualification-samples.ps1" in workflow
     assert "commit_sha must equal the workflow dispatch revision" in workflow
     assert "qualification must be dispatched from master" in workflow
     assert 'github.ref }}" -ne "refs/heads/master"' in workflow
@@ -310,6 +313,75 @@ def test_faster_whisper_qualification_workflow_is_manual_immutable_and_gated():
     assert "secrets.ASR_SERVICE_TOKEN" not in workflow
     assert "activate_service" not in workflow.lower()
     assert "operation:" not in workflow
+
+
+def test_faster_whisper_synthetic_sample_preparation_is_fixed_and_gated():
+    workflow = read(".github/workflows/qualify-faster-whisper-production.yml")
+    script = read("scripts/prepare-faster-whisper-qualification-samples.ps1")
+    lowered = script.lower()
+
+    assert workflow.count("prepare_synthetic_samples:") == 1
+    assert "sample_path:" not in workflow
+    assert "sample_text:" not in workflow
+    assert "voice_name:" not in workflow
+    assert "model_id:" not in workflow
+    assert "\n      revision:" not in workflow
+
+    assert "System.Speech.Synthesis.SpeechSynthesizer" in script
+    assert 'Culture.Name -eq "zh-CN"' in script
+    assert "SpeechAudioFormatInfo" in script
+    assert "16000" in script
+    assert "AudioBitsPerSample]::Sixteen" in script
+    assert "AudioChannel]::Mono" in script
+    assert (
+        r"D:\ServiceData\RAGPinCheng-ASR\qualification\faster-whisper"
+        in script
+    )
+    assert (
+        "Prepared fixed eight-sample non-sensitive Windows TTS qualification set"
+        in script
+    )
+    assert "--validate-manifest-only" in script
+    assert script.count("Invoke-ManifestValidation") >= 4
+    assert script.count("Assert-FixedManifestIdentity") >= 4
+    assert "faster-whisper-qualification-manifest.example.json" in script
+    assert "Existing qualification input directory is not a valid fixed sample set" in script
+    assert "Existing qualification input directory is non-empty" in script
+    assert "empty-input-root-before-promotion" in script
+    assert "Move-Item -LiteralPath $StagingRoot -Destination $InputRoot" in script
+    assert "Add-DeterministicBackgroundNoise" in script
+    assert 'New-Object "System.Collections.Generic.List[object]"' in script
+
+    expected_ids = (
+        "bim-terms",
+        "clear-zh",
+        "mixed-zh-en",
+        "negative-control-1",
+        "negative-control-2",
+        "negative-control-3",
+        "noisy-bim-zh",
+        "standard-codes",
+    )
+    assert all(f'Id = "{sample_id}"' in script for sample_id in expected_ids)
+    assert script.count("is_internal_recording = $false") == 1
+    assert script.count("contains_customer_data = $false") == 1
+    assert script.count("self_made = $true") == 1
+    assert "Remove-Item" not in script
+    assert "Start-ScheduledTask" not in script
+    assert "Stop-ScheduledTask" not in script
+    assert "Register-ScheduledTask" not in script
+    assert "New-NetFirewallRule" not in script
+    assert "Set-NetFirewallRule" not in script
+    assert "Remove-NetFirewallRule" not in script
+    assert "netsh advfirewall" not in lowered
+    assert "ASR_ENABLED" not in script
+    assert "prod.env" not in lowered
+    assert "ASR_SERVICE_TOKEN" not in script
+    assert "GPU_SERVICE_TOKEN" not in script
+    assert "HTTP_PROXY" not in script
+    assert "HTTPS_PROXY" not in script
+    assert "Qdrant" not in script
+    assert "app.sqlite" not in script
 
 
 def test_faster_whisper_qualification_is_isolated_from_production_mutations():

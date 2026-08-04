@@ -1952,3 +1952,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：新增 `.github/workflows/qualify-faster-whisper-production.yml`、`scripts/qualify-faster-whisper-production.ps1`、`scripts/prepare_faster_whisper_model.py`、`scripts/run_faster_whisper_qualification.py`、`asr_service/faster-whisper-qualification-manifest.example.json`、`asr_service/tests/test_faster_whisper_qualification.py` 和统一 R3 方案；最小更新 `tests/test_asr_deployment_static.py`、转录功能文档与 `TODO.md`。
 - 验证：R3 专项与生产静态边界 46/46 通过；全部本地可用 ASR service/Profile/Remote Provider/部署和激活相关回归 221/221 通过；Python `compileall`、PowerShell AST 与 `git diff --check` 通过。当前本机既有 `.venv` 仍缺 FastAPI，因此 `asr_service/tests/test_api_contract.py` 与 `test_auth.py` 未本地收集，须由现有 `test-asr-service-contract` CI 在干净环境验证。
 - 待办/风险：尚未提交、推送、创建 PR 或运行远端 CI；尚未安装真实 faster-whisper 依赖、下载模型、读取生产样本、启动 18200 或执行 CUDA。生产资格 workflow 还要求 Windows 固定输入目录存在 8 个已声明的非敏感 PCM WAV 及严格 `manifest.json`；缺失或身份不符会在下载前失败关闭。
+
+### 05:49 — 增加 R3 固定合成样本准备通道
+
+- 完成：在既有 faster-whisper R3 workflow 增加默认关闭的固定样本准备开关；新增 Windows 内置 `zh-CN` TTS 生成器，在审计 staging 中生成 8 个非敏感 16 kHz mono PCM16 WAV，为带噪场景叠加固定种子低幅噪声，按实际时长和 SHA-256 生成严格 Manifest，并在提升前后复用现有资格验证器校验 Schema、文件和固定语义。已有固定样本可幂等复用，空目录保留审计副本后提升，其他已有内容失败关闭且不覆盖、不删除。
+- 文件：新增 `scripts/prepare-faster-whisper-qualification-samples.ps1`；修改 `.github/workflows/qualify-faster-whisper-production.yml`、`tests/test_asr_deployment_static.py` 和 `project-docs/plans/faster-whisper-r3-unified-qualification.md`。
+- 验证：workflow YAML 解析、PowerShell AST、严格 Manifest 单段/空段数组序列化及 `git diff --check` 通过；R3 专项 47/47 通过；本地无外部服务的 ASR/Profile/Remote Provider/部署回归 322/322 通过。
+- 待办/风险：尚未提交、推送、创建 PR、运行远端 CI 或在 Windows 生产 runner 生成样本；真实执行要求主机已有启用的 `zh-CN` Windows voice，缺失时会在生成阶段失败关闭。未启动或修改 ASR/GPU 服务、Scheduled Task、防火墙、Ubuntu、数据库、Qdrant、业务媒体或 Profile admission。
