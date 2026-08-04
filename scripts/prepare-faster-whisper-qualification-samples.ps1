@@ -299,62 +299,16 @@ if (Test-Path -LiteralPath $InputRoot) {
     }
 }
 
+$fixedTemplate = Get-Content -LiteralPath $template -Raw -Encoding UTF8 | ConvertFrom-Json
 $definitions = @(
-    [pscustomobject]@{
-        Id = "bim-terms"
-        Scenario = "bim-terms"
-        Text = "建筑信息模型用于碰撞检测和施工图审查。"
-        ExpectedTerms = @("建筑信息模型", "碰撞检测", "施工图审查")
-        ExpectedCodes = @()
-    },
-    [pscustomobject]@{
-        Id = "clear-zh"
-        Scenario = "clear-zh"
-        Text = "这是清晰普通话自动转录资格验证。"
-        ExpectedTerms = @()
-        ExpectedCodes = @()
-    },
-    [pscustomobject]@{
-        Id = "mixed-zh-en"
-        Scenario = "mixed-zh-en"
-        Text = "请检查 BIM model 和 Revit family。"
-        ExpectedTerms = @("BIM", "Revit")
-        ExpectedCodes = @()
-    },
-    [pscustomobject]@{
-        Id = "negative-control-1"
-        Scenario = "negative-control"
-        Text = "今天的天气很好，我们准备去公园散步。"
-        ExpectedTerms = @()
-        ExpectedCodes = @()
-    },
-    [pscustomobject]@{
-        Id = "negative-control-2"
-        Scenario = "negative-control"
-        Text = "请把桌上的水杯放到厨房。"
-        ExpectedTerms = @()
-        ExpectedCodes = @()
-    },
-    [pscustomobject]@{
-        Id = "negative-control-3"
-        Scenario = "negative-control"
-        Text = "会议将在下午三点准时开始。"
-        ExpectedTerms = @()
-        ExpectedCodes = @()
-    },
-    [pscustomobject]@{
-        Id = "noisy-bim-zh"
-        Scenario = "noisy-bim-zh"
-        Text = "嘈杂环境下复核构件碰撞和净高分析。"
-        ExpectedTerms = @("构件碰撞", "净高分析")
-        ExpectedCodes = @()
-    },
-    [pscustomobject]@{
-        Id = "standard-codes"
-        Scenario = "standard-codes"
-        Text = "请核对规范编号 GB 50016 2014。"
-        ExpectedTerms = @()
-        ExpectedCodes = @("GB 50016 2014")
+    foreach ($sample in @($fixedTemplate.samples)) {
+        [pscustomobject]@{
+            Id = [string]$sample.id
+            Scenario = [string]$sample.scenario
+            Text = [string]$sample.reference_text
+            ExpectedTerms = @($sample.expected_terms)
+            ExpectedCodes = @($sample.expected_codes)
+        }
     }
 )
 
