@@ -91,6 +91,20 @@ describe("AdminLayout tab boundary", () => {
     expect(container.querySelector("aside")).not.toHaveClass("border-r");
   });
 
+  it("matches the conversation sidebar width and color tokens", () => {
+    const { container } = render(
+      <MemoryRouter>
+        <AdminLayout />
+      </MemoryRouter>,
+    );
+
+    expect(container.querySelector("aside")).toHaveClass(
+      "bg-sidebar",
+      "text-sidebar-foreground",
+      "lg:w-[17rem]",
+    );
+  });
+
   it("keeps the tab order, current marker, and mounts only the selected page", () => {
     render(
       <MemoryRouter>

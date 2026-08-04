@@ -1989,3 +1989,24 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`src/indexing_pipeline.py`、`api/routes_admin.py`、`api/schemas.py`、`frontend/src/api/client.ts`、`frontend/src/pages/admin/AdminDocumentsPage.tsx`、相关前后端测试、资料索引功能文档、PR1 实施说明与 `TODO.md`。
 - 验证：后端资料聚合、删除响应和源文件状态专项测试 7/7 通过；资料页与 API client 专项 21/21 通过；前端全量 Vitest 27 个文件、128/128 项通过；TypeScript project build 与 Vite production build通过（2025 modules transformed）。构建保留既有 React Router future warning、CSS minify warning 和主包大于 500 kB 警告。
 - 待办/风险：代码完成，待用户使用可清理的非敏感资料验收；未访问或删除真实资料，未连接真实 Qdrant/生产数据库，未部署、未重建索引。历史任务仍保留在“索引活动”中作为审计记录。
+
+### 06:50 — 统一管理面板与对话页侧栏样式
+
+- 完成：在最新 `master` 管理布局上保留侧栏固定定位、底部主题菜单和账户菜单，将桌面侧栏宽度从 16rem 调整为与对话页一致的 17rem，并复用对话侧栏的背景与前景主题令牌；保留主分支现有的无分隔线设计。
+- 文件：`frontend/src/pages/admin/AdminLayout.tsx`、`frontend/src/pages/admin/AdminLayout.test.tsx`、`WORKLOG.md`。
+- 验证：管理布局专项 Vitest 3/3 通过；TypeScript project build 与 Vite production build 通过（2025 modules transformed）；`git diff --check` 通过。构建保留既有 React Router future warning、CSS minify warning 和主包大于 500 kB 警告。
+- 待办/风险：尚未使用真实管理员登录会话进行桌面与移动端视觉验收；未修改业务逻辑、API、认证、数据、依赖或部署配置。
+
+### 06:54 — 修复会话侧栏顶部渐隐遮挡
+
+- 完成：会话列表位于滚动顶部时不再显示顶部渐隐，避免遮淡“今天”分组标题；仅在列表向下滚动后显示顶部渐隐，滚回顶部时立即移除，底部渐隐保持不变。
+- 文件：`frontend/src/components/Sidebar.tsx`、`frontend/src/components/Sidebar.test.tsx`、`WORKLOG.md`。
+- 验证：侧栏专项 Vitest 3/3 通过；TypeScript project build 与 Vite production build 通过（2025 modules transformed）；`git diff --check` 通过。构建保留既有 CSS 语法警告和主包大于 500 kB 警告。
+- 待办/风险：尚未使用真实登录会话完成浏览器视觉验收；未修改消息区或来源区渐隐、API、后端、数据与依赖声明。
+
+### 06:54 — 建立反馈处理闭环
+
+- 完成：将只读反馈日志页升级为管理员处理队列，新增待处理、处理中、已完成、已归档状态，支持处理结果、备注、处理人、重新打开、归档恢复、关键词与类型/评价/状态筛选和服务端分页；原始 JSONL 保持追加式，新记录使用 UUID，历史记录生成稳定兼容 ID，不提供永久删除。
+- 文件：`api/db_migrations.py`、`api/feedback.py`、`api/routes_admin.py`、`api/schemas.py`、`frontend/src/api/client.ts`、`frontend/src/types.ts`、`frontend/src/pages/admin/AdminFeedbackPage.tsx`、相关前后端测试、`project-docs/features/feedback-management.md`、功能地图与 `WORKLOG.md`。
+- 验证：反馈与数据库迁移专项测试 12 项通过，接口级用例因当前项目 `.venv` 缺少 FastAPI 而明确跳过 1 项；前端全量 Vitest 27 个文件、128/128 项通过；TypeScript 与 Vite production build 通过（2025 modules transformed）；`git diff --check` 通过。构建保留既有 CSS minify 与主包大于 500 kB 警告。
+- 待办/风险：尚未在包含完整后端依赖的环境验证管理员鉴权/CSRF 接口用例，也未使用真实管理员会话进行浏览器人工验收；状态更新采用最后写入生效，未提供多人同时编辑冲突提示；依赖安装报告的既有审计风险未在本次升级依赖。
