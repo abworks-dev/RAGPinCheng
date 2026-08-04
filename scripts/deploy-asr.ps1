@@ -12,6 +12,39 @@ param(
 
 $ErrorActionPreference = "Stop"
 $taskName = "RAGPinCheng-ASR"
+
+function Get-MachinePython311 {
+    $candidates = @()
+    foreach ($registryPath in @(
+        "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Python\PythonCore\3.11\InstallPath",
+        "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\Python\PythonCore\3.11\InstallPath"
+    )) {
+        if (-not (Test-Path -LiteralPath $registryPath)) { continue }
+        $registryKey = Get-Item -LiteralPath $registryPath
+        $executablePath = $registryKey.GetValue("ExecutablePath")
+        if (-not [string]::IsNullOrWhiteSpace($executablePath)) {
+            $candidates += [string]$executablePath
+        }
+        $installRoot = $registryKey.GetValue("")
+        if (-not [string]::IsNullOrWhiteSpace($installRoot)) {
+            $candidates += Join-Path ([string]$installRoot) "python.exe"
+        }
+    }
+    foreach ($programFilesRoot in @($env:ProgramW6432, $env:ProgramFiles)) {
+        if (-not [string]::IsNullOrWhiteSpace($programFilesRoot)) {
+            $candidates += Join-Path $programFilesRoot "Python311\python.exe"
+        }
+    }
+
+    foreach ($candidate in ($candidates | Select-Object -Unique)) {
+        if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) { continue }
+        $versionOutput = & $candidate -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"
+        if ($LASTEXITCODE -eq 0 -and ([string]$versionOutput).Trim() -eq "3.11") {
+            return (Resolve-Path -LiteralPath $candidate).Path
+        }
+    }
+    throw "Machine-wide Python 3.11 was not found in HKLM or Program Files"
+}
 $resolvedSource = (Resolve-Path -LiteralPath $SourceRoot).Path
 $safeDirectory = $resolvedSource.Replace("\", "/")
 $actualShaOutput = & git -c "safe.directory=$safeDirectory" -C $resolvedSource rev-parse HEAD
@@ -41,9 +74,23 @@ foreach ($path in @(
     New-Item -ItemType Directory -Path $path -Force | Out-Null
 }
 
+function Move-StagingToBackup {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+        [Parameter(Mandatory = $true)]
+        [ValidateSet("stale", "failed")]
+        [string]$Reason
+    )
+    if (-not (Test-Path -LiteralPath $Path)) { return }
+    $destination = Join-Path $backupRoot (("{0}-staging-{1}-{2}" -f $Reason, (Get-Date -Format "yyyyMMdd-HHmmssfff"), $CommitSha.Substring(0, 12)))
+    Move-Item -LiteralPath $Path -Destination $destination
+    Write-Host "Archived $Reason staging directory to $destination"
+}
+
 $staging = Join-Path $ProgramRoot ("app-staging-" + $CommitSha)
 if (Test-Path -LiteralPath $staging) {
-    throw "Staging directory already exists: $staging"
+    Move-StagingToBackup -Path $staging -Reason "stale"
 }
 New-Item -ItemType Directory -Path $staging | Out-Null
 foreach ($item in @("asr_service", "src")) {
@@ -83,16 +130,27 @@ if (-not [string]::IsNullOrWhiteSpace($env:ASR_SERVICE_TOKEN)) {
     "*S-1-5-20:(OI)(CI)M" | Out-Null
 
 if ($InstallDependencies) {
-    if (-not (Test-Path -LiteralPath (Join-Path $venvRoot "Scripts\python.exe"))) {
-        py -3.11 -m venv $venvRoot
+    try {
+        $venvPython = Join-Path $venvRoot "Scripts\python.exe"
+        if (-not (Test-Path -LiteralPath $venvPython -PathType Leaf)) {
+            $python311 = Get-MachinePython311
+            & $python311 -m venv $venvRoot
+            if ($LASTEXITCODE -ne 0) { throw "ASR venv creation failed" }
+        }
+        $venvVersion = & $venvPython -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"
+        if ($LASTEXITCODE -ne 0 -or ([string]$venvVersion).Trim() -ne "3.11") {
+            throw "ASR venv must use Python 3.11"
+        }
+        & $venvPython -m pip install --index-url https://download.pytorch.org/whl/cu128 torch==2.7.0 torchaudio==2.7.0
+        if ($LASTEXITCODE -ne 0) { throw "CUDA Torch installation failed" }
+        & $venvPython -m pip install -r (Join-Path $staging "requirements-windows.txt")
+        if ($LASTEXITCODE -ne 0) { throw "ASR dependency installation failed" }
+        & $venvPython -m pip check
+        if ($LASTEXITCODE -ne 0) { throw "ASR dependency check failed" }
+    } catch {
+        Move-StagingToBackup -Path $staging -Reason "failed"
+        throw
     }
-    $venvPython = Join-Path $venvRoot "Scripts\python.exe"
-    & $venvPython -m pip install --index-url https://download.pytorch.org/whl/cu128 torch==2.7.0 torchaudio==2.7.0
-    if ($LASTEXITCODE -ne 0) { throw "CUDA Torch installation failed" }
-    & $venvPython -m pip install -r (Join-Path $staging "requirements-windows.txt")
-    if ($LASTEXITCODE -ne 0) { throw "ASR dependency installation failed" }
-    & $venvPython -m pip check
-    if ($LASTEXITCODE -ne 0) { throw "ASR dependency check failed" }
 }
 
 $backup = $null
