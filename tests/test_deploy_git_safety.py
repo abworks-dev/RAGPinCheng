@@ -97,6 +97,8 @@ class TestDeployGitSafety(unittest.TestCase):
     def test_windows_gpu_deploy_rolls_back_owned_task_and_listener(self):
         self.assertIn("Remove-ManagedGpuTaskAndListener", self.windows)
         self.assertIn("Stop-VerifiedGpuListeners", self.windows)
+        self.assertIn("ForEach-Object { $_.OwningProcess }", self.windows)
+        self.assertNotIn("$connections.OwningProcess", self.windows)
         self.assertIn("Unregister-ScheduledTask", self.windows)
         self.assertIn("Stop-Process -Id $processId -Force", self.windows)
         self.assertIn("Refusing to stop an unexpected process listening on TCP 8100", self.windows)

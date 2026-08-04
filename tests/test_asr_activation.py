@@ -208,6 +208,8 @@ def test_activation_script_uses_fixed_firewall_and_fail_closed_rollback():
     assert "function Stop-VerifiedAsrListeners" in script
     assert "sys._base_executable" in script
     assert "Get-CimInstance Win32_Process" in script
+    assert "ForEach-Object { $_.OwningProcess }" in script
+    assert "$connections.OwningProcess" not in script
     assert (
         '\'"{0}" -m uvicorn asr_service.app:create_app --factory '
         "--host 0.0.0.0 --port 8200' -f"

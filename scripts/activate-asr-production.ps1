@@ -296,7 +296,12 @@ function Stop-VerifiedAsrListeners {
     $connections = @(
         Get-NetTCPConnection -LocalPort 8200 -State Listen -ErrorAction SilentlyContinue
     )
-    foreach ($processId in @($connections.OwningProcess | Sort-Object -Unique)) {
+    $processIds = @(
+        $connections |
+            ForEach-Object { $_.OwningProcess } |
+            Sort-Object -Unique
+    )
+    foreach ($processId in $processIds) {
         $process = Get-CimInstance Win32_Process -Filter ("ProcessId={0}" -f $processId)
         if ($null -eq $process) {
             continue
