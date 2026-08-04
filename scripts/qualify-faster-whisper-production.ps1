@@ -6,6 +6,8 @@ param(
     [string]$SourceRoot,
     [Parameter(Mandatory = $true)]
     [string]$RunId,
+    [Parameter(Mandatory = $true)]
+    [string]$InternalWheelBundlePath,
     [bool]$ExecuteQualification = $false,
     [string]$SummaryPath = ""
 )
@@ -383,7 +385,8 @@ function Wait-HttpHealth {
 function New-WheelManifest {
     param(
         [Parameter(Mandatory = $true)][string]$DownloadLog,
-        [Parameter(Mandatory = $true)][string]$OutputPath
+        [Parameter(Mandatory = $true)][string]$OutputPath,
+        [Parameter(Mandatory = $true)][object]$InternalManifest
     )
     $logText = Get-Content -LiteralPath $DownloadLog -Raw -Encoding UTF8
     $resolvedUrls = @(
@@ -391,7 +394,29 @@ function New-WheelManifest {
             ForEach-Object { $_.Value.TrimEnd(".", ",", ")", "]") }
     )
     $files = @()
+    $internalWheelRecorded = $false
     foreach ($wheel in @(Get-ChildItem -LiteralPath $Wheelhouse -Filter "*.whl" -File | Sort-Object Name)) {
+        $wheelSha256 = Get-Sha256 -Path $wheel.FullName
+        $isInternalWheel = $wheel.Name.Equals(
+            [string]$InternalManifest.wheel.file_name,
+            [StringComparison]::OrdinalIgnoreCase
+        )
+        if ($isInternalWheel) {
+            if (
+                [int64]$wheel.Length -ne [int64]$InternalManifest.wheel.size_bytes -or
+                $wheelSha256 -ne [string]$InternalManifest.wheel.sha256
+            ) {
+                throw "Controlled internal wheel changed before wheelhouse recording"
+            }
+            $files += [ordered]@{
+                file_name = $wheel.Name
+                size_bytes = [int64]$wheel.Length
+                sha256 = $wheelSha256
+                source_url = "internal://jieba/0.42.1/$wheelSha256"
+            }
+            $internalWheelRecorded = $true
+            continue
+        }
         $url = $null
         foreach ($candidate in $resolvedUrls) {
             try {
@@ -411,18 +436,24 @@ function New-WheelManifest {
         $files += [ordered]@{
             file_name = $wheel.Name
             size_bytes = [int64]$wheel.Length
-            sha256 = Get-Sha256 -Path $wheel.FullName
+            sha256 = $wheelSha256
             source_url = $url
         }
     }
     if ($files.Count -eq 0) {
         throw "Wheelhouse is empty"
     }
+    if (-not $internalWheelRecorded) {
+        throw "Controlled internal wheel was not resolved into the wheelhouse"
+    }
     $manifest = [ordered]@{
         schema_version = "faster-whisper-wheel-manifest/1"
         indexes = @(
             "https://pypi.org/simple",
             "https://download.pytorch.org/whl/cu128"
+        )
+        internal_wheel_manifest_sha256 = Get-Sha256 -Path (
+            Join-Path $ResolvedInternalWheelBundle "internal-wheel-manifest.json"
         )
         files = $files
     }
@@ -494,6 +525,28 @@ if ($env:GPU_SERVICE_TOKEN.Contains("`r") -or $env:GPU_SERVICE_TOKEN.Contains("`
 }
 
 $ResolvedSource = (Resolve-Path -LiteralPath $SourceRoot).Path
+$ResolvedInternalWheelBundle = (
+    Resolve-Path -LiteralPath $InternalWheelBundlePath -ErrorAction Stop
+).Path
+if (
+    -not (Test-Path -LiteralPath $ResolvedInternalWheelBundle -PathType Container) -or
+    ((Get-Item -LiteralPath $ResolvedInternalWheelBundle).Attributes -band
+        [System.IO.FileAttributes]::ReparsePoint)
+) {
+    throw "Controlled internal wheel bundle must be a real directory"
+}
+if (
+    $ResolvedInternalWheelBundle.Equals(
+        $ResolvedSource,
+        [System.StringComparison]::OrdinalIgnoreCase
+    ) -or
+    $ResolvedInternalWheelBundle.StartsWith(
+        $ResolvedSource.TrimEnd("\") + "\",
+        [System.StringComparison]::OrdinalIgnoreCase
+    )
+) {
+    throw "Controlled internal wheel bundle must be outside the checkout"
+}
 $SafeDirectory = $ResolvedSource.Replace("\", "/")
 $ActualShaOutput = & git -c "safe.directory=$SafeDirectory" -C $ResolvedSource rev-parse HEAD
 if (
@@ -531,6 +584,25 @@ try {
         throw "Qualification runner must execute as Administrator"
     }
     $MachinePython = Get-MachinePython311
+    $InternalWheelValidationLog = Join-Path $LogRoot "internal-wheel-validation.log"
+    Invoke-External `
+        -FilePath $MachinePython `
+        -Arguments @(
+            (Join-Path $ResolvedSource "scripts\build_internal_jieba_wheel.py"),
+            "validate",
+            "--bundle-dir", $ResolvedInternalWheelBundle,
+            "--commit-sha", $CommitSha.ToLowerInvariant(),
+            "--run-id", $RunId
+        ) `
+        -LogPath $InternalWheelValidationLog
+    $InternalWheelManifestPath = Join-Path (
+        $ResolvedInternalWheelBundle
+    ) "internal-wheel-manifest.json"
+    $InternalWheelManifest = Get-Content `
+        -LiteralPath $InternalWheelManifestPath `
+        -Raw `
+        -Encoding UTF8 |
+        ConvertFrom-Json
     $ProductionPython = "${PRODUCTION_SERVICE_ROOT}\RAGPinCheng-ASR\venv\Scripts\python.exe"
     if (-not (Test-Path -LiteralPath $ProductionPython -PathType Leaf)) {
         throw "Production ASR venv Python is missing"
@@ -657,6 +729,7 @@ try {
                 "--dest", $Wheelhouse,
                 "--index-url", "https://pypi.org/simple",
                 "--extra-index-url", "https://download.pytorch.org/whl/cu128",
+                "--find-links", $ResolvedInternalWheelBundle,
                 "--constraint", (Join-Path $EvidenceRoot "production-freeze.txt"),
                 "--requirement", $CombinedRequirements
             ) `
@@ -666,7 +739,8 @@ try {
     }
     $WheelManifest = New-WheelManifest `
         -DownloadLog $DownloadLog `
-        -OutputPath (Join-Path $EvidenceRoot "wheel-manifest.json")
+        -OutputPath (Join-Path $EvidenceRoot "wheel-manifest.json") `
+        -InternalManifest $InternalWheelManifest
     Assert-WheelManifestUnchanged -Manifest $WheelManifest
 
     Invoke-External `

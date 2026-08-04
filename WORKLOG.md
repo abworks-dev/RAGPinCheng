@@ -2040,3 +2040,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`frontend/src/components/Message.tsx`、`frontend/src/components/Message.test.tsx`、`WORKLOG.md`。
 - 验证：悬浮框专项测试 12/12 通过；前端全量 Vitest 28 个文件、139/139 项通过；TypeScript project build 与 Vite production build 通过（2026 modules transformed）；`git diff --check` 通过。首次复用旧工作区依赖时有 3 个测试文件因缺少最新锁文件已声明的 Radix Dialog 而无法收集，按最新锁文件安装隔离依赖后全部通过；构建保留既有 CSS 语法、主包大于 500 kB 与 React Router future warning。
 - 待办/风险：尚未使用带来源的真实会话完成明暗主题、视口顶部/右侧翻转和鼠标移入浮层的浏览器视觉验收；依赖审计报告既有 10 项风险，本轮未修改依赖或锁文件，也未运行自动修复。
+
+### 07:26 — 实施受控 jieba wheel 资格接线
+
+- 完成：按获批 R3 方案新增固定 `jieba==0.42.1` wheel 构建与严格校验工具；GitHub-hosted job 在任何源码执行前核验固定 sdist URL、大小和 SHA-256，使用固定 Python/build tools/时间戳双重构建并要求 wheel 字节 hash 一致，再通过同一 workflow artifact 交给 Windows 资格 job。Windows 仅将已重新校验的 bundle 作为 `--find-links` 来源，继续保留 `--only-binary=:all:`，并要求受控 wheel 实际进入 run-local wheelhouse。
+- 文件：新增 `scripts/build_internal_jieba_wheel.py`、`tests/test_asr_internal_wheel.py`；修改 `.github/workflows/qualify-faster-whisper-production.yml`、`scripts/qualify-faster-whisper-production.ps1`、`tests/test_asr_deployment_static.py`、统一 R3 方案与 `TODO.md`。
+- 验证：受控 wheel 单元与部署静态测试 36/36 通过；R3 wheel、部署、模型准备和 faster-whisper 资格定向回归 83/83 通过；workflow YAML、Python 编译、PowerShell AST 与 `git diff --check` 通过。
+- 待办/风险：尚未提交、推送、创建 PR、运行远端 CI 或真实资格 workflow；真实双重构建、Windows run-local 依赖解析、模型/CUDA/8 样本门禁仍须在合并后使用新的完整 master SHA 验证。未修改 production freeze、生产 ASR venv、服务、Scheduled Task、防火墙、Ubuntu、数据库、Qdrant、模型或 Profile admission。
