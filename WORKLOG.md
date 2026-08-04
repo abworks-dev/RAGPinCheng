@@ -2062,3 +2062,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`frontend/src/components/Message.tsx`、`frontend/src/components/Message.test.tsx`、`frontend/src/components/SourceWorkspace.tsx`、`frontend/src/components/SourceWorkspace.test.tsx`、`WORKLOG.md`。
 - 验证：消息与来源工作区专项 Vitest 2 个文件、15/15 项测试通过；TypeScript project build 与 Vite production build 通过（2026 modules transformed）；`git diff --check` 通过。首次复用旧依赖目录时因缺少锁文件已声明的 Radix Dialog 无法完成 TypeScript 构建，按最新锁文件在隔离工作区安装依赖后构建通过；构建保留既有 CSS 语法与主包大于 500 kB 警告，依赖审计仍报告既有 10 项风险。
 - 待办/风险：功能处于待用户验收；尚未在真实登录会话中对视频播放器自动 seek、窄屏来源抽屉和明暗主题完成浏览器视觉验收。本轮未修改 API、媒体鉴权、数据契约、索引、依赖声明或部署。
+
+### 07:38 — 清理回答复制中的引用角标
+
+- 完成：适配最新 `master` 的回答操作结构，在助手回答写入剪贴板前移除已识别的数字、文档章节和视频时间引用角标，并清理角标前的横向空白；用户提问仍原样复制，页面角标展示、来源核验和局域网 HTTP 剪贴板回退保持不变。
+- 文件：`frontend/src/components/citations.ts`、`frontend/src/components/FeedbackBar.tsx`、`frontend/src/components/FeedbackBar.test.tsx`、`WORKLOG.md`。
+- 验证：消息、回答操作、来源工作区和管理布局专项 Vitest 25/25 通过；前端全量 Vitest 29 个文件、143/143 项通过；TypeScript project build 与 Vite production build 通过（2026 modules transformed）；`git diff --check` 通过。构建保留既有 CSS 语法、主包大于 500 kB 与 React Router future warning。
+- 待办/风险：功能处于待用户验收；尚未在真实登录会话中使用长回答执行浏览器剪贴板验收。本轮未修改 API、引用数据契约、RAG、依赖、数据或部署。

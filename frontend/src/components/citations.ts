@@ -62,6 +62,13 @@ export function linkifyCitations(markdown: string): string {
   return result;
 }
 
+export function stripCitationsForCopy(markdown: string): string {
+  return linkifyCitations(markdown).replace(
+    /[ \t]*\[[^\]\n]*\]\(#cite-(?:num|vid|pdf):[^\n]*?\)(?=$|[\s，。！？；：,.!?;:])/g,
+    "",
+  );
+}
+
 export function resolveCitation(href: string, sources: Source[]): number {
   // Numbered reference: #cite-num:N → source index N-1
   const numMatch = href.match(/^#cite-num:(\d+)$/);

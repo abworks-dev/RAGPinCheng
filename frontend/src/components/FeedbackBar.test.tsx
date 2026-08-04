@@ -39,14 +39,14 @@ describe("FeedbackBar", () => {
     mocks.sendFeedback.mockResolvedValue({ ok: true });
   });
 
-  it("copies the complete answer and shows a temporary inline check without a toast", async () => {
+  it("copies the answer without citation markers and shows a temporary inline check without a toast", async () => {
     vi.useFakeTimers();
     renderFeedback();
 
     fireEvent.click(screen.getByRole("button", { name: "复制回答" }));
 
     await act(async () => {});
-    expect(mocks.copy).toHaveBeenCalledWith(message.content);
+    expect(mocks.copy).toHaveBeenCalledWith("## 回答\n\n请查看来源。");
     expect(screen.getByRole("button", { name: "回答已复制" })).toHaveClass("text-success");
     expect(mocks.toastSuccess).not.toHaveBeenCalledWith("回答已复制");
 
