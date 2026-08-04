@@ -14,10 +14,22 @@ export type CitationDetail = {
   sourceIndex: number;
 };
 
+export type CitationSelection = CitationDetail | null;
+
 export type CitationHoverDetail = {
   messageId: string;
   sourceIndex: number | null; // null = clear highlight
 };
+
+export function toggleCitationSelection(
+  current: CitationSelection,
+  clicked: CitationDetail,
+): CitationSelection {
+  return current?.messageId === clicked.messageId &&
+    current.sourceIndex === clicked.sourceIndex
+    ? null
+    : clicked;
+}
 
 // Group 1 = doc title, Group 2 = section path. Negative lookahead avoids
 // eating real markdown links `[label](url)`. Both bracketed and bare forms
@@ -95,9 +107,4 @@ export function resolveCitation(href: string, sources: Source[]): number {
 
 export function dispatchCitation(detail: CitationDetail) {
   window.dispatchEvent(new CustomEvent<CitationDetail>(CITATION_EVENT, { detail }));
-  window.dispatchEvent(
-    new CustomEvent<CitationHoverDetail>(CITATION_HOVER_EVENT, {
-      detail: { messageId: detail.messageId, sourceIndex: detail.sourceIndex },
-    }),
-  );
 }
