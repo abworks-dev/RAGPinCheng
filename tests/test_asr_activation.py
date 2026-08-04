@@ -165,6 +165,11 @@ def test_activation_workflow_is_manual_safe_by_default_and_cross_node_gated():
     assert "needs.verify-ubuntu.result != 'success'" in workflow
     assert "Mode = \"Rollback\"" in workflow
     assert "ASR_SERVICE_TOKEN: ${{ secrets.ASR_SERVICE_TOKEN }}" in workflow
+    assert "ASR_DEPENDENCY_PROXY" in workflow
+    assert "if: ${{ inputs.operation != 'rollback' }}" in workflow
+    assert "activation-backups\\$activationId\\activate-asr-production.ps1" in workflow
+    rollback_job = workflow.split("rollback-after-cross-node-failure:", 1)[1]
+    assert "actions/checkout" not in rollback_job
     assert "ASR_ENABLED=true" not in workflow
     assert "deploy-app.sh" not in workflow
     assert "docker compose" not in workflow
@@ -183,6 +188,7 @@ def test_activation_script_uses_fixed_firewall_and_fail_closed_rollback():
     assert "ASR_SERVICE_ENABLED=true" in script
     assert "ASR_SERVICE_ENABLED=false" in script
     assert "Invoke-ActivationRollback" in script
+    assert "Copy-Item -LiteralPath $PSCommandPath -Destination $rollbackScriptPath" in script
     assert '$state.activation_id -ne $ActivationId' in script
     assert "$state.commit_sha -ne $CommitSha" not in script
     assert "Stop-ScheduledTask" in script
