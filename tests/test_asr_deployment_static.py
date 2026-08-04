@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -318,6 +319,9 @@ def test_faster_whisper_qualification_workflow_is_manual_immutable_and_gated():
 def test_faster_whisper_synthetic_sample_preparation_is_fixed_and_gated():
     workflow = read(".github/workflows/qualify-faster-whisper-production.yml")
     script = read("scripts/prepare-faster-whisper-qualification-samples.ps1")
+    template = json.loads(
+        read("asr_service/faster-whisper-qualification-manifest.example.json")
+    )
     lowered = script.lower()
 
     assert workflow.count("prepare_synthetic_samples:") == 1
@@ -351,6 +355,11 @@ def test_faster_whisper_synthetic_sample_preparation_is_fixed_and_gated():
     assert "Move-Item -LiteralPath $StagingRoot -Destination $InputRoot" in script
     assert "Add-DeterministicBackgroundNoise" in script
     assert 'New-Object "System.Collections.Generic.List[object]"' in script
+    assert script.isascii()
+    assert (
+        "Get-Content -LiteralPath $template -Raw -Encoding UTF8 | ConvertFrom-Json"
+        in script
+    )
 
     expected_ids = (
         "bim-terms",
@@ -362,7 +371,7 @@ def test_faster_whisper_synthetic_sample_preparation_is_fixed_and_gated():
         "noisy-bim-zh",
         "standard-codes",
     )
-    assert all(f'Id = "{sample_id}"' in script for sample_id in expected_ids)
+    assert tuple(sample["id"] for sample in template["samples"]) == expected_ids
     assert script.count("is_internal_recording = $false") == 1
     assert script.count("contains_customer_data = $false") == 1
     assert script.count("self_made = $true") == 1
