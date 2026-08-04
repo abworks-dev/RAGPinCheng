@@ -33,11 +33,66 @@ $PipExe = "C:\Program Files\Python310\Scripts\pip.exe"
 $ServiceDir = Join-Path $RepositoryPath "gpu_service"
 $Timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $BackupPath = Join-Path $BackupDirectory "gpu-service-backup-$Timestamp"
+$TaskName = "RAGPinCheng-GPU"
+$StartScript = Join-Path $RepositoryPath "scripts\start-gpu-service.ps1"
+$ExpectedTaskArguments = (
+    '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -RepositoryPath "{1}"' -f
+    $StartScript,
+    $RepositoryPath
+)
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
 function Write-Step {
     param([string]$Message)
     Write-Host "`n>> $Message" -ForegroundColor Cyan
+}
+
+function Assert-GpuTaskIsOurs {
+    param([object]$Task)
+    $actions = @($Task.Actions)
+    if (
+        $actions.Count -ne 1 -or
+        [string]$actions[0].Execute -ne "powershell.exe" -or
+        [string]$actions[0].Arguments -ne $ExpectedTaskArguments -or
+        [string]$Task.Principal.UserId -ne "Administrator"
+    ) {
+        throw "Refusing to modify an unexpected RAGPinCheng-GPU Scheduled Task"
+    }
+}
+
+function Stop-VerifiedGpuListeners {
+    $resolvedPython = (Resolve-Path -LiteralPath $PythonExe).Path
+    $expectedCommandLine = '"{0}" -m gpu_service.app' -f $resolvedPython
+    $connections = @(
+        Get-NetTCPConnection -LocalPort 8100 -State Listen -ErrorAction SilentlyContinue
+    )
+    foreach ($processId in @($connections.OwningProcess | Sort-Object -Unique)) {
+        $process = Get-CimInstance Win32_Process -Filter ("ProcessId={0}" -f $processId)
+        if ($null -eq $process) {
+            continue
+        }
+        if (
+            [string]$process.ExecutablePath -ne $resolvedPython -or
+            [string]$process.CommandLine -ne $expectedCommandLine
+        ) {
+            throw "Refusing to stop an unexpected process listening on TCP 8100"
+        }
+        Stop-Process -Id $processId -Force
+        Write-Host "Stopped verified GPU listener process $processId."
+    }
+}
+
+function Remove-ManagedGpuTaskAndListener {
+    $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    if ($null -ne $task) {
+        Assert-GpuTaskIsOurs -Task $task
+        if ($task.State -eq "Running") {
+            Stop-ScheduledTask -TaskName $TaskName
+            Start-Sleep -Seconds 2
+        }
+        Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
+    }
+    Stop-VerifiedGpuListeners
 }
 
 # ── 1. Check prerequisites ─────────────────────────────────────────────────
@@ -51,6 +106,9 @@ if (-not (Test-Path $ServiceDir)) {
 }
 if (-not (Test-Path $PythonExe)) {
     throw "Python not found at $PythonExe"
+}
+if (-not (Test-Path -LiteralPath $StartScript -PathType Leaf)) {
+    throw "GPU service start wrapper not found: $StartScript"
 }
 
 # ── 2. Backup current service ──────────────────────────────────────────────
@@ -143,8 +201,7 @@ Write-Step "Configuring GPU service"
 $EnvFile = "$ServiceDir\.env"
 $Token = $env:GPU_SERVICE_TOKEN
 if (-not $Token) {
-    Write-Warning "GPU_SERVICE_TOKEN not set in environment; generating a new one"
-    $Token = & $PythonExe -c "import secrets; print(secrets.token_hex(32))"
+    throw "GPU_SERVICE_TOKEN is required; refusing to generate or rotate it during deployment"
 }
 @"
 GPU_SERVICE_TOKEN=$Token
@@ -153,97 +210,68 @@ PORT=8100
 LOG_LEVEL=INFO
 "@ | Set-Content -Path $EnvFile -Encoding UTF8
 
-# ── 6. Restart service ─────────────────────────────────────────────────────
-Write-Step "Restarting GPU service"
-# Stop any existing process on port 8100
-$existing = netstat -ano | findstr ":8100 " | Select-String "LISTENING"
-if ($existing) {
-    $processId = $existing.ToString().Trim().Split()[-1]
-    Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
-    Start-Sleep -Seconds 2
-}
-
-# Start the service in a detached background process. GitHub Actions tags child
-# processes with RUNNER_TRACKING_ID and removes them at job cleanup, so the
-# long-running service must not inherit that marker. Do not let the service
-# inherit the short-lived checkout credential either.
+# ── 6. Register and start the managed service task ─────────────────────────
+Write-Step "Registering GPU service Scheduled Task"
 $logFile = "$RepositoryPath\gpu_service.log"
 $errorLogFile = "$RepositoryPath\gpu_service.error.log"
-$runnerTrackingId = [Environment]::GetEnvironmentVariable(
-    "RUNNER_TRACKING_ID",
-    [EnvironmentVariableTarget]::Process
-)
-$gitTokenForRestore = [Environment]::GetEnvironmentVariable(
-    "GIT_TOKEN",
-    [EnvironmentVariableTarget]::Process
-)
+$taskRegistered = $false
 try {
-    [Environment]::SetEnvironmentVariable(
-        "RUNNER_TRACKING_ID",
-        $null,
-        [EnvironmentVariableTarget]::Process
-    )
-    [Environment]::SetEnvironmentVariable(
-        "GIT_TOKEN",
-        $null,
-        [EnvironmentVariableTarget]::Process
-    )
-    $process = Start-Process `
-        -FilePath $PythonExe `
-        -ArgumentList @("-m", "gpu_service.app") `
-        -WorkingDirectory $RepositoryPath `
-        -WindowStyle Hidden `
-        -RedirectStandardOutput $logFile `
-        -RedirectStandardError $errorLogFile `
-        -PassThru
-} finally {
-    [Environment]::SetEnvironmentVariable(
-        "RUNNER_TRACKING_ID",
-        $runnerTrackingId,
-        [EnvironmentVariableTarget]::Process
-    )
-    [Environment]::SetEnvironmentVariable(
-        "GIT_TOKEN",
-        $gitTokenForRestore,
-        [EnvironmentVariableTarget]::Process
-    )
-}
-Start-Sleep -Seconds 5
+    Remove-ManagedGpuTaskAndListener
 
-# ── 7. Health check ───────────────────────────────────────────────────────
-Write-Step "Running health checks"
-$retries = 12
-$healthy = $false
-for ($i = 1; $i -le $retries; $i++) {
-    try {
-        $response = & curl.exe -s http://192.168.11.11:8100/health 2>&1
-        if ($response -match '"ok"') {
-            $healthy = $true
-            break
-        }
-    } catch {}
-    Write-Host "  Waiting for service... attempt $i/$retries"
+    $action = New-ScheduledTaskAction `
+        -Execute "powershell.exe" `
+        -Argument $ExpectedTaskArguments
+    $trigger = New-ScheduledTaskTrigger -AtStartup
+    $principal = New-ScheduledTaskPrincipal `
+        -UserId "Administrator" `
+        -LogonType S4U `
+        -RunLevel Highest
+    $settings = New-ScheduledTaskSettingsSet `
+        -RestartCount 3 `
+        -RestartInterval (New-TimeSpan -Minutes 1) `
+        -ExecutionTimeLimit (New-TimeSpan -Days 3)
+    Register-ScheduledTask `
+        -TaskName $TaskName `
+        -Action $action `
+        -Trigger $trigger `
+        -Principal $principal `
+        -Settings $settings | Out-Null
+    $taskRegistered = $true
+    Start-ScheduledTask -TaskName $TaskName
     Start-Sleep -Seconds 5
-}
 
-if (-not $healthy) {
-    Write-Warning "GPU service health check failed; recent service logs follow"
-    foreach ($path in @($logFile, $errorLogFile)) {
-        if (Test-Path -LiteralPath $path -PathType Leaf) {
-            Write-Host "`n--- $path (last 120 lines) ---"
-            Get-Content -LiteralPath $path -Tail 120
-        }
+    # ── 7. Health check ───────────────────────────────────────────────────
+    Write-Step "Running health checks"
+    $retries = 12
+    $healthy = $false
+    for ($i = 1; $i -le $retries; $i++) {
+        try {
+            $response = & curl.exe -s http://192.168.11.11:8100/health 2>&1
+            if ($response -match '"ok"') {
+                $healthy = $true
+                break
+            }
+        } catch {}
+        Write-Host "  Waiting for service... attempt $i/$retries"
+        Start-Sleep -Seconds 5
     }
-    if (-not $process.HasExited) {
-        Stop-Process -Id $process.Id -Force
-    }
-    throw "GPU service health check failed"
-}
 
-# ── 8. Smoke test ──────────────────────────────────────────────────────────
-Write-Step "Running smoke tests"
-# Test embedding
-$embedResult = & $PythonExe -c @"
+    if (-not $healthy) {
+        throw "GPU service health check failed"
+    }
+    $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+    Assert-GpuTaskIsOurs -Task $task
+    if ($task.State -ne "Running") {
+        throw "RAGPinCheng-GPU Scheduled Task is not running"
+    }
+    if (-not (Get-NetTCPConnection -LocalPort 8100 -State Listen -ErrorAction SilentlyContinue)) {
+        throw "TCP port 8100 is not listening after GPU service activation"
+    }
+
+    # ── 8. Smoke test ─────────────────────────────────────────────────────
+    Write-Step "Running smoke tests"
+    # Test embedding
+    $embedResult = & $PythonExe -c @"
 import requests, json
 r = requests.post('http://192.168.11.11:8100/v1/embeddings',
     headers={'Authorization': 'Bearer $Token', 'Content-Type': 'application/json'},
@@ -254,14 +282,13 @@ assert len(data['embeddings']) == 1
 assert len(data['embeddings'][0]['dense']) == 1024
 print('embedding OK')
 "@ 2>&1
-if ($LASTEXITCODE -ne 0) {
-    Write-Error "Smoke test failed: $embedResult"
-    exit 1
-}
-Write-Host "  $embedResult"
+    if ($LASTEXITCODE -ne 0) {
+        throw "Embedding smoke test failed: $embedResult"
+    }
+    Write-Host "  $embedResult"
 
-# Test rerank
-$rerankResult = & $PythonExe -c @"
+    # Test rerank
+    $rerankResult = & $PythonExe -c @"
 import requests, json
 r = requests.post('http://192.168.11.11:8100/v1/rerank',
     headers={'Authorization': 'Bearer $Token', 'Content-Type': 'application/json'},
@@ -271,11 +298,28 @@ data = r.json()
 assert len(data['scores']) == 2
 print('rerank OK')
 "@ 2>&1
-if ($LASTEXITCODE -ne 0) {
-    Write-Error "Smoke test failed: $rerankResult"
-    exit 1
+    if ($LASTEXITCODE -ne 0) {
+        throw "Rerank smoke test failed: $rerankResult"
+    }
+    Write-Host "  $rerankResult"
+} catch {
+    $failure = $_
+    Write-Warning "GPU service deployment failed; rolling back the managed task"
+    try {
+        if ($taskRegistered) {
+            Remove-ManagedGpuTaskAndListener
+        }
+    } catch {
+        Write-Warning "GPU service task rollback also failed: $($_.Exception.Message)"
+    }
+    foreach ($path in @($logFile, $errorLogFile)) {
+        if (Test-Path -LiteralPath $path -PathType Leaf) {
+            Write-Host "`n--- $path (last 120 lines) ---"
+            Get-Content -LiteralPath $path -Tail 120
+        }
+    }
+    throw $failure
 }
-Write-Host "  $rerankResult"
 
 Write-Step "GPU service deployed successfully"
 exit 0
