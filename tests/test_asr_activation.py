@@ -194,6 +194,8 @@ def test_activation_script_uses_fixed_firewall_and_fail_closed_rollback():
     assert "foreach ($entry in @($LocalPort))" in script
     assert "ASR_SERVICE_ENABLED=true" in script
     assert "ASR_SERVICE_ENABLED=false" in script
+    assert '"http://${PRIVATE_IPV4}:8100/v1/activity"' in script
+    assert '"http://127.0.0.1:8100/v1/activity"' not in script
     assert "-AllowInjectedProbeToken" in script
     assert "Injected BGE priority probe token must be one line" in script
     assert "Invoke-ActivationRollback" in script
