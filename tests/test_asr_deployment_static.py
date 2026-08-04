@@ -212,3 +212,75 @@ def test_dependency_proxy_is_scoped_to_pip_installation_and_restored():
     assert "[System.Environment]::SetEnvironmentVariable(" in deploy
     assert "[System.EnvironmentVariableTarget]::Process" in deploy
     assert deploy.count("ASR_DEPENDENCY_PROXY") == 3
+
+
+def test_running_asr_is_verified_and_stopped_before_application_swap():
+    deploy = read("scripts/deploy-asr.ps1")
+    swap = deploy.index('Move-Item -LiteralPath $appRoot -Destination $backup')
+    hot_update = deploy.index("$serviceWasRunning = Stop-OwnedAsrService")
+    task_guard = deploy.index("function Assert-TaskIsOurs")
+    listener_guard = deploy.index("function Get-VerifiedAsrListenerIds")
+
+    assert task_guard < hot_update < swap
+    assert listener_guard < hot_update < swap
+    assert '[string]$Task.Principal.UserId -ne "Administrator"' in deploy
+    assert '[string]$Task.Principal.LogonType -ne "S4U"' in deploy
+    assert '[string]$process.ExecutablePath -ne $basePython' in deploy
+    assert '[string]$process.CommandLine -ne $expectedCommandLine' in deploy
+    assert "Refusing to stop an unexpected process listening on TCP 8200" in deploy
+    assert deploy.index("Assert-TaskIsOurs -Task $task", task_guard) < deploy.index(
+        "Stop-ScheduledTask -TaskName $taskName", task_guard
+    )
+    assert deploy.index("$listenerIds = @(Get-VerifiedAsrListenerIds)") < deploy.index(
+        "Stop-Process -Id $processId -Force"
+    )
+    assert "Get-Process | Stop-Process" not in deploy
+    assert "Get-Process -Name" not in deploy
+
+
+def test_hot_update_waits_for_release_and_verifies_restarted_service():
+    deploy = read("scripts/deploy-asr.ps1")
+    stop_call = deploy.index("$serviceWasRunning = Stop-OwnedAsrService")
+    swap = deploy.index('Move-Item -LiteralPath $appRoot -Destination $backup')
+    start_call = deploy.index("Register-AndStartAsrTask", swap)
+    health_call = deploy.index("Wait-AsrHealthy", start_call)
+    verifier_call = deploy.index(
+        '& (Join-Path $scriptRoot "verify-asr-service.ps1")', health_call
+    )
+
+    assert "function Wait-AsrPortReleased" in deploy
+    assert "TCP port 8200 remained listening" in deploy
+    assert stop_call < swap < start_call < health_call < verifier_call
+    assert 'health.api_version -eq "asr-service/1"' in deploy
+    assert "ASR service did not become healthy within 10 minutes" in deploy
+
+
+def test_hot_update_failure_preserves_original_error_and_restores_backup():
+    deploy = read("scripts/deploy-asr.ps1")
+    catch_block = deploy[deploy.index("} catch {", deploy.index("$backup = $null")) :]
+
+    assert "$original = $_" in catch_block
+    assert "if ($newAppInstalled" in catch_block
+    assert "Unable to archive the failed ASR application" in catch_block
+    assert "Move-Item -LiteralPath $backup -Destination $appRoot" in catch_block
+    assert "Unable to restore the previous ASR application" in catch_block
+    assert "$serviceWasRunning" in catch_block
+    assert "Unable to restart the previous ASR service after rollback" in catch_block
+    assert "throw $original" in catch_block
+    assert catch_block.index("throw $original") > catch_block.index(
+        "Unable to restart the previous ASR service after rollback"
+    )
+    assert "Remove-Item" not in deploy
+
+
+def test_inactive_deploy_refuses_to_replace_a_running_service():
+    deploy = read("scripts/deploy-asr.ps1")
+    activation_branch = deploy.index("if ($ActivateService)", deploy.index("$backup = $null"))
+    inactive_branch = deploy.index("Stop-OwnedAsrService -RequireStopped", activation_branch)
+    swap = deploy.index('Move-Item -LiteralPath $appRoot -Destination $backup')
+
+    assert activation_branch < inactive_branch < swap
+    assert (
+        "RAGPinCheng-ASR is running; deploy again with ActivateService=true "
+        "for a verified hot update"
+    ) in deploy

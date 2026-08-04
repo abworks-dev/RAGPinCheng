@@ -1856,6 +1856,6 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 ### 02:02 — 修复 SenseVoice 后处理与媒体终态刷新
 
 - 完成：SenseVoice experimental adapter 在 Candidate 边界前惰性调用 FunASR 官方 `rich_transcription_postprocess`，后处理为空、返回私有对象、抛错或仍残留 `<|...|>` 控制标记时统一失败关闭；管理端在转录任务从活动态进入终态时只重新读取一次媒体列表，使成功任务自动显示“转写草稿就绪”。
-- 文件：`asr_service/engines/funasr_sensevoice.py`、`asr_service/tests/test_funasr_sensevoice.py`、`frontend/src/pages/admin/AdminMediaPage.tsx`、`frontend/src/pages/admin/AdminMediaPage.test.tsx`、`WORKLOG.md`。
-- 验证：SenseVoice adapter、engine contract 与静态边界专项 `20 passed`；前端全量 Vitest 26 个文件、116/116 项通过；TypeScript project build 与 Vite production build 通过（2023 modules transformed）；Python `py_compile` 和 `git diff --check` 通过。完整 ASR/Phase 5 本地收集因当前 Python 环境缺少 `fastapi`、`qdrant_client` 未运行，交由现有 CI 干净环境验证。
-- 边界/风险：未新增依赖，未修改 Provider/Canonical、数据库、索引、Profile、模型 revision、Token 或防火墙；Ubuntu `ASR_ENABLED=false`，首个测试版本继续保持待审核、未发布、未索引。Windows ASR 与 Ubuntu 应用部署及新测试视频复验仍待本提交 CI/合并后执行。
+- 文件：`asr_service/engines/funasr_sensevoice.py`、`asr_service/tests/test_funasr_sensevoice.py`、`frontend/src/pages/admin/AdminMediaPage.tsx`、`frontend/src/pages/admin/AdminMediaPage.test.tsx`、`scripts/deploy-asr.ps1`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
+- 验证：SenseVoice adapter、engine contract 与静态边界专项 `20 passed`；前端全量 Vitest 26 个文件、116/116 项通过；TypeScript project build 与 Vite production build 通过（2023 modules transformed）；Windows ASR 部署、激活、模型准备与 Git 安全专项 `52 passed, 6 subtests passed`；相关 PowerShell AST、Python `py_compile` 和 `git diff --check` 通过。完整 ASR/Phase 5 本地收集因当前 Python 环境缺少 `fastapi`、`qdrant_client` 未运行，交由现有 CI 干净环境验证。
+- 边界/风险：Windows 热更新现在仅在严格核验自有 Scheduled Task 和 8200 监听进程后停服换版，等待端口释放并执行本机契约验证；失败时保留原始异常、归档失败版本、恢复备份并按原运行状态重启，未请求激活时拒绝替换运行中服务。未新增依赖，未修改 Provider/Canonical、数据库、索引、Profile、模型 revision、Token 或防火墙；Ubuntu `ASR_ENABLED=false`，首个测试版本继续保持待审核、未发布、未索引。Windows ASR 重新部署及新测试视频复验仍待本提交 CI/合并后执行。
