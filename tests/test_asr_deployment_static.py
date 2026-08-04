@@ -103,6 +103,20 @@ def test_service_secret_is_not_passed_on_scheduled_task_command_line():
     assert "-LogonType S4U" in deploy
 
 
+def test_start_script_does_not_treat_uvicorn_stderr_as_a_terminating_error():
+    start = read("scripts/start-asr-service.ps1")
+    invocation = (
+        "& $python -m uvicorn asr_service.app:create_app --factory "
+        "--host $env:ASR_SERVICE_HOST --port $env:ASR_SERVICE_PORT *>> $logFile"
+    )
+    assert '$savedErrorActionPreference = $ErrorActionPreference' in start
+    assert '$ErrorActionPreference = "Continue"' in start
+    assert invocation in start
+    assert "$uvicornExitCode = $LASTEXITCODE" in start
+    assert "$ErrorActionPreference = $savedErrorActionPreference" in start
+    assert "exit $uvicornExitCode" in start
+
+
 def test_activation_secrets_are_written_only_to_the_protected_config():
     deploy = read("scripts/deploy-asr.ps1")
     assert "function Set-ProtectedConfigSecret" in deploy

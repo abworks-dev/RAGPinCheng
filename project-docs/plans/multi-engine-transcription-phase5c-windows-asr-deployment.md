@@ -56,6 +56,7 @@ ASR 仅在四个字段均合法、模型已加载、inflight 为 0 且明确允�
 
 - Scheduled Task 名称：`RAGPinCheng-ASR`。
 - R3B 初始运行账号：`Administrator`，作为显式安全例外。
+- Scheduled Task 入口仍以 fail-fast PowerShell 运行；只在前台执行 Uvicorn 原生命令期间把 `ErrorActionPreference` 临时设为 `Continue`，避免 Windows PowerShell 5.1 将 Uvicorn 的正常 stderr 启动日志误判为终止错误，命令退出后立即恢复并传播真实退出码。
 - 补偿措施：配置目录 ACL 中 Administrators/SYSTEM 拥有 Full Control，受信任的 GitHub Actions runner 执行身份 NETWORK SERVICE 仅拥有 Modify，用于受控 payload 部署和 Environment Secret 注入；Token 仅从 env 文件进入进程；防火墙未来只允许 `192.168.11.12` 访问 8200；服务与 GPU 8100 独立。
 - 后续迁移到低权限服务账号属于独立 R3，不在 R3A。
 
