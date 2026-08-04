@@ -39,6 +39,19 @@ ASR 生产 venv，不产生管理员可见的新建任务能力。
 - 在明确冲突包及重新批准依赖/约束方案前，不得放宽 production freeze、修改固定依赖
   或启用 faster-whisper Profile。
 
+### 2.0.1 精确冲突诊断补充
+
+经 2026-08-05 单独 R3 批准，精确冲突诊断只读取固定 source run
+`30955067671` 的 production freeze、组合 requirements 和既有 resolver 日志。既有日志
+不足时，只在独立诊断 venv 中以相同 index、约束和 requirements 执行 pip dry-run；
+不安装依赖、不下载模型、不启动 ASR/CUDA，也不修改生产服务。
+
+诊断入口为 `.github/workflows/diagnose-faster-whisper-dependencies-production.yml` 和
+`scripts/diagnose-faster-whisper-dependencies.ps1`。workflow 默认关闭，只允许完整 master
+SHA 和显式执行开关，仅注入 `ASR_DEPENDENCY_PROXY`。上传 artifact 只能包含冲突包、
+版本约束和输入文件 SHA-256；URL、代理、Token、绝对路径和完整 freeze 禁止上传。
+诊断得到精确冲突后必须停止，修改 pin、约束或隔离结构仍需重新审批。
+
 ### 2.1 仓库基线
 
 - PR #34 已合并到 `master`；
