@@ -1995,3 +1995,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`frontend/src/pages/admin/AdminLayout.tsx`、`frontend/src/pages/admin/AdminLayout.test.tsx`、`WORKLOG.md`。
 - 验证：管理布局专项 Vitest 3/3 通过；TypeScript project build 与 Vite production build 通过（2025 modules transformed）；`git diff --check` 通过。构建保留既有 React Router future warning、CSS minify warning 和主包大于 500 kB 警告。
 - 待办/风险：尚未使用真实管理员登录会话进行桌面与移动端视觉验收；未修改业务逻辑、API、认证、数据、依赖或部署配置。
+
+### 06:54 — 修复会话侧栏顶部渐隐遮挡
+
+- 完成：会话列表位于滚动顶部时不再显示顶部渐隐，避免遮淡“今天”分组标题；仅在列表向下滚动后显示顶部渐隐，滚回顶部时立即移除，底部渐隐保持不变。
+- 文件：`frontend/src/components/Sidebar.tsx`、`frontend/src/components/Sidebar.test.tsx`、`WORKLOG.md`。
+- 验证：侧栏专项 Vitest 3/3 通过；TypeScript project build 与 Vite production build 通过（2025 modules transformed）；`git diff --check` 通过。构建保留既有 CSS 语法警告和主包大于 500 kB 警告。
+- 待办/风险：尚未使用真实登录会话完成浏览器视觉验收；未修改消息区或来源区渐隐、API、后端、数据与依赖声明。
