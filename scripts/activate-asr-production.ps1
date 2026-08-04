@@ -283,6 +283,35 @@ function Assert-TaskIsOurs {
     }
 }
 
+function Stop-VerifiedAsrListeners {
+    $basePythonOutput = & $venvPython -c "import sys; print(sys._base_executable)"
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($basePythonOutput)) {
+        throw "Unable to resolve the ASR venv base Python executable"
+    }
+    $basePython = (Resolve-Path -LiteralPath ([string]$basePythonOutput).Trim()).Path
+    $expectedCommandLine = (
+        '"{0}" -m uvicorn asr_service.app:create_app --factory --host 0.0.0.0 --port 8200' -f
+        $basePython
+    )
+    $connections = @(
+        Get-NetTCPConnection -LocalPort 8200 -State Listen -ErrorAction SilentlyContinue
+    )
+    foreach ($processId in @($connections.OwningProcess | Sort-Object -Unique)) {
+        $process = Get-CimInstance Win32_Process -Filter ("ProcessId={0}" -f $processId)
+        if ($null -eq $process) {
+            continue
+        }
+        if (
+            [string]$process.ExecutablePath -ne $basePython -or
+            [string]$process.CommandLine -ne $expectedCommandLine
+        ) {
+            throw "Refusing to stop an unexpected process listening on TCP 8200"
+        }
+        Stop-Process -Id $processId -Force
+        Write-Host "Stopped verified ASR listener process $processId."
+    }
+}
+
 function Invoke-ActivationRollback {
     if (-not (Test-Path -LiteralPath $statePath -PathType Leaf)) {
         throw "Activation state is missing: $statePath"
@@ -320,6 +349,7 @@ function Invoke-ActivationRollback {
     Copy-Item -LiteralPath $configBackup -Destination $envFile -Force
     $restored = Read-StrictEnv -Path $envFile
     Assert-RequiredConfiguration -Values $restored.Values -ExpectedEnabled "false"
+    Stop-VerifiedAsrListeners
 
     $deadline = (Get-Date).AddSeconds(30)
     while (
