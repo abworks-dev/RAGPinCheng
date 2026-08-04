@@ -144,13 +144,50 @@ function Test-PortExpressionIncludes8200 {
     return $false
 }
 
-function Get-EnabledInboundAllowRulesFor8200 {
+function Test-FirewallRuleAppliesToAsrProcess {
+    param([object]$Rule)
+    $applicationFilters = @($Rule | Get-NetFirewallApplicationFilter -ErrorAction Stop)
+    $serviceFilters = @($Rule | Get-NetFirewallServiceFilter -ErrorAction Stop)
+    if ($applicationFilters.Count -ne 1 -or $serviceFilters.Count -ne 1) {
+        return $true
+    }
+
+    $program = [string]$applicationFilters[0].Program
+    $package = [string]$applicationFilters[0].Package
+    if (
+        -not [string]::IsNullOrWhiteSpace($program) -and
+        $program -notin @("Any", "*") -and
+        $program -ne $venvPython
+    ) {
+        return $false
+    }
+    if (
+        -not [string]::IsNullOrWhiteSpace($package) -and
+        $package -notin @("Any", "*")
+    ) {
+        return $false
+    }
+
+    $service = [string]$serviceFilters[0].Service
+    if (
+        -not [string]::IsNullOrWhiteSpace($service) -and
+        $service -notin @("Any", "*")
+    ) {
+        return $false
+    }
+    return $true
+}
+
+function Get-EnabledInboundAllowRulesForAsr8200 {
     $matches = @()
     foreach ($rule in @(Get-NetFirewallRule -Enabled True -Direction Inbound -Action Allow -ErrorAction Stop)) {
         foreach ($portFilter in @($rule | Get-NetFirewallPortFilter -ErrorAction Stop)) {
             $protocol = [string]$portFilter.Protocol
             if ($protocol -notin @("TCP", "6")) { continue }
-            if (Test-PortExpressionIncludes8200 -LocalPort $portFilter.LocalPort) {
+            if (
+                (Test-PortExpressionIncludes8200 -LocalPort $portFilter.LocalPort) -and
+                (Test-FirewallRuleAppliesToAsrProcess -Rule $rule)
+            ) {
                 $matches += $rule
                 break
             }
@@ -317,7 +354,7 @@ function Invoke-Preflight {
     if (Get-NetTCPConnection -LocalPort 8200 -State Listen -ErrorAction SilentlyContinue) {
         throw "TCP port 8200 must not be listening before activation"
     }
-    $allowRules = @(Get-EnabledInboundAllowRulesFor8200)
+    $allowRules = @(Get-EnabledInboundAllowRulesForAsr8200)
     if ($allowRules.Count -ne 0) {
         $names = ($allowRules | Select-Object -ExpandProperty Name) -join ","
         throw "An enabled inbound Allow rule already covers TCP 8200: $names"
