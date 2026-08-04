@@ -65,6 +65,40 @@ describe("FeedbackBar", () => {
     expect(screen.getByRole("button", { name: "这个回答不好" })).toBeEnabled();
   });
 
+  it("places regeneration immediately after copy and switches retained versions", () => {
+    const regenerate = vi.fn();
+    const viewVersion = vi.fn();
+    const versionedMessage: ChatMessage = {
+      ...message,
+      viewedVersionIndex: 2,
+      answerVersions: [
+        { id: "v1", versionIndex: 1, content: "旧回答", isActive: false },
+        { id: "v2", versionIndex: 2, content: "新回答", isActive: true },
+      ],
+    };
+    render(
+      <FeedbackBar
+        msg={versionedMessage}
+        conversationId="conversation-1"
+        turnIndex={2}
+        canRegenerate
+        onRegenerate={regenerate}
+        onViewAnswerVersion={viewVersion}
+      />,
+    );
+
+    const copy = screen.getByRole("button", { name: "复制回答" });
+    const regenerateButton = screen.getByRole("button", { name: "重新生成回答" });
+    expect(copy.nextElementSibling).toBe(regenerateButton);
+
+    fireEvent.click(regenerateButton);
+    expect(regenerate).toHaveBeenCalledWith(message.id);
+    expect(screen.getByText("2 / 2")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "查看上一个回答" }));
+    expect(viewVersion).toHaveBeenCalledWith(message.id, 1);
+  });
+
   it("submits a categorized answer feedback with the existing association fields", async () => {
     renderFeedback();
 

@@ -101,9 +101,26 @@ def delete_conversation(conn: sqlite3.Connection, conversation_id: str) -> bool:
 
 def list_messages(conn: sqlite3.Connection, conversation_id: str) -> list[sqlite3.Row]:
     return conn.execute(
-        "SELECT id, role, content, sources_json, created_at "
-        "FROM messages WHERE conversation_id = ? ORDER BY id ASC",
+        "SELECT m.id, m.role, COALESCE(v.content, m.content) AS content, "
+        "COALESCE(v.sources_json, m.sources_json) AS sources_json, m.created_at "
+        "FROM messages m "
+        "LEFT JOIN message_answer_heads h ON h.assistant_message_id = m.id "
+        "LEFT JOIN message_answer_versions v ON v.id = h.active_version_id "
+        "WHERE m.conversation_id = ? ORDER BY m.id ASC",
         (conversation_id,),
+    ).fetchall()
+
+
+def list_answer_versions(
+    conn: sqlite3.Connection, assistant_message_id: int
+) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT v.id, v.version_index, v.content, v.sources_json, v.created_at, "
+        "CASE WHEN h.active_version_id = v.id THEN 1 ELSE 0 END AS is_active "
+        "FROM message_answer_versions v "
+        "LEFT JOIN message_answer_heads h ON h.assistant_message_id = v.assistant_message_id "
+        "WHERE v.assistant_message_id = ? ORDER BY v.version_index",
+        (assistant_message_id,),
     ).fetchall()
 
 
@@ -169,6 +186,9 @@ class TurnPersistencePlan:
     conversation_id: str
     user_text: str
     is_first_turn: bool
+    categories: list[str] | None = None
+    regenerate_assistant_message_id: int | None = None
+    persisted_assistant_message_id: int | None = None
 
 
 def persist_turn(
@@ -194,7 +214,81 @@ def persist_turn(
     now = int(time.time())
     conn = connect()
     try:
-        conn.execute(
+        if plan.regenerate_assistant_message_id is not None:
+            target = conn.execute(
+                "SELECT id, content, sources_json FROM messages "
+                "WHERE id = ? AND conversation_id = ? AND role = 'assistant'",
+                (plan.regenerate_assistant_message_id, plan.conversation_id),
+            ).fetchone()
+            if target is None:
+                return
+            version_count = conn.execute(
+                "SELECT COUNT(*) FROM message_answer_versions "
+                "WHERE assistant_message_id = ?",
+                (plan.regenerate_assistant_message_id,),
+            ).fetchone()[0]
+            if version_count == 0:
+                previous_state = conn.execute(
+                    "SELECT last_sources_json, last_search_query FROM conversations WHERE id = ?",
+                    (plan.conversation_id,),
+                ).fetchone()
+                conn.execute(
+                    "INSERT INTO message_answer_versions "
+                    "(assistant_message_id, version_index, content, sources_json, "
+                    "final_sources_json, search_query, created_at) VALUES (?, 1, ?, ?, ?, ?, ?)",
+                    (
+                        plan.regenerate_assistant_message_id,
+                        target["content"],
+                        target["sources_json"],
+                        previous_state["last_sources_json"],
+                        previous_state["last_search_query"],
+                        now,
+                    ),
+                )
+            next_index = conn.execute(
+                "SELECT MAX(version_index) + 1 FROM message_answer_versions "
+                "WHERE assistant_message_id = ?",
+                (plan.regenerate_assistant_message_id,),
+            ).fetchone()[0]
+            asst_sources_json = (
+                json.dumps(asst_msg.sources_for_ui, ensure_ascii=False)
+                if asst_msg.sources_for_ui
+                else None
+            )
+            cur = conn.execute(
+                "INSERT INTO message_answer_versions "
+                "(assistant_message_id, version_index, content, sources_json, "
+                "final_sources_json, search_query, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    plan.regenerate_assistant_message_id,
+                    next_index,
+                    asst_msg.content,
+                    asst_sources_json,
+                    _retrieved_parents_to_json(state.last_sources),
+                    state.last_search_query,
+                    now,
+                ),
+            )
+            conn.execute(
+                "INSERT INTO message_answer_heads(assistant_message_id, active_version_id) "
+                "VALUES (?, ?) ON CONFLICT(assistant_message_id) DO UPDATE SET active_version_id=excluded.active_version_id",
+                (plan.regenerate_assistant_message_id, cur.lastrowid),
+            )
+            conn.execute(
+                "UPDATE conversations SET updated_at = ?, last_sources_json = ?, "
+                "last_search_query = ? WHERE id = ?",
+                (
+                    now,
+                    _retrieved_parents_to_json(state.last_sources),
+                    state.last_search_query,
+                    plan.conversation_id,
+                ),
+            )
+            conn.commit()
+            plan.persisted_assistant_message_id = plan.regenerate_assistant_message_id
+            return
+
+        user_cur = conn.execute(
             "INSERT INTO messages (conversation_id, role, content, sources_json, created_at) "
             "VALUES (?, 'user', ?, NULL, ?)",
             (plan.conversation_id, user_msg.content, now),
@@ -204,10 +298,35 @@ def persist_turn(
             if asst_msg.sources_for_ui
             else None
         )
-        conn.execute(
+        asst_cur = conn.execute(
             "INSERT INTO messages (conversation_id, role, content, sources_json, created_at) "
             "VALUES (?, 'assistant', ?, ?, ?)",
             (plan.conversation_id, asst_msg.content, asst_sources_json, now),
+        )
+        persisted_assistant_message_id = int(asst_cur.lastrowid)
+        version_cur = conn.execute(
+            "INSERT INTO message_answer_versions "
+            "(assistant_message_id, version_index, content, sources_json, final_sources_json, "
+            "search_query, created_at) VALUES (?, 1, ?, ?, ?, ?, ?)",
+            (
+                asst_cur.lastrowid,
+                asst_msg.content,
+                asst_sources_json,
+                _retrieved_parents_to_json(state.last_sources),
+                state.last_search_query,
+                now,
+            ),
+        )
+        conn.execute(
+            "INSERT INTO message_answer_heads(assistant_message_id, active_version_id) VALUES (?, ?)",
+            (asst_cur.lastrowid, version_cur.lastrowid),
+        )
+        conn.execute(
+            "INSERT INTO message_turn_requests(user_message_id, categories_json) VALUES (?, ?)",
+            (
+                user_cur.lastrowid,
+                json.dumps(plan.categories, ensure_ascii=False) if plan.categories else None,
+            ),
         )
         last_sources_json = _retrieved_parents_to_json(state.last_sources)
         update_sql = (
@@ -222,10 +341,68 @@ def persist_turn(
         params.append(plan.conversation_id)
         conn.execute(update_sql, params)
         conn.commit()
+        plan.persisted_assistant_message_id = persisted_assistant_message_id
     except Exception:
         logger.exception("persist_turn failed for conversation %s", plan.conversation_id)
     finally:
         conn.close()
+
+
+def prepare_regeneration(
+    conn: sqlite3.Connection,
+    conversation_id: str,
+    assistant_message_id: int,
+) -> tuple[ChatSession, str, list[str] | None]:
+    """Restore the conversation immediately before its latest user turn."""
+    latest = conn.execute(
+        "SELECT a.id AS assistant_id, u.id AS user_id, u.content AS query, "
+        "r.categories_json "
+        "FROM messages a "
+        "JOIN messages u ON u.id = ("
+        "  SELECT MAX(id) FROM messages WHERE conversation_id = a.conversation_id "
+        "  AND role = 'user' AND id < a.id"
+        ") "
+        "LEFT JOIN message_turn_requests r ON r.user_message_id = u.id "
+        "WHERE a.conversation_id = ? AND a.role = 'assistant' "
+        "ORDER BY a.id DESC LIMIT 1",
+        (conversation_id,),
+    ).fetchone()
+    if latest is None or latest["assistant_id"] != assistant_message_id:
+        raise ValueError("only_latest_answer_can_be_regenerated")
+
+    session = ChatSession()
+    prior_rows = conn.execute(
+        "SELECT m.id, m.role, COALESCE(v.content, m.content) AS content, "
+        "COALESCE(v.sources_json, m.sources_json) AS sources_json "
+        "FROM messages m "
+        "LEFT JOIN message_answer_heads h ON h.assistant_message_id = m.id "
+        "LEFT JOIN message_answer_versions v ON v.id = h.active_version_id "
+        "WHERE m.conversation_id = ? AND m.id < ? ORDER BY m.id",
+        (conversation_id, latest["user_id"]),
+    ).fetchall()
+    for row in prior_rows:
+        session.state.messages.append(Message(
+            role=row["role"],
+            content=row["content"],
+            sources_for_ui=json.loads(row["sources_json"]) if row["sources_json"] else None,
+        ))
+    session.state.turn_index = len([m for m in session.state.messages if m.role == "user"])
+
+    prior_answer = conn.execute(
+        "SELECT v.final_sources_json, v.search_query "
+        "FROM messages m "
+        "JOIN message_answer_heads h ON h.assistant_message_id = m.id "
+        "JOIN message_answer_versions v ON v.id = h.active_version_id "
+        "WHERE m.conversation_id = ? AND m.role = 'assistant' AND m.id < ? "
+        "ORDER BY m.id DESC LIMIT 1",
+        (conversation_id, latest["user_id"]),
+    ).fetchone()
+    if prior_answer:
+        session.state.last_sources = _retrieved_parents_from_json(prior_answer["final_sources_json"])
+        session.state.last_search_query = prior_answer["search_query"] or ""
+
+    categories = json.loads(latest["categories_json"]) if latest["categories_json"] else None
+    return session, latest["query"], categories
 
 
 def _title_from_user_text(text: str) -> str:

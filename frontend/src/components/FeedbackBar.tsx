@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Check, Copy, ThumbsDown } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Copy, RefreshCw, ThumbsDown } from "lucide-react";
 import { api } from "../api/client";
 import type { ChatMessage } from "../types";
 import { FeedbackDialog, type FeedbackSubmission } from "./FeedbackDialog";
@@ -28,10 +28,16 @@ export function FeedbackBar({
   msg,
   conversationId,
   turnIndex,
+  canRegenerate = false,
+  onRegenerate,
+  onViewAnswerVersion,
 }: {
   msg: ChatMessage;
   conversationId: string | null;
   turnIndex: number;
+  canRegenerate?: boolean;
+  onRegenerate?: (messageId: string) => void;
+  onViewAnswerVersion?: (messageId: string, versionIndex: number) => void;
 }) {
   const [sent, setSent] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -69,6 +75,12 @@ export function FeedbackBar({
     }
   }
 
+  const viewedVersion = msg.viewedVersionIndex
+    ?? msg.answerVersions?.find((version) => version.isActive)?.versionIndex;
+  const viewedPosition = msg.answerVersions?.findIndex(
+    (version) => version.versionIndex === viewedVersion,
+  ) ?? -1;
+
   return (
     <div className="ml-auto flex shrink-0 items-center gap-1" aria-label="回答操作">
       <IconButton
@@ -78,6 +90,43 @@ export function FeedbackBar({
       >
         {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
       </IconButton>
+
+      <IconButton
+        label="重新生成回答"
+        title={canRegenerate ? "重新生成回答" : "后续对话已基于此回答生成，不能重新生成"}
+        disabled={!canRegenerate}
+        onClick={() => onRegenerate?.(msg.id)}
+      >
+        <RefreshCw className="size-4" />
+      </IconButton>
+
+      {msg.answerVersions && msg.answerVersions.length > 1 && (
+        <div className="inline-flex items-center gap-0.5 text-xs text-muted-foreground" aria-label="回答版本">
+          <IconButton
+            label="查看上一个回答"
+            disabled={viewedPosition <= 0}
+            onClick={() => onViewAnswerVersion?.(
+              msg.id,
+              msg.answerVersions![viewedPosition - 1].versionIndex,
+            )}
+          >
+            <ChevronLeft className="size-4" />
+          </IconButton>
+          <span className="min-w-8 text-center">
+            {viewedPosition + 1} / {msg.answerVersions.length}
+          </span>
+          <IconButton
+            label="查看下一个回答"
+            disabled={viewedPosition >= msg.answerVersions.length - 1}
+            onClick={() => onViewAnswerVersion?.(
+              msg.id,
+              msg.answerVersions![viewedPosition + 1].versionIndex,
+            )}
+          >
+            <ChevronRight className="size-4" />
+          </IconButton>
+        </div>
+      )}
 
       <FeedbackDialog
         category="回答问题"
