@@ -1831,3 +1831,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`AGENTS.md`、`CLAUDE.md`、`.claude/rules/worklog.md`、`WORKLOG.md`。
 - 验证：三份规则的关键条款一致性扫描和 `git diff --check` 通过；确认仍保留新增权限、密钥、网络/防火墙、真实数据、业务流量、不可逆影响和回滚失效时的重新审批门禁。
 - 边界：未修改业务代码、部署 workflow、生产配置、TODO 或计划文件，未执行生产操作。
+
+### 21:20 — 实施 Windows ASR 激活与隔离验收通道
+
+- 完成：新增默认 preflight、显式 activate/rollback 的 Windows ASR 生产 workflow；激活脚本绑定完整 SHA、固定目录、模型 Manifest、Administrator/S4U Scheduled Task 和仅允许 Ubuntu `${PRIVATE_IPV4}` 访问 TCP 8200 的防火墙规则，并为本机或跨节点失败提供按 activation ID 的自动回滚；新增 Ubuntu 只读验证器，在 backend 保持 `ASR_ENABLED=false` 时校验固定 URL、共享 Token、health 与唯一 experimental capabilities 契约。
+- 文件：`.github/workflows/activate-asr-production.yml`、`.github/workflows/ci.yml`、`scripts/activate-asr-production.ps1`、`scripts/verify-asr-service.ps1`、`scripts/verify_asr_from_ubuntu.py`、`tests/test_asr_activation.py`、`project-docs/plans/multi-engine-transcription-phase5c-windows-asr-deployment.md`、`WORKLOG.md`。
+- 验证：激活、既有部署和模型缓存专项测试 `42 passed`；本地可运行的 ASR/Provider 回归 `146 passed`；Python `py_compile`、两份 PowerShell AST 解析、WORKLOG 标题格式和 `git diff --check` 通过。本地环境缺少 FastAPI，`test_api_contract.py`、`test_auth.py` 交由会安装 CI 声明依赖的远端 job 验证；远端 CI、合并及生产 workflow 双节点验收将在同一获批交付中继续完成。
+- 边界/风险：尚未在此提交时改变生产服务、防火墙或任务状态；生产执行保持 Ubuntu ASR 关闭，不上传媒体、不调用任务 API、不创建转录任务，不访问数据库、Qdrant 或 artifact。生产验收结果以不可变 workflow run 审计，失败时必须确认自动回滚结果。
