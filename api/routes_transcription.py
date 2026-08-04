@@ -37,6 +37,7 @@ from .schemas import (
     TranscriptPublicationJobDTO,
     TranscriptVersionDTO,
     TranscriptionJobDTO,
+    TranscriptionFailureDTO,
     TranscriptionProfileDTO,
 )
 from .transcription_artifacts import LocalTranscriptionArtifactStore
@@ -74,7 +75,32 @@ def build_transcription_service() -> TranscriptionApplicationService:
         ),
         artifacts=LocalTranscriptionArtifactStore(TRANSCRIPTION_ARTIFACT_DIR),
         job_timeout_ms=ASR_JOB_TIMEOUT_SECONDS * 1000,
+)
+
+
+_TRANSCRIPTION_FAILURES: dict[str, tuple[str, bool]] = {
+    "provider_unavailable": ("自动转录服务暂时不可用，请稍后重试。", True),
+    "provider_timeout": ("自动转录任务超时，可以重新转录。", True),
+    "provider_oom": ("转录资源暂时不足，请稍后重试。", True),
+    "transient_provider_error": ("转录服务暂时失败，可以重新转录。", True),
+    "permanent_provider_error": ("转录服务执行失败，请联系管理员检查服务配置。", False),
+    "input_too_large": ("视频音频超过转录服务限制。", False),
+    "input_unavailable": ("无法读取有效音频，请检查视频文件。", False),
+    "service_contract_mismatch": ("应用与转录服务契约不兼容，请联系管理员。", False),
+    "service_request_identity_conflict": ("转录服务请求身份冲突，请联系管理员。", False),
+    "invalid_provider_output": ("转录结果格式异常，请联系管理员。", False),
+    "provider_cancelled": ("转录任务已取消，可以重新转录。", True),
+    "worker_restarted": ("转录服务重启导致任务中断，可以重新转录。", True),
+}
+
+
+def _failure_dto(code: str | None) -> TranscriptionFailureDTO | None:
+    if code is None:
+        return None
+    message, retryable = _TRANSCRIPTION_FAILURES.get(
+        code, ("转录任务失败，请联系管理员查看技术详情。", False)
     )
+    return TranscriptionFailureDTO(code=code, message=message, retryable=retryable)
 
 
 def _job_dto(job) -> TranscriptionJobDTO:
@@ -89,6 +115,7 @@ def _job_dto(job) -> TranscriptionJobDTO:
         total_ms=job.total_ms,
         failure_error_code=job.failure_error_code,
         error_summary=job.error_summary,
+        failure=_failure_dto(job.failure_error_code),
         result_version_id=job.result_version_id,
         created_at=job.created_at,
         started_at=job.started_at,
@@ -218,7 +245,14 @@ def retry_job(
         ).fetchone()
         if existing is not None:
             if existing["media_id"] != media_id or existing["profile_id"] != body.profile_id:
-                raise HTTPException(status_code=409, detail="幂等键与转录请求不匹配")
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "retry_idempotency_conflict",
+                        "message": "本次重试与原请求不一致，请重新发起重试。",
+                        "retryable": False,
+                    },
+                )
             return _job_dto(SQLiteTranscriptionStore(conn).load_job(existing["id"]))
         active = conn.execute(
             "SELECT id FROM transcription_jobs WHERE media_id=? AND status IN ('pending','running')",

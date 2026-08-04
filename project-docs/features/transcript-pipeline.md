@@ -1,7 +1,7 @@
 # 视频转录链路
 
 - 状态：人工上传/播放链路与多引擎 Phase 5A/5B 应用闭环代码已实现，待远端 CI；Phase 5C 真实隔离验证未执行
-- 最后核对：2026-08-03
+- 最后核对：2026-08-05
 
 ## 用户可观察能力
 
@@ -38,6 +38,9 @@ Phase 5A/5B 已接通版本列表、只读 Markdown 预览、人工审核、显�
 - Phase 3 remote Provider 仍只返回严格 `ProviderCandidate | ProviderFailure`，由 `pipeline.py` 独占 normalizer/Canonical 结果流；
 - 管理端单 MP4 + `profile_id` 上传、任务状态/取消/恢复已接入应用 API 和后台 worker；人工 MP4+Markdown 路径保持独立；
 - 管理端按媒体 lazy 加载版本历史，可预览不可变 Markdown、提交审核备注、批准/拒绝并显式发布；人工版本不提供可用的自动发布动作；
+- 管理端媒体列表使用真实审核枚举计算唯一当前阶段，独立展示索引状态，并提供处理中、待审核、发布处理中和失败快捷筛选；筛选暂时只作用于最近加载的 100 条；
+- Remote Provider 的服务请求身份绑定应用任务、媒体与执行指纹；同一应用任务网络重试保持稳定，同一媒体新建应用重试任务生成新身份；
+- 转录任务 API 返回安全的结构化失败 `code/message/retryable`；服务请求身份冲突与契约不匹配分别处理，前端不再直接展示 Provider 技术摘要；
 - publication adapter 只走 `chunk_document → store_parents → index_children`，不调用 purge、reset 或普通 `index_single`；
 - Parent、Child 和 Qdrant payload 添加 nullable `transcript_version_id` / `publication_target_id`，legacy stable ID 算法保持不变；
 - 正式可见性唯一读取 `app.sqlite.media_transcript_heads.current_version_id`；Qdrant recall 和 Parent expansion 使用同一快照，损坏/缺失 head 对 versioned transcript fail closed，legacy/普通文档继续可见；
@@ -118,6 +121,7 @@ Phase 5A/5B 已接通版本列表、只读 Markdown 预览、人工审核、显�
 | `media_url`（API 动态构造） | 由 media_id 生成 | 是 | 不存储，动态构造 `/api/media/{media_id}` |
 | `transcript_version_id` | transcript version | 是 | immutable 候选/历史版本身份；进入 Parent/Child 与 Qdrant payload |
 | `current_version_id` | `media_transcript_heads` | 是 | SQLite 当前正式版本指针；legacy media 可以没有 head |
+| `application_job_id` | `transcription_jobs.id` | 否 | 仅经 `ProviderRuntimePorts` 传递，参与服务请求身份；不进入 InputRef 或 Canonical |
 
 ## 依赖与下游消费者
 
@@ -137,6 +141,7 @@ Phase 5A/5B 已接通版本列表、只读 Markdown 预览、人工审核、显�
 - Phase 2 新表为添加式迁移；不删除旧表、不回填人工稿、不触发索引 Reset。
 - `app.sqlite` current head 是唯一正式可见性事实；versioned transcript 在 head DB 损坏/缺失时 fail closed，legacy/普通文档继续可见。
 - experimental Profile 不能自动发布或自动索引；人工 Markdown 路径不经过 Provider。
+- `published` 只在候选索引成功并完成正式 head 原子切换后成立；不存在“已发布、稍后再手动索引”的稳定状态。
 
 ## 验证
 
@@ -146,6 +151,7 @@ Phase 5A/5B 已接通版本列表、只读 Markdown 预览、人工审核、显�
 - Phase 3/4：纯 Python service/remote、应用任务/worker、mock engine、存储恢复、取消/恢复和静态依赖边界；
 - Phase 5：Store/事务/manual/visibility/index metadata/static 本地 29 项通过；版本管理定向前端 31 项通过；API、worker、candidate index、Qdrant Filter 与完整前端 build 由独立 CI job 验证；
 - Phase 5C 真实 ffmpeg/ASR/GPU/Qdrant E2E 未运行。
+- 管理流程加固：Provider/应用/API 定向 40 项通过；变基到最新 master 后 Provider/应用身份定向 31 项与前端定向 34 项通过，前端 production build 通过；远端 CI、真实服务和生产回归未执行。
 
 ## 已知限制
 
@@ -154,8 +160,10 @@ Phase 5A/5B 已接通版本列表、只读 Markdown 预览、人工审核、显�
 - 自动转录应用链路和管理端版本工作流已接线，但真实 ASR/ffmpeg/GPU/Qdrant E2E 未运行；
 - 当前唯一实际 Profile 仍是 experimental，必须人工审核和显式发布，尚无 `qualification_approved` Profile；
 - 支持范围播放但无 HLS 自适应码率。
+- 媒体快捷筛选是最近 100 条的客户端筛选，不是服务端全库查询；独立转写工作台基础版仍待后续 PR。
 
 ## 相关决策
 
 - [0001 — 视频转录播放器与媒体资产流水线](../decisions/0001-video-transcript-player.md) 第一阶段已实施完成。
 - [0002 — 多引擎视频自动转录与管理员选择](../decisions/0002-multi-engine-transcription.md)；实施基线见 [Phase 2](../plans/multi-engine-transcription-phase2.md)、[Phase 3](../plans/multi-engine-transcription-phase3.md) 与 [Phase 5](../plans/multi-engine-transcription-phase5.md) 详细计划。
+- [转录管理流程加固](../plans/transcription-admin-workflow-hardening.md) 记录 Phase 5 后续 PR 1/PR 2 的独立范围。

@@ -32,7 +32,7 @@ const awaitingVersion = {
   is_current: false,
 };
 
-const approvedVersion = { ...awaitingVersion, review_status: "approved", reviewed_by: 1, reviewed_at: 2 };
+const approvedVersion = { ...awaitingVersion, review_status: "review_approved" as const, reviewed_by: 1, reviewed_at: 2 };
 
 describe("TranscriptionVersionPanel", () => {
   beforeEach(() => {
@@ -47,7 +47,7 @@ describe("TranscriptionVersionPanel", () => {
     render(<TranscriptionVersionPanel mediaId="media-1" />);
     expect(mocks.listTranscriptVersions).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "审阅转录版本" }));
-    expect(await screen.findByText("转录成功 ≠ 已审核 ≠ 已发布 ≠ 已进入正式检索")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "预览 Markdown" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "预览 Markdown" }));
     expect(await screen.findByText(/培训开始/)).toBeInTheDocument();
   });

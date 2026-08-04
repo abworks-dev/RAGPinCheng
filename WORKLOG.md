@@ -1871,6 +1871,13 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`frontend/src/components/ChatHeader.tsx`、`frontend/src/components/ChatHeader.test.tsx`、`WORKLOG.md`；未修改来源面板数据、引用联动、布局开合、API、SSE、RAG 或后端业务。
 - 验证：来源按钮定向 Vitest 3/3 通过；前端全量 Vitest 26 个文件、117/117 项通过；TypeScript project build 与 Vite production build 通过（2023 modules transformed）；`git diff --check` 通过。保留既有 React Router future warning、CSS minify warning 和主包大于 500 kB 警告。
 
+### 03:34 — 加固转录管理流程与重复媒体请求身份
+
+- 完成：按获批 R2 PR 1 将 `transcription_jobs.id` 冻结为 Provider runtime 的应用调用身份，使同一应用任务的网络重试生成相同服务请求 ID、同一媒体的新应用重试任务生成不同 ID；安全解析 ASR 服务 `detail.code` 并区分服务身份冲突和契约不匹配；任务 API 增加面向管理员的 `code/message/retryable` 失败对象，上传与重试幂等冲突保留在应用 API 层。修复前端审核状态误用 `approved/rejected` 的 P0 问题，媒体列表改为唯一当前阶段、独立索引状态、最近 100 条客户端快捷筛选和受失败策略控制的重试入口，移除表格行内大型版本卡片。
+- 文件：修改 Provider Registry/协议/remote Provider、转录应用服务、管理与转录 API/Schema、媒体管理页、版本面板、API client/类型及相关测试；新增 `project-docs/plans/transcription-admin-workflow-hardening.md`，同步 `project-docs/features/transcript-pipeline.md` 与 `TODO.md`。未修改数据库结构、Canonical、InputRef、历史 Phase 5 计划或不可变 Markdown。
+- 验证：Provider、应用、Phase 4/5 API 定向测试 40 项通过；变基到最新 master 后 Provider/应用身份测试 31 项、前端 API、任务 hook、版本面板与媒体页定向测试 34 项通过；TypeScript project build 与 Vite production build 通过（2023 modules transformed）；真实 ASR/GPU/Qdrant、生产数据和部署未运行。
+- 边界/风险：`published` 仍只在候选索引完成并原子切换正式 head 后成立，不新增独立手动索引业务动作；快捷筛选只覆盖最近加载的 100 条；独立转写工作台基础版、驳回原因后端必填、历史 Markdown token 告警及视频时间戳联动留给需重新审批的 PR 2；生产回归仍按 R3 单独审批。
+
 ### 03:36 — 修复回答角标与来源高亮切换
 
 - 完成：将来源面板开合、回答轮次和当前引用高亮拆分为独立状态；点击回答角标时始终打开并定位来源面板，高亮对应角标和来源卡片，再次点击同一角标仅取消两侧高亮且保持面板打开；面板原本打开或关闭、桌面布局或移动端抽屉均使用同一持久化选择状态。

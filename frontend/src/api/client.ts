@@ -44,11 +44,35 @@ export function setUnauthorizedHandler(fn: (() => void) | null) {
 export class ApiError extends Error {
   status: number;
   body: string;
-  constructor(status: number, body: string, message: string) {
+  code: string | null;
+  retryable: boolean | null;
+  constructor(status: number, body: string, message: string, code: string | null = null, retryable: boolean | null = null) {
     super(message);
     this.status = status;
     this.body = body;
+    this.code = code;
+    this.retryable = retryable;
   }
+}
+
+function parseErrorDetail(body: string): { message: string; code: string | null; retryable: boolean | null } {
+  try {
+    const parsed = JSON.parse(body);
+    if (parsed && typeof parsed.detail === "string") {
+      return { message: parsed.detail, code: null, retryable: null };
+    }
+    const detail = parsed?.detail;
+    if (detail && typeof detail === "object") {
+      return {
+        message: typeof detail.message === "string" ? detail.message : "",
+        code: typeof detail.code === "string" ? detail.code : null,
+        retryable: typeof detail.retryable === "boolean" ? detail.retryable : null,
+      };
+    }
+  } catch {
+    /* keep raw body */
+  }
+  return { message: body, code: null, retryable: null };
 }
 
 async function rawFetch(path: string, init: RequestInit = {}): Promise<Response> {
@@ -78,14 +102,14 @@ async function jsonFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await rawFetch(path, init);
   if (!res.ok) {
     const txt = await res.text().catch(() => "");
-    let detail = txt;
-    try {
-      const parsed = JSON.parse(txt);
-      if (parsed && typeof parsed.detail === "string") detail = parsed.detail;
-    } catch {
-      /* keep raw */
-    }
-    throw new ApiError(res.status, txt, `${res.status} ${res.statusText}${detail ? `: ${detail}` : ""}`);
+    const detail = parseErrorDetail(txt);
+    throw new ApiError(
+      res.status,
+      txt,
+      detail.message || `${res.status} ${res.statusText}`,
+      detail.code,
+      detail.retryable,
+    );
   }
   // 204 has no body.
   if (res.status === 204) return undefined as unknown as T;
@@ -191,14 +215,8 @@ export const api = {
     }
     if (!res.ok) {
       const txt = await res.text().catch(() => "");
-      let detail = txt;
-      try {
-        const parsed = JSON.parse(txt);
-        if (parsed && typeof parsed.detail === "string") detail = parsed.detail;
-      } catch {
-        /* keep raw */
-      }
-      throw new ApiError(res.status, txt, `${res.status} ${res.statusText}${detail ? `: ${detail}` : ""}`);
+      const detail = parseErrorDetail(txt);
+      throw new ApiError(res.status, txt, detail.message || `${res.status} ${res.statusText}`, detail.code, detail.retryable);
     }
     return (await res.json()) as {
       accepted: IndexJob[];
@@ -240,14 +258,8 @@ export const api = {
     }
     if (!res.ok) {
       const txt = await res.text().catch(() => "");
-      let detail = txt;
-      try {
-        const parsed = JSON.parse(txt);
-        if (parsed && typeof parsed.detail === "string") detail = parsed.detail;
-      } catch {
-        /* keep raw */
-      }
-      throw new ApiError(res.status, txt, `${res.status} ${res.statusText}${detail ? `: ${detail}` : ""}`);
+      const detail = parseErrorDetail(txt);
+      throw new ApiError(res.status, txt, detail.message || `${res.status} ${res.statusText}`, detail.code, detail.retryable);
     }
     return (await res.json()) as MediaAsset;
   },
@@ -275,12 +287,8 @@ export const api = {
     }
     if (!res.ok) {
       const txt = await res.text().catch(() => "");
-      let detail = txt;
-      try {
-        const parsed = JSON.parse(txt);
-        if (parsed && typeof parsed.detail === "string") detail = parsed.detail;
-      } catch { /* keep raw */ }
-      throw new ApiError(res.status, txt, `${res.status} ${res.statusText}${detail ? `: ${detail}` : ""}`);
+      const detail = parseErrorDetail(txt);
+      throw new ApiError(res.status, txt, detail.message || `${res.status} ${res.statusText}`, detail.code, detail.retryable);
     }
     return (await res.json()) as MediaAsset;
   },
