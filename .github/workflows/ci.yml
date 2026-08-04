@@ -127,7 +127,7 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install pytest fastapi httpx python-dotenv
-      - run: pytest tests/test_transcription_asr_service_contract.py tests/test_transcription_provider_registry.py tests/test_transcription_profile_catalog.py tests/test_transcription_remote_provider.py tests/test_asr_deployment_static.py asr_service/tests -v
+      - run: pytest tests/test_transcription_asr_service_contract.py tests/test_transcription_provider_registry.py tests/test_transcription_profile_catalog.py tests/test_transcription_remote_provider.py tests/test_asr_deployment_static.py tests/test_asr_activation.py asr_service/tests -v
 
   test-gpu-contract:
     runs-on: ubuntu-latest
