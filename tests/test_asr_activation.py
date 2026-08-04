@@ -183,7 +183,13 @@ def test_activation_script_uses_fixed_firewall_and_fail_closed_rollback():
     assert '$firewallRuleName = "RAGPinCheng-ASR-8200-from-Ubuntu"' in script
     assert "-LocalPort 8200" in script
     assert "-RemoteAddress $allowedRemoteAddress" in script
-    assert "Get-EnabledInboundAllowRulesFor8200" in script
+    assert "Get-EnabledInboundAllowRulesForAsr8200" in script
+    assert "Test-FirewallRuleAppliesToAsrProcess" in script
+    assert "Get-NetFirewallApplicationFilter" in script
+    assert "Get-NetFirewallServiceFilter" in script
+    assert '$program -ne $venvPython' in script
+    assert '$package -notin @("Any", "*")' in script
+    assert '$service -notin @("Any", "*")' in script
     assert "An enabled inbound Allow rule already covers TCP 8200" in script
     assert "foreach ($entry in @($LocalPort))" in script
     assert "ASR_SERVICE_ENABLED=true" in script
