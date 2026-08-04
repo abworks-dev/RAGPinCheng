@@ -55,5 +55,12 @@ New-Item -ItemType Directory -Path $logDir -Force | Out-Null
 $logFile = Join-Path $logDir ("asr-service-" + (Get-Date -Format "yyyyMMdd") + ".log")
 
 Set-Location -LiteralPath $appRoot
-& $python -m uvicorn asr_service.app:create_app --factory --host $env:ASR_SERVICE_HOST --port $env:ASR_SERVICE_PORT *>> $logFile
-exit $LASTEXITCODE
+$savedErrorActionPreference = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
+try {
+    & $python -m uvicorn asr_service.app:create_app --factory --host $env:ASR_SERVICE_HOST --port $env:ASR_SERVICE_PORT *>> $logFile
+    $uvicornExitCode = $LASTEXITCODE
+} finally {
+    $ErrorActionPreference = $savedErrorActionPreference
+}
+exit $uvicornExitCode
