@@ -1818,3 +1818,9 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`.github/workflows/prepare-asr-model-production.yml`、`scripts/prepare-asr-model.ps1`、`scripts/prepare_asr_model.py`、`tests/test_asr_model_preparation_static.py`、`WORKLOG.md`。
 - 验证：模型准备、现有模型缓存与部署边界专项测试 `36 passed`；Python `py_compile`、PowerShell AST 解析和 `git diff --check` 通过。
 - 边界/风险：尚未合并或执行生产模型下载；未启动服务、未注册任务、未修改防火墙、未启用 Ubuntu ASR、未读取或注入 ASR 服务 Token。生产执行仍要求 `production-asr` 环境配置独立的 `ASR_MODEL_DOWNLOAD_PROXY` Secret。
+
+### 20:30 — 完成 R3B-B6 固定模型准备验收
+
+- 完成：通过 GitHub Actions 手动执行生产模型准备 run `#30908870300`，固定 checkout `545c6d6fcc8b82a5980d3f7da5c525a61bf12b9c`，成功准备并验证 `iic/SenseVoiceSmall@7bf452403abd7353a300cd760f7adae7701c92c1` 的 `asr-model-manifest/1` 缓存。
+- 验证：workflow 结论为 success；日志确认 `model_cache_available=True`、`reason_code=available`，固定模型 revision 匹配；Scheduled Task 全程保持停止，TCP 8200 保持未监听。
+- 边界：未启动 ASR 服务、未注册任务、未修改防火墙、未启用 Ubuntu ASR、未读取或输出 Token；未进入 R3C。
