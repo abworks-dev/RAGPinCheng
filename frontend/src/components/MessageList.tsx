@@ -50,6 +50,8 @@ export function MessageList({
   const previousMessageCount = useRef(0);
   const shouldFollowOutput = useRef(true);
   const scrollFrame = useRef<number | null>(null);
+  const navigationTarget = useRef<string | null>(null);
+  const navigationSettleTimer = useRef<number | null>(null);
   const [activeTurnId, setActiveTurnId] = useState<string | null>(null);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const scrollbar = useAutoHideScrollbar<HTMLDivElement>();
@@ -60,6 +62,10 @@ export function MessageList({
   const updateActiveTurn = useCallback(() => {
     const container = scrollbar.ref.current;
     if (!container || turns.length === 0) return;
+    if (navigationTarget.current) {
+      setActiveTurnId(navigationTarget.current);
+      return;
+    }
     const anchor = container.getBoundingClientRect().top + Math.min(120, container.clientHeight * 0.25);
     let active = turns[0].id;
     for (const turn of turns) {
@@ -68,6 +74,15 @@ export function MessageList({
     }
     setActiveTurnId(active);
   }, [scrollbar.ref, turns]);
+
+  const scheduleNavigationSettle = useCallback(() => {
+    if (navigationSettleTimer.current !== null) window.clearTimeout(navigationSettleTimer.current);
+    navigationSettleTimer.current = window.setTimeout(() => {
+      navigationTarget.current = null;
+      navigationSettleTimer.current = null;
+      updateActiveTurn();
+    }, 160);
+  }, [updateActiveTurn]);
 
   const handleScroll = useCallback(() => {
     scrollbar.interactionProps.onScroll();
@@ -79,7 +94,8 @@ export function MessageList({
     }
     if (scrollFrame.current !== null) window.cancelAnimationFrame(scrollFrame.current);
     scrollFrame.current = window.requestAnimationFrame(updateActiveTurn);
-  }, [scrollbar.interactionProps, scrollbar.ref, updateActiveTurn]);
+    if (navigationTarget.current) scheduleNavigationSettle();
+  }, [scheduleNavigationSettle, scrollbar.interactionProps, scrollbar.ref, updateActiveTurn]);
 
   const scrollToBottom = useCallback(() => {
     bottomRef.current?.scrollIntoView({ block: "end" });
@@ -110,18 +126,21 @@ export function MessageList({
     updateActiveTurn();
     return () => {
       if (scrollFrame.current !== null) window.cancelAnimationFrame(scrollFrame.current);
+      if (navigationSettleTimer.current !== null) window.clearTimeout(navigationSettleTimer.current);
     };
   }, [turns, updateActiveTurn]);
 
   const navigateToTurn = useCallback((turnId: string) => {
     shouldFollowOutput.current = false;
+    navigationTarget.current = turnId;
     setActiveTurnId(turnId);
+    scheduleNavigationSettle();
     const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
     turnRefs.current[turnId]?.scrollIntoView({
       behavior: reducedMotion ? "auto" : "smooth",
       block: "start",
     });
-  }, []);
+  }, [scheduleNavigationSettle]);
 
   if (messages.length === 0) {
     return (

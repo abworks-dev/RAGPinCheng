@@ -88,6 +88,24 @@ describe("MessageList", () => {
     expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
   });
 
+  it("keeps the clicked turn highlighted while smooth scrolling passes the previous turn", () => {
+    const { container } = render(<MessageList messages={messages} conversationId="conversation-1" />);
+    const scroller = container.querySelector("[data-message-scroll-container]") as HTMLDivElement;
+    const firstTurn = container.querySelector('[data-turn-id="user-1"]') as HTMLElement;
+    const secondTurn = container.querySelector('[data-turn-id="user-2"]') as HTMLElement;
+
+    Object.defineProperty(scroller, "clientHeight", { configurable: true, value: 400 });
+    scroller.getBoundingClientRect = vi.fn(() => ({ top: 0 }) as DOMRect);
+    firstTurn.getBoundingClientRect = vi.fn(() => ({ top: 20 }) as DOMRect);
+    secondTurn.getBoundingClientRect = vi.fn(() => ({ top: 220 }) as DOMRect);
+
+    fireEvent.click(screen.getByRole("button", { name: "跳转到问题：第二个问题" }));
+    fireEvent.scroll(scroller);
+
+    expect(screen.getByRole("button", { name: "跳转到问题：第二个问题" })).toHaveAttribute("aria-current", "step");
+    expect(screen.getByRole("button", { name: "跳转到问题：第一个问题" })).not.toHaveAttribute("aria-current");
+  });
+
   it("shows a bottom button away from the end and scrolls smoothly when clicked", () => {
     const { container } = render(<MessageList messages={messages} conversationId="conversation-1" />);
     const scroller = container.querySelector(".overflow-y-auto") as HTMLDivElement;
