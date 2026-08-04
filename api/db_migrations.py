@@ -141,9 +141,29 @@ ANSWER_VERSION_STATEMENTS = (
     )""",
 )
 
+FEEDBACK_WORKFLOW_STATEMENTS = (
+    """CREATE TABLE feedback_workflow (
+        feedback_id TEXT PRIMARY KEY,
+        status TEXT NOT NULL DEFAULT 'pending'
+            CHECK (status IN ('pending','in_progress','resolved','archived')),
+        resolution TEXT
+            CHECK (resolution IS NULL OR resolution IN (
+                'knowledge_fixed','answer_improved','no_action','duplicate','other'
+            )),
+        admin_note TEXT,
+        assignee_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        resolved_at INTEGER
+    )""",
+    """CREATE INDEX idx_feedback_workflow_status_updated
+       ON feedback_workflow(status, updated_at DESC)""",
+)
+
 MIGRATIONS = (
     Migration(1, "multi_engine_transcription_phase2", PHASE2_STATEMENTS),
     Migration(2, "answer_regeneration_versions", ANSWER_VERSION_STATEMENTS),
+    Migration(3, "feedback_workflow", FEEDBACK_WORKFLOW_STATEMENTS),
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 PHASE2_TABLES = frozenset(
@@ -158,6 +178,7 @@ PHASE2_TABLES = frozenset(
 ANSWER_VERSION_TABLES = frozenset(
     {"message_answer_versions", "message_answer_heads", "message_turn_requests"}
 )
+FEEDBACK_WORKFLOW_TABLES = frozenset({"feedback_workflow"})
 
 
 def split_sql_statements(script: str) -> tuple[str, ...]:
@@ -219,6 +240,8 @@ def has_pending_ddl(path: Path, *, base_tables: frozenset[str]) -> bool:
         raise RuntimeError("migration_schema_mismatch")
     if any(version == 2 for version, _name in applied) and not ANSWER_VERSION_TABLES.issubset(tables):
         raise RuntimeError("migration_schema_mismatch")
+    if any(version == 3 for version, _name in applied) and not FEEDBACK_WORKFLOW_TABLES.issubset(tables):
+        raise RuntimeError("migration_schema_mismatch")
     if not base_tables.issubset(tables):
         return True
     if "index_jobs" in tables and "media_id" not in index_columns:
@@ -263,6 +286,8 @@ def apply_all(conn: sqlite3.Connection, *, base_schema: str, applied_at: int) ->
         if not PHASE2_TABLES.issubset(tables):
             raise RuntimeError("migration_schema_mismatch")
         if not ANSWER_VERSION_TABLES.issubset(tables):
+            raise RuntimeError("migration_schema_mismatch")
+        if not FEEDBACK_WORKFLOW_TABLES.issubset(tables):
             raise RuntimeError("migration_schema_mismatch")
         if conn.execute("PRAGMA foreign_key_check").fetchone() is not None:
             raise RuntimeError("migration_foreign_key_check_failed")

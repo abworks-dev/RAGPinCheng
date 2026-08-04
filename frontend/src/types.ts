@@ -196,6 +196,7 @@ export type CategoryTree = {
 };
 
 export type AdminFeedbackEntry = {
+  feedback_id: string;
   ts?: string | null;
   kind?: string | null;
   rating?: string | null;
@@ -211,6 +212,21 @@ export type AdminFeedbackEntry = {
   conversation_id?: string | null;
   turn_index?: number | null;
   message_id?: string | null;
+  status: "pending" | "in_progress" | "resolved" | "archived";
+  resolution?: "knowledge_fixed" | "answer_improved" | "no_action" | "duplicate" | "other" | null;
+  admin_note?: string | null;
+  assignee_user_id?: number | null;
+  assignee_name?: string | null;
+  updated_at?: number | null;
+  resolved_at?: number | null;
+};
+
+export type AdminFeedbackResponse = {
+  entries: AdminFeedbackEntry[];
+  total: number;
+  page: number;
+  page_size: number;
+  counts: Record<"pending" | "in_progress" | "resolved" | "archived", number>;
 };
 
 export type FeedbackPayload = {

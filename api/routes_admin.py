@@ -41,13 +41,14 @@ from .auth import (
 )
 from .conversation_runtime import sweep_once
 from .db import get_db
-from .feedback import FEEDBACK_PATH
+from .feedback import read_records
 from .indexing import create_job, enqueue
 from .routes_transcription import build_transcription_service
 from .schemas import (
     AdminConversationListResponse,
     AdminConversationSummaryDTO,
     AdminFeedbackEntry,
+    AdminFeedbackPatchRequest,
     AdminFeedbackResponse,
     AdminStatsResponse,
     AdminUserDTO,
@@ -273,32 +274,126 @@ def stats(
 # ── feedback viewer ────────────────────────────────────────────────────────
 
 
+FEEDBACK_STATUSES = ("pending", "in_progress", "resolved", "archived")
+
+
+def _feedback_workflow_rows(conn: sqlite3.Connection) -> dict[str, sqlite3.Row]:
+    return {
+        row["feedback_id"]: row
+        for row in conn.execute(
+            """SELECT fw.*, u.real_name AS assignee_name
+               FROM feedback_workflow fw
+               LEFT JOIN users u ON u.id = fw.assignee_user_id"""
+        ).fetchall()
+    }
+
+
 @router.get("/feedback", response_model=AdminFeedbackResponse)
 def feedback(
-    limit: int = Query(200, ge=1, le=2000),
+    status: str | None = Query("pending"),
+    kind: str | None = Query(None),
+    rating: str | None = Query(None),
+    q: str | None = Query(None, max_length=200),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    conn: sqlite3.Connection = Depends(get_db),
     _admin: CurrentUser = Depends(require_admin),
 ) -> AdminFeedbackResponse:
-    path: Path = FEEDBACK_PATH
-    if not path.exists():
-        return AdminFeedbackResponse(entries=[], total=0)
-    # Tail the file: load all lines, return the most recent `limit`.
-    with path.open("r", encoding="utf-8") as fh:
-        lines = fh.readlines()
-    total = len(lines)
-    tail = lines[-limit:]
+    if status not in (*FEEDBACK_STATUSES, "all"):
+        raise HTTPException(status_code=422, detail="invalid feedback status")
+    records = read_records()
+    workflows = _feedback_workflow_rows(conn)
+    counts = {item: 0 for item in FEEDBACK_STATUSES}
+    enriched: list[dict] = []
+    for record in records:
+        workflow = workflows.get(record["feedback_id"])
+        workflow_status = workflow["status"] if workflow else "pending"
+        counts[workflow_status] += 1
+        item = dict(record)
+        item.update({
+            "status": workflow_status,
+            "resolution": workflow["resolution"] if workflow else None,
+            "admin_note": workflow["admin_note"] if workflow else None,
+            "assignee_user_id": workflow["assignee_user_id"] if workflow else None,
+            "assignee_name": workflow["assignee_name"] if workflow else None,
+            "updated_at": workflow["updated_at"] if workflow else None,
+            "resolved_at": workflow["resolved_at"] if workflow else None,
+        })
+        enriched.append(item)
+
+    needle = (q or "").strip().casefold()
+    filtered = [
+        item for item in enriched
+        if (status == "all" or item["status"] == status)
+        and (kind is None or item.get("kind") == kind)
+        and (rating is None or item.get("rating") == rating)
+        and (
+            not needle
+            or needle in " ".join(str(item.get(key) or "") for key in (
+                "query", "note", "doc_title", "section_path", "answer_text"
+            )).casefold()
+        )
+    ]
+    filtered.reverse()
+    total = len(filtered)
+    start = (page - 1) * page_size
     entries: list[AdminFeedbackEntry] = []
-    for line in reversed(tail):  # newest first
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            d = json.loads(line)
-        except Exception:
-            continue
+    for d in filtered[start:start + page_size]:
         entries.append(AdminFeedbackEntry(**{
             k: d.get(k) for k in AdminFeedbackEntry.model_fields.keys()
         }))
-    return AdminFeedbackResponse(entries=entries, total=total)
+    return AdminFeedbackResponse(
+        entries=entries, total=total, page=page, page_size=page_size, counts=counts
+    )
+
+
+@router.patch("/feedback/{feedback_id}", response_model=AdminFeedbackEntry)
+def patch_feedback(
+    feedback_id: str,
+    body: AdminFeedbackPatchRequest,
+    conn: sqlite3.Connection = Depends(get_db),
+    admin: CurrentUser = Depends(require_csrf_admin),
+) -> AdminFeedbackEntry:
+    records = {item["feedback_id"]: item for item in read_records()}
+    record = records.get(feedback_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="feedback not found")
+    if body.status == "resolved" and body.resolution is None:
+        raise HTTPException(status_code=422, detail="resolution is required")
+    now = int(time.time())
+    resolution = body.resolution if body.status == "resolved" else None
+    resolved_at = now if body.status == "resolved" else None
+    assignee = admin.id if body.status in ("in_progress", "resolved") else None
+    conn.execute(
+        """INSERT INTO feedback_workflow(
+               feedback_id, status, resolution, admin_note, assignee_user_id,
+               created_at, updated_at, resolved_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(feedback_id) DO UPDATE SET
+               status=excluded.status,
+               resolution=excluded.resolution,
+               admin_note=excluded.admin_note,
+               assignee_user_id=excluded.assignee_user_id,
+               updated_at=excluded.updated_at,
+               resolved_at=excluded.resolved_at""",
+        (
+            feedback_id, body.status, resolution, body.admin_note,
+            assignee, now, now, resolved_at,
+        ),
+    )
+    conn.commit()
+    record.update({
+        "status": body.status,
+        "resolution": resolution,
+        "admin_note": body.admin_note,
+        "assignee_user_id": assignee,
+        "assignee_name": admin.real_name if assignee else None,
+        "updated_at": now,
+        "resolved_at": resolved_at,
+    })
+    return AdminFeedbackEntry(**{
+        key: record.get(key) for key in AdminFeedbackEntry.model_fields.keys()
+    })
 
 
 # ── manual sweep (admin-triggered, for tests + ops) ────────────────────────
