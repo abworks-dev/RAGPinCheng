@@ -289,3 +289,111 @@ def test_inactive_deploy_refuses_to_replace_a_running_service():
         "RAGPinCheng-ASR is running; deploy again with ActivateService=true "
         "for a verified hot update"
     ) in deploy
+
+
+def test_faster_whisper_qualification_workflow_is_manual_immutable_and_gated():
+    workflow = read(".github/workflows/qualify-faster-whisper-production.yml")
+    assert "workflow_dispatch:" in workflow
+    assert "push:" not in workflow
+    assert "pull_request:" not in workflow
+    assert "production-asr" in workflow
+    assert "runs-on: [self-hosted, Windows, X64, asr-production]" in workflow
+    assert "timeout-minutes: 180" in workflow
+    assert workflow.count("default: false") == 1
+    assert "execute_qualification must be explicitly enabled" in workflow
+    assert "commit_sha must equal the workflow dispatch revision" in workflow
+    assert "qualification must be dispatched from master" in workflow
+    assert 'github.ref }}" -ne "refs/heads/master"' in workflow
+    assert "secrets.ASR_DEPENDENCY_PROXY" in workflow
+    assert "secrets.ASR_MODEL_DOWNLOAD_PROXY" in workflow
+    assert "secrets.GPU_SERVICE_TOKEN" in workflow
+    assert "secrets.ASR_SERVICE_TOKEN" not in workflow
+    assert "activate_service" not in workflow.lower()
+    assert "operation:" not in workflow
+
+
+def test_faster_whisper_qualification_is_isolated_from_production_mutations():
+    script = read("scripts/qualify-faster-whisper-production.ps1")
+    lowered = script.lower()
+    assert r"D:\Services\RAGPinCheng-ASR\qualification\faster-whisper" in script
+    assert (
+        r"D:\ServiceData\RAGPinCheng-ASR\qualification\faster-whisper\inputs"
+        in script
+    )
+    assert "$TempPort = 18200" in script
+    assert "127.0.0.1:$TempPort" in script
+    assert "Get-ScheduledTask" in script
+    assert "Get-NetFirewallRule" in script
+    assert "Start-ScheduledTask" not in script
+    assert "Stop-ScheduledTask" not in script
+    assert "Register-ScheduledTask" not in script
+    assert "Unregister-ScheduledTask" not in script
+    assert "New-NetFirewallRule" not in script
+    assert "Set-NetFirewallRule" not in script
+    assert "Remove-NetFirewallRule" not in script
+    assert "netsh advfirewall" not in lowered
+    assert "Remove-Item" not in script
+    assert "ASR_ENABLED" not in script
+    assert "prod.env" not in lowered
+
+
+def test_faster_whisper_qualification_uses_exact_process_and_proxy_boundaries():
+    script = read("scripts/qualify-faster-whisper-production.ps1")
+    assert 'git -c "safe.directory=$SafeDirectory" -C $ResolvedSource rev-parse HEAD' in script
+    assert "function Stop-OwnedProcess" in script
+    assert "Get-CimInstance Win32_Process" in script
+    assert "Refusing to terminate a process that is not owned" in script
+    assert "Get-Process | Stop-Process" not in script
+    assert "Get-Process -Name" not in script
+    assert "function Set-ScopedProxy" in script
+    assert "function Clear-ScopedProxy" in script
+    assert script.count("Set-ScopedProxy -Proxy $env:ASR_DEPENDENCY_PROXY") == 1
+    assert script.count("Set-ScopedProxy -Proxy $env:ASR_MODEL_DOWNLOAD_PROXY") == 1
+    assert script.count("Clear-ScopedProxy") >= 3
+    assert '$env:NO_PROXY = "127.0.0.1,localhost,192.168.11.11,192.168.11.12"' in script
+    assert "ASR_SERVICE_TOKEN: " not in script
+    assert 'Write-Host "$TemporaryToken"' not in script
+    assert 'Write-Output "$TemporaryToken"' not in script
+
+
+def test_faster_whisper_qualification_freezes_dependencies_model_and_gates():
+    script = read("scripts/qualify-faster-whisper-production.ps1")
+    model = read("scripts/prepare_faster_whisper_model.py")
+    runner = read("scripts/run_faster_whisper_qualification.py")
+    assert "torch==2.7.0+cu128" in script
+    assert "torchaudio==2.7.0+cu128" in script
+    assert "requirements-windows.txt" in script
+    assert "requirements-faster-whisper.txt" in script
+    assert "--only-binary=:all:" in script
+    assert "--no-index" in script
+    assert "pip\", \"check" in script
+    assert "license-matrix.json" in script
+    assert "qualification-module-origins.txt" in script
+    assert "module escaped qualification venv" in script
+    assert "e76620f83d5f5769e6a5f66c8013e1292a797de79b3581b44b6c7f9e36d77f31" in model
+    assert "1617884929" in model.replace("_", "")
+    assert "snapshot_download" in model
+    assert "local_files_only=True" in read("asr_service/engines/faster_whisper.py")
+    assert "CLEAR_CER_LIMIT = 0.10" in runner
+    assert "BIM_NOISE_CER_LIMIT = 0.15" in runner
+    assert "TERM_RECALL_LIMIT = 0.70" in runner
+    assert "CODE_RECALL_LIMIT = 0.95" in runner
+    assert "TIMESTAMP_P95_LIMIT_MS = 1_500" in runner
+    assert "RTF_LIMIT = 0.60" in runner
+
+
+def test_faster_whisper_qualification_drives_the_existing_result_flow():
+    runner = read("scripts/run_faster_whisper_qualification.py")
+    required = (
+        "HttpxAsrServiceClient",
+        "RemoteAsrProvider",
+        "ProviderRuntimePorts",
+        "execute_transcription",
+        "CanonicalTranscript",
+        "format_transcript",
+        "_parse_transcript_turns",
+    )
+    assert all(name in runner for name in required)
+    assert "WhisperModel" not in runner
+    assert ".transcribe(" not in runner
+    assert "FASTER_WHISPER_PROFILE_ID" in runner
