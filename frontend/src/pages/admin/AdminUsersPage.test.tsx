@@ -60,9 +60,9 @@ describe("AdminUsersPage", () => {
     expect(screen.getByText("李工")).toBeInTheDocument();
     expect(screen.getByText("共 2 位用户")).toBeInTheDocument();
     expect(screen.getByText("已停用")).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: "停用账号" })[0]).toHaveClass("border-destructive/50");
-    expect(screen.getAllByRole("button", { name: "设为管理员" })[0]).toHaveClass("border-border");
-    expect(screen.getAllByRole("button", { name: "重置密码" })[0]).toHaveClass("bg-secondary");
+    expect(screen.getByRole("button", { name: "管理 管理员" })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByRole("button", { name: "管理 李工" })).toBeInTheDocument();
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
     expect(mocks.adminListUsers).toHaveBeenCalledTimes(1);
   });
 
@@ -83,6 +83,20 @@ describe("AdminUsersPage", () => {
     expect(screen.getByText("李工")).toBeInTheDocument();
   });
 
+  it("opens one contextual action menu and closes it with Escape", async () => {
+    render(<AdminUsersPage />);
+    const actionsButton = await screen.findByRole("button", { name: "管理 李工" });
+
+    fireEvent.click(actionsButton);
+    expect(screen.getByRole("menu", { name: "李工的账号操作" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "设为管理员" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "启用账号" })).toHaveClass("text-success");
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(actionsButton).toHaveFocus();
+  });
+
   it("surfaces a user-list loading failure", async () => {
     mocks.adminListUsers.mockRejectedValue(new Error("用户服务暂不可用"));
 
@@ -96,7 +110,8 @@ describe("AdminUsersPage", () => {
     mocks.adminPatchUser.mockResolvedValue(users[0]);
 
     render(<AdminUsersPage />);
-    fireEvent.click(await screen.findByRole("button", { name: "停用账号" }));
+    fireEvent.click(await screen.findByRole("button", { name: "管理 管理员" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "停用账号" }));
 
     await waitFor(() => expect(mocks.adminPatchUser).toHaveBeenCalledWith(1, { is_active: false }));
     await waitFor(() => expect(mocks.adminListUsers).toHaveBeenCalledTimes(2));
@@ -106,7 +121,8 @@ describe("AdminUsersPage", () => {
     vi.spyOn(window, "confirm").mockReturnValue(false);
 
     render(<AdminUsersPage />);
-    fireEvent.click(await screen.findByRole("button", { name: "降为用户" }));
+    fireEvent.click(await screen.findByRole("button", { name: "管理 管理员" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "降为普通用户" }));
 
     expect(window.confirm).toHaveBeenCalledTimes(1);
     expect(mocks.adminPatchUser).not.toHaveBeenCalled();
@@ -117,7 +133,8 @@ describe("AdminUsersPage", () => {
     mocks.adminPatchUser.mockResolvedValue({ ...users[0], role: "user" });
 
     render(<AdminUsersPage />);
-    fireEvent.click(await screen.findByRole("button", { name: "降为用户" }));
+    fireEvent.click(await screen.findByRole("button", { name: "管理 管理员" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "降为普通用户" }));
 
     await waitFor(() => expect(mocks.adminPatchUser).toHaveBeenCalledWith(1, { role: "user" }));
     await waitFor(() => expect(mocks.adminListUsers).toHaveBeenCalledTimes(2));
@@ -129,13 +146,15 @@ describe("AdminUsersPage", () => {
     mocks.adminPatchUser.mockResolvedValue(users[0]);
 
     render(<AdminUsersPage />);
-    const resetButtons = await screen.findAllByRole("button", { name: "重置密码" });
-    fireEvent.click(resetButtons[0]);
+    const actionsButton = await screen.findByRole("button", { name: "管理 管理员" });
+    fireEvent.click(actionsButton);
+    fireEvent.click(screen.getByRole("menuitem", { name: "重置密码" }));
 
     expect(alertSpy).toHaveBeenCalledWith("密码至少 6 位");
     expect(mocks.adminPatchUser).not.toHaveBeenCalled();
 
-    fireEvent.click(resetButtons[0]);
+    fireEvent.click(actionsButton);
+    fireEvent.click(screen.getByRole("menuitem", { name: "重置密码" }));
     await waitFor(() => expect(mocks.adminPatchUser).toHaveBeenCalledWith(1, { reset_password: "secure123" }));
     expect(alertSpy).toHaveBeenCalledWith("密码已重置；该用户的所有会话已失效。");
     expect(promptSpy).toHaveBeenCalledTimes(2);

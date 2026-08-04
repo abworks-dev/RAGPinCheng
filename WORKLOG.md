@@ -2009,3 +2009,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`api/db_migrations.py`、`api/feedback.py`、`api/routes_admin.py`、`api/schemas.py`、`frontend/src/api/client.ts`、`frontend/src/types.ts`、`frontend/src/pages/admin/AdminFeedbackPage.tsx`、相关前后端测试、`project-docs/features/feedback-management.md`、功能地图与 `WORKLOG.md`。
 - 验证：反馈与数据库迁移专项测试 12 项通过，接口级用例因当前项目 `.venv` 缺少 FastAPI 而明确跳过 1 项；前端全量 Vitest 27 个文件、128/128 项通过；TypeScript 与 Vite production build 通过（2025 modules transformed）；`git diff --check` 通过。构建保留既有 CSS minify 与主包大于 500 kB 警告。
 - 待办/风险：尚未在包含完整后端依赖的环境验证管理员鉴权/CSRF 接口用例，也未使用真实管理员会话进行浏览器人工验收；状态更新采用最后写入生效，未提供多人同时编辑冲突提示；依赖安装报告的既有审计风险未在本次升级依赖。
+
+### 07:01 — 重构用户管理行内操作
+
+- 完成：将用户表格每行三个宽度不一的操作按钮收敛为固定尺寸的三点管理入口；角色调整与密码重置置于操作菜单上部，启停账号作为状态敏感操作经分隔线独立置底，并补充点击外部、滚动/缩放和 Esc 关闭能力，消除管理员与普通用户行的操作错位。
+- 文件：`frontend/src/pages/admin/AdminUsersPage.tsx`、`frontend/src/pages/admin/AdminUsersPage.test.tsx`、`WORKLOG.md`。
+- 验证：用户管理专项 Vitest 9/9 通过；TypeScript project build 与 Vite production build 通过（2025 modules transformed）；`git diff --check` 通过。构建保留既有 CSS 语法与主包大于 500 kB 警告。
+- 待办/风险：尚未使用真实管理员登录会话完成桌面与窄屏视觉验收；未修改 API、权限契约、数据结构、依赖或其他管理页面。
