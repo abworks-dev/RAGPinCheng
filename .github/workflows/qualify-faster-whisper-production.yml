@@ -26,7 +26,59 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  build-internal-wheel:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Validate immutable revision and explicit R3 gate
+        shell: bash
+        run: |
+          if [[ ! "${{ inputs.commit_sha }}" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "commit_sha must be a full 40-character SHA" >&2
+            exit 1
+          fi
+          if [[ "${{ inputs.commit_sha }}" != "${{ github.sha }}" ]]; then
+            echo "commit_sha must equal the workflow dispatch revision" >&2
+            exit 1
+          fi
+          if [[ "${{ github.ref }}" != "refs/heads/master" ]]; then
+            echo "qualification must be dispatched from master" >&2
+            exit 1
+          fi
+          if [[ "${{ inputs.execute_qualification }}" != "true" ]]; then
+            echo "execute_qualification must be explicitly enabled" >&2
+            exit 1
+          fi
+
+      - name: Check out requested merged revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 1
+
+      - name: Set up fixed wheel build Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build reproducible controlled jieba wheel
+        shell: bash
+        run: |
+          python scripts/build_internal_jieba_wheel.py build \
+            --bundle-dir "${{ runner.temp }}/jieba-internal-wheel-${{ github.run_id }}" \
+            --commit-sha "${{ inputs.commit_sha }}" \
+            --run-id "${{ github.run_id }}"
+
+      - name: Upload controlled jieba wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: jieba-internal-wheel-${{ github.run_id }}
+          path: ${{ runner.temp }}/jieba-internal-wheel-${{ github.run_id }}
+          if-no-files-found: error
+          retention-days: 14
+
   qualify:
+    needs: build-internal-wheel
     environment: production-asr
     runs-on: [self-hosted, Windows, X64, asr-production]
     timeout-minutes: 180
@@ -53,6 +105,12 @@ jobs:
           ref: ${{ inputs.commit_sha }}
           fetch-depth: 1
 
+      - name: Download controlled jieba wheel
+        uses: actions/download-artifact@v4
+        with:
+          name: jieba-internal-wheel-${{ github.run_id }}
+          path: ${{ runner.temp }}\jieba-internal-wheel-${{ github.run_id }}
+
       - name: Prepare fixed synthetic qualification samples
         if: ${{ inputs.prepare_synthetic_samples }}
         shell: powershell
@@ -76,6 +134,7 @@ jobs:
             SourceRoot = "${{ github.workspace }}"
             RunId = "${{ github.run_id }}"
             ExecuteQualification = [System.Convert]::ToBoolean("${{ inputs.execute_qualification }}")
+            InternalWheelBundlePath = "${{ runner.temp }}\jieba-internal-wheel-${{ github.run_id }}"
             SummaryPath = "${{ runner.temp }}\faster-whisper-r3-${{ github.run_id }}\qualification-verdict.json"
           }
           & "${{ github.workspace }}\scripts\qualify-faster-whisper-production.ps1" @params
