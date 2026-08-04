@@ -1,0 +1,98 @@
+name: Qualify faster-whisper Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: "Full 40-character merged master SHA to qualify"
+        required: true
+        type: string
+      execute_qualification:
+        description: "Install isolated dependencies, prepare the pinned model, and run real CUDA qualification"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-asr-faster-whisper-qualification
+  cancel-in-progress: false
+
+jobs:
+  qualify:
+    environment: production-asr
+    runs-on: [self-hosted, Windows, X64, asr-production]
+    timeout-minutes: 180
+    steps:
+      - name: Validate immutable revision and explicit R3 gate
+        shell: powershell
+        run: |
+          if ("${{ inputs.commit_sha }}" -notmatch '^[0-9a-fA-F]{40}$') {
+            throw "commit_sha must be a full 40-character SHA"
+          }
+          if ("${{ inputs.commit_sha }}".ToLowerInvariant() -ne "${{ github.sha }}".ToLowerInvariant()) {
+            throw "commit_sha must equal the workflow dispatch revision"
+          }
+          if ("${{ github.ref }}" -ne "refs/heads/master") {
+            throw "qualification must be dispatched from master"
+          }
+          if (-not [System.Convert]::ToBoolean("${{ inputs.execute_qualification }}")) {
+            throw "execute_qualification must be explicitly enabled"
+          }
+
+      - name: Check out requested merged revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 1
+
+      - name: Run isolated faster-whisper R3 qualification
+        shell: powershell
+        env:
+          ASR_DEPENDENCY_PROXY: ${{ secrets.ASR_DEPENDENCY_PROXY }}
+          ASR_MODEL_DOWNLOAD_PROXY: ${{ secrets.ASR_MODEL_DOWNLOAD_PROXY }}
+          GPU_SERVICE_TOKEN: ${{ secrets.GPU_SERVICE_TOKEN }}
+        run: |
+          $params = @{
+            CommitSha = "${{ inputs.commit_sha }}"
+            SourceRoot = "${{ github.workspace }}"
+            RunId = "${{ github.run_id }}"
+            ExecuteQualification = [System.Convert]::ToBoolean("${{ inputs.execute_qualification }}")
+            SummaryPath = "${{ runner.temp }}\faster-whisper-r3-${{ github.run_id }}\qualification-verdict.json"
+          }
+          & "${{ github.workspace }}\scripts\qualify-faster-whisper-production.ps1" @params
+
+      - name: Publish sanitized qualification summary
+        if: ${{ always() }}
+        shell: powershell
+        run: |
+          $path = "${{ runner.temp }}\faster-whisper-r3-${{ github.run_id }}\qualification-verdict.json"
+          if (Test-Path -LiteralPath $path -PathType Leaf) {
+            $summary = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
+            @(
+              "## faster-whisper R3 qualification",
+              "",
+              "- Status: ``$($summary.status)``",
+              "- Failure code: ``$($summary.failure_code)``",
+              "- Commit: ``$($summary.commit_sha)``",
+              "- Model revision: ``$($summary.model_revision)``",
+              "- Baseline GPU memory: ``$($summary.baseline_gpu_memory_mib) MiB``",
+              "- Peak GPU memory: ``$($summary.peak_gpu_memory_mib) MiB``",
+              "- Profile admission: ``$($summary.profile_admission)``",
+              "- Production services modified: ``$($summary.production_services_modified)``"
+            ) -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding UTF8
+          } else {
+            "Qualification ended before a sanitized verdict could be written." |
+              Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding UTF8
+          }
+
+      - name: Upload sanitized verdict
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: faster-whisper-r3-verdict-${{ github.run_id }}
+          path: ${{ runner.temp }}\faster-whisper-r3-${{ github.run_id }}\qualification-verdict.json
+          if-no-files-found: warn
+          retention-days: 14

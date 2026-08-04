@@ -1926,6 +1926,13 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 验证：复制与按钮顺序专项测试 15/15 通过；前端全量 Vitest 27 个文件、126/126 项测试通过；TypeScript 检查和 Vite production build 通过（2024 modules transformed）；`git diff --check` 通过。构建保留既有 CSS minify、主包大于 500 kB 与 React Router future warning。
 - 待办/风险：尚未在真实局域网 HTTP 登录会话中进行浏览器人工验收；未修改 API、SSE、RAG、数据库或部署配置。
 
+### 05:00 — 合并 faster-whisper R2 并编制统一 R3 方案
+
+- 完成：PR #34 的 7 个 CI 检查全部成功后，以 merge commit `43996495c018c00fa6e473c418f57732a08744ea` 合并到 `master`；基于最新 master 编制 `faster-whisper-r3-unified-qualification.md`，将历史 SSH/retry1～retry5 降为只读审计记录，统一为一次仓库交付和一次显式 `production-asr` workflow。方案固定使用独立资格 venv、run-local artifact、loopback 18200、固定模型 revision、8 个非敏感样本、既有质量阈值及 GPU/BGE 资源门禁；R3 通过后仍不自动开放 Profile。
+- 文件：新增 `project-docs/plans/faster-whisper-r3-unified-qualification.md`，同步 `project-docs/features/transcript-pipeline.md`、`TODO.md` 与 `WORKLOG.md`；未修改业务代码、依赖、workflow、生产配置、数据库、Qdrant 或 Profile admission。
+- 验证：只读核对当前部署、模型准备、激活 workflow 与脚本、现有 CI 收集路径、R2 Profile/adapter/model cache、历史 faster-whisper 预检与失败记录；文档范围与最新 master merge SHA 对齐。未运行测试、安装依赖、下载模型、连接生产服务或执行真实 GPU 推理。
+- 待办/风险：R3 仍为待审批方案；执行前必须准备固定路径下的 8 样本严格 Manifest，并重新核验 Windows/Ubuntu/GPU/ASR/BGE 当前状态。历史 R3A/retry 脚本不得继续执行。
+
 ### 05:02 — 移除知识范围重复清除入口
 
 - 完成：移除提问框知识范围菜单底部的“清除筛选”按钮，保留顶部“全部企业知识”作为唯一清空筛选入口，筛选行为和数据逻辑不变。
@@ -1938,3 +1945,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`frontend/src/pages/admin/AdminLayout.tsx`、`frontend/src/pages/admin/AdminLayout.test.tsx`、`frontend/src/components/UserMenu.tsx`、`WORKLOG.md`。
 - 验证：管理布局与问答侧栏定向 Vitest 4/4 通过；前端全量 Vitest 27 个文件、126/126 项通过；TypeScript project build 与 Vite production build 通过（2024 modules transformed）；`git diff --check` 通过。保留既有 React Router future warning、CSS minify warning 和主包大于 500 kB 警告。
 - 待办/风险：尚未使用真实管理员登录会话进行浏览器视觉验收；未修改 API、认证规则、数据、依赖或部署配置。
+
+### 05:27 — 实施 faster-whisper R3 统一资格通道
+
+- 完成：按获批 R3 方案新增默认关闭且只允许完整 master SHA 的 `production-asr` workflow、Windows 隔离编排器、固定 Hugging Face revision 模型准备器、严格 8 样本 Manifest/质量运行器及负面/静态测试。资格通道固定使用独立 run venv、binary wheelhouse、生产 freeze 约束、许可证门禁、loopback 18200、临时随机 Token、Candidate → Remote Provider → pipeline → Canonical → Markdown → 现有 parser 全链路，以及 CUDA FP16、CER/术语/编号/时间戳/RTF、GPU/BGE、精确 PID 清理和生产任务/防火墙末态门禁；未修改现有 Profile admission、ASR/GPU Scheduled Task、防火墙、Ubuntu 配置、数据库、API、UI、worker 或 Qdrant。
+- 文件：新增 `.github/workflows/qualify-faster-whisper-production.yml`、`scripts/qualify-faster-whisper-production.ps1`、`scripts/prepare_faster_whisper_model.py`、`scripts/run_faster_whisper_qualification.py`、`asr_service/faster-whisper-qualification-manifest.example.json`、`asr_service/tests/test_faster_whisper_qualification.py` 和统一 R3 方案；最小更新 `tests/test_asr_deployment_static.py`、转录功能文档与 `TODO.md`。
+- 验证：R3 专项与生产静态边界 46/46 通过；全部本地可用 ASR service/Profile/Remote Provider/部署和激活相关回归 221/221 通过；Python `compileall`、PowerShell AST 与 `git diff --check` 通过。当前本机既有 `.venv` 仍缺 FastAPI，因此 `asr_service/tests/test_api_contract.py` 与 `test_auth.py` 未本地收集，须由现有 `test-asr-service-contract` CI 在干净环境验证。
+- 待办/风险：尚未提交、推送、创建 PR 或运行远端 CI；尚未安装真实 faster-whisper 依赖、下载模型、读取生产样本、启动 18200 或执行 CUDA。生产资格 workflow 还要求 Windows 固定输入目录存在 8 个已声明的非敏感 PCM WAV 及严格 `manifest.json`；缺失或身份不符会在下载前失败关闭。

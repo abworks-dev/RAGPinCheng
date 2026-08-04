@@ -163,11 +163,13 @@
   - [ ] CI 通过后进行 scoped code review 和用户验收；不得把本地缺依赖的测试写成已通过。
   - [ ] 如需执行 R3B，逐项审批 Windows 目录/ACL、独立 venv 依赖安装、固定 revision 模型离线准备、防火墙限源、Token 写入和 Scheduled Task 注册；默认保持不执行。
   - [ ] R3B 通过后另行审批 R3C，仅用非敏感短媒体和 experimental Profile 做隔离端到端验收；不得自动开放正式 Profile、自动发布、自动索引或生产灰度。
-  - [ ] 在 R2 代码通过 scoped review 与远端 CI 后，独立审批 faster-whisper R3
-    依赖、固定模型、CUDA/资源和非敏感短样本资格验证；未通过前保持 admission disabled。
+  - [ ] 完成 faster-whisper R3 统一资格验证的独立 PR、远端 CI 与一次
+    `production-asr` workflow；在隔离 venv、固定模型和 loopback ASR 服务中验证
+    依赖共存、CUDA FP16、8 个非敏感短样本、质量与资源门禁。未通过前保持
+    admission disabled，R3 通过后仍须另批生产启用。
 - 完成标准：人工转录流程不退化；管理员只能选择服务端白名单 Profile；同一媒体可保留多个历史版本且只有 `app.sqlite` head 指向的版本进入正式检索；experimental Profile 强制审核；至少一个 `qualification_approved` Profile 完成隔离端到端验证后才讨论生产灰度。
 - 依赖：Phase 1～4B 已形成契约、持久化、remote Provider 与应用上传/worker/UI 前半段；Phase 5A/5B 已实现版本审阅、发布、候选索引和检索可见性，待远端 CI；Windows ASR R3A 仓库实施及 PR #8 远端 CI 已通过，但不等于生产部署完成；R3B/R3C、真实引擎/GPU/Qdrant 和生产数据均未执行；真实环境操作另按 R3 逐项审批，单卡 GPU 保持 BGE 优先。
-- 方案链接：`project-docs/plans/multi-engine-auto-transcription.md`、`project-docs/plans/multi-engine-transcription-phase1.md`、`project-docs/plans/multi-engine-transcription-phase2.md`、`project-docs/plans/multi-engine-transcription-phase3.md`、`project-docs/plans/multi-engine-transcription-phase5.md`、`project-docs/plans/multi-engine-transcription-phase5c-windows-asr-deployment.md`、`project-docs/plans/transcription-admin-workflow-hardening.md`、`project-docs/plans/faster-whisper-provider-integration.md`、`project-docs/decisions/0002-multi-engine-transcription.md`、`project-docs/plans/funasr-auto-transcription.md`
+- 方案链接：`project-docs/plans/multi-engine-auto-transcription.md`、`project-docs/plans/multi-engine-transcription-phase1.md`、`project-docs/plans/multi-engine-transcription-phase2.md`、`project-docs/plans/multi-engine-transcription-phase3.md`、`project-docs/plans/multi-engine-transcription-phase5.md`、`project-docs/plans/multi-engine-transcription-phase5c-windows-asr-deployment.md`、`project-docs/plans/transcription-admin-workflow-hardening.md`、`project-docs/plans/faster-whisper-provider-integration.md`、`project-docs/plans/faster-whisper-r3-unified-qualification.md`、`project-docs/decisions/0002-multi-engine-transcription.md`、`project-docs/plans/funasr-auto-transcription.md`
 
 ---
 
