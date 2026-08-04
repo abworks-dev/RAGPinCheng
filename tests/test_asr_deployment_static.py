@@ -103,6 +103,21 @@ def test_service_secret_is_not_passed_on_scheduled_task_command_line():
     assert "-LogonType S4U" in deploy
 
 
+def test_activation_secrets_are_written_only_to_the_protected_config():
+    deploy = read("scripts/deploy-asr.ps1")
+    assert "function Set-ProtectedConfigSecret" in deploy
+    assert (
+        'Set-ProtectedConfigSecret -Name "ASR_SERVICE_TOKEN" '
+        "-Value $env:ASR_SERVICE_TOKEN"
+    ) in deploy
+    assert (
+        'Set-ProtectedConfigSecret -Name "BGE_PRIORITY_PROBE_TOKEN" '
+        "-Value $env:BGE_PRIORITY_PROBE_TOKEN"
+    ) in deploy
+    assert 'Write-Host "$Name=' not in deploy
+    assert 'Write-Output "$Name=' not in deploy
+
+
 def test_config_acl_preserves_trusted_runner_modify_without_full_control():
     deploy = read("scripts/deploy-asr.ps1")
     assert "/inheritance:r" in deploy

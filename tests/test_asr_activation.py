@@ -165,6 +165,7 @@ def test_activation_workflow_is_manual_safe_by_default_and_cross_node_gated():
     assert "needs.verify-ubuntu.result != 'success'" in workflow
     assert "Mode = \"Rollback\"" in workflow
     assert "ASR_SERVICE_TOKEN: ${{ secrets.ASR_SERVICE_TOKEN }}" in workflow
+    assert "BGE_PRIORITY_PROBE_TOKEN: ${{ secrets.GPU_SERVICE_TOKEN }}" in workflow
     assert "ASR_DEPENDENCY_PROXY" in workflow
     assert "if: ${{ inputs.operation != 'rollback' }}" in workflow
     assert "activation-backups\\$activationId\\activate-asr-production.ps1" in workflow
@@ -187,6 +188,8 @@ def test_activation_script_uses_fixed_firewall_and_fail_closed_rollback():
     assert "foreach ($entry in @($LocalPort))" in script
     assert "ASR_SERVICE_ENABLED=true" in script
     assert "ASR_SERVICE_ENABLED=false" in script
+    assert "-AllowInjectedProbeToken" in script
+    assert "Injected BGE priority probe token must be one line" in script
     assert "Invoke-ActivationRollback" in script
     assert "Copy-Item -LiteralPath $PSCommandPath -Destination $rollbackScriptPath" in script
     assert '$state.activation_id -ne $ActivationId' in script
