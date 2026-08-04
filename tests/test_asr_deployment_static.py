@@ -119,14 +119,18 @@ def test_start_script_does_not_treat_uvicorn_stderr_as_a_terminating_error():
 
 def test_activation_secrets_are_written_only_to_the_protected_config():
     deploy = read("scripts/deploy-asr.ps1")
-    assert "function Set-ProtectedConfigSecret" in deploy
+    assert "function Set-ProtectedConfigValue" in deploy
     assert (
-        'Set-ProtectedConfigSecret -Name "ASR_SERVICE_TOKEN" '
+        'Set-ProtectedConfigValue -Name "ASR_SERVICE_TOKEN" '
         "-Value $env:ASR_SERVICE_TOKEN"
     ) in deploy
     assert (
-        'Set-ProtectedConfigSecret -Name "BGE_PRIORITY_PROBE_TOKEN" '
+        'Set-ProtectedConfigValue -Name "BGE_PRIORITY_PROBE_TOKEN" '
         "-Value $env:BGE_PRIORITY_PROBE_TOKEN"
+    ) in deploy
+    assert (
+        'Set-ProtectedConfigValue -Name "BGE_PRIORITY_PROBE_URL" '
+        '-Value "http://192.168.11.11:8100/v1/activity"'
     ) in deploy
     assert 'Write-Host "$Name=' not in deploy
     assert 'Write-Output "$Name=' not in deploy

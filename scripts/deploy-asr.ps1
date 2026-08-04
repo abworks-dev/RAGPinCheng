@@ -105,7 +105,7 @@ $envFile = Join-Path $configRoot "asr.env"
 if (-not (Test-Path -LiteralPath $envFile)) {
     Copy-Item -LiteralPath (Join-Path $resolvedSource "asr_service\.env.example") -Destination $envFile
 }
-function Set-ProtectedConfigSecret {
+function Set-ProtectedConfigValue {
     param(
         [string]$Name,
         [string]$Value
@@ -129,8 +129,9 @@ function Set-ProtectedConfigSecret {
     if (-not $replaced) { $lines += "$Name=$Value" }
     Set-Content -LiteralPath $envFile -Value $lines -Encoding utf8
 }
-Set-ProtectedConfigSecret -Name "ASR_SERVICE_TOKEN" -Value $env:ASR_SERVICE_TOKEN
-Set-ProtectedConfigSecret -Name "BGE_PRIORITY_PROBE_TOKEN" -Value $env:BGE_PRIORITY_PROBE_TOKEN
+Set-ProtectedConfigValue -Name "ASR_SERVICE_TOKEN" -Value $env:ASR_SERVICE_TOKEN
+Set-ProtectedConfigValue -Name "BGE_PRIORITY_PROBE_TOKEN" -Value $env:BGE_PRIORITY_PROBE_TOKEN
+Set-ProtectedConfigValue -Name "BGE_PRIORITY_PROBE_URL" -Value "http://192.168.11.11:8100/v1/activity"
 & icacls.exe $configRoot `
     /inheritance:r `
     /grant:r `
