@@ -70,7 +70,7 @@ describe("AdminLayout tab boundary", () => {
     vi.clearAllMocks();
   });
 
-  it("keeps the admin identity and return navigation visible", () => {
+  it("moves theme and admin actions to the bottom of the sidebar", () => {
     const { container } = render(
       <MemoryRouter>
         <AdminLayout />
@@ -78,9 +78,14 @@ describe("AdminLayout tab boundary", () => {
     );
 
     expect(screen.getByText("品成 BIM 知识库")).toBeInTheDocument();
-    expect(screen.getByText("测试管理员（admin-test）")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /返回对话/ })).toHaveAttribute("href", "/");
-    expect(screen.getByRole("button", { name: "退出" })).toBeInTheDocument();
+    expect(screen.queryByText("测试管理员（admin-test）")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /主题：/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /测试管理员/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "退出登录" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /测试管理员/ }));
+    expect(screen.getByRole("button", { name: "返回对话" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "退出登录" })).toBeInTheDocument();
     expect(container.querySelector("header")).not.toHaveClass("border-b");
     expect(container.querySelector("aside")).not.toHaveClass("border-r");
   });

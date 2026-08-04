@@ -1,9 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import { ChevronUp, LogOut, Shield } from "lucide-react";
+import { ArrowLeft, ChevronUp, LogOut, Shield } from "lucide-react";
 
-export function UserMenu({ collapsed = false }: { collapsed?: boolean }) {
+export function UserMenu({
+  collapsed = false,
+  adminContext = false,
+}: {
+  collapsed?: boolean;
+  adminContext?: boolean;
+}) {
   const { state, logout } = useAuth();
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
@@ -41,18 +47,32 @@ export function UserMenu({ collapsed = false }: { collapsed?: boolean }) {
       </button>
       {open && (
         <div className={`absolute bottom-12 z-dropdown rounded-ui-md border border-border bg-popover p-1.5 text-popover-foreground shadow-overlay ${collapsed ? "left-12 w-48" : "left-0 right-0"}`}>
-          {u.role === "admin" && (
+          {adminContext ? (
             <button
               type="button"
               onClick={() => {
                 setOpen(false);
-                navigate("/admin");
+                navigate("/");
               }}
               className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-left text-sm hover:bg-secondary"
             >
-              <Shield className="size-4" />
-              管理后台
+              <ArrowLeft className="size-4" />
+              返回对话
             </button>
+          ) : (
+            u.role === "admin" && (
+              <button
+                type="button"
+                onClick={() => {
+                  setOpen(false);
+                  navigate("/admin");
+                }}
+                className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-left text-sm hover:bg-secondary"
+              >
+                <Shield className="size-4" />
+                管理后台
+              </button>
+            )
           )}
           <button
             type="button"

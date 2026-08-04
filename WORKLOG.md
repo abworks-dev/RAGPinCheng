@@ -1931,3 +1931,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 完成：移除提问框知识范围菜单底部的“清除筛选”按钮，保留顶部“全部企业知识”作为唯一清空筛选入口，筛选行为和数据逻辑不变。
 - 文件：`frontend/src/components/KnowledgeScopePicker.tsx`、`WORKLOG.md`；未修改 API、RAG、后端或其他界面。
 - 验证：TypeScript project build 与 Vite production build 通过（2024 modules transformed）；`git diff --check` 通过。构建保留既有 CSS minify 与主包大于 500 kB 警告。
+
+### 05:04 — 将管理端账户与主题入口移至侧栏底部
+
+- 完成：移除管理面板右上角的管理员身份、返回和退出入口；在桌面端左侧栏底部复用问答页的主题切换和账户菜单，管理员展开菜单后可“返回对话”或“退出登录”，并保留问答页原有“管理后台”入口行为。
+- 文件：`frontend/src/pages/admin/AdminLayout.tsx`、`frontend/src/pages/admin/AdminLayout.test.tsx`、`frontend/src/components/UserMenu.tsx`、`WORKLOG.md`。
+- 验证：管理布局与问答侧栏定向 Vitest 4/4 通过；前端全量 Vitest 27 个文件、126/126 项通过；TypeScript project build 与 Vite production build 通过（2024 modules transformed）；`git diff --check` 通过。保留既有 React Router future warning、CSS minify warning 和主包大于 500 kB 警告。
+- 待办/风险：尚未使用真实管理员登录会话进行浏览器视觉验收；未修改 API、认证规则、数据、依赖或部署配置。
