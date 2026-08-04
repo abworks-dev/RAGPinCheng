@@ -18,6 +18,8 @@ import {
 } from "./citations";
 import { copyText } from "../utils/clipboard";
 
+const CITATION_TOOLTIP_CLOSE_DELAY_MS = 150;
+
 // Demote inline `$$...$$` to `$...$` so KaTeX renders it inline instead of as
 // a block break. Standalone display blocks on their own line are kept.
 function normalizeMath(src: string): string {
@@ -100,8 +102,31 @@ function CitationMarker({
   const [isHighlighted, setIsHighlighted] = useState(false);
   const [showBelow, setShowBelow] = useState(false);
   const [showRightAligned, setShowRightAligned] = useState(false);
-  const tooltipRef = useRef<HTMLDivElement>(null);
+  const tooltipRef = useRef<HTMLSpanElement>(null);
+  const closeTimerRef = useRef<number | null>(null);
   const { open: openPlayer } = useVideoPlayer();
+
+  const cancelClose = () => {
+    if (closeTimerRef.current !== null) {
+      window.clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+  };
+
+  const openTooltip = () => {
+    cancelClose();
+    setIsHovered(true);
+  };
+
+  const scheduleClose = () => {
+    cancelClose();
+    closeTimerRef.current = window.setTimeout(() => {
+      setIsHovered(false);
+      closeTimerRef.current = null;
+    }, CITATION_TOOLTIP_CLOSE_DELAY_MS);
+  };
+
+  useEffect(() => () => cancelClose(), []);
 
   // Listen for hover events from SourcesPanel (card → in-message highlight).
   useEffect(() => {
@@ -146,8 +171,8 @@ function CitationMarker({
     <>
       <sup
         className="relative top-[-0.35em] mx-px align-baseline"
-        onMouseEnter={() => setIsHovered(true)}
-        onMouseLeave={() => setIsHovered(false)}
+        onMouseEnter={openTooltip}
+        onMouseLeave={scheduleClose}
       >
         <a
           className={`inline-flex items-center justify-center cursor-pointer font-sans text-[11px] h-[18px] min-w-[18px] px-1 rounded transition-all ${
@@ -180,14 +205,17 @@ function CitationMarker({
             Horizontal alignment: left-0 (rightwards) by default to avoid sidebar clipping.
             If overflowing viewport right edge: flip to right-0 (leftwards) via showRightAligned state. */}
         {isHovered && (
-          <div
+          <span
             ref={tooltipRef}
-            className={`absolute z-[100] min-w-[200px] max-w-[320px] bg-white border border-gray-200 rounded-lg shadow-xl p-3 text-xs break-words ${
-              showBelow ? "top-[100%] mt-0.5" : "bottom-[100%] mb-0.5"
+            role="tooltip"
+            onMouseEnter={openTooltip}
+            onMouseLeave={scheduleClose}
+            className={`absolute z-[100] block min-w-[200px] max-w-[320px] rounded-ui-lg border border-border bg-popover p-3 text-xs text-popover-foreground shadow-overlay break-words ${
+              showBelow ? "top-full" : "bottom-full"
             } ${showRightAligned ? "right-0" : "left-0"}`}
           >
-            <div className="font-medium text-gray-900 mb-1 truncate">{source.doc_title}</div>
-            <div className="text-gray-500 mb-2 truncate flex items-center gap-1.5">
+            <span className="mb-1 block truncate font-medium text-popover-foreground">{source.doc_title}</span>
+            <span className="mb-2 flex items-center gap-1.5 truncate text-muted-foreground">
               {source.doc_type === "transcript" ? (
                 <>
                   {source.media_id && (
@@ -198,13 +226,13 @@ function CitationMarker({
               ) : (
                 `§${((source.section_path || "").replace(/<[^>]*>/g, ""))}`
               )}
-            </div>
-            <div className="text-gray-600 whitespace-pre-wrap leading-relaxed break-words">{preview}</div>
-            <div className="text-gray-400 mt-2 text-[10px]">
+            </span>
+            <span className="block whitespace-pre-wrap break-words leading-relaxed text-popover-foreground/85">{preview}</span>
+            <span className="mt-2 block text-[10px] text-muted-foreground">
               点击跳转到完整来源
               {source.doc_type === "transcript" && source.media_id && " 并播放视频"}
-            </div>
-          </div>
+            </span>
+          </span>
         )}
       </sup>
     </>
