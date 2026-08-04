@@ -422,7 +422,13 @@ def test_faster_whisper_dependency_diagnosis_is_manual_fixed_and_sanitized():
     assert "production-freeze.txt" in script
     assert "pip-download.log" in script
     assert "qualification-requirements.txt" in script
-    assert "Convert-ToSanitizedConflictLines" in script
+    assert "Convert-ToSanitizedResolverEvidence" in script
+    assert "binary_distribution_unavailable" in script
+    assert "version_constraint_conflict" in script
+    assert "No matching binary distribution found for" in script
+    assert "diagnosis_kind = $DiagnosisKind" in script
+    assert "affected_requirement = $AffectedRequirement" in script
+    assert "exit 0" in script
     assert "Assert-SanitizerSelfTest" in script
     assert "Assert-ProductionFreeze" in script
     assert "Assert-FixedCombinedRequirements" in script
