@@ -163,18 +163,51 @@ if ($existing) {
     Start-Sleep -Seconds 2
 }
 
-# Start the service in a new background process
+# Start the service in a detached background process. GitHub Actions tags child
+# processes with RUNNER_TRACKING_ID and removes them at job cleanup, so the
+# long-running service must not inherit that marker. Do not let the service
+# inherit the short-lived checkout credential either.
 $logFile = "$RepositoryPath\gpu_service.log"
-$psi = New-Object System.Diagnostics.ProcessStartInfo
-$psi.FileName = $PythonExe
-$psi.Arguments = "-m gpu_service.app"
-$psi.WorkingDirectory = $RepositoryPath
-$psi.UseShellExecute = $false
-$psi.RedirectStandardOutput = $true
-$psi.RedirectStandardError = $true
-$psi.EnvironmentVariables["GPU_SERVICE_TOKEN"] = $Token
-$psi.EnvironmentVariables["HF_ENDPOINT"] = $env:HF_ENDPOINT
-$process = [System.Diagnostics.Process]::Start($psi)
+$errorLogFile = "$RepositoryPath\gpu_service.error.log"
+$runnerTrackingId = [Environment]::GetEnvironmentVariable(
+    "RUNNER_TRACKING_ID",
+    [EnvironmentVariableTarget]::Process
+)
+$gitTokenForRestore = [Environment]::GetEnvironmentVariable(
+    "GIT_TOKEN",
+    [EnvironmentVariableTarget]::Process
+)
+try {
+    [Environment]::SetEnvironmentVariable(
+        "RUNNER_TRACKING_ID",
+        $null,
+        [EnvironmentVariableTarget]::Process
+    )
+    [Environment]::SetEnvironmentVariable(
+        "GIT_TOKEN",
+        $null,
+        [EnvironmentVariableTarget]::Process
+    )
+    $process = Start-Process `
+        -FilePath $PythonExe `
+        -ArgumentList @("-m", "gpu_service.app") `
+        -WorkingDirectory $RepositoryPath `
+        -WindowStyle Hidden `
+        -RedirectStandardOutput $logFile `
+        -RedirectStandardError $errorLogFile `
+        -PassThru
+} finally {
+    [Environment]::SetEnvironmentVariable(
+        "RUNNER_TRACKING_ID",
+        $runnerTrackingId,
+        [EnvironmentVariableTarget]::Process
+    )
+    [Environment]::SetEnvironmentVariable(
+        "GIT_TOKEN",
+        $gitTokenForRestore,
+        [EnvironmentVariableTarget]::Process
+    )
+}
 Start-Sleep -Seconds 5
 
 # ── 7. Health check ───────────────────────────────────────────────────────
@@ -194,8 +227,17 @@ for ($i = 1; $i -le $retries; $i++) {
 }
 
 if (-not $healthy) {
-    Write-Error "GPU service health check failed"
-    exit 1
+    Write-Warning "GPU service health check failed; recent service logs follow"
+    foreach ($path in @($logFile, $errorLogFile)) {
+        if (Test-Path -LiteralPath $path -PathType Leaf) {
+            Write-Host "`n--- $path (last 120 lines) ---"
+            Get-Content -LiteralPath $path -Tail 120
+        }
+    }
+    if (-not $process.HasExited) {
+        Stop-Process -Id $process.Id -Force
+    }
+    throw "GPU service health check failed"
 }
 
 # ── 8. Smoke test ──────────────────────────────────────────────────────────
