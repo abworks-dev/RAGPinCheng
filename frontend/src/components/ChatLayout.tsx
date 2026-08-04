@@ -19,6 +19,7 @@ import {
   type CitationHoverDetail,
   type CitationSelection,
 } from "./citations";
+import { getSelectedSourceCount } from "./sourceSelection";
 
 export function ChatLayout() {
   const [categories, setCategories] = useState<string[]>([]);
@@ -117,7 +118,7 @@ export function ChatLayout() {
   }
 
   const currentConversation = conversations.find((conversation) => conversation.id === currentId);
-  const sourceCount = [...messages].reverse().find((message) => message.sources?.length)?.sources?.length || 0;
+  const sourceCount = getSelectedSourceCount(messages, activeSourceMessageId);
   const scopeLabel = selected.length === 0 ? "全部企业知识" : selected.length === 1 ? selected[0] : `${selected.length} 个范围`;
 
   const clearCitationHighlight = useCallback(() => {
