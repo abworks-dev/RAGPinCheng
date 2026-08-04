@@ -1891,3 +1891,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`frontend/src/components/MessageList.tsx`、`frontend/src/components/MessageList.test.tsx`、`WORKLOG.md`；未修改消息数据、会话接口、来源面板、RAG 或后端逻辑。
 - 验证：新增平滑滚动经过上一轮时仍保持目标高亮的回归测试；`MessageList.test.tsx` 7/7 通过。生产构建已执行到 1683 modules transformed，随后因复用的主工作区依赖缺少既有 `@radix-ui/react-dialog` 而失败，属于隔离工作树依赖不完整，未安装或修改依赖。
 - 待办/风险：尚未在真实长对话页面进行视觉验收；需在该工作树依赖完整的环境中补跑完整 TypeScript 与 production build。
+
+### 04:26 — 调整引用问题入口与角标间距
+
+- 完成：基于最新 `origin/master` 将“报告引用问题”移动到“引用原文”标题右侧并精简为小图标与“报告问题”；为连续引用角标增加轻微水平间距，同时保留反馈弹窗、引用定位、悬浮提示和点击交互。
+- 文件：`frontend/src/components/SourceWorkspace.tsx`、`frontend/src/components/Message.tsx`、`WORKLOG.md`。
+- 验证：基于最新 `origin/master` 的 TypeScript project build 与 Vite production build 通过（2023 modules transformed）；`git diff --check` 通过。构建仍保留既有 CSS minify 与主包大于 500 kB 警告。
+- 待办/风险：尚未使用真实登录会话进行浏览器视觉验收；未修改 API、SSE、RAG、数据库或后端业务。
