@@ -638,11 +638,12 @@ try {
     }
 
     $CombinedRequirements = Join-Path $ConfigRoot "qualification-requirements.txt"
+    $RequirementsSource = $ResolvedSource.Replace("\", "/")
     @(
         "torch==2.7.0+cu128",
         "torchaudio==2.7.0+cu128",
-        "-r $ResolvedSource\asr_service\requirements-windows.txt",
-        "-r $ResolvedSource\asr_service\requirements-faster-whisper.txt"
+        "-r $RequirementsSource/asr_service/requirements-windows.txt",
+        "-r $RequirementsSource/asr_service/requirements-faster-whisper.txt"
     ) | Set-Content -LiteralPath $CombinedRequirements -Encoding ASCII
 
     $DownloadLog = Join-Path $LogRoot "pip-download.log"
