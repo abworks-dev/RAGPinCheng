@@ -5,7 +5,7 @@
 
 ## 用户可观察能力
 
-登录用户可以创建、恢复、连续追问和删除对话；回答通过 SSE 流式返回，并在完成后持久化消息、来源和会话检索状态。
+登录用户可以创建、恢复、连续追问和删除对话；回答通过 SSE 流式返回，并在完成后持久化消息、来源和会话检索状态。用户可复制提问，并可对最后一轮回答重新生成、查看保留的历史回答版本。
 
 ## 当前边界
 
@@ -15,6 +15,8 @@
 - HTTP 请求通过 `api/conversation_runtime.py` 恢复会话、按会话加锁并持久化；
 - 同步与流式路径共享生成准备和状态收尾逻辑；
 - SSE 返回准备、正文、完成和错误状态，并保持来源 DTO 一致。
+- 最后一轮助手回答可重新生成；原回答作为只读版本保留，后续上下文只采用当前有效版本；
+- 已有后续追问的历史回答禁止重新生成，避免改变后续对话所依赖的上下文。
 
 ### 未实现
 
@@ -37,6 +39,8 @@ POST /api/conversations/{id}/chat
 → messages / conversations in app.sqlite
 ```
 
+重新生成仍使用同一聊天入口，通过 `regenerate_assistant_message_id` 指定目标。后端在会话锁内从目标轮之前恢复 `ChatSession`，重新执行既有检索与生成编排，并将新回答写入独立版本表。
+
 ## 关键文件
 
 - `api/routes_chat.py`
@@ -51,7 +55,11 @@ POST /api/conversations/{id}/chat
 - `SessionState.messages`、`last_sources`、`last_search_query`、`turn_index`；
 - `StreamingTurnPrep`、`TurnResult`；
 - SSE `prep`、文本、`done`、`error` 事件；
+- SSE `done.assistant_message_id` 将前端临时消息 ID 替换为持久化 ID，使回答完成后可立即重新生成；
 - `messages.sources_json` 只供 UI 恢复，不重新进入 LLM 上下文。
+- `message_answer_versions` 保存回答版本及对应来源/检索状态快照；
+- `message_answer_heads` 指向每轮当前有效回答；
+- `message_turn_requests` 保存重新生成时需要复用的分类范围；旧会话缺失时按全部范围兼容。
 
 ## 依赖与下游消费者
 
@@ -62,12 +70,15 @@ POST /api/conversations/{id}/chat
 
 - 新入口不得复制或绕过 `ChatSession` 编排；
 - HTTP 聊天必须经过 `conversation_runtime.py` 的恢复、锁和持久化；
+- 重新生成只能作用于最后一轮，不增加 `turn_index`，不得覆盖基础消息正文；
+- 后续追问和会话恢复只将当前有效回答版本放入 LLM 历史；
 - 流必须被完整消费或关闭，才能可靠完成状态收尾；
 - SSE 和来源结构变化必须同步后端 Schema、前端类型和消费者。
 
 ## 验证
 
 - 验证新会话、恢复会话、连续追问、无来源、守卫拒绝和流中断；
+- 验证旧回答保留、版本切换、最后一轮限制、旧会话兼容和重新生成失败回退；
 - API/Auth 变化同时验证匿名、普通用户、管理员和 CSRF；
 - 前端变化运行 `npm run build`。
 
@@ -78,4 +89,3 @@ POST /api/conversations/{id}/chat
 ## 相关决策
 
 - 暂无独立 ADR；现有约束见根目录 `CLAUDE.md`。
-

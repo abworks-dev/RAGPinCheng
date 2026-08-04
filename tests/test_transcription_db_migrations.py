@@ -24,6 +24,9 @@ def test_empty_database_initializes_all_phase2_tables(tmp_path):
         "transcript_version_artifacts",
         "transcript_publication_index_jobs",
         "media_transcript_heads",
+        "message_answer_versions",
+        "message_answer_heads",
+        "message_turn_requests",
     } <= tables
     assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     assert conn.execute("PRAGMA foreign_key_check").fetchone() is None
@@ -88,14 +91,14 @@ def test_migration_failure_rolls_back_partial_ddl(tmp_path, monkeypatch):
     path = tmp_path / "app.sqlite"
     init_db(path, backup_dir=tmp_path / "backups")
     original = db_migrations.MIGRATIONS
-    broken = db_migrations.Migration(2, "broken", ("CREATE TABLE must_rollback(id INTEGER)", "INVALID SQL"))
+    broken = db_migrations.Migration(3, "broken", ("CREATE TABLE must_rollback(id INTEGER)", "INVALID SQL"))
     monkeypatch.setattr(db_migrations, "MIGRATIONS", original + (broken,))
     conn = sqlite3.connect(path)
     conn.execute("PRAGMA foreign_keys=ON")
     with pytest.raises(sqlite3.OperationalError):
         db_migrations.apply_all(conn, base_schema=SCHEMA, applied_at=2)
     assert conn.execute("SELECT name FROM sqlite_master WHERE name='must_rollback'").fetchone() is None
-    assert conn.execute("SELECT max(version) FROM app_schema_migrations").fetchone()[0] == 1
+    assert conn.execute("SELECT max(version) FROM app_schema_migrations").fetchone()[0] == 2
     conn.close()
 
 
@@ -103,7 +106,7 @@ def test_unknown_future_migration_fails_closed(tmp_path):
     path = tmp_path / "app.sqlite"
     init_db(path, backup_dir=tmp_path / "backups")
     conn = sqlite3.connect(path)
-    conn.execute("INSERT INTO app_schema_migrations VALUES (2,'future',2)")
+    conn.execute("INSERT INTO app_schema_migrations VALUES (3,'future',2)")
     conn.commit()
     conn.close()
     with pytest.raises(RuntimeError, match="unknown_future_migration"):
@@ -125,7 +128,7 @@ def test_applied_ledger_with_missing_phase2_table_fails_closed(tmp_path):
     "rows,match",
     [
         (((1, "wrong-name"),), "migration_definition_mismatch"),
-        (((2, "future"),), "migration_version_gap"),
+        (((3, "future"),), "migration_version_gap"),
     ],
 )
 def test_migration_ledger_rejects_changed_definition_and_gap(rows, match):

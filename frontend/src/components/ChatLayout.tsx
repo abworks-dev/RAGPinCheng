@@ -70,7 +70,7 @@ export function ChatLayout() {
     return () => window.removeEventListener(CITATION_EVENT, openSources);
   }, [activeCitation]);
 
-  const { messages, send, sending, loading } = useChat({
+  const { messages, send, regenerate, viewAnswerVersion, sending, loading } = useChat({
     conversationId: currentId,
     onConversationCreated: (id) => {
       setCurrentId(id);
@@ -206,6 +206,9 @@ export function ChatLayout() {
             sourceOpen={sourceOpen}
             activeSourceMessageId={activeSourceMessageId}
             onToggleSources={toggleMessageSources}
+            sending={sending}
+            onRegenerate={regenerate}
+            onViewAnswerVersion={viewAnswerVersion}
           />
           <Composer
             onSend={(t) => send(t, selected)}

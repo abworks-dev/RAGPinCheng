@@ -7,7 +7,7 @@ import type { ChatMessage, Source } from "../types";
 import { stripMarkdown } from "../utils/markdown";
 import { FeedbackBar } from "./FeedbackBar";
 import { timestampToSeconds, useVideoPlayer } from "../hooks/useVideoPlayer";
-import { CircleAlert, CirclePlay, Files } from "lucide-react";
+import { Check, CircleAlert, CirclePlay, Copy, Files } from "lucide-react";
 import {
   CITATION_EVENT,
   CITATION_HOVER_EVENT,
@@ -216,24 +216,54 @@ export function Message({
   turnIndex,
   sourcesSelected = false,
   onToggleSources,
+  canRegenerate = false,
+  onRegenerate,
+  onViewAnswerVersion,
 }: {
   msg: ChatMessage;
   conversationId: string | null;
   turnIndex: number;
   sourcesSelected?: boolean;
   onToggleSources?: (messageId: string) => void;
+  canRegenerate?: boolean;
+  onRegenerate?: (messageId: string) => void;
+  onViewAnswerVersion?: (messageId: string, versionIndex: number) => void;
 }) {
   const isUser = msg.role === "user";
+  const [copied, setCopied] = useState(false);
+
+  const copyContent = async () => {
+    try {
+      await navigator.clipboard.writeText(msg.content);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1400);
+    } catch {
+      setCopied(false);
+    }
+  };
   return (
     <article className={`mx-auto flex w-full max-w-[50rem] ${isUser ? "justify-end" : "justify-start"} px-4 py-4`}>
       <div
         className={
-          (isUser ? "max-w-[70%] rounded-ui-lg bg-primary px-4 py-3 text-primary-foreground" : "min-w-0 w-full") +
+          (isUser ? "flex max-w-[70%] flex-col items-end" : "min-w-0 w-full") +
           ""
         }
       >
         {isUser ? (
-          <div className="whitespace-pre-wrap break-words">{msg.content}</div>
+          <>
+            <div className="rounded-ui-lg bg-primary px-4 py-3 text-primary-foreground">
+              <div className="whitespace-pre-wrap break-words">{msg.content}</div>
+            </div>
+            <button
+              type="button"
+              aria-label="复制提问"
+              title="复制提问"
+              onClick={copyContent}
+              className="mt-2 inline-flex size-8 items-center justify-center rounded-ui-md text-muted-foreground hover:bg-secondary hover:text-foreground"
+            >
+              {copied ? <Check className="size-4 text-success" /> : <Copy className="size-4" />}
+            </button>
+          </>
         ) : (
           <>
             <AnswerStatus msg={msg} />
@@ -286,7 +316,14 @@ export function Message({
                     查看 {msg.sources.length} 个来源
                   </button>
                 )}
-                <FeedbackBar msg={msg} conversationId={conversationId} turnIndex={turnIndex} />
+                <FeedbackBar
+                  msg={msg}
+                  conversationId={conversationId}
+                  turnIndex={turnIndex}
+                  canRegenerate={canRegenerate}
+                  onRegenerate={onRegenerate}
+                  onViewAnswerVersion={onViewAnswerVersion}
+                />
               </div>
             )}
           </>

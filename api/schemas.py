@@ -32,8 +32,9 @@ class AuthMeResponse(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    query: str = Field(..., min_length=1)
+    query: str | None = Field(default=None, min_length=1)
     categories: list[str] | None = None
+    regenerate_assistant_message_id: int | None = None
 
 
 class ConversationSummaryDTO(BaseModel):
@@ -339,12 +340,22 @@ class RetryTranscriptionRequest(BaseModel):
     request_idempotency_key: str
 
 
+class AnswerVersionDTO(BaseModel):
+    id: int
+    version_index: int
+    content: str
+    sources_for_ui: list[SourceDTO] | None = None
+    created_at: int
+    is_active: bool
+
+
 class MessageDTO(BaseModel):
     id: int | None = None
     role: str
     content: str
     sources_for_ui: list[SourceDTO] | None = None
     created_at: int | None = None
+    answer_versions: list[AnswerVersionDTO] | None = None
 
 
 class ConversationStateDTO(BaseModel):
@@ -411,6 +422,7 @@ class DoneEvent(BaseModel):
     timings: dict[str, float]
     sources: list[SourceDTO]
     answer_text: str
+    assistant_message_id: int | None = None
     history_chars: int
     budget: int
 

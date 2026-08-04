@@ -36,6 +36,9 @@ export function MessageList({
   sourceOpen = false,
   activeSourceMessageId = null,
   onToggleSources,
+  sending = false,
+  onRegenerate,
+  onViewAnswerVersion,
 }: {
   messages: ChatMessage[];
   conversationId: string | null;
@@ -43,6 +46,9 @@ export function MessageList({
   sourceOpen?: boolean;
   activeSourceMessageId?: string | null;
   onToggleSources?: (messageId: string) => void;
+  sending?: boolean;
+  onRegenerate?: (messageId: string) => void;
+  onViewAnswerVersion?: (messageId: string, versionIndex: number) => void;
 }) {
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const turnRefs = useRef<Record<string, HTMLElement | null>>({});
@@ -164,6 +170,10 @@ export function MessageList({
     );
   }
 
+  const latestAssistantId = [...messages]
+    .reverse()
+    .find((message) => message.role === "assistant")?.id;
+
   return (
     <div className="scroll-fade-content-start relative min-h-0 flex-1">
       <div
@@ -191,6 +201,14 @@ export function MessageList({
               turnIndex={turn.turnIndex}
               sourcesSelected={sourceOpen && activeSourceMessageId === message.id}
               onToggleSources={onToggleSources}
+              canRegenerate={
+                message.role === "assistant"
+                && message.id === latestAssistantId
+                && !sending
+                && !message.streaming
+              }
+              onRegenerate={onRegenerate}
+              onViewAnswerVersion={onViewAnswerVersion}
             />
             ))}
           </section>

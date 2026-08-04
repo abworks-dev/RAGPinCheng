@@ -1905,3 +1905,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：新增 `asr_service/engines/faster_whisper.py`、隔离依赖与模型 Manifest 示例、adapter 测试和 `project-docs/plans/faster-whisper-provider-integration.md`；最小修改可信 Profile/catalog、remote Provider factory、应用组装、ASR service config/app/model cache/engine contract、相关测试、功能文档与 `TODO.md`。未修改数据库、API Schema、前端、worker、Qdrant、BGE、Canonical、normalizer、formatter、pipeline 或生产部署 workflow。
 - 验证：无 FastAPI、无真实引擎的 ASR/Provider/应用回归 `187 passed`；Phase 1 类型、Profile、Canonical、normalizer、formatter、policy 与静态边界回归 `189 passed`；修改代码和测试 `py_compile` 通过，`git diff --check` 通过。现有 CI 的 `test-asr-service-contract` 会自动收集新增 adapter 测试，无需修改 workflow。
 - 待办/风险：本机项目 `.venv` 缺少既有 `fastapi`，因此 `asr_service/tests/test_api_contract.py` 和 `tests/test_transcription_phase4_api.py` 未在本地执行，必须由远端 CI 验证；本轮未安装依赖、未下载模型、未运行 ffmpeg/真实 ASR/GPU、未部署或修改 Windows/Ubuntu 配置。后续 R3 依赖、模型、CUDA、资源和短样本门禁通过前不得启用 faster-whisper admission。
+
+### 04:32 — 增加消息复制与回答重新生成
+
+- 完成：基于最新 `origin/master` 集成为用户提问增加复制按钮，为最后一轮助手回答增加紧邻复制按钮的重新生成入口；重新生成从目标轮之前恢复既有 `ChatSession` 流程，保留旧回答、来源和检索状态为可切换版本，后续上下文只采用当前有效版本；存在后续追问时禁用历史回答重新生成，失败时恢复原回答。新增向后兼容的回答版本、有效版本指针和轮次分类范围表；SSE 完成事件回传持久化助手消息 ID，使新回答完成后无需刷新即可重新生成。不覆盖基础消息正文，不增加会话轮次。
+- 文件：`api/conversation_runtime.py`、`api/db_migrations.py`、`api/routes_chat.py`、`api/schemas.py`、`frontend/src/api/chatStream.ts`、`frontend/src/components/ChatLayout.tsx`、`frontend/src/components/FeedbackBar.tsx`、`frontend/src/components/Message.tsx`、`frontend/src/components/MessageList.tsx`、`frontend/src/hooks/useChat.ts`、`frontend/src/types.ts`、对应前后端测试、`project-docs/features/chat-runtime.md`、`WORKLOG.md`。
+- 验证：最新 master 基线上后端回答版本与迁移专项测试 13/13 通过；Python 语法检查通过；前端全量 Vitest 27 个文件、126/126 项测试通过；TypeScript 检查与 Vite production build 通过（2023 modules transformed）；`git diff --check` 通过。构建保留既有 CSS minify、主包大于 500 kB 与 React Router future warning。
+- 待办/风险：功能处于待用户验收；尚未连接真实 LLM、真实登录会话或生产数据库执行端到端重新生成，未部署。首次启动将按现有迁移流程备份并为 `app.sqlite` 新增三个版本表，不需要重建 Qdrant 索引。
