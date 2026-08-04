@@ -1798,3 +1798,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`scripts/deploy-asr.ps1`、`tests/test_asr_deployment_static.py`、`project-docs/plans/multi-engine-transcription-phase5c-windows-asr-deployment.md`、`WORKLOG.md`。
 - 验证：PowerShell 语法解析通过；Python 测试文件编译通过；在本机未安装 pytest 的前提下直接执行静态测试模块，11/11 项通过；`git diff --check` 通过。远端 CI、合并及生产 R3B-B3 重试按获批流程继续验证。
 - 边界：未读取或输出 Token，未删除生产 staging，未下载模型，未修改防火墙，未注册或启动 Scheduled Task，未启用 Ubuntu ASR 客户端，未运行真实媒体或真实 ASR。
+
+### 11:28 — 接入 R3B-B4 依赖代理
+
+- 完成：为 Windows ASR 手动部署 workflow 接入 `production-asr` 环境的 `ASR_DEPENDENCY_PROXY` Secret；部署脚本仅在 `install_dependencies=true` 的 pip 安装与依赖检查区段临时设置代理，并在结束后恢复 runner 进程环境，未将代理写入 ASR 服务运行配置。
+- 文件：`.github/workflows/deploy-asr-production.yml`、`scripts/deploy-asr.ps1`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
+- 验证：PowerShell AST 解析通过；代理范围静态测试及既有 ASR 部署静态测试 `12 passed`；Python 测试文件编译通过；`git diff --check` 通过。远端 CI、合并及生产依赖安装重跑待后续验证。
+- 边界/风险：未读取或输出 Token 值，未下载模型，未启动 Scheduled Task，未修改防火墙或生产服务状态；本地未运行需要 FastAPI 的 ASR service 测试。

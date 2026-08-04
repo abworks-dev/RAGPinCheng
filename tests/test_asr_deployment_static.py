@@ -36,6 +36,9 @@ def test_manual_workflow_has_safe_defaults_and_immutable_revision():
     assert re.search(r"install_dependencies:.*?default: false", workflow, re.DOTALL)
     assert re.search(r"activate_service:.*?default: false", workflow, re.DOTALL)
     assert "secrets.ASR_SERVICE_TOKEN" in workflow
+    assert "ASR_DEPENDENCY_PROXY: ${{ secrets.ASR_DEPENDENCY_PROXY }}" in workflow
+    assert "HTTP_PROXY:" not in workflow
+    assert "HTTPS_PROXY:" not in workflow
     assert "inputs.commit_sha" in workflow
     assert "40-character" in workflow
     assert "push:" not in workflow
@@ -156,3 +159,22 @@ def test_backend_image_installs_and_deployment_verifies_ffmpeg_tools():
     assert "command -v ffprobe" in deploy
     assert deploy.index("compose up -d --no-deps backend") < deploy.index(media_check)
     assert deploy.index(media_check) < deploy.index("Waiting for backend health check")
+
+def test_dependency_proxy_is_scoped_to_pip_installation_and_restored():
+    deploy = read("scripts/deploy-asr.ps1")
+    install_guard = deploy.index("if ($InstallDependencies)")
+    proxy_read = deploy.index("$env:ASR_DEPENDENCY_PROXY", install_guard)
+    torch_install = deploy.index("pip install --index-url", proxy_read)
+    requirements_install = deploy.index("pip install -r", torch_install)
+    proxy_restore = deploy.index("foreach ($name in $savedProxyEnvironment.Keys)", requirements_install)
+    activation_guard = deploy.index("if ($ActivateService)", proxy_restore)
+
+    assert install_guard < proxy_read < torch_install < requirements_install < proxy_restore < activation_guard
+    assert "ASR_DEPENDENCY_PROXY is required when InstallDependencies is enabled" in deploy
+    assert "ASR_DEPENDENCY_PROXY must be an absolute HTTP(S) URL" in deploy
+    assert '$env:HTTP_PROXY = $dependencyProxy' in deploy
+    assert '$env:HTTPS_PROXY = $dependencyProxy' in deploy
+    assert '$env:NO_PROXY = "127.0.0.1,localhost,${PRIVATE_IPV4},${PRIVATE_IPV4}"' in deploy
+    assert "[System.Environment]::SetEnvironmentVariable(" in deploy
+    assert "[System.EnvironmentVariableTarget]::Process" in deploy
+    assert deploy.count("ASR_DEPENDENCY_PROXY") == 3

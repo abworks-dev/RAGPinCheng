@@ -44,6 +44,7 @@ jobs:
         shell: powershell
         env:
           ASR_SERVICE_TOKEN: ${{ secrets.ASR_SERVICE_TOKEN }}
+          ASR_DEPENDENCY_PROXY: ${{ secrets.ASR_DEPENDENCY_PROXY }}
         run: |
           $params = @{
             CommitSha = "${{ inputs.commit_sha }}"
