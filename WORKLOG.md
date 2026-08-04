@@ -2026,3 +2026,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`frontend/src/pages/admin/AdminUsersPage.tsx`、`frontend/src/pages/admin/AdminUsersPage.test.tsx`、`WORKLOG.md`。
 - 验证：用户管理专项 Vitest 9/9 通过；TypeScript project build 与 Vite production build 通过（2025 modules transformed）；`git diff --check` 通过。构建保留既有 CSS 语法与主包大于 500 kB 警告。
 - 待办/风险：尚未使用真实管理员登录会话完成桌面与窄屏视觉验收；未修改 API、权限契约、数据结构、依赖或其他管理页面。
+
+### 07:02 — 修复来源按钮计数不同步
+
+- 完成：顶部来源按钮与来源核验面板共用回答来源集合规则；存在有效当前回答时显示该轮来源数，未选择或选择失效时回退到最后一条含来源回答，修复多轮会话中按钮数字与当前面板数字不一致。
+- 文件：`frontend/src/components/ChatLayout.tsx`、`frontend/src/components/SourceWorkspace.tsx`、`frontend/src/components/sourceSelection.ts`、`frontend/src/components/sourceSelection.test.ts`、`WORKLOG.md`。
+- 验证：来源选择与标题按钮专项 Vitest 2 个文件、5/5 项通过；TypeScript project build 与 Vite production build 通过（2026 modules transformed）；`git diff --check` 通过。构建保留既有 CSS 语法和主包大于 500 kB 警告。
+- 待办/风险：尚未使用含多个不同来源数量回答的真实会话进行桌面和移动端视觉验收；未修改 API、数据结构、RAG、依赖或部署。
