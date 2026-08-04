@@ -2063,6 +2063,13 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 验证：消息与来源工作区专项 Vitest 2 个文件、15/15 项测试通过；TypeScript project build 与 Vite production build 通过（2026 modules transformed）；`git diff --check` 通过。首次复用旧依赖目录时因缺少锁文件已声明的 Radix Dialog 无法完成 TypeScript 构建，按最新锁文件在隔离工作区安装依赖后构建通过；构建保留既有 CSS 语法与主包大于 500 kB 警告，依赖审计仍报告既有 10 项风险。
 - 待办/风险：功能处于待用户验收；尚未在真实登录会话中对视频播放器自动 seek、窄屏来源抽屉和明暗主题完成浏览器视觉验收。本轮未修改 API、媒体鉴权、数据契约、索引、依赖声明或部署。
 
+### 07:36 — 调研 PDF 预览交互改进
+
+- 完成：只读核对当前 PDF 预览的固定 100% 初始缩放、单页渲染、滚动容器和缺少拖动平移的现状，并参考 PDF.js、Zotero、Paperless-ngx、RAGFlow 及 React PDF Viewer 的公开资料，形成以自适应缩放、手形拖动、连续阅读和引用定位为主的分阶段改进方案。
+- 文件：仅追加 `WORKLOG.md`；未修改功能代码、测试、依赖、API、数据或部署配置。
+- 验证：静态检查 `PdfPreview.tsx`、`ResourcePreviewShell.tsx`、`usePdfPreview.tsx`、来源预览入口及现有测试覆盖；未运行构建或浏览器视觉验收，因为本轮仅提交方案。
+- 待办/风险：改进方案已按用户批准先实施第一阶段；连续多页和引用定位仍不在本次范围。
+
 ### 07:38 — 清理回答复制中的引用角标
 
 - 完成：适配最新 `master` 的回答操作结构，在助手回答写入剪贴板前移除已识别的数字、文档章节和视频时间引用角标，并清理角标前的横向空白；用户提问仍原样复制，页面角标展示、来源核验和局域网 HTTP 剪贴板回退保持不变。
@@ -2076,3 +2083,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：本次发布涉及的前端源码、测试与 `WORKLOG.md`；未修改依赖、API、数据、RAG 或部署配置。
 - 验证：rebase 到推送前最新 `origin/master` 后，前端全量 Vitest 29 个文件、143/143 项通过；TypeScript project build、Vite production build 与 `git diff --check` 通过；推送后本地 HEAD 与 `origin/master` 均为 `2c732e488bb715de88e56175e2bf55ecdc4ac3a7`。
 - 待办/风险：尚未进行真实登录会话的浏览器剪贴板、视频 seek 和管理页长短页面视觉验收；构建保留既有 CSS 语法、主包大于 500 kB 与 React Router future warning。
+
+### 07:42 — 改进 PDF 自适应缩放与拖动
+
+- 完成：PDF 与转换后的 PPTX 预览默认按容器“适合页面”，支持“适合宽度”“实际大小”和 10% 步进的自定义缩放；新增手形拖动与文字选择模式切换，支持鼠标/触控笔 Pointer 平移、按住空格临时拖动、左右方向键翻页，并在切换文档时恢复合理默认状态。
+- 文件：`frontend/src/components/PdfPreview.tsx`、`frontend/src/components/PdfPreview.test.tsx`、`WORKLOG.md`；未修改 PDF API、索引、数据库、依赖、DOCX/XLSX 渲染或其他并行前端文件。
+- 验证：在最新 `origin/master` 隔离工作树中，PDF 预览专项 Vitest 5/5 通过；前端全量 Vitest 30 个文件、148/148 项通过；TypeScript project build 与 Vite production build 通过（2026 modules transformed）；目标文件 `git diff --check` 通过。构建保留既有 CSS 语法、主包大于 500 kB 与 React Router future warning。
+- 待办/风险：功能处于待用户验收；尚未使用真实纵向/横向 PDF 在浏览器中验证容器自适应、放大后四向拖动、文字复制和窄屏工具栏。回滚只需恢复 `PdfPreview.tsx` 并移除对应专项测试。
