@@ -87,6 +87,7 @@ describe("AdminLayout tab boundary", () => {
     expect(screen.getByRole("button", { name: "返回对话" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "退出登录" })).toBeInTheDocument();
     expect(container.querySelector("header")).not.toHaveClass("border-b");
+    expect(container.querySelector("aside")).toHaveClass("lg:sticky", "lg:top-16", "lg:self-start");
     expect(container.querySelector("aside")).not.toHaveClass("border-r");
   });
 
