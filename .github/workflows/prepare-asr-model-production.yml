@@ -1,0 +1,58 @@
+name: Prepare Windows ASR Model Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: "Full 40-character commit SHA to execute"
+        required: true
+        type: string
+      prepare_model:
+        description: "Download and validate the pinned SenseVoiceSmall revision"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-asr-model
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    environment: production-asr
+    runs-on: [self-hosted, Windows, X64, asr-production]
+    timeout-minutes: 60
+    steps:
+      - name: Validate immutable revision and explicit gate
+        shell: powershell
+        run: |
+          if ("${{ inputs.commit_sha }}" -notmatch '^[0-9a-fA-F]{40}$') {
+            throw "commit_sha must be a full 40-character SHA"
+          }
+          if ("${{ inputs.commit_sha }}".ToLowerInvariant() -ne "${{ github.sha }}".ToLowerInvariant()) {
+            throw "commit_sha must equal the workflow dispatch revision"
+          }
+          if (-not [System.Convert]::ToBoolean("${{ inputs.prepare_model }}")) {
+            throw "prepare_model must be explicitly enabled"
+          }
+
+      - name: Check out requested revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 1
+
+      - name: Prepare pinned offline model cache
+        shell: powershell
+        env:
+          ASR_MODEL_DOWNLOAD_PROXY: ${{ secrets.ASR_MODEL_DOWNLOAD_PROXY }}
+        run: |
+          $params = @{
+            CommitSha = "${{ inputs.commit_sha }}"
+            SourceRoot = "${{ github.workspace }}"
+            PrepareModel = [System.Convert]::ToBoolean("${{ inputs.prepare_model }}")
+          }
+          & "${{ github.workspace }}\scripts\prepare-asr-model.ps1" @params
