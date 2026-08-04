@@ -57,6 +57,8 @@ export type ChatMessage = {
   error?: string;
   answerVersions?: AnswerVersion[];
   viewedVersionIndex?: number;
+  userVersions?: UserQuestionVersion[];
+  activeUserVersionId?: string;
 };
 
 export type AnswerVersion = {
@@ -64,6 +66,15 @@ export type AnswerVersion = {
   versionIndex: number;
   content: string;
   sources?: Source[];
+  isActive: boolean;
+  userVersionId?: string;
+};
+
+export type UserQuestionVersion = {
+  id: string;
+  versionIndex: number;
+  content: string;
+  createdAt: number;
   isActive: boolean;
 };
 
@@ -101,6 +112,14 @@ export type ConversationState = {
       version_index: number;
       content: string;
       sources_for_ui?: Source[] | null;
+      created_at: number;
+      is_active: boolean;
+      user_version_id?: number | null;
+    }[] | null;
+    user_versions?: {
+      id: number;
+      version_index: number;
+      content: string;
       created_at: number;
       is_active: boolean;
     }[] | null;

@@ -27,6 +27,8 @@ def test_empty_database_initializes_all_phase2_tables(tmp_path):
         "message_answer_versions",
         "message_answer_heads",
         "message_turn_requests",
+        "message_user_versions",
+        "message_user_heads",
     } <= tables
     assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     assert conn.execute("PRAGMA foreign_key_check").fetchone() is None
@@ -102,7 +104,7 @@ def test_migration_failure_rolls_back_partial_ddl(tmp_path, monkeypatch):
     with pytest.raises(sqlite3.OperationalError):
         db_migrations.apply_all(conn, base_schema=SCHEMA, applied_at=2)
     assert conn.execute("SELECT name FROM sqlite_master WHERE name='must_rollback'").fetchone() is None
-    assert conn.execute("SELECT max(version) FROM app_schema_migrations").fetchone()[0] == 3
+    assert conn.execute("SELECT max(version) FROM app_schema_migrations").fetchone()[0] == db_migrations.CURRENT_SCHEMA_VERSION
     conn.close()
 
 
@@ -110,7 +112,10 @@ def test_unknown_future_migration_fails_closed(tmp_path):
     path = tmp_path / "app.sqlite"
     init_db(path, backup_dir=tmp_path / "backups")
     conn = sqlite3.connect(path)
-    conn.execute("INSERT INTO app_schema_migrations VALUES (4,'future',2)")
+    conn.execute(
+        "INSERT INTO app_schema_migrations VALUES (?,?,2)",
+        (db_migrations.CURRENT_SCHEMA_VERSION + 1, "future"),
+    )
     conn.commit()
     conn.close()
     with pytest.raises(RuntimeError, match="unknown_future_migration"):

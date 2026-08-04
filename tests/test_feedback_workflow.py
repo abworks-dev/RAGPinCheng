@@ -21,7 +21,7 @@ def test_feedback_migration_is_additive(tmp_path):
             "assignee_user_id", "updated_at", "resolved_at",
         }.issubset(columns)
         assert conn.execute(
-            "SELECT max(version) FROM app_schema_migrations"
+            "SELECT version FROM app_schema_migrations WHERE name = 'feedback_workflow'"
         ).fetchone()[0] == 3
     finally:
         conn.close()

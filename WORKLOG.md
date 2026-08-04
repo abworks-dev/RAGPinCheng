@@ -2012,6 +2012,13 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 验证：反馈与数据库迁移专项测试 12 项通过，接口级用例因当前项目 `.venv` 缺少 FastAPI 而明确跳过 1 项；前端全量 Vitest 27 个文件、128/128 项通过；TypeScript 与 Vite production build 通过（2025 modules transformed）；`git diff --check` 通过。构建保留既有 CSS minify 与主包大于 500 kB 警告。
 - 待办/风险：尚未在包含完整后端依赖的环境验证管理员鉴权/CSRF 接口用例，也未使用真实管理员会话进行浏览器人工验收；状态更新采用最后写入生效，未提供多人同时编辑冲突提示；依赖安装报告的既有审计风险未在本次升级依赖。
 
+### 06:58 — 增加最后一问原位编辑与管理端审计
+
+- 完成：在用户提问复制按钮右侧增加原位编辑入口，仅允许编辑最后一问；编辑成功后复用完整聊天检索与生成链路，并原子切换问题和回答活动版本，失败时保留原内容。管理面对话详情继续只读展示当前内容，并可展开查看问题编辑记录及其对应回答版本。
+- 文件：`api/conversation_runtime.py`、`api/db_migrations.py`、`api/routes_chat.py`、`api/schemas.py`、`frontend/src/api/chatStream.ts`、`frontend/src/components/ChatLayout.tsx`、`frontend/src/components/Message.tsx`、`frontend/src/components/MessageList.tsx`、`frontend/src/hooks/useChat.ts`、`frontend/src/pages/admin/AdminConversationsPage.tsx`、`frontend/src/types.ts`、相关前后端测试、`project-docs/features/chat-runtime.md`、`WORKLOG.md`。
+- 验证：Python 语法检查通过；提问编辑、回答版本和数据库迁移专项测试 15/15 通过；前端全量 Vitest 27 个文件、135/135 项通过；TypeScript project build 与 Vite production build 通过（2025 modules transformed）；`git diff --check` 通过。后端全量测试在收集阶段因当前虚拟环境缺少 `numpy`、`fastapi` 和 `qdrant_client` 未能执行，未出现业务断言失败。构建保留既有 React Router future warning、CSS minify warning 和主包大于 500 kB 警告。
+- 待办/风险：功能待用户使用真实登录会话和真实 LLM 验收；首次启动会按现有迁移流程备份 `app.sqlite`，新增用户问题版本表并为回答版本增加关联字段，不需要重建 Qdrant 索引。未部署、未操作真实对话数据。
+
 ### 07:01 — 重构用户管理行内操作
 
 - 完成：将用户表格每行三个宽度不一的操作按钮收敛为固定尺寸的三点管理入口；角色调整与密码重置置于操作菜单上部，启停账号作为状态敏感操作经分隔线独立置底，并补充点击外部、滚动/缩放和 Esc 关闭能力，消除管理员与普通用户行的操作错位。

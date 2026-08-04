@@ -7,7 +7,7 @@ import type { ChatMessage, Source } from "../types";
 import { stripMarkdown } from "../utils/markdown";
 import { FeedbackBar } from "./FeedbackBar";
 import { timestampToSeconds, useVideoPlayer } from "../hooks/useVideoPlayer";
-import { Check, CircleAlert, CirclePlay, Copy, Files } from "lucide-react";
+import { Check, CircleAlert, CirclePlay, Copy, Files, Pencil, Send, X } from "lucide-react";
 import {
   CITATION_EVENT,
   CITATION_HOVER_EVENT,
@@ -217,6 +217,8 @@ export function Message({
   turnIndex,
   sourcesSelected = false,
   onToggleSources,
+  canEdit = false,
+  onEdit,
   canRegenerate = false,
   onRegenerate,
   onViewAnswerVersion,
@@ -226,17 +228,43 @@ export function Message({
   turnIndex: number;
   sourcesSelected?: boolean;
   onToggleSources?: (messageId: string) => void;
+  canEdit?: boolean;
+  onEdit?: (messageId: string, content: string) => void;
   canRegenerate?: boolean;
   onRegenerate?: (messageId: string) => void;
   onViewAnswerVersion?: (messageId: string, versionIndex: number) => void;
 }) {
   const isUser = msg.role === "user";
   const [copied, setCopied] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(msg.content);
+  const editRef = useRef<HTMLTextAreaElement | null>(null);
   const copyResetTimer = useRef<number | null>(null);
 
   useEffect(() => () => {
     if (copyResetTimer.current !== null) window.clearTimeout(copyResetTimer.current);
   }, []);
+
+  useEffect(() => {
+    if (!editing) setDraft(msg.content);
+  }, [editing, msg.content]);
+
+  useEffect(() => {
+    if (!editing) return;
+    editRef.current?.focus();
+    editRef.current?.setSelectionRange(draft.length, draft.length);
+  }, [editing]);
+
+  const submitEdit = () => {
+    const trimmed = draft.trim();
+    if (!trimmed || trimmed === msg.content) {
+      setEditing(false);
+      setDraft(msg.content);
+      return;
+    }
+    setEditing(false);
+    onEdit?.(msg.id, trimmed);
+  };
 
   const copyContent = async () => {
     try {
@@ -261,18 +289,79 @@ export function Message({
       >
         {isUser ? (
           <>
-            <div className="rounded-ui-lg bg-primary px-4 py-3 text-primary-foreground">
-              <div className="whitespace-pre-wrap break-words">{msg.content}</div>
-            </div>
-            <button
-              type="button"
-              aria-label={copied ? "提问已复制" : "复制提问"}
-              title={copied ? "提问已复制" : "复制提问"}
-              onClick={copyContent}
-              className={`mt-2 inline-flex size-8 items-center justify-center rounded-ui-md hover:bg-secondary ${copied ? "text-success hover:text-success" : "text-muted-foreground hover:text-foreground"}`}
-            >
-              {copied ? <Check className="size-4 text-success" /> : <Copy className="size-4" />}
-            </button>
+            {editing ? (
+              <div className="w-full min-w-[18rem] rounded-ui-lg bg-primary p-3 text-primary-foreground shadow-surface">
+                <label htmlFor={`edit-question-${msg.id}`} className="sr-only">编辑提问</label>
+                <textarea
+                  ref={editRef}
+                  id={`edit-question-${msg.id}`}
+                  value={draft}
+                  rows={Math.min(8, Math.max(2, draft.split("\n").length))}
+                  onChange={(event) => setDraft(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") {
+                      setEditing(false);
+                      setDraft(msg.content);
+                    } else if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+                      event.preventDefault();
+                      submitEdit();
+                    }
+                  }}
+                  className="max-h-56 min-h-20 w-full resize-y rounded-ui-md border border-white/25 bg-white/10 px-3 py-2 text-sm leading-relaxed text-primary-foreground outline-none placeholder:text-primary-foreground/60 focus:border-white/60 focus:ring-2 focus:ring-white/20"
+                />
+                <div className="mt-2 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditing(false);
+                      setDraft(msg.content);
+                    }}
+                    className="inline-flex h-8 items-center gap-1.5 rounded-ui-md px-3 text-xs font-medium hover:bg-white/10"
+                  >
+                    <X className="size-3.5" />取消
+                  </button>
+                  <button
+                    type="button"
+                    onClick={submitEdit}
+                    disabled={!draft.trim() || draft.trim() === msg.content}
+                    className="inline-flex h-8 items-center gap-1.5 rounded-ui-md bg-white px-3 text-xs font-medium text-primary shadow-sm hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <Send className="size-3.5" />发送
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="rounded-ui-lg bg-primary px-4 py-3 text-primary-foreground">
+                  <div className="whitespace-pre-wrap break-words">{msg.content}</div>
+                </div>
+                <div className="mt-2 flex items-center">
+                  <button
+                    type="button"
+                    aria-label={copied ? "提问已复制" : "复制提问"}
+                    title={copied ? "提问已复制" : "复制提问"}
+                    onClick={copyContent}
+                    className={`inline-flex size-8 items-center justify-center rounded-ui-md hover:bg-secondary ${copied ? "text-success hover:text-success" : "text-muted-foreground hover:text-foreground"}`}
+                  >
+                    {copied ? <Check className="size-4 text-success" /> : <Copy className="size-4" />}
+                  </button>
+                  {canEdit && (
+                    <button
+                      type="button"
+                      aria-label="编辑提问"
+                      title="编辑提问"
+                      onClick={() => {
+                        setDraft(msg.content);
+                        setEditing(true);
+                      }}
+                      className="inline-flex size-8 items-center justify-center rounded-ui-md text-muted-foreground hover:bg-secondary hover:text-foreground"
+                    >
+                      <Pencil className="size-4" />
+                    </button>
+                  )}
+                </div>
+              </>
+            )}
           </>
         ) : (
           <>

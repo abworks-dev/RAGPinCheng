@@ -185,6 +185,49 @@ describe("Message assistant actions", () => {
     vi.useRealTimers();
   });
 
+  it("edits the latest user question in place and submits with Ctrl+Enter", () => {
+    const edit = vi.fn();
+    render(
+      <Message
+        msg={{ id: "21", role: "user", content: "原问题" }}
+        conversationId="conversation-1"
+        turnIndex={1}
+        canEdit
+        onEdit={edit}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "编辑提问" }));
+    const textbox = screen.getByRole("textbox", { name: "编辑提问" });
+    expect(textbox).toHaveValue("原问题");
+    fireEvent.change(textbox, { target: { value: "编辑后的问题" } });
+    fireEvent.keyDown(textbox, { key: "Enter", ctrlKey: true });
+
+    expect(edit).toHaveBeenCalledWith("21", "编辑后的问题");
+    expect(screen.queryByRole("textbox", { name: "编辑提问" })).not.toBeInTheDocument();
+  });
+
+  it("cancels question editing without emitting a change", () => {
+    const edit = vi.fn();
+    render(
+      <Message
+        msg={{ id: "21", role: "user", content: "原问题" }}
+        conversationId="conversation-1"
+        turnIndex={1}
+        canEdit
+        onEdit={edit}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "编辑提问" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "编辑提问" }), {
+      target: { value: "不保存" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+
+    expect(edit).not.toHaveBeenCalled();
+    expect(screen.getByText("原问题")).toBeInTheDocument();
+  });
+
   it("places regeneration beside copy and disables non-latest answers", () => {
     const regenerate = vi.fn();
     const { rerender } = render(
