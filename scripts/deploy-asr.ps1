@@ -12,6 +12,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 $taskName = "RAGPinCheng-ASR"
+$serviceStartScript = Join-Path $ProgramRoot "scripts\start-asr-service.ps1"
+$expectedTaskArguments = '-NoProfile -ExecutionPolicy Bypass -File "{0}"' -f $serviceStartScript
 
 function Get-MachinePython311 {
     $candidates = @()
@@ -86,6 +88,134 @@ function Move-StagingToBackup {
     $destination = Join-Path $backupRoot (("{0}-staging-{1}-{2}" -f $Reason, (Get-Date -Format "yyyyMMdd-HHmmssfff"), $CommitSha.Substring(0, 12)))
     Move-Item -LiteralPath $Path -Destination $destination
     Write-Host "Archived $Reason staging directory to $destination"
+}
+
+function Assert-TaskIsOurs {
+    param([object]$Task)
+    $actions = @($Task.Actions)
+    if (
+        $actions.Count -ne 1 -or
+        [string]$actions[0].Execute -ne "powershell.exe" -or
+        [string]$actions[0].Arguments -ne $expectedTaskArguments -or
+        [string]$Task.Principal.UserId -ne "Administrator" -or
+        [string]$Task.Principal.LogonType -ne "S4U"
+    ) {
+        throw "Refusing to modify an unexpected RAGPinCheng-ASR Scheduled Task definition"
+    }
+}
+
+function Get-VerifiedAsrListenerIds {
+    $connections = @(
+        Get-NetTCPConnection -LocalPort 8200 -State Listen -ErrorAction SilentlyContinue
+    )
+    if ($connections.Count -eq 0) {
+        return @()
+    }
+    $venvPython = Join-Path $venvRoot "Scripts\python.exe"
+    if (-not (Test-Path -LiteralPath $venvPython -PathType Leaf)) {
+        throw "ASR venv is missing"
+    }
+    $basePythonOutput = & $venvPython -c "import sys; print(sys._base_executable)"
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($basePythonOutput)) {
+        throw "Unable to resolve the ASR venv base Python executable"
+    }
+    $basePython = (Resolve-Path -LiteralPath ([string]$basePythonOutput).Trim()).Path
+    $expectedCommandLine = (
+        '"{0}" -m uvicorn asr_service.app:create_app --factory --host 0.0.0.0 --port 8200' -f
+        $basePython
+    )
+    $processIds = @(
+        $connections |
+            ForEach-Object { $_.OwningProcess } |
+            Sort-Object -Unique
+    )
+    foreach ($processId in $processIds) {
+        $process = Get-CimInstance Win32_Process -Filter ("ProcessId={0}" -f $processId)
+        if (
+            $null -eq $process -or
+            [string]$process.ExecutablePath -ne $basePython -or
+            [string]$process.CommandLine -ne $expectedCommandLine
+        ) {
+            throw "Refusing to stop an unexpected process listening on TCP 8200"
+        }
+    }
+    return $processIds
+}
+
+function Wait-AsrPortReleased {
+    $deadline = (Get-Date).AddSeconds(30)
+    while (
+        (Get-NetTCPConnection -LocalPort 8200 -State Listen -ErrorAction SilentlyContinue) -and
+        (Get-Date) -lt $deadline
+    ) {
+        Start-Sleep -Seconds 1
+    }
+    if (Get-NetTCPConnection -LocalPort 8200 -State Listen -ErrorAction SilentlyContinue) {
+        throw "TCP port 8200 remained listening after the verified ASR service was stopped"
+    }
+}
+
+function Stop-OwnedAsrService {
+    param([switch]$RequireStopped)
+    $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+    if ($null -ne $task) {
+        Assert-TaskIsOurs -Task $task
+    }
+    $listenerIds = @(Get-VerifiedAsrListenerIds)
+    $isRunning = (
+        ($null -ne $task -and [string]$task.State -eq "Running") -or
+        $listenerIds.Count -gt 0
+    )
+    if ($RequireStopped -and $isRunning) {
+        throw "RAGPinCheng-ASR is running; deploy again with ActivateService=true for a verified hot update"
+    }
+    if (-not $isRunning) {
+        return $false
+    }
+    if ($null -ne $task -and [string]$task.State -eq "Running") {
+        Stop-ScheduledTask -TaskName $taskName
+    }
+    foreach ($processId in $listenerIds) {
+        if (Get-Process -Id $processId -ErrorAction SilentlyContinue) {
+            Stop-Process -Id $processId -Force
+        }
+    }
+    Wait-AsrPortReleased
+    return $true
+}
+
+function Register-AndStartAsrTask {
+    $python = Join-Path $venvRoot "Scripts\python.exe"
+    if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
+        throw "ASR venv is missing"
+    }
+    $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $expectedTaskArguments
+    $trigger = New-ScheduledTaskTrigger -AtStartup
+    $principal = New-ScheduledTaskPrincipal -UserId "Administrator" -LogonType S4U -RunLevel Highest
+    $settings = New-ScheduledTaskSettingsSet -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit (New-TimeSpan -Days 3)
+    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
+    Start-ScheduledTask -TaskName $taskName
+}
+
+function Wait-AsrHealthy {
+    $deadline = (Get-Date).AddMinutes(10)
+    while ((Get-Date) -lt $deadline) {
+        try {
+            $health = Invoke-RestMethod -Method Get -Uri "http://127.0.0.1:8200/health" -TimeoutSec 5
+            if ($health.status -eq "ok" -and $health.api_version -eq "asr-service/1") {
+                $task = Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
+                Assert-TaskIsOurs -Task $task
+                if ([string]$task.State -ne "Running") {
+                    throw "RAGPinCheng-ASR Scheduled Task is not running"
+                }
+                return
+            }
+        } catch {
+            # Startup may reject connections while the model and application load.
+        }
+        Start-Sleep -Seconds 5
+    }
+    throw "ASR service did not become healthy within 10 minutes"
 }
 
 $staging = Join-Path $ProgramRoot ("app-staging-" + $CommitSha)
@@ -195,32 +325,66 @@ if ($InstallDependencies) {
 }
 
 $backup = $null
+$newAppInstalled = $false
+$serviceWasRunning = $false
 try {
+    if ($ActivateService) {
+        $serviceWasRunning = Stop-OwnedAsrService
+    } else {
+        Stop-OwnedAsrService -RequireStopped | Out-Null
+    }
     if (Test-Path -LiteralPath $appRoot) {
         $backup = Join-Path $backupRoot ("app-" + (Get-Date -Format "yyyyMMdd-HHmmss") + "-" + $CommitSha.Substring(0, 12))
         Move-Item -LiteralPath $appRoot -Destination $backup
     }
     Move-Item -LiteralPath $staging -Destination $appRoot
+    $newAppInstalled = $true
 
     if ($ActivateService) {
-        $python = Join-Path $venvRoot "Scripts\python.exe"
-        if (-not (Test-Path -LiteralPath $python)) { throw "ASR venv is missing" }
-        $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument ('-NoProfile -ExecutionPolicy Bypass -File "{0}"' -f (Join-Path $scriptRoot "start-asr-service.ps1"))
-        $trigger = New-ScheduledTaskTrigger -AtStartup
-        $principal = New-ScheduledTaskPrincipal -UserId "Administrator" -LogonType S4U -RunLevel Highest
-        $settings = New-ScheduledTaskSettingsSet -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit (New-TimeSpan -Days 3)
-        Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
-        Start-ScheduledTask -TaskName $taskName
+        Register-AndStartAsrTask
+        Wait-AsrHealthy
+        & (Join-Path $scriptRoot "verify-asr-service.ps1") -DataRoot $DataRoot -AsrUrl "http://127.0.0.1:8200"
+        if ($LASTEXITCODE -ne 0) {
+            throw "ASR deployment verification failed"
+        }
     }
 } catch {
-    if (Test-Path -LiteralPath $appRoot) {
-        $failed = Join-Path $backupRoot ("failed-app-" + (Get-Date -Format "yyyyMMdd-HHmmss") + "-" + $CommitSha.Substring(0, 12))
-        Move-Item -LiteralPath $appRoot -Destination $failed
+    $original = $_
+    try {
+        if ($ActivateService) {
+            Stop-OwnedAsrService | Out-Null
+        }
+    } catch {
+        Write-Warning "Unable to stop the failed ASR deployment cleanly: $($_.Exception.Message)"
+    }
+    if ($newAppInstalled -and (Test-Path -LiteralPath $appRoot)) {
+        try {
+            $failed = Join-Path $backupRoot ("failed-app-" + (Get-Date -Format "yyyyMMdd-HHmmss") + "-" + $CommitSha.Substring(0, 12))
+            Move-Item -LiteralPath $appRoot -Destination $failed
+        } catch {
+            Write-Warning "Unable to archive the failed ASR application: $($_.Exception.Message)"
+        }
     }
     if ($backup -and (Test-Path -LiteralPath $backup)) {
-        Move-Item -LiteralPath $backup -Destination $appRoot
+        try {
+            if (-not (Test-Path -LiteralPath $appRoot)) {
+                Move-Item -LiteralPath $backup -Destination $appRoot
+            } else {
+                Write-Warning "Unable to restore the previous ASR application because the application path is occupied"
+            }
+        } catch {
+            Write-Warning "Unable to restore the previous ASR application: $($_.Exception.Message)"
+        }
     }
-    throw
+    if ($ActivateService -and $serviceWasRunning -and (Test-Path -LiteralPath $appRoot)) {
+        try {
+            Register-AndStartAsrTask
+            Wait-AsrHealthy
+        } catch {
+            Write-Warning "Unable to restart the previous ASR service after rollback: $($_.Exception.Message)"
+        }
+    }
+    throw $original
 }
 
 Write-Host "Repository payload deployed for commit $CommitSha. InstallDependencies=$InstallDependencies ActivateService=$ActivateService"
