@@ -1,6 +1,7 @@
 # faster-whisper R3 统一资格验证实施方案
 
-> 状态：已于 2026-08-05 获用户批准，R3 仓库实施与统一生产资格 workflow 进行中。
+> 状态：已于 2026-08-05 获用户批准；统一生产资格 workflow 已合并，首次执行因固定样本
+> Manifest 缺失而在下载前失败关闭；固定 Windows TTS 样本准备通道已获批实施。
 > 日期口径：2026-08-05，Asia/Shanghai。
 > 风险等级：R3（Windows 生产 GPU 主机上的依赖解析、模型下载与真实 CUDA 推理）。
 > 唯一执行基线：本文件取代历史 `faster-whisper-r3a-*` 方案作为后续执行入口；
@@ -160,6 +161,18 @@ R3 不修改：
 推荐复用已经审核过的 8 个非敏感短样本语义与阈值，但复制到 §4.1 的固定输入目录，
 不得直接依赖历史 run 的可变路径。
 
+固定样本由独立、默认关闭的 workflow 开关调用 Windows 内置
+`System.Speech.Synthesis.SpeechSynthesizer` 生成；只选择已启用的 `zh-CN` voice，
+并固定输出为 16 kHz、mono、PCM16 WAV。八段正文、ID、场景、reference、
+expected terms/codes 和来源声明均固化在仓库脚本中，不接受 workflow 自由输入。
+`noisy-bim-zh` 在 TTS PCM 上叠加固定种子的低幅背景噪声，其余样本保持原始 TTS
+输出。
+
+生成过程先写入每次运行的 staging，计算实际时长和小写 SHA-256，写出严格
+Manifest，再调用资格运行器的 `--validate-manifest-only`。固定输入目录不存在时才
+原子提升 staging；目录为空时先把空目录移动到本次审计目录；已有内容只有在严格
+Schema 和固定语义均匹配时才复用，其他情况失败关闭且不覆盖、不删除。
+
 Manifest 必须是严格 JSON，至少包含：
 
 ```text
@@ -205,6 +218,7 @@ samples[8]
 | `scripts/qualify-faster-whisper-production.ps1` | Windows 总编排：preflight、wheelhouse、隔离 venv、模型准备、临时服务、GPU/BGE 监控、清理和最终 verdict |
 | `scripts/prepare_faster_whisper_model.py` | 固定 Hugging Face repo/revision 下载、staging、普通文件/无 symlink 检查、全文件 Manifest 和本机 hash 校验 |
 | `scripts/run_faster_whisper_qualification.py` | 严格读取 8 样本 Manifest，通过隔离 ASR HTTP + Remote Provider + pipeline 生成 Canonical/Markdown，计算质量与时间戳指标 |
+| `scripts/prepare-faster-whisper-qualification-samples.ps1` | 使用 Windows 内置中文 TTS 生成固定 8 样本、确定性噪声、实际时长/SHA-256 和严格 Manifest，并在 staging 校验后提升 |
 | `asr_service/faster-whisper-qualification-manifest.example.json` | 不含真实音频或内部文本的严格 Manifest 模板 |
 | `asr_service/tests/test_faster_whisper_qualification.py` | 模型准备、Manifest、指标、报告、失败关闭和无真实依赖测试 |
 
@@ -248,10 +262,13 @@ workflow 只接受：
 ```text
 commit_sha=<完整 40 位、已合并 master SHA>
 execute_qualification=false|true（默认 false）
+prepare_synthetic_samples=false|true（默认 false）
 ```
 
 `commit_sha` 必须等于 workflow dispatch revision。不得接受自由模型 ID、revision、
-设备、compute type、解码参数、目录、端口或样本路径。
+设备、compute type、解码参数、目录、端口、voice、样本文本或样本路径。启用
+`prepare_synthetic_samples` 只准备固定合成样本；R3 实测仍必须显式启用
+`execute_qualification`。
 
 只允许使用既有 `production-asr` Environment 中的：
 

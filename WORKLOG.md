@@ -1959,3 +1959,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`frontend/src/pages/admin/AdminLayout.tsx`、`frontend/src/pages/admin/AdminLayout.test.tsx`、`WORKLOG.md`。
 - 验证：管理布局定向 Vitest 2/2 通过；TypeScript project build 与 Vite production build 通过（2024 modules transformed）；`git diff --check` 通过。保留既有 React Router future warning、CSS minify warning 和主包大于 500 kB 警告。
 - 待办/风险：尚未使用真实管理员登录会话进行浏览器滚动验收；未修改业务组件、API、认证、数据、依赖或部署配置。
+
+### 05:49 — 增加 R3 固定合成样本准备通道
+
+- 完成：在既有 faster-whisper R3 workflow 增加默认关闭的固定样本准备开关；新增 Windows 内置 `zh-CN` TTS 生成器，在审计 staging 中生成 8 个非敏感 16 kHz mono PCM16 WAV，为带噪场景叠加固定种子低幅噪声，按实际时长和 SHA-256 生成严格 Manifest，并在提升前后复用现有资格验证器校验 Schema、文件和固定语义。已有固定样本可幂等复用，空目录保留审计副本后提升，其他已有内容失败关闭且不覆盖、不删除。
+- 文件：新增 `scripts/prepare-faster-whisper-qualification-samples.ps1`；修改 `.github/workflows/qualify-faster-whisper-production.yml`、`tests/test_asr_deployment_static.py` 和 `project-docs/plans/faster-whisper-r3-unified-qualification.md`。
+- 验证：workflow YAML 解析、PowerShell AST、严格 Manifest 单段/空段数组序列化及 `git diff --check` 通过；R3 专项 47/47 通过；本地无外部服务的 ASR/Profile/Remote Provider/部署回归 322/322 通过。
+- 待办/风险：尚未提交、推送、创建 PR、运行远端 CI 或在 Windows 生产 runner 生成样本；真实执行要求主机已有启用的 `zh-CN` Windows voice，缺失时会在生成阶段失败关闭。未启动或修改 ASR/GPU 服务、Scheduled Task、防火墙、Ubuntu、数据库、Qdrant、业务媒体或 Profile admission。
