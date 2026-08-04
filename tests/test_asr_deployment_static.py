@@ -429,6 +429,11 @@ def test_faster_whisper_dependency_diagnosis_is_manual_fixed_and_sanitized():
     assert 'D:\\private\\python.exe : ERROR: No matching distribution found for jieba' in script
     assert "diagnosis_kind = $DiagnosisKind" in script
     assert "affected_requirement = $AffectedRequirement" in script
+    assert "focused_probe_executed = $FocusedProbeExecuted" in script
+    assert "focused_probe_exit_code = $FocusedProbeExitCode" in script
+    assert "focused-binary-probe.log" in script
+    assert "Focused binary-only requirement probe succeeded" in script
+    assert "$evidence.ProbeConstraint" in script
     assert "exit 0" in script
     assert "Assert-SanitizerSelfTest" in script
     assert "Assert-ProductionFreeze" in script
