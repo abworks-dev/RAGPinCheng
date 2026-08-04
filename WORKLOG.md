@@ -2034,6 +2034,13 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 验证：来源选择与标题按钮专项 Vitest 2 个文件、5/5 项通过；TypeScript project build 与 Vite production build 通过（2026 modules transformed）；`git diff --check` 通过。构建保留既有 CSS 语法和主包大于 500 kB 警告。
 - 待办/风险：尚未使用含多个不同来源数量回答的真实会话进行桌面和移动端视觉验收；未修改 API、数据结构、RAG、依赖或部署。
 
+### 07:19 — 稳定管理面板滚动槽
+
+- 完成：确认长页面出现浏览器纵向滚动条后会缩小可用宽度，使居中内容向左偏移半个滚动条宽度；管理面板挂载期间现会为根页面预留稳定滚动槽，短页与长页保持同一水平居中基准，离开管理面板后自动清理。
+- 文件：`frontend/src/pages/admin/AdminLayout.tsx`、`frontend/src/pages/admin/AdminLayout.test.tsx`、`frontend/src/styles/index.css`、`WORKLOG.md`。
+- 验证：管理布局专项 Vitest 4/4 通过；TypeScript project build 与 Vite production build 通过（1965 modules transformed）。构建保留既有 CSS 语法与主包大于 500 kB 警告。
+- 待办/风险：功能处于待用户验收；尚未在真实管理员登录态下切换长短页面做浏览器视觉对比。本轮未修改 API、数据、依赖或部署，回滚只需移除管理布局生命周期类及对应 CSS。
+
 ### 07:20 — 修复引用角标悬浮框异常
 
 - 完成：在最新 `master` 上将引用悬浮框统一为主题语义色，恢复深色模式下不可见的来源标题；消除角标与浮层之间的命中空隙，改为可取消的 150ms 延迟关闭，使鼠标可稳定移入浮层；保留视口边缘自动翻转，并将浮层改为段落内合法的行内容器。
