@@ -83,6 +83,24 @@ class FunAsrSenseVoiceEngine:
             )
         return self._model
 
+    @staticmethod
+    def _postprocess_text(raw_text: str) -> str:
+        postprocess_module = importlib.import_module(
+            "funasr.utils.postprocess_utils"
+        )
+        postprocess = getattr(
+            postprocess_module, "rich_transcription_postprocess", None
+        )
+        if not callable(postprocess):
+            raise ValueError("SenseVoice postprocessor is unavailable")
+        text = postprocess(raw_text)
+        if type(text) is not str:
+            raise ValueError("invalid postprocessed engine text")
+        text = text.strip()
+        if not text or "<|" in text or "|>" in text:
+            raise ValueError("invalid postprocessed engine text")
+        return text
+
     def transcribe_chunk(
         self,
         chunk: PreparedAudioChunk,
@@ -108,6 +126,7 @@ class FunAsrSenseVoiceEngine:
             text = output[0].get("text")
             if type(text) is not str or not text.strip():
                 raise ValueError("invalid engine text")
+            text = self._postprocess_text(text)
             return EngineChunkCandidate(
                 self.provider_key,
                 "zh-CN",
@@ -118,7 +137,7 @@ class FunAsrSenseVoiceEngine:
                         "0",
                         str(chunk.end_ms - chunk.start_ms),
                         TimeUnit.milliseconds,
-                        text.strip(),
+                        text,
                     ),
                 ),
             )
