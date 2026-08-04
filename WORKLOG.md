@@ -1974,3 +1974,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 验证：后端资料聚合与状态筛选专项测试 2/2 通过，修改 Python 文件语法检查通过；前端全量 Vitest 27 个文件、127/127 项通过；TypeScript project build 与 Vite production build通过（2025 modules transformed）；虚构数据下完成桌面浏览器资料列表、上传抽屉和行操作菜单视觉检查。构建保留既有 React Router future warning、CSS minify warning 和主包大于 500 kB 警告。
 - 用户验收：2026-08-05 06:06，用户明确确认“验收通过”，本任务状态更新为已完成。
 - 边界/风险：未部署、未删除真实资料、未重建索引。资料 ID 由部署内源路径哈希派生，跨部署移动源目录不保证不变；窄屏仍采用横向表格滚动。
+
+### 06:27 — 增加 faster-whisper R3 依赖冲突诊断
+
+- 完成：按获批 R3 方案新增默认关闭的 `production-asr` 依赖诊断 workflow 和纯 ASCII Windows PowerShell 入口；固定读取 source run `30955067671`，优先复用既有 resolver 日志，不足时只在独立 venv 重放 pip dry-run。诊断严格校验 production freeze、组合 requirements 和文件身份，只输出脱敏冲突行与 SHA-256，拒绝 URL、代理、Token、绝对路径和完整 freeze；不安装依赖、不下载模型、不启动服务或 CUDA。
+- 文件：新增 `.github/workflows/diagnose-faster-whisper-dependencies-production.yml`、`scripts/diagnose-faster-whisper-dependencies.ps1`；修改 `tests/test_asr_deployment_static.py` 和 `project-docs/plans/faster-whisper-r3-unified-qualification.md`。
+- 验证：Windows PowerShell 5.1 AST、workflow YAML、脱敏函数内存自检和 `git diff --check` 通过；R3 专项 48/48 通过；本地无外部服务的 ASR/Profile/Remote Provider/部署回归 323/323 通过。
+- 待办/风险：尚未推送、创建 PR、运行远端 CI 或执行生产诊断 workflow；诊断结果出来后仍不得自动修改依赖 pin、production freeze、隔离结构或 Profile admission。
