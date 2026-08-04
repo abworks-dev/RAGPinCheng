@@ -9,7 +9,6 @@ import {
   FileSpreadsheet,
   FileText,
   LocateFixed,
-  PanelRightClose,
   Presentation,
   Video,
 } from "lucide-react";
@@ -94,13 +93,11 @@ function matchesQuery(text: string, query?: string): React.ReactNode {
 export function SourceWorkspace({
   messages,
   conversationId,
-  onClose,
   selectedMessageId,
   onSelectedMessageChange,
 }: {
   messages: ChatMessage[];
   conversationId: string | null;
-  onClose?: () => void;
   selectedMessageId?: string | null;
   onSelectedMessageChange?: (messageId: string) => void;
 }) {
@@ -148,7 +145,7 @@ export function SourceWorkspace({
   if (!activeSet || !source) {
     return (
       <aside className="flex h-full flex-col bg-card">
-        <WorkspaceHeader count={0} onClose={onClose} />
+        <WorkspaceHeader count={0} />
         <div className="flex flex-1 flex-col items-center justify-center px-8 text-center">
           <Clipboard className="mb-3 size-8 text-muted-foreground/60" />
           <h2 className="text-sm font-medium text-foreground">暂无可核验来源</h2>
@@ -162,7 +159,7 @@ export function SourceWorkspace({
 
   return (
     <aside className="flex h-full min-h-0 flex-col bg-card">
-      <WorkspaceHeader count={activeSet.sources.length} onClose={onClose} />
+      <WorkspaceHeader count={activeSet.sources.length} />
       {sets.length > 1 && (
         <label className="border-b border-border px-4 py-3">
           <span className="mb-1 block text-[11px] font-medium text-muted-foreground">回答轮次</span>
@@ -238,20 +235,13 @@ export function SourceWorkspace({
   );
 }
 
-function WorkspaceHeader({ count, onClose }: { count: number; onClose?: () => void }) {
+function WorkspaceHeader({ count }: { count: number }) {
   return (
-    <div className="flex h-14 shrink-0 items-center justify-between border-b border-border px-4">
+    <div className="flex h-14 shrink-0 items-center border-b border-border px-4">
       <div>
         <h2 className="text-sm font-semibold text-foreground">来源核验</h2>
         <p className="text-[11px] text-muted-foreground">{count ? `${count} 项回答依据` : "等待检索结果"}</p>
       </div>
-      {onClose && (
-        <button type="button" aria-label="收起来源" title="收起来源" onClick={onClose} className="inline-flex h-9 items-center gap-1.5 rounded-ui-md px-2 text-muted-foreground hover:bg-secondary hover:text-foreground">
-          {count > 0 && <span className="min-w-5 rounded-full bg-ui-accent px-1.5 py-0.5 text-[11px] font-medium text-ui-accent-foreground">{count}</span>}
-          <PanelRightClose className="size-4" />
-          <span className="text-xs">来源</span>
-        </button>
-      )}
     </div>
   );
 }

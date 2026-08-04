@@ -21,4 +21,18 @@ describe("ChatHeader source control", () => {
     render(<ChatHeader {...props} sourceCount={2} />);
     expect(screen.getByRole("button", { name: /来源/ })).toBeInTheDocument();
   });
+
+  it("keeps the desktop source control fixed and consistent across states", () => {
+    const { rerender } = render(<ChatHeader {...props} sourceCount={3} />);
+    const openButton = screen.getByRole("button", { name: "展开来源" });
+
+    expect(openButton).toHaveTextContent("来源3");
+    expect(openButton).toHaveClass("transition-none", "xl:fixed", "w-[5.75rem]");
+
+    rerender(<ChatHeader {...props} sourceCount={3} sourceOpen />);
+    const closeButton = screen.getByRole("button", { name: "收起来源" });
+
+    expect(closeButton).toHaveTextContent("来源3");
+    expect(closeButton).toHaveClass("transition-none", "xl:fixed", "w-[5.75rem]");
+  });
 });

@@ -1844,3 +1844,9 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 完成：新增共享反馈弹窗，在问题类型前展示由入口固定的“问题分类”；回答下方入口固定为“回答问题”，保留有害/不安全、虚假信息、没有帮助、其他类型；来源核验的“报告引用问题”移除内嵌表单，改用同一弹窗并固定为“引用问题”，提供引用内容不符、来源定位错误、资料已过时、其他类型。
 - 文件：新增 `frontend/src/components/FeedbackDialog.tsx` 及测试，修改 `FeedbackBar.tsx`、`FeedbackBar.test.tsx`、`SourceWorkspace.tsx` 与 `WORKLOG.md`；未修改反馈 API、管理端、消息、引用定位、RAG 或后端业务。
 - 验证：反馈专项 Vitest 2 个文件、6/6 项通过；前端全量 Vitest 26 个文件、114/114 项通过；`npm run build` 通过（2023 modules transformed）；`git diff --check` 无内容错误。保留既有 CSS minify 与主包大于 500 kB 警告。
+
+### 22:34 — 固定来源开关并精简会话标题栏
+
+- 完成：桌面端来源按钮改为固定在视口右上角，展开与收起保持相同宽度、内容顺序和数量徽标，仅切换开合图标并显式取消按钮过渡；移除来源面板内重复且随宽度变化移动的关闭按钮；会话标题由 14px 微调为 15px，并移除标题栏底部分割线。
+- 文件：`frontend/src/components/ChatHeader.tsx`、`frontend/src/components/ChatHeader.test.tsx`、`frontend/src/components/ChatLayout.tsx`、`frontend/src/components/SourceWorkspace.tsx`、`WORKLOG.md`；未修改来源数据、引用联动、反馈弹窗、API、SSE、RAG 或后端业务。
+- 验证：来源按钮定向 Vitest 3/3 通过；前端全量 Vitest 26 个文件、115/115 项通过；TypeScript project build 与 Vite production build 通过（2023 modules transformed）；`git diff --check` 通过。保留既有 React Router future warning、CSS minify warning 和主包大于 500 kB 警告；本轮未使用真实登录会话进行浏览器视觉验收。
