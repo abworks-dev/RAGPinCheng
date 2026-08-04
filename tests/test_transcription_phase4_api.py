@@ -11,7 +11,7 @@ from fastapi import HTTPException
 
 from api.auth import CurrentUser, require_admin, require_csrf_admin
 from api.routes_admin import router as admin_router, upload_media
-from api.routes_transcription import router as transcription_router
+from api.routes_transcription import _failure_dto, router as transcription_router
 from api.schemas import RetryTranscriptionRequest
 from tests.transcription_fixture_helpers import make_pending_job, make_phase2_store
 
@@ -52,6 +52,22 @@ def test_retry_request_rejects_all_untrusted_execution_controls():
             request_idempotency_key="22222222-2222-4222-8222-222222222222",
             service_url="https://attacker.invalid",
         )
+
+
+def test_failure_dto_exposes_safe_message_and_retry_policy():
+    unavailable = _failure_dto("provider_unavailable")
+    assert unavailable is not None
+    assert unavailable.model_dump() == {
+        "code": "provider_unavailable",
+        "message": "自动转录服务暂时不可用，请稍后重试。",
+        "retryable": True,
+    }
+
+    identity_conflict = _failure_dto("service_request_identity_conflict")
+    assert identity_conflict is not None
+    assert identity_conflict.code == "service_request_identity_conflict"
+    assert identity_conflict.retryable is False
+    assert "identity_conflict" not in identity_conflict.message
 
 
 def test_upload_rejects_missing_mode_before_reading_or_writing():

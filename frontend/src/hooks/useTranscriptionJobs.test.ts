@@ -16,6 +16,7 @@ const runningJob = {
   total_ms: 1000,
   failure_error_code: null,
   error_summary: null,
+  failure: null,
   result_version_id: null,
   created_at: 1,
   started_at: 2,

@@ -74,6 +74,7 @@ const succeededJob = {
   total_ms: 1000,
   failure_error_code: null,
   error_summary: null,
+  failure: null,
   result_version_id: "version-1",
   created_at: 1,
   started_at: 2,
@@ -88,6 +89,7 @@ const failedJob = {
   status: "failed" as const,
   failure_error_code: "provider_unavailable",
   error_summary: "远端服务暂不可用",
+  failure: { code: "provider_unavailable", message: "自动转录服务暂时不可用，请稍后重试。", retryable: true },
   result_version_id: null,
 };
 
@@ -108,16 +110,29 @@ describe("AdminMediaPage", () => {
     mocks.retryTranscription.mockResolvedValue({ ...failedJob, job_id: "job-retry", status: "pending" });
   });
 
-  it("loads media assets and makes success semantics explicit", async () => {
+  it("loads media assets with a single current stage and safe failure details", async () => {
     render(<AdminMediaPage />);
 
     expect(screen.getByText("正在加载媒体资源…")).toBeInTheDocument();
     expect(await screen.findByText("项目交付培训")).toBeInTheDocument();
     expect(screen.getByText("共 2 个视频")).toBeInTheDocument();
     expect(screen.getByText("已就绪")).toHaveClass("bg-success/15");
-    expect(screen.getByText("失败")).toHaveClass("bg-destructive/15");
-    expect(screen.getByText("转录草稿已生成，等待人工审核；尚未发布，也未进入索引。")).toBeInTheDocument();
-    expect(screen.getByText("远端服务暂不可用")).toBeInTheDocument();
+    expect(screen.getByText("转录失败")).toHaveClass("bg-destructive/15");
+    expect(screen.getByText("转写草稿就绪")).toHaveClass("bg-info/15");
+    expect(screen.getByText("自动转录服务暂时不可用，请稍后重试。")).toBeInTheDocument();
+    expect(screen.getByText("当前筛选范围为最近加载的 100 条记录。")).toBeInTheDocument();
+    expect(screen.queryByText("succeeded")).not.toBeInTheDocument();
+    expect(screen.queryByText("远端服务暂不可用")).not.toBeInTheDocument();
+  });
+
+  it("filters the loaded media list by actionable stage", async () => {
+    render(<AdminMediaPage />);
+    await screen.findByText("项目交付培训");
+
+    fireEvent.click(screen.getByRole("button", { name: "失败" }));
+
+    expect(screen.queryByText("项目交付培训")).not.toBeInTheDocument();
+    expect(screen.getByText("失败示例")).toBeInTheDocument();
   });
 
   it("renders when randomUUID is unavailable in an insecure HTTP context", async () => {
@@ -207,7 +222,7 @@ describe("AdminMediaPage", () => {
       () => expect(mocks.listMediaAssets).toHaveBeenCalledTimes(2),
       { timeout: 4500 },
     );
-    expect(await screen.findByText("转写草稿就绪")).toBeInTheDocument();
+    expect((await screen.findAllByText("转写草稿就绪")).length).toBeGreaterThan(0);
     expect(mocks.listMediaAssets).toHaveBeenCalledTimes(2);
   });
 

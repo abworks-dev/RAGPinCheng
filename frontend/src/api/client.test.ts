@@ -151,6 +151,33 @@ describe("api client", () => {
     });
     expect(unauthorized).toHaveBeenCalledTimes(1);
   });
+
+  it("preserves safe structured error code, message and retry policy", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        jsonResponse(
+          {
+            detail: {
+              code: "upload_idempotency_conflict",
+              message: "本次提交与原上传请求不一致，请重新提交。",
+              retryable: false,
+            },
+          },
+          409,
+        ),
+      ),
+    );
+
+    const error = await api.adminStats().catch((caught) => caught);
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error).toMatchObject({
+      status: 409,
+      code: "upload_idempotency_conflict",
+      message: "本次提交与原上传请求不一致，请重新提交。",
+      retryable: false,
+    });
+  });
 });
 
 describe("Phase 4B transcription API contracts", () => {

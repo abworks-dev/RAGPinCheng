@@ -228,6 +228,10 @@ class MediaAssetDTO(BaseModel):
     updated_at: int
     error: str | None = None
     transcription_job_id: str | None = None
+    review_status: str | None = None
+    publication_status: str | None = None
+    publication_index_status: str | None = None
+    is_current_version: bool = False
 
 
 class TranscriptionProfileDTO(BaseModel):
@@ -254,11 +258,18 @@ class TranscriptionJobDTO(BaseModel):
     total_ms: int
     failure_error_code: str | None
     error_summary: str | None
+    failure: "TranscriptionFailureDTO | None" = None
     result_version_id: str | None
     created_at: int
     started_at: int | None
     finished_at: int | None
     updated_at: int
+
+
+class TranscriptionFailureDTO(BaseModel):
+    code: str
+    message: str
+    retryable: bool
 
 
 class TranscriptVersionDTO(BaseModel):
