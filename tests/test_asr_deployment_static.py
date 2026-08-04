@@ -19,9 +19,14 @@ def test_windows_asr_layout_and_config_ownership_are_frozen():
     assert 'Join-Path $PSScriptRoot ".."' not in start
     assert ".env.example" not in start
     assert "ASR_MODEL_LOCAL_FILES_ONLY=true" in env
+    assert "ASR_FASTER_WHISPER_MODEL_CACHE_ROOT=" in env
+    assert "ASR_FASTER_WHISPER_MODEL_MANIFEST_PATH=" in env
     assert "7bf452403abd7353a300cd760f7adae7701c92c1" in env
     assert "ASR_SERVICE_TOKEN=" in env
     assert (ROOT / "asr_service" / "requirements-windows.txt").is_file()
+    windows_requirements = read("asr_service/requirements-windows.txt").lower()
+    assert "faster-whisper" not in windows_requirements
+    assert "ctranslate2" not in windows_requirements
     assert not re.search(r"ASR_SERVICE_TOKEN=\S+", env)
 
 

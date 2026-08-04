@@ -19,7 +19,13 @@ from src.transcription.asr_service_contract import (
 from src.transcription.candidate import CandidateSegment
 from src.transcription.pipeline import execute_transcription
 from src.transcription.profile import ProfileSnapshot, TranscriptionExecutionConfig
-from src.transcription.profile_catalog import build_phase3_profile_catalog
+from src.transcription.profile_catalog import (
+    FASTER_WHISPER_PROFILE_ID,
+    FASTER_WHISPER_PROVIDER_KEY,
+    FASTER_WHISPER_SERVICE_PROFILE_ID,
+    FUNASR_SENSEVOICE_PROFILE_ID,
+    build_phase3_profile_catalog,
+)
 from src.transcription.provider_protocol import (
     ProviderCandidate,
     ProviderErrorCode,
@@ -52,12 +58,16 @@ class FakeClient:
     calls: list[str] = field(default_factory=list)
     request_id: str = "1" * 64
     job: ServiceJob | None = None
+    provider_key: str = PROVIDER_KEY
+    service_profile_id: str = SERVICE_PROFILE_ID
 
     def capabilities(self) -> ServiceCapabilities:
         self.calls.append("capabilities")
         if self.mode == "capabilities_error":
             raise AsrServiceClientError(503, "http_error")
-        profiles = () if self.mode == "profile_mismatch" else (SERVICE_PROFILE_ID,)
+        profiles = (
+            () if self.mode == "profile_mismatch" else (self.service_profile_id,)
+        )
         return ServiceCapabilities(ASR_API_VERSION, profiles, 16 * 1024**2, 32 * 1024**2)
 
     def create_job(self, request):
@@ -122,7 +132,11 @@ class FakeClient:
             from src.transcription.types import ContractValidationError
 
             raise ContractValidationError("unknown_field", "result")
-        key = "other-provider" if self.mode == "provider_mismatch" else PROVIDER_KEY
+        key = (
+            "other-provider"
+            if self.mode == "provider_mismatch"
+            else self.provider_key
+        )
         candidate = ProviderCandidate(
             key,
             "zh-CN",
@@ -148,7 +162,12 @@ class SequenceCancel:
         return self.values[min(index, len(self.values) - 1)]
 
 
-def bundle(data: bytes = b"x", *, timeout_ms: int = 1000):
+def bundle(
+    data: bytes = b"x",
+    *,
+    timeout_ms: int = 1000,
+    profile_id: str = FUNASR_SENSEVOICE_PROFILE_ID,
+):
     ref = TranscriptionInputRef(
         JOB_ID,
         "audio",
@@ -156,15 +175,27 @@ def bundle(data: bytes = b"x", *, timeout_ms: int = 1000):
         len(data),
         1000,
     )
-    profile = build_phase3_profile_catalog()[0].profile
+    profile = next(
+        item.profile
+        for item in build_phase3_profile_catalog()
+        if item.profile.profile_id == profile_id
+    )
     execution = TranscriptionExecutionConfig.create(
         profile, ref, language="zh-CN", timeout_ms=timeout_ms
     )
     return ref, execution, ProfileSnapshot.create(profile, execution)
 
 
-def run(client: FakeClient, *, data: bytes = b"x", input_source=None, cancellation=None, monotonic=None):
-    ref, execution, snapshot = bundle(data)
+def run(
+    client: FakeClient,
+    *,
+    data: bytes = b"x",
+    input_source=None,
+    cancellation=None,
+    monotonic=None,
+    profile_id: str = FUNASR_SENSEVOICE_PROFILE_ID,
+):
+    ref, execution, snapshot = bundle(data, profile_id=profile_id)
     provider = RemoteAsrProvider(
         client,
         ProviderRuntimePorts(
@@ -173,6 +204,7 @@ def run(client: FakeClient, *, data: bytes = b"x", input_source=None, cancellati
             NoOpProgressSink(),
             cancellation or NeverCancel(),
         ),
+        execution.provider_key,
         monotonic=monotonic or (lambda: 0.0),
         sleep=lambda _seconds: None,
     )
@@ -187,6 +219,25 @@ def test_remote_provider_uses_unique_bounded_sequence_and_pipeline_normalizer():
     assert result.__class__.__name__ == "CanonicalTranscript"
     assert client.calls == [
         "capabilities", "create", "upload:0", "complete", "start", "poll", "result"
+    ]
+
+
+def test_faster_whisper_uses_the_same_remote_provider_and_pipeline():
+    client = FakeClient(
+        provider_key=FASTER_WHISPER_PROVIDER_KEY,
+        service_profile_id=FASTER_WHISPER_SERVICE_PROFILE_ID,
+    )
+    result = run(client, profile_id=FASTER_WHISPER_PROFILE_ID)
+    assert result.__class__.__name__ == "CanonicalTranscript"
+    assert result.profile_snapshot.provider_key == FASTER_WHISPER_PROVIDER_KEY
+    assert client.calls == [
+        "capabilities",
+        "create",
+        "upload:0",
+        "complete",
+        "start",
+        "poll",
+        "result",
     ]
 
 

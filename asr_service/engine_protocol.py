@@ -28,11 +28,33 @@ class ServiceProfileConfig:
     def __post_init__(self) -> None:
         validate_provider_key(self.service_profile_id, "service_profile_id")
         validate_provider_key(self.provider_key)
-        if self.model_id != "iic/SenseVoiceSmall":
+        expected = {
+            "funasr-sensevoice-small-v1": (
+                "funasr-sensevoice",
+                "iic/SenseVoiceSmall",
+                "7bf452403abd7353a300cd760f7adae7701c92c1",
+                "zh-CN",
+            ),
+            "faster-whisper-large-v3-turbo-v1": (
+                "faster-whisper",
+                "dropbox-dash/faster-whisper-large-v3-turbo",
+                "0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf",
+                "zh-CN",
+            ),
+        }.get(self.service_profile_id)
+        if expected is None:
+            raise ContractValidationError(
+                "unsupported_service_profile", "service_profile_id"
+            )
+        if self.provider_key != expected[0]:
+            raise ContractValidationError("provider_config_mismatch", "provider_key")
+        if self.model_id != expected[1]:
             raise ContractValidationError("invalid_model_id", "model_id")
-        if self.model_revision != "7bf452403abd7353a300cd760f7adae7701c92c1":
+        if self.model_revision != expected[2]:
             raise ContractValidationError("invalid_model_revision", "model_revision")
         validate_language(self.language)
+        if self.language != expected[3]:
+            raise ContractValidationError("invalid_language", "language")
 
 
 SENSEVOICE_SERVICE_CONFIG = ServiceProfileConfig(
@@ -40,6 +62,14 @@ SENSEVOICE_SERVICE_CONFIG = ServiceProfileConfig(
     "funasr-sensevoice",
     "iic/SenseVoiceSmall",
     "7bf452403abd7353a300cd760f7adae7701c92c1",
+    "zh-CN",
+)
+
+FASTER_WHISPER_SERVICE_CONFIG = ServiceProfileConfig(
+    "faster-whisper-large-v3-turbo-v1",
+    "faster-whisper",
+    "dropbox-dash/faster-whisper-large-v3-turbo",
+    "0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf",
     "zh-CN",
 )
 
