@@ -1,7 +1,7 @@
 """Pydantic request/response schemas for the HTTP layer."""
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -210,6 +210,7 @@ class DeleteDocumentRequest(BaseModel):
 class DeleteDocumentResponse(BaseModel):
     parents_deleted: int
     file_deleted: bool
+    file_delete_status: Literal["not_requested", "deleted", "missing", "failed"]
 
 
 class SourceDTO(BaseModel):

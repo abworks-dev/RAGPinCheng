@@ -1981,3 +1981,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：新增 `.github/workflows/diagnose-faster-whisper-dependencies-production.yml`、`scripts/diagnose-faster-whisper-dependencies.ps1`；修改 `tests/test_asr_deployment_static.py` 和 `project-docs/plans/faster-whisper-r3-unified-qualification.md`。
 - 验证：初版经 PR #40 的 7 项 CI 全绿后合并为 `889a4c82fb04e40d9f1f6cbc319826bdf6d14f04`；生产诊断 run `30956817205` 安全完成 dry-run 和脱敏 artifact 上传，但暴露出初版会把兼容的裸依赖误判为冲突。PR #41 的 7 项 CI 全绿并合并为 `dbbc66d7467bf61def70c9d52324385bce60b7dd`；run `30957468479` 正确失败关闭为 `conflict_details_insufficient`，进一步定位为 PowerShell 5.1 stderr 的本机路径前缀先于严格错误短语提取而被丢弃。第二个最小修复改为只从固定 pip 错误短语提取 ASCII 包名、绝不保留路径；PowerShell AST、带路径前缀的脱敏正/负自检、`git diff --check` 和 R3 定向测试 72/72 通过。
 - 待办/风险：路径前缀修复尚未推送、创建 PR 或运行远端 CI；修复合并后需重跑诊断。诊断结果出来后仍不得自动修改依赖 pin、production freeze、隔离结构或 Profile admission。
+
+### 06:47 — 修复资料完全删除后的幽灵条目
+
+- 完成：按获批 R2 方案修正资料列表聚合，已完成但已无 Parent 索引的历史 `index_jobs` 不再生成“可检索”资料条，处理中和失败的未索引任务仍可见；底层删除结果新增 `not_requested/deleted/missing/failed` 状态并保留既有 `file_deleted`，源文件原本不存在按幂等成功处理，删除失败时前端明确提示索引已移除但源文件仍需处理。为避免刷新卸载弹窗导致警告消失，部分完成提示在用户关闭后再刷新列表。
+- 文件：`src/indexing_pipeline.py`、`api/routes_admin.py`、`api/schemas.py`、`frontend/src/api/client.ts`、`frontend/src/pages/admin/AdminDocumentsPage.tsx`、相关前后端测试、资料索引功能文档、PR1 实施说明与 `TODO.md`。
+- 验证：后端资料聚合、删除响应和源文件状态专项测试 7/7 通过；资料页与 API client 专项 21/21 通过；前端全量 Vitest 27 个文件、128/128 项通过；TypeScript project build 与 Vite production build通过（2025 modules transformed）。构建保留既有 React Router future warning、CSS minify warning 和主包大于 500 kB 警告。
+- 待办/风险：代码完成，待用户使用可清理的非敏感资料验收；未访问或删除真实资料，未连接真实 Qdrant/生产数据库，未部署、未重建索引。历史任务仍保留在“索引活动”中作为审计记录。

@@ -387,7 +387,16 @@ function DocumentsTable({
   const [deleteFile, setDeleteFile] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deletePartiallyCompleted, setDeletePartiallyCompleted] = useState(false);
   const [retryingId, setRetryingId] = useState<number | null>(null);
+
+  function closeDeleteDialog() {
+    setDeleteTarget(null);
+    setDeleteFile(false);
+    setDeleteError(null);
+    if (deletePartiallyCompleted) void onChanged();
+    setDeletePartiallyCompleted(false);
+  }
 
   async function retry(document: IndexedDocument) {
     if (document.latest_job_id == null) return;
@@ -404,8 +413,14 @@ function DocumentsTable({
     if (!deleteTarget) return;
     setDeleting(true);
     setDeleteError(null);
+    setDeletePartiallyCompleted(false);
     try {
-      await api.adminDeleteIndexedDocument(deleteTarget.source_path, deleteFile);
+      const result = await api.adminDeleteIndexedDocument(deleteTarget.source_path, deleteFile);
+      if (deleteFile && result.file_delete_status === "failed") {
+        setDeletePartiallyCompleted(true);
+        setDeleteError("知识库索引已移除，但源文件删除失败。请检查文件权限或占用情况后重试。");
+        return;
+      }
       setDeleteTarget(null);
       setDeleteFile(false);
       await onChanged();
@@ -485,6 +500,7 @@ function DocumentsTable({
                             type="button"
                             onClick={() => {
                               setDeleteError(null);
+                              setDeletePartiallyCompleted(false);
                               setDeleteFile(false);
                               setDeleteTarget(document);
                             }}
@@ -504,7 +520,7 @@ function DocumentsTable({
         </div>
       </Card>
 
-      <Dialog open={deleteTarget != null} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+      <Dialog open={deleteTarget != null} onOpenChange={(open) => !open && closeDeleteDialog()}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>移除资料</DialogTitle>
@@ -523,9 +539,9 @@ function DocumentsTable({
               <span><strong className="block text-ui-sm text-destructive">同时删除源文件</strong><span className="text-ui-xs text-muted-foreground">文件将无法通过重新索引恢复。</span></span>
             </label>
           </fieldset>
-          {deleteError && <Alert variant="destructive" role="alert"><AlertTitle>移除失败</AlertTitle><AlertDescription>{deleteError}</AlertDescription></Alert>}
+          {deleteError && <Alert variant="destructive" role="alert"><AlertTitle>删除未完全完成</AlertTitle><AlertDescription>{deleteError}</AlertDescription></Alert>}
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteTarget(null)} disabled={deleting}>取消</Button>
+            <Button variant="outline" onClick={closeDeleteDialog} disabled={deleting}>取消</Button>
             <Button variant="destructive" onClick={() => void removeDocument()} disabled={deleting}>
               {deleting ? "正在移除…" : deleteFile ? "删除资料和源文件" : "从知识库移除"}
             </Button>

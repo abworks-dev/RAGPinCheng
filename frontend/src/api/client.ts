@@ -248,7 +248,11 @@ export const api = {
     return jsonFetch<IndexedDocumentList>(`/api/admin/index/documents${suffix ? `?${suffix}` : ""}`);
   },
   adminDeleteIndexedDocument: (source_path: string, delete_file: boolean) =>
-    jsonFetch<{ parents_deleted: number; file_deleted: boolean }>(
+    jsonFetch<{
+      parents_deleted: number;
+      file_deleted: boolean;
+      file_delete_status: "not_requested" | "deleted" | "missing" | "failed";
+    }>(
       "/api/admin/index/documents",
       { method: "DELETE", body: JSON.stringify({ source_path, delete_file }) },
     ),

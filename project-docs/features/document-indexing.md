@@ -56,6 +56,8 @@
 - Parent SQLite 与 Qdrant Child 使用确定性 ID 关联；
 - 管理列表的 `document_id` 由规范化源路径哈希派生，不新增持久化字段；
 - 主列表状态取同一源路径的最新索引任务，并保留 `is_indexed` 区分是否已有可检索版本；
+- 已完成但已无 Parent 索引的历史任务只保留在索引活动中，不再生成资料条或计入可检索统计；
+- 删除源文件结果区分 `not_requested`、`deleted`、`missing` 和 `failed`；`missing` 作为幂等成功，`failed` 必须向管理员明确提示；
 - `data/parents.sqlite` 是可重建索引状态，`data/app.sqlite` 不是。
 
 ## 依赖与下游消费者
