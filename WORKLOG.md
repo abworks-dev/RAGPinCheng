@@ -1919,3 +1919,9 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`frontend/src/utils/clipboard.ts`、`frontend/src/components/Message.tsx`、`frontend/src/components/FeedbackBar.tsx`、对应组件测试、`WORKLOG.md`。
 - 验证：复制与按钮顺序专项测试 15/15 通过；前端全量 Vitest 27 个文件、126/126 项测试通过；TypeScript 检查和 Vite production build 通过（2024 modules transformed）；`git diff --check` 通过。构建保留既有 CSS minify、主包大于 500 kB 与 React Router future warning。
 - 待办/风险：尚未在真实局域网 HTTP 登录会话中进行浏览器人工验收；未修改 API、SSE、RAG、数据库或部署配置。
+
+### 05:02 — 移除知识范围重复清除入口
+
+- 完成：移除提问框知识范围菜单底部的“清除筛选”按钮，保留顶部“全部企业知识”作为唯一清空筛选入口，筛选行为和数据逻辑不变。
+- 文件：`frontend/src/components/KnowledgeScopePicker.tsx`、`WORKLOG.md`；未修改 API、RAG、后端或其他界面。
+- 验证：TypeScript project build 与 Vite production build 通过（2024 modules transformed）；`git diff --check` 通过。构建保留既有 CSS minify 与主包大于 500 kB 警告。
