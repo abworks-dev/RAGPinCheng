@@ -60,6 +60,21 @@ SHA 和显式执行开关，仅注入 `ASR_DEPENDENCY_PROXY`。上传 artifact �
 执行同 index、同 freeze、`--only-binary=:all:` 的隔离 pip dry-run；只有单包探针明确返回
 无匹配 binary distribution 时才能确认该 blocker，探针成功或错误种类不明确时继续失败关闭。
 
+### 2.0.2 精确诊断结果（2026-08-05）
+
+- source qualification run：`30955067671`；最终聚焦诊断 run：`30958705041`；
+- production freeze 固定 `jieba==0.42.1`，resolver 证据显示 `funasr 1.4.1 depends on jieba`；
+- 聚焦 single-requirement、binary-only dry-run 对 `jieba==0.42.1` 返回非零；
+- PyPI 的 `jieba 0.42.1` release metadata 仅列出 `jieba-0.42.1.tar.gz`
+  (`packagetype=sdist`)，没有 wheel；本地同参数公开索引 dry-run 复验为
+  `No matching distribution found for jieba==0.42.1`；
+- 因此 blocker 不是 FunASR 与 production freeze 的版本上下界冲突，而是当前
+  `--only-binary=:all:` 安全策略无法接受 `jieba 0.42.1` 唯一可用的源码发行物。
+
+诊断到此停止。未修改任何依赖 pin、production freeze、模型、服务、CUDA、Profile admission
+或生产配置。后续若选择构建受控内部 wheel、放宽 binary-only 规则或调整环境隔离，必须提交新的
+R3 方案并单独审批。
+
 ### 2.1 仓库基线
 
 - PR #34 已合并到 `master`；
