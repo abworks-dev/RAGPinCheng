@@ -12,6 +12,11 @@ on:
         required: true
         default: false
         type: boolean
+      prepare_synthetic_samples:
+        description: "Generate the fixed eight-sample non-sensitive Windows TTS qualification set"
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -47,6 +52,17 @@ jobs:
         with:
           ref: ${{ inputs.commit_sha }}
           fetch-depth: 1
+
+      - name: Prepare fixed synthetic qualification samples
+        if: ${{ inputs.prepare_synthetic_samples }}
+        shell: powershell
+        run: |
+          $params = @{
+            CommitSha = "${{ inputs.commit_sha }}"
+            SourceRoot = "${{ github.workspace }}"
+            RunId = "${{ github.run_id }}"
+          }
+          & "${{ github.workspace }}\scripts\prepare-faster-whisper-qualification-samples.ps1" @params
 
       - name: Run isolated faster-whisper R3 qualification
         shell: powershell
