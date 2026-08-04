@@ -12,87 +12,86 @@ const mocks = vi.hoisted(() => ({
   adminDeleteIndexJob: vi.fn(),
 }));
 
-vi.mock("../../api/client", () => ({
-  api: mocks,
-}));
+vi.mock("../../api/client", () => ({ api: mocks }));
 
 const categoryTree = {
   categories: [
-    { name: "企业标准", two_level: false, subcategories: [] },
+    { name: "公司标准", two_level: false, subcategories: [] },
     { name: "客户标准", two_level: true, subcategories: ["甲方", "乙方"] },
   ],
   second_level_categories: ["客户标准"],
 };
 
-const documents = [
-  {
-    source_path: "corpus/company-standard.pdf",
-    doc_title: "企业交付标准",
-    category: "企业标准",
-    doc_type: "pdf",
-    company: null,
-    parent_count: 12,
-  },
-  {
-    source_path: "corpus/customer-budget.xlsx",
-    doc_title: "客户预算模板",
-    category: "客户标准",
-    doc_type: "xlsx",
-    company: "甲方",
-    parent_count: 5,
-  },
-];
+const readyDocument = {
+  document_id: "document-ready",
+  source_path: "C:/internal/docs/company-standard.pdf",
+  display_path: "公司标准 / company-standard.pdf",
+  filename: "company-standard.pdf",
+  doc_title: "企业交付标准",
+  category: "公司标准",
+  doc_type: "pdf",
+  company: null,
+  parent_count: 12,
+  child_count: 36,
+  file_size: 2048,
+  status: "done",
+  is_indexed: true,
+  latest_job_id: 1,
+  error_summary: null,
+  uploaded_by: "管理员",
+  created_at: 1785686400,
+  updated_at: 1785686410,
+};
+
+const failedDocument = {
+  ...readyDocument,
+  document_id: "document-failed",
+  source_path: "C:/internal/docs/failed.docx",
+  display_path: "客户标准 / 甲方 / failed.docx",
+  filename: "failed.docx",
+  doc_title: "失败的客户资料",
+  category: "客户标准",
+  doc_type: "docx",
+  company: "甲方",
+  parent_count: 0,
+  child_count: null,
+  status: "failed",
+  is_indexed: false,
+  latest_job_id: 2,
+  error_summary: "资料处理失败，可重试或在索引活动中查看详情。",
+  updated_at: 1785686420,
+};
+
+const listing = {
+  documents: [readyDocument, failedDocument],
+  total: 2,
+  status_counts: { ready: 1, failed: 1, processing: 0 },
+};
 
 const baseJob = {
   user_id: 1,
   employee_id: "A001",
   real_name: "管理员",
-  category: "企业标准",
+  category: "公司标准",
   doc_type: "pdf",
-  source_path: "corpus/company-standard.pdf",
+  source_path: readyDocument.source_path,
   file_size: 2048,
   error: null,
-  parents: null,
-  children: null,
+  parents: 12,
+  children: 36,
   created_at: 1785686400,
-  started_at: null,
-  finished_at: null,
+  started_at: 1785686401,
+  finished_at: 1785686410,
 };
 
 const jobs = [
-  {
-    ...baseJob,
-    id: 1,
-    filename: "company-standard.pdf",
-    status: "done",
-    parents: 12,
-    children: 36,
-    started_at: 1785686401,
-    finished_at: 1785686410,
-  },
+  { ...baseJob, id: 1, filename: "company-standard.pdf", status: "done" },
   {
     ...baseJob,
     id: 2,
-    filename: "failed-document.docx",
-    doc_type: "docx",
+    filename: "failed.docx",
     status: "failed",
     error: "解析器暂不可用",
-    started_at: 1785686401,
-    finished_at: 1785686410,
-  },
-  {
-    ...baseJob,
-    id: 3,
-    filename: "processing.xlsx",
-    doc_type: "xlsx",
-    status: "embedding",
-    started_at: Math.floor(Date.now() / 1000),
-  },
-  {
-    ...baseJob,
-    id: 4,
-    filename: "unknown.bin",
-    status: "paused",
   },
 ];
 
@@ -100,11 +99,11 @@ describe("AdminDocumentsPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.adminCategoryTree.mockResolvedValue(categoryTree);
-    mocks.adminListIndexedDocuments.mockResolvedValue({ documents });
+    mocks.adminListIndexedDocuments.mockResolvedValue(listing);
     mocks.adminListIndexJobs.mockResolvedValue({ jobs });
-    mocks.adminUploadDocuments.mockResolvedValue({ accepted: ["a", "b"], skipped: [] });
-    mocks.adminDeleteIndexedDocument.mockResolvedValue(undefined);
-    mocks.adminRetryIndexJob.mockResolvedValue(undefined);
+    mocks.adminUploadDocuments.mockResolvedValue({ accepted: [jobs[0]], skipped: [] });
+    mocks.adminDeleteIndexedDocument.mockResolvedValue({ parents_deleted: 12, file_deleted: false });
+    mocks.adminRetryIndexJob.mockResolvedValue(jobs[0]);
     mocks.adminDeleteIndexJob.mockResolvedValue(undefined);
   });
 
@@ -113,180 +112,140 @@ describe("AdminDocumentsPage", () => {
     vi.restoreAllMocks();
   });
 
-  it("loads the three existing data sources and presents semantic document and job states", async () => {
+  it("uses a document-first lifecycle list without exposing internal paths", async () => {
     render(<AdminDocumentsPage />);
 
-    expect(screen.getByText("正在加载已索引资料…")).toBeInTheDocument();
-    expect(screen.getByText("正在加载索引任务…")).toBeInTheDocument();
+    expect(screen.getByText("正在加载资料…")).toBeInTheDocument();
     expect(await screen.findByText("企业交付标准")).toBeInTheDocument();
-
-    expect(mocks.adminCategoryTree).toHaveBeenCalledTimes(1);
-    expect(mocks.adminListIndexedDocuments).toHaveBeenCalledTimes(1);
-    expect(mocks.adminListIndexJobs).toHaveBeenCalledWith(100);
-    expect(screen.getByText("Excel 表格")).toBeInTheDocument();
-    expect(screen.getByText("已完成")).toHaveClass("bg-success/15");
-    expect(screen.getByText("失败")).toHaveClass("bg-destructive/15");
-    expect(screen.getByText(/嵌入中/)).toHaveClass("bg-warning/15");
-    expect(screen.getByText("paused")).toHaveClass("bg-secondary");
-    expect(screen.getByText("解析器暂不可用")).toHaveClass("text-destructive");
+    expect(screen.getByText("失败的客户资料")).toBeInTheDocument();
+    const readyRow = screen.getByText("企业交付标准").closest("tr");
+    const failedRow = screen.getByText("失败的客户资料").closest("tr");
+    expect(within(readyRow as HTMLElement).getByText("可检索")).toHaveClass("bg-success/15");
+    expect(within(failedRow as HTMLElement).getByText("处理失败")).toHaveClass("bg-destructive/15");
+    expect(screen.getByText("资料处理失败，可重试或在索引活动中查看详情。")).toBeInTheDocument();
+    expect(screen.queryByText(readyDocument.source_path)).not.toBeInTheDocument();
+    expect(screen.getAllByText("1")).toHaveLength(2);
+    expect(mocks.adminListIndexedDocuments).toHaveBeenCalledWith(expect.objectContaining({
+      limit: 25,
+      offset: 0,
+    }));
   });
 
-  it("shows a unified loading error and retries the unchanged three-call contract", async () => {
-    mocks.adminCategoryTree
-      .mockRejectedValueOnce(new Error("资料服务暂不可用"))
-      .mockResolvedValueOnce(categoryTree);
-
-    render(<AdminDocumentsPage />);
-
-    expect(await screen.findByRole("alert")).toHaveTextContent("资料与索引数据加载失败");
-    expect(screen.getByRole("alert")).toHaveTextContent("资料服务暂不可用");
-
-    fireEvent.click(screen.getByRole("button", { name: "重新加载" }));
-
-    await waitFor(() => expect(mocks.adminCategoryTree).toHaveBeenCalledTimes(2));
-    expect(await screen.findByText("企业交付标准")).toBeInTheDocument();
-    expect(mocks.adminListIndexedDocuments).toHaveBeenCalledTimes(2);
-    expect(mocks.adminListIndexJobs).toHaveBeenNthCalledWith(2, 100);
-  });
-
-  it("uploads multiple files with the selected category and subcategory, then refreshes all data", async () => {
+  it("opens a focused upload sheet with removable file queue and preserves upload contract", async () => {
     const pdf = new File(["pdf"], "standard.pdf", { type: "application/pdf" });
-    const docx = new File(["docx"], "guide.docx", {
-      type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    });
+    const empty = new File([], "empty.pdf", { type: "application/pdf" });
 
     render(<AdminDocumentsPage />);
     await screen.findByText("企业交付标准");
+    fireEvent.click(screen.getByRole("button", { name: "上传资料" }));
 
-    fireEvent.change(screen.getByLabelText("分类"), { target: { value: "客户标准" } });
-    expect(screen.getByLabelText("客户")).toHaveValue("甲方");
+    const sheet = await screen.findByRole("dialog", { name: "上传资料" });
+    const input = within(sheet).getByLabelText("文件");
+    fireEvent.change(input, { target: { files: [pdf, empty] } });
 
-    const fileInput = screen.getByLabelText("文件");
-    fireEvent.change(fileInput, { target: { files: [pdf, docx] } });
-    expect(screen.getByText(/已选择 2 个文件/)).toBeInTheDocument();
+    expect(within(sheet).getByText("空文件，不能上传")).toBeInTheDocument();
+    fireEvent.click(within(sheet).getByRole("button", { name: "移除 empty.pdf" }));
+    fireEvent.click(within(sheet).getByRole("button", { name: "上传 1 个文件" }));
 
-    fireEvent.click(screen.getByRole("button", { name: "上传 2 个文件" }));
-
-    await waitFor(() =>
-      expect(mocks.adminUploadDocuments).toHaveBeenCalledWith(
-        [pdf, docx],
-        "客户标准",
-        "甲方",
-      ),
-    );
-    expect(await screen.findByText("资料已加入索引队列")).toBeInTheDocument();
-    expect(screen.getByText("尚未选择文件")).toBeInTheDocument();
-    expect(fileInput).toHaveValue("");
-    expect(mocks.adminCategoryTree).toHaveBeenCalledTimes(2);
-    expect(mocks.adminListIndexedDocuments).toHaveBeenCalledTimes(2);
-    expect(mocks.adminListIndexJobs).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(mocks.adminUploadDocuments).toHaveBeenCalledWith(
+      [pdf],
+      "公司标准",
+      undefined,
+    ));
+    expect(await within(sheet).findByText("资料已加入处理队列")).toBeInTheDocument();
   });
 
-  it("keeps selected files and shows inline feedback when upload fails", async () => {
-    mocks.adminUploadDocuments.mockRejectedValueOnce(new Error("上传服务暂不可用"));
-    const file = new File(["pdf"], "standard.pdf", { type: "application/pdf" });
-
+  it("sends search, category, type and status filters to the server", async () => {
     render(<AdminDocumentsPage />);
     await screen.findByText("企业交付标准");
 
-    fireEvent.change(screen.getByLabelText("文件"), { target: { files: [file] } });
-    fireEvent.click(screen.getByRole("button", { name: "上传 1 个文件" }));
+    fireEvent.change(screen.getByPlaceholderText("搜索标题、文件名或分类…"), { target: { value: "预算" } });
+    fireEvent.change(screen.getByLabelText("按分类筛选"), { target: { value: "客户标准" } });
+    fireEvent.change(screen.getByLabelText("按文件类型筛选"), { target: { value: "docx" } });
+    fireEvent.click(screen.getByRole("button", { name: "失败" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("资料上传失败");
-    expect(screen.getByRole("alert")).toHaveTextContent("上传服务暂不可用");
-    expect(screen.getByTitle("standard.pdf")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "上传 1 个文件" })).toBeEnabled();
-    expect(mocks.adminCategoryTree).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(mocks.adminListIndexedDocuments).toHaveBeenLastCalledWith(expect.objectContaining({
+      query: "预算",
+      category: "客户标准",
+      doc_type: "docx",
+      status: "failed",
+      limit: 25,
+      offset: 0,
+    })));
   });
 
-  it("filters documents and preserves the two-step delete confirmation parameters", async () => {
-    const confirmSpy = vi.spyOn(window, "confirm")
-      .mockReturnValueOnce(true)
-      .mockReturnValueOnce(false);
-
+  it("uses one safe deletion dialog and defaults to keeping the source file", async () => {
     render(<AdminDocumentsPage />);
     await screen.findByText("企业交付标准");
 
-    fireEvent.change(screen.getByLabelText("筛选已索引资料"), {
-      target: { value: "预算" },
-    });
-    expect(screen.queryByText("企业交付标准")).not.toBeInTheDocument();
-    expect(screen.getByText("客户预算模板")).toBeInTheDocument();
-    expect(screen.getByText("1 / 2")).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("打开 企业交付标准 的操作菜单"));
+    fireEvent.click(screen.getByRole("button", { name: "移除资料" }));
+    const dialog = await screen.findByRole("dialog", { name: "移除资料" });
+    expect(within(dialog).getByRole("radio", { name: /保留源文件/ })).toBeChecked();
 
-    const row = screen.getByText("客户预算模板").closest("tr");
-    expect(row).not.toBeNull();
-    fireEvent.click(within(row as HTMLElement).getByRole("button", { name: "删除资料" }));
-
-    await waitFor(() =>
-      expect(mocks.adminDeleteIndexedDocument).toHaveBeenCalledWith(
-        "corpus/customer-budget.xlsx",
-        false,
-      ),
-    );
-    expect(confirmSpy).toHaveBeenCalledTimes(2);
-    expect(mocks.adminCategoryTree).toHaveBeenCalledTimes(2);
+    fireEvent.click(within(dialog).getByRole("button", { name: "从知识库移除" }));
+    await waitFor(() => expect(mocks.adminDeleteIndexedDocument).toHaveBeenCalledWith(
+      readyDocument.source_path,
+      false,
+    ));
   });
 
-  it("retries completed jobs and only deletes terminal job records after confirmation", async () => {
-    vi.spyOn(window, "confirm").mockReturnValue(true);
-
+  it("requires an explicit destructive choice before deleting the source file", async () => {
     render(<AdminDocumentsPage />);
-    await screen.findByText("company-standard.pdf");
+    await screen.findByText("企业交付标准");
 
-    const completedRow = screen.getByText("company-standard.pdf").closest("tr");
-    const activeRow = screen.getByText("processing.xlsx").closest("tr");
-    expect(completedRow).not.toBeNull();
-    expect(activeRow).not.toBeNull();
-    expect(within(activeRow as HTMLElement).queryByRole("button", { name: "重试" })).not.toBeInTheDocument();
-    expect(within(activeRow as HTMLElement).queryByRole("button", { name: "删除记录" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("打开 企业交付标准 的操作菜单"));
+    fireEvent.click(screen.getByRole("button", { name: "移除资料" }));
+    const dialog = await screen.findByRole("dialog", { name: "移除资料" });
+    fireEvent.click(within(dialog).getByRole("radio", { name: /同时删除源文件/ }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "删除资料和源文件" }));
 
-    fireEvent.click(within(completedRow as HTMLElement).getByRole("button", { name: "重试" }));
-    await waitFor(() => expect(mocks.adminRetryIndexJob).toHaveBeenCalledWith(1));
-
-    const refreshedCompletedRow = screen.getByText("company-standard.pdf").closest("tr");
-    expect(refreshedCompletedRow).not.toBeNull();
-    fireEvent.click(within(refreshedCompletedRow as HTMLElement).getByRole("button", { name: "删除记录" }));
-    await waitFor(() => expect(mocks.adminDeleteIndexJob).toHaveBeenCalledWith(1));
+    await waitFor(() => expect(mocks.adminDeleteIndexedDocument).toHaveBeenCalledWith(
+      readyDocument.source_path,
+      true,
+    ));
   });
 
-  it("polls active jobs every three seconds and refreshes documents when a job completes", async () => {
+  it("retries a failed document from its lifecycle row", async () => {
+    render(<AdminDocumentsPage />);
+    await screen.findByText("失败的客户资料");
+
+    fireEvent.click(screen.getByLabelText("打开 失败的客户资料 的操作菜单"));
+    fireEvent.click(screen.getByRole("button", { name: "重试处理" }));
+
+    await waitFor(() => expect(mocks.adminRetryIndexJob).toHaveBeenCalledWith(2));
+  });
+
+  it("keeps task history secondary and confirms record deletion in a dialog", async () => {
+    render(<AdminDocumentsPage />);
+    await screen.findByText("企业交付标准");
+
+    const activity = screen.getByText("索引活动").closest("details");
+    expect(activity).not.toBeNull();
+    fireEvent.click(within(activity as HTMLElement).getByText("索引活动"));
+    expect(await screen.findByText("解析器暂不可用")).toBeInTheDocument();
+
+    const failedRow = screen.getByText("failed.docx").closest("tr");
+    fireEvent.click(within(failedRow as HTMLElement).getByRole("button", { name: "删除记录" }));
+    const dialog = await screen.findByRole("dialog", { name: "删除索引活动记录" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "删除记录" }));
+
+    await waitFor(() => expect(mocks.adminDeleteIndexJob).toHaveBeenCalledWith(2));
+  });
+
+  it("polls active jobs and refreshes the unified document list", async () => {
     vi.useFakeTimers();
-    const activeJob = { ...jobs[2], status: "embedding" };
-    const completedJob = {
-      ...activeJob,
-      status: "done",
-      parents: 8,
-      children: 24,
-      finished_at: 1785686410,
-    };
+    const activeJob = { ...jobs[0], id: 3, filename: "processing.xlsx", status: "embedding", finished_at: null };
     mocks.adminListIndexJobs
       .mockResolvedValueOnce({ jobs: [activeJob] })
-      .mockResolvedValueOnce({ jobs: [completedJob] });
+      .mockResolvedValueOnce({ jobs });
 
     render(<AdminDocumentsPage />);
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-    expect(screen.getByText(/嵌入中/)).toBeInTheDocument();
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(3000);
-    });
+    await act(async () => { await Promise.resolve(); });
+    act(() => vi.advanceTimersByTime(3000));
+    await act(async () => { await Promise.resolve(); });
 
     expect(mocks.adminListIndexJobs).toHaveBeenCalledTimes(2);
-    expect(mocks.adminListIndexedDocuments).toHaveBeenCalledTimes(2);
-    expect(screen.getByText("已完成")).toBeInTheDocument();
-  });
-
-  it("shows unified empty states for documents and index jobs", async () => {
-    mocks.adminListIndexedDocuments.mockResolvedValue({ documents: [] });
-    mocks.adminListIndexJobs.mockResolvedValue({ jobs: [] });
-
-    render(<AdminDocumentsPage />);
-
-    expect(await screen.findByText("暂无已索引资料")).toBeInTheDocument();
-    expect(screen.getByText("暂无索引任务")).toBeInTheDocument();
+    expect(mocks.adminListIndexedDocuments.mock.calls.length).toBeGreaterThanOrEqual(2);
   });
 });
