@@ -1982,7 +1982,8 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 验证：初版经 PR #40 的 7 项 CI 全绿后合并为 `889a4c82fb04e40d9f1f6cbc319826bdf6d14f04`；生产诊断 run `30956817205` 安全完成 dry-run 和脱敏 artifact 上传，但暴露出初版会把兼容的裸依赖误判为冲突。PR #41 的 7 项 CI 全绿并合并为 `dbbc66d7467bf61def70c9d52324385bce60b7dd`；run `30957468479` 正确失败关闭为 `conflict_details_insufficient`，进一步定位为 PowerShell 5.1 stderr 的本机路径前缀先于严格错误短语提取而被丢弃。第二个最小修复改为只从固定 pip 错误短语提取 ASCII 包名、绝不保留路径；PowerShell AST、带路径前缀的脱敏正/负自检、`git diff --check` 和 R3 定向测试 72/72 通过。
 - 继续验证：路径前缀修复经 PR #42 的 7 项 CI 全绿后合并为 `7409aa83594f12afc44d4c58280e8f634f66fc9f`；run `30957856578` 仍正确失败关闭，证明完整 resolver 只提供裸依赖与同名 constraint，不能单独证明版本矛盾。新增同 index、同 freeze、binary-only 的单 requirement pip dry-run，只允许从该聚焦探针确认无匹配 binary distribution；探针成功或错误种类不明确时继续失败关闭。本地 PowerShell AST/脱敏自检、workflow YAML、`git diff --check` 和 R3 定向测试 72/72 通过。
 - CI 修复：聚焦探针已提交 PR #43；其首轮 6/7 项通过，唯一失败与本 PR 无关，最新 `master` 也因并行提交 `f75ee7c` 修改 `src/indexing_pipeline.py` 后未同步 Phase 2 保护哈希而失败。经单独批准，复核该提交后仅把保护哈希更新为归一化 SHA-256 `4ee589e1a952c172091585696c991acf0227f8b4b89a3e01bae8499d841a3c34`；保护边界与 R3 定向测试 78/78 通过。
-- 待办/风险：PR #43 需在更新后重跑完整 CI；合并后需重跑诊断。诊断结果出来后仍不得自动修改依赖 pin、production freeze、隔离结构或 Profile admission。
+- 结果：PR #43 更新后 7 项 CI 全绿并合并为 `60a1ee365bb783f1bafffd5b400fbd1b5e3e87c4`。聚焦诊断 run `30958705041` 安全返回 `affected_requirement=jieba`、单包探针退出码 1；结合 production freeze 的 `jieba==0.42.1`、resolver 的 `funasr 1.4.1 depends on jieba`、PyPI release metadata 仅有 sdist 无 wheel，以及本地公开索引同参数 dry-run 的 `No matching distribution found`，精确确认 blocker 为 `--only-binary=:all:` 与 `jieba 0.42.1` 发布物类型不兼容，而非版本范围冲突。
+- 待办/风险：诊断已完成并停止；未修改依赖 pin、production freeze、模型、服务、隔离结构或 Profile admission。构建受控内部 wheel、放宽 binary-only 或调整环境隔离均须另交 R3 方案审批。
 
 ### 06:47 — 修复资料完全删除后的幽灵条目
 
