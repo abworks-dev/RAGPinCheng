@@ -63,6 +63,8 @@ def test_model_and_smoke_identity_are_pinned_and_use_existing_contracts():
     ast.parse(runner)
     ast.parse(engine)
     assert '"pipe:0"' in engine
+    assert "wave.open(BytesIO(content)" in engine
+    assert "audioop.ratecv" in engine
     assert "NamedTemporaryFile" not in engine
     assert 'ASR_MODEL_ID = "Systran/faster-whisper-large-v3"' in runner
     assert 'ASR_REVISION = "53ecf83a5bedc5597eb8c8b34eac29e5345520ff"' in runner
