@@ -323,6 +323,7 @@ def test_faster_whisper_qualification_workflow_is_manual_immutable_and_gated():
     assert "scripts/build_internal_jieba_wheel.py build" in build_job
     assert "scripts/build_internal_oss2_wheel.py build" in build_job
     assert "scripts/build_internal_antlr4_wheel.py build" in build_job
+    assert "scripts/build_internal_crcmod_wheel.py build" in build_job
     assert "actions/upload-artifact@v4" in build_job
     assert "faster-whisper-internal-wheels-${{ github.run_id }}" in build_job
     assert "secrets." not in build_job
@@ -571,9 +572,11 @@ def test_faster_whisper_qualification_freezes_dependencies_model_and_gates():
     assert "InternalWheelBundlePath" in script
     assert "Oss2WheelBundlePath" in script
     assert "Antlr4WheelBundlePath" in script
+    assert "CrcmodWheelBundlePath" in script
     assert "build_internal_jieba_wheel.py" in script
     assert "build_internal_oss2_wheel.py" in script
     assert "build_internal_antlr4_wheel.py" in script
+    assert "build_internal_crcmod_wheel.py" in script
     assert '"validate"' in script
     assert '"--find-links", $ResolvedInternalWheelBundle' in script
     assert 'source_url = "internal://$($controlled.package_name)/$($controlled.package_version)/$wheelSha256"' in script

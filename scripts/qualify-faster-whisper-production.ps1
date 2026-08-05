@@ -12,6 +12,8 @@ param(
     [string]$Oss2WheelBundlePath,
     [Parameter(Mandatory = $true)]
     [string]$Antlr4WheelBundlePath,
+    [Parameter(Mandatory = $true)]
+    [string]$CrcmodWheelBundlePath,
     [bool]$ExecuteQualification = $false,
     [string]$SummaryPath = "",
     [string]$DependencyDiagnosticPath = ""
@@ -562,6 +564,7 @@ function New-WheelManifest {
             Get-Sha256 -Path (Join-Path $ResolvedInternalWheelBundle "internal-wheel-manifest.json")
             Get-Sha256 -Path (Join-Path $ResolvedOss2WheelBundle "internal-wheel-manifest.json")
             Get-Sha256 -Path (Join-Path $ResolvedAntlr4WheelBundle "internal-wheel-manifest.json")
+            Get-Sha256 -Path (Join-Path $ResolvedCrcmodWheelBundle "internal-wheel-manifest.json")
         )
         files = $files
     }
@@ -813,7 +816,8 @@ function Invoke-SanitizedResolverFallback {
         -not (Test-Path -LiteralPath (Join-Path $EvidenceRoot "production-freeze.txt") -PathType Leaf) -or
         -not (Test-Path -LiteralPath $ResolvedInternalWheelBundle -PathType Container) -or
         -not (Test-Path -LiteralPath $ResolvedOss2WheelBundle -PathType Container) -or
-        -not (Test-Path -LiteralPath $ResolvedAntlr4WheelBundle -PathType Container)
+        -not (Test-Path -LiteralPath $ResolvedAntlr4WheelBundle -PathType Container) -or
+        -not (Test-Path -LiteralPath $ResolvedCrcmodWheelBundle -PathType Container)
     ) {
         return $result
     }
@@ -847,6 +851,7 @@ function Invoke-SanitizedResolverFallback {
                     "--find-links", $ResolvedInternalWheelBundle,
                     "--find-links", $ResolvedOss2WheelBundle,
                     "--find-links", $ResolvedAntlr4WheelBundle,
+                    "--find-links", $ResolvedCrcmodWheelBundle,
                     "--constraint", (Join-Path $EvidenceRoot "production-freeze.txt"),
                     "--requirement", $CombinedRequirements
                 ) `
@@ -1044,15 +1049,21 @@ $ResolvedOss2WheelBundle = (
 $ResolvedAntlr4WheelBundle = (
     Resolve-Path -LiteralPath $Antlr4WheelBundlePath -ErrorAction Stop
 ).Path
+$ResolvedCrcmodWheelBundle = (
+    Resolve-Path -LiteralPath $CrcmodWheelBundlePath -ErrorAction Stop
+).Path
 if (
     -not (Test-Path -LiteralPath $ResolvedInternalWheelBundle -PathType Container) -or
     -not (Test-Path -LiteralPath $ResolvedOss2WheelBundle -PathType Container) -or
     -not (Test-Path -LiteralPath $ResolvedAntlr4WheelBundle -PathType Container) -or
+    -not (Test-Path -LiteralPath $ResolvedCrcmodWheelBundle -PathType Container) -or
     ((Get-Item -LiteralPath $ResolvedInternalWheelBundle).Attributes -band
         [System.IO.FileAttributes]::ReparsePoint) -or
     ((Get-Item -LiteralPath $ResolvedOss2WheelBundle).Attributes -band
         [System.IO.FileAttributes]::ReparsePoint) -or
     ((Get-Item -LiteralPath $ResolvedAntlr4WheelBundle).Attributes -band
+        [System.IO.FileAttributes]::ReparsePoint) -or
+    ((Get-Item -LiteralPath $ResolvedCrcmodWheelBundle).Attributes -band
         [System.IO.FileAttributes]::ReparsePoint)
 ) {
     throw "Controlled internal wheel bundle must be a real directory"
@@ -1079,6 +1090,14 @@ if (
         [System.StringComparison]::OrdinalIgnoreCase
     ) -or
     $ResolvedAntlr4WheelBundle.StartsWith(
+        $ResolvedSource.TrimEnd("\") + "\",
+        [System.StringComparison]::OrdinalIgnoreCase
+    ) -or
+    $ResolvedCrcmodWheelBundle.Equals(
+        $ResolvedSource,
+        [System.StringComparison]::OrdinalIgnoreCase
+    ) -or
+    $ResolvedCrcmodWheelBundle.StartsWith(
         $ResolvedSource.TrimEnd("\") + "\",
         [System.StringComparison]::OrdinalIgnoreCase
     )
@@ -1156,6 +1175,16 @@ try {
             "--run-id", $RunId
         ) `
         -LogPath (Join-Path $LogRoot "antlr4-wheel-validation.log")
+    Invoke-External `
+        -FilePath $MachinePython `
+        -Arguments @(
+            (Join-Path $ResolvedSource "scripts\build_internal_crcmod_wheel.py"),
+            "validate",
+            "--bundle-dir", $ResolvedCrcmodWheelBundle,
+            "--commit-sha", $CommitSha.ToLowerInvariant(),
+            "--run-id", $RunId
+        ) `
+        -LogPath (Join-Path $LogRoot "crcmod-wheel-validation.log")
     $InternalWheelManifestPath = Join-Path (
         $ResolvedInternalWheelBundle
     ) "internal-wheel-manifest.json"
@@ -1169,6 +1198,9 @@ try {
         -Raw -Encoding UTF8 | ConvertFrom-Json
     $Antlr4WheelManifest = Get-Content `
         -LiteralPath (Join-Path $ResolvedAntlr4WheelBundle "internal-wheel-manifest.json") `
+        -Raw -Encoding UTF8 | ConvertFrom-Json
+    $CrcmodWheelManifest = Get-Content `
+        -LiteralPath (Join-Path $ResolvedCrcmodWheelBundle "internal-wheel-manifest.json") `
         -Raw -Encoding UTF8 | ConvertFrom-Json
     $ProductionPython = "${PRODUCTION_SERVICE_ROOT}\RAGPinCheng-ASR\venv\Scripts\python.exe"
     if (-not (Test-Path -LiteralPath $ProductionPython -PathType Leaf)) {
@@ -1317,6 +1349,7 @@ try {
                     "--find-links", $ResolvedInternalWheelBundle,
                     "--find-links", $ResolvedOss2WheelBundle,
                     "--find-links", $ResolvedAntlr4WheelBundle,
+                    "--find-links", $ResolvedCrcmodWheelBundle,
                     "--constraint", (Join-Path $EvidenceRoot "production-freeze.txt"),
                     "--requirement", $CombinedRequirements
                 ) `
@@ -1345,7 +1378,7 @@ try {
     $WheelManifest = New-WheelManifest `
         -DownloadLog $DownloadLog `
         -OutputPath (Join-Path $EvidenceRoot "wheel-manifest.json") `
-        -InternalManifests @($InternalWheelManifest, $Oss2WheelManifest, $Antlr4WheelManifest)
+        -InternalManifests @($InternalWheelManifest, $Oss2WheelManifest, $Antlr4WheelManifest, $CrcmodWheelManifest)
     Assert-WheelManifestUnchanged -Manifest $WheelManifest
 
     $DependencyFailureStage = "pip_install"
