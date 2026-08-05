@@ -511,16 +511,26 @@ function Wait-HttpHealth {
 
 function New-WheelManifest {
     param(
-        [Parameter(Mandatory = $true)][string]$DownloadLog,
+        [Parameter(Mandatory = $true)][string]$ResolutionReportPath,
         [Parameter(Mandatory = $true)][string]$OutputPath,
         [Parameter(Mandatory = $true)][object[]]$InternalManifests
     )
     $script:WheelManifestFailureKind = "wheel_manifest_unclassified"
-    $logText = Get-Content -LiteralPath $DownloadLog -Raw -Encoding UTF8
-    $resolvedUrls = @(
-        [regex]::Matches($logText, "https?://[^\s'`"<>]+") |
-            ForEach-Object { $_.Value.TrimEnd(".", ",", ")", "]") }
-    )
+    if (-not (Test-Path -LiteralPath $ResolutionReportPath -PathType Leaf)) {
+        $script:WheelManifestFailureKind = "wheel_manifest_resolution_report_missing"
+        throw "pip resolution report is missing"
+    }
+    $resolutionReport = Get-Content `
+        -LiteralPath $ResolutionReportPath `
+        -Raw `
+        -Encoding UTF8 |
+        ConvertFrom-Json
+    $resolvedDownloads = @($resolutionReport.install | ForEach-Object {
+        [pscustomobject]@{
+            Url = [string]$_.download_info.url
+            Sha256 = [string]$_.download_info.archive_info.hashes.sha256
+        }
+    })
     $files = @()
     $internalWheelRecorded = @{}
     foreach ($wheel in @(Get-ChildItem -LiteralPath $Wheelhouse -Filter "*.whl" -File | Sort-Object Name)) {
@@ -549,19 +559,11 @@ function New-WheelManifest {
             $internalWheelRecorded[[string]$controlled.package_name] = $true
             continue
         }
-        $url = $null
-        foreach ($candidate in $resolvedUrls) {
-            try {
-                $uri = [Uri]$candidate
-                $fileName = [Uri]::UnescapeDataString(
-                    [System.IO.Path]::GetFileName($uri.AbsolutePath)
-                )
-                if ($fileName.Equals($wheel.Name, [StringComparison]::OrdinalIgnoreCase)) {
-                    $url = $candidate
-                }
-            } catch {
-            }
-        }
+        $matches = @($resolvedDownloads | Where-Object {
+            $_.Sha256.Equals($wheelSha256, [StringComparison]::OrdinalIgnoreCase) -and
+            -not [string]::IsNullOrWhiteSpace($_.Url)
+        })
+        $url = if ($matches.Count -eq 1) { [string]$matches[0].Url } else { $null }
         if ([string]::IsNullOrWhiteSpace($url)) {
             $script:WheelManifestFailureKind = "wheel_manifest_source_url_unbound"
             throw "Unable to bind wheel file to its resolved download URL"
@@ -1205,6 +1207,7 @@ function Write-SanitizedDependencyFailure {
         $Stage -eq "wheel_manifest" -and
         $WheelManifestFailureKind -in @(
             "wheel_manifest_unclassified",
+            "wheel_manifest_resolution_report_missing",
             "wheel_manifest_controlled_wheel_mismatch",
             "wheel_manifest_source_url_unbound",
             "wheel_manifest_empty",
@@ -1624,6 +1627,7 @@ try {
         Write-Host "R3_WHEEL_CACHE status=miss key=$($CacheIdentity.Key)"
         $DownloadStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
         $DownloadLog = Join-Path $LogRoot "pip-download.log"
+        $ResolutionReport = Join-Path $EvidenceRoot "pip-resolution-report.json"
         $DependencyFailureStage = "pip_download"
         $DependencyFailureLog = $DownloadLog
         $DependencyFailureOperation = "pip_download_proxy_setup"
@@ -1632,8 +1636,28 @@ try {
         $pipDownloadFailure = $null
         $proxyRestoreFailure = $null
         try {
-            $DependencyFailureOperation = "pip_download_command"
             try {
+                $DependencyFailureOperation = "pip_resolution_report_command"
+                Invoke-External `
+                    -FilePath $VenvPython `
+                    -Arguments @(
+                        "-m", "pip", "install",
+                        "--dry-run",
+                        "--ignore-installed",
+                        "--no-cache-dir",
+                        "--only-binary=:all:",
+                        "--report", $ResolutionReport,
+                        "--index-url", "https://pypi.org/simple",
+                        "--extra-index-url", "https://download.pytorch.org/whl/cu128",
+                        "--find-links", $ResolvedInternalWheelBundle,
+                        "--find-links", $ResolvedOss2WheelBundle,
+                        "--find-links", $ResolvedAntlr4WheelBundle,
+                        "--find-links", $ResolvedCrcmodWheelBundle,
+                        "--constraint", (Join-Path $EvidenceRoot "production-freeze.txt"),
+                        "--requirement", $CombinedRequirements
+                    ) `
+                    -LogPath (Join-Path $LogRoot "pip-resolution-report.log")
+                $DependencyFailureOperation = "pip_download_command"
                 Invoke-External `
                     -FilePath $VenvPython `
                     -Arguments @(
@@ -1667,14 +1691,13 @@ try {
             throw "Dependency proxy environment could not be restored"
         }
         if ($null -ne $pipDownloadFailure) {
-            $DependencyFailureOperation = "pip_download_command"
             throw $pipDownloadFailure
         }
         $DependencyFailureStage = "wheel_manifest"
         $DependencyFailureOperation = "wheel_manifest_validation"
         $DependencyFailureLog = $DownloadLog
         $WheelManifest = New-WheelManifest `
-            -DownloadLog $DownloadLog `
+            -ResolutionReportPath $ResolutionReport `
             -OutputPath (Join-Path $EvidenceRoot "wheel-manifest.json") `
             -InternalManifests @($InternalWheelManifest, $Oss2WheelManifest, $Antlr4WheelManifest, $CrcmodWheelManifest)
         Assert-WheelManifestUnchanged -Manifest $WheelManifest
