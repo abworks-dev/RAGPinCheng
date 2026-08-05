@@ -396,6 +396,7 @@ def test_faster_whisper_model_artifact_preparation_is_manual_and_isolated():
     assert "--staging-root" in script
     assert "--offline-only" in script
     assert "model-preparation\\faster-whisper\\$RunId" in script
+    assert "Run-specific model preparation path is not a regular directory" in script
     assert "start-scheduledtask" not in lowered
     assert "register-scheduledtask" not in lowered
     assert "new-netfirewallrule" not in lowered
@@ -767,7 +768,13 @@ def test_faster_whisper_qualification_freezes_dependencies_model_and_gates():
     assert "module escaped qualification venv" in script
     assert "e76620f83d5f5769e6a5f66c8013e1292a797de79b3581b44b6c7f9e36d77f31" in model
     assert "1617884929" in model.replace("_", "")
-    assert "snapshot_download" in model
+    assert "snapshot_download" not in model
+    assert "FIXED_MODEL_FILES" in model
+    assert "DOWNLOAD_ATTEMPTS = 3" in model
+    assert '"Accept-Encoding": "identity"' in model
+    assert "allow_redirects=False" in model
+    assert "model download escaped approved Hugging Face HTTPS hosts" in model
+    assert "os.replace(partial, destination)" in model
     assert "local_files_only=True" in read("asr_service/engines/faster_whisper.py")
     assert "CLEAR_CER_LIMIT = 0.10" in runner
     assert "BIM_NOISE_CER_LIMIT = 0.15" in runner

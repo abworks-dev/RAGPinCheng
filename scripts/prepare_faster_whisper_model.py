@@ -15,6 +15,7 @@ import ssl
 import sys
 from pathlib import Path, PurePosixPath
 from typing import Callable
+from urllib.parse import quote, urljoin, urlsplit
 
 import requests
 
@@ -35,6 +36,18 @@ MODEL_BIN_SHA256 = (
     "e76620f83d5f5769e6a5f66c8013e1292a797de79b3581b44b6c7f9e36d77f31"
 )
 MANIFEST_NAME = "model-manifest.json"
+FIXED_MODEL_FILES = (
+    ".gitattributes",
+    "README.md",
+    "config.json",
+    "model.bin",
+    "preprocessor_config.json",
+    "tokenizer.json",
+    "vocabulary.json",
+)
+DOWNLOAD_CHUNK_BYTES = 1024 * 1024
+DOWNLOAD_ATTEMPTS = 3
+MAX_REDIRECTS = 5
 
 
 class _TLS12HTTPAdapter(requests.adapters.HTTPAdapter):
@@ -87,6 +100,112 @@ def _hugging_face_backend() -> requests.Session:
     session = requests.Session()
     session.mount("https://", _TLS12HTTPAdapter())
     return session
+
+
+def _assert_download_url(url: str) -> None:
+    parsed = urlsplit(url)
+    host = (parsed.hostname or "").lower()
+    if (
+        parsed.scheme.lower() != "https"
+        or parsed.username is not None
+        or parsed.password is not None
+        or not (
+            host == "huggingface.co"
+            or host.endswith(".huggingface.co")
+            or host == "hf.co"
+            or host.endswith(".hf.co")
+        )
+    ):
+        raise RuntimeError("model download escaped approved Hugging Face HTTPS hosts")
+
+
+def _request_with_redirects(
+    session: requests.Session,
+    url: str,
+    *,
+    headers: dict[str, str],
+) -> requests.Response:
+    current = url
+    for _ in range(MAX_REDIRECTS + 1):
+        _assert_download_url(current)
+        response = session.get(
+            current,
+            headers=headers,
+            stream=True,
+            allow_redirects=False,
+            timeout=(10, 120),
+        )
+        if response.is_redirect or response.is_permanent_redirect:
+            location = response.headers.get("Location")
+            response.close()
+            if not location:
+                raise RuntimeError("model download redirect omitted Location")
+            current = urljoin(current, location)
+            continue
+        response.raise_for_status()
+        return response
+    raise RuntimeError("model download exceeded redirect limit")
+
+
+def _partial_path(destination: Path) -> Path:
+    return destination.with_name(f"{destination.name}.partial")
+
+
+def _download_fixed_file(
+    session: requests.Session,
+    *,
+    url: str,
+    destination: Path,
+) -> None:
+    if destination.exists():
+        if destination.is_symlink() or not destination.is_file():
+            raise RuntimeError("download staging contains an invalid completed file")
+        return
+
+    partial = _partial_path(destination)
+    if partial.exists() and (partial.is_symlink() or not partial.is_file()):
+        raise RuntimeError("download staging contains an invalid partial file")
+    offset = partial.stat().st_size if partial.exists() else 0
+
+    for attempt in range(1, DOWNLOAD_ATTEMPTS + 1):
+        headers = {"Accept-Encoding": "identity"}
+        if offset:
+            headers["Range"] = f"bytes={offset}-"
+        try:
+            response = _request_with_redirects(session, url, headers=headers)
+            try:
+                append = offset > 0 and response.status_code == 206
+                if offset > 0 and response.status_code not in {200, 206}:
+                    raise RuntimeError("model download returned an invalid resume status")
+                if append:
+                    content_range = response.headers.get("Content-Range", "")
+                    if not content_range.startswith(f"bytes {offset}-"):
+                        raise RuntimeError(
+                            "model download returned an invalid Content-Range"
+                        )
+                else:
+                    offset = 0
+                mode = "ab" if append else "wb"
+                with partial.open(mode) as handle:
+                    for chunk in response.iter_content(
+                        chunk_size=DOWNLOAD_CHUNK_BYTES
+                    ):
+                        if chunk:
+                            handle.write(chunk)
+                expected_length = response.headers.get("Content-Length")
+                if expected_length is not None:
+                    received = partial.stat().st_size - offset
+                    if received != int(expected_length):
+                        raise RuntimeError("model download response length mismatch")
+                os.replace(partial, destination)
+                return
+            finally:
+                response.close()
+        except (OSError, requests.RequestException, RuntimeError):
+            if attempt == DOWNLOAD_ATTEMPTS:
+                raise
+            offset = partial.stat().st_size if partial.exists() else 0
+    raise RuntimeError("model download attempts exhausted")
 
 
 def _sha256(path: Path) -> str:
@@ -190,10 +309,51 @@ def _write_manifest(model_root: Path) -> Path:
 
 
 def _default_downloader(**kwargs: object) -> str:
-    from huggingface_hub import configure_http_backend, snapshot_download
+    expected = {"repo_id", "revision", "local_dir"}
+    if set(kwargs) != expected:
+        raise RuntimeError("model downloader received unexpected arguments")
+    if (
+        kwargs["repo_id"] != FASTER_WHISPER_MODEL_ID
+        or kwargs["revision"] != FASTER_WHISPER_REVISION
+    ):
+        raise RuntimeError("model downloader identity mismatch")
+    download_root = _strict_root(
+        Path(str(kwargs["local_dir"])), "local_dir", must_exist=True
+    )
+    allowed_names = set(FIXED_MODEL_FILES)
+    for item in download_root.iterdir():
+        if item.name not in allowed_names and not (
+            item.name.endswith(".partial")
+            and item.name.removesuffix(".partial") in allowed_names
+        ):
+            raise RuntimeError("download staging contains an unexpected entry")
+        if item.is_symlink() or not item.is_file():
+            raise RuntimeError("download staging contains a non-regular entry")
 
-    configure_http_backend(backend_factory=_hugging_face_backend)
-    return snapshot_download(**kwargs)
+    session = _hugging_face_backend()
+    try:
+        for filename in FIXED_MODEL_FILES:
+            encoded = quote(filename, safe="")
+            url = (
+                "https://huggingface.co/"
+                f"{FASTER_WHISPER_MODEL_ID}/resolve/"
+                f"{FASTER_WHISPER_REVISION}/{encoded}"
+            )
+            _download_fixed_file(
+                session,
+                url=url,
+                destination=download_root / filename,
+            )
+        completed = {
+            item.name
+            for item in download_root.iterdir()
+            if item.is_file() and not item.is_symlink()
+        }
+        if completed != set(FIXED_MODEL_FILES):
+            raise RuntimeError("fixed model download file set mismatch")
+    finally:
+        session.close()
+    return str(download_root)
 
 
 def validate_local_model(cache_root: Path) -> dict[str, object]:
@@ -233,14 +393,19 @@ def prepare_model(
         result["status"] = "reused"
         return result
 
-    if staging.exists():
-        if any(staging.iterdir()):
-            raise RuntimeError("staging_root must be empty")
-    else:
+    if not staging.exists():
         staging.mkdir(parents=True)
+    else:
+        staging_entries = tuple(staging.iterdir())
+        if any(item.name != "download" for item in staging_entries):
+            raise RuntimeError("staging_root contains an unexpected entry")
+        if staging_entries and (
+            staging_entries[0].is_symlink() or not staging_entries[0].is_dir()
+        ):
+            raise RuntimeError("staging download root is invalid")
 
     download_root = staging / "download"
-    download_root.mkdir()
+    download_root.mkdir(exist_ok=True)
     returned = Path(
         downloader(
             repo_id=FASTER_WHISPER_MODEL_ID,

@@ -107,9 +107,9 @@ $venvVersion = & $venvPython -c "import sys; print(f'{sys.version_info.major}.{s
 if ($LASTEXITCODE -ne 0 -or ([string]$venvVersion).Trim() -ne "3.11") {
     throw "ASR Python environment must use Python 3.11"
 }
-& $venvPython -c "import huggingface_hub, requests"
+& $venvPython -c "import requests"
 if ($LASTEXITCODE -ne 0) {
-    throw "ASR Python environment must provide huggingface_hub and requests"
+    throw "ASR Python environment must provide requests"
 }
 
 $configPath = Join-Path $DataRoot "config\asr.env"
@@ -156,9 +156,16 @@ if (
 $cacheRoot = Join-Path $DataRoot "models"
 $runRoot = Join-Path $DataRoot "model-preparation\faster-whisper\$RunId"
 if (Test-Path -LiteralPath $runRoot) {
-    throw "Run-specific model preparation directory already exists"
+    $runItem = Get-Item -LiteralPath $runRoot -Force
+    if (
+        -not $runItem.PSIsContainer -or
+        ($runItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint)
+    ) {
+        throw "Run-specific model preparation path is not a regular directory"
+    }
+} else {
+    New-Item -ItemType Directory -Path $runRoot | Out-Null
 }
-New-Item -ItemType Directory -Path $runRoot | Out-Null
 $stagingRoot = Join-Path $runRoot "staging"
 $reportPath = Join-Path $runRoot "model-preparation.json"
 $prepareScript = Join-Path $resolvedSource "scripts\prepare_faster_whisper_model.py"
