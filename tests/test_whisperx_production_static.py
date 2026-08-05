@@ -61,6 +61,7 @@ def test_model_and_smoke_identity_are_pinned_and_use_existing_contracts():
     assert 'ASR_REVISION = "53ecf83a5bedc5597eb8c8b34eac29e5345520ff"' in runner
     assert 'ALIGN_MODEL_ID = "jonatasgrosman/wav2vec2-large-xlsr-53-chinese-zh-cn"' in runner
     assert 'ALIGN_REVISION = "51d27579a1040ee4e967979278d5f76b9c32c375"' in runner
+    assert runner.count("max_workers=1") == 2
     for required in (
         "WhisperXEngine",
         "PreparedAudioChunk",
