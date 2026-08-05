@@ -13,6 +13,13 @@ html.admin-scrollbar-stable {
   scrollbar-gutter: stable;
 }
 
+@media (min-width: 1024px) {
+  html.admin-scrollbar-stable {
+    overflow-y: hidden;
+    scrollbar-gutter: auto;
+  }
+}
+
 .resource-preview-root {
   visibility: hidden;
   pointer-events: none;
