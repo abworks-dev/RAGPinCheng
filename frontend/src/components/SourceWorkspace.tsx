@@ -207,13 +207,7 @@ export function SourceWorkspace({
               </span>
               <span className="min-w-0 flex-1">
                 <span className="flex items-center gap-1.5 text-sm font-medium">
-                  <span
-                    className={
-                      item.doc_type === "transcript"
-                        ? "flex size-6 shrink-0 items-center justify-center rounded-ui-sm bg-info/15 text-info"
-                        : "shrink-0 text-muted-foreground"
-                    }
-                  >
+                  <span className="flex size-6 shrink-0 items-center justify-center rounded-ui-sm bg-info/15 text-info">
                     <SourceTypeIcon source={item} />
                   </span>
                   <span className="truncate">{sourceDisplayTitle(item)}</span>
