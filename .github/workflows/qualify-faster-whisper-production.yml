@@ -171,6 +171,8 @@ jobs:
               "- Model revision: ``$($summary.model_revision)``",
               "- Baseline GPU memory: ``$($summary.baseline_gpu_memory_mib) MiB``",
               "- Peak GPU memory: ``$($summary.peak_gpu_memory_mib) MiB``",
+              "- Wheel cache: ``$($summary.wheel_cache_status)``",
+              "- Wheel cache key: ``$($summary.wheel_cache_key)``",
               "- Profile admission: ``$($summary.profile_admission)``",
               "- Production services modified: ``$($summary.production_services_modified)``"
             )
@@ -196,7 +198,9 @@ jobs:
           }
 
       - name: Upload sanitized verdict
+        id: upload_verdict
         if: ${{ always() }}
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: faster-whisper-r3-verdict-${{ github.run_id }}
@@ -204,4 +208,15 @@ jobs:
             ${{ runner.temp }}\faster-whisper-r3-${{ github.run_id }}\qualification-verdict.json
             ${{ runner.temp }}\faster-whisper-r3-${{ github.run_id }}\dependency-diagnostic.json
           if-no-files-found: warn
+          retention-days: 14
+
+      - name: Retry sanitized verdict upload
+        if: ${{ always() && steps.upload_verdict.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: faster-whisper-r3-verdict-${{ github.run_id }}-retry
+          path: |
+            ${{ runner.temp }}\faster-whisper-r3-${{ github.run_id }}\qualification-verdict.json
+            ${{ runner.temp }}\faster-whisper-r3-${{ github.run_id }}\dependency-diagnostic.json
+          if-no-files-found: error
           retention-days: 14
