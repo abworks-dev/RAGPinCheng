@@ -138,7 +138,6 @@ jobs:
         shell: powershell
         env:
           ASR_DEPENDENCY_PROXY: ${{ secrets.ASR_DEPENDENCY_PROXY }}
-          ASR_MODEL_DOWNLOAD_PROXY: ${{ secrets.ASR_MODEL_DOWNLOAD_PROXY }}
           GPU_SERVICE_TOKEN: ${{ secrets.GPU_SERVICE_TOKEN }}
         run: |
           $params = @{

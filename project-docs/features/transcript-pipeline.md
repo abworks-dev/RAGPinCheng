@@ -56,7 +56,10 @@ Phase 5A/5B 已接通版本列表、只读 Markdown 预览、人工审核、显�
   缓存/依赖缺失时仅相应 Profile 不可用，不阻止现有 SenseVoice 服务启动；
 - faster-whisper adapter 固定
   `dropbox-dash/faster-whisper-large-v3-turbo@0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf`
-  与 CUDA FP16 参数，但 R2 未安装依赖、下载模型或运行推理。
+  与 CUDA FP16 参数；生产资格只接受
+  `${PRODUCTION_DATA_ROOT}\RAGPinCheng-ASR\models` 下已持久化且通过完整 Manifest、文件集合、
+  大小和 SHA-256 校验的本地制品，不在资格运行中访问 Hugging Face。首次填充或
+  恢复模型由独立手动 workflow 完成，服务与 Profile 保持关闭。
 - Qwen3-ASR adapter 固定
   `Qwen/Qwen3-ASR-0.6B@5eb144179a02acc5e5ba31e748d22b0cf3e303b0`
   与
@@ -131,6 +134,10 @@ TTS 样本已生成并通过严格 Manifest 校验，但生产 R3 workflow 在�
 - `asr_service/`（Phase 3 独立服务、存储、调度和 engine adapter）
 - `asr_service/engines/faster_whisper.py`、`requirements-faster-whisper.txt`
   （准入关闭的可选引擎 adapter 与隔离依赖声明）
+- `scripts/prepare_faster_whisper_model.py`、
+  `scripts/prepare-faster-whisper-model-production.ps1`、
+  `.github/workflows/prepare-faster-whisper-model-production.yml`
+  （固定 revision 的持久模型制品准备与严格离线校验入口）
 - `scripts/run_whisperx_qualification.py`、
   `scripts/qualify-whisperx-production.ps1`、
   `.github/workflows/qualify-whisperx-production.yml`

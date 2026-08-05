@@ -322,7 +322,7 @@ def test_faster_whisper_qualification_workflow_is_manual_immutable_and_gated():
     assert "qualification must be dispatched from master" in workflow
     assert 'github.ref }}" -ne "refs/heads/master"' in workflow
     assert "secrets.ASR_DEPENDENCY_PROXY" in workflow
-    assert "secrets.ASR_MODEL_DOWNLOAD_PROXY" in workflow
+    assert "secrets.ASR_MODEL_DOWNLOAD_PROXY" not in workflow
     assert "secrets.GPU_SERVICE_TOKEN" in workflow
     assert "secrets.ASR_SERVICE_TOKEN" not in workflow
     assert "activate_service" not in workflow.lower()
@@ -354,6 +354,46 @@ def test_faster_whisper_qualification_workflow_is_manual_immutable_and_gated():
     assert "Affected requirement:" in workflow
     assert "Fallback probe executed:" in workflow
     assert "Fallback probe exit code:" in workflow
+
+
+def test_faster_whisper_model_artifact_preparation_is_manual_and_isolated():
+    workflow = read(
+        ".github/workflows/prepare-faster-whisper-model-production.yml"
+    )
+    script = read("scripts/prepare-faster-whisper-model-production.ps1")
+    lowered = script.lower()
+
+    assert "workflow_dispatch:" in workflow
+    assert "push:" not in workflow
+    assert "pull_request:" not in workflow
+    assert "environment: production-asr" in workflow
+    assert "runs-on: [self-hosted, Windows, X64, asr-production]" in workflow
+    assert "timeout-minutes: 120" in workflow
+    assert "commit_sha must equal the workflow dispatch revision" in workflow
+    assert "model preparation must be dispatched from master" in workflow
+    assert "prepare_model must be explicitly enabled" in workflow
+    assert "ASR_MODEL_DOWNLOAD_PROXY: ${{ secrets.ASR_MODEL_DOWNLOAD_PROXY }}" in workflow
+    assert "ASR_DEPENDENCY_PROXY" not in workflow
+    assert "GPU_SERVICE_TOKEN" not in workflow
+    assert "ASR_SERVICE_TOKEN" not in workflow
+    assert "activate_service" not in workflow.lower()
+
+    assert "PrepareModel must be explicitly enabled" in script
+    assert "ASR_SERVICE_ENABLED=false" in script
+    assert "ASR_MODEL_DOWNLOAD_PROXY must be an absolute HTTP(S) URL without credentials" in script
+    assert "At least 10 GiB free space" in script
+    assert "Get-ScheduledTask" in script
+    assert "Get-NetTCPConnection -LocalPort 8200 -State Listen" in script
+    assert "--staging-root" in script
+    assert "--offline-only" in script
+    assert "model-preparation\\faster-whisper\\$RunId" in script
+    assert "start-scheduledtask" not in lowered
+    assert "register-scheduledtask" not in lowered
+    assert "new-netfirewallrule" not in lowered
+    assert "set-netfirewallrule" not in lowered
+    assert "netsh advfirewall" not in lowered
+    assert "remove-item" not in lowered
+    assert "asr_service_token" not in lowered
 
 
 def test_faster_whisper_synthetic_sample_preparation_is_fixed_and_gated():
@@ -522,9 +562,11 @@ def test_faster_whisper_qualification_uses_exact_process_and_proxy_boundaries():
     assert "function Set-ScopedProxy" in script
     assert "function Clear-ScopedProxy" in script
     assert script.count("Set-ScopedProxy -Proxy $env:ASR_DEPENDENCY_PROXY") == 2
-    assert script.count("Set-ScopedProxy -Proxy $env:ASR_MODEL_DOWNLOAD_PROXY") == 1
-    assert script.count("Clear-ScopedProxy") >= 3
+    assert "Set-ScopedProxy -Proxy $env:ASR_MODEL_DOWNLOAD_PROXY" not in script
+    assert script.count("Clear-ScopedProxy") >= 2
     assert '$env:NO_PROXY = "127.0.0.1,localhost,${PRIVATE_IPV4},${PRIVATE_IPV4}"' in script
+    assert '$env:HF_HUB_OFFLINE = "1"' in script
+    assert '$env:TRANSFORMERS_OFFLINE = "1"' in script
     assert "ASR_SERVICE_TOKEN: " not in script
     assert 'Write-Host "$TemporaryToken"' not in script
     assert 'Write-Output "$TemporaryToken"' not in script

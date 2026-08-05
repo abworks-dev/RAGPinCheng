@@ -196,6 +196,27 @@ def _default_downloader(**kwargs: object) -> str:
     return snapshot_download(**kwargs)
 
 
+def validate_local_model(cache_root: Path) -> dict[str, object]:
+    cache = _strict_root(cache_root, "cache_root", must_exist=False)
+    target = cache / Path(*PurePosixPath(FASTER_WHISPER_RELATIVE_PATH).parts)
+    target_manifest = target / MANIFEST_NAME
+    status = validate_faster_whisper_cache(cache, target_manifest)
+    if not status.available:
+        raise RuntimeError(
+            f"local model artifact is unavailable: {status.reason_code}"
+        )
+    _assert_model_bin(target)
+    return {
+        "schema_version": "faster-whisper-model-preparation/1",
+        "status": "validated-offline",
+        "model_id": FASTER_WHISPER_MODEL_ID,
+        "model_revision": FASTER_WHISPER_REVISION,
+        "model_path": str(target),
+        "manifest_path": str(target_manifest),
+        "manifest_sha256": _sha256(target_manifest),
+    }
+
+
 def prepare_model(
     cache_root: Path,
     staging_root: Path,
@@ -208,21 +229,9 @@ def prepare_model(
     target_manifest = target / MANIFEST_NAME
 
     if target.exists():
-        status = validate_faster_whisper_cache(cache, target_manifest)
-        if not status.available:
-            raise RuntimeError(
-                f"existing final model cache is invalid: {status.reason_code}"
-            )
-        _assert_model_bin(target)
-        return {
-            "schema_version": "faster-whisper-model-preparation/1",
-            "status": "reused",
-            "model_id": FASTER_WHISPER_MODEL_ID,
-            "model_revision": FASTER_WHISPER_REVISION,
-            "model_path": str(target),
-            "manifest_path": str(target_manifest),
-            "manifest_sha256": _sha256(target_manifest),
-        }
+        result = validate_local_model(cache)
+        result["status"] = "reused"
+        return result
 
     if staging.exists():
         if any(staging.iterdir()):
@@ -287,10 +296,18 @@ def prepare_model(
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--cache-root", type=Path, required=True)
-    parser.add_argument("--staging-root", type=Path, required=True)
+    parser.add_argument("--staging-root", type=Path)
+    parser.add_argument("--offline-only", action="store_true")
     parser.add_argument("--report-path", type=Path, required=True)
     args = parser.parse_args()
-    result = prepare_model(args.cache_root, args.staging_root)
+    if args.offline_only:
+        if args.staging_root is not None:
+            parser.error("--staging-root is not accepted with --offline-only")
+        result = validate_local_model(args.cache_root)
+    else:
+        if args.staging_root is None:
+            parser.error("--staging-root is required unless --offline-only is set")
+        result = prepare_model(args.cache_root, args.staging_root)
     report = _strict_root(args.report_path.parent, "report_parent", must_exist=True)
     report_path = (report / args.report_path.name).resolve()
     if report_path.parent != report:
