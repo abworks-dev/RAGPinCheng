@@ -2152,4 +2152,5 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 完成：从最新 `origin/master` 创建独立分支，仅整合来源核验列表图标统一样式；保留 master 已有的视频标题清理、来源定位和预览交互，不带入旧功能分支的其他提交。
 - 文件：`frontend/src/components/SourceWorkspace.tsx`、`WORKLOG.md`。
 - 验证：来源工作区专项 Vitest 3/3 通过；按最新锁文件安装隔离依赖后，TypeScript project build 与 Vite production build 通过（2026 modules transformed）；`git diff --check` 通过。首次复用旧依赖目录时因缺少锁文件已声明的 Radix Dialog 无法构建，安装隔离依赖后已消除；构建保留既有 CSS 语法与主包大于 500 kB 警告。
-- 待办/风险：尚待创建并检查独立 PR；依赖审计报告既有 10 项风险，本轮未运行自动修复，未修改依赖声明、API、数据契约、数据或部署配置。
+- 交付：独立草稿 PR #51 已创建，目标为 `master`，GitHub 判定可合并；CI 启动后迁移配置检查已通过，其余检查仍在运行。旧 PR #50 未修改或关闭。
+- 待办/风险：尚待 CI 全部完成及人工合并；依赖审计报告既有 10 项风险，本轮未运行自动修复，未修改依赖声明、API、数据契约、数据或部署配置。
