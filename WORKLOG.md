@@ -2313,9 +2313,16 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 验证：待执行部署边界与 faster-whisper 专项测试、PowerShell AST、PR/CI 及一次统一资格重跑。
 - 待办/风险：不修改依赖版本、production freeze、生产 venv、服务、防火墙或 Profile admission；资格失败时继续保持 Profile disabled。
 
+### 22:28 — 增强 faster-whisper Manifest 脱敏诊断
+
+- 完成：资格 run `31012199376` 仍在严格 wheel Manifest 门禁失败后，为六个固定 guard 增加受限失败码，复用既有 `diagnosis_kind` 字段区分未分类、受控 wheel 不匹配、来源 URL 未绑定、空 wheelhouse、兼容性参考缺失和记录后完整性变化；不输出文件名、路径、URL或原始日志。
+- 文件：`scripts/qualify-faster-whisper-production.ps1`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
+- 验证：faster-whisper 引擎、资格、resolver 与部署静态专项测试 86/86 通过；PowerShell AST 与 `git diff --check` 通过。
+- 待办/风险：待 PR/CI/合并和一次绑定新 master SHA 的统一资格重跑；生产服务和 Profile admission 保持不变。
+
 ### 22:33 — 实现 WhisperX 失败证据诊断
 
 - 完成：针对最终资格中的规范编号召回和噪声 BIM CER 两个失败项，新增完整 master SHA、显式 R3 开关、`production-asr` environment 和既有串行并发组保护的手动诊断 workflow；复用原 8 个自制样本、模型 revision、Python 3.11、CUDA 12.8、FP16、batch=1、Provider/normalizer/Canonical 契约及全部原阈值。诊断报告只包含文本 SHA-256、归一化长度、字符类别计数、token 形状、插入/删除/替换计数、期望项命中布尔值和固定分类；不包含参考、原始候选或 Canonical 文本。只有两个目标样本证据完整时诊断 workflow 才成功收口，资格 verdict 仍保持失败。
 - 文件：新增 `.github/workflows/diagnose-whisperx-production.yml`；更新 `scripts/run_whisperx_qualification.py`、`scripts/qualify-whisperx-production.ps1`、`asr_service/tests/test_whisperx_qualification.py`、`project-docs/features/transcript-pipeline.md`、`WORKLOG.md`。
-- 验证：WhisperX 诊断、资格、引擎及部署静态专项测试 51/51 通过；Python compileall、PowerShell 5.1 AST、两个 workflow YAML 解析和 `git diff --check` 通过。
+- 验证：WhisperX 诊断、资格、引擎及部署静态专项测试 52/52 通过；Python compileall、PowerShell 5.1 AST、两个 workflow YAML 解析和 `git diff --check` 通过。
 - 待办/风险：尚待 PR、完整 CI、合并和一次 production-asr 诊断 run；诊断不得启用 Profile、降低阈值、修改模型/样本/参考答案、安装 FFmpeg、注册服务或接入业务流量。若证据不完整即失败关闭。

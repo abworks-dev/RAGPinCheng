@@ -688,6 +688,15 @@ def test_faster_whisper_qualification_freezes_dependencies_model_and_gates():
         "license_audit_command",
     ):
         assert f'$DependencyFailureOperation = "{operation}"' in script
+    for manifest_failure_kind in (
+        "wheel_manifest_unclassified",
+        "wheel_manifest_controlled_wheel_mismatch",
+        "wheel_manifest_source_url_unbound",
+        "wheel_manifest_empty",
+        "wheel_manifest_reference_missing",
+        "wheel_manifest_integrity_changed",
+    ):
+        assert manifest_failure_kind in script
     assert "-Operation $DependencyFailureOperation" in script
     assert "--no-index" in script
     assert "pip\", \"check" in script
