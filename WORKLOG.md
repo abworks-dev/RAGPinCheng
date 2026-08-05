@@ -2236,6 +2236,13 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：新增 `scripts/build_internal_crcmod_wheel.py`、`tests/test_asr_internal_crcmod_wheel.py`；更新统一资格 workflow、PowerShell 编排、部署静态测试、R3 计划和 `WORKLOG.md`。
 - 验证：四个内部 wheel及 faster-whisper 资格专项测试 87/87 通过；Python 编译、PowerShell AST 和 `git diff --check` 通过。
 - 待办/风险：待 PR/CI/合并后继续最终资格；生产服务和 Profile admission 保持不变。
+
+### 21:22 — 修正 faster-whisper 资格依赖范围
+
+- 完成：确认连续 legacy sdist 门禁来自资格脚本重复请求整套 FunASR 生产 requirements，而非 faster-whisper 新增依赖。隔离资格现只安装固定 torch/torchaudio 与 faster-whisper requirements，继续以完整 production freeze 约束所有共享包；真实生产 venv 仍先独立 `pip check`。受控 legacy wheel 仅保留为兼容性参考，不再要求进入新引擎 wheelhouse。
+- 文件：更新 `scripts/qualify-faster-whisper-production.ps1`、`tests/test_asr_deployment_static.py`、R3 计划和 `WORKLOG.md`。
+- 验证：部署边界与 faster-whisper 引擎/资格专项测试 67/67 通过；PowerShell AST 与 `git diff --check` 通过。
+- 待办/风险：待 PR/CI/合并后执行最终统一资格；不修改 production freeze、生产 venv、服务或 Profile admission。
 ### 11:22 — 实现 Qwen3-ASR 依赖失败诊断
 
 - 完成：按单独获批 R3 诊断方案新增默认关闭的 Qwen dependency workflow 和 Windows 诊断脚本，固定读取 source run `30970277613`、source SHA `86b69db6831e3cd201436a26bbe836229bf419bd`、production freeze、Qwen/Windows requirements 与受控 jieba wheel；既有日志证据不足时只执行一次 run-local、binary-only、no-cache 的 resolver dry-run。v2 artifact 只包含固定 operation/failure origin、退出码、捕获行数、诊断种类、ASCII requirement、文件 hash 和清理状态，不包含原始冲突行或敏感上下文。

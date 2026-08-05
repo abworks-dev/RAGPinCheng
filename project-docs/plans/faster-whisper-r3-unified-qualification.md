@@ -252,6 +252,19 @@ wheel 全部进入 run-local wheelhouse。不调整 pin、production freeze 或 
 并继续拒绝任何 native wheel 内容，只接受重复构建一致的 `none-any` wheel。该 wheel 与前三个
 包一同执行严格来源、Manifest 和 wheelhouse 校验，不改变 binary-only 或 production freeze。
 
+### 2.0.13 资格依赖范围修正
+
+连续出现的 oss2、antlr4、crcmod、aliyun SDK 并非 faster-whisper 自身依赖，而是资格脚本
+把 `requirements-windows.txt` 整套 FunASR 生产依赖重新作为安装目标，同时又以 production
+freeze 约束并强制 binary-only，导致已经存在于生产 venv 的 legacy sdist 链被无意义重建。
+
+正确资格边界改为：先对真实生产 venv 执行既有 `pip check` 并生成不可变 freeze；隔离 venv
+只请求固定 torch/torchaudio 与 `requirements-faster-whisper.txt`，仍使用完整 production
+freeze 作为 constraint。这样任何共享依赖都不得改变生产版本，但 FunASR 私有传递依赖不会被
+重复安装。受控 legacy wheel Manifest 仅作为已验证兼容性参考，不要求进入 faster-whisper
+wheelhouse；wheelhouse Schema 升级为 `/3` 明确记录 reference Manifest 哈希。生产 venv、freeze、
+binary-only 和 Profile admission 均不改变。
+
 ### 2.1 仓库基线
 
 - PR #34 已合并到 `master`；
