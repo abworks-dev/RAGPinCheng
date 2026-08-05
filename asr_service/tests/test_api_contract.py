@@ -216,4 +216,5 @@ def test_enabled_default_wiring_does_not_require_optional_candidate_caches(
         "faster-whisper-large-v3-turbo-v1",
         "funasr-sensevoice-small-v1",
         "qwen3-asr-06b-aligner-v1",
+        "whisperx-large-v3-zh-align-v1",
     )

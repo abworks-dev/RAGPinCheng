@@ -21,6 +21,7 @@ from .profile import (
     FasterWhisperRemoteConfig,
     Qwen3AsrRemoteConfig,
     RemoteAsrServiceConfig,
+    WhisperXRemoteConfig,
     RemoteProviderConfig,
     TranscriptionExecutionConfig,
 )
@@ -278,6 +279,7 @@ def compute_client_request_id(
         RemoteAsrServiceConfig,
         FasterWhisperRemoteConfig,
         Qwen3AsrRemoteConfig,
+        WhisperXRemoteConfig,
     ):
         raise ContractValidationError("invalid_provider_config", "provider_config")
     return sha256_hex(
@@ -403,6 +405,7 @@ class RemoteAsrProvider:
             RemoteAsrServiceConfig,
             FasterWhisperRemoteConfig,
             Qwen3AsrRemoteConfig,
+            WhisperXRemoteConfig,
         ):
             return _failure(
                 self.provider_key, ProviderErrorCode.service_contract_mismatch

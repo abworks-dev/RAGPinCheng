@@ -2221,3 +2221,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：新增 `.github/workflows/diagnose-qwen3-asr-dependencies-production.yml`、`scripts/diagnose-qwen3-asr-dependencies.ps1`；更新部署静态测试、Qwen 方案与 `TODO.md`。
 - 验证：PowerShell AST 与 `git diff --check` 已通过；新增静态断言覆盖完整 master SHA、source identity、受控 wheel、dry-run 参数、v2 严格字段、venv 清理以及不含模型/CUDA/服务/防火墙/任务操作。完整 pytest 与 workflow YAML 解析待远端 CI。
 - 待办/风险：尚待独立 PR、CI、合并和一次绑定新 master SHA 的诊断 workflow；诊断结果只用于下一份 R3 方案，不授权修改依赖、production freeze、binary-only、服务或 Profile admission。
+
+### 11:49 — 完成 WhisperX R2/R3 隔离实现并适配最新 master
+
+- 完成：在独立 `codex/whisperx-r2-r3` worktree 中实现 WhisperX experimental Profile、严格远程配置、应用 remote Provider 工厂注册、服务端 lazy-import 引擎和 ASR/中文对齐双模型缓存门禁；模型固定为 `Systran/faster-whisper-large-v3@53ecf83a5bedc5597eb8c8b34eac29e5345520ff`，Profile admission 保持 disabled，强制人工审核且禁止自动发布/索引。新增仅手动触发、固定 master SHA 与 `production-asr` environment 的 Windows runner workflow，在独立目录安装 Python 3.11/cu128/WhisperX、生成非敏感合成中文 WAV，并验证 Engine → ProviderCandidate → normalizer → Canonical；不注册服务、不修改任务/防火墙、不接入业务流量。将前期本地 `f75ee7ce` 实现合入最新 `origin/master`，保留同期 Qwen3-ASR Profile、引擎、缓存和测试。
+- 文件：`src/transcription/profile.py`、`src/transcription/profile_catalog.py`、`src/transcription/remote_provider.py`、`api/transcription_runtime.py`、`api/routes_transcription.py`、`asr_service/app.py`、`asr_service/config.py`、`asr_service/engine_protocol.py`、`asr_service/model_cache.py`、`asr_service/engines/whisperx.py`、`asr_service/requirements-whisperx.txt`、`.github/workflows/smoke-whisperx-production.yml`、`scripts/run_whisperx_cuda_smoke.py`、`scripts/smoke-whisperx-production.ps1`、相关测试、执行方案、功能文档与 `.gitignore`。
+- 验证：最新 master 整合基线下 WhisperX/Profile/service/static 专项 85/85 通过；完整转写与 ASR service 离线回归 506/506 通过。Python `compileall`、PowerShell AST、workflow YAML 和 `git diff --check` 在合并前已通过，合并后的最终静态检查随本次提交继续执行。先前本机 PyPI 安装得到 `torch 2.8.0+cpu`，本机 cu128 大 wheel 下载停滞后已终止；未在开发机下载模型或执行推理。
+- 待办/风险：PR 远端 CI、合并及 Windows `production-asr` CUDA 冒烟仍待本次已批准流程的后续步骤；在 workflow 成功前不能认定 WhisperX 可用。runner 将精确校验 `torch 2.8.0+cu128`/CUDA 12.8、CTranslate2 FP16、双模型逐文件 SHA-256 和系统控制面末态；任一门禁失败即关闭。未启动服务、未接触生产数据/数据库/Qdrant，也未修改系统 CUDA、PATH 或现有 FunASR/BGE 环境。

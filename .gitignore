@@ -11,6 +11,10 @@ media/
 __pycache__/
 *.pyc
 .venv/
+.venv-whisperx/
+.whisperx-cache/
+.whisperx-wheelhouse/
+.whisperx-reports/
 venv/
 # Real business documents stay in docs/ and are not tracked by Git.
 # Project knowledge maps (features, decisions, user acceptance) live in
