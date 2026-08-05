@@ -2263,3 +2263,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：更新 `scripts/extract_qwen3_asr_resolver_evidence.py`、`tests/test_qwen3_asr_resolver_evidence.py`、`.github/workflows/diagnose-qwen3-asr-dependencies-production.yml`、`tests/test_asr_deployment_static.py`、`project-docs/plans/qwen3-asr-r2-r3-integration.md`、`TODO.md`、`WORKLOG.md`。
 - 验证：Python `compileall`、纯内存未解析行对账/分类/无原文冒烟和 `git diff --check` 通过；本机无项目 venv 且系统 Python 未安装 pytest，遵守约束未安装依赖，完整参数化脱敏测试交由 CI。
 - 待办/风险：尚待 PR、CI、合并及一次绑定完整 master SHA 的手动离线 workflow；若结论为 `still_unknown` 或 `resolver_context_only` 即停止。不运行 pip，不下载模型，不启动服务，不修改生产状态或 Profile admission。
+
+### 12:36 — 补全管理面板稳定滚动槽
+
+- 完成：复核确认根滚动元素原为 `overflow-y: visible`，导致仅设置 `scrollbar-gutter: stable` 时短页面不会实际预留滚动槽；现为管理面板根滚动元素补充 `overflow-y: auto`，使有无纵向滚动条的页面保持同一水平居中基准。
+- 文件：`frontend/src/styles/index.css`、`WORKLOG.md`；未带入原工作区的同步转录、来源面板及其他并行修改。
+- 验证：基于最新 `origin/master@d3d3f76`，管理布局专项 Vitest 5/5 通过；TypeScript project build 与 Vite production build 通过（2027 modules transformed）；目标差异与 `git diff --check` 通过。构建保留既有 CSS 语法与主包大于 500 kB 警告；依赖安装审计报告既有 10 项风险，本轮未运行自动修复。
+- 待办/风险：仍需真实管理员登录态下切换长短页面完成视觉验收；无 API、数据、依赖或部署变更，回滚可直接 revert 本提交。
