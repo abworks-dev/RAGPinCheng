@@ -72,6 +72,10 @@ jobs:
             --bundle-dir "${{ runner.temp }}/faster-whisper-internal-wheels-${{ github.run_id }}/oss2" \
             --commit-sha "${{ inputs.commit_sha }}" \
             --run-id "${{ github.run_id }}"
+          python scripts/build_internal_antlr4_wheel.py build \
+            --bundle-dir "${{ runner.temp }}/faster-whisper-internal-wheels-${{ github.run_id }}/antlr4" \
+            --commit-sha "${{ inputs.commit_sha }}" \
+            --run-id "${{ github.run_id }}"
 
       - name: Upload controlled internal wheels
         uses: actions/upload-artifact@v4
@@ -140,6 +144,7 @@ jobs:
             ExecuteQualification = [System.Convert]::ToBoolean("${{ inputs.execute_qualification }}")
             InternalWheelBundlePath = "${{ runner.temp }}\faster-whisper-internal-wheels-${{ github.run_id }}\jieba"
             Oss2WheelBundlePath = "${{ runner.temp }}\faster-whisper-internal-wheels-${{ github.run_id }}\oss2"
+            Antlr4WheelBundlePath = "${{ runner.temp }}\faster-whisper-internal-wheels-${{ github.run_id }}\antlr4"
             SummaryPath = "${{ runner.temp }}\faster-whisper-r3-${{ github.run_id }}\qualification-verdict.json"
             DependencyDiagnosticPath = "${{ runner.temp }}\faster-whisper-r3-${{ github.run_id }}\dependency-diagnostic.json"
           }
