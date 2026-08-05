@@ -2215,6 +2215,13 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：更新 `scripts/extract_faster_whisper_resolver_evidence.py`、`tests/test_faster_whisper_resolver_evidence.py`、`project-docs/plans/faster-whisper-r3-unified-qualification.md`、`TODO.md`、`WORKLOG.md`。
 - 验证：补充真实 `oss2` 防误判、明确冲突、明确相容、缺失约束和不支持格式测试；最终专项回归、PR 和 CI 待执行。
 - 待办/风险：合并后只再执行一次固定离线提取并读取脱敏 JSON；不运行 pip、不读取原始日志、不修改依赖、production freeze、生产服务或 Profile admission。
+
+### 12:07 — 实施 faster-whisper R3 完整闭环
+
+- 完成：依据修复后的离线证据和固定 PyPI release metadata，将真实 blocker 收敛为 `oss2==2.19.1` 仅有 sdist、无法通过全局 binary-only；沿用 jieba 的受控 wheel 安全模式新增固定 oss2 构建器，并将统一资格 workflow 扩展为一次构建、传递和逐包复验两个内部 wheel。Windows 资格脚本要求两个受控 wheel 都进入 wheelhouse，Manifest 升级为 v2 并记录两个来源 Manifest 哈希。
+- 文件：新增 `scripts/build_internal_oss2_wheel.py`、`tests/test_asr_internal_oss2_wheel.py`；更新 `.github/workflows/qualify-faster-whisper-production.yml`、`scripts/qualify-faster-whisper-production.ps1`、`tests/test_asr_deployment_static.py`、R3 计划、`TODO.md`、`WORKLOG.md`。
+- 验证：内部 wheel、部署边界、离线证据和 faster-whisper 引擎/资格专项测试 100/100 通过；新增 oss2 固定 URL、大小、SHA-256、严格 Manifest、篡改拒绝测试；Python 编译、PowerShell AST 和 `git diff --check` 通过。
+- 待办/风险：尚待 scoped review、PR、完整 CI、合并及一次统一生产资格 workflow。未放宽 binary-only、未修改 production freeze、生产 venv、服务、防火墙、Ubuntu、数据库、Qdrant、模型或 Profile admission。
 ### 11:22 — 实现 Qwen3-ASR 依赖失败诊断
 
 - 完成：按单独获批 R3 诊断方案新增默认关闭的 Qwen dependency workflow 和 Windows 诊断脚本，固定读取 source run `30970277613`、source SHA `86b69db6831e3cd201436a26bbe836229bf419bd`、production freeze、Qwen/Windows requirements 与受控 jieba wheel；既有日志证据不足时只执行一次 run-local、binary-only、no-cache 的 resolver dry-run。v2 artifact 只包含固定 operation/failure origin、退出码、捕获行数、诊断种类、ASCII requirement、文件 hash 和清理状态，不包含原始冲突行或敏感上下文。

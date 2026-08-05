@@ -321,8 +321,9 @@ def test_faster_whisper_qualification_workflow_is_manual_immutable_and_gated():
     assert "runs-on: ubuntu-latest" in build_job
     assert "timeout-minutes: 30" in build_job
     assert "scripts/build_internal_jieba_wheel.py build" in build_job
+    assert "scripts/build_internal_oss2_wheel.py build" in build_job
     assert "actions/upload-artifact@v4" in build_job
-    assert "jieba-internal-wheel-${{ github.run_id }}" in build_job
+    assert "faster-whisper-internal-wheels-${{ github.run_id }}" in build_job
     assert "secrets." not in build_job
     assert "production-asr" not in build_job
     assert "ASR_SERVICE_TOKEN" not in build_job
@@ -567,11 +568,14 @@ def test_faster_whisper_qualification_freezes_dependencies_model_and_gates():
     assert "-r $ResolvedSource\\asr_service\\" not in script
     assert "--only-binary=:all:" in script
     assert "InternalWheelBundlePath" in script
+    assert "Oss2WheelBundlePath" in script
     assert "build_internal_jieba_wheel.py" in script
+    assert "build_internal_oss2_wheel.py" in script
     assert '"validate"' in script
     assert '"--find-links", $ResolvedInternalWheelBundle' in script
-    assert "internal://jieba/0.42.1/$wheelSha256" in script
-    assert "internal_wheel_manifest_sha256" in script
+    assert 'source_url = "internal://$($controlled.package_name)/$($controlled.package_version)/$wheelSha256"' in script
+    assert 'schema_version = "faster-whisper-wheel-manifest/2"' in script
+    assert "internal_wheel_manifests_sha256" in script
     assert "Controlled internal wheel changed before wheelhouse recording" in script
     assert "Controlled internal wheel was not resolved into the wheelhouse" in script
     diagnostic_section = script.split(
