@@ -78,6 +78,7 @@ def test_model_and_smoke_identity_are_pinned_and_use_existing_contracts():
         "validate_whisperx_cache",
         "validate_whisperx_align_cache",
         "model-manifest.json",
+        "stage={stage}; type={failure_type}",
     ):
         assert required in runner
     assert 'os.environ["HF_HUB_OFFLINE"] = "1"' in runner

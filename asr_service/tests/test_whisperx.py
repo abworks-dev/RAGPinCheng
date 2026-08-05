@@ -85,7 +85,34 @@ def test_oom_invalid_output_and_profile_mismatch(monkeypatch):
     result = engine.transcribe_chunk(PreparedAudioChunk(0, 0, 2000, b"wav"), WHISPERX_SERVICE_CONFIG)
     assert type(result) is ProviderFailure
     assert result.error_code is ProviderErrorCode.provider_oom
+    assert engine.last_failure_stage == "transcribe"
+    assert engine.last_failure_type == "RuntimeError"
 
     result = engine.transcribe_chunk(PreparedAudioChunk(0, 0, 2000, b"wav"), SENSEVOICE_SERVICE_CONFIG)
     assert type(result) is ProviderFailure
     assert result.error_code is ProviderErrorCode.service_contract_mismatch
+    assert engine.last_failure_stage is None
+    assert engine.last_failure_type is None
+
+
+def test_invalid_output_exposes_only_allowlisted_stage_and_exception_type(monkeypatch):
+    install_fake(monkeypatch)
+
+    class Empty:
+        def transcribe(self, *_args, **_kwargs):
+            return {"language": "zh", "segments": ()}
+
+    engine = WhisperXEngine(
+        _model=Empty(),
+        _align_model=object(),
+        _align_metadata=object(),
+    )
+    result = engine.transcribe_chunk(
+        PreparedAudioChunk(0, 0, 2000, b"wav"),
+        WHISPERX_SERVICE_CONFIG,
+    )
+
+    assert type(result) is ProviderFailure
+    assert result.error_code is ProviderErrorCode.invalid_provider_output
+    assert engine.last_failure_stage == "validate-transcription"
+    assert engine.last_failure_type == "ValueError"

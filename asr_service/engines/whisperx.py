@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import importlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from io import BytesIO
 from pathlib import Path
@@ -37,6 +37,8 @@ class WhisperXEngine:
     model_path: Path | None = None
     align_model_path: Path | None = None
     unavailable_reason_code: str = "model-cache-unavailable"
+    last_failure_stage: str | None = field(default=None, init=False)
+    last_failure_type: str | None = field(default=None, init=False)
 
     def capabilities(self) -> ServiceEngineCapabilities:
         if self._model is not None and self._align_model is not None:
@@ -69,22 +71,31 @@ class WhisperXEngine:
         return self._model, self._align_model, self._align_metadata
 
     def transcribe_chunk(self, chunk: PreparedAudioChunk, config: ServiceProfileConfig) -> EngineChunkCandidate | ProviderFailure:
+        self.last_failure_stage = None
+        self.last_failure_type = None
         if config.provider_key != self.provider_key or config.service_profile_id != self.service_profile_id:
             return ProviderFailure(self.provider_key, ProviderErrorCode.service_contract_mismatch, ProviderFailureClassification.permanent)
         if not self.capabilities().available:
             return ProviderFailure(self.provider_key, ProviderErrorCode.provider_unavailable, ProviderFailureClassification.transient)
+        stage = "load-models"
         try:
             whisperx = importlib.import_module("whisperx")
             model, align_model, align_metadata = self._load_models()
+            stage = "decode-audio"
             audio = whisperx.load_audio(BytesIO(chunk.content))
+            stage = "transcribe"
             raw = model.transcribe(audio, batch_size=1, language="zh")
+            stage = "validate-transcription"
             if type(raw) is not dict or type(raw.get("segments")) is not list or raw.get("language") not in ("zh", "zh-CN"):
                 raise ValueError("invalid transcription output")
+            stage = "align"
             aligned = whisperx.align(raw["segments"], align_model, align_metadata, audio, "cuda", return_char_alignments=False)
+            stage = "validate-alignment"
             if type(aligned) is not dict or type(aligned.get("segments")) is not list:
                 raise ValueError("invalid alignment output")
             duration_ms = chunk.end_ms - chunk.start_ms
             segments: list[CandidateSegment] = []
+            stage = "map-segments"
             for position, item in enumerate(aligned["segments"]):
                 if type(item) is not dict:
                     raise ValueError("invalid aligned segment")
@@ -98,10 +109,14 @@ class WhisperXEngine:
                 raise ValueError("empty aligned output")
             return EngineChunkCandidate(self.provider_key, "zh-CN", duration_ms, tuple(segments))
         except RuntimeError as exc:
+            self.last_failure_stage = stage
+            self.last_failure_type = type(exc).__name__
             return ProviderFailure(
                 self.provider_key,
                 ProviderErrorCode.provider_oom if "out of memory" in str(exc).lower() else ProviderErrorCode.provider_unavailable,
                 ProviderFailureClassification.transient,
             )
-        except Exception:
+        except Exception as exc:
+            self.last_failure_stage = stage
+            self.last_failure_type = type(exc).__name__
             return ProviderFailure(self.provider_key, ProviderErrorCode.invalid_provider_output, ProviderFailureClassification.permanent)
