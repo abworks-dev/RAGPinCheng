@@ -421,11 +421,11 @@ def test_faster_whisper_synthetic_sample_preparation_is_fixed_and_gated():
     assert "app.sqlite" not in script
 
 
-def test_faster_whisper_dependency_diagnosis_is_manual_fixed_and_sanitized():
+def test_faster_whisper_resolver_evidence_is_manual_fixed_offline_and_sanitized():
     workflow = read(
         ".github/workflows/diagnose-faster-whisper-dependencies-production.yml"
     )
-    script = read("scripts/diagnose-faster-whisper-dependencies.ps1")
+    script = read("scripts/extract_faster_whisper_resolver_evidence.py")
     lowered = script.lower()
 
     assert "workflow_dispatch:" in workflow
@@ -433,12 +433,13 @@ def test_faster_whisper_dependency_diagnosis_is_manual_fixed_and_sanitized():
     assert "pull_request:" not in workflow
     assert "production-asr" in workflow
     assert "runs-on: [self-hosted, Windows, X64, asr-production]" in workflow
-    assert "timeout-minutes: 30" in workflow
+    assert "timeout-minutes: 10" in workflow
     assert workflow.count("default: false") == 1
-    assert "execute_diagnosis must be explicitly enabled" in workflow
+    assert "extract_evidence must be explicitly enabled" in workflow
     assert "commit_sha must equal the workflow dispatch revision" in workflow
-    assert "diagnosis must be dispatched from master" in workflow
-    assert "secrets.ASR_DEPENDENCY_PROXY" in workflow
+    assert "evidence extraction must be dispatched from master" in workflow
+    assert "secrets." not in workflow
+    assert "ASR_DEPENDENCY_PROXY" not in workflow
     assert "secrets.ASR_MODEL_DOWNLOAD_PROXY" not in workflow
     assert "secrets.GPU_SERVICE_TOKEN" not in workflow
     assert "secrets.ASR_SERVICE_TOKEN" not in workflow
@@ -446,57 +447,31 @@ def test_faster_whisper_dependency_diagnosis_is_manual_fixed_and_sanitized():
     assert "model_id:" not in workflow
     assert "revision:" not in workflow
 
-    assert '$SourceRunId = "30955067671"' in script
-    assert "production-freeze.txt" in script
+    assert 'SOURCE_RUN_ID = "30968517582"' in script
+    assert 'SOURCE_COMMIT_SHA = "cf57327452dbcd7e72140e5d271a3f0c2f3b5238"' in script
     assert "pip-download.log" in script
-    assert "qualification-requirements.txt" in script
-    assert "Convert-ToSanitizedResolverEvidence" in script
+    assert "pip-resolver-fallback.log" in script
+    assert "dependency-diagnostic.json" in script
+    assert "faster-whisper-r3-resolver-evidence/1" in script
     assert "binary_distribution_unavailable" in script
     assert "version_constraint_conflict" in script
-    assert "No matching binary distribution found for" in script
-    assert 'D:\\private\\python.exe : ERROR: No matching distribution found for jieba' in script
-    assert "diagnosis_kind = $DiagnosisKind" in script
-    assert "affected_requirement = $AffectedRequirement" in script
-    assert "focused_probe_executed = $FocusedProbeExecuted" in script
-    assert "focused_probe_exit_code = $FocusedProbeExitCode" in script
-    assert "focused-binary-probe.log" in script
-    assert "Focused binary-only requirement probe succeeded" in script
-    assert "$evidence.ProbeConstraint" in script
-    assert "exit 0" in script
-    assert "Assert-SanitizerSelfTest" in script
-    assert "Assert-ProductionFreeze" in script
-    assert "Assert-FixedCombinedRequirements" in script
-    assert "Source production freeze contains a non-registry constraint" in script
-    assert "Source combined requirements do not match the fixed contract" in script
-    assert "faster-whisper-r3-dependency-diagnostic/1" in script
-    assert "--dry-run" in script
-    assert "--ignore-installed" in script
-    assert "--only-binary=:all:" in script
-    assert "--no-cache-dir" in script
-    assert "resolver-replay.log" in script
-    assert "conflict_details_insufficient" in script
-    assert "resolution_succeeded_unexpectedly" in script
-    assert "production_services_modified = $false" in script
-    assert 'profile_admission = "disabled"' in script
-    assert script.isascii()
-
-    assert "Remove-Item" not in script
-    assert "Start-ScheduledTask" not in script
-    assert "Stop-ScheduledTask" not in script
-    assert "Register-ScheduledTask" not in script
-    assert "Unregister-ScheduledTask" not in script
-    assert "New-NetFirewallRule" not in script
-    assert "Set-NetFirewallRule" not in script
-    assert "Remove-NetFirewallRule" not in script
-    assert "netsh advfirewall" not in lowered
-    assert "Start-Process" not in script
-    assert "ASR_ENABLED" not in script
-    assert "prod.env" not in lowered
-    assert "ASR_MODEL_DOWNLOAD_PROXY" not in script
-    assert "GPU_SERVICE_TOKEN" not in script
-    assert "ASR_SERVICE_TOKEN" not in script
-    assert "Qdrant" not in script
-    assert "app.sqlite" not in script
+    assert "profile_admission" in script
+    assert "production_services_modified" in script
+    assert "source_run_id:" not in workflow
+    assert "diagnose-faster-whisper-dependencies.ps1" not in workflow
+    assert "extract_faster_whisper_resolver_evidence.py" in workflow
+    assert "resolver-evidence.json" in workflow
+    assert "pip-download.log" not in workflow
+    assert "pip-resolver-fallback.log" not in workflow
+    assert "actions/upload-artifact@v4" in workflow
+    assert "C:\\Program Files\\Python311\\python.exe" in workflow
+    assert "pip " not in lowered
+    for forbidden in (
+        "import subprocess", "import socket", "import requests", "import urllib",
+        "start-scheduledtask", "new-netfirewallrule", "asr_enabled", "qdrant",
+        "app.sqlite", "asr_service_token", "gpu_service_token",
+    ):
+        assert forbidden not in lowered
 
 
 def test_faster_whisper_qualification_is_isolated_from_production_mutations():

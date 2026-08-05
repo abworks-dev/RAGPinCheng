@@ -2201,3 +2201,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`frontend/src/pages/admin/AdminMediaPage.tsx`、`frontend/src/pages/admin/AdminMediaPage.test.tsx`、`project-docs/features/transcript-pipeline.md`、`WORKLOG.md`；复用 master 已有的媒体状态摘要 API 和类型，不修改 Provider、Canonical、ASR 服务、模型、依赖、数据库结构或部署配置。
 - 验证：最新 master 整合基线的媒体页与 API client 专项测试 18/18、前端全量测试 31 个文件 148/148 通过；TypeScript project build 与 Vite production build 通过（2026 modules transformed）；`git diff --check` 通过。构建保留既有 CSS minify、主包大于 500 kB 和 React Router future warning。本地后端环境缺少 FastAPI，后端 API 测试由既有 master 覆盖并留待 CI 复跑。
 - 待办/风险：功能仍需真实管理员登录态下使用多视频、人工 Markdown 与可用 ASR Profile 验收；未运行真实 ASR、Qdrant、生产数据库或部署。
+
+### 11:13 — 实施 R3 离线 resolver 证据提取
+
+- 完成：将既有手动依赖诊断 workflow 收敛为默认关闭、完整 master SHA 绑定的一次离线提取通道；新增纯标准库解析器，只读取固定 run `30968517582` 的两个 resolver 日志和 v2 diagnostic，严格校验来源身份、文件大小/编码/路径及 Schema，并只输出归一化候选、blocker、错误族计数和输入文件哈希。
+- 文件：新增 `scripts/extract_faster_whisper_resolver_evidence.py`、`tests/test_faster_whisper_resolver_evidence.py`；更新 `.github/workflows/diagnose-faster-whisper-dependencies-production.yml`、`tests/test_asr_deployment_static.py`、`project-docs/plans/faster-whisper-r3-unified-qualification.md`、`TODO.md`、`WORKLOG.md`。旧 replay 诊断脚本保留但不再由 workflow 调用。
+- 验证：离线解析器与部署静态定向测试首轮 39/40 通过，唯一失败暴露非法 requirement 尾部被误当作无约束，已收紧为解析失败并计入未解析证据；最终专项回归、PR 与远端 CI 尚待执行。
+- 待办/风险：合并后仅以新完整 master SHA 执行一次离线提取并只读取严格脱敏 JSON artifact；本阶段不运行 pip、不访问网络、不读取或上传原始日志、不修改依赖、生产服务、防火墙、Ubuntu、数据库、Qdrant、模型或 Profile admission。
