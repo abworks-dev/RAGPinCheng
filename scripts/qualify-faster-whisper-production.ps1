@@ -485,7 +485,9 @@ function Get-NormalizedPackageName {
 
 function Convert-ToSanitizedDependencyFailure {
     param(
-        [Parameter(Mandatory = $true)][object[]]$Lines,
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [object[]]$Lines,
         [Parameter(Mandatory = $true)][string]$Stage
     )
     $missingTargets = New-Object "System.Collections.Generic.HashSet[string]"
@@ -580,6 +582,9 @@ function Assert-DependencySanitizerSelfTest {
     $unknown = Convert-ToSanitizedDependencyFailure -Stage "pip_install" -Lines @(
         "D:\private\python.exe failed with token=do-not-emit"
     )
+    $empty = Convert-ToSanitizedDependencyFailure `
+        -Stage "production_freeze" `
+        -Lines @()
     if (
         $binary.Kind -ne "binary_distribution_unavailable" -or
         $binary.Requirement -ne "jieba" -or
@@ -588,7 +593,9 @@ function Assert-DependencySanitizerSelfTest {
         $network.Kind -ne "network_or_index_failure" -or
         -not [string]::IsNullOrEmpty([string]$network.Requirement) -or
         $unknown.Kind -ne "evidence_insufficient" -or
-        -not [string]::IsNullOrEmpty([string]$unknown.Requirement)
+        -not [string]::IsNullOrEmpty([string]$unknown.Requirement) -or
+        $empty.Kind -ne "evidence_insufficient" -or
+        $empty.Stage -ne "production_freeze"
     ) {
         throw "Dependency failure sanitizer self-test failed"
     }
@@ -599,14 +606,24 @@ function Write-SanitizedDependencyFailure {
         [Parameter(Mandatory = $true)][string]$Stage,
         [string]$LogPath = ""
     )
-    $lines = @()
-    if (
-        -not [string]::IsNullOrWhiteSpace($LogPath) -and
-        (Test-Path -LiteralPath $LogPath -PathType Leaf)
-    ) {
-        $lines = @(Get-Content -LiteralPath $LogPath -Encoding UTF8)
+    $diagnosis = [pscustomobject]@{
+        Stage = $Stage
+        Kind = "evidence_insufficient"
+        Requirement = ""
     }
-    $diagnosis = Convert-ToSanitizedDependencyFailure -Lines $lines -Stage $Stage
+    try {
+        $lines = @()
+        if (
+            -not [string]::IsNullOrWhiteSpace($LogPath) -and
+            (Test-Path -LiteralPath $LogPath -PathType Leaf)
+        ) {
+            $lines = @(Get-Content -LiteralPath $LogPath -Encoding UTF8)
+        }
+        $diagnosis = Convert-ToSanitizedDependencyFailure `
+            -Lines $lines `
+            -Stage $Stage
+    } catch {
+    }
     $result = [ordered]@{
         schema_version = "faster-whisper-r3-dependency-failure/1"
         status = "fail"
@@ -619,9 +636,6 @@ function Write-SanitizedDependencyFailure {
         profile_admission = "disabled"
         production_services_modified = $false
     }
-    Write-JsonFile `
-        -Path (Join-Path $ReportRoot "dependency-diagnostic.json") `
-        -Value $result
     if (-not [string]::IsNullOrWhiteSpace($DependencyDiagnosticPath)) {
         $diagnosticParent = Split-Path -Parent $DependencyDiagnosticPath
         if (-not (Test-Path -LiteralPath $diagnosticParent)) {
@@ -629,6 +643,9 @@ function Write-SanitizedDependencyFailure {
         }
         Write-JsonFile -Path $DependencyDiagnosticPath -Value $result
     }
+    Write-JsonFile `
+        -Path (Join-Path $ReportRoot "dependency-diagnostic.json") `
+        -Value $result
 }
 
 function Write-SanitizedSummary {
