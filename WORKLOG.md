@@ -2215,3 +2215,9 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：更新 `scripts/extract_faster_whisper_resolver_evidence.py`、`tests/test_faster_whisper_resolver_evidence.py`、`project-docs/plans/faster-whisper-r3-unified-qualification.md`、`TODO.md`、`WORKLOG.md`。
 - 验证：补充真实 `oss2` 防误判、明确冲突、明确相容、缺失约束和不支持格式测试；最终专项回归、PR 和 CI 待执行。
 - 待办/风险：合并后只再执行一次固定离线提取并读取脱敏 JSON；不运行 pip、不读取原始日志、不修改依赖、production freeze、生产服务或 Profile admission。
+### 11:22 — 实现 Qwen3-ASR 依赖失败诊断
+
+- 完成：按单独获批 R3 诊断方案新增默认关闭的 Qwen dependency workflow 和 Windows 诊断脚本，固定读取 source run `30970277613`、source SHA `86b69db6831e3cd201436a26bbe836229bf419bd`、production freeze、Qwen/Windows requirements 与受控 jieba wheel；既有日志证据不足时只执行一次 run-local、binary-only、no-cache 的 resolver dry-run。v2 artifact 只包含固定 operation/failure origin、退出码、捕获行数、诊断种类、ASCII requirement、文件 hash 和清理状态，不包含原始冲突行或敏感上下文。
+- 文件：新增 `.github/workflows/diagnose-qwen3-asr-dependencies-production.yml`、`scripts/diagnose-qwen3-asr-dependencies.ps1`；更新部署静态测试、Qwen 方案与 `TODO.md`。
+- 验证：PowerShell AST 与 `git diff --check` 已通过；新增静态断言覆盖完整 master SHA、source identity、受控 wheel、dry-run 参数、v2 严格字段、venv 清理以及不含模型/CUDA/服务/防火墙/任务操作。完整 pytest 与 workflow YAML 解析待远端 CI。
+- 待办/风险：尚待独立 PR、CI、合并和一次绑定新 master SHA 的诊断 workflow；诊断结果只用于下一份 R3 方案，不授权修改依赖、production freeze、binary-only、服务或 Profile admission。
