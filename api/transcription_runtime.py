@@ -13,6 +13,7 @@ from src.transcription.profile import (
     ProfileRegistry,
     RemoteAsrServiceConfig,
     TranscriptionProfileDefinition,
+    WhisperXRemoteConfig,
 )
 from src.transcription.profile_catalog import build_phase3_profile_catalog
 from src.transcription.provider_registry import ProviderFactory, ProviderRuntimePorts
@@ -41,6 +42,7 @@ def build_phase4_profile_registry(
         if type(base.provider_config) not in (
             RemoteAsrServiceConfig,
             FasterWhisperRemoteConfig,
+            WhisperXRemoteConfig,
         ):
             raise ContractValidationError(
                 "invalid_provider_config", "provider_config"

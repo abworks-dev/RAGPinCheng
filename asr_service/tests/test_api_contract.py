@@ -215,4 +215,5 @@ def test_enabled_default_wiring_does_not_require_optional_faster_cache(
     assert tuple(item.config.service_profile_id for item in registrations) == (
         "faster-whisper-large-v3-turbo-v1",
         "funasr-sensevoice-small-v1",
+        "whisperx-large-v3-zh-align-v1",
     )

@@ -10,6 +10,7 @@ from .profile import (
     ReleasePolicy,
     RemoteAsrServiceConfig,
     TranscriptionProfileDefinition,
+    WhisperXRemoteConfig,
 )
 from .types import (
     NormalizerConfig,
@@ -29,6 +30,11 @@ FUNASR_SENSEVOICE_PROVIDER_KEY = "funasr-sensevoice"
 FUNASR_SENSEVOICE_SERVICE_PROFILE_ID = "funasr-sensevoice-small-v1"
 FUNASR_SENSEVOICE_MODEL_ID = "iic/SenseVoiceSmall"
 FUNASR_SENSEVOICE_MODEL_REVISION = "7bf452403abd7353a300cd760f7adae7701c92c1"
+WHISPERX_PROFILE_ID = "whisperx-large-v3-zh-align-experimental-v1"
+WHISPERX_PROVIDER_KEY = "whisperx"
+WHISPERX_SERVICE_PROFILE_ID = "whisperx-large-v3-zh-align-v1"
+WHISPERX_MODEL_ID = "Systran/faster-whisper-large-v3"
+WHISPERX_MODEL_REVISION = "53ecf83a5bedc5597eb8c8b34eac29e5345520ff"
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,6 +95,18 @@ def _profiles() -> tuple[TranscriptionProfileDefinition, ...]:
             admission=ProfileAdmission.enabled,
             release_policy=ReleasePolicy(True, False, False),
             evidence_refs=("scripts/funasr_phase0/phase0-config.example.json",),
+        ),
+        TranscriptionProfileDefinition.create(
+            profile_id=WHISPERX_PROFILE_ID,
+            display_name="WhisperX 中文对齐实验配置",
+            description="固定 Whisper large-v3 与中文对齐模型；必须人工审核，禁止自动发布和自动索引。",
+            provider_key=WHISPERX_PROVIDER_KEY,
+            provider_config=WhisperXRemoteConfig(),
+            normalizer_config=NormalizerConfig(2, 500, 1000),
+            qualification=ProfileQualification.experimental,
+            admission=ProfileAdmission.disabled,
+            release_policy=ReleasePolicy(True, False, False),
+            evidence_refs=("project-docs/plans/whisperx-r2-r3-execution-plan.md",),
         ),
     )
     return tuple(sorted(profiles, key=lambda profile: profile.profile_id))
