@@ -103,6 +103,62 @@ def test_report_contains_no_reference_or_hypothesis_text(tmp_path, monkeypatch):
     assert "hypothesis" not in encoded
 
 
+def test_diagnostic_evidence_is_text_free_and_classifies_model_miss(tmp_path):
+    manifest = qualification.load_manifest(_manifest(tmp_path))
+    sample = next(
+        item for item in manifest.samples if item.sample_id == "standard-codes"
+    )
+    evidence = qualification._diagnostic_evidence(
+        sample,
+        "请核对规范编号鸡比五万零一十六二零一四",
+        "请核对规范编号鸡比五万零一十六二零一四",
+    )
+    encoded = json.dumps(evidence, ensure_ascii=False)
+    assert evidence["classification"] == "acoustic_model_miss"
+    assert evidence["raw_to_canonical_equal"] is True
+    assert evidence["expected_items"][0]["present_in_raw"] is False
+    assert sample.reference_text not in encoded
+    assert "GB 50016 2014" not in encoded
+    assert "鸡比" not in encoded
+
+
+def test_diagnostic_evidence_classifies_normalizer_loss(tmp_path):
+    manifest = qualification.load_manifest(_manifest(tmp_path))
+    sample = next(
+        item for item in manifest.samples if item.sample_id == "standard-codes"
+    )
+    evidence = qualification._diagnostic_evidence(
+        sample,
+        sample.reference_text,
+        "请核对规范编号",
+    )
+    assert evidence["classification"] == "normalizer_loss"
+    assert evidence["expected_items"][0]["present_in_raw"] is True
+    assert evidence["expected_items"][0]["present_in_canonical"] is False
+
+
+def test_diagnostic_report_requires_both_target_samples():
+    qualification._DIAGNOSTIC_OBSERVATIONS.clear()
+    qualification._DIAGNOSTIC_OBSERVATIONS["standard-codes"] = [
+        {"classification": "acoustic_model_miss"}
+    ]
+    report = qualification.build_diagnostic_report()
+    assert report["schema_version"] == "whisperx-failure-diagnostic/1"
+    assert report["status"] == "incomplete"
+    assert report["contains_transcript_text"] is False
+
+
+def test_edit_counts_are_structured_without_text():
+    assert qualification._edit_counts("甲乙丙", "甲丁丙") == {
+        "distance": 1,
+        "substitutions": 1,
+        "insertions": 0,
+        "deletions": 0,
+    }
+    assert qualification._edit_counts("甲乙", "甲乙丙")["insertions"] == 1
+    assert qualification._edit_counts("甲乙丙", "甲乙")["deletions"] == 1
+
+
 def test_manifest_contract_remains_fail_closed(tmp_path):
     path = _manifest(tmp_path)
     payload = json.loads(path.read_text(encoding="utf-8"))
@@ -171,6 +227,9 @@ def test_workflow_and_runner_are_manual_isolated_and_disabled():
     workflow = (
         ROOT / ".github/workflows/qualify-whisperx-production.yml"
     ).read_text(encoding="utf-8")
+    diagnostic_workflow = (
+        ROOT / ".github/workflows/diagnose-whisperx-production.yml"
+    ).read_text(encoding="utf-8")
     script = (ROOT / "scripts/qualify-whisperx-production.ps1").read_text(
         encoding="utf-8"
     )
@@ -199,3 +258,11 @@ def test_workflow_and_runner_are_manual_isolated_and_disabled():
         "D:\\Services\\RAGPinCheng-ASR-WhisperX\\qualification\\runs\\"
         "${{ github.run_id }}\\reports"
     ) in workflow
+    assert "execute_diagnostic must be explicitly enabled" in diagnostic_workflow
+    assert "environment: production-asr" in diagnostic_workflow
+    assert "-DiagnosticMode" in diagnostic_workflow
+    assert "contains_transcript_text" in diagnostic_workflow
+    assert "failure-diagnostic.json" in diagnostic_workflow
+    assert "DiagnosticMode" in script
+    assert "$diagnosticComplete" in script
+    assert 'status -eq "complete"' in script

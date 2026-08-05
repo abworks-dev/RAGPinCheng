@@ -197,7 +197,9 @@ TTS 样本已生成并通过严格 Manifest 校验，但生产 R3 workflow 在�
   通过现有 `TranscriptionProvider → ProviderCandidate → normalizer → Canonical`
   契约计算质量、确定性、时间戳、RTF、显存和许可证门禁。Profile admission 保持
   disabled；真实资格结论只以合并后 `production-asr` workflow 的脱敏审计为准，
-  未通过前不能认定 WhisperX 可用。
+  未通过前不能认定 WhisperX 可用。资格失败诊断只输出文本哈希、字符类别、长度、
+  token 形状、编辑类型计数、期望项命中布尔值和固定分类，不输出参考文本、原始
+  ProviderCandidate 文本或 Canonical 文本，也不改变模型、样本或准入阈值。
 
 ## 已知限制
 

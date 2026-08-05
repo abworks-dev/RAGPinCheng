@@ -4,7 +4,8 @@ param(
     [Parameter(Mandatory = $true)][string]$SourceRoot,
     [Parameter(Mandatory = $true)][string]$RunId,
     [Parameter(Mandatory = $true)][bool]$ExecuteQualification,
-    [Parameter(Mandatory = $true)][string]$SummaryPath
+    [Parameter(Mandatory = $true)][string]$SummaryPath,
+    [switch]$DiagnosticMode
 )
 
 Set-StrictMode -Version Latest
@@ -126,9 +127,16 @@ try {
     & $VenvPython -c "from src.transcription.profile_catalog import WHISPERX_PROFILE_ID,build_phase3_profile_catalog; p=next(x.profile for x in build_phase3_profile_catalog() if x.profile.profile_id==WHISPERX_PROFILE_ID); assert p.qualification.value=='experimental' and p.admission.value=='disabled'"
     if ($LASTEXITCODE -ne 0) { throw "WhisperX Profile is not disabled" }
 
+    $diagnosticArgs = @()
+    if ($DiagnosticMode) {
+        $diagnosticArgs = @(
+            "--diagnostic-report",
+            (Join-Path $ReportRoot "failure-diagnostic.json")
+        )
+    }
     & $VenvPython "$resolvedSource\scripts\run_whisperx_qualification.py" `
         --manifest $ManifestPath --model-root $ModelRoot --nltk-root $NltkRoot `
-        --report-dir $ReportRoot --timeout-ms 600000
+        --report-dir $ReportRoot --timeout-ms 600000 @diagnosticArgs
     $qualificationExit = $LASTEXITCODE
     $qualificationSummary = Join-Path $ReportRoot "qualification-summary.json"
     if (Test-Path -LiteralPath $qualificationSummary -PathType Leaf) {
@@ -170,7 +178,26 @@ try {
         license_audit_status = $LicenseAuditStatus
         profile_admission = "disabled"
         production_services_modified = $false
+        diagnostic_mode = [bool]$DiagnosticMode
     })
 }
 
+$diagnosticComplete = $false
+$diagnosticPath = Join-Path $ReportRoot "failure-diagnostic.json"
+if ($DiagnosticMode -and (Test-Path -LiteralPath $diagnosticPath -PathType Leaf)) {
+    try {
+        $diagnosticResult = Get-Content -LiteralPath $diagnosticPath -Raw -Encoding UTF8 |
+            ConvertFrom-Json
+        $diagnosticComplete = [string]$diagnosticResult.status -eq "complete"
+    } catch {
+        $diagnosticComplete = $false
+    }
+}
+if (
+    $DiagnosticMode -and
+    $FailureCode -eq "quality_gate_failed" -and
+    $diagnosticComplete
+) {
+    exit 0
+}
 if ($Status -ne "pass") { exit 2 }
