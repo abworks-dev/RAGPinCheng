@@ -40,8 +40,12 @@ MANIFEST_NAME = "model-manifest.json"
 class _TLS12HTTPAdapter(requests.adapters.HTTPAdapter):
     """Keep Hugging Face HTTPS compatible with the production proxy."""
 
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        self._tls12_context = self._create_ssl_context()
+        super().__init__(*args, **kwargs)
+
     @staticmethod
-    def _ssl_context() -> ssl.SSLContext:
+    def _create_ssl_context() -> ssl.SSLContext:
         context = ssl.create_default_context()
         context.maximum_version = ssl.TLSVersion.TLSv1_2
         return context
@@ -53,14 +57,30 @@ class _TLS12HTTPAdapter(requests.adapters.HTTPAdapter):
         block: bool = requests.adapters.DEFAULT_POOLBLOCK,
         **pool_kwargs: object,
     ) -> None:
-        pool_kwargs["ssl_context"] = self._ssl_context()
+        pool_kwargs["ssl_context"] = self._tls12_context
         super().init_poolmanager(connections, maxsize, block, **pool_kwargs)
 
     def proxy_manager_for(
         self, proxy: str, **proxy_kwargs: object
     ) -> requests.packages.urllib3.ProxyManager:
-        proxy_kwargs["ssl_context"] = self._ssl_context()
+        proxy_kwargs["ssl_context"] = self._tls12_context
         return super().proxy_manager_for(proxy, **proxy_kwargs)
+
+    def build_connection_pool_key_attributes(
+        self,
+        request: requests.PreparedRequest,
+        verify: object,
+        cert: object = None,
+    ) -> tuple[dict[str, object], dict[str, object]]:
+        if verify is not True:
+            raise RuntimeError(
+                "Hugging Face model download requires default certificate verification"
+            )
+        host_params, pool_kwargs = super().build_connection_pool_key_attributes(
+            request, verify, cert
+        )
+        pool_kwargs["ssl_context"] = self._tls12_context
+        return host_params, pool_kwargs
 
 
 def _hugging_face_backend() -> requests.Session:
