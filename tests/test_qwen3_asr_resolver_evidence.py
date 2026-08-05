@@ -69,6 +69,7 @@ def test_extracts_only_normalized_evidence(tmp_path: Path):
     result = evidence.extract_evidence(source_root=root)
     serialized = json.dumps(result, sort_keys=True)
     assert result["status"] == "evidence_complete"
+    assert result["classification"] == "proven_version_conflict"
     assert result["source_run_id"] == "30972780438"
     assert {item["diagnosis_kind"] for item in result["blockers"]} == {
         "binary_distribution_unavailable",
@@ -89,6 +90,7 @@ def test_unversioned_oss2_owner_is_not_misclassified(tmp_path: Path):
     )
     result = evidence.extract_evidence(source_root=root)
     assert result["status"] == "evidence_incomplete"
+    assert result["classification"] == "still_unknown"
     assert result["blockers"] == []
     assert {item["kind"] for item in result["candidates"]} == {
         "constraint_requirement",
@@ -103,6 +105,7 @@ def test_contract_is_strict_and_deterministic(tmp_path: Path):
     assert set(first) == {
         "schema_version",
         "status",
+        "classification",
         "source_run_id",
         "source_commit_sha",
         "source_diagnostic_schema",
@@ -111,9 +114,67 @@ def test_contract_is_strict_and_deterministic(tmp_path: Path):
         "candidates",
         "blockers",
         "unparsed_relevant_line_count",
+        "unparsed_records",
         "profile_admission",
         "production_services_modified",
     }
+
+
+@pytest.mark.parametrize(
+    ("line", "category", "classification"),
+    (
+        (
+            "ERROR: resolver failed while considering conflicting candidates",
+            "resolver_context_only",
+            "resolver_context_only",
+        ),
+        (
+            "ERROR: requirement needs a private URL https://user:token@example.invalid/x",
+            "still_unknown",
+            "still_unknown",
+        ),
+        (
+            "ERROR: runtime requires Python @/private/path",
+            "python_incompatible",
+            "python_incompatible",
+        ),
+        (
+            "ERROR: No matching distribution for package @ https://secret.invalid/x",
+            "binary_unavailable",
+            "binary_unavailable",
+        ),
+    ),
+)
+def test_unparsed_lines_emit_only_fixed_safe_metadata(
+    tmp_path: Path, line: str, category: str, classification: str
+):
+    root = _source(tmp_path, line, "probe")
+    result = evidence.extract_evidence(source_root=root)
+    serialized = json.dumps(result, sort_keys=True)
+    assert result["classification"] == classification
+    assert result["unparsed_relevant_line_count"] == 1
+    assert len(result["unparsed_records"]) == 1
+    record = result["unparsed_records"][0]
+    assert set(record) == {
+        "source",
+        "line_number",
+        "character_count",
+        "sha256",
+        "character_types",
+        "category",
+    }
+    assert record["category"] == category
+    assert set(record["character_types"]) == {
+        "ascii_letters",
+        "digits",
+        "whitespace",
+        "punctuation",
+        "non_ascii",
+    }
+    assert line not in serialized
+    assert "example.invalid" not in serialized
+    assert "secret.invalid" not in serialized
+    assert "/private/path" not in serialized
 
 
 @pytest.mark.parametrize(

@@ -2256,3 +2256,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`api/main.py`、`api/routes_media_transcript.py`、`api/schemas.py`、`frontend/src/api/client.ts`、`frontend/src/types.ts`、`frontend/src/components/VideoPlayerDrawer.tsx`、`frontend/src/components/TranscriptPanel.tsx`、`frontend/src/components/TranscriptPanel.test.tsx`、`tests/test_media_transcript_route.py`、`project-docs/features/transcript-pipeline.md`、`WORKLOG.md`；未修改媒体流门禁、数据库 Schema、ASR、审核发布、RAG 索引、Qdrant、依赖或部署配置。
 - 验证：最新 master 独立整合基线下同步面板专项 Vitest 3/3、前端全量 32 个文件 151/151、TypeScript project build 与 Vite production build通过（2027 modules transformed），目标文件 Python compileall/AST 与 `git diff --check` 通过。原工作区本地 Python 环境缺少 FastAPI，后端路由 pytest 留待完整环境或 CI。
 - 待办/风险：仍需真实登录态与真实长视频视觉验收；重点确认 legacy 人工稿路径、正式自动稿、进度拖动与长稿滚动体验。无数据迁移，回滚可移除独立转录路由和面板并恢复播放器信息区。
+
+### 12:33 — 实施 Qwen3-ASR R3 精准分类增强
+
+- 完成：将 Qwen3-ASR 脱敏证据 Schema 升级为 v2，精确复现现有解析器的未消费行判定并严格对账；每条未解析记录只输出固定来源、行号、长度、SHA-256、字符类型计数和枚举类别，最终结论限制为六类且无法证明时失败关闭。workflow summary 只新增固定 classification 字段。
+- 文件：更新 `scripts/extract_qwen3_asr_resolver_evidence.py`、`tests/test_qwen3_asr_resolver_evidence.py`、`.github/workflows/diagnose-qwen3-asr-dependencies-production.yml`、`tests/test_asr_deployment_static.py`、`project-docs/plans/qwen3-asr-r2-r3-integration.md`、`TODO.md`、`WORKLOG.md`。
+- 验证：Python `compileall`、纯内存未解析行对账/分类/无原文冒烟和 `git diff --check` 通过；本机无项目 venv 且系统 Python 未安装 pytest，遵守约束未安装依赖，完整参数化脱敏测试交由 CI。
+- 待办/风险：尚待 PR、CI、合并及一次绑定完整 master SHA 的手动离线 workflow；若结论为 `still_unknown` 或 `resolver_context_only` 即停止。不运行 pip，不下载模型，不启动服务，不修改生产状态或 Profile admission。
