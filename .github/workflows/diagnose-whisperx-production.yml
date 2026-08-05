@@ -1,0 +1,108 @@
+name: Diagnose WhisperX Production Qualification
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: "Full merged master SHA to diagnose"
+        required: true
+        type: string
+      execute_diagnostic:
+        description: "Run isolated WhisperX failure evidence diagnostic"
+        required: true
+        default: false
+        type: boolean
+      prepare_synthetic_samples:
+        description: "Prepare/reuse the fixed self-made eight-sample ASR corpus"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-asr-whisperx-qualification
+  cancel-in-progress: false
+
+jobs:
+  diagnose:
+    environment: production-asr
+    runs-on: [self-hosted, Windows, X64, asr-production]
+    timeout-minutes: 180
+    steps:
+      - name: Validate immutable revision and explicit R3 diagnostic gate
+        shell: powershell
+        run: |
+          if ("${{ inputs.commit_sha }}" -notmatch '^[0-9a-fA-F]{40}$') {
+            throw "commit_sha must be a full SHA"
+          }
+          if ("${{ inputs.commit_sha }}".ToLowerInvariant() -ne "${{ github.sha }}".ToLowerInvariant()) {
+            throw "commit_sha must equal the dispatch revision"
+          }
+          if ("${{ github.ref }}" -ne "refs/heads/master") {
+            throw "diagnostic must run from master"
+          }
+          if (-not [Convert]::ToBoolean("${{ inputs.execute_diagnostic }}")) {
+            throw "execute_diagnostic must be explicitly enabled"
+          }
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 1
+
+      - name: Prepare or reuse fixed self-made qualification samples
+        if: ${{ inputs.prepare_synthetic_samples }}
+        shell: powershell
+        run: |
+          & "${{ github.workspace }}\scripts\prepare-qwen3-asr-qualification-samples.ps1" `
+            -CommitSha "${{ inputs.commit_sha }}" `
+            -SourceRoot "${{ github.workspace }}" `
+            -RunId "${{ github.run_id }}"
+
+      - name: Run isolated WhisperX failure diagnostic
+        shell: powershell
+        env:
+          ASR_DEPENDENCY_PROXY: ${{ secrets.ASR_DEPENDENCY_PROXY }}
+          ASR_MODEL_DOWNLOAD_PROXY: ${{ secrets.ASR_MODEL_DOWNLOAD_PROXY }}
+        run: |
+          & "${{ github.workspace }}\scripts\qualify-whisperx-production.ps1" `
+            -CommitSha "${{ inputs.commit_sha }}" `
+            -SourceRoot "${{ github.workspace }}" `
+            -RunId "${{ github.run_id }}" `
+            -ExecuteQualification $true `
+            -DiagnosticMode `
+            -SummaryPath "${PRODUCTION_SERVICE_ROOT}\RAGPinCheng-ASR-WhisperX\qualification\runs\${{ github.run_id }}\reports\verdict.json"
+
+      - name: Publish sanitized diagnostic summary
+        if: ${{ always() }}
+        shell: powershell
+        run: |
+          $root = "${PRODUCTION_SERVICE_ROOT}\RAGPinCheng-ASR-WhisperX\qualification\runs\${{ github.run_id }}\reports"
+          $verdictPath = Join-Path $root "verdict.json"
+          $diagnosticPath = Join-Path $root "failure-diagnostic.json"
+          if ((Test-Path -LiteralPath $verdictPath) -and (Test-Path -LiteralPath $diagnosticPath)) {
+            $v = Get-Content -LiteralPath $verdictPath -Raw -Encoding UTF8 | ConvertFrom-Json
+            $d = Get-Content -LiteralPath $diagnosticPath -Raw -Encoding UTF8 | ConvertFrom-Json
+            @(
+              "## WhisperX failure diagnostic",
+              "",
+              "- Qualification status: ``$($v.status)``",
+              "- Failure code: ``$($v.failure_code)``",
+              "- Evidence status: ``$($d.status)``",
+              "- Classifications: ``$($d.classifications -join ', ')``",
+              "- Transcript text included: ``$($d.contains_transcript_text)``",
+              "- Profile admission: ``$($v.profile_admission)``",
+              "- Production services modified: ``$($v.production_services_modified)``"
+            ) -join "`n" | Out-File $env:GITHUB_STEP_SUMMARY -Append -Encoding UTF8
+          }
+
+      - name: Upload sanitized diagnostic evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: whisperx-failure-diagnostic-${{ github.run_id }}
+          path: ${PRODUCTION_SERVICE_ROOT}\RAGPinCheng-ASR-WhisperX\qualification\runs\${{ github.run_id }}\reports
+          if-no-files-found: error
+          retention-days: 14

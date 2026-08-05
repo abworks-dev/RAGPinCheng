@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import collections
 import hashlib
 import json
 import os
@@ -33,6 +34,8 @@ QualificationSample = shared.QualificationSample
 SampleManifest = shared.SampleManifest
 character_error_rate = shared.character_error_rate
 _ENGINE = None
+_DIAGNOSTIC_OBSERVATIONS: dict[str, list[dict[str, object]]] = {}
+_DIAGNOSTIC_SCENARIOS = {"noisy-bim-zh", "standard-codes"}
 
 
 def load_manifest(path: Path) -> SampleManifest:
@@ -114,6 +117,7 @@ class _EngineProvider:
     def __init__(self, content: bytes, duration_ms: int):
         self._content = content
         self._duration_ms = duration_ms
+        self.raw_text = ""
 
     def capabilities(self):
         from src.transcription.provider_protocol import ProviderCapabilities
@@ -145,13 +149,157 @@ class _EngineProvider:
         )
         if type(result) is ProviderFailure:
             return result
-        return ProviderCandidate(
+        candidate = ProviderCandidate(
             result.provider_key,
             result.language,
             result.duration_ms,
             result.segments,
             result.artifact_refs,
         )
+        self.raw_text = " ".join(segment.text for segment in candidate.segments)
+        return candidate
+
+
+def _character_classes(value: str) -> dict[str, int]:
+    counts = collections.Counter(
+        "han"
+        if "\u4e00" <= character <= "\u9fff"
+        else "digit"
+        if character.isdecimal()
+        else "latin"
+        if character.isascii() and character.isalpha()
+        else "space"
+        if character.isspace()
+        else "punctuation"
+        for character in value
+    )
+    return {
+        name: counts[name]
+        for name in ("han", "digit", "latin", "space", "punctuation")
+    }
+
+
+def _token_shape(value: str) -> list[str]:
+    shapes: list[str] = []
+    current = ""
+    length = 0
+    for character in value:
+        shape = (
+            "H"
+            if "\u4e00" <= character <= "\u9fff"
+            else "D"
+            if character.isdecimal()
+            else "L"
+            if character.isascii() and character.isalpha()
+            else ""
+        )
+        if not shape:
+            if current:
+                shapes.append(f"{current}{length}")
+                current = ""
+                length = 0
+            continue
+        if shape != current and current:
+            shapes.append(f"{current}{length}")
+            length = 0
+        current = shape
+        length += 1
+    if current:
+        shapes.append(f"{current}{length}")
+    return shapes
+
+
+def _edit_counts(reference: str, hypothesis: str) -> dict[str, int]:
+    left = shared.normalize_text(reference)
+    right = shared.normalize_text(hypothesis)
+    table: list[list[tuple[int, int, int, int]]] = [
+        [(column, 0, column, 0) for column in range(len(right) + 1)]
+    ]
+    for row, left_character in enumerate(left, start=1):
+        current = [(row, 0, 0, row)]
+        for column, right_character in enumerate(right, start=1):
+            candidates = (
+                tuple(
+                    value + delta
+                    for value, delta in zip(
+                        table[row - 1][column - 1],
+                        (left_character != right_character, left_character != right_character, 0, 0),
+                    )
+                ),
+                tuple(
+                    value + delta
+                    for value, delta in zip(current[column - 1], (1, 0, 1, 0))
+                ),
+                tuple(
+                    value + delta
+                    for value, delta in zip(table[row - 1][column], (1, 0, 0, 1))
+                ),
+            )
+            current.append(min(candidates))
+        table.append(current)
+    distance, substitutions, insertions, deletions = table[-1][-1]
+    return {
+        "distance": distance,
+        "substitutions": substitutions,
+        "insertions": insertions,
+        "deletions": deletions,
+    }
+
+
+def _text_fingerprint(value: str) -> dict[str, object]:
+    normalized = shared.normalize_text(value)
+    return {
+        "normalized_sha256": hashlib.sha256(normalized.encode("utf-8")).hexdigest(),
+        "normalized_length": len(normalized),
+        "character_classes": _character_classes(value),
+        "token_shapes": _token_shape(value),
+    }
+
+
+def _diagnostic_evidence(
+    sample: QualificationSample, raw_text: str, canonical_text: str
+) -> dict[str, object]:
+    expected_values = sample.expected_codes or sample.expected_terms
+    expected = [
+        {
+            "value_sha256": hashlib.sha256(
+                shared.normalize_text(value).encode("utf-8")
+            ).hexdigest(),
+            "shape": _token_shape(value),
+            "present_in_raw": shared.normalize_text(value)
+            in shared.normalize_text(raw_text),
+            "present_in_canonical": shared.normalize_text(value)
+            in shared.normalize_text(canonical_text),
+        }
+        for value in expected_values
+    ]
+    raw_normalized = shared.normalize_text(raw_text)
+    canonical_normalized = shared.normalize_text(canonical_text)
+    missing_raw = any(not item["present_in_raw"] for item in expected)
+    missing_canonical = any(not item["present_in_canonical"] for item in expected)
+    classification = (
+        "normalizer_loss"
+        if not missing_raw and missing_canonical
+        else "normalizer_changed_other"
+        if raw_normalized != canonical_normalized
+        else "acoustic_model_miss"
+        if missing_raw
+        else "no_missing_expected_item"
+    )
+    return {
+        "sample_id": sample.sample_id,
+        "scenario": sample.scenario,
+        "reference": _text_fingerprint(sample.reference_text),
+        "raw_candidate": _text_fingerprint(raw_text),
+        "canonical": _text_fingerprint(canonical_text),
+        "raw_to_canonical_equal": raw_normalized == canonical_normalized,
+        "reference_to_raw_edits": _edit_counts(sample.reference_text, raw_text),
+        "reference_to_canonical_edits": _edit_counts(
+            sample.reference_text, canonical_text
+        ),
+        "expected_items": expected,
+        "classification": classification,
+    }
 
 
 def _run_once(
@@ -198,8 +346,9 @@ def _run_once(
     )
     snapshot = ProfileSnapshot.create(profile, execution)
     started = time.monotonic()
+    provider = _EngineProvider(content, sample.duration_ms)
     result = execute_transcription(
-        _EngineProvider(content, sample.duration_ms),
+        provider,
         input_ref,
         execution,
         profile_snapshot=snapshot,
@@ -214,6 +363,11 @@ def _run_once(
         )
     if type(result) is not CanonicalTranscript:
         raise RuntimeError("pipeline did not return CanonicalTranscript")
+    if sample.scenario in _DIAGNOSTIC_SCENARIOS:
+        canonical_text = " ".join(segment.text for segment in result.segments)
+        _DIAGNOSTIC_OBSERVATIONS.setdefault(sample.sample_id, []).append(
+            _diagnostic_evidence(sample, provider.raw_text, canonical_text)
+        )
     markdown = format_transcript(
         result, title=f"WhisperX qualification {sample.sample_id}"
     )
@@ -252,6 +406,34 @@ def _write_json(path: Path, payload: dict[str, object]) -> None:
     )
 
 
+def build_diagnostic_report() -> dict[str, object]:
+    samples: list[dict[str, object]] = []
+    for sample_id in sorted(_DIAGNOSTIC_OBSERVATIONS):
+        observations = _DIAGNOSTIC_OBSERVATIONS[sample_id]
+        encoded = [
+            json.dumps(item, sort_keys=True, separators=(",", ":"))
+            for item in observations
+        ]
+        samples.append(
+            {
+                **observations[-1],
+                "observation_count": len(observations),
+                "observations_deterministic": len(set(encoded)) == 1,
+            }
+        )
+    classifications = sorted(
+        {str(item["classification"]) for item in samples}
+    )
+    return {
+        "schema_version": "whisperx-failure-diagnostic/1",
+        "status": "complete" if len(samples) == 2 else "incomplete",
+        "target_sample_count": len(samples),
+        "classifications": classifications,
+        "contains_transcript_text": False,
+        "samples": samples,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--manifest", type=Path)
@@ -262,6 +444,7 @@ def main() -> int:
     parser.add_argument("--validate-manifest-only", action="store_true")
     parser.add_argument("--audit-licenses", action="store_true")
     parser.add_argument("--license-report", type=Path)
+    parser.add_argument("--diagnostic-report", type=Path)
     args = parser.parse_args()
     if args.audit_licenses:
         if args.license_report is None:
@@ -294,6 +477,7 @@ def main() -> int:
         raise RuntimeError("CTranslate2 FP16 unavailable")
 
     global _ENGINE
+    _DIAGNOSTIC_OBSERVATIONS.clear()
     _ENGINE = _build_engine(args.model_root)
     torch.cuda.empty_cache()
     torch.cuda.reset_peak_memory_stats()
@@ -321,6 +505,11 @@ def main() -> int:
         args.report_dir / "sample-results.json",
         {"schema_version": REPORT_SCHEMA_VERSION, "samples": result["samples"]},
     )
+    if args.diagnostic_report is not None:
+        diagnostic = build_diagnostic_report()
+        _write_json(args.diagnostic_report, diagnostic)
+        if diagnostic["status"] != "complete":
+            raise RuntimeError("WhisperX diagnostic evidence is incomplete")
     print(json.dumps({"status": result["status"], "sample_count": result["sample_count"]}))
     return 0 if result["status"] == "pass" else 2
 
