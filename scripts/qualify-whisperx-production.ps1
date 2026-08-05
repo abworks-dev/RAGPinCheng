@@ -97,7 +97,7 @@ try {
     & $VenvPython -m pip install --index-url https://download.pytorch.org/whl/cu128 `
         "torch==2.8.0+cu128" "torchaudio==2.8.0+cu128" "torchvision==0.23.0+cu128"
     if ($LASTEXITCODE -ne 0) { throw "cu128 dependency install failed" }
-    & $VenvPython -m pip install "whisperx==3.8.6" "httpx>=0.27.0"
+    & $VenvPython -m pip install "whisperx==3.8.6" "httpx>=0.27.0" "python-dotenv>=1.0.0"
     if ($LASTEXITCODE -ne 0) { throw "WhisperX qualification dependency install failed" }
     & $VenvPython -m pip check
     if ($LASTEXITCODE -ne 0) { throw "pip check failed" }
