@@ -18,6 +18,72 @@ $taskName = "RAGPinCheng-ASR"
 $modelRevision = "0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf"
 $minimumFreeBytes = 10GB
 
+function Get-ServiceSnapshot {
+    param([Parameter(Mandatory = $true)][bool]$ServiceEnabled)
+
+    $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+    $taskState = if ($null -eq $task) { "Absent" } else { [string]$task.State }
+    $listenerPids = @(
+        Get-NetTCPConnection `
+            -LocalPort 8200 `
+            -State Listen `
+            -ErrorAction SilentlyContinue |
+            Select-Object -ExpandProperty OwningProcess -Unique
+    )
+    if ($listenerPids.Count -gt 1) {
+        throw "TCP port 8200 must have at most one listening process"
+    }
+    $listenerPid = if ($listenerPids.Count -eq 1) {
+        [int]$listenerPids[0]
+    } else {
+        0
+    }
+    $listenerExecutable = ""
+    if ($listenerPid -ne 0) {
+        $listenerProcess = Get-CimInstance `
+            -ClassName Win32_Process `
+            -Filter "ProcessId = $listenerPid" `
+            -ErrorAction Stop
+        if (
+            $null -eq $listenerProcess -or
+            [string]::IsNullOrWhiteSpace($listenerProcess.ExecutablePath)
+        ) {
+            throw "Unable to resolve the TCP port 8200 listener executable"
+        }
+        $listenerExecutable = [string]$listenerProcess.ExecutablePath
+    }
+
+    if ($ServiceEnabled) {
+        if ($taskState -ne "Running" -or $listenerPid -eq 0) {
+            throw "Enabled ASR service must have a running task and one TCP port 8200 listener"
+        }
+    } elseif ($taskState -eq "Running" -or $listenerPid -ne 0) {
+        throw "Disabled ASR service must not have a running task or TCP port 8200 listener"
+    }
+
+    return [pscustomobject]@{
+        TaskState = $taskState
+        ListenerPid = $listenerPid
+        ListenerExecutable = $listenerExecutable
+    }
+}
+
+function Assert-ServiceSnapshotUnchanged {
+    param(
+        [Parameter(Mandatory = $true)][bool]$ServiceEnabled,
+        [Parameter(Mandatory = $true)][pscustomobject]$Before
+    )
+
+    $after = Get-ServiceSnapshot -ServiceEnabled $ServiceEnabled
+    if (
+        $after.TaskState -ne $Before.TaskState -or
+        $after.ListenerPid -ne $Before.ListenerPid -or
+        $after.ListenerExecutable -ne $Before.ListenerExecutable
+    ) {
+        throw "ASR service task or listener identity changed during model preparation"
+    }
+}
+
 if (-not $PrepareModel) {
     throw "PrepareModel must be explicitly enabled"
 }
@@ -54,17 +120,14 @@ $enabledLines = @(
     Get-Content -LiteralPath $configPath -Encoding UTF8 |
         Where-Object { $_ -match '^ASR_SERVICE_ENABLED=' }
 )
-if ($enabledLines.Count -ne 1 -or $enabledLines[0].Trim() -ne "ASR_SERVICE_ENABLED=false") {
-    throw "ASR_SERVICE_ENABLED must occur exactly once and remain false"
+if (
+    $enabledLines.Count -ne 1 -or
+    $enabledLines[0].Trim() -notmatch '^ASR_SERVICE_ENABLED=(true|false)$'
+) {
+    throw "ASR_SERVICE_ENABLED must occur exactly once with true or false"
 }
-
-$task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
-if ($null -ne $task -and $task.State -eq "Running") {
-    throw "RAGPinCheng-ASR Scheduled Task must not be running during model preparation"
-}
-if (Get-NetTCPConnection -LocalPort 8200 -State Listen -ErrorAction SilentlyContinue) {
-    throw "TCP port 8200 must not be listening during model preparation"
-}
+$serviceEnabled = $enabledLines[0].Trim() -match '=true$'
+$serviceBefore = Get-ServiceSnapshot -ServiceEnabled $serviceEnabled
 
 $dataDriveName = [System.IO.Path]::GetPathRoot($DataRoot).TrimEnd('\').TrimEnd(':')
 $dataDrive = Get-PSDrive -Name $dataDriveName
@@ -123,6 +186,13 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw "Pinned faster-whisper model preparation failed"
     }
+    & $venvPython $prepareScript `
+        --cache-root $cacheRoot `
+        --offline-only `
+        --report-path (Join-Path $runRoot "offline-validation.json")
+    if ($LASTEXITCODE -ne 0) {
+        throw "Final offline faster-whisper model validation failed"
+    }
 } finally {
     foreach ($name in $savedProxyEnvironment.Keys) {
         [System.Environment]::SetEnvironmentVariable(
@@ -131,22 +201,9 @@ try {
             [System.EnvironmentVariableTarget]::Process
         )
     }
-}
-
-& $venvPython $prepareScript `
-    --cache-root $cacheRoot `
-    --offline-only `
-    --report-path (Join-Path $runRoot "offline-validation.json")
-if ($LASTEXITCODE -ne 0) {
-    throw "Final offline faster-whisper model validation failed"
-}
-
-$taskAfter = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
-if ($null -ne $taskAfter -and $taskAfter.State -eq "Running") {
-    throw "RAGPinCheng-ASR Scheduled Task started unexpectedly"
-}
-if (Get-NetTCPConnection -LocalPort 8200 -State Listen -ErrorAction SilentlyContinue) {
-    throw "TCP port 8200 started listening unexpectedly"
+    Assert-ServiceSnapshotUnchanged `
+        -ServiceEnabled $serviceEnabled `
+        -Before $serviceBefore
 }
 
 $report = Get-Content -LiteralPath $reportPath -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -154,4 +211,4 @@ Write-Host "Pinned faster-whisper model artifact prepared and validated."
 Write-Host "Status: $($report.status)"
 Write-Host "Model revision: $modelRevision"
 Write-Host "Manifest SHA-256: $($report.manifest_sha256)"
-Write-Host "Scheduled Task remained stopped and TCP port 8200 remained closed."
+Write-Host "ASR service task and TCP port 8200 listener identity remained unchanged."
