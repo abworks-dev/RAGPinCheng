@@ -2194,3 +2194,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`tests/test_transcription_phase4_api.py`、`WORKLOG.md`。
 - 验证：首轮 CI 共 317/318 项转录契约测试通过，失败仅为旧列表少一个 Qwen 候选；修复后 Python 编译与 `git diff --check` 通过。本机仍未安装 pytest，完整回归交由 PR CI。
 - 待办/风险：待 PR #53 新一轮 CI 全绿后才可合并；未触发 production-asr workflow，未访问或修改生产状态。
+
+### 10:44 — 发布视频批量上传转写向导
+
+- 完成：在最新 `origin/master` 的独立整合工作树中加入三步视频批量上传向导，支持拖放/多选 MP4、自动与人工转写分流、批量应用或逐项覆盖服务端白名单 Profile、逐视频绑定和编辑 Markdown、最多两个并发上传及单项失败保留重试；媒体列表分别展示媒体、转录、审核、发布和索引状态，并保留 master 已有的快捷筛选、任务终态刷新和转写版本工作台。
+- 文件：`frontend/src/pages/admin/AdminMediaPage.tsx`、`frontend/src/pages/admin/AdminMediaPage.test.tsx`、`project-docs/features/transcript-pipeline.md`、`WORKLOG.md`；复用 master 已有的媒体状态摘要 API 和类型，不修改 Provider、Canonical、ASR 服务、模型、依赖、数据库结构或部署配置。
+- 验证：最新 master 整合基线的媒体页与 API client 专项测试 18/18、前端全量测试 31 个文件 148/148 通过；TypeScript project build 与 Vite production build 通过（2026 modules transformed）；`git diff --check` 通过。构建保留既有 CSS minify、主包大于 500 kB 和 React Router future warning。本地后端环境缺少 FastAPI，后端 API 测试由既有 master 覆盖并留待 CI 复跑。
+- 待办/风险：功能仍需真实管理员登录态下使用多视频、人工 Markdown 与可用 ASR Profile 验收；未运行真实 ASR、Qdrant、生产数据库或部署。

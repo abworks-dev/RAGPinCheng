@@ -15,8 +15,22 @@ import type { MediaAsset, TranscriptionJob, TranscriptionProfile } from "../../t
 import { formatAdminDate, formatBytes } from "./admin-formatters";
 
 type UploadMode = "manual" | "automatic";
+type UploadState = "waiting" | "uploading" | "succeeded" | "failed";
 type StatusVariant = "secondary" | "success" | "warning" | "destructive" | "info";
 type MediaFilter = "all" | "processing" | "review" | "publishing" | "failed";
+
+type PendingVideo = {
+  id: string;
+  file: File;
+  title: string;
+  selected: boolean;
+  profileId: string;
+  transcriptFile: File | null;
+  transcriptText: string | null;
+  requestId: string;
+  state: UploadState;
+  error: string | null;
+};
 
 const mediaStatusMeta: Record<string, { label: string; variant: StatusVariant }> = {
   uploaded: { label: "已上传", variant: "secondary" },
@@ -28,6 +42,29 @@ const mediaStatusMeta: Record<string, { label: string; variant: StatusVariant }>
   failed: { label: "失败", variant: "destructive" },
 };
 
+const reviewMeta: Record<string, { label: string; variant: StatusVariant }> = {
+  not_required: { label: "无需审核", variant: "secondary" },
+  awaiting_review: { label: "待人工审核", variant: "warning" },
+  review_approved: { label: "审核通过", variant: "success" },
+  review_rejected: { label: "审核驳回", variant: "destructive" },
+};
+
+const publicationMeta: Record<string, { label: string; variant: StatusVariant }> = {
+  not_published: { label: "未发布", variant: "secondary" },
+  publishing: { label: "发布中", variant: "warning" },
+  published: { label: "已发布", variant: "success" },
+  publication_failed: { label: "发布失败", variant: "destructive" },
+};
+
+const indexMeta: Record<string, { label: string; variant: StatusVariant }> = {
+  pending: { label: "等待索引", variant: "secondary" },
+  parsing: { label: "解析中", variant: "warning" },
+  chunking: { label: "分块中", variant: "warning" },
+  embedding: { label: "向量化中", variant: "warning" },
+  done: { label: "索引成功", variant: "success" },
+  failed: { label: "索引失败", variant: "destructive" },
+};
+
 const stageLabels: Record<string, string> = {
   validating_input: "校验输入",
   transcribing: "转录中",
@@ -36,81 +73,63 @@ const stageLabels: Record<string, string> = {
 };
 const activeJobStatuses = new Set(["pending", "running"]);
 
-function MediaStatusBadge({ status }: { status: string }) {
-  const meta = mediaStatusMeta[status];
-  return <Badge variant={meta?.variant ?? "secondary"}>{meta?.label ?? status}</Badge>;
+function StatusBadge({ value, meta, empty = "未开始" }: {
+  value: string | null | undefined;
+  meta: Record<string, { label: string; variant: StatusVariant }>;
+  empty?: string;
+}) {
+  const item = value ? meta[value] : null;
+  return <Badge variant={item?.variant ?? "secondary"}>{item?.label ?? value ?? empty}</Badge>;
 }
 
 function JobSummary({ job }: { job: TranscriptionJob }) {
-  if (job.status === "succeeded") {
-    return null;
-  }
-  if (job.status === "failed") {
-    return <p className="mt-1 text-ui-xs text-destructive">{job.failure?.message || "转录失败"}</p>;
-  }
-  if (job.status === "cancelled") {
-    return <p className="mt-1 text-ui-xs text-muted-foreground">任务已取消，可重新转录。</p>;
-  }
+  if (job.status === "succeeded") return <p className="mt-1 text-ui-xs text-muted-foreground">转录草稿已生成；审核、发布与索引状态见右侧独立列。</p>;
+  if (job.status === "failed") return <p className="mt-1 text-ui-xs text-destructive">{job.error_summary || job.failure_error_code || "转录失败"}</p>;
+  if (job.status === "cancelled") return <p className="mt-1 text-ui-xs text-muted-foreground">任务已取消，可重新转录。</p>;
   const stage = job.stage ? stageLabels[job.stage] || job.stage : "排队中";
   const progress = job.total_ms > 0 ? Math.min(100, Math.round((job.processed_ms / job.total_ms) * 100)) : 0;
   return <p className="mt-1 text-ui-xs text-muted-foreground">{stage} · {progress}%</p>;
 }
 
-function currentStage(asset: MediaAsset, job?: TranscriptionJob): { label: string; variant: StatusVariant; filter: MediaFilter } {
-  if (job?.status === "failed" || asset.publication_status === "publication_failed" || asset.publication_index_status === "failed" || asset.status === "failed") {
-    return { label: asset.publication_status === "publication_failed" ? "发布失败" : "转录失败", variant: "destructive", filter: "failed" };
-  }
-  if (job?.status === "pending" || job?.status === "running") {
-    return { label: job.status === "pending" ? "等待转录" : "转录处理中", variant: "warning", filter: "processing" };
-  }
-  if (asset.review_status === "awaiting_review") return { label: "待审核", variant: "info", filter: "review" };
-  if (asset.review_status === "review_rejected") return { label: "审核未通过", variant: "destructive", filter: "failed" };
-  if (asset.publication_status === "publishing") return { label: "发布处理中", variant: "warning", filter: "publishing" };
-  if (asset.publication_status === "published" && asset.is_current_version) return { label: "已发布", variant: "success", filter: "all" };
-  if (asset.review_status === "review_approved" && asset.publication_status === "not_published") return { label: "待发布", variant: "info", filter: "all" };
-  if (job?.status === "succeeded") return { label: "转写草稿就绪", variant: "info", filter: "review" };
-  return { label: "已就绪", variant: "secondary", filter: "all" };
-}
-
-function publicationSummary(asset: MediaAsset) {
-  if (asset.publication_status === "published" && asset.is_current_version) return "正式索引已生效";
-  if (asset.publication_status === "publishing") {
-    const labels: Record<string, string> = { pending: "等待索引", parsing: "解析中", chunking: "分块中", embedding: "向量化中", done: "切换正式版本" };
-    return labels[asset.publication_index_status || ""] || "发布处理中";
-  }
-  if (asset.publication_status === "publication_failed") return "正式发布失败";
-  return "未发布";
+function pendingFromFile(file: File, profileId: string): PendingVideo {
+  return {
+    id: createRequestId(),
+    file,
+    title: file.name.replace(/\.[^.]+$/, ""),
+    selected: true,
+    profileId,
+    transcriptFile: null,
+    transcriptText: null,
+    requestId: createRequestId(),
+    state: "waiting",
+    error: null,
+  };
 }
 
 export function AdminMediaPage() {
   const [mediaAssets, setMediaAssets] = useState<MediaAsset[]>([]);
   const [profiles, setProfiles] = useState<TranscriptionProfile[]>([]);
-  const [mode, setMode] = useState<UploadMode>("manual");
+  const [step, setStep] = useState(1);
+  const [mode, setMode] = useState<UploadMode | null>(null);
+  const [pending, setPending] = useState<PendingVideo[]>([]);
+  const [bulkProfileId, setBulkProfileId] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [uploading, setUploading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [dragging, setDragging] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [mediaFilter, setMediaFilter] = useState<MediaFilter>("all");
   const [selectedMediaId, setSelectedMediaId] = useState<string | null>(null);
-  const [videoFile, setVideoFile] = useState<File | null>(null);
-  const [transcriptFile, setTranscriptFile] = useState<File | null>(null);
-  const [title, setTitle] = useState("");
-  const [profileId, setProfileId] = useState("");
-  const idempotencyKey = useRef(createRequestId());
   const retryIdempotencyKeys = useRef(new Map<string, string>());
   const previousJobStatuses = useRef(new Map<string, string>());
-  const videoInputRef = useRef<HTMLInputElement>(null);
-  const transcriptInputRef = useRef<HTMLInputElement>(null);
   const { jobs, jobsByMediaId, error: jobsError, refreshJobs, replaceJob } = useTranscriptionJobs();
-
-  const rotateRequestIdentity = () => { idempotencyKey.current = createRequestId(); };
 
   const refresh = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
     try {
-      const assets = await api.listMediaAssets();
-      setMediaAssets(assets);
+      setMediaAssets(await api.listMediaAssets());
     } catch (e: any) {
       setLoadError(e?.message || String(e));
     } finally {
@@ -123,11 +142,7 @@ export function AdminMediaPage() {
     const currentStatuses = new Map(jobs.map((job) => [job.job_id, job.status]));
     const reachedTerminalState = jobs.some((job) => {
       const previousStatus = previousJobStatuses.current.get(job.job_id);
-      return (
-        previousStatus !== undefined &&
-        activeJobStatuses.has(previousStatus) &&
-        !activeJobStatuses.has(job.status)
-      );
+      return previousStatus !== undefined && activeJobStatuses.has(previousStatus) && !activeJobStatuses.has(job.status);
     });
     previousJobStatuses.current = currentStatuses;
     if (reachedTerminalState) void refresh();
@@ -137,40 +152,108 @@ export function AdminMediaPage() {
       .then((items) => {
         setProfiles(items);
         const first = items.find((item) => item.admission === "enabled" && item.availability === "available");
-        if (first) setProfileId((current) => current || first.profile_id);
+        if (first) {
+          setBulkProfileId(first.profile_id);
+          setPending((current) => current.map((item) => item.profileId ? item : { ...item, profileId: first.profile_id }));
+        }
       })
       .catch(() => setProfiles([]));
   }, []);
 
-  async function handleUpload() {
-    if (!videoFile || !title.trim()) return;
-    if (mode === "manual" && !transcriptFile) return;
-    if (mode === "automatic" && !profileId) return;
-    setUploading(true);
-    setUploadError(null);
+  const enabledProfiles = profiles.filter((item) => item.admission === "enabled" && item.availability === "available");
+  const editingItem = pending.find((item) => item.id === editingId);
+
+  function addVideos(files: FileList | File[]) {
+    const next = Array.from(files)
+      .filter((file) => file.type === "video/mp4" || file.name.toLowerCase().endsWith(".mp4"))
+      .map((file) => pendingFromFile(file, bulkProfileId || enabledProfiles[0]?.profile_id || ""));
+    if (next.length) setPending((current) => [...current, ...next]);
+  }
+
+  function updatePending(id: string, change: Partial<PendingVideo>) {
+    setPending((current) => current.map((item) => item.id === id ? { ...item, ...change } : item));
+  }
+
+  function chooseMode(nextMode: UploadMode) {
+    setMode(nextMode);
+    setPending((current) => current.map((item) => ({
+      ...item,
+      profileId: nextMode === "automatic" ? (item.profileId || bulkProfileId) : item.profileId,
+      state: item.state === "succeeded" ? item.state : "waiting",
+      error: null,
+    })));
+    setStep(3);
+  }
+
+  async function attachTranscript(id: string, file: File | null) {
+    if (!file) return;
     try {
-      if (mode === "manual") {
-        await api.uploadMediaVideo(videoFile, transcriptFile!, title.trim());
-      } else {
-        const uploaded = await api.uploadAutomaticMediaVideo(videoFile, title.trim(), profileId, idempotencyKey.current);
-        if (uploaded.transcription_job_id) {
-          replaceJob(await api.getTranscriptionJob(uploaded.transcription_job_id));
-        } else {
-          await refreshJobs();
-        }
-      }
-      setVideoFile(null);
-      setTranscriptFile(null);
-      setTitle("");
-      rotateRequestIdentity();
-      if (videoInputRef.current) videoInputRef.current.value = "";
-      if (transcriptInputRef.current) transcriptInputRef.current.value = "";
-      await refresh();
-    } catch (e: any) {
-      setUploadError(e?.message || String(e));
-    } finally {
-      setUploading(false);
+      const text = await file.text();
+      updatePending(id, { transcriptFile: file, transcriptText: text, state: "waiting", error: null });
+    } catch {
+      updatePending(id, { transcriptFile: file, transcriptText: null, state: "failed", error: "无法读取 Markdown 文件" });
     }
+  }
+
+  function validateItem(item: PendingVideo) {
+    if (!item.title.trim()) return "请填写视频标题";
+    if (mode === "automatic") {
+      const profile = profiles.find((entry) => entry.profile_id === item.profileId);
+      if (!profile || profile.admission !== "enabled" || profile.availability !== "available") return "请选择可用的服务端 Profile";
+    } else {
+      if (!item.transcriptFile || item.transcriptText === null) return "请绑定 Markdown 转写文件";
+      if (!item.transcriptFile.name.toLowerCase().endsWith(".md")) return "转写文件必须是 .md";
+      if (!/说话[人⼈]\s+\d+\s+\d{1,2}:\d{2}/.test(item.transcriptText)) return "Markdown 缺少“说话人 HH:MM:SS”格式标记";
+    }
+    return null;
+  }
+
+  const readyItems = pending.filter((item) => item.state !== "succeeded");
+  const canSubmit = Boolean(mode && readyItems.length && readyItems.every((item) => !validateItem(item)) && !submitting);
+  const visibleMediaAssets = mediaAssets.filter((asset) => {
+    if (mediaFilter === "all") return true;
+    const job = jobsByMediaId.get(asset.media_id);
+    if (mediaFilter === "processing") return job?.status === "pending" || job?.status === "running";
+    if (mediaFilter === "review") return asset.review_status === "awaiting_review";
+    if (mediaFilter === "publishing") return asset.publication_status === "publishing";
+    return job?.status === "failed" || asset.status === "failed" || asset.publication_status === "publication_failed" || asset.publication_index_status === "failed";
+  });
+
+  async function uploadOne(item: PendingVideo) {
+    updatePending(item.id, { state: "uploading", error: null });
+    try {
+      if (mode === "automatic") {
+        const uploaded = await api.uploadAutomaticMediaVideo(item.file, item.title.trim(), item.profileId, item.requestId);
+        if (uploaded.transcription_job_id) replaceJob(await api.getTranscriptionJob(uploaded.transcription_job_id));
+      } else {
+        const transcript = new File(
+          [item.transcriptText!],
+          item.transcriptFile!.name,
+          { type: "text/markdown" },
+        );
+        await api.uploadMediaVideo(item.file, transcript, item.title.trim());
+      }
+      updatePending(item.id, { state: "succeeded", error: null });
+    } catch (e: any) {
+      updatePending(item.id, { state: "failed", error: e?.message || String(e) });
+    }
+  }
+
+  async function submitBatch() {
+    if (!canSubmit) return;
+    setSubmitting(true);
+    setUploadError(null);
+    const queue = [...readyItems];
+    let cursor = 0;
+    const worker = async () => {
+      while (cursor < queue.length) {
+        const item = queue[cursor++];
+        await uploadOne(item);
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(2, queue.length) }, worker));
+    setSubmitting(false);
+    await Promise.all([refresh(), refreshJobs()]);
   }
 
   async function cancelJob(job: TranscriptionJob) {
@@ -197,75 +280,168 @@ export function AdminMediaPage() {
     }
   }
 
-  const selectedProfile = profiles.find((item) => item.profile_id === profileId);
-  const automaticProfileReady = selectedProfile?.admission === "enabled" && selectedProfile.availability === "available";
-  const canUpload = Boolean(
-    videoFile && title.trim() && !uploading &&
-    (mode === "manual" ? transcriptFile : automaticProfileReady),
-  );
-  const visibleMediaAssets = mediaAssets.filter((asset) => {
-    if (mediaFilter === "all") return true;
-    return currentStage(asset, jobsByMediaId.get(asset.media_id)).filter === mediaFilter;
-  });
-
   return (
     <section className="space-y-6" aria-labelledby="admin-media-title">
       <header>
         <p className="text-ui-xs font-medium uppercase tracking-[0.14em] text-primary">媒体与转写</p>
         <h1 id="admin-media-title" className="mt-1 text-ui-2xl font-semibold tracking-tight text-foreground">视频媒体</h1>
-        <p className="mt-1 max-w-3xl text-ui-sm text-muted-foreground">上传人工转写，或仅上传 MP4 并使用受控服务端 Profile 生成待审核转录草稿。</p>
+        <p className="mt-1 max-w-3xl text-ui-sm text-muted-foreground">分步骤批量上传视频，并选择人工 Markdown 或受控服务端 Profile。</p>
       </header>
 
       <Card className="shadow-surface">
         <CardHeader className="p-5 pb-4">
           <CardTitle className="text-ui-lg">上传视频与转写</CardTitle>
-          <CardDescription className="mt-1">支持人工转写和受控自动转录。</CardDescription>
+          <CardDescription className="mt-1">自动转录成功不代表已经审核、发布或进入索引。</CardDescription>
+          <ol className="mt-4 grid grid-cols-3 gap-2" aria-label="上传步骤">
+            {["上传视频", "转写方式", "配置并提交"].map((label, index) => (
+              <li key={label} className={`rounded-ui-md border px-3 py-2 text-ui-sm ${step === index + 1 ? "border-primary bg-primary/10 font-medium text-primary" : "border-border text-muted-foreground"}`}>
+                {index + 1}. {label}
+              </li>
+            ))}
+          </ol>
         </CardHeader>
         <CardContent className="space-y-5 px-5 pb-5 pt-0">
-          <div className="flex gap-2" aria-label="转写方式">
-            <Button variant={mode === "manual" ? "default" : "outline"} onClick={() => setMode("manual")}>人工转写</Button>
-            <Button variant={mode === "automatic" ? "default" : "outline"} onClick={() => setMode("automatic")}>自动转录</Button>
-          </div>
-          <div>
-            <label htmlFor="media-title" className="mb-1.5 block text-ui-sm font-medium">视频标题</label>
-            <Input id="media-title" value={title} onChange={(event) => { setTitle(event.target.value); rotateRequestIdentity(); }} disabled={uploading} />
-          </div>
-          <div className="grid gap-4 lg:grid-cols-2">
-            <div className="rounded-ui-xl border border-border bg-surface-muted/40 p-4">
-              <label htmlFor="media-video-file" className="block text-ui-sm font-medium">视频文件</label>
-              <Input ref={videoInputRef} id="media-video-file" type="file" accept=".mp4,video/mp4" disabled={uploading}
-                onChange={(event) => { setVideoFile(event.target.files?.[0] || null); rotateRequestIdentity(); }} className="mt-3 h-auto min-h-control-md py-1.5" />
-              <p className="mt-2 text-ui-xs text-muted-foreground">{videoFile ? `${videoFile.name} · ${formatBytes(videoFile.size)}` : "尚未选择视频文件"}</p>
-            </div>
-            {mode === "manual" ? (
-              <div className="rounded-ui-xl border border-border bg-surface-muted/40 p-4">
-                <label htmlFor="media-transcript-file" className="block text-ui-sm font-medium">人工转写</label>
-                <Input ref={transcriptInputRef} id="media-transcript-file" type="file" accept=".md,text/markdown" disabled={uploading}
-                  onChange={(event) => setTranscriptFile(event.target.files?.[0] || null)} className="mt-3 h-auto min-h-control-md py-1.5" />
-                <p className="mt-2 text-ui-xs text-muted-foreground">{transcriptFile ? `${transcriptFile.name} · ${formatBytes(transcriptFile.size)}` : "尚未选择转写文件"}</p>
+          {step === 1 && (
+            <>
+              <div
+                className={`rounded-ui-xl border-2 border-dashed p-10 text-center transition-colors ${dragging ? "border-primary bg-primary/10" : "border-border bg-surface-muted/40"}`}
+                onDragEnter={(event) => { event.preventDefault(); setDragging(true); }}
+                onDragOver={(event) => event.preventDefault()}
+                onDragLeave={() => setDragging(false)}
+                onDrop={(event) => { event.preventDefault(); setDragging(false); addVideos(event.dataTransfer.files); }}
+              >
+                <p className="font-medium">拖放 MP4 视频到这里</p>
+                <p className="mt-1 text-ui-xs text-muted-foreground">支持一次选择多个文件；此步骤只在浏览器中暂存，不会立即上传。</p>
+                <label className="mt-4 inline-flex h-control-md cursor-pointer items-center rounded-ui-md bg-primary px-4 text-ui-sm font-medium text-primary-foreground">
+                  选择视频文件
+                  <input aria-label="选择视频文件" className="sr-only" type="file" accept=".mp4,video/mp4" multiple onChange={(event) => event.target.files && addVideos(event.target.files)} />
+                </label>
               </div>
-            ) : (
-              <div className="rounded-ui-xl border border-border bg-surface-muted/40 p-4">
-                <label htmlFor="transcription-profile" className="block text-ui-sm font-medium">转录 Profile</label>
-                <select id="transcription-profile" value={profileId} disabled={uploading} onChange={(event) => { setProfileId(event.target.value); rotateRequestIdentity(); }}
-                  className="mt-3 h-control-md w-full rounded-ui-md border border-input bg-background px-3 text-ui-sm">
-                  <option value="">请选择服务端 Profile</option>
-                  {profiles.map((profile) => <option key={profile.profile_id} value={profile.profile_id} disabled={profile.admission !== "enabled" || profile.availability !== "available"}>{profile.display_name}{profile.availability !== "available" ? "（不可用）" : ""}</option>)}
-                </select>
-                <p className="mt-2 text-ui-xs text-muted-foreground">{selectedProfile?.description || "仅可选择服务端白名单中的可用 Profile。"}</p>
+              {pending.length > 0 && (
+                <div className="max-h-64 space-y-2 overflow-y-auto pr-1" aria-label="待上传视频">
+                  {pending.map((item) => (
+                    <div key={item.id} className="flex items-center gap-3 rounded-ui-lg border border-border p-3">
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-ui-sm font-medium">{item.file.name}</p>
+                        <p className="text-ui-xs text-muted-foreground">{formatBytes(item.file.size)}</p>
+                      </div>
+                      <Button variant="ghost" size="sm" onClick={() => setPending((current) => current.filter((entry) => entry.id !== item.id))}>移除</Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="flex justify-end"><Button disabled={!pending.length} onClick={() => setStep(2)}>下一步：选择转写方式</Button></div>
+            </>
+          )}
+
+          {step === 2 && (
+            <>
+              <div className="grid gap-4 md:grid-cols-2">
+                <button type="button" className="rounded-ui-xl border border-border p-5 text-left hover:border-primary hover:bg-primary/5" onClick={() => chooseMode("automatic")}>
+                  <span className="font-semibold">自动转录</span>
+                  <span className="mt-2 block text-ui-sm text-muted-foreground">使用服务端白名单 Profile 生成候选草稿。实验性 Profile 强制人工审核。</span>
+                </button>
+                <button type="button" className="rounded-ui-xl border border-border p-5 text-left hover:border-primary hover:bg-primary/5" onClick={() => chooseMode("manual")}>
+                  <span className="font-semibold">人工转写</span>
+                  <span className="mt-2 block text-ui-sm text-muted-foreground">为每个视频绑定、查看并编辑已准备好的 Markdown 转写文件。</span>
+                </button>
               </div>
-            )}
-          </div>
-          {uploadError && <Alert variant="destructive" role="alert"><AlertTitle>视频上传失败</AlertTitle><AlertDescription>{uploadError}</AlertDescription></Alert>}
-          <div className="flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-ui-xs text-muted-foreground">{mode === "manual" ? "人工 Markdown 路径保持不变。" : "自动任务会生成待审核草稿。"}</p>
-            <Button onClick={handleUpload} disabled={!canUpload}>{uploading ? "正在提交…" : mode === "manual" ? "上传视频与人工转写" : "上传并开始自动转录"}</Button>
-          </div>
+              <Button variant="outline" onClick={() => setStep(1)}>返回上传视频</Button>
+            </>
+          )}
+
+          {step === 3 && mode && (
+            <>
+              <div className="flex flex-wrap items-end gap-3">
+                <Button variant="outline" size="sm" onClick={() => setPending((current) => current.map((item) => ({ ...item, selected: true })))}>全选</Button>
+                <Button variant="outline" size="sm" onClick={() => setPending((current) => current.map((item) => ({ ...item, selected: false })))}>取消全选</Button>
+                {mode === "automatic" && (
+                  <>
+                    <label className="text-ui-sm font-medium">批量转录 Profile
+                      <select aria-label="批量转录 Profile" value={bulkProfileId} onChange={(event) => setBulkProfileId(event.target.value)} className="mt-1 block h-control-md min-w-64 rounded-ui-md border border-input bg-background px-3 text-ui-sm">
+                        <option value="">请选择服务端 Profile</option>
+                        {profiles.map((profile) => <option key={profile.profile_id} value={profile.profile_id} disabled={profile.admission !== "enabled" || profile.availability !== "available"}>{profile.display_name}{profile.qualification === "experimental" ? "（实验性·强制审核）" : ""}{profile.availability !== "available" ? "（不可用）" : ""}</option>)}
+                      </select>
+                    </label>
+                    <Button variant="outline" onClick={() => setPending((current) => current.map((item) => item.selected ? { ...item, profileId: bulkProfileId, requestId: createRequestId(), state: "waiting", error: null } : item))}>应用到已选择视频</Button>
+                  </>
+                )}
+              </div>
+
+              <div className="max-h-[32rem] space-y-3 overflow-y-auto pr-1" aria-label="上传配置列表">
+                {pending.map((item) => {
+                  const validationError = validateItem(item);
+                  const profile = profiles.find((entry) => entry.profile_id === item.profileId);
+                  return (
+                    <div key={item.id} className="rounded-ui-xl border border-border p-4">
+                      <div className="flex gap-3">
+                        <input aria-label={`选择 ${item.file.name}`} type="checkbox" checked={item.selected} onChange={(event) => updatePending(item.id, { selected: event.target.checked })} />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate font-medium">{item.file.name}</p>
+                          <p className="text-ui-xs text-muted-foreground">{formatBytes(item.file.size)}</p>
+                        </div>
+                        <StatusBadge value={item.state} meta={{ waiting: { label: "待提交", variant: "secondary" }, uploading: { label: "上传中", variant: "warning" }, succeeded: { label: "已提交", variant: "success" }, failed: { label: "提交失败", variant: "destructive" } }} />
+                      </div>
+                      <div className="mt-3 grid gap-3 lg:grid-cols-2">
+                        <label className="text-ui-sm font-medium">视频标题
+                          <Input aria-label={`${item.file.name} 的视频标题`} className="mt-1" value={item.title} disabled={submitting || item.state === "succeeded"} onChange={(event) => updatePending(item.id, { title: event.target.value, requestId: createRequestId(), state: "waiting", error: null })} />
+                        </label>
+                        {mode === "automatic" ? (
+                          <label className="text-ui-sm font-medium">转录 Profile
+                            <select aria-label={`${item.file.name} 的转录 Profile`} className="mt-1 h-control-md w-full rounded-ui-md border border-input bg-background px-3 text-ui-sm" value={item.profileId} disabled={submitting || item.state === "succeeded"} onChange={(event) => updatePending(item.id, { profileId: event.target.value, requestId: createRequestId(), state: "waiting", error: null })}>
+                              <option value="">请选择服务端 Profile</option>
+                              {profiles.map((entry) => <option key={entry.profile_id} value={entry.profile_id} disabled={entry.admission !== "enabled" || entry.availability !== "available"}>{entry.display_name}{entry.qualification === "experimental" ? "（实验性·强制审核）" : ""}{entry.availability !== "available" ? "（不可用）" : ""}</option>)}
+                            </select>
+                            {profile?.requires_review && <span className="mt-1 block text-ui-xs text-warning">此 Profile 生成的草稿必须人工审核，不能自动发布或索引。</span>}
+                          </label>
+                        ) : (
+                          <div>
+                            <span className="text-ui-sm font-medium">人工 Markdown</span>
+                            <div className="mt-1 flex flex-wrap gap-2">
+                              <label className="inline-flex h-control-md cursor-pointer items-center rounded-ui-md border border-input bg-background px-3 text-ui-sm">
+                                {item.transcriptFile ? "更换转写文件" : "添加转写文件"}
+                                <input aria-label={`${item.file.name} 的人工转写`} className="sr-only" type="file" accept=".md,text/markdown" disabled={submitting || item.state === "succeeded"} onChange={(event) => void attachTranscript(item.id, event.target.files?.[0] || null)} />
+                              </label>
+                              {item.transcriptFile && <Button variant="outline" onClick={() => setEditingId(item.id)}>打开并编辑</Button>}
+                            </div>
+                            <p className="mt-1 text-ui-xs text-muted-foreground">{item.transcriptFile?.name || "尚未绑定 Markdown"}</p>
+                          </div>
+                        )}
+                      </div>
+                      {(item.error || validationError) && <p className="mt-2 text-ui-xs text-destructive">{item.error || validationError}</p>}
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
+                <Button variant="outline" disabled={submitting} onClick={() => setStep(2)}>返回选择方式</Button>
+                <div className="text-right">
+                  <p className="mb-2 text-ui-xs text-muted-foreground">{mode === "manual" ? "保持现有人工 Markdown 上传与索引路径。" : "每个文件使用独立幂等键；最多并发上传 2 个。"}</p>
+                  <Button disabled={!canSubmit} onClick={() => void submitBatch()}>{submitting ? "正在批量提交…" : mode === "manual" ? "上传视频与人工转写" : "上传并创建自动转录任务"}</Button>
+                </div>
+              </div>
+            </>
+          )}
         </CardContent>
       </Card>
 
+      {editingItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-labelledby="transcript-editor-title">
+          <Card className="flex max-h-[90vh] w-full max-w-4xl flex-col">
+            <CardHeader><CardTitle id="transcript-editor-title">编辑 {editingItem.transcriptFile?.name}</CardTitle><CardDescription>编辑只保存在本次浏览器待上传内容中。</CardDescription></CardHeader>
+            <CardContent className="flex min-h-0 flex-1 flex-col gap-3">
+              <textarea aria-label="Markdown 转写内容" className="min-h-80 flex-1 resize-y rounded-ui-md border border-input bg-background p-3 font-mono text-ui-sm" value={editingItem.transcriptText || ""} onChange={(event) => updatePending(editingItem.id, { transcriptText: event.target.value, state: "waiting", error: null })} />
+              <div className="flex justify-end"><Button onClick={() => setEditingId(null)}>保存并关闭</Button></div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {uploadError && <Alert variant="destructive" role="alert"><AlertTitle>操作失败</AlertTitle><AlertDescription>{uploadError}</AlertDescription></Alert>}
+
       <section className="space-y-3" aria-labelledby="media-assets-title">
-        <div className="flex items-end justify-between"><div><h2 id="media-assets-title" className="text-ui-base font-semibold">媒体资源</h2><p className="mt-1 text-ui-xs text-muted-foreground">查看媒体与最新转录任务状态。</p></div><span className="text-ui-xs text-muted-foreground">共 {mediaAssets.length} 个视频</span></div>
+        <div className="flex items-end justify-between"><div><h2 id="media-assets-title" className="text-ui-base font-semibold">媒体资源</h2><p className="mt-1 text-ui-xs text-muted-foreground">媒体、转录、审核、发布与索引分别显示，不互相代替。</p></div><span className="text-ui-xs text-muted-foreground">共 {mediaAssets.length} 个视频</span></div>
         <div className="flex flex-wrap gap-2" aria-label="媒体快捷筛选">
           {([["all", "全部"], ["processing", "处理中"], ["review", "待审核"], ["publishing", "发布处理中"], ["failed", "失败"]] as const).map(([value, label]) => (
             <Button key={value} size="sm" variant={mediaFilter === value ? "default" : "outline"} onClick={() => setMediaFilter(value)}>{label}</Button>
@@ -275,9 +451,12 @@ export function AdminMediaPage() {
         {jobsError && <Alert role="alert"><AlertTitle>任务状态暂时无法刷新</AlertTitle><AlertDescription>{jobsError}</AlertDescription></Alert>}
         {loadError ? <ErrorState title="媒体资源加载失败" description={loadError} action={<Button variant="outline" size="sm" onClick={refresh}>重新加载</Button>} />
           : loading ? <Card><LoadingState className="min-h-48" label="正在加载媒体资源…" /></Card>
-          : mediaAssets.length === 0 ? <EmptyState title="暂无媒体资源" description="上传第一个视频及其人工转写后，处理状态会显示在这里。" />
-          : <Card className="overflow-hidden shadow-surface"><div className="overflow-x-auto"><table className="w-full min-w-[64rem] text-ui-sm"><caption className="sr-only">视频媒体和当前处理阶段</caption><thead className="border-b border-border bg-surface-muted"><tr><th className="px-4 py-3 text-left">资料</th><th className="px-4 py-3 text-right">大小</th><th className="px-4 py-3 text-left">媒体状态</th><th className="px-4 py-3 text-left">当前阶段</th><th className="px-4 py-3 text-left">索引状态</th><th className="px-4 py-3 text-left">创建时间</th><th className="px-4 py-3 text-left">操作</th></tr></thead><tbody className="divide-y divide-border">
-            {visibleMediaAssets.map((asset) => { const job = jobsByMediaId.get(asset.media_id); const stage = currentStage(asset, job); return <tr key={asset.media_id}><td className="max-w-xs px-4 py-3"><p className="font-medium">{asset.title}</p><p className="mt-1 truncate font-mono text-ui-xs text-muted-foreground" title={asset.original_filename}>{asset.original_filename}</p></td><td className="px-4 py-3 text-right">{formatBytes(asset.file_size)}</td><td className="px-4 py-3"><MediaStatusBadge status={asset.status} /></td><td className="px-4 py-3"><Badge variant={stage.variant}>{stage.label}</Badge>{job && <JobSummary job={job} />}</td><td className="px-4 py-3 text-ui-xs text-muted-foreground">{publicationSummary(asset)}</td><td className="px-4 py-3 text-ui-xs text-muted-foreground">{formatAdminDate(asset.created_at)}</td><td className="px-4 py-3"><div className="flex flex-wrap gap-2">{(job?.status === "pending" || job?.status === "running") && <Button size="sm" variant="outline" onClick={() => void cancelJob(job)}>取消</Button>}{(job?.status === "failed" || job?.status === "cancelled") && job.failure?.retryable !== false && <Button size="sm" variant="outline" onClick={() => void retryJob(job)}>重试</Button>}<Button size="sm" variant="outline" onClick={() => setSelectedMediaId(asset.media_id)}>进入转写工作台</Button></div></td></tr>; })}
+          : mediaAssets.length === 0 ? <EmptyState title="暂无媒体资源" description="完成向导后，视频和各阶段状态会显示在这里。" />
+          : <Card className="overflow-hidden shadow-surface"><div className="overflow-x-auto"><table className="w-full min-w-[78rem] text-ui-sm"><caption className="sr-only">视频媒体、转录、审核、发布和索引状态</caption><thead className="border-b border-border bg-surface-muted"><tr><th className="px-4 py-3 text-left">标题</th><th className="px-4 py-3 text-left">原始文件</th><th className="px-4 py-3 text-left">媒体</th><th className="px-4 py-3 text-left">转录</th><th className="px-4 py-3 text-left">审核</th><th className="px-4 py-3 text-left">发布</th><th className="px-4 py-3 text-left">索引</th><th className="px-4 py-3 text-left">创建时间</th></tr></thead><tbody className="divide-y divide-border">
+            {visibleMediaAssets.map((asset) => {
+              const job = jobsByMediaId.get(asset.media_id);
+              return <tr key={asset.media_id}><td className="px-4 py-3 font-medium">{asset.title}</td><td className="px-4 py-3"><p className="font-mono text-ui-xs text-muted-foreground">{asset.original_filename}</p><p className="mt-1 text-ui-xs text-muted-foreground">{formatBytes(asset.file_size)}</p></td><td className="px-4 py-3"><StatusBadge value={asset.status} meta={mediaStatusMeta} />{asset.error && <p className="mt-1 text-ui-xs text-destructive">{asset.error}</p>}</td><td className="px-4 py-3">{job ? <><Badge variant={job.status === "failed" ? "destructive" : job.status === "succeeded" ? "success" : "secondary"}>{job.status}</Badge><JobSummary job={job} /><div className="mt-2 flex gap-2">{(job.status === "pending" || job.status === "running") && <Button size="sm" variant="outline" onClick={() => void cancelJob(job)}>取消</Button>}{(job.status === "failed" || job.status === "cancelled") && job.failure?.retryable !== false && <Button size="sm" variant="outline" onClick={() => void retryJob(job)}>重试</Button>}</div></> : <span className="text-ui-xs text-muted-foreground">人工转写或暂无任务</span>}</td><td className="px-4 py-3"><StatusBadge value={asset.review_status} meta={reviewMeta} /></td><td className="px-4 py-3"><StatusBadge value={asset.publication_status} meta={publicationMeta} /></td><td className="px-4 py-3"><StatusBadge value={asset.publication_index_status} meta={indexMeta} /></td><td className="px-4 py-3"><p className="text-ui-xs text-muted-foreground">{formatAdminDate(asset.created_at)}</p><Button className="mt-2" size="sm" variant="outline" onClick={() => setSelectedMediaId(asset.media_id)}>进入转写工作台</Button></td></tr>;
+            })}
           </tbody></table></div></Card>}
         {visibleMediaAssets.length === 0 && mediaAssets.length > 0 && <EmptyState title="没有符合条件的媒体" description="请切换其他快捷筛选条件。" />}
         {selectedMediaId && <Card className="p-4"><div className="flex items-center justify-between"><h3 className="font-semibold">转写版本操作</h3><Button size="sm" variant="ghost" onClick={() => setSelectedMediaId(null)}>关闭</Button></div><TranscriptionVersionPanel mediaId={selectedMediaId} refreshToken={jobsByMediaId.get(selectedMediaId)?.result_version_id} embedded /></Card>}
