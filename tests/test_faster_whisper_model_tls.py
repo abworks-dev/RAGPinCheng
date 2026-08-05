@@ -18,6 +18,14 @@ MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 
 
+def test_model_bin_identity_matches_pinned_hugging_face_lfs_metadata() -> None:
+    assert MODULE.MODEL_BIN_SIZE_BYTES == 1_617_884_929
+    assert (
+        MODULE.MODEL_BIN_SHA256
+        == "e76620f83d5f5b69efd3d87e3dc180c1bd21df9fbebacfd4335e5e1efcc018da"
+    )
+
+
 def _assert_tls12_verified(context: ssl.SSLContext) -> None:
     assert context.maximum_version == ssl.TLSVersion.TLSv1_2
     assert context.verify_mode == ssl.CERT_REQUIRED
