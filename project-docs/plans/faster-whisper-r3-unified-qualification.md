@@ -243,6 +243,15 @@ setuptools/wheel 重复构建两次；只接受确定性 pure-Python `none-any` 
 来源、重复构建一致性、Manifest、哈希、大小和标签，并要求 jieba、oss2、antlr4 三个内部
 wheel 全部进入 run-local wheelhouse。不调整 pin、production freeze 或 binary-only 策略。
 
+### 2.0.12 crcmod pure-Python 受控 wheel
+
+最终绑定 SHA 的资格 run `31008453083` 已通过 jieba、oss2、antlr4 三个受控 wheel，下一门禁
+明确为 `crcmod`。固定 1.7 release 只有 SHA-256
+`dc7051a0db5f2bd48665a990d3ec1cc305a466a77358ca4492826f41f283601e`、大小 89670 bytes
+的 sdist。其官方安装契约允许 C 扩展编译失败后使用纯 Python 实现。受控构建显式禁用编译器，
+并继续拒绝任何 native wheel 内容，只接受重复构建一致的 `none-any` wheel。该 wheel 与前三个
+包一同执行严格来源、Manifest 和 wheelhouse 校验，不改变 binary-only 或 production freeze。
+
 ### 2.1 仓库基线
 
 - PR #34 已合并到 `master`；
