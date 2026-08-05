@@ -622,6 +622,28 @@ workflow；使用 run-local venv/wheelhouse、固定 qwen-asr==0.0.6、Qwen3-ASR
 Qdrant 或 Profile admission，不使用真实业务媒体，失败 artifact 保留审计。
 ```
 
+### 10.3 依赖失败诊断审批
+
+统一资格 PR #53 的 CI 通过并合并为
+`86b69db6831e3cd201436a26bbe836229bf419bd`。唯一 workflow
+`30970277613` 在 `pip_download` 返回
+`dependency_preparation_failed/evidence_insufficient`，未进入模型、CUDA、18300
+服务或质量阶段；脱敏 verdict 确认 Profile disabled 且生产服务未修改。
+
+经单独 R3 批准，新增默认关闭的独立依赖诊断，只允许：
+
+1. 固定 source run `30970277613` 与 source SHA
+   `86b69db6831e3cd201436a26bbe836229bf419bd`；
+2. 固定 production freeze、Qwen/Windows requirements 和同一受控 jieba wheel；
+3. 先解析既有 resolver 日志，证据不足时执行一次 run-local、binary-only、
+   no-cache、ignore-installed 的 pip dry-run；
+4. 输出严格 v2 枚举字段、整数退出码/行数、ASCII requirement 和清理结果；
+5. 不输出原始行、URL、代理、Token、绝对路径或完整 freeze；
+6. 不安装包、不下载模型、不启动 CUDA/ASR 服务，不修改任何生产状态；
+7. PR/CI 合并后只执行一次绑定新完整 master SHA 的诊断 workflow，取得结果后停止。
+
+诊断只定位 blocker，不构成资格通过，也不授权修改依赖或重跑完整资格。
+
 ## 11. 最终完成条件
 
 Qwen3-ASR 只有在以下全部完成后才可称为“资格通过”：
