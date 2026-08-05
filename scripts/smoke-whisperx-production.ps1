@@ -128,7 +128,12 @@ try {
     $wav = Join-Path $SampleRoot "synthetic-zh.wav"
     $speaker = New-Object System.Speech.Synthesis.SpeechSynthesizer
     $speaker.SetOutputToWaveFile($wav)
-    $speaker.Speak("品丞 BIM 培训，项目编号 A 一二三，尺寸二千四百毫米。")
+    $speechText = [Text.Encoding]::UTF8.GetString(
+        [Convert]::FromBase64String(
+            "5ZOB5LieIEJJTSDln7norq3vvIzpobnnm67nvJblj7cgQSDkuIDkuozkuInvvIzlsLrlr7jkuozljYPlm5vnmb7mr6vnsbPjgII="
+        )
+    )
+    $speaker.Speak($speechText)
     $speaker.Dispose()
 
     $env:PYTHONPATH = $resolvedSource
