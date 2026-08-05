@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 from pathlib import Path
+import subprocess
 from types import SimpleNamespace
 
+import numpy
+
+import asr_service.engines.whisperx as whisperx_engine
 from asr_service.engine_protocol import EngineChunkCandidate, PreparedAudioChunk, SENSEVOICE_SERVICE_CONFIG, WHISPERX_SERVICE_CONFIG
-from asr_service.engines.whisperx import WhisperXEngine
+from asr_service.engines.whisperx import WhisperXEngine, _decode_audio_bytes
 from src.transcription.provider_protocol import ProviderErrorCode, ProviderFailure
 
 
@@ -34,8 +38,44 @@ def install_fake(monkeypatch, *, devices=1, compute=frozenset({"float16"})):
             return module
         raise AssertionError(name)
 
-    monkeypatch.setattr("asr_service.engines.whisperx.importlib.import_module", load)
+    monkeypatch.setattr(whisperx_engine, "importlib", SimpleNamespace(import_module=load))
+    monkeypatch.setattr(whisperx_engine, "_decode_audio_bytes", lambda _content: b"decoded")
     return calls
+
+
+def test_audio_bytes_are_decoded_through_ffmpeg_stdin_without_tempfile(monkeypatch):
+    captured = {}
+
+    def run(command, **kwargs):
+        captured["command"] = command
+        captured["kwargs"] = kwargs
+        return SimpleNamespace(stdout=b"\x00\x80\xff\x7f")
+
+    monkeypatch.setattr("asr_service.engines.whisperx.subprocess.run", run)
+    audio = _decode_audio_bytes(b"container-bytes")
+
+    assert captured["command"][0] == "ffmpeg"
+    assert captured["command"][captured["command"].index("-i") + 1] == "pipe:0"
+    assert captured["kwargs"] == {
+        "input": b"container-bytes",
+        "capture_output": True,
+        "check": True,
+    }
+    assert numpy.allclose(audio, [-1.0, 32767 / 32768])
+
+
+def test_audio_decode_failure_is_sanitized(monkeypatch):
+    def fail(*_args, **_kwargs):
+        raise subprocess.CalledProcessError(1, "ffmpeg", stderr=b"sensitive")
+
+    monkeypatch.setattr("asr_service.engines.whisperx.subprocess.run", fail)
+    try:
+        _decode_audio_bytes(b"container-bytes")
+    except RuntimeError as exc:
+        assert str(exc) == "audio decode failed"
+        assert "sensitive" not in str(exc)
+    else:
+        raise AssertionError("decode failure was not raised")
 
 
 def test_lazy_local_models_map_aligned_segments(monkeypatch):

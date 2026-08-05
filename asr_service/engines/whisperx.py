@@ -2,9 +2,9 @@
 from __future__ import annotations
 
 import importlib
+import subprocess
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
-from io import BytesIO
 from pathlib import Path
 from typing import Callable
 
@@ -24,6 +24,43 @@ def _milliseconds(value: object) -> int:
     if not seconds.is_finite() or seconds < 0:
         raise ValueError("invalid segment timestamp")
     return int((seconds * 1000).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+
+
+def _decode_audio_bytes(content: bytes) -> object:
+    numpy = importlib.import_module("numpy")
+    try:
+        completed = subprocess.run(
+            [
+                "ffmpeg",
+                "-nostdin",
+                "-threads",
+                "0",
+                "-i",
+                "pipe:0",
+                "-f",
+                "s16le",
+                "-ac",
+                "1",
+                "-acodec",
+                "pcm_s16le",
+                "-ar",
+                "16000",
+                "pipe:1",
+            ],
+            input=content,
+            capture_output=True,
+            check=True,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise RuntimeError("audio decode failed") from exc
+    if not completed.stdout:
+        raise RuntimeError("audio decode returned no samples")
+    return (
+        numpy.frombuffer(completed.stdout, numpy.int16)
+        .flatten()
+        .astype(numpy.float32)
+        / 32768.0
+    )
 
 
 @dataclass(slots=True)
@@ -82,7 +119,7 @@ class WhisperXEngine:
             whisperx = importlib.import_module("whisperx")
             model, align_model, align_metadata = self._load_models()
             stage = "decode-audio"
-            audio = whisperx.load_audio(BytesIO(chunk.content))
+            audio = _decode_audio_bytes(chunk.content)
             stage = "transcribe"
             raw = model.transcribe(audio, batch_size=1, language="zh")
             stage = "validate-transcription"
