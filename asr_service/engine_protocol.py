@@ -55,6 +55,14 @@ class ServiceProfileConfig:
                 "Qwen/Qwen3-ForcedAligner-0.6B",
                 "c7cbfc2048c462b0d63a45797104fc9db3ad62b7",
             ),
+            "whisperx-large-v3-zh-align-v1": (
+                "whisperx",
+                "Systran/faster-whisper-large-v3",
+                "53ecf83a5bedc5597eb8c8b34eac29e5345520ff",
+                "zh-CN",
+                None,
+                None,
+            ),
         }.get(self.service_profile_id)
         if expected is None:
             raise ContractValidationError(
@@ -101,6 +109,14 @@ QWEN3_ASR_SERVICE_CONFIG = ServiceProfileConfig(
     "zh-CN",
     "Qwen/Qwen3-ForcedAligner-0.6B",
     "c7cbfc2048c462b0d63a45797104fc9db3ad62b7",
+)
+
+WHISPERX_SERVICE_CONFIG = ServiceProfileConfig(
+    "whisperx-large-v3-zh-align-v1",
+    "whisperx",
+    "Systran/faster-whisper-large-v3",
+    "53ecf83a5bedc5597eb8c8b34eac29e5345520ff",
+    "zh-CN",
 )
 
 

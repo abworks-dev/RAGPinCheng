@@ -302,8 +302,69 @@ class Qwen3AsrRemoteConfig:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class WhisperXRemoteConfig:
+    config_kind: str = "whisperx"
+    config_version: str = "1"
+    service_profile_id: str = "whisperx-large-v3-zh-align-v1"
+    model_id: str = "Systran/faster-whisper-large-v3"
+    model_revision: str = "53ecf83a5bedc5597eb8c8b34eac29e5345520ff"
+    expected_api_version: str = "asr-service/1"
+    upload_part_bytes: int = 8 * 1024 * 1024
+    poll_interval_ms: int = 1000
+
+    def __post_init__(self) -> None:
+        if self.config_kind != "whisperx" or self.config_version != "1":
+            raise ContractValidationError(
+                "unsupported_provider_config", "provider_config"
+            )
+        if self.service_profile_id != "whisperx-large-v3-zh-align-v1":
+            raise ContractValidationError(
+                "invalid_service_profile_id", "service_profile_id"
+            )
+        if self.model_id != "Systran/faster-whisper-large-v3":
+            raise ContractValidationError("invalid_model_id", "model_id")
+        if self.model_revision != "53ecf83a5bedc5597eb8c8b34eac29e5345520ff":
+            raise ContractValidationError(
+                "invalid_model_revision", "model_revision"
+            )
+        if self.expected_api_version != "asr-service/1":
+            raise ContractValidationError(
+                "unsupported_service_version", "expected_api_version"
+            )
+        require_int(self.upload_part_bytes, "upload_part_bytes", positive=True)
+        mib = 1024 * 1024
+        if (
+            not mib <= self.upload_part_bytes <= 16 * mib
+            or self.upload_part_bytes % mib
+        ):
+            raise ContractValidationError(
+                "invalid_upload_part_bytes", "upload_part_bytes"
+            )
+        require_int(self.poll_interval_ms, "poll_interval_ms", positive=True)
+        if not 100 <= self.poll_interval_ms <= 5000:
+            raise ContractValidationError(
+                "invalid_poll_interval_ms", "poll_interval_ms"
+            )
+
+    def to_json_dict(self) -> dict[str, Any]:
+        return {
+            "config_kind": self.config_kind,
+            "config_version": self.config_version,
+            "service_profile_id": self.service_profile_id,
+            "model_id": self.model_id,
+            "model_revision": self.model_revision,
+            "expected_api_version": self.expected_api_version,
+            "upload_part_bytes": self.upload_part_bytes,
+            "poll_interval_ms": self.poll_interval_ms,
+        }
+
+
 RemoteProviderConfig: TypeAlias = (
-    RemoteAsrServiceConfig | FasterWhisperRemoteConfig | Qwen3AsrRemoteConfig
+    RemoteAsrServiceConfig
+    | FasterWhisperRemoteConfig
+    | Qwen3AsrRemoteConfig
+    | WhisperXRemoteConfig
 )
 ProviderTrustedConfig: TypeAlias = (
     FakeAlphaConfig
@@ -312,6 +373,7 @@ ProviderTrustedConfig: TypeAlias = (
     | RemoteAsrServiceConfig
     | FasterWhisperRemoteConfig
     | Qwen3AsrRemoteConfig
+    | WhisperXRemoteConfig
 )
 _PROVIDER_CONFIG_TYPES = (
     FakeAlphaConfig,
@@ -320,6 +382,7 @@ _PROVIDER_CONFIG_TYPES = (
     RemoteAsrServiceConfig,
     FasterWhisperRemoteConfig,
     Qwen3AsrRemoteConfig,
+    WhisperXRemoteConfig,
 )
 
 
@@ -412,6 +475,31 @@ def provider_config_from_json(data: object) -> ProviderTrustedConfig:
             obj["model_revision"],
             obj["aligner_model_id"],
             obj["aligner_model_revision"],
+            obj["expected_api_version"],
+            obj["upload_part_bytes"],
+            obj["poll_interval_ms"],
+        )
+    if kind == "whisperx" and version == "1":
+        obj = reject_unknown_fields(
+            data,
+            {
+                "config_kind",
+                "config_version",
+                "service_profile_id",
+                "model_id",
+                "model_revision",
+                "expected_api_version",
+                "upload_part_bytes",
+                "poll_interval_ms",
+            },
+            "provider_config",
+        )
+        return WhisperXRemoteConfig(
+            obj["config_kind"],
+            obj["config_version"],
+            obj["service_profile_id"],
+            obj["model_id"],
+            obj["model_revision"],
             obj["expected_api_version"],
             obj["upload_part_bytes"],
             obj["poll_interval_ms"],

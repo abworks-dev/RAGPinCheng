@@ -24,6 +24,14 @@ QWEN3_ALIGNER_REVISION = "c7cbfc2048c462b0d63a45797104fc9db3ad62b7"
 QWEN3_ALIGNER_RELATIVE_PATH = (
     f"Qwen3-ForcedAligner-0.6B/{QWEN3_ALIGNER_REVISION}"
 )
+WHISPERX_MODEL_ID = "Systran/faster-whisper-large-v3"
+WHISPERX_REVISION = "53ecf83a5bedc5597eb8c8b34eac29e5345520ff"
+WHISPERX_RELATIVE_PATH = f"whisper-large-v3/{WHISPERX_REVISION}"
+WHISPERX_ALIGN_MODEL_ID = "jonatasgrosman/wav2vec2-large-xlsr-53-chinese-zh-cn"
+WHISPERX_ALIGN_REVISION = "51d27579a1040ee4e967979278d5f76b9c32c375"
+WHISPERX_ALIGN_RELATIVE_PATH = (
+    f"wav2vec2-large-xlsr-53-chinese-zh-cn/{WHISPERX_ALIGN_REVISION}"
+)
 _SHA256_RE = re.compile(r"[0-9a-f]{64}")
 
 
@@ -194,4 +202,30 @@ def validate_qwen3_aligner_cache(
         expected_model_id=QWEN3_ALIGNER_MODEL_ID,
         expected_revision=QWEN3_ALIGNER_REVISION,
         expected_relative_path=QWEN3_ALIGNER_RELATIVE_PATH,
+    )
+
+
+def validate_whisperx_cache(
+    cache_root: Path | None,
+    manifest_path: Path | None,
+) -> ModelCacheStatus:
+    return _validate_model_cache(
+        cache_root,
+        manifest_path,
+        expected_model_id=WHISPERX_MODEL_ID,
+        expected_revision=WHISPERX_REVISION,
+        expected_relative_path=WHISPERX_RELATIVE_PATH,
+    )
+
+
+def validate_whisperx_align_cache(
+    cache_root: Path | None,
+    manifest_path: Path | None,
+) -> ModelCacheStatus:
+    return _validate_model_cache(
+        cache_root,
+        manifest_path,
+        expected_model_id=WHISPERX_ALIGN_MODEL_ID,
+        expected_revision=WHISPERX_ALIGN_REVISION,
+        expected_relative_path=WHISPERX_ALIGN_RELATIVE_PATH,
     )

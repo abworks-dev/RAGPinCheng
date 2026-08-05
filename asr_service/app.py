@@ -21,16 +21,20 @@ from .engine_protocol import (
     FASTER_WHISPER_SERVICE_CONFIG,
     QWEN3_ASR_SERVICE_CONFIG,
     SENSEVOICE_SERVICE_CONFIG,
+    WHISPERX_SERVICE_CONFIG,
 )
 from .engine_registry import EngineRegistration, EngineRegistry
 from .engines.faster_whisper import FasterWhisperEngine
 from .engines.funasr_sensevoice import FunAsrSenseVoiceEngine
 from .engines.qwen3_asr import Qwen3AsrEngine
+from .engines.whisperx import WhisperXEngine
 from .model_cache import (
     validate_faster_whisper_cache,
     validate_qwen3_aligner_cache,
     validate_qwen3_asr_cache,
     validate_sensevoice_cache,
+    validate_whisperx_align_cache,
+    validate_whisperx_cache,
 )
 from .scheduler import FixedBgePriorityProbe, Scheduler
 from .storage import LocalJobRepository
@@ -119,6 +123,32 @@ def create_app(
             aligner_model_path=qwen3_aligner_cache.model_path,
             unavailable_reason_code=qwen3_reason,
         )
+        whisperx_cache = validate_whisperx_cache(
+            settings.whisperx_model_cache_root,
+            settings.whisperx_model_manifest_path,
+        )
+        whisperx_align_cache = validate_whisperx_align_cache(
+            settings.whisperx_align_model_cache_root,
+            settings.whisperx_align_model_manifest_path,
+        )
+        whisperx_ready = (
+            whisperx_cache.available and whisperx_align_cache.available
+        )
+        whisperx_reason = (
+            "available"
+            if whisperx_ready
+            else (
+                whisperx_cache.reason_code
+                if not whisperx_cache.available
+                else whisperx_align_cache.reason_code
+            )
+        )
+        whisperx_engine = WhisperXEngine(
+            model_cache_ready=lambda: whisperx_ready,
+            model_path=whisperx_cache.model_path,
+            align_model_path=whisperx_align_cache.model_path,
+            unavailable_reason_code=whisperx_reason,
+        )
         probe = (
             HttpBgePriorityProbe(
                 settings.bge_priority_probe_url,
@@ -141,6 +171,9 @@ def create_app(
                     ),
                     EngineRegistration(
                         qwen3_engine, QWEN3_ASR_SERVICE_CONFIG
+                    ),
+                    EngineRegistration(
+                        whisperx_engine, WHISPERX_SERVICE_CONFIG
                     ),
                 )
             ),

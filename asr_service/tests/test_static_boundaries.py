@@ -9,6 +9,7 @@ REAL_ADAPTERS = {
     SERVICE / "engines" / "faster_whisper.py",
     SERVICE / "engines" / "funasr_sensevoice.py",
     SERVICE / "engines" / "qwen3_asr.py",
+    SERVICE / "engines" / "whisperx.py",
 }
 FORBIDDEN_SERVICE_ROOTS = {
     "api",

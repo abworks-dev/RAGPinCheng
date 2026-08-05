@@ -14,6 +14,7 @@ from src.transcription.profile import (
     Qwen3AsrRemoteConfig,
     RemoteAsrServiceConfig,
     TranscriptionProfileDefinition,
+    WhisperXRemoteConfig,
 )
 from src.transcription.profile_catalog import build_phase3_profile_catalog
 from src.transcription.provider_registry import ProviderFactory, ProviderRuntimePorts
@@ -43,6 +44,7 @@ def build_phase4_profile_registry(
             RemoteAsrServiceConfig,
             FasterWhisperRemoteConfig,
             Qwen3AsrRemoteConfig,
+            WhisperXRemoteConfig,
         ):
             raise ContractValidationError(
                 "invalid_provider_config", "provider_config"

@@ -26,6 +26,7 @@ from src.transcription.profile_catalog import (
     FASTER_WHISPER_PROVIDER_KEY,
     FUNASR_SENSEVOICE_PROVIDER_KEY,
     QWEN3_ASR_PROVIDER_KEY,
+    WHISPERX_PROVIDER_KEY,
     build_phase3_profile_catalog,
 )
 from src.transcription.provider_registry import ProviderRegistry
@@ -78,6 +79,7 @@ def build_transcription_service() -> TranscriptionApplicationService:
             FASTER_WHISPER_PROVIDER_KEY,
             FUNASR_SENSEVOICE_PROVIDER_KEY,
             QWEN3_ASR_PROVIDER_KEY,
+            WHISPERX_PROVIDER_KEY,
         )
     )
     return TranscriptionApplicationService(
