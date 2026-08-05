@@ -5,6 +5,8 @@ from pathlib import Path
 
 import yaml
 
+from scripts.run_whisperx_cuda_smoke import prepare_smoke_punkt
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -62,6 +64,9 @@ def test_model_and_smoke_identity_are_pinned_and_use_existing_contracts():
     assert 'ALIGN_MODEL_ID = "jonatasgrosman/wav2vec2-large-xlsr-53-chinese-zh-cn"' in runner
     assert 'ALIGN_REVISION = "51d27579a1040ee4e967979278d5f76b9c32c375"' in runner
     assert runner.count("max_workers=1") == 2
+    assert "nltk.download" not in runner
+    assert "save_punkt_params(PunktParameters()" in runner
+    assert '"punkt_source": "generated-default-smoke-only"' in runner
     for required in (
         "WhisperXEngine",
         "PreparedAudioChunk",
@@ -76,3 +81,13 @@ def test_model_and_smoke_identity_are_pinned_and_use_existing_contracts():
         assert required in runner
     assert 'os.environ["HF_HUB_OFFLINE"] = "1"' in runner
     assert "DiarizationPipeline" not in runner
+
+
+def test_generated_smoke_punkt_is_loadable_without_network(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    prepare_smoke_punkt(tmp_path)
+    import nltk.data
+
+    monkeypatch.setattr(nltk.data, "path", [str(tmp_path)])
+    tokenizer = nltk.data.load("tokenizers/punkt_tab/english.pickle")
+    assert list(tokenizer.span_tokenize("Synthetic sentence.")) == [(0, 19)]
