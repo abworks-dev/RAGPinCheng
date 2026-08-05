@@ -177,10 +177,9 @@
     `production-asr` workflow；在隔离 venv、固定模型和 loopback ASR 服务中验证
     依赖共存、CUDA FP16、8 个非敏感短样本、质量与资源门禁。未通过前保持
     admission disabled，R3 通过后仍须另批生产启用。
-  - [ ] 修复 R3 resolver 将无版本 owner 依赖误判为版本冲突的问题；合并后以新的完整
-    master SHA 再执行一次固定离线提取。只有明确不兼容的双方版本约束才能形成 blocker；
-    取得严格脱敏 JSON 后停止，不得运行 pip、读取原始日志、修改依赖、production freeze、
-    服务或 Profile admission。
+  - [ ] 合并 faster-whisper 的固定 oss2 受控 wheel 支持后，以新的完整 master SHA 执行
+    一次统一资格 workflow；依次完成双内部 wheel、依赖、模型、CUDA、8 样本质量与资源门禁，
+    同范围失败按严格脱敏诊断闭环处理。最终通过前不得修改生产服务或 Profile admission。
   - [ ] Qwen3-ASR R2 代码通过 scoped review、干净环境 CI 并合并后，按统一 R3
     一次性方案审批并执行单一 workflow；内部依次通过依赖/许可证/CUDA、双模型、
     真实推理、8 样本质量与资源门禁，任一前置门禁失败即停止，Profile 保持 disabled。
