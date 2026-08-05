@@ -153,6 +153,36 @@ PowerShell 5.1 的 mandatory array 参数拒绝空集合，导致附加诊断未
 6. 不修改 production freeze、生产 venv、服务、防火墙、Ubuntu、数据库、Qdrant、
    模型或 Profile admission。
 
+### 2.0.7 依赖诊断 v2 闭环
+
+原生 stderr 捕获修复 PR #49 的 7 项 CI 全部通过并合并为
+`20fa332192aeb3d2bb628f7fafbbbd39e09bc1fb`。固定参数资格 run
+`30966653503` 仍停在 `pip_download`，v1 诊断为 `evidence_insufficient`；
+`profile_admission=disabled`、`production_services_modified=false`。
+
+v1 的 `pip_download` 阶段同时覆盖代理设置、pip 原生命令和代理恢复，且只输出解析后的
+诊断种类，无法判定 pip 是否启动、退出码、捕获行数或失败是否来自代理边界。获批的 v2
+闭环一次性增加：
+
+1. 将脱敏 Schema 固定为 `faster-whisper-r3-dependency-failure/2`；
+2. 记录固定枚举 `dependency_operation`、`failure_origin`，以及整数/空值
+   `native_exit_code`、非负 `captured_line_count`；
+3. 将 `pip_download` 内部操作分为 `proxy_setup`、`pip_download_command` 和
+   `proxy_restore`，不改变原执行顺序；
+4. 增加 requirements/constraint、文件权限、磁盘、原生进程启动和代理设置/恢复的固定
+   脱敏类别；
+5. 只有 pip 命令明确非零退出、原始安全解析仍不足时，才在同一隔离 venv 中执行一次
+   同 index、同 freeze、同 requirements、同受控 wheel 的
+   `pip install --dry-run --ignore-installed --only-binary=:all: --no-cache-dir`；
+6. fallback 不安装依赖、不下载模型、不启动服务；只记录是否执行、退出码以及白名单
+   诊断种类/ASCII requirement；
+7. workflow summary 和 artifact 不包含原始行、URL、代理、Token、绝对路径、完整 freeze
+   或其他自由文本；
+8. PR 和 CI 通过后只允许使用新的完整 master SHA 重跑一次，取得 v2 结果后停止。
+
+本闭环不修改依赖、production freeze、生产 venv、服务、防火墙、Ubuntu、数据库、
+Qdrant、模型或 Profile admission。
+
 ### 2.1 仓库基线
 
 - PR #34 已合并到 `master`；
