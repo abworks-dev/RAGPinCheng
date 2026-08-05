@@ -2109,4 +2109,5 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 完成：按获批 R3 方案在统一资格脚本内增加依赖失败阶段跟踪和严格脱敏诊断；只输出固定诊断种类、固定阶段及受限 ASCII requirement，明确排除原始日志、URL、代理、Token、绝对路径、冲突行和完整 freeze。workflow 只把该 JSON 与既有 verdict 一起上传并显示安全字段，不新增一次性诊断 workflow。
 - 文件：`.github/workflows/qualify-faster-whisper-production.yml`、`scripts/qualify-faster-whisper-production.ps1`、`tests/test_asr_deployment_static.py`、`project-docs/plans/faster-whisper-r3-unified-qualification.md`、`TODO.md`、`WORKLOG.md`。
 - 验证：PowerShell AST、隔离脱敏器的 binary/version/network/unknown 正负自测、workflow YAML、部署静态测试 25/25 和 `git diff --check` 通过。
-- 待办/风险：尚未提交、推送、创建 PR、运行远端 CI 或重跑生产资格 workflow；合并后只允许用新的完整 master SHA 重跑一次，并继续保持依赖、生产服务及 Profile admission 不变。
+- 远端进展：PR #47 的 7 项 CI 全部通过并合并为 `cd56f4a0e116a28ef12575748e25c25ffab628f2`；资格 run `30963495106` 仍失败关闭且 verdict 确认服务与 admission 未变化，但 PowerShell 5.1 在空日志集合上拒绝 mandatory array，导致附加诊断文件未生成。同范围修复允许空集合、以内置 `evidence_insufficient` 回退，并优先写 runner artifact 路径。
+- 待办/风险：空集合兼容修复尚待独立 PR、CI、合并和相同参数重试；不得修改依赖、production freeze、服务或 Profile admission。

@@ -563,6 +563,8 @@ def test_faster_whisper_qualification_freezes_dependencies_model_and_gates():
     assert "function Convert-ToSanitizedDependencyFailure" in diagnostic_section
     assert "function Assert-DependencySanitizerSelfTest" in diagnostic_section
     assert "function Write-SanitizedDependencyFailure" in diagnostic_section
+    assert "[AllowEmptyCollection()]" in diagnostic_section
+    assert '-Lines @()' in diagnostic_section
     assert "faster-whisper-r3-dependency-failure/1" in diagnostic_section
     assert "binary_distribution_unavailable" in diagnostic_section
     assert "version_constraint_conflict" in diagnostic_section
@@ -572,6 +574,7 @@ def test_faster_whisper_qualification_freezes_dependencies_model_and_gates():
     assert "affected_requirement = [string]$diagnosis.Requirement" in diagnostic_section
     assert 'profile_admission = "disabled"' in diagnostic_section
     assert "production_services_modified = $false" in diagnostic_section
+    assert 'Kind = "evidence_insufficient"' in diagnostic_section
     assert "conflict_lines" not in diagnostic_section
     assert "log_path =" not in diagnostic_section.lower()
     assert "production_freeze_sha256" not in diagnostic_section
