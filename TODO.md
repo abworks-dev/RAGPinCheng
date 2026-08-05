@@ -177,9 +177,9 @@
     `production-asr` workflow；在隔离 venv、固定模型和 loopback ASR 服务中验证
     依赖共存、CUDA FP16、8 个非敏感短样本、质量与资源门禁。未通过前保持
     admission disabled，R3 通过后仍须另批生产启用。
-  - [ ] 受控 `jieba==0.42.1` wheel 已完成双重构建并进入资格 workflow，但 run
-    `30960326875` 仍以 `dependency_preparation_failed` 失败；如继续，须先审批只读提取
-    下一项脱敏依赖证据，不得自行修改其他 pin、production freeze、服务或 Profile admission。
+  - [ ] 合并资格失败自诊断接线后，以新的完整 master SHA 重跑一次统一资格 workflow；
+    只读取严格脱敏的阶段、诊断种类和 requirement，取得结果后停止，不得自行修改其他
+    pin、production freeze、服务或 Profile admission。
 - 完成标准：人工转录流程不退化；管理员只能选择服务端白名单 Profile；同一媒体可保留多个历史版本且只有 `app.sqlite` head 指向的版本进入正式检索；experimental Profile 强制审核；至少一个 `qualification_approved` Profile 完成隔离端到端验证后才讨论生产灰度。
 - 依赖：Phase 1～4B 已形成契约、持久化、remote Provider 与应用上传/worker/UI 前半段；Phase 5A/5B 已实现版本审阅、发布、候选索引和检索可见性，待远端 CI；Windows ASR R3A 仓库实施及 PR #8 远端 CI 已通过，但不等于生产部署完成；R3B/R3C、真实引擎/GPU/Qdrant 和生产数据均未执行；真实环境操作另按 R3 逐项审批，单卡 GPU 保持 BGE 优先。
 - 方案链接：`project-docs/plans/multi-engine-auto-transcription.md`、`project-docs/plans/multi-engine-transcription-phase1.md`、`project-docs/plans/multi-engine-transcription-phase2.md`、`project-docs/plans/multi-engine-transcription-phase3.md`、`project-docs/plans/multi-engine-transcription-phase5.md`、`project-docs/plans/multi-engine-transcription-phase5c-windows-asr-deployment.md`、`project-docs/plans/transcription-admin-workflow-hardening.md`、`project-docs/plans/faster-whisper-provider-integration.md`、`project-docs/plans/faster-whisper-r3-unified-qualification.md`、`project-docs/decisions/0002-multi-engine-transcription.md`、`project-docs/plans/funasr-auto-transcription.md`

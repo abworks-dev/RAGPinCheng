@@ -107,6 +107,25 @@ production freeze：
 - 当前证据不足以判定新的精确依赖 blocker。本阶段到此停止；读取更详细的依赖证据、
   修改其他 pin/约束或再次重跑须另行审批。
 
+### 2.0.5 已批准的资格失败自诊断（2026-08-05）
+
+为避免继续为每次依赖失败创建一次性诊断 workflow，现有统一资格脚本负责在
+`dependency_preparation_failed` 时生成严格脱敏的
+`faster-whisper-r3-dependency-failure/1`：
+
+- 只输出固定阶段、固定诊断种类和经 ASCII 包名正则归一化的 requirement；
+- 诊断种类限定为 `binary_distribution_unavailable`、
+  `version_constraint_conflict`、`network_or_index_failure` 或
+  `evidence_insufficient`；
+- 不输出原始日志、冲突行、URL、代理、Token、绝对路径或完整 freeze；
+- 脱敏文件与既有 verdict 同 artifact 上传，并可安全显示在 workflow summary；
+- 只有依赖准备失败才生成该文件；成功或进入后续模型/CUDA/样本阶段时不生成；
+- 本补充不修改 pin、production freeze、生产 venv、服务、防火墙、Ubuntu、
+  数据库、Qdrant、模型 revision 或 Profile admission。
+
+合并后只允许使用新的完整 master SHA 重跑一次统一资格 workflow；取得精确 blocker
+或进入下一资格阶段后立即停止，不自动修改依赖或开放 Profile。
+
 ### 2.1 仓库基线
 
 - PR #34 已合并到 `master`；

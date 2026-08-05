@@ -9,7 +9,8 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$InternalWheelBundlePath,
     [bool]$ExecuteQualification = $false,
-    [string]$SummaryPath = ""
+    [string]$SummaryPath = "",
+    [string]$DependencyDiagnosticPath = ""
 )
 
 Set-StrictMode -Version Latest
@@ -52,6 +53,8 @@ $PeakUtilization = 0
 $Verdict = "fail"
 $FailureCode = "unhandled_failure"
 $MachinePython = ""
+$DependencyFailureStage = "not_started"
+$DependencyFailureLog = ""
 
 function Write-JsonFile {
     param(
@@ -475,6 +478,159 @@ function Assert-WheelManifestUnchanged {
     }
 }
 
+function Get-NormalizedPackageName {
+    param([Parameter(Mandatory = $true)][string]$Name)
+    return $Name.ToLowerInvariant().Replace("_", "-").Replace(".", "-")
+}
+
+function Convert-ToSanitizedDependencyFailure {
+    param(
+        [Parameter(Mandatory = $true)][object[]]$Lines,
+        [Parameter(Mandatory = $true)][string]$Stage
+    )
+    $missingTargets = New-Object "System.Collections.Generic.HashSet[string]"
+    $dependencyTargets = @{}
+    $constraintTargets = New-Object "System.Collections.Generic.HashSet[string]"
+    $networkOrIndexFailure = $false
+
+    foreach ($raw in $Lines) {
+        $line = ([string]$raw).Trim()
+        if ([string]::IsNullOrWhiteSpace($line) -or $line.Length -gt 1000) {
+            continue
+        }
+        if (
+            $line -match '(?i)No matching distribution found for\s+(?<package>[A-Za-z0-9_.-]+)' -or
+            $line -match '(?i)Could not find a version that satisfies the requirement\s+(?<package>[A-Za-z0-9_.-]+)'
+        ) {
+            [void]$missingTargets.Add(
+                (Get-NormalizedPackageName -Name $Matches.package)
+            )
+            continue
+        }
+        $clean = $line
+        if ($line -match '(?i)ERROR:\s*(?<message>.+)$') {
+            $clean = [string]$Matches.message
+        }
+        if (
+            $clean -match '^(?<owner>[A-Za-z0-9_.-]+)\s+(?<owner_version>[A-Za-z0-9+_.-]+)\s+depends on\s+(?<package>[A-Za-z0-9_.-]+)(?<spec>(?:==|!=|<=|>=|~=|<|>).+)$'
+        ) {
+            $target = Get-NormalizedPackageName -Name $Matches.package
+            $dependencyTargets[$target] = $true
+            continue
+        }
+        if (
+            $clean -match '^The user requested \(constraint\)\s+(?<package>[A-Za-z0-9_.-]+)(?<spec>(?:==|!=|<=|>=|~=|<|>)[A-Za-z0-9+_.!*,~-]+)$'
+        ) {
+            [void]$constraintTargets.Add(
+                (Get-NormalizedPackageName -Name $Matches.package)
+            )
+            continue
+        }
+        if (
+            $line -match '(?i)(Could not fetch URL|connection (?:error|reset|refused)|Max retries exceeded|temporary failure in name resolution|name or service not known|timed? out|timeout|proxy error|certificate verify failed|SSL(?:Error| error)|HTTP (?:429|500|502|503|504))'
+        ) {
+            $networkOrIndexFailure = $true
+        }
+    }
+
+    foreach ($target in @($missingTargets | Sort-Object)) {
+        return [pscustomobject]@{
+            Stage = $Stage
+            Kind = "binary_distribution_unavailable"
+            Requirement = $target
+        }
+    }
+    foreach ($target in @($dependencyTargets.Keys | Sort-Object)) {
+        if ($constraintTargets.Contains($target)) {
+            return [pscustomobject]@{
+                Stage = $Stage
+                Kind = "version_constraint_conflict"
+                Requirement = $target
+            }
+        }
+    }
+    if ($networkOrIndexFailure) {
+        return [pscustomobject]@{
+            Stage = $Stage
+            Kind = "network_or_index_failure"
+            Requirement = ""
+        }
+    }
+    return [pscustomobject]@{
+        Stage = $Stage
+        Kind = "evidence_insufficient"
+        Requirement = ""
+    }
+}
+
+function Assert-DependencySanitizerSelfTest {
+    $binary = Convert-ToSanitizedDependencyFailure -Stage "pip_download" -Lines @(
+        "D:\private\python.exe : ERROR: Could not find a version that satisfies the requirement jieba",
+        "ERROR: No matching distribution found for jieba",
+        "proxy token=do-not-emit",
+        "https://example.invalid/private"
+    )
+    $conflict = Convert-ToSanitizedDependencyFailure -Stage "pip_download" -Lines @(
+        "D:\private\python.exe : ERROR: funasr 1.4.1 depends on numpy<2",
+        "D:\private\python.exe : ERROR: The user requested (constraint) numpy==2.0.0"
+    )
+    $network = Convert-ToSanitizedDependencyFailure -Stage "pip_download" -Lines @(
+        "Could not fetch URL https://private.invalid/simple: connection error"
+    )
+    $unknown = Convert-ToSanitizedDependencyFailure -Stage "pip_install" -Lines @(
+        "D:\private\python.exe failed with token=do-not-emit"
+    )
+    if (
+        $binary.Kind -ne "binary_distribution_unavailable" -or
+        $binary.Requirement -ne "jieba" -or
+        $conflict.Kind -ne "version_constraint_conflict" -or
+        $conflict.Requirement -ne "numpy" -or
+        $network.Kind -ne "network_or_index_failure" -or
+        -not [string]::IsNullOrEmpty([string]$network.Requirement) -or
+        $unknown.Kind -ne "evidence_insufficient" -or
+        -not [string]::IsNullOrEmpty([string]$unknown.Requirement)
+    ) {
+        throw "Dependency failure sanitizer self-test failed"
+    }
+}
+
+function Write-SanitizedDependencyFailure {
+    param(
+        [Parameter(Mandatory = $true)][string]$Stage,
+        [string]$LogPath = ""
+    )
+    $lines = @()
+    if (
+        -not [string]::IsNullOrWhiteSpace($LogPath) -and
+        (Test-Path -LiteralPath $LogPath -PathType Leaf)
+    ) {
+        $lines = @(Get-Content -LiteralPath $LogPath -Encoding UTF8)
+    }
+    $diagnosis = Convert-ToSanitizedDependencyFailure -Lines $lines -Stage $Stage
+    $result = [ordered]@{
+        schema_version = "faster-whisper-r3-dependency-failure/1"
+        status = "fail"
+        failure_code = "dependency_preparation_failed"
+        commit_sha = $CommitSha.ToLowerInvariant()
+        run_id = $RunId
+        dependency_stage = [string]$diagnosis.Stage
+        diagnosis_kind = [string]$diagnosis.Kind
+        affected_requirement = [string]$diagnosis.Requirement
+        profile_admission = "disabled"
+        production_services_modified = $false
+    }
+    Write-JsonFile `
+        -Path (Join-Path $ReportRoot "dependency-diagnostic.json") `
+        -Value $result
+    if (-not [string]::IsNullOrWhiteSpace($DependencyDiagnosticPath)) {
+        $diagnosticParent = Split-Path -Parent $DependencyDiagnosticPath
+        if (-not (Test-Path -LiteralPath $diagnosticParent)) {
+            New-Item -ItemType Directory -Path $diagnosticParent -Force | Out-Null
+        }
+        Write-JsonFile -Path $DependencyDiagnosticPath -Value $result
+    }
+}
+
 function Write-SanitizedSummary {
     param(
         [string]$Status,
@@ -510,6 +666,7 @@ if ($CommitSha -notmatch "^[0-9a-fA-F]{40}$") {
 if ($RunId -notmatch "^[0-9]{1,20}$") {
     throw "RunId must contain only 1 to 20 digits"
 }
+Assert-DependencySanitizerSelfTest
 if (-not $ExecuteQualification) {
     throw "ExecuteQualification must be explicitly enabled"
 }
@@ -691,19 +848,25 @@ try {
     })
 
     $FailureCode = "dependency_preparation_failed"
+    $DependencyFailureStage = "production_freeze"
+    $DependencyFailureLog = Join-Path $LogRoot "production-pip-freeze.stderr.log"
     Write-PipFreeze `
         -PythonPath $ProductionPython `
         -OutputPath (Join-Path $EvidenceRoot "production-freeze.txt") `
-        -ErrorLogPath (Join-Path $LogRoot "production-pip-freeze.stderr.log")
+        -ErrorLogPath $DependencyFailureLog
+    $DependencyFailureStage = "production_pip_check"
+    $DependencyFailureLog = Join-Path $EvidenceRoot "production-pip-check.txt"
     Invoke-External `
         -FilePath $ProductionPython `
         -Arguments @("-m", "pip", "check") `
-        -LogPath (Join-Path $EvidenceRoot "production-pip-check.txt")
+        -LogPath $DependencyFailureLog
 
+    $DependencyFailureStage = "qualification_venv"
+    $DependencyFailureLog = Join-Path $LogRoot "venv-create.log"
     Invoke-External `
         -FilePath $MachinePython `
         -Arguments @("-m", "venv", $VenvRoot) `
-        -LogPath (Join-Path $LogRoot "venv-create.log")
+        -LogPath $DependencyFailureLog
     $VenvVersion = & $VenvPython -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"
     if ($LASTEXITCODE -ne 0 -or ([string]$VenvVersion).Trim() -ne "3.11") {
         throw "Qualification venv is not Python 3.11"
@@ -719,6 +882,8 @@ try {
     ) | Set-Content -LiteralPath $CombinedRequirements -Encoding ASCII
 
     $DownloadLog = Join-Path $LogRoot "pip-download.log"
+    $DependencyFailureStage = "pip_download"
+    $DependencyFailureLog = $DownloadLog
     Set-ScopedProxy -Proxy $env:ASR_DEPENDENCY_PROXY
     try {
         Invoke-External `
@@ -737,12 +902,16 @@ try {
     } finally {
         Clear-ScopedProxy
     }
+    $DependencyFailureStage = "wheel_manifest"
+    $DependencyFailureLog = $DownloadLog
     $WheelManifest = New-WheelManifest `
         -DownloadLog $DownloadLog `
         -OutputPath (Join-Path $EvidenceRoot "wheel-manifest.json") `
         -InternalManifest $InternalWheelManifest
     Assert-WheelManifestUnchanged -Manifest $WheelManifest
 
+    $DependencyFailureStage = "pip_install"
+    $DependencyFailureLog = Join-Path $LogRoot "pip-install-offline.log"
     Invoke-External `
         -FilePath $VenvPython `
         -Arguments @(
@@ -752,16 +921,20 @@ try {
             "--constraint", (Join-Path $EvidenceRoot "production-freeze.txt"),
             "--requirement", $CombinedRequirements
         ) `
-        -LogPath (Join-Path $LogRoot "pip-install-offline.log")
+        -LogPath $DependencyFailureLog
     Assert-WheelManifestUnchanged -Manifest $WheelManifest
+    $DependencyFailureStage = "qualification_pip_check"
+    $DependencyFailureLog = Join-Path $EvidenceRoot "qualification-pip-check.txt"
     Invoke-External `
         -FilePath $VenvPython `
         -Arguments @("-m", "pip", "check") `
-        -LogPath (Join-Path $EvidenceRoot "qualification-pip-check.txt")
+        -LogPath $DependencyFailureLog
+    $DependencyFailureStage = "qualification_freeze"
+    $DependencyFailureLog = Join-Path $LogRoot "qualification-pip-freeze.stderr.log"
     Write-PipFreeze `
         -PythonPath $VenvPython `
         -OutputPath (Join-Path $EvidenceRoot "qualification-freeze.txt") `
-        -ErrorLogPath (Join-Path $LogRoot "qualification-pip-freeze.stderr.log")
+        -ErrorLogPath $DependencyFailureLog
     $ModuleVerification = @"
 from pathlib import Path
 import ctranslate2
@@ -785,10 +958,14 @@ if not torchaudio.__version__.startswith('2.7.0+cu128'):
 print('qualification-module-origins-verified')
 "@
     $ModuleVerification = "import importlib.metadata`n" + $ModuleVerification
+    $DependencyFailureStage = "module_origin_verification"
+    $DependencyFailureLog = Join-Path $EvidenceRoot "qualification-module-origins.txt"
     Invoke-External `
         -FilePath $VenvPython `
         -Arguments @("-c", $ModuleVerification) `
-        -LogPath (Join-Path $EvidenceRoot "qualification-module-origins.txt")
+        -LogPath $DependencyFailureLog
+    $DependencyFailureStage = "license_audit"
+    $DependencyFailureLog = Join-Path $LogRoot "license-audit.log"
     Invoke-External `
         -FilePath $VenvPython `
         -Arguments @(
@@ -796,7 +973,7 @@ print('qualification-module-origins-verified')
             "--audit-licenses",
             "--license-report", (Join-Path $EvidenceRoot "license-matrix.json")
         ) `
-        -LogPath (Join-Path $LogRoot "license-audit.log")
+        -LogPath $DependencyFailureLog
 
     $FailureCode = "model_preparation_failed"
     Set-ScopedProxy -Proxy $env:ASR_MODEL_DOWNLOAD_PROXY
@@ -1024,6 +1201,14 @@ print('qualification-module-origins-verified')
     Write-Host "Samples: 8/8"
     Write-Host "Profile admission: disabled"
 } catch {
+    if ($FailureCode -eq "dependency_preparation_failed") {
+        try {
+            Write-SanitizedDependencyFailure `
+                -Stage $DependencyFailureStage `
+                -LogPath $DependencyFailureLog
+        } catch {
+        }
+    }
     try {
         Write-SanitizedSummary -Status "fail" -Code $FailureCode
     } catch {
