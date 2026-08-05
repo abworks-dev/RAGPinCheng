@@ -2305,3 +2305,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`api/routes_admin.py`、`api/schemas.py`、`frontend/src/types.ts`、`frontend/src/pages/admin/AdminDocumentsPage.tsx`、`frontend/src/pages/admin/AdminDocumentsPage.test.tsx`、`tests/test_routes_admin_documents.py`、`project-docs/features/document-indexing.md`、`WORKLOG.md`；未修改数据库、索引结构、真实资料、依赖声明或部署配置。
 - 验证：后端资料路由专项测试 5/5、管理资料页专项 Vitest 10/10、前端全量 Vitest 32 个文件 152/152、TypeScript 检查、Vite production build、目标 Python compileall 与 `git diff --check` 均通过。构建保留既有 CSS 语法和主包大于 500 kB 警告；依赖安装审计仍报告既有 10 项风险，本轮未运行自动修复。
 - 待办/风险：功能待用户在真实管理员登录态验收历史成功记录、源文件已删除记录和仍有源文件的可重试记录；API 仅新增布尔字段，无数据库迁移，回滚可直接恢复本次提交。
+
+### 21:46 — 修正 faster-whisper wheel 来源审计
+
+- 完成：统一资格 run `31010157647` 已越过 legacy FunASR 依赖链，但 runner 的 pip 全局缓存使下载日志缺失 wheel 来源 URL，严格 Manifest 因而失败关闭；现仅为隔离资格的 `pip download` 增加 `--no-cache-dir`，确保每个二进制 wheel 都由本轮固定索引下载并可绑定来源 URL。
+- 文件：`scripts/qualify-faster-whisper-production.ps1`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
+- 验证：待执行部署边界与 faster-whisper 专项测试、PowerShell AST、PR/CI 及一次统一资格重跑。
+- 待办/风险：不修改依赖版本、production freeze、生产 venv、服务、防火墙或 Profile admission；资格失败时继续保持 Profile disabled。
