@@ -131,6 +131,10 @@ TTS 样本已生成并通过严格 Manifest 校验，但生产 R3 workflow 在�
 - `asr_service/`（Phase 3 独立服务、存储、调度和 engine adapter）
 - `asr_service/engines/faster_whisper.py`、`requirements-faster-whisper.txt`
   （准入关闭的可选引擎 adapter 与隔离依赖声明）
+- `scripts/run_whisperx_qualification.py`、
+  `scripts/qualify-whisperx-production.ps1`、
+  `.github/workflows/qualify-whisperx-production.yml`
+  （WhisperX 固定非敏感样本、质量/资源/许可证门禁与手动隔离执行入口）
 - `frontend/src/components/citations.ts`
 - `frontend/src/components/SourcesPanel.tsx`（播放按钮）
 - `frontend/src/components/Message.tsx`（引用 click seek）
@@ -189,8 +193,11 @@ TTS 样本已生成并通过严格 Manifest 校验，但生产 R3 workflow 在�
   远端 CI、合并及真实 Windows CUDA 执行；当前不能据此认定 faster-whisper 可用。
 - WhisperX R2/R3：已实现复用 remote Provider/Canonical 契约的 experimental Profile、
   lazy-load service adapter、ASR/中文对齐双模型 manifest 门禁及手动 Windows CUDA
-  冒烟 workflow；Profile admission 保持 disabled。真实 CUDA 结果以合并后的
-  `production-asr` workflow 审计为准，未通过前不能认定 WhisperX 可用。
+  冒烟 workflow；另已实现复用既有 8 个自制中文样本和统一阈值的资格 workflow，
+  通过现有 `TranscriptionProvider → ProviderCandidate → normalizer → Canonical`
+  契约计算质量、确定性、时间戳、RTF、显存和许可证门禁。Profile admission 保持
+  disabled；真实资格结论只以合并后 `production-asr` workflow 的脱敏审计为准，
+  未通过前不能认定 WhisperX 可用。
 
 ## 已知限制
 
