@@ -766,7 +766,7 @@ def test_faster_whisper_qualification_freezes_dependencies_model_and_gates():
     assert "license-matrix.json" in script
     assert "qualification-module-origins.txt" in script
     assert "module escaped qualification venv" in script
-    assert "e76620f83d5f5769e6a5f66c8013e1292a797de79b3581b44b6c7f9e36d77f31" in model
+    assert "e76620f83d5f5b69efd3d87e3dc180c1bd21df9fbebacfd4335e5e1efcc018da" in model
     assert "1617884929" in model.replace("_", "")
     assert "snapshot_download" not in model
     assert "FIXED_MODEL_FILES" in model
