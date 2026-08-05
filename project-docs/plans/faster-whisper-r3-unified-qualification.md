@@ -183,6 +183,25 @@ v1 的 `pip_download` 阶段同时覆盖代理设置、pip 原生命令和代理
 本闭环不修改依赖、production freeze、生产 venv、服务、防火墙、Ubuntu、数据库、
 Qdrant、模型或 Profile admission。
 
+### 2.0.8 离线受限脱敏 resolver 证据提取
+
+固定资格 run `30968517582` 的 v2 诊断确认失败来自 `pip_download_command` 的
+原生命令退出码 1，共捕获 130 行，并执行了一次退出码 1 的隔离 fallback；诊断仍为
+`resolver_replay_insufficient`，Profile 保持 disabled，生产服务未修改。
+
+经单独 R3 批准，复用既有手动诊断 workflow，但将其收敛为一次纯离线提取：
+
+1. 只读取该 run 下 `logs/pip-download.log`、`logs/pip-resolver-fallback.log` 和
+   `reports/dependency-diagnostic.json`，并严格校验固定 run、commit、v2 字段和文件边界；
+2. 使用 Python 3.11 标准库将 pip 固定格式归一化为包名、版本约束、依赖所有者、错误族和
+   blocker，不输出原始行、URL、代理、Token 或绝对路径；
+3. artifact 只允许严格 `faster-whisper-r3-resolver-evidence/1` JSON；workflow summary
+   只显示固定状态、来源身份、计数和归一化 blocker；
+4. workflow 不注入 Secret，不运行 pip，不访问网络，不启动或修改服务、防火墙、Ubuntu、
+   数据库、Qdrant、模型或 Profile admission；
+5. 旧 replay 诊断脚本保留为历史审计实现，但本次 workflow 不再调用；
+6. 合并后只执行一次。若证据仍不完整则停止，不自动迭代解析器或修改依赖。
+
 ### 2.1 仓库基线
 
 - PR #34 已合并到 `master`；
