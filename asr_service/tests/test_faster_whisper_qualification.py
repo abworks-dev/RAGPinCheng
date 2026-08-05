@@ -226,6 +226,11 @@ def test_model_preparation_is_pinned_manifested_and_idempotent(
         downloader=lambda **_kwargs: pytest.fail("valid cache must be reused"),
     )
     assert second["status"] == "reused"
+    offline = model_prep.validate_local_model(cache)
+    assert offline["status"] == "validated-offline"
+    assert offline["manifest_sha256"] == hashlib.sha256(
+        manifest.read_bytes()
+    ).hexdigest()
 
 
 def test_model_preparation_cli_imports_from_outside_repository(tmp_path):
@@ -254,12 +259,17 @@ def test_model_preparation_refuses_invalid_existing_cache(tmp_path):
     target = cache / model_prep.FASTER_WHISPER_RELATIVE_PATH
     target.mkdir(parents=True)
     (target / "model.bin").write_bytes(b"invalid")
-    with pytest.raises(RuntimeError, match="existing final model cache is invalid"):
+    with pytest.raises(RuntimeError, match="local model artifact is unavailable"):
         model_prep.prepare_model(
             cache,
             tmp_path / "staging",
             downloader=lambda **_kwargs: pytest.fail("must not download"),
         )
+
+
+def test_offline_model_validation_refuses_missing_cache(tmp_path):
+    with pytest.raises(RuntimeError, match="local model artifact is unavailable"):
+        model_prep.validate_local_model(tmp_path / "missing")
 
 
 def test_model_preparation_rejects_downloader_escape(tmp_path):

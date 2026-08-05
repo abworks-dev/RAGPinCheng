@@ -1300,10 +1300,9 @@ if (-not $ExecuteQualification) {
 }
 if (
     [string]::IsNullOrWhiteSpace($env:ASR_DEPENDENCY_PROXY) -or
-    [string]::IsNullOrWhiteSpace($env:ASR_MODEL_DOWNLOAD_PROXY) -or
     [string]::IsNullOrWhiteSpace($env:GPU_SERVICE_TOKEN)
 ) {
-    throw "The three approved qualification secrets must be configured"
+    throw "The approved dependency proxy and GPU service token must be configured"
 }
 if ($env:GPU_SERVICE_TOKEN.Contains("`r") -or $env:GPU_SERVICE_TOKEN.Contains("`n")) {
     throw "GPU service token must be one line"
@@ -1802,21 +1801,19 @@ print('qualification-module-origins-verified')
         ) `
         -LogPath $DependencyFailureLog
 
-    $FailureCode = "model_preparation_failed"
+    $FailureCode = "model_artifact_validation_failed"
     $ModelStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
-    Set-ScopedProxy -Proxy $env:ASR_MODEL_DOWNLOAD_PROXY
     try {
         Invoke-External `
             -FilePath $VenvPython `
             -Arguments @(
                 (Join-Path $ResolvedSource "scripts\prepare_faster_whisper_model.py"),
                 "--cache-root", $ModelCacheRoot,
-                "--staging-root", (Join-Path $RunRoot "model-staging"),
+                "--offline-only",
                 "--report-path", (Join-Path $EvidenceRoot "model-preparation.json")
             ) `
             -LogPath (Join-Path $LogRoot "model-preparation.log")
     } finally {
-        Clear-ScopedProxy
         Write-StageTiming -Stage "model_preparation" -Stopwatch $ModelStopwatch
     }
     if (-not (Test-Path -LiteralPath $ModelManifest -PathType Leaf)) {
@@ -1851,7 +1848,8 @@ print('qualification-module-origins-verified')
         "ASR_FASTER_WHISPER_MODEL_CACHE_ROOT",
         "ASR_FASTER_WHISPER_MODEL_MANIFEST_PATH", "ASR_LOG_DIR",
         "BGE_PRIORITY_PROBE_URL", "BGE_PRIORITY_PROBE_TOKEN",
-        "ASR_QUALIFICATION_TOKEN", "PYTHONNOUSERSITE"
+        "ASR_QUALIFICATION_TOKEN", "HF_HUB_OFFLINE",
+        "TRANSFORMERS_OFFLINE", "PYTHONNOUSERSITE"
     )
     $env:ASR_SERVICE_ENABLED = "true"
     $env:ASR_SERVICE_TOKEN = $TemporaryToken
@@ -1872,6 +1870,8 @@ print('qualification-module-origins-verified')
     $env:BGE_PRIORITY_PROBE_URL = "http://192.168.11.11:8100/v1/activity"
     $env:BGE_PRIORITY_PROBE_TOKEN = $env:GPU_SERVICE_TOKEN
     $env:ASR_QUALIFICATION_TOKEN = $TemporaryToken
+    $env:HF_HUB_OFFLINE = "1"
+    $env:TRANSFORMERS_OFFLINE = "1"
     $env:PYTHONNOUSERSITE = "1"
 
     $ServiceStdout = Join-Path $LogRoot "qualification-service.stdout.log"
