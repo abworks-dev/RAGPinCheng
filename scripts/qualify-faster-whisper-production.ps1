@@ -127,8 +127,19 @@ function Invoke-External {
         [Parameter(Mandatory = $true)][string[]]$Arguments,
         [Parameter(Mandatory = $true)][string]$LogPath
     )
-    $output = @(& $FilePath @Arguments 2>&1)
-    $exitCode = $LASTEXITCODE
+    $output = @()
+    $exitCode = -1
+    $previousPreference = $ErrorActionPreference
+    try {
+        # Windows PowerShell 5.1 can promote redirected native stderr to a
+        # terminating NativeCommandError when the caller uses Stop. Capture
+        # the complete native streams first, then enforce the exit code below.
+        $ErrorActionPreference = "Continue"
+        $output = @(& $FilePath @Arguments 2>&1)
+        $exitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousPreference
+    }
     [System.IO.File]::WriteAllLines(
         $LogPath,
         [string[]]@($output | ForEach-Object { [string]$_ }),
@@ -136,6 +147,43 @@ function Invoke-External {
     )
     if ($exitCode -ne 0) {
         throw "External command failed with exit code $exitCode; see $LogPath"
+    }
+}
+
+function Assert-ExternalFailureCapture {
+    param(
+        [Parameter(Mandatory = $true)][string]$PythonPath,
+        [Parameter(Mandatory = $true)][string]$LogPath
+    )
+    $marker = "r3-native-stderr-capture-ok"
+    $expectedFailure = $false
+    $preferenceBefore = $ErrorActionPreference
+    try {
+        Invoke-External `
+            -FilePath $PythonPath `
+            -Arguments @(
+                "-c",
+                "import sys; sys.stderr.write('$marker\n'); raise SystemExit(23)"
+            ) `
+            -LogPath $LogPath
+    } catch {
+        if ($_.Exception.Message -notmatch "exit code 23") {
+            throw "Native stderr capture self-test failed with an unexpected error"
+        }
+        $expectedFailure = $true
+    }
+    if (-not $expectedFailure) {
+        throw "Native stderr capture self-test did not preserve the non-zero exit"
+    }
+    if ($ErrorActionPreference -ne $preferenceBefore) {
+        throw "Native stderr capture self-test did not restore the error preference"
+    }
+    $captured = @(
+        Get-Content -LiteralPath $LogPath -Encoding UTF8 |
+            Where-Object { [string]$_ -match [regex]::Escape($marker) }
+    )
+    if ($captured.Count -ne 1) {
+        throw "Native stderr capture self-test did not preserve stderr"
     }
 }
 
@@ -758,6 +806,9 @@ try {
         throw "Qualification runner must execute as Administrator"
     }
     $MachinePython = Get-MachinePython311
+    Assert-ExternalFailureCapture `
+        -PythonPath $MachinePython `
+        -LogPath (Join-Path $LogRoot "native-stderr-capture-self-test.log")
     $InternalWheelValidationLog = Join-Path $LogRoot "internal-wheel-validation.log"
     Invoke-External `
         -FilePath $MachinePython `
