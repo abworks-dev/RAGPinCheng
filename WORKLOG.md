@@ -2139,3 +2139,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`frontend/src/components/SourceWorkspace.tsx`、`frontend/src/components/SourceWorkspace.test.tsx`、`WORKLOG.md`。
 - 验证：来源工作区专项 Vitest 3/3 通过；TypeScript project build 与 Vite production build 通过（2026 modules transformed）；`git diff --check` 通过。构建保留既有 CSS 语法和主包大于 500 kB 警告。
 - 待办/风险：功能处于待用户验收；尚未使用真实 PDF、DOCX、XLSX、PPTX 来源逐一验证定位预览和窄屏布局。本轮未修改 API、预览数据契约、依赖、数据或部署。
+
+### 09:26 — 修复 R3 原生 stderr 捕获边界
+
+- 完成：统一资格脚本在执行固定原生命令期间临时使用 `ErrorActionPreference=Continue`，先完整捕获 stdout、stderr 和退出码，再恢复调用方错误策略并按非零退出码失败关闭；增加固定非敏感 stderr 与退出码 23 的运行前自测，避免 Windows PowerShell 5.1 在日志落盘前将原生 stderr 提升为终止错误。
+- 文件：`scripts/qualify-faster-whisper-production.ps1`、`tests/test_asr_deployment_static.py`、`project-docs/plans/faster-whisper-r3-unified-qualification.md`、`TODO.md`、`WORKLOG.md`。
+- 验证：内部 wheel、部署边界、模型准备和 faster-whisper 资格定向测试 84/84 通过；PowerShell AST、当前 PowerShell 与 Windows PowerShell 5.1 合成 stderr/非零退出回归及 `git diff --check` 通过。
+- 待办/风险：尚待独立 PR、远端 CI、合并及一次固定参数生产资格重跑；未修改任何依赖、production freeze、生产服务、防火墙、Ubuntu、数据库、Qdrant、模型或 Profile admission。
