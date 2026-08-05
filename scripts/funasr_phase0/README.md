@@ -9,7 +9,7 @@
 
 - 13 Python files + 3 PowerShell files + 1 requirements + 1 example
   config + 1 README = 19 files in this directory.
-- 7 focused test files in `tests/`; tests use fake models, fake CUDA,
+- 9 focused test files plus one shared filesystem harness in `tests/`; tests use fake models, fake CUDA,
   fake `nvidia-smi`, temporary files and loopback HTTP only.
 - `02/03/04` are guarded workers and refuse direct execution. The parent
   launcher owns license gating, active-run registration, monitoring,
@@ -47,7 +47,7 @@
 | 18 | `08_annotate.py` | py | CPU-only provenance/reference validator. |
 | 19 | `README.md` | md | This file. |
 
-## Tests (7 files in `tests/`)
+## Tests (9 files plus one harness in `tests/`)
 
 | # | File | Coverage |
 |---|---|---|
@@ -58,6 +58,27 @@
 | 5 | `test_funasr_phase0_config.py` | Config schema, timezone, threshold and CPU/GPU gate separation. |
 | 6 | `test_funasr_phase0_entries.py` | Guard, fail-closed entry, license-before-spawn, active-run and annotation contracts. |
 | 7 | `test_funasr_phase0_powershell.py` | PS5.1 parsing plus missing/corrupt/hash-drift emergency-stop behavior. |
+| 8 | `test_funasr_phase0_license.py` | Installed package/model evidence and external approval binding. |
+| 9 | `test_funasr_phase0_path_boundaries.py` | Reject persistent drive output paths and unmanaged temporary directories. |
+| — | `funasr_phase0_harness.py` | Creates one managed temporary root and isolated testdata/models/reports/logs/checkpoints trees. |
+
+## Filesystem harness
+
+- Tests use `execution_mode: test`; their `approved_root` must resolve inside
+  the system temporary directory or the repository-controlled
+  `.test-artifacts/` root.
+- Production or manually approved validation uses
+  `execution_mode: approved_sandbox` and must provide an explicit
+  `approved_root`. There is no implicit drive-root default.
+- `testdata_root`, `models_root`, `reports_root`, `logs_root`, and
+  `checkpoints_root` must already exist and resolve strictly below the approved
+  root. Filesystem roots, path traversal, symlink/junction escape, and POSIX
+  drive aliases such as `/e/...` fail closed before output directories are
+  created.
+- `FunASRTestHarness` cleans its temporary tree automatically. Set
+  `KEEP_TEST_ARTIFACTS=1` only for a deliberate local diagnostic run; the
+  retained path is printed by the test runner/temporary-directory failure
+  context and must be cleaned manually afterward.
 
 ## Approved first-batch execution order (R3-0 through R3-5 only)
 
@@ -187,13 +208,12 @@ This sandbox MUST NOT:
 - No GPU workload code that mutates `gpu_service/`.
 - No local BGE copy or :18100 port.
 
-## Local dev venv (separate from sandbox)
+## Local test environment
 
-The author (Claude) maintains a separate venv at
-`E:\Workspace\funasr-phase0-dev\.venv` (Python 3.11.9) for static
-verification only. See `E:\Workspace\funasr-phase0-dev\README.md` for
-details. The production sandbox uses `C:\FunASR-Phase0\venv`
-(Python 3.10) created by `setup_venv.ps1`.
+Local tests use the active project Python environment and the managed temporary
+filesystem harness above. No persistent developer-machine venv or fixed drive
+directory is part of the test contract. Production venv creation remains an
+explicit, separately approved operation handled by `setup_venv.ps1`.
 
 ## Sync strategy
 
