@@ -112,6 +112,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "cu128 dependency install failed" }
     & $VenvPython -m pip install "whisperx==3.8.6"
     if ($LASTEXITCODE -ne 0) { throw "WhisperX dependency install failed" }
+    & $VenvPython -m pip install "httpx>=0.27.0"
+    if ($LASTEXITCODE -ne 0) { throw "existing Provider contract dependency install failed" }
     & $VenvPython -m pip check
     if ($LASTEXITCODE -ne 0) { throw "pip check failed" }
     & $VenvPython -c "import torch; assert torch.__version__ == '2.8.0+cu128', torch.__version__; assert torch.version.cuda == '12.8', torch.version.cuda"

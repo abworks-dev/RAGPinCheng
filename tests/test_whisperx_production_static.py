@@ -36,6 +36,7 @@ def test_windows_runner_is_isolated_and_cannot_mutate_production_controls():
     assert "torch==2.8.0+cu128" in script
     assert "torch.__version__ == '2.8.0+cu128'" in script
     assert "whisperx==3.8.6" in script
+    assert "httpx>=0.27.0" in script
     assert "RTX 5060 Ti" in script
     assert "Get-ScheduledTask" in script
     assert "Get-NetFirewallRule" in script
