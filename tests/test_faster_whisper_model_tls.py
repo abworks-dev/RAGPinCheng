@@ -7,6 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import requests
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -30,12 +31,24 @@ def test_hugging_face_backend_limits_direct_and_proxy_tls() -> None:
     adapter = session.adapters["https://"]
     assert isinstance(adapter, MODULE._TLS12HTTPAdapter)
 
-    _assert_tls12_verified(adapter.poolmanager.connection_pool_kw["ssl_context"])
+    context = adapter.poolmanager.connection_pool_kw["ssl_context"]
+    _assert_tls12_verified(context)
 
     proxy_manager = adapter.proxy_manager_for("http://127.0.0.1:7897")
-    _assert_tls12_verified(
-        proxy_manager.connection_pool_kw["ssl_context"]
+    assert proxy_manager.connection_pool_kw["ssl_context"] is context
+
+    request = requests.Request(
+        "HEAD", "https://huggingface.co/fixed/pinned/config.json"
+    ).prepare()
+    _, request_pool_kwargs = adapter.build_connection_pool_key_attributes(
+        request, verify=True
     )
+    assert request_pool_kwargs["ssl_context"] is context
+
+    with pytest.raises(
+        RuntimeError, match="requires default certificate verification"
+    ):
+        adapter.build_connection_pool_key_attributes(request, verify=False)
 
 
 def test_default_downloader_registers_scoped_backend(monkeypatch) -> None:
