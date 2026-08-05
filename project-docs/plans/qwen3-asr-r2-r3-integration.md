@@ -668,6 +668,25 @@ Qdrant 或 Profile admission，不使用真实业务媒体，失败 artifact 保
 离线输出即使为 `evidence_complete` 也只表示日志足以定位 blocker，不构成 Qwen3-ASR
 资格通过；若为 `evidence_incomplete`，必须停止并另行提出后续方案。
 
+离线运行 `30974524251` 绑定合并 SHA
+`8915ad2fe86677641a958917d2702a9c8d29a1b9` 并成功完成，但结果为
+`evidence_incomplete`：只确认 `oss2==2.19.1` 被请求，以及 `funasr 1.4.1`
+依赖未限定版本的 `oss2`；blocker 为 0，仍有 2 条相关行无法安全结构化。该结果未证明
+版本冲突，Profile 保持 disabled，生产服务未修改。
+
+经后续单独 R3 批准，精准分类增强将输出 Schema 升级为
+`qwen3-asr-r3-resolver-evidence/2`：
+
+1. 精确对账现有解析器未消费的相关行，仅输出固定日志来源、行号、字符数、SHA-256、
+   字符类型计数和固定类别，不输出原文或文本片段；
+2. 最终类别只允许 `proven_version_conflict`、`binary_unavailable`、
+   `python_incompatible`、`network_or_index`、`resolver_context_only` 或
+   `still_unknown`；
+3. 只有可证明的版本约束或分发/Python/网络模式才可形成具体结论；上下文或混合证据
+   继续失败关闭；
+4. PR/CI 合并后只执行一次绑定新完整 master SHA 的相同离线 workflow；若仍为
+   `still_unknown` 或 `resolver_context_only`，立即停止并另行审批。
+
 ## 11. 最终完成条件
 
 Qwen3-ASR 只有在以下全部完成后才可称为“资格通过”：
