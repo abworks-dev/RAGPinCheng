@@ -762,39 +762,44 @@ def test_qwen3_asr_qualification_freezes_dual_models_bf16_and_result_flow():
     assert ".transcribe(" not in runner
 
 
-def test_qwen3_asr_dependency_diagnosis_is_fixed_sanitized_and_non_runtime():
+def test_qwen3_asr_resolver_evidence_is_fixed_offline_and_sanitized():
     workflow = read(
         ".github/workflows/diagnose-qwen3-asr-dependencies-production.yml"
     )
-    script = read("scripts/diagnose-qwen3-asr-dependencies.ps1")
+    script = read("scripts/extract_qwen3_asr_resolver_evidence.py")
     assert "workflow_dispatch:" in workflow
     assert "default: false" in workflow
     assert "commit_sha must equal the workflow dispatch revision" in workflow
     assert "environment: production-asr" in workflow
     assert "runs-on: [self-hosted, Windows, X64, asr-production]" in workflow
-    assert "production-asr-qwen3-asr-dependency-diagnosis" in workflow
-    assert "30970277613" in script
-    assert "86b69db6831e3cd201436a26bbe836229bf419bd" in script
-    assert "requirements-qwen3-asr.txt" in script
+    assert "production-asr-qwen3-asr-offline-evidence" in workflow
+    assert 'SOURCE_RUN_ID = "30972780438"' in script
+    assert 'SOURCE_COMMIT_SHA = "9f0cb2b0ba9ae2f226a289f4a4db68333fcef50e"' in script
+    assert "dependency-diagnostics" in script
+    assert "resolver-replay.log" in script
+    assert "focused-binary-probe.log" in script
     assert "qwen3-asr-r3-dependency-diagnostic/2" in script
-    assert "InternalWheelBundlePath" in workflow
-    assert "build_internal_jieba_wheel.py" in workflow
-    assert "internal-wheel-manifest.json" in script
-    assert "--find-links $ResolvedInternalWheelBundle" in script
-    assert "--dry-run" in script
-    assert "--ignore-installed" in script
-    assert "--only-binary=:all:" in script
-    assert "--no-cache-dir" in script
-    assert "dependency_operation = $DependencyOperation" in script
-    assert "failure_origin = $FailureOrigin" in script
-    assert "native_exit_code = $NativeExitCode" in script
-    assert "captured_line_count = $CapturedLineCount" in script
-    assert "cleanup_complete = $CleanupComplete" in script
-    assert "conflict_lines =" not in script
-    assert 'profile_admission = "disabled"' in script
-    assert "production_services_modified = $false" in script
-    assert "Remove-DiagnosticVenv" in script
+    assert "qwen3-asr-r3-resolver-evidence/1" in script
+    assert "scripts.extract_qwen3_asr_resolver_evidence" in workflow
+    assert "resolver-evidence.json" in workflow
+    assert "timeout-minutes: 10" in workflow
+    assert r"${PRODUCTION_PYTHON311_PATH}" in workflow
+    assert "-m scripts.extract_qwen3_asr_resolver_evidence" in workflow
+    assert "profile_admission" in script
+    assert "production_services_modified" in script
     for forbidden in (
+        "ASR_DEPENDENCY_PROXY",
+        "build_internal_jieba_wheel.py",
+        "diagnose-qwen3-asr-dependencies.ps1",
+        "actions/download-artifact",
+        "actions/setup-python",
+        "import subprocess",
+        "import socket",
+        "import requests",
+        "import urllib",
+        "import httpx",
+        "pip install",
+        "pip download",
         "prepare_qwen3_asr_models.py",
         "run_qwen3_asr_qualification.py",
         "uvicorn",
