@@ -60,9 +60,16 @@ def _write_manifest(
     )
 
 
+def prepare_smoke_punkt(nltk_root: Path) -> None:
+    from nltk.tokenize.punkt import PunktParameters, save_punkt_params
+
+    punkt_dir = nltk_root / "tokenizers" / "punkt_tab" / "english"
+    punkt_dir.mkdir(parents=True, exist_ok=True)
+    save_punkt_params(PunktParameters(), dir=str(punkt_dir))
+
+
 def prepare_models(root: Path, nltk_root: Path) -> None:
     from huggingface_hub import snapshot_download
-    import nltk
 
     root.mkdir(parents=True, exist_ok=True)
     snapshot_download(
@@ -99,8 +106,7 @@ def prepare_models(root: Path, nltk_root: Path) -> None:
         revision=ALIGN_REVISION,
         relative_path=ALIGN_RELATIVE_PATH,
     )
-    if not nltk.download("punkt_tab", download_dir=str(nltk_root), quiet=True):
-        raise RuntimeError("punkt_tab download failed")
+    prepare_smoke_punkt(nltk_root)
 
 
 def smoke(source_root: Path, model_root: Path, nltk_root: Path, wav_path: Path) -> dict[str, object]:
@@ -191,6 +197,7 @@ def smoke(source_root: Path, model_root: Path, nltk_root: Path, wav_path: Path) 
         "asr_model_revision": ASR_REVISION,
         "align_model_id": ALIGN_MODEL_ID,
         "align_model_revision": ALIGN_REVISION,
+        "punkt_source": "generated-default-smoke-only",
         "torch_version": torch.__version__,
         "torch_cuda": torch.version.cuda,
         "gpu_name": torch.cuda.get_device_name(0),
