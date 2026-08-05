@@ -131,6 +131,28 @@ PowerShell 5.1 的 mandatory array 参数拒绝空集合，导致附加诊断未
 必须允许空集合并以 `evidence_insufficient` 失败关闭，同时优先写入 runner artifact 路径；
 修复后只以相同参数重试，不改变资格范围。
 
+### 2.0.6 Windows PowerShell 5.1 原生 stderr 捕获修复
+
+同参数重试 run `30963979244` 已生成附加诊断，但只确定失败阶段为 `pip_download`，
+诊断种类仍为 `evidence_insufficient`，requirement 为空；verdict 继续确认
+`profile_admission=disabled`、`production_services_modified=false`。
+
+代码核对发现，统一资格脚本全局使用 `$ErrorActionPreference = "Stop"`，而
+`Invoke-External` 直接通过 `2>&1` 捕获原生命令输出。Windows PowerShell 5.1 可能把
+原生 stderr 提升为终止错误，使函数在记录完整输出和退出码前中断；仓库此前的精确诊断
+脚本已通过执行期间临时切换为 `Continue` 避免该行为。
+
+获批的最小修复限定为：
+
+1. `Invoke-External` 只在固定原生命令执行期间临时使用 `Continue`，完整捕获 stdout、
+   stderr 和退出码后在 `finally` 恢复原值；
+2. 日志落盘后仍以非零退出码失败关闭，不改变任何命令参数、依赖或资格顺序；
+3. 资格 run 在调用真实依赖步骤前，以固定非敏感 stderr 标记和固定非零退出码自测该边界；
+4. PR 和 CI 通过后，只使用新的完整 master SHA 及原固定参数重跑一次；
+5. 结果仍只上传严格脱敏 verdict/diagnostic，不上传原始日志、路径、代理或 Secret；
+6. 不修改 production freeze、生产 venv、服务、防火墙、Ubuntu、数据库、Qdrant、
+   模型或 Profile admission。
+
 ### 2.1 仓库基线
 
 - PR #34 已合并到 `master`；

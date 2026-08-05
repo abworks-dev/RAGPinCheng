@@ -536,6 +536,35 @@ def test_faster_whisper_qualification_uses_exact_process_and_proxy_boundaries():
     assert 'Write-Output "$TemporaryToken"' not in script
 
 
+def test_faster_whisper_qualification_preserves_native_stderr_before_failing():
+    script = read("scripts/qualify-faster-whisper-production.ps1")
+    invoke_external = script.split("function Invoke-External", 1)[1].split(
+        "function Assert-ExternalFailureCapture", 1
+    )[0]
+    capture_self_test = script.split(
+        "function Assert-ExternalFailureCapture", 1
+    )[1].split("function Write-PipFreeze", 1)[0]
+
+    assert "$previousPreference = $ErrorActionPreference" in invoke_external
+    assert '$ErrorActionPreference = "Continue"' in invoke_external
+    assert "finally {" in invoke_external
+    assert "$ErrorActionPreference = $previousPreference" in invoke_external
+    assert "$exitCode = $LASTEXITCODE" in invoke_external
+    assert invoke_external.index("[System.IO.File]::WriteAllLines(") < invoke_external.index(
+        'if ($exitCode -ne 0)'
+    )
+
+    assert "r3-native-stderr-capture-ok" in capture_self_test
+    assert "raise SystemExit(23)" in capture_self_test
+    assert "exit code 23" in capture_self_test
+    assert "$ErrorActionPreference -ne $preferenceBefore" in capture_self_test
+    assert "did not preserve stderr" in capture_self_test
+    assert script.count("Assert-ExternalFailureCapture `") == 1
+    assert script.index("Assert-ExternalFailureCapture `") < script.index(
+        "$InternalWheelValidationLog ="
+    )
+
+
 def test_faster_whisper_qualification_freezes_dependencies_model_and_gates():
     script = read("scripts/qualify-faster-whisper-production.ps1")
     model = read("scripts/prepare_faster_whisper_model.py")
