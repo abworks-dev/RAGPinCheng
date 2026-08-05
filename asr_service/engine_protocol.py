@@ -41,6 +41,12 @@ class ServiceProfileConfig:
                 "0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf",
                 "zh-CN",
             ),
+            "whisperx-large-v3-zh-align-v1": (
+                "whisperx",
+                "Systran/faster-whisper-large-v3",
+                "53ecf83a5bedc5597eb8c8b34eac29e5345520ff",
+                "zh-CN",
+            ),
         }.get(self.service_profile_id)
         if expected is None:
             raise ContractValidationError(
@@ -70,6 +76,14 @@ FASTER_WHISPER_SERVICE_CONFIG = ServiceProfileConfig(
     "faster-whisper",
     "dropbox-dash/faster-whisper-large-v3-turbo",
     "0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf",
+    "zh-CN",
+)
+
+WHISPERX_SERVICE_CONFIG = ServiceProfileConfig(
+    "whisperx-large-v3-zh-align-v1",
+    "whisperx",
+    "Systran/faster-whisper-large-v3",
+    "53ecf83a5bedc5597eb8c8b34eac29e5345520ff",
     "zh-CN",
 )
 

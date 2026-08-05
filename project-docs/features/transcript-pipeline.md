@@ -170,6 +170,10 @@ TTS 样本已生成并通过严格 Manifest 校验，但生产 R3 workflow 在�
 - faster-whisper R3：统一资格 workflow、隔离编排、固定模型准备、严格 8 样本
   Manifest、质量/资源门禁和无真实引擎测试已在独立分支实现，尚待 scoped review、
   远端 CI、合并及真实 Windows CUDA 执行；当前不能据此认定 faster-whisper 可用。
+- WhisperX R2/R3：已实现复用 remote Provider/Canonical 契约的 experimental Profile、
+  lazy-load service adapter、ASR/中文对齐双模型 manifest 门禁及手动 Windows CUDA
+  冒烟 workflow；Profile admission 保持 disabled。真实 CUDA 结果以合并后的
+  `production-asr` workflow 审计为准，未通过前不能认定 WhisperX 可用。
 
 ## 已知限制
 
@@ -178,7 +182,8 @@ TTS 样本已生成并通过严格 Manifest 校验，但生产 R3 workflow 在�
 - SenseVoice 短媒体自动转录已完成生产验收，但候选稿发布/Qdrant 正式可见性 E2E
   尚未执行；faster-whisper 真实依赖、模型、CUDA 和推理均未运行；
 - 当前唯一允许新建任务的自动 Profile 仍是 experimental SenseVoice；faster-whisper
-  experimental Profile 可见但 admission 为 disabled；尚无 `qualification_approved` Profile；
+  与 WhisperX experimental Profile 可见但 admission 为 disabled；尚无
+  `qualification_approved` Profile；
 - 支持范围播放但无 HLS 自适应码率。
 - 媒体快捷筛选是最近 100 条的客户端筛选，不是服务端全库查询；独立转写工作台基础版仍待后续 PR。
 
@@ -191,3 +196,5 @@ TTS 样本已生成并通过严格 Manifest 校验，但生产 R3 workflow 在�
   记录 R2 代码边界与后续 R3 资格门禁。
 - [faster-whisper R3 统一资格验证](../plans/faster-whisper-r3-unified-qualification.md)
   是后续依赖、模型、CUDA、质量与资源实测的唯一执行基线。
+- [WhisperX R2+R3 一次性合并执行方案](../plans/whisperx-r2-r3-execution-plan.md)
+  固定 Provider/Profile、双模型缓存、Windows runner 与回滚边界。
