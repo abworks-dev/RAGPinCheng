@@ -2103,3 +2103,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`frontend/src/pages/admin/AdminLayout.tsx`、`frontend/src/pages/admin/AdminLayout.test.tsx`、`WORKLOG.md`。
 - 验证：管理布局专项 Vitest 5/5 通过；TypeScript 检查和 Vite production build 通过（2026 modules transformed）；`git diff --check` 通过。构建保留既有 CSS 语法与主包大于 500 kB 警告。
 - 待办/风险：功能处于待用户验收；尚未在真实管理员登录态下完成桌面展开/收起及窄屏视觉验收。本轮未修改 API、权限、数据、依赖或部署。
+
+### 08:24 — 增加 R3 依赖失败自诊断
+
+- 完成：按获批 R3 方案在统一资格脚本内增加依赖失败阶段跟踪和严格脱敏诊断；只输出固定诊断种类、固定阶段及受限 ASCII requirement，明确排除原始日志、URL、代理、Token、绝对路径、冲突行和完整 freeze。workflow 只把该 JSON 与既有 verdict 一起上传并显示安全字段，不新增一次性诊断 workflow。
+- 文件：`.github/workflows/qualify-faster-whisper-production.yml`、`scripts/qualify-faster-whisper-production.ps1`、`tests/test_asr_deployment_static.py`、`project-docs/plans/faster-whisper-r3-unified-qualification.md`、`TODO.md`、`WORKLOG.md`。
+- 验证：PowerShell AST、隔离脱敏器的 binary/version/network/unknown 正负自测、workflow YAML、部署静态测试 25/25 和 `git diff --check` 通过。
+- 待办/风险：尚未提交、推送、创建 PR、运行远端 CI 或重跑生产资格 workflow；合并后只允许用新的完整 master SHA 重跑一次，并继续保持依赖、生产服务及 Profile admission 不变。

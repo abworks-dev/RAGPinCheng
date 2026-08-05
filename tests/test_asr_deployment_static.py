@@ -330,6 +330,11 @@ def test_faster_whisper_qualification_workflow_is_manual_immutable_and_gated():
     assert "actions/download-artifact@v4" in workflow
     assert "InternalWheelBundlePath" in workflow
     assert "needs: build-internal-wheel" in workflow
+    assert "DependencyDiagnosticPath" in workflow
+    assert workflow.count("dependency-diagnostic.json") == 3
+    assert "Dependency stage:" in workflow
+    assert "Dependency diagnosis:" in workflow
+    assert "Affected requirement:" in workflow
 
 
 def test_faster_whisper_synthetic_sample_preparation_is_fixed_and_gated():
@@ -552,6 +557,38 @@ def test_faster_whisper_qualification_freezes_dependencies_model_and_gates():
     assert "internal_wheel_manifest_sha256" in script
     assert "Controlled internal wheel changed before wheelhouse recording" in script
     assert "Controlled internal wheel was not resolved into the wheelhouse" in script
+    diagnostic_section = script.split(
+        "function Get-NormalizedPackageName", 1
+    )[1].split("function Write-SanitizedSummary", 1)[0]
+    assert "function Convert-ToSanitizedDependencyFailure" in diagnostic_section
+    assert "function Assert-DependencySanitizerSelfTest" in diagnostic_section
+    assert "function Write-SanitizedDependencyFailure" in diagnostic_section
+    assert "faster-whisper-r3-dependency-failure/1" in diagnostic_section
+    assert "binary_distribution_unavailable" in diagnostic_section
+    assert "version_constraint_conflict" in diagnostic_section
+    assert "network_or_index_failure" in diagnostic_section
+    assert "evidence_insufficient" in diagnostic_section
+    assert "dependency_stage = [string]$diagnosis.Stage" in diagnostic_section
+    assert "affected_requirement = [string]$diagnosis.Requirement" in diagnostic_section
+    assert 'profile_admission = "disabled"' in diagnostic_section
+    assert "production_services_modified = $false" in diagnostic_section
+    assert "conflict_lines" not in diagnostic_section
+    assert "log_path =" not in diagnostic_section.lower()
+    assert "production_freeze_sha256" not in diagnostic_section
+    assert "Write-SanitizedDependencyFailure" in script.split("} catch {", 1)[-1]
+    for stage in (
+        "production_freeze",
+        "production_pip_check",
+        "qualification_venv",
+        "pip_download",
+        "wheel_manifest",
+        "pip_install",
+        "qualification_pip_check",
+        "qualification_freeze",
+        "module_origin_verification",
+        "license_audit",
+    ):
+        assert f'$DependencyFailureStage = "{stage}"' in script
     assert "--no-index" in script
     assert "pip\", \"check" in script
     assert "license-matrix.json" in script
