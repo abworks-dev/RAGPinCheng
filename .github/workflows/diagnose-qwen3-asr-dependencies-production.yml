@@ -76,6 +76,7 @@ jobs:
               "## Qwen3-ASR R3 offline resolver evidence",
               "",
               "- Status: ``$($result.status)``",
+              "- Classification: ``$($result.classification)``",
               "- Source run: ``$($result.source_run_id)``",
               "- Blocker count: ``$($result.blockers.Count)``",
               "- Unparsed relevant lines: ``$($result.unparsed_relevant_line_count)``",

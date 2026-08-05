@@ -782,7 +782,9 @@ def test_qwen3_asr_resolver_evidence_is_fixed_offline_and_sanitized():
     assert "resolver-replay.log" in script
     assert "focused-binary-probe.log" in script
     assert "qwen3-asr-r3-dependency-diagnostic/2" in script
-    assert "qwen3-asr-r3-resolver-evidence/1" in script
+    assert "qwen3-asr-r3-resolver-evidence/2" in script
+    assert '"classification": classification' in script
+    assert '"unparsed_records": unparsed_records' in script
     assert "scripts.extract_qwen3_asr_resolver_evidence" in workflow
     assert "resolver-evidence.json" in workflow
     assert "timeout-minutes: 10" in workflow
