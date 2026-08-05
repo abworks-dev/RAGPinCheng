@@ -562,10 +562,10 @@ def test_faster_whisper_qualification_freezes_dependencies_model_and_gates():
     runner = read("scripts/run_faster_whisper_qualification.py")
     assert "torch==2.7.0+cu128" in script
     assert "torchaudio==2.7.0+cu128" in script
-    assert "requirements-windows.txt" in script
+    assert "requirements-windows.txt" not in script
     assert "requirements-faster-whisper.txt" in script
     assert '$RequirementsSource = $ResolvedSource.Replace("\\", "/")' in script
-    assert "-r $RequirementsSource/asr_service/requirements-windows.txt" in script
+    assert "-r $RequirementsSource/asr_service/requirements-windows.txt" not in script
     assert "-r $RequirementsSource/asr_service/requirements-faster-whisper.txt" in script
     assert "-r $ResolvedSource\\asr_service\\" not in script
     assert "--only-binary=:all:" in script
@@ -580,10 +580,10 @@ def test_faster_whisper_qualification_freezes_dependencies_model_and_gates():
     assert '"validate"' in script
     assert '"--find-links", $ResolvedInternalWheelBundle' in script
     assert 'source_url = "internal://$($controlled.package_name)/$($controlled.package_version)/$wheelSha256"' in script
-    assert 'schema_version = "faster-whisper-wheel-manifest/2"' in script
-    assert "internal_wheel_manifests_sha256" in script
+    assert 'schema_version = "faster-whisper-wheel-manifest/3"' in script
+    assert "compatibility_reference_manifests_sha256" in script
     assert "Controlled internal wheel changed before wheelhouse recording" in script
-    assert "Controlled internal wheel was not resolved into the wheelhouse" in script
+    assert "Controlled internal wheel was not resolved into the wheelhouse" not in script
     diagnostic_section = script.split(
         "function Get-NormalizedPackageName", 1
     )[1].split("function Write-SanitizedSummary", 1)[0]
