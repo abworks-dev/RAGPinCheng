@@ -45,15 +45,23 @@ Phase 5A/5B 已接通版本列表、只读 Markdown 预览、人工审核、显�
 - Parent、Child 和 Qdrant payload 添加 nullable `transcript_version_id` / `publication_target_id`，legacy stable ID 算法保持不变；
 - 正式可见性唯一读取 `app.sqlite.media_transcript_heads.current_version_id`；Qdrant recall 和 Parent expansion 使用同一快照，损坏/缺失 head 对 versioned transcript fail closed，legacy/普通文档继续可见；
 - 普通索引与 publication 索引共用现有单 worker/单队列，publication job 支持幂等恢复与失败状态持久化。
-- Profile catalog 现包含已启用的 experimental SenseVoice 和准入关闭的 experimental
-  faster-whisper；二者复用同一 Remote Provider 与唯一 Candidate → Canonical 结果流；
-- ASR service 注册两个固定 service Profile；faster-whisper 缓存/依赖缺失时仅该
-  Profile 不可用，不阻止现有 SenseVoice 服务启动；
+- Profile catalog 现包含已启用的 experimental SenseVoice，以及准入关闭的
+  experimental faster-whisper 和 Qwen3-ASR；三者复用同一 Remote Provider 与唯一
+  Candidate → Canonical 结果流；
+- ASR service 注册三个固定 service Profile；faster-whisper 或 Qwen3-ASR
+  缓存/依赖缺失时仅相应 Profile 不可用，不阻止现有 SenseVoice 服务启动；
 - faster-whisper adapter 固定
   `dropbox-dash/faster-whisper-large-v3-turbo@0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf`
   与 CUDA FP16 参数，但 R2 未安装依赖、下载模型或运行推理。
+- Qwen3-ASR adapter 固定
+  `Qwen/Qwen3-ASR-0.6B@5eb144179a02acc5e5ba31e748d22b0cf3e303b0`
+  与
+  `Qwen/Qwen3-ForcedAligner-0.6B@c7cbfc2048c462b0d63a45797104fc9db3ad62b7`，
+  仅允许 Windows Transformers/CUDA BF16 候选参数；R2 未安装依赖、下载模型或
+  运行推理，application Profile 保持 disabled。
 
-SenseVoice 已完成独立生产短媒体验收。faster-whisper 的固定 8 个非敏感 Windows
+SenseVoice 已完成独立生产短媒体验收。Qwen3-ASR 尚未执行 R3A/R3B，因此没有
+Windows、CUDA、依赖、模型、质量或资源资格结论。faster-whisper 的固定 8 个非敏感 Windows
 TTS 样本已生成并通过严格 Manifest 校验，但生产 R3 workflow 在组合依赖解析阶段
 得到 `dependency_preparation_failed`；模型、CUDA、质量和资源门禁均未运行，因此
 其 R2 接线不构成运行或生产资格结论。

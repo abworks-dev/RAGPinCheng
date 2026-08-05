@@ -24,6 +24,8 @@ class ServiceProfileConfig:
     model_id: str
     model_revision: str
     language: str
+    aligner_model_id: str | None = None
+    aligner_model_revision: str | None = None
 
     def __post_init__(self) -> None:
         validate_provider_key(self.service_profile_id, "service_profile_id")
@@ -34,12 +36,24 @@ class ServiceProfileConfig:
                 "iic/SenseVoiceSmall",
                 "7bf452403abd7353a300cd760f7adae7701c92c1",
                 "zh-CN",
+                None,
+                None,
             ),
             "faster-whisper-large-v3-turbo-v1": (
                 "faster-whisper",
                 "dropbox-dash/faster-whisper-large-v3-turbo",
                 "0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf",
                 "zh-CN",
+                None,
+                None,
+            ),
+            "qwen3-asr-06b-aligner-v1": (
+                "qwen3-asr",
+                "Qwen/Qwen3-ASR-0.6B",
+                "5eb144179a02acc5e5ba31e748d22b0cf3e303b0",
+                "zh-CN",
+                "Qwen/Qwen3-ForcedAligner-0.6B",
+                "c7cbfc2048c462b0d63a45797104fc9db3ad62b7",
             ),
         }.get(self.service_profile_id)
         if expected is None:
@@ -55,6 +69,12 @@ class ServiceProfileConfig:
         validate_language(self.language)
         if self.language != expected[3]:
             raise ContractValidationError("invalid_language", "language")
+        if self.aligner_model_id != expected[4]:
+            raise ContractValidationError("invalid_aligner_model_id", "aligner_model_id")
+        if self.aligner_model_revision != expected[5]:
+            raise ContractValidationError(
+                "invalid_aligner_model_revision", "aligner_model_revision"
+            )
 
 
 SENSEVOICE_SERVICE_CONFIG = ServiceProfileConfig(
@@ -71,6 +91,16 @@ FASTER_WHISPER_SERVICE_CONFIG = ServiceProfileConfig(
     "dropbox-dash/faster-whisper-large-v3-turbo",
     "0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf",
     "zh-CN",
+)
+
+QWEN3_ASR_SERVICE_CONFIG = ServiceProfileConfig(
+    "qwen3-asr-06b-aligner-v1",
+    "qwen3-asr",
+    "Qwen/Qwen3-ASR-0.6B",
+    "5eb144179a02acc5e5ba31e748d22b0cf3e303b0",
+    "zh-CN",
+    "Qwen/Qwen3-ForcedAligner-0.6B",
+    "c7cbfc2048c462b0d63a45797104fc9db3ad62b7",
 )
 
 

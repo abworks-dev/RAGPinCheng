@@ -6,6 +6,7 @@ from asr_service.engine_protocol import (
     EngineChunkCandidate,
     FASTER_WHISPER_SERVICE_CONFIG,
     PreparedAudioChunk,
+    QWEN3_ASR_SERVICE_CONFIG,
     SENSEVOICE_SERVICE_CONFIG,
     ServiceProfileConfig,
 )
@@ -50,7 +51,7 @@ def test_engine_registry_rejects_profile_mismatch_and_duplicates():
         EngineRegistry((registration, registration))
 
 
-def test_exact_faster_whisper_identity_and_two_engine_registry():
+def test_exact_candidate_identities_and_three_engine_registry():
     assert FASTER_WHISPER_SERVICE_CONFIG.model_id == (
         "dropbox-dash/faster-whisper-large-v3-turbo"
     )
@@ -65,10 +66,18 @@ def test_exact_faster_whisper_identity_and_two_engine_registry():
         FASTER_WHISPER_SERVICE_CONFIG,
     )
     sensevoice = EngineRegistration(FakeEngine(), SENSEVOICE_SERVICE_CONFIG)
-    registry = EngineRegistry((faster, sensevoice))
+    qwen = EngineRegistration(
+        FakeEngine(
+            provider_key="qwen3-asr",
+            service_profile_id="qwen3-asr-06b-aligner-v1",
+        ),
+        QWEN3_ASR_SERVICE_CONFIG,
+    )
+    registry = EngineRegistry((faster, sensevoice, qwen))
     assert registry.available_profile_ids() == (
         "faster-whisper-large-v3-turbo-v1",
         "funasr-sensevoice-small-v1",
+        "qwen3-asr-06b-aligner-v1",
     )
 
     with pytest.raises(ContractValidationError):
@@ -78,4 +87,27 @@ def test_exact_faster_whisper_identity_and_two_engine_registry():
             "dropbox-dash/faster-whisper-large-v3-turbo",
             "0" * 40,
             "zh-CN",
+        )
+
+
+def test_exact_qwen_identity_includes_forced_aligner():
+    assert QWEN3_ASR_SERVICE_CONFIG.model_id == "Qwen/Qwen3-ASR-0.6B"
+    assert QWEN3_ASR_SERVICE_CONFIG.model_revision == (
+        "5eb144179a02acc5e5ba31e748d22b0cf3e303b0"
+    )
+    assert QWEN3_ASR_SERVICE_CONFIG.aligner_model_id == (
+        "Qwen/Qwen3-ForcedAligner-0.6B"
+    )
+    assert QWEN3_ASR_SERVICE_CONFIG.aligner_model_revision == (
+        "c7cbfc2048c462b0d63a45797104fc9db3ad62b7"
+    )
+    with pytest.raises(ContractValidationError):
+        ServiceProfileConfig(
+            "qwen3-asr-06b-aligner-v1",
+            "qwen3-asr",
+            "Qwen/Qwen3-ASR-0.6B",
+            QWEN3_ASR_SERVICE_CONFIG.model_revision,
+            "zh-CN",
+            "Qwen/Qwen3-ForcedAligner-0.6B",
+            "0" * 40,
         )
