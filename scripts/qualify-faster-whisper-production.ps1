@@ -27,6 +27,7 @@ $DataRoot = "${PRODUCTION_DATA_ROOT}\RAGPinCheng-ASR"
 $InputRoot = "${PRODUCTION_DATA_ROOT}\RAGPinCheng-ASR\qualification\faster-whisper\inputs"
 $SampleManifest = Join-Path $InputRoot "manifest.json"
 $ModelCacheRoot = Join-Path $DataRoot "models"
+$WheelCacheRoot = Join-Path $DataRoot "qualification\wheel-cache"
 $ModelRevision = "0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf"
 $ModelRelativePath = "faster-whisper-large-v3-turbo\$ModelRevision"
 $ModelManifest = Join-Path $ModelCacheRoot "$ModelRelativePath\model-manifest.json"
@@ -63,6 +64,8 @@ $DependencyFailureStage = "not_started"
 $DependencyFailureOperation = "not_started"
 $DependencyFailureLog = ""
 $WheelManifestFailureKind = ""
+$WheelCacheStatus = "not_evaluated"
+$WheelCacheKey = ""
 $LastExternalCommandResult = [pscustomobject]@{
     failure_origin = "not_started"
     exit_code = $null
@@ -87,6 +90,26 @@ function Write-JsonFile {
 function Get-Sha256 {
     param([Parameter(Mandatory = $true)][string]$Path)
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+}
+
+function Get-TextSha256 {
+    param([Parameter(Mandatory = $true)][string]$Text)
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($Text)
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        return ([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace("-", "").ToLowerInvariant()
+    } finally {
+        $sha.Dispose()
+    }
+}
+
+function Write-StageTiming {
+    param(
+        [Parameter(Mandatory = $true)][string]$Stage,
+        [Parameter(Mandatory = $true)][System.Diagnostics.Stopwatch]$Stopwatch
+    )
+    $Stopwatch.Stop()
+    Write-Host ("R3_STAGE stage={0} elapsed_ms={1}" -f $Stage, $Stopwatch.ElapsedMilliseconds)
 }
 
 function Assert-DirectChild {
@@ -599,6 +622,212 @@ function Assert-WheelManifestUnchanged {
     }
 }
 
+function Get-WheelCacheKey {
+    param(
+        [Parameter(Mandatory = $true)][string]$PythonPath,
+        [Parameter(Mandatory = $true)][string]$ProductionFreezePath,
+        [Parameter(Mandatory = $true)][string]$RequirementsPath,
+        [Parameter(Mandatory = $true)][string[]]$ReferenceManifestPaths
+    )
+    $pythonIdentity = @(
+        & $PythonPath -c "import platform,sys; print(platform.python_version()); print(sys.implementation.cache_tag); print(platform.machine()); print(platform.system())"
+    )
+    if ($LASTEXITCODE -ne 0 -or $pythonIdentity.Count -ne 4) {
+        throw "Unable to determine qualification Python identity"
+    }
+    $pipVersion = @(& $PythonPath -c "import importlib.metadata; print(importlib.metadata.version('pip'))")
+    if ($LASTEXITCODE -ne 0 -or $pipVersion.Count -ne 1) {
+        throw "Unable to determine qualification pip version"
+    }
+    $keyMaterial = [ordered]@{
+        schema_version = "faster-whisper-wheel-cache-key/1"
+        python_version = ([string]$pythonIdentity[0]).Trim()
+        python_cache_tag = ([string]$pythonIdentity[1]).Trim()
+        platform_machine = ([string]$pythonIdentity[2]).Trim().ToLowerInvariant()
+        platform_system = ([string]$pythonIdentity[3]).Trim().ToLowerInvariant()
+        pip_version = ([string]$pipVersion[0]).Trim()
+        torch_version = "2.7.0+cu128"
+        torchaudio_version = "2.7.0+cu128"
+        cuda_channel = "cu128"
+        production_freeze_sha256 = Get-Sha256 -Path $ProductionFreezePath
+        requirements_sha256 = Get-Sha256 -Path $RequirementsPath
+        reference_manifest_identity_sha256 = @(
+            $ReferenceManifestPaths | ForEach-Object {
+                $reference = Get-Content -LiteralPath $_ -Raw -Encoding UTF8 | ConvertFrom-Json
+                $identity = [ordered]@{
+                    schema_version = [string]$reference.schema_version
+                    package_name = [string]$reference.package_name
+                    package_version = [string]$reference.package_version
+                    source_sha256 = [string]$reference.source.sha256
+                    wheel_sha256 = [string]$reference.wheel.sha256
+                }
+                Get-TextSha256 -Text ($identity | ConvertTo-Json -Depth 8 -Compress)
+            }
+        )
+    }
+    $canonical = $keyMaterial | ConvertTo-Json -Depth 8 -Compress
+    return [pscustomobject]@{
+        Key = Get-TextSha256 -Text $canonical
+        Material = $keyMaterial
+    }
+}
+
+function Assert-RealDirectory {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Label
+    )
+    if (
+        -not (Test-Path -LiteralPath $Path -PathType Container) -or
+        ((Get-Item -LiteralPath $Path).Attributes -band [System.IO.FileAttributes]::ReparsePoint)
+    ) {
+        throw "$Label must be a real directory"
+    }
+}
+
+function Read-ValidatedWheelCache {
+    param(
+        [Parameter(Mandatory = $true)][string]$CachePath,
+        [Parameter(Mandatory = $true)][string]$ExpectedKey
+    )
+    Assert-RealDirectory -Path $CachePath -Label "Wheel cache entry"
+    $manifestPath = Join-Path $CachePath "cache-manifest.json"
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+        throw "Wheel cache Manifest is missing"
+    }
+    $manifestFile = Get-Item -LiteralPath $manifestPath
+    if ($manifestFile.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+        throw "Wheel cache Manifest cannot be a reparse point"
+    }
+    $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    $rootProperties = @($manifest.psobject.Properties.Name | Sort-Object)
+    if (
+        Compare-Object `
+            -ReferenceObject @("cache_key", "key_material", "schema_version", "wheel_manifest") `
+            -DifferenceObject $rootProperties
+    ) {
+        throw "Wheel cache Manifest contains unknown or missing fields"
+    }
+    $recordedKey = Get-TextSha256 -Text (
+        $manifest.key_material | ConvertTo-Json -Depth 8 -Compress
+    )
+    if (
+        $manifest.schema_version -ne "faster-whisper-wheel-cache/1" -or
+        $manifest.cache_key -ne $ExpectedKey -or
+        $recordedKey -ne $ExpectedKey -or
+        $manifest.wheel_manifest.schema_version -ne "faster-whisper-wheel-manifest/3"
+    ) {
+        throw "Wheel cache Manifest contract mismatch"
+    }
+    $expectedNames = @($manifest.wheel_manifest.files | ForEach-Object { [string]$_.file_name } | Sort-Object)
+    if ($expectedNames.Count -eq 0 -or $expectedNames.Count -ne @($expectedNames | Select-Object -Unique).Count) {
+        throw "Wheel cache Manifest file set is invalid"
+    }
+    $actualFiles = @(Get-ChildItem -LiteralPath $CachePath -File)
+    $actualWheelNames = @($actualFiles | Where-Object Extension -EQ ".whl" | ForEach-Object Name | Sort-Object)
+    $allowedNames = @($expectedNames + "cache-manifest.json" | Sort-Object)
+    $actualNames = @($actualFiles | ForEach-Object Name | Sort-Object)
+    if (
+        (Compare-Object -ReferenceObject $expectedNames -DifferenceObject $actualWheelNames) -or
+        (Compare-Object -ReferenceObject $allowedNames -DifferenceObject $actualNames)
+    ) {
+        throw "Wheel cache file set differs from its Manifest"
+    }
+    foreach ($entry in @($manifest.wheel_manifest.files)) {
+        $path = Join-Path $CachePath ([string]$entry.file_name)
+        $file = Get-Item -LiteralPath $path
+        if (
+            ($file.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -or
+            [int64]$file.Length -ne [int64]$entry.size_bytes -or
+            (Get-Sha256 -Path $path) -ne [string]$entry.sha256
+        ) {
+            throw "Wheel cache content hash mismatch"
+        }
+    }
+    return $manifest
+}
+
+function Copy-ValidatedWheelCacheToRun {
+    param(
+        [Parameter(Mandatory = $true)][string]$CachePath,
+        [Parameter(Mandatory = $true)][object]$CacheManifest,
+        [Parameter(Mandatory = $true)][string[]]$CurrentReferenceManifestSha256
+    )
+    foreach ($entry in @($CacheManifest.wheel_manifest.files)) {
+        Copy-Item -LiteralPath (Join-Path $CachePath ([string]$entry.file_name)) -Destination $Wheelhouse
+    }
+    $runtimeManifest = [ordered]@{
+        schema_version = [string]$CacheManifest.wheel_manifest.schema_version
+        indexes = @($CacheManifest.wheel_manifest.indexes)
+        compatibility_reference_manifests_sha256 = @($CurrentReferenceManifestSha256)
+        files = @($CacheManifest.wheel_manifest.files)
+    }
+    Write-JsonFile -Path (Join-Path $EvidenceRoot "wheel-manifest.json") -Value $runtimeManifest
+    Assert-WheelManifestUnchanged -Manifest $runtimeManifest
+    return $runtimeManifest
+}
+
+function Publish-WheelCache {
+    param(
+        [Parameter(Mandatory = $true)][string]$CacheKey,
+        [Parameter(Mandatory = $true)][object]$KeyMaterial,
+        [Parameter(Mandatory = $true)][object]$WheelManifest
+    )
+    New-Item -ItemType Directory -Path $WheelCacheRoot -Force | Out-Null
+    Assert-RealDirectory -Path $WheelCacheRoot -Label "Wheel cache root"
+    & icacls.exe $WheelCacheRoot /inheritance:r /grant:r `
+        "*S-1-5-32-544:(OI)(CI)F" `
+        "*S-1-5-18:(OI)(CI)F" `
+        "Administrator:(OI)(CI)F" *> (Join-Path $LogRoot "wheel-cache-acl.log")
+    if ($LASTEXITCODE -ne 0) {
+        throw "Unable to protect wheel cache ACL"
+    }
+    $mutex = New-Object System.Threading.Mutex($false, "Global\RAGPinCheng-ASR-faster-whisper-wheel-cache-$CacheKey")
+    $lockTaken = $false
+    try {
+        $lockTaken = $mutex.WaitOne([TimeSpan]::FromMinutes(5))
+        if (-not $lockTaken) { throw "Timed out waiting for wheel cache lock" }
+        $cachePath = Join-Path $WheelCacheRoot $CacheKey
+        if (Test-Path -LiteralPath $cachePath) {
+            try {
+                [void](Read-ValidatedWheelCache -CachePath $cachePath -ExpectedKey $CacheKey)
+                Write-Host "R3_WHEEL_CACHE publish=already_valid key=$CacheKey"
+                return
+            } catch {
+                $quarantineRoot = Join-Path $WheelCacheRoot "quarantine"
+                New-Item -ItemType Directory -Path $quarantineRoot -Force | Out-Null
+                $quarantinePath = Join-Path $quarantineRoot "$CacheKey-$RunId"
+                if (Test-Path -LiteralPath $quarantinePath) {
+                    throw "Wheel cache quarantine destination already exists"
+                }
+                Move-Item -LiteralPath $cachePath -Destination $quarantinePath
+                Write-Host "R3_WHEEL_CACHE corrupt=quarantined key=$CacheKey"
+            }
+        }
+        $stagingPath = Join-Path $WheelCacheRoot ".staging-$CacheKey-$RunId"
+        if (Test-Path -LiteralPath $stagingPath) {
+            throw "Wheel cache staging path already exists"
+        }
+        New-Item -ItemType Directory -Path $stagingPath | Out-Null
+        foreach ($entry in @($WheelManifest.files)) {
+            Copy-Item -LiteralPath (Join-Path $Wheelhouse ([string]$entry.file_name)) -Destination $stagingPath
+        }
+        Write-JsonFile -Path (Join-Path $stagingPath "cache-manifest.json") -Value ([ordered]@{
+            schema_version = "faster-whisper-wheel-cache/1"
+            cache_key = $CacheKey
+            key_material = $KeyMaterial
+            wheel_manifest = $WheelManifest
+        })
+        [void](Read-ValidatedWheelCache -CachePath $stagingPath -ExpectedKey $CacheKey)
+        Move-Item -LiteralPath $stagingPath -Destination $cachePath
+        [void](Read-ValidatedWheelCache -CachePath $cachePath -ExpectedKey $CacheKey)
+        Write-Host "R3_WHEEL_CACHE publish=success key=$CacheKey"
+    } finally {
+        if ($lockTaken) { $mutex.ReleaseMutex() }
+        $mutex.Dispose()
+    }
+}
+
 function Get-NormalizedPackageName {
     param([Parameter(Mandatory = $true)][string]$Name)
     return $Name.ToLowerInvariant().Replace("_", "-").Replace(".", "-")
@@ -1022,7 +1251,7 @@ function Write-SanitizedSummary {
         [string]$Code
     )
     $summary = [ordered]@{
-        schema_version = "faster-whisper-r3-verdict/1"
+        schema_version = "faster-whisper-r3-verdict/2"
         status = $Status
         failure_code = $Code
         commit_sha = $CommitSha.ToLowerInvariant()
@@ -1032,6 +1261,8 @@ function Write-SanitizedSummary {
         peak_gpu_memory_mib = $PeakMemoryMiB
         baseline_gpu_memory_mib = $BaselineMemoryMiB
         peak_gpu_utilization_percent = $PeakUtilization
+        wheel_cache_status = $WheelCacheStatus
+        wheel_cache_key = $WheelCacheKey
         profile_admission = "disabled"
         production_services_modified = $false
     }
@@ -1353,64 +1584,111 @@ try {
         "-r $RequirementsSource/asr_service/requirements-faster-whisper.txt"
     ) | Set-Content -LiteralPath $CombinedRequirements -Encoding ASCII
 
-    $DownloadLog = Join-Path $LogRoot "pip-download.log"
-    $DependencyFailureStage = "pip_download"
-    $DependencyFailureLog = $DownloadLog
-    $DependencyFailureOperation = "pip_download_proxy_setup"
-    Reset-ExternalCommandResult
-    Set-ScopedProxy -Proxy $env:ASR_DEPENDENCY_PROXY
-    $pipDownloadFailure = $null
-    $proxyRestoreFailure = $null
-    try {
-        $DependencyFailureOperation = "pip_download_command"
+    $ReferenceManifestPaths = @(
+        $InternalWheelManifestPath,
+        (Join-Path $ResolvedOss2WheelBundle "internal-wheel-manifest.json"),
+        (Join-Path $ResolvedAntlr4WheelBundle "internal-wheel-manifest.json"),
+        (Join-Path $ResolvedCrcmodWheelBundle "internal-wheel-manifest.json")
+    )
+    $CacheIdentity = Get-WheelCacheKey `
+        -PythonPath $VenvPython `
+        -ProductionFreezePath (Join-Path $EvidenceRoot "production-freeze.txt") `
+        -RequirementsPath (Join-Path $ResolvedSource "asr_service\requirements-faster-whisper.txt") `
+        -ReferenceManifestPaths $ReferenceManifestPaths
+    $CurrentReferenceManifestSha256 = @(
+        $ReferenceManifestPaths | ForEach-Object { Get-Sha256 -Path $_ }
+    )
+    $CachePath = Join-Path $WheelCacheRoot $CacheIdentity.Key
+    $WheelCacheKey = $CacheIdentity.Key
+    $CacheStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+    $CacheHit = $false
+    if (Test-Path -LiteralPath $CachePath) {
+        $CacheManifest = $null
         try {
-            Invoke-External `
-                -FilePath $VenvPython `
-                -Arguments @(
-                    "-m", "pip", "download",
-                    "--no-cache-dir",
-                    "--only-binary=:all:",
-                    "--dest", $Wheelhouse,
-                    "--index-url", "https://pypi.org/simple",
-                    "--extra-index-url", "https://download.pytorch.org/whl/cu128",
-                    "--find-links", $ResolvedInternalWheelBundle,
-                    "--find-links", $ResolvedOss2WheelBundle,
-                    "--find-links", $ResolvedAntlr4WheelBundle,
-                    "--find-links", $ResolvedCrcmodWheelBundle,
-                    "--constraint", (Join-Path $EvidenceRoot "production-freeze.txt"),
-                    "--requirement", $CombinedRequirements
-                ) `
-                -LogPath $DownloadLog
+            $CacheManifest = Read-ValidatedWheelCache -CachePath $CachePath -ExpectedKey $CacheIdentity.Key
         } catch {
-            $pipDownloadFailure = $_
+            Write-Host "R3_WHEEL_CACHE status=invalid key=$($CacheIdentity.Key)"
         }
-    } finally {
-        $DependencyFailureOperation = "pip_download_proxy_restore"
-        try {
-            Clear-ScopedProxy
-        } catch {
-            $proxyRestoreFailure = $_
+        if ($null -ne $CacheManifest) {
+            $WheelManifest = Copy-ValidatedWheelCacheToRun `
+                -CachePath $CachePath `
+                -CacheManifest $CacheManifest `
+                -CurrentReferenceManifestSha256 $CurrentReferenceManifestSha256
+            $CacheHit = $true
+            $WheelCacheStatus = "hit"
+            Write-Host "R3_WHEEL_CACHE status=hit key=$($CacheIdentity.Key)"
         }
     }
-    if ($null -ne $proxyRestoreFailure) {
-        throw "Dependency proxy environment could not be restored"
+    if (-not $CacheHit) {
+        $WheelCacheStatus = "miss"
+        Write-Host "R3_WHEEL_CACHE status=miss key=$($CacheIdentity.Key)"
+        $DownloadStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+        $DownloadLog = Join-Path $LogRoot "pip-download.log"
+        $DependencyFailureStage = "pip_download"
+        $DependencyFailureLog = $DownloadLog
+        $DependencyFailureOperation = "pip_download_proxy_setup"
+        Reset-ExternalCommandResult
+        Set-ScopedProxy -Proxy $env:ASR_DEPENDENCY_PROXY
+        $pipDownloadFailure = $null
+        $proxyRestoreFailure = $null
+        try {
+            $DependencyFailureOperation = "pip_download_command"
+            try {
+                Invoke-External `
+                    -FilePath $VenvPython `
+                    -Arguments @(
+                        "-m", "pip", "download",
+                        "--no-cache-dir",
+                        "--only-binary=:all:",
+                        "--dest", $Wheelhouse,
+                        "--index-url", "https://pypi.org/simple",
+                        "--extra-index-url", "https://download.pytorch.org/whl/cu128",
+                        "--find-links", $ResolvedInternalWheelBundle,
+                        "--find-links", $ResolvedOss2WheelBundle,
+                        "--find-links", $ResolvedAntlr4WheelBundle,
+                        "--find-links", $ResolvedCrcmodWheelBundle,
+                        "--constraint", (Join-Path $EvidenceRoot "production-freeze.txt"),
+                        "--requirement", $CombinedRequirements
+                    ) `
+                    -LogPath $DownloadLog
+            } catch {
+                $pipDownloadFailure = $_
+            }
+        } finally {
+            $DependencyFailureOperation = "pip_download_proxy_restore"
+            try {
+                Clear-ScopedProxy
+            } catch {
+                $proxyRestoreFailure = $_
+            }
+            Write-StageTiming -Stage "dependency_download" -Stopwatch $DownloadStopwatch
+        }
+        if ($null -ne $proxyRestoreFailure) {
+            throw "Dependency proxy environment could not be restored"
+        }
+        if ($null -ne $pipDownloadFailure) {
+            $DependencyFailureOperation = "pip_download_command"
+            throw $pipDownloadFailure
+        }
+        $DependencyFailureStage = "wheel_manifest"
+        $DependencyFailureOperation = "wheel_manifest_validation"
+        $DependencyFailureLog = $DownloadLog
+        $WheelManifest = New-WheelManifest `
+            -DownloadLog $DownloadLog `
+            -OutputPath (Join-Path $EvidenceRoot "wheel-manifest.json") `
+            -InternalManifests @($InternalWheelManifest, $Oss2WheelManifest, $Antlr4WheelManifest, $CrcmodWheelManifest)
+        Assert-WheelManifestUnchanged -Manifest $WheelManifest
+        Publish-WheelCache `
+            -CacheKey $CacheIdentity.Key `
+            -KeyMaterial $CacheIdentity.Material `
+            -WheelManifest $WheelManifest
     }
-    if ($null -ne $pipDownloadFailure) {
-        $DependencyFailureOperation = "pip_download_command"
-        throw $pipDownloadFailure
-    }
-    $DependencyFailureStage = "wheel_manifest"
-    $DependencyFailureOperation = "wheel_manifest_validation"
-    $DependencyFailureLog = $DownloadLog
-    $WheelManifest = New-WheelManifest `
-        -DownloadLog $DownloadLog `
-        -OutputPath (Join-Path $EvidenceRoot "wheel-manifest.json") `
-        -InternalManifests @($InternalWheelManifest, $Oss2WheelManifest, $Antlr4WheelManifest, $CrcmodWheelManifest)
-    Assert-WheelManifestUnchanged -Manifest $WheelManifest
+    Write-StageTiming -Stage "wheel_cache" -Stopwatch $CacheStopwatch
 
     $DependencyFailureStage = "pip_install"
     $DependencyFailureOperation = "pip_install_command"
     $DependencyFailureLog = Join-Path $LogRoot "pip-install-offline.log"
+    $InstallStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
     Invoke-External `
         -FilePath $VenvPython `
         -Arguments @(
@@ -1422,6 +1700,7 @@ try {
             "--requirement", $CombinedRequirements
         ) `
         -LogPath $DependencyFailureLog
+    Write-StageTiming -Stage "offline_install" -Stopwatch $InstallStopwatch
     Assert-WheelManifestUnchanged -Manifest $WheelManifest
     $DependencyFailureStage = "qualification_pip_check"
     $DependencyFailureOperation = "qualification_pip_check_command"
@@ -1481,6 +1760,7 @@ print('qualification-module-origins-verified')
         -LogPath $DependencyFailureLog
 
     $FailureCode = "model_preparation_failed"
+    $ModelStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
     Set-ScopedProxy -Proxy $env:ASR_MODEL_DOWNLOAD_PROXY
     try {
         Invoke-External `
@@ -1494,6 +1774,7 @@ print('qualification-module-origins-verified')
             -LogPath (Join-Path $LogRoot "model-preparation.log")
     } finally {
         Clear-ScopedProxy
+        Write-StageTiming -Stage "model_preparation" -Stopwatch $ModelStopwatch
     }
     if (-not (Test-Path -LiteralPath $ModelManifest -PathType Leaf)) {
         throw "Pinned faster-whisper Manifest was not prepared"
@@ -1588,6 +1869,7 @@ print('qualification-module-origins-verified')
     $FailureCode = "qualification_failed"
     $QualificationStdout = Join-Path $LogRoot "qualification-runner.stdout.log"
     $QualificationStderr = Join-Path $LogRoot "qualification-runner.stderr.log"
+    $InferenceStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
     $QualificationProcess = Start-Process `
         -FilePath $VenvPython `
         -ArgumentList @(
@@ -1649,6 +1931,7 @@ print('qualification-module-origins-verified')
     if ($QualificationSummary.status -ne "pass" -or $QualificationSummary.sample_count -ne 8) {
         throw "Qualification report did not pass every fixed gate"
     }
+    Write-StageTiming -Stage "eight_sample_inference" -Stopwatch $InferenceStopwatch
 
     $FailureCode = "postflight_failed"
     Stop-OwnedProcess `

@@ -335,7 +335,7 @@ def test_faster_whisper_qualification_workflow_is_manual_immutable_and_gated():
     assert "InternalWheelBundlePath" in workflow
     assert "needs: build-internal-wheel" in workflow
     assert "DependencyDiagnosticPath" in workflow
-    assert workflow.count("dependency-diagnostic.json") == 3
+    assert workflow.count("dependency-diagnostic.json") == 4
     assert "Dependency stage:" in workflow
     assert "Dependency operation:" in workflow
     assert "Failure origin:" in workflow
@@ -713,6 +713,68 @@ def test_faster_whisper_qualification_freezes_dependencies_model_and_gates():
     assert "CODE_RECALL_LIMIT = 0.95" in runner
     assert "TIMESTAMP_P95_LIMIT_MS = 1_500" in runner
     assert "RTF_LIMIT = 0.60" in runner
+
+
+def test_faster_whisper_qualification_uses_verified_persistent_wheel_cache():
+    script = read("scripts/qualify-faster-whisper-production.ps1")
+    workflow = read(".github/workflows/qualify-faster-whisper-production.yml")
+
+    assert 'qualification\\wheel-cache' in script
+    assert 'schema_version = "faster-whisper-wheel-cache-key/1"' in script
+    assert 'schema_version = "faster-whisper-wheel-cache/1"' in script
+    assert 'schema_version = "faster-whisper-r3-verdict/2"' in script
+    assert "wheel_cache_status = $WheelCacheStatus" in script
+    assert "wheel_cache_key = $WheelCacheKey" in script
+    assert "importlib.metadata.version('pip')" in script
+    assert "-m pip --version" not in script
+    for key_component in (
+        "python_version",
+        "python_cache_tag",
+        "platform_machine",
+        "platform_system",
+        "pip_version",
+        "torch_version",
+        "torchaudio_version",
+        "cuda_channel",
+        "production_freeze_sha256",
+        "requirements_sha256",
+        "reference_manifest_identity_sha256",
+    ):
+        assert key_component in script
+
+    assert "function Read-ValidatedWheelCache" in script
+    assert "function Copy-ValidatedWheelCacheToRun" in script
+    assert "function Publish-WheelCache" in script
+    assert "Wheel cache file set differs from its Manifest" in script
+    assert "Wheel cache content hash mismatch" in script
+    assert "[System.IO.FileAttributes]::ReparsePoint" in script
+    assert "Global\\RAGPinCheng-ASR-faster-whisper-wheel-cache-" in script
+    assert '".staging-$CacheKey-$RunId"' in script
+    assert '"quarantine"' in script
+    assert "Move-Item -LiteralPath $stagingPath -Destination $cachePath" in script
+
+    assert 'Write-Host "R3_WHEEL_CACHE status=hit' in script
+    assert 'Write-Host "R3_WHEEL_CACHE status=miss' in script
+    assert '"--no-cache-dir"' in script
+    assert '"--no-index"' in script
+    assert "Assert-WheelManifestUnchanged -Manifest $WheelManifest" in script
+    assert "Set-ScopedProxy -Proxy $env:ASR_DEPENDENCY_PROXY" in script
+
+    for stage in (
+        "dependency_download",
+        "wheel_cache",
+        "offline_install",
+        "model_preparation",
+        "eight_sample_inference",
+    ):
+        assert f'Write-StageTiming -Stage "{stage}"' in script
+
+    assert "id: upload_verdict" in workflow
+    assert "continue-on-error: true" in workflow
+    assert "Retry sanitized verdict upload" in workflow
+    assert "steps.upload_verdict.outcome == 'failure'" in workflow
+    assert "Wheel cache:" in workflow
+    assert "Wheel cache key:" in workflow
 
 
 def test_faster_whisper_qualification_drives_the_existing_result_flow():
