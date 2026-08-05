@@ -126,6 +126,11 @@ production freeze：
 合并后只允许使用新的完整 master SHA 重跑一次统一资格 workflow；取得精确 blocker
 或进入下一资格阶段后立即停止，不自动修改依赖或开放 Profile。
 
+首次自诊断 run `30963495106` 仍失败关闭，verdict 正常上传，但依赖日志为空时
+PowerShell 5.1 的 mandatory array 参数拒绝空集合，导致附加诊断未生成。同范围兼容修复
+必须允许空集合并以 `evidence_insufficient` 失败关闭，同时优先写入 runner artifact 路径；
+修复后只以相同参数重试，不改变资格范围。
+
 ### 2.1 仓库基线
 
 - PR #34 已合并到 `master`；
