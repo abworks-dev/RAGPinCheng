@@ -2187,3 +2187,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：新增 `.github/workflows/qualify-qwen3-asr-production.yml`、`scripts/qualify-qwen3-asr-production.ps1`、`scripts/prepare_qwen3_asr_models.py`、`scripts/run_qwen3_asr_qualification.py`、`scripts/prepare-qwen3-asr-qualification-samples.ps1`、资格 Manifest 示例与专项测试；更新部署静态测试、转录功能文档和 `TODO.md`。
 - 验证：两个 PowerShell 脚本 AST、Python `compileall`、`git diff --check` 通过；本机系统 Python 缺少 pytest 和 PyYAML，遵守约束未安装依赖，完整单元测试与 workflow YAML 解析交由干净 CI。未安装 Qwen 依赖、未下载模型、未启动服务或访问 production-asr。
 - 待办/风险：仓库工具仍待 PR/CI；只有合并后绑定完整 master SHA 的唯一 workflow 全部门禁通过，才能记录资格 PASS。当前 Profile 继续 disabled，生产状态未修改。
+
+### 10:41 — 修复 Qwen3-ASR PR Profile 契约断言
+
+- 完成：根据 PR #53 首轮 CI 的唯一失败，将 Phase 4 application runtime 测试从固定两个远端 Profile/Provider 更新为当前三个候选，补充 `qwen3-asr-zh-experimental-v1` 与 `qwen3-asr`；未修改运行时代码、Profile admission、资格参数或生产配置。
+- 文件：`tests/test_transcription_phase4_api.py`、`WORKLOG.md`。
+- 验证：首轮 CI 共 317/318 项转录契约测试通过，失败仅为旧列表少一个 Qwen 候选；修复后 Python 编译与 `git diff --check` 通过。本机仍未安装 pytest，完整回归交由 PR CI。
+- 待办/风险：待 PR #53 新一轮 CI 全绿后才可合并；未触发 production-asr workflow，未访问或修改生产状态。
