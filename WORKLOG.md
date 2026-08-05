@@ -2154,3 +2154,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 验证：来源工作区专项 Vitest 3/3 通过；按最新锁文件安装隔离依赖后，TypeScript project build 与 Vite production build 通过（2026 modules transformed）；`git diff --check` 通过。首次复用旧依赖目录时因缺少锁文件已声明的 Radix Dialog 无法构建，安装隔离依赖后已消除；构建保留既有 CSS 语法与主包大于 500 kB 警告。
 - 交付：独立草稿 PR #51 已创建，目标为 `master`，GitHub 判定可合并；CI 启动后迁移配置检查已通过，其余检查仍在运行。旧 PR #50 未修改或关闭。
 - 待办/风险：尚待 CI 全部完成及人工合并；依赖审计报告既有 10 项风险，本轮未运行自动修复，未修改依赖声明、API、数据契约、数据或部署配置。
+
+### 10:00 — 实施 R3 依赖诊断 v2
+
+- 完成：将依赖失败 artifact 升级为严格 v2 信封，区分阶段内操作、失败来源、原生命令退出码和捕获行数；补充 requirements、constraint、磁盘、权限、代理及进程启动的固定脱敏类别，并只在 `pip_download` 明确非零且普通解析不足时执行一次同约束、binary-only、无缓存的隔离 dry-run fallback。workflow summary 只展示固定安全字段。
+- 文件：`.github/workflows/qualify-faster-whisper-production.yml`、`scripts/qualify-faster-whisper-production.ps1`、`tests/test_asr_deployment_static.py`、`project-docs/plans/faster-whisper-r3-unified-qualification.md`、`TODO.md`、`WORKLOG.md`。
+- 验证：内部 wheel、部署边界、模型准备和 faster-whisper 资格定向测试 84/84 通过；PowerShell AST、Windows PowerShell 5.1 结构化命令证据/全部脱敏类别/v2 严格字段集合及无网络模拟 fallback 测试通过；`git diff --check` 通过。
+- 待办/风险：尚待 scoped review、独立 PR、远端 CI、合并和一次固定参数资格重跑；fallback 不安装包，但 pip dry-run 可能从既有索引下载解析所需的临时依赖文件。未修改依赖、production freeze、生产 venv、服务、防火墙、Ubuntu、数据库、Qdrant、模型或 Profile admission。
