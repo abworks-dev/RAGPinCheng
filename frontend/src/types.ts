@@ -168,6 +168,7 @@ export type IndexJob = {
   category: string;
   doc_type: "pdf" | "transcript" | string;
   source_path: string;
+  source_exists: boolean;
   file_size: number;
   status: "pending" | "parsing" | "chunking" | "summarizing" | "embedding" | "done" | "failed" | string;
   error: string | null;

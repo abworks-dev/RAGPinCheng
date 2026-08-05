@@ -482,6 +482,7 @@ def _job_row_to_dto(r: sqlite3.Row) -> IndexJobDTO:
         category=r["category"],
         doc_type=r["doc_type"],
         source_path=r["source_path"],
+        source_exists=Path(r["source_path"]).is_file(),
         file_size=r["file_size"],
         status=r["status"],
         error=r["error"],
