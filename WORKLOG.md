@@ -2208,3 +2208,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：新增 `scripts/extract_faster_whisper_resolver_evidence.py`、`tests/test_faster_whisper_resolver_evidence.py`；更新 `.github/workflows/diagnose-faster-whisper-dependencies-production.yml`、`tests/test_asr_deployment_static.py`、`project-docs/plans/faster-whisper-r3-unified-qualification.md`、`TODO.md`、`WORKLOG.md`。旧 replay 诊断脚本保留但不再由 workflow 调用。
 - 验证：离线解析器与部署静态定向测试首轮 39/40 通过，唯一失败暴露非法 requirement 尾部被误当作无约束，已收紧为解析失败并计入未解析证据；最终专项回归、PR 与远端 CI 尚待执行。
 - 待办/风险：合并后仅以新完整 master SHA 执行一次离线提取并只读取严格脱敏 JSON artifact；本阶段不运行 pip、不访问网络、不读取或上传原始日志、不修改依赖、生产服务、防火墙、Ubuntu、数据库、Qdrant、模型或 Profile admission。
+
+### 11:22 — 修复 resolver 冲突误判
+
+- 完成：针对首次离线提取将无版本 `funasr → oss2` 依赖误判为版本冲突的问题，新增有限、失败关闭的版本兼容判定；只有 production constraint 是精确数字 pin 且明确违反 owner 的数字比较条件时才形成 `version_constraint_conflict`，缺失约束或无法唯一判断时只保留候选并返回证据不完整。
+- 文件：更新 `scripts/extract_faster_whisper_resolver_evidence.py`、`tests/test_faster_whisper_resolver_evidence.py`、`project-docs/plans/faster-whisper-r3-unified-qualification.md`、`TODO.md`、`WORKLOG.md`。
+- 验证：补充真实 `oss2` 防误判、明确冲突、明确相容、缺失约束和不支持格式测试；最终专项回归、PR 和 CI 待执行。
+- 待办/风险：合并后只再执行一次固定离线提取并读取脱敏 JSON；不运行 pip、不读取原始日志、不修改依赖、production freeze、生产服务或 Profile admission。

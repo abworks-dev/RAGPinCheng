@@ -202,6 +202,18 @@ Qdrant、模型或 Profile admission。
 5. 旧 replay 诊断脚本保留为历史审计实现，但本次 workflow 不再调用；
 6. 合并后只执行一次。若证据仍不完整则停止，不自动迭代解析器或修改依赖。
 
+### 2.0.9 resolver 冲突误判修复
+
+首次离线提取 run `30971872737` 成功读取固定证据，但把无版本范围的
+`funasr 1.4.1 depends on oss2` 与 `oss2==2.19.1` 错判为版本冲突。无版本依赖允许该
+固定版本，不能形成 blocker。
+
+获批最小修复只在 owner 依赖自身包含明确版本比较符、production constraint 是单一精确
+数字版本，且该固定版本违反 owner 的全部合取条件时输出 `version_constraint_conflict`。
+缺失比较符、兼容约束、非数字版本、通配符、compatible-release 或非精确 constraint 均保持
+`evidence_incomplete`，只保留规范化候选。合并后允许再执行一次固定离线提取；仍不运行 pip、
+不读取或上传原始日志、不修改依赖或生产状态。
+
 ### 2.1 仓库基线
 
 - PR #34 已合并到 `master`；

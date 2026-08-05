@@ -95,6 +95,38 @@ def test_output_contract_is_strict_and_deterministic(tmp_path: Path):
     assert all(set(item) == {"package", "diagnosis_kind", "specifiers", "owners", "evidence_count"} for item in first["blockers"])
 
 
+def test_unversioned_owner_dependency_does_not_prove_conflict(tmp_path: Path):
+    root = _source(
+        tmp_path,
+        "The user requested (constraint) oss2==2.19.1",
+        "funasr 1.4.1 depends on oss2",
+    )
+    result = evidence.extract_evidence(source_root=root)
+    assert result["status"] == "evidence_incomplete"
+    assert result["blockers"] == []
+    assert {item["kind"] for item in result["candidates"]} == {
+        "constraint_requirement",
+        "owner_dependency",
+    }
+
+
+@pytest.mark.parametrize(
+    ("owner_specifier", "constraint_specifier", "expected"),
+    [
+        ("<2", "==2", True),
+        (">=2,<3", "==2.19.1", False),
+        ("==1.5", "==2", True),
+        ("", "==2", False),
+        ("~=1.5", "==2", False),
+        ("<2", ">=2", False),
+    ],
+)
+def test_conflict_proof_is_limited_and_unique(
+    owner_specifier: str, constraint_specifier: str, expected: bool
+):
+    assert evidence._specifiers_prove_conflict(owner_specifier, constraint_specifier) is expected
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [
