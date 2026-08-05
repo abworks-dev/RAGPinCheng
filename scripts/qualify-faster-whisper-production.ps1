@@ -62,6 +62,7 @@ $MachinePython = ""
 $DependencyFailureStage = "not_started"
 $DependencyFailureOperation = "not_started"
 $DependencyFailureLog = ""
+$WheelManifestFailureKind = ""
 $LastExternalCommandResult = [pscustomobject]@{
     failure_origin = "not_started"
     exit_code = $null
@@ -491,6 +492,7 @@ function New-WheelManifest {
         [Parameter(Mandatory = $true)][string]$OutputPath,
         [Parameter(Mandatory = $true)][object[]]$InternalManifests
     )
+    $script:WheelManifestFailureKind = "wheel_manifest_unclassified"
     $logText = Get-Content -LiteralPath $DownloadLog -Raw -Encoding UTF8
     $resolvedUrls = @(
         [regex]::Matches($logText, "https?://[^\s'`"<>]+") |
@@ -512,6 +514,7 @@ function New-WheelManifest {
                 [int64]$wheel.Length -ne [int64]$controlled.wheel.size_bytes -or
                 $wheelSha256 -ne [string]$controlled.wheel.sha256
             ) {
+                $script:WheelManifestFailureKind = "wheel_manifest_controlled_wheel_mismatch"
                 throw "Controlled internal wheel changed before wheelhouse recording"
             }
             $files += [ordered]@{
@@ -537,6 +540,7 @@ function New-WheelManifest {
             }
         }
         if ([string]::IsNullOrWhiteSpace($url)) {
+            $script:WheelManifestFailureKind = "wheel_manifest_source_url_unbound"
             throw "Unable to bind wheel file to its resolved download URL"
         }
         $files += [ordered]@{
@@ -547,7 +551,19 @@ function New-WheelManifest {
         }
     }
     if ($files.Count -eq 0) {
+        $script:WheelManifestFailureKind = "wheel_manifest_empty"
         throw "Wheelhouse is empty"
+    }
+    foreach ($referencePath in @(
+        (Join-Path $ResolvedInternalWheelBundle "internal-wheel-manifest.json"),
+        (Join-Path $ResolvedOss2WheelBundle "internal-wheel-manifest.json"),
+        (Join-Path $ResolvedAntlr4WheelBundle "internal-wheel-manifest.json"),
+        (Join-Path $ResolvedCrcmodWheelBundle "internal-wheel-manifest.json")
+    )) {
+        if (-not (Test-Path -LiteralPath $referencePath -PathType Leaf)) {
+            $script:WheelManifestFailureKind = "wheel_manifest_reference_missing"
+            throw "Compatibility reference Manifest is missing"
+        }
     }
     $manifest = [ordered]@{
         schema_version = "faster-whisper-wheel-manifest/3"
@@ -564,6 +580,7 @@ function New-WheelManifest {
         files = $files
     }
     Write-JsonFile -Path $OutputPath -Value $manifest
+    $script:WheelManifestFailureKind = ""
     return $manifest
 }
 
@@ -576,6 +593,7 @@ function Assert-WheelManifestUnchanged {
             (Get-Item -LiteralPath $path).Length -ne [int64]$entry.size_bytes -or
             (Get-Sha256 -Path $path) -ne [string]$entry.sha256
         ) {
+            $script:WheelManifestFailureKind = "wheel_manifest_integrity_changed"
             throw "Wheelhouse changed after its manifest was recorded"
         }
     }
@@ -953,6 +971,20 @@ function Write-SanitizedDependencyFailure {
             $diagnosis.Kind = "resolver_replay_insufficient"
             $diagnosis.Requirement = ""
         }
+    }
+    if (
+        $Stage -eq "wheel_manifest" -and
+        $WheelManifestFailureKind -in @(
+            "wheel_manifest_unclassified",
+            "wheel_manifest_controlled_wheel_mismatch",
+            "wheel_manifest_source_url_unbound",
+            "wheel_manifest_empty",
+            "wheel_manifest_reference_missing",
+            "wheel_manifest_integrity_changed"
+        )
+    ) {
+        $diagnosis.Kind = $WheelManifestFailureKind
+        $diagnosis.Requirement = ""
     }
     $result = [ordered]@{
         schema_version = "faster-whisper-r3-dependency-failure/2"

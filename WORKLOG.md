@@ -2312,3 +2312,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`scripts/qualify-faster-whisper-production.ps1`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
 - 验证：待执行部署边界与 faster-whisper 专项测试、PowerShell AST、PR/CI 及一次统一资格重跑。
 - 待办/风险：不修改依赖版本、production freeze、生产 venv、服务、防火墙或 Profile admission；资格失败时继续保持 Profile disabled。
+
+### 22:28 — 增强 faster-whisper Manifest 脱敏诊断
+
+- 完成：资格 run `31012199376` 仍在严格 wheel Manifest 门禁失败后，为六个固定 guard 增加受限失败码，复用既有 `diagnosis_kind` 字段区分未分类、受控 wheel 不匹配、来源 URL 未绑定、空 wheelhouse、兼容性参考缺失和记录后完整性变化；不输出文件名、路径、URL或原始日志。
+- 文件：`scripts/qualify-faster-whisper-production.ps1`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
+- 验证：faster-whisper 引擎、资格、resolver 与部署静态专项测试 86/86 通过；PowerShell AST 与 `git diff --check` 通过。
+- 待办/风险：待 PR/CI/合并和一次绑定新 master SHA 的统一资格重跑；生产服务和 Profile admission 保持不变。
