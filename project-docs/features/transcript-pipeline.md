@@ -59,7 +59,10 @@ Phase 5A/5B 已接通版本列表、只读 Markdown 预览、人工审核、显�
   与 CUDA FP16 参数；生产资格只接受
   `${PRODUCTION_DATA_ROOT}\RAGPinCheng-ASR\models` 下已持久化且通过完整 Manifest、文件集合、
   大小和 SHA-256 校验的本地制品，不在资格运行中访问 Hugging Face。首次填充或
-  恢复模型由独立手动 workflow 完成，服务与 Profile 保持关闭。
+  恢复模型由独立手动 workflow 完成；准备入口使用单一 TLS 1.2 Session 按固定
+  7 文件清单顺序流式下载，限制重定向到 Hugging Face 官方 HTTPS 域，保留
+  `.partial` 供同一 run 重试续传，并在原子发布前完成身份校验。现有服务保持
+  原状态，Profile admission 继续关闭。
 - Qwen3-ASR adapter 固定
   `Qwen/Qwen3-ASR-0.6B@5eb144179a02acc5e5ba31e748d22b0cf3e303b0`
   与
