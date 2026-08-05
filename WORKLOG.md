@@ -2229,6 +2229,13 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：新增 `scripts/build_internal_antlr4_wheel.py`、`tests/test_asr_internal_antlr4_wheel.py`；更新统一资格 workflow、PowerShell 编排、部署静态测试、R3 计划和 `WORKLOG.md`。
 - 验证：三个内部 wheel、部署边界及 faster-whisper 引擎/资格专项测试 84/84 通过；Python 编译、PowerShell AST 与 `git diff --check` 通过。
 - 待办/风险：待同范围 PR/CI/合并后继续统一资格；不修改 production freeze、生产 venv、服务、防火墙、Ubuntu、数据库、Qdrant、模型或 Profile admission。
+
+### 21:12 — 闭环 crcmod pure-Python blocker
+
+- 完成：资格 run `31008453083` 将前三个受控 wheel 后的唯一新门禁定位为 sdist-only `crcmod 1.7`；按其官方回退能力显式禁用 C 编译器，构建并只接受确定性 pure-Python `none-any` wheel，纳入四包统一 Manifest 与 wheelhouse 校验。
+- 文件：新增 `scripts/build_internal_crcmod_wheel.py`、`tests/test_asr_internal_crcmod_wheel.py`；更新统一资格 workflow、PowerShell 编排、部署静态测试、R3 计划和 `WORKLOG.md`。
+- 验证：四个内部 wheel及 faster-whisper 资格专项测试 87/87 通过；Python 编译、PowerShell AST 和 `git diff --check` 通过。
+- 待办/风险：待 PR/CI/合并后继续最终资格；生产服务和 Profile admission 保持不变。
 ### 11:22 — 实现 Qwen3-ASR 依赖失败诊断
 
 - 完成：按单独获批 R3 诊断方案新增默认关闭的 Qwen dependency workflow 和 Windows 诊断脚本，固定读取 source run `30970277613`、source SHA `86b69db6831e3cd201436a26bbe836229bf419bd`、production freeze、Qwen/Windows requirements 与受控 jieba wheel；既有日志证据不足时只执行一次 run-local、binary-only、no-cache 的 resolver dry-run。v2 artifact 只包含固定 operation/failure origin、退出码、捕获行数、诊断种类、ASCII requirement、文件 hash 和清理状态，不包含原始冲突行或敏感上下文。
