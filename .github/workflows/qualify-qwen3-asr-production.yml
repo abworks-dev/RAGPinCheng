@@ -1,0 +1,187 @@
+name: Qualify qwen3-asr Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: "Full 40-character merged master SHA to qualify"
+        required: true
+        type: string
+      execute_qualification:
+        description: "Install isolated dependencies, prepare both pinned models, and run real CUDA BF16 qualification"
+        required: true
+        default: false
+        type: boolean
+      prepare_synthetic_samples:
+        description: "Generate the fixed eight-sample non-sensitive Windows TTS qualification set"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-asr-qwen3-asr-qualification
+  cancel-in-progress: false
+
+jobs:
+  build-internal-wheel:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Validate immutable revision and explicit R3 gate
+        shell: bash
+        run: |
+          if [[ ! "${{ inputs.commit_sha }}" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "commit_sha must be a full 40-character SHA" >&2
+            exit 1
+          fi
+          if [[ "${{ inputs.commit_sha }}" != "${{ github.sha }}" ]]; then
+            echo "commit_sha must equal the workflow dispatch revision" >&2
+            exit 1
+          fi
+          if [[ "${{ github.ref }}" != "refs/heads/master" ]]; then
+            echo "qualification must be dispatched from master" >&2
+            exit 1
+          fi
+          if [[ "${{ inputs.execute_qualification }}" != "true" ]]; then
+            echo "execute_qualification must be explicitly enabled" >&2
+            exit 1
+          fi
+
+      - name: Check out requested merged revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 1
+
+      - name: Set up fixed wheel build Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build reproducible controlled jieba wheel
+        shell: bash
+        run: |
+          python scripts/build_internal_jieba_wheel.py build \
+            --bundle-dir "${{ runner.temp }}/jieba-internal-wheel-${{ github.run_id }}" \
+            --commit-sha "${{ inputs.commit_sha }}" \
+            --run-id "${{ github.run_id }}"
+
+      - name: Upload controlled jieba wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: jieba-internal-wheel-${{ github.run_id }}
+          path: ${{ runner.temp }}/jieba-internal-wheel-${{ github.run_id }}
+          if-no-files-found: error
+          retention-days: 14
+
+  qualify:
+    needs: build-internal-wheel
+    environment: production-asr
+    runs-on: [self-hosted, Windows, X64, asr-production]
+    timeout-minutes: 180
+    steps:
+      - name: Validate immutable revision and explicit R3 gate
+        shell: powershell
+        run: |
+          if ("${{ inputs.commit_sha }}" -notmatch '^[0-9a-fA-F]{40}$') {
+            throw "commit_sha must be a full 40-character SHA"
+          }
+          if ("${{ inputs.commit_sha }}".ToLowerInvariant() -ne "${{ github.sha }}".ToLowerInvariant()) {
+            throw "commit_sha must equal the workflow dispatch revision"
+          }
+          if ("${{ github.ref }}" -ne "refs/heads/master") {
+            throw "qualification must be dispatched from master"
+          }
+          if (-not [System.Convert]::ToBoolean("${{ inputs.execute_qualification }}")) {
+            throw "execute_qualification must be explicitly enabled"
+          }
+
+      - name: Check out requested merged revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 1
+
+      - name: Download controlled jieba wheel
+        uses: actions/download-artifact@v4
+        with:
+          name: jieba-internal-wheel-${{ github.run_id }}
+          path: ${{ runner.temp }}\jieba-internal-wheel-${{ github.run_id }}
+
+      - name: Prepare fixed synthetic qualification samples
+        if: ${{ inputs.prepare_synthetic_samples }}
+        shell: powershell
+        run: |
+          $params = @{
+            CommitSha = "${{ inputs.commit_sha }}"
+            SourceRoot = "${{ github.workspace }}"
+            RunId = "${{ github.run_id }}"
+          }
+          & "${{ github.workspace }}\scripts\prepare-qwen3-asr-qualification-samples.ps1" @params
+
+      - name: Run isolated qwen3-asr R3 qualification
+        shell: powershell
+        env:
+          ASR_DEPENDENCY_PROXY: ${{ secrets.ASR_DEPENDENCY_PROXY }}
+          ASR_MODEL_DOWNLOAD_PROXY: ${{ secrets.ASR_MODEL_DOWNLOAD_PROXY }}
+          GPU_SERVICE_TOKEN: ${{ secrets.GPU_SERVICE_TOKEN }}
+        run: |
+          $params = @{
+            CommitSha = "${{ inputs.commit_sha }}"
+            SourceRoot = "${{ github.workspace }}"
+            RunId = "${{ github.run_id }}"
+            ExecuteQualification = [System.Convert]::ToBoolean("${{ inputs.execute_qualification }}")
+            InternalWheelBundlePath = "${{ runner.temp }}\jieba-internal-wheel-${{ github.run_id }}"
+            SummaryPath = "${{ runner.temp }}\qwen3-asr-r3-${{ github.run_id }}\qualification-verdict.json"
+            DependencyDiagnosticPath = "${{ runner.temp }}\qwen3-asr-r3-${{ github.run_id }}\dependency-diagnostic.json"
+          }
+          & "${{ github.workspace }}\scripts\qualify-qwen3-asr-production.ps1" @params
+
+      - name: Publish sanitized qualification summary
+        if: ${{ always() }}
+        shell: powershell
+        run: |
+          $path = "${{ runner.temp }}\qwen3-asr-r3-${{ github.run_id }}\qualification-verdict.json"
+          if (Test-Path -LiteralPath $path -PathType Leaf) {
+            $summary = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
+            $lines = @(
+              "## qwen3-asr R3 qualification",
+              "",
+              "- Status: ``$($summary.status)``",
+              "- Failure code: ``$($summary.failure_code)``",
+              "- Commit: ``$($summary.commit_sha)``",
+              "- ASR revision: ``$($summary.asr_model_revision)``",
+              "- Aligner revision: ``$($summary.aligner_model_revision)``",
+              "- Baseline GPU memory: ``$($summary.baseline_gpu_memory_mib) MiB``",
+              "- Peak GPU memory: ``$($summary.peak_gpu_memory_mib) MiB``",
+              "- Profile admission: ``$($summary.profile_admission)``",
+              "- Production services modified: ``$($summary.production_services_modified)``"
+            )
+            $diagnosticPath = "${{ runner.temp }}\qwen3-asr-r3-${{ github.run_id }}\dependency-diagnostic.json"
+            if (Test-Path -LiteralPath $diagnosticPath -PathType Leaf) {
+              $diagnostic = Get-Content -LiteralPath $diagnosticPath -Raw -Encoding UTF8 | ConvertFrom-Json
+              $lines += @(
+                "- Dependency stage: ``$($diagnostic.dependency_stage)``",
+                "- Dependency diagnosis: ``$($diagnostic.diagnosis_kind)``",
+                "- Affected requirement: ``$($diagnostic.affected_requirement)``"
+              )
+            }
+            $lines -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding UTF8
+          } else {
+            "Qualification ended before a sanitized verdict could be written." |
+              Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding UTF8
+          }
+
+      - name: Upload sanitized verdict
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: qwen3-asr-r3-verdict-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}\qwen3-asr-r3-${{ github.run_id }}\qualification-verdict.json
+            ${{ runner.temp }}\qwen3-asr-r3-${{ github.run_id }}\dependency-diagnostic.json
+          if-no-files-found: warn
+          retention-days: 14

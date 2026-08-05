@@ -2181,3 +2181,9 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`.github/workflows/qualify-faster-whisper-production.yml`、`scripts/qualify-faster-whisper-production.ps1`、`tests/test_asr_deployment_static.py`、`project-docs/plans/faster-whisper-r3-unified-qualification.md`、`TODO.md`、`WORKLOG.md`。
 - 验证：内部 wheel、部署边界、模型准备和 faster-whisper 资格定向测试 84/84 通过；PowerShell AST、Windows PowerShell 5.1 结构化命令证据/全部脱敏类别/v2 严格字段集合及无网络模拟 fallback 测试通过；`git diff --check` 通过。
 - 待办/风险：尚待 scoped review、独立 PR、远端 CI、合并和一次固定参数资格重跑；fallback 不安装包，但 pip dry-run 可能从既有索引下载解析所需的临时依赖文件。未修改依赖、production freeze、生产 venv、服务、防火墙、Ubuntu、数据库、Qdrant、模型或 Profile admission。
+### 10:11 — 实现 Qwen3-ASR 统一 R3 资格工具
+
+- 完成：按获批统一 R3 方案新增默认关闭、完整 master SHA 绑定的 `production-asr` 手动 workflow；新增 Windows 隔离总编排、固定双模型准备、8 个非敏感样本生成、业务全链路质量评测和失败关闭测试。编排固定 run-local venv/wheelhouse、0.6B ASR 与 0.6B ForcedAligner revision、loopback 18300、CUDA BF16、14/8 GiB 显存门禁，并保留 BGE 空闲、8100/8200 健康、Profile disabled、Scheduled Task/防火墙不变和精确 PID 清理检查。
+- 文件：新增 `.github/workflows/qualify-qwen3-asr-production.yml`、`scripts/qualify-qwen3-asr-production.ps1`、`scripts/prepare_qwen3_asr_models.py`、`scripts/run_qwen3_asr_qualification.py`、`scripts/prepare-qwen3-asr-qualification-samples.ps1`、资格 Manifest 示例与专项测试；更新部署静态测试、转录功能文档和 `TODO.md`。
+- 验证：两个 PowerShell 脚本 AST、Python `compileall`、`git diff --check` 通过；本机系统 Python 缺少 pytest 和 PyYAML，遵守约束未安装依赖，完整单元测试与 workflow YAML 解析交由干净 CI。未安装 Qwen 依赖、未下载模型、未启动服务或访问 production-asr。
+- 待办/风险：仓库工具仍待 PR/CI；只有合并后绑定完整 master SHA 的唯一 workflow 全部门禁通过，才能记录资格 PASS。当前 Profile 继续 disabled，生产状态未修改。
