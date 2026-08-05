@@ -1,0 +1,160 @@
+name: Diagnose Qwen3-ASR Dependencies Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: "Full 40-character merged master SHA to diagnose"
+        required: true
+        type: string
+      execute_diagnosis:
+        description: "Read fixed source evidence and run one isolated resolver dry-run when required"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-asr-qwen3-asr-dependency-diagnosis
+  cancel-in-progress: false
+
+jobs:
+  build-internal-wheel:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Validate immutable revision and explicit diagnostic gate
+        shell: bash
+        run: |
+          if [[ ! "${{ inputs.commit_sha }}" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "commit_sha must be a full 40-character SHA" >&2
+            exit 1
+          fi
+          if [[ "${{ inputs.commit_sha }}" != "${{ github.sha }}" ]]; then
+            echo "commit_sha must equal the workflow dispatch revision" >&2
+            exit 1
+          fi
+          if [[ "${{ github.ref }}" != "refs/heads/master" ]]; then
+            echo "diagnosis must be dispatched from master" >&2
+            exit 1
+          fi
+          if [[ "${{ inputs.execute_diagnosis }}" != "true" ]]; then
+            echo "execute_diagnosis must be explicitly enabled" >&2
+            exit 1
+          fi
+
+      - name: Check out requested merged revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 1
+
+      - name: Set up fixed wheel build Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build reproducible controlled jieba wheel
+        shell: bash
+        run: |
+          python scripts/build_internal_jieba_wheel.py build \
+            --bundle-dir "${{ runner.temp }}/jieba-internal-wheel-${{ github.run_id }}" \
+            --commit-sha "${{ inputs.commit_sha }}" \
+            --run-id "${{ github.run_id }}"
+
+      - name: Upload controlled jieba wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: jieba-internal-wheel-${{ github.run_id }}
+          path: ${{ runner.temp }}/jieba-internal-wheel-${{ github.run_id }}
+          if-no-files-found: error
+          retention-days: 14
+
+  diagnose:
+    needs: build-internal-wheel
+    environment: production-asr
+    runs-on: [self-hosted, Windows, X64, asr-production]
+    timeout-minutes: 30
+    steps:
+      - name: Validate immutable revision and explicit diagnostic gate
+        shell: powershell
+        run: |
+          if ("${{ inputs.commit_sha }}" -notmatch '^[0-9a-fA-F]{40}$') {
+            throw "commit_sha must be a full 40-character SHA"
+          }
+          if ("${{ inputs.commit_sha }}".ToLowerInvariant() -ne "${{ github.sha }}".ToLowerInvariant()) {
+            throw "commit_sha must equal the workflow dispatch revision"
+          }
+          if ("${{ github.ref }}" -ne "refs/heads/master") {
+            throw "diagnosis must be dispatched from master"
+          }
+          if (-not [System.Convert]::ToBoolean("${{ inputs.execute_diagnosis }}")) {
+            throw "execute_diagnosis must be explicitly enabled"
+          }
+
+      - name: Check out requested merged revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 1
+
+      - name: Download controlled jieba wheel
+        uses: actions/download-artifact@v4
+        with:
+          name: jieba-internal-wheel-${{ github.run_id }}
+          path: ${{ runner.temp }}\jieba-internal-wheel-${{ github.run_id }}
+
+      - name: Diagnose fixed Qwen3-ASR dependency failure
+        shell: powershell
+        env:
+          ASR_DEPENDENCY_PROXY: ${{ secrets.ASR_DEPENDENCY_PROXY }}
+        run: |
+          $params = @{
+            CommitSha = "${{ inputs.commit_sha }}"
+            SourceRoot = "${{ github.workspace }}"
+            RunId = "${{ github.run_id }}"
+            InternalWheelBundlePath = "${{ runner.temp }}\jieba-internal-wheel-${{ github.run_id }}"
+            ExecuteDiagnosis = [System.Convert]::ToBoolean("${{ inputs.execute_diagnosis }}")
+            SummaryPath = "${{ runner.temp }}\qwen3-asr-r3-dependency-${{ github.run_id }}\dependency-diagnostic.json"
+          }
+          & "${{ github.workspace }}\scripts\diagnose-qwen3-asr-dependencies.ps1" @params
+
+      - name: Publish sanitized dependency diagnosis
+        if: ${{ always() }}
+        shell: powershell
+        run: |
+          $path = "${{ runner.temp }}\qwen3-asr-r3-dependency-${{ github.run_id }}\dependency-diagnostic.json"
+          if (Test-Path -LiteralPath $path -PathType Leaf) {
+            $result = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
+            @(
+              "## Qwen3-ASR R3 dependency diagnosis",
+              "",
+              "- Status: ``$($result.status)``",
+              "- Failure code: ``$($result.failure_code)``",
+              "- Operation: ``$($result.dependency_operation)``",
+              "- Failure origin: ``$($result.failure_origin)``",
+              "- Native exit code: ``$($result.native_exit_code)``",
+              "- Captured line count: ``$($result.captured_line_count)``",
+              "- Diagnosis kind: ``$($result.diagnosis_kind)``",
+              "- Affected requirement: ``$($result.affected_requirement)``",
+              "- Source run: ``$($result.source_run_id)``",
+              "- Resolver replayed: ``$($result.resolver_replayed)``",
+              "- Cleanup complete: ``$($result.cleanup_complete)``",
+              "- Profile admission: ``$($result.profile_admission)``",
+              "- Production services modified: ``$($result.production_services_modified)``"
+            ) -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding UTF8
+          } else {
+            "Dependency diagnosis ended before a sanitized result could be written." |
+              Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding UTF8
+          }
+
+      - name: Upload sanitized dependency diagnosis
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: qwen3-asr-r3-dependency-${{ github.run_id }}
+          path: ${{ runner.temp }}\qwen3-asr-r3-dependency-${{ github.run_id }}\dependency-diagnostic.json
+          if-no-files-found: warn
+          retention-days: 14
