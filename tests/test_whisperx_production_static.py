@@ -27,6 +27,7 @@ def test_workflow_is_manual_immutable_and_production_scoped():
 
 def test_windows_runner_is_isolated_and_cannot_mutate_production_controls():
     script = read("scripts/smoke-whisperx-production.ps1")
+    assert all(value < 128 for value in script.encode("utf-8"))
     lowered = script.lower()
     assert r"D:\Services\RAGPinCheng-ASR-WhisperX" in script
     assert r"D:\ServiceData\RAGPinCheng-ASR-WhisperX" in script
