@@ -2326,3 +2326,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：新增 `.github/workflows/diagnose-whisperx-production.yml`；更新 `scripts/run_whisperx_qualification.py`、`scripts/qualify-whisperx-production.ps1`、`asr_service/tests/test_whisperx_qualification.py`、`project-docs/features/transcript-pipeline.md`、`WORKLOG.md`。
 - 验证：WhisperX 诊断、资格、引擎及部署静态专项测试 52/52 通过；Python compileall、PowerShell 5.1 AST、两个 workflow YAML 解析和 `git diff --check` 通过。
 - 待办/风险：尚待 PR、完整 CI、合并和一次 production-asr 诊断 run；诊断不得启用 Profile、降低阈值、修改模型/样本/参考答案、安装 FFmpeg、注册服务或接入业务流量。若证据不完整即失败关闭。
+
+### 23:14 — 实施 faster-whisper 可校验 wheelhouse 缓存
+
+- 完成：为 Windows 统一资格增加 Administrator/SYSTEM 受控的持久 wheelhouse，缓存键覆盖 Python/ABI、Windows 架构、pip、CUDA/torch/torchaudio、production freeze、faster-whisper requirements 与四个受控 wheel 的稳定身份；cache hit 严格复验文件集合、reparse point、大小、哈希和 Manifest，cache miss 继续 no-cache/binary-only 下载并经同盘 staging 原子发布，损坏项隔离后重建。每轮仍创建全新 venv、离线安装并执行全部依赖、许可证、模型、GPU 和八样本门禁；脱敏 verdict 升级为 v2 并记录 hit/miss 与缓存键，artifact 上传失败时受控重试一次。
+- 文件：`.github/workflows/qualify-faster-whisper-production.yml`、`scripts/qualify-faster-whisper-production.ps1`、`tests/test_asr_deployment_static.py`、`project-docs/plans/faster-whisper-r3-unified-qualification.md`、`WORKLOG.md`。
+- 验证：faster-whisper 部署、引擎、资格和 resolver 专项测试 87/87 通过；PowerShell AST、workflow YAML 解析和 `git diff --check` 通过。
+- 待办/风险：待 PR/CI/合并后执行首次 cache miss 与第二次 cache hit 的真实统一资格；两轮均不得修改生产服务或 Profile admission。

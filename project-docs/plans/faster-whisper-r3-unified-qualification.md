@@ -265,6 +265,22 @@ freeze 作为 constraint。这样任何共享依赖都不得改变生产版本�
 wheelhouse；wheelhouse Schema 升级为 `/3` 明确记录 reference Manifest 哈希。生产 venv、freeze、
 binary-only 和 Profile admission 均不改变。
 
+### 2.0.14 可校验持久 wheelhouse 缓存
+
+Windows 自托管 runner 不启用 pip 默认缓存。资格脚本使用固定
+`${PRODUCTION_DATA_ROOT}\RAGPinCheng-ASR\qualification\wheel-cache`，按 Python 版本与 ABI、
+Windows 架构、pip 版本、CUDA/torch/torchaudio、production freeze、faster-whisper
+requirements 及四个受控 wheel 的稳定 Manifest 身份计算缓存键。
+
+缓存 miss 仍以 `--no-cache-dir --only-binary=:all:` 下载到 run-local wheelhouse，
+生成严格来源 URL、大小和 SHA-256 Manifest 后，在同盘 staging 内复验并原子发布。
+缓存 hit 必须重新计算缓存键，拒绝未知、多余、缺失、reparse point、大小或哈希不符的文件，
+再复制到本轮隔离 wheelhouse；损坏项移动到隔离目录后重新下载，不原位修补或静默覆盖。
+每轮仍创建全新 venv，使用 `--no-index` 离线安装，并执行 `pip check`、freeze、模块来源、
+许可证、模型和真实 8 样本 GPU 门禁。缓存、Manifest 和阶段日志不得包含 Token 或代理地址。
+workflow 对脱敏 verdict artifact 提供一次受控上传重试；内部 wheel artifact 链路优化不属于
+本次范围。
+
 ### 2.1 仓库基线
 
 - PR #34 已合并到 `master`；
