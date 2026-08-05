@@ -61,19 +61,23 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Build reproducible controlled jieba wheel
+      - name: Build reproducible controlled internal wheels
         shell: bash
         run: |
           python scripts/build_internal_jieba_wheel.py build \
-            --bundle-dir "${{ runner.temp }}/jieba-internal-wheel-${{ github.run_id }}" \
+            --bundle-dir "${{ runner.temp }}/faster-whisper-internal-wheels-${{ github.run_id }}/jieba" \
+            --commit-sha "${{ inputs.commit_sha }}" \
+            --run-id "${{ github.run_id }}"
+          python scripts/build_internal_oss2_wheel.py build \
+            --bundle-dir "${{ runner.temp }}/faster-whisper-internal-wheels-${{ github.run_id }}/oss2" \
             --commit-sha "${{ inputs.commit_sha }}" \
             --run-id "${{ github.run_id }}"
 
-      - name: Upload controlled jieba wheel
+      - name: Upload controlled internal wheels
         uses: actions/upload-artifact@v4
         with:
-          name: jieba-internal-wheel-${{ github.run_id }}
-          path: ${{ runner.temp }}/jieba-internal-wheel-${{ github.run_id }}
+          name: faster-whisper-internal-wheels-${{ github.run_id }}
+          path: ${{ runner.temp }}/faster-whisper-internal-wheels-${{ github.run_id }}
           if-no-files-found: error
           retention-days: 14
 
@@ -105,11 +109,11 @@ jobs:
           ref: ${{ inputs.commit_sha }}
           fetch-depth: 1
 
-      - name: Download controlled jieba wheel
+      - name: Download controlled internal wheels
         uses: actions/download-artifact@v4
         with:
-          name: jieba-internal-wheel-${{ github.run_id }}
-          path: ${{ runner.temp }}\jieba-internal-wheel-${{ github.run_id }}
+          name: faster-whisper-internal-wheels-${{ github.run_id }}
+          path: ${{ runner.temp }}\faster-whisper-internal-wheels-${{ github.run_id }}
 
       - name: Prepare fixed synthetic qualification samples
         if: ${{ inputs.prepare_synthetic_samples }}
@@ -134,7 +138,8 @@ jobs:
             SourceRoot = "${{ github.workspace }}"
             RunId = "${{ github.run_id }}"
             ExecuteQualification = [System.Convert]::ToBoolean("${{ inputs.execute_qualification }}")
-            InternalWheelBundlePath = "${{ runner.temp }}\jieba-internal-wheel-${{ github.run_id }}"
+            InternalWheelBundlePath = "${{ runner.temp }}\faster-whisper-internal-wheels-${{ github.run_id }}\jieba"
+            Oss2WheelBundlePath = "${{ runner.temp }}\faster-whisper-internal-wheels-${{ github.run_id }}\oss2"
             SummaryPath = "${{ runner.temp }}\faster-whisper-r3-${{ github.run_id }}\qualification-verdict.json"
             DependencyDiagnosticPath = "${{ runner.temp }}\faster-whisper-r3-${{ github.run_id }}\dependency-diagnostic.json"
           }

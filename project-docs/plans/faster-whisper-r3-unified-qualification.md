@@ -214,6 +214,23 @@ Qdrant、模型或 Profile admission。
 `evidence_incomplete`，只保留规范化候选。合并后允许再执行一次固定离线提取；仍不运行 pip、
 不读取或上传原始日志、不修改依赖或生产状态。
 
+### 2.0.10 oss2 受控 wheel 与资格闭环
+
+修复后的离线提取 run `30972229558` 确认无可证明的版本冲突：`funasr 1.4.1` 只声明
+无版本范围的 `oss2`，production freeze 固定 `oss2==2.19.1`。官方 PyPI release metadata
+同时确认 `oss2 2.19.1` 只发布大小 298845 bytes、SHA-256
+`a8ab9ee7eb99e88a7e1382edc6ea641d219d585a7e074e3776e9dec9473e59c1` 的 sdist，
+没有 wheel。因此它与此前 jieba blocker 相同：被资格流程的全局 `--only-binary=:all:` 拒绝，
+而不是版本上下界冲突。
+
+完整闭环沿用已批准的受控 wheel 安全模式：GitHub-hosted Python 3.11 job 从固定
+`files.pythonhosted.org` URL 下载并校验 oss2 sdist，在网络禁用的构建阶段使用固定
+setuptools/wheel 重复构建两次；只接受确定性 pure-Python `none-any` wheel。jieba 与 oss2
+分别保留严格 Manifest，作为同一 artifact 交给 Windows；资格脚本逐包复验身份、哈希、大小、
+标签和 run/commit，并要求两个 wheel 都实际进入 wheelhouse。wheelhouse Manifest 升级为
+`faster-whisper-wheel-manifest/2` 并记录两个受控 Manifest 哈希。该修复不放宽 binary-only，
+不改变 production freeze，也不写入生产 venv。
+
 ### 2.1 仓库基线
 
 - PR #34 已合并到 `master`；
