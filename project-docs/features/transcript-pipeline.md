@@ -60,8 +60,9 @@ Phase 5A/5B 已接通版本列表、只读 Markdown 预览、人工审核、显�
   仅允许 Windows Transformers/CUDA BF16 候选参数；R2 未安装依赖、下载模型或
   运行推理，application Profile 保持 disabled。
 
-SenseVoice 已完成独立生产短媒体验收。Qwen3-ASR 尚未执行 R3A/R3B，因此没有
-Windows、CUDA、依赖、模型、质量或资源资格结论。faster-whisper 的固定 8 个非敏感 Windows
+SenseVoice 已完成独立生产短媒体验收。Qwen3-ASR 已具备统一 R3 仓库资格工具，
+但真实 workflow 尚未取得 PASS，因此没有 Windows、CUDA、依赖、模型、质量或资源
+资格结论。faster-whisper 的固定 8 个非敏感 Windows
 TTS 样本已生成并通过严格 Manifest 校验，但生产 R3 workflow 在组合依赖解析阶段
 得到 `dependency_preparation_failed`；模型、CUDA、质量和资源门禁均未运行，因此
 其 R2 接线不构成运行或生产资格结论。
