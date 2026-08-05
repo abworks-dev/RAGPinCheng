@@ -273,7 +273,8 @@ Windows 架构、pip 版本、CUDA/torch/torchaudio、production freeze、faster
 requirements 及四个受控 wheel 的稳定 Manifest 身份计算缓存键。
 
 缓存 miss 仍以 `--no-cache-dir --only-binary=:all:` 下载到 run-local wheelhouse，
-生成严格来源 URL、大小和 SHA-256 Manifest 后，在同盘 staging 内复验并原子发布。
+先用同约束的 pip `--dry-run --ignore-installed --report` JSON 按归档 SHA-256 绑定公开
+下载 URL，再生成严格来源 URL、大小和 SHA-256 Manifest，并在同盘 staging 内复验后原子发布。
 缓存 hit 必须重新计算缓存键，拒绝未知、多余、缺失、reparse point、大小或哈希不符的文件，
 再复制到本轮隔离 wheelhouse；损坏项移动到隔离目录后重新下载，不原位修补或静默覆盖。
 每轮仍创建全新 venv，使用 `--no-index` 离线安装，并执行 `pip check`、freeze、模块来源、

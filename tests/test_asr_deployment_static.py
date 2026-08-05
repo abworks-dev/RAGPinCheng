@@ -678,6 +678,7 @@ def test_faster_whisper_qualification_freezes_dependencies_model_and_gates():
         "production_pip_check_command",
         "qualification_venv_command",
         "pip_download_proxy_setup",
+        "pip_resolution_report_command",
         "pip_download_command",
         "pip_download_proxy_restore",
         "wheel_manifest_validation",
@@ -690,6 +691,7 @@ def test_faster_whisper_qualification_freezes_dependencies_model_and_gates():
         assert f'$DependencyFailureOperation = "{operation}"' in script
     for manifest_failure_kind in (
         "wheel_manifest_unclassified",
+        "wheel_manifest_resolution_report_missing",
         "wheel_manifest_controlled_wheel_mismatch",
         "wheel_manifest_source_url_unbound",
         "wheel_manifest_empty",
@@ -756,6 +758,11 @@ def test_faster_whisper_qualification_uses_verified_persistent_wheel_cache():
     assert 'Write-Host "R3_WHEEL_CACHE status=hit' in script
     assert 'Write-Host "R3_WHEEL_CACHE status=miss' in script
     assert '"--no-cache-dir"' in script
+    assert '"--dry-run"' in script
+    assert '"--ignore-installed"' in script
+    assert '"--report", $ResolutionReport' in script
+    assert "download_info.archive_info.hashes.sha256" in script
+    assert "-ResolutionReportPath $ResolutionReport" in script
     assert '"--no-index"' in script
     assert "Assert-WheelManifestUnchanged -Manifest $WheelManifest" in script
     assert "Set-ScopedProxy -Proxy $env:ASR_DEPENDENCY_PROXY" in script
