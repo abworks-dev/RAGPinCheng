@@ -379,11 +379,20 @@ def test_faster_whisper_model_artifact_preparation_is_manual_and_isolated():
     assert "activate_service" not in workflow.lower()
 
     assert "PrepareModel must be explicitly enabled" in script
-    assert "ASR_SERVICE_ENABLED=false" in script
+    assert "ASR_SERVICE_ENABLED=(true|false)" in script
+    assert "function Get-ServiceSnapshot" in script
+    assert "function Assert-ServiceSnapshotUnchanged" in script
+    assert "ListenerPid" in script
+    assert "ListenerExecutable" in script
+    assert "TaskState" in script
+    assert "ASR service task or listener identity changed" in script
     assert "ASR_MODEL_DOWNLOAD_PROXY must be an absolute HTTP(S) URL without credentials" in script
     assert "At least 10 GiB free space" in script
     assert "Get-ScheduledTask" in script
-    assert "Get-NetTCPConnection -LocalPort 8200 -State Listen" in script
+    assert "Get-NetTCPConnection `" in script
+    assert "-LocalPort 8200 `" in script
+    assert "-State Listen `" in script
+    assert "Get-CimInstance" in script
     assert "--staging-root" in script
     assert "--offline-only" in script
     assert "model-preparation\\faster-whisper\\$RunId" in script
