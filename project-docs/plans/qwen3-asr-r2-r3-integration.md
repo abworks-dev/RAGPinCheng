@@ -644,6 +644,30 @@ Qdrant 或 Profile admission，不使用真实业务媒体，失败 artifact 保
 
 诊断只定位 blocker，不构成资格通过，也不授权修改依赖或重跑完整资格。
 
+### 10.4 离线证据提取审批
+
+依赖诊断 PR #56 合并为
+`9f0cb2b0ba9ae2f226a289f4a4db68333fcef50e`，唯一运行
+`30972780438` 以 `focused_probe_failed` 失败关闭；`diagnosis_kind=unknown`、
+`affected_requirement=oss2`，清理完成，Profile disabled，生产服务未修改。该结果仍未
+证明具体版本冲突。
+
+经单独 R3 批准，原诊断 workflow 改为纯标准库离线提取：
+
+1. 只读取固定目录
+   `dependency-diagnostics\30972780438` 下的 `state\dependency-diagnostic.json`、
+   `logs\resolver-replay.log` 和 `logs\focused-binary-probe.log`；
+2. 严格绑定诊断 run/SHA、原资格 run/SHA、v2 Schema、退出码、清理及生产不变字段；
+3. 只输出 `qwen3-asr-r3-resolver-evidence/1` 的规范化 package/specifier、
+   分类计数、blocker、文件哈希/大小/行数，不输出原始日志行；
+4. 无版本 owner 依赖（例如 `funasr ... depends on oss2`）不得单独证明版本冲突；
+5. workflow 不构建或下载 wheel、不读取代理、不运行 pip、不安装依赖、不下载模型、
+   不启动服务，也不修改 production freeze 或 Profile admission；
+6. PR/CI 合并后仅执行一次绑定新完整 master SHA 的手动提取，取得脱敏 JSON 后停止。
+
+离线输出即使为 `evidence_complete` 也只表示日志足以定位 blocker，不构成 Qwen3-ASR
+资格通过；若为 `evidence_incomplete`，必须停止并另行提出后续方案。
+
 ## 11. 最终完成条件
 
 Qwen3-ASR 只有在以下全部完成后才可称为“资格通过”：
