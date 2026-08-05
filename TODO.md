@@ -177,10 +177,10 @@
     `production-asr` workflow；在隔离 venv、固定模型和 loopback ASR 服务中验证
     依赖共存、CUDA FP16、8 个非敏感短样本、质量与资源门禁。未通过前保持
     admission disabled，R3 通过后仍须另批生产启用。
-  - [ ] 合并 R3 依赖诊断 v2 后，以新的完整 master SHA 同参数重试一次统一资格
-    workflow；只读取严格脱敏的 operation、failure origin、退出码、行数、诊断种类和
-    requirement，取得结果后停止，不得自行修改依赖、production freeze、服务或
-    Profile admission。
+  - [ ] 合并 R3 离线受限脱敏 resolver 证据提取后，以新的完整 master SHA 执行一次既有
+    手动诊断 workflow；只读取 run `30968517582` 的两个固定日志和 v2 diagnostic，
+    仅下载严格脱敏 JSON artifact，取得结果后停止，不得运行 pip、访问网络、修改依赖、
+    production freeze、服务或 Profile admission。
   - [ ] Qwen3-ASR R2 代码通过 scoped review、干净环境 CI 并合并后，按统一 R3
     一次性方案审批并执行单一 workflow；内部依次通过依赖/许可证/CUDA、双模型、
     真实推理、8 样本质量与资源门禁，任一前置门禁失败即停止，Profile 保持 disabled。
