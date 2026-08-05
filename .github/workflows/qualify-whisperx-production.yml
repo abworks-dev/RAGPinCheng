@@ -72,13 +72,13 @@ jobs:
             -SourceRoot "${{ github.workspace }}" `
             -RunId "${{ github.run_id }}" `
             -ExecuteQualification $true `
-            -SummaryPath "${{ runner.temp }}\whisperx-qualification-${{ github.run_id }}\verdict.json"
+            -SummaryPath "D:\Services\RAGPinCheng-ASR-WhisperX\qualification\runs\${{ github.run_id }}\reports\verdict.json"
 
       - name: Publish sanitized qualification summary
         if: ${{ always() }}
         shell: powershell
         run: |
-          $path = "${{ runner.temp }}\whisperx-qualification-${{ github.run_id }}\verdict.json"
+          $path = "D:\Services\RAGPinCheng-ASR-WhisperX\qualification\runs\${{ github.run_id }}\reports\verdict.json"
           if (Test-Path -LiteralPath $path -PathType Leaf) {
             $v = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
             @(
@@ -100,10 +100,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: whisperx-qualification-verdict-${{ github.run_id }}
-          path: |
-            ${{ runner.temp }}\whisperx-qualification-${{ github.run_id }}\verdict.json
-            D:\Services\RAGPinCheng-ASR-WhisperX\qualification\runs\${{ github.run_id }}\reports\qualification-summary.json
-            D:\Services\RAGPinCheng-ASR-WhisperX\qualification\runs\${{ github.run_id }}\reports\sample-results.json
-            D:\Services\RAGPinCheng-ASR-WhisperX\qualification\runs\${{ github.run_id }}\reports\license-audit.json
+          path: D:\Services\RAGPinCheng-ASR-WhisperX\qualification\runs\${{ github.run_id }}\reports
           if-no-files-found: warn
           retention-days: 14
