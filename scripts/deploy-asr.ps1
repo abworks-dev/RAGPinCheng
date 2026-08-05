@@ -232,7 +232,9 @@ New-Item -ItemType Directory -Path $staging | Out-Null
 foreach ($item in @("asr_service", "src")) {
     Copy-Item -LiteralPath (Join-Path $resolvedSource $item) -Destination $staging -Recurse
 }
-Copy-Item -LiteralPath (Join-Path $resolvedSource "asr_service\requirements-windows.txt") -Destination $staging
+foreach ($requirementsName in @("requirements-service-core.txt", "requirements-windows.txt")) {
+    Copy-Item -LiteralPath (Join-Path $resolvedSource "asr_service\$requirementsName") -Destination $staging
+}
 Copy-Item -LiteralPath (Join-Path $resolvedSource "scripts\start-asr-service.ps1") -Destination $scriptRoot -Force
 Copy-Item -LiteralPath (Join-Path $resolvedSource "scripts\verify-asr-service.ps1") -Destination $scriptRoot -Force
 Set-Content -LiteralPath (Join-Path $staging "DEPLOYED_COMMIT") -Value $CommitSha.ToLowerInvariant() -Encoding ascii
@@ -344,7 +346,10 @@ if ($InstallDependencies) {
                 platform = "windows-x64"
                 torch = "2.7.0+cu128"
                 torchaudio = "2.7.0+cu128"
-                requirements_sha256 = Get-SharedWheelSha256 -Path (Join-Path $staging "requirements-windows.txt")
+                requirements_sha256 = @(
+                    Get-SharedWheelSha256 -Path (Join-Path $staging "requirements-service-core.txt")
+                    Get-SharedWheelSha256 -Path (Join-Path $staging "requirements-windows.txt")
+                )
                 wheels = $wheelIdentity
             }
             $sharedKey = Get-SharedTextSha256 -Text ($sharedMaterial | ConvertTo-Json -Depth 12 -Compress)
