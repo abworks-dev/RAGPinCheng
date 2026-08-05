@@ -7,6 +7,7 @@ from .asr_service_contract import ServiceCapabilities
 from .profile import (
     FasterWhisperRemoteConfig,
     ProfileRegistry,
+    Qwen3AsrRemoteConfig,
     ReleasePolicy,
     RemoteAsrServiceConfig,
     TranscriptionProfileDefinition,
@@ -23,6 +24,14 @@ FASTER_WHISPER_PROVIDER_KEY = "faster-whisper"
 FASTER_WHISPER_SERVICE_PROFILE_ID = "faster-whisper-large-v3-turbo-v1"
 FASTER_WHISPER_MODEL_ID = "dropbox-dash/faster-whisper-large-v3-turbo"
 FASTER_WHISPER_MODEL_REVISION = "0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf"
+
+QWEN3_ASR_PROFILE_ID = "qwen3-asr-zh-experimental-v1"
+QWEN3_ASR_PROVIDER_KEY = "qwen3-asr"
+QWEN3_ASR_SERVICE_PROFILE_ID = "qwen3-asr-06b-aligner-v1"
+QWEN3_ASR_MODEL_ID = "Qwen/Qwen3-ASR-0.6B"
+QWEN3_ASR_MODEL_REVISION = "5eb144179a02acc5e5ba31e748d22b0cf3e303b0"
+QWEN3_ALIGNER_MODEL_ID = "Qwen/Qwen3-ForcedAligner-0.6B"
+QWEN3_ALIGNER_MODEL_REVISION = "c7cbfc2048c462b0d63a45797104fc9db3ad62b7"
 
 FUNASR_SENSEVOICE_PROFILE_ID = "funasr-sensevoice-zh-experimental-v1"
 FUNASR_SENSEVOICE_PROVIDER_KEY = "funasr-sensevoice"
@@ -76,6 +85,23 @@ def _profiles() -> tuple[TranscriptionProfileDefinition, ...]:
             release_policy=ReleasePolicy(True, False, False),
             evidence_refs=(
                 "project-docs/plans/faster-whisper-provider-integration.md",
+            ),
+        ),
+        TranscriptionProfileDefinition.create(
+            profile_id=QWEN3_ASR_PROFILE_ID,
+            display_name="Qwen3-ASR 中文实验配置",
+            description=(
+                "固定 0.6B ASR、0.6B ForcedAligner 与 revision；"
+                "R2 仅完成代码接线，准入保持关闭。"
+            ),
+            provider_key=QWEN3_ASR_PROVIDER_KEY,
+            provider_config=Qwen3AsrRemoteConfig(),
+            normalizer_config=NormalizerConfig(2, 500, 1000),
+            qualification=ProfileQualification.experimental,
+            admission=ProfileAdmission.disabled,
+            release_policy=ReleasePolicy(True, False, False),
+            evidence_refs=(
+                "project-docs/plans/qwen3-asr-r2-r3-integration.md",
             ),
         ),
         TranscriptionProfileDefinition.create(

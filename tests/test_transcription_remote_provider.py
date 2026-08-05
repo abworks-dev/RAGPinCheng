@@ -24,6 +24,9 @@ from src.transcription.profile_catalog import (
     FASTER_WHISPER_PROVIDER_KEY,
     FASTER_WHISPER_SERVICE_PROFILE_ID,
     FUNASR_SENSEVOICE_PROFILE_ID,
+    QWEN3_ASR_PROFILE_ID,
+    QWEN3_ASR_PROVIDER_KEY,
+    QWEN3_ASR_SERVICE_PROFILE_ID,
     build_phase3_profile_catalog,
 )
 from src.transcription.provider_protocol import (
@@ -230,6 +233,25 @@ def test_faster_whisper_uses_the_same_remote_provider_and_pipeline():
     result = run(client, profile_id=FASTER_WHISPER_PROFILE_ID)
     assert result.__class__.__name__ == "CanonicalTranscript"
     assert result.profile_snapshot.provider_key == FASTER_WHISPER_PROVIDER_KEY
+    assert client.calls == [
+        "capabilities",
+        "create",
+        "upload:0",
+        "complete",
+        "start",
+        "poll",
+        "result",
+    ]
+
+
+def test_qwen3_asr_uses_the_same_remote_provider_and_pipeline():
+    client = FakeClient(
+        provider_key=QWEN3_ASR_PROVIDER_KEY,
+        service_profile_id=QWEN3_ASR_SERVICE_PROFILE_ID,
+    )
+    result = run(client, profile_id=QWEN3_ASR_PROFILE_ID)
+    assert result.__class__.__name__ == "CanonicalTranscript"
+    assert result.profile_snapshot.provider_key == QWEN3_ASR_PROVIDER_KEY
     assert client.calls == [
         "capabilities",
         "create",
