@@ -74,15 +74,17 @@ def test_failure_dto_exposes_safe_message_and_retry_policy():
     assert "identity_conflict" not in identity_conflict.message
 
 
-def test_application_runtime_registers_both_remote_provider_keys():
+def test_application_runtime_registers_all_remote_provider_keys():
     service = build_transcription_service()
     assert tuple(item.profile_id for item in service.profiles.definitions) == (
         "faster-whisper-zh-experimental-v1",
         "funasr-sensevoice-zh-experimental-v1",
+        "qwen3-asr-zh-experimental-v1",
     )
     assert tuple(item.provider_key for item in service.providers.factories) == (
         "faster-whisper",
         "funasr-sensevoice",
+        "qwen3-asr",
     )
 
 

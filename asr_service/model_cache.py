@@ -16,6 +16,14 @@ FASTER_WHISPER_REVISION = "0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf"
 FASTER_WHISPER_RELATIVE_PATH = (
     f"faster-whisper-large-v3-turbo/{FASTER_WHISPER_REVISION}"
 )
+QWEN3_ASR_MODEL_ID = "Qwen/Qwen3-ASR-0.6B"
+QWEN3_ASR_REVISION = "5eb144179a02acc5e5ba31e748d22b0cf3e303b0"
+QWEN3_ASR_RELATIVE_PATH = f"Qwen3-ASR-0.6B/{QWEN3_ASR_REVISION}"
+QWEN3_ALIGNER_MODEL_ID = "Qwen/Qwen3-ForcedAligner-0.6B"
+QWEN3_ALIGNER_REVISION = "c7cbfc2048c462b0d63a45797104fc9db3ad62b7"
+QWEN3_ALIGNER_RELATIVE_PATH = (
+    f"Qwen3-ForcedAligner-0.6B/{QWEN3_ALIGNER_REVISION}"
+)
 _SHA256_RE = re.compile(r"[0-9a-f]{64}")
 
 
@@ -160,4 +168,30 @@ def validate_faster_whisper_cache(
         expected_model_id=FASTER_WHISPER_MODEL_ID,
         expected_revision=FASTER_WHISPER_REVISION,
         expected_relative_path=FASTER_WHISPER_RELATIVE_PATH,
+    )
+
+
+def validate_qwen3_asr_cache(
+    cache_root: Path | None,
+    manifest_path: Path | None,
+) -> ModelCacheStatus:
+    return _validate_model_cache(
+        cache_root,
+        manifest_path,
+        expected_model_id=QWEN3_ASR_MODEL_ID,
+        expected_revision=QWEN3_ASR_REVISION,
+        expected_relative_path=QWEN3_ASR_RELATIVE_PATH,
+    )
+
+
+def validate_qwen3_aligner_cache(
+    cache_root: Path | None,
+    manifest_path: Path | None,
+) -> ModelCacheStatus:
+    return _validate_model_cache(
+        cache_root,
+        manifest_path,
+        expected_model_id=QWEN3_ALIGNER_MODEL_ID,
+        expected_revision=QWEN3_ALIGNER_REVISION,
+        expected_relative_path=QWEN3_ALIGNER_RELATIVE_PATH,
     )

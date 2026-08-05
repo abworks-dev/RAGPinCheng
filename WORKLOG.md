@@ -2140,12 +2140,32 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 验证：来源工作区专项 Vitest 3/3 通过；TypeScript project build 与 Vite production build 通过（2026 modules transformed）；`git diff --check` 通过。构建保留既有 CSS 语法和主包大于 500 kB 警告。
 - 待办/风险：功能处于待用户验收；尚未使用真实 PDF、DOCX、XLSX、PPTX 来源逐一验证定位预览和窄屏布局。本轮未修改 API、预览数据契约、依赖、数据或部署。
 
+### 09:10 — 调查 Qwen3-ASR 并编制独立 R2/R3 计划
+
+- 完成：在专用 worktree 中只读核对现有 `TranscriptionProvider`、`ProviderCandidate`、pipeline、normalizer、Canonical、Profile、ASR service 与同类资格方案，并依据 Qwen、Hugging Face、PyPI、PyTorch 和 vLLM 官方资料编制独立 R2/R3 计划。计划固定 Windows 首轮候选为 Qwen3-ASR-0.6B、ForcedAligner-0.6B 与 Transformers backend，排除原生 Windows vLLM，要求独立 Qwen engine 环境、Profile `experimental + disabled`、双模型/许可证/依赖/CUDA/质量/资源门禁，并把 R3A 依赖资格与 R3B 模型推理分开审批。
+- 文件：新增 `project-docs/plans/qwen3-asr-r2-r3-integration.md`；更新 `WORKLOG.md`。未修改业务代码、依赖、配置、workflow、数据库、Qdrant、生产服务或 Profile admission。
+- 验证：核对计划覆盖目标、现状依据、拟修改与明确不修改文件、实施步骤、测试、风险、兼容性、回滚和分阶段审批；未安装依赖、未下载模型、未启动服务、未运行推理、未连接或修改生产状态。
+- 待办/风险：Qwen 完整 Transformers/ForcedAligner 栈在 Windows、RTX 5060 Ti、`torch==2.7.0+cu128` 与现有依赖组合上的可用性尚未实机证明；模型 immutable revision 必须在 R2 实施前只读冻结。R2、R3A、R3B 均待用户分别批准。
+
 ### 09:26 — 修复 R3 原生 stderr 捕获边界
 
 - 完成：统一资格脚本在执行固定原生命令期间临时使用 `ErrorActionPreference=Continue`，先完整捕获 stdout、stderr 和退出码，再恢复调用方错误策略并按非零退出码失败关闭；增加固定非敏感 stderr 与退出码 23 的运行前自测，避免 Windows PowerShell 5.1 在日志落盘前将原生 stderr 提升为终止错误。
 - 文件：`scripts/qualify-faster-whisper-production.ps1`、`tests/test_asr_deployment_static.py`、`project-docs/plans/faster-whisper-r3-unified-qualification.md`、`TODO.md`、`WORKLOG.md`。
 - 验证：内部 wheel、部署边界、模型准备和 faster-whisper 资格定向测试 84/84 通过；PowerShell AST、当前 PowerShell 与 Windows PowerShell 5.1 合成 stderr/非零退出回归及 `git diff --check` 通过。
 - 待办/风险：尚待独立 PR、远端 CI、合并及一次固定参数生产资格重跑；未修改任何依赖、production freeze、生产服务、防火墙、Ubuntu、数据库、Qdrant、模型或 Profile admission。
+### 09:26 — 完成 Qwen3-ASR R2 离线接入
+
+- 完成：按获批 R2 方案冻结官方 Qwen3-ASR-0.6B 与 ForcedAligner-0.6B revision，新增严格可信配置、`experimental + disabled` application Profile、第三个 Remote Provider factory、双模型 Manifest 校验、可选 ASR service 配置和 lazy Qwen engine adapter。引擎只输出既有 `EngineChunkCandidate`，应用结果继续走 `TranscriptionProvider → ProviderCandidate → pipeline → normalizer → Canonical → formatter/parser`；缺少双模型缓存、Qwen 依赖、CUDA 或 BF16 时仅 Qwen Profile fail closed。依据现有 slug 契约将计划中的非法 service ID `qwen3-asr-0.6b-aligner-v1` 修正为 `qwen3-asr-06b-aligner-v1`。
+- 文件：新增 `asr_service/engines/qwen3_asr.py`、`asr_service/requirements-qwen3-asr.txt`、两个 Qwen Manifest 示例、Qwen adapter 测试和 `project-docs/plans/qwen3-asr-r2-r3-integration.md`；最小修改可信 Profile/catalog、Remote Provider/应用组装、ASR service config/app/model cache/engine contract、相关测试、功能文档和 `TODO.md`。未修改 Candidate、Canonical、normalizer、pipeline、formatter、parser、数据库、根依赖、生产安装入口、部署 workflow、Qdrant 或 Profile admission。
+- 验证：Qwen/Profile/Remote Provider/模型缓存/静态边界专项测试 134/134 通过；当前环境可收集的更广 ASR/转写回归 437 项通过，另有 2 项失败分别为本分支基线既有 `src/indexing_pipeline.py` 保护哈希不一致和本机缺 FastAPI；完整收集另有 7 个文件因既有 FastAPI/Qdrant 依赖缺失失败。全量 Python `compileall` 与 `git diff --check` 通过。未安装依赖、未下载模型、未启动服务、未运行推理或修改生产状态。
+- 待办/风险：需由干净 CI 执行 `asr_service/tests/test_api_contract.py`、`test_auth.py`、Phase 4/5 API/worker/publication 测试并复核基线保护哈希；Qwen Windows/CUDA/依赖/许可证/模型/质量/资源资格仍未验证。R3A、R3B 保持未授权，Profile 继续 disabled。
+
+### 09:30 — 合并 Qwen3-ASR 统一 R3 方案
+
+- 完成：将 Qwen3-ASR 原 R3A 依赖资格与 R3B 双模型/真实推理改为一次审批、一个仓库交付、一个默认关闭的 `production-asr` 手动 workflow 和一个最终 PASS/FAIL 报告。依赖、许可证、CUDA、双模型 Manifest、隔离 18300、8 样本全链路和资源/末态仍按顺序设为自动停止门禁；前置门禁通过后无需中途再次审批，失败不得换模型、依赖、参数、样本或阈值。
+- 文件：更新 `project-docs/plans/qwen3-asr-r2-r3-integration.md`、`TODO.md`、`WORKLOG.md`；未修改 R2 代码、依赖、workflow、生产配置或外部状态。
+- 验证：检查统一方案包含固定目标环境/目录、拟修改文件、workflow 输入与 Secret 边界、端到端步骤、质量和资源阈值、停止条件、证据、完成标准、风险、回滚、明确不做内容及一次性审批语句；`git diff --check` 待最终执行。
+- 待办/风险：统一 R3 仍未获批准；本轮未创建 workflow、安装依赖、下载模型、启动服务、运行 CUDA 或连接生产主机。R2 Profile 继续 disabled。
 
 ### 09:50 — 整理来源图标独立合并分支
 
@@ -2161,3 +2181,16 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`.github/workflows/qualify-faster-whisper-production.yml`、`scripts/qualify-faster-whisper-production.ps1`、`tests/test_asr_deployment_static.py`、`project-docs/plans/faster-whisper-r3-unified-qualification.md`、`TODO.md`、`WORKLOG.md`。
 - 验证：内部 wheel、部署边界、模型准备和 faster-whisper 资格定向测试 84/84 通过；PowerShell AST、Windows PowerShell 5.1 结构化命令证据/全部脱敏类别/v2 严格字段集合及无网络模拟 fallback 测试通过；`git diff --check` 通过。
 - 待办/风险：尚待 scoped review、独立 PR、远端 CI、合并和一次固定参数资格重跑；fallback 不安装包，但 pip dry-run 可能从既有索引下载解析所需的临时依赖文件。未修改依赖、production freeze、生产 venv、服务、防火墙、Ubuntu、数据库、Qdrant、模型或 Profile admission。
+### 10:11 — 实现 Qwen3-ASR 统一 R3 资格工具
+
+- 完成：按获批统一 R3 方案新增默认关闭、完整 master SHA 绑定的 `production-asr` 手动 workflow；新增 Windows 隔离总编排、固定双模型准备、8 个非敏感样本生成、业务全链路质量评测和失败关闭测试。编排固定 run-local venv/wheelhouse、0.6B ASR 与 0.6B ForcedAligner revision、loopback 18300、CUDA BF16、14/8 GiB 显存门禁，并保留 BGE 空闲、8100/8200 健康、Profile disabled、Scheduled Task/防火墙不变和精确 PID 清理检查。
+- 文件：新增 `.github/workflows/qualify-qwen3-asr-production.yml`、`scripts/qualify-qwen3-asr-production.ps1`、`scripts/prepare_qwen3_asr_models.py`、`scripts/run_qwen3_asr_qualification.py`、`scripts/prepare-qwen3-asr-qualification-samples.ps1`、资格 Manifest 示例与专项测试；更新部署静态测试、转录功能文档和 `TODO.md`。
+- 验证：两个 PowerShell 脚本 AST、Python `compileall`、`git diff --check` 通过；本机系统 Python 缺少 pytest 和 PyYAML，遵守约束未安装依赖，完整单元测试与 workflow YAML 解析交由干净 CI。未安装 Qwen 依赖、未下载模型、未启动服务或访问 production-asr。
+- 待办/风险：仓库工具仍待 PR/CI；只有合并后绑定完整 master SHA 的唯一 workflow 全部门禁通过，才能记录资格 PASS。当前 Profile 继续 disabled，生产状态未修改。
+
+### 10:41 — 修复 Qwen3-ASR PR Profile 契约断言
+
+- 完成：根据 PR #53 首轮 CI 的唯一失败，将 Phase 4 application runtime 测试从固定两个远端 Profile/Provider 更新为当前三个候选，补充 `qwen3-asr-zh-experimental-v1` 与 `qwen3-asr`；未修改运行时代码、Profile admission、资格参数或生产配置。
+- 文件：`tests/test_transcription_phase4_api.py`、`WORKLOG.md`。
+- 验证：首轮 CI 共 317/318 项转录契约测试通过，失败仅为旧列表少一个 Qwen 候选；修复后 Python 编译与 `git diff --check` 通过。本机仍未安装 pytest，完整回归交由 PR CI。
+- 待办/风险：待 PR #53 新一轮 CI 全绿后才可合并；未触发 production-asr workflow，未访问或修改生产状态。

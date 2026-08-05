@@ -734,3 +734,50 @@ def test_faster_whisper_qualification_drives_the_existing_result_flow():
     assert "WhisperModel" not in runner
     assert ".transcribe(" not in runner
     assert "FASTER_WHISPER_PROFILE_ID" in runner
+
+
+def test_qwen3_asr_qualification_is_manual_sha_bound_and_isolated():
+    workflow = read(".github/workflows/qualify-qwen3-asr-production.yml")
+    script = read("scripts/qualify-qwen3-asr-production.ps1")
+    assert "workflow_dispatch:" in workflow
+    assert "default: false" in workflow
+    assert "commit_sha must equal the workflow dispatch revision" in workflow
+    assert "refs/heads/master" in workflow
+    assert "environment: production-asr" in workflow
+    assert "runs-on: [self-hosted, Windows, X64, asr-production]" in workflow
+    assert "production-asr-qwen3-asr-qualification" in workflow
+    assert "D:\\Services\\RAGPinCheng-ASR\\qualification\\qwen3-asr" in script
+    assert "D:\\ServiceData\\RAGPinCheng-ASR\\qualification\\qwen3-asr\\inputs" in script
+    assert "$TempPort = 18300" in script
+    assert "New-NetFirewallRule" not in script
+    assert "Set-NetFirewallRule" not in script
+    assert "Register-ScheduledTask" not in script
+    assert 'profile_admission = "disabled"' in script
+    assert "production_services_modified = $false" in script
+
+
+def test_qwen3_asr_qualification_freezes_dual_models_bf16_and_result_flow():
+    script = read("scripts/qualify-qwen3-asr-production.ps1")
+    model = read("scripts/prepare_qwen3_asr_models.py")
+    runner = read("scripts/run_qwen3_asr_qualification.py")
+    assert "qwen-asr==0.0.6" in read("asr_service/requirements-qwen3-asr.txt")
+    assert "torch==2.7.0+cu128" in script
+    assert "torchaudio==2.7.0+cu128" in script
+    assert "requirements-qwen3-asr.txt" in script
+    assert "torch.cuda.is_bf16_supported()" in script
+    assert "torch.bfloat16" in script
+    assert "5eb144179a02acc5e5ba31e748d22b0cf3e303b0" in script
+    assert "c7cbfc2048c462b0d63a45797104fc9db3ad62b7" in script
+    assert "QWEN3_ASR_MODEL_ID" in model
+    assert "QWEN3_ALIGNER_MODEL_ID" in model
+    assert "local_dir_use_symlinks=False" in model
+    assert "validate_qwen3_asr_cache" in model
+    assert "validate_qwen3_aligner_cache" in model
+    assert "HttpxAsrServiceClient" in runner
+    assert "RemoteAsrProvider" in runner
+    assert "execute_transcription" in runner
+    assert "CanonicalTranscript" in runner
+    assert "format_transcript" in runner
+    assert "_parse_transcript_turns" in runner
+    assert "QWEN3_ASR_PROFILE_ID" in runner
+    assert ".transcribe(" not in runner
