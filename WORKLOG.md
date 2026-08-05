@@ -2242,3 +2242,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：新增 `scripts/extract_qwen3_asr_resolver_evidence.py`、`tests/test_qwen3_asr_resolver_evidence.py`；更新 `.github/workflows/diagnose-qwen3-asr-dependencies-production.yml`、`tests/test_asr_deployment_static.py`、`project-docs/plans/qwen3-asr-r2-r3-integration.md`、`TODO.md`、`WORKLOG.md`。旧 dry-run 诊断脚本保留但 workflow 不再调用。
 - 验证：Python `compileall`、模块入口、`oss2` 防误判冒烟、离线能力禁用检查和 `git diff --check` 通过；本机没有项目 venv，系统 Python 未安装 pytest，遵守约束未安装依赖，完整专项测试交由远端 CI。
 - 待办/风险：尚待 PR、CI、合并及一次绑定完整 master SHA 的手动离线 workflow；不运行 pip、不读取或上传原始日志、不修改依赖、production freeze、模型、服务、现有 venv、Ubuntu、防火墙、数据库、Qdrant 或 Profile admission。
+
+### 12:09 — 实现视频同步转录面板
+
+- 完成：基于最新 `origin/master` 独立整合普通用户只读转录接口，优先返回当前已发布 Canonical/人工版本，并兼容无版本头的既有已索引人工稿；视频预览下方改为分段转录列表，支持进度同步高亮、点击跳转、自动跟随、用户滚动暂停跟随与一键恢复，同时移除下方重复播放/静音按钮。
+- 文件：`api/main.py`、`api/routes_media_transcript.py`、`api/schemas.py`、`frontend/src/api/client.ts`、`frontend/src/types.ts`、`frontend/src/components/VideoPlayerDrawer.tsx`、`frontend/src/components/TranscriptPanel.tsx`、`frontend/src/components/TranscriptPanel.test.tsx`、`tests/test_media_transcript_route.py`、`project-docs/features/transcript-pipeline.md`、`WORKLOG.md`；未修改媒体流门禁、数据库 Schema、ASR、审核发布、RAG 索引、Qdrant、依赖或部署配置。
+- 验证：最新 master 独立整合基线下同步面板专项 Vitest 3/3、前端全量 32 个文件 151/151、TypeScript project build 与 Vite production build通过（2027 modules transformed），目标文件 Python compileall/AST 与 `git diff --check` 通过。原工作区本地 Python 环境缺少 FastAPI，后端路由 pytest 留待完整环境或 CI。
+- 待办/风险：仍需真实登录态与真实长视频视觉验收；重点确认 legacy 人工稿路径、正式自动稿、进度拖动与长稿滚动体验。无数据迁移，回滚可移除独立转录路由和面板并恢复播放器信息区。
