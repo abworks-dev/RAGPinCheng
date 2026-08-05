@@ -2222,6 +2222,13 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：新增 `scripts/build_internal_oss2_wheel.py`、`tests/test_asr_internal_oss2_wheel.py`；更新 `.github/workflows/qualify-faster-whisper-production.yml`、`scripts/qualify-faster-whisper-production.ps1`、`tests/test_asr_deployment_static.py`、R3 计划、`TODO.md`、`WORKLOG.md`。
 - 验证：内部 wheel、部署边界、离线证据和 faster-whisper 引擎/资格专项测试 100/100 通过；新增 oss2 固定 URL、大小、SHA-256、严格 Manifest、篡改拒绝测试；Python 编译、PowerShell AST 和 `git diff --check` 通过。
 - 待办/风险：尚待 scoped review、PR、完整 CI、合并及一次统一生产资格 workflow。未放宽 binary-only、未修改 production freeze、生产 venv、服务、防火墙、Ubuntu、数据库、Qdrant、模型或 Profile admission。
+
+### 12:31 — 闭环 antlr4 binary-only blocker
+
+- 完成：统一资格 run `30974457008` 证明 jieba/oss2 受控 wheel 构建和 Windows 复验成功，下一依赖门禁为 `antlr4-python3-runtime`；核对固定 4.9.3 release 仅有 sdist 后，将其纳入同一固定来源、双重确定性构建、pure-Python wheel 和严格 Manifest 通道，Windows 资格要求三个内部 wheel 全部进入 wheelhouse。
+- 文件：新增 `scripts/build_internal_antlr4_wheel.py`、`tests/test_asr_internal_antlr4_wheel.py`；更新统一资格 workflow、PowerShell 编排、部署静态测试、R3 计划和 `WORKLOG.md`。
+- 验证：三个内部 wheel、部署边界及 faster-whisper 引擎/资格专项测试 84/84 通过；Python 编译、PowerShell AST 与 `git diff --check` 通过。
+- 待办/风险：待同范围 PR/CI/合并后继续统一资格；不修改 production freeze、生产 venv、服务、防火墙、Ubuntu、数据库、Qdrant、模型或 Profile admission。
 ### 11:22 — 实现 Qwen3-ASR 依赖失败诊断
 
 - 完成：按单独获批 R3 诊断方案新增默认关闭的 Qwen dependency workflow 和 Windows 诊断脚本，固定读取 source run `30970277613`、source SHA `86b69db6831e3cd201436a26bbe836229bf419bd`、production freeze、Qwen/Windows requirements 与受控 jieba wheel；既有日志证据不足时只执行一次 run-local、binary-only、no-cache 的 resolver dry-run。v2 artifact 只包含固定 operation/failure origin、退出码、捕获行数、诊断种类、ASCII requirement、文件 hash 和清理状态，不包含原始冲突行或敏感上下文。
