@@ -270,6 +270,21 @@ class MediaAssetDTO(BaseModel):
     is_current_version: bool = False
 
 
+class MediaTranscriptSegmentDTO(BaseModel):
+    id: int
+    start_ms: int
+    end_ms: int | None = None
+    text: str
+
+
+class MediaTranscriptDTO(BaseModel):
+    media_id: str
+    version_id: str | None = None
+    language: str | None = None
+    duration_ms: int | None = None
+    segments: list[MediaTranscriptSegmentDTO]
+
+
 class TranscriptionProfileDTO(BaseModel):
     profile_id: str
     display_name: str

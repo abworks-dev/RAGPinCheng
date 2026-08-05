@@ -23,6 +23,8 @@ Phase 5A/5B 已接通版本列表、只读 Markdown 预览、人工审核、显�
 - 自动建立 `media_assets` 登记、索引入队、索引完成后状态自动更新为 `ready`；
 - 后端鉴权 HTTP Range 播放（支持无 Range、普通 Range、开放式 Range、后缀 Range）；
 - 前端单实例播放器抽屉（桌面右侧、移动端底部弹层），支持 metadata seek 和自动播放降级；
+- 播放器下方提供交互式转录稿，按播放进度高亮当前分段并自动跟随；点击分段可跳转，用户主动滚动时暂停跟随并可一键回到当前进度；
+- 普通登录用户可通过只读接口读取当前已发布转录版本；无版本头的既有人工上传媒体兼容读取其已登记、受控且完成索引的人工稿；
 - 引用角标点击自动打开视频播放器并跳转对应时间点；
 - 来源卡片显示”从 HH:MM:SS 播放”按钮；
 - 旧会话和未关联转录正常降级（无播放按钮，不报错）；
@@ -86,6 +88,7 @@ TTS 样本已生成并通过严格 Manifest 校验，但生产 R3 workflow 在�
 → 视频引用角标 (点击 → 播放器 seek)
 → 来源卡片 (播放按钮)
 → GET /api/media/{media_id} (鉴权 Range 播放)
+→ GET /api/media/{media_id}/transcript（鉴权读取正式/兼容人工转录稿）
 ```
 
 自动转录与版本发布结果流：
@@ -132,6 +135,7 @@ TTS 样本已生成并通过严格 Manifest 校验，但生产 R3 workflow 在�
 - `frontend/src/components/SourcesPanel.tsx`（播放按钮）
 - `frontend/src/components/Message.tsx`（引用 click seek）
 - `frontend/src/components/VideoPlayerDrawer.tsx`（新增）
+- `frontend/src/components/TranscriptPanel.tsx`（同步转录列表）
 - `frontend/src/hooks/useVideoPlayer.tsx`（新增）
 
 ## 数据契约
@@ -156,6 +160,7 @@ TTS 样本已生成并通过严格 Manifest 校验，但生产 R3 workflow 在�
 
 - 不得向客户端暴露服务器绝对路径（`storage_rel_path` 对外隐藏）；
 - 视频访问必须经过 `require_user` 鉴权和路径穿越防护（`safe_join`）；
+- 转录读取必须经过 `require_user` 鉴权，只返回当前已发布版本；legacy 回退只允许读取 `DOCS_DIR` 内媒体已登记的人工稿；
 - `media_id` 不存在或状态不是 `ready` 时返回 404；
 - 非法 Range 返回 416；
 - `media_id` 不进入 Embedding 文本，不影响检索排序；
@@ -170,6 +175,7 @@ TTS 样本已生成并通过严格 Manifest 校验，但生产 R3 workflow 在�
 
 - 当前链路：转录解析、时间戳索引、检索命中、回答引用、前端匹配；
 - 播放链路：匿名 401、登录用户 200/206、未知媒体 404、路径穿越 404；
+- 转录播放同步：正式稿/legacy 人工稿读取、候选稿不可见、分段高亮、点击跳转、用户滚动暂停跟随和恢复跟随；
 - Phase 2：临时 SQLite migration/backup、Store 事务、artifact hash、publication head、recovery、人工稿不回填和静态依赖边界；
 - Phase 3/4：纯 Python service/remote、应用任务/worker、mock engine、存储恢复、取消/恢复和静态依赖边界；
 - Phase 5：Store/事务/manual/visibility/index metadata/static 本地 29 项通过；版本管理定向前端 31 项通过；API、worker、candidate index、Qdrant Filter 与完整前端 build 由独立 CI job 验证；
@@ -189,7 +195,7 @@ TTS 样本已生成并通过严格 Manifest 校验，但生产 R3 workflow 在�
 ## 已知限制
 
 - 第一阶段只支持 MP4 格式，不支持其他视频容器；
-- 播放器只做时间点 seek，不做完整交互式转录同步高亮；
+- 自动稿按 Canonical 起止时间精确同步；旧人工稿仅有起始时间，结束时间按下一段起点推断，最后一段持续到视频结束；
 - SenseVoice 短媒体自动转录已完成生产验收，但候选稿发布/Qdrant 正式可见性 E2E
   尚未执行；faster-whisper 真实依赖、模型、CUDA 和推理均未运行；
 - 当前唯一允许新建任务的自动 Profile 仍是 experimental SenseVoice；faster-whisper

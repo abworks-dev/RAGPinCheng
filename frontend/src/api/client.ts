@@ -15,6 +15,7 @@ import type {
   IndexedDocumentList,
   LlmHealth,
   MediaAsset,
+  MediaTranscript,
   TranscriptionJob,
   TranscriptionProfile,
   TranscriptMarkdownPreview,
@@ -124,6 +125,8 @@ export const api = {
     jsonFetch<LlmHealth>(`/api/llm_health${force ? "?force=true" : ""}`),
   config: () => jsonFetch<ApiConfig>("/api/config"),
   categories: () => jsonFetch<{ categories: string[] }>("/api/categories"),
+  mediaTranscript: (mediaId: string) =>
+    jsonFetch<MediaTranscript>(`/api/media/${encodeURIComponent(mediaId)}/transcript`),
   sendFeedback: (payload: FeedbackPayload) =>
     jsonFetch<{ ok: boolean }>("/api/feedback", {
       method: "POST",

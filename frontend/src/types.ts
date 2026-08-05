@@ -415,3 +415,18 @@ export type MediaAsset = {
   publication_index_status?: "pending" | "parsing" | "chunking" | "embedding" | "done" | "failed" | null;
   is_current_version?: boolean;
 };
+
+export type MediaTranscriptSegment = {
+  id: number;
+  start_ms: number;
+  end_ms: number | null;
+  text: string;
+};
+
+export type MediaTranscript = {
+  media_id: string;
+  version_id: string | null;
+  language: string | null;
+  duration_ms: number | null;
+  segments: MediaTranscriptSegment[];
+};
