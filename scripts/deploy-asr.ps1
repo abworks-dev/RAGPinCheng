@@ -11,6 +11,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "windows-wheel-cache.ps1")
 $taskName = "RAGPinCheng-ASR"
 $serviceStartScript = Join-Path $ProgramRoot "scripts\start-asr-service.ps1"
 $expectedTaskArguments = '-NoProfile -ExecutionPolicy Bypass -File "{0}"' -f $serviceStartScript
@@ -60,6 +61,11 @@ if ($actualSha -ne $CommitSha.ToLowerInvariant()) {
 
 $appRoot = Join-Path $ProgramRoot "app"
 $venvRoot = Join-Path $ProgramRoot "venv"
+$venvStaging = Join-Path $ProgramRoot ("venv-staging-" + $CommitSha)
+$sharedWheelCacheRoot = Join-Path $DataRoot "wheel-cache"
+$dependencyRunRoot = Join-Path $DataRoot ("dependency-runs\funasr-" + $CommitSha)
+$wheelhouse = Join-Path $dependencyRunRoot "wheelhouse"
+$sharedWheelSeed = Join-Path $dependencyRunRoot "shared-wheel-seed"
 $scriptRoot = Join-Path $ProgramRoot "scripts"
 $configRoot = Join-Path $DataRoot "config"
 $backupRoot = Join-Path $DataRoot "backups"
@@ -271,15 +277,20 @@ Set-ProtectedConfigValue -Name "BGE_PRIORITY_PROBE_URL" -Value "http://${PRIVATE
 
 if ($InstallDependencies) {
     try {
-        $venvPython = Join-Path $venvRoot "Scripts\python.exe"
-        if (-not (Test-Path -LiteralPath $venvPython -PathType Leaf)) {
-            $python311 = Get-MachinePython311
-            & $python311 -m venv $venvRoot
-            if ($LASTEXITCODE -ne 0) { throw "ASR venv creation failed" }
+        if (Test-Path -LiteralPath $venvStaging) {
+            Move-StagingToBackup -Path $venvStaging -Reason "stale"
         }
+        if (Test-Path -LiteralPath $dependencyRunRoot) {
+            Move-StagingToBackup -Path $dependencyRunRoot -Reason "stale"
+        }
+        New-Item -ItemType Directory -Path $dependencyRunRoot, $wheelhouse -Force | Out-Null
+        $python311 = Get-MachinePython311
+        & $python311 -m venv $venvStaging
+        if ($LASTEXITCODE -ne 0) { throw "ASR staging venv creation failed" }
+        $venvPython = Join-Path $venvStaging "Scripts\python.exe"
         $venvVersion = & $venvPython -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"
         if ($LASTEXITCODE -ne 0 -or ([string]$venvVersion).Trim() -ne "3.11") {
-            throw "ASR venv must use Python 3.11"
+            throw "ASR staging venv must use Python 3.11"
         }
         $dependencyProxy = [string]$env:ASR_DEPENDENCY_PROXY
         if ([string]::IsNullOrWhiteSpace($dependencyProxy)) {
@@ -303,12 +314,57 @@ if ($InstallDependencies) {
             $env:HTTP_PROXY = $dependencyProxy
             $env:HTTPS_PROXY = $dependencyProxy
             $env:NO_PROXY = "127.0.0.1,localhost,${PRIVATE_IPV4},${PRIVATE_IPV4}"
-            & $venvPython -m pip install --index-url https://download.pytorch.org/whl/cu128 torch==2.7.0 torchaudio==2.7.0
-            if ($LASTEXITCODE -ne 0) { throw "CUDA Torch installation failed" }
-            & $venvPython -m pip install -r (Join-Path $staging "requirements-windows.txt")
-            if ($LASTEXITCODE -ne 0) { throw "ASR dependency installation failed" }
+            Copy-VerifiedSharedWheelBlobs `
+                -CacheRoot $sharedWheelCacheRoot `
+                -Destination $sharedWheelSeed | Out-Null
+            & $venvPython -m pip download `
+                --only-binary=:all: `
+                --dest $wheelhouse `
+                --index-url https://pypi.org/simple `
+                --extra-index-url https://download.pytorch.org/whl/cu128 `
+                --find-links $sharedWheelSeed `
+                "torch==2.7.0+cu128" `
+                "torchaudio==2.7.0+cu128" `
+                -r (Join-Path $staging "requirements-windows.txt")
+            if ($LASTEXITCODE -ne 0) { throw "ASR dependency download failed" }
+            $wheelIdentity = @(
+                Get-ChildItem -LiteralPath $wheelhouse -Filter "*.whl" -File |
+                    Sort-Object Name |
+                    ForEach-Object {
+                        [ordered]@{
+                            file_name = $_.Name
+                            sha256 = Get-SharedWheelSha256 -Path $_.FullName
+                            size_bytes = [int64]$_.Length
+                        }
+                    }
+            )
+            $sharedMaterial = [ordered]@{
+                schema_version = "funasr-shared-wheel-key/1"
+                python = "3.11"
+                platform = "windows-x64"
+                torch = "2.7.0+cu128"
+                torchaudio = "2.7.0+cu128"
+                requirements_sha256 = Get-SharedWheelSha256 -Path (Join-Path $staging "requirements-windows.txt")
+                wheels = $wheelIdentity
+            }
+            $sharedKey = Get-SharedTextSha256 -Text ($sharedMaterial | ConvertTo-Json -Depth 12 -Compress)
+            Publish-SharedWheelBlobs `
+                -CacheRoot $sharedWheelCacheRoot `
+                -Wheelhouse $wheelhouse `
+                -Consumer "funasr" `
+                -CacheKey $sharedKey `
+                -KeyMaterial $sharedMaterial | Out-Null
+            & $venvPython -m pip install `
+                --no-index `
+                --find-links $wheelhouse `
+                "torch==2.7.0+cu128" `
+                "torchaudio==2.7.0+cu128" `
+                -r (Join-Path $staging "requirements-windows.txt")
+            if ($LASTEXITCODE -ne 0) { throw "ASR offline dependency installation failed" }
             & $venvPython -m pip check
             if ($LASTEXITCODE -ne 0) { throw "ASR dependency check failed" }
+            & $venvPython -c "import funasr, modelscope, torch, torchaudio; assert torch.__version__ == '2.7.0+cu128'; assert torch.version.cuda == '12.8'"
+            if ($LASTEXITCODE -ne 0) { throw "ASR dependency identity verification failed" }
         } finally {
             foreach ($name in $savedProxyEnvironment.Keys) {
                 [System.Environment]::SetEnvironmentVariable(
@@ -319,13 +375,18 @@ if ($InstallDependencies) {
             }
         }
     } catch {
+        if (Test-Path -LiteralPath $venvStaging) {
+            Move-StagingToBackup -Path $venvStaging -Reason "failed"
+        }
         Move-StagingToBackup -Path $staging -Reason "failed"
         throw
     }
 }
 
 $backup = $null
+$venvBackup = $null
 $newAppInstalled = $false
+$newVenvInstalled = $false
 $serviceWasRunning = $false
 try {
     if ($ActivateService) {
@@ -336,6 +397,14 @@ try {
     if (Test-Path -LiteralPath $appRoot) {
         $backup = Join-Path $backupRoot ("app-" + (Get-Date -Format "yyyyMMdd-HHmmss") + "-" + $CommitSha.Substring(0, 12))
         Move-Item -LiteralPath $appRoot -Destination $backup
+    }
+    if ($InstallDependencies -and (Test-Path -LiteralPath $venvRoot)) {
+        $venvBackup = Join-Path $backupRoot ("venv-" + (Get-Date -Format "yyyyMMdd-HHmmss") + "-" + $CommitSha.Substring(0, 12))
+        Move-Item -LiteralPath $venvRoot -Destination $venvBackup
+    }
+    if ($InstallDependencies) {
+        Move-Item -LiteralPath $venvStaging -Destination $venvRoot
+        $newVenvInstalled = $true
     }
     Move-Item -LiteralPath $staging -Destination $appRoot
     $newAppInstalled = $true
@@ -363,6 +432,21 @@ try {
             Move-Item -LiteralPath $appRoot -Destination $failed
         } catch {
             Write-Warning "Unable to archive the failed ASR application: $($_.Exception.Message)"
+        }
+    }
+    if ($newVenvInstalled -and (Test-Path -LiteralPath $venvRoot)) {
+        try {
+            $failedVenv = Join-Path $backupRoot ("failed-venv-" + (Get-Date -Format "yyyyMMdd-HHmmss") + "-" + $CommitSha.Substring(0, 12))
+            Move-Item -LiteralPath $venvRoot -Destination $failedVenv
+        } catch {
+            Write-Warning "Unable to archive the failed ASR venv: $($_.Exception.Message)"
+        }
+    }
+    if ($venvBackup -and (Test-Path -LiteralPath $venvBackup) -and -not (Test-Path -LiteralPath $venvRoot)) {
+        try {
+            Move-Item -LiteralPath $venvBackup -Destination $venvRoot
+        } catch {
+            Write-Warning "Unable to restore the previous ASR venv: $($_.Exception.Message)"
         }
     }
     if ($backup -and (Test-Path -LiteralPath $backup)) {

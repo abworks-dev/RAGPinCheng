@@ -2333,3 +2333,12 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`.github/workflows/qualify-faster-whisper-production.yml`、`scripts/qualify-faster-whisper-production.ps1`、`tests/test_asr_deployment_static.py`、`project-docs/plans/faster-whisper-r3-unified-qualification.md`、`WORKLOG.md`。
 - 验证：faster-whisper 部署、引擎、资格和 resolver 专项测试 87/87 通过；PowerShell AST、workflow YAML 解析和 `git diff --check` 通过。
 - 待办/风险：待 PR/CI/合并后执行首次 cache miss 与第二次 cache hit 的真实统一资格；两轮均不得修改生产服务或 Profile admission。
+
+## 2026-08-06
+
+### 02:17 — 统一 Windows ASR wheel 下载缓存
+
+- 完成：新增 Administrator/SYSTEM 受控的内容寻址公共 wheel 缓存，以 SHA-256 blob、严格消费者 Manifest、互斥锁、staging、损坏项拒绝和硬链接优先恢复实现跨引擎下载复用；scoped review 进一步将同名不同哈希 wheel 改为全部拒绝并回退在线解析，拒绝 reparse point、重复项、未知字段和非固定生产身份。faster-whisper、Qwen3-ASR、WhisperX 和 FunASR 均接入同一缓存根目录，但继续使用独立 venv。FunASR 生产依赖改为在 staging venv 中下载、发布缓存、`--no-index` 离线安装、`pip check` 和 CUDA/模块身份验证，服务停止后才切换 venv，失败恢复旧 venv。
+- 文件：新增 `scripts/windows-wheel-cache.ps1`、`tests/test_windows_shared_wheel_cache_static.py`；更新 `scripts/deploy-asr.ps1`、`scripts/qualify-faster-whisper-production.ps1`、`scripts/qualify-qwen3-asr-production.ps1`、`scripts/qualify-whisperx-production.ps1`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
+- 验证：scoped review 修复后，全部 ASR、Whisper 和 transcription 相关测试 535/535 通过，另有 6 个 subtests 通过；WhisperX 本机缺少 NLTK 的单项运行测试按环境事实排除，其余 WhisperX 静态测试 3/3 通过。新增缓存与部署专项 37/37 通过；五个 PowerShell 脚本 AST 与 `git diff --check` 通过。公共缓存动态写入需固定 Administrator/SYSTEM 身份，开发机普通会话按设计在 ACL 前失败关闭，真实 Windows runner 验证留给远端资格/部署 workflow。
+- 待办/风险：尚未提交、推送、运行远端 CI 或在 Windows runner 填充真实缓存；未下载依赖、未重建生产 venv、未启动服务、未修改防火墙、Ubuntu、数据库、Qdrant 或 Profile admission。首次生产接入仍需独立 R3 审批和回滚验收。

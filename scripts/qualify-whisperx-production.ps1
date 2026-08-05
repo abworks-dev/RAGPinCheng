@@ -10,11 +10,15 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "windows-wheel-cache.ps1")
 
 $ProgramRoot = "${PRODUCTION_SERVICE_ROOT}\RAGPinCheng-ASR-WhisperX\qualification"
 $RunRoot = Join-Path $ProgramRoot "runs\$RunId"
 $VenvRoot = Join-Path $RunRoot "venv"
 $VenvPython = Join-Path $VenvRoot "Scripts\python.exe"
+$Wheelhouse = Join-Path $RunRoot "wheelhouse"
+$SharedWheelSeed = Join-Path $RunRoot "shared-wheel-seed"
+$SharedWheelCacheRoot = "${PRODUCTION_DATA_ROOT}\RAGPinCheng-ASR\wheel-cache"
 $ReportRoot = Join-Path $RunRoot "reports"
 $ModelRoot = "${PRODUCTION_DATA_ROOT}\RAGPinCheng-ASR-WhisperX\models"
 $NltkRoot = "${PRODUCTION_DATA_ROOT}\RAGPinCheng-ASR-WhisperX\nltk"
@@ -86,7 +90,7 @@ if (-not (Test-Path -LiteralPath $ManifestPath -PathType Leaf)) {
 $beforeTasks = Get-StateHash "tasks"
 $beforeFirewall = Get-StateHash "firewall"
 try {
-    New-Item -ItemType Directory -Path $RunRoot, $ReportRoot -Force | Out-Null
+    New-Item -ItemType Directory -Path $RunRoot, $ReportRoot, $Wheelhouse -Force | Out-Null
     $machinePython = "${PRODUCTION_PYTHON311_PATH}"
     if (-not (Test-Path -LiteralPath $machinePython -PathType Leaf)) {
         throw "machine-wide Python 3.11 is required"
@@ -94,18 +98,46 @@ try {
     & $machinePython -m venv $VenvRoot
     if ($LASTEXITCODE -ne 0) { throw "qualification venv creation failed" }
 
+    Copy-VerifiedSharedWheelBlobs `
+        -CacheRoot $SharedWheelCacheRoot `
+        -Destination $SharedWheelSeed | Out-Null
+    $requirements = @(
+        "torch==2.8.0+cu128",
+        "torchaudio==2.8.0+cu128",
+        "torchvision==0.23.0+cu128",
+        "whisperx==3.8.6",
+        "httpx>=0.27.0",
+        "python-dotenv>=1.0.0"
+    )
     Set-RunProxy $env:ASR_DEPENDENCY_PROXY
-    & $VenvPython -m pip install --index-url https://download.pytorch.org/whl/cu128 `
-        "torch==2.8.0+cu128" "torchaudio==2.8.0+cu128" "torchvision==0.23.0+cu128"
-    if ($LASTEXITCODE -ne 0) { throw "cu128 dependency install failed" }
-    & $VenvPython -m pip install "whisperx==3.8.6" "httpx>=0.27.0" "python-dotenv>=1.0.0"
-    if ($LASTEXITCODE -ne 0) { throw "WhisperX qualification dependency install failed" }
+    try {
+        & $VenvPython -m pip download --only-binary=:all: --dest $Wheelhouse `
+            --index-url https://pypi.org/simple `
+            --extra-index-url https://download.pytorch.org/whl/cu128 `
+            --find-links $SharedWheelSeed @requirements
+        if ($LASTEXITCODE -ne 0) { throw "WhisperX dependency download failed" }
+    } finally {
+        Clear-RunProxy
+    }
+    $sharedMaterial = [ordered]@{
+        schema_version = "whisperx-shared-wheel-key/1"
+        python = "3.11"
+        platform = "windows-x64"
+        requirements = $requirements
+    }
+    $sharedKey = Get-SharedTextSha256 -Text ($sharedMaterial | ConvertTo-Json -Depth 8 -Compress)
+    Publish-SharedWheelBlobs `
+        -CacheRoot $SharedWheelCacheRoot `
+        -Wheelhouse $Wheelhouse `
+        -Consumer "whisperx" `
+        -CacheKey $sharedKey `
+        -KeyMaterial $sharedMaterial | Out-Null
+    & $VenvPython -m pip install --no-index --find-links $Wheelhouse @requirements
+    if ($LASTEXITCODE -ne 0) { throw "WhisperX offline dependency install failed" }
     & $VenvPython -m pip check
     if ($LASTEXITCODE -ne 0) { throw "pip check failed" }
     & $VenvPython -c "import torch; assert torch.__version__ == '2.8.0+cu128'; assert torch.version.cuda == '12.8'"
     if ($LASTEXITCODE -ne 0) { throw "Torch/CUDA identity mismatch" }
-    Clear-RunProxy
-
     $licenseReport = Join-Path $ReportRoot "license-audit.json"
     $env:PYTHONPATH = $resolvedSource
     & $VenvPython "$resolvedSource\scripts\run_whisperx_qualification.py" `
