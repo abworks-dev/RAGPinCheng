@@ -4,8 +4,6 @@ from pathlib import Path
 import subprocess
 from types import SimpleNamespace
 
-import numpy
-
 import asr_service.engines.whisperx as whisperx_engine
 from asr_service.engine_protocol import EngineChunkCandidate, PreparedAudioChunk, SENSEVOICE_SERVICE_CONFIG, WHISPERX_SERVICE_CONFIG
 from asr_service.engines.whisperx import WhisperXEngine, _decode_audio_bytes
@@ -46,12 +44,37 @@ def install_fake(monkeypatch, *, devices=1, compute=frozenset({"float16"})):
 def test_audio_bytes_are_decoded_through_ffmpeg_stdin_without_tempfile(monkeypatch):
     captured = {}
 
+    class FakeArray:
+        def flatten(self):
+            return self
+
+        def astype(self, dtype):
+            captured["dtype"] = dtype
+            return self
+
+        def __truediv__(self, divisor):
+            return ("scaled", divisor)
+
+    fake_numpy = SimpleNamespace(
+        int16="int16",
+        float32="float32",
+        frombuffer=lambda content, dtype: (
+            captured.update({"decoded": content, "source_dtype": dtype})
+            or FakeArray()
+        ),
+    )
+
     def run(command, **kwargs):
         captured["command"] = command
         captured["kwargs"] = kwargs
         return SimpleNamespace(stdout=b"\x00\x80\xff\x7f")
 
     monkeypatch.setattr("asr_service.engines.whisperx.subprocess.run", run)
+    monkeypatch.setattr(
+        whisperx_engine,
+        "importlib",
+        SimpleNamespace(import_module=lambda name: fake_numpy if name == "numpy" else None),
+    )
     audio = _decode_audio_bytes(b"container-bytes")
 
     assert captured["command"][0] == "ffmpeg"
@@ -61,7 +84,10 @@ def test_audio_bytes_are_decoded_through_ffmpeg_stdin_without_tempfile(monkeypat
         "capture_output": True,
         "check": True,
     }
-    assert numpy.allclose(audio, [-1.0, 32767 / 32768])
+    assert captured["decoded"] == b"\x00\x80\xff\x7f"
+    assert captured["source_dtype"] == "int16"
+    assert captured["dtype"] == "float32"
+    assert audio == ("scaled", 32768.0)
 
 
 def test_audio_decode_failure_is_sanitized(monkeypatch):
@@ -69,6 +95,11 @@ def test_audio_decode_failure_is_sanitized(monkeypatch):
         raise subprocess.CalledProcessError(1, "ffmpeg", stderr=b"sensitive")
 
     monkeypatch.setattr("asr_service.engines.whisperx.subprocess.run", fail)
+    monkeypatch.setattr(
+        whisperx_engine,
+        "importlib",
+        SimpleNamespace(import_module=lambda _name: SimpleNamespace()),
+    )
     try:
         _decode_audio_bytes(b"container-bytes")
     except RuntimeError as exc:
