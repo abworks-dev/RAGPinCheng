@@ -2104,6 +2104,13 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 验证：管理布局专项 Vitest 5/5 通过；TypeScript 检查和 Vite production build 通过（2026 modules transformed）；`git diff --check` 通过。构建保留既有 CSS 语法与主包大于 500 kB 警告。
 - 待办/风险：功能处于待用户验收；尚未在真实管理员登录态下完成桌面展开/收起及窄屏视觉验收。本轮未修改 API、权限、数据、依赖或部署。
 
+### 08:23 — 统一资源预览弹窗动画
+
+- 完成：为 PDF、PPTX、DOCX、XLSX 和视频共用的资源预览外壳增加统一开合动画；遮罩平滑淡入淡出，移动端面板轻微上移进入，桌面端从右侧轻滑进入，关闭时反向退出，并在系统启用“减少动态效果”时自动取消过渡。
+- 文件：`frontend/src/components/ResourcePreviewShell.tsx`、`frontend/src/components/ResourcePreviewShell.test.tsx`、`frontend/src/styles/index.css`、`WORKLOG.md`；未修改各预览器、API、数据、依赖或部署配置。
+- 验证：在最新 `origin/master` 隔离工作树中，资源预览外壳专项 Vitest 1/1 通过；前端全量 Vitest 31 个文件、150/150 项通过；TypeScript project build 与 Vite production build 通过（2026 modules transformed）；目标文件 `git diff --check` 通过。构建保留既有 CSS 语法、主包大于 500 kB 与 React Router future warning。
+- 待办/风险：功能处于待用户验收；尚未在真实文档和视频预览中完成桌面、窄屏及“减少动态效果”视觉验收。回滚仅需恢复共享外壳和对应样式并移除专项测试。
+
 ### 08:24 — 增加 R3 依赖失败自诊断
 
 - 完成：按获批 R3 方案在统一资格脚本内增加依赖失败阶段跟踪和严格脱敏诊断；只输出固定诊断种类、固定阶段及受限 ASCII requirement，明确排除原始日志、URL、代理、Token、绝对路径、冲突行和完整 freeze。workflow 只把该 JSON 与既有 verdict 一起上传并显示安全字段，不新增一次性诊断 workflow。
