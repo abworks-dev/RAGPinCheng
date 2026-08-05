@@ -19,13 +19,17 @@ from .bge_priority_probe import HttpBgePriorityProbe
 from .config import AsrServiceSettings
 from .engine_protocol import (
     FASTER_WHISPER_SERVICE_CONFIG,
+    QWEN3_ASR_SERVICE_CONFIG,
     SENSEVOICE_SERVICE_CONFIG,
 )
 from .engine_registry import EngineRegistration, EngineRegistry
 from .engines.faster_whisper import FasterWhisperEngine
 from .engines.funasr_sensevoice import FunAsrSenseVoiceEngine
+from .engines.qwen3_asr import Qwen3AsrEngine
 from .model_cache import (
     validate_faster_whisper_cache,
+    validate_qwen3_aligner_cache,
+    validate_qwen3_asr_cache,
     validate_sensevoice_cache,
 )
 from .scheduler import FixedBgePriorityProbe, Scheduler
@@ -91,6 +95,30 @@ def create_app(
             model_path=faster_whisper_cache.model_path,
             unavailable_reason_code=faster_whisper_cache.reason_code,
         )
+        qwen3_asr_cache = validate_qwen3_asr_cache(
+            settings.qwen3_asr_model_cache_root,
+            settings.qwen3_asr_model_manifest_path,
+        )
+        qwen3_aligner_cache = validate_qwen3_aligner_cache(
+            settings.qwen3_aligner_model_cache_root,
+            settings.qwen3_aligner_model_manifest_path,
+        )
+        qwen3_ready = qwen3_asr_cache.available and qwen3_aligner_cache.available
+        qwen3_reason = (
+            "available"
+            if qwen3_ready
+            else (
+                qwen3_asr_cache.reason_code
+                if not qwen3_asr_cache.available
+                else qwen3_aligner_cache.reason_code
+            )
+        )
+        qwen3_engine = Qwen3AsrEngine(
+            model_cache_ready=lambda: qwen3_ready,
+            asr_model_path=qwen3_asr_cache.model_path,
+            aligner_model_path=qwen3_aligner_cache.model_path,
+            unavailable_reason_code=qwen3_reason,
+        )
         probe = (
             HttpBgePriorityProbe(
                 settings.bge_priority_probe_url,
@@ -110,6 +138,9 @@ def create_app(
                     ),
                     EngineRegistration(
                         sensevoice_engine, SENSEVOICE_SERVICE_CONFIG
+                    ),
+                    EngineRegistration(
+                        qwen3_engine, QWEN3_ASR_SERVICE_CONFIG
                     ),
                 )
             ),
