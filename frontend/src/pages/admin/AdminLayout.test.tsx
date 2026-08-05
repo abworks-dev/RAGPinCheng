@@ -82,14 +82,15 @@ describe("AdminLayout tab boundary", () => {
     expect(document.documentElement).not.toHaveClass("admin-scrollbar-stable");
   });
 
-  it("moves theme and admin actions to the bottom of the sidebar", () => {
-    const { container } = render(
+  it("keeps the brand, theme, and admin actions in the sidebar", () => {
+    render(
       <MemoryRouter>
         <AdminLayout />
       </MemoryRouter>,
     );
 
     expect(screen.getByText("品成 BIM 知识库")).toBeInTheDocument();
+    expect(screen.getByText("管理工作台")).toBeInTheDocument();
     expect(screen.queryByText("测试管理员（admin-test）")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /主题：/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /测试管理员/ })).toBeInTheDocument();
@@ -98,9 +99,24 @@ describe("AdminLayout tab boundary", () => {
     fireEvent.click(screen.getByRole("button", { name: /测试管理员/ }));
     expect(screen.getByRole("button", { name: "返回对话" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "退出登录" })).toBeInTheDocument();
-    expect(container.querySelector("header")).not.toHaveClass("border-b");
-    expect(container.querySelector("aside")).toHaveClass("lg:sticky", "lg:top-16", "lg:self-start");
-    expect(container.querySelector("aside")).not.toHaveClass("border-r");
+    expect(document.querySelector("header")).not.toBeInTheDocument();
+  });
+
+  it("collapses and expands like the conversation sidebar", () => {
+    const { container } = render(
+      <MemoryRouter>
+        <AdminLayout />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "收起管理侧栏" }));
+    expect(container.querySelector("aside")).toHaveClass("lg:w-16");
+    expect(screen.queryByText("品成 BIM 知识库")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "展开管理侧栏" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "展开管理侧栏" }));
+    expect(container.querySelector("aside")).toHaveClass("lg:w-[17rem]");
+    expect(screen.getByText("品成 BIM 知识库")).toBeInTheDocument();
   });
 
   it("matches the conversation sidebar width and color tokens", () => {

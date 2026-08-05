@@ -2097,3 +2097,9 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`frontend/src/components/PdfPreview.tsx`、`frontend/src/components/PdfPreview.test.tsx`、`WORKLOG.md`。
 - 验证：推送前 PDF 专项 Vitest 5/5、前端全量 Vitest 30 个文件 148/148、TypeScript project build、Vite production build 与 `git diff --check` 全部通过；推送后远端 `master` 与功能提交均为 `787860f813ecfebdb0f259fe14677c7022c44aa9`。
 - 待办/风险：仍待真实纵向/横向 PDF 的浏览器视觉验收；依赖安装审计报告锁文件既有 10 项风险，本轮未运行自动修复、未修改依赖、API、数据、RAG 或部署配置。
+### 07:55 — 对齐管理页与对话页侧栏
+
+- 完成：移除管理页独立顶部栏，将“品成 BIM 知识库 / 管理工作台”并入左侧栏品牌区；桌面侧栏与对话页统一为 17rem 展开、4rem 收起及同款宽度过渡，收起时保留导航状态点和品牌展开入口；既有主题菜单与管理员菜单保留在侧栏底部并适配收起状态。
+- 文件：`frontend/src/pages/admin/AdminLayout.tsx`、`frontend/src/pages/admin/AdminLayout.test.tsx`、`WORKLOG.md`。
+- 验证：管理布局专项 Vitest 5/5 通过；TypeScript 检查和 Vite production build 通过（2026 modules transformed）；`git diff --check` 通过。构建保留既有 CSS 语法与主包大于 500 kB 警告。
+- 待办/风险：功能处于待用户验收；尚未在真实管理员登录态下完成桌面展开/收起及窄屏视觉验收。本轮未修改 API、权限、数据、依赖或部署。
