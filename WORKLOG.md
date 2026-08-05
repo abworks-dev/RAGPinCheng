@@ -2118,3 +2118,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 验证：PowerShell AST、隔离脱敏器的 binary/version/network/unknown 正负自测、workflow YAML、部署静态测试 25/25 和 `git diff --check` 通过。
 - 远端进展：PR #47 的 7 项 CI 全部通过并合并为 `cd56f4a0e116a28ef12575748e25c25ffab628f2`；资格 run `30963495106` 仍失败关闭且 verdict 确认服务与 admission 未变化，但 PowerShell 5.1 在空日志集合上拒绝 mandatory array，导致附加诊断文件未生成。同范围修复允许空集合、以内置 `evidence_insufficient` 回退，并优先写 runner artifact 路径。
 - 待办/风险：空集合兼容修复尚待独立 PR、CI、合并和相同参数重试；不得修改依赖、production freeze、服务或 Profile admission。
+
+### 09:06 — 发布资源预览动画到 master
+
+- 完成：从最新 `origin/master` 建立隔离工作树，仅整合共享资源预览外壳、动画样式、专项测试及对应日志，以普通 fast-forward 将功能提交 `b99c48b861467d3ca20ce690deb3c39338cae17e` 推送到 `origin/master`；未使用强推，也未提交主工作区的其他并行修改或 `.codex-worktrees/`。
+- 文件：`frontend/src/components/ResourcePreviewShell.tsx`、`frontend/src/components/ResourcePreviewShell.test.tsx`、`frontend/src/styles/index.css`、`WORKLOG.md`。
+- 验证：推送前资源预览动画专项 Vitest 1/1、前端全量 Vitest 31 个文件 150/150、TypeScript project build、Vite production build 与 `git diff --check` 全部通过；推送后远端 `master` 与功能提交均为 `b99c48b861467d3ca20ce690deb3c39338cae17e`。
+- 待办/风险：仍待真实文档和视频预览的桌面、窄屏及“减少动态效果”视觉验收；依赖安装审计报告锁文件既有 10 项风险，本轮未运行自动修复、未修改依赖、API、数据或部署配置。
