@@ -2349,3 +2349,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`scripts/prepare_faster_whisper_model.py`、`asr_service/tests/test_faster_whisper_qualification.py`、`WORKLOG.md`。
 - 验证：新增仓库外临时 cwd、移除 `PYTHONPATH`的真实子进程 `--help`回归；模型准备与部署专项 54/54通过；全部 ASR、Whisper和transcription相关测试559/559通过，另有6个subtests通过；本机缺少NLTK的单项WhisperX运行测试按环境事实排除。Python编译与`git diff --check`通过。
 - 待办/风险：待独立PR、完整CI、合并后以新master SHA重跑一次统一资格；不修改生产服务、防火墙、Ubuntu、数据库、Qdrant或Profile admission。
+
+### 04:09 — 增加 Hugging Face TLS 1.2 代理兜底
+
+- 完成：根据 Windows 生产 runner 的可复现实测，确认 Helios HTTP 代理仅在 Python/OpenSSL 3 以 TLS 1.3 访问 Hugging Face 时提前关闭连接，而同一 Python 会话限制 TLS 1.2 后固定模型 API 返回 200。faster-whisper 模型准备现为 Hugging Face 注册专用 requests backend，直连池和代理池均使用保留系统 CA、主机名与证书验证的默认 SSL context，并仅将最高协议限制为 TLS 1.2；固定模型、revision、Manifest、代理来源、wheel 缓存和生产准入保持不变。
+- 文件：`scripts/prepare_faster_whisper_model.py`、`tests/test_faster_whisper_model_tls.py`、`.github/workflows/ci.yml`、`WORKLOG.md`。
+- 验证：目标 Python 语法检查通过；新增测试验证直连池、代理池、TLS 1.2 上限、`CERT_REQUIRED`、主机名检查和 Hugging Face backend 注册；更新后的完整 ASR CI 测试集合 335/335 通过，`git diff --check` 通过。本机项目 venv 未安装 `huggingface_hub`，实际包集成与生产代理链路仍需远端 CI 和资格 workflow 最终验证。
+- 待办/风险：待提交、推送、PR、远端 CI、合并后，以新的完整 master SHA 重新执行一次 R3 资格验证；本次未触发 workflow、未下载模型、未部署、未修改 Secret、生产服务、任务、防火墙、数据库、Qdrant 或 Profile admission。回滚可恢复默认 Hugging Face backend。

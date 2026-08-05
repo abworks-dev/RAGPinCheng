@@ -11,9 +11,12 @@ import hashlib
 import json
 import os
 import shutil
+import ssl
 import sys
 from pathlib import Path, PurePosixPath
 from typing import Callable
+
+import requests
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 if str(REPOSITORY_ROOT) not in sys.path:
@@ -32,6 +35,38 @@ MODEL_BIN_SHA256 = (
     "e76620f83d5f5769e6a5f66c8013e1292a797de79b3581b44b6c7f9e36d77f31"
 )
 MANIFEST_NAME = "model-manifest.json"
+
+
+class _TLS12HTTPAdapter(requests.adapters.HTTPAdapter):
+    """Keep Hugging Face HTTPS compatible with the production proxy."""
+
+    @staticmethod
+    def _ssl_context() -> ssl.SSLContext:
+        context = ssl.create_default_context()
+        context.maximum_version = ssl.TLSVersion.TLSv1_2
+        return context
+
+    def init_poolmanager(
+        self,
+        connections: int,
+        maxsize: int,
+        block: bool = requests.adapters.DEFAULT_POOLBLOCK,
+        **pool_kwargs: object,
+    ) -> None:
+        pool_kwargs["ssl_context"] = self._ssl_context()
+        super().init_poolmanager(connections, maxsize, block, **pool_kwargs)
+
+    def proxy_manager_for(
+        self, proxy: str, **proxy_kwargs: object
+    ) -> requests.packages.urllib3.ProxyManager:
+        proxy_kwargs["ssl_context"] = self._ssl_context()
+        return super().proxy_manager_for(proxy, **proxy_kwargs)
+
+
+def _hugging_face_backend() -> requests.Session:
+    session = requests.Session()
+    session.mount("https://", _TLS12HTTPAdapter())
+    return session
 
 
 def _sha256(path: Path) -> str:
@@ -135,8 +170,9 @@ def _write_manifest(model_root: Path) -> Path:
 
 
 def _default_downloader(**kwargs: object) -> str:
-    from huggingface_hub import snapshot_download
+    from huggingface_hub import configure_http_backend, snapshot_download
 
+    configure_http_backend(backend_factory=_hugging_face_backend)
     return snapshot_download(**kwargs)
 
 
