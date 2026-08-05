@@ -2296,8 +2296,8 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 
 - 完成：在独立 `codex/whisperx-qualification` worktree 中新增仅手动触发、完整 master SHA 绑定及 `production-asr` environment 保护的 WhisperX 资格 workflow；复用既有 8 个自制中文 BIM/噪声/编号/负控样本和统一质量阈值，通过现有 `TranscriptionProvider → ProviderCandidate → normalizer → Canonical` 契约执行两轮确定性、CER、术语/编号召回、时间戳、RTF 和显存门禁。Windows runner 固定 Python 3.11、`torch 2.8.0+cu128`、WhisperX 3.8.6、FP16、batch=1 和既有双模型 revision，并在模型准备前执行失败关闭的安装包许可证审计；运行目录、venv 和报告均与现有服务隔离，Profile admission 保持 disabled。
 - 文件：新增 `.github/workflows/qualify-whisperx-production.yml`、`scripts/qualify-whisperx-production.ps1`、`scripts/run_whisperx_qualification.py`、`asr_service/tests/test_whisperx_qualification.py`；更新 `project-docs/features/transcript-pipeline.md`、`WORKLOG.md`。未修改业务 Provider/Profile/Canonical 契约、正式依赖、生产服务、任务、防火墙、数据库、Qdrant、模型 revision 或 Profile admission。
-- 验证：WhisperX 资格、引擎及部署静态专项测试 48/48 通过；Python compileall、PowerShell 5.1 AST、workflow YAML 解析和 `git diff --check` 通过。许可证审计在既有 WhisperX 隔离 venv 上通过，未知许可证及 GPL/AGPL/SSPL 仍失败关闭。
-- 待办/风险：尚待独立 PR、完整 CI、合并及一次 production-asr 资格运行；只有 workflow 的脱敏 verdict 才能形成真实质量/资源/许可证结论。运行不注册或启动服务、不接入业务流量；失败时保持 Profile disabled，回滚为 revert 本提交。
+- 验证：WhisperX 资格、引擎及部署静态专项测试 48/48 通过；Python compileall、PowerShell 5.1 AST、workflow YAML 解析和 `git diff --check` 通过。许可证审计在既有 WhisperX 隔离 venv 上通过，未知许可证及 GPL/AGPL/SSPL 仍失败关闭。PR #71 的 7 项 CI 全绿并合并为 `ac4eb561634f47171248772ea52ee875fe43d486`；首次 production-asr run `31011018657` 通过固定 CUDA 依赖、178 包许可证、双模型缓存和 Profile disabled 门禁，随后在正式 Markdown parser 导入时因 run 专属 venv 缺少 `python-dotenv` 关闭，且 artifact 跨目录共同根路径不被上传 action 接受。
+- 待办/风险：待同范围修复为 run 专属 venv 补充 `python-dotenv`，并将全部脱敏报告统一到单一 reports 目录后，经 PR/CI/合并重跑。尚无质量 verdict；运行不注册或启动服务、不接入业务流量，Profile 继续 disabled，回滚为 revert 对应提交。
 
 ### 21:44 — 修正索引活动历史状态语义
 

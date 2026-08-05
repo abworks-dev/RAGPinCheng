@@ -180,6 +180,7 @@ def test_workflow_and_runner_are_manual_isolated_and_disabled():
     assert "prepare-qwen3-asr-qualification-samples.ps1" in workflow
     assert "torch==2.8.0+cu128" in script
     assert "whisperx==3.8.6" in script
+    assert "python-dotenv>=1.0.0" in script
     assert "--audit-licenses" in script
     assert "installed dependency license audit failed" in script
     assert "Profile is not disabled" in script
@@ -193,3 +194,8 @@ def test_workflow_and_runner_are_manual_isolated_and_disabled():
         "new-netfirewallrule",
     ):
         assert forbidden not in lowered
+    assert "${{ runner.temp }}\\whisperx-qualification-" not in workflow
+    assert (
+        "D:\\Services\\RAGPinCheng-ASR-WhisperX\\qualification\\runs\\"
+        "${{ github.run_id }}\\reports"
+    ) in workflow
