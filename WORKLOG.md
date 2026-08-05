@@ -1826,3 +1826,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`frontend/src/pages/admin/AdminLayout.tsx`、`frontend/src/pages/admin/AdminLayout.test.tsx`、`frontend/src/styles/index.css`、`WORKLOG.md`；保留上述文件及仓库内其他并行未提交修改。
 - 验证：管理布局专项 Vitest 4/4 通过；TypeScript project build 与 Vite production build 通过（1965 modules transformed）。构建保留既有 CSS 语法与主包大于 500 kB 警告。
 - 待办/风险：功能处于待用户验收；尚未在真实管理员登录态下切换长短页面做浏览器视觉对比。本轮未修改 API、数据、依赖或部署，回滚只需移除管理布局生命周期类及对应 CSS。
+
+### 08:27 — 统一来源核验列表图标风格
+
+- 完成：将来源核验列表中的文档、表格等来源类型图标统一为视频图标采用的 24px 圆角浅蓝底容器与强调色线框，使同一列表内的类型图标尺寸、底色和视觉层级一致；未改动来源编号、类型判断、文案或交互。
+- 文件：`frontend/src/components/SourceWorkspace.tsx`、`WORKLOG.md`；保留目标文件与仓库内其他并行未提交修改。
+- 验证：来源工作区专项 Vitest 2/2 通过；TypeScript project build 与 Vite production build 通过（1965 modules transformed）；目标文件 `git diff --check` 通过。构建保留既有 CSS 语法与主包大于 500 kB 警告。
+- 待办/风险：功能处于待用户验收；尚未在真实混合来源列表中进行视觉验收。本轮未修改 API、数据、依赖或部署，回滚仅需恢复该图标容器样式。

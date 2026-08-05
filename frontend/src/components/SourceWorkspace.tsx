@@ -207,7 +207,9 @@ export function SourceWorkspace({
               </span>
               <span className="min-w-0 flex-1">
                 <span className="flex items-center gap-1.5 text-sm font-medium">
-                  <SourceTypeIcon source={item} />
+                  <span className="flex size-6 shrink-0 items-center justify-center rounded-ui-sm bg-info/15 text-info">
+                    <SourceTypeIcon source={item} />
+                  </span>
                   <span className="truncate">{item.doc_title}</span>
                 </span>
                 <span className="mt-1.5 block truncate text-xs text-muted-foreground">
