@@ -230,6 +230,32 @@ describe("Message assistant actions", () => {
     expect(screen.getByText("原问题")).toBeInTheDocument();
   });
 
+  it("shows question version navigation on the right side of user actions", () => {
+    const viewQuestionVersion = vi.fn();
+    render(
+      <Message
+        msg={{
+          id: "21",
+          role: "user",
+          content: "编辑后的问题",
+          viewedUserVersionIndex: 2,
+          userVersions: [
+            { id: "u1", versionIndex: 1, content: "原问题", createdAt: 1, isActive: false },
+            { id: "u2", versionIndex: 2, content: "编辑后的问题", createdAt: 2, isActive: true },
+          ],
+        }}
+        conversationId="conversation-1"
+        turnIndex={1}
+        canEdit
+        onViewQuestionVersion={viewQuestionVersion}
+      />,
+    );
+
+    expect(screen.getByText("2 / 2")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "查看上一个提问" }));
+    expect(viewQuestionVersion).toHaveBeenCalledWith("21", 1);
+  });
+
   it("places regeneration beside copy and disables non-latest answers", () => {
     const regenerate = vi.fn();
     const { rerender } = render(
