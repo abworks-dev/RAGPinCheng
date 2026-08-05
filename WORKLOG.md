@@ -2235,3 +2235,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`src/transcription/profile.py`、`src/transcription/profile_catalog.py`、`src/transcription/remote_provider.py`、`api/transcription_runtime.py`、`api/routes_transcription.py`、`asr_service/app.py`、`asr_service/config.py`、`asr_service/engine_protocol.py`、`asr_service/model_cache.py`、`asr_service/engines/whisperx.py`、`asr_service/requirements-whisperx.txt`、`.github/workflows/smoke-whisperx-production.yml`、`scripts/run_whisperx_cuda_smoke.py`、`scripts/smoke-whisperx-production.ps1`、相关测试、执行方案、功能文档与 `.gitignore`。
 - 验证：最新 master 整合基线下 WhisperX/Profile/service/static 专项 85/85 通过；完整转写与 ASR service 离线回归 506/506 通过；PR #57 的 7 项 CI 全部通过并合并为 `c2d06781f4c30979394872cbaa99191b816e1a68`。首次生产 run `30973576282` 在安装前因 Windows PowerShell 5.1 无 BOM UTF-8 中文源码解析失败而关闭，未创建 venv、下载依赖/模型或运行 CUDA；已将固定合成文本改为 ASCII Base64 运行时解码并新增纯 ASCII 门禁，静态测试 3/3 和 Windows PowerShell 5.1 AST 通过。
 - 待办/风险：PowerShell 5.1 编码修复尚待同范围 PR/CI/合并和 production-asr 重跑；在 workflow 成功前不能认定 WhisperX 可用。runner 将精确校验 `torch 2.8.0+cu128`/CUDA 12.8、CTranslate2 FP16、双模型逐文件 SHA-256 和系统控制面末态；任一门禁失败即关闭。先前本机 PyPI 安装得到 `torch 2.8.0+cpu`，本机 cu128 大 wheel 下载停滞后已终止；未在开发机下载模型或执行推理。未启动服务、未接触生产数据/数据库/Qdrant，也未修改系统 CUDA、PATH 或现有 FunASR/BGE 环境。
+
+### 12:08 — 实施 Qwen3-ASR R3 离线证据提取
+
+- 完成：将 Qwen3-ASR 依赖诊断 workflow 收敛为固定 Python 3.11 的纯离线提取通道，严格绑定诊断 run `30972780438`、诊断 SHA、原资格 run/SHA、v2 diagnostic 和三个固定本地文件；复用已审查的失败关闭解析逻辑，只输出规范化候选/blocker、错误族计数及文件哈希，不输出原始日志。无版本 `funasr → oss2` 依赖不会被误判为版本冲突。
+- 文件：新增 `scripts/extract_qwen3_asr_resolver_evidence.py`、`tests/test_qwen3_asr_resolver_evidence.py`；更新 `.github/workflows/diagnose-qwen3-asr-dependencies-production.yml`、`tests/test_asr_deployment_static.py`、`project-docs/plans/qwen3-asr-r2-r3-integration.md`、`TODO.md`、`WORKLOG.md`。旧 dry-run 诊断脚本保留但 workflow 不再调用。
+- 验证：Python `compileall`、模块入口、`oss2` 防误判冒烟、离线能力禁用检查和 `git diff --check` 通过；本机没有项目 venv，系统 Python 未安装 pytest，遵守约束未安装依赖，完整专项测试交由远端 CI。
+- 待办/风险：尚待 PR、CI、合并及一次绑定完整 master SHA 的手动离线 workflow；不运行 pip、不读取或上传原始日志、不修改依赖、production freeze、模型、服务、现有 venv、Ubuntu、防火墙、数据库、Qdrant 或 Profile admission。
