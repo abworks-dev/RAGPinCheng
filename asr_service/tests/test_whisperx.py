@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from io import BytesIO
 from pathlib import Path
 import subprocess
 from types import SimpleNamespace
+import wave
 
 import asr_service.engines.whisperx as whisperx_engine
 from asr_service.engine_protocol import EngineChunkCandidate, PreparedAudioChunk, SENSEVOICE_SERVICE_CONFIG, WHISPERX_SERVICE_CONFIG
@@ -85,6 +87,56 @@ def test_audio_bytes_are_decoded_through_ffmpeg_stdin_without_tempfile(monkeypat
         "check": True,
     }
     assert captured["decoded"] == b"\x00\x80\xff\x7f"
+    assert captured["source_dtype"] == "int16"
+    assert captured["dtype"] == "float32"
+    assert audio == ("scaled", 32768.0)
+
+
+def test_pcm_wav_is_resampled_in_memory_without_ffmpeg(monkeypatch):
+    wav = BytesIO()
+    with wave.open(wav, "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(8000)
+        handle.writeframes(b"\x00\x00\xff\x7f" * 80)
+
+    captured = {}
+
+    class FakeArray:
+        def flatten(self):
+            return self
+
+        def astype(self, dtype):
+            captured["dtype"] = dtype
+            return self
+
+        def __truediv__(self, divisor):
+            return ("scaled", divisor)
+
+    fake_numpy = SimpleNamespace(
+        int16="int16",
+        float32="float32",
+        frombuffer=lambda content, dtype: (
+            captured.update({"decoded": content, "source_dtype": dtype})
+            or FakeArray()
+        ),
+    )
+    monkeypatch.setattr(
+        whisperx_engine,
+        "importlib",
+        SimpleNamespace(import_module=lambda name: fake_numpy if name == "numpy" else None),
+    )
+    monkeypatch.setattr(
+        whisperx_engine.subprocess,
+        "run",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("ffmpeg must not be used for PCM WAV")
+        ),
+    )
+
+    audio = _decode_audio_bytes(wav.getvalue())
+
+    assert len(captured["decoded"]) > 80 * 4
     assert captured["source_dtype"] == "int16"
     assert captured["dtype"] == "float32"
     assert audio == ("scaled", 32768.0)
