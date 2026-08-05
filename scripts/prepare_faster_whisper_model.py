@@ -11,8 +11,13 @@ import hashlib
 import json
 import os
 import shutil
+import sys
 from pathlib import Path, PurePosixPath
 from typing import Callable
+
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+if str(REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPOSITORY_ROOT))
 
 from asr_service.model_cache import (
     FASTER_WHISPER_MODEL_ID,
