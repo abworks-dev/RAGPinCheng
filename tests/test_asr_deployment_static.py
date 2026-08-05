@@ -294,6 +294,10 @@ def test_inactive_deploy_refuses_to_replace_a_running_service():
 
 def test_faster_whisper_qualification_workflow_is_manual_immutable_and_gated():
     workflow = read(".github/workflows/qualify-faster-whisper-production.yml")
+    dispatch_inputs = workflow.split("permissions:", 1)[0]
+    build_job = workflow.split("  build-internal-wheel:", 1)[1].split(
+        "\n  qualify:", 1
+    )[0]
     assert "workflow_dispatch:" in workflow
     assert "push:" not in workflow
     assert "pull_request:" not in workflow
@@ -313,7 +317,31 @@ def test_faster_whisper_qualification_workflow_is_manual_immutable_and_gated():
     assert "secrets.GPU_SERVICE_TOKEN" in workflow
     assert "secrets.ASR_SERVICE_TOKEN" not in workflow
     assert "activate_service" not in workflow.lower()
-    assert "operation:" not in workflow
+    assert "operation:" not in dispatch_inputs
+    assert "runs-on: ubuntu-latest" in build_job
+    assert "timeout-minutes: 30" in build_job
+    assert "scripts/build_internal_jieba_wheel.py build" in build_job
+    assert "actions/upload-artifact@v4" in build_job
+    assert "jieba-internal-wheel-${{ github.run_id }}" in build_job
+    assert "secrets." not in build_job
+    assert "production-asr" not in build_job
+    assert "ASR_SERVICE_TOKEN" not in build_job
+    assert "ASR_MODEL_DOWNLOAD_PROXY" not in build_job
+    assert "GPU_SERVICE_TOKEN" not in build_job
+    assert "actions/download-artifact@v4" in workflow
+    assert "InternalWheelBundlePath" in workflow
+    assert "needs: build-internal-wheel" in workflow
+    assert "DependencyDiagnosticPath" in workflow
+    assert workflow.count("dependency-diagnostic.json") == 3
+    assert "Dependency stage:" in workflow
+    assert "Dependency operation:" in workflow
+    assert "Failure origin:" in workflow
+    assert "Native exit code:" in workflow
+    assert "Captured line count:" in workflow
+    assert "Dependency diagnosis:" in workflow
+    assert "Affected requirement:" in workflow
+    assert "Fallback probe executed:" in workflow
+    assert "Fallback probe exit code:" in workflow
 
 
 def test_faster_whisper_synthetic_sample_preparation_is_fixed_and_gated():
@@ -393,11 +421,11 @@ def test_faster_whisper_synthetic_sample_preparation_is_fixed_and_gated():
     assert "app.sqlite" not in script
 
 
-def test_faster_whisper_dependency_diagnosis_is_manual_fixed_and_sanitized():
+def test_faster_whisper_resolver_evidence_is_manual_fixed_offline_and_sanitized():
     workflow = read(
         ".github/workflows/diagnose-faster-whisper-dependencies-production.yml"
     )
-    script = read("scripts/diagnose-faster-whisper-dependencies.ps1")
+    script = read("scripts/extract_faster_whisper_resolver_evidence.py")
     lowered = script.lower()
 
     assert "workflow_dispatch:" in workflow
@@ -405,12 +433,13 @@ def test_faster_whisper_dependency_diagnosis_is_manual_fixed_and_sanitized():
     assert "pull_request:" not in workflow
     assert "production-asr" in workflow
     assert "runs-on: [self-hosted, Windows, X64, asr-production]" in workflow
-    assert "timeout-minutes: 30" in workflow
+    assert "timeout-minutes: 10" in workflow
     assert workflow.count("default: false") == 1
-    assert "execute_diagnosis must be explicitly enabled" in workflow
+    assert "extract_evidence must be explicitly enabled" in workflow
     assert "commit_sha must equal the workflow dispatch revision" in workflow
-    assert "diagnosis must be dispatched from master" in workflow
-    assert "secrets.ASR_DEPENDENCY_PROXY" in workflow
+    assert "evidence extraction must be dispatched from master" in workflow
+    assert "secrets." not in workflow
+    assert "ASR_DEPENDENCY_PROXY" not in workflow
     assert "secrets.ASR_MODEL_DOWNLOAD_PROXY" not in workflow
     assert "secrets.GPU_SERVICE_TOKEN" not in workflow
     assert "secrets.ASR_SERVICE_TOKEN" not in workflow
@@ -418,52 +447,31 @@ def test_faster_whisper_dependency_diagnosis_is_manual_fixed_and_sanitized():
     assert "model_id:" not in workflow
     assert "revision:" not in workflow
 
-    assert '$SourceRunId = "30955067671"' in script
-    assert "production-freeze.txt" in script
+    assert 'SOURCE_RUN_ID = "30968517582"' in script
+    assert 'SOURCE_COMMIT_SHA = "cf57327452dbcd7e72140e5d271a3f0c2f3b5238"' in script
     assert "pip-download.log" in script
-    assert "qualification-requirements.txt" in script
-    assert "Convert-ToSanitizedResolverEvidence" in script
+    assert "pip-resolver-fallback.log" in script
+    assert "dependency-diagnostic.json" in script
+    assert "faster-whisper-r3-resolver-evidence/1" in script
     assert "binary_distribution_unavailable" in script
     assert "version_constraint_conflict" in script
-    assert "No matching binary distribution found for" in script
-    assert 'D:\\private\\python.exe : ERROR: No matching distribution found for jieba' in script
-    assert "diagnosis_kind = $DiagnosisKind" in script
-    assert "affected_requirement = $AffectedRequirement" in script
-    assert "exit 0" in script
-    assert "Assert-SanitizerSelfTest" in script
-    assert "Assert-ProductionFreeze" in script
-    assert "Assert-FixedCombinedRequirements" in script
-    assert "Source production freeze contains a non-registry constraint" in script
-    assert "Source combined requirements do not match the fixed contract" in script
-    assert "faster-whisper-r3-dependency-diagnostic/1" in script
-    assert "--dry-run" in script
-    assert "--ignore-installed" in script
-    assert "--only-binary=:all:" in script
-    assert "--no-cache-dir" in script
-    assert "resolver-replay.log" in script
-    assert "conflict_details_insufficient" in script
-    assert "resolution_succeeded_unexpectedly" in script
-    assert "production_services_modified = $false" in script
-    assert 'profile_admission = "disabled"' in script
-    assert script.isascii()
-
-    assert "Remove-Item" not in script
-    assert "Start-ScheduledTask" not in script
-    assert "Stop-ScheduledTask" not in script
-    assert "Register-ScheduledTask" not in script
-    assert "Unregister-ScheduledTask" not in script
-    assert "New-NetFirewallRule" not in script
-    assert "Set-NetFirewallRule" not in script
-    assert "Remove-NetFirewallRule" not in script
-    assert "netsh advfirewall" not in lowered
-    assert "Start-Process" not in script
-    assert "ASR_ENABLED" not in script
-    assert "prod.env" not in lowered
-    assert "ASR_MODEL_DOWNLOAD_PROXY" not in script
-    assert "GPU_SERVICE_TOKEN" not in script
-    assert "ASR_SERVICE_TOKEN" not in script
-    assert "Qdrant" not in script
-    assert "app.sqlite" not in script
+    assert "profile_admission" in script
+    assert "production_services_modified" in script
+    assert "source_run_id:" not in workflow
+    assert "diagnose-faster-whisper-dependencies.ps1" not in workflow
+    assert "extract_faster_whisper_resolver_evidence.py" in workflow
+    assert "resolver-evidence.json" in workflow
+    assert "pip-download.log" not in workflow
+    assert "pip-resolver-fallback.log" not in workflow
+    assert "actions/upload-artifact@v4" in workflow
+    assert "C:\\Program Files\\Python311\\python.exe" in workflow
+    assert "pip " not in lowered
+    for forbidden in (
+        "import subprocess", "import socket", "import requests", "import urllib",
+        "start-scheduledtask", "new-netfirewallrule", "asr_enabled", "qdrant",
+        "app.sqlite", "asr_service_token", "gpu_service_token",
+    ):
+        assert forbidden not in lowered
 
 
 def test_faster_whisper_qualification_is_isolated_from_production_mutations():
@@ -501,13 +509,48 @@ def test_faster_whisper_qualification_uses_exact_process_and_proxy_boundaries():
     assert "Get-Process -Name" not in script
     assert "function Set-ScopedProxy" in script
     assert "function Clear-ScopedProxy" in script
-    assert script.count("Set-ScopedProxy -Proxy $env:ASR_DEPENDENCY_PROXY") == 1
+    assert script.count("Set-ScopedProxy -Proxy $env:ASR_DEPENDENCY_PROXY") == 2
     assert script.count("Set-ScopedProxy -Proxy $env:ASR_MODEL_DOWNLOAD_PROXY") == 1
     assert script.count("Clear-ScopedProxy") >= 3
     assert '$env:NO_PROXY = "127.0.0.1,localhost,${PRIVATE_IPV4},${PRIVATE_IPV4}"' in script
     assert "ASR_SERVICE_TOKEN: " not in script
     assert 'Write-Host "$TemporaryToken"' not in script
     assert 'Write-Output "$TemporaryToken"' not in script
+
+
+def test_faster_whisper_qualification_preserves_native_stderr_before_failing():
+    script = read("scripts/qualify-faster-whisper-production.ps1")
+    invoke_external = script.split("function Invoke-External", 1)[1].split(
+        "function Assert-ExternalFailureCapture", 1
+    )[0]
+    capture_self_test = script.split(
+        "function Assert-ExternalFailureCapture", 1
+    )[1].split("function Write-PipFreeze", 1)[0]
+
+    assert "$previousPreference = $ErrorActionPreference" in invoke_external
+    assert '$ErrorActionPreference = "Continue"' in invoke_external
+    assert "finally {" in invoke_external
+    assert "$ErrorActionPreference = $previousPreference" in invoke_external
+    assert "$exitCode = $LASTEXITCODE" in invoke_external
+    assert "captured_line_count" in invoke_external
+    assert '"native_process_launch_failure"' in invoke_external
+    assert '"log_write_failure"' in invoke_external
+    assert '"native_exit"' in invoke_external
+    assert invoke_external.index("[System.IO.File]::WriteAllLines(") < invoke_external.index(
+        'if ($exitCode -ne 0)'
+    )
+
+    assert "r3-native-stderr-capture-ok" in capture_self_test
+    assert "raise SystemExit(23)" in capture_self_test
+    assert "exit code 23" in capture_self_test
+    assert "$ErrorActionPreference -ne $preferenceBefore" in capture_self_test
+    assert "$LastExternalCommandResult.exit_code -ne 23" in capture_self_test
+    assert "$LastExternalCommandResult.captured_line_count -lt 1" in capture_self_test
+    assert "did not preserve stderr" in capture_self_test
+    assert script.count("Assert-ExternalFailureCapture `") == 1
+    assert script.index("Assert-ExternalFailureCapture `") < script.index(
+        "$InternalWheelValidationLog ="
+    )
 
 
 def test_faster_whisper_qualification_freezes_dependencies_model_and_gates():
@@ -523,6 +566,117 @@ def test_faster_whisper_qualification_freezes_dependencies_model_and_gates():
     assert "-r $RequirementsSource/asr_service/requirements-faster-whisper.txt" in script
     assert "-r $ResolvedSource\\asr_service\\" not in script
     assert "--only-binary=:all:" in script
+    assert "InternalWheelBundlePath" in script
+    assert "build_internal_jieba_wheel.py" in script
+    assert '"validate"' in script
+    assert '"--find-links", $ResolvedInternalWheelBundle' in script
+    assert "internal://jieba/0.42.1/$wheelSha256" in script
+    assert "internal_wheel_manifest_sha256" in script
+    assert "Controlled internal wheel changed before wheelhouse recording" in script
+    assert "Controlled internal wheel was not resolved into the wheelhouse" in script
+    diagnostic_section = script.split(
+        "function Get-NormalizedPackageName", 1
+    )[1].split("function Write-SanitizedSummary", 1)[0]
+    assert "function Convert-ToSanitizedDependencyFailure" in diagnostic_section
+    assert "function Assert-DependencySanitizerSelfTest" in diagnostic_section
+    assert "function Write-SanitizedDependencyFailure" in diagnostic_section
+    assert "[AllowEmptyCollection()]" in diagnostic_section
+    assert '-Lines @()' in diagnostic_section
+    assert "faster-whisper-r3-dependency-failure/2" in diagnostic_section
+    assert "binary_distribution_unavailable" in diagnostic_section
+    assert "version_constraint_conflict" in diagnostic_section
+    assert "network_or_index_failure" in diagnostic_section
+    assert "invalid_requirement_input" in diagnostic_section
+    assert "constraint_contract_error" in diagnostic_section
+    assert "filesystem_or_permission_failure" in diagnostic_section
+    assert "disk_space_failure" in diagnostic_section
+    assert "proxy_setup_failure" in diagnostic_section
+    assert "proxy_restore_failure" in diagnostic_section
+    assert "native_process_launch_failure" in diagnostic_section
+    assert "resolver_replay_insufficient" in diagnostic_section
+    assert "evidence_insufficient" in diagnostic_section
+    assert "dependency_stage = [string]$diagnosis.Stage" in diagnostic_section
+    assert "dependency_operation = $Operation" in diagnostic_section
+    assert "failure_origin = $failureOrigin" in diagnostic_section
+    assert "native_exit_code = $originalExternalResult.exit_code" in diagnostic_section
+    assert (
+        "captured_line_count = $originalExternalResult.captured_line_count"
+        in diagnostic_section
+    )
+    assert "affected_requirement = [string]$diagnosis.Requirement" in diagnostic_section
+    assert "fallback_probe_executed = [bool]$fallback.Executed" in diagnostic_section
+    assert "fallback_probe_exit_code = $fallback.ExitCode" in diagnostic_section
+    assert 'profile_admission = "disabled"' in diagnostic_section
+    assert "production_services_modified = $false" in diagnostic_section
+    writer_section = diagnostic_section.split(
+        "function Write-SanitizedDependencyFailure", 1
+    )[1]
+    envelope = writer_section.split("$result = [ordered]@{", 1)[1].split(
+        "\n    }", 1
+    )[0]
+    assert re.findall(r"(?m)^\s{8}([a-z_]+)\s*=", envelope) == [
+        "schema_version",
+        "status",
+        "failure_code",
+        "commit_sha",
+        "run_id",
+        "dependency_stage",
+        "dependency_operation",
+        "failure_origin",
+        "native_exit_code",
+        "captured_line_count",
+        "diagnosis_kind",
+        "affected_requirement",
+        "fallback_probe_executed",
+        "fallback_probe_exit_code",
+        "profile_admission",
+        "production_services_modified",
+    ]
+    assert 'Kind = "evidence_insufficient"' in diagnostic_section
+    assert "conflict_lines" not in diagnostic_section
+    assert "log_path =" not in diagnostic_section.lower()
+    assert "production_freeze_sha256" not in diagnostic_section
+    assert "captured_lines =" not in diagnostic_section.lower()
+    assert "raw_output" not in diagnostic_section.lower()
+    assert "function Get-DependencyFailureOrigin" in diagnostic_section
+    assert "function Invoke-SanitizedResolverFallback" in diagnostic_section
+    assert '"--dry-run"' in diagnostic_section
+    assert '"--ignore-installed"' in diagnostic_section
+    assert '"--no-cache-dir"' in diagnostic_section
+    assert diagnostic_section.count('"--only-binary=:all:"') == 1
+    assert (
+        '"--find-links", $ResolvedInternalWheelBundle' in diagnostic_section
+    )
+    assert "Write-SanitizedDependencyFailure" in script.split("} catch {", 1)[-1]
+    for stage in (
+        "production_freeze",
+        "production_pip_check",
+        "qualification_venv",
+        "pip_download",
+        "wheel_manifest",
+        "pip_install",
+        "qualification_pip_check",
+        "qualification_freeze",
+        "module_origin_verification",
+        "license_audit",
+    ):
+        assert f'$DependencyFailureStage = "{stage}"' in script
+    for operation in (
+        "production_freeze_command",
+        "production_pip_check_command",
+        "qualification_venv_command",
+        "pip_download_proxy_setup",
+        "pip_download_command",
+        "pip_download_proxy_restore",
+        "wheel_manifest_validation",
+        "pip_install_command",
+        "qualification_pip_check_command",
+        "qualification_freeze_command",
+        "module_origin_verification_command",
+        "license_audit_command",
+    ):
+        assert f'$DependencyFailureOperation = "{operation}"' in script
+    assert "-Operation $DependencyFailureOperation" in script
     assert "--no-index" in script
     assert "pip\", \"check" in script
     assert "license-matrix.json" in script
@@ -555,3 +709,97 @@ def test_faster_whisper_qualification_drives_the_existing_result_flow():
     assert "WhisperModel" not in runner
     assert ".transcribe(" not in runner
     assert "FASTER_WHISPER_PROFILE_ID" in runner
+
+
+def test_qwen3_asr_qualification_is_manual_sha_bound_and_isolated():
+    workflow = read(".github/workflows/qualify-qwen3-asr-production.yml")
+    script = read("scripts/qualify-qwen3-asr-production.ps1")
+    assert "workflow_dispatch:" in workflow
+    assert "default: false" in workflow
+    assert "commit_sha must equal the workflow dispatch revision" in workflow
+    assert "refs/heads/master" in workflow
+    assert "environment: production-asr" in workflow
+    assert "runs-on: [self-hosted, Windows, X64, asr-production]" in workflow
+    assert "production-asr-qwen3-asr-qualification" in workflow
+    assert "D:\\Services\\RAGPinCheng-ASR\\qualification\\qwen3-asr" in script
+    assert "D:\\ServiceData\\RAGPinCheng-ASR\\qualification\\qwen3-asr\\inputs" in script
+    assert "$TempPort = 18300" in script
+    assert "New-NetFirewallRule" not in script
+    assert "Set-NetFirewallRule" not in script
+    assert "Register-ScheduledTask" not in script
+    assert 'profile_admission = "disabled"' in script
+    assert "production_services_modified = $false" in script
+
+
+def test_qwen3_asr_qualification_freezes_dual_models_bf16_and_result_flow():
+    script = read("scripts/qualify-qwen3-asr-production.ps1")
+    model = read("scripts/prepare_qwen3_asr_models.py")
+    runner = read("scripts/run_qwen3_asr_qualification.py")
+    assert "qwen-asr==0.0.6" in read("asr_service/requirements-qwen3-asr.txt")
+    assert "torch==2.7.0+cu128" in script
+    assert "torchaudio==2.7.0+cu128" in script
+    assert "requirements-qwen3-asr.txt" in script
+    assert "torch.cuda.is_bf16_supported()" in script
+    assert "torch.bfloat16" in script
+    assert "5eb144179a02acc5e5ba31e748d22b0cf3e303b0" in script
+    assert "c7cbfc2048c462b0d63a45797104fc9db3ad62b7" in script
+    assert "QWEN3_ASR_MODEL_ID" in model
+    assert "QWEN3_ALIGNER_MODEL_ID" in model
+    assert "local_dir_use_symlinks=False" in model
+    assert "validate_qwen3_asr_cache" in model
+    assert "validate_qwen3_aligner_cache" in model
+    assert "HttpxAsrServiceClient" in runner
+    assert "RemoteAsrProvider" in runner
+    assert "execute_transcription" in runner
+    assert "CanonicalTranscript" in runner
+    assert "format_transcript" in runner
+    assert "_parse_transcript_turns" in runner
+    assert "QWEN3_ASR_PROFILE_ID" in runner
+    assert ".transcribe(" not in runner
+
+
+def test_qwen3_asr_dependency_diagnosis_is_fixed_sanitized_and_non_runtime():
+    workflow = read(
+        ".github/workflows/diagnose-qwen3-asr-dependencies-production.yml"
+    )
+    script = read("scripts/diagnose-qwen3-asr-dependencies.ps1")
+    assert "workflow_dispatch:" in workflow
+    assert "default: false" in workflow
+    assert "commit_sha must equal the workflow dispatch revision" in workflow
+    assert "environment: production-asr" in workflow
+    assert "runs-on: [self-hosted, Windows, X64, asr-production]" in workflow
+    assert "production-asr-qwen3-asr-dependency-diagnosis" in workflow
+    assert "30970277613" in script
+    assert "86b69db6831e3cd201436a26bbe836229bf419bd" in script
+    assert "requirements-qwen3-asr.txt" in script
+    assert "qwen3-asr-r3-dependency-diagnostic/2" in script
+    assert "InternalWheelBundlePath" in workflow
+    assert "build_internal_jieba_wheel.py" in workflow
+    assert "internal-wheel-manifest.json" in script
+    assert "--find-links $ResolvedInternalWheelBundle" in script
+    assert "--dry-run" in script
+    assert "--ignore-installed" in script
+    assert "--only-binary=:all:" in script
+    assert "--no-cache-dir" in script
+    assert "dependency_operation = $DependencyOperation" in script
+    assert "failure_origin = $FailureOrigin" in script
+    assert "native_exit_code = $NativeExitCode" in script
+    assert "captured_line_count = $CapturedLineCount" in script
+    assert "cleanup_complete = $CleanupComplete" in script
+    assert "conflict_lines =" not in script
+    assert 'profile_admission = "disabled"' in script
+    assert "production_services_modified = $false" in script
+    assert "Remove-DiagnosticVenv" in script
+    for forbidden in (
+        "prepare_qwen3_asr_models.py",
+        "run_qwen3_asr_qualification.py",
+        "uvicorn",
+        "ASR_MODEL_DOWNLOAD_PROXY",
+        "ASR_SERVICE_TOKEN",
+        "torch.cuda",
+        "Start-Process",
+        "New-NetFirewallRule",
+        "Register-ScheduledTask",
+    ):
+        assert forbidden not in workflow
+        assert forbidden not in script

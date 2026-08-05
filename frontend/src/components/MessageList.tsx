@@ -37,6 +37,8 @@ export function MessageList({
   activeSourceMessageId = null,
   onToggleSources,
   sending = false,
+  onEditQuestion,
+  onViewQuestionVersion,
   onRegenerate,
   onViewAnswerVersion,
 }: {
@@ -47,6 +49,8 @@ export function MessageList({
   activeSourceMessageId?: string | null;
   onToggleSources?: (messageId: string) => void;
   sending?: boolean;
+  onEditQuestion?: (messageId: string, content: string) => void;
+  onViewQuestionVersion?: (messageId: string, versionIndex: number) => void;
   onRegenerate?: (messageId: string) => void;
   onViewAnswerVersion?: (messageId: string, versionIndex: number) => void;
 }) {
@@ -173,6 +177,9 @@ export function MessageList({
   const latestAssistantId = [...messages]
     .reverse()
     .find((message) => message.role === "assistant")?.id;
+  const latestUserId = [...messages]
+    .reverse()
+    .find((message) => message.role === "user")?.id;
 
   return (
     <div className="scroll-fade-content-start relative min-h-0 flex-1">
@@ -193,7 +200,13 @@ export function MessageList({
             data-turn-id={turn.id}
             className="scroll-mt-6"
           >
-            {turn.messages.map((message) => (
+            {turn.messages.map((message) => {
+              const turnUserMessage = turn.messages.find((item) => item.role === "user");
+              const activeQuestionVersion = turnUserMessage?.userVersions?.find((version) => version.isActive);
+              const viewingActiveQuestion =
+                !activeQuestionVersion
+                || turnUserMessage?.viewedUserVersionIndex === activeQuestionVersion.versionIndex;
+              return (
             <Message
               key={message.id}
               msg={message}
@@ -201,16 +214,25 @@ export function MessageList({
               turnIndex={turn.turnIndex}
               sourcesSelected={sourceOpen && activeSourceMessageId === message.id}
               onToggleSources={onToggleSources}
+              canEdit={
+                message.role === "user"
+                && message.id === latestUserId
+                && !sending
+              }
+              onEdit={onEditQuestion}
+              onViewQuestionVersion={onViewQuestionVersion}
               canRegenerate={
                 message.role === "assistant"
                 && message.id === latestAssistantId
                 && !sending
                 && !message.streaming
+                && viewingActiveQuestion
               }
               onRegenerate={onRegenerate}
               onViewAnswerVersion={onViewAnswerVersion}
             />
-            ))}
+              );
+            })}
           </section>
         ))}
         <div ref={bottomRef} aria-hidden="true" className="h-20 sm:h-24" data-message-bottom-spacer />

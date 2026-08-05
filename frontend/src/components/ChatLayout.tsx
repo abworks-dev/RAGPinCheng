@@ -19,6 +19,7 @@ import {
   type CitationHoverDetail,
   type CitationSelection,
 } from "./citations";
+import { getSelectedSourceCount } from "./sourceSelection";
 
 export function ChatLayout() {
   const [categories, setCategories] = useState<string[]>([]);
@@ -70,7 +71,16 @@ export function ChatLayout() {
     return () => window.removeEventListener(CITATION_EVENT, openSources);
   }, [activeCitation]);
 
-  const { messages, send, regenerate, viewAnswerVersion, sending, loading } = useChat({
+  const {
+    messages,
+    send,
+    regenerate,
+    editQuestion,
+    viewAnswerVersion,
+    viewQuestionVersion,
+    sending,
+    loading,
+  } = useChat({
     conversationId: currentId,
     onConversationCreated: (id) => {
       setCurrentId(id);
@@ -117,7 +127,7 @@ export function ChatLayout() {
   }
 
   const currentConversation = conversations.find((conversation) => conversation.id === currentId);
-  const sourceCount = [...messages].reverse().find((message) => message.sources?.length)?.sources?.length || 0;
+  const sourceCount = getSelectedSourceCount(messages, activeSourceMessageId);
   const scopeLabel = selected.length === 0 ? "全部企业知识" : selected.length === 1 ? selected[0] : `${selected.length} 个范围`;
 
   const clearCitationHighlight = useCallback(() => {
@@ -207,6 +217,8 @@ export function ChatLayout() {
             activeSourceMessageId={activeSourceMessageId}
             onToggleSources={toggleMessageSources}
             sending={sending}
+            onEditQuestion={editQuestion}
+            onViewQuestionVersion={viewQuestionVersion}
             onRegenerate={regenerate}
             onViewAnswerVersion={viewAnswerVersion}
           />

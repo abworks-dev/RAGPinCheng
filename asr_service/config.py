@@ -41,6 +41,10 @@ class AsrServiceSettings:
     log_dir: Path | None = None
     faster_whisper_model_cache_root: Path | None = None
     faster_whisper_model_manifest_path: Path | None = None
+    qwen3_asr_model_cache_root: Path | None = None
+    qwen3_asr_model_manifest_path: Path | None = None
+    qwen3_aligner_model_cache_root: Path | None = None
+    qwen3_aligner_model_manifest_path: Path | None = None
     whisperx_model_cache_root: Path | None = None
     whisperx_model_manifest_path: Path | None = None
     whisperx_align_model_cache_root: Path | None = None
@@ -69,6 +73,10 @@ class AsrServiceSettings:
             _optional_path("ASR_LOG_DIR"),
             _optional_path("ASR_FASTER_WHISPER_MODEL_CACHE_ROOT"),
             _optional_path("ASR_FASTER_WHISPER_MODEL_MANIFEST_PATH"),
+            _optional_path("ASR_QWEN3_ASR_MODEL_CACHE_ROOT"),
+            _optional_path("ASR_QWEN3_ASR_MODEL_MANIFEST_PATH"),
+            _optional_path("ASR_QWEN3_ALIGNER_MODEL_CACHE_ROOT"),
+            _optional_path("ASR_QWEN3_ALIGNER_MODEL_MANIFEST_PATH"),
             _optional_path("ASR_WHISPERX_MODEL_CACHE_ROOT"),
             _optional_path("ASR_WHISPERX_MODEL_MANIFEST_PATH"),
             _optional_path("ASR_WHISPERX_ALIGN_MODEL_CACHE_ROOT"),
@@ -109,12 +117,30 @@ class AsrServiceSettings:
             raise RuntimeError(
                 "faster-whisper model cache and manifest must be configured together"
             )
-        for root, manifest in (
-            (self.whisperx_model_cache_root, self.whisperx_model_manifest_path),
-            (self.whisperx_align_model_cache_root, self.whisperx_align_model_manifest_path),
+        qwen_paths = (
+            self.qwen3_asr_model_cache_root,
+            self.qwen3_asr_model_manifest_path,
+            self.qwen3_aligner_model_cache_root,
+            self.qwen3_aligner_model_manifest_path,
+        )
+        if any(item is not None for item in qwen_paths) and any(
+            item is None for item in qwen_paths
         ):
-            if (root is None) != (manifest is None):
-                raise RuntimeError("WhisperX model cache and manifest must be configured together")
+            raise RuntimeError(
+                "Qwen3-ASR model and aligner caches must be configured together"
+            )
+        whisperx_paths = (
+            self.whisperx_model_cache_root,
+            self.whisperx_model_manifest_path,
+            self.whisperx_align_model_cache_root,
+            self.whisperx_align_model_manifest_path,
+        )
+        if any(item is not None for item in whisperx_paths) and any(
+            item is None for item in whisperx_paths
+        ):
+            raise RuntimeError(
+                "WhisperX model and aligner caches must be configured together"
+            )
         if (
             not self.host or self.port <= 0 or self.port > 65535
             or self.max_input_bytes <= 0 or self.max_upload_part_bytes <= 0

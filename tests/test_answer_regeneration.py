@@ -66,8 +66,10 @@ from api.conversation_runtime import (
     create_conversation,
     list_answer_versions,
     list_messages,
+    list_user_versions,
     persist_turn,
     prepare_regeneration,
+    prepare_user_edit,
 )
 from src.session import ChatSession
 
@@ -161,6 +163,81 @@ def test_only_latest_assistant_answer_can_be_regenerated(tmp_path, monkeypatch):
     _create_user(conn)
     conversation = create_conversation(conn, 1)
     conn.close()
+
+
+def test_edit_latest_question_keeps_original_and_switches_paired_versions(tmp_path, monkeypatch):
+    path = tmp_path / "app.sqlite"
+    init_db(path, backup_dir=tmp_path / "backups")
+    monkeypatch.setattr(conversation_runtime, "connect", lambda: connect(path))
+    conn = connect(path)
+    _create_user(conn)
+    conversation = create_conversation(conn, 1)
+    conn.close()
+    assistant_id = _persist_answer(path, conversation["id"], "原问题", "原回答")
+
+    conn = connect(path)
+    user_id = list_messages(conn, conversation["id"])[0]["id"]
+    session, categories, paired_assistant_id = prepare_user_edit(
+        conn, conversation["id"], user_id
+    )
+    conn.close()
+
+    assert categories == ["公司标准"]
+    assert paired_assistant_id == assistant_id
+    assert session.state.messages == []
+    session.state.append_turn("编辑后的问题", "编辑后的回答", sources_for_ui=[])
+    session.state.last_search_query = "编辑后的问题"
+    plan = TurnPersistencePlan(
+        conversation_id=conversation["id"],
+        user_text="编辑后的问题",
+        is_first_turn=False,
+        categories=categories,
+        edit_user_message_id=user_id,
+        edit_assistant_message_id=assistant_id,
+    )
+    persist_turn(plan, session)
+
+    conn = connect(path)
+    effective = list_messages(conn, conversation["id"])
+    user_versions = list_user_versions(conn, user_id)
+    answer_versions = list_answer_versions(conn, assistant_id)
+    stored_user = conn.execute("SELECT content FROM messages WHERE id = ?", (user_id,)).fetchone()[0]
+    stored_answer = conn.execute("SELECT content FROM messages WHERE id = ?", (assistant_id,)).fetchone()[0]
+    conversation_row = conn.execute(
+        "SELECT title, turn_index FROM conversations WHERE id = ?", (conversation["id"],)
+    ).fetchone()
+    conn.close()
+
+    assert stored_user == "原问题"
+    assert stored_answer == "原回答"
+    assert [row["content"] for row in effective] == ["编辑后的问题", "编辑后的回答"]
+    assert [(row["content"], row["is_active"]) for row in user_versions] == [
+        ("原问题", 0),
+        ("编辑后的问题", 1),
+    ]
+    assert answer_versions[-1]["user_version_id"] == user_versions[-1]["id"]
+    assert conversation_row["title"] == "编辑后的问题"
+    assert conversation_row["turn_index"] == 1
+
+
+def test_only_latest_question_can_be_edited(tmp_path, monkeypatch):
+    path = tmp_path / "app.sqlite"
+    init_db(path, backup_dir=tmp_path / "backups")
+    monkeypatch.setattr(conversation_runtime, "connect", lambda: connect(path))
+    conn = connect(path)
+    _create_user(conn)
+    conversation = create_conversation(conn, 1)
+    conn.close()
+    _persist_answer(path, conversation["id"], "问题一", "回答一")
+    _persist_answer(path, conversation["id"], "问题二", "回答二")
+
+    conn = connect(path)
+    first_user_id = [
+        row["id"] for row in list_messages(conn, conversation["id"]) if row["role"] == "user"
+    ][0]
+    with pytest.raises(ValueError, match="only_latest"):
+        prepare_user_edit(conn, conversation["id"], first_user_id)
+    conn.close()
     _persist_answer(path, conversation["id"], "问题一", "回答一")
     _persist_answer(path, conversation["id"], "问题二", "回答二")
 
@@ -187,4 +264,6 @@ def test_version_rows_cascade_when_conversation_is_deleted(tmp_path, monkeypatch
     assert conversation_runtime.delete_conversation(conn, conversation["id"])
     assert conn.execute("SELECT COUNT(*) FROM message_answer_versions").fetchone()[0] == 0
     assert conn.execute("SELECT COUNT(*) FROM message_answer_heads").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM message_user_versions").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM message_user_heads").fetchone()[0] == 0
     conn.close()

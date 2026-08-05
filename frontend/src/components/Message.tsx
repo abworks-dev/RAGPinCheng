@@ -6,8 +6,7 @@ import rehypeKatex from "rehype-katex";
 import type { ChatMessage, Source } from "../types";
 import { stripMarkdown } from "../utils/markdown";
 import { FeedbackBar } from "./FeedbackBar";
-import { timestampToSeconds, useVideoPlayer } from "../hooks/useVideoPlayer";
-import { Check, CircleAlert, CirclePlay, Copy, Files } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, CircleAlert, CirclePlay, Copy, Files, Pencil, Send, X } from "lucide-react";
 import {
   CITATION_EVENT,
   CITATION_HOVER_EVENT,
@@ -17,6 +16,8 @@ import {
   type CitationHoverDetail,
 } from "./citations";
 import { copyText } from "../utils/clipboard";
+
+const CITATION_TOOLTIP_CLOSE_DELAY_MS = 150;
 
 // Demote inline `$$...$$` to `$...$` so KaTeX renders it inline instead of as
 // a block break. Standalone display blocks on their own line are kept.
@@ -100,8 +101,29 @@ function CitationMarker({
   const [isHighlighted, setIsHighlighted] = useState(false);
   const [showBelow, setShowBelow] = useState(false);
   const [showRightAligned, setShowRightAligned] = useState(false);
-  const tooltipRef = useRef<HTMLDivElement>(null);
-  const { open: openPlayer } = useVideoPlayer();
+  const tooltipRef = useRef<HTMLSpanElement>(null);
+  const closeTimerRef = useRef<number | null>(null);
+  const cancelClose = () => {
+    if (closeTimerRef.current !== null) {
+      window.clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+  };
+
+  const openTooltip = () => {
+    cancelClose();
+    setIsHovered(true);
+  };
+
+  const scheduleClose = () => {
+    cancelClose();
+    closeTimerRef.current = window.setTimeout(() => {
+      setIsHovered(false);
+      closeTimerRef.current = null;
+    }, CITATION_TOOLTIP_CLOSE_DELAY_MS);
+  };
+
+  useEffect(() => () => cancelClose(), []);
 
   // Listen for hover events from SourcesPanel (card → in-message highlight).
   useEffect(() => {
@@ -146,8 +168,8 @@ function CitationMarker({
     <>
       <sup
         className="relative top-[-0.35em] mx-px align-baseline"
-        onMouseEnter={() => setIsHovered(true)}
-        onMouseLeave={() => setIsHovered(false)}
+        onMouseEnter={openTooltip}
+        onMouseLeave={scheduleClose}
       >
         <a
           className={`inline-flex items-center justify-center cursor-pointer font-sans text-[11px] h-[18px] min-w-[18px] px-1 rounded transition-all ${
@@ -159,15 +181,6 @@ function CitationMarker({
             e.preventDefault();
             if (idx >= 0) {
               dispatchCitation({ messageId, sourceIndex: idx });
-              // For transcript citations with media, also open the video player
-              if (source.doc_type === "transcript" && source.media_id) {
-                openPlayer({
-                  mediaId: source.media_id,
-                  title: source.doc_title,
-                  startSeconds: timestampToSeconds(source.start_time),
-                  fromSource: false,
-                });
-              }
             }
           }}
         >
@@ -180,14 +193,17 @@ function CitationMarker({
             Horizontal alignment: left-0 (rightwards) by default to avoid sidebar clipping.
             If overflowing viewport right edge: flip to right-0 (leftwards) via showRightAligned state. */}
         {isHovered && (
-          <div
+          <span
             ref={tooltipRef}
-            className={`absolute z-[100] min-w-[200px] max-w-[320px] bg-white border border-gray-200 rounded-lg shadow-xl p-3 text-xs break-words ${
-              showBelow ? "top-[100%] mt-0.5" : "bottom-[100%] mb-0.5"
+            role="tooltip"
+            onMouseEnter={openTooltip}
+            onMouseLeave={scheduleClose}
+            className={`absolute z-[100] block min-w-[200px] max-w-[320px] rounded-ui-lg border border-border bg-popover p-3 text-xs text-popover-foreground shadow-overlay break-words ${
+              showBelow ? "top-full" : "bottom-full"
             } ${showRightAligned ? "right-0" : "left-0"}`}
           >
-            <div className="font-medium text-gray-900 mb-1 truncate">{source.doc_title}</div>
-            <div className="text-gray-500 mb-2 truncate flex items-center gap-1.5">
+            <span className="mb-1 block truncate font-medium text-popover-foreground">{source.doc_title}</span>
+            <span className="mb-2 flex items-center gap-1.5 truncate text-muted-foreground">
               {source.doc_type === "transcript" ? (
                 <>
                   {source.media_id && (
@@ -198,13 +214,12 @@ function CitationMarker({
               ) : (
                 `§${((source.section_path || "").replace(/<[^>]*>/g, ""))}`
               )}
-            </div>
-            <div className="text-gray-600 whitespace-pre-wrap leading-relaxed break-words">{preview}</div>
-            <div className="text-gray-400 mt-2 text-[10px]">
-              点击跳转到完整来源
-              {source.doc_type === "transcript" && source.media_id && " 并播放视频"}
-            </div>
-          </div>
+            </span>
+            <span className="block whitespace-pre-wrap break-words leading-relaxed text-popover-foreground/85">{preview}</span>
+            <span className="mt-2 block text-[10px] text-muted-foreground">
+              点击打开来源核验
+            </span>
+          </span>
         )}
       </sup>
     </>
@@ -217,6 +232,9 @@ export function Message({
   turnIndex,
   sourcesSelected = false,
   onToggleSources,
+  canEdit = false,
+  onEdit,
+  onViewQuestionVersion,
   canRegenerate = false,
   onRegenerate,
   onViewAnswerVersion,
@@ -226,17 +244,52 @@ export function Message({
   turnIndex: number;
   sourcesSelected?: boolean;
   onToggleSources?: (messageId: string) => void;
+  canEdit?: boolean;
+  onEdit?: (messageId: string, content: string) => void;
+  onViewQuestionVersion?: (messageId: string, versionIndex: number) => void;
   canRegenerate?: boolean;
   onRegenerate?: (messageId: string) => void;
   onViewAnswerVersion?: (messageId: string, versionIndex: number) => void;
 }) {
   const isUser = msg.role === "user";
   const [copied, setCopied] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(msg.content);
+  const editRef = useRef<HTMLTextAreaElement | null>(null);
+  const activeUserVersion = msg.userVersions?.find((version) => version.isActive);
+  const viewedUserVersionIndex =
+    msg.viewedUserVersionIndex ?? activeUserVersion?.versionIndex;
+  const viewedUserVersionPosition = msg.userVersions?.findIndex(
+    (version) => version.versionIndex === viewedUserVersionIndex,
+  ) ?? -1;
+  const viewingActiveUserVersion =
+    !activeUserVersion || viewedUserVersionIndex === activeUserVersion.versionIndex;
   const copyResetTimer = useRef<number | null>(null);
 
   useEffect(() => () => {
     if (copyResetTimer.current !== null) window.clearTimeout(copyResetTimer.current);
   }, []);
+
+  useEffect(() => {
+    if (!editing) setDraft(msg.content);
+  }, [editing, msg.content]);
+
+  useEffect(() => {
+    if (!editing) return;
+    editRef.current?.focus();
+    editRef.current?.setSelectionRange(draft.length, draft.length);
+  }, [editing]);
+
+  const submitEdit = () => {
+    const trimmed = draft.trim();
+    if (!trimmed || trimmed === msg.content) {
+      setEditing(false);
+      setDraft(msg.content);
+      return;
+    }
+    setEditing(false);
+    onEdit?.(msg.id, trimmed);
+  };
 
   const copyContent = async () => {
     try {
@@ -255,24 +308,124 @@ export function Message({
     <article className={`mx-auto flex w-full max-w-[50rem] ${isUser ? "justify-end" : "justify-start"} px-4 py-4`}>
       <div
         className={
-          (isUser ? "flex max-w-[70%] flex-col items-end" : "min-w-0 w-full") +
+          (isUser
+            ? editing
+              ? "flex w-full max-w-[85%] flex-col items-end"
+              : "flex max-w-[70%] flex-col items-end"
+            : "min-w-0 w-full") +
           ""
         }
       >
         {isUser ? (
           <>
-            <div className="rounded-ui-lg bg-primary px-4 py-3 text-primary-foreground">
-              <div className="whitespace-pre-wrap break-words">{msg.content}</div>
-            </div>
-            <button
-              type="button"
-              aria-label={copied ? "提问已复制" : "复制提问"}
-              title={copied ? "提问已复制" : "复制提问"}
-              onClick={copyContent}
-              className={`mt-2 inline-flex size-8 items-center justify-center rounded-ui-md hover:bg-secondary ${copied ? "text-success hover:text-success" : "text-muted-foreground hover:text-foreground"}`}
-            >
-              {copied ? <Check className="size-4 text-success" /> : <Copy className="size-4" />}
-            </button>
+            {editing ? (
+              <div className="w-full min-w-[22rem] rounded-ui-lg bg-primary p-4 text-primary-foreground shadow-surface">
+                <label htmlFor={`edit-question-${msg.id}`} className="sr-only">编辑提问</label>
+                <textarea
+                  ref={editRef}
+                  id={`edit-question-${msg.id}`}
+                  value={draft}
+                  rows={Math.min(8, Math.max(2, draft.split("\n").length))}
+                  onChange={(event) => setDraft(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") {
+                      setEditing(false);
+                      setDraft(msg.content);
+                    } else if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+                      event.preventDefault();
+                      submitEdit();
+                    }
+                  }}
+                  className="max-h-72 min-h-28 w-full resize-y rounded-ui-md border border-white/30 bg-white/10 px-4 py-3 text-sm leading-6 text-primary-foreground outline-none placeholder:text-primary-foreground/60 focus:border-white/70 focus:ring-2 focus:ring-white/20"
+                />
+                <div className="mt-2 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditing(false);
+                      setDraft(msg.content);
+                    }}
+                    className="inline-flex h-8 items-center gap-1.5 rounded-ui-md px-3 text-xs font-medium hover:bg-white/10"
+                  >
+                    <X className="size-3.5" />取消
+                  </button>
+                  <button
+                    type="button"
+                    onClick={submitEdit}
+                    disabled={!draft.trim() || draft.trim() === msg.content}
+                    className="inline-flex h-8 items-center gap-1.5 rounded-ui-md bg-white px-3 text-xs font-medium text-primary shadow-sm hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <Send className="size-3.5" />发送
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="rounded-ui-lg bg-primary px-4 py-3 text-primary-foreground">
+                  <div className="whitespace-pre-wrap break-words">{msg.content}</div>
+                </div>
+                <div className="mt-2 flex w-full items-center justify-between gap-3">
+                  <div className="flex items-center">
+                    <button
+                    type="button"
+                    aria-label={copied ? "提问已复制" : "复制提问"}
+                    title={copied ? "提问已复制" : "复制提问"}
+                    onClick={copyContent}
+                    className={`inline-flex size-8 items-center justify-center rounded-ui-md hover:bg-secondary ${copied ? "text-success hover:text-success" : "text-muted-foreground hover:text-foreground"}`}
+                  >
+                    {copied ? <Check className="size-4 text-success" /> : <Copy className="size-4" />}
+                    </button>
+                    {canEdit && viewingActiveUserVersion && (
+                    <button
+                      type="button"
+                      aria-label="编辑提问"
+                      title="编辑提问"
+                      onClick={() => {
+                        setDraft(msg.content);
+                        setEditing(true);
+                      }}
+                      className="inline-flex size-8 items-center justify-center rounded-ui-md text-muted-foreground hover:bg-secondary hover:text-foreground"
+                    >
+                      <Pencil className="size-4" />
+                    </button>
+                    )}
+                  </div>
+                  {msg.userVersions && msg.userVersions.length > 1 && viewedUserVersionPosition >= 0 && (
+                    <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                      <button
+                        type="button"
+                        aria-label="查看上一个提问"
+                        title="查看上一个提问"
+                        disabled={viewedUserVersionPosition <= 0}
+                        onClick={() => onViewQuestionVersion?.(
+                          msg.id,
+                          msg.userVersions![viewedUserVersionPosition - 1].versionIndex,
+                        )}
+                        className="inline-flex size-7 items-center justify-center rounded-ui-md hover:bg-secondary hover:text-foreground disabled:cursor-not-allowed disabled:opacity-35"
+                      >
+                        <ChevronLeft className="size-4" />
+                      </button>
+                      <span className="min-w-8 text-center tabular-nums">
+                        {viewedUserVersionPosition + 1} / {msg.userVersions.length}
+                      </span>
+                      <button
+                        type="button"
+                        aria-label="查看下一个提问"
+                        title="查看下一个提问"
+                        disabled={viewedUserVersionPosition >= msg.userVersions.length - 1}
+                        onClick={() => onViewQuestionVersion?.(
+                          msg.id,
+                          msg.userVersions![viewedUserVersionPosition + 1].versionIndex,
+                        )}
+                        className="inline-flex size-7 items-center justify-center rounded-ui-md hover:bg-secondary hover:text-foreground disabled:cursor-not-allowed disabled:opacity-35"
+                      >
+                        <ChevronRight className="size-4" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
           </>
         ) : (
           <>

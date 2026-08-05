@@ -19,6 +19,7 @@ from .asr_service_contract import (
 )
 from .profile import (
     FasterWhisperRemoteConfig,
+    Qwen3AsrRemoteConfig,
     RemoteAsrServiceConfig,
     WhisperXRemoteConfig,
     RemoteProviderConfig,
@@ -274,7 +275,12 @@ def compute_client_request_id(
 ) -> str:
     validate_uuid(application_job_id, "application_job_id")
     config = execution.provider_config
-    if type(config) not in (RemoteAsrServiceConfig, FasterWhisperRemoteConfig, WhisperXRemoteConfig):
+    if type(config) not in (
+        RemoteAsrServiceConfig,
+        FasterWhisperRemoteConfig,
+        Qwen3AsrRemoteConfig,
+        WhisperXRemoteConfig,
+    ):
         raise ContractValidationError("invalid_provider_config", "provider_config")
     return sha256_hex(
         canonical_json_bytes(
@@ -395,7 +401,12 @@ class RemoteAsrProvider:
                 self.provider_key, ProviderErrorCode.service_contract_mismatch
             )
         config = execution.provider_config
-        if type(config) not in (RemoteAsrServiceConfig, FasterWhisperRemoteConfig, WhisperXRemoteConfig):
+        if type(config) not in (
+            RemoteAsrServiceConfig,
+            FasterWhisperRemoteConfig,
+            Qwen3AsrRemoteConfig,
+            WhisperXRemoteConfig,
+        ):
             return _failure(
                 self.provider_key, ProviderErrorCode.service_contract_mismatch
             )

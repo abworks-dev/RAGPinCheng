@@ -5,7 +5,7 @@
 
 ## 用户可观察能力
 
-教学视频转录稿可以被索引和检索，回答能够显示带时间戳的视频引用，点击引用定位到来源卡片并打开视频播放器。管理员既可继续上传 MP4+Markdown 转录稿对，也可上传单个 MP4 并选择服务端白名单 Profile 启动自动转录任务。
+教学视频转录稿可以被索引和检索，回答能够显示带时间戳的视频引用，点击引用定位到来源卡片并打开视频播放器。管理员可通过三步向导批量暂存 MP4，再逐视频绑定、查看和编辑人工 Markdown，或批量应用并逐项覆盖服务端白名单 Profile 启动自动转录任务。
 
 Phase 5A/5B 已接通版本列表、只读 Markdown 预览、人工审核、显式发布、候选索引与正式 head 检索过滤。转录成功、审核通过、发布中和正式检索可见仍是独立状态；真实 ASR/GPU/Qdrant 端到端尚未运行。
 
@@ -26,7 +26,9 @@ Phase 5A/5B 已接通版本列表、只读 Markdown 预览、人工审核、显�
 - 引用角标点击自动打开视频播放器并跳转对应时间点；
 - 来源卡片显示”从 HH:MM:SS 播放”按钮；
 - 旧会话和未关联转录正常降级（无播放按钮，不报错）；
-- 管理端”视频媒体”标签页展示上传表单和资产列表（含状态、大小、错误信息）。
+- 管理端“视频媒体”标签页提供批量拖放/选择、转写方式分流和逐项配置向导；批量提交最多并发两个单视频请求，单项失败可保留重试；
+- 人工模式仍走原 MP4+Markdown 路径；自动模式只提交服务端白名单 `profile_id`，experimental Profile 强制审核策略不由前端放宽；
+- 媒体列表分别展示媒体、转录、审核、发布和索引状态，并保留快捷筛选与转写版本工作台。
 
 ### 未实现（第二阶段）
 
@@ -45,15 +47,24 @@ Phase 5A/5B 已接通版本列表、只读 Markdown 预览、人工审核、显�
 - Parent、Child 和 Qdrant payload 添加 nullable `transcript_version_id` / `publication_target_id`，legacy stable ID 算法保持不变；
 - 正式可见性唯一读取 `app.sqlite.media_transcript_heads.current_version_id`；Qdrant recall 和 Parent expansion 使用同一快照，损坏/缺失 head 对 versioned transcript fail closed，legacy/普通文档继续可见；
 - 普通索引与 publication 索引共用现有单 worker/单队列，publication job 支持幂等恢复与失败状态持久化。
-- Profile catalog 现包含已启用的 experimental SenseVoice 和准入关闭的 experimental
-  faster-whisper；二者复用同一 Remote Provider 与唯一 Candidate → Canonical 结果流；
-- ASR service 注册两个固定 service Profile；faster-whisper 缓存/依赖缺失时仅该
-  Profile 不可用，不阻止现有 SenseVoice 服务启动；
+- Profile catalog 现包含已启用的 experimental SenseVoice，以及准入关闭的
+  experimental faster-whisper 和 Qwen3-ASR；三者复用同一 Remote Provider 与唯一
+  Candidate → Canonical 结果流；
+- ASR service 注册三个固定 service Profile；faster-whisper 或 Qwen3-ASR
+  缓存/依赖缺失时仅相应 Profile 不可用，不阻止现有 SenseVoice 服务启动；
 - faster-whisper adapter 固定
   `dropbox-dash/faster-whisper-large-v3-turbo@0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf`
   与 CUDA FP16 参数，但 R2 未安装依赖、下载模型或运行推理。
+- Qwen3-ASR adapter 固定
+  `Qwen/Qwen3-ASR-0.6B@5eb144179a02acc5e5ba31e748d22b0cf3e303b0`
+  与
+  `Qwen/Qwen3-ForcedAligner-0.6B@c7cbfc2048c462b0d63a45797104fc9db3ad62b7`，
+  仅允许 Windows Transformers/CUDA BF16 候选参数；R2 未安装依赖、下载模型或
+  运行推理，application Profile 保持 disabled。
 
-SenseVoice 已完成独立生产短媒体验收。faster-whisper 的固定 8 个非敏感 Windows
+SenseVoice 已完成独立生产短媒体验收。Qwen3-ASR 已具备统一 R3 仓库资格工具，
+但真实 workflow 尚未取得 PASS，因此没有 Windows、CUDA、依赖、模型、质量或资源
+资格结论。faster-whisper 的固定 8 个非敏感 Windows
 TTS 样本已生成并通过严格 Manifest 校验，但生产 R3 workflow 在组合依赖解析阶段
 得到 `dependency_preparation_failed`；模型、CUDA、质量和资源门禁均未运行，因此
 其 R2 接线不构成运行或生产资格结论。

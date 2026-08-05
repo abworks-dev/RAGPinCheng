@@ -6,6 +6,7 @@ import { FeedbackDialog, type FeedbackSubmission } from "./FeedbackDialog";
 import { IconButton } from "./ui/icon-button";
 import { toast } from "./ui/toast";
 import { copyText } from "../utils/clipboard";
+import { stripCitationsForCopy } from "./citations";
 
 const feedbackReasons = ["有害/不安全", "虚假信息", "没有帮助", "其他"] as const;
 
@@ -47,7 +48,7 @@ export function FeedbackBar({
 
   async function handleCopy() {
     try {
-      await copyText(msg.content);
+      await copyText(stripCitationsForCopy(msg.content));
       setCopied(true);
       if (copyResetTimer.current !== null) window.clearTimeout(copyResetTimer.current);
       copyResetTimer.current = window.setTimeout(() => {
