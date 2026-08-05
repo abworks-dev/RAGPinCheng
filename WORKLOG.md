@@ -2270,3 +2270,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`frontend/src/styles/index.css`、`WORKLOG.md`；未带入原工作区的同步转录、来源面板及其他并行修改。
 - 验证：基于最新 `origin/master@d3d3f76`，管理布局专项 Vitest 5/5 通过；TypeScript project build 与 Vite production build 通过（2027 modules transformed）；目标差异与 `git diff --check` 通过。构建保留既有 CSS 语法与主包大于 500 kB 警告；依赖安装审计报告既有 10 项风险，本轮未运行自动修复。
 - 待办/风险：仍需真实管理员登录态下切换长短页面完成视觉验收；无 API、数据、依赖或部署变更，回滚可直接 revert 本提交。
+
+### 13:29 — 修正管理面板桌面滚动槽归属
+
+- 完成：根据用户截图确认桌面管理布局的实际滚动容器已是内部 `main`，根页面稳定槽因此在真实滚动条右侧额外留下空隙；现于桌面断点关闭根页面滚动与预留槽，并将稳定滚动槽绑定到 `main`，使滚动条回到视口最右侧，同时保持长短页面内容使用同一宽度基准；移动端继续使用根页面稳定槽。
+- 文件：`frontend/src/pages/admin/AdminLayout.tsx`、`frontend/src/pages/admin/AdminLayout.test.tsx`、`frontend/src/styles/index.css`、`WORKLOG.md`；未修改管理业务、API、数据、依赖或部署。
+- 验证：管理布局专项 Vitest 5/5 通过；TypeScript project build 与 Vite production build 通过（2027 modules transformed）；构建保留既有 CSS 语法与主包大于 500 kB 警告。
+- 待办/风险：仍需在真实管理员登录态下切换长短管理页面，确认桌面滚动条贴右且内容不再跳动；回滚可恢复根页面桌面稳定槽并移除 `main` 的滚动槽类。

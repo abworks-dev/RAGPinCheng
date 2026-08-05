@@ -105,7 +105,7 @@ export function AdminLayout() {
         </div>
       </aside>
 
-      <main className="min-w-0 flex-1 p-4 sm:p-6 lg:overflow-y-auto lg:p-8">
+      <main className="min-w-0 flex-1 p-4 sm:p-6 lg:overflow-y-auto lg:p-8 lg:[scrollbar-gutter:stable]">
         <div className="mx-auto max-w-7xl">
           {tab === "users" && <AdminUsersPage />}
           {tab === "conversations" && <AdminConversationsPage />}
