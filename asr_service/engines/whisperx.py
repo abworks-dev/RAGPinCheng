@@ -1,10 +1,13 @@
 """Experimental WhisperX adapter with strictly lazy, local-only model loading."""
 from __future__ import annotations
 
+import audioop
 import importlib
 import subprocess
+import wave
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from io import BytesIO
 from pathlib import Path
 from typing import Callable
 
@@ -28,6 +31,43 @@ def _milliseconds(value: object) -> int:
 
 def _decode_audio_bytes(content: bytes) -> object:
     numpy = importlib.import_module("numpy")
+    pcm = _decode_pcm_wav(content)
+    if pcm is not None:
+        decoded = pcm
+    else:
+        decoded = _decode_with_ffmpeg(content)
+    return (
+        numpy.frombuffer(decoded, numpy.int16)
+        .flatten()
+        .astype(numpy.float32)
+        / 32768.0
+    )
+
+
+def _decode_pcm_wav(content: bytes) -> bytes | None:
+    if len(content) < 12 or content[:4] != b"RIFF" or content[8:12] != b"WAVE":
+        return None
+    try:
+        with wave.open(BytesIO(content), "rb") as handle:
+            if handle.getcomptype() != "NONE" or handle.getsampwidth() != 2:
+                raise RuntimeError("unsupported WAV encoding")
+            channels = handle.getnchannels()
+            sample_rate = handle.getframerate()
+            frames = handle.readframes(handle.getnframes())
+    except (EOFError, wave.Error) as exc:
+        raise RuntimeError("invalid WAV container") from exc
+    if channels == 2:
+        frames = audioop.tomono(frames, 2, 0.5, 0.5)
+    elif channels != 1:
+        raise RuntimeError("unsupported WAV channel count")
+    if sample_rate != 16000:
+        frames, _state = audioop.ratecv(frames, 2, 1, sample_rate, 16000, None)
+    if not frames:
+        raise RuntimeError("audio decode returned no samples")
+    return frames
+
+
+def _decode_with_ffmpeg(content: bytes) -> bytes:
     try:
         completed = subprocess.run(
             [
@@ -55,12 +95,7 @@ def _decode_audio_bytes(content: bytes) -> object:
         raise RuntimeError("audio decode failed") from exc
     if not completed.stdout:
         raise RuntimeError("audio decode returned no samples")
-    return (
-        numpy.frombuffer(completed.stdout, numpy.int16)
-        .flatten()
-        .astype(numpy.float32)
-        / 32768.0
-    )
+    return completed.stdout
 
 
 @dataclass(slots=True)
