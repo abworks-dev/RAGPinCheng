@@ -22,6 +22,7 @@ if REPO not in sys.path:
 import importlib.util
 from scripts.funasr_phase0 import lib_config  # noqa: E402
 from scripts.funasr_phase0.lib_runtime import load_matching_baseline  # noqa: E402
+from tests.funasr_phase0_harness import build_test_config  # noqa: E402
 
 
 def _import_module_by_path(module_name: str, file_path: str):
@@ -128,47 +129,15 @@ def _fake_bge():
         srv.server_close()
 
 
-def _write_valid_config(path: str, base_url: str, run_id: str) -> None:
-    import datetime as dt
-    now = dt.datetime.now(dt.timezone.utc)
-    cfg = {
-        "schema_version": lib_config.CONFIG_SCHEMA_VERSION,
-        "run_id": run_id,
-        "approved_window_start": (now - dt.timedelta(minutes=5)).isoformat(),
-        "approved_window_end": (now + dt.timedelta(minutes=30)).isoformat(),
-        "shared_production_gpu_confirmed": True,
-        "bge_base_url": base_url,
-        "bge_expected_model": "BAAI/bge-m3",
-        "bge_expected_reranker": "BAAI/bge-reranker-v2-m3",
-        "bge_expected_device": "cuda",
-        "bge_expected_torch_version": "2.7.0+cu128",
-        "embed_rpm": 60, "rerank_rpm": 30, "baseline_duration_s": 2.0,
-        "testdata_root": tempfile.mkdtemp(),
-        "models_root": tempfile.mkdtemp(),
-        "reports_root": tempfile.mkdtemp(),
-        "logs_root": tempfile.mkdtemp(),
-        "checkpoints_root": tempfile.mkdtemp(),
-        "audio_chunk_s": 60.0,
-        "allowed_asr_model_ids": ["iic/SenseVoiceSmall"],
-        "allowed_asr_revisions": ["v1.0.0"],
-        "vad_model_id": "iic/speech_fsmn_vad_zh-cn-16k-common-pytorch",
-        "vad_model_revision": "v2.0.4",
-        "punc_model_id": "iic/punc_ct-transformer_zh-cn-common-vocab272727-pytorch",
-        "punc_model_revision": "v2.0.4",
-        "short_sample_tolerance_s": 0.0,
-        "thresholds": {
-            "bge_p95_degradation_pct": 100.0, "bge_error_rate_pct": 0.5,
-            "bge_5xx_consecutive": 3, "asr_peak_vram_gb": 8.0,
-            "asr_steady_vram_gb": 6.0, "combined_vram_max_gb": 14.0,
-            "disk_free_min_gb": 5.0, "short_failure_rate_pct": 0.0,
-            "long_failure_rate_pct": 5.0, "cer_max_clear": 0.10,
-            "cer_max_bim": 0.15, "bim_term_recall_min": 0.7,
-            "code_recall_min": 0.95,
-            "rtf_max": 0.6,
-            "timestamp_p95_drift_ms_short": 1500.0,
-            "timestamp_p95_drift_ms_long": 3000.0,
-        },
-    }
+def _write_valid_config(path: str, base_url: str, run_id: str, root: str) -> None:
+    cfg = build_test_config(
+        root,
+        run_id=run_id,
+        bge_base_url=base_url,
+        embed_rpm=60,
+        rerank_rpm=30,
+        baseline_duration_s=2.0,
+    )
     with open(path, "w", encoding="utf-8") as f:
         json.dump(cfg, f, ensure_ascii=False, indent=2)
 
@@ -181,7 +150,7 @@ class TestBaseline(unittest.TestCase):
                 cfg_path = os.path.join(td, "cfg.json")
                 rep_dir = os.path.join(td, "rep")
                 os.makedirs(rep_dir, exist_ok=True)
-                _write_valid_config(cfg_path, base, "abort-test")
+                _write_valid_config(cfg_path, base, "abort-test", td)
                 # Override reports_root in config to td/rep
                 with open(cfg_path, "r", encoding="utf-8") as f:
                     cfg_obj = json.load(f)
@@ -207,7 +176,7 @@ class TestBaseline(unittest.TestCase):
                 cfg_path = os.path.join(td, "cfg.json")
                 rep_dir = os.path.join(td, "rep")
                 os.makedirs(rep_dir, exist_ok=True)
-                _write_valid_config(cfg_path, base, "mismatch-test")
+                _write_valid_config(cfg_path, base, "mismatch-test", td)
                 with open(cfg_path, "r", encoding="utf-8") as f:
                     cfg_obj = json.load(f)
                 cfg_obj["reports_root"] = rep_dir
@@ -228,7 +197,7 @@ class TestBaseline(unittest.TestCase):
                 cfg_path = os.path.join(td, "cfg.json")
                 rep_dir = os.path.join(td, "rep")
                 os.makedirs(rep_dir, exist_ok=True)
-                _write_valid_config(cfg_path, base, "ok-test")
+                _write_valid_config(cfg_path, base, "ok-test", td)
                 with open(cfg_path, "r", encoding="utf-8") as f:
                     cfg_obj = json.load(f)
                 cfg_obj["reports_root"] = rep_dir
@@ -265,7 +234,7 @@ class TestConfigMatch(unittest.TestCase):
         with _fake_bge() as (base, _):
             with tempfile.TemporaryDirectory() as td:
                 cfg_path = os.path.join(td, "cfg.json")
-                _write_valid_config(cfg_path, base, "target-test")
+                _write_valid_config(cfg_path, base, "target-test", td)
                 cfg = lib_config.load_config(cfg_path)
                 # Synthesize a baseline with wrong target_id
                 target = _05._target_id_for(cfg)
@@ -285,7 +254,7 @@ class TestConfigMatch(unittest.TestCase):
         with _fake_bge() as (base, _):
             with tempfile.TemporaryDirectory() as td:
                 cfg_path = os.path.join(td, "cfg.json")
-                _write_valid_config(cfg_path, base, "ok-load-test")
+                _write_valid_config(cfg_path, base, "ok-load-test", td)
                 cfg = lib_config.load_config(cfg_path)
                 target = _05._target_id_for(cfg)
                 run_dir = Path(cfg.reports_root) / cfg.run_id
