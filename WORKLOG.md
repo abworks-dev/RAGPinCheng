@@ -2298,3 +2298,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：新增 `.github/workflows/qualify-whisperx-production.yml`、`scripts/qualify-whisperx-production.ps1`、`scripts/run_whisperx_qualification.py`、`asr_service/tests/test_whisperx_qualification.py`；更新 `project-docs/features/transcript-pipeline.md`、`WORKLOG.md`。未修改业务 Provider/Profile/Canonical 契约、正式依赖、生产服务、任务、防火墙、数据库、Qdrant、模型 revision 或 Profile admission。
 - 验证：WhisperX 资格、引擎及部署静态专项测试 48/48 通过；Python compileall、PowerShell 5.1 AST、workflow YAML 解析和 `git diff --check` 通过。许可证审计在既有 WhisperX 隔离 venv 上通过，未知许可证及 GPL/AGPL/SSPL 仍失败关闭。
 - 待办/风险：尚待独立 PR、完整 CI、合并及一次 production-asr 资格运行；只有 workflow 的脱敏 verdict 才能形成真实质量/资源/许可证结论。运行不注册或启动服务、不接入业务流量；失败时保持 Profile disabled，回滚为 revert 本提交。
+
+### 21:44 — 修正索引活动历史状态语义
+
+- 完成：索引活动中的成功任务改为“处理完成”，不再误示当前资料仍可检索；任务 DTO 新增源文件存在性标记，源文件已删除时活动记录显示“源文件已删除，无法重试”、隐藏无效重试入口并继续保留“删除记录”。资料主列表的当前“可检索”语义和后端重试保护保持不变。
+- 文件：`api/routes_admin.py`、`api/schemas.py`、`frontend/src/types.ts`、`frontend/src/pages/admin/AdminDocumentsPage.tsx`、`frontend/src/pages/admin/AdminDocumentsPage.test.tsx`、`tests/test_routes_admin_documents.py`、`project-docs/features/document-indexing.md`、`WORKLOG.md`；未修改数据库、索引结构、真实资料、依赖声明或部署配置。
+- 验证：后端资料路由专项测试 5/5、管理资料页专项 Vitest 10/10、前端全量 Vitest 32 个文件 152/152、TypeScript 检查、Vite production build、目标 Python compileall 与 `git diff --check` 均通过。构建保留既有 CSS 语法和主包大于 500 kB 警告；依赖安装审计仍报告既有 10 项风险，本轮未运行自动修复。
+- 待办/风险：功能待用户在真实管理员登录态验收历史成功记录、源文件已删除记录和仍有源文件的可重试记录；API 仅新增布尔字段，无数据库迁移，回滚可直接恢复本次提交。

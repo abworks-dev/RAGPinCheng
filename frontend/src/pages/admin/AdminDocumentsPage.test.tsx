@@ -75,6 +75,7 @@ const baseJob = {
   category: "公司标准",
   doc_type: "pdf",
   source_path: readyDocument.source_path,
+  source_exists: true,
   file_size: 2048,
   error: null,
   parents: 12,
@@ -257,6 +258,32 @@ describe("AdminDocumentsPage", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "删除记录" }));
 
     await waitFor(() => expect(mocks.adminDeleteIndexJob).toHaveBeenCalledWith(2));
+  });
+
+  it("uses historical completion wording and blocks retry when the source file is gone", async () => {
+    const missingSourceJob = {
+      ...jobs[0],
+      id: 3,
+      filename: "deleted.xlsx",
+      doc_type: "xlsx",
+      source_exists: false,
+    };
+    mocks.adminListIndexJobs.mockResolvedValueOnce({ jobs: [missingSourceJob] });
+
+    render(<AdminDocumentsPage />);
+    await screen.findByText("企业交付标准");
+
+    const activity = screen.getByText("索引活动").closest("details");
+    expect(activity).not.toBeNull();
+    fireEvent.click(within(activity as HTMLElement).getByText("索引活动"));
+
+    const row = screen.getByText("deleted.xlsx").closest("tr");
+    expect(row).not.toBeNull();
+    expect(within(row as HTMLElement).getByText("处理完成")).toBeInTheDocument();
+    expect(within(row as HTMLElement).getByText("源文件已删除，无法重试")).toBeInTheDocument();
+    expect(within(row as HTMLElement).queryByRole("button", { name: "重试" })).not.toBeInTheDocument();
+    expect(within(row as HTMLElement).getByRole("button", { name: "删除记录" })).toBeEnabled();
+    expect(mocks.adminRetryIndexJob).not.toHaveBeenCalled();
   });
 
   it("polls active jobs and refreshes the unified document list", async () => {

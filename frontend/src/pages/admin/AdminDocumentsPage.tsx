@@ -758,12 +758,16 @@ function JobStatusCell({ job }: { job: IndexJob }) {
   const active = ACTIVE_STATUSES.has(job.status);
   const elapsed = useElapsed(active ? job.started_at ?? job.created_at : null);
   const meta = STATUS_META[job.status];
+  const activityLabel = job.status === "done" ? "处理完成" : meta?.label ?? job.status;
   return (
     <div>
       <Badge variant={meta?.variant ?? "secondary"}>
-        {meta?.label ?? job.status}{elapsed ? ` · ${elapsed}` : ""}
+        {activityLabel}{elapsed ? ` · ${elapsed}` : ""}
       </Badge>
       {job.error && <p className="mt-1 max-w-sm text-ui-xs text-destructive">{job.error.length > 160 ? `${job.error.slice(0, 160)}…` : job.error}</p>}
+      {!job.source_exists && (job.status === "failed" || job.status === "done") && (
+        <p className="mt-1 text-ui-xs text-muted-foreground">源文件已删除，无法重试</p>
+      )}
     </div>
   );
 }
@@ -827,7 +831,7 @@ function JobsActivity({
                       <td className="px-4 py-3"><JobStatusCell job={job} /></td>
                       <td className="px-4 py-3 text-muted-foreground">{job.real_name || "—"}</td>
                       <td className="px-4 py-3 text-ui-xs text-muted-foreground">{formatAdminDate(job.created_at)}</td>
-                      <td className="px-4 py-3"><div className="flex justify-end gap-2">{(job.status === "failed" || job.status === "done") && <Button size="sm" variant="outline" onClick={() => void retry(job)}>重试</Button>}{(job.status === "failed" || job.status === "done") && <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => setDeleteTarget(job)}>删除记录</Button>}</div></td>
+                      <td className="px-4 py-3"><div className="flex justify-end gap-2">{job.source_exists && (job.status === "failed" || job.status === "done") && <Button size="sm" variant="outline" onClick={() => void retry(job)}>重试</Button>}{(job.status === "failed" || job.status === "done") && <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => setDeleteTarget(job)}>删除记录</Button>}</div></td>
                     </tr>
                   ))}
                 </tbody>

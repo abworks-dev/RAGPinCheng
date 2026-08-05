@@ -165,6 +165,7 @@ class IndexJobDTO(BaseModel):
     category: str
     doc_type: str
     source_path: str
+    source_exists: bool
     file_size: int
     status: str
     error: str | None

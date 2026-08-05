@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 from types import SimpleNamespace
 
-from api.routes_admin import delete_document, list_documents
+from api.routes_admin import _job_row_to_dto, delete_document, list_documents
 
 
 def _connection() -> sqlite3.Connection:
@@ -34,6 +34,30 @@ def _connection() -> sqlite3.Connection:
         """
     )
     return conn
+
+
+def test_index_job_dto_reports_whether_source_file_still_exists(tmp_path):
+    conn = _connection()
+    existing = tmp_path / "existing.pdf"
+    existing.write_bytes(b"pdf")
+    missing = tmp_path / "missing.pdf"
+    conn.executemany(
+        """
+        INSERT INTO index_jobs(
+            id,user_id,filename,category,doc_type,source_path,file_size,status,
+            error,stats_json,created_at,started_at,finished_at
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """,
+        [
+            (1, 1, existing.name, "公司标准", "pdf", str(existing), 3, "done", None, None, 1, 1, 2),
+            (2, 1, missing.name, "公司标准", "pdf", str(missing), 3, "done", None, None, 1, 1, 2),
+        ],
+    )
+    rows = conn.execute("SELECT * FROM index_jobs ORDER BY id").fetchall()
+
+    assert _job_row_to_dto(rows[0]).source_exists is True
+    assert _job_row_to_dto(rows[1]).source_exists is False
+    conn.close()
 
 
 def test_document_listing_merges_latest_job_and_hides_raw_failure(monkeypatch):
