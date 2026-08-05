@@ -1336,6 +1336,7 @@ try {
                 -FilePath $VenvPython `
                 -Arguments @(
                     "-m", "pip", "download",
+                    "--no-cache-dir",
                     "--only-binary=:all:",
                     "--dest", $Wheelhouse,
                     "--index-url", "https://pypi.org/simple",

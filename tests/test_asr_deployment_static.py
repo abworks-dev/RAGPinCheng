@@ -568,6 +568,8 @@ def test_faster_whisper_qualification_freezes_dependencies_model_and_gates():
     assert "-r $RequirementsSource/asr_service/requirements-windows.txt" not in script
     assert "-r $RequirementsSource/asr_service/requirements-faster-whisper.txt" in script
     assert "-r $ResolvedSource\\asr_service\\" not in script
+    assert '"-m", "pip", "download",' in script
+    assert '"--no-cache-dir",' in script
     assert "--only-binary=:all:" in script
     assert "InternalWheelBundlePath" in script
     assert "Oss2WheelBundlePath" in script
