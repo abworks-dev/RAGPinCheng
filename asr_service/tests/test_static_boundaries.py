@@ -89,6 +89,23 @@ def test_faster_whisper_dependencies_remain_separate_from_runtime_sets():
         assert "ctranslate2" not in packages
 
 
+def test_windows_and_faster_whisper_qualification_share_service_core_dependencies():
+    core_path = SERVICE / "requirements-service-core.txt"
+    core = core_path.read_text(encoding="utf-8").lower()
+    windows = (SERVICE / "requirements-windows.txt").read_text(encoding="utf-8")
+    qualification = (ROOT / "scripts" / "qualify-faster-whisper-production.ps1").read_text(
+        encoding="utf-8"
+    )
+
+    for package in ("fastapi", "uvicorn", "pydantic", "httpx", "python-dotenv"):
+        assert package in core
+    assert "-r requirements-service-core.txt" in windows
+    assert (
+        "-r $RequirementsSource/asr_service/requirements-service-core.txt"
+        in qualification
+    )
+
+
 def test_qwen3_asr_dependencies_remain_separate_from_runtime_sets():
     optional = (SERVICE / "requirements-qwen3-asr.txt").read_text(
         encoding="utf-8"

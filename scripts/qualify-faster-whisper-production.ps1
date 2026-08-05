@@ -496,10 +496,17 @@ function Stop-OwnedProcess {
 function Wait-HttpHealth {
     param(
         [Parameter(Mandatory = $true)][string]$Uri,
-        [int]$TimeoutSeconds = 180
+        [int]$TimeoutSeconds = 180,
+        [System.Diagnostics.Process]$Process
     )
     $deadline = [DateTimeOffset]::Now.AddSeconds($TimeoutSeconds)
     while ([DateTimeOffset]::Now -lt $deadline) {
+        if ($null -ne $Process) {
+            $Process.Refresh()
+            if ($Process.HasExited) {
+                throw "Temporary ASR service exited before health check completed"
+            }
+        }
         try {
             $response = Invoke-RestMethod -Method Get -Uri $Uri -TimeoutSec 5
             if ($response.api_version -eq "asr-service/1" -and $response.status -eq "ok") {
@@ -631,7 +638,7 @@ function Get-WheelCacheKey {
     param(
         [Parameter(Mandatory = $true)][string]$PythonPath,
         [Parameter(Mandatory = $true)][string]$ProductionFreezePath,
-        [Parameter(Mandatory = $true)][string]$RequirementsPath,
+        [Parameter(Mandatory = $true)][string[]]$RequirementsPaths,
         [Parameter(Mandatory = $true)][string[]]$ReferenceManifestPaths
     )
     $pythonIdentity = @(
@@ -655,7 +662,9 @@ function Get-WheelCacheKey {
         torchaudio_version = "2.7.0+cu128"
         cuda_channel = "cu128"
         production_freeze_sha256 = Get-Sha256 -Path $ProductionFreezePath
-        requirements_sha256 = Get-Sha256 -Path $RequirementsPath
+        requirements_sha256 = @(
+            $RequirementsPaths | ForEach-Object { Get-Sha256 -Path $_ }
+        )
         reference_manifest_identity_sha256 = @(
             $ReferenceManifestPaths | ForEach-Object {
                 $reference = Get-Content -LiteralPath $_ -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -1592,6 +1601,7 @@ try {
     @(
         "torch==2.7.0+cu128",
         "torchaudio==2.7.0+cu128",
+        "-r $RequirementsSource/asr_service/requirements-service-core.txt",
         "-r $RequirementsSource/asr_service/requirements-faster-whisper.txt"
     ) | Set-Content -LiteralPath $CombinedRequirements -Encoding ASCII
 
@@ -1604,7 +1614,10 @@ try {
     $CacheIdentity = Get-WheelCacheKey `
         -PythonPath $VenvPython `
         -ProductionFreezePath (Join-Path $EvidenceRoot "production-freeze.txt") `
-        -RequirementsPath (Join-Path $ResolvedSource "asr_service\requirements-faster-whisper.txt") `
+        -RequirementsPaths @(
+            (Join-Path $ResolvedSource "asr_service\requirements-service-core.txt"),
+            (Join-Path $ResolvedSource "asr_service\requirements-faster-whisper.txt")
+        ) `
         -ReferenceManifestPaths $ReferenceManifestPaths
     $CurrentReferenceManifestSha256 = @(
         $ReferenceManifestPaths | ForEach-Object { Get-Sha256 -Path $_ }
@@ -1762,11 +1775,26 @@ try {
     $ModuleVerification = @"
 from pathlib import Path
 import ctranslate2
+import dotenv
+import fastapi
 import faster_whisper
+import httpx
+import pydantic
 import torch
 import torchaudio
+import uvicorn
 venv = Path(r'$VenvRoot').resolve()
-modules = (ctranslate2, faster_whisper, torch, torchaudio)
+modules = (
+    ctranslate2,
+    dotenv,
+    fastapi,
+    faster_whisper,
+    httpx,
+    pydantic,
+    torch,
+    torchaudio,
+    uvicorn,
+)
 for module in modules:
     origin = Path(module.__file__).resolve()
     if venv not in origin.parents:
@@ -1893,7 +1921,10 @@ print('qualification-module-origins-verified')
         port = $TempPort
         commit_sha = $CommitSha.ToLowerInvariant()
     })
-    [void](Wait-HttpHealth -Uri "$TempAsrUrl/health" -TimeoutSeconds 300)
+    [void](Wait-HttpHealth `
+        -Uri "$TempAsrUrl/health" `
+        -TimeoutSeconds 300 `
+        -Process $ServiceProcess)
     $TemporaryCapabilities = Invoke-AuthenticatedJson `
         -Uri "$TempAsrUrl/v1/capabilities" `
         -Token $TemporaryToken `
