@@ -2296,8 +2296,8 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 
 - 完成：在独立 `codex/whisperx-qualification` worktree 中新增仅手动触发、完整 master SHA 绑定及 `production-asr` environment 保护的 WhisperX 资格 workflow；复用既有 8 个自制中文 BIM/噪声/编号/负控样本和统一质量阈值，通过现有 `TranscriptionProvider → ProviderCandidate → normalizer → Canonical` 契约执行两轮确定性、CER、术语/编号召回、时间戳、RTF 和显存门禁。Windows runner 固定 Python 3.11、`torch 2.8.0+cu128`、WhisperX 3.8.6、FP16、batch=1 和既有双模型 revision，并在模型准备前执行失败关闭的安装包许可证审计；运行目录、venv 和报告均与现有服务隔离，Profile admission 保持 disabled。
 - 文件：新增 `.github/workflows/qualify-whisperx-production.yml`、`scripts/qualify-whisperx-production.ps1`、`scripts/run_whisperx_qualification.py`、`asr_service/tests/test_whisperx_qualification.py`；更新 `project-docs/features/transcript-pipeline.md`、`WORKLOG.md`。未修改业务 Provider/Profile/Canonical 契约、正式依赖、生产服务、任务、防火墙、数据库、Qdrant、模型 revision 或 Profile admission。
-- 验证：WhisperX 资格、引擎及部署静态专项测试 48/48 通过；Python compileall、PowerShell 5.1 AST、workflow YAML 解析和 `git diff --check` 通过。许可证审计在既有 WhisperX 隔离 venv 上通过，未知许可证及 GPL/AGPL/SSPL 仍失败关闭。PR #71 的 7 项 CI 全绿并合并为 `ac4eb561634f47171248772ea52ee875fe43d486`；首次 production-asr run `31011018657` 通过固定 CUDA 依赖、178 包许可证、双模型缓存和 Profile disabled 门禁，随后在正式 Markdown parser 导入时因 run 专属 venv 缺少 `python-dotenv` 关闭，且 artifact 跨目录共同根路径不被上传 action 接受。
-- 待办/风险：待同范围修复为 run 专属 venv 补充 `python-dotenv`，并将全部脱敏报告统一到单一 reports 目录后，经 PR/CI/合并重跑。尚无质量 verdict；运行不注册或启动服务、不接入业务流量，Profile 继续 disabled，回滚为 revert 对应提交。
+- 验证：WhisperX 资格、引擎及部署静态专项测试 48/48 通过；Python compileall、PowerShell 5.1 AST、workflow YAML 解析和 `git diff --check` 通过。许可证审计在既有 WhisperX 隔离 venv 上通过，未知许可证及 GPL/AGPL/SSPL 仍失败关闭。PR #71 的 7 项 CI 全绿并合并为 `ac4eb561634f47171248772ea52ee875fe43d486`；首次 production-asr run `31011018657` 通过固定 CUDA 依赖、178 包许可证、双模型缓存和 Profile disabled 门禁，随后在正式 Markdown parser 导入时因 run 专属 venv 缺少 `python-dotenv` 关闭，且 artifact 跨目录共同根路径不被上传 action 接受。同范围修复 PR #73 的 7 项 CI 全绿并合并为 `2e222b6fe193ee905a086e47735e9850436af596`；production-asr run `31012697370` 成功处理固定 8 样本并上传脱敏 artifact。178 包许可证、处理失败率、两轮确定性、负控误报、RTF、时间戳和显存门禁通过；峰值显存 1317.93 MiB，实际 runner 为 RTX 5060 Ti。规范编号召回 0%（门槛 95%）及噪声 BIM CER 25%（门槛 15%）失败，因此资格 verdict 为 `quality_gate_failed`。
+- 待办/风险：WhisperX Profile 继续 disabled，不得接入业务流量。最终生产资格结论发生在合并后，按纯生产验收例外不为日志单独创建 PR；本条随下一次正常仓库交付补记。运行未注册或启动服务，未修改防火墙、计划任务、数据库或 Qdrant。
 
 ### 21:44 — 修正索引活动历史状态语义
 
@@ -2319,3 +2319,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`scripts/qualify-faster-whisper-production.ps1`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
 - 验证：faster-whisper 引擎、资格、resolver 与部署静态专项测试 86/86 通过；PowerShell AST 与 `git diff --check` 通过。
 - 待办/风险：待 PR/CI/合并和一次绑定新 master SHA 的统一资格重跑；生产服务和 Profile admission 保持不变。
+
+### 22:33 — 实现 WhisperX 失败证据诊断
+
+- 完成：针对最终资格中的规范编号召回和噪声 BIM CER 两个失败项，新增完整 master SHA、显式 R3 开关、`production-asr` environment 和既有串行并发组保护的手动诊断 workflow；复用原 8 个自制样本、模型 revision、Python 3.11、CUDA 12.8、FP16、batch=1、Provider/normalizer/Canonical 契约及全部原阈值。诊断报告只包含文本 SHA-256、归一化长度、字符类别计数、token 形状、插入/删除/替换计数、期望项命中布尔值和固定分类；不包含参考、原始候选或 Canonical 文本。只有两个目标样本证据完整时诊断 workflow 才成功收口，资格 verdict 仍保持失败。
+- 文件：新增 `.github/workflows/diagnose-whisperx-production.yml`；更新 `scripts/run_whisperx_qualification.py`、`scripts/qualify-whisperx-production.ps1`、`asr_service/tests/test_whisperx_qualification.py`、`project-docs/features/transcript-pipeline.md`、`WORKLOG.md`。
+- 验证：WhisperX 诊断、资格、引擎及部署静态专项测试 52/52 通过；Python compileall、PowerShell 5.1 AST、两个 workflow YAML 解析和 `git diff --check` 通过。
+- 待办/风险：尚待 PR、完整 CI、合并和一次 production-asr 诊断 run；诊断不得启用 Profile、降低阈值、修改模型/样本/参考答案、安装 FFmpeg、注册服务或接入业务流量。若证据不完整即失败关闭。
