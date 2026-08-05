@@ -179,7 +179,12 @@ def smoke(source_root: Path, model_root: Path, nltk_root: Path, wav_path: Path) 
         WHISPERX_SERVICE_CONFIG,
     )
     if type(result) is ProviderFailure:
-        raise RuntimeError(f"engine failure: {result.error_code.value}")
+        stage = engine.last_failure_stage or "contract"
+        failure_type = engine.last_failure_type or "ProviderFailure"
+        raise RuntimeError(
+            f"engine failure: {result.error_code.value}; "
+            f"stage={stage}; type={failure_type}"
+        )
     candidate = ProviderCandidate(
         result.provider_key,
         result.language,
