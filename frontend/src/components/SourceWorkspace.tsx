@@ -271,6 +271,7 @@ function SourceDetail({
   const detailScroll = useAutoHideScrollbar<HTMLDivElement>();
   const text = stripMarkdown(source.text);
   const visibleText = expanded || text.length <= 900 ? text : `${text.slice(0, 900)}…`;
+  const isPreviewableDocument = ["pdf", "docx", "xlsx", "pptx"].includes(source.doc_type);
 
   const playVideoAtLocation = () => {
     if (!source.media_id) return;
@@ -283,7 +284,7 @@ function SourceDetail({
   };
 
   const openFullResource = () => {
-    if (["pdf", "docx", "xlsx", "pptx"].includes(source.doc_type)) {
+    if (isPreviewableDocument) {
       openDocument(
         source.parent_id,
         source.doc_title,
@@ -363,6 +364,17 @@ function SourceDetail({
               播放
             </button>
           )}
+          {isPreviewableDocument && (
+            <button
+              type="button"
+              onClick={openFullResource}
+              aria-label={`查看 ${sourceLocator(source)}`}
+              className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-ui-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:opacity-90"
+            >
+              <SourceTypeIcon source={source} />
+              查看
+            </button>
+          )}
         </div>
       </div>
       <div className="mt-4">
@@ -400,18 +412,7 @@ function SourceDetail({
           </button>
         )}
       </div>
-      <div className={`mt-5 grid gap-2 ${source.doc_type === "transcript" ? "grid-cols-1" : "grid-cols-2"}`}>
-        {source.doc_type !== "transcript" && (
-          <button
-            type="button"
-            onClick={openFullResource}
-            disabled={!["pdf", "docx", "xlsx", "pptx"].includes(source.doc_type)}
-            className="inline-flex h-9 items-center justify-center gap-1.5 rounded-ui-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            <SourceTypeIcon source={source} />
-            打开完整资料
-          </button>
-        )}
+      <div className="mt-5 grid grid-cols-1 gap-2">
         <button
           type="button"
           onClick={copySource}

@@ -4,9 +4,10 @@ import type { ChatMessage, Source } from "../types";
 import { SourceWorkspace } from "./SourceWorkspace";
 
 const videoPlayerOpen = vi.hoisted(() => vi.fn());
+const documentPreviewOpen = vi.hoisted(() => vi.fn());
 
 vi.mock("../hooks/usePdfPreview", () => ({
-  usePdfPreview: () => ({ open: vi.fn() }),
+  usePdfPreview: () => ({ open: documentPreviewOpen }),
 }));
 
 vi.mock("../hooks/useVideoPlayer", () => ({
@@ -36,6 +37,19 @@ const videoSource: Source = {
   cell_range: null,
   slide_number: null,
   paragraph_anchor: null,
+};
+
+const spreadsheetSource: Source = {
+  ...videoSource,
+  parent_id: "spreadsheet-source-1",
+  doc_title: "构件清单",
+  doc_type: "xlsx",
+  text: "构件统计数据",
+  category: "项目资料",
+  start_time: null,
+  media_id: null,
+  sheet_name: "统计表",
+  cell_range: "B2:F20",
 };
 
 function renderWorkspace(source = videoSource) {
@@ -71,5 +85,24 @@ describe("SourceWorkspace video sources", () => {
       startSeconds: 373,
       fromSource: true,
     });
+  });
+
+  it("opens a document from the action beside its location", () => {
+    renderWorkspace(spreadsheetSource);
+
+    expect(screen.queryByRole("button", { name: "打开完整资料" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "查看 统计表 · B2:F20" }));
+    expect(documentPreviewOpen).toHaveBeenCalledWith(
+      "spreadsheet-source-1",
+      "构件清单",
+      "xlsx",
+      1,
+      {
+        sheetName: "统计表",
+        cellRange: "B2:F20",
+        slideNumber: null,
+        paragraphAnchor: null,
+      },
+    );
   });
 });

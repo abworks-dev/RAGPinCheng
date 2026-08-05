@@ -2132,3 +2132,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`frontend/src/components/ResourcePreviewShell.tsx`、`frontend/src/components/ResourcePreviewShell.test.tsx`、`frontend/src/styles/index.css`、`WORKLOG.md`。
 - 验证：推送前资源预览动画专项 Vitest 1/1、前端全量 Vitest 31 个文件 150/150、TypeScript project build、Vite production build 与 `git diff --check` 全部通过；推送后远端 `master` 与功能提交均为 `b99c48b861467d3ca20ce690deb3c39338cae17e`。
 - 待办/风险：仍待真实文档和视频预览的桌面、窄屏及“减少动态效果”视觉验收；依赖安装审计报告锁文件既有 10 项风险，本轮未运行自动修复、未修改依赖、API、数据或部署配置。
+
+### 09:08 — 将文档查看入口移至定位区域
+
+- 完成：PDF、DOCX、XLSX 和 PPTX 来源的“查看”按钮现位于定位信息右侧，与视频来源的“播放”入口保持一致；点击继续复用既有资源预览和页码、工作表/单元格、幻灯片及段落定位参数，详情底部不再重复显示“打开完整资料”，仅保留“复制来源”。
+- 文件：`frontend/src/components/SourceWorkspace.tsx`、`frontend/src/components/SourceWorkspace.test.tsx`、`WORKLOG.md`。
+- 验证：来源工作区专项 Vitest 3/3 通过；TypeScript project build 与 Vite production build 通过（2026 modules transformed）；`git diff --check` 通过。构建保留既有 CSS 语法和主包大于 500 kB 警告。
+- 待办/风险：功能处于待用户验收；尚未使用真实 PDF、DOCX、XLSX、PPTX 来源逐一验证定位预览和窄屏布局。本轮未修改 API、预览数据契约、依赖、数据或部署。
