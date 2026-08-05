@@ -2111,6 +2111,13 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 验证：在最新 `origin/master` 隔离工作树中，资源预览外壳专项 Vitest 1/1 通过；前端全量 Vitest 31 个文件、150/150 项通过；TypeScript project build 与 Vite production build 通过（2026 modules transformed）；目标文件 `git diff --check` 通过。构建保留既有 CSS 语法、主包大于 500 kB 与 React Router future warning。
 - 待办/风险：功能处于待用户验收；尚未在真实文档和视频预览中完成桌面、窄屏及“减少动态效果”视觉验收。回滚仅需恢复共享外壳和对应样式并移除专项测试。
 
+### 08:20 — 补全提问版本切换并优化编辑框
+
+- 完成：扩大提问气泡内编辑框的宽度、高度和内边距；编辑过的提问在操作栏最右侧显示左右切换与 `1 / 2` 版本计数，切换旧问题时同步显示其对应回答，切回当前问题时恢复当前回答。浏览旧问题版本时隐藏编辑入口并禁用回答重新生成，避免展示版本与后端活动版本错位。
+- 文件：`frontend/src/components/ChatLayout.tsx`、`frontend/src/components/Message.tsx`、`frontend/src/components/MessageList.tsx`、`frontend/src/hooks/useChat.ts`、`frontend/src/types.ts`、相关前端测试、`project-docs/features/chat-runtime.md`、`WORKLOG.md`。
+- 验证：问题气泡、消息列表和会话状态专项 Vitest 24/24 项通过；前端全量 Vitest 30 个文件、150/150 项通过；TypeScript 检查、Vite production build（2026 modules transformed）和 `git diff --check` 通过。构建保留既有 CSS 语法、主包大于 500 kB 与 React Router future warning。
+- 待办/风险：功能待用户在真实登录会话中确认长文本编辑框和问题/回答同步切换的视觉效果；未修改 API、数据库、RAG、依赖或部署配置。
+
 ### 08:24 — 增加 R3 依赖失败自诊断
 
 - 完成：按获批 R3 方案在统一资格脚本内增加依赖失败阶段跟踪和严格脱敏诊断；只输出固定诊断种类、固定阶段及受限 ASCII requirement，明确排除原始日志、URL、代理、Token、绝对路径、冲突行和完整 freeze。workflow 只把该 JSON 与既有 verdict 一起上传并显示安全字段，不新增一次性诊断 workflow。

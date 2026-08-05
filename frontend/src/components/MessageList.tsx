@@ -38,6 +38,7 @@ export function MessageList({
   onToggleSources,
   sending = false,
   onEditQuestion,
+  onViewQuestionVersion,
   onRegenerate,
   onViewAnswerVersion,
 }: {
@@ -49,6 +50,7 @@ export function MessageList({
   onToggleSources?: (messageId: string) => void;
   sending?: boolean;
   onEditQuestion?: (messageId: string, content: string) => void;
+  onViewQuestionVersion?: (messageId: string, versionIndex: number) => void;
   onRegenerate?: (messageId: string) => void;
   onViewAnswerVersion?: (messageId: string, versionIndex: number) => void;
 }) {
@@ -198,7 +200,13 @@ export function MessageList({
             data-turn-id={turn.id}
             className="scroll-mt-6"
           >
-            {turn.messages.map((message) => (
+            {turn.messages.map((message) => {
+              const turnUserMessage = turn.messages.find((item) => item.role === "user");
+              const activeQuestionVersion = turnUserMessage?.userVersions?.find((version) => version.isActive);
+              const viewingActiveQuestion =
+                !activeQuestionVersion
+                || turnUserMessage?.viewedUserVersionIndex === activeQuestionVersion.versionIndex;
+              return (
             <Message
               key={message.id}
               msg={message}
@@ -212,16 +220,19 @@ export function MessageList({
                 && !sending
               }
               onEdit={onEditQuestion}
+              onViewQuestionVersion={onViewQuestionVersion}
               canRegenerate={
                 message.role === "assistant"
                 && message.id === latestAssistantId
                 && !sending
                 && !message.streaming
+                && viewingActiveQuestion
               }
               onRegenerate={onRegenerate}
               onViewAnswerVersion={onViewAnswerVersion}
             />
-            ))}
+              );
+            })}
           </section>
         ))}
         <div ref={bottomRef} aria-hidden="true" className="h-20 sm:h-24" data-message-bottom-spacer />

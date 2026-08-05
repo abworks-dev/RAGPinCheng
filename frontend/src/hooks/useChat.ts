@@ -64,11 +64,19 @@ export function useChat({
               ? String(m.user_versions.find((version) => version.is_active)!.id)
               : undefined;
           }
+          const allAnswerVersions = m.answer_versions?.map((version) => ({
+            id: String(version.id),
+            versionIndex: version.version_index,
+            content: version.content,
+            sources: version.sources_for_ui || undefined,
+            isActive: version.is_active,
+            userVersionId: version.user_version_id != null ? String(version.user_version_id) : undefined,
+          }));
           const visibleAnswerVersions = m.role === "assistant" && lastUserVersionId
-            ? m.answer_versions?.filter(
-                (version) => String(version.user_version_id) === lastUserVersionId,
+            ? allAnswerVersions?.filter(
+                (version) => version.userVersionId === lastUserVersionId,
               )
-            : m.answer_versions;
+            : allAnswerVersions;
           return {
             id: m.id != null ? String(m.id) : newId(),
             role: m.role,
@@ -76,15 +84,9 @@ export function useChat({
             sources: m.sources_for_ui || undefined,
             query: m.role === "assistant" ? lastUserContent : undefined,
             stage: "done",
-            answerVersions: visibleAnswerVersions?.map((version) => ({
-              id: String(version.id),
-              versionIndex: version.version_index,
-              content: version.content,
-              sources: version.sources_for_ui || undefined,
-              isActive: version.is_active,
-              userVersionId: version.user_version_id != null ? String(version.user_version_id) : undefined,
-            })),
-            viewedVersionIndex: visibleAnswerVersions?.find((version) => version.is_active)?.version_index,
+            answerVersions: visibleAnswerVersions,
+            allAnswerVersions,
+            viewedVersionIndex: visibleAnswerVersions?.find((version) => version.isActive)?.versionIndex,
             userVersions: m.user_versions?.map((version) => ({
               id: String(version.id),
               versionIndex: version.version_index,
@@ -93,6 +95,7 @@ export function useChat({
               isActive: version.is_active,
             })),
             activeUserVersionId: lastUserVersionId,
+            viewedUserVersionIndex: m.user_versions?.find((version) => version.is_active)?.version_index,
           };
         });
         setMessages(replayed);
@@ -297,6 +300,19 @@ export function useChat({
                       isActive: true,
                     }];
                 const nextIndex = Math.max(...oldVersions.map((version) => version.versionIndex)) + 1;
+                const nextVersion = {
+                  id: `${assistantMessageId}-pending-${nextIndex}`,
+                  versionIndex: nextIndex,
+                  content: ev.data.answer_text || message.content,
+                  sources: ev.data.sources,
+                  isActive: true,
+                  userVersionId: snapshot.activeUserVersionId,
+                };
+                const updatedVisibleVersions = [
+                  ...oldVersions.map((version) => ({ ...version, isActive: false })),
+                  nextVersion,
+                ];
+                const visibleIds = new Set(oldVersions.map((version) => version.id));
                 return {
                   ...message,
                   content: ev.data.answer_text || message.content,
@@ -304,15 +320,10 @@ export function useChat({
                   done: ev.data,
                   streaming: false,
                   stage: "done",
-                  answerVersions: [
-                    ...oldVersions.map((version) => ({ ...version, isActive: false })),
-                    {
-                      id: `${assistantMessageId}-pending-${nextIndex}`,
-                      versionIndex: nextIndex,
-                      content: ev.data.answer_text || message.content,
-                      sources: ev.data.sources,
-                      isActive: true,
-                    },
+                  answerVersions: updatedVisibleVersions,
+                  allAnswerVersions: [
+                    ...(snapshot.allAnswerVersions || []).filter((version) => !visibleIds.has(version.id)),
+                    ...updatedVisibleVersions,
                   ],
                   viewedVersionIndex: nextIndex,
                 };
@@ -438,9 +449,22 @@ export function useChat({
                       },
                     ],
                     activeUserVersionId: pendingUserVersionId,
+                    viewedUserVersionIndex: nextIndex,
                   };
                 }
                 if (message.id === answerSnapshot.id) {
+                  const nextAnswer = {
+                    id: `${answerSnapshot.id}-pending-edit`,
+                    versionIndex: Math.max(
+                      0,
+                      ...(answerSnapshot.allAnswerVersions || answerSnapshot.answerVersions || [])
+                        .map((version) => version.versionIndex),
+                    ) + 1,
+                    content: ev.data.answer_text || message.content,
+                    sources: ev.data.sources,
+                    isActive: true,
+                    userVersionId: pendingUserVersionId,
+                  };
                   return {
                     ...message,
                     content: ev.data.answer_text || message.content,
@@ -449,15 +473,13 @@ export function useChat({
                     streaming: false,
                     stage: "done",
                     query,
-                    answerVersions: [{
-                      id: `${answerSnapshot.id}-pending-edit`,
-                      versionIndex: 1,
-                      content: ev.data.answer_text || message.content,
-                      sources: ev.data.sources,
-                      isActive: true,
-                      userVersionId: pendingUserVersionId,
-                    }],
-                    viewedVersionIndex: 1,
+                    answerVersions: [nextAnswer],
+                    allAnswerVersions: [
+                      ...(answerSnapshot.allAnswerVersions || answerSnapshot.answerVersions || [])
+                        .map((version) => ({ ...version, isActive: false })),
+                      nextAnswer,
+                    ],
+                    viewedVersionIndex: nextAnswer.versionIndex,
                   };
                 }
                 return message;
@@ -513,5 +535,54 @@ export function useChat({
     );
   }, []);
 
-  return { messages, send, regenerate, editQuestion, viewAnswerVersion, sending, loading, error };
+  const viewQuestionVersion = useCallback((userMessageId: string, versionIndex: number) => {
+    setMessages((prev) => {
+      const userIndex = prev.findIndex((message) => message.id === userMessageId);
+      const userMessage = prev[userIndex];
+      const version = userMessage?.userVersions?.find((item) => item.versionIndex === versionIndex);
+      if (!userMessage || userMessage.role !== "user" || !version) return prev;
+      const pairedAnswer = prev[userIndex + 1];
+      const allAnswers = pairedAnswer?.allAnswerVersions || pairedAnswer?.answerVersions || [];
+      const linkedAnswers = allAnswers.filter(
+        (answer) =>
+          answer.userVersionId === version.id
+          || (version.versionIndex === 1 && !answer.userVersionId),
+      );
+      const displayedAnswer = linkedAnswers[linkedAnswers.length - 1];
+      return prev.map((message, index) => {
+        if (index === userIndex) {
+          return {
+            ...message,
+            content: version.content,
+            viewedUserVersionIndex: version.versionIndex,
+          };
+        }
+        if (index === userIndex + 1 && pairedAnswer?.role === "assistant" && displayedAnswer) {
+          return {
+            ...message,
+            content: displayedAnswer.content,
+            sources: displayedAnswer.sources,
+            query: version.content,
+            answerVersions: linkedAnswers,
+            allAnswerVersions: allAnswers,
+            viewedVersionIndex: displayedAnswer.versionIndex,
+            error: undefined,
+          };
+        }
+        return message;
+      });
+    });
+  }, []);
+
+  return {
+    messages,
+    send,
+    regenerate,
+    editQuestion,
+    viewAnswerVersion,
+    viewQuestionVersion,
+    sending,
+    loading,
+    error,
+  };
 }

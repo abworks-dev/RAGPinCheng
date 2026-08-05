@@ -6,7 +6,7 @@ import rehypeKatex from "rehype-katex";
 import type { ChatMessage, Source } from "../types";
 import { stripMarkdown } from "../utils/markdown";
 import { FeedbackBar } from "./FeedbackBar";
-import { Check, CircleAlert, CirclePlay, Copy, Files, Pencil, Send, X } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, CircleAlert, CirclePlay, Copy, Files, Pencil, Send, X } from "lucide-react";
 import {
   CITATION_EVENT,
   CITATION_HOVER_EVENT,
@@ -234,6 +234,7 @@ export function Message({
   onToggleSources,
   canEdit = false,
   onEdit,
+  onViewQuestionVersion,
   canRegenerate = false,
   onRegenerate,
   onViewAnswerVersion,
@@ -245,6 +246,7 @@ export function Message({
   onToggleSources?: (messageId: string) => void;
   canEdit?: boolean;
   onEdit?: (messageId: string, content: string) => void;
+  onViewQuestionVersion?: (messageId: string, versionIndex: number) => void;
   canRegenerate?: boolean;
   onRegenerate?: (messageId: string) => void;
   onViewAnswerVersion?: (messageId: string, versionIndex: number) => void;
@@ -254,6 +256,14 @@ export function Message({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(msg.content);
   const editRef = useRef<HTMLTextAreaElement | null>(null);
+  const activeUserVersion = msg.userVersions?.find((version) => version.isActive);
+  const viewedUserVersionIndex =
+    msg.viewedUserVersionIndex ?? activeUserVersion?.versionIndex;
+  const viewedUserVersionPosition = msg.userVersions?.findIndex(
+    (version) => version.versionIndex === viewedUserVersionIndex,
+  ) ?? -1;
+  const viewingActiveUserVersion =
+    !activeUserVersion || viewedUserVersionIndex === activeUserVersion.versionIndex;
   const copyResetTimer = useRef<number | null>(null);
 
   useEffect(() => () => {
@@ -298,14 +308,18 @@ export function Message({
     <article className={`mx-auto flex w-full max-w-[50rem] ${isUser ? "justify-end" : "justify-start"} px-4 py-4`}>
       <div
         className={
-          (isUser ? "flex max-w-[70%] flex-col items-end" : "min-w-0 w-full") +
+          (isUser
+            ? editing
+              ? "flex w-full max-w-[85%] flex-col items-end"
+              : "flex max-w-[70%] flex-col items-end"
+            : "min-w-0 w-full") +
           ""
         }
       >
         {isUser ? (
           <>
             {editing ? (
-              <div className="w-full min-w-[18rem] rounded-ui-lg bg-primary p-3 text-primary-foreground shadow-surface">
+              <div className="w-full min-w-[22rem] rounded-ui-lg bg-primary p-4 text-primary-foreground shadow-surface">
                 <label htmlFor={`edit-question-${msg.id}`} className="sr-only">编辑提问</label>
                 <textarea
                   ref={editRef}
@@ -322,7 +336,7 @@ export function Message({
                       submitEdit();
                     }
                   }}
-                  className="max-h-56 min-h-20 w-full resize-y rounded-ui-md border border-white/25 bg-white/10 px-3 py-2 text-sm leading-relaxed text-primary-foreground outline-none placeholder:text-primary-foreground/60 focus:border-white/60 focus:ring-2 focus:ring-white/20"
+                  className="max-h-72 min-h-28 w-full resize-y rounded-ui-md border border-white/30 bg-white/10 px-4 py-3 text-sm leading-6 text-primary-foreground outline-none placeholder:text-primary-foreground/60 focus:border-white/70 focus:ring-2 focus:ring-white/20"
                 />
                 <div className="mt-2 flex justify-end gap-2">
                   <button
@@ -350,8 +364,9 @@ export function Message({
                 <div className="rounded-ui-lg bg-primary px-4 py-3 text-primary-foreground">
                   <div className="whitespace-pre-wrap break-words">{msg.content}</div>
                 </div>
-                <div className="mt-2 flex items-center">
-                  <button
+                <div className="mt-2 flex w-full items-center justify-between gap-3">
+                  <div className="flex items-center">
+                    <button
                     type="button"
                     aria-label={copied ? "提问已复制" : "复制提问"}
                     title={copied ? "提问已复制" : "复制提问"}
@@ -359,8 +374,8 @@ export function Message({
                     className={`inline-flex size-8 items-center justify-center rounded-ui-md hover:bg-secondary ${copied ? "text-success hover:text-success" : "text-muted-foreground hover:text-foreground"}`}
                   >
                     {copied ? <Check className="size-4 text-success" /> : <Copy className="size-4" />}
-                  </button>
-                  {canEdit && (
+                    </button>
+                    {canEdit && viewingActiveUserVersion && (
                     <button
                       type="button"
                       aria-label="编辑提问"
@@ -373,6 +388,40 @@ export function Message({
                     >
                       <Pencil className="size-4" />
                     </button>
+                    )}
+                  </div>
+                  {msg.userVersions && msg.userVersions.length > 1 && viewedUserVersionPosition >= 0 && (
+                    <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                      <button
+                        type="button"
+                        aria-label="查看上一个提问"
+                        title="查看上一个提问"
+                        disabled={viewedUserVersionPosition <= 0}
+                        onClick={() => onViewQuestionVersion?.(
+                          msg.id,
+                          msg.userVersions![viewedUserVersionPosition - 1].versionIndex,
+                        )}
+                        className="inline-flex size-7 items-center justify-center rounded-ui-md hover:bg-secondary hover:text-foreground disabled:cursor-not-allowed disabled:opacity-35"
+                      >
+                        <ChevronLeft className="size-4" />
+                      </button>
+                      <span className="min-w-8 text-center tabular-nums">
+                        {viewedUserVersionPosition + 1} / {msg.userVersions.length}
+                      </span>
+                      <button
+                        type="button"
+                        aria-label="查看下一个提问"
+                        title="查看下一个提问"
+                        disabled={viewedUserVersionPosition >= msg.userVersions.length - 1}
+                        onClick={() => onViewQuestionVersion?.(
+                          msg.id,
+                          msg.userVersions![viewedUserVersionPosition + 1].versionIndex,
+                        )}
+                        className="inline-flex size-7 items-center justify-center rounded-ui-md hover:bg-secondary hover:text-foreground disabled:cursor-not-allowed disabled:opacity-35"
+                      >
+                        <ChevronRight className="size-4" />
+                      </button>
+                    </div>
                   )}
                 </div>
               </>

@@ -70,7 +70,19 @@ describe("useChat persisted message identity", () => {
       turn_index: 1,
       messages: [
         { id: 10, role: "user", content: "原问题" },
-        { id: 11, role: "assistant", content: "原回答", answer_versions: [] },
+        {
+          id: 11,
+          role: "assistant",
+          content: "原回答",
+          answer_versions: [{
+            id: 100,
+            version_index: 1,
+            content: "原回答",
+            created_at: 1,
+            is_active: true,
+            user_version_id: null,
+          }],
+        },
       ],
     });
     mocks.streamChat.mockImplementation(async function* () {
@@ -104,6 +116,15 @@ describe("useChat persisted message identity", () => {
       content: "编辑后的回答",
       query: "编辑后的问题",
       streaming: false,
+    });
+
+    act(() => {
+      result.current.viewQuestionVersion("10", 1);
+    });
+    expect(result.current.messages[0].content).toBe("原问题");
+    expect(result.current.messages[1]).toMatchObject({
+      content: "原回答",
+      query: "原问题",
     });
   });
 });

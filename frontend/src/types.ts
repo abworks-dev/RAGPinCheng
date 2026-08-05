@@ -56,9 +56,11 @@ export type ChatMessage = {
   stage?: ChatStage;
   error?: string;
   answerVersions?: AnswerVersion[];
+  allAnswerVersions?: AnswerVersion[];
   viewedVersionIndex?: number;
   userVersions?: UserQuestionVersion[];
   activeUserVersionId?: string;
+  viewedUserVersionIndex?: number;
 };
 
 export type AnswerVersion = {
