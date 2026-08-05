@@ -135,8 +135,10 @@ TTS 样本已生成并通过严格 Manifest 校验，但生产 R3 workflow 在�
 - `api/routes_transcription.py`、`api/indexing.py`（转录/版本 API 与共享 worker）
 - `frontend/src/components/TranscriptionVersionPanel.tsx`（版本审阅与发布）
 - `asr_service/`（Phase 3 独立服务、存储、调度和 engine adapter）
+- `asr_service/requirements-service-core.txt`、`requirements-windows.txt`
+  （ASR HTTP 服务基础依赖与 Windows 生产引擎依赖）
 - `asr_service/engines/faster_whisper.py`、`requirements-faster-whisper.txt`
-  （准入关闭的可选引擎 adapter 与隔离依赖声明）
+  （准入关闭的可选引擎 adapter 与隔离引擎依赖声明；生产资格组合安装基础服务依赖）
 - `scripts/prepare_faster_whisper_model.py`、
   `scripts/prepare-faster-whisper-model-production.ps1`、
   `.github/workflows/prepare-faster-whisper-model-production.yml`
