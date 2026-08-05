@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
+import subprocess
+import sys
 import wave
 from dataclasses import dataclass
 from email.message import Message
@@ -223,6 +226,27 @@ def test_model_preparation_is_pinned_manifested_and_idempotent(
         downloader=lambda **_kwargs: pytest.fail("valid cache must be reused"),
     )
     assert second["status"] == "reused"
+
+
+def test_model_preparation_cli_imports_from_outside_repository(tmp_path):
+    environment = os.environ.copy()
+    environment.pop("PYTHONPATH", None)
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts" / "prepare_faster_whisper_model.py"),
+            "--help",
+        ],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "ModuleNotFoundError" not in result.stderr
+    assert "--cache-root" in result.stdout
 
 
 def test_model_preparation_refuses_invalid_existing_cache(tmp_path):

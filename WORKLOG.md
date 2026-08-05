@@ -2342,3 +2342,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：新增 `scripts/windows-wheel-cache.ps1`、`tests/test_windows_shared_wheel_cache_static.py`；更新 `scripts/deploy-asr.ps1`、`scripts/qualify-faster-whisper-production.ps1`、`scripts/qualify-qwen3-asr-production.ps1`、`scripts/qualify-whisperx-production.ps1`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
 - 验证：scoped review 修复后，全部 ASR、Whisper 和 transcription 相关测试 535/535 通过，另有 6 个 subtests 通过；WhisperX 本机缺少 NLTK 的单项运行测试按环境事实排除，其余 WhisperX 静态测试 3/3 通过。新增缓存与部署专项 37/37 通过；五个 PowerShell 脚本 AST 与 `git diff --check` 通过。公共缓存动态写入需固定 Administrator/SYSTEM 身份，开发机普通会话按设计在 ACL 前失败关闭，真实 Windows runner 验证留给远端资格/部署 workflow。
 - 待办/风险：尚未提交、推送、运行远端 CI 或在 Windows runner 填充真实缓存；未下载依赖、未重建生产 venv、未启动服务、未修改防火墙、Ubuntu、数据库、Qdrant 或 Profile admission。首次生产接入仍需独立 R3 审批和回滚验收。
+
+### 03:18 — 修复 faster-whisper 模型准备入口
+
+- 完成：生产资格 run `31036640739` 已证明公共 wheel 缓存成功发布29个文件并命中既有依赖缓存，随后在模型下载前因按文件路径启动脚本时仓库根不在 `sys.path` 而失败。模型准备脚本现依据自身路径显式加入仓库根，确保从 runner任意工作目录执行都能导入 `asr_service.model_cache`，不改变固定模型、revision、Manifest或下载来源。
+- 文件：`scripts/prepare_faster_whisper_model.py`、`asr_service/tests/test_faster_whisper_qualification.py`、`WORKLOG.md`。
+- 验证：新增仓库外临时 cwd、移除 `PYTHONPATH`的真实子进程 `--help`回归；模型准备与部署专项 54/54通过；全部 ASR、Whisper和transcription相关测试559/559通过，另有6个subtests通过；本机缺少NLTK的单项WhisperX运行测试按环境事实排除。Python编译与`git diff --check`通过。
+- 待办/风险：待独立PR、完整CI、合并后以新master SHA重跑一次统一资格；不修改生产服务、防火墙、Ubuntu、数据库、Qdrant或Profile admission。
