@@ -549,18 +549,13 @@ function New-WheelManifest {
     if ($files.Count -eq 0) {
         throw "Wheelhouse is empty"
     }
-    foreach ($controlled in @($InternalManifests)) {
-        if (-not $internalWheelRecorded.ContainsKey([string]$controlled.package_name)) {
-            throw "Controlled internal wheel was not resolved into the wheelhouse"
-        }
-    }
     $manifest = [ordered]@{
-        schema_version = "faster-whisper-wheel-manifest/2"
+        schema_version = "faster-whisper-wheel-manifest/3"
         indexes = @(
             "https://pypi.org/simple",
             "https://download.pytorch.org/whl/cu128"
         )
-        internal_wheel_manifests_sha256 = @(
+        compatibility_reference_manifests_sha256 = @(
             Get-Sha256 -Path (Join-Path $ResolvedInternalWheelBundle "internal-wheel-manifest.json")
             Get-Sha256 -Path (Join-Path $ResolvedOss2WheelBundle "internal-wheel-manifest.json")
             Get-Sha256 -Path (Join-Path $ResolvedAntlr4WheelBundle "internal-wheel-manifest.json")
@@ -1323,7 +1318,6 @@ try {
     @(
         "torch==2.7.0+cu128",
         "torchaudio==2.7.0+cu128",
-        "-r $RequirementsSource/asr_service/requirements-windows.txt",
         "-r $RequirementsSource/asr_service/requirements-faster-whisper.txt"
     ) | Set-Content -LiteralPath $CombinedRequirements -Encoding ASCII
 
