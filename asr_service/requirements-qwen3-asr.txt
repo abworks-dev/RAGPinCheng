@@ -1,0 +1,2 @@
+# Optional Qwen3-ASR adapter dependency. R2 does not install this file.
+qwen-asr==0.0.6

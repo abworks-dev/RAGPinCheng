@@ -10,10 +10,18 @@ from asr_service.model_cache import (
     FASTER_WHISPER_RELATIVE_PATH,
     FASTER_WHISPER_REVISION,
     MODEL_MANIFEST_VERSION,
+    QWEN3_ALIGNER_MODEL_ID,
+    QWEN3_ALIGNER_RELATIVE_PATH,
+    QWEN3_ALIGNER_REVISION,
+    QWEN3_ASR_MODEL_ID,
+    QWEN3_ASR_RELATIVE_PATH,
+    QWEN3_ASR_REVISION,
     SENSEVOICE_MODEL_ID,
     SENSEVOICE_RELATIVE_PATH,
     SENSEVOICE_REVISION,
     validate_faster_whisper_cache,
+    validate_qwen3_aligner_cache,
+    validate_qwen3_asr_cache,
     validate_sensevoice_cache,
 )
 
@@ -74,6 +82,38 @@ def test_valid_faster_whisper_manifest_resolves_only_pinned_revision(tmp_path):
 
 
 @pytest.mark.parametrize(
+    ("model_id", "revision", "relative_path", "validator", "other_validator"),
+    [
+        (
+            QWEN3_ASR_MODEL_ID,
+            QWEN3_ASR_REVISION,
+            QWEN3_ASR_RELATIVE_PATH,
+            validate_qwen3_asr_cache,
+            validate_qwen3_aligner_cache,
+        ),
+        (
+            QWEN3_ALIGNER_MODEL_ID,
+            QWEN3_ALIGNER_REVISION,
+            QWEN3_ALIGNER_RELATIVE_PATH,
+            validate_qwen3_aligner_cache,
+            validate_qwen3_asr_cache,
+        ),
+    ],
+)
+def test_qwen_model_manifests_are_pinned_and_not_interchangeable(
+    tmp_path, model_id, revision, relative_path, validator, other_validator
+):
+    root, manifest, model = make_cache(
+        tmp_path,
+        model_id=model_id,
+        revision=revision,
+        relative_path=relative_path,
+    )
+    assert validator(root, manifest).model_path == model.resolve()
+    assert other_validator(root, manifest).reason_code == "model-identity-mismatch"
+
+
+@pytest.mark.parametrize(
     "mutate",
     [
         lambda payload, _root, _model: payload.__setitem__("extra", None),
@@ -125,5 +165,11 @@ def test_unconfigured_or_missing_cache_is_unavailable(tmp_path):
     assert validate_sensevoice_cache(None, None).reason_code == "model-cache-unconfigured"
     assert validate_sensevoice_cache(tmp_path / "missing", tmp_path / "missing.json").available is False
     assert validate_faster_whisper_cache(None, None).reason_code == (
+        "model-cache-unconfigured"
+    )
+    assert validate_qwen3_asr_cache(None, None).reason_code == (
+        "model-cache-unconfigured"
+    )
+    assert validate_qwen3_aligner_cache(None, None).reason_code == (
         "model-cache-unconfigured"
     )

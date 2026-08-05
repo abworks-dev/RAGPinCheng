@@ -11,6 +11,7 @@ from src.transcription.persistence import CHECKPOINT_SCHEMA_VERSION, Transcripti
 from src.transcription.profile import (
     FasterWhisperRemoteConfig,
     ProfileRegistry,
+    Qwen3AsrRemoteConfig,
     RemoteAsrServiceConfig,
     TranscriptionProfileDefinition,
     WhisperXRemoteConfig,
@@ -42,6 +43,7 @@ def build_phase4_profile_registry(
         if type(base.provider_config) not in (
             RemoteAsrServiceConfig,
             FasterWhisperRemoteConfig,
+            Qwen3AsrRemoteConfig,
             WhisperXRemoteConfig,
         ):
             raise ContractValidationError(

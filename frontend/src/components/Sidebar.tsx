@@ -1,4 +1,5 @@
 import type { Conversation } from "../types";
+import { useState } from "react";
 import { AppBrand } from "./AppBrand";
 import { ConversationList } from "./ConversationList";
 import { UserMenu } from "./UserMenu";
@@ -35,6 +36,7 @@ export function Sidebar({
   onToggleCollapsed?: () => void;
 }) {
   const conversationScroll = useAutoHideScrollbar<HTMLDivElement>();
+  const [conversationScrolledFromTop, setConversationScrolledFromTop] = useState(false);
   return (
     <aside className={`flex h-full shrink-0 flex-col bg-sidebar text-sidebar-foreground transition-[width] duration-normal ${collapsed ? "w-16" : "w-[17rem]"}`}>
       <div className="px-3 py-3">
@@ -71,10 +73,14 @@ export function Sidebar({
         </button>
       </div>
 
-      <div className="scroll-fade-bottom scroll-fade-sidebar-start relative min-h-0 flex-1">
+      <div className={`scroll-fade-bottom relative min-h-0 flex-1 ${conversationScrolledFromTop ? "scroll-fade-sidebar-start" : ""}`}>
         <div
           ref={conversationScroll.ref}
           {...conversationScroll.interactionProps}
+          onScroll={(event) => {
+            conversationScroll.interactionProps.onScroll();
+            setConversationScrolledFromTop(event.currentTarget.scrollTop > 0);
+          }}
           className={`h-full overflow-y-auto py-3 ${conversationScroll.className} ${collapsed ? "px-1" : "px-2"}`}
         >
         {!collapsed && (

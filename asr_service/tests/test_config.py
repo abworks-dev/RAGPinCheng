@@ -23,6 +23,10 @@ ENV_KEYS = (
     "ASR_MODEL_LOCAL_FILES_ONLY",
     "ASR_FASTER_WHISPER_MODEL_CACHE_ROOT",
     "ASR_FASTER_WHISPER_MODEL_MANIFEST_PATH",
+    "ASR_QWEN3_ASR_MODEL_CACHE_ROOT",
+    "ASR_QWEN3_ASR_MODEL_MANIFEST_PATH",
+    "ASR_QWEN3_ALIGNER_MODEL_CACHE_ROOT",
+    "ASR_QWEN3_ALIGNER_MODEL_MANIFEST_PATH",
     "BGE_PRIORITY_PROBE_CONNECT_TIMEOUT_SECONDS",
     "BGE_PRIORITY_PROBE_REQUEST_TIMEOUT_SECONDS",
     "ASR_LOG_DIR",
@@ -107,3 +111,24 @@ def test_optional_faster_whisper_cache_requires_an_exact_pair(monkeypatch, tmp_p
     settings = AsrServiceSettings.from_env()
     settings.validate_for_startup()
     assert settings.faster_whisper_model_cache_root == tmp_path / "models"
+
+
+def test_optional_qwen_caches_require_all_four_paths(monkeypatch, tmp_path):
+    for key in ENV_KEYS:
+        monkeypatch.delenv(key, raising=False)
+    values = {
+        "ASR_QWEN3_ASR_MODEL_CACHE_ROOT": tmp_path / "asr",
+        "ASR_QWEN3_ASR_MODEL_MANIFEST_PATH": tmp_path / "asr.json",
+        "ASR_QWEN3_ALIGNER_MODEL_CACHE_ROOT": tmp_path / "aligner",
+        "ASR_QWEN3_ALIGNER_MODEL_MANIFEST_PATH": tmp_path / "aligner.json",
+    }
+    monkeypatch.setenv(next(iter(values)), str(next(iter(values.values()))))
+    with pytest.raises(RuntimeError, match="configured together"):
+        AsrServiceSettings.from_env().validate_for_startup()
+
+    for key, value in values.items():
+        monkeypatch.setenv(key, str(value))
+    settings = AsrServiceSettings.from_env()
+    settings.validate_for_startup()
+    assert settings.qwen3_asr_model_cache_root == tmp_path / "asr"
+    assert settings.qwen3_aligner_model_cache_root == tmp_path / "aligner"

@@ -200,6 +200,10 @@ export function AdminConversationsPage() {
                   <div className="space-y-3">
                     {selected.messages.map((message, index) => {
                       const isUser = message.role === "user";
+                      const userVersions = message.user_versions || [];
+                      const pairedAnswer = isUser && selected.messages[index + 1]?.role === "assistant"
+                        ? selected.messages[index + 1]
+                        : null;
                       return (
                         <article
                           key={message.id ?? `${message.role}-${index}`}
@@ -217,6 +221,9 @@ export function AdminConversationsPage() {
                             >
                               {roleLabels[message.role]}
                             </Badge>
+                            {isUser && userVersions.length > 1 && (
+                              <Badge variant="secondary">已编辑 · 版本 {userVersions.find((version) => version.is_active)?.version_index || userVersions.length}</Badge>
+                            )}
                             {message.created_at && (
                               <span className="text-ui-xs text-muted-foreground">{formatAdminDate(message.created_at)}</span>
                             )}
@@ -224,6 +231,48 @@ export function AdminConversationsPage() {
                           <p className="max-w-[72ch] whitespace-pre-wrap break-words text-ui-sm leading-relaxed text-foreground">
                             {message.content}
                           </p>
+                          {isUser && userVersions.length > 1 && (
+                            <details className="mt-3 border-t border-primary/15 pt-3">
+                              <summary className="cursor-pointer text-ui-xs font-medium text-primary">
+                                查看编辑记录（{userVersions.length} 个版本）
+                              </summary>
+                              <div className="mt-3 space-y-3">
+                                {userVersions.map((version) => {
+                                  const linkedAnswers = pairedAnswer?.answer_versions?.filter(
+                                    (answer) =>
+                                      answer.user_version_id === version.id
+                                      || (version.version_index === 1 && answer.user_version_id == null),
+                                  ) || [];
+                                  return (
+                                    <div key={version.id} className="rounded-ui-md border border-border bg-card p-3">
+                                      <div className="flex flex-wrap items-center gap-2 text-ui-xs text-muted-foreground">
+                                        <span>问题版本 {version.version_index}</span>
+                                        {version.is_active && <Badge variant="info">当前</Badge>}
+                                        <span>{formatAdminDate(version.created_at)}</span>
+                                      </div>
+                                      <p className="mt-2 whitespace-pre-wrap break-words text-ui-sm text-foreground">
+                                        {version.content}
+                                      </p>
+                                      {linkedAnswers.length > 0 && (
+                                        <div className="mt-3 space-y-2 border-t border-border pt-2">
+                                          {linkedAnswers.map((answer) => (
+                                            <div key={answer.id}>
+                                              <p className="text-ui-xs font-medium text-muted-foreground">
+                                                对应回答版本 {answer.version_index}{answer.is_active ? " · 当前" : ""}
+                                              </p>
+                                              <p className="mt-1 whitespace-pre-wrap break-words text-ui-xs leading-relaxed text-foreground">
+                                                {answer.content}
+                                              </p>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </details>
+                          )}
                         </article>
                       );
                     })}

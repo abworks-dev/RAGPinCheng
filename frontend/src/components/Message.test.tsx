@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import type { ChatMessage, Source } from "../types";
 import { Message } from "./Message";
 
+const videoPlayerOpen = vi.hoisted(() => vi.fn());
+
 vi.mock("./FeedbackBar", () => ({
   FeedbackBar: ({
     msg,
@@ -38,7 +40,7 @@ vi.mock("./FeedbackBar", () => ({
 
 vi.mock("../hooks/useVideoPlayer", () => ({
   timestampToSeconds: () => 0,
-  useVideoPlayer: () => ({ open: vi.fn() }),
+  useVideoPlayer: () => ({ open: videoPlayerOpen }),
 }));
 
 const source: Source = {
@@ -185,6 +187,75 @@ describe("Message assistant actions", () => {
     vi.useRealTimers();
   });
 
+  it("edits the latest user question in place and submits with Ctrl+Enter", () => {
+    const edit = vi.fn();
+    render(
+      <Message
+        msg={{ id: "21", role: "user", content: "原问题" }}
+        conversationId="conversation-1"
+        turnIndex={1}
+        canEdit
+        onEdit={edit}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "编辑提问" }));
+    const textbox = screen.getByRole("textbox", { name: "编辑提问" });
+    expect(textbox).toHaveValue("原问题");
+    fireEvent.change(textbox, { target: { value: "编辑后的问题" } });
+    fireEvent.keyDown(textbox, { key: "Enter", ctrlKey: true });
+
+    expect(edit).toHaveBeenCalledWith("21", "编辑后的问题");
+    expect(screen.queryByRole("textbox", { name: "编辑提问" })).not.toBeInTheDocument();
+  });
+
+  it("cancels question editing without emitting a change", () => {
+    const edit = vi.fn();
+    render(
+      <Message
+        msg={{ id: "21", role: "user", content: "原问题" }}
+        conversationId="conversation-1"
+        turnIndex={1}
+        canEdit
+        onEdit={edit}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "编辑提问" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "编辑提问" }), {
+      target: { value: "不保存" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+
+    expect(edit).not.toHaveBeenCalled();
+    expect(screen.getByText("原问题")).toBeInTheDocument();
+  });
+
+  it("shows question version navigation on the right side of user actions", () => {
+    const viewQuestionVersion = vi.fn();
+    render(
+      <Message
+        msg={{
+          id: "21",
+          role: "user",
+          content: "编辑后的问题",
+          viewedUserVersionIndex: 2,
+          userVersions: [
+            { id: "u1", versionIndex: 1, content: "原问题", createdAt: 1, isActive: false },
+            { id: "u2", versionIndex: 2, content: "编辑后的问题", createdAt: 2, isActive: true },
+          ],
+        }}
+        conversationId="conversation-1"
+        turnIndex={1}
+        canEdit
+        onViewQuestionVersion={viewQuestionVersion}
+      />,
+    );
+
+    expect(screen.getByText("2 / 2")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "查看上一个提问" }));
+    expect(viewQuestionVersion).toHaveBeenCalledWith("21", 1);
+  });
+
   it("places regeneration beside copy and disables non-latest answers", () => {
     const regenerate = vi.fn();
     const { rerender } = render(
@@ -236,5 +307,63 @@ describe("Message assistant actions", () => {
     expect(screen.getByText("2 / 2")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "查看上一个回答" }));
     expect(viewVersion).toHaveBeenCalledWith("12", 1);
+  });
+
+  it("keeps a citation tooltip open while moving from the marker into the tooltip", () => {
+    vi.useFakeTimers();
+    render(
+      <Message
+        msg={assistant({ content: "命名规则见[1]。" })}
+        conversationId="conversation-1"
+        turnIndex={1}
+      />,
+    );
+
+    const marker = screen.getByRole("superscript");
+    fireEvent.mouseEnter(marker);
+    const tooltip = screen.getByRole("tooltip");
+    expect(tooltip).toHaveTextContent("测试标准");
+    expect(tooltip).toHaveClass("bg-popover", "text-popover-foreground", "top-full");
+
+    fireEvent.mouseLeave(marker);
+    fireEvent.mouseEnter(tooltip);
+    act(() => vi.advanceTimersByTime(150));
+    expect(screen.getByRole("tooltip")).toBeInTheDocument();
+
+    fireEvent.mouseLeave(tooltip);
+    act(() => vi.advanceTimersByTime(150));
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+    vi.useRealTimers();
+  });
+
+  it("opens source verification without opening the player for video citations", () => {
+    const videoSource: Source = {
+      ...source,
+      doc_title: "Revit界面介绍__7d44513f",
+      doc_type: "transcript",
+      start_time: "00:00:01",
+      media_id: "media-1",
+    };
+    const citationListener = vi.fn();
+    window.addEventListener("pincheng:citation-click", citationListener);
+
+    render(
+      <Message
+        msg={assistant({
+          id: "assistant-video",
+          content: "工具栏用法见[Revit界面介绍__7d44513f @00:00:01]。",
+          sources: [videoSource],
+        })}
+        conversationId="conversation-1"
+        turnIndex={1}
+      />,
+    );
+
+    const marker = screen.getByRole("superscript").querySelector("a");
+    expect(marker).not.toBeNull();
+    fireEvent.click(marker!);
+    expect(citationListener).toHaveBeenCalledTimes(1);
+    expect(videoPlayerOpen).not.toHaveBeenCalled();
+    window.removeEventListener("pincheng:citation-click", citationListener);
   });
 });

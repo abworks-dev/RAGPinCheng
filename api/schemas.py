@@ -32,9 +32,12 @@ class AuthMeResponse(BaseModel):
 
 
 class ChatRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     query: str | None = Field(default=None, min_length=1)
     categories: list[str] | None = None
     regenerate_assistant_message_id: int | None = None
+    edit_user_message_id: int | None = None
 
 
 class ConversationSummaryDTO(BaseModel):
@@ -106,6 +109,7 @@ class AdminConversationListResponse(BaseModel):
 
 
 class AdminFeedbackEntry(BaseModel):
+    feedback_id: str
     ts: str | None = None
     kind: str | None = None
     rating: str | None = None
@@ -121,11 +125,27 @@ class AdminFeedbackEntry(BaseModel):
     conversation_id: str | None = None
     turn_index: int | None = None
     message_id: str | None = None
+    status: Literal["pending", "in_progress", "resolved", "archived"] = "pending"
+    resolution: Literal["knowledge_fixed", "answer_improved", "no_action", "duplicate", "other"] | None = None
+    admin_note: str | None = None
+    assignee_user_id: int | None = None
+    assignee_name: str | None = None
+    updated_at: int | None = None
+    resolved_at: int | None = None
 
 
 class AdminFeedbackResponse(BaseModel):
     entries: list[AdminFeedbackEntry]
     total: int
+    page: int
+    page_size: int
+    counts: dict[str, int]
+
+
+class AdminFeedbackPatchRequest(BaseModel):
+    status: Literal["pending", "in_progress", "resolved", "archived"]
+    resolution: Literal["knowledge_fixed", "answer_improved", "no_action", "duplicate", "other"] | None = None
+    admin_note: str | None = Field(default=None, max_length=2000)
 
 
 class SweepResponse(BaseModel):
@@ -362,6 +382,15 @@ class AnswerVersionDTO(BaseModel):
     sources_for_ui: list[SourceDTO] | None = None
     created_at: int
     is_active: bool
+    user_version_id: int | None = None
+
+
+class UserQuestionVersionDTO(BaseModel):
+    id: int
+    version_index: int
+    content: str
+    created_at: int
+    is_active: bool
 
 
 class MessageDTO(BaseModel):
@@ -371,6 +400,7 @@ class MessageDTO(BaseModel):
     sources_for_ui: list[SourceDTO] | None = None
     created_at: int | None = None
     answer_versions: list[AnswerVersionDTO] | None = None
+    user_versions: list[UserQuestionVersionDTO] | None = None
 
 
 class ConversationStateDTO(BaseModel):

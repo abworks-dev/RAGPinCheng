@@ -56,7 +56,11 @@ export type ChatMessage = {
   stage?: ChatStage;
   error?: string;
   answerVersions?: AnswerVersion[];
+  allAnswerVersions?: AnswerVersion[];
   viewedVersionIndex?: number;
+  userVersions?: UserQuestionVersion[];
+  activeUserVersionId?: string;
+  viewedUserVersionIndex?: number;
 };
 
 export type AnswerVersion = {
@@ -64,6 +68,15 @@ export type AnswerVersion = {
   versionIndex: number;
   content: string;
   sources?: Source[];
+  isActive: boolean;
+  userVersionId?: string;
+};
+
+export type UserQuestionVersion = {
+  id: string;
+  versionIndex: number;
+  content: string;
+  createdAt: number;
   isActive: boolean;
 };
 
@@ -101,6 +114,14 @@ export type ConversationState = {
       version_index: number;
       content: string;
       sources_for_ui?: Source[] | null;
+      created_at: number;
+      is_active: boolean;
+      user_version_id?: number | null;
+    }[] | null;
+    user_versions?: {
+      id: number;
+      version_index: number;
+      content: string;
       created_at: number;
       is_active: boolean;
     }[] | null;
@@ -196,6 +217,7 @@ export type CategoryTree = {
 };
 
 export type AdminFeedbackEntry = {
+  feedback_id: string;
   ts?: string | null;
   kind?: string | null;
   rating?: string | null;
@@ -211,6 +233,21 @@ export type AdminFeedbackEntry = {
   conversation_id?: string | null;
   turn_index?: number | null;
   message_id?: string | null;
+  status: "pending" | "in_progress" | "resolved" | "archived";
+  resolution?: "knowledge_fixed" | "answer_improved" | "no_action" | "duplicate" | "other" | null;
+  admin_note?: string | null;
+  assignee_user_id?: number | null;
+  assignee_name?: string | null;
+  updated_at?: number | null;
+  resolved_at?: number | null;
+};
+
+export type AdminFeedbackResponse = {
+  entries: AdminFeedbackEntry[];
+  total: number;
+  page: number;
+  page_size: number;
+  counts: Record<"pending" | "in_progress" | "resolved" | "archived", number>;
 };
 
 export type FeedbackPayload = {

@@ -56,6 +56,163 @@ SHA 和显式执行开关，仅注入 `ASR_DEPENDENCY_PROXY`。上传 artifact �
 `blocker_confirmed`：pip 明确报告同一 requirement 无可用版本且无匹配 binary distribution；
 或 pip 冲突段同时给出同一 requirement 的带比较符依赖约束和 production constraint。
 结果必须记录受影响 requirement 与诊断种类；证据不完整时保持失败关闭。
+若完整 resolver 只给出裸依赖与同名 production constraint，可对该单一固定 constraint
+执行同 index、同 freeze、`--only-binary=:all:` 的隔离 pip dry-run；只有单包探针明确返回
+无匹配 binary distribution 时才能确认该 blocker，探针成功或错误种类不明确时继续失败关闭。
+
+### 2.0.2 精确诊断结果（2026-08-05）
+
+- source qualification run：`30955067671`；最终聚焦诊断 run：`30958705041`；
+- production freeze 固定 `jieba==0.42.1`，resolver 证据显示 `funasr 1.4.1 depends on jieba`；
+- 聚焦 single-requirement、binary-only dry-run 对 `jieba==0.42.1` 返回非零；
+- PyPI 的 `jieba 0.42.1` release metadata 仅列出 `jieba-0.42.1.tar.gz`
+  (`packagetype=sdist`)，没有 wheel；本地同参数公开索引 dry-run 复验为
+  `No matching distribution found for jieba==0.42.1`；
+- 因此 blocker 不是 FunASR 与 production freeze 的版本上下界冲突，而是当前
+  `--only-binary=:all:` 安全策略无法接受 `jieba 0.42.1` 唯一可用的源码发行物。
+
+诊断到此停止。未修改任何依赖 pin、production freeze、模型、服务、CUDA、Profile admission
+或生产配置。后续若选择构建受控内部 wheel、放宽 binary-only 规则或调整环境隔离，必须提交新的
+R3 方案并单独审批。
+
+### 2.0.3 已批准的受控 wheel 解决方案（2026-08-05）
+
+采用受控内部 wheel，不放宽 `--only-binary=:all:`，不修改 `jieba==0.42.1` pin 或
+production freeze：
+
+1. GitHub-hosted Ubuntu job 只从固定 `files.pythonhosted.org` URL 下载
+   `jieba-0.42.1.tar.gz`，在任何源码执行前校验固定大小和 SHA-256；
+2. 使用 Python 3.11、`setuptools==80.9.0`、`wheel==0.45.1` 和固定
+   `SOURCE_DATE_EPOCH` 独立构建两次，只有文件名和 SHA-256 完全一致才生成 bundle；
+3. bundle 只允许一个 pure-Python `*-none-any.whl` 和严格
+   `asr-internal-wheel-manifest/1`，拒绝未知字段、路径逃逸、符号链接、原生二进制和身份漂移；
+4. 同一 workflow 通过 artifact 将 bundle 传给 Windows `production-asr` job；
+5. Windows 在创建资格 venv 前重新校验完整 SHA/run 身份和 Manifest，只把受控 bundle
+   作为 `pip download --find-links` 来源，仍保留全局 `--only-binary=:all:`；
+6. 内部 wheel 必须实际进入 run-local wheelhouse，并以受控内部身份、大小和 SHA-256
+   记录；其他 wheel 继续绑定公开下载 URL；
+7. 本方案只服务于隔离资格 run，不写入生产 ASR venv，不修改服务、防火墙、Ubuntu、
+   数据库、Qdrant、模型或 Profile admission。
+
+### 2.0.4 受控 wheel 资格重跑结果（2026-08-05）
+
+- PR #45 的 7 项 CI 全部通过，合并 master SHA：
+  `34eab650ed9402512296a835c24cef656dbcb60f`；
+- qualification run `30960326875` 的 GitHub-hosted `build-internal-wheel` job 成功，
+  固定 sdist 的校验、双重构建、wheel hash 一致性和 artifact 上传均通过；
+- Windows job 成功下载同 run 的受控 bundle，随后隔离资格仍以
+  `dependency_preparation_failed` 失败；
+- 脱敏 verdict 确认 `profile_admission=disabled`、
+  `production_services_modified=false`，未进入 Profile 开放；
+- 当前证据不足以判定新的精确依赖 blocker。本阶段到此停止；读取更详细的依赖证据、
+  修改其他 pin/约束或再次重跑须另行审批。
+
+### 2.0.5 已批准的资格失败自诊断（2026-08-05）
+
+为避免继续为每次依赖失败创建一次性诊断 workflow，现有统一资格脚本负责在
+`dependency_preparation_failed` 时生成严格脱敏的
+`faster-whisper-r3-dependency-failure/1`：
+
+- 只输出固定阶段、固定诊断种类和经 ASCII 包名正则归一化的 requirement；
+- 诊断种类限定为 `binary_distribution_unavailable`、
+  `version_constraint_conflict`、`network_or_index_failure` 或
+  `evidence_insufficient`；
+- 不输出原始日志、冲突行、URL、代理、Token、绝对路径或完整 freeze；
+- 脱敏文件与既有 verdict 同 artifact 上传，并可安全显示在 workflow summary；
+- 只有依赖准备失败才生成该文件；成功或进入后续模型/CUDA/样本阶段时不生成；
+- 本补充不修改 pin、production freeze、生产 venv、服务、防火墙、Ubuntu、
+  数据库、Qdrant、模型 revision 或 Profile admission。
+
+合并后只允许使用新的完整 master SHA 重跑一次统一资格 workflow；取得精确 blocker
+或进入下一资格阶段后立即停止，不自动修改依赖或开放 Profile。
+
+首次自诊断 run `30963495106` 仍失败关闭，verdict 正常上传，但依赖日志为空时
+PowerShell 5.1 的 mandatory array 参数拒绝空集合，导致附加诊断未生成。同范围兼容修复
+必须允许空集合并以 `evidence_insufficient` 失败关闭，同时优先写入 runner artifact 路径；
+修复后只以相同参数重试，不改变资格范围。
+
+### 2.0.6 Windows PowerShell 5.1 原生 stderr 捕获修复
+
+同参数重试 run `30963979244` 已生成附加诊断，但只确定失败阶段为 `pip_download`，
+诊断种类仍为 `evidence_insufficient`，requirement 为空；verdict 继续确认
+`profile_admission=disabled`、`production_services_modified=false`。
+
+代码核对发现，统一资格脚本全局使用 `$ErrorActionPreference = "Stop"`，而
+`Invoke-External` 直接通过 `2>&1` 捕获原生命令输出。Windows PowerShell 5.1 可能把
+原生 stderr 提升为终止错误，使函数在记录完整输出和退出码前中断；仓库此前的精确诊断
+脚本已通过执行期间临时切换为 `Continue` 避免该行为。
+
+获批的最小修复限定为：
+
+1. `Invoke-External` 只在固定原生命令执行期间临时使用 `Continue`，完整捕获 stdout、
+   stderr 和退出码后在 `finally` 恢复原值；
+2. 日志落盘后仍以非零退出码失败关闭，不改变任何命令参数、依赖或资格顺序；
+3. 资格 run 在调用真实依赖步骤前，以固定非敏感 stderr 标记和固定非零退出码自测该边界；
+4. PR 和 CI 通过后，只使用新的完整 master SHA 及原固定参数重跑一次；
+5. 结果仍只上传严格脱敏 verdict/diagnostic，不上传原始日志、路径、代理或 Secret；
+6. 不修改 production freeze、生产 venv、服务、防火墙、Ubuntu、数据库、Qdrant、
+   模型或 Profile admission。
+
+### 2.0.7 依赖诊断 v2 闭环
+
+原生 stderr 捕获修复 PR #49 的 7 项 CI 全部通过并合并为
+`20fa332192aeb3d2bb628f7fafbbbd39e09bc1fb`。固定参数资格 run
+`30966653503` 仍停在 `pip_download`，v1 诊断为 `evidence_insufficient`；
+`profile_admission=disabled`、`production_services_modified=false`。
+
+v1 的 `pip_download` 阶段同时覆盖代理设置、pip 原生命令和代理恢复，且只输出解析后的
+诊断种类，无法判定 pip 是否启动、退出码、捕获行数或失败是否来自代理边界。获批的 v2
+闭环一次性增加：
+
+1. 将脱敏 Schema 固定为 `faster-whisper-r3-dependency-failure/2`；
+2. 记录固定枚举 `dependency_operation`、`failure_origin`，以及整数/空值
+   `native_exit_code`、非负 `captured_line_count`；
+3. 将 `pip_download` 内部操作分为 `proxy_setup`、`pip_download_command` 和
+   `proxy_restore`，不改变原执行顺序；
+4. 增加 requirements/constraint、文件权限、磁盘、原生进程启动和代理设置/恢复的固定
+   脱敏类别；
+5. 只有 pip 命令明确非零退出、原始安全解析仍不足时，才在同一隔离 venv 中执行一次
+   同 index、同 freeze、同 requirements、同受控 wheel 的
+   `pip install --dry-run --ignore-installed --only-binary=:all: --no-cache-dir`；
+6. fallback 不安装依赖、不下载模型、不启动服务；只记录是否执行、退出码以及白名单
+   诊断种类/ASCII requirement；
+7. workflow summary 和 artifact 不包含原始行、URL、代理、Token、绝对路径、完整 freeze
+   或其他自由文本；
+8. PR 和 CI 通过后只允许使用新的完整 master SHA 重跑一次，取得 v2 结果后停止。
+
+本闭环不修改依赖、production freeze、生产 venv、服务、防火墙、Ubuntu、数据库、
+Qdrant、模型或 Profile admission。
+
+### 2.0.8 离线受限脱敏 resolver 证据提取
+
+固定资格 run `30968517582` 的 v2 诊断确认失败来自 `pip_download_command` 的
+原生命令退出码 1，共捕获 130 行，并执行了一次退出码 1 的隔离 fallback；诊断仍为
+`resolver_replay_insufficient`，Profile 保持 disabled，生产服务未修改。
+
+经单独 R3 批准，复用既有手动诊断 workflow，但将其收敛为一次纯离线提取：
+
+1. 只读取该 run 下 `logs/pip-download.log`、`logs/pip-resolver-fallback.log` 和
+   `reports/dependency-diagnostic.json`，并严格校验固定 run、commit、v2 字段和文件边界；
+2. 使用 Python 3.11 标准库将 pip 固定格式归一化为包名、版本约束、依赖所有者、错误族和
+   blocker，不输出原始行、URL、代理、Token 或绝对路径；
+3. artifact 只允许严格 `faster-whisper-r3-resolver-evidence/1` JSON；workflow summary
+   只显示固定状态、来源身份、计数和归一化 blocker；
+4. workflow 不注入 Secret，不运行 pip，不访问网络，不启动或修改服务、防火墙、Ubuntu、
+   数据库、Qdrant、模型或 Profile admission；
+5. 旧 replay 诊断脚本保留为历史审计实现，但本次 workflow 不再调用；
+6. 合并后只执行一次。若证据仍不完整则停止，不自动迭代解析器或修改依赖。
+
+### 2.0.9 resolver 冲突误判修复
+
+首次离线提取 run `30971872737` 成功读取固定证据，但把无版本范围的
+`funasr 1.4.1 depends on oss2` 与 `oss2==2.19.1` 错判为版本冲突。无版本依赖允许该
+固定版本，不能形成 blocker。
+
+获批最小修复只在 owner 依赖自身包含明确版本比较符、production constraint 是单一精确
+数字版本，且该固定版本违反 owner 的全部合取条件时输出 `version_constraint_conflict`。
+缺失比较符、兼容约束、非数字版本、通配符、compatible-release 或非精确 constraint 均保持
+`evidence_incomplete`，只保留规范化候选。合并后允许再执行一次固定离线提取；仍不运行 pip、
+不读取或上传原始日志、不修改依赖或生产状态。
 
 ### 2.1 仓库基线
 
@@ -246,6 +403,7 @@ samples[8]
 | 文件 | 职责 |
 |---|---|
 | `.github/workflows/qualify-faster-whisper-production.yml` | 单一手动 R3 workflow；绑定完整 master SHA、`production-asr` Environment、Windows runner、并发锁和显式执行开关 |
+| `scripts/build_internal_jieba_wheel.py` | 固定下载、双重可复现构建和严格校验 `jieba==0.42.1` 受控 pure-Python wheel bundle |
 | `scripts/qualify-faster-whisper-production.ps1` | Windows 总编排：preflight、wheelhouse、隔离 venv、模型准备、临时服务、GPU/BGE 监控、清理和最终 verdict |
 | `scripts/prepare_faster_whisper_model.py` | 固定 Hugging Face repo/revision 下载、staging、普通文件/无 symlink 检查、全文件 Manifest 和本机 hash 校验 |
 | `scripts/run_faster_whisper_qualification.py` | 严格读取 8 样本 Manifest，通过隔离 ASR HTTP + Remote Provider + pipeline 生成 Canonical/Markdown，计算质量与时间戳指标 |
@@ -340,7 +498,9 @@ prepare_synthetic_samples=false|true（默认 false）
    - `asr_service/requirements-windows.txt`；
    - `asr_service/requirements-faster-whisper.txt`；
 4. 现有生产 freeze 作为共享包约束，证明 FunASR 与 faster-whisper 可以共存；
-5. 只接受 Windows x64 binary wheel，禁止 sdist、VCS URL、editable、可变 branch；
+5. 只接受 binary wheel，禁止在 Windows 资格 job 构建 sdist、使用 VCS URL、editable 或
+   可变 branch；唯一例外是前置 GitHub-hosted job 从固定 URL/大小/SHA-256 的
+   `jieba 0.42.1` sdist 双重构建并校验得到的受控 pure-Python wheel；
 6. wheelhouse 按文件名排序记录 URL、大小和 SHA-256；
 7. 从同一 wheelhouse 离线安装资格 venv；
 8. 运行 `pip check`、完整 freeze、模块来源校验和许可证审计；

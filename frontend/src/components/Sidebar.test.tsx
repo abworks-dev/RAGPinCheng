@@ -38,7 +38,23 @@ describe("Sidebar brand", () => {
     expect(screen.getByRole("button", { name: "收起会话侧栏" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "主题：跟随系统" })).toHaveClass("pl-4", "pr-2", "w-full");
     expect(container.querySelector("aside")).not.toHaveClass("border-r");
+    expect(container.querySelector(".scroll-fade-sidebar-start")).not.toBeInTheDocument();
+  });
+
+  it("only fades the top edge after the conversation list scrolls down", () => {
+    const { container } = renderSidebar(false);
+    const scrollArea = container.querySelector(".scrollbar-auto-hide");
+
+    expect(scrollArea).toBeInTheDocument();
+    expect(container.querySelector(".scroll-fade-sidebar-start")).not.toBeInTheDocument();
+
+    Object.defineProperty(scrollArea, "scrollTop", { configurable: true, value: 24 });
+    fireEvent.scroll(scrollArea!);
     expect(container.querySelector(".scroll-fade-sidebar-start")).toBeInTheDocument();
+
+    Object.defineProperty(scrollArea, "scrollTop", { configurable: true, value: 0 });
+    fireEvent.scroll(scrollArea!);
+    expect(container.querySelector(".scroll-fade-sidebar-start")).not.toBeInTheDocument();
   });
 
   it("uses the brand mark as the expand control in the collapsed sidebar", () => {

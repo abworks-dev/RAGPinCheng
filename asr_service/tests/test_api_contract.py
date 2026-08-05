@@ -198,7 +198,7 @@ def test_enabled_default_wiring_rejects_unverified_model_cache(tmp_path):
         create_app(settings(tmp_path))
 
 
-def test_enabled_default_wiring_does_not_require_optional_faster_cache(
+def test_enabled_default_wiring_does_not_require_optional_candidate_caches(
     tmp_path, monkeypatch
 ):
     model_path = (tmp_path / "models" / "sensevoice").resolve()
@@ -215,5 +215,6 @@ def test_enabled_default_wiring_does_not_require_optional_faster_cache(
     assert tuple(item.config.service_profile_id for item in registrations) == (
         "faster-whisper-large-v3-turbo-v1",
         "funasr-sensevoice-small-v1",
+        "qwen3-asr-06b-aligner-v1",
         "whisperx-large-v3-zh-align-v1",
     )

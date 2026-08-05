@@ -38,7 +38,7 @@ ALLOWED = {
     },
 }
 FORBIDDEN_IMPORT_ROOTS = {
-    "funasr", "faster_whisper", "whisper", "torch", "av", "ffmpeg",
+    "funasr", "faster_whisper", "qwen_asr", "whisper", "torch", "av", "ffmpeg",
     "qdrant_client", "requests", "httpx", "aiohttp", "socket", "urllib",
     "subprocess", "sqlite3", "sqlalchemy",
 }
