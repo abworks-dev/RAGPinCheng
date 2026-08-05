@@ -200,16 +200,25 @@ def test_backend_image_installs_and_deployment_verifies_ffmpeg_tools():
     assert deploy.index("compose up -d --no-deps backend") < deploy.index(media_check)
     assert deploy.index(media_check) < deploy.index("Waiting for backend health check")
 
-def test_dependency_proxy_is_scoped_to_pip_installation_and_restored():
+def test_dependency_proxy_is_scoped_to_dependency_preparation_and_restored():
     deploy = read("scripts/deploy-asr.ps1")
     install_guard = deploy.index("if ($InstallDependencies)")
     proxy_read = deploy.index("$env:ASR_DEPENDENCY_PROXY", install_guard)
-    torch_install = deploy.index("pip install --index-url", proxy_read)
-    requirements_install = deploy.index("pip install -r", torch_install)
-    proxy_restore = deploy.index("foreach ($name in $savedProxyEnvironment.Keys)", requirements_install)
-    activation_guard = deploy.index("if ($ActivateService)", proxy_restore)
+    dependency_download = deploy.index("pip download", proxy_read)
+    offline_install = deploy.index("--no-index", dependency_download)
+    proxy_restore = deploy.index(
+        "foreach ($name in $savedProxyEnvironment.Keys)", offline_install
+    )
+    activation_guard = deploy.index("if ($ActivateService)", offline_install)
 
-    assert install_guard < proxy_read < torch_install < requirements_install < proxy_restore < activation_guard
+    assert (
+        install_guard
+        < proxy_read
+        < dependency_download
+        < offline_install
+        < proxy_restore
+        < activation_guard
+    )
     assert "ASR_DEPENDENCY_PROXY is required when InstallDependencies is enabled" in deploy
     assert "ASR_DEPENDENCY_PROXY must be an absolute HTTP(S) URL" in deploy
     assert '$env:HTTP_PROXY = $dependencyProxy' in deploy

@@ -21,6 +21,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "windows-wheel-cache.ps1")
 
 $ProgramRoot = "D:\Services\RAGPinCheng-ASR\qualification\faster-whisper"
 $DataRoot = "D:\ServiceData\RAGPinCheng-ASR"
@@ -28,6 +29,7 @@ $InputRoot = "D:\ServiceData\RAGPinCheng-ASR\qualification\faster-whisper\inputs
 $SampleManifest = Join-Path $InputRoot "manifest.json"
 $ModelCacheRoot = Join-Path $DataRoot "models"
 $WheelCacheRoot = Join-Path $DataRoot "qualification\wheel-cache"
+$SharedWheelCacheRoot = Join-Path $DataRoot "wheel-cache"
 $ModelRevision = "0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf"
 $ModelRelativePath = "faster-whisper-large-v3-turbo\$ModelRevision"
 $ModelManifest = Join-Path $ModelCacheRoot "$ModelRelativePath\model-manifest.json"
@@ -35,6 +37,7 @@ $RunRoot = Join-Path $ProgramRoot "runs\$RunId"
 $VenvRoot = Join-Path $RunRoot "venv"
 $VenvPython = Join-Path $VenvRoot "Scripts\python.exe"
 $Wheelhouse = Join-Path $RunRoot "wheelhouse"
+$SharedWheelSeed = Join-Path $RunRoot "shared-wheel-seed"
 $EvidenceRoot = Join-Path $RunRoot "evidence"
 $ReportRoot = Join-Path $RunRoot "reports"
 $LogRoot = Join-Path $RunRoot "logs"
@@ -775,6 +778,12 @@ function Publish-WheelCache {
         [Parameter(Mandatory = $true)][object]$KeyMaterial,
         [Parameter(Mandatory = $true)][object]$WheelManifest
     )
+    Publish-SharedWheelBlobs `
+        -CacheRoot $SharedWheelCacheRoot `
+        -Wheelhouse $Wheelhouse `
+        -Consumer "faster-whisper" `
+        -CacheKey $CacheKey `
+        -KeyMaterial $KeyMaterial | Out-Null
     New-Item -ItemType Directory -Path $WheelCacheRoot -Force | Out-Null
     Assert-RealDirectory -Path $WheelCacheRoot -Label "Wheel cache root"
     & icacls.exe $WheelCacheRoot /inheritance:r /grant:r `
@@ -1617,6 +1626,12 @@ try {
                 -CachePath $CachePath `
                 -CacheManifest $CacheManifest `
                 -CurrentReferenceManifestSha256 $CurrentReferenceManifestSha256
+            Publish-SharedWheelBlobs `
+                -CacheRoot $SharedWheelCacheRoot `
+                -Wheelhouse $Wheelhouse `
+                -Consumer "faster-whisper" `
+                -CacheKey $CacheIdentity.Key `
+                -KeyMaterial $CacheIdentity.Material | Out-Null
             $CacheHit = $true
             $WheelCacheStatus = "hit"
             Write-Host "R3_WHEEL_CACHE status=hit key=$($CacheIdentity.Key)"
@@ -1625,6 +1640,9 @@ try {
     if (-not $CacheHit) {
         $WheelCacheStatus = "miss"
         Write-Host "R3_WHEEL_CACHE status=miss key=$($CacheIdentity.Key)"
+        Copy-VerifiedSharedWheelBlobs `
+            -CacheRoot $SharedWheelCacheRoot `
+            -Destination $SharedWheelSeed | Out-Null
         $DownloadStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
         $DownloadLog = Join-Path $LogRoot "pip-download.log"
         $ResolutionReport = Join-Path $EvidenceRoot "pip-resolution-report.json"
@@ -1653,6 +1671,7 @@ try {
                         "--find-links", $ResolvedOss2WheelBundle,
                         "--find-links", $ResolvedAntlr4WheelBundle,
                         "--find-links", $ResolvedCrcmodWheelBundle,
+                        "--find-links", $SharedWheelSeed,
                         "--constraint", (Join-Path $EvidenceRoot "production-freeze.txt"),
                         "--requirement", $CombinedRequirements
                     ) `
@@ -1671,6 +1690,7 @@ try {
                         "--find-links", $ResolvedOss2WheelBundle,
                         "--find-links", $ResolvedAntlr4WheelBundle,
                         "--find-links", $ResolvedCrcmodWheelBundle,
+                        "--find-links", $SharedWheelSeed,
                         "--constraint", (Join-Path $EvidenceRoot "production-freeze.txt"),
                         "--requirement", $CombinedRequirements
                     ) `
