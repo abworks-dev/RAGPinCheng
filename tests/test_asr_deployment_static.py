@@ -24,8 +24,13 @@ def test_windows_asr_layout_and_config_ownership_are_frozen():
     assert "ASR_FASTER_WHISPER_MODEL_MANIFEST_PATH=" in env
     assert "7bf452403abd7353a300cd760f7adae7701c92c1" in env
     assert "ASR_SERVICE_TOKEN=" in env
+    assert (ROOT / "asr_service" / "requirements-service-core.txt").is_file()
     assert (ROOT / "asr_service" / "requirements-windows.txt").is_file()
+    core_requirements = read("asr_service/requirements-service-core.txt").lower()
     windows_requirements = read("asr_service/requirements-windows.txt").lower()
+    assert "-r requirements-service-core.txt" in windows_requirements
+    for package in ("fastapi", "uvicorn", "pydantic", "httpx", "python-dotenv"):
+        assert package in core_requirements
     assert "faster-whisper" not in windows_requirements
     assert "ctranslate2" not in windows_requirements
     assert not re.search(r"ASR_SERVICE_TOKEN=\S+", env)
@@ -73,7 +78,9 @@ def test_deploy_script_never_downloads_models_or_changes_firewall():
     )
     assert not any(item in deploy for item in forbidden)
     assert "if ($installdependencies)" in deploy
+    assert "requirements-service-core.txt" in deploy
     assert "requirements-windows.txt" in deploy
+    assert deploy.count('get-sharedwheelsha256 -path (join-path $staging "requirements-') >= 2
     assert "^[0-9a-fA-F]{40}$" in read("scripts/deploy-asr.ps1")
 
 
@@ -624,9 +631,11 @@ def test_faster_whisper_qualification_freezes_dependencies_model_and_gates():
     assert "torch==2.7.0+cu128" in script
     assert "torchaudio==2.7.0+cu128" in script
     assert "requirements-windows.txt" not in script
+    assert "requirements-service-core.txt" in script
     assert "requirements-faster-whisper.txt" in script
     assert '$RequirementsSource = $ResolvedSource.Replace("\\", "/")' in script
     assert "-r $RequirementsSource/asr_service/requirements-windows.txt" not in script
+    assert "-r $RequirementsSource/asr_service/requirements-service-core.txt" in script
     assert "-r $RequirementsSource/asr_service/requirements-faster-whisper.txt" in script
     assert "-r $ResolvedSource\\asr_service\\" not in script
     assert '"-m", "pip", "download",' in script
@@ -766,6 +775,10 @@ def test_faster_whisper_qualification_freezes_dependencies_model_and_gates():
     assert "license-matrix.json" in script
     assert "qualification-module-origins.txt" in script
     assert "module escaped qualification venv" in script
+    for module in ("dotenv", "fastapi", "httpx", "pydantic", "uvicorn"):
+        assert f"import {module}" in script
+    assert "Temporary ASR service exited before health check completed" in script
+    assert "-Process $ServiceProcess" in script
     assert "e76620f83d5f5b69efd3d87e3dc180c1bd21df9fbebacfd4335e5e1efcc018da" in model
     assert "1617884929" in model.replace("_", "")
     assert "snapshot_download" not in model
