@@ -294,6 +294,7 @@ def test_inactive_deploy_refuses_to_replace_a_running_service():
 
 def test_faster_whisper_qualification_workflow_is_manual_immutable_and_gated():
     workflow = read(".github/workflows/qualify-faster-whisper-production.yml")
+    dispatch_inputs = workflow.split("permissions:", 1)[0]
     build_job = workflow.split("  build-internal-wheel:", 1)[1].split(
         "\n  qualify:", 1
     )[0]
@@ -316,7 +317,7 @@ def test_faster_whisper_qualification_workflow_is_manual_immutable_and_gated():
     assert "secrets.GPU_SERVICE_TOKEN" in workflow
     assert "secrets.ASR_SERVICE_TOKEN" not in workflow
     assert "activate_service" not in workflow.lower()
-    assert "operation:" not in workflow
+    assert "operation:" not in dispatch_inputs
     assert "runs-on: ubuntu-latest" in build_job
     assert "timeout-minutes: 30" in build_job
     assert "scripts/build_internal_jieba_wheel.py build" in build_job
@@ -333,8 +334,14 @@ def test_faster_whisper_qualification_workflow_is_manual_immutable_and_gated():
     assert "DependencyDiagnosticPath" in workflow
     assert workflow.count("dependency-diagnostic.json") == 3
     assert "Dependency stage:" in workflow
+    assert "Dependency operation:" in workflow
+    assert "Failure origin:" in workflow
+    assert "Native exit code:" in workflow
+    assert "Captured line count:" in workflow
     assert "Dependency diagnosis:" in workflow
     assert "Affected requirement:" in workflow
+    assert "Fallback probe executed:" in workflow
+    assert "Fallback probe exit code:" in workflow
 
 
 def test_faster_whisper_synthetic_sample_preparation_is_fixed_and_gated():
@@ -527,7 +534,7 @@ def test_faster_whisper_qualification_uses_exact_process_and_proxy_boundaries():
     assert "Get-Process -Name" not in script
     assert "function Set-ScopedProxy" in script
     assert "function Clear-ScopedProxy" in script
-    assert script.count("Set-ScopedProxy -Proxy $env:ASR_DEPENDENCY_PROXY") == 1
+    assert script.count("Set-ScopedProxy -Proxy $env:ASR_DEPENDENCY_PROXY") == 2
     assert script.count("Set-ScopedProxy -Proxy $env:ASR_MODEL_DOWNLOAD_PROXY") == 1
     assert script.count("Clear-ScopedProxy") >= 3
     assert '$env:NO_PROXY = "127.0.0.1,localhost,${PRIVATE_IPV4},${PRIVATE_IPV4}"' in script
@@ -550,6 +557,10 @@ def test_faster_whisper_qualification_preserves_native_stderr_before_failing():
     assert "finally {" in invoke_external
     assert "$ErrorActionPreference = $previousPreference" in invoke_external
     assert "$exitCode = $LASTEXITCODE" in invoke_external
+    assert "captured_line_count" in invoke_external
+    assert '"native_process_launch_failure"' in invoke_external
+    assert '"log_write_failure"' in invoke_external
+    assert '"native_exit"' in invoke_external
     assert invoke_external.index("[System.IO.File]::WriteAllLines(") < invoke_external.index(
         'if ($exitCode -ne 0)'
     )
@@ -558,6 +569,8 @@ def test_faster_whisper_qualification_preserves_native_stderr_before_failing():
     assert "raise SystemExit(23)" in capture_self_test
     assert "exit code 23" in capture_self_test
     assert "$ErrorActionPreference -ne $preferenceBefore" in capture_self_test
+    assert "$LastExternalCommandResult.exit_code -ne 23" in capture_self_test
+    assert "$LastExternalCommandResult.captured_line_count -lt 1" in capture_self_test
     assert "did not preserve stderr" in capture_self_test
     assert script.count("Assert-ExternalFailureCapture `") == 1
     assert script.index("Assert-ExternalFailureCapture `") < script.index(
@@ -594,19 +607,71 @@ def test_faster_whisper_qualification_freezes_dependencies_model_and_gates():
     assert "function Write-SanitizedDependencyFailure" in diagnostic_section
     assert "[AllowEmptyCollection()]" in diagnostic_section
     assert '-Lines @()' in diagnostic_section
-    assert "faster-whisper-r3-dependency-failure/1" in diagnostic_section
+    assert "faster-whisper-r3-dependency-failure/2" in diagnostic_section
     assert "binary_distribution_unavailable" in diagnostic_section
     assert "version_constraint_conflict" in diagnostic_section
     assert "network_or_index_failure" in diagnostic_section
+    assert "invalid_requirement_input" in diagnostic_section
+    assert "constraint_contract_error" in diagnostic_section
+    assert "filesystem_or_permission_failure" in diagnostic_section
+    assert "disk_space_failure" in diagnostic_section
+    assert "proxy_setup_failure" in diagnostic_section
+    assert "proxy_restore_failure" in diagnostic_section
+    assert "native_process_launch_failure" in diagnostic_section
+    assert "resolver_replay_insufficient" in diagnostic_section
     assert "evidence_insufficient" in diagnostic_section
     assert "dependency_stage = [string]$diagnosis.Stage" in diagnostic_section
+    assert "dependency_operation = $Operation" in diagnostic_section
+    assert "failure_origin = $failureOrigin" in diagnostic_section
+    assert "native_exit_code = $originalExternalResult.exit_code" in diagnostic_section
+    assert (
+        "captured_line_count = $originalExternalResult.captured_line_count"
+        in diagnostic_section
+    )
     assert "affected_requirement = [string]$diagnosis.Requirement" in diagnostic_section
+    assert "fallback_probe_executed = [bool]$fallback.Executed" in diagnostic_section
+    assert "fallback_probe_exit_code = $fallback.ExitCode" in diagnostic_section
     assert 'profile_admission = "disabled"' in diagnostic_section
     assert "production_services_modified = $false" in diagnostic_section
+    writer_section = diagnostic_section.split(
+        "function Write-SanitizedDependencyFailure", 1
+    )[1]
+    envelope = writer_section.split("$result = [ordered]@{", 1)[1].split(
+        "\n    }", 1
+    )[0]
+    assert re.findall(r"(?m)^\s{8}([a-z_]+)\s*=", envelope) == [
+        "schema_version",
+        "status",
+        "failure_code",
+        "commit_sha",
+        "run_id",
+        "dependency_stage",
+        "dependency_operation",
+        "failure_origin",
+        "native_exit_code",
+        "captured_line_count",
+        "diagnosis_kind",
+        "affected_requirement",
+        "fallback_probe_executed",
+        "fallback_probe_exit_code",
+        "profile_admission",
+        "production_services_modified",
+    ]
     assert 'Kind = "evidence_insufficient"' in diagnostic_section
     assert "conflict_lines" not in diagnostic_section
     assert "log_path =" not in diagnostic_section.lower()
     assert "production_freeze_sha256" not in diagnostic_section
+    assert "captured_lines =" not in diagnostic_section.lower()
+    assert "raw_output" not in diagnostic_section.lower()
+    assert "function Get-DependencyFailureOrigin" in diagnostic_section
+    assert "function Invoke-SanitizedResolverFallback" in diagnostic_section
+    assert '"--dry-run"' in diagnostic_section
+    assert '"--ignore-installed"' in diagnostic_section
+    assert '"--no-cache-dir"' in diagnostic_section
+    assert diagnostic_section.count('"--only-binary=:all:"') == 1
+    assert (
+        '"--find-links", $ResolvedInternalWheelBundle' in diagnostic_section
+    )
     assert "Write-SanitizedDependencyFailure" in script.split("} catch {", 1)[-1]
     for stage in (
         "production_freeze",
@@ -621,6 +686,22 @@ def test_faster_whisper_qualification_freezes_dependencies_model_and_gates():
         "license_audit",
     ):
         assert f'$DependencyFailureStage = "{stage}"' in script
+    for operation in (
+        "production_freeze_command",
+        "production_pip_check_command",
+        "qualification_venv_command",
+        "pip_download_proxy_setup",
+        "pip_download_command",
+        "pip_download_proxy_restore",
+        "wheel_manifest_validation",
+        "pip_install_command",
+        "qualification_pip_check_command",
+        "qualification_freeze_command",
+        "module_origin_verification_command",
+        "license_audit_command",
+    ):
+        assert f'$DependencyFailureOperation = "{operation}"' in script
+    assert "-Operation $DependencyFailureOperation" in script
     assert "--no-index" in script
     assert "pip\", \"check" in script
     assert "license-matrix.json" in script
