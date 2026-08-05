@@ -120,6 +120,50 @@ def _parse_requirement(value: str) -> tuple[str, str] | None:
     return package, specifier
 
 
+def _numeric_version(value: str) -> tuple[int, ...] | None:
+    if not re.fullmatch(r"\d+(?:\.\d+)*", value):
+        return None
+    return tuple(int(part) for part in value.split("."))
+
+
+def _compare_versions(left: tuple[int, ...], right: tuple[int, ...]) -> int:
+    width = max(len(left), len(right))
+    padded_left = left + (0,) * (width - len(left))
+    padded_right = right + (0,) * (width - len(right))
+    return (padded_left > padded_right) - (padded_left < padded_right)
+
+
+def _specifiers_prove_conflict(owner_specifier: str, constraint_specifier: str) -> bool:
+    """Prove only that one exact numeric constraint violates every owner clause."""
+    if not owner_specifier or not constraint_specifier:
+        return False
+    constraint_match = re.fullmatch(r"==(?P<version>\d+(?:\.\d+)*)", constraint_specifier)
+    if constraint_match is None:
+        return False
+    pinned = _numeric_version(constraint_match.group("version"))
+    if pinned is None:
+        return False
+    for clause in owner_specifier.split(","):
+        match = re.fullmatch(r"(?P<operator>==|!=|<=|>=|<|>)(?P<version>\d+(?:\.\d+)*)", clause)
+        if match is None:
+            return False
+        target = _numeric_version(match.group("version"))
+        if target is None:
+            return False
+        comparison = _compare_versions(pinned, target)
+        satisfied = {
+            "==": comparison == 0,
+            "!=": comparison != 0,
+            "<=": comparison <= 0,
+            ">=": comparison >= 0,
+            "<": comparison < 0,
+            ">": comparison > 0,
+        }[match.group("operator")]
+        if not satisfied:
+            return True
+    return False
+
+
 def _strip_powershell_prefix(line: str) -> str:
     cleaned = line.strip()
     error_match = re.search(r"(?i)ERROR:\s*(?P<message>.+)$", cleaned)
@@ -355,7 +399,23 @@ def _parse_logs(log_sets: Iterable[list[str]]) -> dict[str, Any]:
         elif "owner_dependency" in kinds and kinds.intersection(
             {"requested_requirement", "constraint_requirement"}
         ):
-            diagnosis = "version_constraint_conflict"
+            owner_specifiers = {
+                row["specifier"]
+                for row in rows
+                if row["kind"] == "owner_dependency" and row["specifier"]
+            }
+            constraint_specifiers = {
+                row["specifier"]
+                for row in rows
+                if row["kind"] in {"requested_requirement", "constraint_requirement"}
+                and row["specifier"]
+            }
+            if any(
+                _specifiers_prove_conflict(owner_specifier, constraint_specifier)
+                for owner_specifier in owner_specifiers
+                for constraint_specifier in constraint_specifiers
+            ):
+                diagnosis = "version_constraint_conflict"
         if not diagnosis:
             continue
         specifiers = sorted({row["specifier"] for row in rows if row["specifier"]})
