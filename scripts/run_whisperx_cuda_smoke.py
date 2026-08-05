@@ -76,12 +76,14 @@ def prepare_models(root: Path, nltk_root: Path) -> None:
             "tokenizer.json",
             "vocabulary.json",
         ],
+        max_workers=1,
     )
     snapshot_download(
         ALIGN_MODEL_ID,
         revision=ALIGN_REVISION,
         local_dir=root / ALIGN_RELATIVE_PATH,
         allow_patterns=["*.json", "*.bin", "*.safetensors", "*.txt", "*.model"],
+        max_workers=1,
     )
     _write_manifest(
         root,
