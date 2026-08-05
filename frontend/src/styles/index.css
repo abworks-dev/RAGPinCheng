@@ -12,6 +12,62 @@ html.admin-scrollbar-stable {
   scrollbar-gutter: stable;
 }
 
+.resource-preview-root {
+  visibility: hidden;
+  pointer-events: none;
+  transition: visibility 0s linear var(--duration-normal);
+}
+
+.resource-preview-root.resource-preview-open {
+  visibility: visible;
+  pointer-events: auto;
+  transition-delay: 0s;
+}
+
+.resource-preview-backdrop {
+  opacity: 0;
+  transition: opacity var(--duration-normal) ease-out;
+}
+
+.resource-preview-panel {
+  opacity: 0;
+  transform: translateY(0.75rem) scale(0.995);
+  transform-origin: center bottom;
+  transition:
+    opacity var(--duration-normal) ease-out,
+    transform var(--duration-slow) cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: opacity, transform;
+}
+
+.resource-preview-open .resource-preview-backdrop,
+.resource-preview-open .resource-preview-panel {
+  opacity: 1;
+}
+
+.resource-preview-open .resource-preview-panel {
+  transform: translateY(0) scale(1);
+}
+
+@media (min-width: 768px) {
+  .resource-preview-panel {
+    transform: translateX(1rem);
+    transform-origin: right center;
+  }
+
+  .resource-preview-open .resource-preview-panel {
+    transform: translateX(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .resource-preview-root,
+  .resource-preview-backdrop,
+  .resource-preview-panel {
+    transition-duration: 0s;
+    transition-delay: 0s;
+  }
+}
+
 * {
   scrollbar-color: rgb(var(--muted-foreground) / 0.38) transparent;
   scrollbar-width: thin;
