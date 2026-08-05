@@ -2291,3 +2291,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`frontend/src/pages/admin/AdminLayout.tsx`、`frontend/src/pages/admin/AdminLayout.test.tsx`、`frontend/src/styles/index.css`、`WORKLOG.md`；未修改管理业务、API、数据、依赖或部署。
 - 验证：管理布局专项 Vitest 5/5 通过；TypeScript project build 与 Vite production build 通过（2027 modules transformed）；构建保留既有 CSS 语法与主包大于 500 kB 警告。
 - 待办/风险：仍需在真实管理员登录态下切换长短管理页面，确认桌面滚动条贴右且内容不再跳动；回滚可恢复根页面桌面稳定槽并移除 `main` 的滚动槽类。
+
+### 21:29 — 实现 WhisperX 统一资格验证
+
+- 完成：在独立 `codex/whisperx-qualification` worktree 中新增仅手动触发、完整 master SHA 绑定及 `production-asr` environment 保护的 WhisperX 资格 workflow；复用既有 8 个自制中文 BIM/噪声/编号/负控样本和统一质量阈值，通过现有 `TranscriptionProvider → ProviderCandidate → normalizer → Canonical` 契约执行两轮确定性、CER、术语/编号召回、时间戳、RTF 和显存门禁。Windows runner 固定 Python 3.11、`torch 2.8.0+cu128`、WhisperX 3.8.6、FP16、batch=1 和既有双模型 revision，并在模型准备前执行失败关闭的安装包许可证审计；运行目录、venv 和报告均与现有服务隔离，Profile admission 保持 disabled。
+- 文件：新增 `.github/workflows/qualify-whisperx-production.yml`、`scripts/qualify-whisperx-production.ps1`、`scripts/run_whisperx_qualification.py`、`asr_service/tests/test_whisperx_qualification.py`；更新 `project-docs/features/transcript-pipeline.md`、`WORKLOG.md`。未修改业务 Provider/Profile/Canonical 契约、正式依赖、生产服务、任务、防火墙、数据库、Qdrant、模型 revision 或 Profile admission。
+- 验证：WhisperX 资格、引擎及部署静态专项测试 48/48 通过；Python compileall、PowerShell 5.1 AST、workflow YAML 解析和 `git diff --check` 通过。许可证审计在既有 WhisperX 隔离 venv 上通过，未知许可证及 GPL/AGPL/SSPL 仍失败关闭。
+- 待办/风险：尚待独立 PR、完整 CI、合并及一次 production-asr 资格运行；只有 workflow 的脱敏 verdict 才能形成真实质量/资源/许可证结论。运行不注册或启动服务、不接入业务流量；失败时保持 Profile disabled，回滚为 revert 本提交。
