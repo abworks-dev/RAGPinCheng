@@ -164,8 +164,14 @@ jobs:
               $diagnostic = Get-Content -LiteralPath $diagnosticPath -Raw -Encoding UTF8 | ConvertFrom-Json
               $lines += @(
                 "- Dependency stage: ``$($diagnostic.dependency_stage)``",
+                "- Dependency operation: ``$($diagnostic.dependency_operation)``",
+                "- Failure origin: ``$($diagnostic.failure_origin)``",
+                "- Native exit code: ``$($diagnostic.native_exit_code)``",
+                "- Captured line count: ``$($diagnostic.captured_line_count)``",
                 "- Dependency diagnosis: ``$($diagnostic.diagnosis_kind)``",
-                "- Affected requirement: ``$($diagnostic.affected_requirement)``"
+                "- Affected requirement: ``$($diagnostic.affected_requirement)``",
+                "- Fallback probe executed: ``$($diagnostic.fallback_probe_executed)``",
+                "- Fallback probe exit code: ``$($diagnostic.fallback_probe_exit_code)``"
               )
             }
             $lines -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding UTF8
