@@ -2329,7 +2329,7 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 
 ### 23:14 — 实施 faster-whisper 可校验 wheelhouse 缓存
 
-- 完成：为 Windows 统一资格增加 Administrator/SYSTEM 受控的持久 wheelhouse，缓存键覆盖 Python/ABI、Windows 架构、pip、CUDA/torch/torchaudio、production freeze、faster-whisper requirements 与四个受控 wheel 的稳定身份；cache hit 严格复验文件集合、reparse point、大小、哈希和 Manifest，cache miss 继续 no-cache/binary-only 下载并经同盘 staging 原子发布，损坏项隔离后重建。每轮仍创建全新 venv、离线安装并执行全部依赖、许可证、模型、GPU 和八样本门禁；脱敏 verdict 升级为 v2 并记录 hit/miss 与缓存键，artifact 上传失败时受控重试一次。
+- 完成：为 Windows 统一资格增加 Administrator/SYSTEM 受控的持久 wheelhouse，缓存键覆盖 Python/ABI、Windows 架构、pip、CUDA/torch/torchaudio、production freeze、faster-whisper requirements 与四个受控 wheel 的稳定身份；cache hit 严格复验文件集合、reparse point、大小、哈希和 Manifest，cache miss 继续 no-cache/binary-only 下载并经同盘 staging 原子发布，损坏项隔离后重建。每轮仍创建全新 venv、离线安装并执行全部依赖、许可证、模型、GPU 和八样本门禁；脱敏 verdict 升级为 v2 并记录 hit/miss 与缓存键，artifact 上传失败时受控重试一次。首次 run `31019701637` 唯一定位旧文本日志无法稳定绑定来源 URL，现改用同一 resolver 输入的 pip JSON report，按归档 SHA-256 绑定下载来源，不读取或上传原始日志。
 - 文件：`.github/workflows/qualify-faster-whisper-production.yml`、`scripts/qualify-faster-whisper-production.ps1`、`tests/test_asr_deployment_static.py`、`project-docs/plans/faster-whisper-r3-unified-qualification.md`、`WORKLOG.md`。
 - 验证：faster-whisper 部署、引擎、资格和 resolver 专项测试 87/87 通过；PowerShell AST、workflow YAML 解析和 `git diff --check` 通过。
 - 待办/风险：待 PR/CI/合并后执行首次 cache miss 与第二次 cache hit 的真实统一资格；两轮均不得修改生产服务或 Profile admission。
