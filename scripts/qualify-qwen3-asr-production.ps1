@@ -15,6 +15,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "windows-wheel-cache.ps1")
 
 $ProgramRoot = "D:\Services\RAGPinCheng-ASR\qualification\qwen3-asr"
 $DataRoot = "D:\ServiceData\RAGPinCheng-ASR"
@@ -31,6 +32,8 @@ $RunRoot = Join-Path $ProgramRoot "runs\$RunId"
 $VenvRoot = Join-Path $RunRoot "venv"
 $VenvPython = Join-Path $VenvRoot "Scripts\python.exe"
 $Wheelhouse = Join-Path $RunRoot "wheelhouse"
+$SharedWheelSeed = Join-Path $RunRoot "shared-wheel-seed"
+$SharedWheelCacheRoot = Join-Path $DataRoot "wheel-cache"
 $EvidenceRoot = Join-Path $RunRoot "evidence"
 $ReportRoot = Join-Path $RunRoot "reports"
 $LogRoot = Join-Path $RunRoot "logs"
@@ -482,6 +485,15 @@ function New-WheelManifest {
                     $url = $candidate
                 }
             } catch {
+            }
+        }
+        if ([string]::IsNullOrWhiteSpace($url)) {
+            $sharedCandidate = Join-Path $SharedWheelSeed $wheel.Name
+            if (
+                (Test-Path -LiteralPath $sharedCandidate -PathType Leaf) -and
+                (Get-Sha256 -Path $sharedCandidate) -eq $wheelSha256
+            ) {
+                $url = "shared-cache://sha256/$wheelSha256/$($wheel.Name)"
             }
         }
         if ([string]::IsNullOrWhiteSpace($url)) {
@@ -957,6 +969,9 @@ try {
     $DownloadLog = Join-Path $LogRoot "pip-download.log"
     $DependencyFailureStage = "pip_download"
     $DependencyFailureLog = $DownloadLog
+    Copy-VerifiedSharedWheelBlobs `
+        -CacheRoot $SharedWheelCacheRoot `
+        -Destination $SharedWheelSeed | Out-Null
     Set-ScopedProxy -Proxy $env:ASR_DEPENDENCY_PROXY
     try {
         Invoke-External `
@@ -968,6 +983,7 @@ try {
                 "--index-url", "https://pypi.org/simple",
                 "--extra-index-url", "https://download.pytorch.org/whl/cu128",
                 "--find-links", $ResolvedInternalWheelBundle,
+                "--find-links", $SharedWheelSeed,
                 "--constraint", (Join-Path $EvidenceRoot "production-freeze.txt"),
                 "--requirement", $CombinedRequirements
             ) `
@@ -982,6 +998,21 @@ try {
         -OutputPath (Join-Path $EvidenceRoot "wheel-manifest.json") `
         -InternalManifest $InternalWheelManifest
     Assert-WheelManifestUnchanged -Manifest $WheelManifest
+    $SharedCacheMaterial = [ordered]@{
+        schema_version = "qwen3-asr-shared-wheel-key/1"
+        python = "3.11"
+        torch = "2.7.0+cu128"
+        torchaudio = "2.7.0+cu128"
+        requirements_windows_sha256 = Get-Sha256 -Path (Join-Path $ResolvedSource "asr_service\requirements-windows.txt")
+        requirements_provider_sha256 = Get-Sha256 -Path (Join-Path $ResolvedSource "asr_service\requirements-qwen3-asr.txt")
+    }
+    $SharedCacheKey = Get-TextSha256 -Text ($SharedCacheMaterial | ConvertTo-Json -Depth 8 -Compress)
+    Publish-SharedWheelBlobs `
+        -CacheRoot $SharedWheelCacheRoot `
+        -Wheelhouse $Wheelhouse `
+        -Consumer "qwen3-asr" `
+        -CacheKey $SharedCacheKey `
+        -KeyMaterial $SharedCacheMaterial | Out-Null
 
     $DependencyFailureStage = "pip_install"
     $DependencyFailureLog = Join-Path $LogRoot "pip-install-offline.log"
