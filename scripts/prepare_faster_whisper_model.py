@@ -33,7 +33,7 @@ from asr_service.model_cache import (
 
 MODEL_BIN_SIZE_BYTES = 1_617_884_929
 MODEL_BIN_SHA256 = (
-    "e76620f83d5f5769e6a5f66c8013e1292a797de79b3581b44b6c7f9e36d77f31"
+    "e76620f83d5f5b69efd3d87e3dc180c1bd21df9fbebacfd4335e5e1efcc018da"
 )
 MANIFEST_NAME = "model-manifest.json"
 FIXED_MODEL_FILES = (
