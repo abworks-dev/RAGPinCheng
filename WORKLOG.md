@@ -2356,3 +2356,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`scripts/prepare_faster_whisper_model.py`、`tests/test_faster_whisper_model_tls.py`、`.github/workflows/ci.yml`、`WORKLOG.md`。
 - 验证：目标 Python 语法检查通过；新增测试验证直连池、代理池、每请求连接池参数、TLS 1.2 上限、`CERT_REQUIRED`、主机名检查、禁用证书验证时失败关闭及 Hugging Face backend 注册；更新后的完整 ASR CI 测试集合 335/335 通过，`git diff --check` 通过。首次 master CI `31043371743` 的其余 job 全部通过，ASR job 因原最小安装清单缺少新增生产脚本直接导入的既有 `requests` 依赖在收集期失败，自动部署 `31043484140` 按门禁跳过；补齐后 CI `31043635326` 与自动部署 `31043744430` 全部成功。资格 run `31044405571` 进一步证明 requests 2.34 会在每个请求上用默认 context 覆盖 adapter 初始化值，现将同一受验证 TLS 1.2 context 同时注入每请求连接池参数。
 - 待办/风险：本次每请求修正尚待提交、远端 CI、自动部署及绑定新 master SHA 的独立 R3 资格验证；不修改 Secret、生产服务配置、任务、防火墙、数据库、Qdrant 或 Profile admission。回滚可恢复默认 Hugging Face backend。
+
+### 05:48 — 将 faster-whisper 资格切换为本地持久模型制品
+
+- 完成：faster-whisper 统一资格的模型阶段改为严格 `--offline-only`，只接受 `${PRODUCTION_DATA_ROOT}\RAGPinCheng-ASR\models` 下固定 revision、完整 Manifest、精确文件集合、大小和 SHA-256 均通过的持久制品；资格 workflow 不再接收模型下载代理，临时服务同时强制 `HF_HUB_OFFLINE=1`、`TRANSFORMERS_OFFLINE=1` 和既有 local-files-only 门禁。新增仅手动触发、完整 master SHA、显式 R3 开关、`production-asr` environment 与共享模型并发组保护的独立模型制品准备 workflow，通过 run 专属 staging 下载、校验、原子发布并再次离线复验，不启动服务或修改 Profile。
+- 文件：新增 `.github/workflows/prepare-faster-whisper-model-production.yml`、`scripts/prepare-faster-whisper-model-production.ps1`；更新 `.github/workflows/qualify-faster-whisper-production.yml`、`scripts/prepare_faster_whisper_model.py`、`scripts/qualify-faster-whisper-production.ps1`、`asr_service/tests/test_faster_whisper_qualification.py`、`tests/test_asr_deployment_static.py`、`project-docs/features/transcript-pipeline.md`、`WORKLOG.md`。已撤销未提交且实测会重定向回官方站的 `ASR_HF_ENDPOINT` 方案。
+- 验证：离线模型、TLS、资格与部署静态专项测试 58/58 通过；CI 等价完整 ASR 集合 337/337 通过并保留 2 条既有弃用警告；Python compileall、两个 PowerShell 5.1 AST、两个 workflow YAML 解析和 `git diff --check` 通过。
+- 待办/风险：尚未提交、推送、运行远端 CI，亦未在生产机下载或改动模型制品。独立模型准备实际写入生产持久目录，必须在合并后针对完整 master SHA 单独取得 R3 批准；资格仍需在制品准备成功后另行批准执行，Profile admission 保持 disabled。回滚可 revert 本次代码，既有模型目录不受代码回滚影响。

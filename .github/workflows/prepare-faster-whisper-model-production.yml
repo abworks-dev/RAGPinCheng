@@ -1,0 +1,62 @@
+name: Prepare faster-whisper Model Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: "Full 40-character merged master SHA to execute"
+        required: true
+        type: string
+      prepare_model:
+        description: "Download, validate, and persist the pinned faster-whisper model artifact"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-asr-model
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    environment: production-asr
+    runs-on: [self-hosted, Windows, X64, asr-production]
+    timeout-minutes: 120
+    steps:
+      - name: Validate immutable revision and explicit R3 gate
+        shell: powershell
+        run: |
+          if ("${{ inputs.commit_sha }}" -notmatch '^[0-9a-fA-F]{40}$') {
+            throw "commit_sha must be a full 40-character SHA"
+          }
+          if ("${{ inputs.commit_sha }}".ToLowerInvariant() -ne "${{ github.sha }}".ToLowerInvariant()) {
+            throw "commit_sha must equal the workflow dispatch revision"
+          }
+          if ("${{ github.ref }}" -ne "refs/heads/master") {
+            throw "model preparation must be dispatched from master"
+          }
+          if (-not [System.Convert]::ToBoolean("${{ inputs.prepare_model }}")) {
+            throw "prepare_model must be explicitly enabled"
+          }
+
+      - name: Check out requested merged revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 1
+
+      - name: Prepare pinned persistent model artifact
+        shell: powershell
+        env:
+          ASR_MODEL_DOWNLOAD_PROXY: ${{ secrets.ASR_MODEL_DOWNLOAD_PROXY }}
+        run: |
+          $params = @{
+            CommitSha = "${{ inputs.commit_sha }}"
+            SourceRoot = "${{ github.workspace }}"
+            RunId = "${{ github.run_id }}"
+            PrepareModel = [System.Convert]::ToBoolean("${{ inputs.prepare_model }}")
+          }
+          & "${{ github.workspace }}\scripts\prepare-faster-whisper-model-production.ps1" @params
