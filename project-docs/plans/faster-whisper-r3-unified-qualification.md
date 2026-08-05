@@ -231,6 +231,18 @@ setuptools/wheel 重复构建两次；只接受确定性 pure-Python `none-any` 
 `faster-whisper-wheel-manifest/2` 并记录两个受控 Manifest 哈希。该修复不放宽 binary-only，
 不改变 production freeze，也不写入生产 venv。
 
+### 2.0.11 antlr4 受控 wheel 闭环
+
+统一资格 run `30974457008` 已成功构建并复验 jieba 与 oss2 两个受控 wheel，随后依赖解析
+继续在 `antlr4-python3-runtime` 停止。严格 diagnostic 保持 Profile disabled、生产服务未修改。
+固定 production 版本 `4.9.3` 的官方 PyPI release 也仅发布一个 117034 bytes、SHA-256
+`f224469b4168294902bb1efa80a8bf7855f24c99aef99cbefc1bcd3cce77881b` 的 sdist，
+没有 wheel，属于相同 binary-only blocker。
+
+闭环继续复用同一安全模式构建第三个 pure-Python 受控 wheel；资格脚本逐包验证 antlr4 的固定
+来源、重复构建一致性、Manifest、哈希、大小和标签，并要求 jieba、oss2、antlr4 三个内部
+wheel 全部进入 run-local wheelhouse。不调整 pin、production freeze 或 binary-only 策略。
+
 ### 2.1 仓库基线
 
 - PR #34 已合并到 `master`；
