@@ -2378,3 +2378,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`asr_service/engines/faster_whisper.py`、`asr_service/tests/test_faster_whisper.py`、`WORKLOG.md`。
 - 验证：同范围专项测试此前已通过 132 项；当前工作树补充检查目标 Python 文件可编译并完成 `git diff --check`。当前开发机未安装 pytest，未重复执行测试套件；生产服务、模型制品和 Profile admission 未修改。
 - 待办/风险：待提交、合并后以完整 master SHA 重新触发 faster-whisper 生产资格验证；GitHub 托管 CI 仍可能受账单门禁影响。
+
+### 06:36 — 增加 noisy-bim-zh 本地诊断输出
+
+- 完成：在 faster-whisper 资格 runner 中增加本机 `sample-diagnostics.json` 输出，记录 `reference_text`、`hypothesis_text`、归一化文本和逐样本 CER/召回信息；保持 `qualification-summary.json` 与 `sample-results.json` 继续脱敏，不向 GitHub artifact 回传原文。生产资格 wrapper 现显式传入诊断路径。
+- 文件：`scripts/run_faster_whisper_qualification.py`、`scripts/qualify-faster-whisper-production.ps1`、`asr_service/tests/test_faster_whisper_qualification.py`、`WORKLOG.md`。
+- 验证：`python -m compileall -q scripts/run_faster_whisper_qualification.py asr_service/tests/test_faster_whisper_qualification.py` 通过；`python scripts/run_faster_whisper_qualification.py --help` 通过并显示 `--diagnostic-report`；本机系统 Python 未安装 pytest，未执行 pytest 套件。
+- 待办/风险：需在实际生产资格 run 中读取 `reports/sample-diagnostics.json` 再判断 `noisy-bim-zh` 失败形态；若后续继续暴露为噪声鲁棒性不足，仍需再决定是否调噪声样本或解码策略。

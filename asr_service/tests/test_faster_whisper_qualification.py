@@ -370,7 +370,12 @@ def test_reports_never_require_reference_or_hypothesis_text(tmp_path, monkeypatc
     report = qualification.run_qualification(
         manifest, base_url="http://127.0.0.1:18200", token="secret", timeout_ms=1000
     )
-    encoded = json.dumps(report, ensure_ascii=False)
+    encoded = json.dumps(
+        qualification._sanitized_qualification_result(report), ensure_ascii=False
+    )
     assert "reference_text" not in encoded
     assert "hypothesis" not in encoded
     assert "secret" not in encoded
+    diagnostics = json.dumps(report["local_diagnostics"], ensure_ascii=False)
+    assert "reference_text" in diagnostics
+    assert "hypothesis_text" in diagnostics
