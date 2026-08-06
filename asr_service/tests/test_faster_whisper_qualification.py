@@ -20,6 +20,30 @@ ROOT = Path(__file__).resolve().parents[2]
 EXAMPLE = ROOT / "asr_service" / "faster-whisper-qualification-manifest.example.json"
 
 
+def test_absolute_runner_bootstraps_repository_imports_from_external_cwd(tmp_path):
+    runner = ROOT / "scripts" / "run_faster_whisper_qualification.py"
+    command = (
+        "import runpy; "
+        f"runpy.run_path({str(runner)!r}); "
+        "from src.transcription.canonical import CanonicalTranscript; "
+        "print(CanonicalTranscript.__name__)"
+    )
+    environment = os.environ.copy()
+    environment.pop("PYTHONPATH", None)
+
+    completed = subprocess.run(
+        [sys.executable, "-I", "-c", command],
+        cwd=tmp_path,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout.strip() == "CanonicalTranscript"
+
+
 def _wav(path: Path, frames: int = 16_000) -> None:
     with wave.open(str(path), "wb") as handle:
         handle.setnchannels(1)

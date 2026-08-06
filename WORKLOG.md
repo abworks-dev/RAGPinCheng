@@ -2367,6 +2367,9 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 验证补充：移除 setup-python 的修正经 PR #88 合并为 `bdd72697db744c52a951dd972b42f49300f67e39`；资格 `31065268918` 在 31 秒内证明 PinCheng Ubuntu 未安装 `python3.11` 并按门禁快速失败，未构建或上传制品。基于四个构建器均硬性要求 Python 3.11 且需要下载固定 sdist/构建依赖，现取消 Ubuntu job 与内部 wheel artifact 中转，改由已验证机器级 Python 3.11 的 Windows 资格 Runner 在 run 专属目录构建，并将依赖代理严格限制在该步骤进程内、结束后恢复。
 - 待办/风险：Windows 内部 wheel 构建合并修正尚待本地验证、提交、合并及用户已授权的生产资格重跑；因 GitHub 托管额度耗尽，普通远端 CI 预计仍会在 job 启动前被账单门禁拒绝，不把该外部失败误报为代码失败。Profile admission 保持 disabled；不删除或修改模型制品，不修改系统代理。回滚可恢复独立构建 job，未执行未批准清理。
 
+- 验证补充：Windows 内部 wheel 构建迁移经 PR #89 合并为 `640091c88d9eb4b74fdbd0b7b8593425e25b2638`；资格 `31065672666` 的四个受控 wheel 在 2 分 46 秒内成功构建，随后因新 key 首次建立并发布 46 文件 wheel cache（依赖下载约 31 分 45 秒），离线安装、持久模型校验与临时服务启动均成功。真实资格 warmup 在首次导入 `src.transcription.canonical` 时因绝对脚本入口仅包含 `scripts` 路径而失败；现由 runner 根据自身路径显式加入仓库根目录，并新增隔离模式、仓库外当前目录、无 `PYTHONPATH` 的真实导入回归。
+- 待办/风险：资格 runner 仓库根目录导入修正尚待本地验证、提交、合并及用户已授权的生产资格重跑；新 wheel cache `ba2262647a5841797fd92051005509398e229ab3be545ad29c957b82c6e0383a` 已发布，后续同 key 应命中。因 GitHub 托管额度耗尽，普通远端 CI 预计仍会在 job 启动前被账单门禁拒绝。Profile admission 保持 disabled；不删除或修改模型制品，不修改系统代理。回滚可撤销 runner bootstrap，未执行未批准清理。
+
 ## 2026-08-07
 
 ### 05:41 — 修复 faster-whisper hotwords 参数类型
