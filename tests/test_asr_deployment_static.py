@@ -311,8 +311,10 @@ def test_inactive_deploy_refuses_to_replace_a_running_service():
 def test_faster_whisper_qualification_workflow_is_manual_immutable_and_gated():
     workflow = read(".github/workflows/qualify-faster-whisper-production.yml")
     dispatch_inputs = workflow.split("permissions:", 1)[0]
-    build_job = workflow.split("  build-internal-wheel:", 1)[1].split(
-        "\n  qualify:", 1
+    wheel_build = workflow.split(
+        "      - name: Build reproducible controlled internal wheels", 1
+    )[1].split(
+        "      - name: Prepare fixed synthetic qualification samples", 1
     )[0]
     assert "workflow_dispatch:" in workflow
     assert "push:" not in workflow
@@ -334,27 +336,26 @@ def test_faster_whisper_qualification_workflow_is_manual_immutable_and_gated():
     assert "secrets.ASR_SERVICE_TOKEN" not in workflow
     assert "activate_service" not in workflow.lower()
     assert "operation:" not in dispatch_inputs
-    assert "environment: production-asr" in build_job
-    assert "runs-on: [self-hosted, Linux, X64, ubuntu, production, app]" in build_job
-    assert "ubuntu-latest" not in build_job
-    assert "actions/setup-python" not in build_job
-    assert "command -v python3.11" in build_job
-    assert "must provide python3.11" in build_job
-    assert build_job.count("python3.11 scripts/build_internal_") == 4
-    assert "timeout-minutes: 30" in build_job
-    assert "scripts/build_internal_jieba_wheel.py build" in build_job
-    assert "scripts/build_internal_oss2_wheel.py build" in build_job
-    assert "scripts/build_internal_antlr4_wheel.py build" in build_job
-    assert "scripts/build_internal_crcmod_wheel.py build" in build_job
-    assert "actions/upload-artifact@v4" in build_job
-    assert "faster-whisper-internal-wheels-${{ github.run_id }}" in build_job
-    assert "secrets." not in build_job
-    assert "ASR_SERVICE_TOKEN" not in build_job
-    assert "ASR_MODEL_DOWNLOAD_PROXY" not in build_job
-    assert "GPU_SERVICE_TOKEN" not in build_job
-    assert "actions/download-artifact@v4" in workflow
+    assert "  build-internal-wheel:" not in workflow
+    assert "needs: build-internal-wheel" not in workflow
+    assert "ubuntu-latest" not in workflow
+    assert "runs-on: [self-hosted, Linux, X64, ubuntu, production, app]" not in workflow
+    assert "actions/setup-python" not in workflow
+    assert "Download controlled internal wheels" not in workflow
+    assert "Upload controlled internal wheels" not in workflow
+    assert r'${PRODUCTION_PYTHON311_PATH}' in wheel_build
+    assert "Machine-wide wheel build Python is not 3.11" in wheel_build
+    assert wheel_build.count('Script = "build_internal_') == 4
+    assert "ASR_DEPENDENCY_PROXY: ${{ secrets.ASR_DEPENDENCY_PROXY }}" in wheel_build
+    assert "ASR_DEPENDENCY_PROXY is required for controlled wheel preparation" in wheel_build
+    assert "ASR_DEPENDENCY_PROXY must be an absolute HTTP(S) URL" in wheel_build
+    assert "$env:HTTP_PROXY = $dependencyProxy" in wheel_build
+    assert "$env:HTTPS_PROXY = $dependencyProxy" in wheel_build
+    assert "[System.Environment]::SetEnvironmentVariable(" in wheel_build
+    assert "ASR_SERVICE_TOKEN" not in wheel_build
+    assert "ASR_MODEL_DOWNLOAD_PROXY" not in wheel_build
+    assert "GPU_SERVICE_TOKEN" not in wheel_build
     assert "InternalWheelBundlePath" in workflow
-    assert "needs: build-internal-wheel" in workflow
     assert "DependencyDiagnosticPath" in workflow
     assert workflow.count("dependency-diagnostic.json") == 4
     assert "Dependency stage:" in workflow
