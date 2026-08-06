@@ -57,27 +57,34 @@ jobs:
           ref: ${{ inputs.commit_sha }}
           fetch-depth: 1
 
-      - name: Set up fixed wheel build Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+      - name: Verify fixed system wheel build Python
+        shell: bash
+        run: |
+          if ! command -v python3.11 >/dev/null 2>&1; then
+            echo "PinCheng self-hosted runner must provide python3.11" >&2
+            exit 1
+          fi
+          if [[ "$(python3.11 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')" != "3.11" ]]; then
+            echo "PinCheng self-hosted runner python3.11 command did not resolve to Python 3.11" >&2
+            exit 1
+          fi
 
       - name: Build reproducible controlled internal wheels
         shell: bash
         run: |
-          python scripts/build_internal_jieba_wheel.py build \
+          python3.11 scripts/build_internal_jieba_wheel.py build \
             --bundle-dir "${{ runner.temp }}/faster-whisper-internal-wheels-${{ github.run_id }}/jieba" \
             --commit-sha "${{ inputs.commit_sha }}" \
             --run-id "${{ github.run_id }}"
-          python scripts/build_internal_oss2_wheel.py build \
+          python3.11 scripts/build_internal_oss2_wheel.py build \
             --bundle-dir "${{ runner.temp }}/faster-whisper-internal-wheels-${{ github.run_id }}/oss2" \
             --commit-sha "${{ inputs.commit_sha }}" \
             --run-id "${{ github.run_id }}"
-          python scripts/build_internal_antlr4_wheel.py build \
+          python3.11 scripts/build_internal_antlr4_wheel.py build \
             --bundle-dir "${{ runner.temp }}/faster-whisper-internal-wheels-${{ github.run_id }}/antlr4" \
             --commit-sha "${{ inputs.commit_sha }}" \
             --run-id "${{ github.run_id }}"
-          python scripts/build_internal_crcmod_wheel.py build \
+          python3.11 scripts/build_internal_crcmod_wheel.py build \
             --bundle-dir "${{ runner.temp }}/faster-whisper-internal-wheels-${{ github.run_id }}/crcmod" \
             --commit-sha "${{ inputs.commit_sha }}" \
             --run-id "${{ github.run_id }}"
