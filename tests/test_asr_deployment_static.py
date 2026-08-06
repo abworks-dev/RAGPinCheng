@@ -789,6 +789,7 @@ def test_faster_whisper_qualification_freezes_dependencies_model_and_gates():
         "\n    )", 1
     )[0]
     assert '"faster-whisper-large-v3-turbo-v1"' in expected_profiles
+    assert "faster-whisper-zh-experimental-v1" not in runner
     assert '"funasr-sensevoice-small-v1"' not in expected_profiles
     assert (
         "Temporary service does not expose the exact "
@@ -831,6 +832,10 @@ def test_faster_whisper_qualification_freezes_dependencies_model_and_gates():
     assert "CODE_RECALL_LIMIT = 0.95" in runner
     assert "TIMESTAMP_P95_LIMIT_MS = 1_500" in runner
     assert "RTF_LIMIT = 0.60" in runner
+    assert "steady_state_rtf" in runner
+    assert "rtf_scope" in runner
+    assert "_code_recall" in runner
+    assert "normalize_code" in runner
 
 
 def test_faster_whisper_qualification_uses_verified_persistent_wheel_cache():
