@@ -180,6 +180,7 @@ class FasterWhisperRemoteConfig:
     expected_api_version: str = "asr-service/1"
     upload_part_bytes: int = 8 * 1024 * 1024
     poll_interval_ms: int = 1000
+    hotwords: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if self.config_kind != "faster-whisper" or self.config_version != "1":
@@ -207,6 +208,11 @@ class FasterWhisperRemoteConfig:
             raise ContractValidationError(
                 "invalid_upload_part_bytes", "upload_part_bytes"
             )
+        if type(self.hotwords) is not tuple:
+            raise ContractValidationError("invalid_hotwords", "hotwords")
+        for word in self.hotwords:
+            if type(word) is not str or not word.strip() or len(word) > 64:
+                raise ContractValidationError("invalid_hotword", "hotwords")
         require_int(self.poll_interval_ms, "poll_interval_ms", positive=True)
         if not 100 <= self.poll_interval_ms <= 5000:
             raise ContractValidationError(
@@ -223,6 +229,7 @@ class FasterWhisperRemoteConfig:
             "expected_api_version": self.expected_api_version,
             "upload_part_bytes": self.upload_part_bytes,
             "poll_interval_ms": self.poll_interval_ms,
+            "hotwords": list(self.hotwords),
         }
 
 
@@ -437,6 +444,7 @@ def provider_config_from_json(data: object) -> ProviderTrustedConfig:
                 "expected_api_version",
                 "upload_part_bytes",
                 "poll_interval_ms",
+                "hotwords",
             },
             "provider_config",
         )
@@ -449,6 +457,7 @@ def provider_config_from_json(data: object) -> ProviderTrustedConfig:
             obj["expected_api_version"],
             obj["upload_part_bytes"],
             obj["poll_interval_ms"],
+            tuple(obj["hotwords"]),
         )
     if kind == "qwen3-asr" and version == "1":
         obj = reject_unknown_fields(

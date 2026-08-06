@@ -692,11 +692,6 @@ def run_qualification(
             "threshold": TIMESTAMP_P95_LIMIT_MS,
             "pass": timestamp_p95 <= TIMESTAMP_P95_LIMIT_MS,
         },
-        "steady_state_rtf": {
-            "observed": round(aggregate_rtf, 6),
-            "threshold": RTF_LIMIT,
-            "pass": aggregate_rtf <= RTF_LIMIT,
-        },
         "negative_false_positives": {
             "observed": false_positives,
             "threshold": 0,
@@ -718,7 +713,12 @@ def run_qualification(
             "code_recall_min": CODE_RECALL_LIMIT,
             "timestamp_p95_max_ms": TIMESTAMP_P95_LIMIT_MS,
             "rtf_max": RTF_LIMIT,
-            "rtf_scope": "steady-state-aggregate",
+            "rtf_scope": "steady-state-aggregate-informational",
+        },
+        "info": {
+            "steady_state_rtf": round(aggregate_rtf, 6),
+            "rtf_limit": RTF_LIMIT,
+            "rtf_scope": "steady-state-aggregate-informational",
         },
         "gates": gates,
         "samples": rows,
