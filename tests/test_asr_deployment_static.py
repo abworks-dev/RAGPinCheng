@@ -779,6 +779,26 @@ def test_faster_whisper_qualification_freezes_dependencies_model_and_gates():
         assert f"import {module}" in script
     assert "Temporary ASR service exited before health check completed" in script
     assert "-Process $ServiceProcess" in script
+    isolated_model_variables = (
+        "ASR_QWEN3_ASR_MODEL_CACHE_ROOT",
+        "ASR_QWEN3_ASR_MODEL_MANIFEST_PATH",
+        "ASR_QWEN3_ALIGNER_MODEL_CACHE_ROOT",
+        "ASR_QWEN3_ALIGNER_MODEL_MANIFEST_PATH",
+        "ASR_WHISPERX_MODEL_CACHE_ROOT",
+        "ASR_WHISPERX_MODEL_MANIFEST_PATH",
+        "ASR_WHISPERX_ALIGN_MODEL_CACHE_ROOT",
+        "ASR_WHISPERX_ALIGN_MODEL_MANIFEST_PATH",
+    )
+    for name in isolated_model_variables:
+        assert script.count(f'"{name}"') == 2
+    isolation_call = "[System.Environment]::SetEnvironmentVariable("
+    assert isolation_call in script
+    assert "[System.EnvironmentVariableTarget]::Process" in script
+    assert script.index("Save-ProcessEnvironment -Names") < script.index(
+        isolation_call,
+        script.index("Save-ProcessEnvironment -Names"),
+    )
+    assert "Restore-ProcessEnvironment" in script
     assert "e76620f83d5f5b69efd3d87e3dc180c1bd21df9fbebacfd4335e5e1efcc018da" in model
     assert "1617884929" in model.replace("_", "")
     assert "snapshot_download" not in model
