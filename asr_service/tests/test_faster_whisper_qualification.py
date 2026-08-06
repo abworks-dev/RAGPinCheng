@@ -118,7 +118,7 @@ def test_code_recall_matches_normalized_codes():
 
 
 def test_threshold_constants_are_frozen():
-    assert qualification.FASTER_WHISPER_PROFILE_ID == "faster-whisper-large-v3-turbo-v1"
+    assert qualification.FASTER_WHISPER_PROFILE_ID == "faster-whisper-zh-experimental-v1"
     assert qualification.CLEAR_CER_LIMIT == 0.10
     assert qualification.BIM_NOISE_CER_LIMIT == 0.15
     assert qualification.TERM_RECALL_LIMIT == 0.70

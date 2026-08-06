@@ -789,7 +789,7 @@ def test_faster_whisper_qualification_freezes_dependencies_model_and_gates():
         "\n    )", 1
     )[0]
     assert '"faster-whisper-large-v3-turbo-v1"' in expected_profiles
-    assert "faster-whisper-zh-experimental-v1" not in runner
+    assert "if item.profile.provider_config.service_profile_id == FASTER_WHISPER_SERVICE_PROFILE_ID" in runner
     assert '"funasr-sensevoice-small-v1"' not in expected_profiles
     assert (
         "Temporary service does not expose the exact "
@@ -920,6 +920,7 @@ def test_faster_whisper_qualification_drives_the_existing_result_flow():
     assert "WhisperModel" not in runner
     assert ".transcribe(" not in runner
     assert "FASTER_WHISPER_PROFILE_ID" in runner
+    assert "FASTER_WHISPER_SERVICE_PROFILE_ID" in runner
 
 
 def test_qwen3_asr_qualification_is_manual_sha_bound_and_isolated():
