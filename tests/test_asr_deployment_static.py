@@ -779,6 +779,16 @@ def test_faster_whisper_qualification_freezes_dependencies_model_and_gates():
         assert f"import {module}" in script
     assert "Temporary ASR service exited before health check completed" in script
     assert "-Process $ServiceProcess" in script
+    expected_profiles = script.split("$ExpectedProfiles = @(", 1)[1].split(
+        "\n    )", 1
+    )[0]
+    assert '"faster-whisper-large-v3-turbo-v1"' in expected_profiles
+    assert '"funasr-sensevoice-small-v1"' not in expected_profiles
+    assert (
+        "Temporary service does not expose the exact "
+        "faster-whisper-only profile contract"
+    ) in script
+    assert "exact two-profile contract" not in script
     isolated_model_variables = (
         "ASR_QWEN3_ASR_MODEL_CACHE_ROOT",
         "ASR_QWEN3_ASR_MODEL_MANIFEST_PATH",
