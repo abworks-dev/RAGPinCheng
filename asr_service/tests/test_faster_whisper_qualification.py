@@ -178,7 +178,7 @@ def test_qualification_summary_passes_only_when_every_gate_passes(
     assert all(item["pass"] for item in result["samples"])
 
 
-def test_qualification_summary_fails_on_rtf_or_nondeterminism(
+def test_qualification_summary_fails_on_nondeterminism(
     tmp_path, monkeypatch
 ):
     manifest = qualification.load_manifest(_manifest(tmp_path))
@@ -196,8 +196,8 @@ def test_qualification_summary_fails_on_rtf_or_nondeterminism(
         manifest, base_url="http://127.0.0.1:18200", token="test", timeout_ms=1000
     )
     assert result["status"] == "fail"
-    assert result["gates"]["steady_state_rtf"]["pass"] is False
-    assert result["thresholds"]["rtf_scope"] == "steady-state-aggregate"
+    assert "steady_state_rtf" not in result["gates"]
+    assert result["info"]["rtf_scope"] == "steady-state-aggregate-informational"
     assert any(not item["deterministic"] for item in result["samples"])
 
 

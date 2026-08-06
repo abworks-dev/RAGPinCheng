@@ -26,6 +26,7 @@ class ServiceProfileConfig:
     language: str
     aligner_model_id: str | None = None
     aligner_model_revision: str | None = None
+    hotwords: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         validate_provider_key(self.service_profile_id, "service_profile_id")
@@ -83,6 +84,11 @@ class ServiceProfileConfig:
             raise ContractValidationError(
                 "invalid_aligner_model_revision", "aligner_model_revision"
             )
+        if type(self.hotwords) is not tuple:
+            raise ContractValidationError("invalid_hotwords", "hotwords")
+        for word in self.hotwords:
+            if type(word) is not str or not word.strip() or len(word) > 64:
+                raise ContractValidationError("invalid_hotword", "hotwords")
 
 
 SENSEVOICE_SERVICE_CONFIG = ServiceProfileConfig(
@@ -99,6 +105,7 @@ FASTER_WHISPER_SERVICE_CONFIG = ServiceProfileConfig(
     "dropbox-dash/faster-whisper-large-v3-turbo",
     "0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf",
     "zh-CN",
+    hotwords=("GB 50016-2014", "建筑设计防火规范", "GB 50011-2010", "建筑抗震设计规范"),
 )
 
 QWEN3_ASR_SERVICE_CONFIG = ServiceProfileConfig(
