@@ -26,79 +26,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build-internal-wheel:
-    environment: production-asr
-    runs-on: [self-hosted, Linux, X64, ubuntu, production, app]
-    timeout-minutes: 30
-    steps:
-      - name: Validate immutable revision and explicit R3 gate
-        shell: bash
-        run: |
-          if [[ ! "${{ inputs.commit_sha }}" =~ ^[0-9a-fA-F]{40}$ ]]; then
-            echo "commit_sha must be a full 40-character SHA" >&2
-            exit 1
-          fi
-          if [[ "${{ inputs.commit_sha }}" != "${{ github.sha }}" ]]; then
-            echo "commit_sha must equal the workflow dispatch revision" >&2
-            exit 1
-          fi
-          if [[ "${{ github.ref }}" != "refs/heads/master" ]]; then
-            echo "qualification must be dispatched from master" >&2
-            exit 1
-          fi
-          if [[ "${{ inputs.execute_qualification }}" != "true" ]]; then
-            echo "execute_qualification must be explicitly enabled" >&2
-            exit 1
-          fi
-
-      - name: Check out requested merged revision
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.commit_sha }}
-          fetch-depth: 1
-
-      - name: Verify fixed system wheel build Python
-        shell: bash
-        run: |
-          if ! command -v python3.11 >/dev/null 2>&1; then
-            echo "PinCheng self-hosted runner must provide python3.11" >&2
-            exit 1
-          fi
-          if [[ "$(python3.11 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')" != "3.11" ]]; then
-            echo "PinCheng self-hosted runner python3.11 command did not resolve to Python 3.11" >&2
-            exit 1
-          fi
-
-      - name: Build reproducible controlled internal wheels
-        shell: bash
-        run: |
-          python3.11 scripts/build_internal_jieba_wheel.py build \
-            --bundle-dir "${{ runner.temp }}/faster-whisper-internal-wheels-${{ github.run_id }}/jieba" \
-            --commit-sha "${{ inputs.commit_sha }}" \
-            --run-id "${{ github.run_id }}"
-          python3.11 scripts/build_internal_oss2_wheel.py build \
-            --bundle-dir "${{ runner.temp }}/faster-whisper-internal-wheels-${{ github.run_id }}/oss2" \
-            --commit-sha "${{ inputs.commit_sha }}" \
-            --run-id "${{ github.run_id }}"
-          python3.11 scripts/build_internal_antlr4_wheel.py build \
-            --bundle-dir "${{ runner.temp }}/faster-whisper-internal-wheels-${{ github.run_id }}/antlr4" \
-            --commit-sha "${{ inputs.commit_sha }}" \
-            --run-id "${{ github.run_id }}"
-          python3.11 scripts/build_internal_crcmod_wheel.py build \
-            --bundle-dir "${{ runner.temp }}/faster-whisper-internal-wheels-${{ github.run_id }}/crcmod" \
-            --commit-sha "${{ inputs.commit_sha }}" \
-            --run-id "${{ github.run_id }}"
-
-      - name: Upload controlled internal wheels
-        uses: actions/upload-artifact@v4
-        with:
-          name: faster-whisper-internal-wheels-${{ github.run_id }}
-          path: ${{ runner.temp }}/faster-whisper-internal-wheels-${{ github.run_id }}
-          if-no-files-found: error
-          retention-days: 14
-
   qualify:
-    needs: build-internal-wheel
     environment: production-asr
     runs-on: [self-hosted, Windows, X64, asr-production]
     timeout-minutes: 180
@@ -125,11 +53,67 @@ jobs:
           ref: ${{ inputs.commit_sha }}
           fetch-depth: 1
 
-      - name: Download controlled internal wheels
-        uses: actions/download-artifact@v4
-        with:
-          name: faster-whisper-internal-wheels-${{ github.run_id }}
-          path: ${{ runner.temp }}\faster-whisper-internal-wheels-${{ github.run_id }}
+      - name: Build reproducible controlled internal wheels
+        shell: powershell
+        env:
+          ASR_DEPENDENCY_PROXY: ${{ secrets.ASR_DEPENDENCY_PROXY }}
+        run: |
+          $python = "${PRODUCTION_PYTHON311_PATH}"
+          if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
+            throw "Machine-wide Python 3.11 is missing"
+          }
+          $pythonVersion = & $python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"
+          if ($LASTEXITCODE -ne 0 -or ([string]$pythonVersion).Trim() -ne "3.11") {
+            throw "Machine-wide wheel build Python is not 3.11"
+          }
+          $dependencyProxy = [string]$env:ASR_DEPENDENCY_PROXY
+          if ([string]::IsNullOrWhiteSpace($dependencyProxy)) {
+            throw "ASR_DEPENDENCY_PROXY is required for controlled wheel preparation"
+          }
+          $proxyUri = $null
+          if (
+            -not [System.Uri]::TryCreate($dependencyProxy, [System.UriKind]::Absolute, [ref]$proxyUri) -or
+            $proxyUri.Scheme -notin @("http", "https")
+          ) {
+            throw "ASR_DEPENDENCY_PROXY must be an absolute HTTP(S) URL"
+          }
+          $savedProxyEnvironment = @{}
+          foreach ($name in @("HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY")) {
+            $savedProxyEnvironment[$name] = [System.Environment]::GetEnvironmentVariable(
+              $name,
+              [System.EnvironmentVariableTarget]::Process
+            )
+          }
+          try {
+            $env:HTTP_PROXY = $dependencyProxy
+            $env:HTTPS_PROXY = $dependencyProxy
+            $env:NO_PROXY = "127.0.0.1,localhost,${PRIVATE_IPV4},${PRIVATE_IPV4}"
+            $builders = @(
+              @{ Script = "build_internal_jieba_wheel.py"; Directory = "jieba" },
+              @{ Script = "build_internal_oss2_wheel.py"; Directory = "oss2" },
+              @{ Script = "build_internal_antlr4_wheel.py"; Directory = "antlr4" },
+              @{ Script = "build_internal_crcmod_wheel.py"; Directory = "crcmod" }
+            )
+            foreach ($builder in $builders) {
+              & $python `
+                (Join-Path "${{ github.workspace }}" "scripts\$($builder.Script)") `
+                build `
+                --bundle-dir (Join-Path "${{ runner.temp }}\faster-whisper-internal-wheels-${{ github.run_id }}" $builder.Directory) `
+                --commit-sha "${{ inputs.commit_sha }}" `
+                --run-id "${{ github.run_id }}"
+              if ($LASTEXITCODE -ne 0) {
+                throw "Controlled internal wheel builder failed"
+              }
+            }
+          } finally {
+            foreach ($name in $savedProxyEnvironment.Keys) {
+              [System.Environment]::SetEnvironmentVariable(
+                $name,
+                $savedProxyEnvironment[$name],
+                [System.EnvironmentVariableTarget]::Process
+              )
+            }
+          }
 
       - name: Prepare fixed synthetic qualification samples
         if: ${{ inputs.prepare_synthetic_samples }}
