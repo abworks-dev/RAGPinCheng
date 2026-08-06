@@ -568,6 +568,7 @@ def run_qualification(
     _run_once(warmup, base_url=base_url, token=token, timeout_ms=timeout_ms)
 
     rows: list[dict[str, object]] = []
+    diagnostic_rows: list[dict[str, object]] = []
     term_hits = term_total = code_hits = code_total = 0
     timestamp_drifts: list[int] = []
     positive_terms = tuple(
@@ -614,6 +615,16 @@ def run_qualification(
             "deterministic": deterministic,
             "parser_turn_count": len(turns),
         }
+        diagnostic_row: dict[str, object] = {
+            "sample_id": sample.sample_id,
+            "scenario": sample.scenario,
+            "negative_control": sample.negative_control,
+            "reference_text": sample.reference_text,
+            "hypothesis_text": hypothesis,
+            "normalized_reference_text": normalize_text(sample.reference_text),
+            "normalized_hypothesis_text": normalize_text(hypothesis),
+            "deterministic": deterministic,
+        }
         sample_pass = deterministic
         if sample.negative_control:
             normalized = normalize_text(hypothesis)
@@ -626,6 +637,8 @@ def run_qualification(
             false_positives += len(matched_terms) + len(matched_codes)
             row["forbidden_term_hits"] = len(matched_terms)
             row["forbidden_code_hits"] = len(matched_codes)
+            diagnostic_row["forbidden_term_hits"] = len(matched_terms)
+            diagnostic_row["forbidden_code_hits"] = len(matched_codes)
             sample_pass = sample_pass and not matched_terms and not matched_codes
         else:
             cer = character_error_rate(sample.reference_text, hypothesis)
@@ -654,10 +667,26 @@ def run_qualification(
                     "timestamp_drift_max_ms": max(drifts),
                 }
             )
+            diagnostic_row.update(
+                {
+                    "cer": round(cer, 6),
+                    "cer_limit": cer_limit,
+                    "cer_pass": cer <= cer_limit,
+                    "expected_terms": list(sample.expected_terms),
+                    "term_hits": found_terms,
+                    "term_total": total_terms,
+                    "expected_codes": list(sample.expected_codes),
+                    "code_hits": found_codes,
+                    "code_total": total_codes,
+                    "timestamp_drift_max_ms": max(drifts),
+                }
+            )
             sample_pass = sample_pass and cer <= cer_limit
         row["pass"] = sample_pass
+        diagnostic_row["pass"] = sample_pass
         all_passed = all_passed and sample_pass
         rows.append(row)
+        diagnostic_rows.append(diagnostic_row)
 
     positive_elapsed = sum(
         row["elapsed"] for row in rows if not row["negative_control"]
@@ -722,6 +751,7 @@ def run_qualification(
         },
         "gates": gates,
         "samples": rows,
+        "local_diagnostics": diagnostic_rows,
     }
 
 
@@ -734,6 +764,14 @@ def _write_json(path: Path, payload: dict[str, object]) -> None:
     )
 
 
+def _sanitized_qualification_result(
+    result: dict[str, object],
+) -> dict[str, object]:
+    return {
+        key: value for key, value in result.items() if key != "local_diagnostics"
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--manifest", type=Path)
@@ -742,6 +780,7 @@ def main() -> int:
     parser.add_argument("--timeout-ms", type=int, default=600_000)
     parser.add_argument("--audit-licenses", action="store_true")
     parser.add_argument("--license-report", type=Path)
+    parser.add_argument("--diagnostic-report", type=Path)
     parser.add_argument("--validate-manifest-only", action="store_true")
     args = parser.parse_args()
 
@@ -785,8 +824,19 @@ def main() -> int:
     )
     report_dir = args.report_dir.resolve()
     report_dir.mkdir(parents=True, exist_ok=True)
+    summary = _sanitized_qualification_result(result)
     _write_json(report_dir / "sample-results.json", {"samples": result["samples"]})
-    _write_json(report_dir / "qualification-summary.json", result)
+    _write_json(report_dir / "qualification-summary.json", summary)
+    if args.diagnostic_report is not None:
+        _write_json(
+            args.diagnostic_report.resolve(),
+            {
+                "schema_version": "faster-whisper-local-sample-diagnostics/1",
+                "sample_set_id": result["sample_set_id"],
+                "annotation_version": result["annotation_version"],
+                "samples": result["local_diagnostics"],
+            },
+        )
     print(
         json.dumps(
             {
