@@ -149,7 +149,7 @@ class FasterWhisperEngine:
                 vad_filter=False,
                 condition_on_previous_text=False,
                 word_timestamps=False,
-                hotwords=None,
+                hotwords=config.hotwords or None,
             )
             if type(output) is not tuple or len(output) != 2:
                 raise ValueError("invalid engine output")
