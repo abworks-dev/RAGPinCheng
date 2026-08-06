@@ -337,6 +337,10 @@ def test_faster_whisper_qualification_workflow_is_manual_immutable_and_gated():
     assert "environment: production-asr" in build_job
     assert "runs-on: [self-hosted, Linux, X64, ubuntu, production, app]" in build_job
     assert "ubuntu-latest" not in build_job
+    assert "actions/setup-python" not in build_job
+    assert "command -v python3.11" in build_job
+    assert "must provide python3.11" in build_job
+    assert build_job.count("python3.11 scripts/build_internal_") == 4
     assert "timeout-minutes: 30" in build_job
     assert "scripts/build_internal_jieba_wheel.py build" in build_job
     assert "scripts/build_internal_oss2_wheel.py build" in build_job
