@@ -2366,3 +2366,12 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 验证补充：自托管 wheel 构建迁移经 PR #87 合并为 `6cca4611a3037ee6c450eed639031ea578702ed4`；PR 七个托管 CI job 均在零 step 状态被相同账单门禁拒绝。资格 `31064788787` 成功分配到 PinCheng Runner、通过 SHA 门禁与 checkout，但 `actions/setup-python` 四分钟仍未完成，随后按用户授权取消；现移除该联网下载动作，改为严格要求主机 `python3.11` 且验证版本后构建。
 - 验证补充：移除 setup-python 的修正经 PR #88 合并为 `bdd72697db744c52a951dd972b42f49300f67e39`；资格 `31065268918` 在 31 秒内证明 PinCheng Ubuntu 未安装 `python3.11` 并按门禁快速失败，未构建或上传制品。基于四个构建器均硬性要求 Python 3.11 且需要下载固定 sdist/构建依赖，现取消 Ubuntu job 与内部 wheel artifact 中转，改由已验证机器级 Python 3.11 的 Windows 资格 Runner 在 run 专属目录构建，并将依赖代理严格限制在该步骤进程内、结束后恢复。
 - 待办/风险：Windows 内部 wheel 构建合并修正尚待本地验证、提交、合并及用户已授权的生产资格重跑；因 GitHub 托管额度耗尽，普通远端 CI 预计仍会在 job 启动前被账单门禁拒绝，不把该外部失败误报为代码失败。Profile admission 保持 disabled；不删除或修改模型制品，不修改系统代理。回滚可恢复独立构建 job，未执行未批准清理。
+
+## 2026-08-07
+
+### 05:41 — 修复 faster-whisper hotwords 参数类型
+
+- 完成：生产资格 run `31125523585` 在 warmup 阶段因 `faster-whisper` 收到 tuple 类型 `hotwords` 而以 `permanent_provider_error` 失败；引擎现将配置中的 hotwords 词条按空格拼接为单一字符串，保持既有词条内容和识别策略不变，并补齐精确调用参数回归断言。
+- 文件：`asr_service/engines/faster_whisper.py`、`asr_service/tests/test_faster_whisper.py`、`WORKLOG.md`。
+- 验证：同范围专项测试此前已通过 132 项；当前工作树补充检查目标 Python 文件可编译并完成 `git diff --check`。当前开发机未安装 pytest，未重复执行测试套件；生产服务、模型制品和 Profile admission 未修改。
+- 待办/风险：待提交、合并后以完整 master SHA 重新触发 faster-whisper 生产资格验证；GitHub 托管 CI 仍可能受账单门禁影响。
