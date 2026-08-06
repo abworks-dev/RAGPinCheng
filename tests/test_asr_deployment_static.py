@@ -334,7 +334,9 @@ def test_faster_whisper_qualification_workflow_is_manual_immutable_and_gated():
     assert "secrets.ASR_SERVICE_TOKEN" not in workflow
     assert "activate_service" not in workflow.lower()
     assert "operation:" not in dispatch_inputs
-    assert "runs-on: ubuntu-latest" in build_job
+    assert "environment: production-asr" in build_job
+    assert "runs-on: [self-hosted, Linux, X64, ubuntu, production, app]" in build_job
+    assert "ubuntu-latest" not in build_job
     assert "timeout-minutes: 30" in build_job
     assert "scripts/build_internal_jieba_wheel.py build" in build_job
     assert "scripts/build_internal_oss2_wheel.py build" in build_job
@@ -343,7 +345,6 @@ def test_faster_whisper_qualification_workflow_is_manual_immutable_and_gated():
     assert "actions/upload-artifact@v4" in build_job
     assert "faster-whisper-internal-wheels-${{ github.run_id }}" in build_job
     assert "secrets." not in build_job
-    assert "production-asr" not in build_job
     assert "ASR_SERVICE_TOKEN" not in build_job
     assert "ASR_MODEL_DOWNLOAD_PROXY" not in build_job
     assert "GPU_SERVICE_TOKEN" not in build_job
