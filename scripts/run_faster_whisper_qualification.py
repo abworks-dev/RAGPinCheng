@@ -27,7 +27,8 @@ if TYPE_CHECKING:
 
 SAMPLE_SCHEMA_VERSION = "faster-whisper-qualification-samples/1"
 REPORT_SCHEMA_VERSION = "faster-whisper-qualification-report/1"
-FASTER_WHISPER_PROFILE_ID = "faster-whisper-large-v3-turbo-v1"
+FASTER_WHISPER_PROFILE_ID = "faster-whisper-zh-experimental-v1"
+FASTER_WHISPER_SERVICE_PROFILE_ID = "faster-whisper-large-v3-turbo-v1"
 EXPECTED_SAMPLE_COUNT = 8
 MAX_DURATION_MS = 60_000
 CLEAR_CER_LIMIT = 0.10
@@ -458,7 +459,7 @@ def _run_once(
     profile = next(
         item.profile
         for item in build_phase3_profile_catalog()
-        if item.profile.profile_id == FASTER_WHISPER_PROFILE_ID
+        if item.profile.provider_config.service_profile_id == FASTER_WHISPER_SERVICE_PROFILE_ID
     )
     execution = TranscriptionExecutionConfig.create(
         profile,
