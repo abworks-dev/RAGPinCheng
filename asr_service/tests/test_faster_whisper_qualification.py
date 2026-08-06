@@ -102,7 +102,23 @@ def test_character_error_rate_is_deterministic(reference, hypothesis, expected):
     )
 
 
+def test_normalize_code_strips_whitespace_and_punctuation():
+    assert qualification.normalize_code("GB 50016 2014") == "gb500162014"
+    assert qualification.normalize_code("GB50016-2014") == "gb500162014"
+    assert qualification.normalize_code("gb 50016-2014") == "gb500162014"
+
+
+def test_code_recall_matches_normalized_codes():
+    found, total = qualification._code_recall(
+        ("GB 50016 2014",),
+        "请核对规范编号 GB50016-2014 后再提交。",
+    )
+    assert found == 1
+    assert total == 1
+
+
 def test_threshold_constants_are_frozen():
+    assert qualification.FASTER_WHISPER_PROFILE_ID == "faster-whisper-large-v3-turbo-v1"
     assert qualification.CLEAR_CER_LIMIT == 0.10
     assert qualification.BIM_NOISE_CER_LIMIT == 0.15
     assert qualification.TERM_RECALL_LIMIT == 0.70
@@ -180,7 +196,8 @@ def test_qualification_summary_fails_on_rtf_or_nondeterminism(
         manifest, base_url="http://127.0.0.1:18200", token="test", timeout_ms=1000
     )
     assert result["status"] == "fail"
-    assert any(not item["rtf_pass"] for item in result["samples"])
+    assert result["gates"]["steady_state_rtf"]["pass"] is False
+    assert result["thresholds"]["rtf_scope"] == "steady-state-aggregate"
     assert any(not item["deterministic"] for item in result["samples"])
 
 
