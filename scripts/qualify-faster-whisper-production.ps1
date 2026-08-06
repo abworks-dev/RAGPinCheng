@@ -1955,14 +1955,13 @@ print('qualification-module-origins-verified')
         -Token $TemporaryToken `
         -TimeoutSec 120
     $ExpectedProfiles = @(
-        "faster-whisper-large-v3-turbo-v1",
-        "funasr-sensevoice-small-v1"
+        "faster-whisper-large-v3-turbo-v1"
     )
     if (
         $TemporaryCapabilities.api_version -ne "asr-service/1" -or
         (@($TemporaryCapabilities.service_profiles) -join ",") -ne ($ExpectedProfiles -join ",")
     ) {
-        throw "Temporary service does not expose the exact two-profile contract"
+        throw "Temporary service does not expose the exact faster-whisper-only profile contract"
     }
 
     $FailureCode = "qualification_failed"
