@@ -82,7 +82,16 @@ def test_catalog_has_four_exact_experimental_profiles_and_release_policies():
         "expected_api_version": ASR_API_VERSION,
         "upload_part_bytes": 8 * 1024**2,
         "poll_interval_ms": 1000,
-            "hotwords": [],
+            "hotwords": [
+                "构件碰撞",
+                "净高分析",
+                "复核",
+                "建筑信息模型",
+                "钢结构",
+                "焊缝",
+                "螺栓",
+                "规范编号",
+            ],
     }
     assert sensevoice.admission is ProfileAdmission.enabled
     assert sensevoice.provider_config.to_json_dict() == {
