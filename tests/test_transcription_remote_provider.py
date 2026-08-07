@@ -19,7 +19,16 @@ from src.transcription.asr_service_contract import (
 from src.transcription.candidate import CandidateSegment
 from src.transcription.pipeline import execute_transcription
 from src.transcription.profile import ProfileSnapshot, TranscriptionExecutionConfig
-from src.transcription.profile_catalog import build_phase3_profile_catalog
+from src.transcription.profile_catalog import (
+    FASTER_WHISPER_PROFILE_ID,
+    FASTER_WHISPER_PROVIDER_KEY,
+    FASTER_WHISPER_SERVICE_PROFILE_ID,
+    FUNASR_SENSEVOICE_PROFILE_ID,
+    QWEN3_ASR_PROFILE_ID,
+    QWEN3_ASR_PROVIDER_KEY,
+    QWEN3_ASR_SERVICE_PROFILE_ID,
+    build_phase3_profile_catalog,
+)
 from src.transcription.provider_protocol import (
     ProviderCandidate,
     ProviderErrorCode,
@@ -30,6 +39,8 @@ from src.transcription.remote_provider import (
     AsrServiceClientError,
     HttpxAsrServiceClient,
     RemoteAsrProvider,
+    _client_failure,
+    compute_client_request_id,
 )
 from src.transcription.runtime_ports import (
     InputPart,
@@ -50,12 +61,16 @@ class FakeClient:
     calls: list[str] = field(default_factory=list)
     request_id: str = "1" * 64
     job: ServiceJob | None = None
+    provider_key: str = PROVIDER_KEY
+    service_profile_id: str = SERVICE_PROFILE_ID
 
     def capabilities(self) -> ServiceCapabilities:
         self.calls.append("capabilities")
         if self.mode == "capabilities_error":
             raise AsrServiceClientError(503, "http_error")
-        profiles = () if self.mode == "profile_mismatch" else (SERVICE_PROFILE_ID,)
+        profiles = (
+            () if self.mode == "profile_mismatch" else (self.service_profile_id,)
+        )
         return ServiceCapabilities(ASR_API_VERSION, profiles, 16 * 1024**2, 32 * 1024**2)
 
     def create_job(self, request):
@@ -120,7 +135,11 @@ class FakeClient:
             from src.transcription.types import ContractValidationError
 
             raise ContractValidationError("unknown_field", "result")
-        key = "other-provider" if self.mode == "provider_mismatch" else PROVIDER_KEY
+        key = (
+            "other-provider"
+            if self.mode == "provider_mismatch"
+            else self.provider_key
+        )
         candidate = ProviderCandidate(
             key,
             "zh-CN",
@@ -146,7 +165,12 @@ class SequenceCancel:
         return self.values[min(index, len(self.values) - 1)]
 
 
-def bundle(data: bytes = b"x", *, timeout_ms: int = 1000):
+def bundle(
+    data: bytes = b"x",
+    *,
+    timeout_ms: int = 1000,
+    profile_id: str = FUNASR_SENSEVOICE_PROFILE_ID,
+):
     ref = TranscriptionInputRef(
         JOB_ID,
         "audio",
@@ -154,22 +178,36 @@ def bundle(data: bytes = b"x", *, timeout_ms: int = 1000):
         len(data),
         1000,
     )
-    profile = build_phase3_profile_catalog()[0].profile
+    profile = next(
+        item.profile
+        for item in build_phase3_profile_catalog()
+        if item.profile.profile_id == profile_id
+    )
     execution = TranscriptionExecutionConfig.create(
         profile, ref, language="zh-CN", timeout_ms=timeout_ms
     )
     return ref, execution, ProfileSnapshot.create(profile, execution)
 
 
-def run(client: FakeClient, *, data: bytes = b"x", input_source=None, cancellation=None, monotonic=None):
-    ref, execution, snapshot = bundle(data)
+def run(
+    client: FakeClient,
+    *,
+    data: bytes = b"x",
+    input_source=None,
+    cancellation=None,
+    monotonic=None,
+    profile_id: str = FUNASR_SENSEVOICE_PROFILE_ID,
+):
+    ref, execution, snapshot = bundle(data, profile_id=profile_id)
     provider = RemoteAsrProvider(
         client,
         ProviderRuntimePorts(
+            JOB_ID,
             input_source or MemoryInputSource(data),
             NoOpProgressSink(),
             cancellation or NeverCancel(),
         ),
+        execution.provider_key,
         monotonic=monotonic or (lambda: 0.0),
         sleep=lambda _seconds: None,
     )
@@ -185,6 +223,60 @@ def test_remote_provider_uses_unique_bounded_sequence_and_pipeline_normalizer():
     assert client.calls == [
         "capabilities", "create", "upload:0", "complete", "start", "poll", "result"
     ]
+
+
+def test_faster_whisper_uses_the_same_remote_provider_and_pipeline():
+    client = FakeClient(
+        provider_key=FASTER_WHISPER_PROVIDER_KEY,
+        service_profile_id=FASTER_WHISPER_SERVICE_PROFILE_ID,
+    )
+    result = run(client, profile_id=FASTER_WHISPER_PROFILE_ID)
+    assert result.__class__.__name__ == "CanonicalTranscript"
+    assert result.profile_snapshot.provider_key == FASTER_WHISPER_PROVIDER_KEY
+    assert client.calls == [
+        "capabilities",
+        "create",
+        "upload:0",
+        "complete",
+        "start",
+        "poll",
+        "result",
+    ]
+
+
+def test_qwen3_asr_uses_the_same_remote_provider_and_pipeline():
+    client = FakeClient(
+        provider_key=QWEN3_ASR_PROVIDER_KEY,
+        service_profile_id=QWEN3_ASR_SERVICE_PROFILE_ID,
+    )
+    result = run(client, profile_id=QWEN3_ASR_PROFILE_ID)
+    assert result.__class__.__name__ == "CanonicalTranscript"
+    assert result.profile_snapshot.provider_key == QWEN3_ASR_PROVIDER_KEY
+    assert client.calls == [
+        "capabilities",
+        "create",
+        "upload:0",
+        "complete",
+        "start",
+        "poll",
+        "result",
+    ]
+
+
+def test_same_application_job_network_retry_has_stable_service_request_id():
+    ref, execution, _snapshot = bundle()
+    first = compute_client_request_id(JOB_ID, ref, execution)
+    second = compute_client_request_id(JOB_ID, ref, execution)
+    assert first == second
+
+
+def test_new_application_retry_job_for_same_media_has_new_service_request_id():
+    ref, execution, _snapshot = bundle()
+    first = compute_client_request_id(JOB_ID, ref, execution)
+    second = compute_client_request_id(
+        "22222222-2222-4222-8222-222222222222", ref, execution
+    )
+    assert first != second
 
 
 @pytest.mark.parametrize(
@@ -274,3 +366,27 @@ def test_http_client_errors_do_not_expose_response_body(status, body, reason):
         client.capabilities()
     assert caught.value.reason == reason
     assert body.decode(errors="ignore") not in str(caught.value)
+
+
+def test_http_client_safely_preserves_known_shape_detail_code():
+    transport = httpx.MockTransport(
+        lambda _request: httpx.Response(
+            409, json={"detail": {"code": "identity_conflict", "secret": "hidden"}}
+        )
+    )
+    client = HttpxAsrServiceClient(
+        "https://asr.invalid", "secret", transport=transport
+    )
+    with pytest.raises(AsrServiceClientError) as caught:
+        client.capabilities()
+    assert caught.value.detail_code == "identity_conflict"
+    assert "hidden" not in str(caught.value)
+
+
+def test_identity_conflict_is_not_reported_as_contract_mismatch():
+    result = _client_failure(
+        PROVIDER_KEY,
+        AsrServiceClientError(409, "http_error", "identity_conflict"),
+        1000,
+    )
+    assert result.error_code is ProviderErrorCode.service_request_identity_conflict

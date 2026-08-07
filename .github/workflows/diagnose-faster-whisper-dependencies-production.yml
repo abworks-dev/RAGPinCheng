@@ -1,0 +1,105 @@
+name: Extract faster-whisper Resolver Evidence Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: "Full 40-character merged master SHA to inspect"
+        required: true
+        type: string
+      extract_evidence:
+        description: "Read only the fixed run 30968517582 evidence files"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-asr-faster-whisper-resolver-evidence
+  cancel-in-progress: false
+
+jobs:
+  extract:
+    environment: production-asr
+    runs-on: [self-hosted, Windows, X64, asr-production]
+    timeout-minutes: 10
+    steps:
+      - name: Validate immutable revision and explicit extraction gate
+        shell: powershell
+        run: |
+          if ("${{ inputs.commit_sha }}" -notmatch '^[0-9a-fA-F]{40}$') {
+            throw "commit_sha must be a full 40-character SHA"
+          }
+          if ("${{ inputs.commit_sha }}".ToLowerInvariant() -ne "${{ github.sha }}".ToLowerInvariant()) {
+            throw "commit_sha must equal the workflow dispatch revision"
+          }
+          if ("${{ github.ref }}" -ne "refs/heads/master") {
+            throw "evidence extraction must be dispatched from master"
+          }
+          if (-not [System.Convert]::ToBoolean("${{ inputs.extract_evidence }}")) {
+            throw "extract_evidence must be explicitly enabled"
+          }
+
+      - name: Check out requested merged revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 1
+
+      - name: Extract fixed sanitized resolver evidence offline
+        shell: powershell
+        run: |
+          $python = "C:\Program Files\Python311\python.exe"
+          if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
+            throw "Fixed Python 3.11 runtime is missing"
+          }
+          $version = & $python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"
+          if ($LASTEXITCODE -ne 0 -or $version.Trim() -ne "3.11") {
+            throw "Fixed Python runtime must be Python 3.11"
+          }
+          $output = "${{ runner.temp }}\faster-whisper-r3-evidence-${{ github.run_id }}\resolver-evidence.json"
+          & $python "${{ github.workspace }}\scripts\extract_faster_whisper_resolver_evidence.py" --output $output
+          if ($LASTEXITCODE -ne 0) {
+            throw "Offline resolver evidence extraction failed"
+          }
+
+      - name: Publish sanitized resolver evidence summary
+        if: ${{ always() }}
+        shell: powershell
+        run: |
+          $path = "${{ runner.temp }}\faster-whisper-r3-evidence-${{ github.run_id }}\resolver-evidence.json"
+          if (Test-Path -LiteralPath $path -PathType Leaf) {
+            $result = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
+            $lines = @(
+              "## faster-whisper R3 offline resolver evidence",
+              "",
+              "- Status: ``$($result.status)``",
+              "- Source run: ``$($result.source_run_id)``",
+              "- Source commit: ``$($result.source_commit_sha)``",
+              "- Unparsed relevant lines: ``$($result.unparsed_relevant_line_count)``",
+              "- Profile admission: ``$($result.profile_admission)``",
+              "- Production services modified: ``$($result.production_services_modified)``"
+            )
+            if (@($result.blockers).Count -gt 0) {
+              $lines += ""
+              $lines += "### Normalized blockers"
+              foreach ($blocker in @($result.blockers)) {
+                $lines += "- ``$($blocker.package)``: ``$($blocker.diagnosis_kind)`` (evidence: $($blocker.evidence_count))"
+              }
+            }
+            $lines -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding UTF8
+          } else {
+            "Offline extraction ended before sanitized evidence was written." |
+              Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding UTF8
+          }
+
+      - name: Upload sanitized resolver evidence only
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: faster-whisper-r3-evidence-${{ github.run_id }}
+          path: ${{ runner.temp }}\faster-whisper-r3-evidence-${{ github.run_id }}\resolver-evidence.json
+          if-no-files-found: warn
+          retention-days: 14

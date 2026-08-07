@@ -14,10 +14,22 @@ export type CitationDetail = {
   sourceIndex: number;
 };
 
+export type CitationSelection = CitationDetail | null;
+
 export type CitationHoverDetail = {
   messageId: string;
   sourceIndex: number | null; // null = clear highlight
 };
+
+export function toggleCitationSelection(
+  current: CitationSelection,
+  clicked: CitationDetail,
+): CitationSelection {
+  return current?.messageId === clicked.messageId &&
+    current.sourceIndex === clicked.sourceIndex
+    ? null
+    : clicked;
+}
 
 // Group 1 = doc title, Group 2 = section path. Negative lookahead avoids
 // eating real markdown links `[label](url)`. Both bracketed and bare forms
@@ -48,6 +60,13 @@ export function linkifyCitations(markdown: string): string {
       return `[${doc} § ${section.trim()}](${href})`;
     });
   return result;
+}
+
+export function stripCitationsForCopy(markdown: string): string {
+  return linkifyCitations(markdown).replace(
+    /[ \t]*\[[^\]\n]*\]\(#cite-(?:num|vid|pdf):[^\n]*?\)(?=$|[\s，。！？；：,.!?;:])/g,
+    "",
+  );
 }
 
 export function resolveCitation(href: string, sources: Source[]): number {

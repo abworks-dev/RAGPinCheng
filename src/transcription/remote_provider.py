@@ -17,7 +17,14 @@ from .asr_service_contract import (
     ServiceJobState,
     ServiceResult,
 )
-from .profile import RemoteAsrServiceConfig, TranscriptionExecutionConfig
+from .profile import (
+    FasterWhisperRemoteConfig,
+    Qwen3AsrRemoteConfig,
+    RemoteAsrServiceConfig,
+    WhisperXRemoteConfig,
+    RemoteProviderConfig,
+    TranscriptionExecutionConfig,
+)
 from .provider_protocol import (
     ProviderCapabilities,
     ProviderErrorCode,
@@ -33,13 +40,21 @@ from .types import (
     TranscriptionInputRef,
     canonical_json_bytes,
     sha256_hex,
+    validate_provider_key,
+    validate_uuid,
 )
 
 
 class AsrServiceClientError(RuntimeError):
-    def __init__(self, status_code: int | None, reason: str) -> None:
+    def __init__(
+        self,
+        status_code: int | None,
+        reason: str,
+        detail_code: str | None = None,
+    ) -> None:
         self.status_code = status_code
         self.reason = reason
+        self.detail_code = detail_code
         super().__init__(reason)
 
 
@@ -120,7 +135,18 @@ class HttpxAsrServiceClient:
         except httpx.HTTPError as exc:
             raise AsrServiceClientError(None, "connect_error") from exc
         if response.status_code >= 400:
-            raise AsrServiceClientError(response.status_code, "http_error")
+            detail_code = None
+            try:
+                payload = response.json()
+                detail = payload.get("detail") if type(payload) is dict else None
+                code = detail.get("code") if type(detail) is dict else None
+                if type(code) is str and 0 < len(code) <= 100 and code.replace("_", "").isalnum():
+                    detail_code = code
+            except ValueError:
+                pass
+            raise AsrServiceClientError(
+                response.status_code, "http_error", detail_code
+            )
         try:
             return response.json()
         except ValueError as exc:
@@ -225,6 +251,10 @@ def _client_failure(
 ) -> ProviderFailure:
     if exc.status_code in (401, 403):
         return _failure(provider_key, ProviderErrorCode.permanent_provider_error)
+    if exc.status_code == 409 and exc.detail_code == "identity_conflict":
+        return _failure(
+            provider_key, ProviderErrorCode.service_request_identity_conflict
+        )
     if exc.status_code == 409:
         return _failure(provider_key, ProviderErrorCode.service_contract_mismatch)
     if exc.status_code == 413:
@@ -239,19 +269,29 @@ def _client_failure(
 
 
 def compute_client_request_id(
-    input_ref: TranscriptionInputRef, execution: TranscriptionExecutionConfig
+    application_job_id: str,
+    input_ref: TranscriptionInputRef,
+    execution: TranscriptionExecutionConfig,
 ) -> str:
+    validate_uuid(application_job_id, "application_job_id")
     config = execution.provider_config
-    if type(config) is not RemoteAsrServiceConfig:
+    if type(config) not in (
+        RemoteAsrServiceConfig,
+        FasterWhisperRemoteConfig,
+        Qwen3AsrRemoteConfig,
+        WhisperXRemoteConfig,
+    ):
         raise ContractValidationError("invalid_provider_config", "provider_config")
     return sha256_hex(
         canonical_json_bytes(
             {
-                "input_sha256": input_ref.content_sha256,
-                "size_bytes": input_ref.size_bytes,
-                "duration_ms": input_ref.duration_ms,
-                "provider_key": execution.provider_key,
-                "service_profile_id": config.service_profile_id,
+                "application_job_id": application_job_id,
+                "media_id": input_ref.media_id,
+                "audio_sha256": input_ref.content_sha256,
+                "size": input_ref.size_bytes,
+                "duration": input_ref.duration_ms,
+                "provider": execution.provider_key,
+                "profile": config.service_profile_id,
                 "execution_fingerprint": execution.execution_fingerprint,
             }
         )
@@ -262,9 +302,12 @@ def compute_client_request_id(
 class RemoteAsrProvider:
     client: AsrServiceClient
     ports: ProviderRuntimePorts
-    _provider_key: str = "funasr-sensevoice"
+    _provider_key: str
     monotonic: Callable[[], float] = time.monotonic
     sleep: Callable[[float], None] = time.sleep
+
+    def __post_init__(self) -> None:
+        validate_provider_key(self._provider_key)
 
     @property
     def provider_key(self) -> str:
@@ -311,7 +354,7 @@ class RemoteAsrProvider:
         self,
         job_id: str,
         input_ref: TranscriptionInputRef,
-        config: RemoteAsrServiceConfig,
+        config: RemoteProviderConfig,
         deadline: float,
         timeout_ms: int,
     ) -> ProviderFailure | None:
@@ -358,7 +401,16 @@ class RemoteAsrProvider:
                 self.provider_key, ProviderErrorCode.service_contract_mismatch
             )
         config = execution.provider_config
-        if type(config) is not RemoteAsrServiceConfig:
+        if type(config) not in (
+            RemoteAsrServiceConfig,
+            FasterWhisperRemoteConfig,
+            Qwen3AsrRemoteConfig,
+            WhisperXRemoteConfig,
+        ):
+            return _failure(
+                self.provider_key, ProviderErrorCode.service_contract_mismatch
+            )
+        if config.config_kind != self.provider_key:
             return _failure(
                 self.provider_key, ProviderErrorCode.service_contract_mismatch
             )
@@ -384,7 +436,9 @@ class RemoteAsrProvider:
 
             request = CreateJobRequest(
                 ASR_API_VERSION,
-                compute_client_request_id(input_ref, execution),
+                compute_client_request_id(
+                    self.ports.application_job_id, input_ref, execution
+                ),
                 self.provider_key,
                 config.service_profile_id,
                 execution.execution_fingerprint,

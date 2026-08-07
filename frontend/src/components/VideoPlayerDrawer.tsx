@@ -1,25 +1,54 @@
 import { useEffect, useRef, useState } from "react";
 import { useVideoPlayer } from "../hooks/useVideoPlayer";
-import { Pause, Play, Volume2, VolumeX } from "lucide-react";
+import { LoaderCircle } from "lucide-react";
 import { ResourcePreviewShell } from "./ResourcePreviewShell";
+import { TranscriptPanel } from "./TranscriptPanel";
+import { api, ApiError } from "../api/client";
+import type { MediaTranscriptSegment } from "../types";
 
 export function VideoPlayerDrawer() {
   const { isOpen, currentRequest, close } = useVideoPlayer();
   const videoRef = useRef<HTMLVideoElement>(null);
-  const [seeked, setSeeked] = useState(false);
-  const [isMuted, setIsMuted] = useState(false);
-  const [isPlaying, setIsPlaying] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [currentTimeMs, setCurrentTimeMs] = useState(0);
+  const [transcript, setTranscript] = useState<MediaTranscriptSegment[]>([]);
+  const [transcriptLoading, setTranscriptLoading] = useState(true);
+  const [transcriptError, setTranscriptError] = useState<string | null>(null);
 
   // Reset state when opening a new video
   useEffect(() => {
     if (isOpen && currentRequest) {
-      setSeeked(false);
-      setIsPlaying(false);
       setIsLoading(true);
       setError(null);
+      setCurrentTimeMs(currentRequest.startSeconds * 1000);
     }
+  }, [isOpen, currentRequest?.mediaId]);
+
+  useEffect(() => {
+    if (!isOpen || !currentRequest) return;
+    let cancelled = false;
+    setTranscript([]);
+    setTranscriptLoading(true);
+    setTranscriptError(null);
+    api.mediaTranscript(currentRequest.mediaId)
+      .then((value) => {
+        if (!cancelled) setTranscript(value.segments);
+      })
+      .catch((reason: unknown) => {
+        if (cancelled) return;
+        setTranscriptError(
+          reason instanceof ApiError && reason.status === 404
+            ? "暂无转录稿"
+            : "转录稿加载失败，请稍后重试",
+        );
+      })
+      .finally(() => {
+        if (!cancelled) setTranscriptLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [isOpen, currentRequest?.mediaId]);
 
   useEffect(() => {
@@ -43,20 +72,14 @@ export function VideoPlayerDrawer() {
       if (seconds > 0 && video && Math.abs(video.currentTime - seconds) > 0.1) {
         video.currentTime = seconds;
       }
-      setSeeked(true);
       // Try autoplay — browser may block it
       video!.play().catch(() => {
-        // Autoplay blocked — stay paused, UI shows play button
-        setIsPlaying(false);
+        // Autoplay blocked — native controls remain available.
       });
     }
 
-    function onPlay() {
-      setIsPlaying(true);
-    }
-
-    function onPause() {
-      setIsPlaying(false);
+    function onTimeUpdate() {
+      setCurrentTimeMs(Math.round(video!.currentTime * 1000));
     }
 
     function onError() {
@@ -65,36 +88,17 @@ export function VideoPlayerDrawer() {
     }
 
     video.addEventListener("loadedmetadata", onLoadedMetadata);
-    video.addEventListener("play", onPlay);
-    video.addEventListener("pause", onPause);
+    video.addEventListener("timeupdate", onTimeUpdate);
+    video.addEventListener("seeked", onTimeUpdate);
     video.addEventListener("error", onError);
 
     return () => {
       video.removeEventListener("loadedmetadata", onLoadedMetadata);
-      video.removeEventListener("play", onPlay);
-      video.removeEventListener("pause", onPause);
+      video.removeEventListener("timeupdate", onTimeUpdate);
+      video.removeEventListener("seeked", onTimeUpdate);
       video.removeEventListener("error", onError);
     };
   }, [isOpen, currentRequest?.mediaId]);
-
-  // Toggle play/pause
-  function togglePlay() {
-    const video = videoRef.current;
-    if (!video) return;
-    if (video.paused) {
-      video.play().catch(() => {});
-    } else {
-      video.pause();
-    }
-  }
-
-  // Toggle mute
-  function toggleMute() {
-    const video = videoRef.current;
-    if (!video) return;
-    video.muted = !video.muted;
-    setIsMuted(video.muted);
-  }
 
   if (!isOpen || !currentRequest) return null;
 
@@ -108,21 +112,7 @@ export function VideoPlayerDrawer() {
           {isLoading && (
             <div className="absolute inset-0 flex items-center justify-center text-gray-400">
               <div className="flex flex-col items-center gap-2">
-                <svg className="w-8 h-8 animate-spin" viewBox="0 0 24 24" fill="none">
-                  <circle
-                    cx="12"
-                    cy="12"
-                    r="10"
-                    stroke="currentColor"
-                    strokeWidth="4"
-                    strokeOpacity={0.25}
-                  />
-                  <path
-                    fill="currentColor"
-                    fillOpacity={0.75}
-                    d="M4 12a8 8 0 018-8v4l3-3-3-3v4a8 8 0 00-8 8h4z"
-                  />
-                </svg>
+                <LoaderCircle className="size-8 animate-spin" aria-hidden="true" />
                 <span className="text-sm">加载中...</span>
               </div>
             </div>
@@ -142,38 +132,18 @@ export function VideoPlayerDrawer() {
           />
         </div>
 
-        {/* Info section */}
-        <div className="flex-1 overflow-y-auto p-4">
-          <div className="text-sm text-gray-600 dark:text-gray-400 space-y-2">
-            <p>
-              从 <span className="font-mono font-medium text-gray-900 dark:text-gray-100">
-                {formatTime(currentRequest.startSeconds)}
-              </span> 开始播放
-            </p>
-            {currentRequest.fromSource && (
-              <p className="text-xs text-gray-500 dark:text-gray-500">
-                点击来源卡片的「播放」按钮打开
-              </p>
-            )}
-          </div>
-
-          {/* Quick controls below the info */}
-          <div className="mt-4 flex items-center gap-3">
-            <button
-              onClick={togglePlay}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors"
-            >
-              {isPlaying ? <><Pause className="size-4" />暂停</> : <><Play className="size-4" />播放</>}
-            </button>
-            <button
-              onClick={toggleMute}
-              className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-              title={isMuted ? "取消静音" : "静音"}
-            >
-              {isMuted ? <VolumeX className="size-5" /> : <Volume2 className="size-5" />}
-            </button>
-          </div>
-        </div>
+        <TranscriptPanel
+          segments={transcript}
+          currentTimeMs={currentTimeMs}
+          loading={transcriptLoading}
+          error={transcriptError}
+          onSeek={(milliseconds) => {
+            const video = videoRef.current;
+            if (!video) return;
+            video.currentTime = milliseconds / 1000;
+            setCurrentTimeMs(milliseconds);
+          }}
+        />
       </div>
     </ResourcePreviewShell>
   );

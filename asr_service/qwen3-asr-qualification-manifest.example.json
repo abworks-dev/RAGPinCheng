@@ -1,0 +1,164 @@
+{
+  "schema_version": "qwen3-asr-qualification-samples/1",
+  "sample_set_id": "self-made-qwen3-asr-r3",
+  "annotation_version": "1",
+  "samples": [
+    {
+      "id": "bim-terms",
+      "path": "bim-terms.wav",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "duration_ms": 5000,
+      "scenario": "bim-terms",
+      "reference_text": "建筑信息模型用于碰撞检测和施工图审查。",
+      "reference_segments": [
+        {
+          "start_ms": 0,
+          "text": "建筑信息模型用于碰撞检测和施工图审查。"
+        }
+      ],
+      "expected_terms": [
+        "建筑信息模型",
+        "碰撞检测",
+        "施工图审查"
+      ],
+      "expected_codes": [],
+      "self_made": true,
+      "is_internal_recording": false,
+      "contains_customer_data": false,
+      "negative_control": false
+    },
+    {
+      "id": "clear-zh",
+      "path": "clear-zh.wav",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "duration_ms": 5000,
+      "scenario": "clear-zh",
+      "reference_text": "这是清晰普通话自动转录资格验证。",
+      "reference_segments": [
+        {
+          "start_ms": 0,
+          "text": "这是清晰普通话自动转录资格验证。"
+        }
+      ],
+      "expected_terms": [],
+      "expected_codes": [],
+      "self_made": true,
+      "is_internal_recording": false,
+      "contains_customer_data": false,
+      "negative_control": false
+    },
+    {
+      "id": "mixed-zh-en",
+      "path": "mixed-zh-en.wav",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "duration_ms": 5000,
+      "scenario": "mixed-zh-en",
+      "reference_text": "请检查 BIM model 和 Revit family。",
+      "reference_segments": [
+        {
+          "start_ms": 0,
+          "text": "请检查 BIM model 和 Revit family。"
+        }
+      ],
+      "expected_terms": [
+        "BIM",
+        "Revit"
+      ],
+      "expected_codes": [],
+      "self_made": true,
+      "is_internal_recording": false,
+      "contains_customer_data": false,
+      "negative_control": false
+    },
+    {
+      "id": "negative-control-1",
+      "path": "negative-control-1.wav",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "duration_ms": 5000,
+      "scenario": "negative-control",
+      "reference_text": "今天的天气很好，我们准备去公园散步。",
+      "reference_segments": [],
+      "expected_terms": [],
+      "expected_codes": [],
+      "self_made": true,
+      "is_internal_recording": false,
+      "contains_customer_data": false,
+      "negative_control": true
+    },
+    {
+      "id": "negative-control-2",
+      "path": "negative-control-2.wav",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "duration_ms": 5000,
+      "scenario": "negative-control",
+      "reference_text": "请把桌上的水杯放到厨房。",
+      "reference_segments": [],
+      "expected_terms": [],
+      "expected_codes": [],
+      "self_made": true,
+      "is_internal_recording": false,
+      "contains_customer_data": false,
+      "negative_control": true
+    },
+    {
+      "id": "negative-control-3",
+      "path": "negative-control-3.wav",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "duration_ms": 5000,
+      "scenario": "negative-control",
+      "reference_text": "会议将在下午三点准时开始。",
+      "reference_segments": [],
+      "expected_terms": [],
+      "expected_codes": [],
+      "self_made": true,
+      "is_internal_recording": false,
+      "contains_customer_data": false,
+      "negative_control": true
+    },
+    {
+      "id": "noisy-bim-zh",
+      "path": "noisy-bim-zh.wav",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "duration_ms": 5000,
+      "scenario": "noisy-bim-zh",
+      "reference_text": "嘈杂环境下复核构件碰撞和净高分析。",
+      "reference_segments": [
+        {
+          "start_ms": 0,
+          "text": "嘈杂环境下复核构件碰撞和净高分析。"
+        }
+      ],
+      "expected_terms": [
+        "构件碰撞",
+        "净高分析"
+      ],
+      "expected_codes": [],
+      "self_made": true,
+      "is_internal_recording": false,
+      "contains_customer_data": false,
+      "negative_control": false
+    },
+    {
+      "id": "standard-codes",
+      "path": "standard-codes.wav",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "duration_ms": 5000,
+      "scenario": "standard-codes",
+      "reference_text": "请核对规范编号 GB 50016 2014。",
+      "reference_segments": [
+        {
+          "start_ms": 0,
+          "text": "请核对规范编号 GB 50016 2014。"
+        }
+      ],
+      "expected_terms": [],
+      "expected_codes": [
+        "GB 50016 2014"
+      ],
+      "self_made": true,
+      "is_internal_recording": false,
+      "contains_customer_data": false,
+      "negative_control": false
+    }
+  ]
+}

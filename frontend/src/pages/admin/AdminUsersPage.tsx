@@ -391,7 +391,7 @@ function UserConversationsDrillIn({
             <p className="truncate text-ui-xs text-muted-foreground">用户名 {user.employee_id} · 只读查看</p>
           </div>
           <Button variant="ghost" size="icon" onClick={onClose} aria-label="关闭用户对话">
-            <span aria-hidden="true">✕</span>
+            <X className="size-4" aria-hidden="true" />
           </Button>
         </div>
 

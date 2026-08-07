@@ -1,16 +1,6 @@
 import type { Conversation } from "../types";
 import { Trash2 } from "lucide-react";
 
-function formatRelative(ts: number): string {
-  const diff = Date.now() / 1000 - ts;
-  if (diff < 60) return "刚刚";
-  if (diff < 3600) return `${Math.floor(diff / 60)} 分钟前`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)} 小时前`;
-  if (diff < 30 * 86400) return `${Math.floor(diff / 86400)} 天前`;
-  const d = new Date(ts * 1000);
-  return `${d.getMonth() + 1}/${d.getDate()}`;
-}
-
 export function ConversationList({
   conversations,
   currentId,
@@ -66,10 +56,7 @@ export function ConversationList({
               onClick={() => onSelect(c.id)}
               title={c.title}
             >
-              <div className="flex-1 min-w-0">
-                <div className="truncate">{c.title}</div>
-                <div className="text-[11px] text-muted">{formatRelative(c.updated_at)}</div>
-              </div>
+              <div className="min-w-0 flex-1 truncate">{c.title}</div>
               <button
                 type="button"
                 onClick={(e) => {

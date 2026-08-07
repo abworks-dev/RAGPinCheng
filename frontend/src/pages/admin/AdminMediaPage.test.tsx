@@ -110,8 +110,7 @@ describe("AdminMediaPage", () => {
 
   it("loads media assets and makes success semantics explicit", async () => {
     render(<AdminMediaPage />);
-
-    expect(screen.getByText("正在加载媒体资源…")).toBeInTheDocument();
+    expect(screen.getByLabelText("上传步骤")).toHaveTextContent("1. 上传视频");
     expect(await screen.findByText("项目交付培训")).toBeInTheDocument();
     expect(screen.getByText("共 2 个视频")).toBeInTheDocument();
     expect(screen.getByText("已就绪")).toHaveClass("bg-success/15");
@@ -129,6 +128,7 @@ describe("AdminMediaPage", () => {
     });
 
     render(<AdminMediaPage />);
+    await addVideosAndOpenMode([video("one.mp4"), video("two.mp4")], "自动转录");
 
     expect(await screen.findByText("项目交付培训")).toBeInTheDocument();
     expect(screen.getByText("共 2 个视频")).toBeInTheDocument();

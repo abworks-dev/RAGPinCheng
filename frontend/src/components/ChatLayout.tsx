@@ -48,7 +48,7 @@ export function ChatLayout() {
     };
     window.addEventListener(CITATION_EVENT, openSources);
     return () => window.removeEventListener(CITATION_EVENT, openSources);
-  }, []);
+  }, [activeCitation]);
 
   const { messages, send, regenerate, viewAnswerVersion, sending, loading } = useChat({
     conversationId: currentId,
@@ -95,7 +95,7 @@ export function ChatLayout() {
   }
 
   const currentConversation = conversations.find((conversation) => conversation.id === currentId);
-  const sourceCount = [...messages].reverse().find((message) => message.sources?.length)?.sources?.length || 0;
+  const sourceCount = getSelectedSourceCount(messages, activeSourceMessageId);
   const scopeLabel = selected.length === 0 ? "全部企业知识" : selected.length === 1 ? selected[0] : `${selected.length} 个范围`;
 
   const toggleMessageSources = useCallback((messageId: string) => {
@@ -138,7 +138,36 @@ export function ChatLayout() {
             sourceCount={sourceCount}
             sourceOpen={sourceOpen}
             onOpenConversations={() => setConversationDrawerOpen(true)}
-            onToggleSources={() => setSourceOpen((value) => !value)}
+            onToggleSources={() => {
+              if (sourceOpen) closeSources();
+              else setSourceOpen(true);
+            }}
+          />
+          {messages.length === 0 ? (
+            <div className="flex min-h-0 flex-1 flex-col justify-center gap-7 py-8">
+              <MessageList messages={messages} conversationId={currentId} centeredEmpty />
+              <Composer
+                centered
+                onSend={(t) => send(t, selected)}
+                disabled={sending || loading}
+                categories={categories}
+                selected={selected}
+                onToggleCategory={toggleCategory}
+                onClearCategories={() => setSelected([])}
+              />
+            </div>
+          ) : <>
+          <MessageList
+            messages={messages}
+            conversationId={currentId}
+            sourceOpen={sourceOpen}
+            activeSourceMessageId={activeSourceMessageId}
+            onToggleSources={toggleMessageSources}
+            sending={sending}
+            onEditQuestion={editQuestion}
+            onViewQuestionVersion={viewQuestionVersion}
+            onRegenerate={regenerate}
+            onViewAnswerVersion={viewAnswerVersion}
           />
           {messages.length === 0 ? (
             <div className="flex min-h-0 flex-1 flex-col justify-center gap-7 py-8">

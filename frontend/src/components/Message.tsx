@@ -16,6 +16,9 @@ import {
   resolveCitation,
   type CitationHoverDetail,
 } from "./citations";
+import { copyText } from "../utils/clipboard";
+
+const CITATION_TOOLTIP_CLOSE_DELAY_MS = 150;
 
 // Demote inline `$$...$$` to `$...$` so KaTeX renders it inline instead of as
 // a block break. Standalone display blocks on their own line are kept.
@@ -51,16 +54,49 @@ function StageIndicator({ msg }: { msg: ChatMessage }) {
   );
 }
 
-function RetrievalSummary({ sources }: { sources: Source[] }) {
+  const sources = msg.sources?.length ? msg.sources : msg.prep?.used_sources || [];
+  const sourceCount = sources.length || msg.prep?.final_count || 0;
+  const stage = msg.stage || (msg.streaming ? "streaming" : msg.content ? "done" : undefined);
+  const noSources = msg.prep?.no_source_fallback === true || (stage !== "retrieving" && sourceCount === 0);
   const categories = Array.from(new Set(sources.map((source) => source.category).filter(Boolean)));
   const categoryLabel = categories.length > 0 ? categories.slice(0, 3).join("、") : "企业知识库";
+  let label: string | null = null;
+  let tone: "warning" | "success" | "destructive" = "success";
+  let pulse = false;
+
+  if (stage === "retrieving") {
+    label = "正在理解问题并检索企业知识…";
+    tone = "warning";
+    pulse = true;
+  } else if (stage === "generating") {
+    label = noSources
+      ? "未检索到可用资料，正在组织回复…"
+      : `已检索 ${sourceCount} 份资料，正在组织回答…`;
+    tone = noSources ? "destructive" : "success";
+    pulse = true;
+  } else if (stage === "streaming") {
+    label = noSources
+      ? "未检索到可用资料，正在输出回复…"
+      : `正在输出回答，基于 ${sourceCount} 份资料`;
+    tone = noSources ? "destructive" : "success";
+    pulse = true;
+  } else if (stage === "done" && msg.content) {
+    label = noSources
+      ? "未检索到可用资料，本回答没有知识库来源"
+      : `已检索 ${sourceCount} 份资料，回答基于${categoryLabel}`;
+    tone = noSources ? "destructive" : "success";
+  }
+
+  if (!label) return null;
+  const dotClass = tone === "warning" ? "bg-warning" : tone === "destructive" ? "bg-destructive" : "bg-success";
+
   return (
-    <div className="mb-4 flex items-center gap-2 text-xs text-muted-foreground">
+    <div className="mb-4 flex items-center gap-2 text-xs text-muted-foreground" role="status">
       <span className="relative flex size-2.5 shrink-0">
-        <span className="absolute inline-flex size-full animate-ping rounded-full bg-success opacity-30" />
-        <span className="relative inline-flex size-2.5 rounded-full bg-success" />
+        {pulse && <span className={`absolute inline-flex size-full animate-ping rounded-full opacity-30 ${dotClass}`} />}
+        <span className={`relative inline-flex size-2.5 rounded-full ${dotClass}`} />
       </span>
-      <span>已检索 {sources.length} 份资料，回答基于{categoryLabel}</span>
+      <span>{label}</span>
     </div>
   );
 }
@@ -84,8 +120,29 @@ function CitationMarker({
   const [isHighlighted, setIsHighlighted] = useState(false);
   const [showBelow, setShowBelow] = useState(false);
   const [showRightAligned, setShowRightAligned] = useState(false);
-  const tooltipRef = useRef<HTMLDivElement>(null);
-  const { open: openPlayer } = useVideoPlayer();
+  const tooltipRef = useRef<HTMLSpanElement>(null);
+  const closeTimerRef = useRef<number | null>(null);
+  const cancelClose = () => {
+    if (closeTimerRef.current !== null) {
+      window.clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+  };
+
+  const openTooltip = () => {
+    cancelClose();
+    setIsHovered(true);
+  };
+
+  const scheduleClose = () => {
+    cancelClose();
+    closeTimerRef.current = window.setTimeout(() => {
+      setIsHovered(false);
+      closeTimerRef.current = null;
+    }, CITATION_TOOLTIP_CLOSE_DELAY_MS);
+  };
+
+  useEffect(() => () => cancelClose(), []);
 
   // Listen for hover events from SourcesPanel (card → in-message highlight).
   useEffect(() => {
@@ -143,15 +200,6 @@ function CitationMarker({
             e.preventDefault();
             if (idx >= 0) {
               dispatchCitation({ messageId, sourceIndex: idx });
-              // For transcript citations with media, also open the video player
-              if (source.doc_type === "transcript" && source.media_id) {
-                openPlayer({
-                  mediaId: source.media_id,
-                  title: source.doc_title,
-                  startSeconds: timestampToSeconds(source.start_time),
-                  fromSource: false,
-                });
-              }
             }
           }}
         >
@@ -164,33 +212,33 @@ function CitationMarker({
             Horizontal alignment: left-0 (rightwards) by default to avoid sidebar clipping.
             If overflowing viewport right edge: flip to right-0 (leftwards) via showRightAligned state. */}
         {isHovered && (
-          <div
+          <span
             ref={tooltipRef}
-            className={`absolute z-[100] min-w-[200px] max-w-[320px] bg-white border border-gray-200 rounded-lg shadow-xl p-3 text-xs break-words ${
-              showBelow ? "top-[100%] mt-0.5" : "bottom-[100%] mb-0.5"
+            role="tooltip"
+            onMouseEnter={openTooltip}
+            onMouseLeave={scheduleClose}
+            className={`absolute z-[100] block min-w-[200px] max-w-[320px] rounded-ui-lg border border-border bg-popover p-3 text-xs text-popover-foreground shadow-overlay break-words ${
+              showBelow ? "top-full" : "bottom-full"
             } ${showRightAligned ? "right-0" : "left-0"}`}
           >
-            <div className="font-medium text-gray-900 mb-1 truncate">{source.doc_title}</div>
-            <div className="text-gray-500 mb-2 truncate flex items-center gap-1.5">
+            <span className="mb-1 block truncate font-medium text-popover-foreground">{source.doc_title}</span>
+            <span className="mb-2 flex items-center gap-1.5 truncate text-muted-foreground">
               {source.doc_type === "transcript" ? (
                 <>
                   {source.media_id && (
-                    <svg className="w-3.5 h-3.5 text-accent" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M9.5 7.5l7 4.5-7 4.5v-9z" />
-                    </svg>
+                    <CirclePlay className="size-3.5 text-primary" aria-hidden="true" />
                   )}
                   @{source.start_time || ""}
                 </>
               ) : (
                 `§${((source.section_path || "").replace(/<[^>]*>/g, ""))}`
               )}
-            </div>
-            <div className="text-gray-600 whitespace-pre-wrap leading-relaxed break-words">{preview}</div>
-            <div className="text-gray-400 mt-2 text-[10px]">
-              点击跳转到完整来源
-              {source.doc_type === "transcript" && source.media_id && " 并播放视频"}
-            </div>
-          </div>
+            </span>
+            <span className="block whitespace-pre-wrap break-words leading-relaxed text-popover-foreground/85">{preview}</span>
+            <span className="mt-2 block text-[10px] text-muted-foreground">
+              点击打开来源核验
+            </span>
+          </span>
         )}
       </sup>
     </>
@@ -253,7 +301,7 @@ export function Message({
           </>
         ) : (
           <>
-            {!msg.streaming && msg.sources && msg.sources.length > 0 && <RetrievalSummary sources={msg.sources} />}
+            <AnswerStatus msg={msg} />
             <div className={"prose-tight relative " + (msg.streaming && msg.content ? "caret" : "")}>
               {msg.content ? (
                 <ReactMarkdown
@@ -284,7 +332,6 @@ export function Message({
                   {linkifyCitations(normalizeMath(msg.content))}
                 </ReactMarkdown>
               ) : null}
-              <StageIndicator msg={msg} />
             </div>
             {msg.error && (
               <div className="mt-2 text-sm text-red-600 bg-red-50 border border-red-200 rounded p-2">
@@ -348,7 +395,26 @@ export function Message({
               </div>
             )}
             {!msg.streaming && !msg.error && msg.content && (
-              <FeedbackBar msg={msg} conversationId={conversationId} turnIndex={turnIndex} />
+              <div className="mt-5 flex min-h-9 items-center justify-between gap-3 border-t border-border pt-3">
+                {msg.sources && msg.sources.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => onToggleSources?.(msg.id)}
+                    className={`inline-flex h-9 items-center gap-2 rounded-ui-md border px-3 text-xs font-medium shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${sourcesSelected ? "border-primary bg-primary/10 text-primary" : "border-border bg-card text-foreground hover:border-primary/40 hover:bg-secondary"}`}
+                  >
+                    <Files className="size-4 text-primary" />
+                    查看 {msg.sources.length} 个来源
+                  </button>
+                )}
+                <FeedbackBar
+                  msg={msg}
+                  conversationId={conversationId}
+                  turnIndex={turnIndex}
+                  canRegenerate={canRegenerate}
+                  onRegenerate={onRegenerate}
+                  onViewAnswerVersion={onViewAnswerVersion}
+                />
+              </div>
             )}
           </>
         )}

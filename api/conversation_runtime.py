@@ -338,6 +338,7 @@ def persist_turn(
         params.append(plan.conversation_id)
         conn.execute(update_sql, params)
         conn.commit()
+        plan.persisted_assistant_message_id = persisted_assistant_message_id
     except Exception:
         logger.exception("persist_turn failed for conversation %s", plan.conversation_id)
     finally:

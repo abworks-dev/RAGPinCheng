@@ -22,7 +22,7 @@ describe("ConversationList date groups", () => {
     render(
       <ConversationList
         conversations={[
-          conversation("today", "今日对话", 0.2),
+          conversation("today", "今日对话", 0),
           conversation("week", "本周对话", 3),
           conversation("month", "本月对话", 12),
           conversation("older", "更早对话", 45),
@@ -38,5 +38,6 @@ describe("ConversationList date groups", () => {
     expect(screen.getByRole("heading", { name: "7 天内" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "30 天内" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "更早" })).toBeInTheDocument();
+    expect(screen.queryByText(/分钟前|小时前|天前/)).not.toBeInTheDocument();
   });
 });

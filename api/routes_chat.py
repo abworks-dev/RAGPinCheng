@@ -325,6 +325,7 @@ async def chat(
                 if result is not None:
                     yield event("done", {
                         "answer_text": result.answer_text,
+                        "assistant_message_id": plan.persisted_assistant_message_id,
                         "timings": result.timings,
                         "history_chars": result.history_chars,
                         "budget": result.budget,

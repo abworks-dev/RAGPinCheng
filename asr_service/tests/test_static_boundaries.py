@@ -5,7 +5,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SERVICE = ROOT / "asr_service"
-REAL_ADAPTER = SERVICE / "engines" / "funasr_sensevoice.py"
+REAL_ADAPTERS = {
+    SERVICE / "engines" / "faster_whisper.py",
+    SERVICE / "engines" / "funasr_sensevoice.py",
+    SERVICE / "engines" / "qwen3_asr.py",
+    SERVICE / "engines" / "whisperx.py",
+}
 FORBIDDEN_SERVICE_ROOTS = {
     "api",
     "qdrant_client",
@@ -45,7 +50,7 @@ def test_service_core_has_no_application_storage_index_or_canonical_dependencies
         assert not set(modules) & FORBIDDEN_SERVICE_MODULES, path
 
 
-def test_real_engine_dynamic_import_is_confined_to_one_adapter():
+def test_real_engine_dynamic_imports_are_confined_to_exact_adapters():
     dynamic_files = []
     for path in [*SERVICE.rglob("*.py"), *ROOT.glob("tests/test_transcription*.py")]:
         _modules, tree = imports(path)
@@ -53,11 +58,11 @@ def test_real_engine_dynamic_import_is_confined_to_one_adapter():
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
                 if node.func.attr == "import_module":
                     dynamic_files.append(path)
-    assert set(dynamic_files) == {REAL_ADAPTER}
+    assert set(dynamic_files) == REAL_ADAPTERS
 
 
 def test_main_requirements_have_no_real_asr_or_gpu_packages():
-    forbidden = ("funasr", "faster-whisper", "torch", "pyav")
+    forbidden = ("funasr", "faster-whisper", "qwen-asr", "torch", "pyav")
     for name in ("requirements.txt", "requirements-prod.txt"):
         packages = [
             line.strip().lower()
@@ -65,6 +70,54 @@ def test_main_requirements_have_no_real_asr_or_gpu_packages():
             if line.strip() and not line.lstrip().startswith("#")
         ]
         assert not any(any(item in line for item in forbidden) for line in packages)
+
+
+def test_faster_whisper_dependencies_remain_separate_from_runtime_sets():
+    optional = (SERVICE / "requirements-faster-whisper.txt").read_text(
+        encoding="utf-8"
+    )
+    assert "faster-whisper==1.2.1" in optional
+    assert "ctranslate2==4.8.1" in optional
+    for path in (
+        ROOT / "requirements.txt",
+        ROOT / "requirements-prod.txt",
+        SERVICE / "requirements.txt",
+        SERVICE / "requirements-windows.txt",
+    ):
+        packages = path.read_text(encoding="utf-8").lower()
+        assert "faster-whisper" not in packages
+        assert "ctranslate2" not in packages
+
+
+def test_windows_and_faster_whisper_qualification_share_service_core_dependencies():
+    core_path = SERVICE / "requirements-service-core.txt"
+    core = core_path.read_text(encoding="utf-8").lower()
+    windows = (SERVICE / "requirements-windows.txt").read_text(encoding="utf-8")
+    qualification = (ROOT / "scripts" / "qualify-faster-whisper-production.ps1").read_text(
+        encoding="utf-8"
+    )
+
+    for package in ("fastapi", "uvicorn", "pydantic", "httpx", "python-dotenv"):
+        assert package in core
+    assert "-r requirements-service-core.txt" in windows
+    assert (
+        "-r $RequirementsSource/asr_service/requirements-service-core.txt"
+        in qualification
+    )
+
+
+def test_qwen3_asr_dependencies_remain_separate_from_runtime_sets():
+    optional = (SERVICE / "requirements-qwen3-asr.txt").read_text(
+        encoding="utf-8"
+    )
+    assert "qwen-asr==0.0.6" in optional
+    for path in (
+        ROOT / "requirements.txt",
+        ROOT / "requirements-prod.txt",
+        SERVICE / "requirements.txt",
+        SERVICE / "requirements-windows.txt",
+    ):
+        assert "qwen-asr" not in path.read_text(encoding="utf-8").lower()
 
 
 def test_phase3_contract_tests_have_no_skip_or_xfail():

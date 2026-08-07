@@ -29,6 +29,7 @@ export type PrepData = {
 
 export type DoneData = {
   answer_text: string;
+  assistant_message_id?: number | null;
   timings: Record<string, number>;
   sources: Source[];
   history_chars: number;
@@ -146,6 +147,7 @@ export type IndexJob = {
   category: string;
   doc_type: "pdf" | "transcript" | string;
   source_path: string;
+  source_exists: boolean;
   file_size: number;
   status: "pending" | "parsing" | "chunking" | "summarizing" | "embedding" | "done" | "failed" | string;
   error: string | null;
@@ -157,12 +159,30 @@ export type IndexJob = {
 };
 
 export type IndexedDocument = {
+  document_id: string;
   source_path: string;
+  display_path: string;
+  filename: string;
   doc_title: string;
   category: string;
   doc_type: string;
   company: string | null;
   parent_count: number;
+  child_count: number | null;
+  file_size: number | null;
+  status: string;
+  is_indexed: boolean;
+  latest_job_id: number | null;
+  error_summary: string | null;
+  uploaded_by: string | null;
+  created_at: number | null;
+  updated_at: number | null;
+};
+
+export type IndexedDocumentList = {
+  documents: IndexedDocument[];
+  total: number;
+  status_counts: Record<string, number>;
 };
 
 export type CategoryNode = {
@@ -177,6 +197,7 @@ export type CategoryTree = {
 };
 
 export type AdminFeedbackEntry = {
+  feedback_id: string;
   ts?: string | null;
   kind?: string | null;
   rating?: string | null;
@@ -192,6 +213,21 @@ export type AdminFeedbackEntry = {
   conversation_id?: string | null;
   turn_index?: number | null;
   message_id?: string | null;
+  status: "pending" | "in_progress" | "resolved" | "archived";
+  resolution?: "knowledge_fixed" | "answer_improved" | "no_action" | "duplicate" | "other" | null;
+  admin_note?: string | null;
+  assignee_user_id?: number | null;
+  assignee_name?: string | null;
+  updated_at?: number | null;
+  resolved_at?: number | null;
+};
+
+export type AdminFeedbackResponse = {
+  entries: AdminFeedbackEntry[];
+  total: number;
+  page: number;
+  page_size: number;
+  counts: Record<"pending" | "in_progress" | "resolved" | "archived", number>;
 };
 
 export type FeedbackPayload = {

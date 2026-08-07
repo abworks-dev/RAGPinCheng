@@ -1,4 +1,6 @@
 import type { Conversation } from "../types";
+import { useState } from "react";
+import { AppBrand } from "./AppBrand";
 import { ConversationList } from "./ConversationList";
 import { UserMenu } from "./UserMenu";
 import { Building2, PanelLeftClose, Plus } from "lucide-react";
@@ -80,6 +82,7 @@ export function Sidebar({
         />
         )}
 
+        </div>
       </div>
 
       <div className="border-t border-sidebar-border px-2 py-1.5">

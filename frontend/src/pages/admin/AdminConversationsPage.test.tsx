@@ -122,6 +122,42 @@ describe("AdminConversationsPage", () => {
     expect(mocks.adminGetConversation).toHaveBeenCalledWith("conversation-1");
   });
 
+  it("shows edited question history and its linked answer versions read-only", async () => {
+    mocks.adminListAllConversations.mockResolvedValue({ conversations });
+    mocks.adminGetConversation.mockResolvedValue({
+      ...conversationState,
+      messages: [
+        {
+          id: 1,
+          role: "user" as const,
+          content: "编辑后的问题",
+          user_versions: [
+            { id: 101, version_index: 1, content: "原问题", created_at: 1_720_000_000, is_active: false },
+            { id: 102, version_index: 2, content: "编辑后的问题", created_at: 1_720_000_100, is_active: true },
+          ],
+        },
+        {
+          id: 2,
+          role: "assistant" as const,
+          content: "编辑后的回答",
+          answer_versions: [
+            { id: 201, version_index: 1, content: "原回答", created_at: 1_720_000_000, is_active: false, user_version_id: null },
+            { id: 202, version_index: 2, content: "编辑后的回答", created_at: 1_720_000_100, is_active: true, user_version_id: 102 },
+          ],
+        },
+      ],
+    });
+
+    render(<AdminConversationsPage />);
+    fireEvent.click(await screen.findByRole("button", { name: /项目交付标准/ }));
+
+    expect(await screen.findByText("已编辑 · 版本 2")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("查看编辑记录（2 个版本）"));
+    expect(screen.getByText("原问题")).toBeInTheDocument();
+    expect(screen.getByText("对应回答版本 1")).toBeInTheDocument();
+    expect(screen.getByText("对应回答版本 2 · 当前")).toBeInTheDocument();
+  });
+
   it("shows a list loading failure without requesting details", async () => {
     mocks.adminListAllConversations.mockRejectedValue(new Error("对话服务暂不可用"));
 
