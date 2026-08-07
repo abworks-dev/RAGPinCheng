@@ -123,8 +123,9 @@ def test_lazy_local_gpu_model_and_decode_parameters_are_exact(monkeypatch):
     assert kwargs == {
         "language": "zh",
         "task": "transcribe",
-        "beam_size": 1,
-        "temperature": 0.0,
+        "beam_size": 5,
+        "temperature": 0.2,
+        "initial_prompt": "这是一段关于建筑信息模型、BIM、构件碰撞、净高分析、钢结构、焊缝、螺栓和规范编号的工程语音转写。",
         "vad_filter": False,
         "condition_on_previous_text": False,
         "word_timestamps": False,
