@@ -2405,6 +2405,13 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 验证：`python -m compileall -q scripts/run_faster_whisper_qualification.py asr_service/tests/test_faster_whisper_qualification.py` 通过；`python scripts/run_faster_whisper_qualification.py --help` 通过并显示 `--diagnostic-report`；本机系统 Python 未安装 pytest，未执行 pytest 套件。
 - 待办/风险：需在实际生产资格 run 中读取 `reports/sample-diagnostics.json` 再判断 `noisy-bim-zh` 失败形态；若后续继续暴露为噪声鲁棒性不足，仍需再决定是否调噪声样本或解码策略。
 
+### 10:44 — 实施 Qwen3-ASR R3 上下文安全结构化
+
+- 完成：将固定离线证据 Schema 升级为 v3，仅对未被既有解析器消费的上下文行识别带前缀的 requested requirement 与 owner dependency，输出严格规范化 package/specifier/owner/version；只有同一 package 的明确 owner 数字约束排斥 requested 精确数字 pin 时才证明冲突，其余继续失败关闭且不输出原文。
+- 文件：更新 `scripts/extract_qwen3_asr_resolver_evidence.py`、`tests/test_qwen3_asr_resolver_evidence.py`、`tests/test_asr_deployment_static.py`、Qwen R3 计划、`TODO.md`、`WORKLOG.md`。
+- 验证：Python `compileall`、纯内存带前缀关系结构化、明确冲突证明、无原文泄漏和 `git diff --check` 通过；本机未安装 pytest，完整参数化测试交由 CI。
+- 待办/风险：尚待 PR、CI、合并及一次绑定完整 master SHA 的离线 workflow；不运行 pip、不安装依赖、不下载模型、不启动服务、不修改生产状态或 Profile admission。
+
 ### 12:56 — 收紧 faster-whisper 资格单样本超时
 
 - 完成：将 faster-whisper 生产资格 wrapper 传给 `run_faster_whisper_qualification.py` 的单样本超时从 600000 ms 收紧到 180000 ms，避免单个卡住的 warmup/推理请求把整轮资格 step 拖到半小时以上。

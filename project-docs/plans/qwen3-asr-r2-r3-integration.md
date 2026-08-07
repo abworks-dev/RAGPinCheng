@@ -687,6 +687,13 @@ Qdrant 或 Profile admission，不使用真实业务媒体，失败 artifact 保
 4. PR/CI 合并后只执行一次绑定新完整 master SHA 的相同离线 workflow；若仍为
    `still_unknown` 或 `resolver_context_only`，立即停止并另行审批。
 
+v2 运行 `30975758015` 成功完成，但两条剩余记录具有相同长度和 SHA-256，最终仅能
+归类为 `resolver_context_only`，仍未证明 blocker。经再次单独 R3 批准，Schema v3
+只为这些上下文行增加严格关系结构化：允许识别带安全前缀的 requested requirement 与
+owner dependency，并仅输出规范化 package、specifier、owner 和 owner version。只有同一
+package 的 owner 数字约束明确排斥 requested 精确数字 pin 时，才可升级为
+`proven_version_conflict`；否则继续失败关闭。仍不输出原文、文本片段、URL 或路径。
+
 ## 11. 最终完成条件
 
 Qwen3-ASR 只有在以下全部完成后才可称为“资格通过”：
