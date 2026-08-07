@@ -388,7 +388,7 @@ def test_gpu_recovery_workflow_is_manual_and_limited_to_the_verified_task():
     assert "default: false" in workflow
     assert "production-deployment" in workflow
     assert "production-asr" in workflow
-    assert "runs-on: [self-hosted, Windows, X64, asr-production]" in workflow
+    assert "runs-on: [self-hosted, windows, production, gpu]" in workflow
     assert "timeout-minutes: 5" in workflow
     assert 'TaskName = "RAGPinCheng-GPU"' in workflow
     assert "Refusing to modify an unexpected RAGPinCheng-GPU Scheduled Task" in workflow
@@ -397,6 +397,18 @@ def test_gpu_recovery_workflow_is_manual_and_limited_to_the_verified_task():
     assert "Start-ScheduledTask -TaskName $TaskName" in workflow
     assert "deploy-gpu.ps1" not in workflow
     assert "deploy-app" not in workflow
+
+
+def test_faster_whisper_qualification_treats_gpu_service_as_remote():
+    script = read("scripts/qualify-faster-whisper-production.ps1")
+
+    assert 'Get-TaskSnapshot -TaskNames @("RAGPinCheng-ASR")' not in script
+    assert 'param(\n        [string[]]$TaskNames = @("RAGPinCheng-ASR")' in script
+    assert "Required local production ASR port $ProductionAsrPort is not listening" in script
+    assert "Production ASR Scheduled Task must be running" in script
+    assert "foreach ($port in @($GpuPort, $ProductionAsrPort))" not in script
+    assert 'Invoke-RestMethod -Method Get -Uri "$GpuUrl/health"' in script
+    assert '[string]$_.LocalPort -eq "8200"' in script
 
 
 def test_faster_whisper_model_artifact_preparation_is_manual_and_isolated():

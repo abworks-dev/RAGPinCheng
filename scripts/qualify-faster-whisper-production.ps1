@@ -46,7 +46,6 @@ $SpoolRoot = Join-Path $RunRoot "spool"
 $ConfigRoot = Join-Path $RunRoot "config"
 $StateRoot = Join-Path $RunRoot "state"
 $TempPort = 18200
-$GpuPort = 8100
 $ProductionAsrPort = 8200
 $GpuUrl = "http://192.168.11.11:8100"
 $ProductionAsrUrl = "http://127.0.0.1:8200"
@@ -368,8 +367,11 @@ function Clear-ScopedProxy {
 }
 
 function Get-TaskSnapshot {
+    param(
+        [string[]]$TaskNames = @("RAGPinCheng-ASR")
+    )
     $result = @()
-    foreach ($name in @("RAGPinCheng-GPU", "RAGPinCheng-ASR")) {
+    foreach ($name in $TaskNames) {
         $task = Get-ScheduledTask -TaskName $name -ErrorAction Stop
         $info = Get-ScheduledTaskInfo -TaskName $name -ErrorAction Stop
         $result += [ordered]@{
@@ -399,7 +401,7 @@ function Get-FirewallSnapshot {
         $ports = @($rule | Get-NetFirewallPortFilter -ErrorAction Stop)
         if (-not @($ports | Where-Object {
             [string]$_.Protocol -eq "TCP" -and
-            [string]$_.LocalPort -in @("8100", "8200")
+            [string]$_.LocalPort -eq "8200"
         })) {
             continue
         }
@@ -1520,15 +1522,13 @@ try {
     if (Get-NetTCPConnection -LocalPort $TempPort -State Listen -ErrorAction SilentlyContinue) {
         throw "Qualification port 18200 is already listening"
     }
-    foreach ($port in @($GpuPort, $ProductionAsrPort)) {
-        if (-not (Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue)) {
-            throw "Required production port $port is not listening"
-        }
+    if (-not (Get-NetTCPConnection -LocalPort $ProductionAsrPort -State Listen -ErrorAction SilentlyContinue)) {
+        throw "Required local production ASR port $ProductionAsrPort is not listening"
     }
 
     $PreTaskSnapshot = Get-TaskSnapshot
     if (@($PreTaskSnapshot | Where-Object { $_.state -ne "Running" }).Count -ne 0) {
-        throw "Production GPU and ASR Scheduled Tasks must both be running"
+        throw "Production ASR Scheduled Task must be running"
     }
     $PreFirewallSnapshot = Get-FirewallSnapshot
     Write-QualificationProgress -Stage "preflight_production_health"
