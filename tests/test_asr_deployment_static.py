@@ -322,6 +322,11 @@ def test_faster_whisper_qualification_workflow_is_manual_immutable_and_gated():
     assert "production-asr" in workflow
     assert "runs-on: [self-hosted, Windows, X64, asr-production]" in workflow
     assert "timeout-minutes: 45" in workflow
+    assert 'Write-WorkflowFailureVerdict -Code "workflow_wrapper_timeout"' in workflow
+    assert '$wrapperDeadline = [DateTimeOffset]::Now.AddMinutes(35)' in workflow
+    assert 'taskkill.exe /PID $wrapper.Id /T /F' in workflow
+    assert 'R3_WORKFLOW_HEARTBEAT wrapper_pid=' in workflow
+    assert 'Write-WorkflowFailureVerdict -Code "workflow_wrapper_failed"' in workflow
     assert workflow.count("default: false") == 2
     assert "execute_qualification must be explicitly enabled" in workflow
     assert "prepare_synthetic_samples:" in workflow

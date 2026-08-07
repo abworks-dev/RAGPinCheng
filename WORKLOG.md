@@ -2418,3 +2418,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`.github/workflows/qualify-faster-whisper-production.yml`、`scripts/qualify-faster-whisper-production.ps1`、`scripts/run_faster_whisper_qualification.py`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
 - 验证：PowerShell AST 解析通过；`python -m py_compile scripts/run_faster_whisper_qualification.py` 通过；相关测试 `59 passed`；`git diff --check` 通过。
 - 待办/风险：需在 master 上重新触发生产资格 run；本次不改变样本、评分门槛、模型参数或 profile admission，旧 run 需取消以释放并发锁。
+
+### 20:48 — 增加资格 workflow 外层 watchdog
+
+- 完成：run `31152649460` 在旧 job 45 分钟上限被取消且未产生 verdict，说明 wrapper 内部 watchdog 不能覆盖所有同步阻塞点；workflow 现以独立 PowerShell 父进程运行 wrapper，35 分钟超时后杀掉该 run 的完整进程树并写出脱敏 `workflow_wrapper_timeout` verdict，同时每 30 秒输出 heartbeat。
+- 文件：`.github/workflows/qualify-faster-whisper-production.yml`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
+- 验证：PowerShell wrapper AST 解析通过；相关测试 `59 passed`；`git diff --check` 通过。
+- 待办/风险：需提交到 master 后重新触发资格 run；外层 watchdog 超时会优先保证进程不长期占用 runner，profile admission 仍保持 disabled。
