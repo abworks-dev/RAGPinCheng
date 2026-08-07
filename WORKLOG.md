@@ -2504,3 +2504,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`.github/workflows/diagnose-gpu-runtime-production.yml`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
 - 验证：YAML 解析、提取后 PowerShell AST 解析、faster-whisper qualification 与部署静态专项测试 `62 passed`、`git diff --check` 通过。
 - 待办/风险：需重跑一次相同诊断以获得真实的 Python 失败原因；不修改生产服务或全局依赖。
+
+### 06:59 — 细化 S4U Python 启动阶段证据
+
+- 完成：将 S4U probe 的 Python 入口、Torch 导入、服务配置导入和两个模型加载拆为独立阶段；子 Python 改由 `Start-Process` 显式启动、等待和重定向，记录实际退出码，避免 PowerShell 任务边界吞掉错误输出。
+- 文件：`.github/workflows/diagnose-gpu-runtime-production.yml`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
+- 验证：YAML 解析、提取后 PowerShell AST 解析、faster-whisper qualification 与部署静态专项测试 `62 passed`、`git diff --check` 通过。
+- 待办/风险：下一次只读诊断会短暂实际加载模型；其阶段结果将决定是否需要单独批准运行时修复。

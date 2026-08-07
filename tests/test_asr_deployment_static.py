@@ -427,13 +427,16 @@ def test_gpu_runtime_diagnostic_is_manual_bounded_and_read_only():
     assert 'New-ScheduledTaskPrincipal -UserId "Administrator" -LogonType S4U -RunLevel Highest' in workflow
     assert "BGEM3FlagModel" in workflow
     assert "FlagReranker" in workflow
+    assert 'write_stage("python_entry")' in workflow
+    assert 'write_stage("torch_import_start")' in workflow
     assert 'write_stage("embed_start")' in workflow
     assert 'write_stage("reranker_start")' in workflow
     assert 'write_stage("model_load_complete")' in workflow
     assert "run-model-load.py" in workflow
     assert "s4u.stdout.log" in workflow
     assert "s4u.stderr.log" in workflow
-    assert "1>> $StdoutPath 2>> $StderrPath" in workflow
+    assert "-RedirectStandardOutput $StdoutPath" in workflow
+    assert "-RedirectStandardError $StderrPath" in workflow
     assert "-EncodedCommand" not in workflow
     assert "Stop-ScheduledTask -TaskName $taskName" in workflow
     assert "Unregister-ScheduledTask -TaskName $taskName" in workflow
