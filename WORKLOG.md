@@ -2497,3 +2497,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`.github/workflows/diagnose-gpu-runtime-production.yml`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
 - 验证：YAML 解析、提取后 PowerShell AST 解析、faster-whisper qualification 与部署静态专项测试 `62 passed`、`git diff --check` 通过。
 - 待办/风险：该诊断会真实加载两份生产模型并短暂占用 GPU 显存；需根据其阶段结果确定最小运行时修复，尚未重装全局包或恢复生产 HTTP 服务。
+
+### 06:55 — 补全 S4U 诊断子进程错误捕获
+
+- 完成：首轮 S4U 诊断确认 Python 命令在 `embed_start` 前以任务结果 `1` 退出，但计划任务默认吞掉子进程输出；现将临时 Python probe 的 stdout/stderr 写入 Runner 临时目录，父流程仅回显已脱敏的异常、模块与 CUDA 关键词，继续在 finally 中注销临时任务。
+- 文件：`.github/workflows/diagnose-gpu-runtime-production.yml`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
+- 验证：YAML 解析、提取后 PowerShell AST 解析、faster-whisper qualification 与部署静态专项测试 `62 passed`、`git diff --check` 通过。
+- 待办/风险：需重跑一次相同诊断以获得真实的 Python 失败原因；不修改生产服务或全局依赖。
