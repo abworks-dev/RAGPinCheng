@@ -401,6 +401,8 @@ def test_gpu_recovery_workflow_is_manual_and_limited_to_the_verified_task():
     assert "function Write-SanitizedGpuStartupDiagnostic" in workflow
     assert "GPU_STARTUP_DIAGNOSTIC" in workflow
     assert "[REDACTED]" in workflow
+    assert "host_address_present" in workflow
+    assert "gpu_process_count" in workflow
     assert "deploy-gpu.ps1" not in workflow
     assert "deploy-app" not in workflow
 
