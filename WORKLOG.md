@@ -2411,3 +2411,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`scripts/qualify-faster-whisper-production.ps1`、`WORKLOG.md`。
 - 验证：已完成本地只读检查与最小脚本修改；尚未重新触发远端生产资格 run。
 - 待办/风险：若实际模型在极慢磁盘/冷启动环境下需要超过 3 分钟才能完成首轮推理，这个上限会把它更早判为超时；需要重跑观察是否足够覆盖正常启动时间。
+
+### 13:58 — 修复 faster-whisper 资格整轮卡住
+
+- 完成：为资格 wrapper 增加 25 分钟整轮 watchdog 和 30 秒 heartbeat；runner 增加 warmup、双 pass 和逐样本完成进度；workflow job 上限从 180 分钟收紧到 45 分钟，避免卡住的子进程长期占用生产 GPU runner。
+- 文件：`.github/workflows/qualify-faster-whisper-production.yml`、`scripts/qualify-faster-whisper-production.ps1`、`scripts/run_faster_whisper_qualification.py`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
+- 验证：PowerShell AST 解析通过；`python -m py_compile scripts/run_faster_whisper_qualification.py` 通过；相关测试 `59 passed`；`git diff --check` 通过。
+- 待办/风险：需在 master 上重新触发生产资格 run；本次不改变样本、评分门槛、模型参数或 profile admission，旧 run 需取消以释放并发锁。

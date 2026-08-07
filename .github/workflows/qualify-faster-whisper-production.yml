@@ -29,7 +29,7 @@ jobs:
   qualify:
     environment: production-asr
     runs-on: [self-hosted, Windows, X64, asr-production]
-    timeout-minutes: 180
+    timeout-minutes: 45
     steps:
       - name: Validate immutable revision and explicit R3 gate
         shell: powershell

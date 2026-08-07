@@ -321,7 +321,7 @@ def test_faster_whisper_qualification_workflow_is_manual_immutable_and_gated():
     assert "pull_request:" not in workflow
     assert "production-asr" in workflow
     assert "runs-on: [self-hosted, Windows, X64, asr-production]" in workflow
-    assert "timeout-minutes: 180" in workflow
+    assert "timeout-minutes: 45" in workflow
     assert workflow.count("default: false") == 2
     assert "execute_qualification must be explicitly enabled" in workflow
     assert "prepare_synthetic_samples:" in workflow
@@ -841,6 +841,7 @@ def test_faster_whisper_qualification_freezes_dependencies_model_and_gates():
 def test_faster_whisper_qualification_uses_verified_persistent_wheel_cache():
     script = read("scripts/qualify-faster-whisper-production.ps1")
     workflow = read(".github/workflows/qualify-faster-whisper-production.yml")
+    runner = read("scripts/run_faster_whisper_qualification.py")
 
     assert 'qualification\\wheel-cache' in script
     assert 'schema_version = "faster-whisper-wheel-cache-key/1"' in script
@@ -896,6 +897,11 @@ def test_faster_whisper_qualification_uses_verified_persistent_wheel_cache():
         "eight_sample_inference",
     ):
         assert f'Write-StageTiming -Stage "{stage}"' in script
+    assert "$QualificationWatchdogSeconds = 1500" in script
+    assert 'R3_QUALIFICATION_HEARTBEAT elapsed_ms=' in script
+    assert '$FailureCode = "qualification_timeout"' in script
+    assert '"warmup-start"' in runner
+    assert '"sample-complete"' in runner
 
     assert "id: upload_verdict" in workflow
     assert "continue-on-error: true" in workflow
