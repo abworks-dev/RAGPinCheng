@@ -2533,3 +2533,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`.github/workflows/repair-gpu-reranker-production.yml`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
 - 验证：YAML 解析、提取后 PowerShell AST 解析、faster-whisper qualification 与部署静态专项测试 `63 passed`、`git diff --check` 通过。
 - 待办/风险：需重新执行隔离验证；候选仍未通过前全局包与 GPU 服务保持未修改状态。
+
+### 07:49 — 将 reranker 修复临时空间固定到 D 盘
+
+- 完成：按用户提供的 C 盘空间不足信息，将修复 workflow 的 TEMP、TMP 与 pip wheel 缓存显式迁至 `${PRODUCTION_REPO_PATH}`；全局 Python 安装仍只写入最终的两个 wheel，不在 C 盘保留下载缓存或临时解压文件。旧的未开始修复 run 将以取消方式废弃，避免使用旧路径。
+- 文件：`.github/workflows/repair-gpu-reranker-production.yml`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
+- 验证：YAML 解析、提取后 PowerShell AST 解析、faster-whisper qualification 与部署静态专项测试 `63 passed`、`git diff --check` 通过。
+- 待办/风险：需在新提交上重跑隔离验证；本轮不删除 C 盘文件、不改全局依赖或 GPU 服务。
