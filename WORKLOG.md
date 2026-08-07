@@ -1668,54 +1668,6 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 完成：在前述阶段梳理基础上，进一步核对总体方案、Phase 1/2 详细计划及 `src/transcription/`、SQLite Store/Migration 的实际类型与状态机，整理 Provider、Profile、Candidate、Canonical、Normalizer、Formatter、任务、版本、审核、发布、候选索引、正式 head、checkpoint、恢复和 GPU 调度等概念的职责、边界与设计用意。
 - 文件：仅更新 `WORKLOG.md`；未修改业务代码、配置、数据库、索引、API、前端或部署状态。
 - 验证：通过计划文档与当前类型/持久化代码交叉核对名词和值域；未重新运行测试或生产链路。
-### 09:04 — 调研知识库问答页面布局
-
-- 完成：对当前聊天首页、会话侧栏、分类筛选和输入区进行只读评估，并对照 Glean、Notion AI、Microsoft 365 Copilot 等企业搜索与 AI 问答产品，总结首屏任务入口、检索范围可见性、会话管理和引用信任设计的改进优先级；未修改代码。
-- 文件：仅更新 `WORKLOG.md`。
-- 验证：核对截图与 `ChatLayout.tsx`、`Sidebar.tsx`、`MessageList.tsx`、`Composer.tsx`、`ConversationList.tsx`、`Message.tsx`、`SourcesPanel.tsx` 当前实现；查阅同类产品官方页面与官方文档。
-
-### 09:32 — 清理已合入主线的 Codex 分支
-
-- 完成：确认 `codex/admin-conversations-ui`、`codex/admin-feedback-ui`、`codex/admin-media-ui`、`codex/admin-p2-foundation`、`codex/admin-users-ui`、`codex/frontend-foundation` 均已包含在 `origin/master@9c34467` 后，移除三个干净的关联 worktree，删除六条本地分支，并删除远端仍存在的 media、p2-foundation、frontend-foundation 分支。
-- 文件：仅更新 `WORKLOG.md`；Git refs 新增六个 `backup/codex-cleanup-20260803/*` 本地恢复标签。
-- 验证：删除前复核六个分支均为最新 `origin/master` 的祖先且关联 worktree 无未提交修改；删除后确认目标本地及远端分支均不存在、六个恢复标签均指向原分支提交。
-- 边界：未修改或清理 `codex/fix-admin-sidebar-alignment`、`codex/multi-engine-transcription-phase2`、`codex/multi-engine-transcription-phase3`，未触碰 detached 临时 worktree、admin-users worktree及并行进行中的 Phase 3 代码改动。
-
-### 10:17 — 实施知识库问答工作区 P0
-
-- 完成：将用户问答页调整为响应式会话导航、文档式回答阅读区和来源核验工作区；知识范围筛选移入输入器，引用点击与来源持久选择保持双向联动，并统一 PDF、DOCX、XLSX、PPTX 与视频的宽侧栏/移动端全屏预览外壳及互斥遮罩。
-- 文件：仅修改 `frontend/src/components/`、`frontend/src/hooks/usePdfPreview.tsx`、`frontend/src/hooks/useVideoPlayer.tsx` 与 `WORKLOG.md`；未修改管理端页面、API、认证、CSRF、SSE、RAG、索引或后端业务。
-- 验证：`npm run build` 通过（411 modules transformed）；前端 Vitest 9 个文件、43 项测试全部通过；浏览器在 1440×900、1280×800、1024×768、768×1024、390×844 五个视口检查登录页面均无水平溢出、无控制台 error，仅保留既有 React Router future warning。浏览器无登录态，因此聊天数据、来源选择和资源预览未完成真实后端端到端回归。
-
-### 10:54 — 优化问答来源视觉与检索反馈
-
-- 完成：扩大用户端会话侧栏和来源核验栏；以 `lucide-react` 替换 P0 临时符号图标；在回答顶部增加由实际来源数量与分类动态生成的检索摘要和绿色状态点，在回答底部增加“查看 X 个来源”定位按钮；来源列表与引用详情调整为更接近 shadcn/ui 的边框、选中态、层级和强调引用样式。
-- 文件：仅修改用户端聊天组件、`frontend/package.json`、`frontend/package-lock.json` 与 `WORKLOG.md`；未修改管理端页面、API、认证、CSRF、SSE、RAG、索引或后端业务。
-- 验证：`npm run build` 通过（1960 modules transformed）；前端 Vitest 9 个文件、43 项测试全部通过；`git diff --check` 无内容错误。浏览器仍无登录态，带真实来源的回答态和来源定位交互未完成浏览器端到端视觉验收。
-
-### 11:24 — 完善问答侧栏与来源开合交互
-
-- 完成：登录后的来源核验栏改为默认关闭，使空状态和输入器在主内容区居中；桌面会话侧栏增加 272px 与 64px 两态收缩控制，收起后保留品牌、新建对话和用户入口；用户菜单迁移为 Lucide 图标和紧凑浮层；会话按本地自然日分为今天、7 天内、30 天内和更早；来源展开时隐藏聊天标题栏按钮，仅保留来源栏右上角一个带数量的收缩按钮。
-- 文件：仅修改用户端 `ChatLayout`、`Sidebar`、`ConversationList`、`UserMenu`、`ChatHeader`、`SourceWorkspace`，新增会话分组测试并更新 `WORKLOG.md`；未修改管理端、API、认证、CSRF、SSE、RAG、索引或后端业务。
-- 验证：`npm run build` 通过（1960 modules transformed）；前端 Vitest 10 个文件、44 项测试全部通过；`git diff --check` 无内容错误。浏览器无登录态，桌面收缩、用户菜单和来源开合仍待登录后视觉验收。
-
-### 12:31 — 修复引用角标与来源选中同步
-
-- 完成：修复从右侧来源选中角标 5 后再点击正文角标 2 时，右侧已切换但正文仍高亮角标 5 的状态残留；公共引用分发现在同时广播来源定位和持久选中事件，使正文角标、查看来源按钮与右侧来源保持单一同步选中状态。
-- 文件：仅修改 `frontend/src/components/citations.ts`、对应测试与 `WORKLOG.md`；未修改管理端、API、RAG 或后端业务。
-- 验证：引用专项 Vitest 8/8 通过，新增双事件同步回归用例；`npm run build` 通过（1960 modules transformed）；`git diff --check` 无内容错误。
-
-### 12:35 — 增加侧栏滚动条自动隐藏
-
-- 完成：新增可复用的自动隐藏滚动条 hook 和细滚动条样式，应用于左侧会话列表、右侧来源列表及引用详情；滚动、鼠标进入/移动或聚焦时显示，空闲 900ms 后隐藏，鼠标移出后快速收起，并保持滚动槽宽度稳定以避免内容跳动。
-- 文件：新增 `frontend/src/hooks/useAutoHideScrollbar.ts` 及测试，修改 `Sidebar.tsx`、`SourceWorkspace.tsx`、`styles/index.css` 和 `WORKLOG.md`；未修改管理端或业务数据逻辑。
-- 验证：自动隐藏专项 Vitest 1/1 通过；`npm run build` 通过（1961 modules transformed）；`git diff --check` 无内容错误。
-
-### 12:52 — 协调空对话输入器与来源轮次状态
-
-- 完成：空对话和新建对话时将欢迎内容与输入器置于页面中部，首条消息出现后恢复底部输入器；新建及切换对话自动关闭来源栏；来源栏当前回答轮次提升为统一受控状态，同一回答的“查看 X 个来源”按钮支持再次点击收起并保持唯一选中；检索和生成阶段改为黄色状态点及更明确文案；所有完成回答增加无弹窗复制按钮和短暂勾选反馈；桌面来源栏通过宽度与透明度过渡实现平滑开合。
-- 文件：仅修改用户端 `ChatLayout`、`MessageList`、`Composer`、`Message`、`SourceWorkspace` 与 `WORKLOG.md`；未修改管理端、API、SSE、RAG 或后端业务。
-- 验证：前端全量 Vitest 14 个文件、63 项测试全部通过；`npm run build` 通过（1961 modules transformed）；`git diff --check` 无内容错误。浏览器无登录态，真实对话轮次切换和来源栏动画仍待登录后视觉验收。
 
 ### 09:09 — 修复管理端侧边栏贴边布局
 
@@ -1769,77 +1721,327 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 验证：review 修复定向 suite `49 passed`；最新 master 基线完整 transcription/manual/service 回归 `276 passed, 1 skipped`；`tests/test_providers.py` 为 `16 passed, 6 skipped`；`compileall` 与提交级 `git diff --check` 通过。本地跳过仅因 `.venv` 缺 FastAPI；PR #5 CI 六个 job 全部通过，其中 transcription 为 `239 passed`，ASR service/API/auth 为 `90 passed`、零 skip。
 - 边界/风险：两侧默认关闭，未下载模型、未导入真实 FunASR/torch 执行推理，未访问网络/GPU/真实媒体/数据库/生产；Phase 3 尚未接应用上传、Store、worker、管理员 UI 或索引，因此没有用户可见自动转录能力。Phase 4 未开始。
 
+### 12:25 — 统一问答品牌与回答反馈操作
+
+- 完成：新增共享品牌锁定组件，管理端保持原视觉，对话侧栏改为“品”字品牌图标、站点名称与“知识问答工作台”副标题，收起时品牌图标兼作展开控制；助手完整回答底部统一为来源按钮居左、复制与差评图标居右，复制结果使用 Toast 反馈；差评改为可访问 Dialog，支持“有害/不安全、虚假信息、没有帮助、其他”原因和补充说明，成功后保留复制能力并标记反馈已提交。
+- 文件：新增 `frontend/src/components/AppBrand.tsx`、`frontend/src/components/ui/dialog.tsx`、`frontend/src/components/FeedbackBar.test.tsx`、`frontend/src/components/Message.test.tsx`、`frontend/src/components/Sidebar.test.tsx`；修改 `frontend/src/components/FeedbackBar.tsx`、`frontend/src/components/Message.tsx`、`frontend/src/components/Sidebar.tsx`、`frontend/src/components/ui/icon-button.tsx`、`frontend/src/pages/admin/AdminLayout.tsx`、`frontend/package.json`、`frontend/package-lock.json`、`WORKLOG.md`。
+- 验证：新增专项测试 3 个文件、10/10 项通过；前端全量 Vitest 16 个文件、71/71 项通过；TypeScript project build 与 Vite production build 通过（2016 modules transformed）；使用仅监听本机的虚构账号、会话、回答和来源数据完成桌面端及 390×844 移动端视觉检查，确认品牌、回答操作栏、Dialog 初始焦点、按钮布局和横向溢出均正常；`git diff --check` 通过。保留既有 React Router future warning、CSS minify warning 和主包大于 500 kB 警告。
+- 边界：仅新增 `@radix-ui/react-dialog`；反馈仍调用既有 `/api/feedback` 并保留 `conversation_id`、`turn_index`、`message_id`、`query`、`answer_text` 关联字段，原因和说明仅组合进原 `note`；未修改 API client、类型、认证、CSRF、SSE、引用、来源面板、预览、后端或数据库，未提交真实反馈，临时本地服务已关闭，本地 `master` 尚未推送或部署。
+### 12:31 — 修复引用角标与来源选中同步
+
+- 完成：修复从右侧来源选中角标 5 后再点击正文角标 2 时，右侧已切换但正文仍高亮角标 5 的状态残留；公共引用分发现在同时广播来源定位和持久选中事件，使正文角标、查看来源按钮与右侧来源保持单一同步选中状态。
+- 文件：仅修改 `frontend/src/components/citations.ts`、对应测试与 `WORKLOG.md`；未修改管理端、API、RAG 或后端业务。
+- 验证：引用专项 Vitest 8/8 通过，新增双事件同步回归用例；`npm run build` 通过（1960 modules transformed）；`git diff --check` 无内容错误。
+
+### 12:35 — 增加侧栏滚动条自动隐藏
+
+- 完成：新增可复用的自动隐藏滚动条 hook 和细滚动条样式，应用于左侧会话列表、右侧来源列表及引用详情；滚动、鼠标进入/移动或聚焦时显示，空闲 900ms 后隐藏，鼠标移出后快速收起，并保持滚动槽宽度稳定以避免内容跳动。
+- 文件：新增 `frontend/src/hooks/useAutoHideScrollbar.ts` 及测试，修改 `Sidebar.tsx`、`SourceWorkspace.tsx`、`styles/index.css` 和 `WORKLOG.md`；未修改管理端或业务数据逻辑。
+- 验证：自动隐藏专项 Vitest 1/1 通过；`npm run build` 通过（1961 modules transformed）；`git diff --check` 无内容错误。
+
+### 12:52 — 协调空对话输入器与来源轮次状态
+
+- 完成：空对话和新建对话时将欢迎内容与输入器置于页面中部，首条消息出现后恢复底部输入器；新建及切换对话自动关闭来源栏；来源栏当前回答轮次提升为统一受控状态，同一回答的“查看 X 个来源”按钮支持再次点击收起并保持唯一选中；检索和生成阶段改为黄色状态点及更明确文案；所有完成回答增加无弹窗复制按钮和短暂勾选反馈；桌面来源栏通过宽度与透明度过渡实现平滑开合。
+- 文件：仅修改用户端 `ChatLayout`、`MessageList`、`Composer`、`Message`、`SourceWorkspace` 与 `WORKLOG.md`；未修改管理端、API、SSE、RAG 或后端业务。
+- 验证：前端全量 Vitest 14 个文件、63 项测试全部通过；`npm run build` 通过（1961 modules transformed）；`git diff --check` 无内容错误。浏览器无登录态，真实对话轮次切换和来源栏动画仍待登录后视觉验收。
+
 ### 13:09 — 优化侧栏主题与来源按钮一致性
 
 - 完成：固定左侧品牌图标在展开和收起状态下的水平位置，折叠后以品牌图标作为展开入口；将主题切换从头像菜单独立到头像上方，支持默认跟随系统、明亮和夜间三种模式，并在跟随系统时实时响应浏览器配色变化；无来源的新对话不再显示右上来源按钮，来源栏展开态按钮补齐“来源”文字。
 - 文件：修改用户端 `Sidebar.tsx`、`UserMenu.tsx`、`ChatHeader.tsx`、`SourceWorkspace.tsx`、`useTheme.ts`，新增 `ThemeMenu.tsx` 及主题和来源按钮测试；未修改管理端、API、认证、RAG 或后端业务。
 - 验证：主题与来源按钮专项 Vitest 2 个文件、4 项测试全部通过；`npm run build` 通过（1962 modules transformed）；`git diff --check` 无内容错误。浏览器无登录态，登录后的侧栏动画、主题菜单和来源栏展开态仍待真实会话视觉验收。
 
-### 21:37 — 编写多引擎转录 Phase 5 R2 计划
+### 14:13 — 精简导航品牌与会话列表
 
-- 完成：基于 `origin/master@b323023` 只读核验上传、转录、审核发布内核、索引、检索、引用和播放器调用链，新增 Phase 5 隔离端到端与版本感知发布详细计划；确认现有 `index_single()` 不能直接用于 Candidate，版本审核/发布应用接线和正式 head 检索过滤是实施前置。
-- 文件：新增 `project-docs/plans/multi-engine-transcription-phase5.md`，最小更新 `TODO.md` 和 `WORKLOG.md`；未修改业务代码、测试、配置、数据库、索引或外部状态，未触碰已有前端并行修改。
-- 验证：完成文档范围、链接、24 项完成标准、精确文件清单和外部资源门禁的静态复核；未运行测试、ffmpeg、ASR、GPU、Qdrant 或生产数据。
-- 待办/风险：Phase 5A/5B 代码实施待 R2 审批及第 17 节四项决定；Phase 5C 真实适配器验证另行审批，且当前没有 `qualification_approved` Profile。
+- 完成：主题选项统一为“明亮模式”和“夜间模式”；移除用户侧栏外框、品牌区及底部控件分割线，并固定主题图标和头像在侧栏折叠前后的左侧位置；收紧共享品牌标题与工作台副标题字号，使用户端和管理端品牌区同步；移除管理端顶栏及左导航边界；会话列表不再显示逐条相对时间，仅保留今天、7 天内、30 天内和更早分组。
+- 文件：修改 `AppBrand.tsx`、`Sidebar.tsx`、`ThemeMenu.tsx`、`UserMenu.tsx`、`ConversationList.tsx`、`AdminLayout.tsx` 及对应测试和 `WORKLOG.md`；未修改管理端业务页面、API、认证、RAG、转录或后端逻辑。
+- 验证：前端全量 Vitest 19 个文件、77/77 项测试通过；`npm run build` 通过（2018 modules transformed）；`git diff --check` 无内容错误。保留既有 React Router future warning、CSS minify warning和主包大于 500 kB 警告；浏览器无登录态，真实用户侧栏和管理页仍待登录后视觉验收。
 
-### 21:49 — 定位视频媒体页面空白故障
+### 14:20 — 完善多轮对话导航与回答状态
 
-- 完成：只读核对管理端页面源码、现有测试和浏览器控制台日志，确认 `AdminMediaPage` 在 `http://${PRIVATE_ZEROTIER_IPV4}` 非安全上下文中渲染时直接调用 `crypto.randomUUID()`，浏览器不提供该函数并触发未捕获异常，导致视频媒体页整页空白；资料管理页当前已恢复，第三方统计请求被拦截与本故障无关。
-- 文件：未修改业务代码或测试；仅追加 `WORKLOG.md`，未触碰现有前端并行修改。
-- 验证：`AdminDocumentsPage.test.tsx` 与 `AdminMediaPage.test.tsx` 共 15 项测试通过；测试因 stub `crypto.randomUUID` 未覆盖非安全 HTTP 环境。
-- 待办/风险：需以 R1 最小修复替换三个直接 `crypto.randomUUID()` 调用为兼容的客户端 UUID/幂等键生成函数，并增加 `crypto.randomUUID` 缺失回归测试；HTTPS 部署也能规避现象，但前端仍应失败安全。
+- 完成：全局滚动条统一为细轨道、圆角滑块和透明背景，消息区接入既有自动隐藏机制；新增桌面端多轮对话快速导航，收起时仅显示轮次刻度，悬停或聚焦后展开问题列表，当前轮次和悬停轮次使用语义重点色，移动端自动隐藏；修复消息列表每次渲染都强制置底的问题，点击历史引用角标或“查看 X 个来源”后不再跳到最后一轮，同时保留新增消息和贴近底部时的流式自动跟随；回答顶部统一展示检索、组织、流式输出、完成及无来源状态，流式正文出现后仍保留绿色输出提示，无来源回答使用红色状态点和说明；来源核验的视频、文档、复制、报错、加载、翻页、关闭等残留 Emoji、字符图标和手写 SVG 统一替换为现有 Lucide 视觉语言。
+- 文件：新增 `frontend/src/components/TurnNavigator.tsx`、`TurnNavigator.test.tsx`、`MessageList.test.tsx`；修改 `frontend/src/components/MessageList.tsx`、`Message.tsx`、`Message.test.tsx`、`SourceWorkspace.tsx`、`SourcesPanel.tsx`、`DebugPanel.tsx`、`PdfPreview.tsx`、`VideoPlayerDrawer.tsx`、`frontend/src/pages/admin/AdminLayout.tsx`、`AdminUsersPage.tsx`、`AdminDocumentsPage.tsx`、`frontend/src/styles/index.css`、`WORKLOG.md`。
+- 验证：目标 Vitest 4 个文件、13/13 项通过；前端全量 Vitest 21 个文件、86/86 项通过；TypeScript project build 与 Vite production build 通过（2019 modules transformed）；使用仅监听本机的虚构账号、七轮对话、文档与视频来源完成 1440×900 桌面和 390×844 移动端浏览器检查，确认展开导航不遮挡正文、历史来源打开后仍停留原轮次、流式状态持续可见、视频 Lucide 图标生效、移动端无横向溢出且控制台无 error；静态扫描无用户可见 Emoji 或手写 SVG，`git diff --check` 通过。保留既有 React Router future warning、CSS minify warning和主包大于 500 kB 警告。
+- 边界：未修改认证、CSRF、API、SSE 协议、`useChat`、`chatStream`、RAG、索引、后端或依赖；虚构 Mock API 和临时文件已清理，未提交真实反馈或访问生产数据。真实账号和真实长对话验收待用户执行；推送与 CI/CD 状态以 Git 和远端检查结果为准。
 
-### 21:56 — 修复视频媒体页面 HTTP 白屏
+### 14:37 — 增加滚动边缘渐隐与回到底部入口
 
-- 完成：新增客户端请求 ID 兼容生成器，优先使用 `crypto.randomUUID()`，缺失时使用 `crypto.getRandomValues()` 生成规范 UUID v4，Web Crypto 整体不可用时使用时间戳、递增序号和本地随机数组合生成 UUID v4；将 `AdminMediaPage` 上传、成功后轮换和任务重试三处直接调用统一替换，避免局域网 HTTP 非安全上下文因 `randomUUID` 缺失导致整页崩溃。
-- 文件：`frontend/src/lib/request-id.ts`、`frontend/src/lib/request-id.test.ts`、`frontend/src/pages/admin/AdminMediaPage.tsx`、`frontend/src/pages/admin/AdminMediaPage.test.tsx`、`WORKLOG.md`；未修改 API、数据库、worker、Qdrant、真实 ASR 或其他并行前端文件。
-- 验证：请求 ID 与视频媒体页专项 Vitest 共 11 项通过；`npm run build` 通过（1964 modules transformed）；目标文件 `git diff --check` 通过。构建仍报告既有 CSS 语法和大 chunk 警告，本次未扩大范围处理。
+- 完成：左侧会话列表底部与对话输入器上沿增加非交互式渐隐遮罩，移除输入器和右侧来源栏的硬分割线；长对话离开底部超过阈值时，在输入器正上方显示圆形下箭头按钮，点击后平滑回到底部，并与最新多轮对话导航和流式跟随逻辑协同工作。
+- 文件：仅修改用户端 `MessageList.tsx`、`Composer.tsx`、`Sidebar.tsx`、`ChatLayout.tsx`、`styles/index.css` 及 `MessageList.test.tsx`；未修改管理端业务、API、SSE、RAG 或后端逻辑。
+- 验证：前端全量 Vitest 21 个文件、88/88 项测试通过；`npm run build` 通过（2019 modules transformed）；`git diff --check` 无内容错误。浏览器预览正常进入登录页，但当前无登录态，真实长对话视觉点击回归受登录条件限制。
+
+### 15:05 — 修复回答复制的原位反馈
+
+- 完成：修正完成回答实际使用的 `FeedbackBar` 复制入口；复制成功后不再弹出右上角“回答已复制”，而是在原按钮位置显示绿色勾选，1400ms 后恢复复制图标；连续点击会重置恢复计时，组件卸载时会清理计时器，复制失败仍保留错误提示。
+- 文件：仅修改 `frontend/src/components/FeedbackBar.tsx`、对应测试与 `WORKLOG.md`；未修改反馈提交、消息内容、引用、管理端、API、SSE、RAG 或后端业务。
+- 验证：复制反馈专项 Vitest 5/5 通过；前端全量 Vitest 21 个文件、88/88 项测试通过；`npm run build` 通过（2019 modules transformed）；`git diff --check` 无内容错误。
+
+### 15:11 — 修复聊天底部与导航对齐
+
+- 完成：为消息列表底部增加响应式安全留白，避免最新流式回答及操作区被底部输入器遮挡；移除快速轮次导航对消息正文施加的桌面端右侧内边距，使内容列继续以聊天主区域严格居中；收起态当前轮次改为透明背景和主色刻度，消除异常方块高亮；统一收起侧栏底部控件宽度与容器内边距，使主题按钮和用户头像居中，并通过固定头像收缩行为保持正圆。
+- 文件：修改 `frontend/src/components/MessageList.tsx`、`MessageList.test.tsx`、`TurnNavigator.tsx`、`TurnNavigator.test.tsx`、`Sidebar.tsx`、`Sidebar.test.tsx`、`ThemeMenu.tsx`、`UserMenu.tsx`，新增 `frontend/src/components/UserMenu.test.tsx`，更新 `WORKLOG.md`。
+- 验证：前端全量 Vitest 22 个文件、90/90 项测试通过；TypeScript project build 与 Vite production build 通过（2019 modules transformed）；`git diff --check` 通过。保留既有 React Router future warning、CSS minify warning和主包大于 500 kB 警告。
+- 边界：未修改 API、SSE、认证、RAG、索引、后端、依赖或业务数据流；当前本地后端未运行，未使用真实登录态和长对话执行浏览器视觉验收，待部署后由用户复核底部留白、正文居中、导航高亮与折叠侧栏控件。
 
 ## 2026-08-04
 
-### 22:11 — 固定来源开关并精简会话标题栏
+### 01:09 — 修复 Phase 5 与前端跨环境 CI 夹具
+
+- 完成：修正 Phase 5 审核测试误用免审核 approved Profile 和缺少 reviewer 外键数据的问题；为已发布且正式 head 一致的 publication job 增加幂等短路；将依赖 `src.chunk`/Qdrant 的 Phase 5 集成测试移出 Phase 1 `test_transcription*.py` 静态扫描命名空间并保留在独立 CI job；修正会话“今天”分组测试跨到 UTC 前一天的问题。未放宽 production guard、外键或 Phase 1 静态保护。
+- 文件：`api/transcription_publication.py`、`.github/workflows/ci.yml`、`tests/transcription_fixture_helpers.py`、`tests/test_transcription_phase5_application_e2e.py`、`tests/test_transcription_publication_index_adapter.py`、`tests/test_transcript_index_metadata.py`、`tests/test_transcript_retrieval_integration.py`、`tests/test_transcription_phase5_static_boundaries.py`、`frontend/src/components/ConversationList.test.tsx`、`project-docs/plans/multi-engine-transcription-phase5.md`、`WORKLOG.md`。
+- 验证：experimental fixture 的 awaiting-review 与带 reviewer 外键的 approved 转换冒烟通过；Phase 1/5 静态边界 12/12 通过；修改 Python 文件 `py_compile` 通过；会话分组单测分别在 UTC 与 Asia/Shanghai 通过，前端全量 18 个文件、81 项测试及 production build 通过；PR #7 最新代码提交的 `test-transcription-phase5`、`test-transcription-contracts`、`validate`、ASR service、provider、GPU 和 migration config 七个 CI job 全部通过。
+- 边界：本地未安装缺失的 `qdrant_client`；未运行真实 Qdrant、ASR、GPU、生产数据或部署。
+
+### 08:49 — 修复 Windows ASR Python 解析与 staging 重试
+
+- 完成：部署脚本改为仅从 HKLM 与 `Program Files` 解析并运行时验证机器级 Python 3.11，不再依赖 Administrator 用户级 `py.exe`；同一 SHA 的残留 staging 与依赖安装失败 staging 分别移动到 `stale-staging-*`、`failed-staging-*` 备份，避免删除审计证据并允许后续重试。
+- 文件：`scripts/deploy-asr.ps1`、`tests/test_asr_deployment_static.py`、`project-docs/plans/multi-engine-transcription-phase5c-windows-asr-deployment.md`、`WORKLOG.md`。
+- 验证：PowerShell 语法解析通过；Python 测试文件编译通过；在本机未安装 pytest 的前提下直接执行静态测试模块，11/11 项通过；`git diff --check` 通过。远端 CI、合并及生产 R3B-B3 重试按获批流程继续验证。
+- 边界：未读取或输出 Token，未删除生产 staging，未下载模型，未修改防火墙，未注册或启动 Scheduled Task，未启用 Ubuntu ASR 客户端，未运行真实媒体或真实 ASR。
+
+### 11:28 — 接入 R3B-B4 依赖代理
+
+- 完成：为 Windows ASR 手动部署 workflow 接入 `production-asr` 环境的 `ASR_DEPENDENCY_PROXY` Secret；部署脚本仅在 `install_dependencies=true` 的 pip 安装与依赖检查区段临时设置代理，并在结束后恢复 runner 进程环境，未将代理写入 ASR 服务运行配置。
+- 文件：`.github/workflows/deploy-asr-production.yml`、`scripts/deploy-asr.ps1`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
+- 验证：PowerShell AST 解析通过；代理范围静态测试及既有 ASR 部署静态测试 `12 passed`；Python 测试文件编译通过；`git diff --check` 通过。远端 CI、合并及生产依赖安装重跑待后续验证。
+- 边界/风险：未读取或输出 Token 值，未下载模型，未启动 Scheduled Task，未修改防火墙或生产服务状态；本地未运行需要 FastAPI 的 ASR service 测试。
+### 12:50 — 延长 Windows ASR 依赖安装时限
+
+- 完成：根据 R3B-B4 生产重跑证据，将 Windows ASR 手动部署 workflow 的 job 超时从 30 分钟提高到获批的 60 分钟；保持 `install_dependencies`、`activate_service` 默认关闭，并添加唯一超时值的静态保护。
+- 文件：`.github/workflows/deploy-asr-production.yml`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
+- 验证：ASR 部署静态测试 `12 passed`；Python 测试文件编译通过；`git diff --check` 通过。前序 R3B-B4 第二次尝试确认代理生效，Torch 下载达到约 898.1 kB/s，并在 30 分钟上限时完成约 2.2/3.3 GB；R3B-B5 远端 CI、合并与 60 分钟生产重跑待后续验证。
+- 边界/风险：未改变依赖版本、代理范围、服务配置或激活行为；未下载模型、未修改防火墙、未启动 Scheduled Task。若 pip 不复用下载进度，60 分钟仍可能不足。
+
+### 14:39 — 实施 R3B-B6-A 模型准备通道
+
+- 完成：新增独立、手动且默认关闭的 Windows ASR 模型准备 workflow、PowerShell 安全包装器、固定模型下载与严格 Manifest 生成脚本；固定 `iic/SenseVoiceSmall@7bf452403abd7353a300cd760f7adae7701c92c1`，仅允许执行 workflow dispatch revision，并保持服务停用、Scheduled Task 停止和 TCP 8200 关闭。
+- 文件：`.github/workflows/prepare-asr-model-production.yml`、`scripts/prepare-asr-model.ps1`、`scripts/prepare_asr_model.py`、`tests/test_asr_model_preparation_static.py`、`WORKLOG.md`。
+- 验证：模型准备、现有模型缓存与部署边界专项测试 `36 passed`；Python `py_compile`、PowerShell AST 解析和 `git diff --check` 通过。
+- 边界/风险：尚未合并或执行生产模型下载；未启动服务、未注册任务、未修改防火墙、未启用 Ubuntu ASR、未读取或注入 ASR 服务 Token。生产执行仍要求 `production-asr` 环境配置独立的 `ASR_MODEL_DOWNLOAD_PROXY` Secret。
+
+### 20:30 — 完成 R3B-B6 固定模型准备验收
+
+- 完成：通过 GitHub Actions 手动执行生产模型准备 run `#30908870300`，固定 checkout `545c6d6fcc8b82a5980d3f7da5c525a61bf12b9c`，成功准备并验证 `iic/SenseVoiceSmall@7bf452403abd7353a300cd760f7adae7701c92c1` 的 `asr-model-manifest/1` 缓存。
+- 验证：workflow 结论为 success；日志确认 `model_cache_available=True`、`reason_code=available`，固定模型 revision 匹配；Scheduled Task 全程保持停止，TCP 8200 保持未监听。
+- 边界：未启动 ASR 服务、未注册任务、未修改防火墙、未启用 Ubuntu ASR、未读取或输出 Token；未进入 R3C。
+
+### 20:43 — 收敛风险审批与交付粒度
+
+- 完成：将 R2/R3 审批单位明确为独立风险边界，同一获批阶段默认覆盖实现、测试、CI 修复、提交/PR/合并、受控 workflow、同范围重试、验证和日志收口；禁止因临时失败或内部步骤创建微阶段，并明确具体目标已在获批方案中列明时不重复确认。
+- 文件：`AGENTS.md`、`CLAUDE.md`、`.claude/rules/worklog.md`、`WORKLOG.md`。
+- 验证：三份规则的关键条款一致性扫描和 `git diff --check` 通过；确认仍保留新增权限、密钥、网络/防火墙、真实数据、业务流量、不可逆影响和回滚失效时的重新审批门禁。
+- 边界：未修改业务代码、部署 workflow、生产配置、TODO 或计划文件，未执行生产操作。
+
+### 21:20 — 实施 Windows ASR 激活与隔离验收通道
+
+- 完成：新增默认 preflight、显式 activate/rollback 的 Windows ASR 生产 workflow；激活脚本绑定完整 SHA、固定目录、模型 Manifest、Administrator/S4U Scheduled Task 和仅允许 Ubuntu `${PRIVATE_IPV4}` 访问 TCP 8200 的防火墙规则，并为本机或跨节点失败提供按 activation ID 的自动回滚；新增 Ubuntu 只读验证器，在 backend 保持 `ASR_ENABLED=false` 时校验固定 URL、共享 Token、health 与唯一 experimental capabilities 契约。
+- 文件：`.github/workflows/activate-asr-production.yml`、`.github/workflows/ci.yml`、`scripts/activate-asr-production.ps1`、`scripts/verify-asr-service.ps1`、`scripts/verify_asr_from_ubuntu.py`、`scripts/deploy-gpu.ps1`、`scripts/start-gpu-service.ps1`、`tests/test_asr_activation.py`、`tests/test_deploy_git_safety.py`、`project-docs/plans/multi-engine-transcription-phase5c-windows-asr-deployment.md`、`WORKLOG.md`。
+- 验证：激活、既有部署和模型缓存专项测试 `42 passed`；本地可运行的 ASR/Provider 回归 `146 passed`；Python `py_compile`、PowerShell AST 解析、WORKLOG 标题格式和 `git diff --check` 通过；PR #19～#29 的要求检查均通过。生产部署 run `30926446530` 成功恢复 `RAGPinCheng-GPU` 并部署 backend；首次激活因 Ubuntu `prod.env` 中 `ASR_SERVICE_TOKEN` 为空而由跨节点失败回滚，补齐共享 Token 后 run `30927418117` 的 Windows 激活与 Ubuntu 验证均成功且回滚 job 跳过。Windows runner `${PRODUCTION_HOSTNAME}` 已从前台进程切换为 `.\Administrator`、自动启动且正在运行的 Windows 服务，并持久化限定代理配置；最终后台 runner 部署验收 run `30929936069` 的 `deploy-gpu` 与 `deploy-app` 均成功。现场确认 `RAGPinCheng-GPU`、`RAGPinCheng-ASR` 两项 Scheduled Task 均为 Running，GPU `/health` 返回 `status=ok, model_loaded=true`，ASR `/health` 返回 `status=ok, api_version=asr-service/1`。
+- 边界/风险：Windows GPU、ASR 与仅允许 Ubuntu `${PRIVATE_IPV4}` 访问 TCP 8200 的防火墙规则已按获批流程启用并通过双节点验收；Ubuntu backend 仍保持 `ASR_ENABLED=false`。本阶段未上传媒体、未调用任务 API、未创建转录任务，也未访问或修改数据库、Qdrant 与 artifact；后续启用 Ubuntu ASR 客户端及真实转录必须另行审批。
+
+### 22:13 — 统一回答与引用问题反馈弹窗
+
+- 完成：新增共享反馈弹窗，在问题类型前展示由入口固定的“问题分类”；回答下方入口固定为“回答问题”，保留有害/不安全、虚假信息、没有帮助、其他类型；来源核验的“报告引用问题”移除内嵌表单，改用同一弹窗并固定为“引用问题”，提供引用内容不符、来源定位错误、资料已过时、其他类型。
+- 文件：新增 `frontend/src/components/FeedbackDialog.tsx` 及测试，修改 `FeedbackBar.tsx`、`FeedbackBar.test.tsx`、`SourceWorkspace.tsx` 与 `WORKLOG.md`；未修改反馈 API、管理端、消息、引用定位、RAG 或后端业务。
+- 验证：反馈专项 Vitest 2 个文件、6/6 项通过；前端全量 Vitest 26 个文件、114/114 项通过；`npm run build` 通过（2023 modules transformed）；`git diff --check` 无内容错误。保留既有 CSS minify 与主包大于 500 kB 警告。
+
+### 22:34 — 固定来源开关并精简会话标题栏
 
 - 完成：桌面端来源按钮改为固定在视口右上角，展开与收起保持相同宽度、内容顺序和数量徽标，仅切换开合图标并显式取消按钮过渡；移除来源面板内重复且随宽度变化移动的关闭按钮；会话标题由 14px 微调为 15px，并移除标题栏底部分割线。
-- 文件：`frontend/src/components/ChatHeader.tsx`、`frontend/src/components/ChatHeader.test.tsx`、`frontend/src/components/ChatLayout.tsx`、`frontend/src/components/SourceWorkspace.tsx`、`WORKLOG.md`；保留并行进行中的来源轮次、滚动条和聊天布局未提交修改。
-- 验证：来源按钮定向 Vitest 3/3 通过；前端全量 Vitest 18 个文件、82/82 项测试通过；TypeScript project build 与 Vite production build 通过（1964 modules transformed）。构建仍保留既有 React Router future warning、CSS minify warning 和主包大于 500 kB 警告。
-- 待办/风险：尚未使用带来源的真实会话完成桌面端开合位置和移动端抽屉视觉验收；本轮未提交、推送或部署。
+- 文件：`frontend/src/components/ChatHeader.tsx`、`frontend/src/components/ChatHeader.test.tsx`、`frontend/src/components/ChatLayout.tsx`、`frontend/src/components/SourceWorkspace.tsx`、`WORKLOG.md`；未修改来源数据、引用联动、反馈弹窗、API、SSE、RAG 或后端业务。
+- 验证：来源按钮定向 Vitest 3/3 通过；前端全量 Vitest 26 个文件、115/115 项通过；TypeScript project build 与 Vite production build 通过（2023 modules transformed）；`git diff --check` 通过。保留既有 React Router future warning、CSS minify warning 和主包大于 500 kB 警告；本轮未使用真实登录会话进行浏览器视觉验收。
 
 ## 2026-08-05
 
-### 03:31 — 调整来源引用问题入口
+### 02:02 — 修复 SenseVoice 后处理与媒体终态刷新
 
-- 完成：将来源核验面板底部的“报告引用问题”入口移动到“引用原文”标题行右侧，并精简为警示小图标与“报告问题”；保留原有表单展开和提交逻辑。
-- 文件：`frontend/src/components/SourceWorkspace.tsx`、`WORKLOG.md`；保留该组件及仓库中的其他未提交修改。
-- 验证：`npm run build` 通过（1964 modules transformed）；构建仍报告既有 CSS 语法警告和主包大于 500 kB 警告。
-- 待办/风险：尚未使用带来源的真实会话进行视觉验收；本轮未提交、推送或部署。
+- 完成：SenseVoice experimental adapter 在 Candidate 边界前惰性调用 FunASR 官方 `rich_transcription_postprocess`，后处理为空、返回私有对象、抛错或仍残留 `<|...|>` 控制标记时统一失败关闭；管理端在转录任务从活动态进入终态时只重新读取一次媒体列表，使成功任务自动显示“转写草稿就绪”。
+- 文件：`asr_service/engines/funasr_sensevoice.py`、`asr_service/tests/test_funasr_sensevoice.py`、`frontend/src/pages/admin/AdminMediaPage.tsx`、`frontend/src/pages/admin/AdminMediaPage.test.tsx`、`scripts/deploy-asr.ps1`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
+- 验证：SenseVoice adapter、engine contract 与静态边界专项 `20 passed`；前端全量 Vitest 26 个文件、116/116 项通过；TypeScript project build 与 Vite production build 通过（2023 modules transformed）；Windows ASR 部署、激活、模型准备与 Git 安全专项 `52 passed, 6 subtests passed`；相关 PowerShell AST、Python `py_compile` 和 `git diff --check` 通过。完整 ASR/Phase 5 本地收集因当前 Python 环境缺少 `fastapi`、`qdrant_client` 未运行，交由现有 CI 干净环境验证。
+- 边界/风险：Windows 热更新现在仅在严格核验自有 Scheduled Task 和 8200 监听进程后停服换版，等待端口释放并执行本机契约验证；失败时保留原始异常、归档失败版本、恢复备份并按原运行状态重启，未请求激活时拒绝替换运行中服务。未新增依赖，未修改 Provider/Canonical、数据库、索引、Profile、模型 revision、Token 或防火墙；Ubuntu `ASR_ENABLED=false`，首个测试版本继续保持待审核、未发布、未索引。Windows ASR 重新部署及新测试视频复验仍待本提交 CI/合并后执行。
+### 03:17 — 增加顶部滚动边缘渐隐
 
-### 03:51 — 整理当前工作区发布提交
+- 完成：在左侧会话列表与中央消息列表的固定顶部下方增加非交互式滚动边缘渐隐，分别匹配侧栏和页面背景；内容滚入 Logo/新建对话区及聊天标题区时柔和淡出，不影响按钮、滚动条、会话选择或消息交互。
+- 文件：修改 `frontend/src/components/Sidebar.tsx`、`MessageList.tsx`、`styles/index.css` 及对应测试与 `WORKLOG.md`；未修改管理端、消息数据、来源、API、SSE、RAG 或后端业务。
+- 验证：顶部渐隐专项 Vitest 2 个文件、9/9 项通过；前端全量 Vitest 26 个文件、117/117 项通过；`npm run build` 通过（2023 modules transformed）；`git diff --check` 无内容错误。保留既有 CSS minify 与主包大于 500 kB 警告。
 
-- 完成：按用户确认范围整理当前工作区的业务代码、测试、文档和工作日志，明确排除 `.codex-worktrees/` 临时目录，并执行提交前内容检查。
-- 文件：当前工作区除 `.codex-worktrees/` 外的全部已跟踪和新增业务文件。
-- 验证：`git diff --check` 通过；前端最近一次 `npm run build` 通过（1964 modules transformed），各项专项与全量测试结果见本日志对应功能记录。
-- 待办/风险：`origin/master` 比当前分支多 77 个提交且当前分支有 4 个独有提交，无法直接快进推送；禁止强推覆盖远端历史，需先安全整合远端分支。
+### 03:20 — 修复来源开关文字换行
 
-### 04:10 — 微调相邻引用角标间距
+- 完成：将桌面端来源开关从不足的固定宽度改为内容自适应的最小宽度，并为按钮、开合图标、“来源”文字和数量徽标增加禁止换行及禁止收缩保护，修复窄按钮中“来源”被拆成两行的问题，同时保持展开与收起位置、顺序和无动画切换不变。
+- 文件：`frontend/src/components/ChatHeader.tsx`、`frontend/src/components/ChatHeader.test.tsx`、`WORKLOG.md`；未修改来源面板数据、引用联动、布局开合、API、SSE、RAG 或后端业务。
+- 验证：来源按钮定向 Vitest 3/3 通过；前端全量 Vitest 26 个文件、117/117 项通过；TypeScript project build 与 Vite production build 通过（2023 modules transformed）；`git diff --check` 通过。保留既有 React Router future warning、CSS minify warning 和主包大于 500 kB 警告。
 
-- 完成：为正文引用角标增加左右各 1px 的水平留白，使连续角标之间形成轻微间距，保留原有尺寸、位置、悬浮提示和点击交互。
-- 文件：`frontend/src/components/Message.tsx`、`WORKLOG.md`。
-- 验证：`npm run build` 通过（1964 modules transformed）；构建仍报告既有 CSS 语法警告和主包大于 500 kB 警告。
-- 待办/风险：尚未使用带连续引用角标的真实回答进行浏览器视觉验收；远端整合与推送仍暂停。
+### 03:32 — 对齐侧栏主题切换图标
+
+- 完成：将问答页侧栏主题切换按钮的展开态左内边距增加 8px，使显示器、太阳和月亮图标中心与收起态及下方用户头像中心保持一致，主题文字随图标同步调整。
+- 文件：`frontend/src/components/ThemeMenu.tsx`、`frontend/src/components/Sidebar.test.tsx`、`WORKLOG.md`；未修改主题切换逻辑、侧栏宽度、用户菜单或后端业务。
+- 验证：侧栏专项 Vitest 2/2 项通过；TypeScript project build 与 Vite production build 通过（2023 modules transformed）；保留既有 CSS minify 与主包大于 500 kB 警告。
+
+### 03:34 — 加固转录管理流程与重复媒体请求身份
+
+- 完成：按获批 R2 PR 1 将 `transcription_jobs.id` 冻结为 Provider runtime 的应用调用身份，使同一应用任务的网络重试生成相同服务请求 ID、同一媒体的新应用重试任务生成不同 ID；安全解析 ASR 服务 `detail.code` 并区分服务身份冲突和契约不匹配；任务 API 增加面向管理员的 `code/message/retryable` 失败对象，上传与重试幂等冲突保留在应用 API 层。修复前端审核状态误用 `approved/rejected` 的 P0 问题，媒体列表改为唯一当前阶段、独立索引状态、最近 100 条客户端快捷筛选和受失败策略控制的重试入口，移除表格行内大型版本卡片。
+- 文件：修改 Provider Registry/协议/remote Provider、转录应用服务、管理与转录 API/Schema、媒体管理页、版本面板、API client/类型及相关测试；新增 `project-docs/plans/transcription-admin-workflow-hardening.md`，同步 `project-docs/features/transcript-pipeline.md` 与 `TODO.md`。未修改数据库结构、Canonical、InputRef、历史 Phase 5 计划或不可变 Markdown。
+- 验证：Provider、应用、Phase 4/5 API 定向测试 40 项通过；变基到最新 master 后 Provider/应用身份测试 31 项、前端 API、任务 hook、版本面板与媒体页定向测试 34 项通过；TypeScript project build 与 Vite production build 通过（2023 modules transformed）；真实 ASR/GPU/Qdrant、生产数据和部署未运行。
+- 边界/风险：`published` 仍只在候选索引完成并原子切换正式 head 后成立，不新增独立手动索引业务动作；快捷筛选只覆盖最近加载的 100 条；独立转写工作台基础版、驳回原因后端必填、历史 Markdown token 告警及视频时间戳联动留给需重新审批的 PR 2；生产回归仍按 R3 单独审批。
+
+### 03:36 — 修复回答角标与来源高亮切换
+
+- 完成：将来源面板开合、回答轮次和当前引用高亮拆分为独立状态；点击回答角标时始终打开并定位来源面板，高亮对应角标和来源卡片，再次点击同一角标仅取消两侧高亮且保持面板打开；面板原本打开或关闭、桌面布局或移动端抽屉均使用同一持久化选择状态。
+- 文件：`frontend/src/components/ChatLayout.tsx`、`frontend/src/components/SourceWorkspace.tsx`、`frontend/src/components/citations.ts`、`frontend/src/components/citations.test.ts`、`WORKLOG.md`；未修改来源数据、API、SSE、RAG、后端或其他页面样式。
+- 验证：引用切换专项 Vitest 9/9 通过；前端全量 Vitest 26 个文件、118/118 项通过；TypeScript project build 与 Vite production build 通过（2023 modules transformed）；`git diff --check` 通过。保留既有 React Router future warning、CSS minify warning 和主包大于 500 kB 警告。
+- 待办/风险：未使用真实登录会话进行浏览器视觉验收；待用户在桌面端及移动端分别复核面板初始关闭、初始打开和连续切换不同角标三种交互。
+
+### 03:54 — 修复对话轮次快速导航高亮滞后
+
+- 完成：程序化平滑滚动期间锁定用户点击的目标轮次，避免滚动监听在动画途中按旧位置把高亮覆盖回上一轮；滚动停止 160ms 后解除锁定并恢复正常 Scroll Spy 判定。
+- 文件：`frontend/src/components/MessageList.tsx`、`frontend/src/components/MessageList.test.tsx`、`WORKLOG.md`；未修改消息数据、会话接口、来源面板、RAG 或后端逻辑。
+- 验证：新增平滑滚动经过上一轮时仍保持目标高亮的回归测试；`MessageList.test.tsx` 7/7 通过。生产构建已执行到 1683 modules transformed，随后因复用的主工作区依赖缺少既有 `@radix-ui/react-dialog` 而失败，属于隔离工作树依赖不完整，未安装或修改依赖。
+- 待办/风险：尚未在真实长对话页面进行视觉验收；需在该工作树依赖完整的环境中补跑完整 TypeScript 与 production build。
+
+### 04:26 — 调整引用问题入口与角标间距
+
+- 完成：基于最新 `origin/master` 将“报告引用问题”移动到“引用原文”标题右侧并精简为小图标与“报告问题”；为连续引用角标增加轻微水平间距，同时保留反馈弹窗、引用定位、悬浮提示和点击交互。
+- 文件：`frontend/src/components/SourceWorkspace.tsx`、`frontend/src/components/Message.tsx`、`WORKLOG.md`。
+- 验证：基于最新 `origin/master` 的 TypeScript project build 与 Vite production build 通过（2023 modules transformed）；`git diff --check` 通过。构建仍保留既有 CSS minify 与主包大于 500 kB 警告。
+- 待办/风险：尚未使用真实登录会话进行浏览器视觉验收；未修改 API、SSE、RAG、数据库或后端业务。
+
+### 04:28 — 接入准入关闭的 faster-whisper Provider
+
+- 完成：按获批 R2 将固定 `faster-whisper==1.2.1`、`ctranslate2==4.8.1` 和 `dropbox-dash/faster-whisper-large-v3-turbo@0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf` 接入既有 Profile/remote Provider/ASR EngineRegistry；adapter 仅惰性导入真实依赖，固定本地 CUDA FP16 与解码参数，严格归一化 segment 毫秒并输出 `EngineChunkCandidate | ProviderFailure`。应用 Profile 保持 `experimental + disabled`，唯一结果流仍为 `pipeline.py → normalizer → Canonical → formatter`。scoped review 补强了两个可信远程配置对各自 `service_profile_id` 的精确锁定，禁止合法 slug 之间交叉替换。
+- 文件：新增 `asr_service/engines/faster_whisper.py`、隔离依赖与模型 Manifest 示例、adapter 测试和 `project-docs/plans/faster-whisper-provider-integration.md`；最小修改可信 Profile/catalog、remote Provider factory、应用组装、ASR service config/app/model cache/engine contract、相关测试、功能文档与 `TODO.md`。未修改数据库、API Schema、前端、worker、Qdrant、BGE、Canonical、normalizer、formatter、pipeline 或生产部署 workflow。
+- 验证：无 FastAPI、无真实引擎的 ASR/Provider/应用回归 `187 passed`；Phase 1 类型、Profile、Canonical、normalizer、formatter、policy 与静态边界回归 `189 passed`；修改代码和测试 `py_compile` 通过，`git diff --check` 通过。现有 CI 的 `test-asr-service-contract` 会自动收集新增 adapter 测试，无需修改 workflow。
+- 待办/风险：本机项目 `.venv` 缺少既有 `fastapi`，因此 `asr_service/tests/test_api_contract.py` 和 `tests/test_transcription_phase4_api.py` 未在本地执行，必须由远端 CI 验证；本轮未安装依赖、未下载模型、未运行 ffmpeg/真实 ASR/GPU、未部署或修改 Windows/Ubuntu 配置。后续 R3 依赖、模型、CUDA、资源和短样本门禁通过前不得启用 faster-whisper admission。
 
 ### 04:32 — 增加消息复制与回答重新生成
 
-- 完成：为用户提问增加复制按钮，为最后一轮助手回答增加紧邻复制按钮的重新生成入口；重新生成从目标轮之前恢复既有 `ChatSession` 流程，保留旧回答、来源和检索状态为可切换版本，后续上下文只采用当前有效版本；存在后续追问时禁用历史回答重新生成，失败时恢复原回答。新增向后兼容的回答版本、有效版本指针和轮次分类范围表，不覆盖基础消息正文，不增加会话轮次。
-- 文件：`api/conversation_runtime.py`、`api/db_migrations.py`、`api/routes_chat.py`、`api/schemas.py`、`frontend/src/api/chatStream.ts`、`frontend/src/components/ChatLayout.tsx`、`frontend/src/components/Message.tsx`、`frontend/src/components/MessageList.tsx`、`frontend/src/hooks/useChat.ts`、`frontend/src/types.ts`、`frontend/src/components/Message.test.tsx`、`tests/test_answer_regeneration.py`、`tests/test_transcription_db_migrations.py`、`project-docs/features/chat-runtime.md`、`WORKLOG.md`。
-- 验证：后端回答版本与迁移专项测试 13/13 通过；Python 语法检查通过；前端全量 Vitest 19 个文件、85/85 项测试通过；TypeScript 检查与 Vite production build 通过（1964 modules transformed）；`git diff --check` 通过。构建保留既有 CSS minify、主包大于 500 kB 与 React Router future warning。
+- 完成：基于最新 `origin/master` 集成为用户提问增加复制按钮，为最后一轮助手回答增加紧邻复制按钮的重新生成入口；重新生成从目标轮之前恢复既有 `ChatSession` 流程，保留旧回答、来源和检索状态为可切换版本，后续上下文只采用当前有效版本；存在后续追问时禁用历史回答重新生成，失败时恢复原回答。新增向后兼容的回答版本、有效版本指针和轮次分类范围表；SSE 完成事件回传持久化助手消息 ID，使新回答完成后无需刷新即可重新生成。不覆盖基础消息正文，不增加会话轮次。
+- 文件：`api/conversation_runtime.py`、`api/db_migrations.py`、`api/routes_chat.py`、`api/schemas.py`、`frontend/src/api/chatStream.ts`、`frontend/src/components/ChatLayout.tsx`、`frontend/src/components/FeedbackBar.tsx`、`frontend/src/components/Message.tsx`、`frontend/src/components/MessageList.tsx`、`frontend/src/hooks/useChat.ts`、`frontend/src/types.ts`、对应前后端测试、`project-docs/features/chat-runtime.md`、`WORKLOG.md`。
+- 验证：最新 master 基线上后端回答版本与迁移专项测试 13/13 通过；Python 语法检查通过；前端全量 Vitest 27 个文件、126/126 项测试通过；TypeScript 检查与 Vite production build 通过（2023 modules transformed）；`git diff --check` 通过。构建保留既有 CSS minify、主包大于 500 kB 与 React Router future warning。
 - 待办/风险：功能处于待用户验收；尚未连接真实 LLM、真实登录会话或生产数据库执行端到端重新生成，未部署。首次启动将按现有迁移流程备份并为 `app.sqlite` 新增三个版本表，不需要重建 Qdrant 索引。
+
+### 04:58 — 修复提问复制并调整回答操作顺序
+
+- 完成：用户提问复制改为与助手回答共用安全上下文 Clipboard API 与局域网 HTTP `execCommand` 回退，复制成功后显示绿色打勾并在 1.4 秒后恢复；助手回答操作按“版本切换、重新生成、复制、反馈”排列。
+- 文件：`frontend/src/utils/clipboard.ts`、`frontend/src/components/Message.tsx`、`frontend/src/components/FeedbackBar.tsx`、对应组件测试、`WORKLOG.md`。
+- 验证：复制与按钮顺序专项测试 15/15 通过；前端全量 Vitest 27 个文件、126/126 项测试通过；TypeScript 检查和 Vite production build 通过（2024 modules transformed）；`git diff --check` 通过。构建保留既有 CSS minify、主包大于 500 kB 与 React Router future warning。
+- 待办/风险：尚未在真实局域网 HTTP 登录会话中进行浏览器人工验收；未修改 API、SSE、RAG、数据库或部署配置。
+
+### 05:00 — 合并 faster-whisper R2 并编制统一 R3 方案
+
+- 完成：PR #34 的 7 个 CI 检查全部成功后，以 merge commit `43996495c018c00fa6e473c418f57732a08744ea` 合并到 `master`；基于最新 master 编制 `faster-whisper-r3-unified-qualification.md`，将历史 SSH/retry1～retry5 降为只读审计记录，统一为一次仓库交付和一次显式 `production-asr` workflow。方案固定使用独立资格 venv、run-local artifact、loopback 18200、固定模型 revision、8 个非敏感样本、既有质量阈值及 GPU/BGE 资源门禁；R3 通过后仍不自动开放 Profile。
+- 文件：新增 `project-docs/plans/faster-whisper-r3-unified-qualification.md`，同步 `project-docs/features/transcript-pipeline.md`、`TODO.md` 与 `WORKLOG.md`；未修改业务代码、依赖、workflow、生产配置、数据库、Qdrant 或 Profile admission。
+- 验证：只读核对当前部署、模型准备、激活 workflow 与脚本、现有 CI 收集路径、R2 Profile/adapter/model cache、历史 faster-whisper 预检与失败记录；文档范围与最新 master merge SHA 对齐。未运行测试、安装依赖、下载模型、连接生产服务或执行真实 GPU 推理。
+- 待办/风险：R3 仍为待审批方案；执行前必须准备固定路径下的 8 样本严格 Manifest，并重新核验 Windows/Ubuntu/GPU/ASR/BGE 当前状态。历史 R3A/retry 脚本不得继续执行。
+
+### 05:02 — 移除知识范围重复清除入口
+
+- 完成：移除提问框知识范围菜单底部的“清除筛选”按钮，保留顶部“全部企业知识”作为唯一清空筛选入口，筛选行为和数据逻辑不变。
+- 文件：`frontend/src/components/KnowledgeScopePicker.tsx`、`WORKLOG.md`；未修改 API、RAG、后端或其他界面。
+- 验证：TypeScript project build 与 Vite production build 通过（2024 modules transformed）；`git diff --check` 通过。构建保留既有 CSS minify 与主包大于 500 kB 警告。
+
+### 05:04 — 将管理端账户与主题入口移至侧栏底部
+
+- 完成：移除管理面板右上角的管理员身份、返回和退出入口；在桌面端左侧栏底部复用问答页的主题切换和账户菜单，管理员展开菜单后可“返回对话”或“退出登录”，并保留问答页原有“管理后台”入口行为。
+- 文件：`frontend/src/pages/admin/AdminLayout.tsx`、`frontend/src/pages/admin/AdminLayout.test.tsx`、`frontend/src/components/UserMenu.tsx`、`WORKLOG.md`。
+- 验证：管理布局与问答侧栏定向 Vitest 4/4 通过；前端全量 Vitest 27 个文件、126/126 项通过；TypeScript project build 与 Vite production build 通过（2024 modules transformed）；`git diff --check` 通过。保留既有 React Router future warning、CSS minify warning 和主包大于 500 kB 警告。
+- 待办/风险：尚未使用真实管理员登录会话进行浏览器视觉验收；未修改 API、认证规则、数据、依赖或部署配置。
+
+### 05:27 — 实施 faster-whisper R3 统一资格通道
+
+- 完成：按获批 R3 方案新增默认关闭且只允许完整 master SHA 的 `production-asr` workflow、Windows 隔离编排器、固定 Hugging Face revision 模型准备器、严格 8 样本 Manifest/质量运行器及负面/静态测试。资格通道固定使用独立 run venv、binary wheelhouse、生产 freeze 约束、许可证门禁、loopback 18200、临时随机 Token、Candidate → Remote Provider → pipeline → Canonical → Markdown → 现有 parser 全链路，以及 CUDA FP16、CER/术语/编号/时间戳/RTF、GPU/BGE、精确 PID 清理和生产任务/防火墙末态门禁；未修改现有 Profile admission、ASR/GPU Scheduled Task、防火墙、Ubuntu 配置、数据库、API、UI、worker 或 Qdrant。
+- 文件：新增 `.github/workflows/qualify-faster-whisper-production.yml`、`scripts/qualify-faster-whisper-production.ps1`、`scripts/prepare_faster_whisper_model.py`、`scripts/run_faster_whisper_qualification.py`、`asr_service/faster-whisper-qualification-manifest.example.json`、`asr_service/tests/test_faster_whisper_qualification.py` 和统一 R3 方案；最小更新 `tests/test_asr_deployment_static.py`、转录功能文档与 `TODO.md`。
+- 验证：R3 专项与生产静态边界 46/46 通过；全部本地可用 ASR service/Profile/Remote Provider/部署和激活相关回归 221/221 通过；Python `compileall`、PowerShell AST 与 `git diff --check` 通过。当前本机既有 `.venv` 仍缺 FastAPI，因此 `asr_service/tests/test_api_contract.py` 与 `test_auth.py` 未本地收集，须由现有 `test-asr-service-contract` CI 在干净环境验证。
+- 待办/风险：尚未提交、推送、创建 PR 或运行远端 CI；尚未安装真实 faster-whisper 依赖、下载模型、读取生产样本、启动 18200 或执行 CUDA。生产资格 workflow 还要求 Windows 固定输入目录存在 8 个已声明的非敏感 PCM WAV 及严格 `manifest.json`；缺失或身份不符会在下载前失败关闭。
+
+### 05:49 — 固定管理面板桌面侧栏
+
+- 完成：为管理面板桌面端侧栏增加粘滞定位、顶部栏偏移和独立对齐，使页面内容向下滚动时侧栏始终固定在顶部栏下方，左下角主题与管理员菜单保持可见；移动端布局不变。
+- 文件：`frontend/src/pages/admin/AdminLayout.tsx`、`frontend/src/pages/admin/AdminLayout.test.tsx`、`WORKLOG.md`。
+- 验证：管理布局定向 Vitest 2/2 通过；TypeScript project build 与 Vite production build 通过（2024 modules transformed）；`git diff --check` 通过。保留既有 React Router future warning、CSS minify warning 和主包大于 500 kB 警告。
+- 待办/风险：尚未使用真实管理员登录会话进行浏览器滚动验收；未修改业务组件、API、认证、数据、依赖或部署配置。
+
+### 05:49 — 增加 R3 固定合成样本准备通道
+
+- 完成：在既有 faster-whisper R3 workflow 增加默认关闭的固定样本准备开关；新增 Windows 内置 `zh-CN` TTS 生成器，在审计 staging 中生成 8 个非敏感 16 kHz mono PCM16 WAV，为带噪场景叠加固定种子低幅噪声，按实际时长和 SHA-256 生成严格 Manifest，并在提升前后复用现有资格验证器校验 Schema、文件和固定语义。已有固定样本可幂等复用，空目录保留审计副本后提升，其他已有内容失败关闭且不覆盖、不删除。
+- 文件：新增 `scripts/prepare-faster-whisper-qualification-samples.ps1`；修改 `.github/workflows/qualify-faster-whisper-production.yml`、`tests/test_asr_deployment_static.py` 和 `project-docs/plans/faster-whisper-r3-unified-qualification.md`。
+- 验证：workflow YAML、严格 Manifest 单段/空段数组序列化及 `git diff --check` 通过；R3 专项 47/47 通过；本地无外部服务的 ASR/Profile/Remote Provider/部署回归 322/322 通过；PR #36、编码修复 PR #37 和路径修复 PR #38 的 7 项 CI 均全部通过，依次以 `45a4ebe6d97847348e6add9c33349d12dadc4fde`、`41de4fefb5dac1649c0590bb4ed75030064151b2`、`60054b588144547370bb1b5357830599e02f093a` 合并。生产 workflow `30954369811` 暴露并关闭 Windows PowerShell 5.1 无 BOM UTF-8 中文解析问题；`30954705433` 成功生成和严格校验固定 8 样本并暴露 pip 反斜杠路径问题；最终 `30955067671` 幂等复用样本后在 production freeze 与组合依赖解析处得到 `dependency_preparation_failed`，未进入模型下载、18200 服务或 CUDA 推理。脱敏 verdict 确认 `production_services_modified=false`、`profile_admission=disabled`。
+- 待办/风险：faster-whisper R3 未通过；后续必须先确认 production freeze 与 FunASR 项的精确冲突包，再对依赖 pin、约束或隔离方式提交新方案审批。未启动或修改 ASR/GPU 生产服务、Scheduled Task、防火墙、Ubuntu、数据库、Qdrant、业务媒体或 Profile admission。
+
+### 06:03 — 落地管理端资料管理工作流 PR1
+
+- 完成：按获批 R2 方案将资料管理页改为资料列表优先；后端合并 Parent 索引与同一源文件最新索引任务，纳入尚未索引的处理中/失败资料并提供统计、搜索、分类、类型、语义状态筛选和服务端分页；前端新增上传抽屉、多文件队列、状态总览、当前生命周期、行操作菜单和默认保留源文件的安全删除确认，索引任务降为折叠活动视图。主列表隐藏绝对源路径并对失败摘要脱敏，无数据库迁移。
+- 文件：`api/routes_admin.py`、`api/schemas.py`、`frontend/src/api/client.ts`、`frontend/src/types.ts`、`frontend/src/pages/admin/AdminDocumentsPage.tsx`、新增 `frontend/src/components/ui/sheet.tsx`、相关前后端测试、`project-docs/plans/admin-document-management-pr1.md`、资料索引功能文档与 `TODO.md`。
+- 验证：后端资料聚合与状态筛选专项测试 2/2 通过，修改 Python 文件语法检查通过；前端全量 Vitest 27 个文件、127/127 项通过；TypeScript project build 与 Vite production build通过（2025 modules transformed）；虚构数据下完成桌面浏览器资料列表、上传抽屉和行操作菜单视觉检查。构建保留既有 React Router future warning、CSS minify warning 和主包大于 500 kB 警告。
+- 用户验收：2026-08-05 06:06，用户明确确认“验收通过”，本任务状态更新为已完成。
+- 边界/风险：未部署、未删除真实资料、未重建索引。资料 ID 由部署内源路径哈希派生，跨部署移动源目录不保证不变；窄屏仍采用横向表格滚动。
+
+### 06:27 — 增加 faster-whisper R3 依赖冲突诊断
+
+- 完成：按获批 R3 方案新增默认关闭的 `production-asr` 依赖诊断 workflow 和纯 ASCII Windows PowerShell 入口；固定读取 source run `30955067671`，优先复用既有 resolver 日志，不足时只在独立 venv 重放 pip dry-run。诊断严格校验 production freeze、组合 requirements 和文件身份，只输出脱敏冲突行与 SHA-256，拒绝 URL、代理、Token、绝对路径和完整 freeze；不安装依赖、不下载模型、不启动服务或 CUDA。
+- 文件：新增 `.github/workflows/diagnose-faster-whisper-dependencies-production.yml`、`scripts/diagnose-faster-whisper-dependencies.ps1`；修改 `tests/test_asr_deployment_static.py` 和 `project-docs/plans/faster-whisper-r3-unified-qualification.md`。
+- 验证：初版经 PR #40 的 7 项 CI 全绿后合并为 `889a4c82fb04e40d9f1f6cbc319826bdf6d14f04`；生产诊断 run `30956817205` 安全完成 dry-run 和脱敏 artifact 上传，但暴露出初版会把兼容的裸依赖误判为冲突。PR #41 的 7 项 CI 全绿并合并为 `dbbc66d7467bf61def70c9d52324385bce60b7dd`；run `30957468479` 正确失败关闭为 `conflict_details_insufficient`，进一步定位为 PowerShell 5.1 stderr 的本机路径前缀先于严格错误短语提取而被丢弃。第二个最小修复改为只从固定 pip 错误短语提取 ASCII 包名、绝不保留路径；PowerShell AST、带路径前缀的脱敏正/负自检、`git diff --check` 和 R3 定向测试 72/72 通过。
+- 继续验证：路径前缀修复经 PR #42 的 7 项 CI 全绿后合并为 `7409aa83594f12afc44d4c58280e8f634f66fc9f`；run `30957856578` 仍正确失败关闭，证明完整 resolver 只提供裸依赖与同名 constraint，不能单独证明版本矛盾。新增同 index、同 freeze、binary-only 的单 requirement pip dry-run，只允许从该聚焦探针确认无匹配 binary distribution；探针成功或错误种类不明确时继续失败关闭。本地 PowerShell AST/脱敏自检、workflow YAML、`git diff --check` 和 R3 定向测试 72/72 通过。
+- CI 修复：聚焦探针已提交 PR #43；其首轮 6/7 项通过，唯一失败与本 PR 无关，最新 `master` 也因并行提交 `f75ee7c` 修改 `src/indexing_pipeline.py` 后未同步 Phase 2 保护哈希而失败。经单独批准，复核该提交后仅把保护哈希更新为归一化 SHA-256 `4ee589e1a952c172091585696c991acf0227f8b4b89a3e01bae8499d841a3c34`；保护边界与 R3 定向测试 78/78 通过。
+- 结果：PR #43 更新后 7 项 CI 全绿并合并为 `60a1ee365bb783f1bafffd5b400fbd1b5e3e87c4`。聚焦诊断 run `30958705041` 安全返回 `affected_requirement=jieba`、单包探针退出码 1；结合 production freeze 的 `jieba==0.42.1`、resolver 的 `funasr 1.4.1 depends on jieba`、PyPI release metadata 仅有 sdist 无 wheel，以及本地公开索引同参数 dry-run 的 `No matching distribution found`，精确确认 blocker 为 `--only-binary=:all:` 与 `jieba 0.42.1` 发布物类型不兼容，而非版本范围冲突。
+- 待办/风险：诊断已完成并停止；未修改依赖 pin、production freeze、模型、服务、隔离结构或 Profile admission。构建受控内部 wheel、放宽 binary-only 或调整环境隔离均须另交 R3 方案审批。
+
+### 06:47 — 修复资料完全删除后的幽灵条目
+
+- 完成：按获批 R2 方案修正资料列表聚合，已完成但已无 Parent 索引的历史 `index_jobs` 不再生成“可检索”资料条，处理中和失败的未索引任务仍可见；底层删除结果新增 `not_requested/deleted/missing/failed` 状态并保留既有 `file_deleted`，源文件原本不存在按幂等成功处理，删除失败时前端明确提示索引已移除但源文件仍需处理。为避免刷新卸载弹窗导致警告消失，部分完成提示在用户关闭后再刷新列表。
+- 文件：`src/indexing_pipeline.py`、`api/routes_admin.py`、`api/schemas.py`、`frontend/src/api/client.ts`、`frontend/src/pages/admin/AdminDocumentsPage.tsx`、相关前后端测试、资料索引功能文档、PR1 实施说明与 `TODO.md`。
+- 验证：后端资料聚合、删除响应和源文件状态专项测试 7/7 通过；资料页与 API client 专项 21/21 通过；前端全量 Vitest 27 个文件、128/128 项通过；TypeScript project build 与 Vite production build通过（2025 modules transformed）。构建保留既有 React Router future warning、CSS minify warning 和主包大于 500 kB 警告。
+- 待办/风险：代码完成，待用户使用可清理的非敏感资料验收；未访问或删除真实资料，未连接真实 Qdrant/生产数据库，未部署、未重建索引。历史任务仍保留在“索引活动”中作为审计记录。
+
+### 06:50 — 统一管理面板与对话页侧栏样式
+
+- 完成：在最新 `master` 管理布局上保留侧栏固定定位、底部主题菜单和账户菜单，将桌面侧栏宽度从 16rem 调整为与对话页一致的 17rem，并复用对话侧栏的背景与前景主题令牌；保留主分支现有的无分隔线设计。
+- 文件：`frontend/src/pages/admin/AdminLayout.tsx`、`frontend/src/pages/admin/AdminLayout.test.tsx`、`WORKLOG.md`。
+- 验证：管理布局专项 Vitest 3/3 通过；TypeScript project build 与 Vite production build 通过（2025 modules transformed）；`git diff --check` 通过。构建保留既有 React Router future warning、CSS minify warning 和主包大于 500 kB 警告。
+- 待办/风险：尚未使用真实管理员登录会话进行桌面与移动端视觉验收；未修改业务逻辑、API、认证、数据、依赖或部署配置。
+
+### 06:54 — 修复会话侧栏顶部渐隐遮挡
+
+- 完成：会话列表位于滚动顶部时不再显示顶部渐隐，避免遮淡“今天”分组标题；仅在列表向下滚动后显示顶部渐隐，滚回顶部时立即移除，底部渐隐保持不变。
+- 文件：`frontend/src/components/Sidebar.tsx`、`frontend/src/components/Sidebar.test.tsx`、`WORKLOG.md`。
+- 验证：侧栏专项 Vitest 3/3 通过；TypeScript project build 与 Vite production build 通过（2025 modules transformed）；`git diff --check` 通过。构建保留既有 CSS 语法警告和主包大于 500 kB 警告。
+- 待办/风险：尚未使用真实登录会话完成浏览器视觉验收；未修改消息区或来源区渐隐、API、后端、数据与依赖声明。
+
+### 06:54 — 建立反馈处理闭环
+
+- 完成：将只读反馈日志页升级为管理员处理队列，新增待处理、处理中、已完成、已归档状态，支持处理结果、备注、处理人、重新打开、归档恢复、关键词与类型/评价/状态筛选和服务端分页；原始 JSONL 保持追加式，新记录使用 UUID，历史记录生成稳定兼容 ID，不提供永久删除。
+- 文件：`api/db_migrations.py`、`api/feedback.py`、`api/routes_admin.py`、`api/schemas.py`、`frontend/src/api/client.ts`、`frontend/src/types.ts`、`frontend/src/pages/admin/AdminFeedbackPage.tsx`、相关前后端测试、`project-docs/features/feedback-management.md`、功能地图与 `WORKLOG.md`。
+- 验证：反馈与数据库迁移专项测试 12 项通过，接口级用例因当前项目 `.venv` 缺少 FastAPI 而明确跳过 1 项；前端全量 Vitest 27 个文件、128/128 项通过；TypeScript 与 Vite production build 通过（2025 modules transformed）；`git diff --check` 通过。构建保留既有 CSS minify 与主包大于 500 kB 警告。
+- 待办/风险：尚未在包含完整后端依赖的环境验证管理员鉴权/CSRF 接口用例，也未使用真实管理员会话进行浏览器人工验收；状态更新采用最后写入生效，未提供多人同时编辑冲突提示；依赖安装报告的既有审计风险未在本次升级依赖。
+
+### 06:58 — 增加最后一问原位编辑与管理端审计
+
+- 完成：在用户提问复制按钮右侧增加原位编辑入口，仅允许编辑最后一问；编辑成功后复用完整聊天检索与生成链路，并原子切换问题和回答活动版本，失败时保留原内容。管理面对话详情继续只读展示当前内容，并可展开查看问题编辑记录及其对应回答版本。
+- 文件：`api/conversation_runtime.py`、`api/db_migrations.py`、`api/routes_chat.py`、`api/schemas.py`、`frontend/src/api/chatStream.ts`、`frontend/src/components/ChatLayout.tsx`、`frontend/src/components/Message.tsx`、`frontend/src/components/MessageList.tsx`、`frontend/src/hooks/useChat.ts`、`frontend/src/pages/admin/AdminConversationsPage.tsx`、`frontend/src/types.ts`、相关前后端测试、`project-docs/features/chat-runtime.md`、`WORKLOG.md`。
+- 验证：Python 语法检查通过；提问编辑、回答版本和数据库迁移专项测试 15/15 通过；前端全量 Vitest 27 个文件、135/135 项通过；TypeScript project build 与 Vite production build 通过（2025 modules transformed）；`git diff --check` 通过。后端全量测试在收集阶段因当前虚拟环境缺少 `numpy`、`fastapi` 和 `qdrant_client` 未能执行，未出现业务断言失败。构建保留既有 React Router future warning、CSS minify warning 和主包大于 500 kB 警告。
+- 待办/风险：功能待用户使用真实登录会话和真实 LLM 验收；首次启动会按现有迁移流程备份 `app.sqlite`，新增用户问题版本表并为回答版本增加关联字段，不需要重建 Qdrant 索引。未部署、未操作真实对话数据。
+
+### 07:01 — 重构用户管理行内操作
+
+- 完成：将用户表格每行三个宽度不一的操作按钮收敛为固定尺寸的三点管理入口；角色调整与密码重置置于操作菜单上部，启停账号作为状态敏感操作经分隔线独立置底，并补充点击外部、滚动/缩放和 Esc 关闭能力，消除管理员与普通用户行的操作错位。
+- 文件：`frontend/src/pages/admin/AdminUsersPage.tsx`、`frontend/src/pages/admin/AdminUsersPage.test.tsx`、`WORKLOG.md`。
+- 验证：用户管理专项 Vitest 9/9 通过；TypeScript project build 与 Vite production build 通过（2025 modules transformed）；`git diff --check` 通过。构建保留既有 CSS 语法与主包大于 500 kB 警告。
+- 待办/风险：尚未使用真实管理员登录会话完成桌面与窄屏视觉验收；未修改 API、权限契约、数据结构、依赖或其他管理页面。
+
+### 07:02 — 修复来源按钮计数不同步
+
+- 完成：顶部来源按钮与来源核验面板共用回答来源集合规则；存在有效当前回答时显示该轮来源数，未选择或选择失效时回退到最后一条含来源回答，修复多轮会话中按钮数字与当前面板数字不一致。
+- 文件：`frontend/src/components/ChatLayout.tsx`、`frontend/src/components/SourceWorkspace.tsx`、`frontend/src/components/sourceSelection.ts`、`frontend/src/components/sourceSelection.test.ts`、`WORKLOG.md`。
+- 验证：来源选择与标题按钮专项 Vitest 2 个文件、5/5 项通过；TypeScript project build 与 Vite production build 通过（2026 modules transformed）；`git diff --check` 通过。构建保留既有 CSS 语法和主包大于 500 kB 警告。
+- 待办/风险：尚未使用含多个不同来源数量回答的真实会话进行桌面和移动端视觉验收；未修改 API、数据结构、RAG、依赖或部署。
 
 ### 07:19 — 稳定管理面板滚动槽
 
 - 完成：确认长页面出现浏览器纵向滚动条后会缩小可用宽度，使居中内容向左偏移半个滚动条宽度；管理面板挂载期间现会为根页面预留稳定滚动槽，短页与长页保持同一水平居中基准，离开管理面板后自动清理。
-- 文件：`frontend/src/pages/admin/AdminLayout.tsx`、`frontend/src/pages/admin/AdminLayout.test.tsx`、`frontend/src/styles/index.css`、`WORKLOG.md`；保留上述文件及仓库内其他并行未提交修改。
+- 文件：`frontend/src/pages/admin/AdminLayout.tsx`、`frontend/src/pages/admin/AdminLayout.test.tsx`、`frontend/src/styles/index.css`、`WORKLOG.md`。
 - 验证：管理布局专项 Vitest 4/4 通过；TypeScript project build 与 Vite production build 通过（1965 modules transformed）。构建保留既有 CSS 语法与主包大于 500 kB 警告。
 - 待办/风险：功能处于待用户验收；尚未在真实管理员登录态下切换长短页面做浏览器视觉对比。本轮未修改 API、数据、依赖或部署，回滚只需移除管理布局生命周期类及对应 CSS。
+
+### 07:20 — 修复引用角标悬浮框异常
 
 - 完成：在最新 `master` 上将引用悬浮框统一为主题语义色，恢复深色模式下不可见的来源标题；消除角标与浮层之间的命中空隙，改为可取消的 150ms 延迟关闭，使鼠标可稳定移入浮层；保留视口边缘自动翻转，并将浮层改为段落内合法的行内容器。
 - 文件：`frontend/src/components/Message.tsx`、`frontend/src/components/Message.test.tsx`、`WORKLOG.md`。
@@ -1923,13 +2125,6 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 验证：PowerShell AST、隔离脱敏器的 binary/version/network/unknown 正负自测、workflow YAML、部署静态测试 25/25 和 `git diff --check` 通过。
 - 远端进展：PR #47 的 7 项 CI 全部通过并合并为 `cd56f4a0e116a28ef12575748e25c25ffab628f2`；资格 run `30963495106` 仍失败关闭且 verdict 确认服务与 admission 未变化，但 PowerShell 5.1 在空日志集合上拒绝 mandatory array，导致附加诊断文件未生成。同范围修复允许空集合、以内置 `evidence_insufficient` 回退，并优先写 runner artifact 路径。
 - 待办/风险：空集合兼容修复尚待独立 PR、CI、合并和相同参数重试；不得修改依赖、production freeze、服务或 Profile admission。
-
-### 08:27 — 统一来源核验列表图标风格
-
-- 完成：将来源核验列表中的文档、表格等来源类型图标统一为视频图标采用的 24px 圆角浅蓝底容器与强调色线框，使同一列表内的类型图标尺寸、底色和视觉层级一致；未改动来源编号、类型判断、文案或交互。
-- 文件：`frontend/src/components/SourceWorkspace.tsx`、`WORKLOG.md`；保留目标文件及仓库内其他并行未提交修改。
-- 验证：来源工作区专项 Vitest 2/2 通过；TypeScript project build 与 Vite production build 通过（1965 modules transformed）；目标文件 `git diff --check` 通过。构建保留既有 CSS 语法与主包大于 500 kB 警告。
-- 待办/风险：功能处于待用户验收；尚未在真实混合来源列表中进行视觉验收。本轮未修改 API、数据、依赖或部署，回滚仅需恢复该图标容器样式。
 
 ### 09:06 — 发布资源预览动画到 master
 
@@ -2242,3 +2437,11 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 完成：run `31180581665` 证明 `Start-Process -ArgumentList` 即使传 `1` 仍以字符串到达子 PowerShell；改为传 `-ExecuteQualification:$true`，由子解释器解析为真正布尔值。
 - 文件：`.github/workflows/qualify-faster-whisper-production.yml`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
 - 验证：待提交后重新触发资格 run。
+### 21:45 — 修复 faster-whisper 外层 wrapper 布尔传参
+
+- 完成：将 `qualify-faster-whisper-production.ps1` 的 `ExecuteQualification` 参数由 `[bool]` 改为 `[string]`，并在脚本顶部按白名单字符串转布尔，避免 `Start-Process -ArgumentList` 传布尔时被字符串化导致参数绑定失败。
+- 文件：`scripts/qualify-faster-whisper-production.ps1`、`.github/workflows/qualify-faster-whisper-production.yml`、`tests/test_asr_deployment_static.py`
+- 验证：PowerShell AST 解析通过；`test_asr_deployment_static.py` 31 passed。
+
+### 00:15 — 修复 PR #50 合并后的回归
+恢复 master 中被错误冲突解决覆盖的 API、前端和测试文件，使用最新 master 树重新验证 PR。

@@ -165,15 +165,31 @@
 
 ### 多引擎视频自动转录
 
-- 状态：待审批
-- 目标：建立引擎无关的转录、审核、版本发布和索引流水线，让管理员从受控 Profile 中选择 FunASR、faster-whisper 或人工稿路径。
+- 状态：代码完成待验证
+- 目标：建立引擎无关的转录、审核、版本发布和索引流水线，让管理员只能从服务端白名单 Profile 中启动自动转录，同时永久保留人工 Markdown 路径。
 - 下一步：
-  - [ ] 审批 Phase 5 R2 详细计划及其中四项架构决定。
-  - [ ] 获批后仅实施 Phase 5A/5B；真实 ffmpeg、ASR、GPU、Qdrant 与隔离数据验证的 Phase 5C 另行审批。
-  - [ ] 独立决定是否继续 faster-whisper 资格评测；候选评测不因已有实现自动开放为正式选项。
-- 完成标准：人工转录流程不退化；管理员只能选择服务端白名单 Profile；同一媒体可保留多个历史版本但只有一个正式发布版本；实验 Profile 强制审核且无法绕过发布门禁进入索引；至少一个 `approved` Profile 完成隔离端到端验证后才讨论生产灰度。
-- 依赖：Phase 1～4B 已形成契约、持久化、remote Provider、上传/任务与管理端前半段；当前审核/发布应用入口、Candidate 隔离索引和正式 head 检索过滤尚未实施；当前没有 `qualification_approved` Profile；各后续阶段独立 R2 审批，真实环境和数据操作另行审批，单卡 GPU 保持 BGE 优先。
-- 方案链接：`project-docs/plans/multi-engine-auto-transcription.md`、`project-docs/plans/multi-engine-transcription-phase1.md`、`project-docs/plans/multi-engine-transcription-phase2.md`、`project-docs/plans/multi-engine-transcription-phase3.md`、`project-docs/plans/multi-engine-transcription-phase5.md`、`project-docs/decisions/0002-multi-engine-transcription.md`、`project-docs/plans/funasr-auto-transcription.md`
+  - [ ] 由远端 CI 在干净环境验证 Phase 5 API、worker、candidate index、Qdrant Filter 组合、完整前端测试与构建，要求新增 job 零失败、零跳过且既有 jobs 不退化。
+  - [ ] 将转录管理流程加固 PR 1 交由 scoped code review、远端 CI 和用户验收；PR 2 独立工作台须重新按 R2 审批后再实施。
+  - [ ] CI 通过后进行 scoped code review 和用户验收；不得把本地缺依赖的测试写成已通过。
+  - [ ] 如需执行 R3B，逐项审批 Windows 目录/ACL、独立 venv 依赖安装、固定 revision 模型离线准备、防火墙限源、Token 写入和 Scheduled Task 注册；默认保持不执行。
+  - [ ] R3B 通过后另行审批 R3C，仅用非敏感短媒体和 experimental Profile 做隔离端到端验收；不得自动开放正式 Profile、自动发布、自动索引或生产灰度。
+  - [ ] 完成 faster-whisper R3 统一资格验证的独立 PR、远端 CI 与一次
+    `production-asr` workflow；在隔离 venv、固定模型和 loopback ASR 服务中验证
+    依赖共存、CUDA FP16、8 个非敏感短样本、质量与资源门禁。未通过前保持
+    admission disabled，R3 通过后仍须另批生产启用。
+  - [ ] 合并 faster-whisper 的固定 oss2 受控 wheel 支持后，以新的完整 master SHA 执行
+    一次统一资格 workflow；依次完成双内部 wheel、依赖、模型、CUDA、8 样本质量与资源门禁，
+    同范围失败按严格脱敏诊断闭环处理。最终通过前不得修改生产服务或 Profile admission。
+  - [ ] Qwen3-ASR R2 代码通过 scoped review、干净环境 CI 并合并后，按统一 R3
+    一次性方案审批并执行单一 workflow；内部依次通过依赖/许可证/CUDA、双模型、
+    真实推理、8 样本质量与资源门禁，任一前置门禁失败即停止，Profile 保持 disabled。
+    首次 workflow `30970277613` 已在 `pip_download` 失败关闭；先完成固定 source
+    run/SHA 的精准分类增强；只读取诊断 workflow `30972780438` 的三个固定本地文件，
+    对剩余 2 条相关行仅输出固定枚举、位置、长度、哈希和字符类型计数。取得严格脱敏
+    v2 JSON 后停止，不得运行 pip、修改 pin/freeze、服务或 Profile admission。
+- 完成标准：人工转录流程不退化；管理员只能选择服务端白名单 Profile；同一媒体可保留多个历史版本且只有 `app.sqlite` head 指向的版本进入正式检索；experimental Profile 强制审核；至少一个 `qualification_approved` Profile 完成隔离端到端验证后才讨论生产灰度。
+- 依赖：Phase 1～4B 已形成契约、持久化、remote Provider 与应用上传/worker/UI 前半段；Phase 5A/5B 已实现版本审阅、发布、候选索引和检索可见性，待远端 CI；Windows ASR R3A 仓库实施及 PR #8 远端 CI 已通过，但不等于生产部署完成；R3B/R3C、真实引擎/GPU/Qdrant 和生产数据均未执行；真实环境操作另按 R3 逐项审批，单卡 GPU 保持 BGE 优先。
+- 方案链接：`project-docs/plans/multi-engine-auto-transcription.md`、`project-docs/plans/multi-engine-transcription-phase1.md`、`project-docs/plans/multi-engine-transcription-phase2.md`、`project-docs/plans/multi-engine-transcription-phase3.md`、`project-docs/plans/multi-engine-transcription-phase5.md`、`project-docs/plans/multi-engine-transcription-phase5c-windows-asr-deployment.md`、`project-docs/plans/transcription-admin-workflow-hardening.md`、`project-docs/plans/faster-whisper-provider-integration.md`、`project-docs/plans/faster-whisper-r3-unified-qualification.md`、`project-docs/plans/qwen3-asr-r2-r3-integration.md`、`project-docs/decisions/0002-multi-engine-transcription.md`、`project-docs/plans/funasr-auto-transcription.md`
 
 ---
 
