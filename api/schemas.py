@@ -296,6 +296,30 @@ class TranscriptionJobDTO(BaseModel):
 
 
 class RetryTranscriptionRequest(BaseModel):
+    pass
+
+class ReviewTranscriptVersionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    approved: bool
+    review_note: str | None = None
+
+
+class PublishTranscriptVersionRequest(BaseModel):
+    """Strict empty command body; all publication controls are server-owned."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class TranscriptPublicationJobDTO(BaseModel):
+    index_job_id: str
+    transcript_version_id: str
+    attempt_number: int
+    target_index_id: str
+    status: str
+    error_code: str | None
+    error_summary: str | None
+    created_at: int
     model_config = ConfigDict(extra="forbid")
 
     profile_id: str

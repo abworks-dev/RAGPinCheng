@@ -32,7 +32,7 @@ type PendingVideo = {
 
 const mediaStatusMeta: Record<string, { label: string; variant: StatusVariant }> = {
   uploaded: { label: "已上传", variant: "secondary" },
-  uploading: { label: "上传中", variant: "info" },
+  submitting: { label: "上传中", variant: "info" },
   transcribing: { label: "自动转录中", variant: "warning" },
   transcript_ready: { label: "转写草稿就绪", variant: "info" },
   indexing: { label: "索引中", variant: "warning" },
@@ -115,7 +115,7 @@ export function AdminMediaPage() {
     if (!videoFile || !title.trim()) return;
     if (mode === "manual" && !transcriptFile) return;
     if (mode === "automatic" && !profileId) return;
-    setUploading(true);
+    setSubmitting(true);
     setUploadError(null);
     try {
       if (mode === "manual") {
@@ -138,7 +138,7 @@ export function AdminMediaPage() {
     } catch (e: any) {
       setUploadError(e?.message || String(e));
     } finally {
-      setUploading(false);
+      setSubmitting(false);
     }
   }
 
@@ -169,7 +169,7 @@ export function AdminMediaPage() {
   const selectedProfile = profiles.find((item) => item.profile_id === profileId);
   const automaticProfileReady = selectedProfile?.admission === "enabled" && selectedProfile.availability === "available";
   const canUpload = Boolean(
-    videoFile && title.trim() && !uploading &&
+    videoFile && title.trim() && !submitting &&
     (mode === "manual" ? transcriptFile : automaticProfileReady),
   );
 
@@ -193,26 +193,26 @@ export function AdminMediaPage() {
           </div>
           <div>
             <label htmlFor="media-title" className="mb-1.5 block text-ui-sm font-medium">视频标题</label>
-            <Input id="media-title" value={title} onChange={(event) => { setTitle(event.target.value); rotateRequestIdentity(); }} disabled={uploading} />
+            <Input id="media-title" value={title} onChange={(event) => { setTitle(event.target.value); rotateRequestIdentity(); }} disabled={submitting} />
           </div>
           <div className="grid gap-4 lg:grid-cols-2">
             <div className="rounded-ui-xl border border-border bg-surface-muted/40 p-4">
               <label htmlFor="media-video-file" className="block text-ui-sm font-medium">视频文件</label>
-              <Input ref={videoInputRef} id="media-video-file" type="file" accept=".mp4,video/mp4" disabled={uploading}
+              <Input ref={videoInputRef} id="media-video-file" type="file" accept=".mp4,video/mp4" disabled={submitting}
                 onChange={(event) => { setVideoFile(event.target.files?.[0] || null); rotateRequestIdentity(); }} className="mt-3 h-auto min-h-control-md py-1.5" />
               <p className="mt-2 text-ui-xs text-muted-foreground">{videoFile ? `${videoFile.name} · ${formatBytes(videoFile.size)}` : "尚未选择视频文件"}</p>
             </div>
             {mode === "manual" ? (
               <div className="rounded-ui-xl border border-border bg-surface-muted/40 p-4">
                 <label htmlFor="media-transcript-file" className="block text-ui-sm font-medium">人工转写</label>
-                <Input ref={transcriptInputRef} id="media-transcript-file" type="file" accept=".md,text/markdown" disabled={uploading}
+                <Input ref={transcriptInputRef} id="media-transcript-file" type="file" accept=".md,text/markdown" disabled={submitting}
                   onChange={(event) => setTranscriptFile(event.target.files?.[0] || null)} className="mt-3 h-auto min-h-control-md py-1.5" />
                 <p className="mt-2 text-ui-xs text-muted-foreground">{transcriptFile ? `${transcriptFile.name} · ${formatBytes(transcriptFile.size)}` : "尚未选择转写文件"}</p>
               </div>
             ) : (
               <div className="rounded-ui-xl border border-border bg-surface-muted/40 p-4">
                 <label htmlFor="transcription-profile" className="block text-ui-sm font-medium">转录 Profile</label>
-                <select id="transcription-profile" value={profileId} disabled={uploading} onChange={(event) => { setProfileId(event.target.value); rotateRequestIdentity(); }}
+                <select id="transcription-profile" value={profileId} disabled={submitting} onChange={(event) => { setProfileId(event.target.value); rotateRequestIdentity(); }}
                   className="mt-3 h-control-md w-full rounded-ui-md border border-input bg-background px-3 text-ui-sm">
                   <option value="">请选择服务端 Profile</option>
                   {profiles.map((profile) => <option key={profile.profile_id} value={profile.profile_id} disabled={profile.admission !== "enabled" || profile.availability !== "available"}>{profile.display_name}{profile.availability !== "available" ? "（不可用）" : ""}</option>)}
@@ -224,7 +224,7 @@ export function AdminMediaPage() {
           {uploadError && <Alert variant="destructive" role="alert"><AlertTitle>视频上传失败</AlertTitle><AlertDescription>{uploadError}</AlertDescription></Alert>}
           <div className="flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-ui-xs text-muted-foreground">{mode === "manual" ? "人工 Markdown 路径保持不变。" : "自动任务会生成待审核草稿。"}</p>
-            <Button onClick={handleUpload} disabled={!canUpload}>{uploading ? "正在提交…" : mode === "manual" ? "上传视频与人工转写" : "上传并开始自动转录"}</Button>
+            <Button onClick={handleUpload} disabled={!canUpload}>{submitting ? "正在提交…" : mode === "manual" ? "上传视频与人工转写" : "上传并开始自动转录"}</Button>
           </div>
         </CardContent>
       </Card>
