@@ -2490,3 +2490,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`.github/workflows/diagnose-gpu-runtime-production.yml`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
 - 验证：YAML 解析、Windows `Start-Process` Python `-c` 引号烟测、faster-whisper qualification 与部署静态专项测试 `62 passed`、`git diff --check` 通过。
 - 待办/风险：诊断会初始化 CUDA 上下文和执行一个单元素 tensor，仅用于定位原生运行时崩溃；结果出来后再决定是否修改 GPU 全局运行时。
+
+### 06:53 — 增加 S4U 分阶段模型加载诊断
+
+- 完成：将 GPU 运行时诊断扩展为与生产任务一致的 `Administrator` / `S4U` / Highest 临时任务；它加载同一 `.env` 和工作目录下的 BGE-M3、reranker，并在每个模型阶段写入脱敏状态与显存采样。任务最多运行 8 分钟，完成或失败均注销自身，不启动 `gpu_service`、不监听 8100、不改依赖或模型制品。
+- 文件：`.github/workflows/diagnose-gpu-runtime-production.yml`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
+- 验证：YAML 解析、提取后 PowerShell AST 解析、faster-whisper qualification 与部署静态专项测试 `62 passed`、`git diff --check` 通过。
+- 待办/风险：该诊断会真实加载两份生产模型并短暂占用 GPU 显存；需根据其阶段结果确定最小运行时修复，尚未重装全局包或恢复生产 HTTP 服务。
