@@ -380,6 +380,25 @@ def test_faster_whisper_qualification_workflow_is_manual_immutable_and_gated():
     assert "Fallback probe exit code:" in workflow
 
 
+def test_gpu_recovery_workflow_is_manual_and_limited_to_the_verified_task():
+    workflow = read(".github/workflows/recover-gpu-service-production.yml")
+
+    assert "workflow_dispatch:" in workflow
+    assert "confirm_recovery:" in workflow
+    assert "default: false" in workflow
+    assert "production-deployment" in workflow
+    assert "production-asr" in workflow
+    assert "runs-on: [self-hosted, Windows, X64, asr-production]" in workflow
+    assert "timeout-minutes: 5" in workflow
+    assert 'TaskName = "RAGPinCheng-GPU"' in workflow
+    assert "Refusing to modify an unexpected RAGPinCheng-GPU Scheduled Task" in workflow
+    assert 'Get-NetTCPConnection -LocalPort 8100 -State Listen' in workflow
+    assert 'Uri "http://192.168.11.11:8100/health"' in workflow
+    assert "Start-ScheduledTask -TaskName $TaskName" in workflow
+    assert "deploy-gpu.ps1" not in workflow
+    assert "deploy-app" not in workflow
+
+
 def test_faster_whisper_model_artifact_preparation_is_manual_and_isolated():
     workflow = read(
         ".github/workflows/prepare-faster-whisper-model-production.yml"
