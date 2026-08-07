@@ -59,6 +59,22 @@ jobs:
           }
 
           function Write-SanitizedGpuStartupDiagnostic {
+            $taskDiagnostic = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+            $taskInfo = Get-ScheduledTaskInfo -TaskName $TaskName -ErrorAction SilentlyContinue
+            $hostAddressPresent = $null -ne (@(
+              Get-NetIPAddress -IPAddress "${PRIVATE_IPV4}" -ErrorAction SilentlyContinue
+            ) | Select-Object -First 1)
+            $gpuProcessCount = @(
+              Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+                Where-Object { [string]$_.CommandLine -like "*-m gpu_service.app*" }
+            ).Count
+            Write-Host (
+              "GPU_STARTUP_DIAGNOSTIC task_state={0} task_result={1} host_address_present={2} gpu_process_count={3}" -f
+              [string]$taskDiagnostic.State,
+              [string]$taskInfo.LastTaskResult,
+              $hostAddressPresent,
+              $gpuProcessCount
+            )
             foreach ($path in @(
               (Join-Path $RepositoryPath "gpu_service.error.log"),
               (Join-Path $RepositoryPath "gpu_service.log")
@@ -70,7 +86,7 @@ jobs:
               $item = Get-Item -LiteralPath $path -ErrorAction Stop
               Write-Host "GPU_STARTUP_DIAGNOSTIC log=present bytes=$($item.Length)"
               Get-Content -LiteralPath $path -Tail 120 -ErrorAction SilentlyContinue |
-                Where-Object { $_ -match '(?i)traceback|error|exception|failed|cannot|missing|not found|module|cuda|runtime' } |
+                Where-Object { $_ -match '(?i)traceback|error|exception|failed|cannot|missing|not found|module|cuda|runtime|started server|running on|loading.*model|model.*load' } |
                 ForEach-Object {
                   $line = $_
                   $line = $line -replace '(?i)(authorization\s*:\s*bearer\s+)\S+', '$1[REDACTED]'
