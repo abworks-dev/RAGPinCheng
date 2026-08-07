@@ -175,7 +175,7 @@ jobs:
             "-CommitSha", $params.CommitSha,
             "-SourceRoot", $params.SourceRoot,
             "-RunId", $params.RunId,
-            "-ExecuteQualification", "true",
+            "-ExecuteQualification", "1",
             "-InternalWheelBundlePath", $params.InternalWheelBundlePath,
             "-Oss2WheelBundlePath", $params.Oss2WheelBundlePath,
             "-Antlr4WheelBundlePath", $params.Antlr4WheelBundlePath,

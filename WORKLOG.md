@@ -2425,3 +2425,9 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`.github/workflows/qualify-faster-whisper-production.yml`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
 - 验证：PowerShell wrapper AST 解析通过；相关测试 `59 passed`；`git diff --check` 通过。
 - 待办/风险：需提交到 master 后重新触发资格 run；外层 watchdog 超时会优先保证进程不长期占用 runner，profile admission 仍保持 disabled。
+
+### 20:56 — 修复 workflow wrapper 布尔参数传递
+
+- 完成：run `31179972766` 在 wrapper 启动阶段暴露 Windows PowerShell 5.1 不接受字符串 `true` 到 `[bool]` 参数的转换；外层父进程现传数值 `1`，保持 `ExecuteQualification` 明确开启。
+- 文件：`.github/workflows/qualify-faster-whisper-production.yml`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
+- 验证：已补静态断言；待提交后重新触发资格 run。
