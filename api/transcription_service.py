@@ -186,6 +186,7 @@ class TranscriptionApplicationService:
                     (persisted_cancellation, process_cancellation)
                 )
             ports = ProviderRuntimePorts(
+                job_id,
                 FileTranscriptionInputSource(prepared),
                 StoreProgressSink(job_id, self.connect_factory, self.clock),
                 cancellation,
