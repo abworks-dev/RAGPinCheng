@@ -461,6 +461,9 @@ def test_gpu_reranker_repair_is_manual_isolated_and_rollback_capable():
     assert '$CandidateTokenizers = "0.20.3"' in workflow
     assert "https://pypi.tuna.tsinghua.edu.cn/simple" in workflow
     assert "function Install-PinnedPackages" in workflow
+    assert "$env:PIP_CACHE_DIR = $PipCacheRoot" in workflow
+    assert "$env:TEMP = $DiagnosticRoot" in workflow
+    assert "--cache-dir $PipCacheRoot" in workflow
     assert "backups\\gpu-reranker-runtime-" in workflow
     assert "pip-freeze.txt" in workflow
     assert "changed-packages.json" in workflow

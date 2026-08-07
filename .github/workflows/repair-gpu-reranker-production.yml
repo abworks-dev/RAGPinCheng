@@ -36,6 +36,7 @@ jobs:
           $RunId = "${{ github.run_id }}"
           $DiagnosticRoot = Join-Path "${{ runner.temp }}" "gpu-reranker-repair-$RunId"
           $BackupRoot = Join-Path $RepositoryPath "backups\gpu-reranker-runtime-$RunId"
+          $PipCacheRoot = "D:\RAGPinCheng\pip-cache"
           $CandidateTransformers = "4.46.3"
           $CandidateTokenizers = "0.20.3"
           $PackageIndexUrl = "https://pypi.tuna.tsinghua.edu.cn/simple"
@@ -56,6 +57,10 @@ jobs:
 
           New-Item -ItemType Directory -Path $DiagnosticRoot -Force | Out-Null
           New-Item -ItemType Directory -Path $BackupRoot -Force | Out-Null
+          New-Item -ItemType Directory -Path $PipCacheRoot -Force | Out-Null
+          $env:TEMP = $DiagnosticRoot
+          $env:TMP = $DiagnosticRoot
+          $env:PIP_CACHE_DIR = $PipCacheRoot
           $env:PIP_DISABLE_PIP_VERSION_CHECK = "1"
           $env:PIP_NO_INPUT = "1"
 
@@ -88,6 +93,7 @@ jobs:
             $ErrorActionPreference = "Continue"
             try {
               $output = & $RuntimePython -m pip install --upgrade --force-reinstall --no-deps `
+                --cache-dir $PipCacheRoot `
                 --index-url $PackageIndexUrl `
                 "transformers==$CandidateTransformers" "tokenizers==$CandidateTokenizers" 2>&1
               $exitCode = $LASTEXITCODE
@@ -204,6 +210,7 @@ jobs:
               $ErrorActionPreference = "Continue"
               try {
                 & $Python -m pip install --upgrade --force-reinstall --no-deps `
+                  --cache-dir $PipCacheRoot `
                   --index-url $PackageIndexUrl `
                   "transformers==$originalTransformers" "tokenizers==$originalTokenizers" 2>&1 | Out-Null
               } finally {
