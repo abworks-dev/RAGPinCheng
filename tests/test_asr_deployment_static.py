@@ -409,6 +409,26 @@ def test_gpu_recovery_workflow_is_manual_and_limited_to_the_verified_task():
     assert "deploy-app" not in workflow
 
 
+def test_gpu_runtime_diagnostic_is_manual_bounded_and_read_only():
+    workflow = read(".github/workflows/diagnose-gpu-runtime-production.yml")
+
+    assert "workflow_dispatch:" in workflow
+    assert "confirm_diagnostic:" in workflow
+    assert "default: false" in workflow
+    assert "production-deployment" in workflow
+    assert "runs-on: [self-hosted, windows, production, gpu]" in workflow
+    assert "timeout-minutes: 10" in workflow
+    assert "C:\\Program Files\\Python310\\python.exe" in workflow
+    assert "nvidia-smi.exe" in workflow
+    assert "torch_import" in workflow
+    assert "cuda_tensor" in workflow
+    assert "flag_embedding_import" in workflow
+    assert "WaitForExit(60000)" in workflow
+    assert "Register-ScheduledTask" not in workflow
+    assert "Start-ScheduledTask" not in workflow
+    assert "pip install" not in workflow
+
+
 def test_faster_whisper_qualification_treats_gpu_service_as_remote():
     script = read("scripts/qualify-faster-whisper-production.ps1")
 

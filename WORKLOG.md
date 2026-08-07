@@ -2483,3 +2483,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`.github/workflows/recover-gpu-service-production.yml`、`scripts/qualify-faster-whisper-production.ps1`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
 - 验证：恢复 runs `31223198066`、`31223417073` 均在发现 GPU 任务缺失后失败关闭，未修改生产状态；run `31223666489` 已创建并启动任务但 180 秒内未就绪，自动注销新建任务；run `31224233982` 显示目标主机地址存在、任务进程已退出且 Windows 状态码为 `0xC0000005`。启动日志持续增长但未见已脱敏的异常行，因此补充提前退出检测和 Windows Application Error 的故障模块诊断；修正后的 YAML 解析、PowerShell AST、faster-whisper qualification 与部署静态专项测试通过；`git diff --check` 通过。
 - 待办/风险：恢复任务会改变生产 GPU 服务进程状态；需在该 workflow 成功返回 `status=ok` 且 `model_loaded=true` 后，再重跑 faster-whisper 资格验证。
+
+### 06:42 — 增加 GPU 原生运行时只读诊断
+
+- 完成：针对 `RAGPinCheng-GPU` 以 Windows `0xC0000005` 原生访问冲突退出的状态，新增独立手动诊断 workflow；它在 GPU 主机用服务同一 Python 3.10 依次执行 nvidia-smi、torch 导入、最小 CUDA tensor 与 FlagEmbedding 导入，每项 60 秒上限且不安装、卸载、重启服务或修改任务。
+- 文件：`.github/workflows/diagnose-gpu-runtime-production.yml`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
+- 验证：YAML 解析、Windows `Start-Process` Python `-c` 引号烟测、faster-whisper qualification 与部署静态专项测试 `62 passed`、`git diff --check` 通过。
+- 待办/风险：诊断会初始化 CUDA 上下文和执行一个单元素 tensor，仅用于定位原生运行时崩溃；结果出来后再决定是否修改 GPU 全局运行时。
