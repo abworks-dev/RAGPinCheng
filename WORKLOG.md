@@ -2479,7 +2479,7 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 
 ### 06:14 — 增加受控 GPU 服务恢复入口
 
-- 完成：生产资格 run `31222220581` 已确定因本机 TCP 8100 未监听而在预检失败；新增仅恢复既有 `RAGPinCheng-GPU` Scheduled Task 的手动 workflow，严格验证任务动作、主体和启动脚本，限定 5 分钟执行并在 90 秒内确认 8100 健康。该入口不部署 GPU 代码、不修改 ASR、模型、Ubuntu 应用或防火墙。
-- 文件：`.github/workflows/recover-gpu-service-production.yml`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
-- 验证：YAML 解析通过；faster-whisper qualification 与部署静态专项测试 `60 passed`；`git diff --check` 通过。
+- 完成：生产资格 run `31222220581` 已确定因将远端 GPU 服务 `${PRIVATE_IPV4}:8100` 误作 ASR Runner 本机端口和任务而在预检失败；资格脚本现只约束本机 ASR `8200`、`RAGPinCheng-ASR` 和其防火墙，GPU 继续通过远端健康与 activity API 验证。新增仅恢复既有 `RAGPinCheng-GPU` Scheduled Task 的手动 workflow，并将其路由到 GPU Runner，严格验证任务动作、主体和启动脚本，限定 5 分钟执行并在 90 秒内确认 8100 健康。
+- 文件：`.github/workflows/recover-gpu-service-production.yml`、`scripts/qualify-faster-whisper-production.ps1`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
+- 验证：首次恢复 run `31223198066` 因在 ASR Runner 找不到 GPU 任务而失败关闭，未修改生产状态；修正后的 YAML 解析、PowerShell AST、faster-whisper qualification 与部署静态专项测试通过；`git diff --check` 通过。
 - 待办/风险：恢复任务会改变生产 GPU 服务进程状态；需在该 workflow 成功返回 `status=ok` 且 `model_loaded=true` 后，再重跑 faster-whisper 资格验证。
