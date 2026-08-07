@@ -1,0 +1,213 @@
+name: Qualify faster-whisper Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: "Full 40-character merged master SHA to qualify"
+        required: true
+        type: string
+      execute_qualification:
+        description: "Install isolated dependencies, prepare the pinned model, and run real CUDA qualification"
+        required: true
+        default: false
+        type: boolean
+      prepare_synthetic_samples:
+        description: "Generate the fixed eight-sample non-sensitive Windows TTS qualification set"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-asr-faster-whisper-qualification
+  cancel-in-progress: false
+
+jobs:
+  qualify:
+    environment: production-asr
+    runs-on: [self-hosted, Windows, X64, asr-production]
+    timeout-minutes: 180
+    steps:
+      - name: Validate immutable revision and explicit R3 gate
+        shell: powershell
+        run: |
+          if ("${{ inputs.commit_sha }}" -notmatch '^[0-9a-fA-F]{40}$') {
+            throw "commit_sha must be a full 40-character SHA"
+          }
+          if ("${{ inputs.commit_sha }}".ToLowerInvariant() -ne "${{ github.sha }}".ToLowerInvariant()) {
+            throw "commit_sha must equal the workflow dispatch revision"
+          }
+          if ("${{ github.ref }}" -ne "refs/heads/master") {
+            throw "qualification must be dispatched from master"
+          }
+          if (-not [System.Convert]::ToBoolean("${{ inputs.execute_qualification }}")) {
+            throw "execute_qualification must be explicitly enabled"
+          }
+
+      - name: Check out requested merged revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 1
+
+      - name: Build reproducible controlled internal wheels
+        shell: powershell
+        env:
+          ASR_DEPENDENCY_PROXY: ${{ secrets.ASR_DEPENDENCY_PROXY }}
+        run: |
+          $python = "${PRODUCTION_PYTHON311_PATH}"
+          if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
+            throw "Machine-wide Python 3.11 is missing"
+          }
+          $pythonVersion = & $python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"
+          if ($LASTEXITCODE -ne 0 -or ([string]$pythonVersion).Trim() -ne "3.11") {
+            throw "Machine-wide wheel build Python is not 3.11"
+          }
+          $dependencyProxy = [string]$env:ASR_DEPENDENCY_PROXY
+          if ([string]::IsNullOrWhiteSpace($dependencyProxy)) {
+            throw "ASR_DEPENDENCY_PROXY is required for controlled wheel preparation"
+          }
+          $proxyUri = $null
+          if (
+            -not [System.Uri]::TryCreate($dependencyProxy, [System.UriKind]::Absolute, [ref]$proxyUri) -or
+            $proxyUri.Scheme -notin @("http", "https")
+          ) {
+            throw "ASR_DEPENDENCY_PROXY must be an absolute HTTP(S) URL"
+          }
+          $savedProxyEnvironment = @{}
+          foreach ($name in @("HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY")) {
+            $savedProxyEnvironment[$name] = [System.Environment]::GetEnvironmentVariable(
+              $name,
+              [System.EnvironmentVariableTarget]::Process
+            )
+          }
+          try {
+            $env:HTTP_PROXY = $dependencyProxy
+            $env:HTTPS_PROXY = $dependencyProxy
+            $env:NO_PROXY = "127.0.0.1,localhost,${PRIVATE_IPV4},${PRIVATE_IPV4}"
+            $builders = @(
+              @{ Script = "build_internal_jieba_wheel.py"; Directory = "jieba" },
+              @{ Script = "build_internal_oss2_wheel.py"; Directory = "oss2" },
+              @{ Script = "build_internal_antlr4_wheel.py"; Directory = "antlr4" },
+              @{ Script = "build_internal_crcmod_wheel.py"; Directory = "crcmod" }
+            )
+            foreach ($builder in $builders) {
+              & $python `
+                (Join-Path "${{ github.workspace }}" "scripts\$($builder.Script)") `
+                build `
+                --bundle-dir (Join-Path "${{ runner.temp }}\faster-whisper-internal-wheels-${{ github.run_id }}" $builder.Directory) `
+                --commit-sha "${{ inputs.commit_sha }}" `
+                --run-id "${{ github.run_id }}"
+              if ($LASTEXITCODE -ne 0) {
+                throw "Controlled internal wheel builder failed"
+              }
+            }
+          } finally {
+            foreach ($name in $savedProxyEnvironment.Keys) {
+              [System.Environment]::SetEnvironmentVariable(
+                $name,
+                $savedProxyEnvironment[$name],
+                [System.EnvironmentVariableTarget]::Process
+              )
+            }
+          }
+
+      - name: Prepare fixed synthetic qualification samples
+        if: ${{ inputs.prepare_synthetic_samples }}
+        shell: powershell
+        run: |
+          $params = @{
+            CommitSha = "${{ inputs.commit_sha }}"
+            SourceRoot = "${{ github.workspace }}"
+            RunId = "${{ github.run_id }}"
+          }
+          & "${{ github.workspace }}\scripts\prepare-faster-whisper-qualification-samples.ps1" @params
+
+      - name: Run isolated faster-whisper R3 qualification
+        shell: powershell
+        env:
+          ASR_DEPENDENCY_PROXY: ${{ secrets.ASR_DEPENDENCY_PROXY }}
+          GPU_SERVICE_TOKEN: ${{ secrets.GPU_SERVICE_TOKEN }}
+        run: |
+          $params = @{
+            CommitSha = "${{ inputs.commit_sha }}"
+            SourceRoot = "${{ github.workspace }}"
+            RunId = "${{ github.run_id }}"
+            ExecuteQualification = [System.Convert]::ToBoolean("${{ inputs.execute_qualification }}")
+            InternalWheelBundlePath = "${{ runner.temp }}\faster-whisper-internal-wheels-${{ github.run_id }}\jieba"
+            Oss2WheelBundlePath = "${{ runner.temp }}\faster-whisper-internal-wheels-${{ github.run_id }}\oss2"
+            Antlr4WheelBundlePath = "${{ runner.temp }}\faster-whisper-internal-wheels-${{ github.run_id }}\antlr4"
+            CrcmodWheelBundlePath = "${{ runner.temp }}\faster-whisper-internal-wheels-${{ github.run_id }}\crcmod"
+            SummaryPath = "${{ runner.temp }}\faster-whisper-r3-${{ github.run_id }}\qualification-verdict.json"
+            DependencyDiagnosticPath = "${{ runner.temp }}\faster-whisper-r3-${{ github.run_id }}\dependency-diagnostic.json"
+          }
+          & "${{ github.workspace }}\scripts\qualify-faster-whisper-production.ps1" @params
+
+      - name: Publish sanitized qualification summary
+        if: ${{ always() }}
+        shell: powershell
+        run: |
+          $path = "${{ runner.temp }}\faster-whisper-r3-${{ github.run_id }}\qualification-verdict.json"
+          if (Test-Path -LiteralPath $path -PathType Leaf) {
+            $summary = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
+            $lines = @(
+              "## faster-whisper R3 qualification",
+              "",
+              "- Status: ``$($summary.status)``",
+              "- Failure code: ``$($summary.failure_code)``",
+              "- Commit: ``$($summary.commit_sha)``",
+              "- Model revision: ``$($summary.model_revision)``",
+              "- Baseline GPU memory: ``$($summary.baseline_gpu_memory_mib) MiB``",
+              "- Peak GPU memory: ``$($summary.peak_gpu_memory_mib) MiB``",
+              "- Wheel cache: ``$($summary.wheel_cache_status)``",
+              "- Wheel cache key: ``$($summary.wheel_cache_key)``",
+              "- Profile admission: ``$($summary.profile_admission)``",
+              "- Production services modified: ``$($summary.production_services_modified)``"
+            )
+            $diagnosticPath = "${{ runner.temp }}\faster-whisper-r3-${{ github.run_id }}\dependency-diagnostic.json"
+            if (Test-Path -LiteralPath $diagnosticPath -PathType Leaf) {
+              $diagnostic = Get-Content -LiteralPath $diagnosticPath -Raw -Encoding UTF8 | ConvertFrom-Json
+              $lines += @(
+                "- Dependency stage: ``$($diagnostic.dependency_stage)``",
+                "- Dependency operation: ``$($diagnostic.dependency_operation)``",
+                "- Failure origin: ``$($diagnostic.failure_origin)``",
+                "- Native exit code: ``$($diagnostic.native_exit_code)``",
+                "- Captured line count: ``$($diagnostic.captured_line_count)``",
+                "- Dependency diagnosis: ``$($diagnostic.diagnosis_kind)``",
+                "- Affected requirement: ``$($diagnostic.affected_requirement)``",
+                "- Fallback probe executed: ``$($diagnostic.fallback_probe_executed)``",
+                "- Fallback probe exit code: ``$($diagnostic.fallback_probe_exit_code)``"
+              )
+            }
+            $lines -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding UTF8
+          } else {
+            "Qualification ended before a sanitized verdict could be written." |
+              Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding UTF8
+          }
+
+      - name: Upload sanitized verdict
+        id: upload_verdict
+        if: ${{ always() }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: faster-whisper-r3-verdict-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}\faster-whisper-r3-${{ github.run_id }}\qualification-verdict.json
+            ${{ runner.temp }}\faster-whisper-r3-${{ github.run_id }}\dependency-diagnostic.json
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Retry sanitized verdict upload
+        if: ${{ always() && steps.upload_verdict.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: faster-whisper-r3-verdict-${{ github.run_id }}-retry
+          path: |
+            ${{ runner.temp }}\faster-whisper-r3-${{ github.run_id }}\qualification-verdict.json
+            ${{ runner.temp }}\faster-whisper-r3-${{ github.run_id }}\dependency-diagnostic.json
+          if-no-files-found: error
+          retention-days: 14

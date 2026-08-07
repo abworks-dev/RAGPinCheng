@@ -1,7 +1,7 @@
 """Pydantic request/response schemas for the HTTP layer."""
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -106,6 +106,7 @@ class AdminConversationListResponse(BaseModel):
 
 
 class AdminFeedbackEntry(BaseModel):
+    feedback_id: str
     ts: str | None = None
     kind: str | None = None
     rating: str | None = None
@@ -121,11 +122,27 @@ class AdminFeedbackEntry(BaseModel):
     conversation_id: str | None = None
     turn_index: int | None = None
     message_id: str | None = None
+    status: Literal["pending", "in_progress", "resolved", "archived"] = "pending"
+    resolution: Literal["knowledge_fixed", "answer_improved", "no_action", "duplicate", "other"] | None = None
+    admin_note: str | None = None
+    assignee_user_id: int | None = None
+    assignee_name: str | None = None
+    updated_at: int | None = None
+    resolved_at: int | None = None
 
 
 class AdminFeedbackResponse(BaseModel):
     entries: list[AdminFeedbackEntry]
     total: int
+    page: int
+    page_size: int
+    counts: dict[str, int]
+
+
+class AdminFeedbackPatchRequest(BaseModel):
+    status: Literal["pending", "in_progress", "resolved", "archived"]
+    resolution: Literal["knowledge_fixed", "answer_improved", "no_action", "duplicate", "other"] | None = None
+    admin_note: str | None = Field(default=None, max_length=2000)
 
 
 class SweepResponse(BaseModel):
@@ -145,6 +162,7 @@ class IndexJobDTO(BaseModel):
     category: str
     doc_type: str
     source_path: str
+    source_exists: bool
     file_size: int
     status: str
     error: str | None
@@ -165,16 +183,30 @@ class UploadResponse(BaseModel):
 
 
 class IndexedDocumentDTO(BaseModel):
+    document_id: str
     source_path: str
+    display_path: str
+    filename: str
     doc_title: str
     category: str
     doc_type: str
     company: str | None
     parent_count: int
+    child_count: int | None = None
+    file_size: int | None = None
+    status: str
+    is_indexed: bool
+    latest_job_id: int | None = None
+    error_summary: str | None = None
+    uploaded_by: str | None = None
+    created_at: int | None = None
+    updated_at: int | None = None
 
 
 class IndexedDocumentListResponse(BaseModel):
     documents: list[IndexedDocumentDTO]
+    total: int
+    status_counts: dict[str, int]
 
 
 class CategoryNodeDTO(BaseModel):
@@ -196,6 +228,7 @@ class DeleteDocumentRequest(BaseModel):
 class DeleteDocumentResponse(BaseModel):
     parents_deleted: int
     file_deleted: bool
+    file_delete_status: Literal["not_requested", "deleted", "missing", "failed"]
 
 
 class SourceDTO(BaseModel):
@@ -351,6 +384,7 @@ class DoneEvent(BaseModel):
     timings: dict[str, float]
     sources: list[SourceDTO]
     answer_text: str
+    assistant_message_id: int | None = None
     history_chars: int
     budget: int
 

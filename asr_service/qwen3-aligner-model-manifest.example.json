@@ -1,0 +1,13 @@
+{
+  "schema_version": "asr-model-manifest/1",
+  "model_id": "Qwen/Qwen3-ForcedAligner-0.6B",
+  "model_revision": "c7cbfc2048c462b0d63a45797104fc9db3ad62b7",
+  "model_path": "Qwen3-ForcedAligner-0.6B/c7cbfc2048c462b0d63a45797104fc9db3ad62b7",
+  "files": [
+    {
+      "path": "replace-with-relative-model-file",
+      "size_bytes": 0,
+      "sha256": "replace-with-64-character-lowercase-sha256"
+    }
+  ]
+}

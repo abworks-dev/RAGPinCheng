@@ -15,6 +15,20 @@ import { formatAdminDate, formatBytes } from "./admin-formatters";
 
 type UploadMode = "manual" | "automatic";
 type StatusVariant = "secondary" | "success" | "warning" | "destructive" | "info";
+type MediaFilter = "all" | "processing" | "review" | "publishing" | "failed";
+
+type PendingVideo = {
+  id: string;
+  file: File;
+  title: string;
+  selected: boolean;
+  profileId: string;
+  transcriptFile: File | null;
+  transcriptText: string | null;
+  requestId: string;
+  state: UploadState;
+  error: string | null;
+};
 
 const mediaStatusMeta: Record<string, { label: string; variant: StatusVariant }> = {
   uploaded: { label: "已上传", variant: "secondary" },
@@ -58,7 +72,8 @@ export function AdminMediaPage() {
   const [profiles, setProfiles] = useState<TranscriptionProfile[]>([]);
   const [mode, setMode] = useState<UploadMode>("manual");
   const [loading, setLoading] = useState(true);
-  const [uploading, setUploading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [dragging, setDragging] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [videoFile, setVideoFile] = useState<File | null>(null);
@@ -77,8 +92,7 @@ export function AdminMediaPage() {
     setLoading(true);
     setLoadError(null);
     try {
-      const assets = await api.listMediaAssets();
-      setMediaAssets(assets);
+      setMediaAssets(await api.listMediaAssets());
     } catch (e: any) {
       setLoadError(e?.message || String(e));
     } finally {

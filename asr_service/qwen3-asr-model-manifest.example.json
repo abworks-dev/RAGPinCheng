@@ -1,0 +1,13 @@
+{
+  "schema_version": "asr-model-manifest/1",
+  "model_id": "Qwen/Qwen3-ASR-0.6B",
+  "model_revision": "5eb144179a02acc5e5ba31e748d22b0cf3e303b0",
+  "model_path": "Qwen3-ASR-0.6B/5eb144179a02acc5e5ba31e748d22b0cf3e303b0",
+  "files": [
+    {
+      "path": "replace-with-relative-model-file",
+      "size_bytes": 0,
+      "sha256": "replace-with-64-character-lowercase-sha256"
+    }
+  ]
+}

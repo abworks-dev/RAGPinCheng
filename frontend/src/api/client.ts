@@ -1,6 +1,7 @@
 import type {
   AdminConversation,
   AdminFeedbackEntry,
+  AdminFeedbackResponse,
   AdminStats,
   AdminUser,
   ApiConfig,
@@ -11,7 +12,7 @@ import type {
   FeedbackPayload,
   Health,
   IndexJob,
-  IndexedDocument,
+  IndexedDocumentList,
   LlmHealth,
   MediaAsset,
   TranscriptionJob,
@@ -40,11 +41,35 @@ export function setUnauthorizedHandler(fn: (() => void) | null) {
 export class ApiError extends Error {
   status: number;
   body: string;
-  constructor(status: number, body: string, message: string) {
+  code: string | null;
+  retryable: boolean | null;
+  constructor(status: number, body: string, message: string, code: string | null = null, retryable: boolean | null = null) {
     super(message);
     this.status = status;
     this.body = body;
+    this.code = code;
+    this.retryable = retryable;
   }
+}
+
+function parseErrorDetail(body: string): { message: string; code: string | null; retryable: boolean | null } {
+  try {
+    const parsed = JSON.parse(body);
+    if (parsed && typeof parsed.detail === "string") {
+      return { message: parsed.detail, code: null, retryable: null };
+    }
+    const detail = parsed?.detail;
+    if (detail && typeof detail === "object") {
+      return {
+        message: typeof detail.message === "string" ? detail.message : "",
+        code: typeof detail.code === "string" ? detail.code : null,
+        retryable: typeof detail.retryable === "boolean" ? detail.retryable : null,
+      };
+    }
+  } catch {
+    /* keep raw body */
+  }
+  return { message: body, code: null, retryable: null };
 }
 
 async function rawFetch(path: string, init: RequestInit = {}): Promise<Response> {
@@ -74,14 +99,14 @@ async function jsonFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await rawFetch(path, init);
   if (!res.ok) {
     const txt = await res.text().catch(() => "");
-    let detail = txt;
-    try {
-      const parsed = JSON.parse(txt);
-      if (parsed && typeof parsed.detail === "string") detail = parsed.detail;
-    } catch {
-      /* keep raw */
-    }
-    throw new ApiError(res.status, txt, `${res.status} ${res.statusText}${detail ? `: ${detail}` : ""}`);
+    const detail = parseErrorDetail(txt);
+    throw new ApiError(
+      res.status,
+      txt,
+      detail.message || `${res.status} ${res.statusText}`,
+      detail.code,
+      detail.retryable,
+    );
   }
   // 204 has no body.
   if (res.status === 204) return undefined as unknown as T;
@@ -95,6 +120,8 @@ export const api = {
     jsonFetch<LlmHealth>(`/api/llm_health${force ? "?force=true" : ""}`),
   config: () => jsonFetch<ApiConfig>("/api/config"),
   categories: () => jsonFetch<{ categories: string[] }>("/api/categories"),
+  mediaTranscript: (mediaId: string) =>
+    jsonFetch<MediaTranscript>(`/api/media/${encodeURIComponent(mediaId)}/transcript`),
   sendFeedback: (payload: FeedbackPayload) =>
     jsonFetch<{ ok: boolean }>("/api/feedback", {
       method: "POST",
@@ -147,10 +174,32 @@ export const api = {
   adminGetConversation: (id: string) =>
     jsonFetch<ConversationState>(`/api/conversations/${id}`),
   adminStats: () => jsonFetch<AdminStats>("/api/admin/stats"),
-  adminFeedback: (limit = 200) =>
-    jsonFetch<{ entries: AdminFeedbackEntry[]; total: number }>(
-      `/api/admin/feedback?limit=${limit}`,
-    ),
+  adminFeedback: (params: {
+    status?: string;
+    kind?: string;
+    rating?: string;
+    q?: string;
+    page?: number;
+    page_size?: number;
+  } = {}) => {
+    const query = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== "") query.set(key, String(value));
+    });
+    return jsonFetch<AdminFeedbackResponse>(`/api/admin/feedback?${query.toString()}`);
+  },
+  adminPatchFeedback: (
+    id: string,
+    body: {
+      status: AdminFeedbackEntry["status"];
+      resolution?: AdminFeedbackEntry["resolution"];
+      admin_note?: string;
+    },
+  ) =>
+    jsonFetch<AdminFeedbackEntry>(`/api/admin/feedback/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
   adminSweep: () =>
     jsonFetch<{ deleted_conversations: number; deleted_auth_sessions: number }>(
       "/api/admin/sweep",
@@ -187,14 +236,8 @@ export const api = {
     }
     if (!res.ok) {
       const txt = await res.text().catch(() => "");
-      let detail = txt;
-      try {
-        const parsed = JSON.parse(txt);
-        if (parsed && typeof parsed.detail === "string") detail = parsed.detail;
-      } catch {
-        /* keep raw */
-      }
-      throw new ApiError(res.status, txt, `${res.status} ${res.statusText}${detail ? `: ${detail}` : ""}`);
+      const detail = parseErrorDetail(txt);
+      throw new ApiError(res.status, txt, detail.message || `${res.status} ${res.statusText}`, detail.code, detail.retryable);
     }
     return (await res.json()) as {
       accepted: IndexJob[];
@@ -207,10 +250,30 @@ export const api = {
     jsonFetch<IndexJob>(`/api/admin/index/jobs/${id}/retry`, { method: "POST" }),
   adminDeleteIndexJob: (id: number) =>
     jsonFetch<void>(`/api/admin/index/jobs/${id}`, { method: "DELETE" }),
-  adminListIndexedDocuments: () =>
-    jsonFetch<{ documents: IndexedDocument[] }>("/api/admin/index/documents"),
+  adminListIndexedDocuments: (params?: {
+    query?: string;
+    category?: string;
+    doc_type?: string;
+    status?: string;
+    limit?: number;
+    offset?: number;
+  }) => {
+    const search = new URLSearchParams();
+    if (params?.query) search.set("query", params.query);
+    if (params?.category) search.set("category", params.category);
+    if (params?.doc_type) search.set("doc_type", params.doc_type);
+    if (params?.status) search.set("status", params.status);
+    if (params?.limit != null) search.set("limit", String(params.limit));
+    if (params?.offset != null) search.set("offset", String(params.offset));
+    const suffix = search.toString();
+    return jsonFetch<IndexedDocumentList>(`/api/admin/index/documents${suffix ? `?${suffix}` : ""}`);
+  },
   adminDeleteIndexedDocument: (source_path: string, delete_file: boolean) =>
-    jsonFetch<{ parents_deleted: number; file_deleted: boolean }>(
+    jsonFetch<{
+      parents_deleted: number;
+      file_deleted: boolean;
+      file_delete_status: "not_requested" | "deleted" | "missing" | "failed";
+    }>(
       "/api/admin/index/documents",
       { method: "DELETE", body: JSON.stringify({ source_path, delete_file }) },
     ),
@@ -236,14 +299,8 @@ export const api = {
     }
     if (!res.ok) {
       const txt = await res.text().catch(() => "");
-      let detail = txt;
-      try {
-        const parsed = JSON.parse(txt);
-        if (parsed && typeof parsed.detail === "string") detail = parsed.detail;
-      } catch {
-        /* keep raw */
-      }
-      throw new ApiError(res.status, txt, `${res.status} ${res.statusText}${detail ? `: ${detail}` : ""}`);
+      const detail = parseErrorDetail(txt);
+      throw new ApiError(res.status, txt, detail.message || `${res.status} ${res.statusText}`, detail.code, detail.retryable);
     }
     return (await res.json()) as MediaAsset;
   },

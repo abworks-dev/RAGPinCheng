@@ -1,4 +1,4 @@
-import { Check, ChevronDown, Layers3, X } from "lucide-react";
+import { Check, ChevronDown, Layers3 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 export function KnowledgeScopePicker({
@@ -70,16 +70,6 @@ export function KnowledgeScopePicker({
               </button>
             );
           })}
-          {selected.length > 0 && (
-            <button
-              type="button"
-              onClick={onClear}
-              className="mt-1 flex w-full items-center justify-center gap-1 border-t border-border px-2 py-2 text-xs text-muted-foreground hover:text-foreground"
-            >
-              <X className="size-3.5" />
-              清除筛选
-            </button>
-          )}
         </div>
       )}
     </div>

@@ -32,8 +32,16 @@ class Factory:
 
 
 PORTS = ProviderRuntimePorts(
+    "11111111-1111-4111-8111-111111111111",
     MemoryInputSource(b"x"), NoOpProgressSink(), NeverCancel()
 )
+
+
+def test_runtime_ports_require_application_job_identity():
+    with pytest.raises(ContractValidationError):
+        ProviderRuntimePorts(
+            "not-a-job-id", MemoryInputSource(b"x"), NoOpProgressSink(), NeverCancel()
+        )
 
 
 def test_registry_resolves_without_provider_name_branch():

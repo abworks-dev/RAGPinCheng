@@ -1,4 +1,17 @@
 import { useEffect, useRef, useState } from "react";
+import {
+  AlertTriangle,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  CirclePlay,
+  ClipboardCopy,
+  FileSpreadsheet,
+  FileText,
+  Paperclip,
+  Presentation,
+  Video,
+} from "lucide-react";
 import { api } from "../api/client";
 import { CITATION_EVENT, CITATION_HOVER_EVENT, type CitationDetail, type CitationHoverDetail } from "./citations";
 import type { Source } from "../types";
@@ -11,7 +24,7 @@ function stripHtml(text: string): string {
 }
 
 function locator(s: Source): string {
-  if (s.doc_type === "transcript" && s.start_time) return `🎬 @${s.start_time}`;
+  if (s.doc_type === "transcript" && s.start_time) return `@${s.start_time}`;
   const leaf = stripHtml((s.section_path || "").split(" > ").pop() || "");
   return `§${leaf || "(无)"}`;
 }
@@ -127,7 +140,11 @@ function SourceCard({
     >
       <div className="flex items-start justify-between gap-2">
         <div className="font-medium text-ink">
-          {i + 1}. [{s.doc_title}] <span className="text-muted">{locator(s)}</span>
+          {i + 1}. [{s.doc_title}]{" "}
+          <span className="inline-flex items-center gap-1 text-muted">
+            {s.doc_type === "transcript" && <Video className="size-3.5" aria-hidden="true" />}
+            {locator(s)}
+          </span>
         </div>
         <div className="flex items-center gap-1 shrink-0">
           <button
@@ -156,9 +173,10 @@ function SourceCard({
                 setCopyErr(e?.message || "复制失败，请手动复制");
               }
             }}
-            className="text-xs text-muted hover:text-accent transition-colors"
+            className="inline-flex items-center gap-1 text-xs text-muted hover:text-accent transition-colors"
           >
-            {copied ? "✓ 已复制" : "📋 复制"}
+            {copied ? <Check className="size-3.5" aria-hidden="true" /> : <ClipboardCopy className="size-3.5" aria-hidden="true" />}
+            {copied ? "已复制" : "复制"}
           </button>
           {(s.doc_type === "pdf" || s.doc_type === "docx" || s.doc_type === "xlsx" || s.doc_type === "pptx") && (
             <PdfPreviewButton
@@ -170,9 +188,10 @@ function SourceCard({
             type="button"
             title="报告引用有误"
             onClick={() => setReportOpen((v) => !v)}
-            className="text-xs text-muted hover:text-red-600"
+            className="inline-flex items-center gap-1 text-xs text-muted hover:text-red-600"
           >
-            {sent ? "已报告" : "⚠ 报错"}
+            <AlertTriangle className="size-3.5" aria-hidden="true" />
+            {sent ? "已报告" : "报错"}
           </button>
         </div>
       </div>
@@ -260,16 +279,17 @@ function PdfPreviewButton({ parentId, title, docType, sheetName, cellRange, slid
   }
 
   const label = isDocx ? "DOCX 预览" : isXlsx ? "XLSX 预览" : isPptx ? "PPTX 预览" : "PDF 预览";
-  const icon = isDocx ? "📄" : isXlsx ? "📊" : isPptx ? "📽️" : "📄";
+  const Icon = isXlsx ? FileSpreadsheet : isPptx ? Presentation : FileText;
 
   return (
     <button
       type="button"
       onClick={handleClick}
-      className="text-xs text-accent hover:underline"
+      className="inline-flex items-center gap-1 text-xs text-accent hover:underline"
       title={label}
     >
-      {icon} {label}
+      <Icon className="size-3.5" aria-hidden="true" />
+      {label}
     </button>
   );
 }
@@ -305,10 +325,7 @@ function SourcePlayButton({
       onClick={handlePlay}
       className="mt-2 flex items-center gap-1.5 text-xs text-accent hover:underline"
     >
-      <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
-        <circle cx="12" cy="12" r="10" fillOpacity={0.15} />
-        <path d="M9.5 7.5l7 4.5-7 4.5v-9z" />
-      </svg>
+      <CirclePlay className="size-4" aria-hidden="true" />
       从 {startTime || "00:00:00"} 播放
     </button>
   );
@@ -350,13 +367,13 @@ export function SourcesPanel({
 
   // Group sources by category, preserving original order within each group.
   const CATEGORY_LABELS: Record<string, string> = {
-    "教学视频": "🎬 教学视频",
-    "培训视频": "🎬 培训视频",
-    "公司标准": "📋 公司标准",
-    "客户标准": "📋 客户标准",
-    "行业规范": "📋 行业规范",
-    "设计规范": "📋 设计规范",
-    "uncategorized": "📄 其他",
+    "教学视频": "教学视频",
+    "培训视频": "培训视频",
+    "公司标准": "公司标准",
+    "客户标准": "客户标准",
+    "行业规范": "行业规范",
+    "设计规范": "设计规范",
+    "uncategorized": "其他",
   };
   const groups: { category: string; sources: Source[]; indices: number[] }[] = [];
   const groupMap = new Map<string, { category: string; sources: Source[]; indices: number[] }>();
@@ -379,7 +396,7 @@ export function SourcesPanel({
         onClick={() => setOpen((o) => !o)}
         className="w-full text-left px-3 py-2 text-sm text-muted hover:bg-gray-50 rounded-lg flex items-center justify-between"
       >
-        <span>📎 参考来源 ({sources.length})</span>
+        <span className="inline-flex items-center gap-1.5"><Paperclip className="size-4" aria-hidden="true" />参考来源 ({sources.length})</span>
         <span className="text-xs">{open ? "收起" : "展开"}</span>
       </button>
       {open && (
@@ -388,7 +405,7 @@ export function SourcesPanel({
             <GroupedSources
               key={g.category}
               category={g.category}
-              label={CATEGORY_LABELS[g.category] || `📄 ${g.category}`}
+              label={CATEGORY_LABELS[g.category] || g.category}
               sources={g.sources}
               indices={g.indices}
               messageId={messageId}
@@ -434,7 +451,12 @@ function GroupedSources({
         onClick={() => setCollapsed((c) => !c)}
         className="w-full text-left flex items-center gap-1.5 text-xs font-medium text-muted hover:text-ink transition-colors mb-1.5"
       >
-        <span className="text-[10px]">{collapsed ? "▶" : "▼"}</span>
+        {collapsed ? <ChevronRight className="size-3" aria-hidden="true" /> : <ChevronDown className="size-3" aria-hidden="true" />}
+        {category === "教学视频" || category === "培训视频" ? (
+          <Video className="size-3.5" aria-hidden="true" />
+        ) : (
+          <FileText className="size-3.5" aria-hidden="true" />
+        )}
         <span>{label}</span>
         <span className="text-[10px] opacity-60">({sources.length})</span>
       </button>

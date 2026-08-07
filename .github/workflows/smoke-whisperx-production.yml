@@ -1,0 +1,91 @@
+name: Smoke WhisperX Production GPU
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: "Full merged master SHA to test"
+        required: true
+        type: string
+      execute_smoke:
+        description: "Install isolated dependencies, download pinned models, and run CUDA smoke"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-asr-whisperx-smoke
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    environment: production-asr
+    runs-on: [self-hosted, Windows, X64, asr-production]
+    timeout-minutes: 180
+    steps:
+      - name: Validate immutable revision and explicit R3 gate
+        shell: powershell
+        run: |
+          if ("${{ inputs.commit_sha }}" -notmatch '^[0-9a-fA-F]{40}$') {
+            throw "commit_sha must be a full SHA"
+          }
+          if ("${{ inputs.commit_sha }}".ToLowerInvariant() -ne "${{ github.sha }}".ToLowerInvariant()) {
+            throw "commit_sha must equal the dispatch revision"
+          }
+          if ("${{ github.ref }}" -ne "refs/heads/master") {
+            throw "smoke must run from master"
+          }
+          if (-not [Convert]::ToBoolean("${{ inputs.execute_smoke }}")) {
+            throw "execute_smoke must be explicitly enabled"
+          }
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 1
+
+      - name: Run isolated WhisperX CUDA smoke
+        shell: powershell
+        env:
+          ASR_DEPENDENCY_PROXY: ${{ secrets.ASR_DEPENDENCY_PROXY }}
+          ASR_MODEL_DOWNLOAD_PROXY: ${{ secrets.ASR_MODEL_DOWNLOAD_PROXY }}
+          GPU_SERVICE_TOKEN: ${{ secrets.GPU_SERVICE_TOKEN }}
+        run: |
+          & "${{ github.workspace }}\scripts\smoke-whisperx-production.ps1" `
+            -CommitSha "${{ inputs.commit_sha }}" `
+            -SourceRoot "${{ github.workspace }}" `
+            -RunId "${{ github.run_id }}" `
+            -ExecuteSmoke $true `
+            -SummaryPath "${{ runner.temp }}\whisperx-r3-${{ github.run_id }}\verdict.json"
+
+      - name: Publish sanitized summary
+        if: ${{ always() }}
+        shell: powershell
+        run: |
+          $path = "${{ runner.temp }}\whisperx-r3-${{ github.run_id }}\verdict.json"
+          if (Test-Path -LiteralPath $path -PathType Leaf) {
+            $v = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
+            @(
+              "## WhisperX CUDA smoke",
+              "",
+              "- Status: ``$($v.status)``",
+              "- Failure code: ``$($v.failure_code)``",
+              "- Commit: ``$($v.commit_sha)``",
+              "- GPU: ``$($v.gpu_name)``",
+              "- CUDA: ``$($v.torch_cuda)``",
+              "- Canonical segments: ``$($v.segment_count)``",
+              "- Production services modified: ``$($v.production_services_modified)``"
+            ) -join "`n" | Out-File $env:GITHUB_STEP_SUMMARY -Append -Encoding UTF8
+          }
+
+      - name: Upload sanitized verdict
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: whisperx-r3-verdict-${{ github.run_id }}
+          path: ${{ runner.temp }}\whisperx-r3-${{ github.run_id }}\verdict.json
+          if-no-files-found: warn
+          retention-days: 14

@@ -34,10 +34,18 @@ from .config import (
     RERANK_TOP_K,
     RERANK_USE_HEADER,
     SPARSE_TOP_K,
+    APP_DB_PATH,
 )
 from .embed import encode_one
 from .index import _client, _ensure_payload_indexes, fetch_parents
 from .rerank import rerank_scores
+from .transcription_retrieval_visibility import (
+    PublishedTranscriptSnapshot,
+    PublishedTranscriptVisibilityPort,
+    SQLitePublishedTranscriptVisibility,
+)
+
+_DEFAULT_VISIBILITY = SQLitePublishedTranscriptVisibility(APP_DB_PATH)
 
 
 @dataclass
@@ -54,6 +62,7 @@ class RetrievedParent:
     start_time: str | None = None
     company: str | None = None
     media_id: str | None = None  # associated video asset if any
+    transcript_version_id: str | None = None
     rrf_score: float = 0.0
     # Which sub-query (0-based) this parent was retrieved for, in the decomposed
     # multi-query path. None for the normal single-query path. Used by
@@ -153,24 +162,35 @@ def _code_filter(code_variants: list[str]) -> models.Filter | None:
     )
 
 
+def _visibility_filter(snapshot: PublishedTranscriptSnapshot) -> models.Filter:
+    visible: list = [
+        models.IsEmptyCondition(is_empty=models.PayloadField(key="transcript_version_id"))
+    ]
+    if snapshot.version_ids:
+        visible.append(
+            models.FieldCondition(
+                key="transcript_version_id",
+                match=models.MatchAny(any=sorted(snapshot.version_ids)),
+            )
+        )
+    return models.Filter(should=visible)
+
+
 def _merge_filters(*filters: models.Filter | None) -> models.Filter | None:
-    """AND together multiple filters. Each input's `should` clause becomes a
-    nested filter under `must` so its OR semantics survive the merge."""
-    parts = [f for f in filters if f is not None]
+    """AND complete filters without dropping must-not or minimum-should semantics."""
+    parts = [item for item in filters if item is not None]
     if not parts:
         return None
     if len(parts) == 1:
         return parts[0]
-    must: list = []
-    for f in parts:
-        if f.must:
-            must.extend(f.must)
-        if f.should:
-            must.append(models.Filter(should=list(f.should)))
-    return models.Filter(must=must) if must else None
+    return models.Filter(must=parts)
 
 
-def _recall_scored(query: str, categories: list[str] | None):
+def _recall_scored(
+    query: str,
+    categories: list[str] | None,
+    snapshot: PublishedTranscriptSnapshot | None = None,
+):
     """Run one query's dense+sparse (+code-boost) recall and rerank.
 
     Returns (scored, child_rrf) where:
@@ -182,7 +202,10 @@ def _recall_scored(query: str, categories: list[str] | None):
     emb = encode_one(query)
     code_variants = _extract_code_variants(query)
 
+    snapshot = snapshot or _DEFAULT_VISIBILITY.snapshot()
     cat_filter = _category_filter(categories)
+    visibility_filter = _visibility_filter(snapshot)
+    base_filter = _merge_filters(cat_filter, visibility_filter)
     code_filter = _code_filter(code_variants)
 
     prefetch = [
@@ -190,7 +213,7 @@ def _recall_scored(query: str, categories: list[str] | None):
             query=emb.dense,
             using="dense",
             limit=DENSE_TOP_K,
-            filter=cat_filter,
+            filter=base_filter,
         ),
         models.Prefetch(
             query=models.SparseVector(
@@ -198,7 +221,7 @@ def _recall_scored(query: str, categories: list[str] | None):
             ),
             using="sparse",
             limit=SPARSE_TOP_K,
-            filter=cat_filter,
+            filter=base_filter,
         ),
     ]
     if code_filter is not None:
@@ -209,7 +232,7 @@ def _recall_scored(query: str, categories: list[str] | None):
                 ),
                 using="sparse",
                 limit=CODE_BOOST_TOP_K,
-                filter=_merge_filters(cat_filter, code_filter),
+                filter=_merge_filters(base_filter, code_filter),
             )
         )
 
@@ -260,6 +283,7 @@ def _dedup_to_parents(
     scored: list,
     child_rrf: dict[str, float],
     top_k: int,
+    snapshot: PublishedTranscriptSnapshot,
 ) -> list[RetrievedParent]:
     """Dedupe reranked children by parent_id and expand to RetrievedParent.
 
@@ -298,7 +322,7 @@ def _dedup_to_parents(
     out: list[RetrievedParent] = []
     for pid in parent_order:
         p = parents.get(pid)
-        if not p:
+        if not p or not snapshot.allows(p.get("transcript_version_id")):
             continue
         out.append(
             RetrievedParent(
@@ -318,6 +342,7 @@ def _dedup_to_parents(
                 start_time=parent_hit_time.get(pid) or p.get("start_time"),
                 company=p.get("company"),
                 media_id=p.get("media_id"),
+                transcript_version_id=p.get("transcript_version_id"),
                 rrf_score=parent_rrf.get(pid, 0.0),
             )
         )
@@ -328,11 +353,14 @@ def retrieve(
     query: str,
     top_k: int = FINAL_TOP_K,
     categories: list[str] | None = None,
+    *,
+    visibility: PublishedTranscriptVisibilityPort | None = None,
 ) -> list[RetrievedParent]:
-    scored, child_rrf = _recall_scored(query, categories)
+    snapshot = (visibility or _DEFAULT_VISIBILITY).snapshot()
+    scored, child_rrf = _recall_scored(query, categories, snapshot)
     if not scored:
         return []
-    return _dedup_to_parents(scored, child_rrf, top_k)
+    return _dedup_to_parents(scored, child_rrf, top_k, snapshot)
 
 
 def _cap_children_for_rerank(
@@ -389,6 +417,8 @@ def retrieve_multi(
     top_k: int = DECOMPOSE_FINAL_TOP_K,
     categories: list[str] | None = None,
     min_quota_per_subquery: int = DECOMPOSE_MIN_QUOTA_PER_SUBQUERY,
+    *,
+    visibility: PublishedTranscriptVisibilityPort | None = None,
 ) -> list[RetrievedParent]:
     """Comparison-intent multi-query retrieval.
 
@@ -407,7 +437,7 @@ def retrieve_multi(
     """
     subs = [s.strip() for s in sub_queries if s and s.strip()]
     if len(subs) < 2:
-        return retrieve(original_query, top_k=top_k, categories=categories)
+        return retrieve(original_query, top_k=top_k, categories=categories, visibility=visibility)
 
     # ── 1. Per-sub-query recall + cross-query RRF over child rankings ──────────
     RRF_K = 60  # standard RRF damping constant
@@ -418,8 +448,9 @@ def retrieve_multi(
     # Ordered child_ids per sub-query, best-first (post-rerank order).
     per_sub_children: list[list[str]] = []
 
+    snapshot = (visibility or _DEFAULT_VISIBILITY).snapshot()
     for si, sq in enumerate(subs):
-        scored, _child_rrf = _recall_scored(sq, categories)
+        scored, _child_rrf = _recall_scored(sq, categories, snapshot)
         ordered_ids: list[str] = []
         for rank, (point, _score) in enumerate(scored):
             cid = str(point.id)
@@ -514,7 +545,7 @@ def retrieve_multi(
     scored = [(child_point[cid], global_score[cid]) for cid in scored_children]
     child_rrf = {cid: child_rrf_fused[cid] for cid in all_child_ids}
 
-    out = _dedup_to_parents(scored, child_rrf, top_k)
+    out = _dedup_to_parents(scored, child_rrf, top_k, snapshot)
 
     # Tag each returned parent with the sub-query it belongs to, so
     # `_build_context` can interleave sources and keep every comparison side in

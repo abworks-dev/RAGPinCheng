@@ -37,14 +37,16 @@ ENV PYTHONUNBUFFERED=1 \
     LC_ALL=C.UTF-8
 
 # Minimal system deps:
-#   curl  — used by the healthcheck
+#   curl    — used by the healthcheck
+#   ffmpeg  — provides ffmpeg/ffprobe for backend media audio preparation
 # Only install what the amd64 runtime actually needs.  build-essential is
 # omitted because all wheels on amd64 are prebuilt on PyPI.
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
     apt-get update \
     && apt-get install -y --no-install-recommends \
-        curl
+        curl \
+        ffmpeg
 
 WORKDIR /app
 

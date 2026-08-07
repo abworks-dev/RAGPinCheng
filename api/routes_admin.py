@@ -41,13 +41,14 @@ from .auth import (
 )
 from .conversation_runtime import sweep_once
 from .db import get_db
-from .feedback import FEEDBACK_PATH
+from .feedback import read_records
 from .indexing import create_job, enqueue
 from .routes_transcription import build_transcription_service
 from .schemas import (
     AdminConversationListResponse,
     AdminConversationSummaryDTO,
     AdminFeedbackEntry,
+    AdminFeedbackPatchRequest,
     AdminFeedbackResponse,
     AdminStatsResponse,
     AdminUserDTO,
@@ -273,32 +274,126 @@ def stats(
 # ── feedback viewer ────────────────────────────────────────────────────────
 
 
+FEEDBACK_STATUSES = ("pending", "in_progress", "resolved", "archived")
+
+
+def _feedback_workflow_rows(conn: sqlite3.Connection) -> dict[str, sqlite3.Row]:
+    return {
+        row["feedback_id"]: row
+        for row in conn.execute(
+            """SELECT fw.*, u.real_name AS assignee_name
+               FROM feedback_workflow fw
+               LEFT JOIN users u ON u.id = fw.assignee_user_id"""
+        ).fetchall()
+    }
+
+
 @router.get("/feedback", response_model=AdminFeedbackResponse)
 def feedback(
-    limit: int = Query(200, ge=1, le=2000),
+    status: str | None = Query("pending"),
+    kind: str | None = Query(None),
+    rating: str | None = Query(None),
+    q: str | None = Query(None, max_length=200),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    conn: sqlite3.Connection = Depends(get_db),
     _admin: CurrentUser = Depends(require_admin),
 ) -> AdminFeedbackResponse:
-    path: Path = FEEDBACK_PATH
-    if not path.exists():
-        return AdminFeedbackResponse(entries=[], total=0)
-    # Tail the file: load all lines, return the most recent `limit`.
-    with path.open("r", encoding="utf-8") as fh:
-        lines = fh.readlines()
-    total = len(lines)
-    tail = lines[-limit:]
+    if status not in (*FEEDBACK_STATUSES, "all"):
+        raise HTTPException(status_code=422, detail="invalid feedback status")
+    records = read_records()
+    workflows = _feedback_workflow_rows(conn)
+    counts = {item: 0 for item in FEEDBACK_STATUSES}
+    enriched: list[dict] = []
+    for record in records:
+        workflow = workflows.get(record["feedback_id"])
+        workflow_status = workflow["status"] if workflow else "pending"
+        counts[workflow_status] += 1
+        item = dict(record)
+        item.update({
+            "status": workflow_status,
+            "resolution": workflow["resolution"] if workflow else None,
+            "admin_note": workflow["admin_note"] if workflow else None,
+            "assignee_user_id": workflow["assignee_user_id"] if workflow else None,
+            "assignee_name": workflow["assignee_name"] if workflow else None,
+            "updated_at": workflow["updated_at"] if workflow else None,
+            "resolved_at": workflow["resolved_at"] if workflow else None,
+        })
+        enriched.append(item)
+
+    needle = (q or "").strip().casefold()
+    filtered = [
+        item for item in enriched
+        if (status == "all" or item["status"] == status)
+        and (kind is None or item.get("kind") == kind)
+        and (rating is None or item.get("rating") == rating)
+        and (
+            not needle
+            or needle in " ".join(str(item.get(key) or "") for key in (
+                "query", "note", "doc_title", "section_path", "answer_text"
+            )).casefold()
+        )
+    ]
+    filtered.reverse()
+    total = len(filtered)
+    start = (page - 1) * page_size
     entries: list[AdminFeedbackEntry] = []
-    for line in reversed(tail):  # newest first
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            d = json.loads(line)
-        except Exception:
-            continue
+    for d in filtered[start:start + page_size]:
         entries.append(AdminFeedbackEntry(**{
             k: d.get(k) for k in AdminFeedbackEntry.model_fields.keys()
         }))
-    return AdminFeedbackResponse(entries=entries, total=total)
+    return AdminFeedbackResponse(
+        entries=entries, total=total, page=page, page_size=page_size, counts=counts
+    )
+
+
+@router.patch("/feedback/{feedback_id}", response_model=AdminFeedbackEntry)
+def patch_feedback(
+    feedback_id: str,
+    body: AdminFeedbackPatchRequest,
+    conn: sqlite3.Connection = Depends(get_db),
+    admin: CurrentUser = Depends(require_csrf_admin),
+) -> AdminFeedbackEntry:
+    records = {item["feedback_id"]: item for item in read_records()}
+    record = records.get(feedback_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="feedback not found")
+    if body.status == "resolved" and body.resolution is None:
+        raise HTTPException(status_code=422, detail="resolution is required")
+    now = int(time.time())
+    resolution = body.resolution if body.status == "resolved" else None
+    resolved_at = now if body.status == "resolved" else None
+    assignee = admin.id if body.status in ("in_progress", "resolved") else None
+    conn.execute(
+        """INSERT INTO feedback_workflow(
+               feedback_id, status, resolution, admin_note, assignee_user_id,
+               created_at, updated_at, resolved_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(feedback_id) DO UPDATE SET
+               status=excluded.status,
+               resolution=excluded.resolution,
+               admin_note=excluded.admin_note,
+               assignee_user_id=excluded.assignee_user_id,
+               updated_at=excluded.updated_at,
+               resolved_at=excluded.resolved_at""",
+        (
+            feedback_id, body.status, resolution, body.admin_note,
+            assignee, now, now, resolved_at,
+        ),
+    )
+    conn.commit()
+    record.update({
+        "status": body.status,
+        "resolution": resolution,
+        "admin_note": body.admin_note,
+        "assignee_user_id": assignee,
+        "assignee_name": admin.real_name if assignee else None,
+        "updated_at": now,
+        "resolved_at": resolved_at,
+    })
+    return AdminFeedbackEntry(**{
+        key: record.get(key) for key in AdminFeedbackEntry.model_fields.keys()
+    })
 
 
 # ── manual sweep (admin-triggered, for tests + ops) ────────────────────────
@@ -387,6 +482,7 @@ def _job_row_to_dto(r: sqlite3.Row) -> IndexJobDTO:
         category=r["category"],
         doc_type=r["doc_type"],
         source_path=r["source_path"],
+        source_exists=Path(r["source_path"]).is_file(),
         file_size=r["file_size"],
         status=r["status"],
         error=r["error"],
@@ -665,23 +761,165 @@ def delete_index_job(
     conn.commit()
 
 
+_ACTIVE_INDEX_STATUSES = {
+    "pending",
+    "uploading",
+    "queued_mineru",
+    "parsing",
+    "chunking",
+    "summarizing",
+    "embedding",
+}
+
+
+def _document_status_group(value: str) -> str:
+    if value in _ACTIVE_INDEX_STATUSES:
+        return "processing"
+    if value == "failed":
+        return "failed"
+    if value == "done":
+        return "ready"
+    return "other"
+
+
 @router.get("/index/documents", response_model=IndexedDocumentListResponse)
 def list_documents(
+    query: str = Query("", max_length=200),
+    category: str | None = Query(None, max_length=100),
+    doc_type: str | None = Query(None, max_length=50),
+    status: str | None = Query(None, max_length=50),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
     _admin: CurrentUser = Depends(require_admin),
+    conn: sqlite3.Connection = Depends(get_db),
 ) -> IndexedDocumentListResponse:
-    docs = list_indexed_documents()
-    return IndexedDocumentListResponse(
-        documents=[
+    indexed_by_path = {d.source_path: d for d in list_indexed_documents()}
+    latest_jobs = conn.execute(
+        """
+        SELECT j.*, u.real_name
+        FROM index_jobs j
+        LEFT JOIN users u ON u.id=j.user_id
+        WHERE j.id=(
+            SELECT MAX(j2.id)
+            FROM index_jobs j2
+            WHERE j2.source_path=j.source_path
+        )
+        ORDER BY j.created_at DESC, j.id DESC
+        """
+    ).fetchall()
+    jobs_by_path = {str(row["source_path"]): row for row in latest_jobs}
+    # A completed job is historical evidence, not a live document by itself.
+    # Once its Parent rows are removed, do not resurrect it as a ready item.
+    visible_job_paths = {
+        source_path
+        for source_path, row in jobs_by_path.items()
+        if str(row["status"]) != "done"
+    }
+    all_paths = set(indexed_by_path) | visible_job_paths
+    documents: list[IndexedDocumentDTO] = []
+
+    for source_path in all_paths:
+        indexed = indexed_by_path.get(source_path)
+        job = jobs_by_path.get(source_path)
+        job_stats: dict[str, object] = {}
+        if job is not None and job["stats_json"]:
+            try:
+                job_stats = json.loads(job["stats_json"]) or {}
+            except (TypeError, ValueError):
+                job_stats = {}
+
+        path = Path(source_path)
+        item_category = indexed.category if indexed else str(job["category"])
+        item_type = indexed.doc_type if indexed else str(job["doc_type"])
+        company = indexed.company if indexed else None
+        if company is None and item_category in SECOND_LEVEL_CATEGORIES:
+            try:
+                relative_parts = path.relative_to(DOCS_DIR).parts
+                company = relative_parts[1] if len(relative_parts) > 2 else None
+            except ValueError:
+                company = None
+        display_parts = [item_category]
+        if company:
+            display_parts.append(company)
+        display_parts.append(path.name)
+
+        latest_status = str(job["status"]) if job is not None else "done"
+        is_indexed = indexed is not None
+        error_summary = None
+        if latest_status == "failed":
+            error_summary = "资料处理失败，可重试或在索引活动中查看详情。"
+        documents.append(
             IndexedDocumentDTO(
-                source_path=d.source_path,
-                doc_title=d.doc_title,
-                category=d.category,
-                doc_type=d.doc_type,
-                company=d.company,
-                parent_count=d.parent_count,
+                document_id=hashlib.sha256(source_path.encode("utf-8")).hexdigest()[:24],
+                source_path=source_path,
+                display_path=" / ".join(display_parts),
+                filename=str(job["filename"]) if job is not None else path.name,
+                doc_title=indexed.doc_title if indexed else path.stem,
+                category=item_category,
+                doc_type=item_type,
+                company=company,
+                parent_count=indexed.parent_count if indexed else 0,
+                child_count=(
+                    int(job_stats["children"])
+                    if isinstance(job_stats.get("children"), int)
+                    else None
+                ),
+                file_size=int(job["file_size"]) if job is not None else None,
+                status=latest_status,
+                is_indexed=is_indexed,
+                latest_job_id=int(job["id"]) if job is not None else None,
+                error_summary=error_summary,
+                uploaded_by=(
+                    str(job["real_name"])
+                    if job is not None and job["real_name"]
+                    else None
+                ),
+                created_at=int(job["created_at"]) if job is not None else None,
+                updated_at=(
+                    int(job["finished_at"] or job["started_at"] or job["created_at"])
+                    if job is not None
+                    else None
+                ),
             )
-            for d in docs
+        )
+
+    normalized_query = query.strip().casefold()
+    filtered = [
+        item
+        for item in documents
+        if (
+            not normalized_query
+            or normalized_query in item.doc_title.casefold()
+            or normalized_query in item.filename.casefold()
+            or normalized_query in item.category.casefold()
+            or normalized_query in (item.company or "").casefold()
+        )
+        and (category is None or item.category == category)
+        and (doc_type is None or item.doc_type == doc_type)
+    ]
+    status_counts: dict[str, int] = {}
+    for item in filtered:
+        group = _document_status_group(item.status)
+        status_counts[group] = status_counts.get(group, 0) + 1
+    if status is not None:
+        filtered = [
+            item
+            for item in filtered
+            if _document_status_group(item.status) == status or item.status == status
         ]
+    filtered.sort(
+        key=lambda item: (
+            item.updated_at is not None,
+            item.updated_at or 0,
+            item.doc_title.casefold(),
+        ),
+        reverse=True,
+    )
+    total = len(filtered)
+    return IndexedDocumentListResponse(
+        documents=filtered[offset : offset + limit],
+        total=total,
+        status_counts=status_counts,
     )
 
 
@@ -694,6 +932,7 @@ def delete_document(
     return DeleteDocumentResponse(
         parents_deleted=result["parents_deleted"],
         file_deleted=bool(result["file_deleted"]),
+        file_delete_status=str(result["file_delete_status"]),
     )
 
 
@@ -992,10 +1231,26 @@ def list_media_assets(
     """List all media assets."""
     rows = conn.execute(
         """
-        SELECT media_id, title, original_filename, mime_type, file_size,
-               transcript_origin, status, created_at, updated_at, error
-        FROM media_assets
-        ORDER BY created_at DESC
+        SELECT m.media_id, m.title, m.original_filename, m.mime_type, m.file_size,
+               m.transcript_origin, m.status, m.created_at, m.updated_at, m.error,
+               v.review_status, v.publication_status,
+               CASE WHEN h.current_version_id=v.id THEN 1 ELSE 0 END AS is_current_version,
+               (
+                   SELECT p.status
+                   FROM transcript_publication_index_jobs p
+                   WHERE p.transcript_version_id=v.id
+                   ORDER BY p.attempt_number DESC
+                   LIMIT 1
+               ) AS publication_index_status
+        FROM media_assets m
+        LEFT JOIN transcript_versions v ON v.id=(
+            SELECT v2.id FROM transcript_versions v2
+            WHERE v2.media_id=m.media_id
+            ORDER BY v2.created_at DESC, v2.id DESC
+            LIMIT 1
+        )
+        LEFT JOIN media_transcript_heads h ON h.media_id=m.media_id
+        ORDER BY m.created_at DESC
         LIMIT ?
         """,
         (limit,),
@@ -1012,6 +1267,10 @@ def list_media_assets(
             created_at=r["created_at"],
             updated_at=r["updated_at"],
             error=r["error"],
+            review_status=r["review_status"],
+            publication_status=r["publication_status"],
+            publication_index_status=r["publication_index_status"],
+            is_current_version=bool(r["is_current_version"]),
         )
         for r in rows
     ]

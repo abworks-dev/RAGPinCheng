@@ -1,0 +1,13 @@
+{
+  "schema_version": "asr-model-manifest/1",
+  "model_id": "dropbox-dash/faster-whisper-large-v3-turbo",
+  "model_revision": "0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf",
+  "model_path": "faster-whisper-large-v3-turbo/0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf",
+  "files": [
+    {
+      "path": "replace-with-relative-model-file",
+      "size_bytes": 0,
+      "sha256": "replace-with-64-character-lowercase-sha256"
+    }
+  ]
+}

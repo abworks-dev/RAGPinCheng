@@ -1,0 +1,105 @@
+name: Qualify WhisperX Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: "Full merged master SHA to qualify"
+        required: true
+        type: string
+      execute_qualification:
+        description: "Run isolated WhisperX CUDA quality qualification"
+        required: true
+        default: false
+        type: boolean
+      prepare_synthetic_samples:
+        description: "Prepare/reuse the fixed self-made eight-sample ASR corpus"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-asr-whisperx-qualification
+  cancel-in-progress: false
+
+jobs:
+  qualify:
+    environment: production-asr
+    runs-on: [self-hosted, Windows, X64, asr-production]
+    timeout-minutes: 180
+    steps:
+      - name: Validate immutable revision and explicit R3 gate
+        shell: powershell
+        run: |
+          if ("${{ inputs.commit_sha }}" -notmatch '^[0-9a-fA-F]{40}$') {
+            throw "commit_sha must be a full SHA"
+          }
+          if ("${{ inputs.commit_sha }}".ToLowerInvariant() -ne "${{ github.sha }}".ToLowerInvariant()) {
+            throw "commit_sha must equal the dispatch revision"
+          }
+          if ("${{ github.ref }}" -ne "refs/heads/master") {
+            throw "qualification must run from master"
+          }
+          if (-not [Convert]::ToBoolean("${{ inputs.execute_qualification }}")) {
+            throw "execute_qualification must be explicitly enabled"
+          }
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 1
+
+      - name: Prepare or reuse fixed self-made qualification samples
+        if: ${{ inputs.prepare_synthetic_samples }}
+        shell: powershell
+        run: |
+          & "${{ github.workspace }}\scripts\prepare-qwen3-asr-qualification-samples.ps1" `
+            -CommitSha "${{ inputs.commit_sha }}" `
+            -SourceRoot "${{ github.workspace }}" `
+            -RunId "${{ github.run_id }}"
+
+      - name: Run isolated WhisperX qualification
+        shell: powershell
+        env:
+          ASR_DEPENDENCY_PROXY: ${{ secrets.ASR_DEPENDENCY_PROXY }}
+          ASR_MODEL_DOWNLOAD_PROXY: ${{ secrets.ASR_MODEL_DOWNLOAD_PROXY }}
+        run: |
+          & "${{ github.workspace }}\scripts\qualify-whisperx-production.ps1" `
+            -CommitSha "${{ inputs.commit_sha }}" `
+            -SourceRoot "${{ github.workspace }}" `
+            -RunId "${{ github.run_id }}" `
+            -ExecuteQualification $true `
+            -SummaryPath "${PRODUCTION_SERVICE_ROOT}\RAGPinCheng-ASR-WhisperX\qualification\runs\${{ github.run_id }}\reports\verdict.json"
+
+      - name: Publish sanitized qualification summary
+        if: ${{ always() }}
+        shell: powershell
+        run: |
+          $path = "${PRODUCTION_SERVICE_ROOT}\RAGPinCheng-ASR-WhisperX\qualification\runs\${{ github.run_id }}\reports\verdict.json"
+          if (Test-Path -LiteralPath $path -PathType Leaf) {
+            $v = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
+            @(
+              "## WhisperX qualification",
+              "",
+              "- Status: ``$($v.status)``",
+              "- Failure code: ``$($v.failure_code)``",
+              "- Commit: ``$($v.commit_sha)``",
+              "- Samples: ``$($v.sample_count)``",
+              "- Peak GPU memory: ``$($v.peak_gpu_memory_mib) MiB``",
+              "- License audit: ``$($v.license_audit_status)``",
+              "- Profile admission: ``$($v.profile_admission)``",
+              "- Production services modified: ``$($v.production_services_modified)``"
+            ) -join "`n" | Out-File $env:GITHUB_STEP_SUMMARY -Append -Encoding UTF8
+          }
+
+      - name: Upload sanitized verdict
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: whisperx-qualification-verdict-${{ github.run_id }}
+          path: ${PRODUCTION_SERVICE_ROOT}\RAGPinCheng-ASR-WhisperX\qualification\runs\${{ github.run_id }}\reports
+          if-no-files-found: warn
+          retention-days: 14

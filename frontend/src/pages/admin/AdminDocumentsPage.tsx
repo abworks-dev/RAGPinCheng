@@ -1,17 +1,50 @@
+import {
+  Activity,
+  ChevronDown,
+  FileText,
+  MoreHorizontal,
+  RefreshCw,
+  Search,
+  Trash2,
+  Upload,
+  X,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../api/client";
 import { Alert, AlertDescription, AlertTitle } from "../../components/ui/alert";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../components/ui/card";
+import { Card } from "../../components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "../../components/ui/dialog";
 import { EmptyState } from "../../components/ui/empty-state";
 import { ErrorState } from "../../components/ui/error-state";
 import { Input } from "../../components/ui/input";
 import { LoadingState } from "../../components/ui/loading-state";
-import type { CategoryTree, IndexJob, IndexedDocument } from "../../types";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "../../components/ui/sheet";
+import type {
+  CategoryTree,
+  IndexJob,
+  IndexedDocument,
+  IndexedDocumentList,
+} from "../../types";
+import { cn } from "../../lib/utils";
 import { formatAdminDate, formatBytes } from "./admin-formatters";
 
 const NEW_CATEGORY_SENTINEL = "__new__";
+const PAGE_SIZE = 25;
 const ACTIVE_STATUSES = new Set([
   "pending",
   "uploading",
@@ -21,23 +54,31 @@ const ACTIVE_STATUSES = new Set([
   "summarizing",
   "embedding",
 ]);
+const SUPPORTED_EXTENSIONS = [".pdf", ".md", ".docx", ".xlsx", ".pptx"];
 
 type StatusVariant = "secondary" | "success" | "warning" | "destructive" | "info";
+type StatusFilter = "all" | "processing" | "ready" | "failed";
 
 const STATUS_META: Record<string, { label: string; hint?: string; variant: StatusVariant }> = {
-  pending: { label: "排队中", hint: "任务正在等待处理…", variant: "secondary" },
-  uploading: { label: "上传中", hint: "正在上传文件…", variant: "info" },
-  queued_mineru: { label: "等待 MinerU", hint: "文件已提交，等待解析器开始处理…", variant: "warning" },
-  parsing: { label: "解析中", hint: "正在解析文档内容…", variant: "info" },
-  chunking: { label: "切块中", hint: "正在生成可检索的内容块…", variant: "info" },
-  summarizing: { label: "表格摘要中", hint: "正在为表格生成检索摘要…", variant: "warning" },
-  embedding: { label: "嵌入中", hint: "正在写入向量索引…", variant: "warning" },
-  done: { label: "已完成", variant: "success" },
-  failed: { label: "失败", variant: "destructive" },
+  pending: { label: "排队中", hint: "等待处理", variant: "secondary" },
+  uploading: { label: "上传中", hint: "正在上传文件", variant: "info" },
+  queued_mineru: { label: "等待解析", hint: "等待解析器资源", variant: "warning" },
+  parsing: { label: "解析中", hint: "正在提取文档内容", variant: "info" },
+  chunking: { label: "切分中", hint: "正在生成可检索内容块", variant: "info" },
+  summarizing: { label: "生成摘要", hint: "正在处理表格摘要", variant: "warning" },
+  embedding: { label: "写入索引", hint: "正在写入向量索引", variant: "warning" },
+  done: { label: "可检索", hint: "资料已进入知识库", variant: "success" },
+  failed: { label: "处理失败", hint: "可以重试", variant: "destructive" },
 };
 
 const selectClassName =
   "h-control-md w-full rounded-ui-md border border-input bg-background px-3 text-ui-sm text-foreground shadow-sm outline-none transition-colors duration-normal focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50";
+
+const emptyDocumentList: IndexedDocumentList = {
+  documents: [],
+  total: 0,
+  status_counts: {},
+};
 
 function useElapsed(startTs: number | null | undefined): string {
   const [now, setNow] = useState(() => Date.now());
@@ -55,99 +96,463 @@ function useElapsed(startTs: number | null | undefined): string {
   return `${Math.floor(seconds / 60)}m${seconds % 60}s`;
 }
 
-function documentTypeLabel(document: IndexedDocument): string {
+function documentTypeLabel(document: Pick<IndexedDocument, "doc_type" | "filename">): string {
   if (document.doc_type === "transcript") return "教学视频转写";
-  if (document.doc_type === "docx") return "Word 文档";
-  if (document.doc_type === "xlsx") return "Excel 表格";
-  if (document.doc_type === "pptx") return "PPT 演示";
-  if (document.source_path.toLowerCase().endsWith(".md")) return "Markdown 文档";
+  if (document.doc_type === "docx") return "Word";
+  if (document.doc_type === "xlsx") return "Excel";
+  if (document.doc_type === "pptx") return "PPT";
+  if (document.filename.toLowerCase().endsWith(".md")) return "Markdown";
   return "PDF";
+}
+
+function DocumentStatus({ document }: { document: IndexedDocument }) {
+  const meta = STATUS_META[document.status] || {
+    label: document.status,
+    variant: "secondary" as const,
+  };
+  return (
+    <div>
+      <Badge variant={meta.variant}>{meta.label}</Badge>
+      <p className="mt-1 text-ui-xs text-muted-foreground">
+        {document.error_summary || meta.hint || "状态待确认"}
+      </p>
+      {document.status === "failed" && document.is_indexed && (
+        <p className="mt-1 text-ui-xs text-warning">已有索引仍保留，建议检查后重试。</p>
+      )}
+    </div>
+  );
 }
 
 export function AdminDocumentsPage() {
   const [tree, setTree] = useState<CategoryTree | null>(null);
-  const [documents, setDocuments] = useState<IndexedDocument[]>([]);
+  const [listing, setListing] = useState<IndexedDocumentList>(emptyDocumentList);
   const [jobs, setJobs] = useState<IndexJob[]>([]);
-  const [loadingDocs, setLoadingDocs] = useState(true);
-  const [loadingJobs, setLoadingJobs] = useState(true);
+  const [loading, setLoading] = useState(true);
+  const [jobsLoading, setJobsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [searchInput, setSearchInput] = useState("");
+  const [query, setQuery] = useState("");
+  const [category, setCategory] = useState("");
+  const [docType, setDocType] = useState("");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [page, setPage] = useState(0);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setQuery(searchInput.trim()), 250);
+    return () => window.clearTimeout(timer);
+  }, [searchInput]);
+
+  useEffect(() => {
+    setPage(0);
+  }, [query, category, docType, statusFilter]);
+
+  const documentParams = useMemo(
+    () => ({
+      query: query || undefined,
+      category: category || undefined,
+      doc_type: docType || undefined,
+      status: statusFilter === "all" ? undefined : statusFilter,
+      limit: PAGE_SIZE,
+      offset: page * PAGE_SIZE,
+    }),
+    [query, category, docType, statusFilter, page],
+  );
+
+  const refreshDocuments = useCallback(async () => {
+    setLoading(true);
+    try {
+      setListing(await api.adminListIndexedDocuments(documentParams));
+    } finally {
+      setLoading(false);
+    }
+  }, [documentParams]);
 
   const refreshAll = useCallback(async () => {
-    setLoadingDocs(true);
-    setLoadingJobs(true);
+    setLoading(true);
+    setJobsLoading(true);
     setError(null);
     try {
       const [categoryTree, indexedDocuments, indexJobs] = await Promise.all([
         api.adminCategoryTree(),
-        api.adminListIndexedDocuments(),
+        api.adminListIndexedDocuments(documentParams),
         api.adminListIndexJobs(100),
       ]);
       setTree(categoryTree);
-      setDocuments(indexedDocuments.documents);
+      setListing(indexedDocuments);
       setJobs(indexJobs.jobs);
-    } catch (e: any) {
-      setError(e?.message || String(e));
+    } catch (caught: any) {
+      setError(caught?.message || String(caught));
     } finally {
-      setLoadingDocs(false);
-      setLoadingJobs(false);
+      setLoading(false);
+      setJobsLoading(false);
     }
-  }, []);
+  }, [documentParams]);
 
   useEffect(() => {
-    refreshAll();
+    void refreshAll();
   }, [refreshAll]);
 
-  const hasActive = jobs.some((job) => job.status !== "done" && job.status !== "failed");
-
+  const hasActive = jobs.some((job) => ACTIVE_STATUSES.has(job.status));
   useEffect(() => {
     if (!hasActive) return;
     const timer = window.setInterval(async () => {
       try {
         const { jobs: latest } = await api.adminListIndexJobs(100);
         setJobs(latest);
-        if (latest.some((job) => job.status === "done")) {
-          const indexedDocuments = await api.adminListIndexedDocuments();
-          setDocuments(indexedDocuments.documents);
-        }
+        await refreshDocuments();
       } catch {
-        // Polling is best-effort. The next tick retries without replacing visible data.
+        // Best-effort polling keeps the last usable state and retries next tick.
       }
     }, 3000);
     return () => window.clearInterval(timer);
-  }, [hasActive]);
+  }, [hasActive, refreshDocuments]);
+
+  const pageCount = Math.max(1, Math.ceil(listing.total / PAGE_SIZE));
+  const categoryNames = tree?.categories.map((item) => item.name) || [];
+  const summary = listing.status_counts;
 
   return (
-    <section className="space-y-6" aria-labelledby="admin-documents-title">
-      <header>
-        <p className="text-ui-xs font-medium uppercase tracking-[0.14em] text-primary">知识库维护</p>
-        <h1 id="admin-documents-title" className="mt-1 text-ui-2xl font-semibold tracking-tight text-foreground">
-          资料管理与索引任务
-        </h1>
-        <p className="mt-1 max-w-3xl text-ui-sm text-muted-foreground">
-          上传并分类知识库资料，查看已索引内容，并跟踪解析、切块和向量写入进度。
-        </p>
+    <section className="space-y-5" aria-labelledby="admin-documents-title">
+      <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <p className="text-ui-xs font-medium uppercase tracking-[0.14em] text-primary">知识库维护</p>
+          <h1 id="admin-documents-title" className="mt-1 text-ui-2xl font-semibold tracking-tight text-foreground">
+            资料管理
+          </h1>
+          <p className="mt-1 max-w-3xl text-ui-sm text-muted-foreground">
+            管理资料的上传、处理和检索状态；详细处理记录收纳在索引活动中。
+          </p>
+        </div>
+        <Button onClick={() => setUploadOpen(true)} className="w-full gap-2 sm:w-auto">
+          <Upload className="size-4" />
+          上传资料
+        </Button>
       </header>
 
       {error && (
         <ErrorState
-          title="资料与索引数据加载失败"
+          title="资料数据加载失败"
           description={error}
-          action={
-            <Button variant="outline" size="sm" onClick={refreshAll}>
-              重新加载
-            </Button>
-          }
+          action={<Button variant="outline" size="sm" onClick={() => void refreshAll()}>重新加载</Button>}
         />
       )}
 
-      <UploadCard tree={tree} onUploaded={refreshAll} />
-      <DocumentsCard documents={documents} loading={loadingDocs} onChange={refreshAll} />
-      <JobsCard jobs={jobs} loading={loadingJobs} onChange={refreshAll} />
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="资料状态概览">
+        <SummaryCard label="全部资料" value={Object.values(summary).reduce((sum, value) => sum + value, 0)} />
+        <SummaryCard label="处理中" value={summary.processing || 0} tone="warning" />
+        <SummaryCard label="可检索" value={summary.ready || 0} tone="success" />
+        <SummaryCard label="处理失败" value={summary.failed || 0} tone="destructive" />
+      </section>
+
+      <section className="space-y-3" aria-labelledby="document-list-title">
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+          <div>
+            <h2 id="document-list-title" className="text-ui-base font-semibold text-foreground">资料列表</h2>
+            <p className="mt-1 text-ui-xs text-muted-foreground">状态与最近一次处理任务已经合并到资料行。</p>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2 xl:flex xl:items-center">
+            <label className="relative block sm:col-span-2 xl:w-72">
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <span className="sr-only">搜索资料</span>
+              <Input
+                type="search"
+                value={searchInput}
+                onChange={(event) => setSearchInput(event.target.value)}
+                placeholder="搜索标题、文件名或分类…"
+                className="pl-9"
+              />
+            </label>
+            <select
+              aria-label="按分类筛选"
+              value={category}
+              onChange={(event) => setCategory(event.target.value)}
+              className={cn(selectClassName, "xl:w-40")}
+            >
+              <option value="">全部分类</option>
+              {categoryNames.map((name) => <option key={name} value={name}>{name}</option>)}
+            </select>
+            <select
+              aria-label="按文件类型筛选"
+              value={docType}
+              onChange={(event) => setDocType(event.target.value)}
+              className={cn(selectClassName, "xl:w-36")}
+            >
+              <option value="">全部类型</option>
+              <option value="pdf">PDF / Markdown</option>
+              <option value="docx">Word</option>
+              <option value="xlsx">Excel</option>
+              <option value="pptx">PPT</option>
+              <option value="transcript">视频转写</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-2" aria-label="按处理状态筛选">
+          {([
+            ["all", "全部"],
+            ["processing", "处理中"],
+            ["ready", "可检索"],
+            ["failed", "失败"],
+          ] as const).map(([value, label]) => (
+            <Button
+              key={value}
+              size="sm"
+              variant={statusFilter === value ? "default" : "outline"}
+              onClick={() => setStatusFilter(value)}
+            >
+              {label}
+            </Button>
+          ))}
+        </div>
+
+        {loading ? (
+          <Card><LoadingState className="min-h-64" label="正在加载资料…" /></Card>
+        ) : listing.documents.length === 0 ? (
+          <EmptyState
+            title={query || category || docType || statusFilter !== "all" ? "没有符合条件的资料" : "暂无资料"}
+            description={query || category || docType || statusFilter !== "all" ? "请调整搜索或筛选条件。" : "上传第一份资料后，处理状态会显示在这里。"}
+          />
+        ) : (
+          <DocumentsTable
+            documents={listing.documents}
+            onChanged={refreshAll}
+          />
+        )}
+
+        {!loading && listing.total > 0 && (
+          <div className="flex flex-col gap-2 text-ui-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+            <span>共 {listing.total} 份资料，第 {page + 1} / {pageCount} 页</span>
+            <div className="flex gap-2">
+              <Button size="sm" variant="outline" disabled={page === 0} onClick={() => setPage((value) => value - 1)}>
+                上一页
+              </Button>
+              <Button size="sm" variant="outline" disabled={page + 1 >= pageCount} onClick={() => setPage((value) => value + 1)}>
+                下一页
+              </Button>
+            </div>
+          </div>
+        )}
+      </section>
+
+      <JobsActivity jobs={jobs} loading={jobsLoading} onChanged={refreshAll} />
+
+      <Sheet open={uploadOpen} onOpenChange={setUploadOpen}>
+        <SheetContent>
+          <SheetHeader>
+            <SheetTitle>上传资料</SheetTitle>
+            <SheetDescription>选择分类并添加文件；每个文件都会独立进入处理队列。</SheetDescription>
+          </SheetHeader>
+          <UploadPanel tree={tree} onUploaded={refreshAll} />
+        </SheetContent>
+      </Sheet>
     </section>
   );
 }
 
-function UploadCard({
+function SummaryCard({
+  label,
+  value,
+  tone = "secondary",
+}: {
+  label: string;
+  value: number;
+  tone?: "secondary" | "warning" | "success" | "destructive";
+}) {
+  const dotClass = {
+    secondary: "bg-muted-foreground",
+    warning: "bg-warning",
+    success: "bg-success",
+    destructive: "bg-destructive",
+  }[tone];
+  return (
+    <Card className="flex items-center justify-between px-4 py-3 shadow-surface">
+      <div className="flex items-center gap-2 text-ui-sm text-muted-foreground">
+        <span className={cn("size-2 rounded-full", dotClass)} />
+        {label}
+      </div>
+      <strong className="text-ui-xl tabular-nums text-foreground">{value}</strong>
+    </Card>
+  );
+}
+
+function DocumentsTable({
+  documents,
+  onChanged,
+}: {
+  documents: IndexedDocument[];
+  onChanged: () => Promise<void> | void;
+}) {
+  const [deleteTarget, setDeleteTarget] = useState<IndexedDocument | null>(null);
+  const [deleteFile, setDeleteFile] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deletePartiallyCompleted, setDeletePartiallyCompleted] = useState(false);
+  const [retryingId, setRetryingId] = useState<number | null>(null);
+
+  function closeDeleteDialog() {
+    setDeleteTarget(null);
+    setDeleteFile(false);
+    setDeleteError(null);
+    if (deletePartiallyCompleted) void onChanged();
+    setDeletePartiallyCompleted(false);
+  }
+
+  async function retry(document: IndexedDocument) {
+    if (document.latest_job_id == null) return;
+    setRetryingId(document.latest_job_id);
+    try {
+      await api.adminRetryIndexJob(document.latest_job_id);
+      await onChanged();
+    } finally {
+      setRetryingId(null);
+    }
+  }
+
+  async function removeDocument() {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    setDeleteError(null);
+    setDeletePartiallyCompleted(false);
+    try {
+      const result = await api.adminDeleteIndexedDocument(deleteTarget.source_path, deleteFile);
+      if (deleteFile && result.file_delete_status === "failed") {
+        setDeletePartiallyCompleted(true);
+        setDeleteError("知识库索引已移除，但源文件删除失败。请检查文件权限或占用情况后重试。");
+        return;
+      }
+      setDeleteTarget(null);
+      setDeleteFile(false);
+      await onChanged();
+    } catch (caught: any) {
+      setDeleteError(caught?.message || String(caught));
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  return (
+    <>
+      <Card className="overflow-hidden shadow-surface">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[58rem] text-ui-sm">
+            <caption className="sr-only">资料名称、分类、类型、状态、内容规模、更新时间和操作</caption>
+            <thead className="border-b border-border bg-surface-muted text-muted-foreground">
+              <tr>
+                <th scope="col" className="px-4 py-3 text-left font-medium">资料</th>
+                <th scope="col" className="px-4 py-3 text-left font-medium">分类</th>
+                <th scope="col" className="px-4 py-3 text-left font-medium">类型</th>
+                <th scope="col" className="px-4 py-3 text-left font-medium">当前状态</th>
+                <th scope="col" className="px-4 py-3 text-right font-medium">内容块</th>
+                <th scope="col" className="px-4 py-3 text-left font-medium">更新时间</th>
+                <th scope="col" className="px-4 py-3 text-right font-medium">操作</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {documents.map((document) => (
+                <tr key={document.document_id} className="bg-card align-top hover:bg-surface-muted/60">
+                  <td className="px-4 py-3">
+                    <div className="flex max-w-md gap-3">
+                      <div className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-ui-md bg-secondary text-muted-foreground">
+                        <FileText className="size-4" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="truncate font-medium text-foreground" title={document.doc_title}>{document.doc_title}</p>
+                        <p className="mt-1 truncate text-ui-xs text-muted-foreground" title={document.filename}>
+                          {document.filename}
+                          {document.file_size != null ? ` · ${formatBytes(document.file_size)}` : ""}
+                        </p>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3">
+                    <Badge variant="secondary">{document.category}</Badge>
+                    {document.company && <p className="mt-1 text-ui-xs text-muted-foreground">{document.company}</p>}
+                  </td>
+                  <td className="px-4 py-3"><Badge variant="outline">{documentTypeLabel(document)}</Badge></td>
+                  <td className="px-4 py-3"><DocumentStatus document={document} /></td>
+                  <td className="px-4 py-3 text-right tabular-nums text-muted-foreground">
+                    {document.is_indexed ? document.parent_count : "—"}
+                  </td>
+                  <td className="px-4 py-3 text-ui-xs text-muted-foreground">
+                    {document.updated_at ? formatAdminDate(document.updated_at) : "历史资料"}
+                    {document.uploaded_by && <p className="mt-1">由 {document.uploaded_by} 上传</p>}
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <details className="relative inline-block text-left">
+                      <summary className="inline-flex size-9 cursor-pointer list-none items-center justify-center rounded-ui-md text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label={`打开 ${document.doc_title} 的操作菜单`}>
+                        <MoreHorizontal className="size-4" />
+                      </summary>
+                      <div className="absolute right-0 z-dropdown mt-1 w-44 rounded-ui-md border border-border bg-popover p-1 text-left text-popover-foreground shadow-overlay">
+                        {document.latest_job_id != null && (document.status === "failed" || document.status === "done") && (
+                          <button
+                            type="button"
+                            disabled={retryingId === document.latest_job_id}
+                            onClick={() => void retry(document)}
+                            className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-secondary disabled:opacity-50"
+                          >
+                            <RefreshCw className="size-4" />
+                            {document.status === "failed" ? "重试处理" : "重新索引"}
+                          </button>
+                        )}
+                        {document.is_indexed && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setDeleteError(null);
+                              setDeletePartiallyCompleted(false);
+                              setDeleteFile(false);
+                              setDeleteTarget(document);
+                            }}
+                            className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm text-destructive hover:bg-destructive/10"
+                          >
+                            <Trash2 className="size-4" />
+                            移除资料
+                          </button>
+                        )}
+                      </div>
+                    </details>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+
+      <Dialog open={deleteTarget != null} onOpenChange={(open) => !open && closeDeleteDialog()}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>移除资料</DialogTitle>
+            <DialogDescription>
+              将“{deleteTarget?.doc_title}”从知识库索引中移除。默认保留源文件，之后仍可重新索引。
+            </DialogDescription>
+          </DialogHeader>
+          <fieldset className="space-y-2">
+            <legend className="mb-2 text-ui-sm font-medium text-foreground">源文件处理方式</legend>
+            <label className="flex cursor-pointer gap-3 rounded-ui-md border border-border p-3">
+              <input type="radio" name="delete-mode" checked={!deleteFile} onChange={() => setDeleteFile(false)} />
+              <span><strong className="block text-ui-sm">保留源文件</strong><span className="text-ui-xs text-muted-foreground">仅移除检索索引，推荐选择。</span></span>
+            </label>
+            <label className="flex cursor-pointer gap-3 rounded-ui-md border border-destructive/40 p-3">
+              <input type="radio" name="delete-mode" checked={deleteFile} onChange={() => setDeleteFile(true)} />
+              <span><strong className="block text-ui-sm text-destructive">同时删除源文件</strong><span className="text-ui-xs text-muted-foreground">文件将无法通过重新索引恢复。</span></span>
+            </label>
+          </fieldset>
+          {deleteError && <Alert variant="destructive" role="alert"><AlertTitle>删除未完全完成</AlertTitle><AlertDescription>{deleteError}</AlertDescription></Alert>}
+          <DialogFooter>
+            <Button variant="outline" onClick={closeDeleteDialog} disabled={deleting}>取消</Button>
+            <Button variant="destructive" onClick={() => void removeDocument()} disabled={deleting}>
+              {deleting ? "正在移除…" : deleteFile ? "删除资料和源文件" : "从知识库移除"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+function UploadPanel({
   tree,
   onUploaded,
 }: {
@@ -160,31 +565,17 @@ function UploadCard({
   const [pickedSub, setPickedSub] = useState("");
   const [newSub, setNewSub] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [result, setResult] = useState<{
-    accepted: number;
-    skipped: { filename: string; reason: string }[];
-  } | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const [result, setResult] = useState<{ accepted: number; skipped: { filename: string; reason: string }[] } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const categoryNames = useMemo(
-    () => (tree ? tree.categories.map((category) => category.name) : []),
-    [tree],
-  );
-
+  const categoryNames = useMemo(() => tree?.categories.map((item) => item.name) || [], [tree]);
   useEffect(() => {
-    if (!pickedCategory && categoryNames.length > 0) {
-      setPickedCategory(categoryNames[0]);
-    }
+    if (!pickedCategory && categoryNames.length > 0) setPickedCategory(categoryNames[0]);
   }, [categoryNames, pickedCategory]);
 
-  const effectiveCategory =
-    pickedCategory === NEW_CATEGORY_SENTINEL ? newCategory.trim() : pickedCategory;
-
-  const currentNode = useMemo(() => {
-    if (!tree) return null;
-    return tree.categories.find((category) => category.name === effectiveCategory) || null;
-  }, [tree, effectiveCategory]);
-
+  const effectiveCategory = pickedCategory === NEW_CATEGORY_SENTINEL ? newCategory.trim() : pickedCategory;
+  const currentNode = tree?.categories.find((item) => item.name === effectiveCategory) || null;
   const needsSubcategory = Boolean(currentNode?.two_level);
   const existingSubs = currentNode?.subcategories || [];
 
@@ -199,511 +590,269 @@ function UploadCard({
   }, [effectiveCategory, needsSubcategory, existingSubs.join("|")]);
 
   const effectiveSub = needsSubcategory
-    ? pickedSub === NEW_CATEGORY_SENTINEL
-      ? newSub.trim()
-      : pickedSub
+    ? pickedSub === NEW_CATEGORY_SENTINEL ? newSub.trim() : pickedSub
     : "";
 
-  const canSubmit =
-    files.length > 0 &&
-    Boolean(effectiveCategory) &&
-    (!needsSubcategory || Boolean(effectiveSub));
-  const totalSize = files.reduce((sum, file) => sum + file.size, 0);
+  const invalidFiles = files.filter((file) => {
+    const lower = file.name.toLowerCase();
+    return file.size === 0 || !SUPPORTED_EXTENSIONS.some((extension) => lower.endsWith(extension));
+  });
+  const validFiles = files.filter((file) => !invalidFiles.includes(file));
+  const totalSize = validFiles.reduce((sum, file) => sum + file.size, 0);
+  const canSubmit = validFiles.length > 0 && Boolean(effectiveCategory) && (!needsSubcategory || Boolean(effectiveSub));
+
+  function addFiles(incoming: File[]) {
+    setResult(null);
+    setFiles((current) => {
+      const map = new Map(current.map((file) => [`${file.name}-${file.size}-${file.lastModified}`, file]));
+      incoming.forEach((file) => map.set(`${file.name}-${file.size}-${file.lastModified}`, file));
+      return Array.from(map.values());
+    });
+  }
 
   async function submit() {
     if (!canSubmit) return;
     setSubmitting(true);
     setResult(null);
     try {
-      const response = await api.adminUploadDocuments(
-        files,
-        effectiveCategory,
-        effectiveSub || undefined,
-      );
+      const response = await api.adminUploadDocuments(validFiles, effectiveCategory, effectiveSub || undefined);
       setResult({ accepted: response.accepted.length, skipped: response.skipped });
       setFiles([]);
       if (fileInputRef.current) fileInputRef.current.value = "";
       await onUploaded();
-    } catch (e: any) {
-      setResult({
-        accepted: 0,
-        skipped: [{ filename: "(upload)", reason: e?.message || String(e) }],
-      });
+    } catch (caught: any) {
+      setResult({ accepted: 0, skipped: [{ filename: "本次上传", reason: caught?.message || String(caught) }] });
     } finally {
       setSubmitting(false);
     }
   }
 
   return (
-    <Card className="shadow-surface">
-      <CardHeader className="p-5 pb-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+    <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+      <div className="space-y-5">
+        <div className="grid gap-4 sm:grid-cols-2">
           <div>
-            <CardTitle id="document-upload-title" className="text-ui-lg">
-              上传资料
-            </CardTitle>
-            <CardDescription className="mt-1 max-w-3xl leading-relaxed">
-              支持 PDF、Word、Excel、PPT 和 Markdown，可一次选择多个文件并依次排队处理。
-            </CardDescription>
-          </div>
-          <Badge variant="outline" className="shrink-0">
-            PDF · DOCX · XLSX · PPTX · MD
-          </Badge>
-        </div>
-      </CardHeader>
-
-      <CardContent className="space-y-5 px-5 pb-5 pt-0">
-        <Alert variant="info">
-          <AlertTitle>分类和解析说明</AlertTitle>
-          <AlertDescription className="leading-relaxed">
-            PDF 会经 MinerU 解析，DOCX 会经 Docling 解析；“教学视频”分类下的 Markdown 按说话人和时间戳转写处理，
-            其它 Markdown 按标题切分。处理期间仍可继续问答，但响应可能变慢。
-          </AlertDescription>
-        </Alert>
-
-        <div className="grid gap-4 lg:grid-cols-2">
-          <div>
-            <label htmlFor="document-category" className="mb-1.5 block text-ui-sm font-medium text-foreground">
-              分类
-            </label>
-            <select
-              id="document-category"
-              value={pickedCategory}
-              onChange={(event) => setPickedCategory(event.target.value)}
-              disabled={submitting}
-              className={selectClassName}
-            >
+            <label htmlFor="document-category" className="mb-1.5 block text-ui-sm font-medium">分类</label>
+            <select id="document-category" value={pickedCategory} onChange={(event) => setPickedCategory(event.target.value)} disabled={submitting} className={selectClassName}>
               {categoryNames.length === 0 && <option value="">（暂无现有分类）</option>}
-              {categoryNames.map((category) => (
-                <option key={category} value={category}>{category}</option>
-              ))}
+              {categoryNames.map((name) => <option key={name} value={name}>{name}</option>)}
               <option value={NEW_CATEGORY_SENTINEL}>＋ 新建分类…</option>
             </select>
           </div>
-
           {pickedCategory === NEW_CATEGORY_SENTINEL && (
             <div>
-              <label htmlFor="document-new-category" className="mb-1.5 block text-ui-sm font-medium text-foreground">
-                新分类名称
-              </label>
-              <Input
-                id="document-new-category"
-                value={newCategory}
-                onChange={(event) => setNewCategory(event.target.value)}
-                placeholder="例如：行业规范"
-                disabled={submitting}
-                autoFocus
-              />
+              <label htmlFor="document-new-category" className="mb-1.5 block text-ui-sm font-medium">新分类名称</label>
+              <Input id="document-new-category" value={newCategory} onChange={(event) => setNewCategory(event.target.value)} placeholder="例如：行业规范" disabled={submitting} autoFocus />
             </div>
           )}
-
           {needsSubcategory && (
-            <>
-              <div>
-                <label htmlFor="document-subcategory" className="mb-1.5 block text-ui-sm font-medium text-foreground">
-                  {effectiveCategory === "客户标准" ? "客户" : "公司"}
-                </label>
-                <select
-                  id="document-subcategory"
-                  value={pickedSub}
-                  onChange={(event) => setPickedSub(event.target.value)}
-                  disabled={submitting}
-                  className={selectClassName}
-                >
-                  {existingSubs.length === 0 && (
-                    <option value={NEW_CATEGORY_SENTINEL}>（暂无；请新建）</option>
-                  )}
-                  {existingSubs.map((subcategory) => (
-                    <option key={subcategory} value={subcategory}>{subcategory}</option>
-                  ))}
-                  {existingSubs.length > 0 && (
-                    <option value={NEW_CATEGORY_SENTINEL}>＋ 新建…</option>
-                  )}
-                </select>
-                <p className="mt-1 text-ui-xs text-muted-foreground">
-                  “{effectiveCategory}”会按{effectiveCategory === "客户标准" ? "客户" : "公司"}分组。
-                </p>
-              </div>
-
-              {pickedSub === NEW_CATEGORY_SENTINEL && (
-                <div>
-                  <label htmlFor="document-new-subcategory" className="mb-1.5 block text-ui-sm font-medium text-foreground">
-                    新{effectiveCategory === "客户标准" ? "客户" : "公司"}名称
-                  </label>
-                  <Input
-                    id="document-new-subcategory"
-                    value={newSub}
-                    onChange={(event) => setNewSub(event.target.value)}
-                    placeholder={effectiveCategory === "客户标准" ? "例如：C 客户标准" : "输入新公司名"}
-                    disabled={submitting}
-                    autoFocus
-                  />
-                </div>
-              )}
-            </>
+            <div>
+              <label htmlFor="document-subcategory" className="mb-1.5 block text-ui-sm font-medium">{effectiveCategory === "客户标准" ? "客户" : "公司"}</label>
+              <select id="document-subcategory" value={pickedSub} onChange={(event) => setPickedSub(event.target.value)} disabled={submitting} className={selectClassName}>
+                {existingSubs.length === 0 && <option value={NEW_CATEGORY_SENTINEL}>（暂无；请新建）</option>}
+                {existingSubs.map((name) => <option key={name} value={name}>{name}</option>)}
+                {existingSubs.length > 0 && <option value={NEW_CATEGORY_SENTINEL}>＋ 新建…</option>}
+              </select>
+            </div>
+          )}
+          {needsSubcategory && pickedSub === NEW_CATEGORY_SENTINEL && (
+            <div>
+              <label htmlFor="document-new-subcategory" className="mb-1.5 block text-ui-sm font-medium">新{effectiveCategory === "客户标准" ? "客户" : "公司"}名称</label>
+              <Input id="document-new-subcategory" value={newSub} onChange={(event) => setNewSub(event.target.value)} placeholder="输入名称" disabled={submitting} autoFocus />
+            </div>
           )}
         </div>
 
-        <div className="rounded-ui-xl border border-border bg-surface-muted/40 p-4">
-          <label htmlFor="corpus-upload-input" className="block text-ui-sm font-medium text-foreground">
-            文件
-          </label>
-          <p className="mt-1 text-ui-xs text-muted-foreground">
-            可多选；允许扩展名：.pdf、.md、.docx、.xlsx、.pptx。
-          </p>
-          <Input
+        <div
+          className={cn(
+            "rounded-ui-xl border-2 border-dashed p-8 text-center transition-colors",
+            dragging ? "border-primary bg-primary/5" : "border-border bg-surface-muted/30",
+          )}
+          onDragEnter={(event) => { event.preventDefault(); setDragging(true); }}
+          onDragOver={(event) => event.preventDefault()}
+          onDragLeave={(event) => { if (event.currentTarget === event.target) setDragging(false); }}
+          onDrop={(event) => {
+            event.preventDefault();
+            setDragging(false);
+            addFiles(Array.from(event.dataTransfer.files));
+          }}
+        >
+          <Upload className="mx-auto size-8 text-primary" />
+          <p className="mt-3 text-ui-sm font-medium">拖放文件到这里，或点击选择</p>
+          <p className="mt-1 text-ui-xs text-muted-foreground">支持 PDF、DOCX、XLSX、PPTX 和 Markdown，可多选。</p>
+          <Button type="button" variant="outline" size="sm" className="mt-4" onClick={() => fileInputRef.current?.click()} disabled={submitting}>
+            选择文件
+          </Button>
+          <input
             ref={fileInputRef}
             id="corpus-upload-input"
+            aria-label="文件"
             type="file"
             multiple
-            accept=".pdf,.md,.docx,.xlsx,.pptx"
+            accept={SUPPORTED_EXTENSIONS.join(",")}
+            className="sr-only"
             disabled={submitting}
-            onChange={(event) => setFiles(Array.from(event.target.files || []))}
-            className="mt-3 h-auto min-h-control-md cursor-pointer py-1.5 file:mr-3 file:rounded-ui-sm file:border-0 file:bg-secondary file:px-3 file:py-1.5 file:text-ui-xs file:font-medium file:text-secondary-foreground hover:file:bg-secondary/80"
+            onChange={(event) => addFiles(Array.from(event.target.files || []))}
           />
-          <div className="mt-3" aria-live="polite">
-            {files.length === 0 ? (
-              <p className="text-ui-xs text-muted-foreground">尚未选择文件</p>
-            ) : (
-              <>
-                <p className="text-ui-xs font-medium text-foreground">
-                  已选择 {files.length} 个文件，共 {formatBytes(totalSize)}
-                </p>
-                <ul className="mt-2 grid gap-1 text-ui-xs text-muted-foreground sm:grid-cols-2">
-                  {files.map((file) => (
-                    <li key={`${file.name}-${file.size}`} className="truncate" title={file.name}>
-                      {file.name} · {formatBytes(file.size)}
-                    </li>
-                  ))}
-                </ul>
-              </>
-            )}
-          </div>
         </div>
+
+        {files.length > 0 && (
+          <section aria-labelledby="upload-queue-title">
+            <div className="flex items-center justify-between">
+              <h3 id="upload-queue-title" className="text-ui-sm font-semibold">待上传文件</h3>
+              <span className="text-ui-xs text-muted-foreground">{validFiles.length} 个有效文件 · {formatBytes(totalSize)}</span>
+            </div>
+            <ul className="mt-2 divide-y divide-border rounded-ui-lg border border-border">
+              {files.map((file) => {
+                const invalid = invalidFiles.includes(file);
+                return (
+                  <li key={`${file.name}-${file.size}-${file.lastModified}`} className="flex items-center gap-3 px-3 py-2.5">
+                    <FileText className={cn("size-4 shrink-0", invalid ? "text-destructive" : "text-muted-foreground")} />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-ui-sm font-medium" title={file.name}>{file.name}</p>
+                      <p className={cn("text-ui-xs", invalid ? "text-destructive" : "text-muted-foreground")}>
+                        {file.size === 0 ? "空文件，不能上传" : invalid ? "不支持的文件格式" : formatBytes(file.size)}
+                      </p>
+                    </div>
+                    <button type="button" aria-label={`移除 ${file.name}`} onClick={() => setFiles((current) => current.filter((item) => item !== file))} className="rounded-ui-sm p-2 text-muted-foreground hover:bg-secondary hover:text-foreground">
+                      <X className="size-4" />
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        )}
+
+        <details className="rounded-ui-lg border border-border bg-surface-muted/30 px-4 py-3">
+          <summary className="flex cursor-pointer list-none items-center justify-between text-ui-sm font-medium">
+            解析方式说明
+            <ChevronDown className="size-4 text-muted-foreground" />
+          </summary>
+          <p className="mt-2 text-ui-xs leading-relaxed text-muted-foreground">
+            PDF 使用 MinerU，DOCX 使用 Docling；教学视频分类中的 Markdown 按说话人和时间戳处理，其它 Markdown 按标题切分。
+          </p>
+        </details>
 
         {result && result.accepted > 0 && (
-          <Alert variant="success">
-            <AlertTitle>资料已加入索引队列</AlertTitle>
-            <AlertDescription>
-              已受理 {result.accepted} 个文件，可在下方“索引任务”中查看处理进度。
-            </AlertDescription>
-          </Alert>
+          <Alert variant="success"><AlertTitle>资料已加入处理队列</AlertTitle><AlertDescription>已受理 {result.accepted} 个文件，可关闭面板并在资料列表查看状态。</AlertDescription></Alert>
         )}
-
         {result && result.skipped.length > 0 && (
           <Alert variant="destructive" role="alert">
-            <AlertTitle>{result.accepted > 0 ? "部分文件未受理" : "资料上传失败"}</AlertTitle>
-            <AlertDescription>
-              <ul className="list-disc space-y-1 pl-5">
-                {result.skipped.map((skipped, index) => (
-                  <li key={`${skipped.filename}-${index}`}>
-                    {skipped.filename}：{skipped.reason}
-                  </li>
-                ))}
-              </ul>
-            </AlertDescription>
+            <AlertTitle>{result.accepted > 0 ? "部分文件未受理" : "上传失败"}</AlertTitle>
+            <AlertDescription><ul className="list-disc space-y-1 pl-5">{result.skipped.map((item, index) => <li key={`${item.filename}-${index}`}>{item.filename}：{item.reason}</li>)}</ul></AlertDescription>
           </Alert>
         )}
-
-        <div className="flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-ui-xs text-muted-foreground">
-            选择文件并完成必填分类后才能上传；上传成功会自动刷新资料和任务列表。
-          </p>
-          <Button onClick={submit} disabled={submitting || !canSubmit} className="w-full sm:w-auto">
-            {submitting ? "正在上传并刷新…" : `上传 ${files.length} 个文件`}
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function DocumentsCard({
-  documents,
-  loading,
-  onChange,
-}: {
-  documents: IndexedDocument[];
-  loading: boolean;
-  onChange: () => Promise<void> | void;
-}) {
-  const [filter, setFilter] = useState("");
-
-  const visible = useMemo(() => {
-    const query = filter.trim().toLowerCase();
-    if (!query) return documents;
-    return documents.filter(
-      (document) =>
-        document.doc_title.toLowerCase().includes(query) ||
-        document.category.toLowerCase().includes(query),
-    );
-  }, [documents, filter]);
-
-  async function onDelete(document: IndexedDocument) {
-    const confirmed = confirm(
-      `从索引中移除「${document.doc_title}」？\n` +
-        `这将删除该资料的 ${document.parent_count} 个父段落及其所有子块。`,
-    );
-    if (!confirmed) return;
-    const deleteFile = confirm("同时从磁盘删除源文件？（取消 = 仅清除索引，保留文件）");
-    try {
-      await api.adminDeleteIndexedDocument(document.source_path, deleteFile);
-      await onChange();
-    } catch (e: any) {
-      alert(e?.message || String(e));
-    }
-  }
-
-  return (
-    <section className="space-y-3" aria-labelledby="indexed-documents-title">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-        <div>
-          <h2 id="indexed-documents-title" className="text-ui-base font-semibold text-foreground">
-            已索引资料
-          </h2>
-          <p className="mt-1 text-ui-xs text-muted-foreground">
-            查看当前可检索资料，并按标题或分类快速筛选。
-          </p>
-        </div>
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <label htmlFor="indexed-document-filter" className="sr-only">筛选已索引资料</label>
-          <Input
-            id="indexed-document-filter"
-            type="search"
-            value={filter}
-            onChange={(event) => setFilter(event.target.value)}
-            placeholder="按标题或分类筛选…"
-            className="w-full sm:w-72"
-          />
-          <span className="whitespace-nowrap text-ui-xs text-muted-foreground" aria-live="polite">
-            {filter ? `${visible.length} / ${documents.length}` : `共 ${documents.length} 个文档`}
-          </span>
-        </div>
       </div>
-
-      {loading ? (
-        <Card>
-          <LoadingState className="min-h-40" label="正在加载已索引资料…" />
-        </Card>
-      ) : visible.length === 0 ? (
-        <EmptyState
-          title={filter ? "没有匹配的资料" : "暂无已索引资料"}
-          description={filter ? `没有找到标题或分类包含“${filter}”的资料。` : "上传并完成索引后，资料会显示在这里。"}
-        />
-      ) : (
-        <Card className="overflow-hidden shadow-surface">
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[48rem] text-ui-sm">
-              <caption className="sr-only">已索引资料的标题、分类、类型、父段落数量和操作</caption>
-              <thead className="border-b border-border bg-surface-muted text-muted-foreground">
-                <tr>
-                  <th scope="col" className="px-4 py-3 text-left font-medium">标题</th>
-                  <th scope="col" className="px-4 py-3 text-left font-medium">分类</th>
-                  <th scope="col" className="px-4 py-3 text-left font-medium">类型</th>
-                  <th scope="col" className="px-4 py-3 text-right font-medium">父段落</th>
-                  <th scope="col" className="px-4 py-3 text-right font-medium">操作</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {visible.map((document) => (
-                  <tr
-                    key={document.source_path}
-                    className="bg-card transition-colors duration-normal hover:bg-surface-muted/60"
-                  >
-                    <td className="px-4 py-3">
-                      <div className="max-w-md truncate font-medium text-foreground" title={document.doc_title}>
-                        {document.doc_title}
-                      </div>
-                      <div className="mt-1 max-w-md truncate font-mono text-ui-xs text-muted-foreground" title={document.source_path}>
-                        {document.source_path}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <Badge variant="secondary">{document.category}</Badge>
-                      {document.company && (
-                        <p className="mt-1 text-ui-xs text-muted-foreground">{document.company}</p>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      <Badge variant="outline">{documentTypeLabel(document)}</Badge>
-                    </td>
-                    <td className="px-4 py-3 text-right tabular-nums text-muted-foreground">
-                      {document.parent_count}
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <Button variant="destructive" size="sm" onClick={() => onDelete(document)}>
-                        删除资料
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Card>
-      )}
-    </section>
+      <div className="sticky bottom-0 mt-6 flex items-center justify-between gap-4 border-t border-border bg-card py-4">
+        <p className="text-ui-xs text-muted-foreground">{canSubmit ? `${validFiles.length} 个文件已准备好` : "请完成分类并添加有效文件"}</p>
+        <Button onClick={() => void submit()} disabled={submitting || !canSubmit}>
+          {submitting ? "正在上传…" : `上传 ${validFiles.length} 个文件`}
+        </Button>
+      </div>
+    </div>
   );
 }
 
 function JobStatusCell({ job }: { job: IndexJob }) {
-  const isActive = ACTIVE_STATUSES.has(job.status);
-  const elapsed = useElapsed(isActive ? job.started_at ?? job.created_at : null);
+  const active = ACTIVE_STATUSES.has(job.status);
+  const elapsed = useElapsed(active ? job.started_at ?? job.created_at : null);
   const meta = STATUS_META[job.status];
-
+  const activityLabel = job.status === "done" ? "处理完成" : meta?.label ?? job.status;
   return (
     <div>
-      <Badge variant={meta?.variant ?? "secondary"} className="gap-1.5">
-        {isActive && (
-          <svg className="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4l3-3-3-3v4a8 8 0 00-8 8h4z" />
-          </svg>
-        )}
-        {meta?.label ?? job.status}
-        {elapsed && <span className="opacity-70">{elapsed}</span>}
+      <Badge variant={meta?.variant ?? "secondary"}>
+        {activityLabel}{elapsed ? ` · ${elapsed}` : ""}
       </Badge>
-      {isActive && meta?.hint && (
-        <p className="mt-1 max-w-xs text-ui-xs text-muted-foreground">{meta.hint}</p>
-      )}
-      {job.error && (
-        <p
-          className="mt-1 max-w-sm whitespace-pre-wrap text-ui-xs leading-relaxed text-destructive"
-          title={job.error}
-        >
-          {job.error.length > 200 ? `${job.error.slice(0, 200)}…` : job.error}
-        </p>
+      {job.error && <p className="mt-1 max-w-sm text-ui-xs text-destructive">{job.error.length > 160 ? `${job.error.slice(0, 160)}…` : job.error}</p>}
+      {!job.source_exists && (job.status === "failed" || job.status === "done") && (
+        <p className="mt-1 text-ui-xs text-muted-foreground">源文件已删除，无法重试</p>
       )}
     </div>
   );
 }
 
-function JobsCard({
+function JobsActivity({
   jobs,
   loading,
-  onChange,
+  onChanged,
 }: {
   jobs: IndexJob[];
   loading: boolean;
-  onChange: () => Promise<void> | void;
+  onChanged: () => Promise<void> | void;
 }) {
-  async function onRetry(job: IndexJob) {
-    try {
-      await api.adminRetryIndexJob(job.id);
-      await onChange();
-    } catch (e: any) {
-      alert(e?.message || String(e));
-    }
-  }
-
-  async function onDelete(job: IndexJob) {
-    if (!confirm("删除该任务记录？（不影响已索引的内容）")) return;
-    try {
-      await api.adminDeleteIndexJob(job.id);
-      await onChange();
-    } catch (e: any) {
-      alert(e?.message || String(e));
-    }
-  }
-
   const activeCount = jobs.filter((job) => ACTIVE_STATUSES.has(job.status)).length;
+  const [deleteTarget, setDeleteTarget] = useState<IndexJob | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  async function retry(job: IndexJob) {
+    await api.adminRetryIndexJob(job.id);
+    await onChanged();
+  }
+
+  async function deleteRecord() {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await api.adminDeleteIndexJob(deleteTarget.id);
+      setDeleteTarget(null);
+      await onChanged();
+    } finally {
+      setDeleting(false);
+    }
+  }
 
   return (
-    <section className="space-y-3" aria-labelledby="index-jobs-title">
-      <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h2 id="index-jobs-title" className="text-ui-base font-semibold text-foreground">
-            索引任务
-          </h2>
-          <p className="mt-1 text-ui-xs text-muted-foreground">
-            活跃任务每 3 秒自动刷新；完成后会同步更新已索引资料。
-          </p>
-        </div>
-        <span className="text-ui-xs text-muted-foreground" aria-live="polite">
-          共 {jobs.length} 个任务{activeCount > 0 ? `，${activeCount} 个处理中` : ""}
-        </span>
-      </div>
-
-      {loading ? (
-        <Card>
-          <LoadingState className="min-h-40" label="正在加载索引任务…" />
-        </Card>
-      ) : jobs.length === 0 ? (
-        <EmptyState
-          title="暂无索引任务"
-          description="上传资料后，排队、解析、切块和嵌入状态会显示在这里。"
-        />
-      ) : (
-        <Card className="overflow-hidden shadow-surface">
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[70rem] text-ui-sm">
-              <caption className="sr-only">索引任务的文件、分类、状态、上传者、时间、规模和操作</caption>
-              <thead className="border-b border-border bg-surface-muted text-muted-foreground">
-                <tr>
-                  <th scope="col" className="px-4 py-3 text-left font-medium">文件</th>
-                  <th scope="col" className="px-4 py-3 text-left font-medium">分类</th>
-                  <th scope="col" className="px-4 py-3 text-left font-medium">状态</th>
-                  <th scope="col" className="px-4 py-3 text-left font-medium">上传者</th>
-                  <th scope="col" className="px-4 py-3 text-left font-medium">时间</th>
-                  <th scope="col" className="px-4 py-3 text-right font-medium">规模</th>
-                  <th scope="col" className="px-4 py-3 text-right font-medium">操作</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {jobs.map((job) => (
-                  <tr
-                    key={job.id}
-                    className="bg-card align-top transition-colors duration-normal hover:bg-surface-muted/60"
-                  >
-                    <td className="px-4 py-3">
-                      <div className="max-w-xs truncate font-medium text-foreground" title={job.filename}>
-                        {job.filename}
-                      </div>
-                      <div className="mt-1 text-ui-xs text-muted-foreground">{formatBytes(job.file_size)}</div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <Badge variant="secondary">{job.category}</Badge>
-                    </td>
-                    <td className="px-4 py-3">
-                      <JobStatusCell job={job} />
-                    </td>
-                    <td className="px-4 py-3 text-muted-foreground">
-                      <div>{job.real_name || "—"}</div>
-                      {job.employee_id && <div className="mt-1 text-ui-xs">{job.employee_id}</div>}
-                    </td>
-                    <td className="px-4 py-3 text-ui-xs text-muted-foreground">
-                      <div>提交 {formatAdminDate(job.created_at)}</div>
-                      {job.started_at && !job.finished_at && (
-                        <div className="mt-1">开始 {formatAdminDate(job.started_at)}</div>
-                      )}
-                      {job.finished_at && <div className="mt-1">完成 {formatAdminDate(job.finished_at)}</div>}
-                    </td>
-                    <td className="px-4 py-3 text-right text-ui-xs tabular-nums text-muted-foreground">
-                      {job.status === "done" && job.parents != null && job.children != null
-                        ? `${job.parents} 父 / ${job.children} 子`
-                        : "—"}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex justify-end gap-2 whitespace-nowrap">
-                        {(job.status === "failed" || job.status === "done") && (
-                          <Button variant="outline" size="sm" onClick={() => onRetry(job)}>
-                            重试
-                          </Button>
-                        )}
-                        {(job.status === "done" || job.status === "failed") && (
-                          <Button variant="ghost" size="sm" onClick={() => onDelete(job)} className="text-destructive hover:text-destructive">
-                            删除记录
-                          </Button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+    <>
+      <details className="group rounded-ui-xl border border-border bg-card shadow-surface">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-4 py-4">
+          <div className="flex items-center gap-3">
+            <div className="flex size-9 items-center justify-center rounded-ui-md bg-secondary text-muted-foreground"><Activity className="size-4" /></div>
+            <div>
+              <h2 className="text-ui-sm font-semibold text-foreground">索引活动</h2>
+              <p className="mt-0.5 text-ui-xs text-muted-foreground">最近 {jobs.length} 条处理记录{activeCount ? `，${activeCount} 条进行中` : ""}</p>
+            </div>
           </div>
-        </Card>
-      )}
-    </section>
+          <ChevronDown className="size-4 text-muted-foreground transition-transform group-open:rotate-180" />
+        </summary>
+        <div className="border-t border-border">
+          {loading ? <LoadingState className="min-h-32" label="正在加载索引活动…" /> : jobs.length === 0 ? (
+            <EmptyState title="暂无索引活动" description="上传资料后，处理记录会显示在这里。" />
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[60rem] text-ui-sm">
+                <thead className="border-b border-border bg-surface-muted text-muted-foreground">
+                  <tr><th className="px-4 py-3 text-left font-medium">文件</th><th className="px-4 py-3 text-left font-medium">状态</th><th className="px-4 py-3 text-left font-medium">上传者</th><th className="px-4 py-3 text-left font-medium">时间</th><th className="px-4 py-3 text-right font-medium">操作</th></tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {jobs.map((job) => (
+                    <tr key={job.id} className="align-top">
+                      <td className="px-4 py-3"><p className="max-w-xs truncate font-medium" title={job.filename}>{job.filename}</p><p className="mt-1 text-ui-xs text-muted-foreground">{job.category} · {formatBytes(job.file_size)}</p></td>
+                      <td className="px-4 py-3"><JobStatusCell job={job} /></td>
+                      <td className="px-4 py-3 text-muted-foreground">{job.real_name || "—"}</td>
+                      <td className="px-4 py-3 text-ui-xs text-muted-foreground">{formatAdminDate(job.created_at)}</td>
+                      <td className="px-4 py-3"><div className="flex justify-end gap-2">{job.source_exists && (job.status === "failed" || job.status === "done") && <Button size="sm" variant="outline" onClick={() => void retry(job)}>重试</Button>}{(job.status === "failed" || job.status === "done") && <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => setDeleteTarget(job)}>删除记录</Button>}</div></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </details>
+
+      <Dialog open={deleteTarget != null} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>删除索引活动记录</DialogTitle>
+            <DialogDescription>仅删除“{deleteTarget?.filename}”的任务记录，不影响源文件和已经建立的索引。</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteTarget(null)} disabled={deleting}>取消</Button>
+            <Button variant="destructive" onClick={() => void deleteRecord()} disabled={deleting}>{deleting ? "正在删除…" : "删除记录"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

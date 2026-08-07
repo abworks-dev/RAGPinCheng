@@ -55,6 +55,7 @@ POST /api/conversations/{id}/chat
 - `SessionState.messages`、`last_sources`、`last_search_query`、`turn_index`；
 - `StreamingTurnPrep`、`TurnResult`；
 - SSE `prep`、文本、`done`、`error` 事件；
+- SSE `done.assistant_message_id` 将前端临时消息 ID 替换为持久化 ID，使回答完成后可立即重新生成；
 - `messages.sources_json` 只供 UI 恢复，不重新进入 LLM 上下文。
 - `message_answer_versions` 保存回答版本及对应来源/检索状态快照；
 - `message_answer_heads` 指向每轮当前有效回答；

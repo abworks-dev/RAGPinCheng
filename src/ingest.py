@@ -43,6 +43,8 @@ class ParsedDoc:
     doc_type: str = "pdf"  # "pdf" | "transcript" | "docx" | "xlsx" | "pptx"
     company: str | None = None  # second-level folder under 公司内部标准/
     media_id: str | None = None  # associated video asset if any
+    transcript_version_id: str | None = None  # immutable automatic transcript version
+    publication_target_id: str | None = None  # candidate indexing attempt identity
     # Office document preview fields
     preview_path: Path | None = None  # path to preview file (e.g. PDF for PPTX)
     parsed_via: str | None = None  # "docling" | "openpyxl" | "mineru_fallback"

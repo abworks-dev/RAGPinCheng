@@ -1581,11 +1581,25 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 
 ## 2026-08-03
 
+### 23:24 — 实施多引擎转录 Phase 5A/5B
+
+- 完成：按获批 R2 计划接通版本列表、不可变 Markdown 预览、审核/发布 API 与管理端 UI、publication-only 候选索引、共享单 worker、SQLite 正式 head 和版本感知检索；scoped review 额外收紧人工版本发布按钮、Parent 二次可见性、multi-query 单快照和完整 Qdrant Filter 合并边界，并补齐 API admin/CSRF fail-closed、approve/reject UI、普通索引与 publication 混合串行、legacy/普通文档可见性及 parents 添加式幂等迁移测试。
+- 文件：新增 `api/transcription_publication.py`、`src/transcription_retrieval_visibility.py`、版本管理前端组件及 Phase 5 测试；最小修改 Store/API/worker、索引/检索元数据、CI、Phase 5 计划、功能文档、`TODO.md` 与本日志。SQLite 可见性适配器明确位于 Phase 1 纯契约核心包之外；未修改运行时依赖、部署或生产配置。
+- 验证：`compileall` 通过；Store/事务/manual/visibility/index metadata/static 共 29 项通过；Phase 5 定向前端 4 个文件、31 项通过；`git diff --check` 通过。提交 `c5d5c0f` 已推送；首轮远端 `test-transcription-contracts` 收集 289 项并出现 9 个失败。已按失败证据将 SQLite visibility adapter 移出 Phase 1 核心包、同步获批静态保护哈希，并让 review/publication 测试使用 experimental Profile；因标准命令审批服务暂不可用，修复待本地与远端复验。
+- 边界：未运行 Phase 5C，未安装或真实运行 ffmpeg/ffprobe、FunASR/faster-whisper、GPU/CUDA/torch、Qdrant、embedding/rerank，未访问生产数据、部署或重建索引；CI 修复尚未提交、推送。
+
 ### 08:41 — 编写多引擎转录 Phase 3 R2 详细计划
 
 - 只读核验 Phase 1 唯一 Provider 结果流、Profile Registry、Phase 2 持久化/checkpoint、人工媒体路径、独立 GPU 服务和 CI 边界。
 - 新增 `project-docs/plans/multi-engine-transcription-phase3.md`，冻结独立 `asr_service`、Provider Registry、可恢复上传/job、单卡调度、BGE 优先端口、experimental FunASR adapter、无 GPU 测试和回滚边界。
 - 本轮未实施 Phase 3 代码，未安装依赖，未访问真实模型、GPU、生产服务、真实媒体、数据库或 Qdrant；计划等待用户明确审批。
+
+### 04:50 — 实施 Windows ASR R3A 仓库部署通道
+
+- 完成：在独立 worktree 中实现 Windows ASR 固定目录与配置所有权、严格离线 SenseVoice manifest 校验、GPU service 受鉴权 `/v1/activity`、fail-closed BGE 优先级探针、独立启动/部署/验收 PowerShell 脚本、手动 production workflow、Windows 专用依赖声明及 CI 合约接线；scoped review 进一步要求 manifest 完整枚举除自身外的全部模型常规文件并拒绝符号链接或未列出文件。
+- 文件：修改 `.env.example`、`.github/workflows/ci.yml`、`TODO.md`、`asr_service/**`、`gpu_service/**`；新增 `.github/workflows/deploy-asr-production.yml`、`scripts/start-asr-service.ps1`、`scripts/deploy-asr.ps1`、`scripts/verify-asr-service.ps1`、`tests/test_asr_deployment_static.py`、`project-docs/plans/multi-engine-transcription-phase5c-windows-asr-deployment.md`。
+- 验证：R3A 纯离线测试 77/77 通过；Python `compileall`、三份 PowerShell 脚本语法解析、两份 workflow YAML 解析和 `git diff --check` 通过。PR #8 首轮远端 CI 的 `test-asr-service-contract`、`test-gpu-contract`、`test-providers`、`test-transcription-contracts`、`test-transcription-phase5`、`validate`、`validate-migration-config` 七个 job 全部通过；其中本地因缺少 FastAPI 未运行的 ASR API/auth 与 GPU contract 测试已由 CI 覆盖。
+- 边界：未连接生产主机、未安装依赖、未下载模型、未修改防火墙、未写入生产 Token、未启动服务，也未迁移现有 GPU service Python 环境；R3B/R3C 仍需另行逐项审批。
 
 ### 05:29 — 修复 Phase 1 Candidate 边界并更新 PR
 

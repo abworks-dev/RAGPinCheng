@@ -100,7 +100,9 @@ def _init_parents_db(reset: bool = False) -> sqlite3.Connection:
             doc_type TEXT,
             start_time TEXT,
             company TEXT,
-            media_id TEXT
+            media_id TEXT,
+            transcript_version_id TEXT,
+            publication_target_id TEXT
         )
         """
     )
@@ -121,6 +123,10 @@ def _init_parents_db(reset: bool = False) -> sqlite3.Connection:
         conn.execute("ALTER TABLE parents ADD COLUMN slide_number INTEGER")
     if "paragraph_anchor" not in existing:
         conn.execute("ALTER TABLE parents ADD COLUMN paragraph_anchor TEXT")
+    if "transcript_version_id" not in existing:
+        conn.execute("ALTER TABLE parents ADD COLUMN transcript_version_id TEXT")
+    if "publication_target_id" not in existing:
+        conn.execute("ALTER TABLE parents ADD COLUMN publication_target_id TEXT")
     if reset:
         conn.execute("DELETE FROM parents")
     return conn
@@ -156,14 +162,17 @@ def store_parents(parents: Iterable[Parent], reset: bool = False) -> None:
             p.cell_range,
             p.slide_number,
             p.paragraph_anchor,
+            p.transcript_version_id,
+            p.publication_target_id,
         )
         for p in parents
     ]
     conn.executemany(
         "INSERT OR REPLACE INTO parents "
         "(parent_id, doc_title, category, section_path, source_path, text, doc_type, "
-        "start_time, company, media_id, sheet_name, cell_range, slide_number, paragraph_anchor) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "start_time, company, media_id, sheet_name, cell_range, slide_number, paragraph_anchor, "
+        "transcript_version_id, publication_target_id) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         rows,
     )
     conn.commit()
@@ -178,7 +187,8 @@ def fetch_parents(parent_ids: list[str]) -> dict[str, dict]:
     placeholders = ",".join("?" * len(parent_ids))
     rows = conn.execute(
         f"SELECT parent_id, doc_title, category, section_path, source_path, text, "
-        f"doc_type, start_time, company, media_id "
+        f"doc_type, start_time, company, media_id, sheet_name, cell_range, slide_number, "
+        f"paragraph_anchor, transcript_version_id, publication_target_id "
         f"FROM parents WHERE parent_id IN ({placeholders})",
         parent_ids,
     ).fetchall()
@@ -199,6 +209,8 @@ def fetch_parents(parent_ids: list[str]) -> dict[str, dict]:
             "cell_range": r[11] if len(r) > 11 else None,
             "slide_number": r[12] if len(r) > 12 else None,
             "paragraph_anchor": r[13] if len(r) > 13 else None,
+            "transcript_version_id": r[14] if len(r) > 14 else None,
+            "publication_target_id": r[15] if len(r) > 15 else None,
         }
         for r in rows
     }
@@ -276,6 +288,9 @@ def index_children(children: list[Child], reset: bool = False) -> None:
                         **({"cell_range": c.cell_range} if c.cell_range else {}),
                         **({"slide_number": c.slide_number} if c.slide_number is not None else {}),
                         **({"paragraph_anchor": c.paragraph_anchor} if c.paragraph_anchor else {}),
+                        **({"media_id": c.media_id} if c.media_id else {}),
+                        **({"transcript_version_id": c.transcript_version_id} if c.transcript_version_id else {}),
+                        **({"publication_target_id": c.publication_target_id} if c.publication_target_id else {}),
                     },
                 )
             )

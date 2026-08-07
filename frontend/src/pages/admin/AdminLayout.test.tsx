@@ -90,9 +90,47 @@ describe("AdminLayout tab boundary", () => {
     );
 
     expect(screen.getByText("品成 BIM 知识库")).toBeInTheDocument();
-    expect(screen.getByText("测试管理员（admin-test）")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /返回对话/ })).toHaveAttribute("href", "/");
-    expect(screen.getByRole("button", { name: "退出" })).toBeInTheDocument();
+    expect(screen.getByText("管理工作台")).toBeInTheDocument();
+    expect(screen.queryByText("测试管理员（admin-test）")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /主题：/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /测试管理员/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "退出登录" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /测试管理员/ }));
+    expect(screen.getByRole("button", { name: "返回对话" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "退出登录" })).toBeInTheDocument();
+    expect(document.querySelector("header")).not.toBeInTheDocument();
+  });
+
+  it("collapses and expands like the conversation sidebar", () => {
+    const { container } = render(
+      <MemoryRouter>
+        <AdminLayout />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "收起管理侧栏" }));
+    expect(container.querySelector("aside")).toHaveClass("lg:w-16");
+    expect(screen.queryByText("品成 BIM 知识库")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "展开管理侧栏" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "展开管理侧栏" }));
+    expect(container.querySelector("aside")).toHaveClass("lg:w-[17rem]");
+    expect(screen.getByText("品成 BIM 知识库")).toBeInTheDocument();
+  });
+
+  it("matches the conversation sidebar width and color tokens", () => {
+    const { container } = render(
+      <MemoryRouter>
+        <AdminLayout />
+      </MemoryRouter>,
+    );
+
+    expect(container.querySelector("aside")).toHaveClass(
+      "bg-sidebar",
+      "text-sidebar-foreground",
+      "lg:w-[17rem]",
+    );
   });
 
   it("keeps the tab order, current marker, and mounts only the selected page", () => {

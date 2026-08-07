@@ -1,13 +1,13 @@
 # 视频转录链路
 
-- 状态：人工上传/播放链路已实现；多引擎 Phase 3 独立服务与 remote Provider 契约代码完成待远端 CI，尚未接线或部署
-- 最后核对：2026-08-03
+- 状态：人工上传/播放链路与多引擎 Phase 5A/5B 应用闭环已实现；faster-whisper R2 已合并，R3 依赖资格失败且准入保持关闭
+- 最后核对：2026-08-05
 
 ## 用户可观察能力
 
-教学视频转录稿可以被索引和检索，回答能够显示带时间戳的视频引用，点击引用定位到来源卡片并打开视频播放器。管理员可上传 MP4+Markdown 转录稿对，系统自动绑定、索引并提供认证播放。
+教学视频转录稿可以被索引和检索，回答能够显示带时间戳的视频引用，点击引用定位到来源卡片并打开视频播放器。管理员可通过三步向导批量暂存 MP4，再逐视频绑定、查看和编辑人工 Markdown，或批量应用并逐项覆盖服务端白名单 Profile 启动自动转录任务。
 
-Phase 2/3 没有改变上述用户可观察行为。当前新增的是未接应用 API/UI、worker 或 Qdrant 的持久化内核、独立 ASR 服务和 remote Provider 契约。
+Phase 5A/5B 已接通版本列表、只读 Markdown 预览、人工审核、显式发布、候选索引与正式 head 检索过滤。转录成功、审核通过、发布中和正式检索可见仍是独立状态；真实 ASR/GPU/Qdrant 端到端尚未运行。
 
 ## 当前边界
 
@@ -23,38 +23,59 @@ Phase 2/3 没有改变上述用户可观察行为。当前新增的是未接应�
 - 自动建立 `media_assets` 登记、索引入队、索引完成后状态自动更新为 `ready`；
 - 后端鉴权 HTTP Range 播放（支持无 Range、普通 Range、开放式 Range、后缀 Range）；
 - 前端单实例播放器抽屉（桌面右侧、移动端底部弹层），支持 metadata seek 和自动播放降级；
+- 播放器下方提供交互式转录稿，按播放进度高亮当前分段并自动跟随；点击分段可跳转，用户主动滚动时暂停跟随并可一键回到当前进度；
+- 普通登录用户可通过只读接口读取当前已发布转录版本；无版本头的既有人工上传媒体兼容读取其已登记、受控且完成索引的人工稿；
 - 引用角标点击自动打开视频播放器并跳转对应时间点；
 - 来源卡片显示”从 HH:MM:SS 播放”按钮；
 - 旧会话和未关联转录正常降级（无播放按钮，不报错）；
-- 管理端”视频媒体”标签页展示上传表单和资产列表（含状态、大小、错误信息）。
+- 管理端“视频媒体”标签页提供批量拖放/选择、转写方式分流和逐项配置向导；批量提交最多并发两个单视频请求，单项失败可保留重试；
+- 人工模式仍走原 MP4+Markdown 路径；自动模式只提交服务端白名单 `profile_id`，experimental Profile 强制审核策略不由前端放宽；
+- 媒体列表分别展示媒体、转录、审核、发布和索引状态，并保留快捷筛选与转写版本工作台。
 
 ### 未实现（第二阶段）
 
 - 视频字幕轨道生成与同步；
 
-### 已实现但未接线：多引擎转录 Phase 2 内核
+### 已接线：多引擎转录 Phase 2～5B
 
-- 添加式 SQLite migration ledger，以及 migration 前 `sqlite3.Connection.backup()`、完整性验证和只恢复到新路径的工具；
-- 独立 `transcription_jobs`、`transcript_versions`、artifact refs、publication-only index jobs 和正式版本 head；
-- 幂等 request key、递增 attempt、同媒体单 active job、严格 checkpoint 和稳定失败码；
-- Canonical JSON 严格加载与 hash 回比，自动 Markdown 使用受控内容寻址文件；
-- 审核、候选索引 receipt、单个 `BEGIN IMMEDIATE` head promote、supersedes 和恢复 action；
-- fake `PublicationIndexPort` 只验证逻辑隔离，不写真实 Qdrant；
-- legacy 人工稿不 backfill，无 head 时继续现有路径。
+- Phase 2 的 `transcription_jobs`、`transcript_versions`、artifact refs、publication-only index jobs 和正式版本 head 已由应用层 Store/服务使用；
+- Phase 3 remote Provider 仍只返回严格 `ProviderCandidate | ProviderFailure`，由 `pipeline.py` 独占 normalizer/Canonical 结果流；
+- 管理端单 MP4 + `profile_id` 上传、任务状态/取消/恢复已接入应用 API 和后台 worker；人工 MP4+Markdown 路径保持独立；
+- 管理端按媒体 lazy 加载版本历史，可预览不可变 Markdown、提交审核备注、批准/拒绝并显式发布；人工版本不提供可用的自动发布动作；
+- 管理端媒体列表使用真实审核枚举计算唯一当前阶段，独立展示索引状态，并提供处理中、待审核、发布处理中和失败快捷筛选；筛选暂时只作用于最近加载的 100 条；
+- Remote Provider 的服务请求身份绑定应用任务、媒体与执行指纹；同一应用任务网络重试保持稳定，同一媒体新建应用重试任务生成新身份；
+- 转录任务 API 返回安全的结构化失败 `code/message/retryable`；服务请求身份冲突与契约不匹配分别处理，前端不再直接展示 Provider 技术摘要；
+- publication adapter 只走 `chunk_document → store_parents → index_children`，不调用 purge、reset 或普通 `index_single`；
+- Parent、Child 和 Qdrant payload 添加 nullable `transcript_version_id` / `publication_target_id`，legacy stable ID 算法保持不变；
+- 正式可见性唯一读取 `app.sqlite.media_transcript_heads.current_version_id`；Qdrant recall 和 Parent expansion 使用同一快照，损坏/缺失 head 对 versioned transcript fail closed，legacy/普通文档继续可见；
+- 普通索引与 publication 索引共用现有单 worker/单队列，publication job 支持幂等恢复与失败状态持久化。
+- Profile catalog 现包含已启用的 experimental SenseVoice，以及准入关闭的
+  experimental faster-whisper 和 Qwen3-ASR；三者复用同一 Remote Provider 与唯一
+  Candidate → Canonical 结果流；
+- ASR service 注册三个固定 service Profile；faster-whisper 或 Qwen3-ASR
+  缓存/依赖缺失时仅相应 Profile 不可用，不阻止现有 SenseVoice 服务启动；
+- faster-whisper adapter 固定
+  `dropbox-dash/faster-whisper-large-v3-turbo@0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf`
+  与 CUDA FP16 参数；生产资格只接受
+  `${PRODUCTION_DATA_ROOT}\RAGPinCheng-ASR\models` 下已持久化且通过完整 Manifest、文件集合、
+  大小和 SHA-256 校验的本地制品，不在资格运行中访问 Hugging Face。首次填充或
+  恢复模型由独立手动 workflow 完成；准备入口使用单一 TLS 1.2 Session 按固定
+  7 文件清单顺序流式下载，限制重定向到 Hugging Face 官方 HTTPS 域，保留
+  `.partial` 供同一 run 重试续传，并在原子发布前完成身份校验。现有服务保持
+  原状态，Profile admission 继续关闭。
+- Qwen3-ASR adapter 固定
+  `Qwen/Qwen3-ASR-0.6B@5eb144179a02acc5e5ba31e748d22b0cf3e303b0`
+  与
+  `Qwen/Qwen3-ForcedAligner-0.6B@c7cbfc2048c462b0d63a45797104fc9db3ad62b7`，
+  仅允许 Windows Transformers/CUDA BF16 候选参数；R2 未安装依赖、下载模型或
+  运行推理，application Profile 保持 disabled。
 
-这些模块尚未接入新 endpoint、管理员 UI、真实 Provider 或索引 worker，也没有在真实 `data/app.sqlite` 上执行迁移。
-
-### 已实现但未接线：多引擎转录 Phase 3 服务与 Provider
-
-- 新增严格的 service DTO、上传 manifest、job/checkpoint/result 状态和有限错误码；
-- 新增内容寻址本地 spool、分 part 幂等上传、全量 SHA-256、原子 JSON/result/checkpoint 和重启恢复；
-- 新增 FIFO、单 active、BGE fail-closed、磁盘/连续失败/OOM latch 调度器；
-- 新增 Provider Registry、运行时输入/progress/cancel 窄端口和短请求 `HttpxAsrServiceClient`；
-- 新增固定 `iic/SenseVoiceSmall@7bf452403abd7353a300cd760f7adae7701c92c1` 的 experimental Profile 和 lazy FunASR adapter；
-- remote Provider 只返回严格 `ProviderCandidate | ProviderFailure`，仍由既有 `pipeline.py` 独占 normalizer/Canonical 结果流；
-- 两侧默认关闭；真实 FunASR/torch 依赖只在服务专属依赖文件，未安装、未下载模型、未执行 GPU 推理。
-
-这些模块尚未接入应用上传 API、管理员 UI、应用 worker、Phase 2 Store 或 Qdrant，也未部署独立服务，因此不产生用户可见自动转录能力。
+SenseVoice 已完成独立生产短媒体验收。Qwen3-ASR 已具备统一 R3 仓库资格工具，
+但真实 workflow 尚未取得 PASS，因此没有 Windows、CUDA、依赖、模型、质量或资源
+资格结论。faster-whisper 的固定 8 个非敏感 Windows
+TTS 样本已生成并通过严格 Manifest 校验，但生产 R3 workflow 在组合依赖解析阶段
+得到 `dependency_preparation_failed`；模型、CUDA、质量和资源门禁均未运行，因此
+其 R2 接线不构成运行或生产资格结论。
 
 ## 入口与调用链
 
@@ -73,29 +94,24 @@ Phase 2/3 没有改变上述用户可观察行为。当前新增的是未接应�
 → 视频引用角标 (点击 → 播放器 seek)
 → 来源卡片 (播放按钮)
 → GET /api/media/{media_id} (鉴权 Range 播放)
+→ GET /api/media/{media_id}/transcript（鉴权读取正式/兼容人工转录稿）
 ```
 
-Phase 2 未接线的内部结果流：
+自动转录与版本发布结果流：
 
 ```text
-Phase 1 Canonical Transcript + deterministic Markdown bytes
-→ LocalTranscriptionArtifactStore（内容寻址）
-→ SQLiteTranscriptionStore.record_success（candidate version）
-→ review guard
-→ fake PublicationIndexPort request/receipt
-→ SQLiteTranscriptionStore.promote（单事务 head 切换）
-```
-
-Phase 3 未接线的 Provider 结果流：
-
-```text
-TranscriptionInputSource parts
+单 MP4 + profile_id
+→ 应用转录任务/worker
+→ audio preparation port
 → independent asr_service create/upload/start/poll/result
 → RemoteAsrProvider
 → ProviderCandidate | ProviderFailure
-→ pipeline.py
-→ normalize_candidate
-→ CanonicalTranscript
+→ pipeline.py → normalize_candidate → CanonicalTranscript
+→ deterministic Markdown + candidate transcript version
+→ 管理员审核
+→ publication-only candidate index
+→ SQLiteTranscriptionStore.promote（单事务 head 切换）
+→ 检索按同一 head snapshot 过滤 Qdrant Child 与 parents.sqlite Parent
 ```
 
 ## 关键文件
@@ -111,15 +127,31 @@ TranscriptionInputSource parts
 - `api/routes_admin.py`（媒体上传）
 - `api/indexing.py`（media_id 传递）
 - `api/db.py`、`api/db_migrations.py`、`api/db_backup.py`（Phase 2 添加式 Schema 与备份）
-- `api/transcription_store.py`、`api/transcription_artifacts.py`（Phase 2 未接线适配器）
+- `api/transcription_store.py`、`api/transcription_artifacts.py`、`api/transcription_publication.py`（版本、artifact 与发布应用服务）
 - `src/transcription/persistence.py`、`src/transcription/workflow.py`（Phase 2 领域端口与编排）
 - `src/transcription/asr_service_contract.py`、`provider_registry.py`、`remote_provider.py`、`runtime_ports.py`（Phase 3 后端契约）
 - `src/transcription/profile_catalog.py`（Phase 3 experimental Profile catalog）
+- `src/transcription_retrieval_visibility.py`（Phase 5 SQLite head 只读快照，位于 Phase 1 纯契约核心之外）
+- `api/routes_transcription.py`、`api/indexing.py`（转录/版本 API 与共享 worker）
+- `frontend/src/components/TranscriptionVersionPanel.tsx`（版本审阅与发布）
 - `asr_service/`（Phase 3 独立服务、存储、调度和 engine adapter）
+- `asr_service/requirements-service-core.txt`、`requirements-windows.txt`
+  （ASR HTTP 服务基础依赖与 Windows 生产引擎依赖）
+- `asr_service/engines/faster_whisper.py`、`requirements-faster-whisper.txt`
+  （准入关闭的可选引擎 adapter 与隔离引擎依赖声明；生产资格组合安装基础服务依赖）
+- `scripts/prepare_faster_whisper_model.py`、
+  `scripts/prepare-faster-whisper-model-production.ps1`、
+  `.github/workflows/prepare-faster-whisper-model-production.yml`
+  （固定 revision 的持久模型制品准备与严格离线校验入口）
+- `scripts/run_whisperx_qualification.py`、
+  `scripts/qualify-whisperx-production.ps1`、
+  `.github/workflows/qualify-whisperx-production.yml`
+  （WhisperX 固定非敏感样本、质量/资源/许可证门禁与手动隔离执行入口）
 - `frontend/src/components/citations.ts`
 - `frontend/src/components/SourcesPanel.tsx`（播放按钮）
 - `frontend/src/components/Message.tsx`（引用 click seek）
 - `frontend/src/components/VideoPlayerDrawer.tsx`（新增）
+- `frontend/src/components/TranscriptPanel.tsx`（同步转录列表）
 - `frontend/src/hooks/useVideoPlayer.tsx`（新增）
 
 ## 数据契约
@@ -130,8 +162,9 @@ TranscriptionInputSource parts
 | `start_time` | 转录稿解析 | 是 | 引用时间戳 HH:MM:SS |
 | `media_id` | 上传时生成 UUID | 是 | 关联 media_assets 表，驱动播放器 |
 | `media_url`（API 动态构造） | 由 media_id 生成 | 是 | 不存储，动态构造 `/api/media/{media_id}` |
-| `transcript_version_id` | Phase 2 Store | 是 | 候选/历史版本身份；尚未进入现有索引 payload |
+| `transcript_version_id` | transcript version | 是 | immutable 候选/历史版本身份；进入 Parent/Child 与 Qdrant payload |
 | `current_version_id` | `media_transcript_heads` | 是 | SQLite 当前正式版本指针；legacy media 可以没有 head |
+| `application_job_id` | `transcription_jobs.id` | 否 | 仅经 `ProviderRuntimePorts` 传递，参与服务请求身份；不进入 InputRef 或 Canonical |
 
 ## 依赖与下游消费者
 
@@ -143,30 +176,63 @@ TranscriptionInputSource parts
 
 - 不得向客户端暴露服务器绝对路径（`storage_rel_path` 对外隐藏）；
 - 视频访问必须经过 `require_user` 鉴权和路径穿越防护（`safe_join`）；
+- 转录读取必须经过 `require_user` 鉴权，只返回当前已发布版本；legacy 回退只允许读取 `DOCS_DIR` 内媒体已登记的人工稿；
 - `media_id` 不存在或状态不是 `ready` 时返回 404；
 - 非法 Range 返回 416；
 - `media_id` 不进入 Embedding 文本，不影响检索排序；
 - 旧会话缺少 `media_id` 时正常降级（无播放按钮，不报错）；
-- 新媒体字段是向前兼容的 nullable 列，不需要索引 Reset。
-- Phase 2 新表为添加式迁移；不删除旧表、不回填人工稿、不触发索引 Reset；真实迁移和恢复仍需独立审批。
+- 新媒体和版本字段是向前兼容的 nullable 列，不需要索引 Reset；legacy stable ID 保持。
+- Phase 2 新表为添加式迁移；不删除旧表、不回填人工稿、不触发索引 Reset。
+- `app.sqlite` current head 是唯一正式可见性事实；versioned transcript 在 head DB 损坏/缺失时 fail closed，legacy/普通文档继续可见。
+- experimental Profile 不能自动发布或自动索引；人工 Markdown 路径不经过 Provider。
+- `published` 只在候选索引成功并完成正式 head 原子切换后成立；不存在“已发布、稍后再手动索引”的稳定状态。
 
 ## 验证
 
 - 当前链路：转录解析、时间戳索引、检索命中、回答引用、前端匹配；
 - 播放链路：匿名 401、登录用户 200/206、未知媒体 404、路径穿越 404；
+- 转录播放同步：正式稿/legacy 人工稿读取、候选稿不可见、分段高亮、点击跳转、用户滚动暂停跟随和恢复跟随；
 - Phase 2：临时 SQLite migration/backup、Store 事务、artifact hash、publication head、recovery、人工稿不回填和静态依赖边界；
-- Phase 3：纯 Python service/remote scoped tests、完整 transcription/manual 回归、mock engine、存储恢复、调度和静态依赖边界；API/auth 合同由安装 FastAPI 的远端 CI 执行；
-- 前端变化运行 `npm run build`，RAG 字段变化运行检索冒烟和相关黄金集。
+- Phase 3/4：纯 Python service/remote、应用任务/worker、mock engine、存储恢复、取消/恢复和静态依赖边界；
+- Phase 5：Store/事务/manual/visibility/index metadata/static 本地 29 项通过；版本管理定向前端 31 项通过；API、worker、candidate index、Qdrant Filter 与完整前端 build 由独立 CI job 验证；
+- Phase 5C 真实 ffmpeg/ASR/GPU/Qdrant E2E 未运行。
+- 管理流程加固：Provider/应用/API 定向 40 项通过；变基到最新 master 后 Provider/应用身份定向 31 项与前端定向 34 项通过，前端 production build 通过；远端 CI、真实服务和生产回归未执行。
+- faster-whisper R2：无 FastAPI、无真实引擎的 ASR/Provider/应用回归
+  187 项通过；Phase 1 核心契约与静态边界 189 项通过；PR #34 的 7 个远端 CI
+  检查全部成功并已合并。真实依赖、模型、CUDA 和质量资格仍待 R3。
+- faster-whisper R3：统一资格 workflow、隔离编排、固定模型准备、严格 8 样本
+  Manifest、质量/资源门禁和无真实引擎测试已在独立分支实现，尚待 scoped review、
+  远端 CI、合并及真实 Windows CUDA 执行；当前不能据此认定 faster-whisper 可用。
+- WhisperX R2/R3：已实现复用 remote Provider/Canonical 契约的 experimental Profile、
+  lazy-load service adapter、ASR/中文对齐双模型 manifest 门禁及手动 Windows CUDA
+  冒烟 workflow；另已实现复用既有 8 个自制中文样本和统一阈值的资格 workflow，
+  通过现有 `TranscriptionProvider → ProviderCandidate → normalizer → Canonical`
+  契约计算质量、确定性、时间戳、RTF、显存和许可证门禁。Profile admission 保持
+  disabled；真实资格结论只以合并后 `production-asr` workflow 的脱敏审计为准，
+  未通过前不能认定 WhisperX 可用。资格失败诊断只输出文本哈希、字符类别、长度、
+  token 形状、编辑类型计数、期望项命中布尔值和固定分类，不输出参考文本、原始
+  ProviderCandidate 文本或 Canonical 文本，也不改变模型、样本或准入阈值。
 
 ## 已知限制
 
 - 第一阶段只支持 MP4 格式，不支持其他视频容器；
-- 播放器只做时间点 seek，不做完整交互式转录同步高亮；
-- 无已接线的自动语音识别，转录稿仍需人工上传；
-- Phase 2/3 尚无应用 API/UI/worker/Qdrant 接线，真实引擎未运行，不产生自动转录用户能力；
+- 自动稿按 Canonical 起止时间精确同步；旧人工稿仅有起始时间，结束时间按下一段起点推断，最后一段持续到视频结束；
+- SenseVoice 短媒体自动转录已完成生产验收，但候选稿发布/Qdrant 正式可见性 E2E
+  尚未执行；faster-whisper 真实依赖、模型、CUDA 和推理均未运行；
+- 当前唯一允许新建任务的自动 Profile 仍是 experimental SenseVoice；faster-whisper
+  与 WhisperX experimental Profile 可见但 admission 为 disabled；尚无
+  `qualification_approved` Profile；
 - 支持范围播放但无 HLS 自适应码率。
+- 媒体快捷筛选是最近 100 条的客户端筛选，不是服务端全库查询；独立转写工作台基础版仍待后续 PR。
 
 ## 相关决策
 
 - [0001 — 视频转录播放器与媒体资产流水线](../decisions/0001-video-transcript-player.md) 第一阶段已实施完成。
-- [0002 — 多引擎视频自动转录与管理员选择](../decisions/0002-multi-engine-transcription.md)；实施基线见 [Phase 2](../plans/multi-engine-transcription-phase2.md) 与 [Phase 3](../plans/multi-engine-transcription-phase3.md) 详细计划。
+- [0002 — 多引擎视频自动转录与管理员选择](../decisions/0002-multi-engine-transcription.md)；实施基线见 [Phase 2](../plans/multi-engine-transcription-phase2.md)、[Phase 3](../plans/multi-engine-transcription-phase3.md) 与 [Phase 5](../plans/multi-engine-transcription-phase5.md) 详细计划。
+- [转录管理流程加固](../plans/transcription-admin-workflow-hardening.md) 记录 Phase 5 后续 PR 1/PR 2 的独立范围。
+- [faster-whisper Provider 接入](../plans/faster-whisper-provider-integration.md)
+  记录 R2 代码边界与后续 R3 资格门禁。
+- [faster-whisper R3 统一资格验证](../plans/faster-whisper-r3-unified-qualification.md)
+  是后续依赖、模型、CUDA、质量与资源实测的唯一执行基线。
+- [WhisperX R2+R3 一次性合并执行方案](../plans/whisperx-r2-r3-execution-plan.md)
+  固定 Provider/Profile、双模型缓存、Windows runner 与回滚边界。

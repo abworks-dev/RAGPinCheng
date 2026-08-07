@@ -56,8 +56,27 @@ export function useChat({
         // turn so the FeedbackBar has `query` to ship — otherwise resumed
         // conversations would send feedback with only `answer_text`.
         let lastUserContent: string | undefined;
+        let lastUserVersionId: string | undefined;
         const replayed: ChatMessage[] = state.messages.map((m) => {
-          if (m.role === "user") lastUserContent = m.content;
+          if (m.role === "user") {
+            lastUserContent = m.content;
+            lastUserVersionId = m.user_versions?.find((version) => version.is_active)?.id != null
+              ? String(m.user_versions.find((version) => version.is_active)!.id)
+              : undefined;
+          }
+          const allAnswerVersions = m.answer_versions?.map((version) => ({
+            id: String(version.id),
+            versionIndex: version.version_index,
+            content: version.content,
+            sources: version.sources_for_ui || undefined,
+            isActive: version.is_active,
+            userVersionId: version.user_version_id != null ? String(version.user_version_id) : undefined,
+          }));
+          const visibleAnswerVersions = m.role === "assistant" && lastUserVersionId
+            ? allAnswerVersions?.filter(
+                (version) => version.userVersionId === lastUserVersionId,
+              )
+            : allAnswerVersions;
           return {
             id: m.id != null ? String(m.id) : newId(),
             role: m.role,
@@ -157,6 +176,9 @@ export function useChat({
                 m.id === assistantId
                   ? {
                       ...m,
+                      id: ev.data.assistant_message_id != null
+                        ? String(ev.data.assistant_message_id)
+                        : m.id,
                       content: ev.data.answer_text || m.content,
                       sources: ev.data.sources,
                       done: ev.data,

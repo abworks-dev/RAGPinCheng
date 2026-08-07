@@ -11,6 +11,13 @@ class HealthResponse(BaseModel):
     model_loaded: bool
 
 
+class ActivityResponse(BaseModel):
+    api_version: str
+    model_loaded: bool
+    inflight_requests: int = Field(..., ge=0)
+    asr_chunk_allowed: bool
+
+
 class ModelInfoResponse(BaseModel):
     api_version: str
     embedding_model: str

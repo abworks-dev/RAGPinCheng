@@ -129,6 +129,27 @@ describe("api client", () => {
     );
   });
 
+  it("serializes document lifecycle filters for server-side pagination", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({ documents: [], total: 0, status_counts: {} }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.adminListIndexedDocuments({
+      query: "施工 标准",
+      category: "公司标准",
+      doc_type: "pdf",
+      status: "failed",
+      limit: 25,
+      offset: 50,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/admin/index/documents?query=%E6%96%BD%E5%B7%A5+%E6%A0%87%E5%87%86&category=%E5%85%AC%E5%8F%B8%E6%A0%87%E5%87%86&doc_type=pdf&status=failed&limit=25&offset=50",
+      expect.objectContaining({ credentials: "include", headers: {} }),
+    );
+  });
+
   it("invokes the 401 handler and exposes structured ApiError data", async () => {
     const unauthorized = vi.fn();
     setUnauthorizedHandler(unauthorized);
@@ -150,6 +171,114 @@ describe("api client", () => {
       body: JSON.stringify({ detail: "需要重新登录" }),
     });
     expect(unauthorized).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves safe structured error code, message and retry policy", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        jsonResponse(
+          {
+            detail: {
+              code: "upload_idempotency_conflict",
+              message: "本次提交与原上传请求不一致，请重新提交。",
+              retryable: false,
+            },
+          },
+          409,
+        ),
+      ),
+    );
+
+    const error = await api.adminStats().catch((caught) => caught);
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error).toMatchObject({
+      status: 409,
+      code: "upload_idempotency_conflict",
+      message: "本次提交与原上传请求不一致，请重新提交。",
+      retryable: false,
+    });
+  });
+});
+
+describe("Phase 4B transcription API contracts", () => {
+  it("uses the administrator media endpoint and lists recoverable tasks", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(jsonResponse([]));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.listMediaAssets();
+    await api.listTranscriptionProfiles();
+    await api.listTranscriptionJobs(true, 25);
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/admin/media", expect.objectContaining({ credentials: "include" }));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/admin/transcription/profiles", expect.objectContaining({ credentials: "include" }));
+    expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/admin/transcription/jobs?latest_per_media=true&limit=25", expect.objectContaining({ credentials: "include" }));
+  });
+
+  it("uploads automatic media as exact FormData without forcing Content-Type", async () => {
+    setCsrfToken("csrf-asr");
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ media_id: "media-1", transcription_job_id: "job-1" }));
+    vi.stubGlobal("fetch", fetchMock);
+    const video = new File(["video"], "training.mp4", { type: "video/mp4" });
+
+    await api.uploadAutomaticMediaVideo(video, "培训视频", "profile-1", "11111111-1111-4111-8111-111111111111");
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/admin/media");
+    expect(init).toMatchObject({ method: "POST", credentials: "include", headers: { "X-CSRF-Token": "csrf-asr" } });
+    expect(init.headers).not.toHaveProperty("content-type");
+    const form = init.body as FormData;
+    expect((form.get("video") as File).name).toBe("training.mp4");
+    expect(form.get("title")).toBe("培训视频");
+    expect(form.get("profile_id")).toBe("profile-1");
+    expect(form.get("request_idempotency_key")).toBe("11111111-1111-4111-8111-111111111111");
+    expect(form.get("transcript")).toBeNull();
+  });
+
+  it("preserves CSRF protection for cancellation and retry", async () => {
+    setCsrfToken("csrf-asr");
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ status: "cancelled" }))
+      .mockResolvedValueOnce(jsonResponse({ status: "pending" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.cancelTranscriptionJob("job-1");
+    await api.retryTranscription("media-1", "profile-1", "22222222-2222-4222-8222-222222222222");
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/admin/transcription/jobs/job-1/cancel", expect.objectContaining({ method: "POST", headers: { "X-CSRF-Token": "csrf-asr" } }));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/admin/transcription/media/media-1/retry", expect.objectContaining({
+      method: "POST",
+      headers: { "content-type": "application/json", "X-CSRF-Token": "csrf-asr" },
+      body: JSON.stringify({ profile_id: "profile-1", request_idempotency_key: "22222222-2222-4222-8222-222222222222" }),
+    }));
+  });
+});
+
+
+describe("Phase 5 transcript publication API contracts", () => {
+  it("publishes with a strict empty body and CSRF while keeping reads side-effect free", async () => {
+    setCsrfToken("csrf-phase5");
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(jsonResponse({ version_id: "version-1", markdown: "正文", markdown_sha256: "a".repeat(64) }))
+      .mockResolvedValueOnce(jsonResponse({ version: {}, job: null, reused: false }, 202));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.listTranscriptVersions("media-1");
+    await api.previewTranscriptVersion("version-1");
+    await api.publishTranscriptVersion("version-1");
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/admin/transcription/media/media-1/versions", expect.objectContaining({ credentials: "include", headers: {} }));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/admin/transcription/versions/version-1/markdown", expect.objectContaining({ credentials: "include", headers: {} }));
+    expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/admin/transcription/versions/version-1/publish", expect.objectContaining({
+      method: "POST",
+      credentials: "include",
+      body: JSON.stringify({}),
+      headers: { "content-type": "application/json", "X-CSRF-Token": "csrf-phase5" },
+    }));
   });
 });
 

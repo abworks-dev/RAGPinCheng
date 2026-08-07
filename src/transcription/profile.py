@@ -139,7 +139,10 @@ class RemoteAsrServiceConfig:
     def __post_init__(self) -> None:
         if self.config_kind != "funasr-sensevoice" or self.config_version != "1":
             raise ContractValidationError("unsupported_provider_config", "provider_config")
-        validate_profile_id(self.service_profile_id, "service_profile_id")
+        if self.service_profile_id != "funasr-sensevoice-small-v1":
+            raise ContractValidationError(
+                "invalid_service_profile_id", "service_profile_id"
+            )
         if self.model_id != "iic/SenseVoiceSmall":
             raise ContractValidationError("invalid_model_id", "model_id")
         if self.model_revision != "7bf452403abd7353a300cd760f7adae7701c92c1":
@@ -167,14 +170,226 @@ class RemoteAsrServiceConfig:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class FasterWhisperRemoteConfig:
+    config_kind: str = "faster-whisper"
+    config_version: str = "1"
+    service_profile_id: str = "faster-whisper-large-v3-turbo-v1"
+    model_id: str = "dropbox-dash/faster-whisper-large-v3-turbo"
+    model_revision: str = "0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf"
+    expected_api_version: str = "asr-service/1"
+    upload_part_bytes: int = 8 * 1024 * 1024
+    poll_interval_ms: int = 1000
+    hotwords: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.config_kind != "faster-whisper" or self.config_version != "1":
+            raise ContractValidationError(
+                "unsupported_provider_config", "provider_config"
+            )
+        if self.service_profile_id != "faster-whisper-large-v3-turbo-v1":
+            raise ContractValidationError(
+                "invalid_service_profile_id", "service_profile_id"
+            )
+        if self.model_id != "dropbox-dash/faster-whisper-large-v3-turbo":
+            raise ContractValidationError("invalid_model_id", "model_id")
+        if self.model_revision != "0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf":
+            raise ContractValidationError("invalid_model_revision", "model_revision")
+        if self.expected_api_version != "asr-service/1":
+            raise ContractValidationError(
+                "unsupported_service_version", "expected_api_version"
+            )
+        require_int(self.upload_part_bytes, "upload_part_bytes", positive=True)
+        mib = 1024 * 1024
+        if (
+            not mib <= self.upload_part_bytes <= 16 * mib
+            or self.upload_part_bytes % mib
+        ):
+            raise ContractValidationError(
+                "invalid_upload_part_bytes", "upload_part_bytes"
+            )
+        if type(self.hotwords) is not tuple:
+            raise ContractValidationError("invalid_hotwords", "hotwords")
+        for word in self.hotwords:
+            if type(word) is not str or not word.strip() or len(word) > 64:
+                raise ContractValidationError("invalid_hotword", "hotwords")
+        require_int(self.poll_interval_ms, "poll_interval_ms", positive=True)
+        if not 100 <= self.poll_interval_ms <= 5000:
+            raise ContractValidationError(
+                "invalid_poll_interval_ms", "poll_interval_ms"
+            )
+
+    def to_json_dict(self) -> dict[str, Any]:
+        return {
+            "config_kind": self.config_kind,
+            "config_version": self.config_version,
+            "service_profile_id": self.service_profile_id,
+            "model_id": self.model_id,
+            "model_revision": self.model_revision,
+            "expected_api_version": self.expected_api_version,
+            "upload_part_bytes": self.upload_part_bytes,
+            "poll_interval_ms": self.poll_interval_ms,
+            "hotwords": list(self.hotwords),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class Qwen3AsrRemoteConfig:
+    config_kind: str = "qwen3-asr"
+    config_version: str = "1"
+    service_profile_id: str = "qwen3-asr-06b-aligner-v1"
+    model_id: str = "Qwen/Qwen3-ASR-0.6B"
+    model_revision: str = "5eb144179a02acc5e5ba31e748d22b0cf3e303b0"
+    aligner_model_id: str = "Qwen/Qwen3-ForcedAligner-0.6B"
+    aligner_model_revision: str = "c7cbfc2048c462b0d63a45797104fc9db3ad62b7"
+    expected_api_version: str = "asr-service/1"
+    upload_part_bytes: int = 8 * 1024 * 1024
+    poll_interval_ms: int = 1000
+
+    def __post_init__(self) -> None:
+        if self.config_kind != "qwen3-asr" or self.config_version != "1":
+            raise ContractValidationError(
+                "unsupported_provider_config", "provider_config"
+            )
+        expected = (
+            "qwen3-asr-06b-aligner-v1",
+            "Qwen/Qwen3-ASR-0.6B",
+            "5eb144179a02acc5e5ba31e748d22b0cf3e303b0",
+            "Qwen/Qwen3-ForcedAligner-0.6B",
+            "c7cbfc2048c462b0d63a45797104fc9db3ad62b7",
+        )
+        actual = (
+            self.service_profile_id,
+            self.model_id,
+            self.model_revision,
+            self.aligner_model_id,
+            self.aligner_model_revision,
+        )
+        if actual != expected:
+            fields = (
+                "service_profile_id",
+                "model_id",
+                "model_revision",
+                "aligner_model_id",
+                "aligner_model_revision",
+            )
+            field = next(name for name, value, wanted in zip(fields, actual, expected) if value != wanted)
+            raise ContractValidationError(f"invalid_{field}", field)
+        if self.expected_api_version != "asr-service/1":
+            raise ContractValidationError(
+                "unsupported_service_version", "expected_api_version"
+            )
+        require_int(self.upload_part_bytes, "upload_part_bytes", positive=True)
+        mib = 1024 * 1024
+        if (
+            not mib <= self.upload_part_bytes <= 16 * mib
+            or self.upload_part_bytes % mib
+        ):
+            raise ContractValidationError(
+                "invalid_upload_part_bytes", "upload_part_bytes"
+            )
+        require_int(self.poll_interval_ms, "poll_interval_ms", positive=True)
+        if not 100 <= self.poll_interval_ms <= 5000:
+            raise ContractValidationError(
+                "invalid_poll_interval_ms", "poll_interval_ms"
+            )
+
+    def to_json_dict(self) -> dict[str, Any]:
+        return {
+            "config_kind": self.config_kind,
+            "config_version": self.config_version,
+            "service_profile_id": self.service_profile_id,
+            "model_id": self.model_id,
+            "model_revision": self.model_revision,
+            "aligner_model_id": self.aligner_model_id,
+            "aligner_model_revision": self.aligner_model_revision,
+            "expected_api_version": self.expected_api_version,
+            "upload_part_bytes": self.upload_part_bytes,
+            "poll_interval_ms": self.poll_interval_ms,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class WhisperXRemoteConfig:
+    config_kind: str = "whisperx"
+    config_version: str = "1"
+    service_profile_id: str = "whisperx-large-v3-zh-align-v1"
+    model_id: str = "Systran/faster-whisper-large-v3"
+    model_revision: str = "53ecf83a5bedc5597eb8c8b34eac29e5345520ff"
+    expected_api_version: str = "asr-service/1"
+    upload_part_bytes: int = 8 * 1024 * 1024
+    poll_interval_ms: int = 1000
+
+    def __post_init__(self) -> None:
+        if self.config_kind != "whisperx" or self.config_version != "1":
+            raise ContractValidationError(
+                "unsupported_provider_config", "provider_config"
+            )
+        if self.service_profile_id != "whisperx-large-v3-zh-align-v1":
+            raise ContractValidationError(
+                "invalid_service_profile_id", "service_profile_id"
+            )
+        if self.model_id != "Systran/faster-whisper-large-v3":
+            raise ContractValidationError("invalid_model_id", "model_id")
+        if self.model_revision != "53ecf83a5bedc5597eb8c8b34eac29e5345520ff":
+            raise ContractValidationError(
+                "invalid_model_revision", "model_revision"
+            )
+        if self.expected_api_version != "asr-service/1":
+            raise ContractValidationError(
+                "unsupported_service_version", "expected_api_version"
+            )
+        require_int(self.upload_part_bytes, "upload_part_bytes", positive=True)
+        mib = 1024 * 1024
+        if (
+            not mib <= self.upload_part_bytes <= 16 * mib
+            or self.upload_part_bytes % mib
+        ):
+            raise ContractValidationError(
+                "invalid_upload_part_bytes", "upload_part_bytes"
+            )
+        require_int(self.poll_interval_ms, "poll_interval_ms", positive=True)
+        if not 100 <= self.poll_interval_ms <= 5000:
+            raise ContractValidationError(
+                "invalid_poll_interval_ms", "poll_interval_ms"
+            )
+
+    def to_json_dict(self) -> dict[str, Any]:
+        return {
+            "config_kind": self.config_kind,
+            "config_version": self.config_version,
+            "service_profile_id": self.service_profile_id,
+            "model_id": self.model_id,
+            "model_revision": self.model_revision,
+            "expected_api_version": self.expected_api_version,
+            "upload_part_bytes": self.upload_part_bytes,
+            "poll_interval_ms": self.poll_interval_ms,
+        }
+
+
+RemoteProviderConfig: TypeAlias = (
+    RemoteAsrServiceConfig
+    | FasterWhisperRemoteConfig
+    | Qwen3AsrRemoteConfig
+    | WhisperXRemoteConfig
+)
 ProviderTrustedConfig: TypeAlias = (
-    FakeAlphaConfig | FakeBetaConfig | FakeGammaConfig | RemoteAsrServiceConfig
+    FakeAlphaConfig
+    | FakeBetaConfig
+    | FakeGammaConfig
+    | RemoteAsrServiceConfig
+    | FasterWhisperRemoteConfig
+    | Qwen3AsrRemoteConfig
+    | WhisperXRemoteConfig
 )
 _PROVIDER_CONFIG_TYPES = (
     FakeAlphaConfig,
     FakeBetaConfig,
     FakeGammaConfig,
     RemoteAsrServiceConfig,
+    FasterWhisperRemoteConfig,
+    Qwen3AsrRemoteConfig,
+    WhisperXRemoteConfig,
 )
 
 
@@ -208,6 +423,87 @@ def provider_config_from_json(data: object) -> ProviderTrustedConfig:
             "provider_config",
         )
         return RemoteAsrServiceConfig(
+            obj["config_kind"],
+            obj["config_version"],
+            obj["service_profile_id"],
+            obj["model_id"],
+            obj["model_revision"],
+            obj["expected_api_version"],
+            obj["upload_part_bytes"],
+            obj["poll_interval_ms"],
+        )
+    if kind == "faster-whisper" and version == "1":
+        obj = reject_unknown_fields(
+            data,
+            {
+                "config_kind",
+                "config_version",
+                "service_profile_id",
+                "model_id",
+                "model_revision",
+                "expected_api_version",
+                "upload_part_bytes",
+                "poll_interval_ms",
+                "hotwords",
+            },
+            "provider_config",
+        )
+        return FasterWhisperRemoteConfig(
+            obj["config_kind"],
+            obj["config_version"],
+            obj["service_profile_id"],
+            obj["model_id"],
+            obj["model_revision"],
+            obj["expected_api_version"],
+            obj["upload_part_bytes"],
+            obj["poll_interval_ms"],
+            tuple(obj["hotwords"]),
+        )
+    if kind == "qwen3-asr" and version == "1":
+        obj = reject_unknown_fields(
+            data,
+            {
+                "config_kind",
+                "config_version",
+                "service_profile_id",
+                "model_id",
+                "model_revision",
+                "aligner_model_id",
+                "aligner_model_revision",
+                "expected_api_version",
+                "upload_part_bytes",
+                "poll_interval_ms",
+            },
+            "provider_config",
+        )
+        return Qwen3AsrRemoteConfig(
+            obj["config_kind"],
+            obj["config_version"],
+            obj["service_profile_id"],
+            obj["model_id"],
+            obj["model_revision"],
+            obj["aligner_model_id"],
+            obj["aligner_model_revision"],
+            obj["expected_api_version"],
+            obj["upload_part_bytes"],
+            obj["poll_interval_ms"],
+        )
+    if kind == "whisperx" and version == "1":
+        obj = reject_unknown_fields(
+            data,
+            {
+                "config_kind",
+                "config_version",
+                "service_profile_id",
+                "model_id",
+                "model_revision",
+                "expected_api_version",
+                "upload_part_bytes",
+                "poll_interval_ms",
+            },
+            "provider_config",
+        )
+        return WhisperXRemoteConfig(
             obj["config_kind"],
             obj["config_version"],
             obj["service_profile_id"],

@@ -136,7 +136,16 @@ compose build backend 2>&1 | tail -5
 echo ">> Deploying services"
 compose up -d --no-deps backend 2>&1
 
-# ── 8. Wait for health ────────────────────────────────────────────────────
+# ── 8. Verify required backend media tools ────────────────────────────────
+echo ">> Verifying backend media tools"
+compose exec -T backend sh -lc '
+    command -v ffmpeg >/dev/null 2>&1 || { echo "ERROR: ffmpeg not found in backend image"; exit 1; }
+    command -v ffprobe >/dev/null 2>&1 || { echo "ERROR: ffprobe not found in backend image"; exit 1; }
+    ffmpeg -version 2>&1 | sed -n "1p"
+    ffprobe -version 2>&1 | sed -n "1p"
+'
+
+# ── 9. Wait for health ────────────────────────────────────────────────────
 echo ">> Waiting for backend health check"
 for i in $(seq 1 12); do
     HEALTH=$(curl -fsS http://localhost/api/health 2>/dev/null || echo "")
@@ -148,14 +157,14 @@ for i in $(seq 1 12); do
     sleep 5
 done
 
-# ── 9. Qdrant health check ────────────────────────────────────────────────
+# ── 10. Qdrant health check ───────────────────────────────────────────────
 echo ">> Checking Qdrant"
 # Qdrant container doesn't have curl — use backend container to check.
 compose exec backend curl -fsS http://qdrant:6333/collections/pincheng_docs \
     | python3 -c "import sys,json; d=json.load(sys.stdin); print(f'  Qdrant OK: {d[\"result\"][\"points_count\"]} points')" \
     2>/dev/null || echo "  WARNING: Qdrant health check failed"
 
-# ── 10. Final verification ────────────────────────────────────────────────
+# ── 11. Final verification ────────────────────────────────────────────────
 echo ">> Running end-to-end verification"
 # Verify the backend can reach the GPU service
 E2E_CHECK=$(curl -fsS http://localhost/api/config 2>/dev/null || echo "")

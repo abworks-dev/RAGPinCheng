@@ -18,7 +18,7 @@ import logging
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Literal
 
 logger = logging.getLogger(__name__)
 
@@ -332,6 +332,28 @@ def index_single(
     return IndexResult(parents=len(parents), children=len(children))
 
 
+def index_transcript_candidate(
+    doc: ParsedDoc,
+    on_status: StatusFn = lambda _s: None,
+) -> IndexResult:
+    """Index one immutable transcript version without source-level purge.
+
+    The caller owns artifact verification and temporary materialization.  This
+    function deliberately cannot route through ``index_single`` because that
+    path purges every row/point sharing a source identity.
+    """
+    if type(doc) is not ParsedDoc or doc.doc_type != "transcript":
+        raise ValueError("candidate indexing requires a transcript ParsedDoc")
+    if not doc.media_id or not doc.transcript_version_id or not doc.publication_target_id:
+        raise ValueError("candidate indexing requires media/version/target identity")
+    on_status("chunking")
+    parents, children = chunk_document(doc)
+    on_status("embedding")
+    store_parents(parents)
+    index_children(children)
+    return IndexResult(parents=len(parents), children=len(children))
+
+
 # ── document listing / deletion (admin "manage indexed docs") ─────────────
 
 
@@ -373,7 +395,13 @@ def list_indexed_documents() -> list[IndexedDocument]:
     ]
 
 
-def delete_document(source_path: str, delete_file: bool = False) -> dict[str, int]:
+FileDeleteStatus = Literal["not_requested", "deleted", "missing", "failed"]
+
+
+def delete_document(
+    source_path: str,
+    delete_file: bool = False,
+) -> dict[str, int | bool | FileDeleteStatus]:
     """Remove a document's chunks from Qdrant + parents.sqlite.
 
     `delete_file=True` also removes the source file from disk (and the
@@ -405,14 +433,22 @@ def delete_document(source_path: str, delete_file: bool = False) -> dict[str, in
         conn.close()
 
     file_deleted = False
+    file_delete_status: FileDeleteStatus = "not_requested"
     if delete_file:
         p = Path(source_path)
-        if p.exists() and p.is_file():
+        if not p.exists():
+            file_delete_status = "missing"
+        elif not p.is_file():
+            file_delete_status = "failed"
+        else:
             try:
                 p.unlink()
                 file_deleted = True
+                file_delete_status = "deleted"
+            except FileNotFoundError:
+                file_delete_status = "missing"
             except OSError:
-                pass
+                file_delete_status = "failed"
             # Best-effort cleanup of the cached markdown too (PDFs only).
             try:
                 stem = _safe_stem(p)
@@ -425,5 +461,6 @@ def delete_document(source_path: str, delete_file: bool = False) -> dict[str, in
 
     return {
         "parents_deleted": parents_deleted,
-        "file_deleted": 1 if file_deleted else 0,
+        "file_deleted": file_deleted,
+        "file_delete_status": file_delete_status,
     }

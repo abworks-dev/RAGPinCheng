@@ -5,7 +5,8 @@ import logging
 import os
 import time
 import uuid
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
+from threading import Lock
 
 import torch
 from dotenv import load_dotenv
@@ -28,6 +29,7 @@ from gpu_service.config import (
 )
 from gpu_service.models import ModelManager
 from gpu_service.schemas import (
+    ActivityResponse,
     EmbeddingRequest,
     EmbeddingResponse,
     EmbeddingItem,
@@ -46,6 +48,35 @@ logging.basicConfig(
     format="%(asctime)s [%(name)s] %(levelname)s %(message)s",
 )
 logger = logging.getLogger("gpu_service")
+
+GPU_ACTIVITY_API_VERSION = "gpu-activity/1"
+
+
+class ActivityTracker:
+    def __init__(self) -> None:
+        self._lock = Lock()
+        self._inflight_requests = 0
+
+    @contextmanager
+    def inference(self):
+        with self._lock:
+            self._inflight_requests += 1
+        try:
+            yield
+        finally:
+            with self._lock:
+                self._inflight_requests = max(0, self._inflight_requests - 1)
+
+    def count(self) -> int:
+        with self._lock:
+            return self._inflight_requests
+
+    def reset_for_tests(self) -> None:
+        with self._lock:
+            self._inflight_requests = 0
+
+
+_activity_tracker = ActivityTracker()
 
 
 # ── Auth ─────────────────────────────────────────────────────────────────────
@@ -159,6 +190,19 @@ async def model_info():
     )
 
 
+@app.get("/v1/activity", response_model=ActivityResponse)
+async def activity(request: Request):
+    verify_token(request)
+    inflight = _activity_tracker.count()
+    loaded = _model_manager.is_loaded
+    return ActivityResponse(
+        api_version=GPU_ACTIVITY_API_VERSION,
+        model_loaded=loaded,
+        inflight_requests=inflight,
+        asr_chunk_allowed=loaded and inflight == 0,
+    )
+
+
 @app.post("/v1/embeddings", response_model=EmbeddingResponse)
 async def embed(request: Request, body: EmbeddingRequest):
     verify_token(request)
@@ -182,7 +226,8 @@ async def embed(request: Request, body: EmbeddingRequest):
             )
 
     try:
-        results = _model_manager.embed(body.texts, normalize=body.normalize)
+        with _activity_tracker.inference():
+            results = _model_manager.embed(body.texts, normalize=body.normalize)
     except RuntimeError as exc:
         logger.error("embedding failed: %s", exc)
         if "CUDA" in str(exc) or "out of memory" in str(exc).lower():
@@ -208,7 +253,8 @@ async def rerank(request: Request, body: RerankRequest):
         )
 
     try:
-        scores = _model_manager.rerank(body.query, body.passages, use_header=body.use_header)
+        with _activity_tracker.inference():
+            scores = _model_manager.rerank(body.query, body.passages, use_header=body.use_header)
     except RuntimeError as exc:
         logger.error("rerank failed: %s", exc)
         if "CUDA" in str(exc) or "out of memory" in str(exc).lower():

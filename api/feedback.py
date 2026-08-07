@@ -6,8 +6,10 @@ report). Stored at data/feedback.jsonl for cheap offline review.
 from __future__ import annotations
 
 import json
+import hashlib
 import logging
 import threading
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -95,9 +97,33 @@ def _backfill_query_and_answer(record: dict) -> None:
 def append(req: FeedbackRequest) -> None:
     record = req.model_dump(exclude_none=True)
     _backfill_query_and_answer(record)
+    record["feedback_id"] = str(uuid.uuid4())
     record["ts"] = datetime.now(timezone.utc).isoformat()
     FEEDBACK_PATH.parent.mkdir(parents=True, exist_ok=True)
     line = json.dumps(record, ensure_ascii=False)
     with _lock:
         with FEEDBACK_PATH.open("a", encoding="utf-8") as fh:
             fh.write(line + "\n")
+
+
+def read_records() -> list[dict]:
+    """Read valid feedback records and provide stable IDs for legacy lines."""
+    if not FEEDBACK_PATH.exists():
+        return []
+    records: list[dict] = []
+    with FEEDBACK_PATH.open("r", encoding="utf-8") as fh:
+        for line_number, raw_line in enumerate(fh, start=1):
+            line = raw_line.strip()
+            if not line:
+                continue
+            try:
+                record = json.loads(line)
+            except (TypeError, ValueError):
+                continue
+            if not isinstance(record, dict):
+                continue
+            if not record.get("feedback_id"):
+                seed = f"{line_number}\0{line}".encode("utf-8")
+                record["feedback_id"] = f"legacy-{hashlib.sha256(seed).hexdigest()}"
+            records.append(record)
+    return records
