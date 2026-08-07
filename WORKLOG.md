@@ -2431,3 +2431,9 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 完成：run `31179972766` 在 wrapper 启动阶段暴露 Windows PowerShell 5.1 不接受字符串 `true` 到 `[bool]` 参数的转换；外层父进程现传数值 `1`，保持 `ExecuteQualification` 明确开启。
 - 文件：`.github/workflows/qualify-faster-whisper-production.yml`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
 - 验证：已补静态断言；待提交后重新触发资格 run。
+
+### 21:07 — 修正 PowerShell 子进程布尔字面量
+
+- 完成：run `31180581665` 证明 `Start-Process -ArgumentList` 即使传 `1` 仍以字符串到达子 PowerShell；改为传 `-ExecuteQualification:$true`，由子解释器解析为真正布尔值。
+- 文件：`.github/workflows/qualify-faster-whisper-production.yml`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
+- 验证：待提交后重新触发资格 run。
