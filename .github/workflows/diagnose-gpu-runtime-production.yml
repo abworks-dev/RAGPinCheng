@@ -108,10 +108,6 @@ jobs:
           import sys
           from datetime import datetime, timezone
 
-          import torch
-          from gpu_service.config import EMBED_MODEL, RERANKER_MODEL
-          from FlagEmbedding import BGEM3FlagModel, FlagReranker
-
           stage_path = sys.argv[1]
 
           def write_stage(name):
@@ -120,6 +116,14 @@ jobs:
                   handle.write(line + "\\n")
               print(line, flush=True)
 
+          write_stage("python_entry")
+          write_stage("torch_import_start")
+          import torch
+          write_stage("torch_import_complete")
+          write_stage("config_import_start")
+          from gpu_service.config import EMBED_MODEL, RERANKER_MODEL
+          from FlagEmbedding import BGEM3FlagModel, FlagReranker
+          write_stage("config_import_complete")
           device = "cuda" if torch.cuda.is_available() else "cpu"
           if device != "cuda":
               raise RuntimeError("CUDA is unavailable in the S4U task")
@@ -185,8 +189,16 @@ jobs:
           $probe = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($EncodedProbe))
           Set-Content -LiteralPath $probePath -Value $probe -Encoding UTF8
           Write-Stage -Name "model_load_start"
-          & $python -X faulthandler $probePath $StagePath 1>> $StdoutPath 2>> $StderrPath
-          exit $LASTEXITCODE
+          $process = Start-Process `
+            -FilePath $python `
+            -ArgumentList @("-X", "faulthandler", $probePath, $StagePath) `
+            -RedirectStandardOutput $StdoutPath `
+            -RedirectStandardError $StderrPath `
+            -WindowStyle Hidden `
+            -PassThru `
+            -Wait
+          Write-Stage -Name ("python_exit_{0}" -f $process.ExitCode)
+          exit $process.ExitCode
           '@ | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
           function Write-S4UDiagnostic {
