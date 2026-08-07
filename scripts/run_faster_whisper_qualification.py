@@ -561,11 +561,23 @@ def run_qualification(
     token: str,
     timeout_ms: int,
 ) -> dict[str, object]:
+    def progress(event: str, **fields: object) -> None:
+        print(
+            json.dumps(
+                {"event": event, **fields},
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+            flush=True,
+        )
+
     # Warm the fixed model through the same HTTP/Provider/pipeline path.  The
     # timed passes below therefore measure steady-state inference rather than
     # one-time model loading.
     warmup = next(sample for sample in manifest.samples if not sample.negative_control)
+    progress("warmup-start", sample_id=warmup.sample_id)
     _run_once(warmup, base_url=base_url, token=token, timeout_ms=timeout_ms)
+    progress("warmup-complete", sample_id=warmup.sample_id)
 
     rows: list[dict[str, object]] = []
     diagnostic_rows: list[dict[str, object]] = []
@@ -586,12 +598,31 @@ def run_qualification(
     false_positives = 0
     all_passed = True
 
-    for sample in manifest.samples:
+    for sample_index, sample in enumerate(manifest.samples, start=1):
+        progress(
+            "sample-start",
+            sample_id=sample.sample_id,
+            sample_index=sample_index,
+            sample_count=len(manifest.samples),
+            pass_index=1,
+        )
         first = _run_once(
             sample, base_url=base_url, token=token, timeout_ms=timeout_ms
         )
+        progress(
+            "sample-pass-complete",
+            sample_id=sample.sample_id,
+            sample_index=sample_index,
+            pass_index=1,
+        )
         second = _run_once(
             sample, base_url=base_url, token=token, timeout_ms=timeout_ms
+        )
+        progress(
+            "sample-pass-complete",
+            sample_id=sample.sample_id,
+            sample_index=sample_index,
+            pass_index=2,
         )
         canonical, markdown, turns, elapsed = first
         deterministic = (
@@ -687,6 +718,12 @@ def run_qualification(
         all_passed = all_passed and sample_pass
         rows.append(row)
         diagnostic_rows.append(diagnostic_row)
+        progress(
+            "sample-complete",
+            sample_id=sample.sample_id,
+            sample_index=sample_index,
+            passed=sample_pass,
+        )
 
     positive_elapsed = sum(
         row["elapsed"] for row in rows if not row["negative_control"]

@@ -1969,6 +1969,10 @@ print('qualification-module-origins-verified')
     $QualificationStderr = Join-Path $LogRoot "qualification-runner.stderr.log"
     $QualificationDiagnosticReport = Join-Path $ReportRoot "sample-diagnostics.json"
     $QualificationTimeoutMs = 180000
+    # The runner performs one warmup plus two passes for each of the eight
+    # fixed samples.  A successful run is normally single-digit minutes; cap
+    # the whole inference stage so a stuck child cannot occupy the GPU runner.
+    $QualificationWatchdogSeconds = 1500
     $InferenceStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
     $QualificationProcess = Start-Process `
         -FilePath $VenvPython `
@@ -1987,7 +1991,27 @@ print('qualification-module-origins-verified')
         -PassThru
 
     $GpuEvidence = Join-Path $EvidenceRoot "gpu-samples.jsonl"
+    $QualificationStartedAt = [DateTimeOffset]::Now
+    $NextQualificationHeartbeatAt = $QualificationStartedAt.AddSeconds(30)
     while (-not $QualificationProcess.HasExited) {
+        $now = [DateTimeOffset]::Now
+        if ($now -ge $NextQualificationHeartbeatAt) {
+            $elapsedMs = [int64]($now - $QualificationStartedAt).TotalMilliseconds
+            $runnerOutputStamp = "missing"
+            if (Test-Path -LiteralPath $QualificationStdout -PathType Leaf) {
+                $runnerOutputStamp = (Get-Item -LiteralPath $QualificationStdout).LastWriteTimeUtc.ToString("o")
+            }
+            Write-Host (
+                "R3_QUALIFICATION_HEARTBEAT elapsed_ms={0} runner_stdout_updated_utc={1}" -f
+                $elapsedMs,
+                $runnerOutputStamp
+            )
+            $NextQualificationHeartbeatAt = $now.AddSeconds(30)
+        }
+        if (($now - $QualificationStartedAt).TotalSeconds -ge $QualificationWatchdogSeconds) {
+            $FailureCode = "qualification_timeout"
+            throw "Qualification runner exceeded the fixed whole-stage timeout of $QualificationWatchdogSeconds seconds"
+        }
         $sample = Get-GpuSample
         $PeakMemoryMiB = [Math]::Max($PeakMemoryMiB, [int]$sample.memory_used_mib)
         $PeakUtilization = [Math]::Max($PeakUtilization, [int]$sample.utilization_percent)
