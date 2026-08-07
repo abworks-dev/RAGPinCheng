@@ -33,31 +33,34 @@ from .transcription_store import SQLiteTranscriptionStore, StoreConflictError
 def build_phase4_profile_registry(
     *, upload_part_bytes: int, poll_interval_ms: int, expected_api_version: str
 ) -> ProfileRegistry:
-    base = build_phase3_profile_catalog()[0].profile
-    provider_config = replace(
-        base.provider_config,
-        upload_part_bytes=upload_part_bytes,
-        poll_interval_ms=poll_interval_ms,
-        expected_api_version=expected_api_version,
-    )
-    profile = TranscriptionProfileDefinition.create(
-        profile_id=base.profile_id,
-        display_name=base.display_name,
-        description=base.description,
-        provider_key=base.provider_key,
-        provider_config=provider_config,
-        normalizer_config=base.normalizer_config,
-        qualification=base.qualification,
-        admission=base.admission,
-        release_policy=base.release_policy,
-        profile_definition_version=base.profile_definition_version,
-        provider_adapter_version=base.provider_adapter_version,
-        canonical_schema_version=base.canonical_schema_version,
-        normalizer_version=base.normalizer_version,
-        formatter_version=base.formatter_version,
-        evidence_refs=base.evidence_refs,
-    )
-    return ProfileRegistry((profile,))
+    profiles = []
+    for entry in build_phase3_profile_catalog():
+        base = entry.profile
+        provider_config = replace(
+            base.provider_config,
+            upload_part_bytes=upload_part_bytes,
+            poll_interval_ms=poll_interval_ms,
+            expected_api_version=expected_api_version,
+        )
+        profile = TranscriptionProfileDefinition.create(
+            profile_id=base.profile_id,
+            display_name=base.display_name,
+            description=base.description,
+            provider_key=base.provider_key,
+            provider_config=provider_config,
+            normalizer_config=base.normalizer_config,
+            qualification=base.qualification,
+            admission=base.admission,
+            release_policy=base.release_policy,
+            profile_definition_version=base.profile_definition_version,
+            provider_adapter_version=base.provider_adapter_version,
+            canonical_schema_version=base.canonical_schema_version,
+            normalizer_version=base.normalizer_version,
+            formatter_version=base.formatter_version,
+            evidence_refs=base.evidence_refs,
+        )
+        profiles.append(profile)
+    return ProfileRegistry(tuple(profiles))
 
 
 @dataclass(frozen=True, slots=True)
