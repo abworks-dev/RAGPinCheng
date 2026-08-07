@@ -2372,6 +2372,13 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 
 ## 2026-08-07
 
+### 10:10 — 修复 faster-whisper 资格 wrapper 假阴性
+
+- 完成：将 faster-whisper 生产资格 wrapper 的 runner 结果判定改为以 run-local `qualification-summary.json` 为准；当固定 gate 报告已明确 `pass` 且样本数为 8 时，不再因 Windows `Start-Process` 退出码假阴性把整轮误判为 `qualification_failed`，但会输出 warning 记录异常 exit code。summary 缺失或 gate 未通过仍失败关闭。
+- 文件：`scripts/qualify-faster-whisper-production.ps1`、`WORKLOG.md`。
+- 验证：`git diff --check` 通过；PowerShell AST 解析 `scripts/qualify-faster-whisper-production.ps1` 通过。未重新触发生产资格 run。
+- 待办/风险：需合并到 master 后以完整 SHA 重跑 faster-whisper 生产资格，确认 wrapper 能把已通过的固定 gate 写成最终 PASS verdict。Profile admission 仍保持 disabled。
+
 ### 05:41 — 修复 faster-whisper hotwords 参数类型
 
 - 完成：生产资格 run `31125523585` 在 warmup 阶段因 `faster-whisper` 收到 tuple 类型 `hotwords` 而以 `permanent_provider_error` 失败；引擎现将配置中的 hotwords 词条按空格拼接为单一字符串，保持既有词条内容和识别策略不变，并补齐精确调用参数回归断言。
