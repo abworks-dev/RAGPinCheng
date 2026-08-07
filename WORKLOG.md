@@ -2462,3 +2462,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`.github/workflows/ci.yml`、`api/schemas.py`、`asr_service/tests/test_faster_whisper.py`、`tests/test_transcription_phase4_api.py`、`tests/test_transcription_phase5_api.py`、`tests/test_transcription_phase5_static_boundaries.py`、`WORKLOG.md`。
 - 验证：Phase5 publication/visibility 集合 25/25、transcription contracts 集合 329/329、ASR service CI 集合 346/346 通过；`python -m compileall -q api src scripts tests gpu_service asr_service` 通过；`git diff --check` 未发现空白错误。
 - 待办/风险：本地未执行 `npm ci`，因此 `validate` 的前端测试/构建需由远端 CI 覆盖；Docker Compose 本地检查因 compose 文件显式要求仓库 `.env` 未执行，未为验证创建本地 `.env`。不恢复已删除的 Phase5 HTTP 路由，不修改生产服务、依赖、数据库、Qdrant 或 Profile admission。
+
+### 05:45 — 修复 Qwen3-ASR 资格验证可观测性
+
+- 完成：Qwen3-ASR R3 qualification 现在为隔离依赖、模型准备、CUDA BF16 预检和八样本推理输出脱敏阶段状态与心跳；外部命令按阶段超时并将 stdout/stderr 留在 run-local 日志；runner 输出 warmup 与逐样本完成事件；八样本推理增加 170 分钟整体 watchdog，超时后写入 `qualification_timeout` verdict 并进入既有清理路径。
+- 文件：`scripts/qualify-qwen3-asr-production.ps1`、`scripts/run_qwen3_asr_qualification.py`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
+- 验证：PowerShell AST 解析、Python 编译、完整 ASR 静态测试 31/31 与 `git diff --check` 通过；本机未安装 pytest，未运行 pytest 套件。
+- 待办/风险：尚未在 production-asr runner 触发或取消 workflow；当前进行中的 run 不会获得新逻辑。Profile admission 保持 disabled，生产服务、生产 venv、模型缓存、数据库、Qdrant 与防火墙均未修改。

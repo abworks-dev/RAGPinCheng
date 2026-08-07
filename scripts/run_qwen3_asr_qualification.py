@@ -541,11 +541,23 @@ def run_qualification(
     token: str,
     timeout_ms: int,
 ) -> dict[str, object]:
+    def progress(event: str, **fields: object) -> None:
+        print(
+            json.dumps(
+                {"event": event, **fields},
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+            flush=True,
+        )
+
     # Warm the fixed model through the same HTTP/Provider/pipeline path.  The
     # timed passes below therefore measure steady-state inference rather than
     # one-time model loading.
     warmup = next(sample for sample in manifest.samples if not sample.negative_control)
+    progress("warmup-start", sample_id=warmup.sample_id)
     _run_once(warmup, base_url=base_url, token=token, timeout_ms=timeout_ms)
+    progress("warmup-complete", sample_id=warmup.sample_id)
 
     rows: list[dict[str, object]] = []
     term_hits = term_total = code_hits = code_total = 0
@@ -565,7 +577,7 @@ def run_qualification(
     false_positives = 0
     all_passed = True
 
-    for sample in manifest.samples:
+    for sample_index, sample in enumerate(manifest.samples, start=1):
         first = _run_once(
             sample, base_url=base_url, token=token, timeout_ms=timeout_ms
         )
@@ -637,6 +649,12 @@ def run_qualification(
         row["pass"] = sample_pass
         all_passed = all_passed and sample_pass
         rows.append(row)
+        progress(
+            "sample-complete",
+            sample_id=sample.sample_id,
+            sample_index=sample_index,
+            passed=sample_pass,
+        )
 
     term_recall = 1.0 if term_total == 0 else term_hits / term_total
     code_recall = 1.0 if code_total == 0 else code_hits / code_total
