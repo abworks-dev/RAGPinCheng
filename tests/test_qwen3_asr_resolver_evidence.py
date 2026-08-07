@@ -162,6 +162,7 @@ def test_unparsed_lines_emit_only_fixed_safe_metadata(
         "sha256",
         "character_types",
         "category",
+        "requirements",
     }
     assert record["category"] == category
     assert set(record["character_types"]) == {
@@ -175,6 +176,18 @@ def test_unparsed_lines_emit_only_fixed_safe_metadata(
     assert "example.invalid" not in serialized
     assert "secret.invalid" not in serialized
     assert "/private/path" not in serialized
+
+
+def test_context_prefix_can_prove_only_an_explicit_conflict(tmp_path: Path):
+    root = _source(
+        tmp_path,
+        "ERROR: pip context: The user requested (constraint) oss2==2.19.1",
+        "ERROR: pip context: funasr 1.4.1 depends on oss2<2",
+    )
+    result = evidence.extract_evidence(source_root=root)
+    assert result["classification"] == "proven_version_conflict"
+    assert result["status"] == "evidence_complete"
+    assert all(item["requirements"] for item in result["unparsed_records"])
 
 
 @pytest.mark.parametrize(
