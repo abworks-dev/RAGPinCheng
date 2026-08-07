@@ -1841,9 +1841,385 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 验证：管理布局专项 Vitest 4/4 通过；TypeScript project build 与 Vite production build 通过（1965 modules transformed）。构建保留既有 CSS 语法与主包大于 500 kB 警告。
 - 待办/风险：功能处于待用户验收；尚未在真实管理员登录态下切换长短页面做浏览器视觉对比。本轮未修改 API、数据、依赖或部署，回滚只需移除管理布局生命周期类及对应 CSS。
 
+- 完成：在最新 `master` 上将引用悬浮框统一为主题语义色，恢复深色模式下不可见的来源标题；消除角标与浮层之间的命中空隙，改为可取消的 150ms 延迟关闭，使鼠标可稳定移入浮层；保留视口边缘自动翻转，并将浮层改为段落内合法的行内容器。
+- 文件：`frontend/src/components/Message.tsx`、`frontend/src/components/Message.test.tsx`、`WORKLOG.md`。
+- 验证：悬浮框专项测试 12/12 通过；前端全量 Vitest 28 个文件、139/139 项通过；TypeScript project build 与 Vite production build 通过（2026 modules transformed）；`git diff --check` 通过。首次复用旧工作区依赖时有 3 个测试文件因缺少最新锁文件已声明的 Radix Dialog 而无法收集，按最新锁文件安装隔离依赖后全部通过；构建保留既有 CSS 语法、主包大于 500 kB 与 React Router future warning。
+- 待办/风险：尚未使用带来源的真实会话完成明暗主题、视口顶部/右侧翻转和鼠标移入浮层的浏览器视觉验收；依赖审计报告既有 10 项风险，本轮未修改依赖或锁文件，也未运行自动修复。
+
+### 07:26 — 实施受控 jieba wheel 资格接线
+
+- 完成：按获批 R3 方案新增固定 `jieba==0.42.1` wheel 构建与严格校验工具；GitHub-hosted job 在任何源码执行前核验固定 sdist URL、大小和 SHA-256，使用固定 Python/build tools/时间戳双重构建并要求 wheel 字节 hash 一致，再通过同一 workflow artifact 交给 Windows 资格 job。Windows 仅将已重新校验的 bundle 作为 `--find-links` 来源，继续保留 `--only-binary=:all:`，并要求受控 wheel 实际进入 run-local wheelhouse。
+- 文件：新增 `scripts/build_internal_jieba_wheel.py`、`tests/test_asr_internal_wheel.py`；修改 `.github/workflows/qualify-faster-whisper-production.yml`、`scripts/qualify-faster-whisper-production.ps1`、`tests/test_asr_deployment_static.py`、统一 R3 方案与 `TODO.md`。
+- 验证：受控 wheel 单元与部署静态测试 36/36 通过；R3 wheel、部署、模型准备和 faster-whisper 资格定向回归 83/83 通过；workflow YAML、Python 编译、PowerShell AST 与 `git diff --check` 通过。
+- 远端结果：PR #45 的 7 项 CI 全部通过并合并为 `34eab650ed9402512296a835c24cef656dbcb60f`。资格 run `30960326875` 的受控 wheel 双重构建与 artifact 传递成功，Windows 隔离资格随后仍以 `dependency_preparation_failed` 失败；脱敏 verdict 确认 `profile_admission=disabled`、`production_services_modified=false`。
+- 待办/风险：当前脱敏证据不足以判定下一项精确依赖 blocker；继续读取依赖证据、修改其他 pin/约束或再次重跑须另行审批。未修改 production freeze、生产 ASR venv、服务、Scheduled Task、防火墙、Ubuntu、数据库、Qdrant、模型或 Profile admission。
+
+### 07:31 — 调整视频来源核验与播放入口
+
+- 完成：视频引用角标点击现只打开并定位来源核验，不再联动弹出播放器；视频回答依据项采用独立媒体图标层级、隐藏内部 `__8位ID` 绑定尾缀并简化分类与时间文案；视频播放入口移至来源详情“定位”区域右侧，点击后按引用时间自动跳转并播放，原详情底部的重复播放入口已移除。
+- 文件：`frontend/src/components/Message.tsx`、`frontend/src/components/Message.test.tsx`、`frontend/src/components/SourceWorkspace.tsx`、`frontend/src/components/SourceWorkspace.test.tsx`、`WORKLOG.md`。
+- 验证：消息与来源工作区专项 Vitest 2 个文件、15/15 项测试通过；TypeScript project build 与 Vite production build 通过（2026 modules transformed）；`git diff --check` 通过。首次复用旧依赖目录时因缺少锁文件已声明的 Radix Dialog 无法完成 TypeScript 构建，按最新锁文件在隔离工作区安装依赖后构建通过；构建保留既有 CSS 语法与主包大于 500 kB 警告，依赖审计仍报告既有 10 项风险。
+- 待办/风险：功能处于待用户验收；尚未在真实登录会话中对视频播放器自动 seek、窄屏来源抽屉和明暗主题完成浏览器视觉验收。本轮未修改 API、媒体鉴权、数据契约、索引、依赖声明或部署。
+
+### 07:36 — 调研 PDF 预览交互改进
+
+- 完成：只读核对当前 PDF 预览的固定 100% 初始缩放、单页渲染、滚动容器和缺少拖动平移的现状，并参考 PDF.js、Zotero、Paperless-ngx、RAGFlow 及 React PDF Viewer 的公开资料，形成以自适应缩放、手形拖动、连续阅读和引用定位为主的分阶段改进方案。
+- 文件：仅追加 `WORKLOG.md`；未修改功能代码、测试、依赖、API、数据或部署配置。
+- 验证：静态检查 `PdfPreview.tsx`、`ResourcePreviewShell.tsx`、`usePdfPreview.tsx`、来源预览入口及现有测试覆盖；未运行构建或浏览器视觉验收，因为本轮仅提交方案。
+- 待办/风险：改进方案已按用户批准先实施第一阶段；连续多页和引用定位仍不在本次范围。
+
+### 07:38 — 清理回答复制中的引用角标
+
+- 完成：适配最新 `master` 的回答操作结构，在助手回答写入剪贴板前移除已识别的数字、文档章节和视频时间引用角标，并清理角标前的横向空白；用户提问仍原样复制，页面角标展示、来源核验和局域网 HTTP 剪贴板回退保持不变。
+- 文件：`frontend/src/components/citations.ts`、`frontend/src/components/FeedbackBar.tsx`、`frontend/src/components/FeedbackBar.test.tsx`、`WORKLOG.md`。
+- 验证：消息、回答操作、来源工作区和管理布局专项 Vitest 25/25 通过；前端全量 Vitest 29 个文件、143/143 项通过；TypeScript project build 与 Vite production build 通过（2026 modules transformed）；`git diff --check` 通过。构建保留既有 CSS 语法、主包大于 500 kB 与 React Router future warning。
+- 待办/风险：功能处于待用户验收；尚未在真实登录会话中使用长回答执行浏览器剪贴板验收。本轮未修改 API、引用数据契约、RAG、依赖、数据或部署。
+
+### 07:40 — 发布前端交互修复到 master
+
+- 完成：在最新 `origin/master` 隔离工作区中整合并复核视频来源播放、管理页稳定滚动槽和回答复制角标清理；远端已先行包含视频来源提交，本次以普通 fast-forward 将剩余两个提交推送到 `origin/master`，未使用强推，未提交 `.codex-worktrees/`。
+- 文件：本次发布涉及的前端源码、测试与 `WORKLOG.md`；未修改依赖、API、数据、RAG 或部署配置。
+- 验证：rebase 到推送前最新 `origin/master` 后，前端全量 Vitest 29 个文件、143/143 项通过；TypeScript project build、Vite production build 与 `git diff --check` 通过；推送后本地 HEAD 与 `origin/master` 均为 `2c732e488bb715de88e56175e2bf55ecdc4ac3a7`。
+- 待办/风险：尚未进行真实登录会话的浏览器剪贴板、视频 seek 和管理页长短页面视觉验收；构建保留既有 CSS 语法、主包大于 500 kB 与 React Router future warning。
+
+### 07:42 — 改进 PDF 自适应缩放与拖动
+
+- 完成：PDF 与转换后的 PPTX 预览默认按容器“适合页面”，支持“适合宽度”“实际大小”和 10% 步进的自定义缩放；新增手形拖动与文字选择模式切换，支持鼠标/触控笔 Pointer 平移、按住空格临时拖动、左右方向键翻页，并在切换文档时恢复合理默认状态。
+- 文件：`frontend/src/components/PdfPreview.tsx`、`frontend/src/components/PdfPreview.test.tsx`、`WORKLOG.md`；未修改 PDF API、索引、数据库、依赖、DOCX/XLSX 渲染或其他并行前端文件。
+- 验证：在最新 `origin/master` 隔离工作树中，PDF 预览专项 Vitest 5/5 通过；前端全量 Vitest 30 个文件、148/148 项通过；TypeScript project build 与 Vite production build 通过（2026 modules transformed）；目标文件 `git diff --check` 通过。构建保留既有 CSS 语法、主包大于 500 kB 与 React Router future warning。
+- 待办/风险：功能处于待用户验收；尚未使用真实纵向/横向 PDF 在浏览器中验证容器自适应、放大后四向拖动、文字复制和窄屏工具栏。回滚只需恢复 `PdfPreview.tsx` 并移除对应专项测试。
+
+### 07:51 — 发布 PDF 预览改进到 master
+
+- 完成：从最新 `origin/master` 建立隔离工作树，仅整合 PDF 预览实现、专项测试及对应工作日志，以普通 fast-forward 将功能提交 `787860f813ecfebdb0f259fe14677c7022c44aa9` 推送到 `origin/master`；未使用强推，也未提交主工作区的其他并行修改或 `.codex-worktrees/`。
+- 文件：`frontend/src/components/PdfPreview.tsx`、`frontend/src/components/PdfPreview.test.tsx`、`WORKLOG.md`。
+- 验证：推送前 PDF 专项 Vitest 5/5、前端全量 Vitest 30 个文件 148/148、TypeScript project build、Vite production build 与 `git diff --check` 全部通过；推送后远端 `master` 与功能提交均为 `787860f813ecfebdb0f259fe14677c7022c44aa9`。
+- 待办/风险：仍待真实纵向/横向 PDF 的浏览器视觉验收；依赖安装审计报告锁文件既有 10 项风险，本轮未运行自动修复、未修改依赖、API、数据、RAG 或部署配置。
+### 07:55 — 对齐管理页与对话页侧栏
+
+- 完成：移除管理页独立顶部栏，将“品成 BIM 知识库 / 管理工作台”并入左侧栏品牌区；桌面侧栏与对话页统一为 17rem 展开、4rem 收起及同款宽度过渡，收起时保留导航状态点和品牌展开入口；既有主题菜单与管理员菜单保留在侧栏底部并适配收起状态。
+- 文件：`frontend/src/pages/admin/AdminLayout.tsx`、`frontend/src/pages/admin/AdminLayout.test.tsx`、`WORKLOG.md`。
+- 验证：管理布局专项 Vitest 5/5 通过；TypeScript 检查和 Vite production build 通过（2026 modules transformed）；`git diff --check` 通过。构建保留既有 CSS 语法与主包大于 500 kB 警告。
+- 待办/风险：功能处于待用户验收；尚未在真实管理员登录态下完成桌面展开/收起及窄屏视觉验收。本轮未修改 API、权限、数据、依赖或部署。
+
+### 08:23 — 统一资源预览弹窗动画
+
+- 完成：为 PDF、PPTX、DOCX、XLSX 和视频共用的资源预览外壳增加统一开合动画；遮罩平滑淡入淡出，移动端面板轻微上移进入，桌面端从右侧轻滑进入，关闭时反向退出，并在系统启用“减少动态效果”时自动取消过渡。
+- 文件：`frontend/src/components/ResourcePreviewShell.tsx`、`frontend/src/components/ResourcePreviewShell.test.tsx`、`frontend/src/styles/index.css`、`WORKLOG.md`；未修改各预览器、API、数据、依赖或部署配置。
+- 验证：在最新 `origin/master` 隔离工作树中，资源预览外壳专项 Vitest 1/1 通过；前端全量 Vitest 31 个文件、150/150 项通过；TypeScript project build 与 Vite production build 通过（2026 modules transformed）；目标文件 `git diff --check` 通过。构建保留既有 CSS 语法、主包大于 500 kB 与 React Router future warning。
+- 待办/风险：功能处于待用户验收；尚未在真实文档和视频预览中完成桌面、窄屏及“减少动态效果”视觉验收。回滚仅需恢复共享外壳和对应样式并移除专项测试。
+
+### 08:20 — 补全提问版本切换并优化编辑框
+
+- 完成：扩大提问气泡内编辑框的宽度、高度和内边距；编辑过的提问在操作栏最右侧显示左右切换与 `1 / 2` 版本计数，切换旧问题时同步显示其对应回答，切回当前问题时恢复当前回答。浏览旧问题版本时隐藏编辑入口并禁用回答重新生成，避免展示版本与后端活动版本错位。
+- 文件：`frontend/src/components/ChatLayout.tsx`、`frontend/src/components/Message.tsx`、`frontend/src/components/MessageList.tsx`、`frontend/src/hooks/useChat.ts`、`frontend/src/types.ts`、相关前端测试、`project-docs/features/chat-runtime.md`、`WORKLOG.md`。
+- 验证：问题气泡、消息列表和会话状态专项 Vitest 24/24 项通过；前端全量 Vitest 30 个文件、150/150 项通过；TypeScript 检查、Vite production build（2026 modules transformed）和 `git diff --check` 通过。构建保留既有 CSS 语法、主包大于 500 kB 与 React Router future warning。
+- 待办/风险：功能待用户在真实登录会话中确认长文本编辑框和问题/回答同步切换的视觉效果；未修改 API、数据库、RAG、依赖或部署配置。
+
+### 08:24 — 增加 R3 依赖失败自诊断
+
+- 完成：按获批 R3 方案在统一资格脚本内增加依赖失败阶段跟踪和严格脱敏诊断；只输出固定诊断种类、固定阶段及受限 ASCII requirement，明确排除原始日志、URL、代理、Token、绝对路径、冲突行和完整 freeze。workflow 只把该 JSON 与既有 verdict 一起上传并显示安全字段，不新增一次性诊断 workflow。
+- 文件：`.github/workflows/qualify-faster-whisper-production.yml`、`scripts/qualify-faster-whisper-production.ps1`、`tests/test_asr_deployment_static.py`、`project-docs/plans/faster-whisper-r3-unified-qualification.md`、`TODO.md`、`WORKLOG.md`。
+- 验证：PowerShell AST、隔离脱敏器的 binary/version/network/unknown 正负自测、workflow YAML、部署静态测试 25/25 和 `git diff --check` 通过。
+- 远端进展：PR #47 的 7 项 CI 全部通过并合并为 `cd56f4a0e116a28ef12575748e25c25ffab628f2`；资格 run `30963495106` 仍失败关闭且 verdict 确认服务与 admission 未变化，但 PowerShell 5.1 在空日志集合上拒绝 mandatory array，导致附加诊断文件未生成。同范围修复允许空集合、以内置 `evidence_insufficient` 回退，并优先写 runner artifact 路径。
+- 待办/风险：空集合兼容修复尚待独立 PR、CI、合并和相同参数重试；不得修改依赖、production freeze、服务或 Profile admission。
+
 ### 08:27 — 统一来源核验列表图标风格
 
 - 完成：将来源核验列表中的文档、表格等来源类型图标统一为视频图标采用的 24px 圆角浅蓝底容器与强调色线框，使同一列表内的类型图标尺寸、底色和视觉层级一致；未改动来源编号、类型判断、文案或交互。
-- 文件：`frontend/src/components/SourceWorkspace.tsx`、`WORKLOG.md`；保留目标文件与仓库内其他并行未提交修改。
+- 文件：`frontend/src/components/SourceWorkspace.tsx`、`WORKLOG.md`；保留目标文件及仓库内其他并行未提交修改。
 - 验证：来源工作区专项 Vitest 2/2 通过；TypeScript project build 与 Vite production build 通过（1965 modules transformed）；目标文件 `git diff --check` 通过。构建保留既有 CSS 语法与主包大于 500 kB 警告。
 - 待办/风险：功能处于待用户验收；尚未在真实混合来源列表中进行视觉验收。本轮未修改 API、数据、依赖或部署，回滚仅需恢复该图标容器样式。
+
+### 09:06 — 发布资源预览动画到 master
+
+- 完成：从最新 `origin/master` 建立隔离工作树，仅整合共享资源预览外壳、动画样式、专项测试及对应日志，以普通 fast-forward 将功能提交 `b99c48b861467d3ca20ce690deb3c39338cae17e` 推送到 `origin/master`；未使用强推，也未提交主工作区的其他并行修改或 `.codex-worktrees/`。
+- 文件：`frontend/src/components/ResourcePreviewShell.tsx`、`frontend/src/components/ResourcePreviewShell.test.tsx`、`frontend/src/styles/index.css`、`WORKLOG.md`。
+- 验证：推送前资源预览动画专项 Vitest 1/1、前端全量 Vitest 31 个文件 150/150、TypeScript project build、Vite production build 与 `git diff --check` 全部通过；推送后远端 `master` 与功能提交均为 `b99c48b861467d3ca20ce690deb3c39338cae17e`。
+- 待办/风险：仍待真实文档和视频预览的桌面、窄屏及“减少动态效果”视觉验收；依赖安装审计报告锁文件既有 10 项风险，本轮未运行自动修复、未修改依赖、API、数据或部署配置。
+
+### 09:08 — 将文档查看入口移至定位区域
+
+- 完成：PDF、DOCX、XLSX 和 PPTX 来源的“查看”按钮现位于定位信息右侧，与视频来源的“播放”入口保持一致；点击继续复用既有资源预览和页码、工作表/单元格、幻灯片及段落定位参数，详情底部不再重复显示“打开完整资料”，仅保留“复制来源”。
+- 文件：`frontend/src/components/SourceWorkspace.tsx`、`frontend/src/components/SourceWorkspace.test.tsx`、`WORKLOG.md`。
+- 验证：来源工作区专项 Vitest 3/3 通过；TypeScript project build 与 Vite production build 通过（2026 modules transformed）；`git diff --check` 通过。构建保留既有 CSS 语法和主包大于 500 kB 警告。
+- 待办/风险：功能处于待用户验收；尚未使用真实 PDF、DOCX、XLSX、PPTX 来源逐一验证定位预览和窄屏布局。本轮未修改 API、预览数据契约、依赖、数据或部署。
+
+### 09:10 — 调查 Qwen3-ASR 并编制独立 R2/R3 计划
+
+- 完成：在专用 worktree 中只读核对现有 `TranscriptionProvider`、`ProviderCandidate`、pipeline、normalizer、Canonical、Profile、ASR service 与同类资格方案，并依据 Qwen、Hugging Face、PyPI、PyTorch 和 vLLM 官方资料编制独立 R2/R3 计划。计划固定 Windows 首轮候选为 Qwen3-ASR-0.6B、ForcedAligner-0.6B 与 Transformers backend，排除原生 Windows vLLM，要求独立 Qwen engine 环境、Profile `experimental + disabled`、双模型/许可证/依赖/CUDA/质量/资源门禁，并把 R3A 依赖资格与 R3B 模型推理分开审批。
+- 文件：新增 `project-docs/plans/qwen3-asr-r2-r3-integration.md`；更新 `WORKLOG.md`。未修改业务代码、依赖、配置、workflow、数据库、Qdrant、生产服务或 Profile admission。
+- 验证：核对计划覆盖目标、现状依据、拟修改与明确不修改文件、实施步骤、测试、风险、兼容性、回滚和分阶段审批；未安装依赖、未下载模型、未启动服务、未运行推理、未连接或修改生产状态。
+- 待办/风险：Qwen 完整 Transformers/ForcedAligner 栈在 Windows、RTX 5060 Ti、`torch==2.7.0+cu128` 与现有依赖组合上的可用性尚未实机证明；模型 immutable revision 必须在 R2 实施前只读冻结。R2、R3A、R3B 均待用户分别批准。
+
+### 09:26 — 修复 R3 原生 stderr 捕获边界
+
+- 完成：统一资格脚本在执行固定原生命令期间临时使用 `ErrorActionPreference=Continue`，先完整捕获 stdout、stderr 和退出码，再恢复调用方错误策略并按非零退出码失败关闭；增加固定非敏感 stderr 与退出码 23 的运行前自测，避免 Windows PowerShell 5.1 在日志落盘前将原生 stderr 提升为终止错误。
+- 文件：`scripts/qualify-faster-whisper-production.ps1`、`tests/test_asr_deployment_static.py`、`project-docs/plans/faster-whisper-r3-unified-qualification.md`、`TODO.md`、`WORKLOG.md`。
+- 验证：内部 wheel、部署边界、模型准备和 faster-whisper 资格定向测试 84/84 通过；PowerShell AST、当前 PowerShell 与 Windows PowerShell 5.1 合成 stderr/非零退出回归及 `git diff --check` 通过。
+- 待办/风险：尚待独立 PR、远端 CI、合并及一次固定参数生产资格重跑；未修改任何依赖、production freeze、生产服务、防火墙、Ubuntu、数据库、Qdrant、模型或 Profile admission。
+### 09:26 — 完成 Qwen3-ASR R2 离线接入
+
+- 完成：按获批 R2 方案冻结官方 Qwen3-ASR-0.6B 与 ForcedAligner-0.6B revision，新增严格可信配置、`experimental + disabled` application Profile、第三个 Remote Provider factory、双模型 Manifest 校验、可选 ASR service 配置和 lazy Qwen engine adapter。引擎只输出既有 `EngineChunkCandidate`，应用结果继续走 `TranscriptionProvider → ProviderCandidate → pipeline → normalizer → Canonical → formatter/parser`；缺少双模型缓存、Qwen 依赖、CUDA 或 BF16 时仅 Qwen Profile fail closed。依据现有 slug 契约将计划中的非法 service ID `qwen3-asr-0.6b-aligner-v1` 修正为 `qwen3-asr-06b-aligner-v1`。
+- 文件：新增 `asr_service/engines/qwen3_asr.py`、`asr_service/requirements-qwen3-asr.txt`、两个 Qwen Manifest 示例、Qwen adapter 测试和 `project-docs/plans/qwen3-asr-r2-r3-integration.md`；最小修改可信 Profile/catalog、Remote Provider/应用组装、ASR service config/app/model cache/engine contract、相关测试、功能文档和 `TODO.md`。未修改 Candidate、Canonical、normalizer、pipeline、formatter、parser、数据库、根依赖、生产安装入口、部署 workflow、Qdrant 或 Profile admission。
+- 验证：Qwen/Profile/Remote Provider/模型缓存/静态边界专项测试 134/134 通过；当前环境可收集的更广 ASR/转写回归 437 项通过，另有 2 项失败分别为本分支基线既有 `src/indexing_pipeline.py` 保护哈希不一致和本机缺 FastAPI；完整收集另有 7 个文件因既有 FastAPI/Qdrant 依赖缺失失败。全量 Python `compileall` 与 `git diff --check` 通过。未安装依赖、未下载模型、未启动服务、未运行推理或修改生产状态。
+- 待办/风险：需由干净 CI 执行 `asr_service/tests/test_api_contract.py`、`test_auth.py`、Phase 4/5 API/worker/publication 测试并复核基线保护哈希；Qwen Windows/CUDA/依赖/许可证/模型/质量/资源资格仍未验证。R3A、R3B 保持未授权，Profile 继续 disabled。
+
+### 09:30 — 合并 Qwen3-ASR 统一 R3 方案
+
+- 完成：将 Qwen3-ASR 原 R3A 依赖资格与 R3B 双模型/真实推理改为一次审批、一个仓库交付、一个默认关闭的 `production-asr` 手动 workflow 和一个最终 PASS/FAIL 报告。依赖、许可证、CUDA、双模型 Manifest、隔离 18300、8 样本全链路和资源/末态仍按顺序设为自动停止门禁；前置门禁通过后无需中途再次审批，失败不得换模型、依赖、参数、样本或阈值。
+- 文件：更新 `project-docs/plans/qwen3-asr-r2-r3-integration.md`、`TODO.md`、`WORKLOG.md`；未修改 R2 代码、依赖、workflow、生产配置或外部状态。
+- 验证：检查统一方案包含固定目标环境/目录、拟修改文件、workflow 输入与 Secret 边界、端到端步骤、质量和资源阈值、停止条件、证据、完成标准、风险、回滚、明确不做内容及一次性审批语句；`git diff --check` 待最终执行。
+- 待办/风险：统一 R3 仍未获批准；本轮未创建 workflow、安装依赖、下载模型、启动服务、运行 CUDA 或连接生产主机。R2 Profile 继续 disabled。
+
+### 09:50 — 整理来源图标独立合并分支
+
+- 完成：从最新 `origin/master` 创建独立分支，仅整合来源核验列表图标统一样式；保留 master 已有的视频标题清理、来源定位和预览交互，不带入旧功能分支的其他提交。
+- 文件：`frontend/src/components/SourceWorkspace.tsx`、`WORKLOG.md`。
+- 验证：来源工作区专项 Vitest 3/3 通过；按最新锁文件安装隔离依赖后，TypeScript project build 与 Vite production build 通过（2026 modules transformed）；`git diff --check` 通过。首次复用旧依赖目录时因缺少锁文件已声明的 Radix Dialog 无法构建，安装隔离依赖后已消除；构建保留既有 CSS 语法与主包大于 500 kB 警告。
+- 交付：独立草稿 PR #51 已创建，目标为 `master`，GitHub 判定可合并；CI 启动后迁移配置检查已通过，其余检查仍在运行。旧 PR #50 未修改或关闭。
+- 待办/风险：尚待 CI 全部完成及人工合并；依赖审计报告既有 10 项风险，本轮未运行自动修复，未修改依赖声明、API、数据契约、数据或部署配置。
+
+### 10:00 — 实施 R3 依赖诊断 v2
+
+- 完成：将依赖失败 artifact 升级为严格 v2 信封，区分阶段内操作、失败来源、原生命令退出码和捕获行数；补充 requirements、constraint、磁盘、权限、代理及进程启动的固定脱敏类别，并只在 `pip_download` 明确非零且普通解析不足时执行一次同约束、binary-only、无缓存的隔离 dry-run fallback。workflow summary 只展示固定安全字段。
+- 文件：`.github/workflows/qualify-faster-whisper-production.yml`、`scripts/qualify-faster-whisper-production.ps1`、`tests/test_asr_deployment_static.py`、`project-docs/plans/faster-whisper-r3-unified-qualification.md`、`TODO.md`、`WORKLOG.md`。
+- 验证：内部 wheel、部署边界、模型准备和 faster-whisper 资格定向测试 84/84 通过；PowerShell AST、Windows PowerShell 5.1 结构化命令证据/全部脱敏类别/v2 严格字段集合及无网络模拟 fallback 测试通过；`git diff --check` 通过。
+- 待办/风险：尚待 scoped review、独立 PR、远端 CI、合并和一次固定参数资格重跑；fallback 不安装包，但 pip dry-run 可能从既有索引下载解析所需的临时依赖文件。未修改依赖、production freeze、生产 venv、服务、防火墙、Ubuntu、数据库、Qdrant、模型或 Profile admission。
+### 10:11 — 实现 Qwen3-ASR 统一 R3 资格工具
+
+- 完成：按获批统一 R3 方案新增默认关闭、完整 master SHA 绑定的 `production-asr` 手动 workflow；新增 Windows 隔离总编排、固定双模型准备、8 个非敏感样本生成、业务全链路质量评测和失败关闭测试。编排固定 run-local venv/wheelhouse、0.6B ASR 与 0.6B ForcedAligner revision、loopback 18300、CUDA BF16、14/8 GiB 显存门禁，并保留 BGE 空闲、8100/8200 健康、Profile disabled、Scheduled Task/防火墙不变和精确 PID 清理检查。
+- 文件：新增 `.github/workflows/qualify-qwen3-asr-production.yml`、`scripts/qualify-qwen3-asr-production.ps1`、`scripts/prepare_qwen3_asr_models.py`、`scripts/run_qwen3_asr_qualification.py`、`scripts/prepare-qwen3-asr-qualification-samples.ps1`、资格 Manifest 示例与专项测试；更新部署静态测试、转录功能文档和 `TODO.md`。
+- 验证：两个 PowerShell 脚本 AST、Python `compileall`、`git diff --check` 通过；本机系统 Python 缺少 pytest 和 PyYAML，遵守约束未安装依赖，完整单元测试与 workflow YAML 解析交由干净 CI。未安装 Qwen 依赖、未下载模型、未启动服务或访问 production-asr。
+- 待办/风险：仓库工具仍待 PR/CI；只有合并后绑定完整 master SHA 的唯一 workflow 全部门禁通过，才能记录资格 PASS。当前 Profile 继续 disabled，生产状态未修改。
+
+### 10:41 — 修复 Qwen3-ASR PR Profile 契约断言
+
+- 完成：根据 PR #53 首轮 CI 的唯一失败，将 Phase 4 application runtime 测试从固定两个远端 Profile/Provider 更新为当前三个候选，补充 `qwen3-asr-zh-experimental-v1` 与 `qwen3-asr`；未修改运行时代码、Profile admission、资格参数或生产配置。
+- 文件：`tests/test_transcription_phase4_api.py`、`WORKLOG.md`。
+- 验证：首轮 CI 共 317/318 项转录契约测试通过，失败仅为旧列表少一个 Qwen 候选；修复后 Python 编译与 `git diff --check` 通过。本机仍未安装 pytest，完整回归交由 PR CI。
+- 待办/风险：待 PR #53 新一轮 CI 全绿后才可合并；未触发 production-asr workflow，未访问或修改生产状态。
+
+### 10:44 — 发布视频批量上传转写向导
+
+- 完成：在最新 `origin/master` 的独立整合工作树中加入三步视频批量上传向导，支持拖放/多选 MP4、自动与人工转写分流、批量应用或逐项覆盖服务端白名单 Profile、逐视频绑定和编辑 Markdown、最多两个并发上传及单项失败保留重试；媒体列表分别展示媒体、转录、审核、发布和索引状态，并保留 master 已有的快捷筛选、任务终态刷新和转写版本工作台。
+- 文件：`frontend/src/pages/admin/AdminMediaPage.tsx`、`frontend/src/pages/admin/AdminMediaPage.test.tsx`、`project-docs/features/transcript-pipeline.md`、`WORKLOG.md`；复用 master 已有的媒体状态摘要 API 和类型，不修改 Provider、Canonical、ASR 服务、模型、依赖、数据库结构或部署配置。
+- 验证：最新 master 整合基线的媒体页与 API client 专项测试 18/18、前端全量测试 31 个文件 148/148 通过；TypeScript project build 与 Vite production build 通过（2026 modules transformed）；`git diff --check` 通过。构建保留既有 CSS minify、主包大于 500 kB 和 React Router future warning。本地后端环境缺少 FastAPI，后端 API 测试由既有 master 覆盖并留待 CI 复跑。
+- 待办/风险：功能仍需真实管理员登录态下使用多视频、人工 Markdown 与可用 ASR Profile 验收；未运行真实 ASR、Qdrant、生产数据库或部署。
+
+### 11:13 — 实施 R3 离线 resolver 证据提取
+
+- 完成：将既有手动依赖诊断 workflow 收敛为默认关闭、完整 master SHA 绑定的一次离线提取通道；新增纯标准库解析器，只读取固定 run `30968517582` 的两个 resolver 日志和 v2 diagnostic，严格校验来源身份、文件大小/编码/路径及 Schema，并只输出归一化候选、blocker、错误族计数和输入文件哈希。
+- 文件：新增 `scripts/extract_faster_whisper_resolver_evidence.py`、`tests/test_faster_whisper_resolver_evidence.py`；更新 `.github/workflows/diagnose-faster-whisper-dependencies-production.yml`、`tests/test_asr_deployment_static.py`、`project-docs/plans/faster-whisper-r3-unified-qualification.md`、`TODO.md`、`WORKLOG.md`。旧 replay 诊断脚本保留但不再由 workflow 调用。
+- 验证：离线解析器与部署静态定向测试首轮 39/40 通过，唯一失败暴露非法 requirement 尾部被误当作无约束，已收紧为解析失败并计入未解析证据；最终专项回归、PR 与远端 CI 尚待执行。
+- 待办/风险：合并后仅以新完整 master SHA 执行一次离线提取并只读取严格脱敏 JSON artifact；本阶段不运行 pip、不访问网络、不读取或上传原始日志、不修改依赖、生产服务、防火墙、Ubuntu、数据库、Qdrant、模型或 Profile admission。
+
+### 11:22 — 修复 resolver 冲突误判
+
+- 完成：针对首次离线提取将无版本 `funasr → oss2` 依赖误判为版本冲突的问题，新增有限、失败关闭的版本兼容判定；只有 production constraint 是精确数字 pin 且明确违反 owner 的数字比较条件时才形成 `version_constraint_conflict`，缺失约束或无法唯一判断时只保留候选并返回证据不完整。
+- 文件：更新 `scripts/extract_faster_whisper_resolver_evidence.py`、`tests/test_faster_whisper_resolver_evidence.py`、`project-docs/plans/faster-whisper-r3-unified-qualification.md`、`TODO.md`、`WORKLOG.md`。
+- 验证：补充真实 `oss2` 防误判、明确冲突、明确相容、缺失约束和不支持格式测试；最终专项回归、PR 和 CI 待执行。
+- 待办/风险：合并后只再执行一次固定离线提取并读取脱敏 JSON；不运行 pip、不读取原始日志、不修改依赖、production freeze、生产服务或 Profile admission。
+
+### 12:07 — 实施 faster-whisper R3 完整闭环
+
+- 完成：依据修复后的离线证据和固定 PyPI release metadata，将真实 blocker 收敛为 `oss2==2.19.1` 仅有 sdist、无法通过全局 binary-only；沿用 jieba 的受控 wheel 安全模式新增固定 oss2 构建器，并将统一资格 workflow 扩展为一次构建、传递和逐包复验两个内部 wheel。Windows 资格脚本要求两个受控 wheel 都进入 wheelhouse，Manifest 升级为 v2 并记录两个来源 Manifest 哈希。
+- 文件：新增 `scripts/build_internal_oss2_wheel.py`、`tests/test_asr_internal_oss2_wheel.py`；更新 `.github/workflows/qualify-faster-whisper-production.yml`、`scripts/qualify-faster-whisper-production.ps1`、`tests/test_asr_deployment_static.py`、R3 计划、`TODO.md`、`WORKLOG.md`。
+- 验证：内部 wheel、部署边界、离线证据和 faster-whisper 引擎/资格专项测试 100/100 通过；新增 oss2 固定 URL、大小、SHA-256、严格 Manifest、篡改拒绝测试；Python 编译、PowerShell AST 和 `git diff --check` 通过。
+- 待办/风险：尚待 scoped review、PR、完整 CI、合并及一次统一生产资格 workflow。未放宽 binary-only、未修改 production freeze、生产 venv、服务、防火墙、Ubuntu、数据库、Qdrant、模型或 Profile admission。
+
+### 12:31 — 闭环 antlr4 binary-only blocker
+
+- 完成：统一资格 run `30974457008` 证明 jieba/oss2 受控 wheel 构建和 Windows 复验成功，下一依赖门禁为 `antlr4-python3-runtime`；核对固定 4.9.3 release 仅有 sdist 后，将其纳入同一固定来源、双重确定性构建、pure-Python wheel 和严格 Manifest 通道，Windows 资格要求三个内部 wheel 全部进入 wheelhouse。
+- 文件：新增 `scripts/build_internal_antlr4_wheel.py`、`tests/test_asr_internal_antlr4_wheel.py`；更新统一资格 workflow、PowerShell 编排、部署静态测试、R3 计划和 `WORKLOG.md`。
+- 验证：三个内部 wheel、部署边界及 faster-whisper 引擎/资格专项测试 84/84 通过；Python 编译、PowerShell AST 与 `git diff --check` 通过。
+- 待办/风险：待同范围 PR/CI/合并后继续统一资格；不修改 production freeze、生产 venv、服务、防火墙、Ubuntu、数据库、Qdrant、模型或 Profile admission。
+
+### 21:12 — 闭环 crcmod pure-Python blocker
+
+- 完成：资格 run `31008453083` 将前三个受控 wheel 后的唯一新门禁定位为 sdist-only `crcmod 1.7`；按其官方回退能力显式禁用 C 编译器，构建并只接受确定性 pure-Python `none-any` wheel，纳入四包统一 Manifest 与 wheelhouse 校验。
+- 文件：新增 `scripts/build_internal_crcmod_wheel.py`、`tests/test_asr_internal_crcmod_wheel.py`；更新统一资格 workflow、PowerShell 编排、部署静态测试、R3 计划和 `WORKLOG.md`。
+- 验证：四个内部 wheel及 faster-whisper 资格专项测试 87/87 通过；Python 编译、PowerShell AST 和 `git diff --check` 通过。
+- 待办/风险：待 PR/CI/合并后继续最终资格；生产服务和 Profile admission 保持不变。
+
+### 21:22 — 修正 faster-whisper 资格依赖范围
+
+- 完成：确认连续 legacy sdist 门禁来自资格脚本重复请求整套 FunASR 生产 requirements，而非 faster-whisper 新增依赖。隔离资格现只安装固定 torch/torchaudio 与 faster-whisper requirements，继续以完整 production freeze 约束所有共享包；真实生产 venv 仍先独立 `pip check`。受控 legacy wheel 仅保留为兼容性参考，不再要求进入新引擎 wheelhouse。
+- 文件：更新 `scripts/qualify-faster-whisper-production.ps1`、`tests/test_asr_deployment_static.py`、R3 计划和 `WORKLOG.md`。
+- 验证：部署边界与 faster-whisper 引擎/资格专项测试 67/67 通过；PowerShell AST 与 `git diff --check` 通过。
+- 待办/风险：待 PR/CI/合并后执行最终统一资格；不修改 production freeze、生产 venv、服务或 Profile admission。
+### 11:22 — 实现 Qwen3-ASR 依赖失败诊断
+
+- 完成：按单独获批 R3 诊断方案新增默认关闭的 Qwen dependency workflow 和 Windows 诊断脚本，固定读取 source run `30970277613`、source SHA `86b69db6831e3cd201436a26bbe836229bf419bd`、production freeze、Qwen/Windows requirements 与受控 jieba wheel；既有日志证据不足时只执行一次 run-local、binary-only、no-cache 的 resolver dry-run。v2 artifact 只包含固定 operation/failure origin、退出码、捕获行数、诊断种类、ASCII requirement、文件 hash 和清理状态，不包含原始冲突行或敏感上下文。
+- 文件：新增 `.github/workflows/diagnose-qwen3-asr-dependencies-production.yml`、`scripts/diagnose-qwen3-asr-dependencies.ps1`；更新部署静态测试、Qwen 方案与 `TODO.md`。
+- 验证：PowerShell AST 与 `git diff --check` 已通过；新增静态断言覆盖完整 master SHA、source identity、受控 wheel、dry-run 参数、v2 严格字段、venv 清理以及不含模型/CUDA/服务/防火墙/任务操作。完整 pytest 与 workflow YAML 解析待远端 CI。
+- 待办/风险：尚待独立 PR、CI、合并和一次绑定新 master SHA 的诊断 workflow；诊断结果只用于下一份 R3 方案，不授权修改依赖、production freeze、binary-only、服务或 Profile admission。
+
+### 11:49 — 完成 WhisperX R2/R3 隔离实现并适配最新 master
+
+- 完成：在独立 `codex/whisperx-r2-r3` worktree 中实现 WhisperX experimental Profile、严格远程配置、应用 remote Provider 工厂注册、服务端 lazy-import 引擎和 ASR/中文对齐双模型缓存门禁；模型固定为 `Systran/faster-whisper-large-v3@53ecf83a5bedc5597eb8c8b34eac29e5345520ff`，Profile admission 保持 disabled，强制人工审核且禁止自动发布/索引。新增仅手动触发、固定 master SHA 与 `production-asr` environment 的 Windows runner workflow，在独立目录安装 Python 3.11/cu128/WhisperX、生成非敏感合成中文 WAV，并验证 Engine → ProviderCandidate → normalizer → Canonical；不注册服务、不修改任务/防火墙、不接入业务流量。将前期本地 `f75ee7ce` 实现合入最新 `origin/master`，保留同期 Qwen3-ASR Profile、引擎、缓存和测试。
+- 文件：`src/transcription/profile.py`、`src/transcription/profile_catalog.py`、`src/transcription/remote_provider.py`、`api/transcription_runtime.py`、`api/routes_transcription.py`、`asr_service/app.py`、`asr_service/config.py`、`asr_service/engine_protocol.py`、`asr_service/model_cache.py`、`asr_service/engines/whisperx.py`、`asr_service/requirements-whisperx.txt`、`.github/workflows/smoke-whisperx-production.yml`、`scripts/run_whisperx_cuda_smoke.py`、`scripts/smoke-whisperx-production.ps1`、相关测试、执行方案、功能文档与 `.gitignore`。
+- 验证：最新 master 整合基线下 WhisperX/Profile/service/static 专项 85/85 通过；完整转写与 ASR service 离线回归 506/506 通过；PR #57 的 7 项 CI 全部通过并合并为 `c2d06781f4c30979394872cbaa99191b816e1a68`。首次生产 run `30973576282` 在安装前因 Windows PowerShell 5.1 无 BOM UTF-8 中文源码解析失败而关闭；ASCII Base64 修复经 PR #58 的 7 项 CI 全绿并合并为 `c06ef8d2d65578f31677c12a66bf0022bc57054a`。run `30973830288` 成功安装 `torch 2.8.0+cu128`、WhisperX 3.8.6 并通过依赖检查，随后在 Systran 模型下载因 Hugging Face SSL EOF 失败；run `30975273916` 复现代理链路对默认并发 HEAD/GET 的 SSL EOF。两套模型下载固定为单连接后经 PR #62 的 7 项 CI 全绿并合并；run `30975752241` 完整下载 ASR 与中文对齐模型，随后 NLTK `punkt_tab` 的 GitHub Raw 下载被现有代理策略拒绝。已改用 NLTK 自带 API 在隔离目录生成仅供单句 smoke 的默认 Punkt 参数并显式标记 `generated-default-smoke-only`，无网络 Punkt/runner/engine 专项 7/7 通过；PR #64 的 7 项 CI 全绿并合并为 `f491389058cf5779639a3f23da3f891c26ef5adb`。production run `30977609720` 命中双模型缓存并完成离线 Punkt 准备，随后在加载现有 Provider 契约前因隔离 venv 缺少 `httpx` 关闭，未加载模型或执行 CUDA 推理。`httpx>=0.27.0` 修复经 PR #65 的 7 项 CI 全绿并合并为 `77a359a84d7f7a83a972d8dc5cfcd21391cad349`；run `30978382765` 通过依赖、双模型缓存、CUDA/FP16 与模型初始化后被引擎关闭为 `invalid_provider_output`。脱敏阶段诊断经 PR #66 的 7 项 CI 全绿并合并为 `b6d3da04d3864b01f66388458204ef8f82a53499`；run `30979031926` 明确给出 `stage=decode-audio; type=TypeError`，确认 WhisperX 3.8.6 路径型 `load_audio` 不接受现有字节契约。ffmpeg 标准输入修复经 PR #67 的 7 项 CI 全绿并合并为 `85823cb272727fdb90ceb3e59d50039f2aaf2d4e`；run `30979890529` 越过 `BytesIO` 类型问题后给出 `stage=decode-audio; type=RuntimeError`，并结合 TorchCodec 警告确认 Windows runner 无可用 FFmpeg。现已为 PCM WAV 增加纯内存标准库解码、单声道化和 16 kHz 重采样，非 WAV 保留 ffmpeg 失败关闭后备路径；不创建临时音频文件、不安装 FFmpeg。
+- 待办/风险：PCM WAV 内存解码修复尚待同范围 PR/CI/合并和 production-asr 重跑；在 workflow 成功前不能认定 WhisperX 可用。runner 将精确校验 `torch 2.8.0+cu128`/CUDA 12.8、CTranslate2 FP16、双模型逐文件 SHA-256 和系统控制面末态；任一门禁失败即关闭。该默认 Punkt 参数只适用于本次单句合成冒烟，不能作为真实业务文本分句资格证据；Profile admission 继续 disabled。先前本机 PyPI 安装得到 `torch 2.8.0+cpu`，本机 cu128 大 wheel 下载停滞后已终止；未在开发机下载模型或执行推理。未启动服务、未接触生产数据/数据库/Qdrant，也未修改系统 CUDA、PATH、代理信任或现有 FunASR/BGE 环境。
+
+### 12:08 — 实施 Qwen3-ASR R3 离线证据提取
+
+- 完成：将 Qwen3-ASR 依赖诊断 workflow 收敛为固定 Python 3.11 的纯离线提取通道，严格绑定诊断 run `30972780438`、诊断 SHA、原资格 run/SHA、v2 diagnostic 和三个固定本地文件；复用已审查的失败关闭解析逻辑，只输出规范化候选/blocker、错误族计数及文件哈希，不输出原始日志。无版本 `funasr → oss2` 依赖不会被误判为版本冲突。
+- 文件：新增 `scripts/extract_qwen3_asr_resolver_evidence.py`、`tests/test_qwen3_asr_resolver_evidence.py`；更新 `.github/workflows/diagnose-qwen3-asr-dependencies-production.yml`、`tests/test_asr_deployment_static.py`、`project-docs/plans/qwen3-asr-r2-r3-integration.md`、`TODO.md`、`WORKLOG.md`。旧 dry-run 诊断脚本保留但 workflow 不再调用。
+- 验证：Python `compileall`、模块入口、`oss2` 防误判冒烟、离线能力禁用检查和 `git diff --check` 通过；本机没有项目 venv，系统 Python 未安装 pytest，遵守约束未安装依赖，完整专项测试交由远端 CI。
+- 待办/风险：尚待 PR、CI、合并及一次绑定完整 master SHA 的手动离线 workflow；不运行 pip、不读取或上传原始日志、不修改依赖、production freeze、模型、服务、现有 venv、Ubuntu、防火墙、数据库、Qdrant 或 Profile admission。
+
+### 12:09 — 实现视频同步转录面板
+
+- 完成：基于最新 `origin/master` 独立整合普通用户只读转录接口，优先返回当前已发布 Canonical/人工版本，并兼容无版本头的既有已索引人工稿；视频预览下方改为分段转录列表，支持进度同步高亮、点击跳转、自动跟随、用户滚动暂停跟随与一键恢复，同时移除下方重复播放/静音按钮。
+- 文件：`api/main.py`、`api/routes_media_transcript.py`、`api/schemas.py`、`frontend/src/api/client.ts`、`frontend/src/types.ts`、`frontend/src/components/VideoPlayerDrawer.tsx`、`frontend/src/components/TranscriptPanel.tsx`、`frontend/src/components/TranscriptPanel.test.tsx`、`tests/test_media_transcript_route.py`、`project-docs/features/transcript-pipeline.md`、`WORKLOG.md`；未修改媒体流门禁、数据库 Schema、ASR、审核发布、RAG 索引、Qdrant、依赖或部署配置。
+- 验证：最新 master 独立整合基线下同步面板专项 Vitest 3/3、前端全量 32 个文件 151/151、TypeScript project build 与 Vite production build通过（2027 modules transformed），目标文件 Python compileall/AST 与 `git diff --check` 通过。原工作区本地 Python 环境缺少 FastAPI，后端路由 pytest 留待完整环境或 CI。
+- 待办/风险：仍需真实登录态与真实长视频视觉验收；重点确认 legacy 人工稿路径、正式自动稿、进度拖动与长稿滚动体验。无数据迁移，回滚可移除独立转录路由和面板并恢复播放器信息区。
+
+### 12:33 — 实施 Qwen3-ASR R3 精准分类增强
+
+- 完成：将 Qwen3-ASR 脱敏证据 Schema 升级为 v2，精确复现现有解析器的未消费行判定并严格对账；每条未解析记录只输出固定来源、行号、长度、SHA-256、字符类型计数和枚举类别，最终结论限制为六类且无法证明时失败关闭。workflow summary 只新增固定 classification 字段。
+- 文件：更新 `scripts/extract_qwen3_asr_resolver_evidence.py`、`tests/test_qwen3_asr_resolver_evidence.py`、`.github/workflows/diagnose-qwen3-asr-dependencies-production.yml`、`tests/test_asr_deployment_static.py`、`project-docs/plans/qwen3-asr-r2-r3-integration.md`、`TODO.md`、`WORKLOG.md`。
+- 验证：Python `compileall`、纯内存未解析行对账/分类/无原文冒烟和 `git diff --check` 通过；本机无项目 venv 且系统 Python 未安装 pytest，遵守约束未安装依赖，完整参数化脱敏测试交由 CI。
+- 待办/风险：尚待 PR、CI、合并及一次绑定完整 master SHA 的手动离线 workflow；若结论为 `still_unknown` 或 `resolver_context_only` 即停止。不运行 pip，不下载模型，不启动服务，不修改生产状态或 Profile admission。
+
+### 12:36 — 补全管理面板稳定滚动槽
+
+- 完成：复核确认根滚动元素原为 `overflow-y: visible`，导致仅设置 `scrollbar-gutter: stable` 时短页面不会实际预留滚动槽；现为管理面板根滚动元素补充 `overflow-y: auto`，使有无纵向滚动条的页面保持同一水平居中基准。
+- 文件：`frontend/src/styles/index.css`、`WORKLOG.md`；未带入原工作区的同步转录、来源面板及其他并行修改。
+- 验证：基于最新 `origin/master@d3d3f76`，管理布局专项 Vitest 5/5 通过；TypeScript project build 与 Vite production build 通过（2027 modules transformed）；目标差异与 `git diff --check` 通过。构建保留既有 CSS 语法与主包大于 500 kB 警告；依赖安装审计报告既有 10 项风险，本轮未运行自动修复。
+- 待办/风险：仍需真实管理员登录态下切换长短页面完成视觉验收；无 API、数据、依赖或部署变更，回滚可直接 revert 本提交。
+
+### 13:29 — 修正管理面板桌面滚动槽归属
+
+- 完成：根据用户截图确认桌面管理布局的实际滚动容器已是内部 `main`，根页面稳定槽因此在真实滚动条右侧额外留下空隙；现于桌面断点关闭根页面滚动与预留槽，并将稳定滚动槽绑定到 `main`，使滚动条回到视口最右侧，同时保持长短页面内容使用同一宽度基准；移动端继续使用根页面稳定槽。
+- 文件：`frontend/src/pages/admin/AdminLayout.tsx`、`frontend/src/pages/admin/AdminLayout.test.tsx`、`frontend/src/styles/index.css`、`WORKLOG.md`；未修改管理业务、API、数据、依赖或部署。
+- 验证：管理布局专项 Vitest 5/5 通过；TypeScript project build 与 Vite production build 通过（2027 modules transformed）；构建保留既有 CSS 语法与主包大于 500 kB 警告。
+- 待办/风险：仍需在真实管理员登录态下切换长短管理页面，确认桌面滚动条贴右且内容不再跳动；回滚可恢复根页面桌面稳定槽并移除 `main` 的滚动槽类。
+
+### 21:29 — 实现 WhisperX 统一资格验证
+
+- 完成：在独立 `codex/whisperx-qualification` worktree 中新增仅手动触发、完整 master SHA 绑定及 `production-asr` environment 保护的 WhisperX 资格 workflow；复用既有 8 个自制中文 BIM/噪声/编号/负控样本和统一质量阈值，通过现有 `TranscriptionProvider → ProviderCandidate → normalizer → Canonical` 契约执行两轮确定性、CER、术语/编号召回、时间戳、RTF 和显存门禁。Windows runner 固定 Python 3.11、`torch 2.8.0+cu128`、WhisperX 3.8.6、FP16、batch=1 和既有双模型 revision，并在模型准备前执行失败关闭的安装包许可证审计；运行目录、venv 和报告均与现有服务隔离，Profile admission 保持 disabled。
+- 文件：新增 `.github/workflows/qualify-whisperx-production.yml`、`scripts/qualify-whisperx-production.ps1`、`scripts/run_whisperx_qualification.py`、`asr_service/tests/test_whisperx_qualification.py`；更新 `project-docs/features/transcript-pipeline.md`、`WORKLOG.md`。未修改业务 Provider/Profile/Canonical 契约、正式依赖、生产服务、任务、防火墙、数据库、Qdrant、模型 revision 或 Profile admission。
+- 验证：WhisperX 资格、引擎及部署静态专项测试 48/48 通过；Python compileall、PowerShell 5.1 AST、workflow YAML 解析和 `git diff --check` 通过。许可证审计在既有 WhisperX 隔离 venv 上通过，未知许可证及 GPL/AGPL/SSPL 仍失败关闭。PR #71 的 7 项 CI 全绿并合并为 `ac4eb561634f47171248772ea52ee875fe43d486`；首次 production-asr run `31011018657` 通过固定 CUDA 依赖、178 包许可证、双模型缓存和 Profile disabled 门禁，随后在正式 Markdown parser 导入时因 run 专属 venv 缺少 `python-dotenv` 关闭，且 artifact 跨目录共同根路径不被上传 action 接受。同范围修复 PR #73 的 7 项 CI 全绿并合并为 `2e222b6fe193ee905a086e47735e9850436af596`；production-asr run `31012697370` 成功处理固定 8 样本并上传脱敏 artifact。178 包许可证、处理失败率、两轮确定性、负控误报、RTF、时间戳和显存门禁通过；峰值显存 1317.93 MiB，实际 runner 为 RTX 5060 Ti。规范编号召回 0%（门槛 95%）及噪声 BIM CER 25%（门槛 15%）失败，因此资格 verdict 为 `quality_gate_failed`。
+- 待办/风险：WhisperX Profile 继续 disabled，不得接入业务流量。最终生产资格结论发生在合并后，按纯生产验收例外不为日志单独创建 PR；本条随下一次正常仓库交付补记。运行未注册或启动服务，未修改防火墙、计划任务、数据库或 Qdrant。
+
+### 21:44 — 修正索引活动历史状态语义
+
+- 完成：索引活动中的成功任务改为“处理完成”，不再误示当前资料仍可检索；任务 DTO 新增源文件存在性标记，源文件已删除时活动记录显示“源文件已删除，无法重试”、隐藏无效重试入口并继续保留“删除记录”。资料主列表的当前“可检索”语义和后端重试保护保持不变。
+- 文件：`api/routes_admin.py`、`api/schemas.py`、`frontend/src/types.ts`、`frontend/src/pages/admin/AdminDocumentsPage.tsx`、`frontend/src/pages/admin/AdminDocumentsPage.test.tsx`、`tests/test_routes_admin_documents.py`、`project-docs/features/document-indexing.md`、`WORKLOG.md`；未修改数据库、索引结构、真实资料、依赖声明或部署配置。
+- 验证：后端资料路由专项测试 5/5、管理资料页专项 Vitest 10/10、前端全量 Vitest 32 个文件 152/152、TypeScript 检查、Vite production build、目标 Python compileall 与 `git diff --check` 均通过。构建保留既有 CSS 语法和主包大于 500 kB 警告；依赖安装审计仍报告既有 10 项风险，本轮未运行自动修复。
+- 待办/风险：功能待用户在真实管理员登录态验收历史成功记录、源文件已删除记录和仍有源文件的可重试记录；API 仅新增布尔字段，无数据库迁移，回滚可直接恢复本次提交。
+
+### 21:46 — 修正 faster-whisper wheel 来源审计
+
+- 完成：统一资格 run `31010157647` 已越过 legacy FunASR 依赖链，但 runner 的 pip 全局缓存使下载日志缺失 wheel 来源 URL，严格 Manifest 因而失败关闭；现仅为隔离资格的 `pip download` 增加 `--no-cache-dir`，确保每个二进制 wheel 都由本轮固定索引下载并可绑定来源 URL。
+- 文件：`scripts/qualify-faster-whisper-production.ps1`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
+- 验证：待执行部署边界与 faster-whisper 专项测试、PowerShell AST、PR/CI 及一次统一资格重跑。
+- 待办/风险：不修改依赖版本、production freeze、生产 venv、服务、防火墙或 Profile admission；资格失败时继续保持 Profile disabled。
+
+### 22:28 — 增强 faster-whisper Manifest 脱敏诊断
+
+- 完成：资格 run `31012199376` 仍在严格 wheel Manifest 门禁失败后，为六个固定 guard 增加受限失败码，复用既有 `diagnosis_kind` 字段区分未分类、受控 wheel 不匹配、来源 URL 未绑定、空 wheelhouse、兼容性参考缺失和记录后完整性变化；不输出文件名、路径、URL或原始日志。
+- 文件：`scripts/qualify-faster-whisper-production.ps1`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
+- 验证：faster-whisper 引擎、资格、resolver 与部署静态专项测试 86/86 通过；PowerShell AST 与 `git diff --check` 通过。
+- 待办/风险：待 PR/CI/合并和一次绑定新 master SHA 的统一资格重跑；生产服务和 Profile admission 保持不变。
+
+### 22:33 — 实现 WhisperX 失败证据诊断
+
+- 完成：针对最终资格中的规范编号召回和噪声 BIM CER 两个失败项，新增完整 master SHA、显式 R3 开关、`production-asr` environment 和既有串行并发组保护的手动诊断 workflow；复用原 8 个自制样本、模型 revision、Python 3.11、CUDA 12.8、FP16、batch=1、Provider/normalizer/Canonical 契约及全部原阈值。诊断报告只包含文本 SHA-256、归一化长度、字符类别计数、token 形状、插入/删除/替换计数、期望项命中布尔值和固定分类；不包含参考、原始候选或 Canonical 文本。只有两个目标样本证据完整时诊断 workflow 才成功收口，资格 verdict 仍保持失败。
+- 文件：新增 `.github/workflows/diagnose-whisperx-production.yml`；更新 `scripts/run_whisperx_qualification.py`、`scripts/qualify-whisperx-production.ps1`、`asr_service/tests/test_whisperx_qualification.py`、`project-docs/features/transcript-pipeline.md`、`WORKLOG.md`。
+- 验证：WhisperX 诊断、资格、引擎及部署静态专项测试 52/52 通过；Python compileall、PowerShell 5.1 AST、两个 workflow YAML 解析和 `git diff --check` 通过。
+- 待办/风险：尚待 PR、完整 CI、合并和一次 production-asr 诊断 run；诊断不得启用 Profile、降低阈值、修改模型/样本/参考答案、安装 FFmpeg、注册服务或接入业务流量。若证据不完整即失败关闭。
+
+### 23:14 — 实施 faster-whisper 可校验 wheelhouse 缓存
+
+- 完成：为 Windows 统一资格增加 Administrator/SYSTEM 受控的持久 wheelhouse，缓存键覆盖 Python/ABI、Windows 架构、pip、CUDA/torch/torchaudio、production freeze、faster-whisper requirements 与四个受控 wheel 的稳定身份；cache hit 严格复验文件集合、reparse point、大小、哈希和 Manifest，cache miss 继续 no-cache/binary-only 下载并经同盘 staging 原子发布，损坏项隔离后重建。每轮仍创建全新 venv、离线安装并执行全部依赖、许可证、模型、GPU 和八样本门禁；脱敏 verdict 升级为 v2 并记录 hit/miss 与缓存键，artifact 上传失败时受控重试一次。首次 run `31019701637` 唯一定位旧文本日志无法稳定绑定来源 URL，现改用同一 resolver 输入的 pip JSON report，按归档 SHA-256 绑定下载来源，不读取或上传原始日志。
+- 文件：`.github/workflows/qualify-faster-whisper-production.yml`、`scripts/qualify-faster-whisper-production.ps1`、`tests/test_asr_deployment_static.py`、`project-docs/plans/faster-whisper-r3-unified-qualification.md`、`WORKLOG.md`。
+- 验证：faster-whisper 部署、引擎、资格和 resolver 专项测试 87/87 通过；PowerShell AST、workflow YAML 解析和 `git diff --check` 通过。
+- 待办/风险：待 PR/CI/合并后执行首次 cache miss 与第二次 cache hit 的真实统一资格；两轮均不得修改生产服务或 Profile admission。
+
+## 2026-08-06
+
+### 02:17 — 统一 Windows ASR wheel 下载缓存
+
+- 完成：新增 Administrator/SYSTEM 受控的内容寻址公共 wheel 缓存，以 SHA-256 blob、严格消费者 Manifest、互斥锁、staging、损坏项拒绝和硬链接优先恢复实现跨引擎下载复用；scoped review 进一步将同名不同哈希 wheel 改为全部拒绝并回退在线解析，拒绝 reparse point、重复项、未知字段和非固定生产身份。faster-whisper、Qwen3-ASR、WhisperX 和 FunASR 均接入同一缓存根目录，但继续使用独立 venv。FunASR 生产依赖改为在 staging venv 中下载、发布缓存、`--no-index` 离线安装、`pip check` 和 CUDA/模块身份验证，服务停止后才切换 venv，失败恢复旧 venv。
+- 文件：新增 `scripts/windows-wheel-cache.ps1`、`tests/test_windows_shared_wheel_cache_static.py`；更新 `scripts/deploy-asr.ps1`、`scripts/qualify-faster-whisper-production.ps1`、`scripts/qualify-qwen3-asr-production.ps1`、`scripts/qualify-whisperx-production.ps1`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
+- 验证：scoped review 修复后，全部 ASR、Whisper 和 transcription 相关测试 535/535 通过，另有 6 个 subtests 通过；WhisperX 本机缺少 NLTK 的单项运行测试按环境事实排除，其余 WhisperX 静态测试 3/3 通过。新增缓存与部署专项 37/37 通过；五个 PowerShell 脚本 AST 与 `git diff --check` 通过。公共缓存动态写入需固定 Administrator/SYSTEM 身份，开发机普通会话按设计在 ACL 前失败关闭，真实 Windows runner 验证留给远端资格/部署 workflow。
+- 待办/风险：尚未提交、推送、运行远端 CI 或在 Windows runner 填充真实缓存；未下载依赖、未重建生产 venv、未启动服务、未修改防火墙、Ubuntu、数据库、Qdrant 或 Profile admission。首次生产接入仍需独立 R3 审批和回滚验收。
+
+### 03:18 — 修复 faster-whisper 模型准备入口
+
+- 完成：生产资格 run `31036640739` 已证明公共 wheel 缓存成功发布29个文件并命中既有依赖缓存，随后在模型下载前因按文件路径启动脚本时仓库根不在 `sys.path` 而失败。模型准备脚本现依据自身路径显式加入仓库根，确保从 runner任意工作目录执行都能导入 `asr_service.model_cache`，不改变固定模型、revision、Manifest或下载来源。
+- 文件：`scripts/prepare_faster_whisper_model.py`、`asr_service/tests/test_faster_whisper_qualification.py`、`WORKLOG.md`。
+- 验证：新增仓库外临时 cwd、移除 `PYTHONPATH`的真实子进程 `--help`回归；模型准备与部署专项 54/54通过；全部 ASR、Whisper和transcription相关测试559/559通过，另有6个subtests通过；本机缺少NLTK的单项WhisperX运行测试按环境事实排除。Python编译与`git diff --check`通过。
+- 待办/风险：待独立PR、完整CI、合并后以新master SHA重跑一次统一资格；不修改生产服务、防火墙、Ubuntu、数据库、Qdrant或Profile admission。
+
+### 04:09 — 增加 Hugging Face TLS 1.2 代理兜底
+
+- 完成：根据 Windows 生产 runner 的可复现实测，确认 Helios HTTP 代理仅在 Python/OpenSSL 3 以 TLS 1.3 访问 Hugging Face 时提前关闭连接，而同一 Python 会话限制 TLS 1.2 后固定模型 API 返回 200。faster-whisper 模型准备现为 Hugging Face 注册专用 requests backend，直连池和代理池均使用保留系统 CA、主机名与证书验证的默认 SSL context，并仅将最高协议限制为 TLS 1.2；固定模型、revision、Manifest、代理来源、wheel 缓存和生产准入保持不变。
+- 文件：`scripts/prepare_faster_whisper_model.py`、`tests/test_faster_whisper_model_tls.py`、`.github/workflows/ci.yml`、`WORKLOG.md`。
+- 验证：目标 Python 语法检查通过；新增测试验证直连池、代理池、每请求连接池参数、TLS 1.2 上限、`CERT_REQUIRED`、主机名检查、禁用证书验证时失败关闭及 Hugging Face backend 注册；更新后的完整 ASR CI 测试集合 335/335 通过，`git diff --check` 通过。首次 master CI `31043371743` 的其余 job 全部通过，ASR job 因原最小安装清单缺少新增生产脚本直接导入的既有 `requests` 依赖在收集期失败，自动部署 `31043484140` 按门禁跳过；补齐后 CI `31043635326` 与自动部署 `31043744430` 全部成功。资格 run `31044405571` 进一步证明 requests 2.34 会在每个请求上用默认 context 覆盖 adapter 初始化值，现将同一受验证 TLS 1.2 context 同时注入每请求连接池参数。
+- 待办/风险：本次每请求修正尚待提交、远端 CI、自动部署及绑定新 master SHA 的独立 R3 资格验证；不修改 Secret、生产服务配置、任务、防火墙、数据库、Qdrant 或 Profile admission。回滚可恢复默认 Hugging Face backend。
+
+### 05:48 — 将 faster-whisper 资格切换为本地持久模型制品
+
+- 完成：faster-whisper 统一资格的模型阶段改为严格 `--offline-only`，只接受 `D:\ServiceData\RAGPinCheng-ASR\models` 下固定 revision、完整 Manifest、精确文件集合、大小和 SHA-256 均通过的持久制品；资格 workflow 不再接收模型下载代理，临时服务同时强制 `HF_HUB_OFFLINE=1`、`TRANSFORMERS_OFFLINE=1` 和既有 local-files-only 门禁。新增仅手动触发、完整 master SHA、显式 R3 开关、`production-asr` environment 与共享模型并发组保护的独立模型制品准备 workflow，通过 run 专属 staging 下载、校验、原子发布并再次离线复验，不启动服务或修改 Profile。首次生产准备在 staging 前因既有 ASR 服务处于启用状态而失败关闭；旁路修正现允许服务继续运行，但要求启用状态对应 Running 任务与唯一 8200 监听进程、停用状态对应无运行任务和监听，并在成功或失败后复核任务状态、监听 PID 与可执行路径完全不变。第二次准备证明 `snapshot_download` 的七文件并发 Session 仍在代理链路触发 TLS EOF，现改为单一 TLS 1.2 Session 按固定七文件清单顺序 GET，限制重定向到 Hugging Face 官方 HTTPS 域，使用 `.partial`、Range 续传、每文件三次重试和完成后原子改名；同一 workflow run 可安全复用受控 staging。
+- 文件：新增 `.github/workflows/prepare-faster-whisper-model-production.yml`、`scripts/prepare-faster-whisper-model-production.ps1`；更新 `.github/workflows/qualify-faster-whisper-production.yml`、`scripts/prepare_faster_whisper_model.py`、`scripts/qualify-faster-whisper-production.ps1`、`asr_service/tests/test_faster_whisper_qualification.py`、`tests/test_asr_deployment_static.py`、`project-docs/features/transcript-pipeline.md`、`WORKLOG.md`。已撤销未提交且实测会重定向回官方站的 `ASR_HF_ENDPOINT` 方案。
+- 验证：离线模型、TLS、资格与部署静态专项测试 58/58 通过；CI 等价完整 ASR 集合 337/337 通过并保留 2 条既有弃用警告；Python compileall、两个 PowerShell 5.1 AST、两个 workflow YAML 解析和 `git diff --check` 通过。PR #80 的 7 项 CI、master CI `31051179033` 与自动部署 `31051274015` 全部成功；首次生产模型准备 `31051434134` 在创建 staging 前按旧停服门禁失败，未下载或修改模型。旁路修正的部署静态专项 31/31、完整 ASR 集合 337/337、PowerShell 5.1 AST 与 `git diff --check` 通过；PR #81、master CI `31052148057` 与自动部署 `31052243452` 全部成功。第二次准备 `31052398085` 通过服务旁路门禁后在并发下载约 2/7 文件时因 TLS EOF 失败，未原子发布正式模型；顺序下载器专项 62/62 通过，完整 ASR 集合除既有 Windows 临时目录 `os.replace` 瞬态失败外 340 项通过，目标用例复跑 1/1 通过；Python compileall、PowerShell 5.1 AST 与 `git diff --check` 通过。顺序下载器经 PR #82 合并为 `334b3b67ddb057dc7d603dff3a86f4a0a2f463a8`，master CI `31053187431` 与自动部署 `31053282850` 成功；生产准备 `31053442056` 未再出现 TLS EOF，但下载完成后因代码内固定的 `model.bin` SHA-256 与该 revision 官方 LFS 元数据不符而失败关闭。官方 SHA 修正经 PR #83 合并为 `4f5b3eda670e697de033a1c495cd63c051c2061a`，master CI `31054370484` 与自动部署 `31054458875` 成功；生产准备 `31055291382` 成功原子发布并离线复验 Manifest `38ca18bc9cfb48fd1e8a95ec468d42c220a5ed001f1f825e39d7e9cfaa7793a1`，运行中 ASR 服务保持不变。资格 `31056133823` 的 wheel cache、离线安装和模型校验通过，随后因隔离 venv 未安装 `uvicorn` 导致临时服务立即退出但健康检查等待满 300 秒。ASR 基础依赖与快速失败修正经 PR #84 合并为 `2b0ed14a43b637699596f672929897245ba08da0`，master CI `31057660881` 与自动部署 `31057959078` 成功；资格 `31058039736` 首次构建并发布 46 文件新 wheel cache，临时服务成功 healthy，随后因继承 runner 上 Qwen3-ASR/WhisperX 模型路径而暴露额外 Profile，严格双 Profile 契约失败关闭。额外引擎环境隔离经 PR #85 合并为 `d29feaa90dbfbaf2902ef7c0e542471c5965ebe1`，master CI `31061087540` 与自动部署 `31061159891` 成功；资格 `31061244840` 命中 wheel cache、离线安装及模型校验通过，临时服务 healthy，但隔离 venv 按设计未安装 FunASR 依赖，因此只暴露 faster-whisper，旧双 Profile 断言失败。现将契约修正为严格只允许 `faster-whisper-large-v3-turbo-v1`，额外或缺失 Profile 均失败关闭。
+- 验证补充：严格单 Profile 契约经 PR #86 合并为 `0b533eb602ef519d5b7a2d9b06d18e723f710cf0`，PR 七项检查、master CI `31062514733` 与自动部署 `31062580123` 成功；资格 `31062659913` 在任何 step 启动前被 GitHub Free 托管分钟额度门禁拒绝，未接触生产主机。为移除此非必要依赖，内部 wheel 构建改用既有 PinCheng Ubuntu 自托管 Runner，并继续由 `production-asr` environment、完整 master SHA、显式执行开关和无 Secret 静态门禁约束；专项 71/71、完整 ASR 回归 343/343、workflow YAML 解析及 `git diff --check` 通过。
+- 验证补充：自托管 wheel 构建迁移经 PR #87 合并为 `6cca4611a3037ee6c450eed639031ea578702ed4`；PR 七个托管 CI job 均在零 step 状态被相同账单门禁拒绝。资格 `31064788787` 成功分配到 PinCheng Runner、通过 SHA 门禁与 checkout，但 `actions/setup-python` 四分钟仍未完成，随后按用户授权取消；现移除该联网下载动作，改为严格要求主机 `python3.11` 且验证版本后构建。
+- 验证补充：移除 setup-python 的修正经 PR #88 合并为 `bdd72697db744c52a951dd972b42f49300f67e39`；资格 `31065268918` 在 31 秒内证明 PinCheng Ubuntu 未安装 `python3.11` 并按门禁快速失败，未构建或上传制品。基于四个构建器均硬性要求 Python 3.11 且需要下载固定 sdist/构建依赖，现取消 Ubuntu job 与内部 wheel artifact 中转，改由已验证机器级 Python 3.11 的 Windows 资格 Runner 在 run 专属目录构建，并将依赖代理严格限制在该步骤进程内、结束后恢复。
+- 待办/风险：Windows 内部 wheel 构建合并修正尚待本地验证、提交、合并及用户已授权的生产资格重跑；因 GitHub 托管额度耗尽，普通远端 CI 预计仍会在 job 启动前被账单门禁拒绝，不把该外部失败误报为代码失败。Profile admission 保持 disabled；不删除或修改模型制品，不修改系统代理。回滚可恢复独立构建 job，未执行未批准清理。
+
+- 验证补充：Windows 内部 wheel 构建迁移经 PR #89 合并为 `640091c88d9eb4b74fdbd0b7b8593425e25b2638`；资格 `31065672666` 的四个受控 wheel 在 2 分 46 秒内成功构建，随后因新 key 首次建立并发布 46 文件 wheel cache（依赖下载约 31 分 45 秒），离线安装、持久模型校验与临时服务启动均成功。真实资格 warmup 在首次导入 `src.transcription.canonical` 时因绝对脚本入口仅包含 `scripts` 路径而失败；现由 runner 根据自身路径显式加入仓库根目录，并新增隔离模式、仓库外当前目录、无 `PYTHONPATH` 的真实导入回归。
+- 待办/风险：资格 runner 仓库根目录导入修正尚待本地验证、提交、合并及用户已授权的生产资格重跑；新 wheel cache `ba2262647a5841797fd92051005509398e229ab3be545ad29c957b82c6e0383a` 已发布，后续同 key 应命中。因 GitHub 托管额度耗尽，普通远端 CI 预计仍会在 job 启动前被账单门禁拒绝。Profile admission 保持 disabled；不删除或修改模型制品，不修改系统代理。回滚可撤销 runner bootstrap，未执行未批准清理。
+
+## 2026-08-07
+
+### 10:10 — 修复 faster-whisper 资格 wrapper 假阴性
+
+- 完成：将 faster-whisper 生产资格 wrapper 的 runner 结果判定改为以 run-local `qualification-summary.json` 为准；当固定 gate 报告已明确 `pass` 且样本数为 8 时，不再因 Windows `Start-Process` 退出码假阴性把整轮误判为 `qualification_failed`，但会输出 warning 记录异常 exit code。summary 缺失或 gate 未通过仍失败关闭。
+- 文件：`scripts/qualify-faster-whisper-production.ps1`、`WORKLOG.md`。
+- 验证：`git diff --check` 通过；PowerShell AST 解析 `scripts/qualify-faster-whisper-production.ps1` 通过。未重新触发生产资格 run。
+- 待办/风险：需合并到 master 后以完整 SHA 重跑 faster-whisper 生产资格，确认 wrapper 能把已通过的固定 gate 写成最终 PASS verdict。Profile admission 仍保持 disabled。
+
+### 05:41 — 修复 faster-whisper hotwords 参数类型
+
+- 完成：生产资格 run `31125523585` 在 warmup 阶段因 `faster-whisper` 收到 tuple 类型 `hotwords` 而以 `permanent_provider_error` 失败；引擎现将配置中的 hotwords 词条按空格拼接为单一字符串，保持既有词条内容和识别策略不变，并补齐精确调用参数回归断言。
+- 文件：`asr_service/engines/faster_whisper.py`、`asr_service/tests/test_faster_whisper.py`、`WORKLOG.md`。
+- 验证：同范围专项测试此前已通过 132 项；当前工作树补充检查目标 Python 文件可编译并完成 `git diff --check`。当前开发机未安装 pytest，未重复执行测试套件；生产服务、模型制品和 Profile admission 未修改。
+- 待办/风险：待提交、合并后以完整 master SHA 重新触发 faster-whisper 生产资格验证；GitHub 托管 CI 仍可能受账单门禁影响。
+
+### 08:33 — faster-whisper 解码参数升级（beam_size + temperature + initial_prompt）
+
+- 完成：将 faster-whisper 服务端 profile 从 greedy 解码升级为 beam=5、temperature=0.2，并加入 BIM 领域 initial_prompt；同时把更多 BIM 热词补进服务端配置。引擎侧新增 beam_size、temperature、initial_prompt 三个可配置参数，保持默认值与原硬编码一致。
+- 文件：`asr_service/engine_protocol.py`、`asr_service/engines/faster_whisper.py`、`asr_service/tests/test_faster_whisper.py`、`WORKLOG.md`。
+- 验证：`python -m compileall` 通过；当前环境未安装 pytest，未运行完整测试套件。
+- 待办/风险：待合并 master 后重新触发生产资格 run，验证 `noisy-bim-zh` CER 是否能从 0.375 降至 0.15 以下。Profile admission 保持 disabled，不影响生产流量。
+### 08:06 — faster-whisper 增加 BIM hotwords
+
+- 完成：在 faster-whisper 中文实验 profile 中加入 8 个 BIM 热词（构件碰撞、净高分析、复核、建筑信息模型、钢结构、焊缝、螺栓、规范编号），以提升噪声场景下术语识别率。引擎端此前已完成 hotwords 参数类型修复，无需改动引擎代码。
+- 文件：`src/transcription/profile_catalog.py`、`tests/test_transcription_profile_catalog.py`、`WORKLOG.md`。
+- 验证：`python -m compileall` 通过；当前环境未安装 pytest，未运行完整测试套件。
+- 待办/风险：待合并 master 后重新触发生产资格 run，验证 `noisy-bim-zh` CER 是否能降至 0.15 以下。Profile admission 保持 disabled，不影响生产流量。
+### 06:36 — 增加 noisy-bim-zh 本地诊断输出
+
+- 完成：在 faster-whisper 资格 runner 中增加本机 `sample-diagnostics.json` 输出，记录 `reference_text`、`hypothesis_text`、归一化文本和逐样本 CER/召回信息；保持 `qualification-summary.json` 与 `sample-results.json` 继续脱敏，不向 GitHub artifact 回传原文。生产资格 wrapper 现显式传入诊断路径。
+- 文件：`scripts/run_faster_whisper_qualification.py`、`scripts/qualify-faster-whisper-production.ps1`、`asr_service/tests/test_faster_whisper_qualification.py`、`WORKLOG.md`。
+- 验证：`python -m compileall -q scripts/run_faster_whisper_qualification.py asr_service/tests/test_faster_whisper_qualification.py` 通过；`python scripts/run_faster_whisper_qualification.py --help` 通过并显示 `--diagnostic-report`；本机系统 Python 未安装 pytest，未执行 pytest 套件。
+- 待办/风险：需在实际生产资格 run 中读取 `reports/sample-diagnostics.json` 再判断 `noisy-bim-zh` 失败形态；若后续继续暴露为噪声鲁棒性不足，仍需再决定是否调噪声样本或解码策略。
+
+### 12:56 — 收紧 faster-whisper 资格单样本超时
+
+- 完成：将 faster-whisper 生产资格 wrapper 传给 `run_faster_whisper_qualification.py` 的单样本超时从 600000 ms 收紧到 180000 ms，避免单个卡住的 warmup/推理请求把整轮资格 step 拖到半小时以上。
+- 文件：`scripts/qualify-faster-whisper-production.ps1`、`WORKLOG.md`。
+- 验证：已完成本地只读检查与最小脚本修改；尚未重新触发远端生产资格 run。
+- 待办/风险：若实际模型在极慢磁盘/冷启动环境下需要超过 3 分钟才能完成首轮推理，这个上限会把它更早判为超时；需要重跑观察是否足够覆盖正常启动时间。
+
+### 13:32 — 解决 PR #50 合并冲突
+
+- 完成：在隔离 worktree 中把最新 `origin/master` 合入 PR #50 分支，清理 `WORKLOG.md` 冲突并保留双方已有日志条目；未修改用户当前 checkout。
+- 文件：`WORKLOG.md`。
+- 验证：`git merge origin/master` 已完成且只剩工作日志合并收尾；待运行 `git diff --check` 和最终提交前复核。
+- 待办/风险：还需完成合并提交并推送到 PR 分支，随后再检查 GitHub 端 mergeability 和 checks 状态。
