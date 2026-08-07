@@ -2451,7 +2451,7 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 
 ### 00:18 — 修复 PR #50 Phase4 CI 测试适配
 
-- 完成：按 Phase4 重构后的新 API 边界修复 PR #50 的转录 CI 失败；`RetryTranscriptionRequest` 现在拒绝未知执行控制字段，自动上传重放测试补齐管理员用户 fixture，Phase5 静态边界测试移除已删除的旧 HTTP 路由测试文件引用，并从 CI phase5 job 移除该旧测试文件。
-- 文件：`.github/workflows/ci.yml`、`api/schemas.py`、`tests/test_transcription_phase4_api.py`、`tests/test_transcription_phase5_api.py`、`tests/test_transcription_phase5_static_boundaries.py`、`WORKLOG.md`。
-- 验证：Phase5 publication/visibility 集合 25/25 通过；transcription contracts 集合 329/329 通过；`python -m compileall -q api src scripts tests gpu_service asr_service` 通过；`git diff --check` 未发现空白错误。
+- 完成：按 Phase4 重构后的新 API 边界修复 PR #50 的转录 CI 失败；`RetryTranscriptionRequest` 现在拒绝未知执行控制字段，自动上传重放测试补齐管理员用户 fixture，Phase5 静态边界测试移除已删除的旧 HTTP 路由测试文件引用并从 CI phase5 job 移除该文件，faster-whisper 精确参数断言同步当前服务端 Profile 配置。
+- 文件：`.github/workflows/ci.yml`、`api/schemas.py`、`asr_service/tests/test_faster_whisper.py`、`tests/test_transcription_phase4_api.py`、`tests/test_transcription_phase5_api.py`、`tests/test_transcription_phase5_static_boundaries.py`、`WORKLOG.md`。
+- 验证：Phase5 publication/visibility 集合 25/25、transcription contracts 集合 329/329、ASR service CI 集合 346/346 通过；`python -m compileall -q api src scripts tests gpu_service asr_service` 通过；`git diff --check` 未发现空白错误。
 - 待办/风险：本地未执行 `npm ci`，因此 `validate` 的前端测试/构建需由远端 CI 覆盖；Docker Compose 本地检查因 compose 文件显式要求仓库 `.env` 未执行，未为验证创建本地 `.env`。不恢复已删除的 Phase5 HTTP 路由，不修改生产服务、依赖、数据库、Qdrant 或 Profile admission。
