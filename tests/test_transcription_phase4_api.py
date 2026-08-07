@@ -17,7 +17,11 @@ from api.routes_transcription import (
     router as transcription_router,
 )
 from api.schemas import RetryTranscriptionRequest
-from tests.transcription_fixture_helpers import make_pending_job, make_phase2_store
+from tests.transcription_fixture_helpers import (
+    make_pending_job,
+    make_phase2_store,
+    seed_admin_user,
+)
 
 
 def route_for(router, path: str, method: str):
@@ -130,13 +134,8 @@ def test_automatic_upload_replays_existing_request_when_asr_is_now_unavailable(
 
     video_bytes = b"same-video-bytes"
     conn, store, _artifacts = make_phase2_store(tmp_path)
-    cursor = conn.execute(
-        """INSERT INTO users(employee_id,real_name,password_hash,role,is_active,created_at)
-        VALUES (?,?,?,?,?,?)""",
-        ("admin", "Admin", "x", "admin", 1, 1),
-    )
-    admin_id = int(cursor.lastrowid)
-    conn.commit()
+    seed_admin_user(conn)
+    admin_id = 1
     job = store.create_job(replace(make_pending_job(), created_by=admin_id))
     conn.execute(
         "UPDATE media_assets SET created_by=?,file_size=?,sha256=? WHERE media_id=?",
