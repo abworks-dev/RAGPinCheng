@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+from pydantic import ValidationError
+from api.schemas import PublishTranscriptVersionRequest, ReviewTranscriptVersionRequest
+
 import ast
 from pathlib import Path
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -81,4 +85,15 @@ def test_phase5_tests_do_not_import_real_asr_media_or_gpu_packages():
             elif isinstance(node, ast.ImportFrom) and node.module:
                 roots.add(node.module.split(".")[0])
         assert not roots & forbidden, (path, roots & forbidden)
+
+
+def test_review_and_publish_bodies_reject_untrusted_controls():
+    with pytest.raises(ValidationError):
+        ReviewTranscriptVersionRequest(approved=True, profile_id="attacker")
+    with pytest.raises(ValidationError):
+        PublishTranscriptVersionRequest(profile_id="attacker")
+    with pytest.raises(ValidationError):
+        PublishTranscriptVersionRequest(target_index_id="live")
+    assert PublishTranscriptVersionRequest().model_dump() == {}
+
 
