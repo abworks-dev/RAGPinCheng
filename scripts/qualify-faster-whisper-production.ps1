@@ -14,13 +14,14 @@ param(
     [string]$Antlr4WheelBundlePath,
     [Parameter(Mandatory = $true)]
     [string]$CrcmodWheelBundlePath,
-    [bool]$ExecuteQualification = $false,
+    [string]$ExecuteQualification = "false",
     [string]$SummaryPath = "",
     [string]$DependencyDiagnosticPath = ""
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+$ExecuteQualification = $ExecuteQualification -in @("true","1","yes","on")
 . (Join-Path $PSScriptRoot "windows-wheel-cache.ps1")
 
 $ProgramRoot = "${PRODUCTION_SERVICE_ROOT}\RAGPinCheng-ASR\qualification\faster-whisper"
