@@ -20,7 +20,7 @@ jobs:
   recover:
     environment: production-asr
     runs-on: [self-hosted, windows, production, gpu]
-    timeout-minutes: 5
+    timeout-minutes: 6
     steps:
       - name: Restore verified GPU Scheduled Task
         shell: powershell
@@ -55,6 +55,29 @@ jobs:
               [string]$Task.Principal.RunLevel -ne "Highest"
             ) {
               throw "Refusing to modify an unexpected RAGPinCheng-GPU Scheduled Task"
+            }
+          }
+
+          function Write-SanitizedGpuStartupDiagnostic {
+            foreach ($path in @(
+              (Join-Path $RepositoryPath "gpu_service.error.log"),
+              (Join-Path $RepositoryPath "gpu_service.log")
+            )) {
+              if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+                Write-Host "GPU_STARTUP_DIAGNOSTIC log=missing"
+                continue
+              }
+              $item = Get-Item -LiteralPath $path -ErrorAction Stop
+              Write-Host "GPU_STARTUP_DIAGNOSTIC log=present bytes=$($item.Length)"
+              Get-Content -LiteralPath $path -Tail 120 -ErrorAction SilentlyContinue |
+                Where-Object { $_ -match '(?i)traceback|error|exception|failed|cannot|missing|not found|module|cuda|runtime' } |
+                ForEach-Object {
+                  $line = $_
+                  $line = $line -replace '(?i)(authorization\s*:\s*bearer\s+)\S+', '$1[REDACTED]'
+                  $line = $line -replace '(?i)(GPU_SERVICE_TOKEN\s*[=:]\s*)\S+', '$1[REDACTED]'
+                  $line = $line -replace '(?i)(https?://)[^/\s:@]+:[^@\s]+@', '$1[REDACTED]@'
+                  Write-Host "GPU_STARTUP_DIAGNOSTIC $line"
+                }
             }
           }
 
@@ -114,7 +137,7 @@ jobs:
             }
 
             Start-ScheduledTask -TaskName $TaskName -ErrorAction Stop
-            $deadline = [DateTimeOffset]::Now.AddSeconds(90)
+            $deadline = [DateTimeOffset]::Now.AddSeconds(180)
             do {
               Start-Sleep -Seconds 5
               $listener = Get-NetTCPConnection -LocalPort 8100 -State Listen -ErrorAction SilentlyContinue |
@@ -132,10 +155,14 @@ jobs:
 
             $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
             if (-not $healthy -or $task.State -ne "Running") {
-              throw "RAGPinCheng-GPU did not become healthy within 90 seconds"
+              throw "RAGPinCheng-GPU did not become healthy within 180 seconds"
             }
             Write-Host "GPU service recovered: task=Running port=8100 health=ok model_loaded=true"
           } catch {
+            try {
+              Write-SanitizedGpuStartupDiagnostic
+            } catch {
+            }
             if ($taskCreated) {
               try {
                 $createdTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue

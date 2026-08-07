@@ -389,7 +389,7 @@ def test_gpu_recovery_workflow_is_manual_and_limited_to_the_verified_task():
     assert "production-deployment" in workflow
     assert "production-asr" in workflow
     assert "runs-on: [self-hosted, windows, production, gpu]" in workflow
-    assert "timeout-minutes: 5" in workflow
+    assert "timeout-minutes: 6" in workflow
     assert 'TaskName = "RAGPinCheng-GPU"' in workflow
     assert "Refusing to modify an unexpected RAGPinCheng-GPU Scheduled Task" in workflow
     assert 'Get-NetTCPConnection -LocalPort 8100 -State Listen' in workflow
@@ -398,6 +398,9 @@ def test_gpu_recovery_workflow_is_manual_and_limited_to_the_verified_task():
     assert "Register-ScheduledTask" in workflow
     assert "Registered missing RAGPinCheng-GPU Scheduled Task" in workflow
     assert "Unregister-ScheduledTask -TaskName $TaskName" in workflow
+    assert "function Write-SanitizedGpuStartupDiagnostic" in workflow
+    assert "GPU_STARTUP_DIAGNOSTIC" in workflow
+    assert "[REDACTED]" in workflow
     assert "deploy-gpu.ps1" not in workflow
     assert "deploy-app" not in workflow
 
