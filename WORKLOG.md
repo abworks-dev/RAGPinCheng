@@ -2519,3 +2519,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 验证：YAML 解析、提取后 PowerShell AST 解析、faster-whisper qualification 与部署静态专项测试 `62 passed`、`git diff --check` 通过。
 - 验证补充：run `31225929111` 显示 `BGEM3FlagModel` 加载完成，随后在 `FlagReranker` 加载阶段以 `0xC0000005`（Windows access violation）退出；CUDA、Torch、FlagEmbedding 导入、S4U 会话、仓库模块路径和 BGE-M3 均已排除。临时任务已自动注销。
 - 待办/风险：需针对 FlagReranker 原生加载路径提出最小运行时/包版本修复并单独获批；仍不修改生产服务、模型或全局依赖。
+
+### 07:40 — 增加 FlagReranker 隔离兼容性修复入口
+
+- 完成：新增受确认保护的 GPU reranker 修复 workflow 与分阶段模型加载脚本；先记录当前 transformers/tokenizers 版本及 pip freeze，在临时 system-site-packages venv 中以 `transformers==4.46.3`、`tokenizers==0.20.3` 复现 S4U 全模型加载。仅候选通过后才修改生产 Python 的这两个包并再次 S4U 验证；全局验证失败自动按记录版本回滚。生产依赖文件同步固定该兼容组合。
+- 文件：`.github/workflows/repair-gpu-reranker-production.yml`、`scripts/diagnose_gpu_reranker.py`、`gpu_service/requirements.txt`、`requirements-gpu.txt`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
+- 验证：YAML 解析、提取后 PowerShell AST 解析、Python 编译、faster-whisper qualification 与部署静态专项测试 `63 passed`、`git diff --check` 通过。
+- 待办/风险：workflow 将创建临时 S4U 任务并真实加载模型；候选失败不会修改全局包，候选成功后全局包修改可按 backup 中的原版本回滚。GPU 服务尚未恢复。

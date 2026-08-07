@@ -445,6 +445,39 @@ def test_gpu_runtime_diagnostic_is_manual_bounded_and_read_only():
     assert "pip install" not in workflow
 
 
+def test_gpu_reranker_repair_is_manual_isolated_and_rollback_capable():
+    workflow = read(".github/workflows/repair-gpu-reranker-production.yml")
+    probe = read("scripts/diagnose_gpu_reranker.py")
+    gpu_requirements = read("gpu_service/requirements.txt")
+    root_requirements = read("requirements-gpu.txt")
+
+    assert "workflow_dispatch:" in workflow
+    assert "confirm_repair:" in workflow
+    assert "default: false" in workflow
+    assert "runs-on: [self-hosted, windows, production, gpu]" in workflow
+    assert "timeout-minutes: 30" in workflow
+    assert "--system-site-packages" in workflow
+    assert '$CandidateTransformers = "4.46.3"' in workflow
+    assert '$CandidateTokenizers = "0.20.3"' in workflow
+    assert "backups\\gpu-reranker-runtime-" in workflow
+    assert "pip-freeze.txt" in workflow
+    assert "changed-packages.json" in workflow
+    assert 'New-ScheduledTaskPrincipal -UserId "Administrator" -LogonType S4U -RunLevel Highest' in workflow
+    assert "RAGPinCheng-GPU-Reranker-Diagnostic-" in workflow
+    assert "Unregister-ScheduledTask -TaskName $TaskName" in workflow
+    assert "rollback=attempted" in workflow
+    assert "Recover GPU Service" not in workflow
+    assert "New-NetFirewallRule" not in workflow
+    assert "stage=embed_complete" not in probe
+    assert 'write_stage(stage_file, "embed_complete")' in probe
+    assert 'write_stage(stage_file, "reranker_start")' in probe
+    assert 'write_stage(stage_file, "complete")' in probe
+    assert "transformers==4.46.3" in gpu_requirements
+    assert "tokenizers==0.20.3" in gpu_requirements
+    assert "transformers==4.46.3" in root_requirements
+    assert "tokenizers==0.20.3" in root_requirements
+
+
 def test_faster_whisper_qualification_treats_gpu_service_as_remote():
     script = read("scripts/qualify-faster-whisper-production.ps1")
 

@@ -1,4 +1,5 @@
 # GPU inference service dependencies — used on the Windows GPU host.
 # torch is installed separately; see gpu_service/requirements.txt.
 FlagEmbedding>=1.3.0,<2
-transformers>=4.46,<5
+transformers==4.46.3
+tokenizers==0.20.3
