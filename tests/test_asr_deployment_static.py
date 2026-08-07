@@ -324,7 +324,11 @@ def test_faster_whisper_qualification_workflow_is_manual_immutable_and_gated():
     assert "timeout-minutes: 45" in workflow
     assert 'Write-WorkflowFailureVerdict -Code "workflow_wrapper_timeout"' in workflow
     assert '$wrapperDeadline = [DateTimeOffset]::Now.AddMinutes(35)' in workflow
-    assert 'taskkill.exe /PID $wrapper.Id /T /F' in workflow
+    assert "function Stop-WorkflowProcessTree" in workflow
+    assert workflow.index(
+        'Write-WorkflowFailureVerdict -Code "workflow_wrapper_timeout"'
+    ) < workflow.index("Stop-WorkflowProcessTree -Process $wrapper")
+    assert "qualification-verdict.json.progress.json" in workflow
     assert 'R3_WORKFLOW_HEARTBEAT wrapper_pid=' in workflow
     assert 'Write-WorkflowFailureVerdict -Code "workflow_wrapper_failed"' in workflow
     assert "'-ExecuteQualification'" in workflow
@@ -907,6 +911,9 @@ def test_faster_whisper_qualification_uses_verified_persistent_wheel_cache():
     assert "$QualificationWatchdogSeconds = 1500" in script
     assert 'R3_QUALIFICATION_HEARTBEAT elapsed_ms=' in script
     assert '$FailureCode = "qualification_timeout"' in script
+    assert "function Write-QualificationProgress" in script
+    assert 'Write-QualificationProgress -Stage "wrapper_start"' in script
+    assert 'Write-QualificationProgress -Stage "qualification_runner_wait"' in script
     assert '"warmup-start"' in runner
     assert '"sample-complete"' in runner
 

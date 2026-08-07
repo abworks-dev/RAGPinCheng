@@ -2469,3 +2469,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`scripts/qualify-qwen3-asr-production.ps1`、`scripts/run_qwen3_asr_qualification.py`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
 - 验证：PowerShell AST 解析、Python 编译、完整 ASR 静态测试 31/31 与 `git diff --check` 通过；本机未安装 pytest，未运行 pytest 套件。
 - 待办/风险：尚未在 production-asr runner 触发或取消 workflow；当前进行中的 run 不会获得新逻辑。Profile admission 保持 disabled，生产服务、生产 venv、模型缓存、数据库、Qdrant 与防火墙均未修改。
+
+### 05:57 — 增强 faster-whisper 资格卡死诊断与超时收尾
+
+- 完成：针对生产资格 wrapper 在模型准备后无输出并最终被 workflow watchdog 取消的问题，新增从预检到清理的阶段进度制品和 heartbeat 输出；外层超时现先写脱敏失败 verdict，再以有界 `taskkill` 和 PID fallback 终止进程树，避免进程终止命令自身卡住导致 verdict 丢失。
+- 文件：`.github/workflows/qualify-faster-whisper-production.yml`、`scripts/qualify-faster-whisper-production.ps1`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
+- 验证：PowerShell AST 解析通过；faster-whisper qualification 与部署静态专项测试 `59 passed`；`git diff --check` 通过。
+- 待办/风险：需在 master 上重跑一次生产资格 workflow，以 progress 阶段确认实际阻塞点或验证完整通过；未修改模型、样本、评分门槛、生产服务或 Profile admission。
