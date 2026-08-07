@@ -144,7 +144,87 @@ jobs:
             SummaryPath = "${{ runner.temp }}\faster-whisper-r3-${{ github.run_id }}\qualification-verdict.json"
             DependencyDiagnosticPath = "${{ runner.temp }}\faster-whisper-r3-${{ github.run_id }}\dependency-diagnostic.json"
           }
-          & "${{ github.workspace }}\scripts\qualify-faster-whisper-production.ps1" @params
+          function Write-WorkflowFailureVerdict {
+            param([Parameter(Mandatory = $true)][string]$Code)
+            $parent = Split-Path -Parent $params.SummaryPath
+            New-Item -ItemType Directory -Path $parent -Force | Out-Null
+            [ordered]@{
+              schema_version = "faster-whisper-r3-verdict/2"
+              status = "fail"
+              failure_code = $Code
+              commit_sha = "${{ inputs.commit_sha }}".ToLowerInvariant()
+              run_id = "${{ github.run_id }}"
+              model_id = "dropbox-dash/faster-whisper-large-v3-turbo"
+              model_revision = "0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf"
+              peak_gpu_memory_mib = 0
+              baseline_gpu_memory_mib = 0
+              peak_gpu_utilization_percent = 0
+              wheel_cache_status = "unknown"
+              wheel_cache_key = ""
+              profile_admission = "disabled"
+              production_services_modified = $false
+            } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $params.SummaryPath -Encoding UTF8
+          }
+
+          $wrapperStdout = "${{ runner.temp }}\faster-whisper-r3-${{ github.run_id }}\wrapper.stdout.log"
+          $wrapperStderr = "${{ runner.temp }}\faster-whisper-r3-${{ github.run_id }}\wrapper.stderr.log"
+          New-Item -ItemType Directory -Path (Split-Path -Parent $wrapperStdout) -Force | Out-Null
+          $wrapperArguments = @(
+            "-NoProfile", "-ExecutionPolicy", "Bypass",
+            "-File", "${{ github.workspace }}\scripts\qualify-faster-whisper-production.ps1",
+            "-CommitSha", $params.CommitSha,
+            "-SourceRoot", $params.SourceRoot,
+            "-RunId", $params.RunId,
+            "-ExecuteQualification", "true",
+            "-InternalWheelBundlePath", $params.InternalWheelBundlePath,
+            "-Oss2WheelBundlePath", $params.Oss2WheelBundlePath,
+            "-Antlr4WheelBundlePath", $params.Antlr4WheelBundlePath,
+            "-CrcmodWheelBundlePath", $params.CrcmodWheelBundlePath,
+            "-SummaryPath", $params.SummaryPath,
+            "-DependencyDiagnosticPath", $params.DependencyDiagnosticPath
+          )
+          $wrapper = Start-Process `
+            -FilePath "powershell.exe" `
+            -ArgumentList $wrapperArguments `
+            -RedirectStandardOutput $wrapperStdout `
+            -RedirectStandardError $wrapperStderr `
+            -WindowStyle Hidden `
+            -PassThru
+          $wrapperDeadline = [DateTimeOffset]::Now.AddMinutes(35)
+          $nextHeartbeat = [DateTimeOffset]::Now.AddSeconds(30)
+          try {
+            while (-not $wrapper.HasExited) {
+              $now = [DateTimeOffset]::Now
+              if ($now -ge $wrapperDeadline) {
+                & taskkill.exe /PID $wrapper.Id /T /F 2>$null | Out-Null
+                Write-WorkflowFailureVerdict -Code "workflow_wrapper_timeout"
+                throw "Qualification wrapper exceeded the fixed 35-minute workflow timeout"
+              }
+              if ($now -ge $nextHeartbeat) {
+                $lastOutput = Get-Content -LiteralPath $wrapperStdout -Tail 1 -ErrorAction SilentlyContinue
+                Write-Host "R3_WORKFLOW_HEARTBEAT wrapper_pid=$($wrapper.Id) last_output=$lastOutput"
+                $nextHeartbeat = $now.AddSeconds(30)
+              }
+              Start-Sleep -Seconds 5
+              $wrapper.Refresh()
+            }
+          } finally {
+            $wrapper.Refresh()
+            if (-not $wrapper.HasExited) {
+              & taskkill.exe /PID $wrapper.Id /T /F 2>$null | Out-Null
+            }
+          }
+
+          Get-Content -LiteralPath $wrapperStdout -ErrorAction SilentlyContinue | ForEach-Object { Write-Host $_ }
+          Get-Content -LiteralPath $wrapperStderr -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "WRAPPER_STDERR $_" }
+          if (-not (Test-Path -LiteralPath $params.SummaryPath -PathType Leaf)) {
+            Write-WorkflowFailureVerdict -Code "workflow_wrapper_failed"
+            throw "Qualification wrapper exited without a sanitized verdict"
+          }
+          $wrapperVerdict = Get-Content -LiteralPath $params.SummaryPath -Raw -Encoding UTF8 | ConvertFrom-Json
+          if ($wrapperVerdict.status -ne "pass") {
+            throw "Qualification wrapper verdict: $($wrapperVerdict.failure_code)"
+          }
 
       - name: Publish sanitized qualification summary
         if: ${{ always() }}
