@@ -27,12 +27,12 @@ describe("ChatHeader source control", () => {
     const openButton = screen.getByRole("button", { name: "展开来源" });
 
     expect(openButton).toHaveTextContent("来源3");
-    expect(openButton).toHaveClass("transition-none", "xl:fixed", "min-w-[6.25rem]", "whitespace-nowrap");
+    expect(openButton).toHaveClass("transition-none", "xl:fixed", "w-[5.75rem]");
 
     rerender(<ChatHeader {...props} sourceCount={3} sourceOpen />);
     const closeButton = screen.getByRole("button", { name: "收起来源" });
 
     expect(closeButton).toHaveTextContent("来源3");
-    expect(closeButton).toHaveClass("transition-none", "xl:fixed", "min-w-[6.25rem]", "whitespace-nowrap");
+    expect(closeButton).toHaveClass("transition-none", "xl:fixed", "w-[5.75rem]");
   });
 });

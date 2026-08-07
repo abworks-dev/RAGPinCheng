@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import { ArrowLeft, ChevronUp, LogOut, Shield } from "lucide-react";
+import { ChevronUp, LogOut, Shield } from "lucide-react";
 
 export function UserMenu({
   collapsed = false,
@@ -47,7 +47,7 @@ export function UserMenu({
       </button>
       {open && (
         <div className={`absolute bottom-12 z-dropdown rounded-ui-md border border-border bg-popover p-1.5 text-popover-foreground shadow-overlay ${collapsed ? "left-12 w-48" : "left-0 right-0"}`}>
-          {adminContext ? (
+          {u.role === "admin" && (
             <button
               type="button"
               onClick={() => {

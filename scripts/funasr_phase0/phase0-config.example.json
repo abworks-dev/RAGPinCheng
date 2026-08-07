@@ -1,5 +1,7 @@
 {
   "schema_version": "phase0-config/2",
+  "execution_mode": "approved_sandbox",
+  "approved_root": "REPLACE_WITH_EXPLICITLY_APPROVED_SANDBOX_ROOT",
   "run_id": "REPLACE_WITH_APPROVED_RUN_ID",
   "approved_window_start": "2099-01-01T00:00:00+00:00",
   "approved_window_end": "2099-01-01T00:30:00+00:00",

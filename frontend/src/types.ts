@@ -56,11 +56,7 @@ export type ChatMessage = {
   stage?: ChatStage;
   error?: string;
   answerVersions?: AnswerVersion[];
-  allAnswerVersions?: AnswerVersion[];
   viewedVersionIndex?: number;
-  userVersions?: UserQuestionVersion[];
-  activeUserVersionId?: string;
-  viewedUserVersionIndex?: number;
 };
 
 export type AnswerVersion = {
@@ -68,15 +64,6 @@ export type AnswerVersion = {
   versionIndex: number;
   content: string;
   sources?: Source[];
-  isActive: boolean;
-  userVersionId?: string;
-};
-
-export type UserQuestionVersion = {
-  id: string;
-  versionIndex: number;
-  content: string;
-  createdAt: number;
   isActive: boolean;
 };
 
@@ -114,14 +101,6 @@ export type ConversationState = {
       version_index: number;
       content: string;
       sources_for_ui?: Source[] | null;
-      created_at: number;
-      is_active: boolean;
-      user_version_id?: number | null;
-    }[] | null;
-    user_versions?: {
-      id: number;
-      version_index: number;
-      content: string;
       created_at: number;
       is_active: boolean;
     }[] | null;
@@ -305,12 +284,6 @@ export type TranscriptionProfile = {
 
 export type TranscriptionJobStatus = "pending" | "running" | "succeeded" | "failed" | "cancelled";
 
-export type TranscriptionFailure = {
-  code: string;
-  message: string;
-  retryable: boolean;
-};
-
 export type TranscriptionJob = {
   job_id: string;
   media_id: string;
@@ -322,71 +295,11 @@ export type TranscriptionJob = {
   total_ms: number;
   failure_error_code: string | null;
   error_summary: string | null;
-  failure: TranscriptionFailure | null;
   result_version_id: string | null;
   created_at: number;
   started_at: number | null;
   finished_at: number | null;
   updated_at: number;
-};
-
-export type TranscriptReviewStatus =
-  | "not_required"
-  | "awaiting_review"
-  | "review_approved"
-  | "review_rejected";
-
-export type TranscriptPublicationStatus =
-  | "not_published"
-  | "publishing"
-  | "published"
-  | "publication_failed";
-
-export type TranscriptVersion = {
-  version_id: string;
-  media_id: string;
-  source: "automatic" | "manual" | string;
-  profile_id: string | null;
-  provider_key: string | null;
-  model_id: string | null;
-  model_revision: string | null;
-  review_status: TranscriptReviewStatus;
-  reviewed_by: number | null;
-  reviewed_at: number | null;
-  review_note: string | null;
-  publication_status: TranscriptPublicationStatus;
-  published_at: number | null;
-  supersedes_version_id: string | null;
-  markdown_sha256: string;
-  created_at: number;
-  updated_at: number;
-  is_current: boolean;
-};
-
-export type TranscriptMarkdownPreview = {
-  version_id: string;
-  markdown: string;
-  markdown_sha256: string;
-};
-
-export type TranscriptPublicationJob = {
-  index_job_id: string;
-  transcript_version_id: string;
-  attempt_number: number;
-  target_index_id: string;
-  status: "pending" | "parsing" | "chunking" | "embedding" | "done" | "failed" | string;
-  error_code: string | null;
-  error_summary: string | null;
-  created_at: number;
-  started_at: number | null;
-  finished_at: number | null;
-  updated_at: number;
-};
-
-export type PublishTranscriptVersionResult = {
-  version: TranscriptVersion;
-  job: TranscriptPublicationJob | null;
-  reused: boolean;
 };
 
 export type LlmHealth = {
@@ -411,23 +324,4 @@ export type MediaAsset = {
   updated_at: number;
   error: string | null;
   transcription_job_id?: string | null;
-  review_status?: TranscriptReviewStatus | null;
-  publication_status?: TranscriptPublicationStatus | null;
-  publication_index_status?: "pending" | "parsing" | "chunking" | "embedding" | "done" | "failed" | null;
-  is_current_version?: boolean;
-};
-
-export type MediaTranscriptSegment = {
-  id: number;
-  start_ms: number;
-  end_ms: number | null;
-  text: string;
-};
-
-export type MediaTranscript = {
-  media_id: string;
-  version_id: string | null;
-  language: string | null;
-  duration_ms: number | null;
-  segments: MediaTranscriptSegment[];
 };

@@ -16,13 +16,11 @@ from src.transcription.persistence import (
 from src.transcription.pipeline import execute_transcription
 from src.transcription.runtime_ports import CancellationProbe
 from src.transcription.profile import (
-    FasterWhisperRemoteConfig,
     ProfileOperation,
     ProfileRegistry,
     ProfileResolutionFailure,
     ProfileSnapshot,
     RemoteAsrServiceConfig,
-    Qwen3AsrRemoteConfig,
     TranscriptionExecutionConfig,
 )
 from src.transcription.provider_protocol import (
@@ -110,11 +108,7 @@ class TranscriptionApplicationService:
         )
         snapshot = ProfileSnapshot.create(profile, execution)
         provider_config = execution.provider_config
-        if type(provider_config) not in (
-            RemoteAsrServiceConfig,
-            FasterWhisperRemoteConfig,
-            Qwen3AsrRemoteConfig,
-        ):
+        if type(provider_config) is not RemoteAsrServiceConfig:
             raise ContractValidationError("unsupported_application_profile", "profile_id")
 
         conn = self.connect_factory()
@@ -192,7 +186,6 @@ class TranscriptionApplicationService:
                     (persisted_cancellation, process_cancellation)
                 )
             ports = ProviderRuntimePorts(
-                job.id,
                 FileTranscriptionInputSource(prepared),
                 StoreProgressSink(job_id, self.connect_factory, self.clock),
                 cancellation,

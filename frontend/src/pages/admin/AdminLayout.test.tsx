@@ -71,19 +71,18 @@ describe("AdminLayout tab boundary", () => {
   });
 
   it("reserves a stable root scrollbar gutter only while mounted", () => {
-    const { container, unmount } = render(
+    const { unmount } = render(
       <MemoryRouter>
         <AdminLayout />
       </MemoryRouter>,
     );
 
     expect(document.documentElement).toHaveClass("admin-scrollbar-stable");
-    expect(container.querySelector("main")).toHaveClass("lg:[scrollbar-gutter:stable]");
     unmount();
     expect(document.documentElement).not.toHaveClass("admin-scrollbar-stable");
   });
 
-  it("keeps the brand, theme, and admin actions in the sidebar", () => {
+  it("keeps the admin identity and return navigation visible", () => {
     render(
       <MemoryRouter>
         <AdminLayout />

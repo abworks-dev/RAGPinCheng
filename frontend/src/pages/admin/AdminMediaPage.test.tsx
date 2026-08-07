@@ -28,35 +28,40 @@ const availableProfile = {
   auto_index: false,
 };
 
-const secondProfile = {
-  ...availableProfile,
-  profile_id: "approved-profile",
-  display_name: "正式中文转录",
-  qualification: "qualified",
-};
-
 const unavailableProfile = {
   ...availableProfile,
   profile_id: "disabled-profile",
   display_name: "不可用 Profile",
   availability: "unavailable",
+  unavailable_reason_code: "service_unavailable",
 };
 
-const assets = [{
-  media_id: "media-ready",
-  title: "项目交付培训",
-  original_filename: "delivery-training.mp4",
-  mime_type: "video/mp4",
-  file_size: 1024,
-  transcript_origin: "generated",
-  status: "transcript_ready",
-  review_status: "awaiting_review",
-  publication_status: "not_published",
-  index_status: null,
-  created_at: 1785686400,
-  updated_at: 1785686400,
-  error: null,
-}];
+const assets = [
+  {
+    media_id: "media-ready",
+    title: "项目交付培训",
+    original_filename: "delivery-training.mp4",
+    mime_type: "video/mp4",
+    file_size: 8 * 1024 * 1024,
+    transcript_origin: "manual",
+    status: "ready",
+    created_at: 1785686400,
+    updated_at: 1785686400,
+    error: null,
+  },
+  {
+    media_id: "media-failed",
+    title: "失败示例",
+    original_filename: "failed.mp4",
+    mime_type: "video/mp4",
+    file_size: 512,
+    transcript_origin: "generated",
+    status: "failed",
+    created_at: 1785686400,
+    updated_at: 1785686400,
+    error: "转写格式不符合要求",
+  },
+];
 
 const succeededJob = {
   job_id: "job-succeeded",
@@ -76,129 +81,164 @@ const succeededJob = {
   updated_at: 3,
 };
 
-function video(name: string) {
-  return new File(["video"], name, { type: "video/mp4" });
-}
+const failedJob = {
+  ...succeededJob,
+  job_id: "job-failed",
+  media_id: "media-failed",
+  status: "failed" as const,
+  failure_error_code: "provider_unavailable",
+  error_summary: "远端服务暂不可用",
+  result_version_id: null,
+};
 
-function readFile(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(reader.error);
-    reader.readAsText(file);
-  });
-}
-
-async function addVideosAndOpenMode(files: File[], mode: "自动转录" | "人工转写") {
-  fireEvent.change(screen.getByLabelText("选择视频文件"), { target: { files } });
-  fireEvent.click(screen.getByRole("button", { name: "下一步：选择转写方式" }));
-  fireEvent.click(screen.getByRole("button", { name: new RegExp(`^${mode}`) }));
-  await screen.findByLabelText("上传配置列表");
-}
-
-describe("AdminMediaPage wizard", () => {
+describe("AdminMediaPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    let sequence = 0;
+    let uuidSequence = 0;
     vi.stubGlobal("crypto", {
-      randomUUID: vi.fn(() => `11111111-1111-4111-8111-${String(++sequence).padStart(12, "0")}`),
+      randomUUID: vi.fn(() => `11111111-1111-4111-8111-${String(++uuidSequence).padStart(12, "0")}`),
     });
     mocks.listMediaAssets.mockResolvedValue(assets);
     mocks.uploadMediaVideo.mockResolvedValue(assets[0]);
-    mocks.uploadAutomaticMediaVideo.mockImplementation(async (file: File) => ({
-      ...assets[0],
-      media_id: file.name,
-      transcription_job_id: `job-${file.name}`,
-    }));
-    mocks.listTranscriptionProfiles.mockResolvedValue([availableProfile, secondProfile, unavailableProfile]);
-    mocks.listTranscriptionJobs.mockResolvedValue([succeededJob]);
-    mocks.getTranscriptionJob.mockResolvedValue(succeededJob);
+    mocks.uploadAutomaticMediaVideo.mockResolvedValue({ ...assets[0], transcription_job_id: "job-new" });
+    mocks.listTranscriptionProfiles.mockResolvedValue([availableProfile, unavailableProfile]);
+    mocks.listTranscriptionJobs.mockResolvedValue([succeededJob, failedJob]);
+    mocks.getTranscriptionJob.mockResolvedValue({ ...succeededJob, job_id: "job-new" });
     mocks.cancelTranscriptionJob.mockResolvedValue({ ...succeededJob, status: "cancelled" });
-    mocks.retryTranscription.mockResolvedValue({ ...succeededJob, status: "pending" });
+    mocks.retryTranscription.mockResolvedValue({ ...failedJob, job_id: "job-retry", status: "pending" });
   });
 
-  it("shows the three-step entry and keeps lifecycle states separate", async () => {
+  it("loads media assets and makes success semantics explicit", async () => {
     render(<AdminMediaPage />);
     expect(screen.getByLabelText("上传步骤")).toHaveTextContent("1. 上传视频");
     expect(await screen.findByText("项目交付培训")).toBeInTheDocument();
-    expect(screen.getByText("待人工审核")).toBeInTheDocument();
-    expect(screen.getByText("未发布")).toBeInTheDocument();
-    expect(screen.getByText("未开始")).toBeInTheDocument();
-    expect(screen.getByText("转录草稿已生成；审核、发布与索引状态见右侧独立列。")).toBeInTheDocument();
+    expect(screen.getByText("共 2 个视频")).toBeInTheDocument();
+    expect(screen.getByText("已就绪")).toHaveClass("bg-success/15");
+    expect(screen.getByText("失败")).toHaveClass("bg-destructive/15");
+    expect(screen.getByText("转录草稿已生成，等待人工审核；尚未发布，也未进入索引。")).toBeInTheDocument();
+    expect(screen.getByText("远端服务暂不可用")).toBeInTheDocument();
   });
 
-  it("accepts multiple MP4 files and applies one server profile to selected rows", async () => {
+  it("renders when randomUUID is unavailable in an insecure HTTP context", async () => {
+    vi.stubGlobal("crypto", {
+      getRandomValues: vi.fn((bytes: Uint8Array) => {
+        bytes.fill(7);
+        return bytes;
+      }),
+    });
+
     render(<AdminMediaPage />);
     await addVideosAndOpenMode([video("one.mp4"), video("two.mp4")], "自动转录");
 
-    expect(screen.getAllByText("实验性·强制审核", { exact: false }).length).toBeGreaterThan(0);
-    expect(screen.getAllByRole("option", { name: /不可用 Profile/ }).every((option) => option.hasAttribute("disabled"))).toBe(true);
-    fireEvent.change(screen.getByLabelText("批量转录 Profile"), { target: { value: secondProfile.profile_id } });
-    fireEvent.click(screen.getByRole("button", { name: "应用到已选择视频" }));
-    expect(screen.getByLabelText("one.mp4 的转录 Profile")).toHaveValue(secondProfile.profile_id);
-    expect(screen.getByLabelText("two.mp4 的转录 Profile")).toHaveValue(secondProfile.profile_id);
-
-    fireEvent.click(screen.getByRole("button", { name: "上传并创建自动转录任务" }));
-    await waitFor(() => expect(mocks.uploadAutomaticMediaVideo).toHaveBeenCalledTimes(2));
-    expect(mocks.uploadAutomaticMediaVideo.mock.calls[0][2]).toBe(secondProfile.profile_id);
-    expect(mocks.uploadAutomaticMediaVideo.mock.calls[0][3]).not.toBe(mocks.uploadAutomaticMediaVideo.mock.calls[1][3]);
+    expect(await screen.findByText("项目交付培训")).toBeInTheDocument();
+    expect(screen.getByText("共 2 个视频")).toBeInTheDocument();
   });
 
-  it("allows each automatic row to override the batch profile", async () => {
+  it("keeps the manual MP4 plus Markdown path unchanged", async () => {
+    mocks.listMediaAssets.mockResolvedValueOnce([]).mockResolvedValueOnce(assets);
+    const video = new File(["video-bytes"], "training.mp4", { type: "video/mp4" });
+    const transcript = new File(["说话人 00:00:01 培训开始"], "training.md", { type: "text/markdown" });
+
     render(<AdminMediaPage />);
-    await addVideosAndOpenMode([video("one.mp4"), video("two.mp4")], "自动转录");
-    fireEvent.change(screen.getByLabelText("two.mp4 的转录 Profile"), { target: { value: secondProfile.profile_id } });
-    fireEvent.click(screen.getByRole("button", { name: "上传并创建自动转录任务" }));
+    await screen.findByText("暂无媒体资源");
+    const uploadButton = screen.getByRole("button", { name: "上传视频与人工转写" });
+    fireEvent.change(screen.getByLabelText("视频标题"), { target: { value: "  项目培训视频  " } });
+    fireEvent.change(screen.getByLabelText("视频文件"), { target: { files: [video] } });
+    expect(uploadButton).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("人工转写"), { target: { files: [transcript] } });
+    fireEvent.click(uploadButton);
 
-    await waitFor(() => expect(mocks.uploadAutomaticMediaVideo).toHaveBeenCalledTimes(2));
-    const calls = mocks.uploadAutomaticMediaVideo.mock.calls;
-    expect(calls.find((call) => call[0].name === "one.mp4")?.[2]).toBe(availableProfile.profile_id);
-    expect(calls.find((call) => call[0].name === "two.mp4")?.[2]).toBe(secondProfile.profile_id);
-  });
-
-  it("keeps manual Markdown per video and uploads edited text through the existing path", async () => {
-    render(<AdminMediaPage />);
-    await addVideosAndOpenMode([video("manual.mp4")], "人工转写");
-    const transcript = new File(["原稿"], "manual.md", { type: "text/markdown" });
-    Object.defineProperty(transcript, "text", { value: vi.fn().mockResolvedValue("说话人 1 00:00:01 原稿") });
-    fireEvent.change(screen.getByLabelText("manual.mp4 的人工转写"), { target: { files: [transcript] } });
-    await screen.findByRole("button", { name: "打开并编辑" });
-    fireEvent.click(screen.getByRole("button", { name: "打开并编辑" }));
-    fireEvent.change(screen.getByLabelText("Markdown 转写内容"), { target: { value: "说话人 1 00:00:01 编辑后" } });
-    fireEvent.click(screen.getByRole("button", { name: "保存并关闭" }));
-    fireEvent.click(screen.getByRole("button", { name: "上传视频与人工转写" }));
-
-    await waitFor(() => expect(mocks.uploadMediaVideo).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mocks.uploadMediaVideo).toHaveBeenCalledWith(video, transcript, "项目培训视频"));
     expect(mocks.uploadAutomaticMediaVideo).not.toHaveBeenCalled();
-    const uploadedTranscript = mocks.uploadMediaVideo.mock.calls[0][1] as File;
-    expect(await readFile(uploadedTranscript)).toBe("说话人 1 00:00:01 编辑后");
+    expect(await screen.findByText("项目交付培训")).toBeInTheDocument();
   });
 
-  it("retains failed batch rows for a retry with the same idempotency key", async () => {
-    mocks.uploadAutomaticMediaVideo
-      .mockRejectedValueOnce(new Error("上传服务暂不可用"))
-      .mockResolvedValueOnce({ ...assets[0], transcription_job_id: "job-new" });
+  it("uploads one MP4 with only a server profile in automatic mode", async () => {
+    mocks.listMediaAssets.mockResolvedValueOnce([]).mockResolvedValueOnce(assets);
+    const video = new File(["video-bytes"], "automatic.mp4", { type: "video/mp4" });
+
     render(<AdminMediaPage />);
-    await addVideosAndOpenMode([video("retry.mp4")], "自动转录");
-    const submit = screen.getByRole("button", { name: "上传并创建自动转录任务" });
-    fireEvent.click(submit);
-    expect(await screen.findByText("上传服务暂不可用")).toBeInTheDocument();
-    const firstKey = mocks.uploadAutomaticMediaVideo.mock.calls[0][3];
-    fireEvent.click(submit);
-    await waitFor(() => expect(mocks.uploadAutomaticMediaVideo).toHaveBeenCalledTimes(2));
-    expect(mocks.uploadAutomaticMediaVideo.mock.calls[1][3]).toBe(firstKey);
+    await screen.findByText("暂无媒体资源");
+    fireEvent.click(screen.getByRole("button", { name: "自动转录" }));
+    expect(await screen.findByLabelText("转录 Profile")).toHaveValue(availableProfile.profile_id);
+    expect(screen.getByRole("option", { name: "不可用 Profile（不可用）" })).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText("视频标题"), { target: { value: "自动转录视频" } });
+    fireEvent.change(screen.getByLabelText("视频文件"), { target: { files: [video] } });
+    fireEvent.click(screen.getByRole("button", { name: "上传并开始自动转录" }));
+
+    await waitFor(() => expect(mocks.uploadAutomaticMediaVideo).toHaveBeenCalledWith(
+      video,
+      "自动转录视频",
+      availableProfile.profile_id,
+      expect.stringMatching(/^11111111-1111-4111-8111-/),
+    ));
+    expect(mocks.uploadMediaVideo).not.toHaveBeenCalled();
+    expect(mocks.getTranscriptionJob).toHaveBeenCalledWith("job-new");
+    expect(mocks.listTranscriptionJobs).toHaveBeenCalledTimes(1);
   });
 
-  it("preserves cancel and retry recovery actions", async () => {
-    const running = { ...succeededJob, status: "running" as const };
-    const failed = { ...succeededJob, job_id: "job-failed", media_id: "media-failed", status: "failed" as const };
-    mocks.listMediaAssets.mockResolvedValue([assets[0], { ...assets[0], media_id: "media-failed", title: "失败视频" }]);
-    mocks.listTranscriptionJobs.mockResolvedValue([running, failed]);
+  it("preserves upload fields and request identity after an automatic upload failure", async () => {
+    mocks.listMediaAssets.mockResolvedValue([]);
+    mocks.uploadAutomaticMediaVideo.mockRejectedValueOnce(new Error("上传服务暂不可用"));
+    const video = new File(["video-bytes"], "automatic.mp4", { type: "video/mp4" });
+
+    render(<AdminMediaPage />);
+    await screen.findByText("暂无媒体资源");
+    fireEvent.click(screen.getByRole("button", { name: "自动转录" }));
+    fireEvent.change(screen.getByLabelText("视频标题"), { target: { value: "自动转录视频" } });
+    fireEvent.change(screen.getByLabelText("视频文件"), { target: { files: [video] } });
+    const uploadButton = screen.getByRole("button", { name: "上传并开始自动转录" });
+    fireEvent.click(uploadButton);
+    expect(await screen.findByRole("alert")).toHaveTextContent("上传服务暂不可用");
+    fireEvent.click(uploadButton);
+
+    await waitFor(() => expect(mocks.uploadAutomaticMediaVideo).toHaveBeenCalledTimes(2));
+    expect(mocks.uploadAutomaticMediaVideo.mock.calls[0][3]).toBe(mocks.uploadAutomaticMediaVideo.mock.calls[1][3]);
+  });
+
+  it("cancels active jobs and retries failed jobs through the task API", async () => {
+    const running = { ...succeededJob, job_id: "job-running", status: "running" as const, stage: "transcribing", processed_ms: 500 };
+    mocks.listTranscriptionJobs.mockResolvedValue([running, failedJob]);
+    mocks.cancelTranscriptionJob.mockResolvedValue({ ...running, status: "cancelled" });
+
     render(<AdminMediaPage />);
     await screen.findByText("项目交付培训");
     fireEvent.click(screen.getByRole("button", { name: "取消" }));
     fireEvent.click(screen.getByRole("button", { name: "重试" }));
-    await waitFor(() => expect(mocks.cancelTranscriptionJob).toHaveBeenCalledWith("job-succeeded"));
-    await waitFor(() => expect(mocks.retryTranscription).toHaveBeenCalledWith("media-failed", availableProfile.profile_id, expect.any(String)));
+
+    await waitFor(() => expect(mocks.cancelTranscriptionJob).toHaveBeenCalledWith("job-running"));
+    await waitFor(() => expect(mocks.retryTranscription).toHaveBeenCalledWith(
+      "media-failed",
+      availableProfile.profile_id,
+      expect.stringMatching(/^11111111-1111-4111-8111-/),
+    ));
+  });
+
+  it("reuses the same retry idempotency key after a lost response", async () => {
+    mocks.retryTranscription
+      .mockRejectedValueOnce(new Error("响应丢失"))
+      .mockRejectedValueOnce(new Error("响应仍不可用"));
+
+    render(<AdminMediaPage />);
+    await screen.findByText("项目交付培训");
+    const retryButton = screen.getByRole("button", { name: "重试" });
+    fireEvent.click(retryButton);
+    expect(await screen.findByRole("alert")).toHaveTextContent("响应丢失");
+    fireEvent.click(retryButton);
+
+    await waitFor(() => expect(mocks.retryTranscription).toHaveBeenCalledTimes(2));
+    expect(mocks.retryTranscription.mock.calls[0][2]).toBe(
+      mocks.retryTranscription.mock.calls[1][2],
+    );
+  });
+
+  it("surfaces media loading failure and retries", async () => {
+    mocks.listMediaAssets.mockRejectedValueOnce(new Error("媒体服务暂不可用")).mockResolvedValueOnce(assets);
+    render(<AdminMediaPage />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("媒体服务暂不可用");
+    fireEvent.click(screen.getByRole("button", { name: "重新加载" }));
+    await waitFor(() => expect(mocks.listMediaAssets).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText("项目交付培训")).toBeInTheDocument();
   });
 });

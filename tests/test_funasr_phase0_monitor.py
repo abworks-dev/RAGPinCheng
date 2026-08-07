@@ -135,7 +135,11 @@ def _patched_smi():
 
 class TestMonitor(unittest.TestCase):
     def setUp(self):
-        self.stop_dir = tempfile.mkdtemp()
+        self.tmp = tempfile.TemporaryDirectory()
+        self.stop_dir = self.tmp.name
+
+    def tearDown(self):
+        self.tmp.cleanup()
 
     def _make_cfg(self, base: str, **overrides) -> lib_monitor.MonitorConfig:
         cfg = lib_monitor.MonitorConfig(
@@ -151,7 +155,7 @@ class TestMonitor(unittest.TestCase):
             worker_start_time_iso="2026-07-31T00:00:00+00:00",
             worker_script="tests.fake_worker",
             stop_reasons_dir=self.stop_dir,
-            data_drive="E:\\",
+            data_drive=self.stop_dir,
             bge_health_interval_s=0.05,
             bge_embed_ping_interval_s=0.05,
             bge_rerank_ping_interval_s=0.05,

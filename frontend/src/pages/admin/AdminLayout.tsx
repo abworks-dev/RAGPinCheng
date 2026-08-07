@@ -1,9 +1,7 @@
 import { useEffect, useState } from "react";
-import { PanelLeftClose } from "lucide-react";
-import { AppBrand } from "../../components/AppBrand";
-import { IconButton } from "../../components/ui/icon-button";
-import { ThemeMenu } from "../../components/ThemeMenu";
-import { UserMenu } from "../../components/UserMenu";
+import { Link } from "react-router-dom";
+import { Button, buttonVariants } from "../../components/ui/button";
+import { useAuth } from "../../context/AuthContext";
 import { cn } from "../../lib/utils";
 import { AdminConversationsPage } from "./AdminConversationsPage";
 import { AdminDocumentsPage } from "./AdminDocumentsPage";
@@ -26,6 +24,11 @@ const tabs: [Tab, string][] = [
 export function AdminLayout() {
   const [tab, setTab] = useState<Tab>("users");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
+  useEffect(() => {
+    document.documentElement.classList.add("admin-scrollbar-stable");
+    return () => document.documentElement.classList.remove("admin-scrollbar-stable");
+  }, []);
 
   useEffect(() => {
     document.documentElement.classList.add("admin-scrollbar-stable");

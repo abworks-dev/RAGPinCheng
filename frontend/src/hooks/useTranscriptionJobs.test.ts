@@ -1,8 +1,8 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { useTranscriptPublicationJob, useTranscriptionJobs } from "./useTranscriptionJobs";
+import { useTranscriptionJobs } from "./useTranscriptionJobs";
 
-const mocks = vi.hoisted(() => ({ listTranscriptionJobs: vi.fn(), getTranscriptPublicationJob: vi.fn() }));
+const mocks = vi.hoisted(() => ({ listTranscriptionJobs: vi.fn() }));
 vi.mock("../api/client", () => ({ api: mocks }));
 
 const runningJob = {
@@ -16,7 +16,6 @@ const runningJob = {
   total_ms: 1000,
   failure_error_code: null,
   error_summary: null,
-  failure: null,
   result_version_id: null,
   created_at: 1,
   started_at: 2,
@@ -89,57 +88,5 @@ describe("useTranscriptionJobs", () => {
       await pendingRefresh;
     });
     expect(result.current.jobs).toEqual([succeededJob]);
-  });
-});
-
-
-const activePublicationJob = {
-  index_job_id: "22222222-2222-4222-8222-222222222222",
-  transcript_version_id: "11111111-1111-4111-8111-111111111111",
-  attempt_number: 1,
-  target_index_id: "33333333-3333-4333-8333-333333333333",
-  status: "embedding",
-  error_code: null,
-  error_summary: null,
-  created_at: 1,
-  started_at: 2,
-  finished_at: null,
-  updated_at: 2,
-};
-
-describe("useTranscriptPublicationJob", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mocks.getTranscriptPublicationJob.mockResolvedValue(activePublicationJob);
-  });
-  afterEach(() => vi.useRealTimers());
-
-  it("does not request without a job id", async () => {
-    renderHook(() => useTranscriptPublicationJob(null));
-    await act(async () => { await Promise.resolve(); });
-    expect(mocks.getTranscriptPublicationJob).not.toHaveBeenCalled();
-  });
-
-  it("polls active publication jobs and stops at a terminal state", async () => {
-    vi.useFakeTimers();
-    mocks.getTranscriptPublicationJob
-      .mockResolvedValueOnce(activePublicationJob)
-      .mockResolvedValueOnce({ ...activePublicationJob, status: "done", finished_at: 3, updated_at: 3 });
-    const { result } = renderHook(() => useTranscriptPublicationJob(activePublicationJob.index_job_id));
-    await act(async () => { await Promise.resolve(); });
-    expect(result.current.job?.status).toBe("embedding");
-    await act(async () => { vi.advanceTimersByTime(3000); await Promise.resolve(); });
-    expect(result.current.job?.status).toBe("done");
-    await act(async () => { vi.advanceTimersByTime(6000); await Promise.resolve(); });
-    expect(mocks.getTranscriptPublicationJob).toHaveBeenCalledTimes(2);
-  });
-
-  it("clears polling on unmount", async () => {
-    vi.useFakeTimers();
-    const { unmount } = renderHook(() => useTranscriptPublicationJob(activePublicationJob.index_job_id));
-    await act(async () => { await Promise.resolve(); });
-    unmount();
-    await act(async () => { vi.advanceTimersByTime(6000); await Promise.resolve(); });
-    expect(mocks.getTranscriptPublicationJob).toHaveBeenCalledTimes(1);
   });
 });

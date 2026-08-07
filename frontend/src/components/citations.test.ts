@@ -5,7 +5,6 @@ import {
   dispatchCitation,
   linkifyCitations,
   resolveCitation,
-  toggleCitationSelection,
 } from "./citations";
 import type { Source } from "../types";
 
@@ -92,7 +91,7 @@ describe("citation parsing", () => {
     expect(resolveCitation("#not-a-citation", sources)).toBe(-1);
   });
 
-  it("dispatches source navigation without forcing a highlight state", () => {
+  it("synchronizes source navigation and persistent citation selection", () => {
     const onNavigate = vi.fn();
     const onSelect = vi.fn();
     window.addEventListener(CITATION_EVENT, onNavigate);
@@ -103,17 +102,10 @@ describe("citation parsing", () => {
     expect(onNavigate).toHaveBeenCalledWith(
       expect.objectContaining({ detail: { messageId: "answer-2", sourceIndex: 1 } }),
     );
-    expect(onSelect).not.toHaveBeenCalled();
+    expect(onSelect).toHaveBeenCalledWith(
+      expect.objectContaining({ detail: { messageId: "answer-2", sourceIndex: 1 } }),
+    );
     window.removeEventListener(CITATION_EVENT, onNavigate);
     window.removeEventListener(CITATION_HOVER_EVENT, onSelect);
-  });
-
-  it("toggles the same citation off and selects a different citation", () => {
-    const first = { messageId: "answer-1", sourceIndex: 0 };
-    const second = { messageId: "answer-1", sourceIndex: 1 };
-
-    expect(toggleCitationSelection(null, first)).toEqual(first);
-    expect(toggleCitationSelection(first, first)).toBeNull();
-    expect(toggleCitationSelection(first, second)).toEqual(second);
   });
 });
