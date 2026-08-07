@@ -2437,11 +2437,21 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 完成：run `31180581665` 证明 `Start-Process -ArgumentList` 即使传 `1` 仍以字符串到达子 PowerShell；改为传 `-ExecuteQualification:$true`，由子解释器解析为真正布尔值。
 - 文件：`.github/workflows/qualify-faster-whisper-production.yml`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
 - 验证：待提交后重新触发资格 run。
+
 ### 21:45 — 修复 faster-whisper 外层 wrapper 布尔传参
 
 - 完成：将 `qualify-faster-whisper-production.ps1` 的 `ExecuteQualification` 参数由 `[bool]` 改为 `[string]`，并在脚本顶部按白名单字符串转布尔，避免 `Start-Process -ArgumentList` 传布尔时被字符串化导致参数绑定失败。
 - 文件：`scripts/qualify-faster-whisper-production.ps1`、`.github/workflows/qualify-faster-whisper-production.yml`、`tests/test_asr_deployment_static.py`
 - 验证：PowerShell AST 解析通过；`test_asr_deployment_static.py` 31 passed。
 
+## 2026-08-08
+
 ### 00:15 — 修复 PR #50 合并后的回归
 恢复 master 中被错误冲突解决覆盖的 API、前端和测试文件，使用最新 master 树重新验证 PR。
+
+### 00:18 — 修复 PR #50 Phase4 CI 测试适配
+
+- 完成：按 Phase4 重构后的新 API 边界修复 PR #50 的转录 CI 失败；`RetryTranscriptionRequest` 现在拒绝未知执行控制字段，自动上传重放测试补齐管理员用户 fixture，Phase5 静态边界测试移除已删除的旧 HTTP 路由测试文件引用。
+- 文件：`api/schemas.py`、`tests/test_transcription_phase4_api.py`、`tests/test_transcription_phase5_static_boundaries.py`、`WORKLOG.md`。
+- 验证：Phase5 publication/visibility 集合 26/26 通过；transcription contracts 集合 328/328 通过；`python -m compileall -q api src scripts tests gpu_service asr_service` 通过；`git diff --check` 未发现空白错误。
+- 待办/风险：本地未执行 `npm ci`，因此 `validate` 的前端测试/构建需由远端 CI 覆盖；Docker Compose 本地检查因 compose 文件显式要求仓库 `.env` 未执行，未为验证创建本地 `.env`。不恢复已删除的 Phase5 HTTP 路由，不修改生产服务、依赖、数据库、Qdrant 或 Profile admission。
