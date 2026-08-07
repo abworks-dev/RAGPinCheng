@@ -27,6 +27,9 @@ class ServiceProfileConfig:
     aligner_model_id: str | None = None
     aligner_model_revision: str | None = None
     hotwords: tuple[str, ...] = ()
+    beam_size: int = 1
+    temperature: float = 0.0
+    initial_prompt: str = ""
 
     def __post_init__(self) -> None:
         validate_provider_key(self.service_profile_id, "service_profile_id")
