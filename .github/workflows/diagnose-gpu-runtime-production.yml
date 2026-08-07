@@ -101,6 +101,8 @@ jobs:
           $taskName = "RAGPinCheng-GPU-Diagnostic-${{ github.run_id }}"
           $scriptPath = Join-Path $diagnosticRoot "run-s4u-model-load.ps1"
           $stagePath = Join-Path $diagnosticRoot "s4u-stage.log"
+          $s4uStdout = Join-Path $diagnosticRoot "s4u.stdout.log"
+          $s4uStderr = Join-Path $diagnosticRoot "s4u.stderr.log"
 
           $probe = @'
           import sys
@@ -142,7 +144,9 @@ jobs:
           param(
             [Parameter(Mandatory = $true)][string]$RepositoryPath,
             [Parameter(Mandatory = $true)][string]$StagePath,
-            [Parameter(Mandatory = $true)][string]$EncodedProbe
+            [Parameter(Mandatory = $true)][string]$EncodedProbe,
+            [Parameter(Mandatory = $true)][string]$StdoutPath,
+            [Parameter(Mandatory = $true)][string]$StderrPath
           )
 
           Set-StrictMode -Version Latest
@@ -181,7 +185,7 @@ jobs:
           $probe = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($EncodedProbe))
           Set-Content -LiteralPath $probePath -Value $probe -Encoding UTF8
           Write-Stage -Name "model_load_start"
-          & $python -X faulthandler $probePath $StagePath
+          & $python -X faulthandler $probePath $StagePath 1>> $StdoutPath 2>> $StderrPath
           exit $LASTEXITCODE
           '@ | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
@@ -191,6 +195,15 @@ jobs:
             $stageLines = Get-Content -LiteralPath $stagePath -ErrorAction SilentlyContinue
             foreach ($line in $stageLines) {
               Write-Host $line
+            }
+            foreach ($path in @($s4uStdout, $s4uStderr)) {
+              Get-Content -LiteralPath $path -Tail 80 -ErrorAction SilentlyContinue |
+                Where-Object { $_ -match 'GPU_S4U_|Fatal Python error|Traceback|Error|Exception|CUDA|Access Violation|ModuleNotFound' } |
+                ForEach-Object {
+                  $safeLine = $_ -replace '(?i)(GPU_SERVICE_TOKEN\s*[=:]\s*)\S+', '$1[REDACTED]'
+                  $safeLine = $safeLine -replace '(?i)(https?://)[^/\s:@]+:[^@\s]+@', '$1[REDACTED]@'
+                  Write-Host "GPU_S4U_DIAGNOSTIC $safeLine"
+                }
             }
             $gpu = & nvidia-smi.exe --query-gpu=memory.used,memory.total,utilization.gpu --format=csv,noheader,nounits 2>$null
             if ($LASTEXITCODE -eq 0) {
@@ -205,11 +218,13 @@ jobs:
               throw "Refusing to reuse an existing diagnostic task"
             }
             $arguments = (
-              '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -RepositoryPath "{1}" -StagePath "{2}" -EncodedProbe "{3}"' -f
+              '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -RepositoryPath "{1}" -StagePath "{2}" -EncodedProbe "{3}" -StdoutPath "{4}" -StderrPath "{5}"' -f
               $scriptPath,
               $RepositoryPath,
               $stagePath,
-              $encodedProbe
+              $encodedProbe,
+              $s4uStdout,
+              $s4uStderr
             )
             $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $arguments
             $principal = New-ScheduledTaskPrincipal -UserId "Administrator" -LogonType S4U -RunLevel Highest
