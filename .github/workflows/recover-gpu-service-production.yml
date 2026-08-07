@@ -1,0 +1,106 @@
+name: Recover GPU Service Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_recovery:
+        description: "Confirm recovery of the existing RAGPinCheng-GPU Scheduled Task"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-deployment
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    environment: production-asr
+    runs-on: [self-hosted, Windows, X64, asr-production]
+    timeout-minutes: 5
+    steps:
+      - name: Restore verified GPU Scheduled Task
+        shell: powershell
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+          if (-not [System.Convert]::ToBoolean("${{ inputs.confirm_recovery }}")) {
+            throw "confirm_recovery must be explicitly enabled"
+          }
+
+          $RepositoryPath = "${PRODUCTION_REPO_PATH}"
+          $TaskName = "RAGPinCheng-GPU"
+          $StartScript = Join-Path $RepositoryPath "scripts\start-gpu-service.ps1"
+          $ExpectedTaskArguments = (
+            '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -RepositoryPath "{1}"' -f
+            $StartScript,
+            $RepositoryPath
+          )
+          if (-not (Test-Path -LiteralPath $StartScript -PathType Leaf)) {
+            throw "GPU service start wrapper is missing"
+          }
+
+          $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+          $actions = @($task.Actions)
+          if (
+            $actions.Count -ne 1 -or
+            [string]$actions[0].Execute -ne "powershell.exe" -or
+            [string]$actions[0].Arguments -ne $ExpectedTaskArguments -or
+            [string]$task.Principal.UserId -ne "Administrator"
+          ) {
+            throw "Refusing to modify an unexpected RAGPinCheng-GPU Scheduled Task"
+          }
+
+          $healthy = $false
+          $listener = Get-NetTCPConnection -LocalPort 8100 -State Listen -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+          if ($null -ne $listener) {
+            try {
+              $health = Invoke-RestMethod -Method Get -Uri "http://${PRIVATE_IPV4}:8100/health" -TimeoutSec 10
+              $healthy = $health.status -eq "ok" -and $health.model_loaded -eq $true
+            } catch {
+              $healthy = $false
+            }
+          }
+          if ($healthy) {
+            Write-Host "GPU service is already healthy; no task state changed"
+            exit 0
+          }
+
+          if ($task.State -eq "Running") {
+            Stop-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+            $stopDeadline = [DateTimeOffset]::Now.AddSeconds(30)
+            do {
+              Start-Sleep -Seconds 2
+              $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+            } while ($task.State -eq "Running" -and [DateTimeOffset]::Now -lt $stopDeadline)
+            if ($task.State -eq "Running") {
+              throw "RAGPinCheng-GPU did not stop within 30 seconds"
+            }
+          }
+
+          Start-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+          $deadline = [DateTimeOffset]::Now.AddSeconds(90)
+          do {
+            Start-Sleep -Seconds 5
+            $listener = Get-NetTCPConnection -LocalPort 8100 -State Listen -ErrorAction SilentlyContinue |
+              Select-Object -First 1
+            if ($null -eq $listener) {
+              continue
+            }
+            try {
+              $health = Invoke-RestMethod -Method Get -Uri "http://${PRIVATE_IPV4}:8100/health" -TimeoutSec 10
+              $healthy = $health.status -eq "ok" -and $health.model_loaded -eq $true
+            } catch {
+              $healthy = $false
+            }
+          } while (-not $healthy -and [DateTimeOffset]::Now -lt $deadline)
+
+          $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+          if (-not $healthy -or $task.State -ne "Running") {
+            throw "RAGPinCheng-GPU did not become healthy within 90 seconds"
+          }
+          Write-Host "GPU service recovered: task=Running port=8100 health=ok model_loaded=true"
