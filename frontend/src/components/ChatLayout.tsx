@@ -10,16 +10,7 @@ import { Sidebar } from "./Sidebar";
 import { ChatHeader } from "./ChatHeader";
 import { SourceWorkspace } from "./SourceWorkspace";
 import { Drawer } from "./ui/drawer";
-import {
-  CITATION_EVENT,
-  CITATION_HOVER_EVENT,
-  dispatchCitation,
-  toggleCitationSelection,
-  type CitationDetail,
-  type CitationHoverDetail,
-  type CitationSelection,
-} from "./citations";
-import { getSelectedSourceCount } from "./sourceSelection";
+import { CITATION_EVENT, dispatchCitation, type CitationDetail } from "./citations";
 
 export function ChatLayout() {
   const [categories, setCategories] = useState<string[]>([]);
@@ -31,7 +22,6 @@ export function ChatLayout() {
   const [sourceOpen, setSourceOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [activeSourceMessageId, setActiveSourceMessageId] = useState<string | null>(null);
-  const [activeCitation, setActiveCitation] = useState<CitationSelection>(null);
 
   const refreshConversations = useCallback(async () => {
     try {
@@ -53,34 +43,14 @@ export function ChatLayout() {
   useEffect(() => {
     const openSources = (event: Event) => {
       const detail = (event as CustomEvent<CitationDetail>).detail;
-      if (!detail?.messageId) return;
-      setActiveSourceMessageId(detail.messageId);
+      if (detail?.messageId) setActiveSourceMessageId(detail.messageId);
       setSourceOpen(true);
-      const next = toggleCitationSelection(activeCitation, detail);
-      setActiveCitation(next);
-      window.dispatchEvent(
-        new CustomEvent<CitationHoverDetail>(CITATION_HOVER_EVENT, {
-          detail: {
-            messageId: detail.messageId,
-            sourceIndex: next?.sourceIndex ?? null,
-          },
-        }),
-      );
     };
     window.addEventListener(CITATION_EVENT, openSources);
     return () => window.removeEventListener(CITATION_EVENT, openSources);
   }, [activeCitation]);
 
-  const {
-    messages,
-    send,
-    regenerate,
-    editQuestion,
-    viewAnswerVersion,
-    viewQuestionVersion,
-    sending,
-    loading,
-  } = useChat({
+  const { messages, send, regenerate, viewAnswerVersion, sending, loading } = useChat({
     conversationId: currentId,
     onConversationCreated: (id) => {
       setCurrentId(id);
@@ -96,7 +66,6 @@ export function ChatLayout() {
     setConversationDrawerOpen(false);
     setSourceOpen(false);
     setActiveSourceMessageId(null);
-    setActiveCitation(null);
   }, []);
 
   const onNewChat = useCallback(() => {
@@ -104,7 +73,6 @@ export function ChatLayout() {
     setConversationDrawerOpen(false);
     setSourceOpen(false);
     setActiveSourceMessageId(null);
-    setActiveCitation(null);
   }, []);
 
   const onDeleteConversation = useCallback(
@@ -130,35 +98,14 @@ export function ChatLayout() {
   const sourceCount = getSelectedSourceCount(messages, activeSourceMessageId);
   const scopeLabel = selected.length === 0 ? "全部企业知识" : selected.length === 1 ? selected[0] : `${selected.length} 个范围`;
 
-  const clearCitationHighlight = useCallback(() => {
-    if (activeCitation) {
-      window.dispatchEvent(
-        new CustomEvent<CitationHoverDetail>(CITATION_HOVER_EVENT, {
-          detail: { messageId: activeCitation.messageId, sourceIndex: null },
-        }),
-      );
-    }
-    setActiveCitation(null);
-  }, [activeCitation]);
-
-  const closeSources = useCallback(() => {
-    setSourceOpen(false);
-    clearCitationHighlight();
-  }, [clearCitationHighlight]);
-
   const toggleMessageSources = useCallback((messageId: string) => {
     if (sourceOpen && activeSourceMessageId === messageId) {
-      closeSources();
+      setSourceOpen(false);
       return;
     }
     setActiveSourceMessageId(messageId);
     dispatchCitation({ messageId, sourceIndex: 0 });
-  }, [activeSourceMessageId, closeSources, sourceOpen]);
-
-  const selectSource = useCallback((messageId: string, sourceIndex: number) => {
-    setActiveSourceMessageId(messageId);
-    setActiveCitation({ messageId, sourceIndex });
-  }, []);
+  }, [activeSourceMessageId, sourceOpen]);
 
   const sidebar = (collapsed: boolean, onToggleCollapsed?: () => void) => (
     <Sidebar
@@ -222,6 +169,30 @@ export function ChatLayout() {
             onRegenerate={regenerate}
             onViewAnswerVersion={viewAnswerVersion}
           />
+          {messages.length === 0 ? (
+            <div className="flex min-h-0 flex-1 flex-col justify-center gap-7 py-8">
+              <MessageList messages={messages} conversationId={currentId} centeredEmpty />
+              <Composer
+                centered
+                onSend={(t) => send(t, selected)}
+                disabled={sending || loading}
+                categories={categories}
+                selected={selected}
+                onToggleCategory={toggleCategory}
+                onClearCategories={() => setSelected([])}
+              />
+            </div>
+          ) : <>
+          <MessageList
+            messages={messages}
+            conversationId={currentId}
+            sourceOpen={sourceOpen}
+            activeSourceMessageId={activeSourceMessageId}
+            onToggleSources={toggleMessageSources}
+            sending={sending}
+            onRegenerate={regenerate}
+            onViewAnswerVersion={viewAnswerVersion}
+          />
           <Composer
             onSend={(t) => send(t, selected)}
             disabled={sending || loading}
@@ -232,31 +203,17 @@ export function ChatLayout() {
           />
           </>}
         </main>
-          <div className={`hidden h-full shrink-0 overflow-hidden transition-[width,opacity] duration-slow xl:block ${sourceOpen ? "w-[23rem] opacity-100" : "w-0 opacity-0"}`}>
+          <div className={`hidden h-full shrink-0 overflow-hidden transition-[width,opacity] duration-slow xl:block ${sourceOpen ? "w-[23rem] border-l border-border opacity-100" : "w-0 opacity-0"}`}>
             <div className="h-full w-[23rem]">
-            <SourceWorkspace
-              messages={messages}
-              conversationId={currentId}
-              selectedMessageId={activeSourceMessageId}
-              highlightedSourceIndex={activeCitation?.messageId === activeSourceMessageId ? activeCitation.sourceIndex : null}
-              onSelectedMessageChange={setActiveSourceMessageId}
-              onSourceHighlightChange={selectSource}
-            />
+            <SourceWorkspace messages={messages} conversationId={currentId} selectedMessageId={activeSourceMessageId} onSelectedMessageChange={setActiveSourceMessageId} />
             </div>
           </div>
       </div>
       <Drawer open={conversationDrawerOpen} onClose={() => setConversationDrawerOpen(false)} title="会话导航">
         {sidebar(false)}
       </Drawer>
-      <Drawer open={sourceOpen} onClose={closeSources} title="来源核验" side="right" className="xl:hidden">
-        <SourceWorkspace
-          messages={messages}
-          conversationId={currentId}
-          selectedMessageId={activeSourceMessageId}
-          highlightedSourceIndex={activeCitation?.messageId === activeSourceMessageId ? activeCitation.sourceIndex : null}
-          onSelectedMessageChange={setActiveSourceMessageId}
-          onSourceHighlightChange={selectSource}
-        />
+      <Drawer open={sourceOpen} onClose={() => setSourceOpen(false)} title="来源核验" side="right" className="xl:hidden">
+        <SourceWorkspace messages={messages} conversationId={currentId} selectedMessageId={activeSourceMessageId} onSelectedMessageChange={setActiveSourceMessageId} />
       </Drawer>
       <PdfPreview />
     </PdfPreviewProvider>

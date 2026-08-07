@@ -34,13 +34,7 @@ from .routes_admin import router as admin_router
 from .routes_auth import router as auth_router
 from .routes_chat import router as chat_router
 from .routes_media import router as media_router
-from .routes_media_transcript import router as media_transcript_router
-from .routes_transcription import (
-    build_transcription_service,
-    recover_publications_on_boot,
-    run_publication_index_job,
-    router as transcription_router,
-)
+from .routes_transcription import build_transcription_service, router as transcription_router
 from .transcription_worker import (
     configure as configure_transcription_worker,
     recover_on_boot as recover_transcription_on_boot,
@@ -131,7 +125,6 @@ async def lifespan(app: FastAPI):
     configure_publication_runner(run_publication_index_job)
     await start_worker()
     resume_pending_on_boot()
-    recover_publications_on_boot()
     configure_transcription_worker(build_transcription_service)
     transcription_runtime_ready = ASR_ENABLED and bool(ASR_SERVICE_TOKEN)
     if transcription_runtime_ready:
@@ -176,7 +169,6 @@ app.include_router(auth_router, prefix="/api")
 app.include_router(chat_router, prefix="/api")
 app.include_router(admin_router, prefix="/api")
 app.include_router(media_router, prefix="/api")
-app.include_router(media_transcript_router, prefix="/api")
 app.include_router(transcription_router, prefix="/api")
 
 

@@ -37,8 +37,6 @@ export function MessageList({
   activeSourceMessageId = null,
   onToggleSources,
   sending = false,
-  onEditQuestion,
-  onViewQuestionVersion,
   onRegenerate,
   onViewAnswerVersion,
 }: {
@@ -49,8 +47,6 @@ export function MessageList({
   activeSourceMessageId?: string | null;
   onToggleSources?: (messageId: string) => void;
   sending?: boolean;
-  onEditQuestion?: (messageId: string, content: string) => void;
-  onViewQuestionVersion?: (messageId: string, versionIndex: number) => void;
   onRegenerate?: (messageId: string) => void;
   onViewAnswerVersion?: (messageId: string, versionIndex: number) => void;
 }) {
@@ -182,52 +178,21 @@ export function MessageList({
     .find((message) => message.role === "user")?.id;
 
   return (
-    <div className="scroll-fade-content-start relative min-h-0 flex-1">
-      <div
-        ref={scrollbar.ref}
-        data-message-scroll-container
-        className={`h-full overflow-y-auto py-6 ${scrollbar.className}`}
-        onScroll={handleScroll}
-        onMouseEnter={scrollbar.interactionProps.onMouseEnter}
-        onMouseMove={scrollbar.interactionProps.onMouseMove}
-        onMouseLeave={scrollbar.interactionProps.onMouseLeave}
-        onFocus={scrollbar.interactionProps.onFocus}
-      >
-        {turns.map((turn) => (
-          <section
-            key={turn.id}
-            ref={(element) => { turnRefs.current[turn.id] = element; }}
-            data-turn-id={turn.id}
-            className="scroll-mt-6"
-          >
-            {turn.messages.map((message) => {
-              const turnUserMessage = turn.messages.find((item) => item.role === "user");
-              const activeQuestionVersion = turnUserMessage?.userVersions?.find((version) => version.isActive);
-              const viewingActiveQuestion =
-                !activeQuestionVersion
-                || turnUserMessage?.viewedUserVersionIndex === activeQuestionVersion.versionIndex;
-              return (
+    <div className="min-h-0 flex-1 overflow-y-auto py-6">
+      {(() => {
+        let turn = 0;
+        const latestAssistantId = [...messages].reverse().find((message) => message.role === "assistant")?.id;
+        return messages.map((m) => {
+          if (m.role === "user") turn += 1;
+          return (
             <Message
               key={message.id}
               msg={message}
               conversationId={conversationId}
-              turnIndex={turn.turnIndex}
-              sourcesSelected={sourceOpen && activeSourceMessageId === message.id}
+              turnIndex={m.role === "assistant" ? turn : turn}
+              sourcesSelected={sourceOpen && activeSourceMessageId === m.id}
               onToggleSources={onToggleSources}
-              canEdit={
-                message.role === "user"
-                && message.id === latestUserId
-                && !sending
-              }
-              onEdit={onEditQuestion}
-              onViewQuestionVersion={onViewQuestionVersion}
-              canRegenerate={
-                message.role === "assistant"
-                && message.id === latestAssistantId
-                && !sending
-                && !message.streaming
-                && viewingActiveQuestion
-              }
+              canRegenerate={m.role === "assistant" && m.id === latestAssistantId && !sending && !m.streaming}
               onRegenerate={onRegenerate}
               onViewAnswerVersion={onViewAnswerVersion}
             />

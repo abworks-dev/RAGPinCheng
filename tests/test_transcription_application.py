@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 import wave
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 from api.db import connect, init_db
@@ -64,13 +64,11 @@ class FakeRemoteProvider:
         )
 
 
-@dataclass
+@dataclass(frozen=True)
 class FakeFactory:
     provider_key: str = "funasr-sensevoice"
-    created_ports: list[object] = field(default_factory=list)
 
     def create(self, ports):
-        self.created_ports.append(ports)
         return FakeRemoteProvider(ports)
 
 
@@ -120,8 +118,6 @@ def test_application_persists_candidate_version_without_publication_or_index(tmp
     )
     result = service.run_job(job.id)
     assert result.status is TranscriptionJobStatus.succeeded
-    provider_factory = service.providers.factories[0]
-    assert provider_factory.created_ports[0].application_job_id == job.id
     assert result.processed_ms == result.total_ms
     conn = factory()
     try:

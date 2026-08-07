@@ -151,6 +151,7 @@ class TestCheckpointValidation(unittest.TestCase):
 class TestLongEntry(unittest.TestCase):
     @staticmethod
     def _stage_models(root: Path, data: dict) -> dict[str, Path]:
+        root = Path(data["models_root"])
         staged = {}
         for model_id in (
             data["allowed_asr_model_ids"][0], data["vad_model_id"], data["punc_model_id"],
@@ -165,16 +166,17 @@ class TestLongEntry(unittest.TestCase):
     def test_real_entry_passes_revisions_and_uses_actual_last_duration(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            audio = root / "long.wav"
-            _silent_wav(str(audio), seconds=2.5)
             cfg_path = root / "cfg.json"
             data = valid_config(td)
+            testdata = Path(data["testdata_root"])
+            audio = testdata / "long.wav"
+            _silent_wav(str(audio), seconds=2.5)
             data["audio_chunk_s"] = 1.0
             data["thresholds"]["rtf_max"] = 10.0
             staged = self._stage_models(root, data)
             write_config(cfg_path, data)
             cfg = lib_config.load_config(cfg_path)
-            reference = root / "reference.json"
+            reference = testdata / "reference.json"
             reference.write_text(json.dumps({
                 "input_sha256": _file_sha(str(audio)),
                 "reference_text": "aaa",
@@ -186,7 +188,7 @@ class TestLongEntry(unittest.TestCase):
                 "scenario": "clear_single_speaker",
                 "annotation_version": "1",
             }), encoding="utf-8")
-            active = root / "active-runs"
+            active = Path(data["logs_root"]) / "active-runs"
             active.mkdir()
             nonce = "long-entry-test"
             guard = active / "guard.json"
@@ -234,8 +236,8 @@ class TestLongEntry(unittest.TestCase):
             env = {
                 lib_runtime.GUARD_ENV_FILE: str(guard),
                 lib_runtime.GUARD_ENV_NONCE: nonce,
-                "MODELSCOPE_CACHE": str(root / "modelscope"),
-                "HF_HOME": str(root / "huggingface"),
+                "MODELSCOPE_CACHE": str(Path(data["models_root"]) / "modelscope"),
+                "HF_HOME": str(Path(data["models_root"]) / "huggingface"),
             }
             fake_funasr = types.SimpleNamespace(AutoModel=FakeModel)
             fake_torch = types.SimpleNamespace(cuda=FakeCuda())
@@ -254,11 +256,14 @@ class TestLongEntry(unittest.TestCase):
                 "HF_HUB_OFFLINE": "1",
                 "TRANSFORMERS_OFFLINE": "1",
             })
-            reports = list((root / cfg.run_id).glob("04_run_long-*.json"))
+            reports = list((Path(cfg.reports_root) / cfg.run_id).glob("04_run_long-*.json"))
             self.assertEqual(len(reports), 1)
             payload = json.loads(reports[0].read_text(encoding="utf-8"))
             self.assertAlmostEqual(payload["last_chunk_actual_duration_s"], 0.5, places=3)
-            checkpoints = list((root / cfg.run_id / "04_run_long" / "long").glob("chunk_*.json"))
+            checkpoints = list(
+                (Path(cfg.checkpoints_root) / cfg.run_id / "04_run_long" / "long")
+                .glob("chunk_*.json")
+            )
             last = json.loads(checkpoints[-1].read_text(encoding="utf-8"))
             self.assertAlmostEqual(last["chunk_duration_s"], 0.5, places=3)
 

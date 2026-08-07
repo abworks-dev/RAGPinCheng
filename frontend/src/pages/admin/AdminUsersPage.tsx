@@ -1,4 +1,4 @@
-import { KeyRound, MoreHorizontal, ShieldCheck, UserCheck, UserRound, UserX, X } from "lucide-react";
+import { KeyRound, MoreHorizontal, ShieldCheck, UserCheck, UserRound, UserX } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api } from "../../api/client";

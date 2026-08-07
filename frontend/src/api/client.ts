@@ -15,13 +15,8 @@ import type {
   IndexedDocumentList,
   LlmHealth,
   MediaAsset,
-  MediaTranscript,
   TranscriptionJob,
   TranscriptionProfile,
-  TranscriptMarkdownPreview,
-  TranscriptPublicationJob,
-  TranscriptVersion,
-  PublishTranscriptVersionResult,
 } from "../types";
 
 // Mutating methods send X-CSRF-Token. Cookies always go along via credentials.
@@ -333,8 +328,12 @@ export const api = {
     }
     if (!res.ok) {
       const txt = await res.text().catch(() => "");
-      const detail = parseErrorDetail(txt);
-      throw new ApiError(res.status, txt, detail.message || `${res.status} ${res.statusText}`, detail.code, detail.retryable);
+      let detail = txt;
+      try {
+        const parsed = JSON.parse(txt);
+        if (parsed && typeof parsed.detail === "string") detail = parsed.detail;
+      } catch { /* keep raw */ }
+      throw new ApiError(res.status, txt, `${res.status} ${res.statusText}${detail ? `: ${detail}` : ""}`);
     }
     return (await res.json()) as MediaAsset;
   },
@@ -354,20 +353,4 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ profile_id: profileId, request_idempotency_key: requestIdempotencyKey }),
     }),
-  listTranscriptVersions: (mediaId: string) =>
-    jsonFetch<TranscriptVersion[]>(`/api/admin/transcription/media/${mediaId}/versions`),
-  previewTranscriptVersion: (versionId: string) =>
-    jsonFetch<TranscriptMarkdownPreview>(`/api/admin/transcription/versions/${versionId}/markdown`),
-  reviewTranscriptVersion: (versionId: string, approved: boolean, reviewNote: string | null = null) =>
-    jsonFetch<TranscriptVersion>(`/api/admin/transcription/versions/${versionId}/review`, {
-      method: "POST",
-      body: JSON.stringify({ approved, review_note: reviewNote }),
-    }),
-  publishTranscriptVersion: (versionId: string) =>
-    jsonFetch<PublishTranscriptVersionResult>(`/api/admin/transcription/versions/${versionId}/publish`, {
-      method: "POST",
-      body: JSON.stringify({}),
-    }),
-  getTranscriptPublicationJob: (indexJobId: string) =>
-    jsonFetch<TranscriptPublicationJob>(`/api/admin/transcription/publication-jobs/${indexJobId}`),
 };
