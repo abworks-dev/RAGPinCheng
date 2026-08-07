@@ -184,9 +184,9 @@
     一次性方案审批并执行单一 workflow；内部依次通过依赖/许可证/CUDA、双模型、
     真实推理、8 样本质量与资源门禁，任一前置门禁失败即停止，Profile 保持 disabled。
     首次 workflow `30970277613` 已在 `pip_download` 失败关闭；先完成固定 source
-    run/SHA 的精准分类增强；只读取诊断 workflow `30972780438` 的三个固定本地文件，
-    对剩余 2 条相关行仅输出固定枚举、位置、长度、哈希和字符类型计数。取得严格脱敏
-    v2 JSON 后停止，不得运行 pip、修改 pin/freeze、服务或 Profile admission。
+    run/SHA 的上下文安全结构化；只读取诊断 workflow `30972780438` 的三个固定本地文件，
+    对剩余 2 条相同上下文记录仅提取规范化 requested/owner requirement 关系。取得严格
+    脱敏 v3 JSON 后停止，不得运行 pip、修改 pin/freeze、服务或 Profile admission。
 - 完成标准：人工转录流程不退化；管理员只能选择服务端白名单 Profile；同一媒体可保留多个历史版本且只有 `app.sqlite` head 指向的版本进入正式检索；experimental Profile 强制审核；至少一个 `qualification_approved` Profile 完成隔离端到端验证后才讨论生产灰度。
 - 依赖：Phase 1～4B 已形成契约、持久化、remote Provider 与应用上传/worker/UI 前半段；Phase 5A/5B 已实现版本审阅、发布、候选索引和检索可见性，待远端 CI；Windows ASR R3A 仓库实施及 PR #8 远端 CI 已通过，但不等于生产部署完成；R3B/R3C、真实引擎/GPU/Qdrant 和生产数据均未执行；真实环境操作另按 R3 逐项审批，单卡 GPU 保持 BGE 优先。
 - 方案链接：`project-docs/plans/multi-engine-auto-transcription.md`、`project-docs/plans/multi-engine-transcription-phase1.md`、`project-docs/plans/multi-engine-transcription-phase2.md`、`project-docs/plans/multi-engine-transcription-phase3.md`、`project-docs/plans/multi-engine-transcription-phase5.md`、`project-docs/plans/multi-engine-transcription-phase5c-windows-asr-deployment.md`、`project-docs/plans/transcription-admin-workflow-hardening.md`、`project-docs/plans/faster-whisper-provider-integration.md`、`project-docs/plans/faster-whisper-r3-unified-qualification.md`、`project-docs/plans/qwen3-asr-r2-r3-integration.md`、`project-docs/decisions/0002-multi-engine-transcription.md`、`project-docs/plans/funasr-auto-transcription.md`
