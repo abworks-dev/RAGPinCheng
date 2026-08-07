@@ -2443,3 +2443,5 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`scripts/qualify-faster-whisper-production.ps1`、`.github/workflows/qualify-faster-whisper-production.yml`、`tests/test_asr_deployment_static.py`
 - 验证：PowerShell AST 解析通过；`test_asr_deployment_static.py` 31 passed。
 
+### 00:35 — 同步 faster-whisper 参数契约
+更新精确参数测试以匹配 engine_protocol.py 的 beam、temperature、prompt 和 hotwords 默认值。
