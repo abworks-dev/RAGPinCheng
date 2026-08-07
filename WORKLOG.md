@@ -2526,3 +2526,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`.github/workflows/repair-gpu-reranker-production.yml`、`scripts/diagnose_gpu_reranker.py`、`gpu_service/requirements.txt`、`requirements-gpu.txt`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
 - 验证：YAML 解析、提取后 PowerShell AST 解析、Python 编译、faster-whisper qualification 与部署静态专项测试 `63 passed`、`git diff --check` 通过。
 - 待办/风险：workflow 将创建临时 S4U 任务并真实加载模型；候选失败不会修改全局包，候选成功后全局包修改可按 backup 中的原版本回滚。GPU 服务尚未恢复。
+
+### 07:43 — 修正 reranker 隔离包安装通道
+
+- 完成：首轮修复 run `31227946861` 在隔离 venv 下载前因默认 PyPI TLS EOF 失败，确认未创建临时任务或修改全局包；修复 workflow 改用既有 GPU 部署使用的清华 PyPI 镜像，并将 pip 重试输出留在本地诊断日志，防止 PowerShell 将其提升为终止性错误。
+- 文件：`.github/workflows/repair-gpu-reranker-production.yml`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
+- 验证：YAML 解析、提取后 PowerShell AST 解析、faster-whisper qualification 与部署静态专项测试 `63 passed`、`git diff --check` 通过。
+- 待办/风险：需重新执行隔离验证；候选仍未通过前全局包与 GPU 服务保持未修改状态。

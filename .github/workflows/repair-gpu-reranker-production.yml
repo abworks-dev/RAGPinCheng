@@ -38,6 +38,7 @@ jobs:
           $BackupRoot = Join-Path $RepositoryPath "backups\gpu-reranker-runtime-$RunId"
           $CandidateTransformers = "4.46.3"
           $CandidateTokenizers = "0.20.3"
+          $PackageIndexUrl = "https://pypi.tuna.tsinghua.edu.cn/simple"
           $TaskName = "RAGPinCheng-GPU-Reranker-Diagnostic-$RunId"
 
           if (-not (Test-Path -LiteralPath $Python -PathType Leaf)) {
@@ -76,6 +77,27 @@ jobs:
                 $line = $line -replace '(?i)(https?://)[^/\s:@]+:[^@\s]+@', '$1[REDACTED]@'
                 Write-Host "GPU_RERANKER_DIAGNOSTIC $line"
               }
+          }
+
+          function Install-PinnedPackages {
+            param(
+              [Parameter(Mandatory = $true)][string]$RuntimePython,
+              [Parameter(Mandatory = $true)][string]$LogPath
+            )
+            $savedErrorActionPreference = $ErrorActionPreference
+            $ErrorActionPreference = "Continue"
+            try {
+              $output = & $RuntimePython -m pip install --upgrade --force-reinstall --no-deps `
+                --index-url $PackageIndexUrl `
+                "transformers==$CandidateTransformers" "tokenizers==$CandidateTokenizers" 2>&1
+              $exitCode = $LASTEXITCODE
+            } finally {
+              $ErrorActionPreference = $savedErrorActionPreference
+            }
+            $output | Set-Content -LiteralPath $LogPath -Encoding UTF8
+            if ($exitCode -ne 0) {
+              throw "Pinned package install failed; see local diagnostic log"
+            }
           }
 
           $s4uScript = @'
@@ -165,23 +187,28 @@ jobs:
           & $Python -m venv --system-site-packages $venv
           if ($LASTEXITCODE -ne 0) { throw "Unable to create isolated compatibility venv" }
           $candidatePython = Join-Path $venv "Scripts\python.exe"
-          $candidateInstall = & $candidatePython -m pip install --upgrade --force-reinstall --no-deps `
-            "transformers==$CandidateTransformers" "tokenizers==$CandidateTokenizers" 2>&1
-          if ($LASTEXITCODE -ne 0) { throw "Isolated compatibility install failed" }
+          Install-PinnedPackages -RuntimePython $candidatePython `
+            -LogPath (Join-Path $DiagnosticRoot "candidate-pip.log")
           Invoke-S4URerankerProbe -Name "candidate" -RuntimePython $candidatePython
 
           $repairApplied = $false
           try {
-            $globalInstall = & $Python -m pip install --upgrade --force-reinstall --no-deps `
-              "transformers==$CandidateTransformers" "tokenizers==$CandidateTokenizers" 2>&1
-            if ($LASTEXITCODE -ne 0) { throw "Scoped global package install failed" }
+            Install-PinnedPackages -RuntimePython $Python `
+              -LogPath (Join-Path $BackupRoot "global-install.log")
             $repairApplied = $true
             Invoke-S4URerankerProbe -Name "global" -RuntimePython $Python
             Write-Host "GPU_RERANKER_REPAIR status=success transformers=$CandidateTransformers tokenizers=$CandidateTokenizers"
           } catch {
             if ($repairApplied) {
-              & $Python -m pip install --upgrade --force-reinstall --no-deps `
-                "transformers==$originalTransformers" "tokenizers==$originalTokenizers" 2>&1 | Out-Null
+              $savedErrorActionPreference = $ErrorActionPreference
+              $ErrorActionPreference = "Continue"
+              try {
+                & $Python -m pip install --upgrade --force-reinstall --no-deps `
+                  --index-url $PackageIndexUrl `
+                  "transformers==$originalTransformers" "tokenizers==$originalTokenizers" 2>&1 | Out-Null
+              } finally {
+                $ErrorActionPreference = $savedErrorActionPreference
+              }
               Write-Host "GPU_RERANKER_REPAIR rollback=attempted"
             }
             throw
