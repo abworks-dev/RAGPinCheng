@@ -395,6 +395,9 @@ def test_gpu_recovery_workflow_is_manual_and_limited_to_the_verified_task():
     assert 'Get-NetTCPConnection -LocalPort 8100 -State Listen' in workflow
     assert 'Uri "http://${PRIVATE_IPV4}:8100/health"' in workflow
     assert "Start-ScheduledTask -TaskName $TaskName" in workflow
+    assert "Register-ScheduledTask" in workflow
+    assert "Registered missing RAGPinCheng-GPU Scheduled Task" in workflow
+    assert "Unregister-ScheduledTask -TaskName $TaskName" in workflow
     assert "deploy-gpu.ps1" not in workflow
     assert "deploy-app" not in workflow
 

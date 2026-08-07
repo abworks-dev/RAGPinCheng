@@ -43,64 +43,108 @@ jobs:
             throw "GPU service start wrapper is missing"
           }
 
-          $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
-          $actions = @($task.Actions)
-          if (
-            $actions.Count -ne 1 -or
-            [string]$actions[0].Execute -ne "powershell.exe" -or
-            [string]$actions[0].Arguments -ne $ExpectedTaskArguments -or
-            [string]$task.Principal.UserId -ne "Administrator"
-          ) {
-            throw "Refusing to modify an unexpected RAGPinCheng-GPU Scheduled Task"
-          }
-
-          $healthy = $false
-          $listener = Get-NetTCPConnection -LocalPort 8100 -State Listen -ErrorAction SilentlyContinue |
-            Select-Object -First 1
-          if ($null -ne $listener) {
-            try {
-              $health = Invoke-RestMethod -Method Get -Uri "http://${PRIVATE_IPV4}:8100/health" -TimeoutSec 10
-              $healthy = $health.status -eq "ok" -and $health.model_loaded -eq $true
-            } catch {
-              $healthy = $false
-            }
-          }
-          if ($healthy) {
-            Write-Host "GPU service is already healthy; no task state changed"
-            exit 0
-          }
-
-          if ($task.State -eq "Running") {
-            Stop-ScheduledTask -TaskName $TaskName -ErrorAction Stop
-            $stopDeadline = [DateTimeOffset]::Now.AddSeconds(30)
-            do {
-              Start-Sleep -Seconds 2
-              $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
-            } while ($task.State -eq "Running" -and [DateTimeOffset]::Now -lt $stopDeadline)
-            if ($task.State -eq "Running") {
-              throw "RAGPinCheng-GPU did not stop within 30 seconds"
+          function Assert-ExpectedGpuTask {
+            param([Parameter(Mandatory = $true)][object]$Task)
+            $actions = @($Task.Actions)
+            if (
+              $actions.Count -ne 1 -or
+              [string]$actions[0].Execute -ne "powershell.exe" -or
+              [string]$actions[0].Arguments -ne $ExpectedTaskArguments -or
+              [string]$Task.Principal.UserId -ne "Administrator" -or
+              [string]$Task.Principal.LogonType -ne "S4U" -or
+              [string]$Task.Principal.RunLevel -ne "Highest"
+            ) {
+              throw "Refusing to modify an unexpected RAGPinCheng-GPU Scheduled Task"
             }
           }
 
-          Start-ScheduledTask -TaskName $TaskName -ErrorAction Stop
-          $deadline = [DateTimeOffset]::Now.AddSeconds(90)
-          do {
-            Start-Sleep -Seconds 5
+          $taskCreated = $false
+          $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+          if ($null -eq $task) {
+            $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $ExpectedTaskArguments
+            $trigger = New-ScheduledTaskTrigger -AtStartup
+            $principal = New-ScheduledTaskPrincipal `
+              -UserId "Administrator" `
+              -LogonType S4U `
+              -RunLevel Highest
+            $settings = New-ScheduledTaskSettingsSet `
+              -RestartCount 3 `
+              -RestartInterval (New-TimeSpan -Minutes 1) `
+              -ExecutionTimeLimit (New-TimeSpan -Days 3)
+            Register-ScheduledTask `
+              -TaskName $TaskName `
+              -Action $action `
+              -Trigger $trigger `
+              -Principal $principal `
+              -Settings $settings `
+              -ErrorAction Stop | Out-Null
+            $taskCreated = $true
+            $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+            Write-Host "Registered missing RAGPinCheng-GPU Scheduled Task"
+          }
+          Assert-ExpectedGpuTask -Task $task
+
+          try {
+            $healthy = $false
             $listener = Get-NetTCPConnection -LocalPort 8100 -State Listen -ErrorAction SilentlyContinue |
               Select-Object -First 1
-            if ($null -eq $listener) {
-              continue
+            if ($null -ne $listener) {
+              try {
+                $health = Invoke-RestMethod -Method Get -Uri "http://${PRIVATE_IPV4}:8100/health" -TimeoutSec 10
+                $healthy = $health.status -eq "ok" -and $health.model_loaded -eq $true
+              } catch {
+                $healthy = $false
+              }
             }
-            try {
-              $health = Invoke-RestMethod -Method Get -Uri "http://${PRIVATE_IPV4}:8100/health" -TimeoutSec 10
-              $healthy = $health.status -eq "ok" -and $health.model_loaded -eq $true
-            } catch {
-              $healthy = $false
+            if ($healthy) {
+              Write-Host "GPU service is already healthy; no task state changed"
+              exit 0
             }
-          } while (-not $healthy -and [DateTimeOffset]::Now -lt $deadline)
 
-          $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
-          if (-not $healthy -or $task.State -ne "Running") {
-            throw "RAGPinCheng-GPU did not become healthy within 90 seconds"
+            if ($task.State -eq "Running") {
+              Stop-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+              $stopDeadline = [DateTimeOffset]::Now.AddSeconds(30)
+              do {
+                Start-Sleep -Seconds 2
+                $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+              } while ($task.State -eq "Running" -and [DateTimeOffset]::Now -lt $stopDeadline)
+              if ($task.State -eq "Running") {
+                throw "RAGPinCheng-GPU did not stop within 30 seconds"
+              }
+            }
+
+            Start-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+            $deadline = [DateTimeOffset]::Now.AddSeconds(90)
+            do {
+              Start-Sleep -Seconds 5
+              $listener = Get-NetTCPConnection -LocalPort 8100 -State Listen -ErrorAction SilentlyContinue |
+                Select-Object -First 1
+              if ($null -eq $listener) {
+                continue
+              }
+              try {
+                $health = Invoke-RestMethod -Method Get -Uri "http://${PRIVATE_IPV4}:8100/health" -TimeoutSec 10
+                $healthy = $health.status -eq "ok" -and $health.model_loaded -eq $true
+              } catch {
+                $healthy = $false
+              }
+            } while (-not $healthy -and [DateTimeOffset]::Now -lt $deadline)
+
+            $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+            if (-not $healthy -or $task.State -ne "Running") {
+              throw "RAGPinCheng-GPU did not become healthy within 90 seconds"
+            }
+            Write-Host "GPU service recovered: task=Running port=8100 health=ok model_loaded=true"
+          } catch {
+            if ($taskCreated) {
+              try {
+                $createdTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+                if ($null -ne $createdTask -and $createdTask.State -eq "Running") {
+                  Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+                }
+                Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
+              } catch {
+              }
+            }
+            throw
           }
-          Write-Host "GPU service recovered: task=Running port=8100 health=ok model_loaded=true"
