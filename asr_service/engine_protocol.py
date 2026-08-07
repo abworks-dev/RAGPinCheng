@@ -108,7 +108,26 @@ FASTER_WHISPER_SERVICE_CONFIG = ServiceProfileConfig(
     "dropbox-dash/faster-whisper-large-v3-turbo",
     "0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf",
     "zh-CN",
-    hotwords=("GB 50016-2014", "建筑设计防火规范", "GB 50011-2010", "建筑抗震设计规范"),
+    hotwords=(
+        "GB 50016-2014",
+        "建筑设计防火规范",
+        "GB 50011-2010",
+        "建筑抗震设计规范",
+        "构件碰撞",
+        "净高分析",
+        "复核",
+        "建筑信息模型",
+        "钢结构",
+        "焊缝",
+        "螺栓",
+        "规范编号",
+    ),
+    beam_size=5,
+    temperature=0.2,
+    initial_prompt=(
+        "这是一段关于建筑信息模型、BIM、构件碰撞、净高分析、"
+        "钢结构、焊缝、螺栓和规范编号的工程语音转写。"
+    ),
 )
 
 QWEN3_ASR_SERVICE_CONFIG = ServiceProfileConfig(
