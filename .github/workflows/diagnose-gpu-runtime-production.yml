@@ -109,6 +109,7 @@ jobs:
           from datetime import datetime, timezone
 
           stage_path = sys.argv[1]
+          repository_path = sys.argv[2]
 
           def write_stage(name):
               line = f"GPU_S4U_STAGE stage={name} at={datetime.now(timezone.utc).isoformat()}"
@@ -121,6 +122,7 @@ jobs:
           import torch
           write_stage("torch_import_complete")
           write_stage("config_import_start")
+          sys.path.insert(0, repository_path)
           from gpu_service.config import EMBED_MODEL, RERANKER_MODEL
           from FlagEmbedding import BGEM3FlagModel, FlagReranker
           write_stage("config_import_complete")
@@ -191,7 +193,7 @@ jobs:
           Write-Stage -Name "model_load_start"
           $process = Start-Process `
             -FilePath $python `
-            -ArgumentList @("-X", "faulthandler", $probePath, $StagePath) `
+            -ArgumentList @("-X", "faulthandler", $probePath, $StagePath, $RepositoryPath) `
             -RedirectStandardOutput $StdoutPath `
             -RedirectStandardError $StderrPath `
             -WindowStyle Hidden `

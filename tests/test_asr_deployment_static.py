@@ -429,6 +429,7 @@ def test_gpu_runtime_diagnostic_is_manual_bounded_and_read_only():
     assert "FlagReranker" in workflow
     assert 'write_stage("python_entry")' in workflow
     assert 'write_stage("torch_import_start")' in workflow
+    assert "sys.path.insert(0, repository_path)" in workflow
     assert 'write_stage("embed_start")' in workflow
     assert 'write_stage("reranker_start")' in workflow
     assert 'write_stage("model_load_complete")' in workflow
