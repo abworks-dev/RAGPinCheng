@@ -2511,3 +2511,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`.github/workflows/diagnose-gpu-runtime-production.yml`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
 - 验证：YAML 解析、提取后 PowerShell AST 解析、faster-whisper qualification 与部署静态专项测试 `62 passed`、`git diff --check` 通过。
 - 待办/风险：下一次只读诊断会短暂实际加载模型；其阶段结果将决定是否需要单独批准运行时修复。
+
+### 07:02 — 修正 S4U probe 的模块搜索路径
+
+- 完成：run `31225760616` 证明 S4U Python 与 Torch 正常，失败原因为临时 probe 的脚本目录替代仓库根导致 `gpu_service` 不可导入；probe 现仅在自身进程中将 `${PRODUCTION_REPO_PATH}` 加入 `sys.path`，与生产 `python -m gpu_service.app` 的模块发现语义一致。
+- 文件：`.github/workflows/diagnose-gpu-runtime-production.yml`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
+- 验证：YAML 解析、提取后 PowerShell AST 解析、faster-whisper qualification 与部署静态专项测试 `62 passed`、`git diff --check` 通过。
+- 待办/风险：需重跑以实际采集 BGE-M3 与 reranker 的加载结果；仍不修改生产服务、模型或全局依赖。
