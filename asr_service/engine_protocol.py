@@ -122,11 +122,11 @@ FASTER_WHISPER_SERVICE_CONFIG = ServiceProfileConfig(
         "螺栓",
         "规范编号",
     ),
-    beam_size=5,
-    temperature=0.2,
+    beam_size=10,
+    temperature=0.1,
     initial_prompt=(
-        "这是一段关于建筑信息模型、BIM、构件碰撞、净高分析、"
-        "钢结构、焊缝、螺栓和规范编号的工程语音转写。"
+        "以下是嘈杂环境下的中文工程语音转写，建筑信息模型、BIM、"
+        "构件碰撞、净高分析、钢结构、焊缝、螺栓、规范编号等专业术语要准确识别。"
     ),
 )
 
