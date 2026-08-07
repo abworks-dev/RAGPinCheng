@@ -981,6 +981,16 @@ def test_qwen3_asr_qualification_freezes_dual_models_bf16_and_result_flow():
     assert "_parse_transcript_turns" in runner
     assert "QWEN3_ASR_PROFILE_ID" in runner
     assert ".transcribe(" not in runner
+    assert "R3_EXTERNAL_HEARTBEAT" in script
+    assert 'Write-Host "R3_STAGE stage=dependency_preparation status=start"' in script
+    assert 'Write-StageTiming -Stage "model_preparation"' in script
+    assert 'Write-StageTiming -Stage "cuda_preflight"' in script
+    assert "$QualificationWatchdogSeconds = 10200" in script
+    assert "R3_QUALIFICATION_HEARTBEAT elapsed_ms=" in script
+    assert '$FailureCode = "qualification_timeout"' in script
+    assert '"warmup-start"' in runner
+    assert '"warmup-complete"' in runner
+    assert '"sample-complete"' in runner
 
 
 def test_qwen3_asr_resolver_evidence_is_fixed_offline_and_sanitized():

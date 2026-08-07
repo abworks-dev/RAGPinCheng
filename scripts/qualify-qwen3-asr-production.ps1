@@ -82,6 +82,15 @@ function Get-Sha256 {
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
 }
 
+function Write-StageTiming {
+    param(
+        [Parameter(Mandatory = $true)][string]$Stage,
+        [Parameter(Mandatory = $true)][System.Diagnostics.Stopwatch]$Stopwatch
+    )
+    $Stopwatch.Stop()
+    Write-Host ("R3_STAGE stage={0} elapsed_ms={1}" -f $Stage, $Stopwatch.ElapsedMilliseconds)
+}
+
 function Assert-DirectChild {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
@@ -131,29 +140,85 @@ function Invoke-External {
     param(
         [Parameter(Mandatory = $true)][string]$FilePath,
         [Parameter(Mandatory = $true)][string[]]$Arguments,
-        [Parameter(Mandatory = $true)][string]$LogPath
+        [Parameter(Mandatory = $true)][string]$LogPath,
+        [int]$TimeoutSeconds = 3600,
+        [int]$HeartbeatSeconds = 30
     )
-    $output = @()
-    $exitCode = -1
-    $previousPreference = $ErrorActionPreference
-    try {
-        # Windows PowerShell 5.1 can promote redirected native stderr to a
-        # terminating NativeCommandError when the caller uses Stop. Capture
-        # the complete native streams first, then enforce the exit code below.
-        $ErrorActionPreference = "Continue"
-        $output = @(& $FilePath @Arguments 2>&1)
-        $exitCode = $LASTEXITCODE
-    } finally {
-        $ErrorActionPreference = $previousPreference
+    $stage = if (
+        [string]::IsNullOrWhiteSpace($DependencyFailureStage) -or
+        $DependencyFailureStage -eq "not_started"
+    ) {
+        "external"
+    } else {
+        $DependencyFailureStage
     }
-    [System.IO.File]::WriteAllLines(
-        $LogPath,
-        [string[]]@($output | ForEach-Object { [string]$_ }),
-        (New-Object System.Text.UTF8Encoding($false))
-    )
+    $stdoutPath = "$LogPath.stdout"
+    $stderrPath = "$LogPath.stderr"
+    $process = $null
+    try {
+        Write-Host "R3_STAGE stage=$stage status=start"
+        $process = Start-Process `
+            -FilePath $FilePath `
+            -ArgumentList $Arguments `
+            -WindowStyle Hidden `
+            -RedirectStandardOutput $stdoutPath `
+            -RedirectStandardError $stderrPath `
+            -PassThru
+        $startedAt = [DateTimeOffset]::Now
+        $nextHeartbeat = $startedAt.AddSeconds($HeartbeatSeconds)
+        while (-not $process.HasExited) {
+            $now = [DateTimeOffset]::Now
+            if ($now -ge $nextHeartbeat) {
+                $stdoutBytes = if (Test-Path -LiteralPath $stdoutPath -PathType Leaf) {
+                    [int64](Get-Item -LiteralPath $stdoutPath).Length
+                } else { 0 }
+                $stderrBytes = if (Test-Path -LiteralPath $stderrPath -PathType Leaf) {
+                    [int64](Get-Item -LiteralPath $stderrPath).Length
+                } else { 0 }
+                Write-Host (
+                    "R3_EXTERNAL_HEARTBEAT stage={0} elapsed_ms={1} stdout_bytes={2} stderr_bytes={3}" -f
+                    $stage,
+                    [int64](($now - $startedAt).TotalMilliseconds),
+                    $stdoutBytes,
+                    $stderrBytes
+                )
+                $nextHeartbeat = $now.AddSeconds($HeartbeatSeconds)
+            }
+            if (($now - $startedAt).TotalSeconds -ge $TimeoutSeconds) {
+                try {
+                    $resolvedExecutable = (Get-Command $FilePath -ErrorAction Stop).Source
+                    Stop-OwnedProcess `
+                        -Process $process `
+                        -ExpectedExecutables @($resolvedExecutable) `
+                        -ExpectedCommandFragment ([System.IO.Path]::GetFileName($resolvedExecutable))
+                } catch {
+                    try { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue } catch {}
+                }
+                throw "External command timed out in stage $stage after $TimeoutSeconds seconds"
+            }
+            Start-Sleep -Seconds 1
+            $process.Refresh()
+        }
+        $exitCode = $process.ExitCode
+        $output = @(
+            @(Get-Content -LiteralPath $stdoutPath -Encoding UTF8 -ErrorAction SilentlyContinue) +
+            @(Get-Content -LiteralPath $stderrPath -Encoding UTF8 -ErrorAction SilentlyContinue)
+        )
+        [System.IO.File]::WriteAllLines(
+            $LogPath,
+            [string[]]@($output | ForEach-Object { [string]$_ }),
+            (New-Object System.Text.UTF8Encoding($false))
+        )
+    } catch {
+        if ($null -ne $process -and -not $process.HasExited) {
+            try { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue } catch {}
+        }
+        throw
+    }
     if ($exitCode -ne 0) {
         throw "External command failed with exit code $exitCode; see $LogPath"
     }
+    Write-Host "R3_STAGE stage=$stage status=complete"
 }
 
 function Assert-ExternalFailureCapture {
@@ -932,6 +997,8 @@ try {
         production_profiles = @($PreProductionCapabilities.service_profiles)
     })
 
+    Write-Host "R3_STAGE stage=dependency_preparation status=start"
+    $DependencyStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
     $FailureCode = "dependency_preparation_failed"
     $DependencyFailureStage = "production_freeze"
     $DependencyFailureLog = Join-Path $LogRoot "production-pip-freeze.stderr.log"
@@ -1075,8 +1142,12 @@ print('qualification-module-origins-verified')
             "--license-report", (Join-Path $EvidenceRoot "license-matrix.json")
         ) `
         -LogPath $DependencyFailureLog
+    Write-StageTiming -Stage "dependency_preparation" -Stopwatch $DependencyStopwatch
 
     $FailureCode = "model_preparation_failed"
+    $DependencyFailureStage = "model_preparation"
+    Write-Host "R3_STAGE stage=model_preparation status=start"
+    $ModelStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
     Set-ScopedProxy -Proxy $env:ASR_MODEL_DOWNLOAD_PROXY
     try {
         Invoke-External `
@@ -1090,6 +1161,7 @@ print('qualification-module-origins-verified')
             -LogPath (Join-Path $LogRoot "model-preparation.log")
     } finally {
         Clear-ScopedProxy
+        Write-StageTiming -Stage "model_preparation" -Stopwatch $ModelStopwatch
     }
     if (
         -not (Test-Path -LiteralPath $AsrModelManifest -PathType Leaf) -or
@@ -1101,6 +1173,9 @@ print('qualification-module-origins-verified')
     Copy-Item -LiteralPath $AlignerModelManifest -Destination (Join-Path $EvidenceRoot "aligner-model-manifest.json")
 
     $FailureCode = "cuda_preflight_failed"
+    $DependencyFailureStage = "cuda_preflight"
+    Write-Host "R3_STAGE stage=cuda_preflight status=start"
+    $CudaStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
     Invoke-External `
         -FilePath $VenvPython `
         -Arguments @(
@@ -1108,6 +1183,7 @@ print('qualification-module-origins-verified')
             "import torch; assert torch.cuda.is_available(); assert torch.cuda.is_bf16_supported(); x=torch.ones(1,device='cuda',dtype=torch.bfloat16); assert x.dtype==torch.bfloat16; print('cuda-bf16-ready')"
         ) `
         -LogPath (Join-Path $LogRoot "cuda-preflight.log")
+    Write-StageTiming -Stage "cuda_preflight" -Stopwatch $CudaStopwatch
 
     $FailureCode = "temporary_service_failed"
     $TokenBytes = New-Object byte[] 48
@@ -1191,6 +1267,8 @@ print('qualification-module-origins-verified')
     }
 
     $FailureCode = "qualification_failed"
+    Write-Host "R3_STAGE stage=eight_sample_inference status=start"
+    $InferenceStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
     $QualificationStdout = Join-Path $LogRoot "qualification-runner.stdout.log"
     $QualificationStderr = Join-Path $LogRoot "qualification-runner.stderr.log"
     $QualificationProcess = Start-Process `
@@ -1209,7 +1287,29 @@ print('qualification-module-origins-verified')
         -PassThru
 
     $GpuEvidence = Join-Path $EvidenceRoot "gpu-samples.jsonl"
+    $QualificationStartedAt = [DateTimeOffset]::Now
+    $NextQualificationHeartbeatAt = $QualificationStartedAt.AddSeconds(30)
+    # Eight fixed samples run twice with an individual 10-minute request cap.
+    # Keep cleanup time inside the workflow's 180-minute job timeout.
+    $QualificationWatchdogSeconds = 10200
     while (-not $QualificationProcess.HasExited) {
+        $now = [DateTimeOffset]::Now
+        if ($now -ge $NextQualificationHeartbeatAt) {
+            $runnerOutputStamp = "missing"
+            if (Test-Path -LiteralPath $QualificationStdout -PathType Leaf) {
+                $runnerOutputStamp = (Get-Item -LiteralPath $QualificationStdout).LastWriteTimeUtc.ToString("o")
+            }
+            Write-Host (
+                "R3_QUALIFICATION_HEARTBEAT elapsed_ms={0} runner_stdout_updated_utc={1}" -f
+                [int64](($now - $QualificationStartedAt).TotalMilliseconds),
+                $runnerOutputStamp
+            )
+            $NextQualificationHeartbeatAt = $now.AddSeconds(30)
+        }
+        if (($now - $QualificationStartedAt).TotalSeconds -ge $QualificationWatchdogSeconds) {
+            $FailureCode = "qualification_timeout"
+            throw "Qualification runner exceeded the fixed whole-stage timeout of $QualificationWatchdogSeconds seconds"
+        }
         $sample = Get-GpuSample
         $PeakMemoryMiB = [Math]::Max($PeakMemoryMiB, [int]$sample.memory_used_mib)
         $PeakUtilization = [Math]::Max($PeakUtilization, [int]$sample.utilization_percent)
@@ -1241,6 +1341,7 @@ print('qualification-module-origins-verified')
     if ($QualificationProcess.ExitCode -ne 0) {
         throw "Qualification runner failed; see local run logs"
     }
+    Write-StageTiming -Stage "eight_sample_inference" -Stopwatch $InferenceStopwatch
     $serviceLogs = (
         (Get-Content -LiteralPath $ServiceStdout -Raw -ErrorAction SilentlyContinue) +
         (Get-Content -LiteralPath $ServiceStderr -Raw -ErrorAction SilentlyContinue)
