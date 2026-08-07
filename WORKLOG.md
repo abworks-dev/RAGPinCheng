@@ -2437,3 +2437,9 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 完成：run `31180581665` 证明 `Start-Process -ArgumentList` 即使传 `1` 仍以字符串到达子 PowerShell；改为传 `-ExecuteQualification:$true`，由子解释器解析为真正布尔值。
 - 文件：`.github/workflows/qualify-faster-whisper-production.yml`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
 - 验证：待提交后重新触发资格 run。
+### 21:45 — 修复 faster-whisper 外层 wrapper 布尔传参
+
+- 完成：将 `qualify-faster-whisper-production.ps1` 的 `ExecuteQualification` 参数由 `[bool]` 改为 `[string]`，并在脚本顶部按白名单字符串转布尔，避免 `Start-Process -ArgumentList` 传布尔时被字符串化导致参数绑定失败。
+- 文件：`scripts/qualify-faster-whisper-production.ps1`、`.github/workflows/qualify-faster-whisper-production.yml`、`tests/test_asr_deployment_static.py`
+- 验证：PowerShell AST 解析通过；`test_asr_deployment_static.py` 31 passed。
+
