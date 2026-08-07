@@ -19,6 +19,7 @@ from scripts.extract_faster_whisper_resolver_evidence import (
     EvidenceError,
     _parse_logs,
     _parse_requirement,
+    _specifiers_prove_conflict,
     _strip_powershell_prefix,
 )
 
@@ -183,6 +184,33 @@ def _safe_unparsed_category(line: str) -> str:
     return "still_unknown"
 
 
+def _context_requirements(line: str) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    requested = re.search(
+        r"The user requested(?: \(constraint\))?\s+(?P<requirement>.+)$",
+        line,
+        re.IGNORECASE,
+    )
+    if requested and _safe_requirement_parsed(requested.group("requirement")):
+        parsed = _parse_requirement(requested.group("requirement"))
+        if parsed:
+            package, specifier = parsed
+            rows.append({"kind": "requested_requirement", "package": package, "specifier": specifier, "owner": "", "owner_version": ""})
+    owner = re.search(
+        r"(?P<owner>[A-Za-z0-9_.-]+)\s+"
+        r"(?P<owner_version>[A-Za-z0-9+.!_-]+)\s+depends on\s+"
+        r"(?P<requirement>.+)$",
+        line,
+        re.IGNORECASE,
+    )
+    if owner and _safe_requirement_parsed(owner.group("requirement")):
+        parsed = _parse_requirement(owner.group("requirement"))
+        if parsed:
+            package, specifier = parsed
+            rows.append({"kind": "owner_dependency", "package": package, "specifier": specifier, "owner": owner.group("owner"), "owner_version": owner.group("owner_version")})
+    return rows
+
+
 def _unparsed_records(
     named_logs: dict[str, list[str]],
 ) -> list[dict[str, Any]]:
@@ -266,6 +294,7 @@ def _unparsed_records(
                         "sha256": hashlib.sha256(payload).hexdigest(),
                         "character_types": _character_counts(raw),
                         "category": _safe_unparsed_category(line),
+                        "requirements": _context_requirements(line),
                     }
                 )
                 if len(records) > MAX_UNPARSED_RECORDS:
@@ -281,6 +310,11 @@ def _classification(
         return "proven_version_conflict"
     if "binary_distribution_unavailable" in blocker_kinds:
         return "binary_unavailable"
+    context_rows = [row for item in unparsed_records for row in item["requirements"]]
+    for owner in (row for row in context_rows if row["kind"] == "owner_dependency"):
+        for requested in (row for row in context_rows if row["kind"] == "requested_requirement"):
+            if owner["package"] == requested["package"] and _specifiers_prove_conflict(owner["specifier"], requested["specifier"]):
+                return "proven_version_conflict"
     categories = {item["category"] for item in unparsed_records}
     if "network_or_index" in categories:
         return "network_or_index"
@@ -319,7 +353,7 @@ def extract_evidence(*, source_root: Path = SOURCE_RUN_ROOT) -> dict[str, Any]:
         "still_unknown",
     }
     return {
-        "schema_version": "qwen3-asr-r3-resolver-evidence/2",
+        "schema_version": "qwen3-asr-r3-resolver-evidence/3",
         "status": "evidence_complete" if evidence_complete else "evidence_incomplete",
         "classification": classification,
         "source_run_id": SOURCE_RUN_ID,
