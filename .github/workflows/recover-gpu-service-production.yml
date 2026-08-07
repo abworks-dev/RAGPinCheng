@@ -75,6 +75,30 @@ jobs:
               $hostAddressPresent,
               $gpuProcessCount
             )
+            $applicationEvents = @(
+              Get-WinEvent -FilterHashtable @{
+                LogName = "Application"
+                StartTime = (Get-Date).AddMinutes(-10)
+              } -ErrorAction SilentlyContinue |
+                Where-Object { $_.ProviderName -in @("Application Error", "Windows Error Reporting") } |
+                Select-Object -First 8
+            )
+            foreach ($event in $applicationEvents) {
+              $message = [string]$event.Message
+              if ($message -notmatch '(?i)python\.exe|gpu_service') {
+                continue
+              }
+              $safeLines = @(
+                $message -split "`r?`n" |
+                  Where-Object { $_ -match '(?i)faulting application|faulting module|exception code|exception offset' } |
+                  ForEach-Object {
+                    $_ -replace '(?i)(https?://)[^/\s:@]+:[^@\s]+@', '$1[REDACTED]@'
+                  }
+              )
+              foreach ($line in $safeLines) {
+                Write-Host "GPU_STARTUP_DIAGNOSTIC event_id=$($event.Id) $line"
+              }
+            }
             foreach ($path in @(
               (Join-Path $RepositoryPath "gpu_service.error.log"),
               (Join-Path $RepositoryPath "gpu_service.log")
@@ -156,6 +180,10 @@ jobs:
             $deadline = [DateTimeOffset]::Now.AddSeconds(180)
             do {
               Start-Sleep -Seconds 5
+              $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+              if ($task.State -ne "Running") {
+                break
+              }
               $listener = Get-NetTCPConnection -LocalPort 8100 -State Listen -ErrorAction SilentlyContinue |
                 Select-Object -First 1
               if ($null -eq $listener) {
