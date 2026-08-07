@@ -13,6 +13,7 @@ export async function* streamChat(
     query?: string;
     categories?: string[] | null;
     regenerate_assistant_message_id?: number;
+    edit_user_message_id?: number;
   },
   signal?: AbortSignal,
 ): AsyncGenerator<ChatEvent, void, void> {

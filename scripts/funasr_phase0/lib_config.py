@@ -22,14 +22,12 @@ import hashlib
 import json
 import os
 import re
-import tempfile
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
 CONFIG_SCHEMA_VERSION = "phase0-config/2"
-EXECUTION_MODES = frozenset({"test", "approved_sandbox"})
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -59,8 +57,6 @@ class Thresholds:
 @dataclass(frozen=True)
 class Config:
     schema_version: str
-    execution_mode: str
-    approved_root: str
     run_id: str
     approved_window_start: dt.datetime
     approved_window_end: dt.datetime
@@ -153,14 +149,6 @@ def load_config(path: str | os.PathLike[str]) -> Config:
         raise ValueError(
             f"config schema_version mismatch: got {schema!r}, want {CONFIG_SCHEMA_VERSION!r}"
         )
-
-    execution_mode = str(_require(raw_obj, "execution_mode"))
-    if execution_mode not in EXECUTION_MODES:
-        raise ValueError(
-            f"execution_mode must be one of {sorted(EXECUTION_MODES)}, "
-            f"got {execution_mode!r}"
-        )
-    approved_root = str(_require(raw_obj, "approved_root"))
 
     # Token guard
     if "bge_token" in raw_obj and raw_obj["bge_token"]:
@@ -279,8 +267,6 @@ def load_config(path: str | os.PathLike[str]) -> Config:
 
     cfg = Config(
         schema_version=schema,
-        execution_mode=execution_mode,
-        approved_root=approved_root,
         run_id=run_id,
         approved_window_start=win_start,
         approved_window_end=win_end,
@@ -308,8 +294,7 @@ def load_config(path: str | os.PathLike[str]) -> Config:
         short_sample_tolerance_s=float(_require(raw_obj, "short_sample_tolerance_s")),
         thresholds=thresholds,
         extra={k: v for k, v in raw_obj.items() if k not in {
-            "schema_version", "execution_mode", "approved_root", "run_id",
-            "approved_window_start", "approved_window_end",
+            "schema_version", "run_id", "approved_window_start", "approved_window_end",
             "shared_production_gpu_confirmed", "bge_base_url", "bge_expected_model",
             "bge_expected_reranker", "bge_expected_device", "bge_expected_torch_version",
             "embed_rpm", "rerank_rpm", "baseline_duration_s", "testdata_root",
@@ -365,69 +350,16 @@ def gate_for_cpu_entry(cfg: Config, *, command_name: str) -> None:
 
 
 def _gate_paths(cfg: Config, command_name: str) -> None:
-    approved_root = _resolve_existing_directory(
-        cfg.approved_root, "approved_root", command_name
-    )
-    if approved_root == Path(approved_root.anchor):
-        raise ConfigGateError(
-            f"{command_name}: approved_root must not be a filesystem root: "
-            f"{approved_root}"
-        )
-
-    if cfg.execution_mode == "test":
-        temp_root = Path(tempfile.gettempdir()).resolve()
-        repo_test_root = (
-            Path(__file__).resolve().parents[2] / ".test-artifacts"
-        ).resolve()
-        if not (
-            _is_strictly_under(approved_root, temp_root)
-            or _is_strictly_under(approved_root, repo_test_root)
-        ):
-            raise ConfigGateError(
-                f"{command_name}: test approved_root must be inside the system "
-                f"temporary directory ({temp_root}) or repository-controlled "
-                f"test root ({repo_test_root}): {approved_root}"
-            )
-
     for name in ("testdata_root", "models_root", "reports_root", "logs_root",
                  "checkpoints_root"):
         raw = getattr(cfg, name)
-        path = _resolve_existing_directory(raw, name, command_name)
-        if not _is_strictly_under(path, approved_root):
-            raise ConfigGateError(
-                f"{command_name}: {name} must resolve strictly inside "
-                f"approved_root {approved_root}: {path}"
-            )
-
-
-def _resolve_existing_directory(raw: str, name: str, command_name: str) -> Path:
-    if not raw:
-        raise ConfigGateError(f"{command_name}: {name} empty")
-    if re.match(r"^/[A-Za-z](?:/|$)", raw):
-        raise ConfigGateError(
-            f"{command_name}: {name} uses an ambiguous POSIX drive alias: {raw!r}"
-        )
-    path = Path(raw)
-    if not path.is_absolute():
-        raise ConfigGateError(f"{command_name}: {name} must be absolute: {raw!r}")
-    try:
-        resolved = path.resolve(strict=True)
-    except (OSError, RuntimeError) as exc:
-        raise ConfigGateError(
-            f"{command_name}: {name} directory does not exist or cannot be "
-            f"resolved: {path}"
-        ) from exc
-    if not resolved.is_dir():
-        raise ConfigGateError(f"{command_name}: {name} is not a directory: {resolved}")
-    return resolved
-
-
-def _is_strictly_under(path: Path, parent: Path) -> bool:
-    try:
-        path.relative_to(parent)
-    except ValueError:
-        return False
-    return path != parent
+        if not raw:
+            raise ConfigGateError(f"{command_name}: {name} empty")
+        path = Path(raw)
+        if not path.is_absolute():
+            raise ConfigGateError(f"{command_name}: {name} must be absolute: {raw!r}")
+        if not path.is_dir():
+            raise ConfigGateError(f"{command_name}: {name} directory does not exist: {path}")
 
 
 def selected_asr_model(cfg: Config, index: int = 0) -> tuple[str, str]:

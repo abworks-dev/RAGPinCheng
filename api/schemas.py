@@ -32,9 +32,12 @@ class AuthMeResponse(BaseModel):
 
 
 class ChatRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     query: str | None = Field(default=None, min_length=1)
     categories: list[str] | None = None
     regenerate_assistant_message_id: int | None = None
+    edit_user_message_id: int | None = None
 
 
 class ConversationSummaryDTO(BaseModel):
@@ -262,6 +265,25 @@ class MediaAssetDTO(BaseModel):
     updated_at: int
     error: str | None = None
     transcription_job_id: str | None = None
+    review_status: str | None = None
+    publication_status: str | None = None
+    publication_index_status: str | None = None
+    is_current_version: bool = False
+
+
+class MediaTranscriptSegmentDTO(BaseModel):
+    id: int
+    start_ms: int
+    end_ms: int | None = None
+    text: str
+
+
+class MediaTranscriptDTO(BaseModel):
+    media_id: str
+    version_id: str | None = None
+    language: str | None = None
+    duration_ms: int | None = None
+    segments: list[MediaTranscriptSegmentDTO]
 
 
 class TranscriptionProfileDTO(BaseModel):
@@ -288,6 +310,7 @@ class TranscriptionJobDTO(BaseModel):
     total_ms: int
     failure_error_code: str | None
     error_summary: str | None
+    failure: "TranscriptionFailureDTO | None" = None
     result_version_id: str | None
     created_at: int
     started_at: int | None
@@ -295,8 +318,38 @@ class TranscriptionJobDTO(BaseModel):
     updated_at: int
 
 
-class RetryTranscriptionRequest(BaseModel):
-    pass
+class TranscriptionFailureDTO(BaseModel):
+    code: str
+    message: str
+    retryable: bool
+
+
+class TranscriptVersionDTO(BaseModel):
+    version_id: str
+    media_id: str
+    source: str
+    profile_id: str | None
+    provider_key: str | None
+    model_id: str | None
+    model_revision: str | None
+    review_status: str
+    reviewed_by: int | None
+    reviewed_at: int | None
+    review_note: str | None
+    publication_status: str
+    published_at: int | None
+    supersedes_version_id: str | None
+    markdown_sha256: str
+    created_at: int
+    updated_at: int
+    is_current: bool = False
+
+
+class TranscriptMarkdownPreviewDTO(BaseModel):
+    version_id: str
+    markdown: str
+    markdown_sha256: str
+
 
 class ReviewTranscriptVersionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -320,6 +373,18 @@ class TranscriptPublicationJobDTO(BaseModel):
     error_code: str | None
     error_summary: str | None
     created_at: int
+    started_at: int | None
+    finished_at: int | None
+    updated_at: int
+
+
+class PublishTranscriptVersionResponse(BaseModel):
+    version: TranscriptVersionDTO
+    job: TranscriptPublicationJobDTO | None
+    reused: bool
+
+
+class RetryTranscriptionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     profile_id: str
@@ -333,6 +398,15 @@ class AnswerVersionDTO(BaseModel):
     sources_for_ui: list[SourceDTO] | None = None
     created_at: int
     is_active: bool
+    user_version_id: int | None = None
+
+
+class UserQuestionVersionDTO(BaseModel):
+    id: int
+    version_index: int
+    content: str
+    created_at: int
+    is_active: bool
 
 
 class MessageDTO(BaseModel):
@@ -342,6 +416,7 @@ class MessageDTO(BaseModel):
     sources_for_ui: list[SourceDTO] | None = None
     created_at: int | None = None
     answer_versions: list[AnswerVersionDTO] | None = None
+    user_versions: list[UserQuestionVersionDTO] | None = None
 
 
 class ConversationStateDTO(BaseModel):

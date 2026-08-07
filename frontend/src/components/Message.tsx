@@ -6,8 +6,7 @@ import rehypeKatex from "rehype-katex";
 import type { ChatMessage, Source } from "../types";
 import { stripMarkdown } from "../utils/markdown";
 import { FeedbackBar } from "./FeedbackBar";
-import { timestampToSeconds, useVideoPlayer } from "../hooks/useVideoPlayer";
-import { Check, ChevronLeft, ChevronRight, Copy, Files, RefreshCw } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, CircleAlert, CirclePlay, Copy, Files, Pencil, Send, X } from "lucide-react";
 import {
   CITATION_EVENT,
   CITATION_HOVER_EVENT,
@@ -33,26 +32,8 @@ function normalizeMath(src: string): string {
   });
 }
 
-function StageIndicator({ msg }: { msg: ChatMessage }) {
-  const stage = msg.stage;
-  if (!stage || stage === "done") return null;
-  let label = "";
-  if (stage === "retrieving") label = "正在理解问题并检索企业知识…";
-  else if (stage === "generating") {
-    const n = msg.prep?.final_count ?? msg.sources?.length ?? 0;
-    label = `已找到 ${n} 份相关资料，正在整理回答…`;
-  } else if (stage === "streaming" && !msg.content) label = "正在组织回答…";
-  if (!label) return null;
-  return (
-    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-      <span className="relative flex size-2.5 shrink-0">
-        <span className="absolute inline-flex size-full animate-ping rounded-full bg-warning opacity-30" />
-        <span className="relative inline-flex size-2.5 rounded-full bg-warning" />
-      </span>
-      {label}
-    </div>
-  );
-}
+function AnswerStatus({ msg }: { msg: ChatMessage }) {
+  if (msg.error) return null;
 
   const sources = msg.sources?.length ? msg.sources : msg.prep?.used_sources || [];
   const sourceCount = sources.length || msg.prep?.final_count || 0;
@@ -187,8 +168,8 @@ function CitationMarker({
     <>
       <sup
         className="relative top-[-0.35em] mx-px align-baseline"
-        onMouseEnter={() => setIsHovered(true)}
-        onMouseLeave={() => setIsHovered(false)}
+        onMouseEnter={openTooltip}
+        onMouseLeave={scheduleClose}
       >
         <a
           className={`inline-flex items-center justify-center cursor-pointer font-sans text-[11px] h-[18px] min-w-[18px] px-1 rounded transition-all ${
@@ -251,6 +232,9 @@ export function Message({
   turnIndex,
   sourcesSelected = false,
   onToggleSources,
+  canEdit = false,
+  onEdit,
+  onViewQuestionVersion,
   canRegenerate = false,
   onRegenerate,
   onViewAnswerVersion,
@@ -260,18 +244,62 @@ export function Message({
   turnIndex: number;
   sourcesSelected?: boolean;
   onToggleSources?: (messageId: string) => void;
+  canEdit?: boolean;
+  onEdit?: (messageId: string, content: string) => void;
+  onViewQuestionVersion?: (messageId: string, versionIndex: number) => void;
   canRegenerate?: boolean;
   onRegenerate?: (messageId: string) => void;
   onViewAnswerVersion?: (messageId: string, versionIndex: number) => void;
 }) {
   const isUser = msg.role === "user";
   const [copied, setCopied] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(msg.content);
+  const editRef = useRef<HTMLTextAreaElement | null>(null);
+  const activeUserVersion = msg.userVersions?.find((version) => version.isActive);
+  const viewedUserVersionIndex =
+    msg.viewedUserVersionIndex ?? activeUserVersion?.versionIndex;
+  const viewedUserVersionPosition = msg.userVersions?.findIndex(
+    (version) => version.versionIndex === viewedUserVersionIndex,
+  ) ?? -1;
+  const viewingActiveUserVersion =
+    !activeUserVersion || viewedUserVersionIndex === activeUserVersion.versionIndex;
+  const copyResetTimer = useRef<number | null>(null);
+
+  useEffect(() => () => {
+    if (copyResetTimer.current !== null) window.clearTimeout(copyResetTimer.current);
+  }, []);
+
+  useEffect(() => {
+    if (!editing) setDraft(msg.content);
+  }, [editing, msg.content]);
+
+  useEffect(() => {
+    if (!editing) return;
+    editRef.current?.focus();
+    editRef.current?.setSelectionRange(draft.length, draft.length);
+  }, [editing]);
+
+  const submitEdit = () => {
+    const trimmed = draft.trim();
+    if (!trimmed || trimmed === msg.content) {
+      setEditing(false);
+      setDraft(msg.content);
+      return;
+    }
+    setEditing(false);
+    onEdit?.(msg.id, trimmed);
+  };
 
   const copyContent = async () => {
     try {
-      await navigator.clipboard.writeText(msg.content);
+      await copyText(msg.content);
       setCopied(true);
-      window.setTimeout(() => setCopied(false), 1400);
+      if (copyResetTimer.current !== null) window.clearTimeout(copyResetTimer.current);
+      copyResetTimer.current = window.setTimeout(() => {
+        setCopied(false);
+        copyResetTimer.current = null;
+      }, 1400);
     } catch {
       setCopied(false);
     }
@@ -280,24 +308,124 @@ export function Message({
     <article className={`mx-auto flex w-full max-w-[50rem] ${isUser ? "justify-end" : "justify-start"} px-4 py-4`}>
       <div
         className={
-          (isUser ? "flex max-w-[70%] flex-col items-end" : "min-w-0 w-full") +
+          (isUser
+            ? editing
+              ? "flex w-full max-w-[85%] flex-col items-end"
+              : "flex max-w-[70%] flex-col items-end"
+            : "min-w-0 w-full") +
           ""
         }
       >
         {isUser ? (
           <>
-            <div className="rounded-ui-lg bg-primary px-4 py-3 text-primary-foreground">
-              <div className="whitespace-pre-wrap break-words">{msg.content}</div>
-            </div>
-            <button
-              type="button"
-              aria-label="复制提问"
-              title="复制提问"
-              onClick={copyContent}
-              className="mt-2 inline-flex size-8 items-center justify-center rounded-ui-md text-muted-foreground hover:bg-secondary hover:text-foreground"
-            >
-              {copied ? <Check className="size-4 text-success" /> : <Copy className="size-4" />}
-            </button>
+            {editing ? (
+              <div className="w-full min-w-[22rem] rounded-ui-lg bg-primary p-4 text-primary-foreground shadow-surface">
+                <label htmlFor={`edit-question-${msg.id}`} className="sr-only">编辑提问</label>
+                <textarea
+                  ref={editRef}
+                  id={`edit-question-${msg.id}`}
+                  value={draft}
+                  rows={Math.min(8, Math.max(2, draft.split("\n").length))}
+                  onChange={(event) => setDraft(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") {
+                      setEditing(false);
+                      setDraft(msg.content);
+                    } else if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+                      event.preventDefault();
+                      submitEdit();
+                    }
+                  }}
+                  className="max-h-72 min-h-28 w-full resize-y rounded-ui-md border border-white/30 bg-white/10 px-4 py-3 text-sm leading-6 text-primary-foreground outline-none placeholder:text-primary-foreground/60 focus:border-white/70 focus:ring-2 focus:ring-white/20"
+                />
+                <div className="mt-2 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditing(false);
+                      setDraft(msg.content);
+                    }}
+                    className="inline-flex h-8 items-center gap-1.5 rounded-ui-md px-3 text-xs font-medium hover:bg-white/10"
+                  >
+                    <X className="size-3.5" />取消
+                  </button>
+                  <button
+                    type="button"
+                    onClick={submitEdit}
+                    disabled={!draft.trim() || draft.trim() === msg.content}
+                    className="inline-flex h-8 items-center gap-1.5 rounded-ui-md bg-white px-3 text-xs font-medium text-primary shadow-sm hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <Send className="size-3.5" />发送
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="rounded-ui-lg bg-primary px-4 py-3 text-primary-foreground">
+                  <div className="whitespace-pre-wrap break-words">{msg.content}</div>
+                </div>
+                <div className="mt-2 flex w-full items-center justify-between gap-3">
+                  <div className="flex items-center">
+                    <button
+                    type="button"
+                    aria-label={copied ? "提问已复制" : "复制提问"}
+                    title={copied ? "提问已复制" : "复制提问"}
+                    onClick={copyContent}
+                    className={`inline-flex size-8 items-center justify-center rounded-ui-md hover:bg-secondary ${copied ? "text-success hover:text-success" : "text-muted-foreground hover:text-foreground"}`}
+                  >
+                    {copied ? <Check className="size-4 text-success" /> : <Copy className="size-4" />}
+                    </button>
+                    {canEdit && viewingActiveUserVersion && (
+                    <button
+                      type="button"
+                      aria-label="编辑提问"
+                      title="编辑提问"
+                      onClick={() => {
+                        setDraft(msg.content);
+                        setEditing(true);
+                      }}
+                      className="inline-flex size-8 items-center justify-center rounded-ui-md text-muted-foreground hover:bg-secondary hover:text-foreground"
+                    >
+                      <Pencil className="size-4" />
+                    </button>
+                    )}
+                  </div>
+                  {msg.userVersions && msg.userVersions.length > 1 && viewedUserVersionPosition >= 0 && (
+                    <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                      <button
+                        type="button"
+                        aria-label="查看上一个提问"
+                        title="查看上一个提问"
+                        disabled={viewedUserVersionPosition <= 0}
+                        onClick={() => onViewQuestionVersion?.(
+                          msg.id,
+                          msg.userVersions![viewedUserVersionPosition - 1].versionIndex,
+                        )}
+                        className="inline-flex size-7 items-center justify-center rounded-ui-md hover:bg-secondary hover:text-foreground disabled:cursor-not-allowed disabled:opacity-35"
+                      >
+                        <ChevronLeft className="size-4" />
+                      </button>
+                      <span className="min-w-8 text-center tabular-nums">
+                        {viewedUserVersionPosition + 1} / {msg.userVersions.length}
+                      </span>
+                      <button
+                        type="button"
+                        aria-label="查看下一个提问"
+                        title="查看下一个提问"
+                        disabled={viewedUserVersionPosition >= msg.userVersions.length - 1}
+                        onClick={() => onViewQuestionVersion?.(
+                          msg.id,
+                          msg.userVersions![viewedUserVersionPosition + 1].versionIndex,
+                        )}
+                        className="inline-flex size-7 items-center justify-center rounded-ui-md hover:bg-secondary hover:text-foreground disabled:cursor-not-allowed disabled:opacity-35"
+                      >
+                        <ChevronRight className="size-4" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
           </>
         ) : (
           <>
@@ -334,64 +462,9 @@ export function Message({
               ) : null}
             </div>
             {msg.error && (
-              <div className="mt-2 text-sm text-red-600 bg-red-50 border border-red-200 rounded p-2">
-                ⚠️ {msg.error}
-              </div>
-            )}
-            {!msg.streaming && !msg.error && msg.content && (
-              <div className="mt-5 flex items-center gap-2 border-t border-border pt-3">
-                {msg.sources && msg.sources.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => onToggleSources?.(msg.id)}
-                  className={`inline-flex h-9 items-center gap-2 rounded-ui-md border px-3 text-xs font-medium shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${sourcesSelected ? "border-primary bg-primary/10 text-primary" : "border-border bg-card text-foreground hover:border-primary/40 hover:bg-secondary"}`}
-                >
-                  <Files className="size-4 text-primary" />
-                  查看 {msg.sources.length} 个来源
-                </button>
-                )}
-                <button type="button" aria-label="复制回答" title="复制回答" onClick={copyContent} className="inline-flex size-9 items-center justify-center rounded-ui-md border border-border bg-card text-muted-foreground shadow-sm hover:bg-secondary hover:text-foreground">
-                  {copied ? <Check className="size-4 text-success" /> : <Copy className="size-4" />}
-                </button>
-                <button
-                  type="button"
-                  aria-label="重新生成回答"
-                  title={canRegenerate ? "重新生成回答" : "后续对话已基于此回答生成，不能重新生成"}
-                  disabled={!canRegenerate}
-                  onClick={() => onRegenerate?.(msg.id)}
-                  className="inline-flex size-9 items-center justify-center rounded-ui-md border border-border bg-card text-muted-foreground shadow-sm hover:bg-secondary hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-card"
-                >
-                  <RefreshCw className="size-4" />
-                </button>
-                {msg.answerVersions && msg.answerVersions.length > 1 && (() => {
-                  const viewed = msg.viewedVersionIndex
-                    ?? msg.answerVersions.find((version) => version.isActive)?.versionIndex
-                    ?? msg.answerVersions.length;
-                  const position = msg.answerVersions.findIndex((version) => version.versionIndex === viewed);
-                  return (
-                    <div className="ml-auto inline-flex items-center gap-1 text-xs text-muted-foreground" aria-label="回答版本">
-                      <button
-                        type="button"
-                        aria-label="查看上一个回答"
-                        disabled={position <= 0}
-                        onClick={() => onViewAnswerVersion?.(msg.id, msg.answerVersions![position - 1].versionIndex)}
-                        className="inline-flex size-8 items-center justify-center rounded-ui-md hover:bg-secondary disabled:opacity-30"
-                      >
-                        <ChevronLeft className="size-4" />
-                      </button>
-                      <span>{position + 1} / {msg.answerVersions.length}</span>
-                      <button
-                        type="button"
-                        aria-label="查看下一个回答"
-                        disabled={position >= msg.answerVersions.length - 1}
-                        onClick={() => onViewAnswerVersion?.(msg.id, msg.answerVersions![position + 1].versionIndex)}
-                        className="inline-flex size-8 items-center justify-center rounded-ui-md hover:bg-secondary disabled:opacity-30"
-                      >
-                        <ChevronRight className="size-4" />
-                      </button>
-                    </div>
-                  );
-                })()}
+              <div className="mt-2 flex items-start gap-2 rounded-ui-md border border-destructive/30 bg-destructive/10 p-2 text-sm text-destructive">
+                <CircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+                <span>{msg.error}</span>
               </div>
             )}
             {!msg.streaming && !msg.error && msg.content && (

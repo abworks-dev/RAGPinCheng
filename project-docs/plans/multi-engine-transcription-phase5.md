@@ -1,9 +1,10 @@
 # 多引擎视频自动转录 Phase 5 — 隔离端到端与版本感知发布
 
-- 状态：**R2 详细计划待审批；代码实施未授权**
+- 状态：**R2 已批准；Phase 5A/5B 首轮远端 CI 失败，最小修复待验证；Phase 5C 未授权**
 - 风险等级：**R2**（涉及转录版本审核/发布 API、后台索引编排、Parent/Child 与 Qdrant payload 兼容、检索可见性、管理端 UI 和 CI）
 - 调查日期：2026-08-03（Asia/Shanghai）
 - 代码调查基线：`origin/master@b323023aaf47e628379163470eb30c39f6d3554e`
+- 代码实施基线：`origin/master@27d5c5c`
 - 总体方案：[多引擎视频自动转录](multi-engine-auto-transcription.md)
 - 架构决策：[0002 — 多引擎视频自动转录与管理员选择](../decisions/0002-multi-engine-transcription.md)
 - 前置计划：[Phase 1](multi-engine-transcription-phase1.md)、[Phase 2](multi-engine-transcription-phase2.md)、[Phase 3](multi-engine-transcription-phase3.md)
@@ -194,7 +195,7 @@ Chat/RAG retrieve
 - `src/transcription/` 继续拥有领域契约和端口，不依赖 FastAPI、React、Qdrant service 进程或具体 ASR 引擎。
 - `api/` 拥有 app.sqlite Schema/写事务、artifact、管理命令、worker 配置和 PublicationIndexPort 的应用适配器。
 - `src/chunk.py`、`src/index.py`、`src/indexing_pipeline.py` 只增加可选的版本索引元数据；普通文档和 legacy transcript 调用不传时保持原行为。
-- `src/transcription/retrieval_visibility.py` 拥有可见性端口及基于共享 `APP_DB_PATH` 的只读 SQLite adapter；只读取并校验 head/version，不执行 Schema 初始化或写事务，也不导入 `api`。`src/retrieve.py` 默认使用该 adapter，并允许测试注入同一端口。
+- `src/transcription_retrieval_visibility.py` 拥有可见性端口及基于共享 `APP_DB_PATH` 的只读 SQLite adapter；该 Phase 5 模块位于 Phase 1 纯契约核心包之外，只读取并校验 head/version，不执行 Schema 初始化或写事务，也不导入 `api`。`src/retrieve.py` 默认使用该 adapter，并允许测试注入同一端口。
 - Provider/normalizer/formatter 不参与审核、发布、Qdrant 或可见性判断。
 - 不按 Provider 名称、模型名或 `profile_id` 在索引/检索核心中分支。
 
@@ -360,7 +361,7 @@ Phase 5C 执行前必须明确：目标主机、数据分类、Profile 资格候
 | 文件 | 职责 |
 |---|---|
 | `api/transcription_publication.py` | Publication application service；版本列表/preview/review/publish；实现受控 `PublicationIndexPort` adapter；加载 version/artifact/media 并生成结构化 receipt。 |
-| `src/transcription/retrieval_visibility.py` | 定义 published-head snapshot/port、严格 UUID 与一致性校验，并实现基于共享 `APP_DB_PATH` 的只读 SQLite adapter；只读 join `media_transcript_heads`/`transcript_versions`，不初始化或写入 app.sqlite。 |
+| `src/transcription_retrieval_visibility.py` | 在 Phase 1 纯契约核心包之外定义 published-head snapshot/port、严格 UUID 与一致性校验，并实现基于共享 `APP_DB_PATH` 的只读 SQLite adapter；只读 join `media_transcript_heads`/`transcript_versions`，不初始化或写入 app.sqlite。 |
 
 ### 7.2 修改后端文件
 
@@ -404,7 +405,7 @@ Phase 5C 执行前必须明确：目标主机、数据分类、Profile 资格候
 | `tests/test_transcription_retrieval_visibility.py`（新增） | Candidate 隐藏、head 切换、旧 head 保护、legacy/普通文档兼容、所有 recall 分支过滤。 |
 | `tests/test_transcription_phase5_api.py`（新增） | admin/普通用户/匿名/CSRF、DTO、preview、review、publish 幂等和冲突。 |
 | `tests/test_transcription_phase5_worker.py`（新增） | 单队列串行、恢复、重复入队、shutdown 和 promotion-ready。 |
-| `tests/test_transcription_index_metadata.py`（新增） | Parent/Child/parents/Qdrant payload nullable 字段与跨版本 ID。 |
+| `tests/test_transcript_index_metadata.py`（新增） | Parent/Child/parents/Qdrant payload nullable 字段与跨版本 ID。 |
 | `tests/test_transcription_publication_transaction.py` | 保留既有测试并补充应用 adapter receipt 与恢复组合；不删除原 guard 测试。 |
 | `tests/test_transcript_manual_regression.py` | 增加 legacy 无 version 字段仍保持 golden 的断言。 |
 | `tests/test_transcription_static_boundaries.py` | 禁止 Provider 名称分支、禁止真实 ASR/ffmpeg/GPU/网络依赖进入 Phase 5A/5B 测试。 |
@@ -414,7 +415,7 @@ Phase 5C 执行前必须明确：目标主机、数据分类、Profile 资格候
 
 | 文件 | 修改内容 |
 |---|---|
-| `.github/workflows/ci.yml` | 增加独立 `test-transcription-phase5-isolated` job；只安装已声明依赖，运行 fake/临时资源测试，不启动 Qdrant/ASR/GPU/ffmpeg。 |
+| `.github/workflows/ci.yml` | 增加独立 `test-transcription-phase5` job；只安装已声明依赖，运行 fake/临时资源测试，不启动 Qdrant/ASR/GPU/ffmpeg。 |
 | `project-docs/features/transcript-pipeline.md` | 实施完成后更新实际应用发布、versioned index 和检索可见性事实；不得提前写成已实现。 |
 | `project-docs/plans/multi-engine-auto-transcription.md` | 仅在实施完成后最小更新阶段状态和链接，不改总体架构。 |
 | `TODO.md` | 按实际审批/实施状态最小更新下一步与本计划链接。 |
@@ -533,7 +534,7 @@ python -m pytest `
   tests/test_transcription_retrieval_visibility.py `
   tests/test_transcription_phase5_api.py `
   tests/test_transcription_phase5_worker.py `
-  tests/test_transcription_index_metadata.py -v
+  tests/test_transcript_index_metadata.py -v
 python -m pytest tests/test_transcription*.py tests/test_transcript_manual_regression.py -v
 python -m pytest tests/test_retrieve.py tests/test_indexing_pipeline.py -v
 ```
@@ -675,17 +676,22 @@ build_index --reset
 12. scoped code review；独立提交/PR；CI 在最新 master 基线验证。
 13. 停止。不得自动运行 Phase 5C 或进入 Phase 6。
 
-## 17. 仍需用户决定
+## 17. 已确认决定
 
-批准代码实施前需确认以下四项：
+用户已于 2026-08-03 明确批准 Phase 5 R2 代码实施，并同意以下四项决定：
 
-1. **是否同意 Phase 5 显式吸收 Phase 4 未完成的版本历史、Markdown 审阅、审核和发布 API/UI。**推荐同意；否则总体 Phase 5 E2E 无入口可执行。
-2. **是否同意“同一 collection + immutable version payload + app.sqlite head 读取过滤”作为唯一版本可见性方案。**推荐同意；不推荐 per-media collection/alias，也不推荐 Qdrant `published` 双写开关。
-3. **是否同意普通索引与 publication 索引共用现有单 worker/单队列。**推荐同意；避免 BGE/GPU 与 parents.sqlite 并发。
-4. **是否同意 Phase 5A/5B 代码批准不包含 Phase 5C 的真实环境执行。**推荐同意；Phase 5C 需在存在明确候选 Profile、隔离资源和数据清单后另批。
+1. Phase 5 吸收 Phase 4 未完成的版本历史、Markdown 审阅、审核和发布 API/UI；
+2. 唯一版本可见性方案采用“同一 collection + immutable version payload + `app.sqlite.media_transcript_heads.current_version_id` 读取过滤”；
+3. 普通索引与 publication 索引共用现有单 worker/单队列；
+4. Phase 5A/5B 代码批准不包含 Phase 5C 的真实环境执行。
 
-若四项均批准，可回复：
+上述批准仍不授权真实 ffmpeg、ASR、GPU、Qdrant、生产数据、部署、索引重建或灰度。
 
-> 批准 Phase 5 R2 代码实施，并同意第 17 节四项决定。
+## 18. 实施与验证状态
 
-批准后仍不得直接操作真实 ffmpeg、ASR、GPU、Qdrant、生产数据或部署；这些保持独立门禁。
+- Phase 5A/5B 已实现版本列表、不可变 Markdown 预览、审核/发布 API 与管理端 UI、publication-only 候选索引、单 worker 串行编排、SQLite 正式 head 和检索可见性过滤。
+- Candidate 索引继续写入既有 collection，但携带 immutable `transcript_version_id` / `publication_target_id`；正式可见性只读取 `app.sqlite` head，legacy/普通文档缺少版本字段时保持可见。
+- 本地无外部资源验证已通过：Python Store/事务/manual/visibility/index metadata/static 共 29 项；Phase 5 定向前端共 31 项；`compileall` 与 `git diff --check` 通过。
+- 本地环境缺少 `qdrant_client`、FastAPI 等既有测试依赖，相关 API、worker、candidate index 与 Qdrant Filter 组合测试交由新增的 `test-transcription-phase5` CI job 在干净环境验证；CI 通过前状态保持“代码完成待验证”。
+- 首轮远端 `test-transcription-contracts` 收集 289 项并出现 9 个失败：Phase 5 SQLite visibility adapter 误入 Phase 1 纯契约核心包、获批索引/检索修改后的静态保护哈希未同步，以及 Phase 5 review 测试误用无需审核的 approved Profile fixture。最小修复已将 adapter 移至 `src/transcription_retrieval_visibility.py`、同步获批基线并改用 experimental Profile；标准命令通道暂不可用，修复仍待本地/远端复验。
+- Phase 5C 未授权、未执行；未安装或真实运行 ffmpeg/ffprobe、ASR、GPU、Qdrant、embedding/rerank，未访问生产数据，未新增运行时第三方依赖。

@@ -1046,7 +1046,14 @@ async def upload_media(
                 and existing["sha256"] == retry_digest.hexdigest()
             )
             if not same_identity:
-                raise HTTPException(status_code=409, detail="幂等键与自动转录请求不匹配")
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "upload_idempotency_conflict",
+                        "message": "本次提交与原上传请求不一致，请重新提交。",
+                        "retryable": False,
+                    },
+                )
             return MediaAssetDTO(
                 media_id=existing["media_id"],
                 title=existing["title"],
@@ -1176,7 +1183,14 @@ async def upload_media(
                 ("request idempotency key belongs to another media asset", int(time.time()), media_id),
             )
             conn.commit()
-            raise HTTPException(status_code=409, detail="幂等键已用于其他媒体")
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "upload_idempotency_conflict",
+                    "message": "本次提交与原上传请求不一致，请重新提交。",
+                    "retryable": False,
+                },
+            )
         except (ContractValidationError, OSError):
             conn.execute(
                 "UPDATE media_assets SET status='failed',error=?,updated_at=? WHERE media_id=?",

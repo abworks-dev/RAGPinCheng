@@ -27,7 +27,9 @@ from .conversation_runtime import (
     list_answer_versions,
     list_conversations,
     list_messages,
+    list_user_versions,
     prepare_regeneration,
+    prepare_user_edit,
     wrap_stream_with_persistence,
 )
 from .db import get_db
@@ -119,10 +121,25 @@ def get_my_conversation(
                         ),
                         "created_at": v["created_at"],
                         "is_active": bool(v["is_active"]),
+                        "user_version_id": v["user_version_id"],
                     }
                     for v in list_answer_versions(conn, m["id"])
                 ]
                 if m["role"] == "assistant"
+                else None
+            ),
+            user_versions=(
+                [
+                    {
+                        "id": v["id"],
+                        "version_index": v["version_index"],
+                        "content": v["content"],
+                        "created_at": v["created_at"],
+                        "is_active": bool(v["is_active"]),
+                    }
+                    for v in list_user_versions(conn, m["id"])
+                ]
+                if m["role"] == "user"
                 else None
             ),
         )
@@ -163,7 +180,12 @@ async def chat(
     request: Request,
     user: CurrentUser = Depends(require_csrf),
 ) -> EventSourceResponse:
-    if body.regenerate_assistant_message_id is None and not body.query:
+    if (
+        body.regenerate_assistant_message_id is not None
+        and body.edit_user_message_id is not None
+    ):
+        raise HTTPException(status_code=422, detail="edit and regenerate are mutually exclusive")
+    if body.regenerate_assistant_message_id is None and not (body.query or "").strip():
         raise HTTPException(status_code=422, detail="query is required")
     # Per-user rate limit. Reject early — before doing DB work or hydration —
     # so a hot-spinning client can't queue up expensive turns we'll just
@@ -194,6 +216,15 @@ async def chat(
             if body.regenerate_assistant_message_id is not None
             else None
         )
+        latest_user_id = (
+            pre_conn.execute(
+                "SELECT id FROM messages WHERE conversation_id = ? AND role = 'user' "
+                "ORDER BY id DESC LIMIT 1",
+                (conversation_id,),
+            ).fetchone()
+            if body.edit_user_message_id is not None
+            else None
+        )
     finally:
         pre_conn.close()
     if row is None:
@@ -205,6 +236,10 @@ async def chat(
         or latest_assistant_id["id"] != body.regenerate_assistant_message_id
     ):
         raise HTTPException(status_code=409, detail="only latest answer can be regenerated")
+    if body.edit_user_message_id is not None and (
+        latest_user_id is None or latest_user_id["id"] != body.edit_user_message_id
+    ):
+        raise HTTPException(status_code=409, detail="only latest question can be edited")
     is_first_turn = int(row["turn_index"]) == 0
 
     lock = get_lock(conversation_id)
@@ -217,7 +252,18 @@ async def chat(
                 # see the same stale snapshot.
                 hydrate_conn = db_connect()
                 try:
-                    if body.regenerate_assistant_message_id is not None:
+                    edit_assistant_message_id = None
+                    if body.edit_user_message_id is not None:
+                        try:
+                            session, categories, edit_assistant_message_id = prepare_user_edit(
+                                hydrate_conn,
+                                conversation_id,
+                                body.edit_user_message_id,
+                            )
+                            query = (body.query or "").strip()
+                        except ValueError as exc:
+                            raise HTTPException(status_code=409, detail=str(exc)) from exc
+                    elif body.regenerate_assistant_message_id is not None:
                         try:
                             session, query, categories = prepare_regeneration(
                                 hydrate_conn,
@@ -249,6 +295,8 @@ async def chat(
                     is_first_turn=is_first_turn,
                     categories=categories,
                     regenerate_assistant_message_id=body.regenerate_assistant_message_id,
+                    edit_user_message_id=body.edit_user_message_id,
+                    edit_assistant_message_id=edit_assistant_message_id,
                 )
                 persistent_stream = wrap_stream_with_persistence(
                     raw_stream, session, plan

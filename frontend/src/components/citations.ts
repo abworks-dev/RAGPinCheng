@@ -114,9 +114,4 @@ export function resolveCitation(href: string, sources: Source[]): number {
 
 export function dispatchCitation(detail: CitationDetail) {
   window.dispatchEvent(new CustomEvent<CitationDetail>(CITATION_EVENT, { detail }));
-  window.dispatchEvent(
-    new CustomEvent<CitationHoverDetail>(CITATION_HOVER_EVENT, {
-      detail: { messageId: detail.messageId, sourceIndex: detail.sourceIndex },
-    }),
-  );
 }

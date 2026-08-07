@@ -30,7 +30,7 @@ ANNOTATE = load_numbered("phase0_annotate_entry", "08_annotate.py")
 
 
 def guarded_env(root: Path, cfg, command_name: str) -> dict[str, str]:
-    active = Path(cfg.logs_root) / "active-runs"
+    active = root / "active-runs"
     active.mkdir(exist_ok=True)
     nonce = f"nonce-{command_name}"
     guard = active / f"{command_name}.guard.json"
@@ -44,8 +44,8 @@ def guarded_env(root: Path, cfg, command_name: str) -> dict[str, str]:
     return {
         lib_runtime.GUARD_ENV_FILE: str(guard),
         lib_runtime.GUARD_ENV_NONCE: nonce,
-        "MODELSCOPE_CACHE": str(Path(cfg.models_root) / "modelscope"),
-        "HF_HOME": str(Path(cfg.models_root) / "huggingface"),
+        "MODELSCOPE_CACHE": str(root / "modelscope"),
+        "HF_HOME": str(root / "huggingface"),
     }
 
 
@@ -196,7 +196,6 @@ class TestShortManifestGate(unittest.TestCase):
 
     @staticmethod
     def _stage_models(root: Path, data: dict) -> dict[str, Path]:
-        root = Path(data["models_root"])
         staged = {}
         identities = [
             data["allowed_asr_model_ids"][0],
@@ -215,10 +214,9 @@ class TestShortManifestGate(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             cfg_path = root / "cfg.json"
-            data = valid_config(td)
-            write_config(cfg_path, data)
+            write_config(cfg_path, valid_config(td))
             cfg = lib_config.load_config(cfg_path)
-            manifest = Path(data["testdata_root"]) / "empty.jsonl"
+            manifest = root / "empty.jsonl"
             manifest.write_text("", encoding="utf-8")
             with mock.patch.dict(os.environ, guarded_env(root, cfg, "03_run_short"), clear=False), \
                  mock.patch.dict(__import__("sys").modules, {"torch": None, "funasr": None}):
@@ -230,16 +228,15 @@ class TestShortManifestGate(unittest.TestCase):
             root = Path(td)
             cfg_path = root / "cfg.json"
             data = valid_config(td)
-            testdata = Path(data["testdata_root"])
             data["thresholds"]["rtf_max"] = 10.0
             staged = self._stage_models(root, data)
             write_config(cfg_path, data)
             cfg = lib_config.load_config(cfg_path)
             scenarios = sorted(SHORT.REQUIRED_SHORT_SCENARIOS)
-            manifest = testdata / "short.jsonl"
+            manifest = root / "short.jsonl"
             rows = []
             for i, scenario in enumerate(scenarios):
-                audio = testdata / f"s{i}.wav"
+                audio = root / f"s{i}.wav"
                 with wave.open(str(audio), "wb") as wf:
                     wf.setnchannels(1); wf.setsampwidth(2); wf.setframerate(16000)
                     wf.writeframes(b"\x00\x00" * 1600)
@@ -300,13 +297,13 @@ class TestShortManifestGate(unittest.TestCase):
                 "TRANSFORMERS_OFFLINE": "1",
             })
             self.assertEqual(len(captured["generate_inputs"]), 9)
-            self.assertEqual(captured["generate_inputs"][0], str(testdata / "s0.wav"))
-            self.assertEqual(captured["generate_inputs"][1], str(testdata / "s0.wav"))
+            self.assertEqual(captured["generate_inputs"][0], str(root / "s0.wav"))
+            self.assertEqual(captured["generate_inputs"][1], str(root / "s0.wav"))
             self.assertTrue(all(
                 "hotword" not in kwargs and "clas_scale" not in kwargs
                 for kwargs in captured["generate_kwargs"]
             ))
-            report = next((Path(cfg.reports_root) / cfg.run_id).glob("03_run_short-*.json"))
+            report = next((root / cfg.run_id).glob("03_run_short-*.json"))
             payload = json.loads(report.read_text(encoding="utf-8"))
             self.assertFalse(payload["ok"])
             self.assertEqual(payload["n_threshold_failures"], 8)
@@ -317,7 +314,7 @@ class TestShortManifestGate(unittest.TestCase):
             self.assertIsNone(payload["diagnostic_sample_id"])
             self.assertTrue(all("diagnostic" not in row for row in payload["rows"]))
 
-            diagnostic_out = Path(cfg.reports_root) / cfg.run_id / "diagnostic.json"
+            diagnostic_out = root / cfg.run_id / "diagnostic.json"
             with mock.patch.dict(os.environ, guarded_env(root, cfg, "03_run_short"), clear=False), \
                  mock.patch.dict(__import__("sys").modules, {
                      "torch": types.SimpleNamespace(cuda=FakeCuda()),
@@ -344,8 +341,7 @@ class TestShortManifestGate(unittest.TestCase):
                 "replace",
             )
             checkpoint = json.loads(
-                (Path(cfg.checkpoints_root) / cfg.run_id / "03_run_short" / "s-0.json")
-                .read_text(encoding="utf-8")
+                (root / cfg.run_id / "03_run_short" / "s-0.json").read_text(encoding="utf-8")
             )
             self.assertNotIn("diagnostic", checkpoint)
 
@@ -354,12 +350,11 @@ class TestShortManifestGate(unittest.TestCase):
             root = Path(td)
             cfg_path = root / "cfg.json"
             data = valid_config(td)
-            testdata = Path(data["testdata_root"])
             write_config(cfg_path, data)
             cfg = lib_config.load_config(cfg_path)
             rows = []
             for i, scenario in enumerate(sorted(SHORT.REQUIRED_SHORT_SCENARIOS)):
-                audio = testdata / f"s{i}.wav"
+                audio = root / f"s{i}.wav"
                 with wave.open(str(audio), "wb") as wf:
                     wf.setnchannels(1); wf.setsampwidth(2); wf.setframerate(16000)
                     wf.writeframes(b"\x00\x00" * 1600)
@@ -367,7 +362,7 @@ class TestShortManifestGate(unittest.TestCase):
                     "id": f"s-{i}", "audio": audio.name, "scenario": scenario,
                     "is_internal_recording": False,
                 })
-            manifest = testdata / "short.jsonl"
+            manifest = root / "short.jsonl"
             manifest.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
             with mock.patch.dict(os.environ, guarded_env(root, cfg, "03_run_short"), clear=False):
                 rc = SHORT.main([
@@ -381,22 +376,19 @@ class TestShortManifestGate(unittest.TestCase):
             root = Path(td)
             cfg_path = root / "cfg.json"
             data = valid_config(td)
-            testdata = Path(data["testdata_root"])
             write_config(cfg_path, data)
             cfg = lib_config.load_config(cfg_path)
-            incomplete_model = Path(data["models_root"]).joinpath(
-                *data["allowed_asr_model_ids"][0].split("/")
-            )
+            incomplete_model = root.joinpath(*data["allowed_asr_model_ids"][0].split("/"))
             incomplete_model.mkdir(parents=True)
             (incomplete_model / "configuration.json").write_text("{}", encoding="utf-8")
             rows = []
             for i, scenario in enumerate(sorted(SHORT.REQUIRED_SHORT_SCENARIOS)):
-                audio = testdata / f"s{i}.wav"
+                audio = root / f"s{i}.wav"
                 with wave.open(str(audio), "wb") as wf:
                     wf.setnchannels(1); wf.setsampwidth(2); wf.setframerate(16000)
                     wf.writeframes(b"\x00\x00" * 1600)
                 rows.append({"id": f"s-{i}", "audio": audio.name, "scenario": scenario})
-            manifest = testdata / "short.jsonl"
+            manifest = root / "short.jsonl"
             manifest.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
             with mock.patch.dict(os.environ, guarded_env(root, cfg, "03_run_short"), clear=False), \
                  mock.patch.dict(sys.modules, {"funasr": None}):
@@ -410,15 +402,14 @@ class TestAnnotationContract(unittest.TestCase):
             root = Path(td)
             cfg_path = root / "cfg.json"
             data = valid_config(td)
-            testdata = Path(data["testdata_root"])
             data["shared_production_gpu_confirmed"] = False
             write_config(cfg_path, data)
-            audio = testdata / "sample.wav"
+            audio = root / "sample.wav"
             with wave.open(str(audio), "wb") as wf:
                 wf.setnchannels(1); wf.setsampwidth(2); wf.setframerate(16000)
                 wf.writeframes(b"\x00\x00" * 16000)
             sha = hashlib.sha256(audio.read_bytes()).hexdigest()
-            draft = testdata / "draft.jsonl"
+            draft = root / "draft.jsonl"
             draft.write_text(json.dumps({
                 "id": "sample-1", "audio": "sample.wav", "audio_sha256": sha,
                 "source_url": "https://example.invalid/public-sample",
@@ -430,7 +421,7 @@ class TestAnnotationContract(unittest.TestCase):
                 ],
                 "annotator": "a", "reviewer": "b", "annotation_version": "1",
             }) + "\n", encoding="utf-8")
-            out = testdata / "validated.jsonl"
+            out = root / "validated.jsonl"
             rc = ANNOTATE.main(["--config", str(cfg_path), "--input", str(draft),
                                 "--out", str(out)])
             self.assertIsNone(rc)
@@ -440,9 +431,8 @@ class TestAnnotationContract(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td, tempfile.TemporaryDirectory() as outside:
             root = Path(td)
             cfg_path = root / "cfg.json"
-            data = valid_config(td)
-            write_config(cfg_path, data)
-            draft = Path(data["testdata_root"]) / "draft.jsonl"
+            write_config(cfg_path, valid_config(td))
+            draft = root / "draft.jsonl"
             draft.write_text("", encoding="utf-8")
             rc = ANNOTATE.main(["--config", str(cfg_path), "--input", str(draft),
                                 "--out", str(Path(outside) / "out.jsonl")])
@@ -452,16 +442,14 @@ class TestAnnotationContract(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             cfg_path = root / "cfg.json"
-            data = valid_config(td)
-            testdata = Path(data["testdata_root"])
-            write_config(cfg_path, data)
-            draft = testdata / "draft.jsonl"
+            write_config(cfg_path, valid_config(td))
+            draft = root / "draft.jsonl"
             # Build a single line longer than the per-line limit.
             huge_line = "x" * (ANNOTATE.MAX_LINE_BYTES + 1)
             # Build a draft whose audio path is inside testdata_root, with a
             # single segment whose text is the oversized line.  This is a
             # pathological but realistic DoS-style input.
-            audio = testdata / "oversize.wav"
+            audio = root / "oversize.wav"
             with wave.open(str(audio), "wb") as wf:
                 wf.setnchannels(1); wf.setsampwidth(2); wf.setframerate(16000)
                 wf.writeframes(b"\x00\x00" * 1600)
@@ -479,7 +467,7 @@ class TestAnnotationContract(unittest.TestCase):
                 "annotator": "a", "reviewer": "b", "annotation_version": "1",
             }) + "\n", encoding="utf-8")
             rc = ANNOTATE.main(["--config", str(cfg_path), "--input", str(draft),
-                                "--out", str(testdata / "validated.jsonl")])
+                                "--out", str(root / "validated.jsonl")])
             self.assertEqual(rc, 1,
                              msg="oversized line must be rejected with non-zero exit")
 
@@ -487,28 +475,24 @@ class TestAnnotationContract(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             cfg_path = root / "cfg.json"
-            data = valid_config(td)
-            testdata = Path(data["testdata_root"])
-            write_config(cfg_path, data)
-            draft = testdata / "draft.jsonl"
+            write_config(cfg_path, valid_config(td))
+            draft = root / "draft.jsonl"
             draft.write_text("{}\n", encoding="utf-8")
             with mock.patch.object(ANNOTATE, "MAX_INPUT_BYTES", 1):
                 rc = ANNOTATE.main(["--config", str(cfg_path), "--input", str(draft),
-                                    "--out", str(testdata / "validated.jsonl")])
+                                    "--out", str(root / "validated.jsonl")])
             self.assertEqual(rc, 1)
 
     def test_input_line_count_limit_is_enforced(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             cfg_path = root / "cfg.json"
-            data = valid_config(td)
-            testdata = Path(data["testdata_root"])
-            write_config(cfg_path, data)
-            draft = testdata / "draft.jsonl"
+            write_config(cfg_path, valid_config(td))
+            draft = root / "draft.jsonl"
             draft.write_text("# first\n# second\n", encoding="utf-8")
             with mock.patch.object(ANNOTATE, "MAX_INPUT_LINES", 1):
                 rc = ANNOTATE.main(["--config", str(cfg_path), "--input", str(draft),
-                                    "--out", str(testdata / "validated.jsonl")])
+                                    "--out", str(root / "validated.jsonl")])
             self.assertEqual(rc, 1)
 
     def test_license_evidence_missing_is_advisory_not_blocking(self):
@@ -516,15 +500,14 @@ class TestAnnotationContract(unittest.TestCase):
             root = Path(td)
             cfg_path = root / "cfg.json"
             data = valid_config(td)
-            testdata = Path(data["testdata_root"])
             data["shared_production_gpu_confirmed"] = False
             write_config(cfg_path, data)
-            audio = testdata / "sample.wav"
+            audio = root / "sample.wav"
             with wave.open(str(audio), "wb") as wf:
                 wf.setnchannels(1); wf.setsampwidth(2); wf.setframerate(16000)
                 wf.writeframes(b"\x00\x00" * 16000)
             sha = hashlib.sha256(audio.read_bytes()).hexdigest()
-            draft = testdata / "draft.jsonl"
+            draft = root / "draft.jsonl"
             # NO license_evidence field — should be advisory, not blocking.
             draft.write_text(json.dumps({
                 "id": "sample-1", "audio": "sample.wav", "audio_sha256": sha,
@@ -537,7 +520,7 @@ class TestAnnotationContract(unittest.TestCase):
                 ],
                 "annotator": "a", "reviewer": "b", "annotation_version": "1",
             }) + "\n", encoding="utf-8")
-            out = testdata / "validated.jsonl"
+            out = root / "validated.jsonl"
             rc = ANNOTATE.main(["--config", str(cfg_path), "--input", str(draft),
                                 "--out", str(out)])
             self.assertIsNone(rc, msg="missing license_evidence must be advisory, not blocking")

@@ -9,7 +9,8 @@ import {
   FileSpreadsheet,
   FileText,
   LocateFixed,
-  Play,
+  Presentation,
+  Video,
 } from "lucide-react";
 import { api } from "../api/client";
 import { usePdfPreview } from "../hooks/usePdfPreview";
@@ -83,12 +84,16 @@ export function SourceWorkspace({
   messages,
   conversationId,
   selectedMessageId,
+  highlightedSourceIndex = null,
   onSelectedMessageChange,
+  onSourceHighlightChange,
 }: {
   messages: ChatMessage[];
   conversationId: string | null;
   selectedMessageId?: string | null;
+  highlightedSourceIndex?: number | null;
   onSelectedMessageChange?: (messageId: string) => void;
+  onSourceHighlightChange?: (messageId: string, sourceIndex: number) => void;
 }) {
   const sets = useMemo(() => sourceSetsFromMessages(messages), [messages]);
   const latest = sets[sets.length - 1];
@@ -123,6 +128,7 @@ export function SourceWorkspace({
 
   const selectSource = (messageId: string, index: number) => {
     onSelectedMessageChange?.(messageId);
+    onSourceHighlightChange?.(messageId, index);
     setActiveIndex(index);
     window.dispatchEvent(
       new CustomEvent<CitationHoverDetail>(CITATION_HOVER_EVENT, {
@@ -204,7 +210,7 @@ export function SourceWorkspace({
                   <span className="flex size-6 shrink-0 items-center justify-center rounded-ui-sm bg-info/15 text-info">
                     <SourceTypeIcon source={item} />
                   </span>
-                  <span className="truncate">{item.doc_title}</span>
+                  <span className="truncate">{sourceDisplayTitle(item)}</span>
                 </span>
                 <span className="mt-1.5 block truncate text-xs text-muted-foreground">
                   {item.category || "未分类"} ·{" "}
@@ -368,14 +374,23 @@ function SourceDetail({
       <div className="mt-4">
         <div className="mb-2 flex items-center justify-between gap-3">
           <span className="text-[11px] font-medium text-muted-foreground">引用原文</span>
-          <button
-            type="button"
-            onClick={() => setReporting((value) => !value)}
-            className="inline-flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground hover:text-destructive"
-          >
-            <AlertTriangle className="size-3" />
-            报告问题
-          </button>
+          <FeedbackDialog
+            category="引用问题"
+            description="选择这条引用存在的问题，帮助我们改进来源核验质量。"
+            reasons={citationFeedbackReasons}
+            notePlaceholder="可选：补充说明这条引用的问题"
+            successMessage="引用问题已提交"
+            onSubmit={submitReport}
+            trigger={
+              <button
+                type="button"
+                className="inline-flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground hover:text-destructive"
+              >
+                <AlertTriangle className="size-3" />
+                报告问题
+              </button>
+            }
+          />
         </div>
         <p className="whitespace-pre-wrap break-words border-l-2 border-info bg-info/10 px-3 py-2.5 text-xs leading-6 text-foreground">
           {matchesQuery(visibleText, searchQuery)}
@@ -401,24 +416,6 @@ function SourceDetail({
           {copied ? "已复制" : "复制来源"}
         </button>
       </div>
-      {reporting && (
-        <div className="mt-3 rounded-ui-md border border-border p-3">
-          <textarea
-            rows={3}
-            value={note}
-            onChange={(event) => setNote(event.target.value)}
-            placeholder="可选：说明这条引用的问题"
-            className="w-full resize-none rounded-ui-md border border-input bg-background px-2.5 py-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-          />
-          <button
-            type="button"
-            onClick={submitReport}
-            className="mt-2 h-8 rounded-ui-md bg-destructive px-3 text-xs font-medium text-destructive-foreground"
-          >
-            提交报告
-          </button>
-        </div>
-      )}
       {status && <p className="mt-2 text-xs text-muted-foreground">{status}</p>}
     </div>
   );
