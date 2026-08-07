@@ -2404,3 +2404,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`scripts/run_faster_whisper_qualification.py`、`scripts/qualify-faster-whisper-production.ps1`、`asr_service/tests/test_faster_whisper_qualification.py`、`WORKLOG.md`。
 - 验证：`python -m compileall -q scripts/run_faster_whisper_qualification.py asr_service/tests/test_faster_whisper_qualification.py` 通过；`python scripts/run_faster_whisper_qualification.py --help` 通过并显示 `--diagnostic-report`；本机系统 Python 未安装 pytest，未执行 pytest 套件。
 - 待办/风险：需在实际生产资格 run 中读取 `reports/sample-diagnostics.json` 再判断 `noisy-bim-zh` 失败形态；若后续继续暴露为噪声鲁棒性不足，仍需再决定是否调噪声样本或解码策略。
+
+### 12:56 — 收紧 faster-whisper 资格单样本超时
+
+- 完成：将 faster-whisper 生产资格 wrapper 传给 `run_faster_whisper_qualification.py` 的单样本超时从 600000 ms 收紧到 180000 ms，避免单个卡住的 warmup/推理请求把整轮资格 step 拖到半小时以上。
+- 文件：`scripts/qualify-faster-whisper-production.ps1`、`WORKLOG.md`。
+- 验证：已完成本地只读检查与最小脚本修改；尚未重新触发远端生产资格 run。
+- 待办/风险：若实际模型在极慢磁盘/冷启动环境下需要超过 3 分钟才能完成首轮推理，这个上限会把它更早判为超时；需要重跑观察是否足够覆盖正常启动时间。

@@ -1968,6 +1968,7 @@ print('qualification-module-origins-verified')
     $QualificationStdout = Join-Path $LogRoot "qualification-runner.stdout.log"
     $QualificationStderr = Join-Path $LogRoot "qualification-runner.stderr.log"
     $QualificationDiagnosticReport = Join-Path $ReportRoot "sample-diagnostics.json"
+    $QualificationTimeoutMs = 180000
     $InferenceStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
     $QualificationProcess = Start-Process `
         -FilePath $VenvPython `
@@ -1977,7 +1978,7 @@ print('qualification-module-origins-verified')
             "--base-url", $TempAsrUrl,
             "--report-dir", $ReportRoot,
             "--diagnostic-report", $QualificationDiagnosticReport,
-            "--timeout-ms", "600000"
+            "--timeout-ms", $QualificationTimeoutMs
         ) `
         -WorkingDirectory $ResolvedSource `
         -WindowStyle Hidden `
