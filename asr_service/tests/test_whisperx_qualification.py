@@ -266,3 +266,59 @@ def test_workflow_and_runner_are_manual_isolated_and_disabled():
     assert "DiagnosticMode" in script
     assert "$diagnosticComplete" in script
     assert 'status -eq "complete"' in script
+
+
+def test_eval_candidates_are_finite_and_named():
+    from scripts import run_whisperx_decoding_eval as eval_mod
+
+    assert set(eval_mod.CANDIDATES) == {"baseline", "bim-initial-prompt", "bim-hotwords"}
+    for params in eval_mod.CANDIDATES.values():
+        assert set(params) == {"initial_prompt", "hotwords"}
+
+
+def test_eval_char_classes_cover_ascii_digit_and_cjk():
+    from scripts import run_whisperx_decoding_eval as eval_mod
+
+    classes = eval_mod._char_classes("GB 50016 2014 建筑信息模型")
+    assert classes["ascii_letter"] == 2
+    assert classes["ascii_digit"] == 9
+    assert classes["cjk"] == 6
+
+
+def test_edit_counts_separate_insert_delete_substitute():
+    from scripts import run_whisperx_decoding_eval as eval_mod
+
+    counts = eval_mod._edit_counts("甲乙丙丁", "甲乙丁戊")
+    assert counts["distance"] == 2
+    assert counts["substitutions"] == 1
+    assert counts["insertions"] == 0
+    assert counts["deletions"] == 0
+    assert eval_mod._edit_counts("甲乙", "甲乙丙")["insertions"] == 1
+    assert eval_mod._edit_counts("甲乙丙", "甲乙")["deletions"] == 1
+
+
+def test_eval_workflow_and_runner_are_manual_isolated_and_disabled():
+    workflow = (
+        ROOT / ".github/workflows/evaluate-whisperx-decoding-params-production.yml"
+    ).read_text(encoding="utf-8")
+    script = (ROOT / "scripts/evaluate-whisperx-decoding-params.ps1").read_text(
+        encoding="utf-8"
+    )
+    assert "workflow_dispatch:" in workflow
+    assert "execute_eval must be explicitly enabled" in workflow
+    assert "environment: production-asr" in workflow
+    assert "run_whisperx_decoding_eval.py" in script
+    assert "decoding-params-eval.json" in script
+    assert "WhisperX Profile is not disabled" in script
+    assert "installed dependency license audit failed" in script
+    lowered = script.lower()
+    for forbidden in (
+        "new-service",
+        "start-service",
+        "register-scheduledtask",
+        "new-netfirewallrule",
+    ):
+        assert forbidden not in lowered
+    assert "python-dotenv>=1.0.0" in script
+    assert "whisperx==3.8.6" in script
+    assert "-eval\\reports" in workflow

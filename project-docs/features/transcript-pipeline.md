@@ -212,6 +212,7 @@ TTS 样本已生成并通过严格 Manifest 校验，但生产 R3 workflow 在�
   未通过前不能认定 WhisperX 可用。资格失败诊断只输出文本哈希、字符类别、长度、
   token 形状、编辑类型计数、期望项命中布尔值和固定分类，不输出参考文本、原始
   ProviderCandidate 文本或 Canonical 文本，也不改变模型、样本或准入阈值。
+- 另已实现手动 R3 解码参数评估 workflow，仅在隔离 run 中对比 baseline、BIM initial_prompt 与 BIM hotwords 三个候选，输出脱敏 CER/召回/编辑计数/显存/确定性矩阵，不修改默认生产参数、模型、样本、阈值或 Profile admission。
 
 ## 已知限制
 
