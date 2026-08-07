@@ -417,15 +417,24 @@ def test_gpu_runtime_diagnostic_is_manual_bounded_and_read_only():
     assert "default: false" in workflow
     assert "production-deployment" in workflow
     assert "runs-on: [self-hosted, windows, production, gpu]" in workflow
-    assert "timeout-minutes: 10" in workflow
+    assert "timeout-minutes: 15" in workflow
     assert "C:\\Program Files\\Python310\\python.exe" in workflow
     assert "nvidia-smi.exe" in workflow
     assert "torch_import" in workflow
     assert "cuda_tensor" in workflow
     assert "flag_embedding_import" in workflow
+    assert "RAGPinCheng-GPU-Diagnostic-" in workflow
+    assert 'New-ScheduledTaskPrincipal -UserId "Administrator" -LogonType S4U -RunLevel Highest' in workflow
+    assert "BGEM3FlagModel" in workflow
+    assert "FlagReranker" in workflow
+    assert 'write_stage("embed_start")' in workflow
+    assert 'write_stage("reranker_start")' in workflow
+    assert 'write_stage("model_load_complete")' in workflow
+    assert "run-model-load.py" in workflow
+    assert "-EncodedCommand" not in workflow
+    assert "Stop-ScheduledTask -TaskName $taskName" in workflow
+    assert "Unregister-ScheduledTask -TaskName $taskName" in workflow
     assert "WaitForExit(60000)" in workflow
-    assert "Register-ScheduledTask" not in workflow
-    assert "Start-ScheduledTask" not in workflow
     assert "pip install" not in workflow
 
 
