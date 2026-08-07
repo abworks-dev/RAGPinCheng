@@ -2379,6 +2379,12 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 验证：同范围专项测试此前已通过 132 项；当前工作树补充检查目标 Python 文件可编译并完成 `git diff --check`。当前开发机未安装 pytest，未重复执行测试套件；生产服务、模型制品和 Profile admission 未修改。
 - 待办/风险：待提交、合并后以完整 master SHA 重新触发 faster-whisper 生产资格验证；GitHub 托管 CI 仍可能受账单门禁影响。
 
+### 08:06 — faster-whisper 增加 BIM hotwords
+
+- 完成：在 faster-whisper 中文实验 profile 中加入 8 个 BIM 热词（构件碰撞、净高分析、复核、建筑信息模型、钢结构、焊缝、螺栓、规范编号），以提升噪声场景下术语识别率。引擎端此前已完成 hotwords 参数类型修复，无需改动引擎代码。
+- 文件：`src/transcription/profile_catalog.py`、`tests/test_transcription_profile_catalog.py`、`WORKLOG.md`。
+- 验证：`python -m compileall` 通过；当前环境未安装 pytest，未运行完整测试套件。
+- 待办/风险：待合并 master 后重新触发生产资格 run，验证 `noisy-bim-zh` CER 是否能降至 0.15 以下。Profile admission 保持 disabled，不影响生产流量。
 ### 06:36 — 增加 noisy-bim-zh 本地诊断输出
 
 - 完成：在 faster-whisper 资格 runner 中增加本机 `sample-diagnostics.json` 输出，记录 `reference_text`、`hypothesis_text`、归一化文本和逐样本 CER/召回信息；保持 `qualification-summary.json` 与 `sample-results.json` 继续脱敏，不向 GitHub artifact 回传原文。生产资格 wrapper 现显式传入诊断路径。

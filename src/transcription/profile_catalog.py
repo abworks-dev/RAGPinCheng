@@ -84,7 +84,18 @@ def _profiles() -> tuple[TranscriptionProfileDefinition, ...]:
                 "准入保持关闭。"
             ),
             provider_key=FASTER_WHISPER_PROVIDER_KEY,
-            provider_config=FasterWhisperRemoteConfig(),
+            provider_config=FasterWhisperRemoteConfig(
+                hotwords=(
+                    "构件碰撞",
+                    "净高分析",
+                    "复核",
+                    "建筑信息模型",
+                    "钢结构",
+                    "焊缝",
+                    "螺栓",
+                    "规范编号",
+                ),
+            ),
             normalizer_config=NormalizerConfig(2, 500, 1000),
             qualification=ProfileQualification.experimental,
             admission=ProfileAdmission.disabled,
