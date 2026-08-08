@@ -2615,3 +2615,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`gpu_service/runtime-lock.json`、`tests/test_gpu_runtime_deployment_static.py`、`WORKLOG.md`。
 - 验证：资格 workflow 成功并上传两种精度的 stages/stdout/stderr、manifest、qualification 和完整性清单；尚待本地专项测试、CI 与 production deployment。
 - 待办/风险：promotion 会备份并修改 GPU 任务、环境文件、release 指针和 8100 服务；现有 workflow 在 GPU 成功后还会连带部署 Ubuntu 应用。promotion 或健康/冒烟失败时由脚本恢复备份；当前尚无已知健康 release，首次失败只能保持离线状态。
+
+### 02:51 — 修复 validated release materialization
+
+- 完成：production run `31272624940` 首次失败于缺少 `GPU_MODEL_CACHE_SOURCE`，未分配生产 release；补齐已通过资格的离线模型缓存变量后，run `31272700448` 暴露部署流程缺陷：qualification release 位于 run-local `runtime\qualification\<run>\releases\<release-id>`，而 validated build 只查找确定性 `runtime\releases\<release-id>`，因此在停任务前 fail-closed。build 现严格寻找唯一匹配的 qualification release，校验 release ID、源码/锁/Torch/run 证据和双精度结果后 materialize 到确定性 release；build 与 promote 两层均拒绝缺少完整 `qualified_precisions` 的证据。
+- 文件：`scripts/build-gpu-runtime.ps1`、`scripts/promote-gpu-runtime.ps1`、`tests/test_gpu_runtime_deployment_static.py`、`project-docs/features/gpu-runtime-deployment.md`、`WORKLOG.md`。
+- 验证：GPU/ASR/部署静态专项 `60 passed`；4 个 GPU runtime PowerShell 脚本 AST 解析通过；`git diff --check` 通过。两次 production run 均在停止任务前失败，`deploy-app` 均跳过；`Deploy production` 已恢复为 `disabled_manually`。
+- 待办/风险：需通过 PR 合入后重跑同一 production promotion；成功后才会启动 GPU release 并连带部署 Ubuntu 应用，失败仍按既有备份回滚。当前 GPU 服务仍未恢复。

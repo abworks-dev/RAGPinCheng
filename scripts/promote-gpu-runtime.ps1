@@ -153,11 +153,15 @@ if (
     throw "GPU release lock has not been approved from qualification evidence"
 }
 $qualification = Get-Content -LiteralPath $qualificationPath -Encoding UTF8 | ConvertFrom-Json
+$qualifiedPrecisions = @($qualification.qualified_precisions | ForEach-Object { [string]$_ })
 if (
     $qualification.status -ne "qualified" -or
     $qualification.device -ne "cuda" -or
     $qualification.embedding_precision -ne "fp16" -or
     $qualification.reranker_precision -notin @("fp16", "fp32") -or
+    $qualifiedPrecisions.Count -ne 2 -or
+    $qualifiedPrecisions[0] -ne "fp16" -or
+    $qualifiedPrecisions[1] -ne "fp32" -or
     [string]$qualification.qualification_run_id -ne [string]$manifest.qualification_run_id -or
     $qualification.repository_commit -ne $manifest.repository_commit -or
     $qualification.source_fingerprint -ne $manifest.source_fingerprint -or

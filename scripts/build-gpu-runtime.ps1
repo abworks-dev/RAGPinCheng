@@ -105,6 +105,63 @@ $releaseId = $SourceFingerprint.Substring(0, 12) + "-" + $lockHash.Substring(0, 
 $releaseRoot = Join-Path $resolvedRuntimeRoot "releases\$releaseId"
 $manifestPath = Join-Path $releaseRoot "runtime-manifest.json"
 $qualificationPath = Join-Path $releaseRoot "qualification.json"
+if ($metadata.validation_status -eq "validated" -and -not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+    $qualificationRoot = Join-Path $resolvedRuntimeRoot "qualification"
+    if (-not (Test-Path -LiteralPath $qualificationRoot -PathType Container)) {
+        throw "Validated metadata has no managed qualification root to import"
+    }
+    $qualifiedCandidates = @(
+        Get-ChildItem -LiteralPath $qualificationRoot -Directory -Force |
+            ForEach-Object { Join-Path $_.FullName "releases\$releaseId" } |
+            Where-Object { Test-Path -LiteralPath (Join-Path $_ "runtime-manifest.json") -PathType Leaf }
+    )
+    if ($qualifiedCandidates.Count -ne 1) {
+        throw "Validated metadata requires exactly one matching qualified release; found $($qualifiedCandidates.Count)"
+    }
+    $qualifiedRelease = [IO.Path]::GetFullPath([string]$qualifiedCandidates[0])
+    $resolvedQualificationRoot = [IO.Path]::GetFullPath($qualificationRoot).TrimEnd('\') + '\'
+    if (-not $qualifiedRelease.StartsWith($resolvedQualificationRoot, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Qualified release path escapes the managed qualification root"
+    }
+    $qualifiedManifestPath = Join-Path $qualifiedRelease "runtime-manifest.json"
+    $qualifiedEvidencePath = Join-Path $qualifiedRelease "qualification.json"
+    if (-not (Test-Path -LiteralPath $qualifiedEvidencePath -PathType Leaf)) {
+        throw "Matching qualified release lacks qualification evidence"
+    }
+    $qualifiedManifest = Get-Content -LiteralPath $qualifiedManifestPath -Encoding UTF8 | ConvertFrom-Json
+    $qualifiedEvidence = Get-Content -LiteralPath $qualifiedEvidencePath -Encoding UTF8 | ConvertFrom-Json
+    $qualifiedPrecisions = @($qualifiedEvidence.qualified_precisions | ForEach-Object { [string]$_ })
+    if (
+        $qualifiedManifest.release_id -ne $releaseId -or
+        $qualifiedManifest.status -ne "built" -or
+        $qualifiedManifest.qualification_status -ne "qualified" -or
+        $qualifiedManifest.lock_validation_status -ne "candidate" -or
+        [string]$qualifiedManifest.repository_commit -ne [string]$metadata.source_commit -or
+        [string]$qualifiedManifest.source_fingerprint -ne [string]$SourceFingerprint -or
+        [string]$qualifiedManifest.lock_sha256 -ne [string]$lockHash -or
+        [string]$qualifiedManifest.torch_wheel_sha256 -ne [string]$metadata.torch_wheel_sha256 -or
+        [string]$qualifiedManifest.qualification_run_id -ne [string]$metadata.qualification_run_id -or
+        $qualifiedEvidence.status -ne "qualified" -or
+        $qualifiedEvidence.device -ne "cuda" -or
+        $qualifiedEvidence.embedding_precision -ne "fp16" -or
+        $qualifiedEvidence.reranker_precision -notin @("fp16", "fp32") -or
+        $qualifiedPrecisions.Count -ne 2 -or
+        $qualifiedPrecisions[0] -ne "fp16" -or
+        $qualifiedPrecisions[1] -ne "fp32" -or
+        [string]$qualifiedEvidence.qualification_run_id -ne [string]$metadata.qualification_run_id -or
+        [string]$qualifiedEvidence.repository_commit -ne [string]$metadata.source_commit -or
+        [string]$qualifiedEvidence.source_fingerprint -ne [string]$SourceFingerprint -or
+        [string]$qualifiedEvidence.lock_sha256 -ne [string]$lockHash -or
+        [string]$qualifiedEvidence.torch_wheel_sha256 -ne [string]$metadata.torch_wheel_sha256
+    ) {
+        throw "Managed qualification release does not match validated metadata"
+    }
+    New-Item -ItemType Directory -Path $releaseRoot -Force | Out-Null
+    foreach ($entry in @(Get-ChildItem -LiteralPath $qualifiedRelease -Force)) {
+        Copy-Item -LiteralPath $entry.FullName -Destination (Join-Path $releaseRoot $entry.Name) -Recurse -Force
+    }
+    Write-Host "GPU_RUNTIME_BUILD status=imported-qualified release=$qualifiedRelease"
+}
 if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
     $existing = Get-Content -LiteralPath $manifestPath -Encoding UTF8 | ConvertFrom-Json
     if (
@@ -120,11 +177,15 @@ if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
                 throw "Validated metadata must reuse a previously qualified candidate release"
             }
             $qualification = Get-Content -LiteralPath $qualificationPath -Encoding UTF8 | ConvertFrom-Json
+            $qualifiedPrecisions = @($qualification.qualified_precisions | ForEach-Object { [string]$_ })
             if (
                 $qualification.status -ne "qualified" -or
                 $qualification.device -ne "cuda" -or
                 $qualification.embedding_precision -ne "fp16" -or
                 $qualification.reranker_precision -notin @("fp16", "fp32") -or
+                $qualifiedPrecisions.Count -ne 2 -or
+                $qualifiedPrecisions[0] -ne "fp16" -or
+                $qualifiedPrecisions[1] -ne "fp32" -or
                 [string]$qualification.qualification_run_id -ne [string]$metadata.qualification_run_id -or
                 [string]$existing.repository_commit -ne [string]$metadata.source_commit -or
                 [string]$qualification.repository_commit -ne [string]$metadata.source_commit -or
