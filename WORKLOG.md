@@ -2562,3 +2562,9 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`.gitignore`、`.github/workflows/resolve-gpu-runtime-candidate.yml`、`.github/workflows/repair-gpu-reranker-production.yml`、`gpu_service/runtime-lock.json`、`scripts/resolve-gpu-model-cache-source.ps1`、`scripts/get-gpu-torch-wheel-seed.ps1`、`scripts/new-gpu-torch-wheel-seed-manifest.ps1`、`scripts/resolve-gpu-runtime.ps1`、`scripts/build-gpu-runtime.ps1`、`scripts/qualify-gpu-runtime.ps1`、`scripts/deploy-gpu.ps1`、`scripts/promote-gpu-runtime.ps1`、`scripts/start-gpu-service.ps1`、`tests/test_gpu_runtime_deployment_static.py`、`project-docs/features/gpu-runtime-deployment.md`、`WORKLOG.md`。
 - 验证：新增及相关 GPU runtime 脚本 PowerShell AST 解析通过，两条修改workflow的内嵌PowerShell block AST解析通过；全部17个workflow YAML解析通过；Python `compileall` 通过；ASR/GPU部署CI同款相关集合与GPU服务合约合计 `401 passed`、`2 subtests passed`（7个既有弃用警告）；缺失seed fail-closed冒烟通过；`git diff --check` 通过。
 - 待办/风险：candidate锁合并并通过CI后，需运行一次CUDA/S4U资格workflow并独立复核manifest、qualification、源码与wheel清单及freeze；只有成功后才能回填validated元数据。自动生产部署保持禁用，不进行promotion，不恢复生产GPU服务，不修改生产任务、全局依赖、模型缓存、数据库、Qdrant或防火墙；已取消run留下的部分resolver缓存不清理。
+
+### 17:10 — 隔离资格候选目录隔离
+
+- 完成：执行隔离 GPU runtime 矩阵。D 盘 resolver 成功解析并通过 `pip check`，选定 FlagEmbedding 1.4.0、transformers 4.55.4、tokenizers 0.21.4；资格 run 发现共享 release 目录复用了源码快照不一致的旧候选，完整性校验正确拒绝。将候选资格 workflow 的 runtime 根目录改为每次 run 独立的 D 盘路径，避免旧/损坏 release 被复用；生产部署的 deterministic release 路径保持不变。
+- 验证：本地 GPU runtime、部署和服务合约专项 `75 passed`；resolver run `31249656343` 成功；资格 run `31249859828` 在源码快照完整性阶段失败，未创建生产任务、未监听 8100、未修改全局依赖。
+- 待办/风险：需推送该 workflow 修复后重新运行候选资格；通过后再按独立 R3 审批回填 validated 元数据、promotion、恢复 GPU 服务并重跑 faster-whisper。未删除旧候选目录或清理生产备份。
