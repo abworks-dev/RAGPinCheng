@@ -2625,10 +2625,11 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 
 ### 02:51 — 修复 validated release materialization
 
-- 完成：production run `31272624940` 首次失败于缺少 `GPU_MODEL_CACHE_SOURCE`，未分配生产 release；补齐已通过资格的离线模型缓存变量后，run `31272700448` 暴露部署流程缺陷：qualification release 位于 run-local `runtime\qualification\<run>\releases\<release-id>`，而 validated build 只查找确定性 `runtime\releases\<release-id>`，因此在停任务前 fail-closed。build 现严格寻找唯一匹配的 qualification release，校验 release ID、源码/锁/Torch/run 证据和双精度结果后 materialize 到确定性 release；导入时同步重写 manifest 的 release-local 路径；build 与 promote 两层均拒绝缺少完整 `qualified_precisions` 的证据。
+- 完成：production run `31272624940` 首次失败于缺少 `GPU_MODEL_CACHE_SOURCE`，未分配生产 release；补齐已通过资格的离线模型缓存变量后，run `31272700448` 暴露部署流程缺陷：qualification release 位于 run-local `runtime\qualification\<run>\releases\<release-id>`，而 validated build 只查找确定性 `runtime\releases\<release-id>`，因此在停任务前 fail-closed。build 现严格寻找唯一匹配的 qualification release，校验 release ID、源码/锁/Torch/run 证据和双精度结果后 materialize 到确定性 release；导入时同步重写 manifest 的 release-local 路径；已有但路径异常的 release 也会回到同一证据校验导入分支；build 与 promote 两层均拒绝缺少完整 `qualified_precisions` 的证据。
 - 文件：`scripts/build-gpu-runtime.ps1`、`scripts/promote-gpu-runtime.ps1`、`tests/test_gpu_runtime_deployment_static.py`、`project-docs/features/gpu-runtime-deployment.md`、`WORKLOG.md`。
 - 验证：GPU/ASR/部署静态专项 `60 passed`；4 个 GPU runtime PowerShell 脚本 AST 解析通过；PR `#111` 的7个 CI job全部通过并已合入。production run `31273188815` 已成功 materialize qualification release，但因旧 manifest 绝对路径门禁失败，`deploy-app` 跳过且未确认生产切换；补丁后的本地专项测试、AST 与 `git diff --check` 通过。
-- 待办/风险：路径修复需通过后续 PR 合入后重跑 production promotion；成功后才会启动 GPU release 并连带部署 Ubuntu 应用，失败仍按既有备份回滚。当前 GPU 服务仍未恢复。
+- 验证：GPU/ASR/部署静态专项 `60 passed`；4 个 GPU runtime PowerShell 脚本 AST 解析通过；PR `#111` 的7个 CI job全部通过并已合入。production run `31273188815` 已成功 materialize qualification release，但因旧 manifest 绝对路径门禁失败，`deploy-app` 跳过；run `31273497028` 进一步确认已有旧 release 会直接 `reused`，同样在路径门禁失败，未确认生产切换；补丁后的本地专项测试、AST 与 `git diff --check` 通过。
+- 待办/风险：幂等导入修复需通过后续 PR 合入后重跑 production promotion；成功后才会启动 GPU release 并连带部署 Ubuntu 应用，失败仍按既有备份回滚。当前 GPU 服务仍未恢复。
 
 ### 03:10 — 推送 Qwen 修复并完成 PR CI
 
@@ -2636,3 +2637,9 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`WORKLOG.md`、PR 分支合并提交中的既有 Qwen/GPU 修复文件。
 - 验证：6 个 PowerShell 脚本 AST、`python -m compileall -q scripts gpu_service asr_service tests`、PR `#113` 的 7 个 CI job 全部通过；本机未安装 pytest，未运行 pytest 套件。只读检查显示本机 `${PRIVATE_IPV4}:8100` 超时、`127.0.0.1:8200` 拒绝连接；已核对 GPU 资格 run `31271874609` 的 runtime fingerprint `9b147c448b9b22d15e41f8eae7409c5417c291fec0f8f3d67b47ad6a8bab2e79`。
 - 待办/风险：production runner 的实时健康不能由本机网络结果替代；未触发新的 Qwen R3、GPU promotion 或服务恢复。另有独立 deploy run `31273681766` 正在运行，未干预。
+
+### 03:13 — 合入 GPU manifest 幂等修复并确认部署健康
+
+- 完成：将 `master` 的 `0c60eec` 合入 Qwen 分支，保留 manifest 路径异常时重新导入 qualification release 的修复；未修改生产文件。
+- 验证：production run `31273681766` 已以 `5af725c` 完成 GPU runtime promotion（release `9b147c448b9b-fa16678de682`）和 Ubuntu backend health check，两个 job 均成功；GPU 资格 fingerprint 仍为 `9b147c448b9b22d15e41f8eae7409c5417c291fec0f8f3d67b47ad6a8bab2e79`。
+- 待办/风险：Qwen PR 需在最新 master 合入后重新通过 CI；未合并 PR、未触发 Qwen R3 或修改 Profile admission。
