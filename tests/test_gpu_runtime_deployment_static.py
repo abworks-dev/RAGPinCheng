@@ -33,6 +33,46 @@ def test_known_bad_two_package_pin_is_not_a_production_contract():
     assert "runtime-lock" in root_requirements
 
 
+def test_candidate_resolver_is_manual_d_drive_isolated_and_evidence_only():
+    workflow = read(".github/workflows/resolve-gpu-runtime-candidate.yml")
+    script = read("scripts/resolve-gpu-runtime.ps1")
+    lowered = script.lower()
+
+    assert "workflow_dispatch:" in workflow
+    assert "confirm_resolution:" in workflow
+    assert "default: false" in workflow
+    assert "production-gpu-exclusive" in workflow
+    assert "runs-on: [self-hosted, windows, production, gpu]" in workflow
+    assert "timeout-minutes: 60" in workflow
+    assert "actions/upload-artifact@v4" in workflow
+    assert "runtime-lock-candidate.txt" in workflow
+    assert "resolver-report.json" in workflow
+    assert "preflight.json" in workflow
+    assert "qualify-gpu-runtime.ps1" not in workflow
+    assert "promote-gpu-runtime.ps1" not in workflow
+
+    assert 'StartsWith("D:\\"' in script
+    assert '"-m", "venv"' in script
+    assert "--system-site-packages" not in script
+    assert '"torch==2.7.0+cu128"' in script
+    assert '"FlagEmbedding>=1.3,<2"' in script
+    assert '"transformers>=4.47,<5"' in script
+    assert '"tokenizers>=0.21,<0.22"' in script
+    assert '@("-m", "pip", "check")' in script
+    assert "pip freeze" in script
+    assert "HF_HUB_OFFLINE" in script
+    assert "TRANSFORMERS_OFFLINE" in script
+    assert "Get-NetTCPConnection -LocalPort 8100 -State Listen" in script
+    assert 'Get-ScheduledTask -TaskName "RAGPinCheng-GPU"' in script
+    assert "Stop-ScheduledTask" not in script
+    assert "Register-ScheduledTask" not in script
+    assert "Unregister-ScheduledTask" not in script
+    assert "Remove-Item" not in script
+    assert "new-netfirewallrule" not in lowered
+    assert "BGEM3FlagModel" not in script
+    assert "FlagReranker" not in script
+
+
 def test_builder_is_d_drive_isolated_exact_and_records_artifacts():
     script = read("scripts/build-gpu-runtime.ps1")
     lock_hash = read("scripts/get-gpu-runtime-lock-hash.ps1")

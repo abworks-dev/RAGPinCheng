@@ -2555,3 +2555,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`scripts/deploy-gpu.ps1`、`scripts/build-gpu-runtime.ps1`、`scripts/promote-gpu-runtime.ps1`、`tests/test_gpu_runtime_deployment_static.py`、`project-docs/features/gpu-runtime-deployment.md`、`WORKLOG.md`（本条及上条更正）。未改 `qualify-gpu-runtime.ps1`、`start-gpu-service.ps1`、`gpu_service/**`、任何 workflow、`runtime-lock.txt` 与 `runtime-lock.json`。
 - 验证：8 个外部 PowerShell 脚本及 3 个 workflow 内嵌 block AST 解析、16 个 workflow YAML 解析、Python `compileall`、LF 规范化后 `bash -n scripts/deploy-app.sh`、`git diff --check` 均通过；ASR/部署 CI 同款集合 `371 passed`、`2 subtests passed`，`gpu_service/tests/test_contract.py` `27 passed`（合计与原 `396` 一致，新增 2 项测试）。新增测试经 stash 变异验证：对修复前脚本 `2 failed`，修复后通过。另以从真实脚本 AST 提取的 `Invoke-RuntimeScript` 做功能级验证：`robocopy` 退出 1 时 promotion 门禁放行、内层 `throw` 与非零 `exit` 仍向上传播、调用前脏 `$LASTEXITCODE=16` 被重置且不产生假失败；锁哈希 CRLF/LF 一致并与 Python 参考实现相同。
 - 待办/风险：`runtime-lock.txt` 仍为空、元数据仍为 `unvalidated`，fail-closed 状态未改变，本提交仍无法构建或推广生产 release。未 push、未创建 PR、未启用或触发任何 workflow、未执行 R3-2B 候选资格、未改生产 GPU 服务/Scheduled Task/全局 Python/模型缓存/密钥/防火墙。`qualify-gpu-runtime.ps1` 在 8100 监听或 `RAGPinCheng-GPU` 任务存在时拒绝执行，故首个候选需先停用生产 GPU 任务，属 R3-2B 需单独审批的生产操作，已补记入功能文档。真实 CUDA、S4U、任务切换与失败回滚仍未在生产主机验证。
+
+### 11:40 — 执行 R3-2B GPU 候选资格
+
+- 完成：新增受人工确认保护的 GPU runtime 候选锁解析入口；在生产 GPU Runner 上先验证 Python 3.10、D 盘剩余空间、模型缓存源及生产任务/8100 均符合隔离前提，再仅在 D 盘 run-local venv、TEMP 与 pip cache 中解析固定 CUDA 候选约束、执行 `pip check`，上传完整精确锁、freeze、resolver report 与不含本机路径的 preflight 证据。解析器不加载或下载模型、不写正式锁、不修改全局 Python，发现生产任务或监听端口时直接失败且不自动处理。
+- 文件：`.github/workflows/resolve-gpu-runtime-candidate.yml`、`scripts/resolve-gpu-runtime.ps1`、`tests/test_gpu_runtime_deployment_static.py`、`project-docs/features/gpu-runtime-deployment.md`、`WORKLOG.md`。
+- 验证：新增脚本及相关 GPU runtime 脚本 PowerShell AST 解析通过；全部 17 个 workflow YAML 解析通过；Python `compileall` 通过；ASR/GPU 部署 CI 同款测试集合 `372 passed`、`2 subtests passed`（2 个既有弃用警告）；`git diff --check` 通过。
+- 待办/风险：需合并解析入口并在受控 Runner 上生成、下载和人工复核候选锁；锁提交为 `candidate` 后才能构建并执行 CUDA/S4U 资格验证。自动生产部署保持禁用，不进行promotion，不恢复生产GPU服务，不修改生产任务、全局依赖、模型缓存、数据库、Qdrant或防火墙。
