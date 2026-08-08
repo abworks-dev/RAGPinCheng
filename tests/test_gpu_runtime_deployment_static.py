@@ -11,15 +11,19 @@ def read(path: str) -> str:
     return (ROOT / path).read_text(encoding="utf-8")
 
 
-def test_runtime_lock_is_candidate_only_until_cuda_qualification():
+def test_runtime_lock_is_validated_only_by_matching_cuda_qualification():
     metadata = json.loads(read("gpu_service/runtime-lock.json"))
     requirements = read("gpu_service/runtime-lock.txt")
     assert metadata["schema_version"] == 1
-    assert metadata["validation_status"] == "candidate"
-    assert metadata["qualification_run_id"] is None
-    assert metadata["source_commit"] is None
-    assert metadata["qualified_source_fingerprint"] is None
-    assert metadata["qualified_lock_sha256"] is None
+    assert metadata["validation_status"] == "validated"
+    assert metadata["qualification_run_id"] == "31271874609"
+    assert metadata["source_commit"] == "3ff8c076c4637ab156281dbab7f6b3feac966685"
+    assert metadata["qualified_source_fingerprint"] == (
+        "9b147c448b9b22d15e41f8eae7409c5417c291fec0f8f3d67b47ad6a8bab2e79"
+    )
+    assert metadata["qualified_lock_sha256"] == (
+        "fa16678de682e389e0f5ca89b180b2c033404e5e077ff539b552f8cde0430f1a"
+    )
     assert metadata["torch_wheel_sha256"] == (
         "c52c4b869742f00b12cb34521d1381be6119fa46244791704b00cc4a3cb06850"
     )
