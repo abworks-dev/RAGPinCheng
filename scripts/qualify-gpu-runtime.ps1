@@ -24,6 +24,9 @@ $manifest = Get-Content -LiteralPath $manifestPath -Encoding UTF8 | ConvertFrom-
 if ($manifest.status -ne "built" -or $manifest.qualification_status -ne "pending") {
     throw "GPU runtime release is not awaiting qualification"
 }
+if ([string]$manifest.torch_wheel_sha256 -cnotmatch '^[0-9a-f]{64}$') {
+    throw "GPU runtime release lacks a valid Torch wheel SHA-256"
+}
 $runtimePython = [string]$manifest.runtime_python
 $modelCache = [string]$manifest.model_cache
 $sourceRoot = [string]$manifest.source_root
@@ -185,6 +188,7 @@ $qualification = @{
     reranker_precision = $selectedPrecision
     source_fingerprint = [string]$manifest.source_fingerprint
     lock_sha256 = [string]$manifest.lock_sha256
+    torch_wheel_sha256 = [string]$manifest.torch_wheel_sha256
     source_inventory_sha256 = [string]$manifest.source_inventory_sha256
     repository_commit = [string]$manifest.repository_commit
     qualification_run_id = $QualificationRunId
