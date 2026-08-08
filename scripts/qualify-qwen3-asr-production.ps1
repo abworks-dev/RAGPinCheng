@@ -91,6 +91,48 @@ function Write-StageTiming {
     Write-Host ("R3_STAGE stage={0} elapsed_ms={1}" -f $Stage, $Stopwatch.ElapsedMilliseconds)
 }
 
+function ConvertTo-WindowsCommandLineArgument {
+    param(
+        [AllowEmptyString()][AllowNull()][string]$Value
+    )
+    if ($null -eq $Value) { return '""' }
+    if ($Value.Length -gt 0 -and $Value -notmatch '[\s"]') {
+        return $Value
+    }
+    $builder = New-Object System.Text.StringBuilder
+    [void]$builder.Append('"')
+    $backslashes = 0
+    foreach ($character in $Value.ToCharArray()) {
+        if ($character -eq '\') {
+            $backslashes++
+            continue
+        }
+        if ($character -eq '"') {
+            [void]$builder.Append(('\' * (2 * $backslashes + 1)))
+            [void]$builder.Append('"')
+            $backslashes = 0
+            continue
+        }
+        if ($backslashes -gt 0) {
+            [void]$builder.Append(('\' * $backslashes))
+            $backslashes = 0
+        }
+        [void]$builder.Append($character)
+    }
+    if ($backslashes -gt 0) {
+        [void]$builder.Append(('\' * (2 * $backslashes)))
+    }
+    [void]$builder.Append('"')
+    return $builder.ToString()
+}
+
+function ConvertTo-WindowsCommandLine {
+    param([Parameter(Mandatory = $true)][string[]]$Arguments)
+    return (($Arguments | ForEach-Object {
+        ConvertTo-WindowsCommandLineArgument -Value $_
+    }) -join ' ')
+}
+
 function Assert-DirectChild {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
@@ -157,9 +199,10 @@ function Invoke-External {
     $process = $null
     try {
         Write-Host "R3_STAGE stage=$stage status=start"
+        $argumentLine = ConvertTo-WindowsCommandLine -Arguments $Arguments
         $process = Start-Process `
             -FilePath $FilePath `
-            -ArgumentList $Arguments `
+            -ArgumentList $argumentLine `
             -WindowStyle Hidden `
             -RedirectStandardOutput $stdoutPath `
             -RedirectStandardError $stderrPath `

@@ -2468,4 +2468,11 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 完成：Qwen3-ASR R3 qualification 现在为隔离依赖、模型准备、CUDA BF16 预检和八样本推理输出脱敏阶段状态与心跳；外部命令按阶段超时并将 stdout/stderr 留在 run-local 日志；runner 输出 warmup 与逐样本完成事件；八样本推理增加 170 分钟整体 watchdog，超时后写入 `qualification_timeout` verdict 并进入既有清理路径。
 - 文件：`scripts/qualify-qwen3-asr-production.ps1`、`scripts/run_qwen3_asr_qualification.py`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
 - 验证：PowerShell AST 解析、Python 编译、完整 ASR 静态测试 31/31 与 `git diff --check` 通过；本机未安装 pytest，未运行 pytest 套件。
-- 待办/风险：尚未在 production-asr runner 触发或取消 workflow；当前进行中的 run 不会获得新逻辑。Profile admission 保持 disabled，生产服务、生产 venv、模型缓存、数据库、Qdrant 与防火墙均未修改。
+- 待办/风险：后续 run `31222037405` 已使用 merge SHA 触发，但在 native stderr self-test 暴露 `Start-Process -ArgumentList` 多行 `python -c` 参数边界回归并失败；Profile admission 保持 disabled，生产服务、生产 venv、模型缓存、数据库、Qdrant 与防火墙均未修改。
+
+### 17:01 — 修复 Qwen3-ASR Windows 参数传递回归
+
+- 完成：为 Qwen qualification wrapper 增加 Windows 命令行逐参数 quoting，避免 `Start-Process -ArgumentList` 重组 `python -c` 多行代码；保留阶段心跳、超时和脱敏日志行为。
+- 文件：`scripts/qualify-qwen3-asr-production.ps1`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
+- 验证：PowerShell AST 解析、Python 编译、ASR 静态测试 31/31、临时 Python stderr 参数集成测试和 `git diff --check` 通过；未安装依赖、未启动服务、未执行 production retry。
+- 待办/风险：需提交 PR、CI 通过并重新审批后，才能以新的完整 master SHA 重跑 R3 qualification；Profile admission 继续保持 disabled。
