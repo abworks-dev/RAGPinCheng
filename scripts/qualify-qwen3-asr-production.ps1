@@ -602,23 +602,31 @@ function New-WheelManifest {
                 $fileName = [Uri]::UnescapeDataString(
                     [System.IO.Path]::GetFileName($uri.AbsolutePath)
                 )
+                # Recent pip versions may emit only the metadata URL. Its
+                # wheel path is the same source with the trailing suffix
+                # removed, so retain the actual wheel URL in the manifest.
+                if ($fileName.EndsWith(".whl.metadata", [StringComparison]::OrdinalIgnoreCase)) {
+                    $fileName = $fileName.Substring(0, $fileName.Length - ".metadata".Length)
+                }
                 if ($fileName.Equals($wheel.Name, [StringComparison]::OrdinalIgnoreCase)) {
-                    $url = $candidate
+                    $url = $candidate -replace "\.whl\.metadata(?=$|[?#])", ".whl"
+                    break
                 }
             } catch {
             }
         }
         if ([string]::IsNullOrWhiteSpace($url)) {
-            $sharedCandidate = Join-Path $SharedWheelSeed $wheel.Name
-            if (
-                (Test-Path -LiteralPath $sharedCandidate -PathType Leaf) -and
-                (Get-Sha256 -Path $sharedCandidate) -eq $wheelSha256
-            ) {
-                $url = "shared-cache://sha256/$wheelSha256/$($wheel.Name)"
+            $sharedCandidate = @(
+                Get-ChildItem -LiteralPath $SharedWheelSeed -Filter "*.whl" -File |
+                    Where-Object { (Get-Sha256 -Path $_.FullName) -eq $wheelSha256 } |
+                    Select-Object -First 1
+            )
+            if ($sharedCandidate.Count -eq 1) {
+                $url = "shared-cache://sha256/$wheelSha256/$($sharedCandidate[0].Name)"
             }
         }
         if ([string]::IsNullOrWhiteSpace($url)) {
-            throw "Unable to bind wheel file to its resolved download URL"
+            throw "Unable to bind wheel file '$($wheel.Name)' to a resolved source URL (resolved_url_candidates=$($resolvedUrls.Count))"
         }
         $files += [ordered]@{
             file_name = $wheel.Name
