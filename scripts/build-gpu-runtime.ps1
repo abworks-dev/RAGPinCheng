@@ -160,6 +160,11 @@ if ($metadata.validation_status -eq "validated" -and -not (Test-Path -LiteralPat
     foreach ($entry in @(Get-ChildItem -LiteralPath $qualifiedRelease -Force)) {
         Copy-Item -LiteralPath $entry.FullName -Destination (Join-Path $releaseRoot $entry.Name) -Recurse -Force
     }
+    $qualifiedManifest.runtime_python = Join-Path $releaseRoot "venv\Scripts\python.exe"
+    $qualifiedManifest.model_cache = Join-Path $releaseRoot "model-cache"
+    $qualifiedManifest.source_root = Join-Path $releaseRoot "source"
+    $qualifiedManifest | ConvertTo-Json -Depth 5 |
+        Set-Content -LiteralPath $manifestPath -Encoding UTF8
     Write-Host "GPU_RUNTIME_BUILD status=imported-qualified release=$qualifiedRelease"
 }
 if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
