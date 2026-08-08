@@ -1151,6 +1151,8 @@ def test_qwen3_asr_qualification_emits_sanitized_dependency_diagnosis():
     assert "Cannot install .+ because these package versions have conflicting dependencies" in diagnostic_section
     assert "The user requested(?: \\(constraint\\))?" in diagnostic_section
     assert '$Matches.ContainsKey("spec")' in diagnostic_section
+    assert "function Test-DependencySpecifierExcludesExact" in script
+    assert "compatibleDependencyContexts" in diagnostic_section
     assert "funasr 1.4.1 depends on oss2" in diagnostic_section
     assert '$bareDependencyConflict.Owner -ne "funasr==1.4.1"' in diagnostic_section
     assert '$bareDependencyConflict.RequestedConstraint -ne "oss2==2.19.1"' in diagnostic_section
@@ -1181,21 +1183,24 @@ def test_qwen3_asr_qualification_uses_controlled_legacy_wheel_bundles():
         "build_internal_oss2_wheel.py",
         "build_internal_antlr4_wheel.py",
         "build_internal_crcmod_wheel.py",
+        "build_internal_aliyun_core_wheel.py",
     ):
         assert builder in workflow
         assert builder in script
-    for directory in ("jieba", "oss2", "antlr4", "crcmod"):
+    for directory in ("jieba", "oss2", "antlr4", "crcmod", "aliyun-core"):
         assert f"\\{directory}" in workflow
     for parameter in (
         "Oss2WheelBundlePath",
         "Antlr4WheelBundlePath",
         "CrcmodWheelBundlePath",
+        "AliyunCoreWheelBundlePath",
     ):
         assert f"{parameter} =" in workflow
         assert f"[string]${parameter}" in script
     assert '"--find-links", $ResolvedOss2WheelBundle' in script
     assert '"--find-links", $ResolvedAntlr4WheelBundle' in script
     assert '"--find-links", $ResolvedCrcmodWheelBundle' in script
+    assert '"--find-links", $ResolvedAliyunCoreWheelBundle' in script
     assert "Controlled internal wheel bundle must be a real directory" in script
 
 

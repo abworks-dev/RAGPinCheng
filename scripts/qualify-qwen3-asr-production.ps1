@@ -14,6 +14,8 @@ param(
     [string]$Antlr4WheelBundlePath,
     [Parameter(Mandatory = $true)]
     [string]$CrcmodWheelBundlePath,
+    [Parameter(Mandatory = $true)]
+    [string]$AliyunCoreWheelBundlePath,
     [bool]$ExecuteQualification = $false,
     [string]$SummaryPath = "",
     [string]$DependencyDiagnosticPath = ""
@@ -645,6 +647,7 @@ function New-WheelManifest {
             Get-Sha256 -Path (Join-Path $ResolvedOss2WheelBundle "internal-wheel-manifest.json")
             Get-Sha256 -Path (Join-Path $ResolvedAntlr4WheelBundle "internal-wheel-manifest.json")
             Get-Sha256 -Path (Join-Path $ResolvedCrcmodWheelBundle "internal-wheel-manifest.json")
+            Get-Sha256 -Path (Join-Path $ResolvedAliyunCoreWheelBundle "internal-wheel-manifest.json")
         )
         files = $files
     }
@@ -671,6 +674,41 @@ function Get-NormalizedPackageName {
     return $Name.ToLowerInvariant().Replace("_", "-").Replace(".", "-")
 }
 
+function Test-DependencySpecifierExcludesExact {
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Specifier,
+        [Parameter(Mandatory = $true)][string]$RequestedConstraint
+    )
+    if ($RequestedConstraint -notmatch '^[A-Za-z0-9_.-]+==(?<requested>[0-9]+(?:\.[0-9]+)*)$') {
+        return $false
+    }
+    $requestedText = [string]$Matches.requested
+    if ($Specifier -notmatch '^(?<operator>==|!=|<=|>=|<|>)(?<bound>[0-9]+(?:\.[0-9]+)*)$') {
+        return $false
+    }
+    $operator = [string]$Matches.operator
+    $boundText = [string]$Matches.bound
+    try {
+        while (@($requestedText.Split(".")).Count -lt 3) {
+            $requestedText += ".0"
+        }
+        while (@($boundText.Split(".")).Count -lt 3) {
+            $boundText += ".0"
+        }
+        $requestedVersion = [Version]$requestedText
+        $boundVersion = [Version]$boundText
+    } catch {
+        return $false
+    }
+    if ($operator -eq "==") { return $requestedVersion -ne $boundVersion }
+    if ($operator -eq "!=") { return $requestedVersion -eq $boundVersion }
+    if ($operator -eq "<") { return $requestedVersion -ge $boundVersion }
+    if ($operator -eq "<=") { return $requestedVersion -gt $boundVersion }
+    if ($operator -eq ">") { return $requestedVersion -le $boundVersion }
+    if ($operator -eq ">=") { return $requestedVersion -lt $boundVersion }
+    return $false
+}
+
 function Convert-ToSanitizedDependencyFailure {
     param(
         [Parameter(Mandatory = $true)]
@@ -687,6 +725,7 @@ function Convert-ToSanitizedDependencyFailure {
     $filesystemOrPermissionFailure = $false
     $diskSpaceFailure = $false
     $resolverConflictFailure = $false
+    $compatibleDependencyContexts = @()
 
     foreach ($raw in $Lines) {
         $line = ([string]$raw).Trim()
@@ -773,15 +812,30 @@ function Convert-ToSanitizedDependencyFailure {
     foreach ($target in @($dependencyTargets.Keys | Sort-Object)) {
         if ($constraintTargets.Contains($target)) {
             $dependency = $dependencyTargets[$target]
-            return [pscustomobject]@{
+            $requestedConstraint = [string]$constraintTargets[$target]
+            $ownerConstraint = [string]$dependency.Specifier
+            if (Test-DependencySpecifierExcludesExact -Specifier $ownerConstraint -RequestedConstraint $requestedConstraint) {
+                return [pscustomobject]@{
+                    Stage = $Stage
+                    Kind = "version_constraint_conflict"
+                    Requirement = $target
+                    Owner = "$($dependency.Owner)==$($dependency.OwnerVersion)"
+                    Specifier = $ownerConstraint
+                    RequestedConstraint = $requestedConstraint
+                }
+            }
+            $compatibleDependencyContexts += [pscustomobject]@{
                 Stage = $Stage
-                Kind = "version_constraint_conflict"
+                Kind = "evidence_insufficient"
                 Requirement = $target
                 Owner = "$($dependency.Owner)==$($dependency.OwnerVersion)"
-                Specifier = [string]$dependency.Specifier
-                RequestedConstraint = [string]$constraintTargets[$target]
+                Specifier = $ownerConstraint
+                RequestedConstraint = $requestedConstraint
             }
         }
+    }
+    if ($compatibleDependencyContexts.Count -gt 0) {
+        return $compatibleDependencyContexts[0]
     }
     if ($invalidRequirementInput) {
         return [pscustomobject]@{
@@ -826,7 +880,7 @@ function Convert-ToSanitizedDependencyFailure {
     if ($resolverConflictFailure) {
         return [pscustomobject]@{
             Stage = $Stage
-            Kind = "version_constraint_conflict"
+            Kind = "evidence_insufficient"
             Requirement = ""
             Owner = ""
             Specifier = ""
@@ -902,10 +956,10 @@ function Assert-DependencySanitizerSelfTest {
         $binary.Requirement -ne "jieba" -or
         $conflict.Kind -ne "version_constraint_conflict" -or
         $conflict.Requirement -ne "numpy" -or
-        $resolverConflict.Kind -ne "version_constraint_conflict" -or
+        $resolverConflict.Kind -ne "evidence_insufficient" -or
         $unmarkedConstraint.Kind -ne "version_constraint_conflict" -or
         $unmarkedConstraint.Requirement -ne "numpy" -or
-        $bareDependencyConflict.Kind -ne "version_constraint_conflict" -or
+        $bareDependencyConflict.Kind -ne "evidence_insufficient" -or
         $bareDependencyConflict.Requirement -ne "oss2" -or
         $bareDependencyConflict.Owner -ne "funasr==1.4.1" -or
         -not [string]::IsNullOrEmpty([string]$bareDependencyConflict.Specifier) -or
@@ -969,6 +1023,7 @@ function Invoke-SanitizedResolverFallback {
         -not (Test-Path -LiteralPath $ResolvedOss2WheelBundle -PathType Container) -or
         -not (Test-Path -LiteralPath $ResolvedAntlr4WheelBundle -PathType Container) -or
         -not (Test-Path -LiteralPath $ResolvedCrcmodWheelBundle -PathType Container) -or
+        -not (Test-Path -LiteralPath $ResolvedAliyunCoreWheelBundle -PathType Container) -or
         -not (Test-Path -LiteralPath $SharedWheelSeed -PathType Container)
     ) {
         return $result
@@ -1001,6 +1056,7 @@ function Invoke-SanitizedResolverFallback {
                     "--find-links", $ResolvedOss2WheelBundle,
                     "--find-links", $ResolvedAntlr4WheelBundle,
                     "--find-links", $ResolvedCrcmodWheelBundle,
+                    "--find-links", $ResolvedAliyunCoreWheelBundle,
                     "--find-links", $SharedWheelSeed,
                     "--constraint", (Join-Path $EvidenceRoot "production-freeze.txt"),
                     "--requirement", $CombinedRequirements
@@ -1033,13 +1089,11 @@ function Invoke-SanitizedResolverFallback {
     $diagnosis = Convert-ToSanitizedDependencyFailure `
         -Lines $fallbackLines `
         -Stage $Stage
-    if ($diagnosis.Kind -ne "evidence_insufficient") {
-        $result.Kind = [string]$diagnosis.Kind
-        $result.Requirement = [string]$diagnosis.Requirement
-        $result.Owner = [string]$diagnosis.Owner
-        $result.Specifier = [string]$diagnosis.Specifier
-        $result.RequestedConstraint = [string]$diagnosis.RequestedConstraint
-    }
+    $result.Kind = [string]$diagnosis.Kind
+    $result.Requirement = [string]$diagnosis.Requirement
+    $result.Owner = [string]$diagnosis.Owner
+    $result.Specifier = [string]$diagnosis.Specifier
+    $result.RequestedConstraint = [string]$diagnosis.RequestedConstraint
     return $result
 }
 
@@ -1230,11 +1284,15 @@ $ResolvedAntlr4WheelBundle = (
 $ResolvedCrcmodWheelBundle = (
     Resolve-Path -LiteralPath $CrcmodWheelBundlePath -ErrorAction Stop
 ).Path
+$ResolvedAliyunCoreWheelBundle = (
+    Resolve-Path -LiteralPath $AliyunCoreWheelBundlePath -ErrorAction Stop
+).Path
 if (
     -not (Test-Path -LiteralPath $ResolvedInternalWheelBundle -PathType Container) -or
     -not (Test-Path -LiteralPath $ResolvedOss2WheelBundle -PathType Container) -or
     -not (Test-Path -LiteralPath $ResolvedAntlr4WheelBundle -PathType Container) -or
     -not (Test-Path -LiteralPath $ResolvedCrcmodWheelBundle -PathType Container) -or
+    -not (Test-Path -LiteralPath $ResolvedAliyunCoreWheelBundle -PathType Container) -or
     ((Get-Item -LiteralPath $ResolvedInternalWheelBundle).Attributes -band
         [System.IO.FileAttributes]::ReparsePoint) -or
     ((Get-Item -LiteralPath $ResolvedOss2WheelBundle).Attributes -band
@@ -1242,6 +1300,8 @@ if (
     ((Get-Item -LiteralPath $ResolvedAntlr4WheelBundle).Attributes -band
         [System.IO.FileAttributes]::ReparsePoint) -or
     ((Get-Item -LiteralPath $ResolvedCrcmodWheelBundle).Attributes -band
+        [System.IO.FileAttributes]::ReparsePoint) -or
+    ((Get-Item -LiteralPath $ResolvedAliyunCoreWheelBundle).Attributes -band
         [System.IO.FileAttributes]::ReparsePoint)
 ) {
     throw "Controlled internal wheel bundle must be a real directory"
@@ -1264,7 +1324,9 @@ if (
     $ResolvedAntlr4WheelBundle.Equals($ResolvedSource, [System.StringComparison]::OrdinalIgnoreCase) -or
     $ResolvedAntlr4WheelBundle.StartsWith($ResolvedSource.TrimEnd("\") + "\", [System.StringComparison]::OrdinalIgnoreCase) -or
     $ResolvedCrcmodWheelBundle.Equals($ResolvedSource, [System.StringComparison]::OrdinalIgnoreCase) -or
-    $ResolvedCrcmodWheelBundle.StartsWith($ResolvedSource.TrimEnd("\") + "\", [System.StringComparison]::OrdinalIgnoreCase)
+    $ResolvedCrcmodWheelBundle.StartsWith($ResolvedSource.TrimEnd("\") + "\", [System.StringComparison]::OrdinalIgnoreCase) -or
+    $ResolvedAliyunCoreWheelBundle.Equals($ResolvedSource, [System.StringComparison]::OrdinalIgnoreCase) -or
+    $ResolvedAliyunCoreWheelBundle.StartsWith($ResolvedSource.TrimEnd("\") + "\", [System.StringComparison]::OrdinalIgnoreCase)
 ) {
     throw "Controlled internal wheel bundle must be outside the checkout"
 }
@@ -1322,7 +1384,8 @@ try {
     foreach ($controlled in @(
         [pscustomobject]@{ Script = "build_internal_oss2_wheel.py"; Bundle = $ResolvedOss2WheelBundle; Log = "oss2-wheel-validation.log" },
         [pscustomobject]@{ Script = "build_internal_antlr4_wheel.py"; Bundle = $ResolvedAntlr4WheelBundle; Log = "antlr4-wheel-validation.log" },
-        [pscustomobject]@{ Script = "build_internal_crcmod_wheel.py"; Bundle = $ResolvedCrcmodWheelBundle; Log = "crcmod-wheel-validation.log" }
+        [pscustomobject]@{ Script = "build_internal_crcmod_wheel.py"; Bundle = $ResolvedCrcmodWheelBundle; Log = "crcmod-wheel-validation.log" },
+        [pscustomobject]@{ Script = "build_internal_aliyun_core_wheel.py"; Bundle = $ResolvedAliyunCoreWheelBundle; Log = "aliyun-core-wheel-validation.log" }
     )) {
         Invoke-External `
             -FilePath $MachinePython `
@@ -1346,6 +1409,7 @@ try {
     $Oss2WheelManifest = Get-Content -LiteralPath (Join-Path $ResolvedOss2WheelBundle "internal-wheel-manifest.json") -Raw -Encoding UTF8 | ConvertFrom-Json
     $Antlr4WheelManifest = Get-Content -LiteralPath (Join-Path $ResolvedAntlr4WheelBundle "internal-wheel-manifest.json") -Raw -Encoding UTF8 | ConvertFrom-Json
     $CrcmodWheelManifest = Get-Content -LiteralPath (Join-Path $ResolvedCrcmodWheelBundle "internal-wheel-manifest.json") -Raw -Encoding UTF8 | ConvertFrom-Json
+    $AliyunCoreWheelManifest = Get-Content -LiteralPath (Join-Path $ResolvedAliyunCoreWheelBundle "internal-wheel-manifest.json") -Raw -Encoding UTF8 | ConvertFrom-Json
     $ProductionPython = "D:\Services\RAGPinCheng-ASR\venv\Scripts\python.exe"
     if (-not (Test-Path -LiteralPath $ProductionPython -PathType Leaf)) {
         throw "Production ASR venv Python is missing"
@@ -1494,6 +1558,7 @@ try {
                 "--find-links", $ResolvedOss2WheelBundle,
                 "--find-links", $ResolvedAntlr4WheelBundle,
                 "--find-links", $ResolvedCrcmodWheelBundle,
+                "--find-links", $ResolvedAliyunCoreWheelBundle,
                 "--find-links", $SharedWheelSeed,
                 "--constraint", (Join-Path $EvidenceRoot "production-freeze.txt"),
                 "--requirement", $CombinedRequirements
@@ -1517,7 +1582,8 @@ try {
             $InternalWheelManifest,
             $Oss2WheelManifest,
             $Antlr4WheelManifest,
-            $CrcmodWheelManifest
+            $CrcmodWheelManifest,
+            $AliyunCoreWheelManifest
         )
     Assert-WheelManifestUnchanged -Manifest $WheelManifest
     $SharedCacheMaterial = [ordered]@{
