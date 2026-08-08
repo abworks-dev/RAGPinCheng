@@ -2602,9 +2602,9 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 验证：两个 PowerShell 脚本解析检查通过；在 `Set-StrictMode -Version Latest` 下按五种精度结果组合验证门禁（`[fp16,fp32]`→qualified/fp16、`[fp32,fp16]`→qualified/fp16、`[fp16]`→失败并列出 fp32、`[fp32]`→失败并列出 fp16、`[]`→失败并列出两者），确认 `reranker_precision` 仍为 `String`、`isArray=False`、`-eq "fp16"` 为真；`pytest tests/test_gpu_runtime_deployment_static.py tests/test_asr_deployment_static.py tests/test_deploy_git_safety.py` 为 `1 failed, 59 passed, 2 subtests passed`。
 - 待办/风险：唯一失败项 `assert (4, 56) <= (4, 55)` 是方案预期结果——`gpu_service/runtime-lock.txt` 仍是旧的 4.55.4 闭包，只能由 GPU 主机上的解析 workflow 重新生成，不得手工改单行版本；需用户依次触发候选解析（`confirm_resolution=true`）、人工复核 `resolver-report.json`、原样替换锁并提交，再触发候选资格（`confirm_qualification=true`）并要求 `qualified_precisions` 同时包含 fp16 与 fp32。本次未回填 validated 元数据、未 promotion、未启动 GPU 服务、未改精度白名单、未删除失败 release，也未修复 `qualify-gpu-runtime.ps1:150-159` 的轮询竞态（本次未触发，属独立变更）。
 
-### 02:08 — 撤销不兼容 GPU 候选锁
+### 02:19 — 重新生成兼容 GPU 候选锁
 
-- 完成：候选解析 run `31270935478` 因 `production-asr` 环境保护拒绝非受保护分支而在分配 Runner 前失败，未接触 GPU 主机；为让修复先以全绿状态合入允许的 `master`，将已证明不兼容的 4.55.4/0.21.4 闭包从正式锁移除，元数据回退为 `unvalidated` 并清空 Torch 哈希。构建器继续只接受 `candidate`/`validated`，因此该过渡提交不能构建、资格验证或 promotion；新版 4.56+/0.22.x 约束仍由 resolver 静态契约独立保护。
+- 完成：候选解析 run `31270935478` 因 `production-asr` 环境保护拒绝非受保护分支而在分配 Runner 前失败，未接触 GPU 主机；先通过 PR `#108` 将已证明不兼容的 4.55.4/0.21.4 闭包撤销为 fail-closed `unvalidated` 空锁并以全绿 CI 合入受保护的 `master`。随后 run `31271343463` 从 merge commit `9830d2929dbec0c0b1a45da2595f1c6fcc2ba647` 完成隔离解析和 `pip check`，生成75项完整候选闭包：FlagEmbedding `1.4.0`、transformers `4.57.6`、tokenizers `0.22.2`、Torch `2.7.0+cu128`；锁与 freeze 原始 SHA-256 均为 `fa16678de682e389e0f5ca89b180b2c033404e5e077ff539b552f8cde0430f1a`。正式锁逐字节采用 artifact，元数据仅推进到 `candidate`，qualification字段保持空。
 - 文件：`gpu_service/runtime-lock.json`、`gpu_service/runtime-lock.txt`、`tests/test_gpu_runtime_deployment_static.py`、`project-docs/features/gpu-runtime-deployment.md`、`WORKLOG.md`。
-- 验证：GPU/ASR/部署静态专项 `60 passed`；4 个 GPU runtime PowerShell 脚本 AST 与全部 workflow YAML 解析通过；状态冒烟确认 `validation_status=unvalidated`、`torch_wheel_sha256=null`、正式 pin 数为 0；`git diff --check` 通过。
-- 待办/风险：需通过 PR 合入 `master` 后从 `master` 重跑候选解析，人工复核 artifact 并提交完整新锁；在新候选完成双精度 CUDA/S4U 资格、回填 validated 元数据和独立 R3 promotion 前，不得恢复 GPU 服务。
+- 验证：PR `#108` 的7个 CI job全部通过；GPU/ASR/部署静态专项 `60 passed`；4个 GPU runtime PowerShell脚本 AST 与全部 workflow YAML 解析通过；resolver report为 `status=resolved`、`pip_check=passed`，75行均为完整唯一pin且不含4.55.4/0.21.4；正式锁与 artifact 的原始及规范化 SHA-256完全一致；`git diff --check` 通过。
+- 待办/风险：新闭包尚未执行 CUDA/S4U 双精度资格，不能回填 validated 元数据或恢复 GPU 服务；qualification 与 promotion 仍按独立 R3 执行。未改生产任务、8100监听、全局Python、模型缓存、数据库、Qdrant或环境保护规则。
