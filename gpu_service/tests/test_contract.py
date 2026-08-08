@@ -85,7 +85,7 @@ def model_loaded():
 
 def test_health_unloaded():
     resp = client.get("/health")
-    assert resp.status_code == status.HTTP_200_OK
+    assert resp.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
     data = HealthResponse(**resp.json())
     assert data.status == "error"
     assert data.model_loaded is False
@@ -97,6 +97,11 @@ def test_health_loaded(model_loaded):
     data = HealthResponse(**resp.json())
     assert data.status == "ok"
     assert data.model_loaded is True
+
+
+def test_model_manager_refuses_cpu_fallback():
+    with pytest.raises(RuntimeError, match="CPU fallback is disabled"):
+        _model_manager._pick_device()
 
 
 
@@ -178,6 +183,9 @@ def test_model_info(model_loaded):
     assert data.embedding_dimension == 1024
     assert data.reranker_model == "BAAI/bge-reranker-v2-m3"
     assert data.device == "cuda"
+    assert data.runtime_release_id == ""
+    assert data.runtime_source_fingerprint == ""
+    assert data.runtime_lock_sha256 == ""
 
 
 # ── Embedding ────────────────────────────────────────────────────────────────
@@ -309,7 +317,7 @@ def test_embed_order_stable(model_loaded):
 
 # ── CORS Headers ─────────────────────────────────────────────────────────────
 
-def test_cors_headers():
+def test_cors_headers(model_loaded):
     """CORS should allow Ubuntu backend requests."""
     resp = client.get("/health", headers={"Origin": "http://192.168.11.12"})
     assert resp.status_code == status.HTTP_200_OK

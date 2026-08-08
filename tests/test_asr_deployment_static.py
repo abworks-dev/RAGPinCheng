@@ -324,7 +324,11 @@ def test_faster_whisper_qualification_workflow_is_manual_immutable_and_gated():
     assert "timeout-minutes: 45" in workflow
     assert 'Write-WorkflowFailureVerdict -Code "workflow_wrapper_timeout"' in workflow
     assert '$wrapperDeadline = [DateTimeOffset]::Now.AddMinutes(35)' in workflow
-    assert 'taskkill.exe /PID $wrapper.Id /T /F' in workflow
+    assert "function Stop-WorkflowProcessTree" in workflow
+    assert workflow.index(
+        'Write-WorkflowFailureVerdict -Code "workflow_wrapper_timeout"'
+    ) < workflow.index("Stop-WorkflowProcessTree -Process $wrapper")
+    assert "qualification-verdict.json.progress.json" in workflow
     assert 'R3_WORKFLOW_HEARTBEAT wrapper_pid=' in workflow
     assert 'Write-WorkflowFailureVerdict -Code "workflow_wrapper_failed"' in workflow
     assert "'-ExecuteQualification'" in workflow
@@ -374,6 +378,103 @@ def test_faster_whisper_qualification_workflow_is_manual_immutable_and_gated():
     assert "Affected requirement:" in workflow
     assert "Fallback probe executed:" in workflow
     assert "Fallback probe exit code:" in workflow
+
+
+def test_gpu_recovery_workflow_is_manual_and_limited_to_the_verified_task():
+    workflow = read(".github/workflows/recover-gpu-service-production.yml")
+
+    assert "workflow_dispatch:" in workflow
+    assert "confirm_recovery:" in workflow
+    assert "default: false" in workflow
+    assert "production-gpu-exclusive" in workflow
+    assert "production-asr" in workflow
+    assert "runs-on: [self-hosted, windows, production, gpu]" in workflow
+    assert "timeout-minutes: 10" in workflow
+    assert "current-release.json" in workflow
+    assert "promote-gpu-runtime.ps1" in workflow
+    assert "No validated current GPU release is recorded" in workflow
+    assert "deploy-gpu.ps1" not in workflow
+    assert "build-gpu-runtime.ps1" not in workflow
+    assert "deploy-app" not in workflow
+
+
+def test_gpu_runtime_diagnostic_is_manual_bounded_and_read_only():
+    workflow = read(".github/workflows/diagnose-gpu-runtime-production.yml")
+
+    assert "workflow_dispatch:" in workflow
+    assert "confirm_diagnostic:" in workflow
+    assert "default: false" in workflow
+    assert "production-deployment" in workflow
+    assert "runs-on: [self-hosted, windows, production, gpu]" in workflow
+    assert "timeout-minutes: 15" in workflow
+    assert "C:\\Program Files\\Python310\\python.exe" in workflow
+    assert "nvidia-smi.exe" in workflow
+    assert "torch_import" in workflow
+    assert "cuda_tensor" in workflow
+    assert "flag_embedding_import" in workflow
+    assert "RAGPinCheng-GPU-Diagnostic-" in workflow
+    assert 'New-ScheduledTaskPrincipal -UserId "Administrator" -LogonType S4U -RunLevel Highest' in workflow
+    assert "BGEM3FlagModel" in workflow
+    assert "FlagReranker" in workflow
+    assert 'write_stage("python_entry")' in workflow
+    assert 'write_stage("torch_import_start")' in workflow
+    assert "sys.path.insert(0, repository_path)" in workflow
+    assert 'write_stage("embed_start")' in workflow
+    assert 'write_stage("reranker_start")' in workflow
+    assert 'write_stage("model_load_complete")' in workflow
+    assert "run-model-load.py" in workflow
+    assert "s4u.stdout.log" in workflow
+    assert "s4u.stderr.log" in workflow
+    assert "-RedirectStandardOutput $StdoutPath" in workflow
+    assert "-RedirectStandardError $StderrPath" in workflow
+    assert "-EncodedCommand" not in workflow
+    assert "Stop-ScheduledTask -TaskName $taskName" in workflow
+    assert "Unregister-ScheduledTask -TaskName $taskName" in workflow
+    assert "WaitForExit(60000)" in workflow
+    assert "pip install" not in workflow
+
+
+def test_gpu_reranker_repair_is_replaced_by_candidate_only_qualification():
+    workflow = read(".github/workflows/repair-gpu-reranker-production.yml")
+    probe = read("scripts/diagnose_gpu_reranker.py")
+    builder = read("scripts/build-gpu-runtime.ps1")
+    gpu_requirements = read("gpu_service/requirements.txt")
+    root_requirements = read("requirements-gpu.txt")
+
+    assert "workflow_dispatch:" in workflow
+    assert "confirm_qualification:" in workflow
+    assert "default: false" in workflow
+    assert "runs-on: [self-hosted, windows, production, gpu]" in workflow
+    assert "timeout-minutes: 90" in workflow
+    assert "snapshot-gpu-runtime.ps1" in workflow
+    assert "build-gpu-runtime.ps1" in workflow
+    assert "qualify-gpu-runtime.ps1" in workflow
+    assert "promote-gpu-runtime.ps1" not in workflow
+    assert "--system-site-packages" not in workflow
+    assert "--system-site-packages" not in builder
+    assert "pip wheel" in builder
+    assert "wheelhouse.sha256.json" in builder
+    assert "New-NetFirewallRule" not in workflow
+    assert 'write_stage(stage_file, "embed_complete")' in probe
+    assert 'write_stage(stage_file, "reranker_start")' in probe
+    assert 'write_stage(stage_file, "reranker_inference_complete")' in probe
+    assert 'write_stage(stage_file, "complete")' in probe
+    assert "transformers==4.46.3" not in gpu_requirements
+    assert "tokenizers==0.20.3" not in gpu_requirements
+    assert "transformers==4.46.3" not in root_requirements
+    assert "tokenizers==0.20.3" not in root_requirements
+
+
+def test_faster_whisper_qualification_treats_gpu_service_as_remote():
+    script = read("scripts/qualify-faster-whisper-production.ps1")
+
+    assert 'Get-TaskSnapshot -TaskNames @("RAGPinCheng-ASR")' not in script
+    assert 'param(\n        [string[]]$TaskNames = @("RAGPinCheng-ASR")' in script
+    assert "Required local production ASR port $ProductionAsrPort is not listening" in script
+    assert "Production ASR Scheduled Task must be running" in script
+    assert "foreach ($port in @($GpuPort, $ProductionAsrPort))" not in script
+    assert 'Invoke-RestMethod -Method Get -Uri "$GpuUrl/health"' in script
+    assert '[string]$_.LocalPort -eq "8200"' in script
 
 
 def test_faster_whisper_model_artifact_preparation_is_manual_and_isolated():
@@ -907,6 +1008,9 @@ def test_faster_whisper_qualification_uses_verified_persistent_wheel_cache():
     assert "$QualificationWatchdogSeconds = 1500" in script
     assert 'R3_QUALIFICATION_HEARTBEAT elapsed_ms=' in script
     assert '$FailureCode = "qualification_timeout"' in script
+    assert "function Write-QualificationProgress" in script
+    assert 'Write-QualificationProgress -Stage "wrapper_start"' in script
+    assert 'Write-QualificationProgress -Stage "qualification_runner_wait"' in script
     assert '"warmup-start"' in runner
     assert '"sample-complete"' in runner
 

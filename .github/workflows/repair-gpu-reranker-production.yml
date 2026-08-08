@@ -1,0 +1,126 @@
+name: Qualify GPU Runtime Candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_qualification:
+        description: Confirm D-drive isolated CUDA candidate qualification
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-gpu-exclusive
+  cancel-in-progress: false
+
+jobs:
+  qualify:
+    if: ${{ inputs.confirm_qualification == true }}
+    environment: production-asr
+    runs-on: [self-hosted, windows, production, gpu]
+    timeout-minutes: 90
+    steps:
+      - name: Snapshot and qualify an isolated GPU runtime candidate
+        shell: powershell
+        env:
+          GPU_MODEL_CACHE_SOURCE: ${{ vars.GPU_MODEL_CACHE_SOURCE }}
+          REPO_PATH: D:\RAGPinCheng
+          # Candidate releases are run-local so a stale or interrupted release
+          # can never be mistaken for the current qualification input.
+          RUNTIME_ROOT: D:\RAGPinCheng\runtime\qualification\${{ github.run_id }}
+          TORCH_WHEEL_SEED_ROOT: D:\RAGPinCheng\runtime\wheel-seed\torch-2.7.0-cu128-cp310-win_amd64
+          BACKUP_DIR: D:\RAGBackups
+          GIT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEPLOY_COMMIT_SHA: ${{ github.sha }}
+          DEPLOY_HTTP_PROXY: ${{ vars.DEPLOY_HTTP_PROXY }}
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+          if (-not [Convert]::ToBoolean("${{ inputs.confirm_qualification }}")) {
+            throw "confirm_qualification must be explicitly enabled"
+          }
+          Set-Location $env:REPO_PATH
+          $basic = [Convert]::ToBase64String(
+            [Text.Encoding]::ASCII.GetBytes("x-access-token:$env:GIT_TOKEN")
+          )
+          $proxyArgs = @()
+          if ($env:DEPLOY_HTTP_PROXY) {
+            $proxyArgs = @("-c", "http.proxy=$env:DEPLOY_HTTP_PROXY")
+            $env:HTTP_PROXY = $env:DEPLOY_HTTP_PROXY
+            $env:HTTPS_PROXY = $env:DEPLOY_HTTP_PROXY
+          }
+          $fetched = $false
+          foreach ($attempt in 1..4) {
+            $gitArgs = @("-c", "http.version=HTTP/1.1") + $proxyArgs + @(
+              "-c", "http.extraHeader=AUTHORIZATION: basic $basic", "fetch",
+              "https://github.com/abworks-dev/RAGPinCheng.git", $env:DEPLOY_COMMIT_SHA
+            )
+            & git @gitArgs
+            if ($LASTEXITCODE -eq 0) { $fetched = $true; break }
+            if ($attempt -lt 4) { Start-Sleep -Seconds ([math]::Pow(2, $attempt)) }
+          }
+          if (-not $fetched) { throw "Candidate fetch failed after 4 attempts" }
+          git merge --ff-only $env:DEPLOY_COMMIT_SHA
+          if ($LASTEXITCODE -ne 0) { throw "Candidate fast-forward failed" }
+          if ((git rev-parse HEAD).Trim() -ne $env:DEPLOY_COMMIT_SHA) {
+            throw "Candidate repository HEAD mismatch"
+          }
+
+          $modelCacheSource = & "${env:REPO_PATH}\scripts\resolve-gpu-model-cache-source.ps1" `
+            -RepositoryPath $env:REPO_PATH `
+            -ConfiguredPath $env:GPU_MODEL_CACHE_SOURCE
+          if (@($modelCacheSource).Count -ne 1) {
+            throw "GPU model cache source resolution did not return exactly one path"
+          }
+          & "${env:REPO_PATH}\scripts\snapshot-gpu-runtime.ps1" `
+            -RepositoryPath $env:REPO_PATH `
+            -ModelCacheSource $modelCacheSource `
+            -BackupRoot $env:BACKUP_DIR
+
+          $fingerprint = & "${env:REPO_PATH}\scripts\get-gpu-runtime-fingerprint.ps1" `
+            -RepositoryPath $env:REPO_PATH -Commit $env:DEPLOY_COMMIT_SHA
+          & "${env:REPO_PATH}\scripts\build-gpu-runtime.ps1" `
+            -RepositoryPath $env:REPO_PATH `
+            -RuntimeRoot $env:RUNTIME_ROOT `
+            -ModelCacheSource $modelCacheSource `
+            -TorchWheelSeedRoot $env:TORCH_WHEEL_SEED_ROOT `
+            -CommitSha $env:DEPLOY_COMMIT_SHA `
+            -SourceFingerprint $fingerprint
+
+          $metadata = Get-Content "${env:REPO_PATH}\gpu_service\runtime-lock.json" -Encoding UTF8 | ConvertFrom-Json
+          $requirementsPath = "${env:REPO_PATH}\gpu_service\$($metadata.requirements_file)"
+          $lockHash = & "${env:REPO_PATH}\scripts\get-gpu-runtime-lock-hash.ps1" `
+            -Path $requirementsPath
+          $releaseId = $fingerprint.Substring(0, 12) + "-" + $lockHash.Substring(0, 12)
+          $releaseRoot = Join-Path $env:RUNTIME_ROOT "releases\$releaseId"
+          "GPU_CANDIDATE_RELEASE_ROOT=$releaseRoot" | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding UTF8
+          & "${env:REPO_PATH}\scripts\qualify-gpu-runtime.ps1" `
+            -RuntimeRoot $env:RUNTIME_ROOT `
+            -ReleaseRoot $releaseRoot `
+            -QualificationRunId "${{ github.run_id }}"
+
+          $result = Get-Content (Join-Path $releaseRoot "qualification.json") -Encoding UTF8 | ConvertFrom-Json
+          Write-Host "GPU_RUNTIME_CANDIDATE status=$($result.status) device=$($result.device) reranker_precision=$($result.reranker_precision) source_fingerprint=$fingerprint lock_sha256=$lockHash qualification_run_id=${{ github.run_id }}"
+
+      - name: Upload candidate qualification evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpu-runtime-qualification-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ env.GPU_CANDIDATE_RELEASE_ROOT }}\runtime-manifest.json
+            ${{ env.GPU_CANDIDATE_RELEASE_ROOT }}\qualification.json
+            ${{ env.GPU_CANDIDATE_RELEASE_ROOT }}\source-files.sha256.json
+            ${{ env.GPU_CANDIDATE_RELEASE_ROOT }}\wheelhouse.sha256.json
+            ${{ env.GPU_CANDIDATE_RELEASE_ROOT }}\pip-freeze.txt
+            ${{ env.GPU_CANDIDATE_RELEASE_ROOT }}\qualification\fp16\stages.log
+            ${{ env.GPU_CANDIDATE_RELEASE_ROOT }}\qualification\fp16\stdout.log
+            ${{ env.GPU_CANDIDATE_RELEASE_ROOT }}\qualification\fp16\stderr.log
+            ${{ env.GPU_CANDIDATE_RELEASE_ROOT }}\qualification\fp32\stages.log
+            ${{ env.GPU_CANDIDATE_RELEASE_ROOT }}\qualification\fp32\stdout.log
+            ${{ env.GPU_CANDIDATE_RELEASE_ROOT }}\qualification\fp32\stderr.log
+          if-no-files-found: error
+          retention-days: 30

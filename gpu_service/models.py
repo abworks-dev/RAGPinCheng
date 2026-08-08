@@ -2,11 +2,16 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import Tuple
 
 import torch
 
-from gpu_service.config import EMBED_DIM, EMBED_MODEL, RERANKER_MODEL
+from gpu_service.config import (
+    EMBED_DIM,
+    EMBED_MODEL,
+    EMBED_USE_FP16,
+    RERANKER_MODEL,
+    RERANKER_USE_FP16,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +46,11 @@ class ModelManager:
 
     @property
     def is_loaded(self) -> bool:
-        return self._initialized and self._embed_model is not None
+        return (
+            self._initialized
+            and self._embed_model is not None
+            and self._reranker is not None
+        )
 
     @property
     def device(self) -> str:
@@ -119,36 +128,34 @@ class ModelManager:
     # ── Internal ────────────────────────────────────────────────────────────
 
     def _pick_device(self) -> str:
-        if torch.cuda.is_available():
-            return "cuda"
-        return "cpu"
+        if not torch.cuda.is_available():
+            raise RuntimeError("CUDA is required; CPU fallback is disabled")
+        return "cuda"
 
     def _do_load(self) -> None:
         self._device = self._pick_device()
-        use_fp16 = self._device == "cuda"
-
         logger.info(
             "loading embed model %s on device=%s fp16=%s",
-            EMBED_MODEL, self._device, use_fp16,
+            EMBED_MODEL, self._device, EMBED_USE_FP16,
         )
         from FlagEmbedding import BGEM3FlagModel
 
         self._embed_model = BGEM3FlagModel(
             EMBED_MODEL,
             devices=self._device,
-            use_fp16=use_fp16,
+            use_fp16=EMBED_USE_FP16,
         )
 
         logger.info(
             "loading reranker model %s on device=%s fp16=%s",
-            RERANKER_MODEL, self._device, use_fp16,
+            RERANKER_MODEL, self._device, RERANKER_USE_FP16,
         )
         from FlagEmbedding import FlagReranker
 
         self._reranker = FlagReranker(
             RERANKER_MODEL,
             devices=self._device,
-            use_fp16=use_fp16,
+            use_fp16=RERANKER_USE_FP16,
         )
 
         # Quick sanity check: embed a short string to confirm dim and CUDA

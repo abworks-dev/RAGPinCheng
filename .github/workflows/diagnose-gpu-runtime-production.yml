@@ -1,0 +1,277 @@
+name: Diagnose GPU Runtime Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_diagnostic:
+        description: "Confirm read-only PyTorch/CUDA runtime diagnostics on the GPU host"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-deployment
+  cancel-in-progress: false
+
+jobs:
+  diagnose:
+    environment: production-asr
+    runs-on: [self-hosted, windows, production, gpu]
+    timeout-minutes: 15
+    steps:
+      - name: Run bounded S4U PyTorch, CUDA, and model-load diagnostics
+        shell: powershell
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+          if (-not [System.Convert]::ToBoolean("${{ inputs.confirm_diagnostic }}")) {
+            throw "confirm_diagnostic must be explicitly enabled"
+          }
+
+          $Python = "C:\Program Files\Python310\python.exe"
+          if (-not (Test-Path -LiteralPath $Python -PathType Leaf)) {
+            throw "GPU Python executable is missing"
+          }
+          $diagnosticRoot = Join-Path "${{ runner.temp }}" "gpu-runtime-diagnostic-${{ github.run_id }}"
+          New-Item -ItemType Directory -Path $diagnosticRoot -Force | Out-Null
+
+          function Invoke-ReadOnlyProbe {
+            param(
+              [Parameter(Mandatory = $true)][string]$Name,
+              [Parameter(Mandatory = $true)][string]$FilePath,
+              [Parameter(Mandatory = $true)][string]$ArgumentLine
+            )
+            $stdout = Join-Path $diagnosticRoot "$Name.stdout.log"
+            $stderr = Join-Path $diagnosticRoot "$Name.stderr.log"
+            $process = Start-Process `
+              -FilePath $FilePath `
+              -ArgumentList $ArgumentLine `
+              -RedirectStandardOutput $stdout `
+              -RedirectStandardError $stderr `
+              -WindowStyle Hidden `
+              -PassThru
+            if (-not $process.WaitForExit(60000)) {
+              Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+              throw "GPU_RUNTIME_PROBE name=$Name status=timeout"
+            }
+            $output = @(
+              Get-Content -LiteralPath $stdout -ErrorAction SilentlyContinue
+              Get-Content -LiteralPath $stderr -ErrorAction SilentlyContinue
+            ) | Where-Object { $_ -match '\S' }
+            foreach ($line in $output) {
+              $safeLine = $line -replace '(?i)(https?://)[^/\s:@]+:[^@\s]+@', '$1[REDACTED]@'
+              Write-Host "GPU_RUNTIME_PROBE name=$Name $safeLine"
+            }
+            Write-Host "GPU_RUNTIME_PROBE name=$Name exit_code=$($process.ExitCode)"
+            return [int]$process.ExitCode
+          }
+
+          $results = @()
+          $results += Invoke-ReadOnlyProbe `
+            -Name "nvidia_smi" `
+            -FilePath "nvidia-smi.exe" `
+            -ArgumentLine "--query-gpu=name,driver_version,memory.total,memory.used --format=csv,noheader"
+          $results += Invoke-ReadOnlyProbe `
+            -Name "torch_import" `
+            -FilePath $Python `
+            -ArgumentLine '-X faulthandler -c "import torch; print(''torch='' + torch.__version__); print(''cuda_available='' + str(torch.cuda.is_available()))"'
+          $results += Invoke-ReadOnlyProbe `
+            -Name "cuda_tensor" `
+            -FilePath $Python `
+            -ArgumentLine '-X faulthandler -c "import torch; assert torch.cuda.is_available(); x=torch.ones(1,device=''cuda''); torch.cuda.synchronize(); print(''device='' + torch.cuda.get_device_name(0)); print(''tensor_device='' + str(x.device))"'
+          $results += Invoke-ReadOnlyProbe `
+            -Name "flag_embedding_import" `
+            -FilePath $Python `
+            -ArgumentLine '-X faulthandler -c "import FlagEmbedding; print(''flag_embedding_import=ok'')"'
+
+          if (@($results | Where-Object { $_ -ne 0 }).Count -ne 0) {
+            throw "One or more read-only GPU runtime probes failed"
+          }
+
+          $RepositoryPath = "D:\RAGPinCheng"
+          $ServiceDirectory = Join-Path $RepositoryPath "gpu_service"
+          $EnvironmentFile = Join-Path $ServiceDirectory ".env"
+          if (-not (Test-Path -LiteralPath $EnvironmentFile -PathType Leaf)) {
+            throw "GPU service environment file is missing"
+          }
+
+          $taskName = "RAGPinCheng-GPU-Diagnostic-${{ github.run_id }}"
+          $scriptPath = Join-Path $diagnosticRoot "run-s4u-model-load.ps1"
+          $stagePath = Join-Path $diagnosticRoot "s4u-stage.log"
+          $s4uStdout = Join-Path $diagnosticRoot "s4u.stdout.log"
+          $s4uStderr = Join-Path $diagnosticRoot "s4u.stderr.log"
+
+          $probe = @'
+          import sys
+          from datetime import datetime, timezone
+
+          stage_path = sys.argv[1]
+          repository_path = sys.argv[2]
+
+          def write_stage(name):
+              line = f"GPU_S4U_STAGE stage={name} at={datetime.now(timezone.utc).isoformat()}"
+              with open(stage_path, "a", encoding="utf-8") as handle:
+                  handle.write(line + "\\n")
+              print(line, flush=True)
+
+          write_stage("python_entry")
+          write_stage("torch_import_start")
+          import torch
+          write_stage("torch_import_complete")
+          write_stage("config_import_start")
+          sys.path.insert(0, repository_path)
+          from gpu_service.config import EMBED_MODEL, RERANKER_MODEL
+          from FlagEmbedding import BGEM3FlagModel, FlagReranker
+          write_stage("config_import_complete")
+          device = "cuda" if torch.cuda.is_available() else "cpu"
+          if device != "cuda":
+              raise RuntimeError("CUDA is unavailable in the S4U task")
+          print("GPU_S4U_PYTHON cuda_device=" + torch.cuda.get_device_name(0))
+          write_stage("embed_start")
+          embed_model = BGEM3FlagModel(EMBED_MODEL, devices=device, use_fp16=True)
+          torch.cuda.synchronize()
+          write_stage("embed_complete")
+          write_stage("reranker_start")
+          reranker = FlagReranker(RERANKER_MODEL, devices=device, use_fp16=True)
+          torch.cuda.synchronize()
+          write_stage("reranker_complete")
+          del reranker
+          del embed_model
+          torch.cuda.empty_cache()
+          write_stage("model_load_complete")
+          '@
+          $encodedProbe = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($probe))
+
+          @'
+          [CmdletBinding()]
+          param(
+            [Parameter(Mandatory = $true)][string]$RepositoryPath,
+            [Parameter(Mandatory = $true)][string]$StagePath,
+            [Parameter(Mandatory = $true)][string]$EncodedProbe,
+            [Parameter(Mandatory = $true)][string]$StdoutPath,
+            [Parameter(Mandatory = $true)][string]$StderrPath
+          )
+
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+
+          function Write-Stage {
+            param([Parameter(Mandatory = $true)][string]$Name)
+            $line = "GPU_S4U_STAGE stage=$Name at=$([DateTimeOffset]::UtcNow.ToString('o'))"
+            [System.IO.File]::AppendAllText($StagePath, "$line`r`n", [System.Text.Encoding]::UTF8)
+            Write-Host $line
+          }
+
+          $python = "C:\Program Files\Python310\python.exe"
+          $environmentFile = Join-Path $RepositoryPath "gpu_service\.env"
+          if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
+            throw "GPU Python executable is missing"
+          }
+          if (-not (Test-Path -LiteralPath $environmentFile -PathType Leaf)) {
+            throw "GPU service environment file is missing"
+          }
+
+          Write-Stage -Name "s4u_context"
+          foreach ($line in Get-Content -LiteralPath $environmentFile -Encoding UTF8) {
+            $trimmed = $line.Trim()
+            if (-not $trimmed -or $trimmed.StartsWith("#")) {
+              continue
+            }
+            if ($trimmed -notmatch '^([A-Z][A-Z0-9_]*)=(.*)$') {
+              throw "Invalid GPU service environment entry"
+            }
+            [Environment]::SetEnvironmentVariable($Matches[1], $Matches[2], "Process")
+          }
+          Set-Location -LiteralPath $RepositoryPath
+
+          $probePath = Join-Path (Split-Path -Parent $StagePath) "run-model-load.py"
+          $probe = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($EncodedProbe))
+          Set-Content -LiteralPath $probePath -Value $probe -Encoding UTF8
+          Write-Stage -Name "model_load_start"
+          $process = Start-Process `
+            -FilePath $python `
+            -ArgumentList @("-X", "faulthandler", $probePath, $StagePath, $RepositoryPath) `
+            -RedirectStandardOutput $StdoutPath `
+            -RedirectStandardError $StderrPath `
+            -WindowStyle Hidden `
+            -PassThru `
+            -Wait
+          Write-Stage -Name ("python_exit_{0}" -f $process.ExitCode)
+          exit $process.ExitCode
+          '@ | Set-Content -LiteralPath $scriptPath -Encoding UTF8
+
+          function Write-S4UDiagnostic {
+            $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+            $taskInfo = Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction SilentlyContinue
+            $stageLines = Get-Content -LiteralPath $stagePath -ErrorAction SilentlyContinue
+            foreach ($line in $stageLines) {
+              Write-Host $line
+            }
+            foreach ($path in @($s4uStdout, $s4uStderr)) {
+              Get-Content -LiteralPath $path -Tail 80 -ErrorAction SilentlyContinue |
+                Where-Object { $_ -match 'GPU_S4U_|Fatal Python error|Traceback|Error|Exception|CUDA|Access Violation|ModuleNotFound' } |
+                ForEach-Object {
+                  $safeLine = $_ -replace '(?i)(GPU_SERVICE_TOKEN\s*[=:]\s*)\S+', '$1[REDACTED]'
+                  $safeLine = $safeLine -replace '(?i)(https?://)[^/\s:@]+:[^@\s]+@', '$1[REDACTED]@'
+                  Write-Host "GPU_S4U_DIAGNOSTIC $safeLine"
+                }
+            }
+            $gpu = & nvidia-smi.exe --query-gpu=memory.used,memory.total,utilization.gpu --format=csv,noheader,nounits 2>$null
+            if ($LASTEXITCODE -eq 0) {
+              Write-Host "GPU_S4U_DIAGNOSTIC gpu=$gpu"
+            }
+            Write-Host "GPU_S4U_DIAGNOSTIC task_state=$([string]$task.State) task_result=$([string]$taskInfo.LastTaskResult)"
+          }
+
+          $taskCreated = $false
+          try {
+            if ($null -ne (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue)) {
+              throw "Refusing to reuse an existing diagnostic task"
+            }
+            $arguments = (
+              '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -RepositoryPath "{1}" -StagePath "{2}" -EncodedProbe "{3}" -StdoutPath "{4}" -StderrPath "{5}"' -f
+              $scriptPath,
+              $RepositoryPath,
+              $stagePath,
+              $encodedProbe,
+              $s4uStdout,
+              $s4uStderr
+            )
+            $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $arguments
+            $principal = New-ScheduledTaskPrincipal -UserId "Administrator" -LogonType S4U -RunLevel Highest
+            $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Minutes 8) -RestartCount 0
+            Register-ScheduledTask -TaskName $taskName -Action $action -Principal $principal -Settings $settings -ErrorAction Stop | Out-Null
+            $taskCreated = $true
+            Start-ScheduledTask -TaskName $taskName -ErrorAction Stop
+
+            $deadline = [DateTimeOffset]::Now.AddMinutes(8)
+            do {
+              Start-Sleep -Seconds 10
+              Write-S4UDiagnostic
+              $task = Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
+            } while ($task.State -eq "Running" -and [DateTimeOffset]::Now -lt $deadline)
+
+            if ($task.State -eq "Running") {
+              Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+              throw "S4U model-load diagnostic exceeded eight minutes"
+            }
+            $taskInfo = Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction Stop
+            if ($taskInfo.LastTaskResult -ne 0) {
+              throw "S4U model-load diagnostic failed with task result $($taskInfo.LastTaskResult)"
+            }
+            if (-not (Select-String -LiteralPath $stagePath -Pattern "GPU_S4U_STAGE stage=model_load_complete" -Quiet -ErrorAction SilentlyContinue)) {
+              throw "S4U model-load diagnostic exited without a completion marker"
+            }
+          } finally {
+            if ($taskCreated) {
+              $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+              if ($null -ne $task -and $task.State -eq "Running") {
+                Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+              }
+              Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+              Write-Host "GPU_S4U_DIAGNOSTIC task_cleanup=complete"
+            }
+          }

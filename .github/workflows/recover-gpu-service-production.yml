@@ -1,0 +1,52 @@
+name: Recover GPU Service Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_recovery:
+        description: Confirm restart of the current validated GPU release
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-gpu-exclusive
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    if: ${{ inputs.confirm_recovery == true }}
+    environment: production-asr
+    runs-on: [self-hosted, windows, production, gpu]
+    timeout-minutes: 10
+    steps:
+      - name: Restart the current validated GPU release
+        shell: powershell
+        env:
+          GPU_SERVICE_TOKEN: ${{ secrets.GPU_SERVICE_TOKEN }}
+          REPO_PATH: D:\RAGPinCheng
+          RUNTIME_ROOT: D:\RAGPinCheng\runtime
+          BACKUP_DIR: D:\RAGBackups
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+          if (-not [Convert]::ToBoolean("${{ inputs.confirm_recovery }}")) {
+            throw "confirm_recovery must be explicitly enabled"
+          }
+          if ([string]::IsNullOrWhiteSpace($env:GPU_SERVICE_TOKEN)) {
+            throw "GPU_SERVICE_TOKEN is required"
+          }
+          $currentPath = Join-Path $env:RUNTIME_ROOT "current-release.json"
+          if (-not (Test-Path -LiteralPath $currentPath -PathType Leaf)) {
+            throw "No validated current GPU release is recorded"
+          }
+          $current = Get-Content -LiteralPath $currentPath -Encoding UTF8 | ConvertFrom-Json
+          & "${env:REPO_PATH}\scripts\promote-gpu-runtime.ps1" `
+            -RepositoryPath $env:REPO_PATH `
+            -RuntimeRoot $env:RUNTIME_ROOT `
+            -BackupDirectory $env:BACKUP_DIR `
+            -ReleaseRoot ([string]$current.release_root) `
+            -GpuServiceToken $env:GPU_SERVICE_TOKEN
