@@ -2657,3 +2657,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`scripts/qualify-qwen3-asr-production.ps1`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
 - 验证：PowerShell AST 解析、Python `py_compile`、新增 Qwen 诊断静态断言、`git diff --check` 通过；当前环境没有 pytest，未安装依赖，未运行 pytest。
 - 待办/风险：需 CI 通过后以新的完整 master SHA 重跑 Qwen R3；不放宽依赖、模型、CUDA BF16、样本、资源门禁或 Profile admission，失败仍保持 disabled 并清理。
+
+### 04:39 — 补齐 Qwen pip 冲突汇总模式
+
+- 完成：根据 R3 run `31277073826` 的脱敏结果，补充标准 pip `Cannot install ... conflicting dependencies`、`ResolutionImpossible` 及无 `(constraint)` 的请求行分类；不改变 requirements、版本 pin 或任何资格门禁。
+- 文件：`scripts/qualify-qwen3-asr-production.ps1`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
+- 验证：PowerShell AST 解析和 `git diff --check` 通过；pytest 未安装，未安装依赖。
+- 待办/风险：需 CI 通过后重新绑定完整 master SHA 运行 R3；若分类为真实版本冲突，按门禁停止并报告，不自动放宽依赖。
