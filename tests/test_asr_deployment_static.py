@@ -1135,6 +1135,8 @@ def test_qwen3_asr_qualification_emits_sanitized_dependency_diagnosis():
     assert diagnostic_section.count('"--only-binary=:all:"') == 1
     assert '"--find-links", $ResolvedInternalWheelBundle' in diagnostic_section
     assert '"--find-links", $SharedWheelSeed' in diagnostic_section
+    assert "Cannot install .+ because these package versions have conflicting dependencies" in diagnostic_section
+    assert "The user requested(?: \\(constraint\\))?" in diagnostic_section
     assert 'profile_admission = "disabled"' in diagnostic_section
     assert "production_services_modified = $false" in diagnostic_section
     for operation in (
