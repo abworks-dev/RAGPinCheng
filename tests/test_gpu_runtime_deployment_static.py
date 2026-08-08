@@ -186,9 +186,10 @@ def test_builder_is_d_drive_isolated_exact_and_records_artifacts():
     assert "requires exactly one matching qualified release" in script
     assert "Managed qualification release does not match validated metadata" in script
     assert "Copy-Item -LiteralPath $entry.FullName" in script
-    assert '$qualifiedManifest.runtime_python = Join-Path $releaseRoot "venv\\Scripts\\python.exe"' in script
-    assert '$qualifiedManifest.model_cache = Join-Path $releaseRoot "model-cache"' in script
-    assert '$qualifiedManifest.source_root = Join-Path $releaseRoot "source"' in script
+    assert "$needsQualificationImport" in script
+    assert "$expectedReleasePaths.runtime_python" in script
+    assert "$expectedReleasePaths.model_cache" in script
+    assert "$expectedReleasePaths.source_root" in script
     assert "qualified_precisions" in script
     assert "GPU runtime package index is not approved" in script
     assert "GPU runtime torch index is not approved" in script
