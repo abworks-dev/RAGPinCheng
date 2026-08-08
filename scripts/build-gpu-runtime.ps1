@@ -3,6 +3,7 @@ param(
     [string]$RepositoryPath = "D:\RAGPinCheng",
     [string]$BasePython = "C:\Program Files\Python310\python.exe",
     [string]$RuntimeRoot = "D:\RAGPinCheng\runtime",
+    [string]$TorchWheelSeedRoot = "D:\RAGPinCheng\runtime\wheel-seed\torch-2.7.0-cu128-cp310-win_amd64",
     [Parameter(Mandatory)][string]$ModelCacheSource,
     [Parameter(Mandatory)][ValidatePattern('^[0-9a-fA-F]{40}$')][string]$CommitSha,
     [Parameter(Mandatory)][ValidatePattern('^[0-9a-fA-F]{64}$')][string]$SourceFingerprint
@@ -78,6 +79,13 @@ foreach ($requirement in $requirements) {
         throw "GPU runtime requirements must use exact name==version pins"
     }
 }
+$torchRequirements = @($requirements | Where-Object { $_ -cmatch '^torch==' })
+if ($torchRequirements.Count -ne 1 -or $torchRequirements[0] -cne "torch==2.7.0+cu128") {
+    throw "GPU runtime requirements must contain exactly the approved CUDA Torch pin"
+}
+if ([string]$metadata.torch_wheel_sha256 -cnotmatch '^[0-9a-f]{64}$') {
+    throw "GPU runtime metadata lacks the approved Torch wheel SHA-256"
+}
 
 $lockHash = & (Join-Path $RepositoryPath "scripts\get-gpu-runtime-lock-hash.ps1") -Path $requirementsPath
 if ($lockHash -notmatch '^[0-9a-f]{64}$') {
@@ -99,7 +107,11 @@ $manifestPath = Join-Path $releaseRoot "runtime-manifest.json"
 $qualificationPath = Join-Path $releaseRoot "qualification.json"
 if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
     $existing = Get-Content -LiteralPath $manifestPath -Encoding UTF8 | ConvertFrom-Json
-    if ($existing.source_fingerprint -eq $SourceFingerprint -and $existing.lock_sha256 -eq $lockHash) {
+    if (
+        $existing.source_fingerprint -eq $SourceFingerprint -and
+        $existing.lock_sha256 -eq $lockHash -and
+        [string]$existing.torch_wheel_sha256 -eq [string]$metadata.torch_wheel_sha256
+    ) {
         if ($metadata.validation_status -eq "validated") {
             if (
                 $existing.qualification_status -ne "qualified" -or
@@ -118,6 +130,7 @@ if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
                 [string]$qualification.repository_commit -ne [string]$metadata.source_commit -or
                 $qualification.source_fingerprint -ne $SourceFingerprint -or
                 $qualification.lock_sha256 -ne $lockHash -or
+                [string]$qualification.torch_wheel_sha256 -ne [string]$existing.torch_wheel_sha256 -or
                 $qualification.source_inventory_sha256 -ne $existing.source_inventory_sha256
             ) {
                 throw "Validated metadata does not match the candidate qualification evidence"
@@ -138,6 +151,15 @@ if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
 }
 if ($metadata.validation_status -eq "validated") {
     throw "Validated metadata cannot construct a release without prior candidate qualification"
+}
+
+$torchSeed = & (Join-Path $RepositoryPath "scripts\get-gpu-torch-wheel-seed.ps1") `
+    -SeedRoot $TorchWheelSeedRoot
+if (@($torchSeed).Count -ne 1) {
+    throw "GPU Torch wheel seed validation did not return exactly one artifact"
+}
+if ([string]$torchSeed.sha256 -cne [string]$metadata.torch_wheel_sha256) {
+    throw "GPU Torch wheel seed does not match the candidate lock metadata"
 }
 
 $venvRoot = Join-Path $releaseRoot "venv"
@@ -169,7 +191,8 @@ if ($LASTEXITCODE -ne 0 -or $head -ne $CommitSha.ToLowerInvariant()) {
 }
 $repositoryContractFiles = @($runtimeSourceFiles) + @(
     "gpu_service/runtime-lock.json",
-    "gpu_service/$([string]$metadata.requirements_file)"
+    "gpu_service/$([string]$metadata.requirements_file)",
+    "scripts/get-gpu-torch-wheel-seed.ps1"
 )
 & git -C $RepositoryPath diff --quiet $CommitSha -- @repositoryContractFiles
 if ($LASTEXITCODE -ne 0) {
@@ -204,13 +227,27 @@ Invoke-External -Failure "Unable to create isolated GPU runtime venv" -Command {
     & $BasePython -m venv $venvRoot
 }
 $runtimePython = Join-Path $venvRoot "Scripts\python.exe"
+$wheelDestination = Join-Path $wheelhouse ([string]$torchSeed.file)
+Copy-Item -LiteralPath ([string]$torchSeed.path) -Destination $wheelDestination
+if ((Get-FileHash -LiteralPath $wheelDestination -Algorithm SHA256).Hash.ToLowerInvariant() -cne [string]$torchSeed.sha256) {
+    throw "Copied GPU Torch wheel failed integrity validation"
+}
+$nonTorchRequirementsPath = Join-Path $tempRoot "runtime-lock-without-torch.txt"
+$nonTorchRequirements = @($requirements | Where-Object { $_ -cnotmatch '^torch==' })
+if ($nonTorchRequirements.Count -eq 0) {
+    throw "GPU runtime lock contains no non-Torch dependencies"
+}
+[IO.File]::WriteAllText(
+    $nonTorchRequirementsPath,
+    (($nonTorchRequirements -join "`n") + "`n"),
+    [Text.UTF8Encoding]::new($false)
+)
 Invoke-External -Failure "Unable to build the exact GPU runtime wheelhouse" -Command {
     & $runtimePython -m pip wheel `
         --no-deps `
         --wheel-dir $wheelhouse `
         --index-url ([string]$metadata.package_index_url) `
-        --extra-index-url ([string]$metadata.torch_index_url) `
-        --requirement $requirementsPath
+        --requirement $nonTorchRequirementsPath
 }
 
 $wheelHashes = foreach ($artifact in Get-ChildItem -LiteralPath $wheelhouse -File | Sort-Object Name) {
@@ -256,6 +293,10 @@ if ($LASTEXITCODE -gt 7) { throw "Unable to copy the model cache (robocopy exit 
     source_root = $sourceRoot
     source_inventory_sha256 = $sourceInventoryHash
     requirements_file = [string]$metadata.requirements_file
+    torch_wheel_file = [string]$torchSeed.file
+    torch_wheel_length = [Int64]$torchSeed.length
+    torch_wheel_sha256 = [string]$torchSeed.sha256
+    torch_wheel_source_index_url = [string]$torchSeed.source_index_url
     created_at = [DateTimeOffset]::Now.ToString("o")
 } | ConvertTo-Json -Depth 4 |
     Set-Content -LiteralPath $manifestPath -Encoding UTF8

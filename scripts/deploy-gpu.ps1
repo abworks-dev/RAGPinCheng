@@ -81,6 +81,9 @@ if ($LASTEXITCODE -ne 0 -or $fingerprint -notmatch '^[0-9a-f]{64}$') {
 }
 $lockMetadataPath = Join-Path $RepositoryPath "gpu_service\runtime-lock.json"
 $lockMetadata = Get-Content -LiteralPath $lockMetadataPath -Encoding UTF8 | ConvertFrom-Json
+if ([string]$lockMetadata.torch_wheel_sha256 -cnotmatch '^[0-9a-f]{64}$') {
+    throw "GPU runtime metadata lacks a valid Torch wheel SHA-256"
+}
 $requirementsPath = Join-Path $RepositoryPath "gpu_service\$($lockMetadata.requirements_file)"
 if (-not (Test-Path -LiteralPath $requirementsPath -PathType Leaf)) {
     throw "GPU runtime requirements lock is missing"
@@ -110,6 +113,7 @@ if (Test-Path -LiteralPath $currentReleasePath -PathType Leaf) {
             $activeManifest.release_id -ne $releaseId -or
             $activeManifest.source_fingerprint -ne $fingerprint -or
             $activeManifest.lock_sha256 -ne $lockHash -or
+            [string]$activeManifest.torch_wheel_sha256 -ne [string]$lockMetadata.torch_wheel_sha256 -or
             $activeManifest.qualification_status -ne "qualified" -or
             $activeManifest.lock_validation_status -ne "validated"
         ) {
