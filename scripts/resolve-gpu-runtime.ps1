@@ -125,8 +125,8 @@ $env:HF_HUB_OFFLINE = "1"
 $env:TRANSFORMERS_OFFLINE = "1"
 New-Item -ItemType Directory -Path $env:PIP_CACHE_DIR -Force | Out-Null
 
-$constraints = @(
-    "torch==2.7.0+cu128",
+$torchRequirement = "torch==2.7.0+cu128"
+$runtimeConstraints = @(
     "FlagEmbedding>=1.3,<2",
     "transformers>=4.47,<5",
     "tokenizers>=0.21,<0.22",
@@ -135,6 +135,7 @@ $constraints = @(
     "pydantic>=2,<3",
     "python-dotenv>=1,<2"
 )
+$constraints = @($torchRequirement) + $runtimeConstraints
 $preflight = [ordered]@{
     schema_version = 1
     status = "passed"
@@ -165,12 +166,24 @@ if (-not (Test-Path -LiteralPath $resolverPython -PathType Leaf)) {
     throw "Resolver venv Python is missing"
 }
 
-Write-Host "GPU_RUNTIME_RESOLVER stage=resolve_dependencies"
+Write-Host "GPU_RUNTIME_RESOLVER stage=resolve_cuda_torch"
+$noProxyHosts = @(
+    @($env:NO_PROXY -split ','),
+    "download.pytorch.org"
+) | ForEach-Object { $_.Trim() } | Where-Object { $_ } | Select-Object -Unique
+$env:NO_PROXY = $noProxyHosts -join ","
+$env:no_proxy = $env:NO_PROXY
 $installLog = Join-Path $logRoot "pip-install.log"
+Invoke-LoggedExternal -FilePath $resolverPython -Arguments @(
+    "-m", "pip", "install",
+    "--index-url", $approvedTorchIndex,
+    "--prefer-binary", "--no-deps", $torchRequirement
+) -LogPath $installLog -Failure "CUDA Torch resolution failed"
+
+Write-Host "GPU_RUNTIME_RESOLVER stage=resolve_dependencies"
 $installArguments = @(
     "-m", "pip", "install",
     "--index-url", $approvedPackageIndex,
-    "--extra-index-url", $approvedTorchIndex,
     "--prefer-binary"
 ) + $constraints
 Invoke-LoggedExternal -FilePath $resolverPython -Arguments $installArguments `

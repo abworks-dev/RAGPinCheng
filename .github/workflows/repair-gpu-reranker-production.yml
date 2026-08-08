@@ -70,6 +70,12 @@ jobs:
           if (@($modelCacheSource).Count -ne 1) {
             throw "GPU model cache source resolution did not return exactly one path"
           }
+          $noProxyHosts = @(
+            @($env:NO_PROXY -split ','),
+            "download.pytorch.org"
+          ) | ForEach-Object { $_.Trim() } | Where-Object { $_ } | Select-Object -Unique
+          $env:NO_PROXY = $noProxyHosts -join ","
+          $env:no_proxy = $env:NO_PROXY
 
           & "${env:REPO_PATH}\scripts\snapshot-gpu-runtime.ps1" `
             -RepositoryPath $env:REPO_PATH `
