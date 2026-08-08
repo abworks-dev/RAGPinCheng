@@ -81,6 +81,8 @@ unvalidated → candidate → validated
 
 `resolve-gpu-runtime-candidate.yml` 只接受人工确认的手动触发，在GPU Runner上使用 `D:\RAGPinCheng\runtime\resolver\<run-id>-<attempt>` 下的隔离venv、TEMP、pip cache和输出。解析约束固定为CUDA `torch==2.7.0+cu128`、`FlagEmbedding>=1.3,<2`、`transformers>=4.47,<5`、`tokenizers>=0.21,<0.22`以及现有FastAPI运行依赖；已证明崩溃的 `transformers==4.46.3` / `tokenizers==0.20.3` 不具备候选资格。
 
+模型缓存源优先使用已配置的 `GPU_MODEL_CACHE_SOURCE`；未配置时，只在仓库既有缓存位置和 `C:\Users\<profile>\.cache\huggingface` 的有限候选集中寻找同时包含BGE-M3与reranker完整离线快照的唯一根目录。零个或多个匹配均fail-closed，不读取 `.env`、不递归搜索整盘，也不下载或修改模型。资格成功后workflow上传manifest、qualification、源码与wheel清单及freeze，供validated元数据提交前独立复核。
+
 解析器不导入或加载模型，显式设置Hugging Face/Transformers离线模式，不修改全局Python，不使用 `--system-site-packages`，不写仓库中的正式锁。它只上传由索引包组成的完整 `name==version` 闭包、`pip check` 结果状态、固定约束和脱敏前检；原始pip日志保留在run-local目录且不上传。上传的锁仍须人工检查后才可作为 `candidate` 提交，解析成功本身不等于CUDA资格通过。
 
 ### R3-2B 前置条件
