@@ -79,7 +79,7 @@ unvalidated → candidate → validated
 
 ### 候选锁解析
 
-`resolve-gpu-runtime-candidate.yml` 只接受人工确认的手动触发，在GPU Runner上使用 `${PRODUCTION_REPO_PATH}\runtime\resolver\<run-id>-<attempt>` 下的隔离venv、TEMP、pip cache和输出。解析约束固定为CUDA `torch==2.7.0+cu128`、`FlagEmbedding>=1.3,<2`、`transformers>=4.47,<5`、`tokenizers>=0.21,<0.22`以及现有FastAPI运行依赖；已证明崩溃的 `transformers==4.46.3` / `tokenizers==0.20.3` 不具备候选资格。Torch单独从已批准的官方cu128索引解析，其域名不经过已证明会产生TLS EOF的部署代理，但仍执行正常TLS证书校验；其余完整依赖闭包继续通过部署代理从已批准的清华镜像解析，禁止 `trusted-host` 或关闭证书校验。
+`resolve-gpu-runtime-candidate.yml` 只接受人工确认的手动触发，在GPU Runner上使用 `${PRODUCTION_REPO_PATH}\runtime\resolver\<run-id>-<attempt>` 下的隔离venv、TEMP、pip cache和输出。解析约束固定为CUDA `torch==2.7.0+cu128`、`FlagEmbedding>=1.3,<2`、`transformers>=4.47,<5`、`tokenizers>=0.21,<0.22`以及现有FastAPI运行依赖；已证明崩溃的 `transformers==4.46.3` / `tokenizers==0.20.3` 不具备候选资格。Torch单独从已批准的官方cu128索引解析，索引域名 `download.pytorch.org` 及其官方wheel重定向域名 `download-r2.pytorch.org` 不经过已证明会产生TLS EOF的部署代理，但仍执行正常TLS证书校验；其余完整依赖闭包继续通过部署代理从已批准的清华镜像解析，禁止 `trusted-host` 或关闭证书校验。
 
 模型缓存源优先使用已配置的 `GPU_MODEL_CACHE_SOURCE`；未配置时，只在仓库既有缓存位置和 `C:\Users\<profile>\.cache\huggingface` 的有限候选集中寻找同时包含BGE-M3与reranker完整离线快照的唯一根目录。零个或多个匹配均fail-closed，不读取 `.env`、不递归搜索整盘，也不下载或修改模型。资格成功后workflow上传manifest、qualification、源码与wheel清单及freeze，供validated元数据提交前独立复核。
 

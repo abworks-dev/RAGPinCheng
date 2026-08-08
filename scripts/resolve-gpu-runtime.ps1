@@ -169,7 +169,8 @@ if (-not (Test-Path -LiteralPath $resolverPython -PathType Leaf)) {
 Write-Host "GPU_RUNTIME_RESOLVER stage=resolve_cuda_torch"
 $noProxyHosts = @(
     @($env:NO_PROXY -split ','),
-    "download.pytorch.org"
+    "download.pytorch.org",
+    "download-r2.pytorch.org"
 ) | ForEach-Object { $_.Trim() } | Where-Object { $_ } | Select-Object -Unique
 $env:NO_PROXY = $noProxyHosts -join ","
 $env:no_proxy = $env:NO_PROXY
