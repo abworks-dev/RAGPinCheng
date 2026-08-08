@@ -182,7 +182,11 @@ def test_builder_is_d_drive_isolated_exact_and_records_artifacts():
     assert "ConvertTo-Json -InputObject @($sourceInventory)" in script
     assert '"source"' in script
     assert "working tree contract does not match" in script
-    assert "Validated metadata cannot construct a release without prior candidate qualification" in script
+    assert "Validated metadata has no managed qualification root to import" in script
+    assert "requires exactly one matching qualified release" in script
+    assert "Managed qualification release does not match validated metadata" in script
+    assert "Copy-Item -LiteralPath $entry.FullName" in script
+    assert "qualified_precisions" in script
     assert "GPU runtime package index is not approved" in script
     assert "GPU runtime torch index is not approved" in script
     assert "TorchWheelSeedRoot" in script
@@ -269,6 +273,8 @@ def test_qualification_requires_every_approved_precision_to_complete():
     # Downstream consumers still read a single scalar precision.
     assert 'reranker_precision = $selectedPrecision' in script
     assert '$qualification.reranker_precision -notin @("fp16", "fp32")' in promote
+    assert '$qualifiedPrecisions[0] -ne "fp16"' in promote
+    assert '$qualifiedPrecisions[1] -ne "fp32"' in promote
     assert '$qualification.reranker_precision -notin @("fp16", "fp32")' in start
     assert '$manifest.reranker_precision -eq "fp16"' in start
 
