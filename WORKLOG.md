@@ -2665,6 +2665,13 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 验证：GPU runtime 静态专项 `14 passed`；PowerShell builder AST 解析通过；`git diff --check` 通过。
 - 待办/风险：尚未推送或触发修复后的生产 workflow；需合入 master 后重新运行 `e8ce5ec...` candidate qualification，再继续 promotion 和 faster-whisper。
 
+### 04:39 — 补齐 Qwen pip 冲突汇总模式
+
+- 完成：根据 R3 run `31277073826` 的脱敏结果，补充标准 pip `Cannot install ... conflicting dependencies`、`ResolutionImpossible` 及无 `(constraint)` 的请求行分类；不改变 requirements、版本 pin 或任何资格门禁。
+- 文件：`scripts/qualify-qwen3-asr-production.ps1`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
+- 验证：PowerShell AST 解析和 `git diff --check` 通过；pytest 未安装，未安装依赖。
+- 待办/风险：需 CI 通过后重新绑定完整 master SHA 运行 R3；若分类为真实版本冲突，按门禁停止并报告，不自动放宽依赖。
+
 ### 04:46 — 增加 GPU 资格维护窗口自动恢复
 
 - 完成：candidate qualification workflow 增加显式 `suspend_production_service` 门禁；在 qualification 前校验当前 validated release 和生产任务，停止并确认 `8100` 关闭，qualification 成功或失败均在 `finally` 中恢复原 release；恢复失败保持 workflow 失败并保留证据。
