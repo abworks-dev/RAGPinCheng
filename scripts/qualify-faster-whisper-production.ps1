@@ -46,7 +46,6 @@ $SpoolRoot = Join-Path $RunRoot "spool"
 $ConfigRoot = Join-Path $RunRoot "config"
 $StateRoot = Join-Path $RunRoot "state"
 $TempPort = 18200
-$GpuPort = 8100
 $ProductionAsrPort = 8200
 $GpuUrl = "http://${PRIVATE_IPV4}:8100"
 $ProductionAsrUrl = "http://127.0.0.1:8200"
@@ -114,6 +113,28 @@ function Write-StageTiming {
     )
     $Stopwatch.Stop()
     Write-Host ("R3_STAGE stage={0} elapsed_ms={1}" -f $Stage, $Stopwatch.ElapsedMilliseconds)
+}
+
+function Write-QualificationProgress {
+    param([Parameter(Mandatory = $true)][string]$Stage)
+    if ([string]::IsNullOrWhiteSpace($SummaryPath)) { return }
+    $progressPath = "$SummaryPath.progress.json"
+    $progressParent = Split-Path -Parent $progressPath
+    if (-not (Test-Path -LiteralPath $progressParent)) {
+        New-Item -ItemType Directory -Path $progressParent -Force | Out-Null
+    }
+    $payload = [ordered]@{
+        schema_version = "faster-whisper-r3-progress/1"
+        run_id = $RunId
+        stage = $Stage
+        process_id = $PID
+        updated_at = [DateTimeOffset]::Now.ToString("o")
+    } | ConvertTo-Json -Compress
+    [System.IO.File]::WriteAllText(
+        $progressPath,
+        $payload + "`n",
+        (New-Object System.Text.UTF8Encoding($false))
+    )
 }
 
 function Assert-DirectChild {
@@ -346,8 +367,11 @@ function Clear-ScopedProxy {
 }
 
 function Get-TaskSnapshot {
+    param(
+        [string[]]$TaskNames = @("RAGPinCheng-ASR")
+    )
     $result = @()
-    foreach ($name in @("RAGPinCheng-GPU", "RAGPinCheng-ASR")) {
+    foreach ($name in $TaskNames) {
         $task = Get-ScheduledTask -TaskName $name -ErrorAction Stop
         $info = Get-ScheduledTaskInfo -TaskName $name -ErrorAction Stop
         $result += [ordered]@{
@@ -377,7 +401,7 @@ function Get-FirewallSnapshot {
         $ports = @($rule | Get-NetFirewallPortFilter -ErrorAction Stop)
         if (-not @($ports | Where-Object {
             [string]$_.Protocol -eq "TCP" -and
-            [string]$_.LocalPort -in @("8100", "8200")
+            [string]$_.LocalPort -eq "8200"
         })) {
             continue
         }
@@ -1298,6 +1322,7 @@ function Write-SanitizedSummary {
     }
 }
 
+Write-QualificationProgress -Stage "wrapper_start"
 if ($CommitSha -notmatch "^[0-9a-fA-F]{40}$") {
     throw "CommitSha must be a full 40-character SHA"
 }
@@ -1412,18 +1437,22 @@ foreach ($path in @(
 if ($LASTEXITCODE -ne 0) {
     throw "Unable to protect qualification run ACL"
 }
+Write-QualificationProgress -Stage "run_directory_ready"
 
 try {
     $FailureCode = "preflight_failed"
+    Write-QualificationProgress -Stage "preflight_identity"
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     if ($identity.Name -notmatch "\\Administrator$") {
         throw "Qualification runner must execute as Administrator"
     }
     $MachinePython = Get-MachinePython311
+    Write-QualificationProgress -Stage "preflight_native_capture"
     Assert-ExternalFailureCapture `
         -PythonPath $MachinePython `
         -LogPath (Join-Path $LogRoot "native-stderr-capture-self-test.log")
     $InternalWheelValidationLog = Join-Path $LogRoot "internal-wheel-validation.log"
+    Write-QualificationProgress -Stage "preflight_internal_wheel_validation"
     Invoke-External `
         -FilePath $MachinePython `
         -Arguments @(
@@ -1482,6 +1511,7 @@ try {
         -LiteralPath (Join-Path $ResolvedCrcmodWheelBundle "internal-wheel-manifest.json") `
         -Raw -Encoding UTF8 | ConvertFrom-Json
     $ProductionPython = "${PRODUCTION_SERVICE_ROOT}\RAGPinCheng-ASR\venv\Scripts\python.exe"
+    Write-QualificationProgress -Stage "preflight_host_checks"
     if (-not (Test-Path -LiteralPath $ProductionPython -PathType Leaf)) {
         throw "Production ASR venv Python is missing"
     }
@@ -1492,17 +1522,16 @@ try {
     if (Get-NetTCPConnection -LocalPort $TempPort -State Listen -ErrorAction SilentlyContinue) {
         throw "Qualification port 18200 is already listening"
     }
-    foreach ($port in @($GpuPort, $ProductionAsrPort)) {
-        if (-not (Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue)) {
-            throw "Required production port $port is not listening"
-        }
+    if (-not (Get-NetTCPConnection -LocalPort $ProductionAsrPort -State Listen -ErrorAction SilentlyContinue)) {
+        throw "Required local production ASR port $ProductionAsrPort is not listening"
     }
 
     $PreTaskSnapshot = Get-TaskSnapshot
     if (@($PreTaskSnapshot | Where-Object { $_.state -ne "Running" }).Count -ne 0) {
-        throw "Production GPU and ASR Scheduled Tasks must both be running"
+        throw "Production ASR Scheduled Task must be running"
     }
     $PreFirewallSnapshot = Get-FirewallSnapshot
+    Write-QualificationProgress -Stage "preflight_production_health"
     Write-JsonFile -Path (Join-Path $EvidenceRoot "scheduled-tasks-before.json") -Value $PreTaskSnapshot
     Write-JsonFile -Path (Join-Path $EvidenceRoot "firewall-before.json") -Value $PreFirewallSnapshot
 
@@ -1521,6 +1550,7 @@ try {
             "-AsrUrl", $ProductionAsrUrl
         ) `
         -LogPath (Join-Path $LogRoot "production-asr-verification-before.log")
+    Write-QualificationProgress -Stage "preflight_sample_contract"
     $PreProductionCapabilities = [ordered]@{
         api_version = "asr-service/1"
         service_profiles = @("funasr-sensevoice-small-v1")
@@ -1546,6 +1576,7 @@ try {
         ) `
         -LogPath (Join-Path $LogRoot "sample-manifest-validation.log")
 
+    Write-QualificationProgress -Stage "preflight_gpu_baseline"
     $gpuBaseline = Get-GpuSample
     $BaselineMemoryMiB = [int]$gpuBaseline.memory_used_mib
     $PeakMemoryMiB = $BaselineMemoryMiB
@@ -1567,8 +1598,10 @@ try {
         production_asr_api_version = [string]$PreProductionCapabilities.api_version
         production_profiles = @($PreProductionCapabilities.service_profiles)
     })
+    Write-QualificationProgress -Stage "preflight_complete"
 
     $FailureCode = "dependency_preparation_failed"
+    Write-QualificationProgress -Stage "dependency_production_freeze"
     $DependencyFailureStage = "production_freeze"
     $DependencyFailureOperation = "production_freeze_command"
     $DependencyFailureLog = Join-Path $LogRoot "production-pip-freeze.stderr.log"
@@ -1588,6 +1621,7 @@ try {
     $DependencyFailureStage = "qualification_venv"
     $DependencyFailureOperation = "qualification_venv_command"
     $DependencyFailureLog = Join-Path $LogRoot "venv-create.log"
+    Write-QualificationProgress -Stage "dependency_venv_create"
     Invoke-External `
         -FilePath $MachinePython `
         -Arguments @("-m", "venv", $VenvRoot) `
@@ -1626,6 +1660,7 @@ try {
     $CachePath = Join-Path $WheelCacheRoot $CacheIdentity.Key
     $WheelCacheKey = $CacheIdentity.Key
     $CacheStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+    Write-QualificationProgress -Stage "dependency_wheel_cache"
     $CacheHit = $false
     if (Test-Path -LiteralPath $CachePath) {
         $CacheManifest = $null
@@ -1740,11 +1775,13 @@ try {
             -WheelManifest $WheelManifest
     }
     Write-StageTiming -Stage "wheel_cache" -Stopwatch $CacheStopwatch
+    Write-QualificationProgress -Stage "dependency_wheel_cache_complete"
 
     $DependencyFailureStage = "pip_install"
     $DependencyFailureOperation = "pip_install_command"
     $DependencyFailureLog = Join-Path $LogRoot "pip-install-offline.log"
     $InstallStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+    Write-QualificationProgress -Stage "dependency_offline_install"
     Invoke-External `
         -FilePath $VenvPython `
         -Arguments @(
@@ -1757,6 +1794,7 @@ try {
         ) `
         -LogPath $DependencyFailureLog
     Write-StageTiming -Stage "offline_install" -Stopwatch $InstallStopwatch
+    Write-QualificationProgress -Stage "dependency_offline_install_complete"
     Assert-WheelManifestUnchanged -Manifest $WheelManifest
     $DependencyFailureStage = "qualification_pip_check"
     $DependencyFailureOperation = "qualification_pip_check_command"
@@ -1814,6 +1852,7 @@ print('qualification-module-origins-verified')
     $DependencyFailureStage = "module_origin_verification"
     $DependencyFailureOperation = "module_origin_verification_command"
     $DependencyFailureLog = Join-Path $EvidenceRoot "qualification-module-origins.txt"
+    Write-QualificationProgress -Stage "dependency_module_verification"
     Invoke-External `
         -FilePath $VenvPython `
         -Arguments @("-c", $ModuleVerification) `
@@ -1831,6 +1870,7 @@ print('qualification-module-origins-verified')
         -LogPath $DependencyFailureLog
 
     $FailureCode = "model_artifact_validation_failed"
+    Write-QualificationProgress -Stage "model_preparation"
     $ModelStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
     try {
         Invoke-External `
@@ -1845,12 +1885,14 @@ print('qualification-module-origins-verified')
     } finally {
         Write-StageTiming -Stage "model_preparation" -Stopwatch $ModelStopwatch
     }
+    Write-QualificationProgress -Stage "model_preparation_complete"
     if (-not (Test-Path -LiteralPath $ModelManifest -PathType Leaf)) {
         throw "Pinned faster-whisper Manifest was not prepared"
     }
     Copy-Item -LiteralPath $ModelManifest -Destination (Join-Path $EvidenceRoot "model-manifest.json")
 
     $FailureCode = "cuda_preflight_failed"
+    Write-QualificationProgress -Stage "cuda_preflight"
     Invoke-External `
         -FilePath $VenvPython `
         -Arguments @(
@@ -1930,6 +1972,7 @@ print('qualification-module-origins-verified')
 
     $ServiceStdout = Join-Path $LogRoot "qualification-service.stdout.log"
     $ServiceStderr = Join-Path $LogRoot "qualification-service.stderr.log"
+    Write-QualificationProgress -Stage "qualification_service_start"
     $ServiceProcess = Start-Process `
         -FilePath $VenvPython `
         -ArgumentList @(
@@ -1951,6 +1994,7 @@ print('qualification-module-origins-verified')
         -Uri "$TempAsrUrl/health" `
         -TimeoutSeconds 300 `
         -Process $ServiceProcess)
+    Write-QualificationProgress -Stage "qualification_service_ready"
     $TemporaryCapabilities = Invoke-AuthenticatedJson `
         -Uri "$TempAsrUrl/v1/capabilities" `
         -Token $TemporaryToken `
@@ -1975,6 +2019,7 @@ print('qualification-module-origins-verified')
     # the whole inference stage so a stuck child cannot occupy the GPU runner.
     $QualificationWatchdogSeconds = 1500
     $InferenceStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+    Write-QualificationProgress -Stage "qualification_runner_start"
     $QualificationProcess = Start-Process `
         -FilePath $VenvPython `
         -ArgumentList @(
@@ -1991,6 +2036,7 @@ print('qualification-module-origins-verified')
         -RedirectStandardError $QualificationStderr `
         -PassThru
 
+    Write-QualificationProgress -Stage "qualification_runner_wait"
     $GpuEvidence = Join-Path $EvidenceRoot "gpu-samples.jsonl"
     $QualificationStartedAt = [DateTimeOffset]::Now
     $NextQualificationHeartbeatAt = $QualificationStartedAt.AddSeconds(30)
@@ -2042,6 +2088,7 @@ print('qualification-module-origins-verified')
         $QualificationProcess.Refresh()
     }
     $QualificationExitCode = $QualificationProcess.ExitCode
+    Write-QualificationProgress -Stage "qualification_runner_complete"
     $QualificationSummaryPath = Join-Path $ReportRoot "qualification-summary.json"
     if (-not (Test-Path -LiteralPath $QualificationSummaryPath -PathType Leaf)) {
         throw "Qualification runner failed; see local run logs"
@@ -2068,6 +2115,7 @@ print('qualification-module-origins-verified')
     Write-StageTiming -Stage "eight_sample_inference" -Stopwatch $InferenceStopwatch
 
     $FailureCode = "postflight_failed"
+    Write-QualificationProgress -Stage "postflight"
     Stop-OwnedProcess `
         -Process $ServiceProcess `
         -ExpectedExecutables @($VenvPython, $MachinePython) `
@@ -2117,6 +2165,7 @@ print('qualification-module-origins-verified')
     $Verdict = "pass"
     $FailureCode = "none"
     Write-SanitizedSummary -Status $Verdict -Code $FailureCode
+    Write-QualificationProgress -Stage "complete"
     Write-Host "faster-whisper R3 qualification PASS"
     Write-Host "Commit: $($CommitSha.ToLowerInvariant())"
     Write-Host "Model revision: $ModelRevision"
@@ -2136,8 +2185,16 @@ print('qualification-module-origins-verified')
         Write-SanitizedSummary -Status "fail" -Code $FailureCode
     } catch {
     }
+    try {
+        Write-QualificationProgress -Stage "failed"
+    } catch {
+    }
     throw
 } finally {
+    try {
+        Write-QualificationProgress -Stage "cleanup"
+    } catch {
+    }
     $CleanupIssues = @()
     try {
         Stop-OwnedProcess `

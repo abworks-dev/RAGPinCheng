@@ -2468,7 +2468,7 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 完成：Qwen3-ASR R3 qualification 现在为隔离依赖、模型准备、CUDA BF16 预检和八样本推理输出脱敏阶段状态与心跳；外部命令按阶段超时并将 stdout/stderr 留在 run-local 日志；runner 输出 warmup 与逐样本完成事件；八样本推理增加 170 分钟整体 watchdog，超时后写入 `qualification_timeout` verdict 并进入既有清理路径。
 - 文件：`scripts/qualify-qwen3-asr-production.ps1`、`scripts/run_qwen3_asr_qualification.py`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
 - 验证：PowerShell AST 解析、Python 编译、完整 ASR 静态测试 31/31 与 `git diff --check` 通过；本机未安装 pytest，未运行 pytest 套件。
-- 待办/风险：后续 run `31222037405` 已使用 merge SHA 触发，但在 native stderr self-test 暴露 `Start-Process -ArgumentList` 多行 `python -c` 参数边界回归并失败；Profile admission 保持 disabled，生产服务、生产 venv、模型缓存、数据库、Qdrant 与防火墙均未修改。
+- 待办/风险：尚未在 production-asr runner 触发或取消 workflow；当前进行中的 run 不会获得新逻辑。Profile admission 保持 disabled，生产服务、生产 venv、模型缓存、数据库、Qdrant 与防火墙均未修改。
 
 ### 17:01 — 修复 Qwen3-ASR Windows 参数传递回归
 
@@ -2476,3 +2476,156 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`scripts/qualify-qwen3-asr-production.ps1`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
 - 验证：PowerShell AST 解析、Python 编译、ASR 静态测试 31/31、临时 Python stderr 参数集成测试和 `git diff --check` 通过；未安装依赖、未启动服务、未执行 production retry。
 - 待办/风险：需提交 PR、CI 通过并重新审批后，才能以新的完整 master SHA 重跑 R3 qualification；Profile admission 继续保持 disabled。
+
+### 05:57 — 增强 faster-whisper 资格卡死诊断与超时收尾
+
+- 完成：针对生产资格 wrapper 在模型准备后无输出并最终被 workflow watchdog 取消的问题，新增从预检到清理的阶段进度制品和 heartbeat 输出；外层超时现先写脱敏失败 verdict，再以有界 `taskkill` 和 PID fallback 终止进程树，避免进程终止命令自身卡住导致 verdict 丢失。
+- 文件：`.github/workflows/qualify-faster-whisper-production.yml`、`scripts/qualify-faster-whisper-production.ps1`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
+- 验证：PowerShell AST 解析通过；faster-whisper qualification 与部署静态专项测试 `59 passed`；`git diff --check` 通过。
+- 待办/风险：需在 master 上重跑一次生产资格 workflow，以 progress 阶段确认实际阻塞点或验证完整通过；未修改模型、样本、评分门槛、生产服务或 Profile admission。
+
+### 06:14 — 增加受控 GPU 服务恢复入口
+
+- 完成：生产资格 run `31222220581` 已确定因将远端 GPU 服务 `${PRIVATE_IPV4}:8100` 误作 ASR Runner 本机端口和任务而在预检失败；资格脚本现只约束本机 ASR `8200`、`RAGPinCheng-ASR` 和其防火墙，GPU 继续通过远端健康与 activity API 验证。新增仅恢复 `RAGPinCheng-GPU` Scheduled Task 的手动 workflow，并将其路由到 GPU Runner；已有任务必须严格匹配动作、主体和启动脚本，缺失任务才按现有部署契约创建，在 180 秒内确认 8100 健康，失败时输出脱敏启动诊断并注销本次新建任务。
+- 文件：`.github/workflows/recover-gpu-service-production.yml`、`scripts/qualify-faster-whisper-production.ps1`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
+- 验证：恢复 runs `31223198066`、`31223417073` 均在发现 GPU 任务缺失后失败关闭，未修改生产状态；run `31223666489` 已创建并启动任务但 180 秒内未就绪，自动注销新建任务；run `31224233982` 显示目标主机地址存在、任务进程已退出且 Windows 状态码为 `0xC0000005`。启动日志持续增长但未见已脱敏的异常行，因此补充提前退出检测和 Windows Application Error 的故障模块诊断；修正后的 YAML 解析、PowerShell AST、faster-whisper qualification 与部署静态专项测试通过；`git diff --check` 通过。
+- 待办/风险：恢复任务会改变生产 GPU 服务进程状态；需在该 workflow 成功返回 `status=ok` 且 `model_loaded=true` 后，再重跑 faster-whisper 资格验证。
+
+### 06:42 — 增加 GPU 原生运行时只读诊断
+
+- 完成：针对 `RAGPinCheng-GPU` 以 Windows `0xC0000005` 原生访问冲突退出的状态，新增独立手动诊断 workflow；它在 GPU 主机用服务同一 Python 3.10 依次执行 nvidia-smi、torch 导入、最小 CUDA tensor 与 FlagEmbedding 导入，每项 60 秒上限且不安装、卸载、重启服务或修改任务。
+- 文件：`.github/workflows/diagnose-gpu-runtime-production.yml`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
+- 验证：YAML 解析、Windows `Start-Process` Python `-c` 引号烟测、faster-whisper qualification 与部署静态专项测试 `62 passed`、`git diff --check` 通过。
+- 待办/风险：诊断会初始化 CUDA 上下文和执行一个单元素 tensor，仅用于定位原生运行时崩溃；结果出来后再决定是否修改 GPU 全局运行时。
+
+### 06:53 — 增加 S4U 分阶段模型加载诊断
+
+- 完成：将 GPU 运行时诊断扩展为与生产任务一致的 `Administrator` / `S4U` / Highest 临时任务；它加载同一 `.env` 和工作目录下的 BGE-M3、reranker，并在每个模型阶段写入脱敏状态与显存采样。任务最多运行 8 分钟，完成或失败均注销自身，不启动 `gpu_service`、不监听 8100、不改依赖或模型制品。
+- 文件：`.github/workflows/diagnose-gpu-runtime-production.yml`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
+- 验证：YAML 解析、提取后 PowerShell AST 解析、faster-whisper qualification 与部署静态专项测试 `62 passed`、`git diff --check` 通过。
+- 待办/风险：该诊断会真实加载两份生产模型并短暂占用 GPU 显存；需根据其阶段结果确定最小运行时修复，尚未重装全局包或恢复生产 HTTP 服务。
+
+### 06:55 — 补全 S4U 诊断子进程错误捕获
+
+- 完成：首轮 S4U 诊断确认 Python 命令在 `embed_start` 前以任务结果 `1` 退出，但计划任务默认吞掉子进程输出；现将临时 Python probe 的 stdout/stderr 写入 Runner 临时目录，父流程仅回显已脱敏的异常、模块与 CUDA 关键词，继续在 finally 中注销临时任务。
+- 文件：`.github/workflows/diagnose-gpu-runtime-production.yml`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
+- 验证：YAML 解析、提取后 PowerShell AST 解析、faster-whisper qualification 与部署静态专项测试 `62 passed`、`git diff --check` 通过。
+- 待办/风险：需重跑一次相同诊断以获得真实的 Python 失败原因；不修改生产服务或全局依赖。
+
+### 06:59 — 细化 S4U Python 启动阶段证据
+
+- 完成：将 S4U probe 的 Python 入口、Torch 导入、服务配置导入和两个模型加载拆为独立阶段；子 Python 改由 `Start-Process` 显式启动、等待和重定向，记录实际退出码，避免 PowerShell 任务边界吞掉错误输出。
+- 文件：`.github/workflows/diagnose-gpu-runtime-production.yml`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
+- 验证：YAML 解析、提取后 PowerShell AST 解析、faster-whisper qualification 与部署静态专项测试 `62 passed`、`git diff --check` 通过。
+- 待办/风险：下一次只读诊断会短暂实际加载模型；其阶段结果将决定是否需要单独批准运行时修复。
+
+### 07:02 — 修正 S4U probe 的模块搜索路径
+
+- 完成：run `31225760616` 证明 S4U Python 与 Torch 正常，失败原因为临时 probe 的脚本目录替代仓库根导致 `gpu_service` 不可导入；probe 现仅在自身进程中将 `${PRODUCTION_REPO_PATH}` 加入 `sys.path`，与生产 `python -m gpu_service.app` 的模块发现语义一致。
+- 文件：`.github/workflows/diagnose-gpu-runtime-production.yml`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
+- 验证：YAML 解析、提取后 PowerShell AST 解析、faster-whisper qualification 与部署静态专项测试 `62 passed`、`git diff --check` 通过。
+- 验证补充：run `31225929111` 显示 `BGEM3FlagModel` 加载完成，随后在 `FlagReranker` 加载阶段以 `0xC0000005`（Windows access violation）退出；CUDA、Torch、FlagEmbedding 导入、S4U 会话、仓库模块路径和 BGE-M3 均已排除。临时任务已自动注销。
+- 待办/风险：需针对 FlagReranker 原生加载路径提出最小运行时/包版本修复并单独获批；仍不修改生产服务、模型或全局依赖。
+
+### 07:40 — 增加 FlagReranker 隔离兼容性修复入口
+
+- 完成：新增受确认保护的 GPU reranker 修复 workflow 与分阶段模型加载脚本；先记录当前 transformers/tokenizers 版本及 pip freeze，在临时 system-site-packages venv 中以 `transformers==4.46.3`、`tokenizers==0.20.3` 复现 S4U 全模型加载。仅候选通过后才修改生产 Python 的这两个包并再次 S4U 验证；全局验证失败自动按记录版本回滚。生产依赖文件同步固定该兼容组合。
+- 文件：`.github/workflows/repair-gpu-reranker-production.yml`、`scripts/diagnose_gpu_reranker.py`、`gpu_service/requirements.txt`、`requirements-gpu.txt`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
+- 验证：YAML 解析、提取后 PowerShell AST 解析、Python 编译、faster-whisper qualification 与部署静态专项测试 `63 passed`、`git diff --check` 通过。
+- 待办/风险：workflow 将创建临时 S4U 任务并真实加载模型；候选失败不会修改全局包，候选成功后全局包修改可按 backup 中的原版本回滚。GPU 服务尚未恢复。
+
+### 07:43 — 修正 reranker 隔离包安装通道
+
+- 完成：首轮修复 run `31227946861` 在隔离 venv 下载前因默认 PyPI TLS EOF 失败，确认未创建临时任务或修改全局包；修复 workflow 改用既有 GPU 部署使用的清华 PyPI 镜像，并将 pip 重试输出留在本地诊断日志，防止 PowerShell 将其提升为终止性错误。
+- 文件：`.github/workflows/repair-gpu-reranker-production.yml`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
+- 验证：YAML 解析、提取后 PowerShell AST 解析、faster-whisper qualification 与部署静态专项测试 `63 passed`、`git diff --check` 通过。
+- 待办/风险：需重新执行隔离验证；候选仍未通过前全局包与 GPU 服务保持未修改状态。
+
+### 07:49 — 将 reranker 修复临时空间固定到 D 盘
+
+- 完成：按用户提供的 C 盘空间不足信息，将修复 workflow 的 TEMP、TMP 与 pip wheel 缓存显式迁至 `${PRODUCTION_REPO_PATH}`；全局 Python 安装仍只写入最终的两个 wheel，不在 C 盘保留下载缓存或临时解压文件。旧的未开始修复 run 将以取消方式废弃，避免使用旧路径。
+- 文件：`.github/workflows/repair-gpu-reranker-production.yml`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
+- 验证：YAML 解析、提取后 PowerShell AST 解析、faster-whisper qualification 与部署静态专项测试 `63 passed`、`git diff --check` 通过。
+- 待办/风险：需在新提交上重跑隔离验证；本轮不删除 C 盘文件、不改全局依赖或 GPU 服务。
+
+### 09:49 — 实施 R3-2A GPU 不可变运行时
+
+- 完成：移除未经验证的生产双包 pin，新增默认关闭的 GPU runtime lock、D 盘隔离 venv/wheelhouse/model cache 构建、LF 规范化锁哈希、受指纹保护的不可变源码快照、CUDA-only FP16/FP32 候选资格、资格 run/候选 commit/源码/锁/文件清单证据绑定、release 身份 `/model-info` 校验、S4U 任务切换及环境/任务/release 指针回滚。自动部署仅在仓库变量开启且复用已资格验证的 validated release 时 promotion；未变化分支只核对健康与运行中 release 身份，不隐式修复。GPU 服务禁止 CPU fallback，模型未加载时 `/health` 返回 503；应用部署增加 GPU 健康契约检查。
+- 文件：`.github/workflows/ci.yml`、`.github/workflows/deploy-production.yml`、`.github/workflows/recover-gpu-service-production.yml`、`.github/workflows/repair-gpu-reranker-production.yml`、`gpu_service/**`、`requirements-gpu.txt`、`scripts/build-gpu-runtime.ps1`、`scripts/get-gpu-runtime-fingerprint.ps1`、`scripts/get-gpu-runtime-lock-hash.ps1`、`scripts/qualify-gpu-runtime.ps1`、`scripts/promote-gpu-runtime.ps1`、`scripts/snapshot-gpu-runtime.ps1`、`scripts/snapshot_gpu_runtime.py`、`scripts/deploy-gpu.ps1`、`scripts/start-gpu-service.ps1`、`scripts/deploy-app.sh`、`project-docs/features/**`、`tests/test_gpu_runtime_deployment_static.py`、`tests/test_asr_deployment_static.py`、`tests/test_deploy_git_safety.py`、`WORKLOG.md`。
+- 验证：8 个外部 PowerShell 脚本及 3 个本次修改 workflow 内嵌 PowerShell block AST 解析通过；16 个 workflow YAML 解析、Python compileall、LF 规范化锁哈希 PowerShell/Python 交叉比对、LF 输入下 Bash 语法和 `git diff --check` 通过；GPU/ASR/部署 CI 同款相关集合 `396 passed`、`2 subtests passed`（7 个既有弃用警告）。远端 workflow `319712216` 仍为 `disabled_manually`，queued/in-progress 均为 0。
+- 待办/风险：`runtime-lock.txt` 仍为空且元数据为 `unvalidated`，因此当前提交无法构建或推广生产 release。未推送、未启用 workflow、未执行 R3-2B 候选资格、未安装依赖、未修改生产任务/服务/全局 Python/模型缓存；Windows 生产主机上的真实 CUDA、S4U、计划任务和失败回滚仍需在独立获批的 R3-2B 中验证。
+- 更正：本条声明的静态验证虽通过，但未覆盖 `$LASTEXITCODE` 跨脚本泄漏，自动 promotion 通路实际不可能成功；已在下条 `10:38` 记录中修复并补回归测试。
+
+### 10:38 — 审查并集成 R3-2A GPU 不可变运行时
+
+- 完成：以代码审查方式复核 `c24645b` 并基于最新 `origin/master`（`ec7521e`）建立本地集成分支。修复一处阻断缺陷：`deploy-gpu.ps1` 用 `$LASTEXITCODE` 判定只以 `throw` 报错的 `build-gpu-runtime.ps1`／`promote-gpu-runtime.ps1`，而构建成功路径最后一个原生命令是 `robocopy`（正常复制返回 1，脚本自身已正确按 `-gt 7` 判定），导致构建完全成功后父脚本仍抛 "GPU runtime construction failed"、promotion 永不执行。改为新增 `Invoke-RuntimeScript` 包装：调用前重置 `$LASTEXITCODE`、以 hashtable splatting 传参；两个被调脚本显式 `exit 0`，promote 另加 `$promotionSucceeded` 哨兵防止静默跳过成功标记。同时把 `runtime-lock.json` 的 `allowed_reranker_precisions` 从无人读取的死字段改为构建期强校验（只允许与硬编码 CUDA `fp16`/`fp32` 完全一致，元数据无法放宽白名单）。
+- 文件：`scripts/deploy-gpu.ps1`、`scripts/build-gpu-runtime.ps1`、`scripts/promote-gpu-runtime.ps1`、`tests/test_gpu_runtime_deployment_static.py`、`project-docs/features/gpu-runtime-deployment.md`、`WORKLOG.md`（本条及上条更正）。未改 `qualify-gpu-runtime.ps1`、`start-gpu-service.ps1`、`gpu_service/**`、任何 workflow、`runtime-lock.txt` 与 `runtime-lock.json`。
+- 验证：8 个外部 PowerShell 脚本及 3 个 workflow 内嵌 block AST 解析、16 个 workflow YAML 解析、Python `compileall`、LF 规范化后 `bash -n scripts/deploy-app.sh`、`git diff --check` 均通过；ASR/部署 CI 同款集合 `371 passed`、`2 subtests passed`，`gpu_service/tests/test_contract.py` `27 passed`（合计与原 `396` 一致，新增 2 项测试）。新增测试经 stash 变异验证：对修复前脚本 `2 failed`，修复后通过。另以从真实脚本 AST 提取的 `Invoke-RuntimeScript` 做功能级验证：`robocopy` 退出 1 时 promotion 门禁放行、内层 `throw` 与非零 `exit` 仍向上传播、调用前脏 `$LASTEXITCODE=16` 被重置且不产生假失败；锁哈希 CRLF/LF 一致并与 Python 参考实现相同。
+- 待办/风险：`runtime-lock.txt` 仍为空、元数据仍为 `unvalidated`，fail-closed 状态未改变，本提交仍无法构建或推广生产 release。未 push、未创建 PR、未启用或触发任何 workflow、未执行 R3-2B 候选资格、未改生产 GPU 服务/Scheduled Task/全局 Python/模型缓存/密钥/防火墙。`qualify-gpu-runtime.ps1` 在 8100 监听或 `RAGPinCheng-GPU` 任务存在时拒绝执行，故首个候选需先停用生产 GPU 任务，属 R3-2B 需单独审批的生产操作，已补记入功能文档。真实 CUDA、S4U、任务切换与失败回滚仍未在生产主机验证。
+
+### 11:40 — 执行 R3-2B GPU 候选资格
+
+- 完成：新增受人工确认保护的 GPU runtime 候选锁解析入口；在生产 GPU Runner 上先验证 Python 3.10、D 盘剩余空间、模型缓存源及生产任务/8100 均符合隔离前提，再仅在 D 盘 run-local venv、TEMP 与 pip cache 中解析固定 CUDA 候选约束、执行 `pip check`，上传完整精确锁、freeze、resolver report 与不含本机路径的 preflight 证据。首个解析run在任何安装前证明仓库变量缺失，随后补充有限候选集、双模型快照、唯一匹配的只读缓存发现器，并让资格workflow上传独立可复核的manifest、qualification与清单证据；后续实际执行通过全部前检并创建隔离venv，ZeroTier恢复后的未改代码重跑仍证明部署代理访问官方cu128索引时TLS EOF；选择性直连验证已到达官方索引，但其wheel重定向域名回到代理后再次TLS EOF。按用户要求取消仍在下载Torch的 run `31241654841` 后，改为人工从官方cu128索引下载精确Python 3.10 Windows wheel：本机生成不含路径的长度/SHA-256 manifest，并将官方索引公布的发布者哈希固化在本机生成器与Helios校验器；Helios仅接受D盘固定目录、精确文件集合和标签、非reparse文件及匹配哈希；resolver以`--no-index --no-deps`安装本地Torch，资格构建复用同一文件且只为非Torch锁项联网，候选元数据、release manifest、qualification、未变化部署、promotion和启动均绑定wheel哈希。run `31245209423` 随后通过全部前检、官方wheel校验、完整依赖解析和`pip check`，生成并人工复核75项精确锁：Torch `2.7.0+cu128`、FlagEmbedding `1.4.0`、Transformers `4.55.4`、Tokenizers `0.21.4`，规范化锁SHA-256为`27c8b11912116959761ef15142f0e3934e6fda7d69bd685421ad72a361328240`；正式元数据仅推进到`candidate`，资格字段保持空。发现零个/多个模型缓存、缺失/异常wheel seed、生产任务或监听端口时均直接失败且不自动处理。
+- 文件：`.gitignore`、`.github/workflows/resolve-gpu-runtime-candidate.yml`、`.github/workflows/repair-gpu-reranker-production.yml`、`gpu_service/runtime-lock.json`、`scripts/resolve-gpu-model-cache-source.ps1`、`scripts/get-gpu-torch-wheel-seed.ps1`、`scripts/new-gpu-torch-wheel-seed-manifest.ps1`、`scripts/resolve-gpu-runtime.ps1`、`scripts/build-gpu-runtime.ps1`、`scripts/qualify-gpu-runtime.ps1`、`scripts/deploy-gpu.ps1`、`scripts/promote-gpu-runtime.ps1`、`scripts/start-gpu-service.ps1`、`tests/test_gpu_runtime_deployment_static.py`、`project-docs/features/gpu-runtime-deployment.md`、`WORKLOG.md`。
+- 验证：新增及相关 GPU runtime 脚本 PowerShell AST 解析通过，两条修改workflow的内嵌PowerShell block AST解析通过；全部17个workflow YAML解析通过；Python `compileall` 通过；ASR/GPU部署CI同款相关集合与GPU服务合约合计 `401 passed`、`2 subtests passed`（7个既有弃用警告）；缺失seed fail-closed冒烟通过；`git diff --check` 通过。
+- 待办/风险：candidate锁合并并通过CI后，需运行一次CUDA/S4U资格workflow并独立复核manifest、qualification、源码与wheel清单及freeze；只有成功后才能回填validated元数据。自动生产部署保持禁用，不进行promotion，不恢复生产GPU服务，不修改生产任务、全局依赖、模型缓存、数据库、Qdrant或防火墙；已取消run留下的部分resolver缓存不清理。
+
+### 17:10 — 隔离资格候选目录隔离
+
+- 完成：执行隔离 GPU runtime 矩阵。D 盘 resolver 成功解析并通过 `pip check`，选定 FlagEmbedding 1.4.0、transformers 4.55.4、tokenizers 0.21.4；资格 run 发现共享 release 目录复用了源码快照不一致的旧候选，完整性校验正确拒绝。将候选资格 workflow 的 runtime 根目录改为每次 run 独立的 D 盘路径，避免旧/损坏 release 被复用；生产部署的 deterministic release 路径保持不变。
+- 验证：本地 GPU runtime、部署和服务合约专项 `75 passed`；resolver run `31249656343` 成功；资格 run `31249859828` 在源码快照完整性阶段失败，未创建生产任务、未监听 8100、未修改全局依赖。
+- 待办/风险：需推送该 workflow 修复后重新运行候选资格；通过后再按独立 R3 审批回填 validated 元数据、promotion、恢复 GPU 服务并重跑 faster-whisper。未删除旧候选目录或清理生产备份。
+
+### 17:26 — 增强候选快照差异诊断
+
+- 完成：候选资格 run `31250213152` 已通过独立 D 盘构建和 `pip check`，但仍在源码快照完整性校验阶段失败；补充每个不一致文件的期望/实际长度与 SHA-256 输出，保持失败关闭，不放宽校验。
+- 验证：变更范围仅为 `scripts/qualify-gpu-runtime.ps1`、GPU runtime 静态测试和 `WORKLOG.md`；待本地测试、提交后重新运行隔离资格。
+- 待办/风险：本次仍不执行 promotion、生产任务恢复、全局依赖修改或 faster-whisper 资格验证。
+
+### 17:34 — 修复源码清单 JSON 序列化
+
+- 完成：根因确认为 Windows PowerShell 下源码清单写出格式错误，资格端读取到单个对象及 `System.Object[]` 字段，而不是条目数组；构建端改用显式 `ConvertTo-Json -InputObject @($sourceInventory)` 并保留严格 hash/长度校验。
+- 验证：待运行 GPU runtime 静态测试、PowerShell 解析和隔离资格重跑；不放宽完整性校验，不改生产服务。
+- 待办/风险：通过候选资格后才允许后续 validated/promotion 流程；此前失败 run 均未改生产任务或全局依赖。
+
+### 17:40 — 修复 Windows JSON 数组读取
+
+- 完成：确认 Windows PowerShell 通过管道读取 `source-files.sha256.json` 会把 JSON 数组包装为单个 `System.Object[]`；资格、promotion 和生产启动脚本统一改用 `ConvertFrom-Json -InputObject` 加 `Get-Content -Raw`，逐条恢复源码清单校验。
+- 验证：待本地专项测试与 PowerShell 解析后重新运行隔离 GPU runtime 资格；完整性校验仍保持 fail-closed。
+- 待办/风险：未执行 promotion、生产 GPU 服务恢复、全局依赖变更或 faster-whisper 资格验证。
+
+### 17:59 — 保留失败资格证据
+
+- 完成：最新隔离 run `31251430900` 已完成构建并进入 CUDA 资格，但主步骤失败后 artifact 上传被跳过，无法读取 FP16/FP32 尝试结果；将候选 release 路径提前写入 workflow 环境，并让证据上传使用 `always()`，确保失败也保留 qualification、manifest、源码清单和 freeze。
+- 验证：待本地专项测试、YAML/PowerShell 解析和隔离资格重跑；不改变资格门槛或生产 promotion。
+- 待办/风险：当前尚未证明任何 reranker precision 通过，生产 GPU 服务和全局依赖保持不变。
+
+## 2026-08-09
+
+### 01:54 — 修复 CUDA 资格依赖不兼容并改为两精度全通过门禁
+
+- 完成：定位资格 run `31252065215` 失败根因——`FlagEmbedding==1.4.0` 的 M3 加载路径向 `AutoModel.from_pretrained` 传入 `dtype`，该关键字自 `transformers` 4.56.0 才存在，而候选锁为 4.55.4，fp16/fp32 两次尝试都在 `embed_start` 以 `TypeError: XLMRobertaModel.__init__() got an unexpected keyword argument 'dtype'` 终止；真正的机制是解析约束 `tokenizers>=0.21,<0.22` 与 4.56 自身要求的 `>=0.22` 不相交，在 `transformers>=4.47,<5` 名义允许 4.56+ 的情况下静默封顶到 4.55.4，而 FlagEmbedding 元数据只声明 `transformers>=4.44.2,<6.0.0` 故 `pip check` 通过。解析器改为固定 `FlagEmbedding==1.4.0`、`transformers>=4.56,<5`、`tokenizers>=0.22,<0.23` 并逐项断言与拒绝 4.55.4/0.21.4；资格脚本去掉首个精度成功即 `break`，要求每种批准精度都到达 `stage=complete`，新增 `requested_precisions`/`qualified_precisions` 分别记录，`reranker_precision` 保持标量并确定性优先 fp16（promote 与 start 按单值消费，start 由 `-eq "fp16"` 推导 `RERANKER_USE_FP16`，改数组会静默失真）；修复 workflow 未上传 `qualification\fp16|fp32\stages.log`/`stderr.log` 的证据缺口。
+- 文件：`scripts/resolve-gpu-runtime.ps1`、`scripts/qualify-gpu-runtime.ps1`、`gpu_service/requirements.txt`、`requirements-gpu.txt`、`.github/workflows/repair-gpu-reranker-production.yml`、`tests/test_gpu_runtime_deployment_static.py`、`project-docs/features/gpu-runtime-deployment.md`、`WORKLOG.md`
+- 验证：两个 PowerShell 脚本解析检查通过；在 `Set-StrictMode -Version Latest` 下按五种精度结果组合验证门禁（`[fp16,fp32]`→qualified/fp16、`[fp32,fp16]`→qualified/fp16、`[fp16]`→失败并列出 fp32、`[fp32]`→失败并列出 fp16、`[]`→失败并列出两者），确认 `reranker_precision` 仍为 `String`、`isArray=False`、`-eq "fp16"` 为真；`pytest tests/test_gpu_runtime_deployment_static.py tests/test_asr_deployment_static.py tests/test_deploy_git_safety.py` 为 `1 failed, 59 passed, 2 subtests passed`。
+- 待办/风险：唯一失败项 `assert (4, 56) <= (4, 55)` 是方案预期结果——`gpu_service/runtime-lock.txt` 仍是旧的 4.55.4 闭包，只能由 GPU 主机上的解析 workflow 重新生成，不得手工改单行版本；需用户依次触发候选解析（`confirm_resolution=true`）、人工复核 `resolver-report.json`、原样替换锁并提交，再触发候选资格（`confirm_qualification=true`）并要求 `qualified_precisions` 同时包含 fp16 与 fp32。本次未回填 validated 元数据、未 promotion、未启动 GPU 服务、未改精度白名单、未删除失败 release，也未修复 `qualify-gpu-runtime.ps1:150-159` 的轮询竞态（本次未触发，属独立变更）。
+
+### 02:19 — 重新生成兼容 GPU 候选锁
+
+- 完成：候选解析 run `31270935478` 因 `production-asr` 环境保护拒绝非受保护分支而在分配 Runner 前失败，未接触 GPU 主机；先通过 PR `#108` 将已证明不兼容的 4.55.4/0.21.4 闭包撤销为 fail-closed `unvalidated` 空锁并以全绿 CI 合入受保护的 `master`。随后 run `31271343463` 从 merge commit `9830d2929dbec0c0b1a45da2595f1c6fcc2ba647` 完成隔离解析和 `pip check`，生成75项完整候选闭包：FlagEmbedding `1.4.0`、transformers `4.57.6`、tokenizers `0.22.2`、Torch `2.7.0+cu128`；锁与 freeze 原始 SHA-256 均为 `fa16678de682e389e0f5ca89b180b2c033404e5e077ff539b552f8cde0430f1a`。正式锁逐字节采用 artifact，元数据仅推进到 `candidate`，qualification字段保持空。
+- 文件：`gpu_service/runtime-lock.json`、`gpu_service/runtime-lock.txt`、`tests/test_gpu_runtime_deployment_static.py`、`project-docs/features/gpu-runtime-deployment.md`、`WORKLOG.md`。
+- 验证：PR `#108` 的7个 CI job全部通过；GPU/ASR/部署静态专项 `60 passed`；4个 GPU runtime PowerShell脚本 AST 与全部 workflow YAML 解析通过；resolver report为 `status=resolved`、`pip_check=passed`，75行均为完整唯一pin且不含4.55.4/0.21.4；正式锁与 artifact 的原始及规范化 SHA-256完全一致；`git diff --check` 通过。
+- 待办/风险：新闭包尚未执行 CUDA/S4U 双精度资格，不能回填 validated 元数据或恢复 GPU 服务；qualification 与 promotion 仍按独立 R3 执行。未改生产任务、8100监听、全局Python、模型缓存、数据库、Qdrant或环境保护规则。
+
+### 02:38 — 绑定 GPU 资格证据并准备 promotion
+
+- 完成：资格 run `31271874609` 在真实 CUDA/S4U 上以 FP16、FP32 均完成 Embedding 与 Reranker 加载/推理，`status=qualified`、`qualified_precisions=[fp16,fp32]`；将 `runtime-lock.json` 绑定该 run、`master` commit `3ff8c076c4637ab156281dbab7f6b3feac966685`、源码指纹 `9b147c448b9b22d15e41f8eae7409c5417c291fec0f8f3d67b47ad6a8bab2e79` 和锁 SHA `fa16678de682e389e0f5ca89b180b2c033404e5e077ff539b552f8cde0430f1a`，状态推进为 `validated`。
+- 文件：`gpu_service/runtime-lock.json`、`tests/test_gpu_runtime_deployment_static.py`、`WORKLOG.md`。
+- 验证：资格 workflow 成功并上传两种精度的 stages/stdout/stderr、manifest、qualification 和完整性清单；尚待本地专项测试、CI 与 production deployment。
+- 待办/风险：promotion 会备份并修改 GPU 任务、环境文件、release 指针和 8100 服务；现有 workflow 在 GPU 成功后还会连带部署 Ubuntu 应用。promotion 或健康/冒烟失败时由脚本恢复备份；当前尚无已知健康 release，首次失败只能保持离线状态。
+
+### 02:51 — 修复 validated release materialization
+
+- 完成：production run `31272624940` 首次失败于缺少 `GPU_MODEL_CACHE_SOURCE`，未分配生产 release；补齐已通过资格的离线模型缓存变量后，run `31272700448` 暴露部署流程缺陷：qualification release 位于 run-local `runtime\qualification\<run>\releases\<release-id>`，而 validated build 只查找确定性 `runtime\releases\<release-id>`，因此在停任务前 fail-closed。build 现严格寻找唯一匹配的 qualification release，校验 release ID、源码/锁/Torch/run 证据和双精度结果后 materialize 到确定性 release；导入时同步重写 manifest 的 release-local 路径；build 与 promote 两层均拒绝缺少完整 `qualified_precisions` 的证据。
+- 文件：`scripts/build-gpu-runtime.ps1`、`scripts/promote-gpu-runtime.ps1`、`tests/test_gpu_runtime_deployment_static.py`、`project-docs/features/gpu-runtime-deployment.md`、`WORKLOG.md`。
+- 验证：GPU/ASR/部署静态专项 `60 passed`；4 个 GPU runtime PowerShell 脚本 AST 解析通过；PR `#111` 的7个 CI job全部通过并已合入。production run `31273188815` 已成功 materialize qualification release，但因旧 manifest 绝对路径门禁失败，`deploy-app` 跳过且未确认生产切换；补丁后的本地专项测试、AST 与 `git diff --check` 通过。
+- 待办/风险：路径修复需通过后续 PR 合入后重跑 production promotion；成功后才会启动 GPU release 并连带部署 Ubuntu 应用，失败仍按既有备份回滚。当前 GPU 服务仍未恢复。

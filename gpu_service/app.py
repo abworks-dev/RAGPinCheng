@@ -10,7 +10,7 @@ from threading import Lock
 
 import torch
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request, status
+from fastapi import FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -19,6 +19,9 @@ from gpu_service.config import (
     EMBED_DIM,
     EMBED_MODEL,
     GPU_SERVICE_TOKEN,
+    GPU_RUNTIME_LOCK_SHA256,
+    GPU_RUNTIME_RELEASE_ID,
+    GPU_RUNTIME_SOURCE_FINGERPRINT,
     HOST,
     LOG_LEVEL,
     MAX_BATCH_SIZE,
@@ -166,8 +169,14 @@ async def log_requests(request: Request, call_next):
 
 # ── Routes ───────────────────────────────────────────────────────────────────
 
-@app.get("/health", response_model=HealthResponse)
-async def health():
+@app.get(
+    "/health",
+    response_model=HealthResponse,
+    responses={503: {"model": HealthResponse}},
+)
+async def health(response: Response):
+    if not _model_manager.is_loaded:
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
     return HealthResponse(
         status="ok" if _model_manager.is_loaded else "error",
         model_loaded=_model_manager.is_loaded,
@@ -187,6 +196,9 @@ async def model_info():
         transformers_version=transformers.__version__,
         torch_version=torch.__version__,
         device=_model_manager.device,
+        runtime_release_id=GPU_RUNTIME_RELEASE_ID,
+        runtime_source_fingerprint=GPU_RUNTIME_SOURCE_FINGERPRINT,
+        runtime_lock_sha256=GPU_RUNTIME_LOCK_SHA256,
     )
 
 
