@@ -2,5 +2,8 @@
 # Production promotion must use gpu_service/runtime-lock.json and
 # gpu_service/runtime-lock.txt; this file must never be installed globally.
 FlagEmbedding>=1.3.0,<2
-transformers>=4.44.2,<6
-tokenizers>=0.20,<1
+# Keep these bounds identical to gpu_service/requirements.txt: transformers
+# >= 4.56.0 provides the `dtype` keyword FlagEmbedding 1.4.0 requires, and
+# tokenizers must stay >=0.22,<0.23 or transformers is capped back at 4.55.4.
+transformers>=4.56,<5
+tokenizers>=0.22,<0.23

@@ -6,6 +6,8 @@
 
 仓库已经具备D盘隔离依赖解析、运行时构建、CUDA候选验证、不可变release promotion和任务回滚代码。R3-2B run `31245209423` 已通过手动官方wheel输入生成并复核75项精确依赖锁，`gpu_service/runtime-lock.json` 当前为 `candidate`；尚未完成CUDA/S4U资格，因此所有qualification字段仍为空且不能promotion。自动生产部署仍被外部禁用，尚未恢复GPU服务。
 
+该候选锁已在资格workflow run `31252065215` 上失败：`FlagEmbedding==1.4.0` 的M3加载路径向 `AutoModel.from_pretrained` 传入 `dtype`，该关键字自 `transformers` 4.56.0 才存在，而锁内为 `transformers==4.55.4`，fp16与fp32两次尝试都在 `embed_start` 阶段以 `TypeError: XLMRobertaModel.__init__() got an unexpected keyword argument 'dtype'` 终止。根因是解析约束 `tokenizers>=0.21,<0.22` 与 4.56 自身要求的 `tokenizers>=0.22` 不相交，因此在 `transformers>=4.47,<5` 名义允许4.56+的情况下仍被静默封顶到4.55.4；`pip check` 无法发现，因为FlagEmbedding元数据只声明 `transformers>=4.44.2,<6.0.0`。解析约束与资格门禁已按下文更新，`gpu_service/runtime-lock.txt` 仍是旧的4.55.4闭包，必须由GPU主机上的解析workflow重新生成，不得手工改单行版本。
+
 ## 入口与调用链
 
 ```text
@@ -72,10 +74,12 @@ ${PRODUCTION_REPO_PATH}\runtime\
 
 - CUDA可用；
 - BGE-M3 CUDA FP16加载和真实推理；
-- reranker CUDA FP16或CUDA FP32加载和真实推理；
+- reranker CUDA FP16与CUDA FP32**两种精度都**加载并完成真实推理；
 - 不存在CPU fallback；
 - 临时任务无论成功或失败都注销；
 - 资格结果绑定workflow run ID、源码指纹和依赖锁SHA-256。
+
+`qualify-gpu-runtime.ps1` 逐个执行 `allowed_reranker_precisions` 中的每种精度，不再在第一种成功后 `break`；`qualification.json` 以 `requested_precisions` 和 `qualified_precisions` 分别记录请求集合与实际到达 `stage=complete` 的集合。只有两者完全覆盖才判定 `qualified`，否则抛出并列出失败精度。`reranker_precision` 保持标量并确定性优先 `fp16`：`promote-gpu-runtime.ps1` 与 `start-gpu-service.ps1` 按单值消费该字段（start 由 `-eq "fp16"` 推导 `RERANKER_USE_FP16`），改成数组会让这些比较静默失真。
 
 `validation_status` 状态流为：
 
@@ -89,7 +93,7 @@ unvalidated → candidate → validated
 
 ### 候选锁解析
 
-`resolve-gpu-runtime-candidate.yml` 只接受人工确认的手动触发，在GPU Runner上使用 `${PRODUCTION_REPO_PATH}\runtime\resolver\<run-id>-<attempt>` 下的隔离venv、TEMP、pip cache和输出。解析约束固定为CUDA `torch==2.7.0+cu128`、`FlagEmbedding>=1.3,<2`、`transformers>=4.47,<5`、`tokenizers>=0.21,<0.22`以及现有FastAPI运行依赖；已证明崩溃的 `transformers==4.46.3` / `tokenizers==0.20.3` 不具备候选资格。Torch不再从 Helios 联网解析，而是只接受上节所述的官方 wheel seed；其余完整依赖闭包继续通过部署代理从已批准的清华镜像解析，禁止 `trusted-host` 或关闭证书校验。
+`resolve-gpu-runtime-candidate.yml` 只接受人工确认的手动触发，在GPU Runner上使用 `${PRODUCTION_REPO_PATH}\runtime\resolver\<run-id>-<attempt>` 下的隔离venv、TEMP、pip cache和输出。解析约束固定为CUDA `torch==2.7.0+cu128`、`FlagEmbedding==1.4.0`、`transformers>=4.56,<5`、`tokenizers>=0.22,<0.23`以及现有FastAPI运行依赖；解析后还会逐项断言这三个版本落在批准范围内，并拒绝已证明崩溃的 `transformers==4.46.3` / `tokenizers==0.20.3` 与资格失败的 `transformers==4.55.4` / `tokenizers==0.21.4`。FlagEmbedding固定为精确版本，因为结论只针对1.4.0的加载调用；另一个1.x可能改变该调用，届时测试的就不是本次确认过的组合。`tokenizers` 上界必须与 `transformers` 自身的pin一致，否则会重现4.55.4封顶。Torch不再从 Helios 联网解析，而是只接受上节所述的官方 wheel seed；其余完整依赖闭包继续通过部署代理从已批准的清华镜像解析，禁止 `trusted-host` 或关闭证书校验。
 
 模型缓存源优先使用已配置的 `GPU_MODEL_CACHE_SOURCE`；未配置时，只在仓库既有缓存位置和 `C:\Users\<profile>\.cache\huggingface` 的有限候选集中寻找同时包含BGE-M3与reranker完整离线快照的唯一根目录。零个或多个匹配均fail-closed，不读取 `.env`、不递归搜索整盘，也不下载或修改模型。资格成功后workflow上传manifest、qualification、源码与wheel清单及freeze，供validated元数据提交前独立复核。
 

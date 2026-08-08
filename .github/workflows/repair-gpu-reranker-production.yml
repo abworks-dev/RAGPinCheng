@@ -116,5 +116,11 @@ jobs:
             ${{ env.GPU_CANDIDATE_RELEASE_ROOT }}\source-files.sha256.json
             ${{ env.GPU_CANDIDATE_RELEASE_ROOT }}\wheelhouse.sha256.json
             ${{ env.GPU_CANDIDATE_RELEASE_ROOT }}\pip-freeze.txt
+            ${{ env.GPU_CANDIDATE_RELEASE_ROOT }}\qualification\fp16\stages.log
+            ${{ env.GPU_CANDIDATE_RELEASE_ROOT }}\qualification\fp16\stdout.log
+            ${{ env.GPU_CANDIDATE_RELEASE_ROOT }}\qualification\fp16\stderr.log
+            ${{ env.GPU_CANDIDATE_RELEASE_ROOT }}\qualification\fp32\stages.log
+            ${{ env.GPU_CANDIDATE_RELEASE_ROOT }}\qualification\fp32\stdout.log
+            ${{ env.GPU_CANDIDATE_RELEASE_ROOT }}\qualification\fp32\stderr.log
           if-no-files-found: error
           retention-days: 30
