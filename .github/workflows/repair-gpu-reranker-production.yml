@@ -39,10 +39,6 @@ jobs:
           if (-not [Convert]::ToBoolean("${{ inputs.confirm_qualification }}")) {
             throw "confirm_qualification must be explicitly enabled"
           }
-          if ([string]::IsNullOrWhiteSpace($env:GPU_MODEL_CACHE_SOURCE)) {
-            throw "GPU_MODEL_CACHE_SOURCE is required"
-          }
-
           Set-Location $env:REPO_PATH
           $basic = [Convert]::ToBase64String(
             [Text.Encoding]::ASCII.GetBytes("x-access-token:$env:GIT_TOKEN")
@@ -68,9 +64,16 @@ jobs:
             throw "Candidate repository HEAD mismatch"
           }
 
+          $modelCacheSource = & "${env:REPO_PATH}\scripts\resolve-gpu-model-cache-source.ps1" `
+            -RepositoryPath $env:REPO_PATH `
+            -ConfiguredPath $env:GPU_MODEL_CACHE_SOURCE
+          if (@($modelCacheSource).Count -ne 1) {
+            throw "GPU model cache source resolution did not return exactly one path"
+          }
+
           & "${env:REPO_PATH}\scripts\snapshot-gpu-runtime.ps1" `
             -RepositoryPath $env:REPO_PATH `
-            -ModelCacheSource $env:GPU_MODEL_CACHE_SOURCE `
+            -ModelCacheSource $modelCacheSource `
             -BackupRoot $env:BACKUP_DIR
 
           $fingerprint = & "${env:REPO_PATH}\scripts\get-gpu-runtime-fingerprint.ps1" `
@@ -78,7 +81,7 @@ jobs:
           & "${env:REPO_PATH}\scripts\build-gpu-runtime.ps1" `
             -RepositoryPath $env:REPO_PATH `
             -RuntimeRoot $env:RUNTIME_ROOT `
-            -ModelCacheSource $env:GPU_MODEL_CACHE_SOURCE `
+            -ModelCacheSource $modelCacheSource `
             -CommitSha $env:DEPLOY_COMMIT_SHA `
             -SourceFingerprint $fingerprint
 
@@ -94,4 +97,18 @@ jobs:
             -QualificationRunId "${{ github.run_id }}"
 
           $result = Get-Content (Join-Path $releaseRoot "qualification.json") -Encoding UTF8 | ConvertFrom-Json
+          "GPU_CANDIDATE_RELEASE_ROOT=$releaseRoot" | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding UTF8
           Write-Host "GPU_RUNTIME_CANDIDATE status=$($result.status) device=$($result.device) reranker_precision=$($result.reranker_precision) source_fingerprint=$fingerprint lock_sha256=$lockHash qualification_run_id=${{ github.run_id }}"
+
+      - name: Upload candidate qualification evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpu-runtime-qualification-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ env.GPU_CANDIDATE_RELEASE_ROOT }}\runtime-manifest.json
+            ${{ env.GPU_CANDIDATE_RELEASE_ROOT }}\qualification.json
+            ${{ env.GPU_CANDIDATE_RELEASE_ROOT }}\source-files.sha256.json
+            ${{ env.GPU_CANDIDATE_RELEASE_ROOT }}\wheelhouse.sha256.json
+            ${{ env.GPU_CANDIDATE_RELEASE_ROOT }}\pip-freeze.txt
+          if-no-files-found: error
+          retention-days: 30

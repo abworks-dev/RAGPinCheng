@@ -2558,7 +2558,7 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 
 ### 11:40 — 执行 R3-2B GPU 候选资格
 
-- 完成：新增受人工确认保护的 GPU runtime 候选锁解析入口；在生产 GPU Runner 上先验证 Python 3.10、D 盘剩余空间、模型缓存源及生产任务/8100 均符合隔离前提，再仅在 D 盘 run-local venv、TEMP 与 pip cache 中解析固定 CUDA 候选约束、执行 `pip check`，上传完整精确锁、freeze、resolver report 与不含本机路径的 preflight 证据。解析器不加载或下载模型、不写正式锁、不修改全局 Python，发现生产任务或监听端口时直接失败且不自动处理。
-- 文件：`.github/workflows/resolve-gpu-runtime-candidate.yml`、`scripts/resolve-gpu-runtime.ps1`、`tests/test_gpu_runtime_deployment_static.py`、`project-docs/features/gpu-runtime-deployment.md`、`WORKLOG.md`。
-- 验证：新增脚本及相关 GPU runtime 脚本 PowerShell AST 解析通过；全部 17 个 workflow YAML 解析通过；Python `compileall` 通过；ASR/GPU 部署 CI 同款测试集合 `372 passed`、`2 subtests passed`（2 个既有弃用警告）；`git diff --check` 通过。
+- 完成：新增受人工确认保护的 GPU runtime 候选锁解析入口；在生产 GPU Runner 上先验证 Python 3.10、D 盘剩余空间、模型缓存源及生产任务/8100 均符合隔离前提，再仅在 D 盘 run-local venv、TEMP 与 pip cache 中解析固定 CUDA 候选约束、执行 `pip check`，上传完整精确锁、freeze、resolver report 与不含本机路径的 preflight 证据。首个解析run在任何安装前证明仓库变量缺失，随后补充有限候选集、双模型快照、唯一匹配的只读缓存发现器，并让资格workflow上传独立可复核的manifest、qualification与清单证据；发现零个/多个缓存、生产任务或监听端口时均直接失败且不自动处理。
+- 文件：`.github/workflows/resolve-gpu-runtime-candidate.yml`、`.github/workflows/repair-gpu-reranker-production.yml`、`scripts/resolve-gpu-model-cache-source.ps1`、`scripts/resolve-gpu-runtime.ps1`、`tests/test_gpu_runtime_deployment_static.py`、`project-docs/features/gpu-runtime-deployment.md`、`WORKLOG.md`。
+- 验证：新增脚本及相关 GPU runtime 脚本 PowerShell AST 解析通过；全部 17 个 workflow YAML 解析通过；Python `compileall` 通过；ASR/GPU 部署 CI 同款测试集合 `373 passed`、`2 subtests passed`（2 个既有弃用警告）；`git diff --check` 通过。
 - 待办/风险：需合并解析入口并在受控 Runner 上生成、下载和人工复核候选锁；锁提交为 `candidate` 后才能构建并执行 CUDA/S4U 资格验证。自动生产部署保持禁用，不进行promotion，不恢复生产GPU服务，不修改生产任务、全局依赖、模型缓存、数据库、Qdrant或防火墙。
