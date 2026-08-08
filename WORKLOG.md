@@ -2678,3 +2678,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`.github/workflows/repair-gpu-reranker-production.yml`、`tests/test_gpu_runtime_deployment_static.py`、`WORKLOG.md`
 - 验证：GPU runtime 静态专项 `14 passed`；PowerShell builder AST 解析通过；`git diff --check` 通过。
 - 待办/风险：该 workflow 修改尚未推送/合入 master；合入后必须同时传入 `confirm_qualification=true` 和 `suspend_production_service=true`，才允许临时停止并自动恢复当前 GPU 服务。
+
+### 04:58 — 对齐 GPU 维护窗口静态契约
+
+- 完成：根据 PR #119 CI 的唯一失败，更新 GPU candidate workflow 静态契约，明确要求维护窗口确认参数，并验证生产恢复仅在实际停止服务后于 `finally` 中执行。
+- 文件：`tests/test_asr_deployment_static.py`、`WORKLOG.md`
+- 验证：已定位失败测试和断言；当前 worktree 未安装 pytest，未安装依赖，专项 pytest 待 CI 复跑。
+- 待办/风险：需推送后等待 PR CI；CI 通过并合入 master 后，才执行已批准的生产服务临时停止、资格验证和自动恢复。
