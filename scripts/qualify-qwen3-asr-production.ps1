@@ -8,6 +8,12 @@ param(
     [string]$RunId,
     [Parameter(Mandatory = $true)]
     [string]$InternalWheelBundlePath,
+    [Parameter(Mandatory = $true)]
+    [string]$Oss2WheelBundlePath,
+    [Parameter(Mandatory = $true)]
+    [string]$Antlr4WheelBundlePath,
+    [Parameter(Mandatory = $true)]
+    [string]$CrcmodWheelBundlePath,
     [bool]$ExecuteQualification = $false,
     [string]$SummaryPath = "",
     [string]$DependencyDiagnosticPath = ""
@@ -553,7 +559,7 @@ function New-WheelManifest {
     param(
         [Parameter(Mandatory = $true)][string]$DownloadLog,
         [Parameter(Mandatory = $true)][string]$OutputPath,
-        [Parameter(Mandatory = $true)][object]$InternalManifest
+        [Parameter(Mandatory = $true)][object[]]$InternalManifests
     )
     $logText = Get-Content -LiteralPath $DownloadLog -Raw -Encoding UTF8
     $resolvedUrls = @(
@@ -561,17 +567,20 @@ function New-WheelManifest {
             ForEach-Object { $_.Value.TrimEnd(".", ",", ")", "]") }
     )
     $files = @()
-    $internalWheelRecorded = $false
+    $internalWheelRecorded = @{}
     foreach ($wheel in @(Get-ChildItem -LiteralPath $Wheelhouse -Filter "*.whl" -File | Sort-Object Name)) {
         $wheelSha256 = Get-Sha256 -Path $wheel.FullName
-        $isInternalWheel = $wheel.Name.Equals(
-            [string]$InternalManifest.wheel.file_name,
-            [StringComparison]::OrdinalIgnoreCase
-        )
-        if ($isInternalWheel) {
+        $internalManifest = @($InternalManifests | Where-Object {
+            $wheel.Name.Equals(
+                [string]$_.wheel.file_name,
+                [StringComparison]::OrdinalIgnoreCase
+            )
+        } | Select-Object -First 1)
+        if ($internalManifest.Count -eq 1) {
+            $controlled = $internalManifest[0]
             if (
-                [int64]$wheel.Length -ne [int64]$InternalManifest.wheel.size_bytes -or
-                $wheelSha256 -ne [string]$InternalManifest.wheel.sha256
+                [int64]$wheel.Length -ne [int64]$controlled.wheel.size_bytes -or
+                $wheelSha256 -ne [string]$controlled.wheel.sha256
             ) {
                 throw "Controlled internal wheel changed before wheelhouse recording"
             }
@@ -579,9 +588,9 @@ function New-WheelManifest {
                 file_name = $wheel.Name
                 size_bytes = [int64]$wheel.Length
                 sha256 = $wheelSha256
-                source_url = "internal://jieba/0.42.1/$wheelSha256"
+                source_url = "internal://$($controlled.package_name)/$($controlled.package_version)/$wheelSha256"
             }
-            $internalWheelRecorded = $true
+            $internalWheelRecorded[[string]$controlled.package_name] = $true
             continue
         }
         $url = $null
@@ -619,17 +628,23 @@ function New-WheelManifest {
     if ($files.Count -eq 0) {
         throw "Wheelhouse is empty"
     }
-    if (-not $internalWheelRecorded) {
-        throw "Controlled internal wheel was not resolved into the wheelhouse"
+    foreach ($internalManifest in @($InternalManifests)) {
+        $packageName = [string]$internalManifest.package_name
+        if (-not $internalWheelRecorded.ContainsKey($packageName)) {
+            throw "Controlled internal wheel was not resolved into the wheelhouse: $packageName"
+        }
     }
     $manifest = [ordered]@{
-        schema_version = "qwen3-asr-wheel-manifest/1"
+        schema_version = "qwen3-asr-wheel-manifest/2"
         indexes = @(
             "https://pypi.org/simple",
             "https://download.pytorch.org/whl/cu128"
         )
-        internal_wheel_manifest_sha256 = Get-Sha256 -Path (
-            Join-Path $ResolvedInternalWheelBundle "internal-wheel-manifest.json"
+        internal_wheel_manifest_sha256 = @(
+            Get-Sha256 -Path (Join-Path $ResolvedInternalWheelBundle "internal-wheel-manifest.json")
+            Get-Sha256 -Path (Join-Path $ResolvedOss2WheelBundle "internal-wheel-manifest.json")
+            Get-Sha256 -Path (Join-Path $ResolvedAntlr4WheelBundle "internal-wheel-manifest.json")
+            Get-Sha256 -Path (Join-Path $ResolvedCrcmodWheelBundle "internal-wheel-manifest.json")
         )
         files = $files
     }
@@ -951,6 +966,9 @@ function Invoke-SanitizedResolverFallback {
         -not (Test-Path -LiteralPath $CombinedRequirements -PathType Leaf) -or
         -not (Test-Path -LiteralPath (Join-Path $EvidenceRoot "production-freeze.txt") -PathType Leaf) -or
         -not (Test-Path -LiteralPath $ResolvedInternalWheelBundle -PathType Container) -or
+        -not (Test-Path -LiteralPath $ResolvedOss2WheelBundle -PathType Container) -or
+        -not (Test-Path -LiteralPath $ResolvedAntlr4WheelBundle -PathType Container) -or
+        -not (Test-Path -LiteralPath $ResolvedCrcmodWheelBundle -PathType Container) -or
         -not (Test-Path -LiteralPath $SharedWheelSeed -PathType Container)
     ) {
         return $result
@@ -980,6 +998,9 @@ function Invoke-SanitizedResolverFallback {
                     "--index-url", "https://pypi.org/simple",
                     "--extra-index-url", "https://download.pytorch.org/whl/cu128",
                     "--find-links", $ResolvedInternalWheelBundle,
+                    "--find-links", $ResolvedOss2WheelBundle,
+                    "--find-links", $ResolvedAntlr4WheelBundle,
+                    "--find-links", $ResolvedCrcmodWheelBundle,
                     "--find-links", $SharedWheelSeed,
                     "--constraint", (Join-Path $EvidenceRoot "production-freeze.txt"),
                     "--requirement", $CombinedRequirements
@@ -1200,9 +1221,27 @@ $ResolvedSource = (Resolve-Path -LiteralPath $SourceRoot).Path
 $ResolvedInternalWheelBundle = (
     Resolve-Path -LiteralPath $InternalWheelBundlePath -ErrorAction Stop
 ).Path
+$ResolvedOss2WheelBundle = (
+    Resolve-Path -LiteralPath $Oss2WheelBundlePath -ErrorAction Stop
+).Path
+$ResolvedAntlr4WheelBundle = (
+    Resolve-Path -LiteralPath $Antlr4WheelBundlePath -ErrorAction Stop
+).Path
+$ResolvedCrcmodWheelBundle = (
+    Resolve-Path -LiteralPath $CrcmodWheelBundlePath -ErrorAction Stop
+).Path
 if (
     -not (Test-Path -LiteralPath $ResolvedInternalWheelBundle -PathType Container) -or
+    -not (Test-Path -LiteralPath $ResolvedOss2WheelBundle -PathType Container) -or
+    -not (Test-Path -LiteralPath $ResolvedAntlr4WheelBundle -PathType Container) -or
+    -not (Test-Path -LiteralPath $ResolvedCrcmodWheelBundle -PathType Container) -or
     ((Get-Item -LiteralPath $ResolvedInternalWheelBundle).Attributes -band
+        [System.IO.FileAttributes]::ReparsePoint) -or
+    ((Get-Item -LiteralPath $ResolvedOss2WheelBundle).Attributes -band
+        [System.IO.FileAttributes]::ReparsePoint) -or
+    ((Get-Item -LiteralPath $ResolvedAntlr4WheelBundle).Attributes -band
+        [System.IO.FileAttributes]::ReparsePoint) -or
+    ((Get-Item -LiteralPath $ResolvedCrcmodWheelBundle).Attributes -band
         [System.IO.FileAttributes]::ReparsePoint)
 ) {
     throw "Controlled internal wheel bundle must be a real directory"
@@ -1216,6 +1255,16 @@ if (
         $ResolvedSource.TrimEnd("\") + "\",
         [System.StringComparison]::OrdinalIgnoreCase
     )
+) {
+    throw "Controlled internal wheel bundle must be outside the checkout"
+}
+if (
+    $ResolvedOss2WheelBundle.Equals($ResolvedSource, [System.StringComparison]::OrdinalIgnoreCase) -or
+    $ResolvedOss2WheelBundle.StartsWith($ResolvedSource.TrimEnd("\") + "\", [System.StringComparison]::OrdinalIgnoreCase) -or
+    $ResolvedAntlr4WheelBundle.Equals($ResolvedSource, [System.StringComparison]::OrdinalIgnoreCase) -or
+    $ResolvedAntlr4WheelBundle.StartsWith($ResolvedSource.TrimEnd("\") + "\", [System.StringComparison]::OrdinalIgnoreCase) -or
+    $ResolvedCrcmodWheelBundle.Equals($ResolvedSource, [System.StringComparison]::OrdinalIgnoreCase) -or
+    $ResolvedCrcmodWheelBundle.StartsWith($ResolvedSource.TrimEnd("\") + "\", [System.StringComparison]::OrdinalIgnoreCase)
 ) {
     throw "Controlled internal wheel bundle must be outside the checkout"
 }
@@ -1270,6 +1319,22 @@ try {
             "--run-id", $RunId
         ) `
         -LogPath $InternalWheelValidationLog
+    foreach ($controlled in @(
+        [pscustomobject]@{ Script = "build_internal_oss2_wheel.py"; Bundle = $ResolvedOss2WheelBundle; Log = "oss2-wheel-validation.log" },
+        [pscustomobject]@{ Script = "build_internal_antlr4_wheel.py"; Bundle = $ResolvedAntlr4WheelBundle; Log = "antlr4-wheel-validation.log" },
+        [pscustomobject]@{ Script = "build_internal_crcmod_wheel.py"; Bundle = $ResolvedCrcmodWheelBundle; Log = "crcmod-wheel-validation.log" }
+    )) {
+        Invoke-External `
+            -FilePath $MachinePython `
+            -Arguments @(
+                (Join-Path $ResolvedSource "scripts\$($controlled.Script)"),
+                "validate",
+                "--bundle-dir", $controlled.Bundle,
+                "--commit-sha", $CommitSha.ToLowerInvariant(),
+                "--run-id", $RunId
+            ) `
+            -LogPath (Join-Path $LogRoot $controlled.Log)
+    }
     $InternalWheelManifestPath = Join-Path (
         $ResolvedInternalWheelBundle
     ) "internal-wheel-manifest.json"
@@ -1278,6 +1343,9 @@ try {
         -Raw `
         -Encoding UTF8 |
         ConvertFrom-Json
+    $Oss2WheelManifest = Get-Content -LiteralPath (Join-Path $ResolvedOss2WheelBundle "internal-wheel-manifest.json") -Raw -Encoding UTF8 | ConvertFrom-Json
+    $Antlr4WheelManifest = Get-Content -LiteralPath (Join-Path $ResolvedAntlr4WheelBundle "internal-wheel-manifest.json") -Raw -Encoding UTF8 | ConvertFrom-Json
+    $CrcmodWheelManifest = Get-Content -LiteralPath (Join-Path $ResolvedCrcmodWheelBundle "internal-wheel-manifest.json") -Raw -Encoding UTF8 | ConvertFrom-Json
     $ProductionPython = "${PRODUCTION_SERVICE_ROOT}\RAGPinCheng-ASR\venv\Scripts\python.exe"
     if (-not (Test-Path -LiteralPath $ProductionPython -PathType Leaf)) {
         throw "Production ASR venv Python is missing"
@@ -1423,6 +1491,9 @@ try {
                 "--index-url", "https://pypi.org/simple",
                 "--extra-index-url", "https://download.pytorch.org/whl/cu128",
                 "--find-links", $ResolvedInternalWheelBundle,
+                "--find-links", $ResolvedOss2WheelBundle,
+                "--find-links", $ResolvedAntlr4WheelBundle,
+                "--find-links", $ResolvedCrcmodWheelBundle,
                 "--find-links", $SharedWheelSeed,
                 "--constraint", (Join-Path $EvidenceRoot "production-freeze.txt"),
                 "--requirement", $CombinedRequirements
@@ -1442,7 +1513,12 @@ try {
     $WheelManifest = New-WheelManifest `
         -DownloadLog $DownloadLog `
         -OutputPath (Join-Path $EvidenceRoot "wheel-manifest.json") `
-        -InternalManifest $InternalWheelManifest
+        -InternalManifests @(
+            $InternalWheelManifest,
+            $Oss2WheelManifest,
+            $Antlr4WheelManifest,
+            $CrcmodWheelManifest
+        )
     Assert-WheelManifestUnchanged -Manifest $WheelManifest
     $SharedCacheMaterial = [ordered]@{
         schema_version = "qwen3-asr-shared-wheel-key/1"
