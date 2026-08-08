@@ -112,3 +112,14 @@ jobs:
           done
           git merge --ff-only "${DEPLOY_COMMIT_SHA}"
           bash "${REPO_PATH}/scripts/deploy-app.sh"
+
+  cleanup-after-deploy:
+    if: ${{ needs.deploy-gpu.result == 'success' && needs.deploy-app.result == 'success' }}
+    needs: [deploy-gpu, deploy-app]
+    uses: ./.github/workflows/cleanup-production.yml
+    with:
+      target: backups
+      apply: true
+      confirm_production_cleanup: true
+      reason: post-deploy
+    secrets: inherit
