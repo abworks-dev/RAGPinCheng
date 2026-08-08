@@ -2568,3 +2568,9 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 完成：执行隔离 GPU runtime 矩阵。D 盘 resolver 成功解析并通过 `pip check`，选定 FlagEmbedding 1.4.0、transformers 4.55.4、tokenizers 0.21.4；资格 run 发现共享 release 目录复用了源码快照不一致的旧候选，完整性校验正确拒绝。将候选资格 workflow 的 runtime 根目录改为每次 run 独立的 D 盘路径，避免旧/损坏 release 被复用；生产部署的 deterministic release 路径保持不变。
 - 验证：本地 GPU runtime、部署和服务合约专项 `75 passed`；resolver run `31249656343` 成功；资格 run `31249859828` 在源码快照完整性阶段失败，未创建生产任务、未监听 8100、未修改全局依赖。
 - 待办/风险：需推送该 workflow 修复后重新运行候选资格；通过后再按独立 R3 审批回填 validated 元数据、promotion、恢复 GPU 服务并重跑 faster-whisper。未删除旧候选目录或清理生产备份。
+
+### 17:26 — 增强候选快照差异诊断
+
+- 完成：候选资格 run `31250213152` 已通过独立 D 盘构建和 `pip check`，但仍在源码快照完整性校验阶段失败；补充每个不一致文件的期望/实际长度与 SHA-256 输出，保持失败关闭，不放宽校验。
+- 验证：变更范围仅为 `scripts/qualify-gpu-runtime.ps1`、GPU runtime 静态测试和 `WORKLOG.md`；待本地测试、提交后重新运行隔离资格。
+- 待办/风险：本次仍不执行 promotion、生产任务恢复、全局依赖修改或 faster-whisper 资格验证。
