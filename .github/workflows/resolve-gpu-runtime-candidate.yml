@@ -1,0 +1,95 @@
+name: Resolve GPU Runtime Candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_resolution:
+        description: Confirm D-drive isolated GPU runtime dependency resolution
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-gpu-exclusive
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    if: ${{ inputs.confirm_resolution == true }}
+    environment: production-asr
+    runs-on: [self-hosted, windows, production, gpu]
+    timeout-minutes: 60
+    env:
+      GPU_MODEL_CACHE_SOURCE: ${{ vars.GPU_MODEL_CACHE_SOURCE }}
+      REPO_PATH: ${PRODUCTION_REPO_PATH}
+      RESOLVER_ROOT: ${PRODUCTION_REPO_PATH}\runtime\resolver
+      RESOLVER_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+      RESOLVER_ARTIFACT_ROOT: ${PRODUCTION_REPO_PATH}\runtime\resolver\${{ github.run_id }}-${{ github.run_attempt }}\artifacts
+      GIT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      DEPLOY_COMMIT_SHA: ${{ github.sha }}
+      DEPLOY_HTTP_PROXY: ${{ vars.DEPLOY_HTTP_PROXY }}
+    steps:
+      - name: Resolve an exact isolated GPU runtime candidate
+        shell: powershell
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+          if (-not [Convert]::ToBoolean("${{ inputs.confirm_resolution }}")) {
+            throw "confirm_resolution must be explicitly enabled"
+          }
+          if ([string]::IsNullOrWhiteSpace($env:GPU_MODEL_CACHE_SOURCE)) {
+            throw "GPU_MODEL_CACHE_SOURCE is required"
+          }
+
+          Set-Location -LiteralPath $env:REPO_PATH
+          $basic = [Convert]::ToBase64String(
+            [Text.Encoding]::ASCII.GetBytes("x-access-token:$env:GIT_TOKEN")
+          )
+          $proxyArgs = @()
+          if ($env:DEPLOY_HTTP_PROXY) {
+            $proxyArgs = @("-c", "http.proxy=$env:DEPLOY_HTTP_PROXY")
+            $env:HTTP_PROXY = $env:DEPLOY_HTTP_PROXY
+            $env:HTTPS_PROXY = $env:DEPLOY_HTTP_PROXY
+          }
+          $fetched = $false
+          foreach ($attempt in 1..4) {
+            $gitArgs = @("-c", "http.version=HTTP/1.1") + $proxyArgs + @(
+              "-c", "http.extraHeader=AUTHORIZATION: basic $basic", "fetch",
+              "https://github.com/abworks-dev/RAGPinCheng.git", $env:DEPLOY_COMMIT_SHA
+            )
+            & git @gitArgs
+            if ($LASTEXITCODE -eq 0) { $fetched = $true; break }
+            if ($attempt -lt 4) { Start-Sleep -Seconds ([math]::Pow(2, $attempt)) }
+          }
+          if (-not $fetched) { throw "Candidate resolver fetch failed after 4 attempts" }
+          git merge --ff-only $env:DEPLOY_COMMIT_SHA
+          if ($LASTEXITCODE -ne 0) { throw "Candidate resolver fast-forward failed" }
+          if ((git rev-parse HEAD).Trim() -ne $env:DEPLOY_COMMIT_SHA) {
+            throw "Candidate resolver repository HEAD mismatch"
+          }
+
+          $global:LASTEXITCODE = 0
+          & "${env:REPO_PATH}\scripts\resolve-gpu-runtime.ps1" `
+            -RepositoryPath $env:REPO_PATH `
+            -ResolverRoot $env:RESOLVER_ROOT `
+            -RunId $env:RESOLVER_RUN_ID `
+            -ModelCacheSource $env:GPU_MODEL_CACHE_SOURCE `
+            -CommitSha $env:DEPLOY_COMMIT_SHA
+          if ($LASTEXITCODE -ne 0) {
+            throw "GPU runtime candidate resolution did not complete"
+          }
+
+      - name: Upload sanitized candidate lock evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpu-runtime-candidate-lock-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ env.RESOLVER_ARTIFACT_ROOT }}\runtime-lock-candidate.txt
+            ${{ env.RESOLVER_ARTIFACT_ROOT }}\pip-freeze.txt
+            ${{ env.RESOLVER_ARTIFACT_ROOT }}\resolver-report.json
+            ${{ env.RESOLVER_ARTIFACT_ROOT }}\preflight.json
+          if-no-files-found: error
+          retention-days: 14

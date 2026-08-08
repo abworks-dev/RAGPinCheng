@@ -4,11 +4,17 @@
 
 状态：部分实现。
 
-仓库已经具备D盘隔离运行时构建、CUDA候选验证、不可变release promotion和任务回滚代码，但 `gpu_service/runtime-lock.json` 当前为 `unvalidated`，`runtime-lock.txt` 为空。自动生产部署仍被外部禁用，尚未执行R3-2B生产候选验证或恢复GPU服务。
+仓库已经具备D盘隔离依赖解析、运行时构建、CUDA候选验证、不可变release promotion和任务回滚代码，但 `gpu_service/runtime-lock.json` 当前为 `unvalidated`，`runtime-lock.txt` 为空。自动生产部署仍被外部禁用，尚未执行R3-2B生产候选解析与验证或恢复GPU服务。
 
 ## 入口与调用链
 
 ```text
+手动候选解析workflow
+→ Python 3.10、D盘空间、模型缓存、生产任务/8100前检
+→ D盘run-local venv解析固定候选约束并执行pip check
+→ 上传精确依赖锁、freeze、resolver report和脱敏preflight
+→ 人工复核后将锁以candidate状态提交
+
 手动候选资格workflow
 → GPU源码指纹 + LF规范化requirements SHA-256
 → build-gpu-runtime.ps1
@@ -71,9 +77,15 @@ unvalidated → candidate → validated
 
 `runtime-lock.json` 的 `allowed_reranker_precisions` 不是可配置开关：精度白名单在 qualify、promote 和 start 中硬编码为CUDA `fp16`/`fp32`，构建脚本只校验该字段与硬编码集合完全一致，因此元数据无法放宽白名单，字段漂移会fail-closed。
 
+### 候选锁解析
+
+`resolve-gpu-runtime-candidate.yml` 只接受人工确认的手动触发，在GPU Runner上使用 `${PRODUCTION_REPO_PATH}\runtime\resolver\<run-id>-<attempt>` 下的隔离venv、TEMP、pip cache和输出。解析约束固定为CUDA `torch==2.7.0+cu128`、`FlagEmbedding>=1.3,<2`、`transformers>=4.47,<5`、`tokenizers>=0.21,<0.22`以及现有FastAPI运行依赖；已证明崩溃的 `transformers==4.46.3` / `tokenizers==0.20.3` 不具备候选资格。
+
+解析器不导入或加载模型，显式设置Hugging Face/Transformers离线模式，不修改全局Python，不使用 `--system-site-packages`，不写仓库中的正式锁。它只上传由索引包组成的完整 `name==version` 闭包、`pip check` 结果状态、固定约束和脱敏前检；原始pip日志保留在run-local目录且不上传。上传的锁仍须人工检查后才可作为 `candidate` 提交，解析成功本身不等于CUDA资格通过。
+
 ### R3-2B 前置条件
 
-`qualify-gpu-runtime.ps1` 在 TCP 8100 处于Listen或 `RAGPinCheng-GPU` 任务存在时拒绝执行，以避免候选与生产争用同一块GPU。因此产出首个候选release前必须先停止并注销生产GPU任务；这是需要单独审批的生产操作，不属于普通验收步骤。
+依赖解析器与 `qualify-gpu-runtime.ps1` 都在 TCP 8100 处于Listen或 `RAGPinCheng-GPU` 任务存在时拒绝执行，以避免候选工作与生产争用同一主机资源。它们不会自行停止服务或修改任务；若前检发现任一对象存在，必须按独立生产操作审批处理。
 
 ## 回滚
 
@@ -88,6 +100,7 @@ promotion前备份当前任务XML、GPU环境文件和release指针。新release
 - `/health` 在模型未加载时返回HTTP 503；既有ASR资格脚本（`qualify-faster-whisper-production.ps1`、`qualify-qwen3-asr-production.ps1`、`funasr_phase0/07_verify_bge.ps1`）用 `Invoke-RestMethod`/`Invoke-WebRequest` 读该端点，模型未加载时会抛HTTP异常而非命中脚本自有报错；均仍fail-closed，`src/providers.py` 只消费 `/model-info` 不受影响；
 - 应用部署必须同时验证GPU health和model-info契约；
 - 候选workflow不promotion、不修改全局包、不注册生产任务；
+- 候选解析workflow不加载或下载模型、不直接写正式锁，只产出待人工复核的证据artifact；
 - 当前文档不表示生产GPU服务已经恢复。
 
 ## 验证入口
