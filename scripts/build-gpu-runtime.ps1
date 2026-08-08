@@ -47,6 +47,18 @@ if ([string]$metadata.torch_index_url -ne "https://download.pytorch.org/whl/cu12
 if ($metadata.validation_status -notin @("candidate", "validated")) {
     throw "GPU runtime lock is not eligible for candidate construction"
 }
+# The precision whitelist is enforced by qualify/promote/start as a hardcoded
+# CUDA-only set.  Validate rather than consume the declared field so the lock
+# metadata can never widen it, and so a drifting declaration fails closed
+# instead of silently meaning nothing.
+$declaredPrecisions = @($metadata.allowed_reranker_precisions)
+if (
+    $declaredPrecisions.Count -ne 2 -or
+    $declaredPrecisions[0] -ne "fp16" -or
+    $declaredPrecisions[1] -ne "fp32"
+) {
+    throw "GPU runtime lock must declare exactly the approved CUDA reranker precisions fp16, fp32"
+}
 $requirementsPath = Join-Path (Split-Path $metadataPath) ([string]$metadata.requirements_file)
 if (-not (Test-Path -LiteralPath $requirementsPath -PathType Leaf)) {
     throw "GPU runtime requirements lock is missing"
@@ -117,7 +129,10 @@ if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
                 Set-Content -LiteralPath $manifestPath -Encoding UTF8
         }
         Write-Host "GPU_RUNTIME_BUILD status=reused release=$releaseRoot"
-        return
+        # Callers gate promotion on $LASTEXITCODE; signal success explicitly so a
+        # native command's exit code (robocopy returns 1 on a normal copy) cannot
+        # leak out of this script and fail a build that actually succeeded.
+        exit 0
     }
     throw "Existing GPU runtime release does not match its requested fingerprint"
 }
@@ -246,3 +261,4 @@ if ($LASTEXITCODE -gt 7) { throw "Unable to copy the model cache (robocopy exit 
     Set-Content -LiteralPath $manifestPath -Encoding UTF8
 
 Write-Host "GPU_RUNTIME_BUILD status=complete release=$releaseRoot"
+exit 0

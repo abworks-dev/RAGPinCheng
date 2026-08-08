@@ -130,6 +130,7 @@ function Invoke-SmokeTests {
 }
 
 $resolvedRuntimeRoot = [IO.Path]::GetFullPath($RuntimeRoot).TrimEnd('\') + '\'
+$promotionSucceeded = $false
 $resolvedRelease = [IO.Path]::GetFullPath($ReleaseRoot)
 if (-not $resolvedRelease.StartsWith(($resolvedRuntimeRoot + "releases\"), [StringComparison]::OrdinalIgnoreCase)) {
     throw "GPU release must be under the managed D: runtime root"
@@ -244,6 +245,9 @@ try {
     $current | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath $tempCurrent -Encoding UTF8
     Move-Item -LiteralPath $tempCurrent -Destination $CurrentReleasePath -Force
     Write-Host "GPU_RUNTIME_PROMOTION status=success release=$ReleaseRoot"
+    # deploy-gpu.ps1 gates on $LASTEXITCODE; the smoke tests above run cmdlets, so
+    # signal success explicitly rather than inheriting an unrelated exit code.
+    $promotionSucceeded = $true
 } catch {
     $failure = $_
     try { Stop-OwnedTaskAndListener } catch { Write-Warning "Unable to stop failed GPU release cleanly" }
@@ -269,3 +273,5 @@ try {
 } finally {
     Remove-Item -LiteralPath $tempEnv -Force -ErrorAction SilentlyContinue
 }
+if (-not $promotionSucceeded) { throw "GPU runtime promotion did not complete" }
+exit 0

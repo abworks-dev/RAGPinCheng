@@ -108,6 +108,47 @@ def test_automatic_deploy_is_gated_and_gpu_fingerprint_aware():
     assert "get-gpu-runtime-lock-hash.ps1" in deploy
 
 
+def test_declared_reranker_precisions_are_validated_not_widenable():
+    """allowed_reranker_precisions must not be a decorative field: the builder
+    validates it against the hardcoded CUDA-only set, so lock metadata can never
+    widen the precision whitelist (e.g. by adding a CPU or int8 mode)."""
+    metadata = json.loads(read("gpu_service/runtime-lock.json"))
+    build = read("scripts/build-gpu-runtime.ps1")
+    assert metadata["allowed_reranker_precisions"] == ["fp16", "fp32"]
+    assert "allowed_reranker_precisions" in build
+    assert "approved CUDA reranker precisions" in build
+
+
+def test_runtime_scripts_signal_success_without_leaking_native_exit_codes():
+    """build-gpu-runtime.ps1 copies the model cache with robocopy, which returns 1
+    on a normal successful copy.  Because the builder and promoter report failure
+    by throwing, a caller that inspected the inherited $LASTEXITCODE would treat a
+    fully successful build as failed and silently skip promotion.  Both scripts
+    must therefore end in an explicit `exit 0`, and the caller must reset
+    $LASTEXITCODE before every invocation."""
+    build = read("scripts/build-gpu-runtime.ps1")
+    promote = read("scripts/promote-gpu-runtime.ps1")
+    deploy = read("scripts/deploy-gpu.ps1")
+
+    # robocopy's success-with-copies exit code must stay tolerated, and must not
+    # be able to escape the builder as an apparent failure.
+    assert "robocopy.exe" in build
+    assert "-gt 7" in build
+    assert build.rstrip().endswith("exit 0")
+    assert "return\n    }" not in build
+    assert promote.rstrip().endswith("exit 0")
+    assert 'throw "GPU runtime promotion did not complete"' in promote
+
+    # The caller must not gate on a stale exit code from an earlier command.
+    assert "function Invoke-RuntimeScript" in deploy
+    assert deploy.count("$global:LASTEXITCODE = 0") >= 2
+    assert "Invoke-RuntimeScript -Failure \"GPU runtime construction failed\"" in deploy
+    assert "Invoke-RuntimeScript -Failure \"GPU runtime promotion failed\"" in deploy
+    # The old fragile pattern (bare call then LASTEXITCODE check) must be gone.
+    assert 'if ($LASTEXITCODE -ne 0) { throw "GPU runtime construction failed" }' not in deploy
+    assert 'if ($LASTEXITCODE -ne 0) { throw "GPU runtime promotion failed" }' not in deploy
+
+
 def test_promotion_only_consumes_prequalified_immutable_release():
     promote = read("scripts/promote-gpu-runtime.ps1")
     start = read("scripts/start-gpu-service.ps1")

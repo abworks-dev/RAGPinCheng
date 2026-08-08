@@ -37,6 +37,21 @@ function Invoke-GitFetch {
     throw "git fetch failed after 4 attempts"
 }
 
+function Invoke-RuntimeScript {
+    # Runs a repository script that reports failure by throwing and success by
+    # exiting 0.  Never inspects a stale $LASTEXITCODE: a script whose last
+    # native command legitimately returns non-zero (robocopy exits 1 on a normal
+    # copy) must not be reported as failed.
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][hashtable]$Arguments,
+        [Parameter(Mandatory)][string]$Failure
+    )
+    $global:LASTEXITCODE = 0
+    & $Path @Arguments
+    if ($LASTEXITCODE -ne 0) { throw "$Failure (exit $LASTEXITCODE)" }
+}
+
 if (-not (Test-Path -LiteralPath $RepositoryPath -PathType Container)) {
     throw "GPU repository is missing"
 }
@@ -58,6 +73,7 @@ if ($LASTEXITCODE -ne 0 -or $headAfter -ne $CommitSha.ToLowerInvariant()) {
     throw "Deployed HEAD mismatch: expected $CommitSha, found $headAfter"
 }
 
+$global:LASTEXITCODE = 0
 $fingerprint = & (Join-Path $RepositoryPath "scripts\get-gpu-runtime-fingerprint.ps1") `
     -RepositoryPath $RepositoryPath -Commit $CommitSha
 if ($LASTEXITCODE -ne 0 -or $fingerprint -notmatch '^[0-9a-f]{64}$') {
@@ -141,20 +157,24 @@ if ([string]::IsNullOrWhiteSpace($env:GPU_SERVICE_TOKEN)) {
     throw "GPU_SERVICE_TOKEN is required; refusing to generate or rotate it"
 }
 
-& (Join-Path $RepositoryPath "scripts\build-gpu-runtime.ps1") `
-    -RepositoryPath $RepositoryPath `
-    -RuntimeRoot $RuntimeRoot `
-    -ModelCacheSource $env:GPU_MODEL_CACHE_SOURCE `
-    -CommitSha $CommitSha `
-    -SourceFingerprint $fingerprint
-if ($LASTEXITCODE -ne 0) { throw "GPU runtime construction failed" }
+Invoke-RuntimeScript -Failure "GPU runtime construction failed" `
+    -Path (Join-Path $RepositoryPath "scripts\build-gpu-runtime.ps1") `
+    -Arguments @{
+        RepositoryPath = $RepositoryPath
+        RuntimeRoot = $RuntimeRoot
+        ModelCacheSource = $env:GPU_MODEL_CACHE_SOURCE
+        CommitSha = $CommitSha
+        SourceFingerprint = $fingerprint
+    }
 
-& (Join-Path $RepositoryPath "scripts\promote-gpu-runtime.ps1") `
-    -RepositoryPath $RepositoryPath `
-    -RuntimeRoot $RuntimeRoot `
-    -BackupDirectory $BackupDirectory `
-    -ReleaseRoot $releaseRoot `
-    -GpuServiceToken $env:GPU_SERVICE_TOKEN
-if ($LASTEXITCODE -ne 0) { throw "GPU runtime promotion failed" }
+Invoke-RuntimeScript -Failure "GPU runtime promotion failed" `
+    -Path (Join-Path $RepositoryPath "scripts\promote-gpu-runtime.ps1") `
+    -Arguments @{
+        RepositoryPath = $RepositoryPath
+        RuntimeRoot = $RuntimeRoot
+        BackupDirectory = $BackupDirectory
+        ReleaseRoot = $releaseRoot
+        GpuServiceToken = $env:GPU_SERVICE_TOKEN
+    }
 
 Write-Host "GPU_RUNTIME_DEPLOY status=promoted release=$releaseRoot"
