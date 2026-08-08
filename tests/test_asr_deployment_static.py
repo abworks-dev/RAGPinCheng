@@ -1060,6 +1060,41 @@ def test_qwen3_asr_qualification_is_manual_sha_bound_and_isolated():
     assert "production_services_modified = $false" in script
 
 
+def test_qwen3_asr_qualification_preserves_native_stderr_before_failing():
+    script = read("scripts/qualify-qwen3-asr-production.ps1")
+    invoke_external = script.split("function Invoke-External", 1)[1].split(
+        "function Assert-ExternalFailureCapture", 1
+    )[0]
+    capture_self_test = script.split(
+        "function Assert-ExternalFailureCapture", 1
+    )[1].split("function Write-PipFreeze", 1)[0]
+
+    assert "$previousPreference = $ErrorActionPreference" in invoke_external
+    assert '$ErrorActionPreference = "Continue"' in invoke_external
+    assert "finally {" in invoke_external
+    assert "$ErrorActionPreference = $previousPreference" in invoke_external
+    assert "$exitCode = $LASTEXITCODE" in invoke_external
+    assert "captured_line_count" in invoke_external
+    assert '"native_process_launch_failure"' in invoke_external
+    assert '"log_write_failure"' in invoke_external
+    assert '"native_exit"' in invoke_external
+    assert invoke_external.index("[System.IO.File]::WriteAllLines(") < invoke_external.index(
+        'if ($exitCode -ne 0)'
+    )
+
+    assert "r3-native-stderr-capture-ok" in capture_self_test
+    assert "raise SystemExit(23)" in capture_self_test
+    assert "exit code 23" in capture_self_test
+    assert "$ErrorActionPreference -ne $preferenceBefore" in capture_self_test
+    assert "$LastExternalCommandResult.exit_code -ne 23" in capture_self_test
+    assert "$LastExternalCommandResult.captured_line_count -lt 1" in capture_self_test
+    assert "did not preserve stderr" in capture_self_test
+    assert script.count("Assert-ExternalFailureCapture `") == 1
+    assert script.index("Assert-ExternalFailureCapture `") < script.index(
+        "$InternalWheelValidationLog ="
+    )
+
+
 def test_qwen3_asr_qualification_freezes_dual_models_bf16_and_result_flow():
     script = read("scripts/qualify-qwen3-asr-production.ps1")
     model = read("scripts/prepare_qwen3_asr_models.py")
@@ -1095,10 +1130,9 @@ def test_qwen3_asr_qualification_freezes_dual_models_bf16_and_result_flow():
     assert '"warmup-start"' in runner
     assert '"warmup-complete"' in runner
     assert '"sample-complete"' in runner
-    assert "function ConvertTo-WindowsCommandLineArgument" in script
-    assert "function ConvertTo-WindowsCommandLine" in script
-    assert "$argumentLine = ConvertTo-WindowsCommandLine -Arguments $Arguments" in script
-    assert "-ArgumentList $argumentLine" in script
+    assert "$output = @(& $FilePath @Arguments 2>&1)" in script
+    assert "$exitCode = $LASTEXITCODE" in script
+    assert "-ArgumentList $argumentLine" not in script
     assert "-ArgumentList $Arguments" not in script
 
 

@@ -61,6 +61,11 @@ $FailureCode = "unhandled_failure"
 $MachinePython = ""
 $DependencyFailureStage = "not_started"
 $DependencyFailureLog = ""
+$LastExternalCommandResult = [pscustomobject]@{
+    failure_origin = "not_started"
+    exit_code = $null
+    captured_line_count = 0
+}
 
 function Write-JsonFile {
     param(
@@ -178,6 +183,14 @@ function Get-MachinePython311 {
     throw "Machine-wide Python 3.11 was not found"
 }
 
+function Reset-ExternalCommandResult {
+    $script:LastExternalCommandResult = [pscustomobject]@{
+        failure_origin = "not_started"
+        exit_code = $null
+        captured_line_count = 0
+    }
+}
+
 function Invoke-External {
     param(
         [Parameter(Mandatory = $true)][string]$FilePath,
@@ -186,82 +199,63 @@ function Invoke-External {
         [int]$TimeoutSeconds = 3600,
         [int]$HeartbeatSeconds = 30
     )
+    Reset-ExternalCommandResult
+    $script:LastExternalCommandResult.failure_origin = "native_process_launch_failure"
+    $output = @()
+    $exitCode = -1
+    $launchFailed = $false
+    $startedAt = [DateTimeOffset]::Now
+    $previousPreference = $ErrorActionPreference
+    try {
+        # Windows PowerShell 5.1 can promote redirected native stderr to a
+        # terminating NativeCommandError when the caller uses Stop. Capture
+        # both streams first, then enforce the exit code explicitly.
+        $ErrorActionPreference = "Continue"
+        try {
+            $output = @(& $FilePath @Arguments 2>&1)
+            $exitCode = $LASTEXITCODE
+        } catch {
+            $launchFailed = $true
+        }
+    } finally {
+        $ErrorActionPreference = $previousPreference
+    }
+    $capturedLines = [string[]]@($output | ForEach-Object { [string]$_ })
+    $script:LastExternalCommandResult.captured_line_count = @($capturedLines).Count
     $stage = if (
         [string]::IsNullOrWhiteSpace($DependencyFailureStage) -or
         $DependencyFailureStage -eq "not_started"
-    ) {
-        "external"
-    } else {
-        $DependencyFailureStage
-    }
-    $stdoutPath = "$LogPath.stdout"
-    $stderrPath = "$LogPath.stderr"
-    $process = $null
-    try {
-        Write-Host "R3_STAGE stage=$stage status=start"
-        $argumentLine = ConvertTo-WindowsCommandLine -Arguments $Arguments
-        $process = Start-Process `
-            -FilePath $FilePath `
-            -ArgumentList $argumentLine `
-            -WindowStyle Hidden `
-            -RedirectStandardOutput $stdoutPath `
-            -RedirectStandardError $stderrPath `
-            -PassThru
-        $startedAt = [DateTimeOffset]::Now
-        $nextHeartbeat = $startedAt.AddSeconds($HeartbeatSeconds)
-        while (-not $process.HasExited) {
-            $now = [DateTimeOffset]::Now
-            if ($now -ge $nextHeartbeat) {
-                $stdoutBytes = if (Test-Path -LiteralPath $stdoutPath -PathType Leaf) {
-                    [int64](Get-Item -LiteralPath $stdoutPath).Length
-                } else { 0 }
-                $stderrBytes = if (Test-Path -LiteralPath $stderrPath -PathType Leaf) {
-                    [int64](Get-Item -LiteralPath $stderrPath).Length
-                } else { 0 }
-                Write-Host (
-                    "R3_EXTERNAL_HEARTBEAT stage={0} elapsed_ms={1} stdout_bytes={2} stderr_bytes={3}" -f
-                    $stage,
-                    [int64](($now - $startedAt).TotalMilliseconds),
-                    $stdoutBytes,
-                    $stderrBytes
-                )
-                $nextHeartbeat = $now.AddSeconds($HeartbeatSeconds)
-            }
-            if (($now - $startedAt).TotalSeconds -ge $TimeoutSeconds) {
-                try {
-                    $resolvedExecutable = (Get-Command $FilePath -ErrorAction Stop).Source
-                    Stop-OwnedProcess `
-                        -Process $process `
-                        -ExpectedExecutables @($resolvedExecutable) `
-                        -ExpectedCommandFragment ([System.IO.Path]::GetFileName($resolvedExecutable))
-                } catch {
-                    try { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue } catch {}
-                }
-                throw "External command timed out in stage $stage after $TimeoutSeconds seconds"
-            }
-            Start-Sleep -Seconds 1
-            $process.Refresh()
+    ) { "external" } else { $DependencyFailureStage }
+    Write-Host (
+        "R3_EXTERNAL_HEARTBEAT stage={0} elapsed_ms={1} captured_lines={2}" -f
+        $stage,
+        [int64](([DateTimeOffset]::Now - $startedAt).TotalMilliseconds),
+        $script:LastExternalCommandResult.captured_line_count
+    )
+    if (-not $launchFailed) {
+        $script:LastExternalCommandResult.exit_code = [int]$exitCode
+        $script:LastExternalCommandResult.failure_origin = if ($exitCode -eq 0) {
+            "none"
+        } else {
+            "native_exit"
         }
-        $exitCode = $process.ExitCode
-        $output = @(
-            @(Get-Content -LiteralPath $stdoutPath -Encoding UTF8 -ErrorAction SilentlyContinue) +
-            @(Get-Content -LiteralPath $stderrPath -Encoding UTF8 -ErrorAction SilentlyContinue)
-        )
+    }
+    try {
         [System.IO.File]::WriteAllLines(
             $LogPath,
-            [string[]]@($output | ForEach-Object { [string]$_ }),
+            $capturedLines,
             (New-Object System.Text.UTF8Encoding($false))
         )
     } catch {
-        if ($null -ne $process -and -not $process.HasExited) {
-            try { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue } catch {}
-        }
-        throw
+        $script:LastExternalCommandResult.failure_origin = "log_write_failure"
+        throw "External command output could not be recorded"
+    }
+    if ($launchFailed) {
+        throw "External command could not be launched"
     }
     if ($exitCode -ne 0) {
         throw "External command failed with exit code $exitCode; see $LogPath"
     }
-    Write-Host "R3_STAGE stage=$stage status=complete"
 }
 
 function Assert-ExternalFailureCapture {
@@ -291,6 +285,13 @@ function Assert-ExternalFailureCapture {
     }
     if ($ErrorActionPreference -ne $preferenceBefore) {
         throw "Native stderr capture self-test did not restore the error preference"
+    }
+    if (
+        $LastExternalCommandResult.failure_origin -ne "native_exit" -or
+        $LastExternalCommandResult.exit_code -ne 23 -or
+        $LastExternalCommandResult.captured_line_count -lt 1
+    ) {
+        throw "Native stderr capture self-test did not preserve structured command evidence"
     }
     $captured = @(
         Get-Content -LiteralPath $LogPath -Encoding UTF8 |
