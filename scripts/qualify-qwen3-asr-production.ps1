@@ -665,7 +665,7 @@ function Convert-ToSanitizedDependencyFailure {
     )
     $missingTargets = New-Object "System.Collections.Generic.HashSet[string]"
     $dependencyTargets = @{}
-    $constraintTargets = New-Object "System.Collections.Generic.HashSet[string]"
+    $constraintTargets = @{}
     $networkOrIndexFailure = $false
     $invalidRequirementInput = $false
     $constraintContractError = $false
@@ -692,18 +692,25 @@ function Convert-ToSanitizedDependencyFailure {
             $clean = [string]$Matches.message
         }
         if (
-            $clean -match '^(?<owner>[A-Za-z0-9_.-]+)\s+(?<owner_version>[A-Za-z0-9+_.-]+)\s+depends on\s+(?<package>[A-Za-z0-9_.-]+)(?<spec>(?:==|!=|<=|>=|~=|<|>).+)$'
+            $clean -match '^(?<owner>[A-Za-z0-9_.-]+)\s+(?<owner_version>[A-Za-z0-9+_.-]+)\s+depends on\s+(?<package>[A-Za-z0-9_.-]+)(?<spec>(?:==|!=|<=|>=|~=|<|>)[A-Za-z0-9+_.!*,~-]+)?$'
         ) {
             $target = Get-NormalizedPackageName -Name $Matches.package
-            $dependencyTargets[$target] = $true
+            $specifier = ""
+            if ($Matches.ContainsKey("spec")) {
+                $specifier = [string]$Matches.spec
+            }
+            $dependencyTargets[$target] = [pscustomobject]@{
+                Owner = Get-NormalizedPackageName -Name $Matches.owner
+                OwnerVersion = [string]$Matches.owner_version
+                Specifier = $specifier
+            }
             continue
         }
         if (
             $clean -match '^The user requested(?: \(constraint\))?\s+(?<package>[A-Za-z0-9_.-]+)(?<spec>(?:==|!=|<=|>=|~=|<|>)[A-Za-z0-9+_.!*,~-]+)$'
         ) {
-            [void]$constraintTargets.Add(
-                (Get-NormalizedPackageName -Name $Matches.package)
-            )
+            $target = Get-NormalizedPackageName -Name $Matches.package
+            $constraintTargets[$target] = "$target$($Matches.spec)"
             continue
         }
         if (
@@ -743,14 +750,21 @@ function Convert-ToSanitizedDependencyFailure {
             Stage = $Stage
             Kind = "binary_distribution_unavailable"
             Requirement = $target
+            Owner = ""
+            Specifier = ""
+            RequestedConstraint = ""
         }
     }
     foreach ($target in @($dependencyTargets.Keys | Sort-Object)) {
         if ($constraintTargets.Contains($target)) {
+            $dependency = $dependencyTargets[$target]
             return [pscustomobject]@{
                 Stage = $Stage
                 Kind = "version_constraint_conflict"
                 Requirement = $target
+                Owner = "$($dependency.Owner)==$($dependency.OwnerVersion)"
+                Specifier = [string]$dependency.Specifier
+                RequestedConstraint = [string]$constraintTargets[$target]
             }
         }
     }
@@ -759,6 +773,9 @@ function Convert-ToSanitizedDependencyFailure {
             Stage = $Stage
             Kind = "invalid_requirement_input"
             Requirement = ""
+            Owner = ""
+            Specifier = ""
+            RequestedConstraint = ""
         }
     }
     if ($constraintContractError) {
@@ -766,6 +783,9 @@ function Convert-ToSanitizedDependencyFailure {
             Stage = $Stage
             Kind = "constraint_contract_error"
             Requirement = ""
+            Owner = ""
+            Specifier = ""
+            RequestedConstraint = ""
         }
     }
     if ($diskSpaceFailure) {
@@ -773,6 +793,9 @@ function Convert-ToSanitizedDependencyFailure {
             Stage = $Stage
             Kind = "disk_space_failure"
             Requirement = ""
+            Owner = ""
+            Specifier = ""
+            RequestedConstraint = ""
         }
     }
     if ($filesystemOrPermissionFailure) {
@@ -780,6 +803,9 @@ function Convert-ToSanitizedDependencyFailure {
             Stage = $Stage
             Kind = "filesystem_or_permission_failure"
             Requirement = ""
+            Owner = ""
+            Specifier = ""
+            RequestedConstraint = ""
         }
     }
     if ($resolverConflictFailure) {
@@ -787,6 +813,9 @@ function Convert-ToSanitizedDependencyFailure {
             Stage = $Stage
             Kind = "version_constraint_conflict"
             Requirement = ""
+            Owner = ""
+            Specifier = ""
+            RequestedConstraint = ""
         }
     }
     if ($networkOrIndexFailure) {
@@ -794,12 +823,18 @@ function Convert-ToSanitizedDependencyFailure {
             Stage = $Stage
             Kind = "network_or_index_failure"
             Requirement = ""
+            Owner = ""
+            Specifier = ""
+            RequestedConstraint = ""
         }
     }
     return [pscustomobject]@{
         Stage = $Stage
         Kind = "evidence_insufficient"
         Requirement = ""
+        Owner = ""
+        Specifier = ""
+        RequestedConstraint = ""
     }
 }
 
@@ -821,6 +856,10 @@ function Assert-DependencySanitizerSelfTest {
     $unmarkedConstraint = Convert-ToSanitizedDependencyFailure -Stage "pip_download" -Lines @(
         "funasr 1.4.1 depends on numpy<2",
         "The user requested numpy==2.0.0"
+    )
+    $bareDependencyConflict = Convert-ToSanitizedDependencyFailure -Stage "pip_download" -Lines @(
+        "funasr 1.4.1 depends on oss2",
+        "The user requested (constraint) oss2==2.19.1"
     )
     $network = Convert-ToSanitizedDependencyFailure -Stage "pip_download" -Lines @(
         "Could not fetch URL https://private.invalid/simple: connection error"
@@ -851,6 +890,11 @@ function Assert-DependencySanitizerSelfTest {
         $resolverConflict.Kind -ne "version_constraint_conflict" -or
         $unmarkedConstraint.Kind -ne "version_constraint_conflict" -or
         $unmarkedConstraint.Requirement -ne "numpy" -or
+        $bareDependencyConflict.Kind -ne "version_constraint_conflict" -or
+        $bareDependencyConflict.Requirement -ne "oss2" -or
+        $bareDependencyConflict.Owner -ne "funasr==1.4.1" -or
+        -not [string]::IsNullOrEmpty([string]$bareDependencyConflict.Specifier) -or
+        $bareDependencyConflict.RequestedConstraint -ne "oss2==2.19.1" -or
         $network.Kind -ne "network_or_index_failure" -or
         -not [string]::IsNullOrEmpty([string]$network.Requirement) -or
         $invalidInput.Kind -ne "invalid_requirement_input" -or
@@ -898,6 +942,9 @@ function Invoke-SanitizedResolverFallback {
         ExitCode = $null
         Kind = "resolver_replay_insufficient"
         Requirement = ""
+        Owner = ""
+        Specifier = ""
+        RequestedConstraint = ""
     }
     if (
         -not (Test-Path -LiteralPath $VenvPython -PathType Leaf) -or
@@ -968,6 +1015,9 @@ function Invoke-SanitizedResolverFallback {
     if ($diagnosis.Kind -ne "evidence_insufficient") {
         $result.Kind = [string]$diagnosis.Kind
         $result.Requirement = [string]$diagnosis.Requirement
+        $result.Owner = [string]$diagnosis.Owner
+        $result.Specifier = [string]$diagnosis.Specifier
+        $result.RequestedConstraint = [string]$diagnosis.RequestedConstraint
     }
     return $result
 }
@@ -987,12 +1037,18 @@ function Write-SanitizedDependencyFailure {
         Stage = $Stage
         Kind = "evidence_insufficient"
         Requirement = ""
+        Owner = ""
+        Specifier = ""
+        RequestedConstraint = ""
     }
     $fallback = [pscustomobject]@{
         Executed = $false
         ExitCode = $null
         Kind = "resolver_replay_insufficient"
         Requirement = ""
+        Owner = ""
+        Specifier = ""
+        RequestedConstraint = ""
     }
     try {
         $lines = @()
@@ -1013,15 +1069,27 @@ function Write-SanitizedDependencyFailure {
     if ($failureOrigin -eq "proxy_setup_failure") {
         $diagnosis.Kind = "proxy_setup_failure"
         $diagnosis.Requirement = ""
+        $diagnosis.Owner = ""
+        $diagnosis.Specifier = ""
+        $diagnosis.RequestedConstraint = ""
     } elseif ($failureOrigin -eq "proxy_restore_failure") {
         $diagnosis.Kind = "proxy_restore_failure"
         $diagnosis.Requirement = ""
+        $diagnosis.Owner = ""
+        $diagnosis.Specifier = ""
+        $diagnosis.RequestedConstraint = ""
     } elseif ($failureOrigin -eq "native_process_launch_failure") {
         $diagnosis.Kind = "native_process_launch_failure"
         $diagnosis.Requirement = ""
+        $diagnosis.Owner = ""
+        $diagnosis.Specifier = ""
+        $diagnosis.RequestedConstraint = ""
     } elseif ($failureOrigin -eq "log_write_failure") {
         $diagnosis.Kind = "filesystem_or_permission_failure"
         $diagnosis.Requirement = ""
+        $diagnosis.Owner = ""
+        $diagnosis.Specifier = ""
+        $diagnosis.RequestedConstraint = ""
     } elseif (
         $Stage -eq "pip_download" -and
         $Operation -eq "pip_download_command" -and
@@ -1032,13 +1100,19 @@ function Write-SanitizedDependencyFailure {
             $fallback = Invoke-SanitizedResolverFallback -Stage $Stage
             $diagnosis.Kind = [string]$fallback.Kind
             $diagnosis.Requirement = [string]$fallback.Requirement
+            $diagnosis.Owner = [string]$fallback.Owner
+            $diagnosis.Specifier = [string]$fallback.Specifier
+            $diagnosis.RequestedConstraint = [string]$fallback.RequestedConstraint
         } catch {
             $diagnosis.Kind = "resolver_replay_insufficient"
             $diagnosis.Requirement = ""
+            $diagnosis.Owner = ""
+            $diagnosis.Specifier = ""
+            $diagnosis.RequestedConstraint = ""
         }
     }
     $result = [ordered]@{
-        schema_version = "qwen3-asr-r3-dependency-failure/2"
+        schema_version = "qwen3-asr-r3-dependency-failure/3"
         status = "fail"
         failure_code = "dependency_preparation_failed"
         commit_sha = $CommitSha.ToLowerInvariant()
@@ -1050,6 +1124,9 @@ function Write-SanitizedDependencyFailure {
         captured_line_count = $originalExternalResult.captured_line_count
         diagnosis_kind = [string]$diagnosis.Kind
         affected_requirement = [string]$diagnosis.Requirement
+        dependency_owner = [string]$diagnosis.Owner
+        dependency_specifier = [string]$diagnosis.Specifier
+        requested_constraint = [string]$diagnosis.RequestedConstraint
         fallback_probe_executed = [bool]$fallback.Executed
         fallback_probe_exit_code = $fallback.ExitCode
         profile_admission = "disabled"
