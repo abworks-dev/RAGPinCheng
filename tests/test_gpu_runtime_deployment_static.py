@@ -11,17 +11,29 @@ def read(path: str) -> str:
     return (ROOT / path).read_text(encoding="utf-8")
 
 
-def test_runtime_lock_is_fail_closed_until_r3_2b():
+def test_runtime_lock_is_candidate_only_until_cuda_qualification():
     metadata = json.loads(read("gpu_service/runtime-lock.json"))
     requirements = read("gpu_service/runtime-lock.txt")
     assert metadata["schema_version"] == 1
-    assert metadata["validation_status"] == "unvalidated"
+    assert metadata["validation_status"] == "candidate"
     assert metadata["qualification_run_id"] is None
     assert metadata["source_commit"] is None
     assert metadata["qualified_source_fingerprint"] is None
     assert metadata["qualified_lock_sha256"] is None
-    assert metadata["torch_wheel_sha256"] is None
-    assert [line for line in requirements.splitlines() if line and not line.startswith("#")] == []
+    assert metadata["torch_wheel_sha256"] == (
+        "c52c4b869742f00b12cb34521d1381be6119fa46244791704b00cc4a3cb06850"
+    )
+    lock_lines = [
+        line for line in requirements.splitlines() if line and not line.startswith("#")
+    ]
+    assert len(lock_lines) == 75
+    assert all(line.count("==") == 1 for line in lock_lines)
+    assert "torch==2.7.0+cu128" in lock_lines
+    assert "FlagEmbedding==1.4.0" in lock_lines
+    assert "transformers==4.55.4" in lock_lines
+    assert "tokenizers==0.21.4" in lock_lines
+    assert "transformers==4.46.3" not in lock_lines
+    assert "tokenizers==0.20.3" not in lock_lines
 
 
 def test_known_bad_two_package_pin_is_not_a_production_contract():
