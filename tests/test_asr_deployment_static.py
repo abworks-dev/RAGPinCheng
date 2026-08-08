@@ -991,6 +991,11 @@ def test_qwen3_asr_qualification_freezes_dual_models_bf16_and_result_flow():
     assert '"warmup-start"' in runner
     assert '"warmup-complete"' in runner
     assert '"sample-complete"' in runner
+    assert "function ConvertTo-WindowsCommandLineArgument" in script
+    assert "function ConvertTo-WindowsCommandLine" in script
+    assert "$argumentLine = ConvertTo-WindowsCommandLine -Arguments $Arguments" in script
+    assert "-ArgumentList $argumentLine" in script
+    assert "-ArgumentList $Arguments" not in script
 
 
 def test_qwen3_asr_resolver_evidence_is_fixed_offline_and_sanitized():
