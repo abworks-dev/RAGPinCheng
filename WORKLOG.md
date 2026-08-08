@@ -2757,3 +2757,9 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`scripts/qualify-qwen3-asr-production.ps1`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`
 - 验证：PowerShell AST 解析、`git diff --check` 通过；未安装依赖、未启动服务。需 CI 通过后以新的完整 master SHA 重跑 Qwen R3。
 - 待办/风险：本次修复尚未提交、推送或触发 workflow；Profile admission 仍 disabled，生产服务未修改。
+
+### 07:56 — 增强 Qwen pip 来源证据
+
+- 完成：run `31284775742` 暴露 `accelerate-1.12.0` 的 wheel 已成功下载但默认 pip 输出缺少可绑定 URL；在主下载中启用 verbose pip 来源记录，继续由严格 wheel manifest、SHA-256 和 binary-only 门禁验证。
+- 文件：`scripts/qualify-qwen3-asr-production.ps1`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`
+- 验证：待本地 AST/静态检查及 PR CI；未安装依赖、未启动服务。Profile admission 仍 disabled，生产服务未修改。
