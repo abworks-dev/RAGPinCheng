@@ -452,6 +452,10 @@ def test_gpu_reranker_repair_is_replaced_by_candidate_only_qualification():
     assert "build-gpu-runtime.ps1" in workflow
     assert "qualify-gpu-runtime.ps1" in workflow
     assert "promote-gpu-runtime.ps1" in workflow
+    assert "Get-CimInstance Win32_Process" in workflow
+    assert "-m gpu_service\\.app" in workflow
+    assert "Refusing to stop an unexpected process listening on TCP 8100" in workflow
+    assert "Stop-Process -Id $listener.OwningProcess -Force" in workflow
     assert "if ($productionSuspended)" in workflow
     assert "GPU_PRODUCTION_RESTORE status=starting" in workflow
     assert "GPU_PRODUCTION_RESTORE status=complete" in workflow
