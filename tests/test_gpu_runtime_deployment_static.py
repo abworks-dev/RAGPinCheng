@@ -11,49 +11,22 @@ def read(path: str) -> str:
     return (ROOT / path).read_text(encoding="utf-8")
 
 
-def test_runtime_lock_is_candidate_only_until_cuda_qualification():
+def test_runtime_lock_is_unvalidated_until_compatible_closure_is_resolved():
     metadata = json.loads(read("gpu_service/runtime-lock.json"))
     requirements = read("gpu_service/runtime-lock.txt")
     assert metadata["schema_version"] == 1
-    assert metadata["validation_status"] == "candidate"
+    assert metadata["validation_status"] == "unvalidated"
     assert metadata["qualification_run_id"] is None
     assert metadata["source_commit"] is None
     assert metadata["qualified_source_fingerprint"] is None
     assert metadata["qualified_lock_sha256"] is None
-    assert metadata["torch_wheel_sha256"] == (
-        "c52c4b869742f00b12cb34521d1381be6119fa46244791704b00cc4a3cb06850"
-    )
+    assert metadata["torch_wheel_sha256"] is None
     lock_lines = [
         line for line in requirements.splitlines() if line and not line.startswith("#")
     ]
-    # The resolved closure size is an implementation detail of the resolver and
-    # legitimately changes when a transitive dependency is added or removed.
-    # Assert on what actually matters instead: every line is an exact pin, and
-    # the packages whose interaction we qualified resolve to the tested versions.
-    assert lock_lines
-    assert all(line.count("==") == 1 for line in lock_lines)
-    pins = dict(line.split("==", 1) for line in lock_lines)
-    assert pins["torch"] == "2.7.0+cu128"
-    # FlagEmbedding is pinned exactly: 1.4.0 is the version whose loader calls
-    # AutoModel.from_pretrained(..., dtype=...), which is what forces the
-    # transformers floor below.
-    assert pins["FlagEmbedding"] == "1.4.0"
-    transformers_version = tuple(
-        int(part) for part in pins["transformers"].split(".")[:2]
-    )
-    tokenizers_version = tuple(int(part) for part in pins["tokenizers"].split(".")[:2])
-    assert (4, 56) <= transformers_version < (5, 0)
-    assert (0, 22) <= tokenizers_version < (0, 23)
-    # Combinations already proven broken on the production host must never
-    # reappear: 4.55.4/0.21.4 failed CUDA qualification with
-    # TypeError: XLMRobertaModel.__init__() got an unexpected keyword 'dtype'.
-    for rejected in (
-        "transformers==4.46.3",
-        "tokenizers==0.20.3",
-        "transformers==4.55.4",
-        "tokenizers==0.21.4",
-    ):
-        assert rejected not in lock_lines
+    # The previous candidate is known incompatible. Keep the tracked lock empty
+    # until the isolated resolver produces and an operator reviews a new closure.
+    assert lock_lines == []
 
 
 def test_known_bad_two_package_pin_is_not_a_production_contract():
@@ -169,6 +142,8 @@ def test_gpu_model_cache_source_discovery_is_bounded_and_offline_only():
 def test_builder_is_d_drive_isolated_exact_and_records_artifacts():
     script = read("scripts/build-gpu-runtime.ps1")
     lock_hash = read("scripts/get-gpu-runtime-lock-hash.ps1")
+    assert 'validation_status -notin @("candidate", "validated")' in script
+    assert "GPU runtime lock is not eligible for candidate construction" in script
     assert 'StartsWith("D:\\\\"' not in script
     assert 'StartsWith("D:\\"' in script
     assert "-m venv" in script
