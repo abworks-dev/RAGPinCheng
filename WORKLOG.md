@@ -2470,6 +2470,13 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 验证：PowerShell AST 解析、Python 编译、完整 ASR 静态测试 31/31 与 `git diff --check` 通过；本机未安装 pytest，未运行 pytest 套件。
 - 待办/风险：尚未在 production-asr runner 触发或取消 workflow；当前进行中的 run 不会获得新逻辑。Profile admission 保持 disabled，生产服务、生产 venv、模型缓存、数据库、Qdrant 与防火墙均未修改。
 
+### 17:01 — 修复 Qwen3-ASR Windows 参数传递回归
+
+- 完成：为 Qwen qualification wrapper 增加 Windows 命令行逐参数 quoting，避免 `Start-Process -ArgumentList` 重组 `python -c` 多行代码；保留阶段心跳、超时和脱敏日志行为。
+- 文件：`scripts/qualify-qwen3-asr-production.ps1`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
+- 验证：PowerShell AST 解析、Python 编译、ASR 静态测试 31/31、临时 Python stderr 参数集成测试和 `git diff --check` 通过；未安装依赖、未启动服务、未执行 production retry。
+- 待办/风险：需提交 PR、CI 通过并重新审批后，才能以新的完整 master SHA 重跑 R3 qualification；Profile admission 继续保持 disabled。
+
 ### 05:57 — 增强 faster-whisper 资格卡死诊断与超时收尾
 
 - 完成：针对生产资格 wrapper 在模型准备后无输出并最终被 workflow watchdog 取消的问题，新增从预检到清理的阶段进度制品和 heartbeat 输出；外层超时现先写脱敏失败 verdict，再以有界 `taskkill` 和 PID fallback 终止进程树，避免进程终止命令自身卡住导致 verdict 丢失。
@@ -2620,5 +2627,19 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 
 - 完成：production run `31272624940` 首次失败于缺少 `GPU_MODEL_CACHE_SOURCE`，未分配生产 release；补齐已通过资格的离线模型缓存变量后，run `31272700448` 暴露部署流程缺陷：qualification release 位于 run-local `runtime\qualification\<run>\releases\<release-id>`，而 validated build 只查找确定性 `runtime\releases\<release-id>`，因此在停任务前 fail-closed。build 现严格寻找唯一匹配的 qualification release，校验 release ID、源码/锁/Torch/run 证据和双精度结果后 materialize 到确定性 release；导入时同步重写 manifest 的 release-local 路径；已有但路径异常的 release 也会回到同一证据校验导入分支；build 与 promote 两层均拒绝缺少完整 `qualified_precisions` 的证据。
 - 文件：`scripts/build-gpu-runtime.ps1`、`scripts/promote-gpu-runtime.ps1`、`tests/test_gpu_runtime_deployment_static.py`、`project-docs/features/gpu-runtime-deployment.md`、`WORKLOG.md`。
+- 验证：GPU/ASR/部署静态专项 `60 passed`；4 个 GPU runtime PowerShell 脚本 AST 解析通过；PR `#111` 的7个 CI job全部通过并已合入。production run `31273188815` 已成功 materialize qualification release，但因旧 manifest 绝对路径门禁失败，`deploy-app` 跳过且未确认生产切换；补丁后的本地专项测试、AST 与 `git diff --check` 通过。
 - 验证：GPU/ASR/部署静态专项 `60 passed`；4 个 GPU runtime PowerShell 脚本 AST 解析通过；PR `#111` 的7个 CI job全部通过并已合入。production run `31273188815` 已成功 materialize qualification release，但因旧 manifest 绝对路径门禁失败，`deploy-app` 跳过；run `31273497028` 进一步确认已有旧 release 会直接 `reused`，同样在路径门禁失败，未确认生产切换；补丁后的本地专项测试、AST 与 `git diff --check` 通过。
 - 待办/风险：幂等导入修复需通过后续 PR 合入后重跑 production promotion；成功后才会启动 GPU release 并连带部署 Ubuntu 应用，失败仍按既有备份回滚。当前 GPU 服务仍未恢复。
+
+### 03:10 — 推送 Qwen 修复并完成 PR CI
+
+- 完成：将最新 `master` (`071b74d`) 合入 Qwen 修复分支，解决 `WORKLOG.md` 单一冲突后推送合并提交 `dc7b1f4`；PR `#113` 保持 OPEN，未执行合并。
+- 文件：`WORKLOG.md`、PR 分支合并提交中的既有 Qwen/GPU 修复文件。
+- 验证：6 个 PowerShell 脚本 AST、`python -m compileall -q scripts gpu_service asr_service tests`、PR `#113` 的 7 个 CI job 全部通过；本机未安装 pytest，未运行 pytest 套件。只读检查显示本机 `192.168.11.11:8100` 超时、`127.0.0.1:8200` 拒绝连接；已核对 GPU 资格 run `31271874609` 的 runtime fingerprint `9b147c448b9b22d15e41f8eae7409c5417c291fec0f8f3d67b47ad6a8bab2e79`。
+- 待办/风险：production runner 的实时健康不能由本机网络结果替代；未触发新的 Qwen R3、GPU promotion 或服务恢复。另有独立 deploy run `31273681766` 正在运行，未干预。
+
+### 03:13 — 合入 GPU manifest 幂等修复并确认部署健康
+
+- 完成：将 `master` 的 `0c60eec` 合入 Qwen 分支，保留 manifest 路径异常时重新导入 qualification release 的修复；未修改生产文件。
+- 验证：production run `31273681766` 已以 `5af725c` 完成 GPU runtime promotion（release `9b147c448b9b-fa16678de682`）和 Ubuntu backend health check，两个 job 均成功；GPU 资格 fingerprint 仍为 `9b147c448b9b22d15e41f8eae7409c5417c291fec0f8f3d67b47ad6a8bab2e79`。
+- 待办/风险：Qwen PR 需在最新 master 合入后重新通过 CI；未合并 PR、未触发 Qwen R3 或修改 Profile admission。
