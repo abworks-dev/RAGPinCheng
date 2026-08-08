@@ -40,10 +40,6 @@ jobs:
           if (-not [Convert]::ToBoolean("${{ inputs.confirm_resolution }}")) {
             throw "confirm_resolution must be explicitly enabled"
           }
-          if ([string]::IsNullOrWhiteSpace($env:GPU_MODEL_CACHE_SOURCE)) {
-            throw "GPU_MODEL_CACHE_SOURCE is required"
-          }
-
           Set-Location -LiteralPath $env:REPO_PATH
           $basic = [Convert]::ToBase64String(
             [Text.Encoding]::ASCII.GetBytes("x-access-token:$env:GIT_TOKEN")
@@ -71,12 +67,19 @@ jobs:
             throw "Candidate resolver repository HEAD mismatch"
           }
 
+          $modelCacheSource = & "${env:REPO_PATH}\scripts\resolve-gpu-model-cache-source.ps1" `
+            -RepositoryPath $env:REPO_PATH `
+            -ConfiguredPath $env:GPU_MODEL_CACHE_SOURCE
+          if (@($modelCacheSource).Count -ne 1) {
+            throw "GPU model cache source resolution did not return exactly one path"
+          }
+
           $global:LASTEXITCODE = 0
           & "${env:REPO_PATH}\scripts\resolve-gpu-runtime.ps1" `
             -RepositoryPath $env:REPO_PATH `
             -ResolverRoot $env:RESOLVER_ROOT `
             -RunId $env:RESOLVER_RUN_ID `
-            -ModelCacheSource $env:GPU_MODEL_CACHE_SOURCE `
+            -ModelCacheSource $modelCacheSource `
             -CommitSha $env:DEPLOY_COMMIT_SHA
           if ($LASTEXITCODE -ne 0) {
             throw "GPU runtime candidate resolution did not complete"
