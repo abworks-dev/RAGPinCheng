@@ -2629,3 +2629,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`scripts/build-gpu-runtime.ps1`、`scripts/promote-gpu-runtime.ps1`、`tests/test_gpu_runtime_deployment_static.py`、`project-docs/features/gpu-runtime-deployment.md`、`WORKLOG.md`。
 - 验证：GPU/ASR/部署静态专项 `60 passed`；4 个 GPU runtime PowerShell 脚本 AST 解析通过；PR `#111` 的7个 CI job全部通过并已合入。production run `31273188815` 已成功 materialize qualification release，但因旧 manifest 绝对路径门禁失败，`deploy-app` 跳过且未确认生产切换；补丁后的本地专项测试、AST 与 `git diff --check` 通过。
 - 待办/风险：路径修复需通过后续 PR 合入后重跑 production promotion；成功后才会启动 GPU release 并连带部署 Ubuntu 应用，失败仍按既有备份回滚。当前 GPU 服务仍未恢复。
+
+### 03:10 — 推送 Qwen 修复并完成 PR CI
+
+- 完成：将最新 `master` (`071b74d`) 合入 Qwen 修复分支，解决 `WORKLOG.md` 单一冲突后推送合并提交 `dc7b1f4`；PR `#113` 保持 OPEN，未执行合并。
+- 文件：`WORKLOG.md`、PR 分支合并提交中的既有 Qwen/GPU 修复文件。
+- 验证：6 个 PowerShell 脚本 AST、`python -m compileall -q scripts gpu_service asr_service tests`、PR `#113` 的 7 个 CI job 全部通过；本机未安装 pytest，未运行 pytest 套件。只读检查显示本机 `192.168.11.11:8100` 超时、`127.0.0.1:8200` 拒绝连接；已核对 GPU 资格 run `31271874609` 的 runtime fingerprint `9b147c448b9b22d15e41f8eae7409c5417c291fec0f8f3d67b47ad6a8bab2e79`。
+- 待办/风险：production runner 的实时健康不能由本机网络结果替代；未触发新的 Qwen R3、GPU promotion 或服务恢复。另有独立 deploy run `31273681766` 正在运行，未干预。
