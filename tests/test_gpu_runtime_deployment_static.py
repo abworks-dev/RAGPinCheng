@@ -68,6 +68,7 @@ def test_candidate_resolver_is_manual_d_drive_isolated_and_evidence_only():
     assert '"--prefer-binary", "--no-deps", $torchRequirement' in script
     assert '"--index-url", $approvedPackageIndex' in script
     assert '"download.pytorch.org"' in script
+    assert '"download-r2.pytorch.org"' in script
     assert "$env:NO_PROXY" in script
     assert "$env:no_proxy" in script
     assert "--trusted-host" not in script
@@ -145,6 +146,7 @@ def test_candidate_qualification_is_cuda_only_and_cleans_tasks():
     assert "promote-gpu-runtime.ps1" not in workflow
     assert "resolve-gpu-model-cache-source.ps1" in workflow
     assert '"download.pytorch.org"' in workflow
+    assert '"download-r2.pytorch.org"' in workflow
     assert "$env:NO_PROXY" in workflow
     assert "--trusted-host" not in workflow
     assert "actions/upload-artifact@v4" in workflow
