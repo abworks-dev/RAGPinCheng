@@ -153,6 +153,7 @@ def test_builder_is_d_drive_isolated_exact_and_records_artifacts():
     assert "snapshot_gpu_runtime.py" in script
     assert "robocopy.exe" in script
     assert "source-files.sha256.json" in script
+    assert "ConvertTo-Json -InputObject @($sourceInventory)" in script
     assert '"source"' in script
     assert "working tree contract does not match" in script
     assert "Validated metadata cannot construct a release without prior candidate qualification" in script
@@ -198,6 +199,7 @@ def test_candidate_qualification_is_cuda_only_and_cleans_tasks():
     assert "QualificationRunId" in script
     assert "torch_wheel_sha256" in script
     assert "source_inventory_sha256" in script
+    assert "ConvertFrom-Json -InputObject (" in script
     assert "expected_length=" in script
     assert "actual_sha256=" in script
     assert "repository_commit" in script

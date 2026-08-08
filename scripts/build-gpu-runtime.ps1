@@ -219,8 +219,8 @@ $sourceInventory = foreach ($relativePath in $snapshotFiles) {
     }
 }
 $sourceInventoryPath = Join-Path $releaseRoot "source-files.sha256.json"
-$sourceInventory | ConvertTo-Json -Depth 3 |
-    Set-Content -LiteralPath $sourceInventoryPath -Encoding UTF8
+$sourceInventoryJson = ConvertTo-Json -InputObject @($sourceInventory) -Depth 3
+Set-Content -LiteralPath $sourceInventoryPath -Value $sourceInventoryJson -Encoding UTF8
 $sourceInventoryHash = (Get-FileHash -LiteralPath $sourceInventoryPath -Algorithm SHA256).Hash.ToLowerInvariant()
 
 Invoke-External -Failure "Unable to create isolated GPU runtime venv" -Command {

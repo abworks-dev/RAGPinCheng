@@ -62,7 +62,9 @@ $inventoryHash = (Get-FileHash -LiteralPath $sourceInventoryPath -Algorithm SHA2
 if ($inventoryHash -ne $manifest.source_inventory_sha256) {
     throw "GPU runtime source inventory does not match the release manifest"
 }
-$sourceInventory = @(Get-Content -LiteralPath $sourceInventoryPath -Encoding UTF8 | ConvertFrom-Json)
+$sourceInventory = ConvertFrom-Json -InputObject (
+    Get-Content -LiteralPath $sourceInventoryPath -Raw -Encoding UTF8
+)
 $sourceMismatches = @()
 foreach ($entry in $sourceInventory) {
     $sourcePath = Join-Path $sourceRoot (([string]$entry.path) -replace '/', '\')
