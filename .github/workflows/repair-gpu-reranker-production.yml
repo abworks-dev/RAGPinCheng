@@ -28,7 +28,9 @@ jobs:
         env:
           GPU_MODEL_CACHE_SOURCE: ${{ vars.GPU_MODEL_CACHE_SOURCE }}
           REPO_PATH: ${PRODUCTION_REPO_PATH}
-          RUNTIME_ROOT: ${PRODUCTION_REPO_PATH}\runtime
+          # Candidate releases are run-local so a stale or interrupted release
+          # can never be mistaken for the current qualification input.
+          RUNTIME_ROOT: ${PRODUCTION_REPO_PATH}\runtime\qualification\${{ github.run_id }}
           TORCH_WHEEL_SEED_ROOT: ${PRODUCTION_REPO_PATH}\runtime\wheel-seed\torch-2.7.0-cu128-cp310-win_amd64
           BACKUP_DIR: ${PRODUCTION_BACKUP_DIRECTORY}
           GIT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
