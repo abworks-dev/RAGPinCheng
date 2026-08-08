@@ -2664,3 +2664,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`scripts/build-gpu-runtime.ps1`、`.github/workflows/repair-gpu-reranker-production.yml`、`tests/test_gpu_runtime_deployment_static.py`、`WORKLOG.md`
 - 验证：GPU runtime 静态专项 `14 passed`；PowerShell builder AST 解析通过；`git diff --check` 通过。
 - 待办/风险：尚未推送或触发修复后的生产 workflow；需合入 master 后重新运行 `e8ce5ec...` candidate qualification，再继续 promotion 和 faster-whisper。
+
+### 04:46 — 增加 GPU 资格维护窗口自动恢复
+
+- 完成：candidate qualification workflow 增加显式 `suspend_production_service` 门禁；在 qualification 前校验当前 validated release 和生产任务，停止并确认 `8100` 关闭，qualification 成功或失败均在 `finally` 中恢复原 release；恢复失败保持 workflow 失败并保留证据。
+- 文件：`.github/workflows/repair-gpu-reranker-production.yml`、`tests/test_gpu_runtime_deployment_static.py`、`WORKLOG.md`
+- 验证：GPU runtime 静态专项 `14 passed`；PowerShell builder AST 解析通过；`git diff --check` 通过。
+- 待办/风险：该 workflow 修改尚未推送/合入 master；合入后必须同时传入 `confirm_qualification=true` 和 `suspend_production_service=true`，才允许临时停止并自动恢复当前 GPU 服务。
