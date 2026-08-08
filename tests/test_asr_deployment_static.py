@@ -446,10 +446,15 @@ def test_gpu_reranker_repair_is_replaced_by_candidate_only_qualification():
     assert "default: false" in workflow
     assert "runs-on: [self-hosted, windows, production, gpu]" in workflow
     assert "timeout-minutes: 90" in workflow
+    assert "suspend_production_service:" in workflow
+    assert "suspend_production_service must be explicitly enabled" in workflow
     assert "snapshot-gpu-runtime.ps1" in workflow
     assert "build-gpu-runtime.ps1" in workflow
     assert "qualify-gpu-runtime.ps1" in workflow
-    assert "promote-gpu-runtime.ps1" not in workflow
+    assert "promote-gpu-runtime.ps1" in workflow
+    assert "if ($productionSuspended)" in workflow
+    assert "GPU_PRODUCTION_RESTORE status=starting" in workflow
+    assert "GPU_PRODUCTION_RESTORE status=complete" in workflow
     assert "--system-site-packages" not in workflow
     assert "--system-site-packages" not in builder
     assert "pip wheel" in builder

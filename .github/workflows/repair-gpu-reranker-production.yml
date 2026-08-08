@@ -8,6 +8,11 @@ on:
         required: true
         default: false
         type: boolean
+      suspend_production_service:
+        description: Confirm temporary stop and automatic restore of the current validated GPU service
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -34,6 +39,7 @@ jobs:
           TORCH_WHEEL_SEED_ROOT: D:\RAGPinCheng\runtime\wheel-seed\torch-2.7.0-cu128-cp310-win_amd64
           BACKUP_DIR: D:\RAGBackups
           GIT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GPU_SERVICE_TOKEN: ${{ secrets.GPU_SERVICE_TOKEN }}
           DEPLOY_COMMIT_SHA: ${{ github.sha }}
           DEPLOY_HTTP_PROXY: ${{ vars.DEPLOY_HTTP_PROXY }}
         run: |
@@ -41,6 +47,12 @@ jobs:
           $ErrorActionPreference = "Stop"
           if (-not [Convert]::ToBoolean("${{ inputs.confirm_qualification }}")) {
             throw "confirm_qualification must be explicitly enabled"
+          }
+          if (-not [Convert]::ToBoolean("${{ inputs.suspend_production_service }}")) {
+            throw "suspend_production_service must be explicitly enabled"
+          }
+          if ([string]::IsNullOrWhiteSpace($env:GPU_SERVICE_TOKEN)) {
+            throw "GPU_SERVICE_TOKEN is required to restore the current validated GPU service"
           }
           Set-Location $env:REPO_PATH
           $basic = [Convert]::ToBase64String(
@@ -69,20 +81,55 @@ jobs:
             throw "Candidate repository HEAD mismatch"
           }
 
-          $modelCacheSource = & "${env:REPO_PATH}\scripts\resolve-gpu-model-cache-source.ps1" `
+          $runtimeRoot = "D:\RAGPinCheng\runtime"
+          $backupRoot = "D:\RAGBackups"
+          $productionTaskName = "RAGPinCheng-GPU"
+          $productionSuspended = $false
+          $currentReleaseRoot = ""
+          try {
+            $currentReleasePath = Join-Path $runtimeRoot "current-release.json"
+            if (-not (Test-Path -LiteralPath $currentReleasePath -PathType Leaf)) {
+              throw "No current validated GPU release is recorded"
+            }
+            $currentRelease = Get-Content -LiteralPath $currentReleasePath -Encoding UTF8 | ConvertFrom-Json
+            $currentReleaseRoot = [string]$currentRelease.release_root
+            if (-not (Test-Path -LiteralPath $currentReleaseRoot -PathType Container)) {
+              throw "Current validated GPU release root is missing"
+            }
+            $task = Get-ScheduledTask -TaskName $productionTaskName -ErrorAction SilentlyContinue
+            $listeners = @(Get-NetTCPConnection -LocalPort 8100 -State Listen -ErrorAction SilentlyContinue)
+            $taskRunning = $null -ne $task -and [string]$task.State -eq "Running"
+            if ($listeners.Count -gt 0 -or $taskRunning) {
+              if ($null -eq $task) {
+                throw "GPU port 8100 is listening without the owned production task"
+              }
+              Stop-ScheduledTask -TaskName $productionTaskName -ErrorAction Stop
+              $productionSuspended = $true
+              $deadline = [DateTimeOffset]::Now.AddSeconds(180)
+              do {
+                Start-Sleep -Seconds 5
+                $listeners = @(Get-NetTCPConnection -LocalPort 8100 -State Listen -ErrorAction SilentlyContinue)
+              } while ($listeners.Count -gt 0 -and [DateTimeOffset]::Now -lt $deadline)
+              if ($listeners.Count -gt 0) {
+                throw "GPU production port 8100 did not close after the scheduled task was stopped"
+              }
+              Write-Host "GPU_PRODUCTION_SUSPEND status=stopped"
+            }
+
+            $modelCacheSource = & "${env:REPO_PATH}\scripts\resolve-gpu-model-cache-source.ps1" `
             -RepositoryPath $env:REPO_PATH `
             -ConfiguredPath $env:GPU_MODEL_CACHE_SOURCE
-          if (@($modelCacheSource).Count -ne 1) {
-            throw "GPU model cache source resolution did not return exactly one path"
-          }
-          & "${env:REPO_PATH}\scripts\snapshot-gpu-runtime.ps1" `
+            if (@($modelCacheSource).Count -ne 1) {
+              throw "GPU model cache source resolution did not return exactly one path"
+            }
+            & "${env:REPO_PATH}\scripts\snapshot-gpu-runtime.ps1" `
             -RepositoryPath $env:REPO_PATH `
             -ModelCacheSource $modelCacheSource `
             -BackupRoot $env:BACKUP_DIR
 
-          $fingerprint = & "${env:REPO_PATH}\scripts\get-gpu-runtime-fingerprint.ps1" `
+            $fingerprint = & "${env:REPO_PATH}\scripts\get-gpu-runtime-fingerprint.ps1" `
             -RepositoryPath $env:REPO_PATH -Commit $env:DEPLOY_COMMIT_SHA
-          & "${env:REPO_PATH}\scripts\build-gpu-runtime.ps1" `
+            & "${env:REPO_PATH}\scripts\build-gpu-runtime.ps1" `
             -RepositoryPath $env:REPO_PATH `
             -RuntimeRoot $env:RUNTIME_ROOT `
             -ModelCacheSource $modelCacheSource `
@@ -91,7 +138,7 @@ jobs:
             -SourceFingerprint $fingerprint `
             -RequalifyValidated
 
-          $metadata = Get-Content "${env:REPO_PATH}\gpu_service\runtime-lock.json" -Encoding UTF8 | ConvertFrom-Json
+            $metadata = Get-Content "${env:REPO_PATH}\gpu_service\runtime-lock.json" -Encoding UTF8 | ConvertFrom-Json
           $requirementsPath = "${env:REPO_PATH}\gpu_service\$($metadata.requirements_file)"
           $lockHash = & "${env:REPO_PATH}\scripts\get-gpu-runtime-lock-hash.ps1" `
             -Path $requirementsPath
@@ -104,7 +151,23 @@ jobs:
             -QualificationRunId "${{ github.run_id }}"
 
           $result = Get-Content (Join-Path $releaseRoot "qualification.json") -Encoding UTF8 | ConvertFrom-Json
-          Write-Host "GPU_RUNTIME_CANDIDATE status=$($result.status) device=$($result.device) reranker_precision=$($result.reranker_precision) source_fingerprint=$fingerprint lock_sha256=$lockHash qualification_run_id=${{ github.run_id }}"
+            Write-Host "GPU_RUNTIME_CANDIDATE status=$($result.status) device=$($result.device) reranker_precision=$($result.reranker_precision) source_fingerprint=$fingerprint lock_sha256=$lockHash qualification_run_id=${{ github.run_id }}"
+          } finally {
+            if ($productionSuspended) {
+              Write-Host "GPU_PRODUCTION_RESTORE status=starting release=$currentReleaseRoot"
+              $global:LASTEXITCODE = 0
+              & "${env:REPO_PATH}\scripts\promote-gpu-runtime.ps1" `
+                -RepositoryPath $env:REPO_PATH `
+                -RuntimeRoot $runtimeRoot `
+                -BackupDirectory $backupRoot `
+                -ReleaseRoot $currentReleaseRoot `
+                -GpuServiceToken $env:GPU_SERVICE_TOKEN
+              if ($LASTEXITCODE -ne 0) {
+                throw "GPU production restore failed (exit $LASTEXITCODE)"
+              }
+              Write-Host "GPU_PRODUCTION_RESTORE status=complete"
+            }
+          }
 
       - name: Upload candidate qualification evidence
         if: ${{ always() }}

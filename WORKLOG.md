@@ -2671,3 +2671,17 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`scripts/qualify-qwen3-asr-production.ps1`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
 - 验证：PowerShell AST 解析和 `git diff --check` 通过；pytest 未安装，未安装依赖。
 - 待办/风险：需 CI 通过后重新绑定完整 master SHA 运行 R3；若分类为真实版本冲突，按门禁停止并报告，不自动放宽依赖。
+
+### 04:46 — 增加 GPU 资格维护窗口自动恢复
+
+- 完成：candidate qualification workflow 增加显式 `suspend_production_service` 门禁；在 qualification 前校验当前 validated release 和生产任务，停止并确认 `8100` 关闭，qualification 成功或失败均在 `finally` 中恢复原 release；恢复失败保持 workflow 失败并保留证据。
+- 文件：`.github/workflows/repair-gpu-reranker-production.yml`、`tests/test_gpu_runtime_deployment_static.py`、`WORKLOG.md`
+- 验证：GPU runtime 静态专项 `14 passed`；PowerShell builder AST 解析通过；`git diff --check` 通过。
+- 待办/风险：该 workflow 修改尚未推送/合入 master；合入后必须同时传入 `confirm_qualification=true` 和 `suspend_production_service=true`，才允许临时停止并自动恢复当前 GPU 服务。
+
+### 04:58 — 对齐 GPU 维护窗口静态契约
+
+- 完成：根据 PR #119 CI 的唯一失败，更新 GPU candidate workflow 静态契约，明确要求维护窗口确认参数，并验证生产恢复仅在实际停止服务后于 `finally` 中执行。
+- 文件：`tests/test_asr_deployment_static.py`、`WORKLOG.md`
+- 验证：已定位失败测试和断言；当前 worktree 未安装 pytest，未安装依赖，专项 pytest 待 CI 复跑。
+- 待办/风险：需推送后等待 PR CI；CI 通过并合入 master 后，才执行已批准的生产服务临时停止、资格验证和自动恢复。
