@@ -88,7 +88,8 @@ jobs:
             -ModelCacheSource $modelCacheSource `
             -TorchWheelSeedRoot $env:TORCH_WHEEL_SEED_ROOT `
             -CommitSha $env:DEPLOY_COMMIT_SHA `
-            -SourceFingerprint $fingerprint
+            -SourceFingerprint $fingerprint `
+            -RequalifyValidated
 
           $metadata = Get-Content "${env:REPO_PATH}\gpu_service\runtime-lock.json" -Encoding UTF8 | ConvertFrom-Json
           $requirementsPath = "${env:REPO_PATH}\gpu_service\$($metadata.requirements_file)"
