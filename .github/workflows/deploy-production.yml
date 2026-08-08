@@ -1,20 +1,12 @@
-# Production deployment — two-node topology
-#
-# 1. deploy-gpu:  Windows GPU host  — update inference service
-# 2. deploy-app:  Ubuntu app host   — update backend + Qdrant (depends on 1)
-#
-# Triggered by:
-#   - CI success on master (auto)
-#   - workflow_dispatch (manual)
-
 name: Deploy production
 
 on:
   workflow_dispatch:
     inputs:
       confirm_production:
-        description: Confirm deployment of origin/master to production
+        description: Confirm deployment of the selected commit to production
         required: true
+        default: false
         type: boolean
   workflow_run:
     workflows:
@@ -27,37 +19,29 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: production-deployment
-  cancel-in-progress: false
-
 jobs:
-  # ── Job 1: Windows GPU inference service ────────────────────────────────
   deploy-gpu:
-    if: ${{ (github.event_name == 'workflow_dispatch' && inputs.confirm_production == true) || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') }}
-    runs-on:
-      - self-hosted
-      - windows
-      - production
-      - gpu
-    timeout-minutes: 30
-
+    if: ${{ (github.event_name == 'workflow_dispatch' && inputs.confirm_production == true) || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && vars.PRODUCTION_AUTO_DEPLOY_ENABLED == 'true') }}
+    concurrency:
+      group: production-gpu-exclusive
+      cancel-in-progress: false
+    runs-on: [self-hosted, windows, production, gpu]
+    timeout-minutes: 90
     steps:
-      - name: Deploy GPU inference service
+      - name: Deploy immutable GPU runtime when its fingerprint changed
         shell: powershell
         env:
           DEPLOY_HTTP_PROXY: ${{ vars.DEPLOY_HTTP_PROXY }}
+          GPU_MODEL_CACHE_SOURCE: ${{ vars.GPU_MODEL_CACHE_SOURCE }}
           GPU_SERVICE_TOKEN: ${{ secrets.GPU_SERVICE_TOKEN }}
           REPO_PATH: ${PRODUCTION_REPO_PATH}
           BACKUP_DIR: ${PRODUCTION_BACKUP_DIRECTORY}
+          RUNTIME_ROOT: ${PRODUCTION_REPO_PATH}\runtime
           GIT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DEPLOY_COMMIT_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
         run: |
           Set-StrictMode -Version Latest
           $ErrorActionPreference = 'Stop'
-
-          # Bootstrap the runner checkout before invoking the repository script.
-          # The HTTP header is process-local; origin and .git/config are untouched.
           Set-Location $env:REPO_PATH
           $basic = [Convert]::ToBase64String(
             [Text.Encoding]::ASCII.GetBytes("x-access-token:$env:GIT_TOKEN")
@@ -73,15 +57,8 @@ jobs:
               "https://github.com/abworks-dev/RAGPinCheng.git", $env:DEPLOY_COMMIT_SHA
             )
             & git @gitArgs
-            if ($LASTEXITCODE -eq 0) {
-              $fetched = $true
-              break
-            }
-            if ($attempt -lt 4) {
-              $delay = [math]::Pow(2, $attempt)
-              Write-Warning "Bootstrap fetch attempt $attempt/4 failed; retrying in ${delay}s"
-              Start-Sleep -Seconds $delay
-            }
+            if ($LASTEXITCODE -eq 0) { $fetched = $true; break }
+            if ($attempt -lt 4) { Start-Sleep -Seconds ([math]::Pow(2, $attempt)) }
           }
           if (-not $fetched) { throw "Bootstrap fetch failed after 4 attempts" }
           git merge --ff-only $env:DEPLOY_COMMIT_SHA
@@ -90,21 +67,18 @@ jobs:
           & "${env:REPO_PATH}\scripts\deploy-gpu.ps1" `
             -RepositoryPath $env:REPO_PATH `
             -BackupDirectory $env:BACKUP_DIR `
+            -RuntimeRoot $env:RUNTIME_ROOT `
             -ProxyUrl $env:DEPLOY_HTTP_PROXY `
             -CommitSha $env:DEPLOY_COMMIT_SHA
 
-  # ── Job 2: Ubuntu application node (backend + Qdrant) ───────────────────
   deploy-app:
     if: ${{ needs.deploy-gpu.result == 'success' }}
     needs: [deploy-gpu]
-    runs-on:
-      - self-hosted
-      - linux
-      - ubuntu
-      - production
-      - app
+    concurrency:
+      group: production-app-deployment
+      cancel-in-progress: false
+    runs-on: [self-hosted, linux, ubuntu, production, app]
     timeout-minutes: 30
-
     steps:
       - name: Deploy Ubuntu application node
         env:
@@ -134,7 +108,6 @@ jobs:
               exit 1
             fi
             DELAY=$((2 ** ATTEMPT))
-            echo "Bootstrap fetch attempt ${ATTEMPT}/4 failed; retrying in ${DELAY}s"
             sleep "${DELAY}"
           done
           git merge --ff-only "${DEPLOY_COMMIT_SHA}"

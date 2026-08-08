@@ -2540,3 +2540,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`.github/workflows/repair-gpu-reranker-production.yml`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
 - 验证：YAML 解析、提取后 PowerShell AST 解析、faster-whisper qualification 与部署静态专项测试 `63 passed`、`git diff --check` 通过。
 - 待办/风险：需在新提交上重跑隔离验证；本轮不删除 C 盘文件、不改全局依赖或 GPU 服务。
+
+### 09:49 — 实施 R3-2A GPU 不可变运行时
+
+- 完成：移除未经验证的生产双包 pin，新增默认关闭的 GPU runtime lock、D 盘隔离 venv/wheelhouse/model cache 构建、LF 规范化锁哈希、受指纹保护的不可变源码快照、CUDA-only FP16/FP32 候选资格、资格 run/候选 commit/源码/锁/文件清单证据绑定、release 身份 `/model-info` 校验、S4U 任务切换及环境/任务/release 指针回滚。自动部署仅在仓库变量开启且复用已资格验证的 validated release 时 promotion；未变化分支只核对健康与运行中 release 身份，不隐式修复。GPU 服务禁止 CPU fallback，模型未加载时 `/health` 返回 503；应用部署增加 GPU 健康契约检查。
+- 文件：`.github/workflows/ci.yml`、`.github/workflows/deploy-production.yml`、`.github/workflows/recover-gpu-service-production.yml`、`.github/workflows/repair-gpu-reranker-production.yml`、`gpu_service/**`、`requirements-gpu.txt`、`scripts/build-gpu-runtime.ps1`、`scripts/get-gpu-runtime-fingerprint.ps1`、`scripts/get-gpu-runtime-lock-hash.ps1`、`scripts/qualify-gpu-runtime.ps1`、`scripts/promote-gpu-runtime.ps1`、`scripts/snapshot-gpu-runtime.ps1`、`scripts/snapshot_gpu_runtime.py`、`scripts/deploy-gpu.ps1`、`scripts/start-gpu-service.ps1`、`scripts/deploy-app.sh`、`project-docs/features/**`、`tests/test_gpu_runtime_deployment_static.py`、`tests/test_asr_deployment_static.py`、`tests/test_deploy_git_safety.py`、`WORKLOG.md`。
+- 验证：8 个外部 PowerShell 脚本及 3 个本次修改 workflow 内嵌 PowerShell block AST 解析通过；16 个 workflow YAML 解析、Python compileall、LF 规范化锁哈希 PowerShell/Python 交叉比对、LF 输入下 Bash 语法和 `git diff --check` 通过；GPU/ASR/部署 CI 同款相关集合 `396 passed`、`2 subtests passed`（7 个既有弃用警告）。远端 workflow `319712216` 仍为 `disabled_manually`，queued/in-progress 均为 0。
+- 待办/风险：`runtime-lock.txt` 仍为空且元数据为 `unvalidated`，因此当前提交无法构建或推广生产 release。未推送、未启用 workflow、未执行 R3-2B 候选资格、未安装依赖、未修改生产任务/服务/全局 Python/模型缓存；Windows 生产主机上的真实 CUDA、S4U、计划任务和失败回滚仍需在独立获批的 R3-2B 中验证。

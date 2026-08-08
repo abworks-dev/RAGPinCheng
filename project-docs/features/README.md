@@ -30,6 +30,7 @@
 | 视频转录链路 | 部分实现 | `chunk_transcript` | 文档索引、引用与来源 | [transcript-pipeline.md](transcript-pipeline.md) |
 | 认证与授权 | 已实现 | `require_user` / `require_csrf` | app.sqlite、Cookie | [authentication.md](authentication.md) |
 | 反馈处理工作流 | 已实现 | `/api/admin/feedback` | feedback.jsonl、app.sqlite、管理员权限 | [feedback-management.md](feedback-management.md) |
+| GPU运行时部署 | 部分实现 | `deploy-gpu.ps1` / `runtime-lock.json` | Windows GPU Runner、CUDA、模型缓存 | [gpu-runtime-deployment.md](gpu-runtime-deployment.md) |
 
 ## 新增或更新文档
 
