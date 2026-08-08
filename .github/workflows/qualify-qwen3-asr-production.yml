@@ -71,6 +71,7 @@ jobs:
             "build_internal_oss2_wheel.py:oss2"
             "build_internal_antlr4_wheel.py:antlr4"
             "build_internal_crcmod_wheel.py:crcmod"
+            "build_internal_aliyun_core_wheel.py:aliyun-core"
           )
           for entry in "${builders[@]}"; do
             IFS=: read -r script directory <<< "$entry"
@@ -149,6 +150,7 @@ jobs:
             Oss2WheelBundlePath = "${{ runner.temp }}\qwen3-asr-internal-wheels-${{ github.run_id }}\oss2"
             Antlr4WheelBundlePath = "${{ runner.temp }}\qwen3-asr-internal-wheels-${{ github.run_id }}\antlr4"
             CrcmodWheelBundlePath = "${{ runner.temp }}\qwen3-asr-internal-wheels-${{ github.run_id }}\crcmod"
+            AliyunCoreWheelBundlePath = "${{ runner.temp }}\qwen3-asr-internal-wheels-${{ github.run_id }}\aliyun-core"
             SummaryPath = "${{ runner.temp }}\qwen3-asr-r3-${{ github.run_id }}\qualification-verdict.json"
             DependencyDiagnosticPath = "${{ runner.temp }}\qwen3-asr-r3-${{ github.run_id }}\dependency-diagnostic.json"
           }
