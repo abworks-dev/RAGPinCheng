@@ -165,6 +165,8 @@ def test_builder_is_d_drive_isolated_exact_and_records_artifacts():
     lock_hash = read("scripts/get-gpu-runtime-lock-hash.ps1")
     assert 'validation_status -notin @("candidate", "validated")' in script
     assert "GPU runtime lock is not eligible for candidate construction" in script
+    assert "RequalifyValidated" in script
+    assert "mode=requalify-validated" in script
     assert 'StartsWith("D:\\\\"' not in script
     assert 'StartsWith("D:\\"' in script
     assert "-m venv" in script
@@ -183,6 +185,7 @@ def test_builder_is_d_drive_isolated_exact_and_records_artifacts():
     assert '"source"' in script
     assert "working tree contract does not match" in script
     assert "Validated metadata has no managed qualification root to import" in script
+    assert "-not $RequalifyValidated" in script
     assert "requires exactly one matching qualified release" in script
     assert "Managed qualification release does not match validated metadata" in script
     assert "Copy-Item -LiteralPath $entry.FullName" in script
@@ -208,6 +211,7 @@ def test_candidate_qualification_is_cuda_only_and_cleans_tasks():
     assert "confirm_qualification:" in workflow
     assert "production-gpu-exclusive" in workflow
     assert "build-gpu-runtime.ps1" in workflow
+    assert "-RequalifyValidated" in workflow
     assert "qualify-gpu-runtime.ps1" in workflow
     assert "promote-gpu-runtime.ps1" not in workflow
     assert "resolve-gpu-model-cache-source.ps1" in workflow

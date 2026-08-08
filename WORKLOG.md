@@ -2650,3 +2650,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`scripts/qualify-qwen3-asr-production.ps1`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
 - 验证：PowerShell AST、`python -m compileall -q scripts tests`、Qwen targeted static assertions 与 `git diff --check` 通过；尚未触发新的 production qualification。
 - 待办/风险：需 CI 通过后以新的完整 master SHA 重跑 R3；Profile admission 继续保持 disabled。
+
+### 04:21 — 修复 validated lock 重新资格构建
+
+- 完成：为 GPU runtime builder 增加显式 `-RequalifyValidated` candidate 模式；该模式只复用精确依赖锁和 Torch wheel SHA，在 run-local release 中绑定新的源码提交和资格证据，不导入旧 qualification root；candidate workflow 已启用该模式，promotion 门禁保持不变。
+- 文件：`scripts/build-gpu-runtime.ps1`、`.github/workflows/repair-gpu-reranker-production.yml`、`tests/test_gpu_runtime_deployment_static.py`、`WORKLOG.md`
+- 验证：GPU runtime 静态专项 `14 passed`；PowerShell builder AST 解析通过；`git diff --check` 通过。
+- 待办/风险：尚未推送或触发修复后的生产 workflow；需合入 master 后重新运行 `e8ce5ec...` candidate qualification，再继续 promotion 和 faster-whisper。
