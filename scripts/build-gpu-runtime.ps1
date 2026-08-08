@@ -105,7 +105,20 @@ $releaseId = $SourceFingerprint.Substring(0, 12) + "-" + $lockHash.Substring(0, 
 $releaseRoot = Join-Path $resolvedRuntimeRoot "releases\$releaseId"
 $manifestPath = Join-Path $releaseRoot "runtime-manifest.json"
 $qualificationPath = Join-Path $releaseRoot "qualification.json"
-if ($metadata.validation_status -eq "validated" -and -not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+$expectedReleasePaths = @{
+    runtime_python = Join-Path $releaseRoot "venv\Scripts\python.exe"
+    model_cache = Join-Path $releaseRoot "model-cache"
+    source_root = Join-Path $releaseRoot "source"
+}
+$needsQualificationImport = $metadata.validation_status -eq "validated" -and -not (Test-Path -LiteralPath $manifestPath -PathType Leaf)
+if ($metadata.validation_status -eq "validated" -and (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+    $existingForPathCheck = Get-Content -LiteralPath $manifestPath -Encoding UTF8 | ConvertFrom-Json
+    $needsQualificationImport =
+        [string]$existingForPathCheck.runtime_python -ne [string]$expectedReleasePaths.runtime_python -or
+        [string]$existingForPathCheck.model_cache -ne [string]$expectedReleasePaths.model_cache -or
+        [string]$existingForPathCheck.source_root -ne [string]$expectedReleasePaths.source_root
+}
+if ($needsQualificationImport) {
     $qualificationRoot = Join-Path $resolvedRuntimeRoot "qualification"
     if (-not (Test-Path -LiteralPath $qualificationRoot -PathType Container)) {
         throw "Validated metadata has no managed qualification root to import"
@@ -160,9 +173,9 @@ if ($metadata.validation_status -eq "validated" -and -not (Test-Path -LiteralPat
     foreach ($entry in @(Get-ChildItem -LiteralPath $qualifiedRelease -Force)) {
         Copy-Item -LiteralPath $entry.FullName -Destination (Join-Path $releaseRoot $entry.Name) -Recurse -Force
     }
-    $qualifiedManifest.runtime_python = Join-Path $releaseRoot "venv\Scripts\python.exe"
-    $qualifiedManifest.model_cache = Join-Path $releaseRoot "model-cache"
-    $qualifiedManifest.source_root = Join-Path $releaseRoot "source"
+    $qualifiedManifest.runtime_python = $expectedReleasePaths.runtime_python
+    $qualifiedManifest.model_cache = $expectedReleasePaths.model_cache
+    $qualifiedManifest.source_root = $expectedReleasePaths.source_root
     $qualifiedManifest | ConvertTo-Json -Depth 5 |
         Set-Content -LiteralPath $manifestPath -Encoding UTF8
     Write-Host "GPU_RUNTIME_BUILD status=imported-qualified release=$qualifiedRelease"
