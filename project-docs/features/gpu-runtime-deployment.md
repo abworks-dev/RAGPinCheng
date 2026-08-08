@@ -87,7 +87,7 @@ ${PRODUCTION_REPO_PATH}\runtime\
 unvalidated → candidate → validated
 ```
 
-`unvalidated` 不可构建，`candidate` 只能由手动资格workflow验证，`validated` 只能复用已经存在且证据完全匹配的候选release进行promotion；自动部署不会现场补做qualification。
+`unvalidated` 不可构建，`candidate` 只能由手动资格workflow验证，`validated` 只能导入唯一且证据完全匹配的 `runtime\qualification\<run>\releases\<release-id>`，materialize 到确定性的 `runtime\releases\<release-id>` 后再进行promotion；零个或多个匹配均fail-closed，自动部署不会现场补做qualification。
 
 `runtime-lock.json` 的 `allowed_reranker_precisions` 不是可配置开关：精度白名单在 qualify、promote 和 start 中硬编码为CUDA `fp16`/`fp32`，构建脚本只校验该字段与硬编码集合完全一致，因此元数据无法放宽白名单，字段漂移会fail-closed。
 
