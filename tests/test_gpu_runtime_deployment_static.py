@@ -50,6 +50,7 @@ def test_candidate_resolver_is_manual_d_drive_isolated_and_evidence_only():
     assert "preflight.json" in workflow
     assert "qualify-gpu-runtime.ps1" not in workflow
     assert "promote-gpu-runtime.ps1" not in workflow
+    assert "resolve-gpu-model-cache-source.ps1" in workflow
 
     assert 'StartsWith("D:\\"' in script
     assert '"-m", "venv"' in script
@@ -71,6 +72,26 @@ def test_candidate_resolver_is_manual_d_drive_isolated_and_evidence_only():
     assert "new-netfirewallrule" not in lowered
     assert "BGEM3FlagModel" not in script
     assert "FlagReranker" not in script
+
+
+def test_gpu_model_cache_source_discovery_is_bounded_and_offline_only():
+    script = read("scripts/resolve-gpu-model-cache-source.ps1")
+    lowered = script.lower()
+
+    assert "models--BAAI--bge-m3" in script
+    assert "models--BAAI--bge-reranker-v2-m3" in script
+    assert 'Join-Path $RepositoryPath "gpu_service\\.cache\\huggingface"' in script
+    assert 'Get-ChildItem -LiteralPath "C:\\Users" -Directory' in script
+    assert "does not contain both required offline model snapshots" in script
+    assert "auto-discovery found no complete offline cache" in script
+    assert "auto-discovery is ambiguous" in script
+    assert "snapshot_download" not in script
+    assert "invoke-webrequest" not in lowered
+    assert "invoke-restmethod" not in lowered
+    assert "pip install" not in lowered
+    assert "Get-Content" not in script
+    assert ".env" not in script
+    assert "Remove-Item" not in script
 
 
 def test_builder_is_d_drive_isolated_exact_and_records_artifacts():
@@ -108,6 +129,12 @@ def test_candidate_qualification_is_cuda_only_and_cleans_tasks():
     assert "build-gpu-runtime.ps1" in workflow
     assert "qualify-gpu-runtime.ps1" in workflow
     assert "promote-gpu-runtime.ps1" not in workflow
+    assert "resolve-gpu-model-cache-source.ps1" in workflow
+    assert "actions/upload-artifact@v4" in workflow
+    assert "qualification.json" in workflow
+    assert "runtime-manifest.json" in workflow
+    assert "source-files.sha256.json" in workflow
+    assert "wheelhouse.sha256.json" in workflow
     assert "pip install" not in workflow
     assert "--system-site-packages" not in workflow
     assert '@("fp16", "fp32")' in script
