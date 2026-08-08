@@ -4,7 +4,7 @@
 
 状态：部分实现。
 
-仓库已经具备D盘隔离依赖解析、运行时构建、CUDA候选验证、不可变release promotion和任务回滚代码，但 `gpu_service/runtime-lock.json` 当前为 `unvalidated`，`runtime-lock.txt` 为空。自动生产部署仍被外部禁用，尚未执行R3-2B生产候选解析与验证或恢复GPU服务。
+仓库已经具备D盘隔离依赖解析、运行时构建、CUDA候选验证、不可变release promotion和任务回滚代码。R3-2B run `31245209423` 已通过手动官方wheel输入生成并复核75项精确依赖锁，`gpu_service/runtime-lock.json` 当前为 `candidate`；尚未完成CUDA/S4U资格，因此所有qualification字段仍为空且不能promotion。自动生产部署仍被外部禁用，尚未恢复GPU服务。
 
 ## 入口与调用链
 
