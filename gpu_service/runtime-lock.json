@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "validation_status": "unvalidated",
+  "qualification_run_id": null,
+  "source_commit": null,
+  "qualified_source_fingerprint": null,
+  "qualified_lock_sha256": null,
+  "python_version": "3.10",
+  "requirements_file": "runtime-lock.txt",
+  "package_index_url": "https://pypi.tuna.tsinghua.edu.cn/simple",
+  "torch_index_url": "https://download.pytorch.org/whl/cu128",
+  "allowed_reranker_precisions": [
+    "fp16",
+    "fp32"
+  ]
+}

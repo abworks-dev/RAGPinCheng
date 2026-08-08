@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       confirm_recovery:
-        description: "Confirm recovery of the existing RAGPinCheng-GPU Scheduled Task"
+        description: Confirm restart of the current validated GPU release
         required: true
         default: false
         type: boolean
@@ -13,209 +13,40 @@ permissions:
   contents: read
 
 concurrency:
-  group: production-deployment
+  group: production-gpu-exclusive
   cancel-in-progress: false
 
 jobs:
   recover:
+    if: ${{ inputs.confirm_recovery == true }}
     environment: production-asr
     runs-on: [self-hosted, windows, production, gpu]
-    timeout-minutes: 6
+    timeout-minutes: 10
     steps:
-      - name: Restore verified GPU Scheduled Task
+      - name: Restart the current validated GPU release
         shell: powershell
+        env:
+          GPU_SERVICE_TOKEN: ${{ secrets.GPU_SERVICE_TOKEN }}
+          REPO_PATH: ${PRODUCTION_REPO_PATH}
+          RUNTIME_ROOT: ${PRODUCTION_REPO_PATH}\runtime
+          BACKUP_DIR: ${PRODUCTION_BACKUP_DIRECTORY}
         run: |
           Set-StrictMode -Version Latest
           $ErrorActionPreference = "Stop"
-          if (-not [System.Convert]::ToBoolean("${{ inputs.confirm_recovery }}")) {
+          if (-not [Convert]::ToBoolean("${{ inputs.confirm_recovery }}")) {
             throw "confirm_recovery must be explicitly enabled"
           }
-
-          $RepositoryPath = "${PRODUCTION_REPO_PATH}"
-          $TaskName = "RAGPinCheng-GPU"
-          $StartScript = Join-Path $RepositoryPath "scripts\start-gpu-service.ps1"
-          $ExpectedTaskArguments = (
-            '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -RepositoryPath "{1}"' -f
-            $StartScript,
-            $RepositoryPath
-          )
-          if (-not (Test-Path -LiteralPath $StartScript -PathType Leaf)) {
-            throw "GPU service start wrapper is missing"
+          if ([string]::IsNullOrWhiteSpace($env:GPU_SERVICE_TOKEN)) {
+            throw "GPU_SERVICE_TOKEN is required"
           }
-
-          function Assert-ExpectedGpuTask {
-            param([Parameter(Mandatory = $true)][object]$Task)
-            $actions = @($Task.Actions)
-            if (
-              $actions.Count -ne 1 -or
-              [string]$actions[0].Execute -ne "powershell.exe" -or
-              [string]$actions[0].Arguments -ne $ExpectedTaskArguments -or
-              [string]$Task.Principal.UserId -ne "Administrator" -or
-              [string]$Task.Principal.LogonType -ne "S4U" -or
-              [string]$Task.Principal.RunLevel -ne "Highest"
-            ) {
-              throw "Refusing to modify an unexpected RAGPinCheng-GPU Scheduled Task"
-            }
+          $currentPath = Join-Path $env:RUNTIME_ROOT "current-release.json"
+          if (-not (Test-Path -LiteralPath $currentPath -PathType Leaf)) {
+            throw "No validated current GPU release is recorded"
           }
-
-          function Write-SanitizedGpuStartupDiagnostic {
-            $taskDiagnostic = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-            $taskInfo = Get-ScheduledTaskInfo -TaskName $TaskName -ErrorAction SilentlyContinue
-            $hostAddressPresent = $null -ne (@(
-              Get-NetIPAddress -IPAddress "${PRIVATE_IPV4}" -ErrorAction SilentlyContinue
-            ) | Select-Object -First 1)
-            $gpuProcessCount = @(
-              Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
-                Where-Object { [string]$_.CommandLine -like "*-m gpu_service.app*" }
-            ).Count
-            Write-Host (
-              "GPU_STARTUP_DIAGNOSTIC task_state={0} task_result={1} host_address_present={2} gpu_process_count={3}" -f
-              [string]$taskDiagnostic.State,
-              [string]$taskInfo.LastTaskResult,
-              $hostAddressPresent,
-              $gpuProcessCount
-            )
-            $applicationEvents = @(
-              Get-WinEvent -FilterHashtable @{
-                LogName = "Application"
-                StartTime = (Get-Date).AddMinutes(-10)
-              } -ErrorAction SilentlyContinue |
-                Where-Object { $_.ProviderName -in @("Application Error", "Windows Error Reporting") } |
-                Select-Object -First 8
-            )
-            foreach ($event in $applicationEvents) {
-              $message = [string]$event.Message
-              if ($message -notmatch '(?i)python\.exe|gpu_service') {
-                continue
-              }
-              $safeLines = @(
-                $message -split "`r?`n" |
-                  Where-Object { $_ -match '(?i)faulting application|faulting module|exception code|exception offset' } |
-                  ForEach-Object {
-                    $_ -replace '(?i)(https?://)[^/\s:@]+:[^@\s]+@', '$1[REDACTED]@'
-                  }
-              )
-              foreach ($line in $safeLines) {
-                Write-Host "GPU_STARTUP_DIAGNOSTIC event_id=$($event.Id) $line"
-              }
-            }
-            foreach ($path in @(
-              (Join-Path $RepositoryPath "gpu_service.error.log"),
-              (Join-Path $RepositoryPath "gpu_service.log")
-            )) {
-              if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
-                Write-Host "GPU_STARTUP_DIAGNOSTIC log=missing"
-                continue
-              }
-              $item = Get-Item -LiteralPath $path -ErrorAction Stop
-              Write-Host "GPU_STARTUP_DIAGNOSTIC log=present bytes=$($item.Length)"
-              Get-Content -LiteralPath $path -Tail 120 -ErrorAction SilentlyContinue |
-                Where-Object { $_ -match '(?i)traceback|error|exception|failed|cannot|missing|not found|module|cuda|runtime|started server|running on|loading.*model|model.*load' } |
-                ForEach-Object {
-                  $line = $_
-                  $line = $line -replace '(?i)(authorization\s*:\s*bearer\s+)\S+', '$1[REDACTED]'
-                  $line = $line -replace '(?i)(GPU_SERVICE_TOKEN\s*[=:]\s*)\S+', '$1[REDACTED]'
-                  $line = $line -replace '(?i)(https?://)[^/\s:@]+:[^@\s]+@', '$1[REDACTED]@'
-                  Write-Host "GPU_STARTUP_DIAGNOSTIC $line"
-                }
-            }
-          }
-
-          $taskCreated = $false
-          $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-          if ($null -eq $task) {
-            $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $ExpectedTaskArguments
-            $trigger = New-ScheduledTaskTrigger -AtStartup
-            $principal = New-ScheduledTaskPrincipal `
-              -UserId "Administrator" `
-              -LogonType S4U `
-              -RunLevel Highest
-            $settings = New-ScheduledTaskSettingsSet `
-              -RestartCount 3 `
-              -RestartInterval (New-TimeSpan -Minutes 1) `
-              -ExecutionTimeLimit (New-TimeSpan -Days 3)
-            Register-ScheduledTask `
-              -TaskName $TaskName `
-              -Action $action `
-              -Trigger $trigger `
-              -Principal $principal `
-              -Settings $settings `
-              -ErrorAction Stop | Out-Null
-            $taskCreated = $true
-            $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
-            Write-Host "Registered missing RAGPinCheng-GPU Scheduled Task"
-          }
-          Assert-ExpectedGpuTask -Task $task
-
-          try {
-            $healthy = $false
-            $listener = Get-NetTCPConnection -LocalPort 8100 -State Listen -ErrorAction SilentlyContinue |
-              Select-Object -First 1
-            if ($null -ne $listener) {
-              try {
-                $health = Invoke-RestMethod -Method Get -Uri "http://${PRIVATE_IPV4}:8100/health" -TimeoutSec 10
-                $healthy = $health.status -eq "ok" -and $health.model_loaded -eq $true
-              } catch {
-                $healthy = $false
-              }
-            }
-            if ($healthy) {
-              Write-Host "GPU service is already healthy; no task state changed"
-              exit 0
-            }
-
-            if ($task.State -eq "Running") {
-              Stop-ScheduledTask -TaskName $TaskName -ErrorAction Stop
-              $stopDeadline = [DateTimeOffset]::Now.AddSeconds(30)
-              do {
-                Start-Sleep -Seconds 2
-                $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
-              } while ($task.State -eq "Running" -and [DateTimeOffset]::Now -lt $stopDeadline)
-              if ($task.State -eq "Running") {
-                throw "RAGPinCheng-GPU did not stop within 30 seconds"
-              }
-            }
-
-            Start-ScheduledTask -TaskName $TaskName -ErrorAction Stop
-            $deadline = [DateTimeOffset]::Now.AddSeconds(180)
-            do {
-              Start-Sleep -Seconds 5
-              $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
-              if ($task.State -ne "Running") {
-                break
-              }
-              $listener = Get-NetTCPConnection -LocalPort 8100 -State Listen -ErrorAction SilentlyContinue |
-                Select-Object -First 1
-              if ($null -eq $listener) {
-                continue
-              }
-              try {
-                $health = Invoke-RestMethod -Method Get -Uri "http://${PRIVATE_IPV4}:8100/health" -TimeoutSec 10
-                $healthy = $health.status -eq "ok" -and $health.model_loaded -eq $true
-              } catch {
-                $healthy = $false
-              }
-            } while (-not $healthy -and [DateTimeOffset]::Now -lt $deadline)
-
-            $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
-            if (-not $healthy -or $task.State -ne "Running") {
-              throw "RAGPinCheng-GPU did not become healthy within 180 seconds"
-            }
-            Write-Host "GPU service recovered: task=Running port=8100 health=ok model_loaded=true"
-          } catch {
-            try {
-              Write-SanitizedGpuStartupDiagnostic
-            } catch {
-            }
-            if ($taskCreated) {
-              try {
-                $createdTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-                if ($null -ne $createdTask -and $createdTask.State -eq "Running") {
-                  Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-                }
-                Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
-              } catch {
-              }
-            }
-            throw
-          }
+          $current = Get-Content -LiteralPath $currentPath -Encoding UTF8 | ConvertFrom-Json
+          & "${env:REPO_PATH}\scripts\promote-gpu-runtime.ps1" `
+            -RepositoryPath $env:REPO_PATH `
+            -RuntimeRoot $env:RUNTIME_ROOT `
+            -BackupDirectory $env:BACKUP_DIR `
+            -ReleaseRoot ([string]$current.release_root) `
+            -GpuServiceToken $env:GPU_SERVICE_TOKEN

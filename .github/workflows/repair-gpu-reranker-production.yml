@@ -1,10 +1,10 @@
-name: Repair GPU Reranker Production
+name: Qualify GPU Runtime Candidate
 
 on:
   workflow_dispatch:
     inputs:
-      confirm_repair:
-        description: "Confirm isolated reranker validation and the scoped global package repair"
+      confirm_qualification:
+        description: Confirm D-drive isolated CUDA candidate qualification
         required: true
         default: false
         type: boolean
@@ -13,210 +13,85 @@ permissions:
   contents: read
 
 concurrency:
-  group: production-deployment
+  group: production-gpu-exclusive
   cancel-in-progress: false
 
 jobs:
-  repair:
+  qualify:
+    if: ${{ inputs.confirm_qualification == true }}
     environment: production-asr
     runs-on: [self-hosted, windows, production, gpu]
-    timeout-minutes: 30
+    timeout-minutes: 90
     steps:
-      - name: Validate and repair the GPU reranker runtime
+      - name: Snapshot and qualify an isolated GPU runtime candidate
         shell: powershell
+        env:
+          GPU_MODEL_CACHE_SOURCE: ${{ vars.GPU_MODEL_CACHE_SOURCE }}
+          REPO_PATH: ${PRODUCTION_REPO_PATH}
+          RUNTIME_ROOT: ${PRODUCTION_REPO_PATH}\runtime
+          BACKUP_DIR: ${PRODUCTION_BACKUP_DIRECTORY}
+          GIT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEPLOY_COMMIT_SHA: ${{ github.sha }}
+          DEPLOY_HTTP_PROXY: ${{ vars.DEPLOY_HTTP_PROXY }}
         run: |
           Set-StrictMode -Version Latest
           $ErrorActionPreference = "Stop"
-          if (-not [System.Convert]::ToBoolean("${{ inputs.confirm_repair }}")) {
-            throw "confirm_repair must be explicitly enabled"
+          if (-not [Convert]::ToBoolean("${{ inputs.confirm_qualification }}")) {
+            throw "confirm_qualification must be explicitly enabled"
+          }
+          if ([string]::IsNullOrWhiteSpace($env:GPU_MODEL_CACHE_SOURCE)) {
+            throw "GPU_MODEL_CACHE_SOURCE is required"
           }
 
-          $RepositoryPath = "${PRODUCTION_REPO_PATH}"
-          $Python = "${PRODUCTION_PYTHON_PATH}"
-          $RunId = "${{ github.run_id }}"
-          $DiagnosticRoot = Join-Path "${{ runner.temp }}" "gpu-reranker-repair-$RunId"
-          $BackupRoot = Join-Path $RepositoryPath "backups\gpu-reranker-runtime-$RunId"
-          $PipCacheRoot = "${PRODUCTION_REPO_PATH}\pip-cache"
-          $CandidateTransformers = "4.46.3"
-          $CandidateTokenizers = "0.20.3"
-          $PackageIndexUrl = "https://pypi.tuna.tsinghua.edu.cn/simple"
-          $TaskName = "RAGPinCheng-GPU-Reranker-Diagnostic-$RunId"
-
-          if (-not (Test-Path -LiteralPath $Python -PathType Leaf)) {
-            throw "GPU Python executable is missing"
-          }
-          if (-not (Test-Path -LiteralPath (Join-Path $RepositoryPath "gpu_service\.env") -PathType Leaf)) {
-            throw "GPU service environment file is missing"
-          }
-          if (Get-NetTCPConnection -LocalPort 8100 -State Listen -ErrorAction SilentlyContinue) {
-            throw "Refusing package repair while production port 8100 is listening"
-          }
-          if ($null -ne (Get-ScheduledTask -TaskName "RAGPinCheng-GPU" -ErrorAction SilentlyContinue)) {
-            throw "Refusing package repair while the production GPU task exists"
-          }
-
-          New-Item -ItemType Directory -Path $DiagnosticRoot -Force | Out-Null
-          New-Item -ItemType Directory -Path $BackupRoot -Force | Out-Null
-          New-Item -ItemType Directory -Path $PipCacheRoot -Force | Out-Null
-          $env:TEMP = $DiagnosticRoot
-          $env:TMP = $DiagnosticRoot
-          $env:PIP_CACHE_DIR = $PipCacheRoot
-          $env:PIP_DISABLE_PIP_VERSION_CHECK = "1"
-          $env:PIP_NO_INPUT = "1"
-
-          function Get-PackageVersion {
-            param([Parameter(Mandatory = $true)][string]$Package)
-            $version = & $Python -c "from importlib.metadata import version; print(version('$Package'))"
-            if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($version)) {
-              throw "Unable to determine installed version for $Package"
-            }
-            return ([string]$version).Trim()
-          }
-
-          function Write-SanitizedLines {
-            param([Parameter(Mandatory = $true)][string]$Path)
-            Get-Content -LiteralPath $Path -Tail 80 -ErrorAction SilentlyContinue |
-              Where-Object { $_ -match 'GPU_RERANKER_|Fatal Python error|Traceback|Error|Exception|CUDA|Access Violation|ModuleNotFound' } |
-              ForEach-Object {
-                $line = $_ -replace '(?i)(GPU_SERVICE_TOKEN\s*[=:]\s*)\S+', '$1[REDACTED]'
-                $line = $line -replace '(?i)(https?://)[^/\s:@]+:[^@\s]+@', '$1[REDACTED]@'
-                Write-Host "GPU_RERANKER_DIAGNOSTIC $line"
-              }
-          }
-
-          function Install-PinnedPackages {
-            param(
-              [Parameter(Mandatory = $true)][string]$RuntimePython,
-              [Parameter(Mandatory = $true)][string]$LogPath
-            )
-            $savedErrorActionPreference = $ErrorActionPreference
-            $ErrorActionPreference = "Continue"
-            try {
-              $output = & $RuntimePython -m pip install --upgrade --force-reinstall --no-deps `
-                --cache-dir $PipCacheRoot `
-                --index-url $PackageIndexUrl `
-                "transformers==$CandidateTransformers" "tokenizers==$CandidateTokenizers" 2>&1
-              $exitCode = $LASTEXITCODE
-            } finally {
-              $ErrorActionPreference = $savedErrorActionPreference
-            }
-            $output | Set-Content -LiteralPath $LogPath -Encoding UTF8
-            if ($exitCode -ne 0) {
-              throw "Pinned package install failed; see local diagnostic log"
-            }
-          }
-
-          $s4uScript = @'
-          [CmdletBinding()]
-          param(
-            [Parameter(Mandatory = $true)][string]$RepositoryPath,
-            [Parameter(Mandatory = $true)][string]$RuntimePython,
-            [Parameter(Mandatory = $true)][string]$StagePath,
-            [Parameter(Mandatory = $true)][string]$StdoutPath,
-            [Parameter(Mandatory = $true)][string]$StderrPath
+          Set-Location $env:REPO_PATH
+          $basic = [Convert]::ToBase64String(
+            [Text.Encoding]::ASCII.GetBytes("x-access-token:$env:GIT_TOKEN")
           )
-          Set-StrictMode -Version Latest
-          $ErrorActionPreference = "Stop"
-          $environmentFile = Join-Path $RepositoryPath "gpu_service\.env"
-          foreach ($line in Get-Content -LiteralPath $environmentFile -Encoding UTF8) {
-            $trimmed = $line.Trim()
-            if (-not $trimmed -or $trimmed.StartsWith("#")) { continue }
-            if ($trimmed -notmatch '^([A-Z][A-Z0-9_]*)=(.*)$') {
-              throw "Invalid GPU service environment entry"
-            }
-            [Environment]::SetEnvironmentVariable($Matches[1], $Matches[2], "Process")
+          $proxyArgs = @()
+          if ($env:DEPLOY_HTTP_PROXY) {
+            $proxyArgs = @("-c", "http.proxy=$env:DEPLOY_HTTP_PROXY")
           }
-          Set-Location -LiteralPath $RepositoryPath
-          & $RuntimePython -X faulthandler -m scripts.diagnose_gpu_reranker --stage-file $StagePath 1>> $StdoutPath 2>> $StderrPath
-          exit $LASTEXITCODE
-          '@
-
-          function Invoke-S4URerankerProbe {
-            param(
-              [Parameter(Mandatory = $true)][string]$Name,
-              [Parameter(Mandatory = $true)][string]$RuntimePython
+          $fetched = $false
+          foreach ($attempt in 1..4) {
+            $gitArgs = @("-c", "http.version=HTTP/1.1") + $proxyArgs + @(
+              "-c", "http.extraHeader=AUTHORIZATION: basic $basic", "fetch",
+              "https://github.com/abworks-dev/RAGPinCheng.git", $env:DEPLOY_COMMIT_SHA
             )
-            $root = Join-Path $DiagnosticRoot $Name
-            $stagePath = Join-Path $root "stages.log"
-            $stdoutPath = Join-Path $root "stdout.log"
-            $stderrPath = Join-Path $root "stderr.log"
-            $scriptPath = Join-Path $root "run.ps1"
-            New-Item -ItemType Directory -Path $root -Force | Out-Null
-            $s4uScript | Set-Content -LiteralPath $scriptPath -Encoding UTF8
-
-            $arguments = (
-              '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -RepositoryPath "{1}" -RuntimePython "{2}" -StagePath "{3}" -StdoutPath "{4}" -StderrPath "{5}"' -f
-              $scriptPath, $RepositoryPath, $RuntimePython, $stagePath, $stdoutPath, $stderrPath
-            )
-            $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $arguments
-            $principal = New-ScheduledTaskPrincipal -UserId "Administrator" -LogonType S4U -RunLevel Highest
-            $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Minutes 8) -RestartCount 0
-            Register-ScheduledTask -TaskName $TaskName -Action $action -Principal $principal -Settings $settings -ErrorAction Stop | Out-Null
-            try {
-              Start-ScheduledTask -TaskName $TaskName -ErrorAction Stop
-              $deadline = [DateTimeOffset]::Now.AddMinutes(8)
-              do {
-                Start-Sleep -Seconds 10
-                Write-SanitizedLines -Path $stdoutPath
-                Write-SanitizedLines -Path $stderrPath
-                $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
-              } while ($task.State -eq "Running" -and [DateTimeOffset]::Now -lt $deadline)
-              if ($task.State -eq "Running") {
-                Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-                throw "S4U reranker probe exceeded eight minutes"
-              }
-              $taskInfo = Get-ScheduledTaskInfo -TaskName $TaskName -ErrorAction Stop
-              if ($taskInfo.LastTaskResult -ne 0) {
-                throw "S4U reranker probe failed with task result $($taskInfo.LastTaskResult)"
-              }
-              if (-not (Select-String -LiteralPath $stagePath -Pattern "GPU_RERANKER_STAGE stage=complete" -Quiet -ErrorAction SilentlyContinue)) {
-                throw "S4U reranker probe exited without a completion marker"
-              }
-            } finally {
-              $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-              if ($null -ne $task -and $task.State -eq "Running") {
-                Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-              }
-              Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
-              Write-Host "GPU_RERANKER_DIAGNOSTIC task_cleanup=complete name=$Name"
-            }
+            & git @gitArgs
+            if ($LASTEXITCODE -eq 0) { $fetched = $true; break }
+            if ($attempt -lt 4) { Start-Sleep -Seconds ([math]::Pow(2, $attempt)) }
+          }
+          if (-not $fetched) { throw "Candidate fetch failed after 4 attempts" }
+          git merge --ff-only $env:DEPLOY_COMMIT_SHA
+          if ($LASTEXITCODE -ne 0) { throw "Candidate fast-forward failed" }
+          if ((git rev-parse HEAD).Trim() -ne $env:DEPLOY_COMMIT_SHA) {
+            throw "Candidate repository HEAD mismatch"
           }
 
-          $originalTransformers = Get-PackageVersion -Package "transformers"
-          $originalTokenizers = Get-PackageVersion -Package "tokenizers"
-          & $Python -m pip freeze | Set-Content -LiteralPath (Join-Path $BackupRoot "pip-freeze.txt") -Encoding ASCII
-          @{ transformers = $originalTransformers; tokenizers = $originalTokenizers } |
-            ConvertTo-Json | Set-Content -LiteralPath (Join-Path $BackupRoot "changed-packages.json") -Encoding UTF8
-          Write-Host "GPU_RERANKER_REPAIR backup=created transformers=$originalTransformers tokenizers=$originalTokenizers"
+          & "${env:REPO_PATH}\scripts\snapshot-gpu-runtime.ps1" `
+            -RepositoryPath $env:REPO_PATH `
+            -ModelCacheSource $env:GPU_MODEL_CACHE_SOURCE `
+            -BackupRoot $env:BACKUP_DIR
 
-          $venv = Join-Path $DiagnosticRoot "venv"
-          & $Python -m venv --system-site-packages $venv
-          if ($LASTEXITCODE -ne 0) { throw "Unable to create isolated compatibility venv" }
-          $candidatePython = Join-Path $venv "Scripts\python.exe"
-          Install-PinnedPackages -RuntimePython $candidatePython `
-            -LogPath (Join-Path $DiagnosticRoot "candidate-pip.log")
-          Invoke-S4URerankerProbe -Name "candidate" -RuntimePython $candidatePython
+          $fingerprint = & "${env:REPO_PATH}\scripts\get-gpu-runtime-fingerprint.ps1" `
+            -RepositoryPath $env:REPO_PATH -Commit $env:DEPLOY_COMMIT_SHA
+          & "${env:REPO_PATH}\scripts\build-gpu-runtime.ps1" `
+            -RepositoryPath $env:REPO_PATH `
+            -RuntimeRoot $env:RUNTIME_ROOT `
+            -ModelCacheSource $env:GPU_MODEL_CACHE_SOURCE `
+            -CommitSha $env:DEPLOY_COMMIT_SHA `
+            -SourceFingerprint $fingerprint
 
-          $repairApplied = $false
-          try {
-            Install-PinnedPackages -RuntimePython $Python `
-              -LogPath (Join-Path $BackupRoot "global-install.log")
-            $repairApplied = $true
-            Invoke-S4URerankerProbe -Name "global" -RuntimePython $Python
-            Write-Host "GPU_RERANKER_REPAIR status=success transformers=$CandidateTransformers tokenizers=$CandidateTokenizers"
-          } catch {
-            if ($repairApplied) {
-              $savedErrorActionPreference = $ErrorActionPreference
-              $ErrorActionPreference = "Continue"
-              try {
-                & $Python -m pip install --upgrade --force-reinstall --no-deps `
-                  --cache-dir $PipCacheRoot `
-                  --index-url $PackageIndexUrl `
-                  "transformers==$originalTransformers" "tokenizers==$originalTokenizers" 2>&1 | Out-Null
-              } finally {
-                $ErrorActionPreference = $savedErrorActionPreference
-              }
-              Write-Host "GPU_RERANKER_REPAIR rollback=attempted"
-            }
-            throw
-          }
+          $metadata = Get-Content "${env:REPO_PATH}\gpu_service\runtime-lock.json" -Encoding UTF8 | ConvertFrom-Json
+          $requirementsPath = "${env:REPO_PATH}\gpu_service\$($metadata.requirements_file)"
+          $lockHash = & "${env:REPO_PATH}\scripts\get-gpu-runtime-lock-hash.ps1" `
+            -Path $requirementsPath
+          $releaseId = $fingerprint.Substring(0, 12) + "-" + $lockHash.Substring(0, 12)
+          $releaseRoot = Join-Path $env:RUNTIME_ROOT "releases\$releaseId"
+          & "${env:REPO_PATH}\scripts\qualify-gpu-runtime.ps1" `
+            -RuntimeRoot $env:RUNTIME_ROOT `
+            -ReleaseRoot $releaseRoot `
+            -QualificationRunId "${{ github.run_id }}"
+
+          $result = Get-Content (Join-Path $releaseRoot "qualification.json") -Encoding UTF8 | ConvertFrom-Json
+          Write-Host "GPU_RUNTIME_CANDIDATE status=$($result.status) device=$($result.device) reranker_precision=$($result.reranker_precision) source_fingerprint=$fingerprint lock_sha256=$lockHash qualification_run_id=${{ github.run_id }}"
