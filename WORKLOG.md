@@ -2744,6 +2744,13 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 验证：PyPI metadata 只读核对、PowerShell AST、sanitizer self-test、Python `py_compile`、workflow YAML 解析和 `git diff --check` 通过；未下载源码包、未安装依赖、未启动服务。
 - 待办/风险：需 CI 通过后以新的完整 master SHA 再执行一次 Qwen R3；Profile admission 仍 disabled，生产服务未修改。
 
+### 07:23 — 统一 Windows 生产清理工作流
+
+- 完成：新增统一生产清理编排器和 GitHub Actions 工作流，支持 `all`、`asr`、`runtime`、`backups` 目标选择；定时触发仅 DryRun，手动删除必须同时确认 Apply 和生产清理；新增统一汇总报告与迁移说明。
+- 文件：`scripts/cleanup-production.ps1`、`.github/workflows/cleanup-production.yml`、`project-docs/migrations/windows-production-cleanup-workflow.md`、`WORKLOG.md`
+- 验证：PowerShell 解析通过；临时 `backups` DryRun 保留最新 3 份及非匹配目录并生成汇总 JSON，Apply 测试仅删除最旧一份；工作流关键字段和 `git diff --check` 通过。
+- 待办/风险：未访问或修改生产目录；临时测试目录自动删除被本机命令策略拦截，需后续手动清理该临时目录。
+
 ### 07:41 — 修复 Qwen wheel 来源绑定
 
 - 完成：针对 run `31283453567` 在 `wheel_manifest` 阶段的来源绑定失败，兼容 pip `*.whl.metadata` URL、按 SHA-256 检索共享 wheel seed，并在无法绑定时报告具体 wheel 文件名；未放宽 binary-only 或来源完整性门禁。
