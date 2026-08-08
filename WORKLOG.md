@@ -2743,3 +2743,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`scripts/build_internal_aliyun_core_wheel.py`、`.github/workflows/qualify-qwen3-asr-production.yml`、`scripts/qualify-qwen3-asr-production.ps1`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`
 - 验证：PyPI metadata 只读核对、PowerShell AST、sanitizer self-test、Python `py_compile`、workflow YAML 解析和 `git diff --check` 通过；未下载源码包、未安装依赖、未启动服务。
 - 待办/风险：需 CI 通过后以新的完整 master SHA 再执行一次 Qwen R3；Profile admission 仍 disabled，生产服务未修改。
+
+### 07:41 — 修复 Qwen wheel 来源绑定
+
+- 完成：针对 run `31283453567` 在 `wheel_manifest` 阶段的来源绑定失败，兼容 pip `*.whl.metadata` URL、按 SHA-256 检索共享 wheel seed，并在无法绑定时报告具体 wheel 文件名；未放宽 binary-only 或来源完整性门禁。
+- 文件：`scripts/qualify-qwen3-asr-production.ps1`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`
+- 验证：PowerShell AST 解析、`git diff --check` 通过；未安装依赖、未启动服务。需 CI 通过后以新的完整 master SHA 重跑 Qwen R3。
+- 待办/风险：本次修复尚未提交、推送或触发 workflow；Profile admission 仍 disabled，生产服务未修改。
