@@ -2658,6 +2658,13 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 验证：PowerShell AST 解析、Python `py_compile`、新增 Qwen 诊断静态断言、`git diff --check` 通过；当前环境没有 pytest，未安装依赖，未运行 pytest。
 - 待办/风险：需 CI 通过后以新的完整 master SHA 重跑 Qwen R3；不放宽依赖、模型、CUDA BF16、样本、资源门禁或 Profile admission，失败仍保持 disabled 并清理。
 
+### 04:21 — 修复 validated lock 重新资格构建
+
+- 完成：为 GPU runtime builder 增加显式 `-RequalifyValidated` candidate 模式；该模式只复用精确依赖锁和 Torch wheel SHA，在 run-local release 中绑定新的源码提交和资格证据，不导入旧 qualification root；candidate workflow 已启用该模式，promotion 门禁保持不变。
+- 文件：`scripts/build-gpu-runtime.ps1`、`.github/workflows/repair-gpu-reranker-production.yml`、`tests/test_gpu_runtime_deployment_static.py`、`WORKLOG.md`
+- 验证：GPU runtime 静态专项 `14 passed`；PowerShell builder AST 解析通过；`git diff --check` 通过。
+- 待办/风险：尚未推送或触发修复后的生产 workflow；需合入 master 后重新运行 `e8ce5ec...` candidate qualification，再继续 promotion 和 faster-whisper。
+
 ### 04:39 — 补齐 Qwen pip 冲突汇总模式
 
 - 完成：根据 R3 run `31277073826` 的脱敏结果，补充标准 pip `Cannot install ... conflicting dependencies`、`ResolutionImpossible` 及无 `(constraint)` 的请求行分类；不改变 requirements、版本 pin 或任何资格门禁。
