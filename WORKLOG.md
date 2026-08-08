@@ -2643,3 +2643,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 完成：将 `master` 的 `0c60eec` 合入 Qwen 分支，保留 manifest 路径异常时重新导入 qualification release 的修复；未修改生产文件。
 - 验证：production run `31273681766` 已以 `5af725c` 完成 GPU runtime promotion（release `9b147c448b9b-fa16678de682`）和 Ubuntu backend health check，两个 job 均成功；GPU 资格 fingerprint 仍为 `9b147c448b9b22d15e41f8eae7409c5417c291fec0f8f3d67b47ad6a8bab2e79`。
 - 待办/风险：Qwen PR 需在最新 master 合入后重新通过 CI；未合并 PR、未触发 Qwen R3 或修改 Profile admission。
+
+### 03:59 — 修复 Qwen 原生 stderr 诊断并准备重跑
+
+- 完成：将 Qwen qualification wrapper 的外部命令捕获改为 Windows PowerShell 安全的原生 `&` 调用，显式记录 `failure_origin`、退出码和捕获行数；新增 Qwen 专项静态断言，避免 native stderr 被泛化异常吞掉。
+- 文件：`scripts/qualify-qwen3-asr-production.ps1`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
+- 验证：PowerShell AST、`python -m compileall -q scripts tests`、Qwen targeted static assertions 与 `git diff --check` 通过；尚未触发新的 production qualification。
+- 待办/风险：需 CI 通过后以新的完整 master SHA 重跑 R3；Profile admission 继续保持 disabled。
