@@ -2592,3 +2592,19 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 完成：最新隔离 run `31251430900` 已完成构建并进入 CUDA 资格，但主步骤失败后 artifact 上传被跳过，无法读取 FP16/FP32 尝试结果；将候选 release 路径提前写入 workflow 环境，并让证据上传使用 `always()`，确保失败也保留 qualification、manifest、源码清单和 freeze。
 - 验证：待本地专项测试、YAML/PowerShell 解析和隔离资格重跑；不改变资格门槛或生产 promotion。
 - 待办/风险：当前尚未证明任何 reranker precision 通过，生产 GPU 服务和全局依赖保持不变。
+
+## 2026-08-09
+
+### 01:54 — 修复 CUDA 资格依赖不兼容并改为两精度全通过门禁
+
+- 完成：定位资格 run `31252065215` 失败根因——`FlagEmbedding==1.4.0` 的 M3 加载路径向 `AutoModel.from_pretrained` 传入 `dtype`，该关键字自 `transformers` 4.56.0 才存在，而候选锁为 4.55.4，fp16/fp32 两次尝试都在 `embed_start` 以 `TypeError: XLMRobertaModel.__init__() got an unexpected keyword argument 'dtype'` 终止；真正的机制是解析约束 `tokenizers>=0.21,<0.22` 与 4.56 自身要求的 `>=0.22` 不相交，在 `transformers>=4.47,<5` 名义允许 4.56+ 的情况下静默封顶到 4.55.4，而 FlagEmbedding 元数据只声明 `transformers>=4.44.2,<6.0.0` 故 `pip check` 通过。解析器改为固定 `FlagEmbedding==1.4.0`、`transformers>=4.56,<5`、`tokenizers>=0.22,<0.23` 并逐项断言与拒绝 4.55.4/0.21.4；资格脚本去掉首个精度成功即 `break`，要求每种批准精度都到达 `stage=complete`，新增 `requested_precisions`/`qualified_precisions` 分别记录，`reranker_precision` 保持标量并确定性优先 fp16（promote 与 start 按单值消费，start 由 `-eq "fp16"` 推导 `RERANKER_USE_FP16`，改数组会静默失真）；修复 workflow 未上传 `qualification\fp16|fp32\stages.log`/`stderr.log` 的证据缺口。
+- 文件：`scripts/resolve-gpu-runtime.ps1`、`scripts/qualify-gpu-runtime.ps1`、`gpu_service/requirements.txt`、`requirements-gpu.txt`、`.github/workflows/repair-gpu-reranker-production.yml`、`tests/test_gpu_runtime_deployment_static.py`、`project-docs/features/gpu-runtime-deployment.md`、`WORKLOG.md`
+- 验证：两个 PowerShell 脚本解析检查通过；在 `Set-StrictMode -Version Latest` 下按五种精度结果组合验证门禁（`[fp16,fp32]`→qualified/fp16、`[fp32,fp16]`→qualified/fp16、`[fp16]`→失败并列出 fp32、`[fp32]`→失败并列出 fp16、`[]`→失败并列出两者），确认 `reranker_precision` 仍为 `String`、`isArray=False`、`-eq "fp16"` 为真；`pytest tests/test_gpu_runtime_deployment_static.py tests/test_asr_deployment_static.py tests/test_deploy_git_safety.py` 为 `1 failed, 59 passed, 2 subtests passed`。
+- 待办/风险：唯一失败项 `assert (4, 56) <= (4, 55)` 是方案预期结果——`gpu_service/runtime-lock.txt` 仍是旧的 4.55.4 闭包，只能由 GPU 主机上的解析 workflow 重新生成，不得手工改单行版本；需用户依次触发候选解析（`confirm_resolution=true`）、人工复核 `resolver-report.json`、原样替换锁并提交，再触发候选资格（`confirm_qualification=true`）并要求 `qualified_precisions` 同时包含 fp16 与 fp32。本次未回填 validated 元数据、未 promotion、未启动 GPU 服务、未改精度白名单、未删除失败 release，也未修复 `qualify-gpu-runtime.ps1:150-159` 的轮询竞态（本次未触发，属独立变更）。
+
+### 02:08 — 撤销不兼容 GPU 候选锁
+
+- 完成：候选解析 run `31270935478` 因 `production-asr` 环境保护拒绝非受保护分支而在分配 Runner 前失败，未接触 GPU 主机；为让修复先以全绿状态合入允许的 `master`，将已证明不兼容的 4.55.4/0.21.4 闭包从正式锁移除，元数据回退为 `unvalidated` 并清空 Torch 哈希。构建器继续只接受 `candidate`/`validated`，因此该过渡提交不能构建、资格验证或 promotion；新版 4.56+/0.22.x 约束仍由 resolver 静态契约独立保护。
+- 文件：`gpu_service/runtime-lock.json`、`gpu_service/runtime-lock.txt`、`tests/test_gpu_runtime_deployment_static.py`、`project-docs/features/gpu-runtime-deployment.md`、`WORKLOG.md`。
+- 验证：GPU/ASR/部署静态专项 `60 passed`；4 个 GPU runtime PowerShell 脚本 AST 与全部 workflow YAML 解析通过；状态冒烟确认 `validation_status=unvalidated`、`torch_wheel_sha256=null`、正式 pin 数为 0；`git diff --check` 通过。
+- 待办/风险：需通过 PR 合入 `master` 后从 `master` 重跑候选解析，人工复核 artifact 并提交完整新锁；在新候选完成双精度 CUDA/S4U 资格、回填 validated 元数据和独立 R3 promotion 前，不得恢复 GPU 服务。
