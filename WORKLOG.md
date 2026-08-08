@@ -2586,3 +2586,9 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 完成：确认 Windows PowerShell 通过管道读取 `source-files.sha256.json` 会把 JSON 数组包装为单个 `System.Object[]`；资格、promotion 和生产启动脚本统一改用 `ConvertFrom-Json -InputObject` 加 `Get-Content -Raw`，逐条恢复源码清单校验。
 - 验证：待本地专项测试与 PowerShell 解析后重新运行隔离 GPU runtime 资格；完整性校验仍保持 fail-closed。
 - 待办/风险：未执行 promotion、生产 GPU 服务恢复、全局依赖变更或 faster-whisper 资格验证。
+
+### 17:59 — 保留失败资格证据
+
+- 完成：最新隔离 run `31251430900` 已完成构建并进入 CUDA 资格，但主步骤失败后 artifact 上传被跳过，无法读取 FP16/FP32 尝试结果；将候选 release 路径提前写入 workflow 环境，并让证据上传使用 `always()`，确保失败也保留 qualification、manifest、源码清单和 freeze。
+- 验证：待本地专项测试、YAML/PowerShell 解析和隔离资格重跑；不改变资格门槛或生产 promotion。
+- 待办/风险：当前尚未证明任何 reranker precision 通过，生产 GPU 服务和全局依赖保持不变。

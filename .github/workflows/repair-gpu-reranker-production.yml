@@ -96,16 +96,17 @@ jobs:
             -Path $requirementsPath
           $releaseId = $fingerprint.Substring(0, 12) + "-" + $lockHash.Substring(0, 12)
           $releaseRoot = Join-Path $env:RUNTIME_ROOT "releases\$releaseId"
+          "GPU_CANDIDATE_RELEASE_ROOT=$releaseRoot" | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding UTF8
           & "${env:REPO_PATH}\scripts\qualify-gpu-runtime.ps1" `
             -RuntimeRoot $env:RUNTIME_ROOT `
             -ReleaseRoot $releaseRoot `
             -QualificationRunId "${{ github.run_id }}"
 
           $result = Get-Content (Join-Path $releaseRoot "qualification.json") -Encoding UTF8 | ConvertFrom-Json
-          "GPU_CANDIDATE_RELEASE_ROOT=$releaseRoot" | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding UTF8
           Write-Host "GPU_RUNTIME_CANDIDATE status=$($result.status) device=$($result.device) reranker_precision=$($result.reranker_precision) source_fingerprint=$fingerprint lock_sha256=$lockHash qualification_run_id=${{ github.run_id }}"
 
       - name: Upload candidate qualification evidence
+        if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
           name: gpu-runtime-qualification-${{ github.run_id }}-${{ github.run_attempt }}
