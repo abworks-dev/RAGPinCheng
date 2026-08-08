@@ -2692,3 +2692,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`.github/workflows/repair-gpu-reranker-production.yml`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`
 - 验证：已对照现有 `promote-gpu-runtime.ps1` 的同等安全校验；专项 pytest 需由 CI 验证。
 - 待办/风险：需 CI 通过后重新合入 master，并再次执行已批准的停机、资格验证和自动恢复。
+
+### 05:27 — 注销停机期间生产任务
+
+- 完成：针对 run `31278908260` 已关闭 8100 但 qualification 仍发现 `RAGPinCheng-GPU` 任务的问题，在端口关闭确认后注销已停止的生产任务；`finally` 仍通过原 validated release 的 promotion 重新注册并恢复服务。
+- 文件：`.github/workflows/repair-gpu-reranker-production.yml`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`
+- 验证：run `31278908260` 已确认停止和恢复均完成，失败点为资格脚本的生产任务存在保护；专项 pytest 待 CI 验证。
+- 待办/风险：需 CI 通过后再次合入 master，并重跑维护窗口资格验证。
