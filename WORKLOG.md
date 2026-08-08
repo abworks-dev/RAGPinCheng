@@ -2608,3 +2608,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`gpu_service/runtime-lock.json`、`gpu_service/runtime-lock.txt`、`tests/test_gpu_runtime_deployment_static.py`、`project-docs/features/gpu-runtime-deployment.md`、`WORKLOG.md`。
 - 验证：PR `#108` 的7个 CI job全部通过；GPU/ASR/部署静态专项 `60 passed`；4个 GPU runtime PowerShell脚本 AST 与全部 workflow YAML 解析通过；resolver report为 `status=resolved`、`pip_check=passed`，75行均为完整唯一pin且不含4.55.4/0.21.4；正式锁与 artifact 的原始及规范化 SHA-256完全一致；`git diff --check` 通过。
 - 待办/风险：新闭包尚未执行 CUDA/S4U 双精度资格，不能回填 validated 元数据或恢复 GPU 服务；qualification 与 promotion 仍按独立 R3 执行。未改生产任务、8100监听、全局Python、模型缓存、数据库、Qdrant或环境保护规则。
+
+### 02:38 — 绑定 GPU 资格证据并准备 promotion
+
+- 完成：资格 run `31271874609` 在真实 CUDA/S4U 上以 FP16、FP32 均完成 Embedding 与 Reranker 加载/推理，`status=qualified`、`qualified_precisions=[fp16,fp32]`；将 `runtime-lock.json` 绑定该 run、`master` commit `3ff8c076c4637ab156281dbab7f6b3feac966685`、源码指纹 `9b147c448b9b22d15e41f8eae7409c5417c291fec0f8f3d67b47ad6a8bab2e79` 和锁 SHA `fa16678de682e389e0f5ca89b180b2c033404e5e077ff539b552f8cde0430f1a`，状态推进为 `validated`。
+- 文件：`gpu_service/runtime-lock.json`、`tests/test_gpu_runtime_deployment_static.py`、`WORKLOG.md`。
+- 验证：资格 workflow 成功并上传两种精度的 stages/stdout/stderr、manifest、qualification 和完整性清单；尚待本地专项测试、CI 与 production deployment。
+- 待办/风险：promotion 会备份并修改 GPU 任务、环境文件、release 指针和 8100 服务；现有 workflow 在 GPU 成功后还会连带部署 Ubuntu 应用。promotion 或健康/冒烟失败时由脚本恢复备份；当前尚无已知健康 release，首次失败只能保持离线状态。
