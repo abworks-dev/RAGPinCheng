@@ -198,6 +198,8 @@ def test_candidate_qualification_is_cuda_only_and_cleans_tasks():
     assert "QualificationRunId" in script
     assert "torch_wheel_sha256" in script
     assert "source_inventory_sha256" in script
+    assert "expected_length=" in script
+    assert "actual_sha256=" in script
     assert "repository_commit" in script
     assert "Set-Location -LiteralPath $SourceRoot" in script
     assert 'choices=("fp16", "fp32")' in probe

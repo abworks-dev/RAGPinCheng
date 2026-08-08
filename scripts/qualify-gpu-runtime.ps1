@@ -63,15 +63,24 @@ if ($inventoryHash -ne $manifest.source_inventory_sha256) {
     throw "GPU runtime source inventory does not match the release manifest"
 }
 $sourceInventory = @(Get-Content -LiteralPath $sourceInventoryPath -Encoding UTF8 | ConvertFrom-Json)
+$sourceMismatches = @()
 foreach ($entry in $sourceInventory) {
     $sourcePath = Join-Path $sourceRoot (([string]$entry.path) -replace '/', '\')
-    if (
-        -not (Test-Path -LiteralPath $sourcePath -PathType Leaf) -or
-        (Get-Item -LiteralPath $sourcePath).Length -ne [long]$entry.length -or
-        (Get-FileHash -LiteralPath $sourcePath -Algorithm SHA256).Hash.ToLowerInvariant() -ne [string]$entry.sha256
-    ) {
-        throw "GPU runtime source snapshot failed integrity validation: $($entry.path)"
+    $actualLength = -1L
+    $actualHash = "missing"
+    if (Test-Path -LiteralPath $sourcePath -PathType Leaf) {
+        $actualLength = [long](Get-Item -LiteralPath $sourcePath).Length
+        $actualHash = (Get-FileHash -LiteralPath $sourcePath -Algorithm SHA256).Hash.ToLowerInvariant()
     }
+    if ($actualLength -ne [long]$entry.length -or $actualHash -ne [string]$entry.sha256) {
+        $sourceMismatches += (
+            "{0} expected_length={1} actual_length={2} expected_sha256={3} actual_sha256={4}" -f
+            $entry.path, $entry.length, $actualLength, $entry.sha256, $actualHash
+        )
+    }
+}
+if ($sourceMismatches.Count -gt 0) {
+    throw "GPU runtime source snapshot failed integrity validation: $($sourceMismatches -join '; ')"
 }
 if (Get-NetTCPConnection -LocalPort 8100 -State Listen -ErrorAction SilentlyContinue) {
     throw "Refusing candidate qualification while production port 8100 is listening"
