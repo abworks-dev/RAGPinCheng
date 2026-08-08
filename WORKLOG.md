@@ -2574,3 +2574,15 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 完成：候选资格 run `31250213152` 已通过独立 D 盘构建和 `pip check`，但仍在源码快照完整性校验阶段失败；补充每个不一致文件的期望/实际长度与 SHA-256 输出，保持失败关闭，不放宽校验。
 - 验证：变更范围仅为 `scripts/qualify-gpu-runtime.ps1`、GPU runtime 静态测试和 `WORKLOG.md`；待本地测试、提交后重新运行隔离资格。
 - 待办/风险：本次仍不执行 promotion、生产任务恢复、全局依赖修改或 faster-whisper 资格验证。
+
+### 17:34 — 修复源码清单 JSON 序列化
+
+- 完成：根因确认为 Windows PowerShell 下源码清单写出格式错误，资格端读取到单个对象及 `System.Object[]` 字段，而不是条目数组；构建端改用显式 `ConvertTo-Json -InputObject @($sourceInventory)` 并保留严格 hash/长度校验。
+- 验证：待运行 GPU runtime 静态测试、PowerShell 解析和隔离资格重跑；不放宽完整性校验，不改生产服务。
+- 待办/风险：通过候选资格后才允许后续 validated/promotion 流程；此前失败 run 均未改生产任务或全局依赖。
+
+### 17:40 — 修复 Windows JSON 数组读取
+
+- 完成：确认 Windows PowerShell 通过管道读取 `source-files.sha256.json` 会把 JSON 数组包装为单个 `System.Object[]`；资格、promotion 和生产启动脚本统一改用 `ConvertFrom-Json -InputObject` 加 `Get-Content -Raw`，逐条恢复源码清单校验。
+- 验证：待本地专项测试与 PowerShell 解析后重新运行隔离 GPU runtime 资格；完整性校验仍保持 fail-closed。
+- 待办/风险：未执行 promotion、生产 GPU 服务恢复、全局依赖变更或 faster-whisper 资格验证。
