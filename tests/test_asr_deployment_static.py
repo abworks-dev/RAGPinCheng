@@ -1202,6 +1202,10 @@ def test_qwen3_asr_qualification_uses_controlled_legacy_wheel_bundles():
     assert '"--find-links", $ResolvedCrcmodWheelBundle' in script
     assert '"--find-links", $ResolvedAliyunCoreWheelBundle' in script
     assert "Controlled internal wheel bundle must be a real directory" in script
+    assert 'EndsWith(".whl.metadata"' in script
+    assert 'candidate -replace "\\.whl\\.metadata(?=$|[?#])", ".whl"' in script
+    assert 'Where-Object { (Get-Sha256 -Path $_.FullName) -eq $wheelSha256 }' in script
+    assert "Unable to bind wheel file '$($wheel.Name)'" in script
 
 
 def test_qwen3_asr_qualification_freezes_dual_models_bf16_and_result_flow():
