@@ -2685,3 +2685,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`tests/test_asr_deployment_static.py`、`WORKLOG.md`
 - 验证：已定位失败测试和断言；当前 worktree 未安装 pytest，未安装依赖，专项 pytest 待 CI 复跑。
 - 待办/风险：需推送后等待 PR CI；CI 通过并合入 master 后，才执行已批准的生产服务临时停止、资格验证和自动恢复。
+
+### 05:11 — 修复 GPU 子进程残留停止
+
+- 完成：针对 run `31278395292` 在停止计划任务后 8100 仍监听的问题，维护窗口增加受管 GPU Python 子进程的命令行、可执行文件路径归属校验和强制停止，再继续端口关闭轮询；陌生监听进程仍拒绝处理。
+- 文件：`.github/workflows/repair-gpu-reranker-production.yml`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`
+- 验证：已对照现有 `promote-gpu-runtime.ps1` 的同等安全校验；专项 pytest 需由 CI 验证。
+- 待办/风险：需 CI 通过后重新合入 master，并再次执行已批准的停机、资格验证和自动恢复。

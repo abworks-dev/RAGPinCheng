@@ -104,6 +104,20 @@ jobs:
                 throw "GPU port 8100 is listening without the owned production task"
               }
               Stop-ScheduledTask -TaskName $productionTaskName -ErrorAction Stop
+              foreach ($listener in @($listeners)) {
+                $process = Get-CimInstance Win32_Process -Filter ("ProcessId={0}" -f $listener.OwningProcess)
+                if (
+                  $null -eq $process -or
+                  [string]$process.CommandLine -notmatch '-m gpu_service\.app' -or
+                  (
+                    -not ([string]$process.ExecutablePath).StartsWith($runtimeRoot, [StringComparison]::OrdinalIgnoreCase) -and
+                    [string]$process.ExecutablePath -ne "${PRODUCTION_PYTHON_PATH}"
+                  )
+                ) {
+                  throw "Refusing to stop an unexpected process listening on TCP 8100"
+                }
+                Stop-Process -Id $listener.OwningProcess -Force -ErrorAction Stop
+              }
               $productionSuspended = $true
               $deadline = [DateTimeOffset]::Now.AddSeconds(180)
               do {
