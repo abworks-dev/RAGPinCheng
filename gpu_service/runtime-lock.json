@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
-  "validation_status": "unvalidated",
+  "validation_status": "candidate",
   "qualification_run_id": null,
   "source_commit": null,
   "qualified_source_fingerprint": null,
   "qualified_lock_sha256": null,
-  "torch_wheel_sha256": null,
+  "torch_wheel_sha256": "c52c4b869742f00b12cb34521d1381be6119fa46244791704b00cc4a3cb06850",
   "python_version": "3.10",
   "requirements_file": "runtime-lock.txt",
   "package_index_url": "https://pypi.tuna.tsinghua.edu.cn/simple",
