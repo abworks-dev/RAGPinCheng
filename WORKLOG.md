@@ -2757,3 +2757,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`scripts/qualify-qwen3-asr-production.ps1`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`
 - 验证：PowerShell AST 解析、`git diff --check` 通过；未安装依赖、未启动服务。需 CI 通过后以新的完整 master SHA 重跑 Qwen R3。
 - 待办/风险：本次修复尚未提交、推送或触发 workflow；Profile admission 仍 disabled，生产服务未修改。
+
+### 07:45 — 接入生产清理自动触发
+
+- 完成：部署工作流在 GPU 与应用部署均成功后自动清理旧 `RAGBackups`；清理工作流增加可复用调用、每日全量 DryRun 和每 30 分钟磁盘压力检查；磁盘达到 90% 仅在 `PRODUCTION_AUTO_CLEANUP_ENABLED=true` 时自动清理旧备份，95% 只告警；新增只读磁盘检查脚本、静态契约测试和显式禁用 push 触发。
+- 文件：`.github/workflows/cleanup-production.yml`、`.github/workflows/deploy-production.yml`、`scripts/check-production-disk.ps1`、`tests/test_production_cleanup_triggers_static.py`、`project-docs/migrations/windows-production-cleanup-workflow.md`、`WORKLOG.md`
+- 验证：PowerShell parser 通过；静态断言 3/3 通过；测试文件 `py_compile` 通过；工作流关键字段和 `git diff --check` 通过；本机未安装 pytest，未执行 pytest。
+- 待办/风险：未访问或修改生产目录；ASR 和 GPU Runtime 不会被磁盘阈值自动 Apply；启用阈值自动清理前需在生产配置 `PRODUCTION_AUTO_CLEANUP_ENABLED=true`，并观察 DryRun 报告。
