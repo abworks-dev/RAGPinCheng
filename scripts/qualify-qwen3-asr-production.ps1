@@ -671,6 +671,7 @@ function Convert-ToSanitizedDependencyFailure {
     $constraintContractError = $false
     $filesystemOrPermissionFailure = $false
     $diskSpaceFailure = $false
+    $resolverConflictFailure = $false
 
     foreach ($raw in $Lines) {
         $line = ([string]$raw).Trim()
@@ -698,7 +699,7 @@ function Convert-ToSanitizedDependencyFailure {
             continue
         }
         if (
-            $clean -match '^The user requested \(constraint\)\s+(?<package>[A-Za-z0-9_.-]+)(?<spec>(?:==|!=|<=|>=|~=|<|>)[A-Za-z0-9+_.!*,~-]+)$'
+            $clean -match '^The user requested(?: \(constraint\))?\s+(?<package>[A-Za-z0-9_.-]+)(?<spec>(?:==|!=|<=|>=|~=|<|>)[A-Za-z0-9+_.!*,~-]+)$'
         ) {
             [void]$constraintTargets.Add(
                 (Get-NormalizedPackageName -Name $Matches.package)
@@ -729,6 +730,11 @@ function Convert-ToSanitizedDependencyFailure {
             $line -match '(?i)(Permission denied|Access is denied|WinError 5|Errno 13)'
         ) {
             $filesystemOrPermissionFailure = $true
+        }
+        if (
+            $line -match '(?i)(Cannot install .+ because these package versions have conflicting dependencies|The conflict is caused by:|ResolutionImpossible)'
+        ) {
+            $resolverConflictFailure = $true
         }
     }
 
@@ -776,6 +782,13 @@ function Convert-ToSanitizedDependencyFailure {
             Requirement = ""
         }
     }
+    if ($resolverConflictFailure) {
+        return [pscustomobject]@{
+            Stage = $Stage
+            Kind = "version_constraint_conflict"
+            Requirement = ""
+        }
+    }
     if ($networkOrIndexFailure) {
         return [pscustomobject]@{
             Stage = $Stage
@@ -800,6 +813,14 @@ function Assert-DependencySanitizerSelfTest {
     $conflict = Convert-ToSanitizedDependencyFailure -Stage "pip_download" -Lines @(
         "D:\private\python.exe : ERROR: funasr 1.4.1 depends on numpy<2",
         "D:\private\python.exe : ERROR: The user requested (constraint) numpy==2.0.0"
+    )
+    $resolverConflict = Convert-ToSanitizedDependencyFailure -Stage "pip_download" -Lines @(
+        "ERROR: Cannot install qwen-asr because these package versions have conflicting dependencies.",
+        "ERROR: ResolutionImpossible"
+    )
+    $unmarkedConstraint = Convert-ToSanitizedDependencyFailure -Stage "pip_download" -Lines @(
+        "funasr 1.4.1 depends on numpy<2",
+        "The user requested numpy==2.0.0"
     )
     $network = Convert-ToSanitizedDependencyFailure -Stage "pip_download" -Lines @(
         "Could not fetch URL https://private.invalid/simple: connection error"
@@ -827,6 +848,9 @@ function Assert-DependencySanitizerSelfTest {
         $binary.Requirement -ne "jieba" -or
         $conflict.Kind -ne "version_constraint_conflict" -or
         $conflict.Requirement -ne "numpy" -or
+        $resolverConflict.Kind -ne "version_constraint_conflict" -or
+        $unmarkedConstraint.Kind -ne "version_constraint_conflict" -or
+        $unmarkedConstraint.Requirement -ne "numpy" -or
         $network.Kind -ne "network_or_index_failure" -or
         -not [string]::IsNullOrEmpty([string]$network.Requirement) -or
         $invalidInput.Kind -ne "invalid_requirement_input" -or
