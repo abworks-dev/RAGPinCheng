@@ -1,0 +1,109 @@
+name: Production cleanup
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Cleanup target
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - asr
+          - runtime
+          - backups
+      apply:
+        description: Delete approved candidates instead of previewing
+        required: true
+        default: false
+        type: boolean
+      confirm_production_cleanup:
+        description: Confirm this cleanup run on the production Windows host
+        required: true
+        default: false
+        type: boolean
+  schedule:
+    - cron: '30 19 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-cleanup
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    if: >-
+      github.event_name == 'schedule' ||
+      (github.event_name == 'workflow_dispatch' &&
+      inputs.confirm_production_cleanup == true)
+    runs-on:
+      - self-hosted
+      - windows
+      - production
+      - gpu
+    timeout-minutes: 30
+    env:
+      REPO_PATH: ${PRODUCTION_REPO_PATH}
+      ASR_ROOT: ${PRODUCTION_DATA_ROOT}
+      RUNTIME_ROOT: ${PRODUCTION_REPO_PATH}\runtime
+      BACKUP_DIRECTORY: ${PRODUCTION_BACKUP_DIRECTORY}
+      REPORT_ROOT: ${{ runner.temp }}\ragpincheng-production-cleanup
+
+    steps:
+      - name: Verify cleanup checkout
+        shell: powershell
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          $scriptPath = Join-Path $env:REPO_PATH 'scripts\cleanup-production.ps1'
+          if (-not (Test-Path -LiteralPath $scriptPath -PathType Leaf)) {
+            throw "Unified cleanup script is missing: $scriptPath"
+          }
+          Write-Host "Using cleanup script: $scriptPath"
+
+      - name: Run production cleanup
+        shell: powershell
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_TARGET: ${{ inputs.target }}
+          INPUT_APPLY: ${{ inputs.apply }}
+          INPUT_CONFIRM: ${{ inputs.confirm_production_cleanup }}
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+
+          $target = if ($env:EVENT_NAME -eq 'workflow_dispatch' -and $env:INPUT_TARGET) {
+            $env:INPUT_TARGET
+          }
+          else {
+            'all'
+          }
+
+          $apply = $env:EVENT_NAME -eq 'workflow_dispatch' `
+            -and $env:INPUT_APPLY -eq 'true' `
+            -and $env:INPUT_CONFIRM -eq 'true'
+
+          $arguments = @(
+            '-Target', $target,
+            '-AsrRoot', $env:ASR_ROOT,
+            '-RuntimeRoot', $env:RUNTIME_ROOT,
+            '-BackupDirectory', $env:BACKUP_DIRECTORY,
+            '-ReportRoot', $env:REPORT_ROOT,
+            '-Confirm:$false'
+          )
+          if ($apply) {
+            $arguments += '-Apply'
+          }
+
+          & (Join-Path $env:REPO_PATH 'scripts\cleanup-production.ps1') @arguments
+
+      - name: Upload cleanup report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-cleanup-${{ github.run_id }}
+          path: ${{ runner.temp }}/ragpincheng-production-cleanup
+          if-no-files-found: warn
