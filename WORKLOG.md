@@ -2650,3 +2650,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`scripts/qualify-qwen3-asr-production.ps1`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
 - 验证：PowerShell AST、`python -m compileall -q scripts tests`、Qwen targeted static assertions 与 `git diff --check` 通过；尚未触发新的 production qualification。
 - 待办/风险：需 CI 通过后以新的完整 master SHA 重跑 R3；Profile admission 继续保持 disabled。
+
+### 04:18 — 增强 Qwen 依赖失败诊断并准备自动重跑
+
+- 完成：为 Qwen R3 依赖阶段增加固定分类（缺少二进制包、版本约束、网络/索引、输入约束、磁盘/权限和代理失败），记录失败 operation、原生退出码和捕获行数；`pip_download` 证据不足时仅在隔离 wheel bundle/shared seed 内执行受限 resolver dry-run，并将结果脱敏写入 v2 diagnostic artifact。
+- 文件：`scripts/qualify-qwen3-asr-production.ps1`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
+- 验证：PowerShell AST 解析、Python `py_compile`、新增 Qwen 诊断静态断言、`git diff --check` 通过；当前环境没有 pytest，未安装依赖，未运行 pytest。
+- 待办/风险：需 CI 通过后以新的完整 master SHA 重跑 Qwen R3；不放宽依赖、模型、CUDA BF16、样本、资源门禁或 Profile admission，失败仍保持 disabled 并清理。
