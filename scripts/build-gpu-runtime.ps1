@@ -6,7 +6,8 @@ param(
     [string]$TorchWheelSeedRoot = "D:\RAGPinCheng\runtime\wheel-seed\torch-2.7.0-cu128-cp310-win_amd64",
     [Parameter(Mandatory)][string]$ModelCacheSource,
     [Parameter(Mandatory)][ValidatePattern('^[0-9a-fA-F]{40}$')][string]$CommitSha,
-    [Parameter(Mandatory)][ValidatePattern('^[0-9a-fA-F]{64}$')][string]$SourceFingerprint
+    [Parameter(Mandatory)][ValidatePattern('^[0-9a-fA-F]{64}$')][string]$SourceFingerprint,
+    [switch]$RequalifyValidated
 )
 
 Set-StrictMode -Version Latest
@@ -99,7 +100,10 @@ if (
         [string]$metadata.qualified_lock_sha256 -ne $lockHash
     )
 ) {
-    throw "Validated GPU runtime metadata lacks matching qualification evidence"
+    if (-not $RequalifyValidated) {
+        throw "Validated GPU runtime metadata lacks matching qualification evidence"
+    }
+    Write-Host "GPU_RUNTIME_BUILD mode=requalify-validated lock_sha256=$lockHash source_fingerprint=$SourceFingerprint"
 }
 $releaseId = $SourceFingerprint.Substring(0, 12) + "-" + $lockHash.Substring(0, 12)
 $releaseRoot = Join-Path $resolvedRuntimeRoot "releases\$releaseId"
@@ -110,13 +114,18 @@ $expectedReleasePaths = @{
     model_cache = Join-Path $releaseRoot "model-cache"
     source_root = Join-Path $releaseRoot "source"
 }
-$needsQualificationImport = $metadata.validation_status -eq "validated" -and -not (Test-Path -LiteralPath $manifestPath -PathType Leaf)
+$needsQualificationImport =
+    -not $RequalifyValidated -and
+    $metadata.validation_status -eq "validated" -and
+    -not (Test-Path -LiteralPath $manifestPath -PathType Leaf)
 if ($metadata.validation_status -eq "validated" -and (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
     $existingForPathCheck = Get-Content -LiteralPath $manifestPath -Encoding UTF8 | ConvertFrom-Json
     $needsQualificationImport =
-        [string]$existingForPathCheck.runtime_python -ne [string]$expectedReleasePaths.runtime_python -or
-        [string]$existingForPathCheck.model_cache -ne [string]$expectedReleasePaths.model_cache -or
-        [string]$existingForPathCheck.source_root -ne [string]$expectedReleasePaths.source_root
+        -not $RequalifyValidated -and (
+            [string]$existingForPathCheck.runtime_python -ne [string]$expectedReleasePaths.runtime_python -or
+            [string]$existingForPathCheck.model_cache -ne [string]$expectedReleasePaths.model_cache -or
+            [string]$existingForPathCheck.source_root -ne [string]$expectedReleasePaths.source_root
+        )
 }
 if ($needsQualificationImport) {
     $qualificationRoot = Join-Path $resolvedRuntimeRoot "qualification"
@@ -228,7 +237,7 @@ if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
     }
     throw "Existing GPU runtime release does not match its requested fingerprint"
 }
-if ($metadata.validation_status -eq "validated") {
+if ($metadata.validation_status -eq "validated" -and -not $RequalifyValidated) {
     throw "Validated metadata cannot construct a release without prior candidate qualification"
 }
 
