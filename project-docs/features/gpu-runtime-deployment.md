@@ -69,6 +69,12 @@ unvalidated → candidate → validated
 
 `unvalidated` 不可构建，`candidate` 只能由手动资格workflow验证，`validated` 只能复用已经存在且证据完全匹配的候选release进行promotion；自动部署不会现场补做qualification。
 
+`runtime-lock.json` 的 `allowed_reranker_precisions` 不是可配置开关：精度白名单在 qualify、promote 和 start 中硬编码为CUDA `fp16`/`fp32`，构建脚本只校验该字段与硬编码集合完全一致，因此元数据无法放宽白名单，字段漂移会fail-closed。
+
+### R3-2B 前置条件
+
+`qualify-gpu-runtime.ps1` 在 TCP 8100 处于Listen或 `RAGPinCheng-GPU` 任务存在时拒绝执行，以避免候选与生产争用同一块GPU。因此产出首个候选release前必须先停止并注销生产GPU任务；这是需要单独审批的生产操作，不属于普通验收步骤。
+
 ## 回滚
 
 promotion前备份当前任务XML、GPU环境文件和release指针。新release健康检查或任一embedding/rerank冒烟失败时，删除新任务、恢复旧环境、release指针与旧任务并尝试恢复健康；原文件不存在时恢复为不存在。任务动作必须指向受管D盘release内的启动包装，任务和监听进程必须先通过所有权检查，不操作旧式或其他不符合预期的任务及8100监听进程。
@@ -79,7 +85,7 @@ promotion前备份当前任务XML、GPU环境文件和release指针。新release
 
 - embedding模型仍为 `BAAI/bge-m3`，维度仍为1024，不需要索引Reset；
 - reranker仍为 `BAAI/bge-reranker-v2-m3`，不得静默禁用或切换CPU；
-- `/health` 在模型未加载时返回HTTP 503；
+- `/health` 在模型未加载时返回HTTP 503；既有ASR资格脚本（`qualify-faster-whisper-production.ps1`、`qualify-qwen3-asr-production.ps1`、`funasr_phase0/07_verify_bge.ps1`）用 `Invoke-RestMethod`/`Invoke-WebRequest` 读该端点，模型未加载时会抛HTTP异常而非命中脚本自有报错；均仍fail-closed，`src/providers.py` 只消费 `/model-info` 不受影响；
 - 应用部署必须同时验证GPU health和model-info契约；
 - 候选workflow不promotion、不修改全局包、不注册生产任务；
 - 当前文档不表示生产GPU服务已经恢复。
