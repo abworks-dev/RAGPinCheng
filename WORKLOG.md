@@ -2600,6 +2600,15 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 验证：待本地专项测试、YAML/PowerShell 解析和隔离资格重跑；不改变资格门槛或生产 promotion。
 - 待办/风险：当前尚未证明任何 reranker precision 通过，生产 GPU 服务和全局依赖保持不变。
 
+## 2026-08-08
+
+### 06:01 — 实现 Windows GPU ASR 存储清理器
+
+- 完成：新增默认 DryRun 的 ASR 存储清理器，支持 7 天 staging、30 天 qualification 且保留最新 3 次、每个 wheel-cache 30 天/8 GB 上限；正式模型目录、活跃/近期路径和未知 qualification 命名均跳过，并输出审计 JSON。
+- 文件：`scripts/cleanup-asr-storage.ps1`、`project-docs/migrations/windows-gpu-asr-storage-cleanup.md`、`WORKLOG.md`
+- 验证：Windows PowerShell 解析通过；隔离目录 DryRun/Apply 自测通过；确认旧 staging、旧 qualification、旧 wheel 文件删除，近期文件和模型文件保留；`git diff --check` 通过。
+- 待办/风险：未访问或修改生产 `${PRODUCTION_DATA_ROOT}`，未创建 Windows 计划任务；生产启用前需先运行 DryRun 和 `-Apply -WhatIf`，确认 ASR 无活动任务后再手动执行 `-Apply`。
+
 ## 2026-08-09
 
 ### 01:54 — 修复 CUDA 资格依赖不兼容并改为两精度全通过门禁
