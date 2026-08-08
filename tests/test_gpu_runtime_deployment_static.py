@@ -63,6 +63,11 @@ def test_candidate_resolver_is_manual_d_drive_isolated_and_evidence_only():
     assert "pip freeze" in script
     assert "HF_HUB_OFFLINE" in script
     assert "TRANSFORMERS_OFFLINE" in script
+    assert "function Write-SanitizedLogTail" in script
+    assert "Get-Content -LiteralPath $Path -Tail 120" in script
+    assert "[REDACTED]" in script
+    assert "[TRUNCATED]" in script
+    assert 'Write-Host "GPU_RUNTIME_RESOLVER_DIAGNOSTIC $safeLine"' in script
     assert "Get-NetTCPConnection -LocalPort 8100 -State Listen" in script
     assert 'Get-ScheduledTask -TaskName "RAGPinCheng-GPU"' in script
     assert "Stop-ScheduledTask" not in script

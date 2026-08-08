@@ -12,6 +12,24 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+function Write-SanitizedLogTail {
+    param([Parameter(Mandatory)][string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        return
+    }
+    foreach ($line in Get-Content -LiteralPath $Path -Tail 120 -ErrorAction SilentlyContinue) {
+        $safeLine = [string]$line
+        $safeLine = $safeLine -replace '(?i)(https?://)[^/\s:@]+:[^@\s]+@', '$1[REDACTED]@'
+        $safeLine = $safeLine -replace '(?i)\b(Bearer|Token|Password|Secret)\s*[:=]\s*\S+', '$1=[REDACTED]'
+        $safeLine = $safeLine -replace '(?i)(?:[A-Z]:\\|\\\\)[^\s"''<>]+', '[PATH]'
+        if ($safeLine.Length -gt 1000) {
+            $safeLine = $safeLine.Substring(0, 1000) + " [TRUNCATED]"
+        }
+        Write-Host "GPU_RUNTIME_RESOLVER_DIAGNOSTIC $safeLine"
+    }
+}
+
 function Invoke-LoggedExternal {
     param(
         [Parameter(Mandatory)][string]$FilePath,
@@ -29,6 +47,7 @@ function Invoke-LoggedExternal {
         $ErrorActionPreference = $savedPreference
     }
     if ($exitCode -ne 0) {
+        Write-SanitizedLogTail -Path $LogPath
         throw "$Failure (exit $exitCode; details retained in the run-local log)"
     }
 }
