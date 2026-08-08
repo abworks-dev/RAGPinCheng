@@ -73,6 +73,11 @@ command -v docker >/dev/null 2>&1 || { echo "docker not found"; exit 1; }
 # ── 2. Verify GPU service contract ────────────────────────────────────────
 echo ">> Checking GPU service contract"
 GPU_URL="${GPU_SERVICE_URL:-http://192.168.11.11:8100}"
+GPU_HEALTH=$(curl -fsS "${GPU_URL}/health" 2>/dev/null || echo "")
+if ! echo "$GPU_HEALTH" | python3 -c "import sys,json; d=json.load(sys.stdin); assert d.get('status') == 'ok' and d.get('model_loaded') is True" 2>/dev/null; then
+    echo "ERROR: GPU service is not healthy at ${GPU_URL}"
+    exit 1
+fi
 MODEL_INFO=$(curl -fsS "${GPU_URL}/model-info" 2>/dev/null || echo "")
 if [ -z "$MODEL_INFO" ]; then
     echo "ERROR: GPU service unreachable at ${GPU_URL}"

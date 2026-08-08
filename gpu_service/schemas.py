@@ -29,6 +29,9 @@ class ModelInfoResponse(BaseModel):
     transformers_version: str = ""
     torch_version: str = ""
     device: str  # "cuda" | "cpu"
+    runtime_release_id: str = ""
+    runtime_source_fingerprint: str = ""
+    runtime_lock_sha256: str = ""
 
 
 # ── Embedding ────────────────────────────────────────────────────────────────

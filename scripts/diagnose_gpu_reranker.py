@@ -18,6 +18,11 @@ def main() -> int:
         description="Load the GPU embedding and reranker models for a bounded diagnostic."
     )
     parser.add_argument("--stage-file", required=True, type=Path)
+    parser.add_argument(
+        "--reranker-precision",
+        required=True,
+        choices=("fp16", "fp32"),
+    )
     args = parser.parse_args()
     stage_file = args.stage_file
 
@@ -41,10 +46,35 @@ def main() -> int:
     torch.cuda.synchronize()
     write_stage(stage_file, "embed_complete")
 
+    write_stage(stage_file, "embed_inference_start")
+    embed_output = embed_model.encode(
+        ["GPU runtime qualification"],
+        return_dense=True,
+        return_sparse=True,
+    )
+    if embed_output["dense_vecs"].shape != (1, 1024):
+        raise RuntimeError("Embedding qualification returned an unexpected shape")
+    torch.cuda.synchronize()
+    write_stage(stage_file, "embed_inference_complete")
+
     write_stage(stage_file, "reranker_start")
-    reranker = FlagReranker(RERANKER_MODEL, devices="cuda", use_fp16=True)
+    reranker = FlagReranker(
+        RERANKER_MODEL,
+        devices="cuda",
+        use_fp16=args.reranker_precision == "fp16",
+    )
     torch.cuda.synchronize()
     write_stage(stage_file, "reranker_complete")
+
+    write_stage(stage_file, "reranker_inference_start")
+    scores = reranker.compute_score(
+        [["qualification", "candidate passage"]],
+        normalize=True,
+    )
+    if len(scores) != 1:
+        raise RuntimeError("Reranker qualification returned an unexpected score count")
+    torch.cuda.synchronize()
+    write_stage(stage_file, "reranker_inference_complete")
 
     del reranker
     del embed_model
