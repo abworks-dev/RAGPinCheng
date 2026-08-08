@@ -1095,6 +1095,65 @@ def test_qwen3_asr_qualification_preserves_native_stderr_before_failing():
     )
 
 
+def test_qwen3_asr_qualification_emits_sanitized_dependency_diagnosis():
+    script = read("scripts/qualify-qwen3-asr-production.ps1")
+    diagnostic_section = script.split(
+        "function Get-NormalizedPackageName", 1
+    )[1].split("function Write-SanitizedSummary", 1)[0]
+    assert "function Convert-ToSanitizedDependencyFailure" in diagnostic_section
+    assert "function Assert-DependencySanitizerSelfTest" in diagnostic_section
+    assert "function Get-DependencyFailureOrigin" in diagnostic_section
+    assert "function Invoke-SanitizedResolverFallback" in diagnostic_section
+    assert 'schema_version = "qwen3-asr-r3-dependency-failure/2"' in diagnostic_section
+    for kind in (
+        "binary_distribution_unavailable",
+        "version_constraint_conflict",
+        "network_or_index_failure",
+        "invalid_requirement_input",
+        "constraint_contract_error",
+        "filesystem_or_permission_failure",
+        "disk_space_failure",
+        "proxy_setup_failure",
+        "proxy_restore_failure",
+        "native_process_launch_failure",
+        "resolver_replay_insufficient",
+        "evidence_insufficient",
+    ):
+        assert kind in diagnostic_section
+    for field in (
+        "dependency_operation = $Operation",
+        "failure_origin = $failureOrigin",
+        "native_exit_code = $originalExternalResult.exit_code",
+        "captured_line_count = $originalExternalResult.captured_line_count",
+        "fallback_probe_executed = [bool]$fallback.Executed",
+        "fallback_probe_exit_code = $fallback.ExitCode",
+    ):
+        assert field in diagnostic_section
+    assert '"--dry-run"' in diagnostic_section
+    assert '"--ignore-installed"' in diagnostic_section
+    assert '"--no-cache-dir"' in diagnostic_section
+    assert diagnostic_section.count('"--only-binary=:all:"') == 1
+    assert '"--find-links", $ResolvedInternalWheelBundle' in diagnostic_section
+    assert '"--find-links", $SharedWheelSeed' in diagnostic_section
+    assert 'profile_admission = "disabled"' in diagnostic_section
+    assert "production_services_modified = $false" in diagnostic_section
+    for operation in (
+        "production_freeze_command",
+        "production_pip_check_command",
+        "qualification_venv_command",
+        "pip_download_proxy_setup",
+        "pip_download_command",
+        "pip_download_proxy_restore",
+        "wheel_manifest_validation",
+        "pip_install_command",
+        "qualification_pip_check_command",
+        "qualification_freeze_command",
+        "module_origin_verification_command",
+        "license_audit_command",
+    ):
+        assert f'$DependencyFailureOperation = "{operation}"' in script
+
+
 def test_qwen3_asr_qualification_freezes_dual_models_bf16_and_result_flow():
     script = read("scripts/qualify-qwen3-asr-production.ps1")
     model = read("scripts/prepare_qwen3_asr_models.py")

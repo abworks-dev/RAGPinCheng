@@ -60,6 +60,7 @@ $Verdict = "fail"
 $FailureCode = "unhandled_failure"
 $MachinePython = ""
 $DependencyFailureStage = "not_started"
+$DependencyFailureOperation = "not_started"
 $DependencyFailureLog = ""
 $LastExternalCommandResult = [pscustomobject]@{
     failure_origin = "not_started"
@@ -666,6 +667,10 @@ function Convert-ToSanitizedDependencyFailure {
     $dependencyTargets = @{}
     $constraintTargets = New-Object "System.Collections.Generic.HashSet[string]"
     $networkOrIndexFailure = $false
+    $invalidRequirementInput = $false
+    $constraintContractError = $false
+    $filesystemOrPermissionFailure = $false
+    $diskSpaceFailure = $false
 
     foreach ($raw in $Lines) {
         $line = ([string]$raw).Trim()
@@ -705,6 +710,26 @@ function Convert-ToSanitizedDependencyFailure {
         ) {
             $networkOrIndexFailure = $true
         }
+        if (
+            $line -match '(?i)(Could not open requirements file|Invalid requirement|Expected package name at the start of dependency specifier|requirements file .+ does not exist)'
+        ) {
+            $invalidRequirementInput = $true
+        }
+        if (
+            $line -match '(?i)(Constraints cannot have extras|Unnamed requirements are not allowed as constraints|Constraints are only allowed to take the form|Invalid constraint)'
+        ) {
+            $constraintContractError = $true
+        }
+        if (
+            $line -match '(?i)(No space left on device|not enough space on the disk|disk (?:is )?full)'
+        ) {
+            $diskSpaceFailure = $true
+        }
+        if (
+            $line -match '(?i)(Permission denied|Access is denied|WinError 5|Errno 13)'
+        ) {
+            $filesystemOrPermissionFailure = $true
+        }
     }
 
     foreach ($target in @($missingTargets | Sort-Object)) {
@@ -721,6 +746,34 @@ function Convert-ToSanitizedDependencyFailure {
                 Kind = "version_constraint_conflict"
                 Requirement = $target
             }
+        }
+    }
+    if ($invalidRequirementInput) {
+        return [pscustomobject]@{
+            Stage = $Stage
+            Kind = "invalid_requirement_input"
+            Requirement = ""
+        }
+    }
+    if ($constraintContractError) {
+        return [pscustomobject]@{
+            Stage = $Stage
+            Kind = "constraint_contract_error"
+            Requirement = ""
+        }
+    }
+    if ($diskSpaceFailure) {
+        return [pscustomobject]@{
+            Stage = $Stage
+            Kind = "disk_space_failure"
+            Requirement = ""
+        }
+    }
+    if ($filesystemOrPermissionFailure) {
+        return [pscustomobject]@{
+            Stage = $Stage
+            Kind = "filesystem_or_permission_failure"
+            Requirement = ""
         }
     }
     if ($networkOrIndexFailure) {
@@ -751,6 +804,18 @@ function Assert-DependencySanitizerSelfTest {
     $network = Convert-ToSanitizedDependencyFailure -Stage "pip_download" -Lines @(
         "Could not fetch URL https://private.invalid/simple: connection error"
     )
+    $invalidInput = Convert-ToSanitizedDependencyFailure -Stage "pip_download" -Lines @(
+        "ERROR: Could not open requirements file: private input"
+    )
+    $constraintError = Convert-ToSanitizedDependencyFailure -Stage "pip_download" -Lines @(
+        "ERROR: Constraints cannot have extras"
+    )
+    $diskFailure = Convert-ToSanitizedDependencyFailure -Stage "pip_download" -Lines @(
+        "ERROR: There is not enough space on the disk"
+    )
+    $permissionFailure = Convert-ToSanitizedDependencyFailure -Stage "pip_download" -Lines @(
+        "ERROR: Permission denied"
+    )
     $unknown = Convert-ToSanitizedDependencyFailure -Stage "pip_install" -Lines @(
         "D:\private\python.exe failed with token=do-not-emit"
     )
@@ -764,6 +829,10 @@ function Assert-DependencySanitizerSelfTest {
         $conflict.Requirement -ne "numpy" -or
         $network.Kind -ne "network_or_index_failure" -or
         -not [string]::IsNullOrEmpty([string]$network.Requirement) -or
+        $invalidInput.Kind -ne "invalid_requirement_input" -or
+        $constraintError.Kind -ne "constraint_contract_error" -or
+        $diskFailure.Kind -ne "disk_space_failure" -or
+        $permissionFailure.Kind -ne "filesystem_or_permission_failure" -or
         $unknown.Kind -ne "evidence_insufficient" -or
         -not [string]::IsNullOrEmpty([string]$unknown.Requirement) -or
         $empty.Kind -ne "evidence_insufficient" -or
@@ -773,14 +842,132 @@ function Assert-DependencySanitizerSelfTest {
     }
 }
 
+function Get-DependencyFailureOrigin {
+    param(
+        [Parameter(Mandatory = $true)][string]$Operation,
+        [Parameter(Mandatory = $true)][object]$ExternalResult
+    )
+    if ($Operation -eq "pip_download_proxy_setup") {
+        return "proxy_setup_failure"
+    }
+    if ($Operation -eq "pip_download_proxy_restore") {
+        return "proxy_restore_failure"
+    }
+    if (
+        [string]$ExternalResult.failure_origin -in @(
+            "native_exit",
+            "native_process_launch_failure",
+            "log_write_failure"
+        )
+    ) {
+        return [string]$ExternalResult.failure_origin
+    }
+    return "stage_guard"
+}
+
+function Invoke-SanitizedResolverFallback {
+    param([Parameter(Mandatory = $true)][string]$Stage)
+
+    $fallbackLog = Join-Path $LogRoot "pip-resolver-fallback.log"
+    $result = [pscustomobject]@{
+        Executed = $false
+        ExitCode = $null
+        Kind = "resolver_replay_insufficient"
+        Requirement = ""
+    }
+    if (
+        -not (Test-Path -LiteralPath $VenvPython -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $CombinedRequirements -PathType Leaf) -or
+        -not (Test-Path -LiteralPath (Join-Path $EvidenceRoot "production-freeze.txt") -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $ResolvedInternalWheelBundle -PathType Container) -or
+        -not (Test-Path -LiteralPath $SharedWheelSeed -PathType Container)
+    ) {
+        return $result
+    }
+
+    Reset-ExternalCommandResult
+    try {
+        Set-ScopedProxy -Proxy $env:ASR_DEPENDENCY_PROXY
+    } catch {
+        try { Clear-ScopedProxy } catch {}
+        $result.Kind = "proxy_setup_failure"
+        return $result
+    }
+
+    $result.Executed = $true
+    $restoreFailure = $false
+    try {
+        try {
+            Invoke-External `
+                -FilePath $VenvPython `
+                -Arguments @(
+                    "-m", "pip", "install",
+                    "--dry-run",
+                    "--ignore-installed",
+                    "--only-binary=:all:",
+                    "--no-cache-dir",
+                    "--index-url", "https://pypi.org/simple",
+                    "--extra-index-url", "https://download.pytorch.org/whl/cu128",
+                    "--find-links", $ResolvedInternalWheelBundle,
+                    "--find-links", $SharedWheelSeed,
+                    "--constraint", (Join-Path $EvidenceRoot "production-freeze.txt"),
+                    "--requirement", $CombinedRequirements
+                ) `
+                -LogPath $fallbackLog
+        } catch {
+        }
+    } finally {
+        try { Clear-ScopedProxy } catch { $restoreFailure = $true }
+    }
+
+    $result.ExitCode = $LastExternalCommandResult.exit_code
+    if ($restoreFailure) {
+        $result.Kind = "proxy_restore_failure"
+        return $result
+    }
+    if ($LastExternalCommandResult.failure_origin -eq "native_process_launch_failure") {
+        $result.Kind = "native_process_launch_failure"
+        return $result
+    }
+    if ($LastExternalCommandResult.failure_origin -eq "log_write_failure") {
+        $result.Kind = "filesystem_or_permission_failure"
+        return $result
+    }
+
+    $fallbackLines = @()
+    if (Test-Path -LiteralPath $fallbackLog -PathType Leaf) {
+        $fallbackLines = @(Get-Content -LiteralPath $fallbackLog -Encoding UTF8)
+    }
+    $diagnosis = Convert-ToSanitizedDependencyFailure `
+        -Lines $fallbackLines `
+        -Stage $Stage
+    if ($diagnosis.Kind -ne "evidence_insufficient") {
+        $result.Kind = [string]$diagnosis.Kind
+        $result.Requirement = [string]$diagnosis.Requirement
+    }
+    return $result
+}
+
 function Write-SanitizedDependencyFailure {
     param(
         [Parameter(Mandatory = $true)][string]$Stage,
+        [Parameter(Mandatory = $true)][string]$Operation,
         [string]$LogPath = ""
     )
+    $originalExternalResult = [pscustomobject]@{
+        failure_origin = [string]$LastExternalCommandResult.failure_origin
+        exit_code = $LastExternalCommandResult.exit_code
+        captured_line_count = [int]$LastExternalCommandResult.captured_line_count
+    }
     $diagnosis = [pscustomobject]@{
         Stage = $Stage
         Kind = "evidence_insufficient"
+        Requirement = ""
+    }
+    $fallback = [pscustomobject]@{
+        Executed = $false
+        ExitCode = $null
+        Kind = "resolver_replay_insufficient"
         Requirement = ""
     }
     try {
@@ -796,15 +983,51 @@ function Write-SanitizedDependencyFailure {
             -Stage $Stage
     } catch {
     }
+    $failureOrigin = Get-DependencyFailureOrigin `
+        -Operation $Operation `
+        -ExternalResult $originalExternalResult
+    if ($failureOrigin -eq "proxy_setup_failure") {
+        $diagnosis.Kind = "proxy_setup_failure"
+        $diagnosis.Requirement = ""
+    } elseif ($failureOrigin -eq "proxy_restore_failure") {
+        $diagnosis.Kind = "proxy_restore_failure"
+        $diagnosis.Requirement = ""
+    } elseif ($failureOrigin -eq "native_process_launch_failure") {
+        $diagnosis.Kind = "native_process_launch_failure"
+        $diagnosis.Requirement = ""
+    } elseif ($failureOrigin -eq "log_write_failure") {
+        $diagnosis.Kind = "filesystem_or_permission_failure"
+        $diagnosis.Requirement = ""
+    } elseif (
+        $Stage -eq "pip_download" -and
+        $Operation -eq "pip_download_command" -and
+        $failureOrigin -eq "native_exit" -and
+        $diagnosis.Kind -eq "evidence_insufficient"
+    ) {
+        try {
+            $fallback = Invoke-SanitizedResolverFallback -Stage $Stage
+            $diagnosis.Kind = [string]$fallback.Kind
+            $diagnosis.Requirement = [string]$fallback.Requirement
+        } catch {
+            $diagnosis.Kind = "resolver_replay_insufficient"
+            $diagnosis.Requirement = ""
+        }
+    }
     $result = [ordered]@{
-        schema_version = "qwen3-asr-r3-dependency-failure/1"
+        schema_version = "qwen3-asr-r3-dependency-failure/2"
         status = "fail"
         failure_code = "dependency_preparation_failed"
         commit_sha = $CommitSha.ToLowerInvariant()
         run_id = $RunId
         dependency_stage = [string]$diagnosis.Stage
+        dependency_operation = $Operation
+        failure_origin = $failureOrigin
+        native_exit_code = $originalExternalResult.exit_code
+        captured_line_count = $originalExternalResult.captured_line_count
         diagnosis_kind = [string]$diagnosis.Kind
         affected_requirement = [string]$diagnosis.Requirement
+        fallback_probe_executed = [bool]$fallback.Executed
+        fallback_probe_exit_code = $fallback.ExitCode
         profile_admission = "disabled"
         production_services_modified = $false
     }
@@ -1045,12 +1268,14 @@ try {
     $DependencyStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
     $FailureCode = "dependency_preparation_failed"
     $DependencyFailureStage = "production_freeze"
+    $DependencyFailureOperation = "production_freeze_command"
     $DependencyFailureLog = Join-Path $LogRoot "production-pip-freeze.stderr.log"
     Write-PipFreeze `
         -PythonPath $ProductionPython `
         -OutputPath (Join-Path $EvidenceRoot "production-freeze.txt") `
         -ErrorLogPath $DependencyFailureLog
     $DependencyFailureStage = "production_pip_check"
+    $DependencyFailureOperation = "production_pip_check_command"
     $DependencyFailureLog = Join-Path $EvidenceRoot "production-pip-check.txt"
     Invoke-External `
         -FilePath $ProductionPython `
@@ -1058,6 +1283,7 @@ try {
         -LogPath $DependencyFailureLog
 
     $DependencyFailureStage = "qualification_venv"
+    $DependencyFailureOperation = "qualification_venv_command"
     $DependencyFailureLog = Join-Path $LogRoot "venv-create.log"
     Invoke-External `
         -FilePath $MachinePython `
@@ -1083,7 +1309,9 @@ try {
     Copy-VerifiedSharedWheelBlobs `
         -CacheRoot $SharedWheelCacheRoot `
         -Destination $SharedWheelSeed | Out-Null
+    $DependencyFailureOperation = "pip_download_proxy_setup"
     Set-ScopedProxy -Proxy $env:ASR_DEPENDENCY_PROXY
+    $DependencyFailureOperation = "pip_download_command"
     try {
         Invoke-External `
             -FilePath $VenvPython `
@@ -1100,9 +1328,15 @@ try {
             ) `
             -LogPath $DownloadLog
     } finally {
-        Clear-ScopedProxy
+        try {
+            Clear-ScopedProxy
+        } catch {
+            $DependencyFailureOperation = "pip_download_proxy_restore"
+            throw
+        }
     }
     $DependencyFailureStage = "wheel_manifest"
+    $DependencyFailureOperation = "wheel_manifest_validation"
     $DependencyFailureLog = $DownloadLog
     $WheelManifest = New-WheelManifest `
         -DownloadLog $DownloadLog `
@@ -1126,6 +1360,7 @@ try {
         -KeyMaterial $SharedCacheMaterial | Out-Null
 
     $DependencyFailureStage = "pip_install"
+    $DependencyFailureOperation = "pip_install_command"
     $DependencyFailureLog = Join-Path $LogRoot "pip-install-offline.log"
     Invoke-External `
         -FilePath $VenvPython `
@@ -1139,12 +1374,14 @@ try {
         -LogPath $DependencyFailureLog
     Assert-WheelManifestUnchanged -Manifest $WheelManifest
     $DependencyFailureStage = "qualification_pip_check"
+    $DependencyFailureOperation = "qualification_pip_check_command"
     $DependencyFailureLog = Join-Path $EvidenceRoot "qualification-pip-check.txt"
     Invoke-External `
         -FilePath $VenvPython `
         -Arguments @("-m", "pip", "check") `
         -LogPath $DependencyFailureLog
     $DependencyFailureStage = "qualification_freeze"
+    $DependencyFailureOperation = "qualification_freeze_command"
     $DependencyFailureLog = Join-Path $LogRoot "qualification-pip-freeze.stderr.log"
     Write-PipFreeze `
         -PythonPath $VenvPython `
@@ -1171,12 +1408,14 @@ print('qualification-module-origins-verified')
 "@
     $ModuleVerification = "import importlib.metadata`n" + $ModuleVerification
     $DependencyFailureStage = "module_origin_verification"
+    $DependencyFailureOperation = "module_origin_verification_command"
     $DependencyFailureLog = Join-Path $EvidenceRoot "qualification-module-origins.txt"
     Invoke-External `
         -FilePath $VenvPython `
         -Arguments @("-c", $ModuleVerification) `
         -LogPath $DependencyFailureLog
     $DependencyFailureStage = "license_audit"
+    $DependencyFailureOperation = "license_audit_command"
     $DependencyFailureLog = Join-Path $LogRoot "license-audit.log"
     Invoke-External `
         -FilePath $VenvPython `
@@ -1461,6 +1700,7 @@ print('qualification-module-origins-verified')
         try {
             Write-SanitizedDependencyFailure `
                 -Stage $DependencyFailureStage `
+                -Operation $DependencyFailureOperation `
                 -LogPath $DependencyFailureLog
         } catch {
         }
