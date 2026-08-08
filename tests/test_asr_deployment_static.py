@@ -1114,7 +1114,7 @@ def test_qwen3_asr_qualification_emits_sanitized_dependency_diagnosis():
     assert "function Assert-DependencySanitizerSelfTest" in diagnostic_section
     assert "function Get-DependencyFailureOrigin" in diagnostic_section
     assert "function Invoke-SanitizedResolverFallback" in diagnostic_section
-    assert 'schema_version = "qwen3-asr-r3-dependency-failure/2"' in diagnostic_section
+    assert 'schema_version = "qwen3-asr-r3-dependency-failure/3"' in diagnostic_section
     for kind in (
         "binary_distribution_unavailable",
         "version_constraint_conflict",
@@ -1137,6 +1137,9 @@ def test_qwen3_asr_qualification_emits_sanitized_dependency_diagnosis():
         "captured_line_count = $originalExternalResult.captured_line_count",
         "fallback_probe_executed = [bool]$fallback.Executed",
         "fallback_probe_exit_code = $fallback.ExitCode",
+        "dependency_owner = [string]$diagnosis.Owner",
+        "dependency_specifier = [string]$diagnosis.Specifier",
+        "requested_constraint = [string]$diagnosis.RequestedConstraint",
     ):
         assert field in diagnostic_section
     assert '"--dry-run"' in diagnostic_section
@@ -1147,6 +1150,10 @@ def test_qwen3_asr_qualification_emits_sanitized_dependency_diagnosis():
     assert '"--find-links", $SharedWheelSeed' in diagnostic_section
     assert "Cannot install .+ because these package versions have conflicting dependencies" in diagnostic_section
     assert "The user requested(?: \\(constraint\\))?" in diagnostic_section
+    assert '$Matches.ContainsKey("spec")' in diagnostic_section
+    assert "funasr 1.4.1 depends on oss2" in diagnostic_section
+    assert '$bareDependencyConflict.Owner -ne "funasr==1.4.1"' in diagnostic_section
+    assert '$bareDependencyConflict.RequestedConstraint -ne "oss2==2.19.1"' in diagnostic_section
     assert 'profile_admission = "disabled"' in diagnostic_section
     assert "production_services_modified = $false" in diagnostic_section
     for operation in (

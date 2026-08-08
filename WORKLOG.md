@@ -2708,3 +2708,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`.github/workflows/repair-gpu-reranker-production.yml`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`
 - 验证：run `31278908260` 已确认停止和恢复均完成，失败点为资格脚本的生产任务存在保护；专项 pytest 待 CI 验证。
 - 待办/风险：需 CI 通过后再次合入 master，并重跑维护窗口资格验证。
+
+### 06:19 — 保留 Qwen 依赖冲突证据并收敛脱敏
+
+- 完成：修复 Qwen R3 依赖诊断对无版本 `depends on oss2` 行的识别，保留受控的依赖拥有者、依赖 specifier 和请求约束字段；诊断 schema 升级为 `/3`，继续排除路径、代理和原始日志内容。
+- 文件：`scripts/qualify-qwen3-asr-production.ps1`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`
+- 验证：PowerShell AST、脚本内置 sanitizer self-test、Python `py_compile`、schema 静态断言和 `git diff --check` 通过；本机未安装 pytest，未安装依赖。
+- 待办/风险：未修改 `oss2` 或任何 requirements/pin，未下载依赖、模型或启动服务；需 CI 通过后再以完整 master SHA 重跑 R3。
