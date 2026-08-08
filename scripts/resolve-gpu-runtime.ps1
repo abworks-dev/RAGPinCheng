@@ -129,9 +129,17 @@ New-Item -ItemType Directory -Path $env:PIP_CACHE_DIR -Force | Out-Null
 
 $torchRequirement = "torch==2.7.0+cu128"
 $runtimeConstraints = @(
-    "FlagEmbedding>=1.3,<2",
-    "transformers>=4.47,<5",
-    "tokenizers>=0.21,<0.22",
+    # FlagEmbedding is pinned exactly: 1.4.0's M3 embedder loader calls
+    # AutoModel.from_pretrained(..., dtype=...), which only exists in
+    # transformers >= 4.56.0.  A different 1.x could change that call, so the
+    # qualified combination would no longer be the one under test.
+    "FlagEmbedding==1.4.0",
+    # transformers >= 4.56.0 introduced the `dtype` keyword (replacing
+    # torch_dtype).  tokenizers must follow transformers' own pin: 4.55.x
+    # requires >=0.21,<0.22 while 4.56.x requires >=0.22,<=0.23, so a <0.22
+    # ceiling silently caps transformers at 4.55.4 and breaks model loading.
+    "transformers>=4.56,<5",
+    "tokenizers>=0.22,<0.23",
     "fastapi>=0.115,<1",
     "uvicorn[standard]>=0.32,<1",
     "pydantic>=2,<3",
@@ -221,16 +229,27 @@ if ($packageMap["torch"] -ne "2.7.0+cu128") {
 $flagEmbeddingVersion = ConvertTo-Version -Value $packageMap["flagembedding"] -PackageName "FlagEmbedding"
 $transformersVersion = ConvertTo-Version -Value $packageMap["transformers"] -PackageName "transformers"
 $tokenizersVersion = ConvertTo-Version -Value $packageMap["tokenizers"] -PackageName "tokenizers"
-if ($flagEmbeddingVersion -lt [Version]"1.3" -or $flagEmbeddingVersion -ge [Version]"2.0") {
-    throw "Resolved FlagEmbedding version is outside the approved candidate range"
+# Belt and braces: the constraint above pins FlagEmbedding, and this rejects any
+# other resolved version outright rather than trusting the constraint alone.
+# ConvertTo-Version above also rejects non-stable version strings.
+if ($flagEmbeddingVersion -ne [Version]"1.4.0") {
+    throw "Resolved FlagEmbedding version is not the approved exact candidate 1.4.0"
 }
-if ($transformersVersion -lt [Version]"4.47" -or $transformersVersion -ge [Version]"5.0") {
+if ($transformersVersion -lt [Version]"4.56" -or $transformersVersion -ge [Version]"5.0") {
     throw "Resolved transformers version is outside the approved candidate range"
 }
-if ($tokenizersVersion -lt [Version]"0.21" -or $tokenizersVersion -ge [Version]"0.22") {
+if ($tokenizersVersion -lt [Version]"0.22" -or $tokenizersVersion -ge [Version]"0.23") {
     throw "Resolved tokenizers version is outside the approved candidate range"
 }
-if ($packageMap["transformers"] -eq "4.46.3" -or $packageMap["tokenizers"] -eq "0.20.3") {
+# Reject the specific combinations already proven broken on this host:
+# 4.46.3/0.20.3 was rejected earlier, and 4.55.4/0.21.4 failed CUDA
+# qualification with TypeError: unexpected keyword argument 'dtype'.
+if (
+    $packageMap["transformers"] -eq "4.46.3" -or
+    $packageMap["tokenizers"] -eq "0.20.3" -or
+    $packageMap["transformers"] -eq "4.55.4" -or
+    $packageMap["tokenizers"] -eq "0.21.4"
+) {
     throw "Resolver selected a package version from the rejected runtime combination"
 }
 

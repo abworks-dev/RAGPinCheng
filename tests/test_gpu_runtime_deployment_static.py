@@ -26,14 +26,34 @@ def test_runtime_lock_is_candidate_only_until_cuda_qualification():
     lock_lines = [
         line for line in requirements.splitlines() if line and not line.startswith("#")
     ]
-    assert len(lock_lines) == 75
+    # The resolved closure size is an implementation detail of the resolver and
+    # legitimately changes when a transitive dependency is added or removed.
+    # Assert on what actually matters instead: every line is an exact pin, and
+    # the packages whose interaction we qualified resolve to the tested versions.
+    assert lock_lines
     assert all(line.count("==") == 1 for line in lock_lines)
-    assert "torch==2.7.0+cu128" in lock_lines
-    assert "FlagEmbedding==1.4.0" in lock_lines
-    assert "transformers==4.55.4" in lock_lines
-    assert "tokenizers==0.21.4" in lock_lines
-    assert "transformers==4.46.3" not in lock_lines
-    assert "tokenizers==0.20.3" not in lock_lines
+    pins = dict(line.split("==", 1) for line in lock_lines)
+    assert pins["torch"] == "2.7.0+cu128"
+    # FlagEmbedding is pinned exactly: 1.4.0 is the version whose loader calls
+    # AutoModel.from_pretrained(..., dtype=...), which is what forces the
+    # transformers floor below.
+    assert pins["FlagEmbedding"] == "1.4.0"
+    transformers_version = tuple(
+        int(part) for part in pins["transformers"].split(".")[:2]
+    )
+    tokenizers_version = tuple(int(part) for part in pins["tokenizers"].split(".")[:2])
+    assert (4, 56) <= transformers_version < (5, 0)
+    assert (0, 22) <= tokenizers_version < (0, 23)
+    # Combinations already proven broken on the production host must never
+    # reappear: 4.55.4/0.21.4 failed CUDA qualification with
+    # TypeError: XLMRobertaModel.__init__() got an unexpected keyword 'dtype'.
+    for rejected in (
+        "transformers==4.46.3",
+        "tokenizers==0.20.3",
+        "transformers==4.55.4",
+        "tokenizers==0.21.4",
+    ):
+        assert rejected not in lock_lines
 
 
 def test_known_bad_two_package_pin_is_not_a_production_contract():
@@ -42,6 +62,11 @@ def test_known_bad_two_package_pin_is_not_a_production_contract():
     for source in (gpu_requirements, root_requirements):
         assert "transformers==4.46.3" not in source
         assert "tokenizers==0.20.3" not in source
+        # Both files must carry the same bounds; a <0.22 tokenizers ceiling
+        # silently caps transformers at 4.55.4, which cannot load BGE-M3 under
+        # FlagEmbedding 1.4.0.
+        assert "transformers>=4.56,<5" in source
+        assert "tokenizers>=0.22,<0.23" in source
     assert "runtime-lock" in gpu_requirements
     assert "runtime-lock" in root_requirements
 
@@ -70,9 +95,14 @@ def test_candidate_resolver_is_manual_d_drive_isolated_and_evidence_only():
     assert '"-m", "venv"' in script
     assert "--system-site-packages" not in script
     assert '"torch==2.7.0+cu128"' in script
-    assert '"FlagEmbedding>=1.3,<2"' in script
-    assert '"transformers>=4.47,<5"' in script
-    assert '"tokenizers>=0.21,<0.22"' in script
+    assert '"FlagEmbedding==1.4.0"' in script
+    assert '"transformers>=4.56,<5"' in script
+    assert '"tokenizers>=0.22,<0.23"' in script
+    # The resolver must reject a drifting FlagEmbedding even if the constraint
+    # is ever loosened, and must refuse the proven-broken pairs outright.
+    assert 'not the approved exact candidate 1.4.0' in script
+    assert '$packageMap["transformers"] -eq "4.55.4"' in script
+    assert '$packageMap["tokenizers"] -eq "0.21.4"' in script
     assert '@("-m", "pip", "check")' in script
     assert "pip freeze" in script
     assert "HF_HUB_OFFLINE" in script
@@ -189,6 +219,11 @@ def test_candidate_qualification_is_cuda_only_and_cleans_tasks():
     assert "runtime-manifest.json" in workflow
     assert "source-files.sha256.json" in workflow
     assert "wheelhouse.sha256.json" in workflow
+    # Failure diagnostics must leave the host: without these, the actual Python
+    # traceback is only readable by logging into the production machine.
+    for precision in ("fp16", "fp32"):
+        for log in ("stages.log", "stdout.log", "stderr.log"):
+            assert f"qualification\\{precision}\\{log}" in workflow
     assert "pip install" not in workflow
     assert "--system-site-packages" not in workflow
     assert '@("fp16", "fp32")' in script
@@ -210,6 +245,36 @@ def test_candidate_qualification_is_cuda_only_and_cleans_tasks():
     assert "torch.cuda.is_available()" in probe
     assert "embed_inference_complete" in probe
     assert "reranker_inference_complete" in probe
+
+
+def test_qualification_requires_every_approved_precision_to_complete():
+    """Stopping at the first working precision would ship a release where the
+    other approved precision was never executed.  Both must reach stage=complete,
+    and both results must be recorded.  `reranker_precision` must stay a scalar:
+    promote-gpu-runtime.ps1 and start-gpu-service.ps1 consume it as one value
+    (start derives RERANKER_USE_FP16 from `-eq "fp16"`), so an array there would
+    silently corrupt the production precision."""
+    script = read("scripts/qualify-gpu-runtime.ps1")
+    promote = read("scripts/promote-gpu-runtime.ps1")
+    start = read("scripts/start-gpu-service.ps1")
+
+    # The first-success short circuit must be gone.
+    assert "$selectedPrecision = $precision" not in script
+    assert "qualified_precisions" in script
+    assert "requested_precisions" in script
+    assert "$qualifiedPrecisions += $precision" in script
+    assert "requires every approved CUDA reranker precision to complete" in script
+
+    # Per-precision evidence is still recorded for both attempts.
+    assert "precision = $precision" in script
+    assert "exit_code = $exitCode" in script
+    assert "completed = [bool]$completed" in script
+
+    # Downstream consumers still read a single scalar precision.
+    assert 'reranker_precision = $selectedPrecision' in script
+    assert '$qualification.reranker_precision -notin @("fp16", "fp32")' in promote
+    assert '$qualification.reranker_precision -notin @("fp16", "fp32")' in start
+    assert '$manifest.reranker_precision -eq "fp16"' in start
 
 
 def test_automatic_deploy_is_gated_and_gpu_fingerprint_aware():
