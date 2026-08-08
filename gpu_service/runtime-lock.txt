@@ -1,0 +1,3 @@
+# Intentionally empty until R3-2B records and qualifies a complete GPU runtime.
+# deploy-gpu.ps1 refuses automatic promotion while runtime-lock.json remains
+# validation_status=unvalidated.

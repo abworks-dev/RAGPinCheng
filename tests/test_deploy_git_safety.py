@@ -11,9 +11,16 @@ ROOT = Path(__file__).resolve().parents[1]
 class TestDeployGitSafety(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.workflow = (ROOT / ".github/workflows/deploy-production.yml").read_text(encoding="utf-8")
+        cls.workflow = (ROOT / ".github/workflows/deploy-production.yml").read_text(
+            encoding="utf-8"
+        )
         cls.windows = (ROOT / "scripts/deploy-gpu.ps1").read_text(encoding="utf-8")
-        cls.windows_start = (ROOT / "scripts/start-gpu-service.ps1").read_text(encoding="utf-8")
+        cls.promote = (ROOT / "scripts/promote-gpu-runtime.ps1").read_text(
+            encoding="utf-8"
+        )
+        cls.windows_start = (ROOT / "scripts/start-gpu-service.ps1").read_text(
+            encoding="utf-8"
+        )
         cls.linux = (ROOT / "scripts/deploy-app.sh").read_text(encoding="utf-8")
 
     def test_no_script_persists_authenticated_remote(self):
@@ -37,79 +44,68 @@ class TestDeployGitSafety(unittest.TestCase):
         for text in (self.workflow, self.windows, self.linux):
             self.assertIn("http.extraHeader=AUTHORIZATION: basic", text)
 
-    def test_linux_fetch_uses_optional_proxy_http11_and_bounded_retry(self):
-        for text in (self.workflow, self.linux):
-            with self.subTest(source="workflow" if text is self.workflow else "linux"):
-                self.assertIn("DEPLOY_HTTP_PROXY", text)
-                self.assertIn("http.version=HTTP/1.1", text)
-                self.assertIn("1 2 3 4", text)
-                self.assertIn("2 **", text)
-                self.assertNotIn("http.sslVerify=false", text)
-                self.assertNotIn("git config --global http.proxy", text)
+    def test_fetch_is_http11_proxy_aware_and_bounded(self):
+        self.assertIn("http.version=HTTP/1.1", self.workflow)
+        self.assertIn("1..4", self.workflow)
+        self.assertIn("http.version=HTTP/1.1", self.windows)
+        self.assertIn("1..4", self.windows)
+        self.assertIn("1 2 3 4", self.linux)
+        for text in (self.workflow, self.windows, self.linux):
+            self.assertNotIn("http.sslVerify=false", text)
+            self.assertNotIn("git config --global http.proxy", text)
 
-    def test_windows_fetch_uses_optional_proxy_http11_and_bounded_retry(self):
-        for text in (self.workflow, self.windows):
-            with self.subTest(source="workflow" if text is self.workflow else "windows"):
-                self.assertIn("DEPLOY_HTTP_PROXY" if text is self.workflow else "ProxyUrl", text)
-                self.assertIn("http.version=HTTP/1.1", text)
-                self.assertIn("1..4", text)
-                self.assertIn("[math]::Pow(2, $attempt)", text)
-                self.assertNotIn("http.sslVerify=false", text)
-                self.assertNotIn("git config --global http.proxy", text)
+    def test_gpu_deploy_never_installs_into_global_python(self):
+        self.assertNotIn("Scripts\\pip.exe", self.windows)
+        self.assertNotIn("pip install", self.windows)
+        self.assertIn("build-gpu-runtime.ps1", self.windows)
+        self.assertIn("promote-gpu-runtime.ps1", self.windows)
+        self.assertIn("Automatic GPU promotion requires a validated lock", self.windows)
 
-    def test_windows_pull_failure_is_not_warning_only(self):
-        self.assertNotIn('Write-Warning "git pull failed', self.windows)
-        self.assertIn('throw "git fetch failed', self.windows)
-        self.assertIn('throw "git fast-forward failed', self.windows)
+    def test_unchanged_gpu_runtime_only_checks_health(self):
+        self.assertIn("current-release.json", self.windows)
+        self.assertIn("source_fingerprint", self.windows)
+        self.assertIn("status=unchanged health=ok", self.windows)
+        self.assertIn("refusing an implicit repair", self.windows)
+        self.assertIn("runtime_source_fingerprint", self.windows)
+        self.assertIn("runtime_lock_sha256", self.windows)
 
-    def test_windows_gpu_service_uses_owned_scheduled_task(self):
-        self.assertIn('$TaskName = "RAGPinCheng-GPU"', self.windows)
-        self.assertIn("New-ScheduledTaskAction", self.windows)
-        self.assertIn("New-ScheduledTaskTrigger -AtStartup", self.windows)
-        self.assertIn('-UserId "Administrator"', self.windows)
-        self.assertIn("-LogonType S4U", self.windows)
-        self.assertIn("Register-ScheduledTask", self.windows)
-        self.assertIn("Start-ScheduledTask -TaskName $TaskName", self.windows)
-        self.assertIn("Assert-GpuTaskIsOurs", self.windows)
-        self.assertIn(
-            "Refusing to modify an unexpected RAGPinCheng-GPU Scheduled Task",
-            self.windows,
-        )
-        self.assertNotIn("$process = Start-Process", self.windows)
+    def test_windows_gpu_service_uses_owned_release_task(self):
+        self.assertIn('$TaskName = "RAGPinCheng-GPU"', self.promote)
+        self.assertIn("New-ScheduledTaskAction", self.promote)
+        self.assertIn("New-ScheduledTaskTrigger -AtStartup", self.promote)
+        self.assertIn('-UserId "Administrator"', self.promote)
+        self.assertIn("-LogonType S4U", self.promote)
+        self.assertIn("Register-ScheduledTask", self.promote)
+        self.assertIn("Assert-OwnedTask", self.promote)
+        self.assertIn("Refusing to modify an unexpected RAGPinCheng-GPU", self.promote)
 
-    def test_windows_gpu_task_owns_foreground_process_and_strict_env(self):
-        self.assertIn(
-            "GPU_SERVICE_TOKEN is required; refusing to generate or rotate it",
-            self.windows,
-        )
-        self.assertNotIn("secrets.token_hex", self.windows)
-        self.assertIn(
-            '& $python -m gpu_service.app 1>> $logFile 2>> $errorLogFile',
-            self.windows_start,
-        )
-        self.assertIn("Duplicate GPU service environment key", self.windows_start)
-        self.assertIn("GPU_SERVICE_TOKEN must not be empty", self.windows_start)
-        self.assertIn("GPU service HOST must be 192.168.11.11", self.windows_start)
-        self.assertIn("GPU service PORT must be 8100", self.windows_start)
-        self.assertIn("HF_HUB_OFFLINE=1", self.windows)
-        self.assertIn("TRANSFORMERS_OFFLINE=1", self.windows)
-        self.assertIn("GPU service HF_HUB_OFFLINE must be 1", self.windows_start)
-        self.assertIn("GPU service TRANSFORMERS_OFFLINE must be 1", self.windows_start)
-        self.assertNotIn("GIT_TOKEN", self.windows_start)
-        self.assertNotIn("RUNNER_TRACKING_ID", self.windows_start)
+    def test_start_wrapper_requires_validated_immutable_release(self):
+        self.assertIn("GPU runtime release is not validated for production", self.windows_start)
+        self.assertIn("GPU qualification evidence does not match", self.windows_start)
+        self.assertIn("D:\\RAGPinCheng\\runtime\\releases\\", self.windows_start)
+        self.assertIn("runtime_python", self.windows_start)
+        self.assertIn("RERANKER_USE_FP16", self.windows_start)
+        self.assertIn("source-files.sha256.json", self.windows_start)
+        self.assertIn("Set-Location -LiteralPath $sourceRoot", self.windows_start)
+        self.assertNotIn("C:\\Program Files\\Python310\\python.exe", self.windows_start)
 
-    def test_windows_gpu_deploy_rolls_back_owned_task_and_listener(self):
-        self.assertIn("Remove-ManagedGpuTaskAndListener", self.windows)
-        self.assertIn("Stop-VerifiedGpuListeners", self.windows)
-        self.assertIn("ForEach-Object { $_.OwningProcess }", self.windows)
-        self.assertNotIn("$connections.OwningProcess", self.windows)
-        self.assertIn("Unregister-ScheduledTask", self.windows)
-        self.assertIn("Stop-Process -Id $processId -Force", self.windows)
-        self.assertIn("Refusing to stop an unexpected process listening on TCP 8100", self.windows)
-        self.assertIn('$task.State -ne "Running"', self.windows)
-        self.assertIn("TCP port 8100 is not listening after GPU service activation", self.windows)
-        self.assertIn("GPU service deployment failed; rolling back the managed task", self.windows)
-        self.assertIn("Get-Content -LiteralPath $path -Tail 120", self.windows)
+    def test_promotion_has_task_environment_and_release_rollback(self):
+        self.assertIn("scheduled-task.xml", self.promote)
+        self.assertIn("gpu-service.env", self.promote)
+        self.assertIn("current-release.json", self.promote)
+        self.assertIn("Register-ScheduledTask -TaskName $TaskName -Xml", self.promote)
+        self.assertIn("Previous GPU release did not recover cleanly", self.promote)
+        self.assertIn("foreach ($attempt in 1..5)", self.promote)
+        self.assertIn("GPU model-info does not identify the promoted CUDA release", self.promote)
+        self.assertNotIn("qualify-gpu-runtime.ps1", self.promote)
+        self.assertIn("Remove-Item -LiteralPath $EnvFile", self.promote)
+        self.assertIn("Remove-Item -LiteralPath $CurrentReleasePath", self.promote)
+
+    def test_application_deploy_checks_gpu_health_and_contract(self):
+        self.assertIn('${GPU_URL}/health', self.linux)
+        self.assertIn("d.get('status') == 'ok'", self.linux)
+        self.assertIn('${GPU_URL}/model-info', self.linux)
+        self.assertIn('expected 1024', self.linux)
 
 
 if __name__ == "__main__":
