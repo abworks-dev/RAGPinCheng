@@ -209,11 +209,16 @@ def test_candidate_qualification_is_cuda_only_and_cleans_tasks():
     probe = read("scripts/diagnose_gpu_reranker.py")
     assert "workflow_dispatch:" in workflow
     assert "confirm_qualification:" in workflow
+    assert "suspend_production_service:" in workflow
     assert "production-gpu-exclusive" in workflow
     assert "build-gpu-runtime.ps1" in workflow
     assert "-RequalifyValidated" in workflow
     assert "qualify-gpu-runtime.ps1" in workflow
-    assert "promote-gpu-runtime.ps1" not in workflow
+    assert "promote-gpu-runtime.ps1" in workflow
+    assert "Stop-ScheduledTask" in workflow
+    assert "GPU_PRODUCTION_SUSPEND status=stopped" in workflow
+    assert "GPU_PRODUCTION_RESTORE status=complete" in workflow
+    assert "GPU_SERVICE_TOKEN" in workflow
     assert "resolve-gpu-model-cache-source.ps1" in workflow
     assert "TORCH_WHEEL_SEED_ROOT" in workflow
     assert "TorchWheelSeedRoot" in workflow
