@@ -61,19 +61,30 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Build reproducible controlled jieba wheel
+      - name: Build reproducible controlled legacy wheels
         shell: bash
         run: |
-          python scripts/build_internal_jieba_wheel.py build \
-            --bundle-dir "${{ runner.temp }}/jieba-internal-wheel-${{ github.run_id }}" \
-            --commit-sha "${{ inputs.commit_sha }}" \
-            --run-id "${{ github.run_id }}"
+          root="${{ runner.temp }}/qwen3-asr-internal-wheels-${{ github.run_id }}"
+          mkdir -p "$root"
+          builders=(
+            "build_internal_jieba_wheel.py:jieba"
+            "build_internal_oss2_wheel.py:oss2"
+            "build_internal_antlr4_wheel.py:antlr4"
+            "build_internal_crcmod_wheel.py:crcmod"
+          )
+          for entry in "${builders[@]}"; do
+            IFS=: read -r script directory <<< "$entry"
+            python "scripts/$script" build \
+              --bundle-dir "$root/$directory" \
+              --commit-sha "${{ inputs.commit_sha }}" \
+              --run-id "${{ github.run_id }}"
+          done
 
-      - name: Upload controlled jieba wheel
+      - name: Upload controlled legacy wheels
         uses: actions/upload-artifact@v4
         with:
-          name: jieba-internal-wheel-${{ github.run_id }}
-          path: ${{ runner.temp }}/jieba-internal-wheel-${{ github.run_id }}
+          name: qwen3-asr-internal-wheels-${{ github.run_id }}
+          path: ${{ runner.temp }}/qwen3-asr-internal-wheels-${{ github.run_id }}
           if-no-files-found: error
           retention-days: 14
 
@@ -105,11 +116,11 @@ jobs:
           ref: ${{ inputs.commit_sha }}
           fetch-depth: 1
 
-      - name: Download controlled jieba wheel
+      - name: Download controlled legacy wheels
         uses: actions/download-artifact@v4
         with:
-          name: jieba-internal-wheel-${{ github.run_id }}
-          path: ${{ runner.temp }}\jieba-internal-wheel-${{ github.run_id }}
+          name: qwen3-asr-internal-wheels-${{ github.run_id }}
+          path: ${{ runner.temp }}\qwen3-asr-internal-wheels-${{ github.run_id }}
 
       - name: Prepare fixed synthetic qualification samples
         if: ${{ inputs.prepare_synthetic_samples }}
@@ -134,7 +145,10 @@ jobs:
             SourceRoot = "${{ github.workspace }}"
             RunId = "${{ github.run_id }}"
             ExecuteQualification = [System.Convert]::ToBoolean("${{ inputs.execute_qualification }}")
-            InternalWheelBundlePath = "${{ runner.temp }}\jieba-internal-wheel-${{ github.run_id }}"
+            InternalWheelBundlePath = "${{ runner.temp }}\qwen3-asr-internal-wheels-${{ github.run_id }}\jieba"
+            Oss2WheelBundlePath = "${{ runner.temp }}\qwen3-asr-internal-wheels-${{ github.run_id }}\oss2"
+            Antlr4WheelBundlePath = "${{ runner.temp }}\qwen3-asr-internal-wheels-${{ github.run_id }}\antlr4"
+            CrcmodWheelBundlePath = "${{ runner.temp }}\qwen3-asr-internal-wheels-${{ github.run_id }}\crcmod"
             SummaryPath = "${{ runner.temp }}\qwen3-asr-r3-${{ github.run_id }}\qualification-verdict.json"
             DependencyDiagnosticPath = "${{ runner.temp }}\qwen3-asr-r3-${{ github.run_id }}\dependency-diagnostic.json"
           }
