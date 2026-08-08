@@ -1173,6 +1173,32 @@ def test_qwen3_asr_qualification_emits_sanitized_dependency_diagnosis():
         assert f'$DependencyFailureOperation = "{operation}"' in script
 
 
+def test_qwen3_asr_qualification_uses_controlled_legacy_wheel_bundles():
+    workflow = read(".github/workflows/qualify-qwen3-asr-production.yml")
+    script = read("scripts/qualify-qwen3-asr-production.ps1")
+    for builder in (
+        "build_internal_jieba_wheel.py",
+        "build_internal_oss2_wheel.py",
+        "build_internal_antlr4_wheel.py",
+        "build_internal_crcmod_wheel.py",
+    ):
+        assert builder in workflow
+        assert builder in script
+    for directory in ("jieba", "oss2", "antlr4", "crcmod"):
+        assert f"\\{directory}" in workflow
+    for parameter in (
+        "Oss2WheelBundlePath",
+        "Antlr4WheelBundlePath",
+        "CrcmodWheelBundlePath",
+    ):
+        assert f"{parameter} =" in workflow
+        assert f"[string]${parameter}" in script
+    assert '"--find-links", $ResolvedOss2WheelBundle' in script
+    assert '"--find-links", $ResolvedAntlr4WheelBundle' in script
+    assert '"--find-links", $ResolvedCrcmodWheelBundle' in script
+    assert "Controlled internal wheel bundle must be a real directory" in script
+
+
 def test_qwen3_asr_qualification_freezes_dual_models_bf16_and_result_flow():
     script = read("scripts/qualify-qwen3-asr-production.ps1")
     model = read("scripts/prepare_qwen3_asr_models.py")

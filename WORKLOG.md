@@ -2722,3 +2722,17 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`scripts/cleanup-production-backups.ps1`、`WORKLOG.md`
 - 验证：PowerShell 解析通过；临时目录实际删除测试确认旧备份删除、最新 3 份和非匹配目录保留；`git diff --check` 通过。
 - 待办/风险：未访问或修改生产 `${PRODUCTION_BACKUP_DIRECTORY}`，合并后由用户手动运行脚本。
+
+### 06:33 — 完成 Qwen R3 依赖门失败收口
+
+- 完成：以完整 master SHA `bb676875a94260fdb7d1bdb735d5155994707014` 执行 Qwen3-ASR Production R3 run `31281663215`；immutable revision、受控 jieba wheel 和八样本准备通过，隔离 qualification 在 `pip_download` 停止。
+- 文件：`WORKLOG.md`；本次未修改生产代码、requirements 或依赖锁。
+- 验证：脱敏 verdict 确认 `dependency_preparation_failed`，`affected_requirement=oss2`，`dependency_owner=funasr==1.4.1`，`requested_constraint=oss2==2.19.1`；Profile admission 仍为 disabled，生产服务未修改，清理步骤完成。
+- 待办/风险：只读核对表明 `oss2==2.19.1` 仅有 sdist，而当前 Qwen binary-only 门禁只接入 jieba 受控 wheel；接入现有固定 oss2 wheel builder 需单独 R2 批准，未自动重跑或放宽 `--only-binary`。
+
+### 06:46 — 接入 Qwen 受控 legacy wheels
+
+- 完成：Qwen qualification workflow 统一构建并传递 `jieba`、`oss2`、`antlr4`、`crcmod` 四个受控 wheel；qualification 脚本逐包校验 Manifest、哈希和 wheelhouse 完整性，并将四个目录加入 binary-only resolver 与受限 fallback。
+- 文件：`.github/workflows/qualify-qwen3-asr-production.yml`、`scripts/qualify-qwen3-asr-production.ps1`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`
+- 验证：PowerShell AST、脚本内置 sanitizer self-test、Python `py_compile`、workflow YAML 解析、wheel 接入静态断言和 `git diff --check` 通过；未安装依赖、未运行 wheel builder、未启动服务。
+- 待办/风险：需 PR CI 通过后以新的完整 master SHA 重跑一次 Qwen R3；仍保持 `--only-binary=:all:`、Profile disabled 和生产服务不变。
