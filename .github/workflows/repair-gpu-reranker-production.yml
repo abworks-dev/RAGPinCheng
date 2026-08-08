@@ -127,6 +127,7 @@ jobs:
               if ($listeners.Count -gt 0) {
                 throw "GPU production port 8100 did not close after the scheduled task was stopped"
               }
+              Unregister-ScheduledTask -TaskName $productionTaskName -Confirm:$false -ErrorAction Stop
               Write-Host "GPU_PRODUCTION_SUSPEND status=stopped"
             }
 
