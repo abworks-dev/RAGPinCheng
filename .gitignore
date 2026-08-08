@@ -16,6 +16,7 @@ __pycache__/
 .whisperx-wheelhouse/
 .whisperx-reports/
 venv/
+runtime/
 # Real business documents stay in docs/ and are not tracked by Git.
 # Project knowledge maps (features, decisions, user acceptance) live in
 # project-docs/ and ARE tracked by Git.

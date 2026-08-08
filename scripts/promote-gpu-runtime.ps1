@@ -162,6 +162,7 @@ if (
     $qualification.repository_commit -ne $manifest.repository_commit -or
     $qualification.source_fingerprint -ne $manifest.source_fingerprint -or
     $qualification.lock_sha256 -ne $manifest.lock_sha256 -or
+    [string]$qualification.torch_wheel_sha256 -ne [string]$manifest.torch_wheel_sha256 -or
     $qualification.source_inventory_sha256 -ne $manifest.source_inventory_sha256
 ) {
     throw "GPU release lacks matching validated CUDA qualification evidence"

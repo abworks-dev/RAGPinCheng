@@ -20,6 +20,7 @@ def test_runtime_lock_is_fail_closed_until_r3_2b():
     assert metadata["source_commit"] is None
     assert metadata["qualified_source_fingerprint"] is None
     assert metadata["qualified_lock_sha256"] is None
+    assert metadata["torch_wheel_sha256"] is None
     assert [line for line in requirements.splitlines() if line and not line.startswith("#")] == []
 
 
@@ -51,6 +52,7 @@ def test_candidate_resolver_is_manual_d_drive_isolated_and_evidence_only():
     assert "qualify-gpu-runtime.ps1" not in workflow
     assert "promote-gpu-runtime.ps1" not in workflow
     assert "resolve-gpu-model-cache-source.ps1" in workflow
+    assert "TORCH_WHEEL_SEED_ROOT" in workflow
 
     assert 'StartsWith("D:\\"' in script
     assert '"-m", "venv"' in script
@@ -63,14 +65,12 @@ def test_candidate_resolver_is_manual_d_drive_isolated_and_evidence_only():
     assert "pip freeze" in script
     assert "HF_HUB_OFFLINE" in script
     assert "TRANSFORMERS_OFFLINE" in script
-    assert "GPU_RUNTIME_RESOLVER stage=resolve_cuda_torch" in script
-    assert '"--index-url", $approvedTorchIndex' in script
-    assert '"--prefer-binary", "--no-deps", $torchRequirement' in script
+    assert "GPU_RUNTIME_RESOLVER stage=install_verified_cuda_torch_wheel" in script
+    assert '"--no-index", "--no-deps", [string]$torchSeed.path' in script
     assert '"--index-url", $approvedPackageIndex' in script
-    assert '"download.pytorch.org"' in script
-    assert '"download-r2.pytorch.org"' in script
-    assert "$env:NO_PROXY" in script
-    assert "$env:no_proxy" in script
+    assert "get-gpu-torch-wheel-seed.ps1" in script
+    assert "manual_verified_wheel" in script
+    assert "torch_wheel_sha256" in script
     assert "--trusted-host" not in script
     assert "PIP_CERT" not in script
     assert "function Write-SanitizedLogTail" in script
@@ -87,6 +87,21 @@ def test_candidate_resolver_is_manual_d_drive_isolated_and_evidence_only():
     assert "new-netfirewallrule" not in lowered
     assert "BGEM3FlagModel" not in script
     assert "FlagReranker" not in script
+
+
+def test_manual_torch_wheel_seed_is_fail_closed_and_has_no_network_behavior():
+    verifier = read("scripts/get-gpu-torch-wheel-seed.ps1")
+    manifest = read("scripts/new-gpu-torch-wheel-seed-manifest.ps1")
+    assert "runtime/" in read(".gitignore").splitlines()
+    for script in (verifier, manifest):
+        assert "torch-2.7.0+cu128-cp310-cp310-win_amd64.whl" in script
+        assert "https://download.pytorch.org/whl/cu128" in script
+        assert "c52c4b869742f00b12cb34521d1381be6119fa46244791704b00cc4a3cb06850" in script
+        assert "Get-FileHash" in script
+        assert "ReparsePoint" in script
+    assert "Invoke-WebRequest" not in manifest
+    assert "pip install" not in manifest
+    assert "--trusted-host" not in verifier
 
 
 def test_gpu_model_cache_source_discovery_is_bounded_and_offline_only():
@@ -131,6 +146,10 @@ def test_builder_is_d_drive_isolated_exact_and_records_artifacts():
     assert "Validated metadata cannot construct a release without prior candidate qualification" in script
     assert "GPU runtime package index is not approved" in script
     assert "GPU runtime torch index is not approved" in script
+    assert "TorchWheelSeedRoot" in script
+    assert "runtime-lock-without-torch.txt" in script
+    assert "torch_wheel_sha256" in script
+    assert "--extra-index-url" not in script
     assert '.Replace("`r`n", "`n").Replace("`r", "`n")' in lock_hash
 
 
@@ -145,9 +164,9 @@ def test_candidate_qualification_is_cuda_only_and_cleans_tasks():
     assert "qualify-gpu-runtime.ps1" in workflow
     assert "promote-gpu-runtime.ps1" not in workflow
     assert "resolve-gpu-model-cache-source.ps1" in workflow
-    assert '"download.pytorch.org"' in workflow
-    assert '"download-r2.pytorch.org"' in workflow
-    assert "$env:NO_PROXY" in workflow
+    assert "TORCH_WHEEL_SEED_ROOT" in workflow
+    assert "TorchWheelSeedRoot" in workflow
+    assert "$env:HTTP_PROXY = $env:DEPLOY_HTTP_PROXY" in workflow
     assert "--trusted-host" not in workflow
     assert "actions/upload-artifact@v4" in workflow
     assert "qualification.json" in workflow
@@ -164,6 +183,7 @@ def test_candidate_qualification_is_cuda_only_and_cleans_tasks():
     assert "Unregister-ScheduledTask" in script
     assert "ReadToEndAsync" in script
     assert "QualificationRunId" in script
+    assert "torch_wheel_sha256" in script
     assert "source_inventory_sha256" in script
     assert "repository_commit" in script
     assert "Set-Location -LiteralPath $SourceRoot" in script
@@ -190,6 +210,7 @@ def test_automatic_deploy_is_gated_and_gpu_fingerprint_aware():
     assert "qualification_run_id" in deploy
     assert "qualified_source_fingerprint" in deploy
     assert "qualified_lock_sha256" in deploy
+    assert "torch_wheel_sha256" in deploy
     assert "merge-base --is-ancestor" in deploy
     assert "get-gpu-runtime-lock-hash.ps1" in deploy
 
@@ -244,6 +265,8 @@ def test_promotion_only_consumes_prequalified_immutable_release():
     assert "source-files.sha256.json" in start
     assert "GPU release dependency lock failed integrity validation" in promote
     assert "GPU release dependency lock failed integrity validation" in start
+    assert "torch_wheel_sha256" in promote
+    assert "torch_wheel_sha256" in start
     assert "Set-Location -LiteralPath $sourceRoot" in start
     assert "current repository" not in start
     assert "scripts/get-gpu-runtime-lock-hash.ps1" in fingerprint
