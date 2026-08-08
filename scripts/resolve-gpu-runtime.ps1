@@ -3,6 +3,7 @@ param(
     [string]$RepositoryPath = "D:\RAGPinCheng",
     [string]$BasePython = "C:\Program Files\Python310\python.exe",
     [string]$ResolverRoot = "D:\RAGPinCheng\runtime\resolver",
+    [string]$TorchWheelSeedRoot = "D:\RAGPinCheng\runtime\wheel-seed\torch-2.7.0-cu128-cp310-win_amd64",
     [Parameter(Mandatory)][ValidatePattern('^[0-9]+-[0-9]+$')][string]$RunId,
     [Parameter(Mandatory)][string]$ModelCacheSource,
     [Parameter(Mandatory)][ValidatePattern('^[0-9a-fA-F]{40}$')][string]$CommitSha,
@@ -100,6 +101,7 @@ if ($LASTEXITCODE -ne 0 -or $head -ne $CommitSha.ToLowerInvariant()) {
 }
 & git -C $RepositoryPath diff --quiet $CommitSha -- `
     scripts/resolve-gpu-runtime.ps1 `
+    scripts/get-gpu-torch-wheel-seed.ps1 `
     gpu_service/requirements.txt `
     gpu_service/runtime-lock.json
 if ($LASTEXITCODE -ne 0) {
@@ -136,6 +138,14 @@ $runtimeConstraints = @(
     "python-dotenv>=1,<2"
 )
 $constraints = @($torchRequirement) + $runtimeConstraints
+$torchSeed = & (Join-Path $RepositoryPath "scripts\get-gpu-torch-wheel-seed.ps1") `
+    -SeedRoot $TorchWheelSeedRoot
+if (@($torchSeed).Count -ne 1) {
+    throw "GPU Torch wheel seed validation did not return exactly one artifact"
+}
+if ([string]$torchSeed.source_index_url -cne $approvedTorchIndex) {
+    throw "GPU Torch wheel seed source index is not approved"
+}
 $preflight = [ordered]@{
     schema_version = 1
     status = "passed"
@@ -149,6 +159,10 @@ $preflight = [ordered]@{
     production_port_8100_listening = $false
     production_gpu_task_present = $false
     resolver_root_drive = "D:"
+    torch_wheel_seed_present = $true
+    torch_wheel_file = [string]$torchSeed.file
+    torch_wheel_length = [Int64]$torchSeed.length
+    torch_wheel_sha256 = [string]$torchSeed.sha256
 }
 $preflightPath = Join-Path $artifactRoot "preflight.json"
 [IO.File]::WriteAllText(
@@ -166,27 +180,19 @@ if (-not (Test-Path -LiteralPath $resolverPython -PathType Leaf)) {
     throw "Resolver venv Python is missing"
 }
 
-Write-Host "GPU_RUNTIME_RESOLVER stage=resolve_cuda_torch"
-$noProxyHosts = @(
-    @($env:NO_PROXY -split ','),
-    "download.pytorch.org",
-    "download-r2.pytorch.org"
-) | ForEach-Object { $_.Trim() } | Where-Object { $_ } | Select-Object -Unique
-$env:NO_PROXY = $noProxyHosts -join ","
-$env:no_proxy = $env:NO_PROXY
+Write-Host "GPU_RUNTIME_RESOLVER stage=install_verified_cuda_torch_wheel"
 $installLog = Join-Path $logRoot "pip-install.log"
 Invoke-LoggedExternal -FilePath $resolverPython -Arguments @(
     "-m", "pip", "install",
-    "--index-url", $approvedTorchIndex,
-    "--prefer-binary", "--no-deps", $torchRequirement
-) -LogPath $installLog -Failure "CUDA Torch resolution failed"
+    "--no-index", "--no-deps", [string]$torchSeed.path
+) -LogPath $installLog -Failure "Verified CUDA Torch wheel installation failed"
 
 Write-Host "GPU_RUNTIME_RESOLVER stage=resolve_dependencies"
 $installArguments = @(
     "-m", "pip", "install",
     "--index-url", $approvedPackageIndex,
     "--prefer-binary"
-) + $constraints
+) + $runtimeConstraints
 Invoke-LoggedExternal -FilePath $resolverPython -Arguments $installArguments `
     -LogPath $installLog -Failure "GPU runtime dependency resolution failed"
 
@@ -232,6 +238,16 @@ $freeze = @(& $resolverPython -m pip freeze)
 if ($LASTEXITCODE -ne 0) {
     throw "Unable to freeze the resolved GPU runtime"
 }
+$freeze = @(
+    $freeze | ForEach-Object {
+        $line = $_.Trim()
+        if ($line -match '(?i)^torch\s*@\s*file:') {
+            $torchRequirement
+        } else {
+            $line
+        }
+    }
+)
 $lockLines = @(
     $freeze |
         ForEach-Object { $_.Trim() } |
@@ -268,6 +284,13 @@ $report = [ordered]@{
     python_version = $pythonVersion
     package_index = "pypi.tuna.tsinghua.edu.cn"
     torch_index = "download.pytorch.org/whl/cu128"
+    torch_source = "manual_verified_wheel"
+    torch_wheel = [ordered]@{
+        file = [string]$torchSeed.file
+        length = [Int64]$torchSeed.length
+        sha256 = [string]$torchSeed.sha256
+        source_index_url = [string]$torchSeed.source_index_url
+    }
     constraints = $constraints
     selected_packages = $selected
     package_count = $lockLines.Count

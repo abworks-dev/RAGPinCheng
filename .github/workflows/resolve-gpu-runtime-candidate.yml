@@ -26,6 +26,7 @@ jobs:
       GPU_MODEL_CACHE_SOURCE: ${{ vars.GPU_MODEL_CACHE_SOURCE }}
       REPO_PATH: D:\RAGPinCheng
       RESOLVER_ROOT: D:\RAGPinCheng\runtime\resolver
+      TORCH_WHEEL_SEED_ROOT: D:\RAGPinCheng\runtime\wheel-seed\torch-2.7.0-cu128-cp310-win_amd64
       RESOLVER_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
       RESOLVER_ARTIFACT_ROOT: D:\RAGPinCheng\runtime\resolver\${{ github.run_id }}-${{ github.run_attempt }}\artifacts
       GIT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -78,6 +79,7 @@ jobs:
           & "${env:REPO_PATH}\scripts\resolve-gpu-runtime.ps1" `
             -RepositoryPath $env:REPO_PATH `
             -ResolverRoot $env:RESOLVER_ROOT `
+            -TorchWheelSeedRoot $env:TORCH_WHEEL_SEED_ROOT `
             -RunId $env:RESOLVER_RUN_ID `
             -ModelCacheSource $modelCacheSource `
             -CommitSha $env:DEPLOY_COMMIT_SHA

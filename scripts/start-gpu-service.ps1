@@ -25,6 +25,7 @@ if (
     [string]$qualification.qualification_run_id -ne [string]$manifest.qualification_run_id -or
     $qualification.source_fingerprint -ne $manifest.source_fingerprint -or
     $qualification.lock_sha256 -ne $manifest.lock_sha256 -or
+    [string]$qualification.torch_wheel_sha256 -ne [string]$manifest.torch_wheel_sha256 -or
     $qualification.source_inventory_sha256 -ne $manifest.source_inventory_sha256 -or
     $qualification.embedding_precision -ne "fp16" -or
     $qualification.reranker_precision -notin @("fp16", "fp32") -or
