@@ -139,7 +139,7 @@ $stderr = $stderrTask.GetAwaiter().GetResult()
 exit $process.ExitCode
 '@
 
-$selectedPrecision = $null
+$qualifiedPrecisions = @()
 $attempts = @()
 foreach ($precision in $RerankerPrecisions) {
     $attemptRoot = Join-Path $diagnosticRoot $precision
@@ -178,9 +178,11 @@ foreach ($precision in $RerankerPrecisions) {
             exit_code = $exitCode
             completed = [bool]$completed
         }
+        # Every approved precision is exercised on every run: a precision that
+        # is never executed is not evidence, and stopping at the first success
+        # would leave the other one unverified in production.
         if ($exitCode -eq 0 -and $completed) {
-            $selectedPrecision = $precision
-            break
+            $qualifiedPrecisions += $precision
         }
     } finally {
         $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
@@ -191,12 +193,30 @@ foreach ($precision in $RerankerPrecisions) {
     }
 }
 
+# Production qualification requires EVERY approved CUDA precision to reach
+# stage=complete, not merely the first one that happens to work.  The single
+# `reranker_precision` field stays a scalar because promote-gpu-runtime.ps1 and
+# start-gpu-service.ps1 consume it as one value (start derives
+# RERANKER_USE_FP16 from `-eq "fp16"`); turning it into an array would make
+# those comparisons silently wrong.  fp16 is preferred deterministically.
+$requestedPrecisions = @($RerankerPrecisions)
+$allPrecisionsQualified = (
+    $requestedPrecisions.Count -gt 0 -and
+    @($requestedPrecisions | Where-Object { $qualifiedPrecisions -notcontains $_ }).Count -eq 0
+)
+$selectedPrecision = $null
+if ($allPrecisionsQualified) {
+    $selectedPrecision = if ($qualifiedPrecisions -contains "fp16") { "fp16" } else { $qualifiedPrecisions[0] }
+}
+
 $qualification = @{
     schema_version = 1
     status = if ($selectedPrecision) { "qualified" } else { "failed" }
     device = "cuda"
     embedding_precision = "fp16"
     reranker_precision = $selectedPrecision
+    requested_precisions = $requestedPrecisions
+    qualified_precisions = @($qualifiedPrecisions)
     source_fingerprint = [string]$manifest.source_fingerprint
     lock_sha256 = [string]$manifest.lock_sha256
     torch_wheel_sha256 = [string]$manifest.torch_wheel_sha256
@@ -211,11 +231,12 @@ $qualification | ConvertTo-Json -Depth 5 |
     Set-Content -LiteralPath $qualificationPath -Encoding UTF8
 
 if (-not $selectedPrecision) {
-    throw "No CUDA reranker precision passed complete GPU runtime qualification"
+    $failedPrecisions = @($requestedPrecisions | Where-Object { $qualifiedPrecisions -notcontains $_ })
+    throw "GPU runtime qualification requires every approved CUDA reranker precision to complete; failed: $($failedPrecisions -join ', ')"
 }
 $manifest.qualification_status = "qualified"
 $manifest | Add-Member -NotePropertyName reranker_precision -NotePropertyValue $selectedPrecision -Force
 $manifest | Add-Member -NotePropertyName qualification_run_id -NotePropertyValue $QualificationRunId -Force
 $manifest | ConvertTo-Json -Depth 5 |
     Set-Content -LiteralPath $manifestPath -Encoding UTF8
-Write-Host "GPU_RUNTIME_QUALIFICATION status=qualified release=$ReleaseRoot reranker_precision=$selectedPrecision"
+Write-Host "GPU_RUNTIME_QUALIFICATION status=qualified release=$ReleaseRoot reranker_precision=$selectedPrecision qualified_precisions=$($qualifiedPrecisions -join ',')"
