@@ -499,7 +499,11 @@ def _license_document_declaration(text: str) -> str:
     return ""
 
 
-def _audit_license_text(distribution: importlib.metadata.Distribution) -> str:
+def _audit_license_text(
+    distribution: importlib.metadata.Distribution,
+    *,
+    include_license_files: bool = False,
+) -> str:
     expression = distribution.metadata.get("License-Expression", "").strip()
     if expression:
         return expression
@@ -514,8 +518,10 @@ def _audit_license_text(distribution: importlib.metadata.Distribution) -> str:
     ]
     if approved:
         return "; ".join(approved)[:500]
+    if not include_license_files:
+        return ""
     declared_paths = set(distribution.metadata.get_all("License-File") or [])
-    for item in distribution.files or ():
+    for item in getattr(distribution, "files", None) or ():
         item_text = str(item)
         filename = PurePosixPath(item_text).name.casefold()
         if filename in {
@@ -543,7 +549,7 @@ def _audit_license_text(distribution: importlib.metadata.Distribution) -> str:
     return ""
 
 
-def audit_installed_licenses() -> dict[str, object]:
+def audit_installed_licenses(*, include_license_files: bool = False) -> dict[str, object]:
     packages: list[dict[str, str]] = []
     blocked: list[str] = []
     prohibited = re.compile(r"\b(?:AGPL|GPL|SSPL)(?:[- v0-9.]|$)", re.IGNORECASE)
@@ -553,7 +559,10 @@ def audit_installed_licenses() -> dict[str, object]:
     ):
         name = distribution.metadata.get("Name") or ""
         version = distribution.version
-        license_text = _audit_license_text(distribution)
+        license_text = _audit_license_text(
+            distribution,
+            include_license_files=include_license_files,
+        )
         status = (
             "blocked"
             if prohibited.search(license_text)
@@ -773,7 +782,7 @@ def main() -> int:
     if args.audit_licenses:
         if args.license_report is None:
             parser.error("--license-report is required with --audit-licenses")
-        result = audit_installed_licenses()
+        result = audit_installed_licenses(include_license_files=True)
         _write_json(args.license_report, result)
         print(json.dumps({"status": result["status"]}, sort_keys=True))
         return 0 if result["status"] == "pass" else 1
