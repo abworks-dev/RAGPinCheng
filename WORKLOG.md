@@ -2860,3 +2860,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 完成：将生产部署、可复用清理和清理编排 workflow 统一为“动词在前”文件名与显示名，并同步 reusable workflow 路径、静态测试和 GPU 部署功能文档。
 - 文件：`.github/workflows/deploy-production.yml`、`.github/workflows/cleanup-production.yml`、`.github/workflows/cleanup-production-operations.yml`、`tests/test_deploy_git_safety.py`、`tests/test_gpu_runtime_deployment_static.py`、`tests/test_production_cleanup_triggers_static.py`、`project-docs/features/gpu-runtime-deployment.md`、`WORKLOG.md`
 - 验证：三份 workflow YAML 解析通过，reusable workflow 路径均存在，Job 级 `env` 无 `runner.temp`；相关 pytest 为 `29 passed, 2 subtests passed`；`git diff --check` 通过。未触发部署、清理或生产服务操作。
+
+### 04:26 — 审计公开仓库安全边界
+
+- 完成：只读复核 `origin/master` 的 Actions 触发、Runner、Token 权限、action allowlist、SHA pinning 与私有运行资料追踪状态；未修改 workflow、仓库可见性或 `.gitignore`。
+- 文件：`WORKLOG.md`
+- 验证：`pull_request` 仅进入 `ubuntu-latest` CI，所有工作流顶层 `contents` 均为 `read`，`sha_pinning_required=false`，allowlist 为 5 条，`git diff --check` 通过。当前仓库仍为 private，内网 IP、生产绝对路径和主机/Runner 标识仍在已追踪文件中；`.codex-worktrees/` 与 `jieba-0.42.1.tar.gz` 当前未追踪，但也未被 `.gitignore` 明确忽略。
+- 待办/风险：在变更可见性前需移除或脱敏上述残留，补充私有资料忽略规则，并重新执行 `rg` 和密钥扫描。
