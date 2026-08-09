@@ -2834,3 +2834,9 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 完成：将 cleanup workflow 的顶层 `on` 改为标准未加引号键，并移除错误的空 `push` 触发配置；保留 reusable、手动和定时触发，以及所有清理门禁。
 - 文件：`.github/workflows/production-cleanup.yml`、`tests/test_production_cleanup_triggers_static.py`、`WORKLOG.md`
 - 验证：Python YAML 解析、触发文本断言、测试文件 `py_compile` 和 `git diff --check` 通过；当前环境未安装 pytest，相关静态测试待 PR CI 验证；未触发清理、部署或生产服务操作。
+
+### 10:57 — 拆分生产清理 workflow 入口
+
+- 完成：将清理执行收敛为仅供调用的 `Production Cleanup` reusable workflow；新增 `Production Cleanup Operations` 承接手动、夜间 DryRun 与磁盘压力编排，并通过 reusable workflow 复用原清理脚本和门禁。
+- 文件：`.github/workflows/production-cleanup.yml`、`.github/workflows/production-cleanup-operations.yml`、`tests/test_production_cleanup_triggers_static.py`、`project-docs/features/gpu-runtime-deployment.md`、`WORKLOG.md`
+- 验证：Python YAML 解析、静态测试函数、测试文件 `py_compile`、当前目录旧路径检查和 `git diff --check` 通过；当前环境未安装 pytest，相关静态测试待 PR CI 验证；未触发清理、部署或生产服务操作。
