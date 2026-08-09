@@ -282,6 +282,16 @@ requirements 及四个受控 wheel 的稳定 Manifest 身份计算缓存键。
 workflow 对脱敏 verdict artifact 提供一次受控上传重试；内部 wheel artifact 链路优化不属于
 本次范围。
 
+### 2.0.15 jieba 固定 sdist 预置输入
+
+资格 Run `31287507974` 在 Windows runner 通过依赖代理下载固定
+`jieba-0.42.1.tar.gz` 时发生流截断，未进入样本准备、模型或 CUDA 资格阶段。后续不再由
+builder 在线获取该 sdist，改为只读取固定 staging 路径
+`${PRODUCTION_REPO_PATH}\runtime\qualification-inputs\faster-whisper\jieba-0.42.1.tar.gz`。
+workflow 和 builder 分别校验普通文件、固定 19,214,172 字节、固定 SHA-256 与 archive
+结构，再复制到 run-local 临时目录并执行既有双重可复现构建。路径不是 dispatch 输入，
+不得指向现有 ASR venv、模型或服务目录；缺失或身份不符时立即失败，不回退在线下载。
+
 ### 2.1 仓库基线
 
 - PR #34 已合并到 `master`；
@@ -471,7 +481,7 @@ samples[8]
 | 文件 | 职责 |
 |---|---|
 | `.github/workflows/qualify-faster-whisper-production.yml` | 单一手动 R3 workflow；绑定完整 master SHA、`production-asr` Environment、Windows runner、并发锁和显式执行开关 |
-| `scripts/build_internal_jieba_wheel.py` | 固定下载、双重可复现构建和严格校验 `jieba==0.42.1` 受控 pure-Python wheel bundle |
+| `scripts/build_internal_jieba_wheel.py` | 固定 staging 输入、双重可复现构建和严格校验 `jieba==0.42.1` 受控 pure-Python wheel bundle |
 | `scripts/qualify-faster-whisper-production.ps1` | Windows 总编排：preflight、wheelhouse、隔离 venv、模型准备、临时服务、GPU/BGE 监控、清理和最终 verdict |
 | `scripts/prepare_faster_whisper_model.py` | 固定 Hugging Face repo/revision 下载、staging、普通文件/无 symlink 检查、全文件 Manifest 和本机 hash 校验 |
 | `scripts/run_faster_whisper_qualification.py` | 严格读取 8 样本 Manifest，通过隔离 ASR HTTP + Remote Provider + pipeline 生成 Canonical/Markdown，计算质量与时间戳指标 |
@@ -566,9 +576,9 @@ prepare_synthetic_samples=false|true（默认 false）
    - `asr_service/requirements-windows.txt`；
    - `asr_service/requirements-faster-whisper.txt`；
 4. 现有生产 freeze 作为共享包约束，证明 FunASR 与 faster-whisper 可以共存；
-5. 只接受 binary wheel，禁止在 Windows 资格 job 构建 sdist、使用 VCS URL、editable 或
-   可变 branch；唯一例外是前置 GitHub-hosted job 从固定 URL/大小/SHA-256 的
-   `jieba 0.42.1` sdist 双重构建并校验得到的受控 pure-Python wheel；
+5. 只接受 binary wheel，禁止安装 sdist、使用 VCS URL、editable 或可变 branch；唯一
+   例外是 Windows 资格 job 从固定 staging 路径读取经大小/SHA-256/archive 双重验证的
+   `jieba 0.42.1` sdist，并在网络禁用的构建阶段重复构建得到受控 pure-Python wheel；
 6. wheelhouse 按文件名排序记录 URL、大小和 SHA-256；
 7. 从同一 wheelhouse 离线安装资格 venv；
 8. 运行 `pip check`、完整 freeze、模块来源校验和许可证审计；
