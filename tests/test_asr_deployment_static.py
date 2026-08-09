@@ -1202,6 +1202,8 @@ def test_qwen3_asr_qualification_uses_controlled_legacy_wheel_bundles():
     assert '"--find-links", $ResolvedCrcmodWheelBundle' in script
     assert '"--find-links", $ResolvedAliyunCoreWheelBundle' in script
     assert '"--verbose",' in script
+    assert "function Get-TextSha256" in script
+    assert "$SharedCacheKey = Get-TextSha256" in script
     assert "Controlled internal wheel bundle must be a real directory" in script
     assert 'EndsWith(".whl.metadata"' in script
     assert 'candidate -replace "\\.whl\\.metadata(?=$|[?#])", ".whl"' in script
