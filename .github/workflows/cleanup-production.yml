@@ -45,6 +45,7 @@ jobs:
       inputs.confirm_production_cleanup == true ||
       (inputs.allow_unconfirmed_dry_run == true && inputs.apply == false)
     runs-on: [self-hosted, windows, production, gpu]
+    environment: production-asr
     timeout-minutes: 30
     env:
       INPUT_TARGET: ${{ inputs.target }}
@@ -94,6 +95,7 @@ jobs:
   nightly-dryrun:
     if: github.event_name == 'schedule' && github.event.schedule == '30 19 * * *'
     runs-on: [self-hosted, windows, production, gpu]
+    environment: production-asr
     timeout-minutes: 30
     steps:
       - name: Verify cleanup checkout
@@ -132,6 +134,7 @@ jobs:
   disk-pressure:
     if: github.event_name == 'schedule' && github.event.schedule == '*/30 * * * *'
     runs-on: [self-hosted, windows, production, gpu]
+    environment: production-asr
     timeout-minutes: 30
     env:
       AUTO_CLEANUP_ENABLED: ${{ vars.PRODUCTION_AUTO_CLEANUP_ENABLED }}

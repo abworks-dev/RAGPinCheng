@@ -22,6 +22,7 @@ permissions:
 jobs:
   deploy-gpu:
     if: ${{ (github.event_name == 'workflow_dispatch' && inputs.confirm_production == true) || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && vars.PRODUCTION_AUTO_DEPLOY_ENABLED == 'true') }}
+    environment: production-asr
     concurrency:
       group: production-gpu-exclusive
       cancel-in-progress: false
@@ -77,6 +78,7 @@ jobs:
   deploy-app:
     if: ${{ needs.deploy-gpu.result == 'success' }}
     needs: [deploy-gpu]
+    environment: production-asr
     concurrency:
       group: production-app-deployment
       cancel-in-progress: false
