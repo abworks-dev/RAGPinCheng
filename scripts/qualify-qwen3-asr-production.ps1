@@ -18,7 +18,8 @@ param(
     [string]$AliyunCoreWheelBundlePath,
     [bool]$ExecuteQualification = $false,
     [string]$SummaryPath = "",
-    [string]$DependencyDiagnosticPath = ""
+    [string]$DependencyDiagnosticPath = "",
+    [string]$LicenseMatrixPath = ""
 )
 
 Set-StrictMode -Version Latest
@@ -1680,14 +1681,28 @@ print('qualification-module-origins-verified')
     $DependencyFailureStage = "license_audit"
     $DependencyFailureOperation = "license_audit_command"
     $DependencyFailureLog = Join-Path $LogRoot "license-audit.log"
-    Invoke-External `
-        -FilePath $VenvPython `
-        -Arguments @(
-            (Join-Path $ResolvedSource "scripts\run_qwen3_asr_qualification.py"),
-            "--audit-licenses",
-            "--license-report", (Join-Path $EvidenceRoot "license-matrix.json")
-        ) `
-        -LogPath $DependencyFailureLog
+    $LocalLicenseMatrixPath = Join-Path $EvidenceRoot "license-matrix.json"
+    try {
+        Invoke-External `
+            -FilePath $VenvPython `
+            -Arguments @(
+                (Join-Path $ResolvedSource "scripts\run_qwen3_asr_qualification.py"),
+                "--audit-licenses",
+                "--license-report", $LocalLicenseMatrixPath
+            ) `
+            -LogPath $DependencyFailureLog
+    } finally {
+        if (
+            -not [string]::IsNullOrWhiteSpace($LicenseMatrixPath) -and
+            (Test-Path -LiteralPath $LocalLicenseMatrixPath -PathType Leaf)
+        ) {
+            $licenseMatrixParent = Split-Path -Parent $LicenseMatrixPath
+            if (-not [string]::IsNullOrWhiteSpace($licenseMatrixParent)) {
+                [void](New-Item -ItemType Directory -Path $licenseMatrixParent -Force)
+            }
+            Copy-Item -LiteralPath $LocalLicenseMatrixPath -Destination $LicenseMatrixPath -Force
+        }
+    }
     Write-StageTiming -Stage "dependency_preparation" -Stopwatch $DependencyStopwatch
 
     $FailureCode = "model_preparation_failed"
