@@ -2828,3 +2828,9 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 完成：将 production cleanup 与 deploy workflow 重命名为新的文件路径，并同步 deployment 内 reusable workflow 引用、现行静态测试和当前 GPU deployment 功能地图，以触发 GitHub Actions 新建 workflow 注册记录。
 - 文件：`.github/workflows/production-cleanup.yml`、`.github/workflows/production-deploy.yml`、相关静态测试、`project-docs/features/gpu-runtime-deployment.md`、`WORKLOG.md`
 - 验证：Python YAML 解析、测试文件 `py_compile`、当前目录旧路径检查和 `git diff --check` 通过；当前环境未安装 pytest，相关静态测试待 PR CI 验证；未触发部署、清理或生产服务操作。
+
+### 10:02 — 修复 production cleanup 触发注册
+
+- 完成：将 cleanup workflow 的顶层 `on` 改为标准未加引号键，并移除错误的空 `push` 触发配置；保留 reusable、手动和定时触发，以及所有清理门禁。
+- 文件：`.github/workflows/production-cleanup.yml`、`tests/test_production_cleanup_triggers_static.py`、`WORKLOG.md`
+- 验证：Python YAML 解析、触发文本断言、测试文件 `py_compile` 和 `git diff --check` 通过；当前环境未安装 pytest，相关静态测试待 PR CI 验证；未触发清理、部署或生产服务操作。
