@@ -2797,3 +2797,9 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 完成：PR #134 CI 暴露最小 `Distribution` 测试替身没有 `.files` 属性；改为安全读取可选文件列表，并将 wheel license-file 证据限定为 Qwen CLI 显式开启，保持共享 WhisperX 默认行为不变。
 - 文件：`scripts/run_qwen3_asr_qualification.py`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`
 - 验证：Python `py_compile`、`git diff --check` 通过；需 PR CI 验证完整测试矩阵。
+
+### 09:01 — 修正 Qwen 许可矩阵证据路径
+
+- 完成：run `31286920608` 许可审计仍失败，但 artifact 未包含矩阵；新增显式 `LicenseMatrixPath`，在审计成功或失败的 `finally` 中将 run-local 矩阵复制到 runner temp 并上传，保持许可判断不变。
+- 文件：`scripts/qualify-qwen3-asr-production.ps1`、`.github/workflows/qualify-qwen3-asr-production.yml`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`
+- 验证：待 PowerShell/workflow/Python 静态检查及 PR CI；未修改依赖源、requirements、模型、生产服务或 Profile admission。

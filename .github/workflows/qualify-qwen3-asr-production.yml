@@ -153,6 +153,7 @@ jobs:
             AliyunCoreWheelBundlePath = "${{ runner.temp }}\qwen3-asr-internal-wheels-${{ github.run_id }}\aliyun-core"
             SummaryPath = "${{ runner.temp }}\qwen3-asr-r3-${{ github.run_id }}\qualification-verdict.json"
             DependencyDiagnosticPath = "${{ runner.temp }}\qwen3-asr-r3-${{ github.run_id }}\dependency-diagnostic.json"
+            LicenseMatrixPath = "${{ runner.temp }}\qwen3-asr-r3-${{ github.run_id }}\license-matrix.json"
           }
           & "${{ github.workspace }}\scripts\qualify-qwen3-asr-production.ps1" @params
 
@@ -199,6 +200,6 @@ jobs:
           path: |
             ${{ runner.temp }}\qwen3-asr-r3-${{ github.run_id }}\qualification-verdict.json
             ${{ runner.temp }}\qwen3-asr-r3-${{ github.run_id }}\dependency-diagnostic.json
-            ${{ runner.temp }}\qwen3-asr-r3-${{ github.run_id }}\evidence\license-matrix.json
+            ${{ runner.temp }}\qwen3-asr-r3-${{ github.run_id }}\license-matrix.json
           if-no-files-found: warn
           retention-days: 14
