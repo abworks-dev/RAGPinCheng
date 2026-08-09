@@ -80,7 +80,6 @@ jobs:
       INPUT_APPLY: ${{ inputs.apply }}
       INPUT_CONFIRM: ${{ inputs.confirm_production_cleanup }}
       INPUT_REASON: ${{ inputs.reason }}
-      REPORT_ROOT: ${{ runner.temp }}\ragpincheng-production-cleanup
     steps:
       - name: Verify cleanup checkout
         shell: powershell
@@ -95,6 +94,8 @@ jobs:
 
       - name: Run production cleanup
         shell: powershell
+        env:
+          REPORT_ROOT: ${{ runner.temp }}\ragpincheng-production-cleanup
         run: |
           Set-StrictMode -Version Latest
           $ErrorActionPreference = 'Stop'
@@ -123,8 +124,6 @@ jobs:
     if: github.event_name == 'schedule' && github.event.schedule == '30 19 * * *'
     runs-on: [self-hosted, windows, production, gpu]
     timeout-minutes: 30
-    env:
-      REPORT_ROOT: ${{ runner.temp }}\ragpincheng-production-cleanup
     steps:
       - name: Verify cleanup checkout
         shell: powershell
@@ -138,6 +137,8 @@ jobs:
 
       - name: Run nightly dry-run
         shell: powershell
+        env:
+          REPORT_ROOT: ${{ runner.temp }}\ragpincheng-production-cleanup
         run: |
           Set-StrictMode -Version Latest
           $ErrorActionPreference = 'Stop'
@@ -162,7 +163,6 @@ jobs:
     runs-on: [self-hosted, windows, production, gpu]
     timeout-minutes: 30
     env:
-      REPORT_ROOT: ${{ runner.temp }}\ragpincheng-production-cleanup
       AUTO_CLEANUP_ENABLED: ${{ vars.PRODUCTION_AUTO_CLEANUP_ENABLED }}
     steps:
       - name: Verify cleanup checkout
@@ -183,6 +183,7 @@ jobs:
         id: disk
         shell: powershell
         env:
+          REPORT_ROOT: ${{ runner.temp }}\ragpincheng-production-cleanup
           DISK_REPORT: ${{ runner.temp }}\ragpincheng-production-cleanup\disk.json
         run: |
           Set-StrictMode -Version Latest
@@ -196,6 +197,8 @@ jobs:
       - name: Run pressure dry-run
         if: steps.disk.outputs.run_dryrun == 'true'
         shell: powershell
+        env:
+          REPORT_ROOT: ${{ runner.temp }}\ragpincheng-production-cleanup
         run: |
           Set-StrictMode -Version Latest
           $ErrorActionPreference = 'Stop'
@@ -210,6 +213,8 @@ jobs:
       - name: Auto-clean old deployment backups
         if: steps.disk.outputs.tier == 'backup-apply' && env.AUTO_CLEANUP_ENABLED == 'true'
         shell: powershell
+        env:
+          REPORT_ROOT: ${{ runner.temp }}\ragpincheng-production-cleanup
         run: |
           Set-StrictMode -Version Latest
           $ErrorActionPreference = 'Stop'
