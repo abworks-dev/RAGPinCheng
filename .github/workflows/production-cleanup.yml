@@ -51,7 +51,6 @@ jobs:
       INPUT_APPLY: ${{ inputs.apply }}
       INPUT_CONFIRM: ${{ inputs.confirm_production_cleanup }}
       INPUT_REASON: ${{ inputs.reason }}
-      REPORT_ROOT: ${{ runner.temp }}\ragpincheng-production-cleanup
     steps:
       - name: Verify cleanup checkout
         shell: powershell
@@ -66,6 +65,8 @@ jobs:
 
       - name: Run production cleanup
         shell: powershell
+        env:
+          REPORT_ROOT: ${{ runner.temp }}\ragpincheng-production-cleanup
         run: |
           Set-StrictMode -Version Latest
           $ErrorActionPreference = 'Stop'
