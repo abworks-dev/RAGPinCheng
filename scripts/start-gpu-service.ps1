@@ -7,8 +7,12 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $resolvedRelease = [IO.Path]::GetFullPath($ReleaseRoot)
-if (-not $resolvedRelease.StartsWith("${PRODUCTION_REPO_PATH}\runtime\releases\", [StringComparison]::OrdinalIgnoreCase)) {
-    throw "GPU release must be under the managed D: runtime root"
+if ([string]::IsNullOrWhiteSpace($env:PRODUCTION_RUNTIME_ROOT) -or [string]::IsNullOrWhiteSpace($env:PRODUCTION_REPO_PATH)) {
+    throw "GPU runtime and repository roots must be supplied by the private deployment environment"
+}
+$managedReleaseRoot = (Join-Path $env:PRODUCTION_RUNTIME_ROOT 'releases') + '\'
+if (-not $resolvedRelease.StartsWith($managedReleaseRoot, [StringComparison]::OrdinalIgnoreCase)) {
+    throw "GPU release must be under the managed runtime root"
 }
 $manifestPath = Join-Path $resolvedRelease "runtime-manifest.json"
 $qualificationPath = Join-Path $resolvedRelease "qualification.json"
@@ -79,7 +83,7 @@ if (-not $python.Equals($expectedPython, [StringComparison]::OrdinalIgnoreCase))
     throw "GPU runtime Python path escapes the immutable release"
 }
 if (-not (Test-Path -LiteralPath $python -PathType Leaf)) { throw "GPU release Python is missing" }
-$envFile = "${PRODUCTION_REPO_PATH}\gpu_service\.env"
+$envFile = Join-Path $env:PRODUCTION_REPO_PATH 'gpu_service\.env'
 if (-not (Test-Path -LiteralPath $envFile -PathType Leaf)) { throw "GPU service environment file is missing" }
 
 $seen = @{}
@@ -95,7 +99,9 @@ foreach ($line in Get-Content -LiteralPath $envFile -Encoding UTF8) {
     [Environment]::SetEnvironmentVariable($name, $Matches[2], "Process")
 }
 if ([string]::IsNullOrWhiteSpace($env:GPU_SERVICE_TOKEN)) { throw "GPU_SERVICE_TOKEN must not be empty" }
-if ($env:HOST -ne "${PRIVATE_IPV4}") { throw "GPU service HOST must be ${PRIVATE_IPV4}" }
+if ([string]::IsNullOrWhiteSpace($env:GPU_SERVICE_HOST) -or $env:HOST -ne $env:GPU_SERVICE_HOST) {
+    throw "GPU service HOST does not match the private environment configuration"
+}
 if ($env:PORT -ne "8100") { throw "GPU service PORT must be 8100" }
 
 $env:HF_HOME = [string]$manifest.model_cache

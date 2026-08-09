@@ -10,14 +10,14 @@ param(
     [ValidatePattern('^[0-9]{1,20}$')]
     [string]$ActivationId,
     [string]$SourceRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")),
-    [string]$ProgramRoot = "${PRODUCTION_SERVICE_ROOT}\RAGPinCheng-ASR",
-    [string]$DataRoot = "${PRODUCTION_DATA_ROOT}\RAGPinCheng-ASR"
+    [string]$ProgramRoot = $env:PRODUCTION_ASR_PROGRAM_ROOT,
+    [string]$DataRoot = $env:PRODUCTION_ASR_DATA_ROOT
 )
 
 $ErrorActionPreference = "Stop"
 $taskName = "RAGPinCheng-ASR"
 $firewallRuleName = "RAGPinCheng-ASR-8200-from-Ubuntu"
-$allowedRemoteAddress = "${PRIVATE_IPV4}"
+$allowedRemoteAddress = $env:PRODUCTION_APP_NODE_IP
 $configRoot = Join-Path $DataRoot "config"
 $envFile = Join-Path $configRoot "asr.env"
 $stateRoot = Join-Path $configRoot "activation-backups"
@@ -95,8 +95,8 @@ function Assert-RequiredConfiguration {
     if ($Values["ASR_MODEL_LOCAL_FILES_ONLY"] -ne "true") {
         throw "ASR_MODEL_LOCAL_FILES_ONLY must remain true"
     }
-    if ($Values["BGE_PRIORITY_PROBE_URL"] -ne "http://${PRIVATE_IPV4}:8100/v1/activity") {
-        throw "BGE priority probe URL must remain the fixed local GPU activity endpoint"
+    if ([string]::IsNullOrWhiteSpace($env:GPU_SERVICE_ACTIVITY_URL) -or $Values["BGE_PRIORITY_PROBE_URL"] -ne $env:GPU_SERVICE_ACTIVITY_URL) {
+        throw "BGE priority probe URL must match the private GPU activity endpoint configuration"
     }
 }
 

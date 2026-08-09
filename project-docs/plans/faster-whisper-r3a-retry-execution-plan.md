@@ -12,10 +12,10 @@
 治理关系如下：
 
 1. 原计划继续作为 A0–A8 的主体规范：
-   - `E:\Repository\Github\RAGPinCheng\project-docs\plans\faster-whisper-r3a-execution-plan.md`
+   - `${REPOSITORY_CHECKOUT_PATH}\project-docs\plans\faster-whisper-r3a-execution-plan.md`
    - SHA-256：`e2508a827441d8e7fea61441be9e6551e4a94ee6fd1f903048b5017c8baf08d1`
 2. 静态预检报告继续作为历史依据，但其中旧 `model.bin` SHA-256 已被本补充计划纠正：
-   - `E:\Repository\Github\RAGPinCheng\project-docs\plans\faster-whisper-phase0-precheck.md`
+   - `${REPOSITORY_CHECKOUT_PATH}\project-docs\plans\faster-whisper-phase0-precheck.md`
    - SHA-256：`2edb7c53fc9aec9818eec6be70fd1fa3873d3ce4b0900d7c53e819a9fee9717e`
 3. 本补充计划与原计划冲突时，仅对下列事项以本补充计划为准：
    - new run/new identity；
@@ -76,7 +76,7 @@
 
 ```text
 Host=${PRODUCTION_HOSTNAME}
-IP=${PRIVATE_ZEROTIER_IPV4}
+IP=${GPU_NODE_ZEROTIER_IP}
 User=Administrator
 SSH ED25519=${PRODUCTION_HOST_KEY_FINGERPRINT}
 KexAlgorithms=curve25519-sha256
@@ -106,13 +106,13 @@ ${QUALIFICATION_SANDBOX_ROOT}\faster-whisper-runs\phase0-fw-r3a-retry-YYYYMMDD-H
 
 A0/A1 helper：
 
-- 源文件：`E:\Repository\Github\RAGPinCheng\project-docs\plans\faster-whisper-r3a-retry-a0-a1.ps1`
+- 源文件：`${REPOSITORY_CHECKOUT_PATH}\project-docs\plans\faster-whisper-r3a-retry-a0-a1.ps1`
 - SHA-256：`6dd890402cc5d069c235b5028e2099957b3686805da29bc4a6cdbc0ba350d8fe`
 - 大小：31,261 bytes
 
 BGE 鉴权 helper：
 
-- 源文件：`E:\Repository\Github\RAGPinCheng\project-docs\plans\faster-whisper-r3a-retry-bge-auth-probe.ps1`
+- 源文件：`${REPOSITORY_CHECKOUT_PATH}\project-docs\plans\faster-whisper-r3a-retry-bge-auth-probe.ps1`
 - SHA-256：`758eabc198e94c339a59bce29fa7258410a04d2f2e5ff295528e2d2d4304ef98`
 - 大小：7,223 bytes
 
@@ -161,19 +161,19 @@ A4 实际下载后仍必须对本地 `model.bin` 独立计算完整 SHA-256 和�
 
 ### 5.1 代理类型结论
 
-用户提供的 `${PRIVATE_ZEROTIER_IPV4}:7897` 是开启局域网访问的 Clash Verge/Mihomo `mixed-port`。Mihomo 官方配置语义中，`mixed-port` 可同时接受 HTTP(S) 和 SOCKS 代理连接；生产机只读实测也确认以下两种方式当前可用：
+用户提供的 `${PROXY_HOST}:${PROXY_PORT}` 是开启局域网访问的 Clash Verge/Mihomo `mixed-port`。Mihomo 官方配置语义中，`mixed-port` 可同时接受 HTTP(S) 和 SOCKS 代理连接；生产机只读实测也确认以下两种方式当前可用：
 
 ```text
-http://${PRIVATE_ZEROTIER_IPV4}:7897
-socks5h://${PRIVATE_ZEROTIER_IPV4}:7897
+${PROXY_URI}
+${SOCKS_PROXY_URI}
 ```
 
 本计划固定：
 
-- 自动下载主代理：`http://${PRIVATE_ZEROTIER_IPV4}:7897`；
+- 自动下载主代理：`${PROXY_URI}`；
 - 代理类型：Clash Verge/Mihomo mixed-port；
 - HTTP 是唯一自动下载协议；
-- `socks5h://${PRIVATE_ZEROTIER_IPV4}:7897` 仅用于人工诊断，不得自动切换或写成已批准下载路径；
+- `${SOCKS_PROXY_URI}` 仅用于人工诊断，不得自动切换或写成已批准下载路径；
 - 不使用 `--ssl-no-revoke`，不禁用 TLS 证书或吊销检查；
 - 首次 curl exit 35 只记录为当时的暂时性 TLS 状态，当前链路已恢复，但根因未被证明，不得写成已确定根因。
 
@@ -475,7 +475,7 @@ R3-A 成功只表示固定候选在隔离环境完成 artifact、许可、CUDA/D
 | 数据声明 | 自制或合成、非客户、非内部 |
 | 失败 artifact | A：完整保留 |
 | 暂停点 | P1/P2/P3/P4 全部强制 |
-| 代理 | `http://${PRIVATE_ZEROTIER_IPV4}:7897`，mixed-port，HTTP primary；SOCKS 仅诊断 |
+| 代理 | `${PROXY_URI}`，mixed-port，HTTP primary；SOCKS 仅诊断 |
 | 允许来源 | `pypi.org`、`files.pythonhosted.org`、`huggingface.co`、`us.aws.cdn.hf.co` |
 | 许可 blocker | 目标 blocker=0；`bim-admin` 只可精确批准具体 blocker |
 | 超时 | wheel 30m；模型 120m；离线安装 30m；模型加载 15m；推理 10m |
@@ -486,7 +486,7 @@ R3-A 成功只表示固定候选在隔离环境完成 artifact、许可、CUDA/D
 
 ```text
 批准执行 faster-whisper R3-A retry，按
-E:\Repository\Github\RAGPinCheng\project-docs\plans\faster-whisper-r3a-retry-execution-plan.md
+${REPOSITORY_CHECKOUT_PATH}\project-docs\plans\faster-whisper-r3a-retry-execution-plan.md
 执行；计划 SHA-256 = <填写本文件最终 SHA-256>。
 
 执行通道 = Codex 经验证 SSH
@@ -497,7 +497,7 @@ BGE 鉴权探针 = 批准本地重新输入并生成 15 分钟 DPAPI 临时文�
 样本声明 = 自制或合成、非客户、非内部
 失败 artifact 策略 = A 完整保留
 暂停点 = P1/P2/P3/P4 全部强制
-代理 = http://${PRIVATE_ZEROTIER_IPV4}:7897，Clash Verge/Mihomo mixed-port，HTTP primary；不自动切换 SOCKS
+代理 = ${PROXY_URI}，Clash Verge/Mihomo mixed-port，HTTP primary；不自动切换 SOCKS
 允许下载来源 = pypi.org、files.pythonhosted.org、huggingface.co、us.aws.cdn.hf.co
 许可 blocker 批准人 = bim-admin，仅可精确批准具体 blocker
 超时 = wheel 30 分钟；模型 120 分钟；离线安装 30 分钟；模型加载 15 分钟；推理 10 分钟

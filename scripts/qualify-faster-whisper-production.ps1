@@ -25,9 +25,9 @@ $ErrorActionPreference = "Stop"
 $ExecuteQualification = $ExecuteQualification -in @("true","1","yes","on")
 . (Join-Path $PSScriptRoot "windows-wheel-cache.ps1")
 
-$ProgramRoot = "${PRODUCTION_SERVICE_ROOT}\RAGPinCheng-ASR\qualification\faster-whisper"
-$DataRoot = "${PRODUCTION_DATA_ROOT}\RAGPinCheng-ASR"
-$InputRoot = "${PRODUCTION_DATA_ROOT}\RAGPinCheng-ASR\qualification\faster-whisper\inputs"
+$ProgramRoot = $env:PRODUCTION_FASTER_WHISPER_QUALIFICATION_ROOT
+$DataRoot = $env:PRODUCTION_ASR_DATA_ROOT
+$InputRoot = $env:PRODUCTION_FASTER_WHISPER_INPUT_ROOT
 $SampleManifest = Join-Path $InputRoot "manifest.json"
 $ModelCacheRoot = Join-Path $DataRoot "models"
 $WheelCacheRoot = Join-Path $DataRoot "qualification\wheel-cache"
@@ -48,7 +48,7 @@ $ConfigRoot = Join-Path $RunRoot "config"
 $StateRoot = Join-Path $RunRoot "state"
 $TempPort = 18200
 $ProductionAsrPort = 8200
-$GpuUrl = "http://${PRIVATE_IPV4}:8100"
+$GpuUrl = $env:GPU_SERVICE_URL
 $ProductionAsrUrl = "http://127.0.0.1:8200"
 $TempAsrUrl = "http://127.0.0.1:$TempPort"
 $SenseVoiceManifest = Join-Path $ModelCacheRoot "SenseVoiceSmall\7bf452403abd7353a300cd760f7adae7701c92c1\model-manifest.json"
@@ -168,7 +168,7 @@ function Assert-DirectChild {
 
 function Get-MachinePython311 {
     $candidates = @(
-        "${PRODUCTION_PYTHON311_PATH}",
+        $env:PRODUCTION_PYTHON311_PATH,
         (Join-Path $env:ProgramW6432 "Python311\python.exe")
     )
     foreach ($registryPath in @(
@@ -362,7 +362,7 @@ function Set-ScopedProxy {
     Save-ProcessEnvironment -Names @("HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY")
     $env:HTTP_PROXY = $Proxy
     $env:HTTPS_PROXY = $Proxy
-    $env:NO_PROXY = "127.0.0.1,localhost,${PRIVATE_IPV4},${PRIVATE_IPV4}"
+    $env:NO_PROXY = $env:PRODUCTION_NO_PROXY
 }
 
 function Clear-ScopedProxy {
@@ -1656,7 +1656,7 @@ try {
     $CrcmodWheelManifest = Get-Content `
         -LiteralPath (Join-Path $ResolvedCrcmodWheelBundle "internal-wheel-manifest.json") `
         -Raw -Encoding UTF8 | ConvertFrom-Json
-    $ProductionPython = "${PRODUCTION_SERVICE_ROOT}\RAGPinCheng-ASR\venv\Scripts\python.exe"
+    $ProductionPython = $env:PRODUCTION_PYTHON_PATH
     Write-QualificationProgress -Stage "preflight_host_checks"
     if (-not (Test-Path -LiteralPath $ProductionPython -PathType Leaf)) {
         throw "Production ASR venv Python is missing"
@@ -2109,7 +2109,7 @@ print('qualification-module-origins-verified')
     $env:ASR_FASTER_WHISPER_MODEL_CACHE_ROOT = $ModelCacheRoot
     $env:ASR_FASTER_WHISPER_MODEL_MANIFEST_PATH = $ModelManifest
     $env:ASR_LOG_DIR = $LogRoot
-    $env:BGE_PRIORITY_PROBE_URL = "http://${PRIVATE_IPV4}:8100/v1/activity"
+    $env:BGE_PRIORITY_PROBE_URL = $env:GPU_SERVICE_ACTIVITY_URL
     $env:BGE_PRIORITY_PROBE_TOKEN = $env:GPU_SERVICE_TOKEN
     $env:ASR_QUALIFICATION_TOKEN = $TemporaryToken
     $env:HF_HUB_OFFLINE = "1"

@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 class TestDeployGitSafety(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.workflow = (ROOT / ".github/workflows/production-deploy.yml").read_text(
+        cls.workflow = (ROOT / ".github/workflows/deploy-production.yml").read_text(
             encoding="utf-8"
         )
         cls.windows = (ROOT / "scripts/deploy-gpu.ps1").read_text(encoding="utf-8")
@@ -82,7 +82,7 @@ class TestDeployGitSafety(unittest.TestCase):
     def test_start_wrapper_requires_validated_immutable_release(self):
         self.assertIn("GPU runtime release is not validated for production", self.windows_start)
         self.assertIn("GPU qualification evidence does not match", self.windows_start)
-        self.assertIn("D:\\RAGPinCheng\\runtime\\releases\\", self.windows_start)
+        self.assertIn("Join-Path $env:PRODUCTION_RUNTIME_ROOT 'releases'", self.windows_start)
         self.assertIn("runtime_python", self.windows_start)
         self.assertIn("RERANKER_USE_FP16", self.windows_start)
         self.assertIn("source-files.sha256.json", self.windows_start)

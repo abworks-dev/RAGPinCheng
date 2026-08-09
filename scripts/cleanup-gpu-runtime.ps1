@@ -2,7 +2,7 @@
 param(
     [Parameter()]
     [ValidateNotNullOrEmpty()]
-    [string]$RuntimeRoot = '${PRODUCTION_REPO_PATH}\runtime',
+    [string]$RuntimeRoot = $env:PRODUCTION_RUNTIME_ROOT,
 
     [Parameter()]
     [ValidateRange(1, 3650)]
@@ -50,7 +50,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$ExpectedRuntimeRoot = [IO.Path]::GetFullPath('${PRODUCTION_REPO_PATH}\runtime').TrimEnd('\')
+$ExpectedRuntimeRoot = [IO.Path]::GetFullPath($RuntimeRoot).TrimEnd('\')
 $NowUtc = [DateTime]::UtcNow
 $RecentCutoffUtc = $NowUtc.AddHours(-24)
 $ReleaseCutoffUtc = $NowUtc.AddDays(-$ReleaseRetentionDays)

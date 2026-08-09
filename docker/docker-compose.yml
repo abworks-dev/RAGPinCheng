@@ -74,8 +74,8 @@ services:
       # http://localhost:6333 泄漏到容器内，导致无法连接 qdrant 服务。
       QDRANT_URL: http://qdrant:6333
       # GPU 推理服务地址 — 生产环境指向 Windows GPU 主机内网地址。
-      # 在 .env 中设置：GPU_SERVICE_URL=http://${PRIVATE_IPV4}:8100
-      GPU_SERVICE_URL: ${GPU_SERVICE_URL:-http://${PRIVATE_IPV4}:8100}
+      # 生产 GPU 地址仅从私有 .env 注入；示例默认仅用于本机开发。
+      GPU_SERVICE_URL: ${GPU_SERVICE_URL:-http://127.0.0.1:8100}
       GPU_SERVICE_TOKEN: ${GPU_SERVICE_TOKEN:-}
       EMBED_PROVIDER: ${EMBED_PROVIDER:-remote}
       RERANK_PROVIDER: ${RERANK_PROVIDER:-remote}

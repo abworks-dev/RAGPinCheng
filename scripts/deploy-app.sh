@@ -10,12 +10,12 @@
 
 set -euo pipefail
 
-REPO_PATH="${REPO_PATH:-${PRODUCTION_APP_REPO_PATH}}"
-BACKUP_DIR="${BACKUP_DIR:-${PRODUCTION_APP_BACKUP_DIRECTORY}}"
-DATA_PATH="${DATA_PATH:-${PRODUCTION_APP_DATA_PATH}}"
+REPO_PATH="${REPO_PATH:?REPO_PATH must be provided by the private deployment environment}"
+BACKUP_DIR="${BACKUP_DIR:?BACKUP_DIR must be provided by the private deployment environment}"
+DATA_PATH="${DATA_PATH:?DATA_PATH must be provided by the private deployment environment}"
 COMPOSE_BASE="${REPO_PATH}/docker/docker-compose.yml"
-COMPOSE_OVERRIDE="/data/services/docker/compose/ragpincheng/prod/compose.prod.yaml"
-COMPOSE_ENV_FILE="${PRODUCTION_APP_ENV_FILE}"
+COMPOSE_OVERRIDE="${COMPOSE_OVERRIDE:?COMPOSE_OVERRIDE must be provided by the private deployment environment}"
+COMPOSE_ENV_FILE="${COMPOSE_ENV_FILE:?COMPOSE_ENV_FILE must be provided by the private deployment environment}"
 COMPOSE_PROJECT="ragpincheng-prod"
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 BACKUP_PATH="${BACKUP_DIR}/app-backup-${TIMESTAMP}"
@@ -72,7 +72,7 @@ command -v docker >/dev/null 2>&1 || { echo "docker not found"; exit 1; }
 
 # ── 2. Verify GPU service contract ────────────────────────────────────────
 echo ">> Checking GPU service contract"
-GPU_URL="${GPU_SERVICE_URL:-http://${PRIVATE_IPV4}:8100}"
+GPU_URL="${GPU_SERVICE_URL:?GPU_SERVICE_URL must be provided by the private deployment environment}"
 GPU_HEALTH=$(curl -fsS "${GPU_URL}/health" 2>/dev/null || echo "")
 if ! echo "$GPU_HEALTH" | python3 -c "import sys,json; d=json.load(sys.stdin); assert d.get('status') == 'ok' and d.get('model_loaded') is True" 2>/dev/null; then
     echo "ERROR: GPU service is not healthy at ${GPU_URL}"

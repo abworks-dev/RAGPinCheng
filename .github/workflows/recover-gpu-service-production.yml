@@ -27,9 +27,11 @@ jobs:
         shell: powershell
         env:
           GPU_SERVICE_TOKEN: ${{ secrets.GPU_SERVICE_TOKEN }}
-          REPO_PATH: ${PRODUCTION_REPO_PATH}
-          RUNTIME_ROOT: ${PRODUCTION_REPO_PATH}\runtime
-          BACKUP_DIR: ${PRODUCTION_BACKUP_DIRECTORY}
+          REPO_PATH: ${{ vars.PRODUCTION_REPO_PATH }}
+          RUNTIME_ROOT: ${{ vars.PRODUCTION_RUNTIME_ROOT }}
+          BACKUP_DIR: ${{ vars.PRODUCTION_BACKUP_DIRECTORY }}
+          GPU_SERVICE_URL: ${{ vars.GPU_SERVICE_URL }}
+          GPU_SERVICE_HOST: ${{ vars.GPU_SERVICE_HOST }}
         run: |
           Set-StrictMode -Version Latest
           $ErrorActionPreference = "Stop"

@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ── Network ──────────────────────────────────────────────────────────────────
-HOST = os.getenv("HOST", "${PRIVATE_IPV4}")
+HOST = os.getenv("HOST", "127.0.0.1")
 PORT = int(os.getenv("PORT", "8100"))
 
 # ── Auth ─────────────────────────────────────────────────────────────────────

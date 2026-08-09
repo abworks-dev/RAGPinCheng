@@ -15,7 +15,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$QualificationRoot = "${PRODUCTION_SERVICE_ROOT}\RAGPinCheng-ASR\qualification\qwen3-asr"
+$QualificationRoot = $env:PRODUCTION_QWEN3_ASR_QUALIFICATION_ROOT
 $SourceRunId = "30970277613"
 $SourceCommitSha = "86b69db6831e3cd201436a26bbe836229bf419bd"
 $SourceRunRoot = Join-Path $QualificationRoot "runs\$SourceRunId"
@@ -171,7 +171,7 @@ function Assert-FixedCombinedRequirements {
 
 function Get-MachinePython311 {
     $candidates = @(
-        "${PRODUCTION_PYTHON311_PATH}",
+        $env:PRODUCTION_PYTHON311_PATH,
         (Join-Path $env:ProgramW6432 "Python311\python.exe")
     )
     foreach ($registryPath in @(
@@ -205,7 +205,7 @@ function Set-ScopedProxy {
     }
     $env:HTTP_PROXY = $Proxy
     $env:HTTPS_PROXY = $Proxy
-    $env:NO_PROXY = "127.0.0.1,localhost,${PRIVATE_IPV4},${PRIVATE_IPV4}"
+    $env:NO_PROXY = $env:PRODUCTION_NO_PROXY
 }
 
 function Clear-ScopedProxy {

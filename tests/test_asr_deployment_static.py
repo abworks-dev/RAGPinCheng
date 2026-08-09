@@ -14,15 +14,15 @@ def test_windows_asr_layout_and_config_ownership_are_frozen():
     env = read("asr_service/.env.example")
     deploy = read("scripts/deploy-asr.ps1")
     start = read("scripts/start-asr-service.ps1")
-    assert r"${PRODUCTION_SERVICE_ROOT}\RAGPinCheng-ASR" in deploy
-    assert r"${PRODUCTION_DATA_ROOT}\RAGPinCheng-ASR" in deploy
+    assert "$env:PRODUCTION_ASR_PROGRAM_ROOT" in deploy
+    assert "$env:PRODUCTION_ASR_DATA_ROOT" in deploy
     assert r"config\asr.env" in start
     assert 'Join-Path $PSScriptRoot ".."' not in start
     assert ".env.example" not in start
     assert "ASR_MODEL_LOCAL_FILES_ONLY=true" in env
     assert "ASR_FASTER_WHISPER_MODEL_CACHE_ROOT=" in env
     assert "ASR_FASTER_WHISPER_MODEL_MANIFEST_PATH=" in env
-    assert "7bf452403abd7353a300cd760f7adae7701c92c1" in env
+    assert "ASR_MODEL_MANIFEST_PATH=" in env
     assert "ASR_SERVICE_TOKEN=" in env
     assert (ROOT / "asr_service" / "requirements-service-core.txt").is_file()
     assert (ROOT / "asr_service" / "requirements-windows.txt").is_file()
@@ -143,7 +143,7 @@ def test_activation_secrets_are_written_only_to_the_protected_config():
     ) in deploy
     assert (
         'Set-ProtectedConfigValue -Name "BGE_PRIORITY_PROBE_URL" '
-        '-Value "http://${PRIVATE_IPV4}:8100/v1/activity"'
+        '-Value $env:GPU_SERVICE_ACTIVITY_URL'
     ) in deploy
     assert 'Write-Host "$Name=' not in deploy
     assert 'Write-Output "$Name=' not in deploy
@@ -183,7 +183,7 @@ def test_root_and_windows_env_templates_are_not_merged():
     windows = read("asr_service/.env.example")
     assert "Ubuntu backend ASR client settings" in backend
     assert "ASR_ENABLED=false" in backend
-    assert "ASR_SERVICE_URL=http://${PRIVATE_IPV4}:8200" in backend
+    assert "ASR_SERVICE_URL=http://127.0.0.1:8200" in backend
     assert "ASR_MODEL_CACHE_ROOT" not in backend
     assert "Windows ASR service configuration only" in windows
     assert "ASR_ENABLED=" not in windows
@@ -230,7 +230,7 @@ def test_dependency_proxy_is_scoped_to_dependency_preparation_and_restored():
     assert "ASR_DEPENDENCY_PROXY must be an absolute HTTP(S) URL" in deploy
     assert '$env:HTTP_PROXY = $dependencyProxy' in deploy
     assert '$env:HTTPS_PROXY = $dependencyProxy' in deploy
-    assert '$env:NO_PROXY = "127.0.0.1,localhost,${PRIVATE_IPV4},${PRIVATE_IPV4}"' in deploy
+    assert '$env:NO_PROXY = $env:PRODUCTION_NO_PROXY' in deploy
     assert "[System.Environment]::SetEnvironmentVariable(" in deploy
     assert "[System.EnvironmentVariableTarget]::Process" in deploy
     assert deploy.count("ASR_DEPENDENCY_PROXY") == 3
@@ -354,7 +354,7 @@ def test_faster_whisper_qualification_workflow_is_manual_immutable_and_gated():
     assert "actions/setup-python" not in workflow
     assert "Download controlled internal wheels" not in workflow
     assert "Upload controlled internal wheels" not in workflow
-    assert r'${PRODUCTION_PYTHON311_PATH}' in wheel_build
+    assert '$env:PRODUCTION_PYTHON311_PATH' in wheel_build
     assert "Machine-wide wheel build Python is not 3.11" in wheel_build
     assert wheel_build.count('Script = "build_internal_') == 4
     assert "ASR_DEPENDENCY_PROXY: ${{ secrets.ASR_DEPENDENCY_PROXY }}" in wheel_build
@@ -362,7 +362,7 @@ def test_faster_whisper_qualification_workflow_is_manual_immutable_and_gated():
     assert "ASR_DEPENDENCY_PROXY must be an absolute HTTP(S) URL" in wheel_build
     assert "$env:HTTP_PROXY = $dependencyProxy" in wheel_build
     assert "$env:HTTPS_PROXY = $dependencyProxy" in wheel_build
-    assert '$preloadedSdist = "D:\\RAGPinCheng\\runtime\\qualification-inputs\\faster-whisper\\jieba-0.42.1.tar.gz"' in wheel_build
+    assert '$preloadedSdist = $env:PRODUCTION_JIEBA_SDIST_PATH' in wheel_build
     assert "Preloaded fixed jieba sdist is missing" in wheel_build
     assert "Preloaded fixed jieba sdist must not be a reparse point" in wheel_build
     assert "Preloaded fixed jieba sdist size mismatch" in wheel_build
@@ -418,7 +418,7 @@ def test_gpu_runtime_diagnostic_is_manual_bounded_and_read_only():
     assert "production-deployment" in workflow
     assert "runs-on: [self-hosted, windows, production, gpu]" in workflow
     assert "timeout-minutes: 15" in workflow
-    assert "C:\\Program Files\\Python310\\python.exe" in workflow
+    assert '$env:PRODUCTION_PYTHON_PATH' in workflow
     assert "nvidia-smi.exe" in workflow
     assert "torch_import" in workflow
     assert "cuda_tensor" in workflow
@@ -570,7 +570,7 @@ def test_faster_whisper_synthetic_sample_preparation_is_fixed_and_gated():
     assert "AudioBitsPerSample]::Sixteen" in script
     assert "AudioChannel]::Mono" in script
     assert (
-        r"${PRODUCTION_DATA_ROOT}\RAGPinCheng-ASR\qualification\faster-whisper"
+        r"$env:PRODUCTION_FASTER_WHISPER_INPUT_ROOT"
         in script
     )
     assert (
@@ -668,7 +668,7 @@ def test_faster_whisper_resolver_evidence_is_manual_fixed_offline_and_sanitized(
     assert "pip-download.log" not in workflow
     assert "pip-resolver-fallback.log" not in workflow
     assert "actions/upload-artifact@v4" in workflow
-    assert "C:\\Program Files\\Python311\\python.exe" in workflow
+    assert "$env:PRODUCTION_PYTHON311_PATH" in workflow
     assert "pip " not in lowered
     for forbidden in (
         "import subprocess", "import socket", "import requests", "import urllib",
@@ -681,9 +681,9 @@ def test_faster_whisper_resolver_evidence_is_manual_fixed_offline_and_sanitized(
 def test_faster_whisper_qualification_is_isolated_from_production_mutations():
     script = read("scripts/qualify-faster-whisper-production.ps1")
     lowered = script.lower()
-    assert r"${PRODUCTION_SERVICE_ROOT}\RAGPinCheng-ASR\qualification\faster-whisper" in script
+    assert '$env:PRODUCTION_FASTER_WHISPER_QUALIFICATION_ROOT' in script
     assert (
-        r"${PRODUCTION_DATA_ROOT}\RAGPinCheng-ASR\qualification\faster-whisper\inputs"
+        r"$env:PRODUCTION_FASTER_WHISPER_INPUT_ROOT"
         in script
     )
     assert "$TempPort = 18200" in script
@@ -716,7 +716,7 @@ def test_faster_whisper_qualification_uses_exact_process_and_proxy_boundaries():
     assert script.count("Set-ScopedProxy -Proxy $env:ASR_DEPENDENCY_PROXY") == 2
     assert "Set-ScopedProxy -Proxy $env:ASR_MODEL_DOWNLOAD_PROXY" not in script
     assert script.count("Clear-ScopedProxy") >= 2
-    assert '$env:NO_PROXY = "127.0.0.1,localhost,${PRIVATE_IPV4},${PRIVATE_IPV4}"' in script
+    assert '$env:NO_PROXY = $env:PRODUCTION_NO_PROXY' in script
     assert '$env:HF_HUB_OFFLINE = "1"' in script
     assert '$env:TRANSFORMERS_OFFLINE = "1"' in script
     assert "ASR_SERVICE_TOKEN: " not in script
@@ -1079,8 +1079,8 @@ def test_qwen3_asr_qualification_is_manual_sha_bound_and_isolated():
     assert "environment: production-asr" in workflow
     assert "runs-on: [self-hosted, Windows, X64, asr-production]" in workflow
     assert "production-asr-qwen3-asr-qualification" in workflow
-    assert "D:\\Services\\RAGPinCheng-ASR\\qualification\\qwen3-asr" in script
-    assert "D:\\ServiceData\\RAGPinCheng-ASR\\qualification\\qwen3-asr\\inputs" in script
+    assert '$env:PRODUCTION_QWEN3_ASR_QUALIFICATION_ROOT' in script
+    assert '$env:PRODUCTION_QWEN3_ASR_INPUT_ROOT' in script
     assert "$TempPort = 18300" in script
     assert "New-NetFirewallRule" not in script
     assert "Set-NetFirewallRule" not in script
@@ -1311,7 +1311,7 @@ def test_qwen3_asr_resolver_evidence_is_fixed_offline_and_sanitized():
     assert "scripts.extract_qwen3_asr_resolver_evidence" in workflow
     assert "resolver-evidence.json" in workflow
     assert "timeout-minutes: 10" in workflow
-    assert r"${PRODUCTION_PYTHON311_PATH}" in workflow
+    assert '$env:PRODUCTION_PYTHON311_PATH' in workflow
     assert "-m scripts.extract_qwen3_asr_resolver_evidence" in workflow
     assert "profile_admission" in script
     assert "production_services_modified" in script

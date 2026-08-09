@@ -14,10 +14,10 @@ param(
     [string]$Target = 'all',
 
     [Parameter()]
-    [string]$AsrRoot = '${PRODUCTION_DATA_ROOT}',
+    [string]$AsrRoot = $env:PRODUCTION_ASR_ROOT,
 
     [Parameter()]
-    [string]$RuntimeRoot = '${PRODUCTION_REPO_PATH}\runtime',
+    [string]$RuntimeRoot = $env:PRODUCTION_RUNTIME_ROOT,
 
     [Parameter()]
     [string]$BackupDirectory = $env:PRODUCTION_BACKUP_DIRECTORY,

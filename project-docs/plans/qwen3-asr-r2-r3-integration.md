@@ -312,20 +312,20 @@ backend，不接触真实业务媒体。
 
 ```text
 资格根：
-${PRODUCTION_SERVICE_ROOT}\RAGPinCheng-ASR\qualification\qwen3-asr
+${PRODUCTION_ASR_PROGRAM_ROOT}\qualification\qwen3-asr
 
 每次 run：
-${PRODUCTION_SERVICE_ROOT}\RAGPinCheng-ASR\qualification\qwen3-asr\runs\<github.run_id>\
+${PRODUCTION_ASR_PROGRAM_ROOT}\qualification\qwen3-asr\runs\<github.run_id>\
 
 固定非敏感样本：
-${PRODUCTION_DATA_ROOT}\RAGPinCheng-ASR\qualification\qwen3-asr\inputs\
+${PRODUCTION_ASR_DATA_ROOT}\qualification\qwen3-asr\inputs\
 
 ASR 模型最终目录：
-${PRODUCTION_DATA_ROOT}\RAGPinCheng-ASR\models\Qwen3-ASR-0.6B\
+${PRODUCTION_ASR_DATA_ROOT}\models\Qwen3-ASR-0.6B\
 5eb144179a02acc5e5ba31e748d22b0cf3e303b0\
 
 Aligner 最终目录：
-${PRODUCTION_DATA_ROOT}\RAGPinCheng-ASR\models\Qwen3-ForcedAligner-0.6B\
+${PRODUCTION_ASR_DATA_ROOT}\models\Qwen3-ForcedAligner-0.6B\
 c7cbfc2048c462b0d63a45797104fc9db3ad62b7\
 
 隔离 ASR 地址：

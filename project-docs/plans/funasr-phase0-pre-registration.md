@@ -8,7 +8,7 @@
 
 ## 0. 关键前提（已在父方案之外由用户口头/书面补充）
 
-- 唯一一台 RTX 5060 Ti 位于公司生产 Windows GPU 主机（参见 `project-docs/migrations/ubuntu-app-windows-gpu-runbook.md` §1、`scripts/deploy-gpu.ps1` §6 中 `HOST=${PRIVATE_IPV4}` / `PORT=8100`），当前承载实际 `gpu_service`。
+- 唯一一台 RTX 5060 Ti 位于公司生产 Windows GPU 主机（参见 `project-docs/migrations/ubuntu-app-windows-gpu-runbook.md` §1、`scripts/deploy-gpu.ps1` §6 中 `HOST=${GPU_SERVICE_IP}` / `PORT=8100`），当前承载实际 `gpu_service`。
 - 本预注册计划**不**包含对生产 Windows 主机的任何访问、登录、安装、下载、启动、运行、压测、停止或修改。
 - 本机（开发机）GPU 为 RTX 5070 Ti / 16 GB / Driver 610.74 / sm_120，与生产 RTX 5060 Ti 型号不同；按用户最新指示，**本机也不作为 Phase 0 沙箱**。
 - 未来对生产 Windows 主机的任何测试须另行提交 **R3 生产测试方案**，含维护窗口、当前业务负载、影响范围、监控指标、自动停止条件、服务恢复步骤和负责人，逐项明确批准。

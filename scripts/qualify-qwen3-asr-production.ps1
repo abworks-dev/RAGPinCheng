@@ -18,9 +18,9 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "windows-wheel-cache.ps1")
 
-$ProgramRoot = "${PRODUCTION_SERVICE_ROOT}\RAGPinCheng-ASR\qualification\qwen3-asr"
-$DataRoot = "${PRODUCTION_DATA_ROOT}\RAGPinCheng-ASR"
-$InputRoot = "${PRODUCTION_DATA_ROOT}\RAGPinCheng-ASR\qualification\qwen3-asr\inputs"
+$ProgramRoot = $env:PRODUCTION_QWEN3_ASR_QUALIFICATION_ROOT
+$DataRoot = $env:PRODUCTION_ASR_DATA_ROOT
+$InputRoot = $env:PRODUCTION_QWEN3_ASR_INPUT_ROOT
 $SampleManifest = Join-Path $InputRoot "manifest.json"
 $ModelCacheRoot = Join-Path $DataRoot "models"
 $AsrModelRevision = "5eb144179a02acc5e5ba31e748d22b0cf3e303b0"
@@ -44,7 +44,7 @@ $StateRoot = Join-Path $RunRoot "state"
 $TempPort = 18300
 $GpuPort = 8100
 $ProductionAsrPort = 8200
-$GpuUrl = "http://${PRIVATE_IPV4}:8100"
+$GpuUrl = $env:GPU_SERVICE_URL
 $ProductionAsrUrl = "http://127.0.0.1:8200"
 $TempAsrUrl = "http://127.0.0.1:$TempPort"
 $QualificationProcess = $null
@@ -170,7 +170,7 @@ function Assert-DirectChild {
 
 function Get-MachinePython311 {
     $candidates = @(
-        "${PRODUCTION_PYTHON311_PATH}",
+        $env:PRODUCTION_PYTHON311_PATH,
         (Join-Path $env:ProgramW6432 "Python311\python.exe")
     )
     foreach ($registryPath in @(
@@ -377,7 +377,7 @@ function Set-ScopedProxy {
     Save-ProcessEnvironment -Names @("HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY")
     $env:HTTP_PROXY = $Proxy
     $env:HTTPS_PROXY = $Proxy
-    $env:NO_PROXY = "127.0.0.1,localhost,${PRIVATE_IPV4},${PRIVATE_IPV4}"
+    $env:NO_PROXY = $env:PRODUCTION_NO_PROXY
 }
 
 function Clear-ScopedProxy {
@@ -1352,7 +1352,7 @@ try {
         -Raw `
         -Encoding UTF8 |
         ConvertFrom-Json
-    $ProductionPython = "${PRODUCTION_SERVICE_ROOT}\RAGPinCheng-ASR\venv\Scripts\python.exe"
+    $ProductionPython = $env:PRODUCTION_PYTHON_PATH
     if (-not (Test-Path -LiteralPath $ProductionPython -PathType Leaf)) {
         throw "Production ASR venv Python is missing"
     }
@@ -1704,7 +1704,7 @@ print('qualification-module-origins-verified')
     $env:ASR_QWEN3_ALIGNER_MODEL_CACHE_ROOT = $ModelCacheRoot
     $env:ASR_QWEN3_ALIGNER_MODEL_MANIFEST_PATH = $AlignerModelManifest
     $env:ASR_LOG_DIR = $LogRoot
-    $env:BGE_PRIORITY_PROBE_URL = "http://${PRIVATE_IPV4}:8100/v1/activity"
+    $env:BGE_PRIORITY_PROBE_URL = $env:GPU_SERVICE_ACTIVITY_URL
     $env:BGE_PRIORITY_PROBE_TOKEN = $env:GPU_SERVICE_TOKEN
     $env:ASR_QUALIFICATION_TOKEN = $TemporaryToken
     $env:PYTHONNOUSERSITE = "1"

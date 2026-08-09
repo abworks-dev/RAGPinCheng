@@ -319,7 +319,7 @@ def test_embed_order_stable(model_loaded):
 
 def test_cors_headers(model_loaded):
     """CORS should allow Ubuntu backend requests."""
-    resp = client.get("/health", headers={"Origin": "http://${PRIVATE_IPV4}"})
+    resp = client.get("/health", headers={"Origin": "http://localhost"})
     assert resp.status_code == status.HTTP_200_OK
     assert "Access-Control-Allow-Origin" in resp.headers
 

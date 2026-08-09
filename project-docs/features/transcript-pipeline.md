@@ -57,7 +57,7 @@ Phase 5A/5B 已接通版本列表、只读 Markdown 预览、人工审核、显�
 - faster-whisper adapter 固定
   `dropbox-dash/faster-whisper-large-v3-turbo@0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf`
   与 CUDA FP16 参数；生产资格只接受
-  `${PRODUCTION_DATA_ROOT}\RAGPinCheng-ASR\models` 下已持久化且通过完整 Manifest、文件集合、
+  `${PRODUCTION_ASR_DATA_ROOT}\models` 下已持久化且通过完整 Manifest、文件集合、
   大小和 SHA-256 校验的本地制品，不在资格运行中访问 Hugging Face。首次填充或
   恢复模型由独立手动 workflow 完成；准备入口使用单一 TLS 1.2 Session 按固定
   7 文件清单顺序流式下载，限制重定向到 Hugging Face 官方 HTTPS 域，保留

@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$DataRoot = "${PRODUCTION_DATA_ROOT}\RAGPinCheng-ASR",
+    [string]$DataRoot = $env:PRODUCTION_ASR_DATA_ROOT,
     [string]$AsrUrl = "http://127.0.0.1:8200"
 )
 

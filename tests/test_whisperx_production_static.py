@@ -31,8 +31,8 @@ def test_windows_runner_is_isolated_and_cannot_mutate_production_controls():
     script = read("scripts/smoke-whisperx-production.ps1")
     assert all(value < 128 for value in script.encode("utf-8"))
     lowered = script.lower()
-    assert r"${PRODUCTION_SERVICE_ROOT}\RAGPinCheng-ASR-WhisperX" in script
-    assert r"${PRODUCTION_DATA_ROOT}\RAGPinCheng-ASR-WhisperX" in script
+    assert "$env:PRODUCTION_WHISPERX_PROGRAM_ROOT" in script
+    assert "$env:PRODUCTION_WHISPERX_DATA_ROOT" in script
     assert "torch==2.8.0+cu128" in script
     assert "torch.__version__ == '2.8.0+cu128'" in script
     assert "whisperx==3.8.6" in script

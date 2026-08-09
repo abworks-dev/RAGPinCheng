@@ -1,4 +1,4 @@
-﻿[CmdletBinding()]
+[CmdletBinding()]
 param(
   [switch]$SelfTest,
   [string]$RunRoot
@@ -6,7 +6,7 @@ param(
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
 $AllowedRunParent='${QUALIFICATION_SANDBOX_ROOT}\faster-whisper-runs'
-$AllowedBgeUrls=@('http://127.0.0.1:8100','http://${PRIVATE_IPV4}:8100')
+$AllowedBgeUrls=@('http://127.0.0.1:8100','http://${GPU_SERVICE_IP}:8100')
 function Get-Sha256([string]$Path){(Get-FileHash -Algorithm SHA256 -LiteralPath $Path).Hash.ToLowerInvariant()}
 function Write-JsonFile([string]$Path,$Value){$Value|ConvertTo-Json -Depth 12|Set-Content -LiteralPath $Path -Encoding UTF8}
 function Resolve-Run([string]$Value){
