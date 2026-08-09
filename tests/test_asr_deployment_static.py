@@ -1194,6 +1194,7 @@ def test_qwen3_asr_qualification_uses_controlled_legacy_wheel_bundles():
         "Antlr4WheelBundlePath",
         "CrcmodWheelBundlePath",
         "AliyunCoreWheelBundlePath",
+        "LicenseMatrixPath",
     ):
         assert f"{parameter} =" in workflow
         assert f"[string]${parameter}" in script
@@ -1209,6 +1210,7 @@ def test_qwen3_asr_qualification_uses_controlled_legacy_wheel_bundles():
     assert 'candidate -replace "\\.whl\\.metadata(?=$|[?#])", ".whl"' in script
     assert 'Where-Object { (Get-Sha256 -Path $_.FullName) -eq $wheelSha256 }' in script
     assert "Unable to bind wheel file '$($wheel.Name)'" in script
+    assert "Copy-Item -LiteralPath $LocalLicenseMatrixPath" in script
 
 
 def test_qwen3_asr_qualification_freezes_dual_models_bf16_and_result_flow():
