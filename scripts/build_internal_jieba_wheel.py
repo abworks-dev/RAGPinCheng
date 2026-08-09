@@ -12,7 +12,6 @@ import subprocess
 import sys
 import tarfile
 import tempfile
-import urllib.request
 import venv
 import zipfile
 from pathlib import Path, PurePosixPath
@@ -26,10 +25,8 @@ PACKAGE_REQUIREMENT = f"{PACKAGE_NAME}=={PACKAGE_VERSION}"
 SDIST_FILE_NAME = "jieba-0.42.1.tar.gz"
 SDIST_SHA256 = "055ca12f62674fafed09427f176506079bc135638a14e23e25be909131928db2"
 SDIST_SIZE_BYTES = 19214172
-SDIST_URL = (
-    "https://files.pythonhosted.org/packages/c6/cb/"
-    "18eeb235f833b726522d7ebed54f2278ce28ba9438e3135ab0278d9792a2/"
-    "jieba-0.42.1.tar.gz"
+PRELOADED_SDIST_PATH = Path(
+    rf"D:\RAGPinCheng\runtime\qualification-inputs\faster-whisper\{SDIST_FILE_NAME}"
 )
 SETUPTOOLS_REQUIREMENT = "setuptools==80.9.0"
 WHEEL_REQUIREMENT = "wheel==0.45.1"
@@ -338,28 +335,15 @@ def _write_network_guard(root: Path) -> None:
     )
 
 
-def _download_fixed_sdist(destination: Path) -> None:
-    request = urllib.request.Request(
-        SDIST_URL,
-        headers={"User-Agent": "RAGPinCheng-controlled-wheel-builder/1"},
-        method="GET",
-    )
-    with urllib.request.urlopen(request, timeout=60) as response:
-        if response.geturl() != SDIST_URL:
-            raise WheelContractError("Fixed jieba sdist download redirected")
-        content_length = response.headers.get("Content-Length")
-        if content_length is None or int(content_length) != SDIST_SIZE_BYTES:
-            raise WheelContractError("Fixed jieba sdist response size mismatch")
-        with destination.open("xb") as stream:
-            remaining = SDIST_SIZE_BYTES
-            while remaining:
-                chunk = response.read(min(1024 * 1024, remaining))
-                if not chunk:
-                    raise WheelContractError("Fixed jieba sdist download was truncated")
-                stream.write(chunk)
-                remaining -= len(chunk)
-            if response.read(1):
-                raise WheelContractError("Fixed jieba sdist download exceeded fixed size")
+def _copy_preloaded_sdist(destination: Path) -> None:
+    source = PRELOADED_SDIST_PATH
+    if source.is_symlink() or not source.is_file():
+        raise WheelContractError(
+            f"Preloaded fixed jieba sdist is missing at {PRELOADED_SDIST_PATH}"
+        )
+    validate_sdist(source)
+    with source.open("rb") as source_stream, destination.open("xb") as destination_stream:
+        shutil.copyfileobj(source_stream, destination_stream)
     validate_sdist(destination)
 
 
@@ -463,10 +447,10 @@ def build_bundle(
         downloads.mkdir()
         tools.mkdir()
 
-        _download_fixed_sdist(downloads / SDIST_FILE_NAME)
+        _copy_preloaded_sdist(downloads / SDIST_FILE_NAME)
         source_files = list(downloads.iterdir())
         if len(source_files) != 1 or source_files[0].name != SDIST_FILE_NAME:
-            raise WheelContractError("PyPI did not return the fixed jieba sdist")
+            raise WheelContractError("Run-local source directory is not isolated")
         sdist = source_files[0]
         validate_sdist(sdist)
 
