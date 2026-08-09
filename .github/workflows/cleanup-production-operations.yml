@@ -1,4 +1,4 @@
-name: Production Cleanup Operations
+name: Cleanup Production Operations
 
 on:
   workflow_dispatch:
@@ -44,7 +44,7 @@ env:
 jobs:
   manual-cleanup:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.confirm_production_cleanup == true }}
-    uses: ./.github/workflows/production-cleanup.yml
+    uses: ./.github/workflows/cleanup-production.yml
     with:
       target: ${{ inputs.target }}
       apply: ${{ inputs.apply }}
@@ -55,7 +55,7 @@ jobs:
 
   nightly-dryrun:
     if: ${{ github.event_name == 'schedule' && github.event.schedule == '30 19 * * *' }}
-    uses: ./.github/workflows/production-cleanup.yml
+    uses: ./.github/workflows/cleanup-production.yml
     with:
       target: all
       apply: false
@@ -115,7 +115,7 @@ jobs:
   pressure-dryrun:
     needs: [disk-pressure]
     if: ${{ needs.disk-pressure.outputs.run_dryrun == 'true' }}
-    uses: ./.github/workflows/production-cleanup.yml
+    uses: ./.github/workflows/cleanup-production.yml
     with:
       target: all
       apply: false
@@ -127,7 +127,7 @@ jobs:
   auto-clean-backups:
     needs: [disk-pressure]
     if: ${{ needs.disk-pressure.outputs.tier == 'backup-apply' && vars.PRODUCTION_AUTO_CLEANUP_ENABLED == 'true' }}
-    uses: ./.github/workflows/production-cleanup.yml
+    uses: ./.github/workflows/cleanup-production.yml
     with:
       target: backups
       apply: true

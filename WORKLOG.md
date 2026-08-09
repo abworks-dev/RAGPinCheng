@@ -2854,3 +2854,9 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 完成：将旧版 `production-cleanup.yml` 与 `production-cleanup-operations.yml` 中 Job 级的 `runner.temp` 引用移动到实际执行步骤的 `env`，修复 GitHub 对分支 `codex/split-production-cleanup-workflows` 的 workflow 解析失败。
 - 文件：`.github/workflows/production-cleanup.yml`、`.github/workflows/production-cleanup-operations.yml`、`WORKLOG.md`
 - 验证：两个 cleanup workflow 与 `production-deploy.yml` YAML 解析通过；结构化检查确认 Job 级 `env` 不再使用 `runner.temp`，所有 `$env:REPORT_ROOT` 执行步骤均有变量来源；`git diff --check` 通过。未触发清理、部署或生产服务操作。
+
+### 04:19 — 统一生产 workflow 命名
+
+- 完成：将生产部署、可复用清理和清理编排 workflow 统一为“动词在前”文件名与显示名，并同步 reusable workflow 路径、静态测试和 GPU 部署功能文档。
+- 文件：`.github/workflows/deploy-production.yml`、`.github/workflows/cleanup-production.yml`、`.github/workflows/cleanup-production-operations.yml`、`tests/test_deploy_git_safety.py`、`tests/test_gpu_runtime_deployment_static.py`、`tests/test_production_cleanup_triggers_static.py`、`project-docs/features/gpu-runtime-deployment.md`、`WORKLOG.md`
+- 验证：三份 workflow YAML 解析通过，reusable workflow 路径均存在，Job 级 `env` 无 `runner.temp`；相关 pytest 为 `29 passed, 2 subtests passed`；`git diff --check` 通过。未触发部署、清理或生产服务操作。

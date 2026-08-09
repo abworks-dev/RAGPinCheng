@@ -24,18 +24,18 @@
 → 将run ID、候选commit、源码指纹和锁哈希回填为validated元数据
 
 CI成功
-→ production-deploy.yml（仓库变量门禁）
+→ deploy-production.yml（仓库变量门禁）
 → deploy-gpu.ps1
 → 只复用已验证的候选release
 → promote-gpu-runtime.ps1
 → release内的start-gpu-service.ps1
 → /health + 5次embedding + 5次rerank
 → deploy-app.sh
-→ production-cleanup.yml（仅复用清理）
+→ cleanup-production.yml（仅复用清理）
 
 手动与定时生产清理
-→ production-cleanup-operations.yml
-→ production-cleanup.yml（复用清理）
+→ cleanup-production-operations.yml
+→ cleanup-production.yml（复用清理）
 ```
 
 普通提交若GPU源码指纹和依赖锁均未变化，GPU job只验证当前服务健康，并通过 `/model-info` 核对正在监听的进程确实报告相同release ID、源码指纹、锁哈希和CUDA设备；它不安装依赖、不重建release、不重启任务。GPU源码或锁发生变化时，只有状态为 `validated` 且绑定资格run、源码指纹和锁哈希的完整锁才能进入自动promotion。
