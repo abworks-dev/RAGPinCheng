@@ -199,5 +199,6 @@ jobs:
           path: |
             ${{ runner.temp }}\qwen3-asr-r3-${{ github.run_id }}\qualification-verdict.json
             ${{ runner.temp }}\qwen3-asr-r3-${{ github.run_id }}\dependency-diagnostic.json
+            ${{ runner.temp }}\qwen3-asr-r3-${{ github.run_id }}\evidence\license-matrix.json
           if-no-files-found: warn
           retention-days: 14
