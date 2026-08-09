@@ -25,6 +25,9 @@ jobs:
     environment: production-asr
     runs-on: [self-hosted, Windows, X64, asr-production]
     timeout-minutes: 10
+    env:
+      PRODUCTION_PYTHON311_PATH: ${{ vars.PRODUCTION_PYTHON311_PATH }}
+      PRODUCTION_FASTER_WHISPER_QUALIFICATION_ROOT: ${{ vars.PRODUCTION_FASTER_WHISPER_QUALIFICATION_ROOT }}
     steps:
       - name: Validate immutable revision and explicit extraction gate
         shell: powershell
@@ -51,7 +54,7 @@ jobs:
       - name: Extract fixed sanitized resolver evidence offline
         shell: powershell
         run: |
-          $python = "${PRODUCTION_PYTHON311_PATH}"
+          $python = $env:PRODUCTION_PYTHON311_PATH
           if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
             throw "Fixed Python 3.11 runtime is missing"
           }

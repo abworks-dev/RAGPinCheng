@@ -67,7 +67,7 @@ model.bin sha256=e76620f83d5f5769e6a5f66c8013e1292a797de79b3581b44b6c7f9e36d77f3
 
 ```text
 主机名=${PRODUCTION_HOSTNAME}
-ZeroTier IP=${PRIVATE_ZEROTIER_IPV4}
+ZeroTier IP=${GPU_NODE_ZEROTIER_IP}
 SSH user=Administrator
 生产仓库=${PRODUCTION_REPO_PATH}
 预期 HEAD=e2374e37e1357be3d8df93d6d3429bb0947fb9ba
@@ -472,7 +472,7 @@ R3-B（不在本计划中）才可考虑：
 
 ```text
 批准执行 faster-whisper R3-A，按
-E:\Repository\Github\RAGPinCheng\project-docs\plans\faster-whisper-r3a-execution-plan.md
+${REPOSITORY_CHECKOUT_PATH}\project-docs\plans\faster-whisper-r3a-execution-plan.md
 执行；计划 SHA-256 = <填写 Codex 提交计划时报告的值>。
 
 执行通道 = <Codex 经验证 SSH / 我在生产机手动执行>

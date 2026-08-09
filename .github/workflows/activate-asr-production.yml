@@ -57,7 +57,7 @@ jobs:
         env:
           HTTP_PROXY: ${{ secrets.ASR_DEPENDENCY_PROXY }}
           HTTPS_PROXY: ${{ secrets.ASR_DEPENDENCY_PROXY }}
-          NO_PROXY: 127.0.0.1,localhost,${PRIVATE_IPV4},${PRIVATE_IPV4}
+          NO_PROXY: ${{ vars.PRODUCTION_NO_PROXY }}
         with:
           ref: ${{ inputs.commit_sha }}
           fetch-depth: 1
@@ -67,6 +67,11 @@ jobs:
         env:
           ASR_SERVICE_TOKEN: ${{ secrets.ASR_SERVICE_TOKEN }}
           BGE_PRIORITY_PROBE_TOKEN: ${{ secrets.GPU_SERVICE_TOKEN }}
+          GPU_SERVICE_ACTIVITY_URL: ${{ vars.GPU_SERVICE_ACTIVITY_URL }}
+          PRODUCTION_APP_NODE_IP: ${{ vars.PRODUCTION_APP_NODE_IP }}
+          PRODUCTION_ASR_PROGRAM_ROOT: ${{ vars.PRODUCTION_ASR_PROGRAM_ROOT }}
+          PRODUCTION_ASR_DATA_ROOT: ${{ vars.PRODUCTION_ASR_DATA_ROOT }}
+          PRODUCTION_ASR_BACKUP_ROOT: ${{ vars.PRODUCTION_ASR_BACKUP_ROOT }}
         run: |
           $operation = "${{ inputs.operation }}"
           $activationId = if ($operation -eq "rollback") {
@@ -75,7 +80,7 @@ jobs:
             "${{ github.run_id }}"
           }
           $scriptPath = if ($operation -eq "rollback") {
-            "${PRODUCTION_DATA_ROOT}\RAGPinCheng-ASR\config\activation-backups\$activationId\activate-asr-production.ps1"
+            (Join-Path $env:PRODUCTION_ASR_BACKUP_ROOT "$activationId\activate-asr-production.ps1")
           } else {
             "${{ github.workspace }}\scripts\activate-asr-production.ps1"
           }
@@ -108,11 +113,13 @@ jobs:
       - name: Verify Windows ASR from Ubuntu while backend remains disabled
         env:
           ASR_SERVICE_TOKEN: ${{ secrets.ASR_SERVICE_TOKEN }}
+          ASR_ENV_FILE: ${{ vars.PRODUCTION_APP_ENV_FILE }}
+          ASR_SERVICE_URL: ${{ vars.PRODUCTION_ASR_SERVICE_URL }}
         run: |
           set -euo pipefail
           python3 scripts/verify_asr_from_ubuntu.py \
-            --env-file ${PRODUCTION_APP_ENV_FILE} \
-            --asr-url http://${PRIVATE_IPV4}:8200
+            --env-file "${ASR_ENV_FILE}" \
+            --asr-url "${ASR_SERVICE_URL}"
 
   rollback-after-cross-node-failure:
     if: ${{ always() && inputs.operation == 'activate' && needs.manage-windows.result == 'success' && needs.verify-ubuntu.result != 'success' }}
@@ -123,9 +130,13 @@ jobs:
     steps:
       - name: Roll back failed cross-node activation
         shell: powershell
+        env:
+          PRODUCTION_ASR_BACKUP_ROOT: ${{ vars.PRODUCTION_ASR_BACKUP_ROOT }}
+          PRODUCTION_ASR_PROGRAM_ROOT: ${{ vars.PRODUCTION_ASR_PROGRAM_ROOT }}
+          PRODUCTION_ASR_DATA_ROOT: ${{ vars.PRODUCTION_ASR_DATA_ROOT }}
         run: |
           $activationId = "${{ github.run_id }}"
-          $scriptPath = "${PRODUCTION_DATA_ROOT}\RAGPinCheng-ASR\config\activation-backups\$activationId\activate-asr-production.ps1"
+          $scriptPath = Join-Path $env:PRODUCTION_ASR_BACKUP_ROOT "$activationId\activate-asr-production.ps1"
           if (-not (Test-Path -LiteralPath $scriptPath -PathType Leaf)) {
             throw "Protected ASR rollback script is missing"
           }

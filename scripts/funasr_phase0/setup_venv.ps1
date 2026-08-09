@@ -17,7 +17,7 @@
       - Writes the actual pip freeze + a SHA-256 of the requirements file.
 
 .PARAMETER PythonExe
-    Path to the Python interpreter. Default: ${PRODUCTION_PYTHON_PATH}
+    Path to the Python interpreter. Configure `PRODUCTION_PYTHON_PATH` in the private environment.
     (matches scripts\deploy-gpu.ps1 §5 on the production Windows GPU host).
 
 .PARAMETER VenvDir
@@ -42,7 +42,7 @@
 
 [CmdletBinding()]
 param(
-    [string]$PythonExe = "${PRODUCTION_PYTHON_PATH}",
+    [string]$PythonExe = $env:PRODUCTION_PYTHON_PATH,
     [string]$VenvDir = "C:\FunASR-Phase0\venv",
     [string]$RequirementsFile = "",
     [switch]$SkipInstall,
@@ -108,7 +108,7 @@ function Invoke-PipLogged {
 Write-Step "0) Pre-flight location check"
 $bad_prefixes = @(
     (Join-Path $DefaultRepoRoot ".venv"),                       # project venv
-    "C:\Program Files\Python310\Lib\site-packages",             # production gpu_service venv
+    (Join-Path (Split-Path -Parent $PythonExe) "Lib\site-packages"), # private production environment
     $DefaultRepoRoot                                            # inside repo
 )
 foreach ($p in $bad_prefixes) {

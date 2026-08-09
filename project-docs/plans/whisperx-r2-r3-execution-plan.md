@@ -31,8 +31,8 @@ snapshot 和 Canonical 契约；WhisperX Profile 默认 `disabled`，不得自�
 4. ASR 与中文对齐模型分别使用固定 revision、逐文件 SHA-256 manifest 和本地只读加载。
 5. 增加手动 workflow：只接受 `master` 的完整 SHA 和显式执行门禁。
 6. Windows runner 仅在
-   `${PRODUCTION_SERVICE_ROOT}\RAGPinCheng-ASR-WhisperX` 与
-   `${PRODUCTION_DATA_ROOT}\RAGPinCheng-ASR-WhisperX` 创建隔离文件。
+   `${PRODUCTION_WHISPERX_ROOT}` 与
+   `${PRODUCTION_ASR_DATA_ROOT}-WhisperX` 创建隔离文件。
 7. 使用非敏感、运行时合成的中文 WAV，验证
    `Engine → ProviderCandidate → normalizer → Canonical`。
 

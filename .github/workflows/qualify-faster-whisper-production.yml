@@ -30,6 +30,16 @@ jobs:
     environment: production-asr
     runs-on: [self-hosted, Windows, X64, asr-production]
     timeout-minutes: 45
+    env:
+      PRODUCTION_PYTHON311_PATH: ${{ vars.PRODUCTION_PYTHON311_PATH }}
+      PRODUCTION_PYTHON_PATH: ${{ vars.PRODUCTION_PYTHON_PATH }}
+      PRODUCTION_ASR_DATA_ROOT: ${{ vars.PRODUCTION_ASR_DATA_ROOT }}
+      PRODUCTION_JIEBA_SDIST_PATH: ${{ vars.PRODUCTION_JIEBA_SDIST_PATH }}
+      PRODUCTION_NO_PROXY: ${{ vars.PRODUCTION_NO_PROXY }}
+      PRODUCTION_FASTER_WHISPER_INPUT_ROOT: ${{ vars.PRODUCTION_FASTER_WHISPER_INPUT_ROOT }}
+      PRODUCTION_FASTER_WHISPER_QUALIFICATION_ROOT: ${{ vars.PRODUCTION_FASTER_WHISPER_QUALIFICATION_ROOT }}
+      GPU_SERVICE_URL: ${{ vars.GPU_SERVICE_URL }}
+      GPU_SERVICE_ACTIVITY_URL: ${{ vars.GPU_SERVICE_ACTIVITY_URL }}
     steps:
       - name: Validate immutable revision and explicit R3 gate
         shell: powershell
@@ -58,7 +68,7 @@ jobs:
         env:
           ASR_DEPENDENCY_PROXY: ${{ secrets.ASR_DEPENDENCY_PROXY }}
         run: |
-          $python = "${PRODUCTION_PYTHON311_PATH}"
+          $python = $env:PRODUCTION_PYTHON311_PATH
           if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
             throw "Machine-wide Python 3.11 is missing"
           }
@@ -77,7 +87,7 @@ jobs:
           ) {
             throw "ASR_DEPENDENCY_PROXY must be an absolute HTTP(S) URL"
           }
-          $preloadedSdist = "${PRODUCTION_REPO_PATH}\runtime\qualification-inputs\faster-whisper\jieba-0.42.1.tar.gz"
+          $preloadedSdist = $env:PRODUCTION_JIEBA_SDIST_PATH
           if (-not (Test-Path -LiteralPath $preloadedSdist -PathType Leaf)) {
             throw "Preloaded fixed jieba sdist is missing"
           }
@@ -103,7 +113,7 @@ jobs:
           try {
             $env:HTTP_PROXY = $dependencyProxy
             $env:HTTPS_PROXY = $dependencyProxy
-            $env:NO_PROXY = "127.0.0.1,localhost,${PRIVATE_IPV4},${PRIVATE_IPV4}"
+            $env:NO_PROXY = $env:PRODUCTION_NO_PROXY
             $builders = @(
               @{ Script = "build_internal_jieba_wheel.py"; Directory = "jieba" },
               @{ Script = "build_internal_oss2_wheel.py"; Directory = "oss2" },

@@ -12,7 +12,7 @@ param(
     [Parameter(Mandatory)][string]$RepositoryPath,
     [Parameter(Mandatory)][string]$BackupDirectory,
     [Parameter(Mandatory)][ValidatePattern('^[0-9a-fA-F]{40}$')][string]$CommitSha,
-    [string]$RuntimeRoot = "${PRODUCTION_REPO_PATH}\runtime",
+    [string]$RuntimeRoot = $env:PRODUCTION_RUNTIME_ROOT,
     [string]$ProxyUrl = ""
 )
 
@@ -120,14 +120,14 @@ if (Test-Path -LiteralPath $currentReleasePath -PathType Leaf) {
             throw "The current GPU release manifest does not match its pointer"
         }
         try {
-            $health = Invoke-RestMethod -Method Get -Uri "http://${PRIVATE_IPV4}:8100/health" -TimeoutSec 10
+            $health = Invoke-RestMethod -Method Get -Uri "$env:GPU_SERVICE_URL/health" -TimeoutSec 10
         } catch {
             throw "The unchanged GPU runtime is not reachable; refusing an implicit repair"
         }
         if ($health.status -ne "ok" -or $health.model_loaded -ne $true) {
             throw "The unchanged GPU runtime is unhealthy; refusing an implicit repair"
         }
-        $info = Invoke-RestMethod -Method Get -Uri "http://${PRIVATE_IPV4}:8100/model-info" -TimeoutSec 10
+        $info = Invoke-RestMethod -Method Get -Uri "$env:GPU_SERVICE_URL/model-info" -TimeoutSec 10
         if (
             $info.runtime_release_id -ne $releaseId -or
             $info.runtime_source_fingerprint -ne $fingerprint -or

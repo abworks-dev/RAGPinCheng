@@ -1,9 +1,9 @@
 [CmdletBinding()]
 param(
-    [string]$RepositoryPath = "${PRODUCTION_REPO_PATH}",
-    [string]$BasePython = "${PRODUCTION_PYTHON_PATH}",
-    [string]$RuntimeRoot = "${PRODUCTION_REPO_PATH}\runtime",
-    [string]$TorchWheelSeedRoot = "${PRODUCTION_REPO_PATH}\runtime\wheel-seed\torch-2.7.0-cu128-cp310-win_amd64",
+    [string]$RepositoryPath = $env:PRODUCTION_REPO_PATH,
+    [string]$BasePython = $env:PRODUCTION_PYTHON_PATH,
+    [string]$RuntimeRoot = $env:PRODUCTION_RUNTIME_ROOT,
+    [string]$TorchWheelSeedRoot = $env:PRODUCTION_TORCH_WHEEL_SEED_ROOT,
     [Parameter(Mandatory)][string]$ModelCacheSource,
     [Parameter(Mandatory)][ValidatePattern('^[0-9a-fA-F]{40}$')][string]$CommitSha,
     [Parameter(Mandatory)][ValidatePattern('^[0-9a-fA-F]{64}$')][string]$SourceFingerprint,
@@ -12,6 +12,10 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+
+if ([string]::IsNullOrWhiteSpace($RepositoryPath) -or [string]::IsNullOrWhiteSpace($BasePython) -or [string]::IsNullOrWhiteSpace($RuntimeRoot)) {
+    throw "GPU runtime paths and Python must be supplied by the private deployment environment"
+}
 
 function Invoke-External {
     param([Parameter(Mandatory)][scriptblock]$Command, [Parameter(Mandatory)][string]$Failure)

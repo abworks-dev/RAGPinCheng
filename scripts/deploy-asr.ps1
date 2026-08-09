@@ -4,8 +4,8 @@ param(
     [ValidatePattern('^[0-9a-fA-F]{40}$')]
     [string]$CommitSha,
     [string]$SourceRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")),
-    [string]$ProgramRoot = "${PRODUCTION_SERVICE_ROOT}\RAGPinCheng-ASR",
-    [string]$DataRoot = "${PRODUCTION_DATA_ROOT}\RAGPinCheng-ASR",
+    [string]$ProgramRoot = $env:PRODUCTION_ASR_PROGRAM_ROOT,
+    [string]$DataRoot = $env:PRODUCTION_ASR_DATA_ROOT,
     [switch]$InstallDependencies,
     [switch]$ActivateService
 )
@@ -269,7 +269,7 @@ function Set-ProtectedConfigValue {
 }
 Set-ProtectedConfigValue -Name "ASR_SERVICE_TOKEN" -Value $env:ASR_SERVICE_TOKEN
 Set-ProtectedConfigValue -Name "BGE_PRIORITY_PROBE_TOKEN" -Value $env:BGE_PRIORITY_PROBE_TOKEN
-Set-ProtectedConfigValue -Name "BGE_PRIORITY_PROBE_URL" -Value "http://${PRIVATE_IPV4}:8100/v1/activity"
+Set-ProtectedConfigValue -Name "BGE_PRIORITY_PROBE_URL" -Value $env:GPU_SERVICE_ACTIVITY_URL
 & icacls.exe $configRoot `
     /inheritance:r `
     /grant:r `
@@ -315,7 +315,7 @@ if ($InstallDependencies) {
         try {
             $env:HTTP_PROXY = $dependencyProxy
             $env:HTTPS_PROXY = $dependencyProxy
-            $env:NO_PROXY = "127.0.0.1,localhost,${PRIVATE_IPV4},${PRIVATE_IPV4}"
+            $env:NO_PROXY = $env:PRODUCTION_NO_PROXY
             Copy-VerifiedSharedWheelBlobs `
                 -CacheRoot $sharedWheelCacheRoot `
                 -Destination $sharedWheelSeed | Out-Null

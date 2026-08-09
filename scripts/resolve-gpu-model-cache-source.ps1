@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$RepositoryPath = "${PRODUCTION_REPO_PATH}",
+    [string]$RepositoryPath = $env:PRODUCTION_REPO_PATH,
     [string]$ConfiguredPath = ""
 )
 

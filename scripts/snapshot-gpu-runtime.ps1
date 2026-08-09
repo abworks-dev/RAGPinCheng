@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
-    [string]$RepositoryPath = "${PRODUCTION_REPO_PATH}",
-    [string]$RuntimePython = "${PRODUCTION_PYTHON_PATH}",
+    [string]$RepositoryPath = $env:PRODUCTION_REPO_PATH,
+    [string]$RuntimePython = $env:PRODUCTION_PYTHON_PATH,
     [Parameter(Mandatory)][string]$ModelCacheSource,
     [string]$BackupRoot = $env:PRODUCTION_BACKUP_DIRECTORY
 )

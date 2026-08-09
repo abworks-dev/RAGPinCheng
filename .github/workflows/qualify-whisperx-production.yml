@@ -30,6 +30,17 @@ jobs:
     environment: production-asr
     runs-on: [self-hosted, Windows, X64, asr-production]
     timeout-minutes: 180
+    env:
+      PRODUCTION_PYTHON311_PATH: ${{ vars.PRODUCTION_PYTHON311_PATH }}
+      PRODUCTION_NO_PROXY: ${{ vars.PRODUCTION_NO_PROXY }}
+      PRODUCTION_QWEN3_ASR_MANIFEST_PATH: ${{ vars.PRODUCTION_QWEN3_ASR_MANIFEST_PATH }}
+      PRODUCTION_WHISPERX_MODEL_ROOT: ${{ vars.PRODUCTION_WHISPERX_MODEL_ROOT }}
+      PRODUCTION_WHISPERX_NLTK_ROOT: ${{ vars.PRODUCTION_WHISPERX_NLTK_ROOT }}
+      PRODUCTION_WHISPERX_QUALIFICATION_ROOT: ${{ vars.PRODUCTION_WHISPERX_QUALIFICATION_ROOT }}
+      PRODUCTION_WHISPERX_WHEEL_CACHE_ROOT: ${{ vars.PRODUCTION_WHISPERX_WHEEL_CACHE_ROOT }}
+      PRODUCTION_WHISPERX_REPORT_ROOT: ${{ vars.PRODUCTION_WHISPERX_REPORT_ROOT }}
+      GPU_SERVICE_URL: ${{ vars.GPU_SERVICE_URL }}
+      GPU_SERVICE_ACTIVITY_URL: ${{ vars.GPU_SERVICE_ACTIVITY_URL }}
     steps:
       - name: Validate immutable revision and explicit R3 gate
         shell: powershell
@@ -72,13 +83,13 @@ jobs:
             -SourceRoot "${{ github.workspace }}" `
             -RunId "${{ github.run_id }}" `
             -ExecuteQualification $true `
-            -SummaryPath "${PRODUCTION_SERVICE_ROOT}\RAGPinCheng-ASR-WhisperX\qualification\runs\${{ github.run_id }}\reports\verdict.json"
+            -SummaryPath (Join-Path $env:PRODUCTION_WHISPERX_REPORT_ROOT "runs\${{ github.run_id }}\reports\verdict.json")
 
       - name: Publish sanitized qualification summary
         if: ${{ always() }}
         shell: powershell
         run: |
-          $path = "${PRODUCTION_SERVICE_ROOT}\RAGPinCheng-ASR-WhisperX\qualification\runs\${{ github.run_id }}\reports\verdict.json"
+          $path = Join-Path $env:PRODUCTION_WHISPERX_REPORT_ROOT "runs\${{ github.run_id }}\reports\verdict.json"
           if (Test-Path -LiteralPath $path -PathType Leaf) {
             $v = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
             @(
@@ -100,6 +111,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: whisperx-qualification-verdict-${{ github.run_id }}
-          path: ${PRODUCTION_SERVICE_ROOT}\RAGPinCheng-ASR-WhisperX\qualification\runs\${{ github.run_id }}\reports
+          path: ${{ vars.PRODUCTION_WHISPERX_REPORT_ROOT }}\runs\${{ github.run_id }}\reports
           if-no-files-found: warn
           retention-days: 14

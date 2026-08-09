@@ -12,17 +12,17 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "windows-wheel-cache.ps1")
 
-$ProgramRoot = "${PRODUCTION_SERVICE_ROOT}\RAGPinCheng-ASR-WhisperX\qualification"
+$ProgramRoot = $env:PRODUCTION_WHISPERX_QUALIFICATION_ROOT
 $RunRoot = Join-Path $ProgramRoot "runs\$RunId"
 $VenvRoot = Join-Path $RunRoot "venv"
 $VenvPython = Join-Path $VenvRoot "Scripts\python.exe"
 $Wheelhouse = Join-Path $RunRoot "wheelhouse"
 $SharedWheelSeed = Join-Path $RunRoot "shared-wheel-seed"
-$SharedWheelCacheRoot = "${PRODUCTION_DATA_ROOT}\RAGPinCheng-ASR\wheel-cache"
+$SharedWheelCacheRoot = $env:PRODUCTION_WHISPERX_WHEEL_CACHE_ROOT
 $ReportRoot = Join-Path $RunRoot "reports"
-$ModelRoot = "${PRODUCTION_DATA_ROOT}\RAGPinCheng-ASR-WhisperX\models"
-$NltkRoot = "${PRODUCTION_DATA_ROOT}\RAGPinCheng-ASR-WhisperX\nltk"
-$ManifestPath = "${PRODUCTION_DATA_ROOT}\RAGPinCheng-ASR\qualification\qwen3-asr\inputs\manifest.json"
+$ModelRoot = $env:PRODUCTION_WHISPERX_MODEL_ROOT
+$NltkRoot = $env:PRODUCTION_WHISPERX_NLTK_ROOT
+$ManifestPath = $env:PRODUCTION_QWEN3_ASR_MANIFEST_PATH
 $Status = "fail"
 $FailureCode = "qualification_not_started"
 $PeakGpuMemoryMiB = 0
@@ -91,7 +91,7 @@ $beforeTasks = Get-StateHash "tasks"
 $beforeFirewall = Get-StateHash "firewall"
 try {
     New-Item -ItemType Directory -Path $RunRoot, $ReportRoot, $Wheelhouse -Force | Out-Null
-    $machinePython = "${PRODUCTION_PYTHON311_PATH}"
+    $machinePython = $env:PRODUCTION_PYTHON311_PATH
     if (-not (Test-Path -LiteralPath $machinePython -PathType Leaf)) {
         throw "machine-wide Python 3.11 is required"
     }

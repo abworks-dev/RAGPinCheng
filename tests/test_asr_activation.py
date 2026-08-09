@@ -22,7 +22,7 @@ def valid_env(token: str = "shared-token") -> str:
     return "\n".join(
         (
             "ASR_ENABLED=false",
-            "ASR_SERVICE_URL=http://${PRIVATE_IPV4}:8200",
+            "ASR_SERVICE_URL=http://asr.example.invalid:8200",
             f"ASR_SERVICE_TOKEN={token}",
             "OTHER_KEY=allowed",
         )
@@ -69,7 +69,7 @@ def test_ubuntu_verifier_keeps_backend_disabled_and_validates_cross_node(tmp_pat
     env_file.write_text(valid_env(), encoding="utf-8")
     result = MODULE.verify(
         env_file,
-        "http://${PRIVATE_IPV4}:8200",
+        "http://asr.example.invalid:8200",
         "shared-token",
         opener=fake_opener,
     )
@@ -87,8 +87,8 @@ def test_ubuntu_verifier_keeps_backend_disabled_and_validates_cross_node(tmp_pat
     (
         (valid_env().replace("ASR_ENABLED=false", "ASR_ENABLED=true"), "must remain false"),
         (
-            valid_env().replace("${PRIVATE_IPV4}:8200", "127.0.0.1:8200"),
-            "fixed Windows endpoint",
+            valid_env().replace("asr.example.invalid:8200", "127.0.0.1:8200"),
+            "configured endpoint",
         ),
         (valid_env("wrong-token"), "does not match"),
     ),
@@ -96,7 +96,9 @@ def test_ubuntu_verifier_keeps_backend_disabled_and_validates_cross_node(tmp_pat
 def test_ubuntu_backend_boundary_fails_closed(content: str, message: str):
     values = MODULE.parse_required_env(content)
     with pytest.raises(RuntimeError, match=message):
-        MODULE.validate_backend_boundary(values, "shared-token")
+        MODULE.validate_backend_boundary(
+            values, "shared-token", "http://asr.example.invalid:8200"
+        )
 
 
 def test_ubuntu_prod_env_requires_each_client_key_exactly_once():
@@ -168,7 +170,7 @@ def test_activation_workflow_is_manual_safe_by_default_and_cross_node_gated():
     assert "BGE_PRIORITY_PROBE_TOKEN: ${{ secrets.GPU_SERVICE_TOKEN }}" in workflow
     assert "ASR_DEPENDENCY_PROXY" in workflow
     assert "if: ${{ inputs.operation != 'rollback' }}" in workflow
-    assert "activation-backups\\$activationId\\activate-asr-production.ps1" in workflow
+    assert 'Join-Path $env:PRODUCTION_ASR_BACKUP_ROOT "$activationId\\activate-asr-production.ps1"' in workflow
     rollback_job = workflow.split("rollback-after-cross-node-failure:", 1)[1]
     assert "actions/checkout" not in rollback_job
     assert "ASR_ENABLED=true" not in workflow
@@ -179,7 +181,7 @@ def test_activation_workflow_is_manual_safe_by_default_and_cross_node_gated():
 def test_activation_script_uses_fixed_firewall_and_fail_closed_rollback():
     script = read("scripts/activate-asr-production.ps1")
     lowered = script.lower()
-    assert '$allowedRemoteAddress = "${PRIVATE_IPV4}"' in script
+    assert '$allowedRemoteAddress = $env:PRODUCTION_APP_NODE_IP' in script
     assert '$firewallRuleName = "RAGPinCheng-ASR-8200-from-Ubuntu"' in script
     assert "-LocalPort 8200" in script
     assert "-RemoteAddress $allowedRemoteAddress" in script
@@ -194,7 +196,7 @@ def test_activation_script_uses_fixed_firewall_and_fail_closed_rollback():
     assert "foreach ($entry in @($LocalPort))" in script
     assert "ASR_SERVICE_ENABLED=true" in script
     assert "ASR_SERVICE_ENABLED=false" in script
-    assert '"http://${PRIVATE_IPV4}:8100/v1/activity"' in script
+    assert '$env:GPU_SERVICE_ACTIVITY_URL' in script
     assert '"http://127.0.0.1:8100/v1/activity"' not in script
     assert "-AllowInjectedProbeToken" in script
     assert "Injected BGE priority probe token must be one line" in script

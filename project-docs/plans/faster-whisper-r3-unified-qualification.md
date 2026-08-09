@@ -268,7 +268,7 @@ binary-only 和 Profile admission 均不改变。
 ### 2.0.14 可校验持久 wheelhouse 缓存
 
 Windows 自托管 runner 不启用 pip 默认缓存。资格脚本使用固定
-`${PRODUCTION_DATA_ROOT}\RAGPinCheng-ASR\qualification\wheel-cache`，按 Python 版本与 ABI、
+`${PRODUCTION_ASR_DATA_ROOT}\qualification\wheel-cache`，按 Python 版本与 ABI、
 Windows 架构、pip 版本、CUDA/torch/torchaudio、production freeze、faster-whisper
 requirements 及四个受控 wheel 的稳定 Manifest 身份计算缓存键。
 
@@ -287,7 +287,7 @@ workflow 对脱敏 verdict artifact 提供一次受控上传重试；内部 whee
 资格 Run `31287507974` 在 Windows runner 通过依赖代理下载固定
 `jieba-0.42.1.tar.gz` 时发生流截断，未进入样本准备、模型或 CUDA 资格阶段。后续不再由
 builder 在线获取该 sdist，改为只读取固定 staging 路径
-`${PRODUCTION_REPO_PATH}\runtime\qualification-inputs\faster-whisper\jieba-0.42.1.tar.gz`。
+`${PRODUCTION_RUNTIME_ROOT}\qualification-inputs\faster-whisper\jieba-0.42.1.tar.gz`。
 workflow 和 builder 分别校验普通文件、固定 19,214,172 字节、固定 SHA-256 与 archive
 结构，再复制到 run-local 临时目录并执行既有双重可复现构建。路径不是 dispatch 输入，
 不得指向现有 ASR venv、模型或服务目录；缺失或身份不符时立即失败，不回退在线下载。
@@ -345,13 +345,13 @@ R3 必须在本机重新计算大小与 SHA-256；公开值只作为比对基线
 执行前必须重新只读核验，不能只依赖历史记录：
 
 ```text
-Windows GPU / ASR: ${PRIVATE_IPV4}
-Ubuntu backend:    ${PRIVATE_IPV4}
+Windows GPU / ASR: ${GPU_SERVICE_IP}
+Ubuntu backend:    ${APP_NODE_IP}
 GPU service:       RAGPinCheng-GPU / TCP 8100
 ASR service:       RAGPinCheng-ASR / TCP 8200
 GitHub runner:     ${PRODUCTION_HOSTNAME} / Administrator / asr-production
-ASR program root:  ${PRODUCTION_SERVICE_ROOT}\RAGPinCheng-ASR
-ASR data root:     ${PRODUCTION_DATA_ROOT}\RAGPinCheng-ASR
+ASR program root:  ${PRODUCTION_ASR_PROGRAM_ROOT}
+ASR data root:     ${PRODUCTION_ASR_DATA_ROOT}
 ```
 
 ## 3. 统一执行原则
@@ -378,19 +378,19 @@ Secret、模型、依赖、样本来源、生产服务切换或回滚失效时�
 
 ```text
 资格程序根：
-${PRODUCTION_SERVICE_ROOT}\RAGPinCheng-ASR\qualification\faster-whisper
+${PRODUCTION_ASR_PROGRAM_ROOT}\qualification\faster-whisper
 
 每次运行：
-${PRODUCTION_SERVICE_ROOT}\RAGPinCheng-ASR\qualification\faster-whisper\runs\<github.run_id>\
+${PRODUCTION_ASR_PROGRAM_ROOT}\qualification\faster-whisper\runs\<github.run_id>\
 
 固定样本入口：
-${PRODUCTION_DATA_ROOT}\RAGPinCheng-ASR\qualification\faster-whisper\inputs\
+${PRODUCTION_ASR_DATA_ROOT}\qualification\faster-whisper\inputs\
 
 固定样本 Manifest：
-${PRODUCTION_DATA_ROOT}\RAGPinCheng-ASR\qualification\faster-whisper\inputs\manifest.json
+${PRODUCTION_ASR_DATA_ROOT}\qualification\faster-whisper\inputs\manifest.json
 
 模型最终目录：
-${PRODUCTION_DATA_ROOT}\RAGPinCheng-ASR\models\faster-whisper-large-v3-turbo\
+${PRODUCTION_ASR_DATA_ROOT}\models\faster-whisper-large-v3-turbo\
 0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf\
 
 模型 Manifest：
@@ -415,7 +415,7 @@ R3 不修改：
 
 - TCP 8100/8200 防火墙；
 - 当前 ASR 生产 venv；
-- `${PRODUCTION_DATA_ROOT}\RAGPinCheng-ASR\config\asr.env`；
+- `${PRODUCTION_ASR_DATA_ROOT}\config\asr.env`；
 - Ubuntu `prod.env`；
 - Ubuntu `ASR_ENABLED`；
 - backend 容器。

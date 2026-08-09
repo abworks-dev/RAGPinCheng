@@ -10,6 +10,8 @@ data/feedback.jsonl
 media/
 __pycache__/
 *.pyc
+.codex-worktrees/
+jieba-0.42.1.tar.gz
 .venv/
 .venv-whisperx/
 .whisperx-cache/

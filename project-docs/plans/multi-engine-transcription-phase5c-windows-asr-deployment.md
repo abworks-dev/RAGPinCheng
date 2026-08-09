@@ -2,7 +2,7 @@
 
 - 状态：R3A 仓库实施、R3B 依赖与固定模型准备已完成；Windows ASR 激活与隔离验收通道已获批实施
 - 日期口径：2026-08-04，Asia/Shanghai
-- 适用主机：Windows GPU `${PRIVATE_IPV4}`、Ubuntu backend `${PRIVATE_IPV4}`
+- 适用主机：Windows GPU `${GPU_SERVICE_IP}`、Ubuntu backend `${APP_NODE_IP}`
 - 固定模型：`iic/SenseVoiceSmall` revision `7bf452403abd7353a300cd760f7adae7701c92c1`
 
 ## 1. 目标
@@ -12,12 +12,12 @@
 ## 2. 冻结目录与配置所有权
 
 ```text
-${PRODUCTION_SERVICE_ROOT}\RAGPinCheng-ASR\
+${PRODUCTION_ASR_PROGRAM_ROOT}\
 ├── app\
 ├── venv\
 └── scripts\
 
-${PRODUCTION_DATA_ROOT}\RAGPinCheng-ASR\
+${PRODUCTION_ASR_DATA_ROOT}\
 ├── config\asr.env
 ├── models\SenseVoiceSmall\7bf452403abd7353a300cd760f7adae7701c92c1\
 ├── spool\
@@ -25,7 +25,7 @@ ${PRODUCTION_DATA_ROOT}\RAGPinCheng-ASR\
 └── backups\
 ```
 
-- Windows ASR 服务端只读取 `${PRODUCTION_DATA_ROOT}\RAGPinCheng-ASR\config\asr.env`，模板是 `asr_service/.env.example`。
+- Windows ASR 服务端只读取 `${PRODUCTION_ASR_DATA_ROOT}\config\asr.env`，模板是 `asr_service/.env.example`。
 - Ubuntu backend 客户端继续读取生产 `prod.env`，模板是根 `.env.example` 中的 `ASR_ENABLED`、`ASR_SERVICE_URL` 等客户端键。
 - 两份 env 不能拼接。Token 值不进入仓库、命令行、Scheduled Task XML 或日志。
 - `BGE_PRIORITY_PROBE_TOKEN` 必须与现有 GPU service 的 `GPU_SERVICE_TOKEN` 完全一致；它是 ASR 调用 GPU `/v1/activity` 时使用的 Bearer Token，不与 Ubuntu backend 调用 ASR 的 `ASR_SERVICE_TOKEN` 混用。激活 workflow 只把既有仓库级 `GPU_SERVICE_TOKEN` Secret 映射到进程内的 `BGE_PRIORITY_PROBE_TOKEN`，payload 部署时写入受保护的 Windows ASR env，不输出或复制 Token 到命令行、任务定义和日志。
@@ -50,14 +50,14 @@ GPU service 的受鉴权端点返回唯一结构：
 }
 ```
 
-ASR 固定通过 GPU service 的实际监听地址 `http://${PRIVATE_IPV4}:8100/v1/activity` 探测，不使用未监听的 loopback 地址。仅在四个字段均合法、模型已加载、inflight 为 0 且明确允许时运行下一块。超时、非 200、非法 JSON、版本不匹配、未知字段、GPU 未加载或忙碌均暂停；不得以固定 allow 绕过探针。
+ASR 固定通过 GPU service 的实际监听地址 `http://${GPU_SERVICE_IP}:8100/v1/activity` 探测，不使用未监听的 loopback 地址。仅在四个字段均合法、模型已加载、inflight 为 0 且明确允许时运行下一块。超时、非 200、非法 JSON、版本不匹配、未知字段、GPU 未加载或忙碌均暂停；不得以固定 allow 绕过探针。
 
 ### 3.3 进程与身份
 
 - Scheduled Task 名称：`RAGPinCheng-ASR`。
 - R3B 初始运行账号：`Administrator`，作为显式安全例外。
 - Scheduled Task 入口仍以 fail-fast PowerShell 运行；只在前台执行 Uvicorn 原生命令期间把 `ErrorActionPreference` 临时设为 `Continue`，避免 Windows PowerShell 5.1 将 Uvicorn 的正常 stderr 启动日志误判为终止错误，命令退出后立即恢复并传播真实退出码。
-- 补偿措施：配置目录 ACL 中 Administrators/SYSTEM 拥有 Full Control，受信任的 GitHub Actions runner 执行身份 NETWORK SERVICE 仅拥有 Modify，用于受控 payload 部署和 Environment Secret 注入；Token 仅从 env 文件进入进程；防火墙未来只允许 `${PRIVATE_IPV4}` 访问 8200；服务与 GPU 8100 独立。
+- 补偿措施：配置目录 ACL 中 Administrators/SYSTEM 拥有 Full Control，受信任的 GitHub Actions runner 执行身份 NETWORK SERVICE 仅拥有 Modify，用于受控 payload 部署和 Environment Secret 注入；Token 仅从 env 文件进入进程；防火墙未来只允许 `${APP_NODE_IP}` 访问 8200；服务与 GPU 8100 独立。
 - 后续迁移到低权限服务账号属于独立 R3，不在 R3A。
 
 ## 4. R3A 仓库实施
@@ -80,7 +80,7 @@ ASR 固定通过 GPU service 的实际监听地址 `http://${PRIVATE_IPV4}:8100/
 4. 安装明确锁定的 Python/CUDA/FunASR 依赖；创建专用 `venv` 时只从 HKLM 或 `Program Files` 解析机器级 Python 3.11，并以运行时版本探针拒绝 Python 3.10、用户级 Launcher 或其他版本。
    同一完整 SHA 的残留 staging 不删除，先移动到 `backups` 的 `stale-staging-*`；依赖安装失败的 staging 移动为 `failed-staging-*`，保证后续重试可恢复且保留审计证据。
 5. 离线准备固定 revision 模型，生成并复核 manifest。
-6. 配置仅允许 `${PRIVATE_IPV4} -> ${PRIVATE_IPV4}:8200` 的防火墙规则。
+6. 配置仅允许 `${APP_NODE_IP} -> ${GPU_SERVICE_IP}:8200` 的防火墙规则。
 7. 注册但先不对业务开放 Scheduled Task，执行 health/capabilities/activity 验证。
 
 ## 6. Windows ASR 激活与隔离验收
@@ -90,9 +90,9 @@ ASR 固定通过 GPU service 的实际监听地址 `http://${PRIVATE_IPV4}:8100/
 1. 只允许完整 master SHA 通过 `workflow_dispatch` 执行；默认操作为只读 preflight，显式 `activate` 才能激活。
 2. 激活前要求固定模型 Manifest 有效、服务端配置仍为 `ASR_SERVICE_ENABLED=false`、Scheduled Task 不存在、TCP 8200 未监听，且不存在会应用到任意程序/服务或 ASR venv Python、并覆盖 8200 的其他已启用入站 Allow 规则；其他程序、App Package 或特定 Windows 服务的规则不属于 ASR 暴露面，不修改也不误判。
 3. 部署同一 SHA 的 payload 后，备份服务端配置，原子改为 `ASR_SERVICE_ENABLED=true`；注册并启动固定名称 `RAGPinCheng-ASR` 的 Administrator/S4U Scheduled Task。
-4. 新建唯一防火墙规则 `RAGPinCheng-ASR-8200-from-Ubuntu`，只允许 `${PRIVATE_IPV4}` 访问 Windows TCP 8200；规则字段、端口和远端地址均严格复核。
+4. 新建唯一防火墙规则 `RAGPinCheng-ASR-8200-from-Ubuntu`，只允许 `${APP_NODE_IP}` 访问 Windows TCP 8200；规则字段、端口和远端地址均严格复核。
 5. Windows 本机严格验证 `/health`、受鉴权 `/v1/capabilities` 和 GPU `/v1/activity` 的唯一字段集合、版本、固定 experimental Profile 与值域；health 继续使用 10 秒请求上限，首次 capabilities 允许最多 120 秒完成本地 Torch/FunASR/CUDA 能力探测，响应后仍执行相同严格断言。
-6. Ubuntu production runner 读取既有 `prod.env`，要求 ASR 客户端三个关键键各出现一次、`ASR_ENABLED=false`、URL 固定且 Token 与 `production-asr` Secret 匹配，再从 `${PRIVATE_IPV4}` 验证 Windows health/capabilities。
+6. Ubuntu production runner 读取既有 `prod.env`，要求 ASR 客户端三个关键键各出现一次、`ASR_ENABLED=false`、URL 固定且 Token 与 `production-asr` Secret 匹配，再从 `${APP_NODE_IP}` 验证 Windows health/capabilities。
 7. Windows 本机激活失败时脚本立即按本次 activation state 自动回滚；激活时将回滚入口复制到受保护的 state 目录，Ubuntu 跨节点验证失败时 workflow 无需再次 checkout 即可回到 Windows，停止并注销任务、删除本轮固定防火墙规则、恢复启用前配置并确认 8200 关闭。
 8. 本轮不修改 Ubuntu `prod.env`，不重启 backend，不上传媒体，不调用 `/v1/jobs`，不创建转录任务，也不访问数据库、Qdrant 或 artifact。
 

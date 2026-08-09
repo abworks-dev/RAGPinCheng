@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
-    [string]$RepositoryPath = "${PRODUCTION_REPO_PATH}",
-    [string]$RuntimeRoot = "${PRODUCTION_REPO_PATH}\runtime",
+    [string]$RepositoryPath = $env:PRODUCTION_REPO_PATH,
+    [string]$RuntimeRoot = $env:PRODUCTION_RUNTIME_ROOT,
     [string]$BackupDirectory = $env:PRODUCTION_BACKUP_DIRECTORY,
     [Parameter(Mandatory)][string]$ReleaseRoot,
     [Parameter(Mandatory)][string]$GpuServiceToken
@@ -67,7 +67,7 @@ function Stop-OwnedTaskAndListener {
             [string]$process.CommandLine -notmatch '-m gpu_service\.app' -or
             (
                 -not ([string]$process.ExecutablePath).StartsWith($RuntimeRoot, [StringComparison]::OrdinalIgnoreCase) -and
-                [string]$process.ExecutablePath -ne "${PRODUCTION_PYTHON_PATH}"
+                [string]$process.ExecutablePath -ne $env:PRODUCTION_PYTHON_PATH
             )
         ) {
             throw "Refusing to stop an unexpected process listening on TCP 8100"
@@ -97,7 +97,7 @@ function Wait-Healthy {
     do {
         Start-Sleep -Seconds 5
         try {
-            $health = Invoke-RestMethod -Method Get -Uri "http://${PRIVATE_IPV4}:8100/health" -TimeoutSec 10
+            $health = Invoke-RestMethod -Method Get -Uri "$env:GPU_SERVICE_URL/health" -TimeoutSec 10
             if ($health.status -eq "ok" -and $health.model_loaded -eq $true) { return }
         } catch {}
     } while ([DateTimeOffset]::Now -lt $deadline)
@@ -106,7 +106,7 @@ function Wait-Healthy {
 
 function Invoke-SmokeTests {
     $headers = @{ Authorization = "Bearer $GpuServiceToken" }
-    $info = Invoke-RestMethod -Method Get -Uri "http://${PRIVATE_IPV4}:8100/model-info" -TimeoutSec 10
+        $info = Invoke-RestMethod -Method Get -Uri "$env:GPU_SERVICE_URL/model-info" -TimeoutSec 10
     if (
         $info.runtime_release_id -ne $manifest.release_id -or
         $info.runtime_source_fingerprint -ne $manifest.source_fingerprint -or
@@ -116,13 +116,13 @@ function Invoke-SmokeTests {
         throw "GPU model-info does not identify the promoted CUDA release"
     }
     foreach ($attempt in 1..5) {
-        $embedding = Invoke-RestMethod -Method Post -Uri "http://${PRIVATE_IPV4}:8100/v1/embeddings" `
+        $embedding = Invoke-RestMethod -Method Post -Uri "$env:GPU_SERVICE_URL/v1/embeddings" `
             -Headers $headers -ContentType "application/json" -TimeoutSec 30 `
             -Body (@{ texts = @("GPU promotion $attempt") } | ConvertTo-Json)
         if ($embedding.embeddings.Count -ne 1 -or $embedding.embeddings[0].dense.Count -ne 1024) {
             throw "Embedding smoke test returned an invalid response"
         }
-        $rerank = Invoke-RestMethod -Method Post -Uri "http://${PRIVATE_IPV4}:8100/v1/rerank" `
+        $rerank = Invoke-RestMethod -Method Post -Uri "$env:GPU_SERVICE_URL/v1/rerank" `
             -Headers $headers -ContentType "application/json" -TimeoutSec 30 `
             -Body (@{ query = "qualification"; passages = @("a", "b") } | ConvertTo-Json)
         if ($rerank.scores.Count -ne 2) { throw "Reranker smoke test returned an invalid response" }
@@ -227,7 +227,7 @@ if ($hadCurrentRelease) {
 
 $envPayload = @(
     "GPU_SERVICE_TOKEN=$GpuServiceToken",
-    "HOST=${PRIVATE_IPV4}",
+    "HOST=$env:GPU_SERVICE_HOST",
     "PORT=8100",
     "LOG_LEVEL=INFO"
 ) -join "`r`n"

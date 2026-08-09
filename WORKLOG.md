@@ -521,7 +521,7 @@
 
 - 完成：根据迁移手册 Phase 1 方案，创建 `gpu_service/` 独立推理服务，含完整代码结构：
   - `schemas.py` — Embedding/Rerank/Health/ModelInfo 的 Pydantic schema
-  - `config.py` — 服务配置（监听地址 `${PRIVATE_IPV4}:8100`、Token 认证、推理限制、日志级别）
+  - `config.py` — 服务配置（监听地址 `${GPU_SERVICE_IP}:8100`、Token 认证、推理限制、日志级别）
   - `models.py` — 单例 ModelManager，BGE-M3 加载 + dense/sparse 编码 + reranker 推理，含冷启动互斥锁、GPU OOM 保护、启动维度校验
   - `app.py` — FastAPI 路由（`/health`、`/model-info`、`/v1/embeddings`、`/v1/rerank`），Bearer Token 常量时间认证，请求日志中间件，413/422/503 错误处理
   - `requirements.txt` — 运行时依赖（torch cu128, FlagEmbedding, fastapi, uvicorn 等）
@@ -570,7 +570,7 @@
   - `requirements-prod.txt` — 移除 FlagEmbedding、transformers（已移至 -gpu.txt）
   - `Dockerfile.backend` — 移除 cu128 torch 安装层（~2GB）、BGE 模型下载、HF_HOME 环境变量，更新注释为无 GPU 架构
   - `docker-compose.yml` — 移除 `deploy.resources` GPU 预留块，移除 `hf_cache` volume，增加 `GPU_SERVICE_URL`/`GPU_SERVICE_TOKEN`/`EMBED_PROVIDER`/`RERANK_PROVIDER` 环境变量，`start_period` 从 15m 缩短为 30s
-- 不变量：默认 provider 配置为 remote（指向 `${PRIVATE_IPV4}:8100`），local provider 仍可通过 `EMBED_PROVIDER=local` 切换
+- 不变量：默认 provider 配置为 remote（指向 `${GPU_SERVICE_IP}:8100`），local provider 仍可通过 `EMBED_PROVIDER=local` 切换
 - 文件：`requirements-prod.txt`、`requirements-gpu.txt`、`docker/Dockerfile.backend`、`docker/docker-compose.yml`
 - 验证：语法经人工核查；本地无法运行 Docker 构建
 - 待办/风险：
@@ -594,7 +594,7 @@
 - 文件：`.github/workflows/ci.yml`、`.github/workflows/deploy-production.yml`、`scripts/deploy-gpu.ps1`、`scripts/deploy-app.sh`
 - 待办/风险：
   - 需在 GitHub 仓库设置 Secrets：`GPU_SERVICE_TOKEN`
-  - 需在 GitHub 仓库设置 Variables：`GPU_SERVICE_URL=http://${PRIVATE_IPV4}:8100`
+  - 需在 GitHub 仓库设置 Variables：`GPU_SERVICE_URL=http://${GPU_SERVICE_IP}:8100`
   - 首次 CD 需手动触发验证
 
 ### 19:54 — 全量迁移实施：Ubuntu 部署 + Qdrant 恢复 + CI/CD 改造
@@ -602,8 +602,8 @@
 今天完成了从单机 Windows 部署到双节点（Ubuntu 应用 + Windows GPU）架构的完整迁移实施，涉及代码编写、基础设施搭建、数据迁移和 CI/CD 改造。
 
 **1. 用户决策记录（Phase 0）**
-- Windows GPU 内网 IP: `${PRIVATE_IPV4}`，API 端口 `8100`
-- 认证方案：API Token + Windows 防火墙（仅允许 `${PRIVATE_IPV4}` 访问）
+- Windows GPU 内网 IP: `${GPU_SERVICE_IP}`，API 端口 `8100`
+- 认证方案：API Token + Windows 防火墙（仅允许 `${APP_NODE_IP}` 访问）
 - 非工作时间 GPU 不可用行为：返回 503，提示"推理服务维护中"
 - 无固定停机窗口，边测边切
 - Ubuntu 自托管 Runner 直接部署在 Ubuntu 主机上
@@ -631,11 +631,11 @@
 - 新增 `scripts/deploy-gpu.ps1` 和 `scripts/deploy-app.sh`
 
 **6. Ubuntu 基础设施准备**
-- 服务器：${PRODUCTION_APP_HOSTNAME}（Ubuntu 24.04, i5-8400, 32GB RAM, 500GB NVMe）
+- 服务器：${PRODUCTION_HOSTNAME}（Ubuntu 24.04, i5-8400, 32GB RAM, 500GB NVMe）
 - Docker 已安装（Compose v5.3.1），Docker Hub 直连可用
 - GitHub Actions Runner 已注册为 `${PRODUCTION_APP_RUNNER_NAME}`（systemd 服务）
 - 仓库克隆到 `${PRODUCTION_APP_REPO_PATH}`
-- 目录结构按规范创建：`/data/services/`、`/data/business/`、`${PRIVATE_SECRET_ROOT}/`、`/data/backup/`
+- 目录结构按规范创建：`${PRODUCTION_SERVICES_ROOT}/`、`/data/business/`、`${PRODUCTION_SECRETS_ROOT}/`、`${PRODUCTION_BACKUP_ROOT}/`
 - 生产 Compose 覆盖文件 `compose.prod.yaml` 已验证通过
 - `prod.env` 必填变量全部就位（含 GPU_SERVICE_URL/TOKEN、EMBED/RERANK_PROVIDER=remote）
 
@@ -646,7 +646,7 @@
   - ❌ REST API `/collections/{name}/snapshots/recover` 返回 404（原因不明，可能是 Qdrant v1.18.3 的 REST 端点问题）
   - ❌ 手动解压 tar 归档并复制 segment 文件 → Qdrant 因缺少 `version.json` 删除 segment 目录
   - ✅ 最终方案：`docker run` 临时容器，使用 `qdrant --snapshot file:collection --force-snapshot` CLI 参数直接加载 snapshot，恢复 38488 points 成功
-  - 数据已写入 `/data/services/docker/data/ragpincheng/prod/qdrant/storage/collections/`
+  - 数据已写入 `${PRODUCTION_SERVICES_ROOT}/docker/data/ragpincheng/prod/qdrant/storage/collections/`
   - 生产 Qdrant 容器启动后验证通过：38488 points
 
 **8. 当前待办**
@@ -683,7 +683,7 @@
 
 - 完成：修复 CD 部署全链路，从 `git push` 到自动部署两台服务器全部跑通
   - Windows GPU 部署（`deploy-gpu`）：修复 NETWORK SERVICE 账号执行问题（`$PID` 变量冲突、`git pull` stderr 处理、pip GBK 编码问题、Python 路径硬编码）
-  - Ubuntu 应用部署（`deploy-app`）：修复 Docker 权限（`${PRODUCTION_APP_USER}` 加入 docker 组）、`prod.env` 文件权限（`${PRIVATE_SECRET_ROOT}` 改为 `0750 pincheng-ops`）、Compose 覆盖文件路径
+  - Ubuntu 应用部署（`deploy-app`）：修复 Docker 权限（`${PRODUCTION_APP_USER}` 加入 docker 组）、`prod.env` 文件权限（`${PRODUCTION_SECRETS_ROOT}` 改为 `0750 pincheng-ops`）、Compose 覆盖文件路径
   - CI 测试：`test-providers` 缺少 `python-dotenv` 依赖、`FlagEmbedding` 未安装时跳过测试（`pytest.importorskip`）
   - 共提交 12 次修复，最后一次 CD 全流程通过
 - 文件：`scripts/deploy-gpu.ps1`、`scripts/deploy-app.sh`、`.github/workflows/deploy-production.yml`、`tests/test_providers.py`
@@ -734,7 +734,7 @@
 ### 20:12 — 排版 DOCX 解析测试文档
 
 - 完成：保留桌面原始 DOCX；首次已排版副本经 Word 渲染发现网页粘贴空段落导致重复圆点、跳号和空白页，随后从原文件重新清理空段落及残留编号，生成修正版并统一 A4 页边距、独立封面、中文字体、章节层级、正文行距、连续编号与项目符号、公式和代码块格式、表格表头与斑马纹、合并单元格、页眉页码及手动分页。
-- 文件：`${LOCAL_USER_HOME}\Desktop\RAGPinCheng Office 文档解析测试报告_修正版.docx`、`WORKLOG.md`（原文件保留，未修改业务代码）
+- 文件：`${LOCAL_USER_PATH}\Desktop\RAGPinCheng Office 文档解析测试报告_修正版.docx`、`WORKLOG.md`（原文件保留，未修改业务代码）
 - 验证：修正版由 202 个段落清理为 138 个，保留 7 张表格和文末测试标识；调用本机 Word 渲染为 11 页 PDF并检查全页缩略图，确认封面独立、列表连续、无空白页、表格未异常拆分、章节 10 正确另起一页，视觉验收通过。正文页码从第 2 页开始，因为封面计入总页数但隐藏页眉页脚。
 
 ### 23:13 — 生成 XLSX 解析测试工作簿
@@ -743,7 +743,7 @@
 - 补充：整理上传解析、SheetJS 预览定位、精确检索、跨工作表汇总、公式值、千行数据、隐藏内容策略和拒答等测试问题，并明确对应工作表、单元格及预期答案，便于区分真实解析成功与模型猜测。
 - 诊断：实际提问“MAT-001 的未税金额和含税金额”时，检索已将 XLSX 材料参数表召回第 1 名，但来源正文两列为空。核对确认测试簿公式层包含 `H4=E4*F4`、`I4=H4*(1+G4)`，而缓存值层均为 `None`；当前 `convert_xlsx_to_markdown()` 仅以 `data_only=True` 加载工作簿，因此未缓存公式结果被转换为空单元格，模型据此拒答。该问题属于公式值提取边界，不是召回失败；改进应同时读取公式与缓存值，并对缺失缓存保留公式或经受控计算引擎重算。
 - 交接：整理 Claude Code 修复提示词，限定修改 XLSX 公式与缓存值提取、测试和缓存失效边界；要求同时覆盖普通值、公式有缓存和公式无缓存三种情况，不扩大到检索排序、Prompt、前端或通用公式计算引擎。
-- 文件：`${LOCAL_USER_HOME}\Desktop\RAGPinCheng Office 文档解析测试报告.xlsx`、`WORKLOG.md`（未修改业务代码）
+- 文件：`${LOCAL_USER_PATH}\Desktop\RAGPinCheng Office 文档解析测试报告.xlsx`、`WORKLOG.md`（未修改业务代码）
 - 验证：使用 openpyxl 重新读取并确认工作表顺序、公式、1003 行大表、隐藏 Sheet、唯一检索文本、图表及命名区域完整；调用本机 Excel 将项目概览、材料参数、检查记录和统计图表渲染为 PDF，视觉检查确认中文、表格、公式结果、合并单元格和图表显示正常。
 
 ## 2026-07-28
@@ -775,7 +775,7 @@
 ### 09:17 — 生成 PPTX 解析测试报告
 
 - 完成：在桌面生成 4 页 PPTX 解析测试报告，覆盖封面、中文正文与项目符号、6×7 原生可编辑材料参数表、斜体提示和逐页编号。
-- 文件：`${LOCAL_USER_HOME}\Desktop\RAGPinCheng PPTX 解析测试报告.pptx`、`WORKLOG.md`（未修改业务代码）
+- 文件：`${LOCAL_USER_PATH}\Desktop\RAGPinCheng PPTX 解析测试报告.pptx`、`WORKLOG.md`（未修改业务代码）
 - 验证：逐页渲染检查并修正表头对比度；最终溢出检测通过，未发现越界内容。
 
 ### 09:34 — 整理 PPTX 解析测试问题
@@ -1183,25 +1183,25 @@
 
 - 完成：按用户两门禁要求，只读核对根 `CLAUDE.md`、相关 `.claude/rules/`、`project-docs/plans/funasr-auto-transcription.md`、`GPU_DEPLOYMENT.md`、当前 `gpu_service/` 实现、`scripts/deploy-gpu.ps1`、仓库根环境与 Git 状态；将 Phase 0 范围从「沙箱技术验证」细化为「许可证核查方案 + 非敏感样本准备 + 评测方法设计」三份书面材料；新增 `project-docs/plans/funasr-phase0-pre-registration.md`，覆盖现状、阻塞项、已批准项、不可执行项、沙箱边界（待 GPU 批准后激活）、候选 FunASR 模型与版本、依赖与许可证矩阵（含 LGPL 走人工合规通道）、样本清单与授权、人工标注方式、硬门槛与停止条件（含 faster-whisper 触发条件与「保持关闭」条件）、指标计算方法（CER / BIM 术语 / 规范编号 / 时间戳 / 重复 / 遗漏 / RTF / 显存 / 失败率 / BGE 延迟 / 不静默 CPU 证据）、递进顺序（许可证核查 → 兼容性冒烟 → 短样本 → 1h → 2h → 4h → BGE 共存）、BGE 共存测试设计、磁盘上限与清理方式、交付物列表、10 项待用户决定事项；同步在 `TODO.md` `### FunASR 视频自动转录` 段更新下一步（不再以本机开发 RTX 5070 Ti 为沙箱，明确非生产 GPU 来源需另行审批）。
 - 文件：`project-docs/plans/funasr-phase0-pre-registration.md`（新建）、`TODO.md`（`### FunASR 视频自动转录` 段三行更新）、`WORKLOG.md`（本条）。
-- 用户可观察行为变化：无。本轮**未**下载任何模型权重、**未**创建 venv、**未**安装 funasr / modelscope / torch / torchaudio / ffmpeg / PyAV、**未**启动任何 GPU 推理、**未**访问生产 Windows GPU 主机（${PRIVATE_IPV4}:8100，ping 不可达）、**未**读取 `.env` 真实值、**未**连接生产 Qdrant / `app.sqlite` / `parents.sqlite` / `media/` / `docs/`。`gpu_service` 进程与状态未触碰。
+- 用户可观察行为变化：无。本轮**未**下载任何模型权重、**未**创建 venv、**未**安装 funasr / modelscope / torch / torchaudio / ffmpeg / PyAV、**未**启动任何 GPU 推理、**未**访问生产 Windows GPU 主机（${GPU_SERVICE_IP}:8100，ping 不可达）、**未**读取 `.env` 真实值、**未**连接生产 Qdrant / `app.sqlite` / `parents.sqlite` / `media/` / `docs/`。`gpu_service` 进程与状态未触碰。
 - 验证：核对预注册计划含 17 个二级章节；逐项检查许可证矩阵覆盖 `funasr` / `modelscope` / `torch>=2.7` / `torchaudio` / `transformers<5` / `tokenizers` / `onnxruntime` / `PyAV` / `ffmpeg` / `soundfile` / `numpy` / `modelscope` 权重 / `huggingface_hub`；硬门槛覆盖 CER / 术语 / 编号 / 时间戳 / 重复 / 遗漏 / RTF / 显存 / 失败率 / BGE p95 延迟 / `gpu_service` 健康；`nvidia-smi` 显示本机为 RTX 5070 Ti / 16 GB / Driver 610.74，且显存被 dwm / TabTip / snipaste / Steam++ 占用 4.4 GB（无 Python 推理进程）；仓库根 Git 状态为已记录（5 修改 + 3 未跟踪），无 stash；`.env` 真实值未读取，仅讨论变量名存在与否。
 - 未执行的验证及原因：未跑 `py_compile` / `pytest` / `npm run build`（本轮仅写方案与文档，未改业务代码）；未跑 GPU 兼容性 / 显存 / RTF / 长视频 / BGE 共存 / 许可证实际审查（按用户最新指示，缺非生产 GPU 全部阻塞；非生产 GPU 来源到位后另提 R3 方案再实测）；未跑黄金集 / 检索冒烟（与本任务无关）。
 - 待办/风险：等待用户对 10 项决策项的回复；非生产 GPU 来源到位前，所有 GPU 实测项保持阻塞；未来任何对生产 Windows GPU 主机的访问、压测或服务修改必须走 R3 单独审批（含维护窗口、当前业务负载、影响范围、监控、自动停止、服务恢复、负责人）；Phase 0 完成不构成 Phase 1 自动授权；本轮回滚成本为 0（无业务代码改动）。
 
 ### 04:14 — 提交 FunASR Phase 0 执行计划（生产主机开发调试窗口版）
 
-- 完成：用户已原则批准在生产 Windows GPU 主机（${PRIVATE_IPV4}）当前开发调试窗口执行 Phase 0 GPU 实测，附加硬约束：ASR 必须在独立进程/venv/容器，不得修改 gpu_service 依赖，不得停止/重启/卸载 BGE，出现 OOM/BGE 异常/延迟/磁盘问题立即停。响应提交 `project-docs/plans/funasr-phase0-execution-plan.md`，覆盖：用户已明确的硬约束（§0）；环境隔离方式（§1，路径/进程/venv/缓存/端口/CPU 亲和全表化，加 8 条黑名单）；当前 GPU/BGE 基线测量（§2，GPU dmon + BGE /health + /model-info + 5 分钟 30 req/min 合成 BGE 流量基线）；测试顺序（§3，许可证 → 兼容性冒烟 → 短样本 → 1h → 2h → 4h → BGE 共存，前序失败不进入后续）；资源限制（§4，ASR 峰值 < 8 GB / 稳态 < 6 GB / 4 核 CPU / 30 GB 磁盘）；自动停止条件（§5，10 项含 BGE p95 +100%、OOM、错误率 0.5%、磁盘 < 5 GB、安全余量 14 GB、用户中断）；恢复步骤（§6，杀进程 → 释放显存 → 验证 BGE 4 项 → 抓末态 → 写停机报告 → 报告用户 → 等待）；执行通道（§7，A 密钥 SSH / B WinRM / C 用户手动 / D 终端逐条 — 当前 ping 不可达，需用户指定）；明确不做的（§8）；报告与归档（§9）；待回复 10 项（§10）；批准模板（§11）。同步更新 `TODO.md` `### FunASR 视频自动转录` 段的下一步、依赖、方案链接，指向新执行计划文件。
+- 完成：用户已原则批准在生产 Windows GPU 主机（${GPU_SERVICE_IP}）当前开发调试窗口执行 Phase 0 GPU 实测，附加硬约束：ASR 必须在独立进程/venv/容器，不得修改 gpu_service 依赖，不得停止/重启/卸载 BGE，出现 OOM/BGE 异常/延迟/磁盘问题立即停。响应提交 `project-docs/plans/funasr-phase0-execution-plan.md`，覆盖：用户已明确的硬约束（§0）；环境隔离方式（§1，路径/进程/venv/缓存/端口/CPU 亲和全表化，加 8 条黑名单）；当前 GPU/BGE 基线测量（§2，GPU dmon + BGE /health + /model-info + 5 分钟 30 req/min 合成 BGE 流量基线）；测试顺序（§3，许可证 → 兼容性冒烟 → 短样本 → 1h → 2h → 4h → BGE 共存，前序失败不进入后续）；资源限制（§4，ASR 峰值 < 8 GB / 稳态 < 6 GB / 4 核 CPU / 30 GB 磁盘）；自动停止条件（§5，10 项含 BGE p95 +100%、OOM、错误率 0.5%、磁盘 < 5 GB、安全余量 14 GB、用户中断）；恢复步骤（§6，杀进程 → 释放显存 → 验证 BGE 4 项 → 抓末态 → 写停机报告 → 报告用户 → 等待）；执行通道（§7，A 密钥 SSH / B WinRM / C 用户手动 / D 终端逐条 — 当前 ping 不可达，需用户指定）；明确不做的（§8）；报告与归档（§9）；待回复 10 项（§10）；批准模板（§11）。同步更新 `TODO.md` `### FunASR 视频自动转录` 段的下一步、依赖、方案链接，指向新执行计划文件。
 - 文件：`project-docs/plans/funasr-phase0-execution-plan.md`（新建）、`TODO.md`（`### FunASR 视频自动转录` 段三行更新）、`WORKLOG.md`（本条）。
-- 用户可观察行为变化：无。本轮**未**下载任何模型、**未**创建任何 venv、**未**安装任何 Python 包、**未**启动任何 GPU 推理、**未**发起到 ${PRIVATE_IPV4} 的任何连接（ping / ssh / winrm / rdp / http 均未尝试，因 ping 不可达 + 等待用户指定通道）、**未**修改 `gpu_service/` / `src/` / `api/` / `frontend/` / `prompts/` / `docker/` / `requirements*.txt` / `.env`、**未**触碰生产 Qdrant / SQLite / `media/` / `docs/`。
+- 用户可观察行为变化：无。本轮**未**下载任何模型、**未**创建任何 venv、**未**安装任何 Python 包、**未**启动任何 GPU 推理、**未**发起到 ${GPU_SERVICE_IP} 的任何连接（ping / ssh / winrm / rdp / http 均未尝试，因 ping 不可达 + 等待用户指定通道）、**未**修改 `gpu_service/` / `src/` / `api/` / `frontend/` / `prompts/` / `docker/` / `requirements*.txt` / `.env`、**未**触碰生产 Qdrant / SQLite / `media/` / `docs/`。
 - 验证：核对执行计划含 11 个二级章节；逐项检查 §5 触发条件覆盖 OOM / 异常退出 / BGE health / BGE 错误率 / BGE p95 / BGE 5xx / 磁盘 / 连续失败 / 用户中断 / 安全余量；§6 恢复步骤覆盖杀进程 / 释放显存 / 4 项 BGE 验证 / 末态抓取 / 停机报告 / 报告 / 等待；§1 隔离表覆盖 Python 解释器、进程、工作目录、依赖、缓存、BGE 权重、端口、CUDA 设备共 8 个维度；§10 决策项含执行通道 / 隔离 / 顺序 / 资源 / 停止 / 恢复 / 基线 / 4h 保留 / 步 4·5·6 暂停 / 阈值共 10 项。
-- 未执行的验证及原因：未跑 GPU/BGE 基线（等待用户指定执行通道 §7）；未下载任何模型、未安装 funasr/modelscope/torch/torchaudio/PyAV/ffmpeg（按 §1 隔离方式，批准后由用户在生产主机或通过指定通道执行）；未发起任何到 ${PRIVATE_IPV4} 的远程命令（按用户最新指示 + 当前 ping 不可达）。
+- 未执行的验证及原因：未跑 GPU/BGE 基线（等待用户指定执行通道 §7）；未下载任何模型、未安装 funasr/modelscope/torch/torchaudio/PyAV/ffmpeg（按 §1 隔离方式，批准后由用户在生产主机或通过指定通道执行）；未发起任何到 ${GPU_SERVICE_IP} 的远程命令（按用户最新指示 + 当前 ping 不可达）。
 - 待办/风险：等待用户在 §10 决策项的回复与 §11 批准模板；非生产 GPU 来源仍未到位时本计划无意义；任何对生产 Windows GPU 主机的访问须经用户指定通道 + §11 明确批准；步 4、5、6 进入前需暂停等用户裁决；Phase 0 完成不构成 Phase 1 自动授权；本轮回滚成本 = 0（无业务代码改动，仅新增 1 个 plan 文件 + TODO 段窄更新）。
 
 ### 04:30 — 在 `E:\Workspace\funasr-phase0-dev\` 建立本地 venv（py -3.11）
 
 - 完成：按用户"放 `E:\Workspace\` 子文件夹、匹配 kebab-case 命名规范、不要装到系统环境、只用于 Claude import 验证"指示，新建 `E:\Workspace\funasr-phase0-dev\`（含 `logs/`、`models/`、`scripts/` 子目录，未与本仓库任何目录混用），用 `py -3.11 -m venv` 创建独立 venv（Python 3.11.9，pip 24.0 → 26.2）；通过 5 阶段装包：(1) `pip install --index-url https://download.pytorch.org/whl/cu128 "torch==2.7.0"` → 3.3 GB，1m23s 完成；(2) `pip install funasr modelscope torchaudio` → pip 自动拉 `transformers-5.14.1`（违反生产 `transformers<5` 约束）和 `numpy-2.4.6`（违反生产 `numpy<2` 约束），立即降级到 `transformers==4.57.6` + `numpy==1.26.4` + `huggingface-hub==0.36.2`；(3) `pip install av` → PyAV 18.0.0（27.6 MB）；(4) `pip install onnxruntime python-Levenshtein` → onnxruntime 1.28.0 + Levenshtein 0.27.3；(5) 全量 import 验证首次报 `torchaudio 2.11.0` 与 `torch 2.7.0` 不二进制兼容（`WinError 127`），降级到 `torchaudio==2.7.0+cu128`（从 cu128 索引拉）后通过。同步在 `E:\Workspace\funasr-phase0-dev\logs\` 写 `import-check.log`（版本对照表 + AutoModel/rich_transcription_postprocess 子模块 import 验证通过）和 `freeze.log`（88 个包版本快照），写 `README.md`（路径、版本、与生产对齐、清理方式、不变量清单）。
 - 文件：`E:\Workspace\funasr-phase0-dev\.venv\`（创建）、`E:\Workspace\funasr-phase0-dev\logs\import-check.log`（新建）、`E:\Workspace\funasr-phase0-dev\logs\freeze.log`（新建）、`E:\Workspace\funasr-phase0-dev\README.md`（新建）、`WORKLOG.md`（本条）。
-- 用户可观察行为变化：**仅本地开发机**新增 venv 与目录；不修改 `E:\Repository\Github\RAGPinCheng\` 任何文件（含 `.venv`、源代码、配置、依赖、数据库）；不连生产 Windows GPU 主机（${PRIVATE_IPV4} 仍 ping 不可达）；不动系统 Python、`PATH`、注册表、Windows 服务；不读 `.env` 真实值。
+- 用户可观察行为变化：**仅本地开发机**新增 venv 与目录；不修改 `${REPOSITORY_CHECKOUT_PATH}\` 任何文件（含 `.venv`、源代码、配置、依赖、数据库）；不连生产 Windows GPU 主机（${GPU_SERVICE_IP} 仍 ping 不可达）；不动系统 Python、`PATH`、注册表、Windows 服务；不读 `.env` 真实值。
 - 验证：跑 8 库全量 import + funasr AutoModel + rich_transcription_postprocess 子模块 import + 本机 CUDA 可用性：`torch 2.7.0+cu128` / `cuda_avail True` / `device NVIDIA GeForce RTX 5070 Ti` / `cap (12, 0)` / `torchaudio 2.7.0+cu128` / `funasr 1.3.30` / `modelscope 1.39.0` / `transformers 4.57.6` / `PyAV 18.0.0` / `soundfile 0.14.0` / `numpy 1.26.4` / `onnxruntime 1.28.0` / `Levenshtein 0.27.3`；88 个 wheel 装好；venv 占用 6.6 GB（远超原估 2.4 GB，因 torch-cu128 实际 3.3 GB + 87 个传递依赖）；E 盘剩余 639.5 GB（未触发磁盘警告）。所有结果标注「仅本地 import 验证，不可作为 Phase 0 实测依据」。
 - 未执行的验证及原因：未跑 GPU 推理（按用户指示本机不是 Phase 0 沙箱，GPU 是 RTX 5070 Ti ≠ 生产 5060 Ti）；未拉 `paraformer-large-zh` / `SenseVoiceSmall` 等大模型（用户授权前不下载）；未跑 `py_compile` Phase 0 沙箱代码（沙箱代码本身尚未编写，等用户批准 §11 模板 + 同步方式）；未跑 `nvidia-smi` / `pympler` 等显存测试。
 - 待办/风险：等待用户对 §11 模板（执行通道 C-1/C-2 + §10 决策项）的明确回复；本机 import 验证仅证明 funasr/transformers/torch/PyAV 在本机 Python 3.11 + RTX 5070 Ti 上可加载，**不**代表生产 5060 Ti + 3.10 + 16 GB 显存场景下可工作；本机 Python 3.11 与生产 3.10 存在差异（funasr 官方支持 3.8–3.12 范围覆盖，无已知阻塞）；如未来要清 venv，按 `E:\Workspace\funasr-phase0-dev\README.md` §「清理方式」执行，**不**会触及其它任何目录。
@@ -1221,7 +1221,7 @@
 - 完成：按用户给定的 22 项审核清单逐项修复沙箱代码 + 新增 4 测试 + 同步文档。**lib_config.py**（新建）含 `load_config` / `gate_for_gpu_entry` / `ConfigGateError`；token 必须为空（env 注入）；gate 在窗口外/共享 GPU 未确认/缺目录/token-in-config/schema 不匹配时拒绝启动。**lib_metrics.py**（重写）纯 Python Wagner-Fischer CER；RTF = `wallclock / audio`、`realtime_speedup = audio / wallclock`；code regex 把 `JGJ-T` 和 `JGJ/T` 都归一为 `jgj/t`、year 可选、`code_metrics` 输出 precision/recall/FP/FN/per-item；BIM 输出 precision/recall/per-term TP/FP/FN/TN；segment `_monotone_one_to_one` 贪心按 start_ms 选最近未匹配 hyp，输出 start/end drift p50/p95/p99/max、omission_rate、extra_rate、consecutive_repeat_rate；删除 `python-Levenshtein` 依赖。**lib_license_audit.py**（重写）扫已装包 + 扫描 `models_root` 实际目录读 LICENSE/model card + SHA256；硬编码 `DEFAULT_EXPECTED_MODELS` 标记为 "expected" 而非 "verified"；`_split_compound` 处理 `OR`/`AND`/`WITH` 复合许可取最高 tier；MPL/LGPL/GPL/AGPL/UNKNOWN 都进人工审查；存在未批准 blocker 非 0 退出；`--report-only` 不绕过门禁。**lib_monitor.py**（重写）5 后台线程全部 fail-closed；`_trigger_stop` 在锁外执行且只能 1 次（`self._stopped_once`）；stop 文件写 `stop_reasons_dir`（run 专属）；health 用 JSON 字段；5xx 与 health failure 各自连续计数、成功归零；embed/rerank 延迟分别 deque、p50/p95/p99 分开；steady-state VRAM 滚动统计；`asr_pid_vram_mib(pid)` 单独追踪 ASR PID 显存；监控内部异常写 `monitor-internal-errors.log`，**不**静默。**requirements-asr.txt**（重写）删除 `python-Levenshtein`、用规范包名 `av`、版本 pin 与生产对齐；**两条独立 pip install**（先 `pip install -i https://download.pytorch.org/whl/cu128 torch==2.7.0 torchaudio==2.7.0`，再 `pip install -i tuna -r requirements-asr.txt`）。**setup_venv.ps1**（重写）拒绝 venv 落到项目 `.venv` / 生产 gpu_service venv / 仓库目录；`pip check` 通过；安装后 `python -c "import torch; print(torch.__version__)"` 必须含 `+cu128`；CUDA 不可用返非 0；`-SkipInstall` 同时跳 pip upgrade + dep install；PS 5.1 兼容。**01_measure_bge_baseline.py**（重写）`/health` JSON 字段校验 + `/model-info` 指纹 vs 配置期望，abort 报告与 success 报告 schema 分离，含 `target_id` 与 `config_sha256`；embed/rerank **分别** deque + p50/p95/p99。**02_compat_smoke.py**（重写）`torch.cuda.is_available()` 必须 True、`cap == (12,0)`、`torch.__version__` 含 `+cu128`、CUDA 测试**仅 5 轮**固定大小 matmul（非 30s 持续）。**03_run_short.py**（重写）worker 进程**只 load 一次** `AutoModel`，timing 分类 `cold_start_s`/`warm_up_s`/`pure_inference_s`/`end_to_end_s`；`--device=cpu` 被 `choices=["cuda"]` 锁死；0% 失败率；每个样本原子 checkpoint；stop flag 按 run_id 隔离。**04_run_long.py**（重写）worker 同样只 load 一次；`audio_cache` key `f"{src_sha}|sr16000|ch1|pyav-decoder/1"`；先写 `.partial` 完整验证后原子 rename；每块原子 checkpoint；保存完整绝对时间戳 segments。**05_bge_coexist.py**（重写）**删除**本地 BGE 副本（无 `:18100`、无 test BGE token、无 `BGE_WEIGHTS` 预置、**不** import/启动 `gpu_service.app`）；同一 BGE 实例前后对照；baseline 按 `target_id` + `config_sha256` 匹配加载；rolling 60s 窗口对照 embed_p95 / rerank_p95；embed/rerank 分别比较。**06_emergency_stop.ps1** + **07_verify_bge.ps1**（重写）`$processId` 而非 `$PID`；无 `??`/`?:` 等 PS7 专属（仅注释提及）；`-WhatIf` / `-ListOnly` 支持；**不**用宽泛命令行 regex，而是读 `<logs>/active-runs/<run_id>.json` 取 pid/启动时间/script；杀前**重新核对 PID 启动时间 ± 5s + cmd 包含 script**（防 PID 复用）；health 用 JSON 字段；`/model-info` 全字段对比 config 期望；`stop-events` 报告**永不**含 token。**08_annotate.py**（重写）`--input draft.jsonl --out validated.jsonl --config phase0-config.json`；每条样本要求 `id`/`audio`/`audio_sha256`/`source_url`/`license`/`internal_recording_consent_id`/`scenario`/`reference_text`/`reference_segments`/`annotator`/`reviewer`/`annotation_version`；短样本**无默认 5s 容差**。**scripts/funasr_phase0/README.md**（重写）17 个文件清单 + 4 个 test 文件清单 + 12 项 R2 修复摘要。**tests/test_funasr_phase0_metrics.py**（29 测试）CER/RTF/code/BIM/segment/cer-norm-version 全覆盖。**tests/test_funasr_phase0_monitor.py**（7 测试）用 stdlib `http.server.ThreadingHTTPServer` 起 fake BGE、patch `nvidia_smi_csv`/`asr_pid_vram_mib`，覆盖 health_degraded/5xx streak/无死锁回调/回调只 1 次/health JSON 解析/stop 文件按 run 隔离/old run 文件不阻塞 new run。**tests/test_funasr_phase0_audio.py**（6 测试）cache key 含 SHA + sample rate + channels、原子 rename、WAV 验证、同名不同 SHA、checkpoint 哈希匹配。**tests/test_funasr_phase0_baseline.py**（5 测试）`importlib.util.spec_from_file_location` 加载 01 + 05、health_not_ok 写 abort、model_info_mismatch 写 abort、ok baseline 写 success 含分开 embed_p95/rerank_p95、target_id mismatch 阻塞加载、target_id 匹配可加载。**TODO.md** `### FunASR 视频自动转录` 段下一步明确为「待用户 + Codex 二轮审查 + R3 方案另立」。3 个 plan 文件头部各加一条"GPU 实测已升格 R3 / 调试窗口批准 / CI/CD 路径 A"补注。
 - 文件：`scripts/funasr_phase0/lib_config.py`（新建）、`scripts/funasr_phase0/lib_metrics.py`（重写）、`scripts/funasr_phase0/lib_license_audit.py`（重写）、`scripts/funasr_phase0/lib_monitor.py`（重写）、`scripts/funasr_phase0/requirements-asr.txt`（重写）、`scripts/funasr_phase0/setup_venv.ps1`（重写）、`scripts/funasr_phase0/01_measure_bge_baseline.py`（重写）、`scripts/funasr_phase0/02_compat_smoke.py`（重写）、`scripts/funasr_phase0/03_run_short.py`（重写）、`scripts/funasr_phase0/04_run_long.py`（重写）、`scripts/funasr_phase0/05_bge_coexist.py`（重写）、`scripts/funasr_phase0/06_emergency_stop.ps1`（重写）、`scripts/funasr_phase0/07_verify_bge.ps1`（重写）、`scripts/funasr_phase0/08_annotate.py`（重写）、`scripts/funasr_phase0/__init__.py`（重写）、`scripts/funasr_phase0/phase0-config.example.json`（新建）、`scripts/funasr_phase0/README.md`（重写）、`tests/test_funasr_phase0_metrics.py`（新建）、`tests/test_funasr_phase0_monitor.py`（新建）、`tests/test_funasr_phase0_audio.py`（新建）、`tests/test_funasr_phase0_baseline.py`（新建）、`project-docs/plans/funasr-auto-transcription.md`（头部补注）、`project-docs/plans/funasr-phase0-pre-registration.md`（头部补注）、`project-docs/plans/funasr-phase0-execution-plan.md`（头部补注）、`TODO.md`（FunASR 段下一步/依赖）、`WORKLOG.md`（本条）。**未**改 `.github/workflows/*` / `scripts/deploy-*.ps1` / `scripts/deploy-*.sh` / `gpu_service/` / `src/` / `api/` / `frontend/` / `prompts/` / `docker/` / 项目正式 `requirements*.txt` / `.env*` / `data/` / `media/` / `docs/` / Qdrant 或 SQLite。
 - 用户可观察行为变化：仓库 `scripts/funasr_phase0/` 内 13 个旧文件全部就地重写为合规实现 + 新增 `lib_config.py` + `phase0-config.example.json`；`tests/` 新增 4 个 test 文件。**未** GPU 实测、**未**下载、**未**装 ASR 依赖、**未**改 CI/CD、**未**提交、**未**推送、**未**改生产环境、未动 `.env` 真实值。
-- 验证：11 个 Python 文件 `py_compile` 全部通过；`python -m unittest tests.test_funasr_phase0_{metrics,monitor,audio,baseline}` 跑 47/47 测试全过；3 个 PS1 文件 grep 确认无 `??`/`?:` 真实使用（仅注释提及）；`rg` 确认无硬编码 token（`bge_auth_token="test-token"` 仅在 fake BGE 测试里）、无 `${PRIVATE_IPV4}`、无 `python-Levenshtein` import、无沙箱启动 `gpu_service.app`；`phase0-config.example.json` 用 `http://127.0.0.1:18100` loopback + `shared_production_gpu_confirmed: false`；`lib_config.gate_for_gpu_entry` 拒过 window-外 / 未确认共享 GPU / token-in-config / schema 不匹配 4 类请求（smoke 全过）。
+- 验证：11 个 Python 文件 `py_compile` 全部通过；`python -m unittest tests.test_funasr_phase0_{metrics,monitor,audio,baseline}` 跑 47/47 测试全过；3 个 PS1 文件 grep 确认无 `??`/`?:` 真实使用（仅注释提及）；`rg` 确认无硬编码 token（`bge_auth_token="test-token"` 仅在 fake BGE 测试里）、无 `${GPU_SERVICE_IP}`、无 `python-Levenshtein` import、无沙箱启动 `gpu_service.app`；`phase0-config.example.json` 用 `http://127.0.0.1:18100` loopback + `shared_production_gpu_confirmed: false`；`lib_config.gate_for_gpu_entry` 拒过 window-外 / 未确认共享 GPU / token-in-config / schema 不匹配 4 类请求（smoke 全过）。
 - 未执行的验证及原因：未跑 GPU/CUDA 实测（R3 待批）；未下载任何模型或模型元数据（Phase 0 GPU 实测未启动）；未在生产 Windows 主机运行任何脚本（仍 ping 不可达 + 未获 R3 批准）；`git diff --check` 报告的 1 处 `WORKLOG.md` EOF 新空行 + 1 处 `GPU_DEPLOYMENT.md:7` trailing whitespace 为预存（git 把未触动文件标记 modified 后 git diff --check 的预存问题）；未跑 `npm run build`（与本任务无关）；pytest 不可用故用 stdlib unittest（已在 entry 报告）。
 - 待办/风险：(1) 等待用户 + Codex 二轮代码审查；(2) 实际 GPU 测试需另提 R3 方案（含维护窗口、当前业务负载、影响范围、监控指标、自动停止、服务恢复、负责人），当前授权**不**包含此项；(3) CI/CD 保持路径 A，未触碰；(4) Phase 0 完成**不**构成 Phase 1 自动授权；(5) 本轮所有改动**只**在沙箱、测试、计划文档范围内，可通过 `git restore scripts/funasr_phase0/ tests/test_funasr_phase0_*.py project-docs/plans/funasr*.md TODO.md WORKLOG.md` 单点 revert 恢复（除部分 plan/TODO 头部补注需手动清理外）；(6) example config 故意 `shared_production_gpu_confirmed: false`，生产配置必须放仓库外、未提交。
 
@@ -1431,7 +1431,7 @@
 
 ### 04:47 — 检查 Windows GPU 生产机远程执行通道
 
-- 完成：按用户指定的 ZeroTier 地址 `${PRIVATE_ZEROTIER_IPV4}` 进行只读端口检查；SSH 22 和 WinRM 5985/5986 均未开放，RDP 3389 与 SMB 445 可达，因此当前没有可供 Codex 安全执行 PowerShell 的远程管理通道。
+- 完成：按用户指定的 ZeroTier 地址 `${GPU_NODE_ZEROTIER_IP}` 进行只读端口检查；SSH 22 和 WinRM 5985/5986 均未开放，RDP 3389 与 SMB 445 可达，因此当前没有可供 Codex 安全执行 PowerShell 的远程管理通道。
 - 文件：`WORKLOG.md`；未修改代码、未连接生产会话、未使用 GPU、未下载模型、未访问 BGE 或服务。
 - 验证：TCP 快速探测结果为 22/5985/5986 关闭，3389/445 开放。
 - 待办/风险：需现场启用 OpenSSH Server 或 WinRM 并提供受控认证方式，或由用户继续在现有 RDP PowerShell 会话执行命令；仅凭 SMB 不尝试远程进程创建或凭据猜测。
@@ -1488,7 +1488,7 @@
 ### 07:39 — 停止 faster-whisper R3-A A1 预检
 
 - 完成：按已批准的 R3-A A0–A8 方案和固定 SSH 门禁在生产机创建隔离 run `${QUALIFICATION_SANDBOX_ROOT}\faster-whisper-runs\phase0-fw-r3a-20260801-072218`，固定执行计划、预检报告与 helper，生成自制合成、非客户、非内部中文冒烟样本 `testdata\r3a-synthetic-zh.wav`；样本 SHA-256=`af9ad1728ab8acc6b06a2ead8d520df88e8368d5301f18cde8be01ae175a12c9`，时长约 11.415 秒。
-- 停止：A1 硬门禁发现生产工作区存在两个未跟踪文件 `data/_transfer_manifest.json`、`data/pincheng_docs-8226867163840074-2026-07-26-18-19-11.snapshot`；批准的 HTTP/HTTPS 代理 `http://${PRIVATE_ZEROTIER_IPV4}:7897` TCP 可达，但访问 PyPI/Hugging Face 时 Schannel TLS 握手失败（curl exit 35/HTTP 000）。同时确认 helper 的 Windows WDDM GPU 进程判定过严，且代理失败报告路径在 StrictMode 下访问缺失字段导致非零退出。按 §11 自动停止条件停在 `STOPPED_BEFORE_P1_COMPLETE`，未进入 A2。
+- 停止：A1 硬门禁发现生产工作区存在两个未跟踪文件 `data/_transfer_manifest.json`、`data/pincheng_docs-8226867163840074-2026-07-26-18-19-11.snapshot`；批准的 HTTP/HTTPS 代理 `${PROXY_URI}` TCP 可达，但访问 PyPI/Hugging Face 时 Schannel TLS 握手失败（curl exit 35/HTTP 000）。同时确认 helper 的 Windows WDDM GPU 进程判定过严，且代理失败报告路径在 StrictMode 下访问缺失字段导致非零退出。按 §11 自动停止条件停在 `STOPPED_BEFORE_P1_COMPLETE`，未进入 A2。
 - 安全末态：未输入或创建 BGE Token，DPAPI 临时令牌精确路径不存在；未下载 wheel/模型，未创建 venv，未加载 faster-whisper 模型，未执行 CPU/GPU 推理，未修改生产仓库、BGE、FunASR、CUDA、PATH、驱动或全局 Python。停止后 BGE `status=ok/model_loaded=true`，GPU 利用率 0%，faster-whisper/CTranslate2 命名进程=0、active-run 文件=0；失败 artifact 按批准策略完整保留。
 - 证据：`reports\preflight.md` SHA-256=`221349eb3397802dc5faddcdde83af8228283716fb6c83697b1cbcedd17ed744`；`reports\stop-event.md` SHA-256=`fadb0862384f4ee5f05f30e24e7bc98b171d7f7522a97f362200026aade9ac42`；run identity 的 config/approval/helper-manifest SHA-256 分别为 `098af79b92a6d7239a3e6ad5e0516f74c4d632c742181b4b081230bfc5174f7c`、`777db116736c1b54faf05a20e996ed3a63e59909bc5f473c47466dc94bb65958`、`1af987d3d7e25991c26754f2c275661fe7ccee20208561f8d83ac4cedc31b36b`。
 - 待办/风险：不得自动处理生产未跟踪文件，不得在已固定 identity 内静默替换 helper；需先修复/核对代理 TLS 链路并修订 helper 的 WDDM 判定与失败报告逻辑，随后以新 run/new identity 重新提交 R3-A 重试或补充方案审批。
@@ -1513,7 +1513,7 @@
 
 ### 10:33 — 在 retry2 A-1 PowerShell 门禁自动停止
 
-- 完成：按已批准 retry2 计划启动 A-1 有界恢复核验。固定 SSH host key、`Administrator@${PRIVATE_ZEROTIER_IPV4}`、`curve25519-sha256` 和 30 秒上限下，原生命令成功返回 `${PRODUCTION_HOSTNAME}`、`${PRODUCTION_HOSTNAME}\administrator`，exit=0。
+- 完成：按已批准 retry2 计划启动 A-1 有界恢复核验。固定 SSH host key、`Administrator@${GPU_NODE_ZEROTIER_IP}`、`curve25519-sha256` 和 30 秒上限下，原生命令成功返回 `${PRODUCTION_HOSTNAME}`、`${PRODUCTION_HOSTNAME}\administrator`，exit=0。
 - 停止：第二个显式 `exit 0` 的 `-EncodedCommand` PowerShell 在约 1.2 秒内返回 exit=1。根因是调用端以双引号构造脚本，提前把 `$env:COMPUTERNAME` 展开成调用端值 `${LOCAL_HOSTNAME}`，远端收到无引号表达式并产生 ParserError；这是调用端编码/引用错误，不是生产 PowerShell 会话超时。
 - 安全边界：依计划“A-1 任一超时或非零即停止，不进行远程写入”立即停止。未只读核验或补写第二失败 run 的 stop-event，未创建第三个 retry run，未上传/执行候选 helper，未进入 A0/A1/A2，未下载 wheel/model，未创建 DPAPI 文件。已执行的两个远程命令均未包含文件或服务写入动作。
 - 文件：仅更新 `WORKLOG.md`；计划和 helper 未改变，retry2 计划 SHA-256 仍为 `fd4f89d76f985539262d0524d723da46527f8300687eb7cdedf740074a93fdf0`。
@@ -1577,7 +1577,7 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：新增并修订 `project-docs/plans/faster-whisper-r3a-retry5-execution-plan.md`、`project-docs/plans/faster-whisper-r3a-retry5-a0-a1.ps1`、`project-docs/plans/faster-whisper-r3a-retry5-foreground-controller.ps1`；复用且未修改 `project-docs/plans/faster-whisper-r3a-retry-bge-auth-probe.ps1`；更新本小节；未修改或删除 retry3/retry4 文件及 artifacts。
 - 验证：Windows PowerShell 5.1 parser 两个文件 errors=0；本机 PowerShell 7.6.4 Core parser 两个文件 errors=0；helper 模拟 SelfTest 19/19、`failures=[]`、未调用真实 WMI/nvidia；controller 模拟 SelfTest 9/9、`failures=[]`；29 项静态安全检查全部通过；helper/controller 均为 UTF-8 BOM。静态检查确认人工 SHA 参数和 controller SHA 状态已移除，代码/文档采用存在性与源/目标字节长度门禁，模型与样本固定 SHA 自动身份校验仍存在。本次未计算或生成新的计划/helper/controller SHA-256。
 - 后续修订：按用户要求取消 retry5 预设维护窗口及 `WindowStart/WindowEnd` 参数，改为固定 identity 的单次授权；首个生产 SSH 调用即视为授权已使用，中断、停止、暂停点后的继续/重试必须重新取得精确批准。生产机仍强制使用 `China Standard Time` / `+08:00`，并动态记录本地与 UTC 时间；所有步骤级 watchdog、阶段超时、自动停止和 P1/P2/P3/P4 暂停点不变。
-- 边界/风险：未连接生产机、未执行 retry5、未创建远端 RunRoot/StagingRoot、未上传/下载/安装、未运行真实 WMI/CIM、`nvidia-smi` 或 faster-whisper。人工代码/计划 SHA 与预设维护窗口均已取消，但生产执行仍须按修订后的固定 identity、执行范围和暂停点取得明确批准；本地修改前基线备份位于 `${LOCAL_USER_HOME}\AppData\Local\Temp\ragpincheng-retry5-sha-gated-baseline-20260801-231730`。
+- 边界/风险：未连接生产机、未执行 retry5、未创建远端 RunRoot/StagingRoot、未上传/下载/安装、未运行真实 WMI/CIM、`nvidia-smi` 或 faster-whisper。人工代码/计划 SHA 与预设维护窗口均已取消，但生产执行仍须按修订后的固定 identity、执行范围和暂停点取得明确批准；本地修改前基线备份位于 `${LOCAL_USER_PATH}\AppData\Local\Temp\ragpincheng-retry5-sha-gated-baseline-20260801-231730`。
 
 ## 2026-08-03
 
@@ -1834,10 +1834,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 
 ### 21:20 — 实施 Windows ASR 激活与隔离验收通道
 
-- 完成：新增默认 preflight、显式 activate/rollback 的 Windows ASR 生产 workflow；激活脚本绑定完整 SHA、固定目录、模型 Manifest、Administrator/S4U Scheduled Task 和仅允许 Ubuntu `${PRIVATE_IPV4}` 访问 TCP 8200 的防火墙规则，并为本机或跨节点失败提供按 activation ID 的自动回滚；新增 Ubuntu 只读验证器，在 backend 保持 `ASR_ENABLED=false` 时校验固定 URL、共享 Token、health 与唯一 experimental capabilities 契约。
+- 完成：新增默认 preflight、显式 activate/rollback 的 Windows ASR 生产 workflow；激活脚本绑定完整 SHA、固定目录、模型 Manifest、Administrator/S4U Scheduled Task 和仅允许 Ubuntu `${APP_NODE_IP}` 访问 TCP 8200 的防火墙规则，并为本机或跨节点失败提供按 activation ID 的自动回滚；新增 Ubuntu 只读验证器，在 backend 保持 `ASR_ENABLED=false` 时校验固定 URL、共享 Token、health 与唯一 experimental capabilities 契约。
 - 文件：`.github/workflows/activate-asr-production.yml`、`.github/workflows/ci.yml`、`scripts/activate-asr-production.ps1`、`scripts/verify-asr-service.ps1`、`scripts/verify_asr_from_ubuntu.py`、`scripts/deploy-gpu.ps1`、`scripts/start-gpu-service.ps1`、`tests/test_asr_activation.py`、`tests/test_deploy_git_safety.py`、`project-docs/plans/multi-engine-transcription-phase5c-windows-asr-deployment.md`、`WORKLOG.md`。
 - 验证：激活、既有部署和模型缓存专项测试 `42 passed`；本地可运行的 ASR/Provider 回归 `146 passed`；Python `py_compile`、PowerShell AST 解析、WORKLOG 标题格式和 `git diff --check` 通过；PR #19～#29 的要求检查均通过。生产部署 run `30926446530` 成功恢复 `RAGPinCheng-GPU` 并部署 backend；首次激活因 Ubuntu `prod.env` 中 `ASR_SERVICE_TOKEN` 为空而由跨节点失败回滚，补齐共享 Token 后 run `30927418117` 的 Windows 激活与 Ubuntu 验证均成功且回滚 job 跳过。Windows runner `${PRODUCTION_HOSTNAME}` 已从前台进程切换为 `.\Administrator`、自动启动且正在运行的 Windows 服务，并持久化限定代理配置；最终后台 runner 部署验收 run `30929936069` 的 `deploy-gpu` 与 `deploy-app` 均成功。现场确认 `RAGPinCheng-GPU`、`RAGPinCheng-ASR` 两项 Scheduled Task 均为 Running，GPU `/health` 返回 `status=ok, model_loaded=true`，ASR `/health` 返回 `status=ok, api_version=asr-service/1`。
-- 边界/风险：Windows GPU、ASR 与仅允许 Ubuntu `${PRIVATE_IPV4}` 访问 TCP 8200 的防火墙规则已按获批流程启用并通过双节点验收；Ubuntu backend 仍保持 `ASR_ENABLED=false`。本阶段未上传媒体、未调用任务 API、未创建转录任务，也未访问或修改数据库、Qdrant 与 artifact；后续启用 Ubuntu ASR 客户端及真实转录必须另行审批。
+- 边界/风险：Windows GPU、ASR 与仅允许 Ubuntu `${APP_NODE_IP}` 访问 TCP 8200 的防火墙规则已按获批流程启用并通过双节点验收；Ubuntu backend 仍保持 `ASR_ENABLED=false`。本阶段未上传媒体、未调用任务 API、未创建转录任务，也未访问或修改数据库、Qdrant 与 artifact；后续启用 Ubuntu ASR 客户端及真实转录必须另行审批。
 
 ### 22:13 — 统一回答与引用问题反馈弹窗
 
@@ -2359,7 +2359,7 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 
 ### 05:48 — 将 faster-whisper 资格切换为本地持久模型制品
 
-- 完成：faster-whisper 统一资格的模型阶段改为严格 `--offline-only`，只接受 `${PRODUCTION_DATA_ROOT}\RAGPinCheng-ASR\models` 下固定 revision、完整 Manifest、精确文件集合、大小和 SHA-256 均通过的持久制品；资格 workflow 不再接收模型下载代理，临时服务同时强制 `HF_HUB_OFFLINE=1`、`TRANSFORMERS_OFFLINE=1` 和既有 local-files-only 门禁。新增仅手动触发、完整 master SHA、显式 R3 开关、`production-asr` environment 与共享模型并发组保护的独立模型制品准备 workflow，通过 run 专属 staging 下载、校验、原子发布并再次离线复验，不启动服务或修改 Profile。首次生产准备在 staging 前因既有 ASR 服务处于启用状态而失败关闭；旁路修正现允许服务继续运行，但要求启用状态对应 Running 任务与唯一 8200 监听进程、停用状态对应无运行任务和监听，并在成功或失败后复核任务状态、监听 PID 与可执行路径完全不变。第二次准备证明 `snapshot_download` 的七文件并发 Session 仍在代理链路触发 TLS EOF，现改为单一 TLS 1.2 Session 按固定七文件清单顺序 GET，限制重定向到 Hugging Face 官方 HTTPS 域，使用 `.partial`、Range 续传、每文件三次重试和完成后原子改名；同一 workflow run 可安全复用受控 staging。
+- 完成：faster-whisper 统一资格的模型阶段改为严格 `--offline-only`，只接受 `${PRODUCTION_ASR_DATA_ROOT}\models` 下固定 revision、完整 Manifest、精确文件集合、大小和 SHA-256 均通过的持久制品；资格 workflow 不再接收模型下载代理，临时服务同时强制 `HF_HUB_OFFLINE=1`、`TRANSFORMERS_OFFLINE=1` 和既有 local-files-only 门禁。新增仅手动触发、完整 master SHA、显式 R3 开关、`production-asr` environment 与共享模型并发组保护的独立模型制品准备 workflow，通过 run 专属 staging 下载、校验、原子发布并再次离线复验，不启动服务或修改 Profile。首次生产准备在 staging 前因既有 ASR 服务处于启用状态而失败关闭；旁路修正现允许服务继续运行，但要求启用状态对应 Running 任务与唯一 8200 监听进程、停用状态对应无运行任务和监听，并在成功或失败后复核任务状态、监听 PID 与可执行路径完全不变。第二次准备证明 `snapshot_download` 的七文件并发 Session 仍在代理链路触发 TLS EOF，现改为单一 TLS 1.2 Session 按固定七文件清单顺序 GET，限制重定向到 Hugging Face 官方 HTTPS 域，使用 `.partial`、Range 续传、每文件三次重试和完成后原子改名；同一 workflow run 可安全复用受控 staging。
 - 文件：新增 `.github/workflows/prepare-faster-whisper-model-production.yml`、`scripts/prepare-faster-whisper-model-production.ps1`；更新 `.github/workflows/qualify-faster-whisper-production.yml`、`scripts/prepare_faster_whisper_model.py`、`scripts/qualify-faster-whisper-production.ps1`、`asr_service/tests/test_faster_whisper_qualification.py`、`tests/test_asr_deployment_static.py`、`project-docs/features/transcript-pipeline.md`、`WORKLOG.md`。已撤销未提交且实测会重定向回官方站的 `ASR_HF_ENDPOINT` 方案。
 - 验证：离线模型、TLS、资格与部署静态专项测试 58/58 通过；CI 等价完整 ASR 集合 337/337 通过并保留 2 条既有弃用警告；Python compileall、两个 PowerShell 5.1 AST、两个 workflow YAML 解析和 `git diff --check` 通过。PR #80 的 7 项 CI、master CI `31051179033` 与自动部署 `31051274015` 全部成功；首次生产模型准备 `31051434134` 在创建 staging 前按旧停服门禁失败，未下载或修改模型。旁路修正的部署静态专项 31/31、完整 ASR 集合 337/337、PowerShell 5.1 AST 与 `git diff --check` 通过；PR #81、master CI `31052148057` 与自动部署 `31052243452` 全部成功。第二次准备 `31052398085` 通过服务旁路门禁后在并发下载约 2/7 文件时因 TLS EOF 失败，未原子发布正式模型；顺序下载器专项 62/62 通过，完整 ASR 集合除既有 Windows 临时目录 `os.replace` 瞬态失败外 340 项通过，目标用例复跑 1/1 通过；Python compileall、PowerShell 5.1 AST 与 `git diff --check` 通过。顺序下载器经 PR #82 合并为 `334b3b67ddb057dc7d603dff3a86f4a0a2f463a8`，master CI `31053187431` 与自动部署 `31053282850` 成功；生产准备 `31053442056` 未再出现 TLS EOF，但下载完成后因代码内固定的 `model.bin` SHA-256 与该 revision 官方 LFS 元数据不符而失败关闭。官方 SHA 修正经 PR #83 合并为 `4f5b3eda670e697de033a1c495cd63c051c2061a`，master CI `31054370484` 与自动部署 `31054458875` 成功；生产准备 `31055291382` 成功原子发布并离线复验 Manifest `38ca18bc9cfb48fd1e8a95ec468d42c220a5ed001f1f825e39d7e9cfaa7793a1`，运行中 ASR 服务保持不变。资格 `31056133823` 的 wheel cache、离线安装和模型校验通过，随后因隔离 venv 未安装 `uvicorn` 导致临时服务立即退出但健康检查等待满 300 秒。ASR 基础依赖与快速失败修正经 PR #84 合并为 `2b0ed14a43b637699596f672929897245ba08da0`，master CI `31057660881` 与自动部署 `31057959078` 成功；资格 `31058039736` 首次构建并发布 46 文件新 wheel cache，临时服务成功 healthy，随后因继承 runner 上 Qwen3-ASR/WhisperX 模型路径而暴露额外 Profile，严格双 Profile 契约失败关闭。额外引擎环境隔离经 PR #85 合并为 `d29feaa90dbfbaf2902ef7c0e542471c5965ebe1`，master CI `31061087540` 与自动部署 `31061159891` 成功；资格 `31061244840` 命中 wheel cache、离线安装及模型校验通过，临时服务 healthy，但隔离 venv 按设计未安装 FunASR 依赖，因此只暴露 faster-whisper，旧双 Profile 断言失败。现将契约修正为严格只允许 `faster-whisper-large-v3-turbo-v1`，额外或缺失 Profile 均失败关闭。
 - 验证补充：严格单 Profile 契约经 PR #86 合并为 `0b533eb602ef519d5b7a2d9b06d18e723f710cf0`，PR 七项检查、master CI `31062514733` 与自动部署 `31062580123` 成功；资格 `31062659913` 在任何 step 启动前被 GitHub Free 托管分钟额度门禁拒绝，未接触生产主机。为移除此非必要依赖，内部 wheel 构建改用既有 PinCheng Ubuntu 自托管 Runner，并继续由 `production-asr` environment、完整 master SHA、显式执行开关和无 Secret 静态门禁约束；专项 71/71、完整 ASR 回归 343/343、workflow YAML 解析及 `git diff --check` 通过。
@@ -2486,7 +2486,7 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 
 ### 06:14 — 增加受控 GPU 服务恢复入口
 
-- 完成：生产资格 run `31222220581` 已确定因将远端 GPU 服务 `${PRIVATE_IPV4}:8100` 误作 ASR Runner 本机端口和任务而在预检失败；资格脚本现只约束本机 ASR `8200`、`RAGPinCheng-ASR` 和其防火墙，GPU 继续通过远端健康与 activity API 验证。新增仅恢复 `RAGPinCheng-GPU` Scheduled Task 的手动 workflow，并将其路由到 GPU Runner；已有任务必须严格匹配动作、主体和启动脚本，缺失任务才按现有部署契约创建，在 180 秒内确认 8100 健康，失败时输出脱敏启动诊断并注销本次新建任务。
+- 完成：生产资格 run `31222220581` 已确定因将远端 GPU 服务 `${GPU_SERVICE_IP}:8100` 误作 ASR Runner 本机端口和任务而在预检失败；资格脚本现只约束本机 ASR `8200`、`RAGPinCheng-ASR` 和其防火墙，GPU 继续通过远端健康与 activity API 验证。新增仅恢复 `RAGPinCheng-GPU` Scheduled Task 的手动 workflow，并将其路由到 GPU Runner；已有任务必须严格匹配动作、主体和启动脚本，缺失任务才按现有部署契约创建，在 180 秒内确认 8100 健康，失败时输出脱敏启动诊断并注销本次新建任务。
 - 文件：`.github/workflows/recover-gpu-service-production.yml`、`scripts/qualify-faster-whisper-production.ps1`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`。
 - 验证：恢复 runs `31223198066`、`31223417073` 均在发现 GPU 任务缺失后失败关闭，未修改生产状态；run `31223666489` 已创建并启动任务但 180 秒内未就绪，自动注销新建任务；run `31224233982` 显示目标主机地址存在、任务进程已退出且 Windows 状态码为 `0xC0000005`。启动日志持续增长但未见已脱敏的异常行，因此补充提前退出检测和 Windows Application Error 的故障模块诊断；修正后的 YAML 解析、PowerShell AST、faster-whisper qualification 与部署静态专项测试通过；`git diff --check` 通过。
 - 待办/风险：恢复任务会改变生产 GPU 服务进程状态；需在该 workflow 成功返回 `status=ok` 且 `model_loaded=true` 后，再重跑 faster-whisper 资格验证。
@@ -2607,7 +2607,7 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 完成：新增默认 DryRun 的 ASR 存储清理器，支持 7 天 staging、30 天 qualification 且保留最新 3 次、每个 wheel-cache 30 天/8 GB 上限；正式模型目录、活跃/近期路径和未知 qualification 命名均跳过，并输出审计 JSON。
 - 文件：`scripts/cleanup-asr-storage.ps1`、`project-docs/migrations/windows-gpu-asr-storage-cleanup.md`、`WORKLOG.md`
 - 验证：Windows PowerShell 解析通过；隔离目录 DryRun/Apply 自测通过；确认旧 staging、旧 qualification、旧 wheel 文件删除，近期文件和模型文件保留；`git diff --check` 通过。
-- 待办/风险：未访问或修改生产 `${PRODUCTION_DATA_ROOT}`，未创建 Windows 计划任务；生产启用前需先运行 DryRun 和 `-Apply -WhatIf`，确认 ASR 无活动任务后再手动执行 `-Apply`。
+- 待办/风险：未访问或修改生产 `${PRODUCTION_ASR_ROOT}`，未创建 Windows 计划任务；生产启用前需先运行 DryRun 和 `-Apply -WhatIf`，确认 ASR 无活动任务后再手动执行 `-Apply`。
 
 ## 2026-08-09
 
@@ -2644,7 +2644,7 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 
 - 完成：将最新 `master` (`071b74d`) 合入 Qwen 修复分支，解决 `WORKLOG.md` 单一冲突后推送合并提交 `dc7b1f4`；PR `#113` 保持 OPEN，未执行合并。
 - 文件：`WORKLOG.md`、PR 分支合并提交中的既有 Qwen/GPU 修复文件。
-- 验证：6 个 PowerShell 脚本 AST、`python -m compileall -q scripts gpu_service asr_service tests`、PR `#113` 的 7 个 CI job 全部通过；本机未安装 pytest，未运行 pytest 套件。只读检查显示本机 `${PRIVATE_IPV4}:8100` 超时、`127.0.0.1:8200` 拒绝连接；已核对 GPU 资格 run `31271874609` 的 runtime fingerprint `9b147c448b9b22d15e41f8eae7409c5417c291fec0f8f3d67b47ad6a8bab2e79`。
+- 验证：6 个 PowerShell 脚本 AST、`python -m compileall -q scripts gpu_service asr_service tests`、PR `#113` 的 7 个 CI job 全部通过；本机未安装 pytest，未运行 pytest 套件。只读检查显示本机 `${GPU_SERVICE_IP}:8100` 超时、`127.0.0.1:8200` 拒绝连接；已核对 GPU 资格 run `31271874609` 的 runtime fingerprint `9b147c448b9b22d15e41f8eae7409c5417c291fec0f8f3d67b47ad6a8bab2e79`。
 - 待办/风险：production runner 的实时健康不能由本机网络结果替代；未触发新的 Qwen R3、GPU promotion 或服务恢复。另有独立 deploy run `31273681766` 正在运行，未干预。
 
 ### 03:13 — 合入 GPU manifest 幂等修复并确认部署健康
@@ -2834,3 +2834,57 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 完成：将 cleanup workflow 的顶层 `on` 改为标准未加引号键，并移除错误的空 `push` 触发配置；保留 reusable、手动和定时触发，以及所有清理门禁。
 - 文件：`.github/workflows/production-cleanup.yml`、`tests/test_production_cleanup_triggers_static.py`、`WORKLOG.md`
 - 验证：Python YAML 解析、触发文本断言、测试文件 `py_compile` 和 `git diff --check` 通过；当前环境未安装 pytest，相关静态测试待 PR CI 验证；未触发清理、部署或生产服务操作。
+
+### 10:57 — 拆分生产清理 workflow 入口
+
+- 完成：将清理执行收敛为仅供调用的 `Production Cleanup` reusable workflow；新增 `Production Cleanup Operations` 承接手动、夜间 DryRun 与磁盘压力编排，并通过 reusable workflow 复用原清理脚本和门禁。
+- 文件：`.github/workflows/production-cleanup.yml`、`.github/workflows/production-cleanup-operations.yml`、`tests/test_production_cleanup_triggers_static.py`、`project-docs/features/gpu-runtime-deployment.md`、`WORKLOG.md`
+- 验证：Python YAML 解析、静态测试函数、测试文件 `py_compile`、当前目录旧路径检查和 `git diff --check` 通过；当前环境未安装 pytest，相关静态测试待 PR CI 验证；未触发清理、部署或生产服务操作。
+
+## 2026-08-10
+
+### 03:40 — 修复 reusable cleanup 的 runner 上下文
+
+- 完成：将 production cleanup workflow 中 Job 级的 `runner.temp` 引用移动到实际执行步骤的 `env`，并为清理、夜间 dry-run、磁盘压力检查和备份清理步骤分别提供 `REPORT_ROOT`；保留 artifact 上传步骤的临时目录引用。
+- 文件：`.github/workflows/production-cleanup.yml`、`WORKLOG.md`
+- 验证：production cleanup 与 production deploy YAML 解析通过；结构化检查确认 Job 级 `env` 不再使用 `runner.temp`，所有 `$env:REPORT_ROOT` 执行步骤均有来源；`git diff --check` 通过。未触发清理、部署或生产服务操作。
+
+### 03:48 — 修复旧版 cleanup 的 runner 上下文
+
+- 完成：将旧版 `production-cleanup.yml` 与 `production-cleanup-operations.yml` 中 Job 级的 `runner.temp` 引用移动到实际执行步骤的 `env`，修复 GitHub 对分支 `codex/split-production-cleanup-workflows` 的 workflow 解析失败。
+- 文件：`.github/workflows/production-cleanup.yml`、`.github/workflows/production-cleanup-operations.yml`、`WORKLOG.md`
+- 验证：两个 cleanup workflow 与 `production-deploy.yml` YAML 解析通过；结构化检查确认 Job 级 `env` 不再使用 `runner.temp`，所有 `$env:REPORT_ROOT` 执行步骤均有变量来源；`git diff --check` 通过。未触发清理、部署或生产服务操作。
+
+### 04:19 — 统一生产 workflow 命名
+
+- 完成：将生产部署、可复用清理和清理编排 workflow 统一为“动词在前”文件名与显示名，并同步 reusable workflow 路径、静态测试和 GPU 部署功能文档。
+- 文件：`.github/workflows/deploy-production.yml`、`.github/workflows/cleanup-production.yml`、`.github/workflows/cleanup-production-operations.yml`、`tests/test_deploy_git_safety.py`、`tests/test_gpu_runtime_deployment_static.py`、`tests/test_production_cleanup_triggers_static.py`、`project-docs/features/gpu-runtime-deployment.md`、`WORKLOG.md`
+- 验证：三份 workflow YAML 解析通过，reusable workflow 路径均存在，Job 级 `env` 无 `runner.temp`；相关 pytest 为 `29 passed, 2 subtests passed`；`git diff --check` 通过。未触发部署、清理或生产服务操作。
+
+### 04:26 — 审计公开仓库安全边界
+
+- 完成：只读复核 `origin/master` 的 Actions 触发、Runner、Token 权限、action allowlist、SHA pinning 与私有运行资料追踪状态；未修改 workflow、仓库可见性或 `.gitignore`。
+- 文件：`WORKLOG.md`
+- 验证：`pull_request` 仅进入 `ubuntu-latest` CI，所有工作流顶层 `contents` 均为 `read`，`sha_pinning_required=false`，allowlist 为 5 条，`git diff --check` 通过。当前仓库仍为 private，内网 IP、生产绝对路径和主机/Runner 标识仍在已追踪文件中；`.codex-worktrees/` 与 `jieba-0.42.1.tar.gz` 当前未追踪，但也未被 `.gitignore` 明确忽略。
+- 待办/风险：在变更可见性前需移除或脱敏上述残留，补充私有资料忽略规则，并重新执行 `rg` 和密钥扫描。
+
+### 05:04 — 清理公开仓库私有环境信息
+
+- 完成：将示例配置、生产脚本、workflow、部署文档和计划资料中的真实内网地址、主机标识、绝对路径与代理入口改为中性值或私有环境变量；补充 `.codex-worktrees/`、固定 jieba sdist 和 Python 缓存忽略规则；为手动 ASR/WhisperX workflow 补齐私有变量注入，并将静态测试更新为环境变量契约。
+- 文件：`.gitignore`、`.env.example`、`asr_service/.env.example`、`.github/workflows/*.yml`、`scripts/*`、`tests/*`、`project-docs/*`、`WORKLOG.md`、部署指南。
+- 验证：批准范围内 pytest `156 passed`、`2 subtests passed`；WhisperX 静态测试除 `3 passed` 外有 1 项因当前虚拟环境缺少 `nltk` 未能执行；全部 PowerShell `.ps1` AST 解析通过，19 个 workflow YAML 解析通过，Python `compileall` 通过，`git diff --check` 通过；私有值残留扫描和 self-hosted `pull_request` 边界扫描均清洁。
+- 待办/风险：尚未修改仓库可见性或 Git 历史；公开前仍需配置 `production-asr` Environment 的私有变量，并单独制定和审批历史敏感信息清理方案；未触发生产部署、清理、资格验证或 runner。
+
+### 06:00 — 生产部署门禁阻断
+
+- 完成：按用户批准触发 `Deploy Production` workflow `31338245724`，先修复并推送部署与 cleanup job 的 `production-asr` Environment 绑定；远端部署运行随后在 GPU promotion 前因当前提交缺少匹配的已验证 runtime lock 而失败。
+- 文件：`.github/workflows/deploy-production.yml`、`.github/workflows/cleanup-production.yml`、`.github/workflows/cleanup-production-operations.yml`、`WORKLOG.md`。
+- 验证：Workflow 使用远端 `master@0517f3e257551a2d5b8606571637807f2700a2ff`；`deploy-gpu` 失败，`deploy-app` 和 `cleanup-after-deploy` 跳过；未执行 GPU promotion、应用部署或生产清理。
+- 待办/风险：若继续部署，需要单独批准 GPU runtime qualification；该流程会临时停止并恢复生产 GPU 服务，不能通过跳过 runtime lock 门禁解决。
+
+### 06:45 — 清理 Actions 日志与历史私有资料
+
+- 完成：删除失败的 Actions 运行 `31338245724` 及其日志，并清理本次强推触发的 18 条新 runs；保留完整私有回滚 bundle 后，重写远端全部 115 个分支的 Git 历史，将内网地址、生产主机和 runner 标识、机器绝对路径、代理入口及 SSH 主机指纹改为占位符；未修改仓库可见性。
+- 文件：全分支历史；`WORKLOG.md`
+- 验证：回滚 bundle `git bundle verify` 通过；改写镜像 `git fsck --full --strict` 通过；696 个提交的历史文件和提交消息扫描均为 0 命中；远端分支数量和名称与改写镜像一致；PowerShell parser 错误为 0，`git diff --check` 通过；目标 Actions 运行复查返回 `404 Not Found`，本次强推产生的 18 条 runs 删除失败数为 0；未触发生产部署、清理或 GPU qualification。
+- 待办/风险：GitHub 对旧提交的缓存、PR 引用和搜索索引可能需要一段时间清理；回滚 bundle 保留了改写前历史，必须继续私下保存，不得进入公开仓库。

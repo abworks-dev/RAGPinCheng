@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import os
 import stat
 import zipfile
 from pathlib import Path
@@ -112,9 +113,7 @@ def test_fixed_contract_has_no_free_package_or_source_inputs():
     assert MODULE.SETUPTOOLS_REQUIREMENT == "setuptools==80.9.0"
     assert MODULE.WHEEL_REQUIREMENT == "wheel==0.45.1"
     assert MODULE.SDIST_SIZE_BYTES == 19214172
-    assert str(MODULE.PRELOADED_SDIST_PATH).endswith(
-        r"${PRODUCTION_REPO_PATH}\runtime\qualification-inputs\faster-whisper\jieba-0.42.1.tar.gz"
-    )
+    assert 'PRELOADED_SDIST_PATH = Path(os.environ.get("PRODUCTION_JIEBA_SDIST_PATH", ""))' in source
     assert source.count('subparser.add_argument("--bundle-dir"') == 1
     assert "--package" not in source
     assert "--version" not in source

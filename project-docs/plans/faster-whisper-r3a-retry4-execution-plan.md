@@ -1,4 +1,4 @@
-﻿# faster-whisper Phase 0 R3-A retry4 详细执行计划（仅本地编制，待生产审批）
+# faster-whisper Phase 0 R3-A retry4 详细执行计划（仅本地编制，待生产审批）
 
 > 状态：**retry4 本地执行材料已编写并通过静态检查/模拟 SelfTest；尚未批准或执行生产操作**  
 > 风险等级：**R3（后续若获批将涉及生产 Windows GPU 主机、外部下载、隔离安装、模型权重、GPU/BGE、临时鉴权材料及远端进程生命周期）**  
@@ -43,19 +43,19 @@ retry4 不授权修复、重建、重置或重新注册 Windows WMI Repository�
 
 | 文件 | SHA-256 |
 |---|---|
-| `E:\Repository\Github\RAGPinCheng\project-docs\plans\faster-whisper-r3a-retry3-execution-plan.md` | `d79dc887e7e8862bbd47db79f5beaef33aed80d1e5eff84fd1039b53280035e1` |
-| `E:\Repository\Github\RAGPinCheng\project-docs\plans\faster-whisper-r3a-retry3-foreground-controller.ps1` | `aeee89d8cc7f7c1edfd8b7f632d574a1bc5c82c0745c9effa8a9a25fdaef8515` |
-| `E:\Repository\Github\RAGPinCheng\project-docs\plans\faster-whisper-r3a-retry-a0-a1.ps1` | `11635a071fc56d8a5a8a4b2fe9a89c3516b7702b02dffa90fb140d8cd7f03be5` |
+| `${REPOSITORY_CHECKOUT_PATH}\project-docs\plans\faster-whisper-r3a-retry3-execution-plan.md` | `d79dc887e7e8862bbd47db79f5beaef33aed80d1e5eff84fd1039b53280035e1` |
+| `${REPOSITORY_CHECKOUT_PATH}\project-docs\plans\faster-whisper-r3a-retry3-foreground-controller.ps1` | `aeee89d8cc7f7c1edfd8b7f632d574a1bc5c82c0745c9effa8a9a25fdaef8515` |
+| `${REPOSITORY_CHECKOUT_PATH}\project-docs\plans\faster-whisper-r3a-retry-a0-a1.ps1` | `11635a071fc56d8a5a8a4b2fe9a89c3516b7702b02dffa90fb140d8cd7f03be5` |
 
 所有 retry3 生产 artifacts 继续作为只读审计证据；retry4 不覆盖、续写、清理、迁移或复用其 identity。
 
 ## 3. 治理关系与范围
 
 1. 原始 R3-A 主计划继续规定 A0–A8 的主体边界：
-   - `E:\Repository\Github\RAGPinCheng\project-docs\plans\faster-whisper-r3a-execution-plan.md`
+   - `${REPOSITORY_CHECKOUT_PATH}\project-docs\plans\faster-whisper-r3a-execution-plan.md`
    - SHA-256：`e2508a827441d8e7fea61441be9e6551e4a94ee6fd1f903048b5017c8baf08d1`
 2. 静态预检继续作为历史依据：
-   - `E:\Repository\Github\RAGPinCheng\project-docs\plans\faster-whisper-phase0-precheck.md`
+   - `${REPOSITORY_CHECKOUT_PATH}\project-docs\plans\faster-whisper-phase0-precheck.md`
    - SHA-256：`2edb7c53fc9aec9818eec6be70fd1fa3873d3ce4b0900d7c53e819a9fee9717e`
 3. retry3 计划仅作为历史设计、审批和故障证据；不得凭 retry3 的审批直接执行 retry4。
 4. 本 retry4 计划在以下事项上优先：
@@ -97,11 +97,11 @@ StagingRoot=${QUALIFICATION_SANDBOX_ROOT}\faster-whisper-inputs\phase0-fw-r3a-re
 
 | 输入 | 本地源路径 | SHA-256 |
 |---|---|---|
-| 原始 R3-A 计划 | `E:\Repository\Github\RAGPinCheng\project-docs\plans\faster-whisper-r3a-execution-plan.md` | `e2508a827441d8e7fea61441be9e6551e4a94ee6fd1f903048b5017c8baf08d1` |
-| 静态预检 | `E:\Repository\Github\RAGPinCheng\project-docs\plans\faster-whisper-phase0-precheck.md` | `2edb7c53fc9aec9818eec6be70fd1fa3873d3ce4b0900d7c53e819a9fee9717e` |
-| retry4 A0/A1 helper | `E:\Repository\Github\RAGPinCheng\project-docs\plans\faster-whisper-r3a-retry4-a0-a1.ps1` | `b5d947f8a03a5ee9f25008d67461581e1df5c379638fb30ac210d62df7faa44e` |
-| retry4 foreground controller | `E:\Repository\Github\RAGPinCheng\project-docs\plans\faster-whisper-r3a-retry4-foreground-controller.ps1` | `2aef736d938589dc0cbef67c142720e9fe07e365f0019e3b462b5a5db47f6073` |
-| BGE 鉴权 helper | `E:\Repository\Github\RAGPinCheng\project-docs\plans\faster-whisper-r3a-retry-bge-auth-probe.ps1` | `758eabc198e94c339a59bce29fa7258410a04d2f2e5ff295528e2d2d4304ef98` |
+| 原始 R3-A 计划 | `${REPOSITORY_CHECKOUT_PATH}\project-docs\plans\faster-whisper-r3a-execution-plan.md` | `e2508a827441d8e7fea61441be9e6551e4a94ee6fd1f903048b5017c8baf08d1` |
+| 静态预检 | `${REPOSITORY_CHECKOUT_PATH}\project-docs\plans\faster-whisper-phase0-precheck.md` | `2edb7c53fc9aec9818eec6be70fd1fa3873d3ce4b0900d7c53e819a9fee9717e` |
+| retry4 A0/A1 helper | `${REPOSITORY_CHECKOUT_PATH}\project-docs\plans\faster-whisper-r3a-retry4-a0-a1.ps1` | `b5d947f8a03a5ee9f25008d67461581e1df5c379638fb30ac210d62df7faa44e` |
+| retry4 foreground controller | `${REPOSITORY_CHECKOUT_PATH}\project-docs\plans\faster-whisper-r3a-retry4-foreground-controller.ps1` | `2aef736d938589dc0cbef67c142720e9fe07e365f0019e3b462b5a5db47f6073` |
+| BGE 鉴权 helper | `${REPOSITORY_CHECKOUT_PATH}\project-docs\plans\faster-whisper-r3a-retry-bge-auth-probe.ps1` | `758eabc198e94c339a59bce29fa7258410a04d2f2e5ff295528e2d2d4304ef98` |
 | 合成冒烟样本 | `${QUALIFICATION_SANDBOX_ROOT}\faster-whisper-runs\phase0-fw-r3a-20260801-072218\testdata\r3a-synthetic-zh.wav`（历史 run 内只读源） | `af9ad1728ab8acc6b06a2ead8d520df88e8368d5301f18cde8be01ae175a12c9` |
 | 本 retry4 计划 | 本文件 | `<以最终计算并由用户批准的 SHA-256 为准>` |
 
@@ -342,7 +342,7 @@ condition_on_previous_text=false
 代理固定为：
 
 ```text
-http://${PRIVATE_ZEROTIER_IPV4}:7897
+${PROXY_URI}
 Clash Verge/Mihomo mixed-port
 HTTP primary
 不自动切换 SOCKS
@@ -432,7 +432,7 @@ helper 强制要求开始/结束值都携带 `+08:00`，并在 artifact 中动�
 
 本轮未执行：
 
-- 未连接生产机 `${PRIVATE_ZEROTIER_IPV4}`；
+- 未连接生产机 `${GPU_NODE_ZEROTIER_IP}`；
 - 未执行 retry4；
 - 未运行真实 WMI/CIM；
 - 未运行真实 `nvidia-smi`；
@@ -446,7 +446,7 @@ helper 强制要求开始/结束值都携带 `+08:00`，并在 artifact 中动�
 
 ```text
 批准执行 faster-whisper R3-A retry4，按
-E:\Repository\Github\RAGPinCheng\project-docs\plans\faster-whisper-r3a-retry4-execution-plan.md
+${REPOSITORY_CHECKOUT_PATH}\project-docs\plans\faster-whisper-r3a-retry4-execution-plan.md
 执行；计划 SHA-256 = <填写本文件最终 SHA-256>。
 
 执行通道 = Codex 经验证 SSH；必须使用 retry4 foreground controller，禁止 detached/background supervisor
@@ -470,7 +470,7 @@ SSH 中断恢复 = 先读 lease/status；仅在 PID、StartTime/CreationDate、e
 BGE 鉴权探针 = 批准本地重新输入并生成 15 分钟 DPAPI 临时文件
 失败 artifact 策略 = A 完整保留
 暂停点 = P1/P2/P3/P4 全部强制
-代理 = http://${PRIVATE_ZEROTIER_IPV4}:7897，Clash Verge/Mihomo mixed-port，HTTP primary；不自动切换 SOCKS
+代理 = ${PROXY_URI}，Clash Verge/Mihomo mixed-port，HTTP primary；不自动切换 SOCKS
 允许下载来源 = pypi.org、files.pythonhosted.org、huggingface.co、us.aws.cdn.hf.co
 许可 blocker 批准人 = bim-admin，仅可精确批准具体 blocker
 超时 = wheel 30 分钟；模型 120 分钟；离线安装 30 分钟；模型加载 15 分钟；推理 10 分钟

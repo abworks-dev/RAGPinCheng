@@ -18,7 +18,7 @@
 param(
     [Parameter()]
     [ValidateNotNullOrEmpty()]
-    [string]$RootPath = '${PRODUCTION_DATA_ROOT}',
+    [string]$RootPath = $env:PRODUCTION_ASR_ROOT,
 
     [Parameter()]
     [ValidateRange(1, 3650)]

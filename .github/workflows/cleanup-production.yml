@@ -1,20 +1,22 @@
-name: Production Cleanup
+name: Cleanup Production
 
 on:
   workflow_call:
     inputs:
       target:
         description: Cleanup target
-        required: false
-        default: backups
+        required: true
         type: string
       apply:
         description: Delete approved candidates instead of previewing
-        required: false
-        default: false
+        required: true
         type: boolean
       confirm_production_cleanup:
         description: Confirm this cleanup run on the production Windows host
+        required: true
+        type: boolean
+      allow_unconfirmed_dry_run:
+        description: Permit a non-destructive dry-run without production confirmation
         required: false
         default: false
         type: boolean
@@ -23,36 +25,7 @@ on:
         required: false
         default: reusable-call
         type: string
-  workflow_dispatch:
-    inputs:
-      target:
-        description: Cleanup target
-        required: true
-        default: all
-        type: choice
-        options:
-          - all
-          - asr
-          - runtime
-          - backups
-      apply:
-        description: Delete approved candidates instead of previewing
-        required: true
-        default: false
-        type: boolean
-      confirm_production_cleanup:
-        description: Confirm this cleanup run on the production Windows host
-        required: true
-        default: false
-        type: boolean
-      reason:
-        description: Trigger reason for the audit report
-        required: false
-        default: manual
-        type: string
-  schedule:
-    - cron: '30 19 * * *'
-    - cron: '*/30 * * * *'
+
 permissions:
   contents: read
 
@@ -61,26 +34,24 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  REPO_PATH: ${PRODUCTION_REPO_PATH}
-  ASR_ROOT: ${PRODUCTION_DATA_ROOT}
-  RUNTIME_ROOT: ${PRODUCTION_REPO_PATH}\runtime
-  BACKUP_DIRECTORY: ${PRODUCTION_BACKUP_DIRECTORY}
+  REPO_PATH: ${{ vars.PRODUCTION_REPO_PATH }}
+  ASR_ROOT: ${{ vars.PRODUCTION_ASR_ROOT }}
+  RUNTIME_ROOT: ${{ vars.PRODUCTION_RUNTIME_ROOT }}
+  BACKUP_DIRECTORY: ${{ vars.PRODUCTION_BACKUP_DIRECTORY }}
 
 jobs:
-  manual-or-called:
+  cleanup:
     if: >-
-      github.event_name == 'workflow_call' ||
-      (github.event_name == 'workflow_dispatch' &&
-      inputs.confirm_production_cleanup == true)
+      inputs.confirm_production_cleanup == true ||
+      (inputs.allow_unconfirmed_dry_run == true && inputs.apply == false)
     runs-on: [self-hosted, windows, production, gpu]
+    environment: production-asr
     timeout-minutes: 30
     env:
-      EVENT_NAME: ${{ github.event_name }}
       INPUT_TARGET: ${{ inputs.target }}
       INPUT_APPLY: ${{ inputs.apply }}
       INPUT_CONFIRM: ${{ inputs.confirm_production_cleanup }}
       INPUT_REASON: ${{ inputs.reason }}
-      REPORT_ROOT: ${{ runner.temp }}\ragpincheng-production-cleanup
     steps:
       - name: Verify cleanup checkout
         shell: powershell
@@ -95,6 +66,8 @@ jobs:
 
       - name: Run production cleanup
         shell: powershell
+        env:
+          REPORT_ROOT: ${{ runner.temp }}\ragpincheng-production-cleanup
         run: |
           Set-StrictMode -Version Latest
           $ErrorActionPreference = 'Stop'
@@ -122,9 +95,8 @@ jobs:
   nightly-dryrun:
     if: github.event_name == 'schedule' && github.event.schedule == '30 19 * * *'
     runs-on: [self-hosted, windows, production, gpu]
+    environment: production-asr
     timeout-minutes: 30
-    env:
-      REPORT_ROOT: ${{ runner.temp }}\ragpincheng-production-cleanup
     steps:
       - name: Verify cleanup checkout
         shell: powershell
@@ -138,6 +110,8 @@ jobs:
 
       - name: Run nightly dry-run
         shell: powershell
+        env:
+          REPORT_ROOT: ${{ runner.temp }}\ragpincheng-production-cleanup
         run: |
           Set-StrictMode -Version Latest
           $ErrorActionPreference = 'Stop'
@@ -160,9 +134,9 @@ jobs:
   disk-pressure:
     if: github.event_name == 'schedule' && github.event.schedule == '*/30 * * * *'
     runs-on: [self-hosted, windows, production, gpu]
+    environment: production-asr
     timeout-minutes: 30
     env:
-      REPORT_ROOT: ${{ runner.temp }}\ragpincheng-production-cleanup
       AUTO_CLEANUP_ENABLED: ${{ vars.PRODUCTION_AUTO_CLEANUP_ENABLED }}
     steps:
       - name: Verify cleanup checkout
@@ -183,6 +157,7 @@ jobs:
         id: disk
         shell: powershell
         env:
+          REPORT_ROOT: ${{ runner.temp }}\ragpincheng-production-cleanup
           DISK_REPORT: ${{ runner.temp }}\ragpincheng-production-cleanup\disk.json
         run: |
           Set-StrictMode -Version Latest
@@ -196,6 +171,8 @@ jobs:
       - name: Run pressure dry-run
         if: steps.disk.outputs.run_dryrun == 'true'
         shell: powershell
+        env:
+          REPORT_ROOT: ${{ runner.temp }}\ragpincheng-production-cleanup
         run: |
           Set-StrictMode -Version Latest
           $ErrorActionPreference = 'Stop'
@@ -210,6 +187,8 @@ jobs:
       - name: Auto-clean old deployment backups
         if: steps.disk.outputs.tier == 'backup-apply' && env.AUTO_CLEANUP_ENABLED == 'true'
         shell: powershell
+        env:
+          REPORT_ROOT: ${{ runner.temp }}\ragpincheng-production-cleanup
         run: |
           Set-StrictMode -Version Latest
           $ErrorActionPreference = 'Stop'

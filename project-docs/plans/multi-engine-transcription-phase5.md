@@ -50,7 +50,7 @@ Phase 5 必须同时证明：
 主工作树当前位于 `codex/multi-engine-transcription-phase4@4eb2ee8`，并已有受保护的 `WORKLOG.md` 与用户端前端并行修改。本计划的代码事实来自干净 detached worktree：
 
 ```text
-${LOCAL_USER_HOME}\AppData\Local\Temp\RAGPinCheng-phase4b-main-4eb2ee8
+${LOCAL_USER_PATH}\AppData\Local\Temp\RAGPinCheng-phase4b-main-4eb2ee8
 HEAD = origin/master@b323023aaf47e628379163470eb30c39f6d3554e
 ```
 

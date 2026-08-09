@@ -26,7 +26,7 @@ from scripts.extract_faster_whisper_resolver_evidence import (
 
 SOURCE_RUN_ID = "30972780438"
 SOURCE_COMMIT_SHA = "9f0cb2b0ba9ae2f226a289f4a4db68333fcef50e"
-QUALIFICATION_ROOT = Path(r"${PRODUCTION_SERVICE_ROOT}\RAGPinCheng-ASR\qualification\qwen3-asr")
+QUALIFICATION_ROOT = Path(os.environ["PRODUCTION_QWEN3_ASR_QUALIFICATION_ROOT"])
 SOURCE_RUN_ROOT = QUALIFICATION_ROOT / "dependency-diagnostics" / SOURCE_RUN_ID
 MAX_FILE_BYTES = 4 * 1024 * 1024
 MAX_LINES = 10_000

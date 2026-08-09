@@ -1,0 +1,138 @@
+name: Cleanup Production Operations
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Cleanup target
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - asr
+          - runtime
+          - backups
+      apply:
+        description: Delete approved candidates instead of previewing
+        required: true
+        default: false
+        type: boolean
+      confirm_production_cleanup:
+        description: Confirm this cleanup run on the production Windows host
+        required: true
+        default: false
+        type: boolean
+      reason:
+        description: Trigger reason for the audit report
+        required: false
+        default: manual
+        type: string
+  schedule:
+    - cron: '30 19 * * *'
+    - cron: '*/30 * * * *'
+
+permissions:
+  contents: read
+
+env:
+  REPO_PATH: ${{ vars.PRODUCTION_REPO_PATH }}
+  ASR_ROOT: ${{ vars.PRODUCTION_ASR_ROOT }}
+  RUNTIME_ROOT: ${{ vars.PRODUCTION_RUNTIME_ROOT }}
+  BACKUP_DIRECTORY: ${{ vars.PRODUCTION_BACKUP_DIRECTORY }}
+
+jobs:
+  manual-cleanup:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.confirm_production_cleanup == true }}
+    uses: ./.github/workflows/cleanup-production.yml
+    with:
+      target: ${{ inputs.target }}
+      apply: ${{ inputs.apply }}
+      confirm_production_cleanup: ${{ inputs.confirm_production_cleanup }}
+      allow_unconfirmed_dry_run: false
+      reason: ${{ inputs.reason }}
+    secrets: inherit
+
+  nightly-dryrun:
+    if: ${{ github.event_name == 'schedule' && github.event.schedule == '30 19 * * *' }}
+    uses: ./.github/workflows/cleanup-production.yml
+    with:
+      target: all
+      apply: false
+      confirm_production_cleanup: false
+      allow_unconfirmed_dry_run: true
+      reason: nightly
+    secrets: inherit
+
+  disk-pressure:
+    if: ${{ github.event_name == 'schedule' && github.event.schedule == '*/30 * * * *' }}
+    runs-on: [self-hosted, windows, production, gpu]
+    environment: production-asr
+    timeout-minutes: 30
+    outputs:
+      run_dryrun: ${{ steps.disk.outputs.run_dryrun }}
+      tier: ${{ steps.disk.outputs.tier }}
+    env:
+      AUTO_CLEANUP_ENABLED: ${{ vars.PRODUCTION_AUTO_CLEANUP_ENABLED }}
+    steps:
+      - name: Verify disk checker
+        shell: powershell
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          $diskScript = Join-Path $env:REPO_PATH 'scripts\check-production-disk.ps1'
+          if (-not (Test-Path -LiteralPath $diskScript -PathType Leaf)) {
+            throw "Disk pressure script is missing: $diskScript"
+          }
+
+      - name: Inspect D drive pressure
+        id: disk
+        shell: powershell
+        env:
+          REPORT_ROOT: ${{ runner.temp }}\ragpincheng-production-cleanup
+          DISK_REPORT: ${{ runner.temp }}\ragpincheng-production-cleanup\disk.json
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Path $env:REPORT_ROOT -Force | Out-Null
+          & (Join-Path $env:REPO_PATH 'scripts\check-production-disk.ps1') `
+            -DriveLetter D `
+            -ReportPath $env:DISK_REPORT `
+            -OutputPath $env:GITHUB_OUTPUT
+
+      - name: Report critical disk pressure
+        if: steps.disk.outputs.tier == 'critical'
+        shell: powershell
+        run: Write-Warning 'D drive usage is at or above the critical threshold. Automatic ASR and Runtime deletion is disabled.'
+
+      - name: Upload pressure report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-cleanup-pressure-${{ github.run_id }}
+          path: ${{ runner.temp }}/ragpincheng-production-cleanup
+          if-no-files-found: warn
+
+  pressure-dryrun:
+    needs: [disk-pressure]
+    if: ${{ needs.disk-pressure.outputs.run_dryrun == 'true' }}
+    uses: ./.github/workflows/cleanup-production.yml
+    with:
+      target: all
+      apply: false
+      confirm_production_cleanup: false
+      allow_unconfirmed_dry_run: true
+      reason: disk-pressure-dryrun
+    secrets: inherit
+
+  auto-clean-backups:
+    needs: [disk-pressure]
+    if: ${{ needs.disk-pressure.outputs.tier == 'backup-apply' && vars.PRODUCTION_AUTO_CLEANUP_ENABLED == 'true' }}
+    uses: ./.github/workflows/cleanup-production.yml
+    with:
+      target: backups
+      apply: true
+      confirm_production_cleanup: true
+      allow_unconfirmed_dry_run: false
+      reason: disk-pressure-auto-cleanup
+    secrets: inherit

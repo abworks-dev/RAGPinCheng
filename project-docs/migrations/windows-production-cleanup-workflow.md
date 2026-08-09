@@ -2,8 +2,8 @@
 
 统一入口为 `scripts/cleanup-production.ps1`，底层继续调用三个独立清理器：
 
-- `${PRODUCTION_DATA_ROOT}`：ASR staging、qualification 和 wheel-cache；
-- `${PRODUCTION_REPO_PATH}\runtime`：GPU runtime release、qualification、resolver 和 pip-cache；
+- `${PRODUCTION_ASR_ROOT}`：ASR staging、qualification 和 wheel-cache；
+- `${PRODUCTION_RUNTIME_ROOT}`：GPU runtime release、qualification、resolver 和 pip-cache；
 - `${PRODUCTION_BACKUP_DIRECTORY}`：旧 `gpu-service-backup-*` 部署备份。
 
 统一入口只负责目标选择、DryRun/Apply 模式、失败即停和汇总报告，不复制各清理器的路径安全与保留逻辑。

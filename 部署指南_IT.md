@@ -1,8 +1,8 @@
 # 品成 BIM 知识库 — 内网部署指南（IT 人员）
 
 应用已迁移为双节点架构：
-- **Ubuntu 应用节点**（${PRIVATE_IPV4}）：运行 Web 服务 + Qdrant 向量数据库
-- **Windows GPU 节点**（${PRIVATE_IPV4}）：运行 GPU 推理服务
+- **Ubuntu 应用节点**（${APP_NODE_IP}）：运行 Web 服务 + Qdrant 向量数据库
+- **Windows GPU 节点**（${GPU_SERVICE_IP}）：运行 GPU 推理服务
 
 服务已由开发人员完成配置并启动。本文档说明基本验证和运维操作。
 
@@ -13,7 +13,7 @@
 ### Ubuntu 应用节点
 
 ```bash
-curl http://${PRIVATE_IPV4}/api/health
+curl http://${APP_NODE_IP}/api/health
 ```
 
 应返回：`{"status":"ok","children":38488,"parents":20024}`
@@ -21,7 +21,7 @@ curl http://${PRIVATE_IPV4}/api/health
 ### Windows GPU 节点
 
 ```bash
-curl http://${PRIVATE_IPV4}:8100/health
+curl http://${GPU_SERVICE_IP}:8100/health
 ```
 
 应返回：`{"status":"ok","model_loaded":true}`
@@ -30,7 +30,7 @@ curl http://${PRIVATE_IPV4}:8100/health
 
 ## 第二步：开放防火墙端口
 
-**Ubuntu 应用节点（${PRIVATE_IPV4}）：**
+**Ubuntu 应用节点（${APP_NODE_IP}）：**
 
 ```powershell
 netsh advfirewall firewall add rule name="品成知识库 Port 80" dir=in action=allow protocol=TCP localport=80
@@ -48,12 +48,12 @@ netsh advfirewall firewall add rule name="品成知识库 Port 80" dir=in action
 ipconfig
 ```
 
-找到 `以太网适配器` 下的 `IPv4 地址`，例如 `${PRIVATE_IPV4}`。
+找到 `以太网适配器` 下的 `IPv4 地址`，记为 `${APP_NODE_IP}`。
 
 通知员工在浏览器访问：
 
 ```
-http://${PRIVATE_IPV4}
+http://${APP_NODE_IP}
 ```
 
 首次访问可在 `/register` 页面自助注册账号，或由管理员在后台创建。
@@ -142,7 +142,7 @@ docker compose -f docker/docker-compose.yml exec backend python scripts/build_in
 在每台员工电脑上，用管理员权限编辑 `C:\Windows\System32\drivers\etc\hosts`，追加一行：
 
 ```
-${PRIVATE_IPV4}  bim-kb
+${APP_NODE_IP}  bim-kb
 ```
 
 之后员工访问 `http://bim-kb` 即可。
@@ -165,7 +165,7 @@ ${PRIVATE_IPV4}  bim-kb
 
 ```
 # 用 IP 访问（自签名证书，浏览器会有一次警告）
-https://${PRIVATE_IPV4} {
+https://${APP_NODE_IP} {
     tls internal
     reverse_proxy localhost:80
 }

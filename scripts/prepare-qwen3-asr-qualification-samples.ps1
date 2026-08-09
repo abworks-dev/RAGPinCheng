@@ -11,11 +11,11 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$ProgramRoot = "${PRODUCTION_SERVICE_ROOT}\RAGPinCheng-ASR\qualification\qwen3-asr"
+$ProgramRoot = $env:PRODUCTION_QWEN3_ASR_QUALIFICATION_ROOT
 $PreparationRoot = Join-Path $ProgramRoot "sample-preparation"
 $RunRoot = Join-Path $PreparationRoot $RunId
 $StagingRoot = Join-Path $RunRoot "staging"
-$InputParent = "${PRODUCTION_DATA_ROOT}\RAGPinCheng-ASR\qualification\qwen3-asr"
+$InputParent = $env:PRODUCTION_QWEN3_ASR_INPUT_ROOT
 $InputRoot = Join-Path $InputParent "inputs"
 $ManifestPath = Join-Path $InputRoot "manifest.json"
 $ValidatorRelativePath = "scripts\run_qwen3_asr_qualification.py"
@@ -23,7 +23,7 @@ $TemplateRelativePath = "asr_service\qwen3-asr-qualification-manifest.example.js
 
 function Get-MachinePython311 {
     $candidates = @(
-        "${PRODUCTION_PYTHON311_PATH}",
+        $env:PRODUCTION_PYTHON311_PATH,
         (Join-Path $env:ProgramW6432 "Python311\python.exe")
     )
     foreach ($registryPath in @(

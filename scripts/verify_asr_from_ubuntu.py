@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import Any, Callable
 
 ASR_API_VERSION = "asr-service/1"
-EXPECTED_ASR_URL = "http://${PRIVATE_IPV4}:8200"
 EXPECTED_PROFILE = "funasr-sensevoice-small-v1"
 _ENV_LINE = re.compile(r"^([A-Z][A-Z0-9_]*)=(.*)$")
 _REQUIRED_ENV_KEYS = {"ASR_ENABLED", "ASR_SERVICE_URL", "ASR_SERVICE_TOKEN"}
@@ -40,11 +39,13 @@ def parse_required_env(text: str) -> dict[str, str]:
     return values
 
 
-def validate_backend_boundary(values: dict[str, str], expected_token: str) -> None:
+def validate_backend_boundary(
+    values: dict[str, str], expected_token: str, expected_url: str
+) -> None:
     if values["ASR_ENABLED"] != "false":
         raise RuntimeError("Ubuntu ASR_ENABLED must remain false")
-    if values["ASR_SERVICE_URL"] != EXPECTED_ASR_URL:
-        raise RuntimeError("Ubuntu ASR_SERVICE_URL does not match the fixed Windows endpoint")
+    if values["ASR_SERVICE_URL"] != expected_url:
+        raise RuntimeError("Ubuntu ASR_SERVICE_URL does not match the configured endpoint")
     configured_token = values["ASR_SERVICE_TOKEN"]
     if not configured_token or not expected_token:
         raise RuntimeError("ASR service token must be configured on both sides")
@@ -107,10 +108,10 @@ def verify(
     *,
     opener: Callable[..., Any] = urllib.request.urlopen,
 ) -> dict[str, object]:
-    if asr_url != EXPECTED_ASR_URL:
-        raise RuntimeError("ASR verification URL must be the fixed Windows endpoint")
+    if not asr_url.startswith(("http://", "https://")) or "://" not in asr_url:
+        raise RuntimeError("ASR verification URL must be an HTTP endpoint")
     values = parse_required_env(env_file.read_text(encoding="utf-8"))
-    validate_backend_boundary(values, expected_token)
+    validate_backend_boundary(values, expected_token, asr_url)
     health = fetch_json(f"{asr_url}/health", opener=opener)
     validate_health(health)
     capabilities = fetch_json(

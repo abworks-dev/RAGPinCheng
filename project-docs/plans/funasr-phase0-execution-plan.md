@@ -45,7 +45,7 @@
 |---|---|---|---|
 | Python 解释器 | `${PRODUCTION_PYTHON_PATH}`（见 `scripts/deploy-gpu.ps1` §5） | 新建 `C:\FunASR-Phase0\venv\python.exe`（基于 `C:\Python311\python.exe -m venv`） | **不同解释器路径**，互不污染 |
 | 进程 | `python -m gpu_service.app` 后台进程 | `python -m funasr_phase0.runner ...` 前台/可终止 | **独立进程**，不 `import gpu_service` |
-| 工作目录 | `E:\Repository\Github\RAGPinCheng\gpu_service` | `${QUALIFICATION_SANDBOX_ROOT}\runner` | 物理目录分离 |
+| 工作目录 | `${REPOSITORY_CHECKOUT_PATH}\gpu_service` | `${QUALIFICATION_SANDBOX_ROOT}\runner` | 物理目录分离 |
 | 依赖 | `gpu_service/requirements.txt`（FlagEmbedding + transformers） | ASR 独立 venv 安装 `funasr / modelscope / torch-cu128 / torchaudio / soundfile / PyAV / numpy` | **venv 隔离**，`pip install` 不会动 gpu_service venv |
 | 模型缓存 | `gpu_service/.cache/huggingface`（生产） | `${QUALIFICATION_SANDBOX_ROOT}\models`（`HF_HOME` / `MODELSCOPE_CACHE` 指向） | 不读生产缓存；不复用生产权重 |
 | BGE 权重 | 现有 BGE 服务已经加载 `BAAI/bge-m3` | ASR 沙箱不读取、不复制、不下载 BGE 权重 | 权重与进程边界隔离 |
@@ -95,9 +95,9 @@ nvidia-smi dmon -s pucm -c 60 -d 1 | Tee-Object ${QUALIFICATION_SANDBOX_ROOT}\lo
 
 ```powershell
 # 1) /health
-curl -s -H "Authorization: Bearer $env:GPU_SERVICE_TOKEN" http://${PRIVATE_IPV4}:8100/health
+curl -s -H "Authorization: Bearer $env:GPU_SERVICE_TOKEN" http://${GPU_SERVICE_IP}:8100/health
 # 2) /model-info
-curl -s -H "Authorization: Bearer $env:GPU_SERVICE_TOKEN" http://${PRIVATE_IPV4}:8100/model-info
+curl -s -H "Authorization: Bearer $env:GPU_SERVICE_TOKEN" http://${GPU_SERVICE_IP}:8100/model-info
 ```
 
 期望记录：`status=ok` / `model_loaded=true` / `embedding_model=BAAI/bge-m3` / `reranker_model=BAAI/bge-reranker-v2-m3` / `torch_version=2.7.0+cu128` / `device=cuda`。
@@ -192,7 +192,7 @@ Codex 当前会话没有已确认的生产主机远程命令通道。代码经 G
 
 - **通道 A**：Windows OpenSSH（已开 `PasswordAuthentication no`，默认走密钥）。请告知：
   - 我能否以当前 Windows 用户 `${LOCAL_HOSTNAME}` 凭私钥登录？
-  - 若需在 `${PRIVATE_IPV4}` 放置公钥，请把授权公钥路径告知。
+  - 若需在 `${GPU_SERVICE_IP}` 放置公钥，请把授权公钥路径告知。
 - **通道 B**：PowerShell Remoting（WinRM）。请告知是否启用以及授权账号。
 - **已选通道 C**：你在生产主机上手动执行仓库中的 `scripts\funasr_phase0\*.ps1` / `*.py`，把 stdout / stderr / 产物回贴给我；报告、Token、样本和模型不得提交回 Git。
 - **通道 D**：你直接把生产主机的 PowerShell / Bash 终端贴给我（每个命令逐条执行），结果实时回传。

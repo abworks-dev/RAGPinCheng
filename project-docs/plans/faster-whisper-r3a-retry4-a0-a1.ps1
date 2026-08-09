@@ -1,4 +1,4 @@
-﻿[CmdletBinding()]
+[CmdletBinding()]
 param(
   [switch]$SelfTest,
   [string]$RunRoot,
@@ -12,7 +12,7 @@ param(
   [string]$ExpectedHelperSha256,
   [string]$WindowStart,
   [string]$WindowEnd,
-  [string]$ProxyUri = 'http://${PRIVATE_ZEROTIER_IPV4}:7897'
+  [string]$ProxyUri = '${PROXY_URI}'
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -32,7 +32,7 @@ $AllowedRunParent = '${QUALIFICATION_SANDBOX_ROOT}\faster-whisper-runs'
 $ProductionRepo = '${PRODUCTION_REPO_PATH}'
 $PhaseRoot = '${QUALIFICATION_SANDBOX_ROOT}'
 $AllowedDownloadHosts = @('pypi.org','files.pythonhosted.org','huggingface.co','us.aws.cdn.hf.co')
-$BgeCandidates = @('http://127.0.0.1:8100','http://${PRIVATE_IPV4}:8100')
+$BgeCandidates = @('http://127.0.0.1:8100','http://${GPU_SERVICE_IP}:8100')
 
 function Get-Sha256([string]$Path) {
   (Get-FileHash -Algorithm SHA256 -LiteralPath $Path).Hash.ToLowerInvariant()
@@ -313,7 +313,7 @@ try {
   if($start.Offset.TotalHours-ne 8-or $end.Offset.TotalHours-ne 8){throw 'maintenance window must use +08:00'}
   if($end-le $start){throw 'maintenance window end must be after start'}
   if($now-lt $start-or $now-ge $end){throw "outside maintenance window: $($now.ToString('o'))"}
-  if($ProxyUri-ne 'http://${PRIVATE_ZEROTIER_IPV4}:7897'){throw "unapproved proxy URI: $ProxyUri"}
+  if($ProxyUri-ne '${PROXY_URI}'){throw "unapproved proxy URI: $ProxyUri"}
   $runFull=[IO.Path]::GetFullPath($RunRoot).TrimEnd('\');$parent=[IO.Path]::GetFullPath($AllowedRunParent).TrimEnd('\')
   if([IO.Path]::GetDirectoryName($runFull)-ne $parent){throw "RunRoot must be a direct child of $parent"}
   $runId=Split-Path -Leaf $runFull
@@ -413,7 +413,7 @@ try {
     schema_version='faster-whisper-r3a-retry4-preflight/1';run_id=$runId;run_root=$runFull;collected_at=($now.ToString('o'));hostname=$env:COMPUTERNAME
     os=$os
     timezone=[ordered]@{id=(Get-TimeZone).Id;display=(Get-TimeZone).DisplayName;reporting='Asia/Shanghai +08:00'}
-    ssh=[ordered]@{target='Administrator@${PRIVATE_ZEROTIER_IPV4}';expected_ed25519_fingerprint=$ExpectedFingerprint;strict_host_key_checking=$true;kex='curve25519-sha256';verified_by_caller=$true}
+    ssh=[ordered]@{target='Administrator@${GPU_NODE_ZEROTIER_IP}';expected_ed25519_fingerprint=$ExpectedFingerprint;strict_host_key_checking=$true;kex='curve25519-sha256';verified_by_caller=$true}
     repo=[ordered]@{path=$ProductionRepo;head=$head;branch=$branch;worktree_entries=$worktree}
     python=[ordered]@{executable=$py.executable;version=$py.version;bits=$py.bits;platform=$py.platform;sha256=$pyHash}
     gpu=[ordered]@{summary=$gpuSummary;summary_watchdog=$gpuQuery.watchdog;compute_apps_evidence_only=$gpuAppsEvidence;compute_apps_query=[ordered]@{success=$gpuAppsQuery.success;exit_code=$gpuAppsQuery.exit_code;stderr=$gpuAppsQuery.stderr;watchdog=$gpuAppsQuery.watchdog};bge_pid=$bgePid;wddm_compute_apps_are_not_a_hard_gate=$true}
