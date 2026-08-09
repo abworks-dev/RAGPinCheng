@@ -1068,6 +1068,8 @@ def test_qwen3_asr_qualification_is_manual_sha_bound_and_isolated():
     assert "production-asr-qwen3-asr-qualification" in workflow
     assert "D:\\Services\\RAGPinCheng-ASR\\qualification\\qwen3-asr" in script
     assert "D:\\ServiceData\\RAGPinCheng-ASR\\qualification\\qwen3-asr\\inputs" in script
+    assert 'Join-Path $DataRoot "qualification\\qwen3-asr\\models"' in script
+    assert 'Join-Path $DataRoot "models"' not in script
     assert "$TempPort = 18300" in script
     assert "New-NetFirewallRule" not in script
     assert "Set-NetFirewallRule" not in script
