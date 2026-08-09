@@ -2834,3 +2834,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 完成：将 cleanup workflow 的顶层 `on` 改为标准未加引号键，并移除错误的空 `push` 触发配置；保留 reusable、手动和定时触发，以及所有清理门禁。
 - 文件：`.github/workflows/production-cleanup.yml`、`tests/test_production_cleanup_triggers_static.py`、`WORKLOG.md`
 - 验证：Python YAML 解析、触发文本断言、测试文件 `py_compile` 和 `git diff --check` 通过；当前环境未安装 pytest，相关静态测试待 PR CI 验证；未触发清理、部署或生产服务操作。
+
+### 11:17 — 切换 CI 到自托管 Ubuntu runner
+
+- 完成：将 7 个常规 CI job 和 Qwen qualification 的受控 wheel 构建 job 从 GitHub 托管 `ubuntu-latest` 路由到标签为 `[self-hosted, Linux, X64, ubuntu, ci]` 的 `${PRIVATE_CI_RUNNER_NAME}`；常规 CI 增加同仓库 PR 门禁，避免允许 fork 的私有仓库在自托管 runner 上执行 fork PR 代码。Windows R3 qualification job 及生产边界保持不变。
+- 文件：`.github/workflows/ci.yml`、`.github/workflows/qualify-qwen3-asr-production.yml`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`
+- 验证：`${PRIVATE_CI_RUNNER_NAME}` 在线且标签匹配；workflow YAML 解析、测试文件 `py_compile`、`git diff --check` 通过；针对性静态测试 `39 passed`，完整 ASR contract 集合 `384 passed, 2 subtests passed`。本机未安装 `actionlint`，未额外安装依赖，真实 runner 调度待 PR CI 验证。
+- 待办/风险：单台自托管 runner 将串行处理并发 jobs；PR CI 通过后才能合并并刷新 PR #142，Profile admission 仍保持 disabled。

@@ -178,6 +178,19 @@ def test_gpu_activity_contract_and_ci_are_real_but_dependency_light():
     assert "|| true" not in gpu_section
 
 
+def test_ci_uses_trusted_self_hosted_ubuntu_runner_only():
+    ci = read(".github/workflows/ci.yml")
+    trusted_runner = "runs-on: [self-hosted, Linux, X64, ubuntu, ci]"
+    same_repository_gate = (
+        "if: ${{ github.event_name != 'pull_request' || "
+        "github.event.pull_request.head.repo.full_name == github.repository }}"
+    )
+
+    assert ci.count(trusted_runner) == 7
+    assert ci.count(same_repository_gate) == 7
+    assert "runs-on: ubuntu-latest" not in ci
+
+
 def test_root_and_windows_env_templates_are_not_merged():
     backend = read(".env.example")
     windows = read("asr_service/.env.example")
@@ -1064,6 +1077,11 @@ def test_qwen3_asr_qualification_is_manual_sha_bound_and_isolated():
     assert "commit_sha must equal the workflow dispatch revision" in workflow
     assert "refs/heads/master" in workflow
     assert "environment: production-asr" in workflow
+    build_job = workflow.split("  build-internal-wheel:", 1)[1].split(
+        "  qualify:", 1
+    )[0]
+    assert "runs-on: [self-hosted, Linux, X64, ubuntu, ci]" in build_job
+    assert "ubuntu-latest" not in build_job
     assert "runs-on: [self-hosted, Windows, X64, asr-production]" in workflow
     assert "production-asr-qwen3-asr-qualification" in workflow
     assert "D:\\Services\\RAGPinCheng-ASR\\qualification\\qwen3-asr" in script
