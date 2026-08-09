@@ -1,6 +1,28 @@
 name: Production cleanup
 
-on:
+"on":
+  workflow_call:
+    inputs:
+      target:
+        description: Cleanup target
+        required: false
+        default: backups
+        type: string
+      apply:
+        description: Delete approved candidates instead of previewing
+        required: false
+        default: false
+        type: boolean
+      confirm_production_cleanup:
+        description: Confirm this cleanup run on the production Windows host
+        required: false
+        default: false
+        type: boolean
+      reason:
+        description: Trigger reason for the audit report
+        required: false
+        default: reusable-call
+        type: string
   workflow_dispatch:
     inputs:
       target:
@@ -23,35 +45,45 @@ on:
         required: true
         default: false
         type: boolean
+      reason:
+        description: Trigger reason for the audit report
+        required: false
+        default: manual
+        type: string
   schedule:
     - cron: '30 19 * * *'
+    - cron: '*/30 * * * *'
+  push:
+    branches: []
 
 permissions:
   contents: read
 
 concurrency:
-  group: production-cleanup
+  group: production-gpu-exclusive
   cancel-in-progress: false
 
+env:
+  REPO_PATH: D:\RAGPinCheng
+  ASR_ROOT: D:\ServiceData
+  RUNTIME_ROOT: D:\RAGPinCheng\runtime
+  BACKUP_DIRECTORY: D:\RAGBackups
+
 jobs:
-  cleanup:
+  manual-or-called:
     if: >-
-      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_call' ||
       (github.event_name == 'workflow_dispatch' &&
       inputs.confirm_production_cleanup == true)
-    runs-on:
-      - self-hosted
-      - windows
-      - production
-      - gpu
+    runs-on: [self-hosted, windows, production, gpu]
     timeout-minutes: 30
     env:
-      REPO_PATH: D:\RAGPinCheng
-      ASR_ROOT: D:\ServiceData
-      RUNTIME_ROOT: D:\RAGPinCheng\runtime
-      BACKUP_DIRECTORY: D:\RAGBackups
+      EVENT_NAME: ${{ github.event_name }}
+      INPUT_TARGET: ${{ inputs.target }}
+      INPUT_APPLY: ${{ inputs.apply }}
+      INPUT_CONFIRM: ${{ inputs.confirm_production_cleanup }}
+      INPUT_REASON: ${{ inputs.reason }}
       REPORT_ROOT: ${{ runner.temp }}\ragpincheng-production-cleanup
-
     steps:
       - name: Verify cleanup checkout
         shell: powershell
@@ -66,26 +98,11 @@ jobs:
 
       - name: Run production cleanup
         shell: powershell
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          INPUT_TARGET: ${{ inputs.target }}
-          INPUT_APPLY: ${{ inputs.apply }}
-          INPUT_CONFIRM: ${{ inputs.confirm_production_cleanup }}
         run: |
           Set-StrictMode -Version Latest
           $ErrorActionPreference = 'Stop'
-
-          $target = if ($env:EVENT_NAME -eq 'workflow_dispatch' -and $env:INPUT_TARGET) {
-            $env:INPUT_TARGET
-          }
-          else {
-            'all'
-          }
-
-          $apply = $env:EVENT_NAME -eq 'workflow_dispatch' `
-            -and $env:INPUT_APPLY -eq 'true' `
-            -and $env:INPUT_CONFIRM -eq 'true'
-
+          $target = if ($env:INPUT_TARGET) { $env:INPUT_TARGET } else { 'all' }
+          $apply = $env:INPUT_APPLY -eq 'true' -and $env:INPUT_CONFIRM -eq 'true'
           $arguments = @(
             '-Target', $target,
             '-AsrRoot', $env:ASR_ROOT,
@@ -94,10 +111,7 @@ jobs:
             '-ReportRoot', $env:REPORT_ROOT,
             '-Confirm:$false'
           )
-          if ($apply) {
-            $arguments += '-Apply'
-          }
-
+          if ($apply) { $arguments += '-Apply' }
           & (Join-Path $env:REPO_PATH 'scripts\cleanup-production.ps1') @arguments
 
       - name: Upload cleanup report
@@ -105,5 +119,120 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: production-cleanup-${{ github.run_id }}
+          path: ${{ runner.temp }}/ragpincheng-production-cleanup
+          if-no-files-found: warn
+
+  nightly-dryrun:
+    if: github.event_name == 'schedule' && github.event.schedule == '30 19 * * *'
+    runs-on: [self-hosted, windows, production, gpu]
+    timeout-minutes: 30
+    env:
+      REPORT_ROOT: ${{ runner.temp }}\ragpincheng-production-cleanup
+    steps:
+      - name: Verify cleanup checkout
+        shell: powershell
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          $scriptPath = Join-Path $env:REPO_PATH 'scripts\cleanup-production.ps1'
+          if (-not (Test-Path -LiteralPath $scriptPath -PathType Leaf)) {
+            throw "Unified cleanup script is missing: $scriptPath"
+          }
+
+      - name: Run nightly dry-run
+        shell: powershell
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          & (Join-Path $env:REPO_PATH 'scripts\cleanup-production.ps1') `
+            -Target all `
+            -AsrRoot $env:ASR_ROOT `
+            -RuntimeRoot $env:RUNTIME_ROOT `
+            -BackupDirectory $env:BACKUP_DIRECTORY `
+            -ReportRoot $env:REPORT_ROOT `
+            -Confirm:$false
+
+      - name: Upload nightly report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-cleanup-nightly-${{ github.run_id }}
+          path: ${{ runner.temp }}/ragpincheng-production-cleanup
+          if-no-files-found: warn
+
+  disk-pressure:
+    if: github.event_name == 'schedule' && github.event.schedule == '*/30 * * * *'
+    runs-on: [self-hosted, windows, production, gpu]
+    timeout-minutes: 30
+    env:
+      REPORT_ROOT: ${{ runner.temp }}\ragpincheng-production-cleanup
+      AUTO_CLEANUP_ENABLED: ${{ vars.PRODUCTION_AUTO_CLEANUP_ENABLED }}
+    steps:
+      - name: Verify cleanup checkout
+        shell: powershell
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          $scriptPath = Join-Path $env:REPO_PATH 'scripts\cleanup-production.ps1'
+          $diskScript = Join-Path $env:REPO_PATH 'scripts\check-production-disk.ps1'
+          if (-not (Test-Path -LiteralPath $scriptPath -PathType Leaf)) {
+            throw "Unified cleanup script is missing: $scriptPath"
+          }
+          if (-not (Test-Path -LiteralPath $diskScript -PathType Leaf)) {
+            throw "Disk pressure script is missing: $diskScript"
+          }
+
+      - name: Inspect D drive pressure
+        id: disk
+        shell: powershell
+        env:
+          DISK_REPORT: ${{ runner.temp }}\ragpincheng-production-cleanup\disk.json
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Path $env:REPORT_ROOT -Force | Out-Null
+          & (Join-Path $env:REPO_PATH 'scripts\check-production-disk.ps1') `
+            -DriveLetter D `
+            -ReportPath $env:DISK_REPORT `
+            -OutputPath $env:GITHUB_OUTPUT
+
+      - name: Run pressure dry-run
+        if: steps.disk.outputs.run_dryrun == 'true'
+        shell: powershell
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          & (Join-Path $env:REPO_PATH 'scripts\cleanup-production.ps1') `
+            -Target all `
+            -AsrRoot $env:ASR_ROOT `
+            -RuntimeRoot $env:RUNTIME_ROOT `
+            -BackupDirectory $env:BACKUP_DIRECTORY `
+            -ReportRoot $env:REPORT_ROOT `
+            -Confirm:$false
+
+      - name: Auto-clean old deployment backups
+        if: steps.disk.outputs.tier == 'backup-apply' && env.AUTO_CLEANUP_ENABLED == 'true'
+        shell: powershell
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          & (Join-Path $env:REPO_PATH 'scripts\cleanup-production.ps1') `
+            -Target backups `
+            -BackupDirectory $env:BACKUP_DIRECTORY `
+            -ReportRoot $env:REPORT_ROOT `
+            -Apply `
+            -Confirm:$false
+
+      - name: Report critical disk pressure
+        if: steps.disk.outputs.tier == 'critical'
+        shell: powershell
+        run: |
+          Write-Warning 'D drive usage is at or above the critical threshold. Automatic ASR and Runtime deletion is disabled.'
+
+      - name: Upload pressure report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-cleanup-pressure-${{ github.run_id }}
           path: ${{ runner.temp }}/ragpincheng-production-cleanup
           if-no-files-found: warn
