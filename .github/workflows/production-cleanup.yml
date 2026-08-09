@@ -1,4 +1,4 @@
-name: Production cleanup
+name: Production Cleanup
 
 "on":
   workflow_call:

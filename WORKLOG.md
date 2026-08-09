@@ -2809,3 +2809,9 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 完成：针对 faster-whisper R3 Run `31287507974` 的固定 sdist 代理截断，改为从 Windows runner 固定 staging 路径读取 `jieba-0.42.1.tar.gz`；workflow 与 builder 分别执行普通文件、大小、SHA-256 和 archive 校验，builder 复制到 run-local 临时目录后继续原有双重可复现 wheel 构建；缺失或身份不符直接失败，不回退在线下载。
 - 文件：`.github/workflows/qualify-faster-whisper-production.yml`、`scripts/build_internal_jieba_wheel.py`、`tests/test_asr_internal_wheel.py`、`tests/test_asr_deployment_static.py`、`project-docs/plans/faster-whisper-r3-unified-qualification.md`、`WORKLOG.md`。
 - 验证：本地真实 sdist 大小 `19214172`、SHA-256 匹配；针对性 pytest `54 passed`；Python 编译、workflow YAML 解析和 `git diff --check` 通过。用户已报告上传到固定 runner 路径，尚未由 workflow 独立核验；未触发新的 R3，未修改生产服务、venv、模型或 Profile。
+
+### 09:45 — 重建生产 workflow 注册名称
+
+- 完成：将 production cleanup 与 deploy workflow 重命名为新的文件路径，并同步 deployment 内 reusable workflow 引用、现行静态测试和当前 GPU deployment 功能地图，以触发 GitHub Actions 新建 workflow 注册记录。
+- 文件：`.github/workflows/production-cleanup.yml`、`.github/workflows/production-deploy.yml`、相关静态测试、`project-docs/features/gpu-runtime-deployment.md`、`WORKLOG.md`
+- 验证：Python YAML 解析、测试文件 `py_compile`、当前目录旧路径检查和 `git diff --check` 通过；当前环境未安装 pytest，相关静态测试待 PR CI 验证；未触发部署、清理或生产服务操作。

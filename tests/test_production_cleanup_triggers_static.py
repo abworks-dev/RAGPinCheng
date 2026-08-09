@@ -18,7 +18,7 @@ def test_disk_pressure_checker_is_read_only():
 
 
 def test_cleanup_workflow_has_safe_trigger_gates():
-    workflow = read_text(".github/workflows/cleanup-production.yml")
+    workflow = read_text(".github/workflows/production-cleanup.yml")
 
     assert "workflow_call:" in workflow
     assert "30 19 * * *" in workflow
@@ -30,7 +30,7 @@ def test_cleanup_workflow_has_safe_trigger_gates():
 
 
 def test_deployment_cleanup_waits_for_both_deployment_jobs():
-    workflow = read_text(".github/workflows/deploy-production.yml")
+    workflow = read_text(".github/workflows/production-deploy.yml")
 
     assert "cleanup-after-deploy:" in workflow
     assert "needs: [deploy-gpu, deploy-app]" in workflow

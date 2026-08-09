@@ -24,7 +24,7 @@
 → 将run ID、候选commit、源码指纹和锁哈希回填为validated元数据
 
 CI成功
-→ deploy-production.yml（仓库变量门禁）
+→ production-deploy.yml（仓库变量门禁）
 → deploy-gpu.ps1
 → 只复用已验证的候选release
 → promote-gpu-runtime.ps1
