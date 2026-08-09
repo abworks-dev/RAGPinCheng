@@ -21,9 +21,10 @@ def timestamp(start=0.0, end=1.0, text=" 测试文本 "):
 
 
 class Model:
-    def __init__(self, timestamps=(), error=None):
+    def __init__(self, timestamps=(), error=None, language="Chinese"):
         self.timestamps = timestamps
         self.error = error
+        self.language = language
         self.calls = []
 
     def transcribe(self, **kwargs):
@@ -32,7 +33,7 @@ class Model:
             raise self.error
         return [
             SimpleNamespace(
-                language="Chinese",
+                language=self.language,
                 time_stamps=SimpleNamespace(items=self.timestamps),
             )
         ]
@@ -198,6 +199,14 @@ def test_oom_is_transient_and_private_text_is_not_exposed():
 )
 def test_invalid_timestamp_output_fails_closed(bad_timestamps):
     result = transcribe(Qwen3AsrEngine(_model=Model(bad_timestamps)))
+    assert type(result) is ProviderFailure
+    assert result.error_code is ProviderErrorCode.invalid_provider_output
+
+
+def test_non_chinese_result_is_rejected():
+    result = transcribe(
+        Qwen3AsrEngine(_model=Model((timestamp(),), language="Korean"))
+    )
     assert type(result) is ProviderFailure
     assert result.error_code is ProviderErrorCode.invalid_provider_output
 
