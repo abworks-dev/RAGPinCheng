@@ -7,15 +7,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$RunId,
     [Parameter(Mandatory = $true)]
-    [string]$InternalWheelBundlePath,
-    [Parameter(Mandatory = $true)]
-    [string]$Oss2WheelBundlePath,
-    [Parameter(Mandatory = $true)]
-    [string]$Antlr4WheelBundlePath,
-    [Parameter(Mandatory = $true)]
-    [string]$CrcmodWheelBundlePath,
-    [Parameter(Mandatory = $true)]
-    [string]$AliyunCoreWheelBundlePath,
+    [string]$QwenWheelBundlePath,
     [bool]$ExecuteQualification = $false,
     [string]$SummaryPath = "",
     [string]$DependencyDiagnosticPath = "",
@@ -55,7 +47,6 @@ $ProductionAsrPort = 8200
 $GpuUrl = "http://${PRIVATE_IPV4}:8100"
 $ProductionAsrUrl = "http://127.0.0.1:8200"
 $TempAsrUrl = "http://127.0.0.1:$TempPort"
-$SenseVoiceManifest = Join-Path $ModelCacheRoot "SenseVoiceSmall\7bf452403abd7353a300cd760f7adae7701c92c1\model-manifest.json"
 $QualificationProcess = $null
 $ServiceProcess = $null
 $SavedEnvironment = @{}
@@ -663,11 +654,7 @@ function New-WheelManifest {
             "https://download.pytorch.org/whl/cu128"
         )
         internal_wheel_manifest_sha256 = @(
-            Get-Sha256 -Path (Join-Path $ResolvedInternalWheelBundle "internal-wheel-manifest.json")
-            Get-Sha256 -Path (Join-Path $ResolvedOss2WheelBundle "internal-wheel-manifest.json")
-            Get-Sha256 -Path (Join-Path $ResolvedAntlr4WheelBundle "internal-wheel-manifest.json")
-            Get-Sha256 -Path (Join-Path $ResolvedCrcmodWheelBundle "internal-wheel-manifest.json")
-            Get-Sha256 -Path (Join-Path $ResolvedAliyunCoreWheelBundle "internal-wheel-manifest.json")
+            Get-Sha256 -Path (Join-Path $ResolvedQwenWheelBundle "internal-wheel-manifest.json")
         )
         files = $files
     }
@@ -1039,11 +1026,7 @@ function Invoke-SanitizedResolverFallback {
         -not (Test-Path -LiteralPath $VenvPython -PathType Leaf) -or
         -not (Test-Path -LiteralPath $CombinedRequirements -PathType Leaf) -or
         -not (Test-Path -LiteralPath (Join-Path $EvidenceRoot "production-freeze.txt") -PathType Leaf) -or
-        -not (Test-Path -LiteralPath $ResolvedInternalWheelBundle -PathType Container) -or
-        -not (Test-Path -LiteralPath $ResolvedOss2WheelBundle -PathType Container) -or
-        -not (Test-Path -LiteralPath $ResolvedAntlr4WheelBundle -PathType Container) -or
-        -not (Test-Path -LiteralPath $ResolvedCrcmodWheelBundle -PathType Container) -or
-        -not (Test-Path -LiteralPath $ResolvedAliyunCoreWheelBundle -PathType Container) -or
+        -not (Test-Path -LiteralPath $ResolvedQwenWheelBundle -PathType Container) -or
         -not (Test-Path -LiteralPath $SharedWheelSeed -PathType Container)
     ) {
         return $result
@@ -1072,11 +1055,7 @@ function Invoke-SanitizedResolverFallback {
                     "--no-cache-dir",
                     "--index-url", "https://pypi.org/simple",
                     "--extra-index-url", "https://download.pytorch.org/whl/cu128",
-                    "--find-links", $ResolvedInternalWheelBundle,
-                    "--find-links", $ResolvedOss2WheelBundle,
-                    "--find-links", $ResolvedAntlr4WheelBundle,
-                    "--find-links", $ResolvedCrcmodWheelBundle,
-                    "--find-links", $ResolvedAliyunCoreWheelBundle,
+                    "--find-links", $ResolvedQwenWheelBundle,
                     "--find-links", $SharedWheelSeed,
                     "--constraint", (Join-Path $EvidenceRoot "production-freeze.txt"),
                     "--requirement", $CombinedRequirements
@@ -1292,61 +1271,25 @@ if ($env:GPU_SERVICE_TOKEN.Contains("`r") -or $env:GPU_SERVICE_TOKEN.Contains("`
 }
 
 $ResolvedSource = (Resolve-Path -LiteralPath $SourceRoot).Path
-$ResolvedInternalWheelBundle = (
-    Resolve-Path -LiteralPath $InternalWheelBundlePath -ErrorAction Stop
-).Path
-$ResolvedOss2WheelBundle = (
-    Resolve-Path -LiteralPath $Oss2WheelBundlePath -ErrorAction Stop
-).Path
-$ResolvedAntlr4WheelBundle = (
-    Resolve-Path -LiteralPath $Antlr4WheelBundlePath -ErrorAction Stop
-).Path
-$ResolvedCrcmodWheelBundle = (
-    Resolve-Path -LiteralPath $CrcmodWheelBundlePath -ErrorAction Stop
-).Path
-$ResolvedAliyunCoreWheelBundle = (
-    Resolve-Path -LiteralPath $AliyunCoreWheelBundlePath -ErrorAction Stop
+$ResolvedQwenWheelBundle = (
+    Resolve-Path -LiteralPath $QwenWheelBundlePath -ErrorAction Stop
 ).Path
 if (
-    -not (Test-Path -LiteralPath $ResolvedInternalWheelBundle -PathType Container) -or
-    -not (Test-Path -LiteralPath $ResolvedOss2WheelBundle -PathType Container) -or
-    -not (Test-Path -LiteralPath $ResolvedAntlr4WheelBundle -PathType Container) -or
-    -not (Test-Path -LiteralPath $ResolvedCrcmodWheelBundle -PathType Container) -or
-    -not (Test-Path -LiteralPath $ResolvedAliyunCoreWheelBundle -PathType Container) -or
-    ((Get-Item -LiteralPath $ResolvedInternalWheelBundle).Attributes -band
-        [System.IO.FileAttributes]::ReparsePoint) -or
-    ((Get-Item -LiteralPath $ResolvedOss2WheelBundle).Attributes -band
-        [System.IO.FileAttributes]::ReparsePoint) -or
-    ((Get-Item -LiteralPath $ResolvedAntlr4WheelBundle).Attributes -band
-        [System.IO.FileAttributes]::ReparsePoint) -or
-    ((Get-Item -LiteralPath $ResolvedCrcmodWheelBundle).Attributes -band
-        [System.IO.FileAttributes]::ReparsePoint) -or
-    ((Get-Item -LiteralPath $ResolvedAliyunCoreWheelBundle).Attributes -band
+    -not (Test-Path -LiteralPath $ResolvedQwenWheelBundle -PathType Container) -or
+    ((Get-Item -LiteralPath $ResolvedQwenWheelBundle).Attributes -band
         [System.IO.FileAttributes]::ReparsePoint)
 ) {
     throw "Controlled internal wheel bundle must be a real directory"
 }
 if (
-    $ResolvedInternalWheelBundle.Equals(
+    $ResolvedQwenWheelBundle.Equals(
         $ResolvedSource,
         [System.StringComparison]::OrdinalIgnoreCase
     ) -or
-    $ResolvedInternalWheelBundle.StartsWith(
+    $ResolvedQwenWheelBundle.StartsWith(
         $ResolvedSource.TrimEnd("\") + "\",
         [System.StringComparison]::OrdinalIgnoreCase
     )
-) {
-    throw "Controlled internal wheel bundle must be outside the checkout"
-}
-if (
-    $ResolvedOss2WheelBundle.Equals($ResolvedSource, [System.StringComparison]::OrdinalIgnoreCase) -or
-    $ResolvedOss2WheelBundle.StartsWith($ResolvedSource.TrimEnd("\") + "\", [System.StringComparison]::OrdinalIgnoreCase) -or
-    $ResolvedAntlr4WheelBundle.Equals($ResolvedSource, [System.StringComparison]::OrdinalIgnoreCase) -or
-    $ResolvedAntlr4WheelBundle.StartsWith($ResolvedSource.TrimEnd("\") + "\", [System.StringComparison]::OrdinalIgnoreCase) -or
-    $ResolvedCrcmodWheelBundle.Equals($ResolvedSource, [System.StringComparison]::OrdinalIgnoreCase) -or
-    $ResolvedCrcmodWheelBundle.StartsWith($ResolvedSource.TrimEnd("\") + "\", [System.StringComparison]::OrdinalIgnoreCase) -or
-    $ResolvedAliyunCoreWheelBundle.Equals($ResolvedSource, [System.StringComparison]::OrdinalIgnoreCase) -or
-    $ResolvedAliyunCoreWheelBundle.StartsWith($ResolvedSource.TrimEnd("\") + "\", [System.StringComparison]::OrdinalIgnoreCase)
 ) {
     throw "Controlled internal wheel bundle must be outside the checkout"
 }
@@ -1394,42 +1337,21 @@ try {
     Invoke-External `
         -FilePath $MachinePython `
         -Arguments @(
-            (Join-Path $ResolvedSource "scripts\build_internal_jieba_wheel.py"),
+            (Join-Path $ResolvedSource "scripts\build_controlled_qwen3_asr_wheel.py"),
             "validate",
-            "--bundle-dir", $ResolvedInternalWheelBundle,
+            "--bundle-dir", $ResolvedQwenWheelBundle,
             "--commit-sha", $CommitSha.ToLowerInvariant(),
             "--run-id", $RunId
         ) `
         -LogPath $InternalWheelValidationLog
-    foreach ($controlled in @(
-        [pscustomobject]@{ Script = "build_internal_oss2_wheel.py"; Bundle = $ResolvedOss2WheelBundle; Log = "oss2-wheel-validation.log" },
-        [pscustomobject]@{ Script = "build_internal_antlr4_wheel.py"; Bundle = $ResolvedAntlr4WheelBundle; Log = "antlr4-wheel-validation.log" },
-        [pscustomobject]@{ Script = "build_internal_crcmod_wheel.py"; Bundle = $ResolvedCrcmodWheelBundle; Log = "crcmod-wheel-validation.log" },
-        [pscustomobject]@{ Script = "build_internal_aliyun_core_wheel.py"; Bundle = $ResolvedAliyunCoreWheelBundle; Log = "aliyun-core-wheel-validation.log" }
-    )) {
-        Invoke-External `
-            -FilePath $MachinePython `
-            -Arguments @(
-                (Join-Path $ResolvedSource "scripts\$($controlled.Script)"),
-                "validate",
-                "--bundle-dir", $controlled.Bundle,
-                "--commit-sha", $CommitSha.ToLowerInvariant(),
-                "--run-id", $RunId
-            ) `
-            -LogPath (Join-Path $LogRoot $controlled.Log)
-    }
     $InternalWheelManifestPath = Join-Path (
-        $ResolvedInternalWheelBundle
+        $ResolvedQwenWheelBundle
     ) "internal-wheel-manifest.json"
     $InternalWheelManifest = Get-Content `
         -LiteralPath $InternalWheelManifestPath `
         -Raw `
         -Encoding UTF8 |
         ConvertFrom-Json
-    $Oss2WheelManifest = Get-Content -LiteralPath (Join-Path $ResolvedOss2WheelBundle "internal-wheel-manifest.json") -Raw -Encoding UTF8 | ConvertFrom-Json
-    $Antlr4WheelManifest = Get-Content -LiteralPath (Join-Path $ResolvedAntlr4WheelBundle "internal-wheel-manifest.json") -Raw -Encoding UTF8 | ConvertFrom-Json
-    $CrcmodWheelManifest = Get-Content -LiteralPath (Join-Path $ResolvedCrcmodWheelBundle "internal-wheel-manifest.json") -Raw -Encoding UTF8 | ConvertFrom-Json
-    $AliyunCoreWheelManifest = Get-Content -LiteralPath (Join-Path $ResolvedAliyunCoreWheelBundle "internal-wheel-manifest.json") -Raw -Encoding UTF8 | ConvertFrom-Json
     $ProductionPython = "${PRODUCTION_SERVICE_ROOT}\RAGPinCheng-ASR\venv\Scripts\python.exe"
     if (-not (Test-Path -LiteralPath $ProductionPython -PathType Leaf)) {
         throw "Production ASR venv Python is missing"
@@ -1552,8 +1474,7 @@ try {
     @(
         "torch==2.7.0+cu128",
         "torchaudio==2.7.0+cu128",
-        "-r $RequirementsSource/asr_service/requirements-windows.txt",
-        "-r $RequirementsSource/asr_service/requirements-qwen3-asr.txt"
+        "-r $RequirementsSource/asr_service/requirements-qwen3-asr-windows.txt"
     ) | Set-Content -LiteralPath $CombinedRequirements -Encoding ASCII
 
     $DownloadLog = Join-Path $LogRoot "pip-download.log"
@@ -1575,11 +1496,7 @@ try {
                 "--dest", $Wheelhouse,
                 "--index-url", "https://pypi.org/simple",
                 "--extra-index-url", "https://download.pytorch.org/whl/cu128",
-                "--find-links", $ResolvedInternalWheelBundle,
-                "--find-links", $ResolvedOss2WheelBundle,
-                "--find-links", $ResolvedAntlr4WheelBundle,
-                "--find-links", $ResolvedCrcmodWheelBundle,
-                "--find-links", $ResolvedAliyunCoreWheelBundle,
+                "--find-links", $ResolvedQwenWheelBundle,
                 "--find-links", $SharedWheelSeed,
                 "--constraint", (Join-Path $EvidenceRoot "production-freeze.txt"),
                 "--requirement", $CombinedRequirements
@@ -1600,11 +1517,7 @@ try {
         -DownloadLog $DownloadLog `
         -OutputPath (Join-Path $EvidenceRoot "wheel-manifest.json") `
         -InternalManifests @(
-            $InternalWheelManifest,
-            $Oss2WheelManifest,
-            $Antlr4WheelManifest,
-            $CrcmodWheelManifest,
-            $AliyunCoreWheelManifest
+            $InternalWheelManifest
         )
     Assert-WheelManifestUnchanged -Manifest $WheelManifest
     $SharedCacheMaterial = [ordered]@{
@@ -1612,8 +1525,9 @@ try {
         python = "3.11"
         torch = "2.7.0+cu128"
         torchaudio = "2.7.0+cu128"
-        requirements_windows_sha256 = Get-Sha256 -Path (Join-Path $ResolvedSource "asr_service\requirements-windows.txt")
+        requirements_qwen_windows_sha256 = Get-Sha256 -Path (Join-Path $ResolvedSource "asr_service\requirements-qwen3-asr-windows.txt")
         requirements_provider_sha256 = Get-Sha256 -Path (Join-Path $ResolvedSource "asr_service\requirements-qwen3-asr.txt")
+        controlled_qwen_manifest_sha256 = Get-Sha256 -Path $InternalWheelManifestPath
     }
     $SharedCacheKey = Get-TextSha256 -Text ($SharedCacheMaterial | ConvertTo-Json -Depth 8 -Compress)
     Publish-SharedWheelBlobs `
@@ -1662,7 +1576,7 @@ for module in modules:
     origin = Path(module.__file__).resolve()
     if venv not in origin.parents:
         raise RuntimeError(f'module escaped qualification venv: {module.__name__}')
-if importlib.metadata.version('qwen-asr') != '0.0.6':
+if importlib.metadata.version('qwen-asr') != '0.0.6+ragpincheng.zh1':
     raise RuntimeError('qwen3-asr version mismatch')
 if not torch.__version__.startswith('2.7.0+cu128'):
     raise RuntimeError('torch cu128 version mismatch')
@@ -1761,10 +1675,16 @@ print('qualification-module-origins-verified')
         "ASR_UPLOAD_PART_BYTES", "ASR_MAX_QUEUE_LENGTH", "ASR_CHUNK_DURATION_MS",
         "ASR_CONSECUTIVE_FAILURE_LIMIT", "ASR_MODEL_CACHE_ROOT",
         "ASR_MODEL_MANIFEST_PATH", "ASR_MODEL_LOCAL_FILES_ONLY",
+        "ASR_FASTER_WHISPER_MODEL_CACHE_ROOT",
+        "ASR_FASTER_WHISPER_MODEL_MANIFEST_PATH",
         "ASR_QWEN3_ASR_MODEL_CACHE_ROOT",
         "ASR_QWEN3_ASR_MODEL_MANIFEST_PATH",
         "ASR_QWEN3_ALIGNER_MODEL_CACHE_ROOT",
-        "ASR_QWEN3_ALIGNER_MODEL_MANIFEST_PATH", "ASR_LOG_DIR",
+        "ASR_QWEN3_ALIGNER_MODEL_MANIFEST_PATH",
+        "ASR_WHISPERX_MODEL_CACHE_ROOT",
+        "ASR_WHISPERX_MODEL_MANIFEST_PATH",
+        "ASR_WHISPERX_ALIGN_MODEL_CACHE_ROOT",
+        "ASR_WHISPERX_ALIGN_MODEL_MANIFEST_PATH", "ASR_LOG_DIR",
         "BGE_PRIORITY_PROBE_URL", "BGE_PRIORITY_PROBE_TOKEN",
         "ASR_QUALIFICATION_TOKEN", "PYTHONNOUSERSITE"
     )
@@ -1778,8 +1698,6 @@ print('qualification-module-origins-verified')
     $env:ASR_MAX_QUEUE_LENGTH = "1"
     $env:ASR_CHUNK_DURATION_MS = "300000"
     $env:ASR_CONSECUTIVE_FAILURE_LIMIT = "1"
-    $env:ASR_MODEL_CACHE_ROOT = $ModelCacheRoot
-    $env:ASR_MODEL_MANIFEST_PATH = $SenseVoiceManifest
     $env:ASR_MODEL_LOCAL_FILES_ONLY = "true"
     $env:ASR_QWEN3_ASR_MODEL_CACHE_ROOT = $ModelCacheRoot
     $env:ASR_QWEN3_ASR_MODEL_MANIFEST_PATH = $AsrModelManifest
@@ -1790,6 +1708,20 @@ print('qualification-module-origins-verified')
     $env:BGE_PRIORITY_PROBE_TOKEN = $env:GPU_SERVICE_TOKEN
     $env:ASR_QUALIFICATION_TOKEN = $TemporaryToken
     $env:PYTHONNOUSERSITE = "1"
+    foreach ($name in @(
+        "ASR_MODEL_CACHE_ROOT", "ASR_MODEL_MANIFEST_PATH",
+        "ASR_FASTER_WHISPER_MODEL_CACHE_ROOT",
+        "ASR_FASTER_WHISPER_MODEL_MANIFEST_PATH",
+        "ASR_WHISPERX_MODEL_CACHE_ROOT", "ASR_WHISPERX_MODEL_MANIFEST_PATH",
+        "ASR_WHISPERX_ALIGN_MODEL_CACHE_ROOT",
+        "ASR_WHISPERX_ALIGN_MODEL_MANIFEST_PATH"
+    )) {
+        [System.Environment]::SetEnvironmentVariable(
+            $name,
+            $null,
+            [System.EnvironmentVariableTarget]::Process
+        )
+    }
 
     $ServiceStdout = Join-Path $LogRoot "qualification-service.stdout.log"
     $ServiceStderr = Join-Path $LogRoot "qualification-service.stderr.log"
@@ -1816,15 +1748,13 @@ print('qualification-module-origins-verified')
         -Token $TemporaryToken `
         -TimeoutSec 120
     $ExpectedProfiles = @(
-        "faster-whisper-large-v3-turbo-v1",
-        "funasr-sensevoice-small-v1",
         "qwen3-asr-06b-aligner-v1"
     )
     if (
         $TemporaryCapabilities.api_version -ne "asr-service/1" -or
         (@($TemporaryCapabilities.service_profiles) -join ",") -ne ($ExpectedProfiles -join ",")
     ) {
-        throw "Temporary service does not expose the exact three-profile contract"
+        throw "Temporary service does not expose the exact qwen3-asr-only profile contract"
     }
 
     $FailureCode = "qualification_failed"

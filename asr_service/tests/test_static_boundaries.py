@@ -110,7 +110,18 @@ def test_qwen3_asr_dependencies_remain_separate_from_runtime_sets():
     optional = (SERVICE / "requirements-qwen3-asr.txt").read_text(
         encoding="utf-8"
     )
-    assert "qwen-asr==0.0.6" in optional
+    assert "qwen-asr==0.0.6+ragpincheng.zh1" in optional
+    qwen_windows = (
+        SERVICE / "requirements-qwen3-asr-windows.txt"
+    ).read_text(encoding="utf-8").lower()
+    assert "-r requirements-service-core.txt" in qwen_windows
+    assert "-r requirements-qwen3-asr.txt" in qwen_windows
+    packages = [
+        line for line in qwen_windows.splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    for forbidden in ("funasr", "modelscope", "onnxruntime", "kaldiio", "soynlp"):
+        assert not any(forbidden in line for line in packages)
     for path in (
         ROOT / "requirements.txt",
         ROOT / "requirements-prod.txt",
