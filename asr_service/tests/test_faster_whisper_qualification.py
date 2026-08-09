@@ -200,20 +200,52 @@ def test_qualification_summary_passes_only_when_every_gate_passes(
     assert result["sample_count"] == 8
     assert all(item["pass"] for item in result["gates"].values())
     assert all(item["pass"] for item in result["samples"])
+    assert all(item["canonical_equal"] for item in result["samples"])
+    assert all(item["markdown_equal"] for item in result["samples"])
+    assert all(item["turns_equal"] for item in result["samples"])
+    assert all(
+        item["first_canonical_sha256"] == item["second_canonical_sha256"]
+        for item in result["samples"]
+    )
+    assert all(
+        item["first_markdown_sha256"] == item["second_markdown_sha256"]
+        for item in result["samples"]
+    )
+    assert all(
+        item["first_turns_sha256"] == item["second_turns_sha256"]
+        for item in result["samples"]
+    )
 
 
-def test_qualification_summary_fails_on_nondeterminism(
-    tmp_path, monkeypatch
+@pytest.mark.parametrize(
+    ("changed_layer", "expected_equal"),
+    [
+        ("canonical", (False, True, True)),
+        ("markdown", (True, False, True)),
+        ("turns", (True, True, False)),
+    ],
+)
+def test_qualification_summary_identifies_nondeterministic_layer(
+    tmp_path, monkeypatch, changed_layer, expected_equal
 ):
     manifest = qualification.load_manifest(_manifest(tmp_path))
     calls: dict[str, int] = {}
 
     def run_once(sample, **_kwargs):
         calls[sample.sample_id] = calls.get(sample.sample_id, 0) + 1
-        text = sample.reference_text
-        if sample.sample_id == "clear-zh" and calls[sample.sample_id] >= 2:
-            text += "漂移"
-        return _Canonical(text), text.encode(), [("00:00:00", text)], 1.0
+        canonical_text = sample.reference_text
+        markdown = sample.reference_text.encode()
+        turns = [("00:00:00", sample.reference_text)]
+        is_changed_pass = (
+            sample.sample_id == "clear-zh" and calls[sample.sample_id] == 2
+        )
+        if is_changed_pass and changed_layer == "canonical":
+            canonical_text += "漂移"
+        if is_changed_pass and changed_layer == "markdown":
+            markdown += "漂移".encode()
+        if is_changed_pass and changed_layer == "turns":
+            turns = [("00:00:00", sample.reference_text + "漂移")]
+        return _Canonical(canonical_text), markdown, turns, 1.0
 
     monkeypatch.setattr(qualification, "_run_once", run_once)
     result = qualification.run_qualification(
@@ -222,7 +254,28 @@ def test_qualification_summary_fails_on_nondeterminism(
     assert result["status"] == "fail"
     assert "steady_state_rtf" not in result["gates"]
     assert result["info"]["rtf_scope"] == "steady-state-aggregate-informational"
-    assert any(not item["deterministic"] for item in result["samples"])
+    failed = next(item for item in result["samples"] if item["sample_id"] == "clear-zh")
+    assert not failed["deterministic"]
+    assert (
+        failed["canonical_equal"],
+        failed["markdown_equal"],
+        failed["turns_equal"],
+    ) == expected_equal
+    assert (
+        failed["first_canonical_sha256"] == failed["second_canonical_sha256"]
+    ) is expected_equal[0]
+    assert (
+        failed["first_markdown_sha256"] == failed["second_markdown_sha256"]
+    ) is expected_equal[1]
+    assert (
+        failed["first_turns_sha256"] == failed["second_turns_sha256"]
+    ) is expected_equal[2]
+    assert failed["first_segment_count"] == failed["second_segment_count"] == 1
+    assert failed["first_parser_turn_count"] == failed["second_parser_turn_count"] == 1
+    assert failed["canonical_sha256"] == failed["first_canonical_sha256"]
+    assert failed["markdown_sha256"] == failed["first_markdown_sha256"]
+    assert failed["segment_count"] == failed["first_segment_count"]
+    assert failed["parser_turn_count"] == failed["first_parser_turn_count"]
 
 
 def _fake_download(source: Path):

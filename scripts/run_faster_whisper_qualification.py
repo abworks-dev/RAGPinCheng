@@ -370,6 +370,16 @@ def _percentile95(values: list[int]) -> int:
     return ordered[max(0, math.ceil(0.95 * len(ordered)) - 1)]
 
 
+def _deterministic_json_sha256(value: object) -> str:
+    payload = json.dumps(
+        value,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
 def _load_transcript_parser():
     """Load the real parser without adding unrelated chunking dependencies.
 
@@ -625,11 +635,19 @@ def run_qualification(
             pass_index=2,
         )
         canonical, markdown, turns, elapsed = first
-        deterministic = (
-            canonical.to_json_bytes() == second[0].to_json_bytes()
-            and markdown == second[1]
-            and turns == second[2]
-        )
+        second_canonical, second_markdown, second_turns, _ = second
+        first_canonical_bytes = canonical.to_json_bytes()
+        second_canonical_bytes = second_canonical.to_json_bytes()
+        canonical_equal = first_canonical_bytes == second_canonical_bytes
+        markdown_equal = markdown == second_markdown
+        turns_equal = turns == second_turns
+        deterministic = canonical_equal and markdown_equal and turns_equal
+        first_canonical_sha256 = hashlib.sha256(first_canonical_bytes).hexdigest()
+        second_canonical_sha256 = hashlib.sha256(second_canonical_bytes).hexdigest()
+        first_markdown_sha256 = hashlib.sha256(markdown).hexdigest()
+        second_markdown_sha256 = hashlib.sha256(second_markdown).hexdigest()
+        first_turns_sha256 = _deterministic_json_sha256(turns)
+        second_turns_sha256 = _deterministic_json_sha256(second_turns)
         hypothesis = " ".join(segment.text for segment in canonical.segments)
         rtf = elapsed / (sample.duration_ms / 1000)
         row: dict[str, object] = {
@@ -639,12 +657,25 @@ def run_qualification(
             "duration_ms": sample.duration_ms,
             "segment_count": len(canonical.segments),
             "canonical_sha256": canonical.content_sha256,
-            "markdown_sha256": hashlib.sha256(markdown).hexdigest(),
+            "markdown_sha256": first_markdown_sha256,
             "rtf": round(rtf, 6),
             "rtf_pass": True,
             "elapsed": elapsed,
             "deterministic": deterministic,
             "parser_turn_count": len(turns),
+            "canonical_equal": canonical_equal,
+            "markdown_equal": markdown_equal,
+            "turns_equal": turns_equal,
+            "first_canonical_sha256": first_canonical_sha256,
+            "second_canonical_sha256": second_canonical_sha256,
+            "first_markdown_sha256": first_markdown_sha256,
+            "second_markdown_sha256": second_markdown_sha256,
+            "first_turns_sha256": first_turns_sha256,
+            "second_turns_sha256": second_turns_sha256,
+            "first_segment_count": len(canonical.segments),
+            "second_segment_count": len(second_canonical.segments),
+            "first_parser_turn_count": len(turns),
+            "second_parser_turn_count": len(second_turns),
         }
         diagnostic_row: dict[str, object] = {
             "sample_id": sample.sample_id,

@@ -384,6 +384,11 @@ def test_faster_whisper_qualification_workflow_is_manual_immutable_and_gated():
     assert "Affected requirement:" in workflow
     assert "Fallback probe executed:" in workflow
     assert "Fallback probe exit code:" in workflow
+    assert 'schema_version = "faster-whisper-r3-diagnostic/2"' in workflow
+    assert "$failedSampleDiagnostics" in workflow
+    assert "canonical=``$($_.canonical_equal)``" in workflow
+    assert "markdown=``$($_.markdown_equal)``" in workflow
+    assert "turns=``$($_.turns_equal)``" in workflow
 
 
 def test_gpu_recovery_workflow_is_manual_and_limited_to_the_verified_task():
@@ -1054,6 +1059,14 @@ def test_faster_whisper_qualification_drives_the_existing_result_flow():
     assert ".transcribe(" not in runner
     assert "FASTER_WHISPER_PROFILE_ID" in runner
     assert "FASTER_WHISPER_SERVICE_PROFILE_ID" in runner
+    assert 'REPORT_SCHEMA_VERSION = "faster-whisper-qualification-report/1"' in runner
+    assert "canonical_equal" in runner
+    assert "markdown_equal" in runner
+    assert "turns_equal" in runner
+    assert "first_canonical_sha256" in runner
+    assert "second_canonical_sha256" in runner
+    assert "first_turns_sha256" in runner
+    assert "second_turns_sha256" in runner
 
 
 def test_qwen3_asr_qualification_is_manual_sha_bound_and_isolated():

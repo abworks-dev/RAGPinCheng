@@ -1334,6 +1334,73 @@ function Write-SanitizedSummary {
     }
 }
 
+function Convert-ToSanitizedQualificationSample {
+    param([Parameter(Mandatory = $true)][object]$Sample)
+    return [ordered]@{
+        sample_id = Get-OptionalPropertyValue -Object $Sample -Name "sample_id"
+        scenario = Get-OptionalPropertyValue -Object $Sample -Name "scenario"
+        negative_control = [bool](Get-OptionalPropertyValue -Object $Sample -Name "negative_control")
+        duration_ms = Get-OptionalPropertyValue -Object $Sample -Name "duration_ms"
+        segment_count = Get-OptionalPropertyValue -Object $Sample -Name "segment_count"
+        canonical_sha256 = Get-OptionalPropertyValue -Object $Sample -Name "canonical_sha256"
+        markdown_sha256 = Get-OptionalPropertyValue -Object $Sample -Name "markdown_sha256"
+        rtf = Get-OptionalPropertyValue -Object $Sample -Name "rtf"
+        rtf_pass = Get-OptionalPropertyValue -Object $Sample -Name "rtf_pass"
+        elapsed = Get-OptionalPropertyValue -Object $Sample -Name "elapsed"
+        deterministic = Get-OptionalPropertyValue -Object $Sample -Name "deterministic"
+        parser_turn_count = Get-OptionalPropertyValue -Object $Sample -Name "parser_turn_count"
+        canonical_equal = Get-OptionalPropertyValue -Object $Sample -Name "canonical_equal"
+        markdown_equal = Get-OptionalPropertyValue -Object $Sample -Name "markdown_equal"
+        turns_equal = Get-OptionalPropertyValue -Object $Sample -Name "turns_equal"
+        first_canonical_sha256 = Get-OptionalPropertyValue -Object $Sample -Name "first_canonical_sha256"
+        second_canonical_sha256 = Get-OptionalPropertyValue -Object $Sample -Name "second_canonical_sha256"
+        first_markdown_sha256 = Get-OptionalPropertyValue -Object $Sample -Name "first_markdown_sha256"
+        second_markdown_sha256 = Get-OptionalPropertyValue -Object $Sample -Name "second_markdown_sha256"
+        first_turns_sha256 = Get-OptionalPropertyValue -Object $Sample -Name "first_turns_sha256"
+        second_turns_sha256 = Get-OptionalPropertyValue -Object $Sample -Name "second_turns_sha256"
+        first_segment_count = Get-OptionalPropertyValue -Object $Sample -Name "first_segment_count"
+        second_segment_count = Get-OptionalPropertyValue -Object $Sample -Name "second_segment_count"
+        first_parser_turn_count = Get-OptionalPropertyValue -Object $Sample -Name "first_parser_turn_count"
+        second_parser_turn_count = Get-OptionalPropertyValue -Object $Sample -Name "second_parser_turn_count"
+        cer = Get-OptionalPropertyValue -Object $Sample -Name "cer"
+        cer_limit = Get-OptionalPropertyValue -Object $Sample -Name "cer_limit"
+        cer_pass = Get-OptionalPropertyValue -Object $Sample -Name "cer_pass"
+        term_hits = Get-OptionalPropertyValue -Object $Sample -Name "term_hits"
+        term_total = Get-OptionalPropertyValue -Object $Sample -Name "term_total"
+        code_hits = Get-OptionalPropertyValue -Object $Sample -Name "code_hits"
+        code_total = Get-OptionalPropertyValue -Object $Sample -Name "code_total"
+        timestamp_drift_max_ms = Get-OptionalPropertyValue -Object $Sample -Name "timestamp_drift_max_ms"
+        forbidden_term_hits = Get-OptionalPropertyValue -Object $Sample -Name "forbidden_term_hits"
+        forbidden_code_hits = Get-OptionalPropertyValue -Object $Sample -Name "forbidden_code_hits"
+        pass = [bool](Get-OptionalPropertyValue -Object $Sample -Name "pass")
+    }
+}
+
+function Assert-QualificationDiagnosticProjection {
+    $marker = "qualification-projection-private-marker"
+    $source = [pscustomobject]@{
+        sample_id = "projection-self-test"
+        canonical_equal = $true
+        markdown_equal = $true
+        turns_equal = $true
+        unapproved_payload = $marker
+        pass = $false
+    }
+    $safe = Convert-ToSanitizedQualificationSample -Sample $source
+    if ($safe.Count -ne 36) {
+        throw "Qualification diagnostic projection field count changed"
+    }
+    foreach ($field in @("canonical_equal", "markdown_equal", "turns_equal")) {
+        if (-not $safe.Contains($field) -or $safe[$field] -ne $true) {
+            throw "Qualification diagnostic projection is missing $field"
+        }
+    }
+    $serialized = ConvertTo-Json -InputObject $safe -Depth 4 -Compress
+    if ($serialized.Contains($marker)) {
+        throw "Qualification diagnostic projection leaked an unapproved field"
+    }
+}
+
 function Write-QualificationDiagnostic {
     param(
         [Parameter(Mandatory = $true)][string]$Status,
@@ -1344,7 +1411,7 @@ function Write-QualificationDiagnostic {
     )
     if ([string]::IsNullOrWhiteSpace($QualificationDiagnosticPath)) { return }
     $diagnostic = [ordered]@{
-        schema_version = "faster-whisper-r3-diagnostic/1"
+        schema_version = "faster-whisper-r3-diagnostic/2"
         status = $Status
         failure_code = $Code
         failure_stage = $Stage
@@ -1381,31 +1448,7 @@ function Write-QualificationDiagnostic {
         $diagnostic.gates = $Report.gates
         $safeSamples = @(
             @($Report.samples) | ForEach-Object {
-                [ordered]@{
-                    sample_id = Get-OptionalPropertyValue -Object $_ -Name "sample_id"
-                    scenario = Get-OptionalPropertyValue -Object $_ -Name "scenario"
-                    negative_control = [bool](Get-OptionalPropertyValue -Object $_ -Name "negative_control")
-                    duration_ms = Get-OptionalPropertyValue -Object $_ -Name "duration_ms"
-                    segment_count = Get-OptionalPropertyValue -Object $_ -Name "segment_count"
-                    canonical_sha256 = Get-OptionalPropertyValue -Object $_ -Name "canonical_sha256"
-                    markdown_sha256 = Get-OptionalPropertyValue -Object $_ -Name "markdown_sha256"
-                    rtf = Get-OptionalPropertyValue -Object $_ -Name "rtf"
-                    rtf_pass = Get-OptionalPropertyValue -Object $_ -Name "rtf_pass"
-                    elapsed = Get-OptionalPropertyValue -Object $_ -Name "elapsed"
-                    deterministic = Get-OptionalPropertyValue -Object $_ -Name "deterministic"
-                    parser_turn_count = Get-OptionalPropertyValue -Object $_ -Name "parser_turn_count"
-                    cer = Get-OptionalPropertyValue -Object $_ -Name "cer"
-                    cer_limit = Get-OptionalPropertyValue -Object $_ -Name "cer_limit"
-                    cer_pass = Get-OptionalPropertyValue -Object $_ -Name "cer_pass"
-                    term_hits = Get-OptionalPropertyValue -Object $_ -Name "term_hits"
-                    term_total = Get-OptionalPropertyValue -Object $_ -Name "term_total"
-                    code_hits = Get-OptionalPropertyValue -Object $_ -Name "code_hits"
-                    code_total = Get-OptionalPropertyValue -Object $_ -Name "code_total"
-                    timestamp_drift_max_ms = Get-OptionalPropertyValue -Object $_ -Name "timestamp_drift_max_ms"
-                    forbidden_term_hits = Get-OptionalPropertyValue -Object $_ -Name "forbidden_term_hits"
-                    forbidden_code_hits = Get-OptionalPropertyValue -Object $_ -Name "forbidden_code_hits"
-                    pass = [bool](Get-OptionalPropertyValue -Object $_ -Name "pass")
-                }
+                Convert-ToSanitizedQualificationSample -Sample $_
             }
         )
         $diagnostic.samples = $safeSamples
@@ -1424,6 +1467,7 @@ function Write-QualificationDiagnostic {
     Write-JsonFile -Path $QualificationDiagnosticPath -Value $diagnostic
 }
 
+Assert-QualificationDiagnosticProjection
 Write-QualificationProgress -Stage "wrapper_start"
 if ($CommitSha -notmatch "^[0-9a-fA-F]{40}$") {
     throw "CommitSha must be a full 40-character SHA"

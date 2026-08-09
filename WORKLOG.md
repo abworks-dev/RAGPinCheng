@@ -2828,3 +2828,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 完成：将 production cleanup 与 deploy workflow 重命名为新的文件路径，并同步 deployment 内 reusable workflow 引用、现行静态测试和当前 GPU deployment 功能地图，以触发 GitHub Actions 新建 workflow 注册记录。
 - 文件：`.github/workflows/production-cleanup.yml`、`.github/workflows/production-deploy.yml`、相关静态测试、`project-docs/features/gpu-runtime-deployment.md`、`WORKLOG.md`
 - 验证：Python YAML 解析、测试文件 `py_compile`、当前目录旧路径检查和 `git diff --check` 通过；当前环境未安装 pytest，相关静态测试待 PR CI 验证；未触发部署、清理或生产服务操作。
+
+### 10:00 — 增强 faster-whisper 逐层确定性诊断
+
+- 完成：资格报告以向后兼容字段分别记录两遍 canonical、Markdown 和 parser turns 的 equality、SHA-256 与计数；严格脱敏制品升级为 `faster-whisper-r3-diagnostic/2`，workflow summary 仅展示失败样本 ID 和三层 equality；新增固定白名单投影及运行前合成字段泄漏自检。
+- 文件：`scripts/run_faster_whisper_qualification.py`、`scripts/qualify-faster-whisper-production.ps1`、`.github/workflows/qualify-faster-whisper-production.yml`、`asr_service/tests/test_faster_whisper_qualification.py`、`tests/test_faster_whisper_qualification_diagnostic.py`、`tests/test_asr_deployment_static.py`、`project-docs/plans/faster-whisper-r3-unified-qualification.md`、`WORKLOG.md`
+- 验证：复用仓库 `.venv` 执行专项测试 `71 passed`；Python 编译、workflow YAML 解析、PowerShell AST 与实际投影自检、turns 固定 JSON 哈希检查和 `git diff --check` 通过。
+- 待办/风险：仍需 PR CI 与合并；未触发真实 R3、未修改阈值、样本、解码、Profile admission、生产服务、生产 venv、模型、数据库或 Qdrant。R3 重跑仍需绑定合并后的完整 master SHA 单独批准。
