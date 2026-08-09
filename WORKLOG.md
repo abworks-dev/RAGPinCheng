@@ -2803,3 +2803,9 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 完成：run `31286920608` 许可审计仍失败，但 artifact 未包含矩阵；新增显式 `LicenseMatrixPath`，在审计成功或失败的 `finally` 中将 run-local 矩阵复制到 runner temp 并上传，保持许可判断不变。
 - 文件：`scripts/qualify-qwen3-asr-production.ps1`、`.github/workflows/qualify-qwen3-asr-production.yml`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`
 - 验证：待 PowerShell/workflow/Python 静态检查及 PR CI；未修改依赖源、requirements、模型、生产服务或 Profile admission。
+
+### 09:30 — 刷新生产 workflow 显示名称
+
+- 完成：将 production cleanup 和 deploy workflow 的顶层显示名称改为规范大写形式，强制 GitHub Actions 重新登记名称；未改变触发器、任务、权限或生产逻辑。
+- 文件：`.github/workflows/cleanup-production.yml`、`.github/workflows/deploy-production.yml`、`WORKLOG.md`
+- 验证：Python YAML 解析和名称断言、`git diff --check` 通过；当前环境未安装 pytest，相关静态测试待 PR CI 验证。
