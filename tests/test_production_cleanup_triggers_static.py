@@ -21,6 +21,8 @@ def test_cleanup_workflow_has_safe_trigger_gates():
     workflow = read_text(".github/workflows/production-cleanup.yml")
 
     assert "workflow_call:" in workflow
+    assert '"on":' not in workflow
+    assert "\n  push:" not in workflow
     assert "30 19 * * *" in workflow
     assert "*/30 * * * *" in workflow
     assert "confirm_production_cleanup" in workflow
