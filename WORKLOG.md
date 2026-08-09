@@ -2834,3 +2834,11 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 完成：将 cleanup workflow 的顶层 `on` 改为标准未加引号键，并移除错误的空 `push` 触发配置；保留 reusable、手动和定时触发，以及所有清理门禁。
 - 文件：`.github/workflows/production-cleanup.yml`、`tests/test_production_cleanup_triggers_static.py`、`WORKLOG.md`
 - 验证：Python YAML 解析、触发文本断言、测试文件 `py_compile` 和 `git diff --check` 通过；当前环境未安装 pytest，相关静态测试待 PR CI 验证；未触发清理、部署或生产服务操作。
+
+## 2026-08-10
+
+### 03:40 — 修复 reusable cleanup 的 runner 上下文
+
+- 完成：将 production cleanup workflow 中 Job 级的 `runner.temp` 引用移动到实际执行步骤的 `env`，并为清理、夜间 dry-run、磁盘压力检查和备份清理步骤分别提供 `REPORT_ROOT`；保留 artifact 上传步骤的临时目录引用。
+- 文件：`.github/workflows/production-cleanup.yml`、`WORKLOG.md`
+- 验证：production cleanup 与 production deploy YAML 解析通过；结构化检查确认 Job 级 `env` 不再使用 `runner.temp`，所有 `$env:REPORT_ROOT` 执行步骤均有来源；`git diff --check` 通过。未触发清理、部署或生产服务操作。
