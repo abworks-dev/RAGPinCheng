@@ -116,7 +116,7 @@ jobs:
   cleanup-after-deploy:
     if: ${{ needs.deploy-gpu.result == 'success' && needs.deploy-app.result == 'success' }}
     needs: [deploy-gpu, deploy-app]
-    uses: ./.github/workflows/cleanup-production.yml
+    uses: ./.github/workflows/production-cleanup.yml
     with:
       target: backups
       apply: true

@@ -2815,3 +2815,9 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 完成：将 production cleanup 和 deploy workflow 的顶层显示名称改为规范大写形式，强制 GitHub Actions 重新登记名称；未改变触发器、任务、权限或生产逻辑。
 - 文件：`.github/workflows/cleanup-production.yml`、`.github/workflows/deploy-production.yml`、`WORKLOG.md`
 - 验证：Python YAML 解析和名称断言、`git diff --check` 通过；当前环境未安装 pytest，相关静态测试待 PR CI 验证。
+
+### 09:45 — 重建生产 workflow 注册名称
+
+- 完成：将 production cleanup 与 deploy workflow 重命名为新的文件路径，并同步 deployment 内 reusable workflow 引用、现行静态测试和当前 GPU deployment 功能地图，以触发 GitHub Actions 新建 workflow 注册记录。
+- 文件：`.github/workflows/production-cleanup.yml`、`.github/workflows/production-deploy.yml`、相关静态测试、`project-docs/features/gpu-runtime-deployment.md`、`WORKLOG.md`
+- 验证：Python YAML 解析、测试文件 `py_compile`、当前目录旧路径检查和 `git diff --check` 通过；当前环境未安装 pytest，相关静态测试待 PR CI 验证；未触发部署、清理或生产服务操作。
