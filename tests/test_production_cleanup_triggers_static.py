@@ -22,10 +22,20 @@ def test_cleanup_workflow_has_safe_trigger_gates():
 
     assert "workflow_call:" in workflow
     assert '"on":' not in workflow
-    assert "\n  push:" not in workflow
+    assert "workflow_dispatch:" not in workflow
+    assert "schedule:" not in workflow
+    assert "confirm_production_cleanup" in workflow
+    assert "actions/upload-artifact@v4" in workflow
+
+
+def test_cleanup_operations_owns_manual_and_scheduled_triggers():
+    workflow = read_text(".github/workflows/production-cleanup-operations.yml")
+
+    assert "workflow_dispatch:" in workflow
+    assert "schedule:" in workflow
     assert "30 19 * * *" in workflow
     assert "*/30 * * * *" in workflow
-    assert "confirm_production_cleanup" in workflow
+    assert "production-cleanup.yml" in workflow
     assert "PRODUCTION_AUTO_CLEANUP_ENABLED" in workflow
     assert "backup-apply" in workflow
     assert "actions/upload-artifact@v4" in workflow

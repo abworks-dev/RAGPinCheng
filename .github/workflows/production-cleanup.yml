@@ -5,16 +5,18 @@ on:
     inputs:
       target:
         description: Cleanup target
-        required: false
-        default: backups
+        required: true
         type: string
       apply:
         description: Delete approved candidates instead of previewing
-        required: false
-        default: false
+        required: true
         type: boolean
       confirm_production_cleanup:
         description: Confirm this cleanup run on the production Windows host
+        required: true
+        type: boolean
+      allow_unconfirmed_dry_run:
+        description: Permit a non-destructive dry-run without production confirmation
         required: false
         default: false
         type: boolean
@@ -23,36 +25,7 @@ on:
         required: false
         default: reusable-call
         type: string
-  workflow_dispatch:
-    inputs:
-      target:
-        description: Cleanup target
-        required: true
-        default: all
-        type: choice
-        options:
-          - all
-          - asr
-          - runtime
-          - backups
-      apply:
-        description: Delete approved candidates instead of previewing
-        required: true
-        default: false
-        type: boolean
-      confirm_production_cleanup:
-        description: Confirm this cleanup run on the production Windows host
-        required: true
-        default: false
-        type: boolean
-      reason:
-        description: Trigger reason for the audit report
-        required: false
-        default: manual
-        type: string
-  schedule:
-    - cron: '30 19 * * *'
-    - cron: '*/30 * * * *'
+
 permissions:
   contents: read
 
@@ -67,15 +40,13 @@ env:
   BACKUP_DIRECTORY: ${PRODUCTION_BACKUP_DIRECTORY}
 
 jobs:
-  manual-or-called:
+  cleanup:
     if: >-
-      github.event_name == 'workflow_call' ||
-      (github.event_name == 'workflow_dispatch' &&
-      inputs.confirm_production_cleanup == true)
+      inputs.confirm_production_cleanup == true ||
+      (inputs.allow_unconfirmed_dry_run == true && inputs.apply == false)
     runs-on: [self-hosted, windows, production, gpu]
     timeout-minutes: 30
     env:
-      EVENT_NAME: ${{ github.event_name }}
       INPUT_TARGET: ${{ inputs.target }}
       INPUT_APPLY: ${{ inputs.apply }}
       INPUT_CONFIRM: ${{ inputs.confirm_production_cleanup }}
