@@ -24,6 +24,9 @@ from asr_service.engine_protocol import (
 )
 
 
+_QWEN_LANGUAGE = "Chinese"
+
+
 def _milliseconds(value: object) -> int:
     if type(value) not in (int, float, Decimal):
         raise ValueError("invalid timestamp")
@@ -147,12 +150,14 @@ class Qwen3AsrEngine:
             encoded = base64.b64encode(chunk.content).decode("ascii")
             results = model.transcribe(
                 audio=f"data:audio/wav;base64,{encoded}",
-                language="Chinese",
+                language=_QWEN_LANGUAGE,
                 return_time_stamps=True,
             )
             if type(results) not in (list, tuple) or len(results) != 1:
                 raise ValueError("invalid engine output")
             result = results[0]
+            if getattr(result, "language", None) != _QWEN_LANGUAGE:
+                raise ValueError("unsupported transcription language")
             align_result = getattr(result, "time_stamps", None)
             raw_timestamps = getattr(align_result, "items", None)
             if type(raw_timestamps) not in (list, tuple) or not raw_timestamps:

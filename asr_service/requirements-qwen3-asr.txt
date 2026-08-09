@@ -1,2 +1,4 @@
-# Optional Qwen3-ASR adapter dependency. R2 does not install this file.
-qwen-asr==0.0.6
+# Optional controlled Chinese-only Qwen3-ASR adapter dependency.
+# The local version preserves upstream 0.0.6 code while removing the
+# Korean-only soynlp dependency from the wheel metadata.
+qwen-asr==0.0.6+ragpincheng.zh1

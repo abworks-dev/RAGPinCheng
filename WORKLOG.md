@@ -2816,6 +2816,13 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`.github/workflows/cleanup-production.yml`、`.github/workflows/deploy-production.yml`、`WORKLOG.md`
 - 验证：Python YAML 解析和名称断言、`git diff --check` 通过；当前环境未安装 pytest，相关静态测试待 PR CI 验证。
 
+### 09:44 — 隔离 Qwen 中文运行时依赖
+
+- 完成：Qwen R3 qualification 改为中文专用依赖闭包；新增固定上游 wheel URL、SHA-256、代码和 Apache LICENSE 哈希的受控 `qwen-asr==0.0.6+ragpincheng.zh1` 构建器，仅删除韩语对齐专用 `soynlp` 元数据依赖并重建 `RECORD`；临时服务清空其他引擎模型环境，只接受 Qwen profile，且引擎拒绝非 Chinese 返回。
+- 文件：`scripts/build_controlled_qwen3_asr_wheel.py`、`asr_service/requirements-qwen3-asr-windows.txt`、`asr_service/requirements-qwen3-asr.txt`、`asr_service/engines/qwen3_asr.py`、`scripts/qualify-qwen3-asr-production.ps1`、`.github/workflows/qualify-qwen3-asr-production.yml`、`.github/workflows/ci.yml`、`tests/test_qwen3_asr_controlled_wheel.py`、`tests/test_asr_deployment_static.py`、`asr_service/tests/test_qwen3_asr.py`、`asr_service/tests/test_static_boundaries.py`、`WORKLOG.md`
+- 验证：真实固定上游 wheel 两次构建一致；Python `py_compile`、PowerShell parser、`git diff --check` 通过；复用既有 `.venv` 执行 ASR 专项 `236 passed`。
+- 待办/风险：尚需 PR CI、合并及一次绑定完整 master SHA 的 R3 workflow；Profile admission 保持 disabled，未修改生产服务、生产 venv、模型、数据库、Qdrant 或防火墙。
+
 ### 09:45 — 重建生产 workflow 注册名称
 
 - 完成：将 production cleanup 与 deploy workflow 重命名为新的文件路径，并同步 deployment 内 reusable workflow 引用、现行静态测试和当前 GPU deployment 功能地图，以触发 GitHub Actions 新建 workflow 注册记录。
