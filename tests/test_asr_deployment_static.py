@@ -1152,7 +1152,7 @@ def test_qwen3_asr_qualification_emits_sanitized_dependency_diagnosis():
     assert '"--ignore-installed"' in diagnostic_section
     assert '"--no-cache-dir"' in diagnostic_section
     assert diagnostic_section.count('"--only-binary=:all:"') == 1
-    assert '"--find-links", $ResolvedInternalWheelBundle' in diagnostic_section
+    assert '"--find-links", $ResolvedQwenWheelBundle' in diagnostic_section
     assert '"--find-links", $SharedWheelSeed' in diagnostic_section
     assert "Cannot install .+ because these package versions have conflicting dependencies" in diagnostic_section
     assert "The user requested(?: \\(constraint\\))?" in diagnostic_section
@@ -1181,33 +1181,35 @@ def test_qwen3_asr_qualification_emits_sanitized_dependency_diagnosis():
         assert f'$DependencyFailureOperation = "{operation}"' in script
 
 
-def test_qwen3_asr_qualification_uses_controlled_legacy_wheel_bundles():
+def test_qwen3_asr_qualification_uses_chinese_only_dependency_bundle():
     workflow = read(".github/workflows/qualify-qwen3-asr-production.yml")
     script = read("scripts/qualify-qwen3-asr-production.ps1")
-    for builder in (
+    requirements = [
+        line.strip().lower()
+        for line in read("asr_service/requirements-qwen3-asr-windows.txt").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    assert "build_controlled_qwen3_asr_wheel.py" in workflow
+    assert "build_controlled_qwen3_asr_wheel.py" in script
+    assert "QwenWheelBundlePath =" in workflow
+    assert "[string]$QwenWheelBundlePath" in script
+    assert '"--find-links", $ResolvedQwenWheelBundle' in script
+    assert "requirements-qwen3-asr-windows.txt" in script
+    assert "requirements-windows.txt" not in script
+    assert "qwen-asr==0.0.6+ragpincheng.zh1" in read(
+        "asr_service/requirements-qwen3-asr.txt"
+    )
+    for forbidden in ("funasr", "modelscope", "onnxruntime", "kaldiio", "soynlp"):
+        assert not any(forbidden in line for line in requirements)
+    for legacy_builder in (
         "build_internal_jieba_wheel.py",
         "build_internal_oss2_wheel.py",
         "build_internal_antlr4_wheel.py",
         "build_internal_crcmod_wheel.py",
         "build_internal_aliyun_core_wheel.py",
     ):
-        assert builder in workflow
-        assert builder in script
-    for directory in ("jieba", "oss2", "antlr4", "crcmod", "aliyun-core"):
-        assert f"\\{directory}" in workflow
-    for parameter in (
-        "Oss2WheelBundlePath",
-        "Antlr4WheelBundlePath",
-        "CrcmodWheelBundlePath",
-        "AliyunCoreWheelBundlePath",
-        "LicenseMatrixPath",
-    ):
-        assert f"{parameter} =" in workflow
-        assert f"[string]${parameter}" in script
-    assert '"--find-links", $ResolvedOss2WheelBundle' in script
-    assert '"--find-links", $ResolvedAntlr4WheelBundle' in script
-    assert '"--find-links", $ResolvedCrcmodWheelBundle' in script
-    assert '"--find-links", $ResolvedAliyunCoreWheelBundle' in script
+        assert legacy_builder not in workflow
+        assert legacy_builder not in script
     assert '"--verbose",' in script
     assert "function Get-TextSha256" in script
     assert "$SharedCacheKey = Get-TextSha256" in script
@@ -1217,16 +1219,25 @@ def test_qwen3_asr_qualification_uses_controlled_legacy_wheel_bundles():
     assert 'Where-Object { (Get-Sha256 -Path $_.FullName) -eq $wheelSha256 }' in script
     assert "Unable to bind wheel file '$($wheel.Name)'" in script
     assert "Copy-Item -LiteralPath $LocalLicenseMatrixPath" in script
+    expected_profiles = script.split("$ExpectedProfiles = @(", 1)[1].split(
+        "\n    )", 1
+    )[0]
+    assert '"qwen3-asr-06b-aligner-v1"' in expected_profiles
+    assert '"funasr-sensevoice-small-v1"' not in expected_profiles
+    assert '"faster-whisper-large-v3-turbo-v1"' not in expected_profiles
+    assert "exact qwen3-asr-only profile contract" in script
 
 
 def test_qwen3_asr_qualification_freezes_dual_models_bf16_and_result_flow():
     script = read("scripts/qualify-qwen3-asr-production.ps1")
     model = read("scripts/prepare_qwen3_asr_models.py")
     runner = read("scripts/run_qwen3_asr_qualification.py")
-    assert "qwen-asr==0.0.6" in read("asr_service/requirements-qwen3-asr.txt")
+    assert "qwen-asr==0.0.6+ragpincheng.zh1" in read(
+        "asr_service/requirements-qwen3-asr.txt"
+    )
     assert "torch==2.7.0+cu128" in script
     assert "torchaudio==2.7.0+cu128" in script
-    assert "requirements-qwen3-asr.txt" in script
+    assert "requirements-qwen3-asr-windows.txt" in script
     assert "torch.cuda.is_bf16_supported()" in script
     assert "torch.bfloat16" in script
     assert "5eb144179a02acc5e5ba31e748d22b0cf3e303b0" in script
