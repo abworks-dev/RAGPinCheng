@@ -2777,3 +2777,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`scripts/qualify-qwen3-asr-production.ps1`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`
 - 验证：PowerShell AST 解析、Python `py_compile`、`git diff --check` 通过；未安装依赖、未启动服务。Profile admission 仍 disabled，生产服务未修改。
 - 待办/风险：需 PR CI 通过并合入 master 后，以新的完整 master SHA 重跑 Qwen R3。
+
+### 08:39 — 完善 Qwen 许可证据审计
+
+- 完成：run `31286050162` 已通过依赖安装、模块来源和共享 wheel cache 发布（缓存从 46 增至 125），在许可审计因包元数据缺少 License 字段而失败；审计现在读取受限标准 LICENSE/COPYING/NOTICE 文件并识别 Apache/MIT/BSD/MPL 声明，未知仍阻断；workflow 同步上传非敏感许可矩阵证据。
+- 文件：`scripts/run_qwen3_asr_qualification.py`、`scripts/qualify-qwen3-asr-production.ps1`、`.github/workflows/qualify-qwen3-asr-production.yml`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`
+- 验证：待本地 Python/PowerShell/workflow 静态检查及 PR CI；未修改下载源、requirements、模型、生产服务或 Profile admission。
+- 待办/风险：需 CI 通过并合入 master 后重跑 Qwen R3；若仍有 unknown/blocked 包，依据上传的许可矩阵逐项处理，不自动放宽许可门禁。
