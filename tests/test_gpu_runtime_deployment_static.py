@@ -293,7 +293,7 @@ def test_qualification_requires_every_approved_precision_to_complete():
 
 
 def test_automatic_deploy_is_gated_and_gpu_fingerprint_aware():
-    workflow = read(".github/workflows/deploy-production.yml")
+    workflow = read(".github/workflows/production-deploy.yml")
     deploy = read("scripts/deploy-gpu.ps1")
     assert "PRODUCTION_AUTO_DEPLOY_ENABLED == 'true'" in workflow
     assert "production-gpu-exclusive" in workflow
