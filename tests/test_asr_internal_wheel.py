@@ -112,15 +112,51 @@ def test_fixed_contract_has_no_free_package_or_source_inputs():
     assert MODULE.SETUPTOOLS_REQUIREMENT == "setuptools==80.9.0"
     assert MODULE.WHEEL_REQUIREMENT == "wheel==0.45.1"
     assert MODULE.SDIST_SIZE_BYTES == 19214172
-    assert MODULE.SDIST_URL.startswith("https://files.pythonhosted.org/")
+    assert str(MODULE.PRELOADED_SDIST_PATH).endswith(
+        r"D:\RAGPinCheng\runtime\qualification-inputs\faster-whisper\jieba-0.42.1.tar.gz"
+    )
     assert source.count('subparser.add_argument("--bundle-dir"') == 1
     assert "--package" not in source
     assert "--version" not in source
     assert "--source-url" not in source
     assert "BUILD_REPETITIONS = 2" in source
     assert "network access is disabled during wheel build" in source
-    assert "_download_fixed_sdist(downloads / SDIST_FILE_NAME)" in source
+    assert "_copy_preloaded_sdist(downloads / SDIST_FILE_NAME)" in source
     assert '"--no-binary=:all:"' not in source
+
+
+def test_preloaded_sdist_is_copied_only_after_source_validation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    source = tmp_path / MODULE.SDIST_FILE_NAME
+    destination = tmp_path / "run" / MODULE.SDIST_FILE_NAME
+    source.write_bytes(b"validated fixed source")
+    calls: list[Path] = []
+
+    monkeypatch.setattr(MODULE, "PRELOADED_SDIST_PATH", source)
+    monkeypatch.setattr(MODULE, "validate_sdist", lambda path: calls.append(path))
+
+    destination.parent.mkdir()
+    MODULE._copy_preloaded_sdist(destination)
+
+    assert destination.read_bytes() == source.read_bytes()
+    assert calls == [source, destination]
+
+
+def test_preloaded_sdist_must_exist_at_fixed_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    source = tmp_path / "missing" / MODULE.SDIST_FILE_NAME
+    destination = tmp_path / "run" / MODULE.SDIST_FILE_NAME
+    destination.parent.mkdir()
+    monkeypatch.setattr(MODULE, "PRELOADED_SDIST_PATH", source)
+
+    with pytest.raises(MODULE.WheelContractError, match="missing at"):
+        MODULE._copy_preloaded_sdist(destination)
+
+    assert not destination.exists()
 
 
 def test_valid_bundle_round_trips_with_strict_manifest(tmp_path: Path):

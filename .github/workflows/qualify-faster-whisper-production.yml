@@ -77,6 +77,22 @@ jobs:
           ) {
             throw "ASR_DEPENDENCY_PROXY must be an absolute HTTP(S) URL"
           }
+          $preloadedSdist = "D:\RAGPinCheng\runtime\qualification-inputs\faster-whisper\jieba-0.42.1.tar.gz"
+          if (-not (Test-Path -LiteralPath $preloadedSdist -PathType Leaf)) {
+            throw "Preloaded fixed jieba sdist is missing"
+          }
+          $preloadedSdistItem = Get-Item -LiteralPath $preloadedSdist -Force
+          if (($preloadedSdistItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "Preloaded fixed jieba sdist must not be a reparse point"
+          }
+          if ([int64]$preloadedSdistItem.Length -ne 19214172) {
+            throw "Preloaded fixed jieba sdist size mismatch"
+          }
+          $preloadedSdistHash = (Get-FileHash -LiteralPath $preloadedSdist -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($preloadedSdistHash -ne "055ca12f62674fafed09427f176506079bc135638a14e23e25be909131928db2") {
+            throw "Preloaded fixed jieba sdist SHA-256 mismatch"
+          }
+          Write-Host "R3_PRELOADED_SDIST source=verified size_bytes=$($preloadedSdistItem.Length) sha256=$preloadedSdistHash"
           $savedProxyEnvironment = @{}
           foreach ($name in @("HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY")) {
             $savedProxyEnvironment[$name] = [System.Environment]::GetEnvironmentVariable(
