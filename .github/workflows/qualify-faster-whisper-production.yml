@@ -143,6 +143,7 @@ jobs:
             CrcmodWheelBundlePath = "${{ runner.temp }}\faster-whisper-internal-wheels-${{ github.run_id }}\crcmod"
             SummaryPath = "${{ runner.temp }}\faster-whisper-r3-${{ github.run_id }}\qualification-verdict.json"
             DependencyDiagnosticPath = "${{ runner.temp }}\faster-whisper-r3-${{ github.run_id }}\dependency-diagnostic.json"
+            QualificationDiagnosticPath = "${{ runner.temp }}\faster-whisper-r3-${{ github.run_id }}\qualification-diagnostic.json"
           }
           function Write-WorkflowFailureVerdict {
             param([Parameter(Mandatory = $true)][string]$Code)
@@ -161,9 +162,35 @@ jobs:
               peak_gpu_utilization_percent = 0
               wheel_cache_status = "unknown"
               wheel_cache_key = ""
+              diagnostic_available = $false
               profile_admission = "disabled"
               production_services_modified = $false
             } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $params.SummaryPath -Encoding UTF8
+            $diagnosticPath = $params.QualificationDiagnosticPath
+            [ordered]@{
+              schema_version = "faster-whisper-r3-diagnostic/1"
+              status = "fail"
+              failure_code = $Code
+              failure_stage = "workflow_wrapper"
+              runner_exit_code = $null
+              report_available = $false
+              commit_sha = "${{ inputs.commit_sha }}".ToLowerInvariant()
+              run_id = "${{ github.run_id }}"
+              model_id = "dropbox-dash/faster-whisper-large-v3-turbo"
+              model_revision = "0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf"
+              sample_set_id = ""
+              annotation_version = ""
+              sample_count = 0
+              passed_sample_count = 0
+              failed_sample_count = 0
+              failed_sample_ids = @()
+              thresholds = @{}
+              info = @{}
+              gates = @{}
+              samples = @()
+              profile_admission = "disabled"
+              production_services_modified = $false
+            } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $diagnosticPath -Encoding UTF8
           }
 
           function Stop-WorkflowProcessTree {
@@ -215,7 +242,8 @@ jobs:
             "-Antlr4WheelBundlePath", $params.Antlr4WheelBundlePath,
             "-CrcmodWheelBundlePath", $params.CrcmodWheelBundlePath,
             "-SummaryPath", $params.SummaryPath,
-            "-DependencyDiagnosticPath", $params.DependencyDiagnosticPath
+            "-DependencyDiagnosticPath", $params.DependencyDiagnosticPath,
+            "-QualificationDiagnosticPath", $params.QualificationDiagnosticPath
           )
           $wrapper = Start-Process `
             -FilePath "powershell.exe" `
@@ -265,7 +293,7 @@ jobs:
             throw "Qualification wrapper verdict: $($wrapperVerdict.failure_code)"
           }
 
-      - name: Publish sanitized qualification summary
+      - name: Publish qualification summary
         if: ${{ always() }}
         shell: powershell
         run: |
@@ -281,6 +309,7 @@ jobs:
               "- Model revision: ``$($summary.model_revision)``",
               "- Baseline GPU memory: ``$($summary.baseline_gpu_memory_mib) MiB``",
               "- Peak GPU memory: ``$($summary.peak_gpu_memory_mib) MiB``",
+              "- Qualification diagnostic: ``$($summary.diagnostic_available)``",
               "- Wheel cache: ``$($summary.wheel_cache_status)``",
               "- Wheel cache key: ``$($summary.wheel_cache_key)``",
               "- Profile admission: ``$($summary.profile_admission)``",
@@ -301,13 +330,27 @@ jobs:
                 "- Fallback probe exit code: ``$($diagnostic.fallback_probe_exit_code)``"
               )
             }
+            $qualificationDiagnosticPath = "${{ runner.temp }}\faster-whisper-r3-${{ github.run_id }}\qualification-diagnostic.json"
+            if (Test-Path -LiteralPath $qualificationDiagnosticPath -PathType Leaf) {
+              $qualificationDiagnostic = Get-Content -LiteralPath $qualificationDiagnosticPath -Raw -Encoding UTF8 | ConvertFrom-Json
+              $lines += @(
+                "- Qualification stage: ``$($qualificationDiagnostic.failure_stage)``",
+                "- Qualification report available: ``$($qualificationDiagnostic.report_available)``",
+                "- Qualification sample count: ``$($qualificationDiagnostic.sample_count)``",
+                "- Failed sample count: ``$($qualificationDiagnostic.failed_sample_count)``",
+                "- Failed sample IDs: ``$(@($qualificationDiagnostic.failed_sample_ids) -join ', ')``",
+                "- Failed gates: ``$(@($qualificationDiagnostic.gates.PSObject.Properties | Where-Object { $_.Value.pass -eq $false } | Select-Object -ExpandProperty Name) -join ', ')``",
+                "- Steady-state RTF: ``$($qualificationDiagnostic.info.steady_state_rtf)`` / ``$($qualificationDiagnostic.info.rtf_limit)``",
+                "- Timestamp p95: ``$($qualificationDiagnostic.gates.timestamp_p95_ms.observed)`` / ``$($qualificationDiagnostic.gates.timestamp_p95_ms.threshold) ms``"
+              )
+            }
             $lines -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding UTF8
           } else {
             "Qualification ended before a sanitized verdict could be written." |
               Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding UTF8
           }
 
-      - name: Upload sanitized verdict
+      - name: Upload qualification diagnostics
         id: upload_verdict
         if: ${{ always() }}
         continue-on-error: true
@@ -318,10 +361,11 @@ jobs:
             ${{ runner.temp }}\faster-whisper-r3-${{ github.run_id }}\qualification-verdict.json
             ${{ runner.temp }}\faster-whisper-r3-${{ github.run_id }}\qualification-verdict.json.progress.json
             ${{ runner.temp }}\faster-whisper-r3-${{ github.run_id }}\dependency-diagnostic.json
+            ${{ runner.temp }}\faster-whisper-r3-${{ github.run_id }}\qualification-diagnostic.json
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Retry sanitized verdict upload
+      - name: Retry qualification diagnostics upload
         if: ${{ always() && steps.upload_verdict.outcome == 'failure' }}
         uses: actions/upload-artifact@v4
         with:
@@ -330,5 +374,6 @@ jobs:
             ${{ runner.temp }}\faster-whisper-r3-${{ github.run_id }}\qualification-verdict.json
             ${{ runner.temp }}\faster-whisper-r3-${{ github.run_id }}\qualification-verdict.json.progress.json
             ${{ runner.temp }}\faster-whisper-r3-${{ github.run_id }}\dependency-diagnostic.json
+            ${{ runner.temp }}\faster-whisper-r3-${{ github.run_id }}\qualification-diagnostic.json
           if-no-files-found: error
           retention-days: 14
