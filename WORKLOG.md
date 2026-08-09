@@ -2778,6 +2778,13 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 验证：PowerShell AST 解析、Python `py_compile`、`git diff --check` 通过；未安装依赖、未启动服务。Profile admission 仍 disabled，生产服务未修改。
 - 待办/风险：需 PR CI 通过并合入 master 后，以新的完整 master SHA 重跑 Qwen R3。
 
+### 08:24 — 交付 faster-whisper 门禁级诊断分支
+
+- 完成：基于最新 `origin/master@e42cb6088fd587f1bc454454b4528d8fc549004d` 整理 faster-whisper 资格诊断改动；新增安全的门禁、失败样本、RTF、CER、时间戳、确定性、hash 和 GPU 指标 artifact，继续排除转写正文、Token、环境变量和原始 runner 日志。
+- 文件：`.github/workflows/qualify-faster-whisper-production.yml`、`scripts/qualify-faster-whisper-production.ps1`、`tests/test_faster_whisper_qualification_diagnostic.py`、`WORKLOG.md`
+- 验证：PowerShell parser、workflow YAML 解析、Python `py_compile`、3 项静态诊断断言、PowerShell 投影自测和 `git diff --check` 通过；本机未安装 pytest，未安装新依赖。
+- 待办/风险：分支仍需 PR CI 和合并；未触发生产 R3、未启用 Profile、未修改生产服务或流量。
+
 ### 08:39 — 完善 Qwen 许可证据审计
 
 - 完成：run `31286050162` 已通过依赖安装、模块来源和共享 wheel cache 发布（缓存从 46 增至 125），在许可审计因包元数据缺少 License 字段而失败；审计现在读取受限标准 LICENSE/COPYING/NOTICE 文件并识别 Apache/MIT/BSD/MPL 声明，未知仍阻断；workflow 同步上传非敏感许可矩阵证据。
