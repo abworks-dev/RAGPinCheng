@@ -2840,3 +2840,11 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 完成：将清理执行收敛为仅供调用的 `Production Cleanup` reusable workflow；新增 `Production Cleanup Operations` 承接手动、夜间 DryRun 与磁盘压力编排，并通过 reusable workflow 复用原清理脚本和门禁。
 - 文件：`.github/workflows/production-cleanup.yml`、`.github/workflows/production-cleanup-operations.yml`、`tests/test_production_cleanup_triggers_static.py`、`project-docs/features/gpu-runtime-deployment.md`、`WORKLOG.md`
 - 验证：Python YAML 解析、静态测试函数、测试文件 `py_compile`、当前目录旧路径检查和 `git diff --check` 通过；当前环境未安装 pytest，相关静态测试待 PR CI 验证；未触发清理、部署或生产服务操作。
+
+## 2026-08-10
+
+### 03:48 — 修复旧版 cleanup 的 runner 上下文
+
+- 完成：将旧版 `production-cleanup.yml` 与 `production-cleanup-operations.yml` 中 Job 级的 `runner.temp` 引用移动到实际执行步骤的 `env`，修复 GitHub 对分支 `codex/split-production-cleanup-workflows` 的 workflow 解析失败。
+- 文件：`.github/workflows/production-cleanup.yml`、`.github/workflows/production-cleanup-operations.yml`、`WORKLOG.md`
+- 验证：两个 cleanup workflow 与 `production-deploy.yml` YAML 解析通过；结构化检查确认 Job 级 `env` 不再使用 `runner.temp`，所有 `$env:REPORT_ROOT` 执行步骤均有变量来源；`git diff --check` 通过。未触发清理、部署或生产服务操作。

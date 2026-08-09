@@ -72,7 +72,6 @@ jobs:
       run_dryrun: ${{ steps.disk.outputs.run_dryrun }}
       tier: ${{ steps.disk.outputs.tier }}
     env:
-      REPORT_ROOT: ${{ runner.temp }}\ragpincheng-production-cleanup
       AUTO_CLEANUP_ENABLED: ${{ vars.PRODUCTION_AUTO_CLEANUP_ENABLED }}
     steps:
       - name: Verify disk checker
@@ -89,6 +88,7 @@ jobs:
         id: disk
         shell: powershell
         env:
+          REPORT_ROOT: ${{ runner.temp }}\ragpincheng-production-cleanup
           DISK_REPORT: ${{ runner.temp }}\ragpincheng-production-cleanup\disk.json
         run: |
           Set-StrictMode -Version Latest
