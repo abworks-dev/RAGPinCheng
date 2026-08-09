@@ -2837,7 +2837,7 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 
 ### 11:17 — 切换 CI 到自托管 Ubuntu runner
 
-- 完成：将 7 个常规 CI job 和 Qwen qualification 的受控 wheel 构建 job 从 GitHub 托管 `ubuntu-latest` 路由到标签为 `[self-hosted, Linux, X64, ubuntu, ci]` 的 `${PRIVATE_CI_RUNNER_NAME}`；常规 CI 增加同仓库 PR 门禁，避免允许 fork 的私有仓库在自托管 runner 上执行 fork PR 代码。Windows R3 qualification job 及生产边界保持不变。
-- 文件：`.github/workflows/ci.yml`、`.github/workflows/qualify-qwen3-asr-production.yml`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`
-- 验证：`${PRIVATE_CI_RUNNER_NAME}` 在线且标签匹配；workflow YAML 解析、测试文件 `py_compile`、`git diff --check` 通过；针对性静态测试 `39 passed`，完整 ASR contract 集合 `384 passed, 2 subtests passed`。本机未安装 `actionlint`，未额外安装依赖，真实 runner 调度待 PR CI 验证。
+- 完成：将 7 个常规 CI job 和 Qwen qualification 的受控 wheel 构建 job 从 GitHub 托管 `ubuntu-latest` 路由到标签为 `[self-hosted, Linux, X64, ubuntu, ci]` 的 `${PRIVATE_CI_RUNNER_NAME}`；常规 CI 增加同仓库 PR 门禁，避免允许 fork 的私有仓库在自托管 runner 上执行 fork PR 代码。首轮 PR run `31292161817` 已确认真实调度到目标 runner，但 `actions/setup-python` 因 tool cache 缺失且 GitHub Python archive 下载连续 socket hang up/timeout 而触发 15 分钟硬超时；随后改为严格核对服务器预装 Python 3.11 和 Node 20，并为每个 Python job 在 `$RUNNER_TEMP` 创建唯一 venv，避免在线工具下载与主机环境污染。Windows R3 qualification job 及生产边界保持不变。
+- 文件：`.github/workflows/ci.yml`、`.github/workflows/qualify-qwen3-asr-production.yml`、`tests/test_asr_deployment_static.py`、`tests/test_transcription_static_boundaries.py`、`WORKLOG.md`
+- 验证：`${PRIVATE_CI_RUNNER_NAME}` 在线且标签匹配；workflow YAML 解析、测试文件 `py_compile`、`git diff --check` 通过；修复后针对性静态测试 `47 passed`，完整 ASR contract 集合 `384 passed, 2 subtests passed`。本机未安装 `actionlint`，未额外安装依赖，修复后的真实 runner 调度待 PR CI 验证。
 - 待办/风险：单台自托管 runner 将串行处理并发 jobs；PR CI 通过后才能合并并刷新 PR #142，Profile admission 仍保持 disabled。

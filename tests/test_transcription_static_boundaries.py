@@ -228,5 +228,5 @@ def test_ci_runs_complete_phase1_suite_with_existing_dependencies():
     ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     assert "test-transcription-contracts:" in ci
     assert "pytest tests/test_transcription*.py tests/test_transcript_manual_regression.py" in ci
-    assert 'python-version: "3.11"' in ci
+    assert 'python3.11 -m venv "$venv"' in ci
     assert "funasr" not in ci.lower() and "faster-whisper" not in ci.lower()

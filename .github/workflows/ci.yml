@@ -23,20 +23,34 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+      - name: Create isolated Python 3.11 environment
+        shell: bash
+        run: |
+          version="$(python3.11 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+          if [[ "$version" != "3.11" ]]; then
+            echo "${PRIVATE_CI_RUNNER_NAME} must provide Python 3.11; found $version" >&2
+            exit 1
+          fi
+          venv="$RUNNER_TEMP/ragpincheng-ci-${GITHUB_JOB}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          if [[ -e "$venv" ]]; then
+            echo "Refusing to reuse an existing CI virtual environment: $venv" >&2
+            exit 1
+          fi
+          python3.11 -m venv "$venv"
+          echo "$venv/bin" >> "$GITHUB_PATH"
 
       - name: Check Python syntax
         run: python -m compileall -q api src scripts tests gpu_service asr_service
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
+      - name: Verify preinstalled Node.js 20
+        shell: bash
+        run: |
+          major="$(node -p 'process.versions.node.split(".")[0]')"
+          if [[ "$major" != "20" ]]; then
+            echo "${PRIVATE_CI_RUNNER_NAME} must provide Node.js 20; found $(node --version)" >&2
+            exit 1
+          fi
+          npm --version
 
       - name: Test and build frontend
         working-directory: frontend
@@ -60,10 +74,21 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+      - name: Create isolated Python 3.11 environment
+        shell: bash
+        run: |
+          version="$(python3.11 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+          if [[ "$version" != "3.11" ]]; then
+            echo "${PRIVATE_CI_RUNNER_NAME} must provide Python 3.11; found $version" >&2
+            exit 1
+          fi
+          venv="$RUNNER_TEMP/ragpincheng-ci-${GITHUB_JOB}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          if [[ -e "$venv" ]]; then
+            echo "Refusing to reuse an existing CI virtual environment: $venv" >&2
+            exit 1
+          fi
+          python3.11 -m venv "$venv"
+          echo "$venv/bin" >> "$GITHUB_PATH"
 
       - name: Install declared Python contract-test dependencies
         run: |
@@ -81,10 +106,21 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+      - name: Create isolated Python 3.11 environment
+        shell: bash
+        run: |
+          version="$(python3.11 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+          if [[ "$version" != "3.11" ]]; then
+            echo "${PRIVATE_CI_RUNNER_NAME} must provide Python 3.11; found $version" >&2
+            exit 1
+          fi
+          venv="$RUNNER_TEMP/ragpincheng-ci-${GITHUB_JOB}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          if [[ -e "$venv" ]]; then
+            echo "Refusing to reuse an existing CI virtual environment: $venv" >&2
+            exit 1
+          fi
+          python3.11 -m venv "$venv"
+          echo "$venv/bin" >> "$GITHUB_PATH"
 
       - name: Install existing Phase 5 test dependencies
         run: |
@@ -110,10 +146,21 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+      - name: Create isolated Python 3.11 environment
+        shell: bash
+        run: |
+          version="$(python3.11 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+          if [[ "$version" != "3.11" ]]; then
+            echo "${PRIVATE_CI_RUNNER_NAME} must provide Python 3.11; found $version" >&2
+            exit 1
+          fi
+          venv="$RUNNER_TEMP/ragpincheng-ci-${GITHUB_JOB}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          if [[ -e "$venv" ]]; then
+            echo "Refusing to reuse an existing CI virtual environment: $venv" >&2
+            exit 1
+          fi
+          python3.11 -m venv "$venv"
+          echo "$venv/bin" >> "$GITHUB_PATH"
 
       - name: Install provider test dependencies
         run: pip install httpx pytest python-dotenv
@@ -127,9 +174,21 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+      - name: Create isolated Python 3.11 environment
+        shell: bash
+        run: |
+          version="$(python3.11 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+          if [[ "$version" != "3.11" ]]; then
+            echo "${PRIVATE_CI_RUNNER_NAME} must provide Python 3.11; found $version" >&2
+            exit 1
+          fi
+          venv="$RUNNER_TEMP/ragpincheng-ci-${GITHUB_JOB}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          if [[ -e "$venv" ]]; then
+            echo "Refusing to reuse an existing CI virtual environment: $venv" >&2
+            exit 1
+          fi
+          python3.11 -m venv "$venv"
+          echo "$venv/bin" >> "$GITHUB_PATH"
       - run: pip install pytest fastapi httpx requests python-dotenv
       - run: pytest tests/test_transcription_asr_service_contract.py tests/test_transcription_provider_registry.py tests/test_transcription_profile_catalog.py tests/test_transcription_remote_provider.py tests/test_asr_deployment_static.py tests/test_qwen3_asr_controlled_wheel.py tests/test_gpu_runtime_deployment_static.py tests/test_deploy_git_safety.py tests/test_asr_activation.py tests/test_faster_whisper_model_tls.py asr_service/tests -v
 
@@ -142,10 +201,21 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+      - name: Create isolated Python 3.11 environment
+        shell: bash
+        run: |
+          version="$(python3.11 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+          if [[ "$version" != "3.11" ]]; then
+            echo "${PRIVATE_CI_RUNNER_NAME} must provide Python 3.11; found $version" >&2
+            exit 1
+          fi
+          venv="$RUNNER_TEMP/ragpincheng-ci-${GITHUB_JOB}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          if [[ -e "$venv" ]]; then
+            echo "Refusing to reuse an existing CI virtual environment: $venv" >&2
+            exit 1
+          fi
+          python3.11 -m venv "$venv"
+          echo "$venv/bin" >> "$GITHUB_PATH"
 
       - name: Install GPU contract-test dependencies without GPU packages
         run: pip install fastapi uvicorn pydantic httpx pytest python-dotenv
@@ -161,11 +231,6 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
 
       - name: Verify .env.example has all required GPU config keys
         run: |

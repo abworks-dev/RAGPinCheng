@@ -189,6 +189,11 @@ def test_ci_uses_trusted_self_hosted_ubuntu_runner_only():
     assert ci.count(trusted_runner) == 7
     assert ci.count(same_repository_gate) == 7
     assert "runs-on: ubuntu-latest" not in ci
+    assert "actions/setup-python" not in ci
+    assert ci.count('python3.11 -m venv "$venv"') == 6
+    assert ci.count('echo "$venv/bin" >> "$GITHUB_PATH"') == 6
+    assert "actions/setup-node" not in ci
+    assert "Verify preinstalled Node.js 20" in ci
 
 
 def test_root_and_windows_env_templates_are_not_merged():
@@ -1082,6 +1087,8 @@ def test_qwen3_asr_qualification_is_manual_sha_bound_and_isolated():
     )[0]
     assert "runs-on: [self-hosted, Linux, X64, ubuntu, ci]" in build_job
     assert "ubuntu-latest" not in build_job
+    assert "actions/setup-python" not in build_job
+    assert 'python3.11 -m venv "$venv"' in build_job
     assert "runs-on: [self-hosted, Windows, X64, asr-production]" in workflow
     assert "production-asr-qwen3-asr-qualification" in workflow
     assert "D:\\Services\\RAGPinCheng-ASR\\qualification\\qwen3-asr" in script

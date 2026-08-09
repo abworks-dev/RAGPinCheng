@@ -56,10 +56,21 @@ jobs:
           ref: ${{ inputs.commit_sha }}
           fetch-depth: 1
 
-      - name: Set up fixed wheel build Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+      - name: Create isolated fixed wheel build environment
+        shell: bash
+        run: |
+          version="$(python3.11 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+          if [[ "$version" != "3.11" ]]; then
+            echo "${PRIVATE_CI_RUNNER_NAME} must provide Python 3.11; found $version" >&2
+            exit 1
+          fi
+          venv="$RUNNER_TEMP/qwen3-asr-wheel-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          if [[ -e "$venv" ]]; then
+            echo "Refusing to reuse an existing wheel build environment: $venv" >&2
+            exit 1
+          fi
+          python3.11 -m venv "$venv"
+          echo "$venv/bin" >> "$GITHUB_PATH"
 
       - name: Build reproducible controlled Chinese-only Qwen wheel
         shell: bash
