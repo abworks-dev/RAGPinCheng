@@ -16,7 +16,8 @@ param(
     [string]$CrcmodWheelBundlePath,
     [string]$ExecuteQualification = "false",
     [string]$SummaryPath = "",
-    [string]$DependencyDiagnosticPath = ""
+    [string]$DependencyDiagnosticPath = "",
+    [string]$QualificationDiagnosticPath = ""
 )
 
 Set-StrictMode -Version Latest
@@ -88,6 +89,16 @@ function Write-JsonFile {
         $json + "`n",
         (New-Object System.Text.UTF8Encoding($false))
     )
+}
+
+function Get-OptionalPropertyValue {
+    param(
+        [Parameter(Mandatory = $true)][object]$Object,
+        [Parameter(Mandatory = $true)][string]$Name
+    )
+    $property = $Object.PSObject.Properties[$Name]
+    if ($null -eq $property) { return $null }
+    return $property.Value
 }
 
 function Get-Sha256 {
@@ -1309,6 +1320,7 @@ function Write-SanitizedSummary {
         peak_gpu_utilization_percent = $PeakUtilization
         wheel_cache_status = $WheelCacheStatus
         wheel_cache_key = $WheelCacheKey
+        diagnostic_available = (-not [string]::IsNullOrWhiteSpace($QualificationDiagnosticPath))
         profile_admission = "disabled"
         production_services_modified = $false
     }
@@ -1320,6 +1332,96 @@ function Write-SanitizedSummary {
         }
         Write-JsonFile -Path $SummaryPath -Value $summary
     }
+}
+
+function Write-QualificationDiagnostic {
+    param(
+        [Parameter(Mandatory = $true)][string]$Status,
+        [Parameter(Mandatory = $true)][string]$Code,
+        [Parameter(Mandatory = $true)][string]$Stage,
+        [object]$Report = $null,
+        [object]$RunnerExitCode = $null
+    )
+    if ([string]::IsNullOrWhiteSpace($QualificationDiagnosticPath)) { return }
+    $diagnostic = [ordered]@{
+        schema_version = "faster-whisper-r3-diagnostic/1"
+        status = $Status
+        failure_code = $Code
+        failure_stage = $Stage
+        runner_exit_code = $RunnerExitCode
+        report_available = $false
+        commit_sha = $CommitSha.ToLowerInvariant()
+        run_id = $RunId
+        model_id = "dropbox-dash/faster-whisper-large-v3-turbo"
+        model_revision = $ModelRevision
+        baseline_gpu_memory_mib = $BaselineMemoryMiB
+        peak_gpu_memory_mib = $PeakMemoryMiB
+        peak_gpu_utilization_percent = $PeakUtilization
+        wheel_cache_status = $WheelCacheStatus
+        profile_admission = "disabled"
+        production_services_modified = $false
+        sample_set_id = ""
+        annotation_version = ""
+        sample_count = 0
+        passed_sample_count = 0
+        failed_sample_count = 0
+        failed_sample_ids = @()
+        thresholds = @{}
+        info = @{}
+        gates = @{}
+        samples = @()
+    }
+    if ($null -ne $Report) {
+        $diagnostic.report_available = $true
+        $diagnostic.sample_set_id = [string]$Report.sample_set_id
+        $diagnostic.annotation_version = [string]$Report.annotation_version
+        $diagnostic.sample_count = [int]$Report.sample_count
+        $diagnostic.thresholds = $Report.thresholds
+        $diagnostic.info = $Report.info
+        $diagnostic.gates = $Report.gates
+        $safeSamples = @(
+            @($Report.samples) | ForEach-Object {
+                [ordered]@{
+                    sample_id = Get-OptionalPropertyValue -Object $_ -Name "sample_id"
+                    scenario = Get-OptionalPropertyValue -Object $_ -Name "scenario"
+                    negative_control = [bool](Get-OptionalPropertyValue -Object $_ -Name "negative_control")
+                    duration_ms = Get-OptionalPropertyValue -Object $_ -Name "duration_ms"
+                    segment_count = Get-OptionalPropertyValue -Object $_ -Name "segment_count"
+                    canonical_sha256 = Get-OptionalPropertyValue -Object $_ -Name "canonical_sha256"
+                    markdown_sha256 = Get-OptionalPropertyValue -Object $_ -Name "markdown_sha256"
+                    rtf = Get-OptionalPropertyValue -Object $_ -Name "rtf"
+                    rtf_pass = Get-OptionalPropertyValue -Object $_ -Name "rtf_pass"
+                    elapsed = Get-OptionalPropertyValue -Object $_ -Name "elapsed"
+                    deterministic = Get-OptionalPropertyValue -Object $_ -Name "deterministic"
+                    parser_turn_count = Get-OptionalPropertyValue -Object $_ -Name "parser_turn_count"
+                    cer = Get-OptionalPropertyValue -Object $_ -Name "cer"
+                    cer_limit = Get-OptionalPropertyValue -Object $_ -Name "cer_limit"
+                    cer_pass = Get-OptionalPropertyValue -Object $_ -Name "cer_pass"
+                    term_hits = Get-OptionalPropertyValue -Object $_ -Name "term_hits"
+                    term_total = Get-OptionalPropertyValue -Object $_ -Name "term_total"
+                    code_hits = Get-OptionalPropertyValue -Object $_ -Name "code_hits"
+                    code_total = Get-OptionalPropertyValue -Object $_ -Name "code_total"
+                    timestamp_drift_max_ms = Get-OptionalPropertyValue -Object $_ -Name "timestamp_drift_max_ms"
+                    forbidden_term_hits = Get-OptionalPropertyValue -Object $_ -Name "forbidden_term_hits"
+                    forbidden_code_hits = Get-OptionalPropertyValue -Object $_ -Name "forbidden_code_hits"
+                    pass = [bool](Get-OptionalPropertyValue -Object $_ -Name "pass")
+                }
+            }
+        )
+        $diagnostic.samples = $safeSamples
+        $diagnostic.passed_sample_count = @($safeSamples | Where-Object pass).Count
+        $diagnostic.failed_sample_count = @($safeSamples | Where-Object { -not $_.pass }).Count
+        $diagnostic.failed_sample_ids = @(
+            $safeSamples |
+                Where-Object { -not $_.pass } |
+                ForEach-Object { $_.sample_id }
+        )
+    }
+    $diagnosticParent = Split-Path -Parent $QualificationDiagnosticPath
+    if (-not (Test-Path -LiteralPath $diagnosticParent)) {
+        New-Item -ItemType Directory -Path $diagnosticParent -Force | Out-Null
+    }
+    Write-JsonFile -Path $QualificationDiagnosticPath -Value $diagnostic
 }
 
 Write-QualificationProgress -Stage "wrapper_start"
@@ -2096,7 +2198,20 @@ print('qualification-module-origins-verified')
     $QualificationSummary = Get-Content `
         -LiteralPath $QualificationSummaryPath `
         -Raw -Encoding UTF8 | ConvertFrom-Json
+    $reportStatus = [string]$QualificationSummary.status
+    $reportCode = if ($reportStatus -eq "pass" -and [int]$QualificationSummary.sample_count -eq 8) {
+        ""
+    } else {
+        "quality_gate_failed"
+    }
+    Write-QualificationDiagnostic `
+        -Status $reportStatus `
+        -Code $reportCode `
+        -Stage "qualification_runner" `
+        -Report $QualificationSummary `
+        -RunnerExitCode $QualificationExitCode
     if ($QualificationSummary.status -ne "pass" -or $QualificationSummary.sample_count -ne 8) {
+        $FailureCode = "quality_gate_failed"
         throw "Qualification report did not pass every fixed gate"
     }
     if ($QualificationExitCode -ne 0) {
@@ -2172,6 +2287,18 @@ print('qualification-module-origins-verified')
     Write-Host "Samples: 8/8"
     Write-Host "Profile admission: disabled"
 } catch {
+    try {
+        if (
+            -not [string]::IsNullOrWhiteSpace($QualificationDiagnosticPath) -and
+            -not (Test-Path -LiteralPath $QualificationDiagnosticPath -PathType Leaf)
+        ) {
+            Write-QualificationDiagnostic `
+                -Status "fail" `
+                -Code $FailureCode `
+                -Stage "wrapper" `
+        }
+    } catch {
+    }
     if ($FailureCode -eq "dependency_preparation_failed") {
         try {
             Write-SanitizedDependencyFailure `
