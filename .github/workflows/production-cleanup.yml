@@ -1,6 +1,6 @@
 name: Production Cleanup
 
-"on":
+on:
   workflow_call:
     inputs:
       target:
@@ -53,9 +53,6 @@ name: Production Cleanup
   schedule:
     - cron: '30 19 * * *'
     - cron: '*/30 * * * *'
-  push:
-    branches: []
-
 permissions:
   contents: read
 
