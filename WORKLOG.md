@@ -2874,3 +2874,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`.gitignore`、`.env.example`、`asr_service/.env.example`、`.github/workflows/*.yml`、`scripts/*`、`tests/*`、`project-docs/*`、`WORKLOG.md`、部署指南。
 - 验证：批准范围内 pytest `156 passed`、`2 subtests passed`；WhisperX 静态测试除 `3 passed` 外有 1 项因当前虚拟环境缺少 `nltk` 未能执行；全部 PowerShell `.ps1` AST 解析通过，19 个 workflow YAML 解析通过，Python `compileall` 通过，`git diff --check` 通过；私有值残留扫描和 self-hosted `pull_request` 边界扫描均清洁。
 - 待办/风险：尚未修改仓库可见性或 Git 历史；公开前仍需配置 `production-asr` Environment 的私有变量，并单独制定和审批历史敏感信息清理方案；未触发生产部署、清理、资格验证或 runner。
+
+### 06:00 — 生产部署门禁阻断
+
+- 完成：按用户批准触发 `Deploy Production` workflow `31338245724`，先修复并推送部署与 cleanup job 的 `production-asr` Environment 绑定；远端部署运行随后在 GPU promotion 前因当前提交缺少匹配的已验证 runtime lock 而失败。
+- 文件：`.github/workflows/deploy-production.yml`、`.github/workflows/cleanup-production.yml`、`.github/workflows/cleanup-production-operations.yml`、`WORKLOG.md`。
+- 验证：Workflow 使用远端 `master@0517f3e257551a2d5b8606571637807f2700a2ff`；`deploy-gpu` 失败，`deploy-app` 和 `cleanup-after-deploy` 跳过；未执行 GPU promotion、应用部署或生产清理。
+- 待办/风险：若继续部署，需要单独批准 GPU runtime qualification；该流程会临时停止并恢复生产 GPU 服务，不能通过跳过 runtime lock 门禁解决。
