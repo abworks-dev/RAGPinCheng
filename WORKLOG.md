@@ -2770,3 +2770,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 完成：run `31284775742` 暴露 `accelerate-1.12.0` 的 wheel 已成功下载但默认 pip 输出缺少可绑定 URL；在主下载中启用 verbose pip 来源记录，继续由严格 wheel manifest、SHA-256 和 binary-only 门禁验证。
 - 文件：`scripts/qualify-qwen3-asr-production.ps1`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`
 - 验证：待本地 AST/静态检查及 PR CI；未安装依赖、未启动服务。Profile admission 仍 disabled，生产服务未修改。
+
+### 08:20 — 补齐 Qwen 文本哈希 helper
+
+- 完成：run `31285331967` 已通过 wheel 来源绑定，随后暴露共享缓存 key 调用了未定义的 `Get-TextSha256`；补齐与 faster-whisper 资格脚本一致的 UTF-8 SHA-256 helper 和静态契约。
+- 文件：`scripts/qualify-qwen3-asr-production.ps1`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`
+- 验证：PowerShell AST 解析、Python `py_compile`、`git diff --check` 通过；未安装依赖、未启动服务。Profile admission 仍 disabled，生产服务未修改。
+- 待办/风险：需 PR CI 通过并合入 master 后，以新的完整 master SHA 重跑 Qwen R3。
