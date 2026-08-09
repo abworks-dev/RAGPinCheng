@@ -1640,3 +1640,327 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 完成：在前述阶段梳理基础上，进一步核对总体方案、Phase 1/2 详细计划及 `src/transcription/`、SQLite Store/Migration 的实际类型与状态机，整理 Provider、Profile、Candidate、Canonical、Normalizer、Formatter、任务、版本、审核、发布、候选索引、正式 head、checkpoint、恢复和 GPU 调度等概念的职责、边界与设计用意。
 - 文件：仅更新 `WORKLOG.md`；未修改业务代码、配置、数据库、索引、API、前端或部署状态。
 - 验证：通过计划文档与当前类型/持久化代码交叉核对名词和值域；未重新运行测试或生产链路。
+
+## 2026-08-08
+
+### 05:21 — 实现 Windows GPU ASR 存储清理器
+
+- 完成：按批准的保留策略新增默认 DryRun 的 ASR 存储清理器，支持 7 天 staging、30 天 qualification 且保留最新 3 次、每个 wheel-cache 30 天/8 GB 上限；正式模型目录、活跃/近期路径和未知 qualification 命名均跳过，并输出审计 JSON。
+- 文件：`scripts/cleanup-asr-storage.ps1`、`project-docs/migrations/windows-gpu-asr-storage-cleanup.md`、`WORKLOG.md`
+- 验证：Windows PowerShell 解析通过；`git diff --check` 通过；临时隔离目录 DryRun 与 `-Apply` 自测通过，确认旧 staging、旧 qualification、旧 wheel 文件删除，近期文件和模型文件保留。
+- 待办/风险：未访问或修改生产 `${PRODUCTION_DATA_ROOT}`，未创建 Windows 计划任务；生产启用前必须先运行 DryRun 和 `-Apply -WhatIf`，确认 ASR 没有活动任务后再单独执行 `-Apply`。
+
+### 05:35 — 实现 Windows GPU Runtime 自动清理器
+
+- 完成：新增固定根目录 `${PRODUCTION_REPO_PATH}\runtime` 的 GPU runtime 清理器，默认 DryRun；按 release、qualification、resolver、pip-cache 和审计文件分别执行保留策略，保护当前/回滚 release、wheel-seed、活动进程、锁标记、reparse point 和单次删除容量上限。
+- 文件：`scripts/cleanup-gpu-runtime.ps1`、`scripts/install-gpu-runtime-cleanup-task.ps1`、`tests/test_gpu_runtime_cleanup_static.py`、`project-docs/migrations/windows-gpu-runtime-cleanup.md`、`WORKLOG.md`
+- 验证：两个 PowerShell 脚本 parser errors=0；GPU runtime 静态安全测试 5 passed；错误根目录 fail-closed 冒烟以 exit code 1 拒绝且未执行删除；`git diff --check` 通过。
+- 待办/风险：未访问或修改生产 `${PRODUCTION_REPO_PATH}\runtime`，未注册 Windows 计划任务，未执行 `-Apply`；生产启用前必须先运行 DryRun 和 `-Apply -WhatIf`，观察候选至少 7 天并单独确认删除模式。
+
+## 2026-08-09
+
+### 07:36 — 完成 faster-whisper R3 资格重跑
+
+- 完成：按用户批准在 `origin/master@fd084c5b66ad3591e5e0701bfb57405c6f7b2e5c` 执行既有生产资格 Run `31283606512`；不可变 revision、受控 wheel 构建、模型准备和 GPU 采样完成，最终 verdict 为 `qualification_failed`。
+- 文件：`WORKLOG.md`；本地保留脱敏 artifact 于 `.codex-worktrees/r3-run-31283606512-artifacts/`；未修改业务代码、依赖、Profile、部署或生产服务。
+- 验证：GitHub Actions Run 完成，wheel cache 为 `hit`，baseline GPU memory `2929 MiB`，peak `5342 MiB`，peak utilization `99%`，`production_services_modified=false`；失败发生在固定资格门禁报告未通过，未取得具体失败门项。
+- 待办/风险：当前 workflow 上传的 sanitized verdict 只包含总失败码和资源摘要，不包含样本/时间戳/RTF/共存等具体门禁失败原因；R3 不通过，Profile 继续保持 `disabled`，不得据此启用或切流量。
+
+### 07:56 — 增加 faster-whisper 门禁级诊断
+
+- 完成：在最新 `origin/master@34b2d1c515252a7870b966a692acc71fbd933edc` 基础上，为 faster-whisper 资格 workflow 增加结构化门禁诊断 artifact；输出失败 gates、失败样本 ID、RTF、CER、时间戳漂移、确定性、样本 hash 和资源摘要，保留原始转写文本、Token、环境变量和生产日志隔离。
+- 文件：独立 worktree 分支 `codex/faster-whisper-diagnostic-mode` 中的 `.github/workflows/qualify-faster-whisper-production.yml`、`scripts/qualify-faster-whisper-production.ps1`、`tests/test_faster_whisper_qualification_diagnostic.py`；本主工作区仅更新 `WORKLOG.md`。
+- 验证：Windows PowerShell parser、workflow YAML 解析、Python `py_compile`、3 项静态诊断断言、PowerShell 投影自测和 `git diff --check` 均通过；本地未运行 pytest（环境未安装 pytest），未触发生产重跑、未启用 Profile、未推送或部署。
+- 待办/风险：代码尚未提交或合并；合并后需先运行 CI，再另行批准生产 R3 重跑。
+
+### 08:29 — 推送 faster-whisper 诊断分支
+
+- 完成：将门禁级诊断改动提交为 `6c79127acb1ed862606f7b8b1bd2ff3daa4d55ca`，并推送远端分支 `codex/faster-whisper-diagnostic-mode`；远端 SHA 已核对一致。
+- 文件：远端分支包含 `.github/workflows/qualify-faster-whisper-production.yml`、`scripts/qualify-faster-whisper-production.ps1`、`tests/test_faster_whisper_qualification_diagnostic.py`、`WORKLOG.md`；本主工作区仅更新 `WORKLOG.md`。
+- 验证：提交前 PowerShell parser、workflow YAML、Python 编译、静态断言、投影自测和 `git diff --check` 通过；分支 push 未触发 CI。意外触发的 cleanup Run `31286213035` 无任何 job 并立即失败，未进入 runner、未执行生产清理。
+- 待办/风险：尚未创建 PR、运行 PR CI、合并 master 或重跑生产 R3；`cleanup-production.yml` 的 `push.branches: []` 会为分支 push 建立无 job 的失败 Run，属于相邻既有问题，本任务未修改。
+
+### 08:45 — 创建 faster-whisper 诊断 PR 并通过 CI
+
+- 完成：创建 PR #133；发现 master 前进导致冲突后，将分支 rebase 到 `master@7b34073474788d98ef4b3e312dc59b25762cf39e` 并以 `--force-with-lease` 更新；随后恢复既有 `Retry sanitized verdict upload` 步骤名称兼容静态契约，最终 head 为 `4799304cd30d45e820f007f3e2691b08512a0fc1`。
+- 文件：远端 PR #133 中的 faster-whisper workflow、资格脚本、诊断静态测试和分支 WORKLOG；本主工作区仅更新 `WORKLOG.md`。
+- 验证：CI Run `31286797205` 的 validate、transcription contracts、Phase 5、providers、ASR service contract、GPU contract、migration config 共 7 个 job 全部成功；PR 状态 `MERGEABLE/CLEAN`。首轮 CI 为 377 passed、1 failed，失败仅是步骤名静态契约，修复后对应 job 成功。
+- 待办/风险：PR 尚未合并，未触发生产 R3、未启用 Profile、未修改生产服务或流量；合并 master 需下一次明确授权。
+
+### 08:58 — 合并 faster-whisper 诊断 PR
+
+- 完成：按用户明确批准，以 merge commit 合并 PR #133；合并提交及远端 `master` 均为 `755ea6673762ab0c5a17a41071e899bb992a5367`，远端诊断分支未删除。
+- 文件：远端 `master` 纳入 PR #133 的 faster-whisper workflow、资格脚本、诊断静态测试和分支日志；本主工作区仅更新 `WORKLOG.md`，未改动或整理其他未提交文件。
+- 验证：合并前 PR 为 `CLEAN/MERGEABLE` 且 7 项检查成功；合并后 CI Run `31287235546` 的 7 个 job 全部成功。仓库未配置 `PRODUCTION_AUTO_DEPLOY_ENABLED`；对应 deploy Run `31287283128` 与 cleanup Run `31287235207` 均为 `jobs=[]`，未进入 runner、未执行部署、SSH 或生产清理。
+- 待办/风险：本次未触发 faster-whisper 生产 R3、未启用 Profile 或切换流量；下一次 R3 必须基于合并后的精确 `master` SHA 另行审批。两个零 job workflow Run 在 GitHub UI 显示 failure，属于既有触发配置问题，本任务未扩大范围修复。
+
+### 09:05 — 执行 faster-whisper R3 资格重跑
+
+- 完成：按用户批准，以 `origin/master@755ea6673762ab0c5a17a41071e899bb992a5367` 触发 R3 Run `31287507974`，显式启用真实 qualification 和固定八样本准备开关；不可变 revision 校验、checkout 成功。
+- 验证：Run 在 `Build reproducible controlled internal wheels` 阶段失败，固定 `jieba 0.42.1` sdist 下载流提前结束（`WheelContractError: Fixed jieba sdist download was truncated`）；未进入样本生成、模型准备、CUDA qualification 或服务操作。工作流 job `93178916417` 失败，未生成可上传的 verdict/diagnostic artifact。
+- 待办/风险：Profile 继续为 `disabled`，未修改生产服务、流量、现有 ASR venv 或模型。需要先处理 runner/代理对固定 19,214,172 字节 sdist 下载的截断问题，再对同一完整 SHA 取得新的 R3 重试批准；本轮未修改代码或配置。
+
+### 09:12 — 增加管理资料文件预览
+
+- 完成：资料管理列表为 PDF、DOCX、XLSX 与 PPTX 增加预览操作，复用对话界面的预览抽屉；管理资料接口按 `source_path` 聚合时返回代表性 `preview_parent_id`，供既有原始文件预览接口解析。
+- 文件：`src/indexing_pipeline.py`、`api/schemas.py`、`api/routes_admin.py`、`frontend/src/types.ts`、`frontend/src/pages/admin/AdminLayout.tsx`、`frontend/src/pages/admin/AdminDocumentsPage.tsx`、`project-docs/features/document-indexing.md`、`WORKLOG.md`。
+- 验证：Python `compileall` 通过；`git diff --check` 通过。前端 `npm run build` 和定向 Vitest 未执行，当前 `frontend/node_modules/.bin` 缺少 `tsc`、`vite` 与 `vitest` 可执行文件。
+- 待办/风险：未进行浏览器手工验收；预览继续沿用既有 `/api/source/{parent_id}/raw` 授权与格式支持范围，未改动上传、删除、索引或权限行为。
+
+### 09:21 — 改为预置 jieba sdist 资格输入
+
+- 完成：针对 faster-whisper R3 Run `31287507974` 的固定 sdist 代理截断，完成独立分支上的预置 sdist workflow/builder 改造；提交 `3174b633ebafba3091f89e973ce16619ba18e171` 已推送并创建 PR #136，状态为 `CLEAN/MERGEABLE`；根工作区仅追加本日志，未改动用户已有 API、前端和索引文件。
+- 文件：独立 worktree 的 `.github/workflows/qualify-faster-whisper-production.yml`、`scripts/build_internal_jieba_wheel.py`、对应测试与 R3 方案文档；根工作区仅 `WORKLOG.md`，下载的 `jieba-0.42.1.tar.gz` 未纳入 Git。
+- 验证：本地真实 sdist 大小 `19214172`、SHA-256 匹配；独立 worktree 针对性 pytest `54 passed`；Python 编译、workflow YAML 解析和 `git diff --check` 通过；PR CI Run `31288187008` 的 7 个 job 全部成功。用户已报告上传到固定 runner 路径，尚未由 workflow 独立核验；未触发新的 R3，未修改生产服务、venv、模型或 Profile。
+
+### 09:29 — 合并预置 jieba sdist 改造 PR
+
+- 完成：按用户明确批准，以 merge commit 合并 PR #136；合并提交及远端 `master` 均为 `5903f86fff1bb1dfcb68d785792e283fdc30aaf5`，未删除远端分支。
+- 文件：远端 `master` 纳入固定 staging sdist workflow/builder、测试和 R3 方案文档；根工作区仅更新 `WORKLOG.md`，API、前端、索引改动和本地下载文件均保留。
+- 验证：合并后 master CI Run `31288320850` 的 7 个 job 全部成功；对应 deploy Run `31288362802` 与 cleanup Run `31288320574` 均为 `jobs=[]`，未进入 runner、未执行部署、SSH 或生产清理；仓库仍未配置 `PRODUCTION_AUTO_DEPLOY_ENABLED`。
+- 待办/风险：未触发新的 faster-whisper R3；下一次 R3 必须基于合并后的完整 SHA `5903f86fff1bb1dfcb68d785792e283fdc30aaf5` 另行批准。上传的 sdist 将在新 R3 workflow 首阶段由 runner 独立校验。
+
+### 09:46 — 执行预置输入后的 faster-whisper R3
+
+- 完成：按用户批准，以 `origin/master@5903f86fff1bb1dfcb68d785792e283fdc30aaf5` 执行 faster-whisper R3 Run `31288471038`；预置 `jieba` sdist 身份校验、四个受控 wheel 双重构建、固定八样本准备、隔离依赖、模型和 CUDA 路径均成功，最终 verdict 为 `quality_gate_failed`。
+- 文件：根工作区仅更新 `WORKLOG.md`；安全诊断 artifact 保留于 `.codex-worktrees/r3-run-31288471038-artifacts/`，未提交下载 tarball 或诊断文件。
+- 验证：8 个样本中 7 个通过，唯一失败样本为 `negative-control-1`，原因为两次结果 `deterministic=false`；该样本 forbidden term/code hits 均为 0。聚合 BIM 术语召回 1.0、规范编号召回 1.0、时间戳 P95 0 ms、处理失败率 0、负对照误报 0，门禁均通过；steady-state RTF `3.122928` 为 informational。GPU baseline `3647 MiB`、peak `6060 MiB`、peak utilization `100%`，wheel cache hit。
+- 待办/风险：Profile 保持 `disabled`，`production_services_modified=false`。现有安全诊断未输出第二次推理 hash 或 canonical/Markdown/turns 的确定性分解，尚不能判断具体差异层；不得放宽确定性门禁或据此启用 Profile。
+
+### 10:15 — 切换 CI 到自托管 Runner
+
+- 完成：按批准方案将普通 `CI` workflow 的 5 个 job 从 GitHub-hosted `ubuntu-latest` 改为独立自托管 Linux CI runner 标签 `self-hosted, linux, ubuntu, ci`；生产部署 workflow 未改动。
+- 文件：`.github/workflows/ci.yml`、`WORKLOG.md`
+- 验证：`rg` 核对 `.github/workflows/ci.yml` 中已无 `ubuntu-latest` 且 5 个 job 均使用目标标签；`git diff --check -- .github/workflows/ci.yml` 通过，仅提示 Git 换行转换警告。未触发远端 GitHub Actions，最终验证需以自托管 CI 实跑结果为准。
+- 待办/风险：GitHub 仓库需存在带 `self-hosted, linux, ubuntu, ci` 标签的独立 runner，并预置 Python 3.11、Node 20/npm、Docker Compose、bash/grep 及网络访问；不要复用生产 runner 执行不受信任 PR。
+
+### 10:22 — 说明 CI 使用 Ubuntu 生产机边界
+
+- 完成：回答 CI 可技术性部署到 Ubuntu 生产机运行，但建议仅作为受控过渡方案；生产机 runner 必须使用专用低权限账号、独立工作目录和独立 `ci` 标签，并限制到私库可信分支，避免 PR 或不受信任代码接触生产环境。
+- 文件：`WORKLOG.md`（未修改 CI、部署脚本或业务代码）
+- 验证：基于当前 CI 已改为 `self-hosted, linux, ubuntu, ci`、生产部署使用 `self-hosted, linux, ubuntu, production, app` 的标签边界进行复核；未触发 GitHub Actions、未注册 runner、未改服务器。
+- 待办/风险：若确需复用 Ubuntu 生产机，需另行确认 runner 账号权限、Docker 权限、工作目录、网络代理、secrets 暴露范围和 PR 触发策略；生产部署标签不得与普通 CI 标签混用。
+
+### 10:24 — 澄清 Ubuntu 双 Runner 拓扑
+
+- 完成：说明同一台 Ubuntu 生产机若同时承担生产部署和普通 CI，推荐注册两个 GitHub Actions runner 实例：保留现有生产 runner 使用 `production, app` 标签，新增独立 CI runner 使用 `ci` 标签；不建议直接给生产 runner 追加 `ci` 标签。
+- 文件：`WORKLOG.md`（未修改 CI、部署脚本或业务代码）
+- 验证：基于当前 CI 与部署 workflow 的标签匹配关系进行说明；未触发 Actions、未注册 runner、未改服务器。
+- 待办/风险：双 runner 在同一主机可能并发运行，需通过低权限账号、独立目录和必要的并发/触发策略降低对生产服务的影响。
+
+### 10:27 — 整理 Ubuntu CI Runner 部署流程
+
+- 完成：基于当前 CI 标签 `self-hosted, linux, ubuntu, ci` 和 GitHub 官方 self-hosted runner 注册、标签、服务化与排障文档，整理在 Ubuntu 生产机新增第二个 CI runner 的受控部署流程。
+- 文件：`WORKLOG.md`（未修改 CI、部署脚本、服务器或业务代码）
+- 验证：只读核对 `.github/workflows/ci.yml` 与 `.github/workflows/deploy-production.yml` 的标签边界；在线核对 GitHub 官方 runner 添加、标签和 Linux service 管理说明；未触发 Actions、未注册 runner、未改服务器。
+- 待办/风险：实际部署前需从 GitHub 页面生成 1 小时有效注册 token；CI runner 必须使用独立目录、独立标签和低权限账号，且不得混用生产部署标签。
+
+### 10:30 — 修正 Ubuntu CI Runner 目标路径
+
+- 完成：根据用户提供的现有 runner 目录 `${PRIVATE_SERVICE_ROOT}/github-actions-runner/${PRIVATE_SHARED_RUNNER_NAME}`，明确该目录应保留给现有生产/共享 runner，新 CI runner 建议新建同级目录 `${PRIVATE_SERVICE_ROOT}/github-actions-runner/${PRIVATE_CI_RUNNER_NAME}`。
+- 文件：`WORKLOG.md`（未修改 CI、部署脚本、服务器或业务代码）
+- 验证：基于用户提供路径和当前 workflow 标签边界进行说明；未连接服务器、未注册 runner、未触发 Actions。
+- 待办/风险：不得在现有 `${PRIVATE_SHARED_RUNNER_NAME}` 目录内重新配置 CI runner；若现有实例实际不是生产部署 runner，需先在 GitHub Runners 页面核对其名称、标签和在线状态。
+
+### 10:32 — 解释 ${PRIVATE_RUNNER_USER} 用户不存在错误
+
+- 完成：回答 `chown: 无效的用户: "${PRIVATE_RUNNER_USER}:${PRIVATE_RUNNER_USER}"` 表示目标用户尚未创建或当前机器上并不存在该账号；需要先创建用户再授权目录，或改用已有的 runner 服务账号。
+- 文件：`WORKLOG.md`（未修改 CI、部署脚本、服务器或业务代码）
+- 验证：基于 `chown` 语义进行排障说明；未登录 Ubuntu 机器、未创建用户、未改服务器。
+- 待办/风险：如果机器已有别的 runner 账号，不要随意切换目录所有者到 root；应保持 runner 使用专用低权限账号。
+
+### 10:34 — 查询现有 runner 账号的方法
+
+- 完成：说明仓库中未记录 Ubuntu runner 的具体系统账号，最可靠的方法是在目标机上查看 runner 的 systemd service `User=` 字段或目录所有者；仓库里仅能确认一个 Windows runner 名称 `${PRODUCTION_APP_RUNNER_NAME}`。
+- 文件：`WORKLOG.md`（未修改 CI、部署脚本、服务器或业务代码）
+- 验证：只读检索仓库内 runner 命名与账号线索；未连接 Ubuntu 机器、未修改配置。
+- 待办/风险：如果 Ubuntu 机上的 runner 是手工安装的多个实例，需分别核对每个 service 名称、User 和目录，避免把错误账号用于新 CI 目录。
+
+### 10:38 — 确认 Ubuntu 现有 runner 账号为 ${PRODUCTION_APP_USER}
+
+- 完成：根据用户提供的 systemd unit 确认现有 Ubuntu runner 服务使用 `User=${PRODUCTION_APP_USER}`，`ExecStart` 与 `WorkingDirectory` 都指向 `${PRIVATE_SHARED_RUNNER_NAME}`，因此现有 runner 账号为 `${PRODUCTION_APP_USER}`。
+- 文件：`WORKLOG.md`（未修改 CI、部署脚本、服务器或业务代码）
+- 验证：读取用户粘贴的 `actions.runner.abworks-dev-RAGPinCheng.${PRODUCTION_APP_RUNNER_NAME}.service` 内容并核对 `User`、`ExecStart` 与 `WorkingDirectory`；未连接服务器、未修改配置。
+- 待办/风险：新 CI runner 若沿用同账号，目录权限应改为 `${PRODUCTION_APP_USER}:${PRODUCTION_APP_USER}`；若要更强隔离，可另建独立账号，但不要把 `${PRIVATE_SHARED_RUNNER_NAME}` 的 unit 直接改成 CI。
+
+### 10:36 — 排查 runner 解包权限错误
+
+- 完成：解释 `tar xzf` 对当前目录 `.` 进行时间戳和权限回写时失败，通常是解包目录所有者不对或当前用户对该目录没有足够写权限；问题不在 runner 压缩包本身。
+- 文件：`WORKLOG.md`（未修改 CI、部署脚本、服务器或业务代码）
+- 验证：基于用户给出的 `tar` 输出与当前 shell 提示符判断；未连接服务器、未重建目录。
+- 待办/风险：若 `${PRIVATE_CI_RUNNER_NAME}` 目录不是 `${PRODUCTION_APP_USER}` 所有，先修目录所有权再解包，避免继续用 `sudo tar` 让文件落成 root 所有。
+
+### 10:37 — 指导 Runner 组选择提示
+
+- 完成：说明 self-hosted runner 注册时的 runner group 一般直接按默认 `Default` 处理，只有仓库或组织里预先创建了自定义 runner group 才需要手动填写对应组名。
+- 文件：`WORKLOG.md`（未修改 CI、部署脚本、服务器或业务代码）
+- 验证：基于 GitHub runner 注册交互提示进行说明；未触发注册或修改配置。
+- 待办/风险：如果后续需要把 runner 限制到特定组，再在 GitHub Settings 中创建/选择对应 group。
+
+### 10:38 — 指导 Runner 显示名选择
+
+- 完成：建议把新 CI runner 的显示名设置为能区分用途的名字，例如 `${PRIVATE_CI_RUNNER_NAME}`，而不是继续沿用 `${PRODUCTION_APP_HOSTNAME}`。
+- 文件：`WORKLOG.md`（未修改 CI、部署脚本、服务器或业务代码）
+- 验证：基于用户当前注册提示和既有命名习惯进行说明；未触发注册或修改配置。
+- 待办/风险：显示名只影响 GitHub 页面可读性，不影响标签匹配；后续仍要确保标签填的是 `ubuntu,ci`。
+
+### 10:39 — 指导 Runner 额外标签填写
+
+- 完成：说明新 runner 的额外标签应填写 `ubuntu,ci`，以匹配当前 CI workflow 的 `runs-on: self-hosted, linux, ubuntu, ci`。
+- 文件：`WORKLOG.md`（未修改 CI、部署脚本、服务器或业务代码）
+- 验证：基于当前 `.github/workflows/ci.yml` 的标签要求进行说明；未触发注册或修改配置。
+- 待办/风险：默认标签 `self-hosted/Linux/X64` 由注册器自动附带，不要手工删掉。
+
+### 10:42 — 指导 Runner 工作目录选择
+
+- 完成：说明 work folder 直接使用默认 `_work` 即可，这是 GitHub Actions runner 的标准工作目录名。
+- 文件：`WORKLOG.md`（未修改 CI、部署脚本、服务器或业务代码）
+- 验证：基于 runner 注册提示进行说明；未触发注册或修改配置。
+- 待办/风险：保留默认 `_work` 便于后续排障和升级，不要和 `${PRIVATE_SHARED_RUNNER_NAME}` 的目录混用。
+
+### 10:43 — 指导 runner 注册后续步骤
+
+- 完成：说明 runner 注册交互结束后，下一步是安装并启动 systemd 服务，再回 GitHub Runners 页面确认在线状态。
+- 文件：`WORKLOG.md`（未修改 CI、部署脚本、服务器或业务代码）
+- 验证：基于 GitHub Linux self-hosted runner 服务化文档进行说明；未执行安装或启动。
+- 待办/风险：如果 `svc.sh install` 提示指定用户，填 `${PRODUCTION_APP_USER}`；服务启动后再核对标签和在线状态是否为 `${PRIVATE_CI_RUNNER_NAME}`、`ubuntu`、`ci`。
+
+### 10:47 — 说明注册完成后的核对顺序
+
+- 完成：补充 runner 注册成功后应先安装/启动 systemd 服务，再在 GitHub 页面确认 `${PRIVATE_CI_RUNNER_NAME}` 在线且标签匹配。
+- 文件：`WORKLOG.md`（未修改 CI、部署脚本、服务器或业务代码）
+- 验证：基于当前注册流程顺序进行说明；未执行安装或启动。
+- 待办/风险：若服务安装失败，优先检查目录所有权与 `${PRODUCTION_APP_USER}` 用户是否仍是 runner 所属账号。
+
+### 10:48 — 确认 Ubuntu CI Runner 已就绪
+
+- 完成：用户已完成 `${PRIVATE_CI_RUNNER_NAME}` 的注册、服务安装与启动，runner 进入可用状态。
+- 文件：`WORKLOG.md`（未修改 CI、部署脚本、服务器或业务代码）
+- 验证：基于用户完成注册和 `svc.sh install/start/status` 的回报确认；未触发工作流。
+- 待办/风险：runner 就绪不等于自动触发，仍需满足 `pull_request` 或 `push` 到 `master` 的 workflow 条件。
+
+### 10:50 — 说明是否需要再改工作流
+
+- 完成：确认当前 `CI` workflow 已指向 `self-hosted, linux, ubuntu, ci`，与新 runner 标签匹配；因此 runner 上线后无需再改 workflow 才能自动运行。
+- 文件：`WORKLOG.md`（未修改 CI、部署脚本、服务器或业务代码）
+- 验证：基于现有 `.github/workflows/ci.yml` 与 runner 标签边界判断；未修改 workflow。
+- 待办/风险：只有在想限制触发分支、改 runner 标签，或把 CI 再分流到别的 runner group 时，才需要再动 workflow。
+
+### 11:20 — 说明自托管 CI 并行方式
+
+- 完成：说明当前 CI 的 5 个 job 没有 `needs` 依赖，workflow 层面已经可并行；单个 self-hosted runner 一次只能承接一个 job，若要并行需要注册多个带相同 `ubuntu,ci` 标签的 runner 实例。
+- 文件：`WORKLOG.md`（未修改 CI、部署脚本、服务器或业务代码）
+- 验证：只读核对 `.github/workflows/ci.yml` 的 job、`runs-on` 与 `needs` 情况，并参考 GitHub 官方标签路由文档和社区说明；未修改 workflow、未注册 runner。
+- 待办/风险：同一生产机上增加多个 CI runner 会竞争 CPU、内存、磁盘和 Docker 资源；建议先从 2 个 CI runner 起步，并避开生产部署高峰。
+
+### 11:21 — 确认新增同标签 runner 自动并行
+
+- 完成：确认只要新增 runner 实例在线且带相同 `ubuntu,ci` 标签，GitHub 会自动把可并行 CI job 分发到这些 runner 上，无需再改当前 CI workflow。
+- 文件：`WORKLOG.md`（未修改 CI、部署脚本、服务器或业务代码）
+- 验证：基于当前无 `needs` 的 CI job 结构和 GitHub runner 标签调度机制说明；未注册 runner、未触发 CI。
+- 待办/风险：并行度取决于在线且空闲的匹配 runner 数量；同机多 runner 仍会共享机器资源。
+
+### 11:22 — 解释 self-hosted CI 首跑变慢
+
+- 完成：说明当前慢点来自新 self-hosted runner 缺少本地工具缓存，`actions/setup-python@v5` 首次需要下载 Python 3.11.15，且日志中的 `socket hang up` 导致重试；Node 20 弃用与 `punycode` 警告不是主要耗时来源。
+- 文件：`WORKLOG.md`（未修改 CI、部署脚本、服务器或业务代码）
+- 验证：基于用户提供的 GitHub Actions 日志和当前 CI 使用 `actions/setup-python@v5`、`actions/setup-node@v4` 的配置进行说明；未修改 workflow。
+- 待办/风险：可通过让首跑完成预热缓存、预置 Python/Node 工具缓存，或后续获批升级 Actions 版本来减少警告与下载耗时。
+
+### 11:27 — 提供 mihomo 安装方案
+
+- 完成：针对 Ubuntu 自托管 CI 下载慢的问题，整理安装 mihomo 本地 HTTP 代理、创建 systemd 服务、验证代理和只给 CI runner 注入代理环境变量的操作流程。
+- 文件：`WORKLOG.md`（未修改 CI、部署脚本、服务器或业务代码）
+- 验证：参考 MetaCubeX/mihomo 官方发布页和 GitHub Actions self-hosted runner 服务化文档；未在服务器安装软件、未修改生产网络。
+- 待办/风险：安装 mihomo 会改变服务器网络代理边界，配置必须只监听 `127.0.0.1`，订阅链接和控制面密钥不得写入仓库或聊天；不要给生产部署 runner 混用代理，除非另行确认。
+
+### 11:28 — 调整 mihomo 安装目标目录
+
+- 完成：按用户要求将 mihomo 安装布局调整到 `${PRIVATE_SERVICE_ROOT}/mihomo`，与现有 GitHub Actions runner 同属 native services 目录但保持独立子目录。
+- 文件：`WORKLOG.md`（未修改 CI、部署脚本、服务器或业务代码）
+- 验证：基于用户指定路径整理命令；未在服务器创建目录或安装服务。
+- 待办/风险：`${PRIVATE_SERVICE_ROOT}/mihomo` 应由 mihomo 服务账号持有，配置和订阅不得放入 runner 目录或仓库。
+
+### 11:31 — 选择 mihomo Linux 下载包
+
+- 完成：根据用户提供的 v1.19.29 release 资产列表，说明普通 Ubuntu x64 服务器不要下载 `linux-386`，建议优先选择 `mihomo-linux-amd64-compatible-v1.19.29.gz` 作为稳妥兼容包。
+- 文件：`WORKLOG.md`（未修改 CI、部署脚本、服务器或业务代码）
+- 验证：读取用户提供的 release 资产列表并按 Linux 架构命名判断；未在服务器下载或安装。
+- 待办/风险：若 `uname -m` 不是 `x86_64`，需按实际架构重新选择，例如 `aarch64` 对应 `linux-arm64`。
+
+### 11:42 — 说明 mihomo 启动后的访问方式
+
+- 完成：说明 mihomo 启动后主要通过本机代理端口访问，优先用 `curl -x ${DEPENDENCY_PROXY_URL}` 验证；Web 控制面板不是默认内置页面，需要另行配置外部 UI。
+- 文件：`WORKLOG.md`（未修改 CI、部署脚本、服务器或业务代码）
+- 验证：基于 mihomo 常规端口配置与用户已启动服务的状态进行说明；未访问服务器或修改配置。
+- 待办/风险：代理和控制面板都应只监听 `127.0.0.1`，不要直接暴露到公网。
+
+### 11:47 — 说明 ZeroTier 访问 mihomo 控制端口测试
+
+- 完成：提供从服务端确认 9090 监听与从 ZeroTier 客户端测试 `${PRIVATE_ZEROTIER_IPV4}:9090` 连通性的命令，并强调 mihomo 控制面需要 `secret` 且不应公网暴露。
+- 文件：`WORKLOG.md`（未修改 CI、部署脚本、服务器或业务代码）
+- 验证：基于 ZeroTier 内网访问和 mihomo external-controller 常见配置进行说明；未连接服务器、未修改防火墙或配置。
+- 待办/风险：若 `external-controller` 仍绑定 `127.0.0.1:9090`，ZeroTier 其他节点无法访问；如需开放，应绑定到 `${PRIVATE_ZEROTIER_IPV4}:9090` 并限制防火墙来源。
+
+### 11:48 — 排查 mihomo systemd CHDIR 失败
+
+- 完成：根据用户提供的 `mihomo.service` 状态判断服务失败原因为 `status=200/CHDIR`，即 systemd 在执行 mihomo 前无法切换到 `WorkingDirectory`；优先检查 unit 中路径、目录是否存在及 mihomo 用户权限。
+- 文件：`WORKLOG.md`（未修改 CI、部署脚本、服务器或业务代码）
+- 验证：读取用户粘贴的 `systemctl status mihomo` 输出并定位失败状态；未连接服务器或修改服务。
+- 待办/风险：在服务成功进入 active 前，7890/9090 端口测试都会失败；修复时不要把控制面暴露到公网。
+
+### 11:49 — 指导 CHDIR 后续定位
+
+- 完成：说明下一步应先核对 `mihomo.service` 的 `WorkingDirectory`、目录是否存在以及 `mihomo` 用户是否能 `cd` 进去，再决定是修目录权限还是修 unit 配置。
+- 文件：`WORKLOG.md`（未修改 CI、部署脚本、服务器或业务代码）
+- 验证：基于 `CHDIR` 失败语义给出后续排查顺序；未连接服务器或修改服务。
+- 待办/风险：如果目录存在但 `mihomo` 用户不能进入，必须修权限；如果 unit 写错了路径，先改 `WorkingDirectory` 再重启服务。
+
+### 11:51 — 指导 CHDIR 继续定位上级目录权限
+
+- 完成：指出当前需要优先检查 `${PRIVATE_SERVICE_ROOT}/mihomo` 的上级目录权限链和 `mihomo` 用户是否能在自身 shell 中成功 `cd` 进去，而不是继续只看 systemd 状态。
+- 文件：`WORKLOG.md`（未修改 CI、部署脚本、服务器或业务代码）
+- 验证：结合用户贴出的目录权限和失败状态，判断下一步应检查父目录可执行权限与用户切换结果；未修改配置。
+- 待办/风险：若 `namei -l` 显示任一级父目录缺少 `x`，systemd 仍会报 CHDIR；不要急着改控制面监听地址。
+
+### 11:52 — 说明开源不等于无约束
+
+- 完成：回答“开源”只代表源码可见、可自部署，并不自动消除许可证、系统权限、网络边界和服务配置上的限制。
+- 文件：`WORKLOG.md`（未修改 CI、部署脚本、服务器或业务代码）
+- 验证：基于当前 mihomo 安装与 systemd 排障语境进行说明；未修改配置或服务。
+- 待办/风险：当前问题仍是 systemd/目录权限，不是开源许可本身；若继续暴露控制面，仍需保留本地绑定和访问控制。
+
+### 13:50 — 说明公开仓库 Actions 也有边界
+
+- 完成：说明公开仓库的 GitHub Actions 不是“完全没限制”，只是 GitHub-hosted 标准 runner 的计费和部分配额规则更宽松；self-hosted runner 仍受标签、并发、缓存和安全边界约束。
+- 文件：`WORKLOG.md`（未修改 CI、部署脚本、服务器或业务代码）
+- 验证：基于 GitHub 官方 Actions 文档进行说明；未修改 workflow 或服务器配置。
+- 待办/风险：公开仓库对自托管 runner 的安全风险更高，尤其是未受信任 PR 不应直接进入生产 runner。
+
+### 15:46 — 审查公开仓库暴露面
+
+- 完成：只读审查公开仓库的 workflow、部署脚本和文档暴露面，重点核对内部 IP、固定主机路径、生产机命名和自托管 runner 触发边界。
+- 文件：`WORKLOG.md`（未修改 CI、部署脚本、服务器或业务代码）
+- 验证：通过 `rg` 检索内网地址、固定路径、token 关键词和 runner 线索；未发现明文密钥，但发现多处内部部署细节与自托管 runner 公共触发面。
+- 待办/风险：公开仓库仍需处理自托管 PR 触发、内部 IP/路径和生产 runbook 暴露问题；若不收敛这些内容，外部可从仓库推断基础设施布局。
+
+### 16:13 — 制定公开仓库风险收敛步骤
+
+- 完成：给出公开仓库下的分步收敛方案，优先隔离 PR 与 self-hosted runner，再逐步隐藏内网地址、固定路径和生产 runbook。
+- 文件：`WORKLOG.md`（未修改 CI、部署脚本、服务器或业务代码）
+- 验证：基于上一轮只读审查结果整理；未修改 workflow、文档或服务器配置。
+- 待办/风险：实际改 workflow、部署脚本或公开文档属于 R2 配置/部署边界变更，需用户批准后再执行。
+
+### 16:45 — 指导 GitHub Actions 仓库级安全设置
+
+- 完成：根据当前 workflow 仅使用 `actions/checkout@v4`、`actions/setup-python@v5` 和 `actions/setup-node@v4` 的事实，给出公开仓库 Actions 权限、Fork PR、GITHUB_TOKEN 权限、PR 创建权限和跨仓库访问的推荐设置。
+- 文件：`WORKLOG.md`（未修改 CI、部署脚本、服务器或业务代码）
+- 验证：只读核对 `.github/workflows/**` 的 `uses:` 项；未修改 GitHub 设置或仓库文件。
+- 待办/风险：`Require actions to be pinned to a full-length commit SHA` 暂不建议立即开启，需先把 workflow 的 `uses:` 从版本标签改为完整 SHA，否则会导致现有 CI 失败。
+
+### 16:53 — 将 CI 改回 GitHub-hosted Runner
+
+- 完成：按用户批准，将普通 `CI` 的 5 个 job 全部改回 `ubuntu-latest`，撤回前面未提交的 `self-hosted, linux, ubuntu, ci` 配置；生产部署 workflow 未改动，Ubuntu 上已注册的 CI runner 未卸载。
+- 文件：`.github/workflows/ci.yml`、`WORKLOG.md`
+- 验证：`rg` 核对 `.github/workflows/ci.yml` 中 5 个 `runs-on` 均为 `ubuntu-latest` 且无 `self-hosted`；`git diff --check -- .github/workflows/ci.yml` 通过，仅提示 Git 换行转换警告。未触发远端 GitHub Actions。
+- 待办/风险：CI 将重新使用 GitHub-hosted runner；生产部署 workflow 仍保持现有触发边界，是否继续收紧自动部署需另行批准。
