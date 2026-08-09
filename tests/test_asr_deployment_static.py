@@ -1235,6 +1235,9 @@ def test_qwen3_asr_qualification_freezes_dual_models_bf16_and_result_flow():
     assert "format_transcript" in runner
     assert "_parse_transcript_turns" in runner
     assert "QWEN3_ASR_PROFILE_ID" in runner
+    assert "def _license_document_declaration" in runner
+    assert "License-File" in runner
+    assert "distribution.locate_file(relative)" in runner
     assert ".transcribe(" not in runner
     assert "R3_EXTERNAL_HEARTBEAT" in script
     assert 'Write-Host "R3_STAGE stage=dependency_preparation status=start"' in script

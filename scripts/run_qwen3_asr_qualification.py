@@ -484,6 +484,21 @@ def _run_once(
     return result, markdown, turns, elapsed
 
 
+def _license_document_declaration(text: str) -> str:
+    lowered = text[:131_072].casefold()
+    if "apache license" in lowered and "version 2.0" in lowered:
+        return "Apache-2.0"
+    if "permission is hereby granted, free of charge" in lowered:
+        return "MIT"
+    if "redistribution and use in source and binary forms" in lowered:
+        if "neither the name" in lowered or "may be used to endorse or promote" in lowered:
+            return "BSD-3-Clause"
+        return "BSD-2-Clause"
+    if "mozilla public license" in lowered and "version 2.0" in lowered:
+        return "MPL-2.0"
+    return ""
+
+
 def _audit_license_text(distribution: importlib.metadata.Distribution) -> str:
     expression = distribution.metadata.get("License-Expression", "").strip()
     if expression:
@@ -497,7 +512,35 @@ def _audit_license_text(distribution: importlib.metadata.Distribution) -> str:
         for item in classifiers
         if item.startswith("License ::")
     ]
-    return "; ".join(approved)[:500]
+    if approved:
+        return "; ".join(approved)[:500]
+    declared_paths = set(distribution.metadata.get_all("License-File") or [])
+    for item in distribution.files or ():
+        item_text = str(item)
+        filename = PurePosixPath(item_text).name.casefold()
+        if filename in {
+            "license",
+            "license.txt",
+            "license.md",
+            "copying",
+            "copying.txt",
+            "notice",
+            "notice.txt",
+        } or filename.startswith("license."):
+            declared_paths.add(item_text)
+    for relative in sorted(declared_paths):
+        try:
+            path = Path(distribution.locate_file(relative))
+            if not path.is_file() or path.stat().st_size > 1_048_576:
+                continue
+            declaration = _license_document_declaration(
+                path.read_text(encoding="utf-8", errors="replace")
+            )
+            if declaration:
+                return declaration
+        except (OSError, ValueError, TypeError):
+            continue
+    return ""
 
 
 def audit_installed_licenses() -> dict[str, object]:
