@@ -362,6 +362,12 @@ def test_faster_whisper_qualification_workflow_is_manual_immutable_and_gated():
     assert "ASR_DEPENDENCY_PROXY must be an absolute HTTP(S) URL" in wheel_build
     assert "$env:HTTP_PROXY = $dependencyProxy" in wheel_build
     assert "$env:HTTPS_PROXY = $dependencyProxy" in wheel_build
+    assert '$preloadedSdist = "D:\\RAGPinCheng\\runtime\\qualification-inputs\\faster-whisper\\jieba-0.42.1.tar.gz"' in wheel_build
+    assert "Preloaded fixed jieba sdist is missing" in wheel_build
+    assert "Preloaded fixed jieba sdist must not be a reparse point" in wheel_build
+    assert "Preloaded fixed jieba sdist size mismatch" in wheel_build
+    assert "Preloaded fixed jieba sdist SHA-256 mismatch" in wheel_build
+    assert "R3_PRELOADED_SDIST source=verified" in wheel_build
     assert "[System.Environment]::SetEnvironmentVariable(" in wheel_build
     assert "ASR_SERVICE_TOKEN" not in wheel_build
     assert "ASR_MODEL_DOWNLOAD_PROXY" not in wheel_build
