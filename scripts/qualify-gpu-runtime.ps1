@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$RuntimeRoot = "${PRODUCTION_REPO_PATH}\runtime",
+    [string]$RuntimeRoot = $env:PRODUCTION_RUNTIME_ROOT,
     [Parameter(Mandatory)][string]$ReleaseRoot,
     [Parameter(Mandatory)][string]$QualificationRunId,
     [string[]]$RerankerPrecisions = @("fp16", "fp32"),

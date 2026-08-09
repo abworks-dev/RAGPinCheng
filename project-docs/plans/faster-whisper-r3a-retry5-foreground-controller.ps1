@@ -1,4 +1,4 @@
-﻿[CmdletBinding()]
+[CmdletBinding()]
 param(
   [switch]$SelfTest,
   [ValidateSet('ProbeSuccess','ProbeTimeout','RunA0A1')]
@@ -11,7 +11,7 @@ param(
   [string]$StaticPrecheckPath,
   [string]$BgeHelperPath,
   [string]$SamplePath,
-  [string]$ProxyUri = 'http://${PRIVATE_ZEROTIER_IPV4}:7897',
+  [string]$ProxyUri = '${PROXY_URI}',
   [int]$ChildTimeoutSeconds = 1200,
   [int]$ReleaseWaitSeconds = 60
 )

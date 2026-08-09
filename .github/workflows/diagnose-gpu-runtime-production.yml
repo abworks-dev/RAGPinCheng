@@ -21,6 +21,9 @@ jobs:
     environment: production-asr
     runs-on: [self-hosted, windows, production, gpu]
     timeout-minutes: 15
+    env:
+      PRODUCTION_PYTHON_PATH: ${{ vars.PRODUCTION_PYTHON_PATH }}
+      PRODUCTION_REPO_PATH: ${{ vars.PRODUCTION_REPO_PATH }}
     steps:
       - name: Run bounded S4U PyTorch, CUDA, and model-load diagnostics
         shell: powershell
@@ -31,7 +34,7 @@ jobs:
             throw "confirm_diagnostic must be explicitly enabled"
           }
 
-          $Python = "${PRODUCTION_PYTHON_PATH}"
+          $Python = $env:PRODUCTION_PYTHON_PATH
           if (-not (Test-Path -LiteralPath $Python -PathType Leaf)) {
             throw "GPU Python executable is missing"
           }
@@ -91,7 +94,7 @@ jobs:
             throw "One or more read-only GPU runtime probes failed"
           }
 
-          $RepositoryPath = "${PRODUCTION_REPO_PATH}"
+          $RepositoryPath = $env:PRODUCTION_REPO_PATH
           $ServiceDirectory = Join-Path $RepositoryPath "gpu_service"
           $EnvironmentFile = Join-Path $ServiceDirectory ".env"
           if (-not (Test-Path -LiteralPath $EnvironmentFile -PathType Leaf)) {
@@ -165,7 +168,7 @@ jobs:
             Write-Host $line
           }
 
-          $python = "${PRODUCTION_PYTHON_PATH}"
+          $python = $env:PRODUCTION_PYTHON_PATH
           $environmentFile = Join-Path $RepositoryPath "gpu_service\.env"
           if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
             throw "GPU Python executable is missing"

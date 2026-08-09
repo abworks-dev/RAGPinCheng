@@ -222,7 +222,7 @@ def test_candidate_qualification_is_cuda_only_and_cleans_tasks():
     assert "resolve-gpu-model-cache-source.ps1" in workflow
     assert "TORCH_WHEEL_SEED_ROOT" in workflow
     assert "TorchWheelSeedRoot" in workflow
-    assert "RUNTIME_ROOT: D:\\RAGPinCheng\\runtime\\qualification\\${{ github.run_id }}" in workflow
+    assert "RUNTIME_ROOT: ${{ vars.PRODUCTION_RUNTIME_ROOT }}\\qualification\\${{ github.run_id }}" in workflow
     assert "if: ${{ always() }}" in workflow
     assert 'GPU_CANDIDATE_RELEASE_ROOT=$releaseRoot' in workflow
     assert "$env:HTTP_PROXY = $env:DEPLOY_HTTP_PROXY" in workflow

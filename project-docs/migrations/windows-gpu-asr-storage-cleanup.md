@@ -1,6 +1,6 @@
 # Windows GPU ASR 存储清理
 
-> 适用路径：`${PRODUCTION_DATA_ROOT}`  
+> 适用路径：`${PRODUCTION_ASR_ROOT}`
 > 默认模式：只读预览（DryRun）  
 > 生产实际删除：必须显式传入 `-Apply`，并在执行前复核候选清单。
 
@@ -45,8 +45,8 @@ scripts\cleanup-asr-storage.ps1
 Set-Location C:\RAGPinCheng
 
 .\scripts\cleanup-asr-storage.ps1 `
-  -RootPath '${PRODUCTION_DATA_ROOT}' `
-  -AuditPath '${PRODUCTION_DATA_ROOT}\cleanup-audit\dryrun.json'
+  -RootPath '${PRODUCTION_ASR_ROOT}' `
+  -AuditPath '${PRODUCTION_ASR_ROOT}\cleanup-audit\dryrun.json'
 ```
 
 DryRun 不删除文件。先检查输出中的 `Candidates`、`Skipped paths` 和预计释放空间。
@@ -55,10 +55,10 @@ DryRun 不删除文件。先检查输出中的 `Candidates`、`Skipped paths` �
 
 ```powershell
 .\scripts\cleanup-asr-storage.ps1 `
-  -RootPath '${PRODUCTION_DATA_ROOT}' `
+  -RootPath '${PRODUCTION_ASR_ROOT}' `
   -Apply `
   -WhatIf `
-  -AuditPath '${PRODUCTION_DATA_ROOT}\cleanup-audit\apply-preview.json'
+  -AuditPath '${PRODUCTION_ASR_ROOT}\cleanup-audit\apply-preview.json'
 ```
 
 `-Apply -WhatIf` 仍然只预览，用于确认 PowerShell 的实际删除目标。
@@ -69,10 +69,10 @@ DryRun 不删除文件。先检查输出中的 `Candidates`、`Skipped paths` �
 
 ```powershell
 .\scripts\cleanup-asr-storage.ps1 `
-  -RootPath '${PRODUCTION_DATA_ROOT}' `
+  -RootPath '${PRODUCTION_ASR_ROOT}' `
   -Apply `
   -Confirm `
-  -AuditPath '${PRODUCTION_DATA_ROOT}\cleanup-audit\apply.json'
+  -AuditPath '${PRODUCTION_ASR_ROOT}\cleanup-audit\apply.json'
 ```
 
 脚本不会备份后再删除大文件。需要保留历史 qualification 证据时，应先把对应目录复制到独立备份介质。
@@ -89,8 +89,8 @@ Program:
 
 Arguments:
   -NoProfile -ExecutionPolicy Bypass -File C:\RAGPinCheng\scripts\cleanup-asr-storage.ps1
-  -RootPath ${PRODUCTION_DATA_ROOT}
-  -AuditPath ${PRODUCTION_DATA_ROOT}\cleanup-audit\scheduled-dryrun.json
+  -RootPath ${PRODUCTION_ASR_ROOT}
+  -AuditPath ${PRODUCTION_ASR_ROOT}\cleanup-audit\scheduled-dryrun.json
 ```
 
 连续观察一周且候选清单稳定后，再单独批准启用带 `-Apply` 的任务。任务账号需要能读取和删除 ASR 缓存，但不应获得不必要的仓库或业务数据权限。
@@ -108,7 +108,7 @@ Arguments:
 清理后检查：
 
 ```powershell
-Get-ChildItem '${PRODUCTION_DATA_ROOT}' -Force -Directory
+Get-ChildItem '${PRODUCTION_ASR_ROOT}' -Force -Directory
 Get-PSDrive D
 ```
 

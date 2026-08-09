@@ -83,6 +83,15 @@ jobs:
     environment: production-asr
     runs-on: [self-hosted, Windows, X64, asr-production]
     timeout-minutes: 180
+    env:
+      PRODUCTION_PYTHON311_PATH: ${{ vars.PRODUCTION_PYTHON311_PATH }}
+      PRODUCTION_PYTHON_PATH: ${{ vars.PRODUCTION_PYTHON_PATH }}
+      PRODUCTION_ASR_DATA_ROOT: ${{ vars.PRODUCTION_ASR_DATA_ROOT }}
+      PRODUCTION_NO_PROXY: ${{ vars.PRODUCTION_NO_PROXY }}
+      PRODUCTION_QWEN3_ASR_INPUT_ROOT: ${{ vars.PRODUCTION_QWEN3_ASR_INPUT_ROOT }}
+      PRODUCTION_QWEN3_ASR_QUALIFICATION_ROOT: ${{ vars.PRODUCTION_QWEN3_ASR_QUALIFICATION_ROOT }}
+      GPU_SERVICE_URL: ${{ vars.GPU_SERVICE_URL }}
+      GPU_SERVICE_ACTIVITY_URL: ${{ vars.GPU_SERVICE_ACTIVITY_URL }}
     steps:
       - name: Validate immutable revision and explicit R3 gate
         shell: powershell

@@ -1,12 +1,12 @@
 [CmdletBinding()]
 param(
-    [string]$SeedRoot = "${PRODUCTION_REPO_PATH}\runtime\wheel-seed\torch-2.7.0-cu128-cp310-win_amd64"
+    [string]$SeedRoot = $env:PRODUCTION_TORCH_WHEEL_SEED_ROOT
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$expectedRoot = "${PRODUCTION_REPO_PATH}\runtime\wheel-seed\"
+$expectedRoot = [IO.Path]::GetFullPath($SeedRoot).TrimEnd('\') + '\'
 $expectedWheel = "torch-2.7.0+cu128-cp310-cp310-win_amd64.whl"
 $manifestName = "manifest.json"
 $approvedSourceIndex = "https://download.pytorch.org/whl/cu128"

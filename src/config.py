@@ -89,7 +89,7 @@ EMBED_PROVIDER = os.getenv("EMBED_PROVIDER", "local")
 RERANK_PROVIDER = os.getenv("RERANK_PROVIDER", "local")
 
 # Remote GPU service — only used when the provider above is "remote"
-GPU_SERVICE_URL = os.getenv("GPU_SERVICE_URL", "http://${PRIVATE_IPV4}:8100")
+GPU_SERVICE_URL = os.getenv("GPU_SERVICE_URL", "http://127.0.0.1:8100")
 GPU_SERVICE_TOKEN = os.getenv("GPU_SERVICE_TOKEN", "")
 GPU_CONNECT_TIMEOUT = int(os.getenv("GPU_CONNECT_TIMEOUT", "10"))  # seconds
 GPU_READ_TIMEOUT = int(os.getenv("GPU_READ_TIMEOUT", "60"))  # seconds

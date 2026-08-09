@@ -10,8 +10,8 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$ProgramRoot = "${PRODUCTION_SERVICE_ROOT}\RAGPinCheng-ASR-WhisperX"
-$DataRoot = "${PRODUCTION_DATA_ROOT}\RAGPinCheng-ASR-WhisperX"
+$ProgramRoot = $env:PRODUCTION_WHISPERX_PROGRAM_ROOT
+$DataRoot = $env:PRODUCTION_WHISPERX_DATA_ROOT
 $RunRoot = Join-Path $ProgramRoot "runs\$RunId"
 $VenvPython = Join-Path $RunRoot "venv\Scripts\python.exe"
 $ModelRoot = Join-Path $DataRoot "models"
@@ -55,7 +55,7 @@ function Set-RunProxy {
     }
     $env:HTTP_PROXY = $Value
     $env:HTTPS_PROXY = $Value
-    $env:NO_PROXY = "127.0.0.1,localhost,${PRIVATE_IPV4},${PRIVATE_IPV4}"
+    $env:NO_PROXY = $env:PRODUCTION_NO_PROXY
 }
 
 function Clear-RunProxy {
@@ -99,7 +99,7 @@ try {
     $BeforeFirewall = Get-StateHash "firewall"
     New-Item -ItemType Directory -Path $RunRoot,$ModelRoot,$NltkRoot,$SampleRoot,$ReportRoot -Force | Out-Null
 
-    $machinePython = "${PRODUCTION_PYTHON311_PATH}"
+    $machinePython = $env:PRODUCTION_PYTHON311_PATH
     if (-not (Test-Path -LiteralPath $machinePython -PathType Leaf)) {
         throw "machine Python 3.11 unavailable"
     }

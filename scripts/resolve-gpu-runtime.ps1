@@ -1,9 +1,9 @@
 [CmdletBinding()]
 param(
-    [string]$RepositoryPath = "${PRODUCTION_REPO_PATH}",
-    [string]$BasePython = "${PRODUCTION_PYTHON_PATH}",
-    [string]$ResolverRoot = "${PRODUCTION_REPO_PATH}\runtime\resolver",
-    [string]$TorchWheelSeedRoot = "${PRODUCTION_REPO_PATH}\runtime\wheel-seed\torch-2.7.0-cu128-cp310-win_amd64",
+    [string]$RepositoryPath = $env:PRODUCTION_REPO_PATH,
+    [string]$BasePython = $env:PRODUCTION_PYTHON_PATH,
+    [string]$ResolverRoot = $env:PRODUCTION_RESOLVER_ROOT,
+    [string]$TorchWheelSeedRoot = $env:PRODUCTION_TORCH_WHEEL_SEED_ROOT,
     [Parameter(Mandatory)][ValidatePattern('^[0-9]+-[0-9]+$')][string]$RunId,
     [Parameter(Mandatory)][string]$ModelCacheSource,
     [Parameter(Mandatory)][ValidatePattern('^[0-9a-fA-F]{40}$')][string]$CommitSha,

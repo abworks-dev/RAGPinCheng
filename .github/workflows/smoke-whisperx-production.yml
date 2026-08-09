@@ -25,6 +25,11 @@ jobs:
     environment: production-asr
     runs-on: [self-hosted, Windows, X64, asr-production]
     timeout-minutes: 180
+    env:
+      PRODUCTION_PYTHON311_PATH: ${{ vars.PRODUCTION_PYTHON311_PATH }}
+      PRODUCTION_NO_PROXY: ${{ vars.PRODUCTION_NO_PROXY }}
+      PRODUCTION_WHISPERX_PROGRAM_ROOT: ${{ vars.PRODUCTION_WHISPERX_PROGRAM_ROOT }}
+      PRODUCTION_WHISPERX_DATA_ROOT: ${{ vars.PRODUCTION_WHISPERX_DATA_ROOT }}
     steps:
       - name: Validate immutable revision and explicit R3 gate
         shell: powershell

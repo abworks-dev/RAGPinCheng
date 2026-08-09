@@ -7,10 +7,10 @@
 适用根目录固定为：
 
 ```text
-${PRODUCTION_REPO_PATH}\runtime
+${PRODUCTION_RUNTIME_ROOT}
 ```
 
-本方案不处理 `${PRODUCTION_DATA_ROOT}`，后者由独立的 ASR 存储清理方案负责。
+本方案不处理 `${PRODUCTION_ASR_ROOT}`，后者由独立的 ASR 存储清理方案负责。
 
 ## 清理范围
 
@@ -29,7 +29,7 @@ ${PRODUCTION_REPO_PATH}\runtime
 
 - 默认 DryRun；只有 `-Apply` 才允许删除。
 - 支持 `-WhatIf`、`-Confirm` 和 JSON 审计报告。
-- 根目录必须精确等于 `${PRODUCTION_REPO_PATH}\runtime`。
+- 根目录必须精确等于 `${PRODUCTION_RUNTIME_ROOT}`。
 - 拒绝 reparse point 和越出 runtime 根目录的路径。
 - 活跃标记、最近 24 小时修改的目录和活动 runtime 进程会被跳过。
 - 单次默认最多删除 20 GB，超出时直接失败。
@@ -43,18 +43,18 @@ ${PRODUCTION_REPO_PATH}\runtime
 Set-Location ${PRODUCTION_REPO_PATH}
 
 .\scripts\cleanup-gpu-runtime.ps1 `
-  -RuntimeRoot ${PRODUCTION_REPO_PATH}\runtime `
-  -AuditPath ${PRODUCTION_REPO_PATH}\runtime\cleanup-audit\manual-dryrun.json
+  -RuntimeRoot ${PRODUCTION_RUNTIME_ROOT} `
+  -AuditPath ${PRODUCTION_RUNTIME_ROOT}\cleanup-audit\manual-dryrun.json
 ```
 
 复核候选清单后，再执行 PowerShell 的二次预览：
 
 ```powershell
 .\scripts\cleanup-gpu-runtime.ps1 `
-  -RuntimeRoot ${PRODUCTION_REPO_PATH}\runtime `
+  -RuntimeRoot ${PRODUCTION_RUNTIME_ROOT} `
   -Apply `
   -WhatIf `
-  -AuditPath ${PRODUCTION_REPO_PATH}\runtime\cleanup-audit\apply-preview.json
+  -AuditPath ${PRODUCTION_RUNTIME_ROOT}\cleanup-audit\apply-preview.json
 ```
 
 连续观察至少 7 天，确认候选没有正在使用的 release 或资格任务后，才可单独批准 `-Apply`。
@@ -64,7 +64,7 @@ Set-Location ${PRODUCTION_REPO_PATH}
 ```powershell
 .\scripts\install-gpu-runtime-cleanup-task.ps1 `
   -RepositoryPath ${PRODUCTION_REPO_PATH} `
-  -RuntimeRoot ${PRODUCTION_REPO_PATH}\runtime `
+  -RuntimeRoot ${PRODUCTION_RUNTIME_ROOT} `
   -StartTime 03:30 `
   -WhatIf
 ```
@@ -77,7 +77,7 @@ Set-Location ${PRODUCTION_REPO_PATH}
 
 ```powershell
 Get-ScheduledTask -TaskName RAGPinCheng-GPU -ErrorAction SilentlyContinue
-Get-Content ${PRODUCTION_REPO_PATH}\runtime\current-release.json
+Get-Content ${PRODUCTION_RUNTIME_ROOT}\current-release.json
 Get-PSDrive D
 ```
 

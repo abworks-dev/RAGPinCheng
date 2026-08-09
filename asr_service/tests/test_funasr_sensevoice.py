@@ -161,7 +161,7 @@ def test_missing_cache_fails_closed_without_importing_engine(monkeypatch):
 
 def test_production_engine_loads_exact_local_model_path(monkeypatch):
     calls = install_fake_modules(monkeypatch)
-    local_path = Path(r"${PRODUCTION_DATA_ROOT}\RAGPinCheng-ASR\models\SenseVoiceSmall\7bf452403abd7353a300cd760f7adae7701c92c1")
+    local_path = Path("model-cache") / "SenseVoiceSmall" / "revision"
     engine = FunAsrSenseVoiceEngine(
         model_cache_ready=lambda: True,
         model_path=local_path,

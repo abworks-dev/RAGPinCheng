@@ -2,7 +2,7 @@
 param(
     [Parameter()]
     [ValidateNotNullOrEmpty()]
-    [string]$RepositoryPath = '${PRODUCTION_REPO_PATH}',
+    [string]$RepositoryPath = $env:PRODUCTION_REPO_PATH,
 
     [Parameter()]
     [ValidateNotNullOrEmpty()]

@@ -32,12 +32,15 @@ jobs:
         shell: powershell
         env:
           GPU_MODEL_CACHE_SOURCE: ${{ vars.GPU_MODEL_CACHE_SOURCE }}
-          REPO_PATH: ${PRODUCTION_REPO_PATH}
+          PRODUCTION_PYTHON_PATH: ${{ vars.PRODUCTION_PYTHON_PATH }}
+          GPU_SERVICE_URL: ${{ vars.GPU_SERVICE_URL }}
+          GPU_SERVICE_HOST: ${{ vars.GPU_SERVICE_HOST }}
+          REPO_PATH: ${{ vars.PRODUCTION_REPO_PATH }}
           # Candidate releases are run-local so a stale or interrupted release
           # can never be mistaken for the current qualification input.
-          RUNTIME_ROOT: ${PRODUCTION_REPO_PATH}\runtime\qualification\${{ github.run_id }}
-          TORCH_WHEEL_SEED_ROOT: ${PRODUCTION_REPO_PATH}\runtime\wheel-seed\torch-2.7.0-cu128-cp310-win_amd64
-          BACKUP_DIR: ${PRODUCTION_BACKUP_DIRECTORY}
+          RUNTIME_ROOT: ${{ vars.PRODUCTION_RUNTIME_ROOT }}\qualification\${{ github.run_id }}
+          TORCH_WHEEL_SEED_ROOT: ${{ vars.PRODUCTION_TORCH_WHEEL_SEED_ROOT }}
+          BACKUP_DIR: ${{ vars.PRODUCTION_BACKUP_DIRECTORY }}
           GIT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GPU_SERVICE_TOKEN: ${{ secrets.GPU_SERVICE_TOKEN }}
           DEPLOY_COMMIT_SHA: ${{ github.sha }}
@@ -81,8 +84,8 @@ jobs:
             throw "Candidate repository HEAD mismatch"
           }
 
-          $runtimeRoot = "${PRODUCTION_REPO_PATH}\runtime"
-          $backupRoot = "${PRODUCTION_BACKUP_DIRECTORY}"
+          $runtimeRoot = $env:RUNTIME_ROOT
+          $backupRoot = $env:BACKUP_DIR
           $productionTaskName = "RAGPinCheng-GPU"
           $productionSuspended = $false
           $currentReleaseRoot = ""
@@ -111,7 +114,7 @@ jobs:
                   [string]$process.CommandLine -notmatch '-m gpu_service\.app' -or
                   (
                     -not ([string]$process.ExecutablePath).StartsWith($runtimeRoot, [StringComparison]::OrdinalIgnoreCase) -and
-                    [string]$process.ExecutablePath -ne "${PRODUCTION_PYTHON_PATH}"
+                    [string]$process.ExecutablePath -ne $env:PRODUCTION_PYTHON_PATH
                   )
                 ) {
                   throw "Refusing to stop an unexpected process listening on TCP 8100"

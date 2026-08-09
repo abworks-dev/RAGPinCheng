@@ -2,11 +2,11 @@
 param(
     [Parameter()]
     [ValidateNotNullOrEmpty()]
-    [string]$RepositoryPath = '${PRODUCTION_REPO_PATH}',
+    [string]$RepositoryPath = $env:PRODUCTION_REPO_PATH,
 
     [Parameter()]
     [ValidateNotNullOrEmpty()]
-    [string]$RuntimeRoot = '${PRODUCTION_REPO_PATH}\runtime',
+    [string]$RuntimeRoot = $env:PRODUCTION_RUNTIME_ROOT,
 
     [Parameter()]
     [ValidateNotNullOrEmpty()]
@@ -23,8 +23,8 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$expectedRepository = [IO.Path]::GetFullPath('${PRODUCTION_REPO_PATH}').TrimEnd('\')
-$expectedRuntime = [IO.Path]::GetFullPath('${PRODUCTION_REPO_PATH}\runtime').TrimEnd('\')
+$expectedRepository = [IO.Path]::GetFullPath($RepositoryPath).TrimEnd('\')
+$expectedRuntime = [IO.Path]::GetFullPath($RuntimeRoot).TrimEnd('\')
 $resolvedRepository = [IO.Path]::GetFullPath((Resolve-Path -LiteralPath $RepositoryPath).Path).TrimEnd('\')
 $resolvedRuntime = [IO.Path]::GetFullPath((Resolve-Path -LiteralPath $RuntimeRoot).Path).TrimEnd('\')
 
@@ -64,7 +64,7 @@ if ($PSCmdlet.ShouldProcess($TaskName, "Register GPU runtime cleanup task in $(i
         -Trigger $trigger `
         -Principal $principal `
         -Settings $settings `
-        -Description 'Dry-run or approved retention cleanup for ${PRODUCTION_REPO_PATH}\runtime' `
+        -Description 'Dry-run or approved retention cleanup for the configured GPU runtime' `
         -Force | Out-Null
     Write-Host "Registered: $TaskName"
     Write-Host "Mode: $(if ($EnableApply) { 'APPLY' } else { 'DRY RUN' })"

@@ -25,6 +25,10 @@ jobs:
     environment: production-asr
     runs-on: [self-hosted, Windows, X64, asr-production]
     timeout-minutes: 60
+    env:
+      PRODUCTION_ASR_PROGRAM_ROOT: ${{ vars.PRODUCTION_ASR_PROGRAM_ROOT }}
+      PRODUCTION_ASR_DATA_ROOT: ${{ vars.PRODUCTION_ASR_DATA_ROOT }}
+      PRODUCTION_NO_PROXY: ${{ vars.PRODUCTION_NO_PROXY }}
     steps:
       - name: Validate immutable revision and explicit gate
         shell: powershell

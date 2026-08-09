@@ -161,7 +161,7 @@ def test_powershell_wrapper_keeps_service_closed_and_scopes_proxy():
     assert "netsh advfirewall" not in lowered
     assert "remove-item" not in lowered
     assert "asr_service_token" not in lowered
-    assert "${PRIVATE_IPV4}" in script
+    assert "$env:PRODUCTION_NO_PROXY" in script
 
 
 def test_python_downloader_has_no_free_model_or_revision_inputs():

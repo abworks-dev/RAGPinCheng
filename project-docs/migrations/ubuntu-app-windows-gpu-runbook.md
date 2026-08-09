@@ -10,9 +10,9 @@
 
 - Ubuntu 主机：
   - 系统：Ubuntu 24.04.4 LTS；
-  - 主机名：`${PRODUCTION_APP_HOSTNAME}`；
-  - 内网地址：`${PRIVATE_IPV4}/24`；
-  - 网关：`${PRIVATE_IPV4}`；
+  - 主机名：`${PRODUCTION_HOSTNAME}`；
+  - 内网地址：`${APP_NODE_IP}/24`；
+  - 网关：`${PRODUCTION_GATEWAY_IP}`；
   - 无 NVIDIA GPU；
   - SSH 公网入口为 `${PRODUCTION_APP_SSH_HOST}:2222`，路由器转发到主机 TCP 22；
   - SSH 已确认 `PubkeyAuthentication yes`、`PasswordAuthentication no`、`KbdInteractiveAuthentication no`、`PermitRootLogin no`；
@@ -33,7 +33,7 @@
 ```text
 用户浏览器
   → HTTPS
-Ubuntu ${PRIVATE_IPV4}
+Ubuntu ${APP_NODE_IP}
   ├─ 反向代理 / TLS
   ├─ FastAPI + React
   ├─ Qdrant
@@ -203,7 +203,7 @@ Rerank 请求包含一个 query 和 passages 数组，响应返回等长 scores 
 - Token 使用常量时间比较，日志不得记录 Token；
 - 设置请求 ID、耗时、批量大小、状态码和错误类型日志；
 - 默认只监听 Windows 内网 IP，不监听公网接口；
-- Windows 防火墙仅允许 `${PRIVATE_IPV4}` 访问；
+- Windows 防火墙仅允许 `${APP_NODE_IP}` 访问；
 - 服务使用 NSSM、Windows Service 或任务计划程序实现开机自启；
 - 健康检查区分“进程存活”和“模型已加载可推理”。
 
@@ -408,13 +408,13 @@ GPU API 必须向后兼容，不能要求两台主机在同一秒原子更新。
 
 准备：
 
-- 固定 Ubuntu 地址 `${PRIVATE_IPV4}`；
+- 固定 Ubuntu 地址 `${APP_NODE_IP}`；
 - 安装并固定 Docker/Compose 版本；
 - 准备仓库、数据、备份和日志目录；
 - 配置磁盘容量告警；
 - 配置 HTTPS 反向代理；
 - 仅暴露 HTTPS 与获批 SSH；
-- RDP 3389/3390 仅允许 `${PRIVATE_IPV4}/24`；
+- RDP 3389/3390 仅允许 `${PRODUCTION_SUBNET}`；
 - 保留向日葵并验证防火墙启用后的连接；
 - Qdrant 6333 不对公网开放；
 - 配置时间同步；
@@ -569,7 +569,7 @@ GPU API 必须向后兼容，不能要求两台主机在同一秒原子更新。
 | 范围 | 验收内容 |
 |---|---|
 | GPU | CUDA 可用、模型版本正确、Dense 1024、Sparse 有效、rerank 等长 |
-| 网络 | GPU 端口仅允许 `${PRIVATE_IPV4}`，公网不可达 |
+| 网络 | GPU 端口仅允许 `${APP_NODE_IP}`，公网不可达 |
 | 后端 | GPU 不可用快速 503，恢复后无需重启即可重新工作或行为符合设计 |
 | Qdrant | collection、point、payload、named vector 一致 |
 | SQLite | 用户/会话与 Parent 数据分别完整 |
@@ -621,7 +621,7 @@ Claude Code 接手后，每个阶段都必须：
 
 | # | 问题 | 决策 |
 |---|------|------|
-| 1 | GPU 认证方式 | API Token + Windows 防火墙（仅允许 `${PRIVATE_IPV4}` 访问） |
+| 1 | GPU 认证方式 | API Token + Windows 防火墙（仅允许 `${APP_NODE_IP}` 访问） |
 | 2 | 非工作时间 GPU 不可用行为 | 返回 503，提示"推理服务维护中"，不静默 CPU 降级 |
 | 3 | 生产切换停机窗口 | 无固定窗口，边测边切，随时可停 |
 | 4 | 旧环境保留方式 | 单独备份作为回滚，不长期保留双环境 |
@@ -642,7 +642,7 @@ Claude Code 接手后，每个阶段都必须：
 ### 阶段 0 ✅ 已完成 — 基线与决策
 
 - [x] 记录当前生产 Commit SHA — `5b91f242b7932bf75801c51d07505a0a6ee92a11`
-- [x] 确认 Windows 内网 IP — `${PRIVATE_IPV4}`
+- [x] 确认 Windows 内网 IP — `${GPU_SERVICE_IP}`
 - [x] 确认 GPU 信息 — RTX 5060 Ti, Driver 591.74, CUDA 13.1, 16311 MiB
 - [x] 确认 Python 版本 — 3.10.11（Windows 主机）
 - [x] 确认 Docker 版本 — 29.6.1, Compose v5.2.0

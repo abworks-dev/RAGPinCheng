@@ -4,8 +4,8 @@ param(
     [ValidatePattern('^[0-9a-fA-F]{40}$')]
     [string]$CommitSha,
     [string]$SourceRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")),
-    [string]$ProgramRoot = "${PRODUCTION_SERVICE_ROOT}\RAGPinCheng-ASR",
-    [string]$DataRoot = "${PRODUCTION_DATA_ROOT}\RAGPinCheng-ASR",
+    [string]$ProgramRoot = $env:PRODUCTION_ASR_PROGRAM_ROOT,
+    [string]$DataRoot = $env:PRODUCTION_ASR_DATA_ROOT,
     [switch]$PrepareModel
 )
 
@@ -93,7 +93,7 @@ foreach ($name in @("HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY")) {
 try {
     $env:HTTP_PROXY = $downloadProxy
     $env:HTTPS_PROXY = $downloadProxy
-    $env:NO_PROXY = "127.0.0.1,localhost,${PRIVATE_IPV4},${PRIVATE_IPV4}"
+    $env:NO_PROXY = $env:PRODUCTION_NO_PROXY
     & $venvPython $prepareScript `
         --cache-root $cacheRoot `
         --staging-root $stagingRoot `

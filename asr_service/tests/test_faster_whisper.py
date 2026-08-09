@@ -86,11 +86,7 @@ def test_lazy_local_gpu_model_and_decode_parameters_are_exact(monkeypatch):
             )
         ),
     )
-    local_path = Path(
-        r"${PRODUCTION_DATA_ROOT}\RAGPinCheng-ASR\models"
-        r"\faster-whisper-large-v3-turbo"
-        r"\0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf"
-    )
+    local_path = Path("model-cache") / "faster-whisper-large-v3-turbo" / "revision"
     engine = FasterWhisperEngine(
         model_cache_ready=lambda: True,
         model_path=local_path,
