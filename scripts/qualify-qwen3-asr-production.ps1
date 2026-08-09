@@ -1558,6 +1558,7 @@ try {
             -FilePath $VenvPython `
             -Arguments @(
                 "-m", "pip", "download",
+                "--verbose",
                 "--only-binary=:all:",
                 "--dest", $Wheelhouse,
                 "--index-url", "https://pypi.org/simple",
