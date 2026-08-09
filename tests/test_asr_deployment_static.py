@@ -1238,6 +1238,7 @@ def test_qwen3_asr_qualification_freezes_dual_models_bf16_and_result_flow():
     assert "def _license_document_declaration" in runner
     assert "License-File" in runner
     assert "distribution.locate_file(relative)" in runner
+    assert "audit_installed_licenses(include_license_files=True)" in runner
     assert ".transcribe(" not in runner
     assert "R3_EXTERNAL_HEARTBEAT" in script
     assert 'Write-Host "R3_STAGE stage=dependency_preparation status=start"' in script
