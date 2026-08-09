@@ -2881,3 +2881,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`.github/workflows/deploy-production.yml`、`.github/workflows/cleanup-production.yml`、`.github/workflows/cleanup-production-operations.yml`、`WORKLOG.md`。
 - 验证：Workflow 使用远端 `master@0517f3e257551a2d5b8606571637807f2700a2ff`；`deploy-gpu` 失败，`deploy-app` 和 `cleanup-after-deploy` 跳过；未执行 GPU promotion、应用部署或生产清理。
 - 待办/风险：若继续部署，需要单独批准 GPU runtime qualification；该流程会临时停止并恢复生产 GPU 服务，不能通过跳过 runtime lock 门禁解决。
+
+### 06:45 — 清理 Actions 日志与历史私有资料
+
+- 完成：删除失败的 Actions 运行 `31338245724` 及其日志，并清理本次强推触发的 18 条新 runs；保留完整私有回滚 bundle 后，重写远端全部 115 个分支的 Git 历史，将内网地址、生产主机和 runner 标识、机器绝对路径、代理入口及 SSH 主机指纹改为占位符；未修改仓库可见性。
+- 文件：全分支历史；`WORKLOG.md`
+- 验证：回滚 bundle `git bundle verify` 通过；改写镜像 `git fsck --full --strict` 通过；696 个提交的历史文件和提交消息扫描均为 0 命中；远端分支数量和名称与改写镜像一致；PowerShell parser 错误为 0，`git diff --check` 通过；目标 Actions 运行复查返回 `404 Not Found`，本次强推产生的 18 条 runs 删除失败数为 0；未触发生产部署、清理或 GPU qualification。
+- 待办/风险：GitHub 对旧提交的缓存、PR 引用和搜索索引可能需要一段时间清理；回滚 bundle 保留了改写前历史，必须继续私下保存，不得进入公开仓库。
