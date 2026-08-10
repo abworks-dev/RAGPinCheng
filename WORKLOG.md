@@ -2818,10 +2818,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 
 ### 09:44 — 隔离 Qwen 中文运行时依赖
 
-- 完成：Qwen R3 qualification 改为中文专用依赖闭包；新增固定上游 wheel URL、SHA-256、代码和 Apache LICENSE 哈希的受控 `qwen-asr==0.0.6+ragpincheng.zh1` 构建器，仅删除韩语对齐专用 `soynlp` 元数据依赖并重建 `RECORD`；临时服务清空其他引擎模型环境，只接受 Qwen profile，且引擎拒绝非 Chinese 返回。
+- 完成：Qwen R3 qualification 改为中文专用依赖闭包；新增固定上游 wheel URL、SHA-256、代码和 Apache LICENSE 哈希的受控 `qwen-asr==0.0.6+ragpincheng.zh1` 构建器，仅删除韩语对齐专用 `soynlp` 元数据依赖并重建 `RECORD`；临时服务清空其他引擎模型环境，只接受 Qwen profile，且引擎拒绝非 Chinese 返回；后续将双模型缓存改到资格专用持久目录，避免读取或改写现有共享模型缓存。
 - 文件：`scripts/build_controlled_qwen3_asr_wheel.py`、`asr_service/requirements-qwen3-asr-windows.txt`、`asr_service/requirements-qwen3-asr.txt`、`asr_service/engines/qwen3_asr.py`、`scripts/qualify-qwen3-asr-production.ps1`、`.github/workflows/qualify-qwen3-asr-production.yml`、`.github/workflows/ci.yml`、`tests/test_qwen3_asr_controlled_wheel.py`、`tests/test_asr_deployment_static.py`、`asr_service/tests/test_qwen3_asr.py`、`asr_service/tests/test_static_boundaries.py`、`WORKLOG.md`
-- 验证：真实固定上游 wheel 两次构建一致；Python `py_compile`、PowerShell parser、`git diff --check` 通过；复用既有 `.venv` 执行 ASR 专项 `236 passed`。
-- 待办/风险：尚需 PR CI、合并及一次绑定完整 master SHA 的 R3 workflow；Profile admission 保持 disabled，未修改生产服务、生产 venv、模型、数据库、Qdrant 或防火墙。
+- 验证：真实固定上游 wheel 两次构建一致；Python `py_compile`、PowerShell parser、`git diff --check` 通过；复用既有 `.venv` 执行 ASR 专项 `236 passed`；PR #138 与 master CI 全绿并合入，R3 run `31289204726` 的 96-wheel 隔离闭包、offline install、`pip check`、模块来源和许可证矩阵全部通过，随后在共享既有模型缓存校验处 fail-closed。
+- 待办/风险：资格专用模型缓存修复尚需 PR CI、合并和一次新的完整 master SHA R3；Profile admission 保持 disabled，未修改生产服务、生产 venv、既有模型、数据库、Qdrant 或防火墙。
 
 ### 09:45 — 重建生产 workflow 注册名称
 
@@ -2895,3 +2895,9 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：全分支历史；`WORKLOG.md`
 - 验证：回滚 bundle `git bundle verify` 通过；改写镜像 `git fsck --full --strict` 通过；696 个提交的历史文件和提交消息扫描均为 0 命中；远端分支数量和名称与改写镜像一致；PowerShell parser 错误为 0，`git diff --check` 通过；目标 Actions 运行复查返回 `404 Not Found`，本次强推产生的 18 条 runs 删除失败数为 0；未触发生产部署、清理或 GPU qualification。
 - 待办/风险：GitHub 对旧提交的缓存、PR 引用和搜索索引可能需要一段时间清理；回滚 bundle 保留了改写前历史，必须继续私下保存，不得进入公开仓库。
+
+### 08:02 — 去除生产清理 workflow 重复任务
+
+- 完成：从可复用生产清理 workflow 中移除重复的夜间 dry-run 和磁盘压力 jobs，并补充静态测试断言，确保定时触发逻辑只由 operations workflow 持有。
+- 文件：`.github/workflows/cleanup-production.yml`、`tests/test_production_cleanup_triggers_static.py`、`WORKLOG.md`
+- 验证：专项 pytest 未执行（隔离工作树的 Python 环境未安装 pytest）；等价 Python 静态断言通过，三个相关 workflow YAML 解析通过，`git diff --check` 通过；未连接生产主机、未触发 GitHub Actions。

@@ -254,9 +254,9 @@ def test_workflow_and_runner_are_manual_isolated_and_disabled():
     ):
         assert forbidden not in lowered
     assert "${{ runner.temp }}\\whisperx-qualification-" not in workflow
+    assert "PRODUCTION_WHISPERX_REPORT_ROOT" in workflow
     assert (
-        "D:\\Services\\RAGPinCheng-ASR-WhisperX\\qualification\\runs\\"
-        "${{ github.run_id }}\\reports"
+        'Join-Path $env:PRODUCTION_WHISPERX_REPORT_ROOT "runs\\${{ github.run_id }}\\reports\\verdict.json"'
     ) in workflow
     assert "execute_diagnostic must be explicitly enabled" in diagnostic_workflow
     assert "environment: production-asr" in diagnostic_workflow

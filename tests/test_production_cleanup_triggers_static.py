@@ -24,6 +24,8 @@ def test_cleanup_workflow_has_safe_trigger_gates():
     assert '"on":' not in workflow
     assert "workflow_dispatch:" not in workflow
     assert "schedule:" not in workflow
+    assert "nightly-dryrun:" not in workflow
+    assert "disk-pressure:" not in workflow
     assert "confirm_production_cleanup" in workflow
     assert "actions/upload-artifact@v4" in workflow
 
