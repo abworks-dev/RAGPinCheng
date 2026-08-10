@@ -3020,3 +3020,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`scripts/run_qwen3_asr_qualification.py`、`scripts/qualify-qwen3-asr-production.ps1`、`.github/workflows/qualify-qwen3-asr-production.yml`、`asr_service/tests/test_qwen3_asr_qualification.py`、`tests/test_asr_deployment_static.py`、`project-docs/features/transcript-pipeline.md`、`WORKLOG.md`
 - 验证：完整 CI ASR contract 等价本地集合 `467 passed, 2 subtests passed`，仅有 2 条既有弃用警告；Qwen/部署专项 `82 passed`；现有项目 `.venv` 的真实许可证审计冒烟生成 `/2` 矩阵并以 `0` 个 blocker 通过；Python `py_compile`、PowerShell AST、workflow YAML 和 `git diff --check` 通过。临时矩阵已删除，未安装依赖、下载模型、启动服务或修改生产状态。
 - 待办/风险：需 PR CI 通过并合入 master 后，重新绑定完整 master SHA；许可证诊断修复不等于 Qwen R3 通过。共享语料的 production materialization、变量迁移和三引擎 neutral preflight 仍需独立 R3 流程。
+
+### 15:59 — 加固 WhisperX runtime preflight
+
+- 完成：新增只读 WhisperX runtime preflight，校验共享 manifest、ASR/中文 aligner model manifest、隔离目录、Python 3.11、单 GPU 身份和 Profile disabled 状态；真实 qualification job 先执行同一 preflight，失败时跳过推理并从 runner temp 上传固定脱敏失败报告，避免空 report root 导致无证据退出。新增互斥 `runtime_preflight` workflow 模式，保持 manifest preflight 与真实 qualification 互斥。
+- 文件：`.github/workflows/qualify-whisperx-production.yml`、`scripts/run_whisperx_runtime_preflight.py`、`asr_service/tests/test_whisperx_runtime_preflight.py`、`asr_service/tests/test_whisperx_qualification.py`、`tests/test_asr_deployment_static.py`、`project-docs/features/transcript-pipeline.md`、`project-docs/plans/whisperx-r2-r3-execution-plan.md`、`WORKLOG.md`
+- 验证：ASR service 全集 `254 passed`；runtime preflight/WhisperX/deployment 静态专项 `63 passed`；workflow YAML、PowerShell AST、Python `compileall` 和 `git diff --check` 通过。未安装依赖、下载模型、启动服务或触发 GPU qualification。
+- 待办/风险：需 PR CI 通过并合入最新 master；合并后先运行一次 `runtime_preflight`，通过后再运行已批准的单次三候选 WhisperX GPU qualification。Profile admission 继续保持 disabled。
