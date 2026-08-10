@@ -2922,3 +2922,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`.github/workflows/deploy-asr-production.yml`、`scripts/deploy-asr.ps1`、`scripts/faster-whisper-production-evidence.ps1`、`scripts/verify-asr-service.ps1`、`scripts/verify_asr_from_ubuntu.py`、`tests/test_asr_activation.py`、`tests/test_asr_deployment_static.py`、`project-docs/features/transcript-pipeline.md`、`TODO.md`、`WORKLOG.md`
 - 验证：变基到 `origin/master@5d79bb0` 后，3 份 PowerShell 脚本 AST 解析、Python `py_compile`、部署 workflow YAML 解析和 `git diff --check` 通过；部署、模型准备、共享 wheel cache、Profile catalog、ASR API/引擎/静态边界扩展专项测试 `157 passed`，仅有 2 条既有弃用警告；PR #154 首轮 CI Run `31351794966` 7/7 通过。
 - 待办/风险：尚需 scoped review 和用户批准后合并；合并后必须对新的完整 master SHA 重跑 faster-whisper R3，资格 SHA 与部署 SHA 不一致会拒绝部署。未触发生产 workflow、预检、服务切换、依赖安装、模型变更或应用 Profile 启用。当前部署 workflow 对本机失败可事务回滚，但 Ubuntu 跨节点验证失败后的自动回滚尚未实现，必须纳入后续独立生产 R3 方案并再次审批。
+
+### 11:46 — 补充 Qwen 服务启动安全错误摘要
+
+- 完成：针对 Qwen R3 run `31350405787` 的临时服务健康超时，将固定离线证据提取 schema 升级为 `/2`；仅为 `RuntimeError` 输出去除 URL、Windows 绝对路径、内网地址、Bearer 与敏感赋值后的最长 500 字符摘要，继续拒绝上传 traceback 原文和模块导入详情。
+- 文件：`scripts/extract_qwen3_asr_service_start_evidence.py`、`tests/test_qwen3_asr_service_start_evidence.py`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`
+- 验证：Qwen 服务证据与 ASR 部署静态专项 `47 passed`；Python `py_compile` 和 `git diff --check` 通过。只读证据 workflow `31353231522` 在旧 schema 下仅确认 `RuntimeError`/traceback，未修改生产服务或 Profile admission。
+- 待办/风险：需 PR CI 通过并合入 master 后重跑固定只读证据提取，再依据安全摘要修复临时服务启动；尚未重跑完整 Qwen R3，Profile admission 保持 disabled。

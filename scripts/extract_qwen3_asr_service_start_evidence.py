@@ -37,10 +37,62 @@ EXCEPTION_TYPE_RE = re.compile(
     r"(?:^|\s)([A-Za-z][A-Za-z0-9_]{0,127}(?:Error|Exception))(?=\s*:)",
     re.MULTILINE,
 )
+EXCEPTION_LINE_RE = re.compile(
+    r"^\s*([A-Za-z][A-Za-z0-9_]{0,127}(?:Error|Exception))\s*:\s*(.+?)\s*$",
+    re.MULTILINE,
+)
+ANSI_ESCAPE_RE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
+URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
+QUOTED_WINDOWS_PATH_RE = re.compile(
+    r"(['\"])(?:[A-Za-z]:[\\/]|\\\\).*?\1", re.IGNORECASE
+)
+WINDOWS_PATH_RE = re.compile(r"(?:[A-Za-z]:[\\/]|\\\\)[^\s,;]+", re.IGNORECASE)
+IP_ADDRESS_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}(?::\d{1,5})?\b")
+SENSITIVE_ASSIGNMENT_RE = re.compile(
+    r"\b(token|secret|password|authorization|proxy)\s*[:=]\s*[^\s,;]+",
+    re.IGNORECASE,
+)
+BEARER_RE = re.compile(r"\bBearer\s+\S+", re.IGNORECASE)
+MAX_ERROR_SUMMARY_CHARS = 500
+SUMMARY_EXCEPTION_TYPES = frozenset({"RuntimeError"})
 
 
 class EvidenceError(RuntimeError):
     pass
+
+
+def _sanitize_error_summary(message: str) -> str:
+    value = ANSI_ESCAPE_RE.sub("", message)
+    value = URL_RE.sub("<url>", value)
+    value = QUOTED_WINDOWS_PATH_RE.sub("<path>", value)
+    value = WINDOWS_PATH_RE.sub("<path>", value)
+    value = IP_ADDRESS_RE.sub("<address>", value)
+    value = SENSITIVE_ASSIGNMENT_RE.sub(r"\1=<redacted>", value)
+    value = BEARER_RE.sub("Bearer <redacted>", value)
+    value = " ".join(value.split())
+    if len(value) > MAX_ERROR_SUMMARY_CHARS:
+        value = value[:MAX_ERROR_SUMMARY_CHARS].rstrip() + "..."
+    return value
+
+
+def _extract_error_summaries(text: str) -> list[dict[str, str]]:
+    summaries: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for match in EXCEPTION_LINE_RE.finditer(text):
+        exception_type = match.group(1)
+        if exception_type not in SUMMARY_EXCEPTION_TYPES:
+            continue
+        summary = _sanitize_error_summary(match.group(2))
+        if not summary:
+            continue
+        identity = (exception_type, summary)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        summaries.append(
+            {"exception_type": exception_type, "summary": summary}
+        )
+    return summaries
 
 
 def _is_reparse_point(path: Path) -> bool:
@@ -113,14 +165,16 @@ def extract_evidence(*, source_root: Path) -> dict[str, object]:
     combined = f"{stdout}\n{stderr}"
     signals = sorted(name for name, pattern in SIGNALS.items() if pattern.search(combined))
     exception_types = sorted(set(EXCEPTION_TYPE_RE.findall(combined)))
+    error_summaries = _extract_error_summaries(combined)
     return {
-        "schema_version": "qwen3-asr-service-start-evidence/1",
+        "schema_version": "qwen3-asr-service-start-evidence/2",
         "status": "evidence_complete" if signals or exception_types else "evidence_incomplete",
         "source_run_id": SOURCE_RUN_ID,
         "source_commit_sha": SOURCE_COMMIT_SHA,
         "failure_code": "temporary_service_failed",
         "signals": signals,
         "exception_types": exception_types,
+        "error_summaries": error_summaries,
         "stdout_line_count": stdout_lines,
         "stderr_line_count": stderr_lines,
         "profile_admission": "disabled",

@@ -49,8 +49,38 @@ def test_extracts_safe_service_failure_categories(tmp_path):
     assert result["status"] == "evidence_complete"
     assert result["signals"] == ["module_import_failure", "traceback"]
     assert result["exception_types"] == ["ModuleNotFoundError"]
+    assert result["error_summaries"] == []
     assert secret not in serialized
     assert "private_module" not in serialized
+
+
+def test_sanitizes_runtime_error_summary_without_dropping_the_cause(tmp_path):
+    root = _source(
+        tmp_path,
+        stderr=(
+            "RuntimeError: failed to load D:\\private\\model.bin from "
+            "https://user:token@example.invalid/private at 192.168.1.20:8100 "
+            "token=do-not-emit"
+        ),
+    )
+    result = evidence.extract_evidence(source_root=root)
+    assert result["error_summaries"] == [
+        {
+            "exception_type": "RuntimeError",
+            "summary": (
+                "failed to load <path> from <url> at <address> "
+                "token=<redacted>"
+            ),
+        }
+    ]
+    serialized = json.dumps(result, sort_keys=True)
+    for forbidden in (
+        "D:\\private",
+        "user:token",
+        "192.168.1.20",
+        "do-not-emit",
+    ):
+        assert forbidden not in serialized
 
 
 def test_missing_logs_are_reported_without_failure(tmp_path):
@@ -58,6 +88,7 @@ def test_missing_logs_are_reported_without_failure(tmp_path):
     assert result["status"] == "evidence_incomplete"
     assert result["stdout_line_count"] == 0
     assert result["stderr_line_count"] == 0
+    assert result["error_summaries"] == []
 
 
 def test_rejects_wrong_source_commit(tmp_path):

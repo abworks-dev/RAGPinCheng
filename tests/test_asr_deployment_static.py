@@ -1526,7 +1526,7 @@ def test_qwen3_asr_service_start_evidence_is_fixed_offline_and_sanitized():
     assert "qualification-service.stdout.log" in script
     assert "qualification-service.stderr.log" in script
     assert "qualification-verdict.json" in script
-    assert "qwen3-asr-service-start-evidence/1" in script
+    assert "qwen3-asr-service-start-evidence/2" in script
     assert "scripts.extract_qwen3_asr_service_start_evidence" in workflow
     assert "service-start-evidence.json" in workflow
     assert "timeout-minutes: 10" in workflow
