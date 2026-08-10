@@ -17,6 +17,19 @@ on:
         required: true
         default: false
         type: boolean
+      enable_faster_whisper:
+        description: "Stage the qualified faster-whisper dependency and model contract"
+        required: true
+        default: false
+        type: boolean
+      faster_whisper_qualification_run_id:
+        description: "Passed faster-whisper R3 run ID; required only when enabled"
+        required: false
+        type: string
+      faster_whisper_qualification_commit_sha:
+        description: "Commit SHA recorded by the passed faster-whisper R3 run"
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -29,6 +42,7 @@ jobs:
     env:
       PRODUCTION_ASR_PROGRAM_ROOT: ${{ vars.PRODUCTION_ASR_PROGRAM_ROOT }}
       PRODUCTION_ASR_DATA_ROOT: ${{ vars.PRODUCTION_ASR_DATA_ROOT }}
+      PRODUCTION_FASTER_WHISPER_QUALIFICATION_ROOT: ${{ vars.PRODUCTION_FASTER_WHISPER_QUALIFICATION_ROOT }}
       PRODUCTION_NO_PROXY: ${{ vars.PRODUCTION_NO_PROXY }}
       GPU_SERVICE_ACTIVITY_URL: ${{ vars.GPU_SERVICE_ACTIVITY_URL }}
     steps:
@@ -37,6 +51,35 @@ jobs:
         run: |
           if ("${{ inputs.commit_sha }}" -notmatch '^[0-9a-fA-F]{40}$') {
             throw "commit_sha must be a full 40-character SHA"
+          }
+          if ("${{ inputs.commit_sha }}".ToLowerInvariant() -ne "${{ github.sha }}".ToLowerInvariant()) {
+            throw "commit_sha must equal the workflow dispatch revision"
+          }
+          if ("${{ github.ref }}" -ne "refs/heads/master") {
+            throw "production ASR deployment must be dispatched from master"
+          }
+          $enableFasterWhisper = [System.Convert]::ToBoolean("${{ inputs.enable_faster_whisper }}")
+          if ($enableFasterWhisper) {
+            if (-not [System.Convert]::ToBoolean("${{ inputs.install_dependencies }}")) {
+              throw "faster-whisper production preparation requires a new staging venv"
+            }
+            if ("${{ inputs.faster_whisper_qualification_run_id }}" -notmatch '^[0-9]{1,20}$') {
+              throw "faster_whisper_qualification_run_id is required"
+            }
+            if ("${{ inputs.faster_whisper_qualification_commit_sha }}" -notmatch '^[0-9a-fA-F]{40}$') {
+              throw "faster_whisper_qualification_commit_sha is required"
+            }
+            if (
+              "${{ inputs.faster_whisper_qualification_commit_sha }}".ToLowerInvariant() -ne
+              "${{ inputs.commit_sha }}".ToLowerInvariant()
+            ) {
+              throw "faster_whisper_qualification_commit_sha must equal commit_sha"
+            }
+          } elseif (
+            -not [string]::IsNullOrWhiteSpace("${{ inputs.faster_whisper_qualification_run_id }}") -or
+            -not [string]::IsNullOrWhiteSpace("${{ inputs.faster_whisper_qualification_commit_sha }}")
+          ) {
+            throw "faster-whisper qualification identity is accepted only when enabled"
           }
 
       - name: Check out requested revision
@@ -57,4 +100,41 @@ jobs:
             InstallDependencies = [System.Convert]::ToBoolean("${{ inputs.install_dependencies }}")
             ActivateService = [System.Convert]::ToBoolean("${{ inputs.activate_service }}")
           }
+          if ([System.Convert]::ToBoolean("${{ inputs.enable_faster_whisper }}")) {
+            $params.EnableFasterWhisper = $true
+            $params.FasterWhisperQualificationRunId = "${{ inputs.faster_whisper_qualification_run_id }}"
+            $params.FasterWhisperQualificationCommitSha = "${{ inputs.faster_whisper_qualification_commit_sha }}"
+          }
           & "${{ github.workspace }}\scripts\deploy-asr.ps1" @params
+
+  verify-ubuntu:
+    if: ${{ inputs.activate_service }}
+    needs: [deploy]
+    environment: production-asr
+    runs-on: [self-hosted, Linux, X64, ubuntu, production, app]
+    timeout-minutes: 10
+    steps:
+      - name: Check out requested revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 1
+
+      - name: Verify Windows ASR from Ubuntu while backend remains disabled
+        env:
+          ASR_SERVICE_TOKEN: ${{ secrets.ASR_SERVICE_TOKEN }}
+          ASR_ENV_FILE: ${{ vars.PRODUCTION_APP_ENV_FILE }}
+          ASR_SERVICE_URL: ${{ vars.PRODUCTION_ASR_SERVICE_URL }}
+        run: |
+          set -euo pipefail
+          profile_args=(--expected-profile funasr-sensevoice-small-v1)
+          if [[ "${{ inputs.enable_faster_whisper }}" == "true" ]]; then
+            profile_args=(
+              --expected-profile faster-whisper-large-v3-turbo-v1
+              --expected-profile funasr-sensevoice-small-v1
+            )
+          fi
+          python3 scripts/verify_asr_from_ubuntu.py \
+            --env-file "${ASR_ENV_FILE}" \
+            --asr-url "${ASR_SERVICE_URL}" \
+            "${profile_args[@]}"

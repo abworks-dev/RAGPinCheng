@@ -1,7 +1,7 @@
 # 视频转录链路
 
-- 状态：人工上传/播放链路与多引擎 Phase 5A/5B 应用闭环已实现；faster-whisper R2 已合并，R3 依赖资格失败且准入保持关闭
-- 最后核对：2026-08-05
+- 状态：人工上传/播放链路与多引擎 Phase 5A/5B 应用闭环已实现；faster-whisper R3 资格已通过，生产准入代码已准备但应用 Profile 仍关闭
+- 最后核对：2026-08-10
 
 ## 用户可观察能力
 
@@ -72,10 +72,19 @@ Phase 5A/5B 已接通版本列表、只读 Markdown 预览、人工审核、显�
 
 SenseVoice 已完成独立生产短媒体验收。Qwen3-ASR 已具备统一 R3 仓库资格工具，
 但真实 workflow 尚未取得 PASS，因此没有 Windows、CUDA、依赖、模型、质量或资源
-资格结论。faster-whisper 的固定 8 个非敏感 Windows
-TTS 样本已生成并通过严格 Manifest 校验，但生产 R3 workflow 在组合依赖解析阶段
-得到 `dependency_preparation_failed`；模型、CUDA、质量和资源门禁均未运行，因此
-其 R2 接线不构成运行或生产资格结论。
+资格结论。faster-whisper R3 Run `31348352599` 已在
+`aee897570ff8bfc60cd8aff0914818711109a458` 上通过：固定 8 个非敏感样本全部通过，
+canonical、Markdown 与 parser turns 两遍结果一致，固定模型 revision 和 wheel cache
+身份均通过校验。该资格不自动开放应用 Profile，也不等于生产部署或生产流量验收。
+
+生产部署代码可在显式启用 faster-whisper 准备时绑定持久化 R3 verdict/diagnostic、
+资格 run ID、与部署完全相同的 commit SHA、固定 wheel cache 和模型 Manifest；它强制
+创建新的组合 staging venv，下载阶段必须保留全部已资格 wheel，安装阶段仅从完整
+wheelhouse 离线安装，切换前同时验证 SenseVoice 与 faster-whisper 模块来源及模型缓存。
+模型路径写入前备份受保护的 `asr.env`，失败时先恢复应用、venv 和配置，再尝试恢复
+原服务。启用后的本机与 Ubuntu 验证均要求 Profile 顺序严格为 faster-whisper 后
+SenseVoice；Ubuntu 应用侧 `ASR_ENABLED` 仍必须为 `false`。跨节点验证失败后的自动
+回滚尚未纳入该部署 workflow，必须在后续生产 R3 方案中明确处理。
 
 ## 入口与调用链
 
@@ -199,10 +208,13 @@ TTS 样本已生成并通过严格 Manifest 校验，但生产 R3 workflow 在�
 - 管理流程加固：Provider/应用/API 定向 40 项通过；变基到最新 master 后 Provider/应用身份定向 31 项与前端定向 34 项通过，前端 production build 通过；远端 CI、真实服务和生产回归未执行。
 - faster-whisper R2：无 FastAPI、无真实引擎的 ASR/Provider/应用回归
   187 项通过；Phase 1 核心契约与静态边界 189 项通过；PR #34 的 7 个远端 CI
-  检查全部成功并已合并。真实依赖、模型、CUDA 和质量资格仍待 R3。
-- faster-whisper R3：统一资格 workflow、隔离编排、固定模型准备、严格 8 样本
-  Manifest、质量/资源门禁和无真实引擎测试已在独立分支实现，尚待 scoped review、
-  远端 CI、合并及真实 Windows CUDA 执行；当前不能据此认定 faster-whisper 可用。
+  检查全部成功并已合并。
+- faster-whisper R3：Run `31348352599` 在固定 master SHA 上通过依赖、模型、CUDA、
+  8 个非敏感样本质量、资源与三层确定性门禁；GPU 显存基线 `3721 MiB`、峰值
+  `6136 MiB`，利用率峰值 `100%`。`steady_state_rtf=3.119533` 按既定契约仅为信息项。
+  当前生产准入准备的本地扩展专项测试为 `157 passed`，PR #154 首轮 CI 7/7
+  通过；仍需 scoped review、合并后同 SHA R3 重跑和独立生产 R3 审批，不能据此
+  认定生产已启用。
 - WhisperX R2/R3：已实现复用 remote Provider/Canonical 契约的 experimental Profile、
   lazy-load service adapter、ASR/中文对齐双模型 manifest 门禁及手动 Windows CUDA
   冒烟 workflow；另已实现复用既有 8 个自制中文样本和统一阈值的资格 workflow，
@@ -218,7 +230,7 @@ TTS 样本已生成并通过严格 Manifest 校验，但生产 R3 workflow 在�
 - 第一阶段只支持 MP4 格式，不支持其他视频容器；
 - 自动稿按 Canonical 起止时间精确同步；旧人工稿仅有起始时间，结束时间按下一段起点推断，最后一段持续到视频结束；
 - SenseVoice 短媒体自动转录已完成生产验收，但候选稿发布/Qdrant 正式可见性 E2E
-  尚未执行；faster-whisper 真实依赖、模型、CUDA 和推理均未运行；
+  尚未执行；faster-whisper 已完成隔离 R3 资格，但尚未完成生产部署和生产流量验收；
 - 当前唯一允许新建任务的自动 Profile 仍是 experimental SenseVoice；faster-whisper
   与 WhisperX experimental Profile 可见但 admission 为 disabled；尚无
   `qualification_approved` Profile；

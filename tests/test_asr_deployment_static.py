@@ -10,6 +10,91 @@ def read(relative: str) -> str:
     return (ROOT / relative).read_text(encoding="utf-8")
 
 
+def test_faster_whisper_production_admission_is_bound_to_exact_r3_evidence():
+    deploy = read("scripts/deploy-asr.ps1")
+    evidence = read("scripts/faster-whisper-production-evidence.ps1")
+    workflow = read(".github/workflows/deploy-asr-production.yml")
+
+    assert "faster-whisper qualification SHA must equal the deployed commit SHA" in deploy
+    assert "faster_whisper_qualification_commit_sha must equal commit_sha" in workflow
+    assert "faster-whisper production preparation requires a new staging venv" in deploy
+    assert "faster-whisper production preparation requires a new staging venv" in workflow
+    assert "faster-whisper-r3-verdict/2" in evidence
+    assert "faster-whisper-r3-diagnostic/2" in evidence
+    assert "faster-whisper-wheel-cache/1" in evidence
+    assert "faster-whisper-wheel-manifest/3" in evidence
+    assert 'Join-Path $DataRoot "qualification\\wheel-cache\\$CacheKey"' in evidence
+    assert "Get-FileHash -LiteralPath $Path -Algorithm SHA256" in evidence
+    assert '$verdict.wheel_cache_status -notin @("hit", "miss")' in evidence
+    assert "$diagnostic.wheel_cache_status -ne $verdict.wheel_cache_status" in evidence
+    assert "ctranslate2.get_cuda_device_count() <= 0" in evidence
+    assert '"float16" not in ctranslate2.get_supported_compute_types("cuda")' in evidence
+    for sample_id in (
+        "bim-terms",
+        "clear-zh",
+        "mixed-zh-en",
+        "negative-control-1",
+        "negative-control-2",
+        "negative-control-3",
+        "noisy-bim-zh",
+        "standard-codes",
+    ):
+        assert f'"{sample_id}"' in evidence
+    for gate in (
+        "bim_term_recall",
+        "negative_false_positives",
+        "processing_failure_rate",
+        "standard_code_recall",
+        "timestamp_p95_ms",
+    ):
+        assert f'"{gate}"' in evidence
+
+
+def test_faster_whisper_production_install_is_offline_and_config_rollback_precedes_restart():
+    deploy = read("scripts/deploy-asr.ps1")
+    seed = deploy.index("Copy-QualifiedFasterWhisperWheels")
+    download = deploy.index('"-m", "pip", "download"', seed)
+    assert_wheels = deploy.index("Assert-QualifiedFasterWhisperWheels", download)
+    offline = deploy.index('"--no-index"', assert_wheels)
+    runtime = deploy.index("Assert-FasterWhisperProductionRuntime", offline)
+    assert seed < download < assert_wheels < offline < runtime
+
+    transaction = deploy.index("$configBackup = Join-Path $configBackupRoot")
+    changed = deploy.index("$configChanged = $true", transaction)
+    first_write = deploy.index('ASR_FASTER_WHISPER_MODEL_CACHE_ROOT"', transaction)
+    catch_block = deploy.index("} catch {", transaction)
+    restore = deploy.index(
+        "Copy-Item -LiteralPath $configBackup -Destination $envFile -Force",
+        catch_block,
+    )
+    restart = deploy.index("Register-AndStartAsrTask", restore)
+    assert transaction < changed < first_write < catch_block < restore < restart
+    assert '$configBackupRoot = Join-Path $configRoot "backups"' in deploy
+    assert "Unable to protect ASR configuration backup ACL" in deploy
+    backup_acl = deploy.split("& icacls.exe $configBackupRoot", 1)[1].split(
+        'if ($InstallDependencies)', 1
+    )[0]
+    assert '"*S-1-5-32-544:(OI)(CI)F"' in backup_acl
+    assert '"*S-1-5-18:(OI)(CI)F"' in backup_acl
+    assert "*S-1-5-20" not in backup_acl
+    assert "Remove-Item" not in deploy
+
+
+def test_faster_whisper_cross_node_verification_keeps_application_backend_disabled():
+    workflow = read(".github/workflows/deploy-asr-production.yml")
+    ubuntu = workflow.split("  verify-ubuntu:", 1)[1]
+    assert "if: ${{ inputs.activate_service }}" in ubuntu
+    assert "needs: [deploy]" in ubuntu
+    assert "runs-on: [self-hosted, Linux, X64, ubuntu, production, app]" in ubuntu
+    assert "faster-whisper-large-v3-turbo-v1" in ubuntu
+    assert "funasr-sensevoice-small-v1" in ubuntu
+    assert ubuntu.index("faster-whisper-large-v3-turbo-v1") < ubuntu.index(
+        "funasr-sensevoice-small-v1", ubuntu.index("faster-whisper-large-v3-turbo-v1")
+    )
+    assert "ASR_ENABLED=true" not in ubuntu
+    assert "deploy-app.sh" not in ubuntu
+
+
 def test_windows_asr_layout_and_config_ownership_are_frozen():
     env = read("asr_service/.env.example")
     deploy = read("scripts/deploy-asr.ps1")
@@ -42,17 +127,20 @@ def test_manual_workflow_has_safe_defaults_and_immutable_revision():
     assert "production-asr" in workflow
     assert "runs-on: [self-hosted, Windows, X64, asr-production]" in workflow
     assert workflow.count("timeout-minutes: 60") == 1
-    assert workflow.count("default: false") == 2
+    assert workflow.count("default: false") == 3
     assert workflow.count("shell: powershell") == 2
     assert "shell: pwsh" not in workflow
     assert re.search(r"install_dependencies:.*?default: false", workflow, re.DOTALL)
     assert re.search(r"activate_service:.*?default: false", workflow, re.DOTALL)
+    assert re.search(r"enable_faster_whisper:.*?default: false", workflow, re.DOTALL)
     assert "secrets.ASR_SERVICE_TOKEN" in workflow
     assert "ASR_DEPENDENCY_PROXY: ${{ secrets.ASR_DEPENDENCY_PROXY }}" in workflow
     assert "HTTP_PROXY:" not in workflow
     assert "HTTPS_PROXY:" not in workflow
     assert "inputs.commit_sha" in workflow
     assert "40-character" in workflow
+    assert "commit_sha must equal the workflow dispatch revision" in workflow
+    assert "production ASR deployment must be dispatched from master" in workflow
     assert "push:" not in workflow
     assert "pull_request:" not in workflow
 
@@ -211,7 +299,7 @@ def test_dependency_proxy_is_scoped_to_dependency_preparation_and_restored():
     deploy = read("scripts/deploy-asr.ps1")
     install_guard = deploy.index("if ($InstallDependencies)")
     proxy_read = deploy.index("$env:ASR_DEPENDENCY_PROXY", install_guard)
-    dependency_download = deploy.index("pip download", proxy_read)
+    dependency_download = deploy.index('"-m", "pip", "download"', proxy_read)
     offline_install = deploy.index("--no-index", dependency_download)
     proxy_restore = deploy.index(
         "foreach ($name in $savedProxyEnvironment.Keys)", offline_install
