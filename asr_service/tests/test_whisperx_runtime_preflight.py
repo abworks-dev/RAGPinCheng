@@ -56,6 +56,23 @@ def test_unexpected_import_failure_keeps_exception_details_out_of_report():
     assert "private.module" not in str(result)
 
 
+def test_profile_admission_is_verified_without_importing_transcription_package(
+    tmp_path, monkeypatch
+):
+    catalog = tmp_path / "profile_catalog.py"
+    catalog.write_text(
+        "WHISPERX_PROFILE_ID = 'whisperx-large-v3-zh-align-experimental-v1'\n"
+        "TranscriptionProfileDefinition.create(\n"
+        "    profile_id=WHISPERX_PROFILE_ID,\n"
+        "    admission=ProfileAdmission.disabled,\n"
+        ")\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(preflight, "PROFILE_CATALOG_PATH", catalog)
+
+    assert preflight._profile_admission() == "disabled"
+
+
 def test_successful_result_is_written_as_ascii_json(tmp_path, monkeypatch):
     report = tmp_path / "preflight.json"
     monkeypatch.setattr(

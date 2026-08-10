@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import os
 import subprocess
@@ -9,6 +10,7 @@ import sys
 from pathlib import Path
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+PROFILE_CATALOG_PATH = REPOSITORY_ROOT / "src" / "transcription" / "profile_catalog.py"
 if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
@@ -38,6 +40,54 @@ def _directory_from_environment(name: str) -> Path:
     if not path.is_dir() or path.is_symlink():
         raise ValueError(f"{name.lower()}_invalid")
     return path
+
+
+def _profile_admission() -> str:
+    """Verify the checked-out static catalog without importing venv dependencies."""
+    try:
+        source = PROFILE_CATALOG_PATH.read_text(encoding="utf-8")
+        catalog = ast.parse(source, filename=str(PROFILE_CATALOG_PATH))
+    except (OSError, SyntaxError, UnicodeError) as exc:
+        raise ValueError("profile-catalog-unavailable") from exc
+
+    profile_id_matches = [
+        node.value.value
+        for node in catalog.body
+        if isinstance(node, ast.Assign)
+        and len(node.targets) == 1
+        and isinstance(node.targets[0], ast.Name)
+        and node.targets[0].id == "WHISPERX_PROFILE_ID"
+        and isinstance(node.value, ast.Constant)
+        and isinstance(node.value.value, str)
+    ]
+    if profile_id_matches != ["whisperx-large-v3-zh-align-experimental-v1"]:
+        raise ValueError("profile-catalog-invalid")
+
+    admissions: list[str] = []
+    for node in ast.walk(catalog):
+        if not (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "TranscriptionProfileDefinition"
+            and node.func.attr == "create"
+        ):
+            continue
+        keywords = {keyword.arg: keyword.value for keyword in node.keywords}
+        profile_id = keywords.get("profile_id")
+        admission = keywords.get("admission")
+        if not (
+            isinstance(profile_id, ast.Name)
+            and profile_id.id == "WHISPERX_PROFILE_ID"
+            and isinstance(admission, ast.Attribute)
+            and isinstance(admission.value, ast.Name)
+            and admission.value.id == "ProfileAdmission"
+        ):
+            continue
+        admissions.append(admission.attr)
+    if admissions != ["disabled"]:
+        raise ValueError("profile_admission_not_disabled")
+    return "disabled"
 
 
 def _gpu_identity() -> dict[str, object]:
@@ -84,16 +134,9 @@ def run_preflight() -> dict[str, object]:
             validate_whisperx_cache,
         )
         from scripts.asr_qualification_manifest import resolve_manifest_from_environment
-        from src.transcription.profile_catalog import (
-            WHISPERX_PROFILE_ID,
-            build_phase3_profile_catalog,
-        )
-
         return (
             WHISPERX_ALIGN_RELATIVE_PATH,
-            WHISPERX_PROFILE_ID,
             WHISPERX_RELATIVE_PATH,
-            build_phase3_profile_catalog,
             resolve_manifest_from_environment,
             validate_whisperx_align_cache,
             validate_whisperx_cache,
@@ -101,9 +144,7 @@ def run_preflight() -> dict[str, object]:
 
     (
         whisperx_align_relative_path,
-        whisperx_profile_id,
         whisperx_relative_path,
-        build_phase3_profile_catalog,
         resolve_manifest_from_environment,
         validate_whisperx_align_cache,
         validate_whisperx_cache,
@@ -146,16 +187,7 @@ def run_preflight() -> dict[str, object]:
         raise ValueError(asr_cache.reason_code)
     if not align_cache.available:
         raise ValueError(align_cache.reason_code)
-    profile = _run_stage(
-        "profile",
-        lambda: next(
-            item.profile
-            for item in build_phase3_profile_catalog()
-            if item.profile.profile_id == whisperx_profile_id
-        ),
-    )
-    if profile.admission.value != "disabled":
-        raise ValueError("profile_admission_not_disabled")
+    profile_admission = _run_stage("profile", _profile_admission)
     return {
         "schema_version": "whisperx-runtime-preflight/1",
         "status": "pass",
@@ -168,7 +200,7 @@ def run_preflight() -> dict[str, object]:
         "qualification_root_available": qualification_root.is_dir(),
         "wheel_cache_root_available": wheel_cache_root.is_dir(),
         "report_root_available": report_root.is_dir(),
-        "profile_admission": profile.admission.value,
+        "profile_admission": profile_admission,
         "production_services_modified": False,
     }
 
