@@ -87,6 +87,11 @@ def test_shared_metrics_keep_whisperx_report_identity(tmp_path, monkeypatch):
     assert result["schema_version"] == qualification.REPORT_SCHEMA_VERSION
     assert result["profile_id"] == qualification.WHISPERX_PROFILE_ID
     assert result["sample_count"] == 8
+    assert result["manifest_source"] == "legacy"
+    assert result["manifest_sha256"] == manifest.manifest_sha256
+    assert result["sample_set_id"] == manifest.sample_set_id
+    assert result["annotation_version"] == manifest.annotation_version
+    assert result["qualification_corpus"] == manifest.identity()
 
 
 def test_report_contains_no_reference_or_hypothesis_text(tmp_path, monkeypatch):
@@ -315,7 +320,10 @@ def test_workflow_and_runner_are_manual_isolated_and_disabled():
     assert "workflow_dispatch:" in workflow
     assert "execute_qualification must be explicitly enabled" in workflow
     assert "environment: production-asr" in workflow
-    assert "prepare-qwen3-asr-qualification-samples.ps1" in workflow
+    assert "prepare-qwen3-asr-qualification-samples.ps1" not in workflow
+    assert "PRODUCTION_ASR_QUALIFICATION_ROOT" in workflow
+    assert "PRODUCTION_ASR_QUALIFICATION_MANIFEST_PATH" in workflow
+    assert "PRODUCTION_QWEN3_ASR_MANIFEST_PATH" in workflow
     assert "torch==2.8.0+cu128" in script
     assert "whisperx==3.8.6" in script
     assert "python-dotenv>=1.0.0" in script
@@ -339,6 +347,10 @@ def test_workflow_and_runner_are_manual_isolated_and_disabled():
     ) in workflow
     assert "execute_diagnostic must be explicitly enabled" in diagnostic_workflow
     assert "environment: production-asr" in diagnostic_workflow
+    assert "prepare-qwen3-asr-qualification-samples.ps1" not in diagnostic_workflow
+    assert "PRODUCTION_ASR_QUALIFICATION_ROOT" in diagnostic_workflow
+    assert "PRODUCTION_ASR_QUALIFICATION_MANIFEST_PATH" in diagnostic_workflow
+    assert "PRODUCTION_QWEN3_ASR_MANIFEST_PATH" in diagnostic_workflow
     assert "-DiagnosticMode" in diagnostic_workflow
     assert "contains_transcript_text" in diagnostic_workflow
     assert "failure-diagnostic.json" in diagnostic_workflow

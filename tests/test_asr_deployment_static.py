@@ -413,7 +413,7 @@ def test_faster_whisper_qualification_workflow_is_manual_immutable_and_gated():
     wheel_build = workflow.split(
         "      - name: Build reproducible controlled internal wheels", 1
     )[1].split(
-        "      - name: Prepare fixed synthetic qualification samples", 1
+        "      - name: Run isolated faster-whisper R3 qualification", 1
     )[0]
     assert "workflow_dispatch:" in workflow
     assert "push:" not in workflow
@@ -434,9 +434,11 @@ def test_faster_whisper_qualification_workflow_is_manual_immutable_and_gated():
     assert "'true'" in workflow
     assert workflow.count("default: false") == 2
     assert "execute_qualification must be explicitly enabled" in workflow
-    assert "prepare_synthetic_samples:" in workflow
-    assert "if: ${{ inputs.prepare_synthetic_samples }}" in workflow
-    assert "prepare-faster-whisper-qualification-samples.ps1" in workflow
+    assert "manifest_preflight:" in workflow
+    assert "if: ${{ inputs.manifest_preflight }}" in workflow
+    assert "enable exactly one of execute_qualification or manifest_preflight" in workflow
+    assert "prepare_synthetic_samples:" not in workflow
+    assert "prepare-faster-whisper-qualification-samples.ps1" not in workflow
     assert "commit_sha must equal the workflow dispatch revision" in workflow
     assert "qualification must be dispatched from master" in workflow
     assert 'github.ref }}" -ne "refs/heads/master"' in workflow
@@ -448,7 +450,7 @@ def test_faster_whisper_qualification_workflow_is_manual_immutable_and_gated():
     assert "operation:" not in dispatch_inputs
     assert "  build-internal-wheel:" not in workflow
     assert "needs: build-internal-wheel" not in workflow
-    assert "ubuntu-latest" not in workflow
+    assert "runs-on: ubuntu-latest" in workflow
     assert "runs-on: [self-hosted, Linux, X64, ubuntu, production, app]" not in workflow
     assert "actions/setup-python" not in workflow
     assert "Download controlled internal wheels" not in workflow
@@ -647,7 +649,7 @@ def test_faster_whisper_model_artifact_preparation_is_manual_and_isolated():
     assert "asr_service_token" not in lowered
 
 
-def test_faster_whisper_synthetic_sample_preparation_is_fixed_and_gated():
+def test_faster_whisper_legacy_sample_preparer_remains_fixed_but_is_not_invoked():
     workflow = read(".github/workflows/qualify-faster-whisper-production.yml")
     script = read("scripts/prepare-faster-whisper-qualification-samples.ps1")
     template = json.loads(
@@ -655,7 +657,8 @@ def test_faster_whisper_synthetic_sample_preparation_is_fixed_and_gated():
     )
     lowered = script.lower()
 
-    assert workflow.count("prepare_synthetic_samples:") == 1
+    assert "prepare_synthetic_samples:" not in workflow
+    assert "prepare-faster-whisper-qualification-samples.ps1" not in workflow
     assert "sample_path:" not in workflow
     assert "sample_text:" not in workflow
     assert "voice_name:" not in workflow
@@ -779,12 +782,15 @@ def test_faster_whisper_resolver_evidence_is_manual_fixed_offline_and_sanitized(
 
 def test_faster_whisper_qualification_is_isolated_from_production_mutations():
     script = read("scripts/qualify-faster-whisper-production.ps1")
+    contract = read("scripts/asr_qualification_manifest.py")
     lowered = script.lower()
     assert '$env:PRODUCTION_FASTER_WHISPER_QUALIFICATION_ROOT' in script
-    assert (
-        r"$env:PRODUCTION_FASTER_WHISPER_INPUT_ROOT"
-        in script
-    )
+    assert 'environ.get("PRODUCTION_FASTER_WHISPER_INPUT_ROOT")' in contract
+    assert "--engine faster-whisper" in script
+    assert '"--qualification-root", $SampleRoot' in script
+    assert '"--manifest-source", $ManifestSource' in script
+    assert "ASR qualification corpus changed during qualification" in script
+    assert "qualification_corpus = $QualificationCorpus" in script
     assert "$TempPort = 18200" in script
     assert "127.0.0.1:$TempPort" in script
     assert "Get-ScheduledTask" in script
@@ -1171,6 +1177,7 @@ def test_faster_whisper_qualification_drives_the_existing_result_flow():
 def test_qwen3_asr_qualification_is_manual_sha_bound_and_isolated():
     workflow = read(".github/workflows/qualify-qwen3-asr-production.yml")
     script = read("scripts/qualify-qwen3-asr-production.ps1")
+    contract = read("scripts/asr_qualification_manifest.py")
     assert "workflow_dispatch:" in workflow
     assert "default: false" in workflow
     assert "commit_sha must equal the workflow dispatch revision" in workflow
@@ -1179,7 +1186,12 @@ def test_qwen3_asr_qualification_is_manual_sha_bound_and_isolated():
     assert "runs-on: [self-hosted, Windows, X64, asr-production]" in workflow
     assert "production-asr-qwen3-asr-qualification" in workflow
     assert '$env:PRODUCTION_QWEN3_ASR_QUALIFICATION_ROOT' in script
-    assert '$env:PRODUCTION_QWEN3_ASR_INPUT_ROOT' in script
+    assert 'environ.get("PRODUCTION_QWEN3_ASR_INPUT_ROOT")' in contract
+    assert "--engine qwen3-asr" in script
+    assert '"--qualification-root", $SampleRoot' in script
+    assert '"--manifest-source", $ManifestSource' in script
+    assert "ASR qualification corpus changed during qualification" in script
+    assert "qualification_corpus = $QualificationCorpus" in script
     assert 'Join-Path $DataRoot "qualification\\qwen3-asr\\models"' in script
     assert 'Join-Path $DataRoot "models"' not in script
     assert "$TempPort = 18300" in script
@@ -1188,6 +1200,59 @@ def test_qwen3_asr_qualification_is_manual_sha_bound_and_isolated():
     assert "Register-ScheduledTask" not in script
     assert 'profile_admission = "disabled"' in script
     assert "production_services_modified = $false" in script
+
+
+def test_shared_asr_manifest_preflights_are_read_only_and_sanitized():
+    workflows = {
+        "faster-whisper": read(
+            ".github/workflows/qualify-faster-whisper-production.yml"
+        ),
+        "qwen3-asr": read(".github/workflows/qualify-qwen3-asr-production.yml"),
+        "whisperx": read(".github/workflows/qualify-whisperx-production.yml"),
+    }
+    for engine, workflow in workflows.items():
+        assert "PRODUCTION_ASR_QUALIFICATION_ROOT" in workflow
+        assert "PRODUCTION_ASR_QUALIFICATION_MANIFEST_PATH" in workflow
+        assert "manifest_preflight:" in workflow
+        assert "enable exactly one of execute_qualification or manifest_preflight" in workflow
+        preflight = workflow.split("  manifest-preflight:", 1)[1].split(
+            "\n  qualify:", 1
+        )[0]
+        assert f"--engine {engine}" in preflight
+        assert "manifest_sha256" in preflight
+        assert "sample_set_id" in preflight
+        assert "annotation_version" in preflight
+        assert "reference_text" not in preflight
+        assert "--include-paths" not in preflight
+        for forbidden in (
+            "pip ",
+            "ASR_DEPENDENCY_PROXY",
+            "ASR_MODEL_DOWNLOAD_PROXY",
+            "GPU_SERVICE_TOKEN",
+            "Start-ScheduledTask",
+            "Stop-ScheduledTask",
+            "Register-ScheduledTask",
+            "New-NetFirewallRule",
+        ):
+            assert forbidden not in preflight
+
+
+def test_whisperx_workflows_use_shared_manifest_without_sample_generation():
+    qualification = read(".github/workflows/qualify-whisperx-production.yml")
+    diagnostic = read(".github/workflows/diagnose-whisperx-production.yml")
+    wrapper = read("scripts/qualify-whisperx-production.ps1")
+    contract = read("scripts/asr_qualification_manifest.py")
+    for workflow in (qualification, diagnostic):
+        assert "PRODUCTION_ASR_QUALIFICATION_ROOT" in workflow
+        assert "PRODUCTION_ASR_QUALIFICATION_MANIFEST_PATH" in workflow
+        assert "prepare_synthetic_samples:" not in workflow
+        assert "prepare-qwen3-asr-qualification-samples.ps1" not in workflow
+    assert "--engine whisperx" in wrapper
+    assert "--qualification-root $ManifestRoot" in wrapper
+    assert "--manifest-source $ManifestSource" in wrapper
+    assert "ASR qualification corpus changed during qualification" in wrapper
+    assert "qualification_corpus = $QualificationCorpus" in wrapper
+    assert 'environ.get("PRODUCTION_QWEN3_ASR_MANIFEST_PATH")' in contract
 
 
 def test_qwen3_asr_qualification_preserves_native_stderr_before_failing():
