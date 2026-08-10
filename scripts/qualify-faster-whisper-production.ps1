@@ -1451,7 +1451,6 @@ function Write-QualificationDiagnostic {
     } elseif ([string]::IsNullOrWhiteSpace($Code)) {
         throw "Non-pass qualification diagnostics require a failure code"
     }
-    if ([string]::IsNullOrWhiteSpace($QualificationDiagnosticPath)) { return }
     $diagnostic = [ordered]@{
         schema_version = "faster-whisper-r3-diagnostic/2"
         status = $Status
@@ -1502,11 +1501,20 @@ function Write-QualificationDiagnostic {
                 ForEach-Object { $_.sample_id }
         )
     }
-    $diagnosticParent = Split-Path -Parent $QualificationDiagnosticPath
-    if (-not (Test-Path -LiteralPath $diagnosticParent)) {
-        New-Item -ItemType Directory -Path $diagnosticParent -Force | Out-Null
+    $persistentQualificationDiagnosticPath = Join-Path $ReportRoot "qualification-diagnostic.json"
+    $persistentDiagnosticParent = Split-Path -Parent $persistentQualificationDiagnosticPath
+    if (-not (Test-Path -LiteralPath $persistentDiagnosticParent)) {
+        New-Item -ItemType Directory -Path $persistentDiagnosticParent -Force | Out-Null
     }
-    Write-JsonFile -Path $QualificationDiagnosticPath -Value $diagnostic
+    Write-JsonFile -Path $persistentQualificationDiagnosticPath -Value $diagnostic
+
+    if (-not [string]::IsNullOrWhiteSpace($QualificationDiagnosticPath)) {
+        $diagnosticParent = Split-Path -Parent $QualificationDiagnosticPath
+        if (-not (Test-Path -LiteralPath $diagnosticParent)) {
+            New-Item -ItemType Directory -Path $diagnosticParent -Force | Out-Null
+        }
+        Write-JsonFile -Path $QualificationDiagnosticPath -Value $diagnostic
+    }
 }
 
 Assert-QualificationDiagnosticProjection
@@ -2403,10 +2411,8 @@ print('qualification-module-origins-verified')
     Write-Host "Profile admission: disabled"
 } catch {
     try {
-        if (
-            -not [string]::IsNullOrWhiteSpace($QualificationDiagnosticPath) -and
-            -not (Test-Path -LiteralPath $QualificationDiagnosticPath -PathType Leaf)
-        ) {
+        $persistentQualificationDiagnosticPath = Join-Path $ReportRoot "qualification-diagnostic.json"
+        if (-not (Test-Path -LiteralPath $persistentQualificationDiagnosticPath -PathType Leaf)) {
             Write-QualificationDiagnostic `
                 -Status "fail" `
                 -Code $FailureCode `

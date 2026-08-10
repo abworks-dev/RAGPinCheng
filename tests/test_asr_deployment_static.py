@@ -74,6 +74,26 @@ def test_faster_whisper_production_evidence_treats_runner_exit_as_informational(
     assert "$QualificationSummary.status -ne \"pass\"" in qualification
 
 
+def test_faster_whisper_qualification_persists_diagnostic_for_production_admission():
+    qualification = read("scripts/qualify-faster-whisper-production.ps1")
+
+    persistent_path = (
+        '$persistentQualificationDiagnosticPath = Join-Path $ReportRoot '
+        '"qualification-diagnostic.json"'
+    )
+    assert persistent_path in qualification
+    assert (
+        "Write-JsonFile -Path $persistentQualificationDiagnosticPath -Value $diagnostic"
+        in qualification
+    )
+    assert "Write-JsonFile -Path $QualificationDiagnosticPath -Value $diagnostic" in qualification
+    assert qualification.index(
+        "Write-JsonFile -Path $persistentQualificationDiagnosticPath -Value $diagnostic"
+    ) < qualification.index(
+        "Write-JsonFile -Path $QualificationDiagnosticPath -Value $diagnostic"
+    )
+
+
 def test_faster_whisper_production_install_is_offline_and_config_rollback_precedes_restart():
     deploy = read("scripts/deploy-asr.ps1")
     seed = deploy.index("Copy-QualifiedFasterWhisperWheels")
