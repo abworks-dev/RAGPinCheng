@@ -1335,6 +1335,71 @@ def test_qwen3_asr_qualification_preserves_native_stderr_before_failing():
     )
 
 
+def test_qwen3_asr_qualification_emits_sanitized_preflight_diagnosis():
+    workflow = read(".github/workflows/qualify-qwen3-asr-production.yml")
+    script = read("scripts/qualify-qwen3-asr-production.ps1")
+    diagnostic = script.split(
+        "function Write-SanitizedPreflightFailure", 1
+    )[1].split("function Write-SanitizedSummary", 1)[0]
+
+    assert "[string]$PreflightDiagnosticPath" in script
+    assert "PreflightDiagnosticPath =" in workflow
+    assert workflow.count("preflight-diagnostic.json") == 3
+    assert "Preflight stage:" in workflow
+    assert "Preflight failure origin:" in workflow
+    assert "Preflight native exit code:" in workflow
+    assert "Preflight captured lines:" in workflow
+    assert 'schema_version = "qwen3-asr-r3-preflight-failure/1"' in diagnostic
+    for field in (
+        "preflight_stage = $stage",
+        "failure_origin = $failureOrigin",
+        "native_exit_code = $nativeExitCode",
+        "captured_line_count = $capturedLineCount",
+        'profile_admission = "disabled"',
+        "production_services_modified = $false",
+    ):
+        assert field in diagnostic
+    for forbidden in (
+        "exception_message",
+        "exception_type",
+        "log_path",
+        "request_uri",
+        "environment_value",
+    ):
+        assert forbidden not in diagnostic
+    stages = (
+        "runner_identity",
+        "machine_python",
+        "manifest_resolution",
+        "native_stderr_capture_self_test",
+        "internal_wheel_validation",
+        "internal_wheel_manifest_read",
+        "production_python",
+        "disk_space",
+        "qualification_port",
+        "production_ports",
+        "scheduled_tasks",
+        "firewall_snapshot",
+        "gpu_health",
+        "bge_idle",
+        "production_asr_contract",
+        "sample_manifest_presence",
+        "profile_admission",
+        "sample_manifest_validation",
+        "gpu_baseline",
+    )
+    for stage in stages:
+        assert f'$PreflightFailureStage = "{stage}"' in script
+        assert f'"{stage}"' in diagnostic
+    assert "if ($PreflightUseExternalResult)" in diagnostic
+    assert script.count("$PreflightUseExternalResult = $true") == 3
+    failure_handler = script.split(
+        'Write-Host "Profile admission: disabled"', 1
+    )[1].split("} finally {", 1)[0]
+    assert 'if ($FailureCode -eq "preflight_failed")' in failure_handler
+    assert "Write-SanitizedPreflightFailure" in failure_handler
+
+
 def test_qwen3_asr_qualification_emits_sanitized_dependency_diagnosis():
     script = read("scripts/qualify-qwen3-asr-production.ps1")
     diagnostic_section = script.split(

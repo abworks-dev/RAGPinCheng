@@ -10,6 +10,7 @@ param(
     [string]$QwenWheelBundlePath,
     [bool]$ExecuteQualification = $false,
     [string]$SummaryPath = "",
+    [string]$PreflightDiagnosticPath = "",
     [string]$DependencyDiagnosticPath = "",
     [string]$LicenseMatrixPath = "",
     [string]$ModelPreparationDiagnosticPath = "",
@@ -65,6 +66,8 @@ $PeakUtilization = 0
 $Verdict = "fail"
 $FailureCode = "unhandled_failure"
 $MachinePython = ""
+$PreflightFailureStage = "not_started"
+$PreflightUseExternalResult = $false
 $DependencyFailureStage = "not_started"
 $DependencyFailureOperation = "not_started"
 $DependencyFailureLog = ""
@@ -1478,6 +1481,76 @@ function Write-SanitizedDependencyFailure {
         -Value $result
 }
 
+function Write-SanitizedPreflightFailure {
+    $allowedStages = @(
+        "runner_identity",
+        "machine_python",
+        "manifest_resolution",
+        "native_stderr_capture_self_test",
+        "internal_wheel_validation",
+        "internal_wheel_manifest_read",
+        "production_python",
+        "disk_space",
+        "qualification_port",
+        "production_ports",
+        "scheduled_tasks",
+        "firewall_snapshot",
+        "gpu_health",
+        "bge_idle",
+        "production_asr_contract",
+        "sample_manifest_presence",
+        "profile_admission",
+        "sample_manifest_validation",
+        "gpu_baseline"
+    )
+    $stage = if ($allowedStages -ccontains $PreflightFailureStage) {
+        $PreflightFailureStage
+    } else {
+        "unclassified"
+    }
+    $failureOrigin = "contract_check"
+    $nativeExitCode = $null
+    $capturedLineCount = 0
+    if ($PreflightUseExternalResult) {
+        $allowedOrigins = @(
+            "native_exit",
+            "native_process_launch_failure",
+            "log_write_failure"
+        )
+        if ($allowedOrigins -ccontains [string]$LastExternalCommandResult.failure_origin) {
+            $failureOrigin = [string]$LastExternalCommandResult.failure_origin
+        } else {
+            $failureOrigin = "external_command_failure"
+        }
+        $nativeExitCode = $LastExternalCommandResult.exit_code
+        $capturedLineCount = [int]$LastExternalCommandResult.captured_line_count
+    }
+    $result = [ordered]@{
+        schema_version = "qwen3-asr-r3-preflight-failure/1"
+        status = "fail"
+        failure_code = "preflight_failed"
+        commit_sha = $CommitSha.ToLowerInvariant()
+        run_id = $RunId
+        candidate_id = $CandidateId
+        preflight_stage = $stage
+        failure_origin = $failureOrigin
+        native_exit_code = $nativeExitCode
+        captured_line_count = $capturedLineCount
+        profile_admission = "disabled"
+        production_services_modified = $false
+    }
+    if (-not [string]::IsNullOrWhiteSpace($PreflightDiagnosticPath)) {
+        $diagnosticParent = Split-Path -Parent $PreflightDiagnosticPath
+        if (-not (Test-Path -LiteralPath $diagnosticParent)) {
+            New-Item -ItemType Directory -Path $diagnosticParent -Force | Out-Null
+        }
+        Write-JsonFile -Path $PreflightDiagnosticPath -Value $result
+    }
+    Write-JsonFile `
+        -Path (Join-Path $ReportRoot "preflight-diagnostic.json") `
+        -Value $result
+}
+
 function Write-SanitizedSummary {
     param(
         [string]$Status,
@@ -1589,11 +1662,15 @@ if ($LASTEXITCODE -ne 0) {
 
 try {
     $FailureCode = "preflight_failed"
+    $PreflightFailureStage = "runner_identity"
+    $PreflightUseExternalResult = $false
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     if ($identity.Name -notmatch "\\Administrator$") {
         throw "Qualification runner must execute as Administrator"
     }
+    $PreflightFailureStage = "machine_python"
     $MachinePython = Get-MachinePython311
+    $PreflightFailureStage = "manifest_resolution"
     $ManifestResolution = Resolve-QualificationManifest `
         -PythonPath $MachinePython `
         -RepositoryRoot $ResolvedSource
@@ -1609,9 +1686,12 @@ try {
     }
     $QualificationResolutionFingerprint = $ManifestResolution |
         ConvertTo-Json -Depth 16 -Compress
+    $PreflightFailureStage = "native_stderr_capture_self_test"
     Assert-ExternalFailureCapture `
         -PythonPath $MachinePython `
         -LogPath (Join-Path $LogRoot "native-stderr-capture-self-test.log")
+    $PreflightFailureStage = "internal_wheel_validation"
+    $PreflightUseExternalResult = $true
     $InternalWheelValidationLog = Join-Path $LogRoot "internal-wheel-validation.log"
     Invoke-External `
         -FilePath $MachinePython `
@@ -1623,6 +1703,8 @@ try {
             "--run-id", $RunId
         ) `
         -LogPath $InternalWheelValidationLog
+    $PreflightFailureStage = "internal_wheel_manifest_read"
+    $PreflightUseExternalResult = $false
     $InternalWheelManifestPath = Join-Path (
         $ResolvedQwenWheelBundle
     ) "internal-wheel-manifest.json"
@@ -1631,37 +1713,47 @@ try {
         -Raw `
         -Encoding UTF8 |
         ConvertFrom-Json
+    $PreflightFailureStage = "production_python"
     $ProductionPython = $env:PRODUCTION_PYTHON_PATH
     if (-not (Test-Path -LiteralPath $ProductionPython -PathType Leaf)) {
         throw "Production ASR venv Python is missing"
     }
+    $PreflightFailureStage = "disk_space"
     $drive = Get-PSDrive -Name "D" -ErrorAction Stop
     if ([int64]$drive.Free -lt 30GB) {
         throw "D drive requires at least 30 GiB free"
     }
+    $PreflightFailureStage = "qualification_port"
     if (Get-NetTCPConnection -LocalPort $TempPort -State Listen -ErrorAction SilentlyContinue) {
         throw "Qualification port 18300 is already listening"
     }
+    $PreflightFailureStage = "production_ports"
     foreach ($port in @($GpuPort, $ProductionAsrPort)) {
         if (-not (Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue)) {
             throw "Required production port $port is not listening"
         }
     }
 
+    $PreflightFailureStage = "scheduled_tasks"
     $PreTaskSnapshot = Get-TaskSnapshot
     if (@($PreTaskSnapshot | Where-Object { $_.state -ne "Running" }).Count -ne 0) {
         throw "Production GPU and ASR Scheduled Tasks must both be running"
     }
+    $PreflightFailureStage = "firewall_snapshot"
     $PreFirewallSnapshot = Get-FirewallSnapshot
     Write-JsonFile -Path (Join-Path $EvidenceRoot "scheduled-tasks-before.json") -Value $PreTaskSnapshot
     Write-JsonFile -Path (Join-Path $EvidenceRoot "firewall-before.json") -Value $PreFirewallSnapshot
 
+    $PreflightFailureStage = "gpu_health"
     $gpuHealth = Invoke-RestMethod -Method Get -Uri "$GpuUrl/health" -TimeoutSec 10
     if ($gpuHealth.status -ne "ok" -or $gpuHealth.model_loaded -ne $true) {
         throw "GPU service health is not ready"
     }
+    $PreflightFailureStage = "bge_idle"
     [void](Assert-BgeIdle)
 
+    $PreflightFailureStage = "production_asr_contract"
+    $PreflightUseExternalResult = $true
     Invoke-External `
         -FilePath "powershell.exe" `
         -Arguments @(
@@ -1671,15 +1763,19 @@ try {
             "-AsrUrl", $ProductionAsrUrl
         ) `
         -LogPath (Join-Path $LogRoot "production-asr-verification-before.log")
+    $PreflightUseExternalResult = $false
     $PreProductionCapabilities = [ordered]@{
         api_version = "asr-service/1"
         service_profiles = @("funasr-sensevoice-small-v1")
     }
     Write-JsonFile -Path (Join-Path $EvidenceRoot "production-capabilities-before.json") -Value $PreProductionCapabilities
 
+    $PreflightFailureStage = "sample_manifest_presence"
     if (-not (Test-Path -LiteralPath $SampleManifest -PathType Leaf)) {
         throw "Fixed eight-sample Manifest is missing"
     }
+    $PreflightFailureStage = "profile_admission"
+    $PreflightUseExternalResult = $true
     Invoke-External `
         -FilePath $ProductionPython `
         -Arguments @(
@@ -1687,6 +1783,7 @@ try {
             "from src.transcription.profile_catalog import QWEN3_ASR_PROFILE_ID,build_phase3_profile_catalog; p=next(x.profile for x in build_phase3_profile_catalog() if x.profile.profile_id==QWEN3_ASR_PROFILE_ID); assert p.qualification.value=='experimental' and p.admission.value=='disabled'; print('profile-disabled')"
         ) `
         -LogPath (Join-Path $LogRoot "profile-admission-before.log")
+    $PreflightFailureStage = "sample_manifest_validation"
     Invoke-External `
         -FilePath $MachinePython `
         -Arguments @(
@@ -1698,6 +1795,8 @@ try {
         ) `
         -LogPath (Join-Path $LogRoot "sample-manifest-validation.log")
 
+    $PreflightFailureStage = "gpu_baseline"
+    $PreflightUseExternalResult = $false
     $gpuBaseline = Get-GpuSample
     $BaselineMemoryMiB = [int]$gpuBaseline.memory_used_mib
     $PeakMemoryMiB = $BaselineMemoryMiB
@@ -2249,6 +2348,12 @@ print('qualification-module-origins-verified')
     Write-Host "Samples: 8/8"
     Write-Host "Profile admission: disabled"
 } catch {
+    if ($FailureCode -eq "preflight_failed") {
+        try {
+            Write-SanitizedPreflightFailure
+        } catch {
+        }
+    }
     if ($FailureCode -eq "model_preparation_failed") {
         try {
             Write-SanitizedModelPreparationFailure -LogPath $ModelPreparationLogPath

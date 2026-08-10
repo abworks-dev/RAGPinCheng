@@ -212,6 +212,7 @@ jobs:
             ExecuteQualification = [System.Convert]::ToBoolean("${{ inputs.execute_qualification }}")
             QwenWheelBundlePath = "${{ runner.temp }}\qwen3-asr-controlled-wheel-${{ github.run_id }}"
             SummaryPath = "${{ runner.temp }}\qwen3-asr-r3-${{ github.run_id }}\qualification-verdict.json"
+            PreflightDiagnosticPath = "${{ runner.temp }}\qwen3-asr-r3-${{ github.run_id }}\preflight-diagnostic.json"
             DependencyDiagnosticPath = "${{ runner.temp }}\qwen3-asr-r3-${{ github.run_id }}\dependency-diagnostic.json"
             LicenseMatrixPath = "${{ runner.temp }}\qwen3-asr-r3-${{ github.run_id }}\license-matrix.json"
             ModelPreparationDiagnosticPath = "${{ runner.temp }}\qwen3-asr-r3-${{ github.run_id }}\model-preparation-diagnostic.json"
@@ -240,6 +241,16 @@ jobs:
               "- Profile admission: ``$($summary.profile_admission)``",
               "- Production services modified: ``$($summary.production_services_modified)``"
             )
+            $preflightPath = "${{ runner.temp }}\qwen3-asr-r3-${{ github.run_id }}\preflight-diagnostic.json"
+            if (Test-Path -LiteralPath $preflightPath -PathType Leaf) {
+              $preflight = Get-Content -LiteralPath $preflightPath -Raw -Encoding UTF8 | ConvertFrom-Json
+              $lines += @(
+                "- Preflight stage: ``$($preflight.preflight_stage)``",
+                "- Preflight failure origin: ``$($preflight.failure_origin)``",
+                "- Preflight native exit code: ``$($preflight.native_exit_code)``",
+                "- Preflight captured lines: ``$($preflight.captured_line_count)``"
+              )
+            }
             $diagnosticPath = "${{ runner.temp }}\qwen3-asr-r3-${{ github.run_id }}\dependency-diagnostic.json"
             if (Test-Path -LiteralPath $diagnosticPath -PathType Leaf) {
               $diagnostic = Get-Content -LiteralPath $diagnosticPath -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -275,6 +286,7 @@ jobs:
           name: qwen3-asr-r3-verdict-${{ github.run_id }}
           path: |
             ${{ runner.temp }}\qwen3-asr-r3-${{ github.run_id }}\qualification-verdict.json
+            ${{ runner.temp }}\qwen3-asr-r3-${{ github.run_id }}\preflight-diagnostic.json
             ${{ runner.temp }}\qwen3-asr-r3-${{ github.run_id }}\dependency-diagnostic.json
             ${{ runner.temp }}\qwen3-asr-r3-${{ github.run_id }}\license-matrix.json
             ${{ runner.temp }}\qwen3-asr-r3-${{ github.run_id }}\model-preparation-diagnostic.json
