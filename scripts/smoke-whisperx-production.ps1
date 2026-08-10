@@ -10,12 +10,18 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$ProgramRoot = $env:PRODUCTION_WHISPERX_PROGRAM_ROOT
-$DataRoot = $env:PRODUCTION_WHISPERX_DATA_ROOT
+$WhisperXRoot = $env:PRODUCTION_WHISPERX_ROOT
+if ([string]::IsNullOrWhiteSpace($WhisperXRoot)) {
+    throw "PRODUCTION_WHISPERX_ROOT is required"
+}
+$ProgramRoot = Join-Path $WhisperXRoot "qualification"
+$DataRoot = $WhisperXRoot
 $RunRoot = Join-Path $ProgramRoot "runs\$RunId"
 $VenvPython = Join-Path $RunRoot "venv\Scripts\python.exe"
 $ModelRoot = Join-Path $DataRoot "models"
 $NltkRoot = Join-Path $DataRoot "nltk"
+$WheelCacheRoot = Join-Path $DataRoot "wheel-cache"
+$SharedReportRoot = Join-Path $DataRoot "reports"
 $SampleRoot = Join-Path $RunRoot "samples"
 $ReportRoot = Join-Path $RunRoot "reports"
 $SmokeReport = Join-Path $ReportRoot "cuda-smoke.json"
@@ -97,7 +103,7 @@ try {
     $GpuName = ($gpu.Split(",")[0]).Trim()
     $BeforeTasks = Get-StateHash "tasks"
     $BeforeFirewall = Get-StateHash "firewall"
-    New-Item -ItemType Directory -Path $RunRoot,$ModelRoot,$NltkRoot,$SampleRoot,$ReportRoot -Force | Out-Null
+    New-Item -ItemType Directory -Path $RunRoot,$ModelRoot,$NltkRoot,$WheelCacheRoot,$SharedReportRoot,$SampleRoot,$ReportRoot -Force | Out-Null
 
     $machinePython = $env:PRODUCTION_PYTHON311_PATH
     if (-not (Test-Path -LiteralPath $machinePython -PathType Leaf)) {
