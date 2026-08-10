@@ -785,7 +785,7 @@ def test_faster_whisper_qualification_is_isolated_from_production_mutations():
     contract = read("scripts/asr_qualification_manifest.py")
     lowered = script.lower()
     assert '$env:PRODUCTION_FASTER_WHISPER_QUALIFICATION_ROOT' in script
-    assert 'environ.get("PRODUCTION_FASTER_WHISPER_INPUT_ROOT")' in contract
+    assert 'environ.get("PRODUCTION_FASTER_WHISPER_INPUT_ROOT")' not in contract
     assert "--engine faster-whisper" in script
     assert '"--qualification-root", $SampleRoot' in script
     assert '"--manifest-source", $ManifestSource' in script
@@ -1186,7 +1186,7 @@ def test_qwen3_asr_qualification_is_manual_sha_bound_and_isolated():
     assert "runs-on: [self-hosted, Windows, X64, asr-production]" in workflow
     assert "production-asr-qwen3-asr-qualification" in workflow
     assert '$env:PRODUCTION_QWEN3_ASR_QUALIFICATION_ROOT' in script
-    assert 'environ.get("PRODUCTION_QWEN3_ASR_INPUT_ROOT")' in contract
+    assert 'environ.get("PRODUCTION_QWEN3_ASR_INPUT_ROOT")' not in contract
     assert "--engine qwen3-asr" in script
     assert '"--qualification-root", $SampleRoot' in script
     assert '"--manifest-source", $ManifestSource' in script
@@ -1236,38 +1236,27 @@ def test_shared_asr_manifest_preflights_are_read_only_and_sanitized():
         ):
             assert forbidden not in preflight
 
+    all_production_workflows = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in (ROOT / ".github" / "workflows").glob("*.yml")
+    )
+    for legacy_variable in (
+        "PRODUCTION_FASTER_WHISPER_INPUT_ROOT",
+        "PRODUCTION_QWEN3_ASR_INPUT_ROOT",
+        "PRODUCTION_QWEN3_ASR_MANIFEST_PATH",
+    ):
+        assert legacy_variable not in all_production_workflows
 
-def test_shared_asr_corpus_materialization_is_manual_fixed_and_isolated():
-    workflow = read(
-        ".github/workflows/materialize-asr-qualification-corpus-production.yml"
+
+def test_shared_asr_corpus_materializer_is_offline_after_migration():
+    workflow_path = (
+        ROOT
+        / ".github"
+        / "workflows"
+        / "materialize-asr-qualification-corpus-production.yml"
     )
     script = read("scripts/materialize_asr_qualification_corpus.py")
-    assert "workflow_dispatch:" in workflow
-    assert "default: false" in workflow
-    assert "execute_materialization must be explicitly enabled" in workflow
-    assert "commit_sha must equal the workflow dispatch revision" in workflow
-    assert "materialization must run from master" in workflow
-    assert "environment: production-asr" in workflow
-    assert "runs-on: [self-hosted, Windows, X64, asr-production]" in workflow
-    assert "PRODUCTION_FASTER_WHISPER_INPUT_ROOT" in workflow
-    assert "PRODUCTION_ASR_DATA_ROOT" in workflow
-    assert "self-made-faster-whisper-r3" in workflow
-    assert "Get-ScheduledTask" in workflow
-    assert "Get-NetFirewallRule" in workflow
-    assert "Files read-only: ``true``" in workflow
-    assert "reference_text" not in workflow
-    assert "--include-paths" not in workflow
-    for forbidden in (
-        "pip ",
-        "ASR_DEPENDENCY_PROXY",
-        "ASR_MODEL_DOWNLOAD_PROXY",
-        "GPU_SERVICE_TOKEN",
-        "Start-ScheduledTask",
-        "Stop-ScheduledTask",
-        "Register-ScheduledTask",
-        "New-NetFirewallRule",
-    ):
-        assert forbidden not in workflow
+    assert not workflow_path.exists()
     assert 'APPROVED_SAMPLE_SET_ID = "self-made-faster-whisper-r3"' in script
     assert "shutil.copyfile" in script
     assert "os.replace(staging, target)" in script
@@ -1290,7 +1279,7 @@ def test_whisperx_workflows_use_shared_manifest_without_sample_generation():
     assert "--manifest-source $ManifestSource" in wrapper
     assert "ASR qualification corpus changed during qualification" in wrapper
     assert "qualification_corpus = $QualificationCorpus" in wrapper
-    assert 'environ.get("PRODUCTION_QWEN3_ASR_MANIFEST_PATH")' in contract
+    assert 'environ.get("PRODUCTION_QWEN3_ASR_MANIFEST_PATH")' not in contract
 
 
 def test_qwen3_asr_qualification_preserves_native_stderr_before_failing():

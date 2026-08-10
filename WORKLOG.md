@@ -3006,3 +3006,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`scripts/materialize_asr_qualification_corpus.py`、`.github/workflows/materialize-asr-qualification-corpus-production.yml`、`asr_service/tests/test_materialize_asr_qualification_corpus.py`、`tests/test_asr_deployment_static.py`、`project-docs/plans/shared-asr-qualification-corpus-migration.md`、`WORKLOG.md`。
 - 验证：变基到 `origin/master@42f66e1` 后，完整 CI ASR contract 等价本地集合 `464 passed, 2 subtests passed`；Python `py_compile`、workflow YAML 解析和 `git diff --check` 通过。两个 legacy preflight 仅执行 manifest/WAV 读取，qualification、wheel build、依赖安装、模型加载和推理 jobs 均跳过；未修改 Profile、服务、计划任务或防火墙。
 - 待办/风险：materialization workflow 尚未合并或执行，GitHub 中性/legacy 变量尚未变更，三个中性 preflight 尚未运行。上述生产步骤继续按本次已批准 R3 范围在 PR CI 合并后执行；不运行真实 GPU qualification，不删除旧变量、目录、样本或历史报告。
+
+### 14:45 — 冻结 ASR qualification 中性语料入口
+
+- 完成：删除 qualification 环境解析中的 legacy fallback，三个引擎仅接受成对的 `PRODUCTION_ASR_QUALIFICATION_ROOT` 与 `PRODUCTION_ASR_QUALIFICATION_MANIFEST_PATH`；移除三个 qualification workflow 和 WhisperX diagnostic 的旧变量导出，并退役已经完成使命的一次性 production materialization workflow。离线 materializer、旧样本准备脚本、旧目录和样本均保留，三引擎运行环境、模型、缓存、报告和 Profile admission 不变。
+- 文件：`scripts/asr_qualification_manifest.py`、三个 qualification workflow、`.github/workflows/diagnose-whisperx-production.yml`、删除 `.github/workflows/materialize-asr-qualification-corpus-production.yml`、共享 manifest/WhisperX/部署静态测试、`project-docs/features/transcript-pipeline.md`、`project-docs/plans/shared-asr-qualification-corpus-migration.md`、`TODO.md`、`WORKLOG.md`。
+- 验证：完整 CI ASR contract 等价本地集合 `464 passed, 2 subtests passed`，仅有 2 条既有弃用警告；Python `py_compile`、22 个 workflow YAML 解析和 `git diff --check` 通过。测试确认仅 legacy 配置失败关闭、遗留环境键不能覆盖 neutral manifest、三个 production workflow 只暴露中性语料变量。
+- 待办/风险：GitHub environment 变量删除和合并后 neutral-only Windows preflight 属于本轮已批准的后续生产操作，以 GitHub environment/Actions 审计记录为准；本提交未运行 GPU qualification，未修改 Profile、服务、计划任务、防火墙、模型、缓存、旧样本或历史报告。

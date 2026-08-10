@@ -191,14 +191,14 @@ def test_shared_manifest_rejects_reparse_component(tmp_path, monkeypatch):
         ("qwen3-asr", "PRODUCTION_QWEN3_ASR_INPUT_ROOT"),
     ],
 )
-def test_neutral_manifest_wins_only_when_legacy_identity_matches(
+def test_neutral_manifest_ignores_retired_legacy_root_keys(
     tmp_path, engine, legacy_name
 ):
     path = _manifest(tmp_path / "shared")
     environ = {
         "PRODUCTION_ASR_QUALIFICATION_ROOT": str(path.parent),
         "PRODUCTION_ASR_QUALIFICATION_MANIFEST_PATH": str(path),
-        legacy_name: str(path.parent),
+        legacy_name: str(tmp_path / "retired"),
     }
     selection = contract.resolve_manifest_from_environment(engine, environ)
     assert selection.source == "neutral"
@@ -207,44 +207,43 @@ def test_neutral_manifest_wins_only_when_legacy_identity_matches(
     ).hexdigest()
 
 
-def test_whisperx_neutral_and_legacy_direct_paths_must_match(tmp_path):
+def test_whisperx_neutral_manifest_ignores_retired_direct_path(tmp_path):
     path = _manifest(tmp_path / "shared")
     selection = contract.resolve_manifest_from_environment(
         "whisperx",
         {
             "PRODUCTION_ASR_QUALIFICATION_ROOT": str(path.parent),
             "PRODUCTION_ASR_QUALIFICATION_MANIFEST_PATH": str(path),
-            "PRODUCTION_QWEN3_ASR_MANIFEST_PATH": str(path),
+            "PRODUCTION_QWEN3_ASR_MANIFEST_PATH": str(tmp_path / "retired.json"),
         },
     )
     assert selection.source == "neutral"
 
 
-def test_legacy_fallback_is_explicitly_reported(tmp_path):
+def test_legacy_only_environment_is_rejected(tmp_path):
     path = _manifest(tmp_path / "legacy")
-    selection = contract.resolve_manifest_from_environment(
-        "qwen3-asr", {"PRODUCTION_QWEN3_ASR_INPUT_ROOT": str(path.parent)}
-    )
-    assert selection.source == "legacy"
-    assert selection.to_dict()["manifest_source"] == "legacy"
-    assert "manifest_path" not in selection.to_dict()
-
-
-def test_neutral_and_legacy_identity_conflict_fails_closed(tmp_path):
-    neutral = _manifest(tmp_path / "neutral")
-    legacy = _manifest(tmp_path / "legacy", annotation_version="2")
-    with pytest.raises(ValueError, match="different identities"):
+    with pytest.raises(ValueError, match="neutral ASR qualification manifest"):
         contract.resolve_manifest_from_environment(
-            "faster-whisper",
-            {
-                "PRODUCTION_ASR_QUALIFICATION_ROOT": str(neutral.parent),
-                "PRODUCTION_ASR_QUALIFICATION_MANIFEST_PATH": str(neutral),
-                "PRODUCTION_FASTER_WHISPER_INPUT_ROOT": str(legacy.parent),
-            },
+            "qwen3-asr", {"PRODUCTION_QWEN3_ASR_INPUT_ROOT": str(path.parent)}
         )
 
 
-def test_partial_neutral_configuration_fails_before_legacy_fallback(tmp_path):
+def test_retired_legacy_identity_cannot_override_neutral_manifest(tmp_path):
+    neutral = _manifest(tmp_path / "neutral")
+    legacy = _manifest(tmp_path / "legacy", annotation_version="2")
+    selection = contract.resolve_manifest_from_environment(
+        "faster-whisper",
+        {
+            "PRODUCTION_ASR_QUALIFICATION_ROOT": str(neutral.parent),
+            "PRODUCTION_ASR_QUALIFICATION_MANIFEST_PATH": str(neutral),
+            "PRODUCTION_FASTER_WHISPER_INPUT_ROOT": str(legacy.parent),
+        },
+    )
+    assert selection.source == "neutral"
+    assert selection.manifest.annotation_version == "1"
+
+
+def test_partial_neutral_configuration_fails_even_with_retired_legacy_key(tmp_path):
     legacy = _manifest(tmp_path / "legacy")
     with pytest.raises(ValueError, match="configured together"):
         contract.resolve_manifest_from_environment(

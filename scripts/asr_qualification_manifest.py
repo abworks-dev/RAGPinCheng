@@ -449,28 +449,6 @@ def _configured(value: str | None) -> str | None:
     return value.strip()
 
 
-def _legacy_location(
-    engine: str, environ: Mapping[str, str]
-) -> tuple[Path, Path] | None:
-    if engine == "faster-whisper":
-        root_value = _configured(environ.get("PRODUCTION_FASTER_WHISPER_INPUT_ROOT"))
-        if root_value is None:
-            return None
-        return Path(root_value), Path(root_value) / "manifest.json"
-    if engine == "qwen3-asr":
-        root_value = _configured(environ.get("PRODUCTION_QWEN3_ASR_INPUT_ROOT"))
-        if root_value is None:
-            return None
-        return Path(root_value), Path(root_value) / "manifest.json"
-    if engine == "whisperx":
-        path_value = _configured(environ.get("PRODUCTION_QWEN3_ASR_MANIFEST_PATH"))
-        if path_value is None:
-            return None
-        manifest = Path(path_value)
-        return manifest.parent, manifest
-    raise ValueError("unknown ASR qualification engine")
-
-
 def resolve_manifest_from_environment(
     engine: str, environ: Mapping[str, str] | None = None
 ) -> ManifestSelection:
@@ -483,44 +461,15 @@ def resolve_manifest_from_environment(
         raise ValueError(
             "neutral qualification root and manifest path must be configured together"
         )
-    legacy_location = _legacy_location(engine, values)
-    neutral_manifest = None
-    if neutral_root is not None and neutral_path is not None:
-        neutral_manifest = load_manifest(
-            Path(neutral_path),
-            root=Path(neutral_root),
-            allowed_schema_versions=allowed_schema_versions("neutral", engine),
-            manifest_source="neutral",
-        )
-    legacy_manifest = None
-    if legacy_location is not None:
-        legacy_manifest = load_manifest(
-            legacy_location[1],
-            root=legacy_location[0],
-            allowed_schema_versions=allowed_schema_versions("legacy", engine),
-            manifest_source="legacy",
-        )
-    if neutral_manifest is None and legacy_manifest is None:
-        raise ValueError("ASR qualification manifest is not configured")
-    if neutral_manifest is not None and legacy_manifest is not None:
-        neutral_identity = (
-            neutral_manifest.manifest_sha256,
-            neutral_manifest.sample_set_id,
-            neutral_manifest.annotation_version,
-        )
-        legacy_identity = (
-            legacy_manifest.manifest_sha256,
-            legacy_manifest.sample_set_id,
-            legacy_manifest.annotation_version,
-        )
-        if neutral_identity != legacy_identity:
-            raise ValueError(
-                "neutral and legacy qualification manifests have different identities"
-            )
-    if neutral_manifest is not None:
-        return ManifestSelection("neutral", neutral_manifest)
-    assert legacy_manifest is not None
-    return ManifestSelection("legacy", legacy_manifest)
+    if neutral_root is None or neutral_path is None:
+        raise ValueError("neutral ASR qualification manifest is not configured")
+    manifest = load_manifest(
+        Path(neutral_path),
+        root=Path(neutral_root),
+        allowed_schema_versions=allowed_schema_versions("neutral", engine),
+        manifest_source="neutral",
+    )
+    return ManifestSelection("neutral", manifest)
 
 
 def main() -> int:
