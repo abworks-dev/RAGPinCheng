@@ -17,6 +17,7 @@ def test_missing_runtime_configuration_is_reported_without_paths(tmp_path, monke
     result = json.loads(report.read_text(encoding="utf-8"))
     assert result == {
         "failure_code": "shared-corpus-unconfigured",
+        "failure_stage": "shared-corpus",
         "production_services_modified": False,
         "schema_version": "whisperx-runtime-preflight/1",
         "status": "fail",
@@ -36,7 +37,23 @@ def test_missing_shared_corpus_path_is_reported_without_paths(tmp_path, monkeypa
     assert preflight.main() == 2
     result = json.loads(report.read_text(encoding="utf-8"))
     assert result["failure_code"] == "shared-corpus-unavailable"
+    assert result["failure_stage"] == "shared-corpus"
     assert str(tmp_path) not in report.read_text(encoding="utf-8")
+
+
+def test_unexpected_import_failure_keeps_exception_details_out_of_report():
+    result = preflight._failure_result(
+        preflight.PreflightStageError("imports", ModuleNotFoundError("private.module"))
+    )
+
+    assert result == {
+        "failure_code": "runtime-preflight-failed",
+        "failure_stage": "imports",
+        "production_services_modified": False,
+        "schema_version": "whisperx-runtime-preflight/1",
+        "status": "fail",
+    }
+    assert "private.module" not in str(result)
 
 
 def test_successful_result_is_written_as_ascii_json(tmp_path, monkeypatch):
