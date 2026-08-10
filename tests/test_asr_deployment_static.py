@@ -1420,3 +1420,47 @@ def test_qwen3_asr_model_ssl_evidence_is_fixed_offline_and_sanitized():
     ):
         assert forbidden not in workflow
         assert forbidden not in script
+
+
+def test_qwen3_asr_service_start_evidence_is_fixed_offline_and_sanitized():
+    workflow = read(
+        ".github/workflows/diagnose-qwen3-asr-service-start-production.yml"
+    )
+    script = read("scripts/extract_qwen3_asr_service_start_evidence.py")
+    assert "workflow_dispatch:" in workflow
+    assert "default: false" in workflow
+    assert "commit_sha must equal the workflow dispatch revision" in workflow
+    assert "environment: production-asr" in workflow
+    assert "runs-on: [self-hosted, Windows, X64, asr-production]" in workflow
+    assert "production-asr-qwen3-asr-service-start-evidence" in workflow
+    assert 'SOURCE_RUN_ID = "31350405787"' in script
+    assert 'SOURCE_COMMIT_SHA = "5d79bb0388614eae85f5eadb6669bdde5234f7c1"' in script
+    assert "qualification-service.stdout.log" in script
+    assert "qualification-service.stderr.log" in script
+    assert "qualification-verdict.json" in script
+    assert "qwen3-asr-service-start-evidence/1" in script
+    assert "scripts.extract_qwen3_asr_service_start_evidence" in workflow
+    assert "service-start-evidence.json" in workflow
+    assert "timeout-minutes: 10" in workflow
+    for forbidden in (
+        "secrets.",
+        "actions/download-artifact",
+        "actions/setup-python",
+        "import subprocess",
+        "import socket",
+        "import requests",
+        "import urllib",
+        "import httpx",
+        "pip install",
+        "pip download",
+        "from huggingface_hub",
+        "uvicorn",
+        "ASR_MODEL_DOWNLOAD_PROXY",
+        "ASR_SERVICE_TOKEN",
+        "GPU_SERVICE_TOKEN",
+        "Start-Process",
+        "New-NetFirewallRule",
+        "Register-ScheduledTask",
+    ):
+        assert forbidden not in workflow
+        assert forbidden not in script
