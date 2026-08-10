@@ -76,10 +76,44 @@ def test_ubuntu_verifier_keeps_backend_disabled_and_validates_cross_node(tmp_pat
     assert result == {
         "status": "verified",
         "api_version": "asr-service/1",
-        "service_profile": "funasr-sensevoice-small-v1",
+        "service_profiles": ["funasr-sensevoice-small-v1"],
         "ubuntu_asr_enabled": False,
         "token_match": True,
     }
+
+
+def test_ubuntu_verifier_accepts_exact_faster_whisper_then_sensevoice_contract(
+    tmp_path: Path,
+):
+    def dual_profile_opener(request, *, timeout):
+        if request.full_url.endswith("/health"):
+            return FakeResponse({"status": "ok", "api_version": "asr-service/1"})
+        return FakeResponse(
+            {
+                "api_version": "asr-service/1",
+                "service_profiles": [
+                    "faster-whisper-large-v3-turbo-v1",
+                    "funasr-sensevoice-small-v1",
+                ],
+                "max_upload_part_bytes": 8388608,
+                "max_input_bytes": 2147483648,
+            }
+        )
+
+    env_file = tmp_path / "prod.env"
+    env_file.write_text(valid_env(), encoding="utf-8")
+    expected_profiles = (
+        MODULE.FASTER_WHISPER_PROFILE,
+        MODULE.SENSEVOICE_PROFILE,
+    )
+    result = MODULE.verify(
+        env_file,
+        "http://asr.example.invalid:8200",
+        "shared-token",
+        expected_profiles=expected_profiles,
+        opener=dual_profile_opener,
+    )
+    assert result["service_profiles"] == list(expected_profiles)
 
 
 @pytest.mark.parametrize(
@@ -150,7 +184,26 @@ def test_health_contract_rejects_disabled_wrong_version_and_unknown_fields(paylo
 )
 def test_capabilities_contract_rejects_wrong_profiles_and_bool_limits(payload):
     with pytest.raises(RuntimeError):
-        MODULE.validate_capabilities(payload)
+        MODULE.validate_capabilities(payload, (MODULE.SENSEVOICE_PROFILE,))
+
+
+@pytest.mark.parametrize(
+    "profiles",
+    (
+        (MODULE.FASTER_WHISPER_PROFILE,),
+        (MODULE.SENSEVOICE_PROFILE, MODULE.FASTER_WHISPER_PROFILE),
+        ("unexpected",),
+    ),
+)
+def test_capabilities_contract_rejects_unapproved_expected_profile_sets(profiles):
+    payload = {
+        "api_version": "asr-service/1",
+        "service_profiles": list(profiles),
+        "max_upload_part_bytes": 1,
+        "max_input_bytes": 1,
+    }
+    with pytest.raises(RuntimeError, match="invalid expected"):
+        MODULE.validate_capabilities(payload, profiles)
 
 
 def test_activation_workflow_is_manual_safe_by_default_and_cross_node_gated():
@@ -241,7 +294,10 @@ def test_local_verifier_has_unique_enabled_profile_and_gpu_assertions():
     assert 'ASR_SERVICE_ENABLED"] -ne "true"' in script
     assert '$health.status -ne "ok"' in script
     assert '"funasr-sensevoice-small-v1"' in script
-    assert "$profiles.Count -ne 1" in script
+    assert '"faster-whisper-large-v3-turbo-v1"' in script
+    assert '($profiles -join "`n") -ne ($ExpectedProfiles -join "`n")' in script
+    assert "ASR_FASTER_WHISPER_MODEL_CACHE_ROOT" in script
+    assert "ASR_FASTER_WHISPER_MODEL_MANIFEST_PATH" in script
     assert (
         'Invoke-RestMethod -Method Get -Uri "$AsrUrl/v1/capabilities" '
         "-Headers $asrHeaders -TimeoutSec 120"

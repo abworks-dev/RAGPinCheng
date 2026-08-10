@@ -1,14 +1,23 @@
 [CmdletBinding()]
 param(
     [string]$DataRoot = $env:PRODUCTION_ASR_DATA_ROOT,
-    [string]$AsrUrl = "http://127.0.0.1:8200"
+    [string]$AsrUrl = "http://127.0.0.1:8200",
+    [string[]]$ExpectedProfiles = @("funasr-sensevoice-small-v1")
 )
 
 $ErrorActionPreference = "Stop"
 $expectedAsrVersion = "asr-service/1"
 $expectedGpuVersion = "gpu-activity/1"
-$expectedProfile = "funasr-sensevoice-small-v1"
 $envFile = Join-Path $DataRoot "config\asr.env"
+$senseVoiceProfile = "funasr-sensevoice-small-v1"
+$fasterWhisperProfile = "faster-whisper-large-v3-turbo-v1"
+$expectedIdentity = $ExpectedProfiles -join "`n"
+if ($expectedIdentity -notin @(
+    $senseVoiceProfile,
+    "$fasterWhisperProfile`n$senseVoiceProfile"
+)) {
+    throw "ExpectedProfiles must be the pinned SenseVoice or faster-whisper plus SenseVoice contract"
+}
 
 function Assert-ExactPropertyNames {
     param(
@@ -59,6 +68,16 @@ foreach ($required in @(
         throw "Required ASR setting is empty: $required"
     }
 }
+if ($ExpectedProfiles -contains $fasterWhisperProfile) {
+    foreach ($required in @(
+        "ASR_FASTER_WHISPER_MODEL_CACHE_ROOT",
+        "ASR_FASTER_WHISPER_MODEL_MANIFEST_PATH"
+    )) {
+        if (-not $values.ContainsKey($required) -or [string]::IsNullOrWhiteSpace($values[$required])) {
+            throw "Required faster-whisper ASR setting is empty: $required"
+        }
+    }
+}
 if ($values["ASR_SERVICE_ENABLED"] -ne "true") {
     throw "ASR_SERVICE_ENABLED must be true during activation verification"
 }
@@ -81,8 +100,11 @@ if ($capabilities.api_version -ne $expectedAsrVersion) {
     throw "Unexpected capabilities API version"
 }
 $profiles = @($capabilities.service_profiles)
-if ($profiles.Count -ne 1 -or $profiles[0] -ne $expectedProfile) {
-    throw "ASR capabilities must expose exactly the pinned experimental profile"
+if (
+    $ExpectedProfiles.Count -eq 0 -or
+    ($profiles -join "`n") -ne ($ExpectedProfiles -join "`n")
+) {
+    throw "ASR capabilities must expose exactly the expected pinned profiles"
 }
 foreach ($field in @("max_upload_part_bytes", "max_input_bytes")) {
     $value = $capabilities.$field
@@ -117,5 +139,5 @@ if ($activity.asr_chunk_allowed -isnot [bool]) {
 
 Write-Host "ASR activation verification passed."
 Write-Host "ASR API version: $expectedAsrVersion"
-Write-Host "Service profile: $expectedProfile"
+Write-Host "Service profiles: $($ExpectedProfiles -join ',')"
 Write-Host "GPU activity contract valid; asr_chunk_allowed=$($activity.asr_chunk_allowed)"

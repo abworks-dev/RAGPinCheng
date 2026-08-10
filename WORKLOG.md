@@ -2915,3 +2915,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`WORKLOG.md`
 - 验证：Run `31348352599` job 全部通过；8/8 样本通过，三层 canonical/Markdown/parser turns 确定性一致，GPU 显存基线 `3721 MiB`、峰值 `6136 MiB`、利用率峰值 `100%`；wheel cache 命中；`production_services_modified=false`；Profile admission 仍为 disabled。
 - 待办/风险：R3 证据绑定 SHA `aee8975`；master 后续仅增加 Qwen TLS 提交，未触及 faster-whisper。生产 admission、依赖接入、模型路径和跨节点验收仍需另行 R3 方案与批准。
+
+### 11:06 — 准备 faster-whisper 生产准入代码
+
+- 完成：在隔离分支实现 faster-whisper 生产准入的失败关闭门禁；部署必须绑定持久化 R3 verdict/diagnostic、run ID、与部署相同的完整 SHA、固定 8 样本/5 gate、资格 wheel cache 和模型 Manifest。组合 staging venv 保留全部已资格 wheel 并离线安装，切换前验证 SenseVoice、faster-whisper、CUDA FP16 和模型缓存；`asr.env` 在受限 ACL 目录备份并纳入事务回滚；Windows 本机与 Ubuntu 跨节点验证支持固定双 Profile 顺序，Ubuntu 应用侧保持 `ASR_ENABLED=false`。应用 Profile admission 未修改，仍为 disabled。
+- 文件：`.github/workflows/deploy-asr-production.yml`、`scripts/deploy-asr.ps1`、`scripts/faster-whisper-production-evidence.ps1`、`scripts/verify-asr-service.ps1`、`scripts/verify_asr_from_ubuntu.py`、`tests/test_asr_activation.py`、`tests/test_asr_deployment_static.py`、`project-docs/features/transcript-pipeline.md`、`TODO.md`、`WORKLOG.md`
+- 验证：变基到 `origin/master@5d79bb0` 后，3 份 PowerShell 脚本 AST 解析、Python `py_compile`、部署 workflow YAML 解析和 `git diff --check` 通过；部署、模型准备、共享 wheel cache、Profile catalog、ASR API/引擎/静态边界扩展专项测试 `157 passed`，仅有 2 条既有弃用警告。
+- 待办/风险：尚需 PR 远端 CI 和合并；合并后必须对新的完整 master SHA 重跑 faster-whisper R3，资格 SHA 与部署 SHA 不一致会拒绝部署。未触发生产 workflow、预检、服务切换、依赖安装、模型变更或应用 Profile 启用。当前部署 workflow 对本机失败可事务回滚，但 Ubuntu 跨节点验证失败后的自动回滚尚未实现，必须纳入后续独立生产 R3 方案并再次审批。
