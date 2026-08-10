@@ -211,6 +211,8 @@ def test_enabled_default_wiring_accepts_qwen_only_model_cache(tmp_path, monkeypa
         qwen3_asr_model_manifest_path=tmp_path / "qwen-asr.json",
         qwen3_aligner_model_cache_root=tmp_path / "models",
         qwen3_aligner_model_manifest_path=tmp_path / "qwen-aligner.json",
+        qwen3_language_policy="auto-zh-en",
+        qwen3_timing_diagnostics=True,
     )
     monkeypatch.setattr(
         "asr_service.app.validate_qwen3_asr_cache",
@@ -231,6 +233,12 @@ def test_enabled_default_wiring_accepts_qwen_only_model_cache(tmp_path, monkeypa
     assert app.state.asr_scheduler.engines.available_profile_ids() == (
         "qwen3-asr-06b-aligner-v1",
     )
+    registration = app.state.asr_scheduler.engines.resolve(
+        "qwen3-asr-06b-aligner-v1"
+    )
+    assert registration is not None
+    assert registration.engine.language_policy == "auto-zh-en"
+    assert registration.engine.timing_diagnostics is True
 
 
 def test_enabled_default_wiring_does_not_require_optional_candidate_caches(

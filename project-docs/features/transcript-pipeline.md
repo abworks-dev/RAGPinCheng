@@ -67,12 +67,18 @@ Phase 5A/5B 已接通版本列表、只读 Markdown 预览、人工审核、显�
   `Qwen/Qwen3-ASR-0.6B@5eb144179a02acc5e5ba31e748d22b0cf3e303b0`
   与
   `Qwen/Qwen3-ForcedAligner-0.6B@c7cbfc2048c462b0d63a45797104fc9db3ad62b7`，
-  仅允许 Windows Transformers/CUDA BF16 候选参数；R2 未安装依赖、下载模型或
-  运行推理，application Profile 保持 disabled。
+  仅允许 Windows Transformers/CUDA BF16 候选参数。服务默认继续强制
+  `Chinese`；资格脚本可显式启用固定 `auto-zh-en` 候选，模型输出必须包含
+  Chinese 且语言集合只能由 Chinese/English 组成，Canonical 语言仍为 `zh-CN`。
+  未知策略、English-only 或其他语言均失败关闭，application Profile 保持 disabled。
 
 SenseVoice 已完成独立生产短媒体验收。Qwen3-ASR 已具备统一 R3 仓库资格工具，
-但真实 workflow 尚未取得 PASS，因此没有 Windows、CUDA、依赖、模型、质量或资源
-资格结论。faster-whisper R3 Run `31352608196` 已在生产准入代码合并后的
+baseline R3 Run `31356827072` 已通过 Windows 隔离依赖、许可证、固定双模型、CUDA
+BF16、临时服务、8 样本完整执行、确定性和清理，但未通过质量/性能门禁：RTF 为
+`2.764423–4.035362`，术语召回为 `0.571429`，编号召回为 `0`，时间戳 P95 为
+`2240 ms`。因此 Qwen 尚无正式资格结论。自动语言候选继续使用相同 8 样本和原阈值，
+并额外输出不含音频或文本的模型调用耗时及端到端 RTF 汇总；该能力不代表候选已经
+通过。faster-whisper R3 Run `31352608196` 已在生产准入代码合并后的
 `12f1091009589a68edf82d62712c898324fc318e` 上通过：固定 8 个非敏感样本全部通过，
 canonical、Markdown 与 parser turns 两遍结果一致，固定模型 revision 和 wheel cache
 身份均通过校验。该资格不自动开放应用 Profile，也不等于生产部署或生产流量验收。
@@ -256,8 +262,9 @@ SenseVoice；Ubuntu 应用侧 `ASR_ENABLED` 仍必须为 `false`。跨节点验�
 - 自动稿按 Canonical 起止时间精确同步；旧人工稿仅有起始时间，结束时间按下一段起点推断，最后一段持续到视频结束；
 - SenseVoice 短媒体自动转录已完成生产验收，但候选稿发布/Qdrant 正式可见性 E2E
   尚未执行；faster-whisper 已完成隔离 R3 资格，但尚未完成生产部署和生产流量验收；
-- 当前唯一允许新建任务的自动 Profile 仍是 experimental SenseVoice；faster-whisper
-  与 WhisperX experimental Profile 可见但 admission 为 disabled；尚无
+- 当前唯一允许新建任务的自动 Profile 仍是 experimental SenseVoice；
+  faster-whisper、Qwen3-ASR 与 WhisperX experimental Profile 可见但 admission 为
+  disabled；尚无
   `qualification_approved` Profile；
 - 支持范围播放但无 HLS 自适应码率。
 - 媒体快捷筛选是最近 100 条的客户端筛选，不是服务端全库查询；独立转写工作台基础版仍待后续 PR。

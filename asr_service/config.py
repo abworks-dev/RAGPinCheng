@@ -49,6 +49,8 @@ class AsrServiceSettings:
     whisperx_model_manifest_path: Path | None = None
     whisperx_align_model_cache_root: Path | None = None
     whisperx_align_model_manifest_path: Path | None = None
+    qwen3_language_policy: str = "forced-chinese"
+    qwen3_timing_diagnostics: bool = False
 
     @classmethod
     def from_env(cls) -> "AsrServiceSettings":
@@ -81,6 +83,8 @@ class AsrServiceSettings:
             _optional_path("ASR_WHISPERX_MODEL_MANIFEST_PATH"),
             _optional_path("ASR_WHISPERX_ALIGN_MODEL_CACHE_ROOT"),
             _optional_path("ASR_WHISPERX_ALIGN_MODEL_MANIFEST_PATH"),
+            os.getenv("ASR_QWEN3_LANGUAGE_POLICY", "forced-chinese").strip(),
+            _enabled("ASR_QWEN3_TIMING_DIAGNOSTICS"),
         )
 
     def validate_for_startup(self) -> None:
@@ -107,6 +111,8 @@ class AsrServiceSettings:
                 raise RuntimeError("invalid BGE_PRIORITY_PROBE_URL")
         if not self.model_local_files_only:
             raise RuntimeError("ASR_MODEL_LOCAL_FILES_ONLY must remain true")
+        if self.qwen3_language_policy not in {"forced-chinese", "auto-zh-en"}:
+            raise RuntimeError("invalid ASR_QWEN3_LANGUAGE_POLICY")
         if (self.model_cache_root is None) != (self.model_manifest_path is None):
             raise RuntimeError(
                 "SenseVoice model cache and manifest must be configured together"

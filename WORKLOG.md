@@ -2992,3 +2992,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`.github/workflows/qualify-faster-whisper-production.yml`、`.github/workflows/qualify-qwen3-asr-production.yml`、`.github/workflows/qualify-whisperx-production.yml`、`.github/workflows/diagnose-whisperx-production.yml`、`scripts/asr_qualification_manifest.py`、三个 qualification runner/wrapper、`asr_service/asr-qualification-manifest.example.json`、qualification/部署静态测试、`project-docs/features/transcript-pipeline.md`、`project-docs/plans/shared-asr-qualification-corpus-migration.md`、`TODO.md`、`WORKLOG.md`。
 - 验证：变基到 `origin/master@3adf7be` 前，CI ASR contract 等价完整离线集合 `444 passed, 2 subtests passed`；Python `py_compile`、三个 PowerShell wrapper AST、四个 workflow YAML 和 `git diff --check` 通过。测试覆盖三引擎同 identity、严格字段/重复 key、绝对路径/穿越/reparse、WAV 格式/大小/SHA/时长、固定来源、新旧变量冲突、只读目录和报告身份绑定。
 - 待办/风险：尚未写入 GitHub `production-asr` 中性变量，未运行 Windows manifest preflight，未安装依赖、加载模型或执行 GPU qualification；这些生产步骤仍需分别取得明确 R3 批准。三个只读 preflight 全部核对一致后，删除 legacy 回退也需单独审批；不删除旧变量、目录、样本、缓存或历史报告。
+
+### 13:47 — 实现 Qwen 自动语言候选与性能诊断
+
+- 完成：为 Qwen3-ASR 增加资格验证专用 `auto-zh-en` 候选，自动检测结果必须包含 Chinese 且仅允许 Chinese/English；生产默认仍为强制 Chinese。资格报告绑定固定候选 ID，并新增只输出模型调用耗时和端到端 RTF 聚合值的安全性能诊断；完整 8 样本报告严格要求 17 次模型调用，早期失败可保留零调用诊断。原质量、性能、资源阈值和 Profile admission 均未修改。
+- 文件：`asr_service/app.py`、`asr_service/config.py`、`asr_service/engines/qwen3_asr.py`、`scripts/run_qwen3_asr_qualification.py`、`scripts/summarize_qwen3_asr_performance.py`、`scripts/qualify-qwen3-asr-production.ps1`、`.github/workflows/ci.yml`、`.github/workflows/qualify-qwen3-asr-production.yml`、相关测试、`project-docs/features/transcript-pipeline.md`、`WORKLOG.md`
+- 验证：变基到共享语料契约后的完整 CI ASR contract 等价本地集合 `458 passed, 2 subtests passed`，仅有 2 条既有弃用警告；Python `py_compile`、PowerShell AST、两份 workflow YAML 解析和 `git diff --check` 通过。未安装依赖、下载模型、启动服务或修改生产状态。
+- 待办/风险：需 PR CI 通过并合入 master 后，绑定新的完整 master SHA 运行一次候选 R3；真实 CUDA BF16、8 样本质量/性能、资源与清理门禁仍以该次结果为准，Profile admission 保持 disabled。

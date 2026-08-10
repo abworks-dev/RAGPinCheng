@@ -33,8 +33,11 @@ from scripts.asr_qualification_manifest import (
 )
 
 SAMPLE_SCHEMA_VERSION = QWEN3_ASR_LEGACY_SCHEMA_VERSION
-REPORT_SCHEMA_VERSION = "qwen3-asr-qualification-report/1"
+REPORT_SCHEMA_VERSION = "qwen3-asr-qualification-report/2"
 QWEN3_ASR_PROFILE_ID = "qwen3-asr-zh-experimental-v1"
+QUALIFICATION_CANDIDATE_IDS = frozenset(
+    {"forced-chinese-baseline", "auto-zh-en"}
+)
 CLEAR_CER_LIMIT = 0.10
 BIM_NOISE_CER_LIMIT = 0.15
 TERM_RECALL_LIMIT = 0.70
@@ -369,7 +372,10 @@ def run_qualification(
     base_url: str,
     token: str,
     timeout_ms: int,
+    candidate_id: str = "forced-chinese-baseline",
 ) -> dict[str, object]:
+    if candidate_id not in QUALIFICATION_CANDIDATE_IDS:
+        raise ValueError("unsupported qualification candidate")
     def progress(event: str, **fields: object) -> None:
         print(
             json.dumps(
@@ -525,6 +531,7 @@ def run_qualification(
         "annotation_version": manifest.annotation_version,
         "qualification_corpus": manifest.identity(),
         "profile_id": QWEN3_ASR_PROFILE_ID,
+        "candidate_id": candidate_id,
         "sample_count": len(rows),
         "thresholds": {
             "clear_cer_max": CLEAR_CER_LIMIT,
@@ -558,6 +565,11 @@ def main() -> int:
     parser.add_argument("--base-url", default="http://127.0.0.1:18300")
     parser.add_argument("--report-dir", type=Path)
     parser.add_argument("--timeout-ms", type=int, default=600_000)
+    parser.add_argument(
+        "--candidate-id",
+        choices=sorted(QUALIFICATION_CANDIDATE_IDS),
+        default="forced-chinese-baseline",
+    )
     parser.add_argument("--audit-licenses", action="store_true")
     parser.add_argument("--license-report", type=Path)
     parser.add_argument("--validate-manifest-only", action="store_true")
@@ -611,6 +623,7 @@ def main() -> int:
         base_url=args.base_url,
         token=token,
         timeout_ms=args.timeout_ms,
+        candidate_id=args.candidate_id,
     )
     report_dir = args.report_dir.resolve()
     report_dir.mkdir(parents=True, exist_ok=True)
