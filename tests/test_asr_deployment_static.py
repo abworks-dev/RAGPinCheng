@@ -1244,6 +1244,7 @@ def test_qwen3_asr_qualification_uses_chinese_only_dependency_bundle():
 
 
 def test_qwen3_asr_qualification_freezes_dual_models_bf16_and_result_flow():
+    workflow = read(".github/workflows/qualify-qwen3-asr-production.yml")
     script = read("scripts/qualify-qwen3-asr-production.ps1")
     model = read("scripts/prepare_qwen3_asr_models.py")
     runner = read("scripts/run_qwen3_asr_qualification.py")
@@ -1277,6 +1278,20 @@ def test_qwen3_asr_qualification_freezes_dual_models_bf16_and_result_flow():
     assert "R3_EXTERNAL_HEARTBEAT" in script
     assert 'Write-Host "R3_STAGE stage=dependency_preparation status=start"' in script
     assert 'Write-StageTiming -Stage "model_preparation"' in script
+    assert '[string]$ModelPreparationDiagnosticPath' in script
+    assert "function Convert-ToSanitizedModelPreparationFailure" in script
+    assert "function Write-SanitizedModelPreparationFailure" in script
+    assert 'schema_version = "qwen3-asr-model-preparation-failure/1"' in script
+    for kind in (
+        "existing_cache_invalid",
+        "staging_validation_failed",
+        "snapshot_download_failed",
+        "filesystem_or_permission_failure",
+        "disk_space_failure",
+    ):
+        assert kind in script
+    assert "ModelPreparationDiagnosticPath =" in workflow
+    assert "model-preparation-diagnostic.json" in workflow
     assert 'Write-StageTiming -Stage "cuda_preflight"' in script
     assert "$QualificationWatchdogSeconds = 10200" in script
     assert "R3_QUALIFICATION_HEARTBEAT elapsed_ms=" in script
