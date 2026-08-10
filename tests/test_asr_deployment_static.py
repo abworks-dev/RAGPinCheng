@@ -994,7 +994,7 @@ def test_faster_whisper_qualification_freezes_dependencies_model_and_gates():
     assert "requirements-service-core.txt" in script
     assert "requirements-faster-whisper.txt" in script
     assert '$RequirementsSource = $ResolvedSource.Replace("\\", "/")' in script
-    assert "-r $RequirementsSource/asr_service/requirements-windows.txt" in script
+    assert "-r $RequirementsSource/asr_service/requirements-windows.txt" not in script
     assert "-r $RequirementsSource/asr_service/requirements-service-core.txt" in script
     assert "-r $RequirementsSource/asr_service/requirements-faster-whisper.txt" in script
     assert "-r $ResolvedSource\\asr_service\\" not in script

@@ -1896,7 +1896,6 @@ try {
         "torch==2.7.0+cu128",
         "torchaudio==2.7.0+cu128",
         "-r $RequirementsSource/asr_service/requirements-service-core.txt",
-        "-r $RequirementsSource/asr_service/requirements-windows.txt",
         "-r $RequirementsSource/asr_service/requirements-faster-whisper.txt"
     )
     $CombinedRequirementLines | Set-Content -LiteralPath $CombinedRequirements -Encoding ASCII
