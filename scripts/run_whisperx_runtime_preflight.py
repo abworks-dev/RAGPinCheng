@@ -17,7 +17,10 @@ def _directory_from_environment(name: str) -> Path:
     value = os.environ.get(name, "").strip()
     if not value:
         raise ValueError(f"{name.lower()}_missing")
-    path = Path(value).resolve(strict=True)
+    try:
+        path = Path(value).resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        raise ValueError(f"{name.lower()}_invalid") from exc
     if not path.is_dir() or path.is_symlink():
         raise ValueError(f"{name.lower()}_invalid")
     return path
@@ -71,7 +74,10 @@ def run_preflight() -> dict[str, object]:
         build_phase3_profile_catalog,
     )
 
-    corpus = resolve_manifest_from_environment("whisperx", os.environ).manifest
+    try:
+        corpus = resolve_manifest_from_environment("whisperx", os.environ).manifest
+    except (OSError, RuntimeError) as exc:
+        raise ValueError("shared-corpus-unavailable") from exc
     model_root = _directory_from_environment("PRODUCTION_WHISPERX_MODEL_ROOT")
     nltk_root = _directory_from_environment("PRODUCTION_WHISPERX_NLTK_ROOT")
     qualification_root = _directory_from_environment(
@@ -117,7 +123,7 @@ def run_preflight() -> dict[str, object]:
 
 
 def _failure_code(exc: Exception) -> str:
-    if type(exc) is not ValueError:
+    if not isinstance(exc, ValueError):
         return "runtime-preflight-failed"
     value = str(exc)
     return {
