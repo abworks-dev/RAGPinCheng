@@ -2957,3 +2957,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`WORKLOG.md`；GitHub Actions 旧 run 记录；仓库外临时备份。
 - 验证：删除前目标集合精确匹配 14 个已批准 ID；删除后旧路径匹配 runs 为 0、旧 workflow 注册为 0、旧文件不存在，现行 `cleanup-production.yml` 与 `cleanup-production-operations.yml` 均仍存在。
 - 待办/风险：GitHub run 删除不可恢复，仓库外备份只能用于审计、不能还原 GitHub run；Actions 侧栏缓存可能需要短暂时间刷新。
+
+### 12:37 — 增加 Qwen 8 样本失败离线证据提取
+
+- 完成：为固定 Qwen R3 run `31354658965` 增加只读离线证据提取器和手动 production-asr workflow；输出仅包含白名单 progress 事件、固定 sample ID、异常分类、有界脱敏摘要、报告存在性和最后阶段，不上传原始日志、转写正文或参考文本。CI 的 ASR contract job 已纳入新增测试。
+- 文件：`scripts/extract_qwen3_asr_qualification_failure_evidence.py`、`.github/workflows/diagnose-qwen3-asr-qualification-failure-production.yml`、`.github/workflows/ci.yml`、`tests/test_qwen3_asr_qualification_failure_evidence.py`、`WORKLOG.md`
+- 验证：CI ASR contract 等价本地集合 `414 passed, 2 subtests passed`；新增与既有 Qwen 安全证据专项另有 `13 passed`；Python `py_compile` 通过。未读取或上传原始日志，未触发生产 workflow，未修改生产服务、模型、现有 venv 或 Profile admission。
+- 待办/风险：需 PR CI 通过并合入 master 后，绑定新的完整 master SHA 手动运行只读证据提取；再依据真实 runner 异常决定是否需要最小修复或新的契约审批。
