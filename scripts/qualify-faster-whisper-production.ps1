@@ -1893,15 +1893,15 @@ try {
     }
     $CombinedRequirementLines = @(
         "torch==2.7.0+cu128",
-        "torchaudio==2.7.0+cu128"
-    )
-    $CombinedRequirementLines += $InternalWheelRequirements
-    $CombinedRequirementLines += @(
+        "torchaudio==2.7.0+cu128",
         "-r $RequirementsSource/asr_service/requirements-service-core.txt",
         "-r $RequirementsSource/asr_service/requirements-windows.txt",
         "-r $RequirementsSource/asr_service/requirements-faster-whisper.txt"
     )
     $CombinedRequirementLines | Set-Content -LiteralPath $CombinedRequirements -Encoding ASCII
+    $ResolverRequirements = Join-Path $ConfigRoot "qualification-resolver-requirements.txt"
+    @($InternalWheelRequirements + $CombinedRequirementLines) |
+        Set-Content -LiteralPath $ResolverRequirements -Encoding ASCII
 
     $ReferenceManifestPaths = @(
         $InternalWheelManifestPath,
@@ -1985,7 +1985,7 @@ try {
                         "--find-links", $ResolvedCrcmodWheelBundle,
                         "--find-links", $SharedWheelSeed,
                         "--constraint", (Join-Path $EvidenceRoot "production-freeze.txt"),
-                        "--requirement", $CombinedRequirements
+                        "--requirement", $ResolverRequirements
                     ) `
                     -LogPath (Join-Path $LogRoot "pip-resolution-report.log")
                 Assert-ResolutionReportMatchesInternalWheels `
@@ -2007,7 +2007,7 @@ try {
                         "--find-links", $ResolvedCrcmodWheelBundle,
                         "--find-links", $SharedWheelSeed,
                         "--constraint", (Join-Path $EvidenceRoot "production-freeze.txt"),
-                        "--requirement", $CombinedRequirements
+                        "--requirement", $ResolverRequirements
                     ) `
                     -LogPath $DownloadLog
             } catch {
