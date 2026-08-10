@@ -194,7 +194,7 @@ jobs:
             } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $params.SummaryPath -Encoding UTF8
             $diagnosticPath = $params.QualificationDiagnosticPath
             [ordered]@{
-              schema_version = "faster-whisper-r3-diagnostic/1"
+              schema_version = "faster-whisper-r3-diagnostic/2"
               status = "fail"
               failure_code = $Code
               failure_stage = "workflow_wrapper"
@@ -359,6 +359,9 @@ jobs:
             $qualificationDiagnosticPath = "${{ runner.temp }}\faster-whisper-r3-${{ github.run_id }}\qualification-diagnostic.json"
             if (Test-Path -LiteralPath $qualificationDiagnosticPath -PathType Leaf) {
               $qualificationDiagnostic = Get-Content -LiteralPath $qualificationDiagnosticPath -Raw -Encoding UTF8 | ConvertFrom-Json
+              $failedSampleDiagnostics = @(
+                @($qualificationDiagnostic.samples) | Where-Object { $_.pass -eq $false }
+              )
               $lines += @(
                 "- Qualification stage: ``$($qualificationDiagnostic.failure_stage)``",
                 "- Qualification report available: ``$($qualificationDiagnostic.report_available)``",
@@ -368,6 +371,11 @@ jobs:
                 "- Failed gates: ``$(@($qualificationDiagnostic.gates.PSObject.Properties | Where-Object { $_.Value.pass -eq $false } | Select-Object -ExpandProperty Name) -join ', ')``",
                 "- Steady-state RTF: ``$($qualificationDiagnostic.info.steady_state_rtf)`` / ``$($qualificationDiagnostic.info.rtf_limit)``",
                 "- Timestamp p95: ``$($qualificationDiagnostic.gates.timestamp_p95_ms.observed)`` / ``$($qualificationDiagnostic.gates.timestamp_p95_ms.threshold) ms``"
+              )
+              $lines += @(
+                $failedSampleDiagnostics | ForEach-Object {
+                  "- Determinism ``$($_.sample_id)``: canonical=``$($_.canonical_equal)``; markdown=``$($_.markdown_equal)``; turns=``$($_.turns_equal)``"
+                }
               )
             }
             $lines -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding UTF8

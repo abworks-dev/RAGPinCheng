@@ -292,6 +292,26 @@ workflow 和 builder 分别校验普通文件、固定 19,214,172 字节、固�
 结构，再复制到 run-local 临时目录并执行既有双重可复现构建。路径不是 dispatch 输入，
 不得指向现有 ASR venv、模型或服务目录；缺失或身份不符时立即失败，不回退在线下载。
 
+### 2.0.16 两遍结果的逐层确定性诊断
+
+资格 Run `31288471038` 已通过预置 jieba sdist、四个受控 wheel、隔离依赖、固定模型、
+CUDA 路径和全部聚合质量门禁；8 个样本中 7 个通过，`negative-control-1` 因
+`deterministic=false` 失败。原 `/1` 脱敏制品只包含第一遍 canonical 和 Markdown 哈希，
+无法区分偏移来自 canonical JSON、Markdown formatter 还是 transcript parser turns。
+
+后续诊断保持原始资格报告 `faster-whisper-qualification-report/1`，以向后兼容的可选字段记录：
+
+- `canonical_equal`、`markdown_equal`、`turns_equal`；
+- 两遍 canonical JSON、Markdown 和 turns 的 SHA-256；
+- 两遍 segment 数和 parser turn 数。
+
+turns 哈希使用固定 UTF-8、无空白、key 排序的 JSON 序列化。上传的严格白名单制品升级为
+`faster-whisper-r3-diagnostic/2`，保留既有质量指标并增加上述非正文诊断；workflow summary
+只展示失败样本 ID 和三层 equality，不展示哈希。投影在资格开始前使用合成额外字段自检，
+确认白名单外值不会进入序列化结果。该增强不写入 reference/hypothesis、expected terms/codes、
+原始日志、环境变量或路径，不改变确定性判定、阈值、样本、解码、Profile admission 或生产服务。
+合并后如需重跑 R3，仍须针对新的完整 master SHA 单独批准。
+
 ### 2.1 仓库基线
 
 - PR #34 已合并到 `master`；
