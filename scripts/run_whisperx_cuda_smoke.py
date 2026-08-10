@@ -4,6 +4,8 @@ import argparse
 import hashlib
 import json
 import os
+import ssl
+import time
 import uuid
 import wave
 from pathlib import Path
@@ -16,6 +18,8 @@ ASR_RELATIVE_PATH = f"whisper-large-v3/{ASR_REVISION}"
 ALIGN_RELATIVE_PATH = (
     f"wav2vec2-large-xlsr-53-chinese-zh-cn/{ALIGN_REVISION}"
 )
+MODEL_DOWNLOAD_ATTEMPTS = 3
+MODEL_DOWNLOAD_RETRY_SECONDS = 2
 
 
 def _sha256_file(path: Path) -> str:
@@ -68,14 +72,144 @@ def prepare_smoke_punkt(nltk_root: Path) -> None:
     save_punkt_params(PunktParameters(), dir=str(punkt_dir))
 
 
-def prepare_models(root: Path, nltk_root: Path) -> None:
-    from huggingface_hub import snapshot_download
+def _hugging_face_backend():
+    import requests
 
+    class TLS12HTTPAdapter(requests.adapters.HTTPAdapter):
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            self._ssl_context = ssl.create_default_context()
+            self._ssl_context.maximum_version = ssl.TLSVersion.TLSv1_2
+            super().__init__(*args, **kwargs)
+
+        def init_poolmanager(
+            self,
+            connections: int,
+            maxsize: int,
+            block: bool = requests.adapters.DEFAULT_POOLBLOCK,
+            **pool_kwargs: object,
+        ) -> None:
+            pool_kwargs["ssl_context"] = self._ssl_context
+            super().init_poolmanager(connections, maxsize, block, **pool_kwargs)
+
+        def proxy_manager_for(self, proxy: str, **proxy_kwargs: object):
+            proxy_kwargs["ssl_context"] = self._ssl_context
+            return super().proxy_manager_for(proxy, **proxy_kwargs)
+
+        def build_connection_pool_key_attributes(
+            self,
+            request: requests.PreparedRequest,
+            verify: object,
+            cert: object = None,
+        ) -> tuple[dict[str, object], dict[str, object]]:
+            if verify is not True:
+                raise RuntimeError("Hugging Face download requires certificate verification")
+            host_params, pool_kwargs = super().build_connection_pool_key_attributes(
+                request, verify, cert
+            )
+            pool_kwargs["ssl_context"] = self._ssl_context
+            return host_params, pool_kwargs
+
+    session = requests.Session()
+    session.mount("https://", TLS12HTTPAdapter())
+    return session
+
+
+def _download_model(**kwargs: object) -> str:
+    import requests
+    from huggingface_hub import configure_http_backend, snapshot_download
+
+    os.environ["HF_HUB_DISABLE_XET"] = "1"
+    configure_http_backend(backend_factory=_hugging_face_backend)
+    kwargs.setdefault("max_workers", 1)
+    for attempt in range(1, MODEL_DOWNLOAD_ATTEMPTS + 1):
+        try:
+            return snapshot_download(**kwargs)
+        except requests.exceptions.SSLError:
+            if attempt == MODEL_DOWNLOAD_ATTEMPTS:
+                raise
+            time.sleep(MODEL_DOWNLOAD_RETRY_SECONDS * attempt)
+    raise AssertionError("model download retry loop exhausted")
+
+
+def _prepare_model(
+    root: Path,
+    staging: Path,
+    *,
+    label: str,
+    model_id: str,
+    revision: str,
+    relative_path: str,
+    allow_patterns: list[str],
+) -> None:
+    from asr_service.model_cache import (
+        validate_whisperx_align_cache,
+        validate_whisperx_cache,
+    )
+
+    target = root / relative_path
+    manifest = target / "model-manifest.json"
+    validator = (
+        validate_whisperx_cache if label == "asr" else validate_whisperx_align_cache
+    )
+    if target.exists():
+        if not validator(root, manifest).available:
+            raise RuntimeError(f"existing {label} model cache is invalid")
+        return
+
+    staged_root = staging / label
+    staged_model = staged_root / relative_path
+    _download_model(
+        repo_id=model_id,
+        revision=revision,
+        local_dir=staged_model,
+        local_dir_use_symlinks=False,
+        allow_patterns=allow_patterns,
+        max_workers=1,
+    )
+    _write_manifest(
+        staged_root,
+        staged_model,
+        model_id=model_id,
+        revision=revision,
+        relative_path=relative_path,
+    )
+    if not validator(staged_root, staged_model / "model-manifest.json").available:
+        raise RuntimeError(f"staged {label} model cache validation failed")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    os.replace(staged_model, target)
+
+
+def _model_preparation_diagnostic(error: Exception) -> dict[str, str]:
+    message = str(error).lower()
+    model = "asr" if "asr" in message else "aligner" if "align" in message else "unknown"
+    if "existing" in message and "cache is invalid" in message:
+        kind = "existing_cache_invalid"
+    elif any(marker in message for marker in ("ssl", "huggingface", "connection", "proxy", "timeout")):
+        kind = "snapshot_download_failed"
+    elif isinstance(error, PermissionError):
+        kind = "filesystem_or_permission_failure"
+    else:
+        kind = "evidence_insufficient"
+    return {
+        "schema_version": "whisperx-model-preparation-failure/1",
+        "status": "fail",
+        "stage": "model_preparation",
+        "kind": kind,
+        "model": model,
+        "exception_type": type(error).__name__,
+    }
+
+
+def prepare_models(root: Path, nltk_root: Path) -> None:
     root.mkdir(parents=True, exist_ok=True)
-    snapshot_download(
-        ASR_MODEL_ID,
+    staging = root / ".staging" / uuid.uuid4().hex
+    _prepare_model(
+        root,
+        staging,
+        label="asr",
+        model_id=ASR_MODEL_ID,
         revision=ASR_REVISION,
-        local_dir=root / ASR_RELATIVE_PATH,
+        relative_path=ASR_RELATIVE_PATH,
         allow_patterns=[
             "config.json",
             "model.bin",
@@ -83,28 +217,15 @@ def prepare_models(root: Path, nltk_root: Path) -> None:
             "tokenizer.json",
             "vocabulary.json",
         ],
-        max_workers=1,
     )
-    snapshot_download(
-        ALIGN_MODEL_ID,
-        revision=ALIGN_REVISION,
-        local_dir=root / ALIGN_RELATIVE_PATH,
-        allow_patterns=["*.json", "*.bin", "*.safetensors", "*.txt", "*.model"],
-        max_workers=1,
-    )
-    _write_manifest(
+    _prepare_model(
         root,
-        root / ASR_RELATIVE_PATH,
-        model_id=ASR_MODEL_ID,
-        revision=ASR_REVISION,
-        relative_path=ASR_RELATIVE_PATH,
-    )
-    _write_manifest(
-        root,
-        root / ALIGN_RELATIVE_PATH,
+        staging,
+        label="aligner",
         model_id=ALIGN_MODEL_ID,
         revision=ALIGN_REVISION,
         relative_path=ALIGN_RELATIVE_PATH,
+        allow_patterns=["*.json", "*.bin", "*.safetensors", "*.txt", "*.model"],
     )
     prepare_smoke_punkt(nltk_root)
 
@@ -219,10 +340,20 @@ def main() -> int:
     parser.add_argument("--nltk-root", type=Path, required=True)
     parser.add_argument("--wav", type=Path)
     parser.add_argument("--report", type=Path)
+    parser.add_argument("--model-preparation-diagnostic", type=Path)
     parser.add_argument("--prepare", action="store_true")
     args = parser.parse_args()
     if args.prepare:
-        prepare_models(args.model_root, args.nltk_root)
+        try:
+            prepare_models(args.model_root, args.nltk_root)
+        except Exception as error:
+            if args.model_preparation_diagnostic is not None:
+                args.model_preparation_diagnostic.parent.mkdir(parents=True, exist_ok=True)
+                args.model_preparation_diagnostic.write_text(
+                    json.dumps(_model_preparation_diagnostic(error), sort_keys=True) + "\n",
+                    encoding="utf-8",
+                )
+            raise
         return 0
     if args.wav is None or args.report is None:
         parser.error("--wav and --report are required for smoke")

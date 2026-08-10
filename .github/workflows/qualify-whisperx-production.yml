@@ -249,6 +249,16 @@ jobs:
               "- Profile admission: ``$($v.profile_admission)``",
               "- Production services modified: ``$($v.production_services_modified)``"
             ) -join "`n" | Out-File $env:GITHUB_STEP_SUMMARY -Append -Encoding UTF8
+            $diagnosticPath = Join-Path (Split-Path -Parent $path) "model-preparation-diagnostic.json"
+            if (Test-Path -LiteralPath $diagnosticPath -PathType Leaf) {
+              $diagnostic = Get-Content -LiteralPath $diagnosticPath -Raw -Encoding UTF8 | ConvertFrom-Json
+              @(
+                "- Model preparation stage: ``$($diagnostic.stage)``",
+                "- Model preparation kind: ``$($diagnostic.kind)``",
+                "- Model preparation model: ``$($diagnostic.model)``",
+                "- Model preparation exception: ``$($diagnostic.exception_type)``"
+              ) -join "`n" | Out-File $env:GITHUB_STEP_SUMMARY -Append -Encoding UTF8
+            }
           }
 
       - name: Upload sanitized verdict
