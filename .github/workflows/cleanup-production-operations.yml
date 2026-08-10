@@ -35,9 +35,6 @@ on:
 permissions:
   contents: read
 
-env:
-  REPO_PATH: ${{ vars.PRODUCTION_REPO_PATH }}
-
 jobs:
   manual-cleanup:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.confirm_production_cleanup == true }}
@@ -72,12 +69,15 @@ jobs:
     env:
       AUTO_CLEANUP_ENABLED: ${{ vars.PRODUCTION_AUTO_CLEANUP_ENABLED }}
     steps:
+      - name: Check out disk checker revision
+        uses: actions/checkout@v4
+
       - name: Verify disk checker
         shell: powershell
         run: |
           Set-StrictMode -Version Latest
           $ErrorActionPreference = 'Stop'
-          $diskScript = Join-Path $env:REPO_PATH 'scripts\check-production-disk.ps1'
+          $diskScript = Join-Path "${{ github.workspace }}" 'scripts\check-production-disk.ps1'
           if (-not (Test-Path -LiteralPath $diskScript -PathType Leaf)) {
             throw "Disk pressure script is missing: $diskScript"
           }
@@ -92,7 +92,7 @@ jobs:
           Set-StrictMode -Version Latest
           $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Path $env:REPORT_ROOT -Force | Out-Null
-          & (Join-Path $env:REPO_PATH 'scripts\check-production-disk.ps1') `
+          & (Join-Path "${{ github.workspace }}" 'scripts\check-production-disk.ps1') `
             -DriveLetter D `
             -ReportPath $env:DISK_REPORT `
             -OutputPath $env:GITHUB_OUTPUT
