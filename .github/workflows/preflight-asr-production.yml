@@ -1,0 +1,82 @@
+name: Preflight ASR Production Deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      engine:
+        description: "Engine whose qualification evidence will be checked"
+        required: true
+        type: choice
+        options:
+          - faster-whisper
+          - qwen3-asr
+          - whisperx
+      commit_sha:
+        description: "Full 40-character commit SHA to preflight"
+        required: true
+        type: string
+      qualification_run_id:
+        description: "Passed qualification run ID"
+        required: true
+        type: string
+      qualification_commit_sha:
+        description: "Commit SHA recorded by the passed qualification"
+        required: true
+        type: string
+      runtime_contract_sha256:
+        description: "Runtime contract SHA-256 recorded by the passed qualification"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    environment: production-asr
+    runs-on: [self-hosted, Windows, X64, asr-production]
+    timeout-minutes: 45
+    env:
+      PRODUCTION_ASR_DATA_ROOT: ${{ vars.PRODUCTION_ASR_DATA_ROOT }}
+      PRODUCTION_FASTER_WHISPER_QUALIFICATION_ROOT: ${{ vars.PRODUCTION_FASTER_WHISPER_QUALIFICATION_ROOT }}
+      PRODUCTION_NO_PROXY: ${{ vars.PRODUCTION_NO_PROXY }}
+    steps:
+      - name: Validate immutable revision and identities
+        shell: powershell
+        run: |
+          if ("${{ inputs.commit_sha }}" -notmatch '^[0-9a-fA-F]{40}$') { throw "commit_sha must be a full 40-character SHA" }
+          if ("${{ inputs.commit_sha }}".ToLowerInvariant() -ne "${{ github.sha }}".ToLowerInvariant()) { throw "commit_sha must equal the workflow dispatch revision" }
+          if ("${{ github.ref }}" -ne "refs/heads/master") { throw "production ASR deployment preflight must be dispatched from master" }
+          if ("${{ inputs.qualification_run_id }}" -notmatch '^[0-9]{1,20}$') { throw "qualification_run_id is required" }
+          if ("${{ inputs.qualification_commit_sha }}" -notmatch '^[0-9a-fA-F]{40}$') { throw "qualification_commit_sha is required" }
+          if ("${{ inputs.runtime_contract_sha256 }}" -notmatch '^[0-9a-fA-F]{64}$') { throw "runtime_contract_sha256 is required" }
+
+      - name: Check out requested revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 1
+
+      - name: Preflight qualified ASR deployment without production writes
+        shell: powershell
+        env:
+          ASR_DEPENDENCY_PROXY: ${{ secrets.ASR_DEPENDENCY_PROXY }}
+        run: |
+          $report = Join-Path $env:RUNNER_TEMP "asr-deployment-preflight-${{ github.run_id }}.json"
+          & "${{ github.workspace }}\scripts\preflight-asr-deployment.ps1" `
+            -Engine "${{ inputs.engine }}" `
+            -CommitSha "${{ inputs.commit_sha }}" `
+            -QualificationRunId "${{ inputs.qualification_run_id }}" `
+            -QualificationCommitSha "${{ inputs.qualification_commit_sha }}" `
+            -RuntimeContractSha256 "${{ inputs.runtime_contract_sha256 }}" `
+            -ReportPath $report `
+            -SourceRoot "${{ github.workspace }}"
+
+      - name: Upload sanitized deployment preflight
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: asr-deployment-preflight-${{ github.run_id }}
+          path: ${{ runner.temp }}\asr-deployment-preflight-${{ github.run_id }}.json
+          if-no-files-found: error
+          retention-days: 14

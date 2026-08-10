@@ -24,6 +24,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 $ExecuteQualification = $ExecuteQualification -in @("true","1","yes","on")
 . (Join-Path $PSScriptRoot "windows-wheel-cache.ps1")
+. (Join-Path $PSScriptRoot "asr-contract.ps1")
 
 $ProgramRoot = $env:PRODUCTION_FASTER_WHISPER_QUALIFICATION_ROOT
 $DataRoot = $env:PRODUCTION_ASR_DATA_ROOT
@@ -73,6 +74,7 @@ $DependencyFailureLog = ""
 $WheelManifestFailureKind = ""
 $WheelCacheStatus = "not_evaluated"
 $WheelCacheKey = ""
+$RuntimeContract = $null
 $LastExternalCommandResult = [pscustomobject]@{
     failure_origin = "not_started"
     exit_code = $null
@@ -1341,7 +1343,7 @@ function Write-SanitizedSummary {
         [string]$Code
     )
     $summary = [ordered]@{
-        schema_version = "faster-whisper-r3-verdict/2"
+        schema_version = "faster-whisper-r3-verdict/3"
         status = $Status
         failure_code = $Code
         commit_sha = $CommitSha.ToLowerInvariant()
@@ -1356,6 +1358,7 @@ function Write-SanitizedSummary {
         diagnostic_available = (-not [string]::IsNullOrWhiteSpace($QualificationDiagnosticPath))
         manifest_source = $ManifestSource
         qualification_corpus = $QualificationCorpus
+        runtime_contract = $RuntimeContract
         profile_admission = "disabled"
         production_services_modified = $false
     }
@@ -1452,7 +1455,7 @@ function Write-QualificationDiagnostic {
         throw "Non-pass qualification diagnostics require a failure code"
     }
     $diagnostic = [ordered]@{
-        schema_version = "faster-whisper-r3-diagnostic/2"
+        schema_version = "faster-whisper-r3-diagnostic/3"
         status = $Status
         failure_code = $Code
         failure_stage = $Stage
@@ -1478,6 +1481,7 @@ function Write-QualificationDiagnostic {
         info = @{}
         gates = @{}
         samples = @()
+        runtime_contract = $RuntimeContract
     }
     if ($null -ne $Report) {
         $diagnostic.report_available = $true
@@ -1522,6 +1526,7 @@ Write-QualificationProgress -Stage "wrapper_start"
 if ($CommitSha -notmatch "^[0-9a-fA-F]{40}$") {
     throw "CommitSha must be a full 40-character SHA"
 }
+$RuntimeContract = Get-AsrRuntimeContract -Engine "faster-whisper" -SourceRoot $SourceRoot -CommitSha $CommitSha
 if ($RunId -notmatch "^[0-9]{1,20}$") {
     throw "RunId must contain only 1 to 20 digits"
 }
@@ -1851,6 +1856,7 @@ try {
         "torch==2.7.0+cu128",
         "torchaudio==2.7.0+cu128",
         "-r $RequirementsSource/asr_service/requirements-service-core.txt",
+        "-r $RequirementsSource/asr_service/requirements-windows.txt",
         "-r $RequirementsSource/asr_service/requirements-faster-whisper.txt"
     ) | Set-Content -LiteralPath $CombinedRequirements -Encoding ASCII
 
@@ -1865,6 +1871,7 @@ try {
         -ProductionFreezePath (Join-Path $EvidenceRoot "production-freeze.txt") `
         -RequirementsPaths @(
             (Join-Path $ResolvedSource "asr_service\requirements-service-core.txt"),
+            (Join-Path $ResolvedSource "asr_service\requirements-windows.txt"),
             (Join-Path $ResolvedSource "asr_service\requirements-faster-whisper.txt")
         ) `
         -ReferenceManifestPaths $ReferenceManifestPaths
