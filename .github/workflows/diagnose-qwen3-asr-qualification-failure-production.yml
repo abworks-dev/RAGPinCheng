@@ -79,6 +79,8 @@ jobs:
             $result = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
             $progress = @($result.progress_events | ForEach-Object { "$($_.event):$($_.sample_id)" }) -join ", "
             $errors = @($result.error_summaries | ForEach-Object { "$($_.exception_type): $($_.summary)" }) -join "; "
+            $failedGates = @($result.quality_summary.gates | Where-Object { -not $_.pass } | ForEach-Object { "$($_.name)=$($_.observed)/$($_.threshold)" }) -join ", "
+            $failedSamples = @($result.quality_summary.samples | Where-Object { -not $_.pass } | ForEach-Object { $_.sample_id }) -join ", "
             @(
               "## Qwen3-ASR qualification failure evidence",
               "",
@@ -88,6 +90,9 @@ jobs:
               "- Progress: ``$progress``",
               "- Signals: ``$(@($result.signals) -join ',')``",
               "- Error summaries: ``$errors``",
+              "- Quality status: ``$($result.quality_summary.status)``",
+              "- Failed gates: ``$failedGates``",
+              "- Failed samples: ``$failedSamples``",
               "- Qualification summary exists: ``$($result.qualification_summary_exists)``",
               "- Sample results exist: ``$($result.sample_results_exists)``",
               "- Profile admission: ``$($result.profile_admission)``",
