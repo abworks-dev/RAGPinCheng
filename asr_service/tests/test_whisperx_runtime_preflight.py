@@ -24,6 +24,21 @@ def test_missing_runtime_configuration_is_reported_without_paths(tmp_path, monke
     assert str(tmp_path) not in report.read_text(encoding="utf-8")
 
 
+def test_missing_shared_corpus_path_is_reported_without_paths(tmp_path, monkeypatch):
+    report = tmp_path / "preflight.json"
+    missing_root = tmp_path / "missing-corpus"
+    monkeypatch.setenv("PRODUCTION_ASR_QUALIFICATION_ROOT", str(missing_root))
+    monkeypatch.setenv(
+        "PRODUCTION_ASR_QUALIFICATION_MANIFEST_PATH", str(missing_root / "manifest.json")
+    )
+    monkeypatch.setattr(sys, "argv", ["preflight", "--report", str(report)])
+
+    assert preflight.main() == 2
+    result = json.loads(report.read_text(encoding="utf-8"))
+    assert result["failure_code"] == "shared-corpus-unavailable"
+    assert str(tmp_path) not in report.read_text(encoding="utf-8")
+
+
 def test_successful_result_is_written_as_ascii_json(tmp_path, monkeypatch):
     report = tmp_path / "preflight.json"
     monkeypatch.setattr(

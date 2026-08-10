@@ -3027,3 +3027,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`.github/workflows/qualify-whisperx-production.yml`、`scripts/run_whisperx_runtime_preflight.py`、`asr_service/tests/test_whisperx_runtime_preflight.py`、`asr_service/tests/test_whisperx_qualification.py`、`tests/test_asr_deployment_static.py`、`project-docs/features/transcript-pipeline.md`、`project-docs/plans/whisperx-r2-r3-execution-plan.md`、`WORKLOG.md`
 - 验证：ASR service 全集 `254 passed`；runtime preflight/WhisperX/deployment 静态专项 `63 passed`；workflow YAML、PowerShell AST、Python `compileall` 和 `git diff --check` 通过。未安装依赖、下载模型、启动服务或触发 GPU qualification。
 - 待办/风险：需 PR CI 通过并合入最新 master；合并后先运行一次 `runtime_preflight`，通过后再运行已批准的单次三候选 WhisperX GPU qualification。Profile admission 继续保持 disabled。
+
+### 16:46 — 精确分类 WhisperX 共享语料预检失败
+
+- 完成：读取 merged runtime-preflight Run `31369196115` 的脱敏 artifact，确认失败时未修改生产服务；将共享语料不可达和已配置目录不可达的文件系统异常归并为稳定脱敏失败码，避免将配置/挂载问题误报为通用运行失败。
+- 文件：`scripts/run_whisperx_runtime_preflight.py`、`asr_service/tests/test_whisperx_runtime_preflight.py`、`WORKLOG.md`
+- 验证：独立 worktree 运行 runtime-preflight 专项 `3 passed`；Python `compileall` 和 `git diff --check` 通过。系统 Python 3.11 缺少 `pytest`，测试复用现有项目 venv，未安装依赖。
+- 待办/风险：需 PR CI 通过并合入最新 master 后重跑同一只读 runtime preflight；仍不得写入或猜测 GitHub production-asr 环境变量。真实 GPU qualification 仅在 preflight 通过后运行。
