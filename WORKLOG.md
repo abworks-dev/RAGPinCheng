@@ -3028,14 +3028,33 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 验证：ASR service 全集 `254 passed`；runtime preflight/WhisperX/deployment 静态专项 `63 passed`；workflow YAML、PowerShell AST、Python `compileall` 和 `git diff --check` 通过。未安装依赖、下载模型、启动服务或触发 GPU qualification。
 - 待办/风险：需 PR CI 通过并合入最新 master；合并后先运行一次 `runtime_preflight`，通过后再运行已批准的单次三候选 WhisperX GPU qualification。Profile admission 继续保持 disabled。
 
+### 16:01 — 修复生产清理参数绑定
+
+- 完成：将可复用生产清理 workflow 的 PowerShell 参数传递从数组 splatting 改为哈希表命名参数 splatting，修复 `Target` 被错误绑定为 `-Target` 导致 `ValidateSet` 失败的问题；保留 dry-run/apply 与生产确认门禁。
+- 文件：`.github/workflows/cleanup-production.yml`、`tests/test_production_cleanup_triggers_static.py`、`WORKLOG.md`
+- 验证：生产清理触发器专项 `5 passed`；PowerShell AST、workflow YAML 解析、dry-run/apply 参数绑定冒烟和 `git diff --check` 均通过。未触发生产清理、删除或部署。
+- 待办/风险：需将修复合入包含该 workflow 的提交后重新运行 `pressure-dryrun`；本地未连接生产 Windows runner。
+
 ### 16:46 — 精确分类 WhisperX 共享语料预检失败
 
 - 完成：读取 merged runtime-preflight Run `31369196115` 的脱敏 artifact，确认失败时未修改生产服务；将共享语料不可达和已配置目录不可达的文件系统异常归并为稳定脱敏失败码，避免将配置/挂载问题误报为通用运行失败。
 - 文件：`scripts/run_whisperx_runtime_preflight.py`、`asr_service/tests/test_whisperx_runtime_preflight.py`、`WORKLOG.md`
 - 验证：独立 worktree 运行 runtime-preflight 专项 `3 passed`；Python `compileall` 和 `git diff --check` 通过。系统 Python 3.11 缺少 `pytest`，测试复用现有项目 venv，未安装依赖。
 - 待办/风险：需 PR CI 通过并合入最新 master 后重跑同一只读 runtime preflight；仍不得写入或猜测 GitHub production-asr 环境变量。真实 GPU qualification 仅在 preflight 通过后运行。
+### 23:56 — 核对生产清理 workflow 分工
+
+- 完成：只读核对生产清理执行层、手动/定时编排层、部署后调用链及去重提交历史；确认 `cleanup-production.yml` 是被复用的安全执行入口，`cleanup-production-operations.yml` 是手动与定时触发入口，两者均非多余，未修改代码。
+- 文件：`WORKLOG.md`
+- 验证：远端 `master` 与本地 `origin/master` 均为 `c91d076`；对照当前工作树、调用引用、静态测试与提交 `9e0fbc5`，确认 operations workflow 的 4 处调用及 deploy workflow 的 1 处调用均指向 reusable cleanup workflow。未触发 GitHub Actions、生产清理、删除或部署。
 
 ## 2026-08-11
+
+### 00:18 — 将生产部署改为纯手动触发
+
+- 完成：移除 `Deploy Production` 的 `workflow_run` 自动入口和自动部署变量门禁，只保留带 `confirm_production=true` 的手动触发；GPU 与应用部署均绑定手动选择 ref 的 `github.sha`，避免每次 CI 完成继续生成空壳部署 run 和放大 GitHub check suite 调和故障。
+- 文件：`.github/workflows/deploy-production.yml`、`tests/test_deploy_git_safety.py`、`tests/test_gpu_runtime_deployment_static.py`、`project-docs/features/gpu-runtime-deployment.md`、`WORKLOG.md`
+- 验证：部署安全、GPU 部署静态和生产清理触发器专项合计 `30 passed, 2 subtests passed`；三份相关 workflow YAML 解析和 `git diff --check` 通过。未触发部署、生产清理或 Actions run 删除。
+- 待办/风险：变更合入 `master` 前远端仍会响应 CI 完成事件；现存 stuck Run `31280981585` / check suite `84869412603` 仍需 GitHub Support 强制调和到终态，之后才能删除全部历史 runs。
 
 ### 00:22 — 同步 faster-whisper 生产准入共享语料证据
 
