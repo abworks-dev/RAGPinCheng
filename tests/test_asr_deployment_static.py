@@ -1013,6 +1013,9 @@ def test_faster_whisper_qualification_freezes_dependencies_model_and_gates():
     assert 'schema_version = "faster-whisper-wheel-manifest/3"' in script
     assert "compatibility_reference_manifests_sha256" in script
     assert "Controlled internal wheel changed before wheelhouse recording" in script
+    assert "Assert-ResolutionReportMatchesInternalWheels" in script
+    assert "Controlled internal wheel resolution does not match its verified build" in script
+    assert script.index("Assert-ResolutionReportMatchesInternalWheels") < script.index('$DependencyFailureOperation = "pip_download_command"')
     assert "Controlled internal wheel was not resolved into the wheelhouse" not in script
     diagnostic_section = script.split(
         "function Get-NormalizedPackageName", 1
@@ -1121,6 +1124,7 @@ def test_faster_whisper_qualification_freezes_dependencies_model_and_gates():
         "wheel_manifest_unclassified",
         "wheel_manifest_resolution_report_missing",
         "wheel_manifest_controlled_wheel_mismatch",
+        "wheel_manifest_controlled_resolution_mismatch",
         "wheel_manifest_source_url_unbound",
         "wheel_manifest_empty",
         "wheel_manifest_reference_missing",
