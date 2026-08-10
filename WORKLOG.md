@@ -3069,3 +3069,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`scripts/qualify-qwen3-asr-production.ps1`、`.github/workflows/qualify-qwen3-asr-production.yml`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`
 - 验证：变基到 `origin/master@75daf92` 后，CI `test-asr-service-contract` 等价本地集合 `471 passed, 2 subtests passed`；部署静态专项 `48 passed`，PowerShell AST、workflow YAML 与 `git diff --check` 通过。未读取原始日志，未触发生产 R3，未安装依赖、下载模型、启动服务或修改生产状态。
 - 待办/风险：需 PR CI 通过并合入 master；之后仍须绑定新的完整 master SHA 才能另行执行 Qwen 完整 R3。诊断增强本身不构成资格通过。
+
+### 00:29 — 增加 WhisperX runtime preflight 脱敏阶段证据
+
+- 完成：针对只读 Run `31408725010` 仍返回通用失败码的情况，为 runtime preflight 增加固定 `failure_stage` 白名单；共享语料、目录、模型缓存、Profile 和 GPU 阶段均可被区分，异常文本、路径和环境变量值继续不写入 artifact。
+- 文件：`scripts/run_whisperx_runtime_preflight.py`、`asr_service/tests/test_whisperx_runtime_preflight.py`、`WORKLOG.md`
+- 验证：独立 worktree 运行 runtime-preflight 专项 `4 passed`；Python `compileall` 和 `git diff --check` 通过。未安装依赖、未更新生产变量、未启动服务或执行 GPU 推理。
+- 待办/风险：需 PR CI 通过并合入后重跑同一只读 runtime preflight；仅当所有门禁通过时才执行已批准的三候选 GPU qualification。

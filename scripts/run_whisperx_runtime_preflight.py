@@ -13,6 +13,20 @@ if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
 
+class PreflightStageError(Exception):
+    def __init__(self, stage: str, cause: Exception) -> None:
+        self.stage = stage
+        self.cause = cause
+        super().__init__(stage)
+
+
+def _run_stage(stage: str, operation):
+    try:
+        return operation()
+    except Exception as exc:
+        raise PreflightStageError(stage, exc) from exc
+
+
 def _directory_from_environment(name: str) -> Path:
     value = os.environ.get(name, "").strip()
     if not value:
@@ -62,46 +76,83 @@ def _gpu_identity() -> dict[str, object]:
 
 
 def run_preflight() -> dict[str, object]:
-    from asr_service.model_cache import (
-        WHISPERX_ALIGN_RELATIVE_PATH,
-        WHISPERX_RELATIVE_PATH,
+    def import_contracts():
+        from asr_service.model_cache import (
+            WHISPERX_ALIGN_RELATIVE_PATH,
+            WHISPERX_RELATIVE_PATH,
+            validate_whisperx_align_cache,
+            validate_whisperx_cache,
+        )
+        from scripts.asr_qualification_manifest import resolve_manifest_from_environment
+        from src.transcription.profile_catalog import (
+            WHISPERX_PROFILE_ID,
+            build_phase3_profile_catalog,
+        )
+
+        return (
+            WHISPERX_ALIGN_RELATIVE_PATH,
+            WHISPERX_PROFILE_ID,
+            WHISPERX_RELATIVE_PATH,
+            build_phase3_profile_catalog,
+            resolve_manifest_from_environment,
+            validate_whisperx_align_cache,
+            validate_whisperx_cache,
+        )
+
+    (
+        whisperx_align_relative_path,
+        whisperx_profile_id,
+        whisperx_relative_path,
+        build_phase3_profile_catalog,
+        resolve_manifest_from_environment,
         validate_whisperx_align_cache,
         validate_whisperx_cache,
-    )
-    from scripts.asr_qualification_manifest import resolve_manifest_from_environment
-    from src.transcription.profile_catalog import (
-        WHISPERX_PROFILE_ID,
-        build_phase3_profile_catalog,
-    )
+    ) = _run_stage("imports", import_contracts)
 
-    try:
-        corpus = resolve_manifest_from_environment("whisperx", os.environ).manifest
-    except (OSError, RuntimeError) as exc:
-        raise ValueError("shared-corpus-unavailable") from exc
-    model_root = _directory_from_environment("PRODUCTION_WHISPERX_MODEL_ROOT")
-    nltk_root = _directory_from_environment("PRODUCTION_WHISPERX_NLTK_ROOT")
-    qualification_root = _directory_from_environment(
-        "PRODUCTION_WHISPERX_QUALIFICATION_ROOT"
+    corpus = _run_stage(
+        "shared-corpus",
+        lambda: resolve_manifest_from_environment("whisperx", os.environ).manifest,
     )
-    wheel_cache_root = _directory_from_environment(
-        "PRODUCTION_WHISPERX_WHEEL_CACHE_ROOT"
-    )
-    report_root = _directory_from_environment("PRODUCTION_WHISPERX_REPORT_ROOT")
-    asr_cache = validate_whisperx_cache(
-        model_root, model_root / WHISPERX_RELATIVE_PATH / "model-manifest.json"
-    )
-    align_cache = validate_whisperx_align_cache(
+    (
         model_root,
-        model_root / WHISPERX_ALIGN_RELATIVE_PATH / "model-manifest.json",
+        nltk_root,
+        qualification_root,
+        wheel_cache_root,
+        report_root,
+    ) = _run_stage(
+        "directories",
+        lambda: (
+            _directory_from_environment("PRODUCTION_WHISPERX_MODEL_ROOT"),
+            _directory_from_environment("PRODUCTION_WHISPERX_NLTK_ROOT"),
+            _directory_from_environment("PRODUCTION_WHISPERX_QUALIFICATION_ROOT"),
+            _directory_from_environment("PRODUCTION_WHISPERX_WHEEL_CACHE_ROOT"),
+            _directory_from_environment("PRODUCTION_WHISPERX_REPORT_ROOT"),
+        ),
+    )
+    asr_cache, align_cache = _run_stage(
+        "model-cache",
+        lambda: (
+            validate_whisperx_cache(
+                model_root,
+                model_root / whisperx_relative_path / "model-manifest.json",
+            ),
+            validate_whisperx_align_cache(
+                model_root,
+                model_root / whisperx_align_relative_path / "model-manifest.json",
+            ),
+        ),
     )
     if not asr_cache.available:
         raise ValueError(asr_cache.reason_code)
     if not align_cache.available:
         raise ValueError(align_cache.reason_code)
-    profile = next(
-        item.profile
-        for item in build_phase3_profile_catalog()
-        if item.profile.profile_id == WHISPERX_PROFILE_ID
+    profile = _run_stage(
+        "profile",
+        lambda: next(
+            item.profile
+            for item in build_phase3_profile_catalog()
+            if item.profile.profile_id == whisperx_profile_id
+        ),
     )
     if profile.admission.value != "disabled":
         raise ValueError("profile_admission_not_disabled")
@@ -109,7 +160,7 @@ def run_preflight() -> dict[str, object]:
         "schema_version": "whisperx-runtime-preflight/1",
         "status": "pass",
         "python_version": ".".join(str(item) for item in sys.version_info[:3]),
-        "gpu": _gpu_identity(),
+        "gpu": _run_stage("gpu", _gpu_identity),
         "manifest": corpus.identity(),
         "asr_model_revision": "53ecf83a5bedc5597eb8c8b34eac29e5345520ff",
         "align_model_revision": "51d27579a1040ee4e967979278d5f76b9c32c375",
@@ -136,6 +187,27 @@ def _failure_code(exc: Exception) -> str:
     }.get(value, value if value.isascii() and " " not in value else "runtime-preflight-failed")
 
 
+def _failure_result(exc: Exception) -> dict[str, object]:
+    if isinstance(exc, PreflightStageError):
+        if exc.stage == "shared-corpus" and isinstance(
+            exc.cause, (OSError, RuntimeError)
+        ):
+            failure_code = "shared-corpus-unavailable"
+        else:
+            failure_code = _failure_code(exc.cause)
+        failure_stage = exc.stage
+    else:
+        failure_code = _failure_code(exc)
+        failure_stage = "unclassified"
+    return {
+        "schema_version": "whisperx-runtime-preflight/1",
+        "status": "fail",
+        "failure_code": failure_code,
+        "failure_stage": failure_stage,
+        "production_services_modified": False,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--report", type=Path, required=True)
@@ -143,12 +215,7 @@ def main() -> int:
     try:
         result = run_preflight()
     except Exception as exc:
-        result = {
-            "schema_version": "whisperx-runtime-preflight/1",
-            "status": "fail",
-            "failure_code": _failure_code(exc),
-            "production_services_modified": False,
-        }
+        result = _failure_result(exc)
     args.report.parent.mkdir(parents=True, exist_ok=True)
     args.report.write_text(
         json.dumps(result, ensure_ascii=True, sort_keys=True, indent=2) + "\n",
