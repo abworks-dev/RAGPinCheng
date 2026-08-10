@@ -9,8 +9,8 @@ from pathlib import Path
 from typing import Any
 
 
-SOURCE_RUN_ID = "31354658965"
-SOURCE_COMMIT_SHA = "c4b7adbec4be9eb58afce5d01d6cef7f4a88d713"
+SOURCE_RUN_ID = "31356827072"
+SOURCE_COMMIT_SHA = "1d8154e620acb31e1428dd9abe69a5c97e53a16a"
 MAX_FILE_BYTES = 4 * 1024 * 1024
 MAX_LINES = 10_000
 MAX_PROGRESS_EVENTS = 32
@@ -54,6 +54,32 @@ SENSITIVE_ASSIGNMENT_RE = re.compile(
 )
 BEARER_RE = re.compile(r"\bBearer\s+\S+", re.IGNORECASE)
 SAMPLE_ID_RE = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?")
+GATE_NAMES = (
+    "processing_failure_rate",
+    "bim_term_recall",
+    "standard_code_recall",
+    "timestamp_p95_ms",
+    "negative_false_positives",
+)
+SAMPLE_FIELDS = (
+    "sample_id",
+    "scenario",
+    "negative_control",
+    "rtf",
+    "rtf_pass",
+    "deterministic",
+    "pass",
+    "cer",
+    "cer_limit",
+    "cer_pass",
+    "term_hits",
+    "term_total",
+    "code_hits",
+    "code_total",
+    "timestamp_drift_max_ms",
+    "forbidden_term_hits",
+    "forbidden_code_hits",
+)
 
 
 class EvidenceError(RuntimeError):
@@ -185,6 +211,97 @@ def _extract_progress(stdout: str) -> list[dict[str, object]]:
     return events[-MAX_PROGRESS_EVENTS:]
 
 
+def _is_metric(value: object) -> bool:
+    return type(value) in {int, float} and not isinstance(value, bool)
+
+
+def _extract_quality_summary(text: str, *, exists: bool) -> dict[str, object] | None:
+    if not exists:
+        return None
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise EvidenceError("qualification summary is invalid") from exc
+    if type(value) is not dict:
+        raise EvidenceError("qualification summary must be an object")
+    if (
+        value.get("schema_version") != "qwen3-asr-qualification-report/1"
+        or value.get("status") not in {"pass", "fail"}
+        or value.get("sample_count") != 8
+        or type(value.get("gates")) is not dict
+        or type(value.get("samples")) is not list
+        or len(value["samples"]) != 8
+    ):
+        raise EvidenceError("qualification summary contract mismatch")
+
+    gates: list[dict[str, object]] = []
+    for name in GATE_NAMES:
+        item = value["gates"].get(name)
+        if (
+            type(item) is not dict
+            or not _is_metric(item.get("observed"))
+            or not _is_metric(item.get("threshold"))
+            or type(item.get("pass")) is not bool
+        ):
+            raise EvidenceError(f"qualification gate is invalid: {name}")
+        gates.append(
+            {
+                "name": name,
+                "observed": item["observed"],
+                "threshold": item["threshold"],
+                "pass": item["pass"],
+            }
+        )
+
+    samples: list[dict[str, object]] = []
+    for item in value["samples"]:
+        if type(item) is not dict:
+            raise EvidenceError("qualification sample result must be an object")
+        sample_id = item.get("sample_id")
+        scenario = item.get("scenario")
+        if (
+            type(sample_id) is not str
+            or SAMPLE_ID_RE.fullmatch(sample_id) is None
+            or type(scenario) is not str
+            or SAMPLE_ID_RE.fullmatch(scenario) is None
+        ):
+            raise EvidenceError("qualification sample identity is invalid")
+        filtered: dict[str, object] = {}
+        for field in SAMPLE_FIELDS:
+            if field not in item:
+                continue
+            field_value = item[field]
+            if field in {"sample_id", "scenario"}:
+                filtered[field] = field_value
+            elif field in {
+                "negative_control",
+                "rtf_pass",
+                "deterministic",
+                "pass",
+                "cer_pass",
+            }:
+                if type(field_value) is not bool:
+                    raise EvidenceError(f"qualification sample field is invalid: {field}")
+                filtered[field] = field_value
+            elif _is_metric(field_value):
+                filtered[field] = field_value
+            else:
+                raise EvidenceError(f"qualification sample field is invalid: {field}")
+        for required in (
+            "sample_id",
+            "scenario",
+            "negative_control",
+            "rtf",
+            "rtf_pass",
+            "deterministic",
+            "pass",
+        ):
+            if required not in filtered:
+                raise EvidenceError(f"qualification sample field is missing: {required}")
+        samples.append(filtered)
+    return {"status": value["status"], "gates": gates, "samples": samples}
+
+
 def extract_evidence(*, source_root: Path) -> dict[str, object]:
     _load_verdict(
         source_root / "reports" / "qualification-verdict.json", root=source_root
@@ -204,7 +321,7 @@ def extract_evidence(*, source_root: Path) -> dict[str, object]:
         root=source_root,
         expected_parent="logs",
     )
-    _, _, summary_exists = _read_optional_file(
+    summary_text, _, summary_exists = _read_optional_file(
         source_root / "reports" / "qualification-summary.json",
         root=source_root,
         expected_parent="reports",
@@ -225,6 +342,7 @@ def extract_evidence(*, source_root: Path) -> dict[str, object]:
     signals = sorted(
         name for name, pattern in SIGNALS.items() if pattern.search(diagnostic_text)
     )
+    quality_summary = _extract_quality_summary(summary_text, exists=summary_exists)
     if summary_exists or sample_results_exists:
         last_stage = "report-written"
     elif progress_events:
@@ -233,7 +351,11 @@ def extract_evidence(*, source_root: Path) -> dict[str, object]:
         last_stage = "runner-started"
     return {
         "schema_version": "qwen3-asr-qualification-failure-evidence/1",
-        "status": "evidence_complete" if errors or signals or progress_events else "evidence_incomplete",
+        "status": (
+            "evidence_complete"
+            if errors or signals or progress_events or quality_summary
+            else "evidence_incomplete"
+        ),
         "source_run_id": SOURCE_RUN_ID,
         "source_commit_sha": SOURCE_COMMIT_SHA,
         "failure_code": "qualification_failed",
@@ -241,6 +363,7 @@ def extract_evidence(*, source_root: Path) -> dict[str, object]:
         "progress_events": progress_events,
         "signals": signals,
         "error_summaries": errors,
+        "quality_summary": quality_summary,
         "qualification_summary_exists": summary_exists,
         "sample_results_exists": sample_results_exists,
         "runner_stdout_line_count": runner_stdout_lines,

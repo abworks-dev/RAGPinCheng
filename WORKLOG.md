@@ -2971,3 +2971,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`scripts/qualify-qwen3-asr-production.ps1`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`
 - 验证：完整 CI ASR contract 等价本地集合 `414 passed, 2 subtests passed`；ASR 部署静态专项 `44 passed`；runner 模块入口冒烟、PowerShell AST 和 `git diff --check` 通过。证据显示旧 run 未生成 qualification summary 或 sample results，生产服务未修改，Profile admission 保持 disabled。
 - 待办/风险：需 PR CI 通过并合入 master 后，绑定新的完整 master SHA 重跑完整 Qwen R3；真实 CUDA、双模型与 8 样本质量门禁仍以该次运行结果为准。
+
+### 13:11 — 增强 Qwen 质量失败白名单证据
+
+- 完成：Qwen R3 run `31356827072` 已越过依赖、许可证、双模型、CUDA BF16、临时服务和 runner 导入，真实执行 8 样本阶段约 4 分 40 秒后返回非零；将固定离线提取源更新为该 run，并仅从 qualification summary 白名单输出 5 个 gate 的 observed/threshold/pass 与 8 个 sample 的 ID、场景、RTF、确定性和质量数值，不输出 hypothesis、canonical/Markdown 哈希、转写正文或参考文本。
+- 文件：`scripts/extract_qwen3_asr_qualification_failure_evidence.py`、`.github/workflows/diagnose-qwen3-asr-qualification-failure-production.yml`、`tests/test_qwen3_asr_qualification_failure_evidence.py`、`WORKLOG.md`
+- 验证：完整 CI ASR contract 等价本地集合 `414 passed, 2 subtests passed`；证据提取专项 `5 passed`；Python `py_compile`、workflow YAML 和 `git diff --check` 通过。run GPU 显存基线 `3723 MiB`、峰值 `7262 MiB`、利用率峰值 `34%`，生产服务未修改，Profile admission 保持 disabled。
+- 待办/风险：需 PR CI 通过并合入 master 后运行一次固定只读提取，确认是 runner 异常还是具体质量 gate 未通过；不得在没有指标证据时放宽阈值。

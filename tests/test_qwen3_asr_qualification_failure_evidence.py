@@ -42,8 +42,68 @@ def _source(
         if value:
             (tmp_path / "logs" / name).write_text(value, encoding="utf-8")
     if reports:
+        samples = []
+        for index in range(8):
+            samples.append(
+                {
+                    "sample_id": f"sample-{index + 1}",
+                    "scenario": "clear-zh",
+                    "negative_control": False,
+                    "duration_ms": 1000,
+                    "segment_count": 1,
+                    "canonical_sha256": "a" * 64,
+                    "markdown_sha256": "b" * 64,
+                    "rtf": 0.25,
+                    "rtf_pass": True,
+                    "deterministic": True,
+                    "parser_turn_count": 1,
+                    "cer": 0.01,
+                    "cer_limit": 0.1,
+                    "cer_pass": True,
+                    "term_hits": 1,
+                    "term_total": 1,
+                    "code_hits": 1,
+                    "code_total": 1,
+                    "timestamp_drift_max_ms": 100,
+                    "pass": index != 7,
+                    "hypothesis": "must not be emitted",
+                }
+            )
+        summary = {
+            "schema_version": "qwen3-asr-qualification-report/1",
+            "status": "fail",
+            "sample_count": 8,
+            "gates": {
+                "processing_failure_rate": {
+                    "observed": 0.0,
+                    "threshold": 0.0,
+                    "pass": True,
+                },
+                "bim_term_recall": {
+                    "observed": 0.6,
+                    "threshold": 0.7,
+                    "pass": False,
+                },
+                "standard_code_recall": {
+                    "observed": 1.0,
+                    "threshold": 0.95,
+                    "pass": True,
+                },
+                "timestamp_p95_ms": {
+                    "observed": 100,
+                    "threshold": 1500,
+                    "pass": True,
+                },
+                "negative_false_positives": {
+                    "observed": 0,
+                    "threshold": 0,
+                    "pass": True,
+                },
+            },
+            "samples": samples,
+        }
         (tmp_path / "reports" / "qualification-summary.json").write_text(
-            "{}", encoding="utf-8"
+            json.dumps(summary), encoding="utf-8"
         )
         (tmp_path / "reports" / "sample-results.json").write_text(
             "{}", encoding="utf-8"
@@ -116,7 +176,17 @@ def test_reports_completed_sample_without_copying_extra_fields(tmp_path):
     ]
     assert result["qualification_summary_exists"] is True
     assert result["sample_results_exists"] is True
-    assert "hypothesis" not in json.dumps(result)
+    assert result["quality_summary"]["status"] == "fail"
+    assert result["quality_summary"]["gates"][1] == {
+        "name": "bim_term_recall",
+        "observed": 0.6,
+        "threshold": 0.7,
+        "pass": False,
+    }
+    assert result["quality_summary"]["samples"][-1]["pass"] is False
+    serialized = json.dumps(result)
+    assert "hypothesis" not in serialized
+    assert "canonical_sha256" not in serialized
 
 
 def test_missing_runner_details_are_incomplete_but_bounded(tmp_path):
