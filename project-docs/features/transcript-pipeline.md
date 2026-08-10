@@ -72,8 +72,8 @@ Phase 5A/5B 已接通版本列表、只读 Markdown 预览、人工审核、显�
 
 SenseVoice 已完成独立生产短媒体验收。Qwen3-ASR 已具备统一 R3 仓库资格工具，
 但真实 workflow 尚未取得 PASS，因此没有 Windows、CUDA、依赖、模型、质量或资源
-资格结论。faster-whisper R3 Run `31348352599` 已在
-`aee897570ff8bfc60cd8aff0914818711109a458` 上通过：固定 8 个非敏感样本全部通过，
+资格结论。faster-whisper R3 Run `31352608196` 已在生产准入代码合并后的
+`12f1091009589a68edf82d62712c898324fc318e` 上通过：固定 8 个非敏感样本全部通过，
 canonical、Markdown 与 parser turns 两遍结果一致，固定模型 revision 和 wheel cache
 身份均通过校验。该资格不自动开放应用 Profile，也不等于生产部署或生产流量验收。
 
@@ -209,12 +209,13 @@ SenseVoice；Ubuntu 应用侧 `ASR_ENABLED` 仍必须为 `false`。跨节点验�
 - faster-whisper R2：无 FastAPI、无真实引擎的 ASR/Provider/应用回归
   187 项通过；Phase 1 核心契约与静态边界 189 项通过；PR #34 的 7 个远端 CI
   检查全部成功并已合并。
-- faster-whisper R3：Run `31348352599` 在固定 master SHA 上通过依赖、模型、CUDA、
-  8 个非敏感样本质量、资源与三层确定性门禁；GPU 显存基线 `3721 MiB`、峰值
-  `6136 MiB`，利用率峰值 `100%`。`steady_state_rtf=3.119533` 按既定契约仅为信息项。
-  当前生产准入准备的本地扩展专项测试为 `157 passed`，PR #154 首轮 CI 7/7
-  通过；仍需 scoped review、合并后同 SHA R3 重跑和独立生产 R3 审批，不能据此
-  认定生产已启用。
+- faster-whisper R3：生产准入 PR #154 和 master merge CI 均 7/7 通过；随后 Run
+  `31352608196` 在固定 master SHA 上再次通过依赖、模型、CUDA、8 个非敏感样本质量、
+  资源与三层确定性门禁。GPU 显存基线 `3723 MiB`、峰值 `6136 MiB`，利用率峰值
+  `99%`；`steady_state_rtf=3.195988` 按既定契约仅为信息项。严格 artifact 同时暴露
+  成功 diagnostic 的 `runner_exit_code=null`，而生产 evidence helper 曾错误将该信息字段
+  作为硬门禁；最小修复的本地扩展专项测试为 `159 passed`。修复合并后仍须按新的完整
+  master SHA 重跑 R3，并另行审批生产 R3，不能据此认定生产已启用。
 - WhisperX R2/R3：已实现复用 remote Provider/Canonical 契约的 experimental Profile、
   lazy-load service adapter、ASR/中文对齐双模型 manifest 门禁及手动 Windows CUDA
   冒烟 workflow；另已实现复用既有 8 个自制中文样本和统一阈值的资格 workflow，
