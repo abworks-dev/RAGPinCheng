@@ -1260,6 +1260,11 @@ def test_qwen3_asr_qualification_freezes_dual_models_bf16_and_result_flow():
     assert "c7cbfc2048c462b0d63a45797104fc9db3ad62b7" in script
     assert "QWEN3_ASR_MODEL_ID" in model
     assert "QWEN3_ALIGNER_MODEL_ID" in model
+    assert "def classify_model_preparation_failure" in model
+    assert '"exception_type": type(error).__name__' in model
+    assert '"message"' not in model.split(
+        "def classify_model_preparation_failure", 1
+    )[1].split("def _sha256", 1)[0]
     assert "local_dir_use_symlinks=False" in model
     assert "validate_qwen3_asr_cache" in model
     assert "validate_qwen3_aligner_cache" in model
@@ -1281,6 +1286,7 @@ def test_qwen3_asr_qualification_freezes_dual_models_bf16_and_result_flow():
     assert '[string]$ModelPreparationDiagnosticPath' in script
     assert "function Convert-ToSanitizedModelPreparationFailure" in script
     assert "function Write-SanitizedModelPreparationFailure" in script
+    assert "exception_type" in script
     assert 'schema_version = "qwen3-asr-model-preparation-failure/1"' in script
     for kind in (
         "existing_cache_invalid",

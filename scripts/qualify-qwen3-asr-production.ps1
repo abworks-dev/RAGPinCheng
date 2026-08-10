@@ -922,6 +922,41 @@ function Convert-ToSanitizedModelPreparationFailure {
         [AllowEmptyCollection()]
         [object[]]$Lines
     )
+    $allowedKinds = @(
+        "existing_cache_invalid",
+        "staging_validation_failed",
+        "snapshot_download_failed",
+        "filesystem_or_permission_failure",
+        "disk_space_failure",
+        "evidence_insufficient"
+    )
+    $allowedModels = @("asr", "aligner", "unknown")
+    foreach ($raw in $Lines) {
+        $line = ([string]$raw).Trim()
+        if (-not $line.StartsWith("{") -or -not $line.EndsWith("}")) {
+            continue
+        }
+        try {
+            $payload = $line | ConvertFrom-Json
+            if (
+                $payload.schema_version -eq "qwen3-asr-model-preparation-failure/1" -and
+                [string]$payload.kind -in $allowedKinds -and
+                [string]$payload.model -in $allowedModels -and
+                [string]$payload.exception_type -match '^[A-Za-z][A-Za-z0-9_]{0,127}$'
+            ) {
+                return [pscustomobject]@{
+                    schema_version = "qwen3-asr-model-preparation-failure/1"
+                    status = "fail"
+                    stage = "model_preparation"
+                    kind = [string]$payload.kind
+                    model = [string]$payload.model
+                    exception_type = [string]$payload.exception_type
+                    captured_line_count = @($Lines).Count
+                }
+            }
+        } catch {
+        }
+    }
     $kind = "evidence_insufficient"
     $model = "unknown"
     $joined = (($Lines | ForEach-Object { ([string]$_).Trim() }) -join "`n")
@@ -945,6 +980,7 @@ function Convert-ToSanitizedModelPreparationFailure {
         stage = "model_preparation"
         kind = $kind
         model = $model
+        exception_type = "unknown"
         captured_line_count = @($Lines).Count
     }
 }
@@ -975,6 +1011,9 @@ function Write-SanitizedModelPreparationFailure {
 }
 
 function Assert-ModelPreparationSanitizerSelfTest {
+    $machine = Convert-ToSanitizedModelPreparationFailure -Lines @(
+        '{"schema_version":"qwen3-asr-model-preparation-failure/1","status":"fail","stage":"model_preparation","kind":"existing_cache_invalid","model":"asr","exception_type":"RuntimeError"}'
+    )
     $invalid = Convert-ToSanitizedModelPreparationFailure -Lines @(
         "RuntimeError: existing asr cache is invalid"
     )
@@ -985,6 +1024,8 @@ function Assert-ModelPreparationSanitizerSelfTest {
         "RuntimeError: staged aligner cache validation failed"
     )
     if (
+        $machine.kind -ne "existing_cache_invalid" -or
+        $machine.exception_type -ne "RuntimeError" -or
         $invalid.kind -ne "existing_cache_invalid" -or
         $invalid.model -ne "asr" -or
         $download.kind -ne "snapshot_download_failed" -or
