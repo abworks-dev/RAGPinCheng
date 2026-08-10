@@ -10,17 +10,25 @@ def read(relative: str) -> str:
     return (ROOT / relative).read_text(encoding="utf-8")
 
 
-def test_faster_whisper_production_admission_is_bound_to_exact_r3_evidence():
+def test_faster_whisper_production_admission_is_bound_to_runtime_contract_evidence():
     deploy = read("scripts/deploy-asr.ps1")
     evidence = read("scripts/faster-whisper-production-evidence.ps1")
     workflow = read(".github/workflows/deploy-asr-production.yml")
 
-    assert "faster-whisper qualification SHA must equal the deployed commit SHA" in deploy
-    assert "faster_whisper_qualification_commit_sha must equal commit_sha" in workflow
+    contract = read("scripts/asr-contract.ps1")
+
+    assert "faster-whisper qualification SHA must equal the deployed commit SHA" not in deploy
+    assert "Get-AsrRuntimeContract" in deploy
+    assert "faster-whisper qualification runtime contract must equal the deployed runtime contract" in deploy
+    assert "ExpectedRuntimeContractSha256" in evidence
+    assert "faster_whisper_runtime_contract_sha256" in workflow
+    assert "faster_whisper_qualification_commit_sha must equal commit_sha" not in workflow
     assert "faster-whisper production preparation requires a new staging venv" in deploy
     assert "faster-whisper production preparation requires a new staging venv" in workflow
-    assert "faster-whisper-r3-verdict/2" in evidence
-    assert "faster-whisper-r3-diagnostic/2" in evidence
+    assert "faster-whisper-r3-verdict/3" in evidence
+    assert "faster-whisper-r3-diagnostic/3" in evidence
+    assert "asr-runtime-contract/1" in contract
+    assert "Get-AsrGitBlobId" in contract
     assert "faster-whisper-wheel-cache/1" in evidence
     assert "faster-whisper-wheel-manifest/3" in evidence
     assert 'Join-Path $DataRoot "qualification\\wheel-cache\\$CacheKey"' in evidence
@@ -72,6 +80,71 @@ def test_faster_whisper_production_evidence_treats_runner_exit_as_informational(
     assert "[int]$diagnostic.runner_exit_code -ne 0" not in evidence
     assert "Qualification runner exit code $QualificationExitCode was ignored" in qualification
     assert "$QualificationSummary.status -ne \"pass\"" in qualification
+
+
+def test_asr_runtime_and_deployment_contracts_are_engine_generic_and_fail_closed():
+    contract = read("scripts/asr-contract.ps1")
+    preflight = read("scripts/preflight-asr-deployment.ps1")
+
+    assert 'ValidateSet("faster-whisper", "qwen3-asr", "whisperx")' in contract
+    assert "Get-AsrGitBlobId" in contract
+    assert "asr-runtime-contract/1" in contract
+    assert "asr-deployment-contract/1" in contract
+    assert "scripts/preflight-asr-deployment.ps1" in contract
+    assert ".github/workflows/preflight-asr-production.yml" in contract
+    assert "Get-AsrProductionAdmissionAdapter" in contract
+    assert 'engine = $Engine; enabled = $true; evidence_adapter = "faster-whisper-r3/1"' in contract
+    assert 'engine = $Engine; enabled = $false' in contract
+
+    qualifications = {
+        "faster-whisper": read("scripts/qualify-faster-whisper-production.ps1"),
+        "qwen3-asr": read("scripts/qualify-qwen3-asr-production.ps1"),
+        "whisperx": read("scripts/qualify-whisperx-production.ps1"),
+    }
+    for engine, script in qualifications.items():
+        assert '. (Join-Path $PSScriptRoot "asr-contract.ps1")' in script
+        assert f'Get-AsrRuntimeContract -Engine "{engine}"' in script
+        assert "runtime_contract = $RuntimeContract" in script
+
+    assert 'ValidateSet("faster-whisper", "qwen3-asr", "whisperx")' in preflight
+    assert "Get-AsrRuntimeContract -Engine $Engine" in preflight
+    assert "Get-AsrDeploymentContract" in preflight
+    assert "production_admission_adapter_not_enabled" in preflight
+    assert "Production admission adapter is not enabled for engine" in preflight
+
+
+def test_asr_deployment_preflight_is_manual_and_writes_only_runner_temp():
+    preflight = read("scripts/preflight-asr-deployment.ps1")
+    workflow = read(".github/workflows/preflight-asr-production.yml")
+
+    assert "workflow_dispatch:" in workflow
+    assert "push:" not in workflow
+    assert "pull_request:" not in workflow
+    assert "environment: production-asr" in workflow
+    assert "runs-on: [self-hosted, Windows, X64, asr-production]" in workflow
+    assert "timeout-minutes: 45" in workflow
+    assert "actions/upload-artifact@v4" in workflow
+    assert "ASR_DEPENDENCY_PROXY: ${{ secrets.ASR_DEPENDENCY_PROXY }}" in workflow
+    assert "activate_service" not in workflow.lower()
+    assert "deploy-asr.ps1" not in workflow
+
+    assert "Assert-PreflightPathWithinTemp" in preflight
+    assert "Deployment preflight paths must remain under runner temp" in preflight
+    assert "production_services_modified = $false" in preflight
+    assert "Copy-QualifiedFasterWhisperWheels" in preflight
+    assert "--no-index" in preflight
+    assert "Assert-FasterWhisperProductionRuntime" in preflight
+    for forbidden in (
+        "PRODUCTION_ASR_PROGRAM_ROOT",
+        "New-ScheduledTask",
+        "Start-ScheduledTask",
+        "Stop-ScheduledTask",
+        "Register-ScheduledTask",
+        "Publish-SharedWheelBlobs",
+        "Copy-VerifiedSharedWheelBlobs",
+        "Remove-Item",
+    ):
+        assert forbidden not in preflight
 
 
 def test_faster_whisper_qualification_persists_diagnostic_for_production_admission():
@@ -518,7 +591,7 @@ def test_faster_whisper_qualification_workflow_is_manual_immutable_and_gated():
     assert "Affected requirement:" in workflow
     assert "Fallback probe executed:" in workflow
     assert "Fallback probe exit code:" in workflow
-    assert 'schema_version = "faster-whisper-r3-diagnostic/2"' in workflow
+    assert 'schema_version = "faster-whisper-r3-diagnostic/3"' in workflow
     assert "$failedSampleDiagnostics" in workflow
     assert "canonical=``$($_.canonical_equal)``" in workflow
     assert "markdown=``$($_.markdown_equal)``" in workflow
@@ -903,11 +976,11 @@ def test_faster_whisper_qualification_freezes_dependencies_model_and_gates():
     runner = read("scripts/run_faster_whisper_qualification.py")
     assert "torch==2.7.0+cu128" in script
     assert "torchaudio==2.7.0+cu128" in script
-    assert "requirements-windows.txt" not in script
+    assert "requirements-windows.txt" in script
     assert "requirements-service-core.txt" in script
     assert "requirements-faster-whisper.txt" in script
     assert '$RequirementsSource = $ResolvedSource.Replace("\\", "/")' in script
-    assert "-r $RequirementsSource/asr_service/requirements-windows.txt" not in script
+    assert "-r $RequirementsSource/asr_service/requirements-windows.txt" in script
     assert "-r $RequirementsSource/asr_service/requirements-service-core.txt" in script
     assert "-r $RequirementsSource/asr_service/requirements-faster-whisper.txt" in script
     assert "-r $ResolvedSource\\asr_service\\" not in script
@@ -1113,7 +1186,7 @@ def test_faster_whisper_qualification_uses_verified_persistent_wheel_cache():
     assert 'qualification\\wheel-cache' in script
     assert 'schema_version = "faster-whisper-wheel-cache-key/1"' in script
     assert 'schema_version = "faster-whisper-wheel-cache/1"' in script
-    assert 'schema_version = "faster-whisper-r3-verdict/2"' in script
+    assert 'schema_version = "faster-whisper-r3-verdict/3"' in script
     assert "wheel_cache_status = $WheelCacheStatus" in script
     assert "wheel_cache_key = $WheelCacheKey" in script
     assert "importlib.metadata.version('pip')" in script

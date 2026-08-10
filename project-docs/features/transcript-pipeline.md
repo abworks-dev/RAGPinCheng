@@ -101,14 +101,27 @@ qualification 互斥，前者不安装依赖、不加载模型、不读取密钥
 `31361505382` 已确认相同 manifest SHA-256、历史 sample set、annotation version、样本数
 及八项 WAV 身份；这不构成任一引擎的 GPU qualification 或 Profile admission。
 
-生产部署代码可在显式启用 faster-whisper 准备时绑定持久化 R3 verdict/diagnostic、
-资格 run ID、与部署完全相同的 commit SHA、固定 wheel cache 和模型 Manifest；它强制
-创建新的组合 staging venv，下载阶段必须保留全部已资格 wheel，安装阶段仅从完整
-wheelhouse 离线安装，切换前同时验证 SenseVoice 与 faster-whisper 模块来源及模型缓存。
-模型路径写入前备份受保护的 `asr.env`，失败时先恢复应用、venv 和配置，再尝试恢复
-原服务。启用后的本机与 Ubuntu 验证均要求 Profile 顺序严格为 faster-whisper 后
-SenseVoice；Ubuntu 应用侧 `ASR_ENABLED` 仍必须为 `false`。跨节点验证失败后的自动
-回滚尚未纳入该部署 workflow，必须在后续生产 R3 方案中明确处理。
+生产部署采用引擎通用的两层身份：`runtime_contract_sha256` 是某一引擎运行闭包
+（固定模型 revision 与明确源码文件的 Git blob 身份），`deployment_contract_sha256`
+是部署/预检行为闭包。两者都不依赖 Windows 工作树的 CRLF 字节。旧 R3 只能在当前
+部署的同引擎 runtime contract 完全一致时复用，资格记录的 source commit 仍须可审计；
+不能再仅凭完整 master SHA 相等或不相等判断。当前仅 faster-whisper 具备已启用的生产
+admission adapter；Qwen3-ASR 与 WhisperX 的通用契约会被部署预检明确 fail closed，不能
+据此进入生产预置。
+
+手动 `Preflight ASR Production Deployment` workflow 只在 Windows runner temp 下创建
+验证 wheelhouse 和 venv，读取资格证据与模型缓存并验证在线解析、离线安装、`pip check`
+和 runtime；它不修改生产 app/venv/config、Scheduled Task、服务、模型缓存或共享 wheel
+cache，并输出包含两层 hash 的脱敏 artifact。预检结果目前不自动触发或授权部署。
+
+显式启用 faster-whisper 生产准备时，部署代码绑定持久化 R3 verdict/diagnostic、资格
+run ID、资格 commit、runtime contract、固定 wheel cache 和模型 Manifest；它强制创建
+新的组合 staging venv，下载阶段必须保留全部已资格 wheel，安装阶段仅从完整 wheelhouse
+离线安装，切换前同时验证 SenseVoice 与 faster-whisper 模块来源及模型缓存。模型路径
+写入前备份受保护的 `asr.env`，失败时先恢复应用、venv 和配置，再尝试恢复原服务。启用
+后的本机与 Ubuntu 验证均要求 Profile 顺序严格为 faster-whisper 后 SenseVoice；Ubuntu
+应用侧 `ASR_ENABLED` 仍必须为 `false`。跨节点验证失败后的自动回滚尚未纳入该部署
+workflow，必须在后续生产 R3 方案中明确处理。
 
 ## 入口与调用链
 

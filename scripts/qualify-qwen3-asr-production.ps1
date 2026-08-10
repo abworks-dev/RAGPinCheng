@@ -20,6 +20,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "windows-wheel-cache.ps1")
+. (Join-Path $PSScriptRoot "asr-contract.ps1")
 
 $ProgramRoot = $env:PRODUCTION_QWEN3_ASR_QUALIFICATION_ROOT
 $DataRoot = $env:PRODUCTION_ASR_DATA_ROOT
@@ -77,6 +78,7 @@ $LastExternalCommandResult = [pscustomobject]@{
     exit_code = $null
     captured_line_count = 0
 }
+$RuntimeContract = $null
 
 function Write-JsonFile {
     param(
@@ -1557,7 +1559,7 @@ function Write-SanitizedSummary {
         [string]$Code
     )
     $summary = [ordered]@{
-        schema_version = "qwen3-asr-r3-verdict/1"
+        schema_version = "qwen3-asr-r3-verdict/2"
         status = $Status
         failure_code = $Code
         commit_sha = $CommitSha.ToLowerInvariant()
@@ -1572,6 +1574,7 @@ function Write-SanitizedSummary {
         peak_gpu_utilization_percent = $PeakUtilization
         manifest_source = $ManifestSource
         qualification_corpus = $QualificationCorpus
+        runtime_contract = $RuntimeContract
         profile_admission = "disabled"
         production_services_modified = $false
     }
@@ -1588,6 +1591,7 @@ function Write-SanitizedSummary {
 if ($CommitSha -notmatch "^[0-9a-fA-F]{40}$") {
     throw "CommitSha must be a full 40-character SHA"
 }
+$RuntimeContract = Get-AsrRuntimeContract -Engine "qwen3-asr" -SourceRoot $SourceRoot -CommitSha $CommitSha
 if ($RunId -notmatch "^[0-9]{1,20}$") {
     throw "RunId must contain only 1 to 20 digits"
 }

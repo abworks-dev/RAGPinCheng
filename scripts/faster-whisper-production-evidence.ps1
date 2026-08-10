@@ -198,9 +198,10 @@ function Get-QualifiedFasterWhisperEvidence {
         [Parameter(Mandatory = $true)][string]$QualificationRoot,
         [Parameter(Mandatory = $true)][string]$DataRoot,
         [Parameter(Mandatory = $true)][string]$RunId,
-        [Parameter(Mandatory = $true)][string]$CommitSha
+        [Parameter(Mandatory = $true)][string]$CommitSha,
+        [Parameter(Mandatory = $true)][string]$ExpectedRuntimeContractSha256
     )
-    if ($RunId -notmatch '^[0-9]{1,20}$' -or $CommitSha -notmatch '^[0-9a-f]{40}$') {
+    if ($RunId -notmatch '^[0-9]{1,20}$' -or $CommitSha -notmatch '^[0-9a-f]{40}$' -or $ExpectedRuntimeContractSha256 -notmatch '^[0-9a-f]{64}$') {
         throw "Qualified faster-whisper run identity is invalid"
     }
     Assert-FasterWhisperEvidenceRealDirectory `
@@ -231,6 +232,7 @@ function Get-QualifiedFasterWhisperEvidence {
             "production_services_modified",
             "profile_admission",
             "qualification_corpus",
+            "runtime_contract",
             "run_id",
             "schema_version",
             "status",
@@ -239,7 +241,7 @@ function Get-QualifiedFasterWhisperEvidence {
         ) `
         -Label "Qualified faster-whisper verdict"
     if (
-        $verdict.schema_version -ne "faster-whisper-r3-verdict/2" -or
+        $verdict.schema_version -ne "faster-whisper-r3-verdict/3" -or
         $verdict.status -ne "pass" -or
         $verdict.failure_code -ne "none" -or
         [string]$verdict.commit_sha -ne $CommitSha -or
@@ -253,6 +255,18 @@ function Get-QualifiedFasterWhisperEvidence {
         $verdict.production_services_modified -ne $false
     ) {
         throw "Qualified faster-whisper verdict did not pass the admission evidence contract"
+    }
+    Assert-FasterWhisperEvidenceProperties `
+        -Value $verdict.runtime_contract `
+        -Expected @("engine", "manifest", "runtime_contract_sha256", "schema_version", "source_commit_sha") `
+        -Label "Qualified faster-whisper runtime contract"
+    if (
+        $verdict.runtime_contract.schema_version -ne "asr-runtime-contract/1" -or
+        $verdict.runtime_contract.engine -ne "faster-whisper" -or
+        [string]$verdict.runtime_contract.source_commit_sha -ne $CommitSha -or
+        [string]$verdict.runtime_contract.runtime_contract_sha256 -ne $ExpectedRuntimeContractSha256
+    ) {
+        throw "Qualified faster-whisper runtime contract does not match the deployed runtime"
     }
     Assert-FasterWhisperEvidenceProperties `
         -Value $verdict.qualification_corpus `
@@ -317,6 +331,7 @@ function Get-QualifiedFasterWhisperEvidence {
             "production_services_modified",
             "profile_admission",
             "report_available",
+            "runtime_contract",
             "run_id",
             "runner_exit_code",
             "sample_count",
@@ -329,7 +344,7 @@ function Get-QualifiedFasterWhisperEvidence {
         ) `
         -Label "Qualified faster-whisper diagnostic"
     if (
-        $diagnostic.schema_version -ne "faster-whisper-r3-diagnostic/2" -or
+        $diagnostic.schema_version -ne "faster-whisper-r3-diagnostic/3" -or
         $diagnostic.status -ne "pass" -or
         -not [string]::IsNullOrEmpty([string]$diagnostic.failure_code) -or
         $diagnostic.failure_stage -ne "qualification_runner" -or
@@ -352,6 +367,9 @@ function Get-QualifiedFasterWhisperEvidence {
         $diagnostic.production_services_modified -ne $false
     ) {
         throw "Qualified faster-whisper diagnostic did not pass every fixed sample gate"
+    }
+    if ([string]$diagnostic.runtime_contract.runtime_contract_sha256 -ne $ExpectedRuntimeContractSha256) {
+        throw "Qualified faster-whisper diagnostic runtime contract does not match the deployed runtime"
     }
     $actualGateNames = @($diagnostic.gates.PSObject.Properties.Name | Sort-Object)
     if (Compare-Object -ReferenceObject $script:FasterWhisperGateNames -DifferenceObject $actualGateNames) {
@@ -393,6 +411,7 @@ function Get-QualifiedFasterWhisperEvidence {
         RunId = $RunId
         CommitSha = $CommitSha
         CacheKey = [string]$verdict.wheel_cache_key
+        RuntimeContractSha256 = [string]$verdict.runtime_contract.runtime_contract_sha256
         CachePath = $cache.Path
         CacheManifest = $cache.Manifest
         ModelCacheRoot = $modelCacheRoot

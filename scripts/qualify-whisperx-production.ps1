@@ -11,6 +11,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "windows-wheel-cache.ps1")
+. (Join-Path $PSScriptRoot "asr-contract.ps1")
 
 $WhisperXRoot = $env:PRODUCTION_WHISPERX_ROOT
 if ([string]::IsNullOrWhiteSpace($WhisperXRoot)) {
@@ -43,6 +44,7 @@ $Selection = [ordered]@{
     noisy_bim_cer_improved = $false
     negative_false_positives_zero = $false
 }
+$RuntimeContract = $null
 
 function Write-Json {
     param([string]$Path, [object]$Value)
@@ -119,6 +121,7 @@ function Get-StateHash {
 
 if (-not $ExecuteQualification) { throw "ExecuteQualification must be true" }
 if ($CommitSha -notmatch "^[0-9a-fA-F]{40}$") { throw "CommitSha must be a full SHA" }
+$RuntimeContract = Get-AsrRuntimeContract -Engine "whisperx" -SourceRoot $SourceRoot -CommitSha $CommitSha
 if ($RunId -notmatch "^[0-9]+$") { throw "RunId must contain only digits" }
 if (Test-Path -LiteralPath $RunRoot) { throw "qualification run directory already exists" }
 
@@ -296,7 +299,7 @@ try {
         $Status = "fail"; $FailureCode = "firewall_modified"
     }
     Write-Json $SummaryPath ([ordered]@{
-        schema_version = "whisperx-production-qualification-verdict/1"
+        schema_version = "whisperx-production-qualification-verdict/2"
         status = $Status
         failure_code = $FailureCode
         commit_sha = $CommitSha.ToLowerInvariant()
@@ -309,6 +312,7 @@ try {
         license_audit_status = $LicenseAuditStatus
         manifest_source = $ManifestSource
         qualification_corpus = $QualificationCorpus
+        runtime_contract = $RuntimeContract
         profile_admission = "disabled"
         production_services_modified = $false
         diagnostic_mode = [bool]$DiagnosticMode

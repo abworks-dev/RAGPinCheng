@@ -10,12 +10,14 @@ param(
     [switch]$ActivateService,
     [switch]$EnableFasterWhisper,
     [string]$FasterWhisperQualificationRunId = "",
-    [string]$FasterWhisperQualificationCommitSha = ""
+    [string]$FasterWhisperQualificationCommitSha = "",
+    [string]$FasterWhisperRuntimeContractSha256 = ""
 )
 
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "windows-wheel-cache.ps1")
 . (Join-Path $PSScriptRoot "faster-whisper-production-evidence.ps1")
+. (Join-Path $PSScriptRoot "asr-contract.ps1")
 $taskName = "RAGPinCheng-ASR"
 $serviceStartScript = Join-Path $ProgramRoot "scripts\start-asr-service.ps1"
 $expectedTaskArguments = '-NoProfile -ExecutionPolicy Bypass -File "{0}"' -f $serviceStartScript
@@ -67,20 +69,32 @@ if ($EnableFasterWhisper) {
     if (-not $InstallDependencies) {
         throw "faster-whisper production preparation requires a new staging venv"
     }
-    if ($FasterWhisperQualificationCommitSha.ToLowerInvariant() -ne $CommitSha.ToLowerInvariant()) {
-        throw "faster-whisper qualification SHA must equal the deployed commit SHA"
-    }
     if ([string]::IsNullOrWhiteSpace($env:PRODUCTION_FASTER_WHISPER_QUALIFICATION_ROOT)) {
         throw "PRODUCTION_FASTER_WHISPER_QUALIFICATION_ROOT is required"
+    }
+    if (
+        $FasterWhisperQualificationCommitSha -notmatch '^[0-9a-fA-F]{40}$' -or
+        $FasterWhisperRuntimeContractSha256 -notmatch '^[0-9a-fA-F]{64}$'
+    ) {
+        throw "faster-whisper qualification identity is invalid"
+    }
+    $currentRuntimeContract = Get-AsrRuntimeContract `
+        -Engine "faster-whisper" `
+        -SourceRoot $resolvedSource `
+        -CommitSha $CommitSha
+    if ($FasterWhisperRuntimeContractSha256.ToLowerInvariant() -ne $currentRuntimeContract.runtime_contract_sha256) {
+        throw "faster-whisper qualification runtime contract must equal the deployed runtime contract"
     }
     $fasterWhisperEvidence = Get-QualifiedFasterWhisperEvidence `
         -QualificationRoot $env:PRODUCTION_FASTER_WHISPER_QUALIFICATION_ROOT `
         -DataRoot $DataRoot `
         -RunId $FasterWhisperQualificationRunId `
-        -CommitSha $FasterWhisperQualificationCommitSha.ToLowerInvariant()
+        -CommitSha $FasterWhisperQualificationCommitSha.ToLowerInvariant() `
+        -ExpectedRuntimeContractSha256 $currentRuntimeContract.runtime_contract_sha256
 } elseif (
     -not [string]::IsNullOrWhiteSpace($FasterWhisperQualificationRunId) -or
-    -not [string]::IsNullOrWhiteSpace($FasterWhisperQualificationCommitSha)
+    -not [string]::IsNullOrWhiteSpace($FasterWhisperQualificationCommitSha) -or
+    -not [string]::IsNullOrWhiteSpace($FasterWhisperRuntimeContractSha256)
 ) {
     throw "faster-whisper qualification identity is accepted only when enabled"
 }

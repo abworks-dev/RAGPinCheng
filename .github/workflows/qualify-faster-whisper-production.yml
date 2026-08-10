@@ -242,7 +242,7 @@ jobs:
             $parent = Split-Path -Parent $params.SummaryPath
             New-Item -ItemType Directory -Path $parent -Force | Out-Null
             [ordered]@{
-              schema_version = "faster-whisper-r3-verdict/2"
+              schema_version = "faster-whisper-r3-verdict/3"
               status = "fail"
               failure_code = $Code
               commit_sha = "${{ inputs.commit_sha }}".ToLowerInvariant()
@@ -255,12 +255,13 @@ jobs:
               wheel_cache_status = "unknown"
               wheel_cache_key = ""
               diagnostic_available = $false
+              runtime_contract = $null
               profile_admission = "disabled"
               production_services_modified = $false
             } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $params.SummaryPath -Encoding UTF8
             $diagnosticPath = $params.QualificationDiagnosticPath
             [ordered]@{
-              schema_version = "faster-whisper-r3-diagnostic/2"
+              schema_version = "faster-whisper-r3-diagnostic/3"
               status = "fail"
               failure_code = $Code
               failure_stage = "workflow_wrapper"
@@ -280,6 +281,7 @@ jobs:
               info = @{}
               gates = @{}
               samples = @()
+              runtime_contract = $null
               profile_admission = "disabled"
               production_services_modified = $false
             } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $diagnosticPath -Encoding UTF8
