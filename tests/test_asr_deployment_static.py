@@ -594,6 +594,8 @@ def test_faster_whisper_qualification_workflow_is_manual_immutable_and_gated():
     assert "InternalWheelBundlePath" in workflow
     assert "DependencyDiagnosticPath" in workflow
     assert workflow.count("dependency-diagnostic.json") == 4
+    assert "LicenseMatrixPath" in workflow
+    assert workflow.count("license-matrix.json") == 3
     assert "Dependency stage:" in workflow
     assert "Dependency operation:" in workflow
     assert "Failure origin:" in workflow
@@ -1142,6 +1144,8 @@ def test_faster_whisper_qualification_freezes_dependencies_model_and_gates():
     assert "--no-index" in script
     assert "pip\", \"check" in script
     assert "license-matrix.json" in script
+    assert '$DependencyFailureStage -eq "license_audit"' in script
+    assert "Copy-Item -LiteralPath $localLicenseMatrixPath" in script
     assert "qualification-module-origins.txt" in script
     assert "module escaped qualification venv" in script
     for module in ("dotenv", "fastapi", "httpx", "pydantic", "uvicorn"):
