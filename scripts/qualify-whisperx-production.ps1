@@ -12,16 +12,20 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "windows-wheel-cache.ps1")
 
-$ProgramRoot = $env:PRODUCTION_WHISPERX_QUALIFICATION_ROOT
+$WhisperXRoot = $env:PRODUCTION_WHISPERX_ROOT
+if ([string]::IsNullOrWhiteSpace($WhisperXRoot)) {
+    throw "PRODUCTION_WHISPERX_ROOT is required"
+}
+$ProgramRoot = Join-Path $WhisperXRoot "qualification"
 $RunRoot = Join-Path $ProgramRoot "runs\$RunId"
 $VenvRoot = Join-Path $RunRoot "venv"
 $VenvPython = Join-Path $VenvRoot "Scripts\python.exe"
 $Wheelhouse = Join-Path $RunRoot "wheelhouse"
 $SharedWheelSeed = Join-Path $RunRoot "shared-wheel-seed"
-$SharedWheelCacheRoot = $env:PRODUCTION_WHISPERX_WHEEL_CACHE_ROOT
+$SharedWheelCacheRoot = Join-Path $WhisperXRoot "wheel-cache"
 $ReportRoot = Join-Path $RunRoot "reports"
-$ModelRoot = $env:PRODUCTION_WHISPERX_MODEL_ROOT
-$NltkRoot = $env:PRODUCTION_WHISPERX_NLTK_ROOT
+$ModelRoot = Join-Path $WhisperXRoot "models"
+$NltkRoot = Join-Path $WhisperXRoot "nltk"
 $ManifestPath = ""
 $ManifestRoot = ""
 $ManifestSource = ""

@@ -345,9 +345,14 @@ def test_workflow_and_runner_are_manual_isolated_and_disabled():
     ):
         assert forbidden not in lowered
     assert "${{ runner.temp }}\\whisperx-qualification-" not in workflow
-    assert "PRODUCTION_WHISPERX_REPORT_ROOT" in workflow
+    assert "PRODUCTION_WHISPERX_ROOT" in workflow
+    assert "PRODUCTION_WHISPERX_MODEL_ROOT" not in workflow
+    assert "PRODUCTION_WHISPERX_NLTK_ROOT" not in workflow
+    assert "PRODUCTION_WHISPERX_QUALIFICATION_ROOT" not in workflow
+    assert "PRODUCTION_WHISPERX_WHEEL_CACHE_ROOT" not in workflow
+    assert "PRODUCTION_WHISPERX_REPORT_ROOT" not in workflow
     assert (
-        'Join-Path $env:PRODUCTION_WHISPERX_REPORT_ROOT "runs\\${{ github.run_id }}\\reports\\verdict.json"'
+        'Join-Path $env:PRODUCTION_WHISPERX_ROOT "reports\\runs\\${{ github.run_id }}\\reports\\verdict.json"'
     ) in workflow
     assert "execute_diagnostic must be explicitly enabled" in diagnostic_workflow
     assert "environment: production-asr" in diagnostic_workflow
@@ -355,6 +360,8 @@ def test_workflow_and_runner_are_manual_isolated_and_disabled():
     assert "PRODUCTION_ASR_QUALIFICATION_ROOT" in diagnostic_workflow
     assert "PRODUCTION_ASR_QUALIFICATION_MANIFEST_PATH" in diagnostic_workflow
     assert "PRODUCTION_QWEN3_ASR_MANIFEST_PATH" not in diagnostic_workflow
+    assert "PRODUCTION_WHISPERX_ROOT" in diagnostic_workflow
+    assert "PRODUCTION_WHISPERX_MODEL_ROOT" not in diagnostic_workflow
     assert "-DiagnosticMode" in diagnostic_workflow
     assert "contains_transcript_text" in diagnostic_workflow
     assert "failure-diagnostic.json" in diagnostic_workflow

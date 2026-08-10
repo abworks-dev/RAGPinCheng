@@ -11,6 +11,14 @@ from pathlib import Path
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 PROFILE_CATALOG_PATH = REPOSITORY_ROOT / "src" / "transcription" / "profile_catalog.py"
+WHISPERX_ROOT_ENV = "PRODUCTION_WHISPERX_ROOT"
+WHISPERX_ROOT_CHILDREN = (
+    "models",
+    "nltk",
+    "qualification",
+    "wheel-cache",
+    "reports",
+)
 if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
@@ -40,6 +48,21 @@ def _directory_from_environment(name: str) -> Path:
     if not path.is_dir() or path.is_symlink():
         raise ValueError(f"{name.lower()}_invalid")
     return path
+
+
+def _whisperx_directories() -> tuple[Path, Path, Path, Path, Path]:
+    root = _directory_from_environment(WHISPERX_ROOT_ENV)
+    directories: list[Path] = []
+    for child in WHISPERX_ROOT_CHILDREN:
+        candidate = root / child
+        try:
+            path = candidate.resolve(strict=True)
+        except (OSError, RuntimeError) as exc:
+            raise ValueError(f"production_whisperx_{child.replace('-', '_')}_missing") from exc
+        if path.parent != root or not path.is_dir() or path.is_symlink():
+            raise ValueError(f"production_whisperx_{child.replace('-', '_')}_invalid")
+        directories.append(path)
+    return tuple(directories)  # type: ignore[return-value]
 
 
 def _profile_admission() -> str:
@@ -162,13 +185,7 @@ def run_preflight() -> dict[str, object]:
         report_root,
     ) = _run_stage(
         "directories",
-        lambda: (
-            _directory_from_environment("PRODUCTION_WHISPERX_MODEL_ROOT"),
-            _directory_from_environment("PRODUCTION_WHISPERX_NLTK_ROOT"),
-            _directory_from_environment("PRODUCTION_WHISPERX_QUALIFICATION_ROOT"),
-            _directory_from_environment("PRODUCTION_WHISPERX_WHEEL_CACHE_ROOT"),
-            _directory_from_environment("PRODUCTION_WHISPERX_REPORT_ROOT"),
-        ),
+        _whisperx_directories,
     )
     asr_cache, align_cache = _run_stage(
         "model-cache",

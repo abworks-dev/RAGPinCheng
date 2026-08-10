@@ -73,6 +73,17 @@ def test_profile_admission_is_verified_without_importing_transcription_package(
     assert preflight._profile_admission() == "disabled"
 
 
+def test_whisperx_root_derives_all_isolated_directories(tmp_path, monkeypatch):
+    root = tmp_path / "whisperx"
+    root.mkdir()
+    expected = tuple(root / child for child in preflight.WHISPERX_ROOT_CHILDREN)
+    for path in expected:
+        path.mkdir()
+    monkeypatch.setenv(preflight.WHISPERX_ROOT_ENV, str(root))
+
+    assert preflight._whisperx_directories() == expected
+
+
 def test_successful_result_is_written_as_ascii_json(tmp_path, monkeypatch):
     report = tmp_path / "preflight.json"
     monkeypatch.setattr(

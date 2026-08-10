@@ -121,11 +121,7 @@ jobs:
       PRODUCTION_PYTHON311_PATH: ${{ vars.PRODUCTION_PYTHON311_PATH }}
       PRODUCTION_ASR_QUALIFICATION_ROOT: ${{ vars.PRODUCTION_ASR_QUALIFICATION_ROOT }}
       PRODUCTION_ASR_QUALIFICATION_MANIFEST_PATH: ${{ vars.PRODUCTION_ASR_QUALIFICATION_MANIFEST_PATH }}
-      PRODUCTION_WHISPERX_MODEL_ROOT: ${{ vars.PRODUCTION_WHISPERX_MODEL_ROOT }}
-      PRODUCTION_WHISPERX_NLTK_ROOT: ${{ vars.PRODUCTION_WHISPERX_NLTK_ROOT }}
-      PRODUCTION_WHISPERX_QUALIFICATION_ROOT: ${{ vars.PRODUCTION_WHISPERX_QUALIFICATION_ROOT }}
-      PRODUCTION_WHISPERX_WHEEL_CACHE_ROOT: ${{ vars.PRODUCTION_WHISPERX_WHEEL_CACHE_ROOT }}
-      PRODUCTION_WHISPERX_REPORT_ROOT: ${{ vars.PRODUCTION_WHISPERX_REPORT_ROOT }}
+      PRODUCTION_WHISPERX_ROOT: ${{ vars.PRODUCTION_WHISPERX_ROOT }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -164,11 +160,7 @@ jobs:
       PRODUCTION_NO_PROXY: ${{ vars.PRODUCTION_NO_PROXY }}
       PRODUCTION_ASR_QUALIFICATION_ROOT: ${{ vars.PRODUCTION_ASR_QUALIFICATION_ROOT }}
       PRODUCTION_ASR_QUALIFICATION_MANIFEST_PATH: ${{ vars.PRODUCTION_ASR_QUALIFICATION_MANIFEST_PATH }}
-      PRODUCTION_WHISPERX_MODEL_ROOT: ${{ vars.PRODUCTION_WHISPERX_MODEL_ROOT }}
-      PRODUCTION_WHISPERX_NLTK_ROOT: ${{ vars.PRODUCTION_WHISPERX_NLTK_ROOT }}
-      PRODUCTION_WHISPERX_QUALIFICATION_ROOT: ${{ vars.PRODUCTION_WHISPERX_QUALIFICATION_ROOT }}
-      PRODUCTION_WHISPERX_WHEEL_CACHE_ROOT: ${{ vars.PRODUCTION_WHISPERX_WHEEL_CACHE_ROOT }}
-      PRODUCTION_WHISPERX_REPORT_ROOT: ${{ vars.PRODUCTION_WHISPERX_REPORT_ROOT }}
+      PRODUCTION_WHISPERX_ROOT: ${{ vars.PRODUCTION_WHISPERX_ROOT }}
       GPU_SERVICE_URL: ${{ vars.GPU_SERVICE_URL }}
       GPU_SERVICE_ACTIVITY_URL: ${{ vars.GPU_SERVICE_ACTIVITY_URL }}
     steps:
@@ -227,14 +219,14 @@ jobs:
             -SourceRoot "${{ github.workspace }}" `
             -RunId "${{ github.run_id }}" `
             -ExecuteQualification $true `
-            -SummaryPath (Join-Path $env:PRODUCTION_WHISPERX_REPORT_ROOT "runs\${{ github.run_id }}\reports\verdict.json")
+            -SummaryPath (Join-Path $env:PRODUCTION_WHISPERX_ROOT "reports\runs\${{ github.run_id }}\reports\verdict.json")
 
       - name: Publish sanitized qualification summary
         if: ${{ always() }}
         shell: powershell
         run: |
-          if (-not [string]::IsNullOrWhiteSpace($env:PRODUCTION_WHISPERX_REPORT_ROOT)) {
-            $path = Join-Path $env:PRODUCTION_WHISPERX_REPORT_ROOT "runs\${{ github.run_id }}\reports\verdict.json"
+          if (-not [string]::IsNullOrWhiteSpace($env:PRODUCTION_WHISPERX_ROOT)) {
+            $path = Join-Path $env:PRODUCTION_WHISPERX_ROOT "reports\runs\${{ github.run_id }}\reports\verdict.json"
           } else {
             $path = $null
           }
@@ -260,10 +252,10 @@ jobs:
           }
 
       - name: Upload sanitized verdict
-        if: ${{ always() && env.PRODUCTION_WHISPERX_REPORT_ROOT != '' }}
+        if: ${{ always() && env.PRODUCTION_WHISPERX_ROOT != '' }}
         uses: actions/upload-artifact@v4
         with:
           name: whisperx-qualification-verdict-${{ github.run_id }}
-          path: ${{ vars.PRODUCTION_WHISPERX_REPORT_ROOT }}\runs\${{ github.run_id }}\reports
+          path: ${{ vars.PRODUCTION_WHISPERX_ROOT }}\reports\runs\${{ github.run_id }}\reports
           if-no-files-found: warn
           retention-days: 14
