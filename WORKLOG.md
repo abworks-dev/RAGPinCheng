@@ -2901,3 +2901,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 完成：从可复用生产清理 workflow 中移除重复的夜间 dry-run 和磁盘压力 jobs，并补充静态测试断言，确保定时触发逻辑只由 operations workflow 持有。
 - 文件：`.github/workflows/cleanup-production.yml`、`tests/test_production_cleanup_triggers_static.py`、`WORKLOG.md`
 - 验证：专项 pytest 未执行（隔离工作树的 Python 环境未安装 pytest）；等价 Python 静态断言通过，三个相关 workflow YAML 解析通过，`git diff --check` 通过；未连接生产主机、未触发 GitHub Actions。
+
+### 09:27 — 修复 faster-whisper 通过诊断空错误码
+
+- 完成：允许通过状态的资格诊断使用空 `failure_code`，同时要求非通过状态提供非空错误码，并补充对应的 pass/fail 契约回归断言。
+- 文件：`scripts/qualify-faster-whisper-production.ps1`、`tests/test_faster_whisper_qualification_diagnostic.py`、`WORKLOG.md`
+- 验证：PowerShell parser、诊断函数行为测试、Python `py_compile` 和 `git diff --check` 通过；专项 pytest 因当前环境未安装 pytest 未执行；PR #149 CI Run `31347291036` 7/7 通过；未触发生产 R3、未修改生产服务或 Profile admission。
+- 待办/风险：需合并 PR #149 后，针对新的完整 master SHA 单独批准并重跑 faster-whisper R3。

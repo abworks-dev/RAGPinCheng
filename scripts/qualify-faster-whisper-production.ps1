@@ -1404,11 +1404,18 @@ function Assert-QualificationDiagnosticProjection {
 function Write-QualificationDiagnostic {
     param(
         [Parameter(Mandatory = $true)][string]$Status,
-        [Parameter(Mandatory = $true)][string]$Code,
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Code,
         [Parameter(Mandatory = $true)][string]$Stage,
         [object]$Report = $null,
         [object]$RunnerExitCode = $null
     )
+    if ($Status -eq "pass") {
+        if (-not [string]::IsNullOrEmpty($Code)) {
+            throw "Pass qualification diagnostics must not carry a failure code"
+        }
+    } elseif ([string]::IsNullOrWhiteSpace($Code)) {
+        throw "Non-pass qualification diagnostics require a failure code"
+    }
     if ([string]::IsNullOrWhiteSpace($QualificationDiagnosticPath)) { return }
     $diagnostic = [ordered]@{
         schema_version = "faster-whisper-r3-diagnostic/2"
