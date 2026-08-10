@@ -2908,3 +2908,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`scripts/qualify-faster-whisper-production.ps1`、`tests/test_faster_whisper_qualification_diagnostic.py`、`WORKLOG.md`
 - 验证：PowerShell parser、诊断函数行为测试、Python `py_compile` 和 `git diff --check` 通过；专项 pytest 因当前环境未安装 pytest 未执行；PR #149 CI Run `31347291036` 7/7 通过；未触发生产 R3、未修改生产服务或 Profile admission。
 - 待办/风险：需合并 PR #149 后，针对新的完整 master SHA 单独批准并重跑 faster-whisper R3。
+
+### 10:18 — faster-whisper R3 资格通过
+
+- 完成：在批准的 master SHA `aee897570ff8bfc60cd8aff0914818711109a458` 上完成 Run `31348352599`；固定模型、隔离依赖、CUDA 推理和 8 个非敏感样本全部通过，正式 verdict 为 `pass`。
+- 文件：`WORKLOG.md`
+- 验证：Run `31348352599` job 全部通过；8/8 样本通过，三层 canonical/Markdown/parser turns 确定性一致，GPU 显存基线 `3721 MiB`、峰值 `6136 MiB`、利用率峰值 `100%`；wheel cache 命中；`production_services_modified=false`；Profile admission 仍为 disabled。
+- 待办/风险：R3 证据绑定 SHA `aee8975`；master 后续仅增加 Qwen TLS 提交，未触及 faster-whisper。生产 admission、依赖接入、模型路径和跨节点验收仍需另行 R3 方案与批准。
