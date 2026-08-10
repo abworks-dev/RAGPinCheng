@@ -5,6 +5,9 @@
 - 风险：R3。
 - 数据集身份：沿用 faster-whisper 已通过资格测试的
   `sample_set_id=self-made-faster-whisper-r3`，固定 8 个非敏感 WAV。
+- 共享语料已原子落地并设为只读，三引擎首次 neutral-only preflight 已核对一致；
+  qualification 代码和 workflow 现只接受中性变量，一次性 production materialization
+  workflow 已退役，离线 materializer 保留用于审计与代码回滚。
 - 本计划只统一 qualification 语料契约和定位方式。三个引擎的 venv、依赖、wheel
   cache、模型 cache/revision、运行目录、报告和 admission 结论继续隔离。
 - 不启用 Profile，不注册或控制服务，不修改数据库、Qdrant、防火墙或计划任务。
@@ -41,40 +44,35 @@ schema version 为 `asr-qualification-corpus/1`。根对象严格包含：
 占位值，不能直接作为生产 manifest；实际共享 manifest 应由现有已 PASS 的
 faster-whisper 八样本身份生成并冻结，不得在 qualification workflow 中重新生成。
 
-## 变量迁移
+## 变量契约
 
-| 引擎 | 中性配置 | 第一阶段 legacy 回退 |
-| --- | --- | --- |
-| faster-whisper | `PRODUCTION_ASR_QUALIFICATION_ROOT` + `PRODUCTION_ASR_QUALIFICATION_MANIFEST_PATH` | `PRODUCTION_FASTER_WHISPER_INPUT_ROOT\manifest.json` |
-| Qwen3-ASR | 同上 | `PRODUCTION_QWEN3_ASR_INPUT_ROOT\manifest.json` |
-| WhisperX | 同上 | `PRODUCTION_QWEN3_ASR_MANIFEST_PATH` |
+| 引擎 | qualification 语料配置 |
+| --- | --- |
+| faster-whisper | `PRODUCTION_ASR_QUALIFICATION_ROOT` + `PRODUCTION_ASR_QUALIFICATION_MANIFEST_PATH` |
+| Qwen3-ASR | 同上 |
+| WhisperX | 同上 |
 
-中性变量必须成对存在。只配置其中一个时，即使 legacy 可用也失败关闭。中性与 legacy
-同时存在时会完整校验两份 manifest，并要求原始 manifest SHA-256、`sample_set_id` 和
-`annotation_version` 全部相同；不一致时不选择任何一方。身份相同时选择中性配置并记录
-`manifest_source=neutral`，仅使用 legacy 时记录 `manifest_source=legacy`。
-
-中性路径只接受新 schema。legacy 路径在迁移期接受新 schema 或对应的旧 schema，便于
-先迁移变量再冻结旧回退。三引擎报告 schema version 不变，但都增加
+两个中性变量必须成对存在，缺少任一变量均失败关闭。qualification 环境解析不再读取
+`PRODUCTION_FASTER_WHISPER_INPUT_ROOT`、`PRODUCTION_QWEN3_ASR_INPUT_ROOT` 或
+`PRODUCTION_QWEN3_ASR_MANIFEST_PATH`；中性路径只接受新 schema。三引擎报告 schema
+version 不变，并继续保存
 `manifest_source`、`manifest_sha256` 和 `qualification_corpus` 身份投影；不会把引擎
 输出写入共享 manifest。
 
 ## 实施与验证顺序
 
-1. 合并共享 loader、三个 runner/wrapper、四个 workflow 和离线测试。
-2. 另行批准后，运行
-   `.github/workflows/materialize-asr-qualification-corpus-production.yml`，从已 PASS 的
-   faster-whisper root 逐字节复制 8 个 WAV，在固定共享 root 原子发布新 schema
-   manifest；旧目录与文件保持不变，共享文件发布后设置为只读。
-3. 在 `production-asr` 写入两个中性变量，并将三个 legacy 变量暂时对齐到同一共享
-   root/manifest；修改前在操作者的受限本地临时文件中保存旧值用于回滚，不输出路径。
-4. 逐个运行 workflow 的 `manifest_preflight=true`；该路径只 checkout 和运行机器
-   Python，不创建 venv、不运行 pip、不读取密钥、不加载模型、不执行推理。
-5. 人工核对三份脱敏 artifact 的 manifest SHA-256、`sample_set_id`、
+1. PR #165 合并共享 loader、三个 runner/wrapper、qualification workflow 和离线测试。
+2. PR #167 的一次性 workflow 从已 PASS 的 faster-whisper root 逐字节复制 8 个 WAV，
+   在固定共享 root 原子发布新 schema manifest；旧目录与文件保持不变，共享文件发布后
+   设置为只读。生产 materialization Run `31360797057` 完成后该 workflow 已退役。
+3. `production-asr` 写入两个中性变量，三引擎首次只读 preflight Run `31361349395`、
+   `31361423431`、`31361505382` 确认 manifest SHA-256、`sample_set_id`、
    `annotation_version`、sample count 及八项 WAV SHA-256 完全一致。
-6. 三个只读 preflight 均通过后，另开审批删除代码中的 legacy fallback；环境变量删除
-   也单独审批。
-7. 真实 GPU qualification 每个 workflow 单独列出完整 master SHA、样本准备状态与
+4. 删除 qualification 环境解析中的 legacy fallback、所有 production workflow 的三个
+   legacy 变量引用及 GitHub environment 中对应变量；合并后再次逐个运行 neutral-only
+   preflight。该路径只 checkout 和运行机器 Python，不创建 venv、不运行 pip、不读取
+   密钥、不加载模型、不执行推理。
+5. 真实 GPU qualification 每个 workflow 单独列出完整 master SHA、样本准备状态与
    预期副作用后重新审批；共享语料迁移通过不授权推理。
 
 ## 测试矩阵
@@ -85,15 +83,16 @@ faster-whisper 八样本身份生成并冻结，不得在 qualification workflow
 | 路径 | root 内相对 POSIX WAV | 绝对路径、穿越、反斜杠、symlink/reparse |
 | 文件身份 | 8 项大小、SHA、时长和 WAV 格式一致 | 任一大小、SHA、时长、采样率、声道或位宽不符 |
 | 场景 | 5 个正向场景各 1 项、3 个负样本 | 数量、顺序、场景分布或负样本期望项不符 |
-| 变量解析 | 中性独立工作；相同 legacy 可并存 | 中性变量不成对；新旧身份冲突 |
+| 变量解析 | 三引擎只读取成对中性变量 | 任一中性变量缺失；仅配置 legacy 变量 |
 | 引擎绑定 | 三 runner 得到同一 corpus identity | 报告未绑定 sample set/annotation/manifest SHA |
 | 只读性 | 校验前后共享目录快照不变 | validation 或 qualification 期间身份变化 |
 | workflow | preflight 只输出脱敏身份 | 输出路径/参考文本，或执行 pip、模型、服务操作 |
 
 ## 回滚
 
-- 代码：revert 合并提交，三个 workflow 恢复旧变量读取。
-- 环境：删除新增的两个中性变量并保留旧变量。
+- 代码：revert legacy fallback 移除提交，恢复三个 workflow 的旧变量读取；如需重新执行
+  一次性 materialization，必须另行 R3 审批后从历史提交恢复 workflow。
+- 环境：从受限本地回滚备份恢复三个旧变量；中性变量和共享语料保持不变，除非另行批准。
 - 数据：保留共享语料、旧样本、缓存、运行目录和历史报告，不做删除或重生成。
 - 任一步失败时保持所有 ASR Profile admission 原状态，不继续 GPU qualification，不修改
   样本、阈值或 manifest 以获取通过结果。

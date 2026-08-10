@@ -323,7 +323,7 @@ def test_workflow_and_runner_are_manual_isolated_and_disabled():
     assert "prepare-qwen3-asr-qualification-samples.ps1" not in workflow
     assert "PRODUCTION_ASR_QUALIFICATION_ROOT" in workflow
     assert "PRODUCTION_ASR_QUALIFICATION_MANIFEST_PATH" in workflow
-    assert "PRODUCTION_QWEN3_ASR_MANIFEST_PATH" in workflow
+    assert "PRODUCTION_QWEN3_ASR_MANIFEST_PATH" not in workflow
     assert "torch==2.8.0+cu128" in script
     assert "whisperx==3.8.6" in script
     assert "python-dotenv>=1.0.0" in script
@@ -350,7 +350,7 @@ def test_workflow_and_runner_are_manual_isolated_and_disabled():
     assert "prepare-qwen3-asr-qualification-samples.ps1" not in diagnostic_workflow
     assert "PRODUCTION_ASR_QUALIFICATION_ROOT" in diagnostic_workflow
     assert "PRODUCTION_ASR_QUALIFICATION_MANIFEST_PATH" in diagnostic_workflow
-    assert "PRODUCTION_QWEN3_ASR_MANIFEST_PATH" in diagnostic_workflow
+    assert "PRODUCTION_QWEN3_ASR_MANIFEST_PATH" not in diagnostic_workflow
     assert "-DiagnosticMode" in diagnostic_workflow
     assert "contains_transcript_text" in diagnostic_workflow
     assert "failure-diagnostic.json" in diagnostic_workflow

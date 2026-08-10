@@ -89,12 +89,13 @@ faster-whisper、Qwen3-ASR 和 WhisperX qualification 统一读取
 大小、SHA-256、时长、场景、参考标注、BIM 术语/标准编号和非敏感来源声明；严格拒绝
 未知字段、路径越界、symlink/reparse point 及 WAV 身份或格式变化。中性变量
 `PRODUCTION_ASR_QUALIFICATION_ROOT` 与
-`PRODUCTION_ASR_QUALIFICATION_MANIFEST_PATH` 必须成对配置；迁移期保留各引擎旧变量
-回退，新旧同时存在时必须具有相同 manifest SHA-256、sample set 和 annotation version，
-否则失败关闭。三引擎的运行环境、依赖、模型、缓存、报告和 admission 仍相互隔离。
-workflow 的 manifest preflight 与真实 qualification 互斥，前者不安装依赖、不加载模型、
-不读取密钥或执行推理，只输出脱敏语料身份；环境变量写入及 runner preflight 尚待单独
-R3 批准。
+`PRODUCTION_ASR_QUALIFICATION_MANIFEST_PATH` 必须成对配置；qualification 解析和
+workflow 只接受这两个中性变量，不再读取引擎专属语料变量。三引擎的运行环境、依赖、
+模型、缓存、报告和 admission 仍相互隔离。workflow 的 manifest preflight 与真实
+qualification 互斥，前者不安装依赖、不加载模型、不读取密钥或执行推理，只输出脱敏
+语料身份。首次三引擎中性 preflight Run `31361349395`、`31361423431` 和
+`31361505382` 已确认相同 manifest SHA-256、历史 sample set、annotation version、样本数
+及八项 WAV 身份；这不构成任一引擎的 GPU qualification 或 Profile admission。
 
 生产部署代码可在显式启用 faster-whisper 准备时绑定持久化 R3 verdict/diagnostic、
 资格 run ID、与部署完全相同的 commit SHA、固定 wheel cache 和模型 Manifest；它强制
@@ -177,7 +178,7 @@ SenseVoice；Ubuntu 应用侧 `ASR_ENABLED` 仍必须为 `false`。跨节点验�
   （WhisperX 固定非敏感样本、质量/资源/许可证门禁与手动隔离执行入口）
 - `scripts/asr_qualification_manifest.py`、
   `asr_service/asr-qualification-manifest.example.json`
-  （三引擎共享的只读八样本 manifest 解析、严格文件身份校验与变量迁移门禁）
+  （三引擎共享的只读八样本 manifest 解析、严格文件身份校验与中性变量门禁）
 - `frontend/src/components/citations.ts`
 - `frontend/src/components/SourcesPanel.tsx`（播放按钮）
 - `frontend/src/components/Message.tsx`（引用 click seek）
