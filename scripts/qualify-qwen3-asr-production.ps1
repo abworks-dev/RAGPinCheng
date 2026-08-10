@@ -1898,7 +1898,8 @@ print('qualification-module-origins-verified')
     $QualificationProcess = Start-Process `
         -FilePath $VenvPython `
         -ArgumentList @(
-            (Join-Path $ResolvedSource "scripts\run_qwen3_asr_qualification.py"),
+            "-m",
+            "scripts.run_qwen3_asr_qualification",
             "--manifest", $SampleManifest,
             "--base-url", $TempAsrUrl,
             "--report-dir", $ReportRoot,
@@ -2063,7 +2064,7 @@ print('qualification-module-origins-verified')
         Stop-OwnedProcess `
             -Process $QualificationProcess `
             -ExpectedExecutables @($VenvPython, $MachinePython) `
-            -ExpectedCommandFragment "run_qwen3_asr_qualification.py"
+            -ExpectedCommandFragment "scripts.run_qwen3_asr_qualification"
     } catch {
         $CleanupIssues += "qualification-runner-cleanup-failed"
     }

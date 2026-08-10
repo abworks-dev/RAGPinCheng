@@ -2964,3 +2964,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`scripts/extract_qwen3_asr_qualification_failure_evidence.py`、`.github/workflows/diagnose-qwen3-asr-qualification-failure-production.yml`、`.github/workflows/ci.yml`、`tests/test_qwen3_asr_qualification_failure_evidence.py`、`WORKLOG.md`
 - 验证：CI ASR contract 等价本地集合 `414 passed, 2 subtests passed`；新增与既有 Qwen 安全证据专项另有 `13 passed`；Python `py_compile` 通过。未读取或上传原始日志，未触发生产 workflow，未修改生产服务、模型、现有 venv 或 Profile admission。
 - 待办/风险：需 PR CI 通过并合入 master 后，绑定新的完整 master SHA 手动运行只读证据提取；再依据真实 runner 异常决定是否需要最小修复或新的契约审批。
+
+### 12:48 — 修复 Qwen 资格 runner 模块路径
+
+- 完成：只读 evidence run `31356345019` 确认旧 R3 run `31354658965` 在 `warmup-start` 后因 `ModuleNotFoundError: No module named 'src'` 退出；将 8 样本进程改为从仓库根目录通过 `python -m scripts.run_qwen3_asr_qualification` 启动，并同步 finally 阶段的进程归属匹配。manifest 校验和许可证审计保持原实现。
+- 文件：`scripts/qualify-qwen3-asr-production.ps1`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`
+- 验证：完整 CI ASR contract 等价本地集合 `414 passed, 2 subtests passed`；ASR 部署静态专项 `44 passed`；runner 模块入口冒烟、PowerShell AST 和 `git diff --check` 通过。证据显示旧 run 未生成 qualification summary 或 sample results，生产服务未修改，Profile admission 保持 disabled。
+- 待办/风险：需 PR CI 通过并合入 master 后，绑定新的完整 master SHA 重跑完整 Qwen R3；真实 CUDA、双模型与 8 样本质量门禁仍以该次运行结果为准。

@@ -1418,6 +1418,16 @@ def test_qwen3_asr_qualification_freezes_dual_models_bf16_and_result_flow():
     assert "$exitCode = $LASTEXITCODE" in script
     assert "-ArgumentList $argumentLine" not in script
     assert "-ArgumentList $Arguments" not in script
+    inference_invocation = script.split(
+        "$QualificationProcess = Start-Process", 1
+    )[1].split("$GpuEvidence", 1)[0]
+    assert '"-m"' in inference_invocation
+    assert '"scripts.run_qwen3_asr_qualification"' in inference_invocation
+    assert "run_qwen3_asr_qualification.py" not in inference_invocation
+    assert (
+        '-ExpectedCommandFragment "scripts.run_qwen3_asr_qualification"'
+        in script
+    )
 
 
 def test_qwen3_asr_resolver_evidence_is_fixed_offline_and_sanitized():
