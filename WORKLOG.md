@@ -3013,3 +3013,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`scripts/asr_qualification_manifest.py`、三个 qualification workflow、`.github/workflows/diagnose-whisperx-production.yml`、删除 `.github/workflows/materialize-asr-qualification-corpus-production.yml`、共享 manifest/WhisperX/部署静态测试、`project-docs/features/transcript-pipeline.md`、`project-docs/plans/shared-asr-qualification-corpus-migration.md`、`TODO.md`、`WORKLOG.md`。
 - 验证：完整 CI ASR contract 等价本地集合 `464 passed, 2 subtests passed`，仅有 2 条既有弃用警告；Python `py_compile`、22 个 workflow YAML 解析和 `git diff --check` 通过。测试确认仅 legacy 配置失败关闭、遗留环境键不能覆盖 neutral manifest、三个 production workflow 只暴露中性语料变量。
 - 待办/风险：GitHub environment 变量删除和合并后 neutral-only Windows preflight 属于本轮已批准的后续生产操作，以 GitHub environment/Actions 审计记录为准；本提交未运行 GPU qualification，未修改 Profile、服务、计划任务、防火墙、模型、缓存、旧样本或历史报告。
+
+### 15:33 — 精确分类 Qwen 许可证审计失败
+
+- 完成：使 Qwen 许可证审计在 distribution 枚举、身份读取和许可证元数据读取异常时仍生成结构化矩阵；失败输出固定 schema 的机器记录，PowerShell 脱敏诊断只接受规范化包名、原因码、审计阶段和异常类型，拒绝异常消息、路径、URL、许可证正文和未知字段。依赖诊断 schema 升为 `/4`，Profile admission 与许可证准入政策保持不变。
+- 文件：`scripts/run_qwen3_asr_qualification.py`、`scripts/qualify-qwen3-asr-production.ps1`、`.github/workflows/qualify-qwen3-asr-production.yml`、`asr_service/tests/test_qwen3_asr_qualification.py`、`tests/test_asr_deployment_static.py`、`project-docs/features/transcript-pipeline.md`、`WORKLOG.md`
+- 验证：完整 CI ASR contract 等价本地集合 `467 passed, 2 subtests passed`，仅有 2 条既有弃用警告；Qwen/部署专项 `82 passed`；现有项目 `.venv` 的真实许可证审计冒烟生成 `/2` 矩阵并以 `0` 个 blocker 通过；Python `py_compile`、PowerShell AST、workflow YAML 和 `git diff --check` 通过。临时矩阵已删除，未安装依赖、下载模型、启动服务或修改生产状态。
+- 待办/风险：需 PR CI 通过并合入 master 后，重新绑定完整 master SHA；许可证诊断修复不等于 Qwen R3 通过。共享语料的 production materialization、变量迁移和三引擎 neutral preflight 仍需独立 R3 流程。

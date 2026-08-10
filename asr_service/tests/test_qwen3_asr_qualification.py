@@ -393,11 +393,126 @@ def test_license_audit_blocks_gpl_and_unknown(monkeypatch):
             _Distribution("allowed", "1", "MIT"),
             _Distribution("forbidden", "2", "GPL-3.0-only"),
             _Distribution("unknown", "3", ""),
+            _Distribution("redacted", "4", "https://private.invalid/license"),
         ),
     )
     result = qualification.audit_installed_licenses()
     assert result["status"] == "fail"
+    assert result["schema_version"] == "qwen3-asr-license-audit/2"
     assert result["blocked_packages"] == ["forbidden", "unknown"]
+    assert result["failure_summary"] == {
+        "kind": "prohibited_license",
+        "package": "forbidden",
+        "audit_phase": "policy",
+        "exception_type": "",
+    }
+    redacted = next(item for item in result["packages"] if item["name"] == "redacted")
+    assert redacted["status"] == "allowed"
+    assert redacted["license"] == "DECLARED"
+    assert "private.invalid" not in json.dumps(result, sort_keys=True)
+
+
+class _BrokenLicenseMetadata:
+    def get(self, key, default=None):
+        if key == "Name":
+            return "broken_package"
+        if key == "License-Expression":
+            raise TypeError("private path C:\\sensitive and https://private.invalid")
+        return default
+
+
+@dataclass(frozen=True)
+class _BrokenLicenseDistribution:
+    version: str = "1.0"
+
+    @property
+    def metadata(self):
+        return _BrokenLicenseMetadata()
+
+
+def test_license_audit_contains_metadata_failure_without_private_detail(monkeypatch):
+    monkeypatch.setattr(
+        qualification.importlib.metadata,
+        "distributions",
+        lambda: (_BrokenLicenseDistribution(),),
+    )
+    result = qualification.audit_installed_licenses(include_license_files=True)
+    assert result["status"] == "fail"
+    assert result["blocked_packages"] == ["broken-package"]
+    assert result["failure_summary"] == {
+        "kind": "license_metadata_read_failure",
+        "package": "broken-package",
+        "audit_phase": "license_metadata",
+        "exception_type": "TypeError",
+    }
+    assert result["packages"] == [
+        {
+            "name": "broken-package",
+            "version": "1.0",
+            "license": "UNKNOWN",
+            "status": "audit_error",
+            "reason": "license_metadata_read_failure",
+            "audit_phase": "license_metadata",
+            "exception_type": "TypeError",
+        }
+    ]
+    encoded = json.dumps(result, sort_keys=True)
+    assert "sensitive" not in encoded
+    assert "private.invalid" not in encoded
+
+
+def test_license_audit_contains_distribution_enumeration_failure(monkeypatch):
+    def distributions():
+        yield _Distribution("allowed", "1", "MIT")
+        raise PermissionError("private iterator detail")
+
+    monkeypatch.setattr(
+        qualification.importlib.metadata,
+        "distributions",
+        distributions,
+    )
+    result = qualification.audit_installed_licenses()
+    assert result["status"] == "fail"
+    assert result["failure_summary"] == {
+        "kind": "distribution_enumeration_failure",
+        "package": "unknown",
+        "audit_phase": "distribution_enumeration",
+        "exception_type": "PermissionError",
+    }
+    assert "private iterator detail" not in json.dumps(result, sort_keys=True)
+
+
+def test_license_audit_cli_writes_report_before_failing(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(
+        qualification.importlib.metadata,
+        "distributions",
+        lambda: (_BrokenLicenseDistribution(),),
+    )
+    report = tmp_path / "license-matrix.json"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_qwen3_asr_qualification.py",
+            "--audit-licenses",
+            "--license-report",
+            str(report),
+        ],
+    )
+    assert qualification.main() == 1
+    written = json.loads(report.read_text(encoding="utf-8"))
+    assert written["schema_version"] == "qwen3-asr-license-audit/2"
+    output = json.loads(capsys.readouterr().out)
+    assert output == {
+        "audit_phase": "license_metadata",
+        "exception_type": "TypeError",
+        "kind": "license_metadata_read_failure",
+        "package": "broken-package",
+        "schema_version": "qwen3-asr-license-audit-failure/1",
+        "status": "fail",
+    }
 
 
 def test_reports_never_require_reference_or_hypothesis_text(tmp_path, monkeypatch):

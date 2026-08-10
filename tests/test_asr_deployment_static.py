@@ -1322,11 +1322,12 @@ def test_qwen3_asr_qualification_emits_sanitized_dependency_diagnosis():
     diagnostic_section = script.split(
         "function Get-NormalizedPackageName", 1
     )[1].split("function Write-SanitizedSummary", 1)[0]
+    assert "function Convert-ToSanitizedLicenseAuditFailure" in diagnostic_section
     assert "function Convert-ToSanitizedDependencyFailure" in diagnostic_section
     assert "function Assert-DependencySanitizerSelfTest" in diagnostic_section
     assert "function Get-DependencyFailureOrigin" in diagnostic_section
     assert "function Invoke-SanitizedResolverFallback" in diagnostic_section
-    assert 'schema_version = "qwen3-asr-r3-dependency-failure/3"' in diagnostic_section
+    assert 'schema_version = "qwen3-asr-r3-dependency-failure/4"' in diagnostic_section
     for kind in (
         "binary_distribution_unavailable",
         "version_constraint_conflict",
@@ -1340,6 +1341,11 @@ def test_qwen3_asr_qualification_emits_sanitized_dependency_diagnosis():
         "native_process_launch_failure",
         "resolver_replay_insufficient",
         "evidence_insufficient",
+        "distribution_enumeration_failure",
+        "distribution_identity_read_failure",
+        "license_metadata_read_failure",
+        "prohibited_license",
+        "unknown_license_metadata",
     ):
         assert kind in diagnostic_section
     for field in (
@@ -1352,6 +1358,8 @@ def test_qwen3_asr_qualification_emits_sanitized_dependency_diagnosis():
         "dependency_owner = [string]$diagnosis.Owner",
         "dependency_specifier = [string]$diagnosis.Specifier",
         "requested_constraint = [string]$diagnosis.RequestedConstraint",
+        "audit_phase = $auditPhase",
+        "exception_type = $exceptionType",
     ):
         assert field in diagnostic_section
     assert '"--dry-run"' in diagnostic_section
