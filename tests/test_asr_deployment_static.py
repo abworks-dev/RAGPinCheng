@@ -27,6 +27,19 @@ def test_faster_whisper_production_admission_is_bound_to_exact_r3_evidence():
     assert "Get-FileHash -LiteralPath $Path -Algorithm SHA256" in evidence
     assert '$verdict.wheel_cache_status -notin @("hit", "miss")' in evidence
     assert "$diagnostic.wheel_cache_status -ne $verdict.wheel_cache_status" in evidence
+    assert '"manifest_source"' in evidence
+    assert '"qualification_corpus"' in evidence
+    assert '$verdict.manifest_source -ne "neutral"' in evidence
+    assert (
+        "$verdict.qualification_corpus.manifest_sha256 -ne "
+        "$script:FasterWhisperQualificationManifestSha256"
+    ) in evidence
+    assert (
+        '"cb2cad81ec8d592a2fadcb4b35903cb563acee200aad13be2bde7687c59ca80b"'
+        in evidence
+    )
+    for field in ("annotation_version", "manifest_sha256", "sample_count", "duration_ms", "size_bytes"):
+        assert f'"{field}"' in evidence
     assert "ctranslate2.get_cuda_device_count() <= 0" in evidence
     assert '"float16" not in ctranslate2.get_supported_compute_types("cuda")' in evidence
     for sample_id in (

@@ -3034,3 +3034,12 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`scripts/run_whisperx_runtime_preflight.py`、`asr_service/tests/test_whisperx_runtime_preflight.py`、`WORKLOG.md`
 - 验证：独立 worktree 运行 runtime-preflight 专项 `3 passed`；Python `compileall` 和 `git diff --check` 通过。系统 Python 3.11 缺少 `pytest`，测试复用现有项目 venv，未安装依赖。
 - 待办/风险：需 PR CI 通过并合入最新 master 后重跑同一只读 runtime preflight；仍不得写入或猜测 GitHub production-asr 环境变量。真实 GPU qualification 仅在 preflight 通过后运行。
+
+## 2026-08-11
+
+### 00:22 — 同步 faster-whisper 生产准入共享语料证据
+
+- 完成：修复 faster-whisper R3 verdict 增加 `manifest_source` 与 `qualification_corpus` 后被生产准入旧字段白名单拒绝的问题。生产解析器现在严格要求 neutral 来源、固定共享 Manifest SHA、样本集身份、annotation version、8 个样本及每个样本的结构/哈希格式，不接受未知字段或仅放宽校验。
+- 文件：`scripts/faster-whisper-production-evidence.ps1`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`
+- 验证：部署静态专项 `47 passed`；PowerShell AST、Python `compileall` 与 `git diff --check` 通过。未触发 R3、依赖安装、模型加载、生产预置或服务激活。
+- 待办/风险：需 PR CI 通过并合入新的 master SHA 后，重新运行完整 faster-whisper R3；只有新的 R3 PASS 后才能重试保持 `activate_service=false` 的生产预置。

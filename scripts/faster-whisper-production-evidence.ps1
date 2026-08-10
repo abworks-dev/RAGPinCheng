@@ -4,6 +4,7 @@ $script:FasterWhisperModelId = "dropbox-dash/faster-whisper-large-v3-turbo"
 $script:FasterWhisperModelRevision = "0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf"
 $script:FasterWhisperSampleSetId = "self-made-faster-whisper-r3"
 $script:FasterWhisperAnnotationVersion = "1"
+$script:FasterWhisperQualificationManifestSha256 = "cb2cad81ec8d592a2fadcb4b35903cb563acee200aad13be2bde7687c59ca80b"
 $script:FasterWhisperSampleIds = @(
     "bim-terms",
     "clear-zh",
@@ -222,12 +223,14 @@ function Get-QualifiedFasterWhisperEvidence {
             "commit_sha",
             "diagnostic_available",
             "failure_code",
+            "manifest_source",
             "model_id",
             "model_revision",
             "peak_gpu_memory_mib",
             "peak_gpu_utilization_percent",
             "production_services_modified",
             "profile_admission",
+            "qualification_corpus",
             "run_id",
             "schema_version",
             "status",
@@ -250,6 +253,46 @@ function Get-QualifiedFasterWhisperEvidence {
         $verdict.production_services_modified -ne $false
     ) {
         throw "Qualified faster-whisper verdict did not pass the admission evidence contract"
+    }
+    Assert-FasterWhisperEvidenceProperties `
+        -Value $verdict.qualification_corpus `
+        -Expected @(
+            "annotation_version",
+            "manifest_sha256",
+            "sample_count",
+            "sample_set_id",
+            "samples"
+        ) `
+        -Label "Qualified faster-whisper corpus identity"
+    if (
+        $verdict.manifest_source -ne "neutral" -or
+        [string]$verdict.qualification_corpus.manifest_sha256 -ne $script:FasterWhisperQualificationManifestSha256 -or
+        [string]$verdict.qualification_corpus.sample_set_id -ne $script:FasterWhisperSampleSetId -or
+        [string]$verdict.qualification_corpus.annotation_version -ne $script:FasterWhisperAnnotationVersion -or
+        [int]$verdict.qualification_corpus.sample_count -ne $script:FasterWhisperSampleIds.Count
+    ) {
+        throw "Qualified faster-whisper corpus identity did not match the shared neutral corpus contract"
+    }
+    $corpusSamples = @($verdict.qualification_corpus.samples)
+    $actualCorpusSampleIds = @($corpusSamples | ForEach-Object { [string]$_.id } | Sort-Object)
+    if (
+        $corpusSamples.Count -ne $script:FasterWhisperSampleIds.Count -or
+        (Compare-Object -ReferenceObject $script:FasterWhisperSampleIds -DifferenceObject $actualCorpusSampleIds)
+    ) {
+        throw "Qualified faster-whisper corpus sample set mismatch"
+    }
+    foreach ($sample in $corpusSamples) {
+        Assert-FasterWhisperEvidenceProperties `
+            -Value $sample `
+            -Expected @("duration_ms", "id", "sha256", "size_bytes") `
+            -Label "Qualified faster-whisper corpus sample"
+        if (
+            [int]$sample.duration_ms -le 0 -or
+            [int64]$sample.size_bytes -le 0 -or
+            [string]$sample.sha256 -notmatch '^[0-9a-f]{64}$'
+        ) {
+            throw "Qualified faster-whisper corpus sample identity is invalid"
+        }
     }
     $diagnostic = Read-FasterWhisperEvidenceJson `
         -Path (Join-Path $reportRoot "qualification-diagnostic.json") `
