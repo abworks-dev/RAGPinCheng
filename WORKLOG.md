@@ -3043,3 +3043,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`scripts/faster-whisper-production-evidence.ps1`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`
 - 验证：部署静态专项 `47 passed`；PowerShell AST、Python `compileall` 与 `git diff --check` 通过。未触发 R3、依赖安装、模型加载、生产预置或服务激活。
 - 待办/风险：需 PR CI 通过并合入新的 master SHA 后，重新运行完整 faster-whisper R3；只有新的 R3 PASS 后才能重试保持 `activate_service=false` 的生产预置。
+
+### 00:27 — 精确分类 Qwen R3 preflight 失败
+
+- 完成：针对 Qwen R3 Run `31368668817` 只能报告 `preflight_failed` 的证据缺口，新增固定枚举的 `qwen3-asr-r3-preflight-failure/1` 脱敏诊断；区分 runner、Python、共享语料、内部 wheel、磁盘、端口、计划任务、防火墙、GPU/BGE、生产 ASR 契约、Profile、样本 Manifest 和 GPU 基线阶段。只有当前外部命令失败时才记录安全的 origin、退出码和捕获行数，不输出异常消息、日志路径、URL、环境值或原始内容；主 verdict schema、资格门禁和 Profile admission 均保持不变。
+- 文件：`scripts/qualify-qwen3-asr-production.ps1`、`.github/workflows/qualify-qwen3-asr-production.yml`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`
+- 验证：变基到 `origin/master@75daf92` 后，CI `test-asr-service-contract` 等价本地集合 `471 passed, 2 subtests passed`；部署静态专项 `48 passed`，PowerShell AST、workflow YAML 与 `git diff --check` 通过。未读取原始日志，未触发生产 R3，未安装依赖、下载模型、启动服务或修改生产状态。
+- 待办/风险：需 PR CI 通过并合入 master；之后仍须绑定新的完整 master SHA 才能另行执行 Qwen 完整 R3。诊断增强本身不构成资格通过。
