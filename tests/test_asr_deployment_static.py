@@ -1264,6 +1264,9 @@ def test_qwen3_asr_qualification_freezes_dual_models_bf16_and_result_flow():
     assert "sys.path.insert(0, str(REPOSITORY_ROOT))" in model
     assert 'os.environ["HF_HUB_DISABLE_XET"] = "1"' in model
     assert "configure_http_backend(backend_factory=_hugging_face_backend)" in model
+    assert 'kwargs.setdefault("max_workers", 1)' in model
+    assert "MODEL_DOWNLOAD_ATTEMPTS = 3" in model
+    assert "except requests.exceptions.SSLError" in model
     assert "context.maximum_version = ssl.TLSVersion.TLSv1_2" in model
     assert "context.verify_mode" not in model
     assert "HF_HUB_DISABLE_SSL_VERIFY" not in model
