@@ -2999,3 +2999,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`asr_service/app.py`、`asr_service/config.py`、`asr_service/engines/qwen3_asr.py`、`scripts/run_qwen3_asr_qualification.py`、`scripts/summarize_qwen3_asr_performance.py`、`scripts/qualify-qwen3-asr-production.ps1`、`.github/workflows/ci.yml`、`.github/workflows/qualify-qwen3-asr-production.yml`、相关测试、`project-docs/features/transcript-pipeline.md`、`WORKLOG.md`
 - 验证：变基到共享语料契约后的完整 CI ASR contract 等价本地集合 `458 passed, 2 subtests passed`，仅有 2 条既有弃用警告；Python `py_compile`、PowerShell AST、两份 workflow YAML 解析和 `git diff --check` 通过。未安装依赖、下载模型、启动服务或修改生产状态。
 - 待办/风险：需 PR CI 通过并合入 master 后，绑定新的完整 master SHA 运行一次候选 R3；真实 CUDA BF16、8 样本质量/性能、资源与清理门禁仍以该次结果为准，Profile admission 保持 disabled。
+
+### 14:01 — 增加共享 ASR 语料原子落地入口
+
+- 完成：在 Windows `production-asr` runner 上分别运行 faster-whisper Run `31359836047` 和 Qwen3-ASR Run `31359903196` 的只读 legacy manifest preflight，确认两套旧目录的 8 个 WAV 在 ID、SHA-256、大小和时长上完全一致，annotation version 均为 `1`；按已批准的 faster-whisper 历史 sample set 增加一次性 materialization 脚本与手动 R3 workflow。脚本只从已 PASS faster-whisper root 逐字节复制 WAV，在固定共享 root 原子发布新 schema；目标已存在时只接受完全一致的 corpus identity，不覆盖或删除旧目录，workflow 发布后将共享文件设为只读并核对计划任务与防火墙未变化。
+- 文件：`scripts/materialize_asr_qualification_corpus.py`、`.github/workflows/materialize-asr-qualification-corpus-production.yml`、`asr_service/tests/test_materialize_asr_qualification_corpus.py`、`tests/test_asr_deployment_static.py`、`project-docs/plans/shared-asr-qualification-corpus-migration.md`、`WORKLOG.md`。
+- 验证：变基到 `origin/master@42f66e1` 后，完整 CI ASR contract 等价本地集合 `464 passed, 2 subtests passed`；Python `py_compile`、workflow YAML 解析和 `git diff --check` 通过。两个 legacy preflight 仅执行 manifest/WAV 读取，qualification、wheel build、依赖安装、模型加载和推理 jobs 均跳过；未修改 Profile、服务、计划任务或防火墙。
+- 待办/风险：materialization workflow 尚未合并或执行，GitHub 中性/legacy 变量尚未变更，三个中性 preflight 尚未运行。上述生产步骤继续按本次已批准 R3 范围在 PR CI 合并后执行；不运行真实 GPU qualification，不删除旧变量、目录、样本或历史报告。

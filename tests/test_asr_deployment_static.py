@@ -1237,6 +1237,44 @@ def test_shared_asr_manifest_preflights_are_read_only_and_sanitized():
             assert forbidden not in preflight
 
 
+def test_shared_asr_corpus_materialization_is_manual_fixed_and_isolated():
+    workflow = read(
+        ".github/workflows/materialize-asr-qualification-corpus-production.yml"
+    )
+    script = read("scripts/materialize_asr_qualification_corpus.py")
+    assert "workflow_dispatch:" in workflow
+    assert "default: false" in workflow
+    assert "execute_materialization must be explicitly enabled" in workflow
+    assert "commit_sha must equal the workflow dispatch revision" in workflow
+    assert "materialization must run from master" in workflow
+    assert "environment: production-asr" in workflow
+    assert "runs-on: [self-hosted, Windows, X64, asr-production]" in workflow
+    assert "PRODUCTION_FASTER_WHISPER_INPUT_ROOT" in workflow
+    assert "PRODUCTION_ASR_DATA_ROOT" in workflow
+    assert "self-made-faster-whisper-r3" in workflow
+    assert "Get-ScheduledTask" in workflow
+    assert "Get-NetFirewallRule" in workflow
+    assert "Files read-only: ``true``" in workflow
+    assert "reference_text" not in workflow
+    assert "--include-paths" not in workflow
+    for forbidden in (
+        "pip ",
+        "ASR_DEPENDENCY_PROXY",
+        "ASR_MODEL_DOWNLOAD_PROXY",
+        "GPU_SERVICE_TOKEN",
+        "Start-ScheduledTask",
+        "Stop-ScheduledTask",
+        "Register-ScheduledTask",
+        "New-NetFirewallRule",
+    ):
+        assert forbidden not in workflow
+    assert 'APPROVED_SAMPLE_SET_ID = "self-made-faster-whisper-r3"' in script
+    assert "shutil.copyfile" in script
+    assert "os.replace(staging, target)" in script
+    assert "shutil.rmtree" not in script
+    assert "source corpus changed during materialization" in script
+
+
 def test_whisperx_workflows_use_shared_manifest_without_sample_generation():
     qualification = read(".github/workflows/qualify-whisperx-production.yml")
     diagnostic = read(".github/workflows/diagnose-whisperx-production.yml")
