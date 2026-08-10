@@ -2906,5 +2906,5 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 
 - 完成：允许通过状态的资格诊断使用空 `failure_code`，同时要求非通过状态提供非空错误码，并补充对应的 pass/fail 契约回归断言。
 - 文件：`scripts/qualify-faster-whisper-production.ps1`、`tests/test_faster_whisper_qualification_diagnostic.py`、`WORKLOG.md`
-- 验证：PowerShell parser、诊断函数行为测试、Python `py_compile` 和 `git diff --check` 通过；专项 pytest 因当前环境未安装 pytest 未执行；未触发生产 R3、未修改生产服务或 Profile admission。
-- 待办/风险：需 PR CI 验证并合并后，针对新的完整 master SHA 单独批准并重跑 faster-whisper R3。
+- 验证：PowerShell parser、诊断函数行为测试、Python `py_compile` 和 `git diff --check` 通过；专项 pytest 因当前环境未安装 pytest 未执行；PR #149 CI Run `31347291036` 7/7 通过；未触发生产 R3、未修改生产服务或 Profile admission。
+- 待办/风险：需合并 PR #149 后，针对新的完整 master SHA 单独批准并重跑 faster-whisper R3。
