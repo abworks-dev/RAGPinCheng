@@ -235,7 +235,12 @@ if (Test-Path -LiteralPath $resolvedTargetRoot -PathType Container) {
     }
 }
 
-$candidateBytes = [int64](($candidates | Measure-Object -Property Bytes -Sum).Sum)
+$candidateBytes = if ($candidates.Count -eq 0) {
+    [int64]0
+}
+else {
+    [int64](($candidates | Measure-Object -Property Bytes -Sum).Sum)
+}
 if ($Apply -and $candidateBytes -gt $maxDeleteBytes) {
     throw "Compaction exceeds the safety cap of $MaxDeleteGB GB"
 }

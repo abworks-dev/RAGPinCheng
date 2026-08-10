@@ -167,6 +167,30 @@ def test_periodic_cleanup_discovers_real_run_layouts_without_targeting_evidence(
     assert all(path.exists() for path in (data_root, program_root, qwen_root))
 
 
+def test_periodic_cleanup_reports_zero_candidates_on_powershell_51(tmp_path: Path):
+    data_root = tmp_path / "data" / "RAGPinCheng-ASR"
+    program_root = tmp_path / "program" / "RAGPinCheng-ASR"
+    data_root.mkdir(parents=True)
+    program_root.mkdir(parents=True)
+    audit_path = tmp_path / "empty-cleanup.json"
+
+    result = _run(
+        CLEANUP_SCRIPT,
+        "-DataRoot",
+        str(data_root),
+        "-ProgramRoot",
+        str(program_root),
+        "-AuditPath",
+        str(audit_path),
+    )
+
+    assert result.returncode == 0, result.stderr
+    report = _read_json(audit_path)
+    assert report["mode"] == "dry-run"
+    assert report["candidate_count"] == 0
+    assert report["candidate_bytes"] == 0
+
+
 def test_cleanup_sources_use_explicit_roots_and_exclude_protected_storage():
     compact = COMPACT_SCRIPT.read_text(encoding="utf-8")
     cleanup = CLEANUP_SCRIPT.read_text(encoding="utf-8")
