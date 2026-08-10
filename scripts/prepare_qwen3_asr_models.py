@@ -51,6 +51,72 @@ SPECS = (
     ),
 )
 
+MODEL_FAILURE_KINDS = frozenset(
+    {
+        "existing_cache_invalid",
+        "staging_validation_failed",
+        "snapshot_download_failed",
+        "filesystem_or_permission_failure",
+        "disk_space_failure",
+        "evidence_insufficient",
+    }
+)
+
+
+def classify_model_preparation_failure(error: Exception) -> dict[str, object]:
+    message = str(error).lower()
+    model = "unknown"
+    if "aligner" in message:
+        model = "aligner"
+    elif "asr" in message:
+        model = "asr"
+
+    kind = "evidence_insufficient"
+    if "existing " in message and " cache is invalid" in message:
+        kind = "existing_cache_invalid"
+    elif any(
+        marker in message
+        for marker in (
+            "staged ",
+            "promoted ",
+            "model tree is empty",
+            "unsafe model path",
+            "symbolic link",
+            "downloader escaped fixed staging",
+        )
+    ):
+        kind = "staging_validation_failed"
+    elif isinstance(error, OSError) and getattr(error, "errno", None) == 28:
+        kind = "disk_space_failure"
+    elif isinstance(error, PermissionError) or any(
+        marker in message for marker in ("permission denied", "access is denied")
+    ):
+        kind = "filesystem_or_permission_failure"
+    elif any(
+        marker in message
+        for marker in (
+            "snapshot_download",
+            "huggingface",
+            "http error",
+            "client error",
+            "connection",
+            "proxy",
+            "timeout",
+            "timed out",
+            "ssl",
+        )
+    ):
+        kind = "snapshot_download_failed"
+
+    return {
+        "schema_version": "qwen3-asr-model-preparation-failure/1",
+        "status": "fail",
+        "stage": "model_preparation",
+        "kind": kind,
+        "model": model,
+        "exception_type": type(error).__name__,
+    }
+
 
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
@@ -213,7 +279,18 @@ def main() -> int:
     parser.add_argument("--staging-root", required=True, type=Path)
     parser.add_argument("--report-path", required=True, type=Path)
     args = parser.parse_args()
-    result = prepare_models(args.cache_root, args.staging_root)
+    try:
+        result = prepare_models(args.cache_root, args.staging_root)
+    except Exception as error:
+        print(
+            json.dumps(
+                classify_model_preparation_failure(error),
+                ensure_ascii=True,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+        )
+        return 1
     report_parent = _strict_root(args.report_path.parent, "report_parent", exists=True)
     report = (report_parent / args.report_path.name).resolve()
     if report.parent != report_parent:

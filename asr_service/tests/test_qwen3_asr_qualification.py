@@ -236,6 +236,36 @@ def test_model_preparation_refuses_invalid_existing_cache(tmp_path):
         )
 
 
+@pytest.mark.parametrize(
+    ("error", "kind", "model"),
+    (
+        (RuntimeError("existing asr cache is invalid"), "existing_cache_invalid", "asr"),
+        (
+            RuntimeError("staged aligner cache validation failed"),
+            "staging_validation_failed",
+            "aligner",
+        ),
+        (
+            RuntimeError("huggingface client error"),
+            "snapshot_download_failed",
+            "unknown",
+        ),
+        (PermissionError("private path"), "filesystem_or_permission_failure", "unknown"),
+        (OSError(28, "private path"), "disk_space_failure", "unknown"),
+        (ValueError("private value"), "evidence_insufficient", "unknown"),
+    ),
+)
+def test_model_preparation_failure_classification_is_stable_and_sanitized(
+    error, kind, model
+):
+    result = model_prep.classify_model_preparation_failure(error)
+    assert result["kind"] == kind
+    assert result["model"] == model
+    assert result["exception_type"] == type(error).__name__
+    assert result["kind"] in model_prep.MODEL_FAILURE_KINDS
+    assert "message" not in result
+
+
 def test_model_preparation_rejects_downloader_escape(tmp_path):
     outside = tmp_path / "outside"
     outside.mkdir()
