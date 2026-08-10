@@ -104,3 +104,16 @@ def test_torch_27_is_reused_only_by_compatible_consumers() -> None:
         assert 'Join-Path $DataRoot "wheel-cache"' in script
     assert "2.8.0+cu128" in whisperx
     assert "2.7.0+cu128" not in whisperx
+
+
+def test_whisperx_builds_the_fixed_antlr4_sdist_into_a_cached_wheel() -> None:
+    whisperx = (ROOT / "scripts" / "qualify-whisperx-production.ps1").read_text(
+        encoding="utf-8"
+    )
+    assert '"antlr4-python3-runtime==4.9.3"' in whisperx
+    assert '"setuptools==80.9.0"' in whisperx
+    assert '"wheel==0.45.1"' in whisperx
+    assert "--no-binary=antlr4-python3-runtime" in whisperx
+    assert "pip wheel --no-deps --no-build-isolation" in whisperx
+    assert "wheel_build_requirements = $wheelBuildRequirements" in whisperx
+    assert "source_distribution_requirements = @($antlr4RuntimeRequirement)" in whisperx

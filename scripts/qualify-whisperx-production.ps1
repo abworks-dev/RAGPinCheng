@@ -165,8 +165,29 @@ try {
         "httpx>=0.27.0",
         "python-dotenv>=1.0.0"
     )
+    # WhisperX's omegaconf dependency pins antlr4 4.9.x, which PyPI ships only
+    # as an sdist. Build its wheel before the all-wheel resolver runs.
+    $wheelBuildRequirements = @(
+        "setuptools==80.9.0",
+        "wheel==0.45.1"
+    )
+    $antlr4RuntimeRequirement = "antlr4-python3-runtime==4.9.3"
     Set-RunProxy $env:ASR_DEPENDENCY_PROXY
     try {
+        & $VenvPython -m pip download --only-binary=:all: --dest $Wheelhouse `
+            --index-url https://pypi.org/simple @wheelBuildRequirements
+        if ($LASTEXITCODE -ne 0) { throw "WhisperX wheel-build dependency download failed" }
+        & $VenvPython -m pip download --no-deps --no-binary=antlr4-python3-runtime `
+            --dest $Wheelhouse --index-url https://pypi.org/simple $antlr4RuntimeRequirement
+        if ($LASTEXITCODE -ne 0) { throw "WhisperX antlr4 source download failed" }
+        & $VenvPython -m pip install --no-index --find-links $Wheelhouse @wheelBuildRequirements
+        if ($LASTEXITCODE -ne 0) { throw "WhisperX wheel-build dependency install failed" }
+        $antlr4Source = @(Get-ChildItem -LiteralPath $Wheelhouse `
+            -Filter "antlr4-python3-runtime-4.9.3.tar.gz" -File)
+        if ($antlr4Source.Count -ne 1) { throw "WhisperX antlr4 source bundle is incomplete" }
+        & $VenvPython -m pip wheel --no-deps --no-build-isolation --wheel-dir $Wheelhouse `
+            $antlr4Source[0].FullName
+        if ($LASTEXITCODE -ne 0) { throw "WhisperX antlr4 wheel build failed" }
         & $VenvPython -m pip download --only-binary=:all: --dest $Wheelhouse `
             --index-url https://pypi.org/simple `
             --extra-index-url https://download.pytorch.org/whl/cu128 `
@@ -180,6 +201,8 @@ try {
         python = "3.11"
         platform = "windows-x64"
         requirements = $requirements
+        wheel_build_requirements = $wheelBuildRequirements
+        source_distribution_requirements = @($antlr4RuntimeRequirement)
     }
     $sharedKey = Get-SharedTextSha256 -Text ($sharedMaterial | ConvertTo-Json -Depth 8 -Compress)
     Publish-SharedWheelBlobs `
