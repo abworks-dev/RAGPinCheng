@@ -62,14 +62,19 @@ faster-whisper 八样本身份生成并冻结，不得在 qualification workflow
 ## 实施与验证顺序
 
 1. 合并共享 loader、三个 runner/wrapper、四个 workflow 和离线测试。
-2. 另行批准后，在 `production-asr` 写入两个中性变量，保留所有旧变量和旧目录。
-3. 逐个运行 workflow 的 `manifest_preflight=true`；该路径只 checkout 和运行机器
+2. 另行批准后，运行
+   `.github/workflows/materialize-asr-qualification-corpus-production.yml`，从已 PASS 的
+   faster-whisper root 逐字节复制 8 个 WAV，在固定共享 root 原子发布新 schema
+   manifest；旧目录与文件保持不变，共享文件发布后设置为只读。
+3. 在 `production-asr` 写入两个中性变量，并将三个 legacy 变量暂时对齐到同一共享
+   root/manifest；修改前在操作者的受限本地临时文件中保存旧值用于回滚，不输出路径。
+4. 逐个运行 workflow 的 `manifest_preflight=true`；该路径只 checkout 和运行机器
    Python，不创建 venv、不运行 pip、不读取密钥、不加载模型、不执行推理。
-4. 人工核对三份脱敏 artifact 的 manifest SHA-256、`sample_set_id`、
+5. 人工核对三份脱敏 artifact 的 manifest SHA-256、`sample_set_id`、
    `annotation_version`、sample count 及八项 WAV SHA-256 完全一致。
-5. 三个只读 preflight 均通过后，另开审批删除代码中的 legacy fallback；环境变量删除
+6. 三个只读 preflight 均通过后，另开审批删除代码中的 legacy fallback；环境变量删除
    也单独审批。
-6. 真实 GPU qualification 每个 workflow 单独列出完整 master SHA、样本准备状态与
+7. 真实 GPU qualification 每个 workflow 单独列出完整 master SHA、样本准备状态与
    预期副作用后重新审批；共享语料迁移通过不授权推理。
 
 ## 测试矩阵

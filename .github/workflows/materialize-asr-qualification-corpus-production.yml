@@ -1,0 +1,135 @@
+name: Materialize Shared ASR Qualification Corpus
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: "Full merged master SHA containing the approved corpus contract"
+        required: true
+        type: string
+      execute_materialization:
+        description: "Copy the approved faster-whisper WAV bytes into the immutable shared corpus root"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-asr-shared-corpus-materialization
+  cancel-in-progress: false
+
+jobs:
+  materialize:
+    environment: production-asr
+    runs-on: [self-hosted, Windows, X64, asr-production]
+    timeout-minutes: 10
+    env:
+      PRODUCTION_PYTHON311_PATH: ${{ vars.PRODUCTION_PYTHON311_PATH }}
+      PRODUCTION_ASR_DATA_ROOT: ${{ vars.PRODUCTION_ASR_DATA_ROOT }}
+      PRODUCTION_FASTER_WHISPER_INPUT_ROOT: ${{ vars.PRODUCTION_FASTER_WHISPER_INPUT_ROOT }}
+    steps:
+      - name: Validate immutable revision and explicit R3 gate
+        shell: powershell
+        run: |
+          if ("${{ inputs.commit_sha }}" -notmatch '^[0-9a-fA-F]{40}$') {
+            throw "commit_sha must be a full SHA"
+          }
+          if ("${{ inputs.commit_sha }}".ToLowerInvariant() -ne "${{ github.sha }}".ToLowerInvariant()) {
+            throw "commit_sha must equal the workflow dispatch revision"
+          }
+          if ("${{ github.ref }}" -ne "refs/heads/master") {
+            throw "materialization must run from master"
+          }
+          if (-not [Convert]::ToBoolean("${{ inputs.execute_materialization }}")) {
+            throw "execute_materialization must be explicitly enabled"
+          }
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 1
+
+      - name: Materialize and validate approved corpus
+        shell: powershell
+        run: |
+          function Get-StateHash {
+            param([ValidateSet("tasks", "firewall")][string]$Kind)
+            $text = if ($Kind -eq "tasks") {
+              Get-ScheduledTask | Sort-Object TaskPath, TaskName |
+                Select-Object TaskPath, TaskName, State | ConvertTo-Json -Compress
+            } else {
+              Get-NetFirewallRule | Sort-Object Name |
+                Select-Object Name, Enabled, Direction, Action | ConvertTo-Json -Compress
+            }
+            $bytes = [Text.Encoding]::UTF8.GetBytes([string]$text)
+            $sha = [Security.Cryptography.SHA256]::Create()
+            try {
+              return ([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace("-", "").ToLowerInvariant()
+            } finally {
+              $sha.Dispose()
+            }
+          }
+
+          $python = $env:PRODUCTION_PYTHON311_PATH
+          if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
+            throw "Machine-wide Python 3.11 is missing"
+          }
+          $sourceRoot = $env:PRODUCTION_FASTER_WHISPER_INPUT_ROOT
+          $sourceManifest = Join-Path $sourceRoot "manifest.json"
+          $targetRoot = Join-Path $env:PRODUCTION_ASR_DATA_ROOT `
+            "qualification\shared-corpus\self-made-faster-whisper-r3"
+          $beforeTasks = Get-StateHash tasks
+          $beforeFirewall = Get-StateHash firewall
+          $json = @(
+            & $python "${{ github.workspace }}\scripts\materialize_asr_qualification_corpus.py" `
+              --source-root $sourceRoot `
+              --source-manifest $sourceManifest `
+              --target-root $targetRoot `
+              --run-id "${{ github.run_id }}"
+          )
+          if ($LASTEXITCODE -ne 0 -or $json.Count -ne 1) {
+            throw "Shared corpus materialization failed"
+          }
+          $identity = ([string]$json[0]) | ConvertFrom-Json
+          if ($identity.status -notin @("materialized", "existing") -or $identity.sample_count -ne 8) {
+            throw "Shared corpus materialization returned an invalid identity"
+          }
+          Get-ChildItem -LiteralPath $targetRoot -File -Recurse | ForEach-Object {
+            $_.IsReadOnly = $true
+          }
+          if (@(Get-ChildItem -LiteralPath $targetRoot -File -Recurse | Where-Object { -not $_.IsReadOnly }).Count -ne 0) {
+            throw "Shared corpus files are not read-only"
+          }
+          if ($beforeTasks -cne (Get-StateHash tasks)) {
+            throw "Scheduled Tasks changed during corpus materialization"
+          }
+          if ($beforeFirewall -cne (Get-StateHash firewall)) {
+            throw "Firewall changed during corpus materialization"
+          }
+          [System.IO.File]::WriteAllText(
+            "${{ runner.temp }}\shared-asr-corpus-${{ github.run_id }}.json",
+            ([string]$json[0]) + "`n",
+            (New-Object System.Text.UTF8Encoding($false))
+          )
+          @(
+            "## Shared ASR corpus materialization",
+            "",
+            "- Status: ``$($identity.status)``",
+            "- Manifest SHA-256: ``$($identity.manifest_sha256)``",
+            "- Sample set: ``$($identity.sample_set_id)``",
+            "- Annotation version: ``$($identity.annotation_version)``",
+            "- Samples: ``$($identity.sample_count)``",
+            "- Files read-only: ``true``",
+            "- Scheduled Tasks modified: ``false``",
+            "- Firewall modified: ``false``"
+          ) -join "`n" | Out-File $env:GITHUB_STEP_SUMMARY -Append -Encoding UTF8
+
+      - name: Upload sanitized corpus identity
+        uses: actions/upload-artifact@v4
+        with:
+          name: shared-asr-corpus-${{ github.run_id }}
+          path: ${{ runner.temp }}\shared-asr-corpus-${{ github.run_id }}.json
+          if-no-files-found: error
+          retention-days: 14
