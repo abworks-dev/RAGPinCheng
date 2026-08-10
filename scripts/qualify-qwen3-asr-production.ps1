@@ -11,7 +11,8 @@ param(
     [bool]$ExecuteQualification = $false,
     [string]$SummaryPath = "",
     [string]$DependencyDiagnosticPath = "",
-    [string]$LicenseMatrixPath = ""
+    [string]$LicenseMatrixPath = "",
+    [string]$ModelPreparationDiagnosticPath = ""
 )
 
 Set-StrictMode -Version Latest
@@ -62,6 +63,7 @@ $MachinePython = ""
 $DependencyFailureStage = "not_started"
 $DependencyFailureOperation = "not_started"
 $DependencyFailureLog = ""
+$ModelPreparationLogPath = ""
 $LastExternalCommandResult = [pscustomobject]@{
     failure_origin = "not_started"
     exit_code = $null
@@ -914,6 +916,85 @@ function Convert-ToSanitizedDependencyFailure {
     }
 }
 
+function Convert-ToSanitizedModelPreparationFailure {
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [object[]]$Lines
+    )
+    $kind = "evidence_insufficient"
+    $model = "unknown"
+    $joined = (($Lines | ForEach-Object { ([string]$_).Trim() }) -join "`n")
+    if ($joined -match '(?i)\b(asr|aligner)\b') {
+        $model = $Matches[1].ToLowerInvariant()
+    }
+    if ($joined -match '(?i)existing (?:asr|aligner) cache is invalid') {
+        $kind = "existing_cache_invalid"
+    } elseif ($joined -match '(?i)(staged .* cache validation failed|promoted .* cache validation failed|model tree is empty|unsafe model path|symbolic link|downloader escaped fixed staging)') {
+        $kind = "staging_validation_failed"
+    } elseif ($joined -match '(?i)(no space left|not enough space|disk (?:is )?full)') {
+        $kind = "disk_space_failure"
+    } elseif ($joined -match '(?i)(permission denied|access is denied|winerror 5|errno 13)') {
+        $kind = "filesystem_or_permission_failure"
+    } elseif ($joined -match '(?i)(snapshot_download|huggingface|http (?:401|403|404|429|500|502|503|504)|connection (?:error|reset|refused)|proxy|timed? out|timeout|ssl)') {
+        $kind = "snapshot_download_failed"
+    }
+    return [pscustomobject]@{
+        schema_version = "qwen3-asr-model-preparation-failure/1"
+        status = "fail"
+        stage = "model_preparation"
+        kind = $kind
+        model = $model
+        captured_line_count = @($Lines).Count
+    }
+}
+
+function Write-SanitizedModelPreparationFailure {
+    param(
+        [Parameter(Mandatory = $true)][string]$LogPath
+    )
+    $lines = @()
+    if (-not [string]::IsNullOrWhiteSpace($LogPath) -and (Test-Path -LiteralPath $LogPath -PathType Leaf)) {
+        $lines = @(Get-Content -LiteralPath $LogPath -Encoding UTF8)
+    }
+    $diagnostic = Convert-ToSanitizedModelPreparationFailure -Lines $lines
+    $diagnostic | Add-Member -NotePropertyName failure_origin -NotePropertyValue ([string]$LastExternalCommandResult.failure_origin)
+    $diagnostic | Add-Member -NotePropertyName native_exit_code -NotePropertyValue $LastExternalCommandResult.exit_code
+    $diagnostic | Add-Member -NotePropertyName log_present -NotePropertyValue (-not [string]::IsNullOrWhiteSpace($LogPath) -and (Test-Path -LiteralPath $LogPath -PathType Leaf))
+    $diagnostic | Add-Member -NotePropertyName profile_admission -NotePropertyValue "disabled"
+    $diagnostic | Add-Member -NotePropertyName production_services_modified -NotePropertyValue $false
+    $localPath = Join-Path $EvidenceRoot "model-preparation-diagnostic.json"
+    Write-JsonFile -Path $localPath -Value $diagnostic
+    if (-not [string]::IsNullOrWhiteSpace($ModelPreparationDiagnosticPath)) {
+        $parent = Split-Path -Parent $ModelPreparationDiagnosticPath
+        if (-not [string]::IsNullOrWhiteSpace($parent)) {
+            [void](New-Item -ItemType Directory -Path $parent -Force)
+        }
+        Write-JsonFile -Path $ModelPreparationDiagnosticPath -Value $diagnostic
+    }
+}
+
+function Assert-ModelPreparationSanitizerSelfTest {
+    $invalid = Convert-ToSanitizedModelPreparationFailure -Lines @(
+        "RuntimeError: existing asr cache is invalid"
+    )
+    $download = Convert-ToSanitizedModelPreparationFailure -Lines @(
+        "huggingface_hub.utils.HfHubHTTPError: 403 Client Error"
+    )
+    $staging = Convert-ToSanitizedModelPreparationFailure -Lines @(
+        "RuntimeError: staged aligner cache validation failed"
+    )
+    if (
+        $invalid.kind -ne "existing_cache_invalid" -or
+        $invalid.model -ne "asr" -or
+        $download.kind -ne "snapshot_download_failed" -or
+        $staging.kind -ne "staging_validation_failed" -or
+        $staging.model -ne "aligner"
+    ) {
+        throw "Model preparation failure sanitizer self-test failed"
+    }
+}
+
 function Assert-DependencySanitizerSelfTest {
     $binary = Convert-ToSanitizedDependencyFailure -Stage "pip_download" -Lines @(
         "D:\private\python.exe : ERROR: Could not find a version that satisfies the requirement jieba",
@@ -1256,6 +1337,7 @@ if ($RunId -notmatch "^[0-9]{1,20}$") {
     throw "RunId must contain only 1 to 20 digits"
 }
 Assert-DependencySanitizerSelfTest
+Assert-ModelPreparationSanitizerSelfTest
 if (-not $ExecuteQualification) {
     throw "ExecuteQualification must be explicitly enabled"
 }
@@ -1623,17 +1705,27 @@ print('qualification-module-origins-verified')
     $DependencyFailureStage = "model_preparation"
     Write-Host "R3_STAGE stage=model_preparation status=start"
     $ModelStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+    $ModelPreparationLogPath = Join-Path $LogRoot "model-preparation.log"
     Set-ScopedProxy -Proxy $env:ASR_MODEL_DOWNLOAD_PROXY
     try {
-        Invoke-External `
-            -FilePath $VenvPython `
-            -Arguments @(
-                (Join-Path $ResolvedSource "scripts\prepare_qwen3_asr_models.py"),
-                "--cache-root", $ModelCacheRoot,
-                "--staging-root", (Join-Path $RunRoot "model-staging"),
-                "--report-path", (Join-Path $EvidenceRoot "model-preparation.json")
-            ) `
-            -LogPath (Join-Path $LogRoot "model-preparation.log")
+        try {
+            Invoke-External `
+                -FilePath $VenvPython `
+                -Arguments @(
+                    (Join-Path $ResolvedSource "scripts\prepare_qwen3_asr_models.py"),
+                    "--cache-root", $ModelCacheRoot,
+                    "--staging-root", (Join-Path $RunRoot "model-staging"),
+                    "--report-path", (Join-Path $EvidenceRoot "model-preparation.json")
+                ) `
+                -LogPath $ModelPreparationLogPath
+        } catch {
+            try {
+                Write-SanitizedModelPreparationFailure -LogPath $ModelPreparationLogPath
+            } catch {
+                Write-Warning "Unable to write sanitized model preparation diagnostic"
+            }
+            throw
+        }
     } finally {
         Clear-ScopedProxy
         Write-StageTiming -Stage "model_preparation" -Stopwatch $ModelStopwatch
@@ -1904,6 +1996,12 @@ print('qualification-module-origins-verified')
     Write-Host "Samples: 8/8"
     Write-Host "Profile admission: disabled"
 } catch {
+    if ($FailureCode -eq "model_preparation_failed") {
+        try {
+            Write-SanitizedModelPreparationFailure -LogPath $ModelPreparationLogPath
+        } catch {
+        }
+    }
     if ($FailureCode -eq "dependency_preparation_failed") {
         try {
             Write-SanitizedDependencyFailure `
