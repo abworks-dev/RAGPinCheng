@@ -8,6 +8,8 @@
 - `${PRODUCTION_BACKUP_DIRECTORY}`：旧 `gpu-service-backup-*` 部署备份。
 
 统一入口只负责目标选择、DryRun/Apply 模式、失败即停和汇总报告，不复制各清理器的路径安全与保留逻辑。
+workflow 在 runner 临时 workspace checkout 触发 revision，并只从该 checkout 调用清理脚本；
+不会执行生产机常驻 `PRODUCTION_REPO_PATH` 中可能滞后的脚本副本。
 
 ## 触发方式
 

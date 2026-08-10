@@ -27,6 +27,9 @@ def test_cleanup_workflow_has_safe_trigger_gates():
     assert "nightly-dryrun:" not in workflow
     assert "disk-pressure:" not in workflow
     assert "confirm_production_cleanup" in workflow
+    assert "actions/checkout@v4" in workflow
+    assert "${{ github.workspace }}" in workflow
+    assert "PRODUCTION_REPO_PATH" not in workflow
     assert "actions/upload-artifact@v4" in workflow
 
 
@@ -57,6 +60,9 @@ def test_cleanup_operations_owns_manual_and_scheduled_triggers():
     assert "*/30 * * * *" not in workflow
     assert "cleanup-production.yml" in workflow
     assert "PRODUCTION_AUTO_CLEANUP_ENABLED" in workflow
+    assert "actions/checkout@v4" in workflow
+    assert "${{ github.workspace }}" in workflow
+    assert "PRODUCTION_REPO_PATH" not in workflow
     assert "backup-apply" in workflow
     assert "actions/upload-artifact@v4" in workflow
 

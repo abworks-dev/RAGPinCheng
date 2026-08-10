@@ -34,7 +34,6 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  REPO_PATH: ${{ vars.PRODUCTION_REPO_PATH }}
   ASR_DATA_ROOT: ${{ vars.PRODUCTION_ASR_DATA_ROOT }}
   ASR_PROGRAM_ROOT: ${{ vars.PRODUCTION_ASR_PROGRAM_ROOT }}
   FASTER_WHISPER_QUALIFICATION_ROOT: ${{ vars.PRODUCTION_FASTER_WHISPER_QUALIFICATION_ROOT }}
@@ -57,12 +56,15 @@ jobs:
       INPUT_CONFIRM: ${{ inputs.confirm_production_cleanup }}
       INPUT_REASON: ${{ inputs.reason }}
     steps:
+      - name: Check out cleanup revision
+        uses: actions/checkout@v4
+
       - name: Verify cleanup checkout
         shell: powershell
         run: |
           Set-StrictMode -Version Latest
           $ErrorActionPreference = 'Stop'
-          $scriptPath = Join-Path $env:REPO_PATH 'scripts\cleanup-production.ps1'
+          $scriptPath = Join-Path "${{ github.workspace }}" 'scripts\cleanup-production.ps1'
           if (-not (Test-Path -LiteralPath $scriptPath -PathType Leaf)) {
             throw "Unified cleanup script is missing: $scriptPath"
           }
@@ -90,7 +92,7 @@ jobs:
             Confirm                         = $false
           }
           if ($apply) { $arguments.Apply = $true }
-          & (Join-Path $env:REPO_PATH 'scripts\cleanup-production.ps1') @arguments
+          & (Join-Path "${{ github.workspace }}" 'scripts\cleanup-production.ps1') @arguments
 
       - name: Upload cleanup report
         if: always()
