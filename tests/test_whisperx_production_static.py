@@ -31,8 +31,11 @@ def test_windows_runner_is_isolated_and_cannot_mutate_production_controls():
     script = read("scripts/smoke-whisperx-production.ps1")
     assert all(value < 128 for value in script.encode("utf-8"))
     lowered = script.lower()
-    assert "$env:PRODUCTION_WHISPERX_PROGRAM_ROOT" in script
-    assert "$env:PRODUCTION_WHISPERX_DATA_ROOT" in script
+    assert "$env:PRODUCTION_WHISPERX_ROOT" in script
+    assert "PRODUCTION_WHISPERX_PROGRAM_ROOT" not in script
+    assert "PRODUCTION_WHISPERX_DATA_ROOT" not in script
+    for child in ("models", "nltk", "qualification", "wheel-cache", "reports"):
+        assert child in script
     assert "torch==2.8.0+cu128" in script
     assert "torch.__version__ == '2.8.0+cu128'" in script
     assert "whisperx==3.8.6" in script
