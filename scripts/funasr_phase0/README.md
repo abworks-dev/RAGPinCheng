@@ -206,7 +206,8 @@ details. The production sandbox uses `C:\FunASR-Phase0\venv`
 ## Validation
 
 - Focused CPU-only unit, entry-point and PowerShell behavior tests are the
-  required validation set; the current result is recorded in `WORKLOG.md`.
+  required validation set; the current result is summarized below, with
+  detailed delivery evidence retained in Git/PR history.
 - 20/20 sandbox Python source/test files compiled in memory without writing
   bytecode.
 - 3/3 PowerShell files passed the Windows PowerShell 5.1 parser.
