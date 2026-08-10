@@ -73,7 +73,18 @@ def test_model_and_smoke_identity_are_pinned_and_use_existing_contracts():
     assert 'ASR_REVISION = "53ecf83a5bedc5597eb8c8b34eac29e5345520ff"' in runner
     assert 'ALIGN_MODEL_ID = "jonatasgrosman/wav2vec2-large-xlsr-53-chinese-zh-cn"' in runner
     assert 'ALIGN_REVISION = "51d27579a1040ee4e967979278d5f76b9c32c375"' in runner
-    assert runner.count("max_workers=1") == 2
+    assert 'kwargs.setdefault("max_workers", 1)' in runner
+    assert "max_workers=1" in runner
+    assert "MODEL_DOWNLOAD_ATTEMPTS = 3" in runner
+    assert "MODEL_DOWNLOAD_RETRY_SECONDS = 2" in runner
+    assert "context.maximum_version = ssl.TLSVersion.TLSv1_2" in runner
+    assert "Hugging Face download requires certificate verification" in runner
+    assert 'os.environ["HF_HUB_DISABLE_XET"] = "1"' in runner
+    assert "except requests.exceptions.SSLError:" in runner
+    assert "root / \".staging\" / uuid.uuid4().hex" in runner
+    assert "os.replace(staged_model, target)" in runner
+    assert "existing {label} model cache is invalid" in runner
+    assert '"whisperx-model-preparation-failure/1"' in runner
     assert "nltk.download" not in runner
     assert "save_punkt_params(PunktParameters()" in runner
     assert '"punkt_source": "generated-default-smoke-only"' in runner
@@ -92,6 +103,15 @@ def test_model_and_smoke_identity_are_pinned_and_use_existing_contracts():
         assert required in runner
     assert 'os.environ["HF_HUB_OFFLINE"] = "1"' in runner
     assert "DiarizationPipeline" not in runner
+
+
+def test_qualification_publishes_sanitized_model_preparation_evidence():
+    qualification = read("scripts/qualify-whisperx-production.ps1")
+    workflow = read(".github/workflows/qualify-whisperx-production.yml")
+    assert "model-preparation-diagnostic.json" in qualification
+    assert "--model-preparation-diagnostic $modelPreparationDiagnostic" in qualification
+    assert "model-preparation-diagnostic.json" in workflow
+    assert "Model preparation kind" in workflow
 
 
 def test_generated_smoke_punkt_is_loadable_without_network(tmp_path, monkeypatch):

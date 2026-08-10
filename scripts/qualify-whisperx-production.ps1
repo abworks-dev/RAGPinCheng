@@ -234,8 +234,10 @@ try {
     }
 
     Set-RunProxy $env:ASR_MODEL_DOWNLOAD_PROXY
+    $modelPreparationDiagnostic = Join-Path $ReportRoot "model-preparation-diagnostic.json"
     & $VenvPython "$resolvedSource\scripts\run_whisperx_cuda_smoke.py" `
-        --source-root $resolvedSource --model-root $ModelRoot --nltk-root $NltkRoot --prepare
+        --source-root $resolvedSource --model-root $ModelRoot --nltk-root $NltkRoot `
+        --model-preparation-diagnostic $modelPreparationDiagnostic --prepare
     if ($LASTEXITCODE -ne 0) { throw "pinned model preparation failed" }
     Clear-RunProxy
 
