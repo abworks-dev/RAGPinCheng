@@ -2888,3 +2888,9 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：全分支历史；`WORKLOG.md`
 - 验证：回滚 bundle `git bundle verify` 通过；改写镜像 `git fsck --full --strict` 通过；696 个提交的历史文件和提交消息扫描均为 0 命中；远端分支数量和名称与改写镜像一致；PowerShell parser 错误为 0，`git diff --check` 通过；目标 Actions 运行复查返回 `404 Not Found`，本次强推产生的 18 条 runs 删除失败数为 0；未触发生产部署、清理或 GPU qualification。
 - 待办/风险：GitHub 对旧提交的缓存、PR 引用和搜索索引可能需要一段时间清理；回滚 bundle 保留了改写前历史，必须继续私下保存，不得进入公开仓库。
+
+### 08:02 — 去除生产清理 workflow 重复任务
+
+- 完成：从可复用生产清理 workflow 中移除重复的夜间 dry-run 和磁盘压力 jobs，并补充静态测试断言，确保定时触发逻辑只由 operations workflow 持有。
+- 文件：`.github/workflows/cleanup-production.yml`、`tests/test_production_cleanup_triggers_static.py`、`WORKLOG.md`
+- 验证：专项 pytest 未执行（隔离工作树的 Python 环境未安装 pytest）；等价 Python 静态断言通过，三个相关 workflow YAML 解析通过，`git diff --check` 通过；未连接生产主机、未触发 GitHub Actions。
