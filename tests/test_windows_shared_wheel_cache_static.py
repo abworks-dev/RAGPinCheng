@@ -115,5 +115,6 @@ def test_whisperx_builds_the_fixed_antlr4_sdist_into_a_cached_wheel() -> None:
     assert '"wheel==0.45.1"' in whisperx
     assert "--no-binary=antlr4-python3-runtime" in whisperx
     assert "pip wheel --no-deps --no-build-isolation" in whisperx
+    assert "--find-links $Wheelhouse" in whisperx
     assert "wheel_build_requirements = $wheelBuildRequirements" in whisperx
     assert "source_distribution_requirements = @($antlr4RuntimeRequirement)" in whisperx

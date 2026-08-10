@@ -191,6 +191,7 @@ try {
         & $VenvPython -m pip download --only-binary=:all: --dest $Wheelhouse `
             --index-url https://pypi.org/simple `
             --extra-index-url https://download.pytorch.org/whl/cu128 `
+            --find-links $Wheelhouse `
             --find-links $SharedWheelSeed @requirements
         if ($LASTEXITCODE -ne 0) { throw "WhisperX dependency download failed" }
     } finally {
