@@ -212,8 +212,9 @@ SenseVoice；Ubuntu 应用侧 `ASR_ENABLED` 仍必须为 `false`。跨节点验�
 - faster-whisper R3：Run `31348352599` 在固定 master SHA 上通过依赖、模型、CUDA、
   8 个非敏感样本质量、资源与三层确定性门禁；GPU 显存基线 `3721 MiB`、峰值
   `6136 MiB`，利用率峰值 `100%`。`steady_state_rtf=3.119533` 按既定契约仅为信息项。
-  当前生产准入准备的本地扩展专项测试为 `157 passed`；仍需远端 CI、合并后同 SHA R3
-  重跑和独立生产 R3 审批，不能据此认定生产已启用。
+  当前生产准入准备的本地扩展专项测试为 `157 passed`，PR #154 首轮 CI 7/7
+  通过；仍需 scoped review、合并后同 SHA R3 重跑和独立生产 R3 审批，不能据此
+  认定生产已启用。
 - WhisperX R2/R3：已实现复用 remote Provider/Canonical 契约的 experimental Profile、
   lazy-load service adapter、ASR/中文对齐双模型 manifest 门禁及手动 Windows CUDA
   冒烟 workflow；另已实现复用既有 8 个自制中文样本和统一阈值的资格 workflow，
