@@ -28,6 +28,13 @@ $FailureCode = "qualification_not_started"
 $PeakGpuMemoryMiB = 0
 $SampleCount = 0
 $LicenseAuditStatus = "not-run"
+$SelectedCandidate = ""
+$Selection = [ordered]@{
+    full_candidate_passed = $false
+    standard_code_recall_improved = $false
+    noisy_bim_cer_improved = $false
+    negative_false_positives_zero = $false
+}
 
 function Write-Json {
     param([string]$Path, [object]$Value)
@@ -176,6 +183,13 @@ try {
         $PeakGpuMemoryMiB = [double]$report.peak_gpu_memory_mib
         $SampleCount = [int]$report.sample_count
         $Status = [string]$report.status
+        $SelectedCandidate = [string]$report.selected_candidate
+        $Selection = [ordered]@{
+            full_candidate_passed = [bool]$report.selection.full_candidate_passed
+            standard_code_recall_improved = [bool]$report.selection.standard_code_recall_improved
+            noisy_bim_cer_improved = [bool]$report.selection.noisy_bim_cer_improved
+            negative_false_positives_zero = [bool]$report.selection.negative_false_positives_zero
+        }
         $FailureCode = if ($Status -eq "pass") { "" } else { "quality_gate_failed" }
     } else {
         throw "qualification summary was not written"
@@ -206,6 +220,8 @@ try {
         asr_model_revision = "53ecf83a5bedc5597eb8c8b34eac29e5345520ff"
         align_model_revision = "51d27579a1040ee4e967979278d5f76b9c32c375"
         sample_count = $SampleCount
+        selected_candidate = $SelectedCandidate
+        selection = $Selection
         peak_gpu_memory_mib = $PeakGpuMemoryMiB
         license_audit_status = $LicenseAuditStatus
         profile_admission = "disabled"

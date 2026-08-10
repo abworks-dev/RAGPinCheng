@@ -103,6 +103,85 @@ def test_report_contains_no_reference_or_hypothesis_text(tmp_path, monkeypatch):
     assert "hypothesis" not in encoded
 
 
+def test_candidate_matrix_selects_only_improving_full_decode(monkeypatch):
+    reports = {
+        "baseline": {
+            "status": "fail",
+            "sample_count": 8,
+            "gates": {
+                "standard_code_recall": {"observed": 0.0},
+                "negative_false_positives": {"observed": 0},
+            },
+            "samples": [{"scenario": "noisy-bim-zh", "cer": 0.25}],
+        },
+        "hotwords": {
+            "status": "fail",
+            "sample_count": 8,
+            "gates": {
+                "standard_code_recall": {"observed": 0.5},
+                "negative_false_positives": {"observed": 0},
+            },
+            "samples": [{"scenario": "noisy-bim-zh", "cer": 0.2}],
+        },
+        "full-decode": {
+            "status": "pass",
+            "sample_count": 8,
+            "gates": {
+                "standard_code_recall": {"observed": 1.0},
+                "negative_false_positives": {"observed": 0},
+            },
+            "samples": [{"scenario": "noisy-bim-zh", "cer": 0.1}],
+        },
+    }
+
+    def run_qualification(_manifest, *, timeout_ms, service_config):
+        del timeout_ms
+        if not service_config.hotwords:
+            candidate = "baseline"
+        elif service_config.initial_prompt:
+            candidate = "full-decode"
+        else:
+            candidate = "hotwords"
+        return json.loads(json.dumps(reports[candidate]))
+
+    monkeypatch.setattr(qualification, "run_qualification", run_qualification)
+    result = qualification.run_candidate_matrix(object(), timeout_ms=1000)
+
+    assert result["status"] == "pass"
+    assert result["selected_candidate"] == "full-decode"
+    assert result["candidate_order"] == ["baseline", "hotwords", "full-decode"]
+    assert all(result["selection"].values())
+
+
+def test_candidate_matrix_rejects_non_improving_or_false_positive_full_decode(
+    monkeypatch,
+):
+    def run_qualification(_manifest, *, timeout_ms, service_config):
+        del timeout_ms
+        full = bool(service_config.initial_prompt)
+        return {
+            "status": "pass",
+            "sample_count": 8,
+            "gates": {
+                "standard_code_recall": {"observed": 1.0},
+                "negative_false_positives": {"observed": 1 if full else 0},
+            },
+            "samples": [{"scenario": "noisy-bim-zh", "cer": 0.1}],
+        }
+
+    monkeypatch.setattr(qualification, "run_qualification", run_qualification)
+    result = qualification.run_candidate_matrix(object(), timeout_ms=1000)
+
+    assert result["status"] == "fail"
+    assert result["selected_candidate"] is None
+    assert result["selection"] == {
+        "full_candidate_passed": True,
+        "standard_code_recall_improved": False,
+        "noisy_bim_cer_improved": False,
+        "negative_false_positives_zero": False,
+    }
+
+
 def test_diagnostic_evidence_is_text_free_and_classifies_model_miss(tmp_path):
     manifest = qualification.load_manifest(_manifest(tmp_path))
     sample = next(
@@ -266,3 +345,7 @@ def test_workflow_and_runner_are_manual_isolated_and_disabled():
     assert "DiagnosticMode" in script
     assert "$diagnosticComplete" in script
     assert 'status -eq "complete"' in script
+    assert "selected_candidate = $SelectedCandidate" in script
+    assert "standard_code_recall_improved = [bool]" in script
+    assert "noisy_bim_cer_improved = [bool]" in script
+    assert "- Selected candidate:" in workflow

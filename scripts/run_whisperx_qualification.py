@@ -21,6 +21,7 @@ from scripts.run_whisperx_cuda_smoke import (
 )
 
 REPORT_SCHEMA_VERSION = "whisperx-qualification-report/1"
+MATRIX_REPORT_SCHEMA_VERSION = "whisperx-decoding-matrix-report/1"
 WHISPERX_PROFILE_ID = "whisperx-large-v3-zh-align-experimental-v1"
 CLEAR_CER_LIMIT = shared.CLEAR_CER_LIMIT
 BIM_NOISE_CER_LIMIT = shared.BIM_NOISE_CER_LIMIT
@@ -34,6 +35,7 @@ QualificationSample = shared.QualificationSample
 SampleManifest = shared.SampleManifest
 character_error_rate = shared.character_error_rate
 _ENGINE = None
+_ACTIVE_SERVICE_CONFIG = None
 _DIAGNOSTIC_OBSERVATIONS: dict[str, list[dict[str, object]]] = {}
 _DIAGNOSTIC_SCENARIOS = {"noisy-bim-zh", "standard-codes"}
 
@@ -134,7 +136,6 @@ class _EngineProvider:
     def transcribe(self, input_ref, execution):
         from asr_service.engine_protocol import (
             PreparedAudioChunk,
-            WHISPERX_SERVICE_CONFIG,
         )
         from src.transcription.provider_protocol import (
             ProviderCandidate,
@@ -145,7 +146,7 @@ class _EngineProvider:
             raise RuntimeError("qualification execution provider mismatch")
         result = _ENGINE.transcribe_chunk(
             PreparedAudioChunk(0, 0, self._duration_ms, self._content),
-            WHISPERX_SERVICE_CONFIG,
+            _ACTIVE_SERVICE_CONFIG,
         )
         if type(result) is ProviderFailure:
             return result
@@ -377,10 +378,17 @@ def _run_once(
     return result, markdown, turns, elapsed
 
 
-def run_qualification(manifest: SampleManifest, *, timeout_ms: int):
+def run_qualification(
+    manifest: SampleManifest, *, timeout_ms: int, service_config=None
+):
+    from asr_service.engine_protocol import WHISPERX_SERVICE_CONFIG
+
+    global _ACTIVE_SERVICE_CONFIG
     previous_run_once = shared._run_once
     previous_profile = shared.QWEN3_ASR_PROFILE_ID
     previous_schema = shared.REPORT_SCHEMA_VERSION
+    previous_config = _ACTIVE_SERVICE_CONFIG
+    _ACTIVE_SERVICE_CONFIG = service_config or WHISPERX_SERVICE_CONFIG
     shared._run_once = _run_once
     shared.QWEN3_ASR_PROFILE_ID = WHISPERX_PROFILE_ID
     shared.REPORT_SCHEMA_VERSION = REPORT_SCHEMA_VERSION
@@ -395,6 +403,78 @@ def run_qualification(manifest: SampleManifest, *, timeout_ms: int):
         shared._run_once = previous_run_once
         shared.QWEN3_ASR_PROFILE_ID = previous_profile
         shared.REPORT_SCHEMA_VERSION = previous_schema
+        _ACTIVE_SERVICE_CONFIG = previous_config
+
+
+def _scenario_metric(
+    report: dict[str, object], scenario: str, metric: str
+) -> float:
+    rows = [item for item in report["samples"] if item["scenario"] == scenario]
+    if len(rows) != 1:
+        raise RuntimeError(f"expected one {scenario} qualification sample")
+    return float(rows[0][metric])
+
+
+def run_candidate_matrix(
+    manifest: SampleManifest, *, timeout_ms: int
+) -> dict[str, object]:
+    from asr_service.engine_protocol import (
+        WHISPERX_FULL_DECODE_SERVICE_CONFIG,
+        WHISPERX_HOTWORDS_SERVICE_CONFIG,
+        WHISPERX_SERVICE_CONFIG,
+    )
+
+    candidates = (
+        ("baseline", WHISPERX_SERVICE_CONFIG),
+        ("hotwords", WHISPERX_HOTWORDS_SERVICE_CONFIG),
+        ("full-decode", WHISPERX_FULL_DECODE_SERVICE_CONFIG),
+    )
+    reports: dict[str, dict[str, object]] = {}
+    for candidate_id, config in candidates:
+        _DIAGNOSTIC_OBSERVATIONS.clear()
+        report = run_qualification(
+            manifest, timeout_ms=timeout_ms, service_config=config
+        )
+        report["candidate_id"] = candidate_id
+        report["decode_overrides"] = {
+            "hotword_count": len(config.hotwords),
+            "beam_size": config.beam_size if config.beam_size != 1 else None,
+            "temperatures": (
+                [config.temperature] if config.temperature != 0.0 else None
+            ),
+            "initial_prompt_enabled": bool(config.initial_prompt),
+        }
+        reports[candidate_id] = report
+
+    baseline = reports["baseline"]
+    full = reports["full-decode"]
+    baseline_code_recall = float(
+        baseline["gates"]["standard_code_recall"]["observed"]
+    )
+    full_code_recall = float(
+        full["gates"]["standard_code_recall"]["observed"]
+    )
+    baseline_noisy_cer = _scenario_metric(baseline, "noisy-bim-zh", "cer")
+    full_noisy_cer = _scenario_metric(full, "noisy-bim-zh", "cer")
+    negative_false_positives = int(
+        full["gates"]["negative_false_positives"]["observed"]
+    )
+    selection = {
+        "full_candidate_passed": full["status"] == "pass",
+        "standard_code_recall_improved": full_code_recall > baseline_code_recall,
+        "noisy_bim_cer_improved": full_noisy_cer < baseline_noisy_cer,
+        "negative_false_positives_zero": negative_false_positives == 0,
+    }
+    selected = "full-decode" if all(selection.values()) else None
+    return {
+        **full,
+        "schema_version": MATRIX_REPORT_SCHEMA_VERSION,
+        "status": "pass" if selected else "fail",
+        "selected_candidate": selected,
+        "selection": selection,
+        "candidate_order": [item[0] for item in candidates],
+        "candidates": reports,
+    }
 
 
 def _write_json(path: Path, payload: dict[str, object]) -> None:
@@ -481,7 +561,7 @@ def main() -> int:
     _ENGINE = _build_engine(args.model_root)
     torch.cuda.empty_cache()
     torch.cuda.reset_peak_memory_stats()
-    result = run_qualification(manifest, timeout_ms=args.timeout_ms)
+    result = run_candidate_matrix(manifest, timeout_ms=args.timeout_ms)
     result.update(
         {
             "asr_model_id": ASR_MODEL_ID,

@@ -2943,3 +2943,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`asr_service/config.py`、`asr_service/app.py`、`asr_service/tests/test_config.py`、`asr_service/tests/test_api_contract.py`、`WORKLOG.md`
 - 验证：ASR 服务、远程 Provider、部署与激活契约扩展专项 `294 passed`；Python `py_compile` 和 `git diff --check` 通过，仅有 2 条既有弃用警告。未安装依赖、未启动或修改生产服务、未修改模型缓存或 Profile admission。
 - 待办/风险：需 PR CI 通过并合入 master 后，绑定新的完整 master SHA 重跑 Qwen R3；若无任何 Profile 实际可用，服务现在会在启动时失败关闭。
+
+### 12:19 — 实现 WhisperX 三候选解码资格矩阵
+
+- 完成：在独立 worktree 中为 WhisperX 增加 `baseline`、12 项 `hotwords` 和完整 `full-decode` 三组固定 qualification 候选；通过 WhisperX 3.8.6 公开 `load_model(asr_options=...)` 接口设置覆盖项，切换候选时复用底层 ASR 权重和中文 aligner。矩阵仅在完整候选通过全部既有门禁、标准编号召回严格改善、噪声 BIM CER 严格改善且负样本误命中为零时通过；脱敏 verdict 增加候选和四项选择布尔值，Profile admission 保持 disabled。
+- 文件：`.github/workflows/qualify-whisperx-production.yml`、`asr_service/engine_protocol.py`、`asr_service/engines/whisperx.py`、`asr_service/tests/test_whisperx.py`、`asr_service/tests/test_whisperx_qualification.py`、`scripts/qualify-whisperx-production.ps1`、`scripts/run_whisperx_qualification.py`、`project-docs/features/transcript-pipeline.md`、`project-docs/plans/whisperx-r2-r3-execution-plan.md`、`WORKLOG.md`
+- 验证：完整 ASR service 离线测试 `207 passed`；最终 WhisperX/引擎专项 `29 passed`；PowerShell AST、workflow YAML、Python `compileall` 和 `git diff --check` 通过。扩展 Profile/静态回归另有 `72 passed`，唯一未运行成功项是当前项目 `.venv` 缺少 `nltk` 的既有 punkt 生成测试。
+- 待办/风险：尚未执行真实 Windows CUDA 三候选 qualification；必须先经 PR CI 合并，再从合并后的完整 master SHA 触发一次已批准的隔离运行。未注册或启动服务，未接入业务流量，未修改生产任务、防火墙、数据库、Qdrant、模型 revision 或 Profile admission。

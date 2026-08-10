@@ -226,6 +226,13 @@ SenseVoice；Ubuntu 应用侧 `ASR_ENABLED` 仍必须为 `false`。跨节点验�
   未通过前不能认定 WhisperX 可用。资格失败诊断只输出文本哈希、字符类别、长度、
   token 形状、编辑类型计数、期望项命中布尔值和固定分类，不输出参考文本、原始
   ProviderCandidate 文本或 Canonical 文本，也不改变模型、样本或准入阈值。
+  后续解码评估固定为同一次隔离 qualification 内的三组顺序对照：当前 WhisperX
+  默认解码、仅复用 faster-whisper 已验证的 12 项热词、以及同时覆盖 12 项热词、
+  `beam_size=10`、`temperatures=[0.1]` 和 `initial_prompt` 的完整候选。参数通过
+  WhisperX `3.8.6` 公开的 `load_model(asr_options=...)` 接口设置；切换候选时复用
+  已加载的底层 ASR 权重和中文 aligner。只有完整候选通过原有全部门禁、标准编号
+  召回严格优于基线、噪声 BIM CER 严格低于基线且负样本误命中为零，矩阵结论才
+  可为通过。该代码能力不代表真实 GPU 资格已经通过，Profile admission 仍为 disabled。
 
 ## 已知限制
 

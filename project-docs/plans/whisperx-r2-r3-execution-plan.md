@@ -62,3 +62,20 @@ snapshot 和 Canonical 契约；WhisperX Profile 默认 `disabled`，不得自�
 缓存环境变量、保持 Profile `disabled` 为主；代码回滚为撤销合并提交。runner 产生的
 独立 run 目录和模型缓存保留用于审计，不在 workflow 中自动删除。
 
+## 2026-08-10 解码参数资格修订
+
+用户已批准在既有质量资格基础上增加一次三组顺序对照，修订范围仅限隔离
+qualification，不改变应用 Profile、ProviderCandidate、normalizer 或 Canonical 契约：
+
+1. `baseline`：保持 WhisperX `3.8.6` 官方默认解码；
+2. `hotwords`：仅覆盖 faster-whisper 已验证的完整 12 项热词；
+3. `full-decode`：覆盖相同热词、`beam_size=10`、`temperatures=[0.1]` 和相同
+   `initial_prompt`。
+
+三组使用同一固定 ASR/aligner revision、相同八样本与原有门禁。参数只通过官方
+`load_model(asr_options=...)` 设置；候选切换复用公开 `model` 参数承载的底层 ASR
+权重，并复用同一个 aligner。最终只能选择 `full-decode`，且必须同时满足：自身全部
+门禁通过、标准编号召回严格优于 baseline、噪声 BIM CER 严格低于 baseline、负样本
+误命中为零。任一条件不满足即失败关闭；不得修改样本或阈值，不启用 Profile，
+不注册服务或接入流量。
+

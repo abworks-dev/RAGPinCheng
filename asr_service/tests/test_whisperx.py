@@ -7,12 +7,22 @@ from types import SimpleNamespace
 import wave
 
 import asr_service.engines.whisperx as whisperx_engine
-from asr_service.engine_protocol import EngineChunkCandidate, PreparedAudioChunk, SENSEVOICE_SERVICE_CONFIG, WHISPERX_SERVICE_CONFIG
+from asr_service.engine_protocol import (
+    EngineChunkCandidate,
+    PreparedAudioChunk,
+    SENSEVOICE_SERVICE_CONFIG,
+    WHISPERX_FULL_DECODE_SERVICE_CONFIG,
+    WHISPERX_HOTWORDS_SERVICE_CONFIG,
+    WHISPERX_SERVICE_CONFIG,
+)
 from asr_service.engines.whisperx import WhisperXEngine, _decode_audio_bytes
 from src.transcription.provider_protocol import ProviderErrorCode, ProviderFailure
 
 
 class Model:
+    def __init__(self, model=None):
+        self.model = model if model is not None else object()
+
     def transcribe(self, audio, **kwargs):
         assert kwargs == {"batch_size": 1, "language": "zh"}
         return {"language": "zh", "segments": [{"start": 0.0, "end": 1.0, "text": "测试"}]}
@@ -20,8 +30,13 @@ class Model:
 
 def install_fake(monkeypatch, *, devices=1, compute=frozenset({"float16"})):
     calls = []
+
+    def load_model(*args, **kwargs):
+        calls.append(("load_model", args, kwargs))
+        return Model(kwargs.get("model"))
+
     module = SimpleNamespace(
-        load_model=lambda *args, **kwargs: (calls.append(("load_model", args, kwargs)) or Model()),
+        load_model=load_model,
         load_align_model=lambda *args, **kwargs: (calls.append(("load_align_model", args, kwargs)) or (object(), object())),
         load_audio=lambda value: b"decoded",
         align=lambda *_args, **_kwargs: {"segments": [{"start": 0.0005, "end": 1.0005, "text": " 品丞 BIM "}]},
@@ -180,6 +195,41 @@ def test_lazy_local_models_map_aligned_segments(monkeypatch):
     ]
     assert any(call[0] == "load_model" for call in calls)
     assert any(call[0] == "load_align_model" for call in calls)
+
+
+def test_decode_candidates_use_public_asr_options_and_reuse_models(monkeypatch):
+    calls = install_fake(monkeypatch)
+    engine = WhisperXEngine(
+        model_cache_ready=lambda: True,
+        model_path=Path("whisper"),
+        align_model_path=Path("align"),
+    )
+
+    baseline = engine.transcribe_chunk(
+        PreparedAudioChunk(0, 0, 2000, b"wav"), WHISPERX_SERVICE_CONFIG
+    )
+    hotwords = engine.transcribe_chunk(
+        PreparedAudioChunk(0, 0, 2000, b"wav"),
+        WHISPERX_HOTWORDS_SERVICE_CONFIG,
+    )
+    full = engine.transcribe_chunk(
+        PreparedAudioChunk(0, 0, 2000, b"wav"),
+        WHISPERX_FULL_DECODE_SERVICE_CONFIG,
+    )
+
+    assert all(type(item) is EngineChunkCandidate for item in (baseline, hotwords, full))
+    loads = [item for item in calls if item[0] == "load_model"]
+    assert loads[0][2]["asr_options"] == {}
+    expected_hotwords = " ".join(WHISPERX_HOTWORDS_SERVICE_CONFIG.hotwords)
+    assert loads[1][2]["asr_options"] == {"hotwords": expected_hotwords}
+    assert loads[2][2]["asr_options"] == {
+        "hotwords": expected_hotwords,
+        "beam_size": 10,
+        "temperatures": [0.1],
+        "initial_prompt": WHISPERX_FULL_DECODE_SERVICE_CONFIG.initial_prompt,
+    }
+    assert loads[1][2]["model"] is loads[2][2]["model"]
+    assert len([item for item in calls if item[0] == "load_align_model"]) == 1
 
 
 def test_missing_cache_and_cuda_fail_closed(monkeypatch):
