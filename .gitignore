@@ -26,6 +26,9 @@ docs/*
 CLAUDE.local.md
 .claude/settings.local.json
 
+# Local task notes are not repository delivery evidence.
+/WORKLOG.md
+
 # Frontend (Node / Vite)
 node_modules/
 frontend/dist/

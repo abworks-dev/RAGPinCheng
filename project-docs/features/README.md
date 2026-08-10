@@ -34,5 +34,5 @@
 
 ## 新增或更新文档
 
-复制 [TEMPLATE.md](TEMPLATE.md)，只记录当前源码能够证明的事实。重大架构选择另行写入 [`../decisions/`](../decisions/README.md)，过程和完成记录继续写入根目录 `WORKLOG.md`，未来计划继续写入 `TODO.md`。
+复制 [TEMPLATE.md](TEMPLATE.md)，只记录当前源码能够证明的事实。重大架构选择另行写入 [`../decisions/`](../decisions/README.md)，实际变更和验证证据由 Git commit/PR、checks 和 workflow run 承载，未来计划继续写入 `TODO.md`。
 

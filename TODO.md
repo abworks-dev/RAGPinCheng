@@ -1,6 +1,6 @@
 # 品成 BIM 知识库 — 功能待办
 
-本文件只记录未来工作。已完成事实与详细验证以 `WORKLOG.md` 为准；大型候选方案放在 `project-docs/plans/`，已批准的长期架构决策放在 `project-docs/decisions/`。
+本文件只记录未来工作与最近完成摘要。已完成事实与详细验证以 Git commit/PR、checks 和 workflow run 为准；当前功能事实在 `project-docs/features/` 维护，大型候选方案放在 `project-docs/plans/`，已批准的长期架构决策放在 `project-docs/decisions/`。
 
 统一状态：`未开始` / `待审批` / `进行中` / `代码完成待验证` / `待用户验收` / `已完成` / `已取消`。
 
@@ -193,7 +193,7 @@
 
 ## 最近完成摘要
 
-详细事实、涉及文件和验证结果见 `WORKLOG.md`。
+后续新增摘要应尽量链接相关 commit、PR、workflow 或功能文档；详细事实不在本文件重复记录。
 
 1. 三引擎共享 ASR qualification corpus 中性变量迁移（2026-08-10）。
 2. faster-whisper 生产准入代码准备（2026-08-10）。
