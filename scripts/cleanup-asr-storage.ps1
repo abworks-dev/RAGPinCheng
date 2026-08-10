@@ -1,44 +1,49 @@
-<#
-.SYNOPSIS
-    Preview or remove stale Windows GPU ASR caches and staging artifacts.
-
-.DESCRIPTION
-    The script is deliberately conservative:
-    - Preview mode is the default. Use -Apply to permit deletion.
-    - Only paths below a directory named ServiceData are accepted.
-    - Model directories are never candidates.
-    - Active markers, recent activity, and unrecognized qualification names are skipped.
-    - Every candidate includes a reason and size in the console output.
-
-    Wheel-cache retention and size limits apply independently to each wheel-cache
-    directory. Qualification retention applies only to timestamped run directories.
-#>
-
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
 param(
     [Parameter()]
     [ValidateNotNullOrEmpty()]
-    [string]$RootPath = $env:PRODUCTION_ASR_ROOT,
+    [string]$DataRoot = $env:PRODUCTION_ASR_DATA_ROOT,
 
     [Parameter()]
-    [ValidateRange(1, 3650)]
-    [int]$StagingRetentionDays = 7,
+    [ValidateNotNullOrEmpty()]
+    [string]$ProgramRoot = $env:PRODUCTION_ASR_PROGRAM_ROOT,
+
+    [Parameter()]
+    [string]$FasterWhisperQualificationRoot = $env:PRODUCTION_FASTER_WHISPER_QUALIFICATION_ROOT,
+
+    [Parameter()]
+    [string]$Qwen3AsrQualificationRoot = $env:PRODUCTION_QWEN3_ASR_QUALIFICATION_ROOT,
+
+    [Parameter()]
+    [string]$WhisperXRoot = $env:PRODUCTION_WHISPERX_ROOT,
 
     [Parameter()]
     [ValidateRange(1, 3650)]
     [int]$QualificationRetentionDays = 30,
 
     [Parameter()]
-    [ValidateRange(1, 3650)]
-    [int]$WheelCacheRetentionDays = 30,
+    [ValidateRange(1, 100)]
+    [int]$QualificationKeepCount = 3,
 
     [Parameter()]
-    [ValidateRange(1, 1000)]
-    [int]$WheelCacheMaxGB = 8,
+    [ValidateRange(1, 168)]
+    [int]$RunCompactionHours = 24,
+
+    [Parameter()]
+    [ValidateRange(1, 3650)]
+    [int]$DependencyRetentionDays = 7,
+
+    [Parameter()]
+    [ValidateRange(1, 3650)]
+    [int]$FailedStagingRetentionDays = 7,
 
     [Parameter()]
     [ValidateRange(1, 100)]
-    [int]$QualificationKeepCount = 3,
+    [int]$FailedStagingKeepCount = 2,
+
+    [Parameter()]
+    [ValidateRange(1, 100)]
+    [int]$MaxDeleteGB = 20,
 
     [Parameter()]
     [switch]$Apply,
@@ -51,413 +56,397 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $nowUtc = [DateTime]::UtcNow
-$recentCutoffUtc = $nowUtc.AddHours(-24)
-$stagingCutoffUtc = $nowUtc.AddDays(-$StagingRetentionDays)
 $qualificationCutoffUtc = $nowUtc.AddDays(-$QualificationRetentionDays)
-$wheelCacheCutoffUtc = $nowUtc.AddDays(-$WheelCacheRetentionDays)
-$wheelCacheMaxBytes = [int64]$WheelCacheMaxGB * 1GB
-
-function Get-ResolvedDirectory {
-    param([string]$Path)
-
-    if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
-        throw "Directory does not exist: $Path"
-    }
-
-    $item = Get-Item -LiteralPath $Path -Force
-    if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-        throw "Refusing to use a reparse-point root: $($item.FullName)"
-    }
-
-    $resolved = $item.FullName.TrimEnd('\')
-    if ((Split-Path -Path $resolved -Leaf) -ne 'ServiceData') {
-        throw "Refusing to operate on a directory whose final name is not ServiceData: $resolved"
-    }
-
-    return $resolved
-}
+$compactionCutoffUtc = $nowUtc.AddHours(-$RunCompactionHours)
+$dependencyCutoffUtc = $nowUtc.AddDays(-$DependencyRetentionDays)
+$failedStagingCutoffUtc = $nowUtc.AddDays(-$FailedStagingRetentionDays)
+$maxDeleteBytes = [int64]$MaxDeleteGB * 1GB
+$compactionChildren = @('venv', 'wheelhouse', 'shared-wheel-seed', 'model-staging', 'spool', 'temp')
 
 function Test-PathUnderRoot {
     param(
-        [string]$Path,
-        [string]$Root
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Root
     )
 
     $candidate = [IO.Path]::GetFullPath($Path).TrimEnd('\')
-    $rootWithSlash = $Root.TrimEnd('\') + '\'
+    $rootWithSlash = [IO.Path]::GetFullPath($Root).TrimEnd('\') + '\'
     return $candidate.StartsWith($rootWithSlash, [StringComparison]::OrdinalIgnoreCase)
 }
 
+function Get-RealDirectory {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Label
+    )
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
+        throw "$Label does not exist: $Path"
+    }
+    $item = Get-Item -LiteralPath $Path -Force
+    if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "$Label must not be a reparse point: $Path"
+    }
+    return [IO.Path]::GetFullPath($item.FullName).TrimEnd('\')
+}
+
 function Get-TreeInfo {
-    param([string]$Path)
+    param([Parameter(Mandatory = $true)][string]$Path)
 
     $item = Get-Item -LiteralPath $Path -Force
+    if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "Cleanup candidate is a reparse point: $Path"
+    }
     if (-not $item.PSIsContainer) {
         return [pscustomobject]@{
-            Bytes         = [int64]$item.Length
-            LastWriteUtc  = $item.LastWriteTimeUtc
-            FileCount     = 1
+            Bytes = [int64]$item.Length
+            FileCount = 1
+            LastWriteUtc = $item.LastWriteTimeUtc
         }
     }
 
     $bytes = [int64]0
-    $lastWriteUtc = [DateTime]::MinValue.ToUniversalTime()
-    $files = @(
-        Get-ChildItem -LiteralPath $Path -File -Force -Recurse -ErrorAction SilentlyContinue |
-            Where-Object { ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0 }
-    )
-
-    foreach ($file in $files) {
-        $bytes += [int64]$file.Length
-        if ($file.LastWriteTimeUtc -gt $lastWriteUtc) {
-            $lastWriteUtc = $file.LastWriteTimeUtc
+    $count = 0
+    $lastWriteUtc = $item.LastWriteTimeUtc
+    foreach ($entry in @(Get-ChildItem -LiteralPath $Path -Force -Recurse -ErrorAction Stop)) {
+        if (($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "Cleanup candidate contains a reparse point: $($entry.FullName)"
+        }
+        if (-not $entry.PSIsContainer) {
+            $bytes += [int64]$entry.Length
+            $count++
+        }
+        if ($entry.LastWriteTimeUtc -gt $lastWriteUtc) {
+            $lastWriteUtc = $entry.LastWriteTimeUtc
         }
     }
-
-    if ($lastWriteUtc -eq [DateTime]::MinValue.ToUniversalTime()) {
-        $lastWriteUtc = (Get-Item -LiteralPath $Path -Force).LastWriteTimeUtc
-    }
-
-    [pscustomobject]@{
-        Bytes         = $bytes
-        LastWriteUtc  = $lastWriteUtc
-        FileCount     = $files.Count
+    return [pscustomobject]@{
+        Bytes = $bytes
+        FileCount = $count
+        LastWriteUtc = $lastWriteUtc
     }
 }
 
-function Test-ActivePath {
-    param([string]$Path)
-
-    $markerNames = @('.active', '.lock', 'run.lock', 'lease.json', 'status.json', 'state.json')
-    $markers = @(
-        Get-ChildItem -LiteralPath $Path -File -Force -Recurse -ErrorAction SilentlyContinue |
-            Where-Object {
-                ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0 -and
-                $markerNames -contains $_.Name.ToLowerInvariant()
-            }
+function Get-ActiveProcessReason {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][object[]]$Processes
     )
 
-    foreach ($marker in $markers) {
-        if ($marker.Name -in @('.active', '.lock', 'run.lock')) {
-            return "active marker: $($marker.FullName)"
-        }
-
-        $content = Get-Content -LiteralPath $marker.FullName -Raw -ErrorAction SilentlyContinue
-        if ($content -match '(?i)(running|active|in_progress|pending|queued)') {
-            return "active status marker: $($marker.FullName)"
+    foreach ($process in $Processes) {
+        if (
+            ([string]$process.ExecutablePath).StartsWith($Path, [StringComparison]::OrdinalIgnoreCase) -or
+            ([string]$process.CommandLine).IndexOf($Path, [StringComparison]::OrdinalIgnoreCase) -ge 0
+        ) {
+            return "active process $($process.ProcessId):$($process.Name)"
         }
     }
-
     return $null
 }
 
-function New-Candidate {
-    param(
-        [string]$Path,
-        [string]$Kind,
-        [string]$Reason,
-        [int64]$Bytes,
-        [DateTime]$LastWriteUtc
-    )
+function Get-ActiveMarkerReason {
+    param([Parameter(Mandatory = $true)][string]$Path)
 
-    [pscustomobject]@{
-        Path         = $Path
-        Kind         = $Kind
-        Reason       = $Reason
-        Bytes        = $Bytes
-        GB           = [math]::Round($Bytes / 1GB, 2)
-        LastWriteUtc = $LastWriteUtc
-    }
-}
-
-function Get-TimestampFromName {
-    param([string]$Name)
-
-    $match = [regex]::Match(
-        $Name,
-        '^(?:(?:run|qualification|attempt|job)[-_])?(?<Timestamp>\d{8}(?:[-_]\d{6})?)$',
-        [Text.RegularExpressions.RegexOptions]::IgnoreCase
-    )
-    if (-not $match.Success) {
-        return $null
-    }
-
-    $formats = @('yyyyMMdd-HHmmss', 'yyyyMMdd_HHmmss', 'yyyyMMdd')
-    foreach ($format in $formats) {
-        $parsed = [DateTime]::MinValue
-        if ([DateTime]::TryParseExact(
-                $match.Groups['Timestamp'].Value,
-                $format,
-                [Globalization.CultureInfo]::InvariantCulture,
-                [Globalization.DateTimeStyles]::AssumeLocal,
-                [ref]$parsed
-            )) {
-            return $parsed.ToUniversalTime()
+    foreach ($marker in @('.active', '.lock', 'run.lock')) {
+        $matches = @(Get-ChildItem -LiteralPath $Path -Filter $marker -File -Force -Recurse -ErrorAction SilentlyContinue)
+        if ($matches.Count -gt 0) {
+            return "active marker: $($matches[0].FullName)"
         }
     }
-
     return $null
-}
-
-function Add-Candidate {
-    param(
-        [System.Collections.Generic.List[object]]$List,
-        [string]$Path,
-        [string]$Kind,
-        [string]$Reason,
-        [string]$Root
-    )
-
-    if (-not (Test-PathUnderRoot -Path $Path -Root $Root)) {
-        throw "Candidate escaped root: $Path"
-    }
-
-    $item = Get-Item -LiteralPath $Path -Force
-    if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-        return
-    }
-
-    $info = Get-TreeInfo -Path $Path
-    $List.Add((New-Candidate -Path $item.FullName -Kind $Kind -Reason $Reason `
-        -Bytes $info.Bytes -LastWriteUtc $info.LastWriteUtc))
-}
-
-$resolvedRoot = Get-ResolvedDirectory -Path $RootPath
-$candidates = New-Object 'System.Collections.Generic.List[object]'
-$skipped = New-Object 'System.Collections.Generic.List[object]'
-$seen = @{}
-
-function Add-UniqueCandidate {
-    param(
-        [string]$Path,
-        [string]$Kind,
-        [string]$Reason,
-        [string]$Root
-    )
-
-    $fullPath = (Get-Item -LiteralPath $Path -Force).FullName
-    if ($seen.ContainsKey($fullPath.ToLowerInvariant())) {
-        return
-    }
-
-    $seen[$fullPath.ToLowerInvariant()] = $true
-    Add-Candidate -List $candidates -Path $fullPath -Kind $Kind -Reason $Reason -Root $Root
 }
 
 function Add-Skipped {
     param(
-        [string]$Path,
-        [string]$Reason
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Reason
     )
 
-    $skipped.Add([pscustomobject]@{
-        Path   = $Path
-        Reason = $Reason
-    })
+    $script:skipped.Add([pscustomobject]@{ Path = $Path; Reason = $Reason })
 }
 
-# Staging directories: remove only complete, old staging trees.
-$stagingDirectories = @(
-    Get-ChildItem -LiteralPath $resolvedRoot -Directory -Force -Recurse -ErrorAction SilentlyContinue |
-        Where-Object {
-            $_.Name -ieq 'staging' -and
-            $_.FullName -match '(?i)\\model-preparation\\' -and
-            ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0
-        }
-)
+function Add-Candidate {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Kind,
+        [Parameter(Mandatory = $true)][string]$Reason,
+        [Parameter(Mandatory = $true)][string]$ManagedRoot,
+        [string]$Engine = '',
+        [string]$RunId = ''
+    )
 
-foreach ($directory in $stagingDirectories) {
-    $info = Get-TreeInfo -Path $directory.FullName
-    $activeReason = Test-ActivePath -Path $directory.FullName
-    if ($activeReason) {
-        Add-Skipped -Path $directory.FullName -Reason $activeReason
-        continue
+    if (-not (Test-PathUnderRoot -Path $Path -Root $ManagedRoot)) {
+        throw "Cleanup candidate escaped its managed root: $Path"
     }
-    if ($info.LastWriteUtc -gt $recentCutoffUtc) {
-        Add-Skipped -Path $directory.FullName -Reason 'modified within the last 24 hours'
-        continue
+    $fullPath = [IO.Path]::GetFullPath((Get-Item -LiteralPath $Path -Force).FullName).TrimEnd('\')
+    $key = $fullPath.ToLowerInvariant()
+    if ($script:seen.ContainsKey($key)) {
+        return
     }
-    if ($info.LastWriteUtc -gt $stagingCutoffUtc) {
-        Add-Skipped -Path $directory.FullName -Reason "younger than staging retention ($StagingRetentionDays days)"
-        continue
-    }
-
-    Add-UniqueCandidate -Path $directory.FullName -Kind 'staging-directory' `
-        -Reason "staging older than $StagingRetentionDays days" -Root $resolvedRoot
+    $script:seen[$key] = $true
+    $info = Get-TreeInfo -Path $fullPath
+    $script:candidates.Add([pscustomobject]@{
+            Path = $fullPath
+            Kind = $Kind
+            Reason = $Reason
+            Engine = $Engine
+            RunId = $RunId
+            Bytes = [int64]$info.Bytes
+            FileCount = [int]$info.FileCount
+            LastWriteUtc = $info.LastWriteUtc
+            Deleted = $false
+        })
 }
 
-# Qualification run directories: only timestamped direct children are eligible.
-$qualificationRoots = @(
-    Get-ChildItem -LiteralPath $resolvedRoot -Directory -Force -Recurse -ErrorAction SilentlyContinue |
-        Where-Object {
-            $_.Name -ieq 'qualification' -and
-            ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0
-        }
-)
+function Add-QualificationRoot {
+    param(
+        [Parameter(Mandatory = $true)][string]$Engine,
+        [AllowEmptyString()][string]$Root,
+        [switch]$RootContainsQualificationDirectory
+    )
 
-foreach ($qualificationRoot in $qualificationRoots) {
+    if ([string]::IsNullOrWhiteSpace($Root)) {
+        Add-Skipped -Path "config:$Engine" -Reason 'qualification root is not configured'
+        return
+    }
+    if (-not (Test-Path -LiteralPath $Root -PathType Container)) {
+        Add-Skipped -Path $Root -Reason 'qualification root does not exist'
+        return
+    }
+    $resolvedRoot = Get-RealDirectory -Path $Root -Label "$Engine root"
+    $runsRoot = if ($RootContainsQualificationDirectory) {
+        Join-Path $resolvedRoot 'qualification\runs'
+    }
+    else {
+        Join-Path $resolvedRoot 'runs'
+    }
+    if (-not (Test-Path -LiteralPath $runsRoot -PathType Container)) {
+        Add-Skipped -Path $runsRoot -Reason 'runs directory does not exist'
+        return
+    }
+    $runsRoot = Get-RealDirectory -Path $runsRoot -Label "$Engine runs root"
     $runs = @(
-        Get-ChildItem -LiteralPath $qualificationRoot.FullName -Directory -Force -ErrorAction SilentlyContinue |
-            Where-Object {
-                $_.Name -ine 'wheel-cache' -and
-                ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0
-            } |
-            ForEach-Object {
-                $timestamp = Get-TimestampFromName -Name $_.Name
-                if ($null -eq $timestamp) {
-                    Add-Skipped -Path $_.FullName -Reason 'qualification directory name has no recognized timestamp'
-                    return
-                }
-                [pscustomobject]@{
-                    Directory = $_
-                    Timestamp = $timestamp
-                }
-            } |
-            Sort-Object Timestamp -Descending
+        Get-ChildItem -LiteralPath $runsRoot -Directory -Force |
+            Where-Object { $_.Name -match '^[0-9]{1,20}$' } |
+            Sort-Object LastWriteTimeUtc -Descending
     )
 
-    $runIndex = 0
+    $index = 0
     foreach ($run in $runs) {
-        $runIndex++
-        $path = $run.Directory.FullName
-        $info = Get-TreeInfo -Path $path
-        $activeReason = Test-ActivePath -Path $path
+        $index++
+        $activeReason = Get-ActiveProcessReason -Path $run.FullName -Processes $script:activeProcesses
+        if (-not $activeReason) {
+            $activeReason = Get-ActiveMarkerReason -Path $run.FullName
+        }
         if ($activeReason) {
-            Add-Skipped -Path $path -Reason $activeReason
-            continue
-        }
-        if ($info.LastWriteUtc -gt $recentCutoffUtc) {
-            Add-Skipped -Path $path -Reason 'modified within the last 24 hours'
-            continue
-        }
-        if ($runIndex -le $QualificationKeepCount) {
-            Add-Skipped -Path $path -Reason "within newest qualification keep count ($QualificationKeepCount)"
-            continue
-        }
-        if ($run.Timestamp -gt $qualificationCutoffUtc) {
-            Add-Skipped -Path $path -Reason "younger than qualification retention ($QualificationRetentionDays days)"
+            Add-Skipped -Path $run.FullName -Reason $activeReason
             continue
         }
 
-        Add-UniqueCandidate -Path $path -Kind 'qualification-directory' `
-            -Reason "qualification run older than $QualificationRetentionDays days and outside newest $QualificationKeepCount" `
-            -Root $resolvedRoot
+        if ($index -gt $QualificationKeepCount -and $run.LastWriteTimeUtc -le $qualificationCutoffUtc) {
+            Add-Candidate -Path $run.FullName -Kind 'qualification-run' `
+                -Reason "older than $QualificationRetentionDays days and outside newest $QualificationKeepCount" `
+                -ManagedRoot $runsRoot -Engine $Engine -RunId $run.Name
+            continue
+        }
+
+        if ($run.LastWriteTimeUtc -gt $compactionCutoffUtc) {
+            Add-Skipped -Path $run.FullName -Reason "younger than compaction delay ($RunCompactionHours hours)"
+            continue
+        }
+        foreach ($childName in $compactionChildren) {
+            $childPath = Join-Path $run.FullName $childName
+            if (Test-Path -LiteralPath $childPath) {
+                Add-Candidate -Path $childPath -Kind "qualification-$childName" `
+                    -Reason "run is older than compaction delay ($RunCompactionHours hours)" `
+                    -ManagedRoot $run.FullName -Engine $Engine -RunId $run.Name
+            }
+        }
     }
 }
 
-# Wheel caches: remove old files first, then oldest additional files above the
-# per-cache size cap. Active markers protect the whole cache.
-$wheelCaches = @(
-    Get-ChildItem -LiteralPath $resolvedRoot -Directory -Force -Recurse -ErrorAction SilentlyContinue |
-        Where-Object {
-            $_.Name -ieq 'wheel-cache' -and
-            ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0 -and
-            $_.FullName -notmatch '(?i)\\models(\\|$)'
-        }
-)
+function Backup-QualificationEvidence {
+    param([Parameter(Mandatory = $true)][object]$Candidate)
 
-foreach ($wheelCache in $wheelCaches) {
-    $activeReason = Test-ActivePath -Path $wheelCache.FullName
-    if ($activeReason) {
-        Add-Skipped -Path $wheelCache.FullName -Reason $activeReason
-        continue
+    if ($Candidate.Kind -ne 'qualification-run') {
+        return
     }
-
-    $files = @(
-        Get-ChildItem -LiteralPath $wheelCache.FullName -File -Force -Recurse -ErrorAction SilentlyContinue |
-            Where-Object { ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0 }
+    $backupRoot = Join-Path $script:resolvedDataRoot 'cleanup-evidence-backup'
+    $destination = Join-Path (Join-Path $backupRoot $Candidate.Engine) $Candidate.RunId
+    if (Test-Path -LiteralPath $destination) {
+        throw "Qualification evidence backup already exists and requires review: $destination"
+    }
+    New-Item -ItemType Directory -Path $destination -Force | Out-Null
+    foreach ($name in @('reports', 'evidence', 'logs', 'state', 'config')) {
+        $source = Join-Path $Candidate.Path $name
+        if (Test-Path -LiteralPath $source) {
+            Copy-Item -LiteralPath $source -Destination (Join-Path $destination $name) -Recurse
+        }
+    }
+    foreach ($file in @(Get-ChildItem -LiteralPath $Candidate.Path -File -Filter '*.json' -Force)) {
+        Copy-Item -LiteralPath $file.FullName -Destination $destination
+    }
+    $inventory = @(
+        Get-ChildItem -LiteralPath $destination -File -Force -Recurse |
+            ForEach-Object {
+                [ordered]@{
+                    relative_path = $_.FullName.Substring($destination.Length).TrimStart('\')
+                    size_bytes = [int64]$_.Length
+                    sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+                }
+            }
     )
-    $totalBytes = ($files | Measure-Object -Property Length -Sum).Sum
-    if ($null -eq $totalBytes) {
-        $totalBytes = [int64]0
-    }
+    [ordered]@{
+        schema_version = 'asr-cleanup-evidence-backup/1'
+        source_path = $Candidate.Path
+        engine = $Candidate.Engine
+        run_id = $Candidate.RunId
+        generated_at_utc = [DateTimeOffset]::UtcNow.ToString('o')
+        files = $inventory
+    } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $destination 'inventory.json') -Encoding UTF8
+}
 
-    $eligible = @(
-        $files |
-            Where-Object { $_.LastWriteTimeUtc -le $wheelCacheCutoffUtc } |
-            Sort-Object LastWriteTimeUtc
+$resolvedDataRoot = Get-RealDirectory -Path $DataRoot -Label 'ASR data root'
+$resolvedProgramRoot = Get-RealDirectory -Path $ProgramRoot -Label 'ASR program root'
+if ((Split-Path -Path $resolvedDataRoot -Leaf) -ne 'RAGPinCheng-ASR') {
+    throw 'ASR data root must end with RAGPinCheng-ASR'
+}
+if ((Split-Path -Path $resolvedProgramRoot -Leaf) -ne 'RAGPinCheng-ASR') {
+    throw 'ASR program root must end with RAGPinCheng-ASR'
+}
+
+try {
+    $activeProcesses = @(
+        Get-CimInstance Win32_Process -ErrorAction Stop |
+            Where-Object { $_.ProcessId -ne $PID } |
+            Select-Object ProcessId, Name, ExecutablePath, CommandLine
     )
-    $selected = New-Object 'System.Collections.Generic.List[object]'
-    foreach ($file in $eligible) {
-        $selected.Add($file)
-    }
+}
+catch {
+    throw "Unable to inspect processes before ASR cleanup: $($_.Exception.Message)"
+}
 
-    $remainingBytes = [int64]$totalBytes
-    foreach ($file in $selected) {
-        if ($remainingBytes -le $wheelCacheMaxBytes -and $file.LastWriteTimeUtc -gt $wheelCacheCutoffUtc) {
-            break
+$candidates = [System.Collections.Generic.List[object]]::new()
+$skipped = [System.Collections.Generic.List[object]]::new()
+$seen = @{}
+
+Add-QualificationRoot -Engine 'faster-whisper' -Root $FasterWhisperQualificationRoot
+Add-QualificationRoot -Engine 'qwen3-asr' -Root $Qwen3AsrQualificationRoot
+Add-QualificationRoot -Engine 'whisperx' -Root $WhisperXRoot -RootContainsQualificationDirectory
+
+$dependencyRoot = Join-Path $resolvedDataRoot 'dependency-runs'
+if (Test-Path -LiteralPath $dependencyRoot -PathType Container) {
+    foreach ($directory in @(Get-ChildItem -LiteralPath $dependencyRoot -Directory -Force)) {
+        if ($directory.Name -notmatch '^funasr-[0-9a-fA-F]{40}$') {
+            Add-Skipped -Path $directory.FullName -Reason 'unrecognized dependency run name'
+            continue
         }
-        $remainingBytes -= [int64]$file.Length
-        Add-UniqueCandidate -Path $file.FullName -Kind 'wheel-cache-file' `
-            -Reason "wheel cache file older than $WheelCacheRetentionDays days or above ${WheelCacheMaxGB} GB cache cap" `
-            -Root $resolvedRoot
+        if ($directory.LastWriteTimeUtc -gt $dependencyCutoffUtc) {
+            Add-Skipped -Path $directory.FullName -Reason "younger than dependency retention ($DependencyRetentionDays days)"
+            continue
+        }
+        $activeReason = Get-ActiveProcessReason -Path $directory.FullName -Processes $activeProcesses
+        if (-not $activeReason) {
+            $activeReason = Get-ActiveMarkerReason -Path $directory.FullName
+        }
+        if ($activeReason) {
+            Add-Skipped -Path $directory.FullName -Reason $activeReason
+            continue
+        }
+        Add-Candidate -Path $directory.FullName -Kind 'dependency-run' `
+            -Reason "older than dependency retention ($DependencyRetentionDays days)" `
+            -ManagedRoot $dependencyRoot
     }
+}
 
-    if ($totalBytes -gt $wheelCacheMaxBytes -and $selected.Count -eq 0) {
-        Add-Skipped -Path $wheelCache.FullName -Reason "cache exceeds ${WheelCacheMaxGB} GB but has no file older than $WheelCacheRetentionDays days"
+$backupRoot = Join-Path $resolvedDataRoot 'backups'
+if (Test-Path -LiteralPath $backupRoot -PathType Container) {
+    $failedStaging = @(
+        Get-ChildItem -LiteralPath $backupRoot -Directory -Force |
+            Where-Object { $_.Name -match '^(?:failed|stale)-staging-\d{8}-\d{9}-[0-9a-fA-F]{12}$' } |
+            Sort-Object LastWriteTimeUtc -Descending
+    )
+    $index = 0
+    foreach ($directory in $failedStaging) {
+        $index++
+        if ($index -le $FailedStagingKeepCount) {
+            Add-Skipped -Path $directory.FullName -Reason "within newest failed staging keep count ($FailedStagingKeepCount)"
+            continue
+        }
+        if ($directory.LastWriteTimeUtc -gt $failedStagingCutoffUtc) {
+            Add-Skipped -Path $directory.FullName -Reason "younger than failed staging retention ($FailedStagingRetentionDays days)"
+            continue
+        }
+        $activeReason = Get-ActiveProcessReason -Path $directory.FullName -Processes $activeProcesses
+        if (-not $activeReason) {
+            $activeReason = Get-ActiveMarkerReason -Path $directory.FullName
+        }
+        if ($activeReason) {
+            Add-Skipped -Path $directory.FullName -Reason $activeReason
+            continue
+        }
+        Add-Candidate -Path $directory.FullName -Kind 'failed-staging' `
+            -Reason "older than $FailedStagingRetentionDays days and outside newest $FailedStagingKeepCount" `
+            -ManagedRoot $backupRoot
     }
 }
 
-$candidateArray = $candidates.ToArray()
-$skippedArray = $skipped.ToArray()
-$candidateBytes = ($candidateArray | Measure-Object -Property Bytes -Sum).Sum
-if ($null -eq $candidateBytes) {
-    $candidateBytes = [int64]0
-}
-
-Write-Host "Root: $resolvedRoot"
-Write-Host "Mode: $(if ($Apply) { 'APPLY' } else { 'DRY RUN' })"
-Write-Host "Candidates: $($candidateArray.Count), reclaimable: $([math]::Round($candidateBytes / 1GB, 2)) GB"
-Write-Host "Skipped: $($skippedArray.Count)"
-
-if ($candidateArray.Count -gt 0) {
-    $candidateArray |
-        Select-Object Kind, GB, LastWriteUtc, Path, Reason |
-        Format-Table -AutoSize
-}
-
-if ($skippedArray.Count -gt 0) {
-    Write-Host "`nSkipped paths:" -ForegroundColor DarkYellow
-    $skippedArray | Format-Table -AutoSize
+$candidateBytes = [int64](($candidates | Measure-Object -Property Bytes -Sum).Sum)
+if ($Apply -and $candidateBytes -gt $maxDeleteBytes) {
+    throw "Candidate deletion exceeds the safety cap of $MaxDeleteGB GB"
 }
 
 $audit = [ordered]@{
-    generated_at_utc = $nowUtc.ToString('o')
-    root_path = $resolvedRoot
-    mode = $(if ($Apply) { 'apply' } else { 'dry-run' })
-    retention_days = [ordered]@{
-        staging = $StagingRetentionDays
-        qualification = $QualificationRetentionDays
-        wheel_cache = $WheelCacheRetentionDays
+    schema_version = 'asr-storage-cleanup/2'
+    generated_at_utc = [DateTimeOffset]::UtcNow.ToString('o')
+    mode = if ($Apply) { 'apply' } else { 'dry-run' }
+    roots = [ordered]@{
+        data = $resolvedDataRoot
+        program = $resolvedProgramRoot
+        faster_whisper = $FasterWhisperQualificationRoot
+        qwen3_asr = $Qwen3AsrQualificationRoot
+        whisperx = $WhisperXRoot
     }
-    wheel_cache_max_gb = $WheelCacheMaxGB
-    qualification_keep_count = $QualificationKeepCount
-    candidate_count = $candidateArray.Count
-    candidate_bytes = [int64]$candidateBytes
-    candidates = @($candidateArray)
-    skipped = @($skippedArray)
+    policy = [ordered]@{
+        qualification_retention_days = $QualificationRetentionDays
+        qualification_keep_count = $QualificationKeepCount
+        run_compaction_hours = $RunCompactionHours
+        dependency_retention_days = $DependencyRetentionDays
+        failed_staging_retention_days = $FailedStagingRetentionDays
+        failed_staging_keep_count = $FailedStagingKeepCount
+        max_delete_gb = $MaxDeleteGB
+    }
+    candidate_count = $candidates.Count
+    candidate_bytes = $candidateBytes
+    candidates = @($candidates)
+    skipped = @($skipped)
 }
 
-if ($AuditPath) {
-    $auditParent = Split-Path -Path $AuditPath -Parent
-    if ($auditParent -and -not (Test-Path -LiteralPath $auditParent -PathType Container)) {
-        New-Item -ItemType Directory -Path $auditParent -Force | Out-Null
+function Write-Audit {
+    if ([string]::IsNullOrWhiteSpace($AuditPath)) {
+        return
     }
-    $audit | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $AuditPath -Encoding UTF8
-    Write-Host "Audit: $AuditPath"
+    $parent = Split-Path -Path $AuditPath -Parent
+    if ($parent -and -not (Test-Path -LiteralPath $parent -PathType Container)) {
+        New-Item -ItemType Directory -Path $parent -Force | Out-Null
+    }
+    $audit | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $AuditPath -Encoding UTF8
 }
 
+Write-Host "ASR_STORAGE_CLEANUP mode=$($audit.mode) candidates=$($candidates.Count) bytes=$candidateBytes skipped=$($skipped.Count)"
+Write-Audit
 if (-not $Apply) {
-    Write-Host "`nPreview only. Re-run with -Apply after reviewing the candidate list."
     return
 }
 
-foreach ($candidate in $candidateArray) {
+foreach ($candidate in $candidates) {
     if ($PSCmdlet.ShouldProcess($candidate.Path, "Remove $($candidate.Kind)")) {
+        if ($candidate.Kind -eq 'qualification-run') {
+            Backup-QualificationEvidence -Candidate $candidate
+        }
         Remove-Item -LiteralPath $candidate.Path -Recurse -Force
+        $candidate.Deleted = $true
         Write-Host "Deleted: $($candidate.Path)"
     }
-    else {
-        Write-Host "Would delete: $($candidate.Path)"
-    }
 }
+Write-Audit

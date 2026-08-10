@@ -38,6 +38,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: production-gpu-exclusive
+  cancel-in-progress: false
+
 jobs:
   deploy:
     environment: production-asr
@@ -141,3 +145,48 @@ jobs:
             --env-file "${ASR_ENV_FILE}" \
             --asr-url "${ASR_SERVICE_URL}" \
             "${profile_args[@]}"
+
+  compact-dependency-run:
+    needs: [deploy, verify-ubuntu]
+    if: >-
+      always() &&
+      needs.deploy.result == 'success' &&
+      (needs.verify-ubuntu.result == 'success' || needs.verify-ubuntu.result == 'skipped')
+    environment: production-asr
+    runs-on: [self-hosted, Windows, X64, asr-production]
+    timeout-minutes: 10
+    env:
+      PRODUCTION_ASR_DATA_ROOT: ${{ vars.PRODUCTION_ASR_DATA_ROOT }}
+      COMPACTION_ENABLED: ${{ vars.PRODUCTION_ASR_RUN_COMPACTION_ENABLED }}
+      COMPACTION_AUDIT: ${{ runner.temp }}\asr-deployment-compaction-${{ github.run_id }}.json
+    steps:
+      - name: Check out deployed revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 1
+
+      - name: Compact deployment dependency run
+        shell: powershell
+        run: |
+          $arguments = @{
+            TargetKind = 'deployment-dependency'
+            Engine = 'deployment'
+            ManagedRoot = $env:PRODUCTION_ASR_DATA_ROOT
+            Identity = '${{ inputs.commit_sha }}'
+            AuditPath = $env:COMPACTION_AUDIT
+            Confirm = $false
+          }
+          if ($env:COMPACTION_ENABLED -eq 'true') {
+            $arguments.Apply = $true
+          }
+          & "${{ github.workspace }}\scripts\compact-asr-run.ps1" @arguments
+
+      - name: Upload deployment compaction audit
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: asr-deployment-compaction-${{ github.run_id }}
+          path: ${{ runner.temp }}\asr-deployment-compaction-${{ github.run_id }}.json
+          if-no-files-found: warn
+          retention-days: 30

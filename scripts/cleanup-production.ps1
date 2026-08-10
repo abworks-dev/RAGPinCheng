@@ -14,7 +14,19 @@ param(
     [string]$Target = 'all',
 
     [Parameter()]
-    [string]$AsrRoot = $env:PRODUCTION_ASR_ROOT,
+    [string]$AsrDataRoot = $env:PRODUCTION_ASR_DATA_ROOT,
+
+    [Parameter()]
+    [string]$AsrProgramRoot = $env:PRODUCTION_ASR_PROGRAM_ROOT,
+
+    [Parameter()]
+    [string]$FasterWhisperQualificationRoot = $env:PRODUCTION_FASTER_WHISPER_QUALIFICATION_ROOT,
+
+    [Parameter()]
+    [string]$Qwen3AsrQualificationRoot = $env:PRODUCTION_QWEN3_ASR_QUALIFICATION_ROOT,
+
+    [Parameter()]
+    [string]$WhisperXRoot = $env:PRODUCTION_WHISPERX_ROOT,
 
     [Parameter()]
     [string]$RuntimeRoot = $env:PRODUCTION_RUNTIME_ROOT,
@@ -73,7 +85,11 @@ foreach ($targetName in $selectedTargets) {
 
     switch ($targetName) {
         'asr' {
-            $arguments.RootPath = $AsrRoot
+            $arguments.DataRoot = $AsrDataRoot
+            $arguments.ProgramRoot = $AsrProgramRoot
+            $arguments.FasterWhisperQualificationRoot = $FasterWhisperQualificationRoot
+            $arguments.Qwen3AsrQualificationRoot = $Qwen3AsrQualificationRoot
+            $arguments.WhisperXRoot = $WhisperXRoot
             $arguments.AuditPath = Join-Path $auditRoot 'asr.json'
         }
         'runtime' {
@@ -132,9 +148,13 @@ $summary = [ordered]@{
     Status      = if ($failed) { 'failed' } else { 'passed' }
     Results     = @($results)
     ModuleRoots = [ordered]@{
-        AsrRoot         = $AsrRoot
-        RuntimeRoot     = $RuntimeRoot
-        BackupDirectory = $BackupDirectory
+        AsrDataRoot                    = $AsrDataRoot
+        AsrProgramRoot                 = $AsrProgramRoot
+        FasterWhisperQualificationRoot = $FasterWhisperQualificationRoot
+        Qwen3AsrQualificationRoot       = $Qwen3AsrQualificationRoot
+        WhisperXRoot                    = $WhisperXRoot
+        RuntimeRoot                     = $RuntimeRoot
+        BackupDirectory                 = $BackupDirectory
     }
 }
 

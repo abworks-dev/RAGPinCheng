@@ -22,7 +22,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: production-asr-faster-whisper-qualification
+  group: production-gpu-exclusive
   cancel-in-progress: false
 
 jobs:
@@ -479,3 +479,33 @@ jobs:
             ${{ runner.temp }}\faster-whisper-r3-${{ github.run_id }}\qualification-diagnostic.json
           if-no-files-found: error
           retention-days: 14
+
+      - name: Compact qualification run after evidence upload
+        if: ${{ always() }}
+        shell: powershell
+        env:
+          COMPACTION_ENABLED: ${{ vars.PRODUCTION_ASR_RUN_COMPACTION_ENABLED }}
+          QUALIFICATION_JOB_STATUS: ${{ job.status }}
+          COMPACTION_AUDIT: ${{ runner.temp }}\faster-whisper-compaction-${{ github.run_id }}.json
+        run: |
+          $arguments = @{
+            TargetKind = 'qualification'
+            Engine = 'faster-whisper'
+            ManagedRoot = $env:PRODUCTION_FASTER_WHISPER_QUALIFICATION_ROOT
+            Identity = '${{ github.run_id }}'
+            AuditPath = $env:COMPACTION_AUDIT
+            Confirm = $false
+          }
+          if ($env:COMPACTION_ENABLED -eq 'true' -and $env:QUALIFICATION_JOB_STATUS -eq 'success') {
+            $arguments.Apply = $true
+          }
+          & "${{ github.workspace }}\scripts\compact-asr-run.ps1" @arguments
+
+      - name: Upload qualification compaction audit
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: faster-whisper-compaction-${{ github.run_id }}
+          path: ${{ runner.temp }}\faster-whisper-compaction-${{ github.run_id }}.json
+          if-no-files-found: warn
+          retention-days: 30

@@ -34,8 +34,13 @@ def test_cleanup_workflow_uses_named_parameter_splatting():
     workflow = read_text(".github/workflows/cleanup-production.yml")
 
     assert "$arguments = @{" in workflow
-    assert "Target          = $target" in workflow
-    assert "Confirm         = $false" in workflow
+    assert "Target                         = $target" in workflow
+    assert "AsrDataRoot                    = $env:ASR_DATA_ROOT" in workflow
+    assert "AsrProgramRoot                 = $env:ASR_PROGRAM_ROOT" in workflow
+    assert "FasterWhisperQualificationRoot = $env:FASTER_WHISPER_QUALIFICATION_ROOT" in workflow
+    assert "Qwen3AsrQualificationRoot       = $env:QWEN3_ASR_QUALIFICATION_ROOT" in workflow
+    assert "WhisperXRoot                    = $env:WHISPERX_ROOT" in workflow
+    assert "Confirm                         = $false" in workflow
     assert "$arguments.Apply = $true" in workflow
     assert "'-Target', $target" not in workflow
     assert "$arguments += '-Apply'" not in workflow
@@ -46,8 +51,10 @@ def test_cleanup_operations_owns_manual_and_scheduled_triggers():
 
     assert "workflow_dispatch:" in workflow
     assert "schedule:" in workflow
-    assert "30 19 * * *" in workflow
-    assert "*/30 * * * *" in workflow
+    assert "23 19 * * *" in workflow
+    assert "7,37 * * * *" in workflow
+    assert "30 19 * * *" not in workflow
+    assert "*/30 * * * *" not in workflow
     assert "cleanup-production.yml" in workflow
     assert "PRODUCTION_AUTO_CLEANUP_ENABLED" in workflow
     assert "backup-apply" in workflow
