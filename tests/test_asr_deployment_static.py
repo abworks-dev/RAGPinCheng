@@ -1214,7 +1214,12 @@ def test_shared_asr_manifest_preflights_are_read_only_and_sanitized():
         assert "PRODUCTION_ASR_QUALIFICATION_ROOT" in workflow
         assert "PRODUCTION_ASR_QUALIFICATION_MANIFEST_PATH" in workflow
         assert "manifest_preflight:" in workflow
-        assert "enable exactly one of execute_qualification or manifest_preflight" in workflow
+        expected_gate = (
+            "enable exactly one qualification execution mode"
+            if engine == "whisperx"
+            else "enable exactly one of execute_qualification or manifest_preflight"
+        )
+        assert expected_gate in workflow
         preflight = workflow.split("  manifest-preflight:", 1)[1].split(
             "\n  qualify:", 1
         )[0]

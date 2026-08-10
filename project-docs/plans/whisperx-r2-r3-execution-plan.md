@@ -79,3 +79,16 @@ qualification，不改变应用 Profile、ProviderCandidate、normalizer 或 Can
 误命中为零。任一条件不满足即失败关闭；不得修改样本或阈值，不启用 Profile，
 不注册服务或接入流量。
 
+## 2026-08-10 Runtime preflight 加固
+
+在共享语料中性 preflight 基础上，新增 WhisperX 专属 `runtime_preflight` 模式。该模式
+使用标准库、本地 manifest helper 和只读模型 cache validator，验证中性语料、ASR/中文
+aligner revision、隔离路径、Python 3.11、单 GPU 身份和 Profile disabled 状态；不创建
+venv、不安装依赖、不下载模型、不执行推理。精确 Torch/CUDA/FP16 依赖门禁仍留在实际
+qualification 的隔离 venv 内。
+
+真实 qualification job 先执行同一 runtime preflight，失败即跳过推理；preflight 报告
+始终写入 `${runner.temp}` 并上传，包含缺失 Python 路径等前置失败。只有 preflight 通过
+才允许从最新完整 `master` SHA 运行一次三候选矩阵。该补丁不改变模型、样本、阈值、
+Provider/Canonical 契约、Profile admission 或生产服务状态。
+

@@ -287,3 +287,9 @@ SenseVoice；Ubuntu 应用侧 `ASR_ENABLED` 仍必须为 `false`。跨节点验�
   固定 Provider/Profile、双模型缓存、Windows runner 与回滚边界。
 - [共享 ASR Qualification 语料迁移](../plans/shared-asr-qualification-corpus-migration.md)
   固定三引擎统一 manifest schema、中性变量迁移、只读 preflight 和回滚边界。
+
+WhisperX 另提供互斥的 `runtime_preflight`：只读检查 Python、WhisperX/中文 aligner
+模型 manifest、隔离目录、GPU 单卡身份和 Profile disabled 状态，结果写入 runner temp
+的脱敏 artifact；不安装依赖、不下载模型、不启动服务。真实 qualification job 只有在
+runtime preflight 成功后才运行；缺少 Python 路径时也会生成固定失败报告，避免空 report
+根目录导致无证据退出。

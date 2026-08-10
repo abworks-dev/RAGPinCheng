@@ -17,6 +17,11 @@ on:
         required: true
         default: false
         type: boolean
+      runtime_preflight:
+        description: "Read and validate WhisperX paths, model manifests, GPU identity, and disabled Profile"
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -44,8 +49,14 @@ jobs:
             echo "qualification must run from master" >&2
             exit 1
           fi
-          if [[ "${{ inputs.execute_qualification }}" == "${{ inputs.manifest_preflight }}" ]]; then
-            echo "enable exactly one of execute_qualification or manifest_preflight" >&2
+          selected=0
+          for value in "${{ inputs.execute_qualification }}" "${{ inputs.manifest_preflight }}" "${{ inputs.runtime_preflight }}"; do
+            if [[ "$value" == "true" ]]; then
+              ((selected+=1))
+            fi
+          done
+          if [[ "$selected" -ne 1 ]]; then
+            echo "enable exactly one qualification execution mode" >&2
             exit 1
           fi
 
@@ -100,6 +111,48 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  runtime-preflight:
+    needs: gate
+    if: ${{ inputs.runtime_preflight }}
+    environment: production-asr
+    runs-on: [self-hosted, Windows, X64, asr-production]
+    timeout-minutes: 10
+    env:
+      PRODUCTION_PYTHON311_PATH: ${{ vars.PRODUCTION_PYTHON311_PATH }}
+      PRODUCTION_ASR_QUALIFICATION_ROOT: ${{ vars.PRODUCTION_ASR_QUALIFICATION_ROOT }}
+      PRODUCTION_ASR_QUALIFICATION_MANIFEST_PATH: ${{ vars.PRODUCTION_ASR_QUALIFICATION_MANIFEST_PATH }}
+      PRODUCTION_WHISPERX_MODEL_ROOT: ${{ vars.PRODUCTION_WHISPERX_MODEL_ROOT }}
+      PRODUCTION_WHISPERX_NLTK_ROOT: ${{ vars.PRODUCTION_WHISPERX_NLTK_ROOT }}
+      PRODUCTION_WHISPERX_QUALIFICATION_ROOT: ${{ vars.PRODUCTION_WHISPERX_QUALIFICATION_ROOT }}
+      PRODUCTION_WHISPERX_WHEEL_CACHE_ROOT: ${{ vars.PRODUCTION_WHISPERX_WHEEL_CACHE_ROOT }}
+      PRODUCTION_WHISPERX_REPORT_ROOT: ${{ vars.PRODUCTION_WHISPERX_REPORT_ROOT }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 1
+
+      - name: Validate WhisperX runtime read-only
+        shell: powershell
+        run: |
+          $report = Join-Path $env:RUNNER_TEMP "whisperx-runtime-preflight-${{ github.run_id }}.json"
+          if ([string]::IsNullOrWhiteSpace($env:PRODUCTION_PYTHON311_PATH)) {
+            @{schema_version="whisperx-runtime-preflight/1"; status="fail"; failure_code="python311_path_missing"; production_services_modified=$false} |
+              ConvertTo-Json | Set-Content -LiteralPath $report -Encoding UTF8
+            exit 2
+          }
+          & $env:PRODUCTION_PYTHON311_PATH "${{ github.workspace }}\scripts\run_whisperx_runtime_preflight.py" --report $report
+          exit $LASTEXITCODE
+
+      - name: Upload sanitized runtime preflight
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: whisperx-runtime-preflight-${{ github.run_id }}
+          path: ${{ runner.temp }}\whisperx-runtime-preflight-${{ github.run_id }}.json
+          if-no-files-found: error
+          retention-days: 14
+
   qualify:
     needs: gate
     if: ${{ inputs.execute_qualification }}
@@ -140,7 +193,30 @@ jobs:
           ref: ${{ inputs.commit_sha }}
           fetch-depth: 1
 
+      - name: Validate WhisperX runtime read-only
+        id: runtime_preflight
+        shell: powershell
+        run: |
+          $report = Join-Path $env:RUNNER_TEMP "whisperx-runtime-preflight-${{ github.run_id }}.json"
+          if ([string]::IsNullOrWhiteSpace($env:PRODUCTION_PYTHON311_PATH)) {
+            @{schema_version="whisperx-runtime-preflight/1"; status="fail"; failure_code="python311_path_missing"; production_services_modified=$false} |
+              ConvertTo-Json | Set-Content -LiteralPath $report -Encoding UTF8
+            exit 2
+          }
+          & $env:PRODUCTION_PYTHON311_PATH "${{ github.workspace }}\scripts\run_whisperx_runtime_preflight.py" --report $report
+          exit $LASTEXITCODE
+
+      - name: Upload sanitized runtime preflight
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: whisperx-runtime-preflight-${{ github.run_id }}
+          path: ${{ runner.temp }}\whisperx-runtime-preflight-${{ github.run_id }}.json
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Run isolated WhisperX qualification
+        if: ${{ steps.runtime_preflight.outcome == 'success' }}
         shell: powershell
         env:
           ASR_DEPENDENCY_PROXY: ${{ secrets.ASR_DEPENDENCY_PROXY }}
@@ -157,8 +233,12 @@ jobs:
         if: ${{ always() }}
         shell: powershell
         run: |
-          $path = Join-Path $env:PRODUCTION_WHISPERX_REPORT_ROOT "runs\${{ github.run_id }}\reports\verdict.json"
-          if (Test-Path -LiteralPath $path -PathType Leaf) {
+          if (-not [string]::IsNullOrWhiteSpace($env:PRODUCTION_WHISPERX_REPORT_ROOT)) {
+            $path = Join-Path $env:PRODUCTION_WHISPERX_REPORT_ROOT "runs\${{ github.run_id }}\reports\verdict.json"
+          } else {
+            $path = $null
+          }
+          if ($path -and (Test-Path -LiteralPath $path -PathType Leaf)) {
             $v = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
             @(
               "## WhisperX qualification",
@@ -180,7 +260,7 @@ jobs:
           }
 
       - name: Upload sanitized verdict
-        if: ${{ always() }}
+        if: ${{ always() && env.PRODUCTION_WHISPERX_REPORT_ROOT != '' }}
         uses: actions/upload-artifact@v4
         with:
           name: whisperx-qualification-verdict-${{ github.run_id }}

@@ -318,7 +318,11 @@ def test_workflow_and_runner_are_manual_isolated_and_disabled():
         encoding="utf-8"
     )
     assert "workflow_dispatch:" in workflow
-    assert "execute_qualification must be explicitly enabled" in workflow
+    assert "enable exactly one qualification execution mode" in workflow
+    assert "runtime_preflight:" in workflow
+    assert "if: ${{ inputs.runtime_preflight }}" in workflow
+    assert "run_whisperx_runtime_preflight.py" in workflow
+    assert "python311_path_missing" in workflow
     assert "environment: production-asr" in workflow
     assert "prepare-qwen3-asr-qualification-samples.ps1" not in workflow
     assert "PRODUCTION_ASR_QUALIFICATION_ROOT" in workflow
