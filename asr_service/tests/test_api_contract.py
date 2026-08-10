@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import time
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,7 @@ from asr_service.config import AsrServiceSettings
 from asr_service.engine_protocol import (
     FASTER_WHISPER_SERVICE_CONFIG,
     SENSEVOICE_SERVICE_CONFIG,
+    ServiceEngineCapabilities,
 )
 from asr_service.engine_registry import EngineRegistration, EngineRegistry
 from asr_service.engines.fake import FakeEngine
@@ -198,6 +200,39 @@ def test_enabled_default_wiring_rejects_unverified_model_cache(tmp_path):
         create_app(settings(tmp_path))
 
 
+def test_enabled_default_wiring_accepts_qwen_only_model_cache(tmp_path, monkeypatch):
+    qwen_asr_path = (tmp_path / "models" / "qwen-asr").resolve()
+    qwen_aligner_path = (tmp_path / "models" / "qwen-aligner").resolve()
+    config = replace(
+        settings(tmp_path),
+        model_cache_root=None,
+        model_manifest_path=None,
+        qwen3_asr_model_cache_root=tmp_path / "models",
+        qwen3_asr_model_manifest_path=tmp_path / "qwen-asr.json",
+        qwen3_aligner_model_cache_root=tmp_path / "models",
+        qwen3_aligner_model_manifest_path=tmp_path / "qwen-aligner.json",
+    )
+    monkeypatch.setattr(
+        "asr_service.app.validate_qwen3_asr_cache",
+        lambda *_args: ModelCacheStatus(True, "available", qwen_asr_path),
+    )
+    monkeypatch.setattr(
+        "asr_service.app.validate_qwen3_aligner_cache",
+        lambda *_args: ModelCacheStatus(True, "available", qwen_aligner_path),
+    )
+    monkeypatch.setattr(
+        "asr_service.app.Qwen3AsrEngine.capabilities",
+        lambda self: ServiceEngineCapabilities(
+            self.provider_key, self.service_profile_id, True
+        ),
+    )
+
+    app = create_app(config)
+    assert app.state.asr_scheduler.engines.available_profile_ids() == (
+        "qwen3-asr-06b-aligner-v1",
+    )
+
+
 def test_enabled_default_wiring_does_not_require_optional_candidate_caches(
     tmp_path, monkeypatch
 ):
@@ -209,6 +244,12 @@ def test_enabled_default_wiring_does_not_require_optional_candidate_caches(
     monkeypatch.setattr(
         "asr_service.app.validate_faster_whisper_cache",
         lambda *_args: ModelCacheStatus(False, "model-cache-unconfigured"),
+    )
+    monkeypatch.setattr(
+        "asr_service.app.FunAsrSenseVoiceEngine.capabilities",
+        lambda self: ServiceEngineCapabilities(
+            self.provider_key, self.service_profile_id, True
+        ),
     )
     app = create_app(settings(tmp_path))
     registrations = app.state.asr_scheduler.engines.registrations

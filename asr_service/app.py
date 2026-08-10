@@ -83,8 +83,6 @@ def create_app(
         cache = validate_sensevoice_cache(
             settings.model_cache_root, settings.model_manifest_path
         )
-        if settings.enabled and not cache.available:
-            raise RuntimeError(f"ASR model cache unavailable: {cache.reason_code}")
         sensevoice_engine = FunAsrSenseVoiceEngine(
             model_cache_ready=lambda: cache.available,
             model_path=cache.model_path,
@@ -159,24 +157,23 @@ def create_app(
             if settings.bge_priority_probe_url
             else FixedBgePriorityProbe()
         )
+        engines = EngineRegistry(
+            (
+                EngineRegistration(
+                    faster_whisper_engine, FASTER_WHISPER_SERVICE_CONFIG
+                ),
+                EngineRegistration(
+                    sensevoice_engine, SENSEVOICE_SERVICE_CONFIG
+                ),
+                EngineRegistration(qwen3_engine, QWEN3_ASR_SERVICE_CONFIG),
+                EngineRegistration(whisperx_engine, WHISPERX_SERVICE_CONFIG),
+            )
+        )
+        if settings.enabled and not engines.available_profile_ids():
+            raise RuntimeError("ASR model cache unavailable: no available profile")
         scheduler = Scheduler(
             repo,
-            EngineRegistry(
-                (
-                    EngineRegistration(
-                        faster_whisper_engine, FASTER_WHISPER_SERVICE_CONFIG
-                    ),
-                    EngineRegistration(
-                        sensevoice_engine, SENSEVOICE_SERVICE_CONFIG
-                    ),
-                    EngineRegistration(
-                        qwen3_engine, QWEN3_ASR_SERVICE_CONFIG
-                    ),
-                    EngineRegistration(
-                        whisperx_engine, WHISPERX_SERVICE_CONFIG
-                    ),
-                )
-            ),
+            engines,
             probe,
             queue_limit=settings.max_queue_length,
             failure_limit=settings.consecutive_failure_limit,

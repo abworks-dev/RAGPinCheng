@@ -2936,3 +2936,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`scripts/extract_qwen3_asr_service_start_evidence.py`、`tests/test_qwen3_asr_service_start_evidence.py`、`tests/test_asr_deployment_static.py`、`WORKLOG.md`
 - 验证：Qwen 服务证据与 ASR 部署静态专项 `47 passed`；Python `py_compile` 和 `git diff --check` 通过。只读证据 workflow `31353231522` 在旧 schema 下仅确认 `RuntimeError`/traceback，未修改生产服务或 Profile admission。
 - 待办/风险：需 PR CI 通过并合入 master 后重跑固定只读证据提取，再依据安全摘要修复临时服务启动；尚未重跑完整 Qwen R3，Profile admission 保持 disabled。
+
+### 12:06 — 修复 Qwen-only 多引擎启动门禁
+
+- 完成：依据只读证据 run `31353691326` 确认 Qwen R3 临时服务被旧的 SenseVoice 必需校验阻断；配置层改为启用服务时要求至少一套完整引擎模型配置，并继续严格校验 SenseVoice、faster-whisper、Qwen 双模型和 WhisperX 路径组合；应用层在引擎注册后要求至少一个 Profile 的缓存、CUDA 与依赖实际可用。Qwen-only 隔离服务无需伪造 SenseVoice 路径即可启动，生产默认 SenseVoice 配置和所有 Profile ID 不变。
+- 文件：`asr_service/config.py`、`asr_service/app.py`、`asr_service/tests/test_config.py`、`asr_service/tests/test_api_contract.py`、`WORKLOG.md`
+- 验证：ASR 服务、远程 Provider、部署与激活契约扩展专项 `294 passed`；Python `py_compile` 和 `git diff --check` 通过，仅有 2 条既有弃用警告。未安装依赖、未启动或修改生产服务、未修改模型缓存或 Profile admission。
+- 待办/风险：需 PR CI 通过并合入 master 后，绑定新的完整 master SHA 重跑 Qwen R3；若无任何 Profile 实际可用，服务现在会在启动时失败关闭。
