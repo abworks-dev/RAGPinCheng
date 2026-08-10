@@ -1260,6 +1260,8 @@ def test_qwen3_asr_qualification_freezes_dual_models_bf16_and_result_flow():
     assert "c7cbfc2048c462b0d63a45797104fc9db3ad62b7" in script
     assert "QWEN3_ASR_MODEL_ID" in model
     assert "QWEN3_ALIGNER_MODEL_ID" in model
+    assert "REPOSITORY_ROOT = Path(__file__).resolve().parents[1]" in model
+    assert "sys.path.insert(0, str(REPOSITORY_ROOT))" in model
     assert "def classify_model_preparation_failure" in model
     assert '"exception_type": type(error).__name__' in model
     assert '"message"' not in model.split(
