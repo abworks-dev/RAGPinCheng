@@ -271,6 +271,15 @@ def test_git_sha_validation_uses_command_scoped_safe_directory():
     assert deploy.index("[string]::IsNullOrWhiteSpace($actualShaOutput)") < deploy.index("([string]$actualShaOutput).Trim()")
 
 
+def test_asr_contract_git_blob_resolution_uses_command_scoped_safe_directory():
+    contract = read("scripts/asr-contract.ps1")
+
+    assert '$resolvedSource = (Resolve-Path -LiteralPath $SourceRoot).Path' in contract
+    assert '$safeDirectory = $resolvedSource.Replace("\\", "/")' in contract
+    assert 'git -c "safe.directory=$safeDirectory" -C $resolvedSource rev-parse' in contract
+    assert "git config --global" not in contract
+
+
 def test_deploy_script_never_downloads_models_or_changes_firewall():
     deploy = read("scripts/deploy-asr.ps1").lower()
     forbidden = (

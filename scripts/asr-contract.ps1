@@ -37,7 +37,9 @@ function Get-AsrRuntimeContractSpec {
 
 function Get-AsrGitBlobId {
     param([Parameter(Mandatory = $true)][string]$SourceRoot, [Parameter(Mandatory = $true)][string]$CommitSha, [Parameter(Mandatory = $true)][string]$Path)
-    $result = & git -C $SourceRoot rev-parse "$CommitSha`:$Path"
+    $resolvedSource = (Resolve-Path -LiteralPath $SourceRoot).Path
+    $safeDirectory = $resolvedSource.Replace("\", "/")
+    $result = & git -c "safe.directory=$safeDirectory" -C $resolvedSource rev-parse "$CommitSha`:$Path"
     if ($LASTEXITCODE -ne 0 -or ([string]$result).Trim() -notmatch '^[0-9a-f]{40}$') { throw "Unable to resolve ASR contract source: $Path" }
     return ([string]$result).Trim().ToLowerInvariant()
 }
