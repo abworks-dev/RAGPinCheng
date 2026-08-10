@@ -2950,3 +2950,10 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 文件：`.github/workflows/qualify-whisperx-production.yml`、`asr_service/engine_protocol.py`、`asr_service/engines/whisperx.py`、`asr_service/tests/test_whisperx.py`、`asr_service/tests/test_whisperx_qualification.py`、`scripts/qualify-whisperx-production.ps1`、`scripts/run_whisperx_qualification.py`、`project-docs/features/transcript-pipeline.md`、`project-docs/plans/whisperx-r2-r3-execution-plan.md`、`WORKLOG.md`
 - 验证：完整 ASR service 离线测试 `207 passed`；最终 WhisperX/引擎专项 `29 passed`；PowerShell AST、workflow YAML、Python `compileall` 和 `git diff --check` 通过。扩展 Profile/静态回归另有 `72 passed`，唯一未运行成功项是当前项目 `.venv` 缺少 `nltk` 的既有 punkt 生成测试。
 - 待办/风险：尚未执行真实 Windows CUDA 三候选 qualification；必须先经 PR CI 合并，再从合并后的完整 master SHA 触发一次已批准的隔离运行。未注册或启动服务，未接入业务流量，未修改生产任务、防火墙、数据库、Qdrant、模型 revision 或 Profile admission。
+
+### 12:30 — 清除旧生产清理 Actions 记录
+
+- 完成：确认旧 `.github/workflows/production-cleanup.yml` 已不在 `master` 后，在仓库外系统临时目录备份 14 条失败 run 的 API 元数据和 SHA-256 清单；这些 runs 均无 job、日志或 artifact。随后按批准范围逐条删除 14 条旧 Actions runs。
+- 文件：`WORKLOG.md`；GitHub Actions 旧 run 记录；仓库外临时备份。
+- 验证：删除前目标集合精确匹配 14 个已批准 ID；删除后旧路径匹配 runs 为 0、旧 workflow 注册为 0、旧文件不存在，现行 `cleanup-production.yml` 与 `cleanup-production-operations.yml` 均仍存在。
+- 待办/风险：GitHub run 删除不可恢复，仓库外备份只能用于审计、不能还原 GitHub run；Actions 侧栏缓存可能需要短暂时间刷新。
