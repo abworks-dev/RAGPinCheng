@@ -35,7 +35,11 @@ concurrency:
 
 env:
   REPO_PATH: ${{ vars.PRODUCTION_REPO_PATH }}
-  ASR_ROOT: ${{ vars.PRODUCTION_ASR_ROOT }}
+  ASR_DATA_ROOT: ${{ vars.PRODUCTION_ASR_DATA_ROOT }}
+  ASR_PROGRAM_ROOT: ${{ vars.PRODUCTION_ASR_PROGRAM_ROOT }}
+  FASTER_WHISPER_QUALIFICATION_ROOT: ${{ vars.PRODUCTION_FASTER_WHISPER_QUALIFICATION_ROOT }}
+  QWEN3_ASR_QUALIFICATION_ROOT: ${{ vars.PRODUCTION_QWEN3_ASR_QUALIFICATION_ROOT }}
+  WHISPERX_ROOT: ${{ vars.PRODUCTION_WHISPERX_ROOT }}
   RUNTIME_ROOT: ${{ vars.PRODUCTION_RUNTIME_ROOT }}
   BACKUP_DIRECTORY: ${{ vars.PRODUCTION_BACKUP_DIRECTORY }}
 
@@ -74,12 +78,16 @@ jobs:
           $target = if ($env:INPUT_TARGET) { $env:INPUT_TARGET } else { 'all' }
           $apply = $env:INPUT_APPLY -eq 'true' -and $env:INPUT_CONFIRM -eq 'true'
           $arguments = @{
-            Target          = $target
-            AsrRoot         = $env:ASR_ROOT
-            RuntimeRoot     = $env:RUNTIME_ROOT
-            BackupDirectory = $env:BACKUP_DIRECTORY
-            ReportRoot      = $env:REPORT_ROOT
-            Confirm         = $false
+            Target                         = $target
+            AsrDataRoot                    = $env:ASR_DATA_ROOT
+            AsrProgramRoot                 = $env:ASR_PROGRAM_ROOT
+            FasterWhisperQualificationRoot = $env:FASTER_WHISPER_QUALIFICATION_ROOT
+            Qwen3AsrQualificationRoot       = $env:QWEN3_ASR_QUALIFICATION_ROOT
+            WhisperXRoot                    = $env:WHISPERX_ROOT
+            RuntimeRoot                     = $env:RUNTIME_ROOT
+            BackupDirectory                 = $env:BACKUP_DIRECTORY
+            ReportRoot                      = $env:REPORT_ROOT
+            Confirm                         = $false
           }
           if ($apply) { $arguments.Apply = $true }
           & (Join-Path $env:REPO_PATH 'scripts\cleanup-production.ps1') @arguments

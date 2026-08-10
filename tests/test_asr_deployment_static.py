@@ -246,7 +246,9 @@ def test_manual_workflow_has_safe_defaults_and_immutable_revision():
     assert "runs-on: [self-hosted, Windows, X64, asr-production]" in workflow
     assert workflow.count("timeout-minutes: 60") == 1
     assert workflow.count("default: false") == 3
-    assert workflow.count("shell: powershell") == 2
+    assert workflow.count("shell: powershell") == 3
+    assert "group: production-gpu-exclusive" in workflow
+    assert "Compact deployment dependency run" in workflow
     assert "shell: pwsh" not in workflow
     assert re.search(r"install_dependencies:.*?default: false", workflow, re.DOTALL)
     assert re.search(r"activate_service:.*?default: false", workflow, re.DOTALL)
@@ -1300,7 +1302,8 @@ def test_qwen3_asr_qualification_is_manual_sha_bound_and_isolated():
     assert "refs/heads/master" in workflow
     assert "environment: production-asr" in workflow
     assert "runs-on: [self-hosted, Windows, X64, asr-production]" in workflow
-    assert "production-asr-qwen3-asr-qualification" in workflow
+    assert "group: production-gpu-exclusive" in workflow
+    assert "Compact qualification run after evidence upload" in workflow
     assert '$env:PRODUCTION_QWEN3_ASR_QUALIFICATION_ROOT' in script
     assert 'environ.get("PRODUCTION_QWEN3_ASR_INPUT_ROOT")' not in contract
     assert "--engine qwen3-asr" in script

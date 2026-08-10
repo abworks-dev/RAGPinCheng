@@ -101,6 +101,14 @@ qualification 互斥，前者不安装依赖、不加载模型、不读取密钥
 `31361505382` 已确认相同 manifest SHA-256、历史 sample set、annotation version、样本数
 及八项 WAV 身份；这不构成任一引擎的 GPU qualification 或 Profile admission。
 
+三引擎 qualification 的持久运行目录采用明确的 `runs\<run_id>` 布局。证据上传后，
+workflow 对本次 run 生成收缩审计；只有任务成功且
+`PRODUCTION_ASR_RUN_COMPACTION_ENABLED=true` 时，才删除 `venv`、`wheelhouse`、
+`shared-wheel-seed`、`model-staging`、`spool`、`temp` 六类可重建重资产。失败 run 完整
+保留 24 小时后才进入同一白名单收缩，`reports/evidence/logs/state/config` 始终保留。
+已收缩 run 默认保留 30 天且至少保留最新 3 次；ASR 部署成功后可按精确 commit 收缩
+对应 dependency run。周期清理与这些 workflow 共用生产 GPU 互斥组，默认只 DryRun。
+
 生产部署采用引擎通用的两层身份：`runtime_contract_sha256` 是某一引擎运行闭包
 （固定模型 revision 与明确源码文件的 Git blob 身份），`deployment_contract_sha256`
 是部署/预检行为闭包。两者都不依赖 Windows 工作树的 CRLF 字节。旧 R3 只能在当前
@@ -196,6 +204,9 @@ workflow，必须在后续生产 R3 方案中明确处理。
 - `scripts/asr_qualification_manifest.py`、
   `asr_service/asr-qualification-manifest.example.json`
   （三引擎共享的只读八样本 manifest 解析、严格文件身份校验与中性变量门禁）
+- `scripts/compact-asr-run.ps1`、`scripts/cleanup-asr-storage.ps1`、
+  `.github/workflows/cleanup-production.yml`
+  （单次 run 精确收缩、周期保留策略、路径安全检查与 JSON 审计）
 - `frontend/src/components/citations.ts`
 - `frontend/src/components/SourcesPanel.tsx`（播放按钮）
 - `frontend/src/components/Message.tsx`（引用 click seek）

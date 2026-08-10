@@ -29,17 +29,14 @@ on:
         default: manual
         type: string
   schedule:
-    - cron: '30 19 * * *'
-    - cron: '*/30 * * * *'
+    - cron: '23 19 * * *'
+    - cron: '7,37 * * * *'
 
 permissions:
   contents: read
 
 env:
   REPO_PATH: ${{ vars.PRODUCTION_REPO_PATH }}
-  ASR_ROOT: ${{ vars.PRODUCTION_ASR_ROOT }}
-  RUNTIME_ROOT: ${{ vars.PRODUCTION_RUNTIME_ROOT }}
-  BACKUP_DIRECTORY: ${{ vars.PRODUCTION_BACKUP_DIRECTORY }}
 
 jobs:
   manual-cleanup:
@@ -54,7 +51,7 @@ jobs:
     secrets: inherit
 
   nightly-dryrun:
-    if: ${{ github.event_name == 'schedule' && github.event.schedule == '30 19 * * *' }}
+    if: ${{ github.event_name == 'schedule' && github.event.schedule == '23 19 * * *' }}
     uses: ./.github/workflows/cleanup-production.yml
     with:
       target: all
@@ -65,7 +62,7 @@ jobs:
     secrets: inherit
 
   disk-pressure:
-    if: ${{ github.event_name == 'schedule' && github.event.schedule == '*/30 * * * *' }}
+    if: ${{ github.event_name == 'schedule' && github.event.schedule == '7,37 * * * *' }}
     runs-on: [self-hosted, windows, production, gpu]
     environment: production-asr
     timeout-minutes: 30
