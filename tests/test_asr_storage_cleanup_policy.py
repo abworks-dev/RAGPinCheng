@@ -217,3 +217,9 @@ def test_storage_mutating_workflows_share_concurrency_and_default_to_dry_run():
     assert "needs: [deploy, verify-ubuntu]" in deploy
     assert "needs.deploy.result == 'success'" in deploy
     assert "needs.verify-ubuntu.result == 'success'" in deploy
+    assert "COMPACTION_AUDIT: ${{ runner.temp }}" not in deploy
+    assert (
+        '$auditPath = Join-Path $env:RUNNER_TEMP '
+        '"asr-deployment-compaction-${{ github.run_id }}.json"'
+    ) in deploy
+    assert "AuditPath = $auditPath" in deploy
