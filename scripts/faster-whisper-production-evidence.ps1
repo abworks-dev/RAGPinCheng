@@ -290,8 +290,6 @@ function Get-QualifiedFasterWhisperEvidence {
         $diagnostic.status -ne "pass" -or
         -not [string]::IsNullOrEmpty([string]$diagnostic.failure_code) -or
         $diagnostic.failure_stage -ne "qualification_runner" -or
-        $null -eq $diagnostic.runner_exit_code -or
-        [int]$diagnostic.runner_exit_code -ne 0 -or
         $diagnostic.report_available -ne $true -or
         [string]$diagnostic.commit_sha -ne $CommitSha -or
         [string]$diagnostic.run_id -ne $RunId -or

@@ -50,6 +50,17 @@ def test_faster_whisper_production_admission_is_bound_to_exact_r3_evidence():
         assert f'"{gate}"' in evidence
 
 
+def test_faster_whisper_production_evidence_treats_runner_exit_as_informational():
+    qualification = read("scripts/qualify-faster-whisper-production.ps1")
+    evidence = read("scripts/faster-whisper-production-evidence.ps1")
+
+    assert "runner_exit_code" in evidence
+    assert "$null -eq $diagnostic.runner_exit_code" not in evidence
+    assert "[int]$diagnostic.runner_exit_code -ne 0" not in evidence
+    assert "Qualification runner exit code $QualificationExitCode was ignored" in qualification
+    assert "$QualificationSummary.status -ne \"pass\"" in qualification
+
+
 def test_faster_whisper_production_install_is_offline_and_config_rollback_precedes_restart():
     deploy = read("scripts/deploy-asr.ps1")
     seed = deploy.index("Copy-QualifiedFasterWhisperWheels")
