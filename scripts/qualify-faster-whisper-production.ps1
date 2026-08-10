@@ -1887,6 +1887,12 @@ try {
         (Join-Path $ResolvedAntlr4WheelBundle "internal-wheel-manifest.json"),
         (Join-Path $ResolvedCrcmodWheelBundle "internal-wheel-manifest.json")
     )
+    $InternalManifests = @(
+        $InternalWheelManifest,
+        $Oss2WheelManifest,
+        $Antlr4WheelManifest,
+        $CrcmodWheelManifest
+    )
     $CacheIdentity = Get-WheelCacheKey `
         -PythonPath $VenvPython `
         -ProductionFreezePath (Join-Path $EvidenceRoot "production-freeze.txt") `
@@ -1968,7 +1974,7 @@ try {
                     -LogPath (Join-Path $LogRoot "pip-resolution-report.log")
                 Assert-ResolutionReportMatchesInternalWheels `
                     -ResolutionReportPath $ResolutionReport `
-                    -InternalManifests $ReferenceManifests
+                    -InternalManifests $InternalManifests
                 $DependencyFailureOperation = "pip_download_command"
                 Invoke-External `
                     -FilePath $VenvPython `
@@ -1992,11 +1998,11 @@ try {
                 $pipDownloadFailure = $_
             }
         } finally {
-            $DependencyFailureOperation = "pip_download_proxy_restore"
             try {
                 Clear-ScopedProxy
             } catch {
                 $proxyRestoreFailure = $_
+                $DependencyFailureOperation = "pip_download_proxy_restore"
             }
             Write-StageTiming -Stage "dependency_download" -Stopwatch $DownloadStopwatch
         }
