@@ -120,6 +120,8 @@ def create_app(
             asr_model_path=qwen3_asr_cache.model_path,
             aligner_model_path=qwen3_aligner_cache.model_path,
             unavailable_reason_code=qwen3_reason,
+            language_policy=settings.qwen3_language_policy,
+            timing_diagnostics=settings.qwen3_timing_diagnostics,
         )
         whisperx_cache = validate_whisperx_cache(
             settings.whisperx_model_cache_root,

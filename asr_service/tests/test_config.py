@@ -27,6 +27,8 @@ ENV_KEYS = (
     "ASR_QWEN3_ASR_MODEL_MANIFEST_PATH",
     "ASR_QWEN3_ALIGNER_MODEL_CACHE_ROOT",
     "ASR_QWEN3_ALIGNER_MODEL_MANIFEST_PATH",
+    "ASR_QWEN3_LANGUAGE_POLICY",
+    "ASR_QWEN3_TIMING_DIAGNOSTICS",
     "BGE_PRIORITY_PROBE_CONNECT_TIMEOUT_SECONDS",
     "BGE_PRIORITY_PROBE_REQUEST_TIMEOUT_SECONDS",
     "ASR_LOG_DIR",
@@ -41,7 +43,24 @@ def test_service_defaults_are_disabled_and_use_exact_environment_names(monkeypat
     assert settings.host == "127.0.0.1"
     assert settings.port == 8200
     assert settings.spool_root.name == ".asr-spool"
+    assert settings.qwen3_language_policy == "forced-chinese"
+    assert settings.qwen3_timing_diagnostics is False
     settings.validate_for_startup()
+
+
+def test_qwen_candidate_settings_are_explicit_and_fail_closed(monkeypatch):
+    for key in ENV_KEYS:
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("ASR_QWEN3_LANGUAGE_POLICY", "auto-zh-en")
+    monkeypatch.setenv("ASR_QWEN3_TIMING_DIAGNOSTICS", "true")
+    settings = AsrServiceSettings.from_env()
+    settings.validate_for_startup()
+    assert settings.qwen3_language_policy == "auto-zh-en"
+    assert settings.qwen3_timing_diagnostics is True
+
+    monkeypatch.setenv("ASR_QWEN3_LANGUAGE_POLICY", "unrestricted")
+    with pytest.raises(RuntimeError, match="ASR_QWEN3_LANGUAGE_POLICY"):
+        AsrServiceSettings.from_env().validate_for_startup()
 
 
 def test_enabled_service_and_configured_probe_require_tokens(monkeypatch):

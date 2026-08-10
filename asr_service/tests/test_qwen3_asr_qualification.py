@@ -158,6 +158,8 @@ def test_qualification_summary_passes_only_when_every_gate_passes(
         manifest, base_url="http://127.0.0.1:18300", token="test", timeout_ms=1000
     )
     assert result["status"] == "pass"
+    assert result["schema_version"] == "qwen3-asr-qualification-report/2"
+    assert result["candidate_id"] == "forced-chinese-baseline"
     assert result["sample_count"] == 8
     assert all(item["pass"] for item in result["gates"].values())
     assert all(item["pass"] for item in result["samples"])
@@ -183,6 +185,18 @@ def test_qualification_summary_fails_on_rtf_or_nondeterminism(
     assert result["status"] == "fail"
     assert any(not item["rtf_pass"] for item in result["samples"])
     assert any(not item["deterministic"] for item in result["samples"])
+
+
+def test_qualification_candidate_id_is_strict(tmp_path, monkeypatch):
+    manifest = qualification.load_manifest(_manifest(tmp_path))
+    with pytest.raises(ValueError, match="qualification candidate"):
+        qualification.run_qualification(
+            manifest,
+            base_url="http://127.0.0.1:18300",
+            token="test",
+            timeout_ms=1000,
+            candidate_id="unreviewed",
+        )
 
 
 def _fake_download(sources: dict[str, Path]):

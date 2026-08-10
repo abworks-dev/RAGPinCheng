@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -12,7 +13,10 @@ from asr_service.engine_protocol import (
     QWEN3_ASR_SERVICE_CONFIG,
     SENSEVOICE_SERVICE_CONFIG,
 )
-from asr_service.engines.qwen3_asr import Qwen3AsrEngine
+from asr_service.engines.qwen3_asr import (
+    AUTO_ZH_EN_POLICY,
+    Qwen3AsrEngine,
+)
 from src.transcription.provider_protocol import ProviderErrorCode, ProviderFailure
 
 
@@ -209,6 +213,52 @@ def test_non_chinese_result_is_rejected():
     )
     assert type(result) is ProviderFailure
     assert result.error_code is ProviderErrorCode.invalid_provider_output
+
+
+def test_auto_zh_en_candidate_uses_detection_and_accepts_mixed_result():
+    model = Model((timestamp(),), language="Chinese,English")
+    result = transcribe(
+        Qwen3AsrEngine(_model=model, language_policy=AUTO_ZH_EN_POLICY)
+    )
+    assert type(result) is EngineChunkCandidate
+    assert model.calls[0]["language"] is None
+    assert result.language == "zh-CN"
+
+
+@pytest.mark.parametrize("language", ["English", "Korean", "Chinese,Korean", ""])
+def test_auto_zh_en_candidate_rejects_results_outside_zh_en(language):
+    result = transcribe(
+        Qwen3AsrEngine(
+            _model=Model((timestamp(),), language=language),
+            language_policy=AUTO_ZH_EN_POLICY,
+        )
+    )
+    assert type(result) is ProviderFailure
+    assert result.error_code is ProviderErrorCode.invalid_provider_output
+
+
+def test_unknown_language_policy_fails_at_construction():
+    with pytest.raises(ValueError, match="language policy"):
+        Qwen3AsrEngine(language_policy="unknown")
+
+
+def test_timing_diagnostic_contains_only_fixed_numeric_metadata(capsys):
+    result = transcribe(
+        Qwen3AsrEngine(
+            _model=Model((timestamp(),), language="Chinese,English"),
+            language_policy=AUTO_ZH_EN_POLICY,
+            timing_diagnostics=True,
+        )
+    )
+    assert type(result) is EngineChunkCandidate
+    line = capsys.readouterr().out.strip()
+    assert line.startswith("QWEN3_ENGINE_TIMING ")
+    payload = json.loads(line.removeprefix("QWEN3_ENGINE_TIMING "))
+    assert payload["schema_version"] == "qwen3-asr-engine-timing/1"
+    assert payload["language_policy"] == AUTO_ZH_EN_POLICY
+    assert payload["outcome"] == "success"
+    assert type(payload["elapsed_ms"]) is int
+    assert "wav" not in line
 
 
 def test_profile_mismatch_is_permanent_contract_failure():

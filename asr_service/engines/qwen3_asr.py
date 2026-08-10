@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import base64
 import importlib
+import json
+import time
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from pathlib import Path
@@ -24,7 +26,24 @@ from asr_service.engine_protocol import (
 )
 
 
+FORCED_CHINESE_POLICY = "forced-chinese"
+AUTO_ZH_EN_POLICY = "auto-zh-en"
+QWEN3_LANGUAGE_POLICIES = frozenset({FORCED_CHINESE_POLICY, AUTO_ZH_EN_POLICY})
 _QWEN_LANGUAGE = "Chinese"
+_AUTO_LANGUAGES = frozenset({"Chinese", "English"})
+
+
+def _auto_language_is_allowed(value: object) -> bool:
+    if type(value) is not str:
+        return False
+    languages = tuple(item.strip() for item in value.split(","))
+    return (
+        bool(languages)
+        and all(languages)
+        and len(languages) == len(set(languages))
+        and _QWEN_LANGUAGE in languages
+        and set(languages) <= _AUTO_LANGUAGES
+    )
 
 
 def _milliseconds(value: object) -> int:
@@ -50,6 +69,23 @@ class Qwen3AsrEngine:
     asr_model_path: Path | None = None
     aligner_model_path: Path | None = None
     unavailable_reason_code: str = "model-cache-unavailable"
+    language_policy: str = FORCED_CHINESE_POLICY
+    timing_diagnostics: bool = False
+
+    def __post_init__(self) -> None:
+        if self.language_policy not in QWEN3_LANGUAGE_POLICIES:
+            raise ValueError("unsupported Qwen3-ASR language policy")
+
+    def _emit_timing(self, started: float, outcome: str) -> None:
+        if not self.timing_diagnostics:
+            return
+        payload = {
+            "schema_version": "qwen3-asr-engine-timing/1",
+            "language_policy": self.language_policy,
+            "outcome": outcome,
+            "elapsed_ms": max(0, round((time.perf_counter() - started) * 1000)),
+        }
+        print("QWEN3_ENGINE_TIMING " + json.dumps(payload, sort_keys=True), flush=True)
 
     def capabilities(self) -> ServiceEngineCapabilities:
         if self._model is not None:
@@ -148,15 +184,32 @@ class Qwen3AsrEngine:
         try:
             model = self._load_model()
             encoded = base64.b64encode(chunk.content).decode("ascii")
-            results = model.transcribe(
-                audio=f"data:audio/wav;base64,{encoded}",
-                language=_QWEN_LANGUAGE,
-                return_time_stamps=True,
-            )
+            started = time.perf_counter()
+            try:
+                results = model.transcribe(
+                    audio=f"data:audio/wav;base64,{encoded}",
+                    language=(
+                        _QWEN_LANGUAGE
+                        if self.language_policy == FORCED_CHINESE_POLICY
+                        else None
+                    ),
+                    return_time_stamps=True,
+                )
+            except Exception:
+                self._emit_timing(started, "error")
+                raise
+            self._emit_timing(started, "success")
             if type(results) not in (list, tuple) or len(results) != 1:
                 raise ValueError("invalid engine output")
             result = results[0]
-            if getattr(result, "language", None) != _QWEN_LANGUAGE:
+            result_language = getattr(result, "language", None)
+            if (
+                self.language_policy == FORCED_CHINESE_POLICY
+                and result_language != _QWEN_LANGUAGE
+            ) or (
+                self.language_policy == AUTO_ZH_EN_POLICY
+                and not _auto_language_is_allowed(result_language)
+            ):
                 raise ValueError("unsupported transcription language")
             align_result = getattr(result, "time_stamps", None)
             raw_timestamps = getattr(align_result, "items", None)

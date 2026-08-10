@@ -12,7 +12,8 @@ param(
     [string]$SummaryPath = "",
     [string]$DependencyDiagnosticPath = "",
     [string]$LicenseMatrixPath = "",
-    [string]$ModelPreparationDiagnosticPath = ""
+    [string]$ModelPreparationDiagnosticPath = "",
+    [string]$PerformanceDiagnosticPath = ""
 )
 
 Set-StrictMode -Version Latest
@@ -29,6 +30,7 @@ $QualificationResolutionFingerprint = ""
 $ModelCacheRoot = Join-Path $DataRoot "qualification\qwen3-asr\models"
 $AsrModelRevision = "5eb144179a02acc5e5ba31e748d22b0cf3e303b0"
 $AlignerModelRevision = "c7cbfc2048c462b0d63a45797104fc9db3ad62b7"
+$CandidateId = "auto-zh-en"
 $AsrModelRelativePath = "Qwen3-ASR-0.6B\$AsrModelRevision"
 $AlignerModelRelativePath = "Qwen3-ForcedAligner-0.6B\$AlignerModelRevision"
 $AsrModelManifest = Join-Path $ModelCacheRoot "$AsrModelRelativePath\model-manifest.json"
@@ -1346,6 +1348,7 @@ function Write-SanitizedDependencyFailure {
         failure_code = "dependency_preparation_failed"
         commit_sha = $CommitSha.ToLowerInvariant()
         run_id = $RunId
+        candidate_id = $CandidateId
         dependency_stage = [string]$diagnosis.Stage
         dependency_operation = $Operation
         failure_origin = $failureOrigin
@@ -1384,6 +1387,7 @@ function Write-SanitizedSummary {
         failure_code = $Code
         commit_sha = $CommitSha.ToLowerInvariant()
         run_id = $RunId
+        candidate_id = $CandidateId
         asr_model_id = "Qwen/Qwen3-ASR-0.6B"
         asr_model_revision = $AsrModelRevision
         aligner_model_id = "Qwen/Qwen3-ForcedAligner-0.6B"
@@ -1867,6 +1871,7 @@ print('qualification-module-origins-verified')
         "ASR_QWEN3_ASR_MODEL_MANIFEST_PATH",
         "ASR_QWEN3_ALIGNER_MODEL_CACHE_ROOT",
         "ASR_QWEN3_ALIGNER_MODEL_MANIFEST_PATH",
+        "ASR_QWEN3_LANGUAGE_POLICY", "ASR_QWEN3_TIMING_DIAGNOSTICS",
         "ASR_WHISPERX_MODEL_CACHE_ROOT",
         "ASR_WHISPERX_MODEL_MANIFEST_PATH",
         "ASR_WHISPERX_ALIGN_MODEL_CACHE_ROOT",
@@ -1889,6 +1894,8 @@ print('qualification-module-origins-verified')
     $env:ASR_QWEN3_ASR_MODEL_MANIFEST_PATH = $AsrModelManifest
     $env:ASR_QWEN3_ALIGNER_MODEL_CACHE_ROOT = $ModelCacheRoot
     $env:ASR_QWEN3_ALIGNER_MODEL_MANIFEST_PATH = $AlignerModelManifest
+    $env:ASR_QWEN3_LANGUAGE_POLICY = $CandidateId
+    $env:ASR_QWEN3_TIMING_DIAGNOSTICS = "true"
     $env:ASR_LOG_DIR = $LogRoot
     $env:BGE_PRIORITY_PROBE_URL = $env:GPU_SERVICE_ACTIVITY_URL
     $env:BGE_PRIORITY_PROBE_TOKEN = $env:GPU_SERVICE_TOKEN
@@ -1958,7 +1965,8 @@ print('qualification-module-origins-verified')
             "--manifest-source", $ManifestSource,
             "--base-url", $TempAsrUrl,
             "--report-dir", $ReportRoot,
-            "--timeout-ms", "600000"
+            "--timeout-ms", "600000",
+            "--candidate-id", $CandidateId
         ) `
         -WorkingDirectory $ResolvedSource `
         -WindowStyle Hidden `
@@ -2018,9 +2026,6 @@ print('qualification-module-origins-verified')
         Start-Sleep -Seconds 1
         $QualificationProcess.Refresh()
     }
-    if ($QualificationProcess.ExitCode -ne 0) {
-        throw "Qualification runner failed; see local run logs"
-    }
     $PostQualificationResolution = Resolve-QualificationManifest `
         -PythonPath $MachinePython `
         -RepositoryRoot $ResolvedSource
@@ -2031,6 +2036,29 @@ print('qualification-module-origins-verified')
         throw "ASR qualification corpus changed during qualification"
     }
     Write-StageTiming -Stage "eight_sample_inference" -Stopwatch $InferenceStopwatch
+    $QualificationSummaryPath = Join-Path $ReportRoot "qualification-summary.json"
+    $LocalPerformanceDiagnosticPath = Join-Path $ReportRoot "performance-diagnostic.json"
+    $FailureCode = "performance_diagnostic_failed"
+    Invoke-External `
+        -FilePath $VenvPython `
+        -Arguments @(
+            "-m", "scripts.summarize_qwen3_asr_performance",
+            "--service-log", $ServiceStdout,
+            "--qualification-summary", $QualificationSummaryPath,
+            "--output", $LocalPerformanceDiagnosticPath
+        ) `
+        -LogPath (Join-Path $LogRoot "performance-diagnostic.log")
+    if (-not [string]::IsNullOrWhiteSpace($PerformanceDiagnosticPath)) {
+        $performanceParent = Split-Path -Parent $PerformanceDiagnosticPath
+        if (-not (Test-Path -LiteralPath $performanceParent)) {
+            New-Item -ItemType Directory -Path $performanceParent -Force | Out-Null
+        }
+        Copy-Item `
+            -LiteralPath $LocalPerformanceDiagnosticPath `
+            -Destination $PerformanceDiagnosticPath `
+            -Force
+    }
+    $FailureCode = "qualification_failed"
     $serviceLogs = (
         (Get-Content -LiteralPath $ServiceStdout -Raw -ErrorAction SilentlyContinue) +
         (Get-Content -LiteralPath $ServiceStderr -Raw -ErrorAction SilentlyContinue)
@@ -2038,10 +2066,26 @@ print('qualification-module-origins-verified')
     if ($serviceLogs -match "(?i)out of memory|cuda.*oom") {
         throw "CUDA OOM was detected in qualification service logs"
     }
-    $QualificationSummary = Get-Content `
-        -LiteralPath (Join-Path $ReportRoot "qualification-summary.json") `
-        -Raw -Encoding UTF8 | ConvertFrom-Json
+    $QualificationSummary = $null
+    if (Test-Path -LiteralPath $QualificationSummaryPath -PathType Leaf) {
+        $QualificationSummary = Get-Content `
+            -LiteralPath $QualificationSummaryPath `
+            -Raw -Encoding UTF8 | ConvertFrom-Json
+    }
+    if ($QualificationProcess.ExitCode -ne 0) {
+        if (
+            $null -ne $QualificationSummary -and
+            $QualificationSummary.status -eq "fail" -and
+            $QualificationSummary.sample_count -eq 8 -and
+            $QualificationSummary.candidate_id -eq $CandidateId
+        ) {
+            $FailureCode = "qualification_gates_failed"
+            throw "Qualification report completed but did not pass every fixed gate"
+        }
+        throw "Qualification runner failed; see local run logs"
+    }
     if ($QualificationSummary.status -ne "pass" -or $QualificationSummary.sample_count -ne 8) {
+        $FailureCode = "qualification_gates_failed"
         throw "Qualification report did not pass every fixed gate"
     }
 
@@ -2099,6 +2143,7 @@ print('qualification-module-origins-verified')
     Write-Host "Commit: $($CommitSha.ToLowerInvariant())"
     Write-Host "ASR model revision: $AsrModelRevision"
     Write-Host "Aligner model revision: $AlignerModelRevision"
+    Write-Host "Candidate: $CandidateId"
     Write-Host "Samples: 8/8"
     Write-Host "Profile admission: disabled"
 } catch {
