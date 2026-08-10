@@ -1015,6 +1015,11 @@ def test_faster_whisper_qualification_freezes_dependencies_model_and_gates():
     assert "Controlled internal wheel changed before wheelhouse recording" in script
     assert "Assert-ResolutionReportMatchesInternalWheels" in script
     assert "Controlled internal wheel resolution does not match its verified build" in script
+    assert "Controlled internal wheel changed before resolver binding" in script
+    assert "$InternalWheelRequirements = @(" in script
+    assert '$wheelPath.Replace("\\", "/")' in script
+    assert "$CombinedRequirementLines += $InternalWheelRequirements" in script
+    assert "wheel_bundle_path" not in script
     assert script.index("Assert-ResolutionReportMatchesInternalWheels") < script.index('$DependencyFailureOperation = "pip_download_command"')
     assert "Controlled internal wheel was not resolved into the wheelhouse" not in script
     diagnostic_section = script.split(

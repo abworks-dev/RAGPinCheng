@@ -1873,25 +1873,41 @@ try {
 
     $CombinedRequirements = Join-Path $ConfigRoot "qualification-requirements.txt"
     $RequirementsSource = $ResolvedSource.Replace("\", "/")
-    @(
+    $InternalManifests = @(
+        $InternalWheelManifest,
+        $Oss2WheelManifest,
+        $Antlr4WheelManifest,
+        $CrcmodWheelManifest
+    )
+    $InternalWheelRequirements = @(
+        [pscustomobject]@{ Manifest = $InternalWheelManifest; Bundle = $ResolvedInternalWheelBundle },
+        [pscustomobject]@{ Manifest = $Oss2WheelManifest; Bundle = $ResolvedOss2WheelBundle },
+        [pscustomobject]@{ Manifest = $Antlr4WheelManifest; Bundle = $ResolvedAntlr4WheelBundle },
+        [pscustomobject]@{ Manifest = $CrcmodWheelManifest; Bundle = $ResolvedCrcmodWheelBundle }
+    ) | ForEach-Object {
+        $wheelPath = Join-Path $_.Bundle ([string]$_.Manifest.wheel.file_name)
+        if ((Get-Sha256 -Path $wheelPath) -ne [string]$_.Manifest.wheel.sha256) {
+            throw "Controlled internal wheel changed before resolver binding"
+        }
+        $wheelPath.Replace("\", "/")
+    }
+    $CombinedRequirementLines = @(
         "torch==2.7.0+cu128",
-        "torchaudio==2.7.0+cu128",
+        "torchaudio==2.7.0+cu128"
+    )
+    $CombinedRequirementLines += $InternalWheelRequirements
+    $CombinedRequirementLines += @(
         "-r $RequirementsSource/asr_service/requirements-service-core.txt",
         "-r $RequirementsSource/asr_service/requirements-windows.txt",
         "-r $RequirementsSource/asr_service/requirements-faster-whisper.txt"
-    ) | Set-Content -LiteralPath $CombinedRequirements -Encoding ASCII
+    )
+    $CombinedRequirementLines | Set-Content -LiteralPath $CombinedRequirements -Encoding ASCII
 
     $ReferenceManifestPaths = @(
         $InternalWheelManifestPath,
         (Join-Path $ResolvedOss2WheelBundle "internal-wheel-manifest.json"),
         (Join-Path $ResolvedAntlr4WheelBundle "internal-wheel-manifest.json"),
         (Join-Path $ResolvedCrcmodWheelBundle "internal-wheel-manifest.json")
-    )
-    $InternalManifests = @(
-        $InternalWheelManifest,
-        $Oss2WheelManifest,
-        $Antlr4WheelManifest,
-        $CrcmodWheelManifest
     )
     $CacheIdentity = Get-WheelCacheKey `
         -PythonPath $VenvPython `
