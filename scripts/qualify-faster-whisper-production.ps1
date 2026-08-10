@@ -1526,6 +1526,27 @@ Write-QualificationProgress -Stage "wrapper_start"
 if ($CommitSha -notmatch "^[0-9a-fA-F]{40}$") {
     throw "CommitSha must be a full 40-character SHA"
 }
+
+function Assert-ResolutionReportMatchesInternalWheels {
+    param(
+        [Parameter(Mandatory = $true)][string]$ResolutionReportPath,
+        [Parameter(Mandatory = $true)][object[]]$InternalManifests
+    )
+    $resolutionReport = Get-Content -LiteralPath $ResolutionReportPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    foreach ($controlled in $InternalManifests) {
+        $fileName = [string]$controlled.wheel.file_name
+        $matches = @($resolutionReport.install | Where-Object {
+            ([string]$_.download_info.url).EndsWith($fileName, [StringComparison]::OrdinalIgnoreCase)
+        })
+        if (
+            $matches.Count -ne 1 -or
+            [string]$matches[0].download_info.archive_info.hashes.sha256 -ne [string]$controlled.wheel.sha256
+        ) {
+            $script:WheelManifestFailureKind = "wheel_manifest_controlled_resolution_mismatch"
+            throw "Controlled internal wheel resolution does not match its verified build"
+        }
+    }
+}
 $RuntimeContract = Get-AsrRuntimeContract -Engine "faster-whisper" -SourceRoot $SourceRoot -CommitSha $CommitSha
 if ($RunId -notmatch "^[0-9]{1,20}$") {
     throw "RunId must contain only 1 to 20 digits"
@@ -1945,6 +1966,9 @@ try {
                         "--requirement", $CombinedRequirements
                     ) `
                     -LogPath (Join-Path $LogRoot "pip-resolution-report.log")
+                Assert-ResolutionReportMatchesInternalWheels `
+                    -ResolutionReportPath $ResolutionReport `
+                    -InternalManifests $ReferenceManifests
                 $DependencyFailureOperation = "pip_download_command"
                 Invoke-External `
                     -FilePath $VenvPython `
