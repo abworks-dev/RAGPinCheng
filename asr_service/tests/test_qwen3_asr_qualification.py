@@ -300,6 +300,7 @@ def test_model_download_uses_verified_tls12_backend_and_disables_xet(monkeypatch
         "repo_id": "fixed/model",
         "revision": "fixed-revision",
         "local_dir": "fixed-dir",
+        "max_workers": 1,
     }
 
     session = model_prep._hugging_face_backend()
@@ -317,6 +318,31 @@ def test_model_download_uses_verified_tls12_backend_and_disables_xet(monkeypatch
     ).prepare()
     with pytest.raises(RuntimeError, match="requires default certificate verification"):
         adapter.build_connection_pool_key_attributes(request, verify=False)
+
+
+def test_model_download_retries_ssl_connection_closure(monkeypatch):
+    attempts = 0
+
+    def snapshot_download(**kwargs):
+        nonlocal attempts
+        attempts += 1
+        if attempts < model_prep.MODEL_DOWNLOAD_ATTEMPTS:
+            raise model_prep.requests.exceptions.SSLError("private detail")
+        return kwargs["local_dir"]
+
+    fake_hub = types.SimpleNamespace(
+        configure_http_backend=lambda **_kwargs: None,
+        snapshot_download=snapshot_download,
+    )
+    delays: list[int] = []
+    monkeypatch.setitem(sys.modules, "huggingface_hub", fake_hub)
+    monkeypatch.setattr(model_prep.time, "sleep", delays.append)
+
+    result = model_prep._download(local_dir="fixed-dir")
+
+    assert result == "fixed-dir"
+    assert attempts == model_prep.MODEL_DOWNLOAD_ATTEMPTS
+    assert delays == [2, 4]
 
 
 def test_model_preparation_rejects_downloader_escape(tmp_path):

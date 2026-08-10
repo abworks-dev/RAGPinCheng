@@ -8,6 +8,7 @@ import os
 import shutil
 import ssl
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Callable
@@ -31,6 +32,8 @@ from asr_service.model_cache import (
 )
 
 MANIFEST_NAME = "model-manifest.json"
+MODEL_DOWNLOAD_ATTEMPTS = 3
+MODEL_DOWNLOAD_RETRY_SECONDS = 2
 
 
 class _TLS12HTTPAdapter(requests.adapters.HTTPAdapter):
@@ -255,7 +258,15 @@ def _download(**kwargs: object) -> str:
     from huggingface_hub import configure_http_backend, snapshot_download
 
     configure_http_backend(backend_factory=_hugging_face_backend)
-    return snapshot_download(**kwargs)
+    kwargs.setdefault("max_workers", 1)
+    for attempt in range(1, MODEL_DOWNLOAD_ATTEMPTS + 1):
+        try:
+            return snapshot_download(**kwargs)
+        except requests.exceptions.SSLError:
+            if attempt == MODEL_DOWNLOAD_ATTEMPTS:
+                raise
+            time.sleep(MODEL_DOWNLOAD_RETRY_SECONDS * attempt)
+    raise AssertionError("model download retry loop exhausted")
 
 
 def _prepare_one(
