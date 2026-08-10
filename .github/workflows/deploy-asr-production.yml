@@ -158,7 +158,6 @@ jobs:
     env:
       PRODUCTION_ASR_DATA_ROOT: ${{ vars.PRODUCTION_ASR_DATA_ROOT }}
       COMPACTION_ENABLED: ${{ vars.PRODUCTION_ASR_RUN_COMPACTION_ENABLED }}
-      COMPACTION_AUDIT: ${{ runner.temp }}\asr-deployment-compaction-${{ github.run_id }}.json
     steps:
       - name: Check out deployed revision
         uses: actions/checkout@v4
@@ -169,12 +168,13 @@ jobs:
       - name: Compact deployment dependency run
         shell: powershell
         run: |
+          $auditPath = Join-Path $env:RUNNER_TEMP "asr-deployment-compaction-${{ github.run_id }}.json"
           $arguments = @{
             TargetKind = 'deployment-dependency'
             Engine = 'deployment'
             ManagedRoot = $env:PRODUCTION_ASR_DATA_ROOT
             Identity = '${{ inputs.commit_sha }}'
-            AuditPath = $env:COMPACTION_AUDIT
+            AuditPath = $auditPath
             Confirm = $false
           }
           if ($env:COMPACTION_ENABLED -eq 'true') {
