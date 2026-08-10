@@ -292,10 +292,13 @@ def test_qualification_requires_every_approved_precision_to_complete():
     assert '$manifest.reranker_precision -eq "fp16"' in start
 
 
-def test_automatic_deploy_is_gated_and_gpu_fingerprint_aware():
+def test_manual_deploy_is_gated_and_gpu_fingerprint_aware():
     workflow = read(".github/workflows/deploy-production.yml")
     deploy = read("scripts/deploy-gpu.ps1")
-    assert "PRODUCTION_AUTO_DEPLOY_ENABLED == 'true'" in workflow
+    assert "workflow_dispatch:" in workflow
+    assert "inputs.confirm_production == true" in workflow
+    assert "workflow_run:" not in workflow
+    assert "PRODUCTION_AUTO_DEPLOY_ENABLED" not in workflow
     assert "production-gpu-exclusive" in workflow
     assert "production-app-deployment" in workflow
     assert "GPU_MODEL_CACHE_SOURCE" in workflow

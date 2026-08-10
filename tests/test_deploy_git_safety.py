@@ -30,9 +30,10 @@ class TestDeployGitSafety(unittest.TestCase):
                 self.assertNotIn("x-access-token:${gitToken}@", text)
                 self.assertNotIn("x-access-token:${GIT_TOKEN}@", text)
 
-    def test_workflow_passes_event_commit_to_both_jobs(self):
+    def test_workflow_passes_manual_commit_to_both_jobs(self):
         self.assertGreaterEqual(self.workflow.count("DEPLOY_COMMIT_SHA:"), 2)
-        self.assertIn("github.event.workflow_run.head_sha || github.sha", self.workflow)
+        self.assertGreaterEqual(self.workflow.count("DEPLOY_COMMIT_SHA: ${{ github.sha }}"), 2)
+        self.assertNotIn("github.event.workflow_run", self.workflow)
 
     def test_scripts_require_full_commit_and_verify_head(self):
         self.assertIn("ValidatePattern('^[0-9a-fA-F]{40}$')", self.windows)

@@ -30,6 +30,17 @@ def test_cleanup_workflow_has_safe_trigger_gates():
     assert "actions/upload-artifact@v4" in workflow
 
 
+def test_cleanup_workflow_uses_named_parameter_splatting():
+    workflow = read_text(".github/workflows/cleanup-production.yml")
+
+    assert "$arguments = @{" in workflow
+    assert "Target          = $target" in workflow
+    assert "Confirm         = $false" in workflow
+    assert "$arguments.Apply = $true" in workflow
+    assert "'-Target', $target" not in workflow
+    assert "$arguments += '-Apply'" not in workflow
+
+
 def test_cleanup_operations_owns_manual_and_scheduled_triggers():
     workflow = read_text(".github/workflows/cleanup-production-operations.yml")
 

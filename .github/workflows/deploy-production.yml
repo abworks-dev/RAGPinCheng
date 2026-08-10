@@ -8,20 +8,13 @@ on:
         required: true
         default: false
         type: boolean
-  workflow_run:
-    workflows:
-      - CI
-    types:
-      - completed
-    branches:
-      - master
 
 permissions:
   contents: read
 
 jobs:
   deploy-gpu:
-    if: ${{ (github.event_name == 'workflow_dispatch' && inputs.confirm_production == true) || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && vars.PRODUCTION_AUTO_DEPLOY_ENABLED == 'true') }}
+    if: ${{ inputs.confirm_production == true }}
     environment: production-asr
     concurrency:
       group: production-gpu-exclusive
@@ -42,7 +35,7 @@ jobs:
           GPU_SERVICE_ACTIVITY_URL: ${{ vars.GPU_SERVICE_ACTIVITY_URL }}
           GPU_SERVICE_HOST: ${{ vars.GPU_SERVICE_HOST }}
           GIT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          DEPLOY_COMMIT_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+          DEPLOY_COMMIT_SHA: ${{ github.sha }}
         run: |
           Set-StrictMode -Version Latest
           $ErrorActionPreference = 'Stop'
@@ -94,7 +87,7 @@ jobs:
           COMPOSE_OVERRIDE: ${{ vars.PRODUCTION_APP_COMPOSE_OVERRIDE }}
           COMPOSE_ENV_FILE: ${{ vars.PRODUCTION_APP_ENV_FILE }}
           GIT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          DEPLOY_COMMIT_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+          DEPLOY_COMMIT_SHA: ${{ github.sha }}
           DEPLOY_HTTP_PROXY: ${{ vars.DEPLOY_HTTP_PROXY }}
         run: |
           set -euo pipefail

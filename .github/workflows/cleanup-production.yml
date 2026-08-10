@@ -73,15 +73,15 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $target = if ($env:INPUT_TARGET) { $env:INPUT_TARGET } else { 'all' }
           $apply = $env:INPUT_APPLY -eq 'true' -and $env:INPUT_CONFIRM -eq 'true'
-          $arguments = @(
-            '-Target', $target,
-            '-AsrRoot', $env:ASR_ROOT,
-            '-RuntimeRoot', $env:RUNTIME_ROOT,
-            '-BackupDirectory', $env:BACKUP_DIRECTORY,
-            '-ReportRoot', $env:REPORT_ROOT,
-            '-Confirm:$false'
-          )
-          if ($apply) { $arguments += '-Apply' }
+          $arguments = @{
+            Target          = $target
+            AsrRoot         = $env:ASR_ROOT
+            RuntimeRoot     = $env:RUNTIME_ROOT
+            BackupDirectory = $env:BACKUP_DIRECTORY
+            ReportRoot      = $env:REPORT_ROOT
+            Confirm         = $false
+          }
+          if ($apply) { $arguments.Apply = $true }
           & (Join-Path $env:REPO_PATH 'scripts\cleanup-production.ps1') @arguments
 
       - name: Upload cleanup report
