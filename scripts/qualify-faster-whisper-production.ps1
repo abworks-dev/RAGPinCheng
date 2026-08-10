@@ -17,7 +17,8 @@ param(
     [string]$ExecuteQualification = "false",
     [string]$SummaryPath = "",
     [string]$DependencyDiagnosticPath = "",
-    [string]$QualificationDiagnosticPath = ""
+    [string]$QualificationDiagnosticPath = "",
+    [string]$LicenseMatrixPath = ""
 )
 
 Set-StrictMode -Version Latest
@@ -2463,6 +2464,22 @@ print('qualification-module-origins-verified')
     Write-Host "Samples: 8/8"
     Write-Host "Profile admission: disabled"
 } catch {
+    if ($DependencyFailureStage -eq "license_audit") {
+        try {
+            $localLicenseMatrixPath = Join-Path $EvidenceRoot "license-matrix.json"
+            if (
+                -not [string]::IsNullOrWhiteSpace($LicenseMatrixPath) -and
+                (Test-Path -LiteralPath $localLicenseMatrixPath -PathType Leaf)
+            ) {
+                $licenseMatrixParent = Split-Path -Parent $LicenseMatrixPath
+                if (-not (Test-Path -LiteralPath $licenseMatrixParent)) {
+                    New-Item -ItemType Directory -Path $licenseMatrixParent -Force | Out-Null
+                }
+                Copy-Item -LiteralPath $localLicenseMatrixPath -Destination $LicenseMatrixPath -Force
+            }
+        } catch {
+        }
+    }
     try {
         $persistentQualificationDiagnosticPath = Join-Path $ReportRoot "qualification-diagnostic.json"
         if (-not (Test-Path -LiteralPath $persistentQualificationDiagnosticPath -PathType Leaf)) {

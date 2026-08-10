@@ -236,6 +236,7 @@ jobs:
             SummaryPath = "${{ runner.temp }}\faster-whisper-r3-${{ github.run_id }}\qualification-verdict.json"
             DependencyDiagnosticPath = "${{ runner.temp }}\faster-whisper-r3-${{ github.run_id }}\dependency-diagnostic.json"
             QualificationDiagnosticPath = "${{ runner.temp }}\faster-whisper-r3-${{ github.run_id }}\qualification-diagnostic.json"
+            LicenseMatrixPath = "${{ runner.temp }}\faster-whisper-r3-${{ github.run_id }}\license-matrix.json"
           }
           function Write-WorkflowFailureVerdict {
             param([Parameter(Mandatory = $true)][string]$Code)
@@ -337,7 +338,8 @@ jobs:
             "-CrcmodWheelBundlePath", $params.CrcmodWheelBundlePath,
             "-SummaryPath", $params.SummaryPath,
             "-DependencyDiagnosticPath", $params.DependencyDiagnosticPath,
-            "-QualificationDiagnosticPath", $params.QualificationDiagnosticPath
+            "-QualificationDiagnosticPath", $params.QualificationDiagnosticPath,
+            "-LicenseMatrixPath", $params.LicenseMatrixPath
           )
           $wrapper = Start-Process `
             -FilePath "powershell.exe" `
@@ -464,6 +466,7 @@ jobs:
             ${{ runner.temp }}\faster-whisper-r3-${{ github.run_id }}\qualification-verdict.json.progress.json
             ${{ runner.temp }}\faster-whisper-r3-${{ github.run_id }}\dependency-diagnostic.json
             ${{ runner.temp }}\faster-whisper-r3-${{ github.run_id }}\qualification-diagnostic.json
+            ${{ runner.temp }}\faster-whisper-r3-${{ github.run_id }}\license-matrix.json
           if-no-files-found: warn
           retention-days: 14
 
@@ -477,6 +480,7 @@ jobs:
             ${{ runner.temp }}\faster-whisper-r3-${{ github.run_id }}\qualification-verdict.json.progress.json
             ${{ runner.temp }}\faster-whisper-r3-${{ github.run_id }}\dependency-diagnostic.json
             ${{ runner.temp }}\faster-whisper-r3-${{ github.run_id }}\qualification-diagnostic.json
+            ${{ runner.temp }}\faster-whisper-r3-${{ github.run_id }}\license-matrix.json
           if-no-files-found: error
           retention-days: 14
 
