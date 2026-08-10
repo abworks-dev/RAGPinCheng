@@ -2972,6 +2972,13 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 验证：完整 CI ASR contract 等价本地集合 `414 passed, 2 subtests passed`；ASR 部署静态专项 `44 passed`；runner 模块入口冒烟、PowerShell AST 和 `git diff --check` 通过。证据显示旧 run 未生成 qualification summary 或 sample results，生产服务未修改，Profile admission 保持 disabled。
 - 待办/风险：需 PR CI 通过并合入 master 后，绑定新的完整 master SHA 重跑完整 Qwen R3；真实 CUDA、双模型与 8 样本质量门禁仍以该次运行结果为准。
 
+### 13:00 — 固定 faster-whisper 确定性解码温度
+
+- 完成：R3 run `31355606785` 的 5/5 聚合质量门禁通过，但 `negative-control-1` 两次输出的 canonical、Markdown 和 parser turns 哈希不一致；将生产 faster-whisper Profile 从采样温度 `0.1` 改为确定性 `0.0`，继续保留 `beam_size=10`、hotwords 和 initial prompt。WhisperX full-decode 实验候选显式保留 `temperature=0.1`，不随生产 Profile 改变。
+- 文件：`asr_service/engine_protocol.py`、`asr_service/tests/test_faster_whisper.py`、`WORKLOG.md`
+- 验证：重放到 `origin/master@1d8154e` 后，faster-whisper、WhisperX、引擎、资格与部署契约专项 `118 passed`；完整 ASR service 测试 `210 passed`；Python `py_compile` 和 `git diff --check` 通过。扩大集合另有 `297 passed`，唯一失败为本地 `.venv` 缺少可选 `nltk` 的既有 WhisperX punkt smoke 测试。
+- 待办/风险：真实 Windows CUDA 确定性和 8 样本质量仍须在 PR CI 合并后绑定新的完整 master SHA 重跑 faster-whisper R3；当前未修改生产服务、模型缓存、依赖或 Profile admission。
+
 ### 13:11 — 增强 Qwen 质量失败白名单证据
 
 - 完成：Qwen R3 run `31356827072` 已越过依赖、许可证、双模型、CUDA BF16、临时服务和 runner 导入，真实执行 8 样本阶段约 4 分 40 秒后返回非零；将固定离线提取源更新为该 run，并仅从 qualification summary 白名单输出 5 个 gate 的 observed/threshold/pass 与 8 个 sample 的 ID、场景、RTF、确定性和质量数值，不输出 hypothesis、canonical/Markdown 哈希、转写正文或参考文本。

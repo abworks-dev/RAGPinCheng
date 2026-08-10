@@ -123,7 +123,7 @@ FASTER_WHISPER_SERVICE_CONFIG = ServiceProfileConfig(
         "规范编号",
     ),
     beam_size=10,
-    temperature=0.1,
+    temperature=0.0,
     initial_prompt=(
         "以下是嘈杂环境下的中文工程语音转写，建筑信息模型、BIM、"
         "构件碰撞、净高分析、钢结构、焊缝、螺栓、规范编号等专业术语要准确识别。"
@@ -165,7 +165,7 @@ WHISPERX_FULL_DECODE_SERVICE_CONFIG = ServiceProfileConfig(
     "zh-CN",
     hotwords=FASTER_WHISPER_SERVICE_CONFIG.hotwords,
     beam_size=FASTER_WHISPER_SERVICE_CONFIG.beam_size,
-    temperature=FASTER_WHISPER_SERVICE_CONFIG.temperature,
+    temperature=0.1,
     initial_prompt=FASTER_WHISPER_SERVICE_CONFIG.initial_prompt,
 )
 
