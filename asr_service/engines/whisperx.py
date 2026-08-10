@@ -111,6 +111,9 @@ class WhisperXEngine:
     unavailable_reason_code: str = "model-cache-unavailable"
     last_failure_stage: str | None = field(default=None, init=False)
     last_failure_type: str | None = field(default=None, init=False)
+    _decode_signature: tuple[tuple[str, ...], int, float, str] | None = field(
+        default=None, init=False
+    )
 
     def capabilities(self) -> ServiceEngineCapabilities:
         if self._model is not None and self._align_model is not None:
@@ -130,12 +133,53 @@ class WhisperXEngine:
             return ServiceEngineCapabilities(self.provider_key, self.service_profile_id, False, "engine-dependency-unavailable")
         return ServiceEngineCapabilities(self.provider_key, self.service_profile_id, True)
 
-    def _load_models(self) -> tuple[object, object, object]:
+    @staticmethod
+    def _decode_options(config: ServiceProfileConfig) -> dict[str, object]:
+        options: dict[str, object] = {}
+        if config.hotwords:
+            options["hotwords"] = " ".join(config.hotwords)
+        if config.beam_size != 1:
+            options["beam_size"] = config.beam_size
+        if config.temperature != 0.0:
+            options["temperatures"] = [config.temperature]
+        if config.initial_prompt:
+            options["initial_prompt"] = config.initial_prompt
+        return options
+
+    def _load_models(
+        self, config: ServiceProfileConfig
+    ) -> tuple[object, object, object]:
         whisperx = importlib.import_module("whisperx")
-        if self._model is None:
+        signature = (
+            config.hotwords,
+            config.beam_size,
+            config.temperature,
+            config.initial_prompt,
+        )
+        if self._model is None or (
+            self._decode_signature is not None
+            and self._decode_signature != signature
+        ):
             if self.model_path is None:
                 raise RuntimeError("model_cache_unavailable")
-            self._model = whisperx.load_model(str(self.model_path), "cuda", compute_type="float16", language="zh", download_root=str(self.model_path.parent), local_files_only=True)
+            existing_model = (
+                getattr(self._model, "model", None)
+                if self._model is not None
+                else None
+            )
+            load_kwargs = {
+                "compute_type": "float16",
+                "language": "zh",
+                "download_root": str(self.model_path.parent),
+                "local_files_only": True,
+                "asr_options": self._decode_options(config),
+            }
+            if existing_model is not None:
+                load_kwargs["model"] = existing_model
+            self._model = whisperx.load_model(
+                str(self.model_path), "cuda", **load_kwargs
+            )
+        self._decode_signature = signature
         if self._align_model is None:
             if self.align_model_path is None:
                 raise RuntimeError("model_cache_unavailable")
@@ -152,7 +196,7 @@ class WhisperXEngine:
         stage = "load-models"
         try:
             whisperx = importlib.import_module("whisperx")
-            model, align_model, align_metadata = self._load_models()
+            model, align_model, align_metadata = self._load_models(config)
             stage = "decode-audio"
             audio = _decode_audio_bytes(chunk.content)
             stage = "transcribe"

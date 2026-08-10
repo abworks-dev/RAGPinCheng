@@ -148,6 +148,27 @@ WHISPERX_SERVICE_CONFIG = ServiceProfileConfig(
     "zh-CN",
 )
 
+WHISPERX_HOTWORDS_SERVICE_CONFIG = ServiceProfileConfig(
+    "whisperx-large-v3-zh-align-v1",
+    "whisperx",
+    "Systran/faster-whisper-large-v3",
+    "53ecf83a5bedc5597eb8c8b34eac29e5345520ff",
+    "zh-CN",
+    hotwords=FASTER_WHISPER_SERVICE_CONFIG.hotwords,
+)
+
+WHISPERX_FULL_DECODE_SERVICE_CONFIG = ServiceProfileConfig(
+    "whisperx-large-v3-zh-align-v1",
+    "whisperx",
+    "Systran/faster-whisper-large-v3",
+    "53ecf83a5bedc5597eb8c8b34eac29e5345520ff",
+    "zh-CN",
+    hotwords=FASTER_WHISPER_SERVICE_CONFIG.hotwords,
+    beam_size=FASTER_WHISPER_SERVICE_CONFIG.beam_size,
+    temperature=FASTER_WHISPER_SERVICE_CONFIG.temperature,
+    initial_prompt=FASTER_WHISPER_SERVICE_CONFIG.initial_prompt,
+)
+
 
 @dataclass(frozen=True, slots=True)
 class PreparedAudioChunk:
