@@ -329,39 +329,206 @@ def _audit_license_text(
     return ""
 
 
-def audit_installed_licenses(*, include_license_files: bool = False) -> dict[str, object]:
-    packages: list[dict[str, str]] = []
-    blocked: list[str] = []
-    prohibited = re.compile(r"\b(?:AGPL|GPL|SSPL)(?:[- v0-9.]|$)", re.IGNORECASE)
-    for distribution in sorted(
-        importlib.metadata.distributions(),
-        key=lambda item: (item.metadata.get("Name") or "").casefold(),
-    ):
-        name = distribution.metadata.get("Name") or ""
-        version = distribution.version
+LICENSE_AUDIT_SCHEMA_VERSION = "qwen3-asr-license-audit/2"
+LICENSE_AUDIT_FAILURE_SCHEMA_VERSION = "qwen3-asr-license-audit-failure/1"
+_LICENSE_FAILURE_PRIORITY = {
+    "distribution_enumeration_failure": 0,
+    "distribution_identity_read_failure": 1,
+    "license_metadata_read_failure": 2,
+    "prohibited_license": 3,
+    "unknown_license_metadata": 4,
+}
+
+
+def _safe_package_name(value: object) -> str:
+    text = str(value or "").strip()
+    normalized = re.sub(r"[-_.]+", "-", text).casefold()
+    if len(normalized) <= 200 and re.fullmatch(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?", normalized):
+        return normalized
+    return "unknown"
+
+
+def _safe_package_version(value: object) -> str:
+    text = str(value or "").strip()
+    if len(text) <= 128 and re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9+_.!-]*[A-Za-z0-9])?", text):
+        return text
+    return "UNKNOWN"
+
+
+def _safe_exception_type(error: BaseException) -> str:
+    value = type(error).__name__
+    return value if re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,127}", value) else "Exception"
+
+
+def _safe_license_declaration(value: str) -> str:
+    if not value:
+        return "UNKNOWN"
+    if len(value) <= 200 and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 .()+;_-]*", value):
+        return value
+    return "DECLARED"
+
+
+def _audit_failure(
+    *, kind: str, package: str, audit_phase: str, exception_type: str = ""
+) -> dict[str, str]:
+    return {
+        "kind": kind,
+        "package": package,
+        "audit_phase": audit_phase,
+        "exception_type": exception_type,
+    }
+
+
+def _audit_distribution(
+    distribution: importlib.metadata.Distribution,
+    *,
+    include_license_files: bool,
+) -> tuple[dict[str, str], dict[str, str] | None]:
+    name = "unknown"
+    version = "UNKNOWN"
+    try:
+        metadata = distribution.metadata
+        name = _safe_package_name(metadata.get("Name"))
+        version = _safe_package_version(distribution.version)
+    except Exception as error:
+        failure = _audit_failure(
+            kind="distribution_identity_read_failure",
+            package=name,
+            audit_phase="distribution_identity",
+            exception_type=_safe_exception_type(error),
+        )
+        return {
+            "name": name,
+            "version": version,
+            "license": "UNKNOWN",
+            "status": "audit_error",
+            "reason": failure["kind"],
+            "audit_phase": failure["audit_phase"],
+            "exception_type": failure["exception_type"],
+        }, failure
+
+    try:
         license_text = _audit_license_text(
             distribution,
             include_license_files=include_license_files,
         )
-        status = (
-            "blocked"
-            if prohibited.search(license_text)
-            else "allowed" if license_text else "unknown"
+    except Exception as error:
+        failure = _audit_failure(
+            kind="license_metadata_read_failure",
+            package=name,
+            audit_phase="license_metadata",
+            exception_type=_safe_exception_type(error),
         )
-        if status != "allowed":
-            blocked.append(name)
+        return {
+            "name": name,
+            "version": version,
+            "license": "UNKNOWN",
+            "status": "audit_error",
+            "reason": failure["kind"],
+            "audit_phase": failure["audit_phase"],
+            "exception_type": failure["exception_type"],
+        }, failure
+
+    prohibited = re.compile(r"\b(?:AGPL|GPL|SSPL)(?:[- v0-9.]|$)", re.IGNORECASE)
+    if prohibited.search(license_text):
+        status = "blocked"
+        reason = "prohibited_license"
+    elif license_text:
+        status = "allowed"
+        reason = "none"
+    else:
+        status = "unknown"
+        reason = "unknown_license_metadata"
+    package = {
+        "name": name,
+        "version": version,
+        "license": _safe_license_declaration(license_text),
+        "status": status,
+        "reason": reason,
+        "audit_phase": "policy",
+        "exception_type": "",
+    }
+    failure = (
+        None
+        if status == "allowed"
+        else _audit_failure(kind=reason, package=name, audit_phase="policy")
+    )
+    return package, failure
+
+
+def audit_installed_licenses(*, include_license_files: bool = False) -> dict[str, object]:
+    packages: list[dict[str, str]] = []
+    failures: list[dict[str, str]] = []
+    try:
+        distributions = iter(importlib.metadata.distributions())
+        while True:
+            try:
+                distribution = next(distributions)
+            except StopIteration:
+                break
+            except Exception as error:
+                failure = _audit_failure(
+                    kind="distribution_enumeration_failure",
+                    package="unknown",
+                    audit_phase="distribution_enumeration",
+                    exception_type=_safe_exception_type(error),
+                )
+                packages.append(
+                    {
+                        "name": "unknown",
+                        "version": "UNKNOWN",
+                        "license": "UNKNOWN",
+                        "status": "audit_error",
+                        "reason": failure["kind"],
+                        "audit_phase": failure["audit_phase"],
+                        "exception_type": failure["exception_type"],
+                    }
+                )
+                failures.append(failure)
+                break
+            package, failure = _audit_distribution(
+                distribution,
+                include_license_files=include_license_files,
+            )
+            packages.append(package)
+            if failure is not None:
+                failures.append(failure)
+    except Exception as error:
+        failure = _audit_failure(
+            kind="distribution_enumeration_failure",
+            package="unknown",
+            audit_phase="distribution_enumeration",
+            exception_type=_safe_exception_type(error),
+        )
         packages.append(
             {
-                "name": name,
-                "version": version,
-                "license": license_text or "UNKNOWN",
-                "status": status,
+                "name": "unknown",
+                "version": "UNKNOWN",
+                "license": "UNKNOWN",
+                "status": "audit_error",
+                "reason": failure["kind"],
+                "audit_phase": failure["audit_phase"],
+                "exception_type": failure["exception_type"],
             }
         )
+        failures.append(failure)
+
+    packages.sort(key=lambda item: (item["name"].casefold(), item["version"]))
+    failures.sort(
+        key=lambda item: (
+            _LICENSE_FAILURE_PRIORITY[item["kind"]],
+            item["package"].casefold(),
+        )
+    )
+    blocked = sorted(
+        {item["name"] for item in packages if item["status"] != "allowed"},
+        key=str.casefold,
+    )
     return {
-        "schema_version": "qwen3-asr-license-audit/1",
+        "schema_version": LICENSE_AUDIT_SCHEMA_VERSION,
         "status": "pass" if not blocked else "fail",
-        "blocked_packages": sorted(blocked, key=str.casefold),
+        "failure_summary": failures[0] if failures else None,
+        "blocked_packages": blocked,
         "packages": packages,
     }
 
@@ -580,7 +747,15 @@ def main() -> int:
             parser.error("--license-report is required with --audit-licenses")
         result = audit_installed_licenses(include_license_files=True)
         _write_json(args.license_report, result)
-        print(json.dumps({"status": result["status"]}, sort_keys=True))
+        if result["failure_summary"] is None:
+            output = {"status": result["status"]}
+        else:
+            output = {
+                "schema_version": LICENSE_AUDIT_FAILURE_SCHEMA_VERSION,
+                "status": result["status"],
+                **result["failure_summary"],
+            }
+        print(json.dumps(output, sort_keys=True))
         return 0 if result["status"] == "pass" else 1
 
     if args.validate_manifest_only:

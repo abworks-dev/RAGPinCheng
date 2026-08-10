@@ -753,6 +753,78 @@ function Test-DependencySpecifierExcludesExact {
     return $false
 }
 
+function Convert-ToSanitizedLicenseAuditFailure {
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [object[]]$Lines
+    )
+    $kindPhases = @{
+        distribution_enumeration_failure = "distribution_enumeration"
+        distribution_identity_read_failure = "distribution_identity"
+        license_metadata_read_failure = "license_metadata"
+        prohibited_license = "policy"
+        unknown_license_metadata = "policy"
+    }
+    $allowedKinds = @($kindPhases.Keys)
+    foreach ($raw in $Lines) {
+        $line = ([string]$raw).Trim()
+        if (
+            [string]::IsNullOrWhiteSpace($line) -or
+            $line.Length -gt 1000 -or
+            -not $line.StartsWith("{") -or
+            -not $line.EndsWith("}")
+        ) {
+            continue
+        }
+        try {
+            $payload = $line | ConvertFrom-Json
+            $actualFields = @($payload.PSObject.Properties.Name | Sort-Object)
+            $expectedFields = @(
+                "audit_phase", "exception_type", "kind", "package",
+                "schema_version", "status"
+            ) | Sort-Object
+            if (($actualFields -join ",") -cne ($expectedFields -join ",")) {
+                continue
+            }
+            $kind = [string]$payload.kind
+            $phase = [string]$payload.audit_phase
+            $package = [string]$payload.package
+            $exceptionType = [string]$payload.exception_type
+            if (
+                $payload.schema_version -cne "qwen3-asr-license-audit-failure/1" -or
+                $payload.status -cne "fail" -or
+                -not ($allowedKinds -ccontains $kind) -or
+                $phase -cne [string]$kindPhases[$kind] -or
+                $package.Length -gt 200 -or
+                $package -cnotmatch '^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$'
+            ) {
+                continue
+            }
+            $requiresException = $kind -in @(
+                "distribution_enumeration_failure",
+                "distribution_identity_read_failure",
+                "license_metadata_read_failure"
+            )
+            if (
+                ($requiresException -and $exceptionType -notmatch '^[A-Za-z][A-Za-z0-9_]{0,127}$') -or
+                (-not $requiresException -and -not [string]::IsNullOrEmpty($exceptionType))
+            ) {
+                continue
+            }
+            return [pscustomobject]@{
+                Kind = $kind
+                Requirement = $package
+                AuditPhase = $phase
+                ExceptionType = $exceptionType
+            }
+        } catch {
+        }
+    }
+    return $null
+}
+
+
 function Convert-ToSanitizedDependencyFailure {
     param(
         [Parameter(Mandatory = $true)]
@@ -1115,6 +1187,15 @@ function Assert-DependencySanitizerSelfTest {
     $empty = Convert-ToSanitizedDependencyFailure `
         -Stage "production_freeze" `
         -Lines @()
+    $licenseFailure = Convert-ToSanitizedLicenseAuditFailure -Lines @(
+        '{"audit_phase":"license_metadata","exception_type":"TypeError","kind":"license_metadata_read_failure","package":"example-package","schema_version":"qwen3-asr-license-audit-failure/1","status":"fail"}'
+    )
+    $unsafeLicenseFailure = Convert-ToSanitizedLicenseAuditFailure -Lines @(
+        '{"audit_phase":"license_metadata","exception_type":"TypeError","kind":"license_metadata_read_failure","package":"https://private.invalid","schema_version":"qwen3-asr-license-audit-failure/1","status":"fail"}'
+    )
+    $caseVariantLicenseFailure = Convert-ToSanitizedLicenseAuditFailure -Lines @(
+        '{"audit_phase":"license_metadata","exception_type":"TypeError","kind":"License_Metadata_Read_Failure","package":"example-package","schema_version":"qwen3-asr-license-audit-failure/1","status":"fail"}'
+    )
     if (
         $binary.Kind -ne "binary_distribution_unavailable" -or
         $binary.Requirement -ne "jieba" -or
@@ -1137,7 +1218,13 @@ function Assert-DependencySanitizerSelfTest {
         $unknown.Kind -ne "evidence_insufficient" -or
         -not [string]::IsNullOrEmpty([string]$unknown.Requirement) -or
         $empty.Kind -ne "evidence_insufficient" -or
-        $empty.Stage -ne "production_freeze"
+        $empty.Stage -ne "production_freeze" -or
+        $licenseFailure.Kind -ne "license_metadata_read_failure" -or
+        $licenseFailure.Requirement -ne "example-package" -or
+        $licenseFailure.AuditPhase -ne "license_metadata" -or
+        $licenseFailure.ExceptionType -ne "TypeError" -or
+        $null -ne $unsafeLicenseFailure -or
+        $null -ne $caseVariantLicenseFailure
     ) {
         throw "Dependency failure sanitizer self-test failed"
     }
@@ -1281,6 +1368,8 @@ function Write-SanitizedDependencyFailure {
         Specifier = ""
         RequestedConstraint = ""
     }
+    $auditPhase = ""
+    $exceptionType = ""
     try {
         $lines = @()
         if (
@@ -1289,9 +1378,20 @@ function Write-SanitizedDependencyFailure {
         ) {
             $lines = @(Get-Content -LiteralPath $LogPath -Encoding UTF8)
         }
-        $diagnosis = Convert-ToSanitizedDependencyFailure `
-            -Lines $lines `
-            -Stage $Stage
+        $licenseFailure = $null
+        if ($Stage -eq "license_audit") {
+            $licenseFailure = Convert-ToSanitizedLicenseAuditFailure -Lines $lines
+        }
+        if ($null -ne $licenseFailure) {
+            $diagnosis.Kind = [string]$licenseFailure.Kind
+            $diagnosis.Requirement = [string]$licenseFailure.Requirement
+            $auditPhase = [string]$licenseFailure.AuditPhase
+            $exceptionType = [string]$licenseFailure.ExceptionType
+        } else {
+            $diagnosis = Convert-ToSanitizedDependencyFailure `
+                -Lines $lines `
+                -Stage $Stage
+        }
     } catch {
     }
     $failureOrigin = Get-DependencyFailureOrigin `
@@ -1343,7 +1443,7 @@ function Write-SanitizedDependencyFailure {
         }
     }
     $result = [ordered]@{
-        schema_version = "qwen3-asr-r3-dependency-failure/3"
+        schema_version = "qwen3-asr-r3-dependency-failure/4"
         status = "fail"
         failure_code = "dependency_preparation_failed"
         commit_sha = $CommitSha.ToLowerInvariant()
@@ -1359,6 +1459,8 @@ function Write-SanitizedDependencyFailure {
         dependency_owner = [string]$diagnosis.Owner
         dependency_specifier = [string]$diagnosis.Specifier
         requested_constraint = [string]$diagnosis.RequestedConstraint
+        audit_phase = $auditPhase
+        exception_type = $exceptionType
         fallback_probe_executed = [bool]$fallback.Executed
         fallback_probe_exit_code = $fallback.ExitCode
         profile_admission = "disabled"

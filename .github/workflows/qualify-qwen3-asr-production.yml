@@ -246,7 +246,9 @@ jobs:
               $lines += @(
                 "- Dependency stage: ``$($diagnostic.dependency_stage)``",
                 "- Dependency diagnosis: ``$($diagnostic.diagnosis_kind)``",
-                "- Affected requirement: ``$($diagnostic.affected_requirement)``"
+                "- Affected requirement: ``$($diagnostic.affected_requirement)``",
+                "- Audit phase: ``$($diagnostic.audit_phase)``",
+                "- Exception type: ``$($diagnostic.exception_type)``"
               )
             }
             $performancePath = "${{ runner.temp }}\qwen3-asr-r3-${{ github.run_id }}\performance-diagnostic.json"
