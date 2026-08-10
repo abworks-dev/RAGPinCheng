@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import ssl
 import shutil
+import sys
+import types
 import wave
 from dataclasses import dataclass
 from email.message import Message
@@ -264,6 +268,55 @@ def test_model_preparation_failure_classification_is_stable_and_sanitized(
     assert result["exception_type"] == type(error).__name__
     assert result["kind"] in model_prep.MODEL_FAILURE_KINDS
     assert "message" not in result
+
+
+def test_model_download_uses_verified_tls12_backend_and_disables_xet(monkeypatch):
+    calls: list[object] = []
+
+    def configure_http_backend(*, backend_factory):
+        calls.append(backend_factory)
+
+    def snapshot_download(**kwargs):
+        calls.append(kwargs)
+        return kwargs["local_dir"]
+
+    fake_hub = types.SimpleNamespace(
+        configure_http_backend=configure_http_backend,
+        snapshot_download=snapshot_download,
+    )
+    monkeypatch.setitem(sys.modules, "huggingface_hub", fake_hub)
+    monkeypatch.delenv("HF_HUB_DISABLE_XET", raising=False)
+
+    result = model_prep._download(
+        repo_id="fixed/model",
+        revision="fixed-revision",
+        local_dir="fixed-dir",
+    )
+
+    assert result == "fixed-dir"
+    assert os.environ["HF_HUB_DISABLE_XET"] == "1"
+    assert calls[0] is model_prep._hugging_face_backend
+    assert calls[1] == {
+        "repo_id": "fixed/model",
+        "revision": "fixed-revision",
+        "local_dir": "fixed-dir",
+    }
+
+    session = model_prep._hugging_face_backend()
+    adapter = session.adapters["https://"]
+    context = adapter.poolmanager.connection_pool_kw["ssl_context"]
+    assert context.maximum_version == ssl.TLSVersion.TLSv1_2
+    assert context.verify_mode == ssl.CERT_REQUIRED
+    assert context.check_hostname is True
+
+    proxy_manager = adapter.proxy_manager_for("http://127.0.0.1:7897")
+    assert proxy_manager.connection_pool_kw["ssl_context"] is context
+
+    request = model_prep.requests.Request(
+        "GET", "https://huggingface.co/fixed/model"
+    ).prepare()
+    with pytest.raises(RuntimeError, match="requires default certificate verification"):
+        adapter.build_connection_pool_key_attributes(request, verify=False)
 
 
 def test_model_preparation_rejects_downloader_escape(tmp_path):

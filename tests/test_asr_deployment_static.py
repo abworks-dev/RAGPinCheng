@@ -1262,6 +1262,11 @@ def test_qwen3_asr_qualification_freezes_dual_models_bf16_and_result_flow():
     assert "QWEN3_ALIGNER_MODEL_ID" in model
     assert "REPOSITORY_ROOT = Path(__file__).resolve().parents[1]" in model
     assert "sys.path.insert(0, str(REPOSITORY_ROOT))" in model
+    assert 'os.environ["HF_HUB_DISABLE_XET"] = "1"' in model
+    assert "configure_http_backend(backend_factory=_hugging_face_backend)" in model
+    assert "context.maximum_version = ssl.TLSVersion.TLSv1_2" in model
+    assert "context.verify_mode" not in model
+    assert "HF_HUB_DISABLE_SSL_VERIFY" not in model
     assert "def classify_model_preparation_failure" in model
     assert '"exception_type": type(error).__name__' in model
     assert '"message"' not in model.split(

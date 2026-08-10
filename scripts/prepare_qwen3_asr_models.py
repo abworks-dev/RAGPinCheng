@@ -6,10 +6,13 @@ import hashlib
 import json
 import os
 import shutil
+import ssl
 import sys
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Callable
+
+import requests
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 if str(REPOSITORY_ROOT) not in sys.path:
@@ -28,6 +31,58 @@ from asr_service.model_cache import (
 )
 
 MANIFEST_NAME = "model-manifest.json"
+
+
+class _TLS12HTTPAdapter(requests.adapters.HTTPAdapter):
+    """Keep Hugging Face HTTPS compatible with the production proxy."""
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        self._tls12_context = self._create_ssl_context()
+        super().__init__(*args, **kwargs)
+
+    @staticmethod
+    def _create_ssl_context() -> ssl.SSLContext:
+        context = ssl.create_default_context()
+        context.maximum_version = ssl.TLSVersion.TLSv1_2
+        return context
+
+    def init_poolmanager(
+        self,
+        connections: int,
+        maxsize: int,
+        block: bool = requests.adapters.DEFAULT_POOLBLOCK,
+        **pool_kwargs: object,
+    ) -> None:
+        pool_kwargs["ssl_context"] = self._tls12_context
+        super().init_poolmanager(connections, maxsize, block, **pool_kwargs)
+
+    def proxy_manager_for(
+        self, proxy: str, **proxy_kwargs: object
+    ) -> requests.packages.urllib3.ProxyManager:
+        proxy_kwargs["ssl_context"] = self._tls12_context
+        return super().proxy_manager_for(proxy, **proxy_kwargs)
+
+    def build_connection_pool_key_attributes(
+        self,
+        request: requests.PreparedRequest,
+        verify: object,
+        cert: object = None,
+    ) -> tuple[dict[str, object], dict[str, object]]:
+        if verify is not True:
+            raise RuntimeError(
+                "Hugging Face model download requires default certificate verification"
+            )
+        host_params, pool_kwargs = super().build_connection_pool_key_attributes(
+            request, verify, cert
+        )
+        pool_kwargs["ssl_context"] = self._tls12_context
+        return host_params, pool_kwargs
+
+
+def _hugging_face_backend() -> requests.Session:
+    session = requests.Session()
+    session.mount("https://", _TLS12HTTPAdapter())
+    return session
 
 
 @dataclass(frozen=True, slots=True)
@@ -196,8 +251,10 @@ def _manifest(model_root: Path, spec: ModelSpec) -> Path:
 
 
 def _download(**kwargs: object) -> str:
-    from huggingface_hub import snapshot_download
+    os.environ["HF_HUB_DISABLE_XET"] = "1"
+    from huggingface_hub import configure_http_backend, snapshot_download
 
+    configure_http_backend(backend_factory=_hugging_face_backend)
     return snapshot_download(**kwargs)
 
 
