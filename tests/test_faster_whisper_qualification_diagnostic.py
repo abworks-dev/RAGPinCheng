@@ -69,3 +69,17 @@ def test_script_writes_diagnostic_for_report_and_wrapper_failures():
     assert "-Stage \"wrapper\"" in script
     assert "$FailureCode = \"quality_gate_failed\"" in script
     assert "diagnostic_available" in script
+
+
+def test_diagnostic_code_contract_allows_empty_pass_code_but_rejects_failure_code():
+    script = SCRIPT.read_text(encoding="utf-8")
+    start = script.index("function Write-QualificationDiagnostic")
+    end = script.index("Assert-QualificationDiagnosticProjection")
+    function_body = script[start:end]
+
+    assert "[AllowEmptyString()][string]$Code" in function_body
+    assert 'if ($Status -eq "pass")' in function_body
+    assert "[string]::IsNullOrEmpty($Code)" in function_body
+    assert "[string]::IsNullOrWhiteSpace($Code)" in function_body
+    assert "Pass qualification diagnostics must not carry a failure code" in function_body
+    assert "Non-pass qualification diagnostics require a failure code" in function_body
