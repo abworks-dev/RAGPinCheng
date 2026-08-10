@@ -1370,3 +1370,50 @@ def test_qwen3_asr_resolver_evidence_is_fixed_offline_and_sanitized():
     ):
         assert forbidden not in workflow
         assert forbidden not in script
+
+
+def test_qwen3_asr_model_ssl_evidence_is_fixed_offline_and_sanitized():
+    workflow = read(
+        ".github/workflows/diagnose-qwen3-asr-model-ssl-production.yml"
+    )
+    script = read("scripts/extract_qwen3_asr_model_ssl_evidence.py")
+    assert "workflow_dispatch:" in workflow
+    assert "default: false" in workflow
+    assert "commit_sha must equal the workflow dispatch revision" in workflow
+    assert "environment: production-asr" in workflow
+    assert "runs-on: [self-hosted, Windows, X64, asr-production]" in workflow
+    assert "production-asr-qwen3-asr-model-ssl-evidence" in workflow
+    assert 'SOURCE_RUN_ID = "31348714759"' in script
+    assert 'SOURCE_COMMIT_SHA = "56f20a08d59cdfd6d93022dd2a284e6c7519fc0b"' in script
+    assert "model-preparation.log" in script
+    assert "model-preparation-diagnostic.json" in script
+    assert "qualification-verdict.json" in script
+    assert "qwen3-asr-model-ssl-evidence/1" in script
+    assert "scripts.extract_qwen3_asr_model_ssl_evidence" in workflow
+    assert "model-ssl-evidence.json" in workflow
+    assert "timeout-minutes: 10" in workflow
+    assert '$env:PRODUCTION_PYTHON311_PATH' in workflow
+    assert "profile_admission" in script
+    assert "production_services_modified" in script
+    for forbidden in (
+        "secrets.",
+        "actions/download-artifact",
+        "actions/setup-python",
+        "import subprocess",
+        "import socket",
+        "import requests",
+        "import urllib",
+        "import httpx",
+        "pip install",
+        "pip download",
+        "from huggingface_hub",
+        "uvicorn",
+        "ASR_MODEL_DOWNLOAD_PROXY",
+        "ASR_SERVICE_TOKEN",
+        "GPU_SERVICE_TOKEN",
+        "Start-Process",
+        "New-NetFirewallRule",
+        "Register-ScheduledTask",
+    ):
+        assert forbidden not in workflow
+        assert forbidden not in script
