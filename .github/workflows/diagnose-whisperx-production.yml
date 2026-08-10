@@ -12,11 +12,6 @@ on:
         required: true
         default: false
         type: boolean
-      prepare_synthetic_samples:
-        description: "Prepare/reuse the fixed self-made eight-sample ASR corpus"
-        required: true
-        default: false
-        type: boolean
 
 permissions:
   contents: read
@@ -33,6 +28,8 @@ jobs:
     env:
       PRODUCTION_PYTHON311_PATH: ${{ vars.PRODUCTION_PYTHON311_PATH }}
       PRODUCTION_NO_PROXY: ${{ vars.PRODUCTION_NO_PROXY }}
+      PRODUCTION_ASR_QUALIFICATION_ROOT: ${{ vars.PRODUCTION_ASR_QUALIFICATION_ROOT }}
+      PRODUCTION_ASR_QUALIFICATION_MANIFEST_PATH: ${{ vars.PRODUCTION_ASR_QUALIFICATION_MANIFEST_PATH }}
       PRODUCTION_QWEN3_ASR_MANIFEST_PATH: ${{ vars.PRODUCTION_QWEN3_ASR_MANIFEST_PATH }}
       PRODUCTION_WHISPERX_MODEL_ROOT: ${{ vars.PRODUCTION_WHISPERX_MODEL_ROOT }}
       PRODUCTION_WHISPERX_NLTK_ROOT: ${{ vars.PRODUCTION_WHISPERX_NLTK_ROOT }}
@@ -62,15 +59,6 @@ jobs:
         with:
           ref: ${{ inputs.commit_sha }}
           fetch-depth: 1
-
-      - name: Prepare or reuse fixed self-made qualification samples
-        if: ${{ inputs.prepare_synthetic_samples }}
-        shell: powershell
-        run: |
-          & "${{ github.workspace }}\scripts\prepare-qwen3-asr-qualification-samples.ps1" `
-            -CommitSha "${{ inputs.commit_sha }}" `
-            -SourceRoot "${{ github.workspace }}" `
-            -RunId "${{ github.run_id }}"
 
       - name: Run isolated WhisperX failure diagnostic
         shell: powershell

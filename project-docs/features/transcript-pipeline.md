@@ -77,6 +77,19 @@ SenseVoice 已完成独立生产短媒体验收。Qwen3-ASR 已具备统一 R3 �
 canonical、Markdown 与 parser turns 两遍结果一致，固定模型 revision 和 wheel cache
 身份均通过校验。该资格不自动开放应用 Profile，也不等于生产部署或生产流量验收。
 
+faster-whisper、Qwen3-ASR 和 WhisperX qualification 统一读取
+`asr-qualification-corpus/1` 只读 manifest，并沿用已 PASS 的
+`sample_set_id=self-made-faster-whisper-r3`。共享契约固定 8 个 WAV 的相对 POSIX 路径、
+大小、SHA-256、时长、场景、参考标注、BIM 术语/标准编号和非敏感来源声明；严格拒绝
+未知字段、路径越界、symlink/reparse point 及 WAV 身份或格式变化。中性变量
+`PRODUCTION_ASR_QUALIFICATION_ROOT` 与
+`PRODUCTION_ASR_QUALIFICATION_MANIFEST_PATH` 必须成对配置；迁移期保留各引擎旧变量
+回退，新旧同时存在时必须具有相同 manifest SHA-256、sample set 和 annotation version，
+否则失败关闭。三引擎的运行环境、依赖、模型、缓存、报告和 admission 仍相互隔离。
+workflow 的 manifest preflight 与真实 qualification 互斥，前者不安装依赖、不加载模型、
+不读取密钥或执行推理，只输出脱敏语料身份；环境变量写入及 runner preflight 尚待单独
+R3 批准。
+
 生产部署代码可在显式启用 faster-whisper 准备时绑定持久化 R3 verdict/diagnostic、
 资格 run ID、与部署完全相同的 commit SHA、固定 wheel cache 和模型 Manifest；它强制
 创建新的组合 staging venv，下载阶段必须保留全部已资格 wheel，安装阶段仅从完整
@@ -156,6 +169,9 @@ SenseVoice；Ubuntu 应用侧 `ASR_ENABLED` 仍必须为 `false`。跨节点验�
   `scripts/qualify-whisperx-production.ps1`、
   `.github/workflows/qualify-whisperx-production.yml`
   （WhisperX 固定非敏感样本、质量/资源/许可证门禁与手动隔离执行入口）
+- `scripts/asr_qualification_manifest.py`、
+  `asr_service/asr-qualification-manifest.example.json`
+  （三引擎共享的只读八样本 manifest 解析、严格文件身份校验与变量迁移门禁）
 - `frontend/src/components/citations.ts`
 - `frontend/src/components/SourcesPanel.tsx`（播放按钮）
 - `frontend/src/components/Message.tsx`（引用 click seek）
@@ -257,3 +273,5 @@ SenseVoice；Ubuntu 应用侧 `ASR_ENABLED` 仍必须为 `false`。跨节点验�
   是后续依赖、模型、CUDA、质量与资源实测的唯一执行基线。
 - [WhisperX R2+R3 一次性合并执行方案](../plans/whisperx-r2-r3-execution-plan.md)
   固定 Provider/Profile、双模型缓存、Windows runner 与回滚边界。
+- [共享 ASR Qualification 语料迁移](../plans/shared-asr-qualification-corpus-migration.md)
+  固定三引擎统一 manifest schema、中性变量迁移、只读 preflight 和回滚边界。

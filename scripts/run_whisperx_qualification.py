@@ -6,11 +6,23 @@ import collections
 import hashlib
 import json
 import os
+import sys
 import time
 import uuid
 from pathlib import Path
 
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+if str(REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPOSITORY_ROOT))
+
 from scripts import run_qwen3_asr_qualification as shared
+from scripts.asr_qualification_manifest import (
+    SCENARIOS,
+    QualificationSample,
+    SampleManifest,
+    allowed_schema_versions,
+    load_manifest as load_shared_manifest,
+)
 from scripts.run_whisperx_cuda_smoke import (
     ALIGN_MODEL_ID,
     ALIGN_RELATIVE_PATH,
@@ -29,10 +41,7 @@ TERM_RECALL_LIMIT = shared.TERM_RECALL_LIMIT
 CODE_RECALL_LIMIT = shared.CODE_RECALL_LIMIT
 TIMESTAMP_P95_LIMIT_MS = shared.TIMESTAMP_P95_LIMIT_MS
 RTF_LIMIT = shared.RTF_LIMIT
-_SCENARIOS = shared._SCENARIOS
-
-QualificationSample = shared.QualificationSample
-SampleManifest = shared.SampleManifest
+_SCENARIOS = SCENARIOS
 character_error_rate = shared.character_error_rate
 _ENGINE = None
 _ACTIVE_SERVICE_CONFIG = None
@@ -40,9 +49,21 @@ _DIAGNOSTIC_OBSERVATIONS: dict[str, list[dict[str, object]]] = {}
 _DIAGNOSTIC_SCENARIOS = {"noisy-bim-zh", "standard-codes"}
 
 
-def load_manifest(path: Path) -> SampleManifest:
+def load_manifest(
+    path: Path,
+    *,
+    root: Path | None = None,
+    manifest_source: str = "legacy",
+) -> SampleManifest:
     """Use the existing fixed, self-made eight-sample ASR corpus contract."""
-    return shared.load_manifest(path)
+    return load_shared_manifest(
+        path,
+        root=root,
+        allowed_schema_versions=allowed_schema_versions(
+            manifest_source, "whisperx"
+        ),
+        manifest_source=manifest_source,
+    )
 
 
 def audit_installed_licenses() -> dict[str, object]:
@@ -517,6 +538,10 @@ def build_diagnostic_report() -> dict[str, object]:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--manifest", type=Path)
+    parser.add_argument("--qualification-root", type=Path)
+    parser.add_argument(
+        "--manifest-source", choices=("neutral", "legacy"), default="legacy"
+    )
     parser.add_argument("--model-root", type=Path)
     parser.add_argument("--nltk-root", type=Path)
     parser.add_argument("--report-dir", type=Path)
@@ -535,9 +560,25 @@ def main() -> int:
         return 0 if result["status"] == "pass" else 1
     if args.manifest is None:
         parser.error("--manifest is required")
-    manifest = load_manifest(args.manifest)
+    manifest = load_manifest(
+        args.manifest,
+        root=args.qualification_root,
+        manifest_source=args.manifest_source,
+    )
     if args.validate_manifest_only:
-        print(json.dumps({"status": "valid", "sample_count": len(manifest.samples)}))
+        print(
+            json.dumps(
+                {
+                    "status": "valid",
+                    "manifest_source": manifest.manifest_source,
+                    "manifest_sha256": manifest.manifest_sha256,
+                    "sample_set_id": manifest.sample_set_id,
+                    "annotation_version": manifest.annotation_version,
+                    "sample_count": len(manifest.samples),
+                },
+                sort_keys=True,
+            )
+        )
         return 0
     if args.model_root is None or args.nltk_root is None or args.report_dir is None:
         parser.error("--model-root, --nltk-root and --report-dir are required")

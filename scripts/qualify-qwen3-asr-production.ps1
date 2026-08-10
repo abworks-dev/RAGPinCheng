@@ -21,8 +21,11 @@ $ErrorActionPreference = "Stop"
 
 $ProgramRoot = $env:PRODUCTION_QWEN3_ASR_QUALIFICATION_ROOT
 $DataRoot = $env:PRODUCTION_ASR_DATA_ROOT
-$InputRoot = $env:PRODUCTION_QWEN3_ASR_INPUT_ROOT
-$SampleManifest = Join-Path $InputRoot "manifest.json"
+$SampleManifest = ""
+$SampleRoot = ""
+$ManifestSource = ""
+$QualificationCorpus = $null
+$QualificationResolutionFingerprint = ""
 $ModelCacheRoot = Join-Path $DataRoot "qualification\qwen3-asr\models"
 $AsrModelRevision = "5eb144179a02acc5e5ba31e748d22b0cf3e303b0"
 $AlignerModelRevision = "c7cbfc2048c462b0d63a45797104fc9db3ad62b7"
@@ -83,6 +86,36 @@ function Write-JsonFile {
         $json + "`n",
         (New-Object System.Text.UTF8Encoding($false))
     )
+}
+
+function Resolve-QualificationManifest {
+    param(
+        [Parameter(Mandatory = $true)][string]$PythonPath,
+        [Parameter(Mandatory = $true)][string]$RepositoryRoot
+    )
+    $output = @(
+        & $PythonPath `
+            (Join-Path $RepositoryRoot "scripts\asr_qualification_manifest.py") `
+            --engine qwen3-asr `
+            --include-paths
+    )
+    if ($LASTEXITCODE -ne 0 -or $output.Count -ne 1) {
+        throw "Unable to resolve the ASR qualification manifest"
+    }
+    try {
+        $resolution = ([string]$output[0]) | ConvertFrom-Json
+    } catch {
+        throw "ASR qualification manifest resolution returned invalid JSON"
+    }
+    if (
+        [int]$resolution.sample_count -ne 8 -or
+        [string]::IsNullOrWhiteSpace([string]$resolution.manifest_sha256) -or
+        [string]::IsNullOrWhiteSpace([string]$resolution.sample_set_id) -or
+        [string]::IsNullOrWhiteSpace([string]$resolution.annotation_version)
+    ) {
+        throw "ASR qualification manifest resolution is incomplete"
+    }
+    return $resolution
 }
 
 function Get-Sha256 {
@@ -1358,6 +1391,8 @@ function Write-SanitizedSummary {
         peak_gpu_memory_mib = $PeakMemoryMiB
         baseline_gpu_memory_mib = $BaselineMemoryMiB
         peak_gpu_utilization_percent = $PeakUtilization
+        manifest_source = $ManifestSource
+        qualification_corpus = $QualificationCorpus
         profile_admission = "disabled"
         production_services_modified = $false
     }
@@ -1453,6 +1488,21 @@ try {
         throw "Qualification runner must execute as Administrator"
     }
     $MachinePython = Get-MachinePython311
+    $ManifestResolution = Resolve-QualificationManifest `
+        -PythonPath $MachinePython `
+        -RepositoryRoot $ResolvedSource
+    $SampleManifest = [string]$ManifestResolution.manifest_path
+    $SampleRoot = [string]$ManifestResolution.qualification_root
+    $ManifestSource = [string]$ManifestResolution.manifest_source
+    $QualificationCorpus = [ordered]@{
+        manifest_sha256 = [string]$ManifestResolution.manifest_sha256
+        sample_set_id = [string]$ManifestResolution.sample_set_id
+        annotation_version = [string]$ManifestResolution.annotation_version
+        sample_count = [int]$ManifestResolution.sample_count
+        samples = @($ManifestResolution.samples)
+    }
+    $QualificationResolutionFingerprint = $ManifestResolution |
+        ConvertTo-Json -Depth 16 -Compress
     Assert-ExternalFailureCapture `
         -PythonPath $MachinePython `
         -LogPath (Join-Path $LogRoot "native-stderr-capture-self-test.log")
@@ -1536,6 +1586,8 @@ try {
         -Arguments @(
             (Join-Path $ResolvedSource "scripts\run_qwen3_asr_qualification.py"),
             "--manifest", $SampleManifest,
+            "--qualification-root", $SampleRoot,
+            "--manifest-source", $ManifestSource,
             "--validate-manifest-only"
         ) `
         -LogPath (Join-Path $LogRoot "sample-manifest-validation.log")
@@ -1550,7 +1602,8 @@ try {
         run_id = $RunId
         python = $MachinePython
         free_bytes = [int64]$drive.Free
-        sample_manifest_sha256 = Get-Sha256 -Path $SampleManifest
+        manifest_source = $ManifestSource
+        qualification_corpus = $QualificationCorpus
         gpu = $gpuBaseline
         bge = [ordered]@{
             api_version = "gpu-activity/1"
@@ -1901,6 +1954,8 @@ print('qualification-module-origins-verified')
             "-m",
             "scripts.run_qwen3_asr_qualification",
             "--manifest", $SampleManifest,
+            "--qualification-root", $SampleRoot,
+            "--manifest-source", $ManifestSource,
             "--base-url", $TempAsrUrl,
             "--report-dir", $ReportRoot,
             "--timeout-ms", "600000"
@@ -1965,6 +2020,15 @@ print('qualification-module-origins-verified')
     }
     if ($QualificationProcess.ExitCode -ne 0) {
         throw "Qualification runner failed; see local run logs"
+    }
+    $PostQualificationResolution = Resolve-QualificationManifest `
+        -PythonPath $MachinePython `
+        -RepositoryRoot $ResolvedSource
+    if (
+        ($PostQualificationResolution | ConvertTo-Json -Depth 16 -Compress) -cne
+        $QualificationResolutionFingerprint
+    ) {
+        throw "ASR qualification corpus changed during qualification"
     }
     Write-StageTiming -Stage "eight_sample_inference" -Stopwatch $InferenceStopwatch
     $serviceLogs = (

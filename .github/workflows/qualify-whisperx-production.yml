@@ -12,8 +12,8 @@ on:
         required: true
         default: false
         type: boolean
-      prepare_synthetic_samples:
-        description: "Prepare/reuse the fixed self-made eight-sample ASR corpus"
+      manifest_preflight:
+        description: "Read and validate only the shared qualification manifest and WAV identities"
         required: true
         default: false
         type: boolean
@@ -26,13 +26,92 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate immutable revision and exclusive execution mode
+        shell: bash
+        run: |
+          if [[ ! "${{ inputs.commit_sha }}" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "commit_sha must be a full SHA" >&2
+            exit 1
+          fi
+          if [[ "${{ inputs.commit_sha }}" != "${{ github.sha }}" ]]; then
+            echo "commit_sha must equal the workflow dispatch revision" >&2
+            exit 1
+          fi
+          if [[ "${{ github.ref }}" != "refs/heads/master" ]]; then
+            echo "qualification must run from master" >&2
+            exit 1
+          fi
+          if [[ "${{ inputs.execute_qualification }}" == "${{ inputs.manifest_preflight }}" ]]; then
+            echo "enable exactly one of execute_qualification or manifest_preflight" >&2
+            exit 1
+          fi
+
+  manifest-preflight:
+    needs: gate
+    if: ${{ inputs.manifest_preflight }}
+    environment: production-asr
+    runs-on: [self-hosted, Windows, X64, asr-production]
+    timeout-minutes: 10
+    env:
+      PRODUCTION_PYTHON311_PATH: ${{ vars.PRODUCTION_PYTHON311_PATH }}
+      PRODUCTION_ASR_QUALIFICATION_ROOT: ${{ vars.PRODUCTION_ASR_QUALIFICATION_ROOT }}
+      PRODUCTION_ASR_QUALIFICATION_MANIFEST_PATH: ${{ vars.PRODUCTION_ASR_QUALIFICATION_MANIFEST_PATH }}
+      PRODUCTION_QWEN3_ASR_MANIFEST_PATH: ${{ vars.PRODUCTION_QWEN3_ASR_MANIFEST_PATH }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 1
+
+      - name: Validate shared corpus identity read-only
+        shell: powershell
+        run: |
+          $python = $env:PRODUCTION_PYTHON311_PATH
+          if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
+            throw "Machine-wide Python 3.11 is missing"
+          }
+          $json = @(& $python "${{ github.workspace }}\scripts\asr_qualification_manifest.py" --engine whisperx)
+          if ($LASTEXITCODE -ne 0 -or $json.Count -ne 1) {
+            throw "Shared corpus preflight failed"
+          }
+          $identity = ([string]$json[0]) | ConvertFrom-Json
+          [System.IO.File]::WriteAllText(
+            "${{ runner.temp }}\whisperx-manifest-preflight-${{ github.run_id }}.json",
+            ([string]$json[0]) + "`n",
+            (New-Object System.Text.UTF8Encoding($false))
+          )
+          @(
+            "## WhisperX manifest preflight",
+            "",
+            "- Source: ``$($identity.manifest_source)``",
+            "- Manifest SHA-256: ``$($identity.manifest_sha256)``",
+            "- Sample set: ``$($identity.sample_set_id)``",
+            "- Annotation version: ``$($identity.annotation_version)``",
+            "- Samples: ``$($identity.sample_count)``"
+          ) -join "`n" | Out-File $env:GITHUB_STEP_SUMMARY -Append -Encoding UTF8
+
+      - name: Upload sanitized corpus identity
+        uses: actions/upload-artifact@v4
+        with:
+          name: whisperx-manifest-preflight-${{ github.run_id }}
+          path: ${{ runner.temp }}\whisperx-manifest-preflight-${{ github.run_id }}.json
+          if-no-files-found: error
+          retention-days: 14
+
   qualify:
+    needs: gate
+    if: ${{ inputs.execute_qualification }}
     environment: production-asr
     runs-on: [self-hosted, Windows, X64, asr-production]
     timeout-minutes: 180
     env:
       PRODUCTION_PYTHON311_PATH: ${{ vars.PRODUCTION_PYTHON311_PATH }}
       PRODUCTION_NO_PROXY: ${{ vars.PRODUCTION_NO_PROXY }}
+      PRODUCTION_ASR_QUALIFICATION_ROOT: ${{ vars.PRODUCTION_ASR_QUALIFICATION_ROOT }}
+      PRODUCTION_ASR_QUALIFICATION_MANIFEST_PATH: ${{ vars.PRODUCTION_ASR_QUALIFICATION_MANIFEST_PATH }}
       PRODUCTION_QWEN3_ASR_MANIFEST_PATH: ${{ vars.PRODUCTION_QWEN3_ASR_MANIFEST_PATH }}
       PRODUCTION_WHISPERX_MODEL_ROOT: ${{ vars.PRODUCTION_WHISPERX_MODEL_ROOT }}
       PRODUCTION_WHISPERX_NLTK_ROOT: ${{ vars.PRODUCTION_WHISPERX_NLTK_ROOT }}
@@ -62,15 +141,6 @@ jobs:
         with:
           ref: ${{ inputs.commit_sha }}
           fetch-depth: 1
-
-      - name: Prepare or reuse fixed self-made qualification samples
-        if: ${{ inputs.prepare_synthetic_samples }}
-        shell: powershell
-        run: |
-          & "${{ github.workspace }}\scripts\prepare-qwen3-asr-qualification-samples.ps1" `
-            -CommitSha "${{ inputs.commit_sha }}" `
-            -SourceRoot "${{ github.workspace }}" `
-            -RunId "${{ github.run_id }}"
 
       - name: Run isolated WhisperX qualification
         shell: powershell

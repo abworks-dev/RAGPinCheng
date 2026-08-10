@@ -423,6 +423,11 @@ def test_reports_never_require_reference_or_hypothesis_text(tmp_path, monkeypatc
     report = qualification.run_qualification(
         manifest, base_url="http://127.0.0.1:18200", token="secret", timeout_ms=1000
     )
+    assert report["manifest_source"] == "legacy"
+    assert report["manifest_sha256"] == manifest.manifest_sha256
+    assert report["sample_set_id"] == manifest.sample_set_id
+    assert report["annotation_version"] == manifest.annotation_version
+    assert report["qualification_corpus"] == manifest.identity()
     encoded = json.dumps(
         qualification._sanitized_qualification_result(report), ensure_ascii=False
     )

@@ -13,9 +13,7 @@ import time
 import types
 import unicodedata
 import uuid
-import wave
-from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import TYPE_CHECKING, Iterable
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -25,267 +23,42 @@ if str(REPOSITORY_ROOT) not in sys.path:
 if TYPE_CHECKING:
     from src.transcription.canonical import CanonicalTranscript
 
-SAMPLE_SCHEMA_VERSION = "faster-whisper-qualification-samples/1"
+from scripts.asr_qualification_manifest import (
+    FASTER_WHISPER_LEGACY_SCHEMA_VERSION,
+    SCENARIOS,
+    QualificationSample,
+    SampleManifest,
+    allowed_schema_versions,
+    load_manifest as load_shared_manifest,
+)
+
+SAMPLE_SCHEMA_VERSION = FASTER_WHISPER_LEGACY_SCHEMA_VERSION
 REPORT_SCHEMA_VERSION = "faster-whisper-qualification-report/1"
 FASTER_WHISPER_PROFILE_ID = "faster-whisper-zh-experimental-v1"
 FASTER_WHISPER_SERVICE_PROFILE_ID = "faster-whisper-large-v3-turbo-v1"
-EXPECTED_SAMPLE_COUNT = 8
-MAX_DURATION_MS = 60_000
 CLEAR_CER_LIMIT = 0.10
 BIM_NOISE_CER_LIMIT = 0.15
 TERM_RECALL_LIMIT = 0.70
 CODE_RECALL_LIMIT = 0.95
 TIMESTAMP_P95_LIMIT_MS = 1_500
 RTF_LIMIT = 0.60
-_SHA_RE = re.compile(r"[0-9a-f]{64}")
-_SLUG_RE = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?")
-_ANNOTATION_RE = re.compile(r"[1-9][0-9]{0,8}")
-_SCENARIOS = {
-    "clear-zh",
-    "bim-terms",
-    "standard-codes",
-    "noisy-bim-zh",
-    "mixed-zh-en",
-    "negative-control",
-}
-_POSITIVE_SCENARIOS = _SCENARIOS - {"negative-control"}
+_SCENARIOS = SCENARIOS
 
 
-@dataclass(frozen=True, slots=True)
-class ReferenceSegment:
-    start_ms: int
-    text: str
-
-
-@dataclass(frozen=True, slots=True)
-class QualificationSample:
-    sample_id: str
-    path: Path
-    sha256: str
-    duration_ms: int
-    scenario: str
-    reference_text: str
-    reference_segments: tuple[ReferenceSegment, ...]
-    expected_terms: tuple[str, ...]
-    expected_codes: tuple[str, ...]
-    negative_control: bool
-
-
-@dataclass(frozen=True, slots=True)
-class SampleManifest:
-    sample_set_id: str
-    annotation_version: str
-    samples: tuple[QualificationSample, ...]
-
-
-def _strict_object(
-    value: object, fields: set[str], label: str
-) -> dict[str, object]:
-    if type(value) is not dict or set(value) != fields:
-        raise ValueError(f"{label} has an unexpected field set")
-    return value
-
-
-def _strict_string(value: object, label: str, *, allow_empty: bool = False) -> str:
-    if type(value) is not str or (not allow_empty and not value.strip()):
-        raise ValueError(f"{label} must be a string")
-    if "\x00" in value or "\r" in value:
-        raise ValueError(f"{label} contains a forbidden character")
-    return value
-
-
-def _strict_string_list(value: object, label: str) -> tuple[str, ...]:
-    if type(value) is not list:
-        raise ValueError(f"{label} must be an array")
-    items = tuple(_strict_string(item, label).strip() for item in value)
-    if len(set(items)) != len(items):
-        raise ValueError(f"{label} contains duplicates")
-    return items
-
-
-def _safe_sample_path(root: Path, raw: object) -> Path:
-    relative = _strict_string(raw, "sample.path")
-    pure = PurePosixPath(relative)
-    if (
-        pure.is_absolute()
-        or "\\" in relative
-        or any(part in {"", ".", ".."} for part in pure.parts)
-        or pure.suffix.lower() != ".wav"
-    ):
-        raise ValueError("sample.path must be a safe relative WAV path")
-    candidate = root / Path(*pure.parts)
-    current = root
-    for part in pure.parts:
-        current = current / part
-        if current.is_symlink():
-            raise ValueError("sample.path cannot traverse a symbolic link")
-    target = candidate.resolve(strict=True)
-    if root not in target.parents or not target.is_file():
-        raise ValueError("sample.path escapes the input root or is not a regular file")
-    return target
-
-
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for block in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
-
-
-def _validate_wav(path: Path, expected_duration_ms: int) -> None:
-    try:
-        with wave.open(str(path), "rb") as handle:
-            if (
-                handle.getnchannels() != 1
-                or handle.getframerate() != 16_000
-                or handle.getsampwidth() != 2
-                or handle.getcomptype() != "NONE"
-            ):
-                raise ValueError("sample must be 16 kHz mono PCM16 WAV")
-            actual_ms = round(handle.getnframes() * 1000 / handle.getframerate())
-    except (OSError, EOFError, wave.Error) as exc:
-        raise ValueError("sample is not a readable PCM WAV") from exc
-    if abs(actual_ms - expected_duration_ms) > 20:
-        raise ValueError("sample duration does not match the manifest")
-
-
-def load_manifest(path: Path) -> SampleManifest:
-    manifest_path = path.resolve(strict=True)
-    root = manifest_path.parent.resolve(strict=True)
-    raw = json.loads(manifest_path.read_text(encoding="utf-8"))
-    obj = _strict_object(
-        raw,
-        {"schema_version", "sample_set_id", "annotation_version", "samples"},
-        "manifest",
+def load_manifest(
+    path: Path,
+    *,
+    root: Path | None = None,
+    manifest_source: str = "legacy",
+) -> SampleManifest:
+    return load_shared_manifest(
+        path,
+        root=root,
+        allowed_schema_versions=allowed_schema_versions(
+            manifest_source, "faster-whisper"
+        ),
+        manifest_source=manifest_source,
     )
-    if obj["schema_version"] != SAMPLE_SCHEMA_VERSION:
-        raise ValueError("unsupported sample manifest version")
-    sample_set_id = _strict_string(obj["sample_set_id"], "sample_set_id")
-    if _SLUG_RE.fullmatch(sample_set_id) is None:
-        raise ValueError("invalid sample_set_id")
-    annotation_version = _strict_string(
-        obj["annotation_version"], "annotation_version"
-    )
-    if _ANNOTATION_RE.fullmatch(annotation_version) is None:
-        raise ValueError("invalid annotation_version")
-    if type(obj["samples"]) is not list or len(obj["samples"]) != EXPECTED_SAMPLE_COUNT:
-        raise ValueError("manifest must contain exactly eight samples")
-
-    samples: list[QualificationSample] = []
-    for index, item in enumerate(obj["samples"]):
-        sample = _strict_object(
-            item,
-            {
-                "id",
-                "path",
-                "sha256",
-                "duration_ms",
-                "scenario",
-                "reference_text",
-                "reference_segments",
-                "expected_terms",
-                "expected_codes",
-                "self_made",
-                "is_internal_recording",
-                "contains_customer_data",
-                "negative_control",
-            },
-            f"samples[{index}]",
-        )
-        sample_id = _strict_string(sample["id"], f"samples[{index}].id")
-        if _SLUG_RE.fullmatch(sample_id) is None:
-            raise ValueError("invalid sample id")
-        sha256 = _strict_string(sample["sha256"], f"samples[{index}].sha256")
-        if _SHA_RE.fullmatch(sha256) is None:
-            raise ValueError("invalid sample SHA-256")
-        duration_ms = sample["duration_ms"]
-        if (
-            type(duration_ms) is not int
-            or isinstance(duration_ms, bool)
-            or duration_ms <= 0
-            or duration_ms > MAX_DURATION_MS
-        ):
-            raise ValueError("invalid sample duration")
-        scenario = _strict_string(sample["scenario"], f"samples[{index}].scenario")
-        if scenario not in _SCENARIOS:
-            raise ValueError("unknown sample scenario")
-        negative = sample["negative_control"]
-        if type(negative) is not bool or negative != (scenario == "negative-control"):
-            raise ValueError("negative_control does not match scenario")
-        if (
-            sample["self_made"] is not True
-            or sample["is_internal_recording"] is not False
-            or sample["contains_customer_data"] is not False
-        ):
-            raise ValueError("sample provenance declaration is not allowed")
-        reference_text = _strict_string(
-            sample["reference_text"], f"samples[{index}].reference_text"
-        ).strip()
-        expected_terms = _strict_string_list(
-            sample["expected_terms"], f"samples[{index}].expected_terms"
-        )
-        expected_codes = _strict_string_list(
-            sample["expected_codes"], f"samples[{index}].expected_codes"
-        )
-        if negative and (expected_terms or expected_codes):
-            raise ValueError("negative controls cannot declare expected terms or codes")
-        segments_raw = sample["reference_segments"]
-        if type(segments_raw) is not list:
-            raise ValueError("reference_segments must be an array")
-        reference_segments: list[ReferenceSegment] = []
-        for segment_index, segment_raw in enumerate(segments_raw):
-            segment = _strict_object(
-                segment_raw,
-                {"start_ms", "text"},
-                f"samples[{index}].reference_segments[{segment_index}]",
-            )
-            start_ms = segment["start_ms"]
-            if (
-                type(start_ms) is not int
-                or isinstance(start_ms, bool)
-                or start_ms < 0
-                or start_ms >= duration_ms
-            ):
-                raise ValueError("invalid reference segment timestamp")
-            text = _strict_string(segment["text"], "reference segment text").strip()
-            reference_segments.append(ReferenceSegment(start_ms, text))
-        if not negative and not reference_segments:
-            raise ValueError("positive samples require reference segments")
-        starts = [segment.start_ms for segment in reference_segments]
-        if starts != sorted(set(starts)):
-            raise ValueError("reference segment timestamps must be sorted and unique")
-        sample_path = _safe_sample_path(root, sample["path"])
-        if _sha256(sample_path) != sha256:
-            raise ValueError("sample SHA-256 mismatch")
-        _validate_wav(sample_path, duration_ms)
-        samples.append(
-            QualificationSample(
-                sample_id,
-                sample_path,
-                sha256,
-                duration_ms,
-                scenario,
-                reference_text,
-                tuple(reference_segments),
-                expected_terms,
-                expected_codes,
-                negative,
-            )
-        )
-
-    ids = [sample.sample_id for sample in samples]
-    if ids != sorted(set(ids)):
-        raise ValueError("sample ids must be sorted and unique")
-    scenario_counts = {
-        scenario: sum(sample.scenario == scenario for sample in samples)
-        for scenario in _SCENARIOS
-    }
-    if any(scenario_counts[item] != 1 for item in _POSITIVE_SCENARIOS):
-        raise ValueError("manifest must contain each positive scenario exactly once")
-    if scenario_counts["negative-control"] != 3:
-        raise ValueError("manifest must contain exactly three negative controls")
-    return SampleManifest(sample_set_id, annotation_version, tuple(samples))
 
 
 def normalize_text(value: str) -> str:
@@ -799,8 +572,11 @@ def run_qualification(
     return {
         "schema_version": REPORT_SCHEMA_VERSION,
         "status": "pass" if all_passed else "fail",
+        "manifest_source": manifest.manifest_source,
+        "manifest_sha256": manifest.manifest_sha256,
         "sample_set_id": manifest.sample_set_id,
         "annotation_version": manifest.annotation_version,
+        "qualification_corpus": manifest.identity(),
         "profile_id": FASTER_WHISPER_PROFILE_ID,
         "sample_count": len(rows),
         "thresholds": {
@@ -843,6 +619,10 @@ def _sanitized_qualification_result(
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--manifest", type=Path)
+    parser.add_argument("--qualification-root", type=Path)
+    parser.add_argument(
+        "--manifest-source", choices=("neutral", "legacy"), default="legacy"
+    )
     parser.add_argument("--base-url", default="http://127.0.0.1:18200")
     parser.add_argument("--report-dir", type=Path)
     parser.add_argument("--timeout-ms", type=int, default=600_000)
@@ -863,12 +643,19 @@ def main() -> int:
     if args.validate_manifest_only:
         if args.manifest is None:
             parser.error("--manifest is required with --validate-manifest-only")
-        manifest = load_manifest(args.manifest)
+        manifest = load_manifest(
+            args.manifest,
+            root=args.qualification_root,
+            manifest_source=args.manifest_source,
+        )
         print(
             json.dumps(
                 {
                     "status": "valid",
+                    "manifest_source": manifest.manifest_source,
+                    "manifest_sha256": manifest.manifest_sha256,
                     "sample_set_id": manifest.sample_set_id,
+                    "annotation_version": manifest.annotation_version,
                     "sample_count": len(manifest.samples),
                 },
                 sort_keys=True,
@@ -883,7 +670,11 @@ def main() -> int:
     token = os.environ.get("ASR_QUALIFICATION_TOKEN", "")
     if not token:
         raise RuntimeError("ASR_QUALIFICATION_TOKEN is required")
-    manifest = load_manifest(args.manifest)
+    manifest = load_manifest(
+        args.manifest,
+        root=args.qualification_root,
+        manifest_source=args.manifest_source,
+    )
     result = run_qualification(
         manifest,
         base_url=args.base_url,

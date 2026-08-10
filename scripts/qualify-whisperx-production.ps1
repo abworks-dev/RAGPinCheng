@@ -22,7 +22,11 @@ $SharedWheelCacheRoot = $env:PRODUCTION_WHISPERX_WHEEL_CACHE_ROOT
 $ReportRoot = Join-Path $RunRoot "reports"
 $ModelRoot = $env:PRODUCTION_WHISPERX_MODEL_ROOT
 $NltkRoot = $env:PRODUCTION_WHISPERX_NLTK_ROOT
-$ManifestPath = $env:PRODUCTION_QWEN3_ASR_MANIFEST_PATH
+$ManifestPath = ""
+$ManifestRoot = ""
+$ManifestSource = ""
+$QualificationCorpus = $null
+$QualificationResolutionFingerprint = ""
 $Status = "fail"
 $FailureCode = "qualification_not_started"
 $PeakGpuMemoryMiB = 0
@@ -47,6 +51,36 @@ function Write-Json {
         (($Value | ConvertTo-Json -Depth 16) + "`n"),
         (New-Object System.Text.UTF8Encoding($false))
     )
+}
+
+function Resolve-QualificationManifest {
+    param(
+        [Parameter(Mandatory = $true)][string]$PythonPath,
+        [Parameter(Mandatory = $true)][string]$RepositoryRoot
+    )
+    $output = @(
+        & $PythonPath `
+            (Join-Path $RepositoryRoot "scripts\asr_qualification_manifest.py") `
+            --engine whisperx `
+            --include-paths
+    )
+    if ($LASTEXITCODE -ne 0 -or $output.Count -ne 1) {
+        throw "Unable to resolve the ASR qualification manifest"
+    }
+    try {
+        $resolution = ([string]$output[0]) | ConvertFrom-Json
+    } catch {
+        throw "ASR qualification manifest resolution returned invalid JSON"
+    }
+    if (
+        [int]$resolution.sample_count -ne 8 -or
+        [string]::IsNullOrWhiteSpace([string]$resolution.manifest_sha256) -or
+        [string]::IsNullOrWhiteSpace([string]$resolution.sample_set_id) -or
+        [string]::IsNullOrWhiteSpace([string]$resolution.annotation_version)
+    ) {
+        throw "ASR qualification manifest resolution is incomplete"
+    }
+    return $resolution
 }
 
 function Set-RunProxy {
@@ -90,10 +124,6 @@ $actualSha = (git -c "safe.directory=$safeDirectory" -C $resolvedSource rev-pars
 if ($LASTEXITCODE -ne 0 -or $actualSha -ne $CommitSha.ToLowerInvariant()) {
     throw "checked out revision does not match CommitSha"
 }
-if (-not (Test-Path -LiteralPath $ManifestPath -PathType Leaf)) {
-    throw "fixed self-made qualification Manifest is missing"
-}
-
 $beforeTasks = Get-StateHash "tasks"
 $beforeFirewall = Get-StateHash "firewall"
 try {
@@ -102,6 +132,21 @@ try {
     if (-not (Test-Path -LiteralPath $machinePython -PathType Leaf)) {
         throw "machine-wide Python 3.11 is required"
     }
+    $ManifestResolution = Resolve-QualificationManifest `
+        -PythonPath $machinePython `
+        -RepositoryRoot $resolvedSource
+    $ManifestPath = [string]$ManifestResolution.manifest_path
+    $ManifestRoot = [string]$ManifestResolution.qualification_root
+    $ManifestSource = [string]$ManifestResolution.manifest_source
+    $QualificationCorpus = [ordered]@{
+        manifest_sha256 = [string]$ManifestResolution.manifest_sha256
+        sample_set_id = [string]$ManifestResolution.sample_set_id
+        annotation_version = [string]$ManifestResolution.annotation_version
+        sample_count = [int]$ManifestResolution.sample_count
+        samples = @($ManifestResolution.samples)
+    }
+    $QualificationResolutionFingerprint = $ManifestResolution |
+        ConvertTo-Json -Depth 16 -Compress
     & $machinePython -m venv $VenvRoot
     if ($LASTEXITCODE -ne 0) { throw "qualification venv creation failed" }
 
@@ -174,9 +219,19 @@ try {
         )
     }
     & $VenvPython "$resolvedSource\scripts\run_whisperx_qualification.py" `
-        --manifest $ManifestPath --model-root $ModelRoot --nltk-root $NltkRoot `
+        --manifest $ManifestPath --qualification-root $ManifestRoot `
+        --manifest-source $ManifestSource --model-root $ModelRoot --nltk-root $NltkRoot `
         --report-dir $ReportRoot --timeout-ms 600000 @diagnosticArgs
     $qualificationExit = $LASTEXITCODE
+    $PostQualificationResolution = Resolve-QualificationManifest `
+        -PythonPath $machinePython `
+        -RepositoryRoot $resolvedSource
+    if (
+        ($PostQualificationResolution | ConvertTo-Json -Depth 16 -Compress) -cne
+        $QualificationResolutionFingerprint
+    ) {
+        throw "ASR qualification corpus changed during qualification"
+    }
     $qualificationSummary = Join-Path $ReportRoot "qualification-summary.json"
     if (Test-Path -LiteralPath $qualificationSummary -PathType Leaf) {
         $report = Get-Content -LiteralPath $qualificationSummary -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -224,6 +279,8 @@ try {
         selection = $Selection
         peak_gpu_memory_mib = $PeakGpuMemoryMiB
         license_audit_status = $LicenseAuditStatus
+        manifest_source = $ManifestSource
+        qualification_corpus = $QualificationCorpus
         profile_admission = "disabled"
         production_services_modified = $false
         diagnostic_mode = [bool]$DiagnosticMode
