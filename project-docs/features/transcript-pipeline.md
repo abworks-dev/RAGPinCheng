@@ -214,8 +214,9 @@ SenseVoice；Ubuntu 应用侧 `ASR_ENABLED` 仍必须为 `false`。跨节点验�
   资源与三层确定性门禁。GPU 显存基线 `3723 MiB`、峰值 `6136 MiB`，利用率峰值
   `99%`；`steady_state_rtf=3.195988` 按既定契约仅为信息项。严格 artifact 同时暴露
   成功 diagnostic 的 `runner_exit_code=null`，而生产 evidence helper 曾错误将该信息字段
-  作为硬门禁；最小修复的本地扩展专项测试为 `159 passed`。修复合并后仍须按新的完整
-  master SHA 重跑 R3，并另行审批生产 R3，不能据此认定生产已启用。
+  作为硬门禁；最小修复的本地扩展专项测试为 `159 passed`，PR #156 首轮 CI 7/7
+  通过。修复合并后仍须按新的完整 master SHA 重跑 R3，并另行审批生产 R3，不能据此
+  认定生产已启用。
 - WhisperX R2/R3：已实现复用 remote Provider/Canonical 契约的 experimental Profile、
   lazy-load service adapter、ASR/中文对齐双模型 manifest 门禁及手动 Windows CUDA
   冒烟 workflow；另已实现复用既有 8 个自制中文样本和统一阈值的资格 workflow，

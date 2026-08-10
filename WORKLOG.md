@@ -2928,7 +2928,7 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 - 完成：PR #154 已合并为 master SHA `12f1091009589a68edf82d62712c898324fc318e`，merge CI Run `31352165781` 7/7 通过；按批准触发 faster-whisper R3 Run `31352608196`，正式 verdict 为 `pass`。严格 artifact 显示成功 diagnostic 的 `runner_exit_code=null`，与生产 evidence helper 新增的非空/零硬判断冲突；按资格脚本既有契约移除该信息字段的准入判断，继续由 workflow success、verdict pass、固定 8 样本、5 gate 和三层确定性共同失败关闭。
 - 文件：`scripts/faster-whisper-production-evidence.ps1`、`tests/test_asr_deployment_static.py`、`project-docs/features/transcript-pipeline.md`、`TODO.md`、`WORKLOG.md`
 - 验证：Run `31352608196` 使用目标 SHA，wheel cache 命中固定 key，8/8 样本、5/5 gate 与 canonical/Markdown/parser turns 确定性全部通过；GPU 显存基线 `3723 MiB`、峰值 `6136 MiB`、利用率峰值 `99%`，`steady_state_rtf=3.195988` 为信息项；`production_services_modified=false`，Profile admission 为 disabled。修复后 3 份 PowerShell AST 解析通过，扩展 ASR 专项 `159 passed`，`git diff --check` 通过。
-- 待办/风险：修复仍需 PR 远端 CI、用户批准合并，并在新的完整 master SHA 上再次执行 R3；未触发生产部署、预检、服务切换、依赖安装、模型变更或应用 Profile 启用。生产跨节点失败自动回滚仍留待独立生产 R3 方案。
+- 待办/风险：PR #156 首轮 CI Run `31353549650` 已 7/7 通过，仍需用户批准合并，并在新的完整 master SHA 上再次执行 R3；未触发生产部署、预检、服务切换、依赖安装、模型变更或应用 Profile 启用。生产跨节点失败自动回滚仍留待独立生产 R3 方案。
 
 ### 11:46 — 补充 Qwen 服务启动安全错误摘要
 

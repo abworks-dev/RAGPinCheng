@@ -173,8 +173,9 @@
   - [ ] CI 通过后进行 scoped code review 和用户验收；不得把本地缺依赖的测试写成已通过。
   - [ ] 如需执行 R3B，逐项审批 Windows 目录/ACL、独立 venv 依赖安装、固定 revision 模型离线准备、防火墙限源、Token 写入和 Scheduled Task 注册；默认保持不执行。
   - [ ] R3B 通过后另行审批 R3C，仅用非敏感短媒体和 experimental Profile 做隔离端到端验收；不得自动开放正式 Profile、自动发布、自动索引或生产灰度。
-  - [ ] 完成 faster-whisper PASS diagnostic `runner_exit_code` 信息字段兼容修复的 scoped
-    review、远端 CI 和合并；非零/空值不替代固定报告的 8 样本、5 gate 与三层确定性门禁。
+  - [ ] 完成 faster-whisper PASS diagnostic `runner_exit_code` 信息字段兼容修复 PR #156
+    的 scoped review，并在用户批准后合并；首轮 CI Run `31353549650` 已 7/7 通过，
+    非零/空值不替代固定报告的 8 样本、5 gate 与三层确定性门禁。
   - [ ] 修复合并后，以新的完整 master SHA 再重跑一次 faster-whisper R3；部署 SHA 必须
     与资格 verdict/diagnostic 中的 SHA 完全一致，且复用经 SHA-256 校验的持久 wheel cache。
   - [ ] 同 SHA R3 通过后另行提交生产 R3 执行方案，逐项覆盖维护窗口、`asr.env`/应用/venv
