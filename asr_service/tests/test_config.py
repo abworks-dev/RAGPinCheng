@@ -72,6 +72,36 @@ def test_enabled_service_requires_local_model_and_exact_activity_url(monkeypatch
     AsrServiceSettings.from_env().validate_for_startup()
 
 
+def test_enabled_service_accepts_complete_qwen_only_model_bundle(monkeypatch, tmp_path):
+    for key in ENV_KEYS:
+        monkeypatch.delenv(key, raising=False)
+    values = {
+        "ASR_SERVICE_ENABLED": "true",
+        "ASR_SERVICE_TOKEN": "asr-token",
+        "BGE_PRIORITY_PROBE_URL": "http://127.0.0.1:8100/v1/activity",
+        "BGE_PRIORITY_PROBE_TOKEN": "gpu-token",
+        "ASR_QWEN3_ASR_MODEL_CACHE_ROOT": str(tmp_path / "asr"),
+        "ASR_QWEN3_ASR_MODEL_MANIFEST_PATH": str(tmp_path / "asr.json"),
+        "ASR_QWEN3_ALIGNER_MODEL_CACHE_ROOT": str(tmp_path / "aligner"),
+        "ASR_QWEN3_ALIGNER_MODEL_MANIFEST_PATH": str(tmp_path / "aligner.json"),
+    }
+    for key, value in values.items():
+        monkeypatch.setenv(key, value)
+
+    settings = AsrServiceSettings.from_env()
+    settings.validate_for_startup()
+    assert settings.model_cache_root is None
+    assert settings.model_manifest_path is None
+
+
+def test_sensevoice_cache_requires_an_exact_pair(monkeypatch, tmp_path):
+    for key in ENV_KEYS:
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("ASR_MODEL_CACHE_ROOT", str(tmp_path / "models"))
+    with pytest.raises(RuntimeError, match="SenseVoice.*configured together"):
+        AsrServiceSettings.from_env().validate_for_startup()
+
+
 @pytest.mark.parametrize("url", [
     "http://127.0.0.1:8100",
     "http://user:pass@127.0.0.1:8100/v1/activity",

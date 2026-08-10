@@ -105,10 +105,12 @@ class AsrServiceSettings:
                 or parsed.fragment
             ):
                 raise RuntimeError("invalid BGE_PRIORITY_PROBE_URL")
-        if self.enabled and (self.model_cache_root is None or self.model_manifest_path is None):
-            raise RuntimeError("local model cache and manifest are required when service is enabled")
         if not self.model_local_files_only:
             raise RuntimeError("ASR_MODEL_LOCAL_FILES_ONLY must remain true")
+        if (self.model_cache_root is None) != (self.model_manifest_path is None):
+            raise RuntimeError(
+                "SenseVoice model cache and manifest must be configured together"
+            )
         if (
             self.faster_whisper_model_cache_root is None
         ) != (
@@ -140,6 +142,17 @@ class AsrServiceSettings:
         ):
             raise RuntimeError(
                 "WhisperX model and aligner caches must be configured together"
+            )
+        configured_model_bundles = (
+            self.model_cache_root is not None,
+            self.faster_whisper_model_cache_root is not None,
+            all(item is not None for item in qwen_paths),
+            all(item is not None for item in whisperx_paths),
+        )
+        if self.enabled and not any(configured_model_bundles):
+            raise RuntimeError(
+                "at least one complete local model cache and manifest bundle "
+                "is required when service is enabled"
             )
         if (
             not self.host or self.port <= 0 or self.port > 65535
