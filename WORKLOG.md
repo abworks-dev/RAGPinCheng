@@ -2976,5 +2976,5 @@ vidia-smi 或 faster-whisper，未下载或安装依赖。生产执行仍须用�
 
 - 完成：Qwen R3 run `31356827072` 已越过依赖、许可证、双模型、CUDA BF16、临时服务和 runner 导入，真实执行 8 样本阶段约 4 分 40 秒后返回非零；将固定离线提取源更新为该 run，并仅从 qualification summary 白名单输出 5 个 gate 的 observed/threshold/pass 与 8 个 sample 的 ID、场景、RTF、确定性和质量数值，不输出 hypothesis、canonical/Markdown 哈希、转写正文或参考文本。
 - 文件：`scripts/extract_qwen3_asr_qualification_failure_evidence.py`、`.github/workflows/diagnose-qwen3-asr-qualification-failure-production.yml`、`tests/test_qwen3_asr_qualification_failure_evidence.py`、`WORKLOG.md`
-- 验证：完整 CI ASR contract 等价本地集合 `414 passed, 2 subtests passed`；证据提取专项 `5 passed`；Python `py_compile`、workflow YAML 和 `git diff --check` 通过。run GPU 显存基线 `3723 MiB`、峰值 `7262 MiB`、利用率峰值 `34%`，生产服务未修改，Profile admission 保持 disabled。
-- 待办/风险：需 PR CI 通过并合入 master 后运行一次固定只读提取，确认是 runner 异常还是具体质量 gate 未通过；不得在没有指标证据时放宽阈值。
+- 验证：完整 CI ASR contract 等价本地集合 `414 passed, 2 subtests passed`；证据提取专项 `5 passed`；PR #163 CI 7/7 通过。只读 evidence run `31358007191` 确认 8/8 样本均完成且确定性通过、无 runner 异常；中文清晰与 BIM 样本 CER 通过，但 RTF 为 `2.764423–4.035362`，术语召回 `0.571429 < 0.70`、编号召回 `0 < 0.95`、时间戳 P95 `2240 > 1500 ms`，混合中英 CER `0.26087 > 0.15`、标准编号 CER `0.555556 > 0.15`。GPU 显存基线 `3723 MiB`、峰值 `7262 MiB`、利用率峰值 `34%`；生产服务未修改，Profile admission 保持 disabled。
+- 待办/风险：当前 Qwen R3 结论为真实质量/性能未通过，不能转为正式引擎。自动语言、context/glossary、性能测量或阈值变化都会改变引擎行为/资格契约，需新的 R2 候选优化方案与批准；不得为获得 PASS 直接放宽门禁。
