@@ -93,8 +93,9 @@ def test_asr_runtime_and_deployment_contracts_are_engine_generic_and_fail_closed
     assert "scripts/preflight-asr-deployment.ps1" in contract
     assert ".github/workflows/preflight-asr-production.yml" in contract
     assert "Get-AsrProductionAdmissionAdapter" in contract
-    assert 'engine = $Engine; enabled = $true; evidence_adapter = "faster-whisper-r3/1"' in contract
-    assert 'engine = $Engine; enabled = $false' in contract
+    assert 'enabled = $true; evidence_adapter = "faster-whisper-r3/1"' in contract
+    assert 'enabled = $false' in contract
+    assert "[pscustomobject][ordered]@" in contract
 
     qualifications = {
         "faster-whisper": read("scripts/qualify-faster-whisper-production.ps1"),
