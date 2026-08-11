@@ -8,6 +8,7 @@ data/app.sqlite-shm
 data/app.sqlite-wal
 data/feedback.jsonl
 media/
+content/
 __pycache__/
 *.pyc
 .codex-worktrees/

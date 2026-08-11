@@ -6,6 +6,7 @@ import pytest
 from qdrant_client import models
 
 from src import retrieve
+from src.content_retrieval_visibility import PublishedContentSnapshot
 from src.transcription_retrieval_visibility import PublishedTranscriptSnapshot
 
 VISIBLE_VERSION = "123e4567-e89b-12d3-a456-426614174001"
@@ -55,9 +56,11 @@ def test_multi_query_reuses_one_visibility_snapshot_for_every_recall(monkeypatch
     snapshot = PublishedTranscriptSnapshot(frozenset({VISIBLE_VERSION}))
     visibility = _Visibility(snapshot)
     seen: list[PublishedTranscriptSnapshot] = []
+    seen_content: list[PublishedContentSnapshot] = []
 
-    def fake_recall(_query, _categories, recall_snapshot):
+    def fake_recall(_query, _categories, recall_snapshot, content_snapshot):
         seen.append(recall_snapshot)
+        seen_content.append(content_snapshot)
         return [], {}
 
     monkeypatch.setattr(retrieve, "_recall_scored", fake_recall)
@@ -65,6 +68,8 @@ def test_multi_query_reuses_one_visibility_snapshot_for_every_recall(monkeypatch
     assert visibility.calls == 1
     assert seen == [snapshot, snapshot]
     assert seen[0] is seen[1]
+    assert len(seen_content) == 2
+    assert seen_content[0] is seen_content[1]
 
 
 def test_merge_filters_preserves_nested_filter_semantics():

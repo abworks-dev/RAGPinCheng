@@ -9,6 +9,8 @@
 
 Phase 5A/5B 已接通版本列表、只读 Markdown 预览、人工审核、显式发布、候选索引与正式 head 检索过滤。转录成功、审核通过、发布中和正式检索可见仍是独立状态；真实 ASR/GPU/Qdrant 端到端尚未运行。
 
+受管资料库已增加统一分类和内容关联所需的表字段，但不替代本链路。视频原件、转录版本、审核发布和正式 head 仍以 `media_assets`、`transcript_versions` 与 `media_transcript_heads` 为权威；普通资料的 `content_item_heads` 是另一条独立可见性边界。
+
 ## 当前边界
 
 ### 已实现

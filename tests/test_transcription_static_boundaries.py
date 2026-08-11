@@ -46,7 +46,7 @@ DYNAMIC_IMPORT_CALLS = {
     "__import__", "import_module", "spec_from_file_location", "SourceFileLoader",
 }
 PROTECTED_SHA256 = {
-    "src/chunk.py": "55fa46b41c06bf347d4772a6b92ccaa30fc10d114556a18766f880ee25634f41",
+    "src/chunk.py": "2ee87b9541be6c7b2b93722ec654c980c3719af2fdacace120a1924f442c0fea",
 }
 
 

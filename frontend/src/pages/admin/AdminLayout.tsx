@@ -11,20 +11,35 @@ import { AdminFeedbackPage } from "./AdminFeedbackPage";
 import { AdminMediaPage } from "./AdminMediaPage";
 import { AdminOverviewPage } from "./AdminOverviewPage";
 import { AdminUsersPage } from "./AdminUsersPage";
+import { AdminCategoriesPage } from "./AdminCategoriesPage";
+import { AdminManagedContentPage } from "./AdminManagedContentPage";
+import { useAuth } from "../../context/AuthContext";
 
-type Tab = "users" | "conversations" | "corpus" | "media" | "stats" | "feedback";
+type Tab = "users" | "conversations" | "corpus" | "managed" | "categories" | "media" | "stats" | "feedback";
 
-const tabs: [Tab, string][] = [
+const adminTabs: [Tab, string][] = [
   ["users", "用户"],
   ["conversations", "对话"],
   ["corpus", "资料管理"],
+  ["managed", "资料工作流"],
+  ["categories", "分类设置"],
   ["media", "视频媒体"],
   ["stats", "概览"],
   ["feedback", "反馈"],
 ];
 
 export function AdminLayout() {
-  const [tab, setTab] = useState<Tab>("users");
+  const { state } = useAuth();
+  const user = state.status === "authed" ? state.user : null;
+  const isAdmin = !user?.role || user.role === "admin";
+  const permissions = user?.content_permissions || [];
+  const tabs = isAdmin
+    ? adminTabs
+    : ([
+        ["managed", "资料工作流"],
+        ...(permissions.includes("manage_categories") ? [["categories", "分类设置"]] : []),
+      ] as [Tab, string][]);
+  const [tab, setTab] = useState<Tab>(isAdmin ? "users" : "managed");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   useEffect(() => {
@@ -110,6 +125,8 @@ export function AdminLayout() {
           {tab === "users" && <AdminUsersPage />}
           {tab === "conversations" && <AdminConversationsPage />}
           {tab === "corpus" && <AdminDocumentsPage />}
+          {tab === "managed" && <AdminManagedContentPage />}
+          {tab === "categories" && <AdminCategoriesPage />}
           {tab === "media" && <AdminMediaPage />}
           {tab === "stats" && <AdminOverviewPage />}
           {tab === "feedback" && <AdminFeedbackPage />}

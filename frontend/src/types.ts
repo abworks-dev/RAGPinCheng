@@ -86,7 +86,10 @@ export type AuthUser = {
   real_name: string;
   role: "user" | "admin";
   csrf_token: string;
+  content_permissions?: ContentPermission[];
 };
+
+export type ContentPermission = "organize" | "review" | "publish" | "manage_categories" | "import_server";
 
 export type Conversation = {
   id: string;
@@ -215,6 +218,62 @@ export type CategoryNode = {
 export type CategoryTree = {
   categories: CategoryNode[];
   second_level_categories: string[];
+};
+
+export type ManagedCategory = {
+  id: string;
+  category_key: string;
+  parent_id: string | null;
+  display_code: string;
+  display_name: string;
+  sort_order: number;
+  level: number;
+  is_active: boolean;
+  version: number;
+  created_at: number;
+  updated_at: number;
+};
+
+export type ManagedContentItem = {
+  item_id: string;
+  title: string;
+  content_kind: string;
+  category_id: string;
+  category_key: string;
+  category_label: string;
+  media_id: string | null;
+  version_id: string;
+  version_number: number;
+  original_filename: string;
+  doc_type: string;
+  lifecycle_status: string;
+  object_sha256: string | null;
+  source_origin: string;
+  source_batch_id: string | null;
+  is_current: boolean;
+  created_at: number;
+  updated_at: number;
+};
+
+export type ManagedUploadResponse = {
+  batch_id: string;
+  entries: {
+    filename: string;
+    item_id: string | null;
+    version_id: string | null;
+    sha256: string | null;
+    status: "accepted" | "skipped";
+    reason: string | null;
+  }[];
+};
+
+export type ContentPermissionUser = {
+  user_id: number;
+  employee_id: string;
+  real_name: string;
+  role: "user" | "admin";
+  is_active: boolean;
+  permissions: ContentPermission[];
 };
 
 export type AdminFeedbackEntry = {

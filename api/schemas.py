@@ -26,6 +26,7 @@ class AuthMeResponse(BaseModel):
     real_name: str
     role: str  # 'user' | 'admin'
     csrf_token: str
+    content_permissions: list[str] = Field(default_factory=list)
 
 
 # ── chat / conversations ────────────────────────────────────────────────────
@@ -221,6 +222,109 @@ class CategoryNodeDTO(BaseModel):
 class CategoryTreeResponse(BaseModel):
     categories: list[CategoryNodeDTO]
     second_level_categories: list[str]  # names that REQUIRE a subcategory on upload
+
+
+class ManagedCategoryDTO(BaseModel):
+    id: str
+    category_key: str
+    parent_id: str | None
+    display_code: str
+    display_name: str
+    sort_order: int
+    level: int
+    is_active: bool
+    version: int
+    created_at: int
+    updated_at: int
+
+
+class CreateManagedCategoryRequest(BaseModel):
+    category_key: str = Field(min_length=2, max_length=63)
+    parent_id: str | None = None
+    display_code: str = Field(min_length=1, max_length=12)
+    display_name: str = Field(min_length=1, max_length=100)
+    sort_order: int = 0
+
+
+class UpdateManagedCategoryRequest(BaseModel):
+    display_code: str = Field(min_length=1, max_length=12)
+    display_name: str = Field(min_length=1, max_length=100)
+    sort_order: int
+    is_active: bool
+    expected_version: int = Field(gt=0)
+
+
+class ManagedUploadEntryDTO(BaseModel):
+    filename: str
+    item_id: str | None = None
+    version_id: str | None = None
+    sha256: str | None = None
+    status: Literal["accepted", "skipped"]
+    reason: str | None = None
+
+
+class ManagedUploadResponse(BaseModel):
+    batch_id: str
+    entries: list[ManagedUploadEntryDTO]
+
+
+class ManagedContentItemDTO(BaseModel):
+    item_id: str
+    title: str
+    content_kind: str
+    category_id: str
+    category_key: str
+    category_label: str
+    media_id: str | None
+    version_id: str
+    version_number: int
+    original_filename: str
+    doc_type: str
+    lifecycle_status: str
+    object_sha256: str | None
+    source_origin: str
+    source_batch_id: str | None
+    is_current: bool
+    created_at: int
+    updated_at: int
+
+
+class ReviewManagedContentRequest(BaseModel):
+    approved: bool
+    note: str | None = Field(default=None, max_length=2000)
+    category_id: str | None = None
+
+
+class ManagedPublicationDTO(BaseModel):
+    publication_id: str
+    index_job_id: str
+    status: str
+
+
+class ManagedIndexJobDTO(BaseModel):
+    id: str
+    publication_id: str
+    version_id: str
+    attempt_number: int
+    status: str
+    error_summary: str | None
+    created_at: int
+    started_at: int | None
+    finished_at: int | None
+    updated_at: int
+
+
+class ContentPermissionUserDTO(BaseModel):
+    user_id: int
+    employee_id: str
+    real_name: str
+    role: str
+    is_active: bool
+    permissions: list[str]
+
+
+class UpdateContentPermissionsRequest(BaseModel):
+    permissions: list[str]
 
 
 class DeleteDocumentRequest(BaseModel):

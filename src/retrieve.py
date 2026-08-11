@@ -17,6 +17,7 @@ Pipeline per call:
 from __future__ import annotations
 
 import re
+import sqlite3
 from dataclasses import dataclass, replace
 from functools import lru_cache
 
@@ -35,6 +36,11 @@ from .config import (
     RERANK_USE_HEADER,
     SPARSE_TOP_K,
     APP_DB_PATH,
+    CONTENT_HEAD_ENFORCEMENT,
+)
+from .content_retrieval_visibility import (
+    PublishedContentSnapshot,
+    SQLitePublishedContentVisibility,
 )
 from .embed import encode_one
 from .index import _client, _ensure_payload_indexes, fetch_parents
@@ -46,6 +52,9 @@ from .transcription_retrieval_visibility import (
 )
 
 _DEFAULT_VISIBILITY = SQLitePublishedTranscriptVisibility(APP_DB_PATH)
+_DEFAULT_CONTENT_VISIBILITY = SQLitePublishedContentVisibility(
+    APP_DB_PATH, CONTENT_HEAD_ENFORCEMENT
+)
 
 
 @dataclass
@@ -63,6 +72,9 @@ class RetrievedParent:
     company: str | None = None
     media_id: str | None = None  # associated video asset if any
     transcript_version_id: str | None = None
+    content_item_id: str | None = None
+    content_version_id: str | None = None
+    category_key: str | None = None
     rrf_score: float = 0.0
     # Which sub-query (0-based) this parent was retrieved for, in the decomposed
     # multi-query path. None for the normal single-query path. Used by
@@ -142,13 +154,57 @@ def _bootstrap_indexes() -> bool:
 def _category_filter(categories: list[str] | None) -> models.Filter | None:
     if not categories:
         return None
-    return models.Filter(
-        must=[
+    conditions: list = [
+        models.FieldCondition(key="category", match=models.MatchAny(any=list(categories)))
+    ]
+    category_keys = _category_keys_for_labels(categories)
+    if category_keys:
+        conditions.append(
             models.FieldCondition(
-                key="category", match=models.MatchAny(any=list(categories))
+                key="category_key", match=models.MatchAny(any=category_keys)
             )
+        )
+    return models.Filter(should=conditions)
+
+
+def _category_keys_for_labels(labels: list[str]) -> list[str]:
+    if not APP_DB_PATH.exists():
+        return []
+    conn = sqlite3.connect(f"file:{APP_DB_PATH.as_posix()}?mode=ro", uri=True)
+    try:
+        if conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='category_nodes'"
+        ).fetchone() is None:
+            return []
+        placeholders = ",".join("?" for _ in labels)
+        return [
+            str(row[0])
+            for row in conn.execute(
+                f"SELECT category_key FROM category_nodes WHERE display_name IN ({placeholders}) AND is_active=1",
+                labels,
+            ).fetchall()
         ]
-    )
+    finally:
+        conn.close()
+
+
+def _managed_category_labels() -> dict[str, str]:
+    if not APP_DB_PATH.exists():
+        return {}
+    conn = sqlite3.connect(f"file:{APP_DB_PATH.as_posix()}?mode=ro", uri=True)
+    try:
+        if conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='category_nodes'"
+        ).fetchone() is None:
+            return {}
+        return {
+            str(row[0]): str(row[1])
+            for row in conn.execute(
+                "SELECT category_key,display_name FROM category_nodes"
+            ).fetchall()
+        }
+    finally:
+        conn.close()
 
 
 def _code_filter(code_variants: list[str]) -> models.Filter | None:
@@ -176,6 +232,29 @@ def _visibility_filter(snapshot: PublishedTranscriptSnapshot) -> models.Filter:
     return models.Filter(should=visible)
 
 
+def _content_visibility_filter(snapshot: PublishedContentSnapshot) -> models.Filter:
+    visible: list = []
+    if snapshot.enforcement == "compat":
+        visible.append(
+            models.IsEmptyCondition(is_empty=models.PayloadField(key="content_version_id"))
+        )
+    if snapshot.version_ids:
+        visible.append(
+            models.FieldCondition(
+                key="content_version_id",
+                match=models.MatchAny(any=sorted(snapshot.version_ids)),
+            )
+        )
+    if not visible:
+        visible.append(
+            models.FieldCondition(
+                key="content_version_id",
+                match=models.MatchValue(value="__no_published_content__"),
+            )
+        )
+    return models.Filter(should=visible)
+
+
 def _merge_filters(*filters: models.Filter | None) -> models.Filter | None:
     """AND complete filters without dropping must-not or minimum-should semantics."""
     parts = [item for item in filters if item is not None]
@@ -190,6 +269,7 @@ def _recall_scored(
     query: str,
     categories: list[str] | None,
     snapshot: PublishedTranscriptSnapshot | None = None,
+    content_snapshot: PublishedContentSnapshot | None = None,
 ):
     """Run one query's dense+sparse (+code-boost) recall and rerank.
 
@@ -203,9 +283,12 @@ def _recall_scored(
     code_variants = _extract_code_variants(query)
 
     snapshot = snapshot or _DEFAULT_VISIBILITY.snapshot()
+    content_snapshot = content_snapshot or _DEFAULT_CONTENT_VISIBILITY.snapshot()
     cat_filter = _category_filter(categories)
     visibility_filter = _visibility_filter(snapshot)
-    base_filter = _merge_filters(cat_filter, visibility_filter)
+    base_filter = _merge_filters(
+        cat_filter, visibility_filter, _content_visibility_filter(content_snapshot)
+    )
     code_filter = _code_filter(code_variants)
 
     prefetch = [
@@ -284,6 +367,8 @@ def _dedup_to_parents(
     child_rrf: dict[str, float],
     top_k: int,
     snapshot: PublishedTranscriptSnapshot,
+    content_snapshot: PublishedContentSnapshot | None = None,
+    category_labels: dict[str, str] | None = None,
 ) -> list[RetrievedParent]:
     """Dedupe reranked children by parent_id and expand to RetrievedParent.
 
@@ -324,11 +409,13 @@ def _dedup_to_parents(
         p = parents.get(pid)
         if not p or not snapshot.allows(p.get("transcript_version_id")):
             continue
+        if content_snapshot and not content_snapshot.allows(p.get("content_version_id")):
+            continue
         out.append(
             RetrievedParent(
                 parent_id=pid,
                 doc_title=p["doc_title"],
-                category=p["category"],
+                category=(category_labels or {}).get(p.get("category_key"), p["category"]),
                 section_path=p["section_path"],
                 source_path=p["source_path"],
                 text=p["text"],
@@ -343,6 +430,9 @@ def _dedup_to_parents(
                 company=p.get("company"),
                 media_id=p.get("media_id"),
                 transcript_version_id=p.get("transcript_version_id"),
+                content_item_id=p.get("content_item_id"),
+                content_version_id=p.get("content_version_id"),
+                category_key=p.get("category_key"),
                 rrf_score=parent_rrf.get(pid, 0.0),
             )
         )
@@ -357,10 +447,16 @@ def retrieve(
     visibility: PublishedTranscriptVisibilityPort | None = None,
 ) -> list[RetrievedParent]:
     snapshot = (visibility or _DEFAULT_VISIBILITY).snapshot()
-    scored, child_rrf = _recall_scored(query, categories, snapshot)
+    content_snapshot = _DEFAULT_CONTENT_VISIBILITY.snapshot()
+    category_labels = _managed_category_labels()
+    scored, child_rrf = _recall_scored(
+        query, categories, snapshot, content_snapshot
+    )
     if not scored:
         return []
-    return _dedup_to_parents(scored, child_rrf, top_k, snapshot)
+    return _dedup_to_parents(
+        scored, child_rrf, top_k, snapshot, content_snapshot, category_labels
+    )
 
 
 def _cap_children_for_rerank(
@@ -449,8 +545,12 @@ def retrieve_multi(
     per_sub_children: list[list[str]] = []
 
     snapshot = (visibility or _DEFAULT_VISIBILITY).snapshot()
+    content_snapshot = _DEFAULT_CONTENT_VISIBILITY.snapshot()
+    category_labels = _managed_category_labels()
     for si, sq in enumerate(subs):
-        scored, _child_rrf = _recall_scored(sq, categories, snapshot)
+        scored, _child_rrf = _recall_scored(
+            sq, categories, snapshot, content_snapshot
+        )
         ordered_ids: list[str] = []
         for rank, (point, _score) in enumerate(scored):
             cid = str(point.id)
@@ -545,7 +645,9 @@ def retrieve_multi(
     scored = [(child_point[cid], global_score[cid]) for cid in scored_children]
     child_rrf = {cid: child_rrf_fused[cid] for cid in all_child_ids}
 
-    out = _dedup_to_parents(scored, child_rrf, top_k, snapshot)
+    out = _dedup_to_parents(
+        scored, child_rrf, top_k, snapshot, content_snapshot, category_labels
+    )
 
     # Tag each returned parent with the sub-query it belongs to, so
     # `_build_context` can interleave sources and keep every comparison side in

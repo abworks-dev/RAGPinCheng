@@ -34,21 +34,33 @@ class TranscriptPublicationJob:
 
 
 @dataclass(frozen=True, slots=True)
+class ManagedContentPublicationJob:
+    index_job_id: str
+
+
+@dataclass(frozen=True, slots=True)
 class StopIndexWorker:
     pass
 
 
-IndexWorkItem: TypeAlias = DocumentIndexJob | TranscriptPublicationJob | StopIndexWorker
+IndexWorkItem: TypeAlias = DocumentIndexJob | TranscriptPublicationJob | ManagedContentPublicationJob | StopIndexWorker
 _queue: asyncio.Queue[IndexWorkItem] = asyncio.Queue()
 _worker_task: asyncio.Task | None = None
 _publication_runner: Callable[[str], None] | None = None
+_content_publication_runner: Callable[[str], None] | None = None
 _publication_queue_ids: set[str] = set()
+_content_publication_queue_ids: set[str] = set()
 _stopping = False
 
 
 def configure_publication_runner(runner: Callable[[str], None] | None) -> None:
     global _publication_runner
     _publication_runner = runner
+
+
+def configure_content_publication_runner(runner: Callable[[str], None] | None) -> None:
+    global _content_publication_runner
+    _content_publication_runner = runner
 
 
 # ── job row helpers ────────────────────────────────────────────────────────
@@ -107,6 +119,14 @@ def enqueue_publication(index_job_id: str) -> bool:
         return False
     _publication_queue_ids.add(index_job_id)
     _queue.put_nowait(TranscriptPublicationJob(index_job_id))
+    return True
+
+
+def enqueue_content_publication(index_job_id: str) -> bool:
+    if index_job_id in _content_publication_queue_ids:
+        return False
+    _content_publication_queue_ids.add(index_job_id)
+    _queue.put_nowait(ManagedContentPublicationJob(index_job_id))
     return True
 
 
@@ -242,6 +262,12 @@ async def _worker_loop() -> None:
                 return
             if isinstance(item, DocumentIndexJob):
                 await _run_one(item.job_id)
+            elif isinstance(item, ManagedContentPublicationJob):
+                if _content_publication_runner is None:
+                    logger.error("content publication runner is not configured; job %s remains pending", item.index_job_id)
+                else:
+                    loop = asyncio.get_running_loop()
+                    await loop.run_in_executor(None, lambda: _content_publication_runner(item.index_job_id))
             elif _publication_runner is None:
                 logger.error("publication runner is not configured; job %s remains pending", item.index_job_id)
             else:
@@ -252,6 +278,8 @@ async def _worker_loop() -> None:
         finally:
             if isinstance(item, TranscriptPublicationJob):
                 _publication_queue_ids.discard(item.index_job_id)
+            elif isinstance(item, ManagedContentPublicationJob):
+                _content_publication_queue_ids.discard(item.index_job_id)
             _queue.task_done()
         if _stopping:
             return

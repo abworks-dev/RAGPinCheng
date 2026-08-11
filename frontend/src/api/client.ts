@@ -9,12 +9,17 @@ import type {
   CategoryTree,
   Conversation,
   ConversationState,
+  ContentPermission,
+  ContentPermissionUser,
   FeedbackPayload,
   Health,
   IndexJob,
   IndexedDocumentList,
   LlmHealth,
   MediaAsset,
+  ManagedCategory,
+  ManagedContentItem,
+  ManagedUploadResponse,
   MediaTranscript,
   TranscriptionJob,
   TranscriptionProfile,
@@ -281,6 +286,86 @@ export const api = {
     }>(
       "/api/admin/index/documents",
       { method: "DELETE", body: JSON.stringify({ source_path, delete_file }) },
+    ),
+
+  // admin: managed content library
+  managedContentCapabilities: () =>
+    jsonFetch<{
+      enabled: boolean;
+      max_upload_bytes: number;
+      supported_extensions: string[];
+    }>("/api/admin/content/capabilities"),
+  managedCategories: (includeInactive = false) =>
+    jsonFetch<ManagedCategory[]>(
+      `/api/admin/content/categories?include_inactive=${includeInactive}`,
+    ),
+  createManagedCategory: (body: {
+    category_key: string;
+    parent_id: string | null;
+    display_code: string;
+    display_name: string;
+    sort_order: number;
+  }) =>
+    jsonFetch<ManagedCategory>("/api/admin/content/categories", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  updateManagedCategory: (
+    categoryId: string,
+    body: {
+      display_code: string;
+      display_name: string;
+      sort_order: number;
+      is_active: boolean;
+      expected_version: number;
+    },
+  ) =>
+    jsonFetch<ManagedCategory>(`/api/admin/content/categories/${encodeURIComponent(categoryId)}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
+  managedContentPermissions: () =>
+    jsonFetch<ContentPermissionUser[]>("/api/admin/content/permissions"),
+  updateManagedContentPermissions: (userId: number, permissions: ContentPermission[]) =>
+    jsonFetch<ContentPermissionUser>(`/api/admin/content/permissions/${userId}`, {
+      method: "PUT",
+      body: JSON.stringify({ permissions }),
+    }),
+  managedContentItems: () =>
+    jsonFetch<ManagedContentItem[]>("/api/admin/content/items"),
+  uploadManagedContent: async (files: File[], categoryId: string) => {
+    const form = new FormData();
+    files.forEach((file) => form.append("files", file, file.name));
+    form.append("category_id", categoryId);
+    const headers: Record<string, string> = {};
+    if (csrfToken) headers["X-CSRF-Token"] = csrfToken;
+    const response = await fetch("/api/admin/content/uploads", {
+      method: "POST",
+      headers,
+      body: form,
+      credentials: "include",
+    });
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      const detail = parseErrorDetail(body);
+      throw new ApiError(response.status, body, detail.message || `${response.status} ${response.statusText}`, detail.code, detail.retryable);
+    }
+    return (await response.json()) as ManagedUploadResponse;
+  },
+  submitManagedContent: (versionId: string) =>
+    jsonFetch<ManagedContentItem>(`/api/admin/content/versions/${encodeURIComponent(versionId)}/submit`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    }),
+  reviewManagedContent: (versionId: string, approved: boolean, categoryId?: string) =>
+    jsonFetch<ManagedContentItem>(`/api/admin/content/versions/${encodeURIComponent(versionId)}/review`, {
+      method: "POST",
+      body: JSON.stringify({ approved, category_id: categoryId || null }),
+    }),
+  publishManagedContent: (versionId: string) =>
+    jsonFetch<{ publication_id: string; index_job_id: string; status: string }>(
+      `/api/admin/content/versions/${encodeURIComponent(versionId)}/publish`,
+      { method: "POST", body: JSON.stringify({}) },
     ),
 
   // admin: media
