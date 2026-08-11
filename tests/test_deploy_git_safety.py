@@ -60,8 +60,12 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertIn("needs: [deploy-gpu]", self.emergency_workflow)
         self.assertIn("production-gpu-exclusive", self.emergency_workflow)
         self.assertEqual(
-            self.emergency_workflow.count("production-app-emergency-exclusive"), 2
+            self.emergency_workflow.count(
+                "production-app-emergency-${{ github.run_id }}"
+            ),
+            2,
         )
+        self.assertIn("group: production-emergency-deployment-v2", self.emergency_workflow)
         self.assertNotIn("production-app-deployment", self.emergency_workflow)
         self.assertNotIn("cleanup-after-deploy", self.emergency_workflow)
 
