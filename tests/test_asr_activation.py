@@ -370,6 +370,11 @@ def test_candidate_promotion_preserves_legacy_release_and_rolls_back_fail_closed
     assert "Copy-Item -LiteralPath $candidateConfigBackup" in script
     assert "Register-AndStartTask -Arguments ([string]$state.previous_task_arguments)" in script
     assert "Automatic candidate rollback failed" in script
+    assert "Assert-AtomicFileReplaceSupported" in script
+    assert "Write-AtomicTextWithBackup" in script
+    assert "candidate-asr.env.atomic-before" in script
+    assert "[IO.File]::Replace($temporary, $Path, $BackupPath, $true)" in script
+    assert "[IO.File]::Replace($temporary, $Path, $null" not in script
     assert script.index("Stop-OwnedService -Context $previous") < script.index(
         "Write-AsrJsonAtomic -Path $activeStatePath"
     )
@@ -383,3 +388,39 @@ def test_candidate_promotion_preserves_legacy_release_and_rolls_back_fail_closed
     assert "remove-item" not in lowered
     assert "snapshot_download" not in lowered
     assert "pip install" not in lowered
+
+
+def test_asr_startup_diagnostic_is_manual_read_only_and_sanitized():
+    workflow = read(".github/workflows/diagnose-asr-service-production.yml")
+    script = read("scripts/diagnose-asr-service-production.ps1")
+    lowered = (workflow + script).lower()
+
+    assert "workflow_dispatch:" in workflow
+    assert "default: false" in workflow
+    assert "commit_sha must equal the dispatch revision" in workflow
+    assert "group: production-gpu-exclusive" in workflow
+    assert "runs-on: [self-hosted, Windows, X64, asr-production]" in workflow
+    assert "asr-startup-diagnostic-${{ github.run_id }}" in workflow
+    assert "asr-production-startup-diagnostic/1" in script
+    assert "Get-ScheduledTaskInfo" in script
+    assert "Get-NetTCPConnection -LocalPort 8200 -State Listen" in script
+    assert '"http://127.0.0.1:8200/health"' in script
+    assert "ConvertTo-SafeDiagnosticLine" in script
+    assert "sanitized_log_lines" in script
+    assert "production_services_modified = $false" in script
+    assert "ASR_SERVICE_TOKEN" not in workflow
+    assert "GPU_SERVICE_TOKEN" not in workflow
+    for forbidden in (
+        "stop-scheduledtask",
+        "start-scheduledtask",
+        "register-scheduledtask",
+        "unregister-scheduledtask",
+        "stop-process",
+        "remove-item",
+        "move-item",
+        "copy-item",
+        "set-content",
+        "new-netfirewallrule",
+        "remove-netfirewallrule",
+    ):
+        assert forbidden not in lowered

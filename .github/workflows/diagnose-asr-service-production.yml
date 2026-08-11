@@ -1,0 +1,85 @@
+name: Diagnose ASR Service Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: "Full 40-character merged master SHA to inspect"
+        required: true
+        type: string
+      confirm_diagnostic:
+        description: "Confirm read-only ASR task, listener, health, and startup-log diagnostics"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-gpu-exclusive
+  cancel-in-progress: false
+
+jobs:
+  diagnose:
+    if: ${{ inputs.confirm_diagnostic == true }}
+    environment: production-asr
+    runs-on: [self-hosted, Windows, X64, asr-production]
+    timeout-minutes: 10
+    env:
+      PRODUCTION_ASR_PROGRAM_ROOT: ${{ vars.PRODUCTION_ASR_PROGRAM_ROOT }}
+      PRODUCTION_ASR_DATA_ROOT: ${{ vars.PRODUCTION_ASR_DATA_ROOT }}
+    steps:
+      - name: Validate immutable revision and diagnostic gate
+        shell: powershell
+        run: |
+          if ("${{ inputs.commit_sha }}" -notmatch '^[0-9a-fA-F]{40}$') { throw "commit_sha must be a full SHA" }
+          if ("${{ inputs.commit_sha }}".ToLowerInvariant() -ne "${{ github.sha }}".ToLowerInvariant()) { throw "commit_sha must equal the dispatch revision" }
+          if ("${{ github.ref }}" -ne "refs/heads/master") { throw "ASR production diagnostics must run from master" }
+          if (-not [Convert]::ToBoolean("${{ inputs.confirm_diagnostic }}")) { throw "confirm_diagnostic must be enabled" }
+
+      - name: Check out requested revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 1
+
+      - name: Collect sanitized read-only ASR startup evidence
+        shell: powershell
+        run: |
+          $report = Join-Path $env:RUNNER_TEMP "asr-startup-diagnostic-${{ github.run_id }}.json"
+          & "${{ github.workspace }}\scripts\diagnose-asr-service-production.ps1" `
+            -CommitSha "${{ inputs.commit_sha }}" `
+            -SourceRoot "${{ github.workspace }}" `
+            -ReportPath $report
+
+      - name: Publish sanitized diagnostic summary
+        if: ${{ always() }}
+        shell: powershell
+        run: |
+          $path = Join-Path $env:RUNNER_TEMP "asr-startup-diagnostic-${{ github.run_id }}.json"
+          if (Test-Path -LiteralPath $path -PathType Leaf) {
+            $result = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
+            @(
+              "## ASR startup diagnostic",
+              "",
+              "- Status: ``$($result.status)``",
+              "- Task action: ``$($result.task_action_kind)``",
+              "- Task state: ``$($result.task_state)``",
+              "- Listener count: ``$($result.listener_count)``",
+              "- Health: ``$($result.health_outcome)``",
+              "- Signals: ``$(@($result.signals) -join ',')``",
+              "- Production services modified: ``$($result.production_services_modified)``"
+            ) -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding UTF8
+          } else {
+            "Diagnostic ended before sanitized evidence was written." | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding UTF8
+          }
+
+      - name: Upload sanitized ASR startup evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: asr-startup-diagnostic-${{ github.run_id }}
+          path: ${{ runner.temp }}\asr-startup-diagnostic-${{ github.run_id }}.json
+          if-no-files-found: warn
+          retention-days: 14
