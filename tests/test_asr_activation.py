@@ -116,6 +116,40 @@ def test_ubuntu_verifier_accepts_exact_faster_whisper_then_sensevoice_contract(
     assert result["service_profiles"] == list(expected_profiles)
 
 
+def test_ubuntu_verifier_accepts_exact_whisperx_admission_contract(tmp_path: Path):
+    def whisperx_profile_opener(request, *, timeout):
+        if request.full_url.endswith("/health"):
+            return FakeResponse({"status": "ok", "api_version": "asr-service/1"})
+        return FakeResponse(
+            {
+                "api_version": "asr-service/1",
+                "service_profiles": [
+                    "faster-whisper-large-v3-turbo-v1",
+                    "funasr-sensevoice-small-v1",
+                    "whisperx-large-v3-zh-align-v1",
+                ],
+                "max_upload_part_bytes": 8388608,
+                "max_input_bytes": 2147483648,
+            }
+        )
+
+    env_file = tmp_path / "prod.env"
+    env_file.write_text(valid_env(), encoding="utf-8")
+    expected_profiles = (
+        MODULE.FASTER_WHISPER_PROFILE,
+        MODULE.SENSEVOICE_PROFILE,
+        MODULE.WHISPERX_PROFILE,
+    )
+    result = MODULE.verify(
+        env_file,
+        "http://asr.example.invalid:8200",
+        "shared-token",
+        expected_profiles=expected_profiles,
+        opener=whisperx_profile_opener,
+    )
+    assert result["service_profiles"] == list(expected_profiles)
+
+
 @pytest.mark.parametrize(
     ("content", "message"),
     (
