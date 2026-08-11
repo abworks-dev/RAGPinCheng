@@ -80,6 +80,26 @@ jobs:
             if ($attempt -lt 4) { Start-Sleep -Seconds ([math]::Pow(2, $attempt)) }
           }
           if (-not $fetched) { throw "Bootstrap fetch failed after 4 attempts" }
+
+          $repositoryHead = (& git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0) { throw "Unable to read production repository HEAD" }
+          $repositoryBranch = (& git branch --show-current).Trim()
+          if ($LASTEXITCODE -ne 0) { throw "Unable to read production repository branch" }
+          $trackedChanges = @(& git status --porcelain --untracked-files=no)
+          if ($LASTEXITCODE -ne 0) { throw "Unable to inspect production tracked changes" }
+          Write-Host "PRODUCTION_GIT_STATE branch=$repositoryBranch head=$repositoryHead tracked_changes=$($trackedChanges.Count)"
+          if ($trackedChanges.Count -gt 0) {
+            throw "Production repository has tracked local changes; refusing to overwrite them"
+          }
+          & git merge-base --is-ancestor $repositoryHead $env:DEPLOY_COMMIT_SHA
+          if ($LASTEXITCODE -ne 0) {
+            $mergeBase = (@(& git merge-base $repositoryHead $env:DEPLOY_COMMIT_SHA) -join '').Trim()
+            $divergence = (@(& git rev-list --left-right --count "$repositoryHead...$env:DEPLOY_COMMIT_SHA") -join ' ').Trim()
+            $localOnly = @(& git rev-list --max-count=20 "$env:DEPLOY_COMMIT_SHA..$repositoryHead")
+            Write-Host "PRODUCTION_GIT_DIVERGENCE merge_base=$mergeBase left_right=$divergence"
+            Write-Host "PRODUCTION_GIT_LOCAL_ONLY commits=$($localOnly -join ',')"
+            throw "Production repository history diverged; refusing a destructive synchronization"
+          }
           git merge --ff-only $env:DEPLOY_COMMIT_SHA
           if ($LASTEXITCODE -ne 0) { throw "Bootstrap fast-forward failed" }
 
@@ -131,5 +151,23 @@ jobs:
             DELAY=$((2 ** ATTEMPT))
             sleep "${DELAY}"
           done
+
+          REPOSITORY_HEAD="$(git rev-parse HEAD)"
+          REPOSITORY_BRANCH="$(git branch --show-current)"
+          TRACKED_CHANGES="$(git status --porcelain --untracked-files=no)"
+          echo "PRODUCTION_GIT_STATE branch=${REPOSITORY_BRANCH} head=${REPOSITORY_HEAD}"
+          if [ -n "${TRACKED_CHANGES}" ]; then
+            echo "ERROR: production repository has tracked local changes"
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "${REPOSITORY_HEAD}" "${DEPLOY_COMMIT_SHA}"; then
+            MERGE_BASE="$(git merge-base "${REPOSITORY_HEAD}" "${DEPLOY_COMMIT_SHA}" || true)"
+            DIVERGENCE="$(git rev-list --left-right --count "${REPOSITORY_HEAD}...${DEPLOY_COMMIT_SHA}")"
+            LOCAL_ONLY="$(git rev-list --max-count=20 "${DEPLOY_COMMIT_SHA}..${REPOSITORY_HEAD}" | paste -sd, -)"
+            echo "PRODUCTION_GIT_DIVERGENCE merge_base=${MERGE_BASE} left_right=${DIVERGENCE}"
+            echo "PRODUCTION_GIT_LOCAL_ONLY commits=${LOCAL_ONLY}"
+            echo "ERROR: production repository history diverged; refusing destructive synchronization"
+            exit 1
+          fi
           git merge --ff-only "${DEPLOY_COMMIT_SHA}"
           bash "${REPO_PATH}/scripts/deploy-app.sh"
