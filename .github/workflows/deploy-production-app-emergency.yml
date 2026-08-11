@@ -410,9 +410,12 @@ jobs:
           rollback_backend() {
             echo "APP_ONLY_ROLLBACK status=starting"
             if [ -f "${TRANSCRIPTION_ADMISSION_STATE_FILE}" ]; then
-              python3 "${REPO_PATH}/scripts/configure-transcription-admission.py" restore \
-                --env-file "${COMPOSE_ENV_FILE}" \
-                --state-file "${TRANSCRIPTION_ADMISSION_STATE_FILE}"
+              if ! python3 "${REPO_PATH}/scripts/configure-transcription-admission.py" restore \
+                  --env-file "${COMPOSE_ENV_FILE}" \
+                  --state-file "${TRANSCRIPTION_ADMISSION_STATE_FILE}"; then
+                echo "TRANSCRIPTION_ADMISSION rollback=failed"
+                return 1
+              fi
               echo "TRANSCRIPTION_ADMISSION rollback=restored"
             fi
             docker tag "${OLD_IMAGE_ID}" pincheng-rag-backend:latest
@@ -432,7 +435,8 @@ jobs:
             return 1
           }
 
-          if ! (
+          set +e
+          (
             set -euo pipefail
             git merge --ff-only "${DEPLOY_COMMIT_SHA}"
             if [ "${TRANSCRIPTION_ADMISSION_ACTION}" = "ENABLE_FASTER_WHISPER" ]; then
@@ -474,7 +478,10 @@ jobs:
             verify_transcription_admission
             [ "$(git rev-parse HEAD)" = "${DEPLOY_COMMIT_SHA}" ]
             echo "APP_ONLY_DEPLOY status=success target=${DEPLOY_COMMIT_SHA} image=${EXPECTED_IMAGE_ID}"
-          ); then
+          )
+          DEPLOY_STATUS=$?
+          set -e
+          if [ "${DEPLOY_STATUS}" -ne 0 ]; then
             if ! rollback_backend; then
               echo "CRITICAL: previous backend image did not recover"
             fi
