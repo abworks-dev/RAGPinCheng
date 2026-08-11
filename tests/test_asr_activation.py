@@ -407,6 +407,12 @@ def test_asr_startup_diagnostic_is_manual_read_only_and_sanitized():
     assert '"http://127.0.0.1:8200/health"' in script
     assert "ConvertTo-SafeDiagnosticLine" in script
     assert "sanitized_log_lines" in script
+    assert "task_root_binding_available" in script
+    assert "machine_program_root_present" in script
+    assert "startup_preflight_status" in script
+    assert "config_required_missing_count" in script
+    assert "startup_log_updated_after_last_run" in script
+    assert "task_root_binding_missing" in script
     assert "production_services_modified = $false" in script
     assert "ASR_SERVICE_TOKEN" not in workflow
     assert "GPU_SERVICE_TOKEN" not in workflow
