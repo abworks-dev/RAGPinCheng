@@ -132,7 +132,13 @@ def test_asr_deployment_preflight_is_manual_and_writes_only_runner_temp():
     assert "Assert-PreflightPathWithinTemp" in preflight
     assert "Deployment preflight paths must remain under runner temp" in preflight
     assert "production_services_modified = $false" in preflight
-    assert "Copy-QualifiedFasterWhisperWheels" in preflight
+    assert preflight.count("Copy-QualifiedFasterWhisperWheels") == 2
+    seed = preflight.index("-Destination $qualifiedWheelSeed")
+    wheelhouse = preflight.index("-Destination $wheelhouse", seed)
+    download = preflight.index('"-m", "pip", "download"', wheelhouse)
+    assert_wheels = preflight.index("Assert-QualifiedFasterWhisperWheels", download)
+    assert seed < wheelhouse < download < assert_wheels
+    assert 'failure_code = "qualified_wheel_set_not_preserved"' in preflight
     assert "--no-index" in preflight
     assert "Assert-FasterWhisperProductionRuntime" in preflight
     for forbidden in (
@@ -171,11 +177,13 @@ def test_faster_whisper_qualification_persists_diagnostic_for_production_admissi
 def test_faster_whisper_production_install_is_offline_and_config_rollback_precedes_restart():
     deploy = read("scripts/deploy-asr.ps1")
     seed = deploy.index("Copy-QualifiedFasterWhisperWheels")
-    download = deploy.index('"-m", "pip", "download"', seed)
+    wheelhouse = deploy.index("-Destination $wheelhouse", seed)
+    download = deploy.index('"-m", "pip", "download"', wheelhouse)
     assert_wheels = deploy.index("Assert-QualifiedFasterWhisperWheels", download)
     offline = deploy.index('"--no-index"', assert_wheels)
     runtime = deploy.index("Assert-FasterWhisperProductionRuntime", offline)
-    assert seed < download < assert_wheels < offline < runtime
+    assert deploy.count("Copy-QualifiedFasterWhisperWheels") == 2
+    assert seed < wheelhouse < download < assert_wheels < offline < runtime
 
     transaction = deploy.index("$configBackup = Join-Path $configBackupRoot")
     changed = deploy.index("$configChanged = $true", transaction)
