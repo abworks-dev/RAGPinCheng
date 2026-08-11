@@ -376,8 +376,6 @@ jobs:
               CONTENT_MANAGEMENT_ENABLED,
               CONTENT_ROOT,
           )
-          import os
-
 
           expected_categories = [
               ("01", "行业规范与标准"),
@@ -420,6 +418,8 @@ jobs:
               *) return 0 ;;
             esac
             "${COMPOSE[@]}" exec -T backend python - <<'PY'
+          import os
+
           from api.transcription_runtime import (
               RemoteAsrProviderFactory,
               build_phase4_profile_catalog,
