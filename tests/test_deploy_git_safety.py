@@ -49,8 +49,14 @@ class TestDeployGitSafety(unittest.TestCase):
     def test_emergency_workflow_is_master_only_and_preserves_deploy_order(self):
         self.assertIn("$env:SELECTED_REF -ne 'refs/heads/master'", self.emergency_workflow)
         self.assertGreaterEqual(
-            self.emergency_workflow.count("DEPLOY_COMMIT_SHA: ${{ github.sha }}"), 2
+            self.emergency_workflow.count(
+                "DEPLOY_COMMIT_SHA: ${{ inputs.deploy_commit_sha }}"
+            ),
+            4,
         )
+        self.assertNotIn("DEPLOY_COMMIT_SHA: ${{ github.sha }}", self.emergency_workflow)
+        self.assertIn("deploy_commit_sha:", self.emergency_workflow)
+        self.assertIn("ARCHIVE_AND_REALIGN", self.emergency_workflow)
         self.assertIn("needs: [deploy-gpu]", self.emergency_workflow)
         self.assertIn("production-gpu-exclusive", self.emergency_workflow)
         self.assertEqual(
@@ -59,18 +65,25 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertNotIn("production-app-deployment", self.emergency_workflow)
         self.assertNotIn("cleanup-after-deploy", self.emergency_workflow)
 
-    def test_emergency_workflow_preflights_app_history_before_gpu(self):
+    def test_emergency_workflow_prepares_app_before_gpu(self):
         self.assertIn("preflight-app:", self.emergency_workflow)
         self.assertIn("needs: [preflight-app]", self.emergency_workflow)
         self.assertIn(
-            "PRODUCTION_GIT_PREFLIGHT node=app status=fast_forward_safe",
+            "PRODUCTION_GIT_PREFLIGHT node=app status=ready",
             self.emergency_workflow,
         )
         preflight = self.emergency_workflow.split("  deploy-gpu:", 1)[0]
-        self.assertNotIn("git merge --ff-only", preflight)
         self.assertNotIn("deploy-app.sh", preflight)
+        self.assertIn("source.backup(target)", preflight)
+        self.assertIn("PRAGMA integrity_check", preflight)
+        self.assertIn("qdrant-snapshot.json", preflight)
+        self.assertIn("backend-image.txt", preflight)
+        self.assertLess(
+            preflight.index("PRODUCTION_BACKUP_OK path="),
+            preflight.index('git branch -f master "${DEPLOY_COMMIT_SHA}"'),
+        )
 
-    def test_emergency_workflow_diagnoses_divergence_without_overwriting_it(self):
+    def test_emergency_workflow_archives_divergence_before_realigning(self):
         self.assertEqual(self.emergency_workflow.count("PRODUCTION_GIT_DIVERGENCE"), 3)
         self.assertEqual(self.emergency_workflow.count("PRODUCTION_GIT_LOCAL_ONLY"), 3)
         self.assertGreaterEqual(
@@ -82,6 +95,22 @@ class TestDeployGitSafety(unittest.TestCase):
         )
         self.assertNotIn("git reset", self.emergency_workflow)
         self.assertNotIn("git checkout --force", self.emergency_workflow)
+        self.assertIn("archive/production-app-before-realignment-", self.emergency_workflow)
+        self.assertIn("archive/production-gpu-before-realignment-", self.emergency_workflow)
+        self.assertGreaterEqual(self.emergency_workflow.count("git branch -f master"), 2)
+        self.assertIn("EXPECTED_APP_HEAD", self.emergency_workflow)
+        self.assertIn("EXPECTED_GPU_HEAD", self.emergency_workflow)
+        self.assertIn(
+            'git merge-base --is-ancestor "${DEPLOY_COMMIT_SHA}" "${WORKFLOW_COMMIT_SHA}"',
+            self.emergency_workflow,
+        )
+        gpu = self.emergency_workflow.split("  deploy-gpu:", 1)[1].split(
+            "  deploy-app:", 1
+        )[0]
+        self.assertLess(
+            gpu.index("archive/production-gpu-before-realignment-"),
+            gpu.index("& git branch -f master $env:DEPLOY_COMMIT_SHA"),
+        )
 
     def test_scripts_require_full_commit_and_verify_head(self):
         self.assertIn("ValidatePattern('^[0-9a-fA-F]{40}$')", self.windows)

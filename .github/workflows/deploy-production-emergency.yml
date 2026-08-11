@@ -4,13 +4,33 @@ on:
   workflow_dispatch:
     inputs:
       confirm_production:
-        description: Select DEPLOY to run the selected master commit in production
+        description: Select DEPLOY to run an approved master commit in production
         required: true
         default: CANCEL
         type: choice
         options:
           - CANCEL
           - DEPLOY
+      deploy_commit_sha:
+        description: Full approved commit SHA from master
+        required: true
+        type: string
+      history_realign:
+        description: Archive divergent local master branches before realignment
+        required: true
+        default: KEEP_HISTORY
+        type: choice
+        options:
+          - KEEP_HISTORY
+          - ARCHIVE_AND_REALIGN
+      expected_app_head:
+        description: Expected current Ubuntu repository HEAD when realignment is required
+        required: false
+        type: string
+      expected_gpu_head:
+        description: Expected current Windows repository HEAD when realignment is required
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -24,14 +44,21 @@ jobs:
     runs-on: [self-hosted, linux, ubuntu, production, app]
     timeout-minutes: 10
     steps:
-      - name: Inspect Ubuntu production repository history
+      - name: Back up and prepare Ubuntu production repository
         env:
           CONFIRM_PRODUCTION: ${{ inputs.confirm_production }}
           SELECTED_REF: ${{ github.ref }}
-          DEPLOY_COMMIT_SHA: ${{ github.sha }}
+          WORKFLOW_COMMIT_SHA: ${{ github.sha }}
+          DEPLOY_COMMIT_SHA: ${{ inputs.deploy_commit_sha }}
+          HISTORY_REALIGN: ${{ inputs.history_realign }}
+          EXPECTED_APP_HEAD: ${{ inputs.expected_app_head }}
           DEPLOY_HTTP_PROXY: ${{ vars.DEPLOY_HTTP_PROXY }}
           GIT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO_PATH: ${{ vars.PRODUCTION_APP_REPO_PATH }}
+          BACKUP_DIR: ${{ vars.PRODUCTION_APP_BACKUP_DIRECTORY }}
+          DATA_PATH: ${{ vars.PRODUCTION_APP_DATA_PATH }}
+          COMPOSE_OVERRIDE: ${{ vars.PRODUCTION_APP_COMPOSE_OVERRIDE }}
+          COMPOSE_ENV_FILE: ${{ vars.PRODUCTION_APP_ENV_FILE }}
         run: |
           set -euo pipefail
           [ "${CONFIRM_PRODUCTION}" = "DEPLOY" ] || {
@@ -46,6 +73,10 @@ jobs:
             echo "ERROR: selected deployment commit is not a full Git SHA"
             exit 1
           }
+          [[ "${WORKFLOW_COMMIT_SHA}" =~ ^[0-9a-fA-F]{40}$ ]] || {
+            echo "ERROR: workflow commit is not a full Git SHA"
+            exit 1
+          }
 
           cd "${REPO_PATH}"
           BASIC_AUTH="$(printf 'x-access-token:%s' "${GIT_TOKEN}" | base64 | tr -d '\n')"
@@ -56,7 +87,8 @@ jobs:
           for ATTEMPT in 1 2 3 4; do
             if git -c http.version=HTTP/1.1 "${PROXY_ARGS[@]}" \
               -c "http.extraHeader=AUTHORIZATION: basic ${BASIC_AUTH}" fetch \
-              https://github.com/abworks-dev/RAGPinCheng.git "${DEPLOY_COMMIT_SHA}"; then
+              https://github.com/abworks-dev/RAGPinCheng.git \
+              "${DEPLOY_COMMIT_SHA}" "${WORKFLOW_COMMIT_SHA}"; then
               break
             fi
             if [ "${ATTEMPT}" -eq 4 ]; then
@@ -74,16 +106,84 @@ jobs:
             echo "ERROR: production application repository has tracked local changes"
             exit 1
           fi
+          [ "${REPOSITORY_BRANCH}" = "master" ] || {
+            echo "ERROR: production application repository must be on master"
+            exit 1
+          }
+          git merge-base --is-ancestor "${DEPLOY_COMMIT_SHA}" "${WORKFLOW_COMMIT_SHA}" || {
+            echo "ERROR: approved deployment commit is not an ancestor of selected master"
+            exit 1
+          }
+
+          BACKUP_PATH="${BACKUP_DIR}/history-realignment-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          mkdir -p "${BACKUP_PATH}"
+          printf 'node=app\nprevious_commit=%s\ntarget_commit=%s\n' \
+            "${REPOSITORY_HEAD}" "${DEPLOY_COMMIT_SHA}" > "${BACKUP_PATH}/git-state.txt"
+          SRC="${DATA_PATH}" DST="${BACKUP_PATH}" python3 - <<'PY'
+          import os
+          import sqlite3
+          from pathlib import Path
+
+          source_dir = Path(os.environ["SRC"])
+          backup_dir = Path(os.environ["DST"])
+          for name in ("app.sqlite", "parents.sqlite"):
+              source_path = source_dir / name
+              if not source_path.is_file():
+                  raise SystemExit(f"Missing production database: {source_path}")
+              backup_path = backup_dir / name
+              with sqlite3.connect(f"file:{source_path}?mode=ro", uri=True) as source:
+                  with sqlite3.connect(backup_path) as target:
+                      source.backup(target)
+                      result = target.execute("PRAGMA integrity_check").fetchone()[0]
+                      if result != "ok":
+                          raise SystemExit(f"{name} backup integrity failed: {result}")
+              print(f"PRODUCTION_BACKUP_OK database={name}")
+          PY
+          COMPOSE=(docker compose -p ragpincheng-prod \
+            -f "${REPO_PATH}/docker/docker-compose.yml" \
+            -f "${COMPOSE_OVERRIDE}" --env-file "${COMPOSE_ENV_FILE}")
+          "${COMPOSE[@]}" exec -T backend curl -fsS -X POST \
+            http://qdrant:6333/collections/pincheng_docs/snapshots \
+            > "${BACKUP_PATH}/qdrant-snapshot.json"
+          docker image inspect pincheng-rag-backend:latest --format '{{.Id}}' \
+            > "${BACKUP_PATH}/backend-image.txt"
+          echo "PRODUCTION_BACKUP_OK path=${BACKUP_PATH}"
+
           if ! git merge-base --is-ancestor "${REPOSITORY_HEAD}" "${DEPLOY_COMMIT_SHA}"; then
             MERGE_BASE="$(git merge-base "${REPOSITORY_HEAD}" "${DEPLOY_COMMIT_SHA}" || true)"
             DIVERGENCE="$(git rev-list --left-right --count "${REPOSITORY_HEAD}...${DEPLOY_COMMIT_SHA}")"
             LOCAL_ONLY="$(git rev-list --max-count=20 "${DEPLOY_COMMIT_SHA}..${REPOSITORY_HEAD}" | paste -sd, -)"
             echo "PRODUCTION_GIT_DIVERGENCE node=app merge_base=${MERGE_BASE} left_right=${DIVERGENCE}"
             echo "PRODUCTION_GIT_LOCAL_ONLY node=app commits=${LOCAL_ONLY}"
-            echo "ERROR: production application repository history diverged"
-            exit 1
+            [ "${HISTORY_REALIGN}" = "ARCHIVE_AND_REALIGN" ] || {
+              echo "ERROR: history realignment was not explicitly approved"
+              exit 1
+            }
+            [ "${EXPECTED_APP_HEAD}" = "${REPOSITORY_HEAD}" ] || {
+              echo "ERROR: Ubuntu repository HEAD changed after approval"
+              exit 1
+            }
+            ARCHIVE_BRANCH="archive/production-app-before-realignment-${REPOSITORY_HEAD:0:12}"
+            if git show-ref --verify --quiet "refs/heads/${ARCHIVE_BRANCH}"; then
+              [ "$(git rev-parse "${ARCHIVE_BRANCH}")" = "${REPOSITORY_HEAD}" ] || {
+                echo "ERROR: existing Ubuntu archive branch points to another commit"
+                exit 1
+              }
+            else
+              git branch "${ARCHIVE_BRANCH}" "${REPOSITORY_HEAD}"
+            fi
+            git switch --detach "${DEPLOY_COMMIT_SHA}"
+            git branch -f master "${DEPLOY_COMMIT_SHA}"
+            git switch master
+            echo "PRODUCTION_GIT_REALIGN node=app archive=${ARCHIVE_BRANCH} target=${DEPLOY_COMMIT_SHA}"
+          else
+            git merge --ff-only "${DEPLOY_COMMIT_SHA}"
           fi
-          echo "PRODUCTION_GIT_PREFLIGHT node=app status=fast_forward_safe"
+          [ "$(git rev-parse HEAD)" = "${DEPLOY_COMMIT_SHA}" ] || {
+            echo "ERROR: Ubuntu repository did not reach approved commit"
+            exit 1
+          }
+          echo "PRODUCTION_GIT_PREFLIGHT node=app status=ready target=${DEPLOY_COMMIT_SHA}"
 
   deploy-gpu:
     needs: [preflight-app]
@@ -99,7 +199,10 @@ jobs:
         env:
           CONFIRM_PRODUCTION: ${{ inputs.confirm_production }}
           SELECTED_REF: ${{ github.ref }}
-          DEPLOY_COMMIT_SHA: ${{ github.sha }}
+          WORKFLOW_COMMIT_SHA: ${{ github.sha }}
+          DEPLOY_COMMIT_SHA: ${{ inputs.deploy_commit_sha }}
+          HISTORY_REALIGN: ${{ inputs.history_realign }}
+          EXPECTED_GPU_HEAD: ${{ inputs.expected_gpu_head }}
         run: |
           Set-StrictMode -Version Latest
           $ErrorActionPreference = 'Stop'
@@ -111,6 +214,15 @@ jobs:
           }
           if ($env:DEPLOY_COMMIT_SHA -notmatch '^[0-9a-fA-F]{40}$') {
             throw 'The selected deployment commit is not a full Git SHA.'
+          }
+          if ($env:WORKFLOW_COMMIT_SHA -notmatch '^[0-9a-fA-F]{40}$') {
+            throw 'The workflow commit is not a full Git SHA.'
+          }
+          if (
+            $env:HISTORY_REALIGN -eq 'ARCHIVE_AND_REALIGN' -and
+            $env:EXPECTED_GPU_HEAD -notmatch '^[0-9a-fA-F]{40}$'
+          ) {
+            throw 'An expected Windows HEAD is required for history realignment.'
           }
           Write-Host "EMERGENCY_DEPLOY target=$env:DEPLOY_COMMIT_SHA ref=$env:SELECTED_REF"
 
@@ -127,7 +239,10 @@ jobs:
           GPU_SERVICE_ACTIVITY_URL: ${{ vars.GPU_SERVICE_ACTIVITY_URL }}
           GPU_SERVICE_HOST: ${{ vars.GPU_SERVICE_HOST }}
           GIT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          DEPLOY_COMMIT_SHA: ${{ github.sha }}
+          WORKFLOW_COMMIT_SHA: ${{ github.sha }}
+          DEPLOY_COMMIT_SHA: ${{ inputs.deploy_commit_sha }}
+          HISTORY_REALIGN: ${{ inputs.history_realign }}
+          EXPECTED_GPU_HEAD: ${{ inputs.expected_gpu_head }}
         run: |
           Set-StrictMode -Version Latest
           $ErrorActionPreference = 'Stop'
@@ -143,7 +258,8 @@ jobs:
           foreach ($attempt in 1..4) {
             $gitArgs = @("-c", "http.version=HTTP/1.1") + $proxyArgs + @(
               "-c", "http.extraHeader=AUTHORIZATION: basic $basic", "fetch",
-              "https://github.com/abworks-dev/RAGPinCheng.git", $env:DEPLOY_COMMIT_SHA
+              "https://github.com/abworks-dev/RAGPinCheng.git",
+              $env:DEPLOY_COMMIT_SHA, $env:WORKFLOW_COMMIT_SHA
             )
             & git @gitArgs
             if ($LASTEXITCODE -eq 0) { $fetched = $true; break }
@@ -161,6 +277,13 @@ jobs:
           if ($trackedChanges.Count -gt 0) {
             throw "Production repository has tracked local changes; refusing to overwrite them"
           }
+          if ($repositoryBranch -ne 'master') {
+            throw "Production GPU repository must be on master"
+          }
+          & git merge-base --is-ancestor $env:DEPLOY_COMMIT_SHA $env:WORKFLOW_COMMIT_SHA
+          if ($LASTEXITCODE -ne 0) {
+            throw "Approved deployment commit is not an ancestor of selected master"
+          }
           & git merge-base --is-ancestor $repositoryHead $env:DEPLOY_COMMIT_SHA
           if ($LASTEXITCODE -ne 0) {
             $mergeBase = (@(& git merge-base $repositoryHead $env:DEPLOY_COMMIT_SHA) -join '').Trim()
@@ -168,10 +291,47 @@ jobs:
             $localOnly = @(& git rev-list --max-count=20 "$env:DEPLOY_COMMIT_SHA..$repositoryHead")
             Write-Host "PRODUCTION_GIT_DIVERGENCE merge_base=$mergeBase left_right=$divergence"
             Write-Host "PRODUCTION_GIT_LOCAL_ONLY commits=$($localOnly -join ',')"
-            throw "Production repository history diverged; refusing a destructive synchronization"
+            if ($env:HISTORY_REALIGN -ne 'ARCHIVE_AND_REALIGN') {
+              throw "Production repository history diverged without explicit realignment approval"
+            }
+            if ($env:EXPECTED_GPU_HEAD -ne $repositoryHead) {
+              throw "Windows repository HEAD changed after approval"
+            }
+            New-Item -ItemType Directory -Path $env:BACKUP_DIR -Force | Out-Null
+            $gitStatePath = Join-Path $env:BACKUP_DIR (
+              "history-realignment-{0}-{1}-gpu.txt" -f $env:GITHUB_RUN_ID, $env:GITHUB_RUN_ATTEMPT
+            )
+            @(
+              "node=gpu",
+              "previous_commit=$repositoryHead",
+              "target_commit=$env:DEPLOY_COMMIT_SHA"
+            ) | Set-Content -LiteralPath $gitStatePath -Encoding UTF8
+            $archiveBranch = "archive/production-gpu-before-realignment-$($repositoryHead.Substring(0, 12))"
+            & git show-ref --verify --quiet "refs/heads/$archiveBranch"
+            if ($LASTEXITCODE -eq 0) {
+              $archiveHead = (& git rev-parse $archiveBranch).Trim()
+              if ($LASTEXITCODE -ne 0 -or $archiveHead -ne $repositoryHead) {
+                throw "Existing Windows archive branch points to another commit"
+              }
+            } else {
+              & git branch $archiveBranch $repositoryHead
+              if ($LASTEXITCODE -ne 0) { throw "Unable to create Windows archive branch" }
+            }
+            & git switch --detach $env:DEPLOY_COMMIT_SHA
+            if ($LASTEXITCODE -ne 0) { throw "Unable to detach at approved deployment commit" }
+            & git branch -f master $env:DEPLOY_COMMIT_SHA
+            if ($LASTEXITCODE -ne 0) { throw "Unable to realign Windows master" }
+            & git switch master
+            if ($LASTEXITCODE -ne 0) { throw "Unable to switch to realigned Windows master" }
+            Write-Host "PRODUCTION_GIT_REALIGN node=gpu archive=$archiveBranch target=$env:DEPLOY_COMMIT_SHA"
+          } else {
+            git merge --ff-only $env:DEPLOY_COMMIT_SHA
+            if ($LASTEXITCODE -ne 0) { throw "Bootstrap fast-forward failed" }
           }
-          git merge --ff-only $env:DEPLOY_COMMIT_SHA
-          if ($LASTEXITCODE -ne 0) { throw "Bootstrap fast-forward failed" }
+          $realignedHead = (& git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $realignedHead -ne $env:DEPLOY_COMMIT_SHA) {
+            throw "Windows repository did not reach approved commit"
+          }
 
           & "${env:REPO_PATH}\scripts\deploy-gpu.ps1" `
             -RepositoryPath $env:REPO_PATH `
@@ -198,7 +358,7 @@ jobs:
           COMPOSE_OVERRIDE: ${{ vars.PRODUCTION_APP_COMPOSE_OVERRIDE }}
           COMPOSE_ENV_FILE: ${{ vars.PRODUCTION_APP_ENV_FILE }}
           GIT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          DEPLOY_COMMIT_SHA: ${{ github.sha }}
+          DEPLOY_COMMIT_SHA: ${{ inputs.deploy_commit_sha }}
           DEPLOY_HTTP_PROXY: ${{ vars.DEPLOY_HTTP_PROXY }}
         run: |
           set -euo pipefail
