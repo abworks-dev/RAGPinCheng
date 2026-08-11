@@ -53,7 +53,10 @@ class TestDeployGitSafety(unittest.TestCase):
         )
         self.assertIn("needs: [deploy-gpu]", self.emergency_workflow)
         self.assertIn("production-gpu-exclusive", self.emergency_workflow)
-        self.assertIn("production-app-deployment", self.emergency_workflow)
+        self.assertEqual(
+            self.emergency_workflow.count("production-app-emergency-exclusive"), 2
+        )
+        self.assertNotIn("production-app-deployment", self.emergency_workflow)
         self.assertNotIn("cleanup-after-deploy", self.emergency_workflow)
 
     def test_emergency_workflow_preflights_app_history_before_gpu(self):

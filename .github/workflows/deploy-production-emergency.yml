@@ -19,7 +19,7 @@ jobs:
   preflight-app:
     environment: production-asr
     concurrency:
-      group: production-app-deployment
+      group: production-app-emergency-exclusive
       cancel-in-progress: false
     runs-on: [self-hosted, linux, ubuntu, production, app]
     timeout-minutes: 10
@@ -184,7 +184,7 @@ jobs:
     needs: [deploy-gpu]
     environment: production-asr
     concurrency:
-      group: production-app-deployment
+      group: production-app-emergency-exclusive
       cancel-in-progress: false
     runs-on: [self-hosted, linux, ubuntu, production, app]
     timeout-minutes: 30
