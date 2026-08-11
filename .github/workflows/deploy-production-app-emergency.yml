@@ -1,10 +1,10 @@
-name: Deploy Production App Emergency
+name: Deploy Production App Manual
 
 on:
   workflow_dispatch:
     inputs:
       confirm_production:
-        description: Select DEPLOY_APP to deploy the approved application commit
+        description: Select DEPLOY_APP to deploy the selected master commit
         required: true
         default: CANCEL
         type: choice
@@ -16,7 +16,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: production-app-only-emergency-v1
+  group: production-app-manual-v1
   cancel-in-progress: false
 
 jobs:
@@ -25,11 +25,6 @@ jobs:
     runs-on: [self-hosted, linux, ubuntu, production, app]
     timeout-minutes: 45
     env:
-      APPROVED_DEPLOY_COMMIT: 4ed480e47057dc3414ad0ea3bb0e95d2d1a4c833
-      QUALIFIED_GPU_SOURCE_COMMIT: 3ff8c076c4637ab156281dbab7f6b3feac966685
-      EXPECTED_GPU_RELEASE_ID: 9b147c448b9b-fa16678de682
-      EXPECTED_GPU_SOURCE_FINGERPRINT: 9b147c448b9b22d15e41f8eae7409c5417c291fec0f8f3d67b47ad6a8bab2e79
-      EXPECTED_GPU_LOCK_SHA256: fa16678de682e389e0f5ca89b180b2c033404e5e077ff539b552f8cde0430f1a
       GPU_SERVICE_URL: ${{ vars.GPU_SERVICE_URL }}
       GPU_SERVICE_TOKEN: ${{ secrets.GPU_SERVICE_TOKEN }}
       REPO_PATH: ${{ vars.PRODUCTION_APP_REPO_PATH }}
@@ -39,12 +34,11 @@ jobs:
       COMPOSE_ENV_FILE: ${{ vars.PRODUCTION_APP_ENV_FILE }}
       DEPLOY_HTTP_PROXY: ${{ vars.DEPLOY_HTTP_PROXY }}
       GIT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      WORKFLOW_COMMIT_SHA: ${{ github.sha }}
       SELECTED_REF: ${{ github.ref }}
       CONFIRM_PRODUCTION: ${{ inputs.confirm_production }}
-      DEPLOY_COMMIT_SHA: 4ed480e47057dc3414ad0ea3bb0e95d2d1a4c833
+      DEPLOY_COMMIT_SHA: ${{ github.sha }}
     steps:
-      - name: Back up, deploy, and strictly verify the approved App commit
+      - name: Back up, deploy, and strictly verify the selected App commit
         run: |
           set -euo pipefail
 
@@ -53,11 +47,11 @@ jobs:
             exit 1
           }
           [ "${SELECTED_REF}" = "refs/heads/master" ] || {
-            echo "ERROR: App-only emergency deployment only accepts master"
+            echo "ERROR: manual App deployment only accepts master"
             exit 1
           }
-          [ "${DEPLOY_COMMIT_SHA}" = "${APPROVED_DEPLOY_COMMIT}" ] || {
-            echo "ERROR: deployment target is not the approved immutable commit"
+          [[ "${DEPLOY_COMMIT_SHA}" =~ ^[0-9a-fA-F]{40}$ ]] || {
+            echo "ERROR: selected master commit is not a full Git SHA"
             exit 1
           }
           command -v flock >/dev/null 2>&1 || {
@@ -71,21 +65,21 @@ jobs:
           if [ -n "${DEPLOY_HTTP_PROXY:-}" ]; then
             PROXY_ARGS=(-c "http.proxy=${DEPLOY_HTTP_PROXY}")
           fi
-          for ATTEMPT in 1 2 3 4; do
-            if git -c http.version=HTTP/1.1 "${PROXY_ARGS[@]}" \
-              -c "http.extraHeader=AUTHORIZATION: basic ${BASIC_AUTH}" fetch \
-              https://github.com/abworks-dev/RAGPinCheng.git \
-              "${APPROVED_DEPLOY_COMMIT}" \
-              "${QUALIFIED_GPU_SOURCE_COMMIT}" \
-              "${WORKFLOW_COMMIT_SHA}"; then
-              break
-            fi
-            if [ "${ATTEMPT}" -eq 4 ]; then
-              echo "ERROR: exact production inputs could not be fetched"
-              exit 1
-            fi
-            sleep "$((2 ** ATTEMPT))"
-          done
+          fetch_exact_commits() {
+            for ATTEMPT in 1 2 3 4; do
+              if git -c http.version=HTTP/1.1 "${PROXY_ARGS[@]}" \
+                -c "http.extraHeader=AUTHORIZATION: basic ${BASIC_AUTH}" fetch \
+                https://github.com/abworks-dev/RAGPinCheng.git "$@"; then
+                return 0
+              fi
+              [ "${ATTEMPT}" -lt 4 ] || return 1
+              sleep "$((2 ** ATTEMPT))"
+            done
+          }
+          fetch_exact_commits "${DEPLOY_COMMIT_SHA}" || {
+            echo "ERROR: selected master commit could not be fetched"
+            exit 1
+          }
 
           REPOSITORY_HEAD="$(git rev-parse HEAD)"
           REPOSITORY_BRANCH="$(git branch --show-current)"
@@ -98,15 +92,93 @@ jobs:
             echo "ERROR: production application repository has tracked local changes"
             exit 1
           }
-          [ "${REPOSITORY_HEAD}" = "${APPROVED_DEPLOY_COMMIT}" ] || {
-            echo "ERROR: production application repository is not at the approved commit"
-            exit 1
-          }
           git merge-base --is-ancestor \
-            "${APPROVED_DEPLOY_COMMIT}" "${WORKFLOW_COMMIT_SHA}" || {
-            echo "ERROR: approved application commit is not an ancestor of selected master"
+            "${REPOSITORY_HEAD}" "${DEPLOY_COMMIT_SHA}" || {
+            echo "ERROR: selected master commit is not a fast-forward from production"
             exit 1
           }
+          echo "APP_ONLY_GIT status=fast-forward-ready current=${REPOSITORY_HEAD} target=${DEPLOY_COMMIT_SHA}"
+
+          LOCK_METADATA="$(git show "${DEPLOY_COMMIT_SHA}:gpu_service/runtime-lock.json")"
+          VALIDATION_STATUS="$(printf '%s' "${LOCK_METADATA}" | python3 -c \
+            'import json,sys; print(json.load(sys.stdin).get("validation_status", ""))')"
+          QUALIFICATION_RUN_ID="$(printf '%s' "${LOCK_METADATA}" | python3 -c \
+            'import json,sys; print(json.load(sys.stdin).get("qualification_run_id", ""))')"
+          QUALIFIED_GPU_SOURCE_COMMIT="$(printf '%s' "${LOCK_METADATA}" | python3 -c \
+            'import json,sys; print(json.load(sys.stdin).get("source_commit", ""))')"
+          EXPECTED_GPU_SOURCE_FINGERPRINT="$(printf '%s' "${LOCK_METADATA}" | python3 -c \
+            'import json,sys; print(json.load(sys.stdin).get("qualified_source_fingerprint", ""))')"
+          EXPECTED_GPU_LOCK_SHA256="$(printf '%s' "${LOCK_METADATA}" | python3 -c \
+            'import json,sys; print(json.load(sys.stdin).get("qualified_lock_sha256", ""))')"
+          REQUIREMENTS_FILE="$(printf '%s' "${LOCK_METADATA}" | python3 -c \
+            'import json,sys; print(json.load(sys.stdin).get("requirements_file", ""))')"
+          [ "${VALIDATION_STATUS}" = "validated" ] || {
+            echo "ERROR: selected commit does not contain validated GPU lock metadata"
+            exit 1
+          }
+          [ -n "${QUALIFICATION_RUN_ID}" ] || {
+            echo "ERROR: selected commit lacks a GPU qualification run"
+            exit 1
+          }
+          [[ "${QUALIFIED_GPU_SOURCE_COMMIT}" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "ERROR: selected commit has an invalid qualified GPU source"
+            exit 1
+          }
+          [[ "${EXPECTED_GPU_SOURCE_FINGERPRINT}" =~ ^[0-9a-f]{64}$ ]] || {
+            echo "ERROR: selected commit has an invalid qualified GPU fingerprint"
+            exit 1
+          }
+          [[ "${EXPECTED_GPU_LOCK_SHA256}" =~ ^[0-9a-f]{64}$ ]] || {
+            echo "ERROR: selected commit has an invalid qualified GPU lock hash"
+            exit 1
+          }
+          [[ "${REQUIREMENTS_FILE}" =~ ^[A-Za-z0-9._-]+$ ]] || {
+            echo "ERROR: selected commit has an invalid GPU requirements file"
+            exit 1
+          }
+          fetch_exact_commits "${QUALIFIED_GPU_SOURCE_COMMIT}" || {
+            echo "ERROR: qualified GPU source commit could not be fetched"
+            exit 1
+          }
+
+          GPU_RUNTIME_FILES=(
+            gpu_service/__init__.py
+            gpu_service/app.py
+            gpu_service/config.py
+            gpu_service/models.py
+            gpu_service/schemas.py
+            scripts/start-gpu-service.ps1
+            scripts/diagnose_gpu_reranker.py
+            scripts/get-gpu-runtime-lock-hash.ps1
+          )
+          GPU_OBJECT_IDS=()
+          for FILE in "${GPU_RUNTIME_FILES[@]}"; do
+            OBJECT_ID="$(git rev-parse "${QUALIFIED_GPU_SOURCE_COMMIT}:${FILE}")"
+            [[ "${OBJECT_ID}" =~ ^[0-9a-f]{40}$ ]] || {
+              echo "ERROR: qualified GPU source inventory is incomplete"
+              exit 1
+            }
+            GPU_OBJECT_IDS+=("${OBJECT_ID}")
+          done
+          FINGERPRINT_PAYLOAD="$(printf '%s\n' "${GPU_OBJECT_IDS[@]}")"
+          COMPUTED_GPU_FINGERPRINT="$(printf '%s' "${FINGERPRINT_PAYLOAD}" | sha256sum | awk '{print $1}')"
+          [ "${COMPUTED_GPU_FINGERPRINT}" = "${EXPECTED_GPU_SOURCE_FINGERPRINT}" ] || {
+            echo "ERROR: qualified GPU source fingerprint does not match lock metadata"
+            exit 1
+          }
+          COMPUTED_LOCK_SHA256="$(
+            git show "${DEPLOY_COMMIT_SHA}:gpu_service/${REQUIREMENTS_FILE}" | python3 -c '
+          import hashlib, sys
+          content = sys.stdin.buffer.read().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+          print(hashlib.sha256(content).hexdigest())
+          '
+          )"
+          [ "${COMPUTED_LOCK_SHA256}" = "${EXPECTED_GPU_LOCK_SHA256}" ] || {
+            echo "ERROR: selected commit GPU dependency lock does not match validated metadata"
+            exit 1
+          }
+          EXPECTED_GPU_RELEASE_ID="${EXPECTED_GPU_SOURCE_FINGERPRINT:0:12}-${EXPECTED_GPU_LOCK_SHA256:0:12}"
+          export EXPECTED_GPU_RELEASE_ID EXPECTED_GPU_SOURCE_FINGERPRINT EXPECTED_GPU_LOCK_SHA256
 
           CONTRACT_FILES=(
             src/providers.py
@@ -116,7 +188,7 @@ jobs:
             gpu_service/schemas.py
           )
           for FILE in "${CONTRACT_FILES[@]}"; do
-            TARGET_BLOB="$(git rev-parse "${APPROVED_DEPLOY_COMMIT}:${FILE}")"
+            TARGET_BLOB="$(git rev-parse "${DEPLOY_COMMIT_SHA}:${FILE}")"
             QUALIFIED_BLOB="$(git rev-parse "${QUALIFIED_GPU_SOURCE_COMMIT}:${FILE}")"
             [ "${TARGET_BLOB}" = "${QUALIFIED_BLOB}" ] || {
               echo "ERROR: App/GPU contract differs from the qualified runtime: ${FILE}"
@@ -200,7 +272,7 @@ jobs:
           BACKUP_PATH="${BACKUP_DIR}/app-only-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           mkdir -p "${BACKUP_PATH}"
           printf 'node=app\nprevious_commit=%s\ntarget_commit=%s\n' \
-            "${REPOSITORY_HEAD}" "${APPROVED_DEPLOY_COMMIT}" \
+            "${REPOSITORY_HEAD}" "${DEPLOY_COMMIT_SHA}" \
             > "${BACKUP_PATH}/git-state.txt"
           SRC="${DATA_PATH}" DST="${BACKUP_PATH}" python3 - <<'PY'
           import os
@@ -295,8 +367,8 @@ jobs:
             verify_sqlite_integrity
             verify_gpu_identity
             verify_gpu_inference
-            [ "$(git rev-parse HEAD)" = "${APPROVED_DEPLOY_COMMIT}" ]
-            echo "APP_ONLY_DEPLOY status=success target=${APPROVED_DEPLOY_COMMIT} image=${EXPECTED_IMAGE_ID}"
+            [ "$(git rev-parse HEAD)" = "${DEPLOY_COMMIT_SHA}" ]
+            echo "APP_ONLY_DEPLOY status=success target=${DEPLOY_COMMIT_SHA} image=${EXPECTED_IMAGE_ID}"
           ); then
             if ! rollback_backend; then
               echo "CRITICAL: previous backend image did not recover"
