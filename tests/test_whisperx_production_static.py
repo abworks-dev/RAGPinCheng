@@ -81,7 +81,8 @@ def test_model_and_smoke_identity_are_pinned_and_use_existing_contracts():
     assert "Hugging Face download requires certificate verification" in runner
     assert 'os.environ["HF_HUB_DISABLE_XET"] = "1"' in runner
     assert "except requests.exceptions.SSLError:" in runner
-    assert "root / \".staging\" / uuid.uuid4().hex" in runner
+    assert 'staging = root / ".staging"' in runner
+    assert "exclusive_staging_lock(staging)" in runner
     assert "os.replace(staged_model, target)" in runner
     assert "existing {label} model cache is invalid" in runner
     assert '"whisperx-model-preparation-failure/1"' in runner

@@ -86,12 +86,29 @@ def test_shared_metrics_keep_whisperx_report_identity(tmp_path, monkeypatch):
     assert result["status"] == "pass"
     assert result["schema_version"] == qualification.REPORT_SCHEMA_VERSION
     assert result["profile_id"] == qualification.WHISPERX_PROFILE_ID
+    assert result["repetitions"] == 2
     assert result["sample_count"] == 8
     assert result["manifest_source"] == "legacy"
     assert result["manifest_sha256"] == manifest.manifest_sha256
     assert result["sample_set_id"] == manifest.sample_set_id
     assert result["annotation_version"] == manifest.annotation_version
     assert result["qualification_corpus"] == manifest.identity()
+
+
+def test_local_single_repetition_passes_through_shared_evaluator(tmp_path, monkeypatch):
+    manifest = qualification.load_manifest(_manifest(tmp_path))
+
+    def run_once(sample, **_kwargs):
+        value = _Canonical(sample.reference_text)
+        return value, b"markdown", [("00:00:00", "body")], 0.1
+
+    monkeypatch.setattr(qualification, "_run_once", run_once)
+    result = qualification.run_qualification(
+        manifest, timeout_ms=1000, repetitions=1
+    )
+
+    assert result["repetitions"] == 1
+    assert all(item["deterministic"] is None for item in result["samples"])
 
 
 def test_report_contains_no_reference_or_hypothesis_text(tmp_path, monkeypatch):

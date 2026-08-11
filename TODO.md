@@ -187,7 +187,7 @@
     脱敏 v3 JSON 后停止，不得运行 pip、修改 pin/freeze、服务或 Profile admission。
 - 完成标准：人工转录流程不退化；管理员只能选择服务端白名单 Profile；同一媒体可保留多个历史版本且只有 `app.sqlite` head 指向的版本进入正式检索；experimental Profile 强制审核；至少一个 `qualification_approved` Profile 完成隔离端到端验证后才讨论生产灰度。
 - 依赖：Phase 1～4B 已形成契约、持久化、remote Provider 与应用上传/worker/UI 前半段；Phase 5A/5B 已实现版本审阅、发布、候选索引和检索可见性，待远端 CI；Windows ASR R3A 仓库实施及 PR #8 远端 CI 已通过，但不等于生产部署完成；R3B/R3C、真实引擎/GPU/Qdrant 和生产数据均未执行；真实环境操作另按 R3 逐项审批，单卡 GPU 保持 BGE 优先。
-- 方案链接：`project-docs/plans/multi-engine-auto-transcription.md`、`project-docs/plans/multi-engine-transcription-phase1.md`、`project-docs/plans/multi-engine-transcription-phase2.md`、`project-docs/plans/multi-engine-transcription-phase3.md`、`project-docs/plans/multi-engine-transcription-phase5.md`、`project-docs/plans/multi-engine-transcription-phase5c-windows-asr-deployment.md`、`project-docs/plans/transcription-admin-workflow-hardening.md`、`project-docs/plans/faster-whisper-provider-integration.md`、`project-docs/plans/faster-whisper-r3-unified-qualification.md`、`project-docs/plans/qwen3-asr-r2-r3-integration.md`、`project-docs/plans/shared-asr-qualification-corpus-migration.md`、`project-docs/decisions/0002-multi-engine-transcription.md`、`project-docs/plans/funasr-auto-transcription.md`
+- 方案链接：`project-docs/plans/multi-engine-auto-transcription.md`、`project-docs/plans/multi-engine-transcription-phase1.md`、`project-docs/plans/multi-engine-transcription-phase2.md`、`project-docs/plans/multi-engine-transcription-phase3.md`、`project-docs/plans/multi-engine-transcription-phase5.md`、`project-docs/plans/multi-engine-transcription-phase5c-windows-asr-deployment.md`、`project-docs/plans/transcription-admin-workflow-hardening.md`、`project-docs/plans/faster-whisper-provider-integration.md`、`project-docs/plans/faster-whisper-r3-unified-qualification.md`、`project-docs/plans/qwen3-asr-r2-r3-integration.md`、`project-docs/plans/shared-asr-qualification-corpus-migration.md`、`project-docs/plans/asr-local-development-lab.md`、`project-docs/decisions/0002-multi-engine-transcription.md`、`project-docs/plans/funasr-auto-transcription.md`
 
 ---
 
@@ -195,13 +195,13 @@
 
 后续新增摘要应尽量链接相关 commit、PR、workflow 或功能文档；详细事实不在本文件重复记录。
 
-1. 三引擎共享 ASR qualification corpus 中性变量迁移（2026-08-10）。
-2. faster-whisper 生产准入代码准备（2026-08-10）。
-3. 管理端资料管理工作流 PR1，用户验收通过（2026-08-05）。
-4. 多引擎视频自动转录架构决策与总体方案（2026-08-01）。
-5. 查询拆分 Phase A 评测协议与指标实现（2026-07-31）。
-6. 查询拆分 `retrieve_multi` rerank 超限修复及 79 题回归（2026-07-30）。
-7. 黄金集索引指纹陈旧告警与严格模式（2026-07-30）。
-8. 比较型黄金集、两侧覆盖评分和生产收益样本（2026-07-30）。
-9. 黄金集第一期重建、生产新基线和用户验收（2026-07-30）。
-10. 查询拆分核心、预算截断修复和生产冒烟（2026-07-30）。
+1. [Qwen3-ASR / WhisperX 本地快速实验室](project-docs/plans/asr-local-development-lab.md)及双引擎 full 实测（2026-08-11）。
+2. 三引擎共享 ASR qualification corpus 中性变量迁移（2026-08-10）。
+3. faster-whisper 生产准入代码准备（2026-08-10）。
+4. 管理端资料管理工作流 PR1，用户验收通过（2026-08-05）。
+5. 多引擎视频自动转录架构决策与总体方案（2026-08-01）。
+6. 查询拆分 Phase A 评测协议与指标实现（2026-07-31）。
+7. 查询拆分 `retrieve_multi` rerank 超限修复及 79 题回归（2026-07-30）。
+8. 黄金集索引指纹陈旧告警与严格模式（2026-07-30）。
+9. 比较型黄金集、两侧覆盖评分和生产收益样本（2026-07-30）。
+10. 黄金集第一期重建、生产新基线和用户验收（2026-07-30）。

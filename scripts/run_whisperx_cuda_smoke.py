@@ -5,10 +5,22 @@ import hashlib
 import json
 import os
 import ssl
+import sys
 import time
-import uuid
 import wave
 from pathlib import Path
+
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+if str(REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPOSITORY_ROOT))
+
+from scripts.asr_model_download import (
+    HF_ORIGIN_IP_ENV,
+    assert_no_reparse_components,
+    curl_snapshot_download,
+    exclusive_staging_lock,
+    hugging_face_origin_override,
+)
 
 ASR_MODEL_ID = "Systran/faster-whisper-large-v3"
 ASR_REVISION = "53ecf83a5bedc5597eb8c8b34eac29e5345520ff"
@@ -115,19 +127,22 @@ def _hugging_face_backend():
 
 
 def _download_model(**kwargs: object) -> str:
+    if os.environ.get(HF_ORIGIN_IP_ENV, "").strip():
+        return curl_snapshot_download(**kwargs)
     import requests
     from huggingface_hub import configure_http_backend, snapshot_download
 
     os.environ["HF_HUB_DISABLE_XET"] = "1"
     configure_http_backend(backend_factory=_hugging_face_backend)
     kwargs.setdefault("max_workers", 1)
-    for attempt in range(1, MODEL_DOWNLOAD_ATTEMPTS + 1):
-        try:
-            return snapshot_download(**kwargs)
-        except requests.exceptions.SSLError:
-            if attempt == MODEL_DOWNLOAD_ATTEMPTS:
-                raise
-            time.sleep(MODEL_DOWNLOAD_RETRY_SECONDS * attempt)
+    with hugging_face_origin_override():
+        for attempt in range(1, MODEL_DOWNLOAD_ATTEMPTS + 1):
+            try:
+                return snapshot_download(**kwargs)
+            except requests.exceptions.SSLError:
+                if attempt == MODEL_DOWNLOAD_ATTEMPTS:
+                    raise
+                time.sleep(MODEL_DOWNLOAD_RETRY_SECONDS * attempt)
     raise AssertionError("model download retry loop exhausted")
 
 
@@ -147,6 +162,7 @@ def _prepare_model(
     )
 
     target = root / relative_path
+    assert_no_reparse_components(target, f"{label} model target")
     manifest = target / "model-manifest.json"
     validator = (
         validate_whisperx_cache if label == "asr" else validate_whisperx_align_cache
@@ -176,6 +192,7 @@ def _prepare_model(
     if not validator(staged_root, staged_model / "model-manifest.json").available:
         raise RuntimeError(f"staged {label} model cache validation failed")
     target.parent.mkdir(parents=True, exist_ok=True)
+    assert_no_reparse_components(target.parent, f"{label} model target")
     os.replace(staged_model, target)
 
 
@@ -202,31 +219,32 @@ def _model_preparation_diagnostic(error: Exception) -> dict[str, str]:
 
 def prepare_models(root: Path, nltk_root: Path) -> None:
     root.mkdir(parents=True, exist_ok=True)
-    staging = root / ".staging" / uuid.uuid4().hex
-    _prepare_model(
-        root,
-        staging,
-        label="asr",
-        model_id=ASR_MODEL_ID,
-        revision=ASR_REVISION,
-        relative_path=ASR_RELATIVE_PATH,
-        allow_patterns=[
-            "config.json",
-            "model.bin",
-            "preprocessor_config.json",
-            "tokenizer.json",
-            "vocabulary.json",
-        ],
-    )
-    _prepare_model(
-        root,
-        staging,
-        label="aligner",
-        model_id=ALIGN_MODEL_ID,
-        revision=ALIGN_REVISION,
-        relative_path=ALIGN_RELATIVE_PATH,
-        allow_patterns=["*.json", "*.bin", "*.safetensors", "*.txt", "*.model"],
-    )
+    staging = root / ".staging"
+    with exclusive_staging_lock(staging):
+        _prepare_model(
+            root,
+            staging,
+            label="asr",
+            model_id=ASR_MODEL_ID,
+            revision=ASR_REVISION,
+            relative_path=ASR_RELATIVE_PATH,
+            allow_patterns=[
+                "config.json",
+                "model.bin",
+                "preprocessor_config.json",
+                "tokenizer.json",
+                "vocabulary.json",
+            ],
+        )
+        _prepare_model(
+            root,
+            staging,
+            label="aligner",
+            model_id=ALIGN_MODEL_ID,
+            revision=ALIGN_REVISION,
+            relative_path=ALIGN_RELATIVE_PATH,
+            allow_patterns=["*.json", "*.bin", "*.safetensors", "*.txt", "*.model"],
+        )
     prepare_smoke_punkt(nltk_root)
 
 

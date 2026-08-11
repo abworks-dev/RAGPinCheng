@@ -327,3 +327,20 @@ WhisperX 另提供互斥的 `runtime_preflight`：只读检查 Python、WhisperX
 的脱敏 artifact；不安装依赖、不下载模型、不启动服务。真实 qualification job 只有在
 runtime preflight 成功后才运行；缺少 Python 路径时也会生成固定失败报告，避免空 report
 根目录导致无证据退出。
+
+开发机另提供 `scripts/run-asr-local-lab.ps1` 本地快速实验室。它在仓库外固定根目录中为
+Qwen3-ASR、WhisperX 和测试工具创建三个独立 venv，并重定向 pip/Hugging Face/Torch/
+CUDA/NLTK/temp/pycache；bootstrap 可联网准备固定 revision 模型，smoke/focus/full 评测
+强制离线。Qwen 临时服务只绑定 `127.0.0.1:18310`，生产端口和现有 GPU 进程不被修改。
+模型下载使用稳定 staging、跨命令 `.partial` 续传和原子发布，成功后不保留完整 staging
+副本；所有写入路径解析真实目标并拒绝 reparse 逃逸。每次运行写入 `run-summary.json`，
+质量门禁失败返回退出码 `2`。本地报告固定为 development-only 且永不具备 qualification 资格；当前真实依赖、模型和
+GPU 已在 RTX 5070 Ti 上完成 bootstrap、smoke、focus 和 full。Qwen smoke 通过，但
+forced-chinese 与 auto-zh-en 的 full 均仅 6/8 样本通过，标准编号与中英混合仍未达到原门禁；
+WhisperX full 三候选矩阵通过并选择 full-decode，8/8 样本、双遍确定性、术语/编号召回和
+负样本门禁均通过，峰值 GPU 分配约 `1323.55 MiB`。这些结果仅证明本地开发链路与候选
+差异，不构成 production qualification，Profile admission 仍为 disabled。实施和操作边界见
+[Qwen3-ASR / WhisperX 本地快速实验室](../plans/asr-local-development-lab.md)。
+
+Qwen3-ASR 与 WhisperX 的 `runtime_contract_sha256` 同时绑定各自模型准备/qualification 入口
+和共享 `scripts/asr_model_download.py`；下载或准备实现变化不会复用旧 qualification 证据。

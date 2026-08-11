@@ -30,6 +30,13 @@ from asr_service.model_cache import (
     validate_qwen3_aligner_cache,
     validate_qwen3_asr_cache,
 )
+from scripts.asr_model_download import (
+    HF_ORIGIN_IP_ENV,
+    assert_no_reparse_components,
+    curl_snapshot_download,
+    exclusive_staging_lock,
+    hugging_face_origin_override,
+)
 
 MANIFEST_NAME = "model-manifest.json"
 MODEL_DOWNLOAD_ATTEMPTS = 3
@@ -192,6 +199,7 @@ def _sha256(path: Path) -> str:
 def _strict_root(path: Path, label: str, *, exists: bool) -> Path:
     if not path.is_absolute():
         raise RuntimeError(f"{label} must be absolute")
+    assert_no_reparse_components(path, label)
     result = path.resolve(strict=exists)
     if result == Path(result.anchor):
         raise RuntimeError(f"{label} must not be a drive root")
@@ -255,17 +263,20 @@ def _manifest(model_root: Path, spec: ModelSpec) -> Path:
 
 def _download(**kwargs: object) -> str:
     os.environ["HF_HUB_DISABLE_XET"] = "1"
+    if os.environ.get(HF_ORIGIN_IP_ENV, "").strip():
+        return curl_snapshot_download(**kwargs)
     from huggingface_hub import configure_http_backend, snapshot_download
 
     configure_http_backend(backend_factory=_hugging_face_backend)
     kwargs.setdefault("max_workers", 1)
-    for attempt in range(1, MODEL_DOWNLOAD_ATTEMPTS + 1):
-        try:
-            return snapshot_download(**kwargs)
-        except requests.exceptions.SSLError:
-            if attempt == MODEL_DOWNLOAD_ATTEMPTS:
-                raise
-            time.sleep(MODEL_DOWNLOAD_RETRY_SECONDS * attempt)
+    with hugging_face_origin_override():
+        for attempt in range(1, MODEL_DOWNLOAD_ATTEMPTS + 1):
+            try:
+                return snapshot_download(**kwargs)
+            except requests.exceptions.SSLError:
+                if attempt == MODEL_DOWNLOAD_ATTEMPTS:
+                    raise
+                time.sleep(MODEL_DOWNLOAD_RETRY_SECONDS * attempt)
     raise AssertionError("model download retry loop exhausted")
 
 
@@ -276,6 +287,7 @@ def _prepare_one(
     downloader: Callable[..., str],
 ) -> dict[str, str]:
     target = cache / Path(*PurePosixPath(spec.relative_path).parts)
+    assert_no_reparse_components(target, f"{spec.label} model target")
     target_manifest = target / MANIFEST_NAME
     if target.exists():
         status = spec.validator(cache, target_manifest)
@@ -289,30 +301,27 @@ def _prepare_one(
             "manifest_sha256": _sha256(target_manifest),
         }
 
-    download_root = staging / spec.label / "download"
-    download_root.mkdir(parents=True)
+    candidate_cache = staging / spec.label / "candidate-cache"
+    candidate = candidate_cache / Path(*PurePosixPath(spec.relative_path).parts)
+    candidate.mkdir(parents=True, exist_ok=True)
     returned = Path(
         downloader(
             repo_id=spec.model_id,
             revision=spec.revision,
-            local_dir=str(download_root),
+            local_dir=str(candidate),
             local_dir_use_symlinks=False,
         )
     ).resolve(strict=True)
-    if returned != download_root.resolve(strict=True):
+    if returned != candidate.resolve(strict=True):
         raise RuntimeError("downloader escaped fixed staging")
-
-    candidate_cache = staging / spec.label / "candidate-cache"
-    candidate = candidate_cache / Path(*PurePosixPath(spec.relative_path).parts)
-    candidate.mkdir(parents=True)
-    for source in _files(download_root):
-        destination = candidate / source.relative_to(download_root)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, destination, follow_symlinks=False)
+    metadata_cache = candidate / ".cache"
+    if metadata_cache.exists():
+        shutil.rmtree(metadata_cache)
     manifest = _manifest(candidate, spec)
     if not getattr(spec.validator(candidate_cache, manifest), "available", False):
         raise RuntimeError(f"staged {spec.label} cache validation failed")
     target.parent.mkdir(parents=True, exist_ok=True)
+    assert_no_reparse_components(target.parent, f"{spec.label} model target")
     if target.exists():
         raise RuntimeError("final cache appeared during preparation")
     os.replace(candidate, target)
@@ -335,15 +344,18 @@ def prepare_models(
 ) -> dict[str, object]:
     cache = _strict_root(cache_root, "cache_root", exists=False)
     staging = _strict_root(staging_root, "staging_root", exists=False)
-    if staging.exists() and any(staging.iterdir()):
-        raise RuntimeError("staging_root must be empty")
     staging.mkdir(parents=True, exist_ok=True)
-    return {
-        "schema_version": "qwen3-asr-model-preparation/1",
-        "models": [
-            _prepare_one(cache, staging, spec, downloader) for spec in SPECS
-        ],
-    }
+    allowed = {".prepare.lock", *(spec.label for spec in SPECS)}
+    unexpected = sorted(item.name for item in staging.iterdir() if item.name not in allowed)
+    if unexpected:
+        raise RuntimeError("staging_root contains unexpected entries")
+    with exclusive_staging_lock(staging):
+        return {
+            "schema_version": "qwen3-asr-model-preparation/1",
+            "models": [
+                _prepare_one(cache, staging, spec, downloader) for spec in SPECS
+            ],
+        }
 
 
 def main() -> int:
