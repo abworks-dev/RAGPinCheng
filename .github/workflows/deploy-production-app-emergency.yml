@@ -1,0 +1,306 @@
+name: Deploy Production App Emergency
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_production:
+        description: Select DEPLOY_APP to deploy the approved application commit
+        required: true
+        default: CANCEL
+        type: choice
+        options:
+          - CANCEL
+          - DEPLOY_APP
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-app-only-emergency-v1
+  cancel-in-progress: false
+
+jobs:
+  deploy-app:
+    environment: production-asr
+    runs-on: [self-hosted, linux, ubuntu, production, app]
+    timeout-minutes: 45
+    env:
+      APPROVED_DEPLOY_COMMIT: 4ed480e47057dc3414ad0ea3bb0e95d2d1a4c833
+      QUALIFIED_GPU_SOURCE_COMMIT: 3ff8c076c4637ab156281dbab7f6b3feac966685
+      EXPECTED_GPU_RELEASE_ID: 9b147c448b9b-fa16678de682
+      EXPECTED_GPU_SOURCE_FINGERPRINT: 9b147c448b9b22d15e41f8eae7409c5417c291fec0f8f3d67b47ad6a8bab2e79
+      EXPECTED_GPU_LOCK_SHA256: fa16678de682e389e0f5ca89b180b2c033404e5e077ff539b552f8cde0430f1a
+      GPU_SERVICE_URL: ${{ vars.GPU_SERVICE_URL }}
+      GPU_SERVICE_TOKEN: ${{ secrets.GPU_SERVICE_TOKEN }}
+      REPO_PATH: ${{ vars.PRODUCTION_APP_REPO_PATH }}
+      BACKUP_DIR: ${{ vars.PRODUCTION_APP_BACKUP_DIRECTORY }}
+      DATA_PATH: ${{ vars.PRODUCTION_APP_DATA_PATH }}
+      COMPOSE_OVERRIDE: ${{ vars.PRODUCTION_APP_COMPOSE_OVERRIDE }}
+      COMPOSE_ENV_FILE: ${{ vars.PRODUCTION_APP_ENV_FILE }}
+      DEPLOY_HTTP_PROXY: ${{ vars.DEPLOY_HTTP_PROXY }}
+      GIT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      WORKFLOW_COMMIT_SHA: ${{ github.sha }}
+      SELECTED_REF: ${{ github.ref }}
+      CONFIRM_PRODUCTION: ${{ inputs.confirm_production }}
+      DEPLOY_COMMIT_SHA: 4ed480e47057dc3414ad0ea3bb0e95d2d1a4c833
+    steps:
+      - name: Back up, deploy, and strictly verify the approved App commit
+        run: |
+          set -euo pipefail
+
+          [ "${CONFIRM_PRODUCTION}" = "DEPLOY_APP" ] || {
+            echo "ERROR: App-only production deployment was not confirmed"
+            exit 1
+          }
+          [ "${SELECTED_REF}" = "refs/heads/master" ] || {
+            echo "ERROR: App-only emergency deployment only accepts master"
+            exit 1
+          }
+          [ "${DEPLOY_COMMIT_SHA}" = "${APPROVED_DEPLOY_COMMIT}" ] || {
+            echo "ERROR: deployment target is not the approved immutable commit"
+            exit 1
+          }
+          command -v flock >/dev/null 2>&1 || {
+            echo "ERROR: flock is required for host-level deployment exclusion"
+            exit 1
+          }
+
+          cd "${REPO_PATH}"
+          BASIC_AUTH="$(printf 'x-access-token:%s' "${GIT_TOKEN}" | base64 | tr -d '\n')"
+          PROXY_ARGS=()
+          if [ -n "${DEPLOY_HTTP_PROXY:-}" ]; then
+            PROXY_ARGS=(-c "http.proxy=${DEPLOY_HTTP_PROXY}")
+          fi
+          for ATTEMPT in 1 2 3 4; do
+            if git -c http.version=HTTP/1.1 "${PROXY_ARGS[@]}" \
+              -c "http.extraHeader=AUTHORIZATION: basic ${BASIC_AUTH}" fetch \
+              https://github.com/abworks-dev/RAGPinCheng.git \
+              "${APPROVED_DEPLOY_COMMIT}" \
+              "${QUALIFIED_GPU_SOURCE_COMMIT}" \
+              "${WORKFLOW_COMMIT_SHA}"; then
+              break
+            fi
+            if [ "${ATTEMPT}" -eq 4 ]; then
+              echo "ERROR: exact production inputs could not be fetched"
+              exit 1
+            fi
+            sleep "$((2 ** ATTEMPT))"
+          done
+
+          REPOSITORY_HEAD="$(git rev-parse HEAD)"
+          REPOSITORY_BRANCH="$(git branch --show-current)"
+          TRACKED_CHANGES="$(git status --porcelain --untracked-files=no)"
+          [ "${REPOSITORY_BRANCH}" = "master" ] || {
+            echo "ERROR: production application repository must be on master"
+            exit 1
+          }
+          [ -z "${TRACKED_CHANGES}" ] || {
+            echo "ERROR: production application repository has tracked local changes"
+            exit 1
+          }
+          [ "${REPOSITORY_HEAD}" = "${APPROVED_DEPLOY_COMMIT}" ] || {
+            echo "ERROR: production application repository is not at the approved commit"
+            exit 1
+          }
+          git merge-base --is-ancestor \
+            "${APPROVED_DEPLOY_COMMIT}" "${WORKFLOW_COMMIT_SHA}" || {
+            echo "ERROR: approved application commit is not an ancestor of selected master"
+            exit 1
+          }
+
+          CONTRACT_FILES=(
+            src/providers.py
+            gpu_service/__init__.py
+            gpu_service/app.py
+            gpu_service/models.py
+            gpu_service/schemas.py
+          )
+          for FILE in "${CONTRACT_FILES[@]}"; do
+            TARGET_BLOB="$(git rev-parse "${APPROVED_DEPLOY_COMMIT}:${FILE}")"
+            QUALIFIED_BLOB="$(git rev-parse "${QUALIFIED_GPU_SOURCE_COMMIT}:${FILE}")"
+            [ "${TARGET_BLOB}" = "${QUALIFIED_BLOB}" ] || {
+              echo "ERROR: App/GPU contract differs from the qualified runtime: ${FILE}"
+              exit 1
+            }
+          done
+          echo "APP_ONLY_CONTRACT status=identical files=${#CONTRACT_FILES[@]}"
+
+          mkdir -p "${BACKUP_DIR}"
+          exec 9>"${BACKUP_DIR}/.production-app-deploy.lock"
+          flock -n 9 || {
+            echo "ERROR: another host-level application deployment is active"
+            exit 1
+          }
+
+          COMPOSE=(docker compose -p ragpincheng-prod \
+            -f "${REPO_PATH}/docker/docker-compose.yml" \
+            -f "${COMPOSE_OVERRIDE}" --env-file "${COMPOSE_ENV_FILE}")
+
+          verify_gpu_identity() {
+            curl -fsS --connect-timeout 10 --max-time 30 \
+              "${GPU_SERVICE_URL}/health" | python3 -c \
+              'import json,sys; d=json.load(sys.stdin); assert d.get("status") == "ok" and d.get("model_loaded") is True'
+            curl -fsS --connect-timeout 10 --max-time 30 \
+              "${GPU_SERVICE_URL}/model-info" | python3 -c '
+          import json, os, sys
+          d = json.load(sys.stdin)
+          assert str(d.get("api_version")) == "1"
+          assert d.get("embedding_dimension") == 1024
+          assert d.get("device") == "cuda"
+          assert d.get("runtime_release_id") == os.environ["EXPECTED_GPU_RELEASE_ID"]
+          assert d.get("runtime_source_fingerprint") == os.environ["EXPECTED_GPU_SOURCE_FINGERPRINT"]
+          assert d.get("runtime_lock_sha256") == os.environ["EXPECTED_GPU_LOCK_SHA256"]
+          '
+          }
+
+          verify_gpu_inference() {
+            curl -fsS --connect-timeout 10 --max-time 120 \
+              -H "Authorization: Bearer ${GPU_SERVICE_TOKEN}" \
+              -H "Content-Type: application/json" \
+              --data '{"texts":["app-only deployment probe"]}' \
+              "${GPU_SERVICE_URL}/v1/embeddings" | python3 -c '
+          import json, sys
+          d = json.load(sys.stdin)
+          assert len(d.get("embeddings", [])) == 1
+          item = d["embeddings"][0]
+          assert len(item.get("dense", [])) == 1024
+          assert len(item.get("sparse_indices", [])) == len(item.get("sparse_values", []))
+          '
+            curl -fsS --connect-timeout 10 --max-time 120 \
+              -H "Authorization: Bearer ${GPU_SERVICE_TOKEN}" \
+              -H "Content-Type: application/json" \
+              --data '{"query":"deployment probe","passages":["deployment probe","unrelated text"]}' \
+              "${GPU_SERVICE_URL}/v1/rerank" | python3 -c '
+          import json, sys
+          d = json.load(sys.stdin)
+          scores = d.get("scores", [])
+          assert len(scores) == 2 and all(isinstance(x, (int, float)) for x in scores)
+          '
+          }
+
+          verify_sqlite_integrity() {
+            SRC="${DATA_PATH}" python3 - <<'PY'
+          import os
+          import sqlite3
+          from pathlib import Path
+
+          for name in ("app.sqlite", "parents.sqlite"):
+              path = Path(os.environ["SRC"]) / name
+              with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as database:
+                  result = database.execute("PRAGMA integrity_check").fetchone()[0]
+              if result != "ok":
+                  raise SystemExit(f"{name} integrity check failed: {result}")
+          PY
+          }
+
+          verify_gpu_identity
+          verify_gpu_inference
+          echo "APP_ONLY_GPU status=validated release=${EXPECTED_GPU_RELEASE_ID}"
+
+          BACKUP_PATH="${BACKUP_DIR}/app-only-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          mkdir -p "${BACKUP_PATH}"
+          printf 'node=app\nprevious_commit=%s\ntarget_commit=%s\n' \
+            "${REPOSITORY_HEAD}" "${APPROVED_DEPLOY_COMMIT}" \
+            > "${BACKUP_PATH}/git-state.txt"
+          SRC="${DATA_PATH}" DST="${BACKUP_PATH}" python3 - <<'PY'
+          import os
+          import sqlite3
+          from pathlib import Path
+
+          source_dir = Path(os.environ["SRC"])
+          backup_dir = Path(os.environ["DST"])
+          for name in ("app.sqlite", "parents.sqlite"):
+              source_path = source_dir / name
+              if not source_path.is_file():
+                  raise SystemExit(f"Missing production database: {source_path}")
+              backup_path = backup_dir / name
+              with sqlite3.connect(f"file:{source_path}?mode=ro", uri=True) as source:
+                  with sqlite3.connect(backup_path) as target:
+                      source.backup(target)
+                      result = target.execute("PRAGMA integrity_check").fetchone()[0]
+                      if result != "ok":
+                          raise SystemExit(f"{name} backup integrity failed: {result}")
+              print(f"APP_ONLY_BACKUP status=ok database={name}")
+          PY
+          "${COMPOSE[@]}" exec -T backend curl -fsS -X POST \
+            --connect-timeout 10 --max-time 30 \
+            http://qdrant:6333/collections/pincheng_docs/snapshots \
+            > "${BACKUP_PATH}/qdrant-snapshot.json"
+          SNAPSHOT_PATH="${BACKUP_PATH}/qdrant-snapshot.json" python3 -c '
+          import json, os
+          from pathlib import Path
+          d = json.loads(Path(os.environ["SNAPSHOT_PATH"]).read_text(encoding="utf-8"))
+          assert d.get("status") == "ok"
+          assert d.get("result", {}).get("name")
+          '
+          "${COMPOSE[@]}" exec -T backend curl -fsS \
+            --connect-timeout 10 --max-time 30 \
+            http://qdrant:6333/collections/pincheng_docs \
+            > "${BACKUP_PATH}/qdrant-before.json"
+          OLD_IMAGE_ID="$(docker image inspect pincheng-rag-backend:latest --format '{{.Id}}')"
+          [ -n "${OLD_IMAGE_ID}" ] || {
+            echo "ERROR: current backend image identity is missing"
+            exit 1
+          }
+          printf '%s\n' "${OLD_IMAGE_ID}" > "${BACKUP_PATH}/backend-image.txt"
+          echo "APP_ONLY_BACKUP status=complete path=${BACKUP_PATH}"
+
+          rollback_backend() {
+            echo "APP_ONLY_ROLLBACK status=starting"
+            docker tag "${OLD_IMAGE_ID}" pincheng-rag-backend:latest
+            "${COMPOSE[@]}" up -d --no-deps backend
+            for ATTEMPT in $(seq 1 36); do
+              CONTAINER_ID="$("${COMPOSE[@]}" ps -q backend)"
+              HEALTH_STATUS="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "${CONTAINER_ID}" 2>/dev/null || true)"
+              if [ "${HEALTH_STATUS}" = "healthy" ] && \
+                curl -fsS --connect-timeout 5 --max-time 10 \
+                  http://localhost/api/health >/dev/null 2>&1; then
+                echo "APP_ONLY_ROLLBACK status=complete image=${OLD_IMAGE_ID}"
+                return 0
+              fi
+              sleep 5
+            done
+            echo "APP_ONLY_ROLLBACK status=failed image=${OLD_IMAGE_ID}"
+            return 1
+          }
+
+          if ! (
+            set -euo pipefail
+            bash "${REPO_PATH}/scripts/deploy-app.sh"
+
+            CONTAINER_ID="$("${COMPOSE[@]}" ps -q backend)"
+            [ -n "${CONTAINER_ID}" ]
+            EXPECTED_IMAGE_ID="$(docker image inspect pincheng-rag-backend:latest --format '{{.Id}}')"
+            RUNNING_IMAGE_ID="$(docker inspect --format '{{.Image}}' "${CONTAINER_ID}")"
+            [ "${RUNNING_IMAGE_ID}" = "${EXPECTED_IMAGE_ID}" ]
+
+            HEALTH_STATUS=""
+            for ATTEMPT in $(seq 1 36); do
+              HEALTH_STATUS="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "${CONTAINER_ID}" 2>/dev/null || true)"
+              [ "${HEALTH_STATUS}" = "healthy" ] && break
+              sleep 5
+            done
+            [ "${HEALTH_STATUS}" = "healthy" ]
+            curl -fsS --connect-timeout 5 --max-time 10 \
+              http://localhost/api/health | python3 -c \
+              'import json,sys; assert json.load(sys.stdin).get("status") == "ok"'
+            "${COMPOSE[@]}" exec -T backend curl -fsS \
+              --connect-timeout 10 --max-time 30 \
+              http://qdrant:6333/collections/pincheng_docs | python3 -c '
+          import json, sys
+          d = json.load(sys.stdin)
+          assert d.get("status") == "ok"
+          assert d.get("result", {}).get("status") == "green"
+          '
+            verify_sqlite_integrity
+            verify_gpu_identity
+            verify_gpu_inference
+            [ "$(git rev-parse HEAD)" = "${APPROVED_DEPLOY_COMMIT}" ]
+            echo "APP_ONLY_DEPLOY status=success target=${APPROVED_DEPLOY_COMMIT} image=${EXPECTED_IMAGE_ID}"
+          ); then
+            if ! rollback_backend; then
+              echo "CRITICAL: previous backend image did not recover"
+            fi
+            echo "ERROR: App-only deployment failed strict verification"
+            exit 1
+          fi
