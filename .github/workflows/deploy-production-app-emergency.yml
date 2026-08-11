@@ -277,10 +277,14 @@ jobs:
               exit 1
               ;;
           esac
-          mkdir -p "${CONTENT_HOST_PATH}"
-          CONTENT_WRITE_PROBE="${CONTENT_HOST_PATH}/.deployment-write-probe-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          : > "${CONTENT_WRITE_PROBE}"
-          rm -f "${CONTENT_WRITE_PROBE}"
+          docker run --rm \
+            --volume "${CONTENT_HOST_PATH}:/app/content" \
+            pincheng-rag-backend:latest \
+            sh -eu -c 'PROBE=/app/content/.deployment-write-probe; : > "${PROBE}"; rm -f "${PROBE}"'
+          [ -d "${CONTENT_HOST_PATH}" ] && [ ! -L "${CONTENT_HOST_PATH}" ] || {
+            echo "ERROR: Docker did not create a valid production content root"
+            exit 1
+          }
 
           COMPOSE=(docker compose -p ragpincheng-prod \
             -f "${REPO_PATH}/docker/docker-compose.yml" \
