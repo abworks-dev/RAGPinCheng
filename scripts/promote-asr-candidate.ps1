@@ -61,8 +61,46 @@ function Read-StrictEnv {
     return [pscustomobject]@{ lines = $lines; values = $values }
 }
 
+function Write-AtomicTextWithBackup {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Text,
+        [Parameter(Mandatory = $true)][string]$BackupPath
+    )
+    if (Test-Path -LiteralPath $BackupPath) {
+        throw "Atomic replacement backup path already exists"
+    }
+    $temporary = $Path + ".activation-" + [guid]::NewGuid().ToString("N")
+    [IO.File]::WriteAllText($temporary, $Text, (New-Object Text.UTF8Encoding($false)))
+    [IO.File]::Replace($temporary, $Path, $BackupPath, $true)
+}
+
+function Assert-AtomicFileReplaceSupported {
+    $temporaryRoot = if ([string]::IsNullOrWhiteSpace($env:RUNNER_TEMP)) {
+        [IO.Path]::GetTempPath()
+    } else {
+        $env:RUNNER_TEMP
+    }
+    $probeRoot = Join-Path $temporaryRoot ("asr-atomic-replace-" + [guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Path $probeRoot | Out-Null
+    $destination = Join-Path $probeRoot "destination.txt"
+    $backup = Join-Path $probeRoot "destination.before.txt"
+    [IO.File]::WriteAllText($destination, "before", (New-Object Text.UTF8Encoding($false)))
+    Write-AtomicTextWithBackup -Path $destination -Text "after" -BackupPath $backup
+    if (
+        [IO.File]::ReadAllText($destination) -ne "after" -or
+        [IO.File]::ReadAllText($backup) -ne "before"
+    ) {
+        throw "Atomic file replacement smoke test failed"
+    }
+}
+
 function Set-ServiceEnabled {
-    param([Parameter(Mandatory = $true)][string]$Path, [Parameter(Mandatory = $true)][bool]$Enabled)
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][bool]$Enabled,
+        [Parameter(Mandatory = $true)][string]$BackupPath
+    )
     $parsed = Read-StrictEnv -Path $Path
     $replacement = "ASR_SERVICE_ENABLED=" + $(if ($Enabled) { "true" } else { "false" })
     $count = 0
@@ -70,9 +108,10 @@ function Set-ServiceEnabled {
         if ($_ -match '^ASR_SERVICE_ENABLED=') { $count += 1; $replacement } else { $_ }
     })
     if ($count -ne 1) { throw "ASR_SERVICE_ENABLED must occur exactly once" }
-    $temporary = $Path + ".activation-" + [guid]::NewGuid().ToString("N")
-    [IO.File]::WriteAllText($temporary, (($lines -join "`r`n") + "`r`n"), (New-Object Text.UTF8Encoding($false)))
-    [IO.File]::Replace($temporary, $Path, $null, $true)
+    Write-AtomicTextWithBackup `
+        -Path $Path `
+        -Text (($lines -join "`r`n") + "`r`n") `
+        -BackupPath $BackupPath
 }
 
 function Get-CandidateTaskArguments {
@@ -409,6 +448,7 @@ $deploymentContract = Get-AsrDeploymentContract -SourceRoot $resolvedSource -Com
 if ([string]$candidate.manifest.deployment_contract_sha256 -ne $deploymentContract.deployment_contract_sha256) {
     throw "Candidate deployment contract does not match activation code"
 }
+Assert-AtomicFileReplaceSupported
 Assert-CandidateRuntime -Release $candidate -ExpectedEnabled "false"
 $previous = Get-PreviousReleaseContext
 if ($Mode -eq "Preflight") {
@@ -445,7 +485,10 @@ $state = [pscustomobject][ordered]@{
 }
 Write-ActivationState -Status "prepared" -State $state
 try {
-    Set-ServiceEnabled -Path $candidate.layout.config_path -Enabled $true
+    Set-ServiceEnabled `
+        -Path $candidate.layout.config_path `
+        -Enabled $true `
+        -BackupPath (Join-Path $activationRoot "candidate-asr.env.atomic-before")
     New-Item -ItemType Directory -Path $bootstrapRoot -Force | Out-Null
     Copy-Item -LiteralPath (Join-Path $candidate.layout.app_root "scripts\start-asr-service.ps1") -Destination $bootstrapScript -Force
     Copy-Item -LiteralPath (Join-Path $candidate.layout.app_root "scripts\asr-release.ps1") -Destination $bootstrapHelper -Force
