@@ -424,6 +424,8 @@ def test_legacy_asr_recovery_is_manual_sha_bound_owned_and_rollback_safe():
     assert "Stop-ScheduledTask" in script
     assert "Stop-Process -Id $processId -Force" in script
     assert "Wait-LegacyAsrHealthy" in script
+    assert 'Join-Path $resolvedSource "scripts\\verify-asr-service.ps1"' in script
+    assert 'Join-Path $ProgramRoot "scripts\\verify-asr-service.ps1"' not in script
     assert 'ExpectedProfiles @("funasr-sensevoice-small-v1")' in script
     assert "original_task_action_kind" in script
     assert "original_task_state" in script

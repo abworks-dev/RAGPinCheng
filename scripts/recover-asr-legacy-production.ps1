@@ -227,7 +227,7 @@ try {
     Register-LegacyTask -Arguments $legacyTaskArguments
     Start-ScheduledTask -TaskName $taskName
     Wait-LegacyAsrHealthy
-    & (Join-Path $ProgramRoot "scripts\verify-asr-service.ps1") `
+    & (Join-Path $resolvedSource "scripts\verify-asr-service.ps1") `
         -DataRoot $DataRoot `
         -ConfigPath $legacyConfig `
         -AsrUrl "http://127.0.0.1:8200" `
