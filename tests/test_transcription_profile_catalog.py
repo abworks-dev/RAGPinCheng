@@ -4,7 +4,10 @@ from dataclasses import FrozenInstanceError, replace
 
 import pytest
 
-from api.transcription_runtime import build_phase4_profile_registry
+from api.transcription_runtime import (
+    build_phase4_profile_catalog,
+    build_phase4_profile_registry,
+)
 from src.transcription.asr_service_contract import ASR_API_VERSION, ServiceCapabilities
 from src.transcription.profile import (
     FasterWhisperRemoteConfig,
@@ -168,6 +171,53 @@ def test_phase4_registry_applies_transport_settings_to_both_profiles():
         and item.provider_config.poll_interval_ms == 250
         for item in registry.definitions
     )
+
+
+def test_phase4_admission_overlay_enables_faster_whisper_without_changing_identity():
+    admitted = (
+        FUNASR_SENSEVOICE_PROFILE_ID,
+        FASTER_WHISPER_PROFILE_ID,
+    )
+    static_faster = entry_for(FASTER_WHISPER_PROFILE_ID).profile
+    entries = build_phase4_profile_catalog(admitted_profile_ids=admitted)
+    faster = next(
+        entry.profile
+        for entry in entries
+        if entry.profile.profile_id == FASTER_WHISPER_PROFILE_ID
+    )
+    assert static_faster.admission is ProfileAdmission.disabled
+    assert faster.admission is ProfileAdmission.enabled
+    assert "准入保持关闭" not in faster.description
+    assert faster.config_hash == static_faster.config_hash
+
+    registry = build_phase4_profile_registry(
+        upload_part_bytes=4 * 1024**2,
+        poll_interval_ms=250,
+        expected_api_version=ASR_API_VERSION,
+        admitted_profile_ids=admitted,
+    )
+    resolved = registry.resolve_profile(
+        FASTER_WHISPER_PROFILE_ID, ProfileOperation.new_attempt
+    )
+    assert resolved.profile.profile_id == FASTER_WHISPER_PROFILE_ID
+    qwen = registry.resolve_profile(QWEN3_ASR_PROFILE_ID, ProfileOperation.new_attempt)
+    assert qwen.reason_code is ProfileResolutionReason.profile_disabled
+    whisperx = registry.resolve_profile(
+        WHISPERX_PROFILE_ID, ProfileOperation.new_attempt
+    )
+    assert whisperx.reason_code is ProfileResolutionReason.profile_disabled
+
+
+@pytest.mark.parametrize(
+    "admitted",
+    (
+        ("unknown-profile-v1",),
+        (FASTER_WHISPER_PROFILE_ID, FASTER_WHISPER_PROFILE_ID),
+    ),
+)
+def test_phase4_admission_overlay_rejects_unknown_or_duplicate_profiles(admitted):
+    with pytest.raises(ContractValidationError):
+        build_phase4_profile_catalog(admitted_profile_ids=admitted)
 
 
 @pytest.mark.parametrize(

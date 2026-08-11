@@ -14,8 +14,10 @@ from api.routes_admin import router as admin_router, upload_media
 from api.routes_transcription import (
     _failure_dto,
     build_transcription_service,
+    list_profiles,
     router as transcription_router,
 )
+from src.transcription.asr_service_contract import ASR_API_VERSION, ServiceCapabilities
 from api.schemas import RetryTranscriptionRequest
 from tests.transcription_fixture_helpers import (
     make_pending_job,
@@ -92,6 +94,44 @@ def test_application_runtime_registers_all_remote_provider_keys():
         "qwen3-asr",
         "whisperx",
     )
+
+
+def test_profile_api_reports_admitted_faster_whisper_as_available(monkeypatch):
+    import api.routes_transcription as routes_transcription
+
+    class HealthyFactory:
+        def __init__(self, *_args):
+            pass
+
+        def capabilities(self):
+            return ServiceCapabilities(
+                ASR_API_VERSION,
+                (
+                    "faster-whisper-large-v3-turbo-v1",
+                    "funasr-sensevoice-small-v1",
+                ),
+                16 * 1024**2,
+                32 * 1024**2,
+            )
+
+    monkeypatch.setattr(routes_transcription, "ASR_ENABLED", True)
+    monkeypatch.setattr(routes_transcription, "ASR_SERVICE_TOKEN", "fixture-token")
+    monkeypatch.setattr(
+        routes_transcription,
+        "TRANSCRIPTION_ADMITTED_PROFILE_IDS",
+        (
+            "funasr-sensevoice-zh-experimental-v1",
+            "faster-whisper-zh-experimental-v1",
+        ),
+    )
+    monkeypatch.setattr(routes_transcription, "RemoteAsrProviderFactory", HealthyFactory)
+
+    profiles = {profile.profile_id: profile for profile in list_profiles(None)}
+    assert profiles["faster-whisper-zh-experimental-v1"].admission == "enabled"
+    assert profiles["faster-whisper-zh-experimental-v1"].availability == "available"
+    assert profiles["funasr-sensevoice-zh-experimental-v1"].admission == "enabled"
+    assert profiles["qwen3-asr-zh-experimental-v1"].admission == "disabled"
+    assert profiles["whisperx-large-v3-zh-align-experimental-v1"].admission == "disabled"
 
 
 def test_upload_rejects_missing_mode_before_reading_or_writing():

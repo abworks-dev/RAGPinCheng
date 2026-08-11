@@ -79,6 +79,8 @@ services:
       GPU_SERVICE_TOKEN: ${GPU_SERVICE_TOKEN:-}
       EMBED_PROVIDER: ${EMBED_PROVIDER:-remote}
       RERANK_PROVIDER: ${RERANK_PROVIDER:-remote}
+      # Business admission is application-owned and does not alter ASR runtime identity.
+      TRANSCRIPTION_ADMITTED_PROFILE_IDS: ${TRANSCRIPTION_ADMITTED_PROFILE_IDS:-funasr-sensevoice-zh-experimental-v1}
       # LibreOffice 转换服务地址 — 在同一 Docker 网络内，通过服务名访问。
       LIBREOFFICE_URL: ${LIBREOFFICE_URL:-http://libreoffice:8101}
     volumes:

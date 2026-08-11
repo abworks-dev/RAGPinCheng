@@ -168,6 +168,23 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertIn("flock -n 9", workflow)
         self.assertIn("docker tag \"${OLD_IMAGE_ID}\"", workflow)
         self.assertIn("APP_ONLY_ROLLBACK status=complete", workflow)
+
+    def test_app_only_workflow_can_transactionally_activate_faster_whisper(self):
+        workflow = self.app_only_workflow
+
+        self.assertIn("transcription_admission:", workflow)
+        self.assertIn("ENABLE_FASTER_WHISPER", workflow)
+        self.assertIn("TRANSCRIPTION_ADMISSION_STATE_FILE", workflow)
+        self.assertIn("configure-transcription-admission.py", workflow)
+        self.assertIn("TRANSCRIPTION_ADMISSION rollback=restored", workflow)
+        self.assertIn("verify_transcription_admission", workflow)
+        self.assertIn('states[FASTER_WHISPER_PROFILE_ID] == ("enabled", "available")', workflow)
+
+        compose = (ROOT / "docker" / "docker-compose.yml").read_text(encoding="utf-8")
+        self.assertIn(
+            "TRANSCRIPTION_ADMITTED_PROFILE_IDS: ${TRANSCRIPTION_ADMITTED_PROFILE_IDS:-",
+            compose,
+        )
         self.assertIn("APP_ONLY_DEPLOY status=success", workflow)
         self.assertNotIn("GPU_SERVICE_TOKEN: ${{ vars.", workflow)
 
