@@ -141,6 +141,16 @@ def test_asr_deployment_preflight_is_manual_and_writes_only_runner_temp():
     assert 'failure_code = "qualified_wheel_set_not_preserved"' in preflight
     assert "--no-index" in preflight
     assert "Assert-FasterWhisperProductionRuntime" in preflight
+    evidence = read("scripts/faster-whisper-production-evidence.ps1")
+    assert "[Text.Encoding]::UTF8.GetBytes($verification)" in evidence
+    assert "[Convert]::ToBase64String(" in evidence
+    assert "base64.b64decode(sys.argv.pop(1)).decode('utf-8')" in evidence
+    assert "compile(source, '<faster-whisper-production-runtime>', 'exec')" in evidence
+    assert (
+        "& $PythonPath -c $verificationBootstrap $verificationBase64 "
+        "$Evidence.ModelCacheRoot $Evidence.ModelManifestPath"
+    ) in evidence
+    assert "& $PythonPath -c $verification " not in evidence
     for forbidden in (
         "PRODUCTION_ASR_PROGRAM_ROOT",
         "New-ScheduledTask",

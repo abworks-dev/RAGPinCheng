@@ -502,9 +502,13 @@ if not status.available:
     raise RuntimeError(f"faster-whisper model cache unavailable: {status.reason_code}")
 print("faster-whisper-production-runtime-verified")
 '@
+    $verificationBase64 = [Convert]::ToBase64String(
+        [Text.Encoding]::UTF8.GetBytes($verification)
+    )
+    $verificationBootstrap = "import base64,sys; source=base64.b64decode(sys.argv.pop(1)).decode('utf-8'); exec(compile(source, '<faster-whisper-production-runtime>', 'exec'))"
     Push-Location -LiteralPath $SourceRoot
     try {
-        & $PythonPath -c $verification $Evidence.ModelCacheRoot $Evidence.ModelManifestPath
+        & $PythonPath -c $verificationBootstrap $verificationBase64 $Evidence.ModelCacheRoot $Evidence.ModelManifestPath
     } finally {
         Pop-Location
     }
