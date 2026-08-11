@@ -17,6 +17,9 @@ class TestDeployGitSafety(unittest.TestCase):
         cls.emergency_workflow = (
             ROOT / ".github/workflows/deploy-production-emergency.yml"
         ).read_text(encoding="utf-8")
+        cls.app_only_workflow = (
+            ROOT / ".github/workflows/deploy-production-app-emergency.yml"
+        ).read_text(encoding="utf-8")
         cls.windows = (ROOT / "scripts/deploy-gpu.ps1").read_text(encoding="utf-8")
         cls.promote = (ROOT / "scripts/promote-gpu-runtime.ps1").read_text(
             encoding="utf-8"
@@ -115,6 +118,50 @@ class TestDeployGitSafety(unittest.TestCase):
             gpu.index("archive/production-gpu-before-realignment-"),
             gpu.index("& git branch -f master $env:DEPLOY_COMMIT_SHA"),
         )
+
+    def test_app_only_emergency_workflow_is_bound_to_the_approved_commit(self):
+        workflow = self.app_only_workflow
+        approved = "4ed480e47057dc3414ad0ea3bb0e95d2d1a4c833"
+
+        self.assertIn("name: Deploy Production App Emergency", workflow)
+        self.assertIn("workflow_dispatch:", workflow)
+        self.assertIn("- DEPLOY_APP", workflow)
+        self.assertIn(f"APPROVED_DEPLOY_COMMIT: {approved}", workflow)
+        self.assertIn(f"DEPLOY_COMMIT_SHA: {approved}", workflow)
+        self.assertIn('"${REPOSITORY_HEAD}" = "${APPROVED_DEPLOY_COMMIT}"', workflow)
+        self.assertIn("approved application commit is not an ancestor", workflow)
+        self.assertNotIn("git reset", workflow)
+        self.assertNotIn("git branch -f", workflow)
+        self.assertNotIn("deploy-gpu.ps1", workflow)
+        self.assertNotIn("promote-gpu-runtime.ps1", workflow)
+
+    def test_app_only_emergency_workflow_pins_gpu_contract_and_rolls_back_image(self):
+        workflow = self.app_only_workflow
+
+        self.assertIn("QUALIFIED_GPU_SOURCE_COMMIT:", workflow)
+        self.assertIn("EXPECTED_GPU_RELEASE_ID: 9b147c448b9b-fa16678de682", workflow)
+        self.assertIn("EXPECTED_GPU_SOURCE_FINGERPRINT:", workflow)
+        self.assertIn("EXPECTED_GPU_LOCK_SHA256:", workflow)
+        for path in (
+            "src/providers.py",
+            "gpu_service/app.py",
+            "gpu_service/models.py",
+            "gpu_service/schemas.py",
+        ):
+            self.assertIn(path, workflow)
+        self.assertIn("APP_ONLY_CONTRACT status=identical", workflow)
+        self.assertIn("/v1/embeddings", workflow)
+        self.assertIn("/v1/rerank", workflow)
+        self.assertIn("source.backup(target)", workflow)
+        self.assertIn("PRAGMA integrity_check", workflow)
+        self.assertIn("qdrant-snapshot.json", workflow)
+        self.assertIn('assert d.get("result", {}).get("name")', workflow)
+        self.assertIn("--max-time 120", workflow)
+        self.assertIn("flock -n 9", workflow)
+        self.assertIn("docker tag \"${OLD_IMAGE_ID}\"", workflow)
+        self.assertIn("APP_ONLY_ROLLBACK status=complete", workflow)
+        self.assertIn("APP_ONLY_DEPLOY status=success", workflow)
+        self.assertNotIn("GPU_SERVICE_TOKEN: ${{ vars.", workflow)
 
     def test_scripts_require_full_commit_and_verify_head(self):
         self.assertIn("ValidatePattern('^[0-9a-fA-F]{40}$')", self.windows)
