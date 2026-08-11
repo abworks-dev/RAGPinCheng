@@ -174,10 +174,10 @@ class TestDeployGitSafety(unittest.TestCase):
 
         self.assertIn("transcription_admission:", workflow)
         self.assertIn("ENABLE_FASTER_WHISPER", workflow)
-        self.assertIn("TRANSCRIPTION_ADMISSION_STATE_FILE", workflow)
-        self.assertIn("configure-transcription-admission.py", workflow)
-        self.assertIn("TRANSCRIPTION_ADMISSION rollback=restored", workflow)
-        self.assertIn("TRANSCRIPTION_ADMISSION rollback=failed", workflow)
+        self.assertIn("CONFIGURED_TRANSCRIPTION_ADMITTED_PROFILE_IDS", workflow)
+        self.assertIn("PREVIOUS_TRANSCRIPTION_ADMITTED_PROFILE_IDS", workflow)
+        self.assertIn("source=workflow-environment", workflow)
+        self.assertNotIn("configure-transcription-admission.py", workflow)
         self.assertIn("verify_transcription_admission", workflow)
         self.assertIn("DEPLOY_STATUS=$?", workflow)
         self.assertIn('if [ "${DEPLOY_STATUS}" -ne 0 ]; then', workflow)
@@ -191,6 +191,12 @@ class TestDeployGitSafety(unittest.TestCase):
         )
         self.assertIn("APP_ONLY_DEPLOY status=success", workflow)
         self.assertNotIn("GPU_SERVICE_TOKEN: ${{ vars.", workflow)
+        for production_workflow in (self.workflow, self.emergency_workflow):
+            self.assertIn(
+                "TRANSCRIPTION_ADMITTED_PROFILE_IDS: "
+                "${{ vars.TRANSCRIPTION_ADMITTED_PROFILE_IDS }}",
+                production_workflow,
+            )
 
     def test_scripts_require_full_commit_and_verify_head(self):
         self.assertIn("ValidatePattern('^[0-9a-fA-F]{40}$')", self.windows)

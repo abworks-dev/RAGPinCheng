@@ -45,6 +45,7 @@ jobs:
       SELECTED_REF: ${{ github.ref }}
       CONFIRM_PRODUCTION: ${{ inputs.confirm_production }}
       TRANSCRIPTION_ADMISSION_ACTION: ${{ inputs.transcription_admission }}
+      CONFIGURED_TRANSCRIPTION_ADMITTED_PROFILE_IDS: ${{ vars.TRANSCRIPTION_ADMITTED_PROFILE_IDS }}
       DEPLOY_COMMIT_SHA: ${{ github.sha }}
     steps:
       - name: Back up, deploy, and strictly verify the selected App commit
@@ -55,8 +56,15 @@ jobs:
             echo "ERROR: App-only production deployment was not confirmed"
             exit 1
           }
+          DEFAULT_TRANSCRIPTION_ADMITTED_PROFILE_IDS="funasr-sensevoice-zh-experimental-v1"
+          PREVIOUS_TRANSCRIPTION_ADMITTED_PROFILE_IDS="${CONFIGURED_TRANSCRIPTION_ADMITTED_PROFILE_IDS:-${DEFAULT_TRANSCRIPTION_ADMITTED_PROFILE_IDS}}"
           case "${TRANSCRIPTION_ADMISSION_ACTION}" in
-            PRESERVE_CURRENT|ENABLE_FASTER_WHISPER) ;;
+            PRESERVE_CURRENT)
+              export TRANSCRIPTION_ADMITTED_PROFILE_IDS="${PREVIOUS_TRANSCRIPTION_ADMITTED_PROFILE_IDS}"
+              ;;
+            ENABLE_FASTER_WHISPER)
+              export TRANSCRIPTION_ADMITTED_PROFILE_IDS="funasr-sensevoice-zh-experimental-v1,faster-whisper-zh-experimental-v1"
+              ;;
             *)
               echo "ERROR: unsupported transcription admission action"
               exit 1
@@ -360,7 +368,6 @@ jobs:
 
           BACKUP_PATH="${BACKUP_DIR}/app-only-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           mkdir -p "${BACKUP_PATH}"
-          export TRANSCRIPTION_ADMISSION_STATE_FILE="${BACKUP_PATH}/transcription-admission-state.json"
           printf 'node=app\nprevious_commit=%s\ntarget_commit=%s\n' \
             "${REPOSITORY_HEAD}" "${DEPLOY_COMMIT_SHA}" \
             > "${BACKUP_PATH}/git-state.txt"
@@ -409,15 +416,7 @@ jobs:
 
           rollback_backend() {
             echo "APP_ONLY_ROLLBACK status=starting"
-            if [ -f "${TRANSCRIPTION_ADMISSION_STATE_FILE}" ]; then
-              if ! python3 "${REPO_PATH}/scripts/configure-transcription-admission.py" restore \
-                  --env-file "${COMPOSE_ENV_FILE}" \
-                  --state-file "${TRANSCRIPTION_ADMISSION_STATE_FILE}"; then
-                echo "TRANSCRIPTION_ADMISSION rollback=failed"
-                return 1
-              fi
-              echo "TRANSCRIPTION_ADMISSION rollback=restored"
-            fi
+            export TRANSCRIPTION_ADMITTED_PROFILE_IDS="${PREVIOUS_TRANSCRIPTION_ADMITTED_PROFILE_IDS}"
             docker tag "${OLD_IMAGE_ID}" pincheng-rag-backend:latest
             "${COMPOSE[@]}" up -d --no-deps backend
             for ATTEMPT in $(seq 1 36); do
@@ -439,13 +438,7 @@ jobs:
           (
             set -euo pipefail
             git merge --ff-only "${DEPLOY_COMMIT_SHA}"
-            if [ "${TRANSCRIPTION_ADMISSION_ACTION}" = "ENABLE_FASTER_WHISPER" ]; then
-              python3 "${REPO_PATH}/scripts/configure-transcription-admission.py" set \
-                --env-file "${COMPOSE_ENV_FILE}" \
-                --state-file "${TRANSCRIPTION_ADMISSION_STATE_FILE}" \
-                --value "funasr-sensevoice-zh-experimental-v1,faster-whisper-zh-experimental-v1"
-              echo "TRANSCRIPTION_ADMISSION action=enable-faster-whisper status=configured"
-            fi
+            echo "TRANSCRIPTION_ADMISSION action=${TRANSCRIPTION_ADMISSION_ACTION} source=workflow-environment"
             bash "${REPO_PATH}/scripts/deploy-app.sh"
 
             CONTAINER_ID="$("${COMPOSE[@]}" ps -q backend)"
