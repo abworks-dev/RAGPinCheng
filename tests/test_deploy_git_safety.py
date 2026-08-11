@@ -177,7 +177,11 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertIn("TRANSCRIPTION_ADMISSION_STATE_FILE", workflow)
         self.assertIn("configure-transcription-admission.py", workflow)
         self.assertIn("TRANSCRIPTION_ADMISSION rollback=restored", workflow)
+        self.assertIn("TRANSCRIPTION_ADMISSION rollback=failed", workflow)
         self.assertIn("verify_transcription_admission", workflow)
+        self.assertIn("DEPLOY_STATUS=$?", workflow)
+        self.assertIn('if [ "${DEPLOY_STATUS}" -ne 0 ]; then', workflow)
+        self.assertNotIn("if ! (", workflow)
         self.assertIn('states[FASTER_WHISPER_PROFILE_ID] == ("enabled", "available")', workflow)
 
         compose = (ROOT / "docker" / "docker-compose.yml").read_text(encoding="utf-8")
