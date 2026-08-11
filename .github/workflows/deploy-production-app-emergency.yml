@@ -231,6 +231,20 @@ jobs:
           COMPOSE=(docker compose -p ragpincheng-prod \
             -f "${REPO_PATH}/docker/docker-compose.yml" \
             -f "${COMPOSE_OVERRIDE}" --env-file "${COMPOSE_ENV_FILE}")
+          PREVIOUS_ASR_ENABLED="$("${COMPOSE[@]}" exec -T backend python -c \
+            'from src.config import ASR_ENABLED; print("true" if ASR_ENABLED else "false")')"
+          case "${PREVIOUS_ASR_ENABLED}" in
+            true|false) ;;
+            *)
+              echo "ERROR: current backend ASR enable state is invalid"
+              exit 1
+              ;;
+          esac
+          if [ "${TRANSCRIPTION_ADMISSION_ACTION}" = "PRESERVE_CURRENT" ]; then
+            export ASR_ENABLED="${PREVIOUS_ASR_ENABLED}"
+          else
+            export ASR_ENABLED=true
+          fi
 
           verify_gpu_identity() {
             curl -fsS --connect-timeout 10 --max-time 30 \
@@ -423,6 +437,7 @@ jobs:
 
           rollback_backend() {
             echo "APP_ONLY_ROLLBACK status=starting"
+            export ASR_ENABLED="${PREVIOUS_ASR_ENABLED}"
             export TRANSCRIPTION_ADMITTED_PROFILE_IDS="${PREVIOUS_TRANSCRIPTION_ADMITTED_PROFILE_IDS}"
             if ! docker tag "${ROLLBACK_IMAGE_TAG}" pincheng-rag-backend:latest; then
               echo "APP_ONLY_ROLLBACK status=failed stage=restore-image-tag"
@@ -443,12 +458,13 @@ jobs:
                 [ "${RUNNING_IMAGE_ID}" = "${OLD_IMAGE_ID}" ] && \
                 curl -fsS --connect-timeout 5 --max-time 10 \
                   http://localhost/api/health >/dev/null 2>&1; then
-                if ! RUNNING_ADMISSION="$("${COMPOSE[@]}" exec -T backend python -c \
-                  'from src.config import TRANSCRIPTION_ADMITTED_PROFILE_IDS; print(",".join(TRANSCRIPTION_ADMITTED_PROFILE_IDS))')"; then
+                if ! RUNNING_ASR_STATE="$("${COMPOSE[@]}" exec -T backend python -c \
+                  'from src.config import ASR_ENABLED, TRANSCRIPTION_ADMITTED_PROFILE_IDS; print(("true" if ASR_ENABLED else "false") + "|" + ",".join(TRANSCRIPTION_ADMITTED_PROFILE_IDS))')"; then
                   echo "APP_ONLY_ROLLBACK status=failed stage=verify-admission"
                   return 1
                 fi
-                if [ "${RUNNING_ADMISSION}" != "${PREVIOUS_TRANSCRIPTION_ADMITTED_PROFILE_IDS}" ]; then
+                EXPECTED_ROLLBACK_ASR_STATE="${PREVIOUS_ASR_ENABLED}|${PREVIOUS_TRANSCRIPTION_ADMITTED_PROFILE_IDS}"
+                if [ "${RUNNING_ASR_STATE}" != "${EXPECTED_ROLLBACK_ASR_STATE}" ]; then
                   echo "APP_ONLY_ROLLBACK status=failed stage=verify-admission"
                   return 1
                 fi

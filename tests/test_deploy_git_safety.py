@@ -181,6 +181,10 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertIn("ENABLE_FASTER_WHISPER", workflow)
         self.assertIn("CONFIGURED_TRANSCRIPTION_ADMITTED_PROFILE_IDS", workflow)
         self.assertIn("PREVIOUS_TRANSCRIPTION_ADMITTED_PROFILE_IDS", workflow)
+        self.assertIn("PREVIOUS_ASR_ENABLED", workflow)
+        self.assertIn("export ASR_ENABLED=true", workflow)
+        self.assertIn('export ASR_ENABLED="${PREVIOUS_ASR_ENABLED}"', workflow)
+        self.assertIn("EXPECTED_ROLLBACK_ASR_STATE", workflow)
         self.assertIn("source=workflow-environment", workflow)
         self.assertNotIn("configure-transcription-admission.py", workflow)
         self.assertIn("verify_transcription_admission", workflow)
@@ -211,6 +215,10 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertIn("APP_ONLY_DEPLOY status=success", workflow)
         self.assertNotIn("GPU_SERVICE_TOKEN: ${{ vars.", workflow)
         for production_workflow in (self.workflow, self.emergency_workflow):
+            self.assertIn(
+                "ASR_ENABLED: ${{ vars.ASR_ENABLED }}",
+                production_workflow,
+            )
             self.assertIn(
                 "TRANSCRIPTION_ADMITTED_PROFILE_IDS: "
                 "${{ vars.TRANSCRIPTION_ADMITTED_PROFILE_IDS }}",
