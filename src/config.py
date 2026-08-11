@@ -2,6 +2,11 @@ from pathlib import Path
 import os
 from dotenv import load_dotenv
 
+from src.transcription_admission_config import (
+    default_transcription_admission_value,
+    parse_transcription_admitted_profile_ids,
+)
+
 load_dotenv()
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -151,6 +156,12 @@ ASR_EXPECTED_API_VERSION = os.getenv(
 ASR_FFMPEG_PATH = os.getenv("ASR_FFMPEG_PATH", "ffmpeg").strip() or "ffmpeg"
 ASR_MEDIA_PREP_TIMEOUT_SECONDS = int(
     os.getenv("ASR_MEDIA_PREP_TIMEOUT_SECONDS", "1800")
+)
+TRANSCRIPTION_ADMITTED_PROFILE_IDS = parse_transcription_admitted_profile_ids(
+    os.getenv(
+        "TRANSCRIPTION_ADMITTED_PROFILE_IDS",
+        default_transcription_admission_value(),
+    )
 )
 TRANSCRIPTION_ARTIFACT_DIR = Path(
     os.getenv("TRANSCRIPTION_ARTIFACT_DIR", str(ROOT / "data" / "transcription-artifacts"))

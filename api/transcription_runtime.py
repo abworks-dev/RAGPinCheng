@@ -16,12 +16,17 @@ from src.transcription.profile import (
     TranscriptionProfileDefinition,
     WhisperXRemoteConfig,
 )
-from src.transcription.profile_catalog import build_phase3_profile_catalog
+from src.transcription.profile_catalog import (
+    FASTER_WHISPER_PROFILE_ID,
+    ProfileCatalogEntry,
+    build_phase3_profile_catalog,
+)
 from src.transcription.provider_registry import ProviderFactory, ProviderRuntimePorts
 from src.transcription.remote_provider import HttpxAsrServiceClient, RemoteAsrProvider
 from src.transcription.runtime_ports import CancellationProbe, ProviderRuntimeState
 from src.transcription.types import (
     ContractValidationError,
+    ProfileAdmission,
     TranscriptionJobStage,
     TranscriptionJobStatus,
     require_exact_enum,
@@ -34,11 +39,95 @@ from .db import connect
 from .transcription_store import SQLiteTranscriptionStore, StoreConflictError
 
 
+_APPLICATION_PROFILE_DESCRIPTIONS = {
+    FASTER_WHISPER_PROFILE_ID: (
+        "固定 large-v3-turbo 模型与 revision；必须人工审核，"
+        "禁止自动发布和自动索引。"
+    ),
+}
+
+
+def _admitted_profile_id_set(
+    profiles: tuple[TranscriptionProfileDefinition, ...],
+    admitted_profile_ids: tuple[str, ...] | None,
+) -> frozenset[str]:
+    if admitted_profile_ids is None:
+        return frozenset(
+            profile.profile_id
+            for profile in profiles
+            if profile.admission is ProfileAdmission.enabled
+        )
+    if type(admitted_profile_ids) is not tuple:
+        raise ContractValidationError(
+            "invalid_admission_allowlist", "admitted_profile_ids"
+        )
+    if any(type(profile_id) is not str for profile_id in admitted_profile_ids):
+        raise ContractValidationError(
+            "invalid_admission_allowlist", "admitted_profile_ids"
+        )
+    if len(set(admitted_profile_ids)) != len(admitted_profile_ids):
+        raise ContractValidationError("duplicate_admitted_profile", "admitted_profile_ids")
+    known_profile_ids = {profile.profile_id for profile in profiles}
+    if not set(admitted_profile_ids).issubset(known_profile_ids):
+        raise ContractValidationError("unknown_admitted_profile", "admitted_profile_ids")
+    deprecated_profile_ids = {
+        profile.profile_id
+        for profile in profiles
+        if profile.admission is ProfileAdmission.deprecated
+    }
+    if set(admitted_profile_ids) & deprecated_profile_ids:
+        raise ContractValidationError("deprecated_admitted_profile", "admitted_profile_ids")
+    return frozenset(admitted_profile_ids)
+
+
+def build_phase4_profile_catalog(
+    *,
+    service_enabled: bool = False,
+    service_healthy: bool = False,
+    service_capabilities: ServiceCapabilities | None = None,
+    admitted_profile_ids: tuple[str, ...] | None = None,
+) -> tuple[ProfileCatalogEntry, ...]:
+    entries = build_phase3_profile_catalog(
+        service_enabled=service_enabled,
+        service_healthy=service_healthy,
+        service_capabilities=service_capabilities,
+    )
+    profiles = tuple(entry.profile for entry in entries)
+    admitted = _admitted_profile_id_set(profiles, admitted_profile_ids)
+    return tuple(
+        replace(
+            entry,
+            profile=replace(
+                entry.profile,
+                description=_APPLICATION_PROFILE_DESCRIPTIONS.get(
+                    entry.profile.profile_id, entry.profile.description
+                ),
+                admission=(
+                    entry.profile.admission
+                    if entry.profile.admission is ProfileAdmission.deprecated
+                    else (
+                        ProfileAdmission.enabled
+                        if entry.profile.profile_id in admitted
+                        else ProfileAdmission.disabled
+                    )
+                ),
+            ),
+        )
+        for entry in entries
+    )
+
+
 def build_phase4_profile_registry(
-    *, upload_part_bytes: int, poll_interval_ms: int, expected_api_version: str
+    *,
+    upload_part_bytes: int,
+    poll_interval_ms: int,
+    expected_api_version: str,
+    admitted_profile_ids: tuple[str, ...] | None = None,
 ) -> ProfileRegistry:
     profiles: list[TranscriptionProfileDefinition] = []
-    for entry in build_phase3_profile_catalog():
+    for entry in build_phase4_profile_catalog(
+        admitted_profile_ids=admitted_profile_ids
+    ):
         base = entry.profile
         if type(base.provider_config) not in (
             RemoteAsrServiceConfig,

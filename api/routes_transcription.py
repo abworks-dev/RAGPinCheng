@@ -19,6 +19,7 @@ from src.config import (
     ASR_UPLOAD_PART_BYTES,
     MEDIA_DIR,
     DOCS_DIR,
+    TRANSCRIPTION_ADMITTED_PROFILE_IDS,
     TRANSCRIPTION_ARTIFACT_DIR,
 )
 from src.transcription.profile import ProfileOperation
@@ -27,7 +28,6 @@ from src.transcription.profile_catalog import (
     FUNASR_SENSEVOICE_PROVIDER_KEY,
     QWEN3_ASR_PROVIDER_KEY,
     WHISPERX_PROVIDER_KEY,
-    build_phase3_profile_catalog,
 )
 from src.transcription.provider_registry import ProviderRegistry
 from src.transcription.types import ContractValidationError, TranscriptionJobStatus
@@ -52,6 +52,7 @@ from .indexing import enqueue_publication
 from .transcription_media import FfmpegMediaAudioPreparer
 from .transcription_runtime import (
     RemoteAsrProviderFactory,
+    build_phase4_profile_catalog,
     build_phase4_profile_registry,
 )
 from .transcription_service import TranscriptionApplicationService
@@ -66,6 +67,7 @@ def build_transcription_service() -> TranscriptionApplicationService:
         upload_part_bytes=ASR_UPLOAD_PART_BYTES,
         poll_interval_ms=ASR_POLL_INTERVAL_MS,
         expected_api_version=ASR_EXPECTED_API_VERSION,
+        admitted_profile_ids=TRANSCRIPTION_ADMITTED_PROFILE_IDS,
     )
     factories = tuple(
         RemoteAsrProviderFactory(
@@ -157,10 +159,11 @@ def list_profiles(
             healthy = True
         except Exception:
             pass
-    entries = build_phase3_profile_catalog(
+    entries = build_phase4_profile_catalog(
         service_enabled=ASR_ENABLED,
         service_healthy=healthy,
         service_capabilities=capabilities,
+        admitted_profile_ids=TRANSCRIPTION_ADMITTED_PROFILE_IDS,
     )
     return [
         TranscriptionProfileDTO(
@@ -306,6 +309,7 @@ def _build_publication_service(conn) -> TranscriptionPublicationApplicationServi
         upload_part_bytes=ASR_UPLOAD_PART_BYTES,
         poll_interval_ms=ASR_POLL_INTERVAL_MS,
         expected_api_version=ASR_EXPECTED_API_VERSION,
+        admitted_profile_ids=TRANSCRIPTION_ADMITTED_PROFILE_IDS,
     )
 
     def media_title(media_id: str) -> str:
