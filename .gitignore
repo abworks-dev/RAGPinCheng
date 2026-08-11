@@ -33,6 +33,8 @@ CLAUDE.local.md
 # Frontend (Node / Vite)
 node_modules/
 frontend/dist/
+frontend/playwright-report/
+frontend/test-results/
 frontend/.vite/
 frontend/tsconfig.tsbuildinfo
 npm-debug.log*

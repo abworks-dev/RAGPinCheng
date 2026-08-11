@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { PanelLeftClose } from "lucide-react";
+import { Menu, PanelLeftClose, X } from "lucide-react";
 import { AppBrand } from "../../components/AppBrand";
 import { IconButton } from "../../components/ui/icon-button";
 import { ThemeMenu } from "../../components/ThemeMenu";
@@ -41,6 +41,7 @@ export function AdminLayout() {
       ] as [Tab, string][]);
   const [tab, setTab] = useState<Tab>(isAdmin ? "users" : "managed");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false);
 
   useEffect(() => {
     document.documentElement.classList.add("admin-scrollbar-stable");
@@ -55,49 +56,53 @@ export function AdminLayout() {
           sidebarCollapsed ? "lg:w-16" : "lg:w-[17rem]",
         )}
       >
-        <div className="px-3 py-3">
+        <div className="border-b border-sidebar-border px-3 py-3 lg:border-b-0">
           <div className="flex h-9 items-center justify-between">
-            {sidebarCollapsed ? (
-              <button
-                type="button"
-                aria-label="展开管理侧栏"
-                title="展开管理侧栏"
-                onClick={() => setSidebarCollapsed(false)}
-                className="hidden size-9 items-center justify-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring lg:flex"
-              >
-                <AppBrand subtitle="管理工作台" collapsed />
-              </button>
-            ) : (
-              <>
+            <button
+              type="button"
+              aria-label="展开管理侧栏"
+              title="展开管理侧栏"
+              onClick={() => setSidebarCollapsed(false)}
+              className={cn("hidden size-9 items-center justify-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", sidebarCollapsed && "lg:flex")}
+            >
+              <AppBrand subtitle="管理工作台" collapsed />
+            </button>
+            <div className={cn("flex min-w-0 flex-1 items-center justify-between", sidebarCollapsed && "lg:hidden")}>
                 <AppBrand subtitle="管理工作台" />
                 <div className="hidden lg:block">
                   <IconButton label="收起管理侧栏" onClick={() => setSidebarCollapsed(true)}>
                     <PanelLeftClose className="size-4" />
                   </IconButton>
                 </div>
-              </>
-            )}
+                <IconButton
+                  className="lg:hidden"
+                  label={mobileNavigationOpen ? "收起管理功能" : "展开管理功能"}
+                  onClick={() => setMobileNavigationOpen((open) => !open)}
+                >
+                  {mobileNavigationOpen ? <X className="size-4" /> : <Menu className="size-4" />}
+                </IconButton>
+            </div>
           </div>
         </div>
 
-        <div className="px-3 py-3 lg:min-h-0 lg:flex-1">
+        <div className={cn("px-3 py-3 lg:min-h-0 lg:flex-1", !mobileNavigationOpen && "hidden lg:block")}>
           {!sidebarCollapsed && (
             <p className="mb-2 hidden px-3 text-ui-xs font-medium uppercase tracking-[0.14em] text-muted-foreground lg:block">
               管理功能
             </p>
           )}
-          <nav aria-label="管理功能" className="flex gap-1 overflow-x-auto pb-1 lg:flex-col lg:overflow-visible lg:pb-0">
+          <nav aria-label="管理功能" className="grid grid-cols-2 gap-1 sm:grid-cols-3 lg:flex lg:flex-col">
             {tabs.map(([key, label]) => {
               const active = tab === key;
               return (
                 <button
                   key={key}
                   type="button"
-                  onClick={() => setTab(key)}
+                  onClick={() => { setTab(key); setMobileNavigationOpen(false); }}
                   aria-current={active ? "page" : undefined}
                   title={sidebarCollapsed ? label : undefined}
                   className={cn(
-                    "flex h-control-md shrink-0 items-center rounded-ui-lg text-ui-sm font-medium transition-colors duration-normal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                    "flex h-control-md min-w-0 items-center rounded-ui-lg text-left text-ui-sm font-medium transition-colors duration-normal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                     sidebarCollapsed ? "lg:w-9 lg:justify-center lg:px-0" : "gap-3 px-3",
                     active
                       ? "bg-primary text-primary-foreground shadow-surface"
@@ -108,13 +113,13 @@ export function AdminLayout() {
                     className={cn("h-2 w-2 shrink-0 rounded-full", active ? "bg-primary-foreground" : "bg-border")}
                     aria-hidden="true"
                   />
-                  <span className={cn(sidebarCollapsed && "lg:hidden")}>{label}</span>
+                  <span className={cn("min-w-0 whitespace-normal", sidebarCollapsed && "lg:hidden")}>{label}</span>
                 </button>
               );
             })}
           </nav>
         </div>
-        <div className={cn("mt-auto space-y-1 py-2", sidebarCollapsed ? "px-3" : "px-2")}>
+        <div className={cn("mt-auto hidden space-y-1 py-2 lg:block", sidebarCollapsed ? "px-3" : "px-2")}>
           <ThemeMenu collapsed={sidebarCollapsed} />
           <UserMenu adminContext collapsed={sidebarCollapsed} />
         </div>

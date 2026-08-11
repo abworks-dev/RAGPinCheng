@@ -64,7 +64,7 @@ describe("AdminCategoriesPage", () => {
 
   it("sends the category version for optimistic concurrency", async () => {
     render(<AdminCategoriesPage />);
-    const name = await screen.findByLabelText("行业规范与标准名称");
+    const name = await screen.findByLabelText("编辑行业规范与标准的显示名称");
     fireEvent.change(name, { target: { value: "行业规范" } });
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
     await waitFor(() => expect(mocks.update).toHaveBeenCalledWith("cat-01", {
@@ -89,5 +89,35 @@ describe("AdminCategoriesPage", () => {
     expect(await screen.findByText("industry_standards")).toBeInTheDocument();
     expect(mocks.permissions).not.toHaveBeenCalled();
     expect(screen.queryByRole("heading", { name: "资料权限" })).not.toBeInTheDocument();
+  });
+
+  it("shows loading, empty, and recoverable error states", async () => {
+    let resolveCategories: ((value: typeof category[]) => void) | undefined;
+    mocks.categories.mockReturnValueOnce(new Promise((resolve) => { resolveCategories = resolve; }));
+    render(<AdminCategoriesPage />);
+    expect(screen.getByText("正在加载分类…")).toBeInTheDocument();
+    resolveCategories?.([]);
+    expect(await screen.findByRole("heading", { name: "暂无分类" })).toBeInTheDocument();
+
+    mocks.categories.mockRejectedValueOnce(new Error("分类服务暂不可用"));
+    fireEvent.click(screen.getByRole("button", { name: "刷新" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("分类服务暂不可用");
+    expect(screen.getByRole("button", { name: "重新加载" })).toBeInTheDocument();
+  });
+
+  it("disables permission controls while saving and rolls back failures", async () => {
+    let rejectSave: ((reason: Error) => void) | undefined;
+    mocks.updatePermissions.mockReturnValueOnce(new Promise((_, reject) => { rejectSave = reject; }));
+    render(<AdminCategoriesPage />);
+    const review = await screen.findByLabelText("整理员确认");
+    const organize = screen.getByLabelText("整理员整理");
+    fireEvent.click(review);
+    expect(review).toBeDisabled();
+    expect(organize).toBeDisabled();
+    expect(screen.getByRole("status")).toHaveTextContent("正在保存确认权限");
+    rejectSave?.(new Error("权限保存失败"));
+    await waitFor(() => expect(review).not.toBeChecked());
+    expect(organize).toBeChecked();
+    expect(mocks.error).toHaveBeenCalledWith("权限保存失败");
   });
 });

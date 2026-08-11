@@ -6,6 +6,9 @@
 
 - [ ] `npm run test:run`
 - [ ] `npm run build`
+- [ ] `npm run test:visual -- admin-workflows.spec.ts`
+- [ ] T4 合入并接受 golden 后执行 `npm run test:visual -- admin-golden.spec.ts`
+- [ ] 视觉测试连续运行两次且第二次无截图 diff
 - [ ] TypeScript 无诊断
 - [ ] `chatStream` 的 `prep/token/done/error`、跨 chunk、AbortSignal 测试通过
 - [ ] API client 的 Cookie、CSRF、401 和管理 API 测试通过
@@ -35,8 +38,19 @@
 - [ ] 视频媒体上传和媒体列表
 - [ ] 过期对话清理
 
+## 隔离的管理后台浏览器回归
+
+- [ ] Chromium viewport 覆盖 1440x900、1280x720、768x1024、390x844
+- [ ] 资料工作流覆盖 normal、loading、empty、error、disabled、busy
+- [ ] 分类设置覆盖 normal、loading、empty、error、disabled、busy
+- [ ] `body` 和页面根节点无横向溢出，宽表仅在自身容器滚动
+- [ ] 移动端导航、对象身份和核心操作可发现、可聚焦且位于 viewport 内
+- [ ] 导航、标题、表单、表格或移动列表无互相遮挡
+- [ ] fixture 未声明的 `/api/**` 请求会失败，未访问真实后端
+- [ ] 失败截图、trace 和 HTML report 不含真实身份或业务资料
+
 ## 当前不安全或无法自动执行的项目
 
 - [ ] 不使用真实客户资料、真实密码、生产索引任务或未经授权的外部服务
 - [ ] 未提供安全测试账号时，不执行管理员、上传、媒体和索引人工回归
-- [ ] 未建立隔离后端 fixture 前，不启用 Playwright 作为 CI 阻断项
+- [ ] T4 最终页面尚未合入并人工接受 golden 前，不启用像素比较 required CI

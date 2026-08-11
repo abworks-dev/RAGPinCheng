@@ -1,38 +1,49 @@
-# 视觉基线截图目录
+# 浏览器视觉测试与基线
 
-P0 阶段先约定截图命名和采集范围，不把真实账号、客户资料、Cookie 或导出的文档放入仓库。
+本目录只保存合成数据生成、经过人工审查的 golden screenshots。Playwright 不连接后端，不使用真实账号、Cookie、密码、客户文件或生产截图；所有 `/api/**` 请求均由 `tests/visual/fixtures/` 拦截，未声明请求会直接使测试失败。
 
-## 当前已采集
+## 当前基线状态
 
-本轮已使用匿名本地页面采集以下基础页面基线：
+- `login-*.png`、`register-*.png` 是早期匿名页面诊断截图，不属于 Playwright golden。
+- 管理后台截图在 T4 页面改造合入并人工审查前只允许作为本地诊断产物，不得标记为 accepted golden，也不得据此启用 required 像素 CI。
+- Playwright golden 按 `<project>/<spec>/<页面>-<状态>-<宽>x<高>.png` 保存。
 
-- `login-desktop.png`：1440 × 900；
-- `login-mobile.png`：390 × 844；
-- `register-desktop.png`：1440 × 900；
-- `register-mobile.png`：390 × 844。
+## 固定环境
 
-当前截图记录的是本地应用默认暗色外观，未填写账号、密码或业务数据。
+- 浏览器：Playwright 管理的 Chromium；实际版本用 `npx playwright --version` 和浏览器测试报告记录。
+- 主题/语言/时区：light、`zh-CN`、`Asia/Shanghai`。
+- viewport：`1440x900`、`1280x720`、`768x1024`、`390x844`。
+- 动效：`prefers-reduced-motion: reduce`，截图时禁用 CSS 动画并隐藏输入光标。
 
-## 建议截图
+## 本地命令
 
-- `chat-empty.png`
-- `chat-answer.png`
-- `chat-citation-expanded.png`
-- `preview-pdf.png`
-- `preview-office.png`
-- `video-player.png`
-- `admin-overview.png`
-- `admin-users.png`
-- `admin-documents.png`
-- `admin-index-jobs.png`
-- `admin-index-failed.png`
+在 `frontend/` 执行：
 
-## 采集要求
+```text
+npx playwright install chromium
+npm run test:visual
+npm run test:visual:headed
+npm run test:visual:ui
+```
 
-- 登录、注册和问答空状态可使用匿名或安全测试账号；
-- 有回答、引用、文档、视频和管理端截图必须使用合成数据或经授权的测试账号；
-- 桌面端建议记录 viewport，移动端建议记录具体宽度；
-- 截图中不得出现真实员工信息、客户文件、Cookie、Token 或密码；
-- 新增或修改页面后，先更新对应基线，再进行人工视觉对比；
-- 管理端截图需要管理员安全测试账号和脱敏测试数据；
-- 实际业务页面截图在拥有安全测试数据后再单独采集。
+只运行非像素行为、状态和布局检查：
+
+```text
+npm run test:visual -- admin-workflows.spec.ts
+```
+
+T4 合入后，先生成候选截图：
+
+```text
+npm run test:visual:update -- admin-golden.spec.ts
+```
+
+更新命令不是接受命令。审查者必须逐张检查合成数据、页面完整性、关键操作可见性、遮挡、横向溢出和四个 viewport 的一致性，再审查 Git diff。不得在 CI 自动执行 `--update-snapshots`。
+
+## 失败产物
+
+失败时 `test-results/visual/` 保存截图和 trace，`playwright-report/` 保存 HTML 报告。这些运行产物不作为 golden 提交；CI 启用后仅在失败时作为 artifact 上传。
+
+## Fixture 边界
+
+隔离层仅模拟：当前管理员、资料权限、受管资料能力、分类、权限用户、资料条目，以及对应 mutation。fixture 使用 `TEST-*` 标识和“合成”中文名称，不包含真实身份或业务资料。测试不得回退到 Vite proxy 或任何外部服务。

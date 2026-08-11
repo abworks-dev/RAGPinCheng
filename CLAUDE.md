@@ -144,7 +144,7 @@ Docker状态：docker compose -f docker/docker-compose.yml ps
 ## 验证要求
 
 - Python局部修改：至少做语法/import检查和相关脚本冒烟；
-- 前端修改：运行 `npm run build`；
+- 前端修改：遵守 `.claude/rules/frontend.md` 的构建、相关单元测试、视觉与真实浏览器验收门禁；
 - API/Auth修改：验证鉴权、CSRF、失败状态和持久化；
 - RAG修改：先检索冒烟，再按影响运行黄金集并比较退化；
 - Docker修改：至少验证Compose配置/构建；

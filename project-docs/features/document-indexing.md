@@ -29,7 +29,8 @@
 - 检索按 `content_item_heads` 过滤受管版本，`compat` 模式继续允许旧的未版本化索引；
 - 发布时生成保留原扩展名的工作副本供解析和 Office 预览，引用接口通过稳定 `content://` 身份回取正式对象；
 - 可重建的一至四级编号目录只读视图；视图是副本，不是分类或索引事实来源；
-- 受管资料库默认关闭：`CONTENT_MANAGEMENT_ENABLED=false`，head 强制模式默认 `CONTENT_HEAD_ENFORCEMENT=compat`。
+- 代码和普通环境默认关闭受管资料库；当前 Ubuntu 生产已显式设置 `CONTENT_MANAGEMENT_ENABLED=true`，并保持 `CONTENT_HEAD_ENFORCEMENT=compat`。
+- 当前生产根目录为 `/data/business/ragpincheng/content`（容器内 `/app/content`）；2026-08-11 生产基线为 Schema `5`、七个一级分类，旧 `source/docs` 和 `source/media` 尚未迁移。
 
 ### 未实现
 
@@ -116,7 +117,7 @@
 - 服务器 apply 导入只允许位于 `CONTENT_ROOT/inbox/server` 下的批次；dry-run 不写数据库或对象存储；
 - 受管对象路径拒绝越界和符号链接；网页变更必须同时通过 Cookie 鉴权、资料权限和 CSRF；
 - 资料权限授予仅允许全局管理员执行；`manage_categories` 不能授予自身或他人的确认、发布权限；
-- 新能力默认关闭，生产迁移、启用严格 head、移动旧目录或清理旧索引均属于独立 R3。
+- 新能力在代码和普通环境中默认关闭；生产已经显式启用基础能力。真实资料迁移、启用严格 head、移动旧目录或清理旧索引仍属于独立 R3。
 
 ## 验证
 
@@ -130,7 +131,7 @@
 
 - 索引没有统一事务覆盖 SQLite 与 Qdrant 两种存储，失败恢复依赖现有任务状态与重试流程。
 - 当前资料 ID 来自部署内源路径的稳定哈希；跨部署移动源目录后不保证保持相同 ID。
-- 该路径身份限制只适用于旧索引；受管资料使用稳定业务 ID。受管资料的生产功能开关当前默认关闭，旧库尚未迁移。
+- 该路径身份限制只适用于旧索引；受管资料使用稳定业务 ID。当前生产功能开关已启用，但仍以 `compat` 模式保留旧未版本化索引，旧库尚未迁移。
 - 只读目录视图使用文件副本以避免权限修改污染正式对象，重建时需要额外临时磁盘空间。
 
 ## 相关决策
@@ -138,4 +139,5 @@
 - PR1 实施说明：`project-docs/plans/admin-document-management-pr1.md`。
 - 受管资料库决策：[0003 — 数据库分类与受管内容资料库](../decisions/0003-managed-content-library.md)。
 - R2 实施方案：[受管知识资料库实施方案](../plans/managed-content-library.md)。
+- 生产运行与迁移：[受管知识资料库生产运行与旧资料迁移手册](../migrations/managed-content-production-runbook.md)。
 

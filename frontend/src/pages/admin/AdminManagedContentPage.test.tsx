@@ -94,12 +94,12 @@ describe("AdminManagedContentPage", () => {
 
   it("shows only review actions to a reviewer and submits the decision", async () => {
     render(<AdminManagedContentPage />);
-    expect(await screen.findByText("建模标准")).toBeInTheDocument();
+    expect((await screen.findAllByText("建模标准")).length).toBeGreaterThan(0);
     expect(screen.queryByLabelText("选择资料文件")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "提交" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "发布" })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "确认" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "确认" })[0]);
     await waitFor(() => expect(mocks.review).toHaveBeenCalledWith("version-1", true));
   });
 
@@ -114,7 +114,35 @@ describe("AdminManagedContentPage", () => {
     const input = await screen.findByLabelText("选择资料文件");
     const file = new File(["# Guide"], "guide.md", { type: "text/markdown" });
     fireEvent.change(input, { target: { files: [file] } });
-    fireEvent.click(screen.getByRole("button", { name: "上传" }));
+    expect(screen.getByText("已选择 1 个文件")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "3. 上传" }));
     await waitFor(() => expect(mocks.upload).toHaveBeenCalledWith([file], "cat-03"));
+    expect(await screen.findByText("已接收")).toBeInTheDocument();
+  });
+
+  it("shows loading, empty, and recoverable error states", async () => {
+    let resolveCapabilities: ((value: { enabled: boolean; max_upload_bytes: number; supported_extensions: string[] }) => void) | undefined;
+    mocks.capabilities.mockReturnValueOnce(new Promise((resolve) => { resolveCapabilities = resolve; }));
+    render(<AdminManagedContentPage />);
+    expect(screen.getByText("正在加载资料…")).toBeInTheDocument();
+    resolveCapabilities?.({ enabled: true, max_upload_bytes: 1024, supported_extensions: [".pdf"] });
+    expect((await screen.findAllByText("建模标准")).length).toBeGreaterThan(0);
+
+    mocks.capabilities.mockRejectedValueOnce(new Error("资料服务暂不可用"));
+    fireEvent.click(screen.getByRole("button", { name: "刷新" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("资料服务暂不可用");
+    expect(screen.getByRole("button", { name: "重新加载" })).toBeInTheDocument();
+  });
+
+  it("disables workflow actions and exposes the busy label while saving", async () => {
+    let resolveReview: ((value: typeof item) => void) | undefined;
+    mocks.review.mockReturnValueOnce(new Promise((resolve) => { resolveReview = resolve; }));
+    render(<AdminManagedContentPage />);
+    await screen.findAllByText("建模标准");
+    fireEvent.click(screen.getAllByRole("button", { name: "确认" })[0]);
+    expect(screen.getAllByRole("button", { name: "确认中…" })[0]).toBeDisabled();
+    expect(screen.getAllByRole("button", { name: "退回" })[0]).toBeDisabled();
+    resolveReview?.({ ...item, lifecycle_status: "approved" });
+    await waitFor(() => expect(mocks.success).toHaveBeenCalledWith("资料已确认"));
   });
 });

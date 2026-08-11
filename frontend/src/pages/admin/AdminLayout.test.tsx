@@ -128,12 +128,24 @@ describe("AdminLayout tab boundary", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "收起管理侧栏" }));
     expect(container.querySelector("aside")).toHaveClass("lg:w-16");
-    expect(screen.queryByText("品成 BIM 知识库")).not.toBeInTheDocument();
+    expect(screen.getByText("品成 BIM 知识库").parentElement?.parentElement?.parentElement).toHaveClass("lg:hidden");
     expect(screen.getByRole("button", { name: "展开管理侧栏" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "展开管理侧栏" }));
     expect(container.querySelector("aside")).toHaveClass("lg:w-[17rem]");
     expect(screen.getByText("品成 BIM 知识库")).toBeInTheDocument();
+  });
+
+  it("exposes every management entry through an explicit mobile menu", () => {
+    render(<MemoryRouter><AdminLayout /></MemoryRouter>);
+    const menu = screen.getByRole("button", { name: "展开管理功能" });
+    fireEvent.click(menu);
+    expect(screen.getByRole("button", { name: "收起管理功能" })).toBeInTheDocument();
+    const navigation = screen.getByRole("navigation", { name: "管理功能" });
+    expect(within(navigation).getAllByRole("button")).toHaveLength(8);
+    fireEvent.click(within(navigation).getByRole("button", { name: "分类设置" }));
+    expect(screen.getByText("分类设置页面内容")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "展开管理功能" })).toBeInTheDocument();
   });
 
   it("matches the conversation sidebar width and color tokens", () => {

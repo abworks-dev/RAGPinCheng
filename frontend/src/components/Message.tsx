@@ -311,7 +311,7 @@ export function Message({
           (isUser
             ? editing
               ? "flex w-full max-w-[85%] flex-col items-end"
-              : "flex max-w-[70%] flex-col items-end"
+              : "flex w-full flex-col items-end"
             : "min-w-0 w-full") +
           ""
         }
@@ -361,35 +361,10 @@ export function Message({
               </div>
             ) : (
               <>
-                <div className="rounded-ui-lg bg-primary px-4 py-3 text-primary-foreground">
+                <div className="max-w-[70%] rounded-ui-lg bg-primary px-4 py-3 text-primary-foreground">
                   <div className="whitespace-pre-wrap break-words">{msg.content}</div>
                 </div>
-                <div className="mt-2 flex w-full items-center justify-between gap-3">
-                  <div className="flex items-center">
-                    <button
-                    type="button"
-                    aria-label={copied ? "提问已复制" : "复制提问"}
-                    title={copied ? "提问已复制" : "复制提问"}
-                    onClick={copyContent}
-                    className={`inline-flex size-8 items-center justify-center rounded-ui-md hover:bg-secondary ${copied ? "text-success hover:text-success" : "text-muted-foreground hover:text-foreground"}`}
-                  >
-                    {copied ? <Check className="size-4 text-success" /> : <Copy className="size-4" />}
-                    </button>
-                    {canEdit && viewingActiveUserVersion && (
-                    <button
-                      type="button"
-                      aria-label="编辑提问"
-                      title="编辑提问"
-                      onClick={() => {
-                        setDraft(msg.content);
-                        setEditing(true);
-                      }}
-                      className="inline-flex size-8 items-center justify-center rounded-ui-md text-muted-foreground hover:bg-secondary hover:text-foreground"
-                    >
-                      <Pencil className="size-4" />
-                    </button>
-                    )}
-                  </div>
+                <div className="mt-2 flex w-full items-center justify-end gap-3">
                   {msg.userVersions && msg.userVersions.length > 1 && viewedUserVersionPosition >= 0 && (
                     <div className="flex items-center gap-1 text-xs text-muted-foreground">
                       <button
@@ -423,6 +398,31 @@ export function Message({
                       </button>
                     </div>
                   )}
+                  <div className="flex items-center">
+                    <button
+                      type="button"
+                      aria-label={copied ? "提问已复制" : "复制提问"}
+                      title={copied ? "提问已复制" : "复制提问"}
+                      onClick={copyContent}
+                      className={`inline-flex size-8 items-center justify-center rounded-ui-md hover:bg-secondary ${copied ? "text-success hover:text-success" : "text-muted-foreground hover:text-foreground"}`}
+                    >
+                      {copied ? <Check className="size-4 text-success" /> : <Copy className="size-4" />}
+                    </button>
+                    {canEdit && viewingActiveUserVersion && (
+                      <button
+                        type="button"
+                        aria-label="编辑提问"
+                        title="编辑提问"
+                        onClick={() => {
+                          setDraft(msg.content);
+                          setEditing(true);
+                        }}
+                        className="inline-flex size-8 items-center justify-center rounded-ui-md text-muted-foreground hover:bg-secondary hover:text-foreground"
+                      >
+                        <Pencil className="size-4" />
+                      </button>
+                    )}
+                  </div>
                 </div>
               </>
             )}

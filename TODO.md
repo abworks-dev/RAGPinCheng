@@ -20,13 +20,16 @@
 
 ### 受管知识资料库生产迁移
 
-- 状态：待审批
-- 目标：在独立备份和可回滚前提下清点、复制并登记旧 `source/docs` 与 `source/media`，完成生产功能开关、候选索引和观察期切换。
+- 状态：进行中
+- 目标：在独立备份和可回滚前提下清点并分流旧 `source/docs` 与 `source/media`，复制登记普通资料，保留既有媒体链路，并完成候选索引和观察期切换。
 - 下一步：
-  - [ ] 根据生产容量、备份位置、维护窗口和回滚单元提交独立 R3 运行手册并等待批准。
+  - [ ] 使用非敏感样本完成已启用基础能力的用户验收。
+  - [ ] 只读清点旧 `source/docs` 和 `source/media`，由资料负责人确认旧目录到新分类的映射。
+  - [ ] 在确认 `CONTENT_ROOT`、SQLite、Qdrant 和旧目录均有独立恢复点后，提交真实资料迁移批次的 R3 参数并等待批准。
+  - [ ] 迁移普通资料并观察 1 至 2 周；旧媒体、旧目录、严格 head 和清理分别按手册边界处理。
 - 完成标准：旧目录只读清点和映射经负责人确认；`app.sqlite`、内容根目录和 Qdrant 均有独立恢复点；切换后观察 1 至 2 周且回滚演练可执行；旧目录未在观察期内删除。
-- 依赖：受管知识资料库 R2 用户验收通过；生产主机、真实资料、部署和索引操作均需 R3 明确批准。
-- 方案链接：`project-docs/plans/managed-content-library.md`、`project-docs/decisions/0003-managed-content-library.md`
+- 依赖：生产基础能力已于 2026-08-11 启用并保持 `compat` 模式；受管知识资料库用户验收通过后，真实资料、批次导入、严格 head 和清理仍需 R3 明确批准。
+- 方案链接：`project-docs/plans/managed-content-library.md`、`project-docs/decisions/0003-managed-content-library.md`、`project-docs/migrations/managed-content-production-runbook.md`
 
 ### 查询拆分 Phase A 生产评测
 
@@ -215,13 +218,13 @@
 
 后续新增摘要应尽量链接相关 commit、PR、workflow 或功能文档；详细事实不在本文件重复记录。
 
-1. [Qwen3-ASR / WhisperX 本地快速实验室](project-docs/plans/asr-local-development-lab.md)及双引擎 full 实测（2026-08-11）。
-2. 三引擎共享 ASR qualification corpus 中性变量迁移（2026-08-10）。
-3. faster-whisper 生产准入代码准备（2026-08-10）。
-4. 管理端资料管理工作流 PR1，用户验收通过（2026-08-05）。
-5. 多引擎视频自动转录架构决策与总体方案（2026-08-01）。
-6. 查询拆分 Phase A 评测协议与指标实现（2026-07-31）。
-7. 查询拆分 `retrieve_multi` rerank 超限修复及 79 题回归（2026-07-30）。
-8. 黄金集索引指纹陈旧告警与严格模式（2026-07-30）。
-9. 比较型黄金集、两侧覆盖评分和生产收益样本（2026-07-30）。
-10. 黄金集第一期重建、生产新基线和用户验收（2026-07-30）。
+1. [受管知识资料库](project-docs/features/document-indexing.md)生产基础能力启用，保持 `compat` 且未迁移旧资料（2026-08-11，PR #221/#222，workflow `31500815860`）。
+2. [Qwen3-ASR / WhisperX 本地快速实验室](project-docs/plans/asr-local-development-lab.md)及双引擎 full 实测（2026-08-11）。
+3. 三引擎共享 ASR qualification corpus 中性变量迁移（2026-08-10）。
+4. faster-whisper 生产准入代码准备（2026-08-10）。
+5. 管理端资料管理工作流 PR1，用户验收通过（2026-08-05）。
+6. 多引擎视频自动转录架构决策与总体方案（2026-08-01）。
+7. 查询拆分 Phase A 评测协议与指标实现（2026-07-31）。
+8. 查询拆分 `retrieve_multi` rerank 超限修复及 79 题回归（2026-07-30）。
+9. 黄金集索引指纹陈旧告警与严格模式（2026-07-30）。
+10. 比较型黄金集、两侧覆盖评分和生产收益样本（2026-07-30）。
