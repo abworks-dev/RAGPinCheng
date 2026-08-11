@@ -126,6 +126,7 @@ try {
     $venvRoot = Join-Path $tempRun "venv"
     New-Item -ItemType Directory -Path $qualifiedWheelSeed, $wheelhouse -Force | Out-Null
     Copy-QualifiedFasterWhisperWheels -Evidence $evidence -Destination $qualifiedWheelSeed
+    Copy-QualifiedFasterWhisperWheels -Evidence $evidence -Destination $wheelhouse
 
     $python = Get-PreflightPython311
     & $python -m venv $venvRoot
@@ -160,7 +161,12 @@ try {
         )
         & $venvPython @downloadArguments
         if ($LASTEXITCODE -ne 0) { $report.failure_code = "dependency_resolution_failed"; throw "Deployment preflight dependency resolution failed" }
-        Assert-QualifiedFasterWhisperWheels -Evidence $evidence -Wheelhouse $wheelhouse
+        try {
+            Assert-QualifiedFasterWhisperWheels -Evidence $evidence -Wheelhouse $wheelhouse
+        } catch {
+            $report.failure_code = "qualified_wheel_set_not_preserved"
+            throw
+        }
         & $venvPython -m pip install --no-index --find-links $wheelhouse "torch==2.7.0+cu128" "torchaudio==2.7.0+cu128" "-r" (Join-Path $resolvedSource "asr_service\requirements-windows.txt") "-r" (Join-Path $resolvedSource "asr_service\requirements-faster-whisper.txt")
         if ($LASTEXITCODE -ne 0) { $report.failure_code = "offline_install_failed"; throw "Deployment preflight offline dependency installation failed" }
         & $venvPython -m pip check

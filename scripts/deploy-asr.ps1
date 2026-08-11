@@ -382,6 +382,9 @@ if ($InstallDependencies) {
                 Copy-QualifiedFasterWhisperWheels `
                     -Evidence $fasterWhisperEvidence `
                     -Destination $qualifiedFasterWhisperWheelSeed
+                Copy-QualifiedFasterWhisperWheels `
+                    -Evidence $fasterWhisperEvidence `
+                    -Destination $wheelhouse
             }
             $downloadArguments = @(
                 "-m", "pip", "download",
