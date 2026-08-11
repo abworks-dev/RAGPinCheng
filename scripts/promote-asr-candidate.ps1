@@ -95,6 +95,13 @@ function Assert-AtomicFileReplaceSupported {
     ) {
         throw "Atomic file replacement smoke test failed"
     }
+    $jsonProbe = Join-Path $probeRoot "state.json"
+    Write-AsrJsonAtomic -Path $jsonProbe -Value ([ordered]@{ sequence = 1 })
+    Write-AsrJsonAtomic -Path $jsonProbe -Value ([ordered]@{ sequence = 2 })
+    $jsonState = Get-Content -LiteralPath $jsonProbe -Raw -Encoding UTF8 | ConvertFrom-Json
+    if ([int]$jsonState.sequence -ne 2) {
+        throw "Atomic ASR JSON replacement smoke test failed"
+    }
 }
 
 function Set-ServiceEnabled {

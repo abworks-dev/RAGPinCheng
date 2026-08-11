@@ -342,6 +342,7 @@ def test_candidate_promotion_is_manual_identity_bound_and_cross_node_gated():
 
 def test_candidate_promotion_preserves_legacy_release_and_rolls_back_fail_closed():
     script = read("scripts/promote-asr-candidate.ps1")
+    release = read("scripts/asr-release.ps1")
     lowered = script.lower()
 
     assert 'ValidateSet("Preflight", "Promote", "Rollback")' in script
@@ -379,6 +380,12 @@ def test_candidate_promotion_preserves_legacy_release_and_rolls_back_fail_closed
     assert "candidate-asr.env.atomic-before" in script
     assert "[IO.File]::Replace($temporary, $Path, $BackupPath, $true)" in script
     assert "[IO.File]::Replace($temporary, $Path, $null" not in script
+    assert "Write-AsrJsonAtomic -Path $jsonProbe" in script
+    assert "Atomic ASR JSON replacement smoke test failed" in script
+    assert "[IO.File]::Replace($temporary, $Path, $backup, $true)" in release
+    assert "[IO.File]::Replace($temporary, $Path, $null" not in release
+    assert '".before-" + [guid]::NewGuid().ToString("N")' in release
+    assert "[IO.File]::Delete($backup)" in release
     assert script.index("Stop-OwnedService -Context $previous") < script.index(
         "Write-AsrJsonAtomic -Path $activeStatePath"
     )

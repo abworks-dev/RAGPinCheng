@@ -112,7 +112,17 @@ function Write-AsrJsonAtomic {
     $json = ($Value | ConvertTo-Json -Depth 12) + "`n"
     [IO.File]::WriteAllText($temporary, $json, (New-Object Text.UTF8Encoding($false)))
     if (Test-Path -LiteralPath $Path) {
-        [IO.File]::Replace($temporary, $Path, $null, $true)
+        $backup = Join-Path $parent ((Split-Path -Path $Path -Leaf) + ".before-" + [guid]::NewGuid().ToString("N"))
+        $replaced = $false
+        try {
+            [IO.File]::Replace($temporary, $Path, $backup, $true)
+            $replaced = $true
+        } finally {
+            if (Test-Path -LiteralPath $temporary) { [IO.File]::Delete($temporary) }
+        }
+        if ($replaced -and (Test-Path -LiteralPath $backup)) {
+            try { [IO.File]::Delete($backup) } catch { Write-Warning "ASR JSON replacement backup cleanup failed" }
+        }
     } else {
         Move-Item -LiteralPath $temporary -Destination $Path
     }
