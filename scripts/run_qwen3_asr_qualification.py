@@ -13,7 +13,7 @@ import time
 import types
 import unicodedata
 import uuid
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Iterable
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -182,6 +182,7 @@ def _run_once(
     base_url: str,
     token: str,
     timeout_ms: int,
+    verify_tls: bool = True,
 ) -> tuple[CanonicalTranscript, bytes, list[tuple[str, str]], float]:
     from src.transcription.canonical import CanonicalTranscript
     from src.transcription.formatter import format_transcript
@@ -234,6 +235,7 @@ def _run_once(
             token,
             connect_timeout_seconds=10,
             request_timeout_seconds=60,
+            verify_tls=verify_tls,
         ),
         ProviderRuntimePorts(
             str(uuid.uuid4()),
@@ -540,9 +542,13 @@ def run_qualification(
     token: str,
     timeout_ms: int,
     candidate_id: str = "forced-chinese-baseline",
+    repetitions: int = 2,
+    verify_tls: bool = True,
 ) -> dict[str, object]:
     if candidate_id not in QUALIFICATION_CANDIDATE_IDS:
         raise ValueError("unsupported qualification candidate")
+    if repetitions not in (1, 2):
+        raise ValueError("qualification repetitions must be one or two")
     def progress(event: str, **fields: object) -> None:
         print(
             json.dumps(
@@ -553,12 +559,22 @@ def run_qualification(
             flush=True,
         )
 
+    def run_once(sample: QualificationSample):
+        kwargs = {
+            "base_url": base_url,
+            "token": token,
+            "timeout_ms": timeout_ms,
+        }
+        if not verify_tls:
+            kwargs["verify_tls"] = False
+        return _run_once(sample, **kwargs)
+
     # Warm the fixed model through the same HTTP/Provider/pipeline path.  The
     # timed passes below therefore measure steady-state inference rather than
     # one-time model loading.
     warmup = next(sample for sample in manifest.samples if not sample.negative_control)
     progress("warmup-start", sample_id=warmup.sample_id)
-    _run_once(warmup, base_url=base_url, token=token, timeout_ms=timeout_ms)
+    run_once(warmup)
     progress("warmup-complete", sample_id=warmup.sample_id)
 
     rows: list[dict[str, object]] = []
@@ -580,17 +596,21 @@ def run_qualification(
     all_passed = True
 
     for sample_index, sample in enumerate(manifest.samples, start=1):
-        first = _run_once(
-            sample, base_url=base_url, token=token, timeout_ms=timeout_ms
-        )
-        second = _run_once(
-            sample, base_url=base_url, token=token, timeout_ms=timeout_ms
+        first = run_once(sample)
+        second = (
+            run_once(sample)
+            if repetitions == 2
+            else None
         )
         canonical, markdown, turns, elapsed = first
         deterministic = (
-            canonical.to_json_bytes() == second[0].to_json_bytes()
-            and markdown == second[1]
-            and turns == second[2]
+            None
+            if second is None
+            else (
+                canonical.to_json_bytes() == second[0].to_json_bytes()
+                and markdown == second[1]
+                and turns == second[2]
+            )
         )
         hypothesis = " ".join(segment.text for segment in canonical.segments)
         rtf = elapsed / (sample.duration_ms / 1000)
@@ -607,7 +627,7 @@ def run_qualification(
             "deterministic": deterministic,
             "parser_turn_count": len(turns),
         }
-        sample_pass = rtf <= RTF_LIMIT and deterministic
+        sample_pass = rtf <= RTF_LIMIT and deterministic is not False
         if sample.negative_control:
             normalized = normalize_text(hypothesis)
             matched_terms = [
@@ -699,6 +719,7 @@ def run_qualification(
         "qualification_corpus": manifest.identity(),
         "profile_id": QWEN3_ASR_PROFILE_ID,
         "candidate_id": candidate_id,
+        "repetitions": repetitions,
         "sample_count": len(rows),
         "thresholds": {
             "clear_cer_max": CLEAR_CER_LIMIT,

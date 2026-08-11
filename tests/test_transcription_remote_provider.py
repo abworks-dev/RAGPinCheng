@@ -48,7 +48,11 @@ from src.transcription.runtime_ports import (
     NeverCancel,
     NoOpProgressSink,
 )
-from src.transcription.types import TimeUnit, TranscriptionInputRef
+from src.transcription.types import (
+    ContractValidationError,
+    TimeUnit,
+    TranscriptionInputRef,
+)
 
 JOB_ID = "11111111-1111-4111-8111-111111111111"
 PROVIDER_KEY = "funasr-sensevoice"
@@ -351,6 +355,31 @@ def test_http_client_uses_bearer_and_strict_json_without_network():
     assert captured[0].method == "GET"
     assert captured[0].url.path == "/v1/capabilities"
     assert captured[0].headers["authorization"] == "Bearer secret"
+
+
+def test_http_client_only_allows_disabled_tls_verification_on_loopback_http():
+    transport = httpx.MockTransport(
+        lambda _request: httpx.Response(
+            200,
+            json=ServiceCapabilities(
+                ASR_API_VERSION, (SERVICE_PROFILE_ID,), 1024, 2048
+            ).to_json_dict(),
+        )
+    )
+    client = HttpxAsrServiceClient(
+        "http://127.0.0.1:18310",
+        "secret",
+        transport=transport,
+        verify_tls=False,
+    )
+    assert client.capabilities().service_profiles == (SERVICE_PROFILE_ID,)
+    for base_url in (
+        "https://asr.invalid",
+        "http://127.0.0.1.evil.invalid",
+        "http://127.0.0.1@evil.invalid",
+    ):
+        with pytest.raises(ContractValidationError, match="verify_tls"):
+            HttpxAsrServiceClient(base_url, "secret", verify_tls=False)
 
 
 @pytest.mark.parametrize(

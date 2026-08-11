@@ -85,6 +85,7 @@ class HttpxAsrServiceClient:
     connect_timeout_seconds: float = 10.0
     request_timeout_seconds: float = 60.0
     transport: httpx.BaseTransport | None = None
+    verify_tls: bool = True
 
     def __post_init__(self) -> None:
         if type(self.base_url) is not str or not self.base_url.startswith(
@@ -93,6 +94,19 @@ class HttpxAsrServiceClient:
             raise ContractValidationError("invalid_service_url", "base_url")
         if type(self.token) is not str or not self.token:
             raise ContractValidationError("empty_string", "token")
+        if type(self.verify_tls) is not bool:
+            raise ContractValidationError("invalid_boolean", "verify_tls")
+        if not self.verify_tls:
+            parsed_url = httpx.URL(self.base_url)
+            if (
+                parsed_url.scheme != "http"
+                or parsed_url.host != "127.0.0.1"
+                or parsed_url.username
+                or parsed_url.password
+            ):
+                raise ContractValidationError(
+                    "insecure_transport_forbidden", "verify_tls"
+                )
         if (
             type(self.connect_timeout_seconds) not in (int, float)
             or self.connect_timeout_seconds <= 0
@@ -123,6 +137,7 @@ class HttpxAsrServiceClient:
                 headers=request_headers,
                 timeout=timeout,
                 transport=self.transport,
+                verify=self.verify_tls,
             ) as client:
                 response = client.request(
                     method,

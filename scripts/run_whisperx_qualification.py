@@ -400,7 +400,11 @@ def _run_once(
 
 
 def run_qualification(
-    manifest: SampleManifest, *, timeout_ms: int, service_config=None
+    manifest: SampleManifest,
+    *,
+    timeout_ms: int,
+    service_config=None,
+    repetitions: int = 2,
 ):
     from asr_service.engine_protocol import WHISPERX_SERVICE_CONFIG
 
@@ -419,6 +423,7 @@ def run_qualification(
             base_url="in-process://whisperx",
             token="not-used",
             timeout_ms=timeout_ms,
+            repetitions=repetitions,
         )
     finally:
         shared._run_once = previous_run_once

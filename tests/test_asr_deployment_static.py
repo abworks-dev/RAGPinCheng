@@ -96,6 +96,10 @@ def test_asr_runtime_and_deployment_contracts_are_engine_generic_and_fail_closed
     assert 'enabled = $true; evidence_adapter = "faster-whisper-r3/1"' in contract
     assert 'enabled = $false' in contract
     assert "[pscustomobject][ordered]@" in contract
+    assert contract.count('"scripts/asr_model_download.py"') == 2
+    assert '"scripts/prepare_qwen3_asr_models.py"' in contract
+    assert '"scripts/run_whisperx_cuda_smoke.py"' in contract
+    assert '"scripts/run_whisperx_qualification.py"' in contract
 
     qualifications = {
         "faster-whisper": read("scripts/qualify-faster-whisper-production.ps1"),

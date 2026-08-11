@@ -160,6 +160,7 @@ def test_qualification_summary_passes_only_when_every_gate_passes(
     assert result["status"] == "pass"
     assert result["schema_version"] == "qwen3-asr-qualification-report/2"
     assert result["candidate_id"] == "forced-chinese-baseline"
+    assert result["repetitions"] == 2
     assert result["sample_count"] == 8
     assert all(item["pass"] for item in result["gates"].values())
     assert all(item["pass"] for item in result["samples"])
@@ -185,6 +186,32 @@ def test_qualification_summary_fails_on_rtf_or_nondeterminism(
     assert result["status"] == "fail"
     assert any(not item["rtf_pass"] for item in result["samples"])
     assert any(not item["deterministic"] for item in result["samples"])
+
+
+def test_single_repetition_is_explicitly_non_qualifying_for_determinism(
+    tmp_path, monkeypatch
+):
+    manifest = qualification.load_manifest(_manifest(tmp_path))
+    calls = 0
+
+    def run_once(sample, **_kwargs):
+        nonlocal calls
+        calls += 1
+        canonical = _Canonical(sample.reference_text)
+        return canonical, b"markdown", [("00:00:00", "body")], 0.1
+
+    monkeypatch.setattr(qualification, "_run_once", run_once)
+    result = qualification.run_qualification(
+        manifest,
+        base_url="http://127.0.0.1:18300",
+        token="test",
+        timeout_ms=1000,
+        repetitions=1,
+    )
+
+    assert result["repetitions"] == 1
+    assert calls == len(manifest.samples) + 1
+    assert all(item["deterministic"] is None for item in result["samples"])
 
 
 def test_qualification_candidate_id_is_strict(tmp_path, monkeypatch):
@@ -232,6 +259,7 @@ def test_model_preparation_is_dual_pinned_manifested_and_idempotent(tmp_path):
             "config.json",
             "model.safetensors",
         ]
+    assert not list((tmp_path / "staging-one").rglob("model.safetensors"))
 
     second = model_prep.prepare_models(
         cache,
@@ -370,6 +398,42 @@ def test_model_preparation_rejects_downloader_escape(tmp_path):
         )
 
 
+def test_model_preparation_reuses_stable_partial_staging(tmp_path):
+    sources: dict[str, Path] = {}
+    for spec in model_prep.SPECS:
+        source = tmp_path / f"source-{spec.label}"
+        source.mkdir()
+        (source / "model.safetensors").write_bytes(spec.label.encode())
+        (source / "config.json").write_text("{}", encoding="utf-8")
+        sources[spec.model_id] = source
+    staging = tmp_path / "staging"
+    attempts = 0
+
+    def interrupted_download(**kwargs):
+        nonlocal attempts
+        target = Path(kwargs["local_dir"])
+        attempts += 1
+        if attempts == 1:
+            (target / "model.safetensors.partial").write_bytes(b"partial")
+            raise RuntimeError("snapshot_download interrupted")
+        if attempts == 2:
+            partial = target / "model.safetensors.partial"
+            assert partial.is_file()
+            partial.unlink()
+        return _fake_download(sources)(**kwargs)
+
+    with pytest.raises(RuntimeError, match="interrupted"):
+        model_prep.prepare_models(
+            tmp_path / "cache", staging, downloader=interrupted_download
+        )
+
+    result = model_prep.prepare_models(
+        tmp_path / "cache", staging, downloader=interrupted_download
+    )
+
+    assert [item["status"] for item in result["models"]] == ["prepared", "prepared"]
+
+
 @dataclass(frozen=True)
 class _Distribution:
     package_name: str
@@ -410,6 +474,45 @@ def test_license_audit_blocks_gpl_and_unknown(monkeypatch):
     assert redacted["status"] == "allowed"
     assert redacted["license"] == "DECLARED"
     assert "private.invalid" not in json.dumps(result, sort_keys=True)
+
+
+@dataclass(frozen=True)
+class _LicenseFileDistribution:
+    root: Path
+    version: str = "1.0"
+
+    @property
+    def metadata(self):
+        message = Message()
+        message["Name"] = "license-file-only"
+        message["License-File"] = "package/LICENSE"
+        return message
+
+    @property
+    def files(self):
+        return ("package/LICENSE",)
+
+    def locate_file(self, relative):
+        return self.root / str(relative)
+
+
+def test_license_audit_reads_declared_license_file(tmp_path, monkeypatch):
+    license_file = tmp_path / "package/LICENSE"
+    license_file.parent.mkdir()
+    license_file.write_text(
+        "Permission is hereby granted, free of charge, to any person obtaining a copy.",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        qualification.importlib.metadata,
+        "distributions",
+        lambda: (_LicenseFileDistribution(tmp_path),),
+    )
+
+    result = qualification.audit_installed_licenses(include_license_files=True)
+
+    assert result["status"] == "pass"
+    assert result["packages"][0]["license"] == "MIT"
 
 
 class _BrokenLicenseMetadata:
