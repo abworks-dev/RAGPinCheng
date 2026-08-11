@@ -56,6 +56,19 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertIn("production-app-deployment", self.emergency_workflow)
         self.assertNotIn("cleanup-after-deploy", self.emergency_workflow)
 
+    def test_emergency_workflow_diagnoses_divergence_without_overwriting_it(self):
+        self.assertEqual(self.emergency_workflow.count("PRODUCTION_GIT_DIVERGENCE"), 2)
+        self.assertEqual(self.emergency_workflow.count("PRODUCTION_GIT_LOCAL_ONLY"), 2)
+        self.assertGreaterEqual(
+            self.emergency_workflow.count("git merge-base --is-ancestor"), 2
+        )
+        self.assertGreaterEqual(
+            self.emergency_workflow.count("git status --porcelain --untracked-files=no"),
+            2,
+        )
+        self.assertNotIn("git reset", self.emergency_workflow)
+        self.assertNotIn("git checkout --force", self.emergency_workflow)
+
     def test_scripts_require_full_commit_and_verify_head(self):
         self.assertIn("ValidatePattern('^[0-9a-fA-F]{40}$')", self.windows)
         self.assertIn("Deployed HEAD mismatch", self.windows)
