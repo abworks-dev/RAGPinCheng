@@ -361,6 +361,7 @@ jobs:
           DATA_PATH: ${{ vars.PRODUCTION_APP_DATA_PATH }}
           COMPOSE_OVERRIDE: ${{ vars.PRODUCTION_APP_COMPOSE_OVERRIDE }}
           COMPOSE_ENV_FILE: ${{ vars.PRODUCTION_APP_ENV_FILE }}
+          ASR_ENABLED: ${{ vars.ASR_ENABLED }}
           TRANSCRIPTION_ADMITTED_PROFILE_IDS: ${{ vars.TRANSCRIPTION_ADMITTED_PROFILE_IDS }}
           GIT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DEPLOY_COMMIT_SHA: ${{ inputs.deploy_commit_sha }}

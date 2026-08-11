@@ -122,11 +122,12 @@ candidate 必须同时提交同一部署 revision 对应的 faster-whisper 与 W
 
 应用业务准入是独立于上述两层 GPU 身份的第三方应用配置，不进入
 `runtime_contract_sha256`。默认 allowlist 仅启用 SenseVoice；生产 app-only workflow
-可通过显式 `ENABLE_FASTER_WHISPER` 动作向 Compose 注入 SenseVoice + faster-whisper，
-验证通过后以 `production-asr` GitHub environment variable 持久化；部署或健康验证失败
-时使用运行前配置重建上一 backend 镜像。未知、重复或格式错误的 Profile ID 均失败
-关闭。该动作不修改生产 secret env 文件、不重部署 Windows ASR、不自动开放其他引擎，
-也不绕过实时 capabilities/health 可用性检查。
+可通过显式 `ENABLE_FASTER_WHISPER` 动作向 Compose 注入 `ASR_ENABLED=true` 以及
+SenseVoice + faster-whisper allowlist，验证通过后以 `production-asr` GitHub environment
+variables 持久化；部署或健康验证失败时使用运行前的 enable 状态与 allowlist 重建上一
+backend 镜像。未知、重复或格式错误的 Profile ID 均失败关闭。该动作不修改生产 secret
+env 文件、不重部署 Windows ASR、不自动开放其他引擎，也不绕过实时
+capabilities/health 可用性检查。
 
 手动 `Preflight ASR Production Deployment` workflow 按 engine 选择 faster-whisper 或
 WhisperX evidence adapter，只在 Windows runner temp 下创建验证 wheelhouse 和 venv，
