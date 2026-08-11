@@ -418,8 +418,6 @@ jobs:
               *) return 0 ;;
             esac
             "${COMPOSE[@]}" exec -T backend python - <<'PY'
-          import os
-
           from api.transcription_runtime import (
               RemoteAsrProviderFactory,
               build_phase4_profile_catalog,
@@ -449,7 +447,7 @@ jobs:
               FASTER_WHISPER_PROFILE_ID,
               FUNASR_SENSEVOICE_PROFILE_ID,
           }
-          if os.environ["TRANSCRIPTION_ADMISSION_ACTION"] == "ENABLE_FASTER_WHISPER_AND_WHISPERX":
+          if WHISPERX_PROFILE_ID in TRANSCRIPTION_ADMITTED_PROFILE_IDS:
               expected.add(WHISPERX_PROFILE_ID)
           assert ASR_ENABLED is True
           assert set(TRANSCRIPTION_ADMITTED_PROFILE_IDS) == expected
