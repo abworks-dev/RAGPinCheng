@@ -66,8 +66,11 @@ jobs:
               "- Status: ``$($result.status)``",
               "- Task action: ``$($result.task_action_kind)``",
               "- Task state: ``$($result.task_state)``",
+              "- Startup preflight: ``$($result.startup_preflight_status)``",
+              "- Task root binding: ``$($result.task_root_binding_available)``",
               "- Listener count: ``$($result.listener_count)``",
               "- Health: ``$($result.health_outcome)``",
+              "- Log updated after last run: ``$($result.startup_log_updated_after_last_run)``",
               "- Signals: ``$(@($result.signals) -join ',')``",
               "- Production services modified: ``$($result.production_services_modified)``"
             ) -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding UTF8
