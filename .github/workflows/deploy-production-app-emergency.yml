@@ -19,6 +19,14 @@ on:
         options:
           - PRESERVE_CURRENT
           - ENABLE_FASTER_WHISPER
+      content_root_policy:
+        description: Require an empty first-use content root or preserve an initialized root
+        required: true
+        default: REQUIRE_EMPTY
+        type: choice
+        options:
+          - REQUIRE_EMPTY
+          - PRESERVE_EXISTING
 
 permissions:
   contents: read
@@ -40,11 +48,15 @@ jobs:
       DATA_PATH: ${{ vars.PRODUCTION_APP_DATA_PATH }}
       COMPOSE_OVERRIDE: ${{ vars.PRODUCTION_APP_COMPOSE_OVERRIDE }}
       COMPOSE_ENV_FILE: ${{ vars.PRODUCTION_APP_ENV_FILE }}
+      CONTENT_HOST_PATH: ${{ vars.PRODUCTION_CONTENT_ROOT }}
+      CONTENT_MANAGEMENT_ENABLED: ${{ vars.CONTENT_MANAGEMENT_ENABLED }}
+      CONTENT_HEAD_ENFORCEMENT: ${{ vars.CONTENT_HEAD_ENFORCEMENT }}
       DEPLOY_HTTP_PROXY: ${{ vars.DEPLOY_HTTP_PROXY }}
       GIT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       SELECTED_REF: ${{ github.ref }}
       CONFIRM_PRODUCTION: ${{ inputs.confirm_production }}
       TRANSCRIPTION_ADMISSION_ACTION: ${{ inputs.transcription_admission }}
+      CONTENT_ROOT_POLICY: ${{ inputs.content_root_policy }}
       CONFIGURED_TRANSCRIPTION_ADMITTED_PROFILE_IDS: ${{ vars.TRANSCRIPTION_ADMITTED_PROFILE_IDS }}
       DEPLOY_COMMIT_SHA: ${{ github.sha }}
     steps:
@@ -54,6 +66,18 @@ jobs:
 
           [ "${CONFIRM_PRODUCTION}" = "DEPLOY_APP" ] || {
             echo "ERROR: App-only production deployment was not confirmed"
+            exit 1
+          }
+          [ "${CONTENT_HOST_PATH}" = "/data/business/ragpincheng/content" ] || {
+            echo "ERROR: production content root is not the approved fixed path"
+            exit 1
+          }
+          [ "${CONTENT_MANAGEMENT_ENABLED}" = "true" ] || {
+            echo "ERROR: managed content must be explicitly enabled for this deployment"
+            exit 1
+          }
+          [ "${CONTENT_HEAD_ENFORCEMENT}" = "compat" ] || {
+            echo "ERROR: managed content head enforcement must remain compat"
             exit 1
           }
           DEFAULT_TRANSCRIPTION_ADMITTED_PROFILE_IDS="funasr-sensevoice-zh-experimental-v1"
@@ -228,6 +252,36 @@ jobs:
             exit 1
           }
 
+          if [ -L "${CONTENT_HOST_PATH}" ] || \
+             { [ -e "${CONTENT_HOST_PATH}" ] && [ ! -d "${CONTENT_HOST_PATH}" ]; }; then
+            echo "ERROR: production content root must be a real directory"
+            exit 1
+          fi
+          CONTENT_ROOT_INITIAL_STATE="absent"
+          if [ -d "${CONTENT_HOST_PATH}" ]; then
+            CONTENT_ROOT_INITIAL_STATE="empty"
+            if [ -n "$(find "${CONTENT_HOST_PATH}" -mindepth 1 -maxdepth 1 -print -quit)" ]; then
+              CONTENT_ROOT_INITIAL_STATE="existing"
+            fi
+          fi
+          case "${CONTENT_ROOT_POLICY}" in
+            REQUIRE_EMPTY)
+              [ "${CONTENT_ROOT_INITIAL_STATE}" != "existing" ] || {
+                echo "ERROR: production content root is unexpectedly non-empty"
+                exit 1
+              }
+              ;;
+            PRESERVE_EXISTING) ;;
+            *)
+              echo "ERROR: unsupported production content root policy"
+              exit 1
+              ;;
+          esac
+          mkdir -p "${CONTENT_HOST_PATH}"
+          CONTENT_WRITE_PROBE="${CONTENT_HOST_PATH}/.deployment-write-probe-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          : > "${CONTENT_WRITE_PROBE}"
+          rm -f "${CONTENT_WRITE_PROBE}"
+
           COMPOSE=(docker compose -p ragpincheng-prod \
             -f "${REPO_PATH}/docker/docker-compose.yml" \
             -f "${COMPOSE_OVERRIDE}" --env-file "${COMPOSE_ENV_FILE}")
@@ -300,6 +354,53 @@ jobs:
                   result = database.execute("PRAGMA integrity_check").fetchone()[0]
               if result != "ok":
                   raise SystemExit(f"{name} integrity check failed: {result}")
+          PY
+          }
+
+          verify_managed_content() {
+            "${COMPOSE[@]}" exec -T backend python - <<'PY'
+          from pathlib import Path
+
+          from api.db import connect
+          from api.db_migrations import CURRENT_SCHEMA_VERSION
+          from src.config import (
+              CONTENT_HEAD_ENFORCEMENT,
+              CONTENT_MANAGEMENT_ENABLED,
+              CONTENT_ROOT,
+          )
+
+          expected_categories = [
+              ("01", "行业规范与标准"),
+              ("02", "客户标准与要求"),
+              ("03", "公司内部标准"),
+              ("04", "项目资料"),
+              ("05", "培训资料"),
+              ("06", "项目经验与案例"),
+              ("99", "待确认资料"),
+          ]
+          assert CURRENT_SCHEMA_VERSION == 5
+          assert CONTENT_MANAGEMENT_ENABLED is True
+          assert CONTENT_HEAD_ENFORCEMENT == "compat"
+          assert CONTENT_ROOT == Path("/app/content")
+          probe = CONTENT_ROOT / ".managed-content-deploy-probe"
+          probe.write_text("ok", encoding="ascii")
+          probe.unlink()
+          with connect() as database:
+              version = database.execute(
+                  "SELECT max(version) FROM app_schema_migrations"
+              ).fetchone()[0]
+              categories = database.execute(
+                  "SELECT display_code,display_name FROM category_nodes "
+                  "WHERE parent_id IS NULL AND is_active=1 ORDER BY sort_order,id"
+              ).fetchall()
+              active_jobs = database.execute(
+                  "SELECT count(*) FROM content_index_jobs "
+                  "WHERE status IN ('pending','parsing','chunking','summarizing','embedding')"
+              ).fetchone()[0]
+          assert version == CURRENT_SCHEMA_VERSION
+          assert [tuple(row) for row in categories] == expected_categories
+          assert active_jobs == 0
+          print("MANAGED_CONTENT status=verified schema=5 categories=7 mode=compat")
           PY
           }
 
@@ -382,6 +483,10 @@ jobs:
 
           BACKUP_PATH="${BACKUP_DIR}/app-only-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           mkdir -p "${BACKUP_PATH}"
+          printf 'path=%s\ninitial_state=%s\npolicy=%s\nmanagement_enabled=%s\nhead_enforcement=%s\n' \
+            "${CONTENT_HOST_PATH}" "${CONTENT_ROOT_INITIAL_STATE}" "${CONTENT_ROOT_POLICY}" \
+            "${CONTENT_MANAGEMENT_ENABLED}" "${CONTENT_HEAD_ENFORCEMENT}" \
+            > "${BACKUP_PATH}/content-root-state.txt"
           printf 'node=app\nprevious_commit=%s\ntarget_commit=%s\n' \
             "${REPOSITORY_HEAD}" "${DEPLOY_COMMIT_SHA}" \
             > "${BACKUP_PATH}/git-state.txt"
@@ -504,13 +609,19 @@ jobs:
               'import json,sys; assert json.load(sys.stdin).get("status") == "ok"'
             "${COMPOSE[@]}" exec -T backend curl -fsS \
               --connect-timeout 10 --max-time 30 \
-              http://qdrant:6333/collections/pincheng_docs | python3 -c '
-          import json, sys
+              http://qdrant:6333/collections/pincheng_docs | \
+              QDRANT_BEFORE_PATH="${BACKUP_PATH}/qdrant-before.json" python3 -c '
+          import json, os, sys
+          from pathlib import Path
+          before = json.loads(Path(os.environ["QDRANT_BEFORE_PATH"]).read_text(encoding="utf-8"))
           d = json.load(sys.stdin)
           assert d.get("status") == "ok"
           assert d.get("result", {}).get("status") == "green"
+          assert d.get("result", {}).get("points_count") == before.get("result", {}).get("points_count")
           '
             verify_sqlite_integrity
+            verify_managed_content
+            curl -fsS --connect-timeout 5 --max-time 10 http://localhost/admin >/dev/null
             verify_gpu_identity
             verify_gpu_inference
             verify_transcription_admission

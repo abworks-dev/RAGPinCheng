@@ -107,8 +107,8 @@ services:
       - ../data:/app/data
       # 视频媒体文件 — 上传的 MP4 保存在这里，通过鉴权路由访问。
       - ../media:/app/media
-      # 受管资料库。默认功能关闭；启用和生产迁移需走独立发布流程。
-      - ../content:/app/content
+      # 受管资料库。生产通过 CONTENT_HOST_PATH 固定宿主机目录；本地默认仍在仓库旁。
+      - ${CONTENT_HOST_PATH:-../content}:/app/content
       # 源 PDF 文档 — 只在容器内执行 scripts/build_index.py 时需要。
       # 读写挂载，MinerU 拆分后的 PDF 可以写回原目录。
       - ../docs:/app/docs
