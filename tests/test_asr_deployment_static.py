@@ -2102,6 +2102,8 @@ def test_whisperx_candidate_requires_two_qualification_identities_and_stays_inac
     assert "Assert-WhisperXProductionRuntime" in preflight
     assert '"whisperx-production-qualification-verdict/3"' in evidence
     assert '"shared-wheel-cache/1"' in evidence
+    assert "Test-WhisperXReusableSourceWheel" in evidence
+    assert "source_distribution_requirements" in evidence
     assert "production_services_modified -ne $false" in evidence
     assert "Register-ScheduledTask" not in evidence
     assert "New-NetFirewallRule" not in evidence

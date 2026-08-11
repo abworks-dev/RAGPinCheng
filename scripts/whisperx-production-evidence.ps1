@@ -33,6 +33,36 @@ function Get-WhisperXEvidenceTextSha256 {
     }
 }
 
+function Test-WhisperXReusableSourceWheel {
+    param(
+        [Parameter(Mandatory = $true)][object]$Evidence,
+        [Parameter(Mandatory = $true)][object]$Entry,
+        [Parameter(Mandatory = $true)][string]$Path
+    )
+    $sourceRequirements = @($Evidence.CacheManifest.key_material.source_distribution_requirements)
+    $allowedNames = @(
+        $sourceRequirements |
+            ForEach-Object { ([string]$_).Split("=", 2)[0].ToLowerInvariant().Replace("-", "_") }
+    )
+    if ($allowedNames.Count -eq 0) { return $false }
+    $file = Get-Item -LiteralPath $Path -Force
+    $expectedName = [string]$Entry.file_name
+    $normalizedExpected = $expectedName.ToLowerInvariant().Replace("-", "_")
+    $matchesSourceRequirement = $false
+    foreach ($name in $allowedNames) {
+        if ($normalizedExpected.StartsWith($name + "-", [StringComparison]::Ordinal)) {
+            $matchesSourceRequirement = $true
+            break
+        }
+    }
+    return (
+        $matchesSourceRequirement -and
+        [string]$file.Name -eq $expectedName -and
+        -not ($file.Attributes -band [IO.FileAttributes]::ReparsePoint) -and
+        [int64]$file.Length -gt 0
+    )
+}
+
 function Assert-WhisperXEvidenceProperties {
     param(
         [Parameter(Mandatory = $true)][object]$Value,
@@ -309,7 +339,10 @@ function Copy-QualifiedWhisperXWheels {
         $source = Join-Path (Join-Path (Join-Path $Evidence.CacheRoot "blobs") ([string]$entry.sha256)) ([string]$entry.file_name)
         $target = Join-Path $Destination ([string]$entry.file_name)
         if (Test-Path -LiteralPath $target -PathType Leaf) {
-            if ((Get-WhisperXEvidenceSha256 -Path $target) -ne [string]$entry.sha256) {
+            if (
+                (Get-WhisperXEvidenceSha256 -Path $target) -ne [string]$entry.sha256 -and
+                -not (Test-WhisperXReusableSourceWheel -Evidence $Evidence -Entry $entry -Path $target)
+            ) {
                 throw "Qualified WhisperX wheel conflicts with the candidate wheelhouse"
             }
         } else {
@@ -327,11 +360,19 @@ function Assert-QualifiedWhisperXWheels {
     foreach ($entry in @($Evidence.CacheManifest.files)) {
         $path = Join-Path $Wheelhouse ([string]$entry.file_name)
         $file = if (Test-Path -LiteralPath $path -PathType Leaf) { Get-Item -LiteralPath $path -Force } else { $null }
+        $reusableSourceWheel = $false
+        if ($null -ne $file) {
+            $reusableSourceWheel = Test-WhisperXReusableSourceWheel -Evidence $Evidence -Entry $entry -Path $path
+        }
         if (
             $null -eq $file -or
             ($file.Attributes -band [IO.FileAttributes]::ReparsePoint) -or
-            [int64]$file.Length -ne [int64]$entry.size_bytes -or
-            (Get-WhisperXEvidenceSha256 -Path $path) -ne [string]$entry.sha256
+            (-not $reusableSourceWheel -and
+                (
+                    [int64]$file.Length -ne [int64]$entry.size_bytes -or
+                    (Get-WhisperXEvidenceSha256 -Path $path) -ne [string]$entry.sha256
+                )
+            )
         ) {
             throw "Production wheelhouse does not preserve the qualified WhisperX wheel set"
         }
