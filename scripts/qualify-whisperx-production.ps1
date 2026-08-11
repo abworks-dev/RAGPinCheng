@@ -45,6 +45,7 @@ $Selection = [ordered]@{
     negative_false_positives_zero = $false
 }
 $RuntimeContract = $null
+$WheelCacheKey = ""
 
 function Write-Json {
     param([string]$Path, [object]$Value)
@@ -209,6 +210,7 @@ try {
         source_distribution_requirements = @($antlr4RuntimeRequirement)
     }
     $sharedKey = Get-SharedTextSha256 -Text ($sharedMaterial | ConvertTo-Json -Depth 8 -Compress)
+    $WheelCacheKey = $sharedKey
     Publish-SharedWheelBlobs `
         -CacheRoot $SharedWheelCacheRoot `
         -Wheelhouse $Wheelhouse `
@@ -301,10 +303,11 @@ try {
         $Status = "fail"; $FailureCode = "firewall_modified"
     }
     Write-Json $SummaryPath ([ordered]@{
-        schema_version = "whisperx-production-qualification-verdict/2"
+        schema_version = "whisperx-production-qualification-verdict/3"
         status = $Status
         failure_code = $FailureCode
         commit_sha = $CommitSha.ToLowerInvariant()
+        run_id = $RunId
         asr_model_revision = "53ecf83a5bedc5597eb8c8b34eac29e5345520ff"
         align_model_revision = "51d27579a1040ee4e967979278d5f76b9c32c375"
         sample_count = $SampleCount
@@ -315,6 +318,7 @@ try {
         manifest_source = $ManifestSource
         qualification_corpus = $QualificationCorpus
         runtime_contract = $RuntimeContract
+        wheel_cache_key = $WheelCacheKey
         profile_admission = "disabled"
         production_services_modified = $false
         diagnostic_mode = [bool]$DiagnosticMode

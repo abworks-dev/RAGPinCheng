@@ -339,7 +339,8 @@ function Write-PipFreeze {
     param(
         [Parameter(Mandatory = $true)][string]$PythonPath,
         [Parameter(Mandatory = $true)][string]$OutputPath,
-        [Parameter(Mandatory = $true)][string]$ErrorLogPath
+        [Parameter(Mandatory = $true)][string]$ErrorLogPath,
+        [string[]]$ExcludedPackages = @()
     )
     $lines = @(& $PythonPath -m pip freeze --all 2> $ErrorLogPath)
     if ($LASTEXITCODE -ne 0) {
@@ -355,9 +356,22 @@ function Write-PipFreeze {
     ) {
         throw "pip freeze returned an invalid constraint set"
     }
+    $excluded = @{}
+    foreach ($name in $ExcludedPackages) {
+        $excluded[$name.ToLowerInvariant().Replace("_", "-")] = $true
+    }
+    $constraintLines = @($lines | Where-Object {
+        $line = [string]$_
+        if ($line -notmatch '^([A-Za-z0-9_.-]+)==') { return $true }
+        $name = $Matches[1].ToLowerInvariant().Replace("_", "-")
+        return -not $excluded.ContainsKey($name)
+    })
+    if ($constraintLines.Count -eq 0) {
+        throw "pip freeze returned an empty constraint set"
+    }
     [System.IO.File]::WriteAllLines(
         $OutputPath,
-        [string[]]$lines,
+        [string[]]$constraintLines,
         (New-Object System.Text.UTF8Encoding($false))
     )
 }
@@ -730,8 +744,8 @@ function Get-WheelCacheKey {
         platform_machine = ([string]$pythonIdentity[2]).Trim().ToLowerInvariant()
         platform_system = ([string]$pythonIdentity[3]).Trim().ToLowerInvariant()
         pip_version = ([string]$pipVersion[0]).Trim()
-        torch_version = "2.7.0+cu128"
-        torchaudio_version = "2.7.0+cu128"
+        torch_version = "2.8.0+cu128"
+        torchaudio_version = "2.8.0+cu128"
         cuda_channel = "cu128"
         production_freeze_sha256 = Get-Sha256 -Path $ProductionFreezePath
         requirements_sha256 = @(
@@ -1850,7 +1864,8 @@ try {
     Write-PipFreeze `
         -PythonPath $ProductionPython `
         -OutputPath (Join-Path $EvidenceRoot "production-freeze.txt") `
-        -ErrorLogPath $DependencyFailureLog
+        -ErrorLogPath $DependencyFailureLog `
+        -ExcludedPackages @("torch", "torchaudio")
     $DependencyFailureStage = "production_pip_check"
     $DependencyFailureOperation = "production_pip_check_command"
     $DependencyFailureLog = Join-Path $EvidenceRoot "production-pip-check.txt"
@@ -1893,8 +1908,8 @@ try {
         $wheelPath.Replace("\", "/")
     }
     $CombinedRequirementLines = @(
-        "torch==2.7.0+cu128",
-        "torchaudio==2.7.0+cu128",
+        "torch==2.8.0+cu128",
+        "torchaudio==2.8.0+cu128",
         "-r $RequirementsSource/asr_service/requirements-service-core.txt",
         "-r $RequirementsSource/asr_service/requirements-faster-whisper.txt"
     )
@@ -2109,9 +2124,9 @@ if ctranslate2.__version__ != '4.8.1':
     raise RuntimeError('ctranslate2 version mismatch')
 if importlib.metadata.version('faster-whisper') != '1.2.1':
     raise RuntimeError('faster-whisper version mismatch')
-if not torch.__version__.startswith('2.7.0+cu128'):
+if not torch.__version__.startswith('2.8.0+cu128'):
     raise RuntimeError('torch cu128 version mismatch')
-if not torchaudio.__version__.startswith('2.7.0+cu128'):
+if not torchaudio.__version__.startswith('2.8.0+cu128'):
     raise RuntimeError('torchaudio cu128 version mismatch')
 print('qualification-module-origins-verified')
 "@

@@ -21,12 +21,14 @@ $envFile = if ($ConfigPath) {
 }
 $senseVoiceProfile = "funasr-sensevoice-small-v1"
 $fasterWhisperProfile = "faster-whisper-large-v3-turbo-v1"
+$whisperXProfile = "whisperx-large-v3-zh-align-v1"
 $expectedIdentity = $ExpectedProfiles -join "`n"
 if ($expectedIdentity -notin @(
     $senseVoiceProfile,
-    "$fasterWhisperProfile`n$senseVoiceProfile"
+    "$fasterWhisperProfile`n$senseVoiceProfile",
+    "$fasterWhisperProfile`n$senseVoiceProfile`n$whisperXProfile"
 )) {
-    throw "ExpectedProfiles must be the pinned SenseVoice or faster-whisper plus SenseVoice contract"
+    throw "ExpectedProfiles must match a pinned admitted ASR profile contract"
 }
 
 function Assert-ExactPropertyNames {
@@ -85,6 +87,18 @@ if ($ExpectedProfiles -contains $fasterWhisperProfile) {
     )) {
         if (-not $values.ContainsKey($required) -or [string]::IsNullOrWhiteSpace($values[$required])) {
             throw "Required faster-whisper ASR setting is empty: $required"
+        }
+    }
+}
+if ($ExpectedProfiles -contains $whisperXProfile) {
+    foreach ($required in @(
+        "ASR_WHISPERX_MODEL_CACHE_ROOT",
+        "ASR_WHISPERX_MODEL_MANIFEST_PATH",
+        "ASR_WHISPERX_ALIGN_MODEL_CACHE_ROOT",
+        "ASR_WHISPERX_ALIGN_MODEL_MANIFEST_PATH"
+    )) {
+        if (-not $values.ContainsKey($required) -or [string]::IsNullOrWhiteSpace($values[$required])) {
+            throw "Required WhisperX ASR setting is empty: $required"
         }
     }
 }

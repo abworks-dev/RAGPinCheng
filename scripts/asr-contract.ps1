@@ -29,7 +29,7 @@ function Get-AsrRuntimeContractSpec {
         "whisperx" {
             return [pscustomobject][ordered]@{
                 engine = $Engine; model_revisions = @("53ecf83a5bedc5597eb8c8b34eac29e5345520ff", "51d27579a1040ee4e967979278d5f76b9c32c375")
-                paths = @("asr_service/requirements-service-core.txt", "asr_service/requirements-windows.txt", "asr_service/app.py", "src/transcription/profile_catalog.py", "scripts/asr_model_download.py", "scripts/qualify-whisperx-production.ps1", "scripts/run_whisperx_cuda_smoke.py", "scripts/run_whisperx_qualification.py", "scripts/run_whisperx_runtime_preflight.py")
+                paths = @("asr_service/requirements-service-core.txt", "asr_service/requirements-windows.txt", "asr_service/requirements-whisperx.txt", "asr_service/app.py", "asr_service/config.py", "asr_service/engine_protocol.py", "asr_service/engines/whisperx.py", "asr_service/model_cache.py", "src/transcription/profile_catalog.py", "scripts/asr_model_download.py", "scripts/qualify-whisperx-production.ps1", "scripts/run_whisperx_cuda_smoke.py", "scripts/run_whisperx_qualification.py", "scripts/run_whisperx_runtime_preflight.py")
             }
         }
     }
@@ -60,6 +60,9 @@ function Get-AsrProductionAdmissionAdapter {
         "faster-whisper" {
             return [pscustomobject][ordered]@{ engine = $Engine; enabled = $true; evidence_adapter = "faster-whisper-r3/1" }
         }
+        "whisperx" {
+            return [pscustomobject][ordered]@{ engine = $Engine; enabled = $true; evidence_adapter = "whisperx-r3/1" }
+        }
         default {
             return [pscustomobject][ordered]@{ engine = $Engine; enabled = $false; evidence_adapter = "" }
         }
@@ -74,6 +77,7 @@ function Get-AsrDeploymentContract {
         "scripts/activate-asr-production.ps1",
         "scripts/deploy-asr.ps1",
         "scripts/faster-whisper-production-evidence.ps1",
+        "scripts/whisperx-production-evidence.ps1",
         "scripts/preflight-asr-deployment.ps1",
         "scripts/promote-asr-candidate.ps1",
         "scripts/start-asr-service.ps1",

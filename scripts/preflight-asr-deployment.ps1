@@ -19,7 +19,7 @@ param(
     [string]$ReportPath,
     [string]$SourceRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")),
     [string]$DataRoot = $env:PRODUCTION_ASR_DATA_ROOT,
-    [string]$QualificationRoot = $env:PRODUCTION_FASTER_WHISPER_QUALIFICATION_ROOT,
+    [string]$QualificationRoot = "",
     [string]$TempRoot = $env:RUNNER_TEMP
 )
 
@@ -27,6 +27,7 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot "asr-contract.ps1")
 . (Join-Path $PSScriptRoot "faster-whisper-production-evidence.ps1")
+. (Join-Path $PSScriptRoot "whisperx-production-evidence.ps1")
 
 function Get-PreflightPython311 {
     $candidates = @()
@@ -109,24 +110,47 @@ try {
         $report.failure_code = "production_admission_adapter_not_enabled"
         throw "Production admission adapter is not enabled for engine: $Engine"
     }
+    if ([string]::IsNullOrWhiteSpace($QualificationRoot)) {
+        $QualificationRoot = if ($Engine -eq "whisperx") {
+            [string]$env:PRODUCTION_WHISPERX_ROOT
+        } else {
+            [string]$env:PRODUCTION_FASTER_WHISPER_QUALIFICATION_ROOT
+        }
+    }
     if ([string]::IsNullOrWhiteSpace($DataRoot) -or [string]::IsNullOrWhiteSpace($QualificationRoot)) {
         $report.failure_code = "production_evidence_root_missing"
-        throw "Production faster-whisper evidence roots are required"
+        throw "Production ASR evidence roots are required"
     }
 
-    $evidence = Get-QualifiedFasterWhisperEvidence `
-        -QualificationRoot $QualificationRoot `
-        -DataRoot $DataRoot `
-        -RunId $QualificationRunId `
-        -CommitSha $QualificationCommitSha.ToLowerInvariant() `
-        -ExpectedRuntimeContractSha256 $runtimeContract.runtime_contract_sha256
+    $evidence = if ($Engine -eq "faster-whisper") {
+        Get-QualifiedFasterWhisperEvidence `
+            -QualificationRoot $QualificationRoot `
+            -DataRoot $DataRoot `
+            -RunId $QualificationRunId `
+            -CommitSha $QualificationCommitSha.ToLowerInvariant() `
+            -ExpectedRuntimeContractSha256 $runtimeContract.runtime_contract_sha256
+    } elseif ($Engine -eq "whisperx") {
+        Get-QualifiedWhisperXEvidence `
+            -WhisperXRoot $QualificationRoot `
+            -RunId $QualificationRunId `
+            -CommitSha $QualificationCommitSha.ToLowerInvariant() `
+            -ExpectedRuntimeContractSha256 $runtimeContract.runtime_contract_sha256
+    } else {
+        throw "Production evidence adapter is not implemented for engine: $Engine"
+    }
     $tempRun = Join-Path $resolvedTempRoot ("asr-deployment-preflight-" + $QualificationRunId + "-" + [guid]::NewGuid().ToString("N"))
-    $qualifiedWheelSeed = Join-Path $tempRun "qualified-faster-whisper-wheel-seed"
+    $qualifiedWheelSeed = Join-Path $tempRun ("qualified-" + $Engine + "-wheel-seed")
     $wheelhouse = Join-Path $tempRun "wheelhouse"
     $venvRoot = Join-Path $tempRun "venv"
     New-Item -ItemType Directory -Path $qualifiedWheelSeed, $wheelhouse -Force | Out-Null
-    Copy-QualifiedFasterWhisperWheels -Evidence $evidence -Destination $qualifiedWheelSeed
-    Copy-QualifiedFasterWhisperWheels -Evidence $evidence -Destination $wheelhouse
+    $numpyRequirement = if ($Engine -eq "whisperx") { "numpy>=2.1,<3" } else { "numpy>=1.24,<2" }
+    if ($Engine -eq "faster-whisper") {
+        Copy-QualifiedFasterWhisperWheels -Evidence $evidence -Destination $qualifiedWheelSeed
+        Copy-QualifiedFasterWhisperWheels -Evidence $evidence -Destination $wheelhouse
+    } else {
+        Copy-QualifiedWhisperXWheels -Evidence $evidence -Destination $qualifiedWheelSeed
+        Copy-QualifiedWhisperXWheels -Evidence $evidence -Destination $wheelhouse
+    }
 
     $python = Get-PreflightPython311
     & $python -m venv $venvRoot
@@ -155,23 +179,47 @@ try {
             "--index-url", "https://pypi.org/simple",
             "--extra-index-url", "https://download.pytorch.org/whl/cu128",
             "--find-links", $qualifiedWheelSeed,
-            "torch==2.7.0+cu128", "torchaudio==2.7.0+cu128",
-            "-r", (Join-Path $resolvedSource "asr_service\requirements-windows.txt"),
-            "-r", (Join-Path $resolvedSource "asr_service\requirements-faster-whisper.txt")
+            "torch==2.8.0+cu128", "torchaudio==2.8.0+cu128",
+            $numpyRequirement,
+            "-r", (Join-Path $resolvedSource "asr_service\requirements-windows.txt")
         )
+        if ($Engine -eq "faster-whisper") {
+            $downloadArguments += @("-r", (Join-Path $resolvedSource "asr_service\requirements-faster-whisper.txt"))
+        } else {
+            $downloadArguments += @("torchvision==0.23.0+cu128", "-r", (Join-Path $resolvedSource "asr_service\requirements-whisperx.txt"))
+        }
         & $venvPython @downloadArguments
         if ($LASTEXITCODE -ne 0) { $report.failure_code = "dependency_resolution_failed"; throw "Deployment preflight dependency resolution failed" }
         try {
-            Assert-QualifiedFasterWhisperWheels -Evidence $evidence -Wheelhouse $wheelhouse
+            if ($Engine -eq "faster-whisper") {
+                Assert-QualifiedFasterWhisperWheels -Evidence $evidence -Wheelhouse $wheelhouse
+            } else {
+                Assert-QualifiedWhisperXWheels -Evidence $evidence -Wheelhouse $wheelhouse
+            }
         } catch {
             $report.failure_code = "qualified_wheel_set_not_preserved"
             throw
         }
-        & $venvPython -m pip install --no-index --find-links $wheelhouse "torch==2.7.0+cu128" "torchaudio==2.7.0+cu128" "-r" (Join-Path $resolvedSource "asr_service\requirements-windows.txt") "-r" (Join-Path $resolvedSource "asr_service\requirements-faster-whisper.txt")
+        $installArguments = @(
+            "-m", "pip", "install", "--no-index", "--find-links", $wheelhouse,
+            "torch==2.8.0+cu128", "torchaudio==2.8.0+cu128",
+            $numpyRequirement,
+            "-r", (Join-Path $resolvedSource "asr_service\requirements-windows.txt")
+        )
+        if ($Engine -eq "faster-whisper") {
+            $installArguments += @("-r", (Join-Path $resolvedSource "asr_service\requirements-faster-whisper.txt"))
+        } else {
+            $installArguments += @("torchvision==0.23.0+cu128", "-r", (Join-Path $resolvedSource "asr_service\requirements-whisperx.txt"))
+        }
+        & $venvPython @installArguments
         if ($LASTEXITCODE -ne 0) { $report.failure_code = "offline_install_failed"; throw "Deployment preflight offline dependency installation failed" }
         & $venvPython -m pip check
         if ($LASTEXITCODE -ne 0) { $report.failure_code = "dependency_check_failed"; throw "Deployment preflight dependency check failed" }
-        Assert-FasterWhisperProductionRuntime -PythonPath $venvPython -SourceRoot $resolvedSource -Evidence $evidence
+        if ($Engine -eq "faster-whisper") {
+            Assert-FasterWhisperProductionRuntime -PythonPath $venvPython -SourceRoot $resolvedSource -Evidence $evidence
+        } else {
+            Assert-WhisperXProductionRuntime -PythonPath $venvPython -SourceRoot $resolvedSource -Evidence $evidence
+        }
     } finally {
         foreach ($name in $savedProxyEnvironment.Keys) {
             [System.Environment]::SetEnvironmentVariable($name, $savedProxyEnvironment[$name], [System.EnvironmentVariableTarget]::Process)

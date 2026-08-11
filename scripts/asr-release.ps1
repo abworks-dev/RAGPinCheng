@@ -25,21 +25,54 @@ function Assert-AsrCandidateId {
 
 function Get-AsrReleaseAdmissionAdapter {
     param([Parameter(Mandatory = $true)][ValidateSet("faster-whisper", "qwen3-asr", "whisperx")][string]$Engine)
-    if ($Engine -eq "faster-whisper") {
-        return [pscustomobject][ordered]@{
-            engine = $Engine
-            enabled = $true
-            expected_profiles = @(
-                "faster-whisper-large-v3-turbo-v1",
-                "funasr-sensevoice-small-v1"
-            )
+    switch ($Engine) {
+        "faster-whisper" {
+            return [pscustomobject][ordered]@{
+                engine = $Engine
+                enabled = $true
+                service_profiles = @("faster-whisper-large-v3-turbo-v1")
+            }
+        }
+        "whisperx" {
+            return [pscustomobject][ordered]@{
+                engine = $Engine
+                enabled = $true
+                service_profiles = @("whisperx-large-v3-zh-align-v1")
+            }
         }
     }
     return [pscustomobject][ordered]@{
         engine = $Engine
         enabled = $false
-        expected_profiles = @()
+        service_profiles = @()
     }
+}
+
+function Get-AsrReleaseExpectedProfiles {
+    param([Parameter(Mandatory = $true)][string[]]$Engines)
+    $profiles = @("funasr-sensevoice-small-v1")
+    $engineNames = @($Engines)
+    if (
+        $engineNames.Count -eq 0 -or
+        (@($engineNames | Sort-Object -Unique) -join "`n") -ne ($engineNames -join "`n")
+    ) {
+        throw "ASR release engines must be sorted and unique"
+    }
+    if ($engineNames -contains "whisperx" -and $engineNames -notcontains "faster-whisper") {
+        throw "WhisperX release requires the admitted faster-whisper engine"
+    }
+    foreach ($engine in $engineNames) {
+        $adapter = Get-AsrReleaseAdmissionAdapter -Engine $engine
+        if (-not $adapter.enabled) {
+            throw "ASR release admission adapter is not enabled for engine"
+        }
+        $profiles += @($adapter.service_profiles)
+    }
+    $expected = @($profiles | Sort-Object -Unique)
+    if ($expected.Count -ne $profiles.Count) {
+        throw "ASR release profile adapters must be unique"
+    }
+    return $expected
 }
 
 function Assert-AsrReleasePath {
@@ -198,6 +231,7 @@ function Read-AsrReleaseManifest {
     ) {
         throw "ASR release application file set does not match its manifest"
     }
+    $engineNames = @()
     foreach ($engine in @($manifest.engines)) {
         if (
             [string]$engine.engine -notin @("faster-whisper", "qwen3-asr", "whisperx") -or
@@ -211,9 +245,11 @@ function Read-AsrReleaseManifest {
         if (-not $adapter.enabled) {
             throw "ASR release admission adapter is not enabled for engine"
         }
-        if ((@($manifest.expected_profiles) -join "`n") -ne (@($adapter.expected_profiles) -join "`n")) {
-            throw "ASR release expected profiles do not match the admission adapter"
-        }
+        $engineNames += [string]$engine.engine
+    }
+    $expectedProfiles = Get-AsrReleaseExpectedProfiles -Engines $engineNames
+    if ((@($manifest.expected_profiles) -join "`n") -ne ($expectedProfiles -join "`n")) {
+        throw "ASR release expected profiles do not match the admission adapters"
     }
     return [pscustomobject][ordered]@{
         layout = $layout

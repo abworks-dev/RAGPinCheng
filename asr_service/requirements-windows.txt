@@ -1,5 +1,5 @@
 # Windows ASR service dependencies excluding CUDA Torch.
-# R3B installs torch/torchaudio from the approved cu128 index first.
+# Candidate preparation installs torch/torchaudio from the approved cu128 index first.
 -r requirements-service-core.txt
 funasr>=1.2,<2
 modelscope>=1.20,<2
@@ -14,4 +14,4 @@ requests>=2.32,<3
 tqdm>=4.66,<5
 pyyaml>=6,<7
 packaging>=23,<26
-numpy>=1.24,<2
+numpy>=1.24,<3

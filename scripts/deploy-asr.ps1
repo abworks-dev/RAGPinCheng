@@ -9,17 +9,22 @@ param(
     [switch]$InstallDependencies,
     [switch]$ActivateService,
     [switch]$EnableFasterWhisper,
+    [switch]$EnableWhisperX,
     [switch]$StageCandidate,
     [string]$CandidateId = "",
     [string]$CandidateReportPath = "",
     [string]$FasterWhisperQualificationRunId = "",
     [string]$FasterWhisperQualificationCommitSha = "",
-    [string]$FasterWhisperRuntimeContractSha256 = ""
+    [string]$FasterWhisperRuntimeContractSha256 = "",
+    [string]$WhisperXQualificationRunId = "",
+    [string]$WhisperXQualificationCommitSha = "",
+    [string]$WhisperXRuntimeContractSha256 = ""
 )
 
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "windows-wheel-cache.ps1")
 . (Join-Path $PSScriptRoot "faster-whisper-production-evidence.ps1")
+. (Join-Path $PSScriptRoot "whisperx-production-evidence.ps1")
 . (Join-Path $PSScriptRoot "asr-contract.ps1")
 . (Join-Path $PSScriptRoot "asr-release.ps1")
 $taskName = "RAGPinCheng-ASR"
@@ -67,6 +72,12 @@ if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($actualShaOutput)) {
 $actualSha = ([string]$actualShaOutput).Trim()
 if ($actualSha -ne $CommitSha.ToLowerInvariant()) {
     throw "Checked-out commit does not match the requested full SHA"
+}
+if ($EnableWhisperX -and -not $EnableFasterWhisper) {
+    throw "WhisperX candidate staging requires the admitted faster-whisper engine"
+}
+if ($EnableWhisperX -and -not $StageCandidate) {
+    throw "WhisperX must be staged as an immutable candidate"
 }
 if ($StageCandidate) {
     Assert-AsrCandidateId -CandidateId $CandidateId
@@ -124,6 +135,43 @@ if ($EnableFasterWhisper) {
 ) {
     throw "faster-whisper qualification identity is accepted only when enabled"
 }
+$whisperXEvidence = $null
+if ($EnableWhisperX) {
+    if (-not $InstallDependencies) {
+        throw "WhisperX production preparation requires a new staging venv"
+    }
+    if ([string]::IsNullOrWhiteSpace($env:PRODUCTION_WHISPERX_ROOT)) {
+        throw "PRODUCTION_WHISPERX_ROOT is required"
+    }
+    if (
+        $WhisperXQualificationCommitSha -notmatch '^[0-9a-fA-F]{40}$' -or
+        $WhisperXRuntimeContractSha256 -notmatch '^[0-9a-fA-F]{64}$'
+    ) {
+        throw "WhisperX qualification identity is invalid"
+    }
+    $whisperXRuntimeContract = Get-AsrRuntimeContract `
+        -Engine "whisperx" `
+        -SourceRoot $resolvedSource `
+        -CommitSha $CommitSha
+    if ($WhisperXRuntimeContractSha256.ToLowerInvariant() -ne $whisperXRuntimeContract.runtime_contract_sha256) {
+        throw "WhisperX qualification runtime contract must equal the deployed runtime contract"
+    }
+    $whisperXEvidence = Get-QualifiedWhisperXEvidence `
+        -WhisperXRoot $env:PRODUCTION_WHISPERX_ROOT `
+        -RunId $WhisperXQualificationRunId `
+        -CommitSha $WhisperXQualificationCommitSha.ToLowerInvariant() `
+        -ExpectedRuntimeContractSha256 $whisperXRuntimeContract.runtime_contract_sha256
+} elseif (
+    -not [string]::IsNullOrWhiteSpace($WhisperXQualificationRunId) -or
+    -not [string]::IsNullOrWhiteSpace($WhisperXQualificationCommitSha) -or
+    -not [string]::IsNullOrWhiteSpace($WhisperXRuntimeContractSha256)
+) {
+    throw "WhisperX qualification identity is accepted only when enabled"
+}
+$productionTorchVersion = if ($EnableFasterWhisper) { "2.8.0+cu128" } else { "2.7.0+cu128" }
+$productionTorchRequirement = "torch==$productionTorchVersion"
+$productionTorchaudioRequirement = "torchaudio==$productionTorchVersion"
+$productionNumpyRequirement = if ($EnableWhisperX) { "numpy>=2.1,<3" } else { "numpy>=1.24,<2" }
 
 $appRoot = Join-Path $ProgramRoot "app"
 $venvRoot = Join-Path $ProgramRoot "venv"
@@ -153,6 +201,7 @@ $dependencyRunRoot = Join-Path $DataRoot ("dependency-runs\" + $dependencyRunIde
 $wheelhouse = Join-Path $dependencyRunRoot "wheelhouse"
 $sharedWheelSeed = Join-Path $dependencyRunRoot "shared-wheel-seed"
 $qualifiedFasterWhisperWheelSeed = Join-Path $dependencyRunRoot "qualified-faster-whisper-wheel-seed"
+$qualifiedWhisperXWheelSeed = Join-Path $dependencyRunRoot "qualified-whisperx-wheel-seed"
 $scriptRoot = Join-Path $ProgramRoot "scripts"
 $configRoot = Join-Path $DataRoot "config"
 $activeEnvFile = Join-Path $configRoot "asr.env"
@@ -346,7 +395,8 @@ foreach ($item in @("asr_service", "src")) {
 foreach ($requirementsName in @(
     "requirements-service-core.txt",
     "requirements-windows.txt",
-    "requirements-faster-whisper.txt"
+    "requirements-faster-whisper.txt",
+    "requirements-whisperx.txt"
 )) {
     Copy-Item -LiteralPath (Join-Path $resolvedSource "asr_service\$requirementsName") -Destination $staging
 }
@@ -477,6 +527,14 @@ if ($InstallDependencies) {
                     -Evidence $fasterWhisperEvidence `
                     -Destination $wheelhouse
             }
+            if ($EnableWhisperX) {
+                Copy-QualifiedWhisperXWheels `
+                    -Evidence $whisperXEvidence `
+                    -Destination $qualifiedWhisperXWheelSeed
+                Copy-QualifiedWhisperXWheels `
+                    -Evidence $whisperXEvidence `
+                    -Destination $wheelhouse
+            }
             $downloadArguments = @(
                 "-m", "pip", "download",
                 "--only-binary=:all:",
@@ -484,8 +542,9 @@ if ($InstallDependencies) {
                 "--index-url", "https://pypi.org/simple",
                 "--extra-index-url", "https://download.pytorch.org/whl/cu128",
                 "--find-links", $sharedWheelSeed,
-                "torch==2.7.0+cu128",
-                "torchaudio==2.7.0+cu128",
+                $productionTorchRequirement,
+                $productionTorchaudioRequirement,
+                $productionNumpyRequirement,
                 "-r", (Join-Path $staging "requirements-windows.txt")
             )
             if ($EnableFasterWhisper) {
@@ -494,11 +553,23 @@ if ($InstallDependencies) {
                     "-r", (Join-Path $staging "requirements-faster-whisper.txt")
                 )
             }
+            if ($EnableWhisperX) {
+                $downloadArguments += @(
+                    "--find-links", $qualifiedWhisperXWheelSeed,
+                    "torchvision==0.23.0+cu128",
+                    "-r", (Join-Path $staging "requirements-whisperx.txt")
+                )
+            }
             & $venvPython @downloadArguments
             if ($LASTEXITCODE -ne 0) { throw "ASR dependency download failed" }
             if ($EnableFasterWhisper) {
                 Assert-QualifiedFasterWhisperWheels `
                     -Evidence $fasterWhisperEvidence `
+                    -Wheelhouse $wheelhouse
+            }
+            if ($EnableWhisperX) {
+                Assert-QualifiedWhisperXWheels `
+                    -Evidence $whisperXEvidence `
                     -Wheelhouse $wheelhouse
             }
             $wheelIdentity = @(
@@ -513,13 +584,19 @@ if ($InstallDependencies) {
                     }
             )
             $sharedMaterial = [ordered]@{
-                schema_version = "production-asr-shared-wheel-key/2"
+                schema_version = "production-asr-shared-wheel-key/3"
                 python = "3.11"
                 platform = "windows-x64"
-                torch = "2.7.0+cu128"
-                torchaudio = "2.7.0+cu128"
+                torch = $productionTorchVersion
+                torchaudio = $productionTorchVersion
+                numpy = $productionNumpyRequirement
                 faster_whisper_qualification_cache_key = if ($EnableFasterWhisper) {
                     $fasterWhisperEvidence.CacheKey
+                } else {
+                    ""
+                }
+                whisperx_qualification_cache_key = if ($EnableWhisperX) {
+                    $whisperXEvidence.CacheKey
                 } else {
                     ""
                 }
@@ -528,6 +605,9 @@ if ($InstallDependencies) {
                     Get-SharedWheelSha256 -Path (Join-Path $staging "requirements-windows.txt")
                     if ($EnableFasterWhisper) {
                         Get-SharedWheelSha256 -Path (Join-Path $staging "requirements-faster-whisper.txt")
+                    }
+                    if ($EnableWhisperX) {
+                        Get-SharedWheelSha256 -Path (Join-Path $staging "requirements-whisperx.txt")
                     }
                 )
                 wheels = $wheelIdentity
@@ -543,8 +623,9 @@ if ($InstallDependencies) {
                 "-m", "pip", "install",
                 "--no-index",
                 "--find-links", $wheelhouse,
-                "torch==2.7.0+cu128",
-                "torchaudio==2.7.0+cu128",
+                $productionTorchRequirement,
+                $productionTorchaudioRequirement,
+                $productionNumpyRequirement,
                 "-r", (Join-Path $staging "requirements-windows.txt")
             )
             if ($EnableFasterWhisper) {
@@ -552,17 +633,29 @@ if ($InstallDependencies) {
                     "-r", (Join-Path $staging "requirements-faster-whisper.txt")
                 )
             }
+            if ($EnableWhisperX) {
+                $installArguments += @(
+                    "torchvision==0.23.0+cu128",
+                    "-r", (Join-Path $staging "requirements-whisperx.txt")
+                )
+            }
             & $venvPython @installArguments
             if ($LASTEXITCODE -ne 0) { throw "ASR offline dependency installation failed" }
             & $venvPython -m pip check
             if ($LASTEXITCODE -ne 0) { throw "ASR dependency check failed" }
-            & $venvPython -c "import funasr, modelscope, torch, torchaudio; assert torch.__version__ == '2.7.0+cu128'; assert torch.version.cuda == '12.8'"
+            & $venvPython -c "import sys,funasr,modelscope,torch,torchaudio; assert torch.__version__ == sys.argv[1]; assert torch.version.cuda == '12.8'" $productionTorchVersion
             if ($LASTEXITCODE -ne 0) { throw "ASR dependency identity verification failed" }
             if ($EnableFasterWhisper) {
                 Assert-FasterWhisperProductionRuntime `
                     -PythonPath $venvPython `
                     -SourceRoot $staging `
                     -Evidence $fasterWhisperEvidence
+            }
+            if ($EnableWhisperX) {
+                Assert-WhisperXProductionRuntime `
+                    -PythonPath $venvPython `
+                    -SourceRoot $staging `
+                    -Evidence $whisperXEvidence
             }
         } finally {
             foreach ($name in $savedProxyEnvironment.Keys) {
@@ -599,6 +692,12 @@ if ($StageCandidate) {
             -Name "ASR_FASTER_WHISPER_MODEL_MANIFEST_PATH" `
             -Value $fasterWhisperEvidence.ModelManifestPath
     }
+    if ($EnableWhisperX) {
+        Set-ProtectedConfigValue -Name "ASR_WHISPERX_MODEL_CACHE_ROOT" -Value $whisperXEvidence.ModelCacheRoot
+        Set-ProtectedConfigValue -Name "ASR_WHISPERX_MODEL_MANIFEST_PATH" -Value $whisperXEvidence.ModelManifestPath
+        Set-ProtectedConfigValue -Name "ASR_WHISPERX_ALIGN_MODEL_CACHE_ROOT" -Value $whisperXEvidence.AlignModelCacheRoot
+        Set-ProtectedConfigValue -Name "ASR_WHISPERX_ALIGN_MODEL_MANIFEST_PATH" -Value $whisperXEvidence.AlignModelManifestPath
+    }
     $deploymentContract = Get-AsrDeploymentContract -SourceRoot $resolvedSource -CommitSha $CommitSha
     $freezeLines = @(& (Join-Path $venvStaging "Scripts\python.exe") -m pip freeze --all)
     if ($LASTEXITCODE -ne 0 -or $freezeLines.Count -eq 0) {
@@ -617,7 +716,7 @@ if ($StageCandidate) {
             }
     )
     $engines = @()
-    $expectedProfiles = @()
+    $admittedEngines = @()
     if ($EnableFasterWhisper) {
         $releaseAdapter = Get-AsrReleaseAdmissionAdapter -Engine "faster-whisper"
         if (-not $releaseAdapter.enabled) {
@@ -629,11 +728,25 @@ if ($StageCandidate) {
             qualification_commit_sha = $FasterWhisperQualificationCommitSha.ToLowerInvariant()
             runtime_contract_sha256 = $FasterWhisperRuntimeContractSha256.ToLowerInvariant()
         }
-        $expectedProfiles = @($releaseAdapter.expected_profiles)
+        $admittedEngines += "faster-whisper"
+    }
+    if ($EnableWhisperX) {
+        $releaseAdapter = Get-AsrReleaseAdmissionAdapter -Engine "whisperx"
+        if (-not $releaseAdapter.enabled) {
+            throw "WhisperX candidate release adapter is not enabled"
+        }
+        $engines += [ordered]@{
+            engine = "whisperx"
+            qualification_run_id = [string]$WhisperXQualificationRunId
+            qualification_commit_sha = $WhisperXQualificationCommitSha.ToLowerInvariant()
+            runtime_contract_sha256 = $WhisperXRuntimeContractSha256.ToLowerInvariant()
+        }
+        $admittedEngines += "whisperx"
     }
     if ($engines.Count -eq 0) {
         throw "ASR candidate staging requires at least one admitted engine"
     }
+    $expectedProfiles = Get-AsrReleaseExpectedProfiles -Engines $admittedEngines
     $manifest = [ordered]@{
         schema_version = "asr-production-release/1"
         candidate_id = $CandidateId
@@ -739,6 +852,13 @@ try {
                 "funasr-sensevoice-small-v1"
             )
         }
+        if ($EnableWhisperX) {
+            $expectedProfiles = @(
+                "faster-whisper-large-v3-turbo-v1",
+                "funasr-sensevoice-small-v1",
+                "whisperx-large-v3-zh-align-v1"
+            )
+        }
         & (Join-Path $scriptRoot "verify-asr-service.ps1") `
             -DataRoot $DataRoot `
             -AsrUrl "http://127.0.0.1:8200" `
@@ -808,4 +928,4 @@ try {
     throw $original
 }
 
-Write-Host "Repository payload deployed for commit $CommitSha. InstallDependencies=$InstallDependencies ActivateService=$ActivateService EnableFasterWhisper=$EnableFasterWhisper"
+Write-Host "Repository payload deployed for commit $CommitSha. InstallDependencies=$InstallDependencies ActivateService=$ActivateService EnableFasterWhisper=$EnableFasterWhisper EnableWhisperX=$EnableWhisperX"

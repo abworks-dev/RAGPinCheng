@@ -88,7 +88,7 @@ def test_funasr_builds_staging_venv_offline_before_atomic_swap() -> None:
     assert "pip install --index-url" not in deploy
 
 
-def test_torch_27_is_reused_only_by_compatible_consumers() -> None:
+def test_candidate_runtime_versions_are_selected_by_admitted_engines() -> None:
     faster = (ROOT / "scripts" / "qualify-faster-whisper-production.ps1").read_text(
         encoding="utf-8"
     )
@@ -99,11 +99,29 @@ def test_torch_27_is_reused_only_by_compatible_consumers() -> None:
     whisperx = (ROOT / "scripts" / "qualify-whisperx-production.ps1").read_text(
         encoding="utf-8"
     )
-    for script in (faster, qwen, funasr):
-        assert "2.7.0+cu128" in script
-        assert 'Join-Path $DataRoot "wheel-cache"' in script
+    assert "2.8.0+cu128" in faster
+    assert 'Join-Path $DataRoot "wheel-cache"' in faster
+    assert "2.7.0+cu128" not in faster
+    assert (
+        '$productionTorchVersion = if ($EnableFasterWhisper) { "2.8.0+cu128" } '
+        'else { "2.7.0+cu128" }'
+    ) in funasr
+    assert (
+        '$productionNumpyRequirement = if ($EnableWhisperX) { "numpy>=2.1,<3" } '
+        'else { "numpy>=1.24,<2" }'
+    ) in funasr
+    assert 'Join-Path $DataRoot "wheel-cache"' in funasr
     assert "2.8.0+cu128" in whisperx
+    assert 'Join-Path $WhisperXRoot "wheel-cache"' in whisperx
     assert "2.7.0+cu128" not in whisperx
+    assert "2.7.0+cu128" in qwen
+
+
+def test_windows_base_requirements_allow_both_candidate_numpy_lines() -> None:
+    requirements = (ROOT / "asr_service" / "requirements-windows.txt").read_text(
+        encoding="utf-8"
+    )
+    assert "numpy>=1.24,<3" in requirements
 
 
 def test_whisperx_builds_the_fixed_antlr4_sdist_into_a_cached_wheel() -> None:

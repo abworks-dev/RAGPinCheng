@@ -267,7 +267,7 @@ def test_manual_workflow_has_safe_defaults_and_immutable_revision():
     assert "production-asr" in workflow
     assert "runs-on: [self-hosted, Windows, X64, asr-production]" in workflow
     assert workflow.count("timeout-minutes: 60") == 1
-    assert workflow.count("default: false") == 3
+    assert workflow.count("default: false") == 4
     assert workflow.count("shell: powershell") == 3
     assert "group: production-gpu-exclusive" in workflow
     assert "Compact deployment dependency run" in workflow
@@ -275,6 +275,7 @@ def test_manual_workflow_has_safe_defaults_and_immutable_revision():
     assert re.search(r"install_dependencies:.*?default: false", workflow, re.DOTALL)
     assert re.search(r"activate_service:.*?default: false", workflow, re.DOTALL)
     assert re.search(r"enable_faster_whisper:.*?default: false", workflow, re.DOTALL)
+    assert re.search(r"enable_whisperx:.*?default: false", workflow, re.DOTALL)
     assert "secrets.ASR_SERVICE_TOKEN" in workflow
     assert "BGE_PRIORITY_PROBE_TOKEN: ${{ secrets.GPU_SERVICE_TOKEN }}" in workflow
     assert "ASR_DEPENDENCY_PROXY: ${{ secrets.ASR_DEPENDENCY_PROXY }}" in workflow
@@ -1011,8 +1012,9 @@ def test_faster_whisper_qualification_freezes_dependencies_model_and_gates():
     script = read("scripts/qualify-faster-whisper-production.ps1")
     model = read("scripts/prepare_faster_whisper_model.py")
     runner = read("scripts/run_faster_whisper_qualification.py")
-    assert "torch==2.7.0+cu128" in script
-    assert "torchaudio==2.7.0+cu128" in script
+    assert "torch==2.8.0+cu128" in script
+    assert "torchaudio==2.8.0+cu128" in script
+    assert '-ExcludedPackages @("torch", "torchaudio")' in script
     assert "requirements-windows.txt" in script
     assert "requirements-service-core.txt" in script
     assert "requirements-faster-whisper.txt" in script
@@ -1983,9 +1985,14 @@ def test_asr_candidate_release_contract_is_engine_generic_and_path_safe():
     assert "ASR release application file integrity mismatch" in release
     assert "ASR release application file set does not match its manifest" in release
     assert "Get-AsrReleaseAdmissionAdapter" in release
-    assert 'engine = $Engine\n            enabled = $true' in release
+    assert release.count("enabled = $true") == 2
     assert 'enabled = $false' in release
-    assert "expected profiles do not match the admission adapter" in release
+    assert 'service_profiles = @("faster-whisper-large-v3-turbo-v1")' in release
+    assert 'service_profiles = @("whisperx-large-v3-zh-align-v1")' in release
+    assert 'profiles = @("funasr-sensevoice-small-v1")' in release
+    assert "Get-AsrReleaseExpectedProfiles" in release
+    assert "WhisperX release requires the admitted faster-whisper engine" in release
+    assert "expected profiles do not match the admission adapters" in release
     assert "ASR candidate Python environment identity mismatch" not in release
     assert 'notin @("faster-whisper", "qwen3-asr", "whisperx")' in release
     assert "python_freeze_sha256" in release
@@ -2036,7 +2043,7 @@ def test_faster_whisper_deploy_stages_immutable_candidate_without_active_swap():
     assert "asr-candidate-${{ github.run_id }}" in workflow
     assert "faster-whisper must be staged as an immutable candidate" in workflow
     compaction = workflow.split("  compact-dependency-run:", 1)[1]
-    assert "! (inputs.enable_faster_whisper && ! inputs.activate_service)" in compaction
+    assert "! ((inputs.enable_faster_whisper || inputs.enable_whisperx) && ! inputs.activate_service)" in compaction
 
     assert "CandidateManifestSha256" in start
     assert "UseActiveRelease" in start
@@ -2045,3 +2052,41 @@ def test_faster_whisper_deploy_stages_immutable_candidate_without_active_swap():
     candidate_branch = start.split("if ($CandidateId) {", 1)[1].split("} else {", 1)[0]
     assert 'Join-Path $DataRoot "config\\asr.env"' not in candidate_branch
     assert 'Join-Path $ProgramRoot "venv\\Scripts\\python.exe"' not in candidate_branch
+
+
+def test_whisperx_candidate_requires_two_qualification_identities_and_stays_inactive():
+    deploy = read("scripts/deploy-asr.ps1")
+    workflow = read(".github/workflows/deploy-asr-production.yml")
+    preflight = read("scripts/preflight-asr-deployment.ps1")
+    evidence = read("scripts/whisperx-production-evidence.ps1")
+    contract = read("scripts/asr-contract.ps1")
+
+    assert "WhisperX candidate staging requires the admitted faster-whisper engine" in deploy
+    assert "WhisperX must be staged as an immutable candidate" in deploy
+    assert "enable_faster_whisper=true" in workflow
+    assert "$params.EnableWhisperX = $true" in workflow
+    for identity in (
+        "WhisperXQualificationRunId",
+        "WhisperXQualificationCommitSha",
+        "WhisperXRuntimeContractSha256",
+    ):
+        assert identity in deploy
+    for setting in (
+        "ASR_WHISPERX_MODEL_CACHE_ROOT",
+        "ASR_WHISPERX_MODEL_MANIFEST_PATH",
+        "ASR_WHISPERX_ALIGN_MODEL_CACHE_ROOT",
+        "ASR_WHISPERX_ALIGN_MODEL_MANIFEST_PATH",
+    ):
+        assert setting in deploy
+    assert 'schema_version = "production-asr-shared-wheel-key/3"' in deploy
+    assert 'engine = "whisperx"' in deploy
+    assert '"whisperx-large-v3-zh-align-v1"' in deploy
+    assert 'evidence_adapter = "whisperx-r3/1"' in contract
+    assert '"scripts/whisperx-production-evidence.ps1"' in contract
+    assert "Get-QualifiedWhisperXEvidence" in preflight
+    assert "Assert-WhisperXProductionRuntime" in preflight
+    assert '"whisperx-production-qualification-verdict/3"' in evidence
+    assert '"shared-wheel-cache/1"' in evidence
+    assert "production_services_modified -ne $false" in evidence
+    assert "Register-ScheduledTask" not in evidence
+    assert "New-NetFirewallRule" not in evidence

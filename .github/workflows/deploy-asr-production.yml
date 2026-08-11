@@ -34,6 +34,23 @@ on:
         description: "Runtime contract SHA-256 recorded by the passed faster-whisper R3 run"
         required: false
         type: string
+      enable_whisperx:
+        description: "Add the qualified WhisperX engine to the immutable candidate"
+        required: true
+        default: false
+        type: boolean
+      whisperx_qualification_run_id:
+        description: "Passed WhisperX R3 run ID; required only when enabled"
+        required: false
+        type: string
+      whisperx_qualification_commit_sha:
+        description: "Commit SHA recorded by the passed WhisperX R3 run"
+        required: false
+        type: string
+      whisperx_runtime_contract_sha256:
+        description: "Runtime contract SHA-256 recorded by the passed WhisperX R3 run"
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -51,6 +68,7 @@ jobs:
       PRODUCTION_ASR_PROGRAM_ROOT: ${{ vars.PRODUCTION_ASR_PROGRAM_ROOT }}
       PRODUCTION_ASR_DATA_ROOT: ${{ vars.PRODUCTION_ASR_DATA_ROOT }}
       PRODUCTION_FASTER_WHISPER_QUALIFICATION_ROOT: ${{ vars.PRODUCTION_FASTER_WHISPER_QUALIFICATION_ROOT }}
+      PRODUCTION_WHISPERX_ROOT: ${{ vars.PRODUCTION_WHISPERX_ROOT }}
       PRODUCTION_NO_PROXY: ${{ vars.PRODUCTION_NO_PROXY }}
       GPU_SERVICE_ACTIVITY_URL: ${{ vars.GPU_SERVICE_ACTIVITY_URL }}
     steps:
@@ -67,6 +85,7 @@ jobs:
             throw "production ASR deployment must be dispatched from master"
           }
           $enableFasterWhisper = [System.Convert]::ToBoolean("${{ inputs.enable_faster_whisper }}")
+          $enableWhisperX = [System.Convert]::ToBoolean("${{ inputs.enable_whisperx }}")
           if ($enableFasterWhisper) {
             if (-not [System.Convert]::ToBoolean("${{ inputs.install_dependencies }}")) {
               throw "faster-whisper production preparation requires a new staging venv"
@@ -89,6 +108,32 @@ jobs:
             -not [string]::IsNullOrWhiteSpace("${{ inputs.faster_whisper_runtime_contract_sha256 }}")
           ) {
             throw "faster-whisper qualification identity is accepted only when enabled"
+          }
+          if ($enableWhisperX) {
+            if (-not $enableFasterWhisper) {
+              throw "WhisperX candidate staging requires enable_faster_whisper=true"
+            }
+            if (-not [System.Convert]::ToBoolean("${{ inputs.install_dependencies }}")) {
+              throw "WhisperX production preparation requires a new staging venv"
+            }
+            if ([System.Convert]::ToBoolean("${{ inputs.activate_service }}")) {
+              throw "WhisperX must be staged as an immutable candidate before separate promotion"
+            }
+            if ("${{ inputs.whisperx_qualification_run_id }}" -notmatch '^[0-9]{1,20}$') {
+              throw "whisperx_qualification_run_id is required"
+            }
+            if ("${{ inputs.whisperx_qualification_commit_sha }}" -notmatch '^[0-9a-fA-F]{40}$') {
+              throw "whisperx_qualification_commit_sha is required"
+            }
+            if ("${{ inputs.whisperx_runtime_contract_sha256 }}" -notmatch '^[0-9a-fA-F]{64}$') {
+              throw "whisperx_runtime_contract_sha256 is required"
+            }
+          } elseif (
+            -not [string]::IsNullOrWhiteSpace("${{ inputs.whisperx_qualification_run_id }}") -or
+            -not [string]::IsNullOrWhiteSpace("${{ inputs.whisperx_qualification_commit_sha }}") -or
+            -not [string]::IsNullOrWhiteSpace("${{ inputs.whisperx_runtime_contract_sha256 }}")
+          ) {
+            throw "WhisperX qualification identity is accepted only when enabled"
           }
 
       - name: Check out requested revision
@@ -119,10 +164,16 @@ jobs:
             $params.FasterWhisperQualificationCommitSha = "${{ inputs.faster_whisper_qualification_commit_sha }}"
             $params.FasterWhisperRuntimeContractSha256 = "${{ inputs.faster_whisper_runtime_contract_sha256 }}"
           }
+          if ([System.Convert]::ToBoolean("${{ inputs.enable_whisperx }}")) {
+            $params.EnableWhisperX = $true
+            $params.WhisperXQualificationRunId = "${{ inputs.whisperx_qualification_run_id }}"
+            $params.WhisperXQualificationCommitSha = "${{ inputs.whisperx_qualification_commit_sha }}"
+            $params.WhisperXRuntimeContractSha256 = "${{ inputs.whisperx_runtime_contract_sha256 }}"
+          }
           & "${{ github.workspace }}\scripts\deploy-asr.ps1" @params
 
       - name: Upload sanitized candidate staging evidence
-        if: ${{ always() && inputs.enable_faster_whisper && ! inputs.activate_service }}
+        if: ${{ always() && (inputs.enable_faster_whisper || inputs.enable_whisperx) && ! inputs.activate_service }}
         uses: actions/upload-artifact@v4
         with:
           name: asr-candidate-${{ github.run_id }}
@@ -157,6 +208,13 @@ jobs:
               --expected-profile funasr-sensevoice-small-v1
             )
           fi
+          if [[ "${{ inputs.enable_whisperx }}" == "true" ]]; then
+            profile_args=(
+              --expected-profile faster-whisper-large-v3-turbo-v1
+              --expected-profile funasr-sensevoice-small-v1
+              --expected-profile whisperx-large-v3-zh-align-v1
+            )
+          fi
           python3 scripts/verify_asr_from_ubuntu.py \
             --env-file "${ASR_ENV_FILE}" \
             --asr-url "${ASR_SERVICE_URL}" \
@@ -167,7 +225,7 @@ jobs:
     if: >-
       always() &&
       needs.deploy.result == 'success' &&
-      ! (inputs.enable_faster_whisper && ! inputs.activate_service) &&
+      ! ((inputs.enable_faster_whisper || inputs.enable_whisperx) && ! inputs.activate_service) &&
       (needs.verify-ubuntu.result == 'success' || needs.verify-ubuntu.result == 'skipped')
     environment: production-asr
     runs-on: [self-hosted, Windows, X64, asr-production]
