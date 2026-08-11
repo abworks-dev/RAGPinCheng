@@ -56,15 +56,26 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertIn("production-app-deployment", self.emergency_workflow)
         self.assertNotIn("cleanup-after-deploy", self.emergency_workflow)
 
+    def test_emergency_workflow_preflights_app_history_before_gpu(self):
+        self.assertIn("preflight-app:", self.emergency_workflow)
+        self.assertIn("needs: [preflight-app]", self.emergency_workflow)
+        self.assertIn(
+            "PRODUCTION_GIT_PREFLIGHT node=app status=fast_forward_safe",
+            self.emergency_workflow,
+        )
+        preflight = self.emergency_workflow.split("  deploy-gpu:", 1)[0]
+        self.assertNotIn("git merge --ff-only", preflight)
+        self.assertNotIn("deploy-app.sh", preflight)
+
     def test_emergency_workflow_diagnoses_divergence_without_overwriting_it(self):
-        self.assertEqual(self.emergency_workflow.count("PRODUCTION_GIT_DIVERGENCE"), 2)
-        self.assertEqual(self.emergency_workflow.count("PRODUCTION_GIT_LOCAL_ONLY"), 2)
+        self.assertEqual(self.emergency_workflow.count("PRODUCTION_GIT_DIVERGENCE"), 3)
+        self.assertEqual(self.emergency_workflow.count("PRODUCTION_GIT_LOCAL_ONLY"), 3)
         self.assertGreaterEqual(
-            self.emergency_workflow.count("git merge-base --is-ancestor"), 2
+            self.emergency_workflow.count("git merge-base --is-ancestor"), 3
         )
         self.assertGreaterEqual(
             self.emergency_workflow.count("git status --porcelain --untracked-files=no"),
-            2,
+            3,
         )
         self.assertNotIn("git reset", self.emergency_workflow)
         self.assertNotIn("git checkout --force", self.emergency_workflow)
