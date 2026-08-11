@@ -1,13 +1,53 @@
 [CmdletBinding()]
 param(
     [string]$ProgramRoot = $env:PRODUCTION_ASR_PROGRAM_ROOT,
-    [string]$DataRoot = $env:PRODUCTION_ASR_DATA_ROOT
+    [string]$DataRoot = $env:PRODUCTION_ASR_DATA_ROOT,
+    [switch]$UseActiveRelease,
+    [string]$CandidateId = "",
+    [string]$CandidateManifestSha256 = ""
 )
 
 $ErrorActionPreference = "Stop"
-$envFile = Join-Path $DataRoot "config\asr.env"
-$python = Join-Path $ProgramRoot "venv\Scripts\python.exe"
-$appRoot = Join-Path $ProgramRoot "app"
+if ($UseActiveRelease) {
+    if ($CandidateId -or $CandidateManifestSha256) {
+        throw "Active release selection cannot be combined with direct candidate identity"
+    }
+    . (Join-Path $PSScriptRoot "asr-release.ps1")
+    $activeStatePath = Join-Path $DataRoot "release-state\active.json"
+    if (-not (Test-Path -LiteralPath $activeStatePath -PathType Leaf)) {
+        throw "Active ASR release state is missing"
+    }
+    $active = Get-Content -LiteralPath $activeStatePath -Raw -Encoding UTF8 | ConvertFrom-Json
+    if (
+        $active.schema_version -ne "asr-active-release/1" -or
+        [string]$active.candidate_id -notmatch '^[0-9]{1,20}$' -or
+        [string]$active.release_manifest_sha256 -notmatch '^[0-9a-f]{64}$'
+    ) {
+        throw "Active ASR release state is invalid"
+    }
+    $CandidateId = [string]$active.candidate_id
+    $CandidateManifestSha256 = [string]$active.release_manifest_sha256
+}
+if ($CandidateId) {
+    if (-not (Get-Command Read-AsrReleaseManifest -ErrorAction SilentlyContinue)) {
+        . (Join-Path $PSScriptRoot "asr-release.ps1")
+    }
+    $release = Read-AsrReleaseManifest `
+        -ProgramRoot $ProgramRoot `
+        -DataRoot $DataRoot `
+        -CandidateId $CandidateId `
+        -ExpectedSha256 $CandidateManifestSha256
+    $envFile = $release.layout.config_path
+    $python = Join-Path $release.layout.venv_root "Scripts\python.exe"
+    $appRoot = $release.layout.app_root
+} else {
+    if ($CandidateManifestSha256) {
+        throw "ASR candidate manifest identity requires a candidate ID"
+    }
+    $envFile = Join-Path $DataRoot "config\asr.env"
+    $python = Join-Path $ProgramRoot "venv\Scripts\python.exe"
+    $appRoot = Join-Path $ProgramRoot "app"
+}
 
 if (-not (Test-Path -LiteralPath $envFile -PathType Leaf)) {
     throw "ASR environment file is missing: $envFile"

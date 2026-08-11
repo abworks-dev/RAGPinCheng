@@ -272,6 +272,7 @@ def test_manual_workflow_has_safe_defaults_and_immutable_revision():
     assert re.search(r"activate_service:.*?default: false", workflow, re.DOTALL)
     assert re.search(r"enable_faster_whisper:.*?default: false", workflow, re.DOTALL)
     assert "secrets.ASR_SERVICE_TOKEN" in workflow
+    assert "BGE_PRIORITY_PROBE_TOKEN: ${{ secrets.GPU_SERVICE_TOKEN }}" in workflow
     assert "ASR_DEPENDENCY_PROXY: ${{ secrets.ASR_DEPENDENCY_PROXY }}" in workflow
     assert "HTTP_PROXY:" not in workflow
     assert "HTTPS_PROXY:" not in workflow
@@ -1903,3 +1904,79 @@ def test_qwen3_asr_service_start_evidence_is_fixed_offline_and_sanitized():
     ):
         assert forbidden not in workflow
         assert forbidden not in script
+
+
+def test_asr_candidate_release_contract_is_engine_generic_and_path_safe():
+    release = read("scripts/asr-release.ps1")
+    contract = read("scripts/asr-contract.ps1")
+
+    assert "asr-production-release/1" in release
+    assert "ASR candidate ID must be a workflow run ID" in release
+    assert "ASR release path escapes its managed root" in release
+    assert "ASR release paths must not contain reparse points" in release
+    assert "ASR release roots must not be reparse points" in release
+    assert "ASR release application file integrity mismatch" in release
+    assert "ASR release application file set does not match its manifest" in release
+    assert "Get-AsrReleaseAdmissionAdapter" in release
+    assert 'engine = $Engine\n            enabled = $true' in release
+    assert 'enabled = $false' in release
+    assert "expected profiles do not match the admission adapter" in release
+    assert "ASR candidate Python environment identity mismatch" not in release
+    assert 'notin @("faster-whisper", "qwen3-asr", "whisperx")' in release
+    assert "python_freeze_sha256" in release
+    assert "dependency_contract_sha256" in release
+    assert "app_files" in release
+    for path in (
+        "scripts/asr-release.ps1",
+        "scripts/activate-asr-production.ps1",
+        "scripts/promote-asr-candidate.ps1",
+        "scripts/start-asr-service.ps1",
+        "scripts/verify-asr-service.ps1",
+        ".github/workflows/promote-asr-candidate-production.yml",
+        ".github/workflows/activate-asr-production.yml",
+    ):
+        assert path in contract
+
+
+def test_faster_whisper_deploy_stages_immutable_candidate_without_active_swap():
+    deploy = read("scripts/deploy-asr.ps1")
+    workflow = read(".github/workflows/deploy-asr-production.yml")
+    start = read("scripts/start-asr-service.ps1")
+
+    candidate_publish = deploy.rsplit("if ($StageCandidate) {", 1)[1].split(
+        "$backup = $null", 1
+    )[0]
+    assert 'Join-Path $ProgramRoot ("release-staging-" + $CandidateId)' in deploy
+    assert 'Join-Path $ProgramRoot "releases\\$CandidateId"' in read(
+        "scripts/asr-release.ps1"
+    )
+    assert "ASR candidate release already exists and is immutable" in deploy
+    assert "$candidateMinimumFreeBytes = 20GB" in deploy
+    assert "AvailableFreeSpace" in deploy
+    assert "requires at least 20 GiB free" in deploy
+    assert '$env:PYTHONDONTWRITEBYTECODE = "1"' in deploy
+    assert 'Set-ProtectedConfigValue -Name "PYTHONDONTWRITEBYTECODE" -Value "1"' in deploy
+    assert "Get-AsrDeploymentContract" in candidate_publish
+    assert "Get-AsrReleaseTextSha256" in candidate_publish
+    assert "Read-AsrReleaseManifest" in candidate_publish
+    assert 'production_services_modified = $false' in candidate_publish
+    assert 'active_release_modified = $false' in candidate_publish
+    assert "Stop-OwnedAsrService" not in candidate_publish
+    assert "Register-AndStartAsrTask" not in candidate_publish
+    assert "Move-Item -LiteralPath $appRoot" not in candidate_publish
+    assert "Move-Item -LiteralPath $venvRoot" not in candidate_publish
+
+    assert "$params.StageCandidate = $true" in workflow
+    assert '$params.CandidateId = "${{ github.run_id }}"' in workflow
+    assert "asr-candidate-${{ github.run_id }}" in workflow
+    assert "faster-whisper must be staged as an immutable candidate" in workflow
+    compaction = workflow.split("  compact-dependency-run:", 1)[1]
+    assert "! (inputs.enable_faster_whisper && ! inputs.activate_service)" in compaction
+
+    assert "CandidateManifestSha256" in start
+    assert "UseActiveRelease" in start
+    assert 'Join-Path $DataRoot "release-state\\active.json"' in start
+    assert "Read-AsrReleaseManifest" in start
+    candidate_branch = start.split("if ($CandidateId) {", 1)[1].split("} else {", 1)[0]
+    assert 'Join-Path $DataRoot "config\\asr.env"' not in candidate_branch
+    assert 'Join-Path $ProgramRoot "venv\\Scripts\\python.exe"' not in candidate_branch

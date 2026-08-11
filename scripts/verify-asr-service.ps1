@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$DataRoot = $env:PRODUCTION_ASR_DATA_ROOT,
+    [string]$ConfigPath = "",
     [string]$AsrUrl = "http://127.0.0.1:8200",
     [string[]]$ExpectedProfiles = @("funasr-sensevoice-small-v1")
 )
@@ -8,7 +9,16 @@ param(
 $ErrorActionPreference = "Stop"
 $expectedAsrVersion = "asr-service/1"
 $expectedGpuVersion = "gpu-activity/1"
-$envFile = Join-Path $DataRoot "config\asr.env"
+$envFile = if ($ConfigPath) {
+    $resolvedConfigRoot = [IO.Path]::GetFullPath((Join-Path $DataRoot "config")).TrimEnd('\')
+    $resolvedConfigPath = [IO.Path]::GetFullPath($ConfigPath)
+    if (-not $resolvedConfigPath.StartsWith($resolvedConfigRoot + '\', [StringComparison]::OrdinalIgnoreCase)) {
+        throw "ASR verification configuration escapes the managed config root"
+    }
+    $resolvedConfigPath
+} else {
+    Join-Path $DataRoot "config\asr.env"
+}
 $senseVoiceProfile = "funasr-sensevoice-small-v1"
 $fasterWhisperProfile = "faster-whisper-large-v3-turbo-v1"
 $expectedIdentity = $ExpectedProfiles -join "`n"

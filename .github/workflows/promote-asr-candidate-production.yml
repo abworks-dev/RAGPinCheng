@@ -1,0 +1,136 @@
+name: Promote Windows ASR Candidate Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: "Full 40-character master SHA represented by the candidate"
+        required: true
+        type: string
+      operation:
+        description: "Validate, promote, or roll back an immutable ASR candidate"
+        required: true
+        default: preflight
+        type: choice
+        options:
+          - preflight
+          - promote
+          - rollback
+      candidate_id:
+        description: "Candidate staging workflow run ID; required except for rollback"
+        required: false
+        type: string
+      candidate_manifest_sha256:
+        description: "Candidate release manifest SHA-256; required except for rollback"
+        required: false
+        type: string
+      activation_id:
+        description: "Original promotion run ID; required only for rollback"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-gpu-exclusive
+  cancel-in-progress: false
+
+jobs:
+  manage-windows:
+    environment: production-asr
+    runs-on: [self-hosted, Windows, X64, asr-production]
+    timeout-minutes: 30
+    steps:
+      - name: Validate immutable revision and candidate identity
+        shell: powershell
+        run: |
+          if ("${{ inputs.commit_sha }}" -notmatch '^[0-9a-fA-F]{40}$') { throw "commit_sha must be a full SHA" }
+          if ("${{ inputs.operation }}" -eq "rollback") {
+            if ("${{ inputs.activation_id }}" -notmatch '^[0-9]{1,20}$') { throw "activation_id is required for rollback" }
+            if ("${{ inputs.candidate_id }}" -or "${{ inputs.candidate_manifest_sha256 }}") { throw "candidate identity is not accepted for rollback" }
+          } else {
+            if ("${{ inputs.commit_sha }}".ToLowerInvariant() -ne "${{ github.sha }}".ToLowerInvariant()) { throw "commit_sha must equal the dispatch revision" }
+            if ("${{ github.ref }}" -ne "refs/heads/master") { throw "candidate promotion must run from master" }
+            if ("${{ inputs.candidate_id }}" -notmatch '^[0-9]{1,20}$') { throw "candidate_id is required" }
+            if ("${{ inputs.candidate_manifest_sha256 }}" -notmatch '^[0-9a-fA-F]{64}$') { throw "candidate_manifest_sha256 is required" }
+            if ("${{ inputs.activation_id }}") { throw "activation_id is accepted only for rollback" }
+          }
+
+      - name: Check out requested revision
+        if: ${{ inputs.operation != 'rollback' }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 1
+
+      - name: Manage immutable ASR candidate
+        shell: powershell
+        env:
+          PRODUCTION_ASR_PROGRAM_ROOT: ${{ vars.PRODUCTION_ASR_PROGRAM_ROOT }}
+          PRODUCTION_ASR_DATA_ROOT: ${{ vars.PRODUCTION_ASR_DATA_ROOT }}
+          PRODUCTION_ASR_BACKUP_ROOT: ${{ vars.PRODUCTION_ASR_BACKUP_ROOT }}
+        run: |
+          $operation = "${{ inputs.operation }}"
+          $activationId = if ($operation -eq "rollback") { "${{ inputs.activation_id }}" } else { "${{ github.run_id }}" }
+          $scriptPath = if ($operation -eq "rollback") {
+            Join-Path $env:PRODUCTION_ASR_BACKUP_ROOT "$activationId\promote-asr-candidate.ps1"
+          } else {
+            "${{ github.workspace }}\scripts\promote-asr-candidate.ps1"
+          }
+          if (-not (Test-Path -LiteralPath $scriptPath -PathType Leaf)) { throw "candidate promotion script is missing" }
+          $params = @{
+            Mode = if ($operation -eq "promote") { "Promote" } elseif ($operation -eq "rollback") { "Rollback" } else { "Preflight" }
+            CommitSha = "${{ inputs.commit_sha }}"
+            ActivationId = $activationId
+          }
+          if ($operation -ne "rollback") {
+            $params.SourceRoot = "${{ github.workspace }}"
+            $params.CandidateId = "${{ inputs.candidate_id }}"
+            $params.CandidateManifestSha256 = "${{ inputs.candidate_manifest_sha256 }}"
+          }
+          & $scriptPath @params
+
+  verify-ubuntu:
+    if: ${{ inputs.operation == 'promote' }}
+    needs: [manage-windows]
+    environment: production-asr
+    runs-on: [self-hosted, Linux, X64, ubuntu, production, app]
+    timeout-minutes: 10
+    steps:
+      - name: Check out requested revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 1
+      - name: Verify promoted ASR candidate from Ubuntu
+        env:
+          ASR_SERVICE_TOKEN: ${{ secrets.ASR_SERVICE_TOKEN }}
+          ASR_ENV_FILE: ${{ vars.PRODUCTION_APP_ENV_FILE }}
+          ASR_SERVICE_URL: ${{ vars.PRODUCTION_ASR_SERVICE_URL }}
+        run: |
+          set -euo pipefail
+          python3 scripts/verify_asr_from_ubuntu.py \
+            --env-file "${ASR_ENV_FILE}" \
+            --asr-url "${ASR_SERVICE_URL}" \
+            --expected-profile faster-whisper-large-v3-turbo-v1 \
+            --expected-profile funasr-sensevoice-small-v1
+
+  rollback-after-cross-node-failure:
+    if: ${{ always() && inputs.operation == 'promote' && needs.manage-windows.result == 'success' && needs.verify-ubuntu.result != 'success' }}
+    needs: [manage-windows, verify-ubuntu]
+    environment: production-asr
+    runs-on: [self-hosted, Windows, X64, asr-production]
+    timeout-minutes: 10
+    steps:
+      - name: Roll back failed candidate promotion
+        shell: powershell
+        env:
+          PRODUCTION_ASR_PROGRAM_ROOT: ${{ vars.PRODUCTION_ASR_PROGRAM_ROOT }}
+          PRODUCTION_ASR_DATA_ROOT: ${{ vars.PRODUCTION_ASR_DATA_ROOT }}
+          PRODUCTION_ASR_BACKUP_ROOT: ${{ vars.PRODUCTION_ASR_BACKUP_ROOT }}
+        run: |
+          $activationId = "${{ github.run_id }}"
+          $scriptPath = Join-Path $env:PRODUCTION_ASR_BACKUP_ROOT "$activationId\promote-asr-candidate.ps1"
+          if (-not (Test-Path -LiteralPath $scriptPath -PathType Leaf)) { throw "candidate rollback script is missing" }
+          & $scriptPath -Mode Rollback -CommitSha "${{ inputs.commit_sha }}" -ActivationId $activationId
