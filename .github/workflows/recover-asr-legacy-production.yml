@@ -1,0 +1,88 @@
+name: Recover Legacy ASR Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: "Full 40-character merged master SHA to recover"
+        required: true
+        type: string
+      confirm_recovery:
+        description: "Confirm legacy ASR task replacement, startup, verification, and automatic rollback"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-gpu-exclusive
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    if: ${{ inputs.confirm_recovery == true }}
+    environment: production-asr
+    runs-on: [self-hosted, Windows, X64, asr-production]
+    timeout-minutes: 20
+    env:
+      PRODUCTION_ASR_PROGRAM_ROOT: ${{ vars.PRODUCTION_ASR_PROGRAM_ROOT }}
+      PRODUCTION_ASR_DATA_ROOT: ${{ vars.PRODUCTION_ASR_DATA_ROOT }}
+      PRODUCTION_ASR_BACKUP_ROOT: ${{ vars.PRODUCTION_ASR_BACKUP_ROOT }}
+    steps:
+      - name: Validate immutable revision and recovery gate
+        shell: powershell
+        run: |
+          if ("${{ inputs.commit_sha }}" -notmatch '^[0-9a-fA-F]{40}$') { throw "commit_sha must be a full SHA" }
+          if ("${{ inputs.commit_sha }}".ToLowerInvariant() -ne "${{ github.sha }}".ToLowerInvariant()) { throw "commit_sha must equal the dispatch revision" }
+          if ("${{ github.ref }}" -ne "refs/heads/master") { throw "legacy ASR recovery must run from master" }
+          if (-not [Convert]::ToBoolean("${{ inputs.confirm_recovery }}")) { throw "confirm_recovery must be enabled" }
+          foreach ($name in @("PRODUCTION_ASR_PROGRAM_ROOT", "PRODUCTION_ASR_DATA_ROOT", "PRODUCTION_ASR_BACKUP_ROOT")) {
+            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) { throw "required production ASR variable is missing" }
+          }
+
+      - name: Check out requested revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 1
+
+      - name: Recover and verify legacy ASR service
+        shell: powershell
+        run: |
+          $report = Join-Path $env:RUNNER_TEMP "asr-legacy-recovery-${{ github.run_id }}.json"
+          & "${{ github.workspace }}\scripts\recover-asr-legacy-production.ps1" `
+            -CommitSha "${{ inputs.commit_sha }}" `
+            -RecoveryId "${{ github.run_id }}" `
+            -SourceRoot "${{ github.workspace }}" `
+            -ReportPath $report
+
+      - name: Publish sanitized recovery summary
+        if: ${{ always() }}
+        shell: powershell
+        run: |
+          $path = Join-Path $env:RUNNER_TEMP "asr-legacy-recovery-${{ github.run_id }}.json"
+          if (Test-Path -LiteralPath $path -PathType Leaf) {
+            $result = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
+            @(
+              "## Legacy ASR production recovery",
+              "",
+              "- Status: ``$($result.status)``",
+              "- Original task action: ``$($result.original_task_action_kind)``",
+              "- Original task state: ``$($result.original_task_state)``",
+              "- Target task action: ``$($result.target_task_action_kind)``",
+              "- Rollback: ``$($result.rollback_status)``"
+            ) -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding UTF8
+          } else {
+            "Recovery ended before sanitized evidence was written; no production mutation passed the backup gate." | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding UTF8
+          }
+
+      - name: Upload sanitized recovery evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: asr-legacy-recovery-${{ github.run_id }}
+          path: ${{ runner.temp }}\asr-legacy-recovery-${{ github.run_id }}.json
+          if-no-files-found: warn
+          retention-days: 14

@@ -37,7 +37,9 @@ $bootstrapScript = Join-Path $bootstrapRoot "start-asr-service.ps1"
 $bootstrapHelper = Join-Path $bootstrapRoot "asr-release.ps1"
 $bootstrapScriptBackup = Join-Path $activationRoot "start-asr-service.ps1.before"
 $bootstrapHelperBackup = Join-Path $activationRoot "asr-release.ps1.before"
-$legacyTaskArguments = '-NoProfile -ExecutionPolicy Bypass -File "{0}"' -f (Join-Path $ProgramRoot "scripts\start-asr-service.ps1")
+$legacyRootlessTaskArguments = '-NoProfile -ExecutionPolicy Bypass -File "{0}"' -f (Join-Path $ProgramRoot "scripts\start-asr-service.ps1")
+$legacyTaskArguments = '-NoProfile -ExecutionPolicy Bypass -File "{0}" -ProgramRoot "{1}" -DataRoot "{2}"' -f `
+    (Join-Path $ProgramRoot "scripts\start-asr-service.ps1"), $ProgramRoot, $DataRoot
 $activeTaskArguments = '-NoProfile -ExecutionPolicy Bypass -File "{0}" -ProgramRoot "{1}" -DataRoot "{2}" -UseActiveRelease' -f $bootstrapScript, $ProgramRoot, $DataRoot
 
 function Read-StrictEnv {
@@ -123,12 +125,12 @@ function Get-CandidateTaskArguments {
 }
 
 function Assert-TaskDefinition {
-    param([Parameter(Mandatory = $true)][object]$Task, [Parameter(Mandatory = $true)][string]$ExpectedArguments)
+    param([Parameter(Mandatory = $true)][object]$Task, [Parameter(Mandatory = $true)][string[]]$ExpectedArguments)
     $actions = @($Task.Actions)
     if (
         $actions.Count -ne 1 -or
         [string]$actions[0].Execute -ne "powershell.exe" -or
-        [string]$actions[0].Arguments -ne $ExpectedArguments -or
+        [string]$actions[0].Arguments -notin $ExpectedArguments -or
         [string]$Task.Principal.UserId -ne "Administrator" -or
         [string]$Task.Principal.LogonType -ne "S4U"
     ) {
@@ -138,6 +140,7 @@ function Assert-TaskDefinition {
 
 function Get-PreviousReleaseContext {
     $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+    $allowedArguments = @()
     if (Test-Path -LiteralPath $activeStatePath -PathType Leaf) {
         if (-not (Test-Path -LiteralPath $bootstrapScript -PathType Leaf) -or -not (Test-Path -LiteralPath $bootstrapHelper -PathType Leaf)) {
             throw "Active ASR release bootstrap is incomplete"
@@ -156,10 +159,12 @@ function Get-PreviousReleaseContext {
         $candidate = [string]$active.candidate_id
     } else {
         $arguments = $legacyTaskArguments
+        $allowedArguments = @($legacyRootlessTaskArguments, $legacyTaskArguments)
         $venvRoot = Join-Path $ProgramRoot "venv"
         $candidate = ""
     }
-    if ($null -ne $task) { Assert-TaskDefinition -Task $task -ExpectedArguments $arguments }
+    if (-not $allowedArguments) { $allowedArguments = @($arguments) }
+    if ($null -ne $task) { Assert-TaskDefinition -Task $task -ExpectedArguments $allowedArguments }
     return [pscustomobject]@{
         task = $task
         task_present = $null -ne $task
@@ -353,6 +358,7 @@ function Invoke-CandidateRollback {
         throw "Candidate rollback previous Scheduled Task identity mismatch"
     }
     $currentTaskArguments = $legacyTaskArguments
+    $currentAllowedTaskArguments = @($legacyRootlessTaskArguments, $legacyTaskArguments)
     $currentListenerVenv = Join-Path $ProgramRoot "venv"
     if (Test-Path -LiteralPath $activeStatePath -PathType Leaf) {
         $currentActive = Get-Content -LiteralPath $activeStatePath -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -384,13 +390,14 @@ function Invoke-CandidateRollback {
             -CandidateId ([string]$currentActive.candidate_id) `
             -ExpectedSha256 ([string]$currentActive.release_manifest_sha256)
         $currentTaskArguments = Get-CandidateTaskArguments -Release $currentRelease
+        $currentAllowedTaskArguments = @($currentTaskArguments)
         $currentListenerVenv = $currentRelease.layout.venv_root
     } elseif ([bool]$state.previous_active_present) {
         throw "Candidate rollback found the previous active release state missing"
     }
     $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
     if ($null -ne $task) {
-        Assert-TaskDefinition -Task $task -ExpectedArguments $currentTaskArguments
+        Assert-TaskDefinition -Task $task -ExpectedArguments $currentAllowedTaskArguments
         if ([string]$task.State -eq "Running") { Stop-ScheduledTask -TaskName $taskName }
     }
     Stop-VerifiedListeners -VenvRoot $currentListenerVenv
