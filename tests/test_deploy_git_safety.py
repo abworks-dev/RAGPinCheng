@@ -119,17 +119,19 @@ class TestDeployGitSafety(unittest.TestCase):
             gpu.index("& git branch -f master $env:DEPLOY_COMMIT_SHA"),
         )
 
-    def test_app_only_emergency_workflow_is_bound_to_the_approved_commit(self):
+    def test_app_only_manual_workflow_uses_the_selected_master_sha(self):
         workflow = self.app_only_workflow
-        approved = "4ed480e47057dc3414ad0ea3bb0e95d2d1a4c833"
 
-        self.assertIn("name: Deploy Production App Emergency", workflow)
+        self.assertIn("name: Deploy Production App Manual", workflow)
         self.assertIn("workflow_dispatch:", workflow)
         self.assertIn("- DEPLOY_APP", workflow)
-        self.assertIn(f"APPROVED_DEPLOY_COMMIT: {approved}", workflow)
-        self.assertIn(f"DEPLOY_COMMIT_SHA: {approved}", workflow)
-        self.assertIn('"${REPOSITORY_HEAD}" = "${APPROVED_DEPLOY_COMMIT}"', workflow)
-        self.assertIn("approved application commit is not an ancestor", workflow)
+        self.assertIn("DEPLOY_COMMIT_SHA: ${{ github.sha }}", workflow)
+        self.assertIn("SELECTED_REF: ${{ github.ref }}", workflow)
+        self.assertIn('"${SELECTED_REF}" = "refs/heads/master"', workflow)
+        self.assertIn('"${REPOSITORY_HEAD}" "${DEPLOY_COMMIT_SHA}"', workflow)
+        self.assertIn("selected master commit is not a fast-forward", workflow)
+        self.assertNotIn("APPROVED_DEPLOY_COMMIT", workflow)
+        self.assertNotIn("4ed480e47057dc3414ad0ea3bb0e95d2d1a4c833", workflow)
         self.assertNotIn("git reset", workflow)
         self.assertNotIn("git branch -f", workflow)
         self.assertNotIn("deploy-gpu.ps1", workflow)
@@ -138,10 +140,16 @@ class TestDeployGitSafety(unittest.TestCase):
     def test_app_only_emergency_workflow_pins_gpu_contract_and_rolls_back_image(self):
         workflow = self.app_only_workflow
 
-        self.assertIn("QUALIFIED_GPU_SOURCE_COMMIT:", workflow)
-        self.assertIn("EXPECTED_GPU_RELEASE_ID: 9b147c448b9b-fa16678de682", workflow)
-        self.assertIn("EXPECTED_GPU_SOURCE_FINGERPRINT:", workflow)
-        self.assertIn("EXPECTED_GPU_LOCK_SHA256:", workflow)
+        self.assertIn('gpu_service/runtime-lock.json', workflow)
+        self.assertIn('get("validation_status", "")', workflow)
+        self.assertIn('get("qualification_run_id", "")', workflow)
+        self.assertIn('get("source_commit", "")', workflow)
+        self.assertIn('get("qualified_source_fingerprint", "")', workflow)
+        self.assertIn('get("qualified_lock_sha256", "")', workflow)
+        self.assertIn("COMPUTED_GPU_FINGERPRINT", workflow)
+        self.assertIn("COMPUTED_LOCK_SHA256", workflow)
+        self.assertIn("EXPECTED_GPU_RELEASE_ID=", workflow)
+        self.assertNotIn("9b147c448b9b-fa16678de682", workflow)
         for path in (
             "src/providers.py",
             "gpu_service/app.py",
