@@ -9,6 +9,9 @@ param(
     [switch]$InstallDependencies,
     [switch]$ActivateService,
     [switch]$EnableFasterWhisper,
+    [switch]$StageCandidate,
+    [string]$CandidateId = "",
+    [string]$CandidateReportPath = "",
     [string]$FasterWhisperQualificationRunId = "",
     [string]$FasterWhisperQualificationCommitSha = "",
     [string]$FasterWhisperRuntimeContractSha256 = ""
@@ -18,6 +21,7 @@ $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "windows-wheel-cache.ps1")
 . (Join-Path $PSScriptRoot "faster-whisper-production-evidence.ps1")
 . (Join-Path $PSScriptRoot "asr-contract.ps1")
+. (Join-Path $PSScriptRoot "asr-release.ps1")
 $taskName = "RAGPinCheng-ASR"
 $serviceStartScript = Join-Path $ProgramRoot "scripts\start-asr-service.ps1"
 $expectedTaskArguments = '-NoProfile -ExecutionPolicy Bypass -File "{0}"' -f $serviceStartScript
@@ -64,6 +68,28 @@ $actualSha = ([string]$actualShaOutput).Trim()
 if ($actualSha -ne $CommitSha.ToLowerInvariant()) {
     throw "Checked-out commit does not match the requested full SHA"
 }
+if ($StageCandidate) {
+    Assert-AsrCandidateId -CandidateId $CandidateId
+    $env:PYTHONDONTWRITEBYTECODE = "1"
+    if ($ActivateService) {
+        throw "ASR candidate staging cannot activate the service"
+    }
+    if (-not $InstallDependencies) {
+        throw "ASR candidate staging requires an isolated venv"
+    }
+    $candidateMinimumFreeBytes = 20GB
+    foreach ($volumeRoot in @(
+        [IO.Path]::GetPathRoot([IO.Path]::GetFullPath($ProgramRoot)),
+        [IO.Path]::GetPathRoot([IO.Path]::GetFullPath($DataRoot))
+    ) | Select-Object -Unique) {
+        $drive = New-Object IO.DriveInfo($volumeRoot)
+        if (-not $drive.IsReady -or [int64]$drive.AvailableFreeSpace -lt $candidateMinimumFreeBytes) {
+            throw "ASR candidate staging requires at least 20 GiB free on each managed volume"
+        }
+    }
+} elseif ($CandidateId -or $CandidateReportPath) {
+    throw "ASR candidate identity is accepted only during candidate staging"
+}
 $fasterWhisperEvidence = $null
 if ($EnableFasterWhisper) {
     if (-not $InstallDependencies) {
@@ -101,14 +127,40 @@ if ($EnableFasterWhisper) {
 
 $appRoot = Join-Path $ProgramRoot "app"
 $venvRoot = Join-Path $ProgramRoot "venv"
-$venvStaging = Join-Path $ProgramRoot ("venv-staging-" + $CommitSha)
+$releaseStagingRoot = if ($StageCandidate) {
+    Join-Path $ProgramRoot ("release-staging-" + $CandidateId)
+} else {
+    ""
+}
+$candidateLayout = if ($StageCandidate) {
+    Get-AsrReleaseLayout -ProgramRoot $ProgramRoot -DataRoot $DataRoot -CandidateId $CandidateId
+} else {
+    $null
+}
+$staging = if ($StageCandidate) {
+    Join-Path $releaseStagingRoot "app"
+} else {
+    Join-Path $ProgramRoot ("app-staging-" + $CommitSha)
+}
+$venvStaging = if ($StageCandidate) {
+    Join-Path $releaseStagingRoot "venv"
+} else {
+    Join-Path $ProgramRoot ("venv-staging-" + $CommitSha)
+}
 $sharedWheelCacheRoot = Join-Path $DataRoot "wheel-cache"
-$dependencyRunRoot = Join-Path $DataRoot ("dependency-runs\funasr-" + $CommitSha)
+$dependencyRunIdentity = if ($StageCandidate) { "candidate-$CandidateId" } else { "funasr-$CommitSha" }
+$dependencyRunRoot = Join-Path $DataRoot ("dependency-runs\" + $dependencyRunIdentity)
 $wheelhouse = Join-Path $dependencyRunRoot "wheelhouse"
 $sharedWheelSeed = Join-Path $dependencyRunRoot "shared-wheel-seed"
 $qualifiedFasterWhisperWheelSeed = Join-Path $dependencyRunRoot "qualified-faster-whisper-wheel-seed"
 $scriptRoot = Join-Path $ProgramRoot "scripts"
 $configRoot = Join-Path $DataRoot "config"
+$activeEnvFile = Join-Path $configRoot "asr.env"
+$candidateConfigStagingRoot = if ($StageCandidate) {
+    Join-Path $configRoot ("release-staging-" + $CandidateId)
+} else {
+    ""
+}
 $configBackupRoot = Join-Path $configRoot "backups"
 $backupRoot = Join-Path $DataRoot "backups"
 foreach ($path in @(
@@ -116,6 +168,8 @@ foreach ($path in @(
     $DataRoot,
     $configRoot,
     $backupRoot,
+    (Join-Path $ProgramRoot "releases"),
+    (Join-Path $configRoot "releases"),
     (Join-Path $DataRoot "models"),
     (Join-Path $DataRoot "spool"),
     (Join-Path $DataRoot "logs"),
@@ -266,11 +320,26 @@ function Wait-AsrHealthy {
     throw "ASR service did not become healthy within 10 minutes"
 }
 
-$staging = Join-Path $ProgramRoot ("app-staging-" + $CommitSha)
-if (Test-Path -LiteralPath $staging) {
-    Move-StagingToBackup -Path $staging -Reason "stale"
+if ($StageCandidate) {
+    if (Test-Path -LiteralPath $candidateLayout.release_root) {
+        throw "ASR candidate release already exists and is immutable"
+    }
+    if (Test-Path -LiteralPath $candidateLayout.config_root) {
+        throw "ASR candidate configuration already exists and is immutable"
+    }
+    if (Test-Path -LiteralPath $releaseStagingRoot) {
+        Move-StagingToBackup -Path $releaseStagingRoot -Reason "stale"
+    }
+    if (Test-Path -LiteralPath $candidateConfigStagingRoot) {
+        Move-StagingToBackup -Path $candidateConfigStagingRoot -Reason "stale"
+    }
+    New-Item -ItemType Directory -Path $staging, $candidateConfigStagingRoot -Force | Out-Null
+} else {
+    if (Test-Path -LiteralPath $staging) {
+        Move-StagingToBackup -Path $staging -Reason "stale"
+    }
+    New-Item -ItemType Directory -Path $staging | Out-Null
 }
-New-Item -ItemType Directory -Path $staging | Out-Null
 foreach ($item in @("asr_service", "src")) {
     Copy-Item -LiteralPath (Join-Path $resolvedSource $item) -Destination $staging -Recurse
 }
@@ -281,16 +350,31 @@ foreach ($requirementsName in @(
 )) {
     Copy-Item -LiteralPath (Join-Path $resolvedSource "asr_service\$requirementsName") -Destination $staging
 }
-Copy-Item -LiteralPath (Join-Path $resolvedSource "scripts\start-asr-service.ps1") -Destination $scriptRoot -Force
-Copy-Item -LiteralPath (Join-Path $resolvedSource "scripts\verify-asr-service.ps1") -Destination $scriptRoot -Force
+if ($StageCandidate) {
+    $candidateScriptRoot = Join-Path $staging "scripts"
+    New-Item -ItemType Directory -Path $candidateScriptRoot | Out-Null
+    foreach ($scriptName in @("start-asr-service.ps1", "verify-asr-service.ps1", "asr-release.ps1")) {
+        Copy-Item -LiteralPath (Join-Path $resolvedSource "scripts\$scriptName") -Destination $candidateScriptRoot
+    }
+} else {
+    Copy-Item -LiteralPath (Join-Path $resolvedSource "scripts\start-asr-service.ps1") -Destination $scriptRoot -Force
+    Copy-Item -LiteralPath (Join-Path $resolvedSource "scripts\verify-asr-service.ps1") -Destination $scriptRoot -Force
+}
 Set-Content -LiteralPath (Join-Path $staging "DEPLOYED_COMMIT") -Value $CommitSha.ToLowerInvariant() -Encoding ascii
 
-$envFile = Join-Path $configRoot "asr.env"
-if (-not (Test-Path -LiteralPath $envFile)) {
+$envFile = if ($StageCandidate) {
+    Join-Path $candidateConfigStagingRoot "asr.env"
+} else {
+    $activeEnvFile
+}
+if ($StageCandidate -and (Test-Path -LiteralPath $activeEnvFile -PathType Leaf)) {
+    Copy-Item -LiteralPath $activeEnvFile -Destination $envFile
+} elseif (-not (Test-Path -LiteralPath $envFile)) {
     Copy-Item -LiteralPath (Join-Path $resolvedSource "asr_service\.env.example") -Destination $envFile
 }
 function Set-ProtectedConfigValue {
     param(
+        [string]$Path = $envFile,
         [string]$Name,
         [string]$Value
     )
@@ -300,7 +384,7 @@ function Set-ProtectedConfigValue {
     if ($Value.Contains("`r") -or $Value.Contains("`n")) {
         throw "$Name must be one line"
     }
-    $lines = Get-Content -LiteralPath $envFile -Encoding UTF8
+    $lines = Get-Content -LiteralPath $Path -Encoding UTF8
     $replaced = $false
     $lines = $lines | ForEach-Object {
         if ($_ -match ("^{0}=" -f [regex]::Escape($Name))) {
@@ -311,12 +395,17 @@ function Set-ProtectedConfigValue {
         }
     }
     if (-not $replaced) { $lines += "$Name=$Value" }
-    Set-Content -LiteralPath $envFile -Value $lines -Encoding utf8
+    Set-Content -LiteralPath $Path -Value $lines -Encoding utf8
 }
 Set-ProtectedConfigValue -Name "ASR_SERVICE_TOKEN" -Value $env:ASR_SERVICE_TOKEN
 Set-ProtectedConfigValue -Name "BGE_PRIORITY_PROBE_TOKEN" -Value $env:BGE_PRIORITY_PROBE_TOKEN
 Set-ProtectedConfigValue -Name "BGE_PRIORITY_PROBE_URL" -Value $env:GPU_SERVICE_ACTIVITY_URL
-& icacls.exe $configRoot `
+if ($StageCandidate) {
+    Set-ProtectedConfigValue -Name "ASR_SERVICE_ENABLED" -Value "false"
+    Set-ProtectedConfigValue -Name "PYTHONDONTWRITEBYTECODE" -Value "1"
+}
+$protectedConfigRoot = if ($StageCandidate) { $candidateConfigStagingRoot } else { $configRoot }
+& icacls.exe $protectedConfigRoot `
     /inheritance:r `
     /grant:r `
     "*S-1-5-32-544:(OI)(CI)F" `
@@ -325,15 +414,17 @@ Set-ProtectedConfigValue -Name "BGE_PRIORITY_PROBE_URL" -Value $env:GPU_SERVICE_
 if ($LASTEXITCODE -ne 0) {
     throw "Unable to protect ASR configuration ACL"
 }
-New-Item -ItemType Directory -Path $configBackupRoot -Force | Out-Null
-& icacls.exe $configBackupRoot `
-    /inheritance:r `
-    /grant:r `
-    "*S-1-5-32-544:(OI)(CI)F" `
-    "*S-1-5-18:(OI)(CI)F" `
-    "Administrator:(OI)(CI)F" | Out-Null
-if ($LASTEXITCODE -ne 0) {
-    throw "Unable to protect ASR configuration backup ACL"
+if (-not $StageCandidate) {
+    New-Item -ItemType Directory -Path $configBackupRoot -Force | Out-Null
+    & icacls.exe $configBackupRoot `
+        /inheritance:r `
+        /grant:r `
+        "*S-1-5-32-544:(OI)(CI)F" `
+        "*S-1-5-18:(OI)(CI)F" `
+        "Administrator:(OI)(CI)F" | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Unable to protect ASR configuration backup ACL"
+    }
 }
 
 if ($InstallDependencies) {
@@ -483,12 +574,119 @@ if ($InstallDependencies) {
             }
         }
     } catch {
-        if (Test-Path -LiteralPath $venvStaging) {
-            Move-StagingToBackup -Path $venvStaging -Reason "failed"
+        if ($StageCandidate) {
+            if (Test-Path -LiteralPath $releaseStagingRoot) {
+                Move-StagingToBackup -Path $releaseStagingRoot -Reason "failed"
+            }
+            if (Test-Path -LiteralPath $candidateConfigStagingRoot) {
+                Move-StagingToBackup -Path $candidateConfigStagingRoot -Reason "failed"
+            }
+        } else {
+            if (Test-Path -LiteralPath $venvStaging) {
+                Move-StagingToBackup -Path $venvStaging -Reason "failed"
+            }
+            Move-StagingToBackup -Path $staging -Reason "failed"
         }
-        Move-StagingToBackup -Path $staging -Reason "failed"
         throw
     }
+}
+if ($StageCandidate) {
+    if ($EnableFasterWhisper) {
+        Set-ProtectedConfigValue `
+            -Name "ASR_FASTER_WHISPER_MODEL_CACHE_ROOT" `
+            -Value $fasterWhisperEvidence.ModelCacheRoot
+        Set-ProtectedConfigValue `
+            -Name "ASR_FASTER_WHISPER_MODEL_MANIFEST_PATH" `
+            -Value $fasterWhisperEvidence.ModelManifestPath
+    }
+    $deploymentContract = Get-AsrDeploymentContract -SourceRoot $resolvedSource -CommitSha $CommitSha
+    $freezeLines = @(& (Join-Path $venvStaging "Scripts\python.exe") -m pip freeze --all)
+    if ($LASTEXITCODE -ne 0 -or $freezeLines.Count -eq 0) {
+        throw "ASR candidate pip freeze identity is unavailable"
+    }
+    $freezeIdentity = (@($freezeLines | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ }) -join "`n")
+    $appFiles = @(
+        Get-ChildItem -LiteralPath $staging -Recurse -File |
+            Sort-Object FullName |
+            ForEach-Object {
+                [ordered]@{
+                    path = $_.FullName.Substring($staging.Length).TrimStart('\').Replace('\', '/')
+                    sha256 = Get-AsrReleaseSha256 -Path $_.FullName
+                    size_bytes = [int64]$_.Length
+                }
+            }
+    )
+    $engines = @()
+    $expectedProfiles = @()
+    if ($EnableFasterWhisper) {
+        $releaseAdapter = Get-AsrReleaseAdmissionAdapter -Engine "faster-whisper"
+        if (-not $releaseAdapter.enabled) {
+            throw "faster-whisper candidate release adapter is not enabled"
+        }
+        $engines += [ordered]@{
+            engine = "faster-whisper"
+            qualification_run_id = [string]$FasterWhisperQualificationRunId
+            qualification_commit_sha = $FasterWhisperQualificationCommitSha.ToLowerInvariant()
+            runtime_contract_sha256 = $FasterWhisperRuntimeContractSha256.ToLowerInvariant()
+        }
+        $expectedProfiles = @($releaseAdapter.expected_profiles)
+    }
+    if ($engines.Count -eq 0) {
+        throw "ASR candidate staging requires at least one admitted engine"
+    }
+    $manifest = [ordered]@{
+        schema_version = "asr-production-release/1"
+        candidate_id = $CandidateId
+        status = "staged"
+        deployment_commit_sha = $CommitSha.ToLowerInvariant()
+        deployment_contract_sha256 = $deploymentContract.deployment_contract_sha256
+        dependency_contract_sha256 = $sharedKey
+        python_freeze_sha256 = Get-AsrReleaseTextSha256 -Text $freezeIdentity
+        engines = $engines
+        expected_profiles = $expectedProfiles
+        app_files = $appFiles
+        created_at_utc = [DateTimeOffset]::UtcNow.ToString("o")
+    }
+    $stagedManifestPath = Join-Path $releaseStagingRoot "release-manifest.json"
+    Write-AsrJsonAtomic -Path $stagedManifestPath -Value $manifest
+    $manifestSha256 = Get-AsrReleaseSha256 -Path $stagedManifestPath
+    try {
+        Move-Item -LiteralPath $candidateConfigStagingRoot -Destination $candidateLayout.config_root
+        Move-Item -LiteralPath $releaseStagingRoot -Destination $candidateLayout.release_root
+        $published = Read-AsrReleaseManifest `
+            -ProgramRoot $ProgramRoot `
+            -DataRoot $DataRoot `
+            -CandidateId $CandidateId `
+            -ExpectedSha256 $manifestSha256
+        if ($CandidateReportPath) {
+            $report = [ordered]@{
+                schema_version = "asr-candidate-staging/1"
+                status = "pass"
+                candidate_id = $CandidateId
+                deployment_commit_sha = $CommitSha.ToLowerInvariant()
+                deployment_contract_sha256 = $deploymentContract.deployment_contract_sha256
+                release_manifest_sha256 = $published.manifest_sha256
+                engines = @($manifest.engines | ForEach-Object { $_.engine })
+                production_services_modified = $false
+                active_release_modified = $false
+            }
+            Write-AsrJsonAtomic -Path $CandidateReportPath -Value $report
+        }
+    } catch {
+        foreach ($path in @(
+            $candidateLayout.release_root,
+            $candidateLayout.config_root,
+            $releaseStagingRoot,
+            $candidateConfigStagingRoot
+        )) {
+            if (Test-Path -LiteralPath $path) {
+                Move-StagingToBackup -Path $path -Reason "failed"
+            }
+        }
+        throw
+    }
+    Write-Host "ASR candidate staged without modifying the active service. CandidateId=$CandidateId ManifestSha256=$manifestSha256"
+    return
 }
 $backup = $null
 $venvBackup = $null

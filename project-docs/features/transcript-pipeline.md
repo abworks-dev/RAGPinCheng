@@ -1,7 +1,7 @@
 # 视频转录链路
 
-- 状态：人工上传/播放链路与多引擎 Phase 5A/5B 应用闭环已实现；faster-whisper R3 资格已通过，生产准入代码已准备但应用 Profile 仍关闭
-- 最后核对：2026-08-10
+- 状态：人工上传/播放链路与多引擎 Phase 5A/5B 应用闭环已实现；faster-whisper R3 资格已通过，生产 candidate 旁路预置与独立 promotion 框架已实现但首次迁移和应用 Profile 仍未启用
+- 最后核对：2026-08-11
 
 ## 用户可观察能力
 
@@ -124,12 +124,20 @@ cache，并输出包含两层 hash 的脱敏 artifact。预检结果目前不自
 
 显式启用 faster-whisper 生产准备时，部署代码绑定持久化 R3 verdict/diagnostic、资格
 run ID、资格 commit、runtime contract、固定 wheel cache 和模型 Manifest；它强制创建
-新的组合 staging venv，下载阶段必须保留全部已资格 wheel，安装阶段仅从完整 wheelhouse
-离线安装，切换前同时验证 SenseVoice 与 faster-whisper 模块来源及模型缓存。模型路径
-写入前备份受保护的 `asr.env`，失败时先恢复应用、venv 和配置，再尝试恢复原服务。启用
-后的本机与 Ubuntu 验证均要求 Profile 顺序严格为 faster-whisper 后 SenseVoice；Ubuntu
-应用侧 `ASR_ENABLED` 仍必须为 `false`。跨节点验证失败后的自动回滚尚未纳入该部署
-workflow，必须在后续生产 R3 方案中明确处理。
+新的组合 candidate venv，下载阶段必须保留全部已资格 wheel，安装阶段仅从完整
+wheelhouse 离线安装，并验证 SenseVoice 与 faster-whisper 模块来源及模型缓存。candidate
+以 workflow run ID 为不可变身份，应用、venv、受 ACL 保护的独立配置和 release manifest
+分别发布到版本化目录；manifest 绑定 deployment contract、qualification identity、wheel
+依赖身份、`pip freeze` 身份及应用文件 hash。写入前要求每个受管卷至少有 20 GiB 可用
+空间。旁路预置不读写 active release、不停止或
+注册 Scheduled Task，也不自动执行 dependency compaction。
+
+candidate promotion 由独立手动 workflow 执行，使用 manifest SHA-256 重新验证目录、
+reparse-point、应用文件、Python 环境、模型缓存和当前 task 所有权；promotion 才将 candidate
+配置启用、停止经验证的旧 listener、写入原子 active state 并启动 candidate。任何本机或
+Ubuntu 跨节点验证失败都会使用受保护的 activation state 恢复旧 task action、active state
+和 candidate 配置并重启旧 release。首次生产迁移尚未执行；在迁移前当前固定 `app/venv`
+槽位继续作为 legacy release，不能把代码就绪描述为生产启用。
 
 ## 入口与调用链
 
@@ -290,7 +298,8 @@ workflow，必须在后续生产 R3 方案中明确处理。
 - 第一阶段只支持 MP4 格式，不支持其他视频容器；
 - 自动稿按 Canonical 起止时间精确同步；旧人工稿仅有起始时间，结束时间按下一段起点推断，最后一段持续到视频结束；
 - SenseVoice 短媒体自动转录已完成生产验收，但候选稿发布/Qdrant 正式可见性 E2E
-  尚未执行；faster-whisper 已完成隔离 R3 资格，但尚未完成生产部署和生产流量验收；
+  尚未执行；faster-whisper 已完成隔离 R3 资格和 candidate 框架代码，首次生产旁路预置、
+  legacy release 迁移和生产流量验收仍未执行；
 - 当前唯一允许新建任务的自动 Profile 仍是 experimental SenseVoice；
   faster-whisper、Qwen3-ASR 与 WhisperX experimental Profile 可见但 admission 为
   disabled；尚无

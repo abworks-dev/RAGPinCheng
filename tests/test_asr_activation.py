@@ -215,6 +215,7 @@ def test_activation_workflow_is_manual_safe_by_default_and_cross_node_gated():
     assert "commit_sha must equal the workflow dispatch revision" in workflow
     assert '"${{ github.sha }}"' in workflow
     assert "environment: production-asr" in workflow
+    assert "group: production-gpu-exclusive" in workflow
     assert "runs-on: [self-hosted, Windows, X64, asr-production]" in workflow
     assert "runs-on: [self-hosted, Linux, X64, ubuntu, production, app]" in workflow
     assert "needs.verify-ubuntu.result != 'success'" in workflow
@@ -319,3 +320,66 @@ def test_ubuntu_verifier_never_outputs_or_serializes_token():
     assert "expected_token" not in result_block
     assert "print(expected_token" not in script
     assert "print(configured_token" not in script
+
+
+def test_candidate_promotion_is_manual_identity_bound_and_cross_node_gated():
+    workflow = read(".github/workflows/promote-asr-candidate-production.yml")
+
+    assert "workflow_dispatch:" in workflow
+    assert "default: preflight" in workflow
+    assert "candidate_manifest_sha256" in workflow
+    assert "candidate_id" in workflow
+    assert "group: production-gpu-exclusive" in workflow
+    assert "runs-on: [self-hosted, Windows, X64, asr-production]" in workflow
+    assert "runs-on: [self-hosted, Linux, X64, ubuntu, production, app]" in workflow
+    assert "needs.verify-ubuntu.result != 'success'" in workflow
+    assert "Roll back failed candidate promotion" in workflow
+    assert "--expected-profile faster-whisper-large-v3-turbo-v1" in workflow
+    assert "--expected-profile funasr-sensevoice-small-v1" in workflow
+    assert "push:" not in workflow
+    assert "pull_request:" not in workflow
+
+
+def test_candidate_promotion_preserves_legacy_release_and_rolls_back_fail_closed():
+    script = read("scripts/promote-asr-candidate.ps1")
+    lowered = script.lower()
+
+    assert 'ValidateSet("Preflight", "Promote", "Rollback")' in script
+    assert "Read-AsrReleaseManifest" in script
+    assert "ASR candidate Python environment identity mismatch" in script
+    assert "Assert-TaskDefinition" in script
+    assert "Refusing to modify an unexpected RAGPinCheng-ASR" in script
+    assert "Refusing to stop an unexpected process listening on TCP 8200" in script
+    assert "candidate-asr.env.before" in script
+    assert "active.json.before" in script
+    assert "previous_task_arguments" in script
+    assert "previous_candidate_id" in script
+    assert 'Join-Path $ProgramRoot "bootstrap"' in script
+    assert '"-UseActiveRelease"' not in script
+    assert "-UseActiveRelease' -f" in script
+    assert "previous_bootstrap_script_present" in script
+    assert "previous_bootstrap_helper_present" in script
+    assert "unexpected active release transition" in script
+    assert "Candidate rollback backup set is incomplete" in script
+    assert "previous active release identity mismatch" in script
+    assert "previous Scheduled Task identity mismatch" in script
+    assert "unexpected active release manifest" in script
+    assert "previous active release state missing" in script
+    assert "[string]$state.commit_sha -ne $CommitSha.ToLowerInvariant()" in script
+    assert "Read-AsrReleaseManifest" in script.split("function Invoke-CandidateRollback", 1)[1]
+    assert "Copy-Item -LiteralPath $candidateConfigBackup" in script
+    assert "Register-AndStartTask -Arguments ([string]$state.previous_task_arguments)" in script
+    assert "Automatic candidate rollback failed" in script
+    assert script.index("Stop-OwnedService -Context $previous") < script.index(
+        "Write-AsrJsonAtomic -Path $activeStatePath"
+    )
+    assert script.index("Write-AsrJsonAtomic -Path $activeStatePath") < script.index(
+        "Register-AndStartTask -Arguments $candidateArguments"
+    )
+    task_action = next(
+        line for line in script.splitlines() if "New-ScheduledTaskAction" in line
+    )
+    assert "TOKEN" not in task_action.upper()
+    assert "remove-item" not in lowered
+    assert "snapshot_download" not in lowered
+    assert "pip install" not in lowered

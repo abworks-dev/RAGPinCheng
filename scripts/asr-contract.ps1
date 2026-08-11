@@ -68,7 +68,22 @@ function Get-AsrProductionAdmissionAdapter {
 
 function Get-AsrDeploymentContract {
     param([Parameter(Mandatory = $true)][string]$SourceRoot, [Parameter(Mandatory = $true)][string]$CommitSha)
-    $paths = @("scripts/asr-contract.ps1", "scripts/deploy-asr.ps1", "scripts/faster-whisper-production-evidence.ps1", "scripts/preflight-asr-deployment.ps1", "scripts/windows-wheel-cache.ps1", ".github/workflows/deploy-asr-production.yml", ".github/workflows/preflight-asr-production.yml")
+    $paths = @(
+        "scripts/asr-contract.ps1",
+        "scripts/asr-release.ps1",
+        "scripts/activate-asr-production.ps1",
+        "scripts/deploy-asr.ps1",
+        "scripts/faster-whisper-production-evidence.ps1",
+        "scripts/preflight-asr-deployment.ps1",
+        "scripts/promote-asr-candidate.ps1",
+        "scripts/start-asr-service.ps1",
+        "scripts/verify-asr-service.ps1",
+        "scripts/windows-wheel-cache.ps1",
+        ".github/workflows/deploy-asr-production.yml",
+        ".github/workflows/activate-asr-production.yml",
+        ".github/workflows/preflight-asr-production.yml",
+        ".github/workflows/promote-asr-candidate-production.yml"
+    )
     $files = @($paths | Sort-Object | ForEach-Object { [ordered]@{ path = $_; git_blob_sha = Get-AsrGitBlobId -SourceRoot $SourceRoot -CommitSha $CommitSha -Path $_ } })
     $manifest = [ordered]@{ schema_version = "asr-deployment-contract/1"; files = $files }
     return [pscustomobject][ordered]@{ schema_version = "asr-deployment-contract/1"; source_commit_sha = $CommitSha.ToLowerInvariant(); deployment_contract_sha256 = Get-AsrContractSha256 -Text ($manifest | ConvertTo-Json -Depth 8 -Compress); manifest = $manifest }
