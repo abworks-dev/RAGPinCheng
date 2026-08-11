@@ -61,6 +61,7 @@ $SavedEnvironment = @{}
 $PreTaskSnapshot = $null
 $PreFirewallSnapshot = $null
 $PreProductionCapabilities = $null
+$ExpectedProductionProfiles = @()
 $BaselineMemoryMiB = 0
 $PeakMemoryMiB = 0
 $PeakUtilization = 0
@@ -505,6 +506,101 @@ function Invoke-AuthenticatedJson {
     return Invoke-RestMethod -Method Get -Uri $Uri -Headers @{
         Authorization = "Bearer $Token"
     } -TimeoutSec $TimeoutSec
+}
+
+function Get-ManagedAsrServiceToken {
+    param([Parameter(Mandatory = $true)][string]$Root)
+    $envFile = Join-Path $Root "config\asr.env"
+    if (-not (Test-Path -LiteralPath $envFile -PathType Leaf)) {
+        throw "Production ASR environment file is missing"
+    }
+    $seenNames = @{}
+    $serviceToken = ""
+    foreach ($line in Get-Content -LiteralPath $envFile -Encoding UTF8) {
+        $trimmed = $line.Trim()
+        if (-not $trimmed -or $trimmed.StartsWith("#")) { continue }
+        if ($trimmed -notmatch '^([A-Z][A-Z0-9_]*)=(.*)$') {
+            throw "Production ASR environment file contains an invalid entry"
+        }
+        $name = $Matches[1]
+        if ($seenNames.ContainsKey($name)) {
+            throw "Production ASR environment file contains a duplicate key"
+        }
+        $seenNames[$name] = $true
+        if ($name -eq "ASR_SERVICE_TOKEN") {
+            $serviceToken = $Matches[2]
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($serviceToken)) {
+        throw "Production ASR service token is unavailable"
+    }
+    return $serviceToken
+}
+
+function Get-PinnedProductionAsrCapabilities {
+    param(
+        [Parameter(Mandatory = $true)][string]$Root,
+        [Parameter(Mandatory = $true)][string]$AsrUrl
+    )
+    $serviceToken = Get-ManagedAsrServiceToken -Root $Root
+    $capabilities = Invoke-AuthenticatedJson `
+        -Uri "$AsrUrl/v1/capabilities" `
+        -Token $serviceToken `
+        -TimeoutSec 120
+    $actualProperties = @($capabilities.PSObject.Properties.Name | Sort-Object)
+    $expectedProperties = @(
+        "api_version",
+        "max_input_bytes",
+        "max_upload_part_bytes",
+        "service_profiles"
+    )
+    if (($actualProperties -join "`n") -ne ($expectedProperties -join "`n")) {
+        throw "Production ASR capabilities contain an unexpected field set"
+    }
+    if ([string]$capabilities.api_version -ne "asr-service/1") {
+        throw "Production ASR capabilities use an unexpected API version"
+    }
+    $profiles = [string[]]@($capabilities.service_profiles | ForEach-Object { [string]$_ })
+    $profileIdentity = $profiles -join "`n"
+    $senseVoiceProfile = "funasr-sensevoice-small-v1"
+    $fasterWhisperProfile = "faster-whisper-large-v3-turbo-v1"
+    if ($profileIdentity -notin @(
+        $senseVoiceProfile,
+        "$fasterWhisperProfile`n$senseVoiceProfile"
+    )) {
+        throw "Production ASR capabilities do not match a pinned profile contract"
+    }
+    return $capabilities
+}
+
+function ConvertTo-PowerShellSingleQuotedLiteral {
+    param([Parameter(Mandatory = $true)][string]$Value)
+    return "'" + $Value.Replace("'", "''") + "'"
+}
+
+function New-AsrVerifierArguments {
+    param(
+        [Parameter(Mandatory = $true)][string]$VerifierPath,
+        [Parameter(Mandatory = $true)][string]$Root,
+        [Parameter(Mandatory = $true)][string]$AsrUrl,
+        [Parameter(Mandatory = $true)][string[]]$ExpectedProfiles
+    )
+    if ($ExpectedProfiles.Count -eq 0) {
+        throw "Production ASR verifier requires pinned profiles"
+    }
+    $profileLiterals = @(
+        $ExpectedProfiles | ForEach-Object { ConvertTo-PowerShellSingleQuotedLiteral -Value $_ }
+    ) -join ","
+    $command = "& {0} -DataRoot {1} -AsrUrl {2} -ExpectedProfiles @({3})" -f
+        (ConvertTo-PowerShellSingleQuotedLiteral -Value $VerifierPath),
+        (ConvertTo-PowerShellSingleQuotedLiteral -Value $Root),
+        (ConvertTo-PowerShellSingleQuotedLiteral -Value $AsrUrl),
+        $profileLiterals
+    $encodedCommand = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
+    return [string[]]@(
+        "-NoProfile", "-ExecutionPolicy", "Bypass",
+        "-EncodedCommand", $encodedCommand
+    )
 }
 
 function Assert-BgeIdle {
@@ -1757,22 +1853,23 @@ try {
     [void](Assert-BgeIdle)
 
     $PreflightFailureStage = "production_asr_contract"
+    $PreProductionCapabilities = Get-PinnedProductionAsrCapabilities `
+        -Root $DataRoot `
+        -AsrUrl $ProductionAsrUrl
+    $ExpectedProductionProfiles = [string[]]@($PreProductionCapabilities.service_profiles)
+    Write-JsonFile `
+        -Path (Join-Path $EvidenceRoot "production-capabilities-before.json") `
+        -Value $PreProductionCapabilities
     $PreflightUseExternalResult = $true
     Invoke-External `
         -FilePath "powershell.exe" `
-        -Arguments @(
-            "-NoProfile", "-ExecutionPolicy", "Bypass",
-            "-File", (Join-Path $ResolvedSource "scripts\verify-asr-service.ps1"),
-            "-DataRoot", $DataRoot,
-            "-AsrUrl", $ProductionAsrUrl
-        ) `
+        -Arguments (New-AsrVerifierArguments `
+            -VerifierPath (Join-Path $ResolvedSource "scripts\verify-asr-service.ps1") `
+            -Root $DataRoot `
+            -AsrUrl $ProductionAsrUrl `
+            -ExpectedProfiles $ExpectedProductionProfiles) `
         -LogPath (Join-Path $LogRoot "production-asr-verification-before.log")
     $PreflightUseExternalResult = $false
-    $PreProductionCapabilities = [ordered]@{
-        api_version = "asr-service/1"
-        service_profiles = @("funasr-sensevoice-small-v1")
-    }
-    Write-JsonFile -Path (Join-Path $EvidenceRoot "production-capabilities-before.json") -Value $PreProductionCapabilities
 
     $PreflightFailureStage = "sample_manifest_presence"
     if (-not (Test-Path -LiteralPath $SampleManifest -PathType Leaf)) {
@@ -2325,12 +2422,11 @@ print('qualification-module-origins-verified')
     }
     Invoke-External `
         -FilePath "powershell.exe" `
-        -Arguments @(
-            "-NoProfile", "-ExecutionPolicy", "Bypass",
-            "-File", (Join-Path $ResolvedSource "scripts\verify-asr-service.ps1"),
-            "-DataRoot", $DataRoot,
-            "-AsrUrl", $ProductionAsrUrl
-        ) `
+        -Arguments (New-AsrVerifierArguments `
+            -VerifierPath (Join-Path $ResolvedSource "scripts\verify-asr-service.ps1") `
+            -Root $DataRoot `
+            -AsrUrl $ProductionAsrUrl `
+            -ExpectedProfiles $ExpectedProductionProfiles) `
         -LogPath (Join-Path $LogRoot "production-asr-verification-after.log")
     Invoke-External `
         -FilePath $VenvPython `

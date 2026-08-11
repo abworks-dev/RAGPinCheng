@@ -1544,6 +1544,49 @@ def test_qwen3_asr_qualification_emits_sanitized_preflight_diagnosis():
     assert "Write-SanitizedPreflightFailure" in failure_handler
 
 
+def test_qwen3_asr_qualification_pins_the_detected_production_profile_contract():
+    script = read("scripts/qualify-qwen3-asr-production.ps1")
+    token_reader = script.split("function Get-ManagedAsrServiceToken", 1)[1].split(
+        "function Get-PinnedProductionAsrCapabilities", 1
+    )[0]
+    capability_reader = script.split(
+        "function Get-PinnedProductionAsrCapabilities", 1
+    )[1].split("function ConvertTo-PowerShellSingleQuotedLiteral", 1)[0]
+    verifier_arguments = script.split("function New-AsrVerifierArguments", 1)[1].split(
+        "function Assert-BgeIdle", 1
+    )[0]
+    preflight = script.split(
+        '$PreflightFailureStage = "production_asr_contract"', 1
+    )[1].split('$PreflightFailureStage = "sample_manifest_presence"', 1)[0]
+    postflight = script.split("$PostFirewallSnapshot = Get-FirewallSnapshot", 1)[1].split(
+        "Invoke-External `\n        -FilePath $VenvPython", 1
+    )[0]
+
+    assert '"funasr-sensevoice-small-v1"' in capability_reader
+    assert '"faster-whisper-large-v3-turbo-v1"' in capability_reader
+    assert '$profileIdentity -notin @(' in capability_reader
+    assert '"$fasterWhisperProfile`n$senseVoiceProfile"' in capability_reader
+    assert "do not match a pinned profile contract" in capability_reader
+    assert '$name -eq "ASR_SERVICE_TOKEN"' in token_reader
+    assert "$seenNames[$name] = $true" in token_reader
+    assert "$serviceToken = $Matches[2]" in token_reader
+    assert "$values[$name]" not in token_reader
+    assert "Get-ManagedAsrServiceToken -Root $Root" in capability_reader
+    assert "-Token $serviceToken" in capability_reader
+    assert "ASR_SERVICE_TOKEN" not in verifier_arguments
+    assert '"-EncodedCommand", $encodedCommand' in verifier_arguments
+    assert "-ExpectedProfiles @({3})" in verifier_arguments
+    assert (
+        "$ExpectedProductionProfiles = [string[]]@($PreProductionCapabilities.service_profiles)"
+        in preflight
+    )
+    assert "New-AsrVerifierArguments `" in preflight
+    assert "-ExpectedProfiles $ExpectedProductionProfiles" in preflight
+    assert "New-AsrVerifierArguments `" in postflight
+    assert "-ExpectedProfiles $ExpectedProductionProfiles" in postflight
+    assert 'service_profiles = @("funasr-sensevoice-small-v1")' not in script
+
+
 def test_qwen3_asr_qualification_emits_sanitized_dependency_diagnosis():
     script = read("scripts/qualify-qwen3-asr-production.ps1")
     diagnostic_section = script.split(
