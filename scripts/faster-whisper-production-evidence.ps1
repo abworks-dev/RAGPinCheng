@@ -125,8 +125,8 @@ function Read-QualifiedFasterWhisperWheelCache {
         $manifest.key_material.python_cache_tag -ne "cpython-311" -or
         $manifest.key_material.platform_machine -ne "amd64" -or
         $manifest.key_material.platform_system -ne "windows" -or
-        $manifest.key_material.torch_version -ne "2.7.0+cu128" -or
-        $manifest.key_material.torchaudio_version -ne "2.7.0+cu128" -or
+        $manifest.key_material.torch_version -ne "2.8.0+cu128" -or
+        $manifest.key_material.torchaudio_version -ne "2.8.0+cu128" -or
         $manifest.key_material.cuda_channel -ne "cu128" -or
         [string]$manifest.key_material.production_freeze_sha256 -notmatch '^[0-9a-f]{64}$'
     ) {
@@ -493,9 +493,9 @@ if ctranslate2.get_cuda_device_count() <= 0:
     raise RuntimeError("ctranslate2 CUDA device unavailable")
 if "float16" not in ctranslate2.get_supported_compute_types("cuda"):
     raise RuntimeError("ctranslate2 CUDA FP16 unavailable")
-if not torch.__version__.startswith("2.7.0+cu128") or torch.version.cuda != "12.8":
+if not torch.__version__.startswith("2.8.0+cu128") or torch.version.cuda != "12.8":
     raise RuntimeError("torch cu128 version mismatch")
-if not torchaudio.__version__.startswith("2.7.0+cu128"):
+if not torchaudio.__version__.startswith("2.8.0+cu128"):
     raise RuntimeError("torchaudio cu128 version mismatch")
 status = validate_faster_whisper_cache(Path(sys.argv[1]), Path(sys.argv[2]))
 if not status.available:

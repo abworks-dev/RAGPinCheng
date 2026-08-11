@@ -1,6 +1,6 @@
 # 视频转录链路
 
-- 状态：人工上传/播放链路与多引擎 Phase 5A/5B 应用闭环已实现；faster-whisper R3 资格已通过，生产 candidate 旁路预置与独立 promotion 框架已实现但首次迁移和应用 Profile 仍未启用
+- 状态：人工上传/播放链路与多引擎 Phase 5A/5B 应用闭环已实现；faster-whisper R3 资格曾通过，WhisperX 组合 candidate R2 接线已实现但新依赖基线尚未重跑 R3；首次迁移和应用 Profile 仍未启用
 - 最后核对：2026-08-11
 
 ## 用户可观察能力
@@ -50,9 +50,9 @@ Phase 5A/5B 已接通版本列表、只读 Markdown 预览、人工审核、显�
 - 正式可见性唯一读取 `app.sqlite.media_transcript_heads.current_version_id`；Qdrant recall 和 Parent expansion 使用同一快照，损坏/缺失 head 对 versioned transcript fail closed，legacy/普通文档继续可见；
 - 普通索引与 publication 索引共用现有单 worker/单队列，publication job 支持幂等恢复与失败状态持久化。
 - Profile catalog 现包含已启用的 experimental SenseVoice，以及准入关闭的
-  experimental faster-whisper 和 Qwen3-ASR；三者复用同一 Remote Provider 与唯一
+  experimental faster-whisper、Qwen3-ASR 和 WhisperX；四者复用同一 Remote Provider 与唯一
   Candidate → Canonical 结果流；
-- ASR service 注册三个固定 service Profile；faster-whisper 或 Qwen3-ASR
+- ASR service 注册四个固定 service Profile；faster-whisper、Qwen3-ASR 或 WhisperX
   缓存/依赖缺失时仅相应 Profile 不可用，不阻止现有 SenseVoice 服务启动；
 - faster-whisper adapter 固定
   `dropbox-dash/faster-whisper-large-v3-turbo@0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf`
@@ -113,19 +113,26 @@ workflow 对本次 run 生成收缩审计；只有任务成功且
 （固定模型 revision 与明确源码文件的 Git blob 身份），`deployment_contract_sha256`
 是部署/预检行为闭包。两者都不依赖 Windows 工作树的 CRLF 字节。旧 R3 只能在当前
 部署的同引擎 runtime contract 完全一致时复用，资格记录的 source commit 仍须可审计；
-不能再仅凭完整 master SHA 相等或不相等判断。当前仅 faster-whisper 具备已启用的生产
-admission adapter；Qwen3-ASR 与 WhisperX 的通用契约会被部署预检明确 fail closed，不能
-据此进入生产预置。
+不能再仅凭完整 master SHA 相等或不相等判断。faster-whisper 与 WhisperX 具备已启用的
+生产 admission adapter；Qwen3-ASR 的通用契约仍被部署预检明确 fail closed。WhisperX
+candidate 必须同时提交同一部署 revision 对应的 faster-whisper 与 WhisperX R3 身份，
+不得用单引擎资格替换当前已准入的 faster-whisper 能力。
 
-手动 `Preflight ASR Production Deployment` workflow 只在 Windows runner temp 下创建
-验证 wheelhouse 和 venv，读取资格证据与模型缓存并验证在线解析、离线安装、`pip check`
+手动 `Preflight ASR Production Deployment` workflow 按 engine 选择 faster-whisper 或
+WhisperX evidence adapter，只在 Windows runner temp 下创建验证 wheelhouse 和 venv，
+读取资格证据与模型缓存并验证在线解析、离线安装、`pip check`
 和 runtime；它不修改生产 app/venv/config、Scheduled Task、服务、模型缓存或共享 wheel
 cache，并输出包含两层 hash 的脱敏 artifact。预检结果目前不自动触发或授权部署。
 
 显式启用 faster-whisper 生产准备时，部署代码绑定持久化 R3 verdict/diagnostic、资格
-run ID、资格 commit、runtime contract、固定 wheel cache 和模型 Manifest；它强制创建
-新的组合 candidate venv，下载阶段必须保留全部已资格 wheel，安装阶段仅从完整
-wheelhouse 离线安装，并验证 SenseVoice 与 faster-whisper 模块来源及模型缓存。candidate
+run ID、资格 commit、runtime contract、固定 wheel cache 和模型 Manifest。WhisperX
+candidate 额外绑定 WhisperX verdict、wheel cache、ASR/中文 aligner 双模型 Manifest，
+并固定使用兼容 WhisperX 3.8.6 的 Torch/Torchaudio 2.8 cu128 与 NumPy 2.x 组合环境；
+faster-whisper 的新资格也必须绑定相同 Torch 基线。部署强制创建新的组合 candidate venv，
+下载阶段必须保留两引擎全部已资格 wheel，安装阶段仅从完整 wheelhouse 离线安装，并验证
+SenseVoice、faster-whisper 与 WhisperX 模块来源及模型缓存。三 Profile 顺序固定为
+`faster-whisper-large-v3-turbo-v1`、`funasr-sensevoice-small-v1`、
+`whisperx-large-v3-zh-align-v1`。candidate
 以 workflow run ID 为不可变身份，应用、venv、受 ACL 保护的独立配置和 release manifest
 分别发布到版本化目录；manifest 绑定 deployment contract、qualification identity、wheel
 依赖身份、`pip freeze` 身份及应用文件 hash。写入前要求每个受管卷至少有 20 GiB 可用
@@ -300,6 +307,9 @@ Ubuntu 跨节点验证失败都会使用受保护的 activation state 恢复旧 
 - SenseVoice 短媒体自动转录已完成生产验收，但候选稿发布/Qdrant 正式可见性 E2E
   尚未执行；faster-whisper 已完成隔离 R3 资格和 candidate 框架代码，首次生产旁路预置、
   legacy release 迁移和生产流量验收仍未执行；
+- WhisperX 已具备组合 candidate 的 R2 接线，但 Torch/NumPy 新基线合并后仍须在同一
+  master SHA 分别重跑 faster-whisper 与 WhisperX R3，再执行只读部署预检和旁路 candidate
+  staging；当前没有 WhisperX candidate、promotion、首次推理或显存共存验收结论；
 - 当前唯一允许新建任务的自动 Profile 仍是 experimental SenseVoice；
   faster-whisper、Qwen3-ASR 与 WhisperX experimental Profile 可见但 admission 为
   disabled；尚无
