@@ -411,20 +411,49 @@ jobs:
             echo "ERROR: current backend image identity is missing"
             exit 1
           }
+          ROLLBACK_IMAGE_TAG="pincheng-rag-backend:app-only-rollback-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          docker tag "${OLD_IMAGE_ID}" "${ROLLBACK_IMAGE_TAG}"
+          ROLLBACK_IMAGE_ID="$(docker image inspect "${ROLLBACK_IMAGE_TAG}" --format '{{.Id}}')"
+          [ "${ROLLBACK_IMAGE_ID}" = "${OLD_IMAGE_ID}" ] || {
+            echo "ERROR: rollback backend image could not be retained"
+            exit 1
+          }
           printf '%s\n' "${OLD_IMAGE_ID}" > "${BACKUP_PATH}/backend-image.txt"
-          echo "APP_ONLY_BACKUP status=complete path=${BACKUP_PATH}"
+          echo "APP_ONLY_BACKUP status=complete path=${BACKUP_PATH} rollback_image=retained"
 
           rollback_backend() {
             echo "APP_ONLY_ROLLBACK status=starting"
             export TRANSCRIPTION_ADMITTED_PROFILE_IDS="${PREVIOUS_TRANSCRIPTION_ADMITTED_PROFILE_IDS}"
-            docker tag "${OLD_IMAGE_ID}" pincheng-rag-backend:latest
-            "${COMPOSE[@]}" up -d --no-deps backend
+            if ! docker tag "${ROLLBACK_IMAGE_TAG}" pincheng-rag-backend:latest; then
+              echo "APP_ONLY_ROLLBACK status=failed stage=restore-image-tag"
+              return 1
+            fi
+            if ! "${COMPOSE[@]}" up -d --no-deps --force-recreate backend; then
+              echo "APP_ONLY_ROLLBACK status=failed stage=recreate-backend"
+              return 1
+            fi
             for ATTEMPT in $(seq 1 36); do
-              CONTAINER_ID="$("${COMPOSE[@]}" ps -q backend)"
+              if ! CONTAINER_ID="$("${COMPOSE[@]}" ps -q backend)" || [ -z "${CONTAINER_ID}" ]; then
+                sleep 5
+                continue
+              fi
+              RUNNING_IMAGE_ID="$(docker inspect --format '{{.Image}}' "${CONTAINER_ID}" 2>/dev/null || true)"
               HEALTH_STATUS="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "${CONTAINER_ID}" 2>/dev/null || true)"
               if [ "${HEALTH_STATUS}" = "healthy" ] && \
+                [ "${RUNNING_IMAGE_ID}" = "${OLD_IMAGE_ID}" ] && \
                 curl -fsS --connect-timeout 5 --max-time 10 \
                   http://localhost/api/health >/dev/null 2>&1; then
+                if ! RUNNING_ADMISSION="$("${COMPOSE[@]}" exec -T backend python -c \
+                  'from src.config import TRANSCRIPTION_ADMITTED_PROFILE_IDS; print(",".join(TRANSCRIPTION_ADMITTED_PROFILE_IDS))')"; then
+                  echo "APP_ONLY_ROLLBACK status=failed stage=verify-admission"
+                  return 1
+                fi
+                if [ "${RUNNING_ADMISSION}" != "${PREVIOUS_TRANSCRIPTION_ADMITTED_PROFILE_IDS}" ]; then
+                  echo "APP_ONLY_ROLLBACK status=failed stage=verify-admission"
+                  return 1
+                fi
+                docker image rm "${ROLLBACK_IMAGE_TAG}" >/dev/null 2>&1 || \
+                  echo "WARNING: retained rollback tag could not be removed"
                 echo "APP_ONLY_ROLLBACK status=complete image=${OLD_IMAGE_ID}"
                 return 0
               fi
@@ -481,3 +510,5 @@ jobs:
             echo "ERROR: App-only deployment failed strict verification"
             exit 1
           fi
+          docker image rm "${ROLLBACK_IMAGE_TAG}" >/dev/null 2>&1 || \
+            echo "WARNING: retained rollback tag could not be removed"

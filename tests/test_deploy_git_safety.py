@@ -166,7 +166,12 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertIn('assert d.get("result", {}).get("name")', workflow)
         self.assertIn("--max-time 120", workflow)
         self.assertIn("flock -n 9", workflow)
-        self.assertIn("docker tag \"${OLD_IMAGE_ID}\"", workflow)
+        self.assertIn('ROLLBACK_IMAGE_TAG="pincheng-rag-backend:app-only-rollback-', workflow)
+        self.assertIn('docker tag "${OLD_IMAGE_ID}" "${ROLLBACK_IMAGE_TAG}"', workflow)
+        self.assertIn('docker tag "${ROLLBACK_IMAGE_TAG}" pincheng-rag-backend:latest', workflow)
+        self.assertIn("--force-recreate backend", workflow)
+        self.assertIn('[ "${RUNNING_IMAGE_ID}" = "${OLD_IMAGE_ID}" ]', workflow)
+        self.assertIn("stage=verify-admission", workflow)
         self.assertIn("APP_ONLY_ROLLBACK status=complete", workflow)
 
     def test_app_only_workflow_can_transactionally_activate_faster_whisper(self):
@@ -189,6 +194,20 @@ class TestDeployGitSafety(unittest.TestCase):
             "TRANSCRIPTION_ADMITTED_PROFILE_IDS: ${TRANSCRIPTION_ADMITTED_PROFILE_IDS:-",
             compose,
         )
+        for name in (
+            "ASR_ENABLED",
+            "ASR_SERVICE_URL",
+            "ASR_SERVICE_TOKEN",
+            "ASR_CONNECT_TIMEOUT_SECONDS",
+            "ASR_REQUEST_TIMEOUT_SECONDS",
+            "ASR_JOB_TIMEOUT_SECONDS",
+            "ASR_POLL_INTERVAL_MS",
+            "ASR_UPLOAD_PART_BYTES",
+            "ASR_EXPECTED_API_VERSION",
+            "ASR_FFMPEG_PATH",
+            "ASR_MEDIA_PREP_TIMEOUT_SECONDS",
+        ):
+            self.assertIn(f"{name}: ${{{name}:-", compose)
         self.assertIn("APP_ONLY_DEPLOY status=success", workflow)
         self.assertNotIn("GPU_SERVICE_TOKEN: ${{ vars.", workflow)
         for production_workflow in (self.workflow, self.emergency_workflow):
