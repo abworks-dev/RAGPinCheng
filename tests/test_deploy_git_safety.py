@@ -14,6 +14,9 @@ class TestDeployGitSafety(unittest.TestCase):
         cls.workflow = (ROOT / ".github/workflows/deploy-production.yml").read_text(
             encoding="utf-8"
         )
+        cls.emergency_workflow = (
+            ROOT / ".github/workflows/deploy-production-emergency.yml"
+        ).read_text(encoding="utf-8")
         cls.windows = (ROOT / "scripts/deploy-gpu.ps1").read_text(encoding="utf-8")
         cls.promote = (ROOT / "scripts/promote-gpu-runtime.ps1").read_text(
             encoding="utf-8"
@@ -34,6 +37,24 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertGreaterEqual(self.workflow.count("DEPLOY_COMMIT_SHA:"), 2)
         self.assertGreaterEqual(self.workflow.count("DEPLOY_COMMIT_SHA: ${{ github.sha }}"), 2)
         self.assertNotIn("github.event.workflow_run", self.workflow)
+
+    def test_emergency_workflow_fails_visibly_without_explicit_confirmation(self):
+        self.assertIn("name: Deploy Production Emergency", self.emergency_workflow)
+        self.assertIn("workflow_dispatch:", self.emergency_workflow)
+        self.assertIn("default: CANCEL", self.emergency_workflow)
+        self.assertIn("- DEPLOY", self.emergency_workflow)
+        self.assertNotIn("if: ${{ inputs.confirm_production", self.emergency_workflow)
+        self.assertIn("$env:CONFIRM_PRODUCTION -ne 'DEPLOY'", self.emergency_workflow)
+
+    def test_emergency_workflow_is_master_only_and_preserves_deploy_order(self):
+        self.assertIn("$env:SELECTED_REF -ne 'refs/heads/master'", self.emergency_workflow)
+        self.assertGreaterEqual(
+            self.emergency_workflow.count("DEPLOY_COMMIT_SHA: ${{ github.sha }}"), 2
+        )
+        self.assertIn("needs: [deploy-gpu]", self.emergency_workflow)
+        self.assertIn("production-gpu-exclusive", self.emergency_workflow)
+        self.assertIn("production-app-deployment", self.emergency_workflow)
+        self.assertNotIn("cleanup-after-deploy", self.emergency_workflow)
 
     def test_scripts_require_full_commit_and_verify_head(self):
         self.assertIn("ValidatePattern('^[0-9a-fA-F]{40}$')", self.windows)
