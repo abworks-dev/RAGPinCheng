@@ -79,6 +79,20 @@ services:
       GPU_SERVICE_TOKEN: ${GPU_SERVICE_TOKEN:-}
       EMBED_PROVIDER: ${EMBED_PROVIDER:-remote}
       RERANK_PROVIDER: ${RERANK_PROVIDER:-remote}
+      # --env-file selects the production interpolation source, while env_file above
+      # remains the local repository file. Keep every ASR client setting explicit so
+      # production does not silently fall back to src/config.py defaults.
+      ASR_ENABLED: ${ASR_ENABLED:-false}
+      ASR_SERVICE_URL: ${ASR_SERVICE_URL:-http://127.0.0.1:8200}
+      ASR_SERVICE_TOKEN: ${ASR_SERVICE_TOKEN:-}
+      ASR_CONNECT_TIMEOUT_SECONDS: ${ASR_CONNECT_TIMEOUT_SECONDS:-10}
+      ASR_REQUEST_TIMEOUT_SECONDS: ${ASR_REQUEST_TIMEOUT_SECONDS:-60}
+      ASR_JOB_TIMEOUT_SECONDS: ${ASR_JOB_TIMEOUT_SECONDS:-7200}
+      ASR_POLL_INTERVAL_MS: ${ASR_POLL_INTERVAL_MS:-1000}
+      ASR_UPLOAD_PART_BYTES: ${ASR_UPLOAD_PART_BYTES:-8388608}
+      ASR_EXPECTED_API_VERSION: ${ASR_EXPECTED_API_VERSION:-asr-service/1}
+      ASR_FFMPEG_PATH: ${ASR_FFMPEG_PATH:-ffmpeg}
+      ASR_MEDIA_PREP_TIMEOUT_SECONDS: ${ASR_MEDIA_PREP_TIMEOUT_SECONDS:-1800}
       # Business admission is application-owned and does not alter ASR runtime identity.
       TRANSCRIPTION_ADMITTED_PROFILE_IDS: ${TRANSCRIPTION_ADMITTED_PROFILE_IDS:-funasr-sensevoice-zh-experimental-v1}
       # LibreOffice 转换服务地址 — 在同一 Docker 网络内，通过服务名访问。
