@@ -63,6 +63,8 @@ $SavedEnvironment = @{}
 $PreTaskSnapshot = $null
 $PreFirewallSnapshot = $null
 $PreProductionCapabilities = $null
+$ExpectedProductionProfiles = @()
+$ProductionAsrConfigPath = ""
 $BaselineMemoryMiB = 0
 $PeakMemoryMiB = 0
 $PeakUtilization = 0
@@ -339,7 +341,8 @@ function Write-PipFreeze {
     param(
         [Parameter(Mandatory = $true)][string]$PythonPath,
         [Parameter(Mandatory = $true)][string]$OutputPath,
-        [Parameter(Mandatory = $true)][string]$ErrorLogPath
+        [Parameter(Mandatory = $true)][string]$ErrorLogPath,
+        [string[]]$ExcludedPackages = @()
     )
     $lines = @(& $PythonPath -m pip freeze --all 2> $ErrorLogPath)
     if ($LASTEXITCODE -ne 0) {
@@ -355,9 +358,22 @@ function Write-PipFreeze {
     ) {
         throw "pip freeze returned an invalid constraint set"
     }
+    $excluded = @{}
+    foreach ($name in $ExcludedPackages) {
+        $excluded[$name.ToLowerInvariant().Replace("_", "-")] = $true
+    }
+    $constraintLines = @($lines | Where-Object {
+        $line = [string]$_
+        if ($line -notmatch '^([A-Za-z0-9_.-]+)==') { return $true }
+        $name = $Matches[1].ToLowerInvariant().Replace("_", "-")
+        return -not $excluded.ContainsKey($name)
+    })
+    if ($constraintLines.Count -eq 0) {
+        throw "pip freeze returned an empty constraint set"
+    }
     [System.IO.File]::WriteAllLines(
         $OutputPath,
-        [string[]]$lines,
+        [string[]]$constraintLines,
         (New-Object System.Text.UTF8Encoding($false))
     )
 }
@@ -487,6 +503,149 @@ function Invoke-AuthenticatedJson {
     return Invoke-RestMethod -Method Get -Uri $Uri -Headers @{
         Authorization = "Bearer $Token"
     } -TimeoutSec $TimeoutSec
+}
+
+function Resolve-ProductionAsrConfigPath {
+    param(
+        [Parameter(Mandatory = $true)][string]$Root,
+        [Parameter(Mandatory = $true)][object[]]$TaskSnapshot
+    )
+    $asrTasks = @($TaskSnapshot | Where-Object { [string]$_.task_name -eq "RAGPinCheng-ASR" })
+    if ($asrTasks.Count -ne 1) {
+        throw "Production ASR Scheduled Task snapshot is invalid"
+    }
+    $actions = @($asrTasks[0].actions)
+    if ($actions.Count -ne 1) {
+        throw "Production ASR Scheduled Task action is invalid"
+    }
+    $arguments = [string]$actions[0].arguments
+    if ($arguments -notmatch '(?i)(?:^|\s)-UseActiveRelease(?:\s|$)') {
+        return Join-Path $Root "config\asr.env"
+    }
+
+    $activeStatePath = Join-Path $Root "release-state\active.json"
+    if (-not (Test-Path -LiteralPath $activeStatePath -PathType Leaf)) {
+        throw "Active ASR release state is missing"
+    }
+    try {
+        $active = Get-Content -LiteralPath $activeStatePath -Raw -Encoding UTF8 | ConvertFrom-Json
+    } catch {
+        throw "Active ASR release state is invalid JSON"
+    }
+    if (
+        [string]$active.schema_version -ne "asr-active-release/1" -or
+        [string]$active.candidate_id -notmatch '^[0-9]{1,20}$' -or
+        [string]$active.release_manifest_sha256 -notmatch '^[0-9a-f]{64}$'
+    ) {
+        throw "Active ASR release state is invalid"
+    }
+    $releaseConfigRoot = [IO.Path]::GetFullPath((Join-Path $Root "config\releases")).TrimEnd('\')
+    $configPath = [IO.Path]::GetFullPath(
+        (Join-Path $releaseConfigRoot "$([string]$active.candidate_id)\asr.env")
+    )
+    if (-not $configPath.StartsWith($releaseConfigRoot + '\', [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Active ASR release configuration escapes the managed root"
+    }
+    if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
+        throw "Active ASR release environment file is missing"
+    }
+    return $configPath
+}
+
+function Get-ManagedAsrServiceToken {
+    param([Parameter(Mandatory = $true)][string]$ConfigPath)
+    if (-not (Test-Path -LiteralPath $ConfigPath -PathType Leaf)) {
+        throw "Production ASR environment file is missing"
+    }
+    $seenNames = @{}
+    $serviceToken = ""
+    foreach ($line in Get-Content -LiteralPath $ConfigPath -Encoding UTF8) {
+        $trimmed = $line.Trim()
+        if (-not $trimmed -or $trimmed.StartsWith("#")) { continue }
+        if ($trimmed -notmatch '^([A-Z][A-Z0-9_]*)=(.*)$') {
+            throw "Production ASR environment file contains an invalid entry"
+        }
+        $name = $Matches[1]
+        if ($seenNames.ContainsKey($name)) {
+            throw "Production ASR environment file contains a duplicate key"
+        }
+        $seenNames[$name] = $true
+        if ($name -eq "ASR_SERVICE_TOKEN") {
+            $serviceToken = $Matches[2]
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($serviceToken)) {
+        throw "Production ASR service token is unavailable"
+    }
+    return $serviceToken
+}
+
+function Get-PinnedProductionAsrCapabilities {
+    param(
+        [Parameter(Mandatory = $true)][string]$ConfigPath,
+        [Parameter(Mandatory = $true)][string]$AsrUrl
+    )
+    $serviceToken = Get-ManagedAsrServiceToken -ConfigPath $ConfigPath
+    $capabilities = Invoke-AuthenticatedJson `
+        -Uri "$AsrUrl/v1/capabilities" `
+        -Token $serviceToken `
+        -TimeoutSec 120
+    $actualProperties = @($capabilities.PSObject.Properties.Name | Sort-Object)
+    $expectedProperties = @(
+        "api_version",
+        "max_input_bytes",
+        "max_upload_part_bytes",
+        "service_profiles"
+    )
+    if (($actualProperties -join "`n") -ne ($expectedProperties -join "`n")) {
+        throw "Production ASR capabilities contain an unexpected field set"
+    }
+    if ([string]$capabilities.api_version -ne "asr-service/1") {
+        throw "Production ASR capabilities use an unexpected API version"
+    }
+    $profiles = [string[]]@($capabilities.service_profiles | ForEach-Object { [string]$_ })
+    $profileIdentity = $profiles -join "`n"
+    $senseVoiceProfile = "funasr-sensevoice-small-v1"
+    $fasterWhisperProfile = "faster-whisper-large-v3-turbo-v1"
+    if ($profileIdentity -notin @(
+        $senseVoiceProfile,
+        "$fasterWhisperProfile`n$senseVoiceProfile"
+    )) {
+        throw "Production ASR capabilities do not match a pinned profile contract"
+    }
+    return $capabilities
+}
+
+function ConvertTo-PowerShellSingleQuotedLiteral {
+    param([Parameter(Mandatory = $true)][string]$Value)
+    return "'" + $Value.Replace("'", "''") + "'"
+}
+
+function New-AsrVerifierArguments {
+    param(
+        [Parameter(Mandatory = $true)][string]$VerifierPath,
+        [Parameter(Mandatory = $true)][string]$Root,
+        [Parameter(Mandatory = $true)][string]$ConfigPath,
+        [Parameter(Mandatory = $true)][string]$AsrUrl,
+        [Parameter(Mandatory = $true)][string[]]$ExpectedProfiles
+    )
+    if ($ExpectedProfiles.Count -eq 0) {
+        throw "Production ASR verifier requires pinned profiles"
+    }
+    $profileLiterals = @(
+        $ExpectedProfiles | ForEach-Object { ConvertTo-PowerShellSingleQuotedLiteral -Value $_ }
+    ) -join ","
+    $command = "& {0} -DataRoot {1} -ConfigPath {2} -AsrUrl {3} -ExpectedProfiles @({4})" -f
+        (ConvertTo-PowerShellSingleQuotedLiteral -Value $VerifierPath),
+        (ConvertTo-PowerShellSingleQuotedLiteral -Value $Root),
+        (ConvertTo-PowerShellSingleQuotedLiteral -Value $ConfigPath),
+        (ConvertTo-PowerShellSingleQuotedLiteral -Value $AsrUrl),
+        $profileLiterals
+    $encodedCommand = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
+    return [string[]]@(
+        "-NoProfile", "-ExecutionPolicy", "Bypass",
+        "-EncodedCommand", $encodedCommand
+    )
 }
 
 function Assert-BgeIdle {
@@ -730,8 +889,8 @@ function Get-WheelCacheKey {
         platform_machine = ([string]$pythonIdentity[2]).Trim().ToLowerInvariant()
         platform_system = ([string]$pythonIdentity[3]).Trim().ToLowerInvariant()
         pip_version = ([string]$pipVersion[0]).Trim()
-        torch_version = "2.7.0+cu128"
-        torchaudio_version = "2.7.0+cu128"
+        torch_version = "2.8.0+cu128"
+        torchaudio_version = "2.8.0+cu128"
         cuda_channel = "cu128"
         production_freeze_sha256 = Get-Sha256 -Path $ProductionFreezePath
         requirements_sha256 = @(
@@ -1779,21 +1938,26 @@ try {
     }
     [void](Assert-BgeIdle)
 
+    $ProductionAsrConfigPath = Resolve-ProductionAsrConfigPath `
+        -Root $DataRoot `
+        -TaskSnapshot $PreTaskSnapshot
+    $PreProductionCapabilities = Get-PinnedProductionAsrCapabilities `
+        -ConfigPath $ProductionAsrConfigPath `
+        -AsrUrl $ProductionAsrUrl
+    $ExpectedProductionProfiles = [string[]]@($PreProductionCapabilities.service_profiles)
+    Write-JsonFile `
+        -Path (Join-Path $EvidenceRoot "production-capabilities-before.json") `
+        -Value $PreProductionCapabilities
     Invoke-External `
         -FilePath "powershell.exe" `
-        -Arguments @(
-            "-NoProfile", "-ExecutionPolicy", "Bypass",
-            "-File", (Join-Path $ResolvedSource "scripts\verify-asr-service.ps1"),
-            "-DataRoot", $DataRoot,
-            "-AsrUrl", $ProductionAsrUrl
-        ) `
+        -Arguments (New-AsrVerifierArguments `
+            -VerifierPath (Join-Path $ResolvedSource "scripts\verify-asr-service.ps1") `
+            -Root $DataRoot `
+            -ConfigPath $ProductionAsrConfigPath `
+            -AsrUrl $ProductionAsrUrl `
+            -ExpectedProfiles $ExpectedProductionProfiles) `
         -LogPath (Join-Path $LogRoot "production-asr-verification-before.log")
     Write-QualificationProgress -Stage "preflight_sample_contract"
-    $PreProductionCapabilities = [ordered]@{
-        api_version = "asr-service/1"
-        service_profiles = @("funasr-sensevoice-small-v1")
-    }
-    Write-JsonFile -Path (Join-Path $EvidenceRoot "production-capabilities-before.json") -Value $PreProductionCapabilities
 
     if (-not (Test-Path -LiteralPath $SampleManifest -PathType Leaf)) {
         throw "Fixed eight-sample Manifest is missing"
@@ -1850,7 +2014,8 @@ try {
     Write-PipFreeze `
         -PythonPath $ProductionPython `
         -OutputPath (Join-Path $EvidenceRoot "production-freeze.txt") `
-        -ErrorLogPath $DependencyFailureLog
+        -ErrorLogPath $DependencyFailureLog `
+        -ExcludedPackages @("torch", "torchaudio")
     $DependencyFailureStage = "production_pip_check"
     $DependencyFailureOperation = "production_pip_check_command"
     $DependencyFailureLog = Join-Path $EvidenceRoot "production-pip-check.txt"
@@ -1893,8 +2058,8 @@ try {
         $wheelPath.Replace("\", "/")
     }
     $CombinedRequirementLines = @(
-        "torch==2.7.0+cu128",
-        "torchaudio==2.7.0+cu128",
+        "torch==2.8.0+cu128",
+        "torchaudio==2.8.0+cu128",
         "-r $RequirementsSource/asr_service/requirements-service-core.txt",
         "-r $RequirementsSource/asr_service/requirements-faster-whisper.txt"
     )
@@ -2109,9 +2274,9 @@ if ctranslate2.__version__ != '4.8.1':
     raise RuntimeError('ctranslate2 version mismatch')
 if importlib.metadata.version('faster-whisper') != '1.2.1':
     raise RuntimeError('faster-whisper version mismatch')
-if not torch.__version__.startswith('2.7.0+cu128'):
+if not torch.__version__.startswith('2.8.0+cu128'):
     raise RuntimeError('torch cu128 version mismatch')
-if not torchaudio.__version__.startswith('2.7.0+cu128'):
+if not torchaudio.__version__.startswith('2.8.0+cu128'):
     raise RuntimeError('torchaudio cu128 version mismatch')
 print('qualification-module-origins-verified')
 "@
@@ -2435,14 +2600,23 @@ print('qualification-module-origins-verified')
     ) {
         throw "Production Scheduled Task or firewall state changed"
     }
+    $PostProductionAsrConfigPath = Resolve-ProductionAsrConfigPath `
+        -Root $DataRoot `
+        -TaskSnapshot $PostTaskSnapshot
+    if (-not $PostProductionAsrConfigPath.Equals(
+        $ProductionAsrConfigPath,
+        [StringComparison]::OrdinalIgnoreCase
+    )) {
+        throw "Production ASR active release changed"
+    }
     Invoke-External `
         -FilePath "powershell.exe" `
-        -Arguments @(
-            "-NoProfile", "-ExecutionPolicy", "Bypass",
-            "-File", (Join-Path $ResolvedSource "scripts\verify-asr-service.ps1"),
-            "-DataRoot", $DataRoot,
-            "-AsrUrl", $ProductionAsrUrl
-        ) `
+        -Arguments (New-AsrVerifierArguments `
+            -VerifierPath (Join-Path $ResolvedSource "scripts\verify-asr-service.ps1") `
+            -Root $DataRoot `
+            -ConfigPath $ProductionAsrConfigPath `
+            -AsrUrl $ProductionAsrUrl `
+            -ExpectedProfiles $ExpectedProductionProfiles) `
         -LogPath (Join-Path $LogRoot "production-asr-verification-after.log")
     Invoke-External `
         -FilePath $VenvPython `

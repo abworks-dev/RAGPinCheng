@@ -39,6 +39,7 @@ jobs:
     env:
       PRODUCTION_ASR_DATA_ROOT: ${{ vars.PRODUCTION_ASR_DATA_ROOT }}
       PRODUCTION_FASTER_WHISPER_QUALIFICATION_ROOT: ${{ vars.PRODUCTION_FASTER_WHISPER_QUALIFICATION_ROOT }}
+      PRODUCTION_WHISPERX_ROOT: ${{ vars.PRODUCTION_WHISPERX_ROOT }}
       PRODUCTION_NO_PROXY: ${{ vars.PRODUCTION_NO_PROXY }}
     steps:
       - name: Validate immutable revision and identities

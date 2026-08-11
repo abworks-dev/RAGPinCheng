@@ -166,10 +166,64 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertIn('assert d.get("result", {}).get("name")', workflow)
         self.assertIn("--max-time 120", workflow)
         self.assertIn("flock -n 9", workflow)
-        self.assertIn("docker tag \"${OLD_IMAGE_ID}\"", workflow)
+        self.assertIn('ROLLBACK_IMAGE_TAG="pincheng-rag-backend:app-only-rollback-', workflow)
+        self.assertIn('docker tag "${OLD_IMAGE_ID}" "${ROLLBACK_IMAGE_TAG}"', workflow)
+        self.assertIn('docker tag "${ROLLBACK_IMAGE_TAG}" pincheng-rag-backend:latest', workflow)
+        self.assertIn("--force-recreate backend", workflow)
+        self.assertIn('[ "${RUNNING_IMAGE_ID}" = "${OLD_IMAGE_ID}" ]', workflow)
+        self.assertIn("stage=verify-admission", workflow)
         self.assertIn("APP_ONLY_ROLLBACK status=complete", workflow)
+
+    def test_app_only_workflow_can_transactionally_activate_faster_whisper(self):
+        workflow = self.app_only_workflow
+
+        self.assertIn("transcription_admission:", workflow)
+        self.assertIn("ENABLE_FASTER_WHISPER", workflow)
+        self.assertIn("CONFIGURED_TRANSCRIPTION_ADMITTED_PROFILE_IDS", workflow)
+        self.assertIn("PREVIOUS_TRANSCRIPTION_ADMITTED_PROFILE_IDS", workflow)
+        self.assertIn("PREVIOUS_ASR_ENABLED", workflow)
+        self.assertIn("export ASR_ENABLED=true", workflow)
+        self.assertIn('export ASR_ENABLED="${PREVIOUS_ASR_ENABLED}"', workflow)
+        self.assertIn("EXPECTED_ROLLBACK_ASR_STATE", workflow)
+        self.assertIn("source=workflow-environment", workflow)
+        self.assertNotIn("configure-transcription-admission.py", workflow)
+        self.assertIn("verify_transcription_admission", workflow)
+        self.assertIn("DEPLOY_STATUS=$?", workflow)
+        self.assertIn('if [ "${DEPLOY_STATUS}" -ne 0 ]; then', workflow)
+        self.assertNotIn("if ! (", workflow)
+        self.assertIn('states[FASTER_WHISPER_PROFILE_ID] == ("enabled", "available")', workflow)
+
+        compose = (ROOT / "docker" / "docker-compose.yml").read_text(encoding="utf-8")
+        self.assertIn(
+            "TRANSCRIPTION_ADMITTED_PROFILE_IDS: ${TRANSCRIPTION_ADMITTED_PROFILE_IDS:-",
+            compose,
+        )
+        for name in (
+            "ASR_ENABLED",
+            "ASR_SERVICE_URL",
+            "ASR_SERVICE_TOKEN",
+            "ASR_CONNECT_TIMEOUT_SECONDS",
+            "ASR_REQUEST_TIMEOUT_SECONDS",
+            "ASR_JOB_TIMEOUT_SECONDS",
+            "ASR_POLL_INTERVAL_MS",
+            "ASR_UPLOAD_PART_BYTES",
+            "ASR_EXPECTED_API_VERSION",
+            "ASR_FFMPEG_PATH",
+            "ASR_MEDIA_PREP_TIMEOUT_SECONDS",
+        ):
+            self.assertIn(f"{name}: ${{{name}:-", compose)
         self.assertIn("APP_ONLY_DEPLOY status=success", workflow)
         self.assertNotIn("GPU_SERVICE_TOKEN: ${{ vars.", workflow)
+        for production_workflow in (self.workflow, self.emergency_workflow):
+            self.assertIn(
+                "ASR_ENABLED: ${{ vars.ASR_ENABLED }}",
+                production_workflow,
+            )
+            self.assertIn(
+                "TRANSCRIPTION_ADMITTED_PROFILE_IDS: "
+                "${{ vars.TRANSCRIPTION_ADMITTED_PROFILE_IDS }}",
+                production_workflow,
+            )
 
     def test_scripts_require_full_commit_and_verify_head(self):
         self.assertIn("ValidatePattern('^[0-9a-fA-F]{40}$')", self.windows)

@@ -11,6 +11,14 @@ on:
         options:
           - CANCEL
           - DEPLOY_APP
+      transcription_admission:
+        description: Preserve admission or activate the qualified faster-whisper Profile
+        required: true
+        default: PRESERVE_CURRENT
+        type: choice
+        options:
+          - PRESERVE_CURRENT
+          - ENABLE_FASTER_WHISPER
 
 permissions:
   contents: read
@@ -36,6 +44,8 @@ jobs:
       GIT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       SELECTED_REF: ${{ github.ref }}
       CONFIRM_PRODUCTION: ${{ inputs.confirm_production }}
+      TRANSCRIPTION_ADMISSION_ACTION: ${{ inputs.transcription_admission }}
+      CONFIGURED_TRANSCRIPTION_ADMITTED_PROFILE_IDS: ${{ vars.TRANSCRIPTION_ADMITTED_PROFILE_IDS }}
       DEPLOY_COMMIT_SHA: ${{ github.sha }}
     steps:
       - name: Back up, deploy, and strictly verify the selected App commit
@@ -46,6 +56,20 @@ jobs:
             echo "ERROR: App-only production deployment was not confirmed"
             exit 1
           }
+          DEFAULT_TRANSCRIPTION_ADMITTED_PROFILE_IDS="funasr-sensevoice-zh-experimental-v1"
+          PREVIOUS_TRANSCRIPTION_ADMITTED_PROFILE_IDS="${CONFIGURED_TRANSCRIPTION_ADMITTED_PROFILE_IDS:-${DEFAULT_TRANSCRIPTION_ADMITTED_PROFILE_IDS}}"
+          case "${TRANSCRIPTION_ADMISSION_ACTION}" in
+            PRESERVE_CURRENT)
+              export TRANSCRIPTION_ADMITTED_PROFILE_IDS="${PREVIOUS_TRANSCRIPTION_ADMITTED_PROFILE_IDS}"
+              ;;
+            ENABLE_FASTER_WHISPER)
+              export TRANSCRIPTION_ADMITTED_PROFILE_IDS="funasr-sensevoice-zh-experimental-v1,faster-whisper-zh-experimental-v1"
+              ;;
+            *)
+              echo "ERROR: unsupported transcription admission action"
+              exit 1
+              ;;
+          esac
           [ "${SELECTED_REF}" = "refs/heads/master" ] || {
             echo "ERROR: manual App deployment only accepts master"
             exit 1
@@ -207,6 +231,20 @@ jobs:
           COMPOSE=(docker compose -p ragpincheng-prod \
             -f "${REPO_PATH}/docker/docker-compose.yml" \
             -f "${COMPOSE_OVERRIDE}" --env-file "${COMPOSE_ENV_FILE}")
+          PREVIOUS_ASR_ENABLED="$("${COMPOSE[@]}" exec -T backend python -c \
+            'from src.config import ASR_ENABLED; print("true" if ASR_ENABLED else "false")')"
+          case "${PREVIOUS_ASR_ENABLED}" in
+            true|false) ;;
+            *)
+              echo "ERROR: current backend ASR enable state is invalid"
+              exit 1
+              ;;
+          esac
+          if [ "${TRANSCRIPTION_ADMISSION_ACTION}" = "PRESERVE_CURRENT" ]; then
+            export ASR_ENABLED="${PREVIOUS_ASR_ENABLED}"
+          else
+            export ASR_ENABLED=true
+          fi
 
           verify_gpu_identity() {
             curl -fsS --connect-timeout 10 --max-time 30 \
@@ -265,6 +303,79 @@ jobs:
           PY
           }
 
+          verify_transcription_admission() {
+            [ "${TRANSCRIPTION_ADMISSION_ACTION}" = "ENABLE_FASTER_WHISPER" ] || return 0
+            "${COMPOSE[@]}" exec -T backend python - <<'PY'
+          from api.transcription_runtime import (
+              RemoteAsrProviderFactory,
+              build_phase4_profile_catalog,
+              build_phase4_profile_registry,
+          )
+          from src.config import (
+              ASR_CONNECT_TIMEOUT_SECONDS,
+              ASR_ENABLED,
+              ASR_EXPECTED_API_VERSION,
+              ASR_POLL_INTERVAL_MS,
+              ASR_REQUEST_TIMEOUT_SECONDS,
+              ASR_SERVICE_TOKEN,
+              ASR_SERVICE_URL,
+              ASR_UPLOAD_PART_BYTES,
+              TRANSCRIPTION_ADMITTED_PROFILE_IDS,
+          )
+          from src.transcription.profile import ProfileOperation
+          from src.transcription.profile_catalog import (
+              FASTER_WHISPER_PROFILE_ID,
+              FASTER_WHISPER_PROVIDER_KEY,
+              FUNASR_SENSEVOICE_PROFILE_ID,
+              QWEN3_ASR_PROFILE_ID,
+              WHISPERX_PROFILE_ID,
+          )
+
+          expected = {
+              FASTER_WHISPER_PROFILE_ID,
+              FUNASR_SENSEVOICE_PROFILE_ID,
+          }
+          assert ASR_ENABLED is True
+          assert set(TRANSCRIPTION_ADMITTED_PROFILE_IDS) == expected
+          capabilities = RemoteAsrProviderFactory(
+              ASR_SERVICE_URL,
+              ASR_SERVICE_TOKEN,
+              ASR_CONNECT_TIMEOUT_SECONDS,
+              ASR_REQUEST_TIMEOUT_SECONDS,
+              FASTER_WHISPER_PROVIDER_KEY,
+          ).capabilities()
+          entries = build_phase4_profile_catalog(
+              service_enabled=ASR_ENABLED,
+              service_healthy=True,
+              service_capabilities=capabilities,
+              admitted_profile_ids=TRANSCRIPTION_ADMITTED_PROFILE_IDS,
+          )
+          states = {
+              entry.profile.profile_id: (
+                  entry.profile.admission.value,
+                  entry.availability.value,
+              )
+              for entry in entries
+          }
+          assert states[FASTER_WHISPER_PROFILE_ID] == ("enabled", "available")
+          assert states[FUNASR_SENSEVOICE_PROFILE_ID] == ("enabled", "available")
+          assert states[QWEN3_ASR_PROFILE_ID][0] == "disabled"
+          assert states[WHISPERX_PROFILE_ID][0] == "disabled"
+          registry = build_phase4_profile_registry(
+              upload_part_bytes=ASR_UPLOAD_PART_BYTES,
+              poll_interval_ms=ASR_POLL_INTERVAL_MS,
+              expected_api_version=ASR_EXPECTED_API_VERSION,
+              admitted_profile_ids=TRANSCRIPTION_ADMITTED_PROFILE_IDS,
+          )
+          resolved = registry.resolve_profile(
+              FASTER_WHISPER_PROFILE_ID,
+              ProfileOperation.new_attempt,
+          )
+          assert resolved.profile.profile_id == FASTER_WHISPER_PROFILE_ID
+          print("TRANSCRIPTION_ADMISSION status=verified profile=faster-whisper")
+          PY
+          }
+
           verify_gpu_identity
           verify_gpu_inference
           echo "APP_ONLY_GPU status=validated release=${EXPECTED_GPU_RELEASE_ID}"
@@ -314,19 +425,51 @@ jobs:
             echo "ERROR: current backend image identity is missing"
             exit 1
           }
+          ROLLBACK_IMAGE_TAG="pincheng-rag-backend:app-only-rollback-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          docker tag "${OLD_IMAGE_ID}" "${ROLLBACK_IMAGE_TAG}"
+          ROLLBACK_IMAGE_ID="$(docker image inspect "${ROLLBACK_IMAGE_TAG}" --format '{{.Id}}')"
+          [ "${ROLLBACK_IMAGE_ID}" = "${OLD_IMAGE_ID}" ] || {
+            echo "ERROR: rollback backend image could not be retained"
+            exit 1
+          }
           printf '%s\n' "${OLD_IMAGE_ID}" > "${BACKUP_PATH}/backend-image.txt"
-          echo "APP_ONLY_BACKUP status=complete path=${BACKUP_PATH}"
+          echo "APP_ONLY_BACKUP status=complete path=${BACKUP_PATH} rollback_image=retained"
 
           rollback_backend() {
             echo "APP_ONLY_ROLLBACK status=starting"
-            docker tag "${OLD_IMAGE_ID}" pincheng-rag-backend:latest
-            "${COMPOSE[@]}" up -d --no-deps backend
+            export ASR_ENABLED="${PREVIOUS_ASR_ENABLED}"
+            export TRANSCRIPTION_ADMITTED_PROFILE_IDS="${PREVIOUS_TRANSCRIPTION_ADMITTED_PROFILE_IDS}"
+            if ! docker tag "${ROLLBACK_IMAGE_TAG}" pincheng-rag-backend:latest; then
+              echo "APP_ONLY_ROLLBACK status=failed stage=restore-image-tag"
+              return 1
+            fi
+            if ! "${COMPOSE[@]}" up -d --no-deps --force-recreate backend; then
+              echo "APP_ONLY_ROLLBACK status=failed stage=recreate-backend"
+              return 1
+            fi
             for ATTEMPT in $(seq 1 36); do
-              CONTAINER_ID="$("${COMPOSE[@]}" ps -q backend)"
+              if ! CONTAINER_ID="$("${COMPOSE[@]}" ps -q backend)" || [ -z "${CONTAINER_ID}" ]; then
+                sleep 5
+                continue
+              fi
+              RUNNING_IMAGE_ID="$(docker inspect --format '{{.Image}}' "${CONTAINER_ID}" 2>/dev/null || true)"
               HEALTH_STATUS="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "${CONTAINER_ID}" 2>/dev/null || true)"
               if [ "${HEALTH_STATUS}" = "healthy" ] && \
+                [ "${RUNNING_IMAGE_ID}" = "${OLD_IMAGE_ID}" ] && \
                 curl -fsS --connect-timeout 5 --max-time 10 \
                   http://localhost/api/health >/dev/null 2>&1; then
+                if ! RUNNING_ASR_STATE="$("${COMPOSE[@]}" exec -T backend python -c \
+                  'from src.config import ASR_ENABLED, TRANSCRIPTION_ADMITTED_PROFILE_IDS; print(("true" if ASR_ENABLED else "false") + "|" + ",".join(TRANSCRIPTION_ADMITTED_PROFILE_IDS))')"; then
+                  echo "APP_ONLY_ROLLBACK status=failed stage=verify-admission"
+                  return 1
+                fi
+                EXPECTED_ROLLBACK_ASR_STATE="${PREVIOUS_ASR_ENABLED}|${PREVIOUS_TRANSCRIPTION_ADMITTED_PROFILE_IDS}"
+                if [ "${RUNNING_ASR_STATE}" != "${EXPECTED_ROLLBACK_ASR_STATE}" ]; then
+                  echo "APP_ONLY_ROLLBACK status=failed stage=verify-admission"
+                  return 1
+                fi
+                docker image rm "${ROLLBACK_IMAGE_TAG}" >/dev/null 2>&1 || \
+                  echo "WARNING: retained rollback tag could not be removed"
                 echo "APP_ONLY_ROLLBACK status=complete image=${OLD_IMAGE_ID}"
                 return 0
               fi
@@ -336,8 +479,11 @@ jobs:
             return 1
           }
 
-          if ! (
+          set +e
+          (
             set -euo pipefail
+            git merge --ff-only "${DEPLOY_COMMIT_SHA}"
+            echo "TRANSCRIPTION_ADMISSION action=${TRANSCRIPTION_ADMISSION_ACTION} source=workflow-environment"
             bash "${REPO_PATH}/scripts/deploy-app.sh"
 
             CONTAINER_ID="$("${COMPOSE[@]}" ps -q backend)"
@@ -367,12 +513,18 @@ jobs:
             verify_sqlite_integrity
             verify_gpu_identity
             verify_gpu_inference
+            verify_transcription_admission
             [ "$(git rev-parse HEAD)" = "${DEPLOY_COMMIT_SHA}" ]
             echo "APP_ONLY_DEPLOY status=success target=${DEPLOY_COMMIT_SHA} image=${EXPECTED_IMAGE_ID}"
-          ); then
+          )
+          DEPLOY_STATUS=$?
+          set -e
+          if [ "${DEPLOY_STATUS}" -ne 0 ]; then
             if ! rollback_backend; then
               echo "CRITICAL: previous backend image did not recover"
             fi
             echo "ERROR: App-only deployment failed strict verification"
             exit 1
           fi
+          docker image rm "${ROLLBACK_IMAGE_TAG}" >/dev/null 2>&1 || \
+            echo "WARNING: retained rollback tag could not be removed"
