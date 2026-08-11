@@ -114,7 +114,8 @@ jobs:
             --env-file "${ASR_ENV_FILE}" \
             --asr-url "${ASR_SERVICE_URL}" \
             --expected-profile faster-whisper-large-v3-turbo-v1 \
-            --expected-profile funasr-sensevoice-small-v1
+            --expected-profile funasr-sensevoice-small-v1 \
+            --expected-profile whisperx-large-v3-zh-align-v1
 
   rollback-after-cross-node-failure:
     if: ${{ always() && inputs.operation == 'promote' && needs.manage-windows.result == 'success' && needs.verify-ubuntu.result != 'success' }}

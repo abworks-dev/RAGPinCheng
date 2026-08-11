@@ -339,6 +339,7 @@ def test_candidate_promotion_is_manual_identity_bound_and_cross_node_gated():
     assert "Roll back failed candidate promotion" in workflow
     assert "--expected-profile faster-whisper-large-v3-turbo-v1" in workflow
     assert "--expected-profile funasr-sensevoice-small-v1" in workflow
+    assert "--expected-profile whisperx-large-v3-zh-align-v1" in workflow
     assert "push:" not in workflow
     assert "pull_request:" not in workflow
 
