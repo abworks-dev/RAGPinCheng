@@ -24,13 +24,26 @@ from .schemas import AuthMeResponse, LoginRequest, RegisterRequest
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-def _user_dto(row: sqlite3.Row, csrf_token: str) -> AuthMeResponse:
+def _content_permissions(conn: sqlite3.Connection, user_id: int, role: str) -> list[str]:
+    if role == "admin":
+        return ["organize", "review", "publish", "manage_categories", "import_server"]
+    return [
+        str(row[0])
+        for row in conn.execute(
+            "SELECT permission FROM content_permissions WHERE user_id=? ORDER BY permission",
+            (user_id,),
+        ).fetchall()
+    ]
+
+
+def _user_dto(row: sqlite3.Row, csrf_token: str, conn: sqlite3.Connection) -> AuthMeResponse:
     return AuthMeResponse(
         id=row["id"],
         employee_id=row["employee_id"],
         real_name=row["real_name"],
         role=row["role"],
         csrf_token=csrf_token,
+        content_permissions=_content_permissions(conn, row["id"], row["role"]),
     )
 
 
@@ -67,7 +80,7 @@ def register(
     sid, csrf, _ = issue_session(conn, user_id)
     set_session_cookie(response, sid)
     row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
-    return _user_dto(row, csrf)
+    return _user_dto(row, csrf, conn)
 
 
 @router.post("/login", response_model=AuthMeResponse)
@@ -91,7 +104,7 @@ def login(
 
     sid, csrf, _ = issue_session(conn, row["id"])
     set_session_cookie(response, sid)
-    return _user_dto(row, csrf)
+    return _user_dto(row, csrf, conn)
 
 
 @router.post("/logout", status_code=204)
@@ -108,11 +121,15 @@ def logout(
 
 
 @router.get("/me", response_model=AuthMeResponse)
-def me(user: CurrentUser = Depends(require_user)) -> AuthMeResponse:
+def me(
+    user: CurrentUser = Depends(require_user),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> AuthMeResponse:
     return AuthMeResponse(
         id=user.id,
         employee_id=user.employee_id,
         real_name=user.real_name,
         role=user.role,
         csrf_token=user.csrf_token,
+        content_permissions=_content_permissions(conn, user.id, user.role),
     )

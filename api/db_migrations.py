@@ -177,11 +177,195 @@ USER_QUESTION_VERSION_STATEMENTS = (
        ADD COLUMN user_version_id INTEGER REFERENCES message_user_versions(id) ON DELETE SET NULL""",
 )
 
+CONTENT_LIBRARY_STATEMENTS = (
+    """CREATE TABLE category_nodes (
+        id TEXT PRIMARY KEY,
+        category_key TEXT NOT NULL UNIQUE,
+        parent_id TEXT REFERENCES category_nodes(id) ON DELETE RESTRICT,
+        display_code TEXT NOT NULL,
+        display_name TEXT NOT NULL,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        level INTEGER NOT NULL CHECK (level BETWEEN 1 AND 4),
+        is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0,1)),
+        created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0)
+    )""",
+    """CREATE UNIQUE INDEX uq_category_nodes_sibling_code
+       ON category_nodes(COALESCE(parent_id,''), display_code)""",
+    """CREATE INDEX idx_category_nodes_parent_order
+       ON category_nodes(parent_id, sort_order, display_name)""",
+    """CREATE TABLE category_import_aliases (
+        id TEXT PRIMARY KEY,
+        parent_category_id TEXT REFERENCES category_nodes(id) ON DELETE RESTRICT,
+        folder_name TEXT NOT NULL,
+        target_category_id TEXT NOT NULL REFERENCES category_nodes(id) ON DELETE RESTRICT,
+        is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0,1)),
+        created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+    )""",
+    """CREATE UNIQUE INDEX uq_category_alias_context_name
+       ON category_import_aliases(COALESCE(parent_category_id,''), folder_name)""",
+    """CREATE TABLE content_permissions (
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        permission TEXT NOT NULL CHECK (permission IN (
+            'organize','review','publish','manage_categories','import_server'
+        )),
+        granted_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at INTEGER NOT NULL,
+        PRIMARY KEY(user_id, permission)
+    )""",
+    """CREATE TABLE upload_batches (
+        id TEXT PRIMARY KEY,
+        origin TEXT NOT NULL CHECK (origin IN ('web','server','legacy')),
+        status TEXT NOT NULL CHECK (status IN (
+            'staging','validating','awaiting_mapping','ready_for_review','completed','failed','closed'
+        )),
+        storage_rel_path TEXT,
+        manifest_rel_path TEXT,
+        created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        submitted_at INTEGER,
+        error_summary TEXT
+    )""",
+    """CREATE INDEX idx_upload_batches_status_created
+       ON upload_batches(status, created_at DESC)""",
+    """CREATE TABLE content_objects (
+        sha256 TEXT PRIMARY KEY CHECK (length(sha256) = 64),
+        size_bytes INTEGER NOT NULL CHECK (size_bytes >= 0),
+        mime_type TEXT NOT NULL,
+        storage_rel_path TEXT NOT NULL UNIQUE,
+        created_at INTEGER NOT NULL
+    )""",
+    """CREATE TABLE content_items (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        content_kind TEXT NOT NULL CHECK (content_kind IN ('document','media_transcript')),
+        category_id TEXT NOT NULL REFERENCES category_nodes(id) ON DELETE RESTRICT,
+        media_id TEXT UNIQUE REFERENCES media_assets(media_id) ON DELETE RESTRICT,
+        created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        archived_at INTEGER
+    )""",
+    """CREATE INDEX idx_content_items_category_updated
+       ON content_items(category_id, updated_at DESC)""",
+    """CREATE TABLE content_versions (
+        id TEXT PRIMARY KEY,
+        item_id TEXT NOT NULL REFERENCES content_items(id) ON DELETE RESTRICT,
+        version_number INTEGER NOT NULL CHECK (version_number > 0),
+        object_sha256 TEXT REFERENCES content_objects(sha256) ON DELETE RESTRICT,
+        transcript_version_id TEXT UNIQUE REFERENCES transcript_versions(id) ON DELETE RESTRICT,
+        original_filename TEXT NOT NULL,
+        doc_type TEXT NOT NULL CHECK (doc_type IN ('pdf','markdown','docx','xlsx','pptx','transcript')),
+        source_origin TEXT NOT NULL CHECK (source_origin IN ('web','server','legacy','transcription')),
+        source_batch_id TEXT REFERENCES upload_batches(id) ON DELETE RESTRICT,
+        source_rel_path TEXT,
+        lifecycle_status TEXT NOT NULL CHECK (lifecycle_status IN (
+            'draft','awaiting_review','approved','rejected','publishing','published',
+            'publication_failed','superseded'
+        )),
+        created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        UNIQUE(item_id, version_number),
+        CHECK (object_sha256 IS NOT NULL OR transcript_version_id IS NOT NULL)
+    )""",
+    """CREATE INDEX idx_content_versions_item_created
+       ON content_versions(item_id, version_number DESC)""",
+    """CREATE TABLE content_reviews (
+        id TEXT PRIMARY KEY,
+        version_id TEXT NOT NULL REFERENCES content_versions(id) ON DELETE RESTRICT,
+        decision TEXT NOT NULL CHECK (decision IN ('approved','rejected')),
+        reviewer_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        note TEXT,
+        created_at INTEGER NOT NULL
+    )""",
+    """CREATE INDEX idx_content_reviews_version_created
+       ON content_reviews(version_id, created_at DESC)""",
+    """CREATE TABLE content_publications (
+        id TEXT PRIMARY KEY,
+        version_id TEXT NOT NULL REFERENCES content_versions(id) ON DELETE RESTRICT,
+        status TEXT NOT NULL CHECK (status IN ('pending','indexing','published','failed','withdrawn')),
+        publisher_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        published_at INTEGER,
+        withdrawn_at INTEGER,
+        error_code TEXT,
+        error_summary TEXT
+    )""",
+    """CREATE UNIQUE INDEX uq_content_publication_one_active
+       ON content_publications(version_id)
+       WHERE status IN ('pending','indexing','published')""",
+    """CREATE TABLE content_index_jobs (
+        id TEXT PRIMARY KEY,
+        publication_id TEXT NOT NULL REFERENCES content_publications(id) ON DELETE RESTRICT,
+        version_id TEXT NOT NULL REFERENCES content_versions(id) ON DELETE RESTRICT,
+        attempt_number INTEGER NOT NULL CHECK (attempt_number > 0),
+        target_index_id TEXT NOT NULL UNIQUE,
+        status TEXT NOT NULL CHECK (status IN (
+            'pending','parsing','chunking','summarizing','embedding','done','failed'
+        )),
+        error_code TEXT,
+        error_summary TEXT,
+        created_at INTEGER NOT NULL,
+        started_at INTEGER,
+        finished_at INTEGER,
+        updated_at INTEGER NOT NULL,
+        UNIQUE(publication_id, attempt_number)
+    )""",
+    """CREATE UNIQUE INDEX uq_content_index_one_active
+       ON content_index_jobs(publication_id)
+       WHERE status IN ('pending','parsing','chunking','summarizing','embedding')""",
+    """CREATE TABLE content_item_heads (
+        item_id TEXT PRIMARY KEY REFERENCES content_items(id) ON DELETE RESTRICT,
+        current_version_id TEXT NOT NULL UNIQUE REFERENCES content_versions(id) ON DELETE RESTRICT,
+        publication_id TEXT NOT NULL UNIQUE REFERENCES content_publications(id) ON DELETE RESTRICT,
+        updated_at INTEGER NOT NULL
+    )""",
+    """CREATE TABLE content_audit_events (
+        id TEXT PRIMARY KEY,
+        event_type TEXT NOT NULL,
+        actor_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        item_id TEXT REFERENCES content_items(id) ON DELETE RESTRICT,
+        version_id TEXT REFERENCES content_versions(id) ON DELETE RESTRICT,
+        batch_id TEXT REFERENCES upload_batches(id) ON DELETE RESTRICT,
+        category_id TEXT REFERENCES category_nodes(id) ON DELETE RESTRICT,
+        metadata_json TEXT,
+        created_at INTEGER NOT NULL
+    )""",
+    """CREATE INDEX idx_content_audit_created
+       ON content_audit_events(created_at DESC)""",
+    """INSERT INTO category_nodes
+       (id,category_key,parent_id,display_code,display_name,sort_order,level,is_active,created_at,updated_at)
+       VALUES
+       ('cat-01','industry_standards',NULL,'01','行业规范与标准',10,1,1,strftime('%s','now'),strftime('%s','now')),
+       ('cat-02','client_requirements',NULL,'02','客户标准与要求',20,1,1,strftime('%s','now'),strftime('%s','now')),
+       ('cat-03','company_standards',NULL,'03','公司内部标准',30,1,1,strftime('%s','now'),strftime('%s','now')),
+       ('cat-04','project_materials',NULL,'04','项目资料',40,1,1,strftime('%s','now'),strftime('%s','now')),
+       ('cat-05','training_materials',NULL,'05','培训资料',50,1,1,strftime('%s','now'),strftime('%s','now')),
+       ('cat-06','project_experience',NULL,'06','项目经验与案例',60,1,1,strftime('%s','now'),strftime('%s','now')),
+       ('cat-99','pending_confirmation',NULL,'99','待确认资料',990,1,1,strftime('%s','now'),strftime('%s','now'))""",
+    """INSERT INTO category_import_aliases
+       (id,parent_category_id,folder_name,target_category_id,created_at,updated_at)
+       VALUES
+       ('alias-design',NULL,'设计规范','cat-01',strftime('%s','now'),strftime('%s','now')),
+       ('alias-client',NULL,'客户标准','cat-02',strftime('%s','now'),strftime('%s','now')),
+       ('alias-company',NULL,'公司标准','cat-03',strftime('%s','now'),strftime('%s','now')),
+       ('alias-teaching',NULL,'教学视频','cat-05',strftime('%s','now'),strftime('%s','now')),
+       ('alias-training',NULL,'培训视频','cat-05',strftime('%s','now'),strftime('%s','now'))""",
+)
+
 MIGRATIONS = (
     Migration(1, "multi_engine_transcription_phase2", PHASE2_STATEMENTS),
     Migration(2, "answer_regeneration_versions", ANSWER_VERSION_STATEMENTS),
     Migration(3, "feedback_workflow", FEEDBACK_WORKFLOW_STATEMENTS),
     Migration(4, "user_question_edit_versions", USER_QUESTION_VERSION_STATEMENTS),
+    Migration(5, "managed_content_library", CONTENT_LIBRARY_STATEMENTS),
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 PHASE2_TABLES = frozenset(
@@ -199,6 +383,22 @@ ANSWER_VERSION_TABLES = frozenset(
 FEEDBACK_WORKFLOW_TABLES = frozenset({"feedback_workflow"})
 USER_QUESTION_VERSION_TABLES = frozenset(
     {"message_user_versions", "message_user_heads"}
+)
+CONTENT_LIBRARY_TABLES = frozenset(
+    {
+        "category_nodes",
+        "category_import_aliases",
+        "content_permissions",
+        "upload_batches",
+        "content_objects",
+        "content_items",
+        "content_versions",
+        "content_reviews",
+        "content_publications",
+        "content_index_jobs",
+        "content_item_heads",
+        "content_audit_events",
+    }
 )
 
 
@@ -265,6 +465,8 @@ def has_pending_ddl(path: Path, *, base_tables: frozenset[str]) -> bool:
         raise RuntimeError("migration_schema_mismatch")
     if any(version == 4 for version, _name in applied) and not USER_QUESTION_VERSION_TABLES.issubset(tables):
         raise RuntimeError("migration_schema_mismatch")
+    if any(version == 5 for version, _name in applied) and not CONTENT_LIBRARY_TABLES.issubset(tables):
+        raise RuntimeError("migration_schema_mismatch")
     if not base_tables.issubset(tables):
         return True
     if "index_jobs" in tables and "media_id" not in index_columns:
@@ -313,6 +515,8 @@ def apply_all(conn: sqlite3.Connection, *, base_schema: str, applied_at: int) ->
         if not FEEDBACK_WORKFLOW_TABLES.issubset(tables):
             raise RuntimeError("migration_schema_mismatch")
         if not USER_QUESTION_VERSION_TABLES.issubset(tables):
+            raise RuntimeError("migration_schema_mismatch")
+        if not CONTENT_LIBRARY_TABLES.issubset(tables):
             raise RuntimeError("migration_schema_mismatch")
         if conn.execute("PRAGMA foreign_key_check").fetchone() is not None:
             raise RuntimeError("migration_foreign_key_check_failed")

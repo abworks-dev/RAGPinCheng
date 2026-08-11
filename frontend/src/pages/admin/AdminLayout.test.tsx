@@ -11,13 +11,15 @@ const mocks = vi.hoisted(() => ({
   mediaMount: vi.fn(),
   overviewMount: vi.fn(),
   feedbackMount: vi.fn(),
+  managedMount: vi.fn(),
+  categoriesMount: vi.fn(),
 }));
 
 vi.mock("../../context/AuthContext", () => ({
   useAuth: () => ({
     state: {
       status: "authed",
-      user: { real_name: "测试管理员", employee_id: "admin-test" },
+      user: { real_name: "测试管理员", employee_id: "admin-test", role: "admin", content_permissions: [] },
     },
     logout: mocks.logout,
   }),
@@ -62,6 +64,20 @@ vi.mock("./AdminFeedbackPage", () => ({
   AdminFeedbackPage: () => {
     mocks.feedbackMount();
     return <div>反馈页面内容</div>;
+  },
+}));
+
+vi.mock("./AdminManagedContentPage", () => ({
+  AdminManagedContentPage: () => {
+    mocks.managedMount();
+    return <div>资料工作流页面内容</div>;
+  },
+}));
+
+vi.mock("./AdminCategoriesPage", () => ({
+  AdminCategoriesPage: () => {
+    mocks.categoriesMount();
+    return <div>分类设置页面内容</div>;
   },
 }));
 
@@ -146,6 +162,8 @@ describe("AdminLayout tab boundary", () => {
       "用户",
       "对话",
       "资料管理",
+      "资料工作流",
+      "分类设置",
       "视频媒体",
       "概览",
       "反馈",
@@ -163,6 +181,12 @@ describe("AdminLayout tab boundary", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "资料管理" }));
     expect(screen.getByText("资料管理页面内容")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "资料工作流" }));
+    expect(screen.getByText("资料工作流页面内容")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "分类设置" }));
+    expect(screen.getByText("分类设置页面内容")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "视频媒体" }));
     expect(screen.getByText("视频媒体页面内容")).toBeInTheDocument();

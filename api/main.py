@@ -17,22 +17,29 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.staticfiles import StaticFiles
 from starlette.types import Scope
 
-from src.config import RERANK_ENABLED
+from src.config import CONTENT_MANAGEMENT_ENABLED, RERANK_ENABLED
 from src.config import ASR_ENABLED, ASR_SERVICE_TOKEN
 
 from .auth import bootstrap_admin_from_env
 from .conversation_runtime import sweep_once
 from .db import init_db
 from .indexing import (
+    configure_content_publication_runner,
     configure_publication_runner,
+    enqueue_content_publication,
     resume_pending_on_boot,
     start_worker,
     stop_worker,
+)
+from .content_publication import (
+    recover_content_publications_on_boot,
+    run_content_publication,
 )
 from .routes import router as core_router
 from .routes_admin import router as admin_router
 from .routes_auth import router as auth_router
 from .routes_chat import router as chat_router
+from .routes_content import router as content_router
 from .routes_media import router as media_router
 from .routes_media_transcript import router as media_transcript_router
 from .routes_transcription import (
@@ -129,9 +136,14 @@ async def lifespan(app: FastAPI):
     # Indexing worker: started before resuming pending jobs so the queue
     # has a consumer ready when resume_pending_on_boot enqueues them.
     configure_publication_runner(run_publication_index_job)
+    configure_content_publication_runner(
+        run_content_publication if CONTENT_MANAGEMENT_ENABLED else None
+    )
     await start_worker()
     resume_pending_on_boot()
     recover_publications_on_boot()
+    if CONTENT_MANAGEMENT_ENABLED:
+        recover_content_publications_on_boot(enqueue_content_publication)
     configure_transcription_worker(build_transcription_service)
     transcription_runtime_ready = ASR_ENABLED and bool(ASR_SERVICE_TOKEN)
     if transcription_runtime_ready:
@@ -152,6 +164,7 @@ async def lifespan(app: FastAPI):
             await stop_transcription_worker()
         await stop_worker()
         configure_publication_runner(None)
+        configure_content_publication_runner(None)
 
 
 app = FastAPI(title="PinCheng RAG API", version="0.2.0", lifespan=lifespan)
@@ -174,6 +187,7 @@ app.add_middleware(
 app.include_router(core_router, prefix="/api")
 app.include_router(auth_router, prefix="/api")
 app.include_router(chat_router, prefix="/api")
+app.include_router(content_router, prefix="/api")
 app.include_router(admin_router, prefix="/api")
 app.include_router(media_router, prefix="/api")
 app.include_router(media_transcript_router, prefix="/api")

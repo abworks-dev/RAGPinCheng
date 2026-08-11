@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable, Literal
 
@@ -59,9 +59,23 @@ class IndexResult:
     children: int
 
 
+@dataclass(frozen=True, slots=True)
+class ManagedIndexMetadata:
+    content_item_id: str
+    content_version_id: str
+    publication_target_id: str
+    category_key: str
+    category_display_name: str
+    doc_title: str
+    source_ref: str
+
+
 def _derive_category_and_company(source_path: Path) -> tuple[str, str | None]:
     """Mirror `ingest_all`'s category/company derivation from the docs/ tree."""
-    rel = source_path.relative_to(DOCS_DIR)
+    try:
+        rel = source_path.relative_to(DOCS_DIR)
+    except ValueError:
+        return "uncategorized", None
     parts = rel.parts
     category = parts[0] if len(parts) > 1 else "uncategorized"
     company = parts[1] if category in SECOND_LEVEL_CATEGORIES and len(parts) > 2 else None
@@ -100,11 +114,17 @@ def _purge_existing(source_path: Path) -> None:
         conn.close()
 
 
-def _build_pdf_doc(source_path: Path, on_status: StatusFn) -> ParsedDoc:
+def _build_pdf_doc(
+    source_path: Path,
+    on_status: StatusFn,
+    *,
+    parsed_dir: Path = PARSED_DIR,
+    cache_stem: str | None = None,
+) -> ParsedDoc:
     """Parse a PDF via MinerU and cache the markdown under data/parsed/."""
-    PARSED_DIR.mkdir(parents=True, exist_ok=True)
-    stem = _safe_stem(source_path)
-    md_path = PARSED_DIR / f"{stem}.md"
+    parsed_dir.mkdir(parents=True, exist_ok=True)
+    stem = cache_stem or _safe_stem(source_path)
+    md_path = parsed_dir / f"{stem}.md"
     # Match `ingest_all`'s preference: cloud if MINERU_API_KEY is set,
     # otherwise the local CLI.
     if md_path.exists():
@@ -165,10 +185,12 @@ def _build_markdown_doc(source_path: Path) -> ParsedDoc:
     )
 
 
-def _build_docx_doc(source_path: Path, on_status: StatusFn) -> ParsedDoc:
+def _build_docx_doc(
+    source_path: Path, on_status: StatusFn, *, parsed_dir: Path = PARSED_DIR
+) -> ParsedDoc:
     """Parse a DOCX via Docling Slim and cache the markdown under data/parsed/."""
-    PARSED_DIR.mkdir(parents=True, exist_ok=True)
-    md_path = _md_path_for_office(source_path, PARSED_DIR)
+    parsed_dir.mkdir(parents=True, exist_ok=True)
+    md_path = _md_path_for_office(source_path, parsed_dir)
 
     if md_path.exists():
         on_status("parsing")
@@ -189,15 +211,21 @@ def _build_docx_doc(source_path: Path, on_status: StatusFn) -> ParsedDoc:
     )
 
 
-def _build_xlsx_doc(source_path: Path, on_status: StatusFn) -> ParsedDoc:
+def _build_xlsx_doc(
+    source_path: Path,
+    on_status: StatusFn,
+    *,
+    parsed_dir: Path = PARSED_DIR,
+    write_preview: bool = True,
+) -> ParsedDoc:
     """Parse an XLSX via openpyxl and cache the markdown under data/parsed/.
 
     First attempts to recalculate formulas via LibreOffice so that cached
     values are available. If LibreOffice is unreachable, falls back to
     parsing without recalculation (formula cells will show as uncached).
     """
-    PARSED_DIR.mkdir(parents=True, exist_ok=True)
-    md_path = _md_path_for_office(source_path, PARSED_DIR)
+    parsed_dir.mkdir(parents=True, exist_ok=True)
+    md_path = _md_path_for_office(source_path, parsed_dir)
 
     if md_path.exists():
         on_status("parsing")
@@ -217,8 +245,11 @@ def _build_xlsx_doc(source_path: Path, on_status: StatusFn) -> ParsedDoc:
         finally:
             # Clean up the recalculated temp file
             if recalc_path and recalc_path.exists():
-                recalc_path.rename(source_path.with_suffix(".preview.xlsx"))
-                logger.info("saved preview XLSX: %s", source_path.with_suffix(".preview.xlsx").name)
+                if write_preview:
+                    recalc_path.rename(source_path.with_suffix(".preview.xlsx"))
+                    logger.info("saved preview XLSX: %s", source_path.with_suffix(".preview.xlsx").name)
+                else:
+                    recalc_path.unlink()
 
         md_path.write_text(markdown, encoding="utf-8")
 
@@ -234,13 +265,19 @@ def _build_xlsx_doc(source_path: Path, on_status: StatusFn) -> ParsedDoc:
 
 
 
-def _build_pptx_doc(source_path: Path, on_status: StatusFn) -> ParsedDoc:
+def _build_pptx_doc(
+    source_path: Path,
+    on_status: StatusFn,
+    *,
+    parsed_dir: Path = PARSED_DIR,
+    write_preview: bool = True,
+) -> ParsedDoc:
     """Parse a PPTX via Docling and cache the markdown under data/parsed/.
 
     Also converts the PPTX to PDF via LibreOffice for preview.
     """
-    PARSED_DIR.mkdir(parents=True, exist_ok=True)
-    md_path = _md_path_for_office(source_path, PARSED_DIR)
+    parsed_dir.mkdir(parents=True, exist_ok=True)
+    md_path = _md_path_for_office(source_path, parsed_dir)
 
     if md_path.exists():
         on_status("parsing")
@@ -251,10 +288,11 @@ def _build_pptx_doc(source_path: Path, on_status: StatusFn) -> ParsedDoc:
             markdown, _slides = convert_pptx_to_markdown(source_path)
             md_path.write_text(markdown, encoding="utf-8")
             # Convert to PDF for preview via LibreOffice
-            try:
-                convert_pptx_to_pdf(source_path)
-            except Exception as exc:
-                logger.warning("PPTX to PDF conversion failed (non-fatal): %s", exc)
+            if write_preview:
+                try:
+                    convert_pptx_to_pdf(source_path)
+                except Exception as exc:
+                    logger.warning("PPTX to PDF conversion failed (non-fatal): %s", exc)
         except Exception as exc:
             logger.error("PPTX parsing failed: %s", exc)
             raise
@@ -348,6 +386,59 @@ def index_transcript_candidate(
         raise ValueError("candidate indexing requires media/version/target identity")
     on_status("chunking")
     parents, children = chunk_document(doc)
+    on_status("embedding")
+    store_parents(parents)
+    index_children(children)
+    return IndexResult(parents=len(parents), children=len(children))
+
+
+def index_managed_content(
+    source_path: Path,
+    doc_type: str,
+    metadata: ManagedIndexMetadata,
+    on_status: StatusFn = lambda _s: None,
+) -> IndexResult:
+    """Build a versioned candidate without deriving identity from its folder."""
+    if doc_type not in ("pdf", "markdown", "docx", "xlsx", "pptx"):
+        raise ValueError(f"unsupported managed doc_type: {doc_type!r}")
+    if not source_path.is_file() or source_path.is_symlink():
+        raise ValueError("managed_source_unavailable")
+    parsed_dir = PARSED_DIR / "managed" / metadata.content_version_id
+    if doc_type == "markdown":
+        doc = _build_markdown_doc(source_path)
+    elif doc_type == "docx":
+        doc = _build_docx_doc(source_path, on_status, parsed_dir=parsed_dir)
+    elif doc_type == "xlsx":
+        doc = _build_xlsx_doc(
+            source_path, on_status, parsed_dir=parsed_dir, write_preview=True
+        )
+    elif doc_type == "pptx":
+        doc = _build_pptx_doc(
+            source_path, on_status, parsed_dir=parsed_dir, write_preview=True
+        )
+    else:
+        doc = _build_pdf_doc(
+            source_path,
+            on_status,
+            parsed_dir=parsed_dir,
+            cache_stem="document",
+        )
+    doc = replace(
+        doc,
+        category=metadata.category_display_name,
+        doc_title=metadata.doc_title,
+        company=None,
+        content_item_id=metadata.content_item_id,
+        content_version_id=metadata.content_version_id,
+        publication_target_id=metadata.publication_target_id,
+        category_key=metadata.category_key,
+        source_ref=metadata.source_ref,
+    )
+    on_status("chunking")
+    parents, children = chunk_document(doc)
+    if any(child.content_type == "table" for child in children):
+        on_status("summarizing")
+        summarize_table_children(children)
     on_status("embedding")
     store_parents(parents)
     index_children(children)

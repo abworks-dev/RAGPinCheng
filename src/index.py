@@ -79,6 +79,15 @@ def _ensure_payload_indexes(client: QdrantClient) -> None:
         )
     except Exception:
         pass
+    for field_name in ("category_key", "content_version_id"):
+        try:
+            client.create_payload_index(
+                collection_name=COLLECTION,
+                field_name=field_name,
+                field_schema=models.PayloadSchemaType.KEYWORD,
+            )
+        except Exception:
+            pass
 
 
 def _init_parents_db(reset: bool = False) -> sqlite3.Connection:
@@ -102,7 +111,10 @@ def _init_parents_db(reset: bool = False) -> sqlite3.Connection:
             company TEXT,
             media_id TEXT,
             transcript_version_id TEXT,
-            publication_target_id TEXT
+            publication_target_id TEXT,
+            content_item_id TEXT,
+            content_version_id TEXT,
+            category_key TEXT
         )
         """
     )
@@ -127,6 +139,12 @@ def _init_parents_db(reset: bool = False) -> sqlite3.Connection:
         conn.execute("ALTER TABLE parents ADD COLUMN transcript_version_id TEXT")
     if "publication_target_id" not in existing:
         conn.execute("ALTER TABLE parents ADD COLUMN publication_target_id TEXT")
+    if "content_item_id" not in existing:
+        conn.execute("ALTER TABLE parents ADD COLUMN content_item_id TEXT")
+    if "content_version_id" not in existing:
+        conn.execute("ALTER TABLE parents ADD COLUMN content_version_id TEXT")
+    if "category_key" not in existing:
+        conn.execute("ALTER TABLE parents ADD COLUMN category_key TEXT")
     if reset:
         conn.execute("DELETE FROM parents")
     return conn
@@ -164,6 +182,9 @@ def store_parents(parents: Iterable[Parent], reset: bool = False) -> None:
             p.paragraph_anchor,
             p.transcript_version_id,
             p.publication_target_id,
+            p.content_item_id,
+            p.content_version_id,
+            p.category_key,
         )
         for p in parents
     ]
@@ -171,8 +192,8 @@ def store_parents(parents: Iterable[Parent], reset: bool = False) -> None:
         "INSERT OR REPLACE INTO parents "
         "(parent_id, doc_title, category, section_path, source_path, text, doc_type, "
         "start_time, company, media_id, sheet_name, cell_range, slide_number, paragraph_anchor, "
-        "transcript_version_id, publication_target_id) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "transcript_version_id, publication_target_id, content_item_id, content_version_id, category_key) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         rows,
     )
     conn.commit()
@@ -188,7 +209,8 @@ def fetch_parents(parent_ids: list[str]) -> dict[str, dict]:
     rows = conn.execute(
         f"SELECT parent_id, doc_title, category, section_path, source_path, text, "
         f"doc_type, start_time, company, media_id, sheet_name, cell_range, slide_number, "
-        f"paragraph_anchor, transcript_version_id, publication_target_id "
+        f"paragraph_anchor, transcript_version_id, publication_target_id, "
+        f"content_item_id, content_version_id, category_key "
         f"FROM parents WHERE parent_id IN ({placeholders})",
         parent_ids,
     ).fetchall()
@@ -211,6 +233,9 @@ def fetch_parents(parent_ids: list[str]) -> dict[str, dict]:
             "paragraph_anchor": r[13] if len(r) > 13 else None,
             "transcript_version_id": r[14] if len(r) > 14 else None,
             "publication_target_id": r[15] if len(r) > 15 else None,
+            "content_item_id": r[16] if len(r) > 16 else None,
+            "content_version_id": r[17] if len(r) > 17 else None,
+            "category_key": r[18] if len(r) > 18 else None,
         }
         for r in rows
     }
@@ -291,6 +316,9 @@ def index_children(children: list[Child], reset: bool = False) -> None:
                         **({"media_id": c.media_id} if c.media_id else {}),
                         **({"transcript_version_id": c.transcript_version_id} if c.transcript_version_id else {}),
                         **({"publication_target_id": c.publication_target_id} if c.publication_target_id else {}),
+                        **({"content_item_id": c.content_item_id} if c.content_item_id else {}),
+                        **({"content_version_id": c.content_version_id} if c.content_version_id else {}),
+                        **({"category_key": c.category_key} if c.category_key else {}),
                     },
                 )
             )

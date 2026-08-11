@@ -14,11 +14,11 @@ ADAPTERS = (
 )
 PROTECTED = {
     "api/routes_media.py": "bba0b53767961c90e06e948cfecb659e33a395db1538a9f4f2acd4800087eb14",
-    "api/indexing.py": "e5dd010cfeddd6e90386bb59bf5cad9499da45b4af64d96825da43b51796dda8",
-    "src/chunk.py": "55fa46b41c06bf347d4772a6b92ccaa30fc10d114556a18766f880ee25634f41",
-    "src/index.py": "2e0626f67ea58bc52f61073a2075332ab2ea4f43a5404de511420863d487611f",
-    "src/indexing_pipeline.py": "4ee589e1a952c172091585696c991acf0227f8b4b89a3e01bae8499d841a3c34",
-    "src/retrieve.py": "9ccf7bb4c5272aa9c20cd398234df654bfcd12c83aa967b002efb965015dc4a1",
+    "api/indexing.py": "5613de8c7e9c210b404e6906f24b147bdb071cc1dda89f9adc53b631ded74d05",
+    "src/chunk.py": "2ee87b9541be6c7b2b93722ec654c980c3719af2fdacace120a1924f442c0fea",
+    "src/index.py": "cb04b1897e5703c5ed052c0df12909dfce1a79e453b7714dcc8edff6bc20c5b5",
+    "src/indexing_pipeline.py": "94421a467f19744dc897e19133ff9da9f637da4615a086e6541d412a9c9b5beb",
+    "src/retrieve.py": "158e0c75e437898762d830d98661260e513713e6e671c749a20b51a1a15404dc",
 }
 FORBIDDEN = {
     "funasr", "faster_whisper", "whisper", "torch", "av", "ffmpeg",

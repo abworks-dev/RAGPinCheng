@@ -97,6 +97,9 @@ services:
       TRANSCRIPTION_ADMITTED_PROFILE_IDS: ${TRANSCRIPTION_ADMITTED_PROFILE_IDS:-funasr-sensevoice-zh-experimental-v1}
       # LibreOffice 转换服务地址 — 在同一 Docker 网络内，通过服务名访问。
       LIBREOFFICE_URL: ${LIBREOFFICE_URL:-http://libreoffice:8101}
+      CONTENT_ROOT: /app/content
+      CONTENT_MANAGEMENT_ENABLED: ${CONTENT_MANAGEMENT_ENABLED:-false}
+      CONTENT_HEAD_ENFORCEMENT: ${CONTENT_HEAD_ENFORCEMENT:-compat}
     volumes:
       # 持久化状态 — Markdown 解析缓存、parents.sqlite（向量索引元数据）、
       # app.sqlite（用户 + 对话）、feedback.jsonl。数据存在主机磁盘上，
@@ -104,6 +107,8 @@ services:
       - ../data:/app/data
       # 视频媒体文件 — 上传的 MP4 保存在这里，通过鉴权路由访问。
       - ../media:/app/media
+      # 受管资料库。生产通过 CONTENT_HOST_PATH 固定宿主机目录；本地默认仍在仓库旁。
+      - ${CONTENT_HOST_PATH:-../content}:/app/content
       # 源 PDF 文档 — 只在容器内执行 scripts/build_index.py 时需要。
       # 读写挂载，MinerU 拆分后的 PDF 可以写回原目录。
       - ../docs:/app/docs

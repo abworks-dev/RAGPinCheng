@@ -17,6 +17,16 @@ PARSED_DIR = DATA_DIR / "parsed"
 QDRANT_DIR = DATA_DIR / "qdrant"  # legacy embedded-mode path; unused after the server migration but kept for the optional cleanup script
 PARENTS_DB = DATA_DIR / "parents.sqlite"
 APP_DB_PATH = Path(os.getenv("APP_DB_PATH", str(DATA_DIR / "app.sqlite")))
+CONTENT_ROOT = Path(os.getenv("CONTENT_ROOT", str(ROOT / "content")))
+CONTENT_MANAGEMENT_ENABLED = os.getenv("CONTENT_MANAGEMENT_ENABLED", "").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
+CONTENT_HEAD_ENFORCEMENT = os.getenv("CONTENT_HEAD_ENFORCEMENT", "compat").strip().lower()
+if CONTENT_HEAD_ENFORCEMENT not in {"compat", "strict"}:
+    raise ValueError("CONTENT_HEAD_ENFORCEMENT must be 'compat' or 'strict'")
 
 for d in (DATA_DIR, PARSED_DIR, MEDIA_DIR):
     d.mkdir(parents=True, exist_ok=True)

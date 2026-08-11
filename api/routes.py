@@ -14,7 +14,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse, Response
 
 from src.config import (
+    APP_DB_PATH,
     COLLECTION,
+    CONTENT_ROOT,
     DOCS_DIR,
     EMBED_MODEL,
     LLM_MODEL,
@@ -23,11 +25,13 @@ from src.config import (
     RERANK_ENABLED,
     RERANKER_MODEL,
 )
-from src.index import collection_stats, list_categories, parents_count
+from src.index import collection_stats, list_categories as list_index_categories, parents_count
 from src.llm_health import check_llm, to_dict as llm_health_to_dict
 
 from . import feedback as feedback_log
 from .auth import CurrentUser, require_user
+from .db import connect as db_connect
+from .content_storage import ContentStorage
 from .schemas import (
     CategoriesResponse,
     ConfigResponse,
@@ -40,6 +44,42 @@ from .schemas import (
 logger = logging.getLogger("api.routes")
 
 router = APIRouter()
+_content_storage = ContentStorage(CONTENT_ROOT)
+
+
+def _managed_source(
+    content_item_id: str | None,
+    content_version_id: str | None,
+) -> tuple[Path, str] | None:
+    if not content_item_id or not content_version_id or not APP_DB_PATH.exists():
+        return None
+    conn = db_connect(APP_DB_PATH)
+    try:
+        row = conn.execute(
+            """SELECT o.storage_rel_path,v.original_filename
+               FROM content_versions v
+               JOIN content_objects o ON o.sha256=v.object_sha256
+               WHERE v.id=? AND v.item_id=?""",
+            (content_version_id, content_item_id),
+        ).fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        return None
+    path = _content_storage.resolve_object(row["storage_rel_path"])
+    return path, row["original_filename"]
+
+
+def _managed_preview(
+    content_item_id: str,
+    content_version_id: str,
+    original_filename: str,
+    preview_suffix: str,
+) -> Path:
+    source = _content_storage.published_source_path(
+        content_item_id, content_version_id, original_filename
+    )
+    return source.with_suffix(preview_suffix)
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -117,7 +157,24 @@ def post_feedback(
 
 @router.get("/categories", response_model=CategoriesResponse)
 def get_categories() -> CategoriesResponse:
-    return CategoriesResponse(categories=list_categories())
+    categories = set(list_index_categories())
+    conn = db_connect()
+    try:
+        has_managed = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='content_item_heads'"
+        ).fetchone()
+        if has_managed:
+            rows = conn.execute(
+                """SELECT DISTINCT c.display_name
+                   FROM content_item_heads h
+                   JOIN content_items i ON i.id=h.item_id
+                   JOIN category_nodes c ON c.id=i.category_id
+                   WHERE c.is_active=1"""
+            ).fetchall()
+            categories.update(str(row[0]) for row in rows)
+    finally:
+        conn.close()
+    return CategoriesResponse(categories=sorted(categories))
 
 
 @router.get("/source/{parent_id}/raw")
@@ -133,7 +190,8 @@ def get_source_file(parent_id: str, _user_id: int = Depends(require_user)) -> Re
     conn.row_factory = sqlite3.Row
     try:
         row = conn.execute(
-            "SELECT source_path, doc_type FROM parents WHERE parent_id = ?",
+            """SELECT source_path,doc_type,content_item_id,content_version_id
+               FROM parents WHERE parent_id = ?""",
             (parent_id,),
         ).fetchone()
     finally:
@@ -142,12 +200,25 @@ def get_source_file(parent_id: str, _user_id: int = Depends(require_user)) -> Re
     if not row:
         raise HTTPException(status_code=404, detail="Parent not found")
 
+    managed = _managed_source(row["content_item_id"], row["content_version_id"])
     raw = row["source_path"]
-    file_path = Path(raw) if Path(raw).is_absolute() else DOCS_DIR / raw
+    file_path = managed[0] if managed else (
+        Path(raw) if Path(raw).is_absolute() else DOCS_DIR / raw
+    )
+    download_name = managed[1] if managed else file_path.name
 
     # For XLSX, serve the preview file (with cached formula values) if available
     if row["doc_type"] == "xlsx":
-        preview_path = file_path.with_suffix(".preview.xlsx")
+        preview_path = (
+            _managed_preview(
+                row["content_item_id"],
+                row["content_version_id"],
+                download_name,
+                ".preview.xlsx",
+            )
+            if managed
+            else file_path.with_suffix(".preview.xlsx")
+        )
         if preview_path.exists():
             file_path = preview_path
 
@@ -155,7 +226,7 @@ def get_source_file(parent_id: str, _user_id: int = Depends(require_user)) -> Re
         raise HTTPException(status_code=404, detail="Source file not found")
 
     # Map file extension to MIME type
-    suffix = file_path.suffix.lower()
+    suffix = Path(download_name).suffix.lower()
     mime_map = {
         ".pdf": "application/pdf",
         ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -171,7 +242,7 @@ def get_source_file(parent_id: str, _user_id: int = Depends(require_user)) -> Re
     return FileResponse(
         path=str(file_path),
         media_type=media_type,
-        filename=file_path.name,
+        filename=download_name,
         headers={"Accept-Ranges": "bytes"},
     )
 
@@ -188,7 +259,8 @@ def get_pdf(parent_id: str, _user_id: int = Depends(require_user)) -> Response:
     conn.row_factory = sqlite3.Row
     try:
         row = conn.execute(
-            "SELECT source_path, doc_type FROM parents WHERE parent_id = ?",
+            """SELECT source_path,doc_type,content_item_id,content_version_id
+               FROM parents WHERE parent_id = ?""",
             (parent_id,),
         ).fetchone()
     finally:
@@ -202,9 +274,21 @@ def get_pdf(parent_id: str, _user_id: int = Depends(require_user)) -> Response:
     # source_path is stored as an absolute path inside the container, e.g.
     # /app/docs/行业规范/GB50017-2017.pdf.  If it's not absolute, resolve
     # relative to DOCS_DIR.
+    managed = _managed_source(row["content_item_id"], row["content_version_id"])
     raw = row["source_path"]
     # For PPTX, serve the preview PDF generated by LibreOffice
-    if row["doc_type"] == "pptx":
+    if managed and row["doc_type"] == "pdf":
+        pdf_path = managed[0]
+    elif managed and row["doc_type"] == "pptx":
+        pdf_path = _managed_preview(
+            row["content_item_id"],
+            row["content_version_id"],
+            managed[1],
+            ".preview.pdf",
+        )
+        if not pdf_path.is_file():
+            raise HTTPException(status_code=404, detail="Managed preview not available")
+    elif row["doc_type"] == "pptx":
         preview_path = Path(raw).with_suffix(".preview.pdf")
         if preview_path.exists():
             pdf_path = preview_path
@@ -227,7 +311,7 @@ def get_pdf(parent_id: str, _user_id: int = Depends(require_user)) -> Response:
 
     # 有些 source_path 指向 .md 文件（非教学视频的 markdown 被标记为
     # doc_type="pdf"），浏览器无法渲染 Markdown 为 PDF。
-    if pdf_path.suffix.lower() not in (".pdf",):
+    if not managed and pdf_path.suffix.lower() not in (".pdf",):
         raise HTTPException(
             status_code=400,
             detail=f"源文件是 {pdf_path.suffix} 格式，不是 PDF，无法预览。"
@@ -236,6 +320,6 @@ def get_pdf(parent_id: str, _user_id: int = Depends(require_user)) -> Response:
     return FileResponse(
         path=str(pdf_path),
         media_type="application/pdf",
-        filename=pdf_path.name,
+        filename=managed[1] if managed else pdf_path.name,
         headers={"Accept-Ranges": "bytes"},
     )

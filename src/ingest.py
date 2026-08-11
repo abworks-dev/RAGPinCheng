@@ -45,6 +45,10 @@ class ParsedDoc:
     media_id: str | None = None  # associated video asset if any
     transcript_version_id: str | None = None  # immutable automatic transcript version
     publication_target_id: str | None = None  # candidate indexing attempt identity
+    content_item_id: str | None = None  # managed-library logical document
+    content_version_id: str | None = None  # immutable managed-library version
+    category_key: str | None = None  # stable category identity
+    source_ref: str | None = None  # stable logical source; physical path remains in source_path
     # Office document preview fields
     preview_path: Path | None = None  # path to preview file (e.g. PDF for PPTX)
     parsed_via: str | None = None  # "docling" | "openpyxl" | "mineru_fallback"

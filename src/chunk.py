@@ -109,6 +109,9 @@ class Parent:
     media_id: str | None = None      # associated video asset if any
     transcript_version_id: str | None = None
     publication_target_id: str | None = None
+    content_item_id: str | None = None
+    content_version_id: str | None = None
+    category_key: str | None = None
     # Office document fields
     sheet_name: str | None = None    # XLSX: spreadsheet name
     cell_range: str | None = None    # XLSX: cell range (e.g. "A1:F12")
@@ -138,6 +141,9 @@ class Child:
     media_id: str | None = None      # associated video asset if any
     transcript_version_id: str | None = None
     publication_target_id: str | None = None
+    content_item_id: str | None = None
+    content_version_id: str | None = None
+    category_key: str | None = None
 
 
 def _stable_id(*parts: str) -> str:
@@ -444,7 +450,11 @@ def chunk_document(doc: ParsedDoc) -> tuple[list[Parent], list[Child]]:
             # Hash the full parent text, not a prefix: header-propagated table
             # fragments share the same opening 80 chars (the column-label row)
             # and would otherwise collide on parent_id.
-            parent_id = _stable_id(doc.doc_title, section_path, parent_text)
+            parent_id = (
+                _stable_id(doc.content_version_id, doc.doc_title, section_path, parent_text)
+                if doc.content_version_id
+                else _stable_id(doc.doc_title, section_path, parent_text)
+            )
             parents.append(
                 Parent(
                     parent_id=parent_id,
@@ -452,9 +462,13 @@ def chunk_document(doc: ParsedDoc) -> tuple[list[Parent], list[Child]]:
                     doc_title=doc.doc_title,
                     category=doc.category,
                     section_path=section_path,
-                    source_path=str(doc.source_path),
+                    source_path=doc.source_ref or str(doc.source_path),
                     doc_type=doc.doc_type,
                     company=doc.company,
+                    content_item_id=doc.content_item_id,
+                    content_version_id=doc.content_version_id,
+                    category_key=doc.category_key,
+                    publication_target_id=doc.publication_target_id,
                 )
             )
             header_prefix = f"{doc.doc_title} > {section_path}\n\n"
@@ -469,10 +483,14 @@ def chunk_document(doc: ParsedDoc) -> tuple[list[Parent], list[Child]]:
                         doc_title=doc.doc_title,
                         category=doc.category,
                         section_path=section_path,
-                        source_path=str(doc.source_path),
+                        source_path=doc.source_ref or str(doc.source_path),
                         content_type=ctype,
                         doc_type=doc.doc_type,
                         company=doc.company,
+                        content_item_id=doc.content_item_id,
+                        content_version_id=doc.content_version_id,
+                        category_key=doc.category_key,
+                        publication_target_id=doc.publication_target_id,
                     )
                 )
     return parents, children

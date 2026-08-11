@@ -29,6 +29,18 @@ def test_empty_database_initializes_all_phase2_tables(tmp_path):
         "message_turn_requests",
         "message_user_versions",
         "message_user_heads",
+        "category_nodes",
+        "category_import_aliases",
+        "content_permissions",
+        "upload_batches",
+        "content_objects",
+        "content_items",
+        "content_versions",
+        "content_reviews",
+        "content_publications",
+        "content_index_jobs",
+        "content_item_heads",
+        "content_audit_events",
     } <= tables
     assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     assert conn.execute("PRAGMA foreign_key_check").fetchone() is None

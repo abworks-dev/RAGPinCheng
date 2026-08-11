@@ -225,6 +225,44 @@ class TestDeployGitSafety(unittest.TestCase):
                 production_workflow,
             )
 
+    def test_production_content_root_is_fixed_and_strictly_verified(self):
+        workflow = self.app_only_workflow
+        compose = (ROOT / "docker" / "docker-compose.yml").read_text(encoding="utf-8")
+
+        self.assertIn("${CONTENT_HOST_PATH:-../content}:/app/content", compose)
+        self.assertIn(
+            "CONTENT_HOST_PATH: ${{ vars.PRODUCTION_CONTENT_ROOT }}", workflow
+        )
+        self.assertIn('/data/business/ragpincheng/content', workflow)
+        self.assertIn("content_root_policy:", workflow)
+        self.assertIn("REQUIRE_EMPTY", workflow)
+        self.assertIn("PRESERVE_EXISTING", workflow)
+        self.assertIn("production content root is unexpectedly non-empty", workflow)
+        self.assertIn("content-root-state.txt", workflow)
+        self.assertIn("verify_managed_content", workflow)
+        self.assertIn("CURRENT_SCHEMA_VERSION == 5", workflow)
+        self.assertIn("MANAGED_CONTENT status=verified", workflow)
+        self.assertIn("QDRANT_BEFORE_PATH", workflow)
+        self.assertIn("points_count", workflow)
+        self.assertIn("http://localhost/admin", workflow)
+        for production_workflow in (
+            self.workflow,
+            self.emergency_workflow,
+            self.app_only_workflow,
+        ):
+            self.assertIn(
+                "CONTENT_HOST_PATH: ${{ vars.PRODUCTION_CONTENT_ROOT }}",
+                production_workflow,
+            )
+            self.assertIn(
+                "CONTENT_MANAGEMENT_ENABLED: ${{ vars.CONTENT_MANAGEMENT_ENABLED }}",
+                production_workflow,
+            )
+            self.assertIn(
+                "CONTENT_HEAD_ENFORCEMENT: ${{ vars.CONTENT_HEAD_ENFORCEMENT }}",
+                production_workflow,
+            )
+
     def test_scripts_require_full_commit_and_verify_head(self):
         self.assertIn("ValidatePattern('^[0-9a-fA-F]{40}$')", self.windows)
         self.assertIn("Deployed HEAD mismatch", self.windows)
