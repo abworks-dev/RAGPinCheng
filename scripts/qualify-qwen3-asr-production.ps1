@@ -62,6 +62,7 @@ $PreTaskSnapshot = $null
 $PreFirewallSnapshot = $null
 $PreProductionCapabilities = $null
 $ExpectedProductionProfiles = @()
+$ProductionAsrConfigPath = ""
 $BaselineMemoryMiB = 0
 $PeakMemoryMiB = 0
 $PeakUtilization = 0
@@ -508,15 +509,61 @@ function Invoke-AuthenticatedJson {
     } -TimeoutSec $TimeoutSec
 }
 
+function Resolve-ProductionAsrConfigPath {
+    param(
+        [Parameter(Mandatory = $true)][string]$Root,
+        [Parameter(Mandatory = $true)][object[]]$TaskSnapshot
+    )
+    $asrTasks = @($TaskSnapshot | Where-Object { [string]$_.task_name -eq "RAGPinCheng-ASR" })
+    if ($asrTasks.Count -ne 1) {
+        throw "Production ASR Scheduled Task snapshot is invalid"
+    }
+    $actions = @($asrTasks[0].actions)
+    if ($actions.Count -ne 1) {
+        throw "Production ASR Scheduled Task action is invalid"
+    }
+    $arguments = [string]$actions[0].arguments
+    if ($arguments -notmatch '(?i)(?:^|\s)-UseActiveRelease(?:\s|$)') {
+        return Join-Path $Root "config\asr.env"
+    }
+
+    $activeStatePath = Join-Path $Root "release-state\active.json"
+    if (-not (Test-Path -LiteralPath $activeStatePath -PathType Leaf)) {
+        throw "Active ASR release state is missing"
+    }
+    try {
+        $active = Get-Content -LiteralPath $activeStatePath -Raw -Encoding UTF8 | ConvertFrom-Json
+    } catch {
+        throw "Active ASR release state is invalid JSON"
+    }
+    if (
+        [string]$active.schema_version -ne "asr-active-release/1" -or
+        [string]$active.candidate_id -notmatch '^[0-9]{1,20}$' -or
+        [string]$active.release_manifest_sha256 -notmatch '^[0-9a-f]{64}$'
+    ) {
+        throw "Active ASR release state is invalid"
+    }
+    $releaseConfigRoot = [IO.Path]::GetFullPath((Join-Path $Root "config\releases")).TrimEnd('\')
+    $configPath = [IO.Path]::GetFullPath(
+        (Join-Path $releaseConfigRoot "$([string]$active.candidate_id)\asr.env")
+    )
+    if (-not $configPath.StartsWith($releaseConfigRoot + '\', [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Active ASR release configuration escapes the managed root"
+    }
+    if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
+        throw "Active ASR release environment file is missing"
+    }
+    return $configPath
+}
+
 function Get-ManagedAsrServiceToken {
-    param([Parameter(Mandatory = $true)][string]$Root)
-    $envFile = Join-Path $Root "config\asr.env"
-    if (-not (Test-Path -LiteralPath $envFile -PathType Leaf)) {
+    param([Parameter(Mandatory = $true)][string]$ConfigPath)
+    if (-not (Test-Path -LiteralPath $ConfigPath -PathType Leaf)) {
         throw "Production ASR environment file is missing"
     }
     $seenNames = @{}
     $serviceToken = ""
-    foreach ($line in Get-Content -LiteralPath $envFile -Encoding UTF8) {
+    foreach ($line in Get-Content -LiteralPath $ConfigPath -Encoding UTF8) {
         $trimmed = $line.Trim()
         if (-not $trimmed -or $trimmed.StartsWith("#")) { continue }
         if ($trimmed -notmatch '^([A-Z][A-Z0-9_]*)=(.*)$') {
@@ -539,10 +586,10 @@ function Get-ManagedAsrServiceToken {
 
 function Get-PinnedProductionAsrCapabilities {
     param(
-        [Parameter(Mandatory = $true)][string]$Root,
+        [Parameter(Mandatory = $true)][string]$ConfigPath,
         [Parameter(Mandatory = $true)][string]$AsrUrl
     )
-    $serviceToken = Get-ManagedAsrServiceToken -Root $Root
+    $serviceToken = Get-ManagedAsrServiceToken -ConfigPath $ConfigPath
     $capabilities = Invoke-AuthenticatedJson `
         -Uri "$AsrUrl/v1/capabilities" `
         -Token $serviceToken `
@@ -582,6 +629,7 @@ function New-AsrVerifierArguments {
     param(
         [Parameter(Mandatory = $true)][string]$VerifierPath,
         [Parameter(Mandatory = $true)][string]$Root,
+        [Parameter(Mandatory = $true)][string]$ConfigPath,
         [Parameter(Mandatory = $true)][string]$AsrUrl,
         [Parameter(Mandatory = $true)][string[]]$ExpectedProfiles
     )
@@ -591,9 +639,10 @@ function New-AsrVerifierArguments {
     $profileLiterals = @(
         $ExpectedProfiles | ForEach-Object { ConvertTo-PowerShellSingleQuotedLiteral -Value $_ }
     ) -join ","
-    $command = "& {0} -DataRoot {1} -AsrUrl {2} -ExpectedProfiles @({3})" -f
+    $command = "& {0} -DataRoot {1} -ConfigPath {2} -AsrUrl {3} -ExpectedProfiles @({4})" -f
         (ConvertTo-PowerShellSingleQuotedLiteral -Value $VerifierPath),
         (ConvertTo-PowerShellSingleQuotedLiteral -Value $Root),
+        (ConvertTo-PowerShellSingleQuotedLiteral -Value $ConfigPath),
         (ConvertTo-PowerShellSingleQuotedLiteral -Value $AsrUrl),
         $profileLiterals
     $encodedCommand = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
@@ -1853,8 +1902,11 @@ try {
     [void](Assert-BgeIdle)
 
     $PreflightFailureStage = "production_asr_contract"
-    $PreProductionCapabilities = Get-PinnedProductionAsrCapabilities `
+    $ProductionAsrConfigPath = Resolve-ProductionAsrConfigPath `
         -Root $DataRoot `
+        -TaskSnapshot $PreTaskSnapshot
+    $PreProductionCapabilities = Get-PinnedProductionAsrCapabilities `
+        -ConfigPath $ProductionAsrConfigPath `
         -AsrUrl $ProductionAsrUrl
     $ExpectedProductionProfiles = [string[]]@($PreProductionCapabilities.service_profiles)
     Write-JsonFile `
@@ -1866,6 +1918,7 @@ try {
         -Arguments (New-AsrVerifierArguments `
             -VerifierPath (Join-Path $ResolvedSource "scripts\verify-asr-service.ps1") `
             -Root $DataRoot `
+            -ConfigPath $ProductionAsrConfigPath `
             -AsrUrl $ProductionAsrUrl `
             -ExpectedProfiles $ExpectedProductionProfiles) `
         -LogPath (Join-Path $LogRoot "production-asr-verification-before.log")
@@ -2420,11 +2473,21 @@ print('qualification-module-origins-verified')
     ) {
         throw "Production Scheduled Task or firewall state changed"
     }
+    $PostProductionAsrConfigPath = Resolve-ProductionAsrConfigPath `
+        -Root $DataRoot `
+        -TaskSnapshot $PostTaskSnapshot
+    if (-not $PostProductionAsrConfigPath.Equals(
+        $ProductionAsrConfigPath,
+        [StringComparison]::OrdinalIgnoreCase
+    )) {
+        throw "Production ASR active release changed"
+    }
     Invoke-External `
         -FilePath "powershell.exe" `
         -Arguments (New-AsrVerifierArguments `
             -VerifierPath (Join-Path $ResolvedSource "scripts\verify-asr-service.ps1") `
             -Root $DataRoot `
+            -ConfigPath $ProductionAsrConfigPath `
             -AsrUrl $ProductionAsrUrl `
             -ExpectedProfiles $ExpectedProductionProfiles) `
         -LogPath (Join-Path $LogRoot "production-asr-verification-after.log")
