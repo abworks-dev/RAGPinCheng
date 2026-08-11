@@ -122,10 +122,11 @@ candidate 必须同时提交同一部署 revision 对应的 faster-whisper 与 W
 
 应用业务准入是独立于上述两层 GPU 身份的第三方应用配置，不进入
 `runtime_contract_sha256`。默认 allowlist 仅启用 SenseVoice；生产 app-only workflow
-可通过显式 `ENABLE_FASTER_WHISPER` 动作原子写入 SenseVoice + faster-whisper，并在
-部署或健康验证失败时恢复原配置和上一 backend 镜像。未知、重复或格式错误的 Profile
-ID 均失败关闭。该动作不重部署 Windows ASR，不自动开放其他引擎，也不绕过实时
-capabilities/health 可用性检查。
+可通过显式 `ENABLE_FASTER_WHISPER` 动作向 Compose 注入 SenseVoice + faster-whisper，
+验证通过后以 `production-asr` GitHub environment variable 持久化；部署或健康验证失败
+时使用运行前配置重建上一 backend 镜像。未知、重复或格式错误的 Profile ID 均失败
+关闭。该动作不修改生产 secret env 文件、不重部署 Windows ASR、不自动开放其他引擎，
+也不绕过实时 capabilities/health 可用性检查。
 
 手动 `Preflight ASR Production Deployment` workflow 按 engine 选择 faster-whisper 或
 WhisperX evidence adapter，只在 Windows runner temp 下创建验证 wheelhouse 和 venv，
@@ -287,7 +288,7 @@ Ubuntu 跨节点验证失败都会使用受保护的 activation state 恢复旧 
 - faster-whisper R3：Run `31486600594` 在 master
   `1b75034f679b415a65aad4182286408d6983f467` 上通过依赖、固定模型、CUDA、8 个非敏感
   样本质量、资源与确定性门禁。应用 admission 与该 runtime contract 解耦；生产启用
-  仍须通过带配置备份、镜像回滚和实时 capability 验证的 app-only workflow。
+  仍须通过带配置回滚、镜像回滚和实时 capability 验证的 app-only workflow。
 - WhisperX R2/R3：已实现复用 remote Provider/Canonical 契约的 experimental Profile、
   lazy-load service adapter、ASR/中文对齐双模型 manifest 门禁及手动 Windows CUDA
   冒烟 workflow；另已实现复用既有 8 个自制中文样本和统一阈值的资格 workflow，
