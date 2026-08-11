@@ -353,6 +353,10 @@ def test_candidate_promotion_preserves_legacy_release_and_rolls_back_fail_closed
     assert "candidate-asr.env.before" in script
     assert "active.json.before" in script
     assert "previous_task_arguments" in script
+    assert "$legacyRootlessTaskArguments" in script
+    assert '-ProgramRoot "{1}" -DataRoot "{2}"\' -f' in script
+    assert "@($legacyRootlessTaskArguments, $legacyTaskArguments)" in script
+    assert "[string]$actions[0].Arguments -notin $ExpectedArguments" in script
     assert "previous_candidate_id" in script
     assert 'Join-Path $ProgramRoot "bootstrap"' in script
     assert '"-UseActiveRelease"' not in script
@@ -388,6 +392,55 @@ def test_candidate_promotion_preserves_legacy_release_and_rolls_back_fail_closed
     assert "remove-item" not in lowered
     assert "snapshot_download" not in lowered
     assert "pip install" not in lowered
+
+
+def test_legacy_asr_recovery_is_manual_sha_bound_owned_and_rollback_safe():
+    workflow = read(".github/workflows/recover-asr-legacy-production.yml")
+    script = read("scripts/recover-asr-legacy-production.ps1")
+    lowered = (workflow + script).lower()
+
+    assert "workflow_dispatch:" in workflow
+    assert "default: false" in workflow
+    assert "commit_sha must equal the dispatch revision" in workflow
+    assert '"refs/heads/master"' in workflow
+    assert "group: production-gpu-exclusive" in workflow
+    assert "runs-on: [self-hosted, Windows, X64, asr-production]" in workflow
+    assert "environment: production-asr" in workflow
+    assert "ASR_SERVICE_TOKEN" not in workflow
+    assert "GPU_SERVICE_TOKEN" not in workflow
+    assert "asr-legacy-recovery-${{ github.run_id }}" in workflow
+
+    assert '"asr-legacy-recovery/1"' in script
+    assert "Legacy ASR recovery requires no active candidate release" in script
+    assert "$legacyRootlessTaskArguments" in script
+    assert "$legacyTaskArguments" in script
+    assert '"legacy-explicit-roots"' in script
+    assert "Refusing to recover an unexpected RAGPinCheng-ASR" in script
+    assert "Refusing to modify an unexpected process listening on TCP 8200" in script
+    assert "sys._base_executable" in script
+    assert "Get-CimInstance Win32_Process" in script
+    assert "Register-ScheduledTask" in script
+    assert "Start-ScheduledTask" in script
+    assert "Stop-ScheduledTask" in script
+    assert "Stop-Process -Id $processId -Force" in script
+    assert "Wait-LegacyAsrHealthy" in script
+    assert 'ExpectedProfiles @("funasr-sensevoice-small-v1")' in script
+    assert "original_task_action_kind" in script
+    assert "original_task_state" in script
+    assert 'Write-RecoveryState -Status "rolled-back"' in script
+    assert "Automatic legacy ASR recovery rollback failed" in script
+    assert "ConvertTo-Json" in script
+    assert "ASR_SERVICE_TOKEN" not in script.split("$state =", 1)[1]
+    assert "BGE_PRIORITY_PROBE_TOKEN" not in script.split("$state =", 1)[1]
+    for forbidden in (
+        "active.json -destination",
+        "new-netfirewallrule",
+        "remove-netfirewallrule",
+        "pip install",
+        "snapshot_download",
+        "unregister-scheduledtask",
+    ):
+        assert forbidden not in lowered
 
 
 def test_asr_startup_diagnostic_is_manual_read_only_and_sanitized():
