@@ -1546,6 +1546,9 @@ def test_qwen3_asr_qualification_emits_sanitized_preflight_diagnosis():
 
 def test_qwen3_asr_qualification_pins_the_detected_production_profile_contract():
     script = read("scripts/qualify-qwen3-asr-production.ps1")
+    config_resolver = script.split("function Resolve-ProductionAsrConfigPath", 1)[1].split(
+        "function Get-ManagedAsrServiceToken", 1
+    )[0]
     token_reader = script.split("function Get-ManagedAsrServiceToken", 1)[1].split(
         "function Get-PinnedProductionAsrCapabilities", 1
     )[0]
@@ -1567,15 +1570,27 @@ def test_qwen3_asr_qualification_pins_the_detected_production_profile_contract()
     assert '$profileIdentity -notin @(' in capability_reader
     assert '"$fasterWhisperProfile`n$senseVoiceProfile"' in capability_reader
     assert "do not match a pinned profile contract" in capability_reader
+    assert '"RAGPinCheng-ASR"' in config_resolver
+    assert "-UseActiveRelease" in config_resolver
+    assert '"release-state\\active.json"' in config_resolver
+    assert '"asr-active-release/1"' in config_resolver
+    assert "'^[0-9]{1,20}$'" in config_resolver
+    assert '"config\\releases"' in config_resolver
+    assert ".StartsWith($releaseConfigRoot + '\\'" in config_resolver
+    assert 'return Join-Path $Root "config\\asr.env"' in config_resolver
     assert '$name -eq "ASR_SERVICE_TOKEN"' in token_reader
     assert "$seenNames[$name] = $true" in token_reader
     assert "$serviceToken = $Matches[2]" in token_reader
     assert "$values[$name]" not in token_reader
-    assert "Get-ManagedAsrServiceToken -Root $Root" in capability_reader
+    assert "Get-ManagedAsrServiceToken -ConfigPath $ConfigPath" in capability_reader
     assert "-Token $serviceToken" in capability_reader
     assert "ASR_SERVICE_TOKEN" not in verifier_arguments
     assert '"-EncodedCommand", $encodedCommand' in verifier_arguments
-    assert "-ExpectedProfiles @({3})" in verifier_arguments
+    assert "-ConfigPath {2}" in verifier_arguments
+    assert "-ExpectedProfiles @({4})" in verifier_arguments
+    assert "Resolve-ProductionAsrConfigPath `" in preflight
+    assert "-TaskSnapshot $PreTaskSnapshot" in preflight
+    assert "-ConfigPath $ProductionAsrConfigPath" in preflight
     assert (
         "$ExpectedProductionProfiles = [string[]]@($PreProductionCapabilities.service_profiles)"
         in preflight
@@ -1584,6 +1599,9 @@ def test_qwen3_asr_qualification_pins_the_detected_production_profile_contract()
     assert "-ExpectedProfiles $ExpectedProductionProfiles" in preflight
     assert "New-AsrVerifierArguments `" in postflight
     assert "-ExpectedProfiles $ExpectedProductionProfiles" in postflight
+    assert "Resolve-ProductionAsrConfigPath `" in postflight
+    assert "Production ASR active release changed" in postflight
+    assert "[StringComparison]::OrdinalIgnoreCase" in postflight
     assert 'service_profiles = @("funasr-sensevoice-small-v1")' not in script
 
 
