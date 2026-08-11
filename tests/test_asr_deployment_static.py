@@ -1546,8 +1546,10 @@ def test_qwen3_asr_qualification_emits_sanitized_preflight_diagnosis():
     assert "Write-SanitizedPreflightFailure" in failure_handler
 
 
-def test_qwen3_asr_qualification_pins_the_detected_production_profile_contract():
-    script = read("scripts/qualify-qwen3-asr-production.ps1")
+def _assert_qualification_pins_the_detected_production_profile_contract(
+    script_path: str,
+):
+    script = read(script_path)
     config_resolver = script.split("function Resolve-ProductionAsrConfigPath", 1)[1].split(
         "function Get-ManagedAsrServiceToken", 1
     )[0]
@@ -1560,9 +1562,10 @@ def test_qwen3_asr_qualification_pins_the_detected_production_profile_contract()
     verifier_arguments = script.split("function New-AsrVerifierArguments", 1)[1].split(
         "function Assert-BgeIdle", 1
     )[0]
-    preflight = script.split(
-        '$PreflightFailureStage = "production_asr_contract"', 1
-    )[1].split('$PreflightFailureStage = "sample_manifest_presence"', 1)[0]
+    preflight_marker = "$ProductionAsrConfigPath = Resolve-ProductionAsrConfigPath"
+    preflight = preflight_marker + script.split(preflight_marker, 1)[1].split(
+        'if (-not (Test-Path -LiteralPath $SampleManifest', 1
+    )[0]
     postflight = script.split("$PostFirewallSnapshot = Get-FirewallSnapshot", 1)[1].split(
         "Invoke-External `\n        -FilePath $VenvPython", 1
     )[0]
@@ -1605,6 +1608,18 @@ def test_qwen3_asr_qualification_pins_the_detected_production_profile_contract()
     assert "Production ASR active release changed" in postflight
     assert "[StringComparison]::OrdinalIgnoreCase" in postflight
     assert 'service_profiles = @("funasr-sensevoice-small-v1")' not in script
+
+
+def test_qwen3_asr_qualification_pins_the_detected_production_profile_contract():
+    _assert_qualification_pins_the_detected_production_profile_contract(
+        "scripts/qualify-qwen3-asr-production.ps1"
+    )
+
+
+def test_faster_whisper_qualification_pins_the_detected_production_profile_contract():
+    _assert_qualification_pins_the_detected_production_profile_contract(
+        "scripts/qualify-faster-whisper-production.ps1"
+    )
 
 
 def test_qwen3_asr_qualification_emits_sanitized_dependency_diagnosis():
