@@ -117,5 +117,11 @@ jobs:
             fi
             sleep 5
           done
+          "${COMPOSE[@]}" ps backend || true
+          CONTAINER_ID="$("${COMPOSE[@]}" ps -aq backend)"
+          if [ -n "${CONTAINER_ID}" ]; then
+            docker inspect --format 'APP_BACKUP_RECOVERY container_status={{.State.Status}} health={{if .State.Health}}{{.State.Health.Status}}{{end}} exit={{.State.ExitCode}} error={{.State.Error}}' "${CONTAINER_ID}" || true
+            "${COMPOSE[@]}" logs --no-color --tail 200 backend || true
+          fi
           echo "CRITICAL: approved App backup recovery did not become healthy"
           exit 1
