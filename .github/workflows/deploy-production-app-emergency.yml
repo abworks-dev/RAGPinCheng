@@ -293,8 +293,47 @@ jobs:
           COMPOSE=(docker compose -p ragpincheng-prod \
             -f "${REPO_PATH}/docker/docker-compose.yml" \
             -f "${COMPOSE_OVERRIDE}" --env-file "${COMPOSE_ENV_FILE}")
-          PREVIOUS_ASR_ENABLED="$("${COMPOSE[@]}" exec -T backend python -c \
-            'from src.config import ASR_ENABLED; print("true" if ASR_ENABLED else "false")')"
+
+          remove_legacy_recovery_backend() {
+            local candidate project service host_port container_port
+            while IFS= read -r candidate; do
+              [ -n "${candidate}" ] || continue
+              project="$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project"}}' "${candidate}")"
+              service="$(docker inspect --format '{{index .Config.Labels "com.docker.compose.service"}}' "${candidate}")"
+              host_port="$(docker inspect --format '{{(index (index .HostConfig.PortBindings "8000/tcp") 0).HostPort}}' "${candidate}" 2>/dev/null || true)"
+              container_port="$(docker inspect --format '{{json (index .Config.ExposedPorts "8000/tcp")}}' "${candidate}" 2>/dev/null || true)"
+              if [ "${project}" != "docker" ] || [ "${service}" != "backend" ] || \
+                [ "${host_port}" != "80" ] || [ "${container_port}" != "{}" ]; then
+                echo "ERROR: refusing to remove unverified port-80 container ${candidate}"
+                return 1
+              fi
+              docker rm -f "${candidate}"
+              echo "APP_ONLY_RECOVERY_HARNESS status=removed-legacy-container id=${candidate}"
+            done < <(docker ps -aq \
+              --filter 'label=com.docker.compose.project=docker' \
+              --filter 'label=com.docker.compose.service=backend')
+          }
+          remove_legacy_recovery_backend
+
+          PREVIOUS_ASR_ENABLED=""
+          if PREVIOUS_ASR_ENABLED="$("${COMPOSE[@]}" exec -T backend python -c \
+            'from src.config import ASR_ENABLED; print("true" if ASR_ENABLED else "false")' 2>/dev/null)"; then
+            echo "APP_ONLY_ASR_STATE source=running-backend"
+          else
+            PREVIOUS_CONTAINER_ID="$("${COMPOSE[@]}" ps -aq backend)"
+            [ -n "${PREVIOUS_CONTAINER_ID}" ] || {
+              echo "ERROR: production backend container identity is missing"
+              exit 1
+            }
+            PREVIOUS_ASR_ENABLED="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' \
+              "${PREVIOUS_CONTAINER_ID}" | python3 -c '
+          import sys
+          values = [line.split("=", 1)[1] for line in sys.stdin if line.startswith("ASR_ENABLED=")]
+          assert len(values) == 1
+          print(values[0].lower())
+          ')"
+            echo "APP_ONLY_ASR_STATE source=container-config"
+          fi
           case "${PREVIOUS_ASR_ENABLED}" in
             true|false) ;;
             *)
