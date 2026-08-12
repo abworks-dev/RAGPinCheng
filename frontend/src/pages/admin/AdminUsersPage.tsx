@@ -1,16 +1,20 @@
-import { KeyRound, MoreHorizontal, ShieldCheck, UserCheck, UserRound, UserX, X } from "lucide-react";
+import { Copy, KeyRound, MoreHorizontal, Plus, Settings, Shield, ShieldCheck, UserCheck, UserRound, UserX, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api } from "../../api/client";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Card, CardContent } from "../../components/ui/card";
+import { Checkbox } from "../../components/ui/checkbox";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../../components/ui/dialog";
 import { EmptyState } from "../../components/ui/empty-state";
 import { ErrorState } from "../../components/ui/error-state";
 import { Input } from "../../components/ui/input";
 import { LoadingState } from "../../components/ui/loading-state";
+import { Select } from "../../components/ui/select";
+import { toast } from "../../components/ui/toast";
 import { cn } from "../../lib/utils";
-import type { AdminConversation, AdminUser, ConversationState } from "../../types";
+import type { AdminConversation, AdminUser, ContentPermission, ContentPermissionGroup, ConversationState } from "../../types";
 import { formatAdminDate } from "./admin-formatters";
 
 const roleLabels: Record<ConversationState["messages"][number]["role"], string> = {
@@ -19,12 +23,26 @@ const roleLabels: Record<ConversationState["messages"][number]["role"], string> 
   system: "系统",
 };
 
+const permissionOptions: { key: ContentPermission; label: string; description: string }[] = [
+  { key: "organize", label: "整理、上传", description: "上传资料并提交确认" },
+  { key: "review", label: "确认", description: "确认或退回待审资料" },
+  { key: "publish", label: "发布", description: "发布资料正式版本" },
+  { key: "manage_categories", label: "分类管理", description: "维护资料分类与层级" },
+  { key: "import_server", label: "后台导入", description: "执行服务器批次导入" },
+];
+
+const samePermissions = (left: ContentPermission[], right: ContentPermission[]) =>
+  left.length === right.length && left.every((item) => right.includes(item));
+
 export function AdminUsersPage() {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [drillUser, setDrillUser] = useState<AdminUser | null>(null);
   const [filter, setFilter] = useState("");
+  const [groups, setGroups] = useState<ContentPermissionGroup[]>([]);
+  const [permissionUser, setPermissionUser] = useState<AdminUser | null>(null);
+  const [managingGroups, setManagingGroups] = useState(false);
 
   // Filter on both real_name and employee_id since they live in the same
   // column visually and admins will sometimes search by either.
@@ -42,8 +60,12 @@ export function AdminUsersPage() {
     setLoading(true);
     setError(null);
     try {
-      const { users } = await api.adminListUsers();
+      const [{ users }, permissionGroups] = await Promise.all([
+        api.adminListUsers(),
+        api.managedContentPermissionGroups(),
+      ]);
       setUsers(users);
+      setGroups(permissionGroups);
     } catch (e: any) {
       setError(e?.message || String(e));
     } finally {
@@ -92,12 +114,12 @@ export function AdminUsersPage() {
 
   return (
     <section className="space-y-5" aria-labelledby="admin-users-title">
-      <header>
-        <p className="text-ui-xs font-medium uppercase tracking-[0.14em] text-primary">账号与权限</p>
-        <h1 id="admin-users-title" className="mt-1 text-ui-2xl font-semibold tracking-tight text-foreground">
-          用户管理
-        </h1>
-        <p className="mt-1 text-ui-sm text-muted-foreground">查看账号状态、角色与使用情况，并执行受控的管理员操作。</p>
+      <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div><p className="text-ui-xs font-medium uppercase tracking-[0.14em] text-primary">账号与权限</p>
+          <h1 id="admin-users-title" className="mt-1 text-ui-2xl font-semibold tracking-tight text-foreground">用户管理</h1>
+          <p className="mt-1 text-ui-sm text-muted-foreground">查看账号状态、资料权限与使用情况，并执行受控的管理员操作。</p>
+        </div>
+        <Button variant="outline" size="sm" onClick={() => setManagingGroups(true)}><Settings className="size-4" />权限组管理</Button>
       </header>
 
       <Card className="shadow-surface">
@@ -155,6 +177,7 @@ export function AdminUsersPage() {
                   <th scope="col" className="px-4 py-3 text-left font-medium">用户</th>
                   <th scope="col" className="px-4 py-3 text-left font-medium">角色</th>
                   <th scope="col" className="px-4 py-3 text-left font-medium">状态</th>
+                  <th scope="col" className="px-4 py-3 text-left font-medium">资料权限</th>
                   <th scope="col" className="px-4 py-3 text-right font-medium">对话</th>
                   <th scope="col" className="hidden px-4 py-3 text-left font-medium lg:table-cell">最近登录</th>
                   <th scope="col" className="hidden px-4 py-3 text-left font-medium xl:table-cell">注册时间</th>
@@ -178,6 +201,7 @@ export function AdminUsersPage() {
                         {user.is_active ? "启用" : "已停用"}
                       </Badge>
                     </td>
+                    <td className="max-w-56 px-4 py-3"><PermissionSummary user={user} groups={groups} /></td>
                     <td className="px-4 py-3 text-right">
                       <Button
                         variant="link"
@@ -201,6 +225,7 @@ export function AdminUsersPage() {
                         onToggleActive={() => toggleActive(user)}
                         onToggleRole={() => toggleRole(user)}
                         onResetPassword={() => resetPw(user)}
+                        onSetPermissions={() => setPermissionUser(user)}
                       />
                     </td>
                   </tr>
@@ -217,8 +242,114 @@ export function AdminUsersPage() {
           onClose={() => setDrillUser(null)}
         />
       )}
+      <PermissionDialog user={permissionUser} groups={groups.filter((group) => group.is_active)} onClose={() => setPermissionUser(null)} onSaved={refresh} />
+      <PermissionGroupsDialog open={managingGroups} groups={groups} onOpenChange={setManagingGroups} onSaved={refresh} />
     </section>
   );
+}
+
+function PermissionSummary({ user, groups }: { user: AdminUser; groups: ContentPermissionGroup[] }) {
+  if (user.role === "admin") return <Badge variant="info">系统管理员 · 全部权限</Badge>;
+  const permissions = user.content_permissions || [];
+  const matched = groups.find((group) => group.is_active && samePermissions(group.permissions, permissions));
+  if (matched) return <Badge variant={permissions.length ? "outline" : "secondary"}>{matched.display_name}</Badge>;
+  if (!permissions.length) return <Badge variant="secondary">无资料权限</Badge>;
+  const labels = permissionOptions.filter((item) => permissions.includes(item.key)).map((item) => item.label);
+  return <div className="flex flex-wrap items-center gap-1.5"><Badge variant="outline">自定义</Badge><span className="text-ui-xs text-muted-foreground" title={labels.join("、")}>{labels.slice(0, 2).join("、")}{labels.length > 2 ? ` +${labels.length - 2}` : ""}</span></div>;
+}
+
+function PermissionDialog({ user, groups, onClose, onSaved }: { user: AdminUser | null; groups: ContentPermissionGroup[]; onClose: () => void; onSaved: () => Promise<void> }) {
+  const [permissions, setPermissions] = useState<ContentPermission[]>([]);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => { setPermissions(user?.content_permissions || []); }, [user]);
+  if (!user) return null;
+  const disabled = user.role === "admin" || !user.is_active;
+  const matched = groups.find((group) => samePermissions(group.permissions, permissions));
+  const changed = !samePermissions(permissions, user.content_permissions || []);
+  const save = async () => {
+    setSaving(true);
+    try {
+      await api.updateManagedContentPermissions(user.id, permissions);
+      await onSaved();
+      toast.success(`${user.real_name}的资料权限已保存`);
+      onClose();
+    } catch (saveError) {
+      toast.error(saveError instanceof Error ? saveError.message : "权限保存失败");
+    } finally { setSaving(false); }
+  };
+  return <Dialog open onOpenChange={(open) => { if (!open && !saving) onClose(); }}>
+    <DialogContent className="max-h-[calc(100vh-2rem)] max-w-2xl overflow-y-auto">
+      <DialogHeader><DialogTitle>设置资料权限</DialogTitle><DialogDescription>{user.real_name} · {user.employee_id}</DialogDescription></DialogHeader>
+      <div className="space-y-5">
+        <label className="block space-y-1.5 text-ui-sm font-medium">权限组
+          <Select aria-label="选择权限组" value={matched?.id || "custom"} disabled={disabled || saving} onChange={(event) => {
+            const group = groups.find((item) => item.id === event.target.value);
+            if (group) setPermissions(group.permissions);
+          }}>
+            {groups.map((group) => <option key={group.id} value={group.id}>{group.display_name}</option>)}
+            <option value="custom">自定义配置</option>
+          </Select>
+        </label>
+        <fieldset disabled={disabled || saving} className="space-y-2"><legend className="mb-2 text-ui-sm font-medium">实际权限</legend>
+          <div className="grid gap-2 sm:grid-cols-2">{permissionOptions.map((option) => <label key={option.key} className="flex min-h-16 cursor-pointer items-start gap-3 rounded-ui-md border border-border p-3 has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60">
+            <Checkbox className="mt-0.5" checked={user.role === "admin" || permissions.includes(option.key)} onChange={(event) => setPermissions((current) => event.target.checked ? [...current, option.key] : current.filter((item) => item !== option.key))} />
+            <span><span className="block text-ui-sm font-medium">{option.label}</span><span className="mt-0.5 block text-ui-xs text-muted-foreground">{option.description}</span></span>
+          </label>)}</div>
+        </fieldset>
+        <div className="rounded-ui-md bg-surface-muted px-3 py-2 text-ui-xs text-muted-foreground" role="status">
+          {user.role === "admin" ? "管理员默认拥有全部权限，不能单独取消。" : !user.is_active ? "账号已停用，权限保留但暂不能修改。" : permissions.length ? `保存后将拥有：${permissionOptions.filter((item) => permissions.includes(item.key)).map((item) => item.label).join("、")}` : "保存后将不拥有资料管理权限。"}
+        </div>
+      </div>
+      <DialogFooter><Button variant="outline" onClick={onClose} disabled={saving}>取消</Button><Button onClick={() => void save()} disabled={disabled || saving || !changed}>{saving ? "保存中…" : "保存权限"}</Button></DialogFooter>
+    </DialogContent>
+  </Dialog>;
+}
+
+function PermissionGroupsDialog({ open, groups, onOpenChange, onSaved }: { open: boolean; groups: ContentPermissionGroup[]; onOpenChange: (open: boolean) => void; onSaved: () => Promise<void> }) {
+  const [selectedId, setSelectedId] = useState("");
+  const [name, setName] = useState("");
+  const [permissions, setPermissions] = useState<ContentPermission[]>([]);
+  const [saving, setSaving] = useState(false);
+  const selected = groups.find((group) => group.id === selectedId);
+  useEffect(() => {
+    if (!open) return;
+    const first = groups[0];
+    setSelectedId(first?.id || "new"); setName(first?.display_name || ""); setPermissions(first?.permissions || []);
+  }, [open, groups]);
+  const choose = (id: string) => {
+    setSelectedId(id);
+    const group = groups.find((item) => item.id === id);
+    setName(group?.display_name || ""); setPermissions(group?.permissions || []);
+  };
+  const save = async () => {
+    setSaving(true);
+    try {
+      if (selected) await api.updateManagedContentPermissionGroup(selected.id, { display_name: name.trim(), permissions });
+      else await api.createManagedContentPermissionGroup({ display_name: name.trim(), permissions });
+      await onSaved(); toast.success(selected ? "权限组已保存" : "权限组已创建");
+    } catch (saveError) { toast.error(saveError instanceof Error ? saveError.message : "权限组保存失败"); }
+    finally { setSaving(false); }
+  };
+  const copy = () => { setSelectedId("new"); setName(`${selected?.display_name || "权限组"}副本`); setPermissions(selected?.permissions || []); };
+  const deactivate = async () => {
+    if (!selected || selected.is_system) return;
+    setSaving(true);
+    try { await api.updateManagedContentPermissionGroup(selected.id, { is_active: !selected.is_active }); await onSaved(); toast.success(selected.is_active ? "权限组已停用" : "权限组已启用"); }
+    catch (saveError) { toast.error(saveError instanceof Error ? saveError.message : "权限组状态保存失败"); }
+    finally { setSaving(false); }
+  };
+  return <Dialog open={open} onOpenChange={(next) => { if (!saving) onOpenChange(next); }}><DialogContent className="max-h-[calc(100vh-2rem)] max-w-3xl overflow-y-auto">
+    <DialogHeader><DialogTitle>权限组管理</DialogTitle><DialogDescription>权限组是配置模板；修改模板不会改变既有用户权限。</DialogDescription></DialogHeader>
+    <div className="grid gap-5 md:grid-cols-[15rem_minmax(0,1fr)]">
+      <div className="space-y-2"><Button variant="outline" className="w-full justify-start" onClick={() => choose("new")}><Plus className="size-4" />新建权限组</Button>
+        <div className="divide-y divide-border border-y border-border">{groups.map((group) => <button type="button" key={group.id} onClick={() => choose(group.id)} className={cn("flex w-full items-center justify-between gap-2 px-2 py-2.5 text-left text-ui-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", selectedId === group.id && "bg-primary/10")}><span>{group.display_name}</span><Badge variant={group.is_active ? "outline" : "secondary"}>{group.is_system ? "预设" : group.is_active ? "自定义" : "停用"}</Badge></button>)}</div>
+      </div>
+      <div className="space-y-4"><label className="block space-y-1.5 text-ui-sm font-medium">权限组名称<Input value={name} disabled={selected?.is_system || saving} onChange={(event) => setName(event.target.value)} /></label>
+        <fieldset disabled={selected?.is_system || saving} className="space-y-2"><legend className="text-ui-sm font-medium">模板权限</legend>{permissionOptions.map((option) => <label key={option.key} className="flex min-h-control-md items-center gap-2 rounded-ui-md border border-border px-3 py-2 text-ui-sm has-[:disabled]:opacity-60"><Checkbox checked={permissions.includes(option.key)} onChange={(event) => setPermissions((current) => event.target.checked ? [...current, option.key] : current.filter((item) => item !== option.key))} />{option.label}</label>)}</fieldset>
+        <div className="flex flex-wrap justify-between gap-2"><div>{selected && <Button variant="outline" onClick={copy} disabled={saving}><Copy className="size-4" />复制</Button>}</div><div className="flex gap-2">{selected && !selected.is_system && <Button variant="outline" onClick={() => void deactivate()} disabled={saving}>{selected.is_active ? "停用" : "启用"}</Button>}<Button onClick={() => void save()} disabled={saving || selected?.is_system || name.trim().length < 2}>{saving ? "保存中…" : selected ? "保存模板" : "创建模板"}</Button></div></div>
+      </div>
+    </div>
+  </DialogContent></Dialog>;
 }
 
 function UserActionsMenu({
@@ -226,11 +357,13 @@ function UserActionsMenu({
   onToggleActive,
   onToggleRole,
   onResetPassword,
+  onSetPermissions,
 }: {
   user: AdminUser;
   onToggleActive: () => void;
   onToggleRole: () => void;
   onResetPassword: () => void;
+  onSetPermissions: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [position, setPosition] = useState({ top: 0, right: 0 });
@@ -257,20 +390,21 @@ function UserActionsMenu({
     document.addEventListener("mousedown", closeIfOutside);
     document.addEventListener("keydown", closeOnEscape);
     window.addEventListener("resize", closeOnViewportChange);
-    window.addEventListener("scroll", closeOnViewportChange, true);
     return () => {
       document.removeEventListener("mousedown", closeIfOutside);
       document.removeEventListener("keydown", closeOnEscape);
       window.removeEventListener("resize", closeOnViewportChange);
-      window.removeEventListener("scroll", closeOnViewportChange, true);
     };
   }, [open]);
 
   function toggleMenu() {
     if (!open && triggerRef.current) {
       const rect = triggerRef.current.getBoundingClientRect();
+      const estimatedMenuHeight = 188;
       setPosition({
-        top: rect.bottom + 6,
+        top: rect.bottom + estimatedMenuHeight + 12 <= window.innerHeight
+          ? rect.bottom + 6
+          : Math.max(12, rect.top - estimatedMenuHeight - 6),
         right: Math.max(12, window.innerWidth - rect.right),
       });
     }
@@ -305,6 +439,11 @@ function UserActionsMenu({
             className="fixed z-dropdown w-44 overflow-hidden rounded-ui-lg border border-border bg-popover p-1.5 text-left text-popover-foreground shadow-overlay"
             style={{ top: position.top, right: position.right }}
           >
+            <button
+              type="button" role="menuitem"
+              className="flex w-full items-center gap-2.5 rounded-ui-md px-2.5 py-2 text-ui-sm transition-colors hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              onClick={() => run(onSetPermissions)}
+            ><Shield className="size-4 text-muted-foreground" aria-hidden="true" />设置权限</button>
             <button
               type="button"
               role="menuitem"

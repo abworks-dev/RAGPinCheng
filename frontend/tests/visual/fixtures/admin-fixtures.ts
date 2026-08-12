@@ -50,6 +50,13 @@ const permissionUsers = [
   { user_id: 9003, employee_id: "TEST-INACTIVE", real_name: "停用测试用户", role: "user", is_active: false, permissions: [] },
 ];
 
+const permissionGroups = [
+  { id: "permission-group-member", group_key: "member", display_name: "普通成员", permissions: [], is_system: true, is_active: true, updated_at: 1700000000 },
+  { id: "permission-group-bim-engineer", group_key: "bim_engineer", display_name: "BIM工程师", permissions: ["organize"], is_system: true, is_active: true, updated_at: 1700000000 },
+  { id: "permission-group-content-owner", group_key: "content_owner", display_name: "资料负责人", permissions: ["review"], is_system: true, is_active: true, updated_at: 1700000000 },
+  { id: "permission-group-system-admin", group_key: "system_admin", display_name: "系统管理员", permissions: ["organize", "review", "publish", "manage_categories", "import_server"], is_system: true, is_active: true, updated_at: 1700000000 },
+];
+
 function json(route: Route, body: unknown, status = 200) {
   return route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
 }
@@ -63,7 +70,12 @@ export async function installAdminRoutes(page: Page, scenario: AdminScenario = "
     if (!path.startsWith("/api/")) return route.continue();
 
     if (path === "/api/auth/me") return json(route, admin);
-    if (path === "/api/admin/users") return json(route, { users: [] });
+    if (path === "/api/admin/users") return json(route, { users: permissionUsers.map((user) => ({
+      id: user.user_id, employee_id: user.employee_id, real_name: user.real_name, role: user.role,
+      is_active: user.is_active, created_at: 1700000000, last_login_at: 1700000000,
+      conversation_count: user.user_id === 9001 ? 3 : 0,
+      content_permissions: user.role === "admin" ? admin.content_permissions : user.permissions,
+    })) });
 
     const isTargetRead = request.method() === "GET" && path.startsWith("/api/admin/content/");
     if (isTargetRead && scenario === "loading") {
@@ -83,6 +95,9 @@ export async function installAdminRoutes(page: Page, scenario: AdminScenario = "
     }
     if (path === "/api/admin/content/permissions") {
       return json(route, scenario === "empty" ? [] : permissionUsers);
+    }
+    if (path === "/api/admin/content/permission-groups") {
+      return json(route, permissionGroups);
     }
 
     if (request.method() !== "GET" && path.startsWith("/api/admin/content/")) {

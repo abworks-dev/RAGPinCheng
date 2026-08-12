@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import sqlite3
 import time
+import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
@@ -32,6 +33,8 @@ from .content_store import (
 from .db import get_db
 from .schemas import (
     CreateManagedCategoryRequest,
+    CreateContentPermissionGroupRequest,
+    ContentPermissionGroupDTO,
     ContentPermissionUserDTO,
     ManagedCategoryDTO,
     ManagedContentItemDTO,
@@ -42,6 +45,7 @@ from .schemas import (
     ReviewManagedContentRequest,
     UpdateManagedCategoryRequest,
     UpdateContentPermissionsRequest,
+    UpdateContentPermissionGroupRequest,
 )
 
 
@@ -56,6 +60,28 @@ _DOC_TYPES = {
     ".pptx": "pptx",
 }
 _CONTENT_READ = CONTENT_PERMISSIONS
+
+
+def _permission_group_dto(conn: sqlite3.Connection, row: sqlite3.Row) -> ContentPermissionGroupDTO:
+    permissions = [
+        str(item[0])
+        for item in conn.execute(
+            "SELECT permission FROM content_permission_group_items WHERE group_id=? ORDER BY permission",
+            (row["id"],),
+        ).fetchall()
+    ]
+    return ContentPermissionGroupDTO(
+        id=row["id"], group_key=row["group_key"], display_name=row["display_name"],
+        permissions=permissions, is_system=bool(row["is_system"]),
+        is_active=bool(row["is_active"]), updated_at=row["updated_at"],
+    )
+
+
+def _validate_permissions(permissions: list[str]) -> set[str]:
+    requested = set(permissions)
+    if len(requested) != len(permissions) or not requested.issubset(CONTENT_PERMISSIONS):
+        raise HTTPException(status_code=400, detail="包含重复或未知资料权限")
+    return requested
 
 
 def _category_dto(row: sqlite3.Row) -> ManagedCategoryDTO:
@@ -346,6 +372,103 @@ def get_content_index_job(
     )
 
 
+@router.get("/permission-groups", response_model=list[ContentPermissionGroupDTO])
+def list_permission_groups(
+    _admin: CurrentUser = Depends(require_admin),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> list[ContentPermissionGroupDTO]:
+    rows = conn.execute(
+        """SELECT id,group_key,display_name,is_system,is_active,updated_at
+           FROM content_permission_groups
+           ORDER BY CASE group_key
+               WHEN 'member' THEN 10 WHEN 'bim_engineer' THEN 20
+               WHEN 'content_owner' THEN 30 WHEN 'system_admin' THEN 40
+               ELSE 100 END, created_at, display_name"""
+    ).fetchall()
+    return [_permission_group_dto(conn, row) for row in rows]
+
+
+@router.post("/permission-groups", response_model=ContentPermissionGroupDTO, status_code=201)
+def create_permission_group(
+    body: CreateContentPermissionGroupRequest,
+    actor: CurrentUser = Depends(require_csrf_admin),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> ContentPermissionGroupDTO:
+    _require_feature()
+    display_name = body.display_name.strip()
+    if len(display_name) < 2:
+        raise HTTPException(status_code=400, detail="权限组名称至少 2 个字符")
+    requested = _validate_permissions(body.permissions)
+    group_id = str(uuid.uuid4())
+    now = int(time.time())
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute(
+            """INSERT INTO content_permission_groups
+               (id,group_key,display_name,is_system,is_active,created_by,created_at,updated_at)
+               VALUES (?,?,?,?,?,?,?,?)""",
+            (group_id, f"custom_{group_id}", display_name, 0, 1, actor.id, now, now),
+        )
+        conn.executemany(
+            "INSERT INTO content_permission_group_items(group_id,permission) VALUES (?,?)",
+            [(group_id, permission) for permission in sorted(requested)],
+        )
+        audit_event(conn, "content.permission_group_created", actor_user_id=actor.id,
+                    metadata={"group_id": group_id, "permissions": sorted(requested)})
+        conn.commit()
+    except sqlite3.IntegrityError as exc:
+        conn.rollback()
+        raise HTTPException(status_code=409, detail="权限组名称已存在") from exc
+    except Exception:
+        conn.rollback()
+        raise
+    row = conn.execute("SELECT * FROM content_permission_groups WHERE id=?", (group_id,)).fetchone()
+    return _permission_group_dto(conn, row)
+
+
+@router.patch("/permission-groups/{group_id}", response_model=ContentPermissionGroupDTO)
+def update_permission_group(
+    group_id: str,
+    body: UpdateContentPermissionGroupRequest,
+    actor: CurrentUser = Depends(require_csrf_admin),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> ContentPermissionGroupDTO:
+    _require_feature()
+    row = conn.execute("SELECT * FROM content_permission_groups WHERE id=?", (group_id,)).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="权限组不存在")
+    if row["is_system"]:
+        raise HTTPException(status_code=400, detail="系统预设权限组不可修改")
+    display_name = body.display_name.strip() if body.display_name is not None else row["display_name"]
+    if len(display_name) < 2:
+        raise HTTPException(status_code=400, detail="权限组名称至少 2 个字符")
+    requested = _validate_permissions(body.permissions) if body.permissions is not None else None
+    now = int(time.time())
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute(
+            "UPDATE content_permission_groups SET display_name=?,is_active=?,updated_at=? WHERE id=?",
+            (display_name, int(body.is_active if body.is_active is not None else row["is_active"]), now, group_id),
+        )
+        if requested is not None:
+            conn.execute("DELETE FROM content_permission_group_items WHERE group_id=?", (group_id,))
+            conn.executemany(
+                "INSERT INTO content_permission_group_items(group_id,permission) VALUES (?,?)",
+                [(group_id, permission) for permission in sorted(requested)],
+            )
+        audit_event(conn, "content.permission_group_updated", actor_user_id=actor.id,
+                    metadata={"group_id": group_id, "permissions": sorted(requested) if requested is not None else None})
+        conn.commit()
+    except sqlite3.IntegrityError as exc:
+        conn.rollback()
+        raise HTTPException(status_code=409, detail="权限组名称已存在") from exc
+    except Exception:
+        conn.rollback()
+        raise
+    updated = conn.execute("SELECT * FROM content_permission_groups WHERE id=?", (group_id,)).fetchone()
+    return _permission_group_dto(conn, updated)
+
+
 @router.get("/permissions", response_model=list[ContentPermissionUserDTO])
 def get_content_permissions(
     _user: CurrentUser = Depends(require_admin),
@@ -382,9 +505,7 @@ def put_content_permissions(
     conn: sqlite3.Connection = Depends(get_db),
 ) -> ContentPermissionUserDTO:
     _require_feature()
-    requested = set(body.permissions)
-    if not requested.issubset(CONTENT_PERMISSIONS):
-        raise HTTPException(status_code=400, detail="包含未知资料权限")
+    requested = _validate_permissions(body.permissions)
     user = conn.execute(
         "SELECT id,employee_id,real_name,role,is_active FROM users WHERE id=?", (user_id,)
     ).fetchone()

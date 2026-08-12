@@ -140,6 +140,7 @@ export type AdminUser = {
   created_at: number;
   last_login_at: number | null;
   conversation_count: number;
+  content_permissions: ContentPermission[];
 };
 
 export type AdminConversation = {
@@ -274,6 +275,16 @@ export type ContentPermissionUser = {
   role: "user" | "admin";
   is_active: boolean;
   permissions: ContentPermission[];
+};
+
+export type ContentPermissionGroup = {
+  id: string;
+  group_key: string;
+  display_name: string;
+  permissions: ContentPermission[];
+  is_system: boolean;
+  is_active: boolean;
+  updated_at: number;
 };
 
 export type AdminFeedbackEntry = {

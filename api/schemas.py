@@ -73,6 +73,7 @@ class AdminUserDTO(BaseModel):
     created_at: int
     last_login_at: int | None
     conversation_count: int
+    content_permissions: list[str] = Field(default_factory=list)
 
 
 class AdminUserListResponse(BaseModel):
@@ -325,6 +326,27 @@ class ContentPermissionUserDTO(BaseModel):
 
 class UpdateContentPermissionsRequest(BaseModel):
     permissions: list[str]
+
+
+class ContentPermissionGroupDTO(BaseModel):
+    id: str
+    group_key: str
+    display_name: str
+    permissions: list[str]
+    is_system: bool
+    is_active: bool
+    updated_at: int
+
+
+class CreateContentPermissionGroupRequest(BaseModel):
+    display_name: str = Field(..., min_length=2, max_length=30)
+    permissions: list[str]
+
+
+class UpdateContentPermissionGroupRequest(BaseModel):
+    display_name: str | None = Field(default=None, min_length=2, max_length=30)
+    permissions: list[str] | None = None
+    is_active: bool | None = None
 
 
 class DeleteDocumentRequest(BaseModel):

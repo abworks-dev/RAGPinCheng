@@ -20,7 +20,11 @@ from api.content_store import (
 from api import content_publication
 from api import routes_content
 from api.auth import CurrentUser
-from api.schemas import UpdateContentPermissionsRequest
+from api.schemas import (
+    CreateContentPermissionGroupRequest,
+    UpdateContentPermissionGroupRequest,
+    UpdateContentPermissionsRequest,
+)
 from api.db import init_db
 from api.content_view import rebuild_read_only_view
 from src.content_retrieval_visibility import SQLitePublishedContentVisibility
@@ -53,6 +57,41 @@ def test_migration_seeds_approved_top_level_categories(tmp_path):
         ("06", "项目经验与案例"),
         ("99", "待确认资料"),
     ]
+    conn.close()
+
+
+def test_migration_seeds_permission_group_templates(tmp_path):
+    conn = _db(tmp_path)
+    groups = routes_content.list_permission_groups(
+        CurrentUser(999, "admin", "管理员", "admin", "csrf"), conn
+    )
+    assert [(group.group_key, group.display_name, group.permissions) for group in groups] == [
+        ("member", "普通成员", []),
+        ("bim_engineer", "BIM工程师", ["organize"]),
+        ("content_owner", "资料负责人", ["review"]),
+        ("system_admin", "系统管理员", ["import_server", "manage_categories", "organize", "publish", "review"]),
+    ]
+    conn.close()
+
+
+def test_custom_permission_group_is_a_template_not_a_user_binding(tmp_path, monkeypatch):
+    conn = _db(tmp_path)
+    monkeypatch.setattr(routes_content, "CONTENT_MANAGEMENT_ENABLED", True)
+    actor = CurrentUser(999, "admin", "管理员", "admin", "csrf")
+    created = routes_content.create_permission_group(
+        CreateContentPermissionGroupRequest(display_name="项目发布员", permissions=["publish"]), actor, conn
+    )
+    user_id = conn.execute("SELECT id FROM users WHERE employee_id='u1'").fetchone()[0]
+    routes_content.put_content_permissions(
+        user_id, UpdateContentPermissionsRequest(permissions=created.permissions), actor, conn
+    )
+    routes_content.update_permission_group(
+        created.id, UpdateContentPermissionGroupRequest(permissions=["review"]), actor, conn
+    )
+    actual = [row[0] for row in conn.execute(
+        "SELECT permission FROM content_permissions WHERE user_id=?", (user_id,)
+    )]
+    assert actual == ["publish"]
     conn.close()
 
 
