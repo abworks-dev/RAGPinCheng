@@ -31,6 +31,10 @@ export function SpreadsheetPreview({
 
   useEffect(() => {
     let cancelled = false;
+    setLoading(true);
+    setError(null);
+    setSheets([]);
+    setActiveSheet(0);
 
     async function load() {
       try {
@@ -78,10 +82,9 @@ export function SpreadsheetPreview({
         }
       } catch (e: any) {
         if (!cancelled) {
-          const msg = e?.message || String(e);
-          setError(msg);
+          setError("暂时无法预览此 Excel 表格，请确认源文件仍然存在且格式有效。");
           setLoading(false);
-          onError?.(msg);
+          onError?.("XLSX preview unavailable");
         }
       }
     }
@@ -93,7 +96,7 @@ export function SpreadsheetPreview({
   if (error) {
     return (
       <div className="flex items-center justify-center h-full text-sm text-red-600 p-4">
-        XLSX 加载失败：{error}
+        {error}
       </div>
     );
   }

@@ -94,8 +94,9 @@
 - `ParsedDoc → Parent/Child`；
 - Child 必须保存稳定 `parent_id`；
 - Parent SQLite 与 Qdrant Child 使用确定性 ID 关联；
-- 管理列表的 `document_id` 由规范化源路径哈希派生，不新增持久化字段；
-- 管理列表为已索引资料返回一个稳定排序的代表性 `preview_parent_id`，仅用于复用现有源文件预览接口；
+- 管理列表的 `document_id` 由规范化源路径哈希派生，不新增持久化字段；列表和删除请求均使用该不透明句柄，不向浏览器返回物理路径或 `content://` 对象路径；
+- 管理列表只为已有 Parent 的资料返回按 `parent_id` 排序的代表性 `preview_parent_id`，仅用于复用现有源文件预览接口；该句柄在当前索引快照内确定，重新索引后允许变化；
+- 管理页内预览支持 PDF、DOCX、XLSX 和 PPTX：PPTX 依赖已生成的 `.preview.pdf`，XLSX 优先使用 `.preview.xlsx`；Markdown 可被索引但当前不提供管理页内渲染；源文件或转换产物缺失、浏览器解析失败时显示脱敏的可关闭错误状态；
 - 主列表状态取同一源路径的最新索引任务，并保留 `is_indexed` 区分是否已有可检索版本；
 - 已完成但已无 Parent 索引的历史任务只保留在索引活动中，不再生成资料条或计入可检索统计；
 - 索引任务 DTO 提供 `source_exists`，仅表达源文件当前是否仍为普通文件，不暴露额外路径信息；

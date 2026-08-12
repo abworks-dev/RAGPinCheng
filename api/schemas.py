@@ -189,7 +189,6 @@ class UploadResponse(BaseModel):
 
 class IndexedDocumentDTO(BaseModel):
     document_id: str
-    source_path: str
     display_path: str
     filename: str
     doc_title: str
@@ -351,7 +350,7 @@ class UpdateContentPermissionGroupRequest(BaseModel):
 
 
 class DeleteDocumentRequest(BaseModel):
-    source_path: str
+    document_id: str = Field(min_length=24, max_length=24)
     delete_file: bool = False
 
 

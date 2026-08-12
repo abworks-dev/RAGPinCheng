@@ -11,6 +11,7 @@ import {
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { api } from "../../api/client";
 import { Alert, AlertDescription, AlertTitle } from "../../components/ui/alert";
 import { Badge } from "../../components/ui/badge";
@@ -402,23 +403,82 @@ function DocumentsTable({
   const [deletePartiallyCompleted, setDeletePartiallyCompleted] = useState(false);
   const [retryingId, setRetryingId] = useState<number | null>(null);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [menuPosition, setMenuPosition] = useState({ top: 0, right: 0 });
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const triggerRefs = useRef(new Map<string, HTMLButtonElement>());
   const { open: openPreview } = usePdfPreview();
+
+  const openDocument = openMenuId
+    ? documents.find((document) => document.document_id === openMenuId) ?? null
+    : null;
+
+  const closeMenu = useCallback((restoreFocus = false) => {
+    const trigger = openMenuId ? triggerRefs.current.get(openMenuId) : null;
+    setOpenMenuId(null);
+    if (restoreFocus) requestAnimationFrame(() => trigger?.focus());
+  }, [openMenuId]);
+
+  const openMenu = useCallback((documentId: string, trigger: HTMLButtonElement) => {
+    if (openMenuId === documentId) {
+      closeMenu(true);
+      return;
+    }
+    const rect = trigger.getBoundingClientRect();
+    const menuHeight = 152;
+    const top = rect.bottom + 4 + menuHeight <= window.innerHeight
+      ? rect.bottom + 4
+      : Math.max(8, rect.top - menuHeight - 4);
+    setMenuPosition({ top, right: Math.max(8, window.innerWidth - rect.right) });
+    setOpenMenuId(documentId);
+  }, [closeMenu, openMenuId]);
 
   useEffect(() => {
     function closeOnOutsidePointer(event: PointerEvent) {
       const target = event.target;
-      if (!(target instanceof Element) || !target.closest("[data-document-menu]")) setOpenMenuId(null);
+      if (!(target instanceof Node)) return;
+      const inMenu = menuRef.current?.contains(target);
+      const inTrigger = Array.from(triggerRefs.current.values()).some((trigger) => trigger.contains(target));
+      if (!inMenu && !inTrigger) setOpenMenuId(null);
     }
     function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === "Escape") setOpenMenuId(null);
+      if (event.key === "Escape" && openMenuId) {
+        event.preventDefault();
+        closeMenu(true);
+      }
+    }
+    function closeOnViewportChange() {
+      setOpenMenuId(null);
     }
     document.addEventListener("pointerdown", closeOnOutsidePointer);
     document.addEventListener("keydown", closeOnEscape);
+    window.addEventListener("resize", closeOnViewportChange);
+    window.addEventListener("scroll", closeOnViewportChange, true);
     return () => {
       document.removeEventListener("pointerdown", closeOnOutsidePointer);
       document.removeEventListener("keydown", closeOnEscape);
+      window.removeEventListener("resize", closeOnViewportChange);
+      window.removeEventListener("scroll", closeOnViewportChange, true);
     };
-  }, []);
+  }, [closeMenu, openMenuId]);
+
+  useEffect(() => {
+    if (!openMenuId) return;
+    requestAnimationFrame(() => menuRef.current?.querySelector<HTMLElement>("[role=menuitem]:not(:disabled)")?.focus());
+  }, [openMenuId]);
+
+  function handleMenuKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+    const items = Array.from(menuRef.current?.querySelectorAll<HTMLElement>("[role=menuitem]:not(:disabled)") ?? []);
+    if (!items.length) return;
+    const current = items.indexOf(document.activeElement as HTMLElement);
+    let next = current;
+    if (event.key === "ArrowDown") next = (current + 1) % items.length;
+    else if (event.key === "ArrowUp") next = (current - 1 + items.length) % items.length;
+    else if (event.key === "Home") next = 0;
+    else if (event.key === "End") next = items.length - 1;
+    else return;
+    event.preventDefault();
+    items[next]?.focus();
+  }
 
   function closeDeleteDialog() {
     setDeleteTarget(null);
@@ -445,7 +505,7 @@ function DocumentsTable({
     setDeleteError(null);
     setDeletePartiallyCompleted(false);
     try {
-      const result = await api.adminDeleteIndexedDocument(deleteTarget.source_path, deleteFile);
+      const result = await api.adminDeleteIndexedDocument(deleteTarget.document_id, deleteFile);
       if (deleteFile && result.file_delete_status === "failed") {
         setDeletePartiallyCompleted(true);
         setDeleteError("知识库索引已移除，但源文件删除失败。请检查文件权限或占用情况后重试。");
@@ -475,12 +535,12 @@ function DocumentsTable({
                 <th scope="col" className="px-4 py-3 text-left font-medium">当前状态</th>
                 <th scope="col" className="px-4 py-3 text-right font-medium">内容块</th>
                 <th scope="col" className="px-4 py-3 text-left font-medium">更新时间</th>
-                <th scope="col" className="px-4 py-3 text-right font-medium">操作</th>
+                <th scope="col" className="sticky right-0 bg-surface-muted px-3 py-3 text-right font-medium shadow-[-1px_0_0_rgb(var(--border))]">操作</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
               {documents.map((document) => (
-                <tr key={document.document_id} className="bg-card align-top hover:bg-surface-muted/60">
+                <tr key={document.document_id} className="group bg-card align-top hover:bg-surface-muted/60">
                   <td className="px-4 py-3">
                     <div className="flex max-w-md gap-3">
                       <div className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-ui-md bg-secondary text-muted-foreground">
@@ -508,11 +568,15 @@ function DocumentsTable({
                     {document.updated_at ? formatAdminDate(document.updated_at) : "历史资料"}
                     {document.uploaded_by && <p className="mt-1">由 {document.uploaded_by} 上传</p>}
                   </td>
-                  <td className="px-4 py-3 text-right">
-                    <div data-document-menu className="relative inline-block text-left">
+                  <td className="sticky right-0 bg-card px-3 py-3 text-right shadow-[-1px_0_0_rgb(var(--border))] group-hover:bg-surface-muted">
+                    <div className="inline-block text-left">
                       <button
+                        ref={(node) => {
+                          if (node) triggerRefs.current.set(document.document_id, node);
+                          else triggerRefs.current.delete(document.document_id);
+                        }}
                         type="button"
-                        onClick={() => setOpenMenuId((current) => current === document.document_id ? null : document.document_id)}
+                        onClick={(event) => openMenu(document.document_id, event.currentTarget)}
                         className="inline-flex size-9 items-center justify-center rounded-ui-md text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                         aria-label={`打开 ${document.doc_title} 的操作菜单`}
                         aria-expanded={openMenuId === document.document_id}
@@ -520,48 +584,6 @@ function DocumentsTable({
                       >
                         <MoreHorizontal className="size-4" />
                       </button>
-                      {openMenuId === document.document_id && <div role="menu" className="absolute right-0 z-dropdown mt-1 w-44 rounded-ui-md border border-border bg-popover p-1 text-left text-popover-foreground shadow-overlay">
-                        {document.preview_parent_id && ["pdf", "docx", "xlsx", "pptx"].includes(document.doc_type) && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setOpenMenuId(null);
-                              openPreview(document.preview_parent_id!, document.doc_title, document.doc_type, 1);
-                            }}
-                            className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-secondary"
-                          >
-                            <Eye className="size-4" />
-                            预览文件
-                          </button>
-                        )}
-                        {document.latest_job_id != null && (document.status === "failed" || document.status === "done") && (
-                          <button
-                            type="button"
-                            disabled={retryingId === document.latest_job_id}
-                            onClick={() => { setOpenMenuId(null); void retry(document); }}
-                            className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-secondary disabled:opacity-50"
-                          >
-                            <RefreshCw className="size-4" />
-                            {document.status === "failed" ? "重试处理" : "重新索引"}
-                          </button>
-                        )}
-                        {document.is_indexed && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setDeleteError(null);
-                              setDeletePartiallyCompleted(false);
-                              setDeleteFile(false);
-                              setDeleteTarget(document);
-                              setOpenMenuId(null);
-                            }}
-                            className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm text-destructive hover:bg-destructive/10"
-                          >
-                            <Trash2 className="size-4" />
-                            移除资料
-                          </button>
-                        )}
-                      </div>}
                     </div>
                   </td>
                 </tr>
@@ -570,6 +592,62 @@ function DocumentsTable({
           </table>
         </div>
       </Card>
+
+      {openDocument && createPortal(
+        <div
+          ref={menuRef}
+          role="menu"
+          aria-label={`${openDocument.doc_title}的资料操作`}
+          onKeyDown={handleMenuKeyDown}
+          className="fixed z-dropdown w-44 rounded-ui-md border border-border bg-popover p-1 text-left text-popover-foreground shadow-overlay"
+          style={menuPosition}
+        >
+          {openDocument.preview_parent_id && ["pdf", "docx", "xlsx", "pptx"].includes(openDocument.doc_type) && (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                closeMenu(true);
+                openPreview(openDocument.preview_parent_id!, openDocument.doc_title, openDocument.doc_type, 1);
+              }}
+              className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-secondary"
+            >
+              <Eye className="size-4" />
+              预览文件
+            </button>
+          )}
+          {openDocument.latest_job_id != null && (openDocument.status === "failed" || openDocument.status === "done") && (
+            <button
+              type="button"
+              role="menuitem"
+              disabled={retryingId === openDocument.latest_job_id}
+              onClick={() => { closeMenu(true); void retry(openDocument); }}
+              className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-secondary disabled:opacity-50"
+            >
+              <RefreshCw className="size-4" />
+              {openDocument.status === "failed" ? "重试处理" : "重新索引"}
+            </button>
+          )}
+          {openDocument.is_indexed && (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setDeleteError(null);
+                setDeletePartiallyCompleted(false);
+                setDeleteFile(false);
+                setDeleteTarget(openDocument);
+                closeMenu(true);
+              }}
+              className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm text-destructive hover:bg-destructive/10"
+            >
+              <Trash2 className="size-4" />
+              移除资料
+            </button>
+          )}
+        </div>,
+        document.body,
+      )}
 
       <Dialog open={deleteTarget != null} onOpenChange={(open) => !open && closeDeleteDialog()}>
         <DialogContent>

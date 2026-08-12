@@ -185,7 +185,6 @@ export type IndexJob = {
 
 export type IndexedDocument = {
   document_id: string;
-  source_path: string;
   display_path: string;
   filename: string;
   doc_title: string;
