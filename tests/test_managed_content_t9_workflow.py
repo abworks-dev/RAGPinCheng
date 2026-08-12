@@ -5,6 +5,9 @@ ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = (ROOT / ".github/workflows/prepare-managed-content-t9.yml").read_text(
     encoding="utf-8"
 )
+DIAGNOSTIC = (
+    ROOT / ".github/workflows/diagnose-managed-content-t9-storage.yml"
+).read_text(encoding="utf-8")
 
 
 def test_t9_workflow_is_manual_fixed_master_and_fail_closed():
@@ -68,3 +71,13 @@ def test_t9_workflow_preserves_approved_mapping_boundary():
     assert '"legacy_prefix":"教学视频"' in WORKFLOW
     assert '"legacy_prefix":"培训视频"' in WORKFLOW
     assert '"handling":"transcript"' in WORKFLOW
+
+
+def test_t9_storage_diagnostic_is_fixed_master_and_read_only():
+    assert "workflow_dispatch:" in DIAGNOSTIC
+    assert '[ "${GITHUB_REF}" = "refs/heads/master" ]' in DIAGNOSTIC
+    assert '[ "${GITHUB_SHA}" = "${EXPECTED_COMMIT}" ]' in DIAGNOSTIC
+    assert "findmnt -rn -o TARGET,MAJ:MIN,FSTYPE,AVAIL" in DIAGNOSTIC
+    assert "findmnt -T \"${path}\" -n -o MAJ:MIN" in DIAGNOSTIC
+    for forbidden in ("sudo ", "rm ", "cp ", "rsync ", "sqlite", "docker "):
+        assert forbidden not in DIAGNOSTIC
