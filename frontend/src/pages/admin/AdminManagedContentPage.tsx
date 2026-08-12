@@ -197,13 +197,13 @@ export function AdminManagedContentPage() {
       {loading ? <LoadingState className="min-h-48 border border-border" label="正在加载资料…" /> : !error && items.length === 0 ? (
         <EmptyState title="暂无资料" description="上传第一份资料后，流程状态会显示在这里。" />
       ) : !error && <>
-        <div className="hidden overflow-x-auto border border-border md:block">
+        <div className="hidden overflow-x-auto border border-border lg:block">
           <table className="w-full min-w-[48rem] text-ui-sm">
             <thead className="border-b border-border bg-surface-muted text-left text-muted-foreground"><tr><th className="px-4 py-3 font-medium">资料</th><th className="px-4 py-3 font-medium">分类</th><th className="px-4 py-3 font-medium">状态</th><th className="px-4 py-3 font-medium">来源</th><th className="px-4 py-3 text-right font-medium">操作</th></tr></thead>
             <tbody className="divide-y divide-border">{items.map((item) => <tr key={item.item_id}><td className="max-w-xs px-4 py-3"><p className="break-words font-medium">{item.title}</p><p className="mt-0.5 break-all text-ui-xs text-muted-foreground">{item.original_filename} · v{item.version_number}</p></td><td className="px-4 py-3">{item.category_label}</td><td className="px-4 py-3"><Badge variant={statusVariant(item.lifecycle_status)}>{statusLabel[item.lifecycle_status] || "未知状态"}</Badge></td><td className="px-4 py-3">{sourceLabel[item.source_origin] || "其他来源"}</td><td className="px-4 py-3">{renderActions(item)}</td></tr>)}</tbody>
           </table>
         </div>
-        <ul className="divide-y divide-border border-y border-border md:hidden">
+        <ul className="divide-y divide-border border-y border-border lg:hidden">
           {items.map((item) => <li key={item.item_id} className="space-y-3 py-4">
             <div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="break-words font-medium">{item.title}</p><p className="mt-1 break-all text-ui-xs text-muted-foreground">{item.original_filename} · v{item.version_number}</p></div><Badge className="shrink-0" variant={statusVariant(item.lifecycle_status)}>{statusLabel[item.lifecycle_status] || "未知状态"}</Badge></div>
             <dl className="grid grid-cols-[4rem_minmax(0,1fr)] gap-x-2 gap-y-1 text-ui-sm"><dt className="text-muted-foreground">分类</dt><dd className="break-words">{item.category_label}</dd><dt className="text-muted-foreground">来源</dt><dd>{sourceLabel[item.source_origin] || "其他来源"}</dd></dl>
