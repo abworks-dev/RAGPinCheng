@@ -386,7 +386,6 @@ jobs:
               ("06", "项目经验与案例"),
               ("99", "待确认资料"),
           ]
-          assert CURRENT_SCHEMA_VERSION == 5
           assert CONTENT_MANAGEMENT_ENABLED is True
           assert CONTENT_HEAD_ENFORCEMENT == "compat"
           assert CONTENT_ROOT == Path("/app/content")
@@ -405,10 +404,33 @@ jobs:
                   "SELECT count(*) FROM content_index_jobs "
                   "WHERE status IN ('pending','parsing','chunking','summarizing','embedding')"
               ).fetchone()[0]
+              permission_groups = database.execute(
+                  "SELECT g.group_key,g.display_name,i.permission "
+                  "FROM content_permission_groups g "
+                  "LEFT JOIN content_permission_group_items i ON i.group_id=g.id "
+                  "WHERE g.is_system=1 AND g.is_active=1 "
+                  "ORDER BY g.group_key,i.permission"
+              ).fetchall()
           assert version == CURRENT_SCHEMA_VERSION
           assert [tuple(row) for row in categories] == expected_categories
           assert active_jobs == 0
-          print("MANAGED_CONTENT status=verified schema=5 categories=7 mode=compat")
+          actual_groups = {}
+          for group_key, display_name, permission in permission_groups:
+              actual_groups.setdefault((group_key, display_name), [])
+              if permission is not None:
+                  actual_groups[(group_key, display_name)].append(permission)
+          assert actual_groups == {
+              ("member", "普通成员"): [],
+              ("bim_engineer", "BIM工程师"): ["organize"],
+              ("content_owner", "资料负责人"): ["review"],
+              ("system_admin", "系统管理员"): [
+                  "import_server", "manage_categories", "organize", "publish", "review"
+              ],
+          }
+          print(
+              f"MANAGED_CONTENT status=verified schema={CURRENT_SCHEMA_VERSION} "
+              "categories=7 permission_groups=4 mode=compat"
+          )
           PY
           }
 
@@ -566,6 +588,47 @@ jobs:
             echo "APP_ONLY_ROLLBACK status=starting"
             export ASR_ENABLED="${PREVIOUS_ASR_ENABLED}"
             export TRANSCRIPTION_ADMITTED_PROFILE_IDS="${PREVIOUS_TRANSCRIPTION_ADMITTED_PROFILE_IDS}"
+            if ! "${COMPOSE[@]}" stop backend; then
+              echo "APP_ONLY_ROLLBACK status=failed stage=stop-backend"
+              return 1
+            fi
+            if ! SRC="${BACKUP_PATH}" DST="${DATA_PATH}" python3 - <<'PY'
+          import os
+          import shutil
+          import sqlite3
+          from pathlib import Path
+
+          source_dir = Path(os.environ["SRC"])
+          target_dir = Path(os.environ["DST"])
+          staged = []
+          try:
+              for name in ("app.sqlite", "parents.sqlite"):
+                  source = source_dir / name
+                  target = target_dir / name
+                  temporary = target.with_name(f".{name}.rollback-{os.getpid()}.tmp")
+                  if not source.is_file():
+                      raise RuntimeError(f"missing rollback database: {source}")
+                  with sqlite3.connect(f"file:{source}?mode=ro", uri=True) as database:
+                      result = database.execute("PRAGMA integrity_check").fetchone()[0]
+                  if result != "ok":
+                      raise RuntimeError(f"{name} backup integrity failed: {result}")
+                  shutil.copy2(source, temporary)
+                  with sqlite3.connect(f"file:{temporary}?mode=ro", uri=True) as database:
+                      result = database.execute("PRAGMA integrity_check").fetchone()[0]
+                  if result != "ok":
+                      raise RuntimeError(f"{name} staged integrity failed: {result}")
+                  staged.append((temporary, target))
+              for temporary, target in staged:
+                  os.replace(temporary, target)
+              print("APP_ONLY_ROLLBACK_DATABASES status=restored databases=app.sqlite,parents.sqlite")
+          finally:
+              for temporary, _target in staged:
+                  temporary.unlink(missing_ok=True)
+          PY
+            then
+              echo "APP_ONLY_ROLLBACK status=failed stage=restore-databases"
+              return 1
+            fi
             if ! docker tag "${ROLLBACK_IMAGE_TAG}" pincheng-rag-backend:latest; then
               echo "APP_ONLY_ROLLBACK status=failed stage=restore-image-tag"
               return 1
