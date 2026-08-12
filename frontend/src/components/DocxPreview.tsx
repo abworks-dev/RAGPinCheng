@@ -21,6 +21,9 @@ export function DocxPreview({
 
   useEffect(() => {
     let cancelled = false;
+    setLoading(true);
+    setError(null);
+    if (containerRef.current) containerRef.current.replaceChildren();
 
     async function render() {
       try {
@@ -51,10 +54,9 @@ export function DocxPreview({
         }
       } catch (e: any) {
         if (!cancelled) {
-          const msg = e?.message || String(e);
-          setError(msg);
+          setError("暂时无法预览此 Word 文档，请确认源文件仍然存在且格式有效。");
           setLoading(false);
-          onError?.(msg);
+          onError?.("DOCX preview unavailable");
         }
       }
     }
@@ -69,7 +71,7 @@ export function DocxPreview({
   if (error) {
     return (
       <div className="flex items-center justify-center h-full text-sm text-red-600">
-        DOCX 加载失败：{error}
+        {error}
       </div>
     );
   }

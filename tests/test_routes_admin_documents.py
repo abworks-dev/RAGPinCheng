@@ -3,7 +3,11 @@ from __future__ import annotations
 import sqlite3
 from types import SimpleNamespace
 
-from api.routes_admin import _job_row_to_dto, delete_document, list_documents
+import pytest
+from fastapi import HTTPException
+
+from api.routes_admin import _document_id, _job_row_to_dto, delete_document, list_documents
+from src import indexing_pipeline
 
 
 def _connection() -> sqlite3.Connection:
@@ -150,6 +154,7 @@ def test_document_listing_merges_latest_job_and_hides_raw_failure(monkeypatch):
     assert failed.latest_job_id == 2
     assert failed.is_indexed is True
     assert failed.document_id
+    assert "source_path" not in failed.model_dump()
     assert failed.display_path == "公司标准 / guide.pdf"
     assert failed.preview_parent_id == "parent-guide-1"
     assert failed.error_summary == "资料处理失败，可重试或在索引活动中查看详情。"
@@ -240,6 +245,11 @@ def test_document_listing_does_not_resurrect_deleted_completed_job(monkeypatch):
 
 
 def test_delete_document_exposes_file_delete_status(monkeypatch):
+    source_path = "docs/locked.pdf"
+    monkeypatch.setattr(
+        "api.routes_admin.list_indexed_documents",
+        lambda: [SimpleNamespace(source_path=source_path)],
+    )
     monkeypatch.setattr(
         "api.routes_admin.delete_indexed_document",
         lambda source_path, delete_file: {
@@ -250,10 +260,56 @@ def test_delete_document_exposes_file_delete_status(monkeypatch):
     )
 
     result = delete_document(
-        body=SimpleNamespace(source_path="docs/locked.pdf", delete_file=True),
+        body=SimpleNamespace(document_id=_document_id(source_path), delete_file=True),
         _admin=object(),
     )
 
     assert result.parents_deleted == 3
     assert result.file_deleted is False
     assert result.file_delete_status == "failed"
+
+
+def test_delete_document_rejects_unknown_or_ambiguous_handle(monkeypatch):
+    monkeypatch.setattr("api.routes_admin.list_indexed_documents", lambda: [])
+    with pytest.raises(HTTPException) as missing:
+        delete_document(
+            body=SimpleNamespace(document_id="0" * 24, delete_file=False),
+            _admin=object(),
+        )
+    assert missing.value.status_code == 404
+
+    monkeypatch.setattr(
+        "api.routes_admin.list_indexed_documents",
+        lambda: [SimpleNamespace(source_path="a.pdf"), SimpleNamespace(source_path="b.pdf")],
+    )
+    monkeypatch.setattr("api.routes_admin._document_id", lambda _path: "same-handle")
+    with pytest.raises(HTTPException) as ambiguous:
+        delete_document(
+            body=SimpleNamespace(document_id="same-handle", delete_file=False),
+            _admin=object(),
+        )
+    assert ambiguous.value.status_code == 404
+
+
+def test_indexed_document_preview_parent_is_deterministic(monkeypatch):
+    conn = sqlite3.connect(":memory:")
+    conn.execute(
+        """CREATE TABLE parents (
+            parent_id TEXT PRIMARY KEY, source_path TEXT, doc_title TEXT,
+            category TEXT, doc_type TEXT, company TEXT
+        )"""
+    )
+    conn.executemany(
+        "INSERT INTO parents VALUES (?,?,?,?,?,?)",
+        [
+            ("parent-z", "docs/guide.pdf", "指南", "公司标准", "pdf", None),
+            ("parent-a", "docs/guide.pdf", "指南", "公司标准", "pdf", None),
+        ],
+    )
+    monkeypatch.setattr(indexing_pipeline, "_init_parents_db", lambda reset=False: conn)
+
+    documents = indexing_pipeline.list_indexed_documents()
+
+    assert len(documents) == 1
+    assert documents[0].parent_count == 2
+    assert documents[0].preview_parent_id == "parent-a"

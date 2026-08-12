@@ -797,6 +797,10 @@ def _document_status_group(value: str) -> str:
     return "other"
 
 
+def _document_id(source_path: str) -> str:
+    return hashlib.sha256(source_path.encode("utf-8")).hexdigest()[:24]
+
+
 @router.get("/index/documents", response_model=IndexedDocumentListResponse)
 def list_documents(
     query: str = Query("", max_length=200),
@@ -865,8 +869,7 @@ def list_documents(
             error_summary = "资料处理失败，可重试或在索引活动中查看详情。"
         documents.append(
             IndexedDocumentDTO(
-                document_id=hashlib.sha256(source_path.encode("utf-8")).hexdigest()[:24],
-                source_path=source_path,
+                document_id=_document_id(source_path),
                 display_path=" / ".join(display_parts),
                 filename=str(job["filename"]) if job is not None else path.name,
                 doc_title=indexed.doc_title if indexed else path.stem,
@@ -944,7 +947,14 @@ def delete_document(
     body: DeleteDocumentRequest,
     _admin: CurrentUser = Depends(require_csrf_admin),
 ) -> DeleteDocumentResponse:
-    result = delete_indexed_document(body.source_path, delete_file=body.delete_file)
+    matches = [
+        document.source_path
+        for document in list_indexed_documents()
+        if _document_id(document.source_path) == body.document_id
+    ]
+    if len(matches) != 1:
+        raise HTTPException(status_code=404, detail="document not found")
+    result = delete_indexed_document(matches[0], delete_file=body.delete_file)
     return DeleteDocumentResponse(
         parents_deleted=result["parents_deleted"],
         file_deleted=bool(result["file_deleted"]),

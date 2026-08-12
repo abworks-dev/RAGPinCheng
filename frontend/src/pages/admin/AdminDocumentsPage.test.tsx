@@ -30,7 +30,6 @@ const categoryTree = {
 
 const readyDocument = {
   document_id: "document-ready",
-  source_path: "C:/internal/docs/company-standard.pdf",
   display_path: "公司标准 / company-standard.pdf",
   filename: "company-standard.pdf",
   doc_title: "企业交付标准",
@@ -53,7 +52,6 @@ const readyDocument = {
 const failedDocument = {
   ...readyDocument,
   document_id: "document-failed",
-  source_path: "C:/internal/docs/failed.docx",
   display_path: "客户标准 / 甲方 / failed.docx",
   filename: "failed.docx",
   doc_title: "失败的客户资料",
@@ -82,7 +80,7 @@ const baseJob = {
   real_name: "管理员",
   category: "公司标准",
   doc_type: "pdf",
-  source_path: readyDocument.source_path,
+  source_path: "C:/synthetic/company-standard.pdf",
   source_exists: true,
   file_size: 2048,
   error: null,
@@ -136,7 +134,7 @@ describe("AdminDocumentsPage", () => {
     expect(within(readyRow as HTMLElement).getByText("可检索")).toHaveClass("bg-success/15");
     expect(within(failedRow as HTMLElement).getByText("处理失败")).toHaveClass("bg-destructive/15");
     expect(screen.getByText("资料处理失败，可重试或在索引活动中查看详情。")).toBeInTheDocument();
-    expect(screen.queryByText(readyDocument.source_path)).not.toBeInTheDocument();
+    expect(JSON.stringify(listing.documents)).not.toContain("source_path");
     expect(screen.getAllByText("1")).toHaveLength(2);
     expect(mocks.adminListIndexedDocuments).toHaveBeenCalledWith(expect.objectContaining({
       limit: 25,
@@ -192,13 +190,13 @@ describe("AdminDocumentsPage", () => {
     await screen.findByText("企业交付标准");
 
     fireEvent.click(screen.getByLabelText("打开 企业交付标准 的操作菜单"));
-    fireEvent.click(screen.getByRole("button", { name: "移除资料" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "移除资料" }));
     const dialog = await screen.findByRole("dialog", { name: "移除资料" });
     expect(within(dialog).getByRole("radio", { name: /保留源文件/ })).toBeChecked();
 
     fireEvent.click(within(dialog).getByRole("button", { name: "从知识库移除" }));
     await waitFor(() => expect(mocks.adminDeleteIndexedDocument).toHaveBeenCalledWith(
-      readyDocument.source_path,
+      readyDocument.document_id,
       false,
     ));
   });
@@ -211,9 +209,38 @@ describe("AdminDocumentsPage", () => {
     const failedMenu = screen.getByLabelText("打开 失败的客户资料 的操作菜单");
     fireEvent.click(readyMenu);
     expect(readyMenu).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("menu", { name: "企业交付标准的资料操作" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "预览文件" })).toBeInTheDocument();
     fireEvent.click(failedMenu);
     expect(readyMenu).toHaveAttribute("aria-expanded", "false");
     expect(failedMenu).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("supports keyboard navigation and restores focus when a menu closes", async () => {
+    render(<AdminDocumentsPage />);
+    await screen.findByText("企业交付标准");
+    const trigger = screen.getByLabelText("打开 企业交付标准 的操作菜单");
+
+    fireEvent.click(trigger);
+    const preview = await screen.findByRole("menuitem", { name: "预览文件" });
+    await waitFor(() => expect(preview).toHaveFocus());
+    fireEvent.keyDown(preview, { key: "ArrowDown" });
+    expect(screen.getByRole("menuitem", { name: "重新索引" })).toHaveFocus();
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    await waitFor(() => expect(trigger).toHaveFocus());
+  });
+
+  it("closes the fixed menu when its viewport position can change", async () => {
+    render(<AdminDocumentsPage />);
+    await screen.findByText("企业交付标准");
+    fireEvent.click(screen.getByLabelText("打开 企业交付标准 的操作菜单"));
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+
+    fireEvent.scroll(window);
+
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
 
   it("opens the shared source-file preview for an indexed document", async () => {
@@ -221,7 +248,7 @@ describe("AdminDocumentsPage", () => {
     await screen.findByText("企业交付标准");
 
     fireEvent.click(screen.getByLabelText("打开 企业交付标准 的操作菜单"));
-    fireEvent.click(screen.getByRole("button", { name: "预览文件" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "预览文件" }));
 
     expect(mocks.openPreview).toHaveBeenCalledWith("parent-ready-1", "企业交付标准", "pdf", 1);
     expect(screen.getByLabelText("打开 企业交付标准 的操作菜单")).toHaveAttribute("aria-expanded", "false");
@@ -232,13 +259,13 @@ describe("AdminDocumentsPage", () => {
     await screen.findByText("企业交付标准");
 
     fireEvent.click(screen.getByLabelText("打开 企业交付标准 的操作菜单"));
-    fireEvent.click(screen.getByRole("button", { name: "移除资料" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "移除资料" }));
     const dialog = await screen.findByRole("dialog", { name: "移除资料" });
     fireEvent.click(within(dialog).getByRole("radio", { name: /同时删除源文件/ }));
     fireEvent.click(within(dialog).getByRole("button", { name: "删除资料和源文件" }));
 
     await waitFor(() => expect(mocks.adminDeleteIndexedDocument).toHaveBeenCalledWith(
-      readyDocument.source_path,
+      readyDocument.document_id,
       true,
     ));
   });
@@ -253,7 +280,7 @@ describe("AdminDocumentsPage", () => {
     await screen.findByText("企业交付标准");
 
     fireEvent.click(screen.getByLabelText("打开 企业交付标准 的操作菜单"));
-    fireEvent.click(screen.getByRole("button", { name: "移除资料" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "移除资料" }));
     const dialog = await screen.findByRole("dialog", { name: "移除资料" });
     fireEvent.click(within(dialog).getByRole("radio", { name: /同时删除源文件/ }));
     fireEvent.click(within(dialog).getByRole("button", { name: "删除资料和源文件" }));
@@ -270,7 +297,7 @@ describe("AdminDocumentsPage", () => {
     await screen.findByText("失败的客户资料");
 
     fireEvent.click(screen.getByLabelText("打开 失败的客户资料 的操作菜单"));
-    fireEvent.click(screen.getByRole("button", { name: "重试处理" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "重试处理" }));
 
     await waitFor(() => expect(mocks.adminRetryIndexJob).toHaveBeenCalledWith(2));
   });
