@@ -1,0 +1,43 @@
+name: Diagnose Managed Content T9 Storage
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_commit:
+        description: Full master commit approved for the read-only T9 storage diagnosis
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: managed-content-t9-storage-diagnostic
+  cancel-in-progress: false
+
+jobs:
+  diagnose:
+    environment: production-asr
+    runs-on: [self-hosted, linux, ubuntu, production, app]
+    timeout-minutes: 10
+    steps:
+      - name: Report mount identities and free capacity
+        shell: bash
+        env:
+          EXPECTED_COMMIT: ${{ inputs.expected_commit }}
+        run: |
+          set -euo pipefail
+          [[ "${EXPECTED_COMMIT}" =~ ^[0-9a-f]{40}$ ]]
+          [ "${GITHUB_REF}" = "refs/heads/master" ]
+          [ "${GITHUB_SHA}" = "${EXPECTED_COMMIT}" ]
+          echo "T9_STORAGE_DIAGNOSTIC status=read_only commit=${EXPECTED_COMMIT}"
+          findmnt -rn -o TARGET,MAJ:MIN,FSTYPE,AVAIL | \
+            awk '$1 == "/" || $1 == "/data" || $1 ~ /^\/data\// || $1 == "/mnt" || $1 ~ /^\/mnt\// || $1 == "/backup" || $1 ~ /^\/backup\// || $1 == "/srv" || $1 ~ /^\/srv\//'
+          for path in /data/business /data/backup /data/services; do
+            printf 'T9_STORAGE_PATH path=%s device=%s filesystem=%s available=%s\n' \
+              "${path}" \
+              "$(findmnt -T "${path}" -n -o MAJ:MIN)" \
+              "$(findmnt -T "${path}" -n -o FSTYPE)" \
+              "$(findmnt -T "${path}" -n -o AVAIL)"
+          done
+
