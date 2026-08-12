@@ -874,6 +874,7 @@ def list_documents(
                 doc_type=item_type,
                 company=company,
                 parent_count=indexed.parent_count if indexed else 0,
+                preview_parent_id=indexed.preview_parent_id if indexed else None,
                 child_count=(
                     int(job_stats["children"])
                     if isinstance(job_stats.get("children"), int)

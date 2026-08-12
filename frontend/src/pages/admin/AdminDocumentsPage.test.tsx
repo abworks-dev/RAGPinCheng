@@ -10,9 +10,15 @@ const mocks = vi.hoisted(() => ({
   adminDeleteIndexedDocument: vi.fn(),
   adminRetryIndexJob: vi.fn(),
   adminDeleteIndexJob: vi.fn(),
+  openPreview: vi.fn(),
 }));
 
 vi.mock("../../api/client", () => ({ api: mocks }));
+vi.mock("../../components/PdfPreview", () => ({ PdfPreview: () => null }));
+vi.mock("../../hooks/usePdfPreview", () => ({
+  PdfPreviewProvider: ({ children }: { children: React.ReactNode }) => children,
+  usePdfPreview: () => ({ open: mocks.openPreview }),
+}));
 
 const categoryTree = {
   categories: [
@@ -32,6 +38,7 @@ const readyDocument = {
   doc_type: "pdf",
   company: null,
   parent_count: 12,
+  preview_parent_id: "parent-ready-1",
   child_count: 36,
   file_size: 2048,
   status: "done",
@@ -54,6 +61,7 @@ const failedDocument = {
   doc_type: "docx",
   company: "甲方",
   parent_count: 0,
+  preview_parent_id: null,
   child_count: null,
   status: "failed",
   is_indexed: false,
@@ -193,6 +201,30 @@ describe("AdminDocumentsPage", () => {
       readyDocument.source_path,
       false,
     ));
+  });
+
+  it("keeps only one document action menu open", async () => {
+    render(<AdminDocumentsPage />);
+    await screen.findByText("企业交付标准");
+
+    const readyMenu = screen.getByLabelText("打开 企业交付标准 的操作菜单");
+    const failedMenu = screen.getByLabelText("打开 失败的客户资料 的操作菜单");
+    fireEvent.click(readyMenu);
+    expect(readyMenu).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(failedMenu);
+    expect(readyMenu).toHaveAttribute("aria-expanded", "false");
+    expect(failedMenu).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("opens the shared source-file preview for an indexed document", async () => {
+    render(<AdminDocumentsPage />);
+    await screen.findByText("企业交付标准");
+
+    fireEvent.click(screen.getByLabelText("打开 企业交付标准 的操作菜单"));
+    fireEvent.click(screen.getByRole("button", { name: "预览文件" }));
+
+    expect(mocks.openPreview).toHaveBeenCalledWith("parent-ready-1", "企业交付标准", "pdf", 1);
+    expect(screen.getByLabelText("打开 企业交付标准 的操作菜单")).toHaveAttribute("aria-expanded", "false");
   });
 
   it("requires an explicit destructive choice before deleting the source file", async () => {
