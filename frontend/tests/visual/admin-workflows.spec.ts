@@ -21,6 +21,12 @@ test.describe("资料工作流", () => {
     await expectNoBodyOverflow(page);
     await expectInViewport(page.getByRole("button", { name: "刷新" }));
     await expectInViewport(page.getByRole("button", { name: "上传" }));
+    if (page.viewportSize()!.width === 768) {
+      await expect(page.getByRole("table")).toBeHidden();
+      await expect(page.getByRole("button", { name: "确认" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "退回" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "发布" }).first()).toBeVisible();
+    }
     if (page.viewportSize()!.width === 390) {
       await expectTouchTarget(page.getByRole("button", { name: "上传" }));
       await expectInViewport(page.getByRole("button", { name: "提交" }).first());
