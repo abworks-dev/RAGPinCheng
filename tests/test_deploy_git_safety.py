@@ -20,6 +20,9 @@ class TestDeployGitSafety(unittest.TestCase):
         cls.app_only_workflow = (
             ROOT / ".github/workflows/deploy-production-app-emergency.yml"
         ).read_text(encoding="utf-8")
+        cls.app_backup_recovery_workflow = (
+            ROOT / ".github/workflows/recover-production-app-backup.yml"
+        ).read_text(encoding="utf-8")
         cls.windows = (ROOT / "scripts/deploy-gpu.ps1").read_text(encoding="utf-8")
         cls.promote = (ROOT / "scripts/promote-gpu-runtime.ps1").read_text(
             encoding="utf-8"
@@ -35,6 +38,30 @@ class TestDeployGitSafety(unittest.TestCase):
                 self.assertNotIn("remote set-url", text)
                 self.assertNotIn("x-access-token:${gitToken}@", text)
                 self.assertNotIn("x-access-token:${GIT_TOKEN}@", text)
+
+    def test_approved_app_backup_recovery_is_fixed_atomic_and_narrow(self):
+        workflow = self.app_backup_recovery_workflow
+
+        self.assertIn("RESTORE_APP_ONLY_31552723068_1", workflow)
+        self.assertIn('BACKUP_PATH="${BACKUP_DIR}/app-only-31552723068-1"', workflow)
+        self.assertIn('for name in ("app.sqlite", "parents.sqlite")', workflow)
+        self.assertIn("PRAGMA integrity_check", workflow)
+        self.assertIn('"${COMPOSE[@]}" stop backend', workflow)
+        self.assertIn("os.replace(temporary, target)", workflow)
+        self.assertIn('docker tag "${OLD_IMAGE_ID}" pincheng-rag-backend:latest', workflow)
+        self.assertIn('"${RUNNING_IMAGE_ID}" = "${OLD_IMAGE_ID}"', workflow)
+        self.assertIn("CURRENT_SCHEMA_VERSION == 5", workflow)
+        self.assertIn("APP_BACKUP_RECOVERY status=complete", workflow)
+        self.assertLess(
+            workflow.index('"${COMPOSE[@]}" stop backend'),
+            workflow.index("os.replace(temporary, target)"),
+        )
+        self.assertLess(
+            workflow.index("os.replace(temporary, target)"),
+            workflow.index('docker tag "${OLD_IMAGE_ID}" pincheng-rag-backend:latest'),
+        )
+        self.assertNotIn("qdrant", workflow.lower())
+        self.assertNotIn("git merge", workflow)
 
     def test_workflow_passes_manual_commit_to_both_jobs(self):
         self.assertGreaterEqual(self.workflow.count("DEPLOY_COMMIT_SHA:"), 2)
