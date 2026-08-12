@@ -119,7 +119,7 @@ export function AdminUsersPage() {
           <h1 id="admin-users-title" className="mt-1 text-ui-2xl font-semibold tracking-tight text-foreground">用户管理</h1>
           <p className="mt-1 text-ui-sm text-muted-foreground">查看账号状态、资料权限与使用情况，并执行受控的管理员操作。</p>
         </div>
-        <Button variant="outline" size="sm" onClick={() => setManagingGroups(true)}><Settings className="size-4" />权限组管理</Button>
+        <Button variant="outline" size="sm" onClick={() => { setPermissionUser(null); setManagingGroups(true); }}><Settings className="size-4" />权限组管理</Button>
       </header>
 
       <Card className="shadow-surface">
@@ -225,7 +225,7 @@ export function AdminUsersPage() {
                         onToggleActive={() => toggleActive(user)}
                         onToggleRole={() => toggleRole(user)}
                         onResetPassword={() => resetPw(user)}
-                        onSetPermissions={() => setPermissionUser(user)}
+                        onSetPermissions={() => { setManagingGroups(false); setPermissionUser(user); }}
                       />
                     </td>
                   </tr>
@@ -267,6 +267,7 @@ function PermissionDialog({ user, groups, onClose, onSaved }: { user: AdminUser 
   const matched = groups.find((group) => samePermissions(group.permissions, permissions));
   const changed = !samePermissions(permissions, user.content_permissions || []);
   const save = async () => {
+    if (saving) return;
     setSaving(true);
     try {
       await api.updateManagedContentPermissions(user.id, permissions);
@@ -322,6 +323,7 @@ function PermissionGroupsDialog({ open, groups, onOpenChange, onSaved }: { open:
     setName(group?.display_name || ""); setPermissions(group?.permissions || []);
   };
   const save = async () => {
+    if (saving) return;
     setSaving(true);
     try {
       if (selected) await api.updateManagedContentPermissionGroup(selected.id, { display_name: name.trim(), permissions });
@@ -332,7 +334,7 @@ function PermissionGroupsDialog({ open, groups, onOpenChange, onSaved }: { open:
   };
   const copy = () => { setSelectedId("new"); setName(`${selected?.display_name || "权限组"}副本`); setPermissions(selected?.permissions || []); };
   const deactivate = async () => {
-    if (!selected || selected.is_system) return;
+    if (!selected || selected.is_system || saving) return;
     setSaving(true);
     try { await api.updateManagedContentPermissionGroup(selected.id, { is_active: !selected.is_active }); await onSaved(); toast.success(selected.is_active ? "权限组已停用" : "权限组已启用"); }
     catch (saveError) { toast.error(saveError instanceof Error ? saveError.message : "权限组状态保存失败"); }

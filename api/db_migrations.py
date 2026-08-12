@@ -438,6 +438,38 @@ CONTENT_LIBRARY_TABLES = frozenset(
 CONTENT_PERMISSION_GROUP_TABLES = frozenset(
     {"content_permission_groups", "content_permission_group_items"}
 )
+SYSTEM_CONTENT_PERMISSION_GROUPS = {
+    "member": ("普通成员", frozenset()),
+    "bim_engineer": ("BIM工程师", frozenset({"organize"})),
+    "content_owner": ("资料负责人", frozenset({"review"})),
+    "system_admin": (
+        "系统管理员",
+        frozenset({"organize", "review", "publish", "manage_categories", "import_server"}),
+    ),
+}
+
+
+def validate_system_content_permission_groups(conn: sqlite3.Connection) -> None:
+    rows = conn.execute(
+        """SELECT g.group_key,g.display_name,g.is_system,g.is_active,i.permission
+           FROM content_permission_groups g
+           LEFT JOIN content_permission_group_items i ON i.group_id=g.id
+           WHERE g.is_system=1
+           ORDER BY g.group_key,i.permission"""
+    ).fetchall()
+    actual: dict[str, tuple[str, int, set[str]]] = {}
+    for group_key, display_name, is_system, is_active, permission in rows:
+        entry = actual.setdefault(group_key, (display_name, is_active, set()))
+        if entry[:2] != (display_name, is_active) or is_system != 1:
+            raise RuntimeError("system_permission_group_mismatch")
+        if permission is not None:
+            entry[2].add(permission)
+    expected = {
+        key: (display_name, 1, set(permissions))
+        for key, (display_name, permissions) in SYSTEM_CONTENT_PERMISSION_GROUPS.items()
+    }
+    if actual != expected:
+        raise RuntimeError("system_permission_group_mismatch")
 
 
 def split_sql_statements(script: str) -> tuple[str, ...]:
@@ -507,6 +539,12 @@ def has_pending_ddl(path: Path, *, base_tables: frozenset[str]) -> bool:
         raise RuntimeError("migration_schema_mismatch")
     if any(version == 6 for version, _name in applied) and not CONTENT_PERMISSION_GROUP_TABLES.issubset(tables):
         raise RuntimeError("migration_schema_mismatch")
+    if any(version == 6 for version, _name in applied):
+        conn = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
+        try:
+            validate_system_content_permission_groups(conn)
+        finally:
+            conn.close()
     if not base_tables.issubset(tables):
         return True
     if "index_jobs" in tables and "media_id" not in index_columns:
@@ -560,6 +598,7 @@ def apply_all(conn: sqlite3.Connection, *, base_schema: str, applied_at: int) ->
             raise RuntimeError("migration_schema_mismatch")
         if not CONTENT_PERMISSION_GROUP_TABLES.issubset(tables):
             raise RuntimeError("migration_schema_mismatch")
+        validate_system_content_permission_groups(conn)
         if conn.execute("PRAGMA foreign_key_check").fetchone() is not None:
             raise RuntimeError("migration_foreign_key_check_failed")
         result = conn.execute("PRAGMA integrity_check").fetchone()

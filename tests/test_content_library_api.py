@@ -186,6 +186,82 @@ def test_category_manager_cannot_grant_content_permissions(content_api):
     ).status_code == 403
 
 
+@pytest.mark.parametrize("employee_id", ["plain", "category_manager"])
+def test_non_admin_cannot_read_or_maintain_permission_groups(content_api, employee_id):
+    client, sessions, _queued, _db_path = content_api
+    base = "/api/admin/content/permission-groups"
+    assert client.get(base, **_auth(sessions, employee_id)).status_code == 403
+    assert client.post(
+        base,
+        json={"display_name": "越权模板", "permissions": ["publish"]},
+        **_auth(sessions, employee_id, csrf=True),
+    ).status_code == 403
+
+
+def test_permission_management_requires_cookie_csrf_and_active_admin(content_api):
+    client, sessions, _queued, db_path = content_api
+    groups_url = "/api/admin/content/permission-groups"
+    assert client.get(groups_url).status_code == 401
+    assert client.post(groups_url, json={"display_name": "测试模板", "permissions": []}).status_code == 401
+    assert client.post(
+        groups_url,
+        json={"display_name": "测试模板", "permissions": []},
+        **_auth(sessions, "admin"),
+    ).status_code == 403
+
+    conn = connect(db_path)
+    conn.execute("UPDATE users SET is_active=0 WHERE employee_id='admin'")
+    conn.commit()
+    conn.close()
+    assert client.get(groups_url, **_auth(sessions, "admin")).status_code == 401
+
+
+def test_permission_group_conflicts_and_system_presets_are_protected(content_api):
+    client, sessions, _queued, _db_path = content_api
+    auth = _auth(sessions, "admin", csrf=True)
+    base = "/api/admin/content/permission-groups"
+    created = client.post(
+        base, json={"display_name": "Project Publisher", "permissions": ["publish"]}, **auth
+    )
+    assert created.status_code == 201
+    assert client.post(
+        base, json={"display_name": "Project Publisher", "permissions": []}, **auth
+    ).status_code == 409
+    assert client.post(
+        base, json={"display_name": "project publisher", "permissions": []}, **auth
+    ).status_code == 409
+    assert client.patch(
+        "/api/admin/content/permission-groups/permission-group-system-admin",
+        json={"display_name": "其他名称", "is_active": False, "permissions": []},
+        **auth,
+    ).status_code == 400
+    assert client.patch(f"{base}/missing", json={"is_active": False}, **auth).status_code == 404
+
+
+def test_permission_update_rejects_missing_user_and_rolls_back_on_audit_failure(content_api, monkeypatch):
+    client, sessions, _queued, db_path = content_api
+    auth = _auth(sessions, "admin", csrf=True)
+    assert client.put(
+        "/api/admin/content/permissions/999999", json={"permissions": ["review"]}, **auth
+    ).status_code == 404
+
+    conn = connect(db_path)
+    target_id = conn.execute("SELECT id FROM users WHERE employee_id='organizer'").fetchone()[0]
+    conn.close()
+    monkeypatch.setattr(routes_content, "audit_event", lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("audit failed")))
+    with pytest.raises(RuntimeError, match="audit failed"):
+        client.put(
+            f"/api/admin/content/permissions/{target_id}",
+            json={"permissions": ["publish"]},
+            **auth,
+        )
+    conn = connect(db_path)
+    assert [row[0] for row in conn.execute(
+        "SELECT permission FROM content_permissions WHERE user_id=? ORDER BY permission", (target_id,)
+    )] == ["organize"]
+    conn.close()
+
+
 def test_multipart_upload_reports_supported_and_skipped_files(content_api):
     client, sessions, _queued, db_path = content_api
     response = client.post(
