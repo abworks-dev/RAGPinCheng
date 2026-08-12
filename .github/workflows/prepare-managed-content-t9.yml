@@ -1,0 +1,295 @@
+name: Prepare Managed Content T9
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_production:
+        description: Select PREPARE_T9 to create recovery points and read-only migration reports
+        required: true
+        default: CANCEL
+        type: choice
+        options:
+          - CANCEL
+          - PREPARE_T9
+      expected_commit:
+        description: Full master commit approved for T9
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: managed-content-t9-production
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    environment: production-asr
+    runs-on: [self-hosted, linux, ubuntu, production, app]
+    timeout-minutes: 180
+    env:
+      REPO_PATH: ${{ vars.PRODUCTION_APP_REPO_PATH }}
+      DATA_PATH: ${{ vars.PRODUCTION_APP_DATA_PATH }}
+      BACKUP_ROOT: ${{ vars.PRODUCTION_APP_BACKUP_DIRECTORY }}
+      CONTENT_ROOT: ${{ vars.PRODUCTION_CONTENT_ROOT }}
+      COMPOSE_OVERRIDE: ${{ vars.PRODUCTION_APP_COMPOSE_OVERRIDE }}
+      COMPOSE_ENV_FILE: ${{ vars.PRODUCTION_APP_ENV_FILE }}
+      EXPECTED_COMMIT: ${{ inputs.expected_commit }}
+      CONFIRM_PRODUCTION: ${{ inputs.confirm_production }}
+      EXPECTED_CONTENT_MANAGEMENT: ${{ vars.CONTENT_MANAGEMENT_ENABLED }}
+      EXPECTED_HEAD_ENFORCEMENT: ${{ vars.CONTENT_HEAD_ENFORCEMENT }}
+    steps:
+      - name: Create recovery points and read-only migration reports
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          [ "${CONFIRM_PRODUCTION}" = "PREPARE_T9" ] || {
+            echo "ERROR: T9 production preparation was not confirmed"
+            exit 1
+          }
+          [[ "${EXPECTED_COMMIT}" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "ERROR: expected_commit must be a full lowercase Git SHA"
+            exit 1
+          }
+          [ "${GITHUB_REF}" = "refs/heads/master" ] || {
+            echo "ERROR: T9 preparation only accepts master"
+            exit 1
+          }
+          [ "${GITHUB_SHA}" = "${EXPECTED_COMMIT}" ] || {
+            echo "ERROR: dispatched commit does not match the approved commit"
+            exit 1
+          }
+          [ "${EXPECTED_CONTENT_MANAGEMENT}" = "true" ] || {
+            echo "ERROR: managed content must remain enabled"
+            exit 1
+          }
+          [ "${EXPECTED_HEAD_ENFORCEMENT}" = "compat" ] || {
+            echo "ERROR: T9 must remain in compat mode"
+            exit 1
+          }
+          [ "${REPO_PATH}" = "/data/workspace/projects/ragpincheng" ]
+          [ "${DATA_PATH}" = "/data/services/docker/data/ragpincheng/prod/app" ]
+          [ "${BACKUP_ROOT}" = "/data/backup/databases/ragpincheng" ]
+          [ "${CONTENT_ROOT}" = "/data/business/ragpincheng/content" ]
+          [ "${COMPOSE_OVERRIDE}" = "/data/services/docker/compose/ragpincheng/prod/compose.prod.yaml" ]
+          [ "${COMPOSE_ENV_FILE}" = "/data/secrets/ragpincheng/prod.env" ]
+
+          SOURCE_ROOT="${REPO_PATH}"
+          LEGACY_ROOT="/data/business/ragpincheng/source"
+          DOCS_ROOT="${LEGACY_ROOT}/docs"
+          MEDIA_ROOT="${LEGACY_ROOT}/media"
+          RUN_ID="t9-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          RUN_ROOT="${BACKUP_ROOT}/${RUN_ID}"
+          REPORT_ROOT="${RUNNER_TEMP}/${RUN_ID}-summary"
+          COMPOSE=(docker compose -p ragpincheng-prod -f "${SOURCE_ROOT}/docker/docker-compose.yml" -f "${COMPOSE_OVERRIDE}" --env-file "${COMPOSE_ENV_FILE}")
+
+          for path in "${SOURCE_ROOT}" "${LEGACY_ROOT}" "${DATA_PATH}" "${BACKUP_ROOT}" "${CONTENT_ROOT}" "${DOCS_ROOT}" "${MEDIA_ROOT}"; do
+            [ -d "${path}" ] && [ ! -L "${path}" ] || {
+              echo "ERROR: required path is not a real directory: ${path}"
+              exit 1
+            }
+          done
+          [ "$(git -C "${SOURCE_ROOT}" branch --show-current)" = "master" ]
+          [ -z "$(git -C "${SOURCE_ROOT}" status --porcelain --untracked-files=no)" ]
+          git -C "${SOURCE_ROOT}" fetch --no-tags origin master
+          [ "$(git -C "${SOURCE_ROOT}" rev-parse origin/master)" = "${EXPECTED_COMMIT}" ] || {
+            echo "ERROR: origin/master no longer matches the approved T9 commit"
+            exit 1
+          }
+          git -C "${SOURCE_ROOT}" merge-base --is-ancestor "$(git -C "${SOURCE_ROOT}" rev-parse HEAD)" "${EXPECTED_COMMIT}"
+
+          command -v flock >/dev/null
+          command -v rsync >/dev/null
+          command -v ionice >/dev/null
+          mkdir -p "${BACKUP_ROOT}"
+          exec 9>"${BACKUP_ROOT}/.managed-content-t9.lock"
+          flock -n 9 || {
+            echo "ERROR: another T9 operation is active"
+            exit 1
+          }
+          exec 8>"${BACKUP_ROOT}/.production-app-deploy.lock"
+          flock -n 8 || {
+            echo "ERROR: another application deployment is active"
+            exit 1
+          }
+
+          BUSINESS_DEVICE="$(findmnt -T /data/business -n -o MAJ:MIN)"
+          DATA_DEVICE="$(findmnt -T "${DATA_PATH}" -n -o MAJ:MIN)"
+          BACKUP_DEVICE="$(findmnt -T /data/backup -n -o MAJ:MIN)"
+          [ -n "${BUSINESS_DEVICE}" ] && [ -n "${DATA_DEVICE}" ] && [ -n "${BACKUP_DEVICE}" ]
+          [ "${BUSINESS_DEVICE}" != "${BACKUP_DEVICE}" ] || {
+            echo "ERROR: /data/backup is not an independent mounted device"
+            exit 1
+          }
+          [ "${DATA_DEVICE}" != "${BACKUP_DEVICE}" ] || {
+            echo "ERROR: database data and backups are on the same mounted device"
+            exit 1
+          }
+
+          SOURCE_BYTES="$(du -sb "${DOCS_ROOT}" "${MEDIA_ROOT}" "${CONTENT_ROOT}" "${DATA_PATH}" | awk '{sum += $1} END {print sum + 0}')"
+          FREE_BYTES="$(df -PB1 "${BACKUP_ROOT}" | awk 'NR==2 {print $4}')"
+          REQUIRED_BYTES=$((SOURCE_BYTES + SOURCE_BYTES / 5 + 1073741824))
+          [ "${FREE_BYTES}" -ge "${REQUIRED_BYTES}" ] || {
+            echo "ERROR: insufficient independent backup capacity"
+            exit 1
+          }
+
+          mkdir -m 700 "${RUN_ROOT}" "${REPORT_ROOT}"
+          printf 'run_id=%s\napproved_commit=%s\nsource_commit=%s\n' \
+            "${RUN_ID}" "${EXPECTED_COMMIT}" "$(git -C "${SOURCE_ROOT}" rev-parse HEAD)" \
+            > "${RUN_ROOT}/manifest.txt"
+          printf 'business_device=%s\ndata_device=%s\nbackup_device=%s\nsource_bytes=%s\nfree_bytes=%s\nrequired_bytes=%s\n' \
+            "${BUSINESS_DEVICE}" "${DATA_DEVICE}" "${BACKUP_DEVICE}" "${SOURCE_BYTES}" "${FREE_BYTES}" "${REQUIRED_BYTES}" \
+            >> "${RUN_ROOT}/manifest.txt"
+
+          SRC="${DATA_PATH}" DST="${RUN_ROOT}" python3 - <<'PY'
+          import os
+          import sqlite3
+          from pathlib import Path
+
+          source = Path(os.environ["SRC"])
+          destination = Path(os.environ["DST"])
+          for name in ("app.sqlite", "parents.sqlite"):
+              source_path = source / name
+              if not source_path.is_file():
+                  raise SystemExit(f"missing production database: {name}")
+              target_path = destination / name
+              with sqlite3.connect(f"file:{source_path}?mode=ro", uri=True) as current:
+                  if current.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                      raise SystemExit(f"source integrity failed: {name}")
+                  with sqlite3.connect(target_path) as backup:
+                      current.backup(backup)
+                      if backup.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                          raise SystemExit(f"backup integrity failed: {name}")
+          PY
+
+          "${COMPOSE[@]}" exec -T backend curl -fsS -X POST \
+            --connect-timeout 10 --max-time 60 \
+            http://qdrant:6333/collections/pincheng_docs/snapshots \
+            > "${RUN_ROOT}/qdrant-snapshot.json"
+          SNAPSHOT_NAME="$(RUN_ROOT_ENV="${RUN_ROOT}" python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          payload = json.loads((Path(os.environ["RUN_ROOT_ENV"]) / "qdrant-snapshot.json").read_text(encoding="utf-8"))
+          name = payload.get("result", {}).get("name")
+          if payload.get("status") != "ok" or not isinstance(name, str) or not name:
+              raise SystemExit("invalid Qdrant snapshot response")
+          print(name)
+          PY
+          )"
+          "${COMPOSE[@]}" exec -T backend curl -fsS \
+            --connect-timeout 10 --max-time 1800 \
+            "http://qdrant:6333/collections/pincheng_docs/snapshots/${SNAPSHOT_NAME}" \
+            > "${RUN_ROOT}/qdrant.snapshot"
+          [ -s "${RUN_ROOT}/qdrant.snapshot" ] || {
+            echo "ERROR: independent Qdrant snapshot download is empty"
+            exit 1
+          }
+          "${COMPOSE[@]}" exec -T backend curl -fsS \
+            --connect-timeout 10 --max-time 30 \
+            http://qdrant:6333/collections/pincheng_docs \
+            > "${RUN_ROOT}/qdrant-before.json"
+          RUN_ROOT_ENV="${RUN_ROOT}" python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["RUN_ROOT_ENV"])
+          snapshot = json.loads((root / "qdrant-snapshot.json").read_text(encoding="utf-8"))
+          collection = json.loads((root / "qdrant-before.json").read_text(encoding="utf-8"))
+          assert snapshot.get("status") == "ok" and snapshot.get("result", {}).get("name")
+          assert collection.get("status") == "ok" and collection.get("result", {}).get("status") == "green"
+          PY
+
+          ionice -c2 -n7 nice -n 19 rsync -a --numeric-ids --safe-links --info=stats2 \
+            "${CONTENT_ROOT}/" "${RUN_ROOT}/content/" > "${RUN_ROOT}/content-rsync.txt"
+          ionice -c2 -n7 nice -n 19 rsync -a --numeric-ids --safe-links --info=stats2 \
+            "${DOCS_ROOT}/" "${RUN_ROOT}/legacy-docs/" > "${RUN_ROOT}/docs-rsync.txt"
+          ionice -c2 -n7 nice -n 19 rsync -a --numeric-ids --safe-links --info=stats2 \
+            "${MEDIA_ROOT}/" "${RUN_ROOT}/legacy-media/" > "${RUN_ROOT}/media-rsync.txt"
+          for pair in \
+            "${CONTENT_ROOT}|${RUN_ROOT}/content" \
+            "${DOCS_ROOT}|${RUN_ROOT}/legacy-docs" \
+            "${MEDIA_ROOT}|${RUN_ROOT}/legacy-media"; do
+            SOURCE_PATH="${pair%%|*}"
+            BACKUP_PATH="${pair#*|}"
+            DIFF_PATH="${RUN_ROOT}/$(basename "${BACKUP_PATH}")-verification.txt"
+            ionice -c2 -n7 nice -n 19 rsync -a --numeric-ids --safe-links --checksum --delete --dry-run \
+              "${SOURCE_PATH}/" "${BACKUP_PATH}/" > "${DIFF_PATH}"
+            [ ! -s "${DIFF_PATH}" ] || {
+              echo "ERROR: source changed while its T9 recovery point was created"
+              exit 1
+            }
+          done
+
+          TOOL_ROOT="${RUN_ROOT}/tooling-${EXPECTED_COMMIT}"
+          git -C "${SOURCE_ROOT}" archive "${EXPECTED_COMMIT}" \
+            scripts/inventory_legacy_content.py scripts/plan_legacy_content_migration.py | \
+            tar -x -C "${RUN_ROOT}"
+          mkdir -p "${TOOL_ROOT}/scripts"
+          mv "${RUN_ROOT}/scripts/inventory_legacy_content.py" "${TOOL_ROOT}/scripts/"
+          mv "${RUN_ROOT}/scripts/plan_legacy_content_migration.py" "${TOOL_ROOT}/scripts/"
+          rmdir "${RUN_ROOT}/scripts"
+
+          INVENTORY="${RUN_ROOT}/legacy-inventory.json"
+          ionice -c2 -n7 nice -n 19 python3 "${TOOL_ROOT}/scripts/inventory_legacy_content.py" \
+            --docs-root "${RUN_ROOT}/legacy-docs" --media-root "${RUN_ROOT}/legacy-media" --output "${INVENTORY}"
+
+          cat > "${RUN_ROOT}/mapping.json" <<'JSON'
+          {
+            "schema_version": 1,
+            "mappings": [
+              {"kind":"docs","legacy_prefix":"设计规范","category_key":"industry_standards","handling":"document"},
+              {"kind":"docs","legacy_prefix":"客户标准","category_key":"client_requirements","handling":"document"},
+              {"kind":"docs","legacy_prefix":"公司标准","category_key":"company_standards","handling":"document"},
+              {"kind":"docs","legacy_prefix":"教学视频","category_key":"training_materials","handling":"transcript"},
+              {"kind":"docs","legacy_prefix":"培训视频","category_key":"training_materials","handling":"transcript"}
+            ]
+          }
+          JSON
+          python3 "${TOOL_ROOT}/scripts/plan_legacy_content_migration.py" \
+            --inventory "${INVENTORY}" --mapping "${RUN_ROOT}/mapping.json" \
+            --output-json "${RUN_ROOT}/migration-plan.json" --output-csv "${RUN_ROOT}/migration-plan.csv"
+
+          RUN_ROOT_ENV="${RUN_ROOT}" REPORT_ROOT_ENV="${REPORT_ROOT}" EXPECTED_COMMIT_ENV="${EXPECTED_COMMIT}" python3 - <<'PY'
+          import json
+          import os
+          import sqlite3
+          from pathlib import Path
+
+          root = Path(os.environ["RUN_ROOT_ENV"])
+          report = Path(os.environ["REPORT_ROOT_ENV"])
+          plan = json.loads((root / "migration-plan.json").read_text(encoding="utf-8"))
+          collection = json.loads((root / "qdrant-before.json").read_text(encoding="utf-8"))
+          with sqlite3.connect(f"file:{root / 'app.sqlite'}?mode=ro", uri=True) as database:
+              schema = database.execute("SELECT max(version) FROM app_schema_migrations").fetchone()[0]
+              categories = database.execute("SELECT count(*) FROM category_nodes WHERE parent_id IS NULL").fetchone()[0]
+              permission_groups = database.execute("SELECT count(*) FROM content_permission_groups WHERE is_system=1").fetchone()[0]
+              heads = database.execute("SELECT count(*) FROM content_item_heads").fetchone()[0]
+          summary = {
+              "schema_version": 1,
+              "approved_commit": os.environ.get("EXPECTED_COMMIT_ENV"),
+              "database": {"schema": schema, "root_categories": categories, "system_permission_groups": permission_groups, "managed_heads": heads},
+              "qdrant": {"status": collection["result"]["status"], "points_count": collection["result"]["points_count"]},
+              "migration": plan["summary"],
+          }
+          (report / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+          (report / "README.txt").write_text(
+              "This artifact is deliberately redacted. Full paths, names, hashes and file contents remain only in the protected production backup.\n",
+              encoding="utf-8",
+          )
+          PY
+          chmod -R go-rwx "${RUN_ROOT}" "${REPORT_ROOT}"
+          echo "T9_PREPARATION status=success run_id=${RUN_ID} backup=${RUN_ROOT}"
+
+      - name: Upload redacted T9 summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: managed-content-t9-summary-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/t9-${{ github.run_id }}-${{ github.run_attempt }}-summary
+          if-no-files-found: error
+          retention-days: 30
