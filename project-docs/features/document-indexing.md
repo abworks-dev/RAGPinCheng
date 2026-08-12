@@ -41,6 +41,8 @@
 - 旧 `docs/media` 生产迁移、切换和清理；
 - 将既有视频转录状态机改写为统一内容版本状态机；视频继续由 `media_assets`、`transcript_versions` 和 `media_transcript_heads` 管理。
 
+旧资料迁移目前只提供离线清点和确定性规划：规划器要求显式旧目录映射，输出负责人审查用 JSON/CSV，但不复制、导入、登记或发布资料。真实迁移仍属于独立 R3。
+
 ## 入口与调用链
 
 ```text
@@ -85,6 +87,7 @@
 - `src/content_retrieval_visibility.py`
 - `scripts/import_content_batch.py`
 - `scripts/inventory_legacy_content.py`
+- `scripts/plan_legacy_content_migration.py`
 - `scripts/rebuild_content_view.py`
 - `frontend/src/pages/admin/AdminManagedContentPage.tsx`
 - `frontend/src/pages/admin/AdminCategoriesPage.tsx`

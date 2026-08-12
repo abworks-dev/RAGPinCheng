@@ -154,12 +154,79 @@ python scripts/inventory_legacy_content.py \
 
 清点输出文件必须是新路径；脚本发现同名输出时会拒绝覆盖。清点会计算大小和 SHA-256，但不会写 `app.sqlite`、Qdrant 或 `CONTENT_ROOT`。
 
+### 7.1 离线迁移规划
+
+清点结果不能直接决定分类。负责人必须另行编写显式映射 JSON，将旧 `docs` 下的相对目录前缀映射到稳定 `category_key`，并声明该范围是普通资料还是视频转录稿。不要把 `category_hint` 当作发布授权，也不要把绝对生产路径写入映射或规划结果。
+
+以下示例仅使用合成目录名：
+
+```json
+{
+  "schema_version": 1,
+  "mappings": [
+    {
+      "kind": "docs",
+      "legacy_prefix": "公司标准",
+      "category_key": "company_standards",
+      "handling": "document"
+    },
+    {
+      "kind": "docs",
+      "legacy_prefix": "教学视频",
+      "category_key": "training_materials",
+      "handling": "transcript"
+    }
+  ]
+}
+```
+
+规划器只读取 inventory 和 mapping JSON，不读取清点根目录，也不连接 SQLite、Qdrant、对象存储或外部服务：
+
+```bash
+python scripts/plan_legacy_content_migration.py \
+  --inventory /tmp/legacy-migration/inventory.json \
+  --mapping /tmp/legacy-migration/mapping.json \
+  --output-json /tmp/legacy-migration/plan.json \
+  --output-csv /tmp/legacy-migration/plan.csv
+```
+
+默认大小上限为 200 MiB，可用 `--max-bytes` 显式调整以匹配未来导入窗口。输出存在时命令整体拒绝，不会只改写 JSON 或 CSV 中的一个；只有明确使用 `--overwrite` 才会替换输出，并且任何输出都不得与输入文件同路径。规划输出不包含文件正文或清点根绝对路径。
+
+负责人逐项检查以下 disposition：
+
+| disposition | 含义和后续动作 |
+|---|---|
+| `import_document` | 显式映射且满足普通资料导入约束；未来 R3 批准后才可复制到新 `inbox/server` 批次 |
+| `preserve_legacy_media` | 保持在既有视频链路；不得交给普通资料导入器 |
+| `review_transcript_link` | 教学/培训视频 Markdown 转录稿；人工核对 media、版本和 transcript head，禁止自动重复登记 |
+| `pending_mapping` | 未命中显式映射；负责人补充或修正 mapping 后重新规划 |
+| `unsupported` | 类型不支持、超过大小限制、目录超过四级或 transcript 范围出现非 Markdown；先人工处理 |
+| `symlink_rejected` | 符号链接；不得跟随或迁移 |
+
+同一映射前缀范围内相同 SHA-256 会进入 `duplicate_group`；不同映射范围或 docs/media 间相同 SHA-256 只列入 `related_sha256_paths`。两种标记都只供审查，不会删除文件或合并业务资料。
+
+### 7.2 合成演练
+
+开发和演练必须只使用临时目录与合成内容。下面的 PowerShell 示例不会读取真实 `source/docs` 或 `source/media`：
+
+```powershell
+$migrationLab = Join-Path ([System.IO.Path]::GetTempPath()) "ragpincheng-legacy-migration-lab"
+New-Item -ItemType Directory -Force "$migrationLab/docs/公司标准", "$migrationLab/media/demo-media" | Out-Null
+Set-Content -Encoding utf8 "$migrationLab/docs/公司标准/demo.md" "# synthetic"
+Set-Content -Encoding utf8 "$migrationLab/media/demo-media/original.mp4" "synthetic-media-placeholder"
+python scripts/inventory_legacy_content.py --docs-root "$migrationLab/docs" --media-root "$migrationLab/media" --output "$migrationLab/inventory.json"
+python scripts/plan_legacy_content_migration.py --inventory "$migrationLab/inventory.json" --mapping "$migrationLab/mapping.json" --output-json "$migrationLab/plan.json" --output-csv "$migrationLab/plan.csv"
+```
+
+先在该临时目录中准备只含合成目录名的 `mapping.json`。演练完成后仅删除自行创建的临时实验目录；不要把真实目录、正式 inventory、迁移报告或业务资料提交到 Git。
+
 迁移边界：
 
 - 普通 PDF、Markdown 和 Office 资料：按新分类复制到新的 `inbox/server/<batch_id>`，再走 dry-run/apply/确认/发布；
 - 旧 `docs/教学视频`、`docs/培训视频` 中的转录稿：先核对是否已有 `media_assets`、`transcript_versions` 和正式 transcript head，避免把同一转录稿误当普通资料重复发布；
 - 旧 `source/media`：现阶段继续作为既有视频链路的事实目录，不由 `import_content_batch.py` 导入，不移动到 `CONTENT_ROOT/media`；
 - 未能可靠映射或无法确认业务归属的资料：复制到 `99_待确认资料`，不得自动发布；
+- 离线规划器只生成审查报告，不复制文件，也不调用 `import_content_batch.py`；
 - 观察期内旧 `docs`、`media` 和旧索引保持原状，至少 1 至 2 周后再提交独立清理方案。
 
 ## 8. 只读视图
