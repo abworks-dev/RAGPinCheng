@@ -128,6 +128,7 @@ def test_document_listing_merges_latest_job_and_hides_raw_failure(monkeypatch):
                 doc_type="pdf",
                 company=None,
                 parent_count=4,
+                preview_parent_id="parent-guide-1",
             )
         ],
     )
@@ -150,12 +151,14 @@ def test_document_listing_merges_latest_job_and_hides_raw_failure(monkeypatch):
     assert failed.is_indexed is True
     assert failed.document_id
     assert failed.display_path == "公司标准 / guide.pdf"
+    assert failed.preview_parent_id == "parent-guide-1"
     assert failed.error_summary == "资料处理失败，可重试或在索引活动中查看详情。"
     assert "Traceback" not in failed.error_summary
 
     pending = next(item for item in result.documents if item.filename == "pending.docx")
     assert pending.is_indexed is False
     assert pending.status == "parsing"
+    assert pending.preview_parent_id is None
     conn.close()
 
 
@@ -184,6 +187,7 @@ def test_document_listing_supports_server_side_status_filter(monkeypatch):
                 doc_type="pdf",
                 company=None,
                 parent_count=1,
+                preview_parent_id="parent-ready-1",
             )
         ],
     )

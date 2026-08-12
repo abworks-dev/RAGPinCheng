@@ -456,6 +456,7 @@ class IndexedDocument:
     doc_type: str
     company: str | None
     parent_count: int
+    preview_parent_id: str | None
 
 
 def list_indexed_documents() -> list[IndexedDocument]:
@@ -465,7 +466,7 @@ def list_indexed_documents() -> list[IndexedDocument]:
         rows = conn.execute(
             """
             SELECT source_path, doc_title, category, doc_type, company,
-                   COUNT(*) AS n
+                   COUNT(*) AS n, MIN(parent_id) AS preview_parent_id
             FROM parents
             GROUP BY source_path, doc_title, category, doc_type, company
             ORDER BY category, doc_title
@@ -481,6 +482,7 @@ def list_indexed_documents() -> list[IndexedDocument]:
             doc_type=r[3] or "pdf",
             company=r[4],
             parent_count=int(r[5]),
+            preview_parent_id=r[6],
         )
         for r in rows
     ]

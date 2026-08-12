@@ -1,6 +1,7 @@
 import {
   Activity,
   ChevronDown,
+  Eye,
   FileText,
   MoreHorizontal,
   RefreshCw,
@@ -42,6 +43,8 @@ import type {
 } from "../../types";
 import { cn } from "../../lib/utils";
 import { formatAdminDate, formatBytes } from "./admin-formatters";
+import { PdfPreview } from "../../components/PdfPreview";
+import { PdfPreviewProvider, usePdfPreview } from "../../hooks/usePdfPreview";
 
 const NEW_CATEGORY_SENTINEL = "__new__";
 const PAGE_SIZE = 25;
@@ -124,6 +127,15 @@ function DocumentStatus({ document }: { document: IndexedDocument }) {
 }
 
 export function AdminDocumentsPage() {
+  return (
+    <PdfPreviewProvider>
+      <AdminDocumentsPageContent />
+      <PdfPreview />
+    </PdfPreviewProvider>
+  );
+}
+
+function AdminDocumentsPageContent() {
   const [tree, setTree] = useState<CategoryTree | null>(null);
   const [listing, setListing] = useState<IndexedDocumentList>(emptyDocumentList);
   const [jobs, setJobs] = useState<IndexJob[]>([]);
@@ -389,6 +401,24 @@ function DocumentsTable({
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [deletePartiallyCompleted, setDeletePartiallyCompleted] = useState(false);
   const [retryingId, setRetryingId] = useState<number | null>(null);
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const { open: openPreview } = usePdfPreview();
+
+  useEffect(() => {
+    function closeOnOutsidePointer(event: PointerEvent) {
+      const target = event.target;
+      if (!(target instanceof Element) || !target.closest("[data-document-menu]")) setOpenMenuId(null);
+    }
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setOpenMenuId(null);
+    }
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsidePointer);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, []);
 
   function closeDeleteDialog() {
     setDeleteTarget(null);
@@ -479,16 +509,36 @@ function DocumentsTable({
                     {document.uploaded_by && <p className="mt-1">由 {document.uploaded_by} 上传</p>}
                   </td>
                   <td className="px-4 py-3 text-right">
-                    <details className="relative inline-block text-left">
-                      <summary className="inline-flex size-9 cursor-pointer list-none items-center justify-center rounded-ui-md text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label={`打开 ${document.doc_title} 的操作菜单`}>
+                    <div data-document-menu className="relative inline-block text-left">
+                      <button
+                        type="button"
+                        onClick={() => setOpenMenuId((current) => current === document.document_id ? null : document.document_id)}
+                        className="inline-flex size-9 items-center justify-center rounded-ui-md text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        aria-label={`打开 ${document.doc_title} 的操作菜单`}
+                        aria-expanded={openMenuId === document.document_id}
+                        aria-haspopup="menu"
+                      >
                         <MoreHorizontal className="size-4" />
-                      </summary>
-                      <div className="absolute right-0 z-dropdown mt-1 w-44 rounded-ui-md border border-border bg-popover p-1 text-left text-popover-foreground shadow-overlay">
+                      </button>
+                      {openMenuId === document.document_id && <div role="menu" className="absolute right-0 z-dropdown mt-1 w-44 rounded-ui-md border border-border bg-popover p-1 text-left text-popover-foreground shadow-overlay">
+                        {document.preview_parent_id && ["pdf", "docx", "xlsx", "pptx"].includes(document.doc_type) && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setOpenMenuId(null);
+                              openPreview(document.preview_parent_id!, document.doc_title, document.doc_type, 1);
+                            }}
+                            className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-secondary"
+                          >
+                            <Eye className="size-4" />
+                            预览文件
+                          </button>
+                        )}
                         {document.latest_job_id != null && (document.status === "failed" || document.status === "done") && (
                           <button
                             type="button"
                             disabled={retryingId === document.latest_job_id}
-                            onClick={() => void retry(document)}
+                            onClick={() => { setOpenMenuId(null); void retry(document); }}
                             className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-secondary disabled:opacity-50"
                           >
                             <RefreshCw className="size-4" />
@@ -503,6 +553,7 @@ function DocumentsTable({
                               setDeletePartiallyCompleted(false);
                               setDeleteFile(false);
                               setDeleteTarget(document);
+                              setOpenMenuId(null);
                             }}
                             className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm text-destructive hover:bg-destructive/10"
                           >
@@ -510,8 +561,8 @@ function DocumentsTable({
                             移除资料
                           </button>
                         )}
-                      </div>
-                    </details>
+                      </div>}
+                    </div>
                   </td>
                 </tr>
               ))}

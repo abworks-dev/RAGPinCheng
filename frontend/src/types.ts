@@ -193,6 +193,7 @@ export type IndexedDocument = {
   doc_type: string;
   company: string | null;
   parent_count: number;
+  preview_parent_id: string | null;
   child_count: number | null;
   file_size: number | null;
   status: string;
