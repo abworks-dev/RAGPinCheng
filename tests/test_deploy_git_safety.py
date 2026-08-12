@@ -52,6 +52,7 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertIn('"${RUNNING_IMAGE_ID}" = "${OLD_IMAGE_ID}"', workflow)
         self.assertIn("CURRENT_SCHEMA_VERSION == 5", workflow)
         self.assertIn("APP_BACKUP_RECOVERY status=complete", workflow)
+        self.assertIn("docker compose -p ragpincheng-prod", workflow)
         self.assertIn('container_status={{.State.Status}}', workflow)
         self.assertIn('logs --no-color --tail 200 backend', workflow)
         self.assertLess(
@@ -222,6 +223,8 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertIn("CONFIGURED_TRANSCRIPTION_ADMITTED_PROFILE_IDS", workflow)
         self.assertIn("PREVIOUS_TRANSCRIPTION_ADMITTED_PROFILE_IDS", workflow)
         self.assertIn("PREVIOUS_ASR_ENABLED", workflow)
+        self.assertIn("APP_ONLY_ASR_STATE source=container-config", workflow)
+        self.assertIn(".Config.Env", workflow)
         self.assertIn("export ASR_ENABLED=true", workflow)
         self.assertIn('export ASR_ENABLED="${PREVIOUS_ASR_ENABLED}"', workflow)
         self.assertIn("EXPECTED_ROLLBACK_ASR_STATE", workflow)
@@ -266,6 +269,18 @@ class TestDeployGitSafety(unittest.TestCase):
                 "${{ vars.TRANSCRIPTION_ADMITTED_PROFILE_IDS }}",
                 production_workflow,
             )
+
+    def test_app_only_workflow_only_removes_verified_legacy_recovery_backend(self):
+        workflow = self.app_only_workflow
+
+        self.assertIn("remove_legacy_recovery_backend", workflow)
+        self.assertIn("label=com.docker.compose.project=docker", workflow)
+        self.assertIn("label=com.docker.compose.service=backend", workflow)
+        self.assertIn('HostConfig.PortBindings "8000/tcp"', workflow)
+        self.assertIn('[ "${host_port}" != "80" ]', workflow)
+        self.assertIn("refusing to remove unverified port-80 container", workflow)
+        self.assertIn('docker rm -f "${candidate}"', workflow)
+        self.assertIn("APP_ONLY_RECOVERY_HARNESS status=removed-legacy-container", workflow)
 
     def test_production_content_root_is_fixed_and_strictly_verified(self):
         workflow = self.app_only_workflow
