@@ -1,4 +1,5 @@
 import { defineConfig } from "@playwright/test";
+import process from "node:process";
 
 const viewports = [
   { name: "chromium-1440x900", width: 1440, height: 900 },
@@ -10,7 +11,7 @@ const viewports = [
 export default defineConfig({
   testDir: "./tests/visual",
   outputDir: "./test-results/visual",
-  snapshotPathTemplate: "{testDir}/../visual-baseline/{projectName}/{testFilePath}/{arg}{ext}",
+  snapshotPathTemplate: `{testDir}/../visual-baseline/${process.platform}/{projectName}/{testFilePath}/{arg}{ext}`,
   fullyParallel: true,
   workers: 2,
   forbidOnly: Boolean(process.env.CI),
