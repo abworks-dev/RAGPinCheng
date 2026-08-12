@@ -11,6 +11,8 @@ const mocks = vi.hoisted(() => ({
   updatePermissions: vi.fn(),
   createGroup: vi.fn(),
   updateGroup: vi.fn(),
+  toastSuccess: vi.fn(),
+  toastError: vi.fn(),
 }));
 
 vi.mock("../../api/client", () => ({
@@ -24,6 +26,10 @@ vi.mock("../../api/client", () => ({
     createManagedContentPermissionGroup: mocks.createGroup,
     updateManagedContentPermissionGroup: mocks.updateGroup,
   },
+}));
+
+vi.mock("../../components/ui/toast", () => ({
+  toast: { success: mocks.toastSuccess, error: mocks.toastError },
 }));
 
 const users = [
@@ -125,6 +131,55 @@ describe("AdminUsersPage", () => {
     await waitFor(() => expect(mocks.updatePermissions).toHaveBeenCalledWith(2, ["review"]));
   });
 
+  it("keeps permission dialogs mutually exclusive and cancel does not save", async () => {
+    mocks.adminListUsers.mockResolvedValue({ users: [users[0], { ...users[1], is_active: true }] });
+    render(<AdminUsersPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "权限组管理" }));
+    expect(screen.getByRole("dialog", { name: "权限组管理" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "关闭" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "管理 李工" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "设置权限" }));
+    expect(screen.getByRole("dialog", { name: "设置资料权限" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "权限组管理" })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("选择权限组"), { target: { value: "owner" } });
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+    expect(mocks.updatePermissions).not.toHaveBeenCalled();
+  });
+
+  it("prevents duplicate permission saves and remains editable after failure", async () => {
+    mocks.adminListUsers.mockResolvedValue({ users: [users[0], { ...users[1], is_active: true }] });
+    let rejectSave: (reason: Error) => void = () => undefined;
+    mocks.updatePermissions.mockReturnValue(new Promise((_resolve, reject) => { rejectSave = reject; }));
+    render(<AdminUsersPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "管理 李工" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "设置权限" }));
+    fireEvent.change(screen.getByLabelText("选择权限组"), { target: { value: "owner" } });
+    const save = screen.getByRole("button", { name: "保存权限" });
+    fireEvent.click(save);
+    fireEvent.click(save);
+    expect(mocks.updatePermissions).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "保存中…" })).toBeDisabled();
+    rejectSave(new Error("权限服务失败"));
+    await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith("权限服务失败"));
+    expect(screen.getByRole("button", { name: "保存权限" })).toBeEnabled();
+    expect(screen.getByRole("dialog", { name: "设置资料权限" })).toBeInTheDocument();
+  });
+
+  it("shows administrator and inactive-account permission boundaries", async () => {
+    render(<AdminUsersPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "管理 管理员" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "设置权限" }));
+    expect(screen.getByText("管理员默认拥有全部权限，不能单独取消。")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "保存权限" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "管理 李工" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "设置权限" }));
+    expect(screen.getByText("账号已停用，权限保留但暂不能修改。")).toBeInTheDocument();
+    expect(screen.getByLabelText("选择权限组")).toBeDisabled();
+  });
+
   it("creates a reusable custom permission template", async () => {
     render(<AdminUsersPage />);
     fireEvent.click(await screen.findByRole("button", { name: "权限组管理" }));
@@ -133,6 +188,20 @@ describe("AdminUsersPage", () => {
     fireEvent.click(screen.getByLabelText("发布"));
     fireEvent.click(screen.getByRole("button", { name: "创建模板" }));
     await waitFor(() => expect(mocks.createGroup).toHaveBeenCalledWith({ display_name: "项目发布员", permissions: ["publish"] }));
+  });
+
+  it("copies a preset into an independent editable template and reports conflicts", async () => {
+    mocks.createGroup.mockRejectedValueOnce(new Error("权限组名称已存在"));
+    render(<AdminUsersPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "权限组管理" }));
+    fireEvent.click(screen.getByRole("button", { name: "复制" }));
+    const name = screen.getByLabelText("权限组名称");
+    expect(name).toHaveValue("普通成员副本");
+    expect(name).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "创建模板" }));
+    await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith("权限组名称已存在"));
+    expect(screen.getByRole("button", { name: "创建模板" })).toBeEnabled();
+    expect(screen.getByRole("dialog", { name: "权限组管理" })).toBeInTheDocument();
   });
 
   it("surfaces a user-list loading failure", async () => {

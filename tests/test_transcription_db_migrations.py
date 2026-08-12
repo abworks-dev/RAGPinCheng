@@ -41,6 +41,8 @@ def test_empty_database_initializes_all_phase2_tables(tmp_path):
         "content_index_jobs",
         "content_item_heads",
         "content_audit_events",
+        "content_permission_groups",
+        "content_permission_group_items",
     } <= tables
     assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     assert conn.execute("PRAGMA foreign_key_check").fetchone() is None
@@ -75,6 +77,47 @@ def test_repeated_init_is_noop_and_does_not_create_second_backup(tmp_path):
     first = list((tmp_path / "backups").glob("*.sqlite"))
     init_db(path, backup_dir=tmp_path / "backups")
     assert list((tmp_path / "backups").glob("*.sqlite")) == first
+
+
+def test_schema_5_database_adds_permission_groups_without_changing_users(tmp_path):
+    path = tmp_path / "app.sqlite"
+    init_db(path, backup_dir=tmp_path / "backups")
+    conn = sqlite3.connect(path)
+    conn.execute("DELETE FROM app_schema_migrations WHERE version=6")
+    conn.execute("DROP TABLE content_permission_group_items")
+    conn.execute("DROP TABLE content_permission_groups")
+    conn.execute(
+        "INSERT INTO users(employee_id,real_name,password_hash,role,is_active,created_at) VALUES ('kept','保留用户','x','user',1,1)"
+    )
+    conn.commit()
+    conn.close()
+
+    init_db(path, backup_dir=tmp_path / "backups")
+    conn = sqlite3.connect(path)
+    assert conn.execute("SELECT max(version) FROM app_schema_migrations").fetchone()[0] == 6
+    assert conn.execute("SELECT real_name FROM users WHERE employee_id='kept'").fetchone()[0] == "保留用户"
+    assert conn.execute("SELECT count(*) FROM content_permission_groups WHERE is_system=1").fetchone()[0] == 4
+    conn.close()
+
+
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "UPDATE content_permission_groups SET display_name='已篡改' WHERE group_key='member'",
+        "UPDATE content_permission_groups SET is_active=0 WHERE group_key='system_admin'",
+        "DELETE FROM content_permission_group_items WHERE group_id='permission-group-system-admin' AND permission='publish'",
+    ],
+)
+def test_repeated_init_fails_closed_when_system_permission_group_drifts(tmp_path, statement):
+    path = tmp_path / "app.sqlite"
+    init_db(path, backup_dir=tmp_path / "backups")
+    conn = sqlite3.connect(path)
+    conn.execute(statement)
+    conn.commit()
+    conn.close()
+
+    with pytest.raises(RuntimeError, match="system_permission_group_mismatch"):
+        init_db(path, backup_dir=tmp_path / "backups")
 
 
 def test_backup_happens_before_any_phase2_schema_write(tmp_path, monkeypatch):
