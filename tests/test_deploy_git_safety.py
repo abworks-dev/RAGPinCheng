@@ -52,6 +52,8 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertIn('"${RUNNING_IMAGE_ID}" = "${OLD_IMAGE_ID}"', workflow)
         self.assertIn("CURRENT_SCHEMA_VERSION == 5", workflow)
         self.assertIn("APP_BACKUP_RECOVERY status=complete", workflow)
+        self.assertIn('container_status={{.State.Status}}', workflow)
+        self.assertIn('logs --no-color --tail 200 backend', workflow)
         self.assertLess(
             workflow.index('"${COMPOSE[@]}" stop backend'),
             workflow.index("os.replace(temporary, target)"),
