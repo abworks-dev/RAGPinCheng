@@ -23,6 +23,8 @@
 - Office 文件上传、解析、预览与引用定位。
 - 受管资料库添加式 Schema、七个首批一级分类、四级分类树、稳定 `category_key`、显示编号/名称和导入别名；
 - `organize`、`review`、`publish`、`manage_categories`、`import_server` 独立权限，管理员默认拥有全部资料权限；
+- 资料权限在用户管理页集中显示和配置；行操作中的“设置权限”可套用普通成员、BIM工程师、资料负责人、系统管理员预设，也可精确勾选个人权限；
+- 权限组是可复用模板，自定义模板支持创建、复制、编辑和停用；套用时复制精确权限，后续修改模板不会改变既有用户；
 - 网页多文件上传、服务器 `inbox/server/<batch_id>/` dry-run/apply 导入、审核发布状态机和串行候选索引；
 - SHA-256 内容寻址对象存储，物理对象可复用而业务资料记录保持独立；
 - Parent、Child、parents.sqlite 和 Qdrant payload 携带 nullable 的 `content_item_id`、`content_version_id` 和 `category_key`；
@@ -116,7 +118,7 @@
 - Reset、资料删除和运行中存储操作必须按专项规则确认。
 - 服务器 apply 导入只允许位于 `CONTENT_ROOT/inbox/server` 下的批次；dry-run 不写数据库或对象存储；
 - 受管对象路径拒绝越界和符号链接；网页变更必须同时通过 Cookie 鉴权、资料权限和 CSRF；
-- 资料权限授予仅允许全局管理员执行；`manage_categories` 不能授予自身或他人的确认、发布权限；
+- 资料权限和权限组模板仅允许全局管理员维护；`manage_categories` 不能授予自身或他人的确认、发布权限；
 - 新能力在代码和普通环境中默认关闭；生产已经显式启用基础能力。真实资料迁移、启用严格 head、移动旧目录或清理旧索引仍属于独立 R3。
 
 ## 验证

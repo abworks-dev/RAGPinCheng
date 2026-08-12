@@ -3,32 +3,18 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AdminCategoriesPage } from "./AdminCategoriesPage";
 
 const mocks = vi.hoisted(() => ({
-  role: "admin",
   categories: vi.fn(),
-  permissions: vi.fn(),
   create: vi.fn(),
   update: vi.fn(),
-  updatePermissions: vi.fn(),
   success: vi.fn(),
   error: vi.fn(),
-}));
-
-vi.mock("../../context/AuthContext", () => ({
-  useAuth: () => ({
-    state: {
-      status: "authed",
-      user: { role: mocks.role },
-    },
-  }),
 }));
 
 vi.mock("../../api/client", () => ({
   api: {
     managedCategories: mocks.categories,
-    managedContentPermissions: mocks.permissions,
     createManagedCategory: mocks.create,
     updateManagedCategory: mocks.update,
-    updateManagedContentPermissions: mocks.updatePermissions,
   },
 }));
 
@@ -53,13 +39,8 @@ const category = {
 describe("AdminCategoriesPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.role = "admin";
     mocks.categories.mockResolvedValue([category]);
-    mocks.permissions.mockResolvedValue([
-      { user_id: 2, employee_id: "u2", real_name: "整理员", role: "user", is_active: true, permissions: ["organize"] },
-    ]);
     mocks.update.mockResolvedValue({ ...category, version: 4 });
-    mocks.updatePermissions.mockResolvedValue({});
   });
 
   it("sends the category version for optimistic concurrency", async () => {
@@ -76,18 +57,9 @@ describe("AdminCategoriesPage", () => {
     }));
   });
 
-  it("updates scoped permissions without changing the global role", async () => {
-    render(<AdminCategoriesPage />);
-    const checkbox = await screen.findByLabelText("整理员确认");
-    fireEvent.click(checkbox);
-    await waitFor(() => expect(mocks.updatePermissions).toHaveBeenCalledWith(2, ["organize", "review"]));
-  });
-
-  it("lets a category manager edit categories without exposing permission grants", async () => {
-    mocks.role = "user";
+  it("keeps permission management out of category settings", async () => {
     render(<AdminCategoriesPage />);
     expect(await screen.findByText("industry_standards")).toBeInTheDocument();
-    expect(mocks.permissions).not.toHaveBeenCalled();
     expect(screen.queryByRole("heading", { name: "资料权限" })).not.toBeInTheDocument();
   });
 
@@ -105,19 +77,4 @@ describe("AdminCategoriesPage", () => {
     expect(screen.getByRole("button", { name: "重新加载" })).toBeInTheDocument();
   });
 
-  it("disables permission controls while saving and rolls back failures", async () => {
-    let rejectSave: ((reason: Error) => void) | undefined;
-    mocks.updatePermissions.mockReturnValueOnce(new Promise((_, reject) => { rejectSave = reject; }));
-    render(<AdminCategoriesPage />);
-    const review = await screen.findByLabelText("整理员确认");
-    const organize = screen.getByLabelText("整理员整理");
-    fireEvent.click(review);
-    expect(review).toBeDisabled();
-    expect(organize).toBeDisabled();
-    expect(screen.getByRole("status")).toHaveTextContent("正在保存确认权限");
-    rejectSave?.(new Error("权限保存失败"));
-    await waitFor(() => expect(review).not.toBeChecked());
-    expect(organize).toBeChecked();
-    expect(mocks.error).toHaveBeenCalledWith("权限保存失败");
-  });
 });

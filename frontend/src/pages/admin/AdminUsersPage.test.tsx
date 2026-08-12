@@ -7,6 +7,10 @@ const mocks = vi.hoisted(() => ({
   adminPatchUser: vi.fn(),
   adminListUserConversations: vi.fn(),
   adminGetConversation: vi.fn(),
+  groups: vi.fn(),
+  updatePermissions: vi.fn(),
+  createGroup: vi.fn(),
+  updateGroup: vi.fn(),
 }));
 
 vi.mock("../../api/client", () => ({
@@ -15,6 +19,10 @@ vi.mock("../../api/client", () => ({
     adminPatchUser: mocks.adminPatchUser,
     adminListUserConversations: mocks.adminListUserConversations,
     adminGetConversation: mocks.adminGetConversation,
+    managedContentPermissionGroups: mocks.groups,
+    updateManagedContentPermissions: mocks.updatePermissions,
+    createManagedContentPermissionGroup: mocks.createGroup,
+    updateManagedContentPermissionGroup: mocks.updateGroup,
   },
 }));
 
@@ -28,6 +36,7 @@ const users = [
     created_at: 1_720_000_000,
     last_login_at: 1_721_000_000,
     conversation_count: 3,
+    content_permissions: ["organize", "review", "publish", "manage_categories", "import_server"],
   },
   {
     id: 2,
@@ -38,6 +47,7 @@ const users = [
     created_at: 1_720_100_000,
     last_login_at: null,
     conversation_count: 1,
+    content_permissions: ["organize"],
   },
 ];
 
@@ -45,6 +55,13 @@ describe("AdminUsersPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.adminListUsers.mockResolvedValue({ users });
+    mocks.groups.mockResolvedValue([
+      { id: "member", group_key: "member", display_name: "普通成员", permissions: [], is_system: true, is_active: true, updated_at: 1 },
+      { id: "bim", group_key: "bim_engineer", display_name: "BIM工程师", permissions: ["organize"], is_system: true, is_active: true, updated_at: 1 },
+      { id: "owner", group_key: "content_owner", display_name: "资料负责人", permissions: ["review"], is_system: true, is_active: true, updated_at: 1 },
+    ]);
+    mocks.updatePermissions.mockResolvedValue({});
+    mocks.createGroup.mockResolvedValue({});
   });
 
   afterEach(() => {
@@ -95,6 +112,27 @@ describe("AdminUsersPage", () => {
     fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
     expect(actionsButton).toHaveFocus();
+  });
+
+  it("applies a permission template and saves the exact user permissions", async () => {
+    mocks.adminListUsers.mockResolvedValue({ users: [users[0], { ...users[1], is_active: true }] });
+    render(<AdminUsersPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "管理 李工" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "设置权限" }));
+    expect(screen.getByRole("dialog", { name: "设置资料权限" })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("选择权限组"), { target: { value: "owner" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存权限" }));
+    await waitFor(() => expect(mocks.updatePermissions).toHaveBeenCalledWith(2, ["review"]));
+  });
+
+  it("creates a reusable custom permission template", async () => {
+    render(<AdminUsersPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "权限组管理" }));
+    fireEvent.click(screen.getByRole("button", { name: "新建权限组" }));
+    fireEvent.change(screen.getByLabelText("权限组名称"), { target: { value: "项目发布员" } });
+    fireEvent.click(screen.getByLabelText("发布"));
+    fireEvent.click(screen.getByRole("button", { name: "创建模板" }));
+    await waitFor(() => expect(mocks.createGroup).toHaveBeenCalledWith({ display_name: "项目发布员", permissions: ["publish"] }));
   });
 
   it("surfaces a user-list loading failure", async () => {

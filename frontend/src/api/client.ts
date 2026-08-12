@@ -10,6 +10,7 @@ import type {
   Conversation,
   ConversationState,
   ContentPermission,
+  ContentPermissionGroup,
   ContentPermissionUser,
   FeedbackPayload,
   Health,
@@ -331,6 +332,20 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ permissions }),
     }),
+  managedContentPermissionGroups: () =>
+    jsonFetch<ContentPermissionGroup[]>("/api/admin/content/permission-groups"),
+  createManagedContentPermissionGroup: (body: { display_name: string; permissions: ContentPermission[] }) =>
+    jsonFetch<ContentPermissionGroup>("/api/admin/content/permission-groups", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  updateManagedContentPermissionGroup: (
+    groupId: string,
+    body: Partial<{ display_name: string; permissions: ContentPermission[]; is_active: boolean }>,
+  ) => jsonFetch<ContentPermissionGroup>(`/api/admin/content/permission-groups/${encodeURIComponent(groupId)}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  }),
   managedContentItems: () =>
     jsonFetch<ManagedContentItem[]>("/api/admin/content/items"),
   uploadManagedContent: async (files: File[], categoryId: string) => {

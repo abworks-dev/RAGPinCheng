@@ -40,6 +40,7 @@ from .auth import (
     require_csrf_admin,
 )
 from .conversation_runtime import sweep_once
+from .content_permissions import CONTENT_PERMISSIONS
 from .db import get_db
 from .feedback import read_records
 from .indexing import create_job, enqueue
@@ -74,6 +75,18 @@ logger = logging.getLogger("api.routes_admin")
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 
+def _user_permissions(conn: sqlite3.Connection, user_id: int, role: str) -> list[str]:
+    if role == "admin":
+        return sorted(CONTENT_PERMISSIONS)
+    return [
+        str(row[0])
+        for row in conn.execute(
+            "SELECT permission FROM content_permissions WHERE user_id=? ORDER BY permission",
+            (user_id,),
+        ).fetchall()
+    ]
+
+
 # ── users ──────────────────────────────────────────────────────────────────
 
 
@@ -102,6 +115,7 @@ def list_users(
                 created_at=r["created_at"],
                 last_login_at=r["last_login_at"],
                 conversation_count=r["conv_count"],
+                content_permissions=_user_permissions(conn, r["id"], r["role"]),
             )
             for r in rows
         ]
@@ -168,6 +182,7 @@ def patch_user(
         created_at=r["created_at"],
         last_login_at=r["last_login_at"],
         conversation_count=r["conv_count"],
+        content_permissions=_user_permissions(conn, r["id"], r["role"]),
     )
 
 

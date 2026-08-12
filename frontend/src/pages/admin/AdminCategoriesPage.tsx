@@ -10,14 +10,10 @@ import { Input } from "../../components/ui/input";
 import { LoadingState } from "../../components/ui/loading-state";
 import { Select } from "../../components/ui/select";
 import { toast } from "../../components/ui/toast";
-import { useAuth } from "../../context/AuthContext";
-import type { ContentPermission, ContentPermissionUser, ManagedCategory } from "../../types";
+import type { ManagedCategory } from "../../types";
 
 export function AdminCategoriesPage() {
-  const { state } = useAuth();
-  const isAdmin = state.status === "authed" && state.user.role === "admin";
   const [categories, setCategories] = useState<ManagedCategory[]>([]);
-  const [permissionUsers, setPermissionUsers] = useState<ContentPermissionUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -28,19 +24,15 @@ export function AdminCategoriesPage() {
     refresh ? setRefreshing(true) : setLoading(true);
     setError(null);
     try {
-      const [categoryRows, permissionRows] = await Promise.all([
-        api.managedCategories(true),
-        isAdmin ? api.managedContentPermissions() : Promise.resolve([]),
-      ]);
+      const categoryRows = await api.managedCategories(true);
       setCategories(categoryRows);
-      setPermissionUsers(permissionRows);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "分类加载失败");
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [isAdmin]);
+  }, []);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -69,7 +61,7 @@ export function AdminCategoriesPage() {
       <div>
         <p className="text-ui-xs text-muted-foreground">资料管理</p>
         <h1 id="managed-categories-title" className="mt-1 text-ui-2xl font-semibold text-foreground">分类设置</h1>
-        <p className="mt-1 text-ui-sm text-muted-foreground">维护资料分类及工作流权限。</p>
+        <p className="mt-1 text-ui-sm text-muted-foreground">维护资料分类、层级和可用状态。</p>
       </div>
       <Button variant="outline" size="sm" className="w-full sm:w-auto" onClick={() => void load(true)} disabled={loading || refreshing}>
         <RefreshCw className={refreshing ? "size-4 animate-spin" : "size-4"} />{refreshing ? "刷新中…" : "刷新"}
@@ -96,10 +88,6 @@ export function AdminCategoriesPage() {
       {loading ? <LoadingState className="min-h-48 border border-border" label="正在加载分类…" /> : !error && categories.length === 0 ? <EmptyState title="暂无分类" description="新增第一个分类后，可在此维护名称、编号和状态。" /> : !error && <div className="divide-y divide-border border-y border-border">{categories.map((category) => <CategoryEditor key={category.id} category={category} onSaved={() => load(true)} />)}</div>}
     </section>
 
-    {isAdmin && <section className="order-3 space-y-3" aria-labelledby="content-permissions-title">
-      <div><h2 id="content-permissions-title" className="text-ui-base font-semibold">资料权限</h2><p className="mt-1 text-ui-xs text-muted-foreground">权限独立保存，不会更改用户的全局角色。</p></div>
-      {!loading && !error && permissionUsers.length === 0 ? <EmptyState title="暂无可配置用户" description="当前没有可配置资料权限的用户。" /> : !loading && !error && <div className="divide-y divide-border border-y border-border">{permissionUsers.map((user) => <PermissionEditor key={user.user_id} user={user} onSaved={() => load(true)} />)}</div>}
-    </section>}
   </section>;
 }
 
@@ -136,35 +124,5 @@ function CategoryEditor({ category, onSaved }: { category: ManagedCategory; onSa
       <Field label="排序"><Input aria-label={`编辑${category.display_name}的排序`} type="number" value={sortOrder} onChange={(event) => setSortOrder(event.target.value)} /></Field>
       <label className="flex h-control-md cursor-pointer items-center gap-2 text-ui-sm font-medium"><Checkbox aria-label={`${category.display_name}启用`} checked={active} onChange={(event) => setActive(event.target.checked)} />启用分类</label>
     </div>
-  </article>;
-}
-
-const permissionColumns: [ContentPermission, string][] = [["organize", "整理"], ["review", "确认"], ["publish", "发布"], ["manage_categories", "分类管理"], ["import_server", "后台导入"]];
-
-function PermissionEditor({ user, onSaved }: { user: ContentPermissionUser; onSaved: () => Promise<void> }) {
-  const [permissions, setPermissions] = useState<ContentPermission[]>(user.permissions);
-  const [savingPermission, setSavingPermission] = useState<ContentPermission | null>(null);
-
-  const toggle = async (permission: ContentPermission) => {
-    if (user.role === "admin" || !user.is_active || savingPermission) return;
-    const previous = permissions;
-    const next = previous.includes(permission) ? previous.filter((item) => item !== permission) : [...previous, permission];
-    setPermissions(next);
-    setSavingPermission(permission);
-    try {
-      await api.updateManagedContentPermissions(user.user_id, next);
-      toast.success(`${user.real_name}的资料权限已保存`);
-      await onSaved();
-    } catch (saveError) {
-      setPermissions(previous);
-      toast.error(saveError instanceof Error ? saveError.message : "权限保存失败");
-    } finally { setSavingPermission(null); }
-  };
-
-  const disabled = user.role === "admin" || !user.is_active;
-  const disabledReason = user.role === "admin" ? "管理员默认拥有全部权限" : !user.is_active ? "账号已停用，无法修改权限" : null;
-  return <article className="space-y-3 py-4">
-    <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between"><div><h3 className="font-medium">{user.real_name}</h3><p className="text-ui-xs text-muted-foreground">{user.employee_id}</p></div><p className="min-h-5 text-ui-xs text-muted-foreground" role="status" aria-live="polite">{savingPermission ? `正在保存${permissionColumns.find(([key]) => key === savingPermission)?.[1]}权限…` : disabledReason}</p></div>
-    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">{permissionColumns.map(([permission, label]) => <label key={permission} className="flex min-h-control-md cursor-pointer items-center gap-2 rounded-ui-md border border-border px-3 py-2 text-ui-sm has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60"><Checkbox aria-label={`${user.real_name}${label}`} checked={user.role === "admin" || permissions.includes(permission)} disabled={disabled || Boolean(savingPermission)} onChange={() => void toggle(permission)} />{label}</label>)}</div>
   </article>;
 }

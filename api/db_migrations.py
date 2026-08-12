@@ -360,12 +360,47 @@ CONTENT_LIBRARY_STATEMENTS = (
        ('alias-training',NULL,'培训视频','cat-05',strftime('%s','now'),strftime('%s','now'))""",
 )
 
+CONTENT_PERMISSION_GROUP_STATEMENTS = (
+    """CREATE TABLE content_permission_groups (
+        id TEXT PRIMARY KEY,
+        group_key TEXT NOT NULL UNIQUE,
+        display_name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+        is_system INTEGER NOT NULL DEFAULT 0 CHECK (is_system IN (0,1)),
+        is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0,1)),
+        created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+    )""",
+    """CREATE TABLE content_permission_group_items (
+        group_id TEXT NOT NULL REFERENCES content_permission_groups(id) ON DELETE CASCADE,
+        permission TEXT NOT NULL CHECK (permission IN (
+            'organize','review','publish','manage_categories','import_server'
+        )),
+        PRIMARY KEY(group_id, permission)
+    )""",
+    """INSERT INTO content_permission_groups
+       (id,group_key,display_name,is_system,is_active,created_at,updated_at) VALUES
+       ('permission-group-member','member','普通成员',1,1,strftime('%s','now'),strftime('%s','now')),
+       ('permission-group-bim-engineer','bim_engineer','BIM工程师',1,1,strftime('%s','now'),strftime('%s','now')),
+       ('permission-group-content-owner','content_owner','资料负责人',1,1,strftime('%s','now'),strftime('%s','now')),
+       ('permission-group-system-admin','system_admin','系统管理员',1,1,strftime('%s','now'),strftime('%s','now'))""",
+    """INSERT INTO content_permission_group_items(group_id,permission) VALUES
+       ('permission-group-bim-engineer','organize'),
+       ('permission-group-content-owner','review'),
+       ('permission-group-system-admin','organize'),
+       ('permission-group-system-admin','review'),
+       ('permission-group-system-admin','publish'),
+       ('permission-group-system-admin','manage_categories'),
+       ('permission-group-system-admin','import_server')""",
+)
+
 MIGRATIONS = (
     Migration(1, "multi_engine_transcription_phase2", PHASE2_STATEMENTS),
     Migration(2, "answer_regeneration_versions", ANSWER_VERSION_STATEMENTS),
     Migration(3, "feedback_workflow", FEEDBACK_WORKFLOW_STATEMENTS),
     Migration(4, "user_question_edit_versions", USER_QUESTION_VERSION_STATEMENTS),
     Migration(5, "managed_content_library", CONTENT_LIBRARY_STATEMENTS),
+    Migration(6, "content_permission_groups", CONTENT_PERMISSION_GROUP_STATEMENTS),
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 PHASE2_TABLES = frozenset(
@@ -399,6 +434,9 @@ CONTENT_LIBRARY_TABLES = frozenset(
         "content_item_heads",
         "content_audit_events",
     }
+)
+CONTENT_PERMISSION_GROUP_TABLES = frozenset(
+    {"content_permission_groups", "content_permission_group_items"}
 )
 
 
@@ -467,6 +505,8 @@ def has_pending_ddl(path: Path, *, base_tables: frozenset[str]) -> bool:
         raise RuntimeError("migration_schema_mismatch")
     if any(version == 5 for version, _name in applied) and not CONTENT_LIBRARY_TABLES.issubset(tables):
         raise RuntimeError("migration_schema_mismatch")
+    if any(version == 6 for version, _name in applied) and not CONTENT_PERMISSION_GROUP_TABLES.issubset(tables):
+        raise RuntimeError("migration_schema_mismatch")
     if not base_tables.issubset(tables):
         return True
     if "index_jobs" in tables and "media_id" not in index_columns:
@@ -517,6 +557,8 @@ def apply_all(conn: sqlite3.Connection, *, base_schema: str, applied_at: int) ->
         if not USER_QUESTION_VERSION_TABLES.issubset(tables):
             raise RuntimeError("migration_schema_mismatch")
         if not CONTENT_LIBRARY_TABLES.issubset(tables):
+            raise RuntimeError("migration_schema_mismatch")
+        if not CONTENT_PERMISSION_GROUP_TABLES.issubset(tables):
             raise RuntimeError("migration_schema_mismatch")
         if conn.execute("PRAGMA foreign_key_check").fetchone() is not None:
             raise RuntimeError("migration_foreign_key_check_failed")
