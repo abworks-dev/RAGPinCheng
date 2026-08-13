@@ -13,7 +13,10 @@ def test_t11_workflow_is_manual_fixed_master_compat_and_exact_count():
     assert 'GITHUB_REF}" = "refs/heads/master"' in WORKFLOW
     assert 'GITHUB_SHA}" = "${EXPECTED_COMMIT}"' in WORKFLOW
     assert 'EXPECTED_HEAD_ENFORCEMENT}" = "compat"' in WORKFLOW
-    assert "EXPECTED_HEAD_COUNT=117" in WORKFLOW
+    assert "EXPECTED_IMPORT_RECORD_COUNT=117" in WORKFLOW
+    assert "EXPECTED_HEAD_COUNT=116" in WORKFLOW
+    assert "EXPECTED_ARCHIVED_PREVIEW_COUNT=1" in WORKFLOW
+    assert "EXPECTED_HEAD_COUNT + EXPECTED_ARCHIVED_PREVIEW_COUNT" in WORKFLOW
     assert "cancel-in-progress: false" in WORKFLOW
 
 

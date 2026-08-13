@@ -62,7 +62,10 @@ def _active_job_counts(conn: sqlite3.Connection) -> dict[str, int]:
 
 
 def _managed_sources(
-    conn: sqlite3.Connection, *, expected_head_count: int
+    conn: sqlite3.Connection,
+    *,
+    expected_head_count: int,
+    expected_archived_preview_count: int,
 ) -> tuple[list[sqlite3.Row], list[str]]:
     rows = conn.execute(
         """SELECT i.id AS item_id,h.current_version_id AS version_id,v.source_rel_path
@@ -106,6 +109,11 @@ def _managed_sources(
         for row in preview_rows
         if row["source_rel_path"] and _is_generated_preview(str(row["original_filename"]))
     ]
+    if len(preview_paths) != expected_archived_preview_count:
+        raise LegacyIndexRetirementError(
+            "archived_preview_count_mismatch:"
+            f"{len(preview_paths)}:{expected_archived_preview_count}"
+        )
     return rows, preview_paths
 
 
@@ -139,9 +147,10 @@ def build_plan(
     collection: str,
     legacy_docs_root: str,
     expected_head_count: int,
+    expected_archived_preview_count: int,
 ) -> dict[str, Any]:
-    if expected_head_count <= 0:
-        raise LegacyIndexRetirementError("invalid_expected_head_count")
+    if expected_head_count <= 0 or expected_archived_preview_count < 0:
+        raise LegacyIndexRetirementError("invalid_expected_record_counts")
     root = PurePosixPath(legacy_docs_root)
     if not root.is_absolute():
         raise LegacyIndexRetirementError("legacy_docs_root_must_be_absolute")
@@ -150,7 +159,9 @@ def build_plan(
     if any(active_jobs.values()):
         raise LegacyIndexRetirementError("active_jobs_present")
     managed_rows, preview_rel_paths = _managed_sources(
-        app_conn, expected_head_count=expected_head_count
+        app_conn,
+        expected_head_count=expected_head_count,
+        expected_archived_preview_count=expected_archived_preview_count,
     )
     managed_version_ids = sorted(str(row["version_id"]) for row in managed_rows)
     source_paths = {
@@ -213,6 +224,7 @@ def build_plan(
         "collection": collection,
         "legacy_docs_root": legacy_docs_root,
         "expected_head_count": expected_head_count,
+        "expected_archived_preview_count": expected_archived_preview_count,
         "active_jobs": active_jobs,
         "managed": {
             "version_ids": managed_version_ids,

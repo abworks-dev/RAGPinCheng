@@ -357,7 +357,7 @@ find /data/business/ragpincheng/content/views/current \
 
 117 份普通资料全部发布后，旧目录索引不会自动覆盖或删除。生产仍保持 `compat`，因此同一资料的旧未版本化索引和新受管版本可能同时参与召回。T11 只清理与当前 117 个正式 `legacy` head 的 `source_rel_path` 精确对应的未版本化 Parent/Point，以及已归档的生成预览；不按 `content_version_id IS NULL` 全库删除，不处理教学/培训视频转录，不修改文件、内容对象、发布记录或正式 head。
 
-受控 workflow 为 `.github/workflows/retire-managed-content-legacy-index.yml`，固定确认词 `RETIRE_LEGACY_INDEX_T11`、完整生产 commit、117 个正式 head 和 `compat` 模式。执行前必须满足四类活动任务均为零，并生成冻结的 Parent ID/Point ID 清单。清单只保存在独立备份目录，公开 artifact 仅包含聚合计数。
+受控 workflow 为 `.github/workflows/retire-managed-content-legacy-index.yml`，固定确认词 `RETIRE_LEGACY_INDEX_T11`、完整生产 commit、117 条迁移记录（116 个正式 head + 1 个已归档生成预览）和 `compat` 模式。执行前必须满足四类活动任务均为零，并生成冻结的 Parent ID/Point ID 清单。清单只保存在独立备份目录，公开 artifact 仅包含聚合计数。
 
 执行顺序为：
 

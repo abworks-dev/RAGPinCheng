@@ -54,6 +54,7 @@ def main() -> int:
             collection=str(plan["collection"]),
             legacy_docs_root=str(plan["legacy_docs_root"]),
             expected_head_count=int(plan["expected_head_count"]),
+            expected_archived_preview_count=int(plan["expected_archived_preview_count"]),
         )
     finally:
         parents_ro.close()
