@@ -155,7 +155,7 @@ export function AdminManagedContentPage() {
     const disabled = Boolean(busyAction) || refreshing || !enabled;
     return <div className="flex min-h-control-sm flex-wrap gap-2 sm:justify-end">
       <Button size="sm" variant="outline" disabled={disabled} onClick={() => setDetail(item)}><Eye className="size-4" />查看</Button>
-      {can("organize") && ["draft", "rejected"].includes(item.lifecycle_status) && <Button size="sm" variant="outline" disabled={disabled} onClick={() => void act(item, "submit", () => api.submitManagedContent(item.version_id), "已提交确认")}><Send className="size-4" />提交</Button>}
+      {can("organize") && ["draft", "rejected"].includes(item.lifecycle_status) && <Button size="sm" variant="outline" disabled={disabled} onClick={() => void act(item, "submit", () => api.submitManagedContent(item.version_id), "已提交确认")}><Send className="size-4" />{busyAction === `${item.version_id}:submit` ? "提交中…" : "提交"}</Button>}
       {can("review") && item.lifecycle_status === "awaiting_review" && <>
         <Button size="sm" disabled={disabled} onClick={() => void act(item, "approve", () => api.reviewManagedContent(item.version_id, true), "资料已确认")}><Check className="size-4" />{busyAction === `${item.version_id}:approve` ? "确认中…" : "确认"}</Button>
         <Button size="sm" variant="outline" disabled={disabled} onClick={() => void act(item, "reject", () => api.reviewManagedContent(item.version_id, false), "资料已退回")}><X className="size-4" />{busyAction === `${item.version_id}:reject` ? "退回中…" : "退回"}</Button>
