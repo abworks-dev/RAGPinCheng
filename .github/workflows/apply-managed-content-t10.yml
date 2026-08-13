@@ -1,0 +1,249 @@
+name: Apply Managed Content T10
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_production:
+        description: Select APPLY_T10 to stage and register the approved legacy document batch
+        required: true
+        default: CANCEL
+        type: choice
+        options:
+          - CANCEL
+          - APPLY_T10
+      expected_commit:
+        description: Full master commit separately approved for the T10 production apply
+        required: true
+        type: string
+      expected_plan_sha256:
+        description: Approved T10 migration plan SHA-256
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: managed-content-t10-production
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    environment: production-asr
+    runs-on: [self-hosted, linux, ubuntu, production, app]
+    timeout-minutes: 180
+    env:
+      REPO_PATH: ${{ vars.PRODUCTION_APP_REPO_PATH }}
+      DATA_PATH: ${{ vars.PRODUCTION_APP_DATA_PATH }}
+      BACKUP_ROOT: ${{ vars.PRODUCTION_APP_BACKUP_DIRECTORY }}
+      CONTENT_ROOT: ${{ vars.PRODUCTION_CONTENT_ROOT }}
+      COMPOSE_OVERRIDE: ${{ vars.PRODUCTION_APP_COMPOSE_OVERRIDE }}
+      COMPOSE_ENV_FILE: ${{ vars.PRODUCTION_APP_ENV_FILE }}
+      EXPECTED_COMMIT: ${{ inputs.expected_commit }}
+      EXPECTED_PLAN_SHA256: ${{ inputs.expected_plan_sha256 }}
+      CONFIRM_PRODUCTION: ${{ inputs.confirm_production }}
+      EXPECTED_HEAD_ENFORCEMENT: ${{ vars.CONTENT_HEAD_ENFORCEMENT }}
+      ACTOR_USER_ID: ${{ vars.T10_IMPORT_ACTOR_USER_ID }}
+    steps:
+      - name: Create recovery point, stage, and register approved T10 batch
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          [ "${CONFIRM_PRODUCTION}" = "APPLY_T10" ] || {
+            echo "ERROR: T10 production apply was not confirmed"
+            exit 1
+          }
+          [[ "${EXPECTED_COMMIT}" =~ ^[0-9a-f]{40}$ ]]
+          [[ "${EXPECTED_PLAN_SHA256}" =~ ^[0-9a-f]{64}$ ]]
+          [[ "${ACTOR_USER_ID}" =~ ^[1-9][0-9]*$ ]]
+          [ "${GITHUB_REF}" = "refs/heads/master" ]
+          [ "${GITHUB_SHA}" = "${EXPECTED_COMMIT}" ]
+          [ "${EXPECTED_HEAD_ENFORCEMENT}" = "compat" ]
+          [ "${REPO_PATH}" = "/data/workspace/projects/ragpincheng" ]
+          [ "${DATA_PATH}" = "/data/services/docker/data/ragpincheng/prod/app" ]
+          [ "${BACKUP_ROOT}" = "/data/backup/databases/ragpincheng" ]
+          [ "${CONTENT_ROOT}" = "/data/business/ragpincheng/content" ]
+          [ "${COMPOSE_OVERRIDE}" = "/data/services/docker/compose/ragpincheng/prod/compose.prod.yaml" ]
+          [ "${COMPOSE_ENV_FILE}" = "/data/secrets/ragpincheng/prod.env" ]
+
+          T9_RUN_ID="t9-31656884161-1"
+          T9_ROOT="${BACKUP_ROOT}/${T9_RUN_ID}"
+          PLAN_PATH="${T9_ROOT}/migration-plan.json"
+          DOCS_ROOT="/data/business/ragpincheng/source/docs"
+          EXPECTED_COUNT=117
+          APPROVED_PLAN_SHA256="d28157cdfa710b30ed16ce1dbac71d3b001b15e950fa241db95dbb7cbae457e6"
+          RUN_ID="t10-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          RUN_ROOT="${BACKUP_ROOT}/${RUN_ID}"
+          BATCH_ROOT="${CONTENT_ROOT}/inbox/server/${RUN_ID}"
+          MANIFEST_PATH="${RUN_ROOT}/staging-manifest.json"
+          REPORT_ROOT="${RUNNER_TEMP}/${RUN_ID}-summary"
+          COMPOSE=(docker compose -p ragpincheng-prod -f "${REPO_PATH}/docker/docker-compose.yml" -f "${COMPOSE_OVERRIDE}" --env-file "${COMPOSE_ENV_FILE}")
+
+          [ "${EXPECTED_PLAN_SHA256}" = "${APPROVED_PLAN_SHA256}" ] || {
+            echo "ERROR: input plan SHA-256 is not the preflight-approved plan"
+            exit 1
+          }
+          [ "$(sha256sum "${PLAN_PATH}" | awk '{print $1}')" = "${APPROVED_PLAN_SHA256}" ]
+          for path in "${REPO_PATH}" "${T9_ROOT}" "${DOCS_ROOT}" "${CONTENT_ROOT}" "${DATA_PATH}"; do
+            [ -d "${path}" ] && [ ! -L "${path}" ] || {
+              echo "ERROR: required path is not a real directory"
+              exit 1
+            }
+          done
+          [ -f "${PLAN_PATH}" ] && [ ! -L "${PLAN_PATH}" ]
+          [ "$(git -C "${REPO_PATH}" branch --show-current)" = "master" ]
+          [ -z "$(git -C "${REPO_PATH}" status --porcelain --untracked-files=no)" ]
+          git -C "${REPO_PATH}" fetch --no-tags origin master
+          [ "$(git -C "${REPO_PATH}" rev-parse origin/master)" = "${EXPECTED_COMMIT}" ]
+          [ "$(git -C "${REPO_PATH}" rev-parse HEAD)" = "${EXPECTED_COMMIT}" ]
+
+          BUSINESS_DEVICE="$(findmnt -T /data/business -n -o MAJ:MIN)"
+          DATA_DEVICE="$(findmnt -T "${DATA_PATH}" -n -o MAJ:MIN)"
+          BACKUP_DEVICE="$(findmnt -T /data/backup -n -o MAJ:MIN)"
+          [ "${BUSINESS_DEVICE}" != "${BACKUP_DEVICE}" ]
+          [ "${DATA_DEVICE}" != "${BACKUP_DEVICE}" ]
+          [ -e "${BACKUP_ROOT}/.managed-content-t9.lock" ]
+          [ -e "${BACKUP_ROOT}/.production-app-deploy.lock" ]
+          exec 9>"${BACKUP_ROOT}/.managed-content-t9.lock"
+          flock -n 9 || {
+            echo "ERROR: another managed-content operation is active"
+            exit 1
+          }
+          exec 8>"${BACKUP_ROOT}/.production-app-deploy.lock"
+          flock -n 8 || {
+            echo "ERROR: an application deployment is active"
+            exit 1
+          }
+
+          [ ! -e "${RUN_ROOT}" ] && [ ! -e "${BATCH_ROOT}" ]
+          SOURCE_BYTES="$(du -sb "${CONTENT_ROOT}" "${DATA_PATH}" | awk '{sum += $1} END {print sum + 0}')"
+          FREE_BYTES="$(df -PB1 "${BACKUP_ROOT}" | awk 'NR==2 {print $4}')"
+          REQUIRED_BYTES=$((SOURCE_BYTES + 3221225472))
+          [ "${FREE_BYTES}" -ge "${REQUIRED_BYTES}" ] || {
+            echo "ERROR: insufficient independent backup capacity"
+            exit 1
+          }
+
+          mkdir -m 700 "${RUN_ROOT}" "${REPORT_ROOT}"
+          printf 'run_id=%s\ncommit=%s\nsource_t9=%s\nplan_sha256=%s\nexpected_count=%s\n' \
+            "${RUN_ID}" "${EXPECTED_COMMIT}" "${T9_RUN_ID}" "${APPROVED_PLAN_SHA256}" "${EXPECTED_COUNT}" \
+            > "${RUN_ROOT}/manifest.txt"
+          SRC="${DATA_PATH}" DST="${RUN_ROOT}" python3 - <<'PY'
+          import os
+          import sqlite3
+          from pathlib import Path
+
+          source = Path(os.environ["SRC"])
+          destination = Path(os.environ["DST"])
+          for name in ("app.sqlite", "parents.sqlite"):
+              with sqlite3.connect(f"file:{source / name}?mode=ro", uri=True) as current:
+                  if current.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                      raise SystemExit(f"source integrity failed: {name}")
+                  with sqlite3.connect(destination / name) as backup:
+                      current.backup(backup)
+                      if backup.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                          raise SystemExit(f"backup integrity failed: {name}")
+          PY
+          "${COMPOSE[@]}" exec -T backend curl -fsS -X POST \
+            http://qdrant:6333/collections/pincheng_docs/snapshots \
+            > "${RUN_ROOT}/qdrant-snapshot.json"
+          SNAPSHOT_NAME="$(RUN_ROOT_ENV="${RUN_ROOT}" python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          payload = json.loads((Path(os.environ["RUN_ROOT_ENV"]) / "qdrant-snapshot.json").read_text())
+          name = payload.get("result", {}).get("name")
+          if payload.get("status") != "ok" or not name:
+              raise SystemExit("invalid Qdrant snapshot response")
+          print(name)
+          PY
+          )"
+          "${COMPOSE[@]}" exec -T backend curl -fsS --max-time 1800 \
+            "http://qdrant:6333/collections/pincheng_docs/snapshots/${SNAPSHOT_NAME}" \
+            > "${RUN_ROOT}/qdrant.snapshot"
+          [ -s "${RUN_ROOT}/qdrant.snapshot" ]
+          "${COMPOSE[@]}" exec -T backend curl -fsS \
+            http://qdrant:6333/collections/pincheng_docs \
+            > "${RUN_ROOT}/qdrant-before.json"
+          RUN_ROOT_ENV="${RUN_ROOT}" python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["RUN_ROOT_ENV"])
+          snapshot = json.loads((root / "qdrant-snapshot.json").read_text(encoding="utf-8"))
+          collection = json.loads((root / "qdrant-before.json").read_text(encoding="utf-8"))
+          if snapshot.get("status") != "ok" or not snapshot.get("result", {}).get("name"):
+              raise SystemExit("invalid Qdrant snapshot metadata")
+          result = collection.get("result", {})
+          if collection.get("status") != "ok" or result.get("status") != "green":
+              raise SystemExit("Qdrant collection is not green")
+          with (root / "manifest.txt").open("a", encoding="utf-8") as handle:
+              handle.write(f"qdrant_points_before={result.get('points_count')}\n")
+          PY
+          ionice -c2 -n7 nice -n 19 rsync -a --numeric-ids --safe-links \
+            "${CONTENT_ROOT}/" "${RUN_ROOT}/content/" > "${RUN_ROOT}/content-rsync.txt"
+          ionice -c2 -n7 nice -n 19 rsync -a --numeric-ids --safe-links --checksum --delete --dry-run \
+            "${CONTENT_ROOT}/" "${RUN_ROOT}/content/" > "${RUN_ROOT}/content-verification.txt"
+          [ ! -s "${RUN_ROOT}/content-verification.txt" ]
+
+          python3 "${REPO_PATH}/scripts/stage_legacy_content_t10.py" \
+            --docs-root "${DOCS_ROOT}" \
+            --plan "${PLAN_PATH}" \
+            --database "${DATA_PATH}/app.sqlite" \
+            --expected-plan-sha256 "${APPROVED_PLAN_SHA256}" \
+            --expected-count "${EXPECTED_COUNT}" \
+            --destination "${BATCH_ROOT}" \
+            --manifest "${MANIFEST_PATH}"
+
+          APP_DB_PATH="${DATA_PATH}/app.sqlite" CONTENT_ROOT="${CONTENT_ROOT}" \
+            python3 "${REPO_PATH}/scripts/apply_legacy_content_t10.py" \
+            --staged-root "${BATCH_ROOT}" \
+            --plan "${PLAN_PATH}" \
+            --manifest "${MANIFEST_PATH}" \
+            --expected-plan-sha256 "${APPROVED_PLAN_SHA256}" \
+            --expected-count "${EXPECTED_COUNT}" \
+            --actor-user-id "${ACTOR_USER_ID}" \
+            --batch-storage-rel-path "inbox/server/${RUN_ID}" \
+            --confirm APPLY_T10 > "${RUN_ROOT}/apply-result.json"
+
+          DATABASE="${DATA_PATH}/app.sqlite" RUN_ID_ENV="${RUN_ID}" REPORT="${REPORT_ROOT}/summary.json" python3 - <<'PY'
+          import json
+          import os
+          import sqlite3
+          from pathlib import Path
+
+          with sqlite3.connect(f"file:{Path(os.environ['DATABASE']).as_posix()}?mode=ro", uri=True) as conn:
+              conn.row_factory = sqlite3.Row
+              row = conn.execute(
+                  """SELECT b.id,b.status,count(v.id) AS imported,
+                            sum(CASE WHEN v.lifecycle_status='awaiting_review' THEN 1 ELSE 0 END) AS awaiting_review
+                     FROM upload_batches b
+                     LEFT JOIN content_versions v ON v.source_batch_id=b.id
+                     WHERE b.storage_rel_path=? GROUP BY b.id,b.status""",
+                  (f"inbox/server/{os.environ['RUN_ID_ENV']}",),
+              ).fetchone()
+              if row is None or row["status"] != "ready_for_review" or row["imported"] != 117 or row["awaiting_review"] != 117:
+                  raise SystemExit("T10 imported batch verification failed")
+              heads = conn.execute("SELECT count(*) FROM content_item_heads").fetchone()[0]
+              if heads != 0:
+                  raise SystemExit("T10 apply unexpectedly changed managed heads")
+              summary = {
+                  "schema_version": 1,
+                  "status": "awaiting_review",
+                  "file_count": row["imported"],
+                  "managed_heads": heads,
+              }
+          Path(os.environ["REPORT"]).write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+          PY
+          chmod -R go-rwx "${RUN_ROOT}" "${REPORT_ROOT}"
+          echo "T10_APPLY status=awaiting_review run_id=${RUN_ID} imported=${EXPECTED_COUNT}"
+
+      - name: Upload redacted T10 apply summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: managed-content-t10-apply-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/t10-${{ github.run_id }}-${{ github.run_attempt }}-summary
+          if-no-files-found: error
+          retention-days: 30

@@ -235,6 +235,10 @@ manifest，再使用 `scripts/apply_legacy_content_t10.py` 登记。apply 必须
 授权用户 ID 和 `APPLY_T10` 确认词；导入结果停在 `awaiting_review`。同一 plan 标识只能创建一个 legacy
 批次；中途失败的批次标记为 `failed`，不得不经恢复核对直接重跑。
 
+生产 apply 只通过 `.github/workflows/apply-managed-content-t10.yml` 执行。workflow 在 staging 前创建独立
+SQLite、Qdrant 和完整 `CONTENT_ROOT` 恢复点，固定 T9 run、plan SHA-256、候选数和 `compat` 模式，并从
+受保护 Environment 变量 `T10_IMPORT_ACTOR_USER_ID` 读取执行身份。该 workflow 的存在不构成真实执行授权。
+
 迁移边界：
 
 - 普通 PDF、Markdown 和 Office 资料：按新分类复制到新的 `inbox/server/<batch_id>`，再走 dry-run/apply/确认/发布；
