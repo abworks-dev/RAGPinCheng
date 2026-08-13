@@ -365,7 +365,7 @@ find /data/business/ragpincheng/content/views/current \
 2. 创建 `app.sqlite`、`parents.sqlite` 一致性备份并下载独立 Qdrant collection snapshot；
 3. 在短暂数据库写锁内重算同一计划，任何 ID、计数或任务状态漂移都停止执行；
 4. 只按冻结 Point ID 分批删除 Qdrant，再按冻结 Parent ID 删除 `parents.sqlite`；
-5. 核对正式版本集合、删除数量、数据库完整性、Qdrant 绿色状态和后端健康；
+5. 核对正式版本集合、删除数量、数据库完整性、后端健康，并在点数始终精确匹配的前提下等待 Qdrant 从删除后的短暂优化状态恢复为绿色；
 6. 删除后验证失败时，使用同一恢复点自动恢复 Qdrant 和 `parents.sqlite`。
 
 T11 成功后仍保留 `source/docs`、`source/media` 和受管对象至少 1 至 2 周。不得删除整个 `/data/business/ragpincheng/source`；旧视频链路继续使用 `source/media`，生产仓库和部署配置也必须按现行部署路径保留。观察期结束后的文件归档属于独立 T12 R3 操作。

@@ -33,8 +33,12 @@ def test_t11_workflow_has_locks_backups_exact_apply_and_rollback():
         "--confirm RETIRE_LEGACY_INDEX_T11",
         "T11_ROLLBACK status=complete",
         "T11_RETIRE status=success",
+        "EXPECTED_POINTS_AFTER",
+        "Qdrant did not return to green after T11 deletion",
     ):
         assert required in WORKFLOW
+    assert "for ATTEMPT in $(seq 1 60)" in WORKFLOW
+    assert 'QDRANT_STATE}" = "yellow"' in WORKFLOW
     for forbidden in ("delete_collection", "rm -rf", "docker compose down", "source/media", "CONTENT_HEAD_ENFORCEMENT=strict"):
         assert forbidden not in WORKFLOW
 
