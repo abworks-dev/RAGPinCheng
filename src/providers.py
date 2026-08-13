@@ -54,6 +54,10 @@ class GpuServiceContractError(GpuServiceError):
     """GPU service returned incompatible model/version/dimension."""
 
 
+class GpuServiceInputTooLong(GpuServiceError):
+    """GPU service rejected an embedding input that exceeds its limit."""
+
+
 # ── Embedding ────────────────────────────────────────────────────────────────
 
 @dataclass
@@ -207,6 +211,16 @@ class RemoteEmbedProvider(EmbedProvider):
             raise GpuServiceAuthError(f"GPU service rejected token (HTTP {resp.status_code})")
         if resp.status_code == 503:
             raise GpuServiceUnavailable("GPU service unavailable (models not loaded)")
+        if resp.status_code == 422:
+            try:
+                error_body = resp.json()
+            except ValueError:
+                error_body = {}
+            detail = error_body.get("detail") or error_body.get("error")
+            if isinstance(detail, str) and detail.startswith("Text at index "):
+                raise GpuServiceInputTooLong(
+                    "embedding input exceeds provider limit"
+                )
         if resp.status_code != 200:
             raise GpuServiceError(f"embedding returned HTTP {resp.status_code}: {resp.text[:200]}")
 

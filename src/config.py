@@ -51,6 +51,10 @@ CHILD_OVERLAP = 32
 EMBED_MODEL = "BAAI/bge-m3"
 EMBED_DIM = 1024
 EMBED_BATCH = 32
+# Must match the GPU service's MAX_TEXT_LENGTH contract. Structured children
+# reserve headroom for title/section prefixes and optional table summaries.
+EMBED_MAX_TEXT_CHARS = 8192
+EMBED_STRUCTURED_TEXT_CHARS = 7000
 
 # Retrieval
 DENSE_TOP_K = 60

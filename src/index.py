@@ -14,8 +14,40 @@ from qdrant_client import QdrantClient, models
 from tqdm import tqdm
 
 from .chunk import Child, Parent
-from .config import COLLECTION, EMBED_BATCH, EMBED_DIM, PARENTS_DB, QDRANT_URL
+from .config import (
+    COLLECTION,
+    EMBED_BATCH,
+    EMBED_DIM,
+    EMBED_MAX_TEXT_CHARS,
+    PARENTS_DB,
+    QDRANT_URL,
+)
 from .embed import encode
+
+
+class EmbeddingInputTooLong(ValueError):
+    """A child violates the configured embedding service input contract."""
+
+    def __init__(self, *, child_index: int, content_type: str, length: int) -> None:
+        self.child_index = child_index
+        self.content_type = content_type
+        self.length = length
+        super().__init__(
+            "embedding_input_too_long: "
+            f"child_index={child_index} content_type={content_type} "
+            f"length={length} limit={EMBED_MAX_TEXT_CHARS}"
+        )
+
+
+def validate_embedding_inputs(children: list[Child]) -> None:
+    for index, child in enumerate(children):
+        length = len(child.embed_text)
+        if length > EMBED_MAX_TEXT_CHARS:
+            raise EmbeddingInputTooLong(
+                child_index=index,
+                content_type=child.content_type,
+                length=length,
+            )
 
 
 @lru_cache(maxsize=1)
@@ -253,6 +285,7 @@ def index_children(children: list[Child], reset: bool = False) -> None:
     would be wasted work. Edits to source content produce a NEW id, so this
     skip never masks stale data; it only suppresses redundant re-embeds.
     """
+    validate_embedding_inputs(children)
     client = _client()
     just_created = _ensure_collection(client, reset=reset)
 

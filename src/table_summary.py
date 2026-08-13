@@ -28,6 +28,7 @@ from openai import OpenAI
 
 from .chunk import Child, _stable_id
 from .config import (
+    EMBED_MAX_TEXT_CHARS,
     PARENTS_DB,
     TABLE_SUMMARY_ENABLED,
     TABLE_SUMMARY_MAX_CHARS,
@@ -200,8 +201,18 @@ def summarize_table_children(
             if not summary:
                 continue
 
-            new_text = f"{SUMMARY_MARKER}{summary}\n\n{original}"
             header_prefix = f"{child.doc_title} > {child.section_path}\n\n"
+            summary_overhead = len(SUMMARY_MARKER) + 2
+            summary_budget = (
+                EMBED_MAX_TEXT_CHARS
+                - len(header_prefix)
+                - len(original)
+                - summary_overhead
+            )
+            if summary_budget <= 0:
+                continue
+            summary = summary[:summary_budget]
+            new_text = f"{SUMMARY_MARKER}{summary}\n\n{original}"
             child.text = new_text
             child.embed_text = header_prefix + new_text
             # Recompute ID so the upsert sees this as a NEW vector and

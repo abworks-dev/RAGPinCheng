@@ -20,7 +20,13 @@ from langchain_text_splitters import (
     RecursiveCharacterTextSplitter,
 )
 
-from .config import CHILD_OVERLAP, CHILD_SIZE, PARENT_OVERLAP, PARENT_SIZE
+from .config import (
+    CHILD_OVERLAP,
+    CHILD_SIZE,
+    EMBED_STRUCTURED_TEXT_CHARS,
+    PARENT_OVERLAP,
+    PARENT_SIZE,
+)
 from .ingest import ParsedDoc
 
 NAMESPACE = uuid.UUID("00000000-0000-0000-0000-000000000001")
@@ -158,6 +164,15 @@ def _section_path(meta: dict) -> str:
 PIPE_TABLE_RE = re.compile(r"(\n\|[^\n]*\|(?:\n\|[^\n]*\|)+)", re.MULTILINE)
 HTML_TABLE_RE = re.compile(r"<table\b[^>]*>.*?</table>", re.DOTALL | re.IGNORECASE)
 HTML_TR_RE = re.compile(r"<tr\b[^>]*>.*?</tr>", re.DOTALL | re.IGNORECASE)
+HTML_TR_PARTS_RE = re.compile(
+    r"^(<tr\b[^>]*>)(.*)(</tr>)$", re.DOTALL | re.IGNORECASE
+)
+HTML_CELL_RE = re.compile(
+    r"<(td|th)\b[^>]*>.*?</\1>", re.DOTALL | re.IGNORECASE
+)
+HTML_CELL_PARTS_RE = re.compile(
+    r"^(<(td|th)\b[^>]*>)(.*)(</\2>)$", re.DOTALL | re.IGNORECASE
+)
 HTML_TABLE_OPEN_RE = re.compile(r"<table\b[^>]*>", re.IGNORECASE)
 HTML_TABLE_CLOSE_RE = re.compile(r"</table>\s*$", re.IGNORECASE)
 FORMULA_RE = re.compile(r"\$\$.+?\$\$", re.DOTALL)
@@ -165,6 +180,68 @@ FORMULA_RE = re.compile(r"\$\$.+?\$\$", re.DOTALL)
 # Tables ≤ this size stay atomic in one parent (even if it overflows
 # PARENT_SIZE). Larger tables are row-split with header propagation.
 ATOMIC_TABLE_MAX = 2 * PARENT_SIZE
+
+
+def _split_plain_text(text: str, max_size: int) -> list[str]:
+    if max_size <= 0:
+        return [text]
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=max_size,
+        chunk_overlap=0,
+        separators=["\n\n", "\n", "。", "；", "，", " ", ""],
+    )
+    return splitter.split_text(text)
+
+
+def _split_html_row(row: str, max_size: int) -> list[str]:
+    """Split one oversized HTML row by cells, then by cell content."""
+    if len(row) <= max_size:
+        return [row]
+    match = HTML_TR_PARTS_RE.match(row.strip())
+    if not match:
+        return [row]
+    open_row, inner, close_row = match.groups()
+    cells = [item.group(0) for item in HTML_CELL_RE.finditer(inner)]
+    if not cells:
+        return [row]
+
+    row_overhead = len(open_row) + len(close_row)
+    cell_budget = max_size - row_overhead
+    if cell_budget <= 0:
+        return [row]
+
+    pieces: list[str] = []
+    current: list[str] = []
+    current_size = 0
+
+    def flush() -> None:
+        nonlocal current, current_size
+        if current:
+            pieces.append(open_row + "".join(current) + close_row)
+            current = []
+            current_size = 0
+
+    for cell in cells:
+        if len(cell) <= cell_budget:
+            if current and current_size + len(cell) > cell_budget:
+                flush()
+            current.append(cell)
+            current_size += len(cell)
+            continue
+
+        flush()
+        cell_match = HTML_CELL_PARTS_RE.match(cell)
+        if not cell_match:
+            return [row]
+        open_cell, _tag, content, close_cell = cell_match.groups()
+        content_budget = cell_budget - len(open_cell) - len(close_cell)
+        if content_budget <= 0:
+            return [row]
+        for content_piece in _split_plain_text(content, content_budget):
+            pieces.append(open_row + open_cell + content_piece + close_cell + close_row)
+
+    flush()
+    return pieces or [row]
 
 
 def _find_protected_spans(text: str) -> list[tuple[int, int, str]]:
@@ -209,7 +286,12 @@ def _split_protected(text: str) -> list[tuple[str, str]]:
     return out or [("prose", text.strip())]
 
 
-def _split_table_with_header(table_html: str, max_size: int) -> list[str]:
+def _split_table_with_header(
+    table_html: str,
+    max_size: int,
+    *,
+    split_oversized_rows: bool = False,
+) -> list[str]:
     """Row-split an oversized HTML table, prepending the original first <tr>
     (header row) to every fragment so each chunk carries the column labels.
 
@@ -228,12 +310,39 @@ def _split_table_with_header(table_html: str, max_size: int) -> list[str]:
     inner = HTML_TABLE_CLOSE_RE.sub("", inner).strip()
 
     rows = HTML_TR_RE.findall(inner)
-    if len(rows) < 2:
+    if not rows:
         return [table_html]
+
+    close_tag = "</table>"
+    table_overhead = len(open_tag) + len(close_tag)
+    row_budget = max_size - table_overhead
+    if row_budget <= 0:
+        return [table_html]
+
+    if len(rows) == 1:
+        if not split_oversized_rows:
+            return [table_html]
+        return [
+            open_tag + row_piece + close_tag
+            for row_piece in _split_html_row(rows[0], row_budget)
+        ]
 
     header = rows[0]
     body = rows[1:]
-    close_tag = "</table>"
+
+    # A pathological header cannot be repeated without violating max_size.
+    # Preserve all of it as standalone table children, then split body rows
+    # independently. Parent evidence remains the untouched original table.
+    if split_oversized_rows and len(header) > row_budget:
+        chunks = [
+            open_tag + row_piece + close_tag
+            for row_piece in _split_html_row(header, row_budget)
+        ]
+        body_rows: list[str] = []
+        for row in body:
+            body_rows.extend(_split_html_row(row, row_budget))
+        chunks.extend(open_tag + row_piece + close_tag for row_piece in body_rows)
+        return chunks
 
     wrapper_overhead = len(open_tag) + len(close_tag) + len(header)
     body_budget = max(max_size - wrapper_overhead, 200)
@@ -241,7 +350,13 @@ def _split_table_with_header(table_html: str, max_size: int) -> list[str]:
     chunks: list[str] = []
     current: list[str] = []
     current_size = 0
+    split_rows: list[str] = []
     for row in body:
+        if split_oversized_rows:
+            split_rows.extend(_split_html_row(row, body_budget))
+        else:
+            split_rows.append(row)
+    for row in split_rows:
         if current and current_size + len(row) > body_budget:
             chunks.append(open_tag + header + "".join(current) + close_tag)
             current = [row]
@@ -252,6 +367,32 @@ def _split_table_with_header(table_html: str, max_size: int) -> list[str]:
     if current:
         chunks.append(open_tag + header + "".join(current) + close_tag)
     return chunks
+
+
+def _split_pipe_table_with_header(table: str, max_size: int) -> list[str]:
+    """Row-split a Markdown pipe table while repeating its header rows."""
+    lines = [line.strip() for line in table.strip().splitlines() if line.strip()]
+    if len(table) <= max_size or len(lines) < 3:
+        return [table]
+    header = "\n".join(lines[:2])
+    body_budget = max_size - len(header) - 1
+    if body_budget <= 0:
+        return [table]
+
+    chunks: list[str] = []
+    current: list[str] = []
+    current_size = 0
+    for row in lines[2:]:
+        for piece in _split_plain_text(row, body_budget):
+            if current and current_size + len(piece) + 1 > body_budget:
+                chunks.append(header + "\n" + "\n".join(current))
+                current = []
+                current_size = 0
+            current.append(piece)
+            current_size += len(piece) + 1
+    if current:
+        chunks.append(header + "\n" + "\n".join(current))
+    return chunks or [table]
 
 
 def _split_parents(section_text: str) -> list[str]:
@@ -320,7 +461,23 @@ def _split_children(parent_text: str) -> list[tuple[str, str]]:
         separators=["\n\n", "\n", "。", "；", "，", " ", ""],
     )
     for ctype, seg in segments:
-        if ctype in ("table", "formula"):
+        if ctype == "table" and seg.lstrip().lower().startswith("<table"):
+            children.extend(
+                ("table", piece)
+                for piece in _split_table_with_header(
+                    seg,
+                    EMBED_STRUCTURED_TEXT_CHARS,
+                    split_oversized_rows=True,
+                )
+            )
+        elif ctype == "table" and seg.lstrip().startswith("|"):
+            children.extend(
+                ("table", piece)
+                for piece in _split_pipe_table_with_header(
+                    seg, EMBED_STRUCTURED_TEXT_CHARS
+                )
+            )
+        elif ctype in ("table", "formula"):
             children.append((ctype, seg))
         else:
             for piece in prose_splitter.split_text(seg):
