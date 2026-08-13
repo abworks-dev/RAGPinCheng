@@ -1,0 +1,158 @@
+name: Preflight Managed Content T10
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_read_only:
+        description: Select PREFLIGHT_T10 to verify the approved legacy document batch without writes
+        required: true
+        default: CANCEL
+        type: choice
+        options:
+          - CANCEL
+          - PREFLIGHT_T10
+      expected_commit:
+        description: Full master commit approved for the read-only T10 preflight
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: managed-content-t10-preflight
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    environment: production-asr
+    runs-on: [self-hosted, linux, ubuntu, production, app]
+    timeout-minutes: 60
+    env:
+      REPO_PATH: ${{ vars.PRODUCTION_APP_REPO_PATH }}
+      DATA_PATH: ${{ vars.PRODUCTION_APP_DATA_PATH }}
+      BACKUP_ROOT: ${{ vars.PRODUCTION_APP_BACKUP_DIRECTORY }}
+      CONTENT_ROOT: ${{ vars.PRODUCTION_CONTENT_ROOT }}
+      EXPECTED_COMMIT: ${{ inputs.expected_commit }}
+      CONFIRM_READ_ONLY: ${{ inputs.confirm_read_only }}
+      EXPECTED_HEAD_ENFORCEMENT: ${{ vars.CONTENT_HEAD_ENFORCEMENT }}
+    steps:
+      - name: Verify approved T10 batch without production writes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          [ "${CONFIRM_READ_ONLY}" = "PREFLIGHT_T10" ] || {
+            echo "ERROR: T10 read-only preflight was not confirmed"
+            exit 1
+          }
+          [[ "${EXPECTED_COMMIT}" =~ ^[0-9a-f]{40}$ ]]
+          [ "${GITHUB_REF}" = "refs/heads/master" ]
+          [ "${GITHUB_SHA}" = "${EXPECTED_COMMIT}" ]
+          [ "${EXPECTED_HEAD_ENFORCEMENT}" = "compat" ]
+          [ "${REPO_PATH}" = "/data/workspace/projects/ragpincheng" ]
+          [ "${DATA_PATH}" = "/data/services/docker/data/ragpincheng/prod/app" ]
+          [ "${BACKUP_ROOT}" = "/data/backup/databases/ragpincheng" ]
+          [ "${CONTENT_ROOT}" = "/data/business/ragpincheng/content" ]
+
+          T9_RUN_ID="t9-31656884161-1"
+          T9_ROOT="${BACKUP_ROOT}/${T9_RUN_ID}"
+          DOCS_ROOT="/data/business/ragpincheng/source/docs"
+          PLAN_PATH="${T9_ROOT}/migration-plan.json"
+          INVENTORY_PATH="${T9_ROOT}/legacy-inventory.json"
+          MAPPING_PATH="${T9_ROOT}/mapping.json"
+          T9_TOOL="${T9_ROOT}/tooling-e96417f3be8b04575285845f2d9216a535b43004/scripts/plan_legacy_content_migration.py"
+          REPORT_ROOT="${RUNNER_TEMP}/t10-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-summary"
+          REPRODUCED_PLAN="${REPORT_ROOT}/reproduced-plan.json"
+          DATABASE="${DATA_PATH}/app.sqlite"
+          EXPECTED_COUNT=117
+
+          for path in "${REPO_PATH}" "${T9_ROOT}" "${DOCS_ROOT}" "${CONTENT_ROOT}"; do
+            [ -d "${path}" ] && [ ! -L "${path}" ] || {
+              echo "ERROR: required path is not a real directory"
+              exit 1
+            }
+          done
+          for path in "${PLAN_PATH}" "${INVENTORY_PATH}" "${MAPPING_PATH}" "${T9_TOOL}" \
+            "${DATABASE}" "${T9_ROOT}/manifest.txt"; do
+            [ -f "${path}" ] && [ ! -L "${path}" ] || {
+              echo "ERROR: required file is not a regular file"
+              exit 1
+            }
+          done
+          grep -Fx "run_id=${T9_RUN_ID}" "${T9_ROOT}/manifest.txt" >/dev/null
+          grep -Fx "approved_commit=e96417f3be8b04575285845f2d9216a535b43004" \
+            "${T9_ROOT}/manifest.txt" >/dev/null
+
+          [ "$(git -C "${REPO_PATH}" branch --show-current)" = "master" ]
+          [ -z "$(git -C "${REPO_PATH}" status --porcelain --untracked-files=no)" ]
+          git -C "${REPO_PATH}" fetch --no-tags origin master
+          [ "$(git -C "${REPO_PATH}" rev-parse origin/master)" = "${EXPECTED_COMMIT}" ]
+          git -C "${REPO_PATH}" merge-base --is-ancestor \
+            "$(git -C "${REPO_PATH}" rev-parse HEAD)" "${EXPECTED_COMMIT}"
+
+          [ -f "${BACKUP_ROOT}/.managed-content-t9.lock" ]
+          [ -f "${BACKUP_ROOT}/.production-app-deploy.lock" ]
+          exec 9<"${BACKUP_ROOT}/.managed-content-t9.lock"
+          flock -s -n 9 || {
+            echo "ERROR: another managed-content operation is active"
+            exit 1
+          }
+          exec 8<"${BACKUP_ROOT}/.production-app-deploy.lock"
+          flock -s -n 8 || {
+            echo "ERROR: an application deployment is active"
+            exit 1
+          }
+
+          mkdir -m 700 "${REPORT_ROOT}"
+          python3 "${T9_TOOL}" \
+            --inventory "${INVENTORY_PATH}" \
+            --mapping "${MAPPING_PATH}" \
+            --output-json "${REPRODUCED_PLAN}"
+          cmp --silent "${PLAN_PATH}" "${REPRODUCED_PLAN}" || {
+            echo "ERROR: protected T9 migration plan is not reproducible"
+            exit 1
+          }
+          rm "${REPRODUCED_PLAN}"
+          PLAN_SHA256="$(sha256sum "${PLAN_PATH}" | awk '{print $1}')"
+          python3 "${REPO_PATH}/scripts/preflight_legacy_content_t10.py" \
+            --docs-root "${DOCS_ROOT}" \
+            --plan "${PLAN_PATH}" \
+            --database "${DATABASE}" \
+            --expected-plan-sha256 "${PLAN_SHA256}" \
+            --expected-count "${EXPECTED_COUNT}" \
+            --output "${REPORT_ROOT}/summary.json"
+
+          REPORT="${REPORT_ROOT}/summary.json" DATABASE_PATH="${DATABASE}" python3 - <<'PY'
+          import json
+          import os
+          import sqlite3
+          from pathlib import Path
+
+          report_path = Path(os.environ["REPORT"])
+          report = json.loads(report_path.read_text(encoding="utf-8"))
+          with sqlite3.connect(f"file:{Path(os.environ['DATABASE_PATH']).as_posix()}?mode=ro", uri=True) as conn:
+              conn.execute("PRAGMA query_only=ON")
+              report["database"] = {
+                  "managed_heads": conn.execute("SELECT count(*) FROM content_item_heads").fetchone()[0],
+                  "awaiting_review": conn.execute(
+                      "SELECT count(*) FROM content_versions WHERE lifecycle_status='awaiting_review'"
+                  ).fetchone()[0],
+              }
+          if report["file_count"] != 117:
+              raise SystemExit("unexpected preflight file count")
+          report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+          PY
+          printf '%s\n' \
+            'This artifact is aggregated and contains no filenames, relative paths, hashes of business files, or file contents.' \
+            > "${REPORT_ROOT}/README.txt"
+          chmod -R go-rwx "${REPORT_ROOT}"
+          echo "T10_PREFLIGHT status=ready source_t9=${T9_RUN_ID} expected_count=${EXPECTED_COUNT}"
+
+      - name: Upload redacted T10 summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: managed-content-t10-preflight-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/t10-${{ github.run_id }}-${{ github.run_attempt }}-summary
+          if-no-files-found: error
+          retention-days: 30
