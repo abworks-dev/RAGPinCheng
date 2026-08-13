@@ -214,6 +214,11 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertIn("whisperx-large-v3-zh-align-experimental-v1", workflow)
         self.assertIn("CONFIGURED_TRANSCRIPTION_ADMITTED_PROFILE_IDS", workflow)
         self.assertIn("PREVIOUS_TRANSCRIPTION_ADMITTED_PROFILE_IDS", workflow)
+        self.assertIn(
+            "TRANSCRIPTION_ADMITTED_PROFILE_IDS repository variable must be configured",
+            workflow,
+        )
+        self.assertIn("parse_transcription_admitted_profile_ids", workflow)
         self.assertIn("PREVIOUS_ASR_ENABLED", workflow)
         self.assertIn("APP_ONLY_ASR_STATE source=container-config", workflow)
         self.assertIn(".Config.Env", workflow)

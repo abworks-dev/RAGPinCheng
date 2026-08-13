@@ -81,8 +81,11 @@ jobs:
             echo "ERROR: managed content head enforcement must remain compat"
             exit 1
           }
-          DEFAULT_TRANSCRIPTION_ADMITTED_PROFILE_IDS="funasr-sensevoice-zh-experimental-v1"
-          PREVIOUS_TRANSCRIPTION_ADMITTED_PROFILE_IDS="${CONFIGURED_TRANSCRIPTION_ADMITTED_PROFILE_IDS:-${DEFAULT_TRANSCRIPTION_ADMITTED_PROFILE_IDS}}"
+          [ -n "${CONFIGURED_TRANSCRIPTION_ADMITTED_PROFILE_IDS}" ] || {
+            echo "ERROR: TRANSCRIPTION_ADMITTED_PROFILE_IDS repository variable must be configured"
+            exit 1
+          }
+          PREVIOUS_TRANSCRIPTION_ADMITTED_PROFILE_IDS="${CONFIGURED_TRANSCRIPTION_ADMITTED_PROFILE_IDS}"
           case "${TRANSCRIPTION_ADMISSION_ACTION}" in
             PRESERVE_CURRENT)
               export TRANSCRIPTION_ADMITTED_PROFILE_IDS="${PREVIOUS_TRANSCRIPTION_ADMITTED_PROFILE_IDS}"
@@ -112,6 +115,16 @@ jobs:
           }
 
           cd "${REPO_PATH}"
+          if [ "${TRANSCRIPTION_ADMISSION_ACTION}" = "PRESERVE_CURRENT" ]; then
+            PYTHONPATH="${REPO_PATH}" python3 - <<'PY'
+          import os
+          from src.transcription_admission_config import parse_transcription_admitted_profile_ids
+
+          parse_transcription_admitted_profile_ids(
+              os.environ["TRANSCRIPTION_ADMITTED_PROFILE_IDS"]
+          )
+          PY
+          fi
           BASIC_AUTH="$(printf 'x-access-token:%s' "${GIT_TOKEN}" | base64 | tr -d '\n')"
           PROXY_ARGS=()
           if [ -n "${DEPLOY_HTTP_PROXY:-}" ]; then
