@@ -18,6 +18,7 @@ from .content_permissions import (
     require_content_permission,
 )
 from .indexing import enqueue_content_publication
+from .content_publication import normalize_failure_code
 from .content_storage import ContentStorage
 from .content_store import (
     audit_event,
@@ -494,6 +495,7 @@ def get_content_index_job(
         version_id=row["version_id"],
         attempt_number=row["attempt_number"],
         status=row["status"],
+        error_code=normalize_failure_code(row["error_code"]),
         error_summary=row["error_summary"],
         created_at=row["created_at"],
         started_at=row["started_at"],
@@ -537,6 +539,7 @@ def list_content_index_jobs(
         jobs=[ManagedIndexJobDTO(
             id=row["id"], publication_id=row["publication_id"], version_id=row["version_id"],
             attempt_number=row["attempt_number"], status=row["status"],
+            error_code=normalize_failure_code(row["error_code"]),
             error_summary=row["error_summary"], created_at=row["created_at"],
             started_at=row["started_at"], finished_at=row["finished_at"], updated_at=row["updated_at"],
             title=row["title"], original_filename=row["original_filename"], category_label=row["category_label"],

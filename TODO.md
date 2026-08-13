@@ -23,11 +23,12 @@
 - 状态：进行中
 - 目标：在独立备份和可回滚前提下清点并分流旧 `source/docs` 与 `source/media`，复制登记普通资料，保留既有媒体链路，并完成候选索引和观察期切换。
 - 下一步：
-  - [ ] 资料负责人核对 117 份 `awaiting_review` 普通资料的分类和文件信息，形成分批确认清单。
-  - [ ] 在独立生产审批下小批量确认、发布并验证检索与引用，禁止一次性发布全部迁移资料。
+  - [ ] 合并并部署受管 PDF 解析、状态兼容、错误分类和迁移预览过滤修复；部署前按 R3 创建 SQLite、Qdrant、CONTENT_ROOT 和镜像恢复点。
+  - [ ] 部署后先重试 1 份非敏感 PDF，再按每批不超过 5 份验证检索与引用；禁止再次一次性重试全部失败资料。
+  - [ ] 对误收的 `.preview.pdf`、`.preview.xlsx` 先运行只读清点，再按独立 R3 结果执行软归档；不删除对象或旧源文件。
   - [ ] 发布后观察 1 至 2 周；旧媒体、旧目录、严格 head 和清理分别按手册边界处理。
 - 完成标准：旧目录只读清点和映射经负责人确认；`app.sqlite`、内容根目录和 Qdrant 均有独立恢复点；切换后观察 1 至 2 周且回滚演练可执行；旧目录未在观察期内删除。
-- 依赖：生产基础能力已启用并保持 `compat` 模式；117 份普通资料已于 2026-08-13 登记为 `legacy/awaiting_review`，未确认、未发布且 `content_item_heads=0`；后续真实资料审核发布、严格 head 和清理仍按生产风险边界审批。
+- 依赖：生产基础能力已启用并保持 `compat` 模式；117 份普通资料已于 2026-08-13 登记为 `legacy`，随后批量发布因受管解析路径、Markdown 缓存和任务状态兼容缺陷系统性失败，正式 `content_item_heads` 尚未建立；修复部署、失败任务重试、误收预览归档、严格 head 和旧目录清理仍按生产风险边界审批。
 - 方案链接：`project-docs/plans/managed-content-library.md`、`project-docs/decisions/0003-managed-content-library.md`、`project-docs/migrations/managed-content-production-runbook.md`
 
 ### 查询拆分 Phase A 生产评测

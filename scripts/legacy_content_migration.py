@@ -27,6 +27,11 @@ DOCUMENT_TYPES_BY_SUFFIX = {
 }
 
 
+def _is_generated_preview(relative_path: str) -> bool:
+    filename = PurePosixPath(relative_path).name.lower()
+    return filename.endswith((".preview.pdf", ".preview.xlsx"))
+
+
 @dataclass(frozen=True, slots=True)
 class LegacyImportEntry:
     relative_path: str
@@ -103,6 +108,8 @@ def load_import_entries(
         size_bytes = raw.get("size_bytes")
         sha256 = raw.get("sha256")
         document_type = raw.get("document_type")
+        if isinstance(relative_path, str) and _is_generated_preview(relative_path):
+            raise LegacyMigrationError("generated_preview_rejected")
         if (
             not isinstance(relative_path, str)
             or relative_path in seen_paths

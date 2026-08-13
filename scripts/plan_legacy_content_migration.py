@@ -119,10 +119,13 @@ def _reason_and_disposition(
         return "symlink_rejected", "symbolic_link", None
     if entry["kind"] == "media":
         return "preserve_legacy_media", "legacy_media_pipeline", None
-    suffix = PurePosixPath(entry["relative_path"]).suffix.lower()
+    filename = PurePosixPath(entry["relative_path"]).name.lower()
+    suffix = PurePosixPath(filename).suffix
     document_type = SUPPORTED_DOCUMENT_TYPES.get(suffix)
     if document_type is None:
         return "unsupported", "unsupported_type", None
+    if filename.endswith((".preview.pdf", ".preview.xlsx")):
+        return "derived_artifact", "generated_preview", document_type
     if entry["size_bytes"] > max_bytes:
         return "unsupported", "content_too_large", document_type
     if rule is None:

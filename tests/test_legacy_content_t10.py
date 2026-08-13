@@ -148,6 +148,26 @@ def test_preflight_fails_closed_for_invalid_plan_entries(tmp_path: Path, changes
     conn.close()
 
 
+@pytest.mark.parametrize("filename", ["report.preview.pdf", "sheet.PREVIEW.XLSX"])
+def test_preflight_rejects_generated_preview_from_old_or_manual_plan(
+    tmp_path: Path, filename: str
+):
+    conn = _database(tmp_path)
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    payload = b"derived"
+    (docs / filename).write_bytes(payload)
+    document_type = "xlsx" if filename.lower().endswith("xlsx") else "pdf"
+    plan = _plan(
+        tmp_path / "plan.json",
+        [_entry(filename, payload, document_type=document_type)],
+    )
+
+    with pytest.raises(LegacyMigrationError, match="generated_preview_rejected"):
+        load_import_entries(conn, docs_root=docs, plan_path=plan, expected_count=1)
+    conn.close()
+
+
 def test_stage_preserves_relative_path_and_verifies_copy(tmp_path: Path):
     conn = _database(tmp_path)
     docs = tmp_path / "docs"

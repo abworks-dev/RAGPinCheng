@@ -252,12 +252,41 @@ SQLite、Qdrant 和完整 `CONTENT_ROOT` 恢复点，固定 T9 run、plan SHA-25
 迁移边界：
 
 - 普通 PDF、Markdown 和 Office 资料：按新分类复制到新的 `inbox/server/<batch_id>`，再走 dry-run/apply/确认/发布；
+- `.preview.pdf` 和 `.preview.xlsx` 是 Office 文件生成的预览产物，不是独立业务资料；规划结果必须标为 `derived_artifact/generated_preview`，T10 apply 对旧计划中的同类文件也会失败关闭；
 - 旧 `docs/教学视频`、`docs/培训视频` 中的转录稿：先核对是否已有 `media_assets`、`transcript_versions` 和正式 transcript head，避免把同一转录稿误当普通资料重复发布；
 - 旧 `source/media`：现阶段继续作为既有视频链路的事实目录，不由 `import_content_batch.py` 导入，不移动到 `CONTENT_ROOT/media`；
 - 未能可靠映射或无法确认业务归属的资料：复制到 `99_待确认资料`，不得自动发布；
 - 离线规划器只生成审查报告，不复制文件，也不调用 `import_content_batch.py`；
 - T10 只读预检只重新核验候选普通资料，不读取正文到日志，不写生产数据库或内容根目录；
 - 观察期内旧 `docs`、`media` 和旧索引保持原状，至少 1 至 2 周后再提交独立清理方案。
+
+### 7.4 已误收预览资料的受控归档
+
+`scripts/archive_legacy_generated_previews.py` 只处理 `source_origin=legacy` 且文件名以 `.preview.pdf` 或
+`.preview.xlsx` 结尾的当前未归档资料。默认运行是只读 dry-run，只输出数量、生命周期聚合和阻塞数量，
+不输出文件名、路径或正文：
+
+```bash
+docker compose -p ragpincheng-prod \
+  -f /data/business/ragpincheng/source/docker/docker-compose.yml \
+  exec -T backend python scripts/archive_legacy_generated_previews.py \
+  --database /app/data/app.sqlite
+```
+
+真实归档属于生产数据修改，必须纳入独立 R3 审批并使用活动管理员 ID：
+
+```bash
+docker compose -p ragpincheng-prod \
+  -f /data/business/ragpincheng/source/docker/docker-compose.yml \
+  exec -T backend python scripts/archive_legacy_generated_previews.py \
+  --database /app/data/app.sqlite \
+  --actor-user-id <approved-user-id> \
+  --apply --confirm ARCHIVE_GENERATED_PREVIEWS
+```
+
+脚本发现任一候选存在正式 head、活动/已发布 publication 或活动索引任务时整批拒绝。apply 只设置
+`content_items.archived_at` 并写 `content.generated_preview_archived` 审计事件；不删除对象字节、旧源文件、
+parents.sqlite 或 Qdrant point。生产执行前后都要记录候选数、阻塞数、正式 head 和审计事件增量。
 
 ## 8. 只读视图
 

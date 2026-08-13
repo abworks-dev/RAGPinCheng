@@ -56,6 +56,8 @@ def test_inventory_synthetic_docs_media_tree_and_symlink(tmp_path):
 def test_mapping_dispositions_depth_limit_and_transcript_review():
     inventory_payload = {"schema_version": 1, "entries": [
         _entry("docs", "公司标准/guide.pdf"),
+        _entry("docs", "公司标准/report.preview.pdf"),
+        _entry("docs", "公司标准/sheet.PREVIEW.XLSX"),
         _entry("docs", "未知/readme.md"),
         _entry("docs", "教学视频/lesson.md"),
         _entry("docs", "教学视频/video.mp4"),
@@ -74,6 +76,8 @@ def test_mapping_dispositions_depth_limit_and_transcript_review():
         "a/b/c/d/e/file.docx": "unsupported",
         "a/b/c/d/file.docx": "import_document",
         "公司标准/guide.pdf": "import_document",
+        "公司标准/report.preview.pdf": "derived_artifact",
+        "公司标准/sheet.PREVIEW.XLSX": "derived_artifact",
         "公司标准/link.pdf": "symlink_rejected",
         "教学视频/lesson.md": "review_transcript_link",
         "教学视频/video.mp4": "unsupported",
@@ -82,6 +86,8 @@ def test_mapping_dispositions_depth_limit_and_transcript_review():
     }
     assert plan["summary"]["unmapped_count"] == 1
     assert plan["summary"]["exception_count"] == 3
+    previews = [entry for entry in plan["entries"] if entry["disposition"] == "derived_artifact"]
+    assert {entry["reason"] for entry in previews} == {"generated_preview"}
 
 
 def test_longest_prefix_unknown_category_unsupported_and_size_limit():

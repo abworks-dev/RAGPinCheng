@@ -285,6 +285,7 @@ export type ManagedIndexJob = {
   version_id: string;
   attempt_number: number;
   status: string;
+  error_code: string | null;
   error_summary: string | null;
   created_at: number;
   started_at: number | null;

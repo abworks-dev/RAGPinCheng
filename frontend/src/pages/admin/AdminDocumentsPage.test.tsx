@@ -109,6 +109,23 @@ const jobs = [
   },
 ];
 
+const managedFailedJob = {
+  id: "managed-job-1",
+  publication_id: "publication-1",
+  version_id: "version-1",
+  attempt_number: 1,
+  status: "failed",
+  error_code: "parser_request_failed",
+  error_summary: "文档解析服务请求失败，请稍后重试。",
+  created_at: 1785686400,
+  started_at: 1785686401,
+  finished_at: 1785686410,
+  updated_at: 1785686410,
+  title: "受管资料",
+  original_filename: "managed.pdf",
+  category_label: "03 公司内部标准",
+};
+
 describe("AdminDocumentsPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -148,6 +165,19 @@ describe("AdminDocumentsPage", () => {
       limit: 25,
       offset: 0,
     }));
+  });
+
+  it("shows the controlled managed publication failure without exposing its code", async () => {
+    mocks.managedContentIndexJobs.mockResolvedValue({
+      jobs: [managedFailedJob],
+      total: 1,
+      status_counts: { failed: 1 },
+    });
+    render(<AdminDocumentsPage />);
+
+    expect(await screen.findByText("受管资料")).toBeInTheDocument();
+    expect(screen.getByText("文档解析服务请求失败，请稍后重试。")).toBeInTheDocument();
+    expect(screen.queryByText("parser_request_failed")).not.toBeInTheDocument();
   });
 
   it("keeps the legacy monitor read-only and removes the old upload entry", async () => {
