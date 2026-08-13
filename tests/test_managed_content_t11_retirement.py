@@ -43,7 +43,7 @@ def app_database() -> sqlite3.Connection:
         """
         CREATE TABLE content_items(id TEXT PRIMARY KEY, archived_at INTEGER);
         CREATE TABLE content_versions(
-          id TEXT PRIMARY KEY,item_id TEXT,source_rel_path TEXT,original_filename TEXT,
+          id TEXT PRIMARY KEY,item_id TEXT,version_number INTEGER,source_rel_path TEXT,original_filename TEXT,
           source_origin TEXT,lifecycle_status TEXT
         );
         CREATE TABLE content_item_heads(item_id TEXT,current_version_id TEXT);
@@ -58,8 +58,8 @@ def app_database() -> sqlite3.Connection:
         CREATE TABLE transcription_jobs(id TEXT,status TEXT);
         INSERT INTO content_items VALUES ('item-1',NULL),('preview',1);
         INSERT INTO content_versions VALUES
-          ('version-1','item-1','公司标准/a.pdf','a.pdf','legacy','published'),
-          ('version-preview','preview','公司标准/a.preview.pdf','a.preview.pdf','legacy','publication_failed');
+          ('version-1','item-1',1,'公司标准/a.pdf','a.pdf','legacy','published'),
+          ('version-preview','preview',1,'公司标准/a.preview.pdf','a.preview.pdf','legacy','publication_failed');
         INSERT INTO content_item_heads VALUES ('item-1','version-1');
         INSERT INTO content_publications VALUES ('pub','version-1','published',1);
         INSERT INTO content_index_jobs VALUES ('job','version-1','done',1,1);
@@ -108,7 +108,7 @@ def test_plan_selects_only_matching_unversioned_document_and_preview():
         collection="pincheng_docs",
         legacy_docs_root="/app/docs",
         expected_head_count=1,
-        expected_archived_preview_count=1,
+        expected_excluded_preview_count=1,
     )
     assert plan["managed"]["version_ids"] == ["version-1"]
     assert plan["candidates"]["parent_ids"] == ["legacy-parent", "preview-parent"]
@@ -120,25 +120,27 @@ def test_plan_fails_closed_for_active_jobs_and_managed_identity_conflicts():
     app = app_database()
     app.execute("INSERT INTO transcription_jobs VALUES ('active','running')")
     with pytest.raises(LegacyIndexRetirementError, match="active_jobs_present"):
-        build_plan(app, parents_database(), qdrant(), collection="pincheng_docs", legacy_docs_root="/app/docs", expected_head_count=1, expected_archived_preview_count=1)
+        build_plan(app, parents_database(), qdrant(), collection="pincheng_docs", legacy_docs_root="/app/docs", expected_head_count=1, expected_excluded_preview_count=1)
 
     app = app_database()
     parents = parents_database()
     parents.execute("UPDATE parents SET content_version_id='wrong' WHERE parent_id='legacy-parent'")
     with pytest.raises(LegacyIndexRetirementError, match="candidate_parent_identity_conflict"):
-        build_plan(app, parents, qdrant(), collection="pincheng_docs", legacy_docs_root="/app/docs", expected_head_count=1, expected_archived_preview_count=1)
+        build_plan(app, parents, qdrant(), collection="pincheng_docs", legacy_docs_root="/app/docs", expected_head_count=1, expected_excluded_preview_count=1)
 
 
-def test_plan_requires_exact_archived_preview_count():
-    with pytest.raises(LegacyIndexRetirementError, match="archived_preview_count_mismatch:1:0"):
+def test_plan_requires_exact_excluded_preview_count():
+    app = app_database()
+    app.execute("UPDATE content_versions SET original_filename='ordinary.pdf' WHERE id='version-preview'")
+    with pytest.raises(LegacyIndexRetirementError, match="excluded_preview_count_mismatch:0:1"):
         build_plan(
-            app_database(),
+            app,
             parents_database(),
             qdrant(),
             collection="pincheng_docs",
             legacy_docs_root="/app/docs",
             expected_head_count=1,
-            expected_archived_preview_count=0,
+            expected_excluded_preview_count=1,
         )
 
 
@@ -146,7 +148,7 @@ def test_apply_uses_explicit_ids_and_preserves_managed_video_and_unrelated_rows(
     app = app_database()
     parents = parents_database()
     client = qdrant()
-    plan = build_plan(app, parents, client, collection="pincheng_docs", legacy_docs_root="/app/docs", expected_head_count=1, expected_archived_preview_count=1)
+    plan = build_plan(app, parents, client, collection="pincheng_docs", legacy_docs_root="/app/docs", expected_head_count=1, expected_excluded_preview_count=1)
     result = apply_plan(parents, client, plan, batch_size=1)
     assert result.parent_count == 2
     assert result.point_count == 2
@@ -159,7 +161,7 @@ def test_apply_uses_explicit_ids_and_preserves_managed_video_and_unrelated_rows(
 
 
 def test_plan_fingerprint_detects_any_identity_drift(tmp_path: Path):
-    plan = build_plan(app_database(), parents_database(), qdrant(), collection="pincheng_docs", legacy_docs_root="/app/docs", expected_head_count=1, expected_archived_preview_count=1)
+    plan = build_plan(app_database(), parents_database(), qdrant(), collection="pincheng_docs", legacy_docs_root="/app/docs", expected_head_count=1, expected_excluded_preview_count=1)
     output = tmp_path / "plan.json"
     write_plan(output, plan)
     loaded = json.loads(output.read_text(encoding="utf-8"))

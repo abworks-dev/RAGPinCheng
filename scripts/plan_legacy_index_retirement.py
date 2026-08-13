@@ -34,7 +34,7 @@ def main() -> int:
     parser.add_argument("--collection", default="pincheng_docs")
     parser.add_argument("--legacy-docs-root", default="/app/docs")
     parser.add_argument("--expected-head-count", type=int, required=True)
-    parser.add_argument("--expected-archived-preview-count", type=int, required=True)
+    parser.add_argument("--expected-excluded-preview-count", type=int, required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
 
@@ -46,14 +46,14 @@ def main() -> int:
             collection=args.collection,
             legacy_docs_root=args.legacy_docs_root,
             expected_head_count=args.expected_head_count,
-            expected_archived_preview_count=args.expected_archived_preview_count,
+            expected_excluded_preview_count=args.expected_excluded_preview_count,
         )
     write_plan(args.output, plan)
     print(json.dumps({
         "status": "planned",
         "plan_sha256": plan_sha256(plan),
         "managed_versions": plan["managed"]["version_count"],
-        "archived_previews": args.expected_archived_preview_count,
+        "excluded_previews": args.expected_excluded_preview_count,
         "candidate_parents": plan["candidates"]["parent_count"],
         "candidate_points": plan["candidates"]["point_count"],
     }, sort_keys=True))

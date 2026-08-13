@@ -61,8 +61,8 @@ jobs:
 
           EXPECTED_IMPORT_RECORD_COUNT=117
           EXPECTED_HEAD_COUNT=116
-          EXPECTED_ARCHIVED_PREVIEW_COUNT=1
-          [ $((EXPECTED_HEAD_COUNT + EXPECTED_ARCHIVED_PREVIEW_COUNT)) -eq "${EXPECTED_IMPORT_RECORD_COUNT}" ]
+          EXPECTED_EXCLUDED_PREVIEW_COUNT=1
+          [ $((EXPECTED_HEAD_COUNT + EXPECTED_EXCLUDED_PREVIEW_COUNT)) -eq "${EXPECTED_IMPORT_RECORD_COUNT}" ]
           RUN_ID="t11-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           RUN_ROOT="${BACKUP_ROOT}/${RUN_ID}"
           REPORT_ROOT="${RUNNER_TEMP}/${RUN_ID}-summary"
@@ -180,7 +180,7 @@ jobs:
             --qdrant-url http://qdrant:6333 \
             --legacy-docs-root /app/docs \
             --expected-head-count "${EXPECTED_HEAD_COUNT}" \
-            --expected-archived-preview-count "${EXPECTED_ARCHIVED_PREVIEW_COUNT}" \
+            --expected-excluded-preview-count "${EXPECTED_EXCLUDED_PREVIEW_COUNT}" \
             --output "/app/data/${RUN_ID}-retirement-plan.json" \
             > "${RUN_ROOT}/plan-result.json"
           mv "${DATA_PATH}/${RUN_ID}-retirement-plan.json" "${PLAN_PATH}"
@@ -284,7 +284,7 @@ jobs:
           chmod -R go-rwx "${RUN_ROOT}" "${REPORT_ROOT}"
           MUTATED=0
           trap - EXIT
-          echo "T11_RETIRE status=success managed=${EXPECTED_HEAD_COUNT} archived_previews=${EXPECTED_ARCHIVED_PREVIEW_COUNT} plan_sha256=${PLAN_SHA256}"
+          echo "T11_RETIRE status=success managed=${EXPECTED_HEAD_COUNT} excluded_previews=${EXPECTED_EXCLUDED_PREVIEW_COUNT} plan_sha256=${PLAN_SHA256}"
 
       - name: Upload redacted T11 summary
         uses: actions/upload-artifact@v4
