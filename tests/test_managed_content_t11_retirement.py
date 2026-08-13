@@ -108,6 +108,7 @@ def test_plan_selects_only_matching_unversioned_document_and_preview():
         collection="pincheng_docs",
         legacy_docs_root="/app/docs",
         expected_head_count=1,
+        expected_archived_preview_count=1,
     )
     assert plan["managed"]["version_ids"] == ["version-1"]
     assert plan["candidates"]["parent_ids"] == ["legacy-parent", "preview-parent"]
@@ -119,20 +120,33 @@ def test_plan_fails_closed_for_active_jobs_and_managed_identity_conflicts():
     app = app_database()
     app.execute("INSERT INTO transcription_jobs VALUES ('active','running')")
     with pytest.raises(LegacyIndexRetirementError, match="active_jobs_present"):
-        build_plan(app, parents_database(), qdrant(), collection="pincheng_docs", legacy_docs_root="/app/docs", expected_head_count=1)
+        build_plan(app, parents_database(), qdrant(), collection="pincheng_docs", legacy_docs_root="/app/docs", expected_head_count=1, expected_archived_preview_count=1)
 
     app = app_database()
     parents = parents_database()
     parents.execute("UPDATE parents SET content_version_id='wrong' WHERE parent_id='legacy-parent'")
     with pytest.raises(LegacyIndexRetirementError, match="candidate_parent_identity_conflict"):
-        build_plan(app, parents, qdrant(), collection="pincheng_docs", legacy_docs_root="/app/docs", expected_head_count=1)
+        build_plan(app, parents, qdrant(), collection="pincheng_docs", legacy_docs_root="/app/docs", expected_head_count=1, expected_archived_preview_count=1)
+
+
+def test_plan_requires_exact_archived_preview_count():
+    with pytest.raises(LegacyIndexRetirementError, match="archived_preview_count_mismatch:1:0"):
+        build_plan(
+            app_database(),
+            parents_database(),
+            qdrant(),
+            collection="pincheng_docs",
+            legacy_docs_root="/app/docs",
+            expected_head_count=1,
+            expected_archived_preview_count=0,
+        )
 
 
 def test_apply_uses_explicit_ids_and_preserves_managed_video_and_unrelated_rows():
     app = app_database()
     parents = parents_database()
     client = qdrant()
-    plan = build_plan(app, parents, client, collection="pincheng_docs", legacy_docs_root="/app/docs", expected_head_count=1)
+    plan = build_plan(app, parents, client, collection="pincheng_docs", legacy_docs_root="/app/docs", expected_head_count=1, expected_archived_preview_count=1)
     result = apply_plan(parents, client, plan, batch_size=1)
     assert result.parent_count == 2
     assert result.point_count == 2
@@ -145,7 +159,7 @@ def test_apply_uses_explicit_ids_and_preserves_managed_video_and_unrelated_rows(
 
 
 def test_plan_fingerprint_detects_any_identity_drift(tmp_path: Path):
-    plan = build_plan(app_database(), parents_database(), qdrant(), collection="pincheng_docs", legacy_docs_root="/app/docs", expected_head_count=1)
+    plan = build_plan(app_database(), parents_database(), qdrant(), collection="pincheng_docs", legacy_docs_root="/app/docs", expected_head_count=1, expected_archived_preview_count=1)
     output = tmp_path / "plan.json"
     write_plan(output, plan)
     loaded = json.loads(output.read_text(encoding="utf-8"))
