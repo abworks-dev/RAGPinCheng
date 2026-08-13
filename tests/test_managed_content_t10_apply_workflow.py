@@ -33,6 +33,10 @@ def test_t10_apply_creates_recovery_points_before_staging_and_apply():
     assert sqlite_backup < staging
     assert qdrant_backup < staging
     assert content_backup < staging < apply
+    assert 'PLAN_STAGED="${CONTENT_ROOT}/manifests/${RUN_ID}-plan.json"' in WORKFLOW
+    assert '"${COMPOSE[@]}" exec -T backend python scripts/apply_legacy_content_t10.py' in WORKFLOW
+    assert '--staged-root "/app/content/inbox/server/${RUN_ID}"' in WORKFLOW
+    assert '--plan "/app/content/manifests/${RUN_ID}-plan.json"' in WORKFLOW
     assert "Qdrant collection is not green" in WORKFLOW
     assert "qdrant_points_before=" in WORKFLOW
     assert '"${BUSINESS_DEVICE}" != "${BACKUP_DEVICE}"' in WORKFLOW
