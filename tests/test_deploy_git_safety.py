@@ -159,6 +159,20 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertNotIn("deploy-gpu.ps1", workflow)
         self.assertNotIn("promote-gpu-runtime.ps1", workflow)
 
+    def test_app_only_deployment_refuses_all_active_application_jobs_before_backup(self):
+        workflow = self.app_only_workflow
+        marker = "APP_ONLY_ACTIVE_JOB_PREFLIGHT"
+        for table in (
+            "content_index_jobs",
+            "index_jobs",
+            "transcript_publication_index_jobs",
+            "transcription_jobs",
+        ):
+            self.assertIn(table, workflow)
+        self.assertIn("active application jobs must finish before deployment", workflow)
+        self.assertLess(workflow.index(marker), workflow.index("source.backup(target)"))
+        self.assertLess(workflow.index(marker), workflow.index('docker tag "${OLD_IMAGE_ID}"'))
+
     def test_app_only_emergency_workflow_pins_gpu_contract_and_rolls_back_image(self):
         workflow = self.app_only_workflow
 

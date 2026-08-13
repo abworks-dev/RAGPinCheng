@@ -48,6 +48,9 @@ export const items = [
   source_origin: index === 4 ? "legacy" : "web",
   source_batch_id: null,
   is_current: true,
+  latest_publication_status: status === "publication_failed" ? "failed" : null,
+  publication_attempt_count: status === "publication_failed" ? 4 : 0,
+  publication_failure: status === "publication_failed" ? { code: "pdf_password_required", message: "PDF 需要密码才能解析。", retryable: false, recommended_action: "请上传已解除密码保护的 PDF。" } : null,
   created_at: 1700000000,
   updated_at: 1700000000,
 }));

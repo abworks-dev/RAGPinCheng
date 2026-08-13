@@ -87,6 +87,9 @@ const item = {
   source_origin: "web",
   source_batch_id: "batch-1",
   is_current: false,
+  latest_publication_status: null,
+  publication_attempt_count: 0,
+  publication_failure: null,
   created_at: 1,
   updated_at: 1,
 };
@@ -171,5 +174,16 @@ describe("AdminManagedContentPage", () => {
     expect(screen.getByRole("button", { name: "重试失败项" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "取消" }));
     expect(screen.getAllByRole("checkbox", { name: "选择建模标准" })[0]).toBeChecked();
+  });
+
+  it("shows the latest publication reason without exposing its code", async () => {
+    mocks.permissions = ["publish"];
+    mocks.items.mockResolvedValue({ items: [{ ...item, lifecycle_status: "publication_failed", publication_attempt_count: 4, publication_failure: { code: "pdf_password_required", message: "PDF 需要密码才能解析。", retryable: false, recommended_action: "请上传已解除密码保护的 PDF。" } }], total: 1, status_counts: { publication_failed: 1 } });
+    render(<AdminManagedContentPage />);
+    expect((await screen.findAllByText("PDF 需要密码才能解析。")).length).toBeGreaterThan(0);
+    expect(screen.getAllByText("请上传已解除密码保护的 PDF。").length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/共尝试 4 次/).length).toBeGreaterThan(0);
+    expect(screen.queryByText("pdf_password_required")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "发布" })[0]).toBeDisabled();
   });
 });

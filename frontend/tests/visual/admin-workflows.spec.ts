@@ -65,6 +65,18 @@ test.describe("资料库", () => {
     await expect(upload).toBeDisabled();
     await expectNoBodyOverflow(page);
   });
+
+  test("publication failure stays readable and actionable", async ({ page }) => {
+    await openTab(page, "资料库");
+    await page.locator("select").filter({ has: page.locator('option[value="publication_failed"]') }).selectOption("publication_failed");
+    await expect(page.locator("p:visible", { hasText: "PDF 需要密码才能解析。" })).toBeVisible();
+    await expect(page.locator("p:visible", { hasText: "请上传已解除密码保护的 PDF。" })).toBeVisible();
+    await expect(page.locator("p:visible", { hasText: "共尝试 4 次" })).toBeVisible();
+    const failedTitle = page.getByText("培训资料发布演练", { exact: true }).filter({ visible: true });
+    const failedItem = page.viewportSize()!.width < 1024 ? failedTitle.locator("xpath=ancestor::li") : failedTitle.locator("xpath=ancestor::tr");
+    await expect(failedItem.getByRole("button", { name: "发布" })).toBeDisabled();
+    await expectNoBodyOverflow(page);
+  });
 });
 
 test.describe("分类设置", () => {

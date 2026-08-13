@@ -18,7 +18,7 @@ from .content_permissions import (
     require_content_permission,
 )
 from .indexing import enqueue_content_publication
-from .content_publication import normalize_failure_code
+from .content_publication import failure_detail, normalize_failure_code
 from .content_storage import ContentStorage
 from .content_store import (
     audit_event,
@@ -273,6 +273,9 @@ def _content_item_dto(row: sqlite3.Row) -> ManagedContentItemDTO:
         source_origin=row["source_origin"],
         source_batch_id=row["source_batch_id"],
         is_current=row["current_version_id"] == row["version_id"],
+        latest_publication_status=row["latest_publication_status"],
+        publication_attempt_count=int(row["publication_attempt_count"] or 0),
+        publication_failure=failure_detail(row["latest_publication_error_code"]),
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )
@@ -486,7 +489,11 @@ def get_content_index_job(
     _user: CurrentUser = Depends(require_any_content_permission(_CONTENT_READ)),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> ManagedIndexJobDTO:
-    row = conn.execute("SELECT * FROM content_index_jobs WHERE id=?", (index_job_id,)).fetchone()
+    row = conn.execute(
+        """SELECT j.*,(SELECT count(*) FROM content_index_jobs jc WHERE jc.version_id=j.version_id) AS attempt_count
+           FROM content_index_jobs j WHERE j.id=?""",
+        (index_job_id,),
+    ).fetchone()
     if row is None:
         raise HTTPException(status_code=404, detail="发布任务不存在")
     return ManagedIndexJobDTO(
@@ -497,6 +504,8 @@ def get_content_index_job(
         status=row["status"],
         error_code=normalize_failure_code(row["error_code"]),
         error_summary=row["error_summary"],
+        failure=failure_detail(row["error_code"]),
+        attempt_count=row["attempt_count"],
         created_at=row["created_at"],
         started_at=row["started_at"],
         finished_at=row["finished_at"],
@@ -507,6 +516,7 @@ def get_content_index_job(
 @router.get("/index-jobs", response_model=ManagedIndexJobListResponse)
 def list_content_index_jobs(
     status: str | None = None,
+    history: bool = False,
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
     _user: CurrentUser = Depends(require_any_content_permission(_CONTENT_READ)),
@@ -517,6 +527,11 @@ def list_content_index_jobs(
     if status:
         clauses.append("j.status=?")
         params.append(status)
+    if not history:
+        clauses.append(
+            "j.id=(SELECT j2.id FROM content_index_jobs j2 WHERE j2.version_id=j.version_id "
+            "ORDER BY j2.attempt_number DESC,j2.created_at DESC,j2.id DESC LIMIT 1)"
+        )
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     base = """ FROM content_index_jobs j
                JOIN content_versions v ON v.id=j.version_id
@@ -524,15 +539,22 @@ def list_content_index_jobs(
                JOIN category_nodes c ON c.id=i.category_id"""
     rows = conn.execute(
         """SELECT j.*,i.title,v.original_filename,
+                  (SELECT count(*) FROM content_index_jobs jc WHERE jc.version_id=j.version_id) AS attempt_count,
                   c.display_code || ' ' || c.display_name AS category_label""" + base +
         f" {where} ORDER BY j.created_at DESC,j.id LIMIT ? OFFSET ?",
         [*params, limit, offset],
     ).fetchall()
     total = int(conn.execute("SELECT count(*)" + base + f" {where}", params).fetchone()[0])
+    count_where = ""
+    if not history:
+        count_where = (
+            " WHERE j.id=(SELECT j2.id FROM content_index_jobs j2 WHERE j2.version_id=j.version_id "
+            "ORDER BY j2.attempt_number DESC,j2.created_at DESC,j2.id DESC LIMIT 1)"
+        )
     counts = {
         str(row[0]): int(row[1])
         for row in conn.execute(
-            "SELECT j.status,count(*)" + base + " GROUP BY j.status"
+            "SELECT j.status,count(*)" + base + count_where + " GROUP BY j.status"
         ).fetchall()
     }
     return ManagedIndexJobListResponse(
@@ -540,7 +562,8 @@ def list_content_index_jobs(
             id=row["id"], publication_id=row["publication_id"], version_id=row["version_id"],
             attempt_number=row["attempt_number"], status=row["status"],
             error_code=normalize_failure_code(row["error_code"]),
-            error_summary=row["error_summary"], created_at=row["created_at"],
+            error_summary=row["error_summary"], failure=failure_detail(row["error_code"]),
+            attempt_count=row["attempt_count"], created_at=row["created_at"],
             started_at=row["started_at"], finished_at=row["finished_at"], updated_at=row["updated_at"],
             title=row["title"], original_filename=row["original_filename"], category_label=row["category_label"],
         ) for row in rows],

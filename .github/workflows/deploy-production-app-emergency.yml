@@ -269,6 +269,45 @@ jobs:
             exit 1
           }
 
+          APP_DATABASE="${DATA_PATH}/app.sqlite"
+          [ -f "${APP_DATABASE}" ] || {
+            echo "ERROR: production application database is unavailable for active-job preflight"
+            exit 1
+          }
+          APP_DATABASE="${APP_DATABASE}" python3 - <<'PY'
+          import os
+          import sqlite3
+
+          active = {
+              "content_index_jobs": ("pending", "parsing", "chunking", "summarizing", "embedding"),
+              "index_jobs": ("pending", "running", "uploading", "queued_mineru", "parsing", "chunking", "embedding"),
+              "transcript_publication_index_jobs": ("pending", "parsing", "chunking", "embedding"),
+              "transcription_jobs": ("pending", "running", "processing"),
+          }
+          connection = sqlite3.connect(f"file:{os.environ['APP_DATABASE']}?mode=ro", uri=True)
+          try:
+              existing = {
+                  row[0] for row in connection.execute(
+                      "SELECT name FROM sqlite_master WHERE type='table'"
+                  )
+              }
+              counts = {}
+              for table, statuses in active.items():
+                  if table not in existing:
+                      counts[table] = 0
+                      continue
+                  placeholders = ",".join("?" for _ in statuses)
+                  counts[table] = int(connection.execute(
+                      f"SELECT count(*) FROM {table} WHERE status IN ({placeholders})",
+                      statuses,
+                  ).fetchone()[0])
+          finally:
+              connection.close()
+          print("APP_ONLY_ACTIVE_JOB_PREFLIGHT " + " ".join(f"{name}={counts[name]}" for name in active))
+          if any(counts.values()):
+              raise SystemExit("ERROR: active application jobs must finish before deployment")
+          PY
+
           if [ -L "${CONTENT_HOST_PATH}" ] || \
              { [ -e "${CONTENT_HOST_PATH}" ] && [ ! -d "${CONTENT_HOST_PATH}" ]; }; then
             echo "ERROR: production content root must be a real directory"
