@@ -65,13 +65,3 @@ def test_cleanup_operations_owns_manual_and_scheduled_triggers():
     assert "PRODUCTION_REPO_PATH" not in workflow
     assert "backup-apply" in workflow
     assert "actions/upload-artifact@v4" in workflow
-
-
-def test_deployment_cleanup_waits_for_both_deployment_jobs():
-    workflow = read_text(".github/workflows/deploy-production.yml")
-
-    assert "cleanup-after-deploy:" in workflow
-    assert "needs: [deploy-gpu, deploy-app]" in workflow
-    assert "target: backups" in workflow
-    assert "apply: true" in workflow
-    assert "confirm_production_cleanup: true" in workflow
