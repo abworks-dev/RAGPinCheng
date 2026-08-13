@@ -238,10 +238,12 @@ class ManagedCategoryDTO(BaseModel):
     version: int
     created_at: int
     updated_at: int
+    full_path: str = ""
+    item_count: int = 0
 
 
 class CreateManagedCategoryRequest(BaseModel):
-    category_key: str = Field(min_length=2, max_length=63)
+    category_key: str | None = Field(default=None, min_length=2, max_length=63)
     parent_id: str | None = None
     display_code: str = Field(min_length=1, max_length=12)
     display_name: str = Field(min_length=1, max_length=100)
@@ -277,6 +279,7 @@ class ManagedContentItemDTO(BaseModel):
     category_id: str
     category_key: str
     category_label: str
+    category_path: str = ""
     media_id: str | None
     version_id: str
     version_number: int
@@ -289,6 +292,32 @@ class ManagedContentItemDTO(BaseModel):
     is_current: bool
     created_at: int
     updated_at: int
+
+
+class ManagedContentListResponse(BaseModel):
+    items: list[ManagedContentItemDTO]
+    total: int
+    status_counts: dict[str, int]
+
+
+class BulkManagedContentRequest(BaseModel):
+    version_ids: list[str] = Field(min_length=1, max_length=20)
+    approved: bool | None = None
+    note: str | None = Field(default=None, max_length=2000)
+    category_id: str | None = None
+
+
+class BulkManagedContentResultDTO(BaseModel):
+    version_id: str
+    status: Literal["succeeded", "failed"]
+    message: str | None = None
+    index_job_id: str | None = None
+
+
+class BulkManagedContentResponse(BaseModel):
+    results: list[BulkManagedContentResultDTO]
+    succeeded: int
+    failed: int
 
 
 class ReviewManagedContentRequest(BaseModel):
@@ -314,6 +343,15 @@ class ManagedIndexJobDTO(BaseModel):
     started_at: int | None
     finished_at: int | None
     updated_at: int
+    title: str | None = None
+    original_filename: str | None = None
+    category_label: str | None = None
+
+
+class ManagedIndexJobListResponse(BaseModel):
+    jobs: list[ManagedIndexJobDTO]
+    total: int
+    status_counts: dict[str, int]
 
 
 class ContentPermissionUserDTO(BaseModel):

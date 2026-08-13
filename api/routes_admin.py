@@ -25,6 +25,7 @@ from src.config import (
     MEDIA_DIR,
     MAX_VIDEO_UPLOAD_MB,
     SECOND_LEVEL_CATEGORIES,
+    CONTENT_MANAGEMENT_ENABLED,
 )
 from src.indexing_pipeline import (
     delete_document as delete_indexed_document,
@@ -600,6 +601,8 @@ async def upload_documents(
     is the customer name / company name and gets stored as the `company`
     field on each parent for downstream filtering.
     """
+    if CONTENT_MANAGEMENT_ENABLED:
+        raise HTTPException(status_code=409, detail="旧上传入口已停用，请前往资料库上传")
     cat = category.strip()
     if not cat or not _SAFE_NAME_RE.match(cat):
         raise HTTPException(status_code=400, detail="category 名称非法")

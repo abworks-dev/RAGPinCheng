@@ -61,24 +61,35 @@ def audit_event(
 def list_categories(conn: sqlite3.Connection, *, include_inactive: bool = False) -> list[sqlite3.Row]:
     where = "" if include_inactive else "WHERE is_active=1"
     return conn.execute(
-        f"""SELECT id,category_key,parent_id,display_code,display_name,sort_order,
-                   level,is_active,version,created_at,updated_at
-            FROM category_nodes {where}
-            ORDER BY level,parent_id,sort_order,display_name"""
+        f"""WITH RECURSIVE paths AS (
+                SELECT id,category_key,parent_id,display_code,display_name,sort_order,
+                       level,is_active,version,created_at,updated_at,
+                       display_code || ' ' || display_name AS full_path
+                FROM category_nodes WHERE parent_id IS NULL
+                UNION ALL
+                SELECT c.id,c.category_key,c.parent_id,c.display_code,c.display_name,c.sort_order,
+                       c.level,c.is_active,c.version,c.created_at,c.updated_at,
+                       p.full_path || ' / ' || c.display_code || ' ' || c.display_name
+                FROM category_nodes c JOIN paths p ON p.id=c.parent_id
+            )
+            SELECT p.*,(SELECT count(*) FROM content_items i
+                        WHERE i.category_id=p.id AND i.archived_at IS NULL) AS item_count
+            FROM paths p {where}
+            ORDER BY full_path"""
     ).fetchall()
 
 
 def create_category(
     conn: sqlite3.Connection,
     *,
-    category_key: str,
+    category_key: str | None,
     parent_id: str | None,
     display_code: str,
     display_name: str,
     sort_order: int,
     actor_user_id: int,
 ) -> sqlite3.Row:
-    key = category_key.strip()
+    key = category_key.strip() if category_key else f"category_{uuid.uuid4().hex[:12]}"
     code = display_code.strip()
     name = display_name.strip()
     if not _CATEGORY_KEY_RE.fullmatch(key):
@@ -136,6 +147,12 @@ def update_category(
         ).fetchone()
         if child:
             raise ValueError("active_child_category_exists")
+        item = conn.execute(
+            "SELECT 1 FROM content_items WHERE category_id=? AND archived_at IS NULL LIMIT 1",
+            (category_id,),
+        ).fetchone()
+        if item:
+            raise ValueError("category_has_content")
     now = _now()
     result = conn.execute(
         """UPDATE category_nodes
@@ -267,13 +284,22 @@ def list_content_items(
         params.append(lifecycle_status)
     where = " AND ".join(clauses)
     return conn.execute(
-        f"""SELECT i.id AS item_id,i.title,i.content_kind,i.category_id,i.media_id,
+        f"""WITH RECURSIVE paths AS (
+                SELECT id,display_code || ' ' || display_name AS full_path
+                FROM category_nodes WHERE parent_id IS NULL
+                UNION ALL
+                SELECT c.id,p.full_path || ' / ' || c.display_code || ' ' || c.display_name
+                FROM category_nodes c JOIN paths p ON p.id=c.parent_id
+            )
+            SELECT i.id AS item_id,i.title,i.content_kind,i.category_id,i.media_id,
                    i.created_at,i.updated_at,c.category_key,c.display_code,c.display_name,
+                   paths.full_path AS category_path,
                    v.id AS version_id,v.version_number,v.original_filename,v.doc_type,
                    v.lifecycle_status,v.object_sha256,v.source_origin,v.source_batch_id,
                    h.current_version_id
             FROM content_items i
             JOIN category_nodes c ON c.id=i.category_id
+            JOIN paths ON paths.id=i.category_id
             JOIN content_versions v ON v.item_id=i.id
              AND v.version_number=(SELECT max(v2.version_number) FROM content_versions v2 WHERE v2.item_id=i.id)
             LEFT JOIN content_item_heads h ON h.item_id=i.id
@@ -281,6 +307,71 @@ def list_content_items(
             ORDER BY i.updated_at DESC,i.id""",
         params,
     ).fetchall()
+
+
+def list_content_items_page(
+    conn: sqlite3.Connection,
+    *,
+    query: str = "",
+    category_id: str | None = None,
+    lifecycle_status: str | None = None,
+    source_origin: str | None = None,
+    limit: int = 25,
+    offset: int = 0,
+) -> tuple[list[sqlite3.Row], int, dict[str, int]]:
+    clauses = ["i.archived_at IS NULL"]
+    params: list[object] = []
+    normalized = query.strip()
+    if normalized:
+        clauses.append("(i.title LIKE ? OR v.original_filename LIKE ? OR paths.full_path LIKE ?)")
+        pattern = f"%{normalized}%"
+        params.extend([pattern, pattern, pattern])
+    if category_id:
+        clauses.append("i.category_id=?")
+        params.append(category_id)
+    if source_origin:
+        clauses.append("v.source_origin=?")
+        params.append(source_origin)
+    base_where = " AND ".join(clauses)
+    status_where = base_where
+    status_params = list(params)
+    if lifecycle_status:
+        status_where += " AND v.lifecycle_status=?"
+        status_params.append(lifecycle_status)
+    cte = """WITH RECURSIVE paths AS (
+                SELECT id,display_code || ' ' || display_name AS full_path
+                FROM category_nodes WHERE parent_id IS NULL
+                UNION ALL
+                SELECT c.id,p.full_path || ' / ' || c.display_code || ' ' || c.display_name
+                FROM category_nodes c JOIN paths p ON p.id=c.parent_id
+            ), latest AS (
+                SELECT v.* FROM content_versions v
+                WHERE v.version_number=(SELECT max(v2.version_number) FROM content_versions v2 WHERE v2.item_id=v.item_id)
+            )"""
+    joins = """ FROM content_items i
+                JOIN category_nodes c ON c.id=i.category_id
+                JOIN paths ON paths.id=i.category_id
+                JOIN latest v ON v.item_id=i.id
+                LEFT JOIN content_item_heads h ON h.item_id=i.id"""
+    rows = conn.execute(
+        cte + """ SELECT i.id AS item_id,i.title,i.content_kind,i.category_id,i.media_id,
+                          i.created_at,i.updated_at,c.category_key,c.display_code,c.display_name,
+                          paths.full_path AS category_path,v.id AS version_id,v.version_number,
+                          v.original_filename,v.doc_type,v.lifecycle_status,v.object_sha256,
+                          v.source_origin,v.source_batch_id,h.current_version_id""" + joins +
+        f" WHERE {status_where} ORDER BY i.updated_at DESC,i.id LIMIT ? OFFSET ?",
+        [*status_params, limit, offset],
+    ).fetchall()
+    total = int(conn.execute(cte + "SELECT count(*)" + joins + f" WHERE {status_where}", status_params).fetchone()[0])
+    counts = {
+        str(row[0]): int(row[1])
+        for row in conn.execute(
+            cte + "SELECT v.lifecycle_status,count(*)" + joins +
+            f" WHERE {base_where} GROUP BY v.lifecycle_status",
+            params,
+        ).fetchall()
+    }
+    return rows, total, counts
 
 
 def submit_version_for_review(

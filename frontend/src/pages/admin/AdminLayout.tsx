@@ -21,9 +21,9 @@ type Tab = "users" | "conversations" | "corpus" | "managed" | "categories" | "me
 const adminTabs: [Tab, string][] = [
   ["users", "用户"],
   ["conversations", "对话"],
-  ["corpus", "资料管理"],
-  ["managed", "资料工作流"],
+  ["managed", "资料库"],
   ["categories", "分类设置"],
+  ["corpus", "索引监控"],
   ["media", "视频媒体"],
   ["stats", "概览"],
   ["feedback", "反馈"],
@@ -36,7 +36,7 @@ export function AdminLayout() {
   const permissions = user?.content_permissions || [];
   const tabs = isAdmin
     ? adminTabs
-    : contentWorkspaceTabs(permissions).map((key) => [key, key === "managed" ? "资料工作流" : "分类设置"] as [Tab, string]);
+    : contentWorkspaceTabs(permissions).map((key) => [key, key === "managed" ? "资料库" : "分类设置"] as [Tab, string]);
   const [tab, setTab] = useState<Tab>(isAdmin ? "users" : "managed");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false);

@@ -34,6 +34,8 @@ const category = {
   version: 3,
   created_at: 1,
   updated_at: 1,
+  full_path: "01 行业规范与标准",
+  item_count: 0,
 };
 
 describe("AdminCategoriesPage", () => {
@@ -59,7 +61,8 @@ describe("AdminCategoriesPage", () => {
 
   it("keeps permission management out of category settings", async () => {
     render(<AdminCategoriesPage />);
-    expect(await screen.findByText("industry_standards")).toBeInTheDocument();
+    expect((await screen.findAllByText("01 行业规范与标准")).length).toBeGreaterThan(0);
+    expect(screen.queryByText("industry_standards")).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "资料权限" })).not.toBeInTheDocument();
   });
 

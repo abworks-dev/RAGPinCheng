@@ -1,15 +1,15 @@
 # 受管知识资料库生产运行与旧资料迁移手册
 
-- 状态：生产基础能力已启用，旧资料尚未迁移
+- 状态：117 份普通资料已登记待确认，尚未发布或切换
 - 适用环境：Ubuntu 生产应用节点
-- 当前基线日期：2026-08-11
+- 当前基线日期：2026-08-13
 - 关联方案：`../plans/managed-content-library.md`
 - 关联决策：`../decisions/0003-managed-content-library.md`
 - 当前功能：`../features/document-indexing.md`
 
 ## 1. 当前生产基线
 
-以下事实由生产部署 workflow `31500815860` 和当前源码共同证明：
+以下事实由生产部署 workflow `31500815860`、迁移 workflow `31669922373` 和当前源码共同证明：
 
 - 生产提交：`61ac39f5edbc6fc9319b1d65a3b6e33fd2f79cfa`；
 - 主机内容根目录：`/data/business/ragpincheng/content`；
@@ -20,7 +20,9 @@
 - 部署前备份：`/data/backup/databases/ragpincheng/app-only-31500815860-1`；
 - 部署前后 Qdrant 均为 `38,491` points；
 - 既有视频转录准入状态保持不变；
-- 旧 `/data/business/ragpincheng/source/docs` 和 `source/media` 尚未复制、登记或删除。
+- 迁移以提交 `b0454e4e9fb82da181ef0b3af8bed2fabe4298e5` 执行；117 份普通资料已登记为 `legacy` 来源，全部为 `awaiting_review`；
+- `content_item_heads=0`，没有资料被确认、发布或切换到正式受管检索；`CONTENT_HEAD_ENFORCEMENT` 仍为 `compat`；
+- 旧 `/data/business/ragpincheng/source/docs` 和 `source/media` 均未删除或移动，旧媒体仍由既有链路管理。
 
 当前部署备份包含 `app.sqlite`、`parents.sqlite`、Qdrant snapshot 信息、部署前后 Git 状态和回滚镜像信息，不包含完整 `CONTENT_ROOT` 文件副本。内容根目录开始保存正式对象后，必须另有独立文件级备份。
 
@@ -84,6 +86,14 @@ docker compose -p ragpincheng-prod \
 后台导入会按父级逐层识别以下目录名：显示名称、`编号_显示名称`、`编号 显示名称`，以及显式配置的导入别名。无法映射或超过四级的资料进入 `99 待确认资料` 并标记 `needs_mapping=true`，不得因此自动发布。
 
 ## 5. 网页上传流转
+
+管理端导航职责固定为：
+
+- “资料库”：普通资料的唯一网页上传、确认和发布入口；
+- “分类设置”：维护数据库分类的编号、名称、层级、排序和启停；稳定标识由服务端生成并在业务界面隐藏；
+- “索引监控”：分别查看资料库发布任务和兼容期旧目录索引任务，不提供新资料上传。
+
+启用受管资料库时，旧 `/api/admin/upload` 会在写入前返回 `409`。批量确认、退回或发布单次最多 20 份，逐项返回成功或失败；禁止将 117 份历史迁移资料无审查地一次性发布。
 
 ```text
 网页选择分类和文件

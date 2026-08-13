@@ -282,3 +282,133 @@ def test_multipart_upload_reports_supported_and_skipped_files(content_api):
         assert conn.execute("SELECT count(*) FROM content_objects").fetchone()[0] == 1
     finally:
         conn.close()
+
+
+def test_managed_content_page_supports_filters_counts_and_category_paths(content_api):
+    client, sessions, _queued, _db_path = content_api
+    auth = _auth(sessions, "organizer", csrf=True)
+    for name, category in (("company.md", "cat-03"), ("training.md", "cat-05")):
+        uploaded = client.post(
+            "/api/admin/content/uploads",
+            data={"category_id": category},
+            files=[("files", (name, b"# document", "text/markdown"))],
+            **auth,
+        )
+        version_id = uploaded.json()["entries"][0]["version_id"]
+        client.post(f"/api/admin/content/versions/{version_id}/submit", json={}, **auth)
+
+    response = client.get(
+        "/api/admin/content/items-page?query=company&limit=1",
+        **_auth(sessions, "organizer"),
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] == 1
+    assert body["status_counts"] == {"awaiting_review": 1}
+    assert body["items"][0]["category_path"] == "03 公司内部标准"
+
+
+def test_bulk_review_and_publish_report_partial_failures(content_api):
+    client, sessions, queued, _db_path = content_api
+    uploaded = client.post(
+        "/api/admin/content/uploads",
+        data={"category_id": "cat-03"},
+        files=[("files", ("bulk.md", b"# bulk", "text/markdown"))],
+        **_auth(sessions, "organizer", csrf=True),
+    ).json()["entries"][0]
+    version_id = uploaded["version_id"]
+    client.post(
+        f"/api/admin/content/versions/{version_id}/submit",
+        json={},
+        **_auth(sessions, "organizer", csrf=True),
+    )
+
+    review = client.post(
+        "/api/admin/content/bulk-review",
+        json={"version_ids": [version_id, "version-missing"], "approved": True},
+        **_auth(sessions, "reviewer", csrf=True),
+    )
+    assert review.status_code == 200
+    assert (review.json()["succeeded"], review.json()["failed"]) == (1, 1)
+
+    publish = client.post(
+        "/api/admin/content/bulk-publish",
+        json={"version_ids": [version_id, "version-missing"]},
+        **_auth(sessions, "publisher", csrf=True),
+    )
+    assert publish.status_code == 200
+    assert (publish.json()["succeeded"], publish.json()["failed"]) == (1, 1)
+    assert len(queued) == 1
+
+
+def test_bulk_actions_enforce_permissions_csrf_limits_and_unique_ids(content_api):
+    client, sessions, _queued, _db_path = content_api
+    body = {"version_ids": ["version-1"], "approved": True}
+    assert client.post(
+        "/api/admin/content/bulk-review", json=body, **_auth(sessions, "organizer", csrf=True)
+    ).status_code == 403
+    assert client.post(
+        "/api/admin/content/bulk-review", json=body, **_auth(sessions, "reviewer")
+    ).status_code == 403
+    assert client.post(
+        "/api/admin/content/bulk-review",
+        json={"version_ids": ["same", "same"], "approved": True},
+        **_auth(sessions, "reviewer", csrf=True),
+    ).status_code == 400
+    assert client.post(
+        "/api/admin/content/bulk-publish",
+        json={"version_ids": [f"version-{i}" for i in range(21)]},
+        **_auth(sessions, "publisher", csrf=True),
+    ).status_code == 422
+
+
+def test_managed_index_job_listing_exposes_business_labels(content_api):
+    client, sessions, _queued, _db_path = content_api
+    upload = client.post(
+        "/api/admin/content/uploads",
+        data={"category_id": "cat-03"},
+        files=[("files", ("indexed.md", b"# indexed", "text/markdown"))],
+        **_auth(sessions, "organizer", csrf=True),
+    ).json()["entries"][0]
+    version_id = upload["version_id"]
+    client.post(f"/api/admin/content/versions/{version_id}/submit", json={}, **_auth(sessions, "organizer", csrf=True))
+    client.post(f"/api/admin/content/versions/{version_id}/review", json={"approved": True}, **_auth(sessions, "reviewer", csrf=True))
+    client.post(f"/api/admin/content/versions/{version_id}/publish", json={}, **_auth(sessions, "publisher", csrf=True))
+
+    result = client.get("/api/admin/content/index-jobs", **_auth(sessions, "publisher"))
+    assert result.status_code == 200
+    assert result.json()["total"] == 1
+    assert result.json()["jobs"][0]["original_filename"] == "indexed.md"
+    assert result.json()["jobs"][0]["category_label"] == "03 公司内部标准"
+
+
+def test_category_key_is_server_generated_and_used_categories_cannot_be_disabled(content_api):
+    client, sessions, _queued, _db_path = content_api
+    created = client.post(
+        "/api/admin/content/categories",
+        json={"parent_id": None, "display_code": "88", "display_name": "临时分类", "sort_order": 88},
+        **_auth(sessions, "category_manager", csrf=True),
+    )
+    assert created.status_code == 200
+    assert created.json()["category_key"].startswith("category_")
+
+    client.post(
+        "/api/admin/content/uploads",
+        data={"category_id": "cat-03"},
+        files=[("files", ("used.md", b"# used", "text/markdown"))],
+        **_auth(sessions, "organizer", csrf=True),
+    )
+    category = next(
+        item for item in client.get("/api/admin/content/categories?include_inactive=true", **_auth(sessions, "category_manager")).json()
+        if item["id"] == "cat-03"
+    )
+    disabled = client.patch(
+        "/api/admin/content/categories/cat-03",
+        json={
+            "display_code": category["display_code"], "display_name": category["display_name"],
+            "sort_order": category["sort_order"], "is_active": False, "expected_version": category["version"],
+        },
+        **_auth(sessions, "category_manager", csrf=True),
+    )
+    assert disabled.status_code == 409
+    assert "重新归类" in disabled.json()["detail"]
