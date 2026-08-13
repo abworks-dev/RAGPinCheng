@@ -1,6 +1,6 @@
 # 受管知识资料库生产运行与旧资料迁移手册
 
-- 状态：117 份普通资料已迁移发布，待旧索引下线验收
+- 状态：117 条普通资料迁移记录已收口，T11 旧普通资料索引已下线，处于观察期
 - 适用环境：Ubuntu 生产应用节点
 - 当前基线日期：2026-08-13
 - 关联方案：`../plans/managed-content-library.md`
@@ -354,6 +354,8 @@ find /data/business/ragpincheng/content/views/current \
 - 不把 `compat` 改为 `strict`，直到旧资料迁移、正式 head 覆盖和检索回归均通过。
 
 ## 12. T11 旧普通资料索引受控下线
+
+生产执行已于 2026-08-14 完成，workflow run `31741989386`，生产提交 `161ef9d585c6125a56be3a979a910c4269e25d51`。执行保留 116 个正式受管版本，安全排除 1 个生成预览；删除旧 Parent 19,981 条、旧 Qdrant Point 38,387 条，Qdrant points 从 79,682 变为 41,295。独立恢复点为 `/data/backup/databases/ragpincheng/t11-31741989386-1`。SQLite 完整性、Qdrant 最终绿色状态和后端健康检查均通过。
 
 117 份普通资料全部发布后，旧目录索引不会自动覆盖或删除。生产仍保持 `compat`，因此同一资料的旧未版本化索引和新受管版本可能同时参与召回。T11 只清理与当前 117 个正式 `legacy` head 的 `source_rel_path` 精确对应的未版本化 Parent/Point，以及已归档的生成预览；不按 `content_version_id IS NULL` 全库删除，不处理教学/培训视频转录，不修改文件、内容对象、发布记录或正式 head。
 

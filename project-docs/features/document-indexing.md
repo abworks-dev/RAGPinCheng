@@ -38,13 +38,13 @@
 - MinerU 的上传和排队阶段在受管发布任务中折叠为合法的 `parsing` 状态；发布失败通过稳定错误码及结构化的中文原因、可重试性和建议操作暴露给管理页，供应商响应、存储路径和完整异常仅保留在后端日志；索引监控默认每个版本只显示最新尝试，可按需查看完整历史和总尝试次数；
 - 可重建的一至四级编号目录只读视图；视图是副本，不是分类或索引事实来源；
 - 代码和普通环境默认关闭受管资料库；当前 Ubuntu 生产已显式设置 `CONTENT_MANAGEMENT_ENABLED=true`，并保持 `CONTENT_HEAD_ENFORCEMENT=compat`。
-- 当前生产根目录为 `/data/business/ragpincheng/content`（容器内 `/app/content`）；2026-08-14 已将 117 份旧普通资料登记为 `legacy` 来源并全部发布成功，建立正式 `content_item_heads`。生产仍处于 `compat` 观察期，旧未版本化普通资料索引与新受管索引暂时并存；旧 `source/media` 和视频转录继续保留既有链路。
+- 当前生产根目录为 `/data/business/ragpincheng/content`（容器内 `/app/content`）；2026-08-14 已完成 117 条旧普通资料迁移记录的收口，其中 116 份建立正式 `content_item_heads`，1 份生成预览被安全排除。T11 已删除对应旧普通资料索引，生产继续以 `compat` 保留视频转录等未版本化索引；旧 `source/media` 和视频转录继续保留既有链路。
 
 ### 未实现
 
 - 标签和可编辑的资料版本历史；
 - 统一跨 SQLite 与 Qdrant 的索引事务。
-- 117 份已迁移普通资料的观察期验收、旧普通资料索引受控下线和旧目录归档；
+- 117 条已迁移普通资料记录的观察期验收和旧目录归档；
 - 将既有视频转录状态机改写为统一内容版本状态机；视频继续由 `media_assets`、`transcript_versions` 和 `media_transcript_heads` 管理。
 
 旧资料迁移提供离线清点、确定性规划和固定 T9 恢复点的只读 T10 预检：预检会重新核对候选普通资料的大小、SHA-256 和活动分类，但不写数据库或内容根目录。规划器将 `.preview.pdf`、`.preview.xlsx` 标为生成的派生产物，T10 apply 也会拒绝旧计划或手工计划中的同类文件。受控 staging/apply CLI 已实现，apply 会登记为 `legacy` 来源并停在 `awaiting_review`；真实执行仍须独立 R3 批准，不由代码存在或预检通过自动授权。
