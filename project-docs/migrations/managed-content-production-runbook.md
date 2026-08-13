@@ -220,6 +220,21 @@ python scripts/plan_legacy_content_migration.py --inventory "$migrationLab/inven
 
 先在该临时目录中准备只含合成目录名的 `mapping.json`。演练完成后仅删除自行创建的临时实验目录；不要把真实目录、正式 inventory、迁移报告或业务资料提交到 Git。
 
+### 7.3 T10 只读预检与真实批次边界
+
+T9 恢复点生成的规划只能作为 T10 候选输入。生产只读预检使用
+`scripts/preflight_legacy_content_t10.py` 重新核对当前旧文件的大小和 SHA-256，并以只读模式查询
+`app.sqlite` 的活动分类。预检不得创建 `upload_batches`、写对象存储、复制到生产 `inbox`、确认、发布或索引。
+
+受控 workflow `.github/workflows/preflight-managed-content-t10.yml` 固定到已验证的 T9 恢复点和预期候选数量，
+只上传聚合分类、类型、数量、总字节和数据库基线；artifact 不包含真实文件名、相对路径、业务文件 SHA-256
+或正文。预检通过只证明候选源文件仍与 T9 规划一致，不代表资料负责人已确认，也不授权真实 apply。
+
+未来获独立 R3 批准后，先用 `scripts/stage_legacy_content_t10.py` 将同一计划复制到唯一批次并生成完整
+manifest，再使用 `scripts/apply_legacy_content_t10.py` 登记。apply 必须显式匹配 plan SHA-256、预期文件数、
+授权用户 ID 和 `APPLY_T10` 确认词；导入结果停在 `awaiting_review`。同一 plan 标识只能创建一个 legacy
+批次；中途失败的批次标记为 `failed`，不得不经恢复核对直接重跑。
+
 迁移边界：
 
 - 普通 PDF、Markdown 和 Office 资料：按新分类复制到新的 `inbox/server/<batch_id>`，再走 dry-run/apply/确认/发布；
@@ -227,6 +242,7 @@ python scripts/plan_legacy_content_migration.py --inventory "$migrationLab/inven
 - 旧 `source/media`：现阶段继续作为既有视频链路的事实目录，不由 `import_content_batch.py` 导入，不移动到 `CONTENT_ROOT/media`；
 - 未能可靠映射或无法确认业务归属的资料：复制到 `99_待确认资料`，不得自动发布；
 - 离线规划器只生成审查报告，不复制文件，也不调用 `import_content_batch.py`；
+- T10 只读预检只重新核验候选普通资料，不读取正文到日志，不写生产数据库或内容根目录；
 - 观察期内旧 `docs`、`media` 和旧索引保持原状，至少 1 至 2 周后再提交独立清理方案。
 
 ## 8. 只读视图

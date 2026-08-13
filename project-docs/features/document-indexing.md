@@ -41,7 +41,7 @@
 - 旧 `docs/media` 生产迁移、切换和清理；
 - 将既有视频转录状态机改写为统一内容版本状态机；视频继续由 `media_assets`、`transcript_versions` 和 `media_transcript_heads` 管理。
 
-旧资料迁移目前只提供离线清点和确定性规划：规划器要求显式旧目录映射，输出负责人审查用 JSON/CSV，但不复制、导入、登记或发布资料。真实迁移仍属于独立 R3。
+旧资料迁移提供离线清点、确定性规划和固定 T9 恢复点的只读 T10 预检：预检会重新核对候选普通资料的大小、SHA-256 和活动分类，但不写数据库或内容根目录。受控 staging/apply CLI 已实现，apply 会登记为 `legacy` 来源并停在 `awaiting_review`；真实执行仍须独立 R3 批准，不由代码存在或预检通过自动授权。
 
 ## 入口与调用链
 
@@ -88,6 +88,10 @@
 - `scripts/import_content_batch.py`
 - `scripts/inventory_legacy_content.py`
 - `scripts/plan_legacy_content_migration.py`
+- `scripts/legacy_content_migration.py`
+- `scripts/preflight_legacy_content_t10.py`
+- `scripts/stage_legacy_content_t10.py`
+- `scripts/apply_legacy_content_t10.py`
 - `scripts/rebuild_content_view.py`
 - `frontend/src/pages/admin/AdminManagedContentPage.tsx`
 - `frontend/src/pages/admin/AdminCategoriesPage.tsx`
@@ -122,6 +126,7 @@
 - 真实业务资料送往外部 MinerU 前必须确认授权；
 - Reset、资料删除和运行中存储操作必须按专项规则确认。
 - 服务器 apply 导入只允许位于 `CONTENT_ROOT/inbox/server` 下的批次；dry-run 不写数据库或对象存储；
+- T10 旧资料预检使用 SQLite `mode=ro` 并只生成脱敏聚合摘要；真实 apply 必须匹配已批准 plan 指纹、候选数、执行身份和确认词；
 - 受管对象路径拒绝越界和符号链接；网页变更必须同时通过 Cookie 鉴权、资料权限和 CSRF；
 - 资料权限和权限组模板仅允许全局管理员维护；`manage_categories` 不能授予自身或他人的确认、发布权限；
 - 新能力在代码和普通环境中默认关闭；生产已经显式启用基础能力。真实资料迁移、启用严格 head、移动旧目录或清理旧索引仍属于独立 R3。
