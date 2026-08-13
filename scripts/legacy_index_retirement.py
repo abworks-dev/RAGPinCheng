@@ -65,8 +65,22 @@ def _managed_sources(
     conn: sqlite3.Connection,
     *,
     expected_head_count: int,
-    expected_archived_preview_count: int,
+    expected_excluded_preview_count: int,
 ) -> tuple[list[sqlite3.Row], list[str]]:
+    latest_legacy_count = int(
+        conn.execute(
+            """SELECT count(*) FROM content_versions v
+                WHERE v.source_origin='legacy'
+                  AND v.version_number=(
+                        SELECT max(v2.version_number) FROM content_versions v2 WHERE v2.item_id=v.item_id
+                  )"""
+        ).fetchone()[0]
+    )
+    expected_total = expected_head_count + expected_excluded_preview_count
+    if latest_legacy_count != expected_total:
+        raise LegacyIndexRetirementError(
+            f"legacy_record_count_mismatch:{latest_legacy_count}:{expected_total}"
+        )
     rows = conn.execute(
         """SELECT i.id AS item_id,h.current_version_id AS version_id,v.source_rel_path
              FROM content_items i
@@ -91,12 +105,18 @@ def _managed_sources(
         raise LegacyIndexRetirementError("managed_source_path_missing")
 
     preview_rows = conn.execute(
-        """SELECT v.source_rel_path,v.original_filename
+        """SELECT v.source_rel_path,v.original_filename,v.lifecycle_status
              FROM content_items i
              JOIN content_versions v ON v.item_id=i.id
-            WHERE i.archived_at IS NOT NULL
-              AND v.source_origin='legacy'
+              AND v.version_number=(
+                    SELECT max(v2.version_number) FROM content_versions v2 WHERE v2.item_id=i.id
+              )
+            WHERE v.source_origin='legacy'
               AND NOT EXISTS (SELECT 1 FROM content_item_heads h WHERE h.item_id=i.id)
+              AND NOT EXISTS (
+                    SELECT 1 FROM content_publications p
+                    WHERE p.version_id=v.id AND p.status IN ('pending','indexing','published')
+              )
               AND NOT EXISTS (
                     SELECT 1 FROM content_index_jobs j
                     WHERE j.version_id=v.id
@@ -107,12 +127,15 @@ def _managed_sources(
     preview_paths = [
         str(row["source_rel_path"])
         for row in preview_rows
-        if row["source_rel_path"] and _is_generated_preview(str(row["original_filename"]))
+        if row["source_rel_path"]
+        and _is_generated_preview(str(row["original_filename"]))
+        and row["lifecycle_status"]
+        in {"draft", "awaiting_review", "rejected", "approved", "publication_failed"}
     ]
-    if len(preview_paths) != expected_archived_preview_count:
+    if len(preview_paths) != expected_excluded_preview_count:
         raise LegacyIndexRetirementError(
-            "archived_preview_count_mismatch:"
-            f"{len(preview_paths)}:{expected_archived_preview_count}"
+            "excluded_preview_count_mismatch:"
+            f"{len(preview_paths)}:{expected_excluded_preview_count}"
         )
     return rows, preview_paths
 
@@ -147,9 +170,9 @@ def build_plan(
     collection: str,
     legacy_docs_root: str,
     expected_head_count: int,
-    expected_archived_preview_count: int,
+    expected_excluded_preview_count: int,
 ) -> dict[str, Any]:
-    if expected_head_count <= 0 or expected_archived_preview_count < 0:
+    if expected_head_count <= 0 or expected_excluded_preview_count < 0:
         raise LegacyIndexRetirementError("invalid_expected_record_counts")
     root = PurePosixPath(legacy_docs_root)
     if not root.is_absolute():
@@ -161,7 +184,7 @@ def build_plan(
     managed_rows, preview_rel_paths = _managed_sources(
         app_conn,
         expected_head_count=expected_head_count,
-        expected_archived_preview_count=expected_archived_preview_count,
+        expected_excluded_preview_count=expected_excluded_preview_count,
     )
     managed_version_ids = sorted(str(row["version_id"]) for row in managed_rows)
     source_paths = {
@@ -224,7 +247,7 @@ def build_plan(
         "collection": collection,
         "legacy_docs_root": legacy_docs_root,
         "expected_head_count": expected_head_count,
-        "expected_archived_preview_count": expected_archived_preview_count,
+        "expected_excluded_preview_count": expected_excluded_preview_count,
         "active_jobs": active_jobs,
         "managed": {
             "version_ids": managed_version_ids,
