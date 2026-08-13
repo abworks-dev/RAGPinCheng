@@ -398,13 +398,13 @@ export function Message({
                       </button>
                     </div>
                   )}
-                  <div className="flex items-center">
+                  <div className="flex items-center gap-1">
                     <button
                       type="button"
                       aria-label={copied ? "提问已复制" : "复制提问"}
                       title={copied ? "提问已复制" : "复制提问"}
                       onClick={copyContent}
-                      className={`inline-flex size-8 items-center justify-center rounded-ui-md hover:bg-secondary ${copied ? "text-success hover:text-success" : "text-muted-foreground hover:text-foreground"}`}
+                      className={`inline-flex size-9 items-center justify-center rounded-ui-md hover:bg-secondary ${copied ? "text-success hover:text-success" : "text-muted-foreground hover:text-foreground"}`}
                     >
                       {copied ? <Check className="size-4 text-success" /> : <Copy className="size-4" />}
                     </button>
@@ -417,7 +417,7 @@ export function Message({
                           setDraft(msg.content);
                           setEditing(true);
                         }}
-                        className="inline-flex size-8 items-center justify-center rounded-ui-md text-muted-foreground hover:bg-secondary hover:text-foreground"
+                        className="inline-flex size-9 items-center justify-center rounded-ui-md text-muted-foreground hover:bg-secondary hover:text-foreground"
                       >
                         <Pencil className="size-4" />
                       </button>
