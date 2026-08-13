@@ -133,6 +133,7 @@ def test_document_listing_merges_latest_job_and_hides_raw_failure(monkeypatch):
                 company=None,
                 parent_count=4,
                 preview_parent_id="parent-guide-1",
+                media_id=None,
             )
         ],
     )
@@ -157,6 +158,7 @@ def test_document_listing_merges_latest_job_and_hides_raw_failure(monkeypatch):
     assert "source_path" not in failed.model_dump()
     assert failed.display_path == "公司标准 / guide.pdf"
     assert failed.preview_parent_id == "parent-guide-1"
+    assert failed.media_id is None
     assert failed.error_summary == "资料处理失败，可重试或在索引活动中查看详情。"
     assert "Traceback" not in failed.error_summary
 
@@ -164,6 +166,7 @@ def test_document_listing_merges_latest_job_and_hides_raw_failure(monkeypatch):
     assert pending.is_indexed is False
     assert pending.status == "parsing"
     assert pending.preview_parent_id is None
+    assert pending.media_id is None
     conn.close()
 
 
@@ -193,6 +196,7 @@ def test_document_listing_supports_server_side_status_filter(monkeypatch):
                 company=None,
                 parent_count=1,
                 preview_parent_id="parent-ready-1",
+                media_id=None,
             )
         ],
     )
@@ -296,14 +300,14 @@ def test_indexed_document_preview_parent_is_deterministic(monkeypatch):
     conn.execute(
         """CREATE TABLE parents (
             parent_id TEXT PRIMARY KEY, source_path TEXT, doc_title TEXT,
-            category TEXT, doc_type TEXT, company TEXT
+            category TEXT, doc_type TEXT, company TEXT, media_id TEXT
         )"""
     )
     conn.executemany(
-        "INSERT INTO parents VALUES (?,?,?,?,?,?)",
+        "INSERT INTO parents VALUES (?,?,?,?,?,?,?)",
         [
-            ("parent-z", "docs/guide.pdf", "指南", "公司标准", "pdf", None),
-            ("parent-a", "docs/guide.pdf", "指南", "公司标准", "pdf", None),
+            ("parent-z", "docs/guide.pdf", "指南", "公司标准", "pdf", None, None),
+            ("parent-a", "docs/guide.pdf", "指南", "公司标准", "pdf", None, None),
         ],
     )
     monkeypatch.setattr(indexing_pipeline, "_init_parents_db", lambda reset=False: conn)
@@ -313,3 +317,29 @@ def test_indexed_document_preview_parent_is_deterministic(monkeypatch):
     assert len(documents) == 1
     assert documents[0].parent_count == 2
     assert documents[0].preview_parent_id == "parent-a"
+    assert documents[0].media_id is None
+
+
+def test_indexed_transcript_exposes_only_one_unambiguous_media_id(monkeypatch):
+    conn = sqlite3.connect(":memory:")
+    conn.execute(
+        """CREATE TABLE parents (
+            parent_id TEXT PRIMARY KEY, source_path TEXT, doc_title TEXT,
+            category TEXT, doc_type TEXT, company TEXT, media_id TEXT
+        )"""
+    )
+    conn.executemany(
+        "INSERT INTO parents VALUES (?,?,?,?,?,?,?)",
+        [
+            ("parent-1", "docs/video.md", "培训视频", "教学视频", "transcript", None, "media-1"),
+            ("parent-2", "docs/video.md", "培训视频", "教学视频", "transcript", None, "media-1"),
+            ("parent-3", "docs/ambiguous.md", "混杂视频", "教学视频", "transcript", None, "media-1"),
+            ("parent-4", "docs/ambiguous.md", "混杂视频", "教学视频", "transcript", None, "media-2"),
+        ],
+    )
+    monkeypatch.setattr(indexing_pipeline, "_init_parents_db", lambda reset=False: conn)
+
+    documents = {document.source_path: document for document in indexing_pipeline.list_indexed_documents()}
+
+    assert documents["docs/video.md"].media_id == "media-1"
+    assert documents["docs/ambiguous.md"].media_id is None
