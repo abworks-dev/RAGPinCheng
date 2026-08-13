@@ -197,6 +197,7 @@ class IndexedDocumentDTO(BaseModel):
     company: str | None
     parent_count: int
     preview_parent_id: str | None = None
+    media_id: str | None = None
     child_count: int | None = None
     file_size: int | None = None
     status: str

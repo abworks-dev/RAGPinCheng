@@ -457,6 +457,7 @@ class IndexedDocument:
     company: str | None
     parent_count: int
     preview_parent_id: str | None
+    media_id: str | None
 
 
 def list_indexed_documents() -> list[IndexedDocument]:
@@ -466,7 +467,8 @@ def list_indexed_documents() -> list[IndexedDocument]:
         rows = conn.execute(
             """
             SELECT source_path, doc_title, category, doc_type, company,
-                   COUNT(*) AS n, MIN(parent_id) AS preview_parent_id
+                   COUNT(*) AS n, MIN(parent_id) AS preview_parent_id,
+                   CASE WHEN COUNT(DISTINCT media_id) = 1 THEN MIN(media_id) END AS media_id
             FROM parents
             GROUP BY source_path, doc_title, category, doc_type, company
             ORDER BY category, doc_title
@@ -483,6 +485,7 @@ def list_indexed_documents() -> list[IndexedDocument]:
             company=r[4],
             parent_count=int(r[5]),
             preview_parent_id=r[6],
+            media_id=r[7],
         )
         for r in rows
     ]

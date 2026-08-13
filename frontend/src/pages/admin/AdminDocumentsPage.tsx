@@ -8,6 +8,7 @@ import {
   Search,
   Trash2,
   Upload,
+  Video,
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -46,6 +47,7 @@ import { cn } from "../../lib/utils";
 import { formatAdminDate, formatBytes } from "./admin-formatters";
 import { PdfPreview } from "../../components/PdfPreview";
 import { PdfPreviewProvider, usePdfPreview } from "../../hooks/usePdfPreview";
+import { useVideoPlayer } from "../../hooks/useVideoPlayer";
 
 const NEW_CATEGORY_SENTINEL = "__new__";
 const PAGE_SIZE = 25;
@@ -101,7 +103,7 @@ function useElapsed(startTs: number | null | undefined): string {
 }
 
 function documentTypeLabel(document: Pick<IndexedDocument, "doc_type" | "filename">): string {
-  if (document.doc_type === "transcript") return "教学视频转写";
+  if (document.doc_type === "transcript") return "视频转写";
   if (document.doc_type === "docx") return "Word";
   if (document.doc_type === "xlsx") return "Excel";
   if (document.doc_type === "pptx") return "PPT";
@@ -407,6 +409,7 @@ function DocumentsTable({
   const menuRef = useRef<HTMLDivElement | null>(null);
   const triggerRefs = useRef(new Map<string, HTMLButtonElement>());
   const { open: openPreview } = usePdfPreview();
+  const { open: openVideo } = useVideoPlayer();
 
   const openDocument = openMenuId
     ? documents.find((document) => document.document_id === openMenuId) ?? null
@@ -614,6 +617,25 @@ function DocumentsTable({
             >
               <Eye className="size-4" />
               预览文件
+            </button>
+          )}
+          {openDocument.doc_type === "transcript" && openDocument.media_id && (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                closeMenu(true);
+                openVideo({
+                  mediaId: openDocument.media_id!,
+                  title: openDocument.doc_title,
+                  startSeconds: 0,
+                  fromSource: false,
+                });
+              }}
+              className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-secondary"
+            >
+              <Video className="size-4" />
+              预览视频
             </button>
           )}
           {openDocument.latest_job_id != null && (openDocument.status === "failed" || openDocument.status === "done") && (

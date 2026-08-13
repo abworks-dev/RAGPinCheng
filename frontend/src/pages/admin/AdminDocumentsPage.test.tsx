@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   adminRetryIndexJob: vi.fn(),
   adminDeleteIndexJob: vi.fn(),
   openPreview: vi.fn(),
+  openVideo: vi.fn(),
 }));
 
 vi.mock("../../api/client", () => ({ api: mocks }));
@@ -18,6 +19,9 @@ vi.mock("../../components/PdfPreview", () => ({ PdfPreview: () => null }));
 vi.mock("../../hooks/usePdfPreview", () => ({
   PdfPreviewProvider: ({ children }: { children: React.ReactNode }) => children,
   usePdfPreview: () => ({ open: mocks.openPreview }),
+}));
+vi.mock("../../hooks/useVideoPlayer", () => ({
+  useVideoPlayer: () => ({ open: mocks.openVideo }),
 }));
 
 const categoryTree = {
@@ -38,6 +42,7 @@ const readyDocument = {
   company: null,
   parent_count: 12,
   preview_parent_id: "parent-ready-1",
+  media_id: null,
   child_count: 36,
   file_size: 2048,
   status: "done",
@@ -60,6 +65,7 @@ const failedDocument = {
   company: "甲方",
   parent_count: 0,
   preview_parent_id: null,
+  media_id: null,
   child_count: null,
   status: "failed",
   is_indexed: false,
@@ -252,6 +258,54 @@ describe("AdminDocumentsPage", () => {
 
     expect(mocks.openPreview).toHaveBeenCalledWith("parent-ready-1", "企业交付标准", "pdf", 1);
     expect(screen.getByLabelText("打开 企业交付标准 的操作菜单")).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("labels and opens a video transcript with the shared video and transcript drawer", async () => {
+    const transcriptDocument = {
+      ...readyDocument,
+      document_id: "document-transcript",
+      filename: "training.md",
+      doc_title: "培训视频",
+      category: "教学视频",
+      doc_type: "transcript",
+      preview_parent_id: "parent-transcript-1",
+      media_id: "media-1",
+    };
+    mocks.adminListIndexedDocuments.mockResolvedValueOnce({
+      documents: [transcriptDocument],
+      total: 1,
+      status_counts: { ready: 1 },
+    });
+    render(<AdminDocumentsPage />);
+    await screen.findByText("培训视频");
+
+    const transcriptRow = screen.getByText("培训视频").closest("tr");
+    expect(within(transcriptRow as HTMLElement).getByText("视频转写")).toBeInTheDocument();
+    expect(screen.queryByText("教学视频转写")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("打开 培训视频 的操作菜单"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "预览视频" }));
+
+    expect(mocks.openVideo).toHaveBeenCalledWith({
+      mediaId: "media-1",
+      title: "培训视频",
+      startSeconds: 0,
+      fromSource: false,
+    });
+    expect(mocks.openPreview).not.toHaveBeenCalled();
+  });
+
+  it("does not offer a broken video preview without a media association", async () => {
+    mocks.adminListIndexedDocuments.mockResolvedValueOnce({
+      documents: [{ ...readyDocument, document_id: "legacy-transcript", doc_type: "transcript", media_id: null }],
+      total: 1,
+      status_counts: { ready: 1 },
+    });
+    render(<AdminDocumentsPage />);
+    await screen.findByText("企业交付标准");
+    fireEvent.click(screen.getByLabelText("打开 企业交付标准 的操作菜单"));
+
+    expect(screen.queryByRole("menuitem", { name: "预览视频" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "预览文件" })).not.toBeInTheDocument();
   });
 
   it("requires an explicit destructive choice before deleting the source file", async () => {
