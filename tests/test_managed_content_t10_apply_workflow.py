@@ -43,6 +43,15 @@ def test_t10_apply_creates_recovery_points_before_staging_and_apply():
     assert '"${DATA_DEVICE}" != "${BACKUP_DEVICE}"' in WORKFLOW
 
 
+def test_t10_apply_initializes_staging_directories_after_backup():
+    content_backup_verification = WORKFLOW.index('[ ! -s "${RUN_ROOT}/content-verification.txt" ]')
+    directory_initialization = WORKFLOW.index('install -d -m 0750')
+    plan_copy = WORKFLOW.index('cp --preserve=mode,timestamps "${PLAN_PATH}" "${PLAN_STAGED}"')
+    assert content_backup_verification < directory_initialization < plan_copy
+    assert '"${CONTENT_ROOT}/inbox/server"' in WORKFLOW
+    assert '"${CONTENT_ROOT}/manifests"' in WORKFLOW
+
+
 def test_t10_apply_stops_at_review_and_preserves_legacy_sources():
     assert "lifecycle_status='awaiting_review'" in WORKFLOW
     assert "SELECT count(*) FROM content_item_heads" in WORKFLOW

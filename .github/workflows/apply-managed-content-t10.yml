@@ -190,6 +190,10 @@ jobs:
             "${CONTENT_ROOT}/" "${RUN_ROOT}/content/" > "${RUN_ROOT}/content-verification.txt"
           [ ! -s "${RUN_ROOT}/content-verification.txt" ]
 
+          install -d -m 0750 \
+            "${CONTENT_ROOT}/inbox" \
+            "${CONTENT_ROOT}/inbox/server" \
+            "${CONTENT_ROOT}/manifests"
           cp --preserve=mode,timestamps "${PLAN_PATH}" "${PLAN_STAGED}"
           python3 "${REPO_PATH}/scripts/stage_legacy_content_t10.py" \
             --docs-root "${DOCS_ROOT}" \
