@@ -8,7 +8,9 @@ import requests
 
 from src.config import CONTENT_ROOT
 from src.ingest import PublicationParseError
+from src.index import EmbeddingInputTooLong
 from src.indexing_pipeline import ManagedIndexMetadata, index_managed_content
+from src.providers import GpuServiceInputTooLong
 
 from .content_storage import ContentStorage
 from .content_store import audit_event
@@ -35,6 +37,16 @@ _FAILURE_DETAILS = {
     "parser_unavailable": ("文档解析服务不可用。", True, "请恢复解析服务后重试。"),
     "parser_request_failed": ("文档解析服务请求失败。", True, "请稍后重试；持续失败时联系系统管理员。"),
     "parser_result_invalid": ("文档解析结果无效。", False, "请确认文件内容完整，必要时重新导出后上传。"),
+    "embedding_input_too_long": (
+        "文档中存在超过向量化限制的内容块。",
+        True,
+        "请在系统更新后重试，无需重新上传文件。",
+    ),
+    "embedding_formula_too_long": (
+        "文档中存在超过向量化限制的公式。",
+        False,
+        "请拆分超长公式后重新上传，或联系系统管理员处理。",
+    ),
     "index_provider_failed": ("向量索引服务写入失败。", True, "请恢复索引服务后重试。"),
     "index_storage_failed": ("索引存储写入失败。", True, "请联系系统管理员检查索引存储后重试。"),
     "backend_restarted": ("后端重启时发布任务正在运行，任务已中止。", True, "请重新发布该资料。"),
@@ -148,6 +160,10 @@ def run_content_publication(index_job_id: str) -> None:
 
 def _classify_failure(exc: Exception, stage: str) -> str:
     message = str(exc)
+    if isinstance(exc, EmbeddingInputTooLong) and exc.content_type == "formula":
+        return "embedding_formula_too_long"
+    if isinstance(exc, (EmbeddingInputTooLong, GpuServiceInputTooLong)):
+        return "embedding_input_too_long"
     if isinstance(exc, PublicationParseError):
         return normalize_failure_code(exc.code) or "unknown_publication_failure"
     if message == "managed_source_unavailable" or isinstance(exc, FileNotFoundError):

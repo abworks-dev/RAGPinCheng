@@ -34,7 +34,13 @@ from .config import (
     PARSED_DIR,
     SECOND_LEVEL_CATEGORIES,
 )
-from .index import _client, _init_parents_db, index_children, store_parents
+from .index import (
+    _client,
+    _init_parents_db,
+    index_children,
+    store_parents,
+    validate_embedding_inputs,
+)
 from .table_summary import summarize_table_children
 from .ingest import (
     ParsedDoc,
@@ -401,6 +407,7 @@ def index_single(
         summarize_table_children(children)
 
     on_status("embedding")
+    validate_embedding_inputs(children)
     store_parents(parents)
     index_children(children)
 
@@ -424,6 +431,7 @@ def index_transcript_candidate(
     on_status("chunking")
     parents, children = chunk_document(doc)
     on_status("embedding")
+    validate_embedding_inputs(children)
     store_parents(parents)
     index_children(children)
     return IndexResult(parents=len(parents), children=len(children))
@@ -477,6 +485,7 @@ def index_managed_content(
         on_status("summarizing")
         summarize_table_children(children)
     on_status("embedding")
+    validate_embedding_inputs(children)
     store_parents(parents)
     index_children(children)
     return IndexResult(parents=len(parents), children=len(children))

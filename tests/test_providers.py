@@ -26,6 +26,7 @@ from src.providers import (
     GpuServiceUnavailable,
     GpuServiceAuthError,
     GpuServiceContractError,
+    GpuServiceInputTooLong,
     get_embed_provider,
     get_rerank_provider,
     reset_providers,
@@ -246,6 +247,19 @@ class TestRemoteEmbedProviderErrors:
         provider = RemoteEmbedProvider()
         with pytest.raises(GpuServiceUnavailable):
             provider.encode(["hello"])
+
+    def test_embed_text_too_long_has_specific_error(self, mock_client):
+        mock_client.get.return_value = _mock_response(200, MODEL_INFO_OK)
+        response = _mock_response(
+            422,
+            {"detail": "Text at index 1 exceeds 8192 characters"},
+        )
+        response.text = '{"detail":"Text at index 1 exceeds 8192 characters"}'
+        mock_client.post.return_value = response
+        provider = RemoteEmbedProvider()
+
+        with pytest.raises(GpuServiceInputTooLong):
+            provider.encode(["oversized"])
 
 
 class TestRemoteRerankProvider:

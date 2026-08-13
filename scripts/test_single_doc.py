@@ -24,7 +24,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src.chunk import chunk_document
 from src.config import DOCS_DIR, PARSED_DIR
 from src.generate import generate
-from src.index import index_children, reset_index, store_parents
+from src.index import (
+    index_children,
+    reset_index,
+    store_parents,
+    validate_embedding_inputs,
+)
 from src.ingest import ParsedDoc, _cloud_parse, _local_parse, _safe_stem
 from src.config import MINERU_API_KEY
 from src.retrieve import retrieve
@@ -77,6 +82,7 @@ def build_index_for(pdf: Path) -> ParsedDoc:
     print("\n[2/4] Chunk ...")
     parents, children = chunk_document(doc)
     print(f"      {len(parents)} parents / {len(children)} children")
+    validate_embedding_inputs(children)
 
     print("\n[3/4] Store parents (SQLite) — wiping existing rows ...")
     reset_index()
