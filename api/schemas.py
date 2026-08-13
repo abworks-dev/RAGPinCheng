@@ -272,6 +272,13 @@ class ManagedUploadResponse(BaseModel):
     entries: list[ManagedUploadEntryDTO]
 
 
+class PublicationFailureDTO(BaseModel):
+    code: str
+    message: str
+    retryable: bool
+    recommended_action: str
+
+
 class ManagedContentItemDTO(BaseModel):
     item_id: str
     title: str
@@ -290,6 +297,9 @@ class ManagedContentItemDTO(BaseModel):
     source_origin: str
     source_batch_id: str | None
     is_current: bool
+    latest_publication_status: str | None = None
+    publication_attempt_count: int = 0
+    publication_failure: PublicationFailureDTO | None = None
     created_at: int
     updated_at: int
 
@@ -340,6 +350,8 @@ class ManagedIndexJobDTO(BaseModel):
     status: str
     error_code: str | None
     error_summary: str | None
+    failure: PublicationFailureDTO | None = None
+    attempt_count: int = 1
     created_at: int
     started_at: int | None
     finished_at: int | None

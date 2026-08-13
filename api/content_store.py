@@ -296,13 +296,20 @@ def list_content_items(
                    paths.full_path AS category_path,
                    v.id AS version_id,v.version_number,v.original_filename,v.doc_type,
                    v.lifecycle_status,v.object_sha256,v.source_origin,v.source_batch_id,
-                   h.current_version_id
+                   h.current_version_id,j.status AS latest_publication_status,
+                   j.error_code AS latest_publication_error_code,
+                   (SELECT count(*) FROM content_index_jobs jc WHERE jc.version_id=v.id)
+                     AS publication_attempt_count
             FROM content_items i
             JOIN category_nodes c ON c.id=i.category_id
             JOIN paths ON paths.id=i.category_id
             JOIN content_versions v ON v.item_id=i.id
              AND v.version_number=(SELECT max(v2.version_number) FROM content_versions v2 WHERE v2.item_id=i.id)
             LEFT JOIN content_item_heads h ON h.item_id=i.id
+            LEFT JOIN content_index_jobs j ON j.id=(
+                SELECT j2.id FROM content_index_jobs j2 WHERE j2.version_id=v.id
+                ORDER BY j2.attempt_number DESC,j2.created_at DESC,j2.id DESC LIMIT 1
+            )
             WHERE {where}
             ORDER BY i.updated_at DESC,i.id""",
         params,
@@ -352,13 +359,21 @@ def list_content_items_page(
                 JOIN category_nodes c ON c.id=i.category_id
                 JOIN paths ON paths.id=i.category_id
                 JOIN latest v ON v.item_id=i.id
-                LEFT JOIN content_item_heads h ON h.item_id=i.id"""
+                LEFT JOIN content_item_heads h ON h.item_id=i.id
+                LEFT JOIN content_index_jobs j ON j.id=(
+                    SELECT j2.id FROM content_index_jobs j2 WHERE j2.version_id=v.id
+                    ORDER BY j2.attempt_number DESC,j2.created_at DESC,j2.id DESC LIMIT 1
+                )"""
     rows = conn.execute(
         cte + """ SELECT i.id AS item_id,i.title,i.content_kind,i.category_id,i.media_id,
                           i.created_at,i.updated_at,c.category_key,c.display_code,c.display_name,
                           paths.full_path AS category_path,v.id AS version_id,v.version_number,
                           v.original_filename,v.doc_type,v.lifecycle_status,v.object_sha256,
-                          v.source_origin,v.source_batch_id,h.current_version_id""" + joins +
+                          v.source_origin,v.source_batch_id,h.current_version_id,
+                          j.status AS latest_publication_status,
+                          j.error_code AS latest_publication_error_code,
+                          (SELECT count(*) FROM content_index_jobs jc WHERE jc.version_id=v.id)
+                            AS publication_attempt_count""" + joins +
         f" WHERE {status_where} ORDER BY i.updated_at DESC,i.id LIMIT ? OFFSET ?",
         [*status_params, limit, offset],
     ).fetchall()

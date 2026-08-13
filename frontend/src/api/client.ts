@@ -411,9 +411,10 @@ export const api = {
     }),
   managedContentFileUrl: (versionId: string, download = false) =>
     `/api/admin/content/versions/${encodeURIComponent(versionId)}/file${download ? "?download=true" : ""}`,
-  managedContentIndexJobs: (params?: { status?: string; limit?: number; offset?: number }) => {
+  managedContentIndexJobs: (params?: { status?: string; history?: boolean; limit?: number; offset?: number }) => {
     const search = new URLSearchParams();
     if (params?.status) search.set("status", params.status);
+    if (params?.history) search.set("history", "true");
     if (params?.limit != null) search.set("limit", String(params.limit));
     if (params?.offset != null) search.set("offset", String(params.offset));
     return jsonFetch<ManagedIndexJobList>(`/api/admin/content/index-jobs?${search}`);

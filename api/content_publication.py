@@ -7,6 +7,7 @@ import time
 import requests
 
 from src.config import CONTENT_ROOT
+from src.ingest import PublicationParseError
 from src.indexing_pipeline import ManagedIndexMetadata, index_managed_content
 
 from .content_storage import ContentStorage
@@ -25,17 +26,21 @@ _MANAGED_STATUS_MAP = {
     "summarizing": "summarizing",
     "embedding": "embedding",
 }
-_FAILURE_SUMMARIES = {
-    "managed_source_unavailable": "资料源文件不可用，请检查内容存储后重试。",
-    "managed_parse_path_invalid": "资料解析目录不可用，请联系系统管理员检查存储配置。",
-    "parser_unavailable": "文档解析服务不可用，请恢复解析服务后重试。",
-    "parser_request_failed": "文档解析服务请求失败，请稍后重试。",
-    "parser_result_invalid": "文档解析结果无效，请检查文件后重试。",
-    "index_provider_failed": "向量索引服务写入失败，请恢复索引服务后重试。",
-    "index_storage_failed": "索引存储写入失败，请联系系统管理员检查存储。",
-    "backend_restarted": "后端重启时发布任务正在运行，已中止，请重试。",
-    "unknown_publication_failure": "资料发布索引失败，请在资料管理中重试。",
+_FAILURE_DETAILS = {
+    "managed_source_unavailable": ("资料源文件不可用。", False, "请联系系统管理员检查内容存储。"),
+    "managed_parse_path_invalid": ("资料解析目录不可用。", True, "请联系系统管理员检查解析目录权限后重试。"),
+    "pdf_password_required": ("PDF 需要密码才能解析。", False, "请上传已解除密码保护的 PDF。"),
+    "pdf_crypto_unavailable": ("当前服务缺少 PDF 解密组件。", False, "请联系系统管理员更新解析服务后再发布。"),
+    "parser_request_invalid": ("文档解析请求不符合解析服务要求。", False, "请检查文件是否可正常打开，必要时重新导出后上传。"),
+    "parser_unavailable": ("文档解析服务不可用。", True, "请恢复解析服务后重试。"),
+    "parser_request_failed": ("文档解析服务请求失败。", True, "请稍后重试；持续失败时联系系统管理员。"),
+    "parser_result_invalid": ("文档解析结果无效。", False, "请确认文件内容完整，必要时重新导出后上传。"),
+    "index_provider_failed": ("向量索引服务写入失败。", True, "请恢复索引服务后重试。"),
+    "index_storage_failed": ("索引存储写入失败。", True, "请联系系统管理员检查索引存储后重试。"),
+    "backend_restarted": ("后端重启时发布任务正在运行，任务已中止。", True, "请重新发布该资料。"),
+    "unknown_publication_failure": ("资料发布索引失败。", True, "请重试；持续失败时联系系统管理员。"),
 }
+_FAILURE_SUMMARIES = {code: detail[0] for code, detail in _FAILURE_DETAILS.items()}
 
 
 def normalize_failure_code(error_code: object) -> str | None:
@@ -43,6 +48,14 @@ def normalize_failure_code(error_code: object) -> str | None:
         return None
     code = str(error_code)
     return code if code in _FAILURE_SUMMARIES else "unknown_publication_failure"
+
+
+def failure_detail(error_code: object) -> dict[str, object] | None:
+    code = normalize_failure_code(error_code)
+    if code is None:
+        return None
+    message, retryable, recommended_action = _FAILURE_DETAILS[code]
+    return {"code": code, "message": message, "retryable": retryable, "recommended_action": recommended_action}
 
 
 def _update_job(index_job_id: str, status: str, **fields: object) -> None:
@@ -135,9 +148,11 @@ def run_content_publication(index_job_id: str) -> None:
 
 def _classify_failure(exc: Exception, stage: str) -> str:
     message = str(exc)
+    if isinstance(exc, PublicationParseError):
+        return normalize_failure_code(exc.code) or "unknown_publication_failure"
     if message == "managed_source_unavailable" or isinstance(exc, FileNotFoundError):
         return "managed_source_unavailable"
-    if message in {"managed_parse_path_invalid", "parser_result_invalid"}:
+    if message in {"managed_parse_path_invalid", "pdf_password_required", "pdf_crypto_unavailable", "parser_request_invalid", "parser_result_invalid"}:
         return message
     if message.startswith("mineru CLI not found"):
         return "parser_unavailable"

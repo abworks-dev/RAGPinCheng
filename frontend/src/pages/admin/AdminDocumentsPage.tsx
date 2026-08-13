@@ -147,6 +147,7 @@ function AdminDocumentsPageContent() {
   const [jobsLoading, setJobsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [managedJobs, setManagedJobs] = useState<ManagedIndexJob[]>([]);
+  const [managedHistory, setManagedHistory] = useState(false);
   const [searchInput, setSearchInput] = useState("");
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("");
@@ -193,7 +194,7 @@ function AdminDocumentsPageContent() {
         api.adminCategoryTree(),
         api.adminListIndexedDocuments(documentParams),
         api.adminListIndexJobs(100),
-        api.managedContentIndexJobs({ limit: 100 }),
+        api.managedContentIndexJobs({ limit: 100, history: managedHistory }),
       ]);
       setTree(categoryTree);
       setListing(indexedDocuments);
@@ -205,7 +206,7 @@ function AdminDocumentsPageContent() {
       setLoading(false);
       setJobsLoading(false);
     }
-  }, [documentParams]);
+  }, [documentParams, managedHistory]);
 
   useEffect(() => {
     void refreshAll();
@@ -216,7 +217,7 @@ function AdminDocumentsPageContent() {
     if (!hasActive) return;
     const timer = window.setInterval(async () => {
       try {
-        const [legacy, managed] = await Promise.all([api.adminListIndexJobs(100), api.managedContentIndexJobs({ limit: 100 })]);
+        const [legacy, managed] = await Promise.all([api.adminListIndexJobs(100), api.managedContentIndexJobs({ limit: 100, history: managedHistory })]);
         setJobs(legacy.jobs);
         setManagedJobs(managed.jobs);
         await refreshDocuments();
@@ -225,7 +226,7 @@ function AdminDocumentsPageContent() {
       }
     }, 3000);
     return () => window.clearInterval(timer);
-  }, [hasActive, refreshDocuments]);
+  }, [hasActive, managedHistory, refreshDocuments]);
 
   const pageCount = Math.max(1, Math.ceil(listing.total / PAGE_SIZE));
   const categoryNames = tree?.categories.map((item) => item.name) || [];
@@ -350,17 +351,17 @@ function AdminDocumentsPageContent() {
         )}
       </section>
 
-      <ManagedJobsActivity jobs={managedJobs} loading={jobsLoading} />
+      <ManagedJobsActivity jobs={managedJobs} loading={jobsLoading} history={managedHistory} onHistoryChange={setManagedHistory} />
       <JobsActivity jobs={jobs} loading={jobsLoading} onChanged={refreshAll} />
     </section>
   );
 }
 
-function ManagedJobsActivity({ jobs, loading }: { jobs: ManagedIndexJob[]; loading: boolean }) {
+function ManagedJobsActivity({ jobs, loading, history, onHistoryChange }: { jobs: ManagedIndexJob[]; loading: boolean; history: boolean; onHistoryChange: (value: boolean) => void }) {
   const label: Record<string, string> = { pending: "排队中", parsing: "解析中", chunking: "切分中", summarizing: "生成摘要", embedding: "写入索引", done: "已发布", failed: "发布失败" };
   return <section className="space-y-3 border-y border-border py-5" aria-labelledby="managed-index-title">
-    <div><h2 id="managed-index-title" className="text-ui-base font-semibold">资料库发布任务</h2><p className="mt-1 text-ui-xs text-muted-foreground">来自数据库分类；发布成功后才成为正式可检索版本。</p></div>
-    {loading ? <LoadingState className="min-h-32" label="正在加载发布任务…" /> : jobs.length === 0 ? <EmptyState title="暂无发布任务" description="资料在资料库中确认并发布后，任务会显示在这里。" /> : <div className="overflow-x-auto border border-border"><table className="w-full min-w-[48rem] text-ui-sm"><thead className="border-b border-border bg-surface-muted text-left text-muted-foreground"><tr><th className="px-4 py-3 font-medium">资料</th><th className="px-4 py-3 font-medium">数据库分类</th><th className="px-4 py-3 font-medium">状态</th><th className="px-4 py-3 font-medium">更新时间</th></tr></thead><tbody className="divide-y divide-border">{jobs.map((job) => <tr key={job.id}><td className="px-4 py-3"><p className="font-medium">{job.title || job.original_filename}</p><p className="mt-1 break-all text-ui-xs text-muted-foreground">{job.original_filename}</p></td><td className="px-4 py-3">{job.category_label || "—"}</td><td className="px-4 py-3"><Badge variant={job.status === "done" ? "success" : job.status === "failed" ? "destructive" : "warning"}>{label[job.status] || job.status}</Badge>{job.error_summary && <p className="mt-1 text-ui-xs text-destructive">{job.error_summary}</p>}</td><td className="px-4 py-3 text-ui-xs text-muted-foreground">{formatAdminDate(job.updated_at)}</td></tr>)}</tbody></table></div>}
+    <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between"><div><h2 id="managed-index-title" className="text-ui-base font-semibold">资料库发布任务</h2><p className="mt-1 text-ui-xs text-muted-foreground">默认显示每个版本的最新任务；发布成功后才成为正式可检索版本。</p></div><Button size="sm" variant="outline" onClick={() => onHistoryChange(!history)}>{history ? "仅看最新尝试" : "查看历史尝试"}</Button></div>
+    {loading ? <LoadingState className="min-h-32" label="正在加载发布任务…" /> : jobs.length === 0 ? <EmptyState title="暂无发布任务" description="资料在资料库中确认并发布后，任务会显示在这里。" /> : <div className="overflow-x-auto border border-border"><table className="w-full min-w-[48rem] text-ui-sm"><thead className="border-b border-border bg-surface-muted text-left text-muted-foreground"><tr><th className="px-4 py-3 font-medium">资料</th><th className="px-4 py-3 font-medium">数据库分类</th><th className="px-4 py-3 font-medium">状态</th><th className="px-4 py-3 font-medium">更新时间</th></tr></thead><tbody className="divide-y divide-border">{jobs.map((job) => <tr key={job.id}><td className="px-4 py-3"><p className="font-medium">{job.title || job.original_filename}</p><p className="mt-1 break-all text-ui-xs text-muted-foreground">{job.original_filename}</p>{job.attempt_count > 1 && <p className="mt-1 text-ui-xs text-muted-foreground">共尝试 {job.attempt_count} 次{history ? ` · 当前第 ${job.attempt_number} 次` : ""}</p>}</td><td className="px-4 py-3">{job.category_label || "—"}</td><td className="px-4 py-3"><Badge variant={job.status === "done" ? "success" : job.status === "failed" ? "destructive" : "warning"}>{label[job.status] || job.status}</Badge>{job.failure && <div className="mt-1 max-w-sm space-y-1 text-ui-xs"><p className="break-words text-destructive">{job.failure.message}</p><p className="break-words text-muted-foreground">{job.failure.recommended_action}</p><p className="text-muted-foreground">{job.failure.retryable ? "可以重试" : "请先处理文件或系统配置"}</p></div>}</td><td className="px-4 py-3 text-ui-xs text-muted-foreground">{formatAdminDate(job.updated_at)}</td></tr>)}</tbody></table></div>}
   </section>;
 }
 

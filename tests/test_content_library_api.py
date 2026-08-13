@@ -392,6 +392,47 @@ def test_managed_index_job_listing_exposes_business_labels(content_api):
     assert normalized.json()["jobs"][0]["error_code"] == "unknown_publication_failure"
 
 
+def test_managed_index_jobs_default_to_latest_attempt_and_allow_history(content_api):
+    client, sessions, _queued, db_path = content_api
+    upload = client.post(
+        "/api/admin/content/uploads",
+        data={"category_id": "cat-03"},
+        files=[("files", ("retry.pdf", b"%PDF synthetic", "application/pdf"))],
+        **_auth(sessions, "organizer", csrf=True),
+    ).json()["entries"][0]
+    version_id = upload["version_id"]
+    client.post(f"/api/admin/content/versions/{version_id}/submit", json={}, **_auth(sessions, "organizer", csrf=True))
+    client.post(f"/api/admin/content/versions/{version_id}/review", json={"approved": True}, **_auth(sessions, "reviewer", csrf=True))
+    first = client.post(f"/api/admin/content/versions/{version_id}/publish", json={}, **_auth(sessions, "publisher", csrf=True)).json()
+
+    conn = sqlite3.connect(db_path)
+    conn.execute("UPDATE content_index_jobs SET status='failed',error_code='pdf_password_required',error_summary='legacy raw text' WHERE id=?", (first["index_job_id"],))
+    conn.execute("UPDATE content_publications SET status='failed' WHERE id=?", (first["publication_id"],))
+    conn.execute("UPDATE content_versions SET lifecycle_status='publication_failed' WHERE id=?", (version_id,))
+    conn.commit()
+    conn.close()
+    client.post(f"/api/admin/content/versions/{version_id}/publish", json={}, **_auth(sessions, "publisher", csrf=True))
+
+    latest = client.get("/api/admin/content/index-jobs", **_auth(sessions, "publisher")).json()
+    assert latest["total"] == 1
+    assert latest["jobs"][0]["attempt_number"] == 2
+    assert latest["jobs"][0]["attempt_count"] == 2
+
+    history = client.get("/api/admin/content/index-jobs?history=true", **_auth(sessions, "publisher")).json()
+    assert history["total"] == 2
+    failed = next(job for job in history["jobs"] if job["status"] == "failed")
+    assert failed["failure"] == {
+        "code": "pdf_password_required",
+        "message": "PDF 需要密码才能解析。",
+        "retryable": False,
+        "recommended_action": "请上传已解除密码保护的 PDF。",
+    }
+
+    listing = client.get("/api/admin/content/items-page?lifecycle_status=publishing", **_auth(sessions, "publisher")).json()
+    assert listing["items"][0]["publication_attempt_count"] == 2
+    assert listing["items"][0]["publication_failure"] is None
+
+
 def test_category_key_is_server_generated_and_used_categories_cannot_be_disabled(content_api):
     client, sessions, _queued, _db_path = content_api
     created = client.post(

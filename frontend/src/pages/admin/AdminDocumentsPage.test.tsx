@@ -117,6 +117,8 @@ const managedFailedJob = {
   status: "failed",
   error_code: "parser_request_failed",
   error_summary: "文档解析服务请求失败，请稍后重试。",
+  failure: { code: "parser_request_failed", message: "文档解析服务请求失败。", retryable: true, recommended_action: "请稍后重试；持续失败时联系系统管理员。" },
+  attempt_count: 4,
   created_at: 1785686400,
   started_at: 1785686401,
   finished_at: 1785686410,
@@ -176,8 +178,19 @@ describe("AdminDocumentsPage", () => {
     render(<AdminDocumentsPage />);
 
     expect(await screen.findByText("受管资料")).toBeInTheDocument();
-    expect(screen.getByText("文档解析服务请求失败，请稍后重试。")).toBeInTheDocument();
+    expect(screen.getByText("文档解析服务请求失败。")).toBeInTheDocument();
+    expect(screen.getByText("请稍后重试；持续失败时联系系统管理员。")).toBeInTheDocument();
+    expect(screen.getByText("共尝试 4 次")).toBeInTheDocument();
     expect(screen.queryByText("parser_request_failed")).not.toBeInTheDocument();
+  });
+
+  it("loads publication history only when requested", async () => {
+    mocks.managedContentIndexJobs.mockResolvedValue({ jobs: [managedFailedJob], total: 1, status_counts: { failed: 1 } });
+    render(<AdminDocumentsPage />);
+    await screen.findByText("受管资料");
+    expect(mocks.managedContentIndexJobs).toHaveBeenCalledWith({ limit: 100, history: false });
+    fireEvent.click(screen.getByRole("button", { name: "查看历史尝试" }));
+    await waitFor(() => expect(mocks.managedContentIndexJobs).toHaveBeenLastCalledWith({ limit: 100, history: true }));
   });
 
   it("keeps the legacy monitor read-only and removes the old upload entry", async () => {

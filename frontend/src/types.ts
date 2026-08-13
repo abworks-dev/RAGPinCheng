@@ -256,8 +256,18 @@ export type ManagedContentItem = {
   source_origin: string;
   source_batch_id: string | null;
   is_current: boolean;
+  latest_publication_status: string | null;
+  publication_attempt_count: number;
+  publication_failure: PublicationFailure | null;
   created_at: number;
   updated_at: number;
+};
+
+export type PublicationFailure = {
+  code: string;
+  message: string;
+  retryable: boolean;
+  recommended_action: string;
 };
 
 export type ManagedContentList = {
@@ -287,6 +297,8 @@ export type ManagedIndexJob = {
   status: string;
   error_code: string | null;
   error_summary: string | null;
+  failure: PublicationFailure | null;
+  attempt_count: number;
   created_at: number;
   started_at: number | null;
   finished_at: number | null;

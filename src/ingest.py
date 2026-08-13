@@ -12,6 +12,7 @@ Cloud flow per PDF:
 """
 from __future__ import annotations
 
+import hashlib
 import shutil
 import subprocess
 import sys
@@ -23,6 +24,7 @@ from typing import Callable, Iterator
 
 import requests
 from pypdf import PdfReader, PdfWriter
+from pypdf.errors import DependencyError
 
 from .config import (
     DOCS_DIR,
@@ -63,6 +65,50 @@ def _safe_stem(pdf: Path) -> str:
 
 def _api_headers() -> dict:
     return {"Authorization": f"Bearer {MINERU_API_KEY}", "Content-Type": "application/json"}
+
+
+class PublicationParseError(RuntimeError):
+    """A stable parse failure that callers may safely classify by code."""
+
+    def __init__(self, code: str):
+        super().__init__(code)
+        self.code = code
+
+
+def _prepare_pdf(pdf: Path, work_dir: Path) -> Path:
+    """Return an unencrypted parse source without changing the original PDF."""
+    try:
+        reader = PdfReader(str(pdf))
+        if not reader.is_encrypted:
+            return pdf
+        try:
+            decrypted = reader.decrypt("")
+        except DependencyError as exc:
+            raise PublicationParseError("pdf_crypto_unavailable") from exc
+        if not decrypted:
+            raise PublicationParseError("pdf_password_required")
+
+        work_dir.mkdir(parents=True, exist_ok=True)
+        prepared = work_dir / "decrypted-source.pdf"
+        writer = PdfWriter()
+        for page in reader.pages:
+            writer.add_page(page)
+        with prepared.open("wb") as handle:
+            writer.write(handle)
+        return prepared
+    except PublicationParseError:
+        raise
+    except DependencyError as exc:
+        raise PublicationParseError("pdf_crypto_unavailable") from exc
+
+
+def _mineru_identities(parts: list[Path]) -> list[tuple[Path, str]]:
+    """Build deterministic MinerU identifiers within its 128-char contract."""
+    identities: list[tuple[Path, str]] = []
+    for index, part in enumerate(parts, start=1):
+        digest = hashlib.sha256(part.read_bytes()).hexdigest()[:16]
+        identities.append((part, f"doc-{digest}-part-{index:03d}.pdf"))
+    return identities
 
 
 def _split_pdf_for_cloud(pdf: Path, work_dir: Path) -> list[Path]:
@@ -111,7 +157,8 @@ def _cloud_parse_batch(
     """
     _notify = on_status or (lambda _: None)
     # 1. Request presigned upload URLs.
-    files_meta = [{"name": p.name, "data_id": p.name} for p in parts]
+    identities = _mineru_identities(parts)
+    files_meta = [{"name": alias, "data_id": alias} for _, alias in identities]
     resp = requests.post(
         f"{MINERU_API_BASE}/file-urls/batch",
         headers=_api_headers(),
@@ -124,10 +171,13 @@ def _cloud_parse_batch(
         },
         timeout=30,
     )
+    if 400 <= resp.status_code < 500:
+        raise PublicationParseError("parser_request_invalid")
     resp.raise_for_status()
     body = resp.json()
     if body.get("code") not in (0, None) or "data" not in body:
-        raise RuntimeError(f"MinerU /file-urls/batch error: {body}")
+        code = "parser_request_invalid" if body.get("code") == -10002 else "parser_request_failed"
+        raise PublicationParseError(code)
     data = body["data"]
     file_urls = data["file_urls"]  # list[str], one URL per file in input order
     batch_id = data["batch_id"]
@@ -196,26 +246,24 @@ def _cloud_parse_batch(
             if all(s == "done" for _, s in states):
                 break
             if any(s == "failed" for _, s in states):
-                failed = [e for e in entries if e.get("state") == "failed"]
-                raise RuntimeError(f"MinerU batch had failed part(s): {failed}")
+                raise PublicationParseError("parser_result_invalid")
         time.sleep(10)
 
     # 4. Map results back to input parts and download each markdown.
     entries = result.get("extract_result", []) or []
     by_name: dict[str, dict] = {}
     for e in entries:
-        key = e.get("file_name") or e.get("data_id") or ""
-        by_name[key] = e
+        for key in (e.get("data_id"), e.get("file_name")):
+            if key:
+                by_name[str(key)] = e
     markdowns: list[str] = []
-    for part in parts:
-        entry = by_name.get(part.name)
+    for part, alias in identities:
+        entry = by_name.get(alias)
         if not entry:
-            raise RuntimeError(
-                f"No result entry for {part.name}; got keys: {list(by_name)}"
-            )
+            raise PublicationParseError("parser_result_invalid")
         md_url = entry.get("full_zip_url") or entry.get("md_url") or entry.get("markdown_url")
         if not md_url:
-            raise RuntimeError(f"No markdown URL for {part.name}: {entry}")
+            raise PublicationParseError("parser_result_invalid")
         md_resp = requests.get(md_url, timeout=600)
         md_resp.raise_for_status()
         if md_url.endswith(".zip"):
@@ -224,7 +272,7 @@ def _cloud_parse_batch(
             zf = zipfile.ZipFile(io.BytesIO(md_resp.content))
             md_files = [n for n in zf.namelist() if n.endswith(".md")]
             if not md_files:
-                raise RuntimeError(f"No .md in zip for {part.name}")
+                raise PublicationParseError("parser_result_invalid")
             best = max(md_files, key=lambda n: len(zf.read(n)))
             markdowns.append(zf.read(best).decode("utf-8"))
         else:
@@ -242,7 +290,8 @@ def _cloud_parse(
     if necessary and concatenating the resulting markdown."""
     split_dir = split_dir or PARSED_DIR / f"_split_{_safe_stem(pdf)}"
     try:
-        parts = _split_pdf_for_cloud(pdf, split_dir)
+        prepared = _prepare_pdf(pdf, split_dir / "preflight")
+        parts = _split_pdf_for_cloud(prepared, split_dir / "parts")
         markdowns = _cloud_parse_batch(parts, on_status=on_status)
         if len(markdowns) == 1:
             return markdowns[0]
@@ -278,15 +327,17 @@ def _local_parse(pdf: Path, *, work_dir: Path | None = None) -> str:
     if work_dir.exists():
         shutil.rmtree(work_dir)
     work_dir.mkdir(parents=True)
-    cmd = [_mineru_exe(), "-p", str(pdf), "-o", str(work_dir), "-m", "auto"]
-    subprocess.run(cmd, check=True)
-    md_files = list(work_dir.rglob("*.md"))
-    if not md_files:
-        raise RuntimeError(f"MinerU produced no markdown for {pdf}")
-    best = max(md_files, key=lambda p: p.stat().st_size)
-    text = best.read_text(encoding="utf-8")
-    shutil.rmtree(work_dir, ignore_errors=True)
-    return text
+    try:
+        prepared = _prepare_pdf(pdf, work_dir / "preflight")
+        cmd = [_mineru_exe(), "-p", str(prepared), "-o", str(work_dir), "-m", "auto"]
+        subprocess.run(cmd, check=True)
+        md_files = list(work_dir.rglob("*.md"))
+        if not md_files:
+            raise PublicationParseError("parser_result_invalid")
+        best = max(md_files, key=lambda p: p.stat().st_size)
+        return best.read_text(encoding="utf-8")
+    finally:
+        shutil.rmtree(work_dir, ignore_errors=True)
 
 
 # ── Public interface ──────────────────────────────────────────────────────────
