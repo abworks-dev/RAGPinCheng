@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { installAdminRoutes } from "./fixtures/admin-fixtures";
 
-for (const [tab, slug] of [["资料工作流", "managed-content"], ["分类设置", "categories"]] as const) {
+for (const [tab, slug] of [["资料库", "managed-content"], ["分类设置", "categories"]] as const) {
   test(`${tab} accepted golden`, async ({ page }) => {
     await installAdminRoutes(page, "normal");
     await page.goto("/admin");

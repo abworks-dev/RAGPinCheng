@@ -42,7 +42,7 @@ vi.mock("./AdminConversationsPage", () => ({
 vi.mock("./AdminDocumentsPage", () => ({
   AdminDocumentsPage: () => {
     mocks.documentsMount();
-    return <div>资料管理页面内容</div>;
+    return <div>索引监控页面内容</div>;
   },
 }));
 
@@ -70,7 +70,7 @@ vi.mock("./AdminFeedbackPage", () => ({
 vi.mock("./AdminManagedContentPage", () => ({
   AdminManagedContentPage: () => {
     mocks.managedMount();
-    return <div>资料工作流页面内容</div>;
+    return <div>资料库页面内容</div>;
   },
 }));
 
@@ -173,9 +173,9 @@ describe("AdminLayout tab boundary", () => {
     expect(within(navigation).getAllByRole("button").map((button) => button.textContent?.trim())).toEqual([
       "用户",
       "对话",
-      "资料管理",
-      "资料工作流",
+      "资料库",
       "分类设置",
+      "索引监控",
       "视频媒体",
       "概览",
       "反馈",
@@ -191,11 +191,11 @@ describe("AdminLayout tab boundary", () => {
     expect(screen.getByText("对话页面内容")).toBeInTheDocument();
     expect(screen.queryByText("用户页面内容")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "资料管理" }));
-    expect(screen.getByText("资料管理页面内容")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "资料库" }));
+    expect(screen.getByText("资料库页面内容")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "资料工作流" }));
-    expect(screen.getByText("资料工作流页面内容")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "索引监控" }));
+    expect(screen.getByText("索引监控页面内容")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "分类设置" }));
     expect(screen.getByText("分类设置页面内容")).toBeInTheDocument();

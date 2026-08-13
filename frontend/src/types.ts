@@ -234,6 +234,8 @@ export type ManagedCategory = {
   version: number;
   created_at: number;
   updated_at: number;
+  full_path: string;
+  item_count: number;
 };
 
 export type ManagedContentItem = {
@@ -243,6 +245,7 @@ export type ManagedContentItem = {
   category_id: string;
   category_key: string;
   category_label: string;
+  category_path: string;
   media_id: string | null;
   version_id: string;
   version_number: number;
@@ -255,6 +258,47 @@ export type ManagedContentItem = {
   is_current: boolean;
   created_at: number;
   updated_at: number;
+};
+
+export type ManagedContentList = {
+  items: ManagedContentItem[];
+  total: number;
+  status_counts: Record<string, number>;
+};
+
+export type BulkManagedContentResult = {
+  version_id: string;
+  status: "succeeded" | "failed";
+  message: string | null;
+  index_job_id: string | null;
+};
+
+export type BulkManagedContentResponse = {
+  results: BulkManagedContentResult[];
+  succeeded: number;
+  failed: number;
+};
+
+export type ManagedIndexJob = {
+  id: string;
+  publication_id: string;
+  version_id: string;
+  attempt_number: number;
+  status: string;
+  error_summary: string | null;
+  created_at: number;
+  started_at: number | null;
+  finished_at: number | null;
+  updated_at: number;
+  title: string | null;
+  original_filename: string | null;
+  category_label: string | null;
+};
+
+export type ManagedIndexJobList = {
+  jobs: ManagedIndexJob[];
+  total: number;
+  status_counts: Record<string, number>;
 };
 
 export type ManagedUploadResponse = {

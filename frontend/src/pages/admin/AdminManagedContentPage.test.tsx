@@ -11,6 +11,9 @@ const mocks = vi.hoisted(() => ({
   submit: vi.fn(),
   review: vi.fn(),
   publish: vi.fn(),
+  bulkReview: vi.fn(),
+  bulkPublish: vi.fn(),
+  fileUrl: vi.fn(),
   success: vi.fn(),
   error: vi.fn(),
 }));
@@ -40,6 +43,9 @@ vi.mock("../../api/client", () => ({
     submitManagedContent: mocks.submit,
     reviewManagedContent: mocks.review,
     publishManagedContent: mocks.publish,
+    bulkReviewManagedContent: mocks.bulkReview,
+    bulkPublishManagedContent: mocks.bulkPublish,
+    managedContentFileUrl: mocks.fileUrl,
   },
 }));
 
@@ -59,6 +65,8 @@ const category = {
   version: 1,
   created_at: 1,
   updated_at: 1,
+  full_path: "03 公司内部标准",
+  item_count: 1,
 };
 
 const item = {
@@ -68,6 +76,7 @@ const item = {
   category_id: "cat-03",
   category_key: "company_standards",
   category_label: "03 公司内部标准",
+  category_path: "03 公司内部标准",
   media_id: null,
   version_id: "version-1",
   version_number: 1,
@@ -88,7 +97,7 @@ describe("AdminManagedContentPage", () => {
     mocks.permissions = ["review"];
     mocks.capabilities.mockResolvedValue({ enabled: true, max_upload_bytes: 1024, supported_extensions: [".pdf"] });
     mocks.categories.mockResolvedValue([category]);
-    mocks.items.mockResolvedValue([item]);
+    mocks.items.mockResolvedValue({ items: [item], total: 1, status_counts: { awaiting_review: 1 } });
     mocks.review.mockResolvedValue({ ...item, lifecycle_status: "approved" });
   });
 
@@ -105,7 +114,7 @@ describe("AdminManagedContentPage", () => {
 
   it("uploads selected files for an organizer", async () => {
     mocks.permissions = ["organize"];
-    mocks.items.mockResolvedValue([]);
+    mocks.items.mockResolvedValue({ items: [], total: 0, status_counts: {} });
     mocks.upload.mockResolvedValue({
       batch_id: "batch-1",
       entries: [{ filename: "guide.md", item_id: "item-2", version_id: "version-2", sha256: "b".repeat(64), status: "accepted", reason: null }],
@@ -144,5 +153,23 @@ describe("AdminManagedContentPage", () => {
     expect(screen.getAllByRole("button", { name: "退回" })[0]).toBeDisabled();
     resolveReview?.({ ...item, lifecycle_status: "approved" });
     await waitFor(() => expect(mocks.success).toHaveBeenCalledWith("资料已确认"));
+  });
+
+  it("keeps failed bulk items selected and shows their per-item reason", async () => {
+    mocks.bulkReview.mockResolvedValue({
+      results: [{ version_id: "version-1", status: "failed", message: "资料状态已变化，请刷新后重试", index_job_id: null }],
+      succeeded: 0,
+      failed: 1,
+    });
+    render(<AdminManagedContentPage />);
+    await screen.findAllByText("建模标准");
+    fireEvent.click(screen.getAllByRole("checkbox", { name: "选择建模标准" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "批量确认" }));
+    fireEvent.click(screen.getByRole("button", { name: "确认执行" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("建模标准：资料状态已变化，请刷新后重试");
+    expect(screen.getByRole("button", { name: "重试失败项" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+    expect(screen.getAllByRole("checkbox", { name: "选择建模标准" })[0]).toBeChecked();
   });
 });

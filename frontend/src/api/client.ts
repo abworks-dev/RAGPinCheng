@@ -20,6 +20,9 @@ import type {
   MediaAsset,
   ManagedCategory,
   ManagedContentItem,
+  ManagedContentList,
+  BulkManagedContentResponse,
+  ManagedIndexJobList,
   ManagedUploadResponse,
   MediaTranscript,
   TranscriptionJob,
@@ -301,7 +304,6 @@ export const api = {
       `/api/admin/content/categories?include_inactive=${includeInactive}`,
     ),
   createManagedCategory: (body: {
-    category_key: string;
     parent_id: string | null;
     display_code: string;
     display_name: string;
@@ -346,8 +348,23 @@ export const api = {
     method: "PATCH",
     body: JSON.stringify(body),
   }),
-  managedContentItems: () =>
-    jsonFetch<ManagedContentItem[]>("/api/admin/content/items"),
+  managedContentItems: (params?: {
+    query?: string;
+    category_id?: string;
+    lifecycle_status?: string;
+    source_origin?: string;
+    limit?: number;
+    offset?: number;
+  }) => {
+    const search = new URLSearchParams();
+    if (params?.query) search.set("query", params.query);
+    if (params?.category_id) search.set("category_id", params.category_id);
+    if (params?.lifecycle_status) search.set("lifecycle_status", params.lifecycle_status);
+    if (params?.source_origin) search.set("source_origin", params.source_origin);
+    if (params?.limit != null) search.set("limit", String(params.limit));
+    if (params?.offset != null) search.set("offset", String(params.offset));
+    return jsonFetch<ManagedContentList>(`/api/admin/content/items-page?${search}`);
+  },
   uploadManagedContent: async (files: File[], categoryId: string) => {
     const form = new FormData();
     files.forEach((file) => form.append("files", file, file.name));
@@ -382,6 +399,25 @@ export const api = {
       `/api/admin/content/versions/${encodeURIComponent(versionId)}/publish`,
       { method: "POST", body: JSON.stringify({}) },
     ),
+  bulkReviewManagedContent: (versionIds: string[], approved: boolean) =>
+    jsonFetch<BulkManagedContentResponse>("/api/admin/content/bulk-review", {
+      method: "POST",
+      body: JSON.stringify({ version_ids: versionIds, approved }),
+    }),
+  bulkPublishManagedContent: (versionIds: string[]) =>
+    jsonFetch<BulkManagedContentResponse>("/api/admin/content/bulk-publish", {
+      method: "POST",
+      body: JSON.stringify({ version_ids: versionIds }),
+    }),
+  managedContentFileUrl: (versionId: string, download = false) =>
+    `/api/admin/content/versions/${encodeURIComponent(versionId)}/file${download ? "?download=true" : ""}`,
+  managedContentIndexJobs: (params?: { status?: string; limit?: number; offset?: number }) => {
+    const search = new URLSearchParams();
+    if (params?.status) search.set("status", params.status);
+    if (params?.limit != null) search.set("limit", String(params.limit));
+    if (params?.offset != null) search.set("offset", String(params.offset));
+    return jsonFetch<ManagedIndexJobList>(`/api/admin/content/index-jobs?${search}`);
+  },
 
   // admin: media
   uploadMediaVideo: async (video: File, transcript: File, title: string) => {

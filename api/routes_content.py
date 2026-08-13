@@ -6,7 +6,8 @@ import time
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse
 
 from src.config import CONTENT_MANAGEMENT_ENABLED, CONTENT_ROOT
 
@@ -24,6 +25,7 @@ from .content_store import (
     create_publication_job,
     create_web_batch,
     list_content_items,
+    list_content_items_page,
     list_categories,
     register_uploaded_document,
     review_version,
@@ -36,9 +38,14 @@ from .schemas import (
     CreateContentPermissionGroupRequest,
     ContentPermissionGroupDTO,
     ContentPermissionUserDTO,
+    BulkManagedContentRequest,
+    BulkManagedContentResponse,
+    BulkManagedContentResultDTO,
     ManagedCategoryDTO,
     ManagedContentItemDTO,
+    ManagedContentListResponse,
     ManagedIndexJobDTO,
+    ManagedIndexJobListResponse,
     ManagedPublicationDTO,
     ManagedUploadEntryDTO,
     ManagedUploadResponse,
@@ -97,6 +104,8 @@ def _category_dto(row: sqlite3.Row) -> ManagedCategoryDTO:
         version=row["version"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
+        full_path=row["full_path"] if "full_path" in row.keys() else f"{row['display_code']} {row['display_name']}",
+        item_count=int(row["item_count"]) if "item_count" in row.keys() else 0,
     )
 
 
@@ -108,6 +117,8 @@ def _raise_domain_error(exc: Exception) -> None:
         raise HTTPException(status_code=409, detail="分类已被其他人修改，请刷新后重试") from exc
     if message == "content_too_large":
         raise HTTPException(status_code=413, detail="文件超过上传大小限制") from exc
+    if message == "category_has_content":
+        raise HTTPException(status_code=409, detail="分类下仍有资料，请先重新归类") from exc
     raise HTTPException(status_code=400, detail=message) from exc
 
 
@@ -250,6 +261,7 @@ def _content_item_dto(row: sqlite3.Row) -> ManagedContentItemDTO:
         category_id=row["category_id"],
         category_key=row["category_key"],
         category_label=f"{row['display_code']} {row['display_name']}",
+        category_path=row["category_path"] if "category_path" in row.keys() else f"{row['display_code']} {row['display_name']}",
         media_id=row["media_id"],
         version_id=row["version_id"],
         version_number=row["version_number"],
@@ -278,6 +290,56 @@ def get_content_items(
             conn, category_id=category_id, lifecycle_status=lifecycle_status
         )
     ]
+
+
+@router.get("/items-page", response_model=ManagedContentListResponse)
+def get_content_items_page(
+    query: str = Query("", max_length=200),
+    category_id: str | None = None,
+    lifecycle_status: str | None = None,
+    source_origin: str | None = None,
+    limit: int = Query(25, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    _user: CurrentUser = Depends(require_any_content_permission(_CONTENT_READ)),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> ManagedContentListResponse:
+    rows, total, status_counts = list_content_items_page(
+        conn,
+        query=query,
+        category_id=category_id,
+        lifecycle_status=lifecycle_status,
+        source_origin=source_origin,
+        limit=limit,
+        offset=offset,
+    )
+    return ManagedContentListResponse(
+        items=[_content_item_dto(row) for row in rows],
+        total=total,
+        status_counts=status_counts,
+    )
+
+
+@router.get("/versions/{version_id}/file")
+def get_content_version_file(
+    version_id: str,
+    download: bool = False,
+    _user: CurrentUser = Depends(require_any_content_permission(_CONTENT_READ)),
+    conn: sqlite3.Connection = Depends(get_db),
+):
+    row = conn.execute(
+        """SELECT v.original_filename,v.doc_type,o.storage_rel_path
+           FROM content_versions v JOIN content_objects o ON o.sha256=v.object_sha256
+           WHERE v.id=?""",
+        (version_id,),
+    ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="资料文件不存在")
+    try:
+        path = _storage.resolve_object(row["storage_rel_path"])
+    except (FileNotFoundError, ValueError):
+        raise HTTPException(status_code=404, detail="资料文件不存在")
+    disposition = "attachment" if download or row["doc_type"] != "pdf" else "inline"
+    return FileResponse(path, filename=row["original_filename"], content_disposition_type=disposition)
 
 
 @router.post("/versions/{version_id}/submit", response_model=ManagedContentItemDTO)
@@ -349,6 +411,74 @@ def publish_content_version(
     )
 
 
+def _validate_bulk_version_ids(version_ids: list[str]) -> list[str]:
+    if len(set(version_ids)) != len(version_ids):
+        raise HTTPException(status_code=400, detail="批量操作包含重复资料")
+    return version_ids
+
+
+@router.post("/bulk-review", response_model=BulkManagedContentResponse)
+def bulk_review_content_versions(
+    body: BulkManagedContentRequest,
+    user: CurrentUser = Depends(require_content_permission("review", csrf=True)),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> BulkManagedContentResponse:
+    _require_feature()
+    if body.approved is None:
+        raise HTTPException(status_code=400, detail="请选择确认或退回")
+    results: list[BulkManagedContentResultDTO] = []
+    for version_id in _validate_bulk_version_ids(body.version_ids):
+        try:
+            review_version(
+                conn,
+                version_id,
+                approved=body.approved,
+                note=body.note,
+                category_id=body.category_id,
+                actor_user_id=user.id,
+            )
+            results.append(BulkManagedContentResultDTO(version_id=version_id, status="succeeded"))
+        except (ValueError, sqlite3.IntegrityError):
+            conn.rollback()
+            results.append(BulkManagedContentResultDTO(
+                version_id=version_id,
+                status="failed",
+                message="资料状态已变化，请刷新后重试",
+            ))
+    succeeded = sum(result.status == "succeeded" for result in results)
+    return BulkManagedContentResponse(results=results, succeeded=succeeded, failed=len(results) - succeeded)
+
+
+@router.post("/bulk-publish", response_model=BulkManagedContentResponse)
+def bulk_publish_content_versions(
+    body: BulkManagedContentRequest,
+    user: CurrentUser = Depends(require_content_permission("publish", csrf=True)),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> BulkManagedContentResponse:
+    _require_feature()
+    results: list[BulkManagedContentResultDTO] = []
+    for version_id in _validate_bulk_version_ids(body.version_ids):
+        try:
+            _publication_id, index_job_id = create_publication_job(
+                conn, version_id, actor_user_id=user.id
+            )
+            enqueue_content_publication(index_job_id)
+            results.append(BulkManagedContentResultDTO(
+                version_id=version_id,
+                status="succeeded",
+                index_job_id=index_job_id,
+            ))
+        except (ValueError, sqlite3.IntegrityError):
+            conn.rollback()
+            results.append(BulkManagedContentResultDTO(
+                version_id=version_id,
+                status="failed",
+                message="资料状态已变化，请刷新后重试",
+            ))
+    succeeded = sum(result.status == "succeeded" for result in results)
+    return BulkManagedContentResponse(results=results, succeeded=succeeded, failed=len(results) - succeeded)
+
+
 @router.get("/index-jobs/{index_job_id}", response_model=ManagedIndexJobDTO)
 def get_content_index_job(
     index_job_id: str,
@@ -369,6 +499,50 @@ def get_content_index_job(
         started_at=row["started_at"],
         finished_at=row["finished_at"],
         updated_at=row["updated_at"],
+    )
+
+
+@router.get("/index-jobs", response_model=ManagedIndexJobListResponse)
+def list_content_index_jobs(
+    status: str | None = None,
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    _user: CurrentUser = Depends(require_any_content_permission(_CONTENT_READ)),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> ManagedIndexJobListResponse:
+    clauses: list[str] = []
+    params: list[object] = []
+    if status:
+        clauses.append("j.status=?")
+        params.append(status)
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    base = """ FROM content_index_jobs j
+               JOIN content_versions v ON v.id=j.version_id
+               JOIN content_items i ON i.id=v.item_id
+               JOIN category_nodes c ON c.id=i.category_id"""
+    rows = conn.execute(
+        """SELECT j.*,i.title,v.original_filename,
+                  c.display_code || ' ' || c.display_name AS category_label""" + base +
+        f" {where} ORDER BY j.created_at DESC,j.id LIMIT ? OFFSET ?",
+        [*params, limit, offset],
+    ).fetchall()
+    total = int(conn.execute("SELECT count(*)" + base + f" {where}", params).fetchone()[0])
+    counts = {
+        str(row[0]): int(row[1])
+        for row in conn.execute(
+            "SELECT j.status,count(*)" + base + " GROUP BY j.status"
+        ).fetchall()
+    }
+    return ManagedIndexJobListResponse(
+        jobs=[ManagedIndexJobDTO(
+            id=row["id"], publication_id=row["publication_id"], version_id=row["version_id"],
+            attempt_number=row["attempt_number"], status=row["status"],
+            error_summary=row["error_summary"], created_at=row["created_at"],
+            started_at=row["started_at"], finished_at=row["finished_at"], updated_at=row["updated_at"],
+            title=row["title"], original_filename=row["original_filename"], category_label=row["category_label"],
+        ) for row in rows],
+        total=total,
+        status_counts=counts,
     )
 
 

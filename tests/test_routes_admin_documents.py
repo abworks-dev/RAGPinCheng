@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import sqlite3
 from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
 
+from api import routes_admin
 from api.routes_admin import _document_id, _job_row_to_dto, delete_document, list_documents
 from src import indexing_pipeline
 
@@ -61,6 +63,17 @@ def test_index_job_dto_reports_whether_source_file_still_exists(tmp_path):
 
     assert _job_row_to_dto(rows[0]).source_exists is True
     assert _job_row_to_dto(rows[1]).source_exists is False
+    conn.close()
+
+
+def test_legacy_upload_is_rejected_before_writing_when_managed_content_is_enabled(monkeypatch):
+    conn = _connection()
+    monkeypatch.setattr(routes_admin, "CONTENT_MANAGEMENT_ENABLED", True)
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(routes_admin.upload_documents([], "公司标准", "", object(), conn))
+    assert exc.value.status_code == 409
+    assert "资料库" in exc.value.detail
+    assert conn.execute("SELECT count(*) FROM index_jobs").fetchone()[0] == 0
     conn.close()
 
 

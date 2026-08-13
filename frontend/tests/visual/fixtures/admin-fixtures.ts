@@ -19,9 +19,9 @@ const workspaceUsers = {
 };
 
 export const categories = [
-  { id: "cat-company", category_key: "company_standard", parent_id: null, display_code: "A", display_name: "公司标准", sort_order: 10, level: 1, is_active: true, version: 3, created_at: 1700000000, updated_at: 1700000000 },
-  { id: "cat-project", category_key: "project_delivery", parent_id: null, display_code: "B", display_name: "项目交付与协同管理资料", sort_order: 20, level: 1, is_active: true, version: 2, created_at: 1700000000, updated_at: 1700000000 },
-  { id: "cat-archive", category_key: "archived", parent_id: null, display_code: "Z", display_name: "历史分类", sort_order: 90, level: 1, is_active: false, version: 1, created_at: 1700000000, updated_at: 1700000000 },
+  { id: "cat-company", category_key: "company_standard", parent_id: null, display_code: "03", display_name: "公司内部标准", sort_order: 10, level: 1, is_active: true, version: 3, created_at: 1700000000, updated_at: 1700000000, full_path: "03 公司内部标准", item_count: 3 },
+  { id: "cat-project", category_key: "project_delivery", parent_id: null, display_code: "04", display_name: "项目资料", sort_order: 20, level: 1, is_active: true, version: 2, created_at: 1700000000, updated_at: 1700000000, full_path: "04 项目资料", item_count: 2 },
+  { id: "cat-archive", category_key: "archived", parent_id: null, display_code: "99", display_name: "待确认资料", sort_order: 90, level: 1, is_active: false, version: 1, created_at: 1700000000, updated_at: 1700000000, full_path: "99 待确认资料", item_count: 0 },
 ];
 
 export const items = [
@@ -36,7 +36,8 @@ export const items = [
   content_kind: "document",
   category_id: index % 2 ? "cat-project" : "cat-company",
   category_key: index % 2 ? "project_delivery" : "company_standard",
-  category_label: index % 2 ? "B 项目交付与协同管理资料" : "A 公司标准",
+  category_label: index % 2 ? "04 项目资料" : "03 公司内部标准",
+  category_path: index % 2 ? "04 项目资料 / 02 竣工交付 / 01 模型成果" : "03 公司内部标准 / 01 建模 / 02 机电",
   media_id: null,
   version_id: `version-${index + 1}`,
   version_number: index + 1,
@@ -44,7 +45,7 @@ export const items = [
   doc_type: filename.split(".").pop(),
   lifecycle_status: status,
   object_sha256: null,
-  source_origin: "合成测试数据",
+  source_origin: index === 4 ? "legacy" : "web",
   source_batch_id: null,
   is_current: true,
   created_at: 1700000000,
@@ -99,8 +100,12 @@ export async function installAdminRoutes(page: Page, scenario: AdminScenario = "
     if (path === "/api/admin/content/categories") {
       return json(route, scenario === "empty" ? [] : categories);
     }
-    if (path === "/api/admin/content/items") {
-      return json(route, scenario === "empty" ? [] : items);
+    if (path === "/api/admin/content/items-page") {
+      const rows = scenario === "empty" ? [] : items;
+      return json(route, { items: rows, total: rows.length, status_counts: rows.reduce<Record<string, number>>((counts, item) => ({ ...counts, [item.lifecycle_status]: (counts[item.lifecycle_status] || 0) + 1 }), {}) });
+    }
+    if (path === "/api/admin/content/index-jobs") {
+      return json(route, { jobs: [], total: 0, status_counts: {} });
     }
     if (path === "/api/admin/content/permissions") {
       return json(route, scenario === "empty" ? [] : permissionUsers);
@@ -113,6 +118,9 @@ export async function installAdminRoutes(page: Page, scenario: AdminScenario = "
       await new Promise((resolve) => setTimeout(resolve, 800));
       if (path === "/api/admin/content/uploads") {
         return json(route, { batch_id: "synthetic-batch", entries: [{ filename: "synthetic.pdf", item_id: "new-item", version_id: "new-version", sha256: null, status: "accepted", reason: null }] });
+      }
+      if (path.endsWith("/bulk-review") || path.endsWith("/bulk-publish")) {
+        return json(route, { results: [], succeeded: 0, failed: 0 });
       }
       return json(route, items[0]);
     }

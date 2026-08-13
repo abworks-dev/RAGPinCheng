@@ -42,6 +42,7 @@ import type {
   IndexJob,
   IndexedDocument,
   IndexedDocumentList,
+  ManagedIndexJob,
 } from "../../types";
 import { cn } from "../../lib/utils";
 import { formatAdminDate, formatBytes } from "./admin-formatters";
@@ -145,7 +146,7 @@ function AdminDocumentsPageContent() {
   const [loading, setLoading] = useState(true);
   const [jobsLoading, setJobsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [uploadOpen, setUploadOpen] = useState(false);
+  const [managedJobs, setManagedJobs] = useState<ManagedIndexJob[]>([]);
   const [searchInput, setSearchInput] = useState("");
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("");
@@ -188,14 +189,16 @@ function AdminDocumentsPageContent() {
     setJobsLoading(true);
     setError(null);
     try {
-      const [categoryTree, indexedDocuments, indexJobs] = await Promise.all([
+      const [categoryTree, indexedDocuments, indexJobs, managedIndexJobs] = await Promise.all([
         api.adminCategoryTree(),
         api.adminListIndexedDocuments(documentParams),
         api.adminListIndexJobs(100),
+        api.managedContentIndexJobs({ limit: 100 }),
       ]);
       setTree(categoryTree);
       setListing(indexedDocuments);
       setJobs(indexJobs.jobs);
+      setManagedJobs(managedIndexJobs.jobs);
     } catch (caught: any) {
       setError(caught?.message || String(caught));
     } finally {
@@ -208,13 +211,14 @@ function AdminDocumentsPageContent() {
     void refreshAll();
   }, [refreshAll]);
 
-  const hasActive = jobs.some((job) => ACTIVE_STATUSES.has(job.status));
+  const hasActive = jobs.some((job) => ACTIVE_STATUSES.has(job.status)) || managedJobs.some((job) => ACTIVE_STATUSES.has(job.status));
   useEffect(() => {
     if (!hasActive) return;
     const timer = window.setInterval(async () => {
       try {
-        const { jobs: latest } = await api.adminListIndexJobs(100);
-        setJobs(latest);
+        const [legacy, managed] = await Promise.all([api.adminListIndexJobs(100), api.managedContentIndexJobs({ limit: 100 })]);
+        setJobs(legacy.jobs);
+        setManagedJobs(managed.jobs);
         await refreshDocuments();
       } catch {
         // Best-effort polling keeps the last usable state and retries next tick.
@@ -233,16 +237,12 @@ function AdminDocumentsPageContent() {
         <div>
           <p className="text-ui-xs font-medium uppercase tracking-[0.14em] text-primary">知识库维护</p>
           <h1 id="admin-documents-title" className="mt-1 text-ui-2xl font-semibold tracking-tight text-foreground">
-            资料管理
+            索引监控
           </h1>
           <p className="mt-1 max-w-3xl text-ui-sm text-muted-foreground">
-            管理资料的上传、处理和检索状态；详细处理记录收纳在索引活动中。
+            查看新资料发布和旧目录索引状态；新资料请从“资料库”上传。
           </p>
         </div>
-        <Button onClick={() => setUploadOpen(true)} className="w-full gap-2 sm:w-auto">
-          <Upload className="size-4" />
-          上传资料
-        </Button>
       </header>
 
       {error && (
@@ -263,8 +263,8 @@ function AdminDocumentsPageContent() {
       <section className="space-y-3" aria-labelledby="document-list-title">
         <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
           <div>
-            <h2 id="document-list-title" className="text-ui-base font-semibold text-foreground">资料列表</h2>
-            <p className="mt-1 text-ui-xs text-muted-foreground">状态与最近一次处理任务已经合并到资料行。</p>
+            <h2 id="document-list-title" className="text-ui-base font-semibold text-foreground">旧索引资料</h2>
+            <p className="mt-1 text-ui-xs text-muted-foreground">分类来自旧 docs 目录，仅供兼容期查看，不再作为新资料分类来源。</p>
           </div>
           <div className="grid gap-2 sm:grid-cols-2 xl:flex xl:items-center">
             <label className="relative block sm:col-span-2 xl:w-72">
@@ -350,19 +350,18 @@ function AdminDocumentsPageContent() {
         )}
       </section>
 
+      <ManagedJobsActivity jobs={managedJobs} loading={jobsLoading} />
       <JobsActivity jobs={jobs} loading={jobsLoading} onChanged={refreshAll} />
-
-      <Sheet open={uploadOpen} onOpenChange={setUploadOpen}>
-        <SheetContent>
-          <SheetHeader>
-            <SheetTitle>上传资料</SheetTitle>
-            <SheetDescription>选择分类并添加文件；每个文件都会独立进入处理队列。</SheetDescription>
-          </SheetHeader>
-          <UploadPanel tree={tree} onUploaded={refreshAll} />
-        </SheetContent>
-      </Sheet>
     </section>
   );
+}
+
+function ManagedJobsActivity({ jobs, loading }: { jobs: ManagedIndexJob[]; loading: boolean }) {
+  const label: Record<string, string> = { pending: "排队中", parsing: "解析中", chunking: "切分中", summarizing: "生成摘要", embedding: "写入索引", done: "已发布", failed: "发布失败" };
+  return <section className="space-y-3 border-y border-border py-5" aria-labelledby="managed-index-title">
+    <div><h2 id="managed-index-title" className="text-ui-base font-semibold">资料库发布任务</h2><p className="mt-1 text-ui-xs text-muted-foreground">来自数据库分类；发布成功后才成为正式可检索版本。</p></div>
+    {loading ? <LoadingState className="min-h-32" label="正在加载发布任务…" /> : jobs.length === 0 ? <EmptyState title="暂无发布任务" description="资料在资料库中确认并发布后，任务会显示在这里。" /> : <div className="overflow-x-auto border border-border"><table className="w-full min-w-[48rem] text-ui-sm"><thead className="border-b border-border bg-surface-muted text-left text-muted-foreground"><tr><th className="px-4 py-3 font-medium">资料</th><th className="px-4 py-3 font-medium">数据库分类</th><th className="px-4 py-3 font-medium">状态</th><th className="px-4 py-3 font-medium">更新时间</th></tr></thead><tbody className="divide-y divide-border">{jobs.map((job) => <tr key={job.id}><td className="px-4 py-3"><p className="font-medium">{job.title || job.original_filename}</p><p className="mt-1 break-all text-ui-xs text-muted-foreground">{job.original_filename}</p></td><td className="px-4 py-3">{job.category_label || "—"}</td><td className="px-4 py-3"><Badge variant={job.status === "done" ? "success" : job.status === "failed" ? "destructive" : "warning"}>{label[job.status] || job.status}</Badge>{job.error_summary && <p className="mt-1 text-ui-xs text-destructive">{job.error_summary}</p>}</td><td className="px-4 py-3 text-ui-xs text-muted-foreground">{formatAdminDate(job.updated_at)}</td></tr>)}</tbody></table></div>}
+  </section>;
 }
 
 function SummaryCard({
@@ -960,7 +959,7 @@ function JobsActivity({
           <div className="flex items-center gap-3">
             <div className="flex size-9 items-center justify-center rounded-ui-md bg-secondary text-muted-foreground"><Activity className="size-4" /></div>
             <div>
-              <h2 className="text-ui-sm font-semibold text-foreground">索引活动</h2>
+              <h2 className="text-ui-sm font-semibold text-foreground">旧目录索引活动</h2>
               <p className="mt-0.5 text-ui-xs text-muted-foreground">最近 {jobs.length} 条处理记录{activeCount ? `，${activeCount} 条进行中` : ""}</p>
             </div>
           </div>
@@ -968,7 +967,7 @@ function JobsActivity({
         </summary>
         <div className="border-t border-border">
           {loading ? <LoadingState className="min-h-32" label="正在加载索引活动…" /> : jobs.length === 0 ? (
-            <EmptyState title="暂无索引活动" description="上传资料后，处理记录会显示在这里。" />
+            <EmptyState title="暂无旧索引活动" description="兼容期旧任务记录会显示在这里。" />
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full min-w-[60rem] text-ui-sm">

@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   adminCategoryTree: vi.fn(),
   adminListIndexedDocuments: vi.fn(),
   adminListIndexJobs: vi.fn(),
+  managedContentIndexJobs: vi.fn(),
   adminUploadDocuments: vi.fn(),
   adminDeleteIndexedDocument: vi.fn(),
   adminRetryIndexJob: vi.fn(),
@@ -114,6 +115,7 @@ describe("AdminDocumentsPage", () => {
     mocks.adminCategoryTree.mockResolvedValue(categoryTree);
     mocks.adminListIndexedDocuments.mockResolvedValue(listing);
     mocks.adminListIndexJobs.mockResolvedValue({ jobs });
+    mocks.managedContentIndexJobs.mockResolvedValue({ jobs: [], total: 0, status_counts: {} });
     mocks.adminUploadDocuments.mockResolvedValue({ accepted: [jobs[0]], skipped: [] });
     mocks.adminDeleteIndexedDocument.mockResolvedValue({
       parents_deleted: 12,
@@ -148,28 +150,11 @@ describe("AdminDocumentsPage", () => {
     }));
   });
 
-  it("opens a focused upload sheet with removable file queue and preserves upload contract", async () => {
-    const pdf = new File(["pdf"], "standard.pdf", { type: "application/pdf" });
-    const empty = new File([], "empty.pdf", { type: "application/pdf" });
-
+  it("keeps the legacy monitor read-only and removes the old upload entry", async () => {
     render(<AdminDocumentsPage />);
     await screen.findByText("企业交付标准");
-    fireEvent.click(screen.getByRole("button", { name: "上传资料" }));
-
-    const sheet = await screen.findByRole("dialog", { name: "上传资料" });
-    const input = within(sheet).getByLabelText("文件");
-    fireEvent.change(input, { target: { files: [pdf, empty] } });
-
-    expect(within(sheet).getByText("空文件，不能上传")).toBeInTheDocument();
-    fireEvent.click(within(sheet).getByRole("button", { name: "移除 empty.pdf" }));
-    fireEvent.click(within(sheet).getByRole("button", { name: "上传 1 个文件" }));
-
-    await waitFor(() => expect(mocks.adminUploadDocuments).toHaveBeenCalledWith(
-      [pdf],
-      "公司标准",
-      undefined,
-    ));
-    expect(await within(sheet).findByText("资料已加入处理队列")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "索引监控" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "上传资料" })).not.toBeInTheDocument();
   });
 
   it("sends search, category, type and status filters to the server", async () => {
@@ -360,9 +345,9 @@ describe("AdminDocumentsPage", () => {
     render(<AdminDocumentsPage />);
     await screen.findByText("企业交付标准");
 
-    const activity = screen.getByText("索引活动").closest("details");
+    const activity = screen.getByText("旧目录索引活动").closest("details");
     expect(activity).not.toBeNull();
-    fireEvent.click(within(activity as HTMLElement).getByText("索引活动"));
+    fireEvent.click(within(activity as HTMLElement).getByText("旧目录索引活动"));
     expect(await screen.findByText("解析器暂不可用")).toBeInTheDocument();
 
     const failedRow = screen.getByText("failed.docx").closest("tr");
@@ -386,9 +371,9 @@ describe("AdminDocumentsPage", () => {
     render(<AdminDocumentsPage />);
     await screen.findByText("企业交付标准");
 
-    const activity = screen.getByText("索引活动").closest("details");
+    const activity = screen.getByText("旧目录索引活动").closest("details");
     expect(activity).not.toBeNull();
-    fireEvent.click(within(activity as HTMLElement).getByText("索引活动"));
+    fireEvent.click(within(activity as HTMLElement).getByText("旧目录索引活动"));
 
     const row = screen.getByText("deleted.xlsx").closest("tr");
     expect(row).not.toBeNull();

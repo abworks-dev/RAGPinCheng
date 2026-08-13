@@ -13,44 +13,54 @@ async function openTab(page: Parameters<typeof installAdminRoutes>[0], label: st
   await page.getByRole("button", { name: label, exact: true }).click();
 }
 
-test.describe("资料工作流", () => {
+test.describe("资料库", () => {
   test("normal layout keeps navigation and upload controls discoverable", async ({ page }) => {
-    await openTab(page, "资料工作流");
-    await expect(page.getByRole("heading", { name: "资料工作流" })).toBeVisible();
-    await expect(page.locator("p:visible", { hasText: "建筑信息模型交付标准" }).first()).toBeVisible();
+    await openTab(page, "资料库");
+    await expect(page.getByRole("heading", { name: "资料库" })).toBeVisible();
     await expectNoBodyOverflow(page);
     await expectInViewport(page.getByRole("button", { name: "刷新" }));
-    await expectInViewport(page.getByRole("button", { name: "上传" }));
+    await expectInViewport(page.getByRole("button", { name: "3. 上传" }));
+    if (page.viewportSize()!.width === 390) await expectTouchTarget(page.getByRole("button", { name: "3. 上传" }));
+    const mobile = page.viewportSize()!.width < 1024;
+    const visibleItem = mobile
+      ? page.locator("li").getByText("机电专业协同检查清单", { exact: true })
+      : page.getByRole("table").getByText("机电专业协同检查清单", { exact: true });
+    await visibleItem.scrollIntoViewIfNeeded();
+    await expect(visibleItem).toBeVisible();
     if (page.viewportSize()!.width === 768) {
       await expect(page.getByRole("table")).toBeHidden();
       await expect(page.getByRole("button", { name: "确认" })).toBeVisible();
       await expect(page.getByRole("button", { name: "退回" })).toBeVisible();
-      await expect(page.getByRole("button", { name: "发布" }).first()).toBeVisible();
     }
     if (page.viewportSize()!.width === 390) {
-      await expectTouchTarget(page.getByRole("button", { name: "上传" }));
-      await expectInViewport(page.getByRole("button", { name: "提交" }).first());
+      await expectInViewport(page.getByRole("button", { name: "确认" }).first());
     }
+    const itemCheckbox = mobile
+      ? page.locator("li").getByRole("checkbox", { name: "选择机电专业协同检查清单" })
+      : page.getByRole("table").getByRole("checkbox", { name: "选择机电专业协同检查清单" });
+    await itemCheckbox.check();
+    await expect(page.getByText("单次最多 20 份")).toBeVisible();
+    await expect(page.getByRole("button", { name: "批量确认" })).toBeVisible();
   });
 
   for (const scenario of ["loading", "empty", "error", "disabled"] as const) {
     test(`${scenario} state is explicit and contained`, async ({ page }) => {
-      await openTab(page, "资料工作流", scenario);
+      await openTab(page, "资料库", scenario);
       await expectNoBodyOverflow(page);
-      if (scenario === "loading") await expect(page.getByRole("heading", { name: "资料工作流" })).toBeVisible();
-      if (scenario === "empty") await expect(page.getByText("暂无资料")).toBeVisible();
+      if (scenario === "loading") await expect(page.getByRole("heading", { name: "资料库" })).toBeVisible();
+      if (scenario === "empty") await expect(page.getByText("没有符合条件的资料")).toBeVisible();
       if (scenario === "error") await expect(page.getByText("合成加载失败")).toBeVisible();
       if (scenario === "disabled") {
-        await expect(page.getByText("受管资料库当前未启用")).toBeVisible();
-        await expect(page.getByRole("button", { name: "上传" })).toBeDisabled();
+        await expect(page.getByText("资料库当前未启用，上传和流程操作暂不可用。")).toBeVisible();
+        await expect(page.getByRole("button", { name: "3. 上传" })).toBeDisabled();
       }
     });
   }
 
   test("upload exposes a stable busy state", async ({ page }) => {
-    await openTab(page, "资料工作流");
+    await openTab(page, "资料库");
     await page.getByLabel("选择资料文件").setInputFiles({ name: "synthetic.pdf", mimeType: "application/pdf", buffer: Buffer.from("synthetic fixture") });
-    const upload = page.getByRole("button", { name: "上传" });
+    const upload = page.getByRole("button", { name: "3. 上传" });
     await upload.click();
     await expect(upload).toBeDisabled();
     await expectNoBodyOverflow(page);
@@ -68,7 +78,7 @@ test.describe("分类设置", () => {
     await expectInViewport(createButton);
     if (page.viewportSize()!.width === 390) {
       await expectTouchTarget(createButton);
-      const categoryToggle = page.getByRole("checkbox", { name: "公司标准启用" });
+      const categoryToggle = page.getByRole("checkbox", { name: "公司内部标准启用" });
       await categoryToggle.scrollIntoViewIfNeeded();
       await expectInViewport(categoryToggle);
       const save = page.getByRole("button", { name: "保存" }).first();
@@ -89,7 +99,6 @@ test.describe("分类设置", () => {
 
   test("create exposes a stable busy state", async ({ page }) => {
     await openTab(page, "分类设置");
-    await page.getByLabel("稳定标识", { exact: false }).fill("synthetic_new");
     await page.getByLabel("显示编号", { exact: true }).fill("C");
     await page.getByLabel("分类名称", { exact: true }).fill("合成新增分类");
     const create = page.getByRole("button", { name: "新增分类" });

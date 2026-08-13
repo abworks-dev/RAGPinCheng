@@ -18,7 +18,7 @@ export function AdminCategoriesPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ category_key: "", parent_id: "", display_code: "", display_name: "", sort_order: "0" });
+  const [form, setForm] = useState({ parent_id: "", display_code: "", display_name: "", sort_order: "0" });
 
   const load = useCallback(async (refresh = false) => {
     refresh ? setRefreshing(true) : setLoading(true);
@@ -40,13 +40,12 @@ export function AdminCategoriesPage() {
     setSaving(true);
     try {
       await api.createManagedCategory({
-        category_key: form.category_key.trim(),
         parent_id: form.parent_id || null,
         display_code: form.display_code.trim(),
         display_name: form.display_name.trim(),
         sort_order: Number(form.sort_order) || 0,
       });
-      setForm({ category_key: "", parent_id: "", display_code: "", display_name: "", sort_order: "0" });
+      setForm({ parent_id: "", display_code: "", display_name: "", sort_order: "0" });
       await load(true);
       toast.success("分类已创建");
     } catch (createError) {
@@ -71,15 +70,12 @@ export function AdminCategoriesPage() {
     {error && <ErrorState title="分类设置加载失败" description={error} action={<Button variant="outline" size="sm" onClick={() => void load()}>重新加载</Button>} />}
 
     <section className="order-2 space-y-4 border-y border-border py-5 lg:order-1" aria-labelledby="new-category-title">
-      <div><h2 id="new-category-title" className="text-ui-base font-semibold">新增分类</h2><p className="mt-1 text-ui-xs text-muted-foreground">稳定标识创建后用于系统关联，建议使用简短英文和下划线，日常管理主要使用编号和名称。</p></div>
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5 xl:items-end">
-        <Field label="稳定标识" hint="系统内部使用">
-          <Input value={form.category_key} onChange={(event) => setForm({ ...form, category_key: event.target.value })} placeholder="company_standards" />
-        </Field>
+      <div><h2 id="new-category-title" className="text-ui-base font-semibold">新增分类</h2><p className="mt-1 text-ui-xs text-muted-foreground">分类最多四级；稳定标识由系统自动生成。</p></div>
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4 xl:items-end">
         <Field label="显示编号"><Input value={form.display_code} onChange={(event) => setForm({ ...form, display_code: event.target.value })} placeholder="例如 03" /></Field>
         <Field label="分类名称"><Input value={form.display_name} onChange={(event) => setForm({ ...form, display_name: event.target.value })} placeholder="例如 公司内部标准" /></Field>
         <Field label="父分类"><Select value={form.parent_id} onChange={(event) => setForm({ ...form, parent_id: event.target.value })}><option value="">一级分类</option>{categories.filter((item) => item.is_active && item.level < 4).map((item) => <option key={item.id} value={item.id}>{item.display_code} {item.display_name}</option>)}</Select></Field>
-        <Button className="w-full" onClick={() => void create()} disabled={saving || !form.category_key.trim() || !form.display_code.trim() || !form.display_name.trim()}><Plus className="size-4" />{saving ? "新增中…" : "新增分类"}</Button>
+        <Button className="w-full" onClick={() => void create()} disabled={saving || !form.display_code.trim() || !form.display_name.trim()}><Plus className="size-4" />{saving ? "新增中…" : "新增分类"}</Button>
       </div>
     </section>
 
@@ -115,14 +111,14 @@ function CategoryEditor({ category, onSaved }: { category: ManagedCategory; onSa
 
   return <article className="space-y-4 py-4">
     <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-      <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h3 className="font-medium">{category.display_code} {category.display_name}</h3><Badge variant={active ? "success" : "secondary"}>{active ? "启用" : "停用"}</Badge><Badge variant="outline">第 {category.level} 级</Badge></div><p className="mt-1 break-all text-ui-xs text-muted-foreground">稳定标识：<span className="font-mono">{category.category_key}</span></p></div>
+      <div className="min-w-0" style={{ paddingLeft: `${Math.max(0, category.level - 1) * 16}px` }}><div className="flex flex-wrap items-center gap-2"><h3 className="font-medium">{category.display_code} {category.display_name}</h3><Badge variant={active ? "success" : "secondary"}>{active ? "启用" : "停用"}</Badge><Badge variant="outline">第 {category.level} 级</Badge><Badge variant="secondary">{category.item_count} 份资料</Badge></div><p className="mt-1 break-words text-ui-xs text-muted-foreground">{category.full_path || `${category.display_code} ${category.display_name}`}</p></div>
       <Button size="sm" variant="outline" className="w-full sm:w-auto" onClick={() => void save()} disabled={saving || !code.trim() || !name.trim()}><Save className="size-4" />{saving ? "保存中…" : "保存"}</Button>
     </div>
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[10rem_minmax(12rem,1fr)_8rem_auto] lg:items-end">
       <Field label="编号"><Input aria-label={`编辑${category.display_name}的编号`} value={code} onChange={(event) => setCode(event.target.value)} /></Field>
       <Field label="显示名称"><Input aria-label={`编辑${category.display_name}的显示名称`} value={name} onChange={(event) => setName(event.target.value)} /></Field>
       <Field label="排序"><Input aria-label={`编辑${category.display_name}的排序`} type="number" value={sortOrder} onChange={(event) => setSortOrder(event.target.value)} /></Field>
-      <label className="flex h-control-md cursor-pointer items-center gap-2 text-ui-sm font-medium"><Checkbox aria-label={`${category.display_name}启用`} checked={active} onChange={(event) => setActive(event.target.checked)} />启用分类</label>
+      <label className="flex h-control-md cursor-pointer items-center gap-2 text-ui-sm font-medium"><Checkbox aria-label={`${category.display_name}启用`} checked={active} disabled={category.item_count > 0 && active} onChange={(event) => setActive(event.target.checked)} />启用分类</label>
     </div>
   </article>;
 }
