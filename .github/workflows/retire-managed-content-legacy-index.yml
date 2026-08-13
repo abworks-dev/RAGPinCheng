@@ -242,8 +242,44 @@ jobs:
           rm "${DATA_PATH}/${RUN_ID}-retirement-plan.json"
 
           "${COMPOSE[@]}" exec -T backend curl -fsS http://localhost:8000/api/health >/dev/null
-          "${COMPOSE[@]}" exec -T backend curl -fsS \
-            http://qdrant:6333/collections/pincheng_docs > "${RUN_ROOT}/qdrant-after.json"
+          EXPECTED_POINTS_AFTER="$(RUN_ROOT_ENV="${RUN_ROOT}" python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          root = Path(os.environ["RUN_ROOT_ENV"])
+          before = json.loads((root / "qdrant-before.json").read_text(encoding="utf-8"))["result"]
+          plan = json.loads((root / "retirement-plan.json").read_text(encoding="utf-8"))
+          print(int(before["points_count"]) - int(plan["candidates"]["point_count"]))
+          PY
+          )"
+          QDRANT_READY=0
+          for ATTEMPT in $(seq 1 60); do
+            "${COMPOSE[@]}" exec -T backend curl -fsS \
+              http://qdrant:6333/collections/pincheng_docs > "${RUN_ROOT}/qdrant-after.json"
+            QDRANT_STATE="$(RUN_ROOT_ENV="${RUN_ROOT}" EXPECTED_POINTS="${EXPECTED_POINTS_AFTER}" python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          result = json.loads((Path(os.environ["RUN_ROOT_ENV"]) / "qdrant-after.json").read_text())["result"]
+          if int(result.get("points_count")) != int(os.environ["EXPECTED_POINTS"]):
+              raise SystemExit("Qdrant deletion count mismatch")
+          print(result.get("status") or "unknown")
+          PY
+            )"
+            if [ "${QDRANT_STATE}" = "green" ]; then
+              QDRANT_READY=1
+              break
+            fi
+            [ "${QDRANT_STATE}" = "yellow" ] || {
+              echo "ERROR: unexpected Qdrant state after T11 deletion"
+              exit 1
+            }
+            sleep 5
+          done
+          [ "${QDRANT_READY}" -eq 1 ] || {
+            echo "ERROR: Qdrant did not return to green after T11 deletion"
+            exit 1
+          }
           RUN_ROOT_ENV="${RUN_ROOT}" REPORT="${REPORT_ROOT}/summary.json" python3 - <<'PY'
           import json
           import os
