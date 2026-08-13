@@ -1,0 +1,291 @@
+name: Retire Managed Content Legacy Index T11
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_production:
+        description: Select RETIRE_LEGACY_INDEX_T11 to remove only the frozen legacy index IDs
+        required: true
+        default: CANCEL
+        type: choice
+        options:
+          - CANCEL
+          - RETIRE_LEGACY_INDEX_T11
+      expected_commit:
+        description: Full deployed master commit approved for T11
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: managed-content-production
+  cancel-in-progress: false
+
+jobs:
+  retire:
+    environment: production-asr
+    runs-on: [self-hosted, linux, ubuntu, production, app]
+    timeout-minutes: 120
+    env:
+      REPO_PATH: ${{ vars.PRODUCTION_APP_REPO_PATH }}
+      DATA_PATH: ${{ vars.PRODUCTION_APP_DATA_PATH }}
+      BACKUP_ROOT: ${{ vars.PRODUCTION_APP_BACKUP_DIRECTORY }}
+      CONTENT_ROOT: ${{ vars.PRODUCTION_CONTENT_ROOT }}
+      COMPOSE_OVERRIDE: ${{ vars.PRODUCTION_APP_COMPOSE_OVERRIDE }}
+      COMPOSE_ENV_FILE: ${{ vars.PRODUCTION_APP_ENV_FILE }}
+      EXPECTED_COMMIT: ${{ inputs.expected_commit }}
+      CONFIRM_PRODUCTION: ${{ inputs.confirm_production }}
+      EXPECTED_HEAD_ENFORCEMENT: ${{ vars.CONTENT_HEAD_ENFORCEMENT }}
+    steps:
+      - name: Plan, back up, retire, and strictly verify T11
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          [ "${CONFIRM_PRODUCTION}" = "RETIRE_LEGACY_INDEX_T11" ] || {
+            echo "ERROR: T11 production retirement was not confirmed"
+            exit 1
+          }
+          [[ "${EXPECTED_COMMIT}" =~ ^[0-9a-f]{40}$ ]]
+          [ "${GITHUB_REF}" = "refs/heads/master" ]
+          [ "${GITHUB_SHA}" = "${EXPECTED_COMMIT}" ]
+          [ "${EXPECTED_HEAD_ENFORCEMENT}" = "compat" ]
+          [ "${REPO_PATH}" = "/data/workspace/projects/ragpincheng" ]
+          [ "${DATA_PATH}" = "/data/services/docker/data/ragpincheng/prod/app" ]
+          [ "${BACKUP_ROOT}" = "/data/backup/databases/ragpincheng" ]
+          [ "${CONTENT_ROOT}" = "/data/business/ragpincheng/content" ]
+          [ "${COMPOSE_OVERRIDE}" = "/data/services/docker/compose/ragpincheng/prod/compose.prod.yaml" ]
+          [ "${COMPOSE_ENV_FILE}" = "/data/secrets/ragpincheng/prod.env" ]
+
+          EXPECTED_HEAD_COUNT=117
+          RUN_ID="t11-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          RUN_ROOT="${BACKUP_ROOT}/${RUN_ID}"
+          REPORT_ROOT="${RUNNER_TEMP}/${RUN_ID}-summary"
+          PLAN_PATH="${RUN_ROOT}/retirement-plan.json"
+          COMPOSE=(docker compose -p ragpincheng-prod -f "${REPO_PATH}/docker/docker-compose.yml" -f "${COMPOSE_OVERRIDE}" --env-file "${COMPOSE_ENV_FILE}")
+          MUTATED=0
+
+          for path in "${REPO_PATH}" "${DATA_PATH}" "${BACKUP_ROOT}" "${CONTENT_ROOT}"; do
+            [ -d "${path}" ] && [ ! -L "${path}" ] || {
+              echo "ERROR: required path is not a real directory"
+              exit 1
+            }
+          done
+          [ "$(git -C "${REPO_PATH}" branch --show-current)" = "master" ]
+          [ -z "$(git -C "${REPO_PATH}" status --porcelain --untracked-files=no)" ]
+          git -C "${REPO_PATH}" fetch --no-tags origin master
+          [ "$(git -C "${REPO_PATH}" rev-parse origin/master)" = "${EXPECTED_COMMIT}" ]
+          [ "$(git -C "${REPO_PATH}" rev-parse HEAD)" = "${EXPECTED_COMMIT}" ]
+
+          [ -e "${BACKUP_ROOT}/.managed-content-t9.lock" ]
+          [ -e "${BACKUP_ROOT}/.production-app-deploy.lock" ]
+          exec 9>"${BACKUP_ROOT}/.managed-content-t9.lock"
+          flock -n 9 || { echo "ERROR: another managed-content operation is active"; exit 1; }
+          exec 8>"${BACKUP_ROOT}/.production-app-deploy.lock"
+          flock -n 8 || { echo "ERROR: an application deployment is active"; exit 1; }
+
+          [ ! -e "${RUN_ROOT}" ]
+          mkdir -m 700 "${RUN_ROOT}" "${REPORT_ROOT}"
+
+          "${COMPOSE[@]}" exec -T backend curl -fsS \
+            http://qdrant:6333/collections/pincheng_docs > "${RUN_ROOT}/qdrant-before.json"
+          DATABASE_BYTES="$(du -cb "${DATA_PATH}/app.sqlite" "${DATA_PATH}/parents.sqlite" | awk 'END {print $1}')"
+          QDRANT_BYTES="$(RUN_ROOT_ENV="${RUN_ROOT}" python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          payload = json.loads((Path(os.environ["RUN_ROOT_ENV"]) / "qdrant-before.json").read_text())
+          result = payload.get("result", {})
+          if payload.get("status") != "ok" or result.get("status") != "green":
+              raise SystemExit("Qdrant collection is not green")
+          print(int(result.get("disk_data_size") or 0))
+          PY
+          )"
+          FREE_BYTES="$(df -PB1 "${BACKUP_ROOT}" | awk 'NR==2 {print $4}')"
+          REQUIRED_BYTES=$((DATABASE_BYTES + QDRANT_BYTES + 2147483648))
+          [ "${FREE_BYTES}" -ge "${REQUIRED_BYTES}" ] || {
+            echo "ERROR: insufficient independent backup capacity"
+            exit 1
+          }
+
+          restore_t11() {
+            set +e
+            echo "T11_ROLLBACK status=starting"
+            ROLLBACK_FILE="/tmp/${RUN_ID}.snapshot"
+            BACKEND_CONTAINER="$("${COMPOSE[@]}" ps -q backend)"
+            docker cp "${RUN_ROOT}/qdrant.snapshot" "${BACKEND_CONTAINER}:${ROLLBACK_FILE}"
+            "${COMPOSE[@]}" exec -T backend curl -fsS --max-time 1800 -X POST \
+              "http://qdrant:6333/collections/pincheng_docs/snapshots/upload?priority=snapshot" \
+              -F "snapshot=@${ROLLBACK_FILE}" > "${RUN_ROOT}/qdrant-rollback.json"
+            "${COMPOSE[@]}" exec -T backend rm -f "${ROLLBACK_FILE}"
+            "${COMPOSE[@]}" stop backend
+            SRC="${RUN_ROOT}" DST="${DATA_PATH}" python3 - <<'PY'
+          import os
+          import sqlite3
+          from pathlib import Path
+
+          source = Path(os.environ["SRC"])
+          destination = Path(os.environ["DST"])
+          for name in ("parents.sqlite",):
+              with sqlite3.connect(f"file:{source / name}?mode=ro", uri=True) as backup:
+                  if backup.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                      raise SystemExit(f"invalid rollback backup: {name}")
+                  with sqlite3.connect(destination / name) as current:
+                      backup.backup(current)
+                      if current.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                          raise SystemExit(f"rollback integrity failed: {name}")
+          PY
+            "${COMPOSE[@]}" up -d --no-deps backend
+            HEALTH_STATUS=""
+            for ATTEMPT in $(seq 1 36); do
+              HEALTH_STATUS="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' \
+                "$("${COMPOSE[@]}" ps -q backend)" 2>/dev/null || true)"
+              [ "${HEALTH_STATUS}" = "healthy" ] && break
+              sleep 5
+            done
+            [ "${HEALTH_STATUS}" = "healthy" ]
+            "${COMPOSE[@]}" exec -T backend curl -fsS \
+              http://qdrant:6333/collections/pincheng_docs > "${RUN_ROOT}/qdrant-after-rollback.json"
+            RUN_ROOT_ENV="${RUN_ROOT}" python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["RUN_ROOT_ENV"])
+          before = json.loads((root / "qdrant-before.json").read_text(encoding="utf-8"))["result"]
+          after = json.loads((root / "qdrant-after-rollback.json").read_text(encoding="utf-8"))["result"]
+          assert after.get("status") == "green"
+          assert after.get("points_count") == before.get("points_count")
+          PY
+            echo "T11_ROLLBACK status=complete"
+          }
+
+          on_exit() {
+            status=$?
+            if [ "${status}" -ne 0 ] && [ "${MUTATED}" -eq 1 ]; then
+              restore_t11 || echo "T11_ROLLBACK status=failed"
+            fi
+            exit "${status}"
+          }
+          trap on_exit EXIT
+
+          "${COMPOSE[@]}" exec -T backend python scripts/plan_legacy_index_retirement.py \
+            --app-database /app/data/app.sqlite \
+            --parents-database /app/data/parents.sqlite \
+            --qdrant-url http://qdrant:6333 \
+            --legacy-docs-root /app/docs \
+            --expected-head-count "${EXPECTED_HEAD_COUNT}" \
+            --output "/app/data/${RUN_ID}-retirement-plan.json" \
+            > "${RUN_ROOT}/plan-result.json"
+          mv "${DATA_PATH}/${RUN_ID}-retirement-plan.json" "${PLAN_PATH}"
+          PLAN_SHA256="$(RUN_ROOT_ENV="${RUN_ROOT}" python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          print(json.loads((Path(os.environ["RUN_ROOT_ENV"]) / "plan-result.json").read_text())["plan_sha256"])
+          PY
+          )"
+          [[ "${PLAN_SHA256}" =~ ^[0-9a-f]{64}$ ]]
+
+          SRC="${DATA_PATH}" DST="${RUN_ROOT}" python3 - <<'PY'
+          import os
+          import sqlite3
+          from pathlib import Path
+
+          source = Path(os.environ["SRC"])
+          destination = Path(os.environ["DST"])
+          for name in ("app.sqlite", "parents.sqlite"):
+              with sqlite3.connect(f"file:{source / name}?mode=ro", uri=True) as current:
+                  if current.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                      raise SystemExit(f"source integrity failed: {name}")
+                  with sqlite3.connect(destination / name) as backup:
+                      current.backup(backup)
+                      if backup.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                          raise SystemExit(f"backup integrity failed: {name}")
+              print(f"T11_BACKUP status=ok database={name}")
+          PY
+          "${COMPOSE[@]}" exec -T backend curl -fsS -X POST \
+            http://qdrant:6333/collections/pincheng_docs/snapshots \
+            > "${RUN_ROOT}/qdrant-snapshot.json"
+          SNAPSHOT_NAME="$(RUN_ROOT_ENV="${RUN_ROOT}" python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          payload = json.loads((Path(os.environ["RUN_ROOT_ENV"]) / "qdrant-snapshot.json").read_text())
+          name = payload.get("result", {}).get("name")
+          if payload.get("status") != "ok" or not name:
+              raise SystemExit("invalid Qdrant snapshot response")
+          print(name)
+          PY
+          )"
+          "${COMPOSE[@]}" exec -T backend curl -fsS --max-time 1800 \
+            "http://qdrant:6333/collections/pincheng_docs/snapshots/${SNAPSHOT_NAME}" \
+            > "${RUN_ROOT}/qdrant.snapshot"
+          [ -s "${RUN_ROOT}/qdrant.snapshot" ]
+          echo "T11_BACKUP status=complete path=${RUN_ROOT}"
+
+          cp "${PLAN_PATH}" "${DATA_PATH}/${RUN_ID}-retirement-plan.json"
+          MUTATED=1
+          "${COMPOSE[@]}" exec -T backend python scripts/apply_legacy_index_retirement.py \
+            --app-database /app/data/app.sqlite \
+            --parents-database /app/data/parents.sqlite \
+            --qdrant-url http://qdrant:6333 \
+            --plan "/app/data/${RUN_ID}-retirement-plan.json" \
+            --expected-plan-sha256 "${PLAN_SHA256}" \
+            --confirm RETIRE_LEGACY_INDEX_T11 > "${RUN_ROOT}/apply-result.json"
+          rm "${DATA_PATH}/${RUN_ID}-retirement-plan.json"
+
+          "${COMPOSE[@]}" exec -T backend curl -fsS http://localhost:8000/api/health >/dev/null
+          "${COMPOSE[@]}" exec -T backend curl -fsS \
+            http://qdrant:6333/collections/pincheng_docs > "${RUN_ROOT}/qdrant-after.json"
+          RUN_ROOT_ENV="${RUN_ROOT}" REPORT="${REPORT_ROOT}/summary.json" python3 - <<'PY'
+          import json
+          import os
+          import sqlite3
+          from pathlib import Path
+
+          root = Path(os.environ["RUN_ROOT_ENV"])
+          plan = json.loads((root / "retirement-plan.json").read_text(encoding="utf-8"))
+          result = json.loads((root / "apply-result.json").read_text(encoding="utf-8"))
+          before = json.loads((root / "qdrant-before.json").read_text(encoding="utf-8"))["result"]
+          after = json.loads((root / "qdrant-after.json").read_text(encoding="utf-8"))["result"]
+          candidates = plan["candidates"]
+          if after.get("status") != "green":
+              raise SystemExit("Qdrant collection is not green")
+          if before.get("points_count") - after.get("points_count") != candidates["point_count"]:
+              raise SystemExit("Qdrant deletion count mismatch")
+          if result != {
+              "status": "retired",
+              "parents_deleted": candidates["parent_count"],
+              "points_deleted": candidates["point_count"],
+          }:
+              raise SystemExit("T11 apply result mismatch")
+          for name in ("app.sqlite", "parents.sqlite"):
+              with sqlite3.connect(f"file:/data/services/docker/data/ragpincheng/prod/app/{name}?mode=ro", uri=True) as db:
+                  if db.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                      raise SystemExit(f"post-retirement integrity failed: {name}")
+          summary = {
+              "schema_version": 1,
+              "status": "retired",
+              "managed_versions_preserved": plan["managed"]["version_count"],
+              "parents_deleted": candidates["parent_count"],
+              "points_deleted": candidates["point_count"],
+              "qdrant_points_before": before.get("points_count"),
+              "qdrant_points_after": after.get("points_count"),
+          }
+          Path(os.environ["REPORT"]).write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+          PY
+          chmod -R go-rwx "${RUN_ROOT}" "${REPORT_ROOT}"
+          MUTATED=0
+          trap - EXIT
+          echo "T11_RETIRE status=success managed=${EXPECTED_HEAD_COUNT} plan_sha256=${PLAN_SHA256}"
+
+      - name: Upload redacted T11 summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: managed-content-t11-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/t11-${{ github.run_id }}-${{ github.run_attempt }}-summary
+          if-no-files-found: error
+          retention-days: 30
