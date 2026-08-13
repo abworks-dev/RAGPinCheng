@@ -74,7 +74,10 @@ test.describe("资料库", () => {
     await expect(page.locator("p:visible", { hasText: "共尝试 4 次" })).toBeVisible();
     const failedTitle = page.getByText("培训资料发布演练", { exact: true }).filter({ visible: true });
     const failedItem = page.viewportSize()!.width < 1024 ? failedTitle.locator("xpath=ancestor::li") : failedTitle.locator("xpath=ancestor::tr");
-    await expect(failedItem.getByRole("button", { name: "发布" })).toBeDisabled();
+    const republish = failedItem.getByRole("button", { name: "重新发布" });
+    await expect(republish).toBeEnabled();
+    await republish.click();
+    await expect(failedItem.getByRole("button", { name: "发布中…" })).toBeDisabled();
     await expectNoBodyOverflow(page);
   });
 });
