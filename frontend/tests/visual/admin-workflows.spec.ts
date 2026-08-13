@@ -67,7 +67,7 @@ test.describe("资料库", () => {
   });
 
   test("publication failure stays readable and actionable", async ({ page }) => {
-    await openTab(page, "资料库");
+    await openTab(page, "资料库", "publication_failure");
     await page.locator("select").filter({ has: page.locator('option[value="publication_failed"]') }).selectOption("publication_failed");
     await expect(page.locator("p:visible", { hasText: "PDF 需要密码才能解析。" })).toBeVisible();
     await expect(page.locator("p:visible", { hasText: "请上传已解除密码保护的 PDF。" })).toBeVisible();

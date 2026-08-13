@@ -1,6 +1,6 @@
 import type { Page, Route } from "@playwright/test";
 
-export type AdminScenario = "normal" | "loading" | "empty" | "error" | "disabled";
+export type AdminScenario = "normal" | "loading" | "empty" | "error" | "disabled" | "publication_failure";
 export type WorkspaceUser = "admin" | "bim_engineer" | "member";
 
 const admin = {
@@ -48,9 +48,9 @@ export const items = [
   source_origin: index === 4 ? "legacy" : "web",
   source_batch_id: null,
   is_current: true,
-  latest_publication_status: status === "publication_failed" ? "failed" : null,
-  publication_attempt_count: status === "publication_failed" ? 4 : 0,
-  publication_failure: status === "publication_failed" ? { code: "pdf_password_required", message: "PDF 需要密码才能解析。", retryable: false, recommended_action: "请上传已解除密码保护的 PDF。" } : null,
+  latest_publication_status: null,
+  publication_attempt_count: 0,
+  publication_failure: null,
   created_at: 1700000000,
   updated_at: 1700000000,
 }));
@@ -104,7 +104,7 @@ export async function installAdminRoutes(page: Page, scenario: AdminScenario = "
       return json(route, scenario === "empty" ? [] : categories);
     }
     if (path === "/api/admin/content/items-page") {
-      const rows = scenario === "empty" ? [] : items;
+      const rows = scenario === "empty" ? [] : items.map((item) => item.lifecycle_status === "publication_failed" && scenario === "publication_failure" ? { ...item, latest_publication_status: "failed", publication_attempt_count: 4, publication_failure: { code: "pdf_password_required", message: "PDF 需要密码才能解析。", retryable: false, recommended_action: "请上传已解除密码保护的 PDF。" } } : item);
       return json(route, { items: rows, total: rows.length, status_counts: rows.reduce<Record<string, number>>((counts, item) => ({ ...counts, [item.lifecycle_status]: (counts[item.lifecycle_status] || 0) + 1 }), {}) });
     }
     if (path === "/api/admin/content/index-jobs") {
