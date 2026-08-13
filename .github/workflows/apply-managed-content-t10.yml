@@ -76,7 +76,8 @@ jobs:
           RUN_ID="t10-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           RUN_ROOT="${BACKUP_ROOT}/${RUN_ID}"
           BATCH_ROOT="${CONTENT_ROOT}/inbox/server/${RUN_ID}"
-          MANIFEST_PATH="${RUN_ROOT}/staging-manifest.json"
+          PLAN_STAGED="${CONTENT_ROOT}/manifests/${RUN_ID}-plan.json"
+          MANIFEST_PATH="${CONTENT_ROOT}/manifests/${RUN_ID}-staging-manifest.json"
           REPORT_ROOT="${RUNNER_TEMP}/${RUN_ID}-summary"
           COMPOSE=(docker compose -p ragpincheng-prod -f "${REPO_PATH}/docker/docker-compose.yml" -f "${COMPOSE_OVERRIDE}" --env-file "${COMPOSE_ENV_FILE}")
 
@@ -117,6 +118,7 @@ jobs:
           }
 
           [ ! -e "${RUN_ROOT}" ] && [ ! -e "${BATCH_ROOT}" ]
+          [ ! -e "${PLAN_STAGED}" ] && [ ! -e "${MANIFEST_PATH}" ]
           SOURCE_BYTES="$(du -sb "${CONTENT_ROOT}" "${DATA_PATH}" | awk '{sum += $1} END {print sum + 0}')"
           FREE_BYTES="$(df -PB1 "${BACKUP_ROOT}" | awk 'NR==2 {print $4}')"
           REQUIRED_BYTES=$((SOURCE_BYTES + 3221225472))
@@ -188,25 +190,26 @@ jobs:
             "${CONTENT_ROOT}/" "${RUN_ROOT}/content/" > "${RUN_ROOT}/content-verification.txt"
           [ ! -s "${RUN_ROOT}/content-verification.txt" ]
 
+          cp --preserve=mode,timestamps "${PLAN_PATH}" "${PLAN_STAGED}"
           python3 "${REPO_PATH}/scripts/stage_legacy_content_t10.py" \
             --docs-root "${DOCS_ROOT}" \
-            --plan "${PLAN_PATH}" \
+            --plan "${PLAN_STAGED}" \
             --database "${DATA_PATH}/app.sqlite" \
             --expected-plan-sha256 "${APPROVED_PLAN_SHA256}" \
             --expected-count "${EXPECTED_COUNT}" \
             --destination "${BATCH_ROOT}" \
             --manifest "${MANIFEST_PATH}"
 
-          APP_DB_PATH="${DATA_PATH}/app.sqlite" CONTENT_ROOT="${CONTENT_ROOT}" \
-            python3 "${REPO_PATH}/scripts/apply_legacy_content_t10.py" \
-            --staged-root "${BATCH_ROOT}" \
-            --plan "${PLAN_PATH}" \
-            --manifest "${MANIFEST_PATH}" \
+          "${COMPOSE[@]}" exec -T backend python scripts/apply_legacy_content_t10.py \
+            --staged-root "/app/content/inbox/server/${RUN_ID}" \
+            --plan "/app/content/manifests/${RUN_ID}-plan.json" \
+            --manifest "/app/content/manifests/${RUN_ID}-staging-manifest.json" \
             --expected-plan-sha256 "${APPROVED_PLAN_SHA256}" \
             --expected-count "${EXPECTED_COUNT}" \
             --actor-user-id "${ACTOR_USER_ID}" \
             --batch-storage-rel-path "inbox/server/${RUN_ID}" \
             --confirm APPLY_T10 > "${RUN_ROOT}/apply-result.json"
+          cp --preserve=mode,timestamps "${PLAN_STAGED}" "${MANIFEST_PATH}" "${RUN_ROOT}/"
 
           DATABASE="${DATA_PATH}/app.sqlite" RUN_ID_ENV="${RUN_ID}" REPORT="${REPORT_ROOT}/summary.json" python3 - <<'PY'
           import json
