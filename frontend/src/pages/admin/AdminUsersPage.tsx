@@ -249,13 +249,13 @@ export function AdminUsersPage() {
 }
 
 function PermissionSummary({ user, groups }: { user: AdminUser; groups: ContentPermissionGroup[] }) {
-  if (user.role === "admin") return <Badge variant="info">系统管理员 · 全部权限</Badge>;
+  if (user.role === "admin") return <div className="space-y-1"><Badge variant="info">系统管理员 · 全部权限</Badge><p className="text-ui-xs text-muted-foreground">完整管理工作台</p></div>;
   const permissions = user.content_permissions || [];
   const matched = groups.find((group) => group.is_active && samePermissions(group.permissions, permissions));
-  if (matched) return <Badge variant={permissions.length ? "outline" : "secondary"}>{matched.display_name}</Badge>;
-  if (!permissions.length) return <Badge variant="secondary">无资料权限</Badge>;
+  if (matched) return <div className="space-y-1"><Badge variant={permissions.length ? "outline" : "secondary"}>{matched.display_name}</Badge><p className="text-ui-xs text-muted-foreground">{permissions.length ? "可进入资料工作台" : "无工作台权限"}</p></div>;
+  if (!permissions.length) return <div className="space-y-1"><Badge variant="secondary">无资料权限</Badge><p className="text-ui-xs text-muted-foreground">无工作台权限</p></div>;
   const labels = permissionOptions.filter((item) => permissions.includes(item.key)).map((item) => item.label);
-  return <div className="flex flex-wrap items-center gap-1.5"><Badge variant="outline">自定义</Badge><span className="text-ui-xs text-muted-foreground" title={labels.join("、")}>{labels.slice(0, 2).join("、")}{labels.length > 2 ? ` +${labels.length - 2}` : ""}</span></div>;
+  return <div className="space-y-1"><div className="flex flex-wrap items-center gap-1.5"><Badge variant="outline">自定义</Badge><span className="text-ui-xs text-muted-foreground" title={labels.join("、")}>{labels.slice(0, 2).join("、")}{labels.length > 2 ? ` +${labels.length - 2}` : ""}</span></div><p className="text-ui-xs text-muted-foreground">可进入资料工作台</p></div>;
 }
 
 function PermissionDialog({ user, groups, onClose, onSaved }: { user: AdminUser | null; groups: ContentPermissionGroup[]; onClose: () => void; onSaved: () => Promise<void> }) {
@@ -298,7 +298,7 @@ function PermissionDialog({ user, groups, onClose, onSaved }: { user: AdminUser 
           </label>)}</div>
         </fieldset>
         <div className="rounded-ui-md bg-surface-muted px-3 py-2 text-ui-xs text-muted-foreground" role="status">
-          {user.role === "admin" ? "管理员默认拥有全部权限，不能单独取消。" : !user.is_active ? "账号已停用，权限保留但暂不能修改。" : permissions.length ? `保存后将拥有：${permissionOptions.filter((item) => permissions.includes(item.key)).map((item) => item.label).join("、")}` : "保存后将不拥有资料管理权限。"}
+          {user.role === "admin" ? "管理员默认拥有全部权限和完整管理工作台，不能单独取消。" : !user.is_active ? "账号已停用，权限保留但暂不能修改。" : permissions.length ? `保存后可进入资料工作台，并拥有：${permissionOptions.filter((item) => permissions.includes(item.key)).map((item) => item.label).join("、")}` : "保存后将不拥有资料权限，也不能进入资料工作台。"}
         </div>
       </div>
       <DialogFooter><Button variant="outline" onClick={onClose} disabled={saving}>取消</Button><Button onClick={() => void save()} disabled={disabled || saving || !changed}>{saving ? "保存中…" : "保存权限"}</Button></DialogFooter>

@@ -14,6 +14,7 @@ import { AdminUsersPage } from "./AdminUsersPage";
 import { AdminCategoriesPage } from "./AdminCategoriesPage";
 import { AdminManagedContentPage } from "./AdminManagedContentPage";
 import { useAuth } from "../../context/AuthContext";
+import { contentWorkspaceTabs, workspaceLabel } from "../../lib/workspace-access";
 
 type Tab = "users" | "conversations" | "corpus" | "managed" | "categories" | "media" | "stats" | "feedback";
 
@@ -35,10 +36,7 @@ export function AdminLayout() {
   const permissions = user?.content_permissions || [];
   const tabs = isAdmin
     ? adminTabs
-    : ([
-        ["managed", "资料工作流"],
-        ...(permissions.includes("manage_categories") ? [["categories", "分类设置"]] : []),
-      ] as [Tab, string][]);
+    : contentWorkspaceTabs(permissions).map((key) => [key, key === "managed" ? "资料工作流" : "分类设置"] as [Tab, string]);
   const [tab, setTab] = useState<Tab>(isAdmin ? "users" : "managed");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false);
@@ -65,10 +63,10 @@ export function AdminLayout() {
               onClick={() => setSidebarCollapsed(false)}
               className={cn("hidden size-9 items-center justify-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", sidebarCollapsed && "lg:flex")}
             >
-              <AppBrand subtitle="管理工作台" collapsed />
+              <AppBrand subtitle={user ? workspaceLabel(user) : "管理工作台"} collapsed />
             </button>
             <div className={cn("flex min-w-0 flex-1 items-center justify-between", sidebarCollapsed && "lg:hidden")}>
-                <AppBrand subtitle="管理工作台" />
+                <AppBrand subtitle={user ? workspaceLabel(user) : "管理工作台"} />
                 <div className="hidden lg:block">
                   <IconButton label="收起管理侧栏" onClick={() => setSidebarCollapsed(true)}>
                     <PanelLeftClose className="size-4" />

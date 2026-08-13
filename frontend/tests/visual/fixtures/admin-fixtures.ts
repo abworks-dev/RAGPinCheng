@@ -1,6 +1,7 @@
 import type { Page, Route } from "@playwright/test";
 
 export type AdminScenario = "normal" | "loading" | "empty" | "error" | "disabled";
+export type WorkspaceUser = "admin" | "bim_engineer" | "member";
 
 const admin = {
   id: 9001,
@@ -9,6 +10,12 @@ const admin = {
   role: "admin",
   csrf_token: "synthetic-csrf-token",
   content_permissions: ["organize", "review", "publish", "manage_categories", "import_server"],
+};
+
+const workspaceUsers = {
+  admin,
+  bim_engineer: { ...admin, id: 9002, employee_id: "TEST-EDITOR", real_name: "合成资料员", role: "user", content_permissions: ["organize"] },
+  member: { ...admin, id: 9003, employee_id: "TEST-MEMBER", real_name: "合成成员", role: "user", content_permissions: [] },
 };
 
 export const categories = [
@@ -61,7 +68,7 @@ function json(route: Route, body: unknown, status = 200) {
   return route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
 }
 
-export async function installAdminRoutes(page: Page, scenario: AdminScenario = "normal") {
+export async function installAdminRoutes(page: Page, scenario: AdminScenario = "normal", workspaceUser: WorkspaceUser = "admin") {
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -69,7 +76,9 @@ export async function installAdminRoutes(page: Page, scenario: AdminScenario = "
 
     if (!path.startsWith("/api/")) return route.continue();
 
-    if (path === "/api/auth/me") return json(route, admin);
+    if (path === "/api/auth/me") return json(route, workspaceUsers[workspaceUser]);
+    if (path === "/api/categories") return json(route, { categories: [], second_level_categories: [] });
+    if (path === "/api/conversations") return json(route, { conversations: [] });
     if (path === "/api/admin/users") return json(route, { users: permissionUsers.map((user) => ({
       id: user.user_id, employee_id: user.employee_id, real_name: user.real_name, role: user.role,
       is_active: user.is_active, created_at: 1700000000, last_login_at: 1700000000,

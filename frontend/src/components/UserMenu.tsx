@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import { ArrowLeft, ChevronUp, LogOut, Shield } from "lucide-react";
+import { ArrowLeft, BriefcaseBusiness, ChevronUp, LogOut } from "lucide-react";
+import { hasContentWorkspaceAccess, workspaceLabel } from "../lib/workspace-access";
 
 export function UserMenu({
   collapsed = false,
@@ -26,6 +27,7 @@ export function UserMenu({
 
   if (state.status !== "authed") return null;
   const u = state.user;
+  const canAccessWorkspace = hasContentWorkspaceAccess(u);
   const initials = (u.real_name || u.employee_id).slice(0, 1);
 
   return (
@@ -60,7 +62,7 @@ export function UserMenu({
               返回对话
             </button>
           ) : (
-            u.role === "admin" && (
+            canAccessWorkspace && (
               <button
                 type="button"
                 onClick={() => {
@@ -69,8 +71,8 @@ export function UserMenu({
                 }}
                 className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-left text-sm hover:bg-secondary"
               >
-                <Shield className="size-4" />
-                管理后台
+                <BriefcaseBusiness className="size-4" />
+                {workspaceLabel(u)}
               </button>
             )
           )}
