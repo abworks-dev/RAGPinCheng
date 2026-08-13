@@ -7,6 +7,7 @@ import { AdminDashboard } from "./pages/AdminDashboard";
 import { LoginPage } from "./pages/LoginPage";
 import { RegisterPage } from "./pages/RegisterPage";
 import { Toaster } from "./components/ui/toast";
+import { hasContentWorkspaceAccess } from "./lib/workspace-access";
 
 function FullPageLoader({ label }: { label: string }) {
   return (
@@ -27,7 +28,7 @@ function RequireAdmin({ children }: { children: JSX.Element }) {
   const { state } = useAuth();
   if (state.status === "loading") return <FullPageLoader label="正在恢复登录…" />;
   if (state.status !== "authed") return <Navigate to="/login" replace />;
-  if (state.user.role !== "admin" && (state.user.content_permissions?.length || 0) === 0) return <Navigate to="/" replace />;
+  if (!hasContentWorkspaceAccess(state.user)) return <Navigate to="/" replace />;
   return children;
 }
 

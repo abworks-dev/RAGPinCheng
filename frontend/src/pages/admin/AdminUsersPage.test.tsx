@@ -170,7 +170,7 @@ describe("AdminUsersPage", () => {
     render(<AdminUsersPage />);
     fireEvent.click(await screen.findByRole("button", { name: "管理 管理员" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "设置权限" }));
-    expect(screen.getByText("管理员默认拥有全部权限，不能单独取消。")).toBeInTheDocument();
+    expect(screen.getByText("管理员默认拥有全部权限和完整管理工作台，不能单独取消。")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "保存权限" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "取消" }));
 
