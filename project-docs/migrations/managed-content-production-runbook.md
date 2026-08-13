@@ -1,6 +1,6 @@
 # 受管知识资料库生产运行与旧资料迁移手册
 
-- 状态：117 份普通资料已登记待确认，尚未发布或切换
+- 状态：117 份普通资料已迁移发布，待旧索引下线验收
 - 适用环境：Ubuntu 生产应用节点
 - 当前基线日期：2026-08-13
 - 关联方案：`../plans/managed-content-library.md`
@@ -352,3 +352,20 @@ find /data/business/ragpincheng/content/views/current \
 - 不把旧媒体批量塞入普通资料导入脚本；
 - 不在观察期内删除旧 `source/docs`、`source/media` 或旧索引；
 - 不把 `compat` 改为 `strict`，直到旧资料迁移、正式 head 覆盖和检索回归均通过。
+
+## 12. T11 旧普通资料索引受控下线
+
+117 份普通资料全部发布后，旧目录索引不会自动覆盖或删除。生产仍保持 `compat`，因此同一资料的旧未版本化索引和新受管版本可能同时参与召回。T11 只清理与当前 117 个正式 `legacy` head 的 `source_rel_path` 精确对应的未版本化 Parent/Point，以及已归档的生成预览；不按 `content_version_id IS NULL` 全库删除，不处理教学/培训视频转录，不修改文件、内容对象、发布记录或正式 head。
+
+受控 workflow 为 `.github/workflows/retire-managed-content-legacy-index.yml`，固定确认词 `RETIRE_LEGACY_INDEX_T11`、完整生产 commit、117 个正式 head 和 `compat` 模式。执行前必须满足四类活动任务均为零，并生成冻结的 Parent ID/Point ID 清单。清单只保存在独立备份目录，公开 artifact 仅包含聚合计数。
+
+执行顺序为：
+
+1. 只读扫描 `app.sqlite`、`parents.sqlite` 和 Qdrant，核对每个正式版本均同时存在 Parent 与 Point；
+2. 创建 `app.sqlite`、`parents.sqlite` 一致性备份并下载独立 Qdrant collection snapshot；
+3. 在短暂数据库写锁内重算同一计划，任何 ID、计数或任务状态漂移都停止执行；
+4. 只按冻结 Point ID 分批删除 Qdrant，再按冻结 Parent ID 删除 `parents.sqlite`；
+5. 核对正式版本集合、删除数量、数据库完整性、Qdrant 绿色状态和后端健康；
+6. 删除后验证失败时，使用同一恢复点自动恢复 Qdrant 和 `parents.sqlite`。
+
+T11 成功后仍保留 `source/docs`、`source/media` 和受管对象至少 1 至 2 周。不得删除整个 `/data/business/ragpincheng/source`；旧视频链路继续使用 `source/media`，生产仓库和部署配置也必须按现行部署路径保留。观察期结束后的文件归档属于独立 T12 R3 操作。
