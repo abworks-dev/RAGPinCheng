@@ -10,7 +10,6 @@ from src.config import CONTENT_ROOT
 from src.ingest import PublicationParseError
 from src.index import EmbeddingInputTooLong
 from src.indexing_pipeline import ManagedIndexMetadata, index_managed_content
-from src.providers import GpuServiceInputTooLong
 
 from .content_storage import ContentStorage
 from .content_store import audit_event
@@ -162,7 +161,7 @@ def _classify_failure(exc: Exception, stage: str) -> str:
     message = str(exc)
     if isinstance(exc, EmbeddingInputTooLong) and exc.content_type == "formula":
         return "embedding_formula_too_long"
-    if isinstance(exc, (EmbeddingInputTooLong, GpuServiceInputTooLong)):
+    if isinstance(exc, EmbeddingInputTooLong):
         return "embedding_input_too_long"
     if isinstance(exc, PublicationParseError):
         return normalize_failure_code(exc.code) or "unknown_publication_failure"
