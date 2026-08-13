@@ -11,9 +11,6 @@ ROOT = Path(__file__).resolve().parents[1]
 class TestDeployGitSafety(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.workflow = (ROOT / ".github/workflows/deploy-production.yml").read_text(
-            encoding="utf-8"
-        )
         cls.emergency_workflow = (
             ROOT / ".github/workflows/deploy-production-emergency.yml"
         ).read_text(encoding="utf-8")
@@ -65,11 +62,6 @@ class TestDeployGitSafety(unittest.TestCase):
         )
         self.assertNotIn("qdrant", workflow.lower())
         self.assertNotIn("git merge", workflow)
-
-    def test_workflow_passes_manual_commit_to_both_jobs(self):
-        self.assertGreaterEqual(self.workflow.count("DEPLOY_COMMIT_SHA:"), 2)
-        self.assertGreaterEqual(self.workflow.count("DEPLOY_COMMIT_SHA: ${{ github.sha }}"), 2)
-        self.assertNotIn("github.event.workflow_run", self.workflow)
 
     def test_emergency_workflow_fails_visibly_without_explicit_confirmation(self):
         self.assertIn("name: Deploy Production Emergency", self.emergency_workflow)
@@ -259,16 +251,15 @@ class TestDeployGitSafety(unittest.TestCase):
             self.assertIn(f"{name}: ${{{name}:-", compose)
         self.assertIn("APP_ONLY_DEPLOY status=success", workflow)
         self.assertNotIn("GPU_SERVICE_TOKEN: ${{ vars.", workflow)
-        for production_workflow in (self.workflow, self.emergency_workflow):
-            self.assertIn(
-                "ASR_ENABLED: ${{ vars.ASR_ENABLED }}",
-                production_workflow,
-            )
-            self.assertIn(
-                "TRANSCRIPTION_ADMITTED_PROFILE_IDS: "
-                "${{ vars.TRANSCRIPTION_ADMITTED_PROFILE_IDS }}",
-                production_workflow,
-            )
+        self.assertIn(
+            "ASR_ENABLED: ${{ vars.ASR_ENABLED }}",
+            self.emergency_workflow,
+        )
+        self.assertIn(
+            "TRANSCRIPTION_ADMITTED_PROFILE_IDS: "
+            "${{ vars.TRANSCRIPTION_ADMITTED_PROFILE_IDS }}",
+            self.emergency_workflow,
+        )
 
     def test_app_only_workflow_only_removes_verified_legacy_recovery_backend(self):
         workflow = self.app_only_workflow
@@ -313,7 +304,6 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertIn("points_count", workflow)
         self.assertIn("http://localhost/admin", workflow)
         for production_workflow in (
-            self.workflow,
             self.emergency_workflow,
             self.app_only_workflow,
         ):
@@ -337,16 +327,16 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertIn("deployed HEAD mismatch", self.linux)
 
     def test_fetch_uses_process_local_http_header(self):
-        for text in (self.workflow, self.windows, self.linux):
+        for text in (self.emergency_workflow, self.windows, self.linux):
             self.assertIn("http.extraHeader=AUTHORIZATION: basic", text)
 
     def test_fetch_is_http11_proxy_aware_and_bounded(self):
-        self.assertIn("http.version=HTTP/1.1", self.workflow)
-        self.assertIn("1..4", self.workflow)
+        self.assertIn("http.version=HTTP/1.1", self.emergency_workflow)
+        self.assertIn("1..4", self.emergency_workflow)
         self.assertIn("http.version=HTTP/1.1", self.windows)
         self.assertIn("1..4", self.windows)
         self.assertIn("1 2 3 4", self.linux)
-        for text in (self.workflow, self.windows, self.linux):
+        for text in (self.emergency_workflow, self.windows, self.linux):
             self.assertNotIn("http.sslVerify=false", text)
             self.assertNotIn("git config --global http.proxy", text)
 

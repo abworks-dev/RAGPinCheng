@@ -4,7 +4,7 @@
 
 状态：部分实现。
 
-仓库已经具备D盘隔离依赖解析、运行时构建、CUDA候选验证、不可变release promotion和任务回滚代码。旧的4.55.4候选锁已证明不兼容并撤销；resolver run `31271343463` 从受保护的 `master` 重新生成并通过 `pip check` 的75项精确闭包，选定 FlagEmbedding `1.4.0`、transformers `4.57.6`、tokenizers `0.22.2` 与 Torch `2.7.0+cu128`，规范化锁 SHA-256 为 `fa16678de682e389e0f5ca89b180b2c033404e5e077ff539b552f8cde0430f1a`。`gpu_service/runtime-lock.json` 当前为 `candidate`，所有qualification字段仍为空，尚不能promotion。生产部署仅接受带显式确认的手动触发，不再由CI完成事件自动创建运行记录；GPU服务尚未恢复。
+仓库已经具备D盘隔离依赖解析、运行时构建、CUDA候选验证、不可变release promotion和任务回滚代码。旧的4.55.4候选锁已证明不兼容并撤销；resolver run `31271343463` 从受保护的 `master` 重新生成并通过 `pip check` 的75项精确闭包，选定 FlagEmbedding `1.4.0`、transformers `4.57.6`、tokenizers `0.22.2` 与 Torch `2.7.0+cu128`，规范化锁 SHA-256 为 `fa16678de682e389e0f5ca89b180b2c033404e5e077ff539b552f8cde0430f1a`。`gpu_service/runtime-lock.json` 当前为 `candidate`，所有qualification字段仍为空，尚不能promotion。原 `deploy-production.yml` 已因流程失效移除；生产部署仅保留带显式确认、完整 SHA 和生产 Git 前检的紧急手动入口，不再由CI完成事件自动创建运行记录；GPU服务尚未恢复。
 
 旧候选锁已在资格workflow run `31252065215` 上失败：`FlagEmbedding==1.4.0` 的M3加载路径向 `AutoModel.from_pretrained` 传入 `dtype`，该关键字自 `transformers` 4.56.0 才存在，而锁内为 `transformers==4.55.4`，fp16与fp32两次尝试都在 `embed_start` 阶段以 `TypeError: XLMRobertaModel.__init__() got an unexpected keyword argument 'dtype'` 终止。根因是解析约束 `tokenizers>=0.21,<0.22` 与 4.56 自身要求的 `tokenizers>=0.22` 不相交，因此在 `transformers>=4.47,<5` 名义允许4.56+的情况下仍被静默封顶到4.55.4；`pip check` 无法发现，因为FlagEmbedding元数据只声明 `transformers>=4.44.2,<6.0.0`。解析约束与资格门禁已按下文更新；新锁是 resolver 输出的完整闭包，不是手工改单行版本，但仍须通过 CUDA/S4U 双精度资格才可回填 validated 元数据。
 
@@ -23,8 +23,8 @@
 → qualify-gpu-runtime.ps1（CUDA FP16/FP32，不允许CPU）
 → 将run ID、候选commit、源码指纹和锁哈希回填为validated元数据
 
-手动 workflow_dispatch + confirm_production=true
-→ deploy-production.yml（生产确认门禁）
+手动 workflow_dispatch + 完整 master SHA + DEPLOY
+→ deploy-production-emergency.yml（生产确认与 Git 前检门禁）
 → deploy-gpu.ps1
 → 只复用已验证的候选release
 → promote-gpu-runtime.ps1
