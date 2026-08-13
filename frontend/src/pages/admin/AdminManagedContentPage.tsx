@@ -35,7 +35,7 @@ function statusVariant(status: string) {
 function PublicationFailure({ item }: { item: ManagedContentItem }) {
   const failure = item.publication_failure;
   if (!failure) return null;
-  return <div className="mt-2 max-w-md space-y-1 text-ui-xs text-destructive" role="alert"><p className="break-words">{failure.message}</p><p className="break-words text-muted-foreground">{failure.recommended_action}</p><p className="text-muted-foreground">{failure.retryable ? "可以重试" : "该问题不可通过重复发布解决"}{item.publication_attempt_count > 1 ? ` · 共尝试 ${item.publication_attempt_count} 次` : ""}</p></div>;
+  return <div className="mt-2 max-w-md space-y-1 text-ui-xs text-destructive" role="alert"><p className="break-words">{failure.message}</p><p className="break-words text-muted-foreground">{failure.recommended_action}</p><p className="break-words text-muted-foreground">{failure.retryable ? "可以重新发布" : "按原失败原因直接重试通常不会成功；系统或文件处理后可重新发布"}{item.publication_attempt_count > 1 ? ` · 共尝试 ${item.publication_attempt_count} 次` : ""}</p></div>;
 }
 
 type BulkAction = "approve" | "reject" | "publish";
@@ -128,7 +128,7 @@ export function AdminManagedContentPage() {
 
   const eligibleSelected = useMemo(() => {
     const allowed = bulkAction === "publish" ? new Set(["approved", "publication_failed"]) : new Set(["awaiting_review"]);
-    return items.filter((item) => selected.includes(item.version_id) && allowed.has(item.lifecycle_status) && !(bulkAction === "publish" && item.publication_failure?.retryable === false));
+    return items.filter((item) => selected.includes(item.version_id) && allowed.has(item.lifecycle_status));
   }, [bulkAction, items, selected]);
 
   const executeBulk = async () => {
@@ -159,7 +159,6 @@ export function AdminManagedContentPage() {
 
   const renderActions = (item: ManagedContentItem) => {
     const disabled = Boolean(busyAction) || refreshing || !enabled;
-    const publicationBlocked = item.publication_failure?.retryable === false;
     return <div className="flex min-h-control-sm flex-wrap gap-2 sm:justify-end"><PublicationFailure item={item} />
       <Button size="sm" variant="outline" disabled={disabled} onClick={() => setDetail(item)}><Eye className="size-4" />查看</Button>
       {can("organize") && ["draft", "rejected"].includes(item.lifecycle_status) && <Button size="sm" variant="outline" disabled={disabled} onClick={() => void act(item, "submit", () => api.submitManagedContent(item.version_id), "已提交确认")}><Send className="size-4" />{busyAction === `${item.version_id}:submit` ? "提交中…" : "提交"}</Button>}
@@ -167,7 +166,7 @@ export function AdminManagedContentPage() {
         <Button size="sm" disabled={disabled} onClick={() => void act(item, "approve", () => api.reviewManagedContent(item.version_id, true), "资料已确认")}><Check className="size-4" />{busyAction === `${item.version_id}:approve` ? "确认中…" : "确认"}</Button>
         <Button size="sm" variant="outline" disabled={disabled} onClick={() => void act(item, "reject", () => api.reviewManagedContent(item.version_id, false), "资料已退回")}><X className="size-4" />{busyAction === `${item.version_id}:reject` ? "退回中…" : "退回"}</Button>
       </>}
-      {can("publish") && ["approved", "publication_failed"].includes(item.lifecycle_status) && <Button size="sm" disabled={disabled || publicationBlocked} title={publicationBlocked ? item.publication_failure?.recommended_action : undefined} onClick={() => void act(item, "publish", () => api.publishManagedContent(item.version_id), "已进入发布队列")}><Rocket className="size-4" />{busyAction === `${item.version_id}:publish` ? "发布中…" : "发布"}</Button>}
+      {can("publish") && ["approved", "publication_failed"].includes(item.lifecycle_status) && <Button size="sm" disabled={disabled} onClick={() => void act(item, "publish", () => api.publishManagedContent(item.version_id), "已进入发布队列")}><Rocket className="size-4" />{busyAction === `${item.version_id}:publish` ? "发布中…" : item.lifecycle_status === "publication_failed" ? "重新发布" : "发布"}</Button>}
     </div>;
   };
 

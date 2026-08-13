@@ -176,14 +176,32 @@ describe("AdminManagedContentPage", () => {
     expect(screen.getAllByRole("checkbox", { name: "选择建模标准" })[0]).toBeChecked();
   });
 
-  it("shows the latest publication reason without exposing its code", async () => {
+  it("allows republishing after a non-retryable historical failure", async () => {
     mocks.permissions = ["publish"];
     mocks.items.mockResolvedValue({ items: [{ ...item, lifecycle_status: "publication_failed", publication_attempt_count: 4, publication_failure: { code: "pdf_password_required", message: "PDF 需要密码才能解析。", retryable: false, recommended_action: "请上传已解除密码保护的 PDF。" } }], total: 1, status_counts: { publication_failed: 1 } });
+    mocks.publish.mockResolvedValue({});
     render(<AdminManagedContentPage />);
     expect((await screen.findAllByText("PDF 需要密码才能解析。")).length).toBeGreaterThan(0);
     expect(screen.getAllByText("请上传已解除密码保护的 PDF。").length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/系统或文件处理后可重新发布/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/共尝试 4 次/).length).toBeGreaterThan(0);
     expect(screen.queryByText("pdf_password_required")).not.toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: "发布" })[0]).toBeDisabled();
+    const republish = screen.getAllByRole("button", { name: "重新发布" })[0];
+    expect(republish).toBeEnabled();
+    fireEvent.click(republish);
+    await waitFor(() => expect(mocks.publish).toHaveBeenCalledWith("version-1"));
+  });
+
+  it("includes non-retryable historical failures in bulk republish", async () => {
+    mocks.permissions = ["publish"];
+    mocks.items.mockResolvedValue({ items: [{ ...item, lifecycle_status: "publication_failed", publication_attempt_count: 2, publication_failure: { code: "parser_result_invalid", message: "文档解析结果无效。", retryable: false, recommended_action: "请确认文件内容完整。" } }], total: 1, status_counts: { publication_failed: 1 } });
+    mocks.bulkPublish.mockResolvedValue({ results: [{ version_id: "version-1", status: "succeeded", message: null, index_job_id: "job-3" }], succeeded: 1, failed: 0 });
+    render(<AdminManagedContentPage />);
+    await screen.findAllByText("文档解析结果无效。");
+    fireEvent.click(screen.getAllByRole("checkbox", { name: "选择建模标准" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "批量发布" }));
+    expect(screen.getByRole("dialog")).toHaveTextContent("本次将处理 1 份符合条件的资料。");
+    fireEvent.click(screen.getByRole("button", { name: "确认执行" }));
+    await waitFor(() => expect(mocks.bulkPublish).toHaveBeenCalledWith(["version-1"]));
   });
 });
