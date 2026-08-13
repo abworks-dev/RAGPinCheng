@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import logging
+import sqlite3
 import time
+
+import requests
 
 from src.config import CONTENT_ROOT
 from src.indexing_pipeline import ManagedIndexMetadata, index_managed_content
@@ -14,6 +17,32 @@ from .db import connect
 logger = logging.getLogger("api.content_publication")
 _storage = ContentStorage(CONTENT_ROOT)
 _ACTIVE_STATUSES = {"pending", "parsing", "chunking", "summarizing", "embedding"}
+_MANAGED_STATUS_MAP = {
+    "uploading": "parsing",
+    "queued_mineru": "parsing",
+    "parsing": "parsing",
+    "chunking": "chunking",
+    "summarizing": "summarizing",
+    "embedding": "embedding",
+}
+_FAILURE_SUMMARIES = {
+    "managed_source_unavailable": "资料源文件不可用，请检查内容存储后重试。",
+    "managed_parse_path_invalid": "资料解析目录不可用，请联系系统管理员检查存储配置。",
+    "parser_unavailable": "文档解析服务不可用，请恢复解析服务后重试。",
+    "parser_request_failed": "文档解析服务请求失败，请稍后重试。",
+    "parser_result_invalid": "文档解析结果无效，请检查文件后重试。",
+    "index_provider_failed": "向量索引服务写入失败，请恢复索引服务后重试。",
+    "index_storage_failed": "索引存储写入失败，请联系系统管理员检查存储。",
+    "backend_restarted": "后端重启时发布任务正在运行，已中止，请重试。",
+    "unknown_publication_failure": "资料发布索引失败，请在资料管理中重试。",
+}
+
+
+def normalize_failure_code(error_code: object) -> str | None:
+    if error_code is None:
+        return None
+    code = str(error_code)
+    return code if code in _FAILURE_SUMMARIES else "unknown_publication_failure"
 
 
 def _update_job(index_job_id: str, status: str, **fields: object) -> None:
@@ -70,8 +99,15 @@ def run_content_publication(index_job_id: str) -> None:
     finally:
         conn.close()
 
+    current_stage = "pending"
+
     def on_status(stage: str) -> None:
-        _update_job(index_job_id, stage)
+        nonlocal current_stage
+        managed_stage = _MANAGED_STATUS_MAP.get(stage)
+        if managed_stage is None:
+            raise ValueError("invalid_managed_index_status")
+        current_stage = managed_stage
+        _update_job(index_job_id, managed_stage)
 
     try:
         object_path = _storage.resolve_object(row["storage_rel_path"])
@@ -94,7 +130,28 @@ def run_content_publication(index_job_id: str) -> None:
         _promote(index_job_id)
     except Exception as exc:  # noqa: BLE001 - persisted failure keeps worker alive
         logger.exception("managed publication job %s failed", index_job_id)
-        _fail(index_job_id, type(exc).__name__)
+        _fail(index_job_id, _classify_failure(exc, current_stage))
+
+
+def _classify_failure(exc: Exception, stage: str) -> str:
+    message = str(exc)
+    if message == "managed_source_unavailable" or isinstance(exc, FileNotFoundError):
+        return "managed_source_unavailable"
+    if message in {"managed_parse_path_invalid", "parser_result_invalid"}:
+        return message
+    if message.startswith("mineru CLI not found"):
+        return "parser_unavailable"
+    if isinstance(exc, sqlite3.Error):
+        return "index_storage_failed"
+    if isinstance(exc, requests.RequestException):
+        return "parser_request_failed"
+    if stage == "parsing":
+        if isinstance(exc, (OSError, PermissionError)):
+            return "managed_parse_path_invalid"
+        return "parser_result_invalid"
+    if stage == "embedding":
+        return "index_provider_failed"
+    return "unknown_publication_failure"
 
 
 def _promote(index_job_id: str) -> None:
@@ -176,7 +233,8 @@ def _fail(index_job_id: str, error_code: str) -> None:
         if row is None:
             conn.rollback()
             return
-        summary = "资料发布索引失败，可在资料管理中重试。"
+        error_code = normalize_failure_code(error_code) or "unknown_publication_failure"
+        summary = _FAILURE_SUMMARIES[error_code]
         conn.execute(
             "UPDATE content_index_jobs SET status='failed',error_code=?,error_summary=?,finished_at=?,updated_at=? WHERE id=?",
             (error_code[:120], summary, now, now, index_job_id),

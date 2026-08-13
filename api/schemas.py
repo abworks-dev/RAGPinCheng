@@ -338,6 +338,7 @@ class ManagedIndexJobDTO(BaseModel):
     version_id: str
     attempt_number: int
     status: str
+    error_code: str | None
     error_summary: str | None
     created_at: int
     started_at: int | None

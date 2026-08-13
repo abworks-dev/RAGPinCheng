@@ -268,6 +268,9 @@ def test_review_publish_promotes_only_completed_candidate(tmp_path, monkeypatch)
     monkeypatch.setattr(content_publication, "_storage", storage)
 
     def fake_index(_path, _doc_type, _metadata, on_status):
+        on_status("uploading")
+        on_status("queued_mineru")
+        on_status("parsing")
         on_status("embedding")
         return IndexResult(parents=1, children=1)
 

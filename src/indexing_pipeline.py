@@ -15,7 +15,9 @@ indexing logic:
 from __future__ import annotations
 
 import logging
+import os
 import sqlite3
+import tempfile
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable, Literal
@@ -68,6 +70,29 @@ class ManagedIndexMetadata:
     category_display_name: str
     doc_title: str
     source_ref: str
+
+
+def _write_text_atomic(path: Path, content: str) -> None:
+    """Persist a parse cache without exposing a partial file to retries."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+            temporary = Path(handle.name)
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None and temporary.exists():
+            temporary.unlink()
 
 
 def _derive_category_and_company(source_path: Path) -> tuple[str, str | None]:
@@ -132,14 +157,26 @@ def _build_pdf_doc(
         # same filename therefore skips the slow MinerU call.
         on_status("parsing")
         markdown = md_path.read_text(encoding="utf-8")
+        if not markdown.strip():
+            raise ValueError("parser_result_invalid")
     elif MINERU_API_KEY:
         # Cloud path: on_status is threaded into _cloud_parse so it fires
         # "uploading" → "queued_mineru" → "parsing" at the right moments.
-        markdown = _cloud_parse(source_path, on_status=on_status)
+        on_status("parsing")
+        markdown = _cloud_parse(
+            source_path,
+            on_status=on_status,
+            split_dir=parsed_dir / "split",
+        )
+        if not markdown.strip():
+            raise ValueError("parser_result_invalid")
+        _write_text_atomic(md_path, markdown)
     else:
         on_status("parsing")
-        markdown = _local_parse(source_path)
-        md_path.write_text(markdown, encoding="utf-8")
+        markdown = _local_parse(source_path, work_dir=parsed_dir / "work")
+        if not markdown.strip():
+            raise ValueError("parser_result_invalid")
+        _write_text_atomic(md_path, markdown)
     category, company = _derive_category_and_company(source_path)
     return ParsedDoc(
         source_path=source_path,

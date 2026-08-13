@@ -380,6 +380,16 @@ def test_managed_index_job_listing_exposes_business_labels(content_api):
     assert result.json()["total"] == 1
     assert result.json()["jobs"][0]["original_filename"] == "indexed.md"
     assert result.json()["jobs"][0]["category_label"] == "03 公司内部标准"
+    assert result.json()["jobs"][0]["error_code"] is None
+
+    conn = sqlite3.connect(_db_path)
+    conn.execute(
+        "UPDATE content_index_jobs SET status='failed',error_code='ValueError',error_summary='legacy'"
+    )
+    conn.commit()
+    conn.close()
+    normalized = client.get("/api/admin/content/index-jobs", **_auth(sessions, "publisher"))
+    assert normalized.json()["jobs"][0]["error_code"] == "unknown_publication_failure"
 
 
 def test_category_key_is_server_generated_and_used_categories_cannot_be_disabled(content_api):

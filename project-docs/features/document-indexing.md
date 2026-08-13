@@ -33,9 +33,11 @@
 - Parent、Child、parents.sqlite 和 Qdrant payload 携带 nullable 的 `content_item_id`、`content_version_id` 和 `category_key`；
 - 检索按 `content_item_heads` 过滤受管版本，`compat` 模式继续允许旧的未版本化索引；
 - 发布时生成保留原扩展名的工作副本供解析和 Office 预览，引用接口通过稳定 `content://` 身份回取正式对象；
+- 受管 PDF 在 `data/parsed/managed/<content_version_id>/` 中使用独立解析缓存和临时目录，不依赖旧 `docs` 相对路径；MinerU 云解析结果原子写入 `document.md`，同一版本重试复用该缓存；
+- MinerU 的上传和排队阶段在受管发布任务中折叠为合法的 `parsing` 状态；发布失败只通过有限错误码和脱敏中文说明暴露给管理页，完整异常保留在后端日志；
 - 可重建的一至四级编号目录只读视图；视图是副本，不是分类或索引事实来源；
 - 代码和普通环境默认关闭受管资料库；当前 Ubuntu 生产已显式设置 `CONTENT_MANAGEMENT_ENABLED=true`，并保持 `CONTENT_HEAD_ENFORCEMENT=compat`。
-- 当前生产根目录为 `/data/business/ragpincheng/content`（容器内 `/app/content`）；2026-08-13 已将 117 份旧普通资料登记为 `legacy` 来源并全部停在 `awaiting_review`，`content_item_heads=0`，尚未确认、发布或进入正式 head；旧 `source/media` 继续保留既有链路。
+- 当前生产根目录为 `/data/business/ragpincheng/content`（容器内 `/app/content`）；2026-08-13 已将 117 份旧普通资料登记为 `legacy` 来源，并已对其中资料发起确认/发布。该批发布因受管 PDF 解析路径和任务状态兼容缺陷系统性失败，尚未建立正式 `content_item_heads`；本节描述的修复需在 R2 合并及独立 R3 部署后才会在生产生效。旧 `source/media` 继续保留既有链路。
 
 ### 未实现
 
@@ -44,7 +46,7 @@
 - 117 份已迁移普通资料的分类确认、分批审核发布、观察期切换和旧目录清理；
 - 将既有视频转录状态机改写为统一内容版本状态机；视频继续由 `media_assets`、`transcript_versions` 和 `media_transcript_heads` 管理。
 
-旧资料迁移提供离线清点、确定性规划和固定 T9 恢复点的只读 T10 预检：预检会重新核对候选普通资料的大小、SHA-256 和活动分类，但不写数据库或内容根目录。受控 staging/apply CLI 已实现，apply 会登记为 `legacy` 来源并停在 `awaiting_review`；真实执行仍须独立 R3 批准，不由代码存在或预检通过自动授权。
+旧资料迁移提供离线清点、确定性规划和固定 T9 恢复点的只读 T10 预检：预检会重新核对候选普通资料的大小、SHA-256 和活动分类，但不写数据库或内容根目录。规划器将 `.preview.pdf`、`.preview.xlsx` 标为生成的派生产物，T10 apply 也会拒绝旧计划或手工计划中的同类文件。受控 staging/apply CLI 已实现，apply 会登记为 `legacy` 来源并停在 `awaiting_review`；真实执行仍须独立 R3 批准，不由代码存在或预检通过自动授权。
 
 ## 入口与调用链
 

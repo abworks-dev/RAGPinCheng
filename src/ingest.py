@@ -232,10 +232,15 @@ def _cloud_parse_batch(
     return markdowns
 
 
-def _cloud_parse(pdf: Path, on_status: "Callable[[str], None] | None" = None) -> str:
+def _cloud_parse(
+    pdf: Path,
+    on_status: "Callable[[str], None] | None" = None,
+    *,
+    split_dir: Path | None = None,
+) -> str:
     """Parse one PDF via the MinerU cloud API, splitting into ≤200-page parts
     if necessary and concatenating the resulting markdown."""
-    split_dir = PARSED_DIR / f"_split_{_safe_stem(pdf)}"
+    split_dir = split_dir or PARSED_DIR / f"_split_{_safe_stem(pdf)}"
     try:
         parts = _split_pdf_for_cloud(pdf, split_dir)
         markdowns = _cloud_parse_batch(parts, on_status=on_status)
@@ -267,9 +272,9 @@ def _mineru_exe() -> str:
     )
 
 
-def _local_parse(pdf: Path) -> str:
+def _local_parse(pdf: Path, *, work_dir: Path | None = None) -> str:
     """Run local mineru CLI and return markdown string."""
-    work_dir = PARSED_DIR / f"_work_{_safe_stem(pdf)}"
+    work_dir = work_dir or PARSED_DIR / f"_work_{_safe_stem(pdf)}"
     if work_dir.exists():
         shutil.rmtree(work_dir)
     work_dir.mkdir(parents=True)
