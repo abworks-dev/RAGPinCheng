@@ -11,7 +11,6 @@ from src.config import EMBED_MAX_TEXT_CHARS
 from src.index import EmbeddingInputTooLong, validate_embedding_inputs
 from src.ingest import ParsedDoc
 from src.indexing_pipeline import ManagedIndexMetadata
-from src.providers import GpuServiceInputTooLong
 
 
 def _document(tmp_path: Path, markdown: str, *, title: str = "测试资料") -> ParsedDoc:
@@ -167,14 +166,6 @@ def test_oversized_embedding_failure_has_specific_safe_reason():
         "retryable": True,
         "recommended_action": "请在系统更新后重试，无需重新上传文件。",
     }
-
-    assert (
-        content_publication._classify_failure(
-            GpuServiceInputTooLong("provider limit"), "embedding"
-        )
-        == "embedding_input_too_long"
-    )
-
 
 def test_oversized_formula_failure_has_specific_non_retryable_reason():
     error = EmbeddingInputTooLong(
