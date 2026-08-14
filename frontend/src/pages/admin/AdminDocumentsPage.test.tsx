@@ -169,6 +169,29 @@ describe("AdminDocumentsPage", () => {
     }));
   });
 
+  it("uses responsive object rows instead of fixed-width narrow tables", async () => {
+    mocks.managedContentIndexJobs.mockResolvedValue({
+      jobs: [managedFailedJob],
+      total: 1,
+      status_counts: { failed: 1 },
+    });
+    render(<AdminDocumentsPage />);
+    const documentTitle = await screen.findByText("企业交付标准");
+    const documentRow = documentTitle.closest("tr");
+    expect(documentRow).toHaveClass("grid", "lg:table-row");
+    expect(documentRow?.closest("table")).toHaveClass("block", "lg:table");
+
+    const managedRow = screen.getByText("受管资料").closest("tr");
+    expect(managedRow).toHaveClass("grid", "lg:table-row");
+    expect(managedRow?.closest("table")).toHaveClass("block", "lg:table");
+
+    const activity = screen.getByText("旧目录索引活动").closest("details");
+    fireEvent.click(within(activity as HTMLElement).getByText("旧目录索引活动"));
+    const legacyRow = screen.getByText("failed.docx").closest("tr");
+    expect(legacyRow).toHaveClass("grid", "lg:table-row");
+    expect(legacyRow?.closest("table")).toHaveClass("block", "lg:table");
+  });
+
   it("shows the controlled managed publication failure without exposing its code", async () => {
     mocks.managedContentIndexJobs.mockResolvedValue({
       jobs: [managedFailedJob],

@@ -30,6 +30,7 @@ import { EmptyState } from "../../components/ui/empty-state";
 import { ErrorState } from "../../components/ui/error-state";
 import { Input } from "../../components/ui/input";
 import { LoadingState } from "../../components/ui/loading-state";
+import { Select } from "../../components/ui/select";
 import {
   Sheet,
   SheetContent,
@@ -77,9 +78,6 @@ const STATUS_META: Record<string, { label: string; hint?: string; variant: Statu
   done: { label: "可检索", hint: "资料已进入知识库", variant: "success" },
   failed: { label: "处理失败", hint: "可以重试", variant: "destructive" },
 };
-
-const selectClassName =
-  "h-control-md w-full rounded-ui-md border border-input bg-background px-3 text-ui-sm text-foreground shadow-sm outline-none transition-colors duration-normal focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50";
 
 const emptyDocumentList: IndexedDocumentList = {
   documents: [],
@@ -279,20 +277,20 @@ function AdminDocumentsPageContent() {
                 className="pl-9"
               />
             </label>
-            <select
+            <Select
               aria-label="按分类筛选"
               value={category}
               onChange={(event) => setCategory(event.target.value)}
-              className={cn(selectClassName, "xl:w-40")}
+              className="xl:w-40"
             >
               <option value="">全部分类</option>
               {categoryNames.map((name) => <option key={name} value={name}>{name}</option>)}
-            </select>
-            <select
+            </Select>
+            <Select
               aria-label="按文件类型筛选"
               value={docType}
               onChange={(event) => setDocType(event.target.value)}
-              className={cn(selectClassName, "xl:w-36")}
+              className="xl:w-36"
             >
               <option value="">全部类型</option>
               <option value="pdf">PDF / Markdown</option>
@@ -300,7 +298,7 @@ function AdminDocumentsPageContent() {
               <option value="xlsx">Excel</option>
               <option value="pptx">PPT</option>
               <option value="transcript">视频转写</option>
-            </select>
+            </Select>
           </div>
         </div>
 
@@ -361,7 +359,7 @@ function ManagedJobsActivity({ jobs, loading, history, onHistoryChange }: { jobs
   const label: Record<string, string> = { pending: "排队中", parsing: "解析中", chunking: "切分中", summarizing: "生成摘要", embedding: "写入索引", done: "已发布", failed: "发布失败" };
   return <section className="space-y-3 border-y border-border py-5" aria-labelledby="managed-index-title">
     <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between"><div><h2 id="managed-index-title" className="text-ui-base font-semibold">资料库发布任务</h2><p className="mt-1 text-ui-xs text-muted-foreground">默认显示每个版本的最新任务；发布成功后才成为正式可检索版本。</p></div><Button size="sm" variant="outline" onClick={() => onHistoryChange(!history)}>{history ? "仅看最新尝试" : "查看历史尝试"}</Button></div>
-    {loading ? <LoadingState className="min-h-32" label="正在加载发布任务…" /> : jobs.length === 0 ? <EmptyState title="暂无发布任务" description="资料在资料库中确认并发布后，任务会显示在这里。" /> : <div className="overflow-x-auto border border-border"><table className="w-full min-w-[48rem] text-ui-sm"><thead className="border-b border-border bg-surface-muted text-left text-muted-foreground"><tr><th className="px-4 py-3 font-medium">资料</th><th className="px-4 py-3 font-medium">数据库分类</th><th className="px-4 py-3 font-medium">状态</th><th className="px-4 py-3 font-medium">更新时间</th></tr></thead><tbody className="divide-y divide-border">{jobs.map((job) => <tr key={job.id}><td className="px-4 py-3"><p className="font-medium">{job.title || job.original_filename}</p><p className="mt-1 break-all text-ui-xs text-muted-foreground">{job.original_filename}</p>{job.attempt_count > 1 && <p className="mt-1 text-ui-xs text-muted-foreground">共尝试 {job.attempt_count} 次{history ? ` · 当前第 ${job.attempt_number} 次` : ""}</p>}</td><td className="px-4 py-3">{job.category_label || "—"}</td><td className="px-4 py-3"><Badge variant={job.status === "done" ? "success" : job.status === "failed" ? "destructive" : "warning"}>{label[job.status] || job.status}</Badge>{job.failure && <div className="mt-1 max-w-sm space-y-1 text-ui-xs"><p className="break-words text-destructive">{job.failure.message}</p><p className="break-words text-muted-foreground">{job.failure.recommended_action}</p><p className="text-muted-foreground">{job.failure.retryable ? "可以重试" : "请先处理文件或系统配置"}</p></div>}</td><td className="px-4 py-3 text-ui-xs text-muted-foreground">{formatAdminDate(job.updated_at)}</td></tr>)}</tbody></table></div>}
+    {loading ? <LoadingState className="min-h-32" label="正在加载发布任务…" /> : jobs.length === 0 ? <EmptyState title="暂无发布任务" description="资料在资料库中确认并发布后，任务会显示在这里。" /> : <div className="border border-border lg:overflow-x-auto"><table className="block w-full text-ui-sm lg:table lg:min-w-[48rem]"><thead className="hidden border-b border-border bg-surface-muted text-left text-muted-foreground lg:table-header-group"><tr><th className="px-4 py-3 font-medium">资料</th><th className="px-4 py-3 font-medium">数据库分类</th><th className="px-4 py-3 font-medium">状态</th><th className="px-4 py-3 font-medium">更新时间</th></tr></thead><tbody className="block divide-y divide-border lg:table-row-group">{jobs.map((job) => <tr key={job.id} className="grid grid-cols-2 gap-x-3 gap-y-3 p-4 lg:table-row lg:p-0"><td className="col-span-2 block min-w-0 lg:table-cell lg:px-4 lg:py-3"><p className="truncate font-medium" title={job.title || job.original_filename || undefined}>{job.title || job.original_filename}</p><p className="mt-1 truncate text-ui-xs text-muted-foreground" title={job.original_filename || undefined}>{job.original_filename}</p>{job.attempt_count > 1 && <p className="mt-1 text-ui-xs text-muted-foreground">共尝试 {job.attempt_count} 次{history ? ` · 当前第 ${job.attempt_number} 次` : ""}</p>}</td><td className="block text-ui-xs text-muted-foreground lg:table-cell lg:px-4 lg:py-3 lg:text-ui-sm lg:text-foreground">{job.category_label || "—"}</td><td className="col-span-2 row-start-2 block lg:table-cell lg:px-4 lg:py-3"><Badge variant={job.status === "done" ? "success" : job.status === "failed" ? "destructive" : "warning"}>{label[job.status] || job.status}</Badge>{job.failure && <div className="mt-1 max-w-sm space-y-1 text-ui-xs"><p className="break-words text-destructive">{job.failure.message}</p><p className="break-words text-muted-foreground">{job.failure.recommended_action}</p><p className="text-muted-foreground">{job.failure.retryable ? "可以重试" : "请先处理文件或系统配置"}</p></div>}</td><td className="block text-right text-ui-xs text-muted-foreground lg:table-cell lg:px-4 lg:py-3 lg:text-left">{formatAdminDate(job.updated_at)}</td></tr>)}</tbody></table></div>}
   </section>;
 }
 
@@ -527,10 +525,10 @@ function DocumentsTable({
   return (
     <>
       <Card className="overflow-hidden shadow-surface">
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[58rem] text-ui-sm">
+        <div className="lg:overflow-x-auto">
+          <table className="block w-full text-ui-sm lg:table lg:min-w-[58rem]">
             <caption className="sr-only">资料名称、分类、类型、状态、内容规模、更新时间和操作</caption>
-            <thead className="border-b border-border bg-surface-muted text-muted-foreground">
+            <thead className="hidden border-b border-border bg-surface-muted text-muted-foreground lg:table-header-group">
               <tr>
                 <th scope="col" className="px-4 py-3 text-left font-medium">资料</th>
                 <th scope="col" className="px-4 py-3 text-left font-medium">分类</th>
@@ -541,10 +539,10 @@ function DocumentsTable({
                 <th scope="col" className="sticky right-0 bg-surface-muted px-3 py-3 text-right font-medium shadow-[-1px_0_0_rgb(var(--border))]">操作</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-border">
+            <tbody className="block divide-y divide-border lg:table-row-group">
               {documents.map((document) => (
-                <tr key={document.document_id} className="group bg-card align-top hover:bg-surface-muted/60">
-                  <td className="px-4 py-3">
+                <tr key={document.document_id} className="group grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-4 bg-card p-4 align-top hover:bg-surface-muted/60 lg:table-row lg:p-0">
+                  <td className="block min-w-0 lg:table-cell lg:px-4 lg:py-3">
                     <div className="flex max-w-md gap-3">
                       <div className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-ui-md bg-secondary text-muted-foreground">
                         <FileText className="size-4" />
@@ -558,20 +556,20 @@ function DocumentsTable({
                       </div>
                     </div>
                   </td>
-                  <td className="px-4 py-3">
+                  <td className="block min-w-0 lg:table-cell lg:px-4 lg:py-3">
                     <Badge variant="secondary">{document.category}</Badge>
                     {document.company && <p className="mt-1 text-ui-xs text-muted-foreground">{document.company}</p>}
                   </td>
-                  <td className="px-4 py-3"><Badge variant="outline">{documentTypeLabel(document)}</Badge></td>
-                  <td className="px-4 py-3"><DocumentStatus document={document} /></td>
-                  <td className="px-4 py-3 text-right tabular-nums text-muted-foreground">
-                    {document.is_indexed ? document.parent_count : "—"}
+                  <td className="block lg:table-cell lg:px-4 lg:py-3"><Badge variant="outline">{documentTypeLabel(document)}</Badge></td>
+                  <td className="col-start-2 row-start-1 block text-right lg:table-cell lg:px-4 lg:py-3 lg:text-left"><DocumentStatus document={document} /></td>
+                  <td className="block text-ui-xs tabular-nums text-muted-foreground lg:table-cell lg:px-4 lg:py-3 lg:text-right">
+                    <span className="lg:sr-only">内容块：</span>{document.is_indexed ? document.parent_count : "—"}
                   </td>
-                  <td className="px-4 py-3 text-ui-xs text-muted-foreground">
+                  <td className="block text-ui-xs text-muted-foreground lg:table-cell lg:px-4 lg:py-3">
                     {document.updated_at ? formatAdminDate(document.updated_at) : "历史资料"}
                     {document.uploaded_by && <p className="mt-1">由 {document.uploaded_by} 上传</p>}
                   </td>
-                  <td className="sticky right-0 bg-card px-3 py-3 text-right shadow-[-1px_0_0_rgb(var(--border))] group-hover:bg-surface-muted">
+                  <td className="col-start-2 row-start-2 block self-start bg-card text-right group-hover:bg-surface-muted lg:sticky lg:right-0 lg:table-cell lg:px-3 lg:py-3 lg:shadow-[-1px_0_0_rgb(var(--border))]">
                     <div className="inline-block text-left">
                       <button
                         ref={(node) => {
@@ -580,7 +578,7 @@ function DocumentsTable({
                         }}
                         type="button"
                         onClick={(event) => openMenu(document.document_id, event.currentTarget)}
-                        className="inline-flex size-9 items-center justify-center rounded-ui-md text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        className="inline-flex size-10 items-center justify-center rounded-ui-md text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring lg:size-9"
                         aria-label={`打开 ${document.doc_title} 的操作菜单`}
                         aria-expanded={openMenuId === document.document_id}
                         aria-haspopup="menu"
@@ -784,11 +782,11 @@ function UploadPanel({
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
             <label htmlFor="document-category" className="mb-1.5 block text-ui-sm font-medium">分类</label>
-            <select id="document-category" value={pickedCategory} onChange={(event) => setPickedCategory(event.target.value)} disabled={submitting} className={selectClassName}>
+            <Select id="document-category" value={pickedCategory} onChange={(event) => setPickedCategory(event.target.value)} disabled={submitting}>
               {categoryNames.length === 0 && <option value="">（暂无现有分类）</option>}
               {categoryNames.map((name) => <option key={name} value={name}>{name}</option>)}
               <option value={NEW_CATEGORY_SENTINEL}>＋ 新建分类…</option>
-            </select>
+            </Select>
           </div>
           {pickedCategory === NEW_CATEGORY_SENTINEL && (
             <div>
@@ -799,11 +797,11 @@ function UploadPanel({
           {needsSubcategory && (
             <div>
               <label htmlFor="document-subcategory" className="mb-1.5 block text-ui-sm font-medium">{effectiveCategory === "客户标准" ? "客户" : "公司"}</label>
-              <select id="document-subcategory" value={pickedSub} onChange={(event) => setPickedSub(event.target.value)} disabled={submitting} className={selectClassName}>
+              <Select id="document-subcategory" value={pickedSub} onChange={(event) => setPickedSub(event.target.value)} disabled={submitting}>
                 {existingSubs.length === 0 && <option value={NEW_CATEGORY_SENTINEL}>（暂无；请新建）</option>}
                 {existingSubs.map((name) => <option key={name} value={name}>{name}</option>)}
                 {existingSubs.length > 0 && <option value={NEW_CATEGORY_SENTINEL}>＋ 新建…</option>}
-              </select>
+              </Select>
             </div>
           )}
           {needsSubcategory && pickedSub === NEW_CATEGORY_SENTINEL && (
@@ -970,19 +968,19 @@ function JobsActivity({
           {loading ? <LoadingState className="min-h-32" label="正在加载索引活动…" /> : jobs.length === 0 ? (
             <EmptyState title="暂无旧索引活动" description="兼容期旧任务记录会显示在这里。" />
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[60rem] text-ui-sm">
-                <thead className="border-b border-border bg-surface-muted text-muted-foreground">
+            <div className="lg:overflow-x-auto">
+              <table className="block w-full text-ui-sm lg:table lg:min-w-[52rem]">
+                <thead className="hidden border-b border-border bg-surface-muted text-muted-foreground lg:table-header-group">
                   <tr><th className="px-4 py-3 text-left font-medium">文件</th><th className="px-4 py-3 text-left font-medium">状态</th><th className="px-4 py-3 text-left font-medium">上传者</th><th className="px-4 py-3 text-left font-medium">时间</th><th className="px-4 py-3 text-right font-medium">操作</th></tr>
                 </thead>
-                <tbody className="divide-y divide-border">
+                <tbody className="block divide-y divide-border lg:table-row-group">
                   {jobs.map((job) => (
-                    <tr key={job.id} className="align-top">
-                      <td className="px-4 py-3"><p className="max-w-xs truncate font-medium" title={job.filename}>{job.filename}</p><p className="mt-1 text-ui-xs text-muted-foreground">{job.category} · {formatBytes(job.file_size)}</p></td>
-                      <td className="px-4 py-3"><JobStatusCell job={job} /></td>
-                      <td className="px-4 py-3 text-muted-foreground">{job.real_name || "—"}</td>
-                      <td className="px-4 py-3 text-ui-xs text-muted-foreground">{formatAdminDate(job.created_at)}</td>
-                      <td className="px-4 py-3"><div className="flex justify-end gap-2">{job.source_exists && (job.status === "failed" || job.status === "done") && <Button size="sm" variant="outline" onClick={() => void retry(job)}>重试</Button>}{(job.status === "failed" || job.status === "done") && <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => setDeleteTarget(job)}>删除记录</Button>}</div></td>
+                    <tr key={job.id} className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-3 p-4 align-top lg:table-row lg:p-0">
+                      <td className="block min-w-0 lg:table-cell lg:px-4 lg:py-3"><p className="truncate font-medium" title={job.filename}>{job.filename}</p><p className="mt-1 text-ui-xs text-muted-foreground">{job.category} · {formatBytes(job.file_size)}</p></td>
+                      <td className="col-start-2 row-start-1 block text-right lg:table-cell lg:px-4 lg:py-3 lg:text-left"><JobStatusCell job={job} /></td>
+                      <td className="block text-ui-xs text-muted-foreground lg:table-cell lg:px-4 lg:py-3 lg:text-ui-sm"><span className="lg:sr-only">上传者：</span>{job.real_name || "—"}</td>
+                      <td className="block text-ui-xs text-muted-foreground lg:table-cell lg:px-4 lg:py-3">{formatAdminDate(job.created_at)}</td>
+                      <td className="col-span-2 block lg:table-cell lg:px-4 lg:py-3"><div className="flex flex-wrap justify-end gap-2">{job.source_exists && (job.status === "failed" || job.status === "done") && <Button size="sm" variant="outline" onClick={() => void retry(job)}>重试</Button>}{(job.status === "failed" || job.status === "done") && <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => setDeleteTarget(job)}>删除记录</Button>}</div></td>
                     </tr>
                   ))}
                 </tbody>
