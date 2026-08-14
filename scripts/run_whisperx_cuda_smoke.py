@@ -156,7 +156,7 @@ def _prepare_model(
     relative_path: str,
     allow_patterns: list[str],
 ) -> None:
-    from asr_service.model_cache import (
+    from services.asr_service.model_cache import (
         validate_whisperx_align_cache,
         validate_whisperx_cache,
     )
@@ -257,9 +257,9 @@ def smoke(source_root: Path, model_root: Path, nltk_root: Path, wav_path: Path) 
     import ctranslate2
     import torch
 
-    from asr_service.engine_protocol import PreparedAudioChunk, WHISPERX_SERVICE_CONFIG
-    from asr_service.engines.whisperx import WhisperXEngine
-    from asr_service.model_cache import (
+    from services.asr_service.engine_protocol import PreparedAudioChunk, WHISPERX_SERVICE_CONFIG
+    from services.asr_service.engines.whisperx import WhisperXEngine
+    from services.asr_service.model_cache import (
         validate_whisperx_align_cache,
         validate_whisperx_cache,
     )

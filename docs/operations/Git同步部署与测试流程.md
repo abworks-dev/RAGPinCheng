@@ -75,10 +75,10 @@ CI 全部通过后自动触发，顺序执行：
 |------|-----|
 | 主机名 | ${PRODUCTION_HOSTNAME} |
 | 内网 IP | ${GPU_SERVICE_IP} |
-| 运行服务 | GPU 推理服务（`gpu_service/`） |
+| 运行服务 | GPU 推理服务（`services/gpu_service/`） |
 | 服务端口 | 8100 |
 | 认证 | API Token（`GPU_SERVICE_TOKEN`） |
-| 日志 | `${PRODUCTION_REPO_PATH}\gpu_service.log` |
+| 日志 | `${PRODUCTION_REPO_PATH}\services.gpu_service.log` |
 
 ### 4.2 Ubuntu 应用节点
 
@@ -125,7 +125,7 @@ $env:GPU_SERVICE_TOKEN = "你的token"
 # 停掉旧服务
 Stop-Process -Name python -Force
 # 启动新服务
-python -m gpu_service.app
+python -m services.gpu_service.app
 ```
 
 ## 6. 日常运维
@@ -221,7 +221,7 @@ cd ${PRODUCTION_REPO_PATH}
 git checkout <上一个commit>
 # 重启服务
 $env:GPU_SERVICE_TOKEN = "你的token"
-python -m gpu_service.app
+python -m services.gpu_service.app
 # 恢复后切回 master
 git switch master
 ```

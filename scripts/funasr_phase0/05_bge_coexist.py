@@ -3,7 +3,7 @@
 Per R2 spec §十三:
   - DELETES local BGE copy code: no second instance, no port 18100, no
     test-only BGE token, no BGE weights staging.
-  - NEVER imports or launches gpu_service.app from inside the ASR sandbox.
+  - NEVER imports or launches services.gpu_service.app from inside the ASR sandbox.
   - Same BGE instance for baseline and coexistence: keep
     bge_base_url, bge_expected_model, request body shape, RPM.
   - Steps:

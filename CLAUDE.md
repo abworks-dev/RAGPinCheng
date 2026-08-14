@@ -64,6 +64,7 @@ content/legacy-docs/（兼容入口）或受管发布 → MinerU/Markdown ingest
 - `frontend/`：React/Vite界面；
 - `prompts/`：所有Prompt正文；
 - `scripts/`：索引、调试、评测和维护脚本；
+- `services/`：独立部署的 ASR、GPU 推理和 LibreOffice 转换服务；
 - `docker/`：生产容器；
 - `data/parents.sqlite`：可重建的RAG Parent状态；
 - `data/app.sqlite`：不可随索引Reset删除的用户与会话状态。
@@ -88,6 +89,7 @@ content/legacy-docs/（兼容入口）或受管发布 → MinerU/Markdown ingest
 - 修改 `api/**`、Python依赖或数据库：遵守 `.claude/rules/python-backend.md`；
 - 修改 `frontend/**`：遵守 `.claude/rules/frontend.md`；
 - 修改 `tests/**` 或 `.github/workflows/**`：遵守 `.claude/rules/testing.md`；
+- 修改 `services/**`：同时遵守 Python 后端、测试和安全规则，并保持服务依赖边界；
 - 涉及认证、数据、部署、外部API或破坏性操作：遵守 `.claude/rules/security.md`。
 - 修改 `TODO.md`、`docs/plans/**` 或 `docs/decisions/**`：遵守 `.claude/rules/todo.md`。
 

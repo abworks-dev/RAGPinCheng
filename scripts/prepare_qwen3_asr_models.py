@@ -19,7 +19,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
-from asr_service.model_cache import (
+from services.asr_service.model_cache import (
     MODEL_MANIFEST_VERSION,
     QWEN3_ALIGNER_MODEL_ID,
     QWEN3_ALIGNER_RELATIVE_PATH,

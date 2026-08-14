@@ -111,7 +111,7 @@ jobs:
                 $process = Get-CimInstance Win32_Process -Filter ("ProcessId={0}" -f $listener.OwningProcess)
                 if (
                   $null -eq $process -or
-                  [string]$process.CommandLine -notmatch '-m gpu_service\.app' -or
+                  [string]$process.CommandLine -notmatch '-m services\.gpu_service\.app' -or
                   (
                     -not ([string]$process.ExecutablePath).StartsWith($runtimeRoot, [StringComparison]::OrdinalIgnoreCase) -and
                     [string]$process.ExecutablePath -ne $env:PRODUCTION_PYTHON_PATH
@@ -156,8 +156,8 @@ jobs:
             -SourceFingerprint $fingerprint `
             -RequalifyValidated
 
-            $metadata = Get-Content "${env:REPO_PATH}\gpu_service\runtime-lock.json" -Encoding UTF8 | ConvertFrom-Json
-          $requirementsPath = "${env:REPO_PATH}\gpu_service\$($metadata.requirements_file)"
+            $metadata = Get-Content "${env:REPO_PATH}\services\gpu_service\runtime-lock.json" -Encoding UTF8 | ConvertFrom-Json
+          $requirementsPath = "${env:REPO_PATH}\services\gpu_service\$($metadata.requirements_file)"
           $lockHash = & "${env:REPO_PATH}\scripts\get-gpu-runtime-lock-hash.ps1" `
             -Path $requirementsPath
           $releaseId = $fingerprint.Substring(0, 12) + "-" + $lockHash.Substring(0, 12)

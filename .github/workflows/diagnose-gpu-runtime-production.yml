@@ -126,7 +126,7 @@ jobs:
           write_stage("torch_import_complete")
           write_stage("config_import_start")
           sys.path.insert(0, repository_path)
-          from gpu_service.config import EMBED_MODEL, RERANKER_MODEL
+          from services.gpu_service.config import EMBED_MODEL, RERANKER_MODEL
           from FlagEmbedding import BGEM3FlagModel, FlagReranker
           write_stage("config_import_complete")
           device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -169,7 +169,7 @@ jobs:
           }
 
           $python = $env:PRODUCTION_PYTHON_PATH
-          $environmentFile = Join-Path $RepositoryPath "gpu_service\.env"
+          $environmentFile = Join-Path $RepositoryPath "services\gpu_service\.env"
           if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
             throw "GPU Python executable is missing"
           }

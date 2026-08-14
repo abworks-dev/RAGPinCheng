@@ -150,7 +150,7 @@ def _gpu_identity() -> dict[str, object]:
 
 def run_preflight() -> dict[str, object]:
     def import_contracts():
-        from asr_service.model_cache import (
+        from services.asr_service.model_cache import (
             WHISPERX_ALIGN_RELATIVE_PATH,
             WHISPERX_RELATIVE_PATH,
             validate_whisperx_align_cache,

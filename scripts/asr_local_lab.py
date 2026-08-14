@@ -270,7 +270,7 @@ def _venv_python(lab_root: Path, engine: str) -> Path:
 def _model_status(source_root: Path, lab_root: Path, engine: str) -> dict[str, object]:
     sys.path.insert(0, str(source_root))
     try:
-        from asr_service.model_cache import (
+        from services.asr_service.model_cache import (
             validate_qwen3_aligner_cache,
             validate_qwen3_asr_cache,
             validate_whisperx_align_cache,
@@ -431,7 +431,7 @@ def evaluate_qwen(
 
 
 def _whisperx_configs(candidate_ids: tuple[str, ...]):
-    from asr_service.engine_protocol import (
+    from services.asr_service.engine_protocol import (
         WHISPERX_FULL_DECODE_SERVICE_CONFIG,
         WHISPERX_HOTWORDS_SERVICE_CONFIG,
         WHISPERX_SERVICE_CONFIG,

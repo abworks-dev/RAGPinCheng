@@ -32,7 +32,7 @@ jobs:
           python-version: "3.11"
 
       - name: Check Python syntax
-        run: python -m compileall -q api src scripts tests gpu_service asr_service
+        run: python -m compileall -q api src scripts tests services gpu_service asr_service
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -168,7 +168,7 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install pytest fastapi httpx requests python-dotenv
-      - run: pytest tests/test_transcription_asr_service_contract.py tests/test_transcription_provider_registry.py tests/test_transcription_profile_catalog.py tests/test_transcription_remote_provider.py tests/test_asr_deployment_static.py tests/test_qwen3_asr_controlled_wheel.py tests/test_qwen3_asr_qualification_failure_evidence.py tests/test_qwen3_asr_performance_diagnostic.py tests/test_gpu_runtime_deployment_static.py tests/test_deploy_git_safety.py tests/test_asr_activation.py tests/test_faster_whisper_model_tls.py asr_service/tests -v
+      - run: pytest tests/test_transcription_asr_service_contract.py tests/test_transcription_provider_registry.py tests/test_transcription_profile_catalog.py tests/test_transcription_remote_provider.py tests/test_asr_deployment_static.py tests/test_qwen3_asr_controlled_wheel.py tests/test_qwen3_asr_qualification_failure_evidence.py tests/test_qwen3_asr_performance_diagnostic.py tests/test_gpu_runtime_deployment_static.py tests/test_deploy_git_safety.py tests/test_asr_activation.py tests/test_faster_whisper_model_tls.py tests/test_service_directory_boundaries.py services/asr_service/tests -v
 
   test-gpu-contract:
     runs-on: ubuntu-latest
@@ -187,7 +187,7 @@ jobs:
         run: pip install fastapi uvicorn pydantic httpx pytest python-dotenv
 
       - name: Run GPU service contract tests with the test-local torch stub
-        run: pytest gpu_service/tests/test_contract.py -v
+        run: pytest services/gpu_service/tests/test_contract.py -v
 
   validate-migration-config:
     runs-on: ubuntu-latest

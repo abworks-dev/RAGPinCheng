@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from asr_service.model_cache import (
+from services.asr_service.model_cache import (
     MODEL_MANIFEST_VERSION,
     SENSEVOICE_MODEL_ID,
     SENSEVOICE_RELATIVE_PATH,

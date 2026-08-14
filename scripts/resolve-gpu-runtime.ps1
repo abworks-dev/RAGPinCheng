@@ -102,8 +102,8 @@ if ($LASTEXITCODE -ne 0 -or $head -ne $CommitSha.ToLowerInvariant()) {
 & git -C $RepositoryPath diff --quiet $CommitSha -- `
     scripts/resolve-gpu-runtime.ps1 `
     scripts/get-gpu-torch-wheel-seed.ps1 `
-    gpu_service/requirements.txt `
-    gpu_service/runtime-lock.json
+    services/gpu_service/requirements.txt `
+    services/gpu_service/runtime-lock.json
 if ($LASTEXITCODE -ne 0) {
     throw "GPU runtime resolver contract has uncommitted changes"
 }

@@ -12,8 +12,8 @@ def read(path: str) -> str:
 
 
 def test_runtime_lock_is_validated_only_by_matching_cuda_qualification():
-    metadata = json.loads(read("gpu_service/runtime-lock.json"))
-    requirements = read("gpu_service/runtime-lock.txt")
+    metadata = json.loads(read("services/gpu_service/runtime-lock.json"))
+    requirements = read("services/gpu_service/runtime-lock.txt")
     assert metadata["schema_version"] == 1
     assert metadata["validation_status"] == "validated"
     assert metadata["qualification_run_id"] == "31271874609"
@@ -51,7 +51,7 @@ def test_runtime_lock_is_validated_only_by_matching_cuda_qualification():
 
 
 def test_known_bad_two_package_pin_is_not_a_production_contract():
-    gpu_requirements = read("gpu_service/requirements.txt")
+    gpu_requirements = read("services/gpu_service/requirements.txt")
     root_requirements = read("requirements-gpu.txt")
     for source in (gpu_requirements, root_requirements):
         assert "transformers==4.46.3" not in source
@@ -146,7 +146,7 @@ def test_gpu_model_cache_source_discovery_is_bounded_and_offline_only():
 
     assert "models--BAAI--bge-m3" in script
     assert "models--BAAI--bge-reranker-v2-m3" in script
-    assert 'Join-Path $RepositoryPath "gpu_service\\.cache\\huggingface"' in script
+    assert r'Join-Path $RepositoryPath "services\gpu_service\.cache\huggingface"' in script
     assert 'Get-ChildItem -LiteralPath "C:\\Users" -Directory' in script
     assert "does not contain both required offline model snapshots" in script
     assert "auto-discovery found no complete offline cache" in script
@@ -309,11 +309,22 @@ def test_gpu_deploy_script_is_fingerprint_aware():
     assert "get-gpu-runtime-lock-hash.ps1" in deploy
 
 
+def test_runtime_snapshot_contains_service_namespace_and_legacy_shim():
+    build = read("scripts/build-gpu-runtime.ps1")
+    for path in (
+        "services/__init__.py",
+        "services/gpu_service/__init__.py",
+        "services/gpu_service/app.py",
+        "gpu_service/__init__.py",
+    ):
+        assert f'"{path}"' in build
+
+
 def test_declared_reranker_precisions_are_validated_not_widenable():
     """allowed_reranker_precisions must not be a decorative field: the builder
     validates it against the hardcoded CUDA-only set, so lock metadata can never
     widen the precision whitelist (e.g. by adding a CPU or int8 mode)."""
-    metadata = json.loads(read("gpu_service/runtime-lock.json"))
+    metadata = json.loads(read("services/gpu_service/runtime-lock.json"))
     build = read("scripts/build-gpu-runtime.ps1")
     assert metadata["allowed_reranker_precisions"] == ["fp16", "fp32"]
     assert "allowed_reranker_precisions" in build
@@ -379,8 +390,8 @@ def test_recovery_only_repromotes_the_recorded_validated_release():
 
 
 def test_gpu_service_forbids_cpu_fallback_and_has_precision_controls():
-    config = read("gpu_service/config.py")
-    models = read("gpu_service/models.py")
+    config = read("services/gpu_service/config.py")
+    models = read("services/gpu_service/models.py")
     assert "EMBED_USE_FP16" in config
     assert "RERANKER_USE_FP16" in config
     assert "CUDA is required; CPU fallback is disabled" in models

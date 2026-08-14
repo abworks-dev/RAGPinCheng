@@ -55,7 +55,7 @@ if (-not (Test-Path -LiteralPath $envFile -PathType Leaf)) {
 if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
     throw "ASR virtual environment is missing: $python"
 }
-if (-not (Test-Path -LiteralPath (Join-Path $appRoot "asr_service\app.py") -PathType Leaf)) {
+if (-not (Test-Path -LiteralPath (Join-Path $appRoot "services\asr_service\app.py") -PathType Leaf)) {
     throw "ASR application is missing under: $appRoot"
 }
 
@@ -98,7 +98,7 @@ Set-Location -LiteralPath $appRoot
 $savedErrorActionPreference = $ErrorActionPreference
 $ErrorActionPreference = "Continue"
 try {
-    & $python -m uvicorn asr_service.app:create_app --factory --host $env:ASR_SERVICE_HOST --port $env:ASR_SERVICE_PORT *>> $logFile
+    & $python -m uvicorn services.asr_service.app:create_app --factory --host $env:ASR_SERVICE_HOST --port $env:ASR_SERVICE_PORT *>> $logFile
     $uvicornExitCode = $LASTEXITCODE
 } finally {
     $ErrorActionPreference = $savedErrorActionPreference

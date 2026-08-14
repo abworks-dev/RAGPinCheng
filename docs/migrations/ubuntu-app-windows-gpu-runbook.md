@@ -145,7 +145,7 @@ Claude Code 每次只能执行已批准阶段。范围、接口或数据策略�
 建议新增候选目录：
 
 ```text
-gpu_service/
+services/gpu_service/
   app.py
   schemas.py
   models.py
@@ -661,7 +661,7 @@ Claude Code 接手后，每个阶段都必须：
 
 ### 阶段 1 ✅ 代码完成 — GPU 推理接口
 
-- [x] 创建 `gpu_service/` 目录骨架（app.py, schemas.py, models.py, config.py, .env.example, requirements.txt, tests/）
+- [x] 创建 `services/gpu_service/` 目录骨架（app.py, schemas.py, models.py, config.py, .env.example, requirements.txt, tests/）
 - [x] 定义 Pydantic schema（EmbeddingRequest/Response, RerankRequest/Response, ModelInfo, Health）
 - [x] 实现 GET /health、GET /model-info
 - [x] 实现 POST /v1/embeddings（BGE-M3, dense + sparse）

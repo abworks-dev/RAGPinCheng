@@ -3,7 +3,7 @@
 > Phase 0 non-production sandbox for the FunASR auto-transcription feature
 > described in `docs/plans/funasr-auto-transcription.md`. This
 > directory contains **test scaffolding only** — it MUST NOT be imported by
-> `gpu_service/`, `src/`, `api/`, or `frontend/`.
+> `services/gpu_service/`, `src/`, `api/`, or `frontend/`.
 
 ## Status (2026-08-01, Contextual Paraformer A/B batch approved)
 
@@ -92,7 +92,7 @@ commands or directory deletion are required.
 ## Hard isolation rules (unchanged)
 
 This sandbox MUST NOT:
-- modify `gpu_service/`, `src/`, `api/`, `frontend/`, `prompts/`,
+- modify `services/gpu_service/`, `src/`, `api/`, `frontend/`, `prompts/`,
   `docker/`, `requirements.txt`, `requirements-prod.txt`,
   `requirements-gpu.txt` of the project;
 - touch the production `app.sqlite`, `parents.sqlite`, `media/`,
@@ -184,7 +184,7 @@ This sandbox MUST NOT:
 - No `transcription_jobs` schema migration or `app.sqlite` change.
 - No `asr_service` HTTP server.
 - No BGE weights download script.
-- No GPU workload code that mutates `gpu_service/`.
+- No GPU workload code that mutates `services/gpu_service/`.
 - No local BGE copy or :18100 port.
 
 ## Local dev venv (separate from sandbox)

@@ -1,6 +1,6 @@
 # Combined image — FastAPI + ChatSession + Qdrant client + React SPA.
 # No GPU dependencies (torch, BGE models) — those run on the separate
-# Windows GPU inference service (gpu_service/).
+# Windows GPU inference service (services/gpu_service/).
 #
 # The backend configures EMBED_PROVIDER=remote and RERANK_PROVIDER=remote
 # to delegate embedding and reranking to the GPU service over HTTP.

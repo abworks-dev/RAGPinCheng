@@ -192,7 +192,7 @@ function Stop-VerifiedListeners {
         throw "Unable to resolve the ASR venv base Python executable"
     }
     $basePython = (Resolve-Path -LiteralPath ([string]$baseOutput).Trim()).Path
-    $expectedCommandLine = '"{0}" -m uvicorn asr_service.app:create_app --factory --host 0.0.0.0 --port 8200' -f $basePython
+    $expectedCommandLine = '"{0}" -m uvicorn services.asr_service.app:create_app --factory --host 0.0.0.0 --port 8200' -f $basePython
     foreach ($processId in @(
         Get-NetTCPConnection -LocalPort 8200 -State Listen -ErrorAction SilentlyContinue |
             Select-Object -ExpandProperty OwningProcess -Unique
@@ -269,7 +269,7 @@ function Assert-CandidateRuntime {
     $verification = @'
 import sys
 from pathlib import Path
-from asr_service.model_cache import validate_faster_whisper_cache, validate_sensevoice_cache
+from services.asr_service.model_cache import validate_faster_whisper_cache, validate_sensevoice_cache
 
 venv = Path(sys.prefix).resolve()
 for name in ('ctranslate2', 'faster_whisper', 'funasr', 'modelscope', 'torch', 'torchaudio'):

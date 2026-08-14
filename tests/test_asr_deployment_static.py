@@ -236,7 +236,7 @@ def test_faster_whisper_cross_node_verification_keeps_application_backend_disabl
 
 
 def test_windows_asr_layout_and_config_ownership_are_frozen():
-    env = read("asr_service/.env.example")
+    env = read("services/asr_service/.env.example")
     deploy = read("scripts/deploy-asr.ps1")
     start = read("scripts/start-asr-service.ps1")
     assert "$env:PRODUCTION_ASR_PROGRAM_ROOT" in deploy
@@ -249,10 +249,12 @@ def test_windows_asr_layout_and_config_ownership_are_frozen():
     assert "ASR_FASTER_WHISPER_MODEL_MANIFEST_PATH=" in env
     assert "ASR_MODEL_MANIFEST_PATH=" in env
     assert "ASR_SERVICE_TOKEN=" in env
-    assert (ROOT / "asr_service" / "requirements-service-core.txt").is_file()
-    assert (ROOT / "asr_service" / "requirements-windows.txt").is_file()
-    core_requirements = read("asr_service/requirements-service-core.txt").lower()
-    windows_requirements = read("asr_service/requirements-windows.txt").lower()
+    assert (ROOT / "services" / "asr_service" / "requirements-service-core.txt").is_file()
+    assert (ROOT / "services" / "asr_service" / "requirements-windows.txt").is_file()
+    assert 'Join-Path $resolvedSource "services\\__init__.py"' in deploy
+    assert 'Join-Path $resolvedSource "services\\asr_service"' in deploy
+    core_requirements = read("services/asr_service/requirements-service-core.txt").lower()
+    windows_requirements = read("services/asr_service/requirements-windows.txt").lower()
     assert "-r requirements-service-core.txt" in windows_requirements
     for package in ("fastapi", "uvicorn", "pydantic", "httpx", "python-dotenv"):
         assert package in core_requirements
@@ -360,7 +362,7 @@ def test_service_secret_is_not_passed_on_scheduled_task_command_line():
 def test_start_script_does_not_treat_uvicorn_stderr_as_a_terminating_error():
     start = read("scripts/start-asr-service.ps1")
     invocation = (
-        "& $python -m uvicorn asr_service.app:create_app --factory "
+        "& $python -m uvicorn services.asr_service.app:create_app --factory "
         "--host $env:ASR_SERVICE_HOST --port $env:ASR_SERVICE_PORT *>> $logFile"
     )
     assert '$savedErrorActionPreference = $ErrorActionPreference' in start
@@ -406,22 +408,22 @@ def test_config_acl_preserves_trusted_runner_modify_without_full_control():
 
 
 def test_gpu_activity_contract_and_ci_are_real_but_dependency_light():
-    app = read("gpu_service/app.py")
+    app = read("services/gpu_service/app.py")
     ci = read(".github/workflows/ci.yml")
     gpu_section = ci.split("  test-gpu-contract:", 1)[1].split(
         "  validate-migration-config:", 1
     )[0]
     assert '@app.get("/v1/activity"' in app
     assert "verify_token(request)" in app
-    assert "gpu_service/tests/test_contract.py" in gpu_section
+    assert "services/gpu_service/tests/test_contract.py" in gpu_section
     assert "requirements-gpu" not in gpu_section
-    assert "gpu_service/requirements.txt" not in gpu_section
+    assert "services/gpu_service/requirements.txt" not in gpu_section
     assert "|| true" not in gpu_section
 
 
 def test_root_and_windows_env_templates_are_not_merged():
     backend = read(".env.example")
-    windows = read("asr_service/.env.example")
+    windows = read("services/asr_service/.env.example")
     assert "Ubuntu backend ASR client settings" in backend
     assert "ASR_ENABLED=false" in backend
     assert "ASR_SERVICE_URL=http://127.0.0.1:8200" in backend
@@ -694,7 +696,7 @@ def test_gpu_reranker_repair_is_replaced_by_candidate_only_qualification():
     workflow = read(".github/workflows/repair-gpu-reranker-production.yml")
     probe = read("scripts/diagnose_gpu_reranker.py")
     builder = read("scripts/build-gpu-runtime.ps1")
-    gpu_requirements = read("gpu_service/requirements.txt")
+    gpu_requirements = read("services/gpu_service/requirements.txt")
     root_requirements = read("requirements-gpu.txt")
 
     assert "workflow_dispatch:" in workflow
@@ -709,7 +711,7 @@ def test_gpu_reranker_repair_is_replaced_by_candidate_only_qualification():
     assert "qualify-gpu-runtime.ps1" in workflow
     assert "promote-gpu-runtime.ps1" in workflow
     assert "Get-CimInstance Win32_Process" in workflow
-    assert "-m gpu_service\\.app" in workflow
+    assert r"-m services\.gpu_service\.app" in workflow
     assert "Refusing to stop an unexpected process listening on TCP 8100" in workflow
     assert "Stop-Process -Id $listener.OwningProcess -Force" in workflow
     assert "Unregister-ScheduledTask -TaskName $productionTaskName" in workflow
@@ -797,7 +799,7 @@ def test_faster_whisper_legacy_sample_preparer_remains_fixed_but_is_not_invoked(
     workflow = read(".github/workflows/qualify-faster-whisper-production.yml")
     script = read("scripts/prepare-faster-whisper-qualification-samples.ps1")
     template = json.loads(
-        read("asr_service/faster-whisper-qualification-manifest.example.json")
+        read("services/asr_service/faster-whisper-qualification-manifest.example.json")
     )
     lowered = script.lower()
 
@@ -1019,10 +1021,10 @@ def test_faster_whisper_qualification_freezes_dependencies_model_and_gates():
     assert "requirements-service-core.txt" in script
     assert "requirements-faster-whisper.txt" in script
     assert '$RequirementsSource = $ResolvedSource.Replace("\\", "/")' in script
-    assert "-r $RequirementsSource/asr_service/requirements-windows.txt" not in script
-    assert "-r $RequirementsSource/asr_service/requirements-service-core.txt" in script
-    assert "-r $RequirementsSource/asr_service/requirements-faster-whisper.txt" in script
-    assert "-r $ResolvedSource\\asr_service\\" not in script
+    assert "-r $RequirementsSource/services/asr_service/requirements-windows.txt" not in script
+    assert "-r $RequirementsSource/services/asr_service/requirements-service-core.txt" in script
+    assert "-r $RequirementsSource/services/asr_service/requirements-faster-whisper.txt" in script
+    assert "-r $ResolvedSource\\services\\asr_service\\" not in script
     assert '"-m", "pip", "download",' in script
     assert '"--no-cache-dir",' in script
     assert "--only-binary=:all:" in script
@@ -1217,7 +1219,7 @@ def test_faster_whisper_qualification_freezes_dependencies_model_and_gates():
     assert "allow_redirects=False" in model
     assert "model download escaped approved Hugging Face HTTPS hosts" in model
     assert "os.replace(partial, destination)" in model
-    assert "local_files_only=True" in read("asr_service/engines/faster_whisper.py")
+    assert "local_files_only=True" in read("services/asr_service/engines/faster_whisper.py")
     assert "CLEAR_CER_LIMIT = 0.10" in runner
     assert "BIM_NOISE_CER_LIMIT = 0.15" in runner
     assert "TERM_RECALL_LIMIT = 0.70" in runner
@@ -1705,7 +1707,7 @@ def test_qwen3_asr_qualification_uses_chinese_only_dependency_bundle():
     script = read("scripts/qualify-qwen3-asr-production.ps1")
     requirements = [
         line.strip().lower()
-        for line in read("asr_service/requirements-qwen3-asr-windows.txt").splitlines()
+        for line in read("services/asr_service/requirements-qwen3-asr-windows.txt").splitlines()
         if line.strip() and not line.lstrip().startswith("#")
     ]
     assert "build_controlled_qwen3_asr_wheel.py" in workflow
@@ -1716,7 +1718,7 @@ def test_qwen3_asr_qualification_uses_chinese_only_dependency_bundle():
     assert "requirements-qwen3-asr-windows.txt" in script
     assert "requirements-windows.txt" not in script
     assert "qwen-asr==0.0.6+ragpincheng.zh1" in read(
-        "asr_service/requirements-qwen3-asr.txt"
+        "services/asr_service/requirements-qwen3-asr.txt"
     )
     for forbidden in ("funasr", "modelscope", "onnxruntime", "kaldiio", "soynlp"):
         assert not any(forbidden in line for line in requirements)
@@ -1753,7 +1755,7 @@ def test_qwen3_asr_qualification_freezes_dual_models_bf16_and_result_flow():
     model = read("scripts/prepare_qwen3_asr_models.py")
     runner = read("scripts/run_qwen3_asr_qualification.py")
     assert "qwen-asr==0.0.6+ragpincheng.zh1" in read(
-        "asr_service/requirements-qwen3-asr.txt"
+        "services/asr_service/requirements-qwen3-asr.txt"
     )
     assert "torch==2.7.0+cu128" in script
     assert "torchaudio==2.7.0+cu128" in script

@@ -3,7 +3,7 @@
 > ⚠️ **架构变更说明（2026-07-26）**
 > 生产环境已从单机 Windows 部署迁移为双节点架构：
 > - **Ubuntu 应用节点**：运行 backend + Qdrant，无 GPU
-> - **Windows GPU 节点**：运行独立 GPU 推理服务（`gpu_service/`）
+> - **Windows GPU 节点**：运行独立 GPU 推理服务（`services/gpu_service/`）
 >
 > 本文档保留作为 GPU 技术参考，但不再描述当前生产部署方式。
 > 新架构详情见 `docs/migrations/ubuntu-app-windows-gpu-runbook.md`。

@@ -107,8 +107,8 @@ function Assert-FixedCombinedRequirements {
     $expected = @(
         "torch==2.7.0+cu128",
         "torchaudio==2.7.0+cu128",
-        "-r $requirementsSource/asr_service/requirements-windows.txt",
-        "-r $requirementsSource/asr_service/requirements-faster-whisper.txt"
+        "-r $requirementsSource/services/asr_service/requirements-windows.txt",
+        "-r $requirementsSource/services/asr_service/requirements-faster-whisper.txt"
     )
     $actual = @(Get-Content -LiteralPath $Path -Encoding ASCII)
     if ($actual.Count -ne $expected.Count) {
@@ -438,8 +438,8 @@ try {
         -Path $CombinedRequirements `
         -ResolvedSource $resolvedSource
 
-    $windowsRequirements = Join-Path $resolvedSource "asr_service\requirements-windows.txt"
-    $fasterWhisperRequirements = Join-Path $resolvedSource "asr_service\requirements-faster-whisper.txt"
+    $windowsRequirements = Join-Path $resolvedSource "services\asr_service\requirements-windows.txt"
+    $fasterWhisperRequirements = Join-Path $resolvedSource "services\asr_service\requirements-faster-whisper.txt"
     Assert-RegularFile -Path $windowsRequirements -Label "Windows ASR requirements"
     Assert-RegularFile -Path $fasterWhisperRequirements -Label "faster-whisper requirements"
 

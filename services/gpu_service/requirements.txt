@@ -1,0 +1,33 @@
+# GPU inference development dependencies only.
+# Use an isolated developer venv; never install this file into the Windows
+# production host's machine-wide Python environment.
+#
+# NOTE: torch >= 2.7 is required for RTX 5060 Ti (Blackwell sm_120).
+# The default PyPI index serves the CPU-only build.  Install the CUDA build
+# FIRST in that developer venv, then let this file satisfy the rest.
+#
+#   pip install --index-url https://download.pytorch.org/whl/cu128 "torch>=2.7"
+#   pip install -r services\gpu_service\requirements.txt
+#
+# To verify CUDA is available:
+#   python -c "import torch; print(torch.cuda.is_available())"
+
+# Web framework
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+pydantic>=2.0.0
+
+# Inference requirements for development and contract checks only.
+# Production uses services/gpu_service/runtime-lock.txt after an R3 qualification and
+# is installed only into a D-drive immutable release venv.
+FlagEmbedding>=1.3.0,<2
+# transformers >= 4.56.0 introduced the `dtype` keyword used by
+# FlagEmbedding 1.4.0's BGEM3FlagModel loader; 4.55.x raises
+# TypeError: XLMRobertaModel.__init__() got an unexpected keyword argument 'dtype'.
+# tokenizers must track transformers' own pin (4.56.x requires >=0.22,<=0.23),
+# because a <0.22 ceiling silently caps transformers at 4.55.4.
+transformers>=4.56,<5
+tokenizers>=0.22,<0.23
+
+# Utilities
+python-dotenv>=1.0.0

@@ -12,7 +12,7 @@ rerank returned HTTP 422: {"detail":[{"type":"too_long","loc":["body","passages"
 2026-07-30 补比较型黄金集时，`eval-comparison-0004` 实测触发。该题因此整条评测失败（被 try/except 吞掉，但生产链路会让该轮问答降级/报错）。
 
 ## 根因（已逐项源码核对）
-- **上限来源**：`gpu_service/config.py:21` `MAX_BATCH_SIZE=100`，在 `gpu_service/app.py:207` 对 `/v1/rerank` 的 `body.passages` 强制校验，超过即 422。
+- **上限来源**：`services/gpu_service/config.py:21` `MAX_BATCH_SIZE=100`，在 `services/gpu_service/app.py:207` 对 `/v1/rerank` 的 `body.passages` 强制校验，超过即 422。
 - **单查询路径不超限**：`src/retrieve.py::_recall_scored` 的 Qdrant `query_points(limit=RERANK_TOP_K)`（`RERANK_TOP_K=40`）保证一次召回 ≤40 条 child，送 rerank 也 ≤40。
 - **多查询路径会超限**：`src/retrieve.py::retrieve_multi`（约 365–401 行）对每个子查询各调一次 `_recall_scored`（各 ≤40），再取**并集** `all_child_ids = list(child_point.keys())`，去重后最多 `DECOMPOSE_MAX_SUBQUERIES(3) × RERANK_TOP_K(40) = 120` 条；子查询间重叠少时就 >100。随后 `passages = [... for p in points]` 一次性整批送 `rerank_scores(original_query, passages)`，**rerank 前无任何截断** → 触发 422。
 - **触发条件**：子查询数 ≥3 且各路召回重叠低（比较型天然如此，两侧文档不同）。子查询越正交越易踩。
@@ -43,7 +43,7 @@ rerank returned HTTP 422: {"detail":[{"type":"too_long","loc":["body","passages"
 ## 拟修改文件
 - `src/retrieve.py`：`retrieve_multi` 内，rerank 前加候选预截断（每子查询保底 + 融合分补足）。
 - `src/config.py`：新增 `RERANK_BATCH_CAP`（默认 96，注释说明须 ≤ gpu_service MAX_BATCH_SIZE）。
-- （不改 `gpu_service/*`，不改单查询 `retrieve`/`_recall_scored`。）
+- （不改 `services/gpu_service/*`，不改单查询 `retrieve`/`_recall_scored`。）
 
 ## 实施步骤（候选）
 1. `config.py` 加 `RERANK_BATCH_CAP=96`。

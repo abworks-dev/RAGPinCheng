@@ -8,11 +8,11 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $objects = @(
-    "$Commit`:gpu_service/__init__.py",
-    "$Commit`:gpu_service/app.py",
-    "$Commit`:gpu_service/config.py",
-    "$Commit`:gpu_service/models.py",
-    "$Commit`:gpu_service/schemas.py",
+    "$Commit`:services/gpu_service/__init__.py",
+    "$Commit`:services/gpu_service/app.py",
+    "$Commit`:services/gpu_service/config.py",
+    "$Commit`:services/gpu_service/models.py",
+    "$Commit`:services/gpu_service/schemas.py",
     "$Commit`:scripts/start-gpu-service.ps1",
     "$Commit`:scripts/diagnose_gpu_reranker.py",
     "$Commit`:scripts/get-gpu-runtime-lock-hash.ps1"

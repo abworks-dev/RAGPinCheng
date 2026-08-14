@@ -272,7 +272,7 @@ function Get-VerifiedAsrListenerIds {
     }
     $basePython = (Resolve-Path -LiteralPath ([string]$basePythonOutput).Trim()).Path
     $expectedCommandLine = (
-        '"{0}" -m uvicorn asr_service.app:create_app --factory --host 0.0.0.0 --port 8200' -f
+        '"{0}" -m uvicorn services.asr_service.app:create_app --factory --host 0.0.0.0 --port 8200' -f
         $basePython
     )
     $processIds = @(
@@ -392,13 +392,17 @@ if ($StageCandidate) {
 foreach ($item in @("asr_service", "src")) {
     Copy-Item -LiteralPath (Join-Path $resolvedSource $item) -Destination $staging -Recurse
 }
+$stagingServices = Join-Path $staging "services"
+New-Item -ItemType Directory -Path $stagingServices -Force | Out-Null
+Copy-Item -LiteralPath (Join-Path $resolvedSource "services\__init__.py") -Destination $stagingServices
+Copy-Item -LiteralPath (Join-Path $resolvedSource "services\asr_service") -Destination $stagingServices -Recurse
 foreach ($requirementsName in @(
     "requirements-service-core.txt",
     "requirements-windows.txt",
     "requirements-faster-whisper.txt",
     "requirements-whisperx.txt"
 )) {
-    Copy-Item -LiteralPath (Join-Path $resolvedSource "asr_service\$requirementsName") -Destination $staging
+    Copy-Item -LiteralPath (Join-Path $resolvedSource "services\asr_service\$requirementsName") -Destination $staging
 }
 if ($StageCandidate) {
     $candidateScriptRoot = Join-Path $staging "scripts"
@@ -420,7 +424,7 @@ $envFile = if ($StageCandidate) {
 if ($StageCandidate -and (Test-Path -LiteralPath $activeEnvFile -PathType Leaf)) {
     Copy-Item -LiteralPath $activeEnvFile -Destination $envFile
 } elseif (-not (Test-Path -LiteralPath $envFile)) {
-    Copy-Item -LiteralPath (Join-Path $resolvedSource "asr_service\.env.example") -Destination $envFile
+    Copy-Item -LiteralPath (Join-Path $resolvedSource "services\asr_service\.env.example") -Destination $envFile
 }
 function Set-ProtectedConfigValue {
     param(

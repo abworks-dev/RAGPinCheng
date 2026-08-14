@@ -1,4 +1,5 @@
 import ast
+import importlib.util
 from pathlib import Path
 
 
@@ -21,7 +22,7 @@ def test_src_has_no_service_directory_dependencies():
     imports = _imports_under("src")
     assert not any(
         name == service or name.startswith(f"{service}.")
-        for service in ("api", "gpu_service", "asr_service", "libreoffice")
+        for service in ("api", "services", "gpu_service", "asr_service", "libreoffice")
         for name in imports
     )
 
@@ -30,14 +31,20 @@ def test_api_does_not_import_service_implementations():
     imports = _imports_under("api")
     assert not any(
         name == service or name.startswith(f"{service}.")
-        for service in ("gpu_service", "asr_service", "libreoffice")
+        for service in ("services", "gpu_service", "asr_service", "libreoffice")
         for name in imports
     )
 
 
 def test_asr_service_only_uses_shared_src_transcription_contract():
-    imports = _imports_under("asr_service")
-    forbidden = {"api", "gpu_service", "libreoffice"}
+    imports = _imports_under("services/asr_service")
+    forbidden = {
+        "api",
+        "gpu_service",
+        "libreoffice",
+        "services.gpu_service",
+        "services.libreoffice",
+    }
     assert not any(
         name == root or name.startswith(f"{root}.")
         for root in forbidden
@@ -52,9 +59,17 @@ def test_asr_service_only_uses_shared_src_transcription_contract():
 
 def test_gpu_and_libreoffice_are_standalone_services():
     for service in ("gpu_service", "libreoffice"):
-        imports = _imports_under(service)
+        imports = _imports_under(f"services/{service}")
         assert not any(
             name == root or name.startswith(f"{root}.")
-            for root in ("api", "src", "asr_service")
+            for root in ("api", "src", "asr_service", "services.asr_service")
             for name in imports
         )
+
+
+def test_legacy_module_names_resolve_to_moved_implementations():
+    for service in ("asr_service", "gpu_service"):
+        legacy = importlib.util.find_spec(f"{service}.config")
+        canonical = importlib.util.find_spec(f"services.{service}.config")
+        assert legacy is not None and canonical is not None
+        assert Path(legacy.origin).resolve() == Path(canonical.origin).resolve()

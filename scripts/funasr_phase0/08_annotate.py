@@ -23,7 +23,7 @@ Per R2 spec §十四:
   - Audio + annotation NEVER written to Git (this script does not touch
     the repo; outputs to testdata_root, not into the repo).
 
-NEVER calls any ASR / model. NEVER touches gpu_service.
+NEVER calls any ASR / model. NEVER touches services.gpu_service.
 """
 from __future__ import annotations
 

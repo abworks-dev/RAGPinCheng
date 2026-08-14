@@ -32,7 +32,7 @@ soundfile>=0.12
 # Inference backends
 onnxruntime>=1.17,<2
 
-# Production-aligned version pins (must match gpu_service/requirements.txt)
+# Production-aligned version pins (must match services/gpu_service/requirements.txt)
 transformers>=4.46,<5
 huggingface-hub>=0.34,<1
 safetensors>=0.4

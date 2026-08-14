@@ -114,7 +114,7 @@ try {
 $manifestPath = Join-Path $cacheRoot "SenseVoiceSmall\$modelRevision\model-manifest.json"
 Push-Location -LiteralPath $resolvedSource
 try {
-    & $venvPython -c "from pathlib import Path; from asr_service.model_cache import validate_sensevoice_cache; import sys; status=validate_sensevoice_cache(Path(sys.argv[1]), Path(sys.argv[2])); print(f'model_cache_available={status.available} reason_code={status.reason_code}'); raise SystemExit(0 if status.available else 1)" $cacheRoot $manifestPath
+    & $venvPython -c "from pathlib import Path; from services.asr_service.model_cache import validate_sensevoice_cache; import sys; status=validate_sensevoice_cache(Path(sys.argv[1]), Path(sys.argv[2])); print(f'model_cache_available={status.available} reason_code={status.reason_code}'); raise SystemExit(0 if status.available else 1)" $cacheRoot $manifestPath
 } finally {
     Pop-Location
 }

@@ -478,7 +478,7 @@ import funasr
 import modelscope
 import torch
 import torchaudio
-from asr_service.model_cache import validate_faster_whisper_cache
+from services.asr_service.model_cache import validate_faster_whisper_cache
 
 venv = Path(sys.prefix).resolve()
 for module in (ctranslate2, faster_whisper, funasr, modelscope, torch, torchaudio):
