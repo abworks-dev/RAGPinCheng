@@ -20,10 +20,8 @@ jieba-0.42.1.tar.gz
 .whisperx-reports/
 venv/
 runtime/
-# Real business documents stay in docs/ and are not tracked by Git.
-# Project knowledge maps (features, decisions, user acceptance) live in
-# project-docs/ and ARE tracked by Git.
-docs/*
+# Project documentation is tracked in docs/. Runtime business content belongs
+# under the ignored content/ root (legacy compatibility: content/legacy-docs/).
 CLAUDE.local.md
 .claude/settings.local.json
 

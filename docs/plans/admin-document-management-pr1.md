@@ -36,7 +36,7 @@
 - 前端资料页、API client 及全量组件测试；
 - TypeScript 与 Vite 生产构建；
 - 虚构 API 数据下的桌面浏览器视觉检查；
-- 用户按 `project-docs/USER_ACCEPTANCE.md` 和交付清单完成非敏感样本验收。
+- 用户按 `docs/USER_ACCEPTANCE.md` 和交付清单完成非敏感样本验收。
 
 ## 删除残留修复（2026-08-05）
 

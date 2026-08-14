@@ -24,7 +24,7 @@ cd frontend && npm install && npm run dev   # 访问 http://localhost:5173
 
 首次启动会从 `ADMIN_EMPLOYEE_ID` / `ADMIN_PASSWORD` 自动创建管理员账号。普通员工在 `/register` 自助注册。
 
-如需从本地 `docs/` 目录批量建索引：
+如需从本地 `content/legacy-docs/` 兼容目录批量建索引：
 
 ```bash
 python scripts/build_index.py
@@ -45,7 +45,7 @@ docker compose -f docker/docker-compose.yml logs -f backend   # 看首次模型�
 
 首次启动约 30 秒（无需下载 GPU 模型）。后端镜像通过多阶段构建：node 阶段执行 `npm run build` 产出 React 静态资源，Python 阶段直接挂载提供，无需独立的前端容器或 nginx 反向代理。
 
-**架构说明：** GPU 推理（BGE-M3 embedding + BGE-reranker）运行在独立的 Windows GPU 主机上，通过 HTTP 远程调用。Ubuntu 主机只运行 API 后端 + Qdrant 向量数据库。详见 `project-docs/migrations/ubuntu-app-windows-gpu-runbook.md`。
+**架构说明：** GPU 推理（BGE-M3 embedding + BGE-reranker）运行在独立的 Windows GPU 主机上，通过 HTTP 远程调用。Ubuntu 主机只运行 API 后端 + Qdrant 向量数据库。详见 `docs/migrations/ubuntu-app-windows-gpu-runbook.md`。
 
 **访问前端**（等 `docker compose ps` 显示 `backend` 为 `healthy` 后）：
 
@@ -86,11 +86,11 @@ git pull && docker compose -f docker/docker-compose.yml build && docker compose 
 **通过文件系统 + 命令行**（批量导入）：
 
 ```bash
-cp 新规范.pdf docs/行业规范/
+cp 新规范.pdf content/legacy-docs/行业规范/
 python scripts/build_index.py   # 增量更新，只处理新文件
 ```
 
-资料分类由 `docs/` 下的第一级目录名决定。只有 `客户标准` 使用二级目录（`客户标准/<客户名>/`）。`教学视频/` 下的 `.md` 文件按视频转写格式处理（按发言段落切分，引用带时间戳）；其它目录下的 `.md` 当普通 Markdown 文档处理。
+旧资料分类由 `content/legacy-docs/`（或显式 `DOCS_DIR`）下的第一级目录名决定。只有 `客户标准` 使用二级目录（`客户标准/<客户名>/`）。`教学视频/` 下的 `.md` 文件按视频转写格式处理（按发言段落切分，引用带时间戳）；其它目录下的 `.md` 当普通 Markdown 文档处理。仓库根 `docs/` 只存放项目文档，不是业务资料入口。
 
 ---
 
@@ -124,7 +124,7 @@ python scripts/diff_eval_runs.py <基准>.jsonl <候选>.jsonl        # 对比�
 
 ```
 PDF / .md                   解析后 markdown    分块          向量              回答
-docs/<分类>/   →(1)→   data/parsed/   →(2)→  父块+   →(3)→ Qdrant +   →(4)→ GLM-4
+content/legacy-docs/<分类>/ →(1)→ data/parsed/ →(2)→ 父块+ →(3)→ Qdrant →(4)→ GLM-4
                MinerU                          子块       SQLite            带引用
                                                           BGE-M3 + 重排序
 ```

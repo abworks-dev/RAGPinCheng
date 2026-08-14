@@ -322,7 +322,9 @@ class TestDeployGitSafety(unittest.TestCase):
         compose = (ROOT / "docker" / "docker-compose.yml").read_text(encoding="utf-8")
 
         self.assertIn("${CONTENT_HOST_PATH:-../content}:/app/content", compose)
-        self.assertIn("${DOCS_HOST_PATH:-../docs}:/app/docs", compose)
+        self.assertIn(
+            "${DOCS_HOST_PATH:-../content/legacy-docs}:/app/docs", compose
+        )
         self.assertIn("${MEDIA_HOST_PATH:-../media}:/app/media", compose)
         self.assertIn("DOCS_DIR: /app/docs", compose)
         self.assertIn("MEDIA_DIR: /app/media", compose)

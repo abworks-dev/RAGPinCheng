@@ -35,7 +35,7 @@
 - **不匹配**：打印**显眼**告警（`!!!` 前缀 / 单独段落），包含：
   - live 指纹与基准指纹；
   - 差异（parent_count 差几个、sha256 是否变化）；
-  - 建议："黄金集可能已陈旧，建议重跑 relabel_golden.py fingerprint 校准，或按 project-docs/fix-golden-staleness.md 流程重标。"（**不要**自动重标——重标本身是独立 R2 决策。）
+  - 建议："黄金集可能已陈旧，建议重跑 relabel_golden.py fingerprint 校准，或按 docs/fix-golden-staleness.md 流程重标。"（**不要**自动重标——重标本身是独立 R2 决策。）
 - **非阻断**：`run_eval_retrieval.py` 仍继续跑、产出指标。理由：陈旧集下的指标可能仍对调试有用（"全 0 命中"本身就是信号），但用户必须**主动看到**告警，不会被静默结果误导。
 - 增加 `--strict-staleness` CLI 标志：不匹配时**退出码非 0**（如 `SystemExit(2)`），供 CI 流水线在"集已陈旧"时直接失败。默认关闭。
 
@@ -72,7 +72,7 @@
 ## 仍需用户决定
 - `golden.fingerprint.json` 位置：用 `src/eval/` 下还是仓库根？默认建议 `src/eval/`，靠近被标的黄金集。
 - `--strict-staleness` 默认开关：建议**默认关**（仅打印告警），CI 再传开。
-- 是否把"重标必 freeze"写进 `project-docs/eval-workflow.md` 流程文档（若不存在则不建）。
+- 是否把"重标必 freeze"写进 `docs/eval-workflow.md` 流程文档（若不存在则不建）。
 
 ## R2 审批提示
 本方案改评测脚本 + 新增 sidecar 协议。**尚未获实施授权**，需用户看方案后明确"批准执行"。方案范围或风险升级时需重新审批。

@@ -1,7 +1,7 @@
 # Security, Data and Deployment Rules
 
 - 不读取或输出`.env`真实值；只讨论变量名和是否存在。
-- 不提交`docs/`、`data/*.sqlite*`、Qdrant存储、反馈日志、Cookie或客户文件。
+- 不提交`content/`中的业务资料、`data/*.sqlite*`、Qdrant存储、反馈日志、Cookie或客户文件；`docs/`是应跟踪的项目文档。
 - `.claude/settings.local.json`是本机私有配置，不进入版本控制。
 - MinerU和GLM是外部服务；发送真实资料前确认数据授权和保密边界。
 - 认证改动必须验证匿名、普通用户、管理员、Cookie Secure和CSRF。

@@ -1,14 +1,14 @@
 # FunASR Phase 0 预注册计划（非生产沙箱技术验证）
 
 - 状态：预注册设计已完成；后续执行状态由 `funasr-phase0-execution-plan.md` 接管
-- 父方案：`project-docs/plans/funasr-auto-transcription.md`
+- 父方案：`docs/plans/funasr-auto-transcription.md`
 - 风险等级：评测设计与本地脚本验证为 **R0/R2**；公司开发兼生产 GPU 上的安装、下载、推理和压测均为待单独审批的 **R3**。
 - 审批边界：本文件保留实测前预注册的方法和历史门槛，不再作为现场执行授权。R2 后代码事实、修正后的指标定义、模型身份、停止门禁和批准范围以 `scripts/funasr_phase0/` 及 `funasr-phase0-execution-plan.md` 为准。
 - 2026-07-31 补充：用户已批准公司 Windows GPU 主机上的 R3 第一批，仅限 R3-0～R3-5 和 `iic/SenseVoiceSmall@v1.0.0`；维护窗口起止时间尚未补齐，因此依赖安装、下载和 GPU 实测仍阻塞。1h/2h/4h、BGE 共存及 faster-whisper 均未获批准。
 
 ## 0. 关键前提（已在父方案之外由用户口头/书面补充）
 
-- 唯一一台 RTX 5060 Ti 位于公司生产 Windows GPU 主机（参见 `project-docs/migrations/ubuntu-app-windows-gpu-runbook.md` §1、`scripts/deploy-gpu.ps1` §6 中 `HOST=${GPU_SERVICE_IP}` / `PORT=8100`），当前承载实际 `gpu_service`。
+- 唯一一台 RTX 5060 Ti 位于公司生产 Windows GPU 主机（参见 `docs/migrations/ubuntu-app-windows-gpu-runbook.md` §1、`scripts/deploy-gpu.ps1` §6 中 `HOST=${GPU_SERVICE_IP}` / `PORT=8100`），当前承载实际 `gpu_service`。
 - 本预注册计划**不**包含对生产 Windows 主机的任何访问、登录、安装、下载、启动、运行、压测、停止或修改。
 - 本机（开发机）GPU 为 RTX 5070 Ti / 16 GB / Driver 610.74 / sm_120，与生产 RTX 5060 Ti 型号不同；按用户最新指示，**本机也不作为 Phase 0 沙箱**。
 - 未来对生产 Windows 主机的任何测试须另行提交 **R3 生产测试方案**，含维护窗口、当前业务负载、影响范围、监控指标、自动停止条件、服务恢复步骤和负责人，逐项明确批准。
@@ -210,8 +210,8 @@
 
 | 交付物 | 路径 | 形式 | 何时可写 |
 |---|---|---|---|
-| 预注册计划（本文件） | `project-docs/plans/funasr-phase0-pre-registration.md` | Markdown | 本轮已写 |
-| 评测指标定义 | `project-docs/plans/funasr-phase0-metrics.md` | Markdown | 批准后 |
+| 预注册计划（本文件） | `docs/plans/funasr-phase0-pre-registration.md` | Markdown | 本轮已写 |
+| 评测指标定义 | `docs/plans/funasr-phase0-metrics.md` | Markdown | 批准后 |
 | 硬门槛与停止条件 | 纳入上同文件 | 同上 | 批准后 |
 | 标注脚本 | `scripts/funasr_phase0/annotate.py` | Python | 批准后 |
 | 评测脚本 | `scripts/funasr_phase0/eval.py` | Python | 批准后 |

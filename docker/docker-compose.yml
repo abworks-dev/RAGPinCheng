@@ -114,7 +114,7 @@ services:
       - ${CONTENT_HOST_PATH:-../content}:/app/content
       # 源 PDF 文档 — 只在容器内执行 scripts/build_index.py 时需要。
       # 读写挂载，MinerU 拆分后的 PDF 可以写回原目录。
-      - ${DOCS_HOST_PATH:-../docs}:/app/docs
+      - ${DOCS_HOST_PATH:-../content/legacy-docs}:/app/docs
     ports:
       # 对外暴露入口。主机 80 端口映射到容器 uvicorn 8000 端口 —
       # 与旧 nginx 方案 URL 一致，减少一跳。生产环境建议在前面加公司

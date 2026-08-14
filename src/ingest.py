@@ -363,7 +363,7 @@ def iter_transcripts() -> Iterator[Path]:
 
 
 def iter_markdown_docs() -> Iterator[Path]:
-    """Yield .md files anywhere under docs/ EXCEPT 教学视频/ — these are
+    """Yield .md files under the legacy DOCS_DIR except 教学视频/ — these are
     markdown-as-document sources (already-parsed PDF equivalents), the same
     classification rule the admin upload path applies
     (`routes_admin._classify_doc_type`): a .md is a transcript iff it lives

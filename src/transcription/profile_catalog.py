@@ -101,7 +101,7 @@ def _profiles() -> tuple[TranscriptionProfileDefinition, ...]:
             admission=ProfileAdmission.disabled,
             release_policy=ReleasePolicy(True, False, False),
             evidence_refs=(
-                "project-docs/plans/faster-whisper-provider-integration.md",
+                "docs/plans/faster-whisper-provider-integration.md",
             ),
         ),
         TranscriptionProfileDefinition.create(
@@ -118,7 +118,7 @@ def _profiles() -> tuple[TranscriptionProfileDefinition, ...]:
             admission=ProfileAdmission.disabled,
             release_policy=ReleasePolicy(True, False, False),
             evidence_refs=(
-                "project-docs/plans/qwen3-asr-r2-r3-integration.md",
+                "docs/plans/qwen3-asr-r2-r3-integration.md",
             ),
         ),
         TranscriptionProfileDefinition.create(
@@ -143,7 +143,7 @@ def _profiles() -> tuple[TranscriptionProfileDefinition, ...]:
             qualification=ProfileQualification.experimental,
             admission=ProfileAdmission.disabled,
             release_policy=ReleasePolicy(True, False, False),
-            evidence_refs=("project-docs/plans/whisperx-r2-r3-execution-plan.md",),
+            evidence_refs=("docs/plans/whisperx-r2-r3-execution-plan.md",),
         ),
     )
     return tuple(sorted(profiles, key=lambda profile: profile.profile_id))

@@ -25,7 +25,7 @@
 
 ### 2.1 已实现的媒体后半段流水线
 
-第一阶段已落地（`project-docs/features/transcript-pipeline.md`、`project-docs/decisions/0001-video-transcript-player.md`）：
+第一阶段已落地（`docs/features/transcript-pipeline.md`、`docs/decisions/0001-video-transcript-player.md`）：
 
 - `media_assets` 表位于 `app.sqlite`，已包含 `transcript_origin`（`uploaded | generated`）和媒体处理状态；
 - 视频落盘到 `media/<media_id>/original.mp4`；
@@ -525,7 +525,7 @@ processed_ms / total_ms
 - 人工转录、普通文档、旧会话、引用和播放不退化；
 - 任务幂等、并发拒绝、断点恢复、正式版本唯一、30 天清理和磁盘停止条件通过验证；
 - 默认关闭的部署级开关就位；
-- `project-docs/features/transcript-pipeline.md` 按实际完成范围同步；
+- `docs/features/transcript-pipeline.md` 按实际完成范围同步；
 - `TODO.md` 与 `WORKLOG.md` 按项目规则记录真实状态。
 
 Phase 6 是独立的生产灰度决策，不因技术实施完成而自动执行。

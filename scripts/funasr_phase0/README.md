@@ -1,7 +1,7 @@
 # FunASR Phase 0 Sandbox (`scripts/funasr_phase0/`)
 
 > Phase 0 non-production sandbox for the FunASR auto-transcription feature
-> described in `project-docs/plans/funasr-auto-transcription.md`. This
+> described in `docs/plans/funasr-auto-transcription.md`. This
 > directory contains **test scaffolding only** — it MUST NOT be imported by
 > `gpu_service/`, `src/`, `api/`, or `frontend/`.
 

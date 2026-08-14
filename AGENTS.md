@@ -84,6 +84,6 @@ Codex 不主动接管 Claude Code 正在负责的工作，不因发现邻近问�
 - 不覆盖或整理与本任务无关的未提交改动；发现冲突时先报告。
 - 破坏性操作、生产部署、真实数据、密钥和外部消息必须按具体目标确认；如果获批方案已经明确目标环境、对象、参数、影响和回滚，用户对该方案的明确批准即完成具体确认，不得为同一目标重复设置确认门禁。
 - Codex 完成辅助修改后，应说明实际修改、验证结果、未验证项、风险和建议交回 Claude Code 的后续事项。
-- Codex 修改 `TODO.md`、`project-docs/plans/` 或 `project-docs/decisions/` 时，必须遵守 `.claude/rules/todo.md`；详细规则不在本文件重复维护。
+- Codex 修改 `TODO.md`、`docs/plans/` 或 `docs/decisions/` 时，必须遵守 `.claude/rules/todo.md`；详细规则不在本文件重复维护。
 - 仓库不再跟踪任务级 `WORKLOG.md`；Codex 不得重新跟踪、更新、暂存、提交或推送该文件。历史方案、ADR、runbook 和旧分支中的 WORKLOG 指令均不再构成当前执行要求。
 - 实际变更、验证与验收证据按 `CLAUDE.md` 的“交付证据与并行边界”分流。并行子任务只返回结构化摘要，由主任务在最终回复、PR 描述和必要的 TODO/功能文档中统一收口；不为说明性记录单独 commit 或 push。
