@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AdminLayout } from "./AdminLayout";
 
 const mocks = vi.hoisted(() => ({
+  user: { real_name: "测试管理员", employee_id: "admin-test", role: "admin", content_permissions: [] as string[] },
   logout: vi.fn(),
   usersMount: vi.fn(),
   conversationsMount: vi.fn(),
@@ -13,15 +14,17 @@ const mocks = vi.hoisted(() => ({
   feedbackMount: vi.fn(),
   managedMount: vi.fn(),
   categoriesMount: vi.fn(),
+  refreshUser: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("../../context/AuthContext", () => ({
   useAuth: () => ({
     state: {
       status: "authed",
-      user: { real_name: "测试管理员", employee_id: "admin-test", role: "admin", content_permissions: [] },
+      user: mocks.user,
     },
     logout: mocks.logout,
+    refreshUser: mocks.refreshUser,
   }),
 }));
 
@@ -84,6 +87,7 @@ vi.mock("./AdminCategoriesPage", () => ({
 describe("AdminLayout tab boundary", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.user = { real_name: "测试管理员", employee_id: "admin-test", role: "admin", content_permissions: [] };
   });
 
   it("reserves a stable root scrollbar gutter only while mounted", () => {
@@ -99,7 +103,7 @@ describe("AdminLayout tab boundary", () => {
     expect(document.documentElement).not.toHaveClass("admin-scrollbar-stable");
   });
 
-  it("keeps the brand, theme, and admin actions in the sidebar", () => {
+  it("keeps the brand, theme, and admin actions in the sidebar", async () => {
     render(
       <MemoryRouter>
         <AdminLayout />
@@ -114,7 +118,7 @@ describe("AdminLayout tab boundary", () => {
     expect(screen.queryByRole("button", { name: "退出登录" })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /测试管理员/ }));
-    expect(screen.getByRole("button", { name: "返回对话" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "返回对话" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "退出登录" })).toBeInTheDocument();
     expect(document.querySelector("header")).not.toBeInTheDocument();
   });
@@ -212,5 +216,24 @@ describe("AdminLayout tab boundary", () => {
     fireEvent.click(screen.getByRole("button", { name: "用户" }));
     expect(screen.getByText("用户页面内容")).toBeInTheDocument();
     expect(mocks.usersMount).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns a content user to the library when category permission is removed", () => {
+    mocks.user = {
+      real_name: "测试资料员",
+      employee_id: "editor-test",
+      role: "user",
+      content_permissions: ["organize", "manage_categories"],
+    };
+    const { rerender } = render(<MemoryRouter><AdminLayout /></MemoryRouter>);
+
+    fireEvent.click(screen.getByRole("button", { name: "分类设置" }));
+    expect(screen.getByText("分类设置页面内容")).toBeInTheDocument();
+
+    mocks.user = { ...mocks.user, content_permissions: ["organize"] };
+    rerender(<MemoryRouter><AdminLayout /></MemoryRouter>);
+
+    expect(screen.queryByRole("button", { name: "分类设置" })).not.toBeInTheDocument();
+    expect(screen.getByText("资料库页面内容")).toBeInTheDocument();
   });
 });

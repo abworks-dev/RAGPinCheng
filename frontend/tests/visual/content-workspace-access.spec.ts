@@ -35,4 +35,27 @@ test.describe("资料成员工作台入口", () => {
     await expect(page.getByRole("button", { name: /工作台/ })).toHaveCount(0);
     await expectNoBodyOverflow(page);
   });
+
+  test("撤权后菜单立即移除入口且直接访问不闪现工作台", async ({ page }) => {
+    let permissions = ["organize"];
+    await installAdminRoutes(page, "normal", "bim_engineer", () => ({
+      id: 9002,
+      employee_id: "TEST-EDITOR",
+      real_name: "合成资料员",
+      role: "user",
+      csrf_token: "synthetic-csrf-token",
+      content_permissions: permissions,
+    }));
+    await page.goto("/");
+
+    permissions = [];
+    await openUserMenu(page, /合成资料员/);
+    await expect(page.getByRole("button", { name: /工作台/ })).toHaveCount(0);
+    await expectNoBodyOverflow(page);
+
+    await page.goto("/admin");
+    await expect(page).toHaveURL(/\/$/);
+    await expect(page.getByRole("navigation", { name: "管理功能" })).toHaveCount(0);
+    await expectNoBodyOverflow(page);
+  });
 });

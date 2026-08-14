@@ -15,6 +15,7 @@ import { AdminCategoriesPage } from "./AdminCategoriesPage";
 import { AdminManagedContentPage } from "./AdminManagedContentPage";
 import { useAuth } from "../../context/AuthContext";
 import { contentWorkspaceTabs, workspaceLabel } from "../../lib/workspace-access";
+import { useNavigate } from "react-router-dom";
 
 type Tab = "users" | "conversations" | "corpus" | "managed" | "categories" | "media" | "stats" | "feedback";
 
@@ -30,7 +31,8 @@ const adminTabs: [Tab, string][] = [
 ];
 
 export function AdminLayout() {
-  const { state } = useAuth();
+  const { state, refreshUser } = useAuth();
+  const navigate = useNavigate();
   const user = state.status === "authed" ? state.user : null;
   const isAdmin = !user?.role || user.role === "admin";
   const permissions = user?.content_permissions || [];
@@ -45,6 +47,32 @@ export function AdminLayout() {
     document.documentElement.classList.add("admin-scrollbar-stable");
     return () => document.documentElement.classList.remove("admin-scrollbar-stable");
   }, []);
+
+  useEffect(() => {
+    const refresh = () => {
+      void refreshUser().catch(() => {
+        // Retain the current view when the network is temporarily unavailable.
+      });
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [refreshUser]);
+
+  useEffect(() => {
+    if (!user || isAdmin) return;
+    if (tabs.length === 0) {
+      navigate("/", { replace: true });
+      return;
+    }
+    if (!tabs.some(([key]) => key === tab)) setTab("managed");
+  }, [isAdmin, navigate, tab, tabs, user]);
 
   return (
     <div className="flex min-h-full flex-col bg-admin-background text-foreground lg:h-screen lg:flex-row lg:overflow-hidden">

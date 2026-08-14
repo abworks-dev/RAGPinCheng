@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import { ArrowLeft, BriefcaseBusiness, ChevronUp, LogOut } from "lucide-react";
+import { ArrowLeft, BriefcaseBusiness, ChevronUp, LoaderCircle, LogOut } from "lucide-react";
 import { hasContentWorkspaceAccess, workspaceLabel } from "../lib/workspace-access";
+import { toast } from "./ui/toast";
 
 export function UserMenu({
   collapsed = false,
@@ -11,8 +12,9 @@ export function UserMenu({
   collapsed?: boolean;
   adminContext?: boolean;
 }) {
-  const { state, logout } = useAuth();
+  const { state, logout, refreshUser } = useAuth();
   const [open, setOpen] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const navigate = useNavigate();
   const ref = useRef<HTMLDivElement | null>(null);
 
@@ -34,9 +36,25 @@ export function UserMenu({
     <div className="relative" ref={ref}>
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        disabled={refreshing}
+        aria-busy={refreshing}
+        onClick={async () => {
+          if (open) {
+            setOpen(false);
+            return;
+          }
+          setRefreshing(true);
+          try {
+            await refreshUser();
+            setOpen(true);
+          } catch {
+            toast.error("暂时无法核对最新权限，请稍后重试");
+          } finally {
+            setRefreshing(false);
+          }
+        }}
         title={collapsed ? u.real_name : undefined}
-        className={`flex h-10 items-center rounded-ui-md hover:bg-secondary ${collapsed ? "w-10 justify-center p-1" : "w-full gap-3 px-2"}`}
+        className={`flex h-10 items-center rounded-ui-md hover:bg-secondary disabled:cursor-wait disabled:opacity-70 ${collapsed ? "w-10 justify-center p-1" : "w-full gap-3 px-2"}`}
       >
         <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent text-white text-sm font-semibold">
           {initials}
@@ -45,7 +63,9 @@ export function UserMenu({
           <div className="text-sm truncate">{u.real_name}</div>
           <div className="text-[11px] text-muted truncate">用户名 {u.employee_id}</div>
         </div>}
-        {!collapsed && <ChevronUp className={`size-4 text-muted-foreground transition-transform ${open ? "" : "rotate-180"}`} />}
+        {!collapsed && (refreshing
+          ? <LoaderCircle aria-label="正在核对权限" className="size-4 animate-spin text-muted-foreground" />
+          : <ChevronUp className={`size-4 text-muted-foreground transition-transform ${open ? "" : "rotate-180"}`} />)}
       </button>
       {open && (
         <div className={`absolute bottom-12 z-dropdown rounded-ui-md border border-border bg-popover p-1.5 text-popover-foreground shadow-overlay ${collapsed ? "left-12 w-48" : "left-0 right-0"}`}>
@@ -65,9 +85,22 @@ export function UserMenu({
             canAccessWorkspace && (
               <button
                 type="button"
-                onClick={() => {
-                  setOpen(false);
-                  navigate("/admin");
+                disabled={refreshing}
+                onClick={async () => {
+                  setRefreshing(true);
+                  try {
+                    const user = await refreshUser();
+                    setOpen(false);
+                    if (user && hasContentWorkspaceAccess(user)) {
+                      navigate("/admin");
+                    } else {
+                      toast.error("你的资料工作台权限已被取消");
+                    }
+                  } catch {
+                    toast.error("暂时无法核对最新权限，请稍后重试");
+                  } finally {
+                    setRefreshing(false);
+                  }
                 }}
                 className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-left text-sm hover:bg-secondary"
               >

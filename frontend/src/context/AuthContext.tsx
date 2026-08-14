@@ -4,10 +4,17 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
-import { ApiError, api, setCsrfToken, setUnauthorizedHandler } from "../api/client";
+import {
+  ApiError,
+  api,
+  setContentPermissionForbiddenHandler,
+  setCsrfToken,
+  setUnauthorizedHandler,
+} from "../api/client";
 import type { AuthUser } from "../types";
 
 type AuthState =
@@ -20,12 +27,14 @@ type AuthContextValue = {
   login: (employee_id: string, password: string) => Promise<void>;
   register: (employee_id: string, real_name: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  refreshUser: () => Promise<AuthUser | null>;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState>({ status: "loading", user: null });
+  const refreshPromiseRef = useRef<Promise<AuthUser | null> | null>(null);
 
   const becomeAuthed = useCallback((user: AuthUser) => {
     setCsrfToken(user.csrf_token);
@@ -37,13 +46,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setState({ status: "anon", user: null });
   }, []);
 
+  const refreshUser = useCallback((): Promise<AuthUser | null> => {
+    if (refreshPromiseRef.current) return refreshPromiseRef.current;
+
+    const request = api.me()
+      .then((user) => {
+        becomeAuthed(user);
+        return user;
+      })
+      .catch((error) => {
+        if (error instanceof ApiError && error.status === 401) {
+          becomeAnon();
+          return null;
+        }
+        throw error;
+      })
+      .finally(() => {
+        refreshPromiseRef.current = null;
+      });
+    refreshPromiseRef.current = request;
+    return request;
+  }, [becomeAnon, becomeAuthed]);
+
   // Bootstrap: ask backend who we are. 401 → anon.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const user = await api.me();
-        if (!cancelled) becomeAuthed(user);
+        await refreshUser();
       } catch (e) {
         if (!cancelled) {
           if (e instanceof ApiError && e.status === 401) {
@@ -59,7 +89,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [becomeAuthed, becomeAnon]);
+  }, [becomeAnon, refreshUser]);
 
   // Any 401 from a downstream call clears the session.
   useEffect(() => {
@@ -68,6 +98,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
     return () => setUnauthorizedHandler(null);
   }, [becomeAnon]);
+
+  useEffect(() => {
+    setContentPermissionForbiddenHandler(() => {
+      void refreshUser().catch(() => {
+        // Keep the last trusted identity on transient network failures.
+      });
+    });
+    return () => setContentPermissionForbiddenHandler(null);
+  }, [refreshUser]);
 
   const login = useCallback(
     async (employee_id: string, password: string) => {
@@ -95,8 +134,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [becomeAnon]);
 
   const value = useMemo<AuthContextValue>(
-    () => ({ state, login, register, logout }),
-    [state, login, register, logout],
+    () => ({ state, login, register, logout, refreshUser }),
+    [state, login, register, logout, refreshUser],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

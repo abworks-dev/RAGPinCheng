@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiError, api, setCsrfToken, setUnauthorizedHandler } from "./client";
+import {
+  ApiError,
+  api,
+  setContentPermissionForbiddenHandler,
+  setCsrfToken,
+  setUnauthorizedHandler,
+} from "./client";
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -11,6 +17,7 @@ function jsonResponse(body: unknown, status = 200) {
 afterEach(() => {
   setCsrfToken(null);
   setUnauthorizedHandler(null);
+  setContentPermissionForbiddenHandler(null);
   vi.unstubAllGlobals();
 });
 
@@ -171,6 +178,27 @@ describe("api client", () => {
       body: JSON.stringify({ detail: "需要重新登录" }),
     });
     expect(unauthorized).toHaveBeenCalledTimes(1);
+  });
+
+  it("refreshes auth only for forbidden managed-content requests", async () => {
+    const forbidden = vi.fn();
+    setContentPermissionForbiddenHandler(forbidden);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ detail: "无权限" }, 403)));
+
+    await api.managedContentCapabilities().catch(() => undefined);
+    await api.adminStats().catch(() => undefined);
+
+    expect(forbidden).toHaveBeenCalledTimes(1);
+  });
+
+  it("refreshes auth for forbidden managed-content multipart uploads", async () => {
+    const forbidden = vi.fn();
+    setContentPermissionForbiddenHandler(forbidden);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ detail: "无权限" }, 403)));
+
+    await api.uploadManagedContent([new File(["x"], "test.pdf")], "category-1").catch(() => undefined);
+
+    expect(forbidden).toHaveBeenCalledTimes(1);
   });
 
   it("preserves safe structured error code, message and retry policy", async () => {
