@@ -112,7 +112,12 @@ function json(route: Route, body: unknown, status = 200) {
   return route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
 }
 
-export async function installAdminRoutes(page: Page, scenario: AdminScenario = "normal", workspaceUser: WorkspaceUser = "admin") {
+export async function installAdminRoutes(
+  page: Page,
+  scenario: AdminScenario = "normal",
+  workspaceUser: WorkspaceUser = "admin",
+  currentUser: () => typeof admin = () => workspaceUsers[workspaceUser],
+) {
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -120,7 +125,7 @@ export async function installAdminRoutes(page: Page, scenario: AdminScenario = "
 
     if (!path.startsWith("/api/")) return route.continue();
 
-    if (path === "/api/auth/me") return json(route, workspaceUsers[workspaceUser]);
+    if (path === "/api/auth/me") return json(route, currentUser());
     if (path === "/api/categories") return json(route, { categories: [], second_level_categories: [] });
     if (path === "/api/conversations") return json(route, { conversations: [] });
     if (path === "/api/admin/users") return json(route, { users: permissionUsers.map((user) => ({

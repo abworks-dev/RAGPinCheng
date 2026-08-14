@@ -47,9 +47,35 @@ export function getCsrfToken(): string | null {
 }
 
 let unauthorizedHandler: (() => void) | null = null;
+let contentPermissionForbiddenHandler: (() => void) | null = null;
 
 export function setUnauthorizedHandler(fn: (() => void) | null) {
   unauthorizedHandler = fn;
+}
+
+export function setContentPermissionForbiddenHandler(fn: (() => void) | null) {
+  contentPermissionForbiddenHandler = fn;
+}
+
+function notifyResponse(path: string, response: Response) {
+  if (response.status === 401 && unauthorizedHandler) {
+    try {
+      unauthorizedHandler();
+    } catch {
+      /* noop */
+    }
+  }
+  if (
+    response.status === 403
+    && path.startsWith("/api/admin/content/")
+    && contentPermissionForbiddenHandler
+  ) {
+    try {
+      contentPermissionForbiddenHandler();
+    } catch {
+      /* noop */
+    }
+  }
 }
 
 export class ApiError extends Error {
@@ -98,14 +124,7 @@ async function rawFetch(path: string, init: RequestInit = {}): Promise<Response>
     headers["X-CSRF-Token"] = csrfToken;
   }
   const res = await fetch(path, { ...init, headers, credentials: "include" });
-  if (res.status === 401 && unauthorizedHandler) {
-    // Fire-and-forget; the handler resets local auth state.
-    try {
-      unauthorizedHandler();
-    } catch {
-      /* noop */
-    }
-  }
+  notifyResponse(path, res);
   return res;
 }
 
@@ -377,6 +396,7 @@ export const api = {
       body: form,
       credentials: "include",
     });
+    notifyResponse("/api/admin/content/uploads", response);
     if (!response.ok) {
       const body = await response.text().catch(() => "");
       const detail = parseErrorDetail(body);

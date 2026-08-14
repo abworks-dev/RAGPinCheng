@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Navigate, Route, BrowserRouter as Router, Routes } from "react-router-dom";
 import { ChatLayout } from "./components/ChatLayout";
 import { VideoPlayerDrawer } from "./components/VideoPlayerDrawer";
@@ -25,10 +26,28 @@ function RequireAuth({ children }: { children: JSX.Element }) {
 }
 
 function RequireAdmin({ children }: { children: JSX.Element }) {
-  const { state } = useAuth();
+  const { state, refreshUser } = useAuth();
+  const [access, setAccess] = useState<"checking" | "allowed" | "denied">("checking");
+
+  useEffect(() => {
+    let cancelled = false;
+    setAccess("checking");
+    refreshUser()
+      .then((user) => {
+        if (!cancelled) setAccess(user && hasContentWorkspaceAccess(user) ? "allowed" : "denied");
+      })
+      .catch(() => {
+        if (!cancelled) setAccess("denied");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshUser]);
+
   if (state.status === "loading") return <FullPageLoader label="正在恢复登录…" />;
   if (state.status !== "authed") return <Navigate to="/login" replace />;
-  if (!hasContentWorkspaceAccess(state.user)) return <Navigate to="/" replace />;
+  if (access === "checking") return <FullPageLoader label="正在核对工作台权限…" />;
+  if (access === "denied") return <Navigate to="/" replace />;
   return children;
 }
 
