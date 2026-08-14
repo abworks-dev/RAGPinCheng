@@ -114,7 +114,8 @@ jobs:
           [ -z "$(git -C "${REPO_PATH}" status --porcelain --untracked-files=no)" ]
           git -C "${REPO_PATH}" fetch --no-tags origin master
           [ "$(git -C "${REPO_PATH}" rev-parse origin/master)" = "${EXPECTED_COMMIT}" ]
-          [ "$(git -C "${REPO_PATH}" rev-parse HEAD)" = "${EXPECTED_COMMIT}" ]
+          git -C "${REPO_PATH}" merge-base --is-ancestor \
+            "$(git -C "${REPO_PATH}" rev-parse HEAD)" "${EXPECTED_COMMIT}"
 
           [ -e "${BACKUP_ROOT}/.managed-content-t9.lock" ]
           [ -e "${BACKUP_ROOT}/.production-app-deploy.lock" ]
@@ -126,7 +127,7 @@ jobs:
           mkdir -m 700 "${RUN_ROOT}" "${REPORT_ROOT}"
 
           COMPOSE=(docker compose -p ragpincheng-prod -f "${REPO_PATH}/docker/docker-compose.yml" -f "${COMPOSE_OVERRIDE}" --env-file "${COMPOSE_ENV_FILE}")
-          MAINTENANCE=("${COMPOSE[@]}" run --rm --no-deps -T -v "${REPO_PATH}:/maintenance-repo:ro" backend)
+          MAINTENANCE=("${COMPOSE[@]}" run --rm --no-deps -T -v "${GITHUB_WORKSPACE}:/maintenance-repo:ro" backend)
           BACKEND_CONTAINER="$("${COMPOSE[@]}" ps -q backend)"
           [ -n "${BACKEND_CONTAINER}" ]
           [ "$(docker inspect --format '{{.State.Health.Status}}' "${BACKEND_CONTAINER}")" = "healthy" ]
@@ -245,7 +246,7 @@ jobs:
             set -euo pipefail
             echo "T12_B_ROLLBACK status=starting"
             ROLLBACK_MAINTENANCE=("${COMPOSE[@]}" run --rm --no-deps -T \
-              -v "${REPO_PATH}:/maintenance-repo:ro" \
+              -v "${GITHUB_WORKSPACE}:/maintenance-repo:ro" \
               -v "${RUN_ROOT}:/t12-rollback:ro" backend)
             "${ROLLBACK_MAINTENANCE[@]}" curl -fsS --max-time 1800 -X POST \
               "http://qdrant:6333/collections/pincheng_docs/snapshots/upload?priority=snapshot" \

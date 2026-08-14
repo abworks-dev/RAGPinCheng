@@ -26,6 +26,8 @@ def test_t12b_workflow_is_manual_commit_pinned_and_frozen():
         '"transcript_contracts":{"automatic|managed_artifact|published":2}',
         "a36bbef41e174a42e4bdf99b76ea1c99c8f296ef0288b2b753b1ff89c52bc53a",
         '[ "${EXPECTED_HEAD_ENFORCEMENT}" = "compat" ]',
+        'git -C "${REPO_PATH}" merge-base --is-ancestor',
+        '-v "${GITHUB_WORKSPACE}:/maintenance-repo:ro"',
         "cancel-in-progress: false",
     ):
         assert required in WORKFLOW
