@@ -41,6 +41,7 @@
 - 当前生产根目录为 `/data/business/ragpincheng/content`（容器内 `/app/content`）；2026-08-14 已完成 117 条旧普通资料迁移记录的收口，其中 116 份建立正式 `content_item_heads`，1 份生成预览被安全排除。T11 已删除对应旧普通资料索引，生产继续以 `compat` 保留视频转录等未版本化索引；旧 `source/media` 和视频转录继续保留既有链路。
 - 代码已支持 `DOCS_DIR`、`MEDIA_DIR`、`DOCS_HOST_PATH`、`MEDIA_HOST_PATH` 和 `TRANSCRIPTION_ARTIFACT_DIR` 显式配置；默认值保持旧目录兼容，生产变量尚未切换。
 - `strict` 检索契约按身份分流：普通资料必须命中 `content_item_heads`，带 `transcript_version_id` 的转录由独立 `media_transcript_heads` 快照校验；双重无版本身份的旧 Parent/Child 被拒绝。该能力尚未在生产启用。
+- T12-B 提供精确 plan/apply/verify 和受控生产 workflow：候选 ID、媒体/head、正式版本及审计表均指纹化，活动任务或冻结摘要漂移会在写入前失败；执行仅归档旧媒体记录、删除旧 transcript head 和精确候选 Parent/Point，不重建 collection，也不删除旧文件。
 
 ### 未实现
 
@@ -101,6 +102,9 @@
 - `scripts/stage_legacy_content_t10.py`
 - `scripts/apply_legacy_content_t10.py`
 - `scripts/preflight_source_decoupling_t12.py`
+- `scripts/source_decoupling_t12.py`
+- `scripts/plan_source_decoupling_t12.py`
+- `scripts/apply_source_decoupling_t12.py`
 - `scripts/rebuild_content_view.py`
 - `frontend/src/pages/admin/AdminManagedContentPage.tsx`
 - `frontend/src/pages/admin/AdminCategoriesPage.tsx`

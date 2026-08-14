@@ -1,0 +1,411 @@
+name: Decouple Production Source T12-B
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_production:
+        description: Select DECOUPLE_SOURCE_T12_B to apply the frozen production plan
+        required: true
+        default: CANCEL
+        type: choice
+        options:
+          - CANCEL
+          - DECOUPLE_SOURCE_T12_B
+      expected_commit:
+        description: Full master commit approved for T12-B
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: managed-content-t12-source-decoupling
+  cancel-in-progress: false
+
+jobs:
+  decouple-source:
+    environment: production-asr
+    runs-on: [self-hosted, linux, ubuntu, production, app]
+    timeout-minutes: 180
+    env:
+      REPO_PATH: ${{ vars.PRODUCTION_APP_REPO_PATH }}
+      DATA_PATH: ${{ vars.PRODUCTION_APP_DATA_PATH }}
+      BACKUP_ROOT: ${{ vars.PRODUCTION_APP_BACKUP_DIRECTORY }}
+      CONTENT_ROOT: ${{ vars.PRODUCTION_CONTENT_ROOT }}
+      COMPOSE_OVERRIDE: ${{ vars.PRODUCTION_APP_COMPOSE_OVERRIDE }}
+      COMPOSE_ENV_FILE: ${{ vars.PRODUCTION_APP_ENV_FILE }}
+      CURRENT_DOCS_HOST_PATH: ${{ vars.PRODUCTION_DOCS_HOST_PATH }}
+      CURRENT_MEDIA_HOST_PATH: ${{ vars.PRODUCTION_MEDIA_HOST_PATH }}
+      CURRENT_ARTIFACT_DIR: ${{ vars.PRODUCTION_TRANSCRIPTION_ARTIFACT_DIR }}
+      EXPECTED_HEAD_ENFORCEMENT: ${{ vars.CONTENT_HEAD_ENFORCEMENT }}
+      EXPECTED_COMMIT: ${{ inputs.expected_commit }}
+      CONFIRM_PRODUCTION: ${{ inputs.confirm_production }}
+    steps:
+      - name: Check out the approved T12-B implementation
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.expected_commit }}
+          persist-credentials: false
+
+      - name: Back up, apply, and verify the frozen T12-B plan
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          EXPECTED_MANAGED_HEADS=116
+          EXPECTED_CANDIDATE_PARENTS=44
+          EXPECTED_CANDIDATE_POINTS=104
+          EXPECTED_MEDIA_ASSETS=4
+          EXPECTED_TRANSCRIPT_HEADS=2
+          EXPECTED_PLAN_DIGEST=a36bbef41e174a42e4bdf99b76ea1c99c8f296ef0288b2b753b1ff89c52bc53a
+          EXPECTED_DETAILS_JSON='{"managed_parents_current":21545,"managed_parents_noncurrent":0,"managed_points_current":41191,"managed_points_noncurrent":0,"parents_unversioned_legacy":44,"parents_versioned_transcript":0,"points_unversioned_legacy":104,"points_versioned_transcript":0,"media_statuses":{"failed":1,"ready":1,"transcript_ready":2},"transcript_versions":2,"transcript_contracts":{"automatic|managed_artifact|published":2},"parents_total":21589,"qdrant_points_total":41295}'
+          SOURCE_ROOT=/data/business/ragpincheng/source
+          SOURCE_DOCS=${SOURCE_ROOT}/docs
+          SOURCE_MEDIA=${SOURCE_ROOT}/media
+          RUN_ID=t12b-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}
+          RUN_ROOT=${BACKUP_ROOT}/${RUN_ID}
+          REPORT_ROOT=${RUNNER_TEMP}/${RUN_ID}-summary
+          PLAN_PATH=${RUN_ROOT}/source-decoupling-plan.json
+          MUTATED=0
+          BACKEND_WAS_STOPPED=0
+
+          [ "${CONFIRM_PRODUCTION}" = "DECOUPLE_SOURCE_T12_B" ] || {
+            echo "ERROR: T12-B production source decoupling was not confirmed"
+            exit 1
+          }
+          [[ "${EXPECTED_COMMIT}" =~ ^[0-9a-f]{40}$ ]]
+          [ "${GITHUB_REF}" = "refs/heads/master" ]
+          [ "${GITHUB_SHA}" = "${EXPECTED_COMMIT}" ]
+          [ "$(git rev-parse HEAD)" = "${EXPECTED_COMMIT}" ]
+          [ "${EXPECTED_HEAD_ENFORCEMENT}" = "compat" ]
+          case "${CURRENT_DOCS_HOST_PATH:-}" in
+            ""|"${SOURCE_DOCS}") ;;
+            *) echo "ERROR: current docs path is outside the approved legacy source"; exit 1 ;;
+          esac
+          case "${CURRENT_MEDIA_HOST_PATH:-}" in
+            ""|"${SOURCE_MEDIA}") ;;
+            *) echo "ERROR: current media path is outside the approved legacy source"; exit 1 ;;
+          esac
+          case "${CURRENT_ARTIFACT_DIR:-}" in
+            ""|/app/data/transcription-artifacts) ;;
+            *) echo "ERROR: current artifact path is outside the approved legacy data root"; exit 1 ;;
+          esac
+          [ "${REPO_PATH}" = "/data/workspace/projects/ragpincheng" ]
+          [ "${DATA_PATH}" = "/data/services/docker/data/ragpincheng/prod/app" ]
+          [ "${BACKUP_ROOT}" = "/data/backup/databases/ragpincheng" ]
+          [ "${CONTENT_ROOT}" = "/data/business/ragpincheng/content" ]
+          [ "${COMPOSE_OVERRIDE}" = "/data/services/docker/compose/ragpincheng/prod/compose.prod.yaml" ]
+          [ "${COMPOSE_ENV_FILE}" = "/data/secrets/ragpincheng/prod.env" ]
+
+          for path in "${REPO_PATH}" "${DATA_PATH}" "${BACKUP_ROOT}" "${CONTENT_ROOT}" "${SOURCE_DOCS}" "${SOURCE_MEDIA}"; do
+            [ -d "${path}" ] && [ ! -L "${path}" ] || {
+              echo "ERROR: approved production path is not a real directory"
+              exit 1
+            }
+          done
+          for path in "${DATA_PATH}/app.sqlite" "${DATA_PATH}/parents.sqlite"; do
+            [ -f "${path}" ] && [ ! -L "${path}" ] || {
+              echo "ERROR: production database is not a regular file"
+              exit 1
+            }
+          done
+          [ "$(git -C "${REPO_PATH}" branch --show-current)" = "master" ]
+          [ -z "$(git -C "${REPO_PATH}" status --porcelain --untracked-files=no)" ]
+          git -C "${REPO_PATH}" fetch --no-tags origin master
+          [ "$(git -C "${REPO_PATH}" rev-parse origin/master)" = "${EXPECTED_COMMIT}" ]
+          [ "$(git -C "${REPO_PATH}" rev-parse HEAD)" = "${EXPECTED_COMMIT}" ]
+
+          [ -e "${BACKUP_ROOT}/.managed-content-t9.lock" ]
+          [ -e "${BACKUP_ROOT}/.production-app-deploy.lock" ]
+          exec 9>"${BACKUP_ROOT}/.managed-content-t9.lock"
+          flock -n 9 || { echo "ERROR: another managed-content operation is active"; exit 1; }
+          exec 8>"${BACKUP_ROOT}/.production-app-deploy.lock"
+          flock -n 8 || { echo "ERROR: an application deployment is active"; exit 1; }
+          [ ! -e "${RUN_ROOT}" ]
+          mkdir -m 700 "${RUN_ROOT}" "${REPORT_ROOT}"
+
+          COMPOSE=(docker compose -p ragpincheng-prod -f "${REPO_PATH}/docker/docker-compose.yml" -f "${COMPOSE_OVERRIDE}" --env-file "${COMPOSE_ENV_FILE}")
+          MAINTENANCE=("${COMPOSE[@]}" run --rm --no-deps -T -v "${REPO_PATH}:/maintenance-repo:ro" backend)
+          BACKEND_CONTAINER="$("${COMPOSE[@]}" ps -q backend)"
+          [ -n "${BACKEND_CONTAINER}" ]
+          [ "$(docker inspect --format '{{.State.Health.Status}}' "${BACKEND_CONTAINER}")" = "healthy" ]
+          docker inspect "${BACKEND_CONTAINER}" | \
+            SOURCE_DOCS="${SOURCE_DOCS}" SOURCE_MEDIA="${SOURCE_MEDIA}" python3 -c '
+          import json, os, sys
+          mounts = {item["Destination"]: item["Source"] for item in json.load(sys.stdin)[0].get("Mounts", [])}
+          assert mounts.get("/app/docs") == os.environ["SOURCE_DOCS"]
+          assert mounts.get("/app/media") == os.environ["SOURCE_MEDIA"]
+          '
+
+          "${COMPOSE[@]}" exec -T backend curl -fsS \
+            http://qdrant:6333/collections/pincheng_docs > "${RUN_ROOT}/qdrant-before.json"
+          RUN_ROOT_ENV="${RUN_ROOT}" python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          result = json.loads((Path(os.environ["RUN_ROOT_ENV"]) / "qdrant-before.json").read_text())["result"]
+          if result.get("status") != "green" or int(result.get("points_count") or -1) != 41295:
+              raise SystemExit("T12-B Qdrant baseline changed")
+          PY
+
+          "${MAINTENANCE[@]}" python /maintenance-repo/scripts/plan_source_decoupling_t12.py \
+            --app-database /app/data/app.sqlite \
+            --parents-database /app/data/parents.sqlite \
+            --qdrant-url http://qdrant:6333 \
+            --collection pincheng_docs \
+            --expected-managed-heads "${EXPECTED_MANAGED_HEADS}" \
+            --expected-candidate-parents "${EXPECTED_CANDIDATE_PARENTS}" \
+            --expected-candidate-points "${EXPECTED_CANDIDATE_POINTS}" \
+            --expected-media-assets "${EXPECTED_MEDIA_ASSETS}" \
+            --expected-transcript-heads "${EXPECTED_TRANSCRIPT_HEADS}" \
+            --expected-plan-digest "${EXPECTED_PLAN_DIGEST}" \
+            --expected-details-json "${EXPECTED_DETAILS_JSON}" \
+            --output "/app/data/${RUN_ID}-source-plan.json" \
+            > "${RUN_ROOT}/plan-result.json"
+          mv "${DATA_PATH}/${RUN_ID}-source-plan.json" "${PLAN_PATH}"
+          PLAN_SHA256="$(RUN_ROOT_ENV="${RUN_ROOT}" python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          print(json.loads((Path(os.environ["RUN_ROOT_ENV"]) / "plan-result.json").read_text())["plan_sha256"])
+          PY
+          )"
+          [[ "${PLAN_SHA256}" =~ ^[0-9a-f]{64}$ ]]
+
+          BACKUP_DEVICE="$(findmnt -n -o MAJ:MIN -T "${BACKUP_ROOT}")"
+          for path in "${DATA_PATH}" "${CONTENT_ROOT}" "${SOURCE_DOCS}" "${SOURCE_MEDIA}"; do
+            [ "$(findmnt -n -o MAJ:MIN -T "${path}")" != "${BACKUP_DEVICE}" ] || {
+              echo "ERROR: backup is not on an independent filesystem"
+              exit 1
+            }
+          done
+          FILE_BYTES="$(du -sb "${DATA_PATH}/app.sqlite" "${DATA_PATH}/parents.sqlite" "${CONTENT_ROOT}" "${SOURCE_DOCS}" "${SOURCE_MEDIA}" | awk '{total += $1} END {print total}')"
+          QDRANT_BYTES="$(RUN_ROOT_ENV="${RUN_ROOT}" python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          result = json.loads((Path(os.environ["RUN_ROOT_ENV"]) / "qdrant-before.json").read_text())["result"]
+          print(int(result.get("disk_data_size") or 0))
+          PY
+          )"
+          FREE_BYTES="$(df -PB1 "${BACKUP_ROOT}" | awk 'NR==2 {print $4}')"
+          REQUIRED_BYTES=$((FILE_BYTES + QDRANT_BYTES + 5368709120))
+          [ "${FREE_BYTES}" -ge "${REQUIRED_BYTES}" ] || {
+            echo "ERROR: insufficient independent backup capacity"
+            exit 1
+          }
+
+          "${COMPOSE[@]}" stop backend
+          BACKEND_WAS_STOPPED=1
+
+          SRC="${DATA_PATH}" DST="${RUN_ROOT}" python3 - <<'PY'
+          import os
+          import sqlite3
+          from pathlib import Path
+
+          source = Path(os.environ["SRC"])
+          destination = Path(os.environ["DST"])
+          for name in ("app.sqlite", "parents.sqlite"):
+              with sqlite3.connect(f"file:{source / name}?mode=ro", uri=True) as current:
+                  if current.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                      raise SystemExit(f"source integrity failed: {name}")
+                  with sqlite3.connect(destination / name) as backup:
+                      current.backup(backup)
+                      if backup.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                          raise SystemExit(f"backup integrity failed: {name}")
+          PY
+          mkdir -m 700 "${RUN_ROOT}/content" "${RUN_ROOT}/source-docs" "${RUN_ROOT}/source-media"
+          rsync -aHAXx --numeric-ids "${CONTENT_ROOT}/" "${RUN_ROOT}/content/"
+          rsync -aHAXx --numeric-ids "${SOURCE_DOCS}/" "${RUN_ROOT}/source-docs/"
+          rsync -aHAXx --numeric-ids "${SOURCE_MEDIA}/" "${RUN_ROOT}/source-media/"
+
+          "${MAINTENANCE[@]}" curl -fsS -X POST \
+            http://qdrant:6333/collections/pincheng_docs/snapshots \
+            > "${RUN_ROOT}/qdrant-snapshot.json"
+          SNAPSHOT_NAME="$(RUN_ROOT_ENV="${RUN_ROOT}" python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          payload = json.loads((Path(os.environ["RUN_ROOT_ENV"]) / "qdrant-snapshot.json").read_text())
+          name = payload.get("result", {}).get("name")
+          if payload.get("status") != "ok" or not name:
+              raise SystemExit("invalid Qdrant snapshot response")
+          print(name)
+          PY
+          )"
+          "${MAINTENANCE[@]}" curl -fsS --max-time 1800 \
+            "http://qdrant:6333/collections/pincheng_docs/snapshots/${SNAPSHOT_NAME}" \
+            > "${RUN_ROOT}/qdrant.snapshot"
+          [ -s "${RUN_ROOT}/qdrant.snapshot" ]
+          echo "T12_B_BACKUP status=complete path=${RUN_ROOT}"
+
+          restore_t12b() (
+            set -euo pipefail
+            echo "T12_B_ROLLBACK status=starting"
+            ROLLBACK_MAINTENANCE=("${COMPOSE[@]}" run --rm --no-deps -T \
+              -v "${REPO_PATH}:/maintenance-repo:ro" \
+              -v "${RUN_ROOT}:/t12-rollback:ro" backend)
+            "${ROLLBACK_MAINTENANCE[@]}" curl -fsS --max-time 1800 -X POST \
+              "http://qdrant:6333/collections/pincheng_docs/snapshots/upload?priority=snapshot" \
+              -F "snapshot=@/t12-rollback/qdrant.snapshot" \
+              > "${RUN_ROOT}/qdrant-rollback.json"
+            SRC="${RUN_ROOT}" DST="${DATA_PATH}" python3 - <<'PY'
+          import os
+          import sqlite3
+          from pathlib import Path
+
+          source = Path(os.environ["SRC"])
+          destination = Path(os.environ["DST"])
+          for name in ("app.sqlite", "parents.sqlite"):
+              with sqlite3.connect(f"file:{source / name}?mode=ro", uri=True) as backup:
+                  if backup.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                      raise SystemExit(f"invalid rollback backup: {name}")
+                  with sqlite3.connect(destination / name) as current:
+                      backup.backup(current)
+                      if current.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                          raise SystemExit(f"rollback integrity failed: {name}")
+          PY
+            rsync -aHAXx --delete --numeric-ids "${RUN_ROOT}/content/" "${CONTENT_ROOT}/"
+            "${COMPOSE[@]}" up -d --no-deps backend
+            BACKEND_WAS_STOPPED=0
+            for ATTEMPT in $(seq 1 36); do
+              CONTAINER_ID="$("${COMPOSE[@]}" ps -q backend)"
+              [ -n "${CONTAINER_ID}" ] && \
+                [ "$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "${CONTAINER_ID}" 2>/dev/null || true)" = "healthy" ] && break
+              sleep 5
+            done
+            [ "$(docker inspect --format '{{.State.Health.Status}}' "$("${COMPOSE[@]}" ps -q backend)")" = "healthy" ]
+            echo "T12_B_ROLLBACK status=complete"
+          )
+
+          on_exit() {
+            status=$?
+            if [ "${status}" -ne 0 ] && [ "${MUTATED}" -eq 1 ]; then
+              restore_t12b || echo "T12_B_ROLLBACK status=failed"
+            elif [ "${status}" -ne 0 ] && [ "${BACKEND_WAS_STOPPED}" -eq 1 ]; then
+              "${COMPOSE[@]}" up -d --no-deps backend || true
+            fi
+            exit "${status}"
+          }
+          trap on_exit EXIT
+
+          ROOT_UID="$(stat -c %u "${CONTENT_ROOT}")"
+          ROOT_GID="$(stat -c %g "${CONTENT_ROOT}")"
+          MUTATED=1
+          install -d -o "${ROOT_UID}" -g "${ROOT_GID}" -m 2770 \
+            "${CONTENT_ROOT}/media" \
+            "${CONTENT_ROOT}/transcription-artifacts" \
+            "${CONTENT_ROOT}/legacy-docs"
+
+          cp "${PLAN_PATH}" "${DATA_PATH}/${RUN_ID}-source-plan.json"
+          "${MAINTENANCE[@]}" python /maintenance-repo/scripts/apply_source_decoupling_t12.py \
+            --app-database /app/data/app.sqlite \
+            --parents-database /app/data/parents.sqlite \
+            --qdrant-url http://qdrant:6333 \
+            --plan "/app/data/${RUN_ID}-source-plan.json" \
+            --expected-plan-sha256 "${PLAN_SHA256}" \
+            --expected-plan-digest "${EXPECTED_PLAN_DIGEST}" \
+            --expected-details-json "${EXPECTED_DETAILS_JSON}" \
+            --expected-managed-heads "${EXPECTED_MANAGED_HEADS}" \
+            --expected-candidate-parents "${EXPECTED_CANDIDATE_PARENTS}" \
+            --expected-candidate-points "${EXPECTED_CANDIDATE_POINTS}" \
+            --expected-media-assets "${EXPECTED_MEDIA_ASSETS}" \
+            --expected-transcript-heads "${EXPECTED_TRANSCRIPT_HEADS}" \
+            --confirm DECOUPLE_SOURCE_T12_B \
+            > "${RUN_ROOT}/apply-result.json"
+          rm "${DATA_PATH}/${RUN_ID}-source-plan.json"
+
+          QDRANT_READY=0
+          for ATTEMPT in $(seq 1 60); do
+            "${MAINTENANCE[@]}" curl -fsS \
+              http://qdrant:6333/collections/pincheng_docs > "${RUN_ROOT}/qdrant-after.json"
+            QDRANT_STATE="$(RUN_ROOT_ENV="${RUN_ROOT}" python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          result = json.loads((Path(os.environ["RUN_ROOT_ENV"]) / "qdrant-after.json").read_text())["result"]
+          if int(result.get("points_count") or -1) != 41191:
+              raise SystemExit("T12-B Qdrant point count mismatch")
+          print(result.get("status") or "unknown")
+          PY
+            )"
+            if [ "${QDRANT_STATE}" = "green" ]; then
+              QDRANT_READY=1
+              break
+            fi
+            [ "${QDRANT_STATE}" = "yellow" ] || exit 1
+            sleep 5
+          done
+          [ "${QDRANT_READY}" -eq 1 ] || { echo "ERROR: Qdrant did not return to green"; exit 1; }
+
+          "${COMPOSE[@]}" up -d --no-deps backend
+          BACKEND_WAS_STOPPED=0
+          for ATTEMPT in $(seq 1 36); do
+            CONTAINER_ID="$("${COMPOSE[@]}" ps -q backend)"
+            [ -n "${CONTAINER_ID}" ] && \
+              [ "$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "${CONTAINER_ID}" 2>/dev/null || true)" = "healthy" ] && break
+            sleep 5
+          done
+          "${COMPOSE[@]}" exec -T backend curl -fsS http://localhost:8000/api/health >/dev/null
+
+          RUN_ROOT_ENV="${RUN_ROOT}" REPORT="${REPORT_ROOT}/summary.json" DATA_PATH_ENV="${DATA_PATH}" python3 - <<'PY'
+          import json
+          import os
+          import sqlite3
+          from pathlib import Path
+
+          root = Path(os.environ["RUN_ROOT_ENV"])
+          result = json.loads((root / "apply-result.json").read_text())
+          expected = {
+              "status": "decoupled",
+              "media_archived": 4,
+              "transcript_heads_deleted": 2,
+              "parents_deleted": 44,
+              "points_deleted": 104,
+          }
+          if result != expected:
+              raise SystemExit("T12-B apply result mismatch")
+          data = Path(os.environ["DATA_PATH_ENV"])
+          with sqlite3.connect(f"file:{data / 'app.sqlite'}?mode=ro", uri=True) as app:
+              if app.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                  raise SystemExit("app.sqlite integrity failed")
+              if app.execute("SELECT count(*) FROM media_assets WHERE status='archived'").fetchone()[0] != 4:
+                  raise SystemExit("media archive count mismatch")
+              if app.execute("SELECT count(*) FROM media_transcript_heads").fetchone()[0] != 0:
+                  raise SystemExit("transcript heads remain")
+              if app.execute("SELECT count(*) FROM content_item_heads").fetchone()[0] != 116:
+                  raise SystemExit("managed heads changed")
+          with sqlite3.connect(f"file:{data / 'parents.sqlite'}?mode=ro", uri=True) as parents:
+              if parents.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                  raise SystemExit("parents.sqlite integrity failed")
+              if parents.execute("SELECT count(*) FROM parents").fetchone()[0] != 21545:
+                  raise SystemExit("managed Parent count mismatch")
+              if parents.execute("SELECT count(*) FROM parents WHERE content_version_id IS NULL").fetchone()[0] != 0:
+                  raise SystemExit("nonmanaged Parents remain")
+          Path(os.environ["REPORT"]).write_text(json.dumps({
+              "schema_version": 1,
+              **expected,
+              "managed_heads": 116,
+              "parents_after": 21545,
+              "qdrant_points_after": 41191,
+              "plan_digest": "a36bbef41e174a42e4bdf99b76ea1c99c8f296ef0288b2b753b1ff89c52bc53a",
+              "old_source_files_deleted": 0,
+          }, indent=2) + "\n", encoding="utf-8")
+          PY
+          printf '%s\n' \
+            'Aggregated T12-B result. Exact IDs and business paths remain only in the restricted backup.' \
+            > "${REPORT_ROOT}/README.txt"
+          chmod -R go-rwx "${RUN_ROOT}" "${REPORT_ROOT}"
+          MUTATED=0
+          trap - EXIT
+          echo "T12_B_DECOUPLE status=success plan_digest=${EXPECTED_PLAN_DIGEST} backup=${RUN_ROOT}"
+
+      - name: Upload redacted T12-B summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: source-decoupling-t12b-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/t12b-${{ github.run_id }}-${{ github.run_attempt }}-summary
+          if-no-files-found: error
+          retention-days: 30

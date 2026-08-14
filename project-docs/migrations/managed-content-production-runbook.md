@@ -385,6 +385,17 @@ T12-A 只交付代码兼容层和只读生产 preflight，不修改生产变量�
 
 公开 artifact 不包含文件名、相对/绝对路径、业务文件 SHA-256、数据库记录 ID、Parent/Point ID 或正文。preflight 不创建生产备份目录，不写生产数据库，不删除索引，也不切换运行配置。
 
-后续 T12-B 必须使用 preflight 的准确计数和计划摘要重新提交独立 R3 方案。至少包括两个 SQLite、Qdrant snapshot、完整 `CONTENT_ROOT` 和旧目录恢复点；在活动任务为零的维护窗口中冻结并复算相同 ID 集合，归档旧媒体、下线旧索引，再将媒体宿主目录切到 `CONTENT_ROOT/media`、artifact 切到 `CONTENT_ROOT/transcription-artifacts` 并启用 `strict`。任何计数或摘要漂移都停止执行。
+T12-A 生产结果冻结为：116 个正式普通资料 head、44 个候选 Parent、104 个候选 Point、4 条媒体、2 个 transcript head，计划摘要 `a36bbef41e174a42e4bdf99b76ea1c99c8f296ef0288b2b753b1ff89c52bc53a`；执行前 Qdrant 基线为 41,295 Point，预期完成后为 41,191 Point，Parent 从 21,589 条变为 21,545 条。任何计数或摘要漂移必须在写入前停止。
+
+T12-B 受控入口为 `.github/workflows/decouple-production-source-t12.yml`，固定确认词 `DECOUPLE_SOURCE_T12_B` 和完整 master commit。它同时取得 managed-content 与 App 部署排他锁，验证生产仓库、路径、当前 `compat`、旧 source mount、活动任务、Qdrant 绿色状态和独立备份容量，然后：
+
+1. 在停 backend 前生成并冻结精确计划；停 backend 后再次由 apply 重算并比较完整 plan SHA-256；
+2. 在独立备份盘保存 `app.sqlite`、`parents.sqlite`、Qdrant collection snapshot、完整 `CONTENT_ROOT`、`source/docs` 和 `source/media`；
+3. 创建 `CONTENT_ROOT/media`、`CONTENT_ROOT/transcription-artifacts` 和空的 `CONTENT_ROOT/legacy-docs`；
+4. 将 4 条旧 `media_assets` 标为 `archived`，精确删除 2 条 `media_transcript_heads`，保留 transcript version、转录任务和发布索引任务；
+5. 精确删除 44 个候选 Parent 和 104 个候选 Qdrant Point，不 Reset 或删除 collection；
+6. 核对正式 head、Parent/Point 总数、审计记录、SQLite 完整性、Qdrant 绿色状态和后端健康；失败时从同一恢复点自动恢复两个 SQLite、Qdrant 和 `CONTENT_ROOT`。
+
+数据 workflow 成功后，再设置 `PRODUCTION_MEDIA_HOST_PATH=/data/business/ragpincheng/content/media`、`PRODUCTION_DOCS_HOST_PATH=/data/business/ragpincheng/content/legacy-docs`、`PRODUCTION_TRANSCRIPTION_ARTIFACT_DIR=/app/content/transcription-artifacts`、`CONTENT_HEAD_ENFORCEMENT=strict` 和 `SOURCE_DECOUPLING_COMPLETE=true`，使用 `PRESERVE_EXISTING` 执行 App-only 部署。部署会检查容器 mount source 不再指向 `/data/business/ragpincheng/source`，并核对容器内 artifact 配置。
 
 T12-B 不自动删除 `/data/business/ragpincheng/source`、`source/docs` 或 `source/media`。解除容器依赖并观察 1 至 2 周后，物理归档或删除仍是单独的 R3 决策。

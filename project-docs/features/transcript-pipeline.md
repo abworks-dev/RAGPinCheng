@@ -258,7 +258,7 @@ Ubuntu 跨节点验证失败都会使用受保护的 activation state 恢复旧 
 ## 依赖与下游消费者
 
 - 依赖文档索引、检索、回答生成、引用与来源面板；
-- 依赖认证（`require_user`）和可配置媒体存储；代码默认仍使用 `media/` 兼容目录，T12 生产切换后计划指向 `CONTENT_ROOT/media`；
+- 依赖认证（`require_user`）和可配置媒体存储；代码默认仍使用 `media/` 兼容目录，T12-B 受控切换目标为 `CONTENT_ROOT/media`；旧媒体记录归档后从管理列表隐藏，历史 transcript version 和任务继续保留审计；
 - 依赖 `media_assets` 表（`app.sqlite`）和 `media_id` 列迁移。
 
 ## 不变量与安全边界
@@ -274,6 +274,7 @@ Ubuntu 跨节点验证失败都会使用受保护的 activation state 恢复旧 
 - Phase 2 新表为添加式迁移；不删除旧表、不回填人工稿、不触发索引 Reset。
 - `app.sqlite` transcript head 是版本化转录唯一正式可见性事实；versioned transcript 在 head DB 损坏/缺失时 fail closed。`strict` 下版本化转录独立于普通资料 head 放行，双重无版本身份的 legacy 转录不可见；生产尚未切换到 `strict`。
 - `DOCS_DIR`、`MEDIA_DIR` 和 `TRANSCRIPTION_ARTIFACT_DIR` 均可显式配置；旧式人工 Markdown 上传在 `strict` 下拒绝，避免创建无法进入正式版本可见性的源目录稿，自动转录继续使用 managed artifact。
+- T12-B 仅删除既有 `media_transcript_heads` 正式指针和其精确旧索引，不删除 `transcript_versions`、`transcription_jobs` 或 `transcript_publication_index_jobs`；后续视频需在新媒体目录重新上传、转录和发布后才产生新的正式 head。
 - experimental Profile 不能自动发布或自动索引；人工 Markdown 路径不经过 Provider。
 - `published` 只在候选索引成功并完成正式 head 原子切换后成立；不存在“已发布、稍后再手动索引”的稳定状态。
 
