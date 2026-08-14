@@ -4,28 +4,28 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from asr_service.app import create_app
-from asr_service.config import AsrServiceSettings
-from asr_service.engine_protocol import (
+from services.asr_service.app import create_app
+from services.asr_service.config import AsrServiceSettings
+from services.asr_service.engine_protocol import (
     QWEN3_ASR_SERVICE_CONFIG,
     WHISPERX_FULL_DECODE_SERVICE_CONFIG,
     WHISPERX_SERVICE_CONFIG,
 )
-from asr_service.engine_registry import EngineRegistration, EngineRegistry
-from asr_service.engines.qwen3_asr import Qwen3AsrEngine
-from asr_service.engines.whisperx import WhisperXEngine
-from asr_service.model_cache import (
+from services.asr_service.engine_registry import EngineRegistration, EngineRegistry
+from services.asr_service.engines.qwen3_asr import Qwen3AsrEngine
+from services.asr_service.engines.whisperx import WhisperXEngine
+from services.asr_service.model_cache import (
     validate_qwen3_aligner_cache,
     validate_qwen3_asr_cache,
     validate_whisperx_align_cache,
     validate_whisperx_cache,
 )
-from asr_service.scheduler import (
+from services.asr_service.scheduler import (
     BgePriorityDecision,
     FixedBgePriorityProbe,
     Scheduler,
 )
-from asr_service.storage import LocalJobRepository
+from services.asr_service.storage import LocalJobRepository
 from scripts.asr_local_lab import (
     ENGINE_PORTS,
     MARKER_NAME,

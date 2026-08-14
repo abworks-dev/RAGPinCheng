@@ -36,7 +36,7 @@ def main() -> int:
 
     write_stage(stage_file, "config_import_start")
     from FlagEmbedding import BGEM3FlagModel, FlagReranker
-    from gpu_service.config import EMBED_MODEL, RERANKER_MODEL
+    from services.gpu_service.config import EMBED_MODEL, RERANKER_MODEL
 
     write_stage(stage_file, "config_import_complete")
     print(f"GPU_RERANKER_DEVICE name={torch.cuda.get_device_name(0)}", flush=True)

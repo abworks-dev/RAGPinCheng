@@ -1,0 +1,644 @@
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import ssl
+import shutil
+import sys
+import types
+import wave
+from dataclasses import dataclass
+from email.message import Message
+from pathlib import Path
+
+import pytest
+
+from scripts import prepare_qwen3_asr_models as model_prep
+from scripts import run_qwen3_asr_qualification as qualification
+
+ROOT = Path(__file__).resolve().parents[3]
+EXAMPLE = ROOT / "services" / "asr_service" / "qwen3-asr-qualification-manifest.example.json"
+
+
+def _wav(path: Path, frames: int = 16_000) -> None:
+    with wave.open(str(path), "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(16_000)
+        handle.writeframes(b"\x00\x00" * frames)
+
+
+def _manifest(tmp_path: Path) -> Path:
+    payload = json.loads(EXAMPLE.read_text(encoding="utf-8"))
+    for sample in payload["samples"]:
+        target = tmp_path / sample["path"]
+        _wav(target)
+        sample["duration_ms"] = 1000
+        sample["sha256"] = hashlib.sha256(target.read_bytes()).hexdigest()
+    path = tmp_path / "manifest.json"
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
+def test_manifest_accepts_exact_eight_non_sensitive_pcm_samples(tmp_path):
+    manifest = qualification.load_manifest(_manifest(tmp_path))
+    assert len(manifest.samples) == 8
+    assert sum(sample.negative_control for sample in manifest.samples) == 3
+    assert {sample.scenario for sample in manifest.samples} == qualification._SCENARIOS
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda payload: payload.update({"unknown": None}),
+        lambda payload: payload["samples"][0].update({"unknown": None}),
+        lambda payload: payload["samples"].pop(),
+        lambda payload: payload["samples"][0].update({"self_made": False}),
+        lambda payload: payload["samples"][0].update(
+            {"contains_customer_data": True}
+        ),
+        lambda payload: payload["samples"][0].update({"path": "../escape.wav"}),
+        lambda payload: payload["samples"][0].update({"duration_ms": True}),
+        lambda payload: payload["samples"][0].update({"sha256": "A" * 64}),
+        lambda payload: payload["samples"][0].update({"reference_segments": []}),
+    ],
+)
+def test_manifest_fails_closed_on_contract_changes(tmp_path, mutate):
+    path = _manifest(tmp_path)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    mutate(payload)
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises((ValueError, FileNotFoundError)):
+        qualification.load_manifest(path)
+
+
+def test_manifest_rejects_hash_and_wav_contract_mismatch(tmp_path):
+    path = _manifest(tmp_path)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["samples"][0]["sha256"] = "1" * 64
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(ValueError, match="SHA-256 mismatch"):
+        qualification.load_manifest(path)
+
+    path = _manifest(tmp_path)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["samples"][0]["duration_ms"] = 2000
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(ValueError, match="duration"):
+        qualification.load_manifest(path)
+
+
+@pytest.mark.parametrize(
+    ("reference", "hypothesis", "expected"),
+    [
+        ("建筑信息模型", "建筑信息模型", 0.0),
+        ("建筑信息模型", "建筑模型", 2 / 6),
+        ("GB 50016-2014", "gb50016 2014", 0.0),
+    ],
+)
+def test_character_error_rate_is_deterministic(reference, hypothesis, expected):
+    assert qualification.character_error_rate(reference, hypothesis) == pytest.approx(
+        expected
+    )
+
+
+def test_threshold_constants_are_frozen():
+    assert qualification.CLEAR_CER_LIMIT == 0.10
+    assert qualification.BIM_NOISE_CER_LIMIT == 0.15
+    assert qualification.TERM_RECALL_LIMIT == 0.70
+    assert qualification.CODE_RECALL_LIMIT == 0.95
+    assert qualification.TIMESTAMP_P95_LIMIT_MS == 1500
+    assert qualification.RTF_LIMIT == 0.60
+
+
+def test_qualification_loads_the_real_existing_transcript_parser():
+    parser = qualification._load_transcript_parser()
+    assert parser.__module__ == "src.chunk"
+    assert parser("说话人 1 00:00:00\n测试正文\n") == [
+        ("00:00:00", "测试正文")
+    ]
+
+
+@dataclass(frozen=True)
+class _Segment:
+    id: int
+    start_ms: int
+    text: str
+
+
+@dataclass(frozen=True)
+class _Canonical:
+    text: str
+    drift_ms: int = 0
+
+    @property
+    def segments(self):
+        return (_Segment(0, self.drift_ms, self.text),)
+
+    def to_json_bytes(self):
+        return self.text.encode("utf-8")
+
+    @property
+    def content_sha256(self):
+        return hashlib.sha256(self.to_json_bytes()).hexdigest()
+
+
+def test_qualification_summary_passes_only_when_every_gate_passes(
+    tmp_path, monkeypatch
+):
+    manifest = qualification.load_manifest(_manifest(tmp_path))
+
+    def run_once(sample, **_kwargs):
+        canonical = _Canonical(sample.reference_text)
+        return canonical, b"markdown", [("00:00:00", "body")], 0.1
+
+    monkeypatch.setattr(qualification, "_run_once", run_once)
+    result = qualification.run_qualification(
+        manifest, base_url="http://127.0.0.1:18300", token="test", timeout_ms=1000
+    )
+    assert result["status"] == "pass"
+    assert result["schema_version"] == "qwen3-asr-qualification-report/2"
+    assert result["candidate_id"] == "forced-chinese-baseline"
+    assert result["repetitions"] == 2
+    assert result["sample_count"] == 8
+    assert all(item["pass"] for item in result["gates"].values())
+    assert all(item["pass"] for item in result["samples"])
+
+
+def test_qualification_summary_fails_on_rtf_or_nondeterminism(
+    tmp_path, monkeypatch
+):
+    manifest = qualification.load_manifest(_manifest(tmp_path))
+    calls: dict[str, int] = {}
+
+    def run_once(sample, **_kwargs):
+        calls[sample.sample_id] = calls.get(sample.sample_id, 0) + 1
+        text = sample.reference_text
+        if sample.sample_id == "clear-zh" and calls[sample.sample_id] >= 2:
+            text += "漂移"
+        return _Canonical(text), text.encode(), [("00:00:00", text)], 1.0
+
+    monkeypatch.setattr(qualification, "_run_once", run_once)
+    result = qualification.run_qualification(
+        manifest, base_url="http://127.0.0.1:18300", token="test", timeout_ms=1000
+    )
+    assert result["status"] == "fail"
+    assert any(not item["rtf_pass"] for item in result["samples"])
+    assert any(not item["deterministic"] for item in result["samples"])
+
+
+def test_single_repetition_is_explicitly_non_qualifying_for_determinism(
+    tmp_path, monkeypatch
+):
+    manifest = qualification.load_manifest(_manifest(tmp_path))
+    calls = 0
+
+    def run_once(sample, **_kwargs):
+        nonlocal calls
+        calls += 1
+        canonical = _Canonical(sample.reference_text)
+        return canonical, b"markdown", [("00:00:00", "body")], 0.1
+
+    monkeypatch.setattr(qualification, "_run_once", run_once)
+    result = qualification.run_qualification(
+        manifest,
+        base_url="http://127.0.0.1:18300",
+        token="test",
+        timeout_ms=1000,
+        repetitions=1,
+    )
+
+    assert result["repetitions"] == 1
+    assert calls == len(manifest.samples) + 1
+    assert all(item["deterministic"] is None for item in result["samples"])
+
+
+def test_qualification_candidate_id_is_strict(tmp_path, monkeypatch):
+    manifest = qualification.load_manifest(_manifest(tmp_path))
+    with pytest.raises(ValueError, match="qualification candidate"):
+        qualification.run_qualification(
+            manifest,
+            base_url="http://127.0.0.1:18300",
+            token="test",
+            timeout_ms=1000,
+            candidate_id="unreviewed",
+        )
+
+
+def _fake_download(sources: dict[str, Path]):
+    def download(**kwargs):
+        target = Path(kwargs["local_dir"])
+        source = sources[str(kwargs["repo_id"])]
+        for item in source.iterdir():
+            shutil.copy2(item, target / item.name)
+        return str(target)
+
+    return download
+
+
+def test_model_preparation_is_dual_pinned_manifested_and_idempotent(tmp_path):
+    sources: dict[str, Path] = {}
+    for spec in model_prep.SPECS:
+        source = tmp_path / f"source-{spec.label}"
+        source.mkdir()
+        (source / "model.safetensors").write_bytes(spec.label.encode())
+        (source / "config.json").write_text("{}", encoding="utf-8")
+        sources[spec.model_id] = source
+    cache = tmp_path / "cache"
+    first = model_prep.prepare_models(
+        cache, tmp_path / "staging-one", downloader=_fake_download(sources)
+    )
+    assert [item["status"] for item in first["models"]] == ["prepared", "prepared"]
+    for spec in model_prep.SPECS:
+        manifest = cache / spec.relative_path / "model-manifest.json"
+        payload = json.loads(manifest.read_text(encoding="utf-8"))
+        assert payload["model_id"] == spec.model_id
+        assert payload["model_revision"] == spec.revision
+        assert [item["path"] for item in payload["files"]] == [
+            "config.json",
+            "model.safetensors",
+        ]
+    assert not list((tmp_path / "staging-one").rglob("model.safetensors"))
+
+    second = model_prep.prepare_models(
+        cache,
+        tmp_path / "staging-two",
+        downloader=lambda **_kwargs: pytest.fail("valid caches must be reused"),
+    )
+    assert [item["status"] for item in second["models"]] == ["reused", "reused"]
+
+
+def test_model_preparation_refuses_invalid_existing_cache(tmp_path):
+    cache = tmp_path / "cache"
+    target = cache / model_prep.QWEN3_ASR_RELATIVE_PATH
+    target.mkdir(parents=True)
+    (target / "model.safetensors").write_bytes(b"invalid")
+    with pytest.raises(RuntimeError, match="existing asr cache is invalid"):
+        model_prep.prepare_models(
+            cache,
+            tmp_path / "staging",
+            downloader=lambda **_kwargs: pytest.fail("must not download"),
+        )
+
+
+@pytest.mark.parametrize(
+    ("error", "kind", "model"),
+    (
+        (RuntimeError("existing asr cache is invalid"), "existing_cache_invalid", "asr"),
+        (
+            RuntimeError("staged aligner cache validation failed"),
+            "staging_validation_failed",
+            "aligner",
+        ),
+        (
+            RuntimeError("huggingface client error"),
+            "snapshot_download_failed",
+            "unknown",
+        ),
+        (PermissionError("private path"), "filesystem_or_permission_failure", "unknown"),
+        (OSError(28, "private path"), "disk_space_failure", "unknown"),
+        (ValueError("private value"), "evidence_insufficient", "unknown"),
+    ),
+)
+def test_model_preparation_failure_classification_is_stable_and_sanitized(
+    error, kind, model
+):
+    result = model_prep.classify_model_preparation_failure(error)
+    assert result["kind"] == kind
+    assert result["model"] == model
+    assert result["exception_type"] == type(error).__name__
+    assert result["kind"] in model_prep.MODEL_FAILURE_KINDS
+    assert "message" not in result
+
+
+def test_model_download_uses_verified_tls12_backend_and_disables_xet(monkeypatch):
+    calls: list[object] = []
+
+    def configure_http_backend(*, backend_factory):
+        calls.append(backend_factory)
+
+    def snapshot_download(**kwargs):
+        calls.append(kwargs)
+        return kwargs["local_dir"]
+
+    fake_hub = types.SimpleNamespace(
+        configure_http_backend=configure_http_backend,
+        snapshot_download=snapshot_download,
+    )
+    monkeypatch.setitem(sys.modules, "huggingface_hub", fake_hub)
+    monkeypatch.delenv("HF_HUB_DISABLE_XET", raising=False)
+
+    result = model_prep._download(
+        repo_id="fixed/model",
+        revision="fixed-revision",
+        local_dir="fixed-dir",
+    )
+
+    assert result == "fixed-dir"
+    assert os.environ["HF_HUB_DISABLE_XET"] == "1"
+    assert calls[0] is model_prep._hugging_face_backend
+    assert calls[1] == {
+        "repo_id": "fixed/model",
+        "revision": "fixed-revision",
+        "local_dir": "fixed-dir",
+        "max_workers": 1,
+    }
+
+    session = model_prep._hugging_face_backend()
+    adapter = session.adapters["https://"]
+    context = adapter.poolmanager.connection_pool_kw["ssl_context"]
+    assert context.maximum_version == ssl.TLSVersion.TLSv1_2
+    assert context.verify_mode == ssl.CERT_REQUIRED
+    assert context.check_hostname is True
+
+    proxy_manager = adapter.proxy_manager_for("http://127.0.0.1:7897")
+    assert proxy_manager.connection_pool_kw["ssl_context"] is context
+
+    request = model_prep.requests.Request(
+        "GET", "https://huggingface.co/fixed/model"
+    ).prepare()
+    with pytest.raises(RuntimeError, match="requires default certificate verification"):
+        adapter.build_connection_pool_key_attributes(request, verify=False)
+
+
+def test_model_download_retries_ssl_connection_closure(monkeypatch):
+    attempts = 0
+
+    def snapshot_download(**kwargs):
+        nonlocal attempts
+        attempts += 1
+        if attempts < model_prep.MODEL_DOWNLOAD_ATTEMPTS:
+            raise model_prep.requests.exceptions.SSLError("private detail")
+        return kwargs["local_dir"]
+
+    fake_hub = types.SimpleNamespace(
+        configure_http_backend=lambda **_kwargs: None,
+        snapshot_download=snapshot_download,
+    )
+    delays: list[int] = []
+    monkeypatch.setitem(sys.modules, "huggingface_hub", fake_hub)
+    monkeypatch.setattr(model_prep.time, "sleep", delays.append)
+
+    result = model_prep._download(local_dir="fixed-dir")
+
+    assert result == "fixed-dir"
+    assert attempts == model_prep.MODEL_DOWNLOAD_ATTEMPTS
+    assert delays == [2, 4]
+
+
+def test_model_preparation_rejects_downloader_escape(tmp_path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    with pytest.raises(RuntimeError, match="escaped"):
+        model_prep.prepare_models(
+            tmp_path / "cache",
+            tmp_path / "staging",
+            downloader=lambda **_kwargs: str(outside),
+        )
+
+
+def test_model_preparation_reuses_stable_partial_staging(tmp_path):
+    sources: dict[str, Path] = {}
+    for spec in model_prep.SPECS:
+        source = tmp_path / f"source-{spec.label}"
+        source.mkdir()
+        (source / "model.safetensors").write_bytes(spec.label.encode())
+        (source / "config.json").write_text("{}", encoding="utf-8")
+        sources[spec.model_id] = source
+    staging = tmp_path / "staging"
+    attempts = 0
+
+    def interrupted_download(**kwargs):
+        nonlocal attempts
+        target = Path(kwargs["local_dir"])
+        attempts += 1
+        if attempts == 1:
+            (target / "model.safetensors.partial").write_bytes(b"partial")
+            raise RuntimeError("snapshot_download interrupted")
+        if attempts == 2:
+            partial = target / "model.safetensors.partial"
+            assert partial.is_file()
+            partial.unlink()
+        return _fake_download(sources)(**kwargs)
+
+    with pytest.raises(RuntimeError, match="interrupted"):
+        model_prep.prepare_models(
+            tmp_path / "cache", staging, downloader=interrupted_download
+        )
+
+    result = model_prep.prepare_models(
+        tmp_path / "cache", staging, downloader=interrupted_download
+    )
+
+    assert [item["status"] for item in result["models"]] == ["prepared", "prepared"]
+
+
+@dataclass(frozen=True)
+class _Distribution:
+    package_name: str
+    version: str
+    license_text: str
+
+    @property
+    def metadata(self):
+        message = Message()
+        message["Name"] = self.package_name
+        if self.license_text:
+            message["License-Expression"] = self.license_text
+        return message
+
+
+def test_license_audit_blocks_gpl_and_unknown(monkeypatch):
+    monkeypatch.setattr(
+        qualification.importlib.metadata,
+        "distributions",
+        lambda: (
+            _Distribution("allowed", "1", "MIT"),
+            _Distribution("forbidden", "2", "GPL-3.0-only"),
+            _Distribution("unknown", "3", ""),
+            _Distribution("redacted", "4", "https://private.invalid/license"),
+        ),
+    )
+    result = qualification.audit_installed_licenses()
+    assert result["status"] == "fail"
+    assert result["schema_version"] == "qwen3-asr-license-audit/2"
+    assert result["blocked_packages"] == ["forbidden", "unknown"]
+    assert result["failure_summary"] == {
+        "kind": "prohibited_license",
+        "package": "forbidden",
+        "audit_phase": "policy",
+        "exception_type": "",
+    }
+    redacted = next(item for item in result["packages"] if item["name"] == "redacted")
+    assert redacted["status"] == "allowed"
+    assert redacted["license"] == "DECLARED"
+    assert "private.invalid" not in json.dumps(result, sort_keys=True)
+
+
+@dataclass(frozen=True)
+class _LicenseFileDistribution:
+    root: Path
+    version: str = "1.0"
+
+    @property
+    def metadata(self):
+        message = Message()
+        message["Name"] = "license-file-only"
+        message["License-File"] = "package/LICENSE"
+        return message
+
+    @property
+    def files(self):
+        return ("package/LICENSE",)
+
+    def locate_file(self, relative):
+        return self.root / str(relative)
+
+
+def test_license_audit_reads_declared_license_file(tmp_path, monkeypatch):
+    license_file = tmp_path / "package/LICENSE"
+    license_file.parent.mkdir()
+    license_file.write_text(
+        "Permission is hereby granted, free of charge, to any person obtaining a copy.",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        qualification.importlib.metadata,
+        "distributions",
+        lambda: (_LicenseFileDistribution(tmp_path),),
+    )
+
+    result = qualification.audit_installed_licenses(include_license_files=True)
+
+    assert result["status"] == "pass"
+    assert result["packages"][0]["license"] == "MIT"
+
+
+class _BrokenLicenseMetadata:
+    def get(self, key, default=None):
+        if key == "Name":
+            return "broken_package"
+        if key == "License-Expression":
+            raise TypeError("private path C:\\sensitive and https://private.invalid")
+        return default
+
+
+@dataclass(frozen=True)
+class _BrokenLicenseDistribution:
+    version: str = "1.0"
+
+    @property
+    def metadata(self):
+        return _BrokenLicenseMetadata()
+
+
+def test_license_audit_contains_metadata_failure_without_private_detail(monkeypatch):
+    monkeypatch.setattr(
+        qualification.importlib.metadata,
+        "distributions",
+        lambda: (_BrokenLicenseDistribution(),),
+    )
+    result = qualification.audit_installed_licenses(include_license_files=True)
+    assert result["status"] == "fail"
+    assert result["blocked_packages"] == ["broken-package"]
+    assert result["failure_summary"] == {
+        "kind": "license_metadata_read_failure",
+        "package": "broken-package",
+        "audit_phase": "license_metadata",
+        "exception_type": "TypeError",
+    }
+    assert result["packages"] == [
+        {
+            "name": "broken-package",
+            "version": "1.0",
+            "license": "UNKNOWN",
+            "status": "audit_error",
+            "reason": "license_metadata_read_failure",
+            "audit_phase": "license_metadata",
+            "exception_type": "TypeError",
+        }
+    ]
+    encoded = json.dumps(result, sort_keys=True)
+    assert "sensitive" not in encoded
+    assert "private.invalid" not in encoded
+
+
+def test_license_audit_contains_distribution_enumeration_failure(monkeypatch):
+    def distributions():
+        yield _Distribution("allowed", "1", "MIT")
+        raise PermissionError("private iterator detail")
+
+    monkeypatch.setattr(
+        qualification.importlib.metadata,
+        "distributions",
+        distributions,
+    )
+    result = qualification.audit_installed_licenses()
+    assert result["status"] == "fail"
+    assert result["failure_summary"] == {
+        "kind": "distribution_enumeration_failure",
+        "package": "unknown",
+        "audit_phase": "distribution_enumeration",
+        "exception_type": "PermissionError",
+    }
+    assert "private iterator detail" not in json.dumps(result, sort_keys=True)
+
+
+def test_license_audit_cli_writes_report_before_failing(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(
+        qualification.importlib.metadata,
+        "distributions",
+        lambda: (_BrokenLicenseDistribution(),),
+    )
+    report = tmp_path / "license-matrix.json"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_qwen3_asr_qualification.py",
+            "--audit-licenses",
+            "--license-report",
+            str(report),
+        ],
+    )
+    assert qualification.main() == 1
+    written = json.loads(report.read_text(encoding="utf-8"))
+    assert written["schema_version"] == "qwen3-asr-license-audit/2"
+    output = json.loads(capsys.readouterr().out)
+    assert output == {
+        "audit_phase": "license_metadata",
+        "exception_type": "TypeError",
+        "kind": "license_metadata_read_failure",
+        "package": "broken-package",
+        "schema_version": "qwen3-asr-license-audit-failure/1",
+        "status": "fail",
+    }
+
+
+def test_reports_never_require_reference_or_hypothesis_text(tmp_path, monkeypatch):
+    manifest = qualification.load_manifest(_manifest(tmp_path))
+
+    def run_once(sample, **_kwargs):
+        return (
+            _Canonical(sample.reference_text),
+            b"markdown",
+            [("00:00:00", "body")],
+            0.1,
+        )
+
+    monkeypatch.setattr(qualification, "_run_once", run_once)
+    report = qualification.run_qualification(
+        manifest, base_url="http://127.0.0.1:18300", token="secret", timeout_ms=1000
+    )
+    assert report["manifest_source"] == "legacy"
+    assert report["manifest_sha256"] == manifest.manifest_sha256
+    assert report["sample_set_id"] == manifest.sample_set_id
+    assert report["annotation_version"] == manifest.annotation_version
+    assert report["qualification_corpus"] == manifest.identity()
+    encoded = json.dumps(report, ensure_ascii=False)
+    assert "reference_text" not in encoded
+    assert "hypothesis" not in encoded
+    assert "secret" not in encoded

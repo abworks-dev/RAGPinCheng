@@ -361,7 +361,7 @@ def test_local_powershell_has_no_system_service_or_firewall_mutations():
     assert '"torch==2.7.0+cu128"' in script
     assert '"torch==2.8.0+cu128"' in script
     assert '"requests>=2.32,<3"' in script
-    assert '"asr_service\\requirements-service-core.txt"' in script
+    assert r'"services\asr_service\requirements-service-core.txt"' in script
     assert '"antlr4-python3-runtime==4.9.3"' in script
     assert "Resolve-HuggingFaceOriginIp" in script
     assert 'HF_HUB_OFFLINE = "1"' in script

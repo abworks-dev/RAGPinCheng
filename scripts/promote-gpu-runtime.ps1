@@ -13,7 +13,7 @@ $TaskName = "RAGPinCheng-GPU"
 $CurrentReleasePath = Join-Path $RuntimeRoot "current-release.json"
 $Timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $BackupPath = Join-Path $BackupDirectory "gpu-promotion-$Timestamp"
-$EnvFile = Join-Path $RepositoryPath "gpu_service\.env"
+$EnvFile = Join-Path $RepositoryPath "services\gpu_service\.env"
 
 if (-not ([IO.Path]::GetFullPath($BackupDirectory)).StartsWith("D:\", [StringComparison]::OrdinalIgnoreCase)) {
     throw "GPU promotion backups must be written under D:\"
@@ -64,7 +64,7 @@ function Stop-OwnedTaskAndListener {
         $process = Get-CimInstance Win32_Process -Filter ("ProcessId={0}" -f $processId)
         if (
             $null -eq $process -or
-            [string]$process.CommandLine -notmatch '-m gpu_service\.app' -or
+            [string]$process.CommandLine -notmatch '-m services\.gpu_service\.app' -or
             (
                 -not ([string]$process.ExecutablePath).StartsWith($RuntimeRoot, [StringComparison]::OrdinalIgnoreCase) -and
                 [string]$process.ExecutablePath -ne $env:PRODUCTION_PYTHON_PATH
@@ -202,7 +202,7 @@ foreach ($entry in $sourceInventory) {
         throw "GPU runtime source snapshot failed integrity validation: $($entry.path)"
     }
 }
-$requirementsPath = Join-Path $expectedSourceRoot "gpu_service\$($manifest.requirements_file)"
+$requirementsPath = Join-Path $expectedSourceRoot "services\gpu_service\$($manifest.requirements_file)"
 $lockHashScript = Join-Path $expectedSourceRoot "scripts\get-gpu-runtime-lock-hash.ps1"
 $releaseLockHash = & $lockHashScript -Path $requirementsPath
 if ($releaseLockHash -ne $manifest.lock_sha256) {

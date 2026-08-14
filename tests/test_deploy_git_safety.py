@@ -199,7 +199,7 @@ class TestDeployGitSafety(unittest.TestCase):
     def test_app_only_emergency_workflow_pins_gpu_contract_and_rolls_back_image(self):
         workflow = self.app_only_workflow
 
-        self.assertIn('gpu_service/runtime-lock.json', workflow)
+        self.assertIn('services/gpu_service/runtime-lock.json', workflow)
         self.assertIn('get("validation_status", "")', workflow)
         self.assertIn('get("qualification_run_id", "")', workflow)
         self.assertIn('get("source_commit", "")', workflow)
@@ -211,9 +211,11 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertNotIn("9b147c448b9b-fa16678de682", workflow)
         for path in (
             "src/providers.py",
-            "gpu_service/app.py",
-            "gpu_service/models.py",
-            "gpu_service/schemas.py",
+            "services/__init__.py",
+            "services/gpu_service/app.py",
+            "services/gpu_service/models.py",
+            "services/gpu_service/schemas.py",
+            "gpu_service/__init__.py",
         ):
             self.assertIn(path, workflow)
         self.assertIn("APP_ONLY_CONTRACT status=identical", workflow)

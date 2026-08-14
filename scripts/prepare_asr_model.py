@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from asr_service.model_cache import (
+from services.asr_service.model_cache import (
     MODEL_MANIFEST_VERSION,
     SENSEVOICE_MODEL_ID,
     SENSEVOICE_RELATIVE_PATH,

@@ -58,7 +58,7 @@ if (-not [string]::IsNullOrWhiteSpace($ConfiguredPath)) {
 }
 
 $candidatePaths = @(
-    (Join-Path $RepositoryPath "gpu_service\.cache\huggingface"),
+    (Join-Path $RepositoryPath "services\gpu_service\.cache\huggingface"),
     (Join-Path $RepositoryPath ".cache\huggingface")
 )
 if (-not [string]::IsNullOrWhiteSpace($env:USERPROFILE)) {

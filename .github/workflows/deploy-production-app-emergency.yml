@@ -189,7 +189,7 @@ jobs:
           }
           echo "APP_ONLY_GIT status=fast-forward-ready current=${REPOSITORY_HEAD} target=${DEPLOY_COMMIT_SHA}"
 
-          LOCK_METADATA="$(git show "${DEPLOY_COMMIT_SHA}:gpu_service/runtime-lock.json")"
+          LOCK_METADATA="$(git show "${DEPLOY_COMMIT_SHA}:services/gpu_service/runtime-lock.json")"
           VALIDATION_STATUS="$(printf '%s' "${LOCK_METADATA}" | python3 -c \
             'import json,sys; print(json.load(sys.stdin).get("validation_status", ""))')"
           QUALIFICATION_RUN_ID="$(printf '%s' "${LOCK_METADATA}" | python3 -c \
@@ -232,11 +232,13 @@ jobs:
           }
 
           GPU_RUNTIME_FILES=(
+            services/__init__.py
+            services/gpu_service/__init__.py
+            services/gpu_service/app.py
+            services/gpu_service/config.py
+            services/gpu_service/models.py
+            services/gpu_service/schemas.py
             gpu_service/__init__.py
-            gpu_service/app.py
-            gpu_service/config.py
-            gpu_service/models.py
-            gpu_service/schemas.py
             scripts/start-gpu-service.ps1
             scripts/diagnose_gpu_reranker.py
             scripts/get-gpu-runtime-lock-hash.ps1
@@ -257,7 +259,7 @@ jobs:
             exit 1
           }
           COMPUTED_LOCK_SHA256="$(
-            git show "${DEPLOY_COMMIT_SHA}:gpu_service/${REQUIREMENTS_FILE}" | python3 -c '
+            git show "${DEPLOY_COMMIT_SHA}:services/gpu_service/${REQUIREMENTS_FILE}" | python3 -c '
           import hashlib, sys
           content = sys.stdin.buffer.read().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
           print(hashlib.sha256(content).hexdigest())
@@ -272,10 +274,12 @@ jobs:
 
           CONTRACT_FILES=(
             src/providers.py
+            services/__init__.py
+            services/gpu_service/__init__.py
+            services/gpu_service/app.py
+            services/gpu_service/models.py
+            services/gpu_service/schemas.py
             gpu_service/__init__.py
-            gpu_service/app.py
-            gpu_service/models.py
-            gpu_service/schemas.py
           )
           for FILE in "${CONTRACT_FILES[@]}"; do
             TARGET_BLOB="$(git rev-parse "${DEPLOY_COMMIT_SHA}:${FILE}")"

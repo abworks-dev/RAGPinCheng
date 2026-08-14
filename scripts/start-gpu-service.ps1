@@ -67,7 +67,7 @@ foreach ($entry in $sourceInventory) {
         throw "GPU runtime source snapshot failed integrity validation: $($entry.path)"
     }
 }
-$requirementsPath = Join-Path $sourceRoot "gpu_service\$($manifest.requirements_file)"
+$requirementsPath = Join-Path $sourceRoot "services\gpu_service\$($manifest.requirements_file)"
 $lockHashScript = Join-Path $sourceRoot "scripts\get-gpu-runtime-lock-hash.ps1"
 $currentLockHash = & $lockHashScript -Path $requirementsPath
 if ($currentLockHash -notmatch '^[0-9a-f]{64}$') {
@@ -83,7 +83,7 @@ if (-not $python.Equals($expectedPython, [StringComparison]::OrdinalIgnoreCase))
     throw "GPU runtime Python path escapes the immutable release"
 }
 if (-not (Test-Path -LiteralPath $python -PathType Leaf)) { throw "GPU release Python is missing" }
-$envFile = Join-Path $env:PRODUCTION_REPO_PATH 'gpu_service\.env'
+$envFile = Join-Path $env:PRODUCTION_REPO_PATH 'services\gpu_service\.env'
 if (-not (Test-Path -LiteralPath $envFile -PathType Leaf)) { throw "GPU service environment file is missing" }
 
 $seen = @{}
@@ -125,7 +125,7 @@ $stdoutPath = Join-Path $logRoot "gpu-service.stdout.log"
 $stderrPath = Join-Path $logRoot "gpu-service.stderr.log"
 Set-Location -LiteralPath $sourceRoot
 $process = Start-Process -FilePath $python `
-    -ArgumentList @("-X", "utf8", "-m", "gpu_service.app") `
+    -ArgumentList @("-X", "utf8", "-m", "services.gpu_service.app") `
     -WorkingDirectory $sourceRoot `
     -RedirectStandardOutput $stdoutPath `
     -RedirectStandardError $stderrPath `

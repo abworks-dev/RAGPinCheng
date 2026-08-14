@@ -2060,8 +2060,8 @@ try {
     $CombinedRequirementLines = @(
         "torch==2.8.0+cu128",
         "torchaudio==2.8.0+cu128",
-        "-r $RequirementsSource/asr_service/requirements-service-core.txt",
-        "-r $RequirementsSource/asr_service/requirements-faster-whisper.txt"
+        "-r $RequirementsSource/services/asr_service/requirements-service-core.txt",
+        "-r $RequirementsSource/services/asr_service/requirements-faster-whisper.txt"
     )
     $CombinedRequirementLines | Set-Content -LiteralPath $CombinedRequirements -Encoding ASCII
     $ResolverRequirements = Join-Path $ConfigRoot "qualification-resolver-requirements.txt"
@@ -2078,9 +2078,9 @@ try {
         -PythonPath $VenvPython `
         -ProductionFreezePath (Join-Path $EvidenceRoot "production-freeze.txt") `
         -RequirementsPaths @(
-            (Join-Path $ResolvedSource "asr_service\requirements-service-core.txt"),
-            (Join-Path $ResolvedSource "asr_service\requirements-windows.txt"),
-            (Join-Path $ResolvedSource "asr_service\requirements-faster-whisper.txt")
+            (Join-Path $ResolvedSource "services\asr_service\requirements-service-core.txt"),
+            (Join-Path $ResolvedSource "services\asr_service\requirements-windows.txt"),
+            (Join-Path $ResolvedSource "services\asr_service\requirements-faster-whisper.txt")
         ) `
         -ReferenceManifestPaths $ReferenceManifestPaths
     $CurrentReferenceManifestSha256 = @(
@@ -2408,7 +2408,7 @@ print('qualification-module-origins-verified')
     $ServiceProcess = Start-Process `
         -FilePath $VenvPython `
         -ArgumentList @(
-            "-m", "uvicorn", "asr_service.app:create_app", "--factory",
+            "-m", "uvicorn", "services.asr_service.app:create_app", "--factory",
             "--host", "127.0.0.1", "--port", [string]$TempPort
         ) `
         -WorkingDirectory $ResolvedSource `
@@ -2575,7 +2575,7 @@ print('qualification-module-origins-verified')
     Stop-OwnedProcess `
         -Process $ServiceProcess `
         -ExpectedExecutables @($VenvPython, $MachinePython) `
-        -ExpectedCommandFragment "uvicorn asr_service.app:create_app"
+        -ExpectedCommandFragment "uvicorn services.asr_service.app:create_app"
     $ServiceProcess = $null
     Start-Sleep -Seconds 2
     if (Get-NetTCPConnection -LocalPort $TempPort -State Listen -ErrorAction SilentlyContinue) {
@@ -2699,7 +2699,7 @@ print('qualification-module-origins-verified')
         Stop-OwnedProcess `
             -Process $ServiceProcess `
             -ExpectedExecutables @($VenvPython, $MachinePython) `
-            -ExpectedCommandFragment "uvicorn asr_service.app:create_app"
+            -ExpectedCommandFragment "uvicorn services.asr_service.app:create_app"
     } catch {
         $CleanupIssues += "qualification-service-cleanup-failed"
     }

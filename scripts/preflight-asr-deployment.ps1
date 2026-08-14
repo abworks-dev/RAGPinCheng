@@ -181,12 +181,12 @@ try {
             "--find-links", $qualifiedWheelSeed,
             "torch==2.8.0+cu128", "torchaudio==2.8.0+cu128",
             $numpyRequirement,
-            "-r", (Join-Path $resolvedSource "asr_service\requirements-windows.txt")
+            "-r", (Join-Path $resolvedSource "services\asr_service\requirements-windows.txt")
         )
         if ($Engine -eq "faster-whisper") {
-            $downloadArguments += @("-r", (Join-Path $resolvedSource "asr_service\requirements-faster-whisper.txt"))
+            $downloadArguments += @("-r", (Join-Path $resolvedSource "services\asr_service\requirements-faster-whisper.txt"))
         } else {
-            $downloadArguments += @("torchvision==0.23.0+cu128", "-r", (Join-Path $resolvedSource "asr_service\requirements-whisperx.txt"))
+            $downloadArguments += @("torchvision==0.23.0+cu128", "-r", (Join-Path $resolvedSource "services\asr_service\requirements-whisperx.txt"))
         }
         & $venvPython @downloadArguments
         if ($LASTEXITCODE -ne 0) { $report.failure_code = "dependency_resolution_failed"; throw "Deployment preflight dependency resolution failed" }
@@ -204,12 +204,12 @@ try {
             "-m", "pip", "install", "--no-index", "--find-links", $wheelhouse,
             "torch==2.8.0+cu128", "torchaudio==2.8.0+cu128",
             $numpyRequirement,
-            "-r", (Join-Path $resolvedSource "asr_service\requirements-windows.txt")
+            "-r", (Join-Path $resolvedSource "services\asr_service\requirements-windows.txt")
         )
         if ($Engine -eq "faster-whisper") {
-            $installArguments += @("-r", (Join-Path $resolvedSource "asr_service\requirements-faster-whisper.txt"))
+            $installArguments += @("-r", (Join-Path $resolvedSource "services\asr_service\requirements-faster-whisper.txt"))
         } else {
-            $installArguments += @("torchvision==0.23.0+cu128", "-r", (Join-Path $resolvedSource "asr_service\requirements-whisperx.txt"))
+            $installArguments += @("torchvision==0.23.0+cu128", "-r", (Join-Path $resolvedSource "services\asr_service\requirements-whisperx.txt"))
         }
         & $venvPython @installArguments
         if ($LASTEXITCODE -ne 0) { $report.failure_code = "offline_install_failed"; throw "Deployment preflight offline dependency installation failed" }

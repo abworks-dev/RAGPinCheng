@@ -217,10 +217,10 @@ Ubuntu 跨节点验证失败都会使用受保护的 activation state 恢复旧 
 - `src/transcription_retrieval_visibility.py`（Phase 5 SQLite head 只读快照，位于 Phase 1 纯契约核心之外）
 - `api/routes_transcription.py`、`api/indexing.py`（转录/版本 API 与共享 worker）
 - `frontend/src/components/TranscriptionVersionPanel.tsx`（版本审阅与发布）
-- `asr_service/`（Phase 3 独立服务、存储、调度和 engine adapter）
-- `asr_service/requirements-service-core.txt`、`requirements-windows.txt`
+- `services/asr_service/`（Phase 3 独立服务、存储、调度和 engine adapter）
+- `services/asr_service/requirements-service-core.txt`、`requirements-windows.txt`
   （ASR HTTP 服务基础依赖与 Windows 生产引擎依赖）
-- `asr_service/engines/faster_whisper.py`、`requirements-faster-whisper.txt`
+- `services/asr_service/engines/faster_whisper.py`、`requirements-faster-whisper.txt`
   （准入关闭的可选引擎 adapter 与隔离引擎依赖声明；生产资格组合安装基础服务依赖）
 - `scripts/prepare_faster_whisper_model.py`、
   `scripts/prepare-faster-whisper-model-production.ps1`、
@@ -231,7 +231,7 @@ Ubuntu 跨节点验证失败都会使用受保护的 activation state 恢复旧 
   `.github/workflows/qualify-whisperx-production.yml`
   （WhisperX 固定非敏感样本、质量/资源/许可证门禁与手动隔离执行入口）
 - `scripts/asr_qualification_manifest.py`、
-  `asr_service/asr-qualification-manifest.example.json`
+  `services/asr_service/asr-qualification-manifest.example.json`
   （三引擎共享的只读八样本 manifest 解析、严格文件身份校验与中性变量门禁）
 - `scripts/compact-asr-run.ps1`、`scripts/cleanup-asr-storage.ps1`、
   `.github/workflows/cleanup-production.yml`

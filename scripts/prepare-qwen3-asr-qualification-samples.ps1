@@ -20,7 +20,7 @@ $StagingRoot = Join-Path $RunRoot "staging"
 $InputRoot = Join-Path $InputParent "inputs"
 $ManifestPath = Join-Path $InputRoot "manifest.json"
 $ValidatorRelativePath = "scripts\run_qwen3_asr_qualification.py"
-$TemplateRelativePath = "asr_service\qwen3-asr-qualification-manifest.example.json"
+$TemplateRelativePath = "services\asr_service\qwen3-asr-qualification-manifest.example.json"
 
 function Get-MachinePython311 {
     $candidates = @(

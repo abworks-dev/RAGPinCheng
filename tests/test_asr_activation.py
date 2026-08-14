@@ -301,7 +301,7 @@ def test_activation_script_uses_fixed_firewall_and_fail_closed_rollback():
     assert "ForEach-Object { $_.OwningProcess }" in script
     assert "$connections.OwningProcess" not in script
     assert (
-        '\'"{0}" -m uvicorn asr_service.app:create_app --factory '
+        '\'"{0}" -m uvicorn services.asr_service.app:create_app --factory '
         "--host 0.0.0.0 --port 8200' -f"
     ) in script
     assert "Refusing to stop an unexpected process listening on TCP 8200" in script

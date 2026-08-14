@@ -60,7 +60,7 @@ services:
     image: pincheng-rag-backend:latest
     restart: unless-stopped
     # No GPU reservation — embedding and reranking run on the separate Windows
-    # GPU inference service (gpu_service/) accessed via HTTP.
+    # GPU inference service (services/gpu_service/) accessed via HTTP.
     depends_on:
       qdrant:
         condition: service_healthy
@@ -136,7 +136,7 @@ services:
   libreoffice:
     image: pincheng-libreoffice:latest
     build:
-      context: ../libreoffice
+      context: ../services/libreoffice
       dockerfile: Dockerfile
     restart: unless-stopped
     volumes:

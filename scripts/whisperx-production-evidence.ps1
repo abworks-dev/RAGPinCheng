@@ -381,7 +381,7 @@ import torch
 import torchaudio
 import torchvision
 import whisperx
-from asr_service.model_cache import validate_whisperx_align_cache, validate_whisperx_cache
+from services.asr_service.model_cache import validate_whisperx_align_cache, validate_whisperx_cache
 
 venv = Path(sys.prefix).resolve()
 for module in (funasr, modelscope, torch, torchaudio, torchvision, whisperx):

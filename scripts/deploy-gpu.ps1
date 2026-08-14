@@ -79,12 +79,12 @@ $fingerprint = & (Join-Path $RepositoryPath "scripts\get-gpu-runtime-fingerprint
 if ($LASTEXITCODE -ne 0 -or $fingerprint -notmatch '^[0-9a-f]{64}$') {
     throw "Unable to compute the GPU runtime source fingerprint"
 }
-$lockMetadataPath = Join-Path $RepositoryPath "gpu_service\runtime-lock.json"
+$lockMetadataPath = Join-Path $RepositoryPath "services\gpu_service\runtime-lock.json"
 $lockMetadata = Get-Content -LiteralPath $lockMetadataPath -Encoding UTF8 | ConvertFrom-Json
 if ([string]$lockMetadata.torch_wheel_sha256 -cnotmatch '^[0-9a-f]{64}$') {
     throw "GPU runtime metadata lacks a valid Torch wheel SHA-256"
 }
-$requirementsPath = Join-Path $RepositoryPath "gpu_service\$($lockMetadata.requirements_file)"
+$requirementsPath = Join-Path $RepositoryPath "services\gpu_service\$($lockMetadata.requirements_file)"
 if (-not (Test-Path -LiteralPath $requirementsPath -PathType Leaf)) {
     throw "GPU runtime requirements lock is missing"
 }

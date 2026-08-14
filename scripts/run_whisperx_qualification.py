@@ -109,8 +109,8 @@ def audit_installed_licenses() -> dict[str, object]:
 
 
 def _build_engine(model_root: Path):
-    from asr_service.engines.whisperx import WhisperXEngine
-    from asr_service.model_cache import (
+    from services.asr_service.engines.whisperx import WhisperXEngine
+    from services.asr_service.model_cache import (
         validate_whisperx_align_cache,
         validate_whisperx_cache,
     )
@@ -155,7 +155,7 @@ class _EngineProvider:
         )
 
     def transcribe(self, input_ref, execution):
-        from asr_service.engine_protocol import (
+        from services.asr_service.engine_protocol import (
             PreparedAudioChunk,
         )
         from src.transcription.provider_protocol import (
@@ -406,7 +406,7 @@ def run_qualification(
     service_config=None,
     repetitions: int = 2,
 ):
-    from asr_service.engine_protocol import WHISPERX_SERVICE_CONFIG
+    from services.asr_service.engine_protocol import WHISPERX_SERVICE_CONFIG
 
     global _ACTIVE_SERVICE_CONFIG
     previous_run_once = shared._run_once
@@ -444,7 +444,7 @@ def _scenario_metric(
 def run_candidate_matrix(
     manifest: SampleManifest, *, timeout_ms: int
 ) -> dict[str, object]:
-    from asr_service.engine_protocol import (
+    from services.asr_service.engine_protocol import (
         WHISPERX_FULL_DECODE_SERVICE_CONFIG,
         WHISPERX_HOTWORDS_SERVICE_CONFIG,
         WHISPERX_SERVICE_CONFIG,

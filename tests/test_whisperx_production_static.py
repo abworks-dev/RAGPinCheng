@@ -62,7 +62,7 @@ def test_windows_runner_is_isolated_and_cannot_mutate_production_controls():
 
 def test_model_and_smoke_identity_are_pinned_and_use_existing_contracts():
     runner = read("scripts/run_whisperx_cuda_smoke.py")
-    engine = read("asr_service/engines/whisperx.py")
+    engine = read("services/asr_service/engines/whisperx.py")
     ast.parse(runner)
     ast.parse(engine)
     assert '"pipe:0"' in engine

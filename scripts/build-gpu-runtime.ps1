@@ -41,7 +41,7 @@ if (-not (Test-Path -LiteralPath $ModelCacheSource -PathType Container)) {
     throw "Model cache source is missing"
 }
 
-$metadataPath = Join-Path $RepositoryPath "gpu_service\runtime-lock.json"
+$metadataPath = Join-Path $RepositoryPath "services\gpu_service\runtime-lock.json"
 $metadata = Get-Content -LiteralPath $metadataPath -Encoding UTF8 | ConvertFrom-Json
 if ($metadata.schema_version -ne 1) { throw "Unsupported GPU runtime lock schema" }
 if ([string]$metadata.package_index_url -ne "https://pypi.tuna.tsinghua.edu.cn/simple") {
@@ -268,11 +268,13 @@ $env:PIP_NO_INPUT = "1"
 New-Item -ItemType Directory -Path $env:PIP_CACHE_DIR -Force | Out-Null
 
 $runtimeSourceFiles = @(
+    "services/__init__.py",
+    "services/gpu_service/__init__.py",
+    "services/gpu_service/app.py",
+    "services/gpu_service/config.py",
+    "services/gpu_service/models.py",
+    "services/gpu_service/schemas.py",
     "gpu_service/__init__.py",
-    "gpu_service/app.py",
-    "gpu_service/config.py",
-    "gpu_service/models.py",
-    "gpu_service/schemas.py",
     "scripts/start-gpu-service.ps1",
     "scripts/diagnose_gpu_reranker.py",
     "scripts/get-gpu-runtime-lock-hash.ps1"
@@ -282,8 +284,8 @@ if ($LASTEXITCODE -ne 0 -or $head -ne $CommitSha.ToLowerInvariant()) {
     throw "GPU runtime repository HEAD does not match the approved commit"
 }
 $repositoryContractFiles = @($runtimeSourceFiles) + @(
-    "gpu_service/runtime-lock.json",
-    "gpu_service/$([string]$metadata.requirements_file)",
+    "services/gpu_service/runtime-lock.json",
+    "services/gpu_service/$([string]$metadata.requirements_file)",
     "scripts/get-gpu-torch-wheel-seed.ps1"
 )
 & git -C $RepositoryPath diff --quiet $CommitSha -- @repositoryContractFiles
@@ -291,7 +293,7 @@ if ($LASTEXITCODE -ne 0) {
     throw "GPU runtime working tree contract does not match the approved commit"
 }
 $snapshotFiles = @($runtimeSourceFiles) + @(
-    "gpu_service/$([string]$metadata.requirements_file)"
+    "services/gpu_service/$([string]$metadata.requirements_file)"
 )
 foreach ($relativePath in $snapshotFiles) {
     $sourcePath = Join-Path $RepositoryPath ($relativePath -replace '/', '\')

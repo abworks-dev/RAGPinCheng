@@ -376,7 +376,7 @@ function Install-LabTools {
     $python = Ensure-Venv -EngineName "lab-tools"
     Invoke-Pip -Python $python -Arguments @(
         "install", "pytest>=8,<10", "requests>=2.32,<3",
-        "-r", (Join-Path $SourceRoot "asr_service\requirements-service-core.txt")
+        "-r", (Join-Path $SourceRoot "services\asr_service\requirements-service-core.txt")
     )
     Invoke-Pip -Python $python -Arguments @("check")
 }
@@ -409,7 +409,7 @@ function Install-Qwen {
     )
     Invoke-Pip -Python $python -Arguments @(
         "install", "--find-links", $bundle,
-        "-r", (Join-Path $SourceRoot "asr_service\requirements-qwen3-asr-windows.txt")
+        "-r", (Join-Path $SourceRoot "services\asr_service\requirements-qwen3-asr-windows.txt")
     )
     Invoke-Pip -Python $python -Arguments @("check")
     Invoke-Python -Python $python -Arguments @(
@@ -476,8 +476,8 @@ function Install-WhisperX {
     Prepare-WhisperXAntlrWheel -Python $python
     Invoke-Pip -Python $python -Arguments @(
         "install", "--find-links", (Join-Path $LabRoot "wheel-cache\whisperx"),
-        "-r", (Join-Path $SourceRoot "asr_service\requirements-service-core.txt"),
-        "-r", (Join-Path $SourceRoot "asr_service\requirements-whisperx.txt")
+        "-r", (Join-Path $SourceRoot "services\asr_service\requirements-service-core.txt"),
+        "-r", (Join-Path $SourceRoot "services\asr_service\requirements-whisperx.txt")
     )
     Invoke-Pip -Python $python -Arguments @("check")
     Invoke-Python -Python $python -Arguments @(
@@ -676,8 +676,8 @@ Use-LabEnvironment {
             Invoke-Python -Python $testPython -Arguments @(
                 "-m", "pytest", "-p", "no:cacheprovider",
                 (Join-Path $SourceRoot "tests\test_asr_local_lab.py"),
-                (Join-Path $SourceRoot "asr_service\tests\test_qwen3_asr_qualification.py"),
-                (Join-Path $SourceRoot "asr_service\tests\test_whisperx_qualification.py"),
+                (Join-Path $SourceRoot "services\asr_service\tests\test_qwen3_asr_qualification.py"),
+                (Join-Path $SourceRoot "services\asr_service\tests\test_whisperx_qualification.py"),
                 "-q"
             )
         }

@@ -262,7 +262,7 @@ function Assert-ModelCache {
     }
     Push-Location -LiteralPath $SourceRoot
     try {
-        & $venvPython -c "from pathlib import Path; from asr_service.model_cache import validate_sensevoice_cache; import sys; status=validate_sensevoice_cache(Path(sys.argv[1]), Path(sys.argv[2])); print(f'model_cache_available={status.available} reason_code={status.reason_code}'); raise SystemExit(0 if status.available else 1)" $values["ASR_MODEL_CACHE_ROOT"] $values["ASR_MODEL_MANIFEST_PATH"]
+        & $venvPython -c "from pathlib import Path; from services.asr_service.model_cache import validate_sensevoice_cache; import sys; status=validate_sensevoice_cache(Path(sys.argv[1]), Path(sys.argv[2])); print(f'model_cache_available={status.available} reason_code={status.reason_code}'); raise SystemExit(0 if status.available else 1)" $values["ASR_MODEL_CACHE_ROOT"] $values["ASR_MODEL_MANIFEST_PATH"]
     } finally {
         Pop-Location
     }
@@ -290,7 +290,7 @@ function Stop-VerifiedAsrListeners {
     }
     $basePython = (Resolve-Path -LiteralPath ([string]$basePythonOutput).Trim()).Path
     $expectedCommandLine = (
-        '"{0}" -m uvicorn asr_service.app:create_app --factory --host 0.0.0.0 --port 8200' -f
+        '"{0}" -m uvicorn services.asr_service.app:create_app --factory --host 0.0.0.0 --port 8200' -f
         $basePython
     )
     $connections = @(

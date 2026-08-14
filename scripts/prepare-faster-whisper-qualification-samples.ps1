@@ -19,7 +19,7 @@ $InputParent = $env:PRODUCTION_FASTER_WHISPER_INPUT_ROOT
 $InputRoot = Join-Path $InputParent "inputs"
 $ManifestPath = Join-Path $InputRoot "manifest.json"
 $ValidatorRelativePath = "scripts\run_faster_whisper_qualification.py"
-$TemplateRelativePath = "asr_service\faster-whisper-qualification-manifest.example.json"
+$TemplateRelativePath = "services\asr_service\faster-whisper-qualification-manifest.example.json"
 
 function Get-MachinePython311 {
     $candidates = @(

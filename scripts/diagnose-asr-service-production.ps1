@@ -95,7 +95,7 @@ $taskRootBindingAvailable = (
 
 $legacyStartScript = Join-Path $ProgramRoot "scripts\start-asr-service.ps1"
 $legacyPython = Join-Path $ProgramRoot "venv\Scripts\python.exe"
-$legacyApp = Join-Path $ProgramRoot "app\asr_service\app.py"
+$legacyApp = Join-Path $ProgramRoot "app\services\asr_service\app.py"
 $legacyConfig = Join-Path $DataRoot "config\asr.env"
 $startupScriptPresent = Test-Path -LiteralPath $legacyStartScript -PathType Leaf
 $pythonPresent = Test-Path -LiteralPath $legacyPython -PathType Leaf
@@ -166,7 +166,7 @@ foreach ($processId in @($connections | Select-Object -ExpandProperty OwningProc
     if (
         $null -eq $process -or
         [IO.Path]::GetFileName([string]$process.ExecutablePath) -ne "python.exe" -or
-        [string]$process.CommandLine -notmatch '(?i)-m\s+uvicorn\s+asr_service\.app:create_app\s+--factory' -or
+        [string]$process.CommandLine -notmatch '(?i)-m\s+uvicorn\s+services\.asr_service\.app:create_app\s+--factory' -or
         [string]$process.CommandLine -notmatch '(?i)--port\s+8200'
     ) {
         $listenerOwned = $false
