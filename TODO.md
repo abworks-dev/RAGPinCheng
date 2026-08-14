@@ -8,16 +8,6 @@
 
 ## 当前优先事项
 
-### 项目文档目录迁移
-
-- 状态：代码完成待验证
-- 目标：将 legacy 资料默认路径从仓库根 `docs/` 解耦，并把 `project-docs/` 统一改名为项目文档目录 `docs/`。
-- 下一步：
-  - [ ] 在 Docker daemon 可用的环境完成 backend 镜像构建，并在合并前复核最新 `master` 路径差异。
-- 完成标准：项目 `docs/` 不进入业务摄取或写入路径；`project-docs/` 活跃引用为零；本地、测试和部署兼容验证通过。
-- 依赖：T11/T12-B 与 strict/source-decoupled 生产切换已完成；旧生产文件物理归档另走独立 R3。
-- 方案链接：`docs/plans/docs-directory-migration-phase1.md`
-
 ### 受管知识资料库
 
 - 状态：待用户验收
@@ -226,13 +216,13 @@
 
 后续新增摘要应尽量链接相关 commit、PR、workflow 或功能文档；详细事实不在本文件重复记录。
 
-1. [受管知识资料库](docs/features/document-indexing.md)生产基础能力启用，保持 `compat` 且未迁移旧资料（2026-08-11，PR #221/#222，workflow `31500815860`）。
-2. [Qwen3-ASR / WhisperX 本地快速实验室](docs/plans/asr-local-development-lab.md)及双引擎 full 实测（2026-08-11）。
-3. 三引擎共享 ASR qualification corpus 中性变量迁移（2026-08-10）。
-4. faster-whisper 生产准入代码准备（2026-08-10）。
-5. 管理端资料管理工作流 PR1，用户验收通过（2026-08-05）。
-6. 多引擎视频自动转录架构决策与总体方案（2026-08-01）。
-7. 查询拆分 Phase A 评测协议与指标实现（2026-07-31）。
-8. 查询拆分 `retrieve_multi` rerank 超限修复及 79 题回归（2026-07-30）。
-9. 黄金集索引指纹陈旧告警与严格模式（2026-07-30）。
-10. 比较型黄金集、两侧覆盖评分和生产收益样本（2026-07-30）。
+1. 项目文档目录统一为 `docs/`，legacy 资料默认路径迁至 `content/legacy-docs/`，生产部署验证通过（2026-08-14，PR #268，workflow `31802581728`）。
+2. [受管知识资料库](docs/features/document-indexing.md)生产基础能力启用，保持 `compat` 且未迁移旧资料（2026-08-11，PR #221/#222，workflow `31500815860`）。
+3. [Qwen3-ASR / WhisperX 本地快速实验室](docs/plans/asr-local-development-lab.md)及双引擎 full 实测（2026-08-11）。
+4. 三引擎共享 ASR qualification corpus 中性变量迁移（2026-08-10）。
+5. faster-whisper 生产准入代码准备（2026-08-10）。
+6. 管理端资料管理工作流 PR1，用户验收通过（2026-08-05）。
+7. 多引擎视频自动转录架构决策与总体方案（2026-08-01）。
+8. 查询拆分 Phase A 评测协议与指标实现（2026-07-31）。
+9. 查询拆分 `retrieve_multi` rerank 超限修复及 79 题回归（2026-07-30）。
+10. 黄金集索引指纹陈旧告警与严格模式（2026-07-30）。
