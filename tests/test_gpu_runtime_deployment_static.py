@@ -160,6 +160,21 @@ def test_gpu_model_cache_source_discovery_is_bounded_and_offline_only():
     assert "Remove-Item" not in script
 
 
+def test_gpu_model_cache_repair_workflow_is_bounded_and_immutable():
+    workflow = read(".github/workflows/repair-gpu-model-cache-production.yml")
+    script = read("scripts/repair-gpu-model-cache.ps1")
+
+    assert "production-gpu-exclusive" in workflow
+    assert '"refs/heads/master"' in workflow
+    assert "confirm_maintenance" in workflow
+    assert "model-cache-repair\\${{ github.run_id }}" in workflow
+    assert "Repair target already exists" in script
+    assert "Repair source is outside approved roots" in script
+    assert "Model cache path contains a reparse point" in script
+    assert "Get-FileHash" in script
+    assert "Remove-Item -LiteralPath $target -Recurse -Force" in script
+
+
 def test_builder_is_d_drive_isolated_exact_and_records_artifacts():
     script = read("scripts/build-gpu-runtime.ps1")
     lock_hash = read("scripts/get-gpu-runtime-lock-hash.ps1")

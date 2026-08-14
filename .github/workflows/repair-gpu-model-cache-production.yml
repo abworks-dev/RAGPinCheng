@@ -1,0 +1,83 @@
+name: Repair GPU Model Cache Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Inventory approved caches or create a new immutable combined cache
+        required: true
+        default: inventory
+        type: choice
+        options: [inventory, repair]
+      confirm_maintenance:
+        description: Confirm bounded production GPU cache maintenance
+        required: true
+        default: false
+        type: boolean
+      embedding_source:
+        description: Explicit cache root containing BGE-M3; required for repair
+        required: false
+        type: string
+      reranker_source:
+        description: Explicit cache root containing BGE reranker; required for repair
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-gpu-exclusive
+  cancel-in-progress: false
+
+jobs:
+  maintain:
+    if: ${{ inputs.confirm_maintenance == true }}
+    environment: production-asr
+    runs-on: [self-hosted, windows, production, gpu]
+    timeout-minutes: 90
+    env:
+      REPO_PATH: ${{ vars.PRODUCTION_REPO_PATH }}
+      RUNTIME_ROOT: ${{ vars.PRODUCTION_RUNTIME_ROOT }}
+      CONFIGURED_CACHE: ${{ vars.GPU_MODEL_CACHE_SOURCE }}
+    steps:
+      - name: Validate immutable revision and maintenance inputs
+        shell: powershell
+        run: |
+          if ("${{ github.ref }}" -ne "refs/heads/master") { throw "GPU cache maintenance must run from master" }
+          if ("${{ inputs.operation }}" -eq "repair") {
+            if ([string]::IsNullOrWhiteSpace("${{ inputs.embedding_source }}")) { throw "embedding_source is required" }
+            if ([string]::IsNullOrWhiteSpace("${{ inputs.reranker_source }}")) { throw "reranker_source is required" }
+          } elseif ("${{ inputs.embedding_source }}" -or "${{ inputs.reranker_source }}") {
+            throw "Cache sources are accepted only for repair"
+          }
+      - name: Check out exact maintenance revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+      - name: Inventory or repair approved GPU model caches
+        shell: powershell
+        run: |
+          $report = Join-Path $env:RUNNER_TEMP "gpu-model-cache-${{ github.run_id }}.json"
+          $params = @{
+            Mode = if ("${{ inputs.operation }}" -eq "repair") { "Repair" } else { "Inventory" }
+            RepositoryPath = $env:REPO_PATH
+            RuntimeRoot = $env:RUNTIME_ROOT
+            ConfiguredPath = $env:CONFIGURED_CACHE
+            ReportPath = $report
+          }
+          if ("${{ inputs.operation }}" -eq "repair") {
+            $params.EmbeddingSource = "${{ inputs.embedding_source }}"
+            $params.RerankerSource = "${{ inputs.reranker_source }}"
+            $params.TargetRoot = Join-Path $env:RUNTIME_ROOT "model-cache-repair\${{ github.run_id }}"
+          }
+          & "${{ github.workspace }}\scripts\repair-gpu-model-cache.ps1" @params
+      - name: Upload sanitized cache maintenance evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpu-model-cache-${{ github.run_id }}
+          path: ${{ runner.temp }}\gpu-model-cache-${{ github.run_id }}.json
+          if-no-files-found: error
+          retention-days: 30
