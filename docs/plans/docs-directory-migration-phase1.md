@@ -1,6 +1,6 @@
 # 首轮 `docs/` 目录释放与项目文档改名方案
 
-- 状态：代码完成待验证
+- 状态：已完成
 - 风险等级：仓库兼容代码与目录改名为 R2；旧生产文件归档为独立 R3
 - 范围：释放仓库根目录 `docs/` 作为项目文档目录，将 `project-docs/` 改名为 `docs/`
 
@@ -46,3 +46,10 @@ content/legacy-docs/   旧资料兼容路径
 - 不改变生产 `/app/docs` 容器路径或私有生产挂载；
 - 不执行生产文件归档、删除、Qdrant Reset 或数据库写入；
 - 不整理服务目录，不重组 `api/src`，不拆分 `data`。
+
+## 交付结果
+
+- PR #268 已合并，生产目标 commit 为 `489ee16926eb92020c20f5d24aa6fe044cd50e02`；
+- app-only workflow `31802581728` 部署成功，部署前备份位于 `/data/backup/databases/ragpincheng/app-backup-20260814-205820`；
+- backend 健康，Qdrant 健康且有 41,199 个 Point；受管内容按 Schema 6、7 个分类、4 个权限组和 `strict` 模式验证通过；
+- 未执行旧生产文件归档、删除、Qdrant Reset、数据库迁移或服务目录整理。
