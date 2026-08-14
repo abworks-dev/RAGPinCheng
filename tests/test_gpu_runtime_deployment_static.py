@@ -84,6 +84,8 @@ def test_candidate_resolver_is_manual_d_drive_isolated_and_evidence_only():
     assert "promote-gpu-runtime.ps1" not in workflow
     assert "resolve-gpu-model-cache-source.ps1" in workflow
     assert "TORCH_WHEEL_SEED_ROOT" in workflow
+    assert "PRODUCTION_GPU_PYTHON_PATH" in workflow
+    assert "-BasePython $env:GPU_BASE_PYTHON" in workflow
 
     assert 'StartsWith("D:\\"' in script
     assert '"-m", "venv"' in script
