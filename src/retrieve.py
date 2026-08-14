@@ -238,6 +238,19 @@ def _content_visibility_filter(snapshot: PublishedContentSnapshot) -> models.Fil
         visible.append(
             models.IsEmptyCondition(is_empty=models.PayloadField(key="content_version_id"))
         )
+    else:
+        # Transcript publication has its own immutable version/head contract.
+        # In strict mode it must not be rejected merely because it is not a
+        # managed ordinary document with a content_version_id.
+        visible.append(
+            models.Filter(
+                must_not=[
+                    models.IsEmptyCondition(
+                        is_empty=models.PayloadField(key="transcript_version_id")
+                    )
+                ]
+            )
+        )
     if snapshot.version_ids:
         visible.append(
             models.FieldCondition(
@@ -409,7 +422,11 @@ def _dedup_to_parents(
         p = parents.get(pid)
         if not p or not snapshot.allows(p.get("transcript_version_id")):
             continue
-        if content_snapshot and not content_snapshot.allows(p.get("content_version_id")):
+        if (
+            content_snapshot
+            and p.get("transcript_version_id") is None
+            and not content_snapshot.allows(p.get("content_version_id"))
+        ):
             continue
         out.append(
             RetrievedParent(

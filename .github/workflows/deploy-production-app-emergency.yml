@@ -50,6 +50,10 @@ jobs:
       COMPOSE_OVERRIDE: ${{ vars.PRODUCTION_APP_COMPOSE_OVERRIDE }}
       COMPOSE_ENV_FILE: ${{ vars.PRODUCTION_APP_ENV_FILE }}
       CONTENT_HOST_PATH: ${{ vars.PRODUCTION_CONTENT_ROOT }}
+      DOCS_HOST_PATH: ${{ vars.PRODUCTION_DOCS_HOST_PATH }}
+      MEDIA_HOST_PATH: ${{ vars.PRODUCTION_MEDIA_HOST_PATH }}
+      TRANSCRIPTION_ARTIFACT_DIR: ${{ vars.PRODUCTION_TRANSCRIPTION_ARTIFACT_DIR }}
+      SOURCE_DECOUPLING_COMPLETE: ${{ vars.SOURCE_DECOUPLING_COMPLETE }}
       CONTENT_MANAGEMENT_ENABLED: ${{ vars.CONTENT_MANAGEMENT_ENABLED }}
       CONTENT_HEAD_ENFORCEMENT: ${{ vars.CONTENT_HEAD_ENFORCEMENT }}
       DEPLOY_HTTP_PROXY: ${{ vars.DEPLOY_HTTP_PROXY }}
@@ -73,14 +77,35 @@ jobs:
             echo "ERROR: production content root is not the approved fixed path"
             exit 1
           }
+          case "${DOCS_HOST_PATH:-}" in
+            ""|/data/business/ragpincheng/source/docs|/data/business/ragpincheng/content/legacy-docs) ;;
+            *) echo "ERROR: production docs host path is outside the approved roots"; exit 1 ;;
+          esac
+          case "${MEDIA_HOST_PATH:-}" in
+            ""|/data/business/ragpincheng/source/media|/data/business/ragpincheng/content/media) ;;
+            *) echo "ERROR: production media host path is outside the approved roots"; exit 1 ;;
+          esac
+          case "${TRANSCRIPTION_ARTIFACT_DIR:-}" in
+            ""|/app/data/transcription-artifacts|/app/content/transcription-artifacts) ;;
+            *) echo "ERROR: production transcript artifact path is outside the approved roots"; exit 1 ;;
+          esac
           [ "${CONTENT_MANAGEMENT_ENABLED}" = "true" ] || {
             echo "ERROR: managed content must be explicitly enabled for this deployment"
             exit 1
           }
-          [ "${CONTENT_HEAD_ENFORCEMENT}" = "compat" ] || {
-            echo "ERROR: managed content head enforcement must remain compat"
-            exit 1
-          }
+          case "${CONTENT_HEAD_ENFORCEMENT}" in
+            compat|strict) ;;
+            *) echo "ERROR: invalid managed content head enforcement"; exit 1 ;;
+          esac
+          if [ "${CONTENT_HEAD_ENFORCEMENT}" = "strict" ] || \
+             [ "${DOCS_HOST_PATH:-}" = "/data/business/ragpincheng/content/legacy-docs" ] || \
+             [ "${MEDIA_HOST_PATH:-}" = "/data/business/ragpincheng/content/media" ] || \
+             [ "${TRANSCRIPTION_ARTIFACT_DIR:-}" = "/app/content/transcription-artifacts" ]; then
+            [ "${SOURCE_DECOUPLING_COMPLETE:-}" = "true" ] || {
+              echo "ERROR: source decoupling configuration requires the completed T12 marker"
+              exit 1
+            }
+          fi
           [ -n "${CONFIGURED_TRANSCRIPTION_ADMITTED_PROFILE_IDS}" ] || {
             echo "ERROR: TRANSCRIPTION_ADMITTED_PROFILE_IDS repository variable must be configured"
             exit 1
@@ -478,7 +503,7 @@ jobs:
               ("99", "待确认资料"),
           ]
           assert CONTENT_MANAGEMENT_ENABLED is True
-          assert CONTENT_HEAD_ENFORCEMENT == "compat"
+          assert CONTENT_HEAD_ENFORCEMENT in {"compat", "strict"}
           assert CONTENT_ROOT == Path("/app/content")
           probe = CONTENT_ROOT / ".managed-content-deploy-probe"
           probe.write_text("ok", encoding="ascii")

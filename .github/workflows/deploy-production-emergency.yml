@@ -362,6 +362,10 @@ jobs:
           COMPOSE_OVERRIDE: ${{ vars.PRODUCTION_APP_COMPOSE_OVERRIDE }}
           COMPOSE_ENV_FILE: ${{ vars.PRODUCTION_APP_ENV_FILE }}
           CONTENT_HOST_PATH: ${{ vars.PRODUCTION_CONTENT_ROOT }}
+          DOCS_HOST_PATH: ${{ vars.PRODUCTION_DOCS_HOST_PATH }}
+          MEDIA_HOST_PATH: ${{ vars.PRODUCTION_MEDIA_HOST_PATH }}
+          TRANSCRIPTION_ARTIFACT_DIR: ${{ vars.PRODUCTION_TRANSCRIPTION_ARTIFACT_DIR }}
+          SOURCE_DECOUPLING_COMPLETE: ${{ vars.SOURCE_DECOUPLING_COMPLETE }}
           CONTENT_MANAGEMENT_ENABLED: ${{ vars.CONTENT_MANAGEMENT_ENABLED }}
           CONTENT_HEAD_ENFORCEMENT: ${{ vars.CONTENT_HEAD_ENFORCEMENT }}
           ASR_ENABLED: ${{ vars.ASR_ENABLED }}
@@ -371,6 +375,15 @@ jobs:
           DEPLOY_HTTP_PROXY: ${{ vars.DEPLOY_HTTP_PROXY }}
         run: |
           set -euo pipefail
+          if [ "${CONTENT_HEAD_ENFORCEMENT}" = "strict" ] || \
+             [ "${DOCS_HOST_PATH:-}" = "/data/business/ragpincheng/content/legacy-docs" ] || \
+             [ "${MEDIA_HOST_PATH:-}" = "/data/business/ragpincheng/content/media" ] || \
+             [ "${TRANSCRIPTION_ARTIFACT_DIR:-}" = "/app/content/transcription-artifacts" ]; then
+            [ "${SOURCE_DECOUPLING_COMPLETE:-}" = "true" ] || {
+              echo "ERROR: source decoupling configuration requires the completed T12 marker"
+              exit 1
+            }
+          fi
           cd "${REPO_PATH}"
           BASIC_AUTH="$(printf 'x-access-token:%s' "${GIT_TOKEN}" | base64 | tr -d '\n')"
           PROXY_ARGS=()

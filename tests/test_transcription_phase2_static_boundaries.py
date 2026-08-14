@@ -13,12 +13,12 @@ ADAPTERS = (
     ROOT / "api" / "transcription_store.py",
 )
 PROTECTED = {
-    "api/routes_media.py": "bba0b53767961c90e06e948cfecb659e33a395db1538a9f4f2acd4800087eb14",
+    "api/routes_media.py": "346b4710b0f799e9f47043c07e7b806c1659caac4be3c6fc611fa21f4d6ad761",
     "api/indexing.py": "5613de8c7e9c210b404e6906f24b147bdb071cc1dda89f9adc53b631ded74d05",
     "src/chunk.py": "f22d79fe976a6da4fc4c2ba430490ad2c24205b2399e733912390e480858c542",
     "src/index.py": "993d4e101cfd0e6e1b670de7d43edaa71a73cd0778d18cef6aba72d3184d23bc",
     "src/indexing_pipeline.py": "c2c64728277e806414f6e5efbe9b7eb792633c2439bfaf3e8dd86f25c7bf00ea",
-    "src/retrieve.py": "158e0c75e437898762d830d98661260e513713e6e671c749a20b51a1a15404dc",
+    "src/retrieve.py": "f1497af0589076116e4ca0af91912466b652d03c438f37ebfb184d70c359ad87",
 }
 FORBIDDEN = {
     "funasr", "faster_whisper", "whisper", "torch", "av", "ffmpeg",

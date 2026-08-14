@@ -1,7 +1,7 @@
 # 文档摄取与索引
 
 - 状态：已实现
-- 最后核对：2026-08-13
+- 最后核对：2026-08-14
 
 ## 用户可观察能力
 
@@ -39,6 +39,8 @@
 - 可重建的一至四级编号目录只读视图；视图是副本，不是分类或索引事实来源；
 - 代码和普通环境默认关闭受管资料库；当前 Ubuntu 生产已显式设置 `CONTENT_MANAGEMENT_ENABLED=true`，并保持 `CONTENT_HEAD_ENFORCEMENT=compat`。
 - 当前生产根目录为 `/data/business/ragpincheng/content`（容器内 `/app/content`）；2026-08-14 已完成 117 条旧普通资料迁移记录的收口，其中 116 份建立正式 `content_item_heads`，1 份生成预览被安全排除。T11 已删除对应旧普通资料索引，生产继续以 `compat` 保留视频转录等未版本化索引；旧 `source/media` 和视频转录继续保留既有链路。
+- 代码已支持 `DOCS_DIR`、`MEDIA_DIR`、`DOCS_HOST_PATH`、`MEDIA_HOST_PATH` 和 `TRANSCRIPTION_ARTIFACT_DIR` 显式配置；默认值保持旧目录兼容，生产变量尚未切换。
+- `strict` 检索契约按身份分流：普通资料必须命中 `content_item_heads`，带 `transcript_version_id` 的转录由独立 `media_transcript_heads` 快照校验；双重无版本身份的旧 Parent/Child 被拒绝。该能力尚未在生产启用。
 
 ### 未实现
 
@@ -98,6 +100,7 @@
 - `scripts/preflight_legacy_content_t10.py`
 - `scripts/stage_legacy_content_t10.py`
 - `scripts/apply_legacy_content_t10.py`
+- `scripts/preflight_source_decoupling_t12.py`
 - `scripts/rebuild_content_view.py`
 - `frontend/src/pages/admin/AdminManagedContentPage.tsx`
 - `frontend/src/pages/admin/AdminCategoriesPage.tsx`
@@ -118,6 +121,7 @@
 - 受管资料的分类身份使用数据库 ID 和稳定 `category_key`；显示编号、显示名称与物理目录名可以调整；
 - `content_objects` 允许 SHA-256 物理去重，`content_items` 不做跨项目强制合并；
 - `content_item_heads.current_version_id` 是普通受管资料正式可见性的唯一事实；候选索引完成前不切换；
+- `strict` 只把 `content_version_id` 要求施加到普通资料；带 `transcript_version_id` 的候选仍必须通过独立 transcript head 快照，不能因缺少 `content_version_id` 被误杀；
 - `CONTENT_ROOT/views/current` 和 `inbox` 仅为导入/导出视图，不得被索引器当作事实来源。
 
 ## 依赖与下游消费者
@@ -151,7 +155,7 @@
 
 - 索引没有统一事务覆盖 SQLite 与 Qdrant 两种存储，失败恢复依赖现有任务状态与重试流程。
 - 当前资料 ID 来自部署内源路径的稳定哈希；跨部署移动源目录后不保证保持相同 ID。
-- 该路径身份限制只适用于旧索引；受管资料使用稳定业务 ID。当前生产功能开关已启用，117 份普通资料已迁移并发布，但仍以 `compat` 模式保留未版本化的视频转录和待下线的旧普通资料索引。
+- 该路径身份限制只适用于旧索引；受管资料使用稳定业务 ID。当前生产功能开关已启用，117 份普通资料已迁移并发布，T11 已下线对应旧普通资料索引，但仍以 `compat` 模式保留尚待 T12 清点的旧视频转录和其他无版本索引。
 - 只读目录视图使用文件副本以避免权限修改污染正式对象，重建时需要额外临时磁盘空间。
 
 ## 相关决策

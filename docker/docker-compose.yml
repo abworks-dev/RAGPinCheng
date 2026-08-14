@@ -98,6 +98,9 @@ services:
       # LibreOffice 转换服务地址 — 在同一 Docker 网络内，通过服务名访问。
       LIBREOFFICE_URL: ${LIBREOFFICE_URL:-http://libreoffice:8101}
       CONTENT_ROOT: /app/content
+      DOCS_DIR: /app/docs
+      MEDIA_DIR: /app/media
+      TRANSCRIPTION_ARTIFACT_DIR: ${TRANSCRIPTION_ARTIFACT_DIR:-/app/data/transcription-artifacts}
       CONTENT_MANAGEMENT_ENABLED: ${CONTENT_MANAGEMENT_ENABLED:-false}
       CONTENT_HEAD_ENFORCEMENT: ${CONTENT_HEAD_ENFORCEMENT:-compat}
     volumes:
@@ -106,12 +109,12 @@ services:
       # 镜像保持无状态。Qdrant 有自己的独立 volume（见上方）。
       - ../data:/app/data
       # 视频媒体文件 — 上传的 MP4 保存在这里，通过鉴权路由访问。
-      - ../media:/app/media
+      - ${MEDIA_HOST_PATH:-../media}:/app/media
       # 受管资料库。生产通过 CONTENT_HOST_PATH 固定宿主机目录；本地默认仍在仓库旁。
       - ${CONTENT_HOST_PATH:-../content}:/app/content
       # 源 PDF 文档 — 只在容器内执行 scripts/build_index.py 时需要。
       # 读写挂载，MinerU 拆分后的 PDF 可以写回原目录。
-      - ../docs:/app/docs
+      - ${DOCS_HOST_PATH:-../docs}:/app/docs
     ports:
       # 对外暴露入口。主机 80 端口映射到容器 uvicorn 8000 端口 —
       # 与旧 nginx 方案 URL 一致，减少一跳。生产环境建议在前面加公司
