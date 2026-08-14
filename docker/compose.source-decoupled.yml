@@ -1,0 +1,5 @@
+services:
+  backend:
+    volumes:
+      - ${DOCS_HOST_PATH:?DOCS_HOST_PATH is required}:/app/docs
+      - ${MEDIA_HOST_PATH:?MEDIA_HOST_PATH is required}:/app/media

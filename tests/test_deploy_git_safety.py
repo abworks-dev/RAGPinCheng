@@ -23,6 +23,9 @@ class TestDeployGitSafety(unittest.TestCase):
         cls.app_backup_recovery_workflow = (
             ROOT / ".github/workflows/recover-production-app-backup.yml"
         ).read_text(encoding="utf-8")
+        cls.source_decoupled_compose = (
+            ROOT / "docker/compose.source-decoupled.yml"
+        ).read_text(encoding="utf-8")
         cls.windows = (ROOT / "scripts/deploy-gpu.ps1").read_text(encoding="utf-8")
         cls.promote = (ROOT / "scripts/promote-gpu-runtime.ps1").read_text(
             encoding="utf-8"
@@ -383,6 +386,67 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertIn(
             'assert CONTENT_HEAD_ENFORCEMENT in {"compat", "strict"}',
             self.app_only_workflow,
+        )
+
+    def test_source_decoupling_overlay_is_final_for_deploy_and_recovery(self):
+        overlay = self.source_decoupled_compose
+        self.assertIn(
+            "${DOCS_HOST_PATH:?DOCS_HOST_PATH is required}:/app/docs", overlay
+        )
+        self.assertIn(
+            "${MEDIA_HOST_PATH:?MEDIA_HOST_PATH is required}:/app/media", overlay
+        )
+        self.assertNotIn("/data/business/ragpincheng/source", overlay)
+
+        self.assertLess(
+            self.linux.index('-f "$COMPOSE_OVERRIDE"'),
+            self.linux.index('COMPOSE_ARGS+=(-f "$COMPOSE_SOURCE_DECOUPLED")'),
+        )
+        self.assertLess(
+            self.linux.index('COMPOSE_ARGS+=(-f "$COMPOSE_SOURCE_DECOUPLED")'),
+            self.linux.index('COMPOSE_ARGS+=(--env-file "$COMPOSE_ENV_FILE")'),
+        )
+        self.assertIn(
+            'SOURCE_DECOUPLING_COMPLETE must be true or false', self.linux
+        )
+
+        for workflow in (
+            self.app_only_workflow,
+            self.emergency_workflow,
+            self.app_backup_recovery_workflow,
+        ):
+            with self.subTest(workflow=workflow.splitlines()[0]):
+                self.assertIn(
+                    'COMPOSE_FILES+=(-f "${SOURCE_DECOUPLED_COMPOSE}")', workflow
+                )
+                self.assertLess(
+                    workflow.index('-f "${COMPOSE_OVERRIDE}"'),
+                    workflow.index(
+                        'COMPOSE_FILES+=(-f "${SOURCE_DECOUPLED_COMPOSE}")'
+                    ),
+                )
+                self.assertLess(
+                    workflow.index(
+                        'COMPOSE_FILES+=(-f "${SOURCE_DECOUPLED_COMPOSE}")'
+                    ),
+                    workflow.index('"${COMPOSE_FILES[@]}" --env-file'),
+                )
+
+        self.assertIn(
+            'git show "${DEPLOY_COMMIT_SHA}:docker/compose.source-decoupled.yml"',
+            self.app_only_workflow,
+        )
+        self.assertIn(
+            'git show "${DEPLOY_COMMIT_SHA}:docker/compose.source-decoupled.yml"',
+            self.emergency_workflow,
+        )
+        self.assertIn(
+            'SOURCE_DECOUPLED_COMPOSE="${REPO_PATH}/docker/compose.source-decoupled.yml"',
+            self.app_backup_recovery_workflow,
+        )
+        self.assertIn(
+            '"${COMPOSE[@]}" up -d --no-deps --force-recreate backend',
+            self.app_backup_recovery_workflow,
         )
 
     def test_scripts_require_full_commit_and_verify_head(self):

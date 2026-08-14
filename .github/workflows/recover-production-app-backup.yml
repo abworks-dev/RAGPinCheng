@@ -26,6 +26,9 @@ jobs:
       DATA_PATH: ${{ vars.PRODUCTION_APP_DATA_PATH }}
       COMPOSE_OVERRIDE: ${{ vars.PRODUCTION_APP_COMPOSE_OVERRIDE }}
       COMPOSE_ENV_FILE: ${{ vars.PRODUCTION_APP_ENV_FILE }}
+      DOCS_HOST_PATH: ${{ vars.PRODUCTION_DOCS_HOST_PATH }}
+      MEDIA_HOST_PATH: ${{ vars.PRODUCTION_MEDIA_HOST_PATH }}
+      SOURCE_DECOUPLING_COMPLETE: ${{ vars.SOURCE_DECOUPLING_COMPLETE }}
       CONFIRM_RECOVERY: ${{ inputs.confirm_recovery }}
     steps:
       - name: Restore approved databases and previous backend image
@@ -38,8 +41,27 @@ jobs:
           }
           BACKUP_PATH="${BACKUP_DIR}/app-only-31552723068-1"
           [ -d "${BACKUP_PATH}" ] || { echo "ERROR: approved backup is missing"; exit 1; }
-          COMPOSE=(docker compose -p ragpincheng-prod --env-file "${COMPOSE_ENV_FILE}" -f docker/docker-compose.yml -f "${COMPOSE_OVERRIDE}")
           cd "${REPO_PATH}"
+          COMPOSE_FILES=(-f docker/docker-compose.yml -f "${COMPOSE_OVERRIDE}")
+          case "${SOURCE_DECOUPLING_COMPLETE:-false}" in
+            true)
+              [ "${DOCS_HOST_PATH}" = "/data/business/ragpincheng/content/legacy-docs" ]
+              [ "${MEDIA_HOST_PATH}" = "/data/business/ragpincheng/content/media" ]
+              SOURCE_DECOUPLED_COMPOSE="${REPO_PATH}/docker/compose.source-decoupled.yml"
+              [ -f "${SOURCE_DECOUPLED_COMPOSE}" ] || {
+                echo "ERROR: source-decoupled Compose overlay is missing"
+                exit 1
+              }
+              COMPOSE_FILES+=(-f "${SOURCE_DECOUPLED_COMPOSE}")
+              ;;
+            false|"") ;;
+            *)
+              echo "ERROR: SOURCE_DECOUPLING_COMPLETE must be true or false"
+              exit 1
+              ;;
+          esac
+          COMPOSE=(docker compose -p ragpincheng-prod \
+            "${COMPOSE_FILES[@]}" --env-file "${COMPOSE_ENV_FILE}")
 
           OLD_IMAGE_ID="$(tr -d '\r\n' < "${BACKUP_PATH}/backend-image.txt")"
           [[ "${OLD_IMAGE_ID}" =~ ^sha256:[0-9a-f]{64}$ ]] || {
