@@ -192,7 +192,7 @@ describe("Message assistant actions", () => {
     );
 
     const status = screen.getByRole("status");
-    expect(status).toHaveTextContent("用户已停止回答，以上为已生成内容");
+    expect(status).toHaveTextContent("用户已停止回答，以下为已生成内容");
     expect(status).not.toHaveTextContent("回答基于");
   });
 
