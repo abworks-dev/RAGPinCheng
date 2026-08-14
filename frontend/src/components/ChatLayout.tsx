@@ -78,6 +78,7 @@ export function ChatLayout() {
     editQuestion,
     viewAnswerVersion,
     viewQuestionVersion,
+    stop,
     sending,
     loading,
   } = useChat({
@@ -202,7 +203,9 @@ export function ChatLayout() {
               <Composer
                 centered
                 onSend={(t) => send(t, selected)}
-                disabled={sending || loading}
+                disabled={loading}
+                sending={sending}
+                onStop={stop}
                 categories={categories}
                 selected={selected}
                 onToggleCategory={toggleCategory}
@@ -224,7 +227,9 @@ export function ChatLayout() {
           />
           <Composer
             onSend={(t) => send(t, selected)}
-            disabled={sending || loading}
+            disabled={loading}
+            sending={sending}
+            onStop={stop}
             categories={categories}
             selected={selected}
             onToggleCategory={toggleCategory}

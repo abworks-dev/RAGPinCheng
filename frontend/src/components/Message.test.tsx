@@ -182,6 +182,20 @@ describe("Message assistant actions", () => {
     expect(status.querySelector(".bg-destructive")).toBeInTheDocument();
   });
 
+  it("shows that the user stopped a partial answer", () => {
+    render(
+      <Message
+        msg={assistant({ content: "部分回答", stopped: true, streaming: false, stage: "done", prep: prep(7) })}
+        conversationId="conversation-1"
+        turnIndex={1}
+      />,
+    );
+
+    const status = screen.getByRole("status");
+    expect(status).toHaveTextContent("用户已停止回答，以上为已生成内容");
+    expect(status).not.toHaveTextContent("回答基于");
+  });
+
   it("copies a user question over the HTTP fallback and shows a temporary check", async () => {
     vi.useFakeTimers();
     Object.defineProperty(navigator, "clipboard", {

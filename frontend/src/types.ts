@@ -55,6 +55,7 @@ export type ChatMessage = {
   prep?: PrepData;
   done?: DoneData;
   streaming?: boolean;
+  stopped?: boolean;
   stage?: ChatStage;
   error?: string;
   answerVersions?: AnswerVersion[];

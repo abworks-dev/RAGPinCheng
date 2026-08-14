@@ -204,11 +204,11 @@ export function useChat({
         }
       } catch (e: any) {
         aborted = e?.name === "AbortError";
-        const msg = aborted ? "（已中止）" : e?.message || String(e);
+        const msg = aborted ? undefined : e?.message || String(e);
         setMessages((prev) =>
           prev.map((m) =>
             m.id === assistantId
-              ? { ...m, error: msg, streaming: false, stage: "done" }
+              ? { ...m, error: msg, stopped: aborted || undefined, streaming: false, stage: "done" }
               : m,
           ),
         );
@@ -236,6 +236,10 @@ export function useChat({
     },
     [sending, conversationId, onConversationCreated, onConversationUpdated],
   );
+
+  const stop = useCallback(() => {
+    abortRef.current?.abort();
+  }, []);
 
   const regenerate = useCallback(
     async (assistantMessageId: string) => {
@@ -581,6 +585,7 @@ export function useChat({
     editQuestion,
     viewAnswerVersion,
     viewQuestionVersion,
+    stop,
     sending,
     loading,
     error,
