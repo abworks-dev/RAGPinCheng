@@ -10,7 +10,7 @@ from pydantic import ValidationError
 from fastapi import HTTPException
 
 from api.auth import CurrentUser, require_admin, require_csrf_admin
-from api.routes_admin import router as admin_router, upload_media
+from api.routes_admin import delete_failed_media_asset, router as admin_router, upload_media
 from api.routes_transcription import (
     _failure_dto,
     build_transcription_service,
@@ -47,12 +47,51 @@ def test_management_reads_require_admin_and_mutations_require_csrf_admin():
         transcription_router, "/admin/transcription/media/{media_id}/retry", "POST"
     )
     upload = route_for(admin_router, "/admin/media", "POST")
+    delete = route_for(admin_router, "/admin/media/{media_id}", "DELETE")
     assert require_admin in dependency_calls(profiles)
     assert require_admin in dependency_calls(listing)
     assert require_admin in dependency_calls(detail)
     assert require_csrf_admin in dependency_calls(cancel)
     assert require_csrf_admin in dependency_calls(retry)
     assert require_csrf_admin in dependency_calls(upload)
+    assert require_csrf_admin in dependency_calls(delete)
+
+
+def test_failed_media_delete_removes_file_and_record_but_rejects_history(tmp_path, monkeypatch):
+    import api.routes_admin as routes_admin
+
+    media_root = tmp_path / "media"
+    failed_id = "11111111-1111-4111-8111-111111111111"
+    conn, store, _artifacts = make_phase2_store(tmp_path)
+    try:
+        conn.execute(
+            """INSERT INTO media_assets(media_id,title,original_filename,storage_rel_path,mime_type,file_size,
+            transcript_origin,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            (failed_id, "Failed", "failed.mp4", f"{failed_id}/failed.mp4", "video/mp4", 1,
+             "generated", "failed", 1, 1),
+        )
+        conn.commit()
+        protected_job = store.create_job(make_pending_job())
+        conn.execute(
+            "UPDATE media_assets SET status='failed' WHERE media_id=?",
+            (protected_job.media_id,),
+        )
+        conn.commit()
+        for media_id in (failed_id, protected_job.media_id):
+            (media_root / media_id).mkdir(parents=True)
+            (media_root / media_id / "failed.mp4").write_bytes(b"video")
+        monkeypatch.setattr(routes_admin, "MEDIA_DIR", media_root)
+
+        delete_failed_media_asset(failed_id, None, conn)
+        assert not (media_root / failed_id).exists()
+        assert conn.execute("SELECT 1 FROM media_assets WHERE media_id=?", (failed_id,)).fetchone() is None
+
+        with pytest.raises(HTTPException, match="已有转录任务") as caught:
+            delete_failed_media_asset(protected_job.media_id, None, conn)
+        assert caught.value.status_code == 409
+        assert (media_root / protected_job.media_id).exists()
+    finally:
+        conn.close()
 
 
 def test_retry_request_rejects_all_untrusted_execution_controls():

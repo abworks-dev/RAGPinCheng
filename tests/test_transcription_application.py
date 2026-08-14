@@ -14,6 +14,10 @@ from src.transcription.candidate import CandidateSegment
 from src.transcription.provider_protocol import ProviderCandidate
 from src.transcription.provider_registry import ProviderRegistry
 from src.transcription.runtime_ports import ProviderRuntimeState
+from src.transcription.profile_catalog import (
+    FUNASR_SENSEVOICE_PROFILE_ID,
+    WHISPERX_PROFILE_ID,
+)
 from src.transcription.types import TimeUnit, TranscriptionJobStatus
 
 MEDIA_ID = "11111111-1111-4111-8111-111111111111"
@@ -74,7 +78,7 @@ class FakeFactory:
         return FakeRemoteProvider(ports)
 
 
-def make_service(tmp_path):
+def make_service(tmp_path, admitted_profile_ids=None):
     db_path = tmp_path / "app.sqlite"
     init_db(db_path, backup_dir=tmp_path / "backups")
     conn = connect(db_path)
@@ -99,6 +103,7 @@ def make_service(tmp_path):
             upload_part_bytes=1024 * 1024,
             poll_interval_ms=100,
             expected_api_version="asr-service/1",
+            admitted_profile_ids=admitted_profile_ids,
         ),
         ProviderRegistry((FakeFactory(),)),
         FfmpegMediaAudioPreparer(media_root, "fake-ffmpeg", 10, AudioRunner()),
@@ -137,6 +142,23 @@ def test_application_persists_candidate_version_without_publication_or_index(tmp
         ).fetchone()[0] == "transcript_ready"
     finally:
         conn.close()
+
+
+def test_application_creates_pending_job_for_admitted_whisperx(tmp_path):
+    service, _factory = make_service(
+        tmp_path,
+        (FUNASR_SENSEVOICE_PROFILE_ID, WHISPERX_PROFILE_ID),
+    )
+
+    job = service.create_pending_job(
+        media_id=MEDIA_ID,
+        profile_id=WHISPERX_PROFILE_ID,
+        request_idempotency_key=REQUEST_ID,
+        created_by=1,
+    )
+
+    assert job.profile_id == WHISPERX_PROFILE_ID
+    assert job.status is TranscriptionJobStatus.pending
 
 
 def test_cancelled_job_is_terminal_and_worker_does_not_revive_it(tmp_path):

@@ -4,6 +4,7 @@ import { AdminMediaPage } from "./AdminMediaPage";
 
 const mocks = vi.hoisted(() => ({
   listMediaAssets: vi.fn(),
+  deleteFailedMediaAsset: vi.fn(),
   uploadMediaVideo: vi.fn(),
   uploadAutomaticMediaVideo: vi.fn(),
   listTranscriptionProfiles: vi.fn(),
@@ -104,6 +105,7 @@ describe("AdminMediaPage wizard", () => {
       randomUUID: vi.fn(() => `11111111-1111-4111-8111-${String(++sequence).padStart(12, "0")}`),
     });
     mocks.listMediaAssets.mockResolvedValue(assets);
+    mocks.deleteFailedMediaAsset.mockResolvedValue(undefined);
     mocks.uploadMediaVideo.mockResolvedValue(assets[0]);
     mocks.uploadAutomaticMediaVideo.mockImplementation(async (file: File) => ({
       ...assets[0],
@@ -200,5 +202,19 @@ describe("AdminMediaPage wizard", () => {
     fireEvent.click(screen.getByRole("button", { name: "重试" }));
     await waitFor(() => expect(mocks.cancelTranscriptionJob).toHaveBeenCalledWith("job-succeeded"));
     await waitFor(() => expect(mocks.retryTranscription).toHaveBeenCalledWith("media-failed", availableProfile.profile_id, expect.any(String)));
+  });
+
+  it("offers complete deletion only for a failed upload without a transcription job", async () => {
+    mocks.listMediaAssets.mockResolvedValue([{ ...assets[0], media_id: "media-upload-failed", title: "上传失败视频", status: "failed" }]);
+    mocks.listTranscriptionJobs.mockResolvedValue([]);
+    render(<AdminMediaPage />);
+
+    const remove = await screen.findByRole("button", { name: "完整删除" });
+    fireEvent.click(remove);
+    expect(screen.getByRole("dialog", { name: "完整删除失败视频" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "完整删除" }));
+
+    await waitFor(() => expect(mocks.deleteFailedMediaAsset).toHaveBeenCalledWith("media-upload-failed"));
+    await waitFor(() => expect(screen.queryByText("上传失败视频")).not.toBeInTheDocument());
   });
 });

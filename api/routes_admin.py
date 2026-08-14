@@ -12,6 +12,7 @@ import hashlib
 import json
 import logging
 import re
+import shutil
 import sqlite3
 import time
 from pathlib import Path
@@ -1327,3 +1328,40 @@ def list_media_assets(
         )
         for r in rows
     ]
+
+
+@router.delete("/media/{media_id}", status_code=204)
+def delete_failed_media_asset(
+    media_id: str,
+    _admin: CurrentUser = Depends(require_csrf_admin),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> None:
+    """Remove a failed upload that never created transcription history."""
+    try:
+        validate_uuid(media_id, "media_id")
+    except ContractValidationError:
+        raise HTTPException(status_code=404, detail="媒体不存在")
+    row = conn.execute(
+        "SELECT status FROM media_assets WHERE media_id=?", (media_id,)
+    ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="媒体不存在")
+    if row["status"] != "failed":
+        raise HTTPException(status_code=409, detail="仅可完整删除失败且未进入转录流程的媒体")
+    if conn.execute(
+        "SELECT 1 FROM transcription_jobs WHERE media_id=?", (media_id,)
+    ).fetchone() is not None:
+        raise HTTPException(status_code=409, detail="已有转录任务的媒体不能在此删除")
+    if conn.execute(
+        "SELECT 1 FROM transcript_versions WHERE media_id=?", (media_id,)
+    ).fetchone() is not None:
+        raise HTTPException(status_code=409, detail="已有转录稿的媒体不能在此删除")
+    media_dir = (MEDIA_DIR / media_id).resolve(strict=False)
+    try:
+        media_dir.relative_to(MEDIA_DIR.resolve())
+    except ValueError:
+        raise HTTPException(status_code=500, detail="媒体存储路径异常")
+    if media_dir.exists():
+        shutil.rmtree(media_dir)
+    conn.execute("DELETE FROM media_assets WHERE media_id=?", (media_id,))
+    conn.commit()

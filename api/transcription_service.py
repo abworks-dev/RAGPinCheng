@@ -24,6 +24,7 @@ from src.transcription.profile import (
     RemoteAsrServiceConfig,
     Qwen3AsrRemoteConfig,
     TranscriptionExecutionConfig,
+    WhisperXRemoteConfig,
 )
 from src.transcription.provider_protocol import (
     ProviderErrorCode,
@@ -114,6 +115,7 @@ class TranscriptionApplicationService:
             RemoteAsrServiceConfig,
             FasterWhisperRemoteConfig,
             Qwen3AsrRemoteConfig,
+            WhisperXRemoteConfig,
         ):
             raise ContractValidationError("unsupported_application_profile", "profile_id")
 

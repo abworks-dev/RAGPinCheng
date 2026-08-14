@@ -496,6 +496,8 @@ export const api = {
     return (await res.json()) as MediaAsset;
   },
   listMediaAssets: () => jsonFetch<MediaAsset[]>("/api/admin/media"),
+  deleteFailedMediaAsset: (mediaId: string) =>
+    jsonFetch<void>(`/api/admin/media/${mediaId}`, { method: "DELETE" }),
   listTranscriptionProfiles: () =>
     jsonFetch<TranscriptionProfile[]>("/api/admin/transcription/profiles"),
   listTranscriptionJobs: (latestPerMedia = true, limit = 100) =>

@@ -8,6 +8,7 @@ import { EmptyState } from "../../components/ui/empty-state";
 import { ErrorState } from "../../components/ui/error-state";
 import { Input } from "../../components/ui/input";
 import { LoadingState } from "../../components/ui/loading-state";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../../components/ui/dialog";
 import { TranscriptionVersionPanel } from "../../components/TranscriptionVersionPanel";
 import { useTranscriptionJobs } from "../../hooks/useTranscriptionJobs";
 import { createRequestId } from "../../lib/request-id";
@@ -108,6 +109,8 @@ function pendingFromFile(file: File, profileId: string): PendingVideo {
 
 export function AdminMediaPage() {
   const [mediaAssets, setMediaAssets] = useState<MediaAsset[]>([]);
+  const [deletingMediaId, setDeletingMediaId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<MediaAsset | null>(null);
   const [profiles, setProfiles] = useState<TranscriptionProfile[]>([]);
   const [step, setStep] = useState(1);
   const [mode, setMode] = useState<UploadMode | null>(null);
@@ -218,6 +221,19 @@ export function AdminMediaPage() {
     if (mediaFilter === "publishing") return asset.publication_status === "publishing";
     return job?.status === "failed" || asset.status === "failed" || asset.publication_status === "publication_failed" || asset.publication_index_status === "failed";
   });
+
+  async function deleteFailedMedia(asset: MediaAsset) {
+    setDeletingMediaId(asset.media_id);
+    try {
+      await api.deleteFailedMediaAsset(asset.media_id);
+      setMediaAssets((items) => items.filter((item) => item.media_id !== asset.media_id));
+      setDeleteTarget(null);
+    } catch (e: any) {
+      setUploadError(e?.message || String(e));
+    } finally {
+      setDeletingMediaId(null);
+    }
+  }
 
   async function uploadOne(item: PendingVideo) {
     updatePending(item.id, { state: "uploading", error: null });
@@ -452,15 +468,27 @@ export function AdminMediaPage() {
         {loadError ? <ErrorState title="媒体资源加载失败" description={loadError} action={<Button variant="outline" size="sm" onClick={refresh}>重新加载</Button>} />
           : loading ? <Card><LoadingState className="min-h-48" label="正在加载媒体资源…" /></Card>
           : mediaAssets.length === 0 ? <EmptyState title="暂无媒体资源" description="完成向导后，视频和各阶段状态会显示在这里。" />
-          : <Card className="overflow-hidden shadow-surface"><div className="overflow-x-auto"><table className="w-full min-w-[78rem] text-ui-sm"><caption className="sr-only">视频媒体、转录、审核、发布和索引状态</caption><thead className="border-b border-border bg-surface-muted"><tr><th className="px-4 py-3 text-left">标题</th><th className="px-4 py-3 text-left">原始文件</th><th className="px-4 py-3 text-left">媒体</th><th className="px-4 py-3 text-left">转录</th><th className="px-4 py-3 text-left">审核</th><th className="px-4 py-3 text-left">发布</th><th className="px-4 py-3 text-left">索引</th><th className="px-4 py-3 text-left">创建时间</th></tr></thead><tbody className="divide-y divide-border">
+          : <Card className="overflow-hidden shadow-surface"><div className="overflow-x-auto"><table className="w-full min-w-[84rem] text-ui-sm"><caption className="sr-only">视频媒体、转录、审核、发布和索引状态</caption><thead className="border-b border-border bg-surface-muted"><tr><th className="px-4 py-3 text-left">标题</th><th className="px-4 py-3 text-left">原始文件</th><th className="px-4 py-3 text-left">媒体</th><th className="px-4 py-3 text-left">转录</th><th className="px-4 py-3 text-left">审核</th><th className="px-4 py-3 text-left">发布</th><th className="px-4 py-3 text-left">索引</th><th className="px-4 py-3 text-left">创建时间</th><th className="px-4 py-3 text-left">操作</th></tr></thead><tbody className="divide-y divide-border">
             {visibleMediaAssets.map((asset) => {
               const job = jobsByMediaId.get(asset.media_id);
-              return <tr key={asset.media_id}><td className="px-4 py-3 font-medium">{asset.title}</td><td className="px-4 py-3"><p className="font-mono text-ui-xs text-muted-foreground">{asset.original_filename}</p><p className="mt-1 text-ui-xs text-muted-foreground">{formatBytes(asset.file_size)}</p></td><td className="px-4 py-3"><StatusBadge value={asset.status} meta={mediaStatusMeta} />{asset.error && <p className="mt-1 text-ui-xs text-destructive">{asset.error}</p>}</td><td className="px-4 py-3">{job ? <><Badge variant={job.status === "failed" ? "destructive" : job.status === "succeeded" ? "success" : "secondary"}>{job.status}</Badge><JobSummary job={job} /><div className="mt-2 flex gap-2">{(job.status === "pending" || job.status === "running") && <Button size="sm" variant="outline" onClick={() => void cancelJob(job)}>取消</Button>}{(job.status === "failed" || job.status === "cancelled") && job.failure?.retryable !== false && <Button size="sm" variant="outline" onClick={() => void retryJob(job)}>重试</Button>}</div></> : <span className="text-ui-xs text-muted-foreground">人工转写或暂无任务</span>}</td><td className="px-4 py-3"><StatusBadge value={asset.review_status} meta={reviewMeta} /></td><td className="px-4 py-3"><StatusBadge value={asset.publication_status} meta={publicationMeta} /></td><td className="px-4 py-3"><StatusBadge value={asset.publication_index_status} meta={indexMeta} /></td><td className="px-4 py-3"><p className="text-ui-xs text-muted-foreground">{formatAdminDate(asset.created_at)}</p><Button className="mt-2" size="sm" variant="outline" onClick={() => setSelectedMediaId(asset.media_id)}>进入转写工作台</Button></td></tr>;
+              return <tr key={asset.media_id}><td className="px-4 py-3 font-medium">{asset.title}</td><td className="px-4 py-3"><p className="font-mono text-ui-xs text-muted-foreground">{asset.original_filename}</p><p className="mt-1 text-ui-xs text-muted-foreground">{formatBytes(asset.file_size)}</p></td><td className="px-4 py-3"><StatusBadge value={asset.status} meta={mediaStatusMeta} />{asset.error && <p className="mt-1 text-ui-xs text-destructive">{asset.error}</p>}</td><td className="px-4 py-3">{job ? <><Badge variant={job.status === "failed" ? "destructive" : job.status === "succeeded" ? "success" : "secondary"}>{job.status}</Badge><JobSummary job={job} /><div className="mt-2 flex gap-2">{(job.status === "pending" || job.status === "running") && <Button size="sm" variant="outline" onClick={() => void cancelJob(job)}>取消</Button>}{(job.status === "failed" || job.status === "cancelled") && job.failure?.retryable !== false && <Button size="sm" variant="outline" onClick={() => void retryJob(job)}>重试</Button>}</div></> : <span className="text-ui-xs text-muted-foreground">人工转写或暂无任务</span>}</td><td className="px-4 py-3"><StatusBadge value={asset.review_status} meta={reviewMeta} /></td><td className="px-4 py-3"><StatusBadge value={asset.publication_status} meta={publicationMeta} /></td><td className="px-4 py-3"><StatusBadge value={asset.publication_index_status} meta={indexMeta} /></td><td className="px-4 py-3"><p className="text-ui-xs text-muted-foreground">{formatAdminDate(asset.created_at)}</p><Button className="mt-2" size="sm" variant="outline" onClick={() => setSelectedMediaId(asset.media_id)}>进入转写工作台</Button></td><td className="px-4 py-3">{asset.status === "failed" && !job && <Button size="sm" variant="destructive" disabled={deletingMediaId === asset.media_id} onClick={() => setDeleteTarget(asset)}>{deletingMediaId === asset.media_id ? "删除中" : "完整删除"}</Button>}</td></tr>;
             })}
           </tbody></table></div></Card>}
         {visibleMediaAssets.length === 0 && mediaAssets.length > 0 && <EmptyState title="没有符合条件的媒体" description="请切换其他快捷筛选条件。" />}
         {selectedMediaId && <Card className="p-4"><div className="flex items-center justify-between"><h3 className="font-semibold">转写版本操作</h3><Button size="sm" variant="ghost" onClick={() => setSelectedMediaId(null)}>关闭</Button></div><TranscriptionVersionPanel mediaId={selectedMediaId} refreshToken={jobsByMediaId.get(selectedMediaId)?.result_version_id} embedded /></Card>}
       </section>
+      <Dialog open={deleteTarget != null} onOpenChange={(open) => { if (!open && !deletingMediaId) setDeleteTarget(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>完整删除失败视频</DialogTitle>
+            <DialogDescription>将删除“{deleteTarget?.title}”的媒体记录和原始视频。此操作不可恢复。</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteTarget(null)} disabled={deletingMediaId != null}>取消</Button>
+            <Button variant="destructive" onClick={() => deleteTarget && void deleteFailedMedia(deleteTarget)} disabled={deletingMediaId != null}>{deletingMediaId ? "删除中" : "完整删除"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </section>
   );
 }
