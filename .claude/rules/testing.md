@@ -1,6 +1,7 @@
 ---
 paths:
   - "tests/**/*"
+  - "scripts/tests/**/*"
   - ".github/workflows/**/*.yml"
   - ".github/workflows/**/*.yaml"
 ---
@@ -14,3 +15,4 @@ paths:
 - 更新保护哈希前必须检查目标文件的 Git diff，并确认变化属于已批准范围；保护断言应报告文件路径、expected 和 actual，避免首个失败掩盖其他文件。
 - 验证命令中的通配符和环境变量必须考虑 Bash 与 PowerShell 差异；报告实际执行的文件集合、通过数、跳过数及未覆盖环境。
 - CI 配置或跨平台测试规则变化后，至少运行相关专项测试和静态检查；本地无法等价覆盖 Linux、依赖或服务时必须明确说明，并以远端 CI 复跑作为最终验证。
+- 修改 workspace 身份门禁或协作入口时，运行 `pwsh -NoProfile -File scripts/tests/Test-CodexWorkspace.ps1`，并覆盖主/linked worktree、detached HEAD、分支例外、dirty 状态和跨仓库拒绝场景。测试不得清理或改写真实项目 worktree。
