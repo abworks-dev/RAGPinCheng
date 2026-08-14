@@ -543,10 +543,38 @@ jobs:
                   "import_server", "manage_categories", "organize", "publish", "review"
               ],
           }
+
           print(
               f"MANAGED_CONTENT status=verified schema={CURRENT_SCHEMA_VERSION} "
-              "categories=7 permission_groups=4 mode=compat"
+              f"categories=7 permission_groups=4 mode={CONTENT_HEAD_ENFORCEMENT}"
           )
+          PY
+          }
+
+          verify_source_decoupling_mounts() {
+            [ "${SOURCE_DECOUPLING_COMPLETE:-}" = "true" ] || return 0
+            [ "${CONTENT_HEAD_ENFORCEMENT}" = "strict" ]
+            [ "${DOCS_HOST_PATH}" = "/data/business/ragpincheng/content/legacy-docs" ]
+            [ "${MEDIA_HOST_PATH}" = "/data/business/ragpincheng/content/media" ]
+            [ "${TRANSCRIPTION_ARTIFACT_DIR}" = "/app/content/transcription-artifacts" ]
+            CONTAINER_ID="$("${COMPOSE[@]}" ps -q backend)"
+            docker inspect "${CONTAINER_ID}" | \
+              EXPECTED_DOCS="${DOCS_HOST_PATH}" EXPECTED_MEDIA="${MEDIA_HOST_PATH}" python3 -c '
+          import json, os, sys
+          container = json.load(sys.stdin)[0]
+          mounts = {item["Destination"]: item["Source"] for item in container.get("Mounts", [])}
+          assert mounts.get("/app/docs") == os.environ["EXPECTED_DOCS"]
+          assert mounts.get("/app/media") == os.environ["EXPECTED_MEDIA"]
+          assert mounts.get("/app/content") == "/data/business/ragpincheng/content"
+          assert all(not source.startswith("/data/business/ragpincheng/source") for source in mounts.values())
+          '
+            "${COMPOSE[@]}" exec -T backend python - <<'PY'
+          from pathlib import Path
+          from src.config import DOCS_DIR, MEDIA_DIR, TRANSCRIPTION_ARTIFACT_DIR
+
+          assert DOCS_DIR == Path("/app/docs")
+          assert MEDIA_DIR == Path("/app/media")
+          assert TRANSCRIPTION_ARTIFACT_DIR == Path("/app/content/transcription-artifacts")
           PY
           }
 
@@ -822,6 +850,7 @@ jobs:
           '
             verify_sqlite_integrity
             verify_managed_content
+            verify_source_decoupling_mounts
             curl -fsS --connect-timeout 5 --max-time 10 http://localhost/admin >/dev/null
             verify_gpu_identity
             verify_gpu_inference
