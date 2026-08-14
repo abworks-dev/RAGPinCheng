@@ -24,6 +24,7 @@ jobs:
     timeout-minutes: 60
     env:
       GPU_MODEL_CACHE_SOURCE: ${{ vars.GPU_MODEL_CACHE_SOURCE }}
+      GPU_BASE_PYTHON: ${{ vars.PRODUCTION_GPU_PYTHON_PATH }}
       REPO_PATH: ${{ vars.PRODUCTION_REPO_PATH }}
       RESOLVER_ROOT: ${{ vars.PRODUCTION_RESOLVER_ROOT }}
       TORCH_WHEEL_SEED_ROOT: ${{ vars.PRODUCTION_TORCH_WHEEL_SEED_ROOT }}
@@ -78,6 +79,7 @@ jobs:
           $global:LASTEXITCODE = 0
           & "${env:REPO_PATH}\scripts\resolve-gpu-runtime.ps1" `
             -RepositoryPath $env:REPO_PATH `
+            -BasePython $env:GPU_BASE_PYTHON `
             -ResolverRoot $env:RESOLVER_ROOT `
             -TorchWheelSeedRoot $env:TORCH_WHEEL_SEED_ROOT `
             -RunId $env:RESOLVER_RUN_ID `
