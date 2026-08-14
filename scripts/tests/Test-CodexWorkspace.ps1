@@ -10,7 +10,7 @@ $feature = Join-Path $testRoot "feature worktree"
 $detached = Join-Path $testRoot "detached worktree"
 $otherRepository = Join-Path $testRoot "other repo"
 $testScript = Join-Path $scriptsDirectory "Test-CodexWorkspace.ps1"
-$pwsh = Join-Path $PSHOME "pwsh.exe"
+$pwsh = (Get-Process -Id $PID).Path
 $passed = 0
 
 function Invoke-GitChecked {
@@ -63,32 +63,59 @@ try {
     $case = Invoke-WorkspaceCheck -Path $repository -Mode ReadOnly
     Assert-Case "primary readonly allowed" ($case.ExitCode -eq 0 -and $case.Result.primary_worktree)
 
-    $case = Invoke-WorkspaceCheck -Path $repository -Mode Write
+    $case = Invoke-WorkspaceCheck -Path $repository -Mode Write -ExtraArguments @("-Intent", "New")
     Assert-Case "primary write rejected" ($case.ExitCode -ne 0 -and -not $case.Result.allowed)
 
-    $case = Invoke-WorkspaceCheck -Path $linked -Mode Write
+    $case = Invoke-WorkspaceCheck -Path $linked -Mode Write -ExtraArguments @("-Intent", "New")
     Assert-Case "linked codex branch allowed" ($case.ExitCode -eq 0 -and $case.Result.registered_worktree)
 
-    $case = Invoke-WorkspaceCheck -Path $detached -Mode Write
+    $case = Invoke-WorkspaceCheck -Path $detached -Mode Write -ExtraArguments @("-Intent", "New")
     Assert-Case "detached write rejected" ($case.ExitCode -ne 0 -and $case.Result.detached_head)
 
-    $case = Invoke-WorkspaceCheck -Path $feature -Mode Write
+    $case = Invoke-WorkspaceCheck -Path $feature -Mode Write -ExtraArguments @("-Intent", "New")
     Assert-Case "non-codex branch rejected" ($case.ExitCode -ne 0 -and -not $case.Result.allowed)
 
-    $case = Invoke-WorkspaceCheck -Path $feature -Mode Write -ExtraArguments @("-AllowNonCodexBranch")
-    Assert-Case "explicit non-codex exception allowed" ($case.ExitCode -eq 0 -and $case.Result.warnings.Count -gt 0)
+    $case = Invoke-WorkspaceCheck -Path $feature -Mode Write -ExtraArguments @(
+        "-Intent", "New", "-AllowNonCodexBranch"
+    )
+    Assert-Case "non-codex exception without reason rejected" ($case.ExitCode -ne 0 -and -not $case.Result.allowed)
 
-    $case = Invoke-WorkspaceCheck -Path $linked -Mode Write -ExtraArguments @("-ExpectedBranch", "codex/other")
+    $case = Invoke-WorkspaceCheck -Path $feature -Mode Write -ExtraArguments @(
+        "-Intent", "New", "-AllowNonCodexBranch", "-ExceptionReason", "approved release branch"
+    )
+    Assert-Case "explicit non-codex exception allowed" (
+        $case.ExitCode -eq 0 -and $case.Result.exception_used -and
+        $case.Result.exception_reason -eq "approved release branch"
+    )
+
+    $case = Invoke-WorkspaceCheck -Path $linked -Mode Write -ExtraArguments @(
+        "-Intent", "Continue", "-ExpectedBranch", "codex/other"
+    )
     Assert-Case "expected branch mismatch rejected" ($case.ExitCode -ne 0 -and -not $case.Result.allowed)
 
     $dirtyPath = Join-Path $linked "dirty file.txt"
     Set-Content -LiteralPath $dirtyPath -Value "preserve me" -Encoding utf8NoBOM
     $before = Get-Content -LiteralPath $dirtyPath -Raw
-    $case = Invoke-WorkspaceCheck -Path $linked -Mode Write
+    $case = Invoke-WorkspaceCheck -Path $linked -Mode Write -ExtraArguments @("-Intent", "New")
     $after = Get-Content -LiteralPath $dirtyPath -Raw
-    Assert-Case "dirty worktree reported without cleanup" (
-        $case.ExitCode -eq 0 -and $case.Result.dirty -and $case.Result.change_count -eq 1 -and $before -ceq $after
+    Assert-Case "dirty new task rejected without cleanup" (
+        $case.ExitCode -ne 0 -and $case.Result.dirty -and $case.Result.change_count -eq 1 -and $before -ceq $after
     )
+
+    $case = Invoke-WorkspaceCheck -Path $linked -Mode Write -ExtraArguments @(
+        "-Intent", "Continue", "-ExpectedBranch", "codex/test-task"
+    )
+    Assert-Case "dirty continuation allowed" ($case.ExitCode -eq 0 -and $case.Result.dirty)
+
+    $case = Invoke-WorkspaceCheck -Path $linked -Mode Write -ExtraArguments @("-Intent", "Continue")
+    Assert-Case "continuation without expected branch rejected" ($case.ExitCode -ne 0 -and -not $case.Result.allowed)
+
+    if ($IsWindows) {
+        $case = Invoke-WorkspaceCheck -Path $linked.ToUpperInvariant() -Mode Write -ExtraArguments @(
+            "-Intent", "Continue", "-ExpectedBranch", "codex/test-task"
+        )
+        Assert-Case "Windows path comparison ignores case" ($case.ExitCode -eq 0 -and $case.Result.same_repository)
+    }
 
     $case = Invoke-WorkspaceCheck -Path $otherRepository -Mode ReadOnly
     Assert-Case "other repository rejected" ($case.ExitCode -ne 0 -and -not $case.Result.same_repository)

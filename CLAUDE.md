@@ -21,7 +21,7 @@
 ## 工作前必须做
 
 1. 阅读与任务相关的入口、调用链、类型和配置；
-2. 只读任务先运行 `pwsh -NoProfile -File scripts/Test-CodexWorkspace.ps1 -Mode ReadOnly`；任何编辑前改用 `-Mode Write`，并在继续既有任务时通过 `-ExpectedBranch` 核对原分支；
+2. 只读任务先运行 `pwsh -NoProfile -File scripts/Test-CodexWorkspace.ps1 -Mode ReadOnly`；新写任务在编辑前运行 `-Mode Write -Intent New`，继续既有任务运行 `-Mode Write -Intent Continue -ExpectedBranch <branch>`；
 3. 检查 `git status --short --branch`，保护用户已有修改；workspace 预检失败时停止编辑，不得自动创建、切换、清理或修复 worktree；
 4. 区分只读调查、普通实现、高风险修改和破坏性操作；
 5. 说明最小修改面、验证方式和明确不做的内容；

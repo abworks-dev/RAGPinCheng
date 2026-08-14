@@ -4,11 +4,16 @@ param(
     [ValidateSet("ReadOnly", "Write")]
     [string]$Mode,
 
+    [ValidateSet("New", "Continue")]
+    [string]$Intent,
+
     [string]$RepositoryPath = (Join-Path $PSScriptRoot ".."),
 
     [string]$ExpectedBranch,
 
     [switch]$AllowNonCodexBranch,
+
+    [string]$ExceptionReason,
 
     [switch]$Json
 )
@@ -58,6 +63,11 @@ function Get-NormalizedPath {
 $errors = [System.Collections.Generic.List[string]]::new()
 $warnings = [System.Collections.Generic.List[string]]::new()
 $scriptProjectRoot = Get-NormalizedPath -Path (Join-Path $PSScriptRoot "..")
+$pathComparer = if ($IsWindows) {
+    [System.StringComparer]::OrdinalIgnoreCase
+} else {
+    [System.StringComparer]::Ordinal
+}
 
 try {
     $resolvedInput = (Resolve-Path -LiteralPath $RepositoryPath).Path
@@ -74,7 +84,7 @@ try {
     $projectCommon = Get-NormalizedPath -Path (
         Resolve-GitPath -BasePath $projectRoot -GitPath $projectCommonRaw
     )
-    $sameRepository = $repositoryCommon -ceq $projectCommon
+    $sameRepository = $pathComparer.Equals($repositoryCommon, $projectCommon)
     if (-not $sameRepository) {
         $errors.Add("RepositoryPath does not belong to this project repository.")
     }
@@ -85,12 +95,14 @@ try {
             Where-Object { $_ -like "worktree *" } |
             ForEach-Object { Get-NormalizedPath -Path $_.Substring(9) }
     )
-    $isRegistered = $registeredPaths -ccontains $repositoryRoot
+    $isRegistered = @(
+        $registeredPaths | Where-Object { $pathComparer.Equals($_, $repositoryRoot) }
+    ).Count -gt 0
     if (-not $isRegistered) {
         $errors.Add("RepositoryPath is not a registered worktree for this project.")
     }
     $primaryPath = if ($registeredPaths.Count -gt 0) { $registeredPaths[0] } else { $null }
-    $isPrimary = $null -ne $primaryPath -and $repositoryRoot -ceq $primaryPath
+    $isPrimary = $null -ne $primaryPath -and $pathComparer.Equals($repositoryRoot, $primaryPath)
 
     $branchResult = Invoke-GitText -Path $repositoryRoot -Arguments @("branch", "--show-current")
     $branch = $branchResult.Text
@@ -117,6 +129,9 @@ try {
     }
 
     if ($Mode -eq "Write") {
+        if ([string]::IsNullOrWhiteSpace($Intent)) {
+            $errors.Add("Write mode requires -Intent New or -Intent Continue.")
+        }
         if ($isPrimary) {
             $errors.Add("Write mode is not allowed in the primary worktree.")
         }
@@ -124,12 +139,25 @@ try {
             $errors.Add("Write mode requires an attached branch, not detached HEAD.")
         } elseif ($branch -notlike "codex/*") {
             if ($AllowNonCodexBranch) {
-                $warnings.Add("Non-codex branch allowed by explicit exception: $branch")
+                if ([string]::IsNullOrWhiteSpace($ExceptionReason)) {
+                    $errors.Add("A non-codex branch exception requires -ExceptionReason.")
+                } else {
+                    $warnings.Add("Non-codex branch allowed by explicit exception: $branch")
+                }
             } else {
                 $errors.Add("Write mode requires a codex/* branch unless -AllowNonCodexBranch is explicit.")
             }
         }
-        if (-not [string]::IsNullOrWhiteSpace($ExpectedBranch) -and $branch -cne $ExpectedBranch) {
+        if ($Intent -eq "New" -and $isDirty) {
+            $errors.Add("A new write task requires a clean worktree.")
+        }
+        if ($Intent -eq "Continue") {
+            if ([string]::IsNullOrWhiteSpace($ExpectedBranch)) {
+                $errors.Add("Continue intent requires -ExpectedBranch.")
+            } elseif ($branch -cne $ExpectedBranch) {
+                $errors.Add("Current branch '$branch' does not match ExpectedBranch '$ExpectedBranch'.")
+            }
+        } elseif (-not [string]::IsNullOrWhiteSpace($ExpectedBranch) -and $branch -cne $ExpectedBranch) {
             $errors.Add("Current branch '$branch' does not match ExpectedBranch '$ExpectedBranch'.")
         }
     }
@@ -137,6 +165,7 @@ try {
     $result = [ordered]@{
         schema_version = 1
         mode = $Mode
+        intent = if ([string]::IsNullOrWhiteSpace($Intent)) { $null } else { $Intent }
         allowed = $errors.Count -eq 0
         repository_path = $repositoryRoot
         project_root = $projectRoot
@@ -151,6 +180,9 @@ try {
         behind = $behind
         dirty = $isDirty
         change_count = $changes.Count
+        expected_branch = if ([string]::IsNullOrWhiteSpace($ExpectedBranch)) { $null } else { $ExpectedBranch }
+        exception_used = [bool]$AllowNonCodexBranch
+        exception_reason = if ([string]::IsNullOrWhiteSpace($ExceptionReason)) { $null } else { $ExceptionReason }
         errors = @($errors)
         warnings = @($warnings)
     }
@@ -159,6 +191,7 @@ try {
     $result = [ordered]@{
         schema_version = 1
         mode = $Mode
+        intent = if ([string]::IsNullOrWhiteSpace($Intent)) { $null } else { $Intent }
         allowed = $false
         repository_path = $RepositoryPath
         project_root = $scriptProjectRoot
@@ -173,6 +206,9 @@ try {
         behind = $null
         dirty = $false
         change_count = 0
+        expected_branch = if ([string]::IsNullOrWhiteSpace($ExpectedBranch)) { $null } else { $ExpectedBranch }
+        exception_used = [bool]$AllowNonCodexBranch
+        exception_reason = if ([string]::IsNullOrWhiteSpace($ExceptionReason)) { $null } else { $ExceptionReason }
         errors = @($errors)
         warnings = @($warnings)
     }
