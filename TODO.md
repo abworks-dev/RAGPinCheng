@@ -20,14 +20,13 @@
 
 ### 受管知识资料库生产迁移
 
-- 状态：代码完成待验证
+- 状态：进行中
 - 目标：在独立备份和可回滚前提下完成普通资料受管迁移、旧索引下线、媒体存储解耦和旧 `source` 目录退役。
 - 下一步：
-  - [ ] 合并 T12-B 受控 workflow，按冻结摘要执行生产备份、旧媒体数据库归档和剩余旧索引下线。
   - [ ] 将生产 docs/media/artifact 路径切换到 `CONTENT_ROOT`，启用 `strict` 并完成 App-only 部署与挂载、检索、引用核验。
   - [ ] source 解耦后观察 1 至 2 周，再独立决定旧 `source/docs`、`source/media` 的物理归档或删除；不得删除整个生产仓库目录。
 - 完成标准：116 个正式普通资料 head 与未来正式 transcript head 在 `strict` 下可检索；无版本旧索引不可见且受控下线；生产容器不再依赖 `source/docs`、`source/media`；切换和物理归档均有独立恢复点。
-- 依赖：T11 已于 2026-08-14 删除 19,981 个旧普通资料 Parent 和 38,387 个 Qdrant Point；T12-A 只读生产清点已确认 116 个正式 head、44 个候选 Parent、104 个候选 Point、4 条媒体和 2 个 transcript head，冻结摘要为 `a36bbef…c53a`。T12-B R3 已获批准，生产执行仍以 workflow 的计数、摘要、独立备份和自动回滚门禁为准。
+- 依赖：T11 已于 2026-08-14 删除 19,981 个旧普通资料 Parent 和 38,387 个 Qdrant Point；T12-B 数据 workflow `31767567546` 已按冻结摘要 `a36bbef…c53a` 完成独立备份、4 条旧媒体归档、2 个 transcript head、44 个 Parent 和 104 个 Point 的精确下线。App-only 首次切换因私有 Compose 的旧媒体挂载覆盖而自动恢复，数据切换无需重做。
 - 方案链接：`project-docs/plans/managed-content-library.md`、`project-docs/decisions/0003-managed-content-library.md`、`project-docs/migrations/managed-content-production-runbook.md`
 
 ### 查询拆分 Phase A 生产评测

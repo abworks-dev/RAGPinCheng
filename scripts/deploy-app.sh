@@ -15,6 +15,7 @@ BACKUP_DIR="${BACKUP_DIR:?BACKUP_DIR must be provided by the private deployment 
 DATA_PATH="${DATA_PATH:?DATA_PATH must be provided by the private deployment environment}"
 COMPOSE_BASE="${REPO_PATH}/docker/docker-compose.yml"
 COMPOSE_OVERRIDE="${COMPOSE_OVERRIDE:?COMPOSE_OVERRIDE must be provided by the private deployment environment}"
+COMPOSE_SOURCE_DECOUPLED="${REPO_PATH}/docker/compose.source-decoupled.yml"
 COMPOSE_ENV_FILE="${COMPOSE_ENV_FILE:?COMPOSE_ENV_FILE must be provided by the private deployment environment}"
 COMPOSE_PROJECT="ragpincheng-prod"
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
@@ -51,13 +52,30 @@ git_fetch_exact_commit() {
     done
 }
 
-# Helper: build the full compose command with project, files, and env file.
+COMPOSE_ARGS=(
+    -p "$COMPOSE_PROJECT"
+    -f "$COMPOSE_BASE"
+    -f "$COMPOSE_OVERRIDE"
+)
+case "${SOURCE_DECOUPLING_COMPLETE:-false}" in
+    true)
+        [ -f "$COMPOSE_SOURCE_DECOUPLED" ] || {
+            echo "ERROR: source-decoupled Compose overlay is missing: ${COMPOSE_SOURCE_DECOUPLED}"
+            exit 1
+        }
+        COMPOSE_ARGS+=(-f "$COMPOSE_SOURCE_DECOUPLED")
+        ;;
+    false|"") ;;
+    *)
+        echo "ERROR: SOURCE_DECOUPLING_COMPLETE must be true or false"
+        exit 1
+        ;;
+esac
+COMPOSE_ARGS+=(--env-file "$COMPOSE_ENV_FILE")
+
+# Helper: build the full compose command with the final source-decoupling overlay.
 compose() {
-    docker compose -p "$COMPOSE_PROJECT" \
-        -f "$COMPOSE_BASE" \
-        -f "$COMPOSE_OVERRIDE" \
-        --env-file "$COMPOSE_ENV_FILE" \
-        "$@"
+    docker compose "${COMPOSE_ARGS[@]}" "$@"
 }
 
 echo "========================================="

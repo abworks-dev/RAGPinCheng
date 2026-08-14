@@ -37,10 +37,10 @@
 - MinerU 请求使用确定性的短 ASCII `name/data_id`，不把超长原始文件名用作供应商任务标识；原始文件名仍保留在资料、引用和界面中；
 - MinerU 的上传和排队阶段在受管发布任务中折叠为合法的 `parsing` 状态；发布失败通过稳定错误码及结构化的中文原因、可重试性和建议操作暴露给管理页，供应商响应、存储路径和完整异常仅保留在后端日志；索引监控默认每个版本只显示最新尝试，可按需查看完整历史和总尝试次数；
 - 可重建的一至四级编号目录只读视图；视图是副本，不是分类或索引事实来源；
-- 代码和普通环境默认关闭受管资料库；当前 Ubuntu 生产已显式设置 `CONTENT_MANAGEMENT_ENABLED=true`，并保持 `CONTENT_HEAD_ENFORCEMENT=compat`。
-- 当前生产根目录为 `/data/business/ragpincheng/content`（容器内 `/app/content`）；2026-08-14 已完成 117 条旧普通资料迁移记录的收口，其中 116 份建立正式 `content_item_heads`，1 份生成预览被安全排除。T11 已删除对应旧普通资料索引，生产继续以 `compat` 保留视频转录等未版本化索引；旧 `source/media` 和视频转录继续保留既有链路。
-- 代码已支持 `DOCS_DIR`、`MEDIA_DIR`、`DOCS_HOST_PATH`、`MEDIA_HOST_PATH` 和 `TRANSCRIPTION_ARTIFACT_DIR` 显式配置；默认值保持旧目录兼容，生产变量尚未切换。
-- `strict` 检索契约按身份分流：普通资料必须命中 `content_item_heads`，带 `transcript_version_id` 的转录由独立 `media_transcript_heads` 快照校验；双重无版本身份的旧 Parent/Child 被拒绝。该能力尚未在生产启用。
+- 代码和普通环境默认关闭受管资料库；当前 Ubuntu 生产已显式设置 `CONTENT_MANAGEMENT_ENABLED=true`。T12-B 数据切换后，生产环境契约使用 `CONTENT_HEAD_ENFORCEMENT=strict` 和 `SOURCE_DECOUPLING_COMPLETE=true`。
+- 当前生产根目录为 `/data/business/ragpincheng/content`（容器内 `/app/content`）；2026-08-14 已完成 117 条旧普通资料迁移记录的收口，其中 116 份建立正式 `content_item_heads`，1 份生成预览被安全排除。T11 删除了对应旧普通资料索引；T12-B 又归档 4 条旧媒体记录、删除 2 个旧 transcript head，并精确删除剩余 44 个旧 Parent 与 104 个 Qdrant Point。旧 `source/docs` 和 `source/media` 文件仍保留，未自动删除。
+- 代码支持 `DOCS_DIR`、`MEDIA_DIR`、`DOCS_HOST_PATH`、`MEDIA_HOST_PATH` 和 `TRANSCRIPTION_ARTIFACT_DIR` 显式配置；默认值保持旧目录兼容。生产完成标记为 `true` 时，仓库内最终 Compose overlay 必须位于私有生产 override 之后，强制把 `/app/docs`、`/app/media` 分别挂载到 `CONTENT_ROOT/legacy-docs`、`CONTENT_ROOT/media`；部署、失败回滚和手工恢复共用该顺序。
+- `strict` 检索契约按身份分流：普通资料必须命中 `content_item_heads`，带 `transcript_version_id` 的转录由独立 `media_transcript_heads` 快照校验；双重无版本身份的旧 Parent/Child 被拒绝。生产部署会同时核对 strict 配置、受管 head、索引计数和容器 mount source，任何 `/app/docs`、`/app/media` 或 `/app/content` 挂载仍来自 `/data/business/ragpincheng/source` 都会失败并恢复上一镜像。
 - T12-B 提供精确 plan/apply/verify 和受控生产 workflow：候选 ID、媒体/head、正式版本及审计表均指纹化，活动任务或冻结摘要漂移会在写入前失败；执行仅归档旧媒体记录、删除旧 transcript head 和精确候选 Parent/Point，不重建 collection，也不删除旧文件。
 
 ### 未实现
