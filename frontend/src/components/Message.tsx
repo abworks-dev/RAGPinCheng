@@ -45,7 +45,10 @@ function AnswerStatus({ msg }: { msg: ChatMessage }) {
   let tone: "warning" | "success" | "destructive" = "success";
   let pulse = false;
 
-  if (stage === "retrieving") {
+  if (msg.stopped) {
+    label = "用户已停止回答，以上为已生成内容";
+    tone = "warning";
+  } else if (stage === "retrieving") {
     label = "正在理解问题并检索企业知识…";
     tone = "warning";
     pulse = true;

@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { Send } from "lucide-react";
+import { Send, Square } from "lucide-react";
 import { KnowledgeScopePicker } from "./KnowledgeScopePicker";
 
 export function Composer({
   onSend,
   disabled,
+  sending,
+  onStop,
   categories,
   selected,
   onToggleCategory,
@@ -13,6 +15,8 @@ export function Composer({
 }: {
   onSend: (text: string) => void;
   disabled: boolean;
+  sending: boolean;
+  onStop: () => void;
   categories: string[];
   selected: string[];
   onToggleCategory: (category: string) => void;
@@ -32,7 +36,7 @@ export function Composer({
 
   function submit() {
     const t = text.trim();
-    if (!t || disabled) return;
+    if (!t || disabled || sending) return;
     onSend(t);
     setText("");
   }
@@ -45,6 +49,7 @@ export function Composer({
           rows={1}
           value={text}
           onChange={(e) => setText(e.target.value)}
+          disabled={sending}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
@@ -56,8 +61,8 @@ export function Composer({
         />
         <div className="flex min-h-9 items-center justify-between gap-2 border-t border-border pt-2">
           <KnowledgeScopePicker categories={categories} selected={selected} onToggle={onToggleCategory} onClear={onClearCategories} compact />
-          <button type="button" aria-label="发送问题" title="发送" onClick={submit} disabled={disabled || !text.trim()} className="inline-flex size-9 shrink-0 items-center justify-center rounded-ui-md bg-primary text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40">
-            <Send className="size-4" />
+          <button type="button" aria-label={sending ? "停止回答" : "发送问题"} title={sending ? "停止" : "发送"} onClick={sending ? onStop : submit} disabled={disabled || (!sending && !text.trim())} className="inline-flex size-9 shrink-0 items-center justify-center rounded-ui-md bg-primary text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40">
+            {sending ? <Square className="size-4" fill="currentColor" /> : <Send className="size-4" />}
           </button>
         </div>
       </div>
