@@ -19,8 +19,12 @@ test.describe("资料库", () => {
     await expect(page.getByRole("heading", { name: "资料库" })).toBeVisible();
     await expectNoBodyOverflow(page);
     await expectInViewport(page.getByRole("button", { name: "刷新" }));
-    await expectInViewport(page.getByRole("button", { name: "3. 上传" }));
-    if (page.viewportSize()!.width === 390) await expectTouchTarget(page.getByRole("button", { name: "3. 上传" }));
+    await expectInViewport(page.getByRole("button", { name: "上传资料" }));
+    if (page.viewportSize()!.width === 390) await expectTouchTarget(page.getByRole("button", { name: "上传资料" }));
+    await expect(page.getByRole("combobox", { name: "状态", exact: true })).toHaveValue("");
+    await expect(page.getByText("未选择资料，单次最多 20 份")).toBeVisible();
+    await expect(page.getByRole("button", { name: "批量确认" })).toBeDisabled();
+    const toolbarHeightBeforeSelection = await page.getByTestId("managed-bulk-toolbar").evaluate((element) => element.getBoundingClientRect().height);
     const mobile = page.viewportSize()!.width < 1024;
     const visibleItem = mobile
       ? page.locator("li").getByText("机电专业协同检查清单", { exact: true })
@@ -29,18 +33,20 @@ test.describe("资料库", () => {
     await expect(visibleItem).toBeVisible();
     if (page.viewportSize()!.width === 768) {
       await expect(page.getByRole("table")).toBeHidden();
-      await expect(page.getByRole("button", { name: "确认" })).toBeVisible();
-      await expect(page.getByRole("button", { name: "退回" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "确认", exact: true })).toBeVisible();
+      await expect(page.getByRole("button", { name: "退回", exact: true })).toBeVisible();
     }
     if (page.viewportSize()!.width === 390) {
-      await expectInViewport(page.getByRole("button", { name: "确认" }).first());
+      await expectInViewport(page.getByRole("button", { name: "确认", exact: true }).first());
     }
     const itemCheckbox = mobile
       ? page.locator("li").getByRole("checkbox", { name: "选择机电专业协同检查清单" })
       : page.getByRole("table").getByRole("checkbox", { name: "选择机电专业协同检查清单" });
     await itemCheckbox.check();
-    await expect(page.getByText("单次最多 20 份")).toBeVisible();
-    await expect(page.getByRole("button", { name: "批量确认" })).toBeVisible();
+    await expect(page.getByText(/已选择\s*1\s*份，单次最多\s*20\s*份/)).toBeVisible();
+    await expect(page.getByRole("button", { name: "批量确认" })).toBeEnabled();
+    const toolbarHeightAfterSelection = await page.getByTestId("managed-bulk-toolbar").evaluate((element) => element.getBoundingClientRect().height);
+    expect(Math.abs(toolbarHeightAfterSelection - toolbarHeightBeforeSelection)).toBeLessThanOrEqual(1);
   });
 
   for (const scenario of ["loading", "empty", "error", "disabled"] as const) {
@@ -52,7 +58,7 @@ test.describe("资料库", () => {
       if (scenario === "error") await expect(page.getByText("合成加载失败")).toBeVisible();
       if (scenario === "disabled") {
         await expect(page.getByText("资料库当前未启用，上传和流程操作暂不可用。")).toBeVisible();
-        await expect(page.getByRole("button", { name: "3. 上传" })).toBeDisabled();
+        await expect(page.getByRole("button", { name: "上传资料" })).toBeDisabled();
       }
     });
   }
@@ -60,7 +66,7 @@ test.describe("资料库", () => {
   test("upload exposes a stable busy state", async ({ page }) => {
     await openTab(page, "资料库");
     await page.getByLabel("选择资料文件").setInputFiles({ name: "synthetic.pdf", mimeType: "application/pdf", buffer: Buffer.from("synthetic fixture") });
-    const upload = page.getByRole("button", { name: "3. 上传" });
+    const upload = page.getByRole("button", { name: "上传资料" });
     await upload.click();
     await expect(upload).toBeDisabled();
     await expectNoBodyOverflow(page);
