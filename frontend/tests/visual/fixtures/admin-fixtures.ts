@@ -55,6 +55,46 @@ export const items = [
   updated_at: 1700000000,
 }));
 
+const indexedDocuments = [
+  {
+    document_id: "document-ready", display_path: "公司标准 / synthetic-ready.pdf",
+    filename: "建筑信息模型交付标准（合成长文件名用于资料列表响应式检查）.pdf", doc_title: "建筑信息模型交付标准（合成长文件名用于响应式检查）",
+    category: "公司标准", doc_type: "pdf", company: null, parent_count: 18, child_count: 54,
+    preview_parent_id: "parent-ready", media_id: null, file_size: 2_048_000, status: "done", is_indexed: true,
+    latest_job_id: 101, error_summary: null, uploaded_by: "合成管理员", created_at: 1700000000, updated_at: 1700000300,
+  },
+  {
+    document_id: "document-processing", display_path: "项目资料 / synthetic-processing.docx",
+    filename: "机电专业协同检查清单.docx", doc_title: "机电专业协同检查清单",
+    category: "项目资料", doc_type: "docx", company: null, parent_count: 0, child_count: null,
+    preview_parent_id: null, media_id: null, file_size: 384_000, status: "embedding", is_indexed: false,
+    latest_job_id: 102, error_summary: null, uploaded_by: "合成资料员", created_at: 1700000100, updated_at: 1700000400,
+  },
+  {
+    document_id: "document-failed", display_path: "客户标准 / 合成客户 / synthetic-failed.xlsx",
+    filename: "项目资料归档检查表.xlsx", doc_title: "项目资料归档检查表",
+    category: "客户标准", doc_type: "xlsx", company: "合成客户", parent_count: 0, child_count: null,
+    preview_parent_id: null, media_id: null, file_size: 96_000, status: "failed", is_indexed: false,
+    latest_job_id: 103, error_summary: "解析器暂不可用，可以重试。", uploaded_by: "合成管理员", created_at: 1700000200, updated_at: 1700000500,
+  },
+];
+
+const indexJobs = [
+  { id: 101, user_id: 9001, employee_id: "TEST-ADMIN", real_name: "合成管理员", filename: indexedDocuments[0].filename, category: "公司标准", doc_type: "pdf", source_path: "synthetic/ready.pdf", source_exists: true, file_size: 2_048_000, status: "done", error: null, parents: 18, children: 54, created_at: 1700000000, started_at: 1700000010, finished_at: 1700000300 },
+  { id: 102, user_id: 9002, employee_id: "TEST-EDITOR", real_name: "合成资料员", filename: indexedDocuments[1].filename, category: "项目资料", doc_type: "docx", source_path: "synthetic/processing.docx", source_exists: true, file_size: 384_000, status: "embedding", error: null, parents: 0, children: 0, created_at: 1700000100, started_at: 0, finished_at: null },
+  { id: 103, user_id: 9001, employee_id: "TEST-ADMIN", real_name: "合成管理员", filename: indexedDocuments[2].filename, category: "客户标准", doc_type: "xlsx", source_path: "synthetic/failed.xlsx", source_exists: true, file_size: 96_000, status: "failed", error: "解析器暂不可用", parents: 0, children: 0, created_at: 1700000200, started_at: 1700000210, finished_at: 1700000250 },
+  { id: 104, user_id: 9001, employee_id: "TEST-ADMIN", real_name: "合成管理员", filename: "已移除源文件的历史资料.pptx", category: "培训资料", doc_type: "pptx", source_path: "synthetic/missing.pptx", source_exists: false, file_size: 512_000, status: "done", error: null, parents: 12, children: 36, created_at: 1699990000, started_at: 1699990010, finished_at: 1699990200 },
+];
+
+const managedIndexJobs = [{
+  id: "managed-job-1", publication_id: "publication-1", version_id: "version-1",
+  attempt_number: 1, status: "failed", error_code: "parser_request_failed",
+  error_summary: "文档解析服务请求失败，请稍后重试。",
+  failure: { code: "parser_request_failed", message: "文档解析服务请求失败。", retryable: true, recommended_action: "请稍后重试；持续失败时联系系统管理员。" },
+  attempt_count: 4, created_at: 1700000000, started_at: 1700000010, finished_at: 1700000020, updated_at: 1700000020,
+  title: "资料库发布失败的合成长文件名资料", original_filename: "managed-publication-failure-with-long-name.pdf", category_label: "03 公司内部标准",
+}];
+
 const permissionUsers = [
   { user_id: 9001, employee_id: "TEST-ADMIN", real_name: "合成管理员", role: "admin", is_active: true, permissions: [] },
   { user_id: 9002, employee_id: "TEST-EDITOR", real_name: "合成资料员", role: "user", is_active: true, permissions: ["organize", "review"] },
@@ -90,7 +130,8 @@ export async function installAdminRoutes(page: Page, scenario: AdminScenario = "
       content_permissions: user.role === "admin" ? admin.content_permissions : user.permissions,
     })) });
 
-    const isTargetRead = request.method() === "GET" && path.startsWith("/api/admin/content/");
+    const isIndexRead = request.method() === "GET" && path.startsWith("/api/admin/index/");
+    const isTargetRead = request.method() === "GET" && (path.startsWith("/api/admin/content/") || isIndexRead);
     if (isTargetRead && scenario === "loading") {
       await new Promise((resolve) => setTimeout(resolve, 1_500));
     }
@@ -108,13 +149,24 @@ export async function installAdminRoutes(page: Page, scenario: AdminScenario = "
       return json(route, { items: rows, total: rows.length, status_counts: rows.reduce<Record<string, number>>((counts, item) => ({ ...counts, [item.lifecycle_status]: (counts[item.lifecycle_status] || 0) + 1 }), {}) });
     }
     if (path === "/api/admin/content/index-jobs") {
-      return json(route, { jobs: [], total: 0, status_counts: {} });
+      const jobs = scenario === "empty" ? [] : managedIndexJobs;
+      return json(route, { jobs, total: jobs.length, status_counts: jobs.length ? { failed: 1 } : {} });
     }
     if (path === "/api/admin/content/permissions") {
       return json(route, scenario === "empty" ? [] : permissionUsers);
     }
     if (path === "/api/admin/content/permission-groups") {
       return json(route, permissionGroups);
+    }
+    if (request.method() === "GET" && path === "/api/admin/index/category-tree") {
+      return json(route, { categories: [{ name: "公司标准", two_level: false, subcategories: [] }, { name: "客户标准", two_level: true, subcategories: ["合成客户"] }, { name: "项目资料", two_level: false, subcategories: [] }], second_level_categories: ["客户标准"] });
+    }
+    if (request.method() === "GET" && path === "/api/admin/index/documents") {
+      const documents = scenario === "empty" ? [] : indexedDocuments;
+      return json(route, { documents, total: documents.length, status_counts: scenario === "empty" ? {} : { ready: 1, processing: 1, failed: 1 } });
+    }
+    if (request.method() === "GET" && path === "/api/admin/index/jobs") {
+      return json(route, { jobs: scenario === "empty" ? [] : indexJobs });
     }
 
     if (request.method() !== "GET" && path.startsWith("/api/admin/content/")) {
@@ -126,6 +178,15 @@ export async function installAdminRoutes(page: Page, scenario: AdminScenario = "
         return json(route, { results: [], succeeded: 0, failed: 0 });
       }
       return json(route, items[0]);
+    }
+    if (request.method() === "POST" && /^\/api\/admin\/index\/jobs\/\d+\/retry$/.test(path)) {
+      await new Promise((resolve) => setTimeout(resolve, 800));
+      return json(route, indexJobs[0]);
+    }
+    if (request.method() === "DELETE" && (/^\/api\/admin\/index\/jobs\/\d+$/.test(path) || path === "/api/admin/index/documents")) {
+      return path.endsWith("documents")
+        ? json(route, { parents_deleted: 18, file_deleted: false, file_delete_status: "not_requested" })
+        : route.fulfill({ status: 204 });
     }
 
     throw new Error(`Visual fixture has no route for ${request.method()} ${path}`);

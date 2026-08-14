@@ -82,6 +82,40 @@ test.describe("资料库", () => {
   });
 });
 
+test.describe("索引监控", () => {
+  test("normal layout keeps document identity, status, and actions discoverable", async ({ page }) => {
+    await openTab(page, "索引监控");
+    await expect(page.getByRole("heading", { name: "索引监控" })).toBeVisible();
+    await expect(page.getByText("建筑信息模型交付标准（合成长文件名用于响应式检查）", { exact: true })).toBeVisible();
+    await expectNoBodyOverflow(page);
+    await expect(page.getByRole("button", { name: "上传资料" })).toHaveCount(0);
+    const documentMenu = page.getByLabel("打开 建筑信息模型交付标准（合成长文件名用于响应式检查） 的操作菜单");
+    await documentMenu.scrollIntoViewIfNeeded();
+    await expectInViewport(documentMenu);
+    if (page.viewportSize()!.width === 390) await expectTouchTarget(documentMenu);
+
+    const publicationFailure = page.getByText("文档解析服务请求失败。", { exact: true });
+    await publicationFailure.scrollIntoViewIfNeeded();
+    await expectInViewport(publicationFailure);
+
+    await page.getByText("旧目录索引活动", { exact: true }).click();
+    const retry = page.getByRole("button", { name: "重试" }).last();
+    await retry.scrollIntoViewIfNeeded();
+    await expectInViewport(retry);
+    await expectNoBodyOverflow(page);
+  });
+
+  for (const scenario of ["loading", "empty", "error"] as const) {
+    test(`${scenario} state is explicit and contained`, async ({ page }) => {
+      await openTab(page, "索引监控", scenario);
+      await expectNoBodyOverflow(page);
+      if (scenario === "loading") await expect(page.getByText("正在加载资料…")).toBeVisible();
+      if (scenario === "empty") await expect(page.getByText("暂无资料")).toBeVisible();
+      if (scenario === "error") await expect(page.getByText("合成加载失败")).toBeVisible();
+    });
+  }
+});
+
 test.describe("分类设置", () => {
   test("normal layout keeps form and category actions discoverable", async ({ page }) => {
     await openTab(page, "分类设置");
