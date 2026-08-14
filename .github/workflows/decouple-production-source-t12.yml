@@ -292,13 +292,21 @@ jobs:
           }
           trap on_exit EXIT
 
-          ROOT_UID="$(stat -c %u "${CONTENT_ROOT}")"
-          ROOT_GID="$(stat -c %g "${CONTENT_ROOT}")"
           MUTATED=1
-          install -d -o "${ROOT_UID}" -g "${ROOT_GID}" -m 2770 \
-            "${CONTENT_ROOT}/media" \
-            "${CONTENT_ROOT}/transcription-artifacts" \
-            "${CONTENT_ROOT}/legacy-docs"
+          "${MAINTENANCE[@]}" sh -eu -c '
+          root_uid="$(stat -c %u /app/content)"
+          root_gid="$(stat -c %g /app/content)"
+          install -d -o "${root_uid}" -g "${root_gid}" -m 2770 \
+            /app/content/media \
+            /app/content/transcription-artifacts \
+            /app/content/legacy-docs
+          for path in /app/content/media /app/content/transcription-artifacts /app/content/legacy-docs; do
+            [ -d "${path}" ] && [ ! -L "${path}" ] && [ -w "${path}" ]
+            [ "$(stat -c %u "${path}")" = "${root_uid}" ]
+            [ "$(stat -c %g "${path}")" = "${root_gid}" ]
+            [ "$(stat -c %a "${path}")" = "2770" ]
+          done
+          '
 
           cp "${PLAN_PATH}" "${DATA_PATH}/${RUN_ID}-source-plan.json"
           "${MAINTENANCE[@]}" python /maintenance-repo/scripts/apply_source_decoupling_t12.py \
