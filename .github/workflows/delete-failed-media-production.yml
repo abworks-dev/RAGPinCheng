@@ -1,0 +1,68 @@
+name: Delete Failed Production Media
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_deletion:
+        description: Select DELETE_FAILED_MEDIA to permanently remove one eligible media asset
+        required: true
+        default: CANCEL
+        type: choice
+        options:
+          - CANCEL
+          - DELETE_FAILED_MEDIA
+      media_id:
+        description: Exact failed media UUID verified by the inspection workflow
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-failed-media-deletion
+  cancel-in-progress: false
+
+jobs:
+  delete:
+    if: ${{ inputs.confirm_deletion == 'DELETE_FAILED_MEDIA' }}
+    environment: production-asr
+    runs-on: [self-hosted, linux, ubuntu, production, app]
+    timeout-minutes: 10
+    env:
+      REPO_PATH: ${{ vars.PRODUCTION_APP_REPO_PATH }}
+      COMPOSE_OVERRIDE: ${{ vars.PRODUCTION_APP_COMPOSE_OVERRIDE }}
+      COMPOSE_ENV_FILE: ${{ vars.PRODUCTION_APP_ENV_FILE }}
+      MEDIA_ID: ${{ inputs.media_id }}
+    steps:
+      - name: Delete one eligible failed media asset and verify removal
+        run: |
+          set -euo pipefail
+          [ "${{ github.ref }}" = "refs/heads/master" ] || {
+            echo "ERROR: production media deletion must run from master"
+            exit 1
+          }
+          COMPOSE=(docker compose -p ragpincheng-prod \
+            -f "${REPO_PATH}/docker/docker-compose.yml" \
+            -f "${COMPOSE_OVERRIDE}" --env-file "${COMPOSE_ENV_FILE}")
+          "${COMPOSE[@]}" exec -T -e MEDIA_ID backend python - <<'PY'
+          import os
+
+          from api.db import connect
+          from api.routes_admin import delete_failed_media_asset
+          from src.config import MEDIA_DIR
+
+          media_id = os.environ["MEDIA_ID"]
+          conn = connect()
+          try:
+              delete_failed_media_asset(media_id, None, conn)
+              record_exists = conn.execute(
+                  "SELECT 1 FROM media_assets WHERE media_id=?", (media_id,)
+              ).fetchone() is not None
+          finally:
+              conn.close()
+          media_dir_exists = (MEDIA_DIR / media_id).exists()
+          if record_exists or media_dir_exists:
+              raise SystemExit("ERROR: failed media deletion verification failed")
+          print("FAILED_MEDIA_DELETION status=success media_id=" + media_id)
+          PY
