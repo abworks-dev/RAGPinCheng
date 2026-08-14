@@ -115,6 +115,32 @@ describe("AdminManagedContentPage", () => {
     await waitFor(() => expect(mocks.review).toHaveBeenCalledWith("version-1", true));
   });
 
+  it("loads all statuses by default and keeps disabled bulk actions visible", async () => {
+    render(<AdminManagedContentPage />);
+    await screen.findAllByText("建模标准");
+
+    expect(mocks.items).toHaveBeenCalledWith(expect.objectContaining({
+      lifecycle_status: undefined,
+    }));
+    expect(screen.getByRole("combobox", { name: "状态" })).toHaveValue("");
+    expect(screen.getByText("未选择资料，单次最多 20 份")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "批量确认" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "批量退回" })).toBeDisabled();
+  });
+
+  it("enables applicable bulk actions without mounting a new toolbar", async () => {
+    render(<AdminManagedContentPage />);
+    await screen.findAllByText("建模标准");
+    const toolbar = screen.getByTestId("managed-bulk-toolbar");
+
+    fireEvent.click(screen.getAllByRole("checkbox", { name: "选择建模标准" })[0]);
+
+    expect(screen.getByTestId("managed-bulk-toolbar")).toBe(toolbar);
+    expect(screen.getByText("已选择", { exact: false })).toHaveTextContent("已选择 1 份，单次最多 20 份");
+    expect(screen.getByRole("button", { name: "批量确认" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "批量退回" })).toBeEnabled();
+  });
+
   it("uploads selected files for an organizer", async () => {
     mocks.permissions = ["organize"];
     mocks.items.mockResolvedValue({ items: [], total: 0, status_counts: {} });
@@ -127,7 +153,7 @@ describe("AdminManagedContentPage", () => {
     const file = new File(["# Guide"], "guide.md", { type: "text/markdown" });
     fireEvent.change(input, { target: { files: [file] } });
     expect(screen.getByText("已选择 1 个文件")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "3. 上传" }));
+    fireEvent.click(screen.getByRole("button", { name: "上传资料" }));
     await waitFor(() => expect(mocks.upload).toHaveBeenCalledWith([file], "cat-03"));
     expect(await screen.findByText("已接收")).toBeInTheDocument();
   });
