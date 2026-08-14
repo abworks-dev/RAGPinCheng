@@ -89,7 +89,7 @@ CI 全部通过后自动触发，顺序执行：
 | 系统 | Ubuntu 24.04 LTS |
 | 仓库路径 | `${PRODUCTION_APP_REPO_PATH}` |
 | 数据路径 | `${PRODUCTION_APP_DATA_PATH}/` |
-| 文档路径 | `/data/business/ragpincheng/source/docs/` |
+| 旧文档归档路径 | `/data/business/ragpincheng/source/docs/`（生产容器已解耦，不再作为正式来源） |
 | 媒体路径 | `/data/business/ragpincheng/source/media/` |
 | Compose 基础 | `docker/docker-compose.yml` |
 | Compose 覆盖 | `${PRODUCTION_APP_COMPOSE_OVERRIDE}` |
@@ -245,7 +245,7 @@ data/app.sqlite
 data/parents.sqlite
 data/feedback.jsonl
 data/parsed/
-docs/
+content/（包含 legacy-docs，真实业务资料）
 media/
 ${PRODUCTION_APP_ENV_FILE}（Ubuntu）
 Docker volume: qdrant_storage（Ubuntu）

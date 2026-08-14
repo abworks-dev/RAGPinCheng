@@ -1,8 +1,8 @@
 # FunASR Phase 0 执行计划（生产 Windows GPU 主机开发调试窗口）
 
 - 状态：**R3 第一批已批准，待补充维护窗口后执行**
-- 父方案：`project-docs/plans/funasr-auto-transcription.md`
-- 前置预注册计划：`project-docs/plans/funasr-phase0-pre-registration.md`
+- 父方案：`docs/plans/funasr-auto-transcription.md`
+- 前置预注册计划：`docs/plans/funasr-phase0-pre-registration.md`
 - 风险等级：**R2 → 已升格为 R3**（实际 GPU 实测、生产主机依赖安装、模型下载都属于 R3）；第三轮审查及 R2 收口已完成本地 CPU 验证，但不代表获准实测。
 - 范围：**仅 R3-0～R3-5（主机预检、隔离环境、单一模型与许可证、BGE 基线、兼容性冒烟、8 个短样本）**；不进入 1h/2h/4h 或 BGE 共存测试；不进入 Phase 1；不改业务代码、API、数据库 Schema、Prompt、部署、索引或生产开关；不使用真实客户资料。
 

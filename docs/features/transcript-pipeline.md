@@ -21,7 +21,7 @@ Phase 5A/5B 已接通版本列表、只读 Markdown 预览、人工审核、显�
 - `doc_type`、`start_time`、`media_id` 经检索、生成、`SourceDTO` 和前端完整传递；
 - 前端显示 `🎬 @HH:MM:SS` 并能定位来源卡片；
 - 后台管理端上传 MP4 + Markdown 转录稿：校验文件格式、大小、编码和时间戳标记；
-- 视频文件落盘到 `media/<media_id>/original.mp4`，转录稿落盘到 `docs/教学视频/`；
+- 视频文件落盘到 `media/<media_id>/original.mp4`，legacy 人工转录稿落盘到 `DOCS_DIR/教学视频/`（本地默认 `content/legacy-docs/教学视频/`）；
 - 自动建立 `media_assets` 登记、索引入队、索引完成后状态自动更新为 `ready`；
 - 后端鉴权 HTTP Range 播放（支持无 Range、普通 Range、开放式 Range、后缀 Range）；
 - 前端单实例播放器抽屉（桌面右侧、移动端底部弹层），支持 metadata seek 和自动播放降级；

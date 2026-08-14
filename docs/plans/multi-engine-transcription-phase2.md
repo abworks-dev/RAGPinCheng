@@ -614,7 +614,7 @@ Phase 2 提供并测试 `verify_backup(path)` 和临时数据库恢复流程，�
 只新增：
 
 ```text
-project-docs/plans/multi-engine-transcription-phase2.md
+docs/plans/multi-engine-transcription-phase2.md
 ```
 
 并按协作规则最小追加 `WORKLOG.md`。本轮不修改任何代码、TODO、数据库或 CI。
@@ -651,7 +651,7 @@ api/db.py
 src/transcription/__init__.py
 tests/test_transcription_static_boundaries.py
 tests/transcription_fixture_helpers.py
-project-docs/features/transcript-pipeline.md
+docs/features/transcript-pipeline.md
 TODO.md
 WORKLOG.md
 ```

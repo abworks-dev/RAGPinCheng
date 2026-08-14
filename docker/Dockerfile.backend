@@ -67,8 +67,8 @@ COPY scripts/ ./scripts/
 #    and mounts it at / with SPA fallback.
 COPY --from=frontend-build /build/dist /app/frontend/dist
 
-# docs/ and data/ are bind-mounted at runtime (see docker-compose.yml).
-# Empty placeholders so src.config can mkdir/stat them even before first mount.
+# /app/docs is the legacy business-content compatibility mount; repository
+# project documentation is not copied there. /app/data is runtime state.
 RUN mkdir -p /app/docs /app/data
 
 EXPOSE 8000

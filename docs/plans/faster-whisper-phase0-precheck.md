@@ -20,7 +20,7 @@
 
 - `scripts/funasr_phase0/setup_venv.ps1` 固定生产侧解释器入口为 Python 3.10，并将 PyTorch CUDA 版本固定为 `torch==2.7.0` / `torchaudio==2.7.0` 的 cu128 wheel；
 - `scripts/funasr_phase0/requirements-asr.txt` 固定现有 FunASR 沙箱的顶层依赖范围；
-- `project-docs/plans/funasr-phase0-execution-plan.md` 保留 ASR 峰值显存 `< 8 GB`、ASR 与 BGE 合计 `< 14 GB`、磁盘预算 `30 GB` 等门禁；
+- `docs/plans/funasr-phase0-execution-plan.md` 保留 ASR 峰值显存 `< 8 GB`、ASR 与 BGE 合计 `< 14 GB`、磁盘预算 `30 GB` 等门禁；
 - 既有 Contextual Paraformer 固定 A/B 未通过预注册质量门禁，因此可调查替代后端，但不能据此跳过新候选的独立门禁。
 
 ## 2. 本次明确不做

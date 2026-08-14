@@ -492,7 +492,7 @@ def convert_pptx_to_pdf(path: Path) -> Path:
 def _md_path_for_office(source_path: Path, parsed_dir: Path) -> Path:
     """Generate the cached Markdown path for an Office document.
 
-    Uses the same naming convention as MinerU: relative path under docs/
+    Uses the same naming convention as MinerU: relative path under DOCS_DIR
     with path separators replaced by double underscores.
     """
     from src.config import DOCS_DIR

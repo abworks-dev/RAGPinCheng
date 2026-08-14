@@ -416,8 +416,8 @@ Phase 5C 执行前必须明确：目标主机、数据分类、Profile 资格候
 | 文件 | 修改内容 |
 |---|---|
 | `.github/workflows/ci.yml` | 增加独立 `test-transcription-phase5` job；只安装已声明依赖，运行 fake/临时资源测试，不启动 Qdrant/ASR/GPU/ffmpeg。 |
-| `project-docs/features/transcript-pipeline.md` | 实施完成后更新实际应用发布、versioned index 和检索可见性事实；不得提前写成已实现。 |
-| `project-docs/plans/multi-engine-auto-transcription.md` | 仅在实施完成后最小更新阶段状态和链接，不改总体架构。 |
+| `docs/features/transcript-pipeline.md` | 实施完成后更新实际应用发布、versioned index 和检索可见性事实；不得提前写成已实现。 |
+| `docs/plans/multi-engine-auto-transcription.md` | 仅在实施完成后最小更新阶段状态和链接，不改总体架构。 |
 | `TODO.md` | 按实际审批/实施状态最小更新下一步与本计划链接。 |
 | `WORKLOG.md` | 按每次实际完成的调查/实施/验证记录；不把未运行的真实 E2E 写成成果。 |
 

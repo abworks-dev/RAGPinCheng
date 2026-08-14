@@ -1,14 +1,14 @@
 # TODO 维护规则
 
-本规则适用于 `TODO.md`、`project-docs/plans/` 和 `project-docs/decisions/`。`TODO.md` 只记录未来工作，不承担功能事实、完整方案或详细完成记录。
+本规则适用于 `TODO.md`、`docs/plans/` 和 `docs/decisions/`。`TODO.md` 只记录未来工作，不承担功能事实、完整方案或详细完成记录。
 
 ## 文档职责
 
 - `TODO.md`：未来工作及最近完成摘要；摘要可链接相关 commit、PR、workflow 或功能文档。
 - Git commit/PR、checks 和 workflow run：实际修改、验证、验收和外部执行的交付证据。
-- `project-docs/plans/`：大型候选方案和实施方案；方案获批不等于实施完成。
-- `project-docs/decisions/`：已经批准、会长期影响多个模块的架构决策；候选方案不得写入。
-- `project-docs/features/`：当前源码和可复核运行结果能够证明的功能事实。
+- `docs/plans/`：大型候选方案和实施方案；方案获批不等于实施完成。
+- `docs/decisions/`：已经批准、会长期影响多个模块的架构决策；候选方案不得写入。
+- `docs/features/`：当前源码和可复核运行结果能够证明的功能事实。
 
 ## TODO 项格式
 
@@ -34,8 +34,8 @@
 
 ## 方案与决策
 
-- 超出简短 TODO 摘要所需篇幅的方案迁入 `project-docs/plans/`，TODO 只保留方案链接和下一审批或实施动作。
-- 未获批准的方案不得写入 `project-docs/decisions/`，也不得描述为现有能力。
+- 超出简短 TODO 摘要所需篇幅的方案迁入 `docs/plans/`，TODO 只保留方案链接和下一审批或实施动作。
+- 未获批准的方案不得写入 `docs/decisions/`，也不得描述为现有能力。
 - 长期架构选择获批后才写入 decisions；未完成的实施状态维护在 TODO，已完成的实施证据由 Git/PR/workflow 承载。
 
 ## 更新检查

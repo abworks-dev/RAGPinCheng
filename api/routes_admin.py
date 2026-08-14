@@ -548,7 +548,7 @@ def _classify_doc_type(filename: str, category: str) -> str | None:
 def category_tree(
     _admin: CurrentUser = Depends(require_admin),
 ) -> CategoryTreeResponse:
-    """Walk `docs/` one level deep so the upload UI knows existing categories
+    """Walk the legacy `DOCS_DIR` so the upload UI knows existing categories
     and (for two-level categories) the existing subcategories under each.
 
     Reads disk directly rather than asking Qdrant: a brand-new folder with
@@ -592,7 +592,7 @@ async def upload_documents(
 ) -> UploadResponse:
     """Accept one or more files for indexing. Each file becomes one job row.
 
-    Files are written to `docs/<category>/[<subcategory>/]<filename>` (matches
+    Files are written to `DOCS_DIR/<category>/[<subcategory>/]<filename>` (matches
     the manual ingest convention), then the corresponding job is enqueued.
     The single background worker drains the queue FIFO; concurrent uploads
     queue up instead of running in parallel.

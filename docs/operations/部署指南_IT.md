@@ -104,10 +104,10 @@ docker compose -f docker/docker-compose.yml logs -f backend
 
 ### 方式二：批量导入（首次大批量上传时使用）
 
-**第一步：把文件放到 `docs/` 目录下对应分类文件夹**
+**第一步：把文件放到 `content/legacy-docs/` 兼容目录下对应分类文件夹**
 
 ```
-C:\RAGPinCheng\docs\
+C:\RAGPinCheng\content\legacy-docs\
   行业规范\        ← 行业标准、规范类 PDF
   客户标准\
     <客户名>\      ← 客户标准必须有二级目录，文件夹名为客户名

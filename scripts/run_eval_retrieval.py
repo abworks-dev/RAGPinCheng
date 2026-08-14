@@ -175,7 +175,7 @@ def _check_staleness(strict: bool) -> tuple[str, str, dict | None, dict | None]:
     print("!    match the live index. Results below may be misleading (R@K ≈ 0,")
     print("!    not because retrieval broke, but because the labels are out of date).")
     print("!  Action: rebuild the golden set, then `relabel_golden.py fingerprint")
-    print("!  --freeze` to refresh the baseline. See project-docs/golden-set-staleness-guard.md.")
+    print("!  --freeze` to refresh the baseline. See docs/golden-set-staleness-guard.md.")
     print("!" * 64)
     print()
     if strict:

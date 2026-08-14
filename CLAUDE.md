@@ -53,7 +53,7 @@
 ## 架构地图
 
 ```text
-docs/ → MinerU/Markdown ingest → Parent/Child chunk
+content/legacy-docs/（兼容入口）或受管发布 → MinerU/Markdown ingest → Parent/Child chunk
 → BGE-M3 Dense+Sparse → Qdrant Child + parents.sqlite Parent
 → RRF/code boost → BGE reranker → ChatSession
 → GLM answer/citations → FastAPI SSE → React
@@ -70,7 +70,7 @@ docs/ → MinerU/Markdown ingest → Parent/Child chunk
 
 ### 功能知识地图
 
-`project-docs/features/README.md` 是面向开发者与 Agent 的功能入口，记录当前功能状态、跨模块调用链、数据契约、依赖、边界和验证方式；重大且已批准的架构选择记录在 `project-docs/decisions/`。
+`docs/features/README.md` 是面向开发者与 Agent 的功能入口，记录当前功能状态、跨模块调用链、数据契约、依赖、边界和验证方式；重大且已批准的架构选择记录在 `docs/decisions/`。
 
 设计或修改功能时：
 
@@ -80,7 +80,7 @@ docs/ → MinerU/Markdown ingest → Parent/Child chunk
 4. 功能边界、跨模块契约、主要入口、依赖或验证方式发生变化时，同步更新对应功能文档；纯样式、文案和不影响调用链的局部小修改不强制更新；
 5. 严格区分`已实现`、`部分实现`、`开发中`、`候选设计`和`已废弃`，不得把TODO、方案或ADR提议写成现有能力。
 
-功能地图描述“当前系统是什么”，`project-docs/decisions/`描述“为何作出已批准的长期选择”，`TODO.md`描述未来计划和最近完成摘要；实际交付与验证证据由 Git commit/PR、checks 和 workflow run 承载，不在仓库内维护重复的逐任务工作日志。TODO 的字段、状态、复选框、方案归档和完成摘要规则统一见 `.claude/rules/todo.md`，本文件不重复维护。
+功能地图描述“当前系统是什么”，`docs/decisions/`描述“为何作出已批准的长期选择”，`TODO.md`描述未来计划和最近完成摘要；实际交付与验证证据由 Git commit/PR、checks 和 workflow run 承载，不在仓库内维护重复的逐任务工作日志。TODO 的字段、状态、复选框、方案归档和完成摘要规则统一见 `.claude/rules/todo.md`，本文件不重复维护。
 
 ## 领域规则地图
 
@@ -89,7 +89,7 @@ docs/ → MinerU/Markdown ingest → Parent/Child chunk
 - 修改 `frontend/**`：遵守 `.claude/rules/frontend.md`；
 - 修改 `tests/**` 或 `.github/workflows/**`：遵守 `.claude/rules/testing.md`；
 - 涉及认证、数据、部署、外部API或破坏性操作：遵守 `.claude/rules/security.md`。
-- 修改 `TODO.md`、`project-docs/plans/**` 或 `project-docs/decisions/**`：遵守 `.claude/rules/todo.md`。
+- 修改 `TODO.md`、`docs/plans/**` 或 `docs/decisions/**`：遵守 `.claude/rules/todo.md`。
 
 Rules 由 Claude Code 根据路径配置自动发现；本段是职责地图，不是手动加载脚本。跨目录任务可能同时适用多份 Rules。
 
@@ -127,7 +127,7 @@ Docker状态：docker compose -f docker/docker-compose.yml ps
 ## 数据与安全底线
 
 - 不读取、输出、提交或写入真实API Key、密码、Cookie、用户对话和客户文档；
-- 不提交 `.env`、SQLite、Qdrant存储、模型缓存或真实 `docs/`；
+- 不提交 `.env`、SQLite、Qdrant存储、模型缓存或 `content/` 中的真实业务资料；
 - 不在生产或未知环境执行Reset、删除、迁移和部署；
 - 认证改动必须验证匿名、普通用户、管理员和CSRF路径；
 - 外部MinerU/GLM调用涉及资料外发，使用真实业务数据前必须确认授权。
@@ -157,7 +157,7 @@ Docker状态：docker compose -f docker/docker-compose.yml ps
 
 涉及用户可观察行为变化的功能，Agent 完成技术验证后必须提供用户可执行的验收步骤，至少包含前置条件、测试数据、操作步骤、预期结果、异常检查和安全清理方式。此时相关 TODO 状态写为“待用户验收”；只有用户明确确认后，才能在同一任务、PR 或 Issue 的验收证据中声明“用户验收通过”，并按需同步 TODO 状态。
 
-详细格式遵循 `project-docs/USER_ACCEPTANCE.md`。纯内部重构、文档或无用户可观察变化的任务可说明理由后不提供手工验收。Reset、删除、生产部署、真实数据或其他高风险操作不得作为普通验收步骤，仍须按风险规则单独审批。
+详细格式遵循 `docs/USER_ACCEPTANCE.md`。纯内部重构、文档或无用户可观察变化的任务可说明理由后不提供手工验收。Reset、删除、生产部署、真实数据或其他高风险操作不得作为普通验收步骤，仍须按风险规则单独审批。
 
 ## 完成交付
 
@@ -170,7 +170,7 @@ Docker状态：docker compose -f docker/docker-compose.yml ps
 1. 代码、配置和文档的实际变更以 Git diff 和 commit 为准；
 2. 实施内容、验证结果、未验证项和风险写入当前任务最终回复和 PR 描述；没有 PR 时由 commit body 保留必要摘要；
 3. CI、部署、生产验证和其他外部执行以 checks、workflow run 和 artifact 为审计证据，不为复述这些结果创建独立提交或 PR；
-4. 当前系统能力和验证入口只在 `project-docs/features/` 中维护，未来工作和最近完成摘要在 `TODO.md` 中维护，长期决策在 `project-docs/decisions/` 中维护；
+4. 当前系统能力和验证入口只在 `docs/features/` 中维护，未来工作和最近完成摘要在 `TODO.md` 中维护，长期决策在 `docs/decisions/` 中维护；
 5. 纯咨询、只读调查、中间进度、失败尝试和无实质交付的验证不产生仓库记录。
 
 并行子任务只向主任务返回结构化的修改、验证和风险摘要，不单独修改共享完成文档，也不为说明性记录单独 commit 或 push。主任务负责人在阶段收口时统一汇总最终回复、PR 描述和必要的 TODO/功能文档变更。只有能独立交付的 PR 才在自身范围内同步受影响的当前事实文档。

@@ -900,7 +900,7 @@ CI 不安装 `requirements-funasr.txt`。若实施时发现必须增加新的主
 | `tests/test_transcription_static_boundaries.py` | Phase 3 分层导入白名单；后端禁止真实引擎，服务 core 禁止应用层 |
 | `.github/workflows/ci.yml` | compile `asr_service`；新增无 GPU service contract job；现有转录 job收集新测试 |
 | `.env.example` | 后端 ASR client 默认关闭配置 |
-| `project-docs/features/transcript-pipeline.md` | 只同步已实现的 Phase 3 架构边界；不得写成业务已上线 |
+| `docs/features/transcript-pipeline.md` | 只同步已实现的 Phase 3 架构边界；不得写成业务已上线 |
 | `TODO.md` | 按实际状态更新 Phase 3 下一步 |
 | `WORKLOG.md` | 按规则记录真实实施与验证结果 |
 

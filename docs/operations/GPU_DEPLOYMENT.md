@@ -6,7 +6,7 @@
 > - **Windows GPU 节点**：运行独立 GPU 推理服务（`gpu_service/`）
 >
 > 本文档保留作为 GPU 技术参考，但不再描述当前生产部署方式。
-> 新架构详情见 `project-docs/migrations/ubuntu-app-windows-gpu-runbook.md`。
+> 新架构详情见 `docs/migrations/ubuntu-app-windows-gpu-runbook.md`。
 
 服务器：GeForce RTX 5060 Ti（Blackwell，compute capability sm_120） + i7-10700F。
 目标：让向量计算（BGE-M3 嵌入 + BGE-reranker 重排）跑在 GPU 上。

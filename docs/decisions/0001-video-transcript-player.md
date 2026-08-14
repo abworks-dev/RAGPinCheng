@@ -3,7 +3,7 @@
 - 状态：已批准（设计；第一阶段尚未授权执行）
 - 日期：2026-07-23
 - 关联功能：[视频转录链路](../features/transcript-pipeline.md)、[引用与来源面板](../features/citations-and-sources.md)、[文档摄取与索引](../features/document-indexing.md)、[认证与授权](../features/authentication.md)
-- 关联 ADR：`project-docs/decisions/README.md`
+- 关联 ADR：`docs/decisions/README.md`
 
 ## 给执行者的授权边界
 
@@ -222,7 +222,7 @@ type PlayerRequest = {
 - `.gitignore`
 - `docker/docker-compose.yml`
 - `.env.example`（存在时）
-- 相关 `project-docs/features/*.md`
+- 相关 `docs/features/*.md`
 - `TODO.md`
 - `WORKLOG.md`
 

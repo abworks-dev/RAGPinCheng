@@ -514,7 +514,7 @@ samples[8]
 | 文件 | 修改内容 |
 |---|---|
 | `tests/test_asr_deployment_static.py` | 静态验证 workflow 默认关闭、固定 runner/目录/端口、无服务激活/防火墙/Ubuntu 改写、Secret 不回显 |
-| `project-docs/features/transcript-pipeline.md` | 仅在真实执行后按证据记录资格状态；失败不得写成可用 |
+| `docs/features/transcript-pipeline.md` | 仅在真实执行后按证据记录资格状态；失败不得写成可用 |
 | `TODO.md` | 维护 R3 审批、执行和后续 admission 决策 |
 | `WORKLOG.md` | 记录实际实现、CI 和真实执行结论 |
 

@@ -25,7 +25,8 @@ frontend/dist/
 frontend/.vite/
 frontend/tsconfig.tsbuildinfo
 
-# Bind-mounted at runtime, not baked into the image
+# Runtime data is bind-mounted and repository documentation is not copied by
+# the Dockerfile.
 data/
 docs/
 

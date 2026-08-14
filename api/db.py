@@ -71,7 +71,7 @@ CREATE TABLE IF NOT EXISTS index_jobs (
     filename      TEXT NOT NULL,
     category      TEXT NOT NULL,
     doc_type      TEXT NOT NULL,            -- 'pdf' | 'transcript'
-    source_path   TEXT NOT NULL,            -- absolute path on disk under docs/
+    source_path   TEXT NOT NULL,            -- physical or logical legacy source identity
     file_size     INTEGER NOT NULL,
     media_id      TEXT,                     -- nullable: associated media asset
     status        TEXT NOT NULL DEFAULT 'pending',

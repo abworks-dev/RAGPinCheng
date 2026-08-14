@@ -24,7 +24,7 @@ cd frontend && npm install && npm run dev   # http://localhost:5173
 
 First boot seeds an admin account from `ADMIN_EMPLOYEE_ID` / `ADMIN_PASSWORD`. Self-registration is open — staff sign up at `/register`.
 
-To build the initial index from existing PDFs in `docs/`:
+To build the legacy index from files in `content/legacy-docs/`:
 
 ```bash
 python scripts/build_index.py
@@ -45,7 +45,7 @@ docker compose -f docker/docker-compose.yml logs -f backend   # watch first-boot
 
 First boot takes ~30s (no GPU model downloads). The backend image bundles the built React app (multi-stage Dockerfile runs `npm run build` in a node stage), so there's no separate frontend container or nginx proxy.
 
-**Architecture:** GPU inference (BGE-M3 embedding + BGE-reranker) runs on a separate Windows GPU host, accessed via HTTP. The Ubuntu host runs only the API backend + Qdrant vector database. See `project-docs/migrations/ubuntu-app-windows-gpu-runbook.md` for details.
+**Architecture:** GPU inference (BGE-M3 embedding + BGE-reranker) runs on a separate Windows GPU host, accessed via HTTP. The Ubuntu host runs only the API backend + Qdrant vector database. See `docs/migrations/ubuntu-app-windows-gpu-runbook.md` for details.
 
 **Accessing the app** once `docker compose ps` shows `backend` as `healthy`:
 
@@ -86,11 +86,11 @@ git pull && docker compose -f docker/docker-compose.yml build && docker compose 
 **Via filesystem + CLI** (for bulk loads):
 
 ```bash
-cp new_standard.pdf docs/行业规范/
+cp new_standard.pdf content/legacy-docs/行业规范/
 python scripts/build_index.py   # incremental — only new files are processed
 ```
 
-Document categories are derived from the first-level folder under `docs/`. Only `客户标准` uses a second level (`客户标准/<customer>/`). `.md` files in `教学视频/` are treated as video transcripts (speaker-turn + timestamp chunking); `.md` elsewhere is chunked like a parsed PDF.
+Legacy document categories are derived from the first-level folder under `content/legacy-docs/` (or the explicit `DOCS_DIR`). Only `客户标准` uses a second level (`客户标准/<customer>/`). `.md` files in `教学视频/` are treated as video transcripts (speaker-turn + timestamp chunking); `.md` elsewhere is chunked like a parsed PDF. The repository `docs/` directory contains project documentation and is never a business-content source.
 
 ---
 
@@ -144,7 +144,7 @@ steel-structure corpus; do not compare the two numbers directly.)
 
 ```
 PDF / .md                  parsed markdown    chunks         vectors          answer
-docs/<category>/   →(1)→   data/parsed/  →(2)→ parent+  →(3)→ Qdrant +   →(4)→ GLM-4
+content/legacy-docs/<category>/ →(1)→ data/parsed/ →(2)→ parent+ →(3)→ Qdrant →(4)→ GLM-4
                    MinerU                       child        SQLite            citations
                                                              BGE-M3 + reranker
 ```

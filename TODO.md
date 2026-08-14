@@ -1,12 +1,22 @@
 # 品成 BIM 知识库 — 功能待办
 
-本文件只记录未来工作与最近完成摘要。已完成事实与详细验证以 Git commit/PR、checks 和 workflow run 为准；当前功能事实在 `project-docs/features/` 维护，大型候选方案放在 `project-docs/plans/`，已批准的长期架构决策放在 `project-docs/decisions/`。
+本文件只记录未来工作与最近完成摘要。已完成事实与详细验证以 Git commit/PR、checks 和 workflow run 为准；当前功能事实在 `docs/features/` 维护，大型候选方案放在 `docs/plans/`，已批准的长期架构决策放在 `docs/decisions/`。
 
 统一状态：`未开始` / `待审批` / `进行中` / `代码完成待验证` / `待用户验收` / `已完成` / `已取消`。
 
 ---
 
 ## 当前优先事项
+
+### 项目文档目录迁移
+
+- 状态：代码完成待验证
+- 目标：将 legacy 资料默认路径从仓库根 `docs/` 解耦，并把 `project-docs/` 统一改名为项目文档目录 `docs/`。
+- 下一步：
+  - [ ] 在 Docker daemon 可用的环境完成 backend 镜像构建，并在合并前复核最新 `master` 路径差异。
+- 完成标准：项目 `docs/` 不进入业务摄取或写入路径；`project-docs/` 活跃引用为零；本地、测试和部署兼容验证通过。
+- 依赖：T11/T12-B 与 strict/source-decoupled 生产切换已完成；旧生产文件物理归档另走独立 R3。
+- 方案链接：`docs/plans/docs-directory-migration-phase1.md`
 
 ### 受管知识资料库
 
@@ -16,7 +26,7 @@
   - [ ] 验收“资料库 / 分类设置 / 索引监控”统一界面，以及非敏感 PDF/Markdown 样本的三权工作流、发布检索、引用预览和只读视图。
 - 完成标准：只有已确认并发布的版本进入正式检索；网页上传和后台编号目录均能受控导入；旧视频转录链路不退化；用户确认验收通过。
 - 依赖：R2 契约已于 2026-08-11 批准；生产备份、迁移、切换和旧目录归档另按 R3 审批。
-- 方案链接：`project-docs/plans/managed-content-library.md`、`project-docs/decisions/0003-managed-content-library.md`
+- 方案链接：`docs/plans/managed-content-library.md`、`docs/decisions/0003-managed-content-library.md`
 
 ### 受管知识资料库生产迁移
 
@@ -27,7 +37,7 @@
   - [ ] source 解耦后观察 1 至 2 周，再独立决定旧 `source/docs`、`source/media` 的物理归档或删除；不得删除整个生产仓库目录。
 - 完成标准：116 个正式普通资料 head 与未来正式 transcript head 在 `strict` 下可检索；无版本旧索引不可见且受控下线；生产容器不再依赖 `source/docs`、`source/media`；切换和物理归档均有独立恢复点。
 - 依赖：T11 已于 2026-08-14 删除 19,981 个旧普通资料 Parent 和 38,387 个 Qdrant Point；T12-B 数据 workflow `31767567546` 已按冻结摘要 `a36bbef…c53a` 完成独立备份、4 条旧媒体归档、2 个 transcript head、44 个 Parent 和 104 个 Point 的精确下线。App-only workflow `31769119451` 已将生产切换到 `strict`，并通过 41,191 个 Point、SQLite 完整性、受管配置、GPU、后台页面和无旧 `source` 容器挂载核验。
-- 方案链接：`project-docs/plans/managed-content-library.md`、`project-docs/decisions/0003-managed-content-library.md`、`project-docs/migrations/managed-content-production-runbook.md`
+- 方案链接：`docs/plans/managed-content-library.md`、`docs/decisions/0003-managed-content-library.md`、`docs/migrations/managed-content-production-runbook.md`
 
 ### 查询拆分 Phase A 生产评测
 
@@ -39,11 +49,11 @@
 - 阶段 2：ChatSession 开关 A/B（未跑，Phase B 核心）
   - [ ] 真实环境开关运行完整 ChatSession：on 路径走 `_fresh_retrieve`（gate + rewrite + guard + carry + context packaging + generate），off 路径走原 `_fresh_retrieve(开关关)`。
   - [ ] 收集回答质量、引用支持度、partial/no-answer、`final_sources → used_sources` 侧覆盖损失、延迟 P50/P95、Token 成本、timeout、fallback、错误率。
-  - [ ] 写 `project-docs/plans/phase-b-comparison-greyout.md` 作为独立 R2 方案（待新写）。
+  - [ ] 写 `docs/plans/phase-b-comparison-greyout.md` 作为独立 R2 方案（待新写）。
   - [ ] 显式声明结果**不**构成灰度依据的边界（样本不足、in-process 风险、query rewrite/guard 干扰等）。
 - 完成标准：Phase A 协议层✅ + Phase B 真实链路数据齐；普通黄金集不退化；比较集收益、延迟和成本有可复核结论；明确给出开启、继续关闭或补实验的建议。
 - 依赖：Ubuntu 活索引、GPU 服务、当前 79 题黄金集、`### 黄金集第二期扩展`（用于 A/B 跑出代表性数据）；默认开关保持关闭。
-- 方案链接：`scripts/run_eval_retrieval.py`、`project-docs/features/retrieval-pipeline.md`、本节阶段 2 产出的 Phase B 计划文件（待写）
+- 方案链接：`scripts/run_eval_retrieval.py`、`docs/features/retrieval-pipeline.md`、本节阶段 2 产出的 Phase B 计划文件（待写）
 
 ### 查询拆分灰度决策
 
@@ -53,7 +63,7 @@
   - [ ] 等 Phase B 跑通后，提交独立灰度方案 + 回滚条件 + canary 流量比例 + 监控阈值 + 恢复方式。
 - 完成标准：用户明确批准或否决灰度；如批准，具备监控指标、停止条件和回滚步骤。
 - 依赖：`### 查询拆分 Phase A 生产评测` 全部完成；`### 黄金集第二期扩展` 完成后扩样；该项改变 RAG 行为，属于 R2。
-- 方案链接：待 Phase B 完成后新增到 `project-docs/plans/`。
+- 方案链接：待 Phase B 完成后新增到 `docs/plans/`。
 
 ### Office 安全与故障恢复补齐
 
@@ -66,7 +76,7 @@
   - [ ] 删除文档时同时清理原文件、解析 Markdown、`.preview.pdf`、`.preview.xlsx`、Qdrant 点和 parents.sqlite 行，并为该路径增加验证。
 - 完成标准：恶意或超限输入可控失败；任务不会无限占用解析资源；删除后无已知派生产物残留。
 - 依赖：现有签名校验、zip bomb、宏检测、上传大小限制、串行索引队列和 LibreOffice 超时已经实现；删除属于高风险操作，真实数据验证需单独确认。
-- 方案链接：`project-docs/plans/office-document-support-plan.md`
+- 方案链接：`docs/plans/office-document-support-plan.md`
 
 ### Office 发布与运维收口
 
@@ -79,7 +89,7 @@
   - [ ] 评估是否需要独立 Office 功能开关和分阶段灰度策略。
 - 完成标准：新环境可以按文档部署并检查 Office 链路；故障时能停用新解析且不影响 PDF、Markdown 和转录稿。
 - 依赖：Python/前端依赖、LibreOffice 独立容器、Compose 和 `LIBREOFFICE_URL` 已落地。
-- 方案链接：`project-docs/plans/office-document-support-plan.md`
+- 方案链接：`docs/plans/office-document-support-plan.md`
 
 ### Office 自动化测试与用户验收矩阵
 
@@ -93,7 +103,7 @@
   - [ ] 形成覆盖匿名用户、普通用户、管理员、失败重试和兼容预览的用户验收矩阵。
 - 完成标准：Office 专项自动化测试通过、前端构建通过，并完成一轮非敏感样本用户验收。
 - 依赖：现有 `tests/test_xlsx_converter.py` 只覆盖部分 XLSX 转换行为；真实生产资料不得作为普通测试样本。
-- 方案链接：`project-docs/plans/office-document-support-plan.md`、`project-docs/USER_ACCEPTANCE.md`
+- 方案链接：`docs/plans/office-document-support-plan.md`、`docs/USER_ACCEPTANCE.md`
 
 ---
 
@@ -107,7 +117,7 @@
   - [ ] 使用一份可清理的非敏感测试资料验证“同时删除源文件”后资料条消失；如可构造文件占用或权限失败，确认弹窗保留“索引已移除、源文件未删除”提示。
 - 完成标准：已删除资料不再显示或计入可检索统计，处理中/失败任务仍可见，源文件删除结果不再被静默误报。
 - 依赖：无需数据库迁移或索引重建；不得用真实业务资料执行破坏性验收。
-- 方案链接：`project-docs/plans/admin-document-management-pr1.md`、`project-docs/USER_ACCEPTANCE.md`
+- 方案链接：`docs/plans/admin-document-management-pr1.md`、`docs/USER_ACCEPTANCE.md`
 
 ### 跨父文档多轮综合
 
@@ -130,7 +140,7 @@
   - [ ] 优化移动端底部弹层。
 - 完成标准：转录高亮与播放时间一致；重新打开可续播；移动端核心操作不被遮挡。
 - 依赖：视频播放器第一阶段和精确命中时间跳播已完成。
-- 方案链接：`project-docs/decisions/0001-video-transcript-player.md`
+- 方案链接：`docs/decisions/0001-video-transcript-player.md`
 
 ### 来源批量导出
 
@@ -140,7 +150,7 @@
   - [ ] 明确导出格式并实现文档标题、章节路径、引用序号和可用定位信息的批量导出。
 - 完成标准：用户可一次性复制或下载当前回答的完整引用列表，内容与界面来源一致。
 - 依赖：单条“复制来源”和 PDF/Office 预览入口已经实现。
-- 方案链接：`project-docs/features/citations-and-sources.md`
+- 方案链接：`docs/features/citations-and-sources.md`
 
 ### 反馈质量仪表盘
 
@@ -168,7 +178,7 @@
 - 完成标准：新增题集经过人工审核，索引指纹已冻结，评分口径与检索黄金集、生成质量评测边界清晰。
 - 依赖：第一期 79 题基线、comparison 评分和索引陈旧告警已经完成。
 - **Phase B 前置关系**：`### 查询拆分 Phase A 生产评测` 阶段 2 真实链路 A/B 需要在 20-30 道代表性 comparison 题（含跨文档、无强规范码、多实体、gate 真假阳阴）上跑才有意义；当前第一期 4 题同池 GB50189↔GB55015、均带强规范编号，Phase B 跑在这 4 题上只会重复 Phase A 的"机制层信号"，得不出"代表性数据"。**本条目视为 Phase B 的强制前置**，不先做则 Phase B 的 A/B 价值有限。
-- 方案链接：`project-docs/golden-set-staleness-guard.md`
+- 方案链接：`docs/golden-set-staleness-guard.md`
 
 ---
 
@@ -182,7 +192,7 @@
   - [ ] 查询拆分灰度结论明确后，重新核对方案并提交独立 R2 审批。
 - 完成标准：MQE、HyDE 分阶段验证，固定黄金集证明收益，延迟和成本可接受，精确查询不退化。
 - 依赖：查询拆分 Phase A 与灰度决策；不得替换原始查询通道。
-- 方案链接：`project-docs/plans/layered-query-enhancement.md`
+- 方案链接：`docs/plans/layered-query-enhancement.md`
 
 ### 多引擎视频自动转录
 
@@ -208,7 +218,7 @@
     脱敏 v3 JSON 后停止，不得运行 pip、修改 pin/freeze、服务或 Profile admission。
 - 完成标准：人工转录流程不退化；管理员只能选择服务端白名单 Profile；同一媒体可保留多个历史版本且只有 `app.sqlite` head 指向的版本进入正式检索；experimental Profile 强制审核；至少一个 `qualification_approved` Profile 完成隔离端到端验证后才讨论生产灰度。
 - 依赖：Phase 1～4B 已形成契约、持久化、remote Provider 与应用上传/worker/UI 前半段；Phase 5A/5B 已实现版本审阅、发布、候选索引和检索可见性，待远端 CI；Windows ASR R3A 仓库实施及 PR #8 远端 CI 已通过，但不等于生产部署完成；R3B/R3C、真实引擎/GPU/Qdrant 和生产数据均未执行；真实环境操作另按 R3 逐项审批，单卡 GPU 保持 BGE 优先。
-- 方案链接：`project-docs/plans/multi-engine-auto-transcription.md`、`project-docs/plans/multi-engine-transcription-phase1.md`、`project-docs/plans/multi-engine-transcription-phase2.md`、`project-docs/plans/multi-engine-transcription-phase3.md`、`project-docs/plans/multi-engine-transcription-phase5.md`、`project-docs/plans/multi-engine-transcription-phase5c-windows-asr-deployment.md`、`project-docs/plans/transcription-admin-workflow-hardening.md`、`project-docs/plans/faster-whisper-provider-integration.md`、`project-docs/plans/faster-whisper-r3-unified-qualification.md`、`project-docs/plans/qwen3-asr-r2-r3-integration.md`、`project-docs/plans/shared-asr-qualification-corpus-migration.md`、`project-docs/plans/asr-local-development-lab.md`、`project-docs/decisions/0002-multi-engine-transcription.md`、`project-docs/plans/funasr-auto-transcription.md`
+- 方案链接：`docs/plans/multi-engine-auto-transcription.md`、`docs/plans/multi-engine-transcription-phase1.md`、`docs/plans/multi-engine-transcription-phase2.md`、`docs/plans/multi-engine-transcription-phase3.md`、`docs/plans/multi-engine-transcription-phase5.md`、`docs/plans/multi-engine-transcription-phase5c-windows-asr-deployment.md`、`docs/plans/transcription-admin-workflow-hardening.md`、`docs/plans/faster-whisper-provider-integration.md`、`docs/plans/faster-whisper-r3-unified-qualification.md`、`docs/plans/qwen3-asr-r2-r3-integration.md`、`docs/plans/shared-asr-qualification-corpus-migration.md`、`docs/plans/asr-local-development-lab.md`、`docs/decisions/0002-multi-engine-transcription.md`、`docs/plans/funasr-auto-transcription.md`
 
 ---
 
@@ -216,8 +226,8 @@
 
 后续新增摘要应尽量链接相关 commit、PR、workflow 或功能文档；详细事实不在本文件重复记录。
 
-1. [受管知识资料库](project-docs/features/document-indexing.md)生产基础能力启用，保持 `compat` 且未迁移旧资料（2026-08-11，PR #221/#222，workflow `31500815860`）。
-2. [Qwen3-ASR / WhisperX 本地快速实验室](project-docs/plans/asr-local-development-lab.md)及双引擎 full 实测（2026-08-11）。
+1. [受管知识资料库](docs/features/document-indexing.md)生产基础能力启用，保持 `compat` 且未迁移旧资料（2026-08-11，PR #221/#222，workflow `31500815860`）。
+2. [Qwen3-ASR / WhisperX 本地快速实验室](docs/plans/asr-local-development-lab.md)及双引擎 full 实测（2026-08-11）。
 3. 三引擎共享 ASR qualification corpus 中性变量迁移（2026-08-10）。
 4. faster-whisper 生产准入代码准备（2026-08-10）。
 5. 管理端资料管理工作流 PR1，用户验收通过（2026-08-05）。

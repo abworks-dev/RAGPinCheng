@@ -226,7 +226,7 @@ language=zh-CN
 | `asr_service/tests/test_qwen3_asr.py` | Fake 模块、输出转换、异常和时间戳边界 |
 | `asr_service/tests/test_model_cache.py` | 双模型 Manifest、路径逃逸、hash/revision |
 | `asr_service/tests/test_api_contract.py` | capabilities 排序、缺依赖 fail-closed |
-| `project-docs/features/transcript-pipeline.md` | 仅记录“代码已接入、Profile disabled” |
+| `docs/features/transcript-pipeline.md` | 仅记录“代码已接入、Profile disabled” |
 | `TODO.md`、`WORKLOG.md` | 按项目规则记录审批与实际完成事实 |
 
 实际实现前应再次用 `git diff` 确认主线变化；若现有所有权或文件名改变，更新计划并
@@ -348,7 +348,7 @@ venv、GPU service venv 或仓库工作区。
 | `asr_service/qwen3-asr-qualification-manifest.example.json` | 严格、不含真实音频的样本 Manifest 示例 |
 | `asr_service/tests/test_qwen3_asr_qualification.py` | 无真实依赖的工具、门禁、失败关闭和报告测试 |
 | `tests/test_asr_deployment_static.py` | workflow 默认关闭、固定目录/端口、无生产激活或防火墙改写 |
-| `project-docs/features/transcript-pipeline.md` | 只按真实结果记录资格状态 |
+| `docs/features/transcript-pipeline.md` | 只按真实结果记录资格状态 |
 | `TODO.md`、`WORKLOG.md` | 按实际实施、CI 和 workflow 结果收口 |
 
 不得修改 R2 Profile/Provider/Canonical/normalizer/pipeline、数据库、前端、生产部署

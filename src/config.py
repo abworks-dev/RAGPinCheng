@@ -11,13 +11,15 @@ load_dotenv()
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT / "data"
-DOCS_DIR = Path(os.getenv("DOCS_DIR", str(ROOT / "docs"))).resolve()
+CONTENT_ROOT = Path(os.getenv("CONTENT_ROOT", str(ROOT / "content"))).resolve()
+# DOCS_DIR is retained as the legacy compatibility name. The default must not
+# overlap the repository's project documentation directory.
+DOCS_DIR = Path(os.getenv("DOCS_DIR", str(CONTENT_ROOT / "legacy-docs"))).resolve()
 MEDIA_DIR = Path(os.getenv("MEDIA_DIR", str(ROOT / "media"))).resolve()
 PARSED_DIR = DATA_DIR / "parsed"
 QDRANT_DIR = DATA_DIR / "qdrant"  # legacy embedded-mode path; unused after the server migration but kept for the optional cleanup script
 PARENTS_DB = DATA_DIR / "parents.sqlite"
 APP_DB_PATH = Path(os.getenv("APP_DB_PATH", str(DATA_DIR / "app.sqlite")))
-CONTENT_ROOT = Path(os.getenv("CONTENT_ROOT", str(ROOT / "content")))
 CONTENT_MANAGEMENT_ENABLED = os.getenv("CONTENT_MANAGEMENT_ENABLED", "").strip().lower() in (
     "1",
     "true",
@@ -31,7 +33,7 @@ if CONTENT_HEAD_ENFORCEMENT not in {"compat", "strict"}:
 for d in (DATA_DIR, PARSED_DIR, DOCS_DIR, MEDIA_DIR):
     d.mkdir(parents=True, exist_ok=True)
 
-# Category convention: most top-level folders under docs/ are flat
+# Legacy category convention: most top-level folders under DOCS_DIR are flat
 # (`<category>/<file>`). 客户标准 uses a second level for grouping —
 # `客户标准/<customer>/<file>` — and the customer name is preserved on
 # each parent/child as the `company` field for downstream filtering.

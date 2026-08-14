@@ -89,7 +89,7 @@
               "host": ["{{baseUrl}}"],
               "path": ["api", "categories"]
             },
-            "description": "Distinct top-level category folders under docs/. Used to populate the sidebar multi-select filter."
+            "description": "Distinct top-level category folders under the configured legacy DOCS_DIR. Used to populate the sidebar multi-select filter."
           },
           "event": [
             {

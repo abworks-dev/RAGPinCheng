@@ -40,7 +40,7 @@
 - 可重建的一至四级编号目录只读视图；视图是副本，不是分类或索引事实来源；
 - 代码和普通环境默认关闭受管资料库；当前 Ubuntu 生产已显式设置 `CONTENT_MANAGEMENT_ENABLED=true`。T12-B 数据切换后，生产环境契约使用 `CONTENT_HEAD_ENFORCEMENT=strict` 和 `SOURCE_DECOUPLING_COMPLETE=true`。
 - 当前生产根目录为 `/data/business/ragpincheng/content`（容器内 `/app/content`）；2026-08-14 已完成 117 条旧普通资料迁移记录的收口，其中 116 份建立正式 `content_item_heads`，1 份生成预览被安全排除。T11 删除了对应旧普通资料索引；T12-B 又归档 4 条旧媒体记录、删除 2 个旧 transcript head，并精确删除剩余 44 个旧 Parent 与 104 个 Qdrant Point。旧 `source/docs` 和 `source/media` 文件仍保留，未自动删除。
-- 代码支持 `DOCS_DIR`、`MEDIA_DIR`、`DOCS_HOST_PATH`、`MEDIA_HOST_PATH` 和 `TRANSCRIPTION_ARTIFACT_DIR` 显式配置；默认值保持旧目录兼容。生产完成标记为 `true` 时，仓库内最终 Compose overlay 必须位于私有生产 override 之后，强制把 `/app/docs`、`/app/media` 分别挂载到 `CONTENT_ROOT/legacy-docs`、`CONTENT_ROOT/media`；部署、失败回滚和手工恢复共用该顺序。
+- 代码支持 `DOCS_DIR`、`MEDIA_DIR`、`DOCS_HOST_PATH`、`MEDIA_HOST_PATH` 和 `TRANSCRIPTION_ARTIFACT_DIR` 显式配置；本地 `DOCS_DIR` 和 Compose 宿主机默认值指向 `content/legacy-docs`，仓库 `docs/` 只存放项目文档。生产完成标记为 `true` 时，仓库内最终 Compose overlay 必须位于私有生产 override 之后，强制把 `/app/docs`、`/app/media` 分别挂载到 `CONTENT_ROOT/legacy-docs`、`CONTENT_ROOT/media`；部署、失败回滚和手工恢复共用该顺序。
 - `strict` 检索契约按身份分流：普通资料必须命中 `content_item_heads`，带 `transcript_version_id` 的转录由独立 `media_transcript_heads` 快照校验；双重无版本身份的旧 Parent/Child 被拒绝。生产部署会同时核对 strict 配置、受管 head、索引计数和容器 mount source，任何 `/app/docs`、`/app/media` 或 `/app/content` 挂载仍来自 `/data/business/ragpincheng/source` 都会失败并恢复上一镜像。
 - T12-B 提供精确 plan/apply/verify 和受控生产 workflow：候选 ID、媒体/head、正式版本及审计表均指纹化，活动任务或冻结摘要漂移会在写入前失败；执行仅归档旧媒体记录、删除旧 transcript head 和精确候选 Parent/Point，不重建 collection，也不删除旧文件。
 
@@ -165,7 +165,7 @@
 
 ## 相关决策
 
-- PR1 实施说明：`project-docs/plans/admin-document-management-pr1.md`。
+- PR1 实施说明：`docs/plans/admin-document-management-pr1.md`。
 - 受管资料库决策：[0003 — 数据库分类与受管内容资料库](../decisions/0003-managed-content-library.md)。
 - R2 实施方案：[受管知识资料库实施方案](../plans/managed-content-library.md)。
 - 生产运行与迁移：[受管知识资料库生产运行与旧资料迁移手册](../migrations/managed-content-production-runbook.md)。
