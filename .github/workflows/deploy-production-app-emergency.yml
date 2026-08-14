@@ -436,7 +436,12 @@ jobs:
               ;;
           esac
           if [ "${TRANSCRIPTION_ADMISSION_ACTION}" = "PRESERVE_CURRENT" ]; then
-            export ASR_ENABLED="${PREVIOUS_ASR_ENABLED}"
+            if [ "${PREVIOUS_ASR_ENABLED}" = "false" ]; then
+              echo "APP_ONLY_ASR_STATE configured-admission-requires-enabled"
+              export ASR_ENABLED=true
+            else
+              export ASR_ENABLED="${PREVIOUS_ASR_ENABLED}"
+            fi
           else
             export ASR_ENABLED=true
           fi

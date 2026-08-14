@@ -261,6 +261,8 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertIn(".Config.Env", workflow)
         self.assertIn("export ASR_ENABLED=true", workflow)
         self.assertIn('export ASR_ENABLED="${PREVIOUS_ASR_ENABLED}"', workflow)
+        self.assertIn("configured-admission-requires-enabled", workflow)
+        self.assertIn('if [ "${PREVIOUS_ASR_ENABLED}" = "false" ]; then', workflow)
         self.assertIn("EXPECTED_ROLLBACK_ASR_STATE", workflow)
         self.assertIn("source=workflow-environment", workflow)
         self.assertNotIn("configure-transcription-admission.py", workflow)
