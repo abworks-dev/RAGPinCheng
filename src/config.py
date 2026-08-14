@@ -10,9 +10,9 @@ from src.transcription_admission_config import (
 load_dotenv()
 
 ROOT = Path(__file__).resolve().parent.parent
-DOCS_DIR = ROOT / "docs"
 DATA_DIR = ROOT / "data"
-MEDIA_DIR = ROOT / "media"
+DOCS_DIR = Path(os.getenv("DOCS_DIR", str(ROOT / "docs"))).resolve()
+MEDIA_DIR = Path(os.getenv("MEDIA_DIR", str(ROOT / "media"))).resolve()
 PARSED_DIR = DATA_DIR / "parsed"
 QDRANT_DIR = DATA_DIR / "qdrant"  # legacy embedded-mode path; unused after the server migration but kept for the optional cleanup script
 PARENTS_DB = DATA_DIR / "parents.sqlite"
@@ -28,7 +28,7 @@ CONTENT_HEAD_ENFORCEMENT = os.getenv("CONTENT_HEAD_ENFORCEMENT", "compat").strip
 if CONTENT_HEAD_ENFORCEMENT not in {"compat", "strict"}:
     raise ValueError("CONTENT_HEAD_ENFORCEMENT must be 'compat' or 'strict'")
 
-for d in (DATA_DIR, PARSED_DIR, MEDIA_DIR):
+for d in (DATA_DIR, PARSED_DIR, DOCS_DIR, MEDIA_DIR):
     d.mkdir(parents=True, exist_ok=True)
 
 # Category convention: most top-level folders under docs/ are flat

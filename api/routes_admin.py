@@ -25,6 +25,7 @@ from src.config import (
     MEDIA_DIR,
     MAX_VIDEO_UPLOAD_MB,
     SECOND_LEVEL_CATEGORIES,
+    CONTENT_HEAD_ENFORCEMENT,
     CONTENT_MANAGEMENT_ENABLED,
 )
 from src.indexing_pipeline import (
@@ -1014,6 +1015,12 @@ async def upload_media(
     clean_title = title.strip()
     automatic = transcript is None
 
+    if not automatic and CONTENT_HEAD_ENFORCEMENT == "strict":
+        raise HTTPException(
+            status_code=409,
+            detail="严格资料版本模式下不再接受旧式人工转录，请使用自动转录流程。",
+        )
+
     if not clean_title or len(clean_title) > 200:
         raise HTTPException(status_code=400, detail="标题不能为空且不能超过 200 字符")
 
@@ -1049,6 +1056,7 @@ async def upload_media(
             FROM transcription_jobs j
             JOIN media_assets m ON m.media_id=j.media_id
             WHERE j.request_idempotency_key=?
+              AND m.status <> 'archived'
             """,
             (request_idempotency_key,),
         ).fetchone()
@@ -1294,6 +1302,7 @@ def list_media_assets(
             LIMIT 1
         )
         LEFT JOIN media_transcript_heads h ON h.media_id=m.media_id
+        WHERE m.status <> 'archived'
         ORDER BY m.created_at DESC
         LIMIT ?
         """,

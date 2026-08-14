@@ -90,6 +90,55 @@ def test_merge_filters_preserves_nested_filter_semantics():
     assert merged.must[0].must_not == category.must_not
 
 
+def test_strict_content_filter_allows_versioned_transcript_candidates():
+    snapshot = PublishedContentSnapshot(frozenset({"managed-version"}), "strict")
+
+    result = retrieve._content_visibility_filter(snapshot)
+
+    assert len(result.should or []) == 2
+    transcript_clause = result.should[0]
+    assert isinstance(transcript_clause, models.Filter)
+    assert transcript_clause.must_not == [
+        models.IsEmptyCondition(
+            is_empty=models.PayloadField(key="transcript_version_id")
+        )
+    ]
+
+
+def test_strict_parent_visibility_keeps_versioned_transcript(monkeypatch):
+    point = _Point("child-transcript", {"parent_id": "parent-transcript", "text": "matched"})
+    parent = _parent(VISIBLE_VERSION)
+    parent["content_version_id"] = None
+    monkeypatch.setattr(retrieve, "fetch_parents", lambda _ids: {"parent-transcript": parent})
+
+    result = retrieve._dedup_to_parents(
+        [(point, 1.0)],
+        {"child-transcript": 0.5},
+        5,
+        PublishedTranscriptSnapshot(frozenset({VISIBLE_VERSION})),
+        PublishedContentSnapshot(frozenset({"managed-version"}), "strict"),
+    )
+
+    assert [item.parent_id for item in result] == ["parent-transcript"]
+
+
+def test_strict_parent_visibility_rejects_unversioned_legacy_parent(monkeypatch):
+    point = _Point("child-legacy", {"parent_id": "parent-legacy", "text": "matched"})
+    parent = _parent(None)
+    parent["content_version_id"] = None
+    monkeypatch.setattr(retrieve, "fetch_parents", lambda _ids: {"parent-legacy": parent})
+
+    result = retrieve._dedup_to_parents(
+        [(point, 1.0)],
+        {"child-legacy": 0.5},
+        5,
+        PublishedTranscriptSnapshot(frozenset()),
+        PublishedContentSnapshot(frozenset({"managed-version"}), "strict"),
+    )
+
+    assert result == []
+
+
 @pytest.mark.parametrize("doc_type", ["pdf", "markdown", "docx", "xlsx", "pptx", "transcript"])
 def test_unversioned_ordinary_and_legacy_parents_remain_visible(doc_type, monkeypatch):
     point = _Point("child-legacy", {"parent_id": "parent-legacy", "text": "ordinary"})

@@ -206,6 +206,7 @@ def list_media(
             SELECT media_id, title, original_filename, mime_type, file_size,
                    transcript_origin, status, created_at, updated_at, error
             FROM media_assets
+            WHERE status <> 'archived'
             ORDER BY created_at DESC
             LIMIT 100
             """

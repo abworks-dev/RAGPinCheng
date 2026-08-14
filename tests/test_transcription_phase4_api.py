@@ -167,6 +167,27 @@ def test_manual_upload_rejects_automatic_controls_before_reading():
     assert caught.value.status_code == 400
 
 
+def test_strict_mode_rejects_legacy_manual_upload_before_reading(monkeypatch):
+    import api.routes_admin as routes_admin
+
+    class Video:
+        filename = "video.mp4"
+
+    class Transcript:
+        filename = "manual.md"
+
+        async def read(self):
+            raise AssertionError("strict rejection must happen before reading")
+
+    monkeypatch.setattr(routes_admin, "CONTENT_HEAD_ENFORCEMENT", "strict")
+    admin = CurrentUser(1, "admin", "Admin", "admin", "csrf")
+
+    with pytest.raises(HTTPException) as caught:
+        asyncio.run(upload_media(Video(), "Title", Transcript(), None, None, admin, None))
+
+    assert caught.value.status_code == 409
+
+
 def test_automatic_upload_replays_existing_request_when_asr_is_now_unavailable(
     tmp_path, monkeypatch
 ):

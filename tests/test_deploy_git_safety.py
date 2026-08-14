@@ -317,6 +317,10 @@ class TestDeployGitSafety(unittest.TestCase):
         compose = (ROOT / "docker" / "docker-compose.yml").read_text(encoding="utf-8")
 
         self.assertIn("${CONTENT_HOST_PATH:-../content}:/app/content", compose)
+        self.assertIn("${DOCS_HOST_PATH:-../docs}:/app/docs", compose)
+        self.assertIn("${MEDIA_HOST_PATH:-../media}:/app/media", compose)
+        self.assertIn("DOCS_DIR: /app/docs", compose)
+        self.assertIn("MEDIA_DIR: /app/media", compose)
         self.assertIn(
             "CONTENT_HOST_PATH: ${{ vars.PRODUCTION_CONTENT_ROOT }}", workflow
         )
@@ -358,6 +362,28 @@ class TestDeployGitSafety(unittest.TestCase):
                 "CONTENT_HEAD_ENFORCEMENT: ${{ vars.CONTENT_HEAD_ENFORCEMENT }}",
                 production_workflow,
             )
+            self.assertIn(
+                "DOCS_HOST_PATH: ${{ vars.PRODUCTION_DOCS_HOST_PATH }}",
+                production_workflow,
+            )
+            self.assertIn(
+                "MEDIA_HOST_PATH: ${{ vars.PRODUCTION_MEDIA_HOST_PATH }}",
+                production_workflow,
+            )
+            self.assertIn(
+                "SOURCE_DECOUPLING_COMPLETE: ${{ vars.SOURCE_DECOUPLING_COMPLETE }}",
+                production_workflow,
+            )
+            self.assertIn(
+                "source decoupling configuration requires the completed T12 marker",
+                production_workflow,
+            )
+
+        self.assertIn('compat|strict', self.app_only_workflow)
+        self.assertIn(
+            'assert CONTENT_HEAD_ENFORCEMENT in {"compat", "strict"}',
+            self.app_only_workflow,
+        )
 
     def test_scripts_require_full_commit_and_verify_head(self):
         self.assertIn("ValidatePattern('^[0-9a-fA-F]{40}$')", self.windows)

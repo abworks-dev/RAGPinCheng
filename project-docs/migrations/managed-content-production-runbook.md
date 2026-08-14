@@ -371,3 +371,20 @@ find /data/business/ragpincheng/content/views/current \
 6. 删除后验证失败时，使用同一恢复点自动恢复 Qdrant 和 `parents.sqlite`。
 
 T11 成功后仍保留 `source/docs`、`source/media` 和受管对象至少 1 至 2 周。不得删除整个 `/data/business/ragpincheng/source`；旧视频链路继续使用 `source/media`，生产仓库和部署配置也必须按现行部署路径保留。观察期结束后的文件归档属于独立 T12 R3 操作。
+
+## 13. T12 source 解耦边界
+
+T12-A 只交付代码兼容层和只读生产 preflight，不修改生产变量、数据库、Parent、Qdrant、挂载或旧文件。代码允许把 `DOCS_HOST_PATH`、`MEDIA_HOST_PATH` 和转录 artifact 分别切换到 `CONTENT_ROOT` 下的受管目录；切换前默认值仍保持 `source/docs`、`source/media` 和既有 artifact 路径。
+
+`.github/workflows/preflight-source-decoupling-t12.yml` 固定确认词 `PREFLIGHT_T12`、完整 master commit、116 个正式普通资料 head 和当前 `compat` 模式。它以共享锁只读打开两个 SQLite，扫描 Qdrant payload 身份和两个旧目录的聚合文件数/字节数，并输出：
+
+- 正式普通资料 current/non-current Parent 与 Point 数；
+- 无版本 legacy、版本化 transcript 的候选 Parent 与 Point 数及冻结计划摘要；
+- 媒体状态、转录版本/head 聚合；
+- `source/docs`、`source/media` 的文件、目录、符号链接和字节聚合。
+
+公开 artifact 不包含文件名、相对/绝对路径、业务文件 SHA-256、数据库记录 ID、Parent/Point ID 或正文。preflight 不创建生产备份目录，不写生产数据库，不删除索引，也不切换运行配置。
+
+后续 T12-B 必须使用 preflight 的准确计数和计划摘要重新提交独立 R3 方案。至少包括两个 SQLite、Qdrant snapshot、完整 `CONTENT_ROOT` 和旧目录恢复点；在活动任务为零的维护窗口中冻结并复算相同 ID 集合，归档旧媒体、下线旧索引，再将媒体宿主目录切到 `CONTENT_ROOT/media`、artifact 切到 `CONTENT_ROOT/transcription-artifacts` 并启用 `strict`。任何计数或摘要漂移都停止执行。
+
+T12-B 不自动删除 `/data/business/ragpincheng/source`、`source/docs` 或 `source/media`。解除容器依赖并观察 1 至 2 周后，物理归档或删除仍是单独的 R3 决策。

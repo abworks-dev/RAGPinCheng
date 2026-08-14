@@ -274,9 +274,17 @@ def retry_job(
                 )
             return _job_dto(SQLiteTranscriptionStore(conn).load_job(existing["id"]))
         active = conn.execute(
-            "SELECT id FROM transcription_jobs WHERE media_id=? AND status IN ('pending','running')",
+            """SELECT j.id FROM transcription_jobs j
+               JOIN media_assets m ON m.media_id=j.media_id
+               WHERE j.media_id=? AND j.status IN ('pending','running')
+                 AND m.status <> 'archived'""",
             (media_id,),
         ).fetchone()
+        media = conn.execute(
+            "SELECT status FROM media_assets WHERE media_id=?", (media_id,)
+        ).fetchone()
+        if media is None or media["status"] == "archived":
+            raise HTTPException(status_code=404, detail="媒体不存在")
         if active is not None:
             raise HTTPException(status_code=409, detail="该媒体已有活动转录任务")
         previous = conn.execute(

@@ -258,7 +258,7 @@ Ubuntu 跨节点验证失败都会使用受保护的 activation state 恢复旧 
 ## 依赖与下游消费者
 
 - 依赖文档索引、检索、回答生成、引用与来源面板；
-- 依赖认证（`require_user`）和媒体存储（`media/` 目录挂载）；
+- 依赖认证（`require_user`）和可配置媒体存储；代码默认仍使用 `media/` 兼容目录，T12 生产切换后计划指向 `CONTENT_ROOT/media`；
 - 依赖 `media_assets` 表（`app.sqlite`）和 `media_id` 列迁移。
 
 ## 不变量与安全边界
@@ -272,7 +272,8 @@ Ubuntu 跨节点验证失败都会使用受保护的 activation state 恢复旧 
 - 旧会话缺少 `media_id` 时正常降级（无播放按钮，不报错）；
 - 新媒体和版本字段是向前兼容的 nullable 列，不需要索引 Reset；legacy stable ID 保持。
 - Phase 2 新表为添加式迁移；不删除旧表、不回填人工稿、不触发索引 Reset。
-- `app.sqlite` current head 是唯一正式可见性事实；versioned transcript 在 head DB 损坏/缺失时 fail closed，legacy/普通文档继续可见。
+- `app.sqlite` transcript head 是版本化转录唯一正式可见性事实；versioned transcript 在 head DB 损坏/缺失时 fail closed。`strict` 下版本化转录独立于普通资料 head 放行，双重无版本身份的 legacy 转录不可见；生产尚未切换到 `strict`。
+- `DOCS_DIR`、`MEDIA_DIR` 和 `TRANSCRIPTION_ARTIFACT_DIR` 均可显式配置；旧式人工 Markdown 上传在 `strict` 下拒绝，避免创建无法进入正式版本可见性的源目录稿，自动转录继续使用 managed artifact。
 - experimental Profile 不能自动发布或自动索引；人工 Markdown 路径不经过 Provider。
 - `published` 只在候选索引成功并完成正式 head 原子切换后成立；不存在“已发布、稍后再手动索引”的稳定状态。
 
