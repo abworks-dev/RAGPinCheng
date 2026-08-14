@@ -17,6 +17,9 @@ class TestDeployGitSafety(unittest.TestCase):
         cls.app_only_workflow = (
             ROOT / ".github/workflows/deploy-production-app-emergency.yml"
         ).read_text(encoding="utf-8")
+        cls.app_asr_diagnostic_workflow = (
+            ROOT / ".github/workflows/diagnose-production-app-asr.yml"
+        ).read_text(encoding="utf-8")
         cls.app_backup_recovery_workflow = (
             ROOT / ".github/workflows/recover-production-app-backup.yml"
         ).read_text(encoding="utf-8")
@@ -158,6 +161,23 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertNotIn("git branch -f", workflow)
         self.assertNotIn("deploy-gpu.ps1", workflow)
         self.assertNotIn("promote-gpu-runtime.ps1", workflow)
+
+    def test_app_asr_diagnostic_is_read_only_and_redacts_sensitive_values(self):
+        workflow = self.app_asr_diagnostic_workflow
+
+        self.assertIn("name: Diagnose Production App ASR", workflow)
+        self.assertIn("confirm_diagnostic", workflow)
+        self.assertIn("production-app-asr-diagnostic", workflow)
+        self.assertIn("docker compose -p ragpincheng-prod", workflow)
+        self.assertIn('"${COMPOSE[@]}" exec -T backend python', workflow)
+        self.assertIn("APP_ASR_DIAGNOSTIC", workflow)
+        self.assertIn("capabilities_error_type", workflow)
+        self.assertIn("asr_service_token_configured", workflow)
+        self.assertNotIn("print(ASR_SERVICE_TOKEN", workflow)
+        self.assertNotIn("print(ASR_SERVICE_URL", workflow)
+        self.assertNotIn("docker compose down", workflow)
+        self.assertNotIn("docker compose up", workflow)
+        self.assertNotIn(" stop backend", workflow)
 
     def test_app_only_deployment_refuses_all_active_application_jobs_before_backup(self):
         workflow = self.app_only_workflow
