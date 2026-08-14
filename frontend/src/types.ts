@@ -25,6 +25,7 @@ export type PrepData = {
   final_count: number;
   used_sources: Source[];
   no_source_fallback: boolean;
+  relevance?: Record<string, unknown>;
 };
 
 export type DoneData = {
@@ -34,6 +35,7 @@ export type DoneData = {
   sources: Source[];
   history_chars: number;
   budget: number;
+  finish_reason?: string;
 };
 
 export type ChatEvent =

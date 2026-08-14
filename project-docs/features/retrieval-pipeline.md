@@ -16,6 +16,8 @@
 - Child 命中聚合回 SQLite Parent；
 - BGE reranker 重排；
 - 多轮上下文携带和预算裁剪。
+- 检索结果记录 Top-1/Top-2 rerank、margin 与 RRF 校准信号；相关性门禁
+  `RELEVANCE_GATE_ENABLED` 默认关闭，仅单轮非分解路径具备判定资格。
 
 ### 未实现
 
@@ -76,6 +78,8 @@ ChatSession
 ## 已知限制
 
 - 当前检索质量依赖本地索引与模型状态，README 的历史指标不能代替本次验证；
+- 相关性阈值必须绑定 reranker provider/model 与 policy version；当前策略为
+  `uncalibrated-v1`，在可答/不可答分布校准完成前不得在生产开启；
 - Phase A 4 条比较题样本过薄（且全部是同一文档对、均带强规范编号），任何 delta>0
   须警惕"虚假高收益"，仅供机制层面参考，灰度决策仍需 Phase B。
 

@@ -106,6 +106,10 @@ RERANK_USE_HEADER = True
 # Embedding / rerank provider — "local" (in-process BGE) or "remote" (GPU service)
 EMBED_PROVIDER = os.getenv("EMBED_PROVIDER", "local")
 RERANK_PROVIDER = os.getenv("RERANK_PROVIDER", "local")
+RELEVANCE_GATE_ENABLED = os.getenv("RELEVANCE_GATE_ENABLED", "false").strip().lower() in ("1", "true", "yes", "on")
+RELEVANCE_GATE_MIN_SCORE = float(os.getenv("RELEVANCE_GATE_MIN_SCORE", "0.0"))
+RELEVANCE_GATE_MIN_RRF = float(os.getenv("RELEVANCE_GATE_MIN_RRF", "0.0"))
+RELEVANCE_GATE_POLICY_VERSION = os.getenv("RELEVANCE_GATE_POLICY_VERSION", "uncalibrated-v1")
 
 # Remote GPU service — only used when the provider above is "remote"
 GPU_SERVICE_URL = os.getenv("GPU_SERVICE_URL", "http://127.0.0.1:8100")

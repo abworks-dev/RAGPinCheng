@@ -655,6 +655,7 @@ class PrepEvent(BaseModel):
     final_count: int
     used_sources: list[SourceDTO]
     no_source_fallback: bool = False
+    relevance: dict = Field(default_factory=dict)
 
 
 class DoneEvent(BaseModel):
@@ -664,6 +665,7 @@ class DoneEvent(BaseModel):
     assistant_message_id: int | None = None
     history_chars: int
     budget: int
+    finish_reason: str = "stop"
 
 
 class FeedbackRequest(BaseModel):
