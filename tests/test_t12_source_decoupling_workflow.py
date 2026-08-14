@@ -50,9 +50,11 @@ def test_t12b_workflow_has_independent_backups_exact_apply_and_rollback():
         "--expected-plan-sha256",
         "T12_B_ROLLBACK status=complete",
         "T12_B_DECOUPLE status=success",
-        '"${CONTENT_ROOT}/media"',
-        '"${CONTENT_ROOT}/transcription-artifacts"',
-        '"${CONTENT_ROOT}/legacy-docs"',
+        "/app/content/media",
+        "/app/content/transcription-artifacts",
+        "/app/content/legacy-docs",
+        'root_gid="$(stat -c %g /app/content)"',
+        '[ "$(stat -c %a "${path}")" = "2770" ]',
     ):
         assert required in WORKFLOW
     for forbidden in (
@@ -61,6 +63,7 @@ def test_t12b_workflow_has_independent_backups_exact_apply_and_rollback():
         'rm -rf "${SOURCE_ROOT}"',
         'rm -rf "${SOURCE_DOCS}"',
         'rm -rf "${SOURCE_MEDIA}"',
+        'install -d -o "${ROOT_UID}"',
     ):
         assert forbidden not in WORKFLOW
 
