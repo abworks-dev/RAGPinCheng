@@ -54,6 +54,8 @@ from src.config import (
     FINAL_TOP_K,
     LLM_REWRITE_MODEL,
     PARENTS_DB,
+    RERANKER_MODEL,
+    RERANK_PROVIDER,
     ZHIPU_API_KEY,
 )
 from src.eval.fingerprint import compare, compute_fingerprint, load_baseline
@@ -186,6 +188,19 @@ def _ask(session: ChatSession, question: str) -> tuple[list[str], str, dict]:
     result = session.ask(question)
     pids = [p.parent_id for p in result.final_sources]
     return pids, result.answer_text, dict(result.timings)
+
+
+def _score_snapshot(parents) -> dict:
+    ranked = sorted(parents, key=lambda p: p.score, reverse=True)
+    top1 = float(ranked[0].score) if ranked else None
+    top2 = float(ranked[1].score) if len(ranked) > 1 else None
+    return {
+        "source_count": len(ranked), "top1_score": top1, "top2_score": top2,
+        "score_margin": top1 - top2 if top1 is not None and top2 is not None else None,
+        "top1_rrf": float(ranked[0].rrf_score) if ranked else None,
+        "decomposition_applied": any(p.subquery_idx is not None for p in ranked),
+        "rerank_provider": RERANK_PROVIDER, "reranker_model": RERANKER_MODEL,
+    }
 
 
 def _grade_no_answer(answer_text: str) -> bool:
@@ -621,10 +636,12 @@ def main() -> None:
             if it.kind == "no_answer":
                 session = ChatSession()
                 retrieved, answer_text, timings = _ask(session, it.question)
+                relevance = _score_snapshot(session.last_turn_result.final_sources)
             else:
                 t0 = perf_counter()
                 parents = retrieve(it.question)
                 retrieved = [p.parent_id for p in parents]
+                relevance = _score_snapshot(parents)
                 answer_text = ""
                 timings = {"retrieve": perf_counter() - t0, "total": perf_counter() - t0}
         except Exception as exc:  # noqa: BLE001
@@ -644,6 +661,7 @@ def main() -> None:
                 "item_id": it.id, "kind": it.kind,
                 "compliant": ok, "answer_text": answer_text,
                 "retrieved": retrieved, "timings": timings,
+                "relevance": relevance,
             })
         else:
             hit = grade_one(it.expected_parent_ids, retrieved)
@@ -657,6 +675,7 @@ def main() -> None:
                 "expected": it.expected_parent_ids,
                 "retrieved": retrieved, "hit_rank": hit,
                 "answer_text": answer_text, "timings": timings,
+                "relevance": relevance,
             })
 
         print(
@@ -677,6 +696,7 @@ def main() -> None:
         for tag, item in (("t1", t1), ("t2", t2)):
             try:
                 retrieved, answer_text, timings = _ask(session, item.question)
+                relevance = _score_snapshot(session.last_turn_result.final_sources)
             except Exception as exc:  # noqa: BLE001
                 print(f"[eval] {item.id} FAILED: {exc}")
                 per_item_log.append({"item_id": item.id, "error": str(exc)})
@@ -692,6 +712,7 @@ def main() -> None:
                 "expected": item.expected_parent_ids,
                 "retrieved": retrieved, "hit_rank": hit,
                 "answer_text": answer_text, "timings": timings,
+                "relevance": relevance,
             })
         print(f"[pair {j:>2}/{len(pair_ids)}] {pid}  done")
 

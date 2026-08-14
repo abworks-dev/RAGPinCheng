@@ -25,6 +25,7 @@ from .config import DECOMPOSE_MAX_CONTEXT_CHARS, MAX_CONTEXT_CHARS, QUERY_DECOMP
 from .decompose import maybe_decompose
 from .generate import Answer, GenerationPrep, generate, rewrite_query, stream_generate
 from .query_guard import QueryValidation, validate_search_query
+from .relevance_gate import LOW_CONFIDENCE_MESSAGE, evaluate_relevance
 from .rerank import rerank_scores
 from .retrieve import RetrievedParent, retrieve, retrieve_multi
 
@@ -139,6 +140,7 @@ class TurnResult:
     # Query guard telemetry: populated when the guard rejected the query,
     # identifying which rule triggered.
     guard_reason: str = ""
+    relevance: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -160,6 +162,7 @@ class StreamingTurnPrep:
     timings: dict[str, float]
     no_source_fallback: bool = False
     guard_reason: str = ""
+    relevance: dict = field(default_factory=dict)
 
 
 _USAGE_KEYS = ("prompt_tokens", "completion_tokens", "total_tokens")
@@ -386,6 +389,7 @@ class ChatSession:
             categories=categories,
         )
         timings["retrieve"] = perf_counter() - t
+        relevance = evaluate_relevance(final_sources, has_history=has_history, decomposition_applied=any(p.subquery_idx is not None for p in final_sources)).to_dict()
 
         # No-source escape hatch.
         if not final_sources:
@@ -407,6 +411,29 @@ class ChatSession:
                 rewrite_applied=rewrite_applied,
                 timings=timings,
                 guard_reason="",
+                relevance=relevance,
+            )
+            self.last_turn_result = result
+            return result
+
+        if relevance["action"] == "low_confidence":
+            self.state.append_turn(query, LOW_CONFIDENCE_MESSAGE, sources_for_ui=[])
+            self.state.last_sources = []
+            self.state.last_search_query = search_query
+            timings["generate"] = 0.0
+            timings["total"] = sum(timings.values())
+            result = TurnResult(
+                answer_text=LOW_CONFIDENCE_MESSAGE,
+                sources=[],
+                search_query=search_query,
+                fresh_sources=fresh_sources,
+                final_sources=[],
+                answer=None,
+                history_chars=0,
+                budget=0,
+                rewrite_applied=rewrite_applied,
+                timings=timings,
+                relevance=relevance,
             )
             self.last_turn_result = result
             return result
@@ -446,6 +473,7 @@ class ChatSession:
             usage=usage_total,
             usage_by_call=usage_by_call,
             guard_reason="",
+            relevance=relevance,
         )
         self.last_turn_result = result
         return result
@@ -521,6 +549,7 @@ class ChatSession:
             categories=categories,
         )
         timings["retrieve"] = perf_counter() - t
+        relevance = evaluate_relevance(final_sources, has_history=has_history, decomposition_applied=any(p.subquery_idx is not None for p in final_sources)).to_dict()
 
         # No-source path: stream the fallback message and finalize.
         if not final_sources:
@@ -535,6 +564,7 @@ class ChatSession:
                 budget=0,
                 timings=dict(timings),
                 no_source_fallback=True,
+                relevance=relevance,
             )
 
             def _fallback_iter() -> Iterator[str]:
@@ -554,6 +584,24 @@ class ChatSession:
                 rewrite_usage=dict(rewrite_usage),
                 guard_reason="",
             )
+            return prep, stream
+
+        if relevance["action"] == "low_confidence":
+            prep = StreamingTurnPrep(
+                search_query=search_query,
+                rewrite_applied=rewrite_applied,
+                fresh_sources=fresh_sources,
+                final_sources=[],
+                used_sources=[],
+                history_chars=0,
+                budget=0,
+                timings=dict(timings),
+                no_source_fallback=True,
+                relevance=relevance,
+            )
+            def _low_confidence_iter() -> Iterator[str]:
+                yield LOW_CONFIDENCE_MESSAGE
+            stream = self._wrap_stream(_low_confidence_iter(), query=query, search_query=search_query, rewrite_applied=rewrite_applied, fresh_sources=fresh_sources, final_sources=[], gen_prep=None, history_chars=0, budget=0, timings_so_far=dict(timings), rewrite_usage=dict(rewrite_usage), relevance=relevance)
             return prep, stream
 
         # ④ STREAM GENERATE with history + dynamic budget.
@@ -576,6 +624,7 @@ class ChatSession:
             history_chars=history_chars,
             budget=budget,
             timings=dict(timings),
+            relevance=relevance,
         )
 
         stream = self._wrap_stream(
@@ -590,6 +639,7 @@ class ChatSession:
             budget=budget,
             timings_so_far=dict(timings),
             rewrite_usage=dict(rewrite_usage),
+            relevance=relevance,
         )
         return prep, stream
 
@@ -608,6 +658,7 @@ class ChatSession:
         timings_so_far: dict[str, float],
         rewrite_usage: dict,
         guard_reason: str = "",
+        relevance: dict | None = None,
     ) -> Iterator[str]:
         """Accumulate streamed text, time the generate stage, then finalize.
 
@@ -640,6 +691,7 @@ class ChatSession:
                 timings=timings,
                 rewrite_usage=rewrite_usage,
                 guard_reason=guard_reason,
+                relevance=dict(relevance or {}),
             )
 
     def _finalize_streaming_turn(
@@ -657,6 +709,7 @@ class ChatSession:
         timings: dict[str, float],
         rewrite_usage: dict,
         guard_reason: str = "",
+        relevance: dict | None = None,
     ) -> None:
         """Mirror of the ⑤ UPDATE STATE block in `ask()`, for the streaming path."""
         if gen_prep is None:
@@ -684,6 +737,7 @@ class ChatSession:
                 usage=usage_total,
                 usage_by_call=usage_by_call,
                 guard_reason=guard_reason,
+                relevance=dict(relevance or {}),
             )
             return
 
@@ -717,4 +771,5 @@ class ChatSession:
             usage=usage_total,
             usage_by_call=usage_by_call,
             guard_reason="",
+            relevance=dict(relevance or {}),
         )

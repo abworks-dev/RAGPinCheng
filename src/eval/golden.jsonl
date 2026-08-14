@@ -73,6 +73,30 @@
 {"id": "eval-no_answer-0004", "kind": "no_answer", "question": "玻璃幕墙的抗风压变形性能分级有哪些？", "notes": "建筑幕墙,当前语料未覆盖幕墙规范"}
 {"id": "eval-no_answer-0005", "kind": "no_answer", "question": "预应力混凝土连续梁桥的悬臂浇筑施工顺序是什么？", "notes": "桥梁工程,超出现有语料"}
 {"id": "eval-no_answer-0006", "kind": "no_answer", "question": "盾构法隧道管片的拼装方式有哪几种？", "notes": "隧道盾构施工,当前语料无相关规范"}
+{"id":"eval-no_answer-0007","kind":"no_answer","question":"办公楼中央空调冷冻水系统的水力平衡怎么计算？","notes":"合成校准：相邻工程领域但当前资料无答案。"}
+{"id":"eval-no_answer-0008","kind":"no_answer","question":"消防水泵扬程和流量应怎样选型？","notes":"合成校准：机电领域不可答。"}
+{"id":"eval-no_answer-0009","kind":"no_answer","question":"岩土工程勘察的钻孔间距如何确定？","notes":"合成校准：领域相近但语料无依据。"}
+{"id":"eval-no_answer-0010","kind":"no_answer","question":"施工现场塔吊基础承载力如何验算？","notes":"合成校准：专业问题但当前资料无答案。"}
+{"id":"eval-no_answer-0011","kind":"no_answer","question":"城市道路交通信号配时周期如何计算？","notes":"合成校准：明显越出企业知识库范围。"}
+{"id":"eval-no_answer-0012","kind":"no_answer","question":"医院洁净手术部的换气次数要求是多少？","notes":"合成校准：建筑专业相邻领域。"}
+{"id":"eval-no_answer-0013","kind":"no_answer","question":"水利闸门启闭机的设计荷载怎么确定？","notes":"合成校准：工程领域越域。"}
+{"id":"eval-no_answer-0014","kind":"no_answer","question":"地铁接触网的悬挂形式有哪些？","notes":"合成校准：工程领域越域。"}
+{"id":"eval-no_answer-0015","kind":"no_answer","question":"光伏组件串联数量如何根据逆变器参数计算？","notes":"合成校准：设备技术越域。"}
+{"id":"eval-no_answer-0016","kind":"no_answer","question":"企业所得税研发费用加计扣除如何申报？","notes":"合成校准：明显非 BIM 业务。"}
+{"id":"eval-no_answer-0017","kind":"no_answer","question":"劳动合同试用期最长可以约定多久？","notes":"合成校准：法律问题越域。"}
+{"id":"eval-no_answer-0018","kind":"no_answer","question":"Python 的异步生成器如何正确关闭？","notes":"合成校准：通用软件问题越域。"}
+{"id":"eval-no_answer-0019","kind":"no_answer","question":"Revit 插件使用 OAuth 登录时刷新令牌怎么设计？","notes":"合成校准：含领域词但当前资料无依据。"}
+{"id":"eval-no_answer-0020","kind":"no_answer","question":"CAD 图纸采用区块链存证应该选择什么共识算法？","notes":"合成校准：词汇相似但实际越域。"}
+{"id":"eval-no_answer-0021","kind":"no_answer","question":"GB 50017 第 99.9 条规定了什么？","notes":"合成校准：规范编号存在但条文目标不存在。"}
+{"id":"eval-no_answer-0022","kind":"no_answer","question":"JGJ 130 第 88 章的脚手架要求是什么？","notes":"合成校准：规范编号存在但章节目标不存在。"}
+{"id":"eval-no_answer-0023","kind":"no_answer","question":"GB 50011 是否规定了海上风机叶片的疲劳寿命？","notes":"合成校准：规范词汇相似但问题无依据。"}
+{"id":"eval-no_answer-0024","kind":"no_answer","question":"Q355 钢材用于航天器隔热层时厚度如何确定？","notes":"合成校准：包含专业实体但应用越域。"}
+{"id":"eval-no_answer-0025","kind":"no_answer","question":"阿斯顿发科技拉开收到附件开发活动","notes":"合成校准：连续随机中文输入。"}
+{"id":"eval-no_answer-0026","kind":"no_answer","question":"asdfghjklqwertyuiopzxcvbnm","notes":"合成校准：键盘随机英文输入。"}
+{"id":"eval-no_answer-0027","kind":"no_answer","question":"模型模型模型模型图纸图纸图纸资料资料资料","notes":"合成校准：领域词重复噪声。"}
+{"id":"eval-no_answer-0028","kind":"no_answer","question":"这个那个然后所以就是可能大概怎么办","notes":"合成校准：无明确对象的长模糊输入。"}
+{"id":"eval-no_answer-0029","kind":"no_answer","question":"M20 Q355 Revit CAD GB50017 到底哪个好？","notes":"合成校准：专业关键词堆叠但无可回答比较对象。"}
+{"id":"eval-no_answer-0030","kind":"no_answer","question":"上一条里面那个参数换成另外一个以后呢？","notes":"合成校准：无历史上下文的伪追问。"}
 {"id": "eval-comparison-0001", "kind": "comparison", "question": "公共建筑节能设计标准GB 50189与建筑节能与可再生能源利用通用规范GB 55015在供暖空调节能设计要求上分别有哪些规定？", "doc_type": "pdf", "category": "设计规范", "notes": "GB50189 vs GB55015 两侧覆盖题; expected_sides 用生产实际召回块标注(数据驱动); 衡量两侧能否同进top-8", "expected_sides": [["90f95e4c-195a-5bd7-afcf-c7ebf7e0ee66", "aee448be-2113-5638-90dd-195af89f46bc", "55c55a62-844c-5dae-8878-46322097b7cf", "5d4a21de-daa2-50c3-9f45-c8d2ed7417c4"], ["fa6a7c97-6f58-5a84-a084-0c1077267009", "9165ba02-4345-5146-a2e0-e75df4bc6973"]], "expected_parent_ids": ["90f95e4c-195a-5bd7-afcf-c7ebf7e0ee66", "aee448be-2113-5638-90dd-195af89f46bc", "55c55a62-844c-5dae-8878-46322097b7cf", "5d4a21de-daa2-50c3-9f45-c8d2ed7417c4", "119f0c77-6cdb-5f69-8263-d059c54481c1", "fa6a7c97-6f58-5a84-a084-0c1077267009", "d8560ff7-1de2-58f8-b2e7-d1ebc19e883a", "9165ba02-4345-5146-a2e0-e75df4bc6973"]}
 {"id": "eval-comparison-0002", "kind": "comparison", "question": "对比公共建筑节能设计标准GB 50189与建筑节能通用规范GB 55015对可再生能源和太阳能利用的规定？", "doc_type": "pdf", "category": "设计规范", "notes": "GB50189 vs GB55015 两侧覆盖题; expected_sides 用生产实际召回块标注(数据驱动); 衡量两侧能否同进top-8", "expected_sides": [["b0a8c5f0-2c9e-588a-bb81-a5dfdd5b0fe9", "29edc411-a2ee-58d7-92a5-e1413d5dbd6c", "ee2420d4-dd19-5173-b4c4-9cc692a9e5e7", "d7ed96be-7034-5c40-ac73-f4aff237ab13"], ["f141480f-6e4b-5a2f-8ccf-9b6360e31f25", "2442cd94-d6d8-5e2a-bf1f-19e22419155e", "7fc71ebf-92d9-5dc7-b4bd-76e5089558f8", "554ab62c-7901-5fe1-b2ab-7559bcd6cc39"]], "expected_parent_ids": ["b0a8c5f0-2c9e-588a-bb81-a5dfdd5b0fe9", "29edc411-a2ee-58d7-92a5-e1413d5dbd6c", "ee2420d4-dd19-5173-b4c4-9cc692a9e5e7", "f141480f-6e4b-5a2f-8ccf-9b6360e31f25", "d7ed96be-7034-5c40-ac73-f4aff237ab13", "2442cd94-d6d8-5e2a-bf1f-19e22419155e", "7fc71ebf-92d9-5dc7-b4bd-76e5089558f8", "554ab62c-7901-5fe1-b2ab-7559bcd6cc39"]}
 {"id": "eval-comparison-0003", "kind": "comparison", "question": "公共建筑节能设计标准GB 50189与建筑节能与可再生能源利用通用规范GB 55015对空调冷热负荷计算和设备能效有哪些不同要求？", "doc_type": "pdf", "category": "设计规范", "notes": "GB50189 vs GB55015 两侧覆盖题; expected_sides 用生产实际召回块标注(数据驱动); 衡量两侧能否同进top-8", "expected_sides": [["90f95e4c-195a-5bd7-afcf-c7ebf7e0ee66", "f3e2d4fd-d38c-52dd-b0a5-b3d6d5bc228d", "b686946b-2e0d-54ae-868b-84a0b7eac270", "55c55a62-844c-5dae-8878-46322097b7cf"], ["54fe4c9a-d26c-5fb9-8435-ae055e0850d2", "d3b595fe-ee79-5075-8d0e-27551946a4b1"]], "expected_parent_ids": ["90f95e4c-195a-5bd7-afcf-c7ebf7e0ee66", "f3e2d4fd-d38c-52dd-b0a5-b3d6d5bc228d", "54fe4c9a-d26c-5fb9-8435-ae055e0850d2", "b686946b-2e0d-54ae-868b-84a0b7eac270", "55c55a62-844c-5dae-8878-46322097b7cf", "ea4897e9-556c-5343-8931-0cc132d87bbc", "7b4fbd5e-a5b0-5111-b2f6-43fac1a516ab", "d3b595fe-ee79-5075-8d0e-27551946a4b1"]}

@@ -158,6 +158,30 @@ describe("Message assistant actions", () => {
     expect(screen.getByRole("status")).toHaveTextContent("未检索到可用资料，本回答没有知识库来源");
   });
 
+  it("shows a destructive status when retrieval confidence blocks generation", () => {
+    render(
+      <Message
+        msg={assistant({
+          content: "未找到足够相关的资料。请补充具体的查询对象。",
+          sources: [],
+          streaming: false,
+          stage: "done",
+          prep: prep(0, true),
+          done: {
+            answer_text: "未找到足够相关的资料。请补充具体的查询对象。",
+            timings: {}, sources: [], history_chars: 0, budget: 0,
+            finish_reason: "retrieval_low_confidence",
+          },
+        })}
+        conversationId="conversation-1"
+        turnIndex={1}
+      />,
+    );
+    const status = screen.getByRole("status");
+    expect(status).toHaveTextContent("资料相关性不足，未生成回答");
+    expect(status.querySelector(".bg-destructive")).toBeInTheDocument();
+  });
+
   it("copies a user question over the HTTP fallback and shows a temporary check", async () => {
     vi.useFakeTimers();
     Object.defineProperty(navigator, "clipboard", {

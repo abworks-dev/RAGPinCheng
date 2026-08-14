@@ -62,10 +62,15 @@ function AnswerStatus({ msg }: { msg: ChatMessage }) {
     tone = noSources ? "destructive" : "success";
     pulse = true;
   } else if (stage === "done" && msg.content) {
-    label = noSources
+    if (msg.done?.finish_reason === "retrieval_low_confidence") {
+      label = "资料相关性不足，未生成回答";
+      tone = "destructive";
+    } else {
+      label = noSources
       ? "未检索到可用资料，本回答没有知识库来源"
       : `已检索 ${sourceCount} 份资料，回答基于${categoryLabel}`;
-    tone = noSources ? "destructive" : "success";
+      tone = noSources ? "destructive" : "success";
+    }
   }
 
   if (!label) return null;

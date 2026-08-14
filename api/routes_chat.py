@@ -314,6 +314,7 @@ async def chat(
                         for s in session._sources_for_ui(prep.used_sources)
                     ],
                     "no_source_fallback": prep.no_source_fallback,
+                    "relevance": prep.relevance,
                 })
 
                 _STOP = object()
@@ -377,6 +378,7 @@ async def chat(
                         "timings": result.timings,
                         "history_chars": result.history_chars,
                         "budget": result.budget,
+                        "finish_reason": "retrieval_low_confidence" if result.relevance.get("action") == "low_confidence" else "stop",
                         "sources": [
                             source_to_dto(s).model_dump()
                             for s in session._sources_for_ui(result.sources)
@@ -435,6 +437,7 @@ def _emit_turn_telemetry(
             "timings": {k: round(float(v), 4) for k, v in timings.items()},
             "usage": dict(result.usage) if result and result.usage else {},
             "usage_by_call": usage_by_call,
+            "relevance": dict(result.relevance) if result and result.relevance else {},
         }
         if error:
             payload["error"] = error
