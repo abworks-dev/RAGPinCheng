@@ -582,13 +582,18 @@ jobs:
             docker inspect "${CONTAINER_ID}" | \
               EXPECTED_MEDIA="${MEDIA_HOST_PATH}" python3 -c '
           import json, os, sys
+          from pathlib import Path
           container = json.load(sys.stdin)[0]
           mounts = {item["Destination"]: item for item in container.get("Mounts", [])}
           docs = mounts.get("/app/docs")
-          assert docs is not None
-          assert docs.get("Type") == "tmpfs"
-          assert mounts.get("/app/media", {}).get("Source") == os.environ["EXPECTED_MEDIA"]
-          assert mounts.get("/app/content", {}).get("Source") == "/data/business/ragpincheng/content"
+          assert docs is not None, "missing /app/docs mount"
+          assert docs.get("Type") == "tmpfs", f"unexpected docs mount type: {docs.get('Type')}"
+          media = mounts.get("/app/media", {})
+          content = mounts.get("/app/content", {})
+          assert media.get("Type") == "bind", f"unexpected media mount type: {media.get('Type')}"
+          assert Path(media.get("Source", "")).resolve() == Path(os.environ["EXPECTED_MEDIA"]).resolve(), f"unexpected media mount source: {media.get('Source')}"
+          assert content.get("Type") == "bind", f"unexpected content mount type: {content.get('Type')}"
+          assert Path(content.get("Source", "")).resolve() == Path("/data/business/ragpincheng/content").resolve(), f"unexpected content mount source: {content.get('Source')}"
           assert all(not item.get("Source", "").startswith("/data/business/ragpincheng/source") for item in mounts.values())
           '
             if "${COMPOSE[@]}" exec -T backend sh -c ': > /app/docs/.write-probe' 2>/dev/null; then
