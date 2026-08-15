@@ -5,16 +5,11 @@ services:
     volumes: !override
       - ${DATA_PATH:?DATA_PATH is required}:/app/data
       - ${CONTENT_HOST_PATH:?CONTENT_HOST_PATH is required}:/app/content
-      # Production strict mode no longer accepts filesystem documents. Keep the
-      # legacy runtime path as an empty, read-only tmpfs so old fallback code
-      # cannot write files and no host compatibility directory is required.
-      - type: tmpfs
-        target: /app/docs
-        read_only: true
-        tmpfs:
-          size: 1048576
-          mode: 0555
       - ${MEDIA_HOST_PATH:?MEDIA_HOST_PATH is required}:/app/media
+    # Use the service-level form for compatibility with the production Compose
+    # runtime. The volume override above removes every legacy /app/docs bind.
+    tmpfs:
+      - /app/docs:ro,size=1048576,mode=0555
 
 # Production owns this network independently of the backend container. Mark it
 # external so a backend-only recreate cannot remove Qdrant or LibreOffice
