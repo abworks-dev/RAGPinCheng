@@ -59,7 +59,7 @@ test("索引监控任务区域 accepted golden", async ({ page }) => {
     await page.getByRole("button", { name: "展开管理功能" }).click();
   }
   await page.getByRole("button", { name: "索引任务", exact: true }).click();
-  const managedActivity = page.locator('section[aria-labelledby="managed-index-title"]');
+  const managedActivity = page.locator('[aria-labelledby="managed-index-title"]');
   await expect(page.getByText("文档解析服务请求失败。", { exact: true })).toBeVisible();
   const viewport = page.viewportSize()!;
   await expect(managedActivity).toHaveScreenshot(`index-monitor-managed-normal-${viewport.width}x${viewport.height}.png`);
