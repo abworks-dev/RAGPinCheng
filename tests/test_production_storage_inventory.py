@@ -75,6 +75,7 @@ def test_inventory_classifies_candidate_release_and_active_references(tmp_path: 
     for candidate_id in ("101", "102", "broken", "103"):
         (dependency_root / f"candidate-{candidate_id}").mkdir(parents=True)
         (dependency_root / f"candidate-{candidate_id}" / "wheelhouse.bin").write_bytes(b"x")
+    (dependency_root / "candidate-103" / "run.lock").write_text("active", encoding="ascii")
     (program_root / "releases" / "101").mkdir(parents=True)
     (data_root / "config" / "releases" / "101").mkdir(parents=True)
     (program_root / "releases" / "101" / "release-manifest.json").write_text(
@@ -100,7 +101,8 @@ def test_inventory_classifies_candidate_release_and_active_references(tmp_path: 
     )
     assert result.returncode == 0, result.stderr
     candidates = {item["candidate_id"]: item for item in json.loads(report_path.read_text(encoding="utf-8-sig"))["candidates"]}
-    assert candidates["101"]["status"] == "active"
+    assert candidates["101"]["status"] == "identity-conflict"
+    assert "active-release-state" in candidates["101"]["reasons"]
     assert candidates["102"]["status"] == "rollback-referenced"
-    assert candidates["103"]["status"] == "dependency-only"
+    assert candidates["103"]["status"] == "active-marker"
     assert candidates["broken"]["status"] == "unknown-name"

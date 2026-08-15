@@ -19,6 +19,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'asr-release.ps1')
 
 function Measure-Tree {
     param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Path)
@@ -44,6 +45,11 @@ function Measure-Tree {
             }
             $bytes += [int64]$entry.Length
             $files++
+        }
+        foreach ($entry in @(Get-ChildItem -LiteralPath $root.FullName -Directory -Force -Recurse -ErrorAction Stop)) {
+            if (($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                $reparsePointsSkipped++
+            }
         }
     }
     catch {
@@ -111,6 +117,13 @@ function Get-CandidateInventory {
     if (-not (Test-Path -LiteralPath $dependencyRoot -PathType Container)) { return $items }
     $active = Get-JsonFile -Path (Join-Path $DataRoot 'release-state\active.json')
     $activeId = if ($active -and ($active.PSObject.Properties.Name -contains 'candidate_id')) { [string]$active.candidate_id } else { '' }
+    $activeManifestSha256 = if ($active -and ($active.PSObject.Properties.Name -contains 'release_manifest_sha256')) { [string]$active.release_manifest_sha256 } else { '' }
+    try {
+        $processes = @(Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object { $_.ProcessId -ne $PID } | Select-Object ExecutablePath, CommandLine)
+    }
+    catch {
+        $processes = $null
+    }
     $rollbackIds = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     if ($BackupRoot -and (Test-Path -LiteralPath $BackupRoot -PathType Container)) {
         foreach ($statePath in @(Get-ChildItem -LiteralPath $BackupRoot -Filter 'candidate-activation-state.json' -File -Recurse -Force -ErrorAction SilentlyContinue)) {
@@ -137,11 +150,50 @@ function Get-CandidateInventory {
             if (-not $manifest) { $status = 'release-incomplete'; $reasons.Add('manifest-missing') }
             elseif ($manifest.PSObject.Properties.Name -contains '__parse_error') { $status = 'identity-conflict'; $reasons.Add('manifest-invalid-json') }
             elseif ([string]$manifest.candidate_id -ne $id) { $status = 'identity-conflict'; $reasons.Add('manifest-candidate-id-mismatch') }
-            else { $status = 'staged-complete' }
+            else {
+                try {
+                    $expectedSha = if ($id -eq $activeId) { $activeManifestSha256 } else { '' }
+                    Read-AsrReleaseManifest -ProgramRoot $ProgramRoot -DataRoot $DataRoot -CandidateId $id -ExpectedSha256 $expectedSha | Out-Null
+                    $status = 'staged-complete'
+                }
+                catch {
+                    $status = 'identity-conflict'
+                    $reasons.Add('release-contract-invalid')
+                }
+            }
         }
-        if ($id -eq $activeId) { $status = 'active'; $reasons.Add('active-release-state') }
+        if ($id -eq $activeId) {
+            $reasons.Add('active-release-state')
+            if ($status -ne 'identity-conflict') { $status = 'active' }
+        }
         elseif ($rollbackIds.Contains($id)) { $status = 'rollback-referenced'; $reasons.Add('activation-state-reference') }
         $measurement = Measure-Tree -Path $directory.FullName
+        $reparseCount = if ($measurement.Contains('reparse_points_skipped')) { [int]$measurement.reparse_points_skipped } else { 0 }
+        if ($measurement.status -eq 'reparse-point-skipped' -or $reparseCount -gt 0) {
+            $status = 'reparse-point'
+            $reasons.Add('candidate-tree-reparse-point')
+        }
+        elseif ($measurement.status -ne 'measured') {
+            $status = 'measurement-failed'
+            $reasons.Add('candidate-tree-measurement-failed')
+        }
+        elseif ($null -eq $processes) {
+            $status = 'process-inspection-failed'
+            $reasons.Add('process-inventory-unavailable')
+        }
+        elseif (@($processes | Where-Object { ([string]$_.ExecutablePath).IndexOf($directory.FullName, [StringComparison]::OrdinalIgnoreCase) -ge 0 -or ([string]$_.CommandLine).IndexOf($directory.FullName, [StringComparison]::OrdinalIgnoreCase) -ge 0 }).Count -gt 0) {
+            $status = 'active-process'
+            $reasons.Add('process-references-candidate')
+        }
+        else {
+            foreach ($marker in @('.active', '.lock', 'run.lock')) {
+                if (@(Get-ChildItem -LiteralPath $directory.FullName -Filter $marker -File -Force -Recurse -ErrorAction SilentlyContinue).Count -gt 0) {
+                    $status = 'active-marker'
+                    $reasons.Add("active-marker-$marker")
+                    break
+                }
+            }
+        }
         $items += [ordered]@{
             candidate_id = $id
             status = $status
