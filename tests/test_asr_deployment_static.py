@@ -19,6 +19,15 @@ def test_active_asr_restart_is_identity_bound_and_reversible():
     assert '"asr-active-release/1"' in script
     assert "Read-AsrReleaseManifest" in script
     assert 'status = "rollback-not-required"' in script
+    assert '"services/asr_service/app.py"' in script
+    assert '"asr_service/app.py"' in script
+    assert "Get-OwnedListenerIds" in script
+    assert "Refusing to modify an unexpected process listening on TCP 8200" in script
+    assert "Wait-RunningHealthy" in script
+    assert "bootstrap_replaced" in script
+    assert "Install-FileAtomic" in script
+    assert "[IO.File]::Replace" in script
+    assert '$context.module -eq "services.asr_service.app:create_app"' in script
     assert '[string]$actions[0].Execute -ne "powershell.exe"' in script
     assert '[string]$actions[0].Arguments -ne $expectedArguments' in script
     assert '[string]$task.Principal.UserId -ne "Administrator"' in script
@@ -28,7 +37,6 @@ def test_active_asr_restart_is_identity_bound_and_reversible():
     assert "Unregister-ScheduledTask" not in script
     assert "ASR_SERVICE_ENABLED" not in script
     assert "Write-AsrJsonAtomic" not in script
-    assert "Stop-Process" not in script
     assert "Remove-Item" not in script
 
     assert "name: Restart Active Windows ASR Production" in workflow
@@ -41,6 +49,13 @@ def test_active_asr_restart_is_identity_bound_and_reversible():
     assert "whisperx-large-v3-zh-align-v1" in workflow
     assert "deploy-asr.ps1" not in workflow
     assert "promote-asr-candidate.ps1" not in workflow
+
+    start = read("scripts/start-asr-service.ps1")
+    assert '"services/asr_service/app.py"' in start
+    assert '"asr_service/app.py"' in start
+    assert '"services.asr_service.app:create_app"' in start
+    assert '"asr_service.app:create_app"' in start
+    assert "exactly one supported application layout" in start
 
 
 def test_faster_whisper_production_admission_is_bound_to_runtime_contract_evidence():
@@ -395,7 +410,7 @@ def test_service_secret_is_not_passed_on_scheduled_task_command_line():
 def test_start_script_does_not_treat_uvicorn_stderr_as_a_terminating_error():
     start = read("scripts/start-asr-service.ps1")
     invocation = (
-        "& $python -m uvicorn services.asr_service.app:create_app --factory "
+        "& $python -m uvicorn $appModule --factory "
         "--host $env:ASR_SERVICE_HOST --port $env:ASR_SERVICE_PORT *>> $logFile"
     )
     assert '$savedErrorActionPreference = $ErrorActionPreference' in start
