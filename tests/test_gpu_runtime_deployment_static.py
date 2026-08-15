@@ -72,6 +72,7 @@ def test_candidate_resolver_is_manual_d_drive_isolated_and_evidence_only():
 
     assert "workflow_dispatch:" in workflow
     assert "confirm_resolution:" in workflow
+    assert "suspend_production_service:" in workflow
     assert "default: false" in workflow
     assert "production-gpu-exclusive" in workflow
     assert "runs-on: [self-hosted, windows, production, gpu]" in workflow
@@ -86,6 +87,14 @@ def test_candidate_resolver_is_manual_d_drive_isolated_and_evidence_only():
     assert "TORCH_WHEEL_SEED_ROOT" in workflow
     assert "PRODUCTION_GPU_PYTHON_PATH" in workflow
     assert "-BasePython $env:GPU_BASE_PYTHON" in workflow
+    assert "resolve-gpu-runtime-maintenance.ps1" in workflow
+    assert "GPU_SERVICE_TOKEN" in workflow
+    maintenance = read("scripts/resolve-gpu-runtime-maintenance.ps1")
+    assert "current-release.json" in maintenance
+    assert "Refusing to stop an unexpected process listening on TCP 8100" in maintenance
+    assert "finally" in maintenance
+    assert "promote-gpu-runtime.ps1" in maintenance
+    assert "GPU_RESOLVER_MAINTENANCE status=restored" in maintenance
 
     assert 'StartsWith("D:\\"' in script
     assert '"-m", "venv"' in script

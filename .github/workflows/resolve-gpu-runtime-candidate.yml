@@ -8,6 +8,11 @@ on:
         required: true
         default: false
         type: boolean
+      suspend_production_service:
+        description: Confirm temporary stop and automatic restore of the current GPU release
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -28,9 +33,12 @@ jobs:
       REPO_PATH: ${{ vars.PRODUCTION_REPO_PATH }}
       RESOLVER_ROOT: ${{ vars.PRODUCTION_RESOLVER_ROOT }}
       TORCH_WHEEL_SEED_ROOT: ${{ vars.PRODUCTION_TORCH_WHEEL_SEED_ROOT }}
+      RUNTIME_ROOT: ${{ vars.PRODUCTION_RUNTIME_ROOT }}
+      BACKUP_DIR: ${{ vars.PRODUCTION_BACKUP_DIRECTORY }}
       RESOLVER_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
       RESOLVER_ARTIFACT_ROOT: ${{ vars.PRODUCTION_RESOLVER_ARTIFACT_ROOT }}\${{ github.run_id }}-${{ github.run_attempt }}\artifacts
       GIT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GPU_SERVICE_TOKEN: ${{ secrets.GPU_SERVICE_TOKEN }}
       DEPLOY_COMMIT_SHA: ${{ github.sha }}
       DEPLOY_HTTP_PROXY: ${{ vars.DEPLOY_HTTP_PROXY }}
     steps:
@@ -41,6 +49,12 @@ jobs:
           $ErrorActionPreference = "Stop"
           if (-not [Convert]::ToBoolean("${{ inputs.confirm_resolution }}")) {
             throw "confirm_resolution must be explicitly enabled"
+          }
+          if (-not [Convert]::ToBoolean("${{ inputs.suspend_production_service }}")) {
+            throw "suspend_production_service must be explicitly enabled"
+          }
+          if ([string]::IsNullOrWhiteSpace($env:GPU_SERVICE_TOKEN)) {
+            throw "GPU_SERVICE_TOKEN is required for automatic production restore"
           }
           Set-Location -LiteralPath $env:REPO_PATH
           $basic = [Convert]::ToBase64String(
@@ -77,14 +91,17 @@ jobs:
           }
 
           $global:LASTEXITCODE = 0
-          & "${env:REPO_PATH}\scripts\resolve-gpu-runtime.ps1" `
+          & "${env:REPO_PATH}\scripts\resolve-gpu-runtime-maintenance.ps1" `
             -RepositoryPath $env:REPO_PATH `
             -BasePython $env:GPU_BASE_PYTHON `
             -ResolverRoot $env:RESOLVER_ROOT `
             -TorchWheelSeedRoot $env:TORCH_WHEEL_SEED_ROOT `
+            -RuntimeRoot $env:RUNTIME_ROOT `
+            -BackupDirectory $env:BACKUP_DIR `
             -RunId $env:RESOLVER_RUN_ID `
             -ModelCacheSource $modelCacheSource `
-            -CommitSha $env:DEPLOY_COMMIT_SHA
+            -CommitSha $env:DEPLOY_COMMIT_SHA `
+            -GpuServiceToken $env:GPU_SERVICE_TOKEN
           if ($LASTEXITCODE -ne 0) {
             throw "GPU runtime candidate resolution did not complete"
           }
