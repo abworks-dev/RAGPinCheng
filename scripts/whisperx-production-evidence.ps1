@@ -75,6 +75,44 @@ function Assert-WhisperXRealDirectory {
     }
 }
 
+function Assert-WhisperXRealFile {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Label
+    )
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw "$Label is missing"
+    }
+    $item = Get-Item -LiteralPath $Path -Force
+    if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+        throw "$Label cannot be a reparse point"
+    }
+    if ([int64]$item.Length -le 0) {
+        throw "$Label is empty"
+    }
+}
+
+function Get-QualifiedWhisperXNltkRoot {
+    param([Parameter(Mandatory = $true)][string]$WhisperXRoot)
+    $root = (Resolve-Path -LiteralPath $WhisperXRoot).Path
+    $nltkRoot = Assert-WhisperXPathWithinRoot `
+        -Path (Join-Path $root "nltk") `
+        -Root $root `
+        -Label "Qualified WhisperX NLTK root"
+    Assert-WhisperXRealDirectory -Path $nltkRoot -Label "Qualified WhisperX NLTK root"
+    $punktRoot = Assert-WhisperXPathWithinRoot `
+        -Path (Join-Path $nltkRoot "tokenizers\punkt_tab\english") `
+        -Root $nltkRoot `
+        -Label "Qualified WhisperX punkt_tab resource"
+    Assert-WhisperXRealDirectory -Path $punktRoot -Label "Qualified WhisperX punkt_tab resource"
+    foreach ($name in @("abbrev_types.txt", "collocations.tab", "ortho_context.tab", "sent_starters.txt")) {
+        Assert-WhisperXRealFile `
+            -Path (Join-Path $punktRoot $name) `
+            -Label ("Qualified WhisperX punkt_tab resource " + $name)
+    }
+    return $nltkRoot
+}
+
 function Assert-WhisperXPathWithinRoot {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
@@ -300,6 +338,7 @@ function Get-QualifiedWhisperXEvidence {
     }
     $cache = Read-QualifiedWhisperXWheelCache -WhisperXRoot $root -CacheKey ([string]$verdict.wheel_cache_key)
     $modelRoot = Join-Path $root "models"
+    $nltkRoot = Get-QualifiedWhisperXNltkRoot -WhisperXRoot $root
     return [pscustomobject]@{
         RunId = $RunId
         CommitSha = $CommitSha
@@ -311,6 +350,7 @@ function Get-QualifiedWhisperXEvidence {
         ModelManifestPath = Join-Path $modelRoot "whisper-large-v3\$($script:WhisperXAsrRevision)\model-manifest.json"
         AlignModelCacheRoot = $modelRoot
         AlignModelManifestPath = Join-Path $modelRoot "wav2vec2-large-xlsr-53-chinese-zh-cn\$($script:WhisperXAlignRevision)\model-manifest.json"
+        NltkRoot = $nltkRoot
     }
 }
 
@@ -381,6 +421,7 @@ import torch
 import torchaudio
 import torchvision
 import whisperx
+import nltk
 from services.asr_service.model_cache import validate_whisperx_align_cache, validate_whisperx_cache
 
 venv = Path(sys.prefix).resolve()
@@ -402,6 +443,11 @@ asr = validate_whisperx_cache(Path(sys.argv[1]), Path(sys.argv[2]))
 align = validate_whisperx_align_cache(Path(sys.argv[3]), Path(sys.argv[4]))
 if not asr.available or not align.available:
     raise RuntimeError("WhisperX model cache unavailable")
+nltk_root = Path(sys.argv[5])
+if not nltk_root.is_dir():
+    raise RuntimeError("WhisperX NLTK root unavailable")
+nltk.data.path.insert(0, str(nltk_root))
+nltk.data.find("tokenizers/punkt_tab/english/")
 print("whisperx-production-runtime-verified")
 '@
     $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($verification))
@@ -410,7 +456,8 @@ print("whisperx-production-runtime-verified")
     try {
         & $PythonPath -c $bootstrap $encoded `
             $Evidence.ModelCacheRoot $Evidence.ModelManifestPath `
-            $Evidence.AlignModelCacheRoot $Evidence.AlignModelManifestPath
+            $Evidence.AlignModelCacheRoot $Evidence.AlignModelManifestPath `
+            $Evidence.NltkRoot
     } finally {
         Pop-Location
     }

@@ -2192,6 +2192,7 @@ def test_whisperx_candidate_requires_two_qualification_identities_and_stays_inac
         "ASR_WHISPERX_MODEL_MANIFEST_PATH",
         "ASR_WHISPERX_ALIGN_MODEL_CACHE_ROOT",
         "ASR_WHISPERX_ALIGN_MODEL_MANIFEST_PATH",
+        "NLTK_DATA",
     ):
         assert setting in deploy
     assert 'schema_version = "production-asr-shared-wheel-key/3"' in deploy
@@ -2204,6 +2205,9 @@ def test_whisperx_candidate_requires_two_qualification_identities_and_stays_inac
     assert '"whisperx-production-qualification-verdict/3"' in evidence
     assert '"shared-wheel-cache/1"' in evidence
     assert "Test-WhisperXReusableCandidateWheel" in evidence
+    assert "Get-QualifiedWhisperXNltkRoot" in evidence
+    assert "tokenizers/punkt_tab/english" in evidence
+    assert "NltkRoot" in evidence
     assert "[string]$file.Name -eq $expectedName" in evidence
     assert "production_services_modified -ne $false" in evidence
     assert "Register-ScheduledTask" not in evidence

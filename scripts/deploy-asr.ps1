@@ -699,6 +699,7 @@ if ($StageCandidate) {
         Set-ProtectedConfigValue -Name "ASR_WHISPERX_MODEL_MANIFEST_PATH" -Value $whisperXEvidence.ModelManifestPath
         Set-ProtectedConfigValue -Name "ASR_WHISPERX_ALIGN_MODEL_CACHE_ROOT" -Value $whisperXEvidence.AlignModelCacheRoot
         Set-ProtectedConfigValue -Name "ASR_WHISPERX_ALIGN_MODEL_MANIFEST_PATH" -Value $whisperXEvidence.AlignModelManifestPath
+        Set-ProtectedConfigValue -Name "NLTK_DATA" -Value $whisperXEvidence.NltkRoot
     }
     $deploymentContract = Get-AsrDeploymentContract -SourceRoot $resolvedSource -CommitSha $CommitSha
     $freezeLines = @(& (Join-Path $venvStaging "Scripts\python.exe") -m pip freeze --all)
