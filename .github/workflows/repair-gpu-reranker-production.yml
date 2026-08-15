@@ -32,7 +32,7 @@ jobs:
         shell: powershell
         env:
           GPU_MODEL_CACHE_SOURCE: ${{ vars.GPU_MODEL_CACHE_SOURCE }}
-          PRODUCTION_PYTHON_PATH: ${{ vars.PRODUCTION_PYTHON_PATH }}
+          PRODUCTION_PYTHON_PATH: ${{ vars.PRODUCTION_GPU_PYTHON_PATH }}
           GPU_SERVICE_URL: ${{ vars.GPU_SERVICE_URL }}
           GPU_SERVICE_HOST: ${{ vars.GPU_SERVICE_HOST }}
           REPO_PATH: ${{ vars.PRODUCTION_REPO_PATH }}

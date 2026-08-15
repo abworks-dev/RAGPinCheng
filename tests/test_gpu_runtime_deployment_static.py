@@ -92,6 +92,7 @@ def test_candidate_resolver_is_manual_d_drive_isolated_and_evidence_only():
     assert "-BasePython $env:GPU_BASE_PYTHON" in workflow
     assert "resolve-gpu-runtime-maintenance.ps1" in workflow
     assert "GPU_SERVICE_TOKEN" in workflow
+    assert "PRODUCTION_PYTHON_PATH: ${{ vars.PRODUCTION_GPU_PYTHON_PATH }}" in workflow
     maintenance = read("scripts/resolve-gpu-runtime-maintenance.ps1")
     assert "current-release.json" in maintenance
     assert "Refusing to stop an unexpected process listening on TCP 8100" in maintenance
