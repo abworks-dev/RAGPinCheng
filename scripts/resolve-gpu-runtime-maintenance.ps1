@@ -36,6 +36,7 @@ if ($listeners.Count -gt 0 -and $null -eq $task) {
 }
 foreach ($listener in $listeners) {
     $process = Get-CimInstance Win32_Process -Filter ("ProcessId={0}" -f $listener.OwningProcess)
+    Write-Host ("GPU_RESOLVER_OWNER pid={0} executable={1} commandline={2}" -f $listener.OwningProcess, [string]$process.ExecutablePath, [string]$process.CommandLine)
     if (
         $null -eq $process -or
         [string]$process.CommandLine -notmatch '-m (?:services\.)?gpu_service\.app' -or

@@ -92,6 +92,7 @@ def test_candidate_resolver_is_manual_d_drive_isolated_and_evidence_only():
     maintenance = read("scripts/resolve-gpu-runtime-maintenance.ps1")
     assert "current-release.json" in maintenance
     assert "Refusing to stop an unexpected process listening on TCP 8100" in maintenance
+    assert "GPU_RESOLVER_OWNER pid=" in maintenance
     assert "finally" in maintenance
     assert "promote-gpu-runtime.ps1" in maintenance
     assert "GPU_RESOLVER_MAINTENANCE status=restored" in maintenance
