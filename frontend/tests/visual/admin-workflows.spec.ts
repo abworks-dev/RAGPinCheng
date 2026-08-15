@@ -166,6 +166,24 @@ test.describe("资料库", () => {
   });
 });
 
+test.describe("视频管理", () => {
+  test("media records keep duplicate submissions and recovery actions readable", async ({ page }) => {
+    await openTab(page, "视频管理");
+    await expect(page.getByRole("heading", { name: "视频媒体" })).toBeVisible();
+    await expect(page.getByText("重复提交 2 次").first()).toBeVisible();
+    await expect(page.getByText("转录服务当前暂停接收任务，请稍后重试。")).toBeVisible();
+    await expect(page.getByRole("button", { name: "重试" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "进入转写工作台" }).first()).toBeVisible();
+    await expectNoBodyOverflow(page);
+    if (page.viewportSize()!.width === 390) {
+      const retry = page.getByRole("button", { name: "重试" });
+      await retry.scrollIntoViewIfNeeded();
+      await expectInViewport(retry);
+      await expectTouchTarget(retry);
+    }
+  });
+});
+
 test.describe("索引任务", () => {
   test("normal layout keeps publication identity, filters, and failures discoverable", async ({ page }) => {
     await openTab(page, "索引任务");
