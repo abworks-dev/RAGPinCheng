@@ -129,21 +129,58 @@ test.describe("资料库", () => {
     await expectNoBodyOverflow(page);
   });
 
-  test("delete confirmation explains impact and exposes a stable busy state", async ({ page }) => {
+  test("move-to-trash confirmation explains impact and exposes a stable busy state", async ({ page }) => {
     await openTab(page, "资料管理");
     const title = page.getByText("建筑信息模型交付标准（合成长文件名用于响应式检查）", { exact: true }).filter({ visible: true });
     const item = page.viewportSize()!.width < 1024 ? title.locator("xpath=ancestor::li") : title.locator("xpath=ancestor::tr");
-    const remove = item.getByRole("button", { name: "删除", exact: true });
+    const remove = item.getByRole("button", { name: "移至回收站", exact: true });
     await remove.scrollIntoViewIfNeeded();
     await expectInViewport(remove);
     await remove.click();
-    const dialog = page.getByRole("dialog", { name: "删除资料" });
+    const dialog = page.getByRole("dialog", { name: "移至回收站" });
     await expect(dialog).toContainText("将从资料列表和知识库检索中移除");
-    await expect(dialog).toContainText("保留文件、版本及审核发布历史");
+    await expect(dialog).toContainText("文件、版本及审核发布历史会保留");
     await expectNoBodyOverflow(page);
-    const confirm = dialog.getByRole("button", { name: "确认删除" });
+    const confirm = dialog.getByRole("button", { name: "确认移入" });
     await confirm.click();
-    await expect(dialog.getByRole("button", { name: "删除中…" })).toBeDisabled();
+    await expect(dialog.getByRole("button", { name: "处理中…" })).toBeDisabled();
+  });
+
+  test("trash exposes archive context and a stable restore flow", async ({ page }) => {
+    await openTab(page, "资料管理");
+    await page.getByRole("tab", { name: "回收站" }).click();
+    await expect(page.getByRole("heading", { name: "回收站", exact: true })).toBeVisible();
+    await expect(page.getByText(/合成资料员 于/)).toBeVisible();
+    await expect(page.getByText("原状态：已发布")).toBeVisible();
+    await expectNoBodyOverflow(page);
+    const restore = page.getByRole("button", { name: "恢复", exact: true });
+    await restore.scrollIntoViewIfNeeded();
+    await expectInViewport(restore);
+    const restoreRequest = page.waitForRequest((request) => request.method() === "POST" && request.url().endsWith("/items/item-5/restore"));
+    await restore.click();
+    const dialog = page.getByRole("dialog", { name: "恢复资料" });
+    await expect(dialog).toContainText("需要管理员重新发布后才会进入检索");
+    await dialog.getByRole("button", { name: "确认恢复" }).click();
+    await expect(dialog.getByRole("button", { name: "恢复中…" })).toBeDisabled();
+    await restoreRequest;
+  });
+});
+
+test.describe("视频管理", () => {
+  test("media records keep duplicate submissions and recovery actions readable", async ({ page }) => {
+    await openTab(page, "视频管理");
+    await expect(page.getByRole("heading", { name: "视频媒体" })).toBeVisible();
+    await expect(page.getByText("重复提交 2 次").first()).toBeVisible();
+    await expect(page.getByText("转录服务当前暂停接收任务，请稍后重试。")).toBeVisible();
+    await expect(page.getByRole("button", { name: "重试" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "进入转写工作台" }).first()).toBeVisible();
+    await expectNoBodyOverflow(page);
+    if (page.viewportSize()!.width === 390) {
+      const retry = page.getByRole("button", { name: "重试" });
+      await retry.scrollIntoViewIfNeeded();
+      await expectInViewport(retry);
+      await expectTouchTarget(retry);
+    }
   });
 });
 

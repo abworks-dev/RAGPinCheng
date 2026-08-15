@@ -351,6 +351,9 @@ class ManagedContentItemDTO(BaseModel):
     publication_failure: PublicationFailureDTO | None = None
     created_at: int
     updated_at: int
+    archived_at: int | None = None
+    archived_by_name: str | None = None
+    pre_archive_lifecycle_status: str | None = None
 
 
 class ManagedContentListResponse(BaseModel):
@@ -369,6 +372,16 @@ class DeleteManagedContentResponse(BaseModel):
     archived_at: int
     previous_status: str
     publication_withdrawn: bool
+
+
+class RestoreManagedContentRequest(BaseModel):
+    expected_version_id: str = Field(min_length=1, max_length=100)
+
+
+class RestoreManagedContentResponse(BaseModel):
+    item_id: str
+    version_id: str
+    restored_status: str
 
 
 class MoveManagedContentRequest(BaseModel):

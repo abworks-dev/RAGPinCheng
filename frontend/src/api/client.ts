@@ -335,6 +335,18 @@ export const api = {
       method: "DELETE",
       body: JSON.stringify({ expected_version_id: expectedVersionId }),
     }),
+  managedContentTrash: (params?: { query?: string; limit?: number; offset?: number }) => {
+    const search = new URLSearchParams();
+    if (params?.query) search.set("query", params.query);
+    if (params?.limit != null) search.set("limit", String(params.limit));
+    if (params?.offset != null) search.set("offset", String(params.offset));
+    return jsonFetch<ManagedContentList>(`/api/admin/content/trash?${search}`);
+  },
+  restoreManagedContent: (itemId: string, expectedVersionId: string) =>
+    jsonFetch<{ item_id: string; version_id: string; restored_status: string }>(
+      `/api/admin/content/items/${encodeURIComponent(itemId)}/restore`,
+      { method: "POST", body: JSON.stringify({ expected_version_id: expectedVersionId }) },
+    ),
   uploadManagedContent: async (files: File[], categoryId: string) => {
     const form = new FormData();
     files.forEach((file) => {

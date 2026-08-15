@@ -11,7 +11,7 @@ import pytest
 from api.content_permissions import has_content_permission
 from api.content_import import import_server_batch, resolve_import_category
 from api.content_storage import ContentStorage, StoredContentObject
-from api.content_store import archive_content_item, create_category, create_web_batch, register_uploaded_document
+from api.content_store import archive_content_item, create_category, create_web_batch, register_uploaded_document, restore_content_item
 from api.content_store import (
     create_publication_job,
     review_version,
@@ -352,6 +352,19 @@ def test_archiving_published_content_withdraws_head_but_preserves_history_and_ob
     assert conn.execute("SELECT count(*) FROM content_versions").fetchone()[0] == 1
     assert conn.execute("SELECT count(*) FROM content_objects").fetchone()[0] == 1
     assert object_path.read_bytes() == payload
+
+    restored = restore_content_item(
+        conn,
+        uploaded.item_id,
+        expected_version_id=uploaded.version_id,
+        actor_user_id=actor,
+        can_restore=True,
+    )
+    assert restored.restored_status == "approved"
+    assert conn.execute(
+        "SELECT lifecycle_status FROM content_versions WHERE id=?", (uploaded.version_id,)
+    ).fetchone()[0] == "approved"
+    assert conn.execute("SELECT count(*) FROM content_item_heads").fetchone()[0] == 0
     conn.close()
 
     snapshot = SQLitePublishedContentVisibility(tmp_path / "app.sqlite", "strict").snapshot()

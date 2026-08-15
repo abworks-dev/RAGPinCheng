@@ -74,6 +74,14 @@ const stageLabels: Record<string, string> = {
 };
 const activeJobStatuses = new Set(["pending", "running"]);
 
+const jobStatusMeta: Record<string, { label: string; variant: StatusVariant }> = {
+  pending: { label: "等待转录", variant: "secondary" },
+  running: { label: "正在转录", variant: "warning" },
+  succeeded: { label: "转录完成", variant: "success" },
+  failed: { label: "转录失败", variant: "destructive" },
+  cancelled: { label: "已取消", variant: "secondary" },
+};
+
 function StatusBadge({ value, meta, empty = "未开始" }: {
   value: string | null | undefined;
   meta: Record<string, { label: string; variant: StatusVariant }>;
@@ -84,7 +92,7 @@ function StatusBadge({ value, meta, empty = "未开始" }: {
 }
 
 function JobSummary({ job }: { job: TranscriptionJob }) {
-  if (job.status === "succeeded") return <p className="mt-1 text-ui-xs text-muted-foreground">转录草稿已生成；审核、发布与索引状态见右侧独立列。</p>;
+  if (job.status === "succeeded") return <p className="mt-1 text-ui-xs text-muted-foreground">草稿已生成，等待后续审核与发布。</p>;
   if (job.status === "failed") return <p className="mt-1 text-ui-xs text-destructive">{job.failure?.message || job.error_summary || job.failure_error_code || "转录失败"}</p>;
   if (job.status === "cancelled") return <p className="mt-1 text-ui-xs text-muted-foreground">任务已取消，可重新转录。</p>;
   const stage = job.stage ? stageLabels[job.stage] || job.stage : "排队中";
@@ -457,7 +465,7 @@ export function AdminMediaPage() {
       {uploadError && <Alert variant="destructive" role="alert"><AlertTitle>操作失败</AlertTitle><AlertDescription>{uploadError}</AlertDescription></Alert>}
 
       <section className="space-y-3" aria-labelledby="media-assets-title">
-        <div className="flex items-end justify-between"><div><h2 id="media-assets-title" className="text-ui-base font-semibold">媒体资源</h2><p className="mt-1 text-ui-xs text-muted-foreground">媒体、转录、审核、发布与索引分别显示，不互相代替。</p></div><span className="text-ui-xs text-muted-foreground">共 {mediaAssets.length} 个视频</span></div>
+        <div className="flex flex-wrap items-end justify-between gap-3"><div><h2 id="media-assets-title" className="text-ui-base font-semibold">媒体资源</h2><p className="mt-1 text-ui-xs text-muted-foreground">按每次提交分别记录媒体与处理进度；同名文件不会合并。</p></div><span className="text-ui-xs text-muted-foreground">共 {mediaAssets.length} 个视频</span></div>
         <div className="flex flex-wrap gap-2" aria-label="媒体快捷筛选">
           {([["all", "全部"], ["processing", "处理中"], ["review", "待审核"], ["publishing", "发布处理中"], ["failed", "失败"]] as const).map(([value, label]) => (
             <Button key={value} size="sm" variant={mediaFilter === value ? "default" : "outline"} onClick={() => setMediaFilter(value)}>{label}</Button>
@@ -468,12 +476,44 @@ export function AdminMediaPage() {
         {loadError ? <ErrorState title="媒体资源加载失败" description={loadError} action={<Button variant="outline" size="sm" onClick={refresh}>重新加载</Button>} />
           : loading ? <Card><LoadingState className="min-h-48" label="正在加载媒体资源…" /></Card>
           : mediaAssets.length === 0 ? <EmptyState title="暂无媒体资源" description="完成向导后，视频和各阶段状态会显示在这里。" />
-          : <Card className="overflow-hidden shadow-surface"><div className="overflow-x-auto"><table className="w-full min-w-[84rem] text-ui-sm"><caption className="sr-only">视频媒体、转录、审核、发布和索引状态</caption><thead className="border-b border-border bg-surface-muted"><tr><th className="px-4 py-3 text-left">标题</th><th className="px-4 py-3 text-left">原始文件</th><th className="px-4 py-3 text-left">媒体</th><th className="px-4 py-3 text-left">转录</th><th className="px-4 py-3 text-left">审核</th><th className="px-4 py-3 text-left">发布</th><th className="px-4 py-3 text-left">索引</th><th className="px-4 py-3 text-left">创建时间</th><th className="px-4 py-3 text-left">操作</th></tr></thead><tbody className="divide-y divide-border">
-            {visibleMediaAssets.map((asset) => {
-              const job = jobsByMediaId.get(asset.media_id);
-              return <tr key={asset.media_id}><td className="px-4 py-3 font-medium">{asset.title}</td><td className="px-4 py-3"><p className="font-mono text-ui-xs text-muted-foreground">{asset.original_filename}</p><p className="mt-1 text-ui-xs text-muted-foreground">{formatBytes(asset.file_size)}</p></td><td className="px-4 py-3"><StatusBadge value={asset.status} meta={mediaStatusMeta} />{asset.error && <p className="mt-1 text-ui-xs text-destructive">{asset.error}</p>}</td><td className="px-4 py-3">{job ? <><Badge variant={job.status === "failed" ? "destructive" : job.status === "succeeded" ? "success" : "secondary"}>{job.status}</Badge><JobSummary job={job} /><div className="mt-2 flex gap-2">{(job.status === "pending" || job.status === "running") && <Button size="sm" variant="outline" onClick={() => void cancelJob(job)}>取消</Button>}{(job.status === "failed" || job.status === "cancelled") && job.failure?.retryable !== false && <Button size="sm" variant="outline" onClick={() => void retryJob(job)}>重试</Button>}</div></> : <span className="text-ui-xs text-muted-foreground">人工转写或暂无任务</span>}</td><td className="px-4 py-3"><StatusBadge value={asset.review_status} meta={reviewMeta} /></td><td className="px-4 py-3"><StatusBadge value={asset.publication_status} meta={publicationMeta} /></td><td className="px-4 py-3"><StatusBadge value={asset.publication_index_status} meta={indexMeta} /></td><td className="px-4 py-3"><p className="text-ui-xs text-muted-foreground">{formatAdminDate(asset.created_at)}</p><Button className="mt-2" size="sm" variant="outline" onClick={() => setSelectedMediaId(asset.media_id)}>进入转写工作台</Button></td><td className="px-4 py-3">{asset.status === "failed" && !job && <Button size="sm" variant="destructive" disabled={deletingMediaId === asset.media_id} onClick={() => setDeleteTarget(asset)}>{deletingMediaId === asset.media_id ? "删除中" : "完整删除"}</Button>}</td></tr>;
-            })}
-          </tbody></table></div></Card>}
+          : <Card className="overflow-hidden shadow-surface">
+            <div className="hidden grid-cols-[minmax(15rem,1.4fr)_minmax(20rem,1.8fr)_minmax(9rem,.7fr)_auto] gap-4 border-b border-border bg-surface-muted px-5 py-3 text-ui-xs font-medium text-muted-foreground lg:grid">
+              <span>媒体信息</span><span>处理进度</span><span>最近提交</span><span>操作</span>
+            </div>
+            <ul className="divide-y divide-border" aria-label="视频媒体处理记录">
+              {visibleMediaAssets.map((asset) => {
+                const job = jobsByMediaId.get(asset.media_id);
+                const duplicateCount = mediaAssets.filter((item) => item.original_filename === asset.original_filename).length;
+                const canDelete = asset.status === "failed" && !job;
+                return <li key={asset.media_id} className="p-4 sm:p-5">
+                  <div className="grid gap-4 lg:grid-cols-[minmax(15rem,1.4fr)_minmax(20rem,1.8fr)_minmax(9rem,.7fr)_auto] lg:items-start">
+                    <div className="min-w-0">
+                      <p className="truncate font-medium" title={asset.title}>{asset.title}</p>
+                      <p className="mt-1 truncate font-mono text-ui-xs text-muted-foreground" title={asset.original_filename}>{asset.original_filename}</p>
+                      <div className="mt-2 flex flex-wrap gap-2 text-ui-xs text-muted-foreground"><span>{formatBytes(asset.file_size)}</span>{duplicateCount > 1 && <Badge variant="secondary">重复提交 {duplicateCount} 次</Badge>}</div>
+                    </div>
+                    <div className="min-w-0 space-y-2">
+                      <div className="flex flex-wrap items-center gap-2"><StatusBadge value={asset.status} meta={mediaStatusMeta} />{job && <StatusBadge value={job.status} meta={jobStatusMeta} />}</div>
+                      {asset.error && !job && <p className="text-ui-xs text-destructive">媒体处理失败，请在确认后删除或重新提交。</p>}
+                      {job ? <JobSummary job={job} /> : <p className="text-ui-xs text-muted-foreground">{asset.transcript_origin === "manual" ? "人工转写" : "尚未创建转录任务"}</p>}
+                      <div className="flex flex-wrap gap-x-3 gap-y-1 text-ui-xs text-muted-foreground">
+                        <span>审核：<StatusBadge value={asset.review_status} meta={reviewMeta} /></span>
+                        <span>发布：<StatusBadge value={asset.publication_status} meta={publicationMeta} /></span>
+                        <span>索引：<StatusBadge value={asset.publication_index_status} meta={indexMeta} /></span>
+                      </div>
+                    </div>
+                    <p className="text-ui-xs text-muted-foreground">{formatAdminDate(asset.created_at)}</p>
+                    <div className="flex flex-wrap gap-2 lg:justify-end">
+                      <Button className="min-h-10 sm:min-h-0" size="sm" variant="outline" onClick={() => setSelectedMediaId(asset.media_id)}>进入转写工作台</Button>
+                      {(job?.status === "pending" || job?.status === "running") && <Button className="min-h-10 sm:min-h-0" size="sm" variant="outline" onClick={() => void cancelJob(job)}>取消</Button>}
+                      {(job?.status === "failed" || job?.status === "cancelled") && job.failure?.retryable !== false && <Button className="min-h-10 sm:min-h-0" size="sm" variant="outline" onClick={() => void retryJob(job)}>重试</Button>}
+                      {canDelete && <Button className="min-h-10 sm:min-h-0" size="sm" variant="destructive" disabled={deletingMediaId === asset.media_id} onClick={() => setDeleteTarget(asset)}>{deletingMediaId === asset.media_id ? "删除中" : "完整删除"}</Button>}
+                    </div>
+                  </div>
+                </li>;
+              })}
+            </ul>
+          </Card>}
         {visibleMediaAssets.length === 0 && mediaAssets.length > 0 && <EmptyState title="没有符合条件的媒体" description="请切换其他快捷筛选条件。" />}
         {selectedMediaId && <Card className="p-4"><div className="flex items-center justify-between"><h3 className="font-semibold">转写版本操作</h3><Button size="sm" variant="ghost" onClick={() => setSelectedMediaId(null)}>关闭</Button></div><TranscriptionVersionPanel mediaId={selectedMediaId} refreshToken={jobsByMediaId.get(selectedMediaId)?.result_version_id} embedded /></Card>}
       </section>

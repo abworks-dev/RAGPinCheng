@@ -126,7 +126,20 @@ describe("AdminMediaPage wizard", () => {
     expect(screen.getByText("待人工审核")).toBeInTheDocument();
     expect(screen.getByText("未发布")).toBeInTheDocument();
     expect(screen.getByText("未开始")).toBeInTheDocument();
-    expect(screen.getByText("转录草稿已生成；审核、发布与索引状态见右侧独立列。")).toBeInTheDocument();
+    expect(screen.getByText("草稿已生成，等待后续审核与发布。")).toBeInTheDocument();
+  });
+
+  it("groups repeat submissions by filename without merging their records", async () => {
+    mocks.listMediaAssets.mockResolvedValue([
+      assets[0],
+      { ...assets[0], media_id: "media-ready-repeat", title: "第二次提交", status: "failed" },
+    ]);
+    mocks.listTranscriptionJobs.mockResolvedValue([succeededJob]);
+    render(<AdminMediaPage />);
+
+    expect(await screen.findAllByText("重复提交 2 次")).toHaveLength(2);
+    expect(screen.getByText("项目交付培训")).toBeInTheDocument();
+    expect(screen.getByText("第二次提交")).toBeInTheDocument();
   });
 
   it("accepts multiple MP4 files and applies one server profile to selected rows", async () => {
