@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, Download, Eye, FileText, RefreshCw, Rocket, Search, Send, Upload, X } from "lucide-react";
+import { Check, Download, Eye, FileText, RefreshCw, Rocket, Search, Send, Trash2, Upload, X } from "lucide-react";
 import { api } from "../../api/client";
 import { Badge } from "../../components/ui/badge";
 import { Button, buttonVariants } from "../../components/ui/button";
@@ -68,6 +68,8 @@ export function AdminManagedContentPage() {
   const [sourceFilter, setSourceFilter] = useState("");
   const [page, setPage] = useState(0);
   const [detail, setDetail] = useState<ManagedContentItem | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<ManagedContentItem | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -127,6 +129,24 @@ export function AdminManagedContentPage() {
     finally { setBusyAction(null); }
   };
 
+  const deleteContent = async () => {
+    if (!deleteTarget) return;
+    const target = deleteTarget;
+    setBusyAction(`${target.version_id}:delete`);
+    setDeleteError(null);
+    try {
+      await api.deleteManagedContent(target.item_id, target.version_id);
+      setSelected((current) => current.filter((id) => id !== target.version_id));
+      setDeleteTarget(null);
+      toast.success(`已删除“${target.title}”`);
+      await load(true);
+    } catch (deleteFailure) {
+      setDeleteError(deleteFailure instanceof Error ? deleteFailure.message : "删除资料失败");
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
   const eligibleSelected = useMemo(() => {
     const allowed = bulkAction === "publish" ? new Set(["approved", "publication_failed"]) : new Set(["awaiting_review"]);
     return items.filter((item) => selected.includes(item.version_id) && allowed.has(item.lifecycle_status));
@@ -163,6 +183,9 @@ export function AdminManagedContentPage() {
 
   const renderActions = (item: ManagedContentItem) => {
     const disabled = Boolean(busyAction) || refreshing || !enabled;
+    const draftLike = ["draft", "rejected"].includes(item.lifecycle_status);
+    const canDelete = (draftLike && can("organize")) || (!draftLike && can("publish"));
+    const deleteBlocked = item.lifecycle_status === "publishing";
     return <div className="flex min-h-control-sm flex-wrap gap-2 sm:justify-end"><PublicationFailure item={item} />
       <Button size="sm" variant="outline" disabled={disabled} onClick={() => setDetail(item)}><Eye className="size-4" />查看</Button>
       {can("organize") && ["draft", "rejected"].includes(item.lifecycle_status) && <Button size="sm" variant="outline" disabled={disabled} onClick={() => void act(item, "submit", () => api.submitManagedContent(item.version_id), "已提交确认")}><Send className="size-4" />{busyAction === `${item.version_id}:submit` ? "提交中…" : "提交"}</Button>}
@@ -171,6 +194,7 @@ export function AdminManagedContentPage() {
         <Button size="sm" variant="outline" disabled={disabled} onClick={() => void act(item, "reject", () => api.reviewManagedContent(item.version_id, false), "资料已退回")}><X className="size-4" />{busyAction === `${item.version_id}:reject` ? "退回中…" : "退回"}</Button>
       </>}
       {can("publish") && ["approved", "publication_failed"].includes(item.lifecycle_status) && <Button size="sm" disabled={disabled} onClick={() => void act(item, "publish", () => api.publishManagedContent(item.version_id), "已进入发布队列")}><Rocket className="size-4" />{busyAction === `${item.version_id}:publish` ? "发布中…" : item.lifecycle_status === "publication_failed" ? "重新发布" : "发布"}</Button>}
+      {canDelete && <Button size="sm" variant="destructive" disabled={disabled || deleteBlocked} title={deleteBlocked ? "资料正在发布，暂时不能删除" : undefined} onClick={() => { setDeleteError(null); setDeleteTarget(item); }}><Trash2 className="size-4" />删除</Button>}
     </div>;
   };
 
@@ -221,5 +245,7 @@ export function AdminManagedContentPage() {
     <Dialog open={Boolean(bulkAction)} onOpenChange={(open) => { if (!open) { setBulkAction(null); setBulkFailures([]); } }}><DialogContent><DialogHeader><DialogTitle>{bulkAction === "publish" ? "批量发布资料" : bulkAction === "reject" ? "批量退回资料" : "批量确认资料"}</DialogTitle><DialogDescription>本次将处理 {eligibleSelected.length} 份符合条件的资料。系统会逐项执行并保留失败原因。</DialogDescription></DialogHeader>{bulkFailures.length > 0 && <div className="space-y-2 text-ui-sm text-destructive" role="alert"><p>上次操作有 {bulkFailures.length} 份失败：</p><ul className="max-h-48 space-y-1 overflow-y-auto border-y border-destructive/30 py-2">{bulkFailures.map((entry) => <li key={entry.version_id} className="break-words"><span className="font-medium">{entry.title}</span>{entry.message ? `：${entry.message}` : "：请刷新后重试"}</li>)}</ul></div>}<DialogFooter><Button variant="outline" onClick={() => setBulkAction(null)} disabled={busyAction === "bulk"}>取消</Button><Button onClick={() => void executeBulk()} disabled={busyAction === "bulk" || eligibleSelected.length === 0}>{busyAction === "bulk" ? "处理中…" : bulkFailures.length ? "重试失败项" : "确认执行"}</Button></DialogFooter></DialogContent></Dialog>
 
     <Dialog open={Boolean(detail)} onOpenChange={(open) => { if (!open) setDetail(null); }}><DialogContent className="max-w-2xl"><DialogHeader><DialogTitle>{detail?.title || "资料详情"}</DialogTitle><DialogDescription>核对文件、分类、来源和版本后再确认或发布。</DialogDescription></DialogHeader>{detail && <div className="space-y-4"><PublicationFailure item={detail} /><dl className="grid grid-cols-[5rem_minmax(0,1fr)] gap-x-3 gap-y-2 text-ui-sm"><dt className="text-muted-foreground">文件名</dt><dd className="break-all">{detail.original_filename}</dd><dt className="text-muted-foreground">分类</dt><dd className="break-words">{detail.category_path || detail.category_label}</dd><dt className="text-muted-foreground">状态</dt><dd><Badge variant={statusVariant(detail.lifecycle_status)}>{statusLabel[detail.lifecycle_status]}</Badge></dd><dt className="text-muted-foreground">来源</dt><dd>{sourceLabel[detail.source_origin] || "其他来源"}</dd><dt className="text-muted-foreground">版本</dt><dd>v{detail.version_number}</dd><dt className="text-muted-foreground">发布尝试</dt><dd>共 {detail.publication_attempt_count} 次</dd></dl><div className="flex flex-col gap-2 sm:flex-row"><a className={buttonVariants({ variant: "outline" })} href={api.managedContentFileUrl(detail.version_id)} target="_blank" rel="noreferrer"><Eye className="size-4" />{detail.doc_type === "pdf" ? "预览文件" : "打开文件"}</a><a className={buttonVariants({ variant: "outline" })} href={api.managedContentFileUrl(detail.version_id, true)}><Download className="size-4" />下载</a></div></div>}</DialogContent></Dialog>
+
+    <Dialog open={Boolean(deleteTarget)} onOpenChange={(open) => { if (!open && busyAction !== `${deleteTarget?.version_id}:delete`) { setDeleteTarget(null); setDeleteError(null); } }}><DialogContent><DialogHeader><DialogTitle>删除资料</DialogTitle><DialogDescription>“{deleteTarget?.title}”将从资料列表和知识库检索中移除。系统会保留文件、版本及审核发布历史，以便管理员恢复。</DialogDescription></DialogHeader>{deleteError && <p className="rounded-ui-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-ui-sm text-destructive" role="alert">{deleteError}</p>}<DialogFooter><Button variant="outline" disabled={busyAction === `${deleteTarget?.version_id}:delete`} onClick={() => { setDeleteTarget(null); setDeleteError(null); }}>取消</Button><Button variant="destructive" disabled={busyAction === `${deleteTarget?.version_id}:delete`} onClick={() => void deleteContent()}>{busyAction === `${deleteTarget?.version_id}:delete` ? "删除中…" : "确认删除"}</Button></DialogFooter></DialogContent></Dialog>
   </section>;
 }

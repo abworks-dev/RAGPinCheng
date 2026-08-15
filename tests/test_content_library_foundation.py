@@ -11,7 +11,7 @@ import pytest
 from api.content_permissions import has_content_permission
 from api.content_import import import_server_batch, resolve_import_category
 from api.content_storage import ContentStorage, StoredContentObject
-from api.content_store import create_category, create_web_batch, register_uploaded_document
+from api.content_store import archive_content_item, create_category, create_web_batch, register_uploaded_document
 from api.content_store import (
     create_publication_job,
     review_version,
@@ -290,6 +290,72 @@ def test_review_publish_promotes_only_completed_candidate(tmp_path, monkeypatch)
     snapshot = SQLitePublishedContentVisibility(tmp_path / "app.sqlite", "strict").snapshot()
     assert snapshot.allows(uploaded.version_id)
     assert snapshot.allows(None) is False
+
+
+def test_archiving_published_content_withdraws_head_but_preserves_history_and_object(tmp_path, monkeypatch):
+    conn = _db(tmp_path)
+    actor = conn.execute("SELECT id FROM users WHERE employee_id='u1'").fetchone()[0]
+    storage = ContentStorage(tmp_path / "content")
+    storage.ensure_layout()
+    payload = b"# Published synthetic content"
+    digest = hashlib.sha256(payload).hexdigest()
+    object_path = storage.object_path_for_sha256(digest)
+    object_path.parent.mkdir(parents=True, exist_ok=True)
+    object_path.write_bytes(payload)
+    uploaded = register_uploaded_document(
+        conn,
+        batch_id=create_web_batch(conn, actor_user_id=actor),
+        category_id="cat-03",
+        title="待删除已发布资料",
+        original_filename="published.md",
+        doc_type="markdown",
+        stored=StoredContentObject(
+            digest,
+            len(payload),
+            "text/markdown",
+            object_path.relative_to(storage.root).as_posix(),
+            object_path,
+            True,
+        ),
+        actor_user_id=actor,
+    )
+    conn.execute(
+        "UPDATE content_versions SET lifecycle_status='published' WHERE id=?",
+        (uploaded.version_id,),
+    )
+    conn.execute(
+        """INSERT INTO content_publications
+           (id,version_id,status,publisher_id,created_at,updated_at,published_at)
+           VALUES ('publication-delete',?,'published',?,1,1,1)""",
+        (uploaded.version_id, actor),
+    )
+    conn.execute(
+        """INSERT INTO content_item_heads(item_id,current_version_id,publication_id,updated_at)
+           VALUES (?,?,'publication-delete',1)""",
+        (uploaded.item_id, uploaded.version_id),
+    )
+    conn.commit()
+
+    result = archive_content_item(
+        conn,
+        uploaded.item_id,
+        expected_version_id=uploaded.version_id,
+        actor_user_id=actor,
+        can_organize=False,
+        can_publish=True,
+    )
+    assert result.publication_withdrawn is True
+    assert conn.execute("SELECT count(*) FROM content_item_heads").fetchone()[0] == 0
+    assert conn.execute(
+        "SELECT status FROM content_publications WHERE id='publication-delete'"
+    ).fetchone()[0] == "withdrawn"
+    assert conn.execute("SELECT count(*) FROM content_versions").fetchone()[0] == 1
+    assert conn.execute("SELECT count(*) FROM content_objects").fetchone()[0] == 1
+    assert object_path.read_bytes() == payload
+    conn.close()
+
+    snapshot = SQLitePublishedContentVisibility(tmp_path / "app.sqlite", "strict").snapshot()
+    assert snapshot.allows(uploaded.version_id) is False
 
 
 def test_server_batch_dry_run_maps_numbered_directory_without_writes(tmp_path):

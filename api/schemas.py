@@ -310,6 +310,18 @@ class ManagedContentListResponse(BaseModel):
     status_counts: dict[str, int]
 
 
+class DeleteManagedContentRequest(BaseModel):
+    expected_version_id: str = Field(min_length=1, max_length=100)
+
+
+class DeleteManagedContentResponse(BaseModel):
+    item_id: str
+    version_id: str
+    archived_at: int
+    previous_status: str
+    publication_withdrawn: bool
+
+
 class BulkManagedContentRequest(BaseModel):
     version_ids: list[str] = Field(min_length=1, max_length=20)
     approved: bool | None = None

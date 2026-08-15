@@ -36,6 +36,21 @@ test("资料库批量选择 accepted golden", async ({ page }) => {
   await expect(page).toHaveScreenshot(`managed-content-selected-${viewport.width}x${viewport.height}.png`);
 });
 
+test("资料库删除确认 accepted golden", async ({ page }) => {
+  await installAdminRoutes(page, "normal");
+  await page.goto("/admin");
+  if (page.viewportSize()!.width < 1024) {
+    await page.getByRole("button", { name: "展开管理功能" }).click();
+  }
+  await page.getByRole("button", { name: "资料管理", exact: true }).click();
+  const title = page.getByText("建筑信息模型交付标准（合成长文件名用于响应式检查）", { exact: true }).filter({ visible: true });
+  const item = page.viewportSize()!.width < 1024 ? title.locator("xpath=ancestor::li") : title.locator("xpath=ancestor::tr");
+  await item.getByRole("button", { name: "删除", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "删除资料" })).toBeVisible();
+  const viewport = page.viewportSize()!;
+  await expect(page).toHaveScreenshot(`managed-content-delete-confirm-${viewport.width}x${viewport.height}.png`);
+});
+
 test("索引监控任务区域 accepted golden", async ({ page }) => {
   test.skip(process.platform !== "win32", "索引监控任务区域 Linux golden 尚未在 Linux Chromium 上人工接受");
   await installAdminRoutes(page, "normal");

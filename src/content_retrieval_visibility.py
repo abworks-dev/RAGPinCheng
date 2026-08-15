@@ -33,7 +33,17 @@ class SQLitePublishedContentVisibility:
             ).fetchone()
             if table is None:
                 return PublishedContentSnapshot(frozenset(), self.enforcement)
-            rows = conn.execute("SELECT current_version_id FROM content_item_heads").fetchall()
+            content_items = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='content_items'"
+            ).fetchone()
+            if content_items is None:
+                rows = conn.execute("SELECT current_version_id FROM content_item_heads").fetchall()
+            else:
+                rows = conn.execute(
+                    """SELECT h.current_version_id FROM content_item_heads h
+                       JOIN content_items i ON i.id=h.item_id
+                       WHERE i.archived_at IS NULL"""
+                ).fetchall()
             return PublishedContentSnapshot(
                 frozenset(str(row[0]) for row in rows), self.enforcement
             )
