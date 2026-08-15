@@ -29,7 +29,7 @@ Codex 不主动接管 Claude Code 正在负责的工作，不因发现邻近问�
 - 只读调查、解释、方案和代码审查可以使用主 worktree，但不得在其中编辑文件、切换分支或执行会改变 Git 状态的命令。开始前运行 `pwsh -NoProfile -File scripts/Test-CodexWorkspace.ps1 -Mode ReadOnly`。
 - 任何写任务必须使用同一仓库正式注册的 linked worktree。新任务在编辑前运行 `pwsh -NoProfile -File scripts/Test-CodexWorkspace.ps1 -Mode Write -Intent New`；继续原任务运行 `pwsh -NoProfile -File scripts/Test-CodexWorkspace.ps1 -Mode Write -Intent Continue -ExpectedBranch <branch>`。主 worktree 即使当前不在 `master` 也不得用于写任务。
 - 写任务默认使用 `codex/*` 分支。恢复、发布或用户明确指定的非 `codex/*` 分支只有在说明理由并取得对应授权后，才可同时使用 `-AllowNonCodexBranch -ExceptionReason <reason>` 例外；原因会进入诊断结果，但不替代用户授权，也不放宽其他项目或风险边界。
-- Agent 不得自行执行 `git worktree add`、`git worktree remove`、`git worktree prune`，也不得通过手工目录复制建立任务工作区。需要创建、迁移或清理 worktree 时，必须先向用户说明原因、目标路径、分支和影响，并取得明确授权；优先使用 Codex App 管理的 Worktree 任务。
+- Agent 不得自行执行 `git worktree add`、`git worktree remove`、`git worktree prune`，也不得通过手工目录复制建立任务工作区。需要创建、迁移或清理 worktree 时，必须先向用户说明原因、起点与目标分支、路径管理方式和影响，并取得明确授权；优先使用 Codex App 管理的 Worktree 任务。因缺少该授权而阻塞时，回复最末尾必须只提出一个具体、可直接回答的授权问题，并在问题前列明上述信息，不得把多个选择或后续技术步骤拆成多个问题。
 - 继续既有任务必须返回原对话及其原 worktree，并在需要时用 `-ExpectedBranch` 核对分支。不得新开对话接管仍有未提交内容的任务，也不得把一个任务的未提交修改搬入主 worktree继续开发。
 - 预检脚本是协作门禁，不是安全沙箱；成功只证明当前 workspace 形态符合规则，不代表获得修改、部署或跨项目授权。脚本不会创建、切换、清理、stash、提交或删除任何 Git 状态。预检失败时必须停止编辑并报告原因，不得绕过脚本结果继续执行。
 

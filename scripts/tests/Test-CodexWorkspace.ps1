@@ -61,19 +61,42 @@ try {
     Invoke-GitChecked @("init", "-b", "master", $otherRepository)
 
     $case = Invoke-WorkspaceCheck -Path $repository -Mode ReadOnly
-    Assert-Case "primary readonly allowed" ($case.ExitCode -eq 0 -and $case.Result.primary_worktree)
+    Assert-Case "primary readonly allowed" (
+        $case.ExitCode -eq 0 -and $case.Result.primary_worktree -and
+        $case.Result.reason_codes.Count -eq 0 -and $null -eq $case.Result.recommended_action
+    )
 
     $case = Invoke-WorkspaceCheck -Path $repository -Mode Write -ExtraArguments @("-Intent", "New")
-    Assert-Case "primary write rejected" ($case.ExitCode -ne 0 -and -not $case.Result.allowed)
+    Assert-Case "primary write rejected" (
+        $case.ExitCode -ne 0 -and -not $case.Result.allowed -and
+        $case.Result.reason_codes -contains "PRIMARY_WORKTREE_WRITE_FORBIDDEN" -and
+        $case.Result.recommended_action -eq "CREATE_MANAGED_WORKTREE"
+    )
+
+    $case = Invoke-WorkspaceCheck -Path $repository -Mode Write
+    Assert-Case "primary write action takes priority" (
+        $case.ExitCode -ne 0 -and
+        $case.Result.reason_codes -contains "WRITE_INTENT_REQUIRED" -and
+        $case.Result.reason_codes -contains "PRIMARY_WORKTREE_WRITE_FORBIDDEN" -and
+        $case.Result.recommended_action -eq "CREATE_MANAGED_WORKTREE"
+    )
 
     $case = Invoke-WorkspaceCheck -Path $linked -Mode Write -ExtraArguments @("-Intent", "New")
     Assert-Case "linked codex branch allowed" ($case.ExitCode -eq 0 -and $case.Result.registered_worktree)
 
     $case = Invoke-WorkspaceCheck -Path $detached -Mode Write -ExtraArguments @("-Intent", "New")
-    Assert-Case "detached write rejected" ($case.ExitCode -ne 0 -and $case.Result.detached_head)
+    Assert-Case "detached write rejected" (
+        $case.ExitCode -ne 0 -and $case.Result.detached_head -and
+        $case.Result.reason_codes -contains "DETACHED_HEAD_WRITE_FORBIDDEN" -and
+        $case.Result.recommended_action -eq "ATTACH_CODEX_BRANCH"
+    )
 
     $case = Invoke-WorkspaceCheck -Path $feature -Mode Write -ExtraArguments @("-Intent", "New")
-    Assert-Case "non-codex branch rejected" ($case.ExitCode -ne 0 -and -not $case.Result.allowed)
+    Assert-Case "non-codex branch rejected" (
+        $case.ExitCode -ne 0 -and -not $case.Result.allowed -and
+        $case.Result.reason_codes -contains "NON_CODEX_BRANCH_FORBIDDEN" -and
+        $case.Result.recommended_action -eq "USE_CODEX_BRANCH"
+    )
 
     $case = Invoke-WorkspaceCheck -Path $feature -Mode Write -ExtraArguments @(
         "-Intent", "New", "-AllowNonCodexBranch"
@@ -99,7 +122,9 @@ try {
     $case = Invoke-WorkspaceCheck -Path $linked -Mode Write -ExtraArguments @("-Intent", "New")
     $after = Get-Content -LiteralPath $dirtyPath -Raw
     Assert-Case "dirty new task rejected without cleanup" (
-        $case.ExitCode -ne 0 -and $case.Result.dirty -and $case.Result.change_count -eq 1 -and $before -ceq $after
+        $case.ExitCode -ne 0 -and $case.Result.dirty -and $case.Result.change_count -eq 1 -and
+        $case.Result.reason_codes -contains "DIRTY_WORKTREE_FOR_NEW_TASK" -and
+        $case.Result.recommended_action -eq "USE_CLEAN_MANAGED_WORKTREE" -and $before -ceq $after
     )
 
     $case = Invoke-WorkspaceCheck -Path $linked -Mode Write -ExtraArguments @(
@@ -118,7 +143,11 @@ try {
     }
 
     $case = Invoke-WorkspaceCheck -Path $otherRepository -Mode ReadOnly
-    Assert-Case "other repository rejected" ($case.ExitCode -ne 0 -and -not $case.Result.same_repository)
+    Assert-Case "other repository rejected" (
+        $case.ExitCode -ne 0 -and -not $case.Result.same_repository -and
+        $case.Result.reason_codes -contains "DIFFERENT_REPOSITORY" -and
+        $case.Result.recommended_action -eq "USE_PROJECT_WORKTREE"
+    )
 
     Write-Host "Workspace harness tests passed: $passed"
 } finally {
