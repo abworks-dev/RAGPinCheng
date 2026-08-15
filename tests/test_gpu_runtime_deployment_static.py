@@ -16,8 +16,8 @@ def test_runtime_lock_is_validated_by_matching_cuda_qualification():
     requirements = read("services/gpu_service/runtime-lock.txt")
     assert metadata["schema_version"] == 1
     assert metadata["validation_status"] == "validated"
-    assert metadata["qualification_run_id"] == "31866665137"
-    assert metadata["source_commit"] == "bcd4cdc6a6a7c302657c3eb5d200108aae494fa5"
+    assert metadata["qualification_run_id"] == "31880461282"
+    assert metadata["source_commit"] == "811753d5f687ce51421dbc79edc61cb0c97e87e9"
     assert metadata["qualified_source_fingerprint"] == (
         "a0a14c48a9f70eb9885fe71229b80476ae1f6d2245a0657303ed318119ea49c7"
     )
