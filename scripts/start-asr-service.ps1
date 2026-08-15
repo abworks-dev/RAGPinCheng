@@ -94,6 +94,18 @@ foreach ($required in @(
 if ($env:ASR_MODEL_LOCAL_FILES_ONLY -ne "true") {
     throw "ASR_MODEL_LOCAL_FILES_ONLY must be true"
 }
+if (-not [string]::IsNullOrWhiteSpace($env:ASR_WHISPERX_MODEL_CACHE_ROOT)) {
+    if ([string]::IsNullOrWhiteSpace($env:NLTK_DATA)) {
+        throw "NLTK_DATA is required when WhisperX is configured"
+    }
+    $punktRoot = Join-Path $env:NLTK_DATA "tokenizers\punkt_tab\english"
+    foreach ($name in @("abbrev_types.txt", "collocations.tab", "ortho_context.tab", "sent_starters.txt")) {
+        $path = Join-Path $punktRoot $name
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+            throw "WhisperX NLTK punkt_tab resource is missing: $name"
+        }
+    }
+}
 
 $logDir = $env:ASR_LOG_DIR
 if ([string]::IsNullOrWhiteSpace($logDir)) {
