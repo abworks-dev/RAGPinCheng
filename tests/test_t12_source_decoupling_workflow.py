@@ -78,7 +78,8 @@ def test_t12b_public_artifact_is_redacted_and_deploy_checks_mounts():
         'Path("/proc/self/mountinfo")',
         'assert "ro" in left.split()[5].split(",")',
         'retired legacy docs runtime path is writable',
-        'mounts.get("/app/media", {}).get("Source") == os.environ["EXPECTED_MEDIA"]',
+        'Path(media.get("Source", "")).resolve() == Path(os.environ["EXPECTED_MEDIA"]).resolve()',
+        'unexpected media mount source',
         'not item.get("Source", "").startswith("/data/business/ragpincheng/source")',
         'TRANSCRIPTION_ARTIFACT_DIR == Path("/app/content/transcription-artifacts")',
     ):
