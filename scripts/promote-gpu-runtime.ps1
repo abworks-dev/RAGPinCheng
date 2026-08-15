@@ -14,6 +14,7 @@ $CurrentReleasePath = Join-Path $RuntimeRoot "current-release.json"
 $Timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $BackupPath = Join-Path $BackupDirectory "gpu-promotion-$Timestamp"
 $EnvFile = Join-Path $RepositoryPath "services\gpu_service\.env"
+$ConfiguredGpuPython = if ($env:PRODUCTION_PYTHON_PATH) { $env:PRODUCTION_PYTHON_PATH } else { $env:GPU_BASE_PYTHON }
 
 if (-not ([IO.Path]::GetFullPath($BackupDirectory)).StartsWith("D:\", [StringComparison]::OrdinalIgnoreCase)) {
     throw "GPU promotion backups must be written under D:\"
@@ -41,11 +42,10 @@ function Assert-OwnedTask {
     )
     $legacyStartScript = [IO.Path]::GetFullPath((Join-Path $RepositoryPath "scripts\start-gpu-legacy-service.ps1"))
     $repositoryRoot = [IO.Path]::GetFullPath($RepositoryPath).TrimEnd('\')
-    $legacyBasePython = if ($env:PRODUCTION_PYTHON_PATH) { $env:PRODUCTION_PYTHON_PATH } else { $env:GPU_BASE_PYTHON }
     $legacyArgumentsPattern = '^-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -RepositoryPath "{1}" -BasePython "{2}" -ModelCacheSource "[^"]+" -LogRoot "{3}[^"]+\\logs"$' -f `
         [regex]::Escape($legacyStartScript),
         [regex]::Escape($repositoryRoot),
-        [regex]::Escape([IO.Path]::GetFullPath($legacyBasePython)),
+        [regex]::Escape([IO.Path]::GetFullPath($ConfiguredGpuPython)),
         [regex]::Escape($managedReleasePrefix)
     $legacyTaskOwned = $arguments -match $legacyArgumentsPattern
     if (
@@ -76,13 +76,24 @@ function Stop-OwnedTaskAndListener {
     $listeners = @(Get-NetTCPConnection -LocalPort 8100 -State Listen -ErrorAction SilentlyContinue)
     foreach ($processId in @($listeners | ForEach-Object { $_.OwningProcess } | Sort-Object -Unique)) {
         $process = Get-CimInstance Win32_Process -Filter ("ProcessId={0}" -f $processId)
-        if (
-            $null -eq $process -or
-            [string]$process.CommandLine -notmatch '-m services\.gpu_service\.app' -or
-            (
-                -not ([string]$process.ExecutablePath).StartsWith($RuntimeRoot, [StringComparison]::OrdinalIgnoreCase) -and
-                [string]$process.ExecutablePath -ne $env:PRODUCTION_PYTHON_PATH
+        $canonicalProcessOwned = (
+            $null -ne $process -and
+            [string]$process.CommandLine -match '(?<!\S)-m\s+services\.gpu_service\.app(?:\s|$)' -and
+            [string]$process.ExecutablePath -and
+            ([string]$process.ExecutablePath).StartsWith($RuntimeRoot, [StringComparison]::OrdinalIgnoreCase)
+        )
+        $legacyProcessOwned = (
+            $null -ne $process -and
+            [string]$process.CommandLine -match '(?<!\S)-m\s+gpu_service\.app(?:\s|$)' -and
+            [string]::Equals(
+                [string]$process.ExecutablePath,
+                [IO.Path]::GetFullPath($ConfiguredGpuPython),
+                [StringComparison]::OrdinalIgnoreCase
             )
+        )
+        if (
+            -not $canonicalProcessOwned -and
+            -not $legacyProcessOwned
         ) {
             throw "Refusing to stop an unexpected process listening on TCP 8100"
         }
