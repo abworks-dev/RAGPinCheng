@@ -130,6 +130,16 @@ def test_candidate_resolver_is_manual_d_drive_isolated_and_evidence_only():
     assert "-TaskName $taskName" in register_line
     assert "-Force" not in register_line
 
+    promotion = read("scripts/promote-gpu-runtime.ps1")
+    assert '$legacyStartScript = [IO.Path]::GetFullPath((Join-Path $RepositoryPath "scripts\\start-gpu-legacy-service.ps1"))' in promotion
+    assert '$legacyBasePython = if ($env:PRODUCTION_PYTHON_PATH)' in promotion
+    assert "else { $env:GPU_BASE_PYTHON }" in promotion
+    assert '[regex]::Escape([IO.Path]::GetFullPath($legacyBasePython))' in promotion
+    assert '[regex]::Escape($repositoryRoot)' in promotion
+    assert '[regex]::Escape($managedReleasePrefix)' in promotion
+    assert "$legacyTaskOwned = $arguments -match $legacyArgumentsPattern" in promotion
+    assert "(-not $releaseTaskOwned -and -not $legacyTaskOwned)" in promotion
+
     assert 'StartsWith("D:\\"' in script
     assert '"-m", "venv"' in script
     assert "--system-site-packages" not in script

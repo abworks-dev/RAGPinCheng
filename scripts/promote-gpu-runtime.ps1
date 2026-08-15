@@ -32,12 +32,26 @@ function Get-TaskArguments {
 function Assert-OwnedTask {
     param([Parameter(Mandatory)][object]$Task)
     $actions = @($Task.Actions)
+    $arguments = if ($actions.Count -eq 1) { [string]$actions[0].Arguments } else { "" }
+    $managedReleasePrefix = [IO.Path]::GetFullPath($RuntimeRoot).TrimEnd('\') + "\releases\"
+    $releaseTaskOwned = (
+        $arguments -match [regex]::Escape($managedReleasePrefix) -and
+        $arguments -match '\\source\\scripts\\start-gpu-service\.ps1"' -and
+        $arguments -match '-ReleaseRoot\s+"'
+    )
+    $legacyStartScript = [IO.Path]::GetFullPath((Join-Path $RepositoryPath "scripts\start-gpu-legacy-service.ps1"))
+    $repositoryRoot = [IO.Path]::GetFullPath($RepositoryPath).TrimEnd('\')
+    $legacyBasePython = if ($env:PRODUCTION_PYTHON_PATH) { $env:PRODUCTION_PYTHON_PATH } else { $env:GPU_BASE_PYTHON }
+    $legacyArgumentsPattern = '^-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -RepositoryPath "{1}" -BasePython "{2}" -ModelCacheSource "[^"]+" -LogRoot "{3}[^"]+\\logs"$' -f `
+        [regex]::Escape($legacyStartScript),
+        [regex]::Escape($repositoryRoot),
+        [regex]::Escape([IO.Path]::GetFullPath($legacyBasePython)),
+        [regex]::Escape($managedReleasePrefix)
+    $legacyTaskOwned = $arguments -match $legacyArgumentsPattern
     if (
         $actions.Count -ne 1 -or
         [IO.Path]::GetFileName([string]$actions[0].Execute) -ne "powershell.exe" -or
-        [string]$actions[0].Arguments -notmatch [regex]::Escape(([IO.Path]::GetFullPath($RuntimeRoot).TrimEnd('\') + "\releases\")) -or
-        [string]$actions[0].Arguments -notmatch '\\source\\scripts\\start-gpu-service\.ps1"' -or
-        [string]$actions[0].Arguments -notmatch '-ReleaseRoot\s+"' -or
+        (-not $releaseTaskOwned -and -not $legacyTaskOwned) -or
         [string]$Task.Principal.UserId -ne "Administrator"
     ) {
         throw "Refusing to modify an unexpected RAGPinCheng-GPU Scheduled Task"
