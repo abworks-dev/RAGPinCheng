@@ -34,6 +34,8 @@ jobs:
           GPU_SERVICE_HOST: ${{ vars.GPU_SERVICE_HOST }}
           GPU_MODEL_CACHE_SOURCE: ${{ vars.GPU_MODEL_CACHE_SOURCE }}
           GPU_BASE_PYTHON: ${{ vars.PRODUCTION_GPU_PYTHON_PATH }}
+          GIT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEPLOY_COMMIT_SHA: ${{ github.sha }}
         run: |
           Set-StrictMode -Version Latest
           $ErrorActionPreference = "Stop"
@@ -43,6 +45,12 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($env:GPU_SERVICE_TOKEN)) {
             throw "GPU_SERVICE_TOKEN is required"
           }
+          Set-Location -LiteralPath $env:REPO_PATH
+          $basic = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("x-access-token:$env:GIT_TOKEN"))
+          git -c http.version=HTTP/1.1 -c "http.extraHeader=AUTHORIZATION: basic $basic" fetch https://github.com/abworks-dev/RAGPinCheng.git $env:DEPLOY_COMMIT_SHA
+          if ($LASTEXITCODE -ne 0) { throw "GPU recovery fetch failed" }
+          git merge --ff-only $env:DEPLOY_COMMIT_SHA
+          if ($LASTEXITCODE -ne 0 -or (git rev-parse HEAD).Trim() -ne $env:DEPLOY_COMMIT_SHA) { throw "GPU recovery repository fast-forward failed" }
           $currentPath = Join-Path $env:RUNTIME_ROOT "current-release.json"
           if (-not (Test-Path -LiteralPath $currentPath -PathType Leaf)) {
             throw "No validated current GPU release is recorded"

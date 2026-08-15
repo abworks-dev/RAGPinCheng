@@ -416,6 +416,7 @@ def test_recovery_only_repromotes_the_recorded_validated_release():
     assert "workflow_dispatch:" in workflow
     assert "confirm_recovery:" in workflow
     assert "current-release.json" in workflow
+    assert "git merge --ff-only $env:DEPLOY_COMMIT_SHA" in workflow
     assert "promote-gpu-runtime.ps1" in workflow
     assert "build-gpu-runtime.ps1" not in workflow
     assert "pip install" not in workflow
