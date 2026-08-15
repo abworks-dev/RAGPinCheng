@@ -595,7 +595,12 @@ if (Test-Path -LiteralPath $auditRoot -PathType Container) {
 
 $candidateArray = $candidates.ToArray()
 $skippedArray = $skipped.ToArray()
-$candidateBytes = [int64](($candidateArray | Measure-Object -Property Bytes -Sum).Sum)
+$candidateBytes = if ($candidateArray.Count -eq 0) {
+    [int64]0
+}
+else {
+    [int64](($candidateArray | Measure-Object -Property Bytes -Sum).Sum)
+}
 if ($candidateBytes -gt $MaxDeleteBytes -and $Apply) {
     throw "Candidate deletion exceeds the safety cap of $MaxDeleteGB GB; review the dry run and raise the limit explicitly"
 }
