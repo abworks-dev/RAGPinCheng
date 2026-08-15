@@ -384,6 +384,17 @@ export const api = {
     if (params?.offset != null) search.set("offset", String(params.offset));
     return jsonFetch<ManagedContentList>(`/api/admin/content/items-page?${search}`);
   },
+  deleteManagedContent: (itemId: string, expectedVersionId: string) =>
+    jsonFetch<{
+      item_id: string;
+      version_id: string;
+      archived_at: number;
+      previous_status: string;
+      publication_withdrawn: boolean;
+    }>(`/api/admin/content/items/${encodeURIComponent(itemId)}`, {
+      method: "DELETE",
+      body: JSON.stringify({ expected_version_id: expectedVersionId }),
+    }),
   uploadManagedContent: async (files: File[], categoryId: string) => {
     const form = new FormData();
     files.forEach((file) => form.append("files", file, file.name));

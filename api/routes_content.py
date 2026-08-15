@@ -11,9 +11,10 @@ from fastapi.responses import FileResponse
 
 from src.config import CONTENT_MANAGEMENT_ENABLED, CONTENT_ROOT
 
-from .auth import CurrentUser, require_admin, require_csrf_admin
+from .auth import CurrentUser, require_admin, require_csrf, require_csrf_admin
 from .content_permissions import (
     CONTENT_PERMISSIONS,
+    has_content_permission,
     require_any_content_permission,
     require_content_permission,
 )
@@ -21,6 +22,7 @@ from .indexing import enqueue_content_publication
 from .content_publication import failure_detail, normalize_failure_code
 from .content_storage import ContentStorage
 from .content_store import (
+    archive_content_item,
     audit_event,
     create_category,
     create_publication_job,
@@ -37,6 +39,8 @@ from .db import get_db
 from .schemas import (
     CreateManagedCategoryRequest,
     CreateContentPermissionGroupRequest,
+    DeleteManagedContentRequest,
+    DeleteManagedContentResponse,
     ContentPermissionGroupDTO,
     ContentPermissionUserDTO,
     BulkManagedContentRequest,
@@ -120,6 +124,14 @@ def _raise_domain_error(exc: Exception) -> None:
         raise HTTPException(status_code=413, detail="文件超过上传大小限制") from exc
     if message == "category_has_content":
         raise HTTPException(status_code=409, detail="分类下仍有资料，请先重新归类") from exc
+    if message == "content_item_not_found":
+        raise HTTPException(status_code=404, detail="资料不存在或已删除") from exc
+    if message == "content_version_conflict":
+        raise HTTPException(status_code=409, detail="资料版本已变化，请刷新后重试") from exc
+    if message == "content_delete_in_progress":
+        raise HTTPException(status_code=409, detail="资料正在发布，暂时不能删除") from exc
+    if message == "content_delete_forbidden":
+        raise HTTPException(status_code=403, detail="当前账号没有删除此状态资料的权限") from exc
     raise HTTPException(status_code=400, detail=message) from exc
 
 
@@ -323,6 +335,34 @@ def get_content_items_page(
     )
 
 
+@router.delete("/items/{item_id}", response_model=DeleteManagedContentResponse)
+def delete_content_item(
+    item_id: str,
+    body: DeleteManagedContentRequest,
+    user: CurrentUser = Depends(require_csrf),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> DeleteManagedContentResponse:
+    _require_feature()
+    try:
+        result = archive_content_item(
+            conn,
+            item_id,
+            expected_version_id=body.expected_version_id,
+            actor_user_id=user.id,
+            can_organize=has_content_permission(conn, user, "organize"),
+            can_publish=has_content_permission(conn, user, "publish"),
+        )
+    except (ValueError, sqlite3.IntegrityError) as exc:
+        _raise_domain_error(exc)
+    return DeleteManagedContentResponse(
+        item_id=result.item_id,
+        version_id=result.version_id,
+        archived_at=result.archived_at,
+        previous_status=result.previous_status,
+        publication_withdrawn=result.publication_withdrawn,
+    )
+
+
 @router.get("/versions/{version_id}/file")
 def get_content_version_file(
     version_id: str,
@@ -332,8 +372,10 @@ def get_content_version_file(
 ):
     row = conn.execute(
         """SELECT v.original_filename,v.doc_type,o.storage_rel_path
-           FROM content_versions v JOIN content_objects o ON o.sha256=v.object_sha256
-           WHERE v.id=?""",
+           FROM content_versions v
+           JOIN content_items i ON i.id=v.item_id
+           JOIN content_objects o ON o.sha256=v.object_sha256
+           WHERE v.id=? AND i.archived_at IS NULL""",
         (version_id,),
     ).fetchone()
     if row is None:

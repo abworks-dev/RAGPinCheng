@@ -21,6 +21,15 @@ class UploadedContent:
     version_id: str
 
 
+@dataclass(frozen=True, slots=True)
+class ArchivedContent:
+    item_id: str
+    version_id: str
+    archived_at: int
+    previous_status: str
+    publication_withdrawn: bool
+
+
 def _now() -> int:
     return int(time.time())
 
@@ -387,6 +396,94 @@ def list_content_items_page(
         ).fetchall()
     }
     return rows, total, counts
+
+
+def archive_content_item(
+    conn: sqlite3.Connection,
+    item_id: str,
+    *,
+    expected_version_id: str,
+    actor_user_id: int,
+    can_organize: bool,
+    can_publish: bool,
+) -> ArchivedContent:
+    now = _now()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            """SELECT i.id AS item_id,i.archived_at,v.id AS version_id,
+                      v.lifecycle_status,v.source_batch_id
+               FROM content_items i
+               JOIN content_versions v ON v.item_id=i.id
+                AND v.version_number=(
+                    SELECT max(v2.version_number) FROM content_versions v2 WHERE v2.item_id=i.id
+                )
+               WHERE i.id=?""",
+            (item_id,),
+        ).fetchone()
+        if row is None or row["archived_at"] is not None:
+            raise ValueError("content_item_not_found")
+        requires_publish = row["lifecycle_status"] not in {"draft", "rejected"}
+        if (requires_publish and not can_publish) or (
+            not requires_publish and not can_organize
+        ):
+            raise ValueError("content_delete_forbidden")
+        if row["version_id"] != expected_version_id:
+            raise ValueError("content_version_conflict")
+        active_job = conn.execute(
+            """SELECT 1 FROM content_index_jobs
+               WHERE version_id=? AND status IN (
+                   'pending','parsing','chunking','summarizing','embedding'
+               ) LIMIT 1""",
+            (expected_version_id,),
+        ).fetchone()
+        if row["lifecycle_status"] == "publishing" or active_job is not None:
+            raise ValueError("content_delete_in_progress")
+
+        head = conn.execute(
+            "SELECT publication_id FROM content_item_heads WHERE item_id=?",
+            (item_id,),
+        ).fetchone()
+        publication_withdrawn = head is not None
+        if head is not None:
+            conn.execute(
+                """UPDATE content_publications
+                   SET status='withdrawn',withdrawn_at=?,updated_at=?
+                   WHERE id=? AND status='published'""",
+                (now, now, head["publication_id"]),
+            )
+            conn.execute("DELETE FROM content_item_heads WHERE item_id=?", (item_id,))
+
+        result = conn.execute(
+            """UPDATE content_items SET archived_at=?,updated_at=?
+               WHERE id=? AND archived_at IS NULL""",
+            (now, now, item_id),
+        )
+        if result.rowcount != 1:
+            raise ValueError("content_item_not_found")
+        audit_event(
+            conn,
+            "content.archived",
+            actor_user_id=actor_user_id,
+            item_id=item_id,
+            version_id=expected_version_id,
+            batch_id=row["source_batch_id"],
+            metadata={
+                "previous_status": row["lifecycle_status"],
+                "publication_withdrawn": publication_withdrawn,
+            },
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    return ArchivedContent(
+        item_id=item_id,
+        version_id=expected_version_id,
+        archived_at=now,
+        previous_status=row["lifecycle_status"],
+        publication_withdrawn=publication_withdrawn,
+    )
 
 
 def submit_version_for_review(

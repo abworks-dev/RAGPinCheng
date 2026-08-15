@@ -57,6 +57,33 @@ describe("api client", () => {
     );
   });
 
+  it("sends the managed-content delete handle with CSRF protection", async () => {
+    setCsrfToken("csrf-delete");
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+      item_id: "item-1",
+      version_id: "version-1",
+      archived_at: 2,
+      previous_status: "published",
+      publication_withdrawn: true,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.deleteManagedContent("item/1", "version-1");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/admin/content/items/item%2F1",
+      expect.objectContaining({
+        method: "DELETE",
+        credentials: "include",
+        body: JSON.stringify({ expected_version_id: "version-1" }),
+        headers: {
+          "content-type": "application/json",
+          "X-CSRF-Token": "csrf-delete",
+        },
+      }),
+    );
+  });
+
   it("preserves the administrator PATCH contract", async () => {
     setCsrfToken("csrf-admin");
     const fetchMock = vi.fn().mockResolvedValue(

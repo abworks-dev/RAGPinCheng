@@ -405,9 +405,8 @@ class TestDeployGitSafety(unittest.TestCase):
             "${CONTENT_HOST_PATH:?CONTENT_HOST_PATH is required}:/app/content",
             overlay,
         )
-        self.assertIn("type: tmpfs", overlay)
-        self.assertIn("target: /app/docs", overlay)
-        self.assertIn("read_only: true", overlay)
+        self.assertIn("tmpfs:", overlay)
+        self.assertIn("/app/docs:ro,size=1048576,mode=0555", overlay)
         self.assertNotIn("DOCS_HOST_PATH", overlay)
         self.assertIn(
             "${MEDIA_HOST_PATH:?MEDIA_HOST_PATH is required}:/app/media", overlay
@@ -423,8 +422,13 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertIn('ORIGINAL_COMPOSE_OVERRIDE="${COMPOSE_OVERRIDE}"', self.app_only_workflow)
         self.assertIn('COMPOSE=("${DEPLOY_COMPOSE[@]}")', self.app_only_workflow)
         self.assertIn("export COMPOSE_OVERRIDE", self.app_only_workflow)
-        self.assertIn("SOURCE_DECOUPLED_OVERRIDE_SANITIZED=true", self.app_only_workflow)
-        self.assertIn("SOURCE_DECOUPLED_OVERRIDE_SANITIZED:-false", self.linux)
+        self.assertIn(
+            "export SOURCE_DECOUPLED_OVERRIDE_SANITIZED=true",
+            self.app_only_workflow,
+        )
+        self.assertIn(
+            'SOURCE_DECOUPLED_OVERRIDE_SANITIZED:-false', self.linux
+        )
         self.assertIn("sanitize_source_decoupled_override.py", self.linux)
         self.assertIn(compose_sanitizer_flags, self.linux)
         self.assertIn("export COMPOSE_OVERRIDE", self.linux)

@@ -146,6 +146,109 @@ def test_content_endpoints_enforce_auth_permissions_csrf_and_role_separation(con
     assert queued == [published.json()["index_job_id"]]
 
 
+def test_delete_draft_requires_organize_csrf_and_preserves_object(content_api):
+    client, sessions, _queued, db_path = content_api
+    uploaded = client.post(
+        "/api/admin/content/uploads",
+        data={"category_id": "cat-03"},
+        files=[("files", ("delete-me.md", b"# synthetic", "text/markdown"))],
+        **_auth(sessions, "organizer", csrf=True),
+    ).json()["entries"][0]
+    url = f"/api/admin/content/items/{uploaded['item_id']}"
+    body = {"expected_version_id": uploaded["version_id"]}
+
+    assert client.request("DELETE", url, json=body, **_auth(sessions, "organizer")).status_code == 403
+    assert client.request("DELETE", url, json=body, **_auth(sessions, "plain", csrf=True)).status_code == 403
+    assert client.request(
+        "DELETE",
+        url,
+        json={"expected_version_id": "version-stale"},
+        **_auth(sessions, "plain", csrf=True),
+    ).status_code == 403
+    deleted = client.request("DELETE", url, json=body, **_auth(sessions, "organizer", csrf=True))
+    assert deleted.status_code == 200
+    assert deleted.json()["publication_withdrawn"] is False
+
+    conn = connect(db_path)
+    try:
+        assert conn.execute(
+            "SELECT archived_at FROM content_items WHERE id=?", (uploaded["item_id"],)
+        ).fetchone()[0] is not None
+        assert conn.execute("SELECT count(*) FROM content_objects").fetchone()[0] == 1
+        assert conn.execute(
+            "SELECT count(*) FROM content_audit_events WHERE event_type='content.archived'"
+        ).fetchone()[0] == 1
+    finally:
+        conn.close()
+    listing = client.get("/api/admin/content/items-page", **_auth(sessions, "organizer"))
+    assert listing.json()["items"] == []
+    assert client.get(
+        f"/api/admin/content/versions/{uploaded['version_id']}/file",
+        **_auth(sessions, "organizer"),
+    ).status_code == 404
+
+
+def test_delete_reviewed_content_requires_publish_and_checks_version(content_api):
+    client, sessions, _queued, _db_path = content_api
+    uploaded = client.post(
+        "/api/admin/content/uploads",
+        data={"category_id": "cat-03"},
+        files=[("files", ("reviewed.md", b"# synthetic", "text/markdown"))],
+        **_auth(sessions, "organizer", csrf=True),
+    ).json()["entries"][0]
+    client.post(
+        f"/api/admin/content/versions/{uploaded['version_id']}/submit",
+        json={},
+        **_auth(sessions, "organizer", csrf=True),
+    )
+    url = f"/api/admin/content/items/{uploaded['item_id']}"
+    assert client.request(
+        "DELETE",
+        url,
+        json={"expected_version_id": "version-stale"},
+        **_auth(sessions, "publisher", csrf=True),
+    ).status_code == 409
+    assert client.request(
+        "DELETE",
+        url,
+        json={"expected_version_id": uploaded["version_id"]},
+        **_auth(sessions, "organizer", csrf=True),
+    ).status_code == 403
+    assert client.request(
+        "DELETE",
+        url,
+        json={"expected_version_id": uploaded["version_id"]},
+        **_auth(sessions, "publisher", csrf=True),
+    ).status_code == 200
+
+
+def test_delete_rejects_active_publication(content_api):
+    client, sessions, _queued, _db_path = content_api
+    uploaded = client.post(
+        "/api/admin/content/uploads",
+        data={"category_id": "cat-03"},
+        files=[("files", ("publishing.md", b"# synthetic", "text/markdown"))],
+        **_auth(sessions, "organizer", csrf=True),
+    ).json()["entries"][0]
+    version_url = f"/api/admin/content/versions/{uploaded['version_id']}"
+    client.post(f"{version_url}/submit", json={}, **_auth(sessions, "organizer", csrf=True))
+    client.post(
+        f"{version_url}/review",
+        json={"approved": True},
+        **_auth(sessions, "reviewer", csrf=True),
+    )
+    client.post(f"{version_url}/publish", json={}, **_auth(sessions, "publisher", csrf=True))
+
+    response = client.request(
+        "DELETE",
+        f"/api/admin/content/items/{uploaded['item_id']}",
+        json={"expected_version_id": uploaded["version_id"]},
+        **_auth(sessions, "publisher", csrf=True),
+    )
+    assert response.status_code == 409
+    assert response.json()["detail"] == "资料正在发布，暂时不能删除"
+
+
 def test_category_update_uses_csrf_and_optimistic_version(content_api):
     client, sessions, _queued, _db_path = content_api
     url = "/api/admin/content/categories/cat-01"
