@@ -275,6 +275,7 @@ def test_candidate_qualification_is_cuda_only_and_cleans_tasks():
     assert "GPU_PRODUCTION_SUSPEND status=stopped" in workflow
     assert "GPU_PRODUCTION_RESTORE status=complete" in workflow
     assert "GPU_SERVICE_TOKEN" in workflow
+    assert "PRODUCTION_PYTHON_PATH: ${{ vars.PRODUCTION_GPU_PYTHON_PATH }}" in workflow
     assert "resolve-gpu-model-cache-source.ps1" in workflow
     assert "TORCH_WHEEL_SEED_ROOT" in workflow
     assert "TorchWheelSeedRoot" in workflow
