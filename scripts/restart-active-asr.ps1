@@ -124,9 +124,11 @@ function Test-AsrHealth {
 function Install-FileAtomic {
     param([Parameter(Mandatory = $true)][string]$Source, [Parameter(Mandatory = $true)][string]$Destination)
     $temporary = $Destination + ".migration-" + [guid]::NewGuid().ToString("N")
+    $replaceBackup = $Destination + ".migration-before-" + [guid]::NewGuid().ToString("N")
     Copy-Item -LiteralPath $Source -Destination $temporary
-    try { [IO.File]::Replace($temporary, $Destination, $null, $true) } finally {
+    try { [IO.File]::Replace($temporary, $Destination, $replaceBackup, $true) } finally {
         if (Test-Path -LiteralPath $temporary) { [IO.File]::Delete($temporary) }
+        if (Test-Path -LiteralPath $replaceBackup) { [IO.File]::Delete($replaceBackup) }
     }
 }
 

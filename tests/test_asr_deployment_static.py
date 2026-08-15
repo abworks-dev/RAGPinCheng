@@ -27,6 +27,8 @@ def test_active_asr_restart_is_identity_bound_and_reversible():
     assert "bootstrap_replaced" in script
     assert "Install-FileAtomic" in script
     assert "[IO.File]::Replace" in script
+    assert '".migration-before-"' in script
+    assert "[IO.File]::Delete($replaceBackup)" in script
     assert '$context.module -eq "services.asr_service.app:create_app"' in script
     assert '[string]$actions[0].Execute -ne "powershell.exe"' in script
     assert '[string]$actions[0].Arguments -ne $expectedArguments' in script
