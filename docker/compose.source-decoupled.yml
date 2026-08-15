@@ -2,7 +2,7 @@ services:
   backend:
     # Replace every base/private backend mount so an older Compose merge
     # implementation cannot retain the retired /app/docs bind by target.
-    volumes: !override
+    volumes:
       - ${DATA_PATH:?DATA_PATH is required}:/app/data
       - ${CONTENT_HOST_PATH:?CONTENT_HOST_PATH is required}:/app/content
       # Production strict mode no longer accepts filesystem documents. Keep the
