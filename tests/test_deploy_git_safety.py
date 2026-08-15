@@ -503,6 +503,11 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertIn("Register-ScheduledTask", self.promote)
         self.assertIn("Assert-OwnedTask", self.promote)
         self.assertIn("Refusing to modify an unexpected RAGPinCheng-GPU", self.promote)
+        self.assertIn("$legacyArgumentsPattern", self.promote)
+        self.assertIn("start-gpu-legacy-service.ps1", self.promote)
+        self.assertIn("$env:PRODUCTION_PYTHON_PATH", self.promote)
+        self.assertIn("$env:GPU_BASE_PYTHON", self.promote)
+        self.assertIn("(-not $releaseTaskOwned -and -not $legacyTaskOwned)", self.promote)
 
     def test_start_wrapper_requires_validated_immutable_release(self):
         self.assertIn("GPU runtime release is not validated for production", self.windows_start)
