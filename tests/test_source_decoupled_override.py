@@ -79,6 +79,8 @@ def test_production_mount_contract_is_explicit(monkeypatch):
     ]
     assert volumes[2]["type"] == "tmpfs"
     assert volumes[2]["read_only"] is True
+    assert config["name"] == "ragpincheng-prod"
+    assert config["networks"]["default"]["name"] == "ragpincheng-prod_default"
 
 
 @pytest.mark.parametrize(
