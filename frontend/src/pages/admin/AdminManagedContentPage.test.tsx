@@ -93,6 +93,17 @@ const childCategory = {
   item_count: 0,
 };
 
+const projectCategory = {
+  ...category,
+  id: "cat-04",
+  category_key: "project_materials",
+  display_code: "04",
+  display_name: "项目资料",
+  sort_order: 40,
+  full_path: "04 项目资料",
+  item_count: 0,
+};
+
 const item = {
   item_id: "item-1",
   title: "建模标准",
@@ -152,6 +163,19 @@ describe("AdminManagedContentPage", () => {
     expect(screen.getByText("未选择资料，单次最多 20 份")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "批量确认" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "批量退回" })).toBeDisabled();
+  });
+
+  it("switches the active top-level folder and its upload target", async () => {
+    mocks.permissions = ["organize"];
+    mocks.categories.mockResolvedValue([category, projectCategory]);
+    render(<AdminManagedContentPage />);
+
+    const rootFolder = await screen.findByRole("combobox", { name: "一级目录" });
+    await waitFor(() => expect(rootFolder).toHaveValue("cat-03"));
+    fireEvent.change(rootFolder, { target: { value: "cat-04" } });
+
+    await waitFor(() => expect(mocks.items).toHaveBeenCalledWith(expect.objectContaining({ category_id: "cat-04" })));
+    expect(screen.getByText("上传到：04 项目资料")).toBeInTheDocument();
   });
 
   it("lets an organizer delete a draft after explicit confirmation", async () => {

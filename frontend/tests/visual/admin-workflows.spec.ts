@@ -19,6 +19,12 @@ test.describe("资料库", () => {
     await expect(page.getByRole("heading", { name: "资料库" })).toBeVisible();
     await expectNoBodyOverflow(page);
     await expectInViewport(page.getByRole("button", { name: "刷新" }));
+    const rootFolder = page.getByRole("combobox", { name: "一级目录" });
+    await expect(rootFolder).toHaveValue("cat-company");
+    const switchedListing = page.waitForRequest((request) => request.method() === "GET" && request.url().includes("/api/admin/content/items-page") && request.url().includes("category_id=cat-project"));
+    await rootFolder.selectOption("cat-project");
+    await switchedListing;
+    await expect(page.getByText("上传到：04 项目资料")).toBeVisible();
     await page.getByRole("button", { name: "上传资料" }).scrollIntoViewIfNeeded();
     await expectInViewport(page.getByRole("button", { name: "上传资料" }));
     if (page.viewportSize()!.width === 390) await expectTouchTarget(page.getByRole("button", { name: "上传资料" }));
@@ -141,17 +147,20 @@ test.describe("资料库", () => {
   });
 });
 
-test.describe("索引监控", () => {
+test.describe("索引任务", () => {
   test("normal layout keeps publication identity, filters, and failures discoverable", async ({ page }) => {
     await openTab(page, "索引任务");
-    await expect(page.getByRole("heading", { name: "索引监控" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "索引任务" })).toBeVisible();
     await expect(page.getByText("资料库发布失败的合成长文件名资料", { exact: true })).toBeVisible();
     await expectNoBodyOverflow(page);
     await expect(page.getByRole("button", { name: "上传资料" })).toHaveCount(0);
     await expect(page.getByText("旧索引资料", { exact: true })).toHaveCount(0);
     await expect(page.getByRole("searchbox", { name: "搜索发布任务" })).toBeVisible();
     await expect(page.getByRole("combobox", { name: "按数据库分类筛选" })).toBeVisible();
+    await expect(page.getByRole("combobox", { name: "按资料来源筛选" })).toBeVisible();
     await expect(page.getByRole("button", { name: "查看历史尝试" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "查看文件" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "重新发布" })).toBeVisible();
 
     const publicationFailure = page.getByText("文档解析服务请求失败。", { exact: true });
     await publicationFailure.scrollIntoViewIfNeeded();

@@ -46,7 +46,7 @@ vi.mock("./AdminConversationsPage", () => ({
 vi.mock("./AdminDocumentsPage", () => ({
   AdminDocumentsPage: () => {
     mocks.documentsMount();
-    return <div>索引监控页面内容</div>;
+    return <div>索引任务页面内容</div>;
   },
 }));
 
@@ -211,7 +211,7 @@ describe("AdminLayout tab boundary", () => {
     expect(screen.getByText("资料库页面内容")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "索引任务" }));
-    expect(screen.getByText("索引监控页面内容")).toBeInTheDocument();
+    expect(screen.getByText("索引任务页面内容")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "分类管理" }));
     expect(screen.getByText("分类设置页面内容")).toBeInTheDocument();

@@ -451,6 +451,14 @@ class ManagedIndexJobDTO(BaseModel):
     doc_type: str | None = None
     category_id: str | None = None
     category_label: str | None = None
+    category_path: str | None = None
+    version_number: int | None = None
+    file_size: int | None = None
+    source_origin: str | None = None
+    is_current_head: bool = False
+    is_latest_attempt: bool = True
+    parent_count: int | None = None
+    preview_parent_id: str | None = None
 
 
 class ManagedIndexJobListResponse(BaseModel):

@@ -404,6 +404,7 @@ export const api = {
     query?: string;
     category_id?: string;
     doc_type?: string;
+    source_origin?: string;
     status?: string;
     history?: boolean;
     limit?: number;
@@ -413,6 +414,7 @@ export const api = {
     if (params?.query) search.set("query", params.query);
     if (params?.category_id) search.set("category_id", params.category_id);
     if (params?.doc_type) search.set("doc_type", params.doc_type);
+    if (params?.source_origin) search.set("source_origin", params.source_origin);
     if (params?.status) search.set("status", params.status);
     if (params?.history) search.set("history", "true");
     if (params?.limit != null) search.set("limit", String(params.limit));
