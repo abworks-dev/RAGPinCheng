@@ -8,7 +8,12 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 $envFile = Join-Path $RepositoryPath "services\gpu_service\.env"
-if (-not (Test-Path -LiteralPath $envFile -PathType Leaf)) { throw "GPU service environment file is missing" }
+if (-not (Test-Path -LiteralPath $envFile -PathType Leaf)) {
+    $envFile = Join-Path $RepositoryPath "gpu_service\.env"
+}
+if (-not (Test-Path -LiteralPath $envFile -PathType Leaf)) {
+    throw "GPU service environment file is missing from canonical and legacy paths"
+}
 foreach ($line in Get-Content -LiteralPath $envFile -Encoding UTF8) {
     if ($line -match '^([A-Z][A-Z0-9_]*)=(.*)$') { [Environment]::SetEnvironmentVariable($Matches[1], $Matches[2], "Process") }
 }

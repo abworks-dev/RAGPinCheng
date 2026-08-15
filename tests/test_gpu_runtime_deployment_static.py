@@ -110,6 +110,13 @@ def test_candidate_resolver_is_manual_d_drive_isolated_and_evidence_only():
     assert "Stop-Process -Id $processId -Force" in legacy
     assert "TCP 8100 did not close after stopping the owned GPU process" in legacy
     assert "[string]::Equals([string]$process.ExecutablePath, $BasePython" in legacy
+    legacy_start = read("scripts/start-gpu-legacy-service.ps1")
+    canonical_env = 'Join-Path $RepositoryPath "services\\gpu_service\\.env"'
+    fallback_env = 'Join-Path $RepositoryPath "gpu_service\\.env"'
+    assert canonical_env in legacy_start
+    assert fallback_env in legacy_start
+    assert legacy_start.index(canonical_env) < legacy_start.index(fallback_env)
+    assert "missing from canonical and legacy paths" in legacy_start
     register_line = next(
         line for line in legacy.splitlines() if line.startswith("Register-ScheduledTask ")
     )
