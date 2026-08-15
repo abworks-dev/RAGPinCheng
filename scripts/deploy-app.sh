@@ -75,11 +75,6 @@ COMPOSE_ARGS=(
 case "${SOURCE_DECOUPLING_COMPLETE:-false}" in
     true)
         COMPOSE_ARGS+=(-f "$COMPOSE_OVERRIDE")
-        [ -f "$COMPOSE_SOURCE_DECOUPLED" ] || {
-            echo "ERROR: source-decoupled Compose overlay is missing: ${COMPOSE_SOURCE_DECOUPLED}"
-            exit 1
-        }
-        COMPOSE_ARGS+=(-f "$COMPOSE_SOURCE_DECOUPLED")
         ;;
     false|"")
         COMPOSE_ARGS+=(-f "$COMPOSE_BASE" -f "$COMPOSE_OVERRIDE")
