@@ -41,4 +41,14 @@ do {
         }
     } catch {}
 } while ([DateTimeOffset]::Now -lt $deadline)
+$taskInfo = Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction SilentlyContinue
+Write-Host "GPU_LEGACY_RESTORE_DIAGNOSTIC task_result=$([string]$taskInfo.LastTaskResult)"
+foreach ($log in @((Join-Path $release "logs\gpu-service.stdout.log"), (Join-Path $release "logs\gpu-service.stderr.log"))) {
+    if (Test-Path -LiteralPath $log -PathType Leaf) {
+        foreach ($line in Get-Content -LiteralPath $log -Tail 40 -ErrorAction SilentlyContinue) {
+            $safe = [string]$line -replace '(?i)(token|secret|password)\s*[:=]\s*\S+', '$1=[REDACTED]'
+            Write-Host "GPU_LEGACY_RESTORE_LOG $safe"
+        }
+    }
+}
 throw "Legacy GPU release did not become healthy"
