@@ -421,7 +421,7 @@ def test_gpu_deploy_script_is_fingerprint_aware():
 
 def test_app_deploy_uses_canonical_gpu_fingerprint_inventory():
     fingerprint = read("scripts/get-gpu-runtime-fingerprint.ps1")
-    app_deploy = read(".github/workflows/deploy-production-app-emergency.yml")
+    app_deploy = read(".github/workflows/deploy-production-app-manual.yml")
 
     powershell_inventory = re.search(
         r"\$objects = @\(\s*(.*?)\s*\)", fingerprint, re.DOTALL

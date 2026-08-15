@@ -15,7 +15,7 @@ class TestDeployGitSafety(unittest.TestCase):
             ROOT / ".github/workflows/deploy-production-emergency.yml"
         ).read_text(encoding="utf-8")
         cls.app_only_workflow = (
-            ROOT / ".github/workflows/deploy-production-app-emergency.yml"
+            ROOT / ".github/workflows/deploy-production-app-manual.yml"
         ).read_text(encoding="utf-8")
         cls.app_asr_diagnostic_workflow = (
             ROOT / ".github/workflows/diagnose-production-app-asr.yml"

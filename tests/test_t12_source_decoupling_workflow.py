@@ -5,7 +5,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = (ROOT / ".github/workflows/decouple-production-source-t12.yml").read_text(
     encoding="utf-8"
 )
-DEPLOY = (ROOT / ".github/workflows/deploy-production-app-emergency.yml").read_text(
+DEPLOY = (ROOT / ".github/workflows/deploy-production-app-manual.yml").read_text(
     encoding="utf-8"
 )
 
