@@ -399,6 +399,12 @@ class TestDeployGitSafety(unittest.TestCase):
 
     def test_source_decoupling_overlay_is_final_for_deploy_and_recovery(self):
         overlay = self.source_decoupled_compose
+        self.assertIn("volumes: !override", overlay)
+        self.assertIn("${DATA_PATH:?DATA_PATH is required}:/app/data", overlay)
+        self.assertIn(
+            "${CONTENT_HOST_PATH:?CONTENT_HOST_PATH is required}:/app/content",
+            overlay,
+        )
         self.assertIn("type: tmpfs", overlay)
         self.assertIn("target: /app/docs", overlay)
         self.assertIn("read_only: true", overlay)
