@@ -53,7 +53,7 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertIn("os.replace(temporary, target)", workflow)
         self.assertIn('docker tag "${OLD_IMAGE_ID}" pincheng-rag-backend:latest', workflow)
         self.assertIn('"${RUNNING_IMAGE_ID}" = "${OLD_IMAGE_ID}"', workflow)
-        self.assertIn("CURRENT_SCHEMA_VERSION == 5", workflow)
+        self.assertIn("CURRENT_SCHEMA_VERSION == 6", workflow)
         self.assertIn("APP_BACKUP_RECOVERY status=complete", workflow)
         self.assertIn("docker compose -p ragpincheng-prod", workflow)
         self.assertIn('container_status={{.State.Status}}', workflow)
