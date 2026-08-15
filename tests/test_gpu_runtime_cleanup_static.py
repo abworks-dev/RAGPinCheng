@@ -44,6 +44,13 @@ def test_cleanup_has_retention_and_delete_caps():
     assert "Candidate deletion exceeds the safety cap" in CLEANUP
 
 
+def test_cleanup_materializes_generic_lists_on_windows_powershell_51():
+    assert "$candidateArray = $candidates.ToArray()" in CLEANUP
+    assert "$skippedArray = $skipped.ToArray()" in CLEANUP
+    assert "$candidateArray = @($candidates)" not in CLEANUP
+    assert "$skippedArray = @($skipped)" not in CLEANUP
+
+
 def test_task_installer_defaults_to_dry_run_and_exact_paths():
     assert "[switch]$EnableApply" in INSTALL
     assert "$env:PRODUCTION_REPO_PATH" in INSTALL
