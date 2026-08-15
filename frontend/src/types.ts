@@ -220,6 +220,20 @@ export type ManagedContentList = {
   status_counts: Record<string, number>;
 };
 
+export type FolderRequest = {
+  id: string;
+  parent_category_id: string;
+  parent_label: string;
+  display_name: string;
+  status: "pending" | "approved" | "rejected";
+  requester_name: string | null;
+  review_note: string | null;
+  created_category_id: string | null;
+  created_at: number;
+  updated_at: number;
+  reviewed_at: number | null;
+};
+
 export type BulkManagedContentResult = {
   version_id: string;
   status: "succeeded" | "failed";

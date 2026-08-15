@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 import time
 import uuid
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
@@ -25,12 +26,16 @@ from .content_store import (
     archive_content_item,
     audit_event,
     create_category,
+    create_folder_request,
     create_publication_job,
     create_web_batch,
     list_content_items,
     list_content_items_page,
     list_categories,
+    list_folder_requests,
+    move_content_item,
     register_uploaded_document,
+    review_folder_request,
     review_version,
     submit_version_for_review,
     update_category,
@@ -38,6 +43,7 @@ from .content_store import (
 from .db import get_db
 from .schemas import (
     CreateManagedCategoryRequest,
+    CreateFolderRequest,
     CreateContentPermissionGroupRequest,
     DeleteManagedContentRequest,
     DeleteManagedContentResponse,
@@ -49,12 +55,15 @@ from .schemas import (
     ManagedCategoryDTO,
     ManagedContentItemDTO,
     ManagedContentListResponse,
+    FolderRequestDTO,
+    MoveManagedContentRequest,
     ManagedIndexJobDTO,
     ManagedIndexJobListResponse,
     ManagedPublicationDTO,
     ManagedUploadEntryDTO,
     ManagedUploadResponse,
     ReviewManagedContentRequest,
+    ReviewFolderRequest,
     UpdateManagedCategoryRequest,
     UpdateContentPermissionsRequest,
     UpdateContentPermissionGroupRequest,
@@ -114,6 +123,17 @@ def _category_dto(row: sqlite3.Row) -> ManagedCategoryDTO:
     )
 
 
+def _folder_request_dto(row: sqlite3.Row) -> FolderRequestDTO:
+    return FolderRequestDTO(
+        id=row["id"], parent_category_id=row["parent_category_id"],
+        parent_label=row["parent_label"] if "parent_label" in row.keys() else "",
+        display_name=row["display_name"], status=row["status"],
+        requester_name=row["requester_name"] if "requester_name" in row.keys() else None,
+        review_note=row["review_note"], created_category_id=row["created_category_id"],
+        created_at=row["created_at"], updated_at=row["updated_at"], reviewed_at=row["reviewed_at"],
+    )
+
+
 def _raise_domain_error(exc: Exception) -> None:
     message = str(exc)
     if isinstance(exc, sqlite3.IntegrityError):
@@ -132,6 +152,16 @@ def _raise_domain_error(exc: Exception) -> None:
         raise HTTPException(status_code=409, detail="资料正在发布，暂时不能删除") from exc
     if message == "content_delete_forbidden":
         raise HTTPException(status_code=403, detail="当前账号没有删除此状态资料的权限") from exc
+    if message == "content_move_forbidden":
+        raise HTTPException(status_code=403, detail="当前账号没有移动此状态资料的权限") from exc
+    if message == "content_move_requires_republication":
+        raise HTTPException(status_code=409, detail="已确认或已发布资料需要退回后重新归类") from exc
+    if message == "folder_already_exists":
+        raise HTTPException(status_code=409, detail="同名文件夹已经存在") from exc
+    if message == "folder_request_already_reviewed":
+        raise HTTPException(status_code=409, detail="目录申请已被处理") from exc
+    if message == "folder_request_not_found":
+        raise HTTPException(status_code=404, detail="目录申请不存在") from exc
     raise HTTPException(status_code=400, detail=message) from exc
 
 
@@ -206,19 +236,70 @@ def patch_category(
     return _category_dto(row)
 
 
+@router.post("/folder-requests", response_model=FolderRequestDTO)
+def post_folder_request(
+    body: CreateFolderRequest,
+    user: CurrentUser = Depends(require_content_permission("organize", csrf=True)),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> FolderRequestDTO:
+    _require_feature()
+    try:
+        row = create_folder_request(
+            conn, parent_category_id=body.parent_category_id,
+            display_name=body.display_name, actor_user_id=user.id,
+        )
+    except (ValueError, sqlite3.IntegrityError) as exc:
+        _raise_domain_error(exc)
+    return _folder_request_dto(row)
+
+
+@router.get("/folder-requests", response_model=list[FolderRequestDTO])
+def get_folder_requests(
+    status: str | None = None,
+    _user: CurrentUser = Depends(require_any_content_permission({"review", "manage_categories"})),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> list[FolderRequestDTO]:
+    return [_folder_request_dto(row) for row in list_folder_requests(conn, status=status)]
+
+
+@router.post("/folder-requests/{request_id}/review", response_model=FolderRequestDTO)
+def post_folder_request_review(
+    request_id: str,
+    body: ReviewFolderRequest,
+    user: CurrentUser = Depends(require_content_permission("review", csrf=True)),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> FolderRequestDTO:
+    _require_feature()
+    try:
+        review_folder_request(
+            conn, request_id, approved=body.approved,
+            review_note=body.note, actor_user_id=user.id,
+        )
+    except (ValueError, sqlite3.IntegrityError) as exc:
+        _raise_domain_error(exc)
+    row = next((entry for entry in list_folder_requests(conn) if entry["id"] == request_id), None)
+    if row is None:
+        raise HTTPException(status_code=404, detail="目录申请不存在")
+    return _folder_request_dto(row)
+
+
 @router.post("/uploads", response_model=ManagedUploadResponse)
 async def upload_managed_documents(
     files: list[UploadFile] = File(...),
     category_id: str = Form(...),
+    relative_paths: list[str] | None = Form(None),
     user: CurrentUser = Depends(require_content_permission("organize", csrf=True)),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> ManagedUploadResponse:
     _require_feature()
     if not files:
         raise HTTPException(status_code=400, detail="至少选择一个文件")
+    if relative_paths is not None and len(relative_paths) != len(files):
+        raise HTTPException(status_code=400, detail="文件和相对路径数量不一致")
     batch_id = create_web_batch(conn, actor_user_id=user.id)
     entries: list[ManagedUploadEntryDTO] = []
-    for upload in files:
+    can_create_folders = has_content_permission(conn, user, "manage_categories")
+    for index, upload in enumerate(files):
         filename = (upload.filename or "").strip()
         suffix = Path(filename).suffix.lower()
         doc_type = _DOC_TYPES.get(suffix)
@@ -230,18 +311,56 @@ async def upload_managed_documents(
             )
             continue
         try:
+            upload_category_id = category_id
+            if relative_paths:
+                relative = PurePosixPath(relative_paths[index].replace("\\", "/"))
+                if relative.is_absolute() or ".." in relative.parts or len(relative.parts) > 5:
+                    raise ValueError("invalid_relative_path")
+                for folder_name in relative.parts[:-1]:
+                    clean_name = folder_name.strip()
+                    if not clean_name or clean_name in {".", ".."}:
+                        raise ValueError("invalid_relative_path")
+                    match = re.fullmatch(r"(?:(\d{2})[ _-]+)?(.+)", clean_name)
+                    if not match:
+                        raise ValueError("invalid_folder_name")
+                    code, name = match.group(1), match.group(2).strip()
+                    child = conn.execute(
+                        """SELECT id FROM category_nodes
+                           WHERE parent_id=? AND is_active=1 AND display_name=?""",
+                        (upload_category_id, name),
+                    ).fetchone()
+                    if child is not None:
+                        upload_category_id = child["id"]
+                        continue
+                    if not can_create_folders:
+                        raise ValueError("folder_approval_required")
+                    sibling_count = int(conn.execute(
+                        "SELECT count(*) FROM category_nodes WHERE parent_id=?",
+                        (upload_category_id,),
+                    ).fetchone()[0])
+                    created = create_category(
+                        conn,
+                        category_key=None,
+                        parent_id=upload_category_id,
+                        display_code=code or f"{sibling_count + 1:02d}",
+                        display_name=name,
+                        sort_order=(sibling_count + 1) * 10,
+                        actor_user_id=user.id,
+                    )
+                    upload_category_id = created["id"]
             stored = await _storage.ingest_upload(
                 upload, batch_id=batch_id, max_bytes=_MAX_UPLOAD_BYTES
             )
             result = register_uploaded_document(
                 conn,
                 batch_id=batch_id,
-                category_id=category_id,
+                category_id=upload_category_id,
                 title=Path(filename).stem,
                 original_filename=filename,
                 doc_type=doc_type,
                 stored=stored,
                 actor_user_id=user.id,
+                source_rel_path=relative_paths[index] if relative_paths else filename,
             )
             entries.append(
                 ManagedUploadEntryDTO(
@@ -254,8 +373,14 @@ async def upload_managed_documents(
             )
         except (ValueError, sqlite3.IntegrityError) as exc:
             conn.rollback()
+            reason = {
+                "folder_approval_required": "目录尚未批准，请联系资料负责人创建后重试",
+                "invalid_relative_path": "文件夹路径无效或超过允许深度",
+                "invalid_folder_name": "文件夹名称不符合规则",
+                "category_depth_exceeded": "资料目录最多支持四级",
+            }.get(str(exc), str(exc))
             entries.append(
-                ManagedUploadEntryDTO(filename=filename, status="skipped", reason=str(exc))
+                ManagedUploadEntryDTO(filename=filename, status="skipped", reason=reason)
             )
     if not any(entry.status == "accepted" for entry in entries):
         conn.execute(
@@ -361,6 +486,32 @@ def delete_content_item(
         previous_status=result.previous_status,
         publication_withdrawn=result.publication_withdrawn,
     )
+
+
+@router.post("/items/{item_id}/move", response_model=ManagedContentItemDTO)
+def move_managed_content_item(
+    item_id: str,
+    body: MoveManagedContentRequest,
+    user: CurrentUser = Depends(require_csrf),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> ManagedContentItemDTO:
+    _require_feature()
+    try:
+        move_content_item(
+            conn,
+            item_id,
+            target_category_id=body.target_category_id,
+            expected_version_id=body.expected_version_id,
+            actor_user_id=user.id,
+            can_organize=has_content_permission(conn, user, "organize"),
+            can_review=has_content_permission(conn, user, "review"),
+        )
+    except (ValueError, sqlite3.IntegrityError) as exc:
+        _raise_domain_error(exc)
+    row = next((entry for entry in list_content_items(conn) if entry["item_id"] == item_id), None)
+    if row is None:
+        raise HTTPException(status_code=404, detail="资料不存在")
+    return _content_item_dto(row)
 
 
 @router.get("/versions/{version_id}/file")

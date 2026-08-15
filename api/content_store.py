@@ -97,6 +97,7 @@ def create_category(
     display_name: str,
     sort_order: int,
     actor_user_id: int,
+    commit: bool = True,
 ) -> sqlite3.Row:
     key = category_key.strip() if category_key else f"category_{uuid.uuid4().hex[:12]}"
     code = display_code.strip()
@@ -176,6 +177,110 @@ def update_category(
     audit_event(conn, "category.updated", actor_user_id=actor_user_id, category_id=category_id)
     conn.commit()
     return conn.execute("SELECT * FROM category_nodes WHERE id=?", (category_id,)).fetchone()
+
+
+def create_folder_request(
+    conn: sqlite3.Connection,
+    *,
+    parent_category_id: str,
+    display_name: str,
+    actor_user_id: int,
+    commit: bool = True,
+) -> sqlite3.Row:
+    name = display_name.strip()
+    if not name or len(name) > 100:
+        raise ValueError("invalid_display_name")
+    parent = conn.execute(
+        "SELECT level,is_active FROM category_nodes WHERE id=?", (parent_category_id,)
+    ).fetchone()
+    if parent is None or not parent["is_active"]:
+        raise ValueError("active_category_not_found")
+    if int(parent["level"]) >= 4:
+        raise ValueError("category_depth_exceeded")
+    if conn.execute(
+        "SELECT 1 FROM category_nodes WHERE parent_id=? AND display_name=? AND is_active=1",
+        (parent_category_id, name),
+    ).fetchone():
+        raise ValueError("folder_already_exists")
+    request_id = _id("folder-request")
+    now = _now()
+    conn.execute(
+        """INSERT INTO content_folder_requests
+           (id,parent_category_id,display_name,status,requested_by,created_at,updated_at)
+           VALUES (?,?,?,'pending',?,?,?)""",
+        (request_id, parent_category_id, name, actor_user_id, now, now),
+    )
+    audit_event(
+        conn, "folder.requested", actor_user_id=actor_user_id,
+        category_id=parent_category_id, metadata={"request_id": request_id, "display_name": name},
+    )
+    if commit:
+        conn.commit()
+    return conn.execute("SELECT * FROM content_folder_requests WHERE id=?", (request_id,)).fetchone()
+
+
+def list_folder_requests(conn: sqlite3.Connection, *, status: str | None = None) -> list[sqlite3.Row]:
+    where = "WHERE r.status=?" if status else ""
+    params = (status,) if status else ()
+    return conn.execute(
+        f"""SELECT r.*,c.display_code || ' ' || c.display_name AS parent_label,
+                    u.real_name AS requester_name
+             FROM content_folder_requests r
+             JOIN category_nodes c ON c.id=r.parent_category_id
+             LEFT JOIN users u ON u.id=r.requested_by
+             {where}
+             ORDER BY CASE r.status WHEN 'pending' THEN 0 ELSE 1 END,r.created_at DESC""",
+        params,
+    ).fetchall()
+
+
+def review_folder_request(
+    conn: sqlite3.Connection,
+    request_id: str,
+    *,
+    approved: bool,
+    review_note: str | None,
+    actor_user_id: int,
+) -> sqlite3.Row:
+    now = _now()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            "SELECT * FROM content_folder_requests WHERE id=?", (request_id,)
+        ).fetchone()
+        if row is None:
+            raise ValueError("folder_request_not_found")
+        if row["status"] != "pending":
+            raise ValueError("folder_request_already_reviewed")
+        created_category_id = None
+        if approved:
+            sibling_count = int(conn.execute(
+                "SELECT count(*) FROM category_nodes WHERE parent_id=?",
+                (row["parent_category_id"],),
+            ).fetchone()[0])
+            created = create_category(
+                conn, category_key=None, parent_id=row["parent_category_id"],
+                display_code=f"{sibling_count + 1:02d}", display_name=row["display_name"],
+                sort_order=(sibling_count + 1) * 10, actor_user_id=actor_user_id, commit=False,
+            )
+            created_category_id = created["id"]
+        status = "approved" if approved else "rejected"
+        conn.execute(
+            """UPDATE content_folder_requests
+               SET status=?,reviewed_by=?,review_note=?,created_category_id=?,updated_at=?,reviewed_at=?
+               WHERE id=? AND status='pending'""",
+            (status, actor_user_id, review_note, created_category_id, now, now, request_id),
+        )
+        audit_event(
+            conn, f"folder.request.{status}", actor_user_id=actor_user_id,
+            category_id=created_category_id or row["parent_category_id"],
+            metadata={"request_id": request_id},
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    return conn.execute("SELECT * FROM content_folder_requests WHERE id=?", (request_id,)).fetchone()
 
 
 def create_batch(
@@ -484,6 +589,72 @@ def archive_content_item(
         previous_status=row["lifecycle_status"],
         publication_withdrawn=publication_withdrawn,
     )
+
+
+def move_content_item(
+    conn: sqlite3.Connection,
+    item_id: str,
+    *,
+    target_category_id: str,
+    expected_version_id: str,
+    actor_user_id: int,
+    can_organize: bool,
+    can_review: bool,
+) -> sqlite3.Row:
+    now = _now()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            """SELECT i.id AS item_id,i.category_id,v.id AS version_id,
+                      v.lifecycle_status,v.source_batch_id
+               FROM content_items i
+               JOIN content_versions v ON v.item_id=i.id
+                AND v.version_number=(
+                    SELECT max(v2.version_number) FROM content_versions v2 WHERE v2.item_id=i.id
+                )
+               WHERE i.id=? AND i.archived_at IS NULL""",
+            (item_id,),
+        ).fetchone()
+        if row is None:
+            raise ValueError("content_item_not_found")
+        if row["version_id"] != expected_version_id:
+            raise ValueError("content_version_conflict")
+        if row["lifecycle_status"] in {"draft", "rejected"}:
+            allowed = can_organize
+        elif row["lifecycle_status"] == "awaiting_review":
+            allowed = can_review
+        else:
+            raise ValueError("content_move_requires_republication")
+        if not allowed:
+            raise ValueError("content_move_forbidden")
+        target = conn.execute(
+            "SELECT id FROM category_nodes WHERE id=? AND is_active=1",
+            (target_category_id,),
+        ).fetchone()
+        if target is None:
+            raise ValueError("active_category_not_found")
+        if row["category_id"] != target_category_id:
+            conn.execute(
+                "UPDATE content_items SET category_id=?,updated_at=? WHERE id=?",
+                (target_category_id, now, item_id),
+            )
+            audit_event(
+                conn,
+                "content.moved",
+                actor_user_id=actor_user_id,
+                item_id=item_id,
+                version_id=expected_version_id,
+                batch_id=row["source_batch_id"],
+                category_id=target_category_id,
+                metadata={"from_category_id": row["category_id"]},
+            )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    return conn.execute(
+        "SELECT id,category_id,updated_at FROM content_items WHERE id=?", (item_id,)
+    ).fetchone()
 
 
 def submit_version_for_review(

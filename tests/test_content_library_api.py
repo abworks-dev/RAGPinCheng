@@ -188,6 +188,136 @@ def test_delete_draft_requires_organize_csrf_and_preserves_object(content_api):
     ).status_code == 404
 
 
+def test_move_draft_requires_permission_and_preserves_version(content_api):
+    client, sessions, _queued, db_path = content_api
+    uploaded = client.post(
+        "/api/admin/content/uploads",
+        data={"category_id": "cat-03"},
+        files=[("files", ("move-me.md", b"# synthetic", "text/markdown"))],
+        **_auth(sessions, "organizer", csrf=True),
+    ).json()["entries"][0]
+    url = f"/api/admin/content/items/{uploaded['item_id']}/move"
+    body = {"target_category_id": "cat-04", "expected_version_id": uploaded["version_id"]}
+
+    assert client.post(url, json=body, **_auth(sessions, "organizer")).status_code == 403
+    assert client.post(url, json=body, **_auth(sessions, "plain", csrf=True)).status_code == 403
+    moved = client.post(url, json=body, **_auth(sessions, "organizer", csrf=True))
+    assert moved.status_code == 200
+    assert moved.json()["category_id"] == "cat-04"
+    assert moved.json()["version_id"] == uploaded["version_id"]
+
+    conn = connect(db_path)
+    try:
+        event = conn.execute(
+            "SELECT category_id,metadata_json FROM content_audit_events WHERE event_type='content.moved'"
+        ).fetchone()
+        assert event["category_id"] == "cat-04"
+        assert '"from_category_id": "cat-03"' in event["metadata_json"]
+    finally:
+        conn.close()
+
+
+def test_folder_request_requires_organize_csrf_and_reviewer_creates_category(content_api):
+    client, sessions, _queued, db_path = content_api
+    url = "/api/admin/content/folder-requests"
+    body = {"parent_category_id": "cat-03", "display_name": "审核标准"}
+
+    assert client.post(url, json=body, **_auth(sessions, "plain", csrf=True)).status_code == 403
+    assert client.post(url, json=body, **_auth(sessions, "organizer")).status_code == 403
+    created = client.post(url, json=body, **_auth(sessions, "organizer", csrf=True))
+    assert created.status_code == 200
+    request_id = created.json()["id"]
+    assert created.json()["status"] == "pending"
+
+    assert client.get(url, **_auth(sessions, "organizer")).status_code == 403
+    pending = client.get(f"{url}?status=pending", **_auth(sessions, "reviewer"))
+    assert pending.status_code == 200
+    assert [entry["id"] for entry in pending.json()] == [request_id]
+
+    review_url = f"{url}/{request_id}/review"
+    assert client.post(
+        review_url, json={"approved": True}, **_auth(sessions, "reviewer")
+    ).status_code == 403
+    approved = client.post(
+        review_url,
+        json={"approved": True, "note": "目录符合整理规范"},
+        **_auth(sessions, "reviewer", csrf=True),
+    )
+    assert approved.status_code == 200
+    assert approved.json()["status"] == "approved"
+    assert approved.json()["created_category_id"]
+
+    conn = connect(db_path)
+    try:
+        category_row = conn.execute(
+            "SELECT parent_id,display_name,level FROM category_nodes WHERE id=?",
+            (approved.json()["created_category_id"],),
+        ).fetchone()
+        assert tuple(category_row) == ("cat-03", "审核标准", 2)
+        events = conn.execute(
+            "SELECT event_type FROM content_audit_events WHERE event_type LIKE 'folder.%' ORDER BY event_type"
+        ).fetchall()
+        assert [row[0] for row in events] == ["folder.request.approved", "folder.requested"]
+    finally:
+        conn.close()
+
+
+def test_folder_request_rejects_duplicate_pending_and_second_review(content_api):
+    client, sessions, _queued, _db_path = content_api
+    url = "/api/admin/content/folder-requests"
+    body = {"parent_category_id": "cat-03", "display_name": "碰撞检查"}
+    first = client.post(url, json=body, **_auth(sessions, "organizer", csrf=True))
+    assert first.status_code == 200
+    assert client.post(url, json=body, **_auth(sessions, "organizer", csrf=True)).status_code == 409
+
+    review_url = f"{url}/{first.json()['id']}/review"
+    assert client.post(
+        review_url, json={"approved": False}, **_auth(sessions, "reviewer", csrf=True)
+    ).status_code == 200
+    repeated = client.post(
+        review_url, json={"approved": True}, **_auth(sessions, "reviewer", csrf=True)
+    )
+    assert repeated.status_code == 409
+    assert repeated.json()["detail"] == "目录申请已被处理"
+
+
+def test_folder_upload_preserves_relative_path_for_category_manager(content_api):
+    client, sessions, _queued, db_path = content_api
+    response = client.post(
+        "/api/admin/content/uploads",
+        data={"category_id": "cat-04", "relative_paths": "01 建筑/guide.md"},
+        files=[("files", ("guide.md", b"# folder", "text/markdown"))],
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert response.status_code == 200
+    assert response.json()["entries"][0]["status"] == "accepted"
+
+    conn = connect(db_path)
+    try:
+        folder = conn.execute(
+            "SELECT id,display_code FROM category_nodes WHERE parent_id='cat-04' AND display_name='建筑'"
+        ).fetchone()
+        assert folder["display_code"] == "01"
+        assert conn.execute(
+            "SELECT category_id FROM content_items WHERE title='guide'"
+        ).fetchone()[0] == folder["id"]
+    finally:
+        conn.close()
+
+
+def test_folder_upload_does_not_let_organizer_create_unapproved_folder(content_api):
+    client, sessions, _queued, _db_path = content_api
+    response = client.post(
+        "/api/admin/content/uploads",
+        data={"category_id": "cat-04", "relative_paths": "未批准目录/guide.md"},
+        files=[("files", ("guide.md", b"# folder", "text/markdown"))],
+        **_auth(sessions, "organizer", csrf=True),
+    )
+    assert response.status_code == 200
+    assert response.json()["entries"][0]["status"] == "skipped"
+    assert response.json()["entries"][0]["reason"] == "目录尚未批准，请联系资料负责人创建后重试"
+
+
 def test_delete_reviewed_content_requires_publish_and_checks_version(content_api):
     client, sessions, _queued, _db_path = content_api
     uploaded = client.post(

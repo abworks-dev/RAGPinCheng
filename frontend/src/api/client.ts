@@ -16,6 +16,7 @@ import type {
   LlmHealth,
   MediaAsset,
   ManagedCategory,
+  FolderRequest,
   ManagedContentItem,
   ManagedContentList,
   BulkManagedContentResponse,
@@ -322,7 +323,10 @@ export const api = {
     }),
   uploadManagedContent: async (files: File[], categoryId: string) => {
     const form = new FormData();
-    files.forEach((file) => form.append("files", file, file.name));
+    files.forEach((file) => {
+      form.append("files", file, file.name);
+      form.append("relative_paths", file.webkitRelativePath || file.name);
+    });
     form.append("category_id", categoryId);
     const headers: Record<string, string> = {};
     if (csrfToken) headers["X-CSRF-Token"] = csrfToken;
@@ -340,6 +344,21 @@ export const api = {
     }
     return (await response.json()) as ManagedUploadResponse;
   },
+  moveManagedContent: (itemId: string, targetCategoryId: string, expectedVersionId: string) =>
+    jsonFetch<ManagedContentItem>(`/api/admin/content/items/${encodeURIComponent(itemId)}/move`, {
+      method: "POST",
+      body: JSON.stringify({ target_category_id: targetCategoryId, expected_version_id: expectedVersionId }),
+    }),
+  createFolderRequest: (parentCategoryId: string, displayName: string) =>
+    jsonFetch<FolderRequest>("/api/admin/content/folder-requests", {
+      method: "POST", body: JSON.stringify({ parent_category_id: parentCategoryId, display_name: displayName }),
+    }),
+  managedFolderRequests: (status?: string) =>
+    jsonFetch<FolderRequest[]>(`/api/admin/content/folder-requests${status ? `?status=${encodeURIComponent(status)}` : ""}`),
+  reviewFolderRequest: (requestId: string, approved: boolean, note?: string) =>
+    jsonFetch<FolderRequest>(`/api/admin/content/folder-requests/${encodeURIComponent(requestId)}/review`, {
+      method: "POST", body: JSON.stringify({ approved, note: note || null }),
+    }),
   submitManagedContent: (versionId: string) =>
     jsonFetch<ManagedContentItem>(`/api/admin/content/versions/${encodeURIComponent(versionId)}/submit`, {
       method: "POST",
