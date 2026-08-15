@@ -418,13 +418,12 @@ def test_gpu_deploy_script_is_fingerprint_aware():
     assert "get-gpu-runtime-lock-hash.ps1" in deploy
 
 
-def test_runtime_snapshot_contains_service_namespace_and_legacy_shim():
+def test_runtime_snapshot_contains_canonical_service_namespace():
     build = read("scripts/build-gpu-runtime.ps1")
     for path in (
         "services/__init__.py",
         "services/gpu_service/__init__.py",
         "services/gpu_service/app.py",
-        "gpu_service/__init__.py",
     ):
         assert f'"{path}"' in build
 

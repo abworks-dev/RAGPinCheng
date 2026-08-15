@@ -118,9 +118,9 @@ def test_candidate_runtime_versions_are_selected_by_admitted_engines() -> None:
 
 
 def test_windows_base_requirements_allow_both_candidate_numpy_lines() -> None:
-    requirements = (ROOT / "asr_service" / "requirements-windows.txt").read_text(
-        encoding="utf-8"
-    )
+    requirements = (
+        ROOT / "services" / "asr_service" / "requirements-windows.txt"
+    ).read_text(encoding="utf-8")
     assert "numpy>=1.24,<3" in requirements
 
 

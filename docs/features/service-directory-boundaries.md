@@ -21,7 +21,7 @@
 - `services.asr_service` 可导入 `src.transcription.*` 中的协议、类型和运行时端口，以保持跨进程契约一致；不得导入 `api.*`。
 - `services.gpu_service` 不得导入 `api.*`、`services.asr_service.*` 或 `src.*`，通过 HTTP 契约与主应用通信。
 - `services.libreoffice` 不得导入项目 Python 包；通过 HTTP/容器接口提供转换能力。
-- 根目录 `asr_service` 和 `gpu_service` 仅为旧模块入口兼容 shim，不包含业务实现。
+- ASR 和 GPU 服务只使用 `services.asr_service`、`services.gpu_service` 规范包名；根目录不再保留同名兼容包。
 
 ## 验证入口
 
@@ -29,4 +29,4 @@
 - `docker/docker-compose.yml`、`scripts/start-gpu-service.ps1`、`scripts/start-asr-service.ps1`：运行入口和 build context；
 - `docs/features/transcript-pipeline.md`、`docs/features/gpu-runtime-deployment.md`：服务功能事实。
 
-移除根目录兼容 shim 或迁移生产主机上的既有 release 入口需要独立审批；仓库目录迁移不自动改变已部署 release。
+生产 release 已切换到 `services/` 目录入口；后续部署不得重新引入根目录兼容包。
