@@ -129,6 +129,29 @@ function Wait-Healthy {
     throw "GPU release did not become healthy within 180 seconds"
 }
 
+function Write-PromotionDiagnostics {
+    param(
+        [Parameter(Mandatory)][string]$DiagnosticRelease,
+        [Parameter(Mandatory)][ValidateSet("candidate", "previous")][string]$Label
+    )
+    $managedReleaseRoot = [IO.Path]::GetFullPath((Join-Path $RuntimeRoot "releases")).TrimEnd('\') + '\'
+    $resolvedDiagnosticRelease = [IO.Path]::GetFullPath($DiagnosticRelease).TrimEnd('\') + '\'
+    if (-not $resolvedDiagnosticRelease.StartsWith($managedReleaseRoot, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "GPU diagnostic release is outside managed releases"
+    }
+    $taskInfo = Get-ScheduledTaskInfo -TaskName $TaskName -ErrorAction SilentlyContinue
+    Write-Host "GPU_PROMOTION_DIAGNOSTIC label=$Label task_result=$([string]$taskInfo.LastTaskResult)"
+    foreach ($logName in @("gpu-service.stdout.log", "gpu-service.stderr.log")) {
+        $logPath = Join-Path $resolvedDiagnosticRelease "logs\$logName"
+        if (-not (Test-Path -LiteralPath $logPath -PathType Leaf)) { continue }
+        foreach ($line in Get-Content -LiteralPath $logPath -Tail 80 -ErrorAction SilentlyContinue) {
+            $safe = [string]$line -replace '(?i)(token|secret|password)\s*[:=]\s*\S+', '$1=[REDACTED]'
+            if ($safe.Length -gt 500) { $safe = $safe.Substring(0, 500) + " [TRUNCATED]" }
+            Write-Host "GPU_PROMOTION_LOG label=$Label file=$logName $safe"
+        }
+    }
+}
+
 function Invoke-SmokeTests {
     $headers = @{ Authorization = "Bearer $GpuServiceToken" }
         $info = Invoke-RestMethod -Method Get -Uri "$env:GPU_SERVICE_URL/model-info" -TimeoutSec 10
@@ -282,6 +305,9 @@ try {
     $promotionSucceeded = $true
 } catch {
     $failure = $_
+    try { Write-PromotionDiagnostics -DiagnosticRelease $ReleaseRoot -Label "candidate" } catch {
+        Write-Warning "Unable to collect failed GPU candidate diagnostics"
+    }
     try { Stop-OwnedTaskAndListener } catch { Write-Warning "Unable to stop failed GPU release cleanly" }
     $savedEnv = Join-Path $BackupPath "gpu-service.env"
     if ($hadEnvFile -and (Test-Path -LiteralPath $savedEnv -PathType Leaf)) {
@@ -299,7 +325,13 @@ try {
     if (Test-Path -LiteralPath $savedTask -PathType Leaf) {
         Register-ScheduledTask -TaskName $TaskName -Xml (Get-Content -LiteralPath $savedTask -Raw -Encoding UTF8) | Out-Null
         Start-ScheduledTask -TaskName $TaskName
-        try { Wait-Healthy } catch { Write-Warning "Previous GPU release did not recover cleanly" }
+        try { Wait-Healthy } catch {
+            Write-Warning "Previous GPU release did not recover cleanly"
+            try {
+                $previousRelease = [string](Get-Content -LiteralPath $savedCurrent -Raw -Encoding UTF8 | ConvertFrom-Json).release_root
+                Write-PromotionDiagnostics -DiagnosticRelease $previousRelease -Label "previous"
+            } catch { Write-Warning "Unable to collect previous GPU release diagnostics" }
+        }
     }
     throw $failure
 } finally {
