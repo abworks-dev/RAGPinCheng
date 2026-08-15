@@ -7,6 +7,7 @@ const viewports = [
   { name: "chromium-768x1024", width: 768, height: 1024 },
   { name: "chromium-390x844", width: 390, height: 844 },
 ];
+const testPort = process.env.PLAYWRIGHT_PORT || "4173";
 
 export default defineConfig({
   testDir: "./tests/visual",
@@ -27,7 +28,7 @@ export default defineConfig({
     },
   },
   use: {
-    baseURL: "http://127.0.0.1:4173",
+    baseURL: `http://127.0.0.1:${testPort}`,
     browserName: "chromium",
     colorScheme: "light",
     locale: "zh-CN",
@@ -41,8 +42,8 @@ export default defineConfig({
     use: { viewport: { width, height } },
   })),
   webServer: {
-    command: "npm run dev -- --host 127.0.0.1 --port 4173 --strictPort",
-    url: "http://127.0.0.1:4173",
+    command: `npm run dev -- --host 127.0.0.1 --port ${testPort} --strictPort`,
+    url: `http://127.0.0.1:${testPort}`,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
   },
