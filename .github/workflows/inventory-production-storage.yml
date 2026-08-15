@@ -42,6 +42,7 @@ jobs:
           WHISPERX_ROOT: ${{ vars.PRODUCTION_WHISPERX_ROOT }}
           RUNTIME_ROOT: ${{ vars.PRODUCTION_RUNTIME_ROOT }}
           BACKUP_DIRECTORY: ${{ vars.PRODUCTION_BACKUP_DIRECTORY }}
+          ASR_ACTIVATION_BACKUP_ROOT: ${{ vars.PRODUCTION_ASR_BACKUP_ROOT }}
           ASR_MODEL_CACHE_ROOT: ${{ vars.PRODUCTION_ASR_MODEL_CACHE_ROOT }}
           WHISPERX_CACHE_ROOT: ${{ vars.PRODUCTION_WHISPERX_CACHE_ROOT }}
           RUNNER_WORK_ROOT: ${{ runner.temp }}\..
@@ -59,6 +60,7 @@ jobs:
             -WhisperXRoot $env:WHISPERX_ROOT `
             -RuntimeRoot $env:RUNTIME_ROOT `
             -BackupDirectory $env:BACKUP_DIRECTORY `
+            -AsrActivationBackupRoot $env:ASR_ACTIVATION_BACKUP_ROOT `
             -AsrModelCacheRoot $env:ASR_MODEL_CACHE_ROOT `
             -WhisperXCacheRoot $env:WHISPERX_CACHE_ROOT `
             -RunnerWorkRoot $env:RUNNER_WORK_ROOT `
