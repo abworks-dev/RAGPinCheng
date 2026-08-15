@@ -11,6 +11,10 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from fastapi.responses import FileResponse
 
 from src.config import CONTENT_MANAGEMENT_ENABLED, CONTENT_ROOT
+from src.indexing_pipeline import (
+    ManagedVersionIndexSummary,
+    list_managed_version_index_summaries,
+)
 
 from .auth import CurrentUser, require_admin, require_csrf, require_csrf_admin
 from .content_permissions import (
@@ -81,6 +85,40 @@ _DOC_TYPES = {
     ".pptx": "pptx",
 }
 _CONTENT_READ = CONTENT_PERMISSIONS
+
+
+def _managed_index_job_dto(
+    row: sqlite3.Row,
+    summary: ManagedVersionIndexSummary | None = None,
+) -> ManagedIndexJobDTO:
+    return ManagedIndexJobDTO(
+        id=row["id"],
+        publication_id=row["publication_id"],
+        version_id=row["version_id"],
+        attempt_number=row["attempt_number"],
+        status=row["status"],
+        error_code=normalize_failure_code(row["error_code"]),
+        error_summary=row["error_summary"],
+        failure=failure_detail(row["error_code"]),
+        attempt_count=row["attempt_count"],
+        created_at=row["created_at"],
+        started_at=row["started_at"],
+        finished_at=row["finished_at"],
+        updated_at=row["updated_at"],
+        title=row["title"],
+        original_filename=row["original_filename"],
+        doc_type=row["doc_type"],
+        category_id=row["category_id"],
+        category_label=row["category_label"],
+        category_path=row["category_path"],
+        version_number=row["version_number"],
+        file_size=row["file_size"],
+        source_origin=row["source_origin"],
+        is_current_head=bool(row["is_current_head"]),
+        is_latest_attempt=bool(row["is_latest_attempt"]),
+        parent_count=summary.parent_count if summary else None,
+        preview_parent_id=summary.preview_parent_id if summary else None,
+    )
 
 
 def _permission_group_dto(conn: sqlite3.Connection, row: sqlite3.Row) -> ContentPermissionGroupDTO:
@@ -683,27 +721,40 @@ def get_content_index_job(
     conn: sqlite3.Connection = Depends(get_db),
 ) -> ManagedIndexJobDTO:
     row = conn.execute(
-        """SELECT j.*,(SELECT count(*) FROM content_index_jobs jc WHERE jc.version_id=j.version_id) AS attempt_count
-           FROM content_index_jobs j WHERE j.id=?""",
+        """WITH RECURSIVE paths AS (
+               SELECT id,display_code || ' ' || display_name AS full_path
+               FROM category_nodes WHERE parent_id IS NULL
+               UNION ALL
+               SELECT c.id,p.full_path || ' / ' || c.display_code || ' ' || c.display_name
+               FROM category_nodes c JOIN paths p ON p.id=c.parent_id
+           )
+           SELECT j.*,i.title,v.original_filename,v.doc_type,i.category_id,
+                  c.display_code || ' ' || c.display_name AS category_label,
+                  paths.full_path AS category_path,v.version_number,v.source_origin,
+                  o.size_bytes AS file_size,
+                  CASE WHEN h.current_version_id=v.id THEN 1 ELSE 0 END AS is_current_head,
+                  CASE WHEN j.id=(
+                      SELECT j2.id FROM content_index_jobs j2 WHERE j2.version_id=j.version_id
+                      ORDER BY j2.attempt_number DESC,j2.created_at DESC,j2.id DESC LIMIT 1
+                  ) THEN 1 ELSE 0 END AS is_latest_attempt,
+                  (SELECT count(*) FROM content_index_jobs jc WHERE jc.version_id=j.version_id)
+                    AS attempt_count
+           FROM content_index_jobs j
+           JOIN content_versions v ON v.id=j.version_id
+           JOIN content_items i ON i.id=v.item_id
+           JOIN category_nodes c ON c.id=i.category_id
+           JOIN paths ON paths.id=i.category_id
+           LEFT JOIN content_objects o ON o.sha256=v.object_sha256
+           LEFT JOIN content_item_heads h ON h.item_id=i.id
+           WHERE j.id=?""",
         (index_job_id,),
     ).fetchone()
     if row is None:
         raise HTTPException(status_code=404, detail="发布任务不存在")
-    return ManagedIndexJobDTO(
-        id=row["id"],
-        publication_id=row["publication_id"],
-        version_id=row["version_id"],
-        attempt_number=row["attempt_number"],
-        status=row["status"],
-        error_code=normalize_failure_code(row["error_code"]),
-        error_summary=row["error_summary"],
-        failure=failure_detail(row["error_code"]),
-        attempt_count=row["attempt_count"],
-        created_at=row["created_at"],
-        started_at=row["started_at"],
-        finished_at=row["finished_at"],
-        updated_at=row["updated_at"],
-    )
+    summary = None
+    if row["status"] == "done" and bool(row["is_current_head"]):
+        summary = list_managed_version_index_summaries([row["version_id"]]).get(row["version_id"])
+    return _managed_index_job_dto(row, summary)
 
 
 @router.get("/index-jobs", response_model=ManagedIndexJobListResponse)
@@ -711,6 +762,10 @@ def list_content_index_jobs(
     query: str = Query("", max_length=200),
     category_id: str | None = Query(None, max_length=100),
     doc_type: str | None = Query(None, max_length=50),
+    source_origin: str | None = Query(
+        None,
+        pattern="^(web|server|legacy|transcription)$",
+    ),
     status: str | None = Query(None, max_length=50),
     history: bool = False,
     limit: int = Query(50, ge=1, le=100),
@@ -718,22 +773,31 @@ def list_content_index_jobs(
     _user: CurrentUser = Depends(require_any_content_permission(_CONTENT_READ)),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> ManagedIndexJobListResponse:
+    cte = """WITH RECURSIVE paths AS (
+                   SELECT id,display_code || ' ' || display_name AS full_path
+                   FROM category_nodes WHERE parent_id IS NULL
+                   UNION ALL
+                   SELECT c.id,p.full_path || ' / ' || c.display_code || ' ' || c.display_name
+                   FROM category_nodes c JOIN paths p ON p.id=c.parent_id
+               )"""
     base = """ FROM content_index_jobs j
                JOIN content_versions v ON v.id=j.version_id
                JOIN content_items i ON i.id=v.item_id
-               JOIN category_nodes c ON c.id=i.category_id"""
+               JOIN category_nodes c ON c.id=i.category_id
+               JOIN paths ON paths.id=i.category_id
+               LEFT JOIN content_objects o ON o.sha256=v.object_sha256
+               LEFT JOIN content_item_heads h ON h.item_id=i.id"""
     scope_clauses: list[str] = []
     scope_params: list[object] = []
-    if not history:
-        scope_clauses.append(
-            "j.id=(SELECT j2.id FROM content_index_jobs j2 WHERE j2.version_id=j.version_id "
-            "ORDER BY j2.attempt_number DESC,j2.created_at DESC,j2.id DESC LIMIT 1)"
-        )
+    latest_attempt = (
+        "j.id=(SELECT j2.id FROM content_index_jobs j2 WHERE j2.version_id=j.version_id "
+        "ORDER BY j2.attempt_number DESC,j2.created_at DESC,j2.id DESC LIMIT 1)"
+    )
     normalized_query = query.strip()
     if normalized_query:
         scope_clauses.append(
             "instr(lower(i.title || ' ' || v.original_filename || ' ' || "
-            "c.display_code || ' ' || c.display_name), lower(?)) > 0"
+            "paths.full_path), lower(?)) > 0"
         )
         scope_params.append(normalized_query)
     if category_id:
@@ -742,10 +806,14 @@ def list_content_index_jobs(
     if doc_type:
         scope_clauses.append("v.doc_type=?")
         scope_params.append(doc_type)
+    if source_origin:
+        scope_clauses.append("v.source_origin=?")
+        scope_params.append(source_origin)
 
-    scope_where = f"WHERE {' AND '.join(scope_clauses)}" if scope_clauses else ""
+    count_clauses = [latest_attempt, *scope_clauses]
+    scope_where = f"WHERE {' AND '.join(count_clauses)}"
     count_rows = conn.execute(
-        "SELECT j.status,count(*)" + base + f" {scope_where} GROUP BY j.status",
+        cte + " SELECT j.status,count(*)" + base + f" {scope_where} GROUP BY j.status",
         scope_params,
     ).fetchall()
     counts = {"processing": 0, "ready": 0, "failed": 0}
@@ -758,6 +826,8 @@ def list_content_index_jobs(
         counts[group] = counts.get(group, 0) + count
 
     clauses = list(scope_clauses)
+    if not history:
+        clauses.insert(0, latest_attempt)
     params = list(scope_params)
     if status == "processing":
         placeholders = ",".join("?" for _ in active_statuses)
@@ -770,24 +840,28 @@ def list_content_index_jobs(
         params.append(status)
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     rows = conn.execute(
-        """SELECT j.*,i.title,v.original_filename,v.doc_type,i.category_id,
+        cte + """ SELECT j.*,i.title,v.original_filename,v.doc_type,i.category_id,
                   (SELECT count(*) FROM content_index_jobs jc WHERE jc.version_id=j.version_id) AS attempt_count,
-                  c.display_code || ' ' || c.display_name AS category_label""" + base +
+                  c.display_code || ' ' || c.display_name AS category_label,
+                  paths.full_path AS category_path,v.version_number,v.source_origin,
+                  o.size_bytes AS file_size,
+                  CASE WHEN h.current_version_id=v.id THEN 1 ELSE 0 END AS is_current_head,
+                  CASE WHEN """ + latest_attempt + """ THEN 1 ELSE 0 END AS is_latest_attempt""" + base +
         f" {where} ORDER BY j.created_at DESC,j.id LIMIT ? OFFSET ?",
         [*params, limit, offset],
     ).fetchall()
-    total = int(conn.execute("SELECT count(*)" + base + f" {where}", params).fetchone()[0])
+    total = int(conn.execute(cte + " SELECT count(*)" + base + f" {where}", params).fetchone()[0])
+    summary_version_ids = [
+        str(row["version_id"])
+        for row in rows
+        if row["status"] == "done" and bool(row["is_current_head"])
+    ]
+    summaries = list_managed_version_index_summaries(summary_version_ids)
     return ManagedIndexJobListResponse(
-        jobs=[ManagedIndexJobDTO(
-            id=row["id"], publication_id=row["publication_id"], version_id=row["version_id"],
-            attempt_number=row["attempt_number"], status=row["status"],
-            error_code=normalize_failure_code(row["error_code"]),
-            error_summary=row["error_summary"], failure=failure_detail(row["error_code"]),
-            attempt_count=row["attempt_count"], created_at=row["created_at"],
-            started_at=row["started_at"], finished_at=row["finished_at"], updated_at=row["updated_at"],
-            title=row["title"], original_filename=row["original_filename"], doc_type=row["doc_type"],
-            category_id=row["category_id"], category_label=row["category_label"],
-        ) for row in rows],
+        jobs=[
+            _managed_index_job_dto(row, summaries.get(str(row["version_id"])))
+            for row in rows
+        ],
         total=total,
         status_counts=counts,
     )

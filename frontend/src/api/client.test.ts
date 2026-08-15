@@ -117,6 +117,7 @@ describe("api client", () => {
       query: "施工 标准",
       category_id: "cat-03",
       doc_type: "pdf",
+      source_origin: "legacy",
       status: "processing",
       history: true,
       limit: 25,
@@ -124,7 +125,7 @@ describe("api client", () => {
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/admin/content/index-jobs?query=%E6%96%BD%E5%B7%A5+%E6%A0%87%E5%87%86&category_id=cat-03&doc_type=pdf&status=processing&history=true&limit=25&offset=50",
+      "/api/admin/content/index-jobs?query=%E6%96%BD%E5%B7%A5+%E6%A0%87%E5%87%86&category_id=cat-03&doc_type=pdf&source_origin=legacy&status=processing&history=true&limit=25&offset=50",
       expect.objectContaining({ credentials: "include", headers: {} }),
     );
   });

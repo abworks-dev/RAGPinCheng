@@ -2,9 +2,9 @@ import { expect, test } from "@playwright/test";
 import process from "node:process";
 import { installAdminRoutes } from "./fixtures/admin-fixtures";
 
-for (const [navigationLabel, heading, slug] of [["资料管理", "资料库", "managed-content"], ["分类管理", "分类设置", "categories"], ["索引任务", "索引监控", "index-monitor"]] as const) {
+for (const [navigationLabel, heading, slug] of [["资料管理", "资料库", "managed-content"], ["分类管理", "分类设置", "categories"], ["索引任务", "索引任务", "index-monitor"]] as const) {
   test(`${heading} accepted golden`, async ({ page }) => {
-    test.skip(heading === "索引监控" && process.platform !== "win32", "索引监控 Linux golden 尚未在 Linux Chromium 上人工接受");
+    test.skip(heading === "索引任务" && process.platform !== "win32", "索引任务 Linux golden 尚未在 Linux Chromium 上人工接受");
     await installAdminRoutes(page, "normal");
     await page.goto("/admin");
     if (page.viewportSize()!.width < 1024) {
@@ -51,8 +51,8 @@ test("资料库删除确认 accepted golden", async ({ page }) => {
   await expect(page).toHaveScreenshot(`managed-content-delete-confirm-${viewport.width}x${viewport.height}.png`);
 });
 
-test("索引监控任务区域 accepted golden", async ({ page }) => {
-  test.skip(process.platform !== "win32", "索引监控任务区域 Linux golden 尚未在 Linux Chromium 上人工接受");
+test("索引任务区域 accepted golden", async ({ page }) => {
+  test.skip(process.platform !== "win32", "索引任务区域 Linux golden 尚未在 Linux Chromium 上人工接受");
   await installAdminRoutes(page, "normal");
   await page.goto("/admin");
   if (page.viewportSize()!.width < 1024) {
