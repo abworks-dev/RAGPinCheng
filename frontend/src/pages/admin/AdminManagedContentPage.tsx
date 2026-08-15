@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, ChevronRight, Download, Eye, FileText, Folder, FolderPlus, Move, RefreshCw, Rocket, Search, Send, Trash2, Upload, X } from "lucide-react";
+import { ArchiveRestore, Check, ChevronRight, Download, Eye, FileText, Folder, FolderPlus, Move, RefreshCw, Rocket, Search, Send, Trash2, Upload, X } from "lucide-react";
 import { api } from "../../api/client";
 import { Badge } from "../../components/ui/badge";
 import { Button, buttonVariants } from "../../components/ui/button";
@@ -70,6 +70,12 @@ export function AdminManagedContentPage() {
   const [detail, setDetail] = useState<ManagedContentItem | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ManagedContentItem | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [view, setView] = useState<"library" | "trash">("library");
+  const [trashItems, setTrashItems] = useState<ManagedContentItem[]>([]);
+  const [trashTotal, setTrashTotal] = useState(0);
+  const [trashLoading, setTrashLoading] = useState(false);
+  const [restoreTarget, setRestoreTarget] = useState<ManagedContentItem | null>(null);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
   const [newFolderOpen, setNewFolderOpen] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
   const [moveTarget, setMoveTarget] = useState<ManagedContentItem | null>(null);
@@ -121,6 +127,19 @@ export function AdminManagedContentPage() {
   }, [categoryFilter, currentFolderId, page, query, sourceFilter, statusFilter]);
 
   useEffect(() => { void load(); }, [load]);
+
+  const loadTrash = useCallback(async () => {
+    if (!(can("review") || can("publish"))) return;
+    setTrashLoading(true); setError(null);
+    try {
+      const listing = await api.managedContentTrash({ query: query || undefined, limit: PAGE_SIZE, offset: page * PAGE_SIZE });
+      setTrashItems(listing.items); setTrashTotal(listing.total);
+    } catch (trashFailure) {
+      setError(trashFailure instanceof Error ? trashFailure.message : "回收站加载失败");
+    } finally { setTrashLoading(false); }
+  }, [page, query]);
+
+  useEffect(() => { if (view === "trash") void loadTrash(); }, [loadTrash, view]);
 
   const upload = async () => {
     setUploading(true); setUploadResults([]);
@@ -228,13 +247,27 @@ export function AdminManagedContentPage() {
       await api.deleteManagedContent(target.item_id, target.version_id);
       setSelected((current) => current.filter((id) => id !== target.version_id));
       setDeleteTarget(null);
-      toast.success(`已删除“${target.title}”`);
+      toast.success(`已将“${target.title}”移至回收站`);
       await load(true);
     } catch (deleteFailure) {
-      setDeleteError(deleteFailure instanceof Error ? deleteFailure.message : "删除资料失败");
+      setDeleteError(deleteFailure instanceof Error ? deleteFailure.message : "移入回收站失败");
     } finally {
       setBusyAction(null);
     }
+  };
+
+  const restoreContent = async () => {
+    if (!restoreTarget) return;
+    const target = restoreTarget;
+    setBusyAction(`${target.version_id}:restore`); setRestoreError(null);
+    try {
+      await api.restoreManagedContent(target.item_id, target.version_id);
+      setRestoreTarget(null);
+      toast.success(`已恢复“${target.title}”`);
+      await loadTrash();
+    } catch (restoreFailure) {
+      setRestoreError(restoreFailure instanceof Error ? restoreFailure.message : "恢复资料失败");
+    } finally { setBusyAction(null); }
   };
 
   const eligibleSelected = useMemo(() => {
@@ -286,15 +319,31 @@ export function AdminManagedContentPage() {
         <Button size="sm" variant="outline" disabled={disabled} onClick={() => void act(item, "reject", () => api.reviewManagedContent(item.version_id, false), "资料已退回")}><X className="size-4" />{busyAction === `${item.version_id}:reject` ? "退回中…" : "退回"}</Button>
       </>}
       {can("publish") && ["approved", "publication_failed"].includes(item.lifecycle_status) && <Button size="sm" disabled={disabled} onClick={() => void act(item, "publish", () => api.publishManagedContent(item.version_id), "已进入发布队列")}><Rocket className="size-4" />{busyAction === `${item.version_id}:publish` ? "发布中…" : item.lifecycle_status === "publication_failed" ? "重新发布" : "发布"}</Button>}
-      {canDelete && <Button size="sm" variant="destructive" disabled={disabled || deleteBlocked} title={deleteBlocked ? "资料正在发布，暂时不能删除" : undefined} onClick={() => { setDeleteError(null); setDeleteTarget(item); }}><Trash2 className="size-4" />删除</Button>}
+      {canDelete && <Button size="sm" variant="destructive" disabled={disabled || deleteBlocked} title={deleteBlocked ? "资料正在发布，暂时不能移入回收站" : undefined} onClick={() => { setDeleteError(null); setDeleteTarget(item); }}><Trash2 className="size-4" />移至回收站</Button>}
     </div>;
   };
+
+  if (view === "trash") {
+    const trashPageCount = Math.max(1, Math.ceil(trashTotal / PAGE_SIZE));
+    return <section className="space-y-5" aria-labelledby="managed-content-title">
+      <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"><div><p className="text-ui-xs text-muted-foreground">资料管理</p><h1 id="managed-content-title" className="mt-1 text-ui-2xl font-semibold">回收站</h1><p className="mt-1 text-ui-sm text-muted-foreground">查看和恢复已移出资料库的资料。</p></div><Button size="sm" variant="outline" onClick={() => void loadTrash()} disabled={trashLoading}><RefreshCw className={trashLoading ? "size-4 animate-spin" : "size-4"} />刷新</Button></header>
+      <div className="flex gap-2" role="tablist" aria-label="资料视图"><Button size="sm" variant="outline" role="tab" aria-selected="false" onClick={() => { setView("library"); setPage(0); }}>资料库</Button><Button size="sm" role="tab" aria-selected="true">回收站</Button></div>
+      {error && <ErrorState title="回收站加载失败" description={error} action={<Button size="sm" variant="outline" onClick={() => void loadTrash()}>重新加载</Button>} />}
+      <Card className="overflow-hidden shadow-surface"><div className="flex flex-col gap-3 border-b border-border px-4 py-4 sm:flex-row sm:items-end sm:justify-between sm:px-5"><label className="max-w-xl flex-1 space-y-1 text-ui-xs text-muted-foreground"><span>搜索回收站</span><span className="relative block"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2" /><Input className="pl-9" value={queryInput} onChange={(event) => setQueryInput(event.target.value)} placeholder="搜索名称或文件名…" /></span></label><p className="text-ui-xs text-muted-foreground">共 {trashTotal} 份</p></div>
+        {trashLoading ? <LoadingState className="min-h-48 border-0" label="正在加载回收站…" /> : trashItems.length === 0 ? <EmptyState className="rounded-none border-0" title="回收站为空" description="移至回收站的资料会显示在这里。" /> : <ul className="divide-y divide-border">{trashItems.map((item) => <li key={item.item_id} className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5"><div className="min-w-0"><p className="break-words font-medium">{item.title}</p><p className="mt-1 break-all text-ui-xs text-muted-foreground">{item.original_filename} · 原状态：{statusLabel[item.pre_archive_lifecycle_status || item.lifecycle_status] || "未知"}</p><p className="mt-1 text-ui-xs text-muted-foreground">{item.archived_by_name || "未知人员"} 于 {item.archived_at ? new Date(item.archived_at * 1000).toLocaleString("zh-CN") : "未知时间"} 移入回收站</p></div><Button size="sm" variant="outline" disabled={Boolean(busyAction)} onClick={() => { setRestoreError(null); setRestoreTarget(item); }}><ArchiveRestore className="size-4" />恢复</Button></li>)}</ul>}
+        <div className="flex items-center justify-between border-t border-border px-4 py-3 sm:px-5"><p className="text-ui-xs text-muted-foreground">第 {page + 1} / {trashPageCount} 页</p><div className="flex gap-2"><Button size="sm" variant="outline" disabled={page === 0 || trashLoading} onClick={() => setPage((value) => value - 1)}>上一页</Button><Button size="sm" variant="outline" disabled={page + 1 >= trashPageCount || trashLoading} onClick={() => setPage((value) => value + 1)}>下一页</Button></div></div>
+      </Card>
+      <Dialog open={Boolean(restoreTarget)} onOpenChange={(open) => { if (!open && !busyAction) { setRestoreTarget(null); setRestoreError(null); } }}><DialogContent><DialogHeader><DialogTitle>恢复资料</DialogTitle><DialogDescription>“{restoreTarget?.title}”将恢复到资料库。已发布或发布失败的资料会恢复为“已确认”，需要管理员重新发布后才会进入检索。</DialogDescription></DialogHeader>{restoreError && <p className="rounded-ui-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-ui-sm text-destructive" role="alert">{restoreError}</p>}<DialogFooter><Button variant="outline" disabled={Boolean(busyAction)} onClick={() => setRestoreTarget(null)}>取消</Button><Button disabled={Boolean(busyAction)} onClick={() => void restoreContent()}>{busyAction ? "恢复中…" : "确认恢复"}</Button></DialogFooter></DialogContent></Dialog>
+    </section>;
+  }
 
   return <section className="space-y-5" aria-labelledby="managed-content-title">
     <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
       <div><p className="text-ui-xs text-muted-foreground">资料管理</p><h1 id="managed-content-title" className="mt-1 text-ui-2xl font-semibold text-foreground">资料库</h1><p className="mt-1 text-ui-sm text-muted-foreground">统一管理资料的上传、分类、确认和发布。</p></div>
       <Button size="sm" variant="outline" className="w-full sm:w-auto" onClick={() => void load(true)} disabled={loading || refreshing}><RefreshCw className={refreshing ? "size-4 animate-spin" : "size-4"} />{refreshing ? "刷新中…" : "刷新"}</Button>
     </header>
+
+    {(can("review") || can("publish")) && <div className="flex gap-2" role="tablist" aria-label="资料视图"><Button size="sm" role="tab" aria-selected="true">资料库</Button><Button size="sm" variant="outline" role="tab" aria-selected="false" onClick={() => { setView("trash"); setPage(0); setSelected([]); }}>回收站</Button></div>}
 
     <section className="grid grid-cols-2 gap-3 lg:grid-cols-4" aria-label="资料状态概览">
       {[["全部资料", Object.values(counts).reduce((sum, value) => sum + value, 0)], ["待确认", counts.awaiting_review || 0], ["已确认", counts.approved || 0], ["已发布", counts.published || 0]].map(([label, value]) => <Card key={label} className="overflow-hidden shadow-surface"><CardContent className="relative p-4 pt-4"><span className="absolute inset-x-0 top-0 h-1 bg-primary/80" aria-hidden="true" /><p className="text-ui-xs font-medium text-muted-foreground">{label}</p><p className="mt-2 text-ui-xl font-semibold tabular-nums text-foreground">{value}</p></CardContent></Card>)}
@@ -356,6 +405,6 @@ export function AdminManagedContentPage() {
 
     <Dialog open={Boolean(moveTarget)} onOpenChange={(open) => { if (!open) setMoveTarget(null); }}><DialogContent><DialogHeader><DialogTitle>移动资料</DialogTitle><DialogDescription>将“{moveTarget?.title || "资料"}”移动到另一个受控目录。已确认或已发布资料需要先退回。</DialogDescription></DialogHeader><label className="space-y-1.5 text-ui-sm font-medium"><span>目标目录</span><Select value={moveFolderId} onChange={(event) => setMoveFolderId(event.target.value)}>{categories.filter((category) => category.is_active).map((category) => <option key={category.id} value={category.id}>{category.full_path || `${category.display_code} ${category.display_name}`}</option>)}</Select></label><DialogFooter><Button variant="outline" onClick={() => setMoveTarget(null)} disabled={Boolean(busyAction?.endsWith(":move"))}>取消</Button><Button onClick={() => void moveContent()} disabled={!moveFolderId || moveFolderId === moveTarget?.category_id || Boolean(busyAction?.endsWith(":move"))}>{busyAction?.endsWith(":move") ? "移动中…" : "移动"}</Button></DialogFooter></DialogContent></Dialog>
 
-    <Dialog open={Boolean(deleteTarget)} onOpenChange={(open) => { if (!open && busyAction !== `${deleteTarget?.version_id}:delete`) { setDeleteTarget(null); setDeleteError(null); } }}><DialogContent><DialogHeader><DialogTitle>删除资料</DialogTitle><DialogDescription>“{deleteTarget?.title}”将从资料列表和知识库检索中移除。系统会保留文件、版本及审核发布历史，以便管理员恢复。</DialogDescription></DialogHeader>{deleteError && <p className="rounded-ui-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-ui-sm text-destructive" role="alert">{deleteError}</p>}<DialogFooter><Button variant="outline" disabled={busyAction === `${deleteTarget?.version_id}:delete`} onClick={() => { setDeleteTarget(null); setDeleteError(null); }}>取消</Button><Button variant="destructive" disabled={busyAction === `${deleteTarget?.version_id}:delete`} onClick={() => void deleteContent()}>{busyAction === `${deleteTarget?.version_id}:delete` ? "删除中…" : "确认删除"}</Button></DialogFooter></DialogContent></Dialog>
+    <Dialog open={Boolean(deleteTarget)} onOpenChange={(open) => { if (!open && busyAction !== `${deleteTarget?.version_id}:delete`) { setDeleteTarget(null); setDeleteError(null); } }}><DialogContent><DialogHeader><DialogTitle>移至回收站</DialogTitle><DialogDescription>“{deleteTarget?.title}”将从资料列表和知识库检索中移除，但文件、版本及审核发布历史会保留，可由资料负责人或系统管理员恢复。</DialogDescription></DialogHeader>{deleteError && <p className="rounded-ui-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-ui-sm text-destructive" role="alert">{deleteError}</p>}<DialogFooter><Button variant="outline" disabled={busyAction === `${deleteTarget?.version_id}:delete`} onClick={() => { setDeleteTarget(null); setDeleteError(null); }}>取消</Button><Button variant="destructive" disabled={busyAction === `${deleteTarget?.version_id}:delete`} onClick={() => void deleteContent()}>{busyAction === `${deleteTarget?.version_id}:delete` ? "处理中…" : "确认移入"}</Button></DialogFooter></DialogContent></Dialog>
   </section>;
 }

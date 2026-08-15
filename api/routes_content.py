@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 import sqlite3
@@ -31,6 +32,7 @@ from .content_store import (
     create_web_batch,
     list_content_items,
     list_content_items_page,
+    restore_content_item,
     list_categories,
     list_folder_requests,
     move_content_item,
@@ -47,6 +49,8 @@ from .schemas import (
     CreateContentPermissionGroupRequest,
     DeleteManagedContentRequest,
     DeleteManagedContentResponse,
+    RestoreManagedContentRequest,
+    RestoreManagedContentResponse,
     ContentPermissionGroupDTO,
     ContentPermissionUserDTO,
     BulkManagedContentRequest,
@@ -145,13 +149,21 @@ def _raise_domain_error(exc: Exception) -> None:
     if message == "category_has_content":
         raise HTTPException(status_code=409, detail="分类下仍有资料，请先重新归类") from exc
     if message == "content_item_not_found":
-        raise HTTPException(status_code=404, detail="资料不存在或已删除") from exc
+        raise HTTPException(status_code=404, detail="资料不存在或已移至回收站") from exc
     if message == "content_version_conflict":
         raise HTTPException(status_code=409, detail="资料版本已变化，请刷新后重试") from exc
     if message == "content_delete_in_progress":
-        raise HTTPException(status_code=409, detail="资料正在发布，暂时不能删除") from exc
+        raise HTTPException(status_code=409, detail="资料正在发布，暂时不能移入回收站") from exc
     if message == "content_delete_forbidden":
-        raise HTTPException(status_code=403, detail="当前账号没有删除此状态资料的权限") from exc
+        raise HTTPException(status_code=403, detail="当前账号没有将此状态资料移入回收站的权限") from exc
+    if message == "content_trash_item_not_found":
+        raise HTTPException(status_code=404, detail="回收站中没有这份资料") from exc
+    if message == "content_restore_forbidden":
+        raise HTTPException(status_code=403, detail="当前账号没有恢复资料的权限") from exc
+    if message == "content_restore_category_inactive":
+        raise HTTPException(status_code=409, detail="原分类已停用，请先启用分类后再恢复") from exc
+    if message == "content_restore_in_progress":
+        raise HTTPException(status_code=409, detail="资料仍有索引任务，暂时不能恢复") from exc
     if message == "content_move_forbidden":
         raise HTTPException(status_code=403, detail="当前账号没有移动此状态资料的权限") from exc
     if message == "content_move_requires_republication":
@@ -392,6 +404,7 @@ async def upload_managed_documents(
 
 
 def _content_item_dto(row: sqlite3.Row) -> ManagedContentItemDTO:
+    archive_metadata = json.loads(row["archive_metadata_json"] or "{}") if "archive_metadata_json" in row.keys() else {}
     return ManagedContentItemDTO(
         item_id=row["item_id"],
         title=row["title"],
@@ -415,6 +428,9 @@ def _content_item_dto(row: sqlite3.Row) -> ManagedContentItemDTO:
         publication_failure=failure_detail(row["latest_publication_error_code"]),
         created_at=row["created_at"],
         updated_at=row["updated_at"],
+        archived_at=row["archived_at"] if "archived_at" in row.keys() else None,
+        archived_by_name=row["archived_by_name"] if "archived_by_name" in row.keys() else None,
+        pre_archive_lifecycle_status=archive_metadata.get("previous_status"),
     )
 
 
@@ -457,6 +473,45 @@ def get_content_items_page(
         items=[_content_item_dto(row) for row in rows],
         total=total,
         status_counts=status_counts,
+    )
+
+
+@router.get("/trash", response_model=ManagedContentListResponse)
+def get_content_trash(
+    query: str = Query("", max_length=200),
+    limit: int = Query(25, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    _user: CurrentUser = Depends(require_any_content_permission(frozenset({"review", "publish"}))),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> ManagedContentListResponse:
+    rows, total, status_counts = list_content_items_page(
+        conn, query=query, limit=limit, offset=offset, archived=True
+    )
+    return ManagedContentListResponse(
+        items=[_content_item_dto(row) for row in rows], total=total, status_counts=status_counts
+    )
+
+
+@router.post("/items/{item_id}/restore", response_model=RestoreManagedContentResponse)
+def restore_managed_content_item(
+    item_id: str,
+    body: RestoreManagedContentRequest,
+    user: CurrentUser = Depends(require_csrf),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> RestoreManagedContentResponse:
+    _require_feature()
+    try:
+        result = restore_content_item(
+            conn,
+            item_id,
+            expected_version_id=body.expected_version_id,
+            actor_user_id=user.id,
+            can_restore=has_content_permission(conn, user, "review"),
+        )
+    except (ValueError, sqlite3.IntegrityError) as exc:
+        _raise_domain_error(exc)
+    return RestoreManagedContentResponse(
+        item_id=result.item_id, version_id=result.version_id, restored_status=result.restored_status
     )
 
 

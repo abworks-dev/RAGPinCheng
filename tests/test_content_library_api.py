@@ -187,6 +187,29 @@ def test_delete_draft_requires_organize_csrf_and_preserves_object(content_api):
         **_auth(sessions, "organizer"),
     ).status_code == 404
 
+    assert client.get("/api/admin/content/trash", **_auth(sessions, "organizer")).status_code == 403
+    trash = client.get("/api/admin/content/trash", **_auth(sessions, "reviewer"))
+    assert trash.status_code == 200
+    assert trash.json()["total"] == 1
+    assert trash.json()["items"][0]["archived_by_name"] == "整理员"
+    assert trash.json()["items"][0]["pre_archive_lifecycle_status"] == "draft"
+
+    restore_url = f"/api/admin/content/items/{uploaded['item_id']}/restore"
+    assert client.post(restore_url, json=body, **_auth(sessions, "organizer", csrf=True)).status_code == 403
+    restored = client.post(restore_url, json=body, **_auth(sessions, "reviewer", csrf=True))
+    assert restored.status_code == 200
+    assert restored.json()["restored_status"] == "draft"
+    listing = client.get("/api/admin/content/items-page", **_auth(sessions, "organizer"))
+    assert listing.json()["items"][0]["item_id"] == uploaded["item_id"]
+    assert client.get("/api/admin/content/trash", **_auth(sessions, "reviewer")).json()["total"] == 0
+    conn = connect(db_path)
+    try:
+        assert conn.execute(
+            "SELECT count(*) FROM content_audit_events WHERE event_type='content.restored'"
+        ).fetchone()[0] == 1
+    finally:
+        conn.close()
+
 
 def test_move_draft_requires_permission_and_preserves_version(content_api):
     client, sessions, _queued, db_path = content_api
@@ -376,7 +399,7 @@ def test_delete_rejects_active_publication(content_api):
         **_auth(sessions, "publisher", csrf=True),
     )
     assert response.status_code == 409
-    assert response.json()["detail"] == "资料正在发布，暂时不能删除"
+    assert response.json()["detail"] == "资料正在发布，暂时不能移入回收站"
 
 
 def test_category_update_uses_csrf_and_optimistic_version(content_api):

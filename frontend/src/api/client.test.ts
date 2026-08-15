@@ -84,6 +84,30 @@ describe("api client", () => {
     );
   });
 
+  it("loads trash and restores managed content with CSRF protection", async () => {
+    setCsrfToken("csrf-restore");
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ items: [], total: 0, status_counts: {} }))
+      .mockResolvedValueOnce(jsonResponse({ item_id: "item-1", version_id: "version-1", restored_status: "approved" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.managedContentTrash({ query: "标准", limit: 25, offset: 0 });
+    await api.restoreManagedContent("item/1", "version-1");
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1,
+      "/api/admin/content/trash?query=%E6%A0%87%E5%87%86&limit=25&offset=0",
+      expect.objectContaining({ credentials: "include", headers: {} }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(2,
+      "/api/admin/content/items/item%2F1/restore",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ expected_version_id: "version-1" }),
+        headers: { "content-type": "application/json", "X-CSRF-Token": "csrf-restore" },
+      }),
+    );
+  });
+
   it("preserves the administrator PATCH contract", async () => {
     setCsrfToken("csrf-admin");
     const fetchMock = vi.fn().mockResolvedValue(
