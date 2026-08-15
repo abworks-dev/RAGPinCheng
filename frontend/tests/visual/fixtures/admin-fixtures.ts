@@ -112,6 +112,42 @@ const managedIndexJobs = [{
   parent_count: null, preview_parent_id: null,
 }];
 
+const mediaAssets = [
+  {
+    media_id: "media-failed-1", title: "机电协同培训录像", original_filename: "mep-training-recording.mp4",
+    mime_type: "video/mp4", file_size: 3_456_789, transcript_origin: "generated", status: "failed",
+    review_status: "not_required", publication_status: "not_published", publication_index_status: "pending",
+    created_at: 1700000400, updated_at: 1700000400, error: "provider_unavailable",
+  },
+  {
+    media_id: "media-failed-2", title: "机电协同培训录像（重复提交）", original_filename: "mep-training-recording.mp4",
+    mime_type: "video/mp4", file_size: 3_456_789, transcript_origin: "generated", status: "failed",
+    review_status: "not_required", publication_status: "not_published", publication_index_status: "pending",
+    created_at: 1700000300, updated_at: 1700000300, error: "provider_unavailable",
+  },
+  {
+    media_id: "media-ready", title: "项目交付培训", original_filename: "project-delivery-training.mp4",
+    mime_type: "video/mp4", file_size: 8_765_432, transcript_origin: "generated", status: "transcript_ready",
+    review_status: "awaiting_review", publication_status: "not_published", publication_index_status: "pending",
+    created_at: 1700000200, updated_at: 1700000200, error: null,
+  },
+];
+
+const transcriptionProfiles = [{
+  profile_id: "funasr-sensevoice-zh-experimental-v1", display_name: "受控中文转录", description: "合成服务端 Profile",
+  qualification: "experimental", admission: "enabled", availability: "available", unavailable_reason_code: null,
+  requires_review: true, auto_publish: false, auto_index: false,
+}];
+
+const transcriptionJobs = [{
+  job_id: "media-failed-job", media_id: "media-failed-1", attempt_number: 1,
+  profile_id: "funasr-sensevoice-zh-experimental-v1", status: "failed", stage: null,
+  processed_ms: 0, total_ms: 0, failure_error_code: "provider_unavailable",
+  error_summary: "转录服务当前暂停接收任务，请稍后重试。",
+  failure: { code: "provider_unavailable", message: "转录服务当前暂停接收任务，请稍后重试。", retryable: true },
+  result_version_id: null, created_at: 1700000400, started_at: 1700000401, finished_at: 1700000402, updated_at: 1700000402,
+}];
+
 const permissionUsers = [
   { user_id: 9001, employee_id: "TEST-ADMIN", real_name: "合成管理员", role: "admin", is_active: true, permissions: [] },
   { user_id: 9002, employee_id: "TEST-EDITOR", real_name: "合成资料员", role: "user", is_active: true, permissions: ["organize", "review"] },
@@ -144,6 +180,9 @@ export async function installAdminRoutes(
     if (!path.startsWith("/api/")) return route.continue();
 
     if (path === "/api/auth/me") return json(route, currentUser());
+    if (request.method() === "GET" && path === "/api/admin/media") return json(route, mediaAssets);
+    if (request.method() === "GET" && path === "/api/admin/transcription/profiles") return json(route, transcriptionProfiles);
+    if (request.method() === "GET" && path === "/api/admin/transcription/jobs") return json(route, transcriptionJobs);
     if (path === "/api/categories") return json(route, { categories: [], second_level_categories: [] });
     if (path === "/api/conversations") return json(route, { conversations: [] });
     if (path === "/api/admin/users") return json(route, { users: permissionUsers.map((user) => ({
