@@ -2,9 +2,9 @@ import { expect, test } from "@playwright/test";
 import process from "node:process";
 import { installAdminRoutes } from "./fixtures/admin-fixtures";
 
-for (const [tab, slug] of [["资料库", "managed-content"], ["分类设置", "categories"], ["索引监控", "index-monitor"]] as const) {
-  test(`${tab} accepted golden`, async ({ page }) => {
-    test.skip(tab === "索引监控" && process.platform !== "win32", "索引监控 Linux golden 尚未在 Linux Chromium 上人工接受");
+for (const [navigationLabel, heading, slug] of [["资料管理", "资料库", "managed-content"], ["分类管理", "分类设置", "categories"], ["索引任务", "索引监控", "index-monitor"]] as const) {
+  test(`${heading} accepted golden`, async ({ page }) => {
+    test.skip(heading === "索引监控" && process.platform !== "win32", "索引监控 Linux golden 尚未在 Linux Chromium 上人工接受");
     await installAdminRoutes(page, "normal");
     await page.goto("/admin");
     if (page.viewportSize()!.width < 1024) {
@@ -12,8 +12,8 @@ for (const [tab, slug] of [["资料库", "managed-content"], ["分类设置", "c
       await expect(mobileNavigation).toBeVisible();
       await mobileNavigation.click();
     }
-    await page.getByRole("button", { name: tab, exact: true }).click();
-    await expect(page.getByRole("heading", { name: tab })).toBeVisible();
+    await page.getByRole("button", { name: navigationLabel, exact: true }).click();
+    await expect(page.getByRole("heading", { name: heading })).toBeVisible();
     const viewport = page.viewportSize()!;
     await expect(page).toHaveScreenshot(`${slug}-normal-${viewport.width}x${viewport.height}.png`, { fullPage: true });
   });
@@ -25,7 +25,7 @@ test("资料库批量选择 accepted golden", async ({ page }) => {
   if (page.viewportSize()!.width < 1024) {
     await page.getByRole("button", { name: "展开管理功能" }).click();
   }
-  await page.getByRole("button", { name: "资料库", exact: true }).click();
+  await page.getByRole("button", { name: "资料管理", exact: true }).click();
   const itemCheckbox = page.viewportSize()!.width < 1024
     ? page.locator("li").getByRole("checkbox", { name: "选择机电专业协同检查清单" })
     : page.getByRole("table").getByRole("checkbox", { name: "选择机电专业协同检查清单" });
@@ -43,7 +43,7 @@ test("索引监控任务区域 accepted golden", async ({ page }) => {
   if (page.viewportSize()!.width < 1024) {
     await page.getByRole("button", { name: "展开管理功能" }).click();
   }
-  await page.getByRole("button", { name: "索引监控", exact: true }).click();
+  await page.getByRole("button", { name: "索引任务", exact: true }).click();
   const managedActivity = page.locator('section[aria-labelledby="managed-index-title"]');
   await expect(page.getByText("文档解析服务请求失败。", { exact: true })).toBeVisible();
   const viewport = page.viewportSize()!;

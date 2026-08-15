@@ -147,7 +147,7 @@ describe("AdminLayout tab boundary", () => {
     expect(screen.getByRole("button", { name: "收起管理功能" })).toBeInTheDocument();
     const navigation = screen.getByRole("navigation", { name: "管理功能" });
     expect(within(navigation).getAllByRole("button")).toHaveLength(8);
-    fireEvent.click(within(navigation).getByRole("button", { name: "分类设置" }));
+    fireEvent.click(within(navigation).getByRole("button", { name: "分类管理" }));
     expect(screen.getByText("分类设置页面内容")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "展开管理功能" })).toBeInTheDocument();
   });
@@ -174,46 +174,49 @@ describe("AdminLayout tab boundary", () => {
     );
 
     const navigation = screen.getByRole("navigation", { name: "管理功能" });
+    expect(within(navigation).getByText("总览")).toBeInTheDocument();
+    expect(within(navigation).getByText("内容管理")).toBeInTheDocument();
+    expect(within(navigation).getByText("运营管理")).toBeInTheDocument();
     expect(within(navigation).getAllByRole("button").map((button) => button.textContent?.trim())).toEqual([
-      "用户",
-      "对话",
-      "资料库",
-      "分类设置",
-      "索引监控",
-      "视频媒体",
       "概览",
-      "反馈",
+      "资料管理",
+      "分类管理",
+      "视频管理",
+      "索引任务",
+      "用户管理",
+      "对话记录",
+      "用户反馈",
     ]);
 
-    expect(screen.getByRole("button", { name: "用户" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("button", { name: "用户管理" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByText("用户页面内容")).toBeInTheDocument();
     expect(screen.queryByText("对话页面内容")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "对话" }));
-    expect(screen.getByRole("button", { name: "对话" })).toHaveAttribute("aria-current", "page");
-    expect(screen.getByRole("button", { name: "用户" })).not.toHaveAttribute("aria-current");
+    fireEvent.click(screen.getByRole("button", { name: "对话记录" }));
+    expect(screen.getByRole("button", { name: "对话记录" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("button", { name: "用户管理" })).not.toHaveAttribute("aria-current");
     expect(screen.getByText("对话页面内容")).toBeInTheDocument();
     expect(screen.queryByText("用户页面内容")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "资料库" }));
+    fireEvent.click(screen.getByRole("button", { name: "资料管理" }));
     expect(screen.getByText("资料库页面内容")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "索引监控" }));
+    fireEvent.click(screen.getByRole("button", { name: "索引任务" }));
     expect(screen.getByText("索引监控页面内容")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "分类设置" }));
+    fireEvent.click(screen.getByRole("button", { name: "分类管理" }));
     expect(screen.getByText("分类设置页面内容")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "视频媒体" }));
+    fireEvent.click(screen.getByRole("button", { name: "视频管理" }));
     expect(screen.getByText("视频媒体页面内容")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "概览" }));
     expect(screen.getByText("概览页面内容")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "反馈" }));
+    fireEvent.click(screen.getByRole("button", { name: "用户反馈" }));
     expect(screen.getByText("反馈页面内容")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "用户" }));
+    fireEvent.click(screen.getByRole("button", { name: "用户管理" }));
     expect(screen.getByText("用户页面内容")).toBeInTheDocument();
     expect(mocks.usersMount).toHaveBeenCalledTimes(2);
   });
@@ -227,13 +230,13 @@ describe("AdminLayout tab boundary", () => {
     };
     const { rerender } = render(<MemoryRouter><AdminLayout /></MemoryRouter>);
 
-    fireEvent.click(screen.getByRole("button", { name: "分类设置" }));
+    fireEvent.click(screen.getByRole("button", { name: "分类管理" }));
     expect(screen.getByText("分类设置页面内容")).toBeInTheDocument();
 
     mocks.user = { ...mocks.user, content_permissions: ["organize"] };
     rerender(<MemoryRouter><AdminLayout /></MemoryRouter>);
 
-    expect(screen.queryByRole("button", { name: "分类设置" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "分类管理" })).not.toBeInTheDocument();
     expect(screen.getByText("资料库页面内容")).toBeInTheDocument();
   });
 });
