@@ -647,7 +647,7 @@ if ($AuditPath) {
 
 if (-not $Apply) {
     Write-Host "`nPreview only. Re-run with -Apply after reviewing the candidate list."
-    exit 0
+    return
 }
 
 foreach ($candidate in $candidateArray) {
@@ -657,4 +657,4 @@ foreach ($candidate in $candidateArray) {
     }
 }
 
-exit 0
+return

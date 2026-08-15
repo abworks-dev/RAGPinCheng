@@ -38,6 +38,8 @@
 → cleanup-production.yml（复用清理）
 ```
 
+统一清理器将 GPU runtime 原始审计写入 `runtime/cleanup-audit/`，满足 runtime 清理器的精确根目录约束；workflow artifact 使用该审计的只读副本，不会放宽 `AuditPath` 的路径边界。
+
 手动部署所选提交若GPU源码指纹和依赖锁均未变化，GPU job只验证当前服务健康，并通过 `/model-info` 核对正在监听的进程确实报告相同release ID、源码指纹、锁哈希和CUDA设备；它不安装依赖、不重建release、不重启任务。GPU源码或锁发生变化时，只有状态为 `validated` 且绑定资格run、源码指纹和锁哈希的完整锁才能进入promotion。
 
 ## 运行时目录

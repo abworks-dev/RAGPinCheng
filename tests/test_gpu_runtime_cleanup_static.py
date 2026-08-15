@@ -13,10 +13,12 @@ def test_cleanup_is_dry_run_by_default_and_requires_apply():
     assert "if (-not $Apply)" in CLEANUP
     assert "Preview only" in CLEANUP
     assert "ShouldProcess" in CLEANUP
+    assert "exit 0" not in CLEANUP
 
 
 def test_cleanup_is_locked_to_the_exact_production_runtime_root():
-    assert "D:\\RAGPinCheng\\runtime" in CLEANUP
+    assert "$env:PRODUCTION_RUNTIME_ROOT" in CLEANUP
+    assert "$ExpectedRuntimeRoot = [IO.Path]::GetFullPath($RuntimeRoot)" in CLEANUP
     assert "Refusing to operate outside the exact production runtime root" in CLEANUP
     assert "Test-PathUnderRoot" in CLEANUP
     assert "ReparsePoint" in CLEANUP
@@ -44,7 +46,9 @@ def test_cleanup_has_retention_and_delete_caps():
 
 def test_task_installer_defaults_to_dry_run_and_exact_paths():
     assert "[switch]$EnableApply" in INSTALL
-    assert "D:\\RAGPinCheng" in INSTALL
-    assert "D:\\RAGPinCheng\\runtime" in INSTALL
+    assert "$env:PRODUCTION_REPO_PATH" in INSTALL
+    assert "$env:PRODUCTION_RUNTIME_ROOT" in INSTALL
+    assert "Refusing to install a task outside the exact production repository" in INSTALL
+    assert "Refusing to install a task outside the exact production runtime root" in INSTALL
     assert "Register-ScheduledTask" in INSTALL
     assert "Mode: $(if ($EnableApply) { 'APPLY' } else { 'DRY RUN' })" in INSTALL
