@@ -205,6 +205,9 @@ export type ManagedContentItem = {
   publication_failure: PublicationFailure | null;
   created_at: number;
   updated_at: number;
+  archived_at?: number | null;
+  archived_by_name?: string | null;
+  pre_archive_lifecycle_status?: string | null;
 };
 
 export type PublicationFailure = {

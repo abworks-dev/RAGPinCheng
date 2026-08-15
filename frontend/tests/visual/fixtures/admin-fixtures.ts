@@ -61,6 +61,13 @@ export const items = [
   updated_at: 1700000000,
 }));
 
+const trashItems = [{
+  ...items[4],
+  archived_at: 1700000600,
+  archived_by_name: "合成资料员",
+  pre_archive_lifecycle_status: "published",
+}];
+
 const indexedDocuments = [
   {
     document_id: "document-ready", display_path: "公司标准 / synthetic-ready.pdf",
@@ -164,6 +171,10 @@ export async function installAdminRoutes(
     if (path === "/api/admin/content/items-page") {
       const rows = scenario === "empty" ? [] : items.map((item) => item.lifecycle_status === "publication_failed" && scenario === "publication_failure" ? { ...item, latest_publication_status: "failed", publication_attempt_count: 4, publication_failure: { code: "pdf_password_required", message: "PDF 需要密码才能解析。", retryable: false, recommended_action: "请上传已解除密码保护的 PDF。" } } : item);
       return json(route, { items: rows, total: rows.length, status_counts: rows.reduce<Record<string, number>>((counts, item) => ({ ...counts, [item.lifecycle_status]: (counts[item.lifecycle_status] || 0) + 1 }), {}) });
+    }
+    if (path === "/api/admin/content/trash") {
+      const rows = scenario === "empty" ? [] : trashItems;
+      return json(route, { items: rows, total: rows.length, status_counts: rows.length ? { published: 1 } : {} });
     }
     if (path === "/api/admin/content/folder-requests") {
       return json(route, options.includeFolderRequest ? folderRequests : []);

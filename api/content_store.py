@@ -30,6 +30,13 @@ class ArchivedContent:
     publication_withdrawn: bool
 
 
+@dataclass(frozen=True, slots=True)
+class RestoredContent:
+    item_id: str
+    version_id: str
+    restored_status: str
+
+
 def _now() -> int:
     return int(time.time())
 
@@ -439,8 +446,9 @@ def list_content_items_page(
     source_origin: str | None = None,
     limit: int = 25,
     offset: int = 0,
+    archived: bool = False,
 ) -> tuple[list[sqlite3.Row], int, dict[str, int]]:
-    clauses = ["i.archived_at IS NULL"]
+    clauses = ["i.archived_at IS NOT NULL" if archived else "i.archived_at IS NULL"]
     params: list[object] = []
     normalized = query.strip()
     if normalized:
@@ -477,7 +485,13 @@ def list_content_items_page(
                 LEFT JOIN content_index_jobs j ON j.id=(
                     SELECT j2.id FROM content_index_jobs j2 WHERE j2.version_id=v.id
                     ORDER BY j2.attempt_number DESC,j2.created_at DESC,j2.id DESC LIMIT 1
-                )"""
+                )
+                LEFT JOIN content_audit_events archive_event ON archive_event.id=(
+                    SELECT ae.id FROM content_audit_events ae
+                    WHERE ae.item_id=i.id AND ae.event_type='content.archived'
+                    ORDER BY ae.created_at DESC,ae.id DESC LIMIT 1
+                )
+                LEFT JOIN users archive_user ON archive_user.id=archive_event.actor_user_id"""
     rows = conn.execute(
         cte + """ SELECT i.id AS item_id,i.title,i.content_kind,i.category_id,i.media_id,
                           i.created_at,i.updated_at,c.category_key,c.display_code,c.display_name,
@@ -486,6 +500,8 @@ def list_content_items_page(
                           v.source_origin,v.source_batch_id,h.current_version_id,
                           j.status AS latest_publication_status,
                           j.error_code AS latest_publication_error_code,
+                          i.archived_at,archive_user.real_name AS archived_by_name,
+                          archive_event.metadata_json AS archive_metadata_json,
                           (SELECT count(*) FROM content_index_jobs jc WHERE jc.version_id=v.id)
                             AS publication_attempt_count""" + joins +
         f" WHERE {status_where} ORDER BY i.updated_at DESC,i.id LIMIT ? OFFSET ?",
@@ -501,6 +517,83 @@ def list_content_items_page(
         ).fetchall()
     }
     return rows, total, counts
+
+
+def restore_content_item(
+    conn: sqlite3.Connection,
+    item_id: str,
+    *,
+    expected_version_id: str,
+    actor_user_id: int,
+    can_restore: bool,
+) -> RestoredContent:
+    now = _now()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            """SELECT i.id AS item_id,i.archived_at,i.category_id,c.is_active,
+                      v.id AS version_id,v.lifecycle_status,v.object_sha256,v.source_batch_id,
+                      (SELECT ae.metadata_json FROM content_audit_events ae
+                       WHERE ae.item_id=i.id AND ae.event_type='content.archived'
+                       ORDER BY ae.created_at DESC,ae.id DESC LIMIT 1) AS archive_metadata_json
+               FROM content_items i
+               JOIN category_nodes c ON c.id=i.category_id
+               JOIN content_versions v ON v.item_id=i.id
+                AND v.version_number=(
+                    SELECT max(v2.version_number) FROM content_versions v2 WHERE v2.item_id=i.id
+                )
+               WHERE i.id=?""",
+            (item_id,),
+        ).fetchone()
+        if row is None or row["archived_at"] is None:
+            raise ValueError("content_trash_item_not_found")
+        if not can_restore:
+            raise ValueError("content_restore_forbidden")
+        if row["version_id"] != expected_version_id:
+            raise ValueError("content_version_conflict")
+        if not row["is_active"]:
+            raise ValueError("content_restore_category_inactive")
+        active_job = conn.execute(
+            """SELECT 1 FROM content_index_jobs
+               WHERE version_id=? AND status IN (
+                   'pending','parsing','chunking','summarizing','embedding'
+               ) LIMIT 1""",
+            (expected_version_id,),
+        ).fetchone()
+        if active_job is not None:
+            raise ValueError("content_restore_in_progress")
+        metadata = json.loads(row["archive_metadata_json"] or "{}")
+        previous_status = str(metadata.get("previous_status") or row["lifecycle_status"])
+        restored_status = (
+            previous_status
+            if previous_status in {"draft", "rejected", "awaiting_review"}
+            else "approved"
+        )
+        result = conn.execute(
+            """UPDATE content_items SET archived_at=NULL,updated_at=?
+               WHERE id=? AND archived_at IS NOT NULL""",
+            (now, item_id),
+        )
+        if result.rowcount != 1:
+            raise ValueError("content_trash_item_not_found")
+        conn.execute(
+            "UPDATE content_versions SET lifecycle_status=?,updated_at=? WHERE id=?",
+            (restored_status, now, expected_version_id),
+        )
+        audit_event(
+            conn,
+            "content.restored",
+            actor_user_id=actor_user_id,
+            item_id=item_id,
+            version_id=expected_version_id,
+            batch_id=row["source_batch_id"],
+            metadata={"previous_status": previous_status, "restored_status": restored_status},
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    return RestoredContent(item_id=item_id, version_id=expected_version_id, restored_status=restored_status)
 
 
 def archive_content_item(
