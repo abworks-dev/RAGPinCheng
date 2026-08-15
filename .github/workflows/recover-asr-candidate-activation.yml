@@ -1,0 +1,75 @@
+name: Recover Failed ASR Candidate Activation
+
+on:
+  workflow_dispatch:
+    inputs:
+      recovery_commit_sha:
+        description: "Full master SHA containing the reviewed recovery implementation"
+        required: true
+        type: string
+      activation_id:
+        description: "Failed promotion workflow run ID"
+        required: true
+        type: string
+      candidate_id:
+        description: "Candidate ID recorded by the failed activation"
+        required: true
+        type: string
+      candidate_manifest_sha256:
+        description: "Candidate manifest SHA recorded by the failed activation"
+        required: true
+        type: string
+      confirm_recovery:
+        description: "Confirm exact failed-activation rollback"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-gpu-exclusive
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    environment: production-asr
+    runs-on: [self-hosted, Windows, X64, asr-production]
+    timeout-minutes: 20
+    env:
+      PRODUCTION_ASR_PROGRAM_ROOT: ${{ vars.PRODUCTION_ASR_PROGRAM_ROOT }}
+      PRODUCTION_ASR_DATA_ROOT: ${{ vars.PRODUCTION_ASR_DATA_ROOT }}
+      PRODUCTION_ASR_BACKUP_ROOT: ${{ vars.PRODUCTION_ASR_BACKUP_ROOT }}
+      CONFIRM_RECOVERY: ${{ inputs.confirm_recovery }}
+    steps:
+      - name: Validate exact recovery identity
+        shell: powershell
+        run: |
+          if ($env:CONFIRM_RECOVERY -ne "true") { throw "confirm_recovery must be true" }
+          if ("${{ inputs.recovery_commit_sha }}" -notmatch '^[0-9a-fA-F]{40}$') { throw "recovery_commit_sha must be a full SHA" }
+          if ("${{ inputs.recovery_commit_sha }}".ToLowerInvariant() -ne "${{ github.sha }}".ToLowerInvariant()) { throw "recovery_commit_sha must equal the dispatch revision" }
+          if ("${{ github.ref }}" -ne "refs/heads/master") { throw "activation recovery must run from master" }
+          if ("${{ inputs.activation_id }}" -notmatch '^[0-9]{1,20}$') { throw "activation_id is invalid" }
+          if ("${{ inputs.candidate_id }}" -notmatch '^[0-9]{1,20}$') { throw "candidate_id is invalid" }
+          if ("${{ inputs.candidate_manifest_sha256 }}" -notmatch '^[0-9a-fA-F]{64}$') { throw "candidate_manifest_sha256 is invalid" }
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.recovery_commit_sha }}
+          fetch-depth: 1
+      - name: Recover the exact failed activation
+        shell: powershell
+        run: |
+          $statePath = Join-Path $env:PRODUCTION_ASR_BACKUP_ROOT "${{ inputs.activation_id }}\candidate-activation-state.json"
+          if (-not (Test-Path -LiteralPath $statePath -PathType Leaf)) { throw "candidate activation state is missing" }
+          $state = Get-Content -LiteralPath $statePath -Raw -Encoding UTF8 | ConvertFrom-Json
+          if (
+            $state.schema_version -ne "asr-candidate-activation/1" -or
+            [string]$state.activation_id -ne "${{ inputs.activation_id }}" -or
+            [string]$state.candidate_id -ne "${{ inputs.candidate_id }}" -or
+            [string]$state.candidate_manifest_sha256 -ne "${{ inputs.candidate_manifest_sha256 }}".ToLowerInvariant()
+          ) { throw "candidate activation recovery identity mismatch" }
+          & "${{ github.workspace }}\scripts\promote-asr-candidate.ps1" `
+            -Mode Rollback `
+            -CommitSha ([string]$state.commit_sha) `
+            -ActivationId "${{ inputs.activation_id }}"

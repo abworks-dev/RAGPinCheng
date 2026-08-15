@@ -145,6 +145,15 @@ function Assert-TaskDefinition {
     }
 }
 
+function Get-ReleaseAppModule {
+    param([Parameter(Mandatory = $true)][object]$Release)
+    $paths = @($Release.manifest.app_files | ForEach-Object { [string]$_.path })
+    $current = $paths -contains "services/asr_service/app.py"
+    $legacy = $paths -contains "asr_service/app.py"
+    if ($current -eq $legacy) { throw "ASR release must contain exactly one supported application layout" }
+    return $(if ($current) { "services.asr_service.app:create_app" } else { "asr_service.app:create_app" })
+}
+
 function Get-PreviousReleaseContext {
     $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
     $allowedArguments = @()
@@ -163,11 +172,13 @@ function Get-PreviousReleaseContext {
             -ExpectedSha256 ([string]$active.release_manifest_sha256)
         $arguments = Get-CandidateTaskArguments -Release $release
         $venvRoot = $release.layout.venv_root
+        $appModule = Get-ReleaseAppModule -Release $release
         $candidate = [string]$active.candidate_id
     } else {
         $arguments = $legacyTaskArguments
         $allowedArguments = @($legacyRootlessTaskArguments, $legacyTaskArguments)
         $venvRoot = Join-Path $ProgramRoot "venv"
+        $appModule = "asr_service.app:create_app"
         $candidate = ""
     }
     if (-not $allowedArguments) { $allowedArguments = @($arguments) }
@@ -177,12 +188,16 @@ function Get-PreviousReleaseContext {
         task_present = $null -ne $task
         task_arguments = $arguments
         venv_root = $venvRoot
+        app_module = $appModule
         candidate_id = $candidate
     }
 }
 
 function Stop-VerifiedListeners {
-    param([Parameter(Mandatory = $true)][string]$VenvRoot)
+    param(
+        [Parameter(Mandatory = $true)][string]$VenvRoot,
+        [Parameter(Mandatory = $true)][string]$AppModule
+    )
     $python = Join-Path $VenvRoot "Scripts\python.exe"
     if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
         throw "ASR venv is missing while verifying listeners"
@@ -192,7 +207,7 @@ function Stop-VerifiedListeners {
         throw "Unable to resolve the ASR venv base Python executable"
     }
     $basePython = (Resolve-Path -LiteralPath ([string]$baseOutput).Trim()).Path
-    $expectedCommandLine = '"{0}" -m uvicorn services.asr_service.app:create_app --factory --host 0.0.0.0 --port 8200' -f $basePython
+    $expectedCommandLine = '"{0}" -m uvicorn {1} --factory --host 0.0.0.0 --port 8200' -f $basePython, $AppModule
     foreach ($processId in @(
         Get-NetTCPConnection -LocalPort 8200 -State Listen -ErrorAction SilentlyContinue |
             Select-Object -ExpandProperty OwningProcess -Unique
@@ -214,7 +229,7 @@ function Stop-OwnedService {
     if ($Context.task_present -and [string]$Context.task.State -eq "Running") {
         Stop-ScheduledTask -TaskName $taskName
     }
-    Stop-VerifiedListeners -VenvRoot $Context.venv_root
+    Stop-VerifiedListeners -VenvRoot $Context.venv_root -AppModule $Context.app_module
     $deadline = (Get-Date).AddSeconds(30)
     while ((Get-NetTCPConnection -LocalPort 8200 -State Listen -ErrorAction SilentlyContinue) -and (Get-Date) -lt $deadline) {
         Start-Sleep -Seconds 1
@@ -367,6 +382,7 @@ function Invoke-CandidateRollback {
     $currentTaskArguments = $legacyTaskArguments
     $currentAllowedTaskArguments = @($legacyRootlessTaskArguments, $legacyTaskArguments)
     $currentListenerVenv = Join-Path $ProgramRoot "venv"
+    $currentListenerModule = "asr_service.app:create_app"
     if (Test-Path -LiteralPath $activeStatePath -PathType Leaf) {
         $currentActive = Get-Content -LiteralPath $activeStatePath -Raw -Encoding UTF8 | ConvertFrom-Json
         if (
@@ -399,6 +415,7 @@ function Invoke-CandidateRollback {
         $currentTaskArguments = Get-CandidateTaskArguments -Release $currentRelease
         $currentAllowedTaskArguments = @($currentTaskArguments)
         $currentListenerVenv = $currentRelease.layout.venv_root
+        $currentListenerModule = Get-ReleaseAppModule -Release $currentRelease
     } elseif ([bool]$state.previous_active_present) {
         throw "Candidate rollback found the previous active release state missing"
     }
@@ -407,7 +424,7 @@ function Invoke-CandidateRollback {
         Assert-TaskDefinition -Task $task -ExpectedArguments $currentAllowedTaskArguments
         if ([string]$task.State -eq "Running") { Stop-ScheduledTask -TaskName $taskName }
     }
-    Stop-VerifiedListeners -VenvRoot $currentListenerVenv
+    Stop-VerifiedListeners -VenvRoot $currentListenerVenv -AppModule $currentListenerModule
     Copy-Item -LiteralPath $candidateConfigBackup -Destination $candidate.layout.config_path -Force
     if ([bool]$state.previous_bootstrap_script_present) {
         Copy-Item -LiteralPath $bootstrapScriptBackup -Destination $bootstrapScript -Force
