@@ -56,7 +56,7 @@ sanitize_source_decoupled_override() {
     local sanitized
     sanitized="${BACKUP_DIR}/.compose-private-source-decoupled-${TIMESTAMP}.json"
     mkdir -p "$BACKUP_DIR"
-    docker compose -f "$COMPOSE_BASE" -f "$COMPOSE_OVERRIDE" --env-file "$COMPOSE_ENV_FILE" \
+    docker compose -f "$COMPOSE_OVERRIDE" --env-file "$COMPOSE_ENV_FILE" \
         config --no-interpolate --no-env-resolution --no-consistency --format json \
         | python3 "${REPO_PATH}/scripts/sanitize_source_decoupled_override.py" \
             > "${sanitized}.tmp"
