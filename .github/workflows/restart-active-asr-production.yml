@@ -1,0 +1,100 @@
+name: Restart Active Windows ASR Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: "Full 40-character master SHA containing the recovery workflow"
+        required: true
+        type: string
+      confirm_restart:
+        description: "Confirm controlled restart of the existing active ASR release"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-gpu-exclusive
+  cancel-in-progress: false
+
+jobs:
+  restart-windows:
+    environment: production-asr
+    runs-on: [self-hosted, Windows, X64, asr-production]
+    timeout-minutes: 20
+    steps:
+      - name: Validate immutable master revision and confirmation
+        shell: powershell
+        env:
+          CONFIRM_RESTART: ${{ inputs.confirm_restart }}
+        run: |
+          if ($env:CONFIRM_RESTART -ne "true") { throw "confirm_restart must be true" }
+          if ("${{ inputs.commit_sha }}" -notmatch '^[0-9a-fA-F]{40}$') { throw "commit_sha must be a full SHA" }
+          if ("${{ inputs.commit_sha }}".ToLowerInvariant() -ne "${{ github.sha }}".ToLowerInvariant()) { throw "commit_sha must equal the dispatch revision" }
+          if ("${{ github.ref }}" -ne "refs/heads/master") { throw "active ASR restart must run from master" }
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 1
+      - name: Restart only the validated active ASR release
+        shell: powershell
+        env:
+          PRODUCTION_ASR_PROGRAM_ROOT: ${{ vars.PRODUCTION_ASR_PROGRAM_ROOT }}
+          PRODUCTION_ASR_DATA_ROOT: ${{ vars.PRODUCTION_ASR_DATA_ROOT }}
+          PRODUCTION_ASR_BACKUP_ROOT: ${{ vars.PRODUCTION_ASR_BACKUP_ROOT }}
+        run: |
+          & "${{ github.workspace }}\scripts\restart-active-asr.ps1" `
+            -Mode EnsureRunning `
+            -OperationId "${{ github.run_id }}" `
+            -EvidencePath "${{ runner.temp }}\active-asr-restart-evidence.json"
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: active-asr-restart-evidence-${{ github.run_id }}
+          path: ${{ runner.temp }}\active-asr-restart-evidence.json
+          if-no-files-found: error
+
+  verify-ubuntu:
+    needs: [restart-windows]
+    environment: production-asr
+    runs-on: [self-hosted, Linux, X64, ubuntu, production, app]
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 1
+      - name: Verify active ASR profiles from Ubuntu
+        env:
+          ASR_SERVICE_TOKEN: ${{ secrets.ASR_SERVICE_TOKEN }}
+          ASR_ENV_FILE: ${{ vars.PRODUCTION_APP_ENV_FILE }}
+          ASR_SERVICE_URL: ${{ vars.PRODUCTION_ASR_SERVICE_URL }}
+        run: |
+          set -euo pipefail
+          python3 scripts/verify_asr_from_ubuntu.py \
+            --env-file "${ASR_ENV_FILE}" \
+            --asr-url "${ASR_SERVICE_URL}" \
+            --expected-profile faster-whisper-large-v3-turbo-v1 \
+            --expected-profile funasr-sensevoice-small-v1 \
+            --expected-profile whisperx-large-v3-zh-align-v1
+
+  restore-stopped-after-cross-node-failure:
+    if: ${{ always() && needs.restart-windows.result == 'success' && needs.verify-ubuntu.result != 'success' }}
+    needs: [restart-windows, verify-ubuntu]
+    environment: production-asr
+    runs-on: [self-hosted, Windows, X64, asr-production]
+    timeout-minutes: 10
+    steps:
+      - name: Restore the pre-workflow stopped state
+        shell: powershell
+        env:
+          PRODUCTION_ASR_PROGRAM_ROOT: ${{ vars.PRODUCTION_ASR_PROGRAM_ROOT }}
+          PRODUCTION_ASR_DATA_ROOT: ${{ vars.PRODUCTION_ASR_DATA_ROOT }}
+          PRODUCTION_ASR_BACKUP_ROOT: ${{ vars.PRODUCTION_ASR_BACKUP_ROOT }}
+        run: |
+          $scriptPath = Join-Path $env:PRODUCTION_ASR_BACKUP_ROOT "${{ github.run_id }}\restart-active-asr.ps1"
+          if (-not (Test-Path -LiteralPath $scriptPath -PathType Leaf)) { throw "ASR restart rollback script is missing" }
+          & $scriptPath -Mode RestoreStopped -OperationId "${{ github.run_id }}"
