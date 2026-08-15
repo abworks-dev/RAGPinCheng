@@ -68,9 +68,23 @@ jobs:
           docs = next((item for item in container.get("Mounts", []) if item.get("Destination") == "/app/docs"), None)
           assert docs is not None
           assert docs.get("Type") == "tmpfs"
-          assert docs.get("RW") is False
           assert all(item.get("Source") != "/data/business/ragpincheng/content/legacy-docs" for item in container.get("Mounts", []))
           '
+          docker exec -i "${CONTAINER_ID}" python - <<'PY'
+          from pathlib import Path
+
+          mount = next(
+              line for line in Path("/proc/self/mountinfo").read_text().splitlines()
+              if line.split(" - ", 1)[0].split()[4] == "/app/docs"
+          )
+          left, right = mount.split(" - ", 1)
+          assert right.split()[0] == "tmpfs"
+          assert "ro" in left.split()[5].split(",")
+          PY
+          if docker exec "${CONTAINER_ID}" sh -c ': > /app/docs/.write-probe' 2>/dev/null; then
+            echo "ERROR: retired legacy docs runtime path is writable"
+            exit 1
+          fi
           curl -fsS --connect-timeout 5 --max-time 10 http://localhost/api/health | \
             python3 -c 'import json,sys; assert json.load(sys.stdin).get("status") == "ok"'
 

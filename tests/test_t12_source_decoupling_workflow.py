@@ -75,7 +75,9 @@ def test_t12b_public_artifact_is_redacted_and_deploy_checks_mounts():
     for required in (
         "verify_source_decoupling_mounts",
         'docs.get("Type") == "tmpfs"',
-        'docs.get("RW") is False',
+        'Path("/proc/self/mountinfo")',
+        'assert "ro" in left.split()[5].split(",")',
+        'retired legacy docs runtime path is writable',
         'mounts.get("/app/media", {}).get("Source") == os.environ["EXPECTED_MEDIA"]',
         'not item.get("Source", "").startswith("/data/business/ragpincheng/source")',
         'TRANSCRIPTION_ARTIFACT_DIR == Path("/app/content/transcription-artifacts")',
