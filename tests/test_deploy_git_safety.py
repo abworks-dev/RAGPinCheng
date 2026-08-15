@@ -420,6 +420,8 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertIn(compose_sanitizer_flags, self.app_only_workflow)
         self.assertIn('docker-compose.yml" -f "${COMPOSE_OVERRIDE}', self.app_only_workflow)
         self.assertIn('COMPOSE_FILES=(-f "${COMPOSE_OVERRIDE}")', self.app_only_workflow)
+        self.assertIn('ORIGINAL_COMPOSE_OVERRIDE="${COMPOSE_OVERRIDE}"', self.app_only_workflow)
+        self.assertIn('COMPOSE=("${DEPLOY_COMPOSE[@]}")', self.app_only_workflow)
         self.assertIn("export COMPOSE_OVERRIDE", self.app_only_workflow)
         self.assertIn("sanitize_source_decoupled_override.py", self.linux)
         self.assertIn(compose_sanitizer_flags, self.linux)
