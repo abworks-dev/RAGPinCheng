@@ -1,6 +1,10 @@
 services:
   backend:
-    volumes:
+    # Replace every base/private backend mount so an older Compose merge
+    # implementation cannot retain the retired /app/docs bind by target.
+    volumes: !override
+      - ${DATA_PATH:?DATA_PATH is required}:/app/data
+      - ${CONTENT_HOST_PATH:?CONTENT_HOST_PATH is required}:/app/content
       # Production strict mode no longer accepts filesystem documents. Keep the
       # legacy runtime path as an empty, read-only tmpfs so old fallback code
       # cannot write files and no host compatibility directory is required.
