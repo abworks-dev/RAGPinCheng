@@ -65,6 +65,22 @@ def test_cli_replaces_relative_env_file_with_production_path():
     ]
 
 
+def test_production_mount_contract_is_explicit(monkeypatch):
+    from scripts.sanitize_source_decoupled_override import apply_production_volumes
+
+    config = {"services": {"backend": {"volumes": [{"target": "/app/docs"}]}}}
+    monkeypatch.setenv("DATA_PATH", "/data/app")
+    monkeypatch.setenv("CONTENT_HOST_PATH", "/data/content")
+    monkeypatch.setenv("MEDIA_HOST_PATH", "/data/media")
+    apply_production_volumes(config)
+    volumes = config["services"]["backend"]["volumes"]
+    assert [item["target"] for item in volumes] == [
+        "/app/data", "/app/content", "/app/docs", "/app/media"
+    ]
+    assert volumes[2]["type"] == "tmpfs"
+    assert volumes[2]["read_only"] is True
+
+
 @pytest.mark.parametrize(
     "config",
     [

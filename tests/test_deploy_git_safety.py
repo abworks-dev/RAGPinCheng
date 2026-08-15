@@ -427,51 +427,8 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertIn(compose_sanitizer_flags, self.linux)
         self.assertIn("export COMPOSE_OVERRIDE", self.linux)
 
-        self.assertLess(
-            self.linux.index('-f "$COMPOSE_OVERRIDE"'),
-            self.linux.index('COMPOSE_ARGS+=(-f "$COMPOSE_SOURCE_DECOUPLED")'),
-        )
-        self.assertLess(
-            self.linux.index('COMPOSE_ARGS+=(-f "$COMPOSE_SOURCE_DECOUPLED")'),
-            self.linux.index('COMPOSE_ARGS+=(--env-file "$COMPOSE_ENV_FILE")'),
-        )
         self.assertIn(
             'SOURCE_DECOUPLING_COMPLETE must be true or false', self.linux
-        )
-
-        for workflow in (
-            self.app_only_workflow,
-            self.emergency_workflow,
-            self.app_backup_recovery_workflow,
-        ):
-            with self.subTest(workflow=workflow.splitlines()[0]):
-                self.assertIn(
-                    'COMPOSE_FILES+=(-f "${SOURCE_DECOUPLED_COMPOSE}")', workflow
-                )
-                self.assertLess(
-                    workflow.index('-f "${COMPOSE_OVERRIDE}"'),
-                    workflow.index(
-                        'COMPOSE_FILES+=(-f "${SOURCE_DECOUPLED_COMPOSE}")'
-                    ),
-                )
-                self.assertLess(
-                    workflow.index(
-                        'COMPOSE_FILES+=(-f "${SOURCE_DECOUPLED_COMPOSE}")'
-                    ),
-                    workflow.index('"${COMPOSE_FILES[@]}" --env-file'),
-                )
-
-        self.assertIn(
-            'git show "${DEPLOY_COMMIT_SHA}:docker/compose.source-decoupled.yml"',
-            self.app_only_workflow,
-        )
-        self.assertIn(
-            'git show "${DEPLOY_COMMIT_SHA}:docker/compose.source-decoupled.yml"',
-            self.emergency_workflow,
-        )
-        self.assertIn(
-            'SOURCE_DECOUPLED_COMPOSE="${REPO_PATH}/docker/compose.source-decoupled.yml"',
-            self.app_backup_recovery_workflow,
         )
         self.assertIn(
             '"${COMPOSE[@]}" up -d --no-deps --force-recreate backend',

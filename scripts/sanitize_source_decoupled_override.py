@@ -32,6 +32,25 @@ def sanitize(config: dict[str, Any]) -> tuple[dict[str, Any], int]:
     return config, removed
 
 
+def apply_production_volumes(config: dict[str, Any]) -> None:
+    """Make the decoupled production mount contract explicit, without YAML merge tags."""
+    required = ("DATA_PATH", "CONTENT_HOST_PATH", "MEDIA_HOST_PATH")
+    if not all(os.environ.get(name) for name in required):
+        return
+    backend = config["services"]["backend"]
+    backend["volumes"] = [
+        {"type": "bind", "source": os.environ["DATA_PATH"], "target": "/app/data"},
+        {"type": "bind", "source": os.environ["CONTENT_HOST_PATH"], "target": "/app/content"},
+        {
+            "type": "tmpfs",
+            "target": "/app/docs",
+            "read_only": True,
+            "tmpfs": {"size": 1048576, "mode": 365},
+        },
+        {"type": "bind", "source": os.environ["MEDIA_HOST_PATH"], "target": "/app/media"},
+    ]
+
+
 def main() -> int:
     config = json.load(sys.stdin)
     sanitized, removed = sanitize(config)
@@ -39,6 +58,7 @@ def main() -> int:
     if env_file:
         backend = sanitized["services"]["backend"]
         backend["env_file"] = [env_file]
+    apply_production_volumes(sanitized)
     json.dump(sanitized, sys.stdout, ensure_ascii=True, separators=(",", ":"))
     sys.stdout.write("\n")
     print(f"SOURCE_DECOUPLED_OVERRIDE status=sanitized removed_docs_mounts={removed}", file=sys.stderr)
