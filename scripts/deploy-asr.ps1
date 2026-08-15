@@ -389,9 +389,7 @@ if ($StageCandidate) {
     }
     New-Item -ItemType Directory -Path $staging | Out-Null
 }
-foreach ($item in @("asr_service", "src")) {
-    Copy-Item -LiteralPath (Join-Path $resolvedSource $item) -Destination $staging -Recurse
-}
+Copy-Item -LiteralPath (Join-Path $resolvedSource "src") -Destination $staging -Recurse
 $stagingServices = Join-Path $staging "services"
 New-Item -ItemType Directory -Path $stagingServices -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $resolvedSource "services\__init__.py") -Destination $stagingServices

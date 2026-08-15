@@ -79,6 +79,13 @@ def test_asr_candidate_promotion_owns_both_verified_release_layouts():
     assert "Register-ScheduledTask" not in recovery
 
 
+def test_legacy_asr_deploy_copies_the_service_directory_from_services_root():
+    deploy = read("scripts/deploy-asr.ps1")
+
+    assert 'Join-Path $resolvedSource "services\\asr_service"' in deploy
+    assert 'Join-Path $resolvedSource "asr_service"' not in deploy
+
+
 def test_faster_whisper_production_admission_is_bound_to_runtime_contract_evidence():
     deploy = read("scripts/deploy-asr.ps1")
     evidence = read("scripts/faster-whisper-production-evidence.ps1")
