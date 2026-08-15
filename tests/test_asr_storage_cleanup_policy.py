@@ -192,6 +192,30 @@ def test_periodic_cleanup_reports_zero_candidates_on_powershell_51(tmp_path: Pat
     assert report["candidate_bytes"] == 0
 
 
+def test_candidate_dependency_runs_remain_excluded_from_cleanup(tmp_path: Path):
+    data_root = tmp_path / "data" / "RAGPinCheng-ASR"
+    program_root = tmp_path / "program" / "RAGPinCheng-ASR"
+    dependency = data_root / "dependency-runs" / "candidate-123456"
+    _write_tree(dependency, ("wheelhouse",))
+    program_root.mkdir(parents=True)
+    audit_path = tmp_path / "candidate-cleanup.json"
+
+    result = _run(
+        CLEANUP_SCRIPT,
+        "-DataRoot", str(data_root),
+        "-ProgramRoot", str(program_root),
+        "-AuditPath", str(audit_path),
+    )
+
+    assert result.returncode == 0, result.stderr
+    report = _read_json(audit_path)
+    assert not any("candidate-123456" in item["Path"] for item in report["candidates"])
+    assert any(
+        item["Reason"] == "unrecognized dependency run name"
+        for item in report["skipped"]
+    )
+
+
 def test_cleanup_batch_manifest_is_required_and_hash_locked_for_apply(tmp_path: Path):
     data_root = tmp_path / "data" / "RAGPinCheng-ASR"
     program_root = tmp_path / "program" / "RAGPinCheng-ASR"
