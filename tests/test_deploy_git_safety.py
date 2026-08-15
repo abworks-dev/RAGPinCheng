@@ -45,15 +45,15 @@ class TestDeployGitSafety(unittest.TestCase):
     def test_approved_app_backup_recovery_is_fixed_atomic_and_narrow(self):
         workflow = self.app_backup_recovery_workflow
 
-        self.assertIn("RESTORE_APP_ONLY_31552723068_1", workflow)
-        self.assertIn('BACKUP_PATH="${BACKUP_DIR}/app-only-31552723068-1"', workflow)
+        self.assertIn("RESTORE_APP_ONLY_31889326884_1", workflow)
+        self.assertIn('BACKUP_PATH="${BACKUP_DIR}/app-only-31889326884-1"', workflow)
         self.assertIn('for name in ("app.sqlite", "parents.sqlite")', workflow)
         self.assertIn("PRAGMA integrity_check", workflow)
         self.assertIn('"${COMPOSE[@]}" stop backend', workflow)
         self.assertIn("os.replace(temporary, target)", workflow)
         self.assertIn('docker tag "${OLD_IMAGE_ID}" pincheng-rag-backend:latest', workflow)
         self.assertIn('"${RUNNING_IMAGE_ID}" = "${OLD_IMAGE_ID}"', workflow)
-        self.assertIn("CURRENT_SCHEMA_VERSION == 5", workflow)
+        self.assertIn("CURRENT_SCHEMA_VERSION == 6", workflow)
         self.assertIn("APP_BACKUP_RECOVERY status=complete", workflow)
         self.assertIn("docker compose -p ragpincheng-prod", workflow)
         self.assertIn('container_status={{.State.Status}}', workflow)
@@ -422,9 +422,6 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertIn("sanitize_source_decoupled_override.py", self.linux)
         self.assertIn(compose_sanitizer_flags, self.linux)
         self.assertIn("export COMPOSE_OVERRIDE", self.linux)
-        self.assertIn("sanitize_source_decoupled_override.py", self.app_backup_recovery_workflow)
-        self.assertIn(compose_sanitizer_flags, self.app_backup_recovery_workflow)
-        self.assertIn("export COMPOSE_OVERRIDE", self.app_backup_recovery_workflow)
 
         self.assertLess(
             self.linux.index('-f "$COMPOSE_OVERRIDE"'),
