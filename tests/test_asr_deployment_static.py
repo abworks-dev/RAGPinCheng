@@ -200,6 +200,7 @@ def test_asr_deployment_preflight_is_manual_and_writes_only_runner_temp():
     assert preflight.count("Copy-QualifiedFasterWhisperWheels") == 4
     assert preflight.count("Assert-QualifiedFasterWhisperWheels") == 2
     assert "companion_faster_whisper_runtime_contract_sha256" in workflow
+    assert preflight.count("-DataRoot $DataRoot") == 2
     seed = preflight.index("-Destination $qualifiedWheelSeed")
     wheelhouse = preflight.index("-Destination $wheelhouse", seed)
     download = preflight.index('"-m", "pip", "download"', wheelhouse)
