@@ -483,14 +483,14 @@ export function AdminMediaPage() {
             <ul className="divide-y divide-border" aria-label="视频媒体处理记录">
               {visibleMediaAssets.map((asset) => {
                 const job = jobsByMediaId.get(asset.media_id);
-                const duplicateCount = mediaAssets.filter((item) => item.original_filename === asset.original_filename).length;
+                const sameNameCount = mediaAssets.filter((item) => item.original_filename === asset.original_filename).length;
                 const canDelete = asset.status === "failed" && !job;
                 return <li key={asset.media_id} className="p-4 sm:p-5">
                   <div className="grid gap-4 lg:grid-cols-[minmax(15rem,1.4fr)_minmax(20rem,1.8fr)_minmax(9rem,.7fr)_auto] lg:items-start">
                     <div className="min-w-0">
                       <p className="truncate font-medium" title={asset.title}>{asset.title}</p>
                       <p className="mt-1 truncate font-mono text-ui-xs text-muted-foreground" title={asset.original_filename}>{asset.original_filename}</p>
-                      <div className="mt-2 flex flex-wrap gap-2 text-ui-xs text-muted-foreground"><span>{formatBytes(asset.file_size)}</span>{duplicateCount > 1 && <Badge variant="secondary">重复提交 {duplicateCount} 次</Badge>}</div>
+                      <div className="mt-2 flex flex-wrap gap-2 text-ui-xs text-muted-foreground"><span>{formatBytes(asset.file_size)}</span>{sameNameCount > 1 && <Badge variant="secondary">同名记录 {sameNameCount} 条</Badge>}</div>
                     </div>
                     <div className="min-w-0 space-y-2">
                       <div className="flex flex-wrap items-center gap-2"><StatusBadge value={asset.status} meta={mediaStatusMeta} />{job && <StatusBadge value={job.status} meta={jobStatusMeta} />}</div>

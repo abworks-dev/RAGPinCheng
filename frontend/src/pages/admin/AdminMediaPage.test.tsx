@@ -137,7 +137,7 @@ describe("AdminMediaPage wizard", () => {
     mocks.listTranscriptionJobs.mockResolvedValue([succeededJob]);
     render(<AdminMediaPage />);
 
-    expect(await screen.findAllByText("重复提交 2 次")).toHaveLength(2);
+    expect(await screen.findAllByText("同名记录 2 条")).toHaveLength(2);
     expect(screen.getByText("项目交付培训")).toBeInTheDocument();
     expect(screen.getByText("第二次提交")).toBeInTheDocument();
   });

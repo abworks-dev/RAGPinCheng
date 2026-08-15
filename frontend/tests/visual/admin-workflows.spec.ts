@@ -201,7 +201,7 @@ test.describe("视频管理", () => {
   test("media records keep duplicate submissions and recovery actions readable", async ({ page }) => {
     await openTab(page, "视频管理");
     await expect(page.getByRole("heading", { name: "视频媒体" })).toBeVisible();
-    await expect(page.getByText("重复提交 2 次").first()).toBeVisible();
+    await expect(page.getByText("同名记录 2 条").first()).toBeVisible();
     await expect(page.getByText("转录服务当前暂停接收任务，请稍后重试。")).toBeVisible();
     await expect(page.getByRole("button", { name: "重试" })).toBeVisible();
     await expect(page.getByRole("button", { name: "进入转写工作台" }).first()).toBeVisible();
