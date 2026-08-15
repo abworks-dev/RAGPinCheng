@@ -38,6 +38,12 @@ param(
     [string]$ReportRoot = '',
 
     [Parameter()]
+    [string]$AsrBatchManifestPath = '',
+
+    [Parameter()]
+    [string]$ExpectedAsrBatchManifestSha256 = '',
+
+    [Parameter()]
     [switch]$Apply
 )
 
@@ -92,6 +98,15 @@ foreach ($targetName in $selectedTargets) {
             $arguments.Qwen3AsrQualificationRoot = $Qwen3AsrQualificationRoot
             $arguments.WhisperXRoot = $WhisperXRoot
             $arguments.AuditPath = Join-Path $auditRoot 'asr.json'
+            $arguments.BatchManifestPath = if ([string]::IsNullOrWhiteSpace($AsrBatchManifestPath)) {
+                Join-Path $auditRoot 'asr-batch-manifest.json'
+            }
+            else {
+                $AsrBatchManifestPath
+            }
+            if ($Apply) {
+                $arguments.ExpectedBatchManifestSha256 = $ExpectedAsrBatchManifestSha256
+            }
         }
         'runtime' {
             $arguments.RuntimeRoot = $RuntimeRoot

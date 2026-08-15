@@ -46,6 +46,16 @@ param(
     [int]$MaxDeleteGB = 20,
 
     [Parameter()]
+    [ValidateRange(1, 20)]
+    [int]$BatchMaxGB = 18,
+
+    [Parameter()]
+    [string]$BatchManifestPath,
+
+    [Parameter()]
+    [string]$ExpectedBatchManifestSha256,
+
+    [Parameter()]
     [switch]$Apply,
 
     [Parameter()]
@@ -61,6 +71,7 @@ $compactionCutoffUtc = $nowUtc.AddHours(-$RunCompactionHours)
 $dependencyCutoffUtc = $nowUtc.AddDays(-$DependencyRetentionDays)
 $failedStagingCutoffUtc = $nowUtc.AddDays(-$FailedStagingRetentionDays)
 $maxDeleteBytes = [int64]$MaxDeleteGB * 1GB
+$batchMaxBytes = [int64]$BatchMaxGB * 1GB
 $compactionChildren = @('venv', 'wheelhouse', 'shared-wheel-seed', 'model-staging', 'spool', 'temp')
 
 function Test-PathUnderRoot {
@@ -292,7 +303,7 @@ function Backup-QualificationEvidence {
                 [ordered]@{
                     relative_path = $_.FullName.Substring($destination.Length).TrimStart('\')
                     size_bytes = [int64]$_.Length
-                    sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+                    sha256 = Get-FileSha256 -Path $_.FullName
                 }
             }
     )
@@ -397,8 +408,119 @@ $candidateBytes = if ($candidates.Count -eq 0) {
 else {
     [int64](($candidates | Measure-Object -Property Bytes -Sum).Sum)
 }
-if ($Apply -and $candidateBytes -gt $maxDeleteBytes) {
-    throw "Candidate deletion exceeds the safety cap of $MaxDeleteGB GB"
+
+function Get-FileSha256 {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $stream = [IO.File]::OpenRead($Path)
+    try {
+        $sha256 = [Security.Cryptography.SHA256]::Create()
+        try {
+            return ([BitConverter]::ToString($sha256.ComputeHash($stream))).Replace('-', '').ToLowerInvariant()
+        }
+        finally { $sha256.Dispose() }
+    }
+    finally { $stream.Dispose() }
+}
+
+$selectedCandidates = [System.Collections.Generic.List[object]]::new()
+$selectedBytes = [int64]0
+$batchManifestSha256 = $null
+foreach ($candidate in @($candidates | Sort-Object LastWriteUtc, Path)) {
+    if (($selectedBytes + [int64]$candidate.Bytes) -gt $batchMaxBytes) {
+        break
+    }
+    $selectedCandidates.Add($candidate)
+    $selectedBytes += [int64]$candidate.Bytes
+}
+
+function New-BatchManifest {
+    [ordered]@{
+        schema_version = 'asr-storage-cleanup-batch/1'
+        generated_at_utc = [DateTimeOffset]::UtcNow.ToString('o')
+        policy = [ordered]@{
+            batch_max_gb = $BatchMaxGB
+            max_delete_gb = $MaxDeleteGB
+            ordering = 'oldest-first'
+        }
+        selected_count = $selectedCandidates.Count
+        selected_bytes = $selectedBytes
+        candidates = @(
+            $selectedCandidates | ForEach-Object {
+                [ordered]@{
+                    path = $_.Path
+                    kind = $_.Kind
+                    bytes = [int64]$_.Bytes
+                    last_write_utc = ([DateTimeOffset]$_.LastWriteUtc).ToUniversalTime().ToString('o')
+                }
+            }
+        )
+    }
+}
+
+if ($Apply) {
+    if ([string]::IsNullOrWhiteSpace($BatchManifestPath) -or
+        [string]::IsNullOrWhiteSpace($ExpectedBatchManifestSha256)) {
+        throw 'Apply requires BatchManifestPath and ExpectedBatchManifestSha256 from an approved dry run'
+    }
+    if (-not (Test-Path -LiteralPath $BatchManifestPath -PathType Leaf)) {
+        throw "Approved batch manifest does not exist: $BatchManifestPath"
+    }
+    $actualManifestSha256 = Get-FileSha256 -Path $BatchManifestPath
+    $batchManifestSha256 = $actualManifestSha256
+    if ($actualManifestSha256 -ne $ExpectedBatchManifestSha256.Trim().ToLowerInvariant()) {
+        throw "Approved batch manifest SHA-256 mismatch: expected $ExpectedBatchManifestSha256 actual $actualManifestSha256"
+    }
+    $approvedManifest = Get-Content -LiteralPath $BatchManifestPath -Raw | ConvertFrom-Json
+    if ($approvedManifest.schema_version -ne 'asr-storage-cleanup-batch/1') {
+        throw 'Approved batch manifest has an unsupported schema version'
+    }
+    if ([int64]$approvedManifest.selected_bytes -gt $batchMaxBytes -or
+        [int64]$approvedManifest.selected_bytes -gt $maxDeleteBytes) {
+        throw 'Approved batch manifest exceeds the configured deletion safety cap'
+    }
+    $discoveredByPath = @{}
+    foreach ($candidate in $candidates) {
+        $discoveredByPath[$candidate.Path.ToLowerInvariant()] = $candidate
+    }
+    $selectedCandidates.Clear()
+    $selectedBytes = [int64]0
+    $approvedPaths = @{}
+    foreach ($approved in @($approvedManifest.candidates)) {
+        $key = ([IO.Path]::GetFullPath([string]$approved.path).TrimEnd('\')).ToLowerInvariant()
+        if ($approvedPaths.ContainsKey($key)) {
+            throw "Approved batch manifest contains a duplicate candidate: $($approved.path)"
+        }
+        $approvedPaths[$key] = $true
+        if (-not $discoveredByPath.ContainsKey($key)) {
+            throw "Approved candidate is no longer eligible: $($approved.path)"
+        }
+        $current = $discoveredByPath[$key]
+        $currentLastWrite = ([DateTimeOffset]$current.LastWriteUtc).ToUniversalTime().ToString('o')
+        if ($current.Kind -ne [string]$approved.kind -or
+            [int64]$current.Bytes -ne [int64]$approved.bytes -or
+            $currentLastWrite -ne [string]$approved.last_write_utc) {
+            throw "Approved candidate changed after dry run: $($approved.path)"
+        }
+        $selectedCandidates.Add($current)
+        $selectedBytes += [int64]$current.Bytes
+    }
+    if ($selectedCandidates.Count -ne [int]$approvedManifest.selected_count -or
+        $selectedBytes -ne [int64]$approvedManifest.selected_bytes) {
+        throw 'Approved batch manifest totals do not match its candidate entries'
+    }
+}
+elseif (-not [string]::IsNullOrWhiteSpace($BatchManifestPath)) {
+    $manifestParent = Split-Path -Path $BatchManifestPath -Parent
+    if ($manifestParent -and -not (Test-Path -LiteralPath $manifestParent -PathType Container)) {
+        New-Item -ItemType Directory -Path $manifestParent -Force | Out-Null
+    }
+    New-BatchManifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $BatchManifestPath -Encoding UTF8
+    $batchManifestSha256 = Get-FileSha256 -Path $BatchManifestPath
+}
+
+if ($Apply -and $selectedBytes -gt $maxDeleteBytes) {
+    throw "Selected batch exceeds the safety cap of $MaxDeleteGB GB"
 }
 
 $audit = [ordered]@{
@@ -420,10 +542,16 @@ $audit = [ordered]@{
         failed_staging_retention_days = $FailedStagingRetentionDays
         failed_staging_keep_count = $FailedStagingKeepCount
         max_delete_gb = $MaxDeleteGB
+        batch_max_gb = $BatchMaxGB
     }
     candidate_count = $candidates.Count
     candidate_bytes = $candidateBytes
     candidates = @($candidates)
+    selected_count = $selectedCandidates.Count
+    selected_bytes = $selectedBytes
+    selected_candidates = @($selectedCandidates)
+    batch_manifest_path = $BatchManifestPath
+    batch_manifest_sha256 = $batchManifestSha256
     skipped = @($skipped)
 }
 
@@ -444,7 +572,7 @@ if (-not $Apply) {
     return
 }
 
-foreach ($candidate in $candidates) {
+foreach ($candidate in $selectedCandidates) {
     if ($PSCmdlet.ShouldProcess($candidate.Path, "Remove $($candidate.Kind)")) {
         if ($candidate.Kind -eq 'qualification-run') {
             Backup-QualificationEvidence -Candidate $candidate

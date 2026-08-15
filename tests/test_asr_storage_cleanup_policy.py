@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import subprocess
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -189,6 +190,69 @@ def test_periodic_cleanup_reports_zero_candidates_on_powershell_51(tmp_path: Pat
     assert report["mode"] == "dry-run"
     assert report["candidate_count"] == 0
     assert report["candidate_bytes"] == 0
+
+
+def test_cleanup_batch_manifest_is_required_and_hash_locked_for_apply(tmp_path: Path):
+    data_root = tmp_path / "data" / "RAGPinCheng-ASR"
+    program_root = tmp_path / "program" / "RAGPinCheng-ASR"
+    qwen_root = tmp_path / "qualification" / "qwen3-asr"
+    data_root.mkdir(parents=True)
+    program_root.mkdir(parents=True)
+    run_root = qwen_root / "runs" / "101"
+    _write_tree(run_root, ("venv",))
+    os.utime(run_root, (1_600_000_000, 1_600_000_000))
+    manifest_path = tmp_path / "batch.json"
+    audit_path = tmp_path / "dry-run.json"
+
+    dry_run = _run(
+        CLEANUP_SCRIPT,
+        "-DataRoot", str(data_root),
+        "-ProgramRoot", str(program_root),
+        "-Qwen3AsrQualificationRoot", str(qwen_root),
+        "-QualificationKeepCount", "1",
+        "-BatchManifestPath", str(manifest_path),
+        "-AuditPath", str(audit_path),
+    )
+
+    assert dry_run.returncode == 0, dry_run.stderr
+    report = _read_json(audit_path)
+    manifest = _read_json(manifest_path)
+    digest = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+    assert report["batch_manifest_sha256"] == digest
+    assert manifest["selected_count"] == 1
+    assert run_root.is_dir()
+
+    wrong_hash = _run(
+        CLEANUP_SCRIPT,
+        "-DataRoot", str(data_root),
+        "-ProgramRoot", str(program_root),
+        "-Qwen3AsrQualificationRoot", str(qwen_root),
+        "-QualificationKeepCount", "1",
+        "-BatchManifestPath", str(manifest_path),
+        "-ExpectedBatchManifestSha256", "0" * 64,
+        "-Apply",
+    )
+    assert wrong_hash.returncode != 0
+    assert run_root.is_dir()
+
+    executable = _powershell()
+    assert executable is not None
+    apply_command = (
+        f"& '{CLEANUP_SCRIPT}' -DataRoot '{data_root}' -ProgramRoot '{program_root}' "
+        f"-Qwen3AsrQualificationRoot '{qwen_root}' -QualificationKeepCount 1 "
+        f"-BatchManifestPath '{manifest_path}' -ExpectedBatchManifestSha256 '{digest}' "
+        "-Apply -Confirm:$false"
+    )
+    applied = subprocess.run(
+        [executable, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", apply_command],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert applied.returncode == 0, applied.stderr
+    assert run_root.is_dir()
+    assert not (run_root / "venv").exists()
 
 
 def test_cleanup_sources_use_explicit_roots_and_exclude_protected_storage():

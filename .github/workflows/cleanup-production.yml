@@ -25,9 +25,20 @@ on:
         required: false
         default: reusable-call
         type: string
+      asr_manifest_run_id:
+        description: Workflow run containing the approved ASR batch manifest
+        required: false
+        default: ''
+        type: string
+      asr_manifest_sha256:
+        description: SHA-256 of the approved ASR batch manifest
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: production-gpu-exclusive
@@ -55,6 +66,7 @@ jobs:
       INPUT_APPLY: ${{ inputs.apply }}
       INPUT_CONFIRM: ${{ inputs.confirm_production_cleanup }}
       INPUT_REASON: ${{ inputs.reason }}
+      INPUT_ASR_MANIFEST_SHA256: ${{ inputs.asr_manifest_sha256 }}
     steps:
       - name: Check out cleanup revision
         uses: actions/checkout@v4
@@ -69,6 +81,15 @@ jobs:
             throw "Unified cleanup script is missing: $scriptPath"
           }
           Write-Host "Using cleanup script: $scriptPath"
+
+      - name: Download approved ASR batch manifest
+        if: ${{ inputs.apply == true && (inputs.target == 'all' || inputs.target == 'asr') }}
+        uses: actions/download-artifact@v4
+        with:
+          name: production-cleanup-${{ inputs.asr_manifest_run_id }}
+          path: ${{ runner.temp }}/ragpincheng-approved-cleanup
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.asr_manifest_run_id }}
 
       - name: Run production cleanup
         shell: powershell
@@ -92,6 +113,18 @@ jobs:
             Confirm                         = $false
           }
           if ($apply) { $arguments.Apply = $true }
+          if ($apply -and ($target -eq 'all' -or $target -eq 'asr')) {
+            if (-not $env:INPUT_ASR_MANIFEST_SHA256) {
+              throw 'ASR apply requires an approved manifest SHA-256'
+            }
+            $manifests = @(Get-ChildItem -LiteralPath (Join-Path $env:RUNNER_TEMP 'ragpincheng-approved-cleanup') `
+              -Filter 'asr-batch-manifest.json' -File -Recurse)
+            if ($manifests.Count -ne 1) {
+              throw "Expected exactly one approved ASR batch manifest, found $($manifests.Count)"
+            }
+            $arguments.AsrBatchManifestPath = $manifests[0].FullName
+            $arguments.ExpectedAsrBatchManifestSha256 = $env:INPUT_ASR_MANIFEST_SHA256
+          }
           & (Join-Path "${{ github.workspace }}" 'scripts\cleanup-production.ps1') @arguments
 
       - name: Upload cleanup report
