@@ -139,6 +139,10 @@ def test_candidate_resolver_is_manual_d_drive_isolated_and_evidence_only():
     assert '[regex]::Escape($managedReleasePrefix)' in promotion
     assert "$legacyTaskOwned = $arguments -match $legacyArgumentsPattern" in promotion
     assert "(-not $releaseTaskOwned -and -not $legacyTaskOwned)" in promotion
+    assert '$bootstrapLog = Join-Path $TargetRelease "gpu-service-bootstrap.log"' in promotion
+    assert '-Command "{0}"' in promotion
+    assert "$arguments -eq (Get-TaskArguments -TargetRelease" in promotion
+    assert 'Groups["release"].Value' in promotion
     assert "$canonicalProcessOwned = (" in promotion
     assert "$legacyProcessOwned = (" in promotion
     assert "-match '(?<!\\S)-m\\s+services\\.gpu_service\\.app(?:\\s|$)'" in promotion
@@ -150,10 +154,12 @@ def test_candidate_resolver_is_manual_d_drive_isolated_and_evidence_only():
     assert 'ValidateSet("candidate", "previous")' in promotion
     assert 'Get-ScheduledTaskInfo -TaskName $TaskName' in promotion
     assert 'Get-Content -LiteralPath $logPath -Tail 80' in promotion
+    assert '"gpu-service-bootstrap.log"' in promotion
     assert "[REDACTED]" in promotion
     assert "[TRUNCATED]" in promotion
     assert 'Write-PromotionDiagnostics -DiagnosticRelease $ReleaseRoot -Label "candidate"' in promotion
     assert 'Write-PromotionDiagnostics -DiagnosticRelease $previousRelease -Label "previous"' in promotion
+    assert 'throw "GPU release task exited before becoming healthy"' in promotion
 
     assert 'StartsWith("D:\\"' in script
     assert '"-m", "venv"' in script

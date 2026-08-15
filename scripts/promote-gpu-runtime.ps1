@@ -26,8 +26,9 @@ if ($GpuServiceToken -match '[\r\n]') {
 function Get-TaskArguments {
     param([Parameter(Mandatory)][string]$TargetRelease)
     $targetStartScript = Join-Path $TargetRelease "source\scripts\start-gpu-service.ps1"
-    '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -ReleaseRoot "{1}"' -f `
-        $targetStartScript, $TargetRelease
+    $bootstrapLog = Join-Path $TargetRelease "gpu-service-bootstrap.log"
+    $command = "& '$targetStartScript' -ReleaseRoot '$TargetRelease' *> '$bootstrapLog'"
+    '-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "{0}"' -f $command
 }
 
 function Assert-OwnedTask {
@@ -35,10 +36,13 @@ function Assert-OwnedTask {
     $actions = @($Task.Actions)
     $arguments = if ($actions.Count -eq 1) { [string]$actions[0].Arguments } else { "" }
     $managedReleasePrefix = [IO.Path]::GetFullPath($RuntimeRoot).TrimEnd('\') + "\releases\"
-    $releaseTaskOwned = (
-        $arguments -match [regex]::Escape($managedReleasePrefix) -and
-        $arguments -match '\\source\\scripts\\start-gpu-service\.ps1"' -and
-        $arguments -match '-ReleaseRoot\s+"'
+    $releaseRootMatch = [regex]::Match($arguments, "-ReleaseRoot\s+'(?<release>[^']+)'")
+    $releaseTaskOwned = $releaseRootMatch.Success -and (
+        $arguments -eq (Get-TaskArguments -TargetRelease $releaseRootMatch.Groups["release"].Value) -and
+        ([IO.Path]::GetFullPath($releaseRootMatch.Groups["release"].Value) + '\').StartsWith(
+            $managedReleasePrefix,
+            [StringComparison]::OrdinalIgnoreCase
+        )
     )
     $legacyStartScript = [IO.Path]::GetFullPath((Join-Path $RepositoryPath "scripts\start-gpu-legacy-service.ps1"))
     $repositoryRoot = [IO.Path]::GetFullPath($RepositoryPath).TrimEnd('\')
@@ -125,6 +129,11 @@ function Wait-Healthy {
             $health = Invoke-RestMethod -Method Get -Uri "$env:GPU_SERVICE_URL/health" -TimeoutSec 10
             if ($health.status -eq "ok" -and $health.model_loaded -eq $true) { return }
         } catch {}
+        $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+        $taskInfo = Get-ScheduledTaskInfo -TaskName $TaskName -ErrorAction SilentlyContinue
+        if ($null -ne $task -and $task.State -ne "Running" -and $null -ne $taskInfo -and $taskInfo.LastTaskResult -ne 0) {
+            throw "GPU release task exited before becoming healthy"
+        }
     } while ([DateTimeOffset]::Now -lt $deadline)
     throw "GPU release did not become healthy within 180 seconds"
 }
@@ -141,13 +150,13 @@ function Write-PromotionDiagnostics {
     }
     $taskInfo = Get-ScheduledTaskInfo -TaskName $TaskName -ErrorAction SilentlyContinue
     Write-Host "GPU_PROMOTION_DIAGNOSTIC label=$Label task_result=$([string]$taskInfo.LastTaskResult)"
-    foreach ($logName in @("gpu-service.stdout.log", "gpu-service.stderr.log")) {
-        $logPath = Join-Path $resolvedDiagnosticRelease "logs\$logName"
+    foreach ($logName in @("gpu-service-bootstrap.log", "logs\gpu-service.stdout.log", "logs\gpu-service.stderr.log")) {
+        $logPath = Join-Path $resolvedDiagnosticRelease $logName
         if (-not (Test-Path -LiteralPath $logPath -PathType Leaf)) { continue }
         foreach ($line in Get-Content -LiteralPath $logPath -Tail 80 -ErrorAction SilentlyContinue) {
             $safe = [string]$line -replace '(?i)(token|secret|password)\s*[:=]\s*\S+', '$1=[REDACTED]'
             if ($safe.Length -gt 500) { $safe = $safe.Substring(0, 500) + " [TRUNCATED]" }
-            Write-Host "GPU_PROMOTION_LOG label=$Label file=$logName $safe"
+            Write-Host "GPU_PROMOTION_LOG label=$Label file=$([IO.Path]::GetFileName($logName)) $safe"
         }
     }
 }
