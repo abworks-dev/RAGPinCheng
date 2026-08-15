@@ -52,6 +52,8 @@ export function AdminManagedContentPage() {
   const [enabled, setEnabled] = useState(false);
   const [currentFolderId, setCurrentFolderId] = useState("");
   const [files, setFiles] = useState<File[]>([]);
+  const [pendingUploadFiles, setPendingUploadFiles] = useState<File[]>([]);
+  const [pendingUploadFolderId, setPendingUploadFolderId] = useState("");
   const [uploadResults, setUploadResults] = useState<ManagedUploadResponse["entries"]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -81,6 +83,7 @@ export function AdminManagedContentPage() {
   const [moveTarget, setMoveTarget] = useState<ManagedContentItem | null>(null);
   const [moveFolderId, setMoveFolderId] = useState("");
   const [dragActive, setDragActive] = useState(false);
+  const [folderDropActive, setFolderDropActive] = useState(false);
   const [draggedItem, setDraggedItem] = useState<ManagedContentItem | null>(null);
   const [folderRequests, setFolderRequests] = useState<FolderRequest[]>([]);
   const [requestFolderOpen, setRequestFolderOpen] = useState(false);
@@ -141,10 +144,10 @@ export function AdminManagedContentPage() {
 
   useEffect(() => { if (view === "trash") void loadTrash(); }, [loadTrash, view]);
 
-  const upload = async () => {
+  const upload = async (targetFolderId = currentFolderId, uploadFiles = files) => {
     setUploading(true); setUploadResults([]);
     try {
-      const result = await api.uploadManagedContent(files, currentFolderId);
+      const result = await api.uploadManagedContent(uploadFiles, targetFolderId);
       setUploadResults(result.entries);
       const accepted = result.entries.filter((entry) => entry.status === "accepted").length;
       const skipped = result.entries.length - accepted;
@@ -154,6 +157,25 @@ export function AdminManagedContentPage() {
       await load(true);
     } catch (uploadError) { toast.error(uploadError instanceof Error ? uploadError.message : "上传失败"); }
     finally { setUploading(false); }
+  };
+
+  const prepareFolderUpload = (incoming: File[]) => {
+    const supported = incoming.filter((file) => /\.(pdf|md|docx|xlsx|pptx)$/i.test(file.name));
+    if (!supported.length || !currentFolderId) {
+      if (incoming.length) toast.error("拖入的文件没有可上传的支持格式");
+      return;
+    }
+    setPendingUploadFiles(supported);
+    setPendingUploadFolderId(currentFolderId);
+    setFolderDropActive(false);
+  };
+
+  const confirmFolderUpload = async () => {
+    if (!pendingUploadFiles.length || !pendingUploadFolderId) return;
+    const targetFolderId = pendingUploadFolderId;
+    await upload(targetFolderId, pendingUploadFiles);
+    setPendingUploadFiles([]);
+    setPendingUploadFolderId("");
   };
 
   const currentFolder = categories.find((category) => category.id === currentFolderId) || null;
@@ -352,7 +374,7 @@ export function AdminManagedContentPage() {
     {!enabled && !loading && <div className="border border-warning/40 bg-warning/10 px-4 py-3 text-ui-sm" role="status">资料库当前未启用，上传和流程操作暂不可用。</div>}
     {error && <ErrorState title="资料列表加载失败" description={error} action={<Button size="sm" variant="outline" onClick={() => void load()}>重新加载</Button>} />}
 
-    <Card className="overflow-hidden shadow-surface" aria-labelledby="folder-browser-title">
+    <Card data-testid="managed-folder-browser" className={`overflow-hidden shadow-surface transition-colors duration-normal ${folderDropActive ? "border-primary bg-primary/5 ring-2 ring-primary/40" : ""}`} aria-labelledby="folder-browser-title" onDragEnter={(event) => { if (event.dataTransfer?.types.includes("Files")) { event.preventDefault(); setFolderDropActive(true); } }} onDragOver={(event) => { if (event.dataTransfer?.types.includes("Files")) event.preventDefault(); }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFolderDropActive(false); }} onDrop={(event) => { if (!event.dataTransfer?.files.length) return; event.preventDefault(); prepareFolderUpload(Array.from(event.dataTransfer.files)); }}>
       <div className="flex flex-col gap-3 border-b border-border px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
         <div className="min-w-0 flex-1"><h2 id="folder-browser-title" className="text-ui-base font-semibold">资料目录</h2><label className="mt-2 block max-w-sm space-y-1 text-ui-xs text-muted-foreground"><span>一级目录</span><Select aria-label="一级目录" value={currentRootFolderId} onChange={(event) => setCurrentFolderId(event.target.value)}>{rootFolders.map((folder) => <option key={folder.id} value={folder.id}>{folder.display_code} {folder.display_name}</option>)}</Select></label><nav className="mt-2 flex flex-wrap items-center gap-1 text-ui-sm" aria-label="当前资料目录">{breadcrumbs.map((folder, index) => <span key={folder.id} className="flex min-w-0 items-center gap-1">{index > 0 && <ChevronRight className="size-4 shrink-0 text-muted-foreground" />}<button type="button" className="max-w-56 truncate rounded px-1 py-0.5 hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setCurrentFolderId(folder.id)}>{folder.display_code} {folder.display_name}</button></span>)}</nav></div>
         <div className="flex flex-wrap gap-2">{can("organize") && !can("manage_categories") && currentFolder && currentFolder.level < 4 && <Button size="sm" variant="outline" onClick={() => setRequestFolderOpen(true)}><FolderPlus className="size-4" />申请文件夹</Button>}{can("manage_categories") && currentFolder && currentFolder.level < 4 && <Button size="sm" variant="outline" onClick={() => setNewFolderOpen(true)}><FolderPlus className="size-4" />新建文件夹</Button>}</div>
@@ -404,6 +426,8 @@ export function AdminManagedContentPage() {
     <Dialog open={newFolderOpen} onOpenChange={setNewFolderOpen}><DialogContent><DialogHeader><DialogTitle>新建文件夹</DialogTitle><DialogDescription>文件夹将建立在“{currentFolder?.display_name || "当前目录"}”下，最多支持四级目录。</DialogDescription></DialogHeader><label className="space-y-1.5 text-ui-sm font-medium"><span>文件夹名称</span><Input value={newFolderName} onChange={(event) => setNewFolderName(event.target.value)} placeholder="例如：净高分析" autoFocus /></label><DialogFooter><Button variant="outline" onClick={() => setNewFolderOpen(false)} disabled={busyAction === "new-folder"}>取消</Button><Button onClick={() => void createFolder()} disabled={!newFolderName.trim() || busyAction === "new-folder"}>{busyAction === "new-folder" ? "创建中…" : "创建"}</Button></DialogFooter></DialogContent></Dialog>
 
     <Dialog open={Boolean(moveTarget)} onOpenChange={(open) => { if (!open) setMoveTarget(null); }}><DialogContent><DialogHeader><DialogTitle>移动资料</DialogTitle><DialogDescription>将“{moveTarget?.title || "资料"}”移动到另一个受控目录。已确认或已发布资料需要先退回。</DialogDescription></DialogHeader><label className="space-y-1.5 text-ui-sm font-medium"><span>目标目录</span><Select value={moveFolderId} onChange={(event) => setMoveFolderId(event.target.value)}>{categories.filter((category) => category.is_active).map((category) => <option key={category.id} value={category.id}>{category.full_path || `${category.display_code} ${category.display_name}`}</option>)}</Select></label><DialogFooter><Button variant="outline" onClick={() => setMoveTarget(null)} disabled={Boolean(busyAction?.endsWith(":move"))}>取消</Button><Button onClick={() => void moveContent()} disabled={!moveFolderId || moveFolderId === moveTarget?.category_id || Boolean(busyAction?.endsWith(":move"))}>{busyAction?.endsWith(":move") ? "移动中…" : "移动"}</Button></DialogFooter></DialogContent></Dialog>
+
+    <Dialog open={pendingUploadFiles.length > 0} onOpenChange={(open) => { if (!open && !uploading) { setPendingUploadFiles([]); setPendingUploadFolderId(""); } }}><DialogContent><DialogHeader><DialogTitle>确认上传</DialogTitle><DialogDescription>将上传到“{categories.find((category) => category.id === pendingUploadFolderId)?.full_path || currentFolder?.full_path || "当前目录"}”，确认后文件会进入待提交状态。</DialogDescription></DialogHeader><div className="space-y-2 text-ui-sm"><p>共 {pendingUploadFiles.length} 个文件</p><ul className="max-h-48 space-y-1 overflow-y-auto rounded-ui-md border border-border px-3 py-2">{pendingUploadFiles.map((file) => <li key={`${file.name}-${file.size}`} className="break-all">{file.name}<span className="ml-2 text-ui-xs text-muted-foreground">{Math.ceil(file.size / 1024)} KB</span></li>)}</ul></div><DialogFooter><Button variant="outline" onClick={() => { setPendingUploadFiles([]); setPendingUploadFolderId(""); }} disabled={uploading}>取消</Button><Button onClick={() => void confirmFolderUpload()} disabled={uploading}>{uploading ? "上传中…" : "确定上传"}</Button></DialogFooter></DialogContent></Dialog>
 
     <Dialog open={Boolean(deleteTarget)} onOpenChange={(open) => { if (!open && busyAction !== `${deleteTarget?.version_id}:delete`) { setDeleteTarget(null); setDeleteError(null); } }}><DialogContent><DialogHeader><DialogTitle>移至回收站</DialogTitle><DialogDescription>“{deleteTarget?.title}”将从资料列表和知识库检索中移除，但文件、版本及审核发布历史会保留，可由资料负责人或系统管理员恢复。</DialogDescription></DialogHeader>{deleteError && <p className="rounded-ui-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-ui-sm text-destructive" role="alert">{deleteError}</p>}<DialogFooter><Button variant="outline" disabled={busyAction === `${deleteTarget?.version_id}:delete`} onClick={() => { setDeleteTarget(null); setDeleteError(null); }}>取消</Button><Button variant="destructive" disabled={busyAction === `${deleteTarget?.version_id}:delete`} onClick={() => void deleteContent()}>{busyAction === `${deleteTarget?.version_id}:delete` ? "处理中…" : "确认移入"}</Button></DialogFooter></DialogContent></Dialog>
   </section>;

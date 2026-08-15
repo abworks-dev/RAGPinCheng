@@ -79,6 +79,37 @@ test.describe("资料库", () => {
     await expectNoBodyOverflow(page);
   });
 
+  test("dropping local files on the current folder requires confirmation", async ({ page }) => {
+    await openTab(page, "资料管理");
+    const uploadRequests: string[] = [];
+    page.on("request", (request) => {
+      if (request.method() === "POST" && request.url().includes("/api/admin/content/uploads")) {
+        uploadRequests.push(request.postData() || "");
+      }
+    });
+    const folderBrowser = page.getByTestId("managed-folder-browser");
+    const dataTransfer = await page.evaluateHandle(() => {
+      const transfer = new DataTransfer();
+      transfer.items.add(new File(["# Dropped fixture"], "dropped.md", { type: "text/markdown" }));
+      return transfer;
+    });
+
+    await folderBrowser.dispatchEvent("dragenter", { dataTransfer });
+    await expect(folderBrowser).toHaveClass(/border-primary/);
+    await folderBrowser.dispatchEvent("drop", { dataTransfer });
+
+    const dialog = page.getByRole("dialog", { name: "确认上传" });
+    await expect(dialog).toContainText("03 公司内部标准");
+    await expect(dialog).toContainText("dropped.md");
+    expect(uploadRequests).toHaveLength(0);
+    await expectNoBodyOverflow(page);
+
+    await dialog.getByRole("button", { name: "确定上传" }).click();
+    await expect.poll(() => uploadRequests.length).toBe(1);
+    expect(uploadRequests[0]).toContain('name="category_id"');
+    expect(uploadRequests[0]).toContain("cat-company");
+  });
+
   test("folder request and review controls stay contained", async ({ page }) => {
     await openTab(page, "资料管理", "normal", "bim_engineer");
     await page.getByRole("button", { name: "申请文件夹" }).click();

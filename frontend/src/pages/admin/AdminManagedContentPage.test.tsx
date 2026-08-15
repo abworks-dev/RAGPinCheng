@@ -279,6 +279,39 @@ describe("AdminManagedContentPage", () => {
     expect(await screen.findByText("已接收")).toBeInTheDocument();
   });
 
+  it("opens a confirmation before uploading files dropped on the current folder", async () => {
+    mocks.permissions = ["organize"];
+    mocks.items.mockResolvedValue({ items: [], total: 0, status_counts: {} });
+    mocks.upload.mockResolvedValue({ batch_id: "batch-drop", entries: [] });
+    render(<AdminManagedContentPage />);
+    const file = new File(["# Dropped"], "dropped.md", { type: "text/markdown" });
+    await waitFor(() => expect(screen.getByLabelText("一级目录")).toHaveValue("cat-03"));
+    const folderCard = screen.getByTestId("managed-folder-browser");
+
+    fireEvent.drop(folderCard!, { dataTransfer: { files: [file], types: ["Files"] } });
+    expect(await screen.findByRole("dialog", { name: "确认上传" })).toHaveTextContent("03 公司内部标准");
+    expect(screen.getByRole("dialog")).toHaveTextContent("dropped.md");
+    expect(mocks.upload).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText("一级目录"), { target: { value: "cat-04" } });
+    fireEvent.click(screen.getByRole("button", { name: "确定上传" }));
+    await waitFor(() => expect(mocks.upload).toHaveBeenCalledWith([file], "cat-03"));
+  });
+
+  it("does not upload files when a folder drop is cancelled", async () => {
+    mocks.permissions = ["organize"];
+    mocks.items.mockResolvedValue({ items: [], total: 0, status_counts: {} });
+    render(<AdminManagedContentPage />);
+    const file = new File(["cancelled"], "cancelled.pdf", { type: "application/pdf" });
+    await waitFor(() => expect(screen.getByLabelText("一级目录")).toHaveValue("cat-03"));
+
+    fireEvent.drop(screen.getByTestId("managed-folder-browser"), { dataTransfer: { files: [file], types: ["Files"] } });
+    fireEvent.click(await screen.findByRole("button", { name: "取消" }));
+
+    expect(screen.queryByRole("dialog", { name: "确认上传" })).not.toBeInTheDocument();
+    expect(mocks.upload).not.toHaveBeenCalled();
+  });
+
   it("navigates into a child folder and uploads to the current folder", async () => {
     mocks.permissions = ["organize"];
     mocks.categories.mockResolvedValue([category, childCategory]);
