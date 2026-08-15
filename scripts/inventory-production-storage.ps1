@@ -96,6 +96,48 @@ function Measure-DependencyRuns {
     return $summary
 }
 
+function Measure-RootBreakdown {
+    param(
+        [AllowEmptyString()][string]$Root,
+        [Parameter(Mandatory = $true)][hashtable]$CategoryPatterns
+    )
+
+    $result = [ordered]@{ status = 'not-configured'; categories = [ordered]@{} }
+    foreach ($category in @($CategoryPatterns.Keys | Sort-Object)) {
+        $result.categories[$category] = [ordered]@{ entries = 0; bytes = [int64]0; files = 0 }
+    }
+    $result.categories['other'] = [ordered]@{ entries = 0; bytes = [int64]0; files = 0 }
+    if ([string]::IsNullOrWhiteSpace($Root)) { return $result }
+    if (-not (Test-Path -LiteralPath $Root -PathType Container)) {
+        $result.status = 'missing'
+        return $result
+    }
+
+    $result.status = 'measured'
+    foreach ($entry in @(Get-ChildItem -LiteralPath $Root -Force)) {
+        $category = 'other'
+        foreach ($candidateCategory in @($CategoryPatterns.Keys | Sort-Object)) {
+            if ($entry.Name -match $CategoryPatterns[$candidateCategory]) {
+                $category = $candidateCategory
+                break
+            }
+        }
+        $measurement = if ($entry.PSIsContainer) {
+            Measure-Tree -Path $entry.FullName
+        }
+        elseif (($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            [ordered]@{ status = 'reparse-point-skipped'; bytes = [int64]0; files = 0 }
+        }
+        else {
+            [ordered]@{ status = 'measured'; bytes = [int64]$entry.Length; files = 1 }
+        }
+        $result.categories[$category].entries++
+        $result.categories[$category].bytes += [int64]$measurement.bytes
+        $result.categories[$category].files += [int]$measurement.files
+    }
+    return $result
+}
+
 $roots = [ordered]@{
     asr_data = $AsrDataRoot
     asr_program = $AsrProgramRoot
@@ -136,6 +178,36 @@ $report = [ordered]@{
     generated_at_utc = [DateTimeOffset]::UtcNow.ToString('o')
     privacy = 'aggregate metadata only; no file names or file contents'
     roots = $measurements
+    breakdowns = [ordered]@{
+        asr_data = Measure-RootBreakdown -Root $AsrDataRoot -CategoryPatterns @{
+            backups = '^backups$'
+            cleanup_evidence = '^cleanup-evidence-backup$'
+            config = '^config$'
+            dependency_runs = '^dependency-runs$'
+            logs = '^logs$'
+            models = '^models$'
+            spool = '^spool$'
+            wheel_cache = '^wheel-cache$'
+        }
+        asr_program = Measure-RootBreakdown -Root $AsrProgramRoot -CategoryPatterns @{
+            active_app = '^app$'
+            active_venv = '^venv$'
+            app_staging = '^app-staging-'
+            qualification = '^qualification$'
+            release_staging = '^release-staging-'
+            releases = '^releases$'
+            scripts = '^scripts$'
+            venv_staging = '^venv-staging-'
+        }
+        gpu_runtime = Measure-RootBreakdown -Root $RuntimeRoot -CategoryPatterns @{
+            cleanup_audit = '^cleanup-audit$'
+            pip_cache = '^pip-cache$'
+            qualification = '^qualification$'
+            releases = '^releases$'
+            resolver = '^resolver$'
+            wheel_seed = '^wheel-seed$'
+        }
+    }
     dependency_runs = Measure-DependencyRuns -DataRoot $AsrDataRoot
     docker = $docker
 }
@@ -146,3 +218,4 @@ if ($parent -and -not (Test-Path -LiteralPath $parent -PathType Container)) {
 }
 $report | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $ReportPath -Encoding UTF8
 Write-Host "PRODUCTION_STORAGE_INVENTORY report=$ReportPath"
+$global:LASTEXITCODE = 0
