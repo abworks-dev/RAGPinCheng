@@ -1,4 +1,4 @@
-name: Deploy Production App Manual
+name: Deploy Production App + Content/ASR Manual
 
 on:
   workflow_dispatch:
@@ -23,11 +23,11 @@ on:
       content_root_policy:
         description: Require an empty first-use content root or preserve an initialized root
         required: true
-        default: REQUIRE_EMPTY
+        default: PRESERVE_EXISTING
         type: choice
         options:
-          - REQUIRE_EMPTY
           - PRESERVE_EXISTING
+          - REQUIRE_EMPTY
 
 permissions:
   contents: read

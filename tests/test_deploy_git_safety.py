@@ -100,7 +100,6 @@ class TestDeployGitSafety(unittest.TestCase):
             ),
             2,
         )
-        self.assertIn("group: production-emergency-deployment-v2", self.emergency_workflow)
         self.assertNotIn("production-app-deployment", self.emergency_workflow)
         self.assertNotIn("cleanup-after-deploy", self.emergency_workflow)
 
@@ -154,7 +153,7 @@ class TestDeployGitSafety(unittest.TestCase):
     def test_app_only_manual_workflow_uses_the_selected_master_sha(self):
         workflow = self.app_only_workflow
 
-        self.assertIn("name: Deploy Production App Manual", workflow)
+        self.assertIn("name: Deploy Production App + Content/ASR Manual", workflow)
         self.assertIn("workflow_dispatch:", workflow)
         self.assertIn("- DEPLOY_APP", workflow)
         self.assertIn("DEPLOY_COMMIT_SHA: ${{ github.sha }}", workflow)
@@ -168,6 +167,10 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertNotIn("git branch -f", workflow)
         self.assertNotIn("deploy-gpu.ps1", workflow)
         self.assertNotIn("promote-gpu-runtime.ps1", workflow)
+
+    def test_production_deploy_workflows_share_the_app_mutation_lock(self):
+        for workflow in (self.emergency_workflow, self.app_only_workflow):
+            self.assertIn("group: production-app-manual-v1", workflow)
 
     def test_app_asr_diagnostic_is_read_only_and_redacts_sensitive_values(self):
         workflow = self.app_asr_diagnostic_workflow
@@ -340,6 +343,10 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertIn("content_root_policy:", workflow)
         self.assertIn("REQUIRE_EMPTY", workflow)
         self.assertIn("PRESERVE_EXISTING", workflow)
+        content_root_input = workflow.split("content_root_policy:", 1)[1].split(
+            "permissions:", 1
+        )[0]
+        self.assertIn("default: PRESERVE_EXISTING", content_root_input)
         self.assertIn("production content root is unexpectedly non-empty", workflow)
         self.assertIn('--volume "${CONTENT_HOST_PATH}:/app/content"', workflow)
         self.assertIn("pincheng-rag-backend:latest", workflow)
