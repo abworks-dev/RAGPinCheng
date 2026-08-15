@@ -423,6 +423,13 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertIn('ORIGINAL_COMPOSE_OVERRIDE="${COMPOSE_OVERRIDE}"', self.app_only_workflow)
         self.assertIn('COMPOSE=("${DEPLOY_COMPOSE[@]}")', self.app_only_workflow)
         self.assertIn("export COMPOSE_OVERRIDE", self.app_only_workflow)
+        self.assertIn(
+            "export SOURCE_DECOUPLED_OVERRIDE_SANITIZED=true",
+            self.app_only_workflow,
+        )
+        self.assertIn(
+            'SOURCE_DECOUPLED_OVERRIDE_SANITIZED:-false', self.linux
+        )
         self.assertIn("sanitize_source_decoupled_override.py", self.linux)
         self.assertIn(compose_sanitizer_flags, self.linux)
         self.assertIn("export COMPOSE_OVERRIDE", self.linux)
