@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 
@@ -416,6 +417,29 @@ def test_gpu_deploy_script_is_fingerprint_aware():
     assert "torch_wheel_sha256" in deploy
     assert "merge-base --is-ancestor" in deploy
     assert "get-gpu-runtime-lock-hash.ps1" in deploy
+
+
+def test_app_deploy_uses_canonical_gpu_fingerprint_inventory():
+    fingerprint = read("scripts/get-gpu-runtime-fingerprint.ps1")
+    app_deploy = read(".github/workflows/deploy-production-app-emergency.yml")
+
+    powershell_inventory = re.search(
+        r"\$objects = @\(\s*(.*?)\s*\)", fingerprint, re.DOTALL
+    )
+    workflow_inventory = re.search(
+        r"GPU_RUNTIME_FILES=\(\s*(.*?)\s*\)", app_deploy, re.DOTALL
+    )
+    assert powershell_inventory is not None
+    assert workflow_inventory is not None
+
+    canonical_files = [
+        line.strip().strip('",').split(":", 1)[1]
+        for line in powershell_inventory.group(1).splitlines()
+    ]
+    deployed_files = [
+        line.strip() for line in workflow_inventory.group(1).splitlines()
+    ]
+    assert deployed_files == canonical_files
 
 
 def test_runtime_snapshot_contains_canonical_service_namespace():
