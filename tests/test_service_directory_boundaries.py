@@ -67,9 +67,16 @@ def test_gpu_and_libreoffice_are_standalone_services():
         )
 
 
-def test_legacy_module_names_resolve_to_moved_implementations():
+def test_services_only_resolve_from_the_canonical_namespace():
     for service in ("asr_service", "gpu_service"):
-        legacy = importlib.util.find_spec(f"{service}.config")
+        try:
+            legacy = importlib.util.find_spec(f"{service}.config")
+        except ModuleNotFoundError:
+            legacy = None
         canonical = importlib.util.find_spec(f"services.{service}.config")
-        assert legacy is not None and canonical is not None
-        assert Path(legacy.origin).resolve() == Path(canonical.origin).resolve()
+        assert not list((ROOT / service).glob("*.py"))
+        assert legacy is None
+        assert canonical is not None
+        assert Path(canonical.origin).resolve().is_relative_to(
+            ROOT / "services" / service
+        )

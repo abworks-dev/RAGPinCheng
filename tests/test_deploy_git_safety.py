@@ -219,7 +219,6 @@ class TestDeployGitSafety(unittest.TestCase):
             "services/gpu_service/app.py",
             "services/gpu_service/models.py",
             "services/gpu_service/schemas.py",
-            "gpu_service/__init__.py",
         ):
             self.assertIn(path, workflow)
         self.assertIn("APP_ONLY_CONTRACT status=identical", workflow)

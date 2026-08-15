@@ -274,7 +274,6 @@ $runtimeSourceFiles = @(
     "services/gpu_service/config.py",
     "services/gpu_service/models.py",
     "services/gpu_service/schemas.py",
-    "gpu_service/__init__.py",
     "scripts/start-gpu-service.ps1",
     "scripts/diagnose_gpu_reranker.py",
     "scripts/get-gpu-runtime-lock-hash.ps1"
