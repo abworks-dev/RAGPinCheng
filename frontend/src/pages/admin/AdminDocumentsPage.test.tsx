@@ -110,6 +110,30 @@ describe("AdminDocumentsPage", () => {
     expect(screen.getByText("共尝试 4 次 · 当前第 4 次")).toBeInTheDocument();
   });
 
+  it("clears the visible publication filters together", async () => {
+    render(<AdminDocumentsPage />);
+    await screen.findByText(failedJob.title);
+
+    const search = screen.getByRole("searchbox", { name: "搜索发布任务" });
+    const category = screen.getByRole("combobox", { name: "按数据库分类筛选" });
+    const type = screen.getByRole("combobox", { name: "按文件类型筛选" });
+    fireEvent.change(search, { target: { value: "管综" } });
+    fireEvent.change(category, { target: { value: "cat-03" } });
+    fireEvent.change(type, { target: { value: "pdf" } });
+    fireEvent.click(screen.getByRole("button", { name: "发布失败" }));
+    fireEvent.click(screen.getByRole("button", { name: "清除筛选" }));
+
+    expect(search).toHaveValue("");
+    expect(category).toHaveValue("");
+    expect(type).toHaveValue("");
+    await waitFor(() => expect(mocks.managedContentIndexJobs).toHaveBeenLastCalledWith(expect.objectContaining({
+      query: undefined,
+      category_id: undefined,
+      doc_type: undefined,
+      status: undefined,
+    })));
+  });
+
   it("supports server-side pagination", async () => {
     mocks.managedContentIndexJobs.mockResolvedValue({ ...listing, total: 26 });
     render(<AdminDocumentsPage />);
