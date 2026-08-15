@@ -415,6 +415,32 @@ CONTENT_FOLDER_REQUEST_STATEMENTS = (
        WHERE status='pending'""",
 )
 
+SYSTEM_MAINTENANCE_STATEMENTS = (
+    """CREATE TABLE maintenance_settings (
+        singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
+        conversation_cleanup_enabled INTEGER NOT NULL DEFAULT 1
+            CHECK (conversation_cleanup_enabled IN (0,1)),
+        conversation_retention_days INTEGER NOT NULL DEFAULT 30
+            CHECK (conversation_retention_days BETWEEN 7 AND 3650),
+        updated_at INTEGER NOT NULL,
+        updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL
+    )""",
+    """CREATE TABLE maintenance_runs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        trigger_source TEXT NOT NULL CHECK (trigger_source IN ('automatic','manual')),
+        status TEXT NOT NULL CHECK (status IN ('succeeded','failed')),
+        retention_days INTEGER NOT NULL CHECK (retention_days BETWEEN 7 AND 3650),
+        deleted_conversations INTEGER NOT NULL DEFAULT 0 CHECK (deleted_conversations >= 0),
+        deleted_messages INTEGER NOT NULL DEFAULT 0 CHECK (deleted_messages >= 0),
+        deleted_auth_sessions INTEGER NOT NULL DEFAULT 0 CHECK (deleted_auth_sessions >= 0),
+        started_at INTEGER NOT NULL,
+        finished_at INTEGER NOT NULL,
+        error_summary TEXT
+    )""",
+    """CREATE INDEX idx_maintenance_runs_started_desc
+       ON maintenance_runs(started_at DESC)""",
+)
+
 MIGRATIONS = (
     Migration(1, "multi_engine_transcription_phase2", PHASE2_STATEMENTS),
     Migration(2, "answer_regeneration_versions", ANSWER_VERSION_STATEMENTS),
@@ -423,6 +449,7 @@ MIGRATIONS = (
     Migration(5, "managed_content_library", CONTENT_LIBRARY_STATEMENTS),
     Migration(6, "content_permission_groups", CONTENT_PERMISSION_GROUP_STATEMENTS),
     Migration(7, "content_folder_requests", CONTENT_FOLDER_REQUEST_STATEMENTS),
+    Migration(8, "system_maintenance", SYSTEM_MAINTENANCE_STATEMENTS),
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 PHASE2_TABLES = frozenset(
@@ -461,6 +488,7 @@ CONTENT_PERMISSION_GROUP_TABLES = frozenset(
     {"content_permission_groups", "content_permission_group_items"}
 )
 CONTENT_FOLDER_REQUEST_TABLES = frozenset({"content_folder_requests"})
+SYSTEM_MAINTENANCE_TABLES = frozenset({"maintenance_settings", "maintenance_runs"})
 SYSTEM_CONTENT_PERMISSION_GROUPS = {
     "member": ("普通成员", frozenset()),
     "bim_engineer": ("BIM工程师", frozenset({"organize"})),
@@ -570,6 +598,8 @@ def has_pending_ddl(path: Path, *, base_tables: frozenset[str]) -> bool:
             conn.close()
     if any(version == 7 for version, _name in applied) and not CONTENT_FOLDER_REQUEST_TABLES.issubset(tables):
         raise RuntimeError("migration_schema_mismatch")
+    if any(version == 8 for version, _name in applied) and not SYSTEM_MAINTENANCE_TABLES.issubset(tables):
+        raise RuntimeError("migration_schema_mismatch")
     if not base_tables.issubset(tables):
         return True
     if "index_jobs" in tables and "media_id" not in index_columns:
@@ -624,6 +654,8 @@ def apply_all(conn: sqlite3.Connection, *, base_schema: str, applied_at: int) ->
         if not CONTENT_PERMISSION_GROUP_TABLES.issubset(tables):
             raise RuntimeError("migration_schema_mismatch")
         if not CONTENT_FOLDER_REQUEST_TABLES.issubset(tables):
+            raise RuntimeError("migration_schema_mismatch")
+        if not SYSTEM_MAINTENANCE_TABLES.issubset(tables):
             raise RuntimeError("migration_schema_mismatch")
         validate_system_content_permission_groups(conn)
         if conn.execute("PRAGMA foreign_key_check").fetchone() is not None:

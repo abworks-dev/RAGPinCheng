@@ -150,9 +150,58 @@ class AdminFeedbackPatchRequest(BaseModel):
     admin_note: str | None = Field(default=None, max_length=2000)
 
 
-class SweepResponse(BaseModel):
+class MaintenanceSettingsDTO(BaseModel):
+    conversation_cleanup_enabled: bool
+    conversation_retention_days: int
+    updated_at: int | None = None
+    updated_by: int | None = None
+
+
+class MaintenanceSettingsPatchRequest(BaseModel):
+    conversation_cleanup_enabled: bool
+    conversation_retention_days: int = Field(ge=7, le=3650)
+
+
+class CleanupPreviewResponse(BaseModel):
+    retention_days: int
+    conversations: int
+    messages: int
+    auth_sessions: int
+    oldest_conversation_at: int | None = None
+    newest_conversation_at: int | None = None
+
+
+class MaintenanceRunDTO(BaseModel):
+    id: int
+    trigger_source: Literal["automatic", "manual"]
+    status: Literal["succeeded", "failed"]
+    retention_days: int
     deleted_conversations: int
+    deleted_messages: int
     deleted_auth_sessions: int
+    started_at: int
+    finished_at: int
+    error_summary: str | None = None
+
+
+class MaintenanceStatusResponse(BaseModel):
+    settings: MaintenanceSettingsDTO
+    sweeper_interval_seconds: int
+    last_run: MaintenanceRunDTO | None = None
+
+
+class MaintenanceRunsResponse(BaseModel):
+    runs: list[MaintenanceRunDTO]
+
+
+class CleanupResponse(BaseModel):
+    run_id: int
+    retention_days: int
+    deleted_conversations: int
+    deleted_messages: int
+    deleted_auth_sessions: int
+    started_at: int
+    finished_at: int
 
 
 # ── admin: indexing ─────────────────────────────────────────────────────────

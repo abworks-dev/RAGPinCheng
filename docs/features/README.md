@@ -30,6 +30,7 @@
 | 视频转录链路 | 部分实现 | `chunk_transcript` | 文档索引、引用与来源 | [transcript-pipeline.md](transcript-pipeline.md) |
 | 认证与授权 | 已实现 | `require_user` / `require_csrf` | app.sqlite、Cookie | [authentication.md](authentication.md) |
 | 反馈处理工作流 | 已实现 | `/api/admin/feedback` | feedback.jsonl、app.sqlite、管理员权限 | [feedback-management.md](feedback-management.md) |
+| 系统维护 | 已实现 | `/api/admin/maintenance` / `AdminMaintenancePage` | app.sqlite、管理员权限、认证 | [system-maintenance.md](system-maintenance.md) |
 | 受管资料库 | 已实现 | `/api/admin/content` / `AdminManagedContentPage` | 资料权限、对象存储、发布索引 | [managed-content-library.md](managed-content-library.md) |
 | GPU运行时部署 | 部分实现 | `deploy-gpu.ps1` / `runtime-lock.json` | Windows GPU Runner、CUDA、模型缓存 | [gpu-runtime-deployment.md](gpu-runtime-deployment.md) |
 | 服务目录边界 | 已实现 | `api.main:app` / `services.asr_service.app:create_app` / `services.gpu_service.app` | Docker Compose、HTTP 契约、共享转录类型 | [service-directory-boundaries.md](service-directory-boundaries.md) |

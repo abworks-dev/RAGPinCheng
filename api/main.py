@@ -21,7 +21,7 @@ from src.config import CONTENT_MANAGEMENT_ENABLED, RERANK_ENABLED
 from src.config import ASR_ENABLED, ASR_SERVICE_TOKEN
 
 from .auth import bootstrap_admin_from_env
-from .conversation_runtime import sweep_once
+from .maintenance import run_cleanup
 from .db import init_db
 from .indexing import (
     configure_content_publication_runner,
@@ -68,11 +68,11 @@ async def _sweeper_loop() -> None:
     while True:
         try:
             await asyncio.sleep(SWEEPER_INTERVAL_SECONDS)
-            conv, sess = await asyncio.to_thread(sweep_once)
-            if conv or sess:
+            result = await asyncio.to_thread(run_cleanup, trigger_source="automatic")
+            if result.deleted_conversations or result.deleted_auth_sessions:
                 logger.info(
                     "sweeper deleted %d expired conversations, %d expired auth sessions",
-                    conv, sess,
+                    result.deleted_conversations, result.deleted_auth_sessions,
                 )
         except asyncio.CancelledError:
             break

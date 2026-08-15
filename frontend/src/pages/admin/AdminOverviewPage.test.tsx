@@ -1,16 +1,14 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AdminOverviewPage } from "./AdminOverviewPage";
 
 const mocks = vi.hoisted(() => ({
   adminStats: vi.fn(),
-  adminSweep: vi.fn(),
 }));
 
 vi.mock("../../api/client", () => ({
   api: {
     adminStats: mocks.adminStats,
-    adminSweep: mocks.adminSweep,
   },
 }));
 
@@ -69,31 +67,10 @@ describe("AdminOverviewPage", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("统计服务暂不可用");
   });
 
-  it("does not sweep when the administrator cancels confirmation", async () => {
+  it("keeps destructive maintenance actions out of the overview", async () => {
     mocks.adminStats.mockResolvedValue(initialStats);
-    vi.spyOn(window, "confirm").mockReturnValue(false);
-
     render(<AdminOverviewPage />);
     await screen.findByText("用户总数");
-    fireEvent.click(screen.getByRole("button", { name: "立即清理过期对话" }));
-
-    expect(window.confirm).toHaveBeenCalledTimes(1);
-    expect(mocks.adminSweep).not.toHaveBeenCalled();
-    expect(mocks.adminStats).toHaveBeenCalledTimes(1);
-  });
-
-  it("keeps the sweep call, refreshes statistics, and reports success", async () => {
-    mocks.adminStats.mockResolvedValueOnce(initialStats).mockResolvedValueOnce({ ...initialStats, conversations_total: 20 });
-    mocks.adminSweep.mockResolvedValue({ deleted_conversations: 4, deleted_auth_sessions: 2 });
-    vi.spyOn(window, "confirm").mockReturnValue(true);
-
-    render(<AdminOverviewPage />);
-    await screen.findByText("用户总数");
-    fireEvent.click(screen.getByRole("button", { name: "立即清理过期对话" }));
-
-    expect(await screen.findByText("已删除 4 条对话、2 条登录会话。")).toBeInTheDocument();
-    await waitFor(() => expect(mocks.adminStats).toHaveBeenCalledTimes(2));
-    expect(mocks.adminSweep).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole("status")).toHaveTextContent("清理完成");
+    expect(screen.queryByRole("button", { name: /清理/ })).not.toBeInTheDocument();
   });
 });

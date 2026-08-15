@@ -3,6 +3,11 @@ import type {
   AdminFeedbackEntry,
   AdminFeedbackResponse,
   AdminStats,
+  CleanupPreview,
+  CleanupResult,
+  MaintenanceRun,
+  MaintenanceSettings,
+  MaintenanceStatus,
   AdminUser,
   ApiConfig,
   AuthUser,
@@ -231,11 +236,20 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(body),
     }),
-  adminSweep: () =>
-    jsonFetch<{ deleted_conversations: number; deleted_auth_sessions: number }>(
-      "/api/admin/sweep",
-      { method: "POST" },
+  adminMaintenance: () => jsonFetch<MaintenanceStatus>("/api/admin/maintenance"),
+  adminMaintenancePreview: (retentionDays?: number) =>
+    jsonFetch<CleanupPreview>(
+      `/api/admin/maintenance/cleanup-preview${retentionDays === undefined ? "" : `?retention_days=${retentionDays}`}`,
     ),
+  adminUpdateMaintenanceSettings: (settings: Pick<MaintenanceSettings, "conversation_cleanup_enabled" | "conversation_retention_days">) =>
+    jsonFetch<MaintenanceSettings>("/api/admin/maintenance/settings", {
+      method: "PATCH",
+      body: JSON.stringify(settings),
+    }),
+  adminRunMaintenanceCleanup: () =>
+    jsonFetch<CleanupResult>("/api/admin/maintenance/cleanup", { method: "POST" }),
+  adminMaintenanceRuns: (limit = 20) =>
+    jsonFetch<{ runs: MaintenanceRun[] }>(`/api/admin/maintenance/runs?limit=${limit}`),
 
   // admin: managed content library
   managedContentCapabilities: () =>

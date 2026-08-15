@@ -613,30 +613,9 @@ def wrap_stream_with_persistence(
         persist_turn(plan, session)
 
 
-# ── sweeper ────────────────────────────────────────────────────────────────
-
-
-CONVERSATION_TTL_SECONDS = 30 * 24 * 60 * 60  # 30 days
-
-
 def sweep_once() -> tuple[int, int]:
-    """Delete expired auth sessions and conversations idle > 30 days.
+    """Compatibility wrapper for internal callers of the former sweeper."""
+    from .maintenance import run_cleanup
 
-    Returns (conversations_deleted, auth_sessions_deleted).
-    """
-    now = int(time.time())
-    conn = connect()
-    try:
-        cur = conn.execute(
-            "DELETE FROM conversations WHERE updated_at < ?",
-            (now - CONVERSATION_TTL_SECONDS,),
-        )
-        conv_deleted = cur.rowcount
-        cur = conn.execute(
-            "DELETE FROM auth_sessions WHERE expires_at < ?", (now,)
-        )
-        sess_deleted = cur.rowcount
-        conn.commit()
-    finally:
-        conn.close()
-    return conv_deleted, sess_deleted
+    result = run_cleanup(trigger_source="manual")
+    return result.deleted_conversations, result.deleted_auth_sessions

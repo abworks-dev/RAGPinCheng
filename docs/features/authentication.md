@@ -15,6 +15,7 @@
 - 服务端 Session、HttpOnly Cookie 和 CSRF Token；
 - `require_user`、`require_admin`、`require_csrf`、`require_csrf_admin` 依赖；
 - 会话到期、注销和管理员环境引导。
+- 失效登录会话由系统维护任务按 `expires_at` 清理，不受历史对话保留天数或自动清理开关影响。
 
 ### 未实现
 
