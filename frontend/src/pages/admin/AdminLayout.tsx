@@ -19,15 +19,30 @@ import { useNavigate } from "react-router-dom";
 
 type Tab = "users" | "conversations" | "corpus" | "managed" | "categories" | "media" | "stats" | "feedback";
 
-const adminTabs: [Tab, string][] = [
-  ["users", "用户"],
-  ["conversations", "对话"],
-  ["managed", "资料库"],
-  ["categories", "分类设置"],
-  ["corpus", "索引监控"],
-  ["media", "视频媒体"],
-  ["stats", "概览"],
-  ["feedback", "反馈"],
+type NavigationGroup = {
+  label: string;
+  tabs: [Tab, string][];
+};
+
+const adminNavigation: NavigationGroup[] = [
+  { label: "总览", tabs: [["stats", "概览"]] },
+  {
+    label: "内容管理",
+    tabs: [
+      ["managed", "资料管理"],
+      ["categories", "分类管理"],
+      ["media", "视频管理"],
+      ["corpus", "索引任务"],
+    ],
+  },
+  {
+    label: "运营管理",
+    tabs: [
+      ["users", "用户管理"],
+      ["conversations", "对话记录"],
+      ["feedback", "用户反馈"],
+    ],
+  },
 ];
 
 export function AdminLayout() {
@@ -36,9 +51,16 @@ export function AdminLayout() {
   const user = state.status === "authed" ? state.user : null;
   const isAdmin = !user?.role || user.role === "admin";
   const permissions = user?.content_permissions || [];
-  const tabs = isAdmin
-    ? adminTabs
-    : contentWorkspaceTabs(permissions).map((key) => [key, key === "managed" ? "资料库" : "分类设置"] as [Tab, string]);
+  const navigation: NavigationGroup[] = isAdmin
+    ? adminNavigation
+    : [{
+        label: "内容管理",
+        tabs: contentWorkspaceTabs(permissions).map((key) => [
+          key,
+          key === "managed" ? "资料管理" : "分类管理",
+        ] as [Tab, string]),
+      }];
+  const tabs = navigation.flatMap((group) => group.tabs);
   const [tab, setTab] = useState<Tab>(isAdmin ? "users" : "managed");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false);
@@ -112,37 +134,47 @@ export function AdminLayout() {
         </div>
 
         <div className={cn("px-3 py-3 lg:min-h-0 lg:flex-1", !mobileNavigationOpen && "hidden lg:block")}>
-          {!sidebarCollapsed && (
-            <p className="mb-2 hidden px-3 text-ui-xs font-medium uppercase tracking-[0.14em] text-muted-foreground lg:block">
-              管理功能
-            </p>
-          )}
-          <nav aria-label="管理功能" className="grid grid-cols-2 gap-1 sm:grid-cols-3 lg:flex lg:flex-col">
-            {tabs.map(([key, label]) => {
-              const active = tab === key;
-              return (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => { setTab(key); setMobileNavigationOpen(false); }}
-                  aria-current={active ? "page" : undefined}
-                  title={sidebarCollapsed ? label : undefined}
+          <nav aria-label="管理功能" className="space-y-3">
+            {navigation.map((group) => (
+              <section key={group.label} aria-labelledby={`admin-nav-${group.label}`}>
+                <p
+                  id={`admin-nav-${group.label}`}
                   className={cn(
-                    "flex h-control-md min-w-0 items-center rounded-ui-lg text-left text-ui-sm font-medium transition-colors duration-normal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                    sidebarCollapsed ? "lg:w-9 lg:justify-center lg:px-0" : "gap-3 px-3",
-                    active
-                      ? "bg-primary text-primary-foreground shadow-surface"
-                      : "text-muted-foreground hover:bg-surface-muted hover:text-foreground",
+                    "mb-1 px-3 text-ui-xs font-medium text-muted-foreground",
+                    sidebarCollapsed && "lg:sr-only",
                   )}
                 >
-                  <span
-                    className={cn("h-2 w-2 shrink-0 rounded-full", active ? "bg-primary-foreground" : "bg-border")}
-                    aria-hidden="true"
-                  />
-                  <span className={cn("min-w-0 whitespace-normal", sidebarCollapsed && "lg:hidden")}>{label}</span>
-                </button>
-              );
-            })}
+                  {group.label}
+                </p>
+                <div className="grid grid-cols-2 gap-1 sm:grid-cols-3 lg:flex lg:flex-col">
+                  {group.tabs.map(([key, label]) => {
+                    const active = tab === key;
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => { setTab(key); setMobileNavigationOpen(false); }}
+                        aria-current={active ? "page" : undefined}
+                        title={sidebarCollapsed ? label : undefined}
+                        className={cn(
+                          "flex h-control-md min-w-0 items-center rounded-ui-lg text-left text-ui-sm font-medium transition-colors duration-normal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                          sidebarCollapsed ? "lg:w-9 lg:justify-center lg:px-0" : "gap-3 px-3",
+                          active
+                            ? "bg-primary text-primary-foreground shadow-surface"
+                            : "text-muted-foreground hover:bg-surface-muted hover:text-foreground",
+                        )}
+                      >
+                        <span
+                          className={cn("h-2 w-2 shrink-0 rounded-full", active ? "bg-primary-foreground" : "bg-border")}
+                          aria-hidden="true"
+                        />
+                        <span className={cn("min-w-0 whitespace-normal", sidebarCollapsed && "lg:hidden")}>{label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+            ))}
           </nav>
         </div>
         <div className={cn("mt-auto hidden space-y-1 py-2 lg:block", sidebarCollapsed ? "px-3" : "px-2")}>

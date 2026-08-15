@@ -22,9 +22,9 @@ test.describe("资料成员工作台入口", () => {
     if (page.viewportSize()!.width < 1024) {
       await page.getByRole("button", { name: "展开管理功能" }).click();
     }
-    await expect(page.getByRole("button", { name: "资料库", exact: true })).toBeVisible();
-    await expect(page.getByRole("button", { name: "用户", exact: true })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "分类设置", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "资料管理", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "用户管理", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "分类管理", exact: true })).toHaveCount(0);
     await expectNoBodyOverflow(page);
   });
 

@@ -15,7 +15,7 @@ async function openTab(page: Parameters<typeof installAdminRoutes>[0], label: st
 
 test.describe("资料库", () => {
   test("normal layout keeps navigation and upload controls discoverable", async ({ page }) => {
-    await openTab(page, "资料库");
+    await openTab(page, "资料管理");
     await expect(page.getByRole("heading", { name: "资料库" })).toBeVisible();
     await expectNoBodyOverflow(page);
     await expectInViewport(page.getByRole("button", { name: "刷新" }));
@@ -51,7 +51,7 @@ test.describe("资料库", () => {
 
   for (const scenario of ["loading", "empty", "error", "disabled"] as const) {
     test(`${scenario} state is explicit and contained`, async ({ page }) => {
-      await openTab(page, "资料库", scenario);
+      await openTab(page, "资料管理", scenario);
       await expectNoBodyOverflow(page);
       if (scenario === "loading") await expect(page.getByRole("heading", { name: "资料库" })).toBeVisible();
       if (scenario === "empty") await expect(page.getByText("没有符合条件的资料")).toBeVisible();
@@ -64,7 +64,7 @@ test.describe("资料库", () => {
   }
 
   test("upload exposes a stable busy state", async ({ page }) => {
-    await openTab(page, "资料库");
+    await openTab(page, "资料管理");
     await page.getByLabel("选择资料文件").setInputFiles({ name: "synthetic.pdf", mimeType: "application/pdf", buffer: Buffer.from("synthetic fixture") });
     const upload = page.getByRole("button", { name: "上传资料" });
     await upload.click();
@@ -73,7 +73,7 @@ test.describe("资料库", () => {
   });
 
   test("publication failure stays readable and actionable", async ({ page }) => {
-    await openTab(page, "资料库", "publication_failure");
+    await openTab(page, "资料管理", "publication_failure");
     await page.locator("select").filter({ has: page.locator('option[value="publication_failed"]') }).selectOption("publication_failed");
     await expect(page.locator("p:visible", { hasText: "PDF 需要密码才能解析。" })).toBeVisible();
     await expect(page.locator("p:visible", { hasText: "请上传已解除密码保护的 PDF。" })).toBeVisible();
@@ -90,7 +90,7 @@ test.describe("资料库", () => {
 
 test.describe("索引监控", () => {
   test("normal layout keeps document identity, status, and actions discoverable", async ({ page }) => {
-    await openTab(page, "索引监控");
+    await openTab(page, "索引任务");
     await expect(page.getByRole("heading", { name: "索引监控" })).toBeVisible();
     await expect(page.getByText("建筑信息模型交付标准（合成长文件名用于响应式检查）", { exact: true })).toBeVisible();
     await expectNoBodyOverflow(page);
@@ -113,7 +113,7 @@ test.describe("索引监控", () => {
 
   for (const scenario of ["loading", "empty", "error"] as const) {
     test(`${scenario} state is explicit and contained`, async ({ page }) => {
-      await openTab(page, "索引监控", scenario);
+      await openTab(page, "索引任务", scenario);
       await expectNoBodyOverflow(page);
       if (scenario === "loading") await expect(page.getByText("正在加载资料…")).toBeVisible();
       if (scenario === "empty") await expect(page.getByText("暂无资料")).toBeVisible();
@@ -124,7 +124,7 @@ test.describe("索引监控", () => {
 
 test.describe("分类设置", () => {
   test("normal layout keeps form and category actions discoverable", async ({ page }) => {
-    await openTab(page, "分类设置");
+    await openTab(page, "分类管理");
     await expect(page.getByRole("heading", { name: "分类设置" })).toBeVisible();
     await expect(page.getByText("资料权限")).toHaveCount(0);
     await expectNoBodyOverflow(page);
@@ -144,7 +144,7 @@ test.describe("分类设置", () => {
 
   for (const scenario of ["loading", "empty", "error"] as const) {
     test(`${scenario} state is explicit and contained`, async ({ page }) => {
-      await openTab(page, "分类设置", scenario);
+      await openTab(page, "分类管理", scenario);
       await expectNoBodyOverflow(page);
       if (scenario === "loading") await expect(page.getByRole("button", { name: "刷新" })).toBeDisabled();
       if (scenario === "empty") await expect(page.getByText("暂无分类")).toBeVisible();
@@ -153,7 +153,7 @@ test.describe("分类设置", () => {
   }
 
   test("create exposes a stable busy state", async ({ page }) => {
-    await openTab(page, "分类设置");
+    await openTab(page, "分类管理");
     await page.getByLabel("显示编号", { exact: true }).fill("C");
     await page.getByLabel("分类名称", { exact: true }).fill("合成新增分类");
     const create = page.getByRole("button", { name: "新增分类" });
@@ -164,7 +164,7 @@ test.describe("分类设置", () => {
 
 test.describe("用户权限", () => {
   test("permissions are visible and editable from the user action menu", async ({ page }) => {
-    await openTab(page, "用户");
+    await openTab(page, "用户管理");
     await expect(page.getByRole("heading", { name: "用户管理" })).toBeVisible();
     await expect(page.getByText("系统管理员 · 全部权限")).toBeVisible();
     await expect(page.getByText("自定义")).toBeVisible();
@@ -178,7 +178,7 @@ test.describe("用户权限", () => {
   });
 
   test("permission group management explains template semantics", async ({ page }) => {
-    await openTab(page, "用户");
+    await openTab(page, "用户管理");
     await page.getByRole("button", { name: "权限组管理" }).click();
     await expect(page.getByRole("dialog", { name: "权限组管理" })).toContainText("修改模板不会改变既有用户权限");
     await expect(page.getByRole("dialog", { name: "权限组管理" }).getByRole("button", { name: "普通成员 预设" })).toBeVisible();
