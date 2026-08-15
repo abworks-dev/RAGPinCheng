@@ -10,6 +10,7 @@ param(
     [string]$WhisperXRoot,
     [string]$RuntimeRoot,
     [string]$BackupDirectory,
+    [string]$AsrActivationBackupRoot,
     [string]$AsrModelCacheRoot,
     [string]$WhisperXCacheRoot,
     [string]$RunnerWorkRoot,
@@ -321,7 +322,7 @@ $report = [ordered]@{
         }
     }
     dependency_runs = Measure-DependencyRuns -DataRoot $AsrDataRoot
-    candidates = Get-CandidateInventory -DataRoot $AsrDataRoot -ProgramRoot $AsrProgramRoot -BackupRoot $BackupDirectory
+    candidates = Get-CandidateInventory -DataRoot $AsrDataRoot -ProgramRoot $AsrProgramRoot -BackupRoot $(if ($AsrActivationBackupRoot) { $AsrActivationBackupRoot } else { $BackupDirectory })
     docker = $docker
 }
 
