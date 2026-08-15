@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from typing import Any
 
@@ -34,6 +35,10 @@ def sanitize(config: dict[str, Any]) -> tuple[dict[str, Any], int]:
 def main() -> int:
     config = json.load(sys.stdin)
     sanitized, removed = sanitize(config)
+    env_file = os.environ.get("COMPOSE_ENV_FILE")
+    if env_file:
+        backend = sanitized["services"]["backend"]
+        backend["env_file"] = [env_file]
     json.dump(sanitized, sys.stdout, ensure_ascii=True, separators=(",", ":"))
     sys.stdout.write("\n")
     print(f"SOURCE_DECOUPLED_OVERRIDE status=sanitized removed_docs_mounts={removed}", file=sys.stderr)
