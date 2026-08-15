@@ -79,6 +79,8 @@ def test_candidate_resolver_is_manual_d_drive_isolated_and_evidence_only():
     assert "timeout-minutes: 60" in workflow
     assert "actions/upload-artifact@v4" in workflow
     assert "if: ${{ always() }}" in workflow
+    assert "RESOLVER_ARTIFACT_ROOT: ${{ vars.PRODUCTION_RESOLVER_ROOT }}" in workflow
+    assert "PRODUCTION_RESOLVER_ARTIFACT_ROOT" not in workflow
     assert "runtime-lock-candidate.txt" in workflow
     assert "resolver-report.json" in workflow
     assert "preflight.json" in workflow

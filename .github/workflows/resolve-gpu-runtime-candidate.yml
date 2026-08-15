@@ -36,7 +36,7 @@ jobs:
       RUNTIME_ROOT: ${{ vars.PRODUCTION_RUNTIME_ROOT }}
       BACKUP_DIR: ${{ vars.PRODUCTION_BACKUP_DIRECTORY }}
       RESOLVER_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
-      RESOLVER_ARTIFACT_ROOT: ${{ vars.PRODUCTION_RESOLVER_ARTIFACT_ROOT }}\${{ github.run_id }}-${{ github.run_attempt }}\artifacts
+      RESOLVER_ARTIFACT_ROOT: ${{ vars.PRODUCTION_RESOLVER_ROOT }}\${{ github.run_id }}-${{ github.run_attempt }}\artifacts
       GIT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GPU_SERVICE_TOKEN: ${{ secrets.GPU_SERVICE_TOKEN }}
       GPU_SERVICE_URL: ${{ vars.GPU_SERVICE_URL }}
