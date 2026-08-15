@@ -70,6 +70,11 @@ jobs:
               "- Task root binding: ``$($result.task_root_binding_available)``",
               "- Listener count: ``$($result.listener_count)``",
               "- Health: ``$($result.health_outcome)``",
+              "- Scheduler diagnostics: ``$($result.scheduler_diagnostics_outcome)``",
+              "- Scheduler pause reason: ``$($result.scheduler_pause_reason)``",
+              "- Scheduler OOM latch: ``$($result.scheduler_oom_latched)``",
+              "- Scheduler failures: ``$($result.scheduler_consecutive_failures)/$($result.scheduler_failure_limit)``",
+              "- Scheduler queue: ``$($result.scheduler_queue_depth)/$($result.scheduler_queue_limit)``",
               "- Log updated after last run: ``$($result.startup_log_updated_after_last_run)``",
               "- Signals: ``$(@($result.signals) -join ',')``",
               "- Production services modified: ``$($result.production_services_modified)``"

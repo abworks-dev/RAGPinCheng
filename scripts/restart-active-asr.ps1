@@ -163,7 +163,6 @@ if ($Mode -eq "RestoreStopped") {
 
 $context = Get-ValidatedContext
 $initialState = [string]$context.task.State
-$alreadyHealthy = Test-AsrHealth
 $initialListenerIds = @(Get-OwnedListenerIds -Context $context)
 $started = $false
 $state = [ordered]@{
@@ -189,23 +188,19 @@ Copy-Item -LiteralPath $bootstrapHelperPath -Destination $bootstrapHelperBackupP
 Write-SanitizedJson -Path $statePath -Value $state
 try {
     if ($initialState -notin @("Ready", "Running")) { throw "Production ASR task is not in a recoverable state" }
-    if ($initialState -eq "Running" -and $alreadyHealthy -and $context.module -eq "services.asr_service.app:create_app") {
-        $state.status = "already-running-healthy"
-    } else {
-        if ($initialState -eq "Running") { Stop-ScheduledTask -TaskName $taskName }
-        if ($initialListenerIds.Count -gt 0) { Stop-OwnedListeners -Context $context }
-        Install-FileAtomic -Source (Join-Path $PSScriptRoot "start-asr-service.ps1") -Destination $bootstrapPath
-        Install-FileAtomic -Source (Join-Path $PSScriptRoot "asr-release.ps1") -Destination $bootstrapHelperPath
-        $state.bootstrap_replaced = $true
-        $state.status = "starting"
-        Write-SanitizedJson -Path $statePath -Value $state
-        Start-ScheduledTask -TaskName $taskName
-        $started = $true
-        $state.started_by_operation = $true
-        Write-SanitizedJson -Path $statePath -Value $state
-        Wait-RunningHealthy
-        $state.status = "started-running-healthy"
-    }
+    if ($initialState -eq "Running") { Stop-ScheduledTask -TaskName $taskName }
+    if ($initialListenerIds.Count -gt 0) { Stop-OwnedListeners -Context $context }
+    Install-FileAtomic -Source (Join-Path $PSScriptRoot "start-asr-service.ps1") -Destination $bootstrapPath
+    Install-FileAtomic -Source (Join-Path $PSScriptRoot "asr-release.ps1") -Destination $bootstrapHelperPath
+    $state.bootstrap_replaced = $true
+    $state.status = "starting"
+    Write-SanitizedJson -Path $statePath -Value $state
+    Start-ScheduledTask -TaskName $taskName
+    $started = $true
+    $state.started_by_operation = $true
+    Write-SanitizedJson -Path $statePath -Value $state
+    Wait-RunningHealthy
+    $state.status = "started-running-healthy"
     Write-SanitizedJson -Path $statePath -Value $state
     if ($EvidencePath) { Write-SanitizedJson -Path $EvidencePath -Value $state }
     Write-Host "ASR_ACTIVE_RESTART status=$($state.status) candidate_id=$($state.candidate_id)"

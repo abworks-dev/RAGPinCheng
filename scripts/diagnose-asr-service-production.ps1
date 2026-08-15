@@ -106,9 +106,9 @@ $configRequiredMissingCount = 0
 $configServiceEnabled = $false
 $configLocalFilesOnly = $false
 $senseVoiceModelBundlePresent = $false
+$configValues = @{}
 if ($configPresent) {
     try {
-        $configValues = @{}
         foreach ($line in Get-Content -LiteralPath $legacyConfig -Encoding UTF8) {
             $trimmed = $line.Trim()
             if (-not $trimmed -or $trimmed.StartsWith("#")) { continue }
@@ -186,6 +186,39 @@ try {
     $healthExceptionType = $_.Exception.GetType().Name
 }
 
+$schedulerDiagnosticsOutcome = "unavailable"
+$schedulerDiagnosticsExceptionType = ""
+$schedulerPauseReason = ""
+$schedulerOomLatched = $null
+$schedulerConsecutiveFailures = $null
+$schedulerFailureLimit = $null
+$schedulerQueueDepth = $null
+$schedulerQueueLimit = $null
+if (
+    $healthOutcome -eq "healthy" -and
+    $configValid -and
+    $configValues.ContainsKey("ASR_SERVICE_TOKEN") -and
+    -not [string]::IsNullOrWhiteSpace([string]$configValues["ASR_SERVICE_TOKEN"])
+) {
+    try {
+        $headers = @{ Authorization = "Bearer $([string]$configValues["ASR_SERVICE_TOKEN"])" }
+        $schedulerDiagnostics = Invoke-RestMethod `
+            -Method Get `
+            -Uri "http://127.0.0.1:8200/v1/diagnostics" `
+            -Headers $headers `
+            -TimeoutSec 10
+        $schedulerDiagnosticsOutcome = "available"
+        $schedulerPauseReason = [string]$schedulerDiagnostics.pause_reason
+        $schedulerOomLatched = [bool]$schedulerDiagnostics.oom_latched
+        $schedulerConsecutiveFailures = [int]$schedulerDiagnostics.consecutive_failures
+        $schedulerFailureLimit = [int]$schedulerDiagnostics.failure_limit
+        $schedulerQueueDepth = [int]$schedulerDiagnostics.queue_depth
+        $schedulerQueueLimit = [int]$schedulerDiagnostics.queue_limit
+    } catch {
+        $schedulerDiagnosticsExceptionType = $_.Exception.GetType().Name
+    }
+}
+
 $activeStatePath = Join-Path $DataRoot "release-state\active.json"
 $activeStatePresent = Test-Path -LiteralPath $activeStatePath -PathType Leaf
 $activeCandidateId = ""
@@ -232,6 +265,9 @@ elseif ([string]$task.State -ne "Running") { $signals += "task_not_running" }
 if ($connections.Count -eq 0) { $signals += "listener_missing" }
 elseif (-not $listenerOwned) { $signals += "listener_ownership_mismatch" }
 if ($healthOutcome -ne "healthy") { $signals += "health_$healthOutcome" }
+if ($schedulerDiagnosticsOutcome -eq "available" -and $schedulerPauseReason) {
+    $signals += "scheduler_paused_$schedulerPauseReason"
+}
 if ($activeStatePresent -and -not $activeStateValid) { $signals += "active_state_invalid" }
 if ($null -eq $latestLog) { $signals += "startup_log_missing" }
 elseif ($null -ne $taskInfo -and $latestLog.LastWriteTimeUtc -lt $taskInfo.LastRunTime.ToUniversalTime()) { $signals += "startup_log_not_updated_by_last_run" }
@@ -249,7 +285,9 @@ if (@($safeLogLines | Where-Object { $_ -match '(?i)cuda.*(?:out of memory|error
 if (@($safeLogLines | Where-Object { $_ -match '(?i)modulenotfound|importerror' }).Count -gt 0) { $signals += "module_import_error" }
 if (@($safeLogLines | Where-Object { $_ -match '(?i)application startup failed|runtimeerror|fatal' }).Count -gt 0) { $signals += "startup_error" }
 
-$status = if ($healthOutcome -eq "healthy" -and $taskOwned -and $listenerOwned) {
+$status = if ($schedulerDiagnosticsOutcome -eq "available" -and $schedulerPauseReason) {
+    "scheduler_paused"
+} elseif ($healthOutcome -eq "healthy" -and $taskOwned -and $listenerOwned) {
     "healthy"
 } elseif (-not $taskOwned -or ($connections.Count -gt 0 -and -not $listenerOwned)) {
     "ownership_mismatch"
@@ -283,6 +321,14 @@ $report = [ordered]@{
     health_status = $healthStatus
     health_api_version = $healthApiVersion
     health_exception_type = $healthExceptionType
+    scheduler_diagnostics_outcome = $schedulerDiagnosticsOutcome
+    scheduler_diagnostics_exception_type = $schedulerDiagnosticsExceptionType
+    scheduler_pause_reason = $schedulerPauseReason
+    scheduler_oom_latched = $schedulerOomLatched
+    scheduler_consecutive_failures = $schedulerConsecutiveFailures
+    scheduler_failure_limit = $schedulerFailureLimit
+    scheduler_queue_depth = $schedulerQueueDepth
+    scheduler_queue_limit = $schedulerQueueLimit
     active_state_present = [bool]$activeStatePresent
     active_state_valid = [bool]$activeStateValid
     active_candidate_id = $activeCandidateId
