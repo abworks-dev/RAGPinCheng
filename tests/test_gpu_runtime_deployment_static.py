@@ -140,7 +140,7 @@ def test_candidate_resolver_is_manual_d_drive_isolated_and_evidence_only():
     assert "$legacyTaskOwned = $arguments -match $legacyArgumentsPattern" in promotion
     assert "(-not $releaseTaskOwned -and -not $legacyTaskOwned)" in promotion
     assert '$taskWrapper = Join-Path $RepositoryPath "scripts\\start-gpu-release-task.ps1"' in promotion
-    assert '-File "{0}" -ReleaseRoot "{1}"' in promotion
+    assert '-File "{0}" -ReleaseRoot "{1}" -RepositoryPath "{2}" -RuntimeRoot "{3}" -GpuServiceHost "{4}"' in promotion
     assert "$arguments -eq (Get-TaskArguments -TargetRelease" in promotion
     assert 'Groups["release"].Value' in promotion
     assert "$canonicalProcessOwned = (" in promotion
@@ -161,7 +161,10 @@ def test_candidate_resolver_is_manual_d_drive_isolated_and_evidence_only():
     assert 'Write-PromotionDiagnostics -DiagnosticRelease $previousRelease -Label "previous"' in promotion
     assert 'throw "GPU release task exited before becoming healthy"' in promotion
     task_wrapper = read("scripts/start-gpu-release-task.ps1")
-    assert 'Join-Path $env:PRODUCTION_RUNTIME_ROOT "releases"' in task_wrapper
+    assert 'Join-Path $resolvedRuntime "releases"' in task_wrapper
+    assert "$env:PRODUCTION_REPO_PATH = $resolvedRepository" in task_wrapper
+    assert "$env:PRODUCTION_RUNTIME_ROOT = $resolvedRuntime" in task_wrapper
+    assert "$env:GPU_SERVICE_HOST = $GpuServiceHost" in task_wrapper
     assert "GPU task release is outside managed releases" in task_wrapper
     assert 'Join-Path $resolvedRelease "source\\scripts\\start-gpu-service.ps1"' in task_wrapper
     assert 'Join-Path $resolvedRelease "gpu-service-bootstrap.log"' in task_wrapper

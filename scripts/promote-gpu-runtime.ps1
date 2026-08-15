@@ -26,8 +26,8 @@ if ($GpuServiceToken -match '[\r\n]') {
 function Get-TaskArguments {
     param([Parameter(Mandatory)][string]$TargetRelease)
     $taskWrapper = Join-Path $RepositoryPath "scripts\start-gpu-release-task.ps1"
-    '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -ReleaseRoot "{1}"' -f `
-        $taskWrapper, $TargetRelease
+    '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -ReleaseRoot "{1}" -RepositoryPath "{2}" -RuntimeRoot "{3}" -GpuServiceHost "{4}"' -f `
+        $taskWrapper, $TargetRelease, $RepositoryPath, $RuntimeRoot, $env:GPU_SERVICE_HOST
 }
 
 function Assert-OwnedTask {
