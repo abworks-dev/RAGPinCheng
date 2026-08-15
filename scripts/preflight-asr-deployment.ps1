@@ -150,6 +150,7 @@ try {
         }
         $fasterEvidence = Get-QualifiedFasterWhisperEvidence `
             -QualificationRoot $FasterWhisperQualificationRoot `
+            -DataRoot $DataRoot `
             -RunId $CompanionFasterWhisperRunId `
             -CommitSha $CompanionFasterWhisperCommitSha.ToLowerInvariant() `
             -ExpectedRuntimeContractSha256 $fasterRuntime.runtime_contract_sha256
