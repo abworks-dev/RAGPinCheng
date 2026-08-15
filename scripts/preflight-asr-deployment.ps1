@@ -213,6 +213,11 @@ try {
         }
         & $venvPython @downloadArguments
         if ($LASTEXITCODE -ne 0) { $report.failure_code = "dependency_resolution_failed"; throw "Deployment preflight dependency resolution failed" }
+        if ($Engine -eq "whisperx") {
+            foreach ($qualifiedWheel in @(Get-ChildItem -LiteralPath $qualifiedCompanionWheelSeed -File)) {
+                Copy-Item -LiteralPath $qualifiedWheel.FullName -Destination (Join-Path $wheelhouse $qualifiedWheel.Name) -Force
+            }
+        }
         try {
             if ($Engine -eq "faster-whisper") {
                 Assert-QualifiedFasterWhisperWheels -Evidence $evidence -Wheelhouse $wheelhouse

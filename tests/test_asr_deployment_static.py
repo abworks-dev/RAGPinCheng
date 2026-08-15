@@ -203,6 +203,12 @@ def test_asr_deployment_preflight_is_manual_and_writes_only_runner_temp():
     assert preflight.count("-DataRoot $DataRoot") == 2
     assert '"qualified-faster-whisper-companion-wheel-seed"' in preflight
     assert '$downloadArguments += @("--find-links", $qualifiedCompanionWheelSeed)' in preflight
+    overlay = preflight.index("Get-ChildItem -LiteralPath $qualifiedCompanionWheelSeed -File")
+    assert_companion = preflight.index(
+        "Assert-QualifiedFasterWhisperWheels -Evidence $fasterEvidence -Wheelhouse $wheelhouse"
+    )
+    assert overlay < assert_companion
+    assert "-Destination (Join-Path $wheelhouse $qualifiedWheel.Name) -Force" in preflight
     seed = preflight.index("-Destination $qualifiedWheelSeed")
     wheelhouse = preflight.index("-Destination $wheelhouse", seed)
     download = preflight.index('"-m", "pip", "download"', wheelhouse)
