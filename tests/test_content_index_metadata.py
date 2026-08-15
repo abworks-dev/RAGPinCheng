@@ -20,6 +20,35 @@ class _QdrantCapture:
         self.points.extend(points)
 
 
+def test_managed_version_index_summaries_are_read_from_parents_sqlite(tmp_path, monkeypatch):
+    parents_db = tmp_path / "parents.sqlite"
+    conn = sqlite3.connect(parents_db)
+    conn.execute("CREATE TABLE parents(parent_id TEXT PRIMARY KEY, content_version_id TEXT)")
+    conn.executemany(
+        "INSERT INTO parents(parent_id,content_version_id) VALUES (?,?)",
+        [
+            ("parent-b", "version-1"),
+            ("parent-a", "version-1"),
+            ("parent-c", "version-2"),
+            ("legacy-parent", None),
+        ],
+    )
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(indexing_pipeline, "PARENTS_DB", parents_db)
+
+    summaries = indexing_pipeline.list_managed_version_index_summaries(
+        ["version-1", "version-1", "version-missing"]
+    )
+
+    assert summaries == {
+        "version-1": indexing_pipeline.ManagedVersionIndexSummary(
+            parent_count=2,
+            preview_parent_id="parent-a",
+        )
+    }
+
+
 def test_managed_identity_reaches_parent_store_and_qdrant_payload(tmp_path, monkeypatch):
     source = tmp_path / "object"
     source.write_text("# Scope\n\nManaged indexing contract.", encoding="utf-8")
