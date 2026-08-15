@@ -79,6 +79,10 @@ class TestDeployGitSafety(unittest.TestCase):
 
     def test_emergency_workflow_is_master_only_and_preserves_deploy_order(self):
         self.assertIn("$env:SELECTED_REF -ne 'refs/heads/master'", self.emergency_workflow)
+        self.assertIn(
+            "PRODUCTION_PYTHON_PATH: ${{ vars.PRODUCTION_GPU_PYTHON_PATH }}",
+            self.emergency_workflow,
+        )
         self.assertGreaterEqual(
             self.emergency_workflow.count(
                 "DEPLOY_COMMIT_SHA: ${{ inputs.deploy_commit_sha }}"
