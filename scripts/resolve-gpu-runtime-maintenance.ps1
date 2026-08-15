@@ -40,7 +40,10 @@ foreach ($listener in $listeners) {
     if (
         $null -eq $process -or
         [string]$process.CommandLine -notmatch '-m (?:services\.)?gpu_service\.app' -or
-        -not ([string]$process.ExecutablePath).StartsWith($currentReleaseRoot, [StringComparison]::OrdinalIgnoreCase)
+        -not (
+            ([string]$process.ExecutablePath).StartsWith($currentReleaseRoot, [StringComparison]::OrdinalIgnoreCase) -or
+            [string]::Equals([string]$process.ExecutablePath, $BasePython, [StringComparison]::OrdinalIgnoreCase)
+        )
     ) {
         throw "Refusing to stop an unexpected process listening on TCP 8100"
     }
