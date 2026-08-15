@@ -101,6 +101,16 @@ def test_candidate_resolver_is_manual_d_drive_isolated_and_evidence_only():
     assert "gpu_service\\app.py" in legacy
     assert "GPU_LEGACY_RESTORE status=healthy" in legacy
     assert "start-gpu-legacy-service.ps1" in legacy
+    assert "Stop-ScheduledTask -TaskName $taskName" in legacy
+    assert "Unregister-ScheduledTask -TaskName $taskName -Confirm:$false" in legacy
+    assert "Existing GPU scheduled task did not stop within 30 seconds" in legacy
+    assert "Get-NetTCPConnection -LocalPort 8100 -State Listen" in legacy
+    assert "TCP 8100 is still occupied after stopping the existing GPU scheduled task" in legacy
+    register_line = next(
+        line for line in legacy.splitlines() if line.startswith("Register-ScheduledTask ")
+    )
+    assert "-TaskName $taskName" in register_line
+    assert "-Force" not in register_line
 
     assert 'StartsWith("D:\\"' in script
     assert '"-m", "venv"' in script
