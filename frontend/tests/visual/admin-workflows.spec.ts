@@ -86,6 +86,23 @@ test.describe("资料库", () => {
     await expect(failedItem.getByRole("button", { name: "发布中…" })).toBeDisabled();
     await expectNoBodyOverflow(page);
   });
+
+  test("delete confirmation explains impact and exposes a stable busy state", async ({ page }) => {
+    await openTab(page, "资料管理");
+    const title = page.getByText("建筑信息模型交付标准（合成长文件名用于响应式检查）", { exact: true }).filter({ visible: true });
+    const item = page.viewportSize()!.width < 1024 ? title.locator("xpath=ancestor::li") : title.locator("xpath=ancestor::tr");
+    const remove = item.getByRole("button", { name: "删除", exact: true });
+    await remove.scrollIntoViewIfNeeded();
+    await expectInViewport(remove);
+    await remove.click();
+    const dialog = page.getByRole("dialog", { name: "删除资料" });
+    await expect(dialog).toContainText("将从资料列表和知识库检索中移除");
+    await expect(dialog).toContainText("保留文件、版本及审核发布历史");
+    await expectNoBodyOverflow(page);
+    const confirm = dialog.getByRole("button", { name: "确认删除" });
+    await confirm.click();
+    await expect(dialog.getByRole("button", { name: "删除中…" })).toBeDisabled();
+  });
 });
 
 test.describe("索引监控", () => {

@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   publish: vi.fn(),
   bulkReview: vi.fn(),
   bulkPublish: vi.fn(),
+  deleteContent: vi.fn(),
   fileUrl: vi.fn(),
   success: vi.fn(),
   error: vi.fn(),
@@ -45,6 +46,7 @@ vi.mock("../../api/client", () => ({
     publishManagedContent: mocks.publish,
     bulkReviewManagedContent: mocks.bulkReview,
     bulkPublishManagedContent: mocks.bulkPublish,
+    deleteManagedContent: mocks.deleteContent,
     managedContentFileUrl: mocks.fileUrl,
   },
 }));
@@ -102,6 +104,7 @@ describe("AdminManagedContentPage", () => {
     mocks.categories.mockResolvedValue([category]);
     mocks.items.mockResolvedValue({ items: [item], total: 1, status_counts: { awaiting_review: 1 } });
     mocks.review.mockResolvedValue({ ...item, lifecycle_status: "approved" });
+    mocks.deleteContent.mockResolvedValue({ item_id: "item-1", version_id: "version-1", archived_at: 2, previous_status: "awaiting_review", publication_withdrawn: false });
   });
 
   it("shows only review actions to a reviewer and submits the decision", async () => {
@@ -126,6 +129,55 @@ describe("AdminManagedContentPage", () => {
     expect(screen.getByText("未选择资料，单次最多 20 份")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "批量确认" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "批量退回" })).toBeDisabled();
+  });
+
+  it("lets an organizer delete a draft after explicit confirmation", async () => {
+    mocks.permissions = ["organize"];
+    mocks.items.mockResolvedValue({
+      items: [{ ...item, lifecycle_status: "draft" }],
+      total: 1,
+      status_counts: { draft: 1 },
+    });
+    render(<AdminManagedContentPage />);
+    await screen.findAllByText("建模标准");
+
+    fireEvent.click(screen.getAllByRole("button", { name: "删除" })[0]);
+    expect(screen.getByRole("dialog")).toHaveTextContent("将从资料列表和知识库检索中移除");
+    expect(screen.getByRole("dialog")).toHaveTextContent("保留文件、版本及审核发布历史");
+    fireEvent.click(screen.getByRole("button", { name: "确认删除" }));
+
+    await waitFor(() => expect(mocks.deleteContent).toHaveBeenCalledWith("item-1", "version-1"));
+    expect(mocks.success).toHaveBeenCalledWith("已删除“建模标准”");
+  });
+
+  it("requires publish permission for reviewed content and blocks publishing content", async () => {
+    mocks.permissions = ["organize"];
+    render(<AdminManagedContentPage />);
+    await screen.findAllByText("建模标准");
+    expect(screen.queryByRole("button", { name: "删除" })).not.toBeInTheDocument();
+
+    mocks.permissions = ["publish"];
+    mocks.items.mockResolvedValue({
+      items: [{ ...item, lifecycle_status: "publishing" }],
+      total: 1,
+      status_counts: { publishing: 1 },
+    });
+    const { unmount } = render(<AdminManagedContentPage />);
+    await waitFor(() => expect(screen.getAllByRole("button", { name: "删除" })[0]).toBeDisabled());
+    expect(screen.getAllByRole("button", { name: "删除" })[0]).toHaveAttribute("title", "资料正在发布，暂时不能删除");
+    unmount();
+  });
+
+  it("keeps the delete dialog open with a recoverable conflict message", async () => {
+    mocks.permissions = ["publish"];
+    mocks.deleteContent.mockRejectedValue(new Error("资料版本已变化，请刷新后重试"));
+    render(<AdminManagedContentPage />);
+    await screen.findAllByText("建模标准");
+    fireEvent.click(screen.getAllByRole("button", { name: "删除" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "确认删除" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("资料版本已变化，请刷新后重试");
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 
   it("enables applicable bulk actions without mounting a new toolbar", async () => {
