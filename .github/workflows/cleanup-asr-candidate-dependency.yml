@@ -42,7 +42,6 @@ jobs:
       CANDIDATE_ID: ${{ inputs.candidate_id }}
       OPERATION: ${{ inputs.operation }}
       EXPECTED_SHA256: ${{ inputs.manifest_sha256 }}
-      REPORT_ROOT: ${{ runner.temp }}\asr-candidate-cleanup
       ASR_SERVICE_TOKEN: ${{ secrets.ASR_SERVICE_TOKEN }}
     steps:
       - uses: actions/checkout@v4
@@ -63,12 +62,13 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          New-Item -ItemType Directory -Path $env:REPORT_ROOT -Force | Out-Null
-          $manifest = Join-Path $env:REPORT_ROOT 'manifest.json'
+          $reportRoot = Join-Path $env:RUNNER_TEMP 'asr-candidate-cleanup'
+          New-Item -ItemType Directory -Path $reportRoot -Force | Out-Null
+          $manifest = Join-Path $reportRoot 'manifest.json'
           $common = @{ CandidateId=$env:CANDIDATE_ID; DataRoot=$env:ASR_DATA_ROOT; ProgramRoot=$env:ASR_PROGRAM_ROOT; BackupRoot=$env:ASR_BACKUP_ROOT; ManifestPath=$manifest; OperationId='${{ github.run_id }}' }
           if ($env:OPERATION -eq 'preview') {
             & .\scripts\cleanup-asr-candidate-dependency.ps1 -Mode Preview @common
-            (Get-FileHash -LiteralPath $manifest -Algorithm SHA256).Hash.ToLowerInvariant() | Set-Content (Join-Path $env:REPORT_ROOT 'manifest.sha256') -Encoding ascii
+            (Get-FileHash -LiteralPath $manifest -Algorithm SHA256).Hash.ToLowerInvariant() | Set-Content (Join-Path $reportRoot 'manifest.sha256') -Encoding ascii
             return
           }
           try {
