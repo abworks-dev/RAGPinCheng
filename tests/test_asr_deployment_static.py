@@ -197,10 +197,12 @@ def test_asr_deployment_preflight_is_manual_and_writes_only_runner_temp():
     assert "CompanionFasterWhisperRunId" in preflight
     assert "WhisperX preflight requires a qualified faster-whisper companion identity" in preflight
     assert "Companion faster-whisper runtime contract does not match the deployment source" in preflight
-    assert preflight.count("Copy-QualifiedFasterWhisperWheels") == 4
+    assert preflight.count("Copy-QualifiedFasterWhisperWheels") == 3
     assert preflight.count("Assert-QualifiedFasterWhisperWheels") == 2
     assert "companion_faster_whisper_runtime_contract_sha256" in workflow
     assert preflight.count("-DataRoot $DataRoot") == 2
+    assert '"qualified-faster-whisper-companion-wheel-seed"' in preflight
+    assert '$downloadArguments += @("--find-links", $qualifiedCompanionWheelSeed)' in preflight
     seed = preflight.index("-Destination $qualifiedWheelSeed")
     wheelhouse = preflight.index("-Destination $wheelhouse", seed)
     download = preflight.index('"-m", "pip", "download"', wheelhouse)
