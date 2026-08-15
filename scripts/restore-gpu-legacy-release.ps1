@@ -44,7 +44,24 @@ if ($null -ne $existingTask) {
 }
 $listener = Get-NetTCPConnection -LocalPort 8100 -State Listen -ErrorAction SilentlyContinue
 if ($null -ne $listener) {
-    throw "TCP 8100 is still occupied after stopping the existing GPU scheduled task"
+    foreach ($processId in @($listener | ForEach-Object { $_.OwningProcess } | Sort-Object -Unique)) {
+        $process = Get-CimInstance Win32_Process -Filter ("ProcessId={0}" -f $processId)
+        if (
+            $null -eq $process -or
+            [string]$process.CommandLine -notmatch '-m (?:services\.)?gpu_service\.app' -or
+            -not [string]::Equals([string]$process.ExecutablePath, $BasePython, [StringComparison]::OrdinalIgnoreCase)
+        ) {
+            throw "Refusing to stop an unexpected process listening on TCP 8100"
+        }
+        Stop-Process -Id $processId -Force
+    }
+    $listenerDeadline = [DateTimeOffset]::Now.AddSeconds(30)
+    do {
+        $listener = Get-NetTCPConnection -LocalPort 8100 -State Listen -ErrorAction SilentlyContinue
+        if ($null -eq $listener) { break }
+        Start-Sleep -Seconds 1
+    } while ([DateTimeOffset]::Now -lt $listenerDeadline)
+    if ($null -ne $listener) { throw "TCP 8100 did not close after stopping the owned GPU process" }
 }
 Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings | Out-Null
 Start-ScheduledTask -TaskName $taskName
