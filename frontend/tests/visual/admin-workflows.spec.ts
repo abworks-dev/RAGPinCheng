@@ -19,6 +19,12 @@ test.describe("资料库", () => {
     await expect(page.getByRole("heading", { name: "资料库" })).toBeVisible();
     await expectNoBodyOverflow(page);
     await expectInViewport(page.getByRole("button", { name: "刷新" }));
+    const rootFolder = page.getByRole("combobox", { name: "一级目录" });
+    await expect(rootFolder).toHaveValue("cat-company");
+    const switchedListing = page.waitForRequest((request) => request.method() === "GET" && request.url().includes("/api/admin/content/items-page") && request.url().includes("category_id=cat-project"));
+    await rootFolder.selectOption("cat-project");
+    await switchedListing;
+    await expect(page.getByText("上传到：04 项目资料")).toBeVisible();
     await page.getByRole("button", { name: "上传资料" }).scrollIntoViewIfNeeded();
     await expectInViewport(page.getByRole("button", { name: "上传资料" }));
     if (page.viewportSize()!.width === 390) await expectTouchTarget(page.getByRole("button", { name: "上传资料" }));
