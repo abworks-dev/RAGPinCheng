@@ -10,6 +10,39 @@ def read(relative: str) -> str:
     return (ROOT / relative).read_text(encoding="utf-8")
 
 
+def test_active_asr_restart_is_identity_bound_and_reversible():
+    script = read("scripts/restart-active-asr.ps1")
+    workflow = read(".github/workflows/restart-active-asr-production.yml")
+
+    assert 'ValidateSet("EnsureRunning", "RestoreStopped")' in script
+    assert '"release-state\\active.json"' in script
+    assert '"asr-active-release/1"' in script
+    assert "Read-AsrReleaseManifest" in script
+    assert 'status = "rollback-not-required"' in script
+    assert '[string]$actions[0].Execute -ne "powershell.exe"' in script
+    assert '[string]$actions[0].Arguments -ne $expectedArguments' in script
+    assert '[string]$task.Principal.UserId -ne "Administrator"' in script
+    assert '[string]$task.Principal.LogonType -ne "S4U"' in script
+    assert script.count("Start-ScheduledTask -TaskName $taskName") == 1
+    assert "Register-ScheduledTask" not in script
+    assert "Unregister-ScheduledTask" not in script
+    assert "ASR_SERVICE_ENABLED" not in script
+    assert "Write-AsrJsonAtomic" not in script
+    assert "Stop-Process" not in script
+    assert "Remove-Item" not in script
+
+    assert "name: Restart Active Windows ASR Production" in workflow
+    assert "confirm_restart" in workflow
+    assert "production-gpu-exclusive" in workflow
+    assert "scripts/verify_asr_from_ubuntu.py" in workflow
+    assert "restore-stopped-after-cross-node-failure" in workflow
+    assert "faster-whisper-large-v3-turbo-v1" in workflow
+    assert "funasr-sensevoice-small-v1" in workflow
+    assert "whisperx-large-v3-zh-align-v1" in workflow
+    assert "deploy-asr.ps1" not in workflow
+    assert "promote-asr-candidate.ps1" not in workflow
+
+
 def test_faster_whisper_production_admission_is_bound_to_runtime_contract_evidence():
     deploy = read("scripts/deploy-asr.ps1")
     evidence = read("scripts/faster-whisper-production-evidence.ps1")
