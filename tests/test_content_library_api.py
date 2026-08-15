@@ -187,6 +187,29 @@ def test_delete_draft_requires_organize_csrf_and_preserves_object(content_api):
         **_auth(sessions, "organizer"),
     ).status_code == 404
 
+    assert client.get("/api/admin/content/trash", **_auth(sessions, "organizer")).status_code == 403
+    trash = client.get("/api/admin/content/trash", **_auth(sessions, "reviewer"))
+    assert trash.status_code == 200
+    assert trash.json()["total"] == 1
+    assert trash.json()["items"][0]["archived_by_name"] == "整理员"
+    assert trash.json()["items"][0]["pre_archive_lifecycle_status"] == "draft"
+
+    restore_url = f"/api/admin/content/items/{uploaded['item_id']}/restore"
+    assert client.post(restore_url, json=body, **_auth(sessions, "organizer", csrf=True)).status_code == 403
+    restored = client.post(restore_url, json=body, **_auth(sessions, "reviewer", csrf=True))
+    assert restored.status_code == 200
+    assert restored.json()["restored_status"] == "draft"
+    listing = client.get("/api/admin/content/items-page", **_auth(sessions, "organizer"))
+    assert listing.json()["items"][0]["item_id"] == uploaded["item_id"]
+    assert client.get("/api/admin/content/trash", **_auth(sessions, "reviewer")).json()["total"] == 0
+    conn = connect(db_path)
+    try:
+        assert conn.execute(
+            "SELECT count(*) FROM content_audit_events WHERE event_type='content.restored'"
+        ).fetchone()[0] == 1
+    finally:
+        conn.close()
+
 
 def test_move_draft_requires_permission_and_preserves_version(content_api):
     client, sessions, _queued, db_path = content_api
@@ -376,7 +399,7 @@ def test_delete_rejects_active_publication(content_api):
         **_auth(sessions, "publisher", csrf=True),
     )
     assert response.status_code == 409
-    assert response.json()["detail"] == "资料正在发布，暂时不能删除"
+    assert response.json()["detail"] == "资料正在发布，暂时不能移入回收站"
 
 
 def test_category_update_uses_csrf_and_optimistic_version(content_api):
@@ -595,11 +618,21 @@ def test_bulk_actions_enforce_permissions_csrf_limits_and_unique_ids(content_api
     ).status_code == 422
 
 
-def test_managed_index_job_listing_exposes_business_labels(content_api):
-    client, sessions, _queued, _db_path = content_api
+def test_managed_index_job_listing_exposes_business_labels_and_filters(content_api):
+    client, sessions, _queued, db_path = content_api
+    conn = connect(db_path)
+    now = int(time.time())
+    conn.execute(
+        """INSERT INTO category_nodes
+           (id,category_key,parent_id,display_code,display_name,sort_order,level,is_active,created_at,updated_at)
+           VALUES ('cat-03-modeling','company_modeling','cat-03','01','建模标准',1,2,1,?,?)""",
+        (now, now),
+    )
+    conn.commit()
+    conn.close()
     upload = client.post(
         "/api/admin/content/uploads",
-        data={"category_id": "cat-03"},
+        data={"category_id": "cat-03-modeling"},
         files=[("files", ("indexed.md", b"# indexed", "text/markdown"))],
         **_auth(sessions, "organizer", csrf=True),
     ).json()["entries"][0]
@@ -613,23 +646,33 @@ def test_managed_index_job_listing_exposes_business_labels(content_api):
     assert result.json()["total"] == 1
     assert result.json()["jobs"][0]["original_filename"] == "indexed.md"
     assert result.json()["jobs"][0]["doc_type"] == "markdown"
-    assert result.json()["jobs"][0]["category_id"] == "cat-03"
-    assert result.json()["jobs"][0]["category_label"] == "03 公司内部标准"
+    assert result.json()["jobs"][0]["category_id"] == "cat-03-modeling"
+    assert result.json()["jobs"][0]["category_label"] == "01 建模标准"
+    assert result.json()["jobs"][0]["category_path"] == "03 公司内部标准 / 01 建模标准"
+    assert result.json()["jobs"][0]["version_number"] == 1
+    assert result.json()["jobs"][0]["file_size"] == len(b"# indexed")
+    assert result.json()["jobs"][0]["source_origin"] == "web"
+    assert result.json()["jobs"][0]["is_current_head"] is False
+    assert result.json()["jobs"][0]["is_latest_attempt"] is True
+    assert result.json()["jobs"][0]["parent_count"] is None
     assert result.json()["jobs"][0]["error_code"] is None
     assert result.json()["status_counts"] == {"processing": 1, "ready": 0, "failed": 0}
 
     filtered = client.get(
-        "/api/admin/content/index-jobs?query=indexed&category_id=cat-03&doc_type=markdown&status=processing",
+        "/api/admin/content/index-jobs?query=建模标准&category_id=cat-03-modeling&doc_type=markdown&source_origin=web&status=processing",
         **_auth(sessions, "publisher"),
     )
     assert filtered.status_code == 200
     assert filtered.json()["total"] == 1
     assert filtered.json()["jobs"][0]["original_filename"] == "indexed.md"
     assert client.get(
+        "/api/admin/content/index-jobs?source_origin=server", **_auth(sessions, "publisher")
+    ).json()["total"] == 0
+    assert client.get(
         "/api/admin/content/index-jobs?status=ready", **_auth(sessions, "publisher")
     ).json()["total"] == 0
 
-    conn = sqlite3.connect(_db_path)
+    conn = sqlite3.connect(db_path)
     conn.execute(
         "UPDATE content_index_jobs SET status='failed',error_code='ValueError',error_summary='legacy'"
     )
@@ -667,6 +710,8 @@ def test_managed_index_jobs_default_to_latest_attempt_and_allow_history(content_
 
     history = client.get("/api/admin/content/index-jobs?history=true", **_auth(sessions, "publisher")).json()
     assert history["total"] == 2
+    assert history["status_counts"] == {"processing": 1, "ready": 0, "failed": 0}
+    assert sum(job["is_latest_attempt"] for job in history["jobs"]) == 1
     failed = next(job for job in history["jobs"] if job["status"] == "failed")
     assert failed["failure"] == {
         "code": "pdf_password_required",
@@ -678,6 +723,62 @@ def test_managed_index_jobs_default_to_latest_attempt_and_allow_history(content_
     listing = client.get("/api/admin/content/items-page?lifecycle_status=publishing", **_auth(sessions, "publisher")).json()
     assert listing["items"][0]["publication_attempt_count"] == 2
     assert listing["items"][0]["publication_failure"] is None
+
+
+def test_managed_index_jobs_expose_current_head_parent_summary(content_api, monkeypatch):
+    client, sessions, _queued, db_path = content_api
+    upload = client.post(
+        "/api/admin/content/uploads",
+        data={"category_id": "cat-03"},
+        files=[("files", ("ready.md", b"# ready", "text/markdown"))],
+        **_auth(sessions, "organizer", csrf=True),
+    ).json()["entries"][0]
+    version_id = upload["version_id"]
+    client.post(f"/api/admin/content/versions/{version_id}/submit", json={}, **_auth(sessions, "organizer", csrf=True))
+    client.post(f"/api/admin/content/versions/{version_id}/review", json={"approved": True}, **_auth(sessions, "reviewer", csrf=True))
+    publication = client.post(
+        f"/api/admin/content/versions/{version_id}/publish",
+        json={},
+        **_auth(sessions, "publisher", csrf=True),
+    ).json()
+
+    conn = connect(db_path)
+    now = int(time.time())
+    conn.execute("UPDATE content_index_jobs SET status='done',finished_at=?,updated_at=? WHERE id=?", (now, now, publication["index_job_id"]))
+    conn.execute("UPDATE content_publications SET status='published',published_at=?,updated_at=? WHERE id=?", (now, now, publication["publication_id"]))
+    conn.execute("UPDATE content_versions SET lifecycle_status='published',updated_at=? WHERE id=?", (now, version_id))
+    conn.execute(
+        "INSERT INTO content_item_heads(item_id,current_version_id,publication_id,updated_at) VALUES (?,?,?,?)",
+        (upload["item_id"], version_id, publication["publication_id"], now),
+    )
+    conn.commit()
+    conn.close()
+
+    calls: list[list[str]] = []
+
+    def summaries(version_ids: list[str]):
+        calls.append(version_ids)
+        return {
+            version_id: routes_content.ManagedVersionIndexSummary(
+                parent_count=12,
+                preview_parent_id="parent-preview",
+            )
+        }
+
+    monkeypatch.setattr(routes_content, "list_managed_version_index_summaries", summaries)
+    listing = client.get("/api/admin/content/index-jobs", **_auth(sessions, "publisher")).json()
+    assert listing["status_counts"] == {"processing": 0, "ready": 1, "failed": 0}
+    assert listing["jobs"][0]["is_current_head"] is True
+    assert listing["jobs"][0]["parent_count"] == 12
+    assert listing["jobs"][0]["preview_parent_id"] == "parent-preview"
+
+    detail = client.get(
+        f"/api/admin/content/index-jobs/{publication['index_job_id']}",
+        **_auth(sessions, "publisher"),
+    ).json()
+    assert detail["category_path"] == "03 公司内部标准"
+    assert detail["parent_count"] == 12
+    assert calls == [[version_id], [version_id]]
 
 
 def test_legacy_index_monitoring_routes_are_not_exposed(content_api):

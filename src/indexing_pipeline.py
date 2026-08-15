@@ -31,6 +31,7 @@ from .config import (
     COLLECTION,
     DOCS_DIR,
     MINERU_API_KEY,
+    PARENTS_DB,
     PARSED_DIR,
     SECOND_LEVEL_CATEGORIES,
 )
@@ -504,6 +505,47 @@ class IndexedDocument:
     parent_count: int
     preview_parent_id: str | None
     media_id: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class ManagedVersionIndexSummary:
+    parent_count: int
+    preview_parent_id: str | None
+
+
+def list_managed_version_index_summaries(
+    version_ids: list[str],
+) -> dict[str, ManagedVersionIndexSummary]:
+    """Return one read-only Parent summary for each requested managed version."""
+    normalized = list(dict.fromkeys(version_id for version_id in version_ids if version_id))
+    if not normalized:
+        return {}
+    placeholders = ",".join("?" for _ in normalized)
+    try:
+        conn = sqlite3.connect(f"{PARENTS_DB.resolve().as_uri()}?mode=ro", uri=True)
+        try:
+            rows = conn.execute(
+                f"""
+                SELECT content_version_id, COUNT(*) AS parent_count,
+                       MIN(parent_id) AS preview_parent_id
+                FROM parents
+                WHERE content_version_id IN ({placeholders})
+                GROUP BY content_version_id
+                """,
+                normalized,
+            ).fetchall()
+        finally:
+            conn.close()
+    except (OSError, sqlite3.Error) as exc:
+        logger.warning("managed Parent summaries unavailable: %s", exc)
+        return {}
+    return {
+        str(row[0]): ManagedVersionIndexSummary(
+            parent_count=int(row[1]),
+            preview_parent_id=str(row[2]) if row[2] is not None else None,
+        )
+        for row in rows
+    }
 
 
 def list_indexed_documents() -> list[IndexedDocument]:

@@ -1,17 +1,19 @@
-import { RefreshCw, Search } from "lucide-react";
+import { Eye, RefreshCw, Rocket, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../../api/client";
 import { Badge } from "../../components/ui/badge";
-import { Button } from "../../components/ui/button";
+import { Button, buttonVariants } from "../../components/ui/button";
 import { Card, CardContent } from "../../components/ui/card";
 import { EmptyState } from "../../components/ui/empty-state";
 import { ErrorState } from "../../components/ui/error-state";
 import { Input } from "../../components/ui/input";
 import { LoadingState } from "../../components/ui/loading-state";
 import { Select } from "../../components/ui/select";
+import { toast } from "../../components/ui/toast";
+import { useAuth } from "../../context/AuthContext";
 import { cn } from "../../lib/utils";
 import type { ManagedCategory, ManagedIndexJob, ManagedIndexJobList } from "../../types";
-import { formatAdminDate } from "./admin-formatters";
+import { formatAdminDate, formatBytes } from "./admin-formatters";
 
 const PAGE_SIZE = 25;
 const ACTIVE_STATUSES = new Set([
@@ -52,7 +54,19 @@ function documentTypeLabel(docType: string | null): string {
   }[docType || ""] || docType || "未知";
 }
 
+function sourceOriginLabel(sourceOrigin: string | null): string {
+  return {
+    web: "网页上传",
+    server: "服务器导入",
+    legacy: "历史迁移",
+    transcription: "视频转录",
+  }[sourceOrigin || ""] || "其他来源";
+}
+
 export function AdminDocumentsPage() {
+  const { state } = useAuth();
+  const canPublish = state.status === "authed"
+    && (state.user.role === "admin" || state.user.content_permissions?.includes("publish"));
   const [listing, setListing] = useState<ManagedIndexJobList>(EMPTY_LIST);
   const [categories, setCategories] = useState<ManagedCategory[]>([]);
   const [loading, setLoading] = useState(true);
@@ -62,9 +76,11 @@ export function AdminDocumentsPage() {
   const [query, setQuery] = useState("");
   const [categoryId, setCategoryId] = useState("");
   const [docType, setDocType] = useState("");
+  const [sourceOrigin, setSourceOrigin] = useState("");
   const [status, setStatus] = useState<StatusFilter>("all");
   const [history, setHistory] = useState(false);
   const [page, setPage] = useState(0);
+  const [retryingJobId, setRetryingJobId] = useState<string | null>(null);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setQuery(searchInput.trim()), 250);
@@ -73,17 +89,18 @@ export function AdminDocumentsPage() {
 
   useEffect(() => {
     setPage(0);
-  }, [query, categoryId, docType, status, history]);
+  }, [query, categoryId, docType, sourceOrigin, status, history]);
 
   const params = useMemo(() => ({
     query: query || undefined,
     category_id: categoryId || undefined,
     doc_type: docType || undefined,
+    source_origin: sourceOrigin || undefined,
     status: status === "all" ? undefined : status,
     history,
     limit: PAGE_SIZE,
     offset: page * PAGE_SIZE,
-  }), [query, categoryId, docType, status, history, page]);
+  }), [query, categoryId, docType, sourceOrigin, status, history, page]);
 
   const load = useCallback(async (background = false) => {
     background ? setRefreshing(true) : setLoading(true);
@@ -118,14 +135,29 @@ export function AdminDocumentsPage() {
   const counts = listing.status_counts;
   const allCount = Object.values(counts).reduce((sum, value) => sum + value, 0);
   const pageCount = Math.max(1, Math.ceil(listing.total / PAGE_SIZE));
-  const hasFilters = Boolean(query || categoryId || docType || status !== "all");
+  const hasFilters = Boolean(query || categoryId || docType || sourceOrigin || status !== "all");
 
   const clearFilters = () => {
     setSearchInput("");
     setQuery("");
     setCategoryId("");
     setDocType("");
+    setSourceOrigin("");
     setStatus("all");
+  };
+
+  const retryPublication = async (job: ManagedIndexJob) => {
+    if (!canPublish || retryingJobId || job.status !== "failed" || !job.is_latest_attempt) return;
+    setRetryingJobId(job.id);
+    try {
+      await api.publishManagedContent(job.version_id);
+      toast.success("已重新加入发布队列");
+      await load(true);
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "重新发布失败");
+    } finally {
+      setRetryingJobId(null);
+    }
   };
 
   return (
@@ -134,10 +166,10 @@ export function AdminDocumentsPage() {
         <div>
           <p className="text-ui-xs font-medium text-muted-foreground">内容管理</p>
           <h1 id="admin-documents-title" className="mt-1 text-ui-2xl font-semibold text-foreground">
-            索引监控
+            索引任务
           </h1>
           <p className="mt-1 max-w-3xl text-ui-sm text-muted-foreground">
-            跟踪资料库的发布处理状态；资料整理、确认、发布和失败重试请在“资料库”完成。
+            跟踪资料版本的发布处理状态，并处理可重试的失败任务。
           </p>
         </div>
         <Button
@@ -160,7 +192,7 @@ export function AdminDocumentsPage() {
       )}
 
       <section className="grid grid-cols-2 gap-3 lg:grid-cols-4" aria-label="发布任务状态概览">
-        <SummaryCard label="全部任务" value={allCount} />
+        <SummaryCard label="发布版本" value={allCount} />
         <SummaryCard label="处理中" value={counts.processing || 0} />
         <SummaryCard label="已发布" value={counts.ready || 0} />
         <SummaryCard label="发布失败" value={counts.failed || 0} />
@@ -177,7 +209,7 @@ export function AdminDocumentsPage() {
           <p className="text-ui-xs tabular-nums text-muted-foreground">当前共 {listing.total} 条</p>
         </div>
 
-        <div className="grid gap-2 border-t border-border px-4 py-4 md:grid-cols-2 xl:grid-cols-[minmax(14rem,1fr)_minmax(11rem,14rem)_9rem_auto] xl:items-end sm:px-5">
+        <div className="grid gap-2 border-t border-border px-4 py-4 md:grid-cols-2 xl:grid-cols-[minmax(14rem,1fr)_minmax(11rem,14rem)_9rem_10rem_auto] xl:items-end sm:px-5">
           <label className="space-y-1 text-ui-xs text-muted-foreground md:col-span-2 xl:col-span-1">
             <span>搜索</span>
             <span className="relative block">
@@ -213,6 +245,16 @@ export function AdminDocumentsPage() {
               <option value="transcript">视频转写</option>
             </Select>
           </label>
+          <label className="space-y-1 text-ui-xs text-muted-foreground">
+            <span>来源</span>
+            <Select aria-label="按资料来源筛选" value={sourceOrigin} onChange={(event) => setSourceOrigin(event.target.value)}>
+              <option value="">全部来源</option>
+              <option value="web">网页上传</option>
+              <option value="server">服务器导入</option>
+              <option value="legacy">历史迁移</option>
+              <option value="transcription">视频转录</option>
+            </Select>
+          </label>
           <Button className="md:col-span-2 xl:col-span-1" variant="outline" onClick={clearFilters} disabled={!hasFilters}>清除筛选</Button>
         </div>
 
@@ -243,7 +285,13 @@ export function AdminDocumentsPage() {
             description={hasFilters ? "请调整搜索或筛选条件。" : "资料在资料库中发布后，处理状态会显示在这里。"}
           />
         ) : (
-          <ManagedJobsTable jobs={listing.jobs} history={history} />
+          <ManagedJobsTable
+            jobs={listing.jobs}
+            history={history}
+            retryingJobId={retryingJobId}
+            canPublish={Boolean(canPublish)}
+            onRetry={retryPublication}
+          />
         )}
 
         {!loading && listing.total > 0 && (
@@ -260,30 +308,51 @@ export function AdminDocumentsPage() {
   );
 }
 
-function ManagedJobsTable({ jobs, history }: { jobs: ManagedIndexJob[]; history: boolean }) {
+function ManagedJobsTable({
+  jobs,
+  history,
+  retryingJobId,
+  canPublish,
+  onRetry,
+}: {
+  jobs: ManagedIndexJob[];
+  history: boolean;
+  retryingJobId: string | null;
+  canPublish: boolean;
+  onRetry: (job: ManagedIndexJob) => void;
+}) {
   return (
-    <div className="border-t border-border">
-      <table className="block w-full text-ui-sm lg:table lg:min-w-[52rem]">
-        <caption className="sr-only">资料库发布任务、数据库分类、文件类型、状态和更新时间</caption>
+    <div className="overflow-x-auto border-t border-border">
+      <table className="block w-full text-ui-sm lg:table lg:min-w-[78rem]">
+        <caption className="sr-only">资料库发布任务、分类、类型、状态、内容块、来源、更新时间和操作</caption>
         <thead className="hidden border-b border-border bg-surface-muted text-left text-muted-foreground lg:table-header-group">
           <tr>
-            <th className="px-4 py-3 font-medium">资料</th>
-            <th className="px-4 py-3 font-medium">数据库分类</th>
-            <th className="px-4 py-3 font-medium">类型</th>
-            <th className="px-4 py-3 font-medium">状态</th>
-            <th className="px-4 py-3 font-medium">更新时间</th>
+            <th className="min-w-[18rem] px-4 py-3 font-medium">资料</th>
+            <th className="min-w-[12rem] px-4 py-3 font-medium">分类</th>
+            <th className="w-20 whitespace-nowrap px-4 py-3 font-medium">类型</th>
+            <th className="min-w-[16rem] px-4 py-3 font-medium">状态</th>
+            <th className="w-24 whitespace-nowrap px-4 py-3 font-medium">内容块</th>
+            <th className="w-28 whitespace-nowrap px-4 py-3 font-medium">来源</th>
+            <th className="min-w-[10rem] whitespace-nowrap px-4 py-3 font-medium">更新时间</th>
+            <th className="sticky right-0 w-32 whitespace-nowrap bg-surface-muted px-4 py-3 font-medium">操作</th>
           </tr>
         </thead>
         <tbody className="block divide-y divide-border lg:table-row-group">
           {jobs.map((job) => {
             const meta = STATUS_META[job.status] || { label: job.status, hint: "状态待确认", variant: "secondary" as const };
+            const statusHint = job.status === "done"
+              ? job.is_current_head ? "当前正式版本可检索" : "已发布历史版本"
+              : meta.hint;
+            const retrying = retryingJobId === job.id;
             return (
-              <tr key={job.id} className="grid grid-cols-2 gap-x-3 gap-y-3 p-4 transition-colors duration-normal hover:bg-surface-muted/60 lg:table-row lg:p-0">
+              <tr key={job.id} className="group grid grid-cols-2 gap-x-3 gap-y-3 p-4 transition-colors duration-normal hover:bg-surface-muted/60 lg:table-row lg:p-0">
                 <td className="col-span-2 block min-w-0 lg:table-cell lg:px-4 lg:py-3">
                   <p className="break-words font-medium text-foreground" title={job.title || job.original_filename || undefined}>
                     {job.title || job.original_filename || "未命名资料"}
                   </p>
-                  <p className="mt-1 break-all text-ui-xs text-muted-foreground">{job.original_filename || "—"}</p>
+                  <p className="mt-1 break-all text-ui-xs text-muted-foreground">
+                    {[job.original_filename || "—", job.version_number ? `v${job.version_number}` : null, job.file_size != null ? formatBytes(job.file_size) : null].filter(Boolean).join(" · ")}
+                  </p>
                   {job.attempt_count > 1 && (
                     <p className="mt-1 text-ui-xs text-muted-foreground">
                       共尝试 {job.attempt_count} 次{history ? ` · 当前第 ${job.attempt_number} 次` : ""}
@@ -291,24 +360,50 @@ function ManagedJobsTable({ jobs, history }: { jobs: ManagedIndexJob[]; history:
                   )}
                 </td>
                 <td className="block text-ui-xs text-muted-foreground lg:table-cell lg:px-4 lg:py-3 lg:text-ui-sm lg:text-foreground">
-                  <span className="lg:hidden">分类： </span>{job.category_label || "—"}
+                  <span className="lg:hidden">分类： </span>{job.category_path || job.category_label || "—"}
                 </td>
-                <td className="block text-right text-ui-xs text-muted-foreground lg:table-cell lg:px-4 lg:py-3 lg:text-left lg:text-ui-sm lg:text-foreground">
+                <td className="block text-right text-ui-xs text-muted-foreground lg:table-cell lg:whitespace-nowrap lg:px-4 lg:py-3 lg:text-left lg:text-ui-sm lg:text-foreground">
                   <span className="lg:hidden">类型： </span>{documentTypeLabel(job.doc_type)}
                 </td>
                 <td className="col-span-2 block lg:table-cell lg:px-4 lg:py-3">
                   <Badge variant={meta.variant}>{meta.label}</Badge>
-                  <p className="mt-1 text-ui-xs text-muted-foreground">{meta.hint}</p>
+                  <p className="mt-1 text-ui-xs text-muted-foreground">{statusHint}</p>
                   {job.failure && (
                     <div className="mt-2 max-w-md space-y-1 text-ui-xs">
                       <p className="break-words text-destructive">{job.failure.message}</p>
                       <p className="break-words text-muted-foreground">{job.failure.recommended_action}</p>
-                      <p className="text-muted-foreground">{job.failure.retryable ? "可在资料库重新发布" : "请先处理文件或系统配置"}</p>
+                      <p className="text-muted-foreground">{job.failure.retryable ? "可以重新发布" : "请先处理文件或系统配置"}</p>
                     </div>
                   )}
                 </td>
-                <td className="col-span-2 block text-ui-xs text-muted-foreground lg:table-cell lg:px-4 lg:py-3">
+                <td className="block text-ui-xs text-muted-foreground lg:table-cell lg:whitespace-nowrap lg:px-4 lg:py-3 lg:text-ui-sm lg:text-foreground">
+                  <span className="lg:hidden">内容块： </span>
+                  {job.status === "done" && job.is_current_head && job.parent_count != null ? `${job.parent_count} 个` : "—"}
+                </td>
+                <td className="block text-right text-ui-xs text-muted-foreground lg:table-cell lg:whitespace-nowrap lg:px-4 lg:py-3 lg:text-left lg:text-ui-sm lg:text-foreground">
+                  <span className="lg:hidden">来源： </span>{sourceOriginLabel(job.source_origin)}
+                </td>
+                <td className="col-span-2 block text-ui-xs text-muted-foreground lg:table-cell lg:whitespace-nowrap lg:px-4 lg:py-3">
                   <span className="lg:hidden">更新时间： </span>{formatAdminDate(job.updated_at)}
+                </td>
+                <td className="col-span-2 flex flex-wrap gap-2 lg:sticky lg:right-0 lg:table-cell lg:bg-background lg:px-4 lg:py-3 lg:group-hover:bg-surface-muted">
+                  <div className="flex flex-wrap gap-2 lg:flex-col lg:items-stretch">
+                    <a
+                      className={buttonVariants({ variant: "outline", size: "sm" })}
+                      href={api.managedContentFileUrl(job.version_id)}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      <Eye className="size-4" />
+                      查看文件
+                    </a>
+                    {canPublish && job.status === "failed" && job.is_latest_attempt && (
+                      <Button size="sm" disabled={Boolean(retryingJobId)} onClick={() => onRetry(job)}>
+                        <Rocket className={cn("size-4", retrying && "animate-pulse")} />
+                        {retrying ? "发布中…" : "重新发布"}
+                      </Button>
+                    )}
+                  </div>
                 </td>
               </tr>
             );

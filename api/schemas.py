@@ -302,6 +302,9 @@ class ManagedContentItemDTO(BaseModel):
     publication_failure: PublicationFailureDTO | None = None
     created_at: int
     updated_at: int
+    archived_at: int | None = None
+    archived_by_name: str | None = None
+    pre_archive_lifecycle_status: str | None = None
 
 
 class ManagedContentListResponse(BaseModel):
@@ -320,6 +323,16 @@ class DeleteManagedContentResponse(BaseModel):
     archived_at: int
     previous_status: str
     publication_withdrawn: bool
+
+
+class RestoreManagedContentRequest(BaseModel):
+    expected_version_id: str = Field(min_length=1, max_length=100)
+
+
+class RestoreManagedContentResponse(BaseModel):
+    item_id: str
+    version_id: str
+    restored_status: str
 
 
 class MoveManagedContentRequest(BaseModel):
@@ -402,6 +415,14 @@ class ManagedIndexJobDTO(BaseModel):
     doc_type: str | None = None
     category_id: str | None = None
     category_label: str | None = None
+    category_path: str | None = None
+    version_number: int | None = None
+    file_size: int | None = None
+    source_origin: str | None = None
+    is_current_head: bool = False
+    is_latest_attempt: bool = True
+    parent_count: int | None = None
+    preview_parent_id: str | None = None
 
 
 class ManagedIndexJobListResponse(BaseModel):

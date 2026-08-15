@@ -106,3 +106,12 @@ def test_inventory_classifies_candidate_release_and_active_references(tmp_path: 
     assert candidates["102"]["status"] == "rollback-referenced"
     assert candidates["103"]["status"] == "active-marker"
     assert candidates["broken"]["status"] == "unknown-name"
+    activation_audit = report["activation_audit"]
+    assert activation_audit["references"][0]["activation_id"] == "900"
+    assert activation_audit["references"][0]["candidate_ids"] == ["102", "101"]
+
+
+def test_inventory_workflow_uses_asr_activation_backup_root():
+    workflow = (ROOT / ".github" / "workflows" / "inventory-production-storage.yml").read_text(encoding="utf-8")
+    assert "PRODUCTION_ASR_BACKUP_ROOT" in workflow
+    assert "-AsrActivationBackupRoot" in workflow

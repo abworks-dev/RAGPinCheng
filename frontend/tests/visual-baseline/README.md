@@ -6,7 +6,7 @@
 
 - `login-*.png`、`register-*.png` 是早期匿名页面诊断截图，不属于 Playwright golden。
 - 管理后台资料工作流和分类设置截图基于 T4 `dcc0d306661a24435aac88bf13cbcf628e84776f` 及 768px 列表断点修复生成，已人工检查对象身份、状态、表单、操作可见性、遮挡和横向溢出，属于 accepted golden。
-- 索引监控保存整页和资料库发布任务区域两组 Windows golden；合成数据覆盖长文件名、处理中、已发布、发布失败和结构化失败原因，并按相同四个 viewport 检查桌面表格与窄屏对象列表。Linux 继续执行结构与布局检查，但新增精确像素基线须在 Linux Chromium 上人工接受后启用，不得复制 Windows 图片。
+- 索引任务保存整页和资料库发布任务区域两组 Windows golden；合成数据覆盖长文件名、处理中、已发布、发布失败、来源、内容块和结构化失败原因，并按相同四个 viewport 检查桌面表格与窄屏对象列表。Linux 继续执行结构与布局检查，但新增精确像素基线须在 Linux Chromium 上人工接受后启用，不得复制 Windows 图片。
 - Playwright golden 按 `<platform>/<project>/<spec>/<页面>-<状态>-<宽>x<高>.png` 保存。Windows 与 Linux 使用各自人工审查的精确像素基线，不使用跨平台容差。
 
 ## 固定环境

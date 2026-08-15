@@ -10,6 +10,7 @@ param(
     [string]$WhisperXRoot,
     [string]$RuntimeRoot,
     [string]$BackupDirectory,
+    [string]$AsrActivationBackupRoot,
     [string]$AsrModelCacheRoot,
     [string]$WhisperXCacheRoot,
     [string]$RunnerWorkRoot,
@@ -208,6 +209,29 @@ function Get-CandidateInventory {
     return @($items | Sort-Object candidate_id)
 }
 
+function Get-ActivationAudit {
+    param([string]$DataRoot, [string]$BackupRoot)
+    $result = [ordered]@{ status = 'not-configured'; active_candidate_id = ''; references = @() }
+    if ([string]::IsNullOrWhiteSpace($BackupRoot)) { return $result }
+    $result.status = 'measured'
+    $activePath = Join-Path $DataRoot 'release-state\active.json'
+    $active = Get-JsonFile -Path $activePath
+    if ($active -and ($active.PSObject.Properties.Name -contains 'candidate_id')) { $result.active_candidate_id = [string]$active.candidate_id }
+    if (-not (Test-Path -LiteralPath $BackupRoot -PathType Container)) { $result.status = 'missing'; return $result }
+    foreach ($statePath in @(Get-ChildItem -LiteralPath $BackupRoot -Filter 'candidate-activation-state.json' -File -Recurse -Force -ErrorAction SilentlyContinue)) {
+        $state = Get-JsonFile -Path $statePath.FullName
+        $activationId = Split-Path (Split-Path $statePath.FullName -Parent) -Leaf
+        $ids = @()
+        if ($state -and -not ($state.PSObject.Properties.Name -contains '__parse_error')) {
+            foreach ($propertyName in @('candidate_id', 'previous_candidate_id')) {
+                if ($state.PSObject.Properties.Name -contains $propertyName -and $state.$propertyName) { $ids += [string]$state.$propertyName }
+            }
+        }
+        $result.references += [ordered]@{ activation_id = $activationId; candidate_ids = @($ids); state_status = if ($state -and ($state.PSObject.Properties.Name -contains 'status')) { [string]$state.status } else { 'invalid-or-missing' } }
+    }
+    return $result
+}
+
 function Measure-RootBreakdown {
     param(
         [AllowEmptyString()][string]$Root,
@@ -321,7 +345,8 @@ $report = [ordered]@{
         }
     }
     dependency_runs = Measure-DependencyRuns -DataRoot $AsrDataRoot
-    candidates = Get-CandidateInventory -DataRoot $AsrDataRoot -ProgramRoot $AsrProgramRoot -BackupRoot $BackupDirectory
+    candidates = Get-CandidateInventory -DataRoot $AsrDataRoot -ProgramRoot $AsrProgramRoot -BackupRoot $(if ($AsrActivationBackupRoot) { $AsrActivationBackupRoot } else { $BackupDirectory })
+    activation_audit = Get-ActivationAudit -DataRoot $AsrDataRoot -BackupRoot $(if ($AsrActivationBackupRoot) { $AsrActivationBackupRoot } else { $BackupDirectory })
     docker = $docker
 }
 

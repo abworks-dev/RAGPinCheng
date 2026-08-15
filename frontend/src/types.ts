@@ -205,6 +205,9 @@ export type ManagedContentItem = {
   publication_failure: PublicationFailure | null;
   created_at: number;
   updated_at: number;
+  archived_at?: number | null;
+  archived_by_name?: string | null;
+  pre_archive_lifecycle_status?: string | null;
 };
 
 export type PublicationFailure = {
@@ -266,6 +269,14 @@ export type ManagedIndexJob = {
   doc_type: string | null;
   category_id: string | null;
   category_label: string | null;
+  category_path: string | null;
+  version_number: number | null;
+  file_size: number | null;
+  source_origin: string | null;
+  is_current_head: boolean;
+  is_latest_attempt: boolean;
+  parent_count: number | null;
+  preview_parent_id: string | null;
 };
 
 export type ManagedIndexJobList = {

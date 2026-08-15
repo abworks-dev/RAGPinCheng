@@ -2,9 +2,9 @@ import { expect, test } from "@playwright/test";
 import process from "node:process";
 import { installAdminRoutes } from "./fixtures/admin-fixtures";
 
-for (const [navigationLabel, heading, slug] of [["资料管理", "资料库", "managed-content"], ["分类管理", "分类设置", "categories"], ["索引任务", "索引监控", "index-monitor"]] as const) {
+for (const [navigationLabel, heading, slug] of [["资料管理", "资料库", "managed-content"], ["分类管理", "分类设置", "categories"], ["索引任务", "索引任务", "index-monitor"]] as const) {
   test(`${heading} accepted golden`, async ({ page }) => {
-    test.skip(heading === "索引监控" && process.platform !== "win32", "索引监控 Linux golden 尚未在 Linux Chromium 上人工接受");
+    test.skip(heading === "索引任务" && process.platform !== "win32", "索引任务 Linux golden 尚未在 Linux Chromium 上人工接受");
     await installAdminRoutes(page, "normal");
     await page.goto("/admin");
     if (page.viewportSize()!.width < 1024) {
@@ -36,7 +36,7 @@ test("资料库批量选择 accepted golden", async ({ page }) => {
   await expect(page).toHaveScreenshot(`managed-content-selected-${viewport.width}x${viewport.height}.png`);
 });
 
-test("资料库删除确认 accepted golden", async ({ page }) => {
+test("资料库移入回收站确认 accepted golden", async ({ page }) => {
   await installAdminRoutes(page, "normal");
   await page.goto("/admin");
   if (page.viewportSize()!.width < 1024) {
@@ -45,14 +45,14 @@ test("资料库删除确认 accepted golden", async ({ page }) => {
   await page.getByRole("button", { name: "资料管理", exact: true }).click();
   const title = page.getByText("建筑信息模型交付标准（合成长文件名用于响应式检查）", { exact: true }).filter({ visible: true });
   const item = page.viewportSize()!.width < 1024 ? title.locator("xpath=ancestor::li") : title.locator("xpath=ancestor::tr");
-  await item.getByRole("button", { name: "删除", exact: true }).click();
-  await expect(page.getByRole("dialog", { name: "删除资料" })).toBeVisible();
+  await item.getByRole("button", { name: "移至回收站", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "移至回收站" })).toBeVisible();
   const viewport = page.viewportSize()!;
   await expect(page).toHaveScreenshot(`managed-content-delete-confirm-${viewport.width}x${viewport.height}.png`);
 });
 
-test("索引监控任务区域 accepted golden", async ({ page }) => {
-  test.skip(process.platform !== "win32", "索引监控任务区域 Linux golden 尚未在 Linux Chromium 上人工接受");
+test("索引任务区域 accepted golden", async ({ page }) => {
+  test.skip(process.platform !== "win32", "索引任务区域 Linux golden 尚未在 Linux Chromium 上人工接受");
   await installAdminRoutes(page, "normal");
   await page.goto("/admin");
   if (page.viewportSize()!.width < 1024) {
