@@ -587,7 +587,6 @@ jobs:
           docs = mounts.get("/app/docs")
           assert docs is not None
           assert docs.get("Type") == "tmpfs"
-          assert docs.get("RW") is False
           assert mounts.get("/app/media", {}).get("Source") == os.environ["EXPECTED_MEDIA"]
           assert mounts.get("/app/content", {}).get("Source") == "/data/business/ragpincheng/content"
           assert all(not item.get("Source", "").startswith("/data/business/ragpincheng/source") for item in mounts.values())
@@ -603,6 +602,13 @@ jobs:
           assert DOCS_DIR == Path("/app/docs")
           assert MEDIA_DIR == Path("/app/media")
           assert TRANSCRIPTION_ARTIFACT_DIR == Path("/app/content/transcription-artifacts")
+          mount = next(
+              line for line in Path("/proc/self/mountinfo").read_text().splitlines()
+              if line.split(" - ", 1)[0].split()[4] == "/app/docs"
+          )
+          left, right = mount.split(" - ", 1)
+          assert right.split()[0] == "tmpfs"
+          assert "ro" in left.split()[5].split(",")
           PY
           }
 

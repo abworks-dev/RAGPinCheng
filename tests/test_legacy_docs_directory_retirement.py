@@ -26,7 +26,9 @@ def test_retirement_requires_empty_unmounted_path_and_has_rollback_metadata():
     for required in (
         'LEGACY_DOCS_DIR="/data/business/ragpincheng/content/legacy-docs"',
         'docs.get("Type") == "tmpfs"',
-        'docs.get("RW") is False',
+        'Path("/proc/self/mountinfo")',
+        'assert "ro" in left.split()[5].split(",")',
+        'retired legacy docs runtime path is writable',
         'find "${LEGACY_DOCS_DIR}" -mindepth 1 -print -quit',
         'findmnt -rn -S "${LEGACY_DOCS_DIR}"',
         'directory-metadata.txt',
