@@ -92,7 +92,8 @@ try {
             Write-Host "GPU_RESOLVER_MAINTENANCE status=validated-restore-rejected; attempting legacy restore"
             & (Join-Path $RepositoryPath "scripts\restore-gpu-legacy-release.ps1") `
                 -ReleaseRoot $currentReleaseRoot -RuntimeRoot $RuntimeRoot -GpuServiceToken $GpuServiceToken `
-                -GpuServiceUrl $env:GPU_SERVICE_URL -GpuServiceHost $env:GPU_SERVICE_HOST -BasePython $BasePython
+                -GpuServiceUrl $env:GPU_SERVICE_URL -GpuServiceHost $env:GPU_SERVICE_HOST -BasePython $BasePython `
+                -RepositoryPath $RepositoryPath -ModelCacheSource $ModelCacheSource
             if ($LASTEXITCODE -ne 0) { throw "GPU legacy production restore failed" }
         }
         Write-Host "GPU_RESOLVER_MAINTENANCE status=restored release=$currentReleaseRoot"

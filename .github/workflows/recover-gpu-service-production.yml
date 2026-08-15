@@ -32,6 +32,8 @@ jobs:
           BACKUP_DIR: ${{ vars.PRODUCTION_BACKUP_DIRECTORY }}
           GPU_SERVICE_URL: ${{ vars.GPU_SERVICE_URL }}
           GPU_SERVICE_HOST: ${{ vars.GPU_SERVICE_HOST }}
+          GPU_MODEL_CACHE_SOURCE: ${{ vars.GPU_MODEL_CACHE_SOURCE }}
+          GPU_BASE_PYTHON: ${{ vars.PRODUCTION_GPU_PYTHON_PATH }}
         run: |
           Set-StrictMode -Version Latest
           $ErrorActionPreference = "Stop"
@@ -46,9 +48,14 @@ jobs:
             throw "No validated current GPU release is recorded"
           }
           $current = Get-Content -LiteralPath $currentPath -Encoding UTF8 | ConvertFrom-Json
-          & "${env:REPO_PATH}\scripts\promote-gpu-runtime.ps1" `
-            -RepositoryPath $env:REPO_PATH `
-            -RuntimeRoot $env:RUNTIME_ROOT `
-            -BackupDirectory $env:BACKUP_DIR `
-            -ReleaseRoot ([string]$current.release_root) `
-            -GpuServiceToken $env:GPU_SERVICE_TOKEN
+          try {
+            & "${env:REPO_PATH}\scripts\promote-gpu-runtime.ps1" `
+              -RepositoryPath $env:REPO_PATH -RuntimeRoot $env:RUNTIME_ROOT -BackupDirectory $env:BACKUP_DIR `
+              -ReleaseRoot ([string]$current.release_root) -GpuServiceToken $env:GPU_SERVICE_TOKEN
+          } catch {
+            & "${env:REPO_PATH}\scripts\restore-gpu-legacy-release.ps1" `
+              -ReleaseRoot ([string]$current.release_root) -RuntimeRoot $env:RUNTIME_ROOT `
+              -GpuServiceToken $env:GPU_SERVICE_TOKEN -GpuServiceUrl $env:GPU_SERVICE_URL `
+              -GpuServiceHost $env:GPU_SERVICE_HOST -BasePython $env:GPU_BASE_PYTHON `
+              -RepositoryPath $env:REPO_PATH -ModelCacheSource $env:GPU_MODEL_CACHE_SOURCE
+          }
