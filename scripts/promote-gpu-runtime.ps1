@@ -25,10 +25,9 @@ if ($GpuServiceToken -match '[\r\n]') {
 
 function Get-TaskArguments {
     param([Parameter(Mandatory)][string]$TargetRelease)
-    $targetStartScript = Join-Path $TargetRelease "source\scripts\start-gpu-service.ps1"
-    $bootstrapLog = Join-Path $TargetRelease "gpu-service-bootstrap.log"
-    $command = "& '$targetStartScript' -ReleaseRoot '$TargetRelease' *> '$bootstrapLog'"
-    '-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "{0}"' -f $command
+    $taskWrapper = Join-Path $RepositoryPath "scripts\start-gpu-release-task.ps1"
+    '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -ReleaseRoot "{1}"' -f `
+        $taskWrapper, $TargetRelease
 }
 
 function Assert-OwnedTask {
@@ -36,7 +35,7 @@ function Assert-OwnedTask {
     $actions = @($Task.Actions)
     $arguments = if ($actions.Count -eq 1) { [string]$actions[0].Arguments } else { "" }
     $managedReleasePrefix = [IO.Path]::GetFullPath($RuntimeRoot).TrimEnd('\') + "\releases\"
-    $releaseRootMatch = [regex]::Match($arguments, "-ReleaseRoot\s+'(?<release>[^']+)'")
+    $releaseRootMatch = [regex]::Match($arguments, '-ReleaseRoot\s+"(?<release>[^"]+)"')
     $releaseTaskOwned = $releaseRootMatch.Success -and (
         $arguments -eq (Get-TaskArguments -TargetRelease $releaseRootMatch.Groups["release"].Value) -and
         ([IO.Path]::GetFullPath($releaseRootMatch.Groups["release"].Value) + '\').StartsWith(
