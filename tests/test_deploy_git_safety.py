@@ -413,6 +413,18 @@ class TestDeployGitSafety(unittest.TestCase):
             "${MEDIA_HOST_PATH:?MEDIA_HOST_PATH is required}:/app/media", overlay
         )
         self.assertNotIn("/data/business/ragpincheng/source", overlay)
+        self.assertIn("sanitize_source_decoupled_override.py", self.app_only_workflow)
+        compose_sanitizer_flags = (
+            "--no-interpolate --no-env-resolution --no-consistency --format json"
+        )
+        self.assertIn(compose_sanitizer_flags, self.app_only_workflow)
+        self.assertIn("export COMPOSE_OVERRIDE", self.app_only_workflow)
+        self.assertIn("sanitize_source_decoupled_override.py", self.linux)
+        self.assertIn(compose_sanitizer_flags, self.linux)
+        self.assertIn("export COMPOSE_OVERRIDE", self.linux)
+        self.assertIn("sanitize_source_decoupled_override.py", self.app_backup_recovery_workflow)
+        self.assertIn(compose_sanitizer_flags, self.app_backup_recovery_workflow)
+        self.assertIn("export COMPOSE_OVERRIDE", self.app_backup_recovery_workflow)
 
         self.assertLess(
             self.linux.index('-f "$COMPOSE_OVERRIDE"'),
