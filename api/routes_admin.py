@@ -716,7 +716,6 @@ async def upload_documents(
     return UploadResponse(accepted=accepted, skipped=skipped)
 
 
-@router.get("/index/jobs", response_model=IndexJobListResponse)
 def list_index_jobs(
     limit: int = Query(100, ge=1, le=1000),
     _admin: CurrentUser = Depends(require_admin),
@@ -734,7 +733,6 @@ def list_index_jobs(
     return IndexJobListResponse(jobs=[_job_row_to_dto(r) for r in rows])
 
 
-@router.post("/index/jobs/{job_id}/retry", response_model=IndexJobDTO)
 def retry_index_job(
     job_id: int,
     _admin: CurrentUser = Depends(require_csrf_admin),
@@ -766,7 +764,6 @@ def retry_index_job(
     return _job_row_to_dto(row)
 
 
-@router.delete("/index/jobs/{job_id}", status_code=204)
 def delete_index_job(
     job_id: int,
     _admin: CurrentUser = Depends(require_csrf_admin),
@@ -806,7 +803,6 @@ def _document_id(source_path: str) -> str:
     return hashlib.sha256(source_path.encode("utf-8")).hexdigest()[:24]
 
 
-@router.get("/index/documents", response_model=IndexedDocumentListResponse)
 def list_documents(
     query: str = Query("", max_length=200),
     category: str | None = Query(None, max_length=100),
@@ -948,7 +944,6 @@ def list_documents(
     )
 
 
-@router.delete("/index/documents", response_model=DeleteDocumentResponse)
 def delete_document(
     body: DeleteDocumentRequest,
     _admin: CurrentUser = Depends(require_csrf_admin),

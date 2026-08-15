@@ -166,65 +166,6 @@ export type AdminStats = {
   messages_7d: number;
 };
 
-export type IndexJob = {
-  id: number;
-  user_id: number | null;
-  employee_id: string | null;
-  real_name: string | null;
-  filename: string;
-  category: string;
-  doc_type: "pdf" | "transcript" | string;
-  source_path: string;
-  source_exists: boolean;
-  file_size: number;
-  status: "pending" | "parsing" | "chunking" | "summarizing" | "embedding" | "done" | "failed" | string;
-  error: string | null;
-  parents: number | null;
-  children: number | null;
-  created_at: number;
-  started_at: number | null;
-  finished_at: number | null;
-};
-
-export type IndexedDocument = {
-  document_id: string;
-  display_path: string;
-  filename: string;
-  doc_title: string;
-  category: string;
-  doc_type: string;
-  company: string | null;
-  parent_count: number;
-  preview_parent_id: string | null;
-  media_id: string | null;
-  child_count: number | null;
-  file_size: number | null;
-  status: string;
-  is_indexed: boolean;
-  latest_job_id: number | null;
-  error_summary: string | null;
-  uploaded_by: string | null;
-  created_at: number | null;
-  updated_at: number | null;
-};
-
-export type IndexedDocumentList = {
-  documents: IndexedDocument[];
-  total: number;
-  status_counts: Record<string, number>;
-};
-
-export type CategoryNode = {
-  name: string;
-  two_level: boolean;
-  subcategories: string[];
-};
-
-export type CategoryTree = {
-  categories: CategoryNode[];
-  second_level_categories: string[];
-};
-
 export type ManagedCategory = {
   id: string;
   category_key: string;
@@ -308,6 +249,8 @@ export type ManagedIndexJob = {
   updated_at: number;
   title: string | null;
   original_filename: string | null;
+  doc_type: string | null;
+  category_id: string | null;
   category_label: string | null;
 };
 

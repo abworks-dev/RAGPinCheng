@@ -92,7 +92,8 @@ const managedIndexJobs = [{
   error_summary: "文档解析服务请求失败，请稍后重试。",
   failure: { code: "parser_request_failed", message: "文档解析服务请求失败。", retryable: true, recommended_action: "请稍后重试；持续失败时联系系统管理员。" },
   attempt_count: 4, created_at: 1700000000, started_at: 1700000010, finished_at: 1700000020, updated_at: 1700000020,
-  title: "资料库发布失败的合成长文件名资料", original_filename: "managed-publication-failure-with-long-name.pdf", category_label: "03 公司内部标准",
+  title: "资料库发布失败的合成长文件名资料", original_filename: "managed-publication-failure-with-long-name.pdf",
+  doc_type: "pdf", category_id: "cat-03", category_label: "03 公司内部标准",
 }];
 
 const permissionUsers = [
@@ -155,7 +156,7 @@ export async function installAdminRoutes(
     }
     if (path === "/api/admin/content/index-jobs") {
       const jobs = scenario === "empty" ? [] : managedIndexJobs;
-      return json(route, { jobs, total: jobs.length, status_counts: jobs.length ? { failed: 1 } : {} });
+      return json(route, { jobs, total: jobs.length, status_counts: jobs.length ? { processing: 0, ready: 0, failed: 1 } : {} });
     }
     if (path === "/api/admin/content/permissions") {
       return json(route, scenario === "empty" ? [] : permissionUsers);
@@ -166,14 +167,6 @@ export async function installAdminRoutes(
     if (request.method() === "GET" && path === "/api/admin/index/category-tree") {
       return json(route, { categories: [{ name: "公司标准", two_level: false, subcategories: [] }, { name: "客户标准", two_level: true, subcategories: ["合成客户"] }, { name: "项目资料", two_level: false, subcategories: [] }], second_level_categories: ["客户标准"] });
     }
-    if (request.method() === "GET" && path === "/api/admin/index/documents") {
-      const documents = scenario === "empty" ? [] : indexedDocuments;
-      return json(route, { documents, total: documents.length, status_counts: scenario === "empty" ? {} : { ready: 1, processing: 1, failed: 1 } });
-    }
-    if (request.method() === "GET" && path === "/api/admin/index/jobs") {
-      return json(route, { jobs: scenario === "empty" ? [] : indexJobs });
-    }
-
     if (request.method() !== "GET" && path.startsWith("/api/admin/content/")) {
       await new Promise((resolve) => setTimeout(resolve, 800));
       if (path === "/api/admin/content/uploads") {
@@ -184,16 +177,6 @@ export async function installAdminRoutes(
       }
       return json(route, items[0]);
     }
-    if (request.method() === "POST" && /^\/api\/admin\/index\/jobs\/\d+\/retry$/.test(path)) {
-      await new Promise((resolve) => setTimeout(resolve, 800));
-      return json(route, indexJobs[0]);
-    }
-    if (request.method() === "DELETE" && (/^\/api\/admin\/index\/jobs\/\d+$/.test(path) || path === "/api/admin/index/documents")) {
-      return path.endsWith("documents")
-        ? json(route, { parents_deleted: 18, file_deleted: false, file_delete_status: "not_requested" })
-        : route.fulfill({ status: 204 });
-    }
-
     throw new Error(`Visual fixture has no route for ${request.method()} ${path}`);
   });
 }

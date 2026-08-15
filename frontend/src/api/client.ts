@@ -6,7 +6,6 @@ import type {
   AdminUser,
   ApiConfig,
   AuthUser,
-  CategoryTree,
   Conversation,
   ConversationState,
   ContentPermission,
@@ -14,8 +13,6 @@ import type {
   ContentPermissionUser,
   FeedbackPayload,
   Health,
-  IndexJob,
-  IndexedDocumentList,
   LlmHealth,
   MediaAsset,
   ManagedCategory,
@@ -239,78 +236,6 @@ export const api = {
       { method: "POST" },
     ),
 
-  // admin: indexing
-  adminCategoryTree: () =>
-    jsonFetch<CategoryTree>("/api/admin/index/category-tree"),
-  adminUploadDocuments: async (
-    files: File[],
-    category: string,
-    subcategory?: string,
-  ) => {
-    // FormData triggers multipart; we deliberately don't set content-type
-    // so the browser appends the multipart boundary itself. The CSRF
-    // header is still injected by rawFetch via the X-CSRF-Token branch.
-    const fd = new FormData();
-    for (const f of files) fd.append("files", f, f.name);
-    fd.append("category", category);
-    if (subcategory) fd.append("subcategory", subcategory);
-    const method = "POST";
-    const csrf = csrfToken;
-    const headers: Record<string, string> = {};
-    if (csrf) headers["X-CSRF-Token"] = csrf;
-    const res = await fetch("/api/admin/upload", {
-      method,
-      headers,
-      body: fd,
-      credentials: "include",
-    });
-    if (res.status === 401 && unauthorizedHandler) {
-      try { unauthorizedHandler(); } catch { /* noop */ }
-    }
-    if (!res.ok) {
-      const txt = await res.text().catch(() => "");
-      const detail = parseErrorDetail(txt);
-      throw new ApiError(res.status, txt, detail.message || `${res.status} ${res.statusText}`, detail.code, detail.retryable);
-    }
-    return (await res.json()) as {
-      accepted: IndexJob[];
-      skipped: { filename: string; reason: string }[];
-    };
-  },
-  adminListIndexJobs: (limit = 100) =>
-    jsonFetch<{ jobs: IndexJob[] }>(`/api/admin/index/jobs?limit=${limit}`),
-  adminRetryIndexJob: (id: number) =>
-    jsonFetch<IndexJob>(`/api/admin/index/jobs/${id}/retry`, { method: "POST" }),
-  adminDeleteIndexJob: (id: number) =>
-    jsonFetch<void>(`/api/admin/index/jobs/${id}`, { method: "DELETE" }),
-  adminListIndexedDocuments: (params?: {
-    query?: string;
-    category?: string;
-    doc_type?: string;
-    status?: string;
-    limit?: number;
-    offset?: number;
-  }) => {
-    const search = new URLSearchParams();
-    if (params?.query) search.set("query", params.query);
-    if (params?.category) search.set("category", params.category);
-    if (params?.doc_type) search.set("doc_type", params.doc_type);
-    if (params?.status) search.set("status", params.status);
-    if (params?.limit != null) search.set("limit", String(params.limit));
-    if (params?.offset != null) search.set("offset", String(params.offset));
-    const suffix = search.toString();
-    return jsonFetch<IndexedDocumentList>(`/api/admin/index/documents${suffix ? `?${suffix}` : ""}`);
-  },
-  adminDeleteIndexedDocument: (document_id: string, delete_file: boolean) =>
-    jsonFetch<{
-      parents_deleted: number;
-      file_deleted: boolean;
-      file_delete_status: "not_requested" | "deleted" | "missing" | "failed";
-    }>(
-      "/api/admin/index/documents",
-      { method: "DELETE", body: JSON.stringify({ document_id, delete_file }) },
-    ),
-
   // admin: managed content library
   managedContentCapabilities: () =>
     jsonFetch<{
@@ -442,8 +367,19 @@ export const api = {
     }),
   managedContentFileUrl: (versionId: string, download = false) =>
     `/api/admin/content/versions/${encodeURIComponent(versionId)}/file${download ? "?download=true" : ""}`,
-  managedContentIndexJobs: (params?: { status?: string; history?: boolean; limit?: number; offset?: number }) => {
+  managedContentIndexJobs: (params?: {
+    query?: string;
+    category_id?: string;
+    doc_type?: string;
+    status?: string;
+    history?: boolean;
+    limit?: number;
+    offset?: number;
+  }) => {
     const search = new URLSearchParams();
+    if (params?.query) search.set("query", params.query);
+    if (params?.category_id) search.set("category_id", params.category_id);
+    if (params?.doc_type) search.set("doc_type", params.doc_type);
     if (params?.status) search.set("status", params.status);
     if (params?.history) search.set("history", "true");
     if (params?.limit != null) search.set("limit", String(params.limit));

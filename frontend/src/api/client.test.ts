@@ -107,79 +107,24 @@ describe("api client", () => {
     );
   });
 
-  it("uploads documents as FormData without forcing Content-Type", async () => {
-    setCsrfToken("csrf-upload");
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ accepted: [], skipped: [] }));
-    vi.stubGlobal("fetch", fetchMock);
-    const file = new File(["document"], "规范.pdf", { type: "application/pdf" });
-
-    await api.adminUploadDocuments([file], "公司标准", "技术规范");
-
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("/api/admin/upload");
-    expect(init).toMatchObject({
-      method: "POST",
-      credentials: "include",
-      headers: { "X-CSRF-Token": "csrf-upload" },
-    });
-    expect(init.headers).not.toHaveProperty("content-type");
-    expect(init.headers).not.toHaveProperty("Content-Type");
-    expect(init.body).toBeInstanceOf(FormData);
-    const form = init.body as FormData;
-    expect(form.get("category")).toBe("公司标准");
-    expect(form.get("subcategory")).toBe("技术规范");
-    expect((form.get("files") as File).name).toBe("规范.pdf");
-  });
-
-  it("preserves retry and delete index-job requests", async () => {
-    setCsrfToken("csrf-jobs");
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(jsonResponse({ id: 12, status: "pending" }))
-      .mockResolvedValueOnce(new Response(null, { status: 204 }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    await api.adminRetryIndexJob(12);
-    await api.adminDeleteIndexJob(12);
-
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      1,
-      "/api/admin/index/jobs/12/retry",
-      expect.objectContaining({
-        method: "POST",
-        credentials: "include",
-        headers: { "X-CSRF-Token": "csrf-jobs" },
-      }),
-    );
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
-      "/api/admin/index/jobs/12",
-      expect.objectContaining({
-        method: "DELETE",
-        credentials: "include",
-        headers: { "X-CSRF-Token": "csrf-jobs" },
-      }),
-    );
-  });
-
-  it("serializes document lifecycle filters for server-side pagination", async () => {
+  it("serializes managed publication task filters for server-side pagination", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
-      jsonResponse({ documents: [], total: 0, status_counts: {} }),
+      jsonResponse({ jobs: [], total: 0, status_counts: {} }),
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    await api.adminListIndexedDocuments({
+    await api.managedContentIndexJobs({
       query: "施工 标准",
-      category: "公司标准",
+      category_id: "cat-03",
       doc_type: "pdf",
-      status: "failed",
+      status: "processing",
+      history: true,
       limit: 25,
       offset: 50,
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/admin/index/documents?query=%E6%96%BD%E5%B7%A5+%E6%A0%87%E5%87%86&category=%E5%85%AC%E5%8F%B8%E6%A0%87%E5%87%86&doc_type=pdf&status=failed&limit=25&offset=50",
+      "/api/admin/content/index-jobs?query=%E6%96%BD%E5%B7%A5+%E6%A0%87%E5%87%86&category_id=cat-03&doc_type=pdf&status=processing&history=true&limit=25&offset=50",
       expect.objectContaining({ credentials: "include", headers: {} }),
     );
   });

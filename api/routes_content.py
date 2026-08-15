@@ -557,48 +557,75 @@ def get_content_index_job(
 
 @router.get("/index-jobs", response_model=ManagedIndexJobListResponse)
 def list_content_index_jobs(
-    status: str | None = None,
+    query: str = Query("", max_length=200),
+    category_id: str | None = Query(None, max_length=100),
+    doc_type: str | None = Query(None, max_length=50),
+    status: str | None = Query(None, max_length=50),
     history: bool = False,
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
     _user: CurrentUser = Depends(require_any_content_permission(_CONTENT_READ)),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> ManagedIndexJobListResponse:
-    clauses: list[str] = []
-    params: list[object] = []
-    if status:
-        clauses.append("j.status=?")
-        params.append(status)
-    if not history:
-        clauses.append(
-            "j.id=(SELECT j2.id FROM content_index_jobs j2 WHERE j2.version_id=j.version_id "
-            "ORDER BY j2.attempt_number DESC,j2.created_at DESC,j2.id DESC LIMIT 1)"
-        )
-    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     base = """ FROM content_index_jobs j
                JOIN content_versions v ON v.id=j.version_id
                JOIN content_items i ON i.id=v.item_id
                JOIN category_nodes c ON c.id=i.category_id"""
+    scope_clauses: list[str] = []
+    scope_params: list[object] = []
+    if not history:
+        scope_clauses.append(
+            "j.id=(SELECT j2.id FROM content_index_jobs j2 WHERE j2.version_id=j.version_id "
+            "ORDER BY j2.attempt_number DESC,j2.created_at DESC,j2.id DESC LIMIT 1)"
+        )
+    normalized_query = query.strip()
+    if normalized_query:
+        scope_clauses.append(
+            "instr(lower(i.title || ' ' || v.original_filename || ' ' || "
+            "c.display_code || ' ' || c.display_name), lower(?)) > 0"
+        )
+        scope_params.append(normalized_query)
+    if category_id:
+        scope_clauses.append("i.category_id=?")
+        scope_params.append(category_id)
+    if doc_type:
+        scope_clauses.append("v.doc_type=?")
+        scope_params.append(doc_type)
+
+    scope_where = f"WHERE {' AND '.join(scope_clauses)}" if scope_clauses else ""
+    count_rows = conn.execute(
+        "SELECT j.status,count(*)" + base + f" {scope_where} GROUP BY j.status",
+        scope_params,
+    ).fetchall()
+    counts = {"processing": 0, "ready": 0, "failed": 0}
+    active_statuses = {
+        "pending", "uploading", "queued_mineru", "parsing", "chunking", "summarizing", "embedding"
+    }
+    for row in count_rows:
+        raw_status, count = str(row[0]), int(row[1])
+        group = "processing" if raw_status in active_statuses else "ready" if raw_status == "done" else raw_status
+        counts[group] = counts.get(group, 0) + count
+
+    clauses = list(scope_clauses)
+    params = list(scope_params)
+    if status == "processing":
+        placeholders = ",".join("?" for _ in active_statuses)
+        clauses.append(f"j.status IN ({placeholders})")
+        params.extend(sorted(active_statuses))
+    elif status == "ready":
+        clauses.append("j.status='done'")
+    elif status:
+        clauses.append("j.status=?")
+        params.append(status)
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     rows = conn.execute(
-        """SELECT j.*,i.title,v.original_filename,
+        """SELECT j.*,i.title,v.original_filename,v.doc_type,i.category_id,
                   (SELECT count(*) FROM content_index_jobs jc WHERE jc.version_id=j.version_id) AS attempt_count,
                   c.display_code || ' ' || c.display_name AS category_label""" + base +
         f" {where} ORDER BY j.created_at DESC,j.id LIMIT ? OFFSET ?",
         [*params, limit, offset],
     ).fetchall()
     total = int(conn.execute("SELECT count(*)" + base + f" {where}", params).fetchone()[0])
-    count_where = ""
-    if not history:
-        count_where = (
-            " WHERE j.id=(SELECT j2.id FROM content_index_jobs j2 WHERE j2.version_id=j.version_id "
-            "ORDER BY j2.attempt_number DESC,j2.created_at DESC,j2.id DESC LIMIT 1)"
-        )
-    counts = {
-        str(row[0]): int(row[1])
-        for row in conn.execute(
-            "SELECT j.status,count(*)" + base + count_where + " GROUP BY j.status"
-        ).fetchall()
-    }
     return ManagedIndexJobListResponse(
         jobs=[ManagedIndexJobDTO(
             id=row["id"], publication_id=row["publication_id"], version_id=row["version_id"],
@@ -607,7 +634,8 @@ def list_content_index_jobs(
             error_summary=row["error_summary"], failure=failure_detail(row["error_code"]),
             attempt_count=row["attempt_count"], created_at=row["created_at"],
             started_at=row["started_at"], finished_at=row["finished_at"], updated_at=row["updated_at"],
-            title=row["title"], original_filename=row["original_filename"], category_label=row["category_label"],
+            title=row["title"], original_filename=row["original_filename"], doc_type=row["doc_type"],
+            category_id=row["category_id"], category_label=row["category_label"],
         ) for row in rows],
         total=total,
         status_counts=counts,
