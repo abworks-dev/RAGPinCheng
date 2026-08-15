@@ -2,8 +2,8 @@ import { expect, test } from "@playwright/test";
 import { installAdminRoutes, type AdminScenario } from "./fixtures/admin-fixtures";
 import { expectInViewport, expectNoBodyOverflow, expectTouchTarget } from "./helpers/layout";
 
-async function openTab(page: Parameters<typeof installAdminRoutes>[0], label: string, scenario: AdminScenario = "normal") {
-  await installAdminRoutes(page, scenario);
+async function openTab(page: Parameters<typeof installAdminRoutes>[0], label: string, scenario: AdminScenario = "normal", workspaceUser: "admin" | "bim_engineer" | "member" = "admin", options: { includeChildFolder?: boolean; includeFolderRequest?: boolean } = {}) {
+  await installAdminRoutes(page, scenario, workspaceUser, undefined, options);
   await page.goto("/admin");
   if (page.viewportSize()!.width < 1024) {
     const mobileNavigation = page.getByRole("button", { name: "展开管理功能" });
@@ -19,6 +19,7 @@ test.describe("资料库", () => {
     await expect(page.getByRole("heading", { name: "资料库" })).toBeVisible();
     await expectNoBodyOverflow(page);
     await expectInViewport(page.getByRole("button", { name: "刷新" }));
+    await page.getByRole("button", { name: "上传资料" }).scrollIntoViewIfNeeded();
     await expectInViewport(page.getByRole("button", { name: "上传资料" }));
     if (page.viewportSize()!.width === 390) await expectTouchTarget(page.getByRole("button", { name: "上传资料" }));
     await expect(page.getByRole("combobox", { name: "状态", exact: true })).toHaveValue("");
@@ -65,11 +66,46 @@ test.describe("资料库", () => {
 
   test("upload exposes a stable busy state", async ({ page }) => {
     await openTab(page, "资料管理");
-    await page.getByLabel("选择资料文件").setInputFiles({ name: "synthetic.pdf", mimeType: "application/pdf", buffer: Buffer.from("synthetic fixture") });
+    await page.getByLabel("选择资料文件", { exact: true }).setInputFiles({ name: "synthetic.pdf", mimeType: "application/pdf", buffer: Buffer.from("synthetic fixture") });
     const upload = page.getByRole("button", { name: "上传资料" });
     await upload.click();
     await expect(upload).toBeDisabled();
     await expectNoBodyOverflow(page);
+  });
+
+  test("folder request and review controls stay contained", async ({ page }) => {
+    await openTab(page, "资料管理", "normal", "bim_engineer");
+    await page.getByRole("button", { name: "申请文件夹" }).click();
+    const dialog = page.getByRole("dialog", { name: "申请新建文件夹" });
+    await expect(dialog).toBeVisible();
+    await expectInViewport(dialog.getByRole("button", { name: "提交申请" }));
+    await expectNoBodyOverflow(page);
+
+    await page.reload();
+    await installAdminRoutes(page, "normal", "admin", undefined, { includeFolderRequest: true });
+    await page.goto("/admin");
+    if (page.viewportSize()!.width < 1024) {
+      await page.getByRole("button", { name: "展开管理功能" }).click();
+    }
+    await page.getByRole("button", { name: "资料管理", exact: true }).click();
+    await expect(page.getByText("待处理目录申请")).toBeVisible();
+    await expect(page.getByText("审核标准", { exact: true })).toBeVisible();
+    await expectNoBodyOverflow(page);
+  });
+
+  test("desktop rows can be dragged into a child folder", async ({ page }) => {
+    test.skip(page.viewportSize()!.width < 1024, "桌面增强只在桌面表格中启用");
+    await openTab(page, "资料管理", "normal", "admin", { includeChildFolder: true });
+    const row = page.getByTitle("拖动到上方文件夹可移动资料").first();
+    const folder = page.getByRole("button", { name: /01 建模标准/ });
+    await expect(row).toBeVisible();
+    await expect(folder).toBeVisible();
+    await row.dispatchEvent("dragstart");
+    await expect(folder).toHaveClass(/border-primary/);
+    const requestPromise = page.waitForRequest((request) => request.method() === "POST" && request.url().includes("/move"));
+    await folder.dispatchEvent("dragover");
+    await folder.dispatchEvent("drop");
+    await requestPromise;
   });
 
   test("publication failure stays readable and actionable", async ({ page }) => {

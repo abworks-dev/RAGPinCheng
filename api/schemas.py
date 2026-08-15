@@ -322,6 +322,35 @@ class DeleteManagedContentResponse(BaseModel):
     publication_withdrawn: bool
 
 
+class MoveManagedContentRequest(BaseModel):
+    target_category_id: str = Field(min_length=1, max_length=100)
+    expected_version_id: str = Field(min_length=1, max_length=100)
+
+
+class CreateFolderRequest(BaseModel):
+    parent_category_id: str = Field(min_length=1, max_length=100)
+    display_name: str = Field(min_length=1, max_length=100)
+
+
+class ReviewFolderRequest(BaseModel):
+    approved: bool
+    note: str | None = Field(default=None, max_length=1000)
+
+
+class FolderRequestDTO(BaseModel):
+    id: str
+    parent_category_id: str
+    parent_label: str = ""
+    display_name: str
+    status: Literal["pending", "approved", "rejected"]
+    requester_name: str | None = None
+    review_note: str | None = None
+    created_category_id: str | None = None
+    created_at: int
+    updated_at: int
+    reviewed_at: int | None = None
+
+
 class BulkManagedContentRequest(BaseModel):
     version_ids: list[str] = Field(min_length=1, max_length=20)
     approved: bool | None = None

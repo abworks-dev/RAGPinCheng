@@ -394,6 +394,27 @@ CONTENT_PERMISSION_GROUP_STATEMENTS = (
        ('permission-group-system-admin','import_server')""",
 )
 
+CONTENT_FOLDER_REQUEST_STATEMENTS = (
+    """CREATE TABLE content_folder_requests (
+        id TEXT PRIMARY KEY,
+        parent_category_id TEXT NOT NULL REFERENCES category_nodes(id) ON DELETE RESTRICT,
+        display_name TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('pending','approved','rejected')),
+        requested_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        reviewed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        review_note TEXT,
+        created_category_id TEXT REFERENCES category_nodes(id) ON DELETE RESTRICT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        reviewed_at INTEGER
+    )""",
+    """CREATE INDEX idx_content_folder_requests_status_created
+       ON content_folder_requests(status, created_at DESC)""",
+    """CREATE UNIQUE INDEX uq_content_folder_requests_pending
+       ON content_folder_requests(parent_category_id, display_name)
+       WHERE status='pending'""",
+)
+
 MIGRATIONS = (
     Migration(1, "multi_engine_transcription_phase2", PHASE2_STATEMENTS),
     Migration(2, "answer_regeneration_versions", ANSWER_VERSION_STATEMENTS),
@@ -401,6 +422,7 @@ MIGRATIONS = (
     Migration(4, "user_question_edit_versions", USER_QUESTION_VERSION_STATEMENTS),
     Migration(5, "managed_content_library", CONTENT_LIBRARY_STATEMENTS),
     Migration(6, "content_permission_groups", CONTENT_PERMISSION_GROUP_STATEMENTS),
+    Migration(7, "content_folder_requests", CONTENT_FOLDER_REQUEST_STATEMENTS),
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 PHASE2_TABLES = frozenset(
@@ -438,6 +460,7 @@ CONTENT_LIBRARY_TABLES = frozenset(
 CONTENT_PERMISSION_GROUP_TABLES = frozenset(
     {"content_permission_groups", "content_permission_group_items"}
 )
+CONTENT_FOLDER_REQUEST_TABLES = frozenset({"content_folder_requests"})
 SYSTEM_CONTENT_PERMISSION_GROUPS = {
     "member": ("普通成员", frozenset()),
     "bim_engineer": ("BIM工程师", frozenset({"organize"})),
@@ -545,6 +568,8 @@ def has_pending_ddl(path: Path, *, base_tables: frozenset[str]) -> bool:
             validate_system_content_permission_groups(conn)
         finally:
             conn.close()
+    if any(version == 7 for version, _name in applied) and not CONTENT_FOLDER_REQUEST_TABLES.issubset(tables):
+        raise RuntimeError("migration_schema_mismatch")
     if not base_tables.issubset(tables):
         return True
     if "index_jobs" in tables and "media_id" not in index_columns:
@@ -597,6 +622,8 @@ def apply_all(conn: sqlite3.Connection, *, base_schema: str, applied_at: int) ->
         if not CONTENT_LIBRARY_TABLES.issubset(tables):
             raise RuntimeError("migration_schema_mismatch")
         if not CONTENT_PERMISSION_GROUP_TABLES.issubset(tables):
+            raise RuntimeError("migration_schema_mismatch")
+        if not CONTENT_FOLDER_REQUEST_TABLES.issubset(tables):
             raise RuntimeError("migration_schema_mismatch")
         validate_system_content_permission_groups(conn)
         if conn.execute("PRAGMA foreign_key_check").fetchone() is not None:

@@ -24,6 +24,12 @@ export const categories = [
   { id: "cat-archive", category_key: "archived", parent_id: null, display_code: "99", display_name: "待确认资料", sort_order: 90, level: 1, is_active: false, version: 1, created_at: 1700000000, updated_at: 1700000000, full_path: "99 待确认资料", item_count: 0 },
 ];
 
+const folderRequests = [{
+  id: "folder-request-1", parent_category_id: "cat-company", parent_label: "03 公司内部标准",
+  display_name: "审核标准", status: "pending", requester_name: "合成资料员", review_note: null,
+  created_category_id: null, created_at: 1700000000, updated_at: 1700000000, reviewed_at: null,
+}];
+
 export const items = [
   ["draft", "建筑信息模型交付标准（合成长文件名用于响应式检查）.pdf"],
   ["awaiting_review", "机电专业协同检查清单.docx"],
@@ -118,6 +124,7 @@ export async function installAdminRoutes(
   scenario: AdminScenario = "normal",
   workspaceUser: WorkspaceUser = "admin",
   currentUser: () => typeof admin = () => workspaceUsers[workspaceUser],
+  options: { includeChildFolder?: boolean; includeFolderRequest?: boolean } = {},
 ) {
   await page.route("**/api/**", async (route) => {
     const request = route.request();
@@ -148,11 +155,15 @@ export async function installAdminRoutes(
       return json(route, { enabled: scenario !== "disabled", max_upload_bytes: 10_000_000, supported_extensions: [".pdf", ".md", ".docx", ".xlsx", ".pptx"] });
     }
     if (path === "/api/admin/content/categories") {
-      return json(route, scenario === "empty" ? [] : categories);
+      const childFolder = { id: "cat-company-modeling", category_key: "company_modeling", parent_id: "cat-company", display_code: "01", display_name: "建模标准", sort_order: 10, level: 2, is_active: true, version: 1, created_at: 1700000000, updated_at: 1700000000, full_path: "03 公司内部标准 / 01 建模标准", item_count: 0 };
+      return json(route, scenario === "empty" ? [] : options.includeChildFolder ? [...categories, childFolder] : categories);
     }
     if (path === "/api/admin/content/items-page") {
       const rows = scenario === "empty" ? [] : items.map((item) => item.lifecycle_status === "publication_failed" && scenario === "publication_failure" ? { ...item, latest_publication_status: "failed", publication_attempt_count: 4, publication_failure: { code: "pdf_password_required", message: "PDF 需要密码才能解析。", retryable: false, recommended_action: "请上传已解除密码保护的 PDF。" } } : item);
       return json(route, { items: rows, total: rows.length, status_counts: rows.reduce<Record<string, number>>((counts, item) => ({ ...counts, [item.lifecycle_status]: (counts[item.lifecycle_status] || 0) + 1 }), {}) });
+    }
+    if (path === "/api/admin/content/folder-requests") {
+      return json(route, options.includeFolderRequest ? folderRequests : []);
     }
     if (path === "/api/admin/content/index-jobs") {
       const jobs = scenario === "empty" ? [] : managedIndexJobs;

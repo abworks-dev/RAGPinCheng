@@ -8,6 +8,11 @@ const mocks = vi.hoisted(() => ({
   categories: vi.fn(),
   items: vi.fn(),
   upload: vi.fn(),
+  createCategory: vi.fn(),
+  moveContent: vi.fn(),
+  folderRequests: vi.fn(),
+  createFolderRequest: vi.fn(),
+  reviewFolderRequest: vi.fn(),
   submit: vi.fn(),
   review: vi.fn(),
   publish: vi.fn(),
@@ -41,6 +46,11 @@ vi.mock("../../api/client", () => ({
     managedCategories: mocks.categories,
     managedContentItems: mocks.items,
     uploadManagedContent: mocks.upload,
+    createManagedCategory: mocks.createCategory,
+    moveManagedContent: mocks.moveContent,
+    managedFolderRequests: mocks.folderRequests,
+    createFolderRequest: mocks.createFolderRequest,
+    reviewFolderRequest: mocks.reviewFolderRequest,
     submitManagedContent: mocks.submit,
     reviewManagedContent: mocks.review,
     publishManagedContent: mocks.publish,
@@ -69,6 +79,18 @@ const category = {
   updated_at: 1,
   full_path: "03 公司内部标准",
   item_count: 1,
+};
+
+const childCategory = {
+  ...category,
+  id: "cat-03-01",
+  category_key: "company_modeling",
+  parent_id: "cat-03",
+  display_code: "01",
+  display_name: "建模标准",
+  level: 2,
+  full_path: "03 公司内部标准 / 01 建模标准",
+  item_count: 0,
 };
 
 const item = {
@@ -103,6 +125,7 @@ describe("AdminManagedContentPage", () => {
     mocks.capabilities.mockResolvedValue({ enabled: true, max_upload_bytes: 1024, supported_extensions: [".pdf"] });
     mocks.categories.mockResolvedValue([category]);
     mocks.items.mockResolvedValue({ items: [item], total: 1, status_counts: { awaiting_review: 1 } });
+    mocks.folderRequests.mockResolvedValue([]);
     mocks.review.mockResolvedValue({ ...item, lifecycle_status: "approved" });
     mocks.deleteContent.mockResolvedValue({ item_id: "item-1", version_id: "version-1", archived_at: 2, previous_status: "awaiting_review", publication_withdrawn: false });
   });
@@ -208,6 +231,81 @@ describe("AdminManagedContentPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "上传资料" }));
     await waitFor(() => expect(mocks.upload).toHaveBeenCalledWith([file], "cat-03"));
     expect(await screen.findByText("已接收")).toBeInTheDocument();
+  });
+
+  it("navigates into a child folder and uploads to the current folder", async () => {
+    mocks.permissions = ["organize"];
+    mocks.categories.mockResolvedValue([category, childCategory]);
+    mocks.upload.mockResolvedValue({ batch_id: "batch-folder", entries: [] });
+    render(<AdminManagedContentPage />);
+    const folderButtons = await screen.findAllByRole("button", { name: /01 建模标准/ });
+    fireEvent.click(folderButtons[0]);
+    await waitFor(() => expect(mocks.items).toHaveBeenCalledWith(expect.objectContaining({ category_id: "cat-03-01" })));
+    const file = new File(["# Folder"], "folder.md", { type: "text/markdown" });
+    fireEvent.change(screen.getByLabelText("选择资料文件"), { target: { files: [file] } });
+    fireEvent.click(screen.getByRole("button", { name: "上传资料" }));
+    await waitFor(() => expect(mocks.upload).toHaveBeenCalledWith([file], "cat-03-01"));
+  });
+
+  it("lets a category manager create a controlled child folder", async () => {
+    mocks.permissions = ["manage_categories"];
+    mocks.createCategory.mockResolvedValue(childCategory);
+    render(<AdminManagedContentPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "新建文件夹" }));
+    fireEvent.change(screen.getByLabelText("文件夹名称"), { target: { value: "审核标准" } });
+    fireEvent.click(screen.getByRole("button", { name: "创建" }));
+    await waitFor(() => expect(mocks.createCategory).toHaveBeenCalledWith(expect.objectContaining({
+      parent_id: "cat-03", display_name: "审核标准",
+    })));
+  });
+
+  it("lets an organizer submit a child folder request", async () => {
+    mocks.permissions = ["organize"];
+    mocks.createFolderRequest.mockResolvedValue({ id: "request-1" });
+    render(<AdminManagedContentPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "申请文件夹" }));
+    fireEvent.change(screen.getByLabelText("文件夹名称"), { target: { value: "审核标准" } });
+    fireEvent.click(screen.getByRole("button", { name: "提交申请" }));
+
+    await waitFor(() => expect(mocks.createFolderRequest).toHaveBeenCalledWith("cat-03", "审核标准"));
+    expect(mocks.success).toHaveBeenCalledWith("目录申请已提交");
+  });
+
+  it("shows pending folder requests to a reviewer and approves one", async () => {
+    mocks.folderRequests.mockResolvedValue([{
+      id: "request-1", parent_category_id: "cat-03", parent_label: "03 公司内部标准",
+      display_name: "审核标准", status: "pending", requester_name: "整理员",
+      review_note: null, created_category_id: null, created_at: 1, updated_at: 1, reviewed_at: null,
+    }]);
+    mocks.reviewFolderRequest.mockResolvedValue({ id: "request-1", status: "approved" });
+    render(<AdminManagedContentPage />);
+
+    expect(await screen.findByText("待处理目录申请")).toBeInTheDocument();
+    expect(screen.getByText(/申请人：整理员/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "批准" }));
+
+    await waitFor(() => expect(mocks.reviewFolderRequest).toHaveBeenCalledWith("request-1", true));
+    expect(mocks.success).toHaveBeenCalledWith("目录申请已批准");
+  });
+
+  it("moves an existing desktop row when dropped on a child folder", async () => {
+    mocks.permissions = ["organize"];
+    mocks.categories.mockResolvedValue([category, childCategory]);
+    mocks.items.mockResolvedValue({
+      items: [{ ...item, lifecycle_status: "draft" }], total: 1, status_counts: { draft: 1 },
+    });
+    mocks.moveContent.mockResolvedValue({ ...item, category_id: "cat-03-01" });
+    render(<AdminManagedContentPage />);
+
+    const row = await screen.findByTitle("拖动到上方文件夹可移动资料");
+    const targetFolder = screen.getAllByRole("button", { name: /01 建模标准/ })[0];
+    fireEvent.dragStart(row);
+    fireEvent.dragOver(targetFolder);
+    fireEvent.drop(targetFolder);
+
+    await waitFor(() => expect(mocks.moveContent).toHaveBeenCalledWith("item-1", "cat-03-01", "version-1"));
+    expect(mocks.success).toHaveBeenCalledWith("已移动“建模标准”");
   });
 
   it("shows loading, empty, and recoverable error states", async () => {
