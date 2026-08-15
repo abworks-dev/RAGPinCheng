@@ -47,6 +47,9 @@ def test_cleanup_workflow_uses_named_parameter_splatting():
     assert "$arguments.Apply = $true" in workflow
     assert "'-Target', $target" not in workflow
     assert "$arguments += '-Apply'" not in workflow
+    assert "actions/download-artifact@v4" in workflow
+    assert "ExpectedAsrBatchManifestSha256" in workflow
+    assert "asr_manifest_run_id" in workflow
 
 
 def test_cleanup_orchestrator_keeps_runtime_audit_inside_managed_root():
@@ -75,4 +78,18 @@ def test_cleanup_operations_owns_manual_and_scheduled_triggers():
     assert "${{ github.workspace }}" in workflow
     assert "PRODUCTION_REPO_PATH" not in workflow
     assert "backup-apply" in workflow
+    assert "actions/upload-artifact@v4" in workflow
+
+
+def test_storage_inventory_is_aggregate_and_read_only():
+    script = read_text("scripts/inventory-production-storage.ps1")
+    workflow = read_text(".github/workflows/inventory-production-storage.yml")
+
+    assert "production-storage-inventory/1" in script
+    assert "aggregate metadata only; no file names or file contents" in script
+    assert "Remove-Item" not in script
+    assert "Move-Item" not in script
+    assert "Set-Content" in script
+    assert "workflow_dispatch:" in workflow
+    assert "confirm_read_only_inventory" in workflow
     assert "actions/upload-artifact@v4" in workflow

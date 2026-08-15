@@ -28,6 +28,16 @@ on:
         required: false
         default: manual
         type: string
+      asr_manifest_run_id:
+        description: Dry-run workflow run containing the approved ASR batch manifest
+        required: false
+        default: ''
+        type: string
+      asr_manifest_sha256:
+        description: SHA-256 of the approved ASR batch manifest
+        required: false
+        default: ''
+        type: string
   schedule:
     - cron: '23 19 * * *'
     - cron: '7,37 * * * *'
@@ -45,6 +55,8 @@ jobs:
       confirm_production_cleanup: ${{ inputs.confirm_production_cleanup }}
       allow_unconfirmed_dry_run: false
       reason: ${{ inputs.reason }}
+      asr_manifest_run_id: ${{ inputs.asr_manifest_run_id }}
+      asr_manifest_sha256: ${{ inputs.asr_manifest_sha256 }}
     secrets: inherit
 
   nightly-dryrun:

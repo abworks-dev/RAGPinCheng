@@ -1,0 +1,74 @@
+name: Inventory Production Storage
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_read_only_inventory:
+        description: Confirm aggregate read-only inventory on the production Windows host
+        required: true
+        default: false
+        type: boolean
+      reason:
+        description: Audit reason
+        required: false
+        default: manual
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-gpu-exclusive
+  cancel-in-progress: false
+
+jobs:
+  inventory:
+    if: ${{ inputs.confirm_read_only_inventory == true }}
+    runs-on: [self-hosted, windows, production, gpu]
+    environment: production-asr
+    timeout-minutes: 30
+    steps:
+      - name: Check out inventory revision
+        uses: actions/checkout@v4
+
+      - name: Collect aggregate storage inventory
+        shell: powershell
+        env:
+          REPORT_PATH: ${{ runner.temp }}\ragpincheng-production-inventory\inventory.json
+          ASR_DATA_ROOT: ${{ vars.PRODUCTION_ASR_DATA_ROOT }}
+          ASR_PROGRAM_ROOT: ${{ vars.PRODUCTION_ASR_PROGRAM_ROOT }}
+          FASTER_WHISPER_ROOT: ${{ vars.PRODUCTION_FASTER_WHISPER_QUALIFICATION_ROOT }}
+          QWEN3_ASR_ROOT: ${{ vars.PRODUCTION_QWEN3_ASR_QUALIFICATION_ROOT }}
+          WHISPERX_ROOT: ${{ vars.PRODUCTION_WHISPERX_ROOT }}
+          RUNTIME_ROOT: ${{ vars.PRODUCTION_RUNTIME_ROOT }}
+          BACKUP_DIRECTORY: ${{ vars.PRODUCTION_BACKUP_DIRECTORY }}
+          ASR_MODEL_CACHE_ROOT: ${{ vars.PRODUCTION_ASR_MODEL_CACHE_ROOT }}
+          WHISPERX_CACHE_ROOT: ${{ vars.PRODUCTION_WHISPERX_CACHE_ROOT }}
+          RUNNER_WORK_ROOT: ${{ runner.temp }}\..
+          RUNNER_TEMP_ROOT: ${{ runner.temp }}
+          RUNNER_TOOL_CACHE_ROOT: ${{ runner.tool_cache }}
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          & (Join-Path "${{ github.workspace }}" 'scripts\inventory-production-storage.ps1') `
+            -ReportPath $env:REPORT_PATH `
+            -AsrDataRoot $env:ASR_DATA_ROOT `
+            -AsrProgramRoot $env:ASR_PROGRAM_ROOT `
+            -FasterWhisperQualificationRoot $env:FASTER_WHISPER_ROOT `
+            -Qwen3AsrQualificationRoot $env:QWEN3_ASR_ROOT `
+            -WhisperXRoot $env:WHISPERX_ROOT `
+            -RuntimeRoot $env:RUNTIME_ROOT `
+            -BackupDirectory $env:BACKUP_DIRECTORY `
+            -AsrModelCacheRoot $env:ASR_MODEL_CACHE_ROOT `
+            -WhisperXCacheRoot $env:WHISPERX_CACHE_ROOT `
+            -RunnerWorkRoot $env:RUNNER_WORK_ROOT `
+            -RunnerTempRoot $env:RUNNER_TEMP_ROOT `
+            -RunnerToolCacheRoot $env:RUNNER_TOOL_CACHE_ROOT
+
+      - name: Upload aggregate inventory
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-storage-inventory-${{ github.run_id }}
+          path: ${{ runner.temp }}/ragpincheng-production-inventory
+          if-no-files-found: warn
