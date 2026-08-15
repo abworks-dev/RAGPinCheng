@@ -405,9 +405,8 @@ class TestDeployGitSafety(unittest.TestCase):
             "${CONTENT_HOST_PATH:?CONTENT_HOST_PATH is required}:/app/content",
             overlay,
         )
-        self.assertIn("type: tmpfs", overlay)
-        self.assertIn("target: /app/docs", overlay)
-        self.assertIn("read_only: true", overlay)
+        self.assertIn("tmpfs:", overlay)
+        self.assertIn("/app/docs:ro,size=1048576,mode=0555", overlay)
         self.assertNotIn("DOCS_HOST_PATH", overlay)
         self.assertIn(
             "${MEDIA_HOST_PATH:?MEDIA_HOST_PATH is required}:/app/media", overlay
