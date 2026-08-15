@@ -96,6 +96,66 @@ function Measure-DependencyRuns {
     return $summary
 }
 
+function Get-JsonFile {
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
+    try { return Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json }
+    catch { return [pscustomobject]@{ __parse_error = $_.Exception.GetType().Name } }
+}
+
+function Get-CandidateInventory {
+    param([string]$DataRoot, [string]$ProgramRoot, [string]$BackupRoot)
+    $items = @()
+    if ([string]::IsNullOrWhiteSpace($DataRoot)) { return $items }
+    $dependencyRoot = Join-Path $DataRoot 'dependency-runs'
+    if (-not (Test-Path -LiteralPath $dependencyRoot -PathType Container)) { return $items }
+    $active = Get-JsonFile -Path (Join-Path $DataRoot 'release-state\active.json')
+    $activeId = if ($active -and ($active.PSObject.Properties.Name -contains 'candidate_id')) { [string]$active.candidate_id } else { '' }
+    $rollbackIds = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    if ($BackupRoot -and (Test-Path -LiteralPath $BackupRoot -PathType Container)) {
+        foreach ($statePath in @(Get-ChildItem -LiteralPath $BackupRoot -Filter 'candidate-activation-state.json' -File -Recurse -Force -ErrorAction SilentlyContinue)) {
+            $state = Get-JsonFile -Path $statePath.FullName
+            if ($state -and -not ($state.PSObject.Properties.Name -contains '__parse_error')) {
+                foreach ($propertyName in @('candidate_id', 'previous_candidate_id')) {
+                    if ($state.PSObject.Properties.Name -contains $propertyName) {
+                        $id = [string]$state.$propertyName
+                        if ($id) { [void]$rollbackIds.Add($id) }
+                    }
+                }
+            }
+        }
+    }
+    foreach ($directory in @(Get-ChildItem -LiteralPath $dependencyRoot -Directory -Force | Where-Object { $_.Name -match '^candidate-' })) {
+        $id = $directory.Name.Substring(10)
+        $status = if ($id -notmatch '^[0-9]{1,20}$') { 'unknown-name' } else { 'dependency-only' }
+        $reasons = [System.Collections.Generic.List[string]]::new()
+        $release = if ($ProgramRoot -and $id -match '^[0-9]{1,20}$') { Join-Path $ProgramRoot "releases\$id" } else { '' }
+        $config = if ($id -match '^[0-9]{1,20}$') { Join-Path $DataRoot "config\releases\$id" } else { '' }
+        $manifestPath = if ($release) { Join-Path $release 'release-manifest.json' } else { '' }
+        $manifest = if ($manifestPath) { Get-JsonFile -Path $manifestPath } else { $null }
+        if ($status -eq 'dependency-only' -and $release -and $config -and (Test-Path $release -PathType Container) -and (Test-Path $config -PathType Container)) {
+            if (-not $manifest) { $status = 'release-incomplete'; $reasons.Add('manifest-missing') }
+            elseif ($manifest.PSObject.Properties.Name -contains '__parse_error') { $status = 'identity-conflict'; $reasons.Add('manifest-invalid-json') }
+            elseif ([string]$manifest.candidate_id -ne $id) { $status = 'identity-conflict'; $reasons.Add('manifest-candidate-id-mismatch') }
+            else { $status = 'staged-complete' }
+        }
+        if ($id -eq $activeId) { $status = 'active'; $reasons.Add('active-release-state') }
+        elseif ($rollbackIds.Contains($id)) { $status = 'rollback-referenced'; $reasons.Add('activation-state-reference') }
+        $measurement = Measure-Tree -Path $directory.FullName
+        $items += [ordered]@{
+            candidate_id = $id
+            status = $status
+            bytes = [int64]$measurement.bytes
+            files = [int]$measurement.files
+            last_write_utc = $directory.LastWriteTimeUtc.ToString('o')
+            release_present = [bool]($release -and (Test-Path $release -PathType Container))
+            config_present = [bool]($config -and (Test-Path $config -PathType Container))
+            reasons = @($reasons)
+        }
+    }
+    return @($items | Sort-Object candidate_id)
+}
+
 function Measure-RootBreakdown {
     param(
         [AllowEmptyString()][string]$Root,
@@ -209,6 +269,7 @@ $report = [ordered]@{
         }
     }
     dependency_runs = Measure-DependencyRuns -DataRoot $AsrDataRoot
+    candidates = Get-CandidateInventory -DataRoot $AsrDataRoot -ProgramRoot $AsrProgramRoot -BackupRoot $BackupDirectory
     docker = $docker
 }
 

@@ -18,6 +18,11 @@
 app/venv 回滚备份，以及 qualification 中的 `reports`、`evidence`、`logs`、`state`、
 `config`、manifest 和 verdict。
 
+`dependency-runs\candidate-<workflow_run_id>` 在候选识别阶段只做只读分类，不进入清理候选。
+Inventory 会同时核对候选 ID、`releases\<id>`、`config\releases\<id>`、release manifest、
+`release-state\active.json` 和 activation rollback state。活动、回滚引用、闭包不完整、身份冲突、
+非法命名或无法测量的候选均保持保护状态；只有后续独立 R3 方案获批后，才可能讨论删除。
+
 ## 保留策略
 
 | 类型 | 默认策略 |
