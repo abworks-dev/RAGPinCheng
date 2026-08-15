@@ -29,7 +29,8 @@ def test_active_asr_restart_is_identity_bound_and_reversible():
     assert "[IO.File]::Replace" in script
     assert '".migration-before-"' in script
     assert "[IO.File]::Delete($replaceBackup)" in script
-    assert '$context.module -eq "services.asr_service.app:create_app"' in script
+    assert 'status = "already-running-healthy"' not in script
+    assert "$alreadyHealthy" not in script
     assert '[string]$actions[0].Execute -ne "powershell.exe"' in script
     assert '[string]$actions[0].Arguments -ne $expectedArguments' in script
     assert '[string]$task.Principal.UserId -ne "Administrator"' in script

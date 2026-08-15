@@ -505,6 +505,7 @@ def test_asr_startup_diagnostic_is_manual_read_only_and_sanitized():
     assert "Get-ScheduledTaskInfo" in script
     assert "Get-NetTCPConnection -LocalPort 8200 -State Listen" in script
     assert '"http://127.0.0.1:8200/health"' in script
+    assert '"http://127.0.0.1:8200/v1/diagnostics"' in script
     assert "ConvertTo-SafeDiagnosticLine" in script
     assert "IsNullOrWhiteSpace" in script
     assert "sanitized_log_lines" in script
@@ -513,6 +514,12 @@ def test_asr_startup_diagnostic_is_manual_read_only_and_sanitized():
     assert "startup_preflight_status" in script
     assert "config_required_missing_count" in script
     assert "startup_log_updated_after_last_run" in script
+    assert "scheduler_diagnostics_outcome" in script
+    assert "scheduler_pause_reason" in script
+    assert "scheduler_oom_latched" in script
+    assert "scheduler_consecutive_failures" in script
+    assert "scheduler_queue_depth" in script
+    assert '"scheduler_paused"' in script
     assert "task_root_binding_missing" in script
     assert "production_services_modified = $false" in script
     assert "ASR_SERVICE_TOKEN" not in workflow
