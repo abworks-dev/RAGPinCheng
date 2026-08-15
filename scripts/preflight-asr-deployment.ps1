@@ -160,9 +160,10 @@ try {
     }
     $tempRun = Join-Path $resolvedTempRoot ("asr-deployment-preflight-" + $QualificationRunId + "-" + [guid]::NewGuid().ToString("N"))
     $qualifiedWheelSeed = Join-Path $tempRun ("qualified-" + $Engine + "-wheel-seed")
+    $qualifiedCompanionWheelSeed = Join-Path $tempRun "qualified-faster-whisper-companion-wheel-seed"
     $wheelhouse = Join-Path $tempRun "wheelhouse"
     $venvRoot = Join-Path $tempRun "venv"
-    New-Item -ItemType Directory -Path $qualifiedWheelSeed, $wheelhouse -Force | Out-Null
+    New-Item -ItemType Directory -Path $qualifiedWheelSeed, $qualifiedCompanionWheelSeed, $wheelhouse -Force | Out-Null
     $numpyRequirement = if ($Engine -eq "whisperx") { "numpy>=2.1,<3" } else { "numpy>=1.24,<2" }
     if ($Engine -eq "faster-whisper") {
         Copy-QualifiedFasterWhisperWheels -Evidence $evidence -Destination $qualifiedWheelSeed
@@ -170,8 +171,7 @@ try {
     } else {
         Copy-QualifiedWhisperXWheels -Evidence $evidence -Destination $qualifiedWheelSeed
         Copy-QualifiedWhisperXWheels -Evidence $evidence -Destination $wheelhouse
-        Copy-QualifiedFasterWhisperWheels -Evidence $fasterEvidence -Destination $qualifiedWheelSeed
-        Copy-QualifiedFasterWhisperWheels -Evidence $fasterEvidence -Destination $wheelhouse
+        Copy-QualifiedFasterWhisperWheels -Evidence $fasterEvidence -Destination $qualifiedCompanionWheelSeed
     }
 
     $python = Get-PreflightPython311
@@ -208,6 +208,7 @@ try {
         if ($Engine -eq "faster-whisper") {
             $downloadArguments += @("-r", (Join-Path $resolvedSource "services\asr_service\requirements-faster-whisper.txt"))
         } else {
+            $downloadArguments += @("--find-links", $qualifiedCompanionWheelSeed)
             $downloadArguments += @("torchvision==0.23.0+cu128", "-r", (Join-Path $resolvedSource "services\asr_service\requirements-whisperx.txt"))
         }
         & $venvPython @downloadArguments
