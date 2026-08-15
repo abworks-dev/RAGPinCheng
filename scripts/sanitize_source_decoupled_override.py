@@ -37,6 +37,10 @@ def apply_production_volumes(config: dict[str, Any]) -> None:
     required = ("DATA_PATH", "CONTENT_HOST_PATH", "MEDIA_HOST_PATH")
     if not all(os.environ.get(name) for name in required):
         return
+    config["name"] = "ragpincheng-prod"
+    networks = config.setdefault("networks", {})
+    default_network = networks.setdefault("default", {})
+    default_network["name"] = "ragpincheng-prod_default"
     backend = config["services"]["backend"]
     backend["volumes"] = [
         {"type": "bind", "source": os.environ["DATA_PATH"], "target": "/app/data"},
