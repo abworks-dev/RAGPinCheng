@@ -146,6 +146,14 @@ def test_candidate_resolver_is_manual_d_drive_isolated_and_evidence_only():
     assert "[IO.Path]::GetFullPath($ConfiguredGpuPython)" in promotion
     assert "-not $canonicalProcessOwned -and" in promotion
     assert "-not $legacyProcessOwned" in promotion
+    assert "function Write-PromotionDiagnostics" in promotion
+    assert 'ValidateSet("candidate", "previous")' in promotion
+    assert 'Get-ScheduledTaskInfo -TaskName $TaskName' in promotion
+    assert 'Get-Content -LiteralPath $logPath -Tail 80' in promotion
+    assert "[REDACTED]" in promotion
+    assert "[TRUNCATED]" in promotion
+    assert 'Write-PromotionDiagnostics -DiagnosticRelease $ReleaseRoot -Label "candidate"' in promotion
+    assert 'Write-PromotionDiagnostics -DiagnosticRelease $previousRelease -Label "previous"' in promotion
 
     assert 'StartsWith("D:\\"' in script
     assert '"-m", "venv"' in script

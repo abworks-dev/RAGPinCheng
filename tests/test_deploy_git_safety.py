@@ -511,6 +511,9 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertIn("$canonicalProcessOwned", self.promote)
         self.assertIn("$legacyProcessOwned", self.promote)
         self.assertIn("[IO.Path]::GetFullPath($ConfiguredGpuPython)", self.promote)
+        self.assertIn("GPU diagnostic release is outside managed releases", self.promote)
+        self.assertIn("GPU_PROMOTION_DIAGNOSTIC", self.promote)
+        self.assertIn("GPU_PROMOTION_LOG", self.promote)
 
     def test_start_wrapper_requires_validated_immutable_release(self):
         self.assertIn("GPU runtime release is not validated for production", self.windows_start)
