@@ -138,6 +138,7 @@ export function AdminManagedContentPage() {
   };
 
   const currentFolder = categories.find((category) => category.id === currentFolderId) || null;
+  const rootFolders = categories.filter((category) => category.parent_id === null && category.is_active);
   const childFolders = categories.filter((category) => category.parent_id === currentFolderId && category.is_active);
   const breadcrumbs = useMemo(() => {
     const result: ManagedCategory[] = [];
@@ -148,6 +149,7 @@ export function AdminManagedContentPage() {
     }
     return result;
   }, [categories, currentFolder]);
+  const currentRootFolderId = breadcrumbs[0]?.id || "";
 
   const createFolder = async () => {
     if (!currentFolder || !newFolderName.trim()) return;
@@ -303,7 +305,7 @@ export function AdminManagedContentPage() {
 
     <Card className="overflow-hidden shadow-surface" aria-labelledby="folder-browser-title">
       <div className="flex flex-col gap-3 border-b border-border px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
-        <div className="min-w-0"><h2 id="folder-browser-title" className="text-ui-base font-semibold">资料目录</h2><nav className="mt-2 flex flex-wrap items-center gap-1 text-ui-sm" aria-label="当前资料目录">{breadcrumbs.map((folder, index) => <span key={folder.id} className="flex min-w-0 items-center gap-1">{index > 0 && <ChevronRight className="size-4 shrink-0 text-muted-foreground" />}<button type="button" className="max-w-56 truncate rounded px-1 py-0.5 hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setCurrentFolderId(folder.id)}>{folder.display_code} {folder.display_name}</button></span>)}</nav></div>
+        <div className="min-w-0 flex-1"><h2 id="folder-browser-title" className="text-ui-base font-semibold">资料目录</h2><label className="mt-2 block max-w-sm space-y-1 text-ui-xs text-muted-foreground"><span>一级目录</span><Select aria-label="一级目录" value={currentRootFolderId} onChange={(event) => setCurrentFolderId(event.target.value)}>{rootFolders.map((folder) => <option key={folder.id} value={folder.id}>{folder.display_code} {folder.display_name}</option>)}</Select></label><nav className="mt-2 flex flex-wrap items-center gap-1 text-ui-sm" aria-label="当前资料目录">{breadcrumbs.map((folder, index) => <span key={folder.id} className="flex min-w-0 items-center gap-1">{index > 0 && <ChevronRight className="size-4 shrink-0 text-muted-foreground" />}<button type="button" className="max-w-56 truncate rounded px-1 py-0.5 hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setCurrentFolderId(folder.id)}>{folder.display_code} {folder.display_name}</button></span>)}</nav></div>
         <div className="flex flex-wrap gap-2">{can("organize") && !can("manage_categories") && currentFolder && currentFolder.level < 4 && <Button size="sm" variant="outline" onClick={() => setRequestFolderOpen(true)}><FolderPlus className="size-4" />申请文件夹</Button>}{can("manage_categories") && currentFolder && currentFolder.level < 4 && <Button size="sm" variant="outline" onClick={() => setNewFolderOpen(true)}><FolderPlus className="size-4" />新建文件夹</Button>}</div>
       </div>
       <div className="grid gap-2 p-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" aria-label="子文件夹">
