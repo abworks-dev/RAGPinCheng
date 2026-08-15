@@ -80,6 +80,7 @@ def test_t12b_public_artifact_is_redacted_and_deploy_checks_mounts():
         'retired legacy docs runtime path is writable',
         'Path(media.get("Source", "")).resolve() == Path(os.environ["EXPECTED_MEDIA"]).resolve()',
         'unexpected media mount source',
+        'media.get("Source")',
         'not item.get("Source", "").startswith("/data/business/ragpincheng/source")',
         'TRANSCRIPTION_ARTIFACT_DIR == Path("/app/content/transcription-artifacts")',
     ):
