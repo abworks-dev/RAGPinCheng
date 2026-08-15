@@ -60,6 +60,25 @@ def test_active_asr_restart_is_identity_bound_and_reversible():
     assert "exactly one supported application layout" in start
 
 
+def test_asr_candidate_promotion_owns_both_verified_release_layouts():
+    promotion = read("scripts/promote-asr-candidate.ps1")
+
+    assert "Get-ReleaseAppModule" in promotion
+    assert '"services/asr_service/app.py"' in promotion
+    assert '"asr_service/app.py"' in promotion
+    assert "-AppModule $Context.app_module" in promotion
+    assert "-AppModule $currentListenerModule" in promotion
+    assert "Refusing to stop an unexpected process listening on TCP 8200" in promotion
+
+    recovery = read(".github/workflows/recover-asr-candidate-activation.yml")
+    assert "name: Recover Failed ASR Candidate Activation" in recovery
+    assert "production-gpu-exclusive" in recovery
+    assert "candidate activation recovery identity mismatch" in recovery
+    assert '"${{ github.workspace }}\\scripts\\promote-asr-candidate.ps1"' in recovery
+    assert "-Mode Rollback" in recovery
+    assert "Register-ScheduledTask" not in recovery
+
+
 def test_faster_whisper_production_admission_is_bound_to_runtime_contract_evidence():
     deploy = read("scripts/deploy-asr.ps1")
     evidence = read("scripts/faster-whisper-production-evidence.ps1")
