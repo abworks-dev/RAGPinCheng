@@ -11,15 +11,19 @@ def read(path: str) -> str:
     return (ROOT / path).read_text(encoding="utf-8")
 
 
-def test_runtime_lock_is_an_exact_resolved_cuda_candidate():
+def test_runtime_lock_is_validated_by_matching_cuda_qualification():
     metadata = json.loads(read("services/gpu_service/runtime-lock.json"))
     requirements = read("services/gpu_service/runtime-lock.txt")
     assert metadata["schema_version"] == 1
-    assert metadata["validation_status"] == "candidate"
-    assert metadata["qualification_run_id"] == ""
-    assert metadata["source_commit"] == "f6716800345530cb19ed4c10467b5ade6fc3092c"
-    assert metadata["qualified_source_fingerprint"] == ""
-    assert metadata["qualified_lock_sha256"] == ""
+    assert metadata["validation_status"] == "validated"
+    assert metadata["qualification_run_id"] == "31866665137"
+    assert metadata["source_commit"] == "bcd4cdc6a6a7c302657c3eb5d200108aae494fa5"
+    assert metadata["qualified_source_fingerprint"] == (
+        "a0a14c48a9f70eb9885fe71229b80476ae1f6d2245a0657303ed318119ea49c7"
+    )
+    assert metadata["qualified_lock_sha256"] == (
+        "f9a0f015f3e82dd129272651a69866357b0d658f5adf8de13d8487fdb01c42bf"
+    )
     assert metadata["resolver_run_id"] == "31865623061-1"
     assert metadata["candidate_lock_sha256"] == (
         "f9a0f015f3e82dd129272651a69866357b0d658f5adf8de13d8487fdb01c42bf"
