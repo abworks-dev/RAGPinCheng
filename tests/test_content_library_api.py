@@ -482,8 +482,22 @@ def test_managed_index_job_listing_exposes_business_labels(content_api):
     assert result.status_code == 200
     assert result.json()["total"] == 1
     assert result.json()["jobs"][0]["original_filename"] == "indexed.md"
+    assert result.json()["jobs"][0]["doc_type"] == "markdown"
+    assert result.json()["jobs"][0]["category_id"] == "cat-03"
     assert result.json()["jobs"][0]["category_label"] == "03 公司内部标准"
     assert result.json()["jobs"][0]["error_code"] is None
+    assert result.json()["status_counts"] == {"processing": 1, "ready": 0, "failed": 0}
+
+    filtered = client.get(
+        "/api/admin/content/index-jobs?query=indexed&category_id=cat-03&doc_type=markdown&status=processing",
+        **_auth(sessions, "publisher"),
+    )
+    assert filtered.status_code == 200
+    assert filtered.json()["total"] == 1
+    assert filtered.json()["jobs"][0]["original_filename"] == "indexed.md"
+    assert client.get(
+        "/api/admin/content/index-jobs?status=ready", **_auth(sessions, "publisher")
+    ).json()["total"] == 0
 
     conn = sqlite3.connect(_db_path)
     conn.execute(
@@ -534,6 +548,18 @@ def test_managed_index_jobs_default_to_latest_attempt_and_allow_history(content_
     listing = client.get("/api/admin/content/items-page?lifecycle_status=publishing", **_auth(sessions, "publisher")).json()
     assert listing["items"][0]["publication_attempt_count"] == 2
     assert listing["items"][0]["publication_failure"] is None
+
+
+def test_legacy_index_monitoring_routes_are_not_exposed(content_api):
+    client, sessions, _queued, _db_path = content_api
+    auth = _auth(sessions, "publisher", csrf=True)
+    assert client.get("/api/admin/index/documents", **auth).status_code == 404
+    assert client.request(
+        "DELETE", "/api/admin/index/documents", json={"document_id": "0" * 24}, **auth
+    ).status_code == 404
+    assert client.get("/api/admin/index/jobs", **auth).status_code == 404
+    assert client.post("/api/admin/index/jobs/1/retry", **auth).status_code == 404
+    assert client.delete("/api/admin/index/jobs/1", **auth).status_code == 404
 
 
 def test_category_key_is_server_generated_and_used_categories_cannot_be_disabled(content_api):

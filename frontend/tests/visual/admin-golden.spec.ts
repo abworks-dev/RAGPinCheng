@@ -63,9 +63,4 @@ test("索引监控任务区域 accepted golden", async ({ page }) => {
   await expect(page.getByText("文档解析服务请求失败。", { exact: true })).toBeVisible();
   const viewport = page.viewportSize()!;
   await expect(managedActivity).toHaveScreenshot(`index-monitor-managed-normal-${viewport.width}x${viewport.height}.png`);
-
-  const legacyActivity = page.locator("details").filter({ hasText: "旧目录索引活动" });
-  await page.getByText("旧目录索引活动", { exact: true }).click();
-  await expect(page.getByText("解析器暂不可用", { exact: true }).last()).toBeVisible();
-  await expect(legacyActivity).toHaveScreenshot(`index-monitor-legacy-normal-${viewport.width}x${viewport.height}.png`);
 });

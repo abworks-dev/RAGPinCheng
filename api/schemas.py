@@ -370,6 +370,8 @@ class ManagedIndexJobDTO(BaseModel):
     updated_at: int
     title: str | None = None
     original_filename: str | None = None
+    doc_type: str | None = None
+    category_id: str | None = None
     category_label: str | None = None
 
 
