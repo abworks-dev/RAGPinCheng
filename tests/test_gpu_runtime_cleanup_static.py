@@ -51,6 +51,12 @@ def test_cleanup_materializes_generic_lists_on_windows_powershell_51():
     assert "$skippedArray = @($skipped)" not in CLEANUP
 
 
+def test_cleanup_handles_an_empty_candidate_list_in_strict_mode():
+    assert "if ($candidateArray.Count -eq 0)" in CLEANUP
+    assert "[int64]0" in CLEANUP
+    assert "Measure-Object -Property Bytes -Sum" in CLEANUP
+
+
 def test_task_installer_defaults_to_dry_run_and_exact_paths():
     assert "[switch]$EnableApply" in INSTALL
     assert "$env:PRODUCTION_REPO_PATH" in INSTALL
