@@ -71,18 +71,19 @@ fi
 
 COMPOSE_ARGS=(
     -p "$COMPOSE_PROJECT"
-    -f "$COMPOSE_BASE"
-    -f "$COMPOSE_OVERRIDE"
 )
 case "${SOURCE_DECOUPLING_COMPLETE:-false}" in
     true)
+        COMPOSE_ARGS+=(-f "$COMPOSE_OVERRIDE")
         [ -f "$COMPOSE_SOURCE_DECOUPLED" ] || {
             echo "ERROR: source-decoupled Compose overlay is missing: ${COMPOSE_SOURCE_DECOUPLED}"
             exit 1
         }
         COMPOSE_ARGS+=(-f "$COMPOSE_SOURCE_DECOUPLED")
         ;;
-    false|"") ;;
+    false|"")
+        COMPOSE_ARGS+=(-f "$COMPOSE_BASE" -f "$COMPOSE_OVERRIDE")
+        ;;
     *)
         echo "ERROR: SOURCE_DECOUPLING_COMPLETE must be true or false"
         exit 1
