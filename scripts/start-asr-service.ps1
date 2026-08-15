@@ -40,6 +40,13 @@ if ($CandidateId) {
     $envFile = $release.layout.config_path
     $python = Join-Path $release.layout.venv_root "Scripts\python.exe"
     $appRoot = $release.layout.app_root
+    $manifestPaths = @($release.manifest.app_files | ForEach-Object { [string]$_.path })
+    $hasCurrentLayout = $manifestPaths -contains "services/asr_service/app.py"
+    $hasLegacyLayout = $manifestPaths -contains "asr_service/app.py"
+    if ($hasCurrentLayout -eq $hasLegacyLayout) {
+        throw "ASR release manifest must contain exactly one supported application layout"
+    }
+    $appModule = if ($hasCurrentLayout) { "services.asr_service.app:create_app" } else { "asr_service.app:create_app" }
 } else {
     if ($CandidateManifestSha256) {
         throw "ASR candidate manifest identity requires a candidate ID"
@@ -47,6 +54,7 @@ if ($CandidateId) {
     $envFile = Join-Path $DataRoot "config\asr.env"
     $python = Join-Path $ProgramRoot "venv\Scripts\python.exe"
     $appRoot = Join-Path $ProgramRoot "app"
+    $appModule = "services.asr_service.app:create_app"
 }
 
 if (-not (Test-Path -LiteralPath $envFile -PathType Leaf)) {
@@ -55,7 +63,7 @@ if (-not (Test-Path -LiteralPath $envFile -PathType Leaf)) {
 if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
     throw "ASR virtual environment is missing: $python"
 }
-if (-not (Test-Path -LiteralPath (Join-Path $appRoot "services\asr_service\app.py") -PathType Leaf)) {
+if (-not (Test-Path -LiteralPath (Join-Path $appRoot ($appModule.Split(':')[0].Replace('.', '\') + ".py")) -PathType Leaf)) {
     throw "ASR application is missing under: $appRoot"
 }
 
@@ -98,7 +106,7 @@ Set-Location -LiteralPath $appRoot
 $savedErrorActionPreference = $ErrorActionPreference
 $ErrorActionPreference = "Continue"
 try {
-    & $python -m uvicorn services.asr_service.app:create_app --factory --host $env:ASR_SERVICE_HOST --port $env:ASR_SERVICE_PORT *>> $logFile
+    & $python -m uvicorn $appModule --factory --host $env:ASR_SERVICE_HOST --port $env:ASR_SERVICE_PORT *>> $logFile
     $uvicornExitCode = $LASTEXITCODE
 } finally {
     $ErrorActionPreference = $savedErrorActionPreference
