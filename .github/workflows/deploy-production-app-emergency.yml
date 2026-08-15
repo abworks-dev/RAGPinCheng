@@ -232,7 +232,6 @@ jobs:
           }
 
           GPU_RUNTIME_FILES=(
-            services/__init__.py
             services/gpu_service/__init__.py
             services/gpu_service/app.py
             services/gpu_service/config.py
