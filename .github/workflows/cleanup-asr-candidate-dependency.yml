@@ -1,0 +1,91 @@
+name: Cleanup ASR Candidate Dependency
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_id:
+        description: Exact candidate workflow run ID
+        required: true
+        type: string
+      operation:
+        description: Generate preview manifest or apply an approved preview
+        required: true
+        default: preview
+        type: choice
+        options: [preview, apply]
+      preview_run_id:
+        description: Preview workflow run ID; required for apply
+        required: false
+        type: string
+      manifest_sha256:
+        description: Exact preview manifest SHA-256; required for apply
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: production-gpu-exclusive
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    runs-on: [self-hosted, windows, production, gpu]
+    environment: production-asr
+    timeout-minutes: 30
+    env:
+      ASR_DATA_ROOT: ${{ vars.PRODUCTION_ASR_DATA_ROOT }}
+      ASR_PROGRAM_ROOT: ${{ vars.PRODUCTION_ASR_PROGRAM_ROOT }}
+      ASR_BACKUP_ROOT: ${{ vars.PRODUCTION_ASR_BACKUP_ROOT }}
+      CANDIDATE_ID: ${{ inputs.candidate_id }}
+      OPERATION: ${{ inputs.operation }}
+      EXPECTED_SHA256: ${{ inputs.manifest_sha256 }}
+      REPORT_ROOT: ${{ runner.temp }}\asr-candidate-cleanup
+      ASR_SERVICE_TOKEN: ${{ secrets.ASR_SERVICE_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate request
+        shell: powershell
+        run: |
+          if ($env:CANDIDATE_ID -notmatch '^[0-9]{1,20}$') { throw 'candidate_id must be numeric' }
+          if ($env:OPERATION -eq 'apply' -and ('${{ inputs.preview_run_id }}' -notmatch '^[0-9]{1,20}$' -or $env:EXPECTED_SHA256 -notmatch '^[0-9a-fA-F]{64}$')) { throw 'apply requires preview_run_id and manifest_sha256' }
+      - name: Download approved manifest
+        if: ${{ inputs.operation == 'apply' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: asr-candidate-cleanup-${{ inputs.preview_run_id }}
+          path: ${{ runner.temp }}/asr-candidate-cleanup
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.preview_run_id }}
+      - name: Preview or apply candidate cleanup
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Path $env:REPORT_ROOT -Force | Out-Null
+          $manifest = Join-Path $env:REPORT_ROOT 'manifest.json'
+          $common = @{ CandidateId=$env:CANDIDATE_ID; DataRoot=$env:ASR_DATA_ROOT; ProgramRoot=$env:ASR_PROGRAM_ROOT; BackupRoot=$env:ASR_BACKUP_ROOT; ManifestPath=$manifest; OperationId='${{ github.run_id }}' }
+          if ($env:OPERATION -eq 'preview') {
+            & .\scripts\cleanup-asr-candidate-dependency.ps1 -Mode Preview @common
+            (Get-FileHash -LiteralPath $manifest -Algorithm SHA256).Hash.ToLowerInvariant() | Set-Content (Join-Path $env:REPORT_ROOT 'manifest.sha256') -Encoding ascii
+            return
+          }
+          try {
+            & .\scripts\cleanup-asr-candidate-dependency.ps1 -Mode Quarantine @common -ExpectedManifestSha256 $env:EXPECTED_SHA256 -Confirm:$false
+            . .\scripts\asr-release.ps1
+            $active = Get-Content (Join-Path $env:ASR_DATA_ROOT 'release-state\active.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+            $release = Read-AsrReleaseManifest -ProgramRoot $env:ASR_PROGRAM_ROOT -DataRoot $env:ASR_DATA_ROOT -CandidateId ([string]$active.candidate_id) -ExpectedSha256 ([string]$active.release_manifest_sha256)
+            & .\scripts\verify-asr-service.ps1 -DataRoot $env:ASR_DATA_ROOT -ConfigPath $release.layout.config_path -ExpectedProfiles @($release.manifest.expected_profiles)
+            & .\scripts\cleanup-asr-candidate-dependency.ps1 -Mode Finalize @common -Confirm:$false
+          } catch {
+            & .\scripts\cleanup-asr-candidate-dependency.ps1 -Mode Restore @common -Confirm:$false
+            throw
+          }
+      - name: Upload cleanup evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: asr-candidate-cleanup-${{ github.run_id }}
+          path: ${{ runner.temp }}/asr-candidate-cleanup
+          if-no-files-found: warn
