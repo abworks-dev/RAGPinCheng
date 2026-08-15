@@ -74,9 +74,10 @@ def test_t12b_public_artifact_is_redacted_and_deploy_checks_mounts():
     assert "Exact IDs and business paths remain only in the restricted backup" in WORKFLOW
     for required in (
         "verify_source_decoupling_mounts",
-        'mounts.get("/app/docs") == os.environ["EXPECTED_DOCS"]',
-        'mounts.get("/app/media") == os.environ["EXPECTED_MEDIA"]',
-        'not source.startswith("/data/business/ragpincheng/source")',
+        'docs.get("Type") == "tmpfs"',
+        'docs.get("RW") is False',
+        'mounts.get("/app/media", {}).get("Source") == os.environ["EXPECTED_MEDIA"]',
+        'not item.get("Source", "").startswith("/data/business/ragpincheng/source")',
         'TRANSCRIPTION_ARTIFACT_DIR == Path("/app/content/transcription-artifacts")',
     ):
         assert required in DEPLOY

@@ -1,5 +1,13 @@
 services:
   backend:
     volumes:
-      - ${DOCS_HOST_PATH:?DOCS_HOST_PATH is required}:/app/docs
+      # Production strict mode no longer accepts filesystem documents. Keep the
+      # legacy runtime path as an empty, read-only tmpfs so old fallback code
+      # cannot write files and no host compatibility directory is required.
+      - type: tmpfs
+        target: /app/docs
+        read_only: true
+        tmpfs:
+          size: 1048576
+          mode: 0555
       - ${MEDIA_HOST_PATH:?MEDIA_HOST_PATH is required}:/app/media

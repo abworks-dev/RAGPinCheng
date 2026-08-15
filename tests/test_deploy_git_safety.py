@@ -399,9 +399,10 @@ class TestDeployGitSafety(unittest.TestCase):
 
     def test_source_decoupling_overlay_is_final_for_deploy_and_recovery(self):
         overlay = self.source_decoupled_compose
-        self.assertIn(
-            "${DOCS_HOST_PATH:?DOCS_HOST_PATH is required}:/app/docs", overlay
-        )
+        self.assertIn("type: tmpfs", overlay)
+        self.assertIn("target: /app/docs", overlay)
+        self.assertIn("read_only: true", overlay)
+        self.assertNotIn("DOCS_HOST_PATH", overlay)
         self.assertIn(
             "${MEDIA_HOST_PATH:?MEDIA_HOST_PATH is required}:/app/media", overlay
         )
