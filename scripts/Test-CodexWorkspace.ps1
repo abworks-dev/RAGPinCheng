@@ -62,6 +62,23 @@ function Get-NormalizedPath {
 
 $errors = [System.Collections.Generic.List[string]]::new()
 $warnings = [System.Collections.Generic.List[string]]::new()
+$reasonCodes = [System.Collections.Generic.List[string]]::new()
+$recommendedAction = $null
+
+function Add-WorkspaceError {
+    param(
+        [Parameter(Mandatory = $true)][string]$Code,
+        [Parameter(Mandatory = $true)][string]$Message,
+        [Parameter(Mandatory = $true)][string]$RecommendedAction
+    )
+
+    $script:errors.Add($Message)
+    $script:reasonCodes.Add($Code)
+    if ($null -eq $script:recommendedAction) {
+        $script:recommendedAction = $RecommendedAction
+    }
+}
+
 $scriptProjectRoot = Get-NormalizedPath -Path (Join-Path $PSScriptRoot "..")
 $pathComparer = if ($IsWindows) {
     [System.StringComparer]::OrdinalIgnoreCase
@@ -86,7 +103,9 @@ try {
     )
     $sameRepository = $pathComparer.Equals($repositoryCommon, $projectCommon)
     if (-not $sameRepository) {
-        $errors.Add("RepositoryPath does not belong to this project repository.")
+        Add-WorkspaceError -Code "DIFFERENT_REPOSITORY" `
+            -Message "RepositoryPath does not belong to this project repository." `
+            -RecommendedAction "USE_PROJECT_WORKTREE"
     }
 
     $worktreeLines = (Invoke-GitText -Path $projectRoot -Arguments @("worktree", "list", "--porcelain")).Lines
@@ -99,7 +118,9 @@ try {
         $registeredPaths | Where-Object { $pathComparer.Equals($_, $repositoryRoot) }
     ).Count -gt 0
     if (-not $isRegistered) {
-        $errors.Add("RepositoryPath is not a registered worktree for this project.")
+        Add-WorkspaceError -Code "UNREGISTERED_WORKTREE" `
+            -Message "RepositoryPath is not a registered worktree for this project." `
+            -RecommendedAction "USE_REGISTERED_WORKTREE"
     }
     $primaryPath = if ($registeredPaths.Count -gt 0) { $registeredPaths[0] } else { $null }
     $isPrimary = $null -ne $primaryPath -and $pathComparer.Equals($repositoryRoot, $primaryPath)
@@ -130,35 +151,54 @@ try {
 
     if ($Mode -eq "Write") {
         if ([string]::IsNullOrWhiteSpace($Intent)) {
-            $errors.Add("Write mode requires -Intent New or -Intent Continue.")
+            Add-WorkspaceError -Code "WRITE_INTENT_REQUIRED" `
+                -Message "Write mode requires -Intent New or -Intent Continue." `
+                -RecommendedAction "SPECIFY_WRITE_INTENT"
         }
         if ($isPrimary) {
-            $errors.Add("Write mode is not allowed in the primary worktree.")
+            Add-WorkspaceError -Code "PRIMARY_WORKTREE_WRITE_FORBIDDEN" `
+                -Message "Write mode is not allowed in the primary worktree." `
+                -RecommendedAction "CREATE_MANAGED_WORKTREE"
+            $recommendedAction = "CREATE_MANAGED_WORKTREE"
         }
         if ($isDetached) {
-            $errors.Add("Write mode requires an attached branch, not detached HEAD.")
+            Add-WorkspaceError -Code "DETACHED_HEAD_WRITE_FORBIDDEN" `
+                -Message "Write mode requires an attached branch, not detached HEAD." `
+                -RecommendedAction "ATTACH_CODEX_BRANCH"
         } elseif ($branch -notlike "codex/*") {
             if ($AllowNonCodexBranch) {
                 if ([string]::IsNullOrWhiteSpace($ExceptionReason)) {
-                    $errors.Add("A non-codex branch exception requires -ExceptionReason.")
+                    Add-WorkspaceError -Code "EXCEPTION_REASON_REQUIRED" `
+                        -Message "A non-codex branch exception requires -ExceptionReason." `
+                        -RecommendedAction "PROVIDE_EXCEPTION_REASON"
                 } else {
                     $warnings.Add("Non-codex branch allowed by explicit exception: $branch")
                 }
             } else {
-                $errors.Add("Write mode requires a codex/* branch unless -AllowNonCodexBranch is explicit.")
+                Add-WorkspaceError -Code "NON_CODEX_BRANCH_FORBIDDEN" `
+                    -Message "Write mode requires a codex/* branch unless -AllowNonCodexBranch is explicit." `
+                    -RecommendedAction "USE_CODEX_BRANCH"
             }
         }
         if ($Intent -eq "New" -and $isDirty) {
-            $errors.Add("A new write task requires a clean worktree.")
+            Add-WorkspaceError -Code "DIRTY_WORKTREE_FOR_NEW_TASK" `
+                -Message "A new write task requires a clean worktree." `
+                -RecommendedAction "USE_CLEAN_MANAGED_WORKTREE"
         }
         if ($Intent -eq "Continue") {
             if ([string]::IsNullOrWhiteSpace($ExpectedBranch)) {
-                $errors.Add("Continue intent requires -ExpectedBranch.")
+                Add-WorkspaceError -Code "EXPECTED_BRANCH_REQUIRED" `
+                    -Message "Continue intent requires -ExpectedBranch." `
+                    -RecommendedAction "SPECIFY_EXPECTED_BRANCH"
             } elseif ($branch -cne $ExpectedBranch) {
-                $errors.Add("Current branch '$branch' does not match ExpectedBranch '$ExpectedBranch'.")
+                Add-WorkspaceError -Code "EXPECTED_BRANCH_MISMATCH" `
+                    -Message "Current branch '$branch' does not match ExpectedBranch '$ExpectedBranch'." `
+                    -RecommendedAction "RETURN_TO_EXPECTED_WORKTREE"
             }
         } elseif (-not [string]::IsNullOrWhiteSpace($ExpectedBranch) -and $branch -cne $ExpectedBranch) {
-            $errors.Add("Current branch '$branch' does not match ExpectedBranch '$ExpectedBranch'.")
+            Add-WorkspaceError -Code "EXPECTED_BRANCH_MISMATCH" `
+                -Message "Current branch '$branch' does not match ExpectedBranch '$ExpectedBranch'." `
+                -RecommendedAction "RETURN_TO_EXPECTED_WORKTREE"
         }
     }
 
@@ -185,9 +225,13 @@ try {
         exception_reason = if ([string]::IsNullOrWhiteSpace($ExceptionReason)) { $null } else { $ExceptionReason }
         errors = @($errors)
         warnings = @($warnings)
+        reason_codes = @($reasonCodes)
+        recommended_action = $recommendedAction
     }
 } catch {
-    $errors.Add($_.Exception.Message)
+    Add-WorkspaceError -Code "WORKSPACE_INSPECTION_FAILED" `
+        -Message $_.Exception.Message `
+        -RecommendedAction "VERIFY_REPOSITORY_PATH"
     $result = [ordered]@{
         schema_version = 1
         mode = $Mode
@@ -211,6 +255,8 @@ try {
         exception_reason = if ([string]::IsNullOrWhiteSpace($ExceptionReason)) { $null } else { $ExceptionReason }
         errors = @($errors)
         warnings = @($warnings)
+        reason_codes = @($reasonCodes)
+        recommended_action = $recommendedAction
     }
 }
 
