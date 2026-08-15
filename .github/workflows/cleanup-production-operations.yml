@@ -44,6 +44,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   manual-cleanup:
