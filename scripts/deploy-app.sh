@@ -52,6 +52,23 @@ git_fetch_exact_commit() {
     done
 }
 
+sanitize_source_decoupled_override() {
+    local sanitized
+    sanitized="${BACKUP_DIR}/.compose-private-source-decoupled-${TIMESTAMP}.json"
+    mkdir -p "$BACKUP_DIR"
+    docker compose -f "$COMPOSE_OVERRIDE" --env-file "$COMPOSE_ENV_FILE" \
+        config --no-interpolate --no-env-resolution --no-consistency --format json \
+        | python3 "${REPO_PATH}/scripts/sanitize_source_decoupled_override.py" \
+            > "${sanitized}.tmp"
+    mv "${sanitized}.tmp" "$sanitized"
+    COMPOSE_OVERRIDE="$sanitized"
+    export COMPOSE_OVERRIDE
+}
+
+if [ "${SOURCE_DECOUPLING_COMPLETE:-false}" = "true" ]; then
+    sanitize_source_decoupled_override
+fi
+
 COMPOSE_ARGS=(
     -p "$COMPOSE_PROJECT"
     -f "$COMPOSE_BASE"
