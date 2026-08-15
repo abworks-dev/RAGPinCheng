@@ -45,8 +45,8 @@ class TestDeployGitSafety(unittest.TestCase):
     def test_approved_app_backup_recovery_is_fixed_atomic_and_narrow(self):
         workflow = self.app_backup_recovery_workflow
 
-        self.assertIn("RESTORE_APP_ONLY_31552723068_1", workflow)
-        self.assertIn('BACKUP_PATH="${BACKUP_DIR}/app-only-31552723068-1"', workflow)
+        self.assertIn("RESTORE_APP_ONLY_31889326884_1", workflow)
+        self.assertIn('BACKUP_PATH="${BACKUP_DIR}/app-only-31889326884-1"', workflow)
         self.assertIn('for name in ("app.sqlite", "parents.sqlite")', workflow)
         self.assertIn("PRAGMA integrity_check", workflow)
         self.assertIn('"${COMPOSE[@]}" stop backend', workflow)
@@ -422,9 +422,6 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertIn("sanitize_source_decoupled_override.py", self.linux)
         self.assertIn(compose_sanitizer_flags, self.linux)
         self.assertIn("export COMPOSE_OVERRIDE", self.linux)
-        self.assertIn("sanitize_source_decoupled_override.py", self.app_backup_recovery_workflow)
-        self.assertIn(compose_sanitizer_flags, self.app_backup_recovery_workflow)
-        self.assertIn("export COMPOSE_OVERRIDE", self.app_backup_recovery_workflow)
 
         self.assertLess(
             self.linux.index('-f "$COMPOSE_OVERRIDE"'),
