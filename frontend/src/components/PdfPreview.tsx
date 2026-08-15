@@ -21,11 +21,35 @@ pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/b
 type ZoomMode = "fit-page" | "fit-width" | "actual" | "custom";
 type InteractionMode = "pan" | "select";
 type Size = { width: number; height: number };
+type PrefetchablePdfPage = { getOperatorList: () => Promise<unknown> };
+type PrefetchablePdfDocument = {
+  numPages: number;
+  getPage: (pageNumber: number) => Promise<PrefetchablePdfPage>;
+};
 
 const MIN_SCALE = 0.5;
 const MAX_SCALE = 3;
 const ZOOM_STEP = 0.1;
 const VIEWPORT_PADDING = 32;
+const PREFETCH_RADIUS = 2;
+const PDF_DOCUMENT_OPTIONS = {
+  disableAutoFetch: true,
+  disableStream: true,
+  rangeChunkSize: 256 * 1024,
+};
+
+export function getPdfPrefetchOrder(currentPage: number, numPages: number): number[] {
+  const pages: number[] = [];
+  for (let distance = 1; distance <= PREFETCH_RADIUS; distance += 1) {
+    const nextPage = currentPage + distance;
+    if (nextPage <= numPages) pages.push(nextPage);
+  }
+  for (let distance = 1; distance <= PREFETCH_RADIUS; distance += 1) {
+    const previousPage = currentPage - distance;
+    if (previousPage >= 1) pages.push(previousPage);
+  }
+  return pages;
+}
 
 export function calculatePdfScale(
   mode: Exclude<ZoomMode, "custom">,
@@ -54,6 +78,10 @@ export function PdfPreview() {
   const { state, close, setPage } = usePdfPreview();
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef({ pointerId: -1, x: 0, y: 0, scrollLeft: 0, scrollTop: 0 });
+  const pdfDocumentRef = useRef<PrefetchablePdfDocument | null>(null);
+  const prefetchedPagesRef = useRef(new Set<number>());
+  const prefetchGenerationRef = useRef(0);
+  const prefetchQueueRef = useRef(Promise.resolve());
   const [numPages, setNumPages] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [scale, setScale] = useState(1);
@@ -73,6 +101,9 @@ export function PdfPreview() {
   const panEnabled = isPdf && (interactionMode === "pan" || temporaryPan);
 
   useEffect(() => {
+    prefetchGenerationRef.current += 1;
+    pdfDocumentRef.current = null;
+    prefetchedPagesRef.current.clear();
     setNumPages(null);
     setLoading(true);
     setScale(1);
@@ -82,6 +113,35 @@ export function PdfPreview() {
     setDragging(false);
     setPageSize({ width: 0, height: 0 });
   }, [state.parentId]);
+
+  useEffect(() => {
+    const pdfDocument = pdfDocumentRef.current;
+    if (!open || !isPdf || !pdfDocument || !numPages) return;
+
+    const generation = prefetchGenerationRef.current + 1;
+    prefetchGenerationRef.current = generation;
+    const pages = getPdfPrefetchOrder(state.pageNumber, numPages);
+
+    for (const pageNumber of pages) {
+      prefetchQueueRef.current = prefetchQueueRef.current.then(async () => {
+        if (
+          generation !== prefetchGenerationRef.current
+          || pdfDocument !== pdfDocumentRef.current
+          || prefetchedPagesRef.current.has(pageNumber)
+        ) {
+          return;
+        }
+
+        try {
+          const page = await pdfDocument.getPage(pageNumber);
+          await page.getOperatorList();
+          prefetchedPagesRef.current.add(pageNumber);
+        } catch {
+          // Prefetch is best-effort; the visible Page keeps its own error handling.
+        }
+      });
+    }
+  }, [isPdf, numPages, open, state.pageNumber]);
 
   useEffect(() => {
     const viewport = viewportRef.current;
@@ -127,12 +187,18 @@ export function PdfPreview() {
     };
   }, [isPdf, open]);
 
-  const onDocumentLoadSuccess = useCallback(({ numPages: count }: { numPages: number }) => {
-    setNumPages(count);
+  const onDocumentLoadSuccess = useCallback((pdfDocument: PrefetchablePdfDocument) => {
+    pdfDocumentRef.current = pdfDocument;
+    prefetchedPagesRef.current.clear();
+    prefetchGenerationRef.current += 1;
+    setNumPages(pdfDocument.numPages);
     setLoading(false);
   }, []);
 
   const onDocumentLoadError = useCallback(() => {
+    prefetchGenerationRef.current += 1;
+    pdfDocumentRef.current = null;
+    prefetchedPagesRef.current.clear();
     setLoading(false);
   }, []);
 
@@ -322,6 +388,7 @@ export function PdfPreview() {
                 <Document
                   key={state.parentId}
                   file={`/api/pdf/${state.parentId}`}
+                  options={PDF_DOCUMENT_OPTIONS}
                   onLoadSuccess={onDocumentLoadSuccess}
                   onLoadError={onDocumentLoadError}
                   loading={<div className="flex h-full items-center justify-center text-sm text-muted-foreground">加载 PDF…</div>}

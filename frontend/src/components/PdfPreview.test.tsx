@@ -1,22 +1,33 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PdfPreviewProvider, usePdfPreview } from "../hooks/usePdfPreview";
-import { calculatePdfScale, PdfPreview } from "./PdfPreview";
+import { calculatePdfScale, getPdfPrefetchOrder, PdfPreview } from "./PdfPreview";
+
+const pdfMocks = vi.hoisted(() => ({
+  getOperatorList: vi.fn(),
+  getPage: vi.fn(),
+}));
 
 vi.mock("react-pdf", () => ({
   pdfjs: {
     version: "test",
     GlobalWorkerOptions: { workerSrc: "" },
   },
-  Document: ({ children, onLoadSuccess }: any) => {
+  Document: ({ children, onLoadSuccess, options }: any) => {
     return (
       <div>
-        <button type="button" onClick={() => onLoadSuccess({ numPages: 3 })}>模拟 PDF 加载</button>
+        <button
+          type="button"
+          onClick={() => onLoadSuccess({ numPages: 6, getPage: pdfMocks.getPage })}
+        >
+          模拟 PDF 加载
+        </button>
+        <output aria-label="PDF 加载选项">{JSON.stringify(options)}</output>
         {children}
       </div>
     );
   },
-  Page: ({ onLoadSuccess, scale }: any) => {
+  Page: ({ onLoadSuccess, pageNumber, scale }: any) => {
     return (
       <>
         <button
@@ -25,6 +36,7 @@ vi.mock("react-pdf", () => ({
         >
           模拟页面加载
         </button>
+        <output aria-label="可见页码">{pageNumber}</output>
         <output aria-label="渲染缩放">{scale}</output>
       </>
     );
@@ -71,9 +83,24 @@ describe("calculatePdfScale", () => {
   });
 });
 
+describe("getPdfPrefetchOrder", () => {
+  it("prefetches two forward pages before two previous pages", () => {
+    expect(getPdfPrefetchOrder(4, 10)).toEqual([5, 6, 3, 2]);
+  });
+
+  it("keeps the window inside document bounds", () => {
+    expect(getPdfPrefetchOrder(1, 3)).toEqual([2, 3]);
+    expect(getPdfPrefetchOrder(3, 3)).toEqual([2, 1]);
+  });
+});
+
 describe("PdfPreview interactions", () => {
   beforeEach(() => {
     vi.stubGlobal("ResizeObserver", ResizeObserverMock);
+    pdfMocks.getOperatorList.mockReset().mockResolvedValue({});
+    pdfMocks.getPage.mockReset().mockImplementation(async () => ({
+      getOperatorList: pdfMocks.getOperatorList,
+    }));
   });
 
   it("opens in fit-page and switches to custom zoom", () => {
@@ -101,5 +128,41 @@ describe("PdfPreview interactions", () => {
     expect(screen.getByRole("spinbutton", { name: "页码" })).toHaveValue(2);
     fireEvent.keyDown(screen.getByRole("region", { name: "PDF 页面" }), { key: "ArrowRight" });
     expect(screen.getByRole("spinbutton", { name: "页码" })).toHaveValue(3);
+  });
+
+  it("uses range loading and dynamically prefetches the adjacent window", async () => {
+    renderPreview();
+
+    expect(JSON.parse(screen.getByLabelText("PDF 加载选项").textContent || "{}"))
+      .toEqual({ disableAutoFetch: true, disableStream: true, rangeChunkSize: 256 * 1024 });
+
+    await waitFor(() => expect(pdfMocks.getPage.mock.calls.map(([page]) => page)).toEqual([2, 3]));
+
+    fireEvent.click(screen.getByRole("button", { name: "下一页 →" }));
+    await waitFor(() => expect(pdfMocks.getPage.mock.calls.map(([page]) => page)).toEqual([2, 3, 4, 1]));
+
+    expect(screen.getAllByLabelText("可见页码")).toHaveLength(1);
+    expect(screen.getByLabelText("可见页码")).toHaveTextContent("2");
+  });
+
+  it("drops stale queued pages when the user jumps while prefetch is in flight", async () => {
+    let releaseFirstPage!: () => void;
+    const firstPage = new Promise<{ getOperatorList: () => Promise<unknown> }>((resolve) => {
+      releaseFirstPage = () => resolve({ getOperatorList: pdfMocks.getOperatorList });
+    });
+    pdfMocks.getPage
+      .mockReset()
+      .mockImplementationOnce(() => firstPage)
+      .mockImplementation(async () => ({ getOperatorList: pdfMocks.getOperatorList }));
+
+    renderPreview();
+    await waitFor(() => expect(pdfMocks.getPage.mock.calls.map(([page]) => page)).toEqual([2]));
+
+    fireEvent.change(screen.getByRole("spinbutton", { name: "页码" }), { target: { value: "4" } });
+    releaseFirstPage();
+
+    await waitFor(() => {
+      expect(pdfMocks.getPage.mock.calls.map(([page]) => page)).toEqual([2, 5, 6, 3]);
+    });
   });
 });
