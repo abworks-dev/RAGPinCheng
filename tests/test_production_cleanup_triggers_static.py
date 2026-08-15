@@ -49,6 +49,17 @@ def test_cleanup_workflow_uses_named_parameter_splatting():
     assert "$arguments += '-Apply'" not in workflow
 
 
+def test_cleanup_orchestrator_keeps_runtime_audit_inside_managed_root():
+    script = read_text("scripts/cleanup-production.ps1")
+
+    assert "$runtimeAuditRoot = Join-Path $RuntimeRoot 'cleanup-audit'" in script
+    assert 'Join-Path $runtimeAuditRoot "orchestrated-$runId.json"' in script
+    assert "$artifactAuditPath = Join-Path $auditRoot 'runtime.json'" in script
+    assert "Copy-Item -LiteralPath $arguments.AuditPath" in script
+    assert "Runtime cleanup did not produce its managed audit report" in script
+    assert "$arguments.AuditPath = Join-Path $auditRoot 'runtime.json'" not in script
+
+
 def test_cleanup_operations_owns_manual_and_scheduled_triggers():
     workflow = read_text(".github/workflows/cleanup-production-operations.yml")
 

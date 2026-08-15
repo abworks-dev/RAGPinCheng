@@ -82,6 +82,7 @@ $mode = if ($Apply) { 'APPLY' } else { 'DRY RUN' }
 foreach ($targetName in $selectedTargets) {
     $module = $modules[$targetName]
     $arguments = @{}
+    $artifactAuditPath = $null
 
     switch ($targetName) {
         'asr' {
@@ -94,7 +95,9 @@ foreach ($targetName in $selectedTargets) {
         }
         'runtime' {
             $arguments.RuntimeRoot = $RuntimeRoot
-            $arguments.AuditPath = Join-Path $auditRoot 'runtime.json'
+            $runtimeAuditRoot = Join-Path $RuntimeRoot 'cleanup-audit'
+            $arguments.AuditPath = Join-Path $runtimeAuditRoot "orchestrated-$runId.json"
+            $artifactAuditPath = Join-Path $auditRoot 'runtime.json'
         }
         'backups' {
             $arguments.BackupDirectory = $BackupDirectory
@@ -118,6 +121,12 @@ foreach ($targetName in $selectedTargets) {
     try {
         if ($PSCmdlet.ShouldProcess($module, "Run $targetName cleanup")) {
             & $module @arguments
+        }
+        if ($artifactAuditPath) {
+            if (-not (Test-Path -LiteralPath $arguments.AuditPath -PathType Leaf)) {
+                throw "Runtime cleanup did not produce its managed audit report"
+            }
+            Copy-Item -LiteralPath $arguments.AuditPath -Destination $artifactAuditPath -Force
         }
         $results.Add([pscustomobject]@{
                 Target     = $targetName
