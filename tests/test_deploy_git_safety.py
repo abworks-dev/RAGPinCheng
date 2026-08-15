@@ -418,6 +418,7 @@ class TestDeployGitSafety(unittest.TestCase):
             "--no-interpolate --no-env-resolution --no-consistency --format json"
         )
         self.assertIn(compose_sanitizer_flags, self.app_only_workflow)
+        self.assertIn('docker-compose.yml" -f "${COMPOSE_OVERRIDE}', self.app_only_workflow)
         self.assertIn("export COMPOSE_OVERRIDE", self.app_only_workflow)
         self.assertIn("sanitize_source_decoupled_override.py", self.linux)
         self.assertIn(compose_sanitizer_flags, self.linux)
