@@ -24,6 +24,11 @@ if TYPE_CHECKING:
 class ProviderErrorCode(Enum):
     invalid_input = "invalid_input"
     provider_unavailable = "provider_unavailable"
+    profile_unavailable = "profile_unavailable"
+    queue_full = "queue_full"
+    service_unavailable = "service_unavailable"
+    storage_unavailable = "storage_unavailable"
+    disk_low = "disk_low"
     provider_timeout = "provider_timeout"
     transient_provider_error = "transient_provider_error"
     permanent_provider_error = "permanent_provider_error"

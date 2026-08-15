@@ -55,8 +55,9 @@ Phase 5A/5B 已接通版本列表、只读 Markdown 预览、人工审核、显�
 - 静态 Profile catalog 保留 qualification 基线：experimental SenseVoice 为 enabled，
   faster-whisper、Qwen3-ASR 和 WhisperX 为 disabled。Phase 4 应用组装层通过严格的
   `TRANSCRIPTION_ADMITTED_PROFILE_IDS` allowlist 覆盖业务准入，不改变引擎运行时身份；
-  生产允许 SenseVoice 与 faster-whisper，Qwen3-ASR 和 WhisperX 继续关闭。四者复用
-  同一 Remote Provider 与唯一 Candidate → Canonical 结果流；
+  当前生产应用的准入由受控 deployment workflow 持久化并以实时 capabilities 复核：
+  SenseVoice、faster-whisper 与 WhisperX 已准入，Qwen3-ASR 保持关闭。四者复用同一
+  Remote Provider 与唯一 Candidate → Canonical 结果流；
 - ASR service 注册四个固定 service Profile；faster-whisper、Qwen3-ASR 或 WhisperX
   缓存/依赖缺失时仅相应 Profile 不可用，不阻止现有 SenseVoice 服务启动；
 - faster-whisper adapter 固定

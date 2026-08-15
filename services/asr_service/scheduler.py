@@ -95,6 +95,41 @@ class Scheduler:
             if self._pause_reason() is not None:
                 raise ContractValidationError("service_unavailable", "scheduler")
 
+    def diagnostic_snapshot(self) -> dict[str, object]:
+        """Return bounded, non-content operational state for authenticated diagnostics."""
+        with self._state_lock:
+            profiles = []
+            for registration in self.engines.registrations:
+                try:
+                    capability = registration.engine.capabilities()
+                    available = (
+                        capability.available
+                        and capability.provider_key == registration.config.provider_key
+                        and capability.service_profile_id == registration.config.service_profile_id
+                    )
+                    reason = None if available else capability.unavailable_reason_code
+                except Exception:
+                    available = False
+                    reason = "engine-check-failed"
+                profiles.append(
+                    {
+                        "service_profile_id": registration.config.service_profile_id,
+                        "available": available,
+                        "unavailable_reason_code": reason,
+                    }
+                )
+            pause_reason = self._pause_reason()
+            return {
+                "enabled": self.enabled,
+                "queue_depth": len(self._queue),
+                "queue_limit": self.queue_limit,
+                "oom_latched": self.oom_latched,
+                "consecutive_failures": self._consecutive_failures,
+                "failure_limit": self.failure_limit,
+                "pause_reason": None if pause_reason is None else pause_reason.value,
+                "profiles": profiles,
+            }
+
     def cancel(self, job_id: str) -> ServiceJob:
         with self._state_lock:
             job = self.repo.get(job_id)

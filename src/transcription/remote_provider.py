@@ -220,9 +220,9 @@ class HttpxAsrServiceClient:
 
 
 _FAILURE_MAP = {
-    ServiceFailureCode.profile_unavailable: ProviderErrorCode.provider_unavailable,
-    ServiceFailureCode.service_unavailable: ProviderErrorCode.provider_unavailable,
-    ServiceFailureCode.queue_full: ProviderErrorCode.provider_unavailable,
+    ServiceFailureCode.profile_unavailable: ProviderErrorCode.profile_unavailable,
+    ServiceFailureCode.service_unavailable: ProviderErrorCode.service_unavailable,
+    ServiceFailureCode.queue_full: ProviderErrorCode.queue_full,
     ServiceFailureCode.provider_timeout: ProviderErrorCode.provider_timeout,
     ServiceFailureCode.provider_oom: ProviderErrorCode.provider_oom,
     ServiceFailureCode.provider_cancelled: ProviderErrorCode.provider_cancelled,
@@ -233,8 +233,8 @@ _FAILURE_MAP = {
     ServiceFailureCode.invalid_engine_output: ProviderErrorCode.invalid_provider_output,
     ServiceFailureCode.engine_failure_transient: ProviderErrorCode.transient_provider_error,
     ServiceFailureCode.engine_failure_permanent: ProviderErrorCode.permanent_provider_error,
-    ServiceFailureCode.storage_unavailable: ProviderErrorCode.provider_unavailable,
-    ServiceFailureCode.disk_low: ProviderErrorCode.provider_unavailable,
+    ServiceFailureCode.storage_unavailable: ProviderErrorCode.storage_unavailable,
+    ServiceFailureCode.disk_low: ProviderErrorCode.disk_low,
 }
 
 
@@ -245,6 +245,11 @@ def _failure(
 ) -> ProviderFailure:
     transient = code in {
         ProviderErrorCode.provider_unavailable,
+        ProviderErrorCode.profile_unavailable,
+        ProviderErrorCode.queue_full,
+        ProviderErrorCode.service_unavailable,
+        ProviderErrorCode.storage_unavailable,
+        ProviderErrorCode.disk_low,
         ProviderErrorCode.provider_timeout,
         ProviderErrorCode.provider_oom,
         ProviderErrorCode.transient_provider_error,
@@ -278,6 +283,11 @@ def _client_failure(
         return _failure(provider_key, ProviderErrorCode.provider_timeout, timeout_ms)
     if exc.reason == "invalid_json":
         return _failure(provider_key, ProviderErrorCode.service_contract_mismatch)
+    if exc.status_code == 503 and exc.detail_code:
+        try:
+            return _failure(provider_key, _FAILURE_MAP[ServiceFailureCode(exc.detail_code)])
+        except (KeyError, ValueError):
+            pass
     if exc.status_code == 503 or exc.status_code is None:
         return _failure(provider_key, ProviderErrorCode.provider_unavailable)
     return _failure(provider_key, ProviderErrorCode.provider_contract_violation)

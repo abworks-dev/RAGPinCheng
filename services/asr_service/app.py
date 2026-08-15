@@ -218,6 +218,10 @@ def create_app(
             settings.max_input_bytes,
         ).to_json_dict()
 
+    @app.get("/v1/diagnostics", dependencies=[auth])
+    def diagnostics() -> dict[str, object]:
+        return scheduler.diagnostic_snapshot()
+
     @app.post("/v1/jobs", dependencies=[auth])
     async def create(request: Request) -> dict[str, object]:
         try:

@@ -85,7 +85,7 @@ function StatusBadge({ value, meta, empty = "未开始" }: {
 
 function JobSummary({ job }: { job: TranscriptionJob }) {
   if (job.status === "succeeded") return <p className="mt-1 text-ui-xs text-muted-foreground">转录草稿已生成；审核、发布与索引状态见右侧独立列。</p>;
-  if (job.status === "failed") return <p className="mt-1 text-ui-xs text-destructive">{job.error_summary || job.failure_error_code || "转录失败"}</p>;
+  if (job.status === "failed") return <p className="mt-1 text-ui-xs text-destructive">{job.failure?.message || job.error_summary || job.failure_error_code || "转录失败"}</p>;
   if (job.status === "cancelled") return <p className="mt-1 text-ui-xs text-muted-foreground">任务已取消，可重新转录。</p>;
   const stage = job.stage ? stageLabels[job.stage] || job.stage : "排队中";
   const progress = job.total_ms > 0 ? Math.min(100, Math.round((job.processed_ms / job.total_ms) * 100)) : 0;

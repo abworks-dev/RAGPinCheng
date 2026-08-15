@@ -135,6 +135,35 @@ def test_api_create_upload_complete_start_poll_result_sequence(tmp_path):
         assert result.json()["result_kind"] == "candidate"
 
 
+def test_authenticated_diagnostics_exposes_only_operational_state(tmp_path):
+    app = app_for(tmp_path)
+    with TestClient(app) as client:
+        assert client.get("/v1/diagnostics").status_code == 401
+        response = client.get("/v1/diagnostics", headers=headers())
+    assert response.status_code == 200
+    assert response.json() == {
+        "enabled": True,
+        "queue_depth": 0,
+        "queue_limit": 2,
+        "oom_latched": False,
+        "consecutive_failures": 0,
+        "failure_limit": 3,
+        "pause_reason": None,
+        "profiles": [
+            {
+                "service_profile_id": "faster-whisper-large-v3-turbo-v1",
+                "available": True,
+                "unavailable_reason_code": None,
+            },
+            {
+                "service_profile_id": "funasr-sensevoice-small-v1",
+                "available": True,
+                "unavailable_reason_code": None,
+            },
+        ],
+    }
+
+
 def test_capabilities_expose_each_available_registered_profile(tmp_path):
     with TestClient(app_for(tmp_path)) as client:
         payload = client.get("/v1/capabilities", headers=headers()).json()

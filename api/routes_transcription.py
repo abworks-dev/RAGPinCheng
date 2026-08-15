@@ -97,6 +97,11 @@ def build_transcription_service() -> TranscriptionApplicationService:
 
 _TRANSCRIPTION_FAILURES: dict[str, tuple[str, bool]] = {
     "provider_unavailable": ("自动转录服务暂时不可用，请稍后重试。", True),
+    "profile_unavailable": ("所选转录 Profile 暂不可用，请稍后重试。", True),
+    "queue_full": ("转录队列已满，请稍后重试。", True),
+    "service_unavailable": ("转录服务当前暂停接收任务，请稍后重试。", True),
+    "storage_unavailable": ("转录服务存储暂不可用，请稍后重试。", True),
+    "disk_low": ("转录服务存储空间不足，请联系管理员处理。", True),
     "provider_timeout": ("自动转录任务超时，可以重新转录。", True),
     "provider_oom": ("转录资源暂时不足，请稍后重试。", True),
     "transient_provider_error": ("转录服务暂时失败，可以重新转录。", True),

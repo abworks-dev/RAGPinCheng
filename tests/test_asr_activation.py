@@ -506,6 +506,7 @@ def test_asr_startup_diagnostic_is_manual_read_only_and_sanitized():
     assert "Get-NetTCPConnection -LocalPort 8200 -State Listen" in script
     assert '"http://127.0.0.1:8200/health"' in script
     assert "ConvertTo-SafeDiagnosticLine" in script
+    assert "IsNullOrWhiteSpace" in script
     assert "sanitized_log_lines" in script
     assert "task_root_binding_available" in script
     assert "machine_program_root_present" in script

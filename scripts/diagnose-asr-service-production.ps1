@@ -216,6 +216,7 @@ $safeLogLines = @()
 $exceptionTypes = @()
 if ($null -ne $latestLog) {
     foreach ($line in @(Get-Content -LiteralPath $latestLog.FullName -Tail 300 -ErrorAction SilentlyContinue)) {
+        if ([string]::IsNullOrWhiteSpace([string]$line)) { continue }
         foreach ($match in [regex]::Matches([string]$line, '\b[A-Za-z_][A-Za-z0-9_]*(?:Error|Exception)\b')) {
             $exceptionTypes += $match.Value
         }

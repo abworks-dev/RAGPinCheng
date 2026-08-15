@@ -305,6 +305,26 @@ def test_remote_failure_mapping_is_closed(mode, expected):
     assert result.error_code is expected
 
 
+@pytest.mark.parametrize(
+    ("detail_code", "expected"),
+    [
+        ("queue_full", ProviderErrorCode.queue_full),
+        ("profile_unavailable", ProviderErrorCode.profile_unavailable),
+        ("service_unavailable", ProviderErrorCode.service_unavailable),
+        ("storage_unavailable", ProviderErrorCode.storage_unavailable),
+        ("disk_low", ProviderErrorCode.disk_low),
+    ],
+)
+def test_service_503_preserves_safe_failure_detail(detail_code, expected):
+    result = _client_failure(
+        "funasr-sensevoice",
+        AsrServiceClientError(503, "http_error", detail_code),
+        1000,
+    )
+    assert result.error_code is expected
+    assert result.classification.value == "transient"
+
+
 def test_timeout_best_effort_cancels_before_returning_failure():
     times = iter((0.0, 0.0, 0.0, 2.0))
     client = FakeClient("timeout")
