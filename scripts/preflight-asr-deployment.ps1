@@ -15,11 +15,15 @@ param(
     [Parameter(Mandatory = $true)]
     [ValidatePattern('^[0-9a-fA-F]{64}$')]
     [string]$RuntimeContractSha256,
+    [string]$CompanionFasterWhisperRunId = "",
+    [string]$CompanionFasterWhisperCommitSha = "",
+    [string]$CompanionFasterWhisperRuntimeContractSha256 = "",
     [Parameter(Mandatory = $true)]
     [string]$ReportPath,
     [string]$SourceRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")),
     [string]$DataRoot = $env:PRODUCTION_ASR_DATA_ROOT,
     [string]$QualificationRoot = "",
+    [string]$FasterWhisperQualificationRoot = $env:PRODUCTION_FASTER_WHISPER_QUALIFICATION_ROOT,
     [string]$TempRoot = $env:RUNNER_TEMP
 )
 
@@ -130,11 +134,26 @@ try {
             -CommitSha $QualificationCommitSha.ToLowerInvariant() `
             -ExpectedRuntimeContractSha256 $runtimeContract.runtime_contract_sha256
     } elseif ($Engine -eq "whisperx") {
-        Get-QualifiedWhisperXEvidence `
+        $whisperXEvidence = Get-QualifiedWhisperXEvidence `
             -WhisperXRoot $QualificationRoot `
             -RunId $QualificationRunId `
             -CommitSha $QualificationCommitSha.ToLowerInvariant() `
             -ExpectedRuntimeContractSha256 $runtimeContract.runtime_contract_sha256
+        if (
+            $CompanionFasterWhisperRunId -notmatch '^[0-9]{1,20}$' -or
+            $CompanionFasterWhisperCommitSha -notmatch '^[0-9a-fA-F]{40}$' -or
+            $CompanionFasterWhisperRuntimeContractSha256 -notmatch '^[0-9a-fA-F]{64}$'
+        ) { throw "WhisperX preflight requires a qualified faster-whisper companion identity" }
+        $fasterRuntime = Get-AsrRuntimeContract -Engine "faster-whisper" -SourceRoot $resolvedSource -CommitSha $CommitSha
+        if ($fasterRuntime.runtime_contract_sha256 -ne $CompanionFasterWhisperRuntimeContractSha256.ToLowerInvariant()) {
+            throw "Companion faster-whisper runtime contract does not match the deployment source"
+        }
+        $fasterEvidence = Get-QualifiedFasterWhisperEvidence `
+            -QualificationRoot $FasterWhisperQualificationRoot `
+            -RunId $CompanionFasterWhisperRunId `
+            -CommitSha $CompanionFasterWhisperCommitSha.ToLowerInvariant() `
+            -ExpectedRuntimeContractSha256 $fasterRuntime.runtime_contract_sha256
+        $whisperXEvidence
     } else {
         throw "Production evidence adapter is not implemented for engine: $Engine"
     }
@@ -150,6 +169,8 @@ try {
     } else {
         Copy-QualifiedWhisperXWheels -Evidence $evidence -Destination $qualifiedWheelSeed
         Copy-QualifiedWhisperXWheels -Evidence $evidence -Destination $wheelhouse
+        Copy-QualifiedFasterWhisperWheels -Evidence $fasterEvidence -Destination $qualifiedWheelSeed
+        Copy-QualifiedFasterWhisperWheels -Evidence $fasterEvidence -Destination $wheelhouse
     }
 
     $python = Get-PreflightPython311
@@ -195,6 +216,7 @@ try {
                 Assert-QualifiedFasterWhisperWheels -Evidence $evidence -Wheelhouse $wheelhouse
             } else {
                 Assert-QualifiedWhisperXWheels -Evidence $evidence -Wheelhouse $wheelhouse
+                Assert-QualifiedFasterWhisperWheels -Evidence $fasterEvidence -Wheelhouse $wheelhouse
             }
         } catch {
             $report.failure_code = "qualified_wheel_set_not_preserved"

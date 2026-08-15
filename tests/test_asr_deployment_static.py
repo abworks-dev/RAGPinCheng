@@ -194,7 +194,12 @@ def test_asr_deployment_preflight_is_manual_and_writes_only_runner_temp():
     assert "Assert-PreflightPathWithinTemp" in preflight
     assert "Deployment preflight paths must remain under runner temp" in preflight
     assert "production_services_modified = $false" in preflight
-    assert preflight.count("Copy-QualifiedFasterWhisperWheels") == 2
+    assert "CompanionFasterWhisperRunId" in preflight
+    assert "WhisperX preflight requires a qualified faster-whisper companion identity" in preflight
+    assert "Companion faster-whisper runtime contract does not match the deployment source" in preflight
+    assert preflight.count("Copy-QualifiedFasterWhisperWheels") == 4
+    assert preflight.count("Assert-QualifiedFasterWhisperWheels") == 2
+    assert "companion_faster_whisper_runtime_contract_sha256" in workflow
     seed = preflight.index("-Destination $qualifiedWheelSeed")
     wheelhouse = preflight.index("-Destination $wheelhouse", seed)
     download = preflight.index('"-m", "pip", "download"', wheelhouse)

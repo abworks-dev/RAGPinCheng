@@ -27,6 +27,18 @@ on:
         description: "Runtime contract SHA-256 recorded by the passed qualification"
         required: true
         type: string
+      companion_faster_whisper_run_id:
+        description: "Passed faster-whisper run ID; required for WhisperX"
+        required: false
+        type: string
+      companion_faster_whisper_commit_sha:
+        description: "Commit recorded by the companion faster-whisper qualification"
+        required: false
+        type: string
+      companion_faster_whisper_runtime_contract_sha256:
+        description: "Runtime contract from the companion faster-whisper qualification"
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -70,6 +82,9 @@ jobs:
             -QualificationRunId "${{ inputs.qualification_run_id }}" `
             -QualificationCommitSha "${{ inputs.qualification_commit_sha }}" `
             -RuntimeContractSha256 "${{ inputs.runtime_contract_sha256 }}" `
+            -CompanionFasterWhisperRunId "${{ inputs.companion_faster_whisper_run_id }}" `
+            -CompanionFasterWhisperCommitSha "${{ inputs.companion_faster_whisper_commit_sha }}" `
+            -CompanionFasterWhisperRuntimeContractSha256 "${{ inputs.companion_faster_whisper_runtime_contract_sha256 }}" `
             -ReportPath $report `
             -SourceRoot "${{ github.workspace }}"
 
