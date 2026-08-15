@@ -62,3 +62,45 @@ def test_inventory_reports_only_aggregate_metadata(tmp_path: Path):
         b"content-not-for-report"
     )
     assert "candidate-secret-name" not in raw
+
+
+def test_inventory_classifies_candidate_release_and_active_references(tmp_path: Path):
+    executable = _powershell()
+    if executable is None:
+        pytest.skip("Windows PowerShell is unavailable")
+    data_root = tmp_path / "data"
+    program_root = tmp_path / "program"
+    backup_root = data_root / "backups"
+    dependency_root = data_root / "dependency-runs"
+    for candidate_id in ("101", "102", "broken", "103"):
+        (dependency_root / f"candidate-{candidate_id}").mkdir(parents=True)
+        (dependency_root / f"candidate-{candidate_id}" / "wheelhouse.bin").write_bytes(b"x")
+    (program_root / "releases" / "101").mkdir(parents=True)
+    (data_root / "config" / "releases" / "101").mkdir(parents=True)
+    (program_root / "releases" / "101" / "release-manifest.json").write_text(
+        '{"candidate_id":"101"}', encoding="utf-8"
+    )
+    (data_root / "release-state").mkdir(parents=True)
+    (data_root / "release-state" / "active.json").write_text(
+        '{"candidate_id":"101"}', encoding="utf-8"
+    )
+    activation = backup_root / "900"
+    activation.mkdir(parents=True)
+    (activation / "candidate-activation-state.json").write_text(
+        '{"candidate_id":"102","previous_candidate_id":"101"}', encoding="utf-8"
+    )
+    report_path = tmp_path / "inventory.json"
+    result = subprocess.run(
+        [
+            executable, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+            "-File", str(SCRIPT), "-ReportPath", str(report_path),
+            "-AsrDataRoot", str(data_root), "-AsrProgramRoot", str(program_root),
+            "-BackupDirectory", str(backup_root),
+        ], cwd=ROOT, text=True, capture_output=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    candidates = {item["candidate_id"]: item for item in json.loads(report_path.read_text(encoding="utf-8-sig"))["candidates"]}
+    assert candidates["101"]["status"] == "active"
+    assert candidates["102"]["status"] == "rollback-referenced"
+    assert candidates["103"]["status"] == "dependency-only"
+    assert candidates["broken"]["status"] == "unknown-name"
