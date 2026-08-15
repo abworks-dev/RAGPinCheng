@@ -1,4 +1,8 @@
 import copy
+import json
+import os
+import subprocess
+import sys
 
 import pytest
 
@@ -37,6 +41,28 @@ def test_sanitize_is_idempotent_when_docs_mount_is_absent():
     sanitized, removed = sanitize(config)
     assert removed == 0
     assert sanitized == config
+
+
+def test_cli_replaces_relative_env_file_with_production_path():
+    config = {
+        "services": {
+            "backend": {
+                "env_file": ["../.env"],
+                "volumes": [],
+            }
+        }
+    }
+    result = subprocess.run(
+        [sys.executable, "scripts/sanitize_source_decoupled_override.py"],
+        input=json.dumps(config),
+        text=True,
+        capture_output=True,
+        check=True,
+        env={**os.environ, "COMPOSE_ENV_FILE": "/data/secrets/prod.env"},
+    )
+    assert json.loads(result.stdout)["services"]["backend"]["env_file"] == [
+        "/data/secrets/prod.env"
+    ]
 
 
 @pytest.mark.parametrize(
