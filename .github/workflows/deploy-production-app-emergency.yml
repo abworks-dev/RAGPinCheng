@@ -367,6 +367,7 @@ jobs:
             exit 1
           }
 
+          ORIGINAL_COMPOSE_OVERRIDE="${COMPOSE_OVERRIDE}"
           if [ "${SOURCE_DECOUPLING_COMPLETE:-false}" = "true" ]; then
             SANITIZER="${BACKUP_DIR}/.sanitize-source-decoupled-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.py"
             SANITIZED_OVERRIDE="${BACKUP_DIR}/.compose-private-source-decoupled-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.json"
@@ -396,8 +397,17 @@ jobs:
               exit 1
               ;;
           esac
-          COMPOSE=(docker compose -p ragpincheng-prod \
+          DEPLOY_COMPOSE=(docker compose -p ragpincheng-prod \
             "${COMPOSE_FILES[@]}" --env-file "${COMPOSE_ENV_FILE}")
+          CURRENT_COMPOSE_FILES=(
+            -f "${REPO_PATH}/docker/docker-compose.yml"
+            -f "${ORIGINAL_COMPOSE_OVERRIDE}"
+          )
+          if [ "${SOURCE_DECOUPLING_COMPLETE:-false}" = "true" ]; then
+            CURRENT_COMPOSE_FILES+=(-f "${SOURCE_DECOUPLED_COMPOSE}")
+          fi
+          COMPOSE=(docker compose -p ragpincheng-prod \
+            "${CURRENT_COMPOSE_FILES[@]}" --env-file "${COMPOSE_ENV_FILE}")
 
           remove_legacy_recovery_backend() {
             local candidate project service host_port container_port
@@ -869,6 +879,7 @@ jobs:
             git merge --ff-only "${DEPLOY_COMMIT_SHA}"
             echo "TRANSCRIPTION_ADMISSION action=${TRANSCRIPTION_ADMISSION_ACTION} source=workflow-environment"
             bash "${REPO_PATH}/scripts/deploy-app.sh"
+            COMPOSE=("${DEPLOY_COMPOSE[@]}")
 
             CONTAINER_ID="$("${COMPOSE[@]}" ps -q backend)"
             [ -n "${CONTAINER_ID}" ]
