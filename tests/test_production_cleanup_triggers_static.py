@@ -79,6 +79,7 @@ def test_cleanup_operations_owns_manual_and_scheduled_triggers():
     assert "PRODUCTION_REPO_PATH" not in workflow
     assert "backup-apply" in workflow
     assert "actions/upload-artifact@v4" in workflow
+    assert "actions: read" in workflow
 
 
 def test_storage_inventory_is_aggregate_and_read_only():
