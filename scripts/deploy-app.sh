@@ -65,7 +65,8 @@ sanitize_source_decoupled_override() {
     export COMPOSE_OVERRIDE
 }
 
-if [ "${SOURCE_DECOUPLING_COMPLETE:-false}" = "true" ]; then
+if [ "${SOURCE_DECOUPLING_COMPLETE:-false}" = "true" ] && \
+   [ "${SOURCE_DECOUPLED_OVERRIDE_SANITIZED:-false}" != "true" ]; then
     sanitize_source_decoupled_override
 fi
 

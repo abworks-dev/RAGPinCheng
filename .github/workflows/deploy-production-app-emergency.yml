@@ -380,6 +380,7 @@ jobs:
             mv "${SANITIZED_OVERRIDE}.tmp" "${SANITIZED_OVERRIDE}"
             COMPOSE_OVERRIDE="${SANITIZED_OVERRIDE}"
             export COMPOSE_OVERRIDE
+            export SOURCE_DECOUPLED_OVERRIDE_SANITIZED=true
           fi
 
           COMPOSE_FILES=(-f "${COMPOSE_OVERRIDE}")
