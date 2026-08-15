@@ -98,7 +98,6 @@ jobs:
             *) echo "ERROR: invalid managed content head enforcement"; exit 1 ;;
           esac
           if [ "${CONTENT_HEAD_ENFORCEMENT}" = "strict" ] || \
-             [ "${DOCS_HOST_PATH:-}" = "/data/business/ragpincheng/content/legacy-docs" ] || \
              [ "${MEDIA_HOST_PATH:-}" = "/data/business/ragpincheng/content/media" ] || \
              [ "${TRANSCRIPTION_ARTIFACT_DIR:-}" = "/app/content/transcription-artifacts" ]; then
             [ "${SOURCE_DECOUPLING_COMPLETE:-}" = "true" ] || {
@@ -577,20 +576,26 @@ jobs:
           verify_source_decoupling_mounts() {
             [ "${SOURCE_DECOUPLING_COMPLETE:-}" = "true" ] || return 0
             [ "${CONTENT_HEAD_ENFORCEMENT}" = "strict" ]
-            [ "${DOCS_HOST_PATH}" = "/data/business/ragpincheng/content/legacy-docs" ]
             [ "${MEDIA_HOST_PATH}" = "/data/business/ragpincheng/content/media" ]
             [ "${TRANSCRIPTION_ARTIFACT_DIR}" = "/app/content/transcription-artifacts" ]
             CONTAINER_ID="$("${COMPOSE[@]}" ps -q backend)"
             docker inspect "${CONTAINER_ID}" | \
-              EXPECTED_DOCS="${DOCS_HOST_PATH}" EXPECTED_MEDIA="${MEDIA_HOST_PATH}" python3 -c '
+              EXPECTED_MEDIA="${MEDIA_HOST_PATH}" python3 -c '
           import json, os, sys
           container = json.load(sys.stdin)[0]
-          mounts = {item["Destination"]: item["Source"] for item in container.get("Mounts", [])}
-          assert mounts.get("/app/docs") == os.environ["EXPECTED_DOCS"]
-          assert mounts.get("/app/media") == os.environ["EXPECTED_MEDIA"]
-          assert mounts.get("/app/content") == "/data/business/ragpincheng/content"
-          assert all(not source.startswith("/data/business/ragpincheng/source") for source in mounts.values())
+          mounts = {item["Destination"]: item for item in container.get("Mounts", [])}
+          docs = mounts.get("/app/docs")
+          assert docs is not None
+          assert docs.get("Type") == "tmpfs"
+          assert docs.get("RW") is False
+          assert mounts.get("/app/media", {}).get("Source") == os.environ["EXPECTED_MEDIA"]
+          assert mounts.get("/app/content", {}).get("Source") == "/data/business/ragpincheng/content"
+          assert all(not item.get("Source", "").startswith("/data/business/ragpincheng/source") for item in mounts.values())
           '
+            if "${COMPOSE[@]}" exec -T backend sh -c ': > /app/docs/.write-probe' 2>/dev/null; then
+              echo "ERROR: retired legacy docs runtime path is writable"
+              return 1
+            fi
             "${COMPOSE[@]}" exec -T backend python - <<'PY'
           from pathlib import Path
           from src.config import DOCS_DIR, MEDIA_DIR, TRANSCRIPTION_ARTIFACT_DIR

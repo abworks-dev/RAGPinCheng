@@ -1,0 +1,111 @@
+name: Retire Empty Production Legacy Docs Directory
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_production:
+        description: Select RETIRE_EMPTY_LEGACY_DOCS_DIR to remove the empty host directory
+        required: true
+        default: CANCEL
+        type: choice
+        options:
+          - CANCEL
+          - RETIRE_EMPTY_LEGACY_DOCS_DIR
+      expected_commit:
+        description: Full deployed master commit approved for directory retirement
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-app-manual-v1
+  cancel-in-progress: false
+
+jobs:
+  retire-empty-directory:
+    environment: production-asr
+    runs-on: [self-hosted, linux, ubuntu, production, app]
+    timeout-minutes: 15
+    env:
+      REPO_PATH: ${{ vars.PRODUCTION_APP_REPO_PATH }}
+      BACKUP_ROOT: ${{ vars.PRODUCTION_APP_BACKUP_DIRECTORY }}
+      CONTENT_ROOT: ${{ vars.PRODUCTION_CONTENT_ROOT }}
+      CONTENT_HEAD_ENFORCEMENT: ${{ vars.CONTENT_HEAD_ENFORCEMENT }}
+      SOURCE_DECOUPLING_COMPLETE: ${{ vars.SOURCE_DECOUPLING_COMPLETE }}
+      EXPECTED_COMMIT: ${{ inputs.expected_commit }}
+      CONFIRM_PRODUCTION: ${{ inputs.confirm_production }}
+    steps:
+      - name: Verify deployment and retire the exact empty directory
+        run: |
+          set -euo pipefail
+
+          LEGACY_DOCS_DIR="/data/business/ragpincheng/content/legacy-docs"
+          [ "${CONFIRM_PRODUCTION}" = "RETIRE_EMPTY_LEGACY_DOCS_DIR" ] || {
+            echo "ERROR: empty production legacy docs directory retirement was not confirmed"
+            exit 1
+          }
+          [ "${GITHUB_REF}" = "refs/heads/master" ]
+          [[ "${EXPECTED_COMMIT}" =~ ^[0-9a-fA-F]{40}$ ]]
+          [ "${GITHUB_SHA}" = "${EXPECTED_COMMIT}" ]
+          [ "${CONTENT_ROOT}" = "/data/business/ragpincheng/content" ]
+          [ "${CONTENT_HEAD_ENFORCEMENT}" = "strict" ]
+          [ "${SOURCE_DECOUPLING_COMPLETE}" = "true" ]
+          [ "$(git -C "${REPO_PATH}" rev-parse HEAD)" = "${EXPECTED_COMMIT}" ]
+
+          mapfile -t BACKEND_CONTAINERS < <(docker ps -q \
+            --filter 'label=com.docker.compose.project=ragpincheng-prod' \
+            --filter 'label=com.docker.compose.service=backend')
+          [ "${#BACKEND_CONTAINERS[@]}" -eq 1 ] || {
+            echo "ERROR: expected exactly one running production backend"
+            exit 1
+          }
+          CONTAINER_ID="${BACKEND_CONTAINERS[0]}"
+          docker inspect "${CONTAINER_ID}" | python3 -c '
+          import json, sys
+          container = json.load(sys.stdin)[0]
+          docs = next((item for item in container.get("Mounts", []) if item.get("Destination") == "/app/docs"), None)
+          assert docs is not None
+          assert docs.get("Type") == "tmpfs"
+          assert docs.get("RW") is False
+          assert all(item.get("Source") != "/data/business/ragpincheng/content/legacy-docs" for item in container.get("Mounts", []))
+          '
+          curl -fsS --connect-timeout 5 --max-time 10 http://localhost/api/health | \
+            python3 -c 'import json,sys; assert json.load(sys.stdin).get("status") == "ok"'
+
+          if [ ! -e "${LEGACY_DOCS_DIR}" ]; then
+            echo "LEGACY_DOCS_DIRECTORY status=already-absent"
+            exit 0
+          fi
+          [ -d "${LEGACY_DOCS_DIR}" ] && [ ! -L "${LEGACY_DOCS_DIR}" ]
+          [ "$(find "${LEGACY_DOCS_DIR}" -mindepth 1 -print -quit)" = "" ]
+          if findmnt -rn -S "${LEGACY_DOCS_DIR}" | grep -q .; then
+            echo "ERROR: legacy docs directory is still a mount source"
+            exit 1
+          fi
+
+          BACKUP_PATH="${BACKUP_ROOT}/legacy-docs-directory-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          install -d -m 0750 "${BACKUP_PATH}"
+          stat -c 'uid=%u\ngid=%g\nmode=%a\npath=%n' "${LEGACY_DOCS_DIR}" \
+            > "${BACKUP_PATH}/directory-metadata.txt"
+          printf 'commit=%s\nempty=true\n' "${EXPECTED_COMMIT}" \
+            > "${BACKUP_PATH}/retirement-marker.txt"
+          LEGACY_UID="$(stat -c %u "${LEGACY_DOCS_DIR}")"
+          LEGACY_GID="$(stat -c %g "${LEGACY_DOCS_DIR}")"
+          LEGACY_MODE="$(stat -c %a "${LEGACY_DOCS_DIR}")"
+          REMOVED=false
+          restore_empty_directory() {
+            if [ "${REMOVED}" = "true" ] && [ ! -e "${LEGACY_DOCS_DIR}" ]; then
+              install -d -o "${LEGACY_UID}" -g "${LEGACY_GID}" -m "${LEGACY_MODE}" "${LEGACY_DOCS_DIR}"
+              echo "LEGACY_DOCS_DIRECTORY rollback=recreated-empty-directory"
+            fi
+          }
+          trap restore_empty_directory ERR
+
+          rmdir -- "${LEGACY_DOCS_DIR}"
+          REMOVED=true
+          [ ! -e "${LEGACY_DOCS_DIR}" ]
+          curl -fsS --connect-timeout 5 --max-time 10 http://localhost/api/health >/dev/null
+          trap - ERR
+          echo "LEGACY_DOCS_DIRECTORY status=retired backup=${BACKUP_PATH}"

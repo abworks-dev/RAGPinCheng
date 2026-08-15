@@ -397,7 +397,6 @@ jobs:
         run: |
           set -euo pipefail
           if [ "${CONTENT_HEAD_ENFORCEMENT}" = "strict" ] || \
-             [ "${DOCS_HOST_PATH:-}" = "/data/business/ragpincheng/content/legacy-docs" ] || \
              [ "${MEDIA_HOST_PATH:-}" = "/data/business/ragpincheng/content/media" ] || \
              [ "${TRANSCRIPTION_ARTIFACT_DIR:-}" = "/app/content/transcription-artifacts" ]; then
             [ "${SOURCE_DECOUPLING_COMPLETE:-}" = "true" ] || {

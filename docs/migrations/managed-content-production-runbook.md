@@ -402,4 +402,6 @@ T12-B 不自动删除 `/data/business/ragpincheng/source`、`source/docs` 或 `s
 
 2026-08-14 的 T12-B 数据 workflow 已完成：独立恢复点为 `/data/backup/databases/ragpincheng/t12b-31767567546-1`，4 条旧媒体记录已归档，2 个旧 transcript head、44 个候选 Parent 和 104 个候选 Point 已精确下线；完成后保留 116 个受管普通资料 head、21,545 个 Parent 和 41,191 个 Qdrant Point。首次 App-only 部署发现私有 `compose.prod.yaml` 的固定媒体卷覆盖了 `MEDIA_HOST_PATH`，部署严格核验失败并自动恢复上一镜像，未回滚已完成的数据切换。
 
-修复后的部署契约在私有生产 override 之后追加仓库内 `docker/compose.source-decoupled.yml`。该最终 overlay 只在 `SOURCE_DECOUPLING_COMPLETE=true` 时启用，并要求显式提供 `DOCS_HOST_PATH`、`MEDIA_HOST_PATH`；App-only 工作流从获批目标 commit 提取同一文件，使部署前检查、部署后核验和失败回滚使用同一 Compose 文件顺序，手工恢复也不得重新挂载旧 `source`。生产成功标准仍包括 `/app/docs → content/legacy-docs`、`/app/media → content/media`、`/app/content → content`，且三个 mount source 均不得位于 `/data/business/ragpincheng/source`。
+修复后的部署契约在私有生产 override 之后追加仓库内 `docker/compose.source-decoupled.yml`。该最终 overlay 只在 `SOURCE_DECOUPLING_COMPLETE=true` 时启用；App-only 工作流从获批目标 commit 提取同一文件，使部署前检查、部署后核验和失败回滚使用同一 Compose 文件顺序，手工恢复也不得重新挂载旧 `source`。
+
+`legacy-docs` 宿主机兼容入口废弃后，最终 overlay 使用空的只读 tmpfs 覆盖 `/app/docs`，不再读取 `DOCS_HOST_PATH`。生产成功标准为 `/app/docs` 的 mount type 是 `tmpfs` 且 `RW=false`、`/app/media → content/media`、`/app/content → content`，同时所有宿主机 mount source 均不得位于 `/data/business/ragpincheng/source`。`.github/workflows/retire-production-legacy-docs-directory.yml` 只在部署该契约后处理精确路径 `/data/business/ragpincheng/content/legacy-docs`：要求目录为空、不是符号链接、不是任何 mount source，保存 uid/gid/mode 元数据后仅执行 `rmdir`；失败时重建同权限空目录。它不处理 `source/docs`、`source/media`、对象存储、数据库或索引。

@@ -45,7 +45,6 @@ jobs:
           COMPOSE_FILES=(-f docker/docker-compose.yml -f "${COMPOSE_OVERRIDE}")
           case "${SOURCE_DECOUPLING_COMPLETE:-false}" in
             true)
-              [ "${DOCS_HOST_PATH}" = "/data/business/ragpincheng/content/legacy-docs" ]
               [ "${MEDIA_HOST_PATH}" = "/data/business/ragpincheng/content/media" ]
               SOURCE_DECOUPLED_COMPOSE="${REPO_PATH}/docker/compose.source-decoupled.yml"
               [ -f "${SOURCE_DECOUPLED_COMPOSE}" ] || {
