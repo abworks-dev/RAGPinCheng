@@ -381,10 +381,7 @@ jobs:
             export COMPOSE_OVERRIDE
           fi
 
-          COMPOSE_FILES=(
-            -f "${REPO_PATH}/docker/docker-compose.yml"
-            -f "${COMPOSE_OVERRIDE}"
-          )
+          COMPOSE_FILES=(-f "${COMPOSE_OVERRIDE}")
           case "${SOURCE_DECOUPLING_COMPLETE:-false}" in
             true)
               SOURCE_DECOUPLED_COMPOSE="${BACKUP_DIR}/.compose-source-decoupled-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.yml"
