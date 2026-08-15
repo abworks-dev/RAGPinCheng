@@ -58,3 +58,7 @@ def test_inventory_reports_only_aggregate_metadata(tmp_path: Path):
     assert report["roots"]["asr_data"]["bytes"] == len(b"content-not-for-report")
     assert report["dependency_runs"]["candidate"]["directories"] == 1
     assert report["dependency_runs"]["candidate"]["bytes"] == len(b"content-not-for-report")
+    assert report["breakdowns"]["asr_data"]["categories"]["dependency_runs"]["bytes"] == len(
+        b"content-not-for-report"
+    )
+    assert "candidate-secret-name" not in raw
