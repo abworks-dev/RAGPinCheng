@@ -28,7 +28,25 @@ $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $arguments
 $trigger = New-ScheduledTaskTrigger -AtStartup
 $principal = New-ScheduledTaskPrincipal -UserId "Administrator" -LogonType S4U -RunLevel Highest
 $settings = New-ScheduledTaskSettingsSet -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit (New-TimeSpan -Days 3)
-Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
+$existingTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+if ($null -ne $existingTask) {
+    Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+    $stopDeadline = [DateTimeOffset]::Now.AddSeconds(30)
+    do {
+        $existingTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+        if ($null -eq $existingTask -or $existingTask.State -ne "Running") { break }
+        Start-Sleep -Seconds 1
+    } while ([DateTimeOffset]::Now -lt $stopDeadline)
+    if ($null -ne $existingTask -and $existingTask.State -eq "Running") {
+        throw "Existing GPU scheduled task did not stop within 30 seconds"
+    }
+    Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
+}
+$listener = Get-NetTCPConnection -LocalPort 8100 -State Listen -ErrorAction SilentlyContinue
+if ($null -ne $listener) {
+    throw "TCP 8100 is still occupied after stopping the existing GPU scheduled task"
+}
+Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings | Out-Null
 Start-ScheduledTask -TaskName $taskName
 $deadline = [DateTimeOffset]::Now.AddSeconds(180)
 do {
