@@ -39,6 +39,8 @@ jobs:
       RESOLVER_ARTIFACT_ROOT: ${{ vars.PRODUCTION_RESOLVER_ARTIFACT_ROOT }}\${{ github.run_id }}-${{ github.run_attempt }}\artifacts
       GIT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GPU_SERVICE_TOKEN: ${{ secrets.GPU_SERVICE_TOKEN }}
+      GPU_SERVICE_URL: ${{ vars.GPU_SERVICE_URL }}
+      GPU_SERVICE_HOST: ${{ vars.GPU_SERVICE_HOST }}
       DEPLOY_COMMIT_SHA: ${{ github.sha }}
       DEPLOY_HTTP_PROXY: ${{ vars.DEPLOY_HTTP_PROXY }}
     steps:

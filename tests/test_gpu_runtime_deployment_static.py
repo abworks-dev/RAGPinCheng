@@ -97,6 +97,9 @@ def test_candidate_resolver_is_manual_d_drive_isolated_and_evidence_only():
     assert "finally" in maintenance
     assert "promote-gpu-runtime.ps1" in maintenance
     assert "GPU_RESOLVER_MAINTENANCE status=restored" in maintenance
+    legacy = read("scripts/restore-gpu-legacy-release.ps1")
+    assert "gpu_service\\app.py" in legacy
+    assert "GPU_LEGACY_RESTORE status=healthy" in legacy
 
     assert 'StartsWith("D:\\"' in script
     assert '"-m", "venv"' in script
