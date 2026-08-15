@@ -27,7 +27,7 @@ from .db import connect, get_db
 logger = logging.getLogger("api.auth")
 
 COOKIE_NAME = "pc_sid"
-SESSION_TTL_SECONDS = 30 * 24 * 60 * 60  # 30 days; matches retention window
+SESSION_TTL_SECONDS = 30 * 24 * 60 * 60  # Independent authentication lifetime.
 COOKIE_PATH = "/api"
 
 _pwd = CryptContext(schemes=["argon2"], deprecated="auto")

@@ -1,0 +1,195 @@
+import { useEffect, useState } from "react";
+import { RefreshCw, Save, Trash2 } from "lucide-react";
+import { api } from "../../api/client";
+import { Alert, AlertDescription, AlertTitle } from "../../components/ui/alert";
+import { Badge } from "../../components/ui/badge";
+import { Button } from "../../components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../components/ui/card";
+import { Checkbox } from "../../components/ui/checkbox";
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from "../../components/ui/dialog";
+import { ErrorState } from "../../components/ui/error-state";
+import { Input } from "../../components/ui/input";
+import { LoadingState } from "../../components/ui/loading-state";
+import { Select } from "../../components/ui/select";
+import type { CleanupPreview, MaintenanceRun, MaintenanceSettings, MaintenanceStatus } from "../../types";
+import { formatAdminDate } from "./admin-formatters";
+
+const PRESETS = [30, 90, 180, 365];
+
+function countSummary(preview: CleanupPreview) {
+  return `${preview.conversations} 条对话、${preview.messages} 条消息、${preview.auth_sessions} 个失效登录会话`;
+}
+
+export function AdminMaintenancePage() {
+  const [status, setStatus] = useState<MaintenanceStatus | null>(null);
+  const [preview, setPreview] = useState<CleanupPreview | null>(null);
+  const [runs, setRuns] = useState<MaintenanceRun[]>([]);
+  const [enabled, setEnabled] = useState(true);
+  const [days, setDays] = useState("30");
+  const [customDays, setCustomDays] = useState("30");
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [busy, setBusy] = useState<"load" | "preview" | "save" | "cleanup" | null>("load");
+  const [confirmSettings, setConfirmSettings] = useState<MaintenanceSettings | null>(null);
+  const [cleanupOpen, setCleanupOpen] = useState(false);
+
+  const selectedDays = Number(days === "custom" ? customDays : days);
+  const validDays = Number.isInteger(selectedDays) && selectedDays >= 7 && selectedDays <= 3650;
+
+  async function load() {
+    setBusy("load");
+    setError(null);
+    try {
+      const [nextStatus, nextPreview, nextRuns] = await Promise.all([
+        api.adminMaintenance(), api.adminMaintenancePreview(), api.adminMaintenanceRuns(),
+      ]);
+      setStatus(nextStatus);
+      setPreview(nextPreview);
+      setRuns(nextRuns.runs);
+      setEnabled(nextStatus.settings.conversation_cleanup_enabled);
+      const retention = nextStatus.settings.conversation_retention_days;
+      setDays(PRESETS.includes(retention) ? String(retention) : "custom");
+      setCustomDays(String(retention));
+    } catch (e: any) {
+      setError(e?.message || String(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  useEffect(() => { void load(); }, []);
+
+  async function refreshPreview(retentionDays = selectedDays) {
+    if (!Number.isInteger(retentionDays) || retentionDays < 7 || retentionDays > 3650) return null;
+    setBusy("preview");
+    try {
+      const value = await api.adminMaintenancePreview(retentionDays);
+      setPreview(value);
+      return value;
+    } catch (e: any) {
+      setNotice(e?.message || String(e));
+      return null;
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function requestSave() {
+    if (!status || !validDays) return;
+    const candidate: MaintenanceSettings = {
+      conversation_cleanup_enabled: enabled,
+      conversation_retention_days: selectedDays,
+      updated_at: status.settings.updated_at,
+      updated_by: status.settings.updated_by,
+    };
+    if (selectedDays < status.settings.conversation_retention_days || !enabled) {
+      const candidatePreview = await refreshPreview(selectedDays);
+      if (!candidatePreview) return;
+      setConfirmSettings(candidate);
+      return;
+    }
+    await save(candidate);
+  }
+
+  async function save(candidate: MaintenanceSettings) {
+    setBusy("save");
+    setNotice(null);
+    try {
+      const settings = await api.adminUpdateMaintenanceSettings(candidate);
+      setStatus((current) => current ? { ...current, settings } : current);
+      setConfirmSettings(null);
+      setNotice("维护策略已保存，将从下一次自动检查开始生效。");
+      await refreshPreview(settings.conversation_retention_days);
+    } catch (e: any) {
+      setNotice(e?.message || String(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function cleanup() {
+    setBusy("cleanup");
+    setNotice(null);
+    try {
+      const result = await api.adminRunMaintenanceCleanup();
+      setCleanupOpen(false);
+      setNotice(`清理完成：删除 ${result.deleted_conversations} 条对话、${result.deleted_messages} 条消息、${result.deleted_auth_sessions} 个失效登录会话。`);
+      const [nextStatus, nextPreview, nextRuns] = await Promise.all([
+        api.adminMaintenance(), api.adminMaintenancePreview(), api.adminMaintenanceRuns(),
+      ]);
+      setStatus(nextStatus);
+      setPreview(nextPreview);
+      setRuns(nextRuns.runs);
+    } catch (e: any) {
+      setNotice(e?.message || String(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  if (busy === "load" && !status) return <LoadingState className="min-h-72" label="正在加载系统维护状态…" />;
+  if (error || !status) return <ErrorState title="系统维护加载失败" description={error || "暂无可用状态"} action={<Button variant="outline" onClick={() => void load()}>重试</Button>} />;
+
+  const dirty = enabled !== status.settings.conversation_cleanup_enabled || selectedDays !== status.settings.conversation_retention_days;
+  const lastRun = status.last_run;
+
+  return (
+    <div className="space-y-6" aria-labelledby="maintenance-title">
+      <div>
+        <p className="text-ui-sm font-medium text-primary">系统管理</p>
+        <h1 id="maintenance-title" className="mt-1 text-ui-2xl font-semibold text-foreground">系统维护</h1>
+        <p className="mt-2 max-w-2xl text-ui-sm text-muted-foreground">配置历史对话保留策略，检查影响范围并追踪清理结果。</p>
+      </div>
+
+      {notice && <Alert variant={notice.includes("失败") ? "destructive" : "success"} aria-live="polite"><AlertTitle>操作结果</AlertTitle><AlertDescription>{notice}</AlertDescription></Alert>}
+
+      <section aria-labelledby="maintenance-status" className="space-y-3">
+        <h2 id="maintenance-status" className="text-ui-base font-semibold">运行状态</h2>
+        <dl className="grid grid-cols-1 gap-px overflow-hidden rounded-ui-xl border border-border bg-border sm:grid-cols-2 xl:grid-cols-4">
+          <div className="bg-card p-4"><dt className="text-ui-xs text-muted-foreground">自动清理</dt><dd className="mt-2"><Badge variant={status.settings.conversation_cleanup_enabled ? "success" : "warning"}>{status.settings.conversation_cleanup_enabled ? "已启用" : "已停用"}</Badge></dd></div>
+          <div className="bg-card p-4"><dt className="text-ui-xs text-muted-foreground">当前保留期</dt><dd className="mt-2 text-ui-lg font-semibold">{status.settings.conversation_retention_days} 天</dd></div>
+          <div className="bg-card p-4"><dt className="text-ui-xs text-muted-foreground">检查频率</dt><dd className="mt-2 text-ui-sm font-medium">每 {status.sweeper_interval_seconds / 3600} 小时</dd></div>
+          <div className="bg-card p-4"><dt className="text-ui-xs text-muted-foreground">最近运行</dt><dd className="mt-2 text-ui-sm font-medium">{lastRun ? formatAdminDate(lastRun.finished_at) : "尚无记录"}</dd></div>
+        </dl>
+      </section>
+
+      <Card>
+        <CardHeader><CardTitle>历史对话保留策略</CardTitle><CardDescription>期限按对话最后活动时间计算。失效登录会话始终按认证到期时间清理。</CardDescription></CardHeader>
+        <CardContent className="space-y-5">
+          <label className="flex items-start gap-3 rounded-ui-lg border border-border p-4">
+            <Checkbox checked={enabled} onChange={(event) => setEnabled(event.target.checked)} disabled={busy === "save"} />
+            <span><span className="block text-ui-sm font-medium">启用历史对话自动清理</span><span className="mt-1 block text-ui-xs text-muted-foreground">停用后不会自动删除历史对话，但失效登录会话仍会清理。</span></span>
+          </label>
+          <div className="grid gap-4 sm:grid-cols-[minmax(0,14rem)_minmax(0,14rem)_auto] sm:items-end">
+            <label className="space-y-1.5 text-ui-sm font-medium"><span>保留期限</span><Select value={days} onChange={(event) => setDays(event.target.value)} disabled={busy === "save"}>{PRESETS.map((value) => <option key={value} value={value}>{value} 天</option>)}<option value="custom">自定义</option></Select></label>
+            {days === "custom" && <label className="space-y-1.5 text-ui-sm font-medium"><span>自定义天数</span><Input type="number" min={7} max={3650} value={customDays} onChange={(event) => setCustomDays(event.target.value)} aria-describedby="retention-help" /></label>}
+            <Button onClick={() => void requestSave()} disabled={!dirty || !validDays || busy !== null}><Save className="size-4" />{busy === "save" ? "保存中…" : "保存策略"}</Button>
+          </div>
+          <p id="retention-help" className={validDays ? "text-ui-xs text-muted-foreground" : "text-ui-xs text-destructive"}>{validDays ? "允许设置 7 至 3650 天；默认值为 30 天。保存设置不会立即删除数据。" : "请输入 7 至 3650 之间的整数。"}</p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle>立即清理</CardTitle><CardDescription>预览仅统计数据，不执行删除。手动清理始终采用当前已保存的策略。</CardDescription></CardHeader>
+        <CardContent className="space-y-4">
+          {preview && <div className="grid grid-cols-2 gap-4 border-y border-border py-4 sm:grid-cols-4"><div><p className="text-ui-xs text-muted-foreground">待清理对话</p><p className="mt-1 text-ui-xl font-semibold tabular-nums">{preview.conversations}</p></div><div><p className="text-ui-xs text-muted-foreground">关联消息</p><p className="mt-1 text-ui-xl font-semibold tabular-nums">{preview.messages}</p></div><div><p className="text-ui-xs text-muted-foreground">失效登录会话</p><p className="mt-1 text-ui-xl font-semibold tabular-nums">{preview.auth_sessions}</p></div><div><p className="text-ui-xs text-muted-foreground">最近待清理时间</p><p className="mt-1 text-ui-sm font-medium">{formatAdminDate(preview.newest_conversation_at)}</p></div></div>}
+          <div className="flex flex-col gap-2 sm:flex-row"><Button variant="outline" onClick={() => void refreshPreview(status.settings.conversation_retention_days)} disabled={busy !== null}><RefreshCw className="size-4" />{busy === "preview" ? "刷新中…" : "刷新预览"}</Button><Button variant="destructive" onClick={() => setCleanupOpen(true)} disabled={busy !== null || !preview}><Trash2 className="size-4" />立即执行清理</Button></div>
+        </CardContent>
+      </Card>
+
+      <section aria-labelledby="maintenance-runs" className="space-y-3">
+        <h2 id="maintenance-runs" className="text-ui-base font-semibold">最近运行记录</h2>
+        {runs.length === 0 ? <p className="rounded-ui-xl border border-border px-4 py-8 text-center text-ui-sm text-muted-foreground">尚无清理记录</p> : <>
+          <div className="hidden overflow-hidden rounded-ui-xl border border-border md:block"><table className="w-full text-ui-sm"><thead className="bg-surface-muted text-left text-muted-foreground"><tr><th className="px-4 py-3 font-medium">运行时间</th><th className="px-4 py-3 font-medium">方式</th><th className="px-4 py-3 font-medium">策略</th><th className="px-4 py-3 font-medium">清理结果</th><th className="px-4 py-3 font-medium">状态</th></tr></thead><tbody className="divide-y divide-border">{runs.map((run) => <tr key={run.id}><td className="px-4 py-3">{formatAdminDate(run.finished_at)}</td><td className="px-4 py-3">{run.trigger_source === "automatic" ? "自动" : "手动"}</td><td className="px-4 py-3">保留 {run.retention_days} 天</td><td className="px-4 py-3">{run.deleted_conversations} 条对话 · {run.deleted_messages} 条消息 · {run.deleted_auth_sessions} 个登录会话</td><td className="px-4 py-3"><Badge variant={run.status === "succeeded" ? "success" : "destructive"}>{run.status === "succeeded" ? "成功" : "失败"}</Badge></td></tr>)}</tbody></table></div>
+          <ul className="divide-y divide-border rounded-ui-xl border border-border md:hidden">{runs.map((run) => <li key={run.id} className="space-y-2 p-4"><div className="flex items-center justify-between gap-3"><span className="text-ui-sm font-medium">{run.trigger_source === "automatic" ? "自动清理" : "手动清理"}</span><Badge variant={run.status === "succeeded" ? "success" : "destructive"}>{run.status === "succeeded" ? "成功" : "失败"}</Badge></div><p className="text-ui-xs text-muted-foreground">{formatAdminDate(run.finished_at)} · 保留 {run.retention_days} 天</p><p className="text-ui-sm">{run.deleted_conversations} 条对话 · {run.deleted_messages} 条消息 · {run.deleted_auth_sessions} 个登录会话</p></li>)}</ul>
+        </>}
+      </section>
+
+      <Dialog open={Boolean(confirmSettings)} onOpenChange={(open) => { if (!open && busy !== "save") setConfirmSettings(null); }}><DialogContent><DialogHeader><DialogTitle>{confirmSettings?.conversation_cleanup_enabled ? "确认缩短保留期限" : "确认停用自动清理"}</DialogTitle><DialogDescription>{confirmSettings?.conversation_cleanup_enabled ? `新策略为保留 ${confirmSettings?.conversation_retention_days} 天。下一次自动检查可能删除当前预估的 ${preview ? countSummary(preview) : "过期数据"}。` : "停用后历史对话会持续保留并增加存储占用；失效登录会话不受影响。"}</DialogDescription></DialogHeader><DialogFooter><Button variant="outline" onClick={() => setConfirmSettings(null)} disabled={busy === "save"}>取消</Button><Button variant={confirmSettings?.conversation_cleanup_enabled ? "destructive" : "default"} onClick={() => confirmSettings && void save(confirmSettings)} disabled={busy === "save"}>{busy === "save" ? "保存中…" : "确认保存"}</Button></DialogFooter></DialogContent></Dialog>
+
+      <Dialog open={cleanupOpen} onOpenChange={(open) => { if (busy !== "cleanup") setCleanupOpen(open); }}><DialogContent><DialogHeader><DialogTitle>确认立即清理过期数据</DialogTitle><DialogDescription>将按已保存的 {status.settings.conversation_retention_days} 天策略永久删除当前预估的 {preview ? countSummary(preview) : "过期数据"}。删除后只能通过数据库备份恢复。</DialogDescription></DialogHeader><DialogFooter><Button variant="outline" onClick={() => setCleanupOpen(false)} disabled={busy === "cleanup"}>取消</Button><Button variant="destructive" onClick={() => void cleanup()} disabled={busy === "cleanup"}>{busy === "cleanup" ? "清理中…" : "确认永久删除"}</Button></DialogFooter></DialogContent></Dialog>
+    </div>
+  );
+}

@@ -43,6 +43,8 @@ def test_empty_database_initializes_all_phase2_tables(tmp_path):
         "content_audit_events",
         "content_permission_groups",
         "content_permission_group_items",
+        "maintenance_settings",
+        "maintenance_runs",
     } <= tables
     assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     assert conn.execute("PRAGMA foreign_key_check").fetchone() is None
@@ -79,11 +81,13 @@ def test_repeated_init_is_noop_and_does_not_create_second_backup(tmp_path):
     assert list((tmp_path / "backups").glob("*.sqlite")) == first
 
 
-def test_schema_5_database_adds_permission_groups_and_folder_requests_without_changing_users(tmp_path):
+def test_schema_5_database_adds_later_tables_without_changing_users(tmp_path):
     path = tmp_path / "app.sqlite"
     init_db(path, backup_dir=tmp_path / "backups")
     conn = sqlite3.connect(path)
-    conn.execute("DELETE FROM app_schema_migrations WHERE version IN (6,7)")
+    conn.execute("DELETE FROM app_schema_migrations WHERE version IN (6,7,8)")
+    conn.execute("DROP TABLE maintenance_runs")
+    conn.execute("DROP TABLE maintenance_settings")
     conn.execute("DROP TABLE content_folder_requests")
     conn.execute("DROP TABLE content_permission_group_items")
     conn.execute("DROP TABLE content_permission_groups")
@@ -95,7 +99,7 @@ def test_schema_5_database_adds_permission_groups_and_folder_requests_without_ch
 
     init_db(path, backup_dir=tmp_path / "backups")
     conn = sqlite3.connect(path)
-    assert conn.execute("SELECT max(version) FROM app_schema_migrations").fetchone()[0] == 7
+    assert conn.execute("SELECT max(version) FROM app_schema_migrations").fetchone()[0] == db_migrations.CURRENT_SCHEMA_VERSION
     assert conn.execute("SELECT real_name FROM users WHERE employee_id='kept'").fetchone()[0] == "保留用户"
     assert conn.execute("SELECT count(*) FROM content_permission_groups WHERE is_system=1").fetchone()[0] == 4
     assert conn.execute("SELECT count(*) FROM content_folder_requests").fetchone()[0] == 0

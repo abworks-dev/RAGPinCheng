@@ -1,5 +1,4 @@
-"""Admin endpoints — user management, cross-user conversation read,
-system stats, feedback-log viewer, manual sweep.
+"""Admin endpoints — users, conversations, content, feedback, and maintenance.
 
 All endpoints require an authenticated user with role='admin'. Read endpoints
 use `require_admin`; mutating endpoints add the CSRF check via
@@ -15,6 +14,7 @@ import re
 import shutil
 import sqlite3
 import time
+from dataclasses import asdict
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
@@ -42,7 +42,13 @@ from .auth import (
     require_admin,
     require_csrf_admin,
 )
-from .conversation_runtime import sweep_once
+from .maintenance import (
+    get_settings,
+    list_runs,
+    preview_cleanup,
+    run_cleanup,
+    save_settings,
+)
 from .content_permissions import CONTENT_PERMISSIONS
 from .db import get_db
 from .feedback import read_records
@@ -67,7 +73,13 @@ from .schemas import (
     IndexedDocumentDTO,
     IndexedDocumentListResponse,
     MediaAssetDTO,
-    SweepResponse,
+    CleanupPreviewResponse,
+    CleanupResponse,
+    MaintenanceRunDTO,
+    MaintenanceRunsResponse,
+    MaintenanceSettingsDTO,
+    MaintenanceSettingsPatchRequest,
+    MaintenanceStatusResponse,
     UploadResponse,
 )
 from .transcription_store import StoreConflictError
@@ -414,15 +426,71 @@ def patch_feedback(
     })
 
 
-# ── manual sweep (admin-triggered, for tests + ops) ────────────────────────
+# ── system maintenance ────────────────────────────────────────────────────
 
 
-@router.post("/sweep", response_model=SweepResponse)
-def trigger_sweep(
+def _settings_dto(settings) -> MaintenanceSettingsDTO:
+    return MaintenanceSettingsDTO(**asdict(settings))
+
+
+@router.get("/maintenance", response_model=MaintenanceStatusResponse)
+def maintenance_status(
+    _admin: CurrentUser = Depends(require_admin),
+) -> MaintenanceStatusResponse:
+    runs = list_runs(limit=1)
+    return MaintenanceStatusResponse(
+        settings=_settings_dto(get_settings()),
+        sweeper_interval_seconds=60 * 60,
+        last_run=MaintenanceRunDTO(**runs[0]) if runs else None,
+    )
+
+
+@router.patch("/maintenance/settings", response_model=MaintenanceSettingsDTO)
+def patch_maintenance_settings(
+    body: MaintenanceSettingsPatchRequest,
+    admin: CurrentUser = Depends(require_csrf_admin),
+) -> MaintenanceSettingsDTO:
+    settings = save_settings(
+        enabled=body.conversation_cleanup_enabled,
+        retention_days=body.conversation_retention_days,
+        updated_by=admin.id,
+    )
+    return _settings_dto(settings)
+
+
+@router.get("/maintenance/cleanup-preview", response_model=CleanupPreviewResponse)
+def cleanup_preview(
+    retention_days: int | None = Query(None, ge=7, le=3650),
+    _admin: CurrentUser = Depends(require_admin),
+) -> CleanupPreviewResponse:
+    settings = get_settings()
+    days = settings.conversation_retention_days if retention_days is None else retention_days
+    preview = preview_cleanup(retention_days=days)
+    return CleanupPreviewResponse(retention_days=days, **asdict(preview))
+
+
+@router.post("/maintenance/cleanup", response_model=CleanupResponse)
+def trigger_cleanup(
     _admin: CurrentUser = Depends(require_csrf_admin),
-) -> SweepResponse:
-    conv, sess = sweep_once()
-    return SweepResponse(deleted_conversations=conv, deleted_auth_sessions=sess)
+) -> CleanupResponse:
+    result = run_cleanup(trigger_source="manual")
+    return CleanupResponse(
+        run_id=result.run_id,
+        retention_days=result.retention_days,
+        deleted_conversations=result.deleted_conversations,
+        deleted_messages=result.deleted_messages,
+        deleted_auth_sessions=result.deleted_auth_sessions,
+        started_at=result.started_at,
+        finished_at=result.finished_at,
+    )
+
+
+@router.get("/maintenance/runs", response_model=MaintenanceRunsResponse)
+def maintenance_runs(
+    limit: int = Query(20, ge=1, le=100),
+    _admin: CurrentUser = Depends(require_admin),
+) -> MaintenanceRunsResponse:
+    return MaintenanceRunsResponse(runs=[MaintenanceRunDTO(**row) for row in list_runs(limit=limit)])
 
 
 # ── indexing: upload + jobs + documents ────────────────────────────────────

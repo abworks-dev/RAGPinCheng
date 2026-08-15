@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   feedbackMount: vi.fn(),
   managedMount: vi.fn(),
   categoriesMount: vi.fn(),
+  maintenanceMount: vi.fn(),
   refreshUser: vi.fn().mockResolvedValue(null),
 }));
 
@@ -84,6 +85,13 @@ vi.mock("./AdminCategoriesPage", () => ({
   },
 }));
 
+vi.mock("./AdminMaintenancePage", () => ({
+  AdminMaintenancePage: () => {
+    mocks.maintenanceMount();
+    return <div>系统维护页面内容</div>;
+  },
+}));
+
 describe("AdminLayout tab boundary", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -146,7 +154,7 @@ describe("AdminLayout tab boundary", () => {
     fireEvent.click(menu);
     expect(screen.getByRole("button", { name: "收起管理功能" })).toBeInTheDocument();
     const navigation = screen.getByRole("navigation", { name: "管理功能" });
-    expect(within(navigation).getAllByRole("button")).toHaveLength(8);
+    expect(within(navigation).getAllByRole("button")).toHaveLength(9);
     fireEvent.click(within(navigation).getByRole("button", { name: "分类管理" }));
     expect(screen.getByText("分类设置页面内容")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "展开管理功能" })).toBeInTheDocument();
@@ -179,6 +187,7 @@ describe("AdminLayout tab boundary", () => {
     expect(within(navigation).getByText("运营管理")).toBeInTheDocument();
     expect(within(navigation).getAllByRole("button").map((button) => button.textContent?.trim())).toEqual([
       "概览",
+      "系统维护",
       "资料管理",
       "分类管理",
       "视频管理",

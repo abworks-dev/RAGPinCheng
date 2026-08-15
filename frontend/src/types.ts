@@ -166,6 +166,51 @@ export type AdminStats = {
   messages_7d: number;
 };
 
+export type MaintenanceSettings = {
+  conversation_cleanup_enabled: boolean;
+  conversation_retention_days: number;
+  updated_at: number | null;
+  updated_by: number | null;
+};
+
+export type MaintenanceRun = {
+  id: number;
+  trigger_source: "automatic" | "manual";
+  status: "succeeded" | "failed";
+  retention_days: number;
+  deleted_conversations: number;
+  deleted_messages: number;
+  deleted_auth_sessions: number;
+  started_at: number;
+  finished_at: number;
+  error_summary: string | null;
+};
+
+export type MaintenanceStatus = {
+  settings: MaintenanceSettings;
+  sweeper_interval_seconds: number;
+  last_run: MaintenanceRun | null;
+};
+
+export type CleanupPreview = {
+  retention_days: number;
+  conversations: number;
+  messages: number;
+  auth_sessions: number;
+  oldest_conversation_at: number | null;
+  newest_conversation_at: number | null;
+};
+
+export type CleanupResult = {
+  run_id: number;
+  retention_days: number;
+  deleted_conversations: number;
+  deleted_messages: number;
+  deleted_auth_sessions: number;
+  started_at: number;
+  finished_at: number;
+};
+
 export type ManagedCategory = {
   id: string;
   category_key: string;

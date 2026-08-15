@@ -13,11 +13,12 @@ import { AdminOverviewPage } from "./AdminOverviewPage";
 import { AdminUsersPage } from "./AdminUsersPage";
 import { AdminCategoriesPage } from "./AdminCategoriesPage";
 import { AdminManagedContentPage } from "./AdminManagedContentPage";
+import { AdminMaintenancePage } from "./AdminMaintenancePage";
 import { useAuth } from "../../context/AuthContext";
 import { contentWorkspaceTabs, workspaceLabel } from "../../lib/workspace-access";
 import { useNavigate } from "react-router-dom";
 
-type Tab = "users" | "conversations" | "corpus" | "managed" | "categories" | "media" | "stats" | "feedback";
+type Tab = "users" | "conversations" | "corpus" | "managed" | "categories" | "media" | "stats" | "feedback" | "maintenance";
 
 type NavigationGroup = {
   label: string;
@@ -25,7 +26,7 @@ type NavigationGroup = {
 };
 
 const adminNavigation: NavigationGroup[] = [
-  { label: "总览", tabs: [["stats", "概览"]] },
+  { label: "总览", tabs: [["stats", "概览"], ["maintenance", "系统维护"]] },
   {
     label: "内容管理",
     tabs: [
@@ -193,6 +194,7 @@ export function AdminLayout() {
           {tab === "media" && <AdminMediaPage />}
           {tab === "stats" && <AdminOverviewPage />}
           {tab === "feedback" && <AdminFeedbackPage />}
+          {tab === "maintenance" && <AdminMaintenancePage />}
         </div>
       </main>
     </div>
