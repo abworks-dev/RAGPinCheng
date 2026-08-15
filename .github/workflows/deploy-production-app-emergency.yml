@@ -587,13 +587,13 @@ jobs:
           mounts = {item["Destination"]: item for item in container.get("Mounts", [])}
           docs = mounts.get("/app/docs")
           assert docs is not None, "missing /app/docs mount"
-          assert docs.get("Type") == "tmpfs", f"unexpected docs mount type: {docs.get('Type')}"
+          assert docs.get("Type") == "tmpfs", "unexpected docs mount type: %r" % docs.get("Type")
           media = mounts.get("/app/media", {})
           content = mounts.get("/app/content", {})
-          assert media.get("Type") == "bind", f"unexpected media mount type: {media.get('Type')}"
-          assert Path(media.get("Source", "")).resolve() == Path(os.environ["EXPECTED_MEDIA"]).resolve(), f"unexpected media mount source: {media.get('Source')}"
-          assert content.get("Type") == "bind", f"unexpected content mount type: {content.get('Type')}"
-          assert Path(content.get("Source", "")).resolve() == Path("/data/business/ragpincheng/content").resolve(), f"unexpected content mount source: {content.get('Source')}"
+          assert media.get("Type") == "bind", "unexpected media mount type: %r" % media.get("Type")
+          assert Path(media.get("Source", "")).resolve() == Path(os.environ["EXPECTED_MEDIA"]).resolve(), "unexpected media mount source: %r" % media.get("Source")
+          assert content.get("Type") == "bind", "unexpected content mount type: %r" % content.get("Type")
+          assert Path(content.get("Source", "")).resolve() == Path("/data/business/ragpincheng/content").resolve(), "unexpected content mount source: %r" % content.get("Source")
           assert all(not item.get("Source", "").startswith("/data/business/ragpincheng/source") for item in mounts.values())
           '
             if "${COMPOSE[@]}" exec -T backend sh -c ': > /app/docs/.write-probe' 2>/dev/null; then
