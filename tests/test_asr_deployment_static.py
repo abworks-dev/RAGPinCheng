@@ -132,6 +132,14 @@ def test_faster_whisper_production_evidence_treats_runner_exit_as_informational(
     assert "$QualificationSummary.status -ne \"pass\"" in qualification
 
 
+def test_faster_whisper_qualification_accepts_only_pinned_production_profile_sets():
+    qualification = read("scripts/qualify-faster-whisper-production.ps1")
+
+    assert '$whisperXProfile = "whisperx-large-v3-zh-align-v1"' in qualification
+    assert '"$fasterWhisperProfile`n$senseVoiceProfile`n$whisperXProfile"' in qualification
+    assert "Production ASR capabilities do not match a pinned profile contract" in qualification
+
+
 def test_asr_runtime_and_deployment_contracts_are_engine_generic_and_fail_closed():
     contract = read("scripts/asr-contract.ps1")
     preflight = read("scripts/preflight-asr-deployment.ps1")
