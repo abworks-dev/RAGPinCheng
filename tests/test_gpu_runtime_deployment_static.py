@@ -78,6 +78,7 @@ def test_candidate_resolver_is_manual_d_drive_isolated_and_evidence_only():
     assert "runs-on: [self-hosted, windows, production, gpu]" in workflow
     assert "timeout-minutes: 60" in workflow
     assert "actions/upload-artifact@v4" in workflow
+    assert "if: ${{ always() }}" in workflow
     assert "runtime-lock-candidate.txt" in workflow
     assert "resolver-report.json" in workflow
     assert "preflight.json" in workflow
@@ -275,7 +276,12 @@ def test_candidate_qualification_is_cuda_only_and_cleans_tasks():
     assert "resolve-gpu-model-cache-source.ps1" in workflow
     assert "TORCH_WHEEL_SEED_ROOT" in workflow
     assert "TorchWheelSeedRoot" in workflow
-    assert "RUNTIME_ROOT: ${{ vars.PRODUCTION_RUNTIME_ROOT }}\\qualification\\${{ github.run_id }}" in workflow
+    assert "PRODUCTION_RUNTIME_ROOT: ${{ vars.PRODUCTION_RUNTIME_ROOT }}" in workflow
+    assert "CANDIDATE_RUNTIME_ROOT: ${{ vars.PRODUCTION_RUNTIME_ROOT }}\\qualification\\${{ github.run_id }}" in workflow
+    assert '$currentReleasePath = Join-Path $runtimeRoot "current-release.json"' in workflow
+    assert '-RuntimeRoot $candidateRuntimeRoot' in workflow
+    assert "-m (?:services\\.)?gpu_service\\.app" in workflow
+    assert "restore-gpu-legacy-release.ps1" in workflow
     assert "if: ${{ always() }}" in workflow
     assert 'GPU_CANDIDATE_RELEASE_ROOT=$releaseRoot' in workflow
     assert "$env:HTTP_PROXY = $env:DEPLOY_HTTP_PROXY" in workflow

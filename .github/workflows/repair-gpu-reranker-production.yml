@@ -38,7 +38,8 @@ jobs:
           REPO_PATH: ${{ vars.PRODUCTION_REPO_PATH }}
           # Candidate releases are run-local so a stale or interrupted release
           # can never be mistaken for the current qualification input.
-          RUNTIME_ROOT: ${{ vars.PRODUCTION_RUNTIME_ROOT }}\qualification\${{ github.run_id }}
+          PRODUCTION_RUNTIME_ROOT: ${{ vars.PRODUCTION_RUNTIME_ROOT }}
+          CANDIDATE_RUNTIME_ROOT: ${{ vars.PRODUCTION_RUNTIME_ROOT }}\qualification\${{ github.run_id }}
           TORCH_WHEEL_SEED_ROOT: ${{ vars.PRODUCTION_TORCH_WHEEL_SEED_ROOT }}
           BACKUP_DIR: ${{ vars.PRODUCTION_BACKUP_DIRECTORY }}
           GIT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -84,7 +85,8 @@ jobs:
             throw "Candidate repository HEAD mismatch"
           }
 
-          $runtimeRoot = $env:RUNTIME_ROOT
+          $runtimeRoot = $env:PRODUCTION_RUNTIME_ROOT
+          $candidateRuntimeRoot = $env:CANDIDATE_RUNTIME_ROOT
           $backupRoot = $env:BACKUP_DIR
           $productionTaskName = "RAGPinCheng-GPU"
           $productionSuspended = $false
@@ -102,7 +104,7 @@ jobs:
             $task = Get-ScheduledTask -TaskName $productionTaskName -ErrorAction SilentlyContinue
             $listeners = @(Get-NetTCPConnection -LocalPort 8100 -State Listen -ErrorAction SilentlyContinue)
             $taskRunning = $null -ne $task -and [string]$task.State -eq "Running"
-            if ($listeners.Count -gt 0 -or $taskRunning) {
+            if ($listeners.Count -gt 0 -or $null -ne $task) {
               if ($null -eq $task) {
                 throw "GPU port 8100 is listening without the owned production task"
               }
@@ -111,7 +113,7 @@ jobs:
                 $process = Get-CimInstance Win32_Process -Filter ("ProcessId={0}" -f $listener.OwningProcess)
                 if (
                   $null -eq $process -or
-                  [string]$process.CommandLine -notmatch '-m services\.gpu_service\.app' -or
+                  [string]$process.CommandLine -notmatch '-m (?:services\.)?gpu_service\.app' -or
                   (
                     -not ([string]$process.ExecutablePath).StartsWith($runtimeRoot, [StringComparison]::OrdinalIgnoreCase) -and
                     [string]$process.ExecutablePath -ne $env:PRODUCTION_PYTHON_PATH
@@ -149,7 +151,7 @@ jobs:
             -RepositoryPath $env:REPO_PATH -Commit $env:DEPLOY_COMMIT_SHA
             & "${env:REPO_PATH}\scripts\build-gpu-runtime.ps1" `
             -RepositoryPath $env:REPO_PATH `
-            -RuntimeRoot $env:RUNTIME_ROOT `
+            -RuntimeRoot $candidateRuntimeRoot `
             -ModelCacheSource $modelCacheSource `
             -TorchWheelSeedRoot $env:TORCH_WHEEL_SEED_ROOT `
             -CommitSha $env:DEPLOY_COMMIT_SHA `
@@ -161,10 +163,10 @@ jobs:
           $lockHash = & "${env:REPO_PATH}\scripts\get-gpu-runtime-lock-hash.ps1" `
             -Path $requirementsPath
           $releaseId = $fingerprint.Substring(0, 12) + "-" + $lockHash.Substring(0, 12)
-          $releaseRoot = Join-Path $env:RUNTIME_ROOT "releases\$releaseId"
+          $releaseRoot = Join-Path $candidateRuntimeRoot "releases\$releaseId"
           "GPU_CANDIDATE_RELEASE_ROOT=$releaseRoot" | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding UTF8
           & "${env:REPO_PATH}\scripts\qualify-gpu-runtime.ps1" `
-            -RuntimeRoot $env:RUNTIME_ROOT `
+            -RuntimeRoot $candidateRuntimeRoot `
             -ReleaseRoot $releaseRoot `
             -QualificationRunId "${{ github.run_id }}"
 
@@ -174,14 +176,19 @@ jobs:
             if ($productionSuspended) {
               Write-Host "GPU_PRODUCTION_RESTORE status=starting release=$currentReleaseRoot"
               $global:LASTEXITCODE = 0
-              & "${env:REPO_PATH}\scripts\promote-gpu-runtime.ps1" `
-                -RepositoryPath $env:REPO_PATH `
-                -RuntimeRoot $runtimeRoot `
-                -BackupDirectory $backupRoot `
-                -ReleaseRoot $currentReleaseRoot `
-                -GpuServiceToken $env:GPU_SERVICE_TOKEN
-              if ($LASTEXITCODE -ne 0) {
-                throw "GPU production restore failed (exit $LASTEXITCODE)"
+              try {
+                & "${env:REPO_PATH}\scripts\promote-gpu-runtime.ps1" `
+                  -RepositoryPath $env:REPO_PATH `
+                  -RuntimeRoot $runtimeRoot `
+                  -BackupDirectory $backupRoot `
+                  -ReleaseRoot $currentReleaseRoot `
+                  -GpuServiceToken $env:GPU_SERVICE_TOKEN
+              } catch {
+                & "${env:REPO_PATH}\scripts\restore-gpu-legacy-release.ps1" `
+                  -ReleaseRoot $currentReleaseRoot -RuntimeRoot $runtimeRoot `
+                  -GpuServiceToken $env:GPU_SERVICE_TOKEN -GpuServiceUrl $env:GPU_SERVICE_URL `
+                  -GpuServiceHost $env:GPU_SERVICE_HOST -BasePython $env:PRODUCTION_PYTHON_PATH `
+                  -RepositoryPath $env:REPO_PATH -ModelCacheSource $env:GPU_MODEL_CACHE_SOURCE
               }
               Write-Host "GPU_PRODUCTION_RESTORE status=complete"
             }
