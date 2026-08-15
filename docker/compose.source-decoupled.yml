@@ -15,3 +15,11 @@ services:
           size: 1048576
           mode: 0555
       - ${MEDIA_HOST_PATH:?MEDIA_HOST_PATH is required}:/app/media
+
+# Production owns this network independently of the backend container. Mark it
+# external so a backend-only recreate cannot remove Qdrant or LibreOffice
+# endpoints from the shared network.
+networks:
+  default:
+    name: ragpincheng-prod_default
+    external: true
