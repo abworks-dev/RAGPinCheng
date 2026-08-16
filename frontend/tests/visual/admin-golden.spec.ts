@@ -25,7 +25,7 @@ for (const [navigationLabel, heading, slug] of [["资料管理", "资料管理",
   });
 }
 
-test("管理概览生产运行状态 accepted golden", async ({ page }) => {
+test("系统概览生产运行状态 accepted golden", async ({ page }) => {
   await installAdminRoutes(page, "normal");
   await page.goto("/admin");
   await expect(page.getByRole("heading", { name: "生产运行状态" })).toBeVisible();

@@ -326,7 +326,11 @@ test.describe("分类管理", () => {
     } else {
       const parent = page.getByTestId("category-tree-item-cat-company");
       const child = page.getByTestId("category-tree-item-cat-company-modeling");
+      await expect(parent).toHaveAttribute("aria-expanded", "false");
+      await expect(child).toHaveCount(0);
       await parent.focus();
+      await parent.press("ArrowRight");
+      await expect(child).toBeVisible();
       await parent.press("ArrowRight");
       await expect(child).toBeFocused();
       await child.press("ArrowLeft");

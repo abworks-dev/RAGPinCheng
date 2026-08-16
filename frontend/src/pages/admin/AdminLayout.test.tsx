@@ -91,7 +91,7 @@ describe("AdminLayout route boundary", () => {
     expect(within(navigation).getByText("内容管理")).toBeInTheDocument();
     expect(within(navigation).getByText("运营管理")).toBeInTheDocument();
     expect(within(navigation).getAllByRole("link").map((link) => link.textContent?.trim())).toEqual([
-      "概览", "系统维护", "资料管理", "分类管理", "视频管理", "索引任务", "用户管理", "对话记录", "用户反馈",
+      "系统概览", "系统维护", "资料管理", "分类管理", "视频管理", "索引任务", "用户管理", "对话记录", "用户反馈",
     ]);
     expect(screen.getByRole("link", { name: "对话记录" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByText("对话页面内容")).toBeInTheDocument();
