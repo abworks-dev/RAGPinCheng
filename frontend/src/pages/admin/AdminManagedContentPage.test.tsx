@@ -181,7 +181,7 @@ describe("AdminManagedContentPage", () => {
     fireEvent.change(rootFolder, { target: { value: "cat-04" } });
 
     await waitFor(() => expect(mocks.items).toHaveBeenCalledWith(expect.objectContaining({ category_id: "cat-04" })));
-    expect(screen.getByText("上传到：04 项目资料")).toBeInTheDocument();
+    expect(screen.getByText(/当前目录：04 项目资料/)).toBeInTheDocument();
   });
 
   it("shows archived metadata and restores an item from trash", async () => {
@@ -270,13 +270,31 @@ describe("AdminManagedContentPage", () => {
       entries: [{ filename: "guide.md", item_id: "item-2", version_id: "version-2", sha256: "b".repeat(64), status: "accepted", reason: null }],
     });
     render(<AdminManagedContentPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "上传文件" }));
     const input = await screen.findByLabelText("选择资料文件");
+    expect(screen.queryByLabelText("选择资料文件夹")).not.toBeInTheDocument();
     const file = new File(["# Guide"], "guide.md", { type: "text/markdown" });
     fireEvent.change(input, { target: { files: [file] } });
-    expect(screen.getByText("已选择 1 个文件")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "上传资料" }));
+    expect(screen.getByText("guide.md")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "确定上传" }));
     await waitFor(() => expect(mocks.upload).toHaveBeenCalledWith([file], "cat-03"));
     expect(await screen.findByText("已接收")).toBeInTheDocument();
+  });
+
+  it("keeps the upload dialog and selected file after an upload failure", async () => {
+    mocks.permissions = ["organize"];
+    mocks.items.mockResolvedValue({ items: [], total: 0, status_counts: {} });
+    mocks.upload.mockRejectedValue(new Error("上传服务暂不可用"));
+    render(<AdminManagedContentPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "上传文件" }));
+    const file = new File(["# Retry"], "retry.md", { type: "text/markdown" });
+    fireEvent.change(screen.getByLabelText("选择资料文件"), { target: { files: [file] } });
+    fireEvent.click(screen.getByRole("button", { name: "确定上传" }));
+
+    await waitFor(() => expect(mocks.error).toHaveBeenCalledWith("上传服务暂不可用"));
+    expect(screen.getByRole("dialog", { name: "上传文件" })).toBeInTheDocument();
+    expect(screen.getByText("retry.md")).toBeInTheDocument();
   });
 
   it("opens a confirmation before uploading files dropped on the current folder", async () => {
@@ -286,7 +304,7 @@ describe("AdminManagedContentPage", () => {
     render(<AdminManagedContentPage />);
     const file = new File(["# Dropped"], "dropped.md", { type: "text/markdown" });
     await waitFor(() => expect(screen.getByLabelText("一级目录")).toHaveValue("cat-03"));
-    const folderCard = screen.getByTestId("managed-folder-browser");
+    const folderCard = screen.getByTestId("managed-content-drop-list");
 
     fireEvent.drop(folderCard!, { dataTransfer: { files: [file], types: ["Files"] } });
     expect(await screen.findByRole("dialog", { name: "确认上传" })).toHaveTextContent("03 公司内部标准");
@@ -305,7 +323,7 @@ describe("AdminManagedContentPage", () => {
     const file = new File(["cancelled"], "cancelled.pdf", { type: "application/pdf" });
     await waitFor(() => expect(screen.getByLabelText("一级目录")).toHaveValue("cat-03"));
 
-    fireEvent.drop(screen.getByTestId("managed-folder-browser"), { dataTransfer: { files: [file], types: ["Files"] } });
+    fireEvent.drop(screen.getByTestId("managed-content-drop-list"), { dataTransfer: { files: [file], types: ["Files"] } });
     fireEvent.click(await screen.findByRole("button", { name: "取消" }));
 
     expect(screen.queryByRole("dialog", { name: "确认上传" })).not.toBeInTheDocument();
@@ -321,8 +339,9 @@ describe("AdminManagedContentPage", () => {
     fireEvent.click(folderButtons[0]);
     await waitFor(() => expect(mocks.items).toHaveBeenCalledWith(expect.objectContaining({ category_id: "cat-03-01" })));
     const file = new File(["# Folder"], "folder.md", { type: "text/markdown" });
-    fireEvent.change(screen.getByLabelText("选择资料文件"), { target: { files: [file] } });
-    fireEvent.click(screen.getByRole("button", { name: "上传资料" }));
+    fireEvent.click(screen.getByRole("button", { name: "上传文件" }));
+    fireEvent.change(await screen.findByLabelText("选择资料文件"), { target: { files: [file] } });
+    fireEvent.click(screen.getByRole("button", { name: "确定上传" }));
     await waitFor(() => expect(mocks.upload).toHaveBeenCalledWith([file], "cat-03-01"));
   });
 
@@ -330,7 +349,7 @@ describe("AdminManagedContentPage", () => {
     mocks.permissions = ["manage_categories"];
     mocks.createCategory.mockResolvedValue(childCategory);
     render(<AdminManagedContentPage />);
-    fireEvent.click(await screen.findByRole("button", { name: "新建文件夹" }));
+    fireEvent.click(await screen.findByRole("button", { name: "新建" }));
     fireEvent.change(screen.getByLabelText("文件夹名称"), { target: { value: "审核标准" } });
     fireEvent.click(screen.getByRole("button", { name: "创建" }));
     await waitFor(() => expect(mocks.createCategory).toHaveBeenCalledWith(expect.objectContaining({
@@ -343,7 +362,7 @@ describe("AdminManagedContentPage", () => {
     mocks.createFolderRequest.mockResolvedValue({ id: "request-1" });
     render(<AdminManagedContentPage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "申请文件夹" }));
+    fireEvent.click(await screen.findByRole("button", { name: "新建" }));
     fireEvent.change(screen.getByLabelText("文件夹名称"), { target: { value: "审核标准" } });
     fireEvent.click(screen.getByRole("button", { name: "提交申请" }));
 
