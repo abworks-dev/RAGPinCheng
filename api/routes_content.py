@@ -39,13 +39,16 @@ from .content_store import (
     create_publication_job,
     create_content_revision,
     create_web_batch,
+    get_upload_task,
     list_content_items,
     list_content_items_page,
+    list_upload_tasks,
     restore_content_item,
     list_categories,
     list_folder_requests,
     move_content_item,
     register_uploaded_document,
+    record_upload_batch_entry,
     review_folder_request,
     review_version,
     submit_version_for_review,
@@ -80,6 +83,9 @@ from .schemas import (
     ManagedPublicationDTO,
     ManagedUploadEntryDTO,
     ManagedUploadResponse,
+    ManagedUploadTaskDTO,
+    ManagedUploadTaskEntryDTO,
+    ManagedUploadTaskListResponse,
     ReviewManagedContentRequest,
     ReviewFolderRequest,
     UpdateManagedCategoryRequest,
@@ -534,22 +540,33 @@ async def upload_managed_documents(
         relative_paths=relative_paths,
         upload_mode=upload_mode,
     )
-    batch_id = create_web_batch(conn, actor_user_id=user.id)
+    upload_sizes = [_upload_size(upload) for upload in files]
+    batch_id = create_web_batch(
+        conn,
+        actor_user_id=user.id,
+        upload_mode=upload_mode,
+        target_category_id=category_id,
+        total_files=len(files),
+        total_bytes=sum(upload_sizes),
+    )
     entries: list[ManagedUploadEntryDTO] = []
     can_create_folders = has_content_permission(conn, user, "category.manage")
     for index, upload in enumerate(files):
         filename = (upload.filename or "").strip()
+        relative_path = normalized_paths[index]
+        size_bytes = upload_sizes[index]
         suffix = Path(filename).suffix.lower()
         doc_type = _DOC_TYPES.get(suffix)
         if doc_type is None:
-            entries.append(
-                ManagedUploadEntryDTO(
-                    filename=filename or "(empty)", status="skipped", reason="不支持的文件格式"
-                )
+            reason = "不支持的文件格式"
+            clean_filename = filename or "(empty)"
+            entries.append(ManagedUploadEntryDTO(filename=clean_filename, status="skipped", reason=reason))
+            record_upload_batch_entry(
+                conn, batch_id=batch_id, sequence=index + 1, filename=clean_filename,
+                relative_path=relative_path, size_bytes=size_bytes, status="skipped", reason=reason,
             )
             continue
         try:
-            relative_path = normalized_paths[index]
             if relative_path and not can_create_folders:
                 _resolve_upload_category(
                     conn,
@@ -579,14 +596,12 @@ async def upload_managed_documents(
                 actor_user_id=user.id,
                 source_rel_path=relative_path or filename,
             )
-            entries.append(
-                ManagedUploadEntryDTO(
-                    filename=filename,
-                    item_id=result.item_id,
-                    version_id=result.version_id,
-                    sha256=stored.sha256,
-                    status="accepted",
-                )
+            entries.append(ManagedUploadEntryDTO(filename=filename, item_id=result.item_id,
+                version_id=result.version_id, sha256=stored.sha256, status="accepted"))
+            record_upload_batch_entry(
+                conn, batch_id=batch_id, sequence=index + 1, filename=filename,
+                relative_path=relative_path, size_bytes=size_bytes, status="accepted",
+                item_id=result.item_id, version_id=result.version_id,
             )
         except (ValueError, sqlite3.IntegrityError) as exc:
             conn.rollback()
@@ -597,8 +612,10 @@ async def upload_managed_documents(
                 "category_depth_exceeded": "资料目录最多支持四级",
                 "content_filename_conflict": "当前目录下已存在同名资料",
             }.get(str(exc), str(exc))
-            entries.append(
-                ManagedUploadEntryDTO(filename=filename, status="skipped", reason=reason)
+            entries.append(ManagedUploadEntryDTO(filename=filename, status="skipped", reason=reason))
+            record_upload_batch_entry(
+                conn, batch_id=batch_id, sequence=index + 1, filename=filename,
+                relative_path=relative_path, size_bytes=size_bytes, status="skipped", reason=reason,
             )
     if not any(entry.status == "accepted" for entry in entries):
         conn.execute(
@@ -607,6 +624,73 @@ async def upload_managed_documents(
         )
         conn.commit()
     return ManagedUploadResponse(batch_id=batch_id, entries=entries)
+
+
+def _managed_upload_task_dto(
+    row: sqlite3.Row,
+    entries: list[sqlite3.Row] | None = None,
+) -> ManagedUploadTaskDTO:
+    return ManagedUploadTaskDTO(
+        batch_id=row["id"],
+        upload_mode=row["upload_mode"] or "files",
+        status=row["task_status"],
+        target_category_id=row["target_category_id"],
+        target_path=row["target_path"],
+        total_files=int(row["total_files"] or 0),
+        accepted_files=int(row["accepted_files"] or 0),
+        skipped_files=int(row["skipped_files"] or 0),
+        total_bytes=int(row["total_bytes"] or 0),
+        total_uploaded_bytes=int(row["total_uploaded_bytes"] or 0),
+        created_by_name=row["creator_name"],
+        created_at=int(row["created_at"]),
+        updated_at=int(row["updated_at"]),
+        error_summary=row["error_summary"],
+        entries=[ManagedUploadTaskEntryDTO(
+            sequence=int(entry["sequence"]), filename=entry["filename"],
+            relative_path=entry["relative_path"], size_bytes=int(entry["size_bytes"] or 0),
+            status=entry["status"], reason=entry["reason"], item_id=entry["item_id"],
+            version_id=entry["version_id"], created_at=int(entry["created_at"]),
+        ) for entry in entries] if entries is not None else None,
+    )
+
+
+@router.get("/upload-tasks", response_model=ManagedUploadTaskListResponse)
+def list_managed_upload_tasks(
+    status: str | None = Query(None),
+    query: str = Query("", max_length=200),
+    limit: int = Query(25, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    user: CurrentUser = Depends(require_content_permission("item.upload")),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> ManagedUploadTaskListResponse:
+    _require_feature()
+    try:
+        rows, total, status_counts = list_upload_tasks(
+            conn, user_id=user.id, is_admin=user.role == "admin", status=status,
+            query=query.strip() or None, limit=limit, offset=offset,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return ManagedUploadTaskListResponse(
+        tasks=[_managed_upload_task_dto(row) for row in rows],
+        total=total,
+        status_counts=status_counts,
+    )
+
+
+@router.get("/upload-tasks/{batch_id}", response_model=ManagedUploadTaskDTO)
+def get_managed_upload_task(
+    batch_id: str,
+    user: CurrentUser = Depends(require_content_permission("item.upload")),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> ManagedUploadTaskDTO:
+    _require_feature()
+    row, entries = get_upload_task(
+        conn, batch_id, user_id=user.id, is_admin=user.role == "admin"
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="上传任务不存在")
+    return _managed_upload_task_dto(row, entries)
 
 
 def _content_item_dto(

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { ArchiveRestore, ArrowDown, ArrowUp, ArrowUpDown, Check, ChevronDown, ChevronRight, Download, Eye, FileUp, Folder, FolderInput, FolderPlus, Info, Pencil, RefreshCw, Rocket, Search, Send, Trash2, Upload, X } from "lucide-react";
+import { AlertTriangle, ArchiveRestore, ArrowDown, ArrowUp, ArrowUpDown, Check, CheckCircle2, ChevronDown, ChevronRight, Download, Eye, FileUp, Folder, FolderInput, FolderPlus, Info, ListChecks, Pencil, RefreshCw, RotateCcw, Rocket, Search, Send, Trash2, Upload, X, XCircle } from "lucide-react";
 import { adminContentApi } from "../../api/admin/content";
 import { Badge } from "../../components/ui/badge";
 import { Button, buttonVariants } from "../../components/ui/button";
@@ -13,10 +13,12 @@ import { Input } from "../../components/ui/input";
 import { IconButton } from "../../components/ui/icon-button";
 import { LoadingState } from "../../components/ui/loading-state";
 import { Select } from "../../components/ui/select";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "../../components/ui/sheet";
 import { toast } from "../../components/ui/toast";
 import { useAuth } from "../../context/AuthContext";
 import { usePdfPreview } from "../../hooks/usePdfPreview";
-import type { BulkManagedContentResult, ContentPermission, FolderRequest, ManagedCategory, ManagedContentItem, ManagedUploadResponse } from "../../types";
+import type { BulkManagedContentResult, ContentPermission, FolderRequest, ManagedCategory, ManagedContentItem, ManagedUploadTask, ManagedUploadTaskEntry } from "../../types";
+import type { ManagedUploadProgress } from "../../api/client";
 import { formatAdminDate } from "../../lib/admin-formatters";
 import {
   collectDroppedUpload,
@@ -42,6 +44,117 @@ function formatUploadSize(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${Math.ceil(bytes / 1024)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+type ActiveUploadState = {
+  batchId: string | null;
+  uploadMode: "files" | "folder";
+  targetPath: string;
+  totalFiles: number;
+  totalBytes: number;
+  loadedBytes: number;
+  phase: "uploading" | "processing" | "completed" | "failed";
+  message?: string;
+};
+
+const uploadTaskStatusLabel: Record<string, string> = {
+  processing: "处理中",
+  completed: "已完成",
+  partial_success: "部分成功",
+  failed: "失败",
+};
+
+function uploadTaskStatusVariant(status: string) {
+  if (status === "completed") return "success" as const;
+  if (status === "failed") return "destructive" as const;
+  if (status === "processing") return "secondary" as const;
+  return "warning" as const;
+}
+
+function uploadTaskEntryStatus(entry: ManagedUploadTaskEntry) {
+  return entry.status === "accepted" ? "已接收" : "已跳过";
+}
+
+function UploadTasksPanel({
+  activeUpload,
+  canRetry,
+  onRetry,
+}: {
+  activeUpload: ActiveUploadState | null;
+  canRetry: (task: ManagedUploadTask) => boolean;
+  onRetry: (task: ManagedUploadTask) => void;
+}) {
+  const [tasks, setTasks] = useState<ManagedUploadTask[]>([]);
+  const [total, setTotal] = useState(0);
+  const [counts, setCounts] = useState<Record<string, number>>({});
+  const [queryInput, setQueryInput] = useState("");
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "completed" | "partial_success" | "failed">("all");
+  const [page, setPage] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [detail, setDetail] = useState<ManagedUploadTask | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const pageSize = 10;
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setQuery(queryInput.trim()), 250);
+    return () => window.clearTimeout(timer);
+  }, [queryInput]);
+  useEffect(() => { setPage(0); }, [query, statusFilter]);
+
+  const loadTasks = useCallback(async () => {
+    setLoading(true); setError(null);
+    try {
+      const result = await adminContentApi.uploadTasks({
+        status: statusFilter === "all" ? undefined : statusFilter === "active" ? "processing" : statusFilter,
+        query: query || undefined,
+        limit: pageSize,
+        offset: page * pageSize,
+      });
+      setTasks(result.tasks); setTotal(result.total); setCounts(result.status_counts);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "上传任务加载失败");
+    } finally { setLoading(false); }
+  }, [page, query, statusFilter]);
+
+  useEffect(() => { void loadTasks(); }, [loadTasks]);
+  useEffect(() => {
+    if (!activeUpload || activeUpload.phase === "uploading" || activeUpload.phase === "processing") return;
+    void loadTasks();
+  }, [activeUpload, loadTasks]);
+
+  const openDetail = async (task: ManagedUploadTask) => {
+    setDetail(task); setDetailLoading(true);
+    try { setDetail(await adminContentApi.uploadTask(task.batch_id)); }
+    catch (detailError) { setError(detailError instanceof Error ? detailError.message : "上传任务详情加载失败"); }
+    finally { setDetailLoading(false); }
+  };
+  const visibleTasks = tasks;
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  const progressPercent = activeUpload && activeUpload.totalBytes > 0
+    ? Math.min(100, Math.round((activeUpload.loadedBytes / activeUpload.totalBytes) * 100))
+    : activeUpload?.phase === "completed" ? 100 : 0;
+  const activeLabel = activeUpload?.phase === "uploading" ? "上传中" : activeUpload?.phase === "processing" ? "服务端处理中…" : activeUpload?.phase === "completed" ? "已完成" : "上传失败";
+  const activeStatusIcon = activeUpload?.phase === "failed" ? <XCircle className="size-4 text-destructive" /> : activeUpload?.phase === "completed" ? <CheckCircle2 className="size-4 text-success" /> : <Upload className="size-4 animate-pulse text-primary" />;
+
+  return <section className="space-y-4" aria-labelledby="upload-tasks-title">
+    <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+      <div><h2 id="upload-tasks-title" className="text-ui-xl font-semibold tracking-tight">上传任务</h2><p className="mt-1 text-ui-sm text-muted-foreground">查看文件和文件夹上传进度、结果与失败明细。</p></div>
+      <Button size="sm" variant="outline" onClick={() => void loadTasks()} disabled={loading}><RefreshCw className={loading ? "size-4 animate-spin" : "size-4"} />刷新任务</Button>
+    </header>
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4" aria-label="上传任务状态概览">
+      {[{ key: "active", label: "进行中", value: (counts.processing || 0) + (activeUpload && ["uploading", "processing"].includes(activeUpload.phase) ? 1 : 0), icon: <Upload className="size-4" /> }, { key: "completed", label: "已完成", value: counts.completed || 0, icon: <CheckCircle2 className="size-4" /> }, { key: "partial_success", label: "部分成功", value: counts.partial_success || 0, icon: <AlertTriangle className="size-4" /> }, { key: "failed", label: "失败", value: counts.failed || 0, icon: <XCircle className="size-4" /> }].map((summary) => <button type="button" key={summary.key} className={`rounded-ui-lg border bg-background p-3 text-left transition-colors hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${statusFilter === summary.key ? "border-primary ring-1 ring-primary/30" : "border-border"}`} onClick={() => setStatusFilter(summary.key as typeof statusFilter)}><span className="flex items-center justify-between text-ui-xs text-muted-foreground"><span>{summary.label}</span>{summary.icon}</span><span className="mt-2 block text-ui-xl font-semibold tabular-nums">{summary.value}</span></button>)}
+    </div>
+    {activeUpload && <div className="rounded-ui-lg border border-primary/40 bg-primary/5 px-4 py-3" role="status" aria-live="polite"><div className="flex items-start gap-3">{activeStatusIcon}<div className="min-w-0 flex-1"><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium">{activeLabel}</p><span className="text-ui-xs tabular-nums text-muted-foreground">{progressPercent}%</span></div><p className="mt-1 break-words text-ui-xs text-muted-foreground">{activeUpload.uploadMode === "folder" ? "文件夹" : "文件"} · {activeUpload.totalFiles} 个 · {activeUpload.targetPath}</p><div className="mt-2 h-2 overflow-hidden rounded-full bg-primary/15"><div className="h-full rounded-full bg-primary transition-[width] duration-normal" style={{ width: `${progressPercent}%` }} /></div>{activeUpload.message && <p className="mt-2 break-words text-ui-xs text-destructive">{activeUpload.message}</p>}</div></div></div>}
+    <Card className="overflow-hidden shadow-surface">
+      <div className="grid gap-3 border-b border-border px-4 py-4 sm:px-5 lg:grid-cols-[minmax(16rem,1fr)_auto]"><label className="space-y-1 text-ui-xs text-muted-foreground"><span>搜索任务</span><span className="relative block"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2" /><Input className="pl-9" value={queryInput} onChange={(event) => setQueryInput(event.target.value)} placeholder="搜索目录、文件名或任务…" /></span></label><div className="flex items-end gap-2"><Button size="sm" variant="outline" onClick={() => { setQueryInput(""); setStatusFilter("all"); }} disabled={!queryInput && statusFilter === "all"}>清除筛选</Button><span className="pb-2 text-ui-xs text-muted-foreground">共 {total} 个任务</span></div></div>
+      {error && <ErrorState title="上传任务加载失败" description={error} action={<Button size="sm" variant="outline" onClick={() => void loadTasks()}>重新加载</Button>} />}
+      {loading ? <LoadingState className="min-h-48 border-0" label="正在加载上传任务…" /> : statusFilter === "active" && !activeUpload && visibleTasks.length === 0 ? <EmptyState className="rounded-none border-0" title="暂无进行中的上传" description="开始上传文件或文件夹后，进度会显示在这里。" /> : visibleTasks.length === 0 ? <EmptyState className="rounded-none border-0" title="暂无上传任务" description="上传文件或文件夹后，任务记录会显示在这里。" /> : <ul className="divide-y divide-border">{visibleTasks.map((task) => <li key={task.batch_id} className="flex flex-col gap-3 px-4 py-4 md:grid md:grid-cols-[minmax(12rem,1.5fr)_8rem_minmax(12rem,1fr)_10rem_8rem_auto] md:items-center md:px-5"><div className="min-w-0"><p className="break-all font-medium">{task.upload_mode === "folder" ? "文件夹上传" : "文件上传"}</p><p className="mt-1 break-all text-ui-xs text-muted-foreground">{task.target_path}</p></div><span className="text-ui-xs text-muted-foreground">{task.upload_mode === "folder" ? "文件夹" : "文件"} · {task.total_files} 个</span><div className="min-w-0"><div className="flex items-center justify-between gap-2 text-ui-xs"><span className="text-muted-foreground">{task.accepted_files}/{task.total_files} 个文件</span><span className="tabular-nums text-muted-foreground">{task.total_bytes ? Math.round((task.total_uploaded_bytes / task.total_bytes) * 100) : 100}%</span></div><div className="mt-1 h-1.5 overflow-hidden rounded-full bg-surface-muted"><div className={`h-full rounded-full ${task.status === "failed" ? "bg-destructive" : task.status === "partial_success" ? "bg-warning" : task.status === "processing" ? "bg-primary" : "bg-success"}`} style={{ width: `${task.total_bytes ? Math.min(100, Math.round((task.total_uploaded_bytes / task.total_bytes) * 100)) : 100}%` }} /></div></div><span className="text-ui-xs text-muted-foreground">{formatManagedUpdatedAt(task.created_at)}</span><Badge variant={uploadTaskStatusVariant(task.status)}>{uploadTaskStatusLabel[task.status]}</Badge><div className="flex gap-2 md:justify-end"><Button size="sm" variant="outline" onClick={() => void openDetail(task)}><ListChecks className="size-4" />详情</Button>{task.status === "failed" && <Button size="sm" variant="outline" disabled={!canRetry(task)} onClick={() => onRetry(task)}><RotateCcw className="size-4" />重试</Button>}</div></li>)}</ul>}
+      <div className="flex items-center justify-between border-t border-border px-4 py-3 sm:px-5"><p className="text-ui-xs text-muted-foreground">第 {page + 1} / {pageCount} 页</p><div className="flex gap-2"><Button size="sm" variant="outline" disabled={page === 0 || loading} onClick={() => setPage((value) => value - 1)}>上一页</Button><Button size="sm" variant="outline" disabled={page + 1 >= pageCount || loading} onClick={() => setPage((value) => value + 1)}>下一页</Button></div></div>
+    </Card>
+    <Sheet open={Boolean(detail)} onOpenChange={(open) => { if (!open) setDetail(null); }}><SheetContent className="max-w-xl overflow-y-auto"><SheetHeader><SheetTitle>上传任务详情</SheetTitle><SheetDescription>{detail?.target_path || "查看任务明细"}</SheetDescription></SheetHeader>{detailLoading ? <LoadingState className="mt-6 border-0" label="正在加载任务详情…" /> : detail && <div className="mt-6 space-y-5"><dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4 gap-y-2 text-ui-sm"><dt className="text-muted-foreground">状态</dt><dd><Badge variant={uploadTaskStatusVariant(detail.status)}>{uploadTaskStatusLabel[detail.status]}</Badge></dd><dt className="text-muted-foreground">目标目录</dt><dd className="break-words">{detail.target_path}</dd><dt className="text-muted-foreground">创建人</dt><dd>{detail.created_by_name}</dd><dt className="text-muted-foreground">创建时间</dt><dd>{formatManagedUpdatedAt(detail.created_at)}</dd><dt className="text-muted-foreground">文件统计</dt><dd>{detail.accepted_files} 个已接收，{detail.skipped_files} 个已跳过，共 {detail.total_files} 个</dd>{detail.error_summary && <><dt className="text-muted-foreground">失败原因</dt><dd className="break-words text-destructive">{detail.error_summary}</dd></>}</dl><div><h3 className="text-ui-sm font-semibold">文件明细</h3><ul className="mt-2 divide-y divide-border rounded-ui-md border border-border">{(detail.entries || []).map((entry) => <li key={entry.sequence} className="flex items-start justify-between gap-3 px-3 py-2 text-ui-sm"><span className="min-w-0"><span className="block break-all">{entry.relative_path || entry.filename}</span>{entry.reason && <span className="mt-0.5 block break-words text-ui-xs text-muted-foreground">{entry.reason}</span>}</span><span className={`shrink-0 text-ui-xs ${entry.status === "accepted" ? "text-success" : "text-warning"}`}>{uploadTaskEntryStatus(entry)}</span></li>)}</ul></div>{detail.status === "failed" && <Button variant="outline" disabled={!canRetry(detail)} onClick={() => { onRetry(detail); setDetail(null); }}><RotateCcw className="size-4" />重试此任务</Button>}</div>}</SheetContent></Sheet>
+  </section>;
 }
 
 const statusLabel: Record<string, string> = {
@@ -194,11 +307,12 @@ export function AdminManagedContentPage() {
   const [pendingUploadFolderId, setPendingUploadFolderId] = useState("");
   const [pendingFolderUpload, setPendingFolderUpload] = useState<FolderUploadSelection | null>(null);
   const [pendingFolderUploadFolderId, setPendingFolderUploadFolderId] = useState("");
-  const [uploadResults, setUploadResults] = useState<ManagedUploadResponse["entries"]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [activeUpload, setActiveUpload] = useState<ActiveUploadState | null>(null);
+  const [lastUploadAttempt, setLastUploadAttempt] = useState<{ batchId: string; files: Array<File | FolderUploadEntry>; categoryId: string; uploadMode: "files" | "folder" } | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [bulkAction, setBulkAction] = useState<BulkAction | null>(null);
@@ -215,7 +329,10 @@ export function AdminManagedContentPage() {
   const [deleteTargets, setDeleteTargets] = useState<ManagedContentItem[]>([]);
   const [deleteAcknowledged, setDeleteAcknowledged] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
-  const [view, setView] = useState<"library" | "trash">("library");
+  const [view, setViewState] = useState<"library" | "trash" | "uploads">(() => {
+    if (typeof window === "undefined") return "library";
+    return new URLSearchParams(window.location.search).get("view") === "uploads" ? "uploads" : "library";
+  });
   const [trashItems, setTrashItems] = useState<ManagedContentItem[]>([]);
   const [trashTotal, setTrashTotal] = useState(0);
   const [trashLoading, setTrashLoading] = useState(false);
@@ -249,6 +366,19 @@ export function AdminManagedContentPage() {
   const updateFileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
   const listDragDepthRef = useRef(0);
+
+  const setView = (nextView: "library" | "trash" | "uploads") => {
+    setViewState(nextView);
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    if (nextView === "library") params.delete("view");
+    else params.set("view", nextView);
+    const queryString = params.toString();
+    window.history.replaceState({}, "", `${window.location.pathname}${queryString ? `?${queryString}` : ""}`);
+  };
+  useEffect(() => {
+    if (view === "uploads" && !can("item.upload")) setView("library");
+  }, [view, state.status, permissions]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setQuery(queryInput.trim()), 250);
@@ -308,23 +438,45 @@ export function AdminManagedContentPage() {
     uploadFiles: Array<File | FolderUploadEntry> = files,
     uploadMode: "files" | "folder" = "files",
   ) => {
-    setUploading(true); setUploadResults([]);
+    const totalBytes = uploadFiles.reduce((sum, entry) => sum + ("file" in entry ? entry.file.size : entry.size), 0);
+    const targetPath = categories.find((category) => category.id === targetFolderId)?.full_path || "当前目录";
+    setUploading(true);
+    setActiveUpload({ batchId: null, uploadMode, targetPath, totalFiles: uploadFiles.length, totalBytes, loadedBytes: 0, phase: "uploading" });
     try {
+      const onProgress = (progress: ManagedUploadProgress) => setActiveUpload((current) => current ? {
+        ...current,
+        phase: progress.phase,
+        loadedBytes: progress.phase === "processing" ? current.totalBytes : progress.loaded,
+      } : current);
       const result = uploadMode === "folder"
-        ? await adminContentApi.upload(uploadFiles, targetFolderId, "folder")
-        : await adminContentApi.upload(uploadFiles, targetFolderId);
-      setUploadResults(result.entries);
+        ? await adminContentApi.upload(uploadFiles, targetFolderId, "folder", onProgress)
+        : await adminContentApi.upload(uploadFiles, targetFolderId, "files", onProgress);
       const accepted = result.entries.filter((entry) => entry.status === "accepted").length;
       const skipped = result.entries.length - accepted;
+      setActiveUpload((current) => current ? { ...current, batchId: result.batch_id, loadedBytes: current.totalBytes, phase: accepted ? "completed" : "failed", message: accepted ? undefined : "没有文件被接收，请查看任务详情" } : current);
+      if (!accepted) setLastUploadAttempt({ batchId: result.batch_id, files: uploadFiles, categoryId: targetFolderId, uploadMode });
+      else setLastUploadAttempt(null);
       toast.success(skipped ? `已接收 ${accepted} 个文件，跳过 ${skipped} 个` : `已接收 ${accepted} 个文件`);
       setFiles([]);
       if (fileInputRef.current) fileInputRef.current.value = "";
       if (folderInputRef.current) folderInputRef.current.value = "";
       await load(true);
       return true;
-    } catch (uploadError) { toast.error(uploadError instanceof Error ? uploadError.message : "上传失败"); }
+    } catch (uploadError) {
+      const message = uploadError instanceof Error ? uploadError.message : "上传失败";
+      setActiveUpload((current) => current ? { ...current, phase: "failed", message } : current);
+      toast.error(message);
+    }
     finally { setUploading(false); }
     return false;
+  };
+
+  const retryUploadTask = async (task: ManagedUploadTask) => {
+    if (!lastUploadAttempt || lastUploadAttempt.batchId !== task.batch_id) {
+      toast.error("原始文件已不在当前页面，请重新选择后上传");
+      return;
+    }
+    await upload(lastUploadAttempt.categoryId, lastUploadAttempt.files, lastUploadAttempt.uploadMode);
   };
 
   const prepareFileDrop = (incoming: File[]) => {
@@ -540,12 +692,11 @@ export function AdminManagedContentPage() {
 
   const acceptFiles = (incoming: File[]) => {
     const supported = incoming.filter((file) => /\.(pdf|md|docx|xlsx|pptx)$/i.test(file.name));
-    setFiles(supported); setUploadResults([]);
+    setFiles(supported);
     if (supported.length !== incoming.length) toast.error("已忽略不支持的文件格式");
   };
 
   const openUploadDialog = () => {
-    setUploadResults([]);
     setFiles([]);
     setDragActive(false);
     if (fileInputRef.current) fileInputRef.current.value = "";
@@ -750,11 +901,19 @@ export function AdminManagedContentPage() {
     </div>;
   };
 
+  if (view === "uploads") {
+    return <section className="space-y-5" aria-labelledby="managed-content-title">
+      <header><p className="text-ui-xs font-medium text-primary">内容管理</p><h1 id="managed-content-title" className="mt-1 text-ui-2xl font-semibold tracking-tight">资料管理</h1><p className="mt-1 text-ui-sm text-muted-foreground">统一管理资料的上传、分类、确认和发布。</p></header>
+      <div className="flex flex-wrap gap-2" role="tablist" aria-label="资料视图"><Button size="sm" variant="outline" role="tab" aria-selected="false" onClick={() => setView("library")}>资料库</Button>{can("trash.view") && <Button size="sm" variant="outline" role="tab" aria-selected="false" onClick={() => { setView("trash"); setPage(0); }}>回收站</Button>}{can("item.upload") && <Button size="sm" role="tab" aria-selected="true"><Upload className="size-4" />上传任务</Button>}</div>
+      <UploadTasksPanel activeUpload={activeUpload} canRetry={(task) => Boolean(lastUploadAttempt?.batchId === task.batch_id)} onRetry={(task) => void retryUploadTask(task)} />
+    </section>;
+  }
+
   if (view === "trash") {
     const trashPageCount = Math.max(1, Math.ceil(trashTotal / PAGE_SIZE));
     return <section className="space-y-5" aria-labelledby="managed-content-title">
       <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"><div><p className="text-ui-xs font-medium text-primary">内容管理</p><h1 id="managed-content-title" className="mt-1 text-ui-2xl font-semibold tracking-tight">回收站</h1><p className="mt-1 text-ui-sm text-muted-foreground">{can("trash.restore") ? "查看和恢复已移出资料库的资料。" : "查看已移出资料库的资料。"}</p></div><Button size="sm" variant="outline" onClick={() => void loadTrash()} disabled={trashLoading}><RefreshCw className={trashLoading ? "size-4 animate-spin" : "size-4"} />刷新</Button></header>
-      <div className="flex gap-2" role="tablist" aria-label="资料视图"><Button size="sm" variant="outline" role="tab" aria-selected="false" onClick={() => { setView("library"); setPage(0); }}>资料库</Button><Button size="sm" role="tab" aria-selected="true">回收站</Button></div>
+      <div className="flex flex-wrap gap-2" role="tablist" aria-label="资料视图"><Button size="sm" variant="outline" role="tab" aria-selected="false" onClick={() => { setView("library"); setPage(0); }}>资料库</Button><Button size="sm" role="tab" aria-selected="true">回收站</Button>{can("item.upload") && <Button size="sm" variant="outline" role="tab" aria-selected="false" onClick={() => setView("uploads")}><Upload className="size-4" />上传任务</Button>}</div>
       {error && <ErrorState title="回收站加载失败" description={error} action={<Button size="sm" variant="outline" onClick={() => void loadTrash()}>重新加载</Button>} />}
       <Card className="overflow-hidden shadow-surface"><div className="flex flex-col gap-3 border-b border-border px-4 py-4 sm:flex-row sm:items-end sm:justify-between sm:px-5"><label className="max-w-xl flex-1 space-y-1 text-ui-xs text-muted-foreground"><span>搜索回收站</span><span className="relative block"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2" /><Input className="pl-9" value={queryInput} onChange={(event) => setQueryInput(event.target.value)} placeholder="搜索名称或文件名…" /></span></label><p className="text-ui-xs text-muted-foreground">共 {trashTotal} 份</p></div>
         {trashLoading ? <LoadingState className="min-h-48 border-0" label="正在加载回收站…" /> : trashItems.length === 0 ? <EmptyState className="rounded-none border-0" title="回收站为空" description="移至回收站的资料会显示在这里。" /> : <ul className="divide-y divide-border">{trashItems.map((item) => <li key={item.item_id} className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5"><div className="min-w-0"><p className="break-words font-medium">{item.title}</p><p className="mt-1 break-all text-ui-xs text-muted-foreground">{item.original_filename} · 原状态：{statusLabel[item.pre_archive_lifecycle_status || item.lifecycle_status] || "未知"}</p><p className="mt-1 text-ui-xs text-muted-foreground">{item.archived_by_name || "未知人员"} 于 {item.archived_at ? new Date(item.archived_at * 1000).toLocaleString("zh-CN") : "未知时间"} 移入回收站</p></div>{can("trash.restore") && <Button size="sm" variant="outline" disabled={Boolean(busyAction)} onClick={() => { setRestoreError(null); setRestoreTarget(item); }}><ArchiveRestore className="size-4" />恢复</Button>}</li>)}</ul>}
@@ -769,7 +928,7 @@ export function AdminManagedContentPage() {
       <div><p className="text-ui-xs font-medium text-primary">内容管理</p><h1 id="managed-content-title" className="mt-1 text-ui-2xl font-semibold tracking-tight text-foreground">资料管理</h1><p className="mt-1 text-ui-sm text-muted-foreground">统一管理资料的上传、分类、确认和发布。</p></div>
     </header>
 
-    {can("trash.view") && <div className="flex gap-2" role="tablist" aria-label="资料视图"><Button size="sm" role="tab" aria-selected="true">资料库</Button><Button size="sm" variant="outline" role="tab" aria-selected="false" onClick={() => { setView("trash"); setPage(0); setSelected([]); }}>回收站</Button></div>}
+    {(can("trash.view") || can("item.upload")) && <div className="flex flex-wrap gap-2" role="tablist" aria-label="资料视图"><Button size="sm" role="tab" aria-selected="true">资料库</Button>{can("trash.view") && <Button size="sm" variant="outline" role="tab" aria-selected="false" onClick={() => { setView("trash"); setPage(0); setSelected([]); }}>回收站</Button>}{can("item.upload") && <Button size="sm" variant="outline" role="tab" aria-selected="false" onClick={() => setView("uploads")}><Upload className="size-4" />上传任务</Button>}</div>}
 
     <section className="grid grid-cols-2 gap-3 lg:grid-cols-4" aria-label="资料状态概览">
       {[["全部资料", Object.values(counts).reduce((sum, value) => sum + value, 0)], ["待确认", counts.awaiting_review || 0], ["已确认", counts.approved || 0], ["已发布", counts.published || 0]].map(([label, value]) => <Card key={label} className="overflow-hidden shadow-surface"><CardContent className="relative p-4 pt-4"><span className="absolute inset-x-0 top-0 h-1 bg-primary/80" aria-hidden="true" /><p className="text-ui-xs font-medium text-muted-foreground">{label}</p><p className="mt-2 text-ui-xl font-semibold tabular-nums text-foreground">{value}</p></CardContent></Card>)}
@@ -809,7 +968,6 @@ export function AdminManagedContentPage() {
 
       <div data-testid="managed-content-drop-list" className="relative" onDragEnter={handleListDragEnter} onDragOver={handleListDragOver} onDragLeave={handleListDragLeave} onDrop={handleListDrop}>
       {listDropActive && <div data-testid="managed-content-drop-overlay" className="pointer-events-none absolute inset-1 z-sticky rounded-ui-lg border-2 border-dashed border-primary/70 bg-background/70 text-center shadow-focus backdrop-blur-[1px]" role="status" aria-live="polite"><div className="absolute left-1/2 flex w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-3" style={{ top: listDropPromptTop }}><span className="flex size-12 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-surface" aria-hidden="true"><Upload className="size-6" /></span><div className="space-y-1"><p className="break-words text-ui-base font-semibold">松开以上传文件到“{currentFolderDropLabel}”</p><p className="text-ui-xs text-muted-foreground">也支持拖入文件夹；支持 PDF、Markdown、Word、Excel 和 PPT 文件</p></div></div></div>}
-      {uploadResults.length > 0 && <ul className="border-t border-border px-4 py-3 text-ui-sm sm:px-5" aria-live="polite">{uploadResults.map((entry) => <li key={entry.filename} className="flex items-start justify-between gap-3 border-b border-border py-2 last:border-b-0"><span className="min-w-0"><span className="block break-all">{entry.filename}</span>{entry.reason && <span className="mt-0.5 block break-words text-ui-xs text-muted-foreground">{entry.reason}</span>}</span><Badge className="shrink-0" variant={entry.status === "accepted" ? "success" : "warning"}>{entry.status === "accepted" ? "已接收" : "已跳过"}</Badge></li>)}</ul>}
       {loading ? <LoadingState className="min-h-48 border-x-0 border-b-0" label="正在加载资料…" /> : !error && items.length === 0 ? <EmptyState className="min-h-56 rounded-none border-x-0 border-b-0 sm:min-h-64" title="没有符合条件的资料" description="请调整筛选条件或上传新资料。" /> : !error && <>
         <div className="hidden overflow-x-auto border-t border-border lg:block"><table className="w-full min-w-[68rem] text-ui-sm"><thead className="border-b border-border bg-surface-muted text-left text-muted-foreground"><tr><th className="w-12 px-3 py-3"><Checkbox aria-label="选择当前页前20份资料" checked={allSelected} onChange={toggleAll} /></th>{([ ["title", "资料"], ["updatedAt", "更新时间"], ["status", "状态"], ["source", "来源"] ] as [SortKey, string][]).map(([key, label]) => <th key={key} aria-sort={sort?.key === key ? sort.direction === "asc" ? "ascending" : "descending" : "none"} className="px-3 py-3 font-medium"><button type="button" className="inline-flex items-center gap-1 rounded px-1 py-0.5 hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => toggleSort(key)}>{label}{sortIcon(key)}</button></th>)}<th className="px-3 py-3 text-right font-medium">操作</th></tr></thead><tbody className="divide-y divide-border">{sortedItems.map((item, index) => { const movable = canMoveItem(item); return <tr key={item.item_id} draggable={movable} title={movable ? "拖动到上方文件夹可移动资料" : undefined} onDragStart={() => setDraggedItem(item)} onDragEnd={() => setDraggedItem(null)} className={`transition-colors duration-normal hover:bg-surface-muted/60 ${movable ? "cursor-grab" : ""}`}><td className="px-3 py-3"><Checkbox aria-label={`选择${item.title}`} checked={selected.includes(item.version_id)} disabled={index >= BULK_LIMIT} onChange={() => setSelected((current) => current.includes(item.version_id) ? current.filter((id) => id !== item.version_id) : [...current, item.version_id].slice(0, BULK_LIMIT))} /></td><td className="max-w-xs px-3 py-3"><p className="break-words font-medium">{item.title}</p><p className="mt-0.5 break-all text-ui-xs text-muted-foreground">{item.original_filename} · v{item.version_number}</p></td><td className="whitespace-nowrap px-3 py-3 tabular-nums">{formatManagedUpdatedAt(item.updated_at)}</td><td className="px-3 py-3"><Badge variant={statusVariant(item.lifecycle_status)}>{statusLabel[item.lifecycle_status] || "未知状态"}</Badge></td><td className="px-3 py-3">{sourceLabel[item.source_origin] || "其他来源"}</td><td className="px-3 py-3 text-right">{renderActions(item)}</td></tr>; })}</tbody></table></div>
         <ul className="divide-y divide-border border-t border-border lg:hidden">{items.map((item, index) => <li key={item.item_id} className="space-y-3 px-4 py-4 sm:px-5"><div className="flex items-start gap-3"><Checkbox className="mt-0.5" aria-label={`选择${item.title}`} checked={selected.includes(item.version_id)} disabled={index >= BULK_LIMIT} onChange={() => setSelected((current) => current.includes(item.version_id) ? current.filter((id) => id !== item.version_id) : [...current, item.version_id].slice(0, BULK_LIMIT))} /><div className="min-w-0 flex-1"><div className="flex items-start justify-between gap-3"><p className="break-words font-medium">{item.title}</p><Badge className="shrink-0" variant={statusVariant(item.lifecycle_status)}>{statusLabel[item.lifecycle_status] || "未知状态"}</Badge></div><p className="mt-1 break-all text-ui-xs text-muted-foreground">{item.original_filename} · v{item.version_number}</p></div></div><dl className="grid grid-cols-[4rem_minmax(0,1fr)] gap-x-2 gap-y-1 text-ui-sm"><dt className="text-muted-foreground">更新时间</dt><dd className="whitespace-nowrap tabular-nums">{formatManagedUpdatedAt(item.updated_at)}</dd><dt className="text-muted-foreground">来源</dt><dd>{sourceLabel[item.source_origin] || "其他来源"}</dd></dl>{renderActions(item)}</li>)}</ul>

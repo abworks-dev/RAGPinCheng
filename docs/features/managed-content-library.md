@@ -2,7 +2,7 @@
 
 ## 状态
 
-已实现。资料经过上传、提交、确认和发布后进入检索；资料管理页按当前受控目录展示资料，支持上传、拖放确认、新建目录、筛选、批量流程操作、单项六图标操作，以及移入回收站和恢复。
+已实现。资料经过上传、提交、确认和发布后进入检索；资料管理页按当前受控目录展示资料，支持上传、拖放确认、新建目录、筛选、批量流程操作、单项六图标操作，以及移入回收站和恢复。回收站后新增“上传任务”页，集中展示当前账号的上传历史和当前浏览器内的传输进度。
 
 ## 入口与调用链
 
@@ -14,6 +14,19 @@
 - 发布：`api/content_publication.py`
 - 检索可见性：`src/content_retrieval_visibility.py`
 - Schema：`api/schemas.py`、`api/db_migrations.py`
+
+上传任务链路：
+
+```text
+multipart 上传 -> upload_batches + upload_batch_entries
+-> GET /api/admin/content/upload-tasks -> 任务列表/状态筛选/分页
+-> GET /api/admin/content/upload-tasks/{batch_id} -> 任务详情抽屉
+```
+
+- Schema 12 为 `upload_batches` 增加上传模式、目标目录和文件统计，并以结构化的 `upload_batch_entries` 保存每个文件的接收/跳过结果。
+- `item.upload` 是上传任务页和接口的权限边界；普通用户只能查看自己创建的任务，全局管理员可查看全部任务。
+- 浏览器使用 XHR 显示字节传输进度；网络传输达到 100% 后切换为“服务端处理中…”。当前同步上传接口不承诺跨刷新恢复实时进度，但任务历史和文件明细可跨刷新查询。
+- 失败任务在原文件仍保留于当前页面时支持重试；刷新页面后需要重新选择原文件，服务端不保存可重试的浏览器临时文件。
 
 ```text
 上传文件 -> content_objects + content_items + content_versions

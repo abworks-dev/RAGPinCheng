@@ -85,12 +85,13 @@ def test_schema_5_database_adds_later_tables_without_changing_users(tmp_path):
     path = tmp_path / "app.sqlite"
     init_db(path, backup_dir=tmp_path / "backups")
     conn = sqlite3.connect(path)
-    conn.execute("DELETE FROM app_schema_migrations WHERE version IN (6,7,8,9,10,11)")
+    conn.execute("DELETE FROM app_schema_migrations WHERE version IN (6,7,8,9,10,11,12)")
     conn.execute("DROP TABLE maintenance_runs")
     conn.execute("DROP TABLE maintenance_settings")
     conn.execute("DROP TABLE content_folder_requests")
     conn.execute("DROP TABLE content_permission_group_items")
     conn.execute("DROP TABLE content_permission_groups")
+    conn.execute("DROP TABLE upload_batch_entries")
     conn.execute(
         "INSERT INTO users(employee_id,real_name,password_hash,role,is_active,created_at) VALUES ('kept','保留用户','x','user',1,1)"
     )
@@ -129,7 +130,7 @@ def test_repeated_init_fails_closed_when_system_permission_group_drifts(tmp_path
 def test_schema_10_permissions_expand_to_granular_nodes(tmp_path, monkeypatch):
     path = tmp_path / "app.sqlite"
     migrations = db_migrations.MIGRATIONS
-    monkeypatch.setattr(db_migrations, "MIGRATIONS", migrations[:-1])
+    monkeypatch.setattr(db_migrations, "MIGRATIONS", migrations[:-2])
     init_db(path, backup_dir=tmp_path / "backups")
     conn = sqlite3.connect(path)
     user_id = conn.execute(
@@ -173,7 +174,7 @@ def test_schema_10_permissions_expand_to_granular_nodes(tmp_path, monkeypatch):
         "workspace.view", "item.view", "category.view", "item.publish",
         "item.archive_published", "trash.view", "index.view",
     }
-    assert conn.execute("SELECT max(version) FROM app_schema_migrations").fetchone()[0] == 11
+    assert conn.execute("SELECT max(version) FROM app_schema_migrations").fetchone()[0] == db_migrations.CURRENT_SCHEMA_VERSION
     assert conn.execute("PRAGMA foreign_key_check").fetchone() is None
     conn.close()
 
