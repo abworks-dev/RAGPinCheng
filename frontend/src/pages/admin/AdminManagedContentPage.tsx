@@ -31,6 +31,7 @@ import {
 const PAGE_SIZE = 25;
 const PAGE_SIZE_OPTIONS = [25, 50, 100];
 const BULK_LIMIT = 20;
+const BULK_DOWNLOAD_TOAST_ID = "managed-content-bulk-download";
 type SortKey = "title" | "updatedAt" | "status" | "source";
 type SortDirection = "asc" | "desc";
 
@@ -858,13 +859,19 @@ export function AdminManagedContentPage() {
 
   const downloadSelected = async () => {
     if (selectedItems.length < 2 || !can("item.download")) return;
+    const selectedCount = selectedItems.length;
     setBusyAction("bulk-download");
+    toast.info(`正在打包 ${selectedCount} 份资料，请稍候…`, {
+      id: BULK_DOWNLOAD_TOAST_ID,
+      description: "文件较多时可能需要几秒。",
+      duration: Infinity,
+    });
     try {
       const result = await adminContentApi.bulkDownload(selectedItems.map((item) => item.version_id));
       triggerManagedDownload(result.blob, result.filename);
-      toast.success(`已打包 ${selectedItems.length} 份资料并开始下载`);
+      toast.success(`已打包 ${selectedCount} 份资料并开始下载`, { id: BULK_DOWNLOAD_TOAST_ID, duration: 4000 });
     } catch (downloadError) {
-      toast.error(downloadError instanceof Error ? downloadError.message : "批量下载失败");
+      toast.error(downloadError instanceof Error ? downloadError.message : "批量下载失败", { id: BULK_DOWNLOAD_TOAST_ID, duration: 5000 });
     } finally {
       setBusyAction(null);
     }
@@ -994,7 +1001,7 @@ export function AdminManagedContentPage() {
     {can("folder.review") && folderRequests.length > 0 && <Card className="overflow-hidden shadow-surface" aria-labelledby="folder-requests-title"><div className="border-b border-border px-4 py-3 sm:px-5"><h2 id="folder-requests-title" className="text-ui-base font-semibold">待处理目录申请</h2></div><ul className="divide-y divide-border">{folderRequests.map((request) => <li key={request.id} className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5"><div className="min-w-0"><p className="break-words text-ui-sm font-medium">{request.display_name}</p><p className="mt-0.5 text-ui-xs text-muted-foreground">上级目录：{request.parent_label} · 申请人：{request.requester_name || "未知"}</p></div><div className="flex gap-2"><Button size="sm" variant="outline" disabled={busyAction === `folder-request:${request.id}`} onClick={() => void reviewFolder(request, false)}><X className="size-4" />退回</Button><Button size="sm" disabled={busyAction === `folder-request:${request.id}`} onClick={() => void reviewFolder(request, true)}><Check className="size-4" />批准</Button></div></li>)}</ul></Card>}
     <Card className="overflow-hidden shadow-surface [&_table]:!min-w-[56rem]" aria-labelledby="managed-list-title">
       <div className="flex flex-col gap-3 border-b border-border px-4 py-4 lg:flex-row lg:items-end lg:justify-between sm:px-5">
-      <div className="min-w-0"><h2 id="managed-list-title" className="text-ui-base font-semibold">资料列表</h2><p className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-ui-xs text-muted-foreground"><span>当前目录：{currentFolder?.full_path || "请选择目录"} · 共 {total} 份</span><span role="status" aria-live="polite">· {selected.length > 0 ? <>已选择 <strong>{selected.length}</strong> 份，单次最多 {BULK_LIMIT} 份</> : <>未选择资料，单次最多 {BULK_LIMIT} 份</>}</span></p><div data-testid="bulk-download-status" className="min-h-10 text-ui-xs text-primary sm:min-h-5" role={busyAction === "bulk-download" ? "status" : undefined} aria-live="polite" aria-atomic="true">{busyAction === "bulk-download" && <span className="inline-flex flex-wrap items-center gap-1.5 font-medium"><RefreshCw className="size-3.5 shrink-0 animate-spin" aria-hidden="true" />正在打包 {selectedItems.length} 份资料，请稍候…<span className="font-normal text-muted-foreground">文件较多时可能需要几秒。</span></span>}</div></div>
+      <div className="min-w-0"><h2 id="managed-list-title" className="text-ui-base font-semibold">资料列表</h2><p className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-ui-xs text-muted-foreground"><span>当前目录：{currentFolder?.full_path || "请选择目录"} · 共 {total} 份</span><span role="status" aria-live="polite">· {selected.length > 0 ? <>已选择 <strong>{selected.length}</strong> 份，单次最多 {BULK_LIMIT} 份</> : <>未选择资料，单次最多 {BULK_LIMIT} 份</>}</span></p></div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
           {can("item.upload") && <Button size="sm" className="max-sm:h-control-md" onClick={openUploadDialog} disabled={!enabled || !currentFolderId || uploading || folderScanning}><Upload className="size-4" />{folderScanning ? "读取文件夹中…" : "上传文件"}</Button>}
           <Button size="sm" variant="outline" className="max-sm:h-control-md" onClick={() => void load(true)} disabled={loading || refreshing}><RefreshCw className={refreshing ? "size-4 animate-spin" : "size-4"} />{refreshing ? "刷新中…" : "刷新列表"}</Button>
