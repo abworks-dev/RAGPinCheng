@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArchiveRestore, Check, ChevronRight, Download, Eye, FileText, Folder, FolderPlus, Move, RefreshCw, Rocket, Search, Send, Trash2, Upload, X } from "lucide-react";
+import { ArchiveRestore, ArrowDown, ArrowUp, ArrowUpDown, Check, ChevronRight, Download, Eye, FileText, Folder, FolderPlus, Move, RefreshCw, Rocket, Search, Send, Trash2, Upload, X } from "lucide-react";
 import { api } from "../../api/client";
 import { Badge } from "../../components/ui/badge";
 import { Button, buttonVariants } from "../../components/ui/button";
@@ -19,7 +19,10 @@ import type { BulkManagedContentResult, ContentPermission, FolderRequest, Manage
 import { formatAdminDate } from "./admin-formatters";
 
 const PAGE_SIZE = 25;
+const PAGE_SIZE_OPTIONS = [25, 50, 100];
 const BULK_LIMIT = 20;
+type SortKey = "title" | "category" | "status" | "source";
+type SortDirection = "asc" | "desc";
 
 const statusLabel: Record<string, string> = {
   draft: "待提交", awaiting_review: "待确认", approved: "已确认", rejected: "已退回",
@@ -81,7 +84,9 @@ function AdminManagedContentPageContent() {
   const [statusFilter, setStatusFilter] = useState("");
   const [sourceFilter, setSourceFilter] = useState("");
   const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(PAGE_SIZE);
   const [detail, setDetail] = useState<ManagedContentItem | null>(null);
+  const [sort, setSort] = useState<{ key: SortKey; direction: SortDirection } | null>(null);
   const { open: openPreview } = usePdfPreview();
   const [deleteTarget, setDeleteTarget] = useState<ManagedContentItem | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -108,7 +113,7 @@ function AdminManagedContentPageContent() {
     const timer = window.setTimeout(() => setQuery(queryInput.trim()), 250);
     return () => window.clearTimeout(timer);
   }, [queryInput]);
-  useEffect(() => { setPage(0); setSelected([]); }, [query, categoryFilter, currentFolderId, statusFilter, sourceFilter]);
+  useEffect(() => { setPage(0); setSelected([]); }, [query, categoryFilter, currentFolderId, statusFilter, sourceFilter, pageSize]);
 
   const load = useCallback(async (refresh = false) => {
     if (refresh) setRefreshing(true);
@@ -121,16 +126,16 @@ function AdminManagedContentPageContent() {
           category_id: query ? categoryFilter || undefined : currentFolderId || categoryFilter || undefined,
           lifecycle_status: statusFilter || undefined,
           source_origin: sourceFilter || undefined,
-          limit: PAGE_SIZE,
-          offset: page * PAGE_SIZE,
+          limit: pageSize,
+          offset: page * pageSize,
         }),
       ]);
       setEnabled(capabilities.enabled);
       setCategories(categoryRows);
-      setItems(listing.items);
-      setTotal(listing.total);
-      setCounts(listing.status_counts);
-      setCurrentFolderId((current) => current || categoryRows.find((row) => row.parent_id === null)?.id || categoryRows[0]?.id || "");
+      setItems(currentFolderId ? listing.items : []);
+      setTotal(currentFolderId ? listing.total : 0);
+      setCounts(currentFolderId ? listing.status_counts : {});
+      setCurrentFolderId((current) => current && categoryRows.some((row) => row.id === current) ? current : "");
       setSelected((current) => current.filter((id) => listing.items.some((item) => item.version_id === id)));
       if (can("review") || can("manage_categories")) {
         setFolderRequests(await api.managedFolderRequests("pending"));
@@ -140,7 +145,7 @@ function AdminManagedContentPageContent() {
     } finally {
       setLoading(false); setRefreshing(false);
     }
-  }, [categoryFilter, currentFolderId, page, query, sourceFilter, statusFilter]);
+  }, [categoryFilter, currentFolderId, page, pageSize, query, sourceFilter, statusFilter]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -195,7 +200,7 @@ function AdminManagedContentPageContent() {
 
   const currentFolder = categories.find((category) => category.id === currentFolderId) || null;
   const rootFolders = categories.filter((category) => category.parent_id === null && category.is_active);
-  const childFolders = categories.filter((category) => category.parent_id === currentFolderId && category.is_active);
+  const childFolders = categories.filter((category) => category.parent_id === (currentFolderId || null) && category.is_active);
   const breadcrumbs = useMemo(() => {
     const result: ManagedCategory[] = [];
     let cursor = currentFolder;
@@ -206,6 +211,23 @@ function AdminManagedContentPageContent() {
     return result;
   }, [categories, currentFolder]);
   const currentRootFolderId = breadcrumbs[0]?.id || "";
+  const sortedItems = useMemo(() => {
+    if (!sort) return items;
+    const value = (item: ManagedContentItem) => ({
+      title: item.title,
+      category: item.category_path || item.category_label,
+      status: statusLabel[item.lifecycle_status] || item.lifecycle_status,
+      source: sourceLabel[item.source_origin] || item.source_origin,
+    })[sort.key];
+    return [...items].sort((left, right) => {
+      const comparison = value(left).localeCompare(value(right), "zh-CN", { numeric: true, sensitivity: "base" });
+      return sort.direction === "asc" ? comparison : -comparison;
+    });
+  }, [items, sort]);
+  const toggleSort = (key: SortKey) => setSort((current) => current?.key === key
+    ? { key, direction: current.direction === "asc" ? "desc" : "asc" }
+    : { key, direction: "asc" });
+  const sortIcon = (key: SortKey) => sort?.key !== key ? <ArrowUpDown className="size-3.5" /> : sort.direction === "asc" ? <ArrowUp className="size-3.5" /> : <ArrowDown className="size-3.5" />;
 
   const createFolder = async () => {
     if (!currentFolder || !newFolderName.trim()) return;
@@ -355,7 +377,7 @@ function AdminManagedContentPageContent() {
     finally { setBusyAction(null); }
   };
 
-  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
   const selectable = items.slice(0, BULK_LIMIT);
   const allSelected = selectable.length > 0 && selectable.every((item) => selected.includes(item.version_id));
   const toggleAll = () => setSelected(allSelected ? [] : selectable.map((item) => item.version_id));
@@ -413,7 +435,7 @@ function AdminManagedContentPageContent() {
     {(can("review") || can("manage_categories")) && folderRequests.length > 0 && <Card className="overflow-hidden shadow-surface" aria-labelledby="folder-requests-title"><div className="border-b border-border px-4 py-3 sm:px-5"><h2 id="folder-requests-title" className="text-ui-base font-semibold">待处理目录申请</h2></div><ul className="divide-y divide-border">{folderRequests.map((request) => <li key={request.id} className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5"><div className="min-w-0"><p className="break-words text-ui-sm font-medium">{request.display_name}</p><p className="mt-0.5 text-ui-xs text-muted-foreground">上级目录：{request.parent_label} · 申请人：{request.requester_name || "未知"}</p></div><div className="flex gap-2"><Button size="sm" variant="outline" disabled={busyAction === `folder-request:${request.id}`} onClick={() => void reviewFolder(request, false)}><X className="size-4" />退回</Button><Button size="sm" disabled={busyAction === `folder-request:${request.id}`} onClick={() => void reviewFolder(request, true)}><Check className="size-4" />批准</Button></div></li>)}</ul></Card>}
     <Card className="overflow-hidden shadow-surface [&_table]:!min-w-[56rem]" aria-labelledby="managed-list-title">
       <div className="flex flex-col gap-3 border-b border-border px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5"><div><h2 id="managed-list-title" className="text-ui-base font-semibold">资料列表</h2><p className="mt-1 text-ui-xs text-muted-foreground">当前目录：{currentFolder?.full_path || "请选择目录"} · 共 {total} 份</p></div><div className="flex flex-wrap gap-2">{can("organize") && <Button size="sm" className="min-h-10" onClick={openUploadDialog} disabled={!enabled || !currentFolderId || uploading}><Upload className="size-4" />上传文件</Button>}{(can("organize") || can("manage_categories")) && <Button size="sm" variant="outline" onClick={() => can("manage_categories") ? setNewFolderOpen(true) : setRequestFolderOpen(true)} disabled={!currentFolder || currentFolder.level >= 4}><FolderPlus className="size-4" />新建</Button>}<Button size="sm" variant="outline" onClick={() => void load(true)} disabled={loading || refreshing}><RefreshCw className={refreshing ? "size-4 animate-spin" : "size-4"} />{refreshing ? "刷新中…" : "刷新"}</Button></div></div>
-      <div className="border-b border-border bg-surface-muted/40 px-4 py-3 sm:px-5" data-testid="managed-folder-address"><div className="flex flex-col gap-2 rounded-ui-md border border-input bg-background px-3 py-2 sm:flex-row sm:items-center"><label className="flex shrink-0 items-center gap-2 text-ui-xs font-medium text-muted-foreground"><span>资料目录</span><Select aria-label="一级目录" className="h-8 min-w-44" value={currentRootFolderId} onChange={(event) => setCurrentFolderId(event.target.value)}>{rootFolders.map((folder) => <option key={folder.id} value={folder.id}>{folder.display_code} {folder.display_name}</option>)}</Select></label><nav className="flex min-w-0 flex-wrap items-center gap-1 text-ui-sm" aria-label="当前资料目录">{breadcrumbs.map((folder, index) => <span key={folder.id} className="flex min-w-0 items-center gap-1">{index > 0 && <ChevronRight className="size-4 shrink-0 text-muted-foreground" />}<button type="button" className="max-w-56 truncate rounded px-1 py-0.5 hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setCurrentFolderId(folder.id)}>{folder.display_code} {folder.display_name}</button></span>)}</nav></div></div>
+      <div className="border-b border-border bg-surface-muted/40 px-4 py-3 sm:px-5" data-testid="managed-folder-address"><nav className="flex min-w-0 items-center gap-1 rounded-ui-md border border-input bg-background px-3 py-2 text-ui-sm" aria-label="资料路径"><button type="button" className="shrink-0 rounded px-1 py-0.5 font-medium hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setCurrentFolderId("")}>/</button>{breadcrumbs.map((folder) => <span key={folder.id} className="flex min-w-0 items-center gap-1"><ChevronRight className="size-4 shrink-0 text-muted-foreground" /><button type="button" className="max-w-56 truncate rounded px-1 py-0.5 hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setCurrentFolderId(folder.id)}>{folder.display_code} {folder.display_name}</button></span>)}</nav></div>
       <div className="grid gap-2 border-b border-border p-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" aria-label="子文件夹">
         {childFolders.map((folder) => <button key={folder.id} type="button" className={`flex min-h-14 items-center gap-3 rounded-ui-lg border bg-background px-3 py-2 text-left transition-colors hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${draggedItem ? "border-primary/60" : "border-border"}`} onClick={() => setCurrentFolderId(folder.id)} onDragOver={(event) => { if (draggedItem) event.preventDefault(); }} onDrop={(event) => { event.preventDefault(); if (draggedItem) void moveItemTo(draggedItem, folder.id); }}><Folder className="size-5 shrink-0 text-primary" /><span className="min-w-0"><span className="block truncate text-ui-sm font-medium">{folder.display_code} {folder.display_name}</span><span className="block text-ui-xs text-muted-foreground">{folder.item_count} 份直接资料</span></span></button>)}
         {!loading && childFolders.length === 0 && <p className="col-span-full px-1 py-2 text-ui-sm text-muted-foreground">当前目录没有子文件夹。</p>}
@@ -431,9 +453,9 @@ function AdminManagedContentPageContent() {
       <div data-testid="managed-content-drop-list" className={`relative transition-colors duration-normal ${listDropActive ? "bg-primary/5 ring-2 ring-inset ring-primary/50" : ""}`} onDragEnter={(event) => { if (event.dataTransfer?.types.includes("Files")) { event.preventDefault(); setListDropActive(true); } }} onDragOver={(event) => { if (event.dataTransfer?.types.includes("Files")) event.preventDefault(); }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setListDropActive(false); }} onDrop={(event) => { if (!event.dataTransfer?.types.includes("Files") || !event.dataTransfer.files.length) return; event.preventDefault(); prepareFolderUpload(Array.from(event.dataTransfer.files)); }}>
       {uploadResults.length > 0 && <ul className="border-t border-border px-4 py-3 text-ui-sm sm:px-5" aria-live="polite">{uploadResults.map((entry) => <li key={entry.filename} className="flex items-start justify-between gap-3 border-b border-border py-2 last:border-b-0"><span className="min-w-0"><span className="block break-all">{entry.filename}</span>{entry.reason && <span className="mt-0.5 block break-words text-ui-xs text-muted-foreground">{entry.reason}</span>}</span><Badge className="shrink-0" variant={entry.status === "accepted" ? "success" : "warning"}>{entry.status === "accepted" ? "已接收" : "已跳过"}</Badge></li>)}</ul>}
       {loading ? <LoadingState className="min-h-48 border-x-0 border-b-0" label="正在加载资料…" /> : !error && items.length === 0 ? <EmptyState className="rounded-none border-x-0 border-b-0" title="没有符合条件的资料" description="请调整筛选条件或上传新资料。" /> : !error && <>
-        <div className="hidden overflow-x-auto border-t border-border lg:block"><table className="w-full min-w-[64rem] text-ui-sm"><thead className="border-b border-border bg-surface-muted text-left text-muted-foreground"><tr><th className="w-12 px-3 py-3"><Checkbox aria-label="选择当前页前20份资料" checked={allSelected} onChange={toggleAll} /></th><th className="px-3 py-3 font-medium">资料</th><th className="px-3 py-3 font-medium">分类</th><th className="px-3 py-3 font-medium">状态</th><th className="px-3 py-3 font-medium">来源</th><th className="px-3 py-3 text-right font-medium">操作</th></tr></thead><tbody className="divide-y divide-border">{items.map((item, index) => { const movable = (can("organize") && ["draft", "rejected"].includes(item.lifecycle_status)) || (can("review") && item.lifecycle_status === "awaiting_review"); return <tr key={item.item_id} draggable={movable} title={movable ? "拖动到上方文件夹可移动资料" : undefined} onDragStart={() => setDraggedItem(item)} onDragEnd={() => setDraggedItem(null)} className={`transition-colors duration-normal hover:bg-surface-muted/60 ${movable ? "cursor-grab" : ""}`}><td className="px-3 py-3"><Checkbox aria-label={`选择${item.title}`} checked={selected.includes(item.version_id)} disabled={index >= BULK_LIMIT} onChange={() => setSelected((current) => current.includes(item.version_id) ? current.filter((id) => id !== item.version_id) : [...current, item.version_id].slice(0, BULK_LIMIT))} /></td><td className="max-w-xs px-3 py-3"><p className="break-words font-medium">{item.title}</p><p className="mt-0.5 break-all text-ui-xs text-muted-foreground">{item.original_filename} · v{item.version_number}</p></td><td className="max-w-xs px-3 py-3 break-words">{item.category_path || item.category_label}</td><td className="px-3 py-3"><Badge variant={statusVariant(item.lifecycle_status)}>{statusLabel[item.lifecycle_status] || "未知状态"}</Badge></td><td className="px-3 py-3">{sourceLabel[item.source_origin] || "其他来源"}</td><td className="px-3 py-3">{renderActions(item)}</td></tr>; })}</tbody></table></div>
+        <div className="hidden overflow-x-auto border-t border-border lg:block"><table className="w-full min-w-[64rem] text-ui-sm"><thead className="border-b border-border bg-surface-muted text-left text-muted-foreground"><tr><th className="w-12 px-3 py-3"><Checkbox aria-label="选择当前页前20份资料" checked={allSelected} onChange={toggleAll} /></th>{([ ["title", "资料"], ["category", "分类"], ["status", "状态"], ["source", "来源"] ] as [SortKey, string][]).map(([key, label]) => <th key={key} aria-sort={sort?.key === key ? sort.direction === "asc" ? "ascending" : "descending" : "none"} className="px-3 py-3 font-medium"><button type="button" className="inline-flex items-center gap-1 rounded px-1 py-0.5 hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => toggleSort(key)}>{label}{sortIcon(key)}</button></th>)}<th className="px-3 py-3 text-right font-medium">操作</th></tr></thead><tbody className="divide-y divide-border">{sortedItems.map((item, index) => { const movable = (can("organize") && ["draft", "rejected"].includes(item.lifecycle_status)) || (can("review") && item.lifecycle_status === "awaiting_review"); return <tr key={item.item_id} draggable={movable} title={movable ? "拖动到上方文件夹可移动资料" : undefined} onDragStart={() => setDraggedItem(item)} onDragEnd={() => setDraggedItem(null)} className={`transition-colors duration-normal hover:bg-surface-muted/60 ${movable ? "cursor-grab" : ""}`}><td className="px-3 py-3"><Checkbox aria-label={`选择${item.title}`} checked={selected.includes(item.version_id)} disabled={index >= BULK_LIMIT} onChange={() => setSelected((current) => current.includes(item.version_id) ? current.filter((id) => id !== item.version_id) : [...current, item.version_id].slice(0, BULK_LIMIT))} /></td><td className="max-w-xs px-3 py-3"><p className="break-words font-medium">{item.title}</p><p className="mt-0.5 break-all text-ui-xs text-muted-foreground">{item.original_filename} · v{item.version_number}</p></td><td className="max-w-xs px-3 py-3 break-words">{item.category_path || item.category_label}</td><td className="px-3 py-3"><Badge variant={statusVariant(item.lifecycle_status)}>{statusLabel[item.lifecycle_status] || "未知状态"}</Badge></td><td className="px-3 py-3">{sourceLabel[item.source_origin] || "其他来源"}</td><td className="px-3 py-3">{renderActions(item)}</td></tr>; })}</tbody></table></div>
         <ul className="divide-y divide-border border-t border-border lg:hidden">{items.map((item, index) => <li key={item.item_id} className="space-y-3 px-4 py-4 sm:px-5"><div className="flex items-start gap-3"><Checkbox className="mt-0.5" aria-label={`选择${item.title}`} checked={selected.includes(item.version_id)} disabled={index >= BULK_LIMIT} onChange={() => setSelected((current) => current.includes(item.version_id) ? current.filter((id) => id !== item.version_id) : [...current, item.version_id].slice(0, BULK_LIMIT))} /><div className="min-w-0 flex-1"><div className="flex items-start justify-between gap-3"><p className="break-words font-medium">{item.title}</p><Badge className="shrink-0" variant={statusVariant(item.lifecycle_status)}>{statusLabel[item.lifecycle_status] || "未知状态"}</Badge></div><p className="mt-1 break-all text-ui-xs text-muted-foreground">{item.original_filename} · v{item.version_number}</p></div></div><dl className="grid grid-cols-[4rem_minmax(0,1fr)] gap-x-2 gap-y-1 text-ui-sm"><dt className="text-muted-foreground">分类</dt><dd className="break-words">{item.category_path || item.category_label}</dd><dt className="text-muted-foreground">来源</dt><dd>{sourceLabel[item.source_origin] || "其他来源"}</dd></dl>{renderActions(item)}</li>)}</ul>
-        <div className="flex flex-col gap-2 border-t border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5"><p className="text-ui-xs text-muted-foreground">共 {total} 份，第 {page + 1} / {pageCount} 页</p><div className="flex gap-2"><Button size="sm" variant="outline" disabled={page === 0 || loading} onClick={() => setPage((value) => value - 1)}>上一页</Button><Button size="sm" variant="outline" disabled={page + 1 >= pageCount || loading} onClick={() => setPage((value) => value + 1)}>下一页</Button></div></div>
+        <div className="flex flex-col gap-2 border-t border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5"><p className="text-ui-xs text-muted-foreground">共 {total} 份，第 {page + 1} / {pageCount} 页</p><div className="flex flex-wrap items-center justify-end gap-2"><label className="flex items-center gap-2 text-ui-xs text-muted-foreground">每页<Select aria-label="每页条数" className="h-control-sm w-20" value={String(pageSize)} onChange={(event) => setPageSize(Number(event.target.value))}>{PAGE_SIZE_OPTIONS.map((size) => <option key={size} value={size}>{size}</option>)}</Select></label><Button size="sm" variant="outline" disabled={page === 0 || loading} onClick={() => setPage((value) => value - 1)}>上一页</Button><Select aria-label="跳转页码" className="h-control-sm w-24" value={String(page + 1)} onChange={(event) => setPage(Number(event.target.value) - 1)} disabled={loading}>{Array.from({ length: pageCount }, (_, index) => <option key={index + 1} value={index + 1}>第 {index + 1} 页</option>)}</Select><Button size="sm" variant="outline" disabled={page + 1 >= pageCount || loading} onClick={() => setPage((value) => value + 1)}>下一页</Button></div></div>
       </>}
       </div>
     </Card>
