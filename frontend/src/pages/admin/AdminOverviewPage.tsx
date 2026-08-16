@@ -3,7 +3,7 @@ import { ArrowRight } from "lucide-react";
 import { adminOverviewApi } from "../../api/admin/overview";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
-import { Card, CardContent } from "../../components/ui/card";
+import { Card } from "../../components/ui/card";
 import { ErrorState } from "../../components/ui/error-state";
 import { LoadingState } from "../../components/ui/loading-state";
 import type { AdminStats, MaintenanceStatus, SystemOverview } from "../../types";
@@ -107,18 +107,15 @@ export function AdminOverviewPage({ onOpenMaintenance }: AdminOverviewPageProps)
           </h2>
           <span className="text-ui-xs text-muted-foreground">当前数据</span>
         </div>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <dl className="grid grid-cols-1 overflow-hidden rounded-ui-xl border border-border bg-card divide-y divide-border sm:grid-cols-2 sm:divide-x sm:divide-y-0 xl:grid-cols-3 xl:divide-y">
           {cards.map(([label, value, hint]) => (
-            <Card key={label} className="overflow-hidden shadow-surface">
-              <CardContent className="relative p-5 pt-5">
-                <span className="absolute inset-x-0 top-0 h-1 bg-primary/80" aria-hidden="true" />
-                <div className="text-ui-xs font-medium text-muted-foreground">{label}</div>
-                <div className="mt-2 text-ui-2xl font-semibold tabular-nums text-card-foreground">{value}</div>
-                {hint && <div className="mt-2 text-ui-xs text-muted-foreground">{hint}</div>}
-              </CardContent>
-            </Card>
+            <div key={label} className="min-w-0 p-4 sm:p-5">
+              <dt className="text-ui-xs font-medium text-muted-foreground">{label}</dt>
+              <dd className="mt-1 text-ui-xl font-semibold tabular-nums text-card-foreground">{value}</dd>
+              {hint && <dd className="mt-1 text-ui-xs text-muted-foreground">{hint}</dd>}
+            </div>
           ))}
-        </div>
+        </dl>
       </section>
 
       <ProductionRuntimeStatus

@@ -244,6 +244,11 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertIn('ROLLBACK_IMAGE_TAG="pincheng-rag-backend:app-only-rollback-', workflow)
         self.assertIn('docker tag "${OLD_IMAGE_ID}" "${ROLLBACK_IMAGE_TAG}"', workflow)
         self.assertIn('docker tag "${ROLLBACK_IMAGE_TAG}" pincheng-rag-backend:latest', workflow)
+        self.assertIn(
+            'git show "${DEPLOY_COMMIT_SHA}:scripts/deploy-app.sh"', workflow
+        )
+        self.assertIn('bash "${DEPLOY_SCRIPT}"', workflow)
+        self.assertNotIn('bash "${REPO_PATH}/scripts/deploy-app.sh"', workflow)
         self.assertIn('"${COMPOSE[@]}" stop backend', workflow)
         self.assertIn('SRC="${BACKUP_PATH}" DST="${DATA_PATH}" python3', workflow)
         self.assertIn('os.replace(temporary, target)', workflow)
@@ -444,6 +449,14 @@ class TestDeployGitSafety(unittest.TestCase):
             'COMPOSE_FILES+=(-f "${SOURCE_DECOUPLED_COMPOSE}")',
             self.app_only_workflow,
         )
+        self.assertIn('backend.get("tmpfs", [])', self.app_only_workflow)
+        self.assertIn(
+            'container.get("HostConfig", {}).get("Tmpfs", {})',
+            self.app_only_workflow,
+        )
+        self.assertIn(
+            'assert "/app/docs" in tmpfs', self.app_only_workflow
+        )
         self.assertIn('ORIGINAL_COMPOSE_OVERRIDE="${COMPOSE_OVERRIDE}"', self.app_only_workflow)
         self.assertIn('COMPOSE=("${DEPLOY_COMPOSE[@]}")', self.app_only_workflow)
         self.assertIn("export COMPOSE_OVERRIDE", self.app_only_workflow)
@@ -480,10 +493,14 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertIn(
             'COMPOSE_ARGS+=(-f "$COMPOSE_SOURCE_DECOUPLED")', self.linux
         )
+        self.assertIn(
+            'source-decoupled Compose overlay is missing', self.linux
+        )
         source_decoupled_branch = self.linux.split(
             'case "${SOURCE_DECOUPLING_COMPLETE:-false}" in', 1
         )[1].split('false|"")', 1)[0]
         self.assertNotIn('COMPOSE_BASE', source_decoupled_branch)
+        self.assertIn('COMPOSE_SOURCE_DECOUPLED', source_decoupled_branch)
         self.assertLess(
             source_decoupled_branch.index('COMPOSE_ARGS+=(-f "$COMPOSE_OVERRIDE")'),
             source_decoupled_branch.index(
@@ -491,6 +508,9 @@ class TestDeployGitSafety(unittest.TestCase):
             ),
         )
         self.assertIn('service-level tmpfs contract', source_decoupled_branch)
+        self.assertIn(
+            "compose up -d --no-deps --force-recreate backend", self.linux
+        )
         self.assertIn(
             '"${COMPOSE[@]}" up -d --no-deps --force-recreate backend',
             self.app_backup_recovery_workflow,

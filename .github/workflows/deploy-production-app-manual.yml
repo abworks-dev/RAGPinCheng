@@ -408,12 +408,18 @@ jobs:
           from pathlib import Path
 
           config = json.loads(Path(os.environ["DIAGNOSTIC_PATH"]).read_text(encoding="utf-8"))
-          volumes = config.get("services", {}).get("backend", {}).get("volumes", [])
+          backend = config.get("services", {}).get("backend", {})
+          volumes = backend.get("volumes", [])
           summary = [
               {"target": item.get("target"), "type": item.get("type"), "read_only": item.get("read_only")}
               for item in volumes
           ]
-          print("SOURCE_DECOUPLED_COMPOSE_DIAGNOSTIC volumes=" + json.dumps(summary, ensure_ascii=True))
+          print(
+              "SOURCE_DECOUPLED_COMPOSE_DIAGNOSTIC volumes="
+              + json.dumps(summary, ensure_ascii=True)
+              + " tmpfs="
+              + json.dumps(backend.get("tmpfs", []), ensure_ascii=True)
+          )
           PY
           CURRENT_COMPOSE_FILES=(
             -f "${REPO_PATH}/docker/docker-compose.yml"
@@ -620,8 +626,11 @@ jobs:
           container = json.load(sys.stdin)[0]
           mounts = {item["Destination"]: item for item in container.get("Mounts", [])}
           docs = mounts.get("/app/docs")
-          assert docs is not None, "missing /app/docs mount"
-          assert docs.get("Type") == "tmpfs", "unexpected docs mount type: %r" % docs.get("Type")
+          if docs is not None:
+              assert docs.get("Type") == "tmpfs", "unexpected docs mount type: %r" % docs.get("Type")
+          tmpfs = container.get("HostConfig", {}).get("Tmpfs", {})
+          assert "/app/docs" in tmpfs, "missing /app/docs tmpfs configuration"
+          assert "ro" in tmpfs["/app/docs"].split(","), "docs tmpfs is not read-only"
           media = mounts.get("/app/media", {})
           content = mounts.get("/app/content", {})
           assert media.get("Type") == "bind", "unexpected media mount type: %r" % media.get("Type")
@@ -890,8 +899,13 @@ jobs:
           (
             set -euo pipefail
             git merge --ff-only "${DEPLOY_COMMIT_SHA}"
+            DEPLOY_SCRIPT="${RUNNER_TEMP}/deploy-app-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.sh"
+            trap 'rm -f "${DEPLOY_SCRIPT}" "${DEPLOY_SCRIPT}.tmp"' EXIT
+            git show "${DEPLOY_COMMIT_SHA}:scripts/deploy-app.sh" > "${DEPLOY_SCRIPT}.tmp"
+            mv "${DEPLOY_SCRIPT}.tmp" "${DEPLOY_SCRIPT}"
+            chmod 700 "${DEPLOY_SCRIPT}"
             echo "TRANSCRIPTION_ADMISSION action=${TRANSCRIPTION_ADMISSION_ACTION} source=workflow-environment"
-            bash "${REPO_PATH}/scripts/deploy-app.sh"
+            bash "${DEPLOY_SCRIPT}"
             COMPOSE=("${DEPLOY_COMPOSE[@]}")
 
             CONTAINER_ID="$("${COMPOSE[@]}" ps -q backend)"
