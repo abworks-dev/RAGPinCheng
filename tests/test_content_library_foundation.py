@@ -11,7 +11,7 @@ import pytest
 from api.content_permissions import has_content_permission
 from api.content_import import import_server_batch, resolve_import_category
 from api.content_storage import ContentStorage, StoredContentObject
-from api.content_store import archive_content_item, create_category, create_web_batch, register_uploaded_document, restore_content_item
+from api.content_store import archive_content_item, create_category, create_web_batch, list_categories, register_uploaded_document, restore_content_item
 from api.content_store import (
     create_publication_job,
     review_version,
@@ -153,6 +153,36 @@ def test_category_depth_is_limited_to_four(tmp_path):
             sort_order=5,
             actor_user_id=actor,
         )
+    conn.close()
+
+
+def test_category_listing_is_depth_first_with_stable_sibling_order(tmp_path):
+    conn = _db(tmp_path)
+    rows = [
+        ("cat-sort-first", "sort_first", "cat-03", "01", "第一项", 5, 2),
+        ("cat-sort-grandchild", "sort_grandchild", "cat-sort-first", "01", "子项", 1, 3),
+        ("cat-sort-code-02", "sort_code_02", "cat-03", "02", "第二项", 10, 2),
+        ("cat-sort-code-03", "sort_code_03", "cat-03", "03", "第三项", 10, 2),
+        ("cat-sort-code", "sort_code", "cat-03", "10", "编号靠后", 10, 2),
+    ]
+    conn.executemany(
+        """INSERT INTO category_nodes
+           (id,category_key,parent_id,display_code,display_name,sort_order,level,is_active,created_at,updated_at)
+           VALUES (?,?,?,?,?,?,?,1,1,1)""",
+        rows,
+    )
+    conn.commit()
+
+    inserted_ids = {row[0] for row in rows}
+    actual = [row["id"] for row in list_categories(conn) if row["id"] in inserted_ids]
+
+    assert actual == [
+        "cat-sort-first",
+        "cat-sort-grandchild",
+        "cat-sort-code-02",
+        "cat-sort-code-03",
+        "cat-sort-code",
+    ]
     conn.close()
 
 

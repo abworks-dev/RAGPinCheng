@@ -76,7 +76,7 @@ def audit_event(
 
 def list_categories(conn: sqlite3.Connection, *, include_inactive: bool = False) -> list[sqlite3.Row]:
     where = "" if include_inactive else "WHERE is_active=1"
-    return conn.execute(
+    rows = conn.execute(
         f"""WITH RECURSIVE paths AS (
                 SELECT id,category_key,parent_id,display_code,display_name,sort_order,
                        level,is_active,version,created_at,updated_at,
@@ -91,8 +91,27 @@ def list_categories(conn: sqlite3.Connection, *, include_inactive: bool = False)
             SELECT p.*,(SELECT count(*) FROM content_items i
                         WHERE i.category_id=p.id AND i.archived_at IS NULL) AS item_count
             FROM paths p {where}
-            ORDER BY full_path"""
+            """
     ).fetchall()
+
+    # Keep the API flat for existing consumers while returning a stable depth-first
+    # tree order. Sibling order is controlled by the editable sort_order field.
+    children: dict[str | None, list[sqlite3.Row]] = {}
+    for row in rows:
+        children.setdefault(row["parent_id"], []).append(row)
+
+    def sibling_key(row: sqlite3.Row) -> tuple[int, str, str, str]:
+        return (row["sort_order"], row["display_code"], row["display_name"], row["id"])
+
+    ordered: list[sqlite3.Row] = []
+
+    def visit(parent_id: str | None) -> None:
+        for row in sorted(children.get(parent_id, []), key=sibling_key):
+            ordered.append(row)
+            visit(row["id"])
+
+    visit(None)
+    return ordered
 
 
 def create_category(

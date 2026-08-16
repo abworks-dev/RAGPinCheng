@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { RefreshCw, Save, Trash2 } from "lucide-react";
-import { api } from "../../api/client";
+import { adminMaintenanceApi } from "../../api/admin/maintenance";
 import { Alert, AlertDescription, AlertTitle } from "../../components/ui/alert";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
@@ -14,7 +14,7 @@ import { Input } from "../../components/ui/input";
 import { LoadingState } from "../../components/ui/loading-state";
 import { Select } from "../../components/ui/select";
 import type { CleanupPreview, MaintenanceRun, MaintenanceSettings, MaintenanceStatus } from "../../types";
-import { formatAdminDate } from "./admin-formatters";
+import { formatAdminDate } from "../../lib/admin-formatters";
 
 const PRESETS = [30, 90, 180, 365];
 const NEVER = "never";
@@ -56,7 +56,7 @@ export function AdminMaintenancePage() {
     setError(null);
     try {
       const [nextStatus, nextPreview, nextRuns] = await Promise.all([
-        api.adminMaintenance(), api.adminMaintenancePreview(), api.adminMaintenanceRuns(),
+        adminMaintenanceApi.status(), adminMaintenanceApi.preview(), adminMaintenanceApi.runs(),
       ]);
       setStatus(nextStatus);
       setPreview(nextPreview);
@@ -78,7 +78,7 @@ export function AdminMaintenancePage() {
     if (retentionDays !== undefined && (!Number.isInteger(retentionDays) || retentionDays < 7 || retentionDays > 3650)) return null;
     setBusy("preview");
     try {
-      const value = await api.adminMaintenancePreview(retentionDays);
+      const value = await adminMaintenanceApi.preview(retentionDays);
       setPreview(value);
       return value;
     } catch (e: any) {
@@ -110,7 +110,7 @@ export function AdminMaintenancePage() {
     setBusy("save");
     setNotice(null);
     try {
-      const settings = await api.adminUpdateMaintenanceSettings(candidate);
+      const settings = await adminMaintenanceApi.updateSettings(candidate);
       setStatus((current) => current ? { ...current, settings } : current);
       setConfirmSettings(null);
       setNotice("维护策略已保存，将从下一次自动检查开始生效。");
@@ -126,11 +126,11 @@ export function AdminMaintenancePage() {
     setBusy("cleanup");
     setNotice(null);
     try {
-      const result = await api.adminRunMaintenanceCleanup();
+      const result = await adminMaintenanceApi.cleanup();
       setCleanupOpen(false);
       setNotice(`清理完成：删除 ${result.deleted_conversations} 条对话、${result.deleted_messages} 条消息、${result.deleted_auth_sessions} 个失效登录会话。`);
       const [nextStatus, nextPreview, nextRuns] = await Promise.all([
-        api.adminMaintenance(), api.adminMaintenancePreview(), api.adminMaintenanceRuns(),
+        adminMaintenanceApi.status(), adminMaintenanceApi.preview(), adminMaintenanceApi.runs(),
       ]);
       setStatus(nextStatus);
       setPreview(nextPreview);
@@ -151,8 +151,8 @@ export function AdminMaintenancePage() {
   return (
     <div className="space-y-6" aria-labelledby="maintenance-title">
       <div>
-        <p className="text-ui-sm font-medium text-primary">系统管理</p>
-        <h1 id="maintenance-title" className="mt-1 text-ui-2xl font-semibold text-foreground">系统维护</h1>
+        <p className="text-ui-xs font-medium text-primary">总览</p>
+        <h1 id="maintenance-title" className="mt-1 text-ui-2xl font-semibold tracking-tight text-foreground">系统维护</h1>
         <p className="mt-2 max-w-2xl text-ui-sm text-muted-foreground">配置历史对话保留策略，检查影响范围并追踪清理结果。</p>
       </div>
 

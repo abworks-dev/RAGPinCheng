@@ -5,12 +5,14 @@ import { AdminOverviewPage } from "./AdminOverviewPage";
 const mocks = vi.hoisted(() => ({
   adminStats: vi.fn(),
   adminMaintenance: vi.fn(),
+  adminSystemOverview: vi.fn(),
 }));
 
 vi.mock("../../api/client", () => ({
   api: {
     adminStats: mocks.adminStats,
     adminMaintenance: mocks.adminMaintenance,
+    adminSystemOverview: mocks.adminSystemOverview,
   },
 }));
 
@@ -31,6 +33,12 @@ describe("AdminOverviewPage", () => {
       sweeper_interval_seconds: 3600,
       last_run: { id: 1, trigger_source: "automatic", status: "succeeded", retention_days: null, deleted_conversations: 0, deleted_messages: 0, deleted_auth_sessions: 2, started_at: 10, finished_at: 11, error_summary: null },
     });
+    mocks.adminSystemOverview.mockResolvedValue({
+      topology: "separate",
+      checked_at: 20,
+      app: { status: "healthy", cpu_percent: 31.2, memory_used_bytes: 4 * 1024 ** 3, memory_total_bytes: 16 * 1024 ** 3, disk_used_bytes: 40 * 1024 ** 3, disk_total_bytes: 100 * 1024 ** 3, checked_at: 20, error_code: null },
+      gpu: { status: "healthy", model_loaded: true, device_name: "合成 GPU", vram_used_bytes: 4 * 1024 ** 3, vram_total_bytes: 16 * 1024 ** 3, utilization_percent: 42, temperature_celsius: 53, inflight_requests: 1, checked_at: 20, data_age_seconds: 0, stale: false, error_code: null },
+    });
   });
 
   afterEach(() => {
@@ -42,7 +50,7 @@ describe("AdminOverviewPage", () => {
 
     render(<AdminOverviewPage />);
 
-    expect(screen.getByText("正在加载管理概览…")).toBeInTheDocument();
+    expect(screen.getByText("正在加载系统概览…")).toBeInTheDocument();
   });
 
   it("renders the six existing statistics without changing their order", async () => {
@@ -70,7 +78,7 @@ describe("AdminOverviewPage", () => {
 
     render(<AdminOverviewPage />);
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("概览加载失败");
+    expect(await screen.findByRole("alert")).toHaveTextContent("系统概览加载失败");
     expect(screen.getByRole("alert")).toHaveTextContent("统计服务暂不可用");
   });
 
@@ -99,5 +107,24 @@ describe("AdminOverviewPage", () => {
 
     expect(await screen.findByText("用户总数")).toBeInTheDocument();
     expect(await screen.findByText("维护状态暂不可用")).toBeInTheDocument();
+  });
+
+  it("shows production runtime status without exposing technical node ids", async () => {
+    mocks.adminStats.mockResolvedValue(initialStats);
+    render(<AdminOverviewPage />);
+
+    expect(await screen.findByRole("heading", { name: "生产运行状态" })).toBeInTheDocument();
+    expect(screen.getByText("分离部署")).toBeInTheDocument();
+    expect(screen.getByText("合成 GPU")).toBeInTheDocument();
+    expect(screen.queryByText(/node|节点 ID/i)).not.toBeInTheDocument();
+  });
+
+  it("keeps the overview usable when runtime metrics fail", async () => {
+    mocks.adminStats.mockResolvedValue(initialStats);
+    mocks.adminSystemOverview.mockRejectedValue(new Error("GPU 指标暂不可用"));
+    render(<AdminOverviewPage />);
+
+    expect(await screen.findByText("用户总数")).toBeInTheDocument();
+    expect(await screen.findByText("生产运行状态暂不可用：GPU 指标暂不可用")).toBeInTheDocument();
   });
 });

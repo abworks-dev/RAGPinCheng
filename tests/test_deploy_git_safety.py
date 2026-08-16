@@ -26,6 +26,9 @@ class TestDeployGitSafety(unittest.TestCase):
         cls.source_decoupled_compose = (
             ROOT / "docker/compose.source-decoupled.yml"
         ).read_text(encoding="utf-8")
+        cls.base_compose = (ROOT / "docker/docker-compose.yml").read_text(
+            encoding="utf-8"
+        )
         cls.windows = (ROOT / "scripts/deploy-gpu.ps1").read_text(encoding="utf-8")
         cls.promote = (ROOT / "scripts/promote-gpu-runtime.ps1").read_text(
             encoding="utf-8"
@@ -34,6 +37,11 @@ class TestDeployGitSafety(unittest.TestCase):
             encoding="utf-8"
         )
         cls.linux = (ROOT / "scripts/deploy-app.sh").read_text(encoding="utf-8")
+
+    def test_compose_uses_production_env_file_with_local_fallback(self):
+        self.assertIn("- ${COMPOSE_ENV_FILE:-../.env}", self.base_compose)
+        self.assertNotIn("- ../.env", self.base_compose)
+        self.assertIn('COMPOSE_ARGS+=(--env-file "$COMPOSE_ENV_FILE")', self.linux)
 
     def test_no_script_persists_authenticated_remote(self):
         for name, text in (("windows", self.windows), ("linux", self.linux)):
@@ -236,6 +244,11 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertIn('ROLLBACK_IMAGE_TAG="pincheng-rag-backend:app-only-rollback-', workflow)
         self.assertIn('docker tag "${OLD_IMAGE_ID}" "${ROLLBACK_IMAGE_TAG}"', workflow)
         self.assertIn('docker tag "${ROLLBACK_IMAGE_TAG}" pincheng-rag-backend:latest', workflow)
+        self.assertIn(
+            'git show "${DEPLOY_COMMIT_SHA}:scripts/deploy-app.sh"', workflow
+        )
+        self.assertIn('bash "${DEPLOY_SCRIPT}"', workflow)
+        self.assertNotIn('bash "${REPO_PATH}/scripts/deploy-app.sh"', workflow)
         self.assertIn('"${COMPOSE[@]}" stop backend', workflow)
         self.assertIn('SRC="${BACKUP_PATH}" DST="${DATA_PATH}" python3', workflow)
         self.assertIn('os.replace(temporary, target)', workflow)
@@ -406,6 +419,8 @@ class TestDeployGitSafety(unittest.TestCase):
 
     def test_source_decoupling_overlay_is_final_for_deploy_and_recovery(self):
         overlay = self.source_decoupled_compose
+        self.assertIn("env_file: !override", overlay)
+        self.assertIn("${COMPOSE_ENV_FILE:?COMPOSE_ENV_FILE is required}", overlay)
         self.assertIn("volumes: !override", overlay)
         self.assertIn("${DATA_PATH:?DATA_PATH is required}:/app/data", overlay)
         self.assertIn(
@@ -426,6 +441,22 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertIn(compose_sanitizer_flags, self.app_only_workflow)
         self.assertIn('docker-compose.yml" -f "${COMPOSE_OVERRIDE}', self.app_only_workflow)
         self.assertIn('COMPOSE_FILES=(-f "${COMPOSE_OVERRIDE}")', self.app_only_workflow)
+        self.assertIn(
+            'git show "${DEPLOY_COMMIT_SHA}:docker/compose.source-decoupled.yml"',
+            self.app_only_workflow,
+        )
+        self.assertIn(
+            'COMPOSE_FILES+=(-f "${SOURCE_DECOUPLED_COMPOSE}")',
+            self.app_only_workflow,
+        )
+        self.assertIn('backend.get("tmpfs", [])', self.app_only_workflow)
+        self.assertIn(
+            'container.get("HostConfig", {}).get("Tmpfs", {})',
+            self.app_only_workflow,
+        )
+        self.assertIn(
+            'assert "/app/docs" in tmpfs', self.app_only_workflow
+        )
         self.assertIn('ORIGINAL_COMPOSE_OVERRIDE="${COMPOSE_OVERRIDE}"', self.app_only_workflow)
         self.assertIn('COMPOSE=("${DEPLOY_COMPOSE[@]}")', self.app_only_workflow)
         self.assertIn("export COMPOSE_OVERRIDE", self.app_only_workflow)
@@ -438,10 +469,47 @@ class TestDeployGitSafety(unittest.TestCase):
         )
         self.assertIn("sanitize_source_decoupled_override.py", self.linux)
         self.assertIn(compose_sanitizer_flags, self.linux)
+        self.assertIn("export COMPOSE_ENV_FILE", self.linux)
         self.assertIn("export COMPOSE_OVERRIDE", self.linux)
+        self.assertIn(
+            'docker compose -f "$COMPOSE_BASE" -f "$COMPOSE_OVERRIDE"',
+            self.linux,
+        )
+        self.assertIn(
+            "export COMPOSE_OVERRIDE SOURCE_DECOUPLED_OVERRIDE_SANITIZED",
+            self.linux,
+        )
 
         self.assertIn(
             'SOURCE_DECOUPLING_COMPLETE must be true or false', self.linux
+        )
+        self.assertIn(
+            'source-decoupled Compose configuration was not sanitized',
+            self.linux,
+        )
+        self.assertIn(
+            'COMPOSE_ARGS+=(-f "$COMPOSE_OVERRIDE")', self.linux
+        )
+        self.assertIn(
+            'COMPOSE_ARGS+=(-f "$COMPOSE_SOURCE_DECOUPLED")', self.linux
+        )
+        self.assertIn(
+            'source-decoupled Compose overlay is missing', self.linux
+        )
+        source_decoupled_branch = self.linux.split(
+            'case "${SOURCE_DECOUPLING_COMPLETE:-false}" in', 1
+        )[1].split('false|"")', 1)[0]
+        self.assertNotIn('COMPOSE_BASE', source_decoupled_branch)
+        self.assertIn('COMPOSE_SOURCE_DECOUPLED', source_decoupled_branch)
+        self.assertLess(
+            source_decoupled_branch.index('COMPOSE_ARGS+=(-f "$COMPOSE_OVERRIDE")'),
+            source_decoupled_branch.index(
+                'COMPOSE_ARGS+=(-f "$COMPOSE_SOURCE_DECOUPLED")'
+            ),
+        )
+        self.assertIn('service-level tmpfs contract', source_decoupled_branch)
+        self.assertIn(
+            "compose up -d --no-deps --force-recreate backend", self.linux
         )
         self.assertIn(
             '"${COMPOSE[@]}" up -d --no-deps --force-recreate backend',
@@ -500,6 +568,7 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertIn("$canonicalProcessOwned", self.promote)
         self.assertIn("$legacyProcessOwned", self.promote)
         self.assertIn("[IO.Path]::GetFullPath($ConfiguredGpuPython)", self.promote)
+        self.assertIn("$ownedTaskPresent -and", self.promote)
         self.assertIn("GPU diagnostic release is outside managed releases", self.promote)
         self.assertIn("GPU_PROMOTION_DIAGNOSTIC", self.promote)
         self.assertIn("GPU_PROMOTION_LOG", self.promote)

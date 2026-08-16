@@ -1,5 +1,10 @@
 services:
   backend:
+    # Compose merges env_file sequences from the base and private files. Replace
+    # the repository-relative development entry so production never probes
+    # ${REPO_PATH}/.env when the managed env file is mounted elsewhere.
+    env_file: !override
+      - ${COMPOSE_ENV_FILE:?COMPOSE_ENV_FILE is required}
     # Replace every base/private backend mount so an older Compose merge
     # implementation cannot retain the retired /app/docs bind by target.
     volumes: !override

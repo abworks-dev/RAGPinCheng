@@ -17,10 +17,10 @@ def test_runtime_lock_is_validated_by_matching_cuda_qualification():
     requirements = read("services/gpu_service/runtime-lock.txt")
     assert metadata["schema_version"] == 1
     assert metadata["validation_status"] == "validated"
-    assert metadata["qualification_run_id"] == "31880461282"
-    assert metadata["source_commit"] == "811753d5f687ce51421dbc79edc61cb0c97e87e9"
+    assert metadata["qualification_run_id"] == "31925221286"
+    assert metadata["source_commit"] == "1215cc825be45ad3e9dacf0cb909ce4742479ee4"
     assert metadata["qualified_source_fingerprint"] == (
-        "a0a14c48a9f70eb9885fe71229b80476ae1f6d2245a0657303ed318119ea49c7"
+        "e351a5d5d78f554dda43085cd173a47dca94542186ae86abdc83c4e6cb2d9e92"
     )
     assert metadata["qualified_lock_sha256"] == (
         "f9a0f015f3e82dd129272651a69866357b0d658f5adf8de13d8487fdb01c42bf"
@@ -146,9 +146,12 @@ def test_candidate_resolver_is_manual_d_drive_isolated_and_evidence_only():
     assert 'Groups["release"].Value' in promotion
     assert "$canonicalProcessOwned = (" in promotion
     assert "$legacyProcessOwned = (" in promotion
+    assert "$ownedTaskPresent = $false" in promotion
+    assert "$ownedTaskPresent = $true" in promotion
     assert "-match '(?<!\\S)-m\\s+services\\.gpu_service\\.app(?:\\s|$)'" in promotion
     assert "-match '(?<!\\S)-m\\s+gpu_service\\.app(?:\\s|$)'" in promotion
     assert "[IO.Path]::GetFullPath($ConfiguredGpuPython)" in promotion
+    assert "$ownedTaskPresent -and" in promotion
     assert "-not $canonicalProcessOwned -and" in promotion
     assert "-not $legacyProcessOwned" in promotion
     assert "function Write-PromotionDiagnostics" in promotion
@@ -291,6 +294,8 @@ def test_builder_is_d_drive_isolated_exact_and_records_artifacts():
     assert "Validated metadata has no managed qualification root to import" in script
     assert "-not $RequalifyValidated" in script
     assert "requires exactly one matching qualified release" in script
+    assert '$qualifiedManifest.lock_validation_status -notin @("candidate", "validated")' in script
+    assert '$qualifiedManifest.lock_validation_status -ne "candidate"' not in script
     assert "Managed qualification release does not match validated metadata" in script
     assert "Copy-Item -LiteralPath $entry.FullName" in script
     assert "$needsQualificationImport" in script

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import hmac
 import logging
 import os
+import subprocess
 import time
 import uuid
 from contextlib import asynccontextmanager, contextmanager
@@ -29,6 +31,7 @@ from services.gpu_service.config import (
     MAX_TEXT_LENGTH,
     PORT,
     RERANKER_MODEL,
+    SYSTEM_NODE_ID,
 )
 from services.gpu_service.models import ModelManager
 from services.gpu_service.schemas import (
@@ -41,6 +44,7 @@ from services.gpu_service.schemas import (
     ModelInfoResponse,
     RerankRequest,
     RerankResponse,
+    SystemMetricsResponse,
 )
 
 load_dotenv()
@@ -53,6 +57,7 @@ logging.basicConfig(
 logger = logging.getLogger("gpu_service")
 
 GPU_ACTIVITY_API_VERSION = "gpu-activity/1"
+GPU_SYSTEM_METRICS_API_VERSION = "gpu-system-metrics/1"
 
 
 class ActivityTracker:
@@ -212,6 +217,73 @@ async def activity(request: Request):
         model_loaded=loaded,
         inflight_requests=inflight,
         asr_chunk_allowed=loaded and inflight == 0,
+    )
+
+
+def _nvidia_smi_snapshot() -> dict[str, float | int | str | None]:
+    """Read host GPU telemetry without accepting any user-controlled arguments."""
+    try:
+        completed = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=name,memory.used,memory.total,utilization.gpu,temperature.gpu",
+                "--format=csv,noheader,nounits",
+            ],
+            capture_output=True,
+            check=True,
+            text=True,
+            timeout=2,
+        )
+        line = next((item.strip() for item in completed.stdout.splitlines() if item.strip()), "")
+        values = [item.strip() for item in line.split(",")]
+        if len(values) != 5:
+            return {}
+        def parse_number(value: str, scale: float = 1) -> float | int | None:
+            if value.strip().lower() in {"", "n/a", "na", "not supported"}:
+                return None
+            number = float(value)
+            scaled = number * scale
+            return int(scaled) if scale != 1 else number
+
+        result: dict[str, float | int | str | None] = {"device_name": values[0] or None}
+        result["vram_used_bytes"] = parse_number(values[1], 1024 * 1024)
+        result["vram_total_bytes"] = parse_number(values[2], 1024 * 1024)
+        result["utilization_percent"] = parse_number(values[3])
+        result["temperature_celsius"] = parse_number(values[4])
+        return result
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return {}
+
+
+@app.get("/v1/system-metrics", response_model=SystemMetricsResponse)
+async def system_metrics(request: Request):
+    verify_token(request)
+    telemetry = await asyncio.to_thread(_nvidia_smi_snapshot)
+    gpu_available = bool(torch.cuda.is_available())
+    if gpu_available:
+        try:
+            free_bytes, total_bytes = torch.cuda.mem_get_info()
+            telemetry.setdefault("vram_total_bytes", int(total_bytes))
+            telemetry.setdefault("vram_used_bytes", max(0, int(total_bytes - free_bytes)))
+        except (AttributeError, RuntimeError):
+            pass
+        if telemetry.get("device_name") is None:
+            try:
+                telemetry["device_name"] = torch.cuda.get_device_name(0)
+            except (AttributeError, RuntimeError):
+                pass
+    return SystemMetricsResponse(
+        api_version=GPU_SYSTEM_METRICS_API_VERSION,
+        node_id=SYSTEM_NODE_ID or None,
+        model_loaded=_model_manager.is_loaded,
+        gpu_available=gpu_available,
+        device_name=telemetry.get("device_name"),
+        vram_used_bytes=telemetry.get("vram_used_bytes"),
+        vram_total_bytes=telemetry.get("vram_total_bytes"),
+        utilization_percent=telemetry.get("utilization_percent"),
+        temperature_celsius=telemetry.get("temperature_celsius"),
+        inflight_requests=_activity_tracker.count(),
+        checked_at=int(time.time()),
     )
 
 

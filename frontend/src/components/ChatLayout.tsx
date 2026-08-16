@@ -4,8 +4,6 @@ import { useChat } from "../hooks/useChat";
 import type { Conversation } from "../types";
 import { Composer } from "./Composer";
 import { MessageList } from "./MessageList";
-import { PdfPreview } from "./PdfPreview";
-import { PdfPreviewProvider } from "../hooks/usePdfPreview";
 import { Sidebar } from "./Sidebar";
 import { ChatHeader } from "./ChatHeader";
 import { SourceWorkspace } from "./SourceWorkspace";
@@ -179,7 +177,7 @@ export function ChatLayout() {
   );
 
   return (
-    <PdfPreviewProvider>
+    <>
       <div className="flex h-full min-w-0 overflow-hidden bg-background text-foreground">
         <div className="hidden h-full shrink-0 lg:block">
           {sidebar(sidebarCollapsed, () => setSidebarCollapsed((value) => !value))}
@@ -263,7 +261,6 @@ export function ChatLayout() {
           onSourceHighlightChange={selectSource}
         />
       </Drawer>
-      <PdfPreview />
-    </PdfPreviewProvider>
+    </>
   );
 }

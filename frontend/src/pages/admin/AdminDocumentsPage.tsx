@@ -1,6 +1,6 @@
 import { Eye, RefreshCw, Rocket, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { api } from "../../api/client";
+import { adminContentApi } from "../../api/admin/content";
 import { Badge } from "../../components/ui/badge";
 import { Button, buttonVariants } from "../../components/ui/button";
 import { Card, CardContent } from "../../components/ui/card";
@@ -13,7 +13,7 @@ import { toast } from "../../components/ui/toast";
 import { useAuth } from "../../context/AuthContext";
 import { cn } from "../../lib/utils";
 import type { ManagedCategory, ManagedIndexJob, ManagedIndexJobList } from "../../types";
-import { formatAdminDate, formatBytes } from "./admin-formatters";
+import { formatAdminDate, formatBytes } from "../../lib/admin-formatters";
 
 const PAGE_SIZE = 25;
 const ACTIVE_STATUSES = new Set([
@@ -106,7 +106,7 @@ export function AdminDocumentsPage() {
     background ? setRefreshing(true) : setLoading(true);
     setError(null);
     try {
-      setListing(await api.managedContentIndexJobs(params));
+      setListing(await adminContentApi.indexJobs(params));
     } catch (caught: any) {
       setError(caught?.message || String(caught));
     } finally {
@@ -116,7 +116,7 @@ export function AdminDocumentsPage() {
   }, [params]);
 
   useEffect(() => {
-    api.managedCategories(false)
+    adminContentApi.categories(false)
       .then(setCategories)
       .catch((caught: any) => setError(caught?.message || String(caught)));
   }, []);
@@ -150,7 +150,7 @@ export function AdminDocumentsPage() {
     if (!canPublish || retryingJobId || job.status !== "failed" || !job.is_latest_attempt) return;
     setRetryingJobId(job.id);
     try {
-      await api.publishManagedContent(job.version_id);
+      await adminContentApi.publish(job.version_id);
       toast.success("已重新加入发布队列");
       await load(true);
     } catch (caught) {
@@ -164,8 +164,8 @@ export function AdminDocumentsPage() {
     <section className="space-y-5" aria-labelledby="admin-documents-title">
       <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <p className="text-ui-xs font-medium text-muted-foreground">内容管理</p>
-          <h1 id="admin-documents-title" className="mt-1 text-ui-2xl font-semibold text-foreground">
+          <p className="text-ui-xs font-medium text-primary">内容管理</p>
+          <h1 id="admin-documents-title" className="mt-1 text-ui-2xl font-semibold tracking-tight text-foreground">
             索引任务
           </h1>
           <p className="mt-1 max-w-3xl text-ui-sm text-muted-foreground">
@@ -201,7 +201,7 @@ export function AdminDocumentsPage() {
       <Card className="overflow-hidden shadow-surface" aria-labelledby="managed-index-title">
         <div className="flex flex-col gap-1 px-4 py-4 sm:flex-row sm:items-end sm:justify-between sm:px-5">
           <div>
-            <h2 id="managed-index-title" className="text-ui-base font-semibold text-foreground">资料库发布任务</h2>
+            <h2 id="managed-index-title" className="text-ui-base font-semibold text-foreground">资料发布任务</h2>
             <p className="mt-1 text-ui-xs text-muted-foreground">
               {history ? "正在显示全部历史尝试。" : "每个资料版本仅显示最新一次发布尝试。"}
             </p>
@@ -282,7 +282,7 @@ export function AdminDocumentsPage() {
           <EmptyState
             className="rounded-none border-x-0 border-b-0"
             title={hasFilters ? "没有符合条件的发布任务" : "暂无发布任务"}
-            description={hasFilters ? "请调整搜索或筛选条件。" : "资料在资料库中发布后，处理状态会显示在这里。"}
+            description={hasFilters ? "请调整搜索或筛选条件。" : "资料在资料管理中发布后，处理状态会显示在这里。"}
           />
         ) : (
           <ManagedJobsTable
@@ -324,7 +324,7 @@ function ManagedJobsTable({
   return (
     <div className="overflow-x-auto border-t border-border">
       <table className="block w-full text-ui-sm lg:table lg:min-w-[78rem]">
-        <caption className="sr-only">资料库发布任务、分类、类型、状态、内容块、来源、更新时间和操作</caption>
+        <caption className="sr-only">资料发布任务、分类、类型、状态、内容块、来源、更新时间和操作</caption>
         <thead className="hidden border-b border-border bg-surface-muted text-left text-muted-foreground lg:table-header-group">
           <tr>
             <th className="min-w-[18rem] px-4 py-3 font-medium">资料</th>
@@ -390,7 +390,7 @@ function ManagedJobsTable({
                   <div className="flex flex-wrap gap-2 lg:flex-col lg:items-stretch">
                     <a
                       className={buttonVariants({ variant: "outline", size: "sm" })}
-                      href={api.managedContentFileUrl(job.version_id)}
+                      href={adminContentApi.fileUrl(job.version_id)}
                       target="_blank"
                       rel="noreferrer"
                     >

@@ -426,6 +426,42 @@ def test_category_update_uses_csrf_and_optimistic_version(content_api):
     assert updated.json()["version"] == 2
 
 
+def test_category_with_active_child_cannot_be_disabled(content_api):
+    client, sessions, _queued, db_path = content_api
+    conn = connect(db_path)
+    now = int(time.time())
+    conn.execute(
+        """INSERT INTO category_nodes
+           (id,category_key,parent_id,display_code,display_name,sort_order,level,is_active,created_at,updated_at)
+           VALUES ('cat-03-child','company_child','cat-03','01','启用子分类',1,2,1,?,?)""",
+        (now, now),
+    )
+    conn.commit()
+    conn.close()
+    category = next(
+        item for item in client.get(
+            "/api/admin/content/categories?include_inactive=true",
+            **_auth(sessions, "category_manager"),
+        ).json()
+        if item["id"] == "cat-03"
+    )
+
+    response = client.patch(
+        "/api/admin/content/categories/cat-03",
+        json={
+            "display_code": category["display_code"],
+            "display_name": category["display_name"],
+            "sort_order": category["sort_order"],
+            "is_active": False,
+            "expected_version": category["version"],
+        },
+        **_auth(sessions, "category_manager", csrf=True),
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "该分类仍有启用的子分类，请先停用子分类"
+
+
 def test_category_manager_cannot_grant_content_permissions(content_api):
     client, sessions, _queued, _db_path = content_api
     auth = _auth(sessions, "category_manager", csrf=True)

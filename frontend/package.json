@@ -10,6 +10,7 @@
     "test": "vitest",
     "test:run": "vitest run",
     "test:visual": "playwright test",
+    "check:page-inventory": "node scripts/check-page-inventory.mjs",
     "test:visual:headed": "playwright test --headed",
     "test:visual:ui": "playwright test --ui",
     "test:visual:update": "playwright test --update-snapshots=all"

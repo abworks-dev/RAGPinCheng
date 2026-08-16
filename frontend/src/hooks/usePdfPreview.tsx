@@ -11,6 +11,8 @@ export interface PdfPreviewLocation {
   paragraphAnchor?: string | null;
 }
 
+export type PdfPreviewReturnTarget = "managed-content-detail";
+
 export interface PdfPreviewState {
   /** The parent_id of the source to preview, or null if closed. */
   parentId: string | null;
@@ -22,11 +24,13 @@ export interface PdfPreviewState {
   pageNumber: number;
   /** Location parameters for citation jumping. */
   location: PdfPreviewLocation;
+  /** Optional UI context to restore when the preview closes. */
+  returnTo: PdfPreviewReturnTarget | null;
 }
 
 interface PdfPreviewContextValue {
   state: PdfPreviewState;
-  open: (parentId: string, title: string, docType?: string, pageNumber?: number, location?: PdfPreviewLocation) => void;
+  open: (parentId: string, title: string, docType?: string, pageNumber?: number, location?: PdfPreviewLocation, returnTo?: PdfPreviewReturnTarget | null) => void;
   close: () => void;
   setPage: (page: number) => void;
 }
@@ -40,18 +44,19 @@ export function PdfPreviewProvider({ children }: { children: React.ReactNode }) 
     docType: "pdf",
     pageNumber: 1,
     location: {},
+    returnTo: null,
   });
 
   const open = useCallback(
-    (parentId: string, title: string, docType = "pdf", pageNumber = 1, location: PdfPreviewLocation = {}) => {
+    (parentId: string, title: string, docType = "pdf", pageNumber = 1, location: PdfPreviewLocation = {}, returnTo: PdfPreviewReturnTarget | null = null) => {
       window.dispatchEvent(new CustomEvent("resource-preview-open", { detail: { kind: "document" } }));
-      setState({ parentId, title, docType, pageNumber, location });
+      setState({ parentId, title, docType, pageNumber, location, returnTo });
     },
     [],
   );
 
   const close = useCallback(() => {
-    setState({ parentId: null, title: "", docType: "pdf", pageNumber: 1, location: {} });
+    setState({ parentId: null, title: "", docType: "pdf", pageNumber: 1, location: {}, returnTo: null });
   }, []);
 
   const setPage = useCallback((page: number) => {

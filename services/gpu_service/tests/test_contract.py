@@ -44,6 +44,7 @@ from services.gpu_service.schemas import (
     HealthResponse,
     ModelInfoResponse,
     RerankResponse,
+    SystemMetricsResponse,
 )
 
 client = TestClient(app)
@@ -146,6 +147,41 @@ def test_activity_tracker_releases_count_after_failure():
         with _activity_tracker.inference():
             raise RuntimeError("boom")
     assert _activity_tracker.count() == 0
+
+
+def test_system_metrics_requires_auth():
+    assert client.get("/v1/system-metrics").status_code == status.HTTP_401_UNAUTHORIZED
+    assert client.get("/v1/system-metrics", headers={"Authorization": "Bearer wrong-token"}).status_code == status.HTTP_403_FORBIDDEN
+
+
+def test_system_metrics_returns_contract_when_gpu_unavailable():
+    with patch("services.gpu_service.app._nvidia_smi_snapshot", return_value={}):
+        response = client.get("/v1/system-metrics", headers=AUTH_HEADER)
+
+    assert response.status_code == status.HTTP_200_OK
+    data = SystemMetricsResponse(**response.json())
+    assert data.api_version == "gpu-system-metrics/1"
+    assert data.gpu_available is False
+    assert data.vram_total_bytes is None
+    assert data.inflight_requests == 0
+
+
+def test_system_metrics_uses_gpu_telemetry(model_loaded):
+    with patch("services.gpu_service.app._nvidia_smi_snapshot", return_value={
+        "device_name": "Test GPU",
+        "vram_used_bytes": 40,
+        "vram_total_bytes": 100,
+        "utilization_percent": 42.0,
+        "temperature_celsius": 54.0,
+    }), patch.object(torch_stub.cuda, "is_available", return_value=True):
+        response = client.get("/v1/system-metrics", headers=AUTH_HEADER)
+
+    assert response.status_code == status.HTTP_200_OK
+    data = SystemMetricsResponse(**response.json())
+    assert data.model_loaded is True
+    assert data.device_name == "Test GPU"
+    assert data.vram_used_bytes == 40
+    assert data.utilization_percent == 42
 
 
 def test_embedding_and_rerank_calls_are_counted_as_inflight(model_loaded):
