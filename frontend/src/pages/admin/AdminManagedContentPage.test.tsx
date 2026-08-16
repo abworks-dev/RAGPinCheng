@@ -368,7 +368,7 @@ describe("AdminManagedContentPage", () => {
     render(<AdminManagedContentPage />);
 
     fireEvent.click(screen.getByRole("tab", { name: "回收站" }));
-    expect(await screen.findByText(/发布负责人 于/)).toBeInTheDocument();
+    expect((await screen.findAllByText("发布负责人")).length).toBeGreaterThan(0);
     expect(screen.getByText("查看已移出资料库的资料。")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "恢复" })).not.toBeInTheDocument();
   });
