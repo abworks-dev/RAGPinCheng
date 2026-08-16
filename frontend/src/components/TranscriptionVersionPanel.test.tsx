@@ -78,6 +78,10 @@ describe("TranscriptionVersionPanel", () => {
     const rendered = await screen.findByText("培训开始", { selector: "strong" });
     expect(rendered).toBeInTheDocument();
     expect(await screen.findByRole("region", { name: "视频转录稿" })).toBeInTheDocument();
+    expect(screen.getByLabelText("视频播放器")).toHaveAttribute(
+      "src",
+      "/api/admin/media/media-1/preview",
+    );
   });
 
   it("saves edits as a new draft and refreshes the selected version", async () => {

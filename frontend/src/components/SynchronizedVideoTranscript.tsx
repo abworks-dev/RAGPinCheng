@@ -8,6 +8,7 @@ type SynchronizedVideoTranscriptProps = {
   segments: MediaTranscriptSegment[];
   transcriptLoading: boolean;
   transcriptError: string | null;
+  mediaUrl?: string;
   initialStartSeconds?: number;
   layout?: "stacked" | "split";
 };
@@ -17,6 +18,7 @@ export function SynchronizedVideoTranscript({
   segments,
   transcriptLoading,
   transcriptError,
+  mediaUrl,
   initialStartSeconds = 0,
   layout = "stacked",
 }: SynchronizedVideoTranscriptProps) {
@@ -29,7 +31,7 @@ export function SynchronizedVideoTranscript({
     setIsLoading(true);
     setVideoError(null);
     setCurrentTimeMs(initialStartSeconds * 1000);
-  }, [mediaId, initialStartSeconds]);
+  }, [mediaId, mediaUrl, initialStartSeconds]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -65,7 +67,7 @@ export function SynchronizedVideoTranscript({
   }, [mediaId, initialStartSeconds]);
 
   const videoSurface = (
-    <div className="relative aspect-video w-full shrink-0 overflow-hidden bg-black">
+    <div className="relative aspect-video w-full overflow-hidden bg-black">
       {isLoading && (
         <div className="absolute inset-0 z-10 flex items-center justify-center text-gray-400">
           <LoaderCircle className="size-7 animate-spin" aria-label="正在加载视频" />
@@ -78,7 +80,7 @@ export function SynchronizedVideoTranscript({
       )}
       <video
         ref={videoRef}
-        src={`/api/media/${encodeURIComponent(mediaId)}`}
+        src={mediaUrl ?? `/api/media/${encodeURIComponent(mediaId)}`}
         aria-label="视频播放器"
         className="h-full w-full object-contain"
         controls
@@ -104,9 +106,9 @@ export function SynchronizedVideoTranscript({
   );
 
   return layout === "split" ? (
-    <div className="grid min-h-0 gap-3 lg:grid-cols-[minmax(0,1.15fr)_minmax(20rem,0.85fr)] lg:items-stretch">
+    <div className="grid min-h-0 gap-3 lg:grid-cols-[minmax(0,1.15fr)_minmax(20rem,0.85fr)] lg:items-start">
       <div className="min-w-0 overflow-hidden rounded-ui-md border border-border bg-black">{videoSurface}</div>
-      <div className="flex min-h-[22rem] min-w-0 flex-col overflow-hidden rounded-ui-md border border-border bg-background">
+      <div className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-ui-md border border-border bg-background lg:h-[32rem] lg:max-h-[calc(100vh-18rem)]">
         {transcript}
       </div>
     </div>

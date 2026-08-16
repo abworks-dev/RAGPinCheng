@@ -282,6 +282,7 @@ export function TranscriptionVersionPanel({ mediaId, refreshToken, embedded = fa
                         </div>
                         <SynchronizedVideoTranscript
                           mediaId={mediaId}
+                          mediaUrl={`/api/admin/media/${encodeURIComponent(mediaId)}/preview`}
                           segments={timeline?.segments ?? []}
                           transcriptLoading={timelineLoading}
                           transcriptError={timelineError}

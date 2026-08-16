@@ -52,7 +52,7 @@ export function TranscriptMarkdownEditor({
           <textarea
             id="transcript-markdown-editor"
             aria-label="转录 Markdown 编辑器"
-            className="h-80 w-full resize-none rounded-ui-md border border-input bg-background p-3 font-mono text-ui-sm leading-relaxed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60 sm:h-96 md:h-[28rem]"
+            className="h-64 w-full resize-y rounded-ui-md border border-input bg-background p-3 font-mono text-ui-sm leading-relaxed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60 sm:h-72 md:h-80"
             value={value}
             onChange={(event) => onChange(event.target.value)}
             disabled={disabled}
@@ -61,7 +61,7 @@ export function TranscriptMarkdownEditor({
         </section>
         <section className={mode === "edit" ? "hidden min-w-0 md:block" : "min-w-0"} aria-label="Markdown 预览">
           <h5 className="mb-2 text-ui-xs font-medium text-foreground">渲染预览</h5>
-          <div className="prose-tight h-80 overflow-auto rounded-ui-md border border-border bg-background p-4 text-ui-sm sm:h-96 md:h-[28rem]">
+          <div className="prose-tight h-64 overflow-auto rounded-ui-md border border-border bg-background p-4 text-ui-sm sm:h-72 md:h-80">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{value}</ReactMarkdown>
           </div>
         </section>

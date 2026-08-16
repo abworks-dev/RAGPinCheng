@@ -401,6 +401,9 @@ export async function installAdminRoutes(
     if (request.method() === "GET" && path === "/api/media/media-ready") {
       return route.fulfill({ status: 200, contentType: "video/mp4", body: "" });
     }
+    if (request.method() === "GET" && path === "/api/admin/media/media-ready/preview") {
+      return route.fulfill({ status: 200, contentType: "video/mp4", body: "" });
+    }
     if (path === "/api/categories") return json(route, { categories: [], second_level_categories: [] });
     if (path === "/api/conversations" && request.method() === "GET") return json(route, { conversations: adminConversations.slice(0, 1) });
     if (path === "/api/conversations" && request.method() === "POST") return json(route, { ...adminConversations[0] });
