@@ -350,4 +350,31 @@ describe("Phase 5 transcript publication API contracts", () => {
       headers: { "content-type": "application/json", "X-CSRF-Token": "csrf-phase5" },
     }));
   });
+
+  it("creates a Markdown revision with base SHA, idempotency and CSRF", async () => {
+    setCsrfToken("csrf-revision");
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ version_id: "version-2" }, 201));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.createTranscriptRevision(
+      "version-1",
+      "说话人 1 00:00:00\n修订内容\n",
+      "a".repeat(64),
+      "11111111-1111-4111-8111-111111111111",
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/admin/transcription/versions/version-1/revisions",
+      expect.objectContaining({
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json", "X-CSRF-Token": "csrf-revision" },
+        body: JSON.stringify({
+          markdown: "说话人 1 00:00:00\n修订内容\n",
+          base_markdown_sha256: "a".repeat(64),
+          request_idempotency_key: "11111111-1111-4111-8111-111111111111",
+        }),
+      }),
+    );
+  });
 });

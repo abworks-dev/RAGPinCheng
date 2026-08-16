@@ -168,8 +168,10 @@ const transcriptionJobs = [{
 const transcriptVersions = [{
   version_id: "11111111-1111-4111-8111-111111111111", media_id: "media-ready", source: "automatic",
   profile_id: "synthetic-profile", provider_key: "synthetic-asr", model_id: "synthetic-model", model_revision: "r1",
+  markdown_storage_kind: "managed_artifact",
   review_status: "awaiting_review", reviewed_by: null, reviewed_at: null, review_note: null,
   publication_status: "not_published", published_at: null, supersedes_version_id: null,
+  derived_from_version_id: null, edited_by: null,
   markdown_sha256: "a".repeat(64), created_at: 1700000200, updated_at: 1700000200, is_current: false,
 }];
 
@@ -381,7 +383,7 @@ export async function installAdminRoutes(
     if (request.method() === "GET" && path === "/api/admin/transcription/media/media-ready/versions") return json(route, transcriptVersions);
     if (request.method() === "GET" && /^\/api\/admin\/transcription\/media\/[^/]+\/versions$/.test(path)) return json(route, []);
     if (request.method() === "GET" && path === "/api/admin/transcription/versions/11111111-1111-4111-8111-111111111111/markdown") {
-      return json(route, { version_id: transcriptVersions[0].version_id, markdown: "# 项目交付培训\n\n说话人 1 00:00:00\n培训开始\n", markdown_sha256: transcriptVersions[0].markdown_sha256 });
+      return json(route, { version_id: transcriptVersions[0].version_id, markdown: "# 项目交付培训\n\n说话人 1 00:00:00\n**培训开始**\n\n说话人 2 00:00:12\n- 核对模型命名\n- 核对交付目录\n", markdown_sha256: transcriptVersions[0].markdown_sha256 });
     }
     if (path === "/api/categories") return json(route, { categories: [], second_level_categories: [] });
     if (path === "/api/conversations" && request.method() === "GET") return json(route, { conversations: adminConversations.slice(0, 1) });

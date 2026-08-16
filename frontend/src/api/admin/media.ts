@@ -12,6 +12,7 @@ export const adminMediaApi = {
   retryJob: (...args: Parameters<typeof api.retryTranscription>) => api.retryTranscription(...args),
   versions: (...args: Parameters<typeof api.listTranscriptVersions>) => api.listTranscriptVersions(...args),
   previewVersion: (...args: Parameters<typeof api.previewTranscriptVersion>) => api.previewTranscriptVersion(...args),
+  createRevision: (...args: Parameters<typeof api.createTranscriptRevision>) => api.createTranscriptRevision(...args),
   reviewVersion: (...args: Parameters<typeof api.reviewTranscriptVersion>) => api.reviewTranscriptVersion(...args),
   publishVersion: (...args: Parameters<typeof api.publishTranscriptVersion>) => api.publishTranscriptVersion(...args),
   publicationJob: (...args: Parameters<typeof api.getTranscriptPublicationJob>) => api.getTranscriptPublicationJob(...args),

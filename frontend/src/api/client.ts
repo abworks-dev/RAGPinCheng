@@ -584,6 +584,20 @@ export const api = {
     jsonFetch<TranscriptVersion[]>(`/api/admin/transcription/media/${mediaId}/versions`),
   previewTranscriptVersion: (versionId: string) =>
     jsonFetch<TranscriptMarkdownPreview>(`/api/admin/transcription/versions/${versionId}/markdown`),
+  createTranscriptRevision: (
+    baseVersionId: string,
+    markdown: string,
+    baseMarkdownSha256: string,
+    requestIdempotencyKey: string,
+  ) =>
+    jsonFetch<TranscriptVersion>(`/api/admin/transcription/versions/${baseVersionId}/revisions`, {
+      method: "POST",
+      body: JSON.stringify({
+        markdown,
+        base_markdown_sha256: baseMarkdownSha256,
+        request_idempotency_key: requestIdempotencyKey,
+      }),
+    }),
   reviewTranscriptVersion: (versionId: string, approved: boolean, reviewNote: string | null = null) =>
     jsonFetch<TranscriptVersion>(`/api/admin/transcription/versions/${versionId}/review`, {
       method: "POST",

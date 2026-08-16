@@ -375,8 +375,12 @@ test.describe("视频管理", () => {
     await expect(workbench.getByRole("textbox", { name: /审核备注/ })).toBeVisible();
     await expect(workbench.getByText("审核通过后可发布")).toBeVisible();
     await expect(workbench.getByText("synthetic-asr")).toBeHidden();
-    await workbench.getByRole("button", { name: "预览 Markdown" }).click();
-    await expect(workbench.locator("pre")).toContainText("培训开始");
+    await workbench.getByRole("button", { name: "校对内容" }).click();
+    await expect(workbench.getByRole("textbox", { name: "转录 Markdown 编辑器" })).toBeVisible();
+    if (page.viewportSize()!.width < 768) {
+      await workbench.getByRole("button", { name: "预览" }).click();
+    }
+    await expect(workbench.getByRole("region", { name: "Markdown 预览" })).toContainText("培训开始");
     await workbench.getByRole("button", { name: "关闭转写工作台" }).click();
     await expect(workbench).toBeHidden();
     await expectNoBodyOverflow(page);
