@@ -206,6 +206,12 @@ test.describe("视频管理", () => {
     await expect(page.getByRole("button", { name: "重试" })).toBeVisible();
     await expect(page.getByRole("button", { name: "进入转写工作台" }).first()).toBeVisible();
     await expectNoBodyOverflow(page);
+    if (page.viewportSize()!.width >= 1024) {
+      const headerX = await page.getByTestId("media-record-header").locator(":scope > span").evaluateAll((cells) => cells.map((cell) => cell.getBoundingClientRect().x));
+      const rowX = await page.getByTestId("media-record-row").first().locator(":scope > div > *").evaluateAll((cells) => cells.map((cell) => cell.getBoundingClientRect().x));
+      expect(rowX).toHaveLength(headerX.length);
+      rowX.forEach((x, index) => expect(Math.abs(x - headerX[index])).toBeLessThanOrEqual(1));
+    }
     if (page.viewportSize()!.width === 390) {
       const retry = page.getByRole("button", { name: "重试" });
       await retry.scrollIntoViewIfNeeded();

@@ -477,7 +477,7 @@ export function AdminMediaPage() {
           : loading ? <Card><LoadingState className="min-h-48" label="正在加载媒体资源…" /></Card>
           : mediaAssets.length === 0 ? <EmptyState title="暂无媒体资源" description="完成向导后，视频和各阶段状态会显示在这里。" />
           : <Card className="overflow-hidden shadow-surface">
-            <div className="hidden grid-cols-[minmax(15rem,1.4fr)_minmax(20rem,1.8fr)_minmax(9rem,.7fr)_auto] gap-4 border-b border-border bg-surface-muted px-5 py-3 text-ui-xs font-medium text-muted-foreground lg:grid">
+            <div className="hidden grid-cols-[minmax(0,31fr)_minmax(0,42fr)_minmax(0,12fr)_minmax(0,15fr)] gap-4 border-b border-border bg-surface-muted px-5 py-3 text-ui-xs font-medium text-muted-foreground lg:grid" data-testid="media-record-header">
               <span>媒体信息</span><span>处理进度</span><span>最近提交</span><span>操作</span>
             </div>
             <ul className="divide-y divide-border" aria-label="视频媒体处理记录">
@@ -485,8 +485,8 @@ export function AdminMediaPage() {
                 const job = jobsByMediaId.get(asset.media_id);
                 const sameNameCount = mediaAssets.filter((item) => item.original_filename === asset.original_filename).length;
                 const canDelete = asset.status === "failed" && !job;
-                return <li key={asset.media_id} className="p-4 sm:p-5">
-                  <div className="grid gap-4 lg:grid-cols-[minmax(15rem,1.4fr)_minmax(20rem,1.8fr)_minmax(9rem,.7fr)_auto] lg:items-start">
+                return <li key={asset.media_id} className="p-4 sm:p-5" data-testid="media-record-row">
+                  <div className="grid gap-4 lg:grid-cols-[minmax(0,31fr)_minmax(0,42fr)_minmax(0,12fr)_minmax(0,15fr)] lg:items-start">
                     <div className="min-w-0">
                       <p className="truncate font-medium" title={asset.title}>{asset.title}</p>
                       <p className="mt-1 truncate font-mono text-ui-xs text-muted-foreground" title={asset.original_filename}>{asset.original_filename}</p>
