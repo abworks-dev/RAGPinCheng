@@ -29,6 +29,7 @@ const mocks = vi.hoisted(() => ({
   trash: vi.fn(),
   restoreContent: vi.fn(),
   fileUrl: vi.fn(),
+  info: vi.fn(),
   success: vi.fn(),
   error: vi.fn(),
   openPreview: vi.fn(),
@@ -92,7 +93,7 @@ vi.mock("../../api/client", () => ({
 }));
 
 vi.mock("../../components/ui/toast", () => ({
-  toast: { success: mocks.success, error: mocks.error },
+  toast: { info: mocks.info, success: mocks.success, error: mocks.error },
 }));
 
 const category = {
@@ -223,16 +224,24 @@ describe("AdminManagedContentPage", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "批量下载" }));
 
     await waitFor(() => expect(mocks.bulkDownload).toHaveBeenCalledWith(["version-1", "version-2"]));
-    await waitFor(() => expect(screen.getByTestId("bulk-download-status")).toHaveTextContent(/正在打包 2 份资料，请稍候/));
-    expect(screen.getByTestId("bulk-download-status")).toHaveTextContent("文件较多时可能需要几秒");
+    await waitFor(() => expect(mocks.info).toHaveBeenCalledWith(
+      "正在打包 2 份资料，请稍候…",
+      expect.objectContaining({
+        id: "managed-content-bulk-download",
+        description: "文件较多时可能需要几秒。",
+        duration: Infinity,
+      }),
+    ));
     expect(screen.getByRole("button", { name: "批量操作" })).toBeDisabled();
 
     vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
     Object.defineProperty(URL, "createObjectURL", { configurable: true, value: vi.fn(() => "blob:synthetic") });
     Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
     resolveDownload({ blob: new Blob(["zip"]), filename: "资料批量下载.zip" });
-    await waitFor(() => expect(mocks.success).toHaveBeenCalledWith("已打包 2 份资料并开始下载"));
-    expect(screen.getByTestId("bulk-download-status")).not.toHaveTextContent(/正在打包 2 份资料，请稍候/);
+    await waitFor(() => expect(mocks.success).toHaveBeenCalledWith(
+      "已打包 2 份资料并开始下载",
+      expect.objectContaining({ id: "managed-content-bulk-download", duration: 4000 }),
+    ));
   });
 
   it("clears the packaging status and reports a failed batch download", async () => {
@@ -247,11 +256,16 @@ describe("AdminManagedContentPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "批量操作" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "批量下载" }));
     await waitFor(() => expect(mocks.bulkDownload).toHaveBeenCalledWith(["version-1", "version-2"]));
-    await waitFor(() => expect(screen.getByTestId("bulk-download-status")).toHaveTextContent(/正在打包 2 份资料，请稍候/));
+    await waitFor(() => expect(mocks.info).toHaveBeenCalledWith(
+      "正在打包 2 份资料，请稍候…",
+      expect.objectContaining({ id: "managed-content-bulk-download", duration: Infinity }),
+    ));
 
     rejectDownload(new Error("打包服务暂时不可用"));
-    await waitFor(() => expect(mocks.error).toHaveBeenCalledWith("打包服务暂时不可用"));
-    expect(screen.getByTestId("bulk-download-status")).not.toHaveTextContent(/正在打包 2 份资料，请稍候/);
+    await waitFor(() => expect(mocks.error).toHaveBeenCalledWith(
+      "打包服务暂时不可用",
+      expect.objectContaining({ id: "managed-content-bulk-download", duration: 5000 }),
+    ));
   });
 
   it("opens indexed files directly and restores details after an in-dialog preview", async () => {
