@@ -1,13 +1,13 @@
 # 视频转录链路
 
-- 状态：人工上传/播放链路与多引擎 Phase 5A/5B 应用闭环已实现；faster-whisper R3 资格曾通过，WhisperX 组合 candidate R2 接线已实现但新依赖基线尚未重跑 R3；首次迁移和应用 Profile 仍未启用
+- 状态：人工上传/播放链路与多引擎 Phase 5A/5B 应用闭环已实现；faster-whisper 与 WhisperX R3 已通过，生产 ASR 已准入 SenseVoice、faster-whisper 与 WhisperX；WhisperX 服务注册固定使用已资格的 `full-decode`
 - 最后核对：2026-08-16
 
 ## 用户可观察能力
 
 教学视频转录稿可以被索引和检索，回答能够显示带时间戳的视频引用，点击引用定位到来源卡片并打开视频播放器。管理员可通过三步向导批量暂存 MP4，再逐视频绑定、查看和编辑人工 Markdown，或批量应用并逐项覆盖服务端白名单 Profile 启动自动转录任务。
 
-Phase 5A/5B 已接通版本列表、只读 Markdown 预览、人工审核、显式发布、候选索引与正式 head 检索过滤。转录成功、审核通过、发布中和正式检索可见仍是独立状态；真实 ASR/GPU/Qdrant 端到端尚未运行。
+Phase 5A/5B 已接通版本列表、Markdown 校对与渲染预览、人工审核、显式发布、候选索引与正式 head 检索过滤。校对保存始终创建新的受管人工修订稿，不覆盖 ASR 或历史版本；新稿必须重新审核并在候选索引成功后才能替换正式 head。转录成功、审核通过、发布中和正式检索可见仍是独立状态；真实 ASR/GPU/Qdrant 端到端尚未运行。
 
 受管资料库已增加统一分类和内容关联所需的表字段，但不替代本链路。视频原件、转录版本、审核发布和正式 head 仍以 `media_assets`、`transcript_versions` 与 `media_transcript_heads` 为权威；普通资料的 `content_item_heads` 是另一条独立可见性边界。
 
@@ -34,6 +34,10 @@ Phase 5A/5B 已接通版本列表、只读 Markdown 预览、人工审核、显�
 - 管理端“视频媒体”标签页提供批量拖放/选择、转写方式分流和逐项配置向导；批量提交最多并发两个单视频请求，单项失败可保留重试；
 - 人工模式仍走原 MP4+Markdown 路径；自动模式只提交服务端白名单 `profile_id`，experimental Profile 强制审核策略不由前端放宽；
 - 媒体列表分别展示媒体、转录、审核、发布和索引状态，并保留快捷筛选与转写版本工作台。
+- 转写工作台支持桌面双栏 Markdown 编辑/渲染预览，移动端使用“编辑/预览”切换；关闭、收起或切换版本前会保护未保存内容；不启用 raw HTML、自动保存或 WYSIWYG。
+- 管理员在转写工作台展开“校对内容”后可同时查看视频和指定转录版本的同步时间轴；点击时间戳跳转视频，播放时自动高亮当前段落，时间轴支持自动跟随和手动暂停跟随。
+- 管理员显式“保存为新草稿”时，服务端统一 LF、校验 UTF-8 编码后的 2 MiB 上限、说话人时间戳和非空正文，并以基础版本 SHA-256 与请求幂等键防止并发误写。
+- 修订稿登记为 `source=manual`、`markdown_storage_kind=managed_artifact`，记录基础版本、编辑人和保存幂等键，审核状态重置为 `awaiting_review`；legacy 人工上传稿仍保持独立且不能通过受管发布流程发布。
 
 ### 未实现（第二阶段）
 
@@ -44,7 +48,7 @@ Phase 5A/5B 已接通版本列表、只读 Markdown 预览、人工审核、显�
 - Phase 2 的 `transcription_jobs`、`transcript_versions`、artifact refs、publication-only index jobs 和正式版本 head 已由应用层 Store/服务使用；
 - Phase 3 remote Provider 仍只返回严格 `ProviderCandidate | ProviderFailure`，由 `pipeline.py` 独占 normalizer/Canonical 结果流；
 - 管理端单 MP4 + `profile_id` 上传、任务状态/取消/恢复已接入应用 API 和后台 worker；人工 MP4+Markdown 路径保持独立；
-- 管理端按媒体 lazy 加载版本历史，可预览不可变 Markdown、提交审核备注、批准/拒绝并显式发布；人工版本不提供可用的自动发布动作；
+- 管理端按媒体 lazy 加载版本历史，可校对并渲染预览不可变版本的 Markdown、将修改保存为新的受管人工修订、提交审核备注、批准/拒绝并显式发布；legacy 人工版本不提供可用的受管发布动作；
 - 管理端媒体列表使用真实审核枚举计算唯一当前阶段，独立展示索引状态，并提供处理中、待审核、发布处理中和失败快捷筛选；筛选暂时只作用于最近加载的 100 条；
 - Remote Provider 的服务请求身份绑定应用任务、媒体与执行指纹；同一应用任务网络重试保持稳定，同一媒体新建应用重试任务生成新身份；
 - 转录任务 API 返回安全的结构化失败 `code/message/retryable`；服务请求身份冲突与契约不匹配分别处理，前端不再直接展示 Provider 技术摘要；
@@ -92,6 +96,14 @@ BF16、临时服务、8 样本完整执行、确定性和清理，但未通过�
 `1b75034f679b415a65aad4182286408d6983f467` 上通过：固定 8 个非敏感样本全部通过，
 canonical、Markdown 与 parser turns 两遍结果一致，固定模型 revision 和 wheel cache
 身份均通过校验。该资格不自动开放应用 Profile，也不等于生产部署或生产流量验收。
+
+WhisperX R3 Run `31889569116` 已在
+`befa81db9df9333b0e44823208390d5dacc2d2bb` 上通过：固定 8 个非敏感样本的三组解码矩阵
+选择 `full-decode`，原有质量、确定性、时间戳、资源和许可证门禁全部通过，峰值 GPU
+显存为 `1323.55 MiB`，且资格过程未修改生产服务。生产服务保持原
+`whisperx-large-v3-zh-align-v1` Profile 身份，仅将其注册配置固定为已资格的 12 项热词、
+`beam_size=10`、`temperature=0.1` 和工程 `initial_prompt`；资格结论本身不替代 active
+release 的部署、promotion 与实时验收。
 
 faster-whisper、Qwen3-ASR 和 WhisperX qualification 统一读取
 `asr-qualification-corpus/1` 只读 manifest，并沿用已 PASS 的
@@ -273,11 +285,13 @@ Ubuntu 跨节点验证失败都会使用受保护的 activation state 恢复旧 
 - 旧会话缺少 `media_id` 时正常降级（无播放按钮，不报错）；
 - 新媒体和版本字段是向前兼容的 nullable 列，不需要索引 Reset；legacy stable ID 保持。
 - Phase 2 新表为添加式迁移；不删除旧表、不回填人工稿、不触发索引 Reset。
+- Markdown 修订字段通过 schema 11 添加式迁移加入 `transcript_versions`；自动版本和 legacy 人工版本的已有字段与制品保持不可变，不需要索引 Reset。
 - `app.sqlite` transcript head 是版本化转录唯一正式可见性事实；versioned transcript 在 head DB 损坏/缺失时 fail closed。`strict` 下版本化转录独立于普通资料 head 放行，双重无版本身份的 legacy 转录不可见；生产尚未切换到 `strict`。
 - `DOCS_DIR`、`MEDIA_DIR` 和 `TRANSCRIPTION_ARTIFACT_DIR` 均可显式配置；旧式人工 Markdown 上传在 `strict` 下拒绝，避免创建无法进入正式版本可见性的源目录稿，自动转录继续使用 managed artifact。
 - T12-B 仅删除既有 `media_transcript_heads` 正式指针和其精确旧索引，不删除 `transcript_versions`、`transcription_jobs` 或 `transcript_publication_index_jobs`；后续视频需在新媒体目录重新上传、转录和发布后才产生新的正式 head。
 - experimental Profile 不能自动发布或自动索引；人工 Markdown 路径不经过 Provider。
 - `published` 只在候选索引成功并完成正式 head 原子切换后成立；不存在“已发布、稍后再手动索引”的稳定状态。
+- 受管人工修订必须审核通过并由管理员显式发布；创建修订、审核通过或候选索引处理中均不改变既有正式 head，发布失败时旧 head 继续可见。
 
 ## 验证
 
@@ -287,6 +301,7 @@ Ubuntu 跨节点验证失败都会使用受保护的 activation state 恢复旧 
 - Phase 2：临时 SQLite migration/backup、Store 事务、artifact hash、publication head、recovery、人工稿不回填和静态依赖边界；
 - Phase 3/4：纯 Python service/remote、应用任务/worker、mock engine、存储恢复、取消/恢复和静态依赖边界；
 - Phase 5：Store/事务/manual/visibility/index metadata/static 本地 29 项通过；版本管理定向前端 31 项通过；API、worker、candidate index、Qdrant Filter 与完整前端 build 由独立 CI job 验证；
+- Markdown 校对：schema 10→11、修订幂等/冲突、格式验证、审核发布、旧 head 保留和公开读取后端定向通过；前端完整 259 项通过，production build 通过；媒体页 Playwright 12 项在 `1440x900`、`1280x720`、`768x1024` 和 `390x844` 全部通过，并完成校对抽屉截图复核。
 - Phase 5C 真实 ffmpeg/ASR/GPU/Qdrant E2E 未运行。
 - 管理流程加固：Provider/应用/API 定向 40 项通过；变基到最新 master 后 Provider/应用身份定向 31 项与前端定向 34 项通过，前端 production build 通过；远端 CI、真实服务和生产回归未执行。
 - faster-whisper R2：无 FastAPI、无真实引擎的 ASR/Provider/应用回归
@@ -300,9 +315,9 @@ Ubuntu 跨节点验证失败都会使用受保护的 activation state 恢复旧 
   lazy-load service adapter、ASR/中文对齐双模型 manifest 门禁及手动 Windows CUDA
   冒烟 workflow；另已实现复用既有 8 个自制中文样本和统一阈值的资格 workflow，
   通过现有 `TranscriptionProvider → ProviderCandidate → normalizer → Canonical`
-  契约计算质量、确定性、时间戳、RTF、显存和许可证门禁。Profile admission 保持
-  disabled；真实资格结论只以合并后 `production-asr` workflow 的脱敏审计为准，
-  未通过前不能认定 WhisperX 可用。资格失败诊断只输出文本哈希、字符类别、长度、
+  契约计算质量、确定性、时间戳、RTF、显存和许可证门禁。Run `31889569116` 已通过
+  `production-asr` workflow 的脱敏审计并选择 `full-decode`；生产服务注册使用该配置，
+  应用 admission 仍由独立 allowlist 控制。资格失败诊断只输出文本哈希、字符类别、长度、
   token 形状、编辑类型计数、期望项命中布尔值和固定分类，不输出参考文本、原始
   ProviderCandidate 文本或 Canonical 文本，也不改变模型、样本或准入阈值。
   后续解码评估固定为同一次隔离 qualification 内的三组顺序对照：当前 WhisperX
@@ -311,7 +326,7 @@ Ubuntu 跨节点验证失败都会使用受保护的 activation state 恢复旧 
   WhisperX `3.8.6` 公开的 `load_model(asr_options=...)` 接口设置；切换候选时复用
   已加载的底层 ASR 权重和中文 aligner。只有完整候选通过原有全部门禁、标准编号
   召回严格优于基线、噪声 BIM CER 严格低于基线且负样本误命中为零，矩阵结论才
-  可为通过。该代码能力不代表真实 GPU 资格已经通过，Profile admission 仍为 disabled。
+  可为通过。正式资格不等于生产部署或真实业务媒体验收。
 
 ## 已知限制
 
@@ -320,14 +335,14 @@ Ubuntu 跨节点验证失败都会使用受保护的 activation state 恢复旧 
 - SenseVoice 短媒体自动转录已完成生产验收，但候选稿发布/Qdrant 正式可见性 E2E
   尚未执行；faster-whisper 已完成隔离 R3、Windows promotion 和应用 admission 激活，
   尚未使用真实业务媒体执行生产流量验收；
-- WhisperX 已具备组合 candidate 的 R2 接线，但 Torch/NumPy 新基线合并后仍须在同一
-  master SHA 分别重跑 faster-whisper 与 WhisperX R3，再执行只读部署预检和旁路 candidate
-  staging；当前没有 WhisperX candidate、promotion、首次推理或显存共存验收结论；
-- 当前允许新建任务的自动 Profile 是 experimental SenseVoice 与 faster-whisper；
-  Qwen3-ASR 与 WhisperX experimental Profile 可见但 admission 为 disabled；尚无
+- WhisperX `full-decode` 已通过隔离 R3 并成为服务注册配置；每次 runtime contract 变化后
+  仍须在同一 master SHA 分别重跑 faster-whisper 与 WhisperX R3，再执行只读部署预检、
+  旁路 candidate staging、promotion 和实时验收；尚未使用真实业务媒体完成质量验收；
+- 当前允许新建任务的自动 Profile 是 experimental SenseVoice、faster-whisper 与 WhisperX；
+  Qwen3-ASR experimental Profile 可见但 admission 为 disabled；尚无
   `qualification_approved` Profile；
 - 支持范围播放但无 HLS 自适应码率。
-- 媒体快捷筛选是最近 100 条的客户端筛选，不是服务端全库查询；独立转写工作台基础版仍待后续 PR。
+- 媒体快捷筛选是最近 100 条的客户端筛选，不是服务端全库查询；转写工作台的视频校对区域目前只支持已登记媒体的受控视频播放，不生成独立字幕轨道。
 
 ## 相关决策
 

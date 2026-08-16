@@ -91,7 +91,7 @@ describe("AdminLayout route boundary", () => {
     expect(within(navigation).getByText("内容管理")).toBeInTheDocument();
     expect(within(navigation).getByText("运营管理")).toBeInTheDocument();
     expect(within(navigation).getAllByRole("link").map((link) => link.textContent?.trim())).toEqual([
-      "概览", "系统维护", "资料管理", "分类管理", "视频管理", "索引任务", "用户管理", "对话记录", "用户反馈",
+      "系统概览", "系统维护", "资料管理", "分类管理", "视频管理", "索引任务", "用户管理", "对话记录", "用户反馈",
     ]);
     expect(screen.getByRole("link", { name: "对话记录" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByText("对话页面内容")).toBeInTheDocument();
@@ -111,11 +111,32 @@ describe("AdminLayout route boundary", () => {
       real_name: "测试资料员",
       employee_id: "editor-test",
       role: "user",
-      content_permissions: ["organize"],
+      content_permissions: ["workspace.view", "item.view"],
     };
     renderAdmin("categories");
     expect(screen.queryByRole("link", { name: "分类管理" })).not.toBeInTheDocument();
     expect(await screen.findByText("资料库页面内容")).toBeInTheDocument();
+  });
+
+  it("shows index navigation only with index view permission", async () => {
+    mocks.user = {
+      real_name: "测试资料员",
+      employee_id: "editor-test",
+      role: "user",
+      content_permissions: ["workspace.view", "item.view", "category.view"],
+    };
+    const firstRender = renderAdmin("index");
+    expect(screen.queryByRole("link", { name: "索引任务" })).not.toBeInTheDocument();
+    expect(await screen.findByText("资料库页面内容")).toBeInTheDocument();
+    firstRender.unmount();
+
+    mocks.user = {
+      ...mocks.user,
+      content_permissions: ["workspace.view", "item.view", "category.view", "index.view"],
+    };
+    renderAdmin("index");
+    expect(screen.getByRole("link", { name: "索引任务" })).toBeInTheDocument();
+    expect(screen.getByText("索引任务页面内容")).toBeInTheDocument();
   });
 
   it("returns users without workspace permissions to chat", async () => {

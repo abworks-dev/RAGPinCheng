@@ -9,12 +9,27 @@ const admin = {
   real_name: "合成管理员",
   role: "admin",
   csrf_token: "synthetic-csrf-token",
-  content_permissions: ["organize", "review", "publish", "manage_categories", "import_server"],
+  content_permissions: [
+    "workspace.view", "item.view", "item.download", "category.view", "item.upload", "item.submit",
+    "item.move_draft", "item.archive_draft", "item.review", "item.move_review",
+    "item.publish", "item.archive_published", "trash.view", "trash.restore",
+    "category.manage", "folder.request", "folder.review", "import.server", "index.view",
+  ],
 };
 
 const workspaceUsers = {
   admin,
-  bim_engineer: { ...admin, id: 9002, employee_id: "TEST-EDITOR", real_name: "合成资料员", role: "user", content_permissions: ["organize"] },
+  bim_engineer: {
+    ...admin,
+    id: 9002,
+    employee_id: "TEST-EDITOR",
+    real_name: "合成资料员",
+    role: "user",
+    content_permissions: [
+      "workspace.view", "item.view", "item.download", "category.view", "item.upload", "item.submit",
+      "item.move_draft", "item.archive_draft", "folder.request",
+    ],
+  },
   member: { ...admin, id: 9003, employee_id: "TEST-MEMBER", real_name: "合成成员", role: "user", content_permissions: [] },
 };
 
@@ -55,6 +70,7 @@ export const items = [
   source_origin: index === 4 ? "legacy" : "web",
   source_batch_id: null,
   is_current: true,
+  has_published_head: status === "published",
   latest_publication_status: null,
   publication_attempt_count: 0,
   publication_failure: null,
@@ -150,25 +166,114 @@ const transcriptionJobs = [{
   result_version_id: null, created_at: 1700000400, started_at: 1700000401, finished_at: 1700000402, updated_at: 1700000402,
 }];
 
-const transcriptVersions = [{
+const baseTranscriptVersion = {
   version_id: "11111111-1111-4111-8111-111111111111", media_id: "media-ready", source: "automatic",
   profile_id: "synthetic-profile", provider_key: "synthetic-asr", model_id: "synthetic-model", model_revision: "r1",
+  markdown_storage_kind: "managed_artifact",
   review_status: "awaiting_review", reviewed_by: null, reviewed_at: null, review_note: null,
   publication_status: "not_published", published_at: null, supersedes_version_id: null,
+  derived_from_version_id: null, edited_by: null,
   markdown_sha256: "a".repeat(64), created_at: 1700000200, updated_at: 1700000200, is_current: false,
-}];
+};
+
+const transcriptVersions = [
+  baseTranscriptVersion,
+  {
+    ...baseTranscriptVersion,
+    version_id: "22222222-2222-4222-8222-222222222222",
+    source: "manual",
+    profile_id: null,
+    provider_key: null,
+    model_id: null,
+    model_revision: null,
+    review_status: "review_approved",
+    derived_from_version_id: baseTranscriptVersion.version_id,
+    markdown_sha256: "b".repeat(64),
+    created_at: 1700000190,
+  },
+  {
+    ...baseTranscriptVersion,
+    version_id: "33333333-3333-4333-8333-333333333333",
+    review_status: "review_rejected",
+    review_note: "时间轴术语需要重新核对",
+    markdown_sha256: "c".repeat(64),
+    created_at: 1700000180,
+  },
+  {
+    ...baseTranscriptVersion,
+    version_id: "44444444-4444-4444-8444-444444444444",
+    review_status: "review_approved",
+    publication_status: "published",
+    published_at: 1700000175,
+    markdown_sha256: "d".repeat(64),
+    created_at: 1700000170,
+    is_current: true,
+  },
+  {
+    ...baseTranscriptVersion,
+    version_id: "55555555-5555-4555-8555-555555555555",
+    source: "manual",
+    profile_id: null,
+    provider_key: null,
+    model_id: null,
+    model_revision: null,
+    markdown_storage_kind: "legacy_manual",
+    review_status: "not_required",
+    markdown_sha256: "e".repeat(64),
+    created_at: 1700000160,
+  },
+];
 
 const permissionUsers = [
   { user_id: 9001, employee_id: "TEST-ADMIN", real_name: "合成管理员", role: "admin", is_active: true, permissions: [] },
-  { user_id: 9002, employee_id: "TEST-EDITOR", real_name: "合成资料员", role: "user", is_active: true, permissions: ["organize", "review"] },
+  {
+    user_id: 9002,
+    employee_id: "TEST-EDITOR",
+    real_name: "合成资料员",
+    role: "user",
+    is_active: true,
+    permissions: [
+      "workspace.view", "item.view", "item.download", "category.view", "item.upload", "item.submit",
+      "item.move_draft", "item.archive_draft", "folder.request", "item.review",
+      "item.move_review", "folder.review", "trash.view", "trash.restore",
+    ],
+  },
   { user_id: 9003, employee_id: "TEST-INACTIVE", real_name: "停用测试用户", role: "user", is_active: false, permissions: [] },
 ];
 
+const permissionCatalog = {
+  schema_version: 3,
+  permissions: [
+    { key: "workspace.view", domain: "access", domain_label: "入口与查看", label: "进入资料工作台", description: "进入资料管理工作台。", dependencies: [] },
+    { key: "item.view", domain: "access", domain_label: "入口与查看", label: "查看资料", description: "查看资料列表、详情和预览。", dependencies: ["workspace.view"] },
+    { key: "item.download", domain: "access", domain_label: "入口与查看", label: "下载资料", description: "下载单份资料或批量打包下载。", dependencies: ["workspace.view", "item.view"] },
+    { key: "category.view", domain: "access", domain_label: "入口与查看", label: "查看分类", description: "查看资料分类树和完整路径。", dependencies: ["workspace.view"] },
+    { key: "item.upload", domain: "organize", domain_label: "资料整理", label: "上传资料", description: "上传文件并创建资料草稿。", dependencies: ["workspace.view", "item.view", "category.view"] },
+    { key: "item.submit", domain: "organize", domain_label: "资料整理", label: "提交确认", description: "将草稿或退回资料提交确认。", dependencies: ["workspace.view", "item.view"] },
+    { key: "item.move_draft", domain: "organize", domain_label: "资料整理", label: "移动草稿", description: "移动草稿或退回状态的资料。", dependencies: ["workspace.view", "item.view", "category.view"] },
+    { key: "item.archive_draft", domain: "organize", domain_label: "资料整理", label: "归档草稿", description: "将草稿或退回资料移入回收站。", dependencies: ["workspace.view", "item.view"] },
+    { key: "item.review", domain: "review", domain_label: "确认流程", label: "确认与退回", description: "确认或退回待确认资料。", dependencies: ["workspace.view", "item.view"] },
+    { key: "item.move_review", domain: "review", domain_label: "确认流程", label: "移动待确认资料", description: "移动待确认状态的资料。", dependencies: ["workspace.view", "item.view", "category.view"] },
+    { key: "item.publish", domain: "publish", domain_label: "发布流程", label: "发布资料", description: "发布或重新发布已确认资料。", dependencies: ["workspace.view", "item.view"] },
+    { key: "item.archive_published", domain: "publish", domain_label: "发布流程", label: "下架正式资料", description: "将已确认、发布失败或已发布资料移入回收站。", dependencies: ["workspace.view", "item.view"] },
+    { key: "trash.view", domain: "trash", domain_label: "回收站", label: "查看回收站", description: "查看和搜索已归档资料。", dependencies: ["workspace.view", "item.view"] },
+    { key: "trash.restore", domain: "trash", domain_label: "回收站", label: "恢复资料", description: "从回收站恢复资料。", dependencies: ["workspace.view", "item.view", "trash.view"] },
+    { key: "category.manage", domain: "category", domain_label: "分类与目录", label: "维护分类", description: "新增、修改、启用或停用资料分类。", dependencies: ["workspace.view", "category.view"] },
+    { key: "folder.request", domain: "category", domain_label: "分类与目录", label: "申请目录", description: "提交子目录创建申请。", dependencies: ["workspace.view", "item.view", "category.view"] },
+    { key: "folder.review", domain: "category", domain_label: "分类与目录", label: "审批目录", description: "查看、批准或退回目录申请。", dependencies: ["workspace.view", "item.view", "category.view"] },
+    { key: "import.server", domain: "operations", domain_label: "导入与索引", label: "服务器导入", description: "执行受控的服务器批次导入。", dependencies: ["workspace.view", "item.view", "category.view"] },
+    { key: "index.view", domain: "operations", domain_label: "导入与索引", label: "查看索引任务", description: "查看发布处理状态、失败原因和历史尝试。", dependencies: ["workspace.view", "item.view", "category.view"] },
+  ],
+};
+
 const permissionGroups = [
   { id: "permission-group-member", group_key: "member", display_name: "普通成员", permissions: [], is_system: true, is_active: true, updated_at: 1700000000 },
-  { id: "permission-group-bim-engineer", group_key: "bim_engineer", display_name: "BIM工程师", permissions: ["organize"], is_system: true, is_active: true, updated_at: 1700000000 },
-  { id: "permission-group-content-owner", group_key: "content_owner", display_name: "资料负责人", permissions: ["review"], is_system: true, is_active: true, updated_at: 1700000000 },
-  { id: "permission-group-system-admin", group_key: "system_admin", display_name: "系统管理员", permissions: ["organize", "review", "publish", "manage_categories", "import_server"], is_system: true, is_active: true, updated_at: 1700000000 },
+  { id: "permission-group-viewer", group_key: "viewer", display_name: "资料浏览者", permissions: ["workspace.view", "item.view", "item.download", "category.view"], is_system: true, is_active: true, updated_at: 1700000000 },
+  { id: "permission-group-bim-engineer", group_key: "bim_engineer", display_name: "BIM工程师", permissions: ["workspace.view", "item.view", "item.download", "category.view", "item.upload", "item.submit", "item.move_draft", "item.archive_draft", "folder.request"], is_system: true, is_active: true, updated_at: 1700000000 },
+  { id: "permission-group-content-owner", group_key: "content_owner", display_name: "资料负责人", permissions: ["workspace.view", "item.view", "item.download", "category.view", "item.review", "item.move_review", "folder.review", "trash.view", "trash.restore"], is_system: true, is_active: true, updated_at: 1700000000 },
+  { id: "permission-group-publisher", group_key: "publisher", display_name: "发布负责人", permissions: ["workspace.view", "item.view", "item.download", "category.view", "item.publish", "item.archive_published", "trash.view", "index.view"], is_system: true, is_active: true, updated_at: 1700000000 },
+  { id: "permission-group-category-admin", group_key: "category_admin", display_name: "分类管理员", permissions: ["workspace.view", "item.view", "item.download", "category.view", "category.manage", "folder.review"], is_system: true, is_active: true, updated_at: 1700000000 },
+  { id: "permission-group-system-admin", group_key: "system_admin", display_name: "系统管理员", permissions: admin.content_permissions, is_system: true, is_active: true, updated_at: 1700000000 },
 ];
 
 const adminConversations = [
@@ -328,13 +433,43 @@ export async function installAdminRoutes(
     if (request.method() === "GET" && path === "/api/admin/transcription/media/media-ready/versions") return json(route, transcriptVersions);
     if (request.method() === "GET" && /^\/api\/admin\/transcription\/media\/[^/]+\/versions$/.test(path)) return json(route, []);
     if (request.method() === "GET" && path === "/api/admin/transcription/versions/11111111-1111-4111-8111-111111111111/markdown") {
-      return json(route, { version_id: transcriptVersions[0].version_id, markdown: "# 项目交付培训\n\n说话人 1 00:00:00\n培训开始\n", markdown_sha256: transcriptVersions[0].markdown_sha256 });
+      return json(route, { version_id: transcriptVersions[0].version_id, markdown: "# 项目交付培训\n\n说话人 1 00:00:00\n**培训开始**\n\n说话人 2 00:00:12\n- 核对模型命名\n- 核对交付目录\n", markdown_sha256: transcriptVersions[0].markdown_sha256 });
+    }
+    if (request.method() === "GET" && path === "/api/admin/transcription/versions/11111111-1111-4111-8111-111111111111/timeline") {
+      return json(route, {
+        media_id: "media-ready",
+        version_id: transcriptVersions[0].version_id,
+        language: "zh-CN",
+        duration_ms: 30_000,
+        segments: [
+          { id: 0, start_ms: 0, end_ms: 12_000, text: "培训开始" },
+          { id: 1, start_ms: 12_000, end_ms: null, text: "核对模型命名\n核对交付目录" },
+        ],
+      });
+    }
+    if (request.method() === "GET" && path === "/api/media/media-ready") {
+      return route.fulfill({ status: 200, contentType: "video/mp4", body: "" });
+    }
+    if (request.method() === "GET" && path === "/api/admin/media/media-ready/preview") {
+      return route.fulfill({ status: 200, contentType: "video/mp4", body: "" });
     }
     if (path === "/api/categories") return json(route, { categories: [], second_level_categories: [] });
     if (path === "/api/conversations" && request.method() === "GET") return json(route, { conversations: adminConversations.slice(0, 1) });
     if (path === "/api/conversations" && request.method() === "POST") return json(route, { ...adminConversations[0] });
     if (request.method() === "GET" && path.startsWith("/api/pdf/")) {
       return route.fulfill({ status: 404, contentType: "application/pdf", body: "" });
+    }
+    if (request.method() === "GET" && /^\/api\/admin\/content\/versions\/[^/]+\/file$/.test(path)) {
+      return route.fulfill({ status: 200, contentType: "application/pdf", body: "%PDF synthetic fixture" });
+    }
+    if (request.method() === "POST" && path === "/api/admin/content/bulk-download") {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      return route.fulfill({
+        status: 200,
+        contentType: "application/zip",
+        headers: { "content-disposition": "attachment; filename=managed-content.zip" },
+        body: "synthetic zip fixture",
+      });
     }
     if (path === "/api/admin/users") return json(route, { users: permissionUsers.map((user) => ({
       id: user.user_id, employee_id: user.employee_id, real_name: user.real_name, role: user.role,
@@ -367,6 +502,9 @@ export async function installAdminRoutes(
     }
     if (path === "/api/admin/content/permissions") {
       return json(route, scenario === "empty" ? [] : permissionUsers);
+    }
+    if (path === "/api/admin/content/permission-catalog") {
+      return json(route, permissionCatalog);
     }
     if (path === "/api/admin/content/permission-groups") {
       return json(route, permissionGroups);
@@ -406,8 +544,10 @@ export async function installAdminRoutes(
       if (path === "/api/admin/content/uploads") {
         return json(route, { batch_id: "synthetic-batch", entries: [{ filename: "synthetic.pdf", item_id: "new-item", version_id: "new-version", sha256: null, status: "accepted", reason: null }] });
       }
-      if (path.endsWith("/bulk-review") || path.endsWith("/bulk-publish")) {
-        return json(route, { results: [], succeeded: 0, failed: 0 });
+      if (path.endsWith("/bulk-review") || path.endsWith("/bulk-publish") || path.endsWith("/bulk-move") || path.endsWith("/bulk-archive")) {
+        const body = request.postDataJSON() as { version_ids?: string[]; items?: Array<{ item_id: string; expected_version_id: string }> };
+        const versionIds = body.version_ids || body.items?.map((item) => item.expected_version_id) || [];
+        return json(route, { results: versionIds.map((version_id) => ({ version_id, status: "succeeded", message: null, index_job_id: null })), succeeded: versionIds.length, failed: 0 });
       }
       return json(route, items[0]);
     }

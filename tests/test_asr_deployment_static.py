@@ -2210,6 +2210,12 @@ def test_whisperx_candidate_requires_two_qualification_identities_and_stays_inac
     assert "Get-QualifiedWhisperXNltkRoot" in evidence
     assert "tokenizers/punkt_tab/english" in evidence
     assert "NltkRoot" in evidence
+    real_file_guard = evidence.split("function Assert-WhisperXRealFile", 1)[1].split(
+        "function Get-QualifiedWhisperXNltkRoot", 1
+    )[0]
+    assert "PathType Leaf" in real_file_guard
+    assert "ReparsePoint" in real_file_guard
+    assert "Length" not in real_file_guard
     assert "[string]$file.Name -eq $expectedName" in evidence
     assert "production_services_modified -ne $false" in evidence
     assert "Register-ScheduledTask" not in evidence

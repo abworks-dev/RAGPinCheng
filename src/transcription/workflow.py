@@ -6,8 +6,10 @@ from dataclasses import dataclass
 from .canonical import CanonicalTranscript
 from .persistence import (
     ArtifactStore,
+    MarkdownStorageKind,
     PublicationIndexPort,
     PublicationIndexReceipt,
+    TranscriptSource,
     TranscriptionStore,
     TranscriptionJobRecord,
     compute_persisted_execution_identity,
@@ -161,13 +163,32 @@ class TranscriptionPersistenceWorkflow:
         *,
         version_id: str,
         index_job_id: str,
-        current_profile: TranscriptionProfileDefinition,
+        current_profile: TranscriptionProfileDefinition | None,
         explicit_admin_action: bool,
         attempt_number: int,
         now: int,
     ) -> str:
         version = self.store.load_version(version_id)
-        if version.profile_snapshot is None:
+        managed_manual = (
+            version.source is TranscriptSource.manual
+            and version.markdown_storage_kind is MarkdownStorageKind.managed_artifact
+            and version.derived_from_version_id is not None
+        )
+        if managed_manual:
+            if current_profile is not None:
+                raise ContractValidationError("manual_revision_profile_forbidden", "current_profile")
+            if not explicit_admin_action or version.review_status is not ReviewStatus.review_approved:
+                raise ContractValidationError("manual_revision_review_required", "review_status")
+            target = candidate_target_index_id(version_id, attempt_number)
+            self.store.begin_publication(
+                version_id=version_id,
+                index_job_id=index_job_id,
+                attempt_number=attempt_number,
+                target_index_id=target,
+                now=now,
+            )
+            return target
+        if version.profile_snapshot is None or current_profile is None:
             raise ContractValidationError("manual_publication_not_connected", "version.source")
         policy = effective_release_policy(version.profile_snapshot, current_profile)
         if current_profile.admission is ProfileAdmission.disabled:
@@ -199,7 +220,7 @@ class TranscriptionPersistenceWorkflow:
         *,
         version_id: str,
         index_job_id: str,
-        current_profile: TranscriptionProfileDefinition,
+        current_profile: TranscriptionProfileDefinition | None,
         explicit_admin_action: bool,
         now: int,
     ):

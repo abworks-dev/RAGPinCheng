@@ -8,13 +8,13 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from src.chunk import _parse_transcript_turns
 from src.config import DOCS_DIR, ROOT, TRANSCRIPTION_ARTIFACT_DIR
 from src.transcription.canonical import CanonicalTranscript
 from src.transcription.types import ContractValidationError
 
 from .auth import require_user
 from .db import connect as db_connect
+from .transcription_markdown import parse_transcript_segments
 from .schemas import MediaTranscriptDTO, MediaTranscriptSegmentDTO
 
 router = APIRouter(prefix="/media", tags=["media-transcript"])
@@ -51,30 +51,16 @@ def _read_verified(path: Path, expected_sha256: str | None, expected_size: int |
         raise _integrity_error() from exc
 
 
-def _timestamp_ms(value: str) -> int:
-    parts = [int(part) for part in value.split(":")]
-    if len(parts) == 2:
-        minutes, seconds = parts
-        return (minutes * 60 + seconds) * 1000
-    hours, minutes, seconds = parts
-    return (hours * 3600 + minutes * 60 + seconds) * 1000
-
-
 def _manual_segments(markdown: str) -> list[MediaTranscriptSegmentDTO]:
-    turns = _parse_transcript_turns(markdown)
-    result: list[MediaTranscriptSegmentDTO] = []
-    for index, (timestamp, text) in enumerate(turns):
-        start_ms = _timestamp_ms(timestamp)
-        next_start = _timestamp_ms(turns[index + 1][0]) if index + 1 < len(turns) else None
-        result.append(
-            MediaTranscriptSegmentDTO(
-                id=index,
-                start_ms=start_ms,
-                end_ms=next_start if next_start is not None and next_start > start_ms else None,
-                text=text,
-            )
+    return [
+        MediaTranscriptSegmentDTO(
+            id=index,
+            start_ms=segment.start_ms,
+            end_ms=segment.end_ms,
+            text=segment.text,
         )
-    return result
+        for index, segment in enumerate(parse_transcript_segments(markdown))
+    ]
 
 
 @router.get("/{media_id}/transcript", response_model=MediaTranscriptDTO)

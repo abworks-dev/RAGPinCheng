@@ -94,7 +94,8 @@ def run_content_publication(index_job_id: str) -> None:
         row = conn.execute(
             """SELECT j.id,j.status,j.target_index_id,j.publication_id,j.version_id,
                       v.item_id,v.object_sha256,v.original_filename,v.doc_type,v.source_batch_id,
-                      i.title,i.category_id,c.category_key,c.display_name,o.storage_rel_path
+                      COALESCE(v.title,i.title) AS title,i.category_id,
+                      c.category_key,c.display_name,o.storage_rel_path
                FROM content_index_jobs j
                JOIN content_publications p ON p.id=j.publication_id
                JOIN content_versions v ON v.id=j.version_id

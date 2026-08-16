@@ -32,11 +32,12 @@ export function ResourcePreviewShell({
     <Sheet open={open} onOpenChange={(nextOpen) => { if (!nextOpen) onClose(); }}>
       <SheetContent
         closeLabel="关闭预览"
+        overlayClassName="resource-preview-overlay"
         onCloseAutoFocus={(event) => {
           event.preventDefault();
           returnFocusRef.current?.focus();
         }}
-        className="gap-0 border-l-0 p-0 md:w-[min(60rem,75vw)] md:max-w-none"
+        className="resource-preview-sheet gap-0 border-l-0 p-0 md:w-[min(60rem,75vw)] md:max-w-none"
       >
         <SheetHeader className="flex min-h-14 items-center gap-3 space-y-0 border-b border-border px-4 py-0 pr-16">
           {backAction}

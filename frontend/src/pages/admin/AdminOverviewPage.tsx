@@ -13,7 +13,7 @@ import { ProductionRuntimeStatus } from "./ProductionRuntimeStatus";
 const pageHeading = (
   <div>
     <p className="text-ui-xs font-medium text-primary">总览</p>
-    <h1 className="mt-1 text-ui-2xl font-semibold tracking-tight text-foreground">管理概览</h1>
+    <h1 className="mt-1 text-ui-2xl font-semibold tracking-tight text-foreground">系统概览</h1>
     <p className="mt-2 max-w-2xl text-ui-sm text-muted-foreground">
       查看用户、对话和消息的整体情况。
     </p>
@@ -71,7 +71,7 @@ export function AdminOverviewPage({ onOpenMaintenance }: AdminOverviewPageProps)
     return (
       <div className="space-y-6">
         {pageHeading}
-        <ErrorState title="概览加载失败" description={error} className="bg-card" />
+        <ErrorState title="系统概览加载失败" description={error} className="bg-card" />
       </div>
     );
   }
@@ -81,7 +81,7 @@ export function AdminOverviewPage({ onOpenMaintenance }: AdminOverviewPageProps)
       <div className="space-y-6">
         {pageHeading}
         <Card className="shadow-surface">
-          <LoadingState className="min-h-48" label="正在加载管理概览…" />
+          <LoadingState className="min-h-48" label="正在加载系统概览…" />
         </Card>
       </div>
     );

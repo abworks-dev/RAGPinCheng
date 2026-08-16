@@ -383,6 +383,73 @@ class SQLiteTranscriptionStore:
             )
         return self.load_version(version_id)
 
+    def register_edited_version(
+        self,
+        *,
+        version_id: str,
+        base_version_id: str,
+        base_markdown_sha256: str,
+        markdown_ref: ManagedMarkdownRef,
+        edited_by: int,
+        edit_idempotency_key: str,
+        now: int,
+    ) -> TranscriptVersionRecord:
+        validate_uuid(version_id, "version_id")
+        validate_uuid(base_version_id, "base_version_id")
+        validate_sha256(base_markdown_sha256, "base_markdown_sha256")
+        validate_uuid(edit_idempotency_key, "edit_idempotency_key")
+        if type(markdown_ref) is not ManagedMarkdownRef:
+            raise ContractValidationError("invalid_markdown_ref", "markdown_ref")
+        if not markdown_ref.relative_path.startswith("markdown/"):
+            raise ContractValidationError("invalid_managed_artifact_path", "markdown_ref")
+        require_int(edited_by, "edited_by", positive=True)
+        require_int(now, "now")
+        with self._transaction():
+            existing = self._conn.execute(
+                "SELECT id FROM transcript_versions WHERE edit_idempotency_key=?",
+                (edit_idempotency_key,),
+            ).fetchone()
+            if existing is not None:
+                version = self._load_version_row(str(existing["id"]))
+                if (
+                    version.derived_from_version_id != base_version_id
+                    or version.markdown_ref.content_sha256 != markdown_ref.content_sha256
+                    or version.edited_by != edited_by
+                ):
+                    raise StoreConflictError("edit_idempotency_conflict")
+                return version
+            base = self._load_version_row(base_version_id)
+            if base.markdown_ref.content_sha256 != base_markdown_sha256:
+                raise StoreConflictError("stale_base_markdown")
+            if base.markdown_ref.content_sha256 == markdown_ref.content_sha256:
+                raise StoreConflictError("unchanged_markdown")
+            try:
+                self._conn.execute(
+                    """INSERT INTO transcript_versions(
+                        id,media_id,transcription_job_id,source,profile_id,provider_key,model_id,model_revision,
+                        config_hash,profile_snapshot_json,canonical_json,canonical_sha256,markdown_storage_kind,
+                        markdown_rel_path,markdown_sha256,markdown_size_bytes,review_status,reviewed_by,
+                        reviewed_at,review_note,publication_status,published_at,supersedes_version_id,
+                        created_at,updated_at,derived_from_version_id,edited_by,edit_idempotency_key
+                    ) VALUES (?,?,NULL,'manual',NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,'managed_artifact',
+                              ?,?,?,'awaiting_review',NULL,NULL,NULL,'not_published',NULL,NULL,?,?,?,?,?)""",
+                    (
+                        version_id,
+                        base.media_id,
+                        markdown_ref.relative_path,
+                        markdown_ref.content_sha256,
+                        markdown_ref.size_bytes,
+                        now,
+                        now,
+                        base.id,
+                        edited_by,
+                        edit_idempotency_key,
+                    ),
+                )
+            except sqlite3.IntegrityError as exc:
+                raise StoreConflictError("edited_version_uniqueness_conflict") from exc
+        return self.load_version(version_id)
+
     def review_version(
         self,
         version_id: str,
@@ -546,7 +613,7 @@ class SQLiteTranscriptionStore:
         *,
         version_id: str,
         index_job_id: str,
-        current_profile: TranscriptionProfileDefinition,
+        current_profile: TranscriptionProfileDefinition | None,
         explicit_admin_action: bool,
         now: int,
     ) -> TranscriptVersionRecord:
@@ -554,7 +621,12 @@ class SQLiteTranscriptionStore:
         validate_uuid(index_job_id, "index_job_id")
         with self._transaction():
             version = self._load_version_row(version_id)
-            if version.source is not TranscriptSource.automatic:
+            managed_manual = (
+                version.source is TranscriptSource.manual
+                and version.markdown_storage_kind is MarkdownStorageKind.managed_artifact
+                and version.derived_from_version_id is not None
+            )
+            if version.source is not TranscriptSource.automatic and not managed_manual:
                 raise ContractValidationError("manual_promotion_not_connected", "version.source")
             row = self._conn.execute(
                 "SELECT * FROM transcript_publication_index_jobs WHERE id=? AND transcript_version_id=?",
@@ -571,19 +643,30 @@ class SQLiteTranscriptionStore:
             validate_target_index_id(row["target_index_id"])
             if row["target_index_id"] != f"transcript-candidate-{version.id}-a{row['attempt_number']}":
                 raise PersistedStateError("publication_target_identity_mismatch")
-            policy = effective_release_policy(version.profile_snapshot, current_profile)
-            allowed = promote_allowed(
-                review_status=version.review_status,
-                effective_policy=policy,
-                current_admission=current_profile.admission,
-                explicit_admin_action=explicit_admin_action,
-                publication_status=version.publication_status,
-                index_status=PublicationIndexStatus(row["status"]),
-                candidate_version_id=version.id,
-                canonical_sha256=version.canonical_sha256,
-                markdown_sha256=version.markdown_ref.content_sha256,
-                target_index_id=row["target_index_id"],
-            )
+            if managed_manual:
+                allowed = (
+                    current_profile is None
+                    and explicit_admin_action
+                    and version.review_status is ReviewStatus.review_approved
+                    and version.publication_status is PublicationStatus.publishing
+                    and PublicationIndexStatus(row["status"]) is PublicationIndexStatus.done
+                )
+            else:
+                if current_profile is None or version.profile_snapshot is None:
+                    raise ContractValidationError("profile_required", "current_profile")
+                policy = effective_release_policy(version.profile_snapshot, current_profile)
+                allowed = promote_allowed(
+                    review_status=version.review_status,
+                    effective_policy=policy,
+                    current_admission=current_profile.admission,
+                    explicit_admin_action=explicit_admin_action,
+                    publication_status=version.publication_status,
+                    index_status=PublicationIndexStatus(row["status"]),
+                    candidate_version_id=version.id,
+                    canonical_sha256=version.canonical_sha256,
+                    markdown_sha256=version.markdown_ref.content_sha256,
+                    target_index_id=row["target_index_id"],
+                )
             if not allowed:
                 raise ContractValidationError("promotion_guard_rejected", "promotion")
             old = self._conn.execute(
@@ -713,7 +796,8 @@ class SQLiteTranscriptionStore:
                 ManagedMarkdownRef(row["markdown_rel_path"], row["markdown_sha256"], row["markdown_size_bytes"]),
                 ReviewStatus(row["review_status"]), row["reviewed_by"], row["reviewed_at"], row["review_note"],
                 PublicationStatus(row["publication_status"]), row["published_at"], row["supersedes_version_id"],
-                row["created_at"], row["updated_at"],
+                row["created_at"], row["updated_at"], row["derived_from_version_id"],
+                row["edited_by"], row["edit_idempotency_key"],
             )
             artifacts = tuple(
                 ArtifactReference.from_json_dict(

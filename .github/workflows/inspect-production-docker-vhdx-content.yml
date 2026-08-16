@@ -1,0 +1,40 @@
+name: Inspect Production Docker VHDX Content Read Only
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_read_only_mount:
+        description: Confirm temporary read-only VHDX mount and guaranteed unmount
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-gpu-exclusive
+  cancel-in-progress: false
+
+jobs:
+  inspect:
+    if: ${{ inputs.confirm_read_only_mount == true }}
+    runs-on: [self-hosted, windows, production, gpu]
+    environment: production-asr
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Quiesce Docker Desktop and inspect exact VHDX read only
+        shell: powershell
+        timeout-minutes: 110
+        run: |
+          & .\scripts\inspect-docker-vhdx-content-quiesced.ps1 `
+            -ReportRoot (Join-Path $env:RUNNER_TEMP 'docker-vhdx-content-readonly-audit') `
+            -ExpectedLogicalBytes 92712992768 `
+            -ExpectedCreatedUtc '2026-06-04T07:58:58.2353948Z'
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-vhdx-content-readonly-audit-${{ github.run_id }}
+          path: ${{ runner.temp }}/docker-vhdx-content-readonly-audit
+          if-no-files-found: warn

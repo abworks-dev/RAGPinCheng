@@ -35,10 +35,13 @@ from src.transcription.types import ContractValidationError, TranscriptionJobSta
 from .auth import CurrentUser, require_admin, require_csrf_admin
 from .db import connect
 from .schemas import (
+    CreateTranscriptRevisionRequest,
     RetryTranscriptionRequest,
     PublishTranscriptVersionRequest,
     PublishTranscriptVersionResponse,
     ReviewTranscriptVersionRequest,
+    MediaTranscriptDTO,
+    MediaTranscriptSegmentDTO,
     TranscriptMarkdownPreviewDTO,
     TranscriptPublicationJobDTO,
     TranscriptVersionDTO,
@@ -57,6 +60,7 @@ from .transcription_runtime import (
 )
 from .transcription_service import TranscriptionApplicationService
 from .transcription_store import SQLiteTranscriptionStore, StoreConflictError
+from .transcription_markdown import parse_transcript_segments
 from .transcription_worker import enqueue
 
 router = APIRouter(prefix="/admin/transcription", tags=["admin-transcription"])
@@ -385,6 +389,7 @@ def _version_dto(version, current_version_id: str | None = None) -> TranscriptVe
         provider_key=version.provider_key,
         model_id=version.model_id,
         model_revision=version.model_revision,
+        markdown_storage_kind=version.markdown_storage_kind.value,
         review_status=version.review_status.value,
         reviewed_by=version.reviewed_by,
         reviewed_at=version.reviewed_at,
@@ -392,6 +397,8 @@ def _version_dto(version, current_version_id: str | None = None) -> TranscriptVe
         publication_status=version.publication_status.value,
         published_at=version.published_at,
         supersedes_version_id=version.supersedes_version_id,
+        derived_from_version_id=version.derived_from_version_id,
+        edited_by=version.edited_by,
         markdown_sha256=version.markdown_ref.content_sha256,
         created_at=version.created_at,
         updated_at=version.updated_at,
@@ -446,6 +453,97 @@ def preview_transcript_version(version_id: str, _admin: CurrentUser = Depends(re
         raise HTTPException(status_code=404, detail="转录版本不存在")
     except ContractValidationError:
         raise HTTPException(status_code=409, detail="转录稿完整性校验失败")
+    finally:
+        conn.close()
+
+
+@router.get("/versions/{version_id}/timeline", response_model=MediaTranscriptDTO)
+def preview_transcript_version_timeline(
+    version_id: str,
+    _admin: CurrentUser = Depends(require_admin),
+) -> MediaTranscriptDTO:
+    conn = connect()
+    try:
+        service = _build_publication_service(conn)
+        version = service.store.load_version(version_id)
+        if version.canonical is not None:
+            return MediaTranscriptDTO(
+                media_id=version.media_id,
+                version_id=version.id,
+                language=version.canonical.language,
+                duration_ms=version.canonical.duration_ms,
+                segments=[
+                    MediaTranscriptSegmentDTO(
+                        id=segment.id,
+                        start_ms=segment.start_ms,
+                        end_ms=segment.end_ms,
+                        text=segment.text,
+                    )
+                    for segment in version.canonical.segments
+                ],
+            )
+
+        segments = parse_transcript_segments(service.preview_markdown(version.id))
+        return MediaTranscriptDTO(
+            media_id=version.media_id,
+            version_id=version.id,
+            segments=[
+                MediaTranscriptSegmentDTO(
+                    id=index,
+                    start_ms=segment.start_ms,
+                    end_ms=segment.end_ms,
+                    text=segment.text,
+                )
+                for index, segment in enumerate(segments)
+            ],
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="转录版本不存在")
+    except ContractValidationError:
+        raise HTTPException(status_code=409, detail="转录稿时间轴不可用")
+    finally:
+        conn.close()
+
+
+@router.post(
+    "/versions/{base_version_id}/revisions",
+    response_model=TranscriptVersionDTO,
+    status_code=201,
+)
+def create_transcript_revision(
+    base_version_id: str,
+    body: CreateTranscriptRevisionRequest,
+    admin: CurrentUser = Depends(require_csrf_admin),
+):
+    conn = connect()
+    try:
+        service = _build_publication_service(conn)
+        version = service.create_revision(
+            base_version_id,
+            markdown=body.markdown,
+            base_markdown_sha256=body.base_markdown_sha256,
+            edited_by=admin.id,
+            request_idempotency_key=body.request_idempotency_key,
+        )
+        return _version_dto(version, service.store.current_head(version.media_id))
+    except KeyError:
+        raise HTTPException(status_code=404, detail="基础转录版本不存在")
+    except StoreConflictError as exc:
+        detail = {
+            "stale_base_markdown": "基础版本已变化，请重新加载后再保存。",
+            "unchanged_markdown": "内容没有变化，无需创建新草稿。",
+            "edit_idempotency_conflict": "保存请求与已处理请求不一致，请重新发起保存。",
+        }.get(str(exc), "保存修订时发生并发冲突，请重新加载后再试。")
+        raise HTTPException(status_code=409, detail=detail)
+    except ContractValidationError as exc:
+        detail = {
+            "empty_transcript_markdown": "转录稿不能为空。",
+            "transcript_markdown_too_large": "转录稿超过 2 MiB 限制。",
+            "transcript_turn_required": "转录稿至少需要一段带时间戳且有正文的说话人内容。",
+            "invalid_transcript_timestamp": "转录稿包含无效时间戳。",
+            "invalid_markdown_encoding": "转录稿必须是有效的 UTF-8 文本。",
+        }.get(exc.code, "转录稿格式不符合要求。")
+        raise HTTPException(status_code=400, detail=detail)
     finally:
         conn.close()
 

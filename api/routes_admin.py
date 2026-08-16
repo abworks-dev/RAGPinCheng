@@ -17,7 +17,7 @@ import time
 from dataclasses import asdict
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 
 from src.config import (
     ASR_ENABLED,
@@ -50,11 +50,12 @@ from .maintenance import (
     save_settings,
 )
 from .system_overview import collect_system_overview
-from .content_permissions import CONTENT_PERMISSIONS
+from .content_permission_catalog import CONTENT_PERMISSIONS
 from .db import get_db
 from .feedback import read_records
 from .indexing import create_job, enqueue
 from .routes_transcription import build_transcription_service
+from .routes_media import safe_join, stream_media_file
 from .schemas import (
     AdminConversationListResponse,
     AdminConversationSummaryDTO,
@@ -90,6 +91,10 @@ from .transcription_worker import enqueue as enqueue_transcription
 logger = logging.getLogger("api.routes_admin")
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+
+_ADMIN_PREVIEWABLE_MEDIA_STATUSES = frozenset(
+    {"uploaded", "transcribing", "transcript_ready", "indexing", "ready", "failed"}
+)
 
 
 def _user_permissions(conn: sqlite3.Connection, user_id: int, role: str) -> list[str]:
@@ -1400,6 +1405,51 @@ def list_media_assets(
         )
         for r in rows
     ]
+
+
+@router.get("/media/{media_id}/preview")
+def preview_media_asset(
+    media_id: str,
+    request: Request,
+    _admin: CurrentUser = Depends(require_admin),
+    conn: sqlite3.Connection = Depends(get_db),
+):
+    """Stream an uploaded media asset for the administrator workbench.
+
+    The public media endpoint intentionally exposes only finalized ``ready``
+    assets. Reviewers also need to inspect failed and unpublished uploads, so
+    this endpoint provides the same Range behavior behind admin auth while
+    keeping drafts out of shared caches.
+    """
+    try:
+        validate_uuid(media_id, "media_id")
+    except ContractValidationError:
+        raise HTTPException(status_code=404, detail="媒体不存在")
+
+    row = conn.execute(
+        """
+        SELECT storage_rel_path, mime_type, status
+        FROM media_assets
+        WHERE media_id=?
+        """,
+        (media_id,),
+    ).fetchone()
+    if row is None or row["status"] not in _ADMIN_PREVIEWABLE_MEDIA_STATUSES:
+        raise HTTPException(status_code=404, detail="媒体不可预览")
+
+    try:
+        file_path = safe_join(MEDIA_DIR, row["storage_rel_path"])
+    except ValueError:
+        raise HTTPException(status_code=404, detail="媒体不存在")
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(status_code=404, detail="媒体文件缺失")
+
+    return stream_media_file(
+        file_path,
+        row["mime_type"],
+        request.headers.get("range"),
+        cache_control="private, no-store",
+    )
 
 
 @router.delete("/media/{media_id}", status_code=204)

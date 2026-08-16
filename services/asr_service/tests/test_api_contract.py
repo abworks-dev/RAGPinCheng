@@ -14,6 +14,7 @@ from services.asr_service.engine_protocol import (
     FASTER_WHISPER_SERVICE_CONFIG,
     SENSEVOICE_SERVICE_CONFIG,
     ServiceEngineCapabilities,
+    WHISPERX_FULL_DECODE_SERVICE_CONFIG,
 )
 from services.asr_service.engine_registry import EngineRegistration, EngineRegistry
 from services.asr_service.engines.fake import FakeEngine
@@ -270,7 +271,7 @@ def test_enabled_default_wiring_accepts_qwen_only_model_cache(tmp_path, monkeypa
     assert registration.engine.timing_diagnostics is True
 
 
-def test_enabled_default_wiring_does_not_require_optional_candidate_caches(
+def test_default_wiring_uses_qualified_whisperx_config_without_optional_caches(
     tmp_path, monkeypatch
 ):
     model_path = (tmp_path / "models" / "sensevoice").resolve()
@@ -296,3 +297,4 @@ def test_enabled_default_wiring_does_not_require_optional_candidate_caches(
         "qwen3-asr-06b-aligner-v1",
         "whisperx-large-v3-zh-align-v1",
     )
+    assert registrations[-1].config == WHISPERX_FULL_DECODE_SERVICE_CONFIG

@@ -13,6 +13,78 @@ html.admin-scrollbar-stable {
   scrollbar-gutter: stable;
 }
 
+.resource-preview-overlay {
+  animation-duration: var(--duration-normal);
+  animation-timing-function: ease-out;
+  animation-fill-mode: both;
+}
+
+.resource-preview-sheet {
+  transform-origin: right center;
+  animation-duration: var(--duration-slow);
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  animation-fill-mode: both;
+}
+
+.resource-preview-overlay[data-state="open"] {
+  animation-name: resource-preview-overlay-enter;
+}
+
+.resource-preview-overlay[data-state="closed"] {
+  animation-name: resource-preview-overlay-exit;
+}
+
+.resource-preview-sheet[data-state="open"] {
+  animation-name: resource-preview-sheet-enter;
+}
+
+.resource-preview-sheet[data-state="closed"] {
+  animation-name: resource-preview-sheet-exit;
+}
+
+@keyframes resource-preview-overlay-enter {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes resource-preview-overlay-exit {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes resource-preview-sheet-enter {
+  from { opacity: 0; transform: translateX(1rem) scale(0.995); }
+  to { opacity: 1; transform: translateX(0) scale(1); }
+}
+
+@keyframes resource-preview-sheet-exit {
+  from { opacity: 1; transform: translateX(0) scale(1); }
+  to { opacity: 0; transform: translateX(1rem) scale(0.995); }
+}
+
+@media (max-width: 767px) {
+  .resource-preview-sheet {
+    transform-origin: center bottom;
+  }
+
+  @keyframes resource-preview-sheet-enter {
+    from { opacity: 0; transform: translateY(0.75rem) scale(0.995); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+  }
+
+  @keyframes resource-preview-sheet-exit {
+    from { opacity: 1; transform: translateY(0) scale(1); }
+    to { opacity: 0; transform: translateY(0.75rem) scale(0.995); }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .resource-preview-overlay,
+  .resource-preview-sheet {
+    animation-duration: 0s;
+  }
+}
+
 @media (min-width: 1024px) {
   html.admin-scrollbar-stable {
     overflow-y: hidden;

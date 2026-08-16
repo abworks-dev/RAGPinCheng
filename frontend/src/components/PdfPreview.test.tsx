@@ -1,7 +1,14 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PdfPreviewProvider, usePdfPreview } from "../hooks/usePdfPreview";
-import { calculatePdfScale, getPdfPrefetchOrder, PdfPreview } from "./PdfPreview";
+import {
+  calculatePdfScale,
+  calculateWheelZoom,
+  calculateZoomedScroll,
+  getPdfPrefetchOrder,
+  PdfPreview,
+  shouldZoomPdfWheel,
+} from "./PdfPreview";
 
 const pdfMocks = vi.hoisted(() => ({
   getOperatorList: vi.fn(),
@@ -89,8 +96,32 @@ describe("calculatePdfScale", () => {
 
   it("fits width independently and keeps supported bounds", () => {
     expect(calculatePdfScale("fit-width", { width: 632, height: 400 }, { width: 600, height: 800 })).toBe(1);
-    expect(calculatePdfScale("fit-width", { width: 100, height: 100 }, { width: 600, height: 800 })).toBe(0.5);
+    expect(calculatePdfScale("fit-width", { width: 100, height: 100 }, { width: 600, height: 800 })).toBeCloseTo(0.1133);
+    expect(calculatePdfScale("fit-page", { width: 332, height: 232 }, { width: 1200, height: 1600 })).toBe(0.125);
     expect(calculatePdfScale("actual", { width: 100, height: 100 }, { width: 600, height: 800 })).toBe(1);
+  });
+});
+
+describe("PDF wheel zoom helpers", () => {
+  it("zooms mouse-wheel input in pan mode and modifier input in selection mode", () => {
+    expect(shouldZoomPdfWheel(true, {
+      ctrlKey: false, metaKey: false, deltaMode: WheelEvent.DOM_DELTA_PIXEL, deltaX: 0, deltaY: -100,
+    })).toBe(true);
+    expect(shouldZoomPdfWheel(true, {
+      ctrlKey: false, metaKey: false, deltaMode: WheelEvent.DOM_DELTA_PIXEL, deltaX: 0, deltaY: -4,
+    })).toBe(false);
+    expect(shouldZoomPdfWheel(false, {
+      ctrlKey: true, metaKey: false, deltaMode: WheelEvent.DOM_DELTA_PIXEL, deltaX: 0, deltaY: -4,
+    })).toBe(true);
+  });
+
+  it("uses continuous bounded zoom and preserves the pointer anchor", () => {
+    expect(calculateWheelZoom(1, -100)).toBe(1.1);
+    expect(calculateWheelZoom(2.95, -100)).toBe(3);
+    expect(calculateWheelZoom(0.52, 100)).toBe(0.5);
+    expect(calculateWheelZoom(0.3, 100)).toBe(0.3);
+    expect(calculateWheelZoom(0.3, -100)).toBe(0.5);
+    expect(calculateZoomedScroll(200, 100, 1, 1.5)).toBe(350);
   });
 });
 
@@ -108,6 +139,11 @@ describe("getPdfPrefetchOrder", () => {
 describe("PdfPreview interactions", () => {
   beforeEach(() => {
     vi.stubGlobal("ResizeObserver", ResizeObserverMock);
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      callback(0);
+      return 1;
+    });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
     pdfMocks.getOperatorList.mockReset().mockResolvedValue({});
     pdfMocks.getPage.mockReset().mockImplementation(async () => ({
       getOperatorList: pdfMocks.getOperatorList,
@@ -121,6 +157,33 @@ describe("PdfPreview interactions", () => {
     fireEvent.click(screen.getByRole("button", { name: "放大" }));
     expect(screen.getByRole("combobox", { name: "缩放模式" })).toHaveValue("custom");
     expect(screen.getByText("110%")).toBeInTheDocument();
+  });
+
+  it("applies fit-page, fit-width, and actual-size presets to the rendered page", () => {
+    const clientWidth = vi.spyOn(Element.prototype, "clientWidth", "get").mockReturnValue(332);
+    const clientHeight = vi.spyOn(Element.prototype, "clientHeight", "get").mockReturnValue(232);
+    renderPreview();
+    clientWidth.mockRestore();
+    clientHeight.mockRestore();
+
+    const viewport = screen.getByRole("region", { name: "PDF 页面" });
+    Object.defineProperties(viewport, {
+      clientWidth: { configurable: true, value: 332 },
+      clientHeight: { configurable: true, value: 232 },
+      scrollWidth: { configurable: true, value: 1200 },
+      scrollHeight: { configurable: true, value: 1600 },
+    });
+
+    fireEvent.change(screen.getByRole("combobox", { name: "缩放模式" }), { target: { value: "fit-width" } });
+    expect(screen.getByLabelText("渲染缩放")).toHaveTextContent("0.5");
+    expect(viewport.scrollTop).toBe(0);
+
+    fireEvent.change(screen.getByRole("combobox", { name: "缩放模式" }), { target: { value: "fit-page" } });
+    expect(screen.getByLabelText("渲染缩放")).toHaveTextContent("0.25");
+
+    fireEvent.change(screen.getByRole("combobox", { name: "缩放模式" }), { target: { value: "actual" } });
+    expect(screen.getByLabelText("渲染缩放")).toHaveTextContent("1");
+    expect(viewport.scrollTop).toBe(0);
   });
 
   it("tracks and clears the managed content return target", () => {
@@ -144,6 +207,39 @@ describe("PdfPreview interactions", () => {
     expect(toggle).toHaveAttribute("aria-pressed", "true");
     fireEvent.click(toggle);
     expect(screen.getByRole("button", { name: "切换到手形拖动" })).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("zooms around the pointer with the mouse wheel in hand mode", () => {
+    renderPreview();
+    const viewport = screen.getByRole("region", { name: "PDF 页面" });
+    Object.defineProperty(viewport, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({ left: 10, top: 20, right: 610, bottom: 820, width: 600, height: 800, x: 10, y: 20, toJSON() {} }),
+    });
+    viewport.scrollLeft = 200;
+    viewport.scrollTop = 300;
+
+    fireEvent.wheel(viewport, { deltaY: -100, deltaX: 0, deltaMode: WheelEvent.DOM_DELTA_PIXEL, clientX: 110, clientY: 220 });
+
+    expect(screen.getByRole("combobox", { name: "缩放模式" })).toHaveValue("custom");
+    expect(screen.getByText("110%")).toBeInTheDocument();
+    expect(viewport.scrollLeft).toBe(230);
+    expect(viewport.scrollTop).toBe(350);
+  });
+
+  it("keeps fine touchpad scrolling in hand mode and plain wheel scrolling in selection mode", () => {
+    renderPreview();
+    const viewport = screen.getByRole("region", { name: "PDF 页面" });
+
+    fireEvent.wheel(viewport, { deltaY: -4, deltaMode: WheelEvent.DOM_DELTA_PIXEL });
+    expect(screen.getByRole("combobox", { name: "缩放模式" })).toHaveValue("fit-page");
+
+    fireEvent.click(screen.getByRole("button", { name: "切换到文字选择" }));
+    fireEvent.wheel(viewport, { deltaY: -100, deltaMode: WheelEvent.DOM_DELTA_PIXEL });
+    expect(screen.getByRole("combobox", { name: "缩放模式" })).toHaveValue("fit-page");
+
+    fireEvent.wheel(viewport, { deltaY: -10, deltaMode: WheelEvent.DOM_DELTA_PIXEL, ctrlKey: true });
+    expect(screen.getByRole("combobox", { name: "缩放模式" })).toHaveValue("custom");
   });
 
   it("navigates pages with buttons and arrow keys", async () => {

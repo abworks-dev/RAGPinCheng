@@ -4,6 +4,7 @@ import json
 import re
 import sqlite3
 import time
+import unicodedata
 import uuid
 from dataclasses import dataclass
 
@@ -37,12 +38,72 @@ class RestoredContent:
     restored_status: str
 
 
+@dataclass(frozen=True, slots=True)
+class RevisedContent:
+    item_id: str
+    version_id: str
+    version_number: int
+    replaced_item_id: str | None = None
+
+
+class ContentFilenameConflict(ValueError):
+    def __init__(self, row: sqlite3.Row) -> None:
+        super().__init__("content_filename_conflict")
+        self.item_id = str(row["item_id"])
+        self.version_id = str(row["version_id"])
+        self.title = str(row["title"])
+        self.original_filename = str(row["original_filename"])
+
+
 def _now() -> int:
     return int(time.time())
 
 
 def _id(prefix: str) -> str:
     return f"{prefix}-{uuid.uuid4()}"
+
+
+def normalize_content_filename(filename: str) -> tuple[str, str]:
+    clean = unicodedata.normalize("NFKC", filename).strip()
+    if (
+        not clean
+        or len(clean) > 255
+        or clean in {".", ".."}
+        or clean.endswith(".")
+        or "/" in clean
+        or "\\" in clean
+        or "\x00" in clean
+    ):
+        raise ValueError("invalid_filename")
+    return clean, clean.casefold()
+
+
+def find_content_filename_conflict(
+    conn: sqlite3.Connection,
+    *,
+    category_id: str,
+    original_filename: str,
+    exclude_item_id: str | None = None,
+) -> sqlite3.Row | None:
+    _clean, normalized = normalize_content_filename(original_filename)
+    rows = conn.execute(
+        """SELECT i.id AS item_id,COALESCE(v.title,i.title) AS title,
+                  v.id AS version_id,v.original_filename
+           FROM content_items i
+           JOIN content_versions v ON v.item_id=i.id
+            AND v.version_number=(
+                SELECT max(v2.version_number) FROM content_versions v2 WHERE v2.item_id=i.id
+            )
+           WHERE i.category_id=? AND i.archived_at IS NULL AND (? IS NULL OR i.id<>?)""",
+        (category_id, exclude_item_id, exclude_item_id),
+    ).fetchall()
+    for row in rows:
+        try:
+            if normalize_content_filename(str(row["original_filename"]))[1] == normalized:
+                return row
+        except ValueError:
+            continue
+    return None
 
 
 def audit_event(
@@ -357,6 +418,12 @@ def register_uploaded_document(
     clean_title = title.strip()
     if not clean_title or len(clean_title) > 300:
         raise ValueError("invalid_content_title")
+    clean_filename, normalized_filename = normalize_content_filename(original_filename)
+    conflict = find_content_filename_conflict(
+        conn, category_id=category_id, original_filename=clean_filename
+    )
+    if conflict is not None:
+        raise ContentFilenameConflict(conflict)
     now = _now()
     item_id = _id("item")
     version_id = _id("version")
@@ -367,27 +434,28 @@ def register_uploaded_document(
     )
     conn.execute(
         """INSERT INTO content_items
-           (id,title,content_kind,category_id,created_by,created_at,updated_at)
-           VALUES (?,?,'document',?,?,?,?)""",
-        (item_id, clean_title, category_id, actor_user_id, now, now),
+           (id,title,content_kind,category_id,created_by,created_at,updated_at,normalized_filename)
+           VALUES (?,?,'document',?,?,?,?,?)""",
+        (item_id, clean_title, category_id, actor_user_id, now, now, normalized_filename),
     )
     conn.execute(
         """INSERT INTO content_versions
            (id,item_id,version_number,object_sha256,original_filename,doc_type,source_origin,
-            source_batch_id,source_rel_path,lifecycle_status,created_by,created_at,updated_at)
-           VALUES (?,?,1,?,?,?,?,?,?, 'draft',?,?,?)""",
+            source_batch_id,source_rel_path,lifecycle_status,created_by,created_at,updated_at,title)
+           VALUES (?,?,1,?,?,?,?,?,?, 'draft',?,?,?,?)""",
         (
             version_id,
             item_id,
             stored.sha256,
-            original_filename,
+            clean_filename,
             doc_type,
             source_origin,
             batch_id,
-            source_rel_path or original_filename,
+            source_rel_path or clean_filename,
             actor_user_id,
             now,
             now,
+            clean_title,
         ),
     )
     conn.execute(
@@ -431,7 +499,7 @@ def list_content_items(
                 SELECT c.id,p.full_path || ' / ' || c.display_code || ' ' || c.display_name
                 FROM category_nodes c JOIN paths p ON p.id=c.parent_id
             )
-            SELECT i.id AS item_id,i.title,i.content_kind,i.category_id,i.media_id,
+            SELECT i.id AS item_id,COALESCE(v.title,i.title) AS title,i.content_kind,i.category_id,i.media_id,
                    i.created_at,i.updated_at,c.category_key,c.display_code,c.display_name,
                    paths.full_path AS category_path,
                    v.id AS version_id,v.version_number,v.original_filename,v.doc_type,
@@ -472,7 +540,7 @@ def list_content_items_page(
     params: list[object] = []
     normalized = query.strip()
     if normalized:
-        clauses.append("(i.title LIKE ? OR v.original_filename LIKE ? OR paths.full_path LIKE ? OR v.source_rel_path LIKE ?)")
+        clauses.append("(COALESCE(v.title,i.title) LIKE ? OR v.original_filename LIKE ? OR paths.full_path LIKE ? OR v.source_rel_path LIKE ?)")
         pattern = f"%{normalized}%"
         params.extend([pattern, pattern, pattern, pattern])
     if category_id:
@@ -513,7 +581,7 @@ def list_content_items_page(
                 )
                 LEFT JOIN users archive_user ON archive_user.id=archive_event.actor_user_id"""
     rows = conn.execute(
-        cte + """ SELECT i.id AS item_id,i.title,i.content_kind,i.category_id,i.media_id,
+        cte + """ SELECT i.id AS item_id,COALESCE(v.title,i.title) AS title,i.content_kind,i.category_id,i.media_id,
                           i.created_at,i.updated_at,c.category_key,c.display_code,c.display_name,
                           paths.full_path AS category_path,v.id AS version_id,v.version_number,
                           v.original_filename,v.doc_type,v.lifecycle_status,v.object_sha256,
@@ -553,6 +621,7 @@ def restore_content_item(
         row = conn.execute(
             """SELECT i.id AS item_id,i.archived_at,i.category_id,c.is_active,
                       v.id AS version_id,v.lifecycle_status,v.object_sha256,v.source_batch_id,
+                      v.original_filename,
                       (SELECT ae.metadata_json FROM content_audit_events ae
                        WHERE ae.item_id=i.id AND ae.event_type='content.archived'
                        ORDER BY ae.created_at DESC,ae.id DESC LIMIT 1) AS archive_metadata_json
@@ -573,6 +642,14 @@ def restore_content_item(
             raise ValueError("content_version_conflict")
         if not row["is_active"]:
             raise ValueError("content_restore_category_inactive")
+        conflict = find_content_filename_conflict(
+            conn,
+            category_id=str(row["category_id"]),
+            original_filename=str(row["original_filename"]),
+            exclude_item_id=item_id,
+        )
+        if conflict is not None:
+            raise ContentFilenameConflict(conflict)
         active_job = conn.execute(
             """SELECT 1 FROM content_index_jobs
                WHERE version_id=? AND status IN (
@@ -590,9 +667,13 @@ def restore_content_item(
             else "approved"
         )
         result = conn.execute(
-            """UPDATE content_items SET archived_at=NULL,updated_at=?
+            """UPDATE content_items SET archived_at=NULL,updated_at=?,normalized_filename=?
                WHERE id=? AND archived_at IS NOT NULL""",
-            (now, item_id),
+            (
+                now,
+                normalize_content_filename(str(row["original_filename"]))[1],
+                item_id,
+            ),
         )
         if result.rowcount != 1:
             raise ValueError("content_trash_item_not_found")
@@ -616,85 +697,80 @@ def restore_content_item(
     return RestoredContent(item_id=item_id, version_id=expected_version_id, restored_status=restored_status)
 
 
-def archive_content_item(
+def _archive_content_item_locked(
     conn: sqlite3.Connection,
     item_id: str,
     *,
     expected_version_id: str,
     actor_user_id: int,
-    can_organize: bool,
-    can_publish: bool,
+    can_archive_draft: bool,
+    can_archive_published: bool,
+    now: int,
 ) -> ArchivedContent:
-    now = _now()
-    try:
-        conn.execute("BEGIN IMMEDIATE")
-        row = conn.execute(
-            """SELECT i.id AS item_id,i.archived_at,v.id AS version_id,
-                      v.lifecycle_status,v.source_batch_id
-               FROM content_items i
-               JOIN content_versions v ON v.item_id=i.id
-                AND v.version_number=(
-                    SELECT max(v2.version_number) FROM content_versions v2 WHERE v2.item_id=i.id
-                )
-               WHERE i.id=?""",
-            (item_id,),
-        ).fetchone()
-        if row is None or row["archived_at"] is not None:
-            raise ValueError("content_item_not_found")
-        requires_publish = row["lifecycle_status"] not in {"draft", "rejected"}
-        if (requires_publish and not can_publish) or (
-            not requires_publish and not can_organize
-        ):
-            raise ValueError("content_delete_forbidden")
-        if row["version_id"] != expected_version_id:
-            raise ValueError("content_version_conflict")
-        active_job = conn.execute(
-            """SELECT 1 FROM content_index_jobs
-               WHERE version_id=? AND status IN (
-                   'pending','parsing','chunking','summarizing','embedding'
-               ) LIMIT 1""",
-            (expected_version_id,),
-        ).fetchone()
-        if row["lifecycle_status"] == "publishing" or active_job is not None:
-            raise ValueError("content_delete_in_progress")
-
-        head = conn.execute(
-            "SELECT publication_id FROM content_item_heads WHERE item_id=?",
-            (item_id,),
-        ).fetchone()
-        publication_withdrawn = head is not None
-        if head is not None:
-            conn.execute(
-                """UPDATE content_publications
-                   SET status='withdrawn',withdrawn_at=?,updated_at=?
-                   WHERE id=? AND status='published'""",
-                (now, now, head["publication_id"]),
+    row = conn.execute(
+        """SELECT i.id AS item_id,i.archived_at,v.id AS version_id,
+                  v.lifecycle_status,v.source_batch_id,
+                  h.publication_id AS head_publication_id
+           FROM content_items i
+           JOIN content_versions v ON v.item_id=i.id
+            AND v.version_number=(
+                SELECT max(v2.version_number) FROM content_versions v2 WHERE v2.item_id=i.id
             )
-            conn.execute("DELETE FROM content_item_heads WHERE item_id=?", (item_id,))
+           LEFT JOIN content_item_heads h ON h.item_id=i.id
+           WHERE i.id=?""",
+        (item_id,),
+    ).fetchone()
+    if row is None or row["archived_at"] is not None:
+        raise ValueError("content_item_not_found")
+    requires_publish = (
+        row["head_publication_id"] is not None
+        or row["lifecycle_status"] not in {"draft", "rejected"}
+    )
+    if (requires_publish and not can_archive_published) or (
+        not requires_publish and not can_archive_draft
+    ):
+        raise ValueError("content_delete_forbidden")
+    if row["version_id"] != expected_version_id:
+        raise ValueError("content_version_conflict")
+    active_job = conn.execute(
+        """SELECT 1 FROM content_index_jobs
+           WHERE version_id=? AND status IN (
+               'pending','parsing','chunking','summarizing','embedding'
+           ) LIMIT 1""",
+        (expected_version_id,),
+    ).fetchone()
+    if row["lifecycle_status"] == "publishing" or active_job is not None:
+        raise ValueError("content_delete_in_progress")
 
-        result = conn.execute(
-            """UPDATE content_items SET archived_at=?,updated_at=?
-               WHERE id=? AND archived_at IS NULL""",
-            (now, now, item_id),
+    publication_withdrawn = row["head_publication_id"] is not None
+    if publication_withdrawn:
+        conn.execute(
+            """UPDATE content_publications
+               SET status='withdrawn',withdrawn_at=?,updated_at=?
+               WHERE id=? AND status='published'""",
+            (now, now, row["head_publication_id"]),
         )
-        if result.rowcount != 1:
-            raise ValueError("content_item_not_found")
-        audit_event(
-            conn,
-            "content.archived",
-            actor_user_id=actor_user_id,
-            item_id=item_id,
-            version_id=expected_version_id,
-            batch_id=row["source_batch_id"],
-            metadata={
-                "previous_status": row["lifecycle_status"],
-                "publication_withdrawn": publication_withdrawn,
-            },
-        )
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
+        conn.execute("DELETE FROM content_item_heads WHERE item_id=?", (item_id,))
+
+    result = conn.execute(
+        """UPDATE content_items SET archived_at=?,updated_at=?
+           WHERE id=? AND archived_at IS NULL""",
+        (now, now, item_id),
+    )
+    if result.rowcount != 1:
+        raise ValueError("content_item_not_found")
+    audit_event(
+        conn,
+        "content.archived",
+        actor_user_id=actor_user_id,
+        item_id=item_id,
+        version_id=expected_version_id,
+        batch_id=row["source_batch_id"],
+        metadata={
+            "previous_status": row["lifecycle_status"],
+            "publication_withdrawn": publication_withdrawn,
+        },
+    )
     return ArchivedContent(
         item_id=item_id,
         version_id=expected_version_id,
@@ -704,6 +780,33 @@ def archive_content_item(
     )
 
 
+def archive_content_item(
+    conn: sqlite3.Connection,
+    item_id: str,
+    *,
+    expected_version_id: str,
+    actor_user_id: int,
+    can_archive_draft: bool,
+    can_archive_published: bool,
+) -> ArchivedContent:
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        result = _archive_content_item_locked(
+            conn,
+            item_id,
+            expected_version_id=expected_version_id,
+            actor_user_id=actor_user_id,
+            can_archive_draft=can_archive_draft,
+            can_archive_published=can_archive_published,
+            now=_now(),
+        )
+        conn.commit()
+        return result
+    except Exception:
+        conn.rollback()
+        raise
+
+
 def move_content_item(
     conn: sqlite3.Connection,
     item_id: str,
@@ -711,20 +814,22 @@ def move_content_item(
     target_category_id: str,
     expected_version_id: str,
     actor_user_id: int,
-    can_organize: bool,
-    can_review: bool,
+    can_move_draft: bool,
+    can_move_review: bool,
 ) -> sqlite3.Row:
     now = _now()
     try:
         conn.execute("BEGIN IMMEDIATE")
         row = conn.execute(
             """SELECT i.id AS item_id,i.category_id,v.id AS version_id,
-                      v.lifecycle_status,v.source_batch_id
+                      v.lifecycle_status,v.source_batch_id,v.original_filename,
+                      h.current_version_id
                FROM content_items i
                JOIN content_versions v ON v.item_id=i.id
                 AND v.version_number=(
                     SELECT max(v2.version_number) FROM content_versions v2 WHERE v2.item_id=i.id
                 )
+               LEFT JOIN content_item_heads h ON h.item_id=i.id
                WHERE i.id=? AND i.archived_at IS NULL""",
             (item_id,),
         ).fetchone()
@@ -732,10 +837,12 @@ def move_content_item(
             raise ValueError("content_item_not_found")
         if row["version_id"] != expected_version_id:
             raise ValueError("content_version_conflict")
+        if row["current_version_id"] is not None:
+            raise ValueError("content_move_requires_republication")
         if row["lifecycle_status"] in {"draft", "rejected"}:
-            allowed = can_organize
+            allowed = can_move_draft
         elif row["lifecycle_status"] == "awaiting_review":
-            allowed = can_review
+            allowed = can_move_review
         else:
             raise ValueError("content_move_requires_republication")
         if not allowed:
@@ -747,9 +854,23 @@ def move_content_item(
         if target is None:
             raise ValueError("active_category_not_found")
         if row["category_id"] != target_category_id:
+            conflict = find_content_filename_conflict(
+                conn,
+                category_id=target_category_id,
+                original_filename=str(row["original_filename"]),
+                exclude_item_id=item_id,
+            )
+            if conflict is not None:
+                raise ContentFilenameConflict(conflict)
             conn.execute(
-                "UPDATE content_items SET category_id=?,updated_at=? WHERE id=?",
-                (target_category_id, now, item_id),
+                """UPDATE content_items
+                   SET category_id=?,updated_at=?,normalized_filename=? WHERE id=?""",
+                (
+                    target_category_id,
+                    now,
+                    normalize_content_filename(str(row["original_filename"]))[1],
+                    item_id,
+                ),
             )
             audit_event(
                 conn,
@@ -768,6 +889,162 @@ def move_content_item(
     return conn.execute(
         "SELECT id,category_id,updated_at FROM content_items WHERE id=?", (item_id,)
     ).fetchone()
+
+
+def create_content_revision(
+    conn: sqlite3.Connection,
+    item_id: str,
+    *,
+    expected_version_id: str,
+    title: str,
+    original_filename: str,
+    actor_user_id: int,
+    can_revise: bool,
+    can_archive_draft: bool,
+    can_archive_published: bool,
+    stored: StoredContentObject | None = None,
+    doc_type: str | None = None,
+    source_batch_id: str | None = None,
+    replace_conflict_item_id: str | None = None,
+    replace_conflict_expected_version_id: str | None = None,
+) -> RevisedContent:
+    if not can_revise:
+        raise ValueError("content_revision_forbidden")
+    clean_title = title.strip()
+    if not clean_title or len(clean_title) > 300:
+        raise ValueError("invalid_content_title")
+    clean_filename, normalized_filename = normalize_content_filename(original_filename)
+    now = _now()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            """SELECT i.id AS item_id,i.category_id,i.content_kind,
+                      v.id AS version_id,v.version_number,v.object_sha256,
+                      v.original_filename,v.doc_type,v.source_origin,v.source_batch_id,
+                      v.lifecycle_status,h.current_version_id
+               FROM content_items i
+               JOIN content_versions v ON v.item_id=i.id
+                AND v.version_number=(
+                    SELECT max(v2.version_number) FROM content_versions v2 WHERE v2.item_id=i.id
+                )
+               LEFT JOIN content_item_heads h ON h.item_id=i.id
+               WHERE i.id=? AND i.archived_at IS NULL""",
+            (item_id,),
+        ).fetchone()
+        if row is None or row["content_kind"] != "document":
+            raise ValueError("content_item_not_found")
+        if row["version_id"] != expected_version_id:
+            raise ValueError("content_version_conflict")
+        active_job = conn.execute(
+            """SELECT 1 FROM content_index_jobs
+               WHERE version_id=? AND status IN (
+                   'pending','parsing','chunking','summarizing','embedding'
+               ) LIMIT 1""",
+            (expected_version_id,),
+        ).fetchone()
+        if row["lifecycle_status"] == "publishing" or active_job is not None:
+            raise ValueError("content_revision_in_progress")
+
+        conflict = find_content_filename_conflict(
+            conn,
+            category_id=str(row["category_id"]),
+            original_filename=clean_filename,
+            exclude_item_id=item_id,
+        )
+        replaced_item_id: str | None = None
+        if conflict is not None:
+            if (
+                replace_conflict_item_id != conflict["item_id"]
+                or replace_conflict_expected_version_id != conflict["version_id"]
+            ):
+                raise ContentFilenameConflict(conflict)
+            _archive_content_item_locked(
+                conn,
+                str(conflict["item_id"]),
+                expected_version_id=str(conflict["version_id"]),
+                actor_user_id=actor_user_id,
+                can_archive_draft=can_archive_draft,
+                can_archive_published=can_archive_published,
+                now=now,
+            )
+            replaced_item_id = str(conflict["item_id"])
+
+        if stored is not None:
+            conn.execute(
+                """INSERT OR IGNORE INTO content_objects
+                   (sha256,size_bytes,mime_type,storage_rel_path,created_at)
+                   VALUES (?,?,?,?,?)""",
+                (stored.sha256, stored.size_bytes, stored.mime_type, stored.storage_rel_path, now),
+            )
+        object_sha256 = stored.sha256 if stored is not None else str(row["object_sha256"])
+        next_doc_type = doc_type or str(row["doc_type"])
+        next_origin = "web" if stored is not None else str(row["source_origin"])
+        next_batch_id = source_batch_id if stored is not None else row["source_batch_id"]
+        version_id = _id("version")
+        version_number = int(row["version_number"]) + 1
+
+        if row["current_version_id"] != row["version_id"]:
+            conn.execute(
+                """UPDATE content_versions SET lifecycle_status='superseded',updated_at=?
+                   WHERE id=? AND lifecycle_status<>'superseded'""",
+                (now, row["version_id"]),
+            )
+        conn.execute(
+            """INSERT INTO content_versions
+               (id,item_id,version_number,object_sha256,original_filename,doc_type,source_origin,
+                source_batch_id,source_rel_path,lifecycle_status,created_by,created_at,updated_at,title)
+               VALUES (?,?,?,?,?,?,?,?,?,'draft',?,?,?,?)""",
+            (
+                version_id,
+                item_id,
+                version_number,
+                object_sha256,
+                clean_filename,
+                next_doc_type,
+                next_origin,
+                next_batch_id,
+                clean_filename,
+                actor_user_id,
+                now,
+                now,
+                clean_title,
+            ),
+        )
+        conn.execute(
+            """UPDATE content_items
+               SET title=?,normalized_filename=?,updated_at=? WHERE id=?""",
+            (clean_title, normalized_filename, now, item_id),
+        )
+        if stored is not None and source_batch_id:
+            conn.execute(
+                "UPDATE upload_batches SET status='ready_for_review',updated_at=? WHERE id=?",
+                (now, source_batch_id),
+            )
+        event_type = "content.updated" if stored is not None else "content.renamed"
+        audit_event(
+            conn,
+            event_type,
+            actor_user_id=actor_user_id,
+            item_id=item_id,
+            version_id=version_id,
+            batch_id=next_batch_id,
+            category_id=row["category_id"],
+            metadata={
+                "previous_version_id": expected_version_id,
+                "previous_filename": row["original_filename"],
+                "replaced_item_id": replaced_item_id,
+            },
+        )
+        conn.commit()
+        return RevisedContent(
+            item_id=item_id,
+            version_id=version_id,
+            version_number=version_number,
+            replaced_item_id=replaced_item_id,
+        )
+    except Exception:
+        conn.rollback()
+        raise
 
 
 def submit_version_for_review(

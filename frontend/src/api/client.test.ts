@@ -96,6 +96,31 @@ describe("api client", () => {
     );
   });
 
+  it("downloads managed content as a CSRF-protected ZIP and reads its filename", async () => {
+    setCsrfToken("csrf-download");
+    const fetchMock = vi.fn().mockResolvedValue(new Response(new Blob(["zip"]), {
+      status: 200,
+      headers: {
+        "content-type": "application/zip",
+        "content-disposition": "attachment; filename*=UTF-8''%E8%B5%84%E6%96%99%E6%89%93%E5%8C%85.zip",
+      },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await api.bulkDownloadManagedContent(["version-1", "version-2"]);
+    expect(result.filename).toBe("资料打包.zip");
+    expect(result.blob.size).toBeGreaterThan(0);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/admin/content/bulk-download",
+      expect.objectContaining({
+        method: "POST",
+        credentials: "include",
+        body: JSON.stringify({ version_ids: ["version-1", "version-2"] }),
+        headers: { "content-type": "application/json", "X-CSRF-Token": "csrf-download" },
+      }),
+    );
+  });
+
   it("loads trash and restores managed content with CSRF protection", async () => {
     setCsrfToken("csrf-restore");
     const fetchMock = vi.fn()
@@ -210,6 +235,39 @@ describe("api client", () => {
     expect(forbidden).toHaveBeenCalledTimes(1);
   });
 
+  it("preserves explicit folder paths and marks folder uploads in FormData", async () => {
+    setCsrfToken("csrf-folder");
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ batch_id: "batch-1", entries: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const guide = new File(["guide"], "guide.md", { type: "text/markdown" });
+
+    await api.uploadManagedContent(
+      [{ file: guide, relativePath: "资料包/01 建筑/guide.md" }],
+      "category-1",
+      "folder",
+    );
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const form = init.body as FormData;
+    expect(form.getAll("files")).toEqual([guide]);
+    expect(form.getAll("relative_paths")).toEqual(["资料包/01 建筑/guide.md"]);
+    expect(form.get("category_id")).toBe("category-1");
+    expect(form.get("upload_mode")).toBe("folder");
+    expect(init.headers).toEqual({ "X-CSRF-Token": "csrf-folder" });
+  });
+
+  it("keeps ordinary file uploads compatible with filename paths", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ batch_id: "batch-1", entries: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const guide = new File(["guide"], "guide.md");
+
+    await api.uploadManagedContent([guide], "category-1");
+
+    const form = fetchMock.mock.calls[0][1]?.body as FormData;
+    expect(form.getAll("relative_paths")).toEqual(["guide.md"]);
+    expect(form.get("upload_mode")).toBe("files");
+  });
+
   it("preserves safe structured error code, message and retry policy", async () => {
     vi.stubGlobal(
       "fetch",
@@ -301,20 +359,50 @@ describe("Phase 5 transcript publication API contracts", () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse([]))
       .mockResolvedValueOnce(jsonResponse({ version_id: "version-1", markdown: "正文", markdown_sha256: "a".repeat(64) }))
+      .mockResolvedValueOnce(jsonResponse({ media_id: "media-1", version_id: "version-1", language: "zh-CN", duration_ms: 1000, segments: [] }))
       .mockResolvedValueOnce(jsonResponse({ version: {}, job: null, reused: false }, 202));
     vi.stubGlobal("fetch", fetchMock);
 
     await api.listTranscriptVersions("media-1");
     await api.previewTranscriptVersion("version-1");
+    await api.previewTranscriptVersionTimeline("version-1");
     await api.publishTranscriptVersion("version-1");
 
     expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/admin/transcription/media/media-1/versions", expect.objectContaining({ credentials: "include", headers: {} }));
     expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/admin/transcription/versions/version-1/markdown", expect.objectContaining({ credentials: "include", headers: {} }));
-    expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/admin/transcription/versions/version-1/publish", expect.objectContaining({
+    expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/admin/transcription/versions/version-1/timeline", expect.objectContaining({ credentials: "include", headers: {} }));
+    expect(fetchMock).toHaveBeenNthCalledWith(4, "/api/admin/transcription/versions/version-1/publish", expect.objectContaining({
       method: "POST",
       credentials: "include",
       body: JSON.stringify({}),
       headers: { "content-type": "application/json", "X-CSRF-Token": "csrf-phase5" },
     }));
+  });
+
+  it("creates a Markdown revision with base SHA, idempotency and CSRF", async () => {
+    setCsrfToken("csrf-revision");
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ version_id: "version-2" }, 201));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.createTranscriptRevision(
+      "version-1",
+      "说话人 1 00:00:00\n修订内容\n",
+      "a".repeat(64),
+      "11111111-1111-4111-8111-111111111111",
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/admin/transcription/versions/version-1/revisions",
+      expect.objectContaining({
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json", "X-CSRF-Token": "csrf-revision" },
+        body: JSON.stringify({
+          markdown: "说话人 1 00:00:00\n修订内容\n",
+          base_markdown_sha256: "a".repeat(64),
+          request_idempotency_key: "11111111-1111-4111-8111-111111111111",
+        }),
+      }),
+    );
   });
 });

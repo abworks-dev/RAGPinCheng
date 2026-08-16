@@ -433,6 +433,9 @@ class TranscriptVersionRecord:
     supersedes_version_id: str | None
     created_at: int
     updated_at: int
+    derived_from_version_id: str | None = None
+    edited_by: int | None = None
+    edit_idempotency_key: str | None = None
 
     def __post_init__(self) -> None:
         validate_uuid(self.id, "version.id")
@@ -451,12 +454,21 @@ class TranscriptVersionRecord:
             validate_single_line(self.review_note, "version.review_note")
         _optional_timestamp(self.published_at, "version.published_at")
         _optional_uuid(self.supersedes_version_id, "version.supersedes_version_id")
+        _optional_uuid(self.derived_from_version_id, "version.derived_from_version_id")
+        if self.edited_by is not None:
+            require_int(self.edited_by, "version.edited_by", positive=True)
+        _optional_uuid(self.edit_idempotency_key, "version.edit_idempotency_key")
         require_int(self.created_at, "version.created_at")
         require_int(self.updated_at, "version.updated_at")
         self._validate_cross_fields()
 
     def _validate_cross_fields(self) -> None:
         automatic = self.source is TranscriptSource.automatic
+        edit_fields = (
+            self.derived_from_version_id,
+            self.edited_by,
+            self.edit_idempotency_key,
+        )
         automatic_fields = (
             self.transcription_job_id,
             self.profile_id,
@@ -467,6 +479,8 @@ class TranscriptVersionRecord:
             self.canonical_sha256,
         )
         if automatic:
+            if any(item is not None for item in edit_fields):
+                raise ContractValidationError("automatic_edit_lineage", "version")
             if any(item is None for item in automatic_fields):
                 raise ContractValidationError("incomplete_automatic_version", "version")
             validate_profile_id(self.profile_id, "version.profile_id")
@@ -490,10 +504,20 @@ class TranscriptVersionRecord:
         else:
             if any(item is not None for item in automatic_fields) or self.model_id is not None or self.model_revision is not None:
                 raise ContractValidationError("manual_provider_leak", "version")
-            if self.markdown_storage_kind is not MarkdownStorageKind.legacy_manual:
+            if self.markdown_storage_kind is MarkdownStorageKind.legacy_manual:
+                if any(item is not None for item in edit_fields):
+                    raise ContractValidationError("legacy_manual_edit_lineage", "version")
+                if not self.markdown_ref.relative_path.startswith("docs/"):
+                    raise ContractValidationError("invalid_legacy_manual_path", "version.markdown_ref")
+            elif self.markdown_storage_kind is MarkdownStorageKind.managed_artifact:
+                if any(item is None for item in edit_fields):
+                    raise ContractValidationError("incomplete_manual_edit_lineage", "version")
+                if not self.markdown_ref.relative_path.startswith("markdown/"):
+                    raise ContractValidationError("invalid_managed_artifact_path", "version.markdown_ref")
+                if self.review_status is ReviewStatus.not_required:
+                    raise ContractValidationError("manual_revision_requires_review", "version.review_status")
+            else:
                 raise ContractValidationError("invalid_manual_storage", "version.markdown_storage_kind")
-            if not self.markdown_ref.relative_path.startswith("docs/"):
-                raise ContractValidationError("invalid_legacy_manual_path", "version.markdown_ref")
         if (self.model_id is None) != (self.model_revision is None):
             raise ContractValidationError("incomplete_model_identity", "version.model")
         for field, value in (("model_id", self.model_id), ("model_revision", self.model_revision)):
@@ -612,6 +636,18 @@ class TranscriptionStore(Protocol):
 
     def load_version(self, version_id: str) -> TranscriptVersionRecord: ...
 
+    def register_edited_version(
+        self,
+        *,
+        version_id: str,
+        base_version_id: str,
+        base_markdown_sha256: str,
+        markdown_ref: ManagedMarkdownRef,
+        edited_by: int,
+        edit_idempotency_key: str,
+        now: int,
+    ) -> TranscriptVersionRecord: ...
+
     def record_success(
         self,
         *,
@@ -658,7 +694,7 @@ class TranscriptionStore(Protocol):
         *,
         version_id: str,
         index_job_id: str,
-        current_profile: TranscriptionProfileDefinition,
+        current_profile: TranscriptionProfileDefinition | None,
         explicit_admin_action: bool,
         now: int,
     ) -> TranscriptVersionRecord: ...

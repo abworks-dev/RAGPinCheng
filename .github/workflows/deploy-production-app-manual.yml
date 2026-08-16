@@ -547,6 +547,7 @@ jobs:
             "${COMPOSE[@]}" exec -T backend python - <<'PY'
           from pathlib import Path
 
+          from api.content_permission_catalog import SYSTEM_CONTENT_PERMISSION_GROUPS
           from api.db import connect
           from api.db_migrations import CURRENT_SCHEMA_VERSION
           from src.config import (
@@ -597,18 +598,16 @@ jobs:
               actual_groups.setdefault((group_key, display_name), [])
               if permission is not None:
                   actual_groups[(group_key, display_name)].append(permission)
-          assert actual_groups == {
-              ("member", "普通成员"): [],
-              ("bim_engineer", "BIM工程师"): ["organize"],
-              ("content_owner", "资料负责人"): ["review"],
-              ("system_admin", "系统管理员"): [
-                  "import_server", "manage_categories", "organize", "publish", "review"
-              ],
+          expected_groups = {
+              (group_key, display_name): sorted(permissions)
+              for group_key, (display_name, permissions)
+              in SYSTEM_CONTENT_PERMISSION_GROUPS.items()
           }
+          assert actual_groups == expected_groups
 
           print(
               f"MANAGED_CONTENT status=verified schema={CURRENT_SCHEMA_VERSION} "
-              f"categories=7 permission_groups=4 mode={CONTENT_HEAD_ENFORCEMENT}"
+              f"categories=7 permission_groups={len(expected_groups)} mode={CONTENT_HEAD_ENFORCEMENT}"
           )
           PY
           }
