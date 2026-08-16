@@ -1,0 +1,36 @@
+name: Inventory Production Docker Desktop Storage
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_read_only_inventory:
+        description: Confirm read-only Docker Desktop and WSL file inventory
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-gpu-exclusive
+  cancel-in-progress: false
+
+jobs:
+  inventory:
+    if: ${{ inputs.confirm_read_only_inventory == true }}
+    runs-on: [self-hosted, windows, production, gpu]
+    environment: production-asr
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inventory Docker Desktop and WSL storage
+        shell: powershell
+        run: |
+          & .\scripts\inventory-docker-desktop-storage.ps1 -ReportPath (Join-Path $env:RUNNER_TEMP 'docker-desktop-storage-inventory\inventory.json')
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-desktop-storage-inventory-${{ github.run_id }}
+          path: ${{ runner.temp }}/docker-desktop-storage-inventory
+          if-no-files-found: warn
