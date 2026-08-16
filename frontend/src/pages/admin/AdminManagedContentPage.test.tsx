@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AdminManagedContentPage } from "./AdminManagedContentPage";
 
@@ -24,6 +25,13 @@ const mocks = vi.hoisted(() => ({
   fileUrl: vi.fn(),
   success: vi.fn(),
   error: vi.fn(),
+  openPreview: vi.fn(),
+}));
+
+vi.mock("../../components/PdfPreview", () => ({ PdfPreview: () => null }));
+vi.mock("../../hooks/usePdfPreview", () => ({
+  PdfPreviewProvider: ({ children }: { children: React.ReactNode }) => children,
+  usePdfPreview: () => ({ open: mocks.openPreview }),
 }));
 
 vi.mock("../../context/AuthContext", () => ({
@@ -117,6 +125,7 @@ const item = {
   category_label: "03 公司内部标准",
   category_path: "03 公司内部标准",
   media_id: null,
+  preview_parent_id: "parent-1",
   version_id: "version-1",
   version_number: 1,
   original_filename: "standard.pdf",
@@ -156,6 +165,14 @@ describe("AdminManagedContentPage", () => {
 
     fireEvent.click(screen.getAllByRole("button", { name: "确认" })[0]);
     await waitFor(() => expect(mocks.review).toHaveBeenCalledWith("version-1", true));
+  });
+
+  it("opens indexed files in the shared preview drawer", async () => {
+    render(<AdminManagedContentPage />);
+    await screen.findAllByText("建模标准");
+    fireEvent.click(screen.getAllByRole("button", { name: "查看" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    expect(mocks.openPreview).toHaveBeenCalledWith("parent-1", "建模标准", "pdf", 1);
   });
 
   it("loads all statuses by default and keeps disabled bulk actions visible", async () => {
