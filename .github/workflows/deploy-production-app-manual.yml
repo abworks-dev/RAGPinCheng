@@ -890,8 +890,13 @@ jobs:
           (
             set -euo pipefail
             git merge --ff-only "${DEPLOY_COMMIT_SHA}"
+            DEPLOY_SCRIPT="${RUNNER_TEMP}/deploy-app-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.sh"
+            trap 'rm -f "${DEPLOY_SCRIPT}" "${DEPLOY_SCRIPT}.tmp"' EXIT
+            git show "${DEPLOY_COMMIT_SHA}:scripts/deploy-app.sh" > "${DEPLOY_SCRIPT}.tmp"
+            mv "${DEPLOY_SCRIPT}.tmp" "${DEPLOY_SCRIPT}"
+            chmod 700 "${DEPLOY_SCRIPT}"
             echo "TRANSCRIPTION_ADMISSION action=${TRANSCRIPTION_ADMISSION_ACTION} source=workflow-environment"
-            bash "${REPO_PATH}/scripts/deploy-app.sh"
+            bash "${DEPLOY_SCRIPT}"
             COMPOSE=("${DEPLOY_COMPOSE[@]}")
 
             CONTAINER_ID="$("${COMPOSE[@]}" ps -q backend)"

@@ -244,6 +244,11 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertIn('ROLLBACK_IMAGE_TAG="pincheng-rag-backend:app-only-rollback-', workflow)
         self.assertIn('docker tag "${OLD_IMAGE_ID}" "${ROLLBACK_IMAGE_TAG}"', workflow)
         self.assertIn('docker tag "${ROLLBACK_IMAGE_TAG}" pincheng-rag-backend:latest', workflow)
+        self.assertIn(
+            'git show "${DEPLOY_COMMIT_SHA}:scripts/deploy-app.sh"', workflow
+        )
+        self.assertIn('bash "${DEPLOY_SCRIPT}"', workflow)
+        self.assertNotIn('bash "${REPO_PATH}/scripts/deploy-app.sh"', workflow)
         self.assertIn('"${COMPOSE[@]}" stop backend', workflow)
         self.assertIn('SRC="${BACKUP_PATH}" DST="${DATA_PATH}" python3', workflow)
         self.assertIn('os.replace(temporary, target)', workflow)
@@ -491,6 +496,9 @@ class TestDeployGitSafety(unittest.TestCase):
             ),
         )
         self.assertIn('service-level tmpfs contract', source_decoupled_branch)
+        self.assertIn(
+            "compose up -d --no-deps --force-recreate backend", self.linux
+        )
         self.assertIn(
             '"${COMPOSE[@]}" up -d --no-deps --force-recreate backend',
             self.app_backup_recovery_workflow,
