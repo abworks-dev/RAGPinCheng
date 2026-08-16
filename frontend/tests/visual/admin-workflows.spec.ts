@@ -67,7 +67,7 @@ test.describe("资料管理", () => {
     await expect(batchButton).toBeFocused();
   });
 
-  test("single-file actions expose independent move, download, rename, and update flows", async ({ page }) => {
+  test("single-file actions expose independent move, download, rename, and update flows", async ({ page }, testInfo) => {
     await openTab(page, "资料管理");
     await openRootFolder(page);
     const longTitle = "建筑信息模型交付标准（合成长文件名用于响应式检查）";
@@ -77,8 +77,11 @@ test.describe("资料管理", () => {
     await item.getByRole("button", { name: `移动“${longTitle}”`, exact: true }).click();
     const moveDialog = page.getByRole("dialog", { name: "移动资料" });
     await expect(moveDialog).toContainText(longTitle);
-    await moveDialog.getByRole("combobox", { name: "目标目录" }).selectOption("cat-project");
-    await expect(moveDialog.getByRole("button", { name: "移动", exact: true })).toBeEnabled();
+    await expect(moveDialog.getByTestId("category-picker-item-cat-company")).toHaveAttribute("aria-disabled", "true");
+    await moveDialog.getByTestId("category-picker-item-cat-project").click();
+    await expect(moveDialog.getByText("已选择：04 项目资料")).toBeVisible();
+    await expect(moveDialog.getByRole("button", { name: "确认移动", exact: true })).toBeEnabled();
+    await page.screenshot({ path: testInfo.outputPath("managed-content-move-picker.png"), fullPage: false });
     await expectNoBodyOverflow(page);
     await moveDialog.getByRole("button", { name: "取消" }).click();
 
@@ -113,7 +116,7 @@ test.describe("资料管理", () => {
     await page.getByRole("menuitem", { name: "批量移动" }).click();
     const moveDialog = page.getByRole("dialog", { name: "批量移动资料" });
     await expect(moveDialog).toContainText("已选择 2 份资料");
-    await moveDialog.getByRole("combobox", { name: "目标目录" }).selectOption("cat-project");
+    await moveDialog.getByTestId("category-picker-item-cat-project").click();
     await expect(moveDialog.getByRole("button", { name: "确认执行" })).toBeEnabled();
     await moveDialog.getByRole("button", { name: "取消" }).click();
 
