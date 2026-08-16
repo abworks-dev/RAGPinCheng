@@ -239,7 +239,6 @@ try {
         $report.mount_status='mounted-read-only'
 
         $shell=@'
-set -eu
 root=/mnt/wsl/ragpincheng-docker-audit
 test -d "$root"
 mount_line=$(mount | awk '$3 == "/mnt/wsl/ragpincheng-docker-audit" {print $0}')
