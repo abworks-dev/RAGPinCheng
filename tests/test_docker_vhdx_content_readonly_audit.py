@@ -27,7 +27,9 @@ def test_vhdx_content_audit_is_exact_read_only_and_fail_closed():
     assert "Get-MountCapableWslPath" in SCRIPT
     assert "-tVHDX" in SCRIPT
     assert "if (-not $values)" in SCRIPT
-    assert "--help 2>&1 | Out-String" in SCRIPT
+    assert "Get-WslHelp $candidate" in SCRIPT
+    assert "ConvertFrom-WslHelpBytes" in SCRIPT
+    assert ".Replace(\"$([char]0)\",'')" in SCRIPT
     for forbidden in (
         "Remove-Item",
         "Optimize-VHD",
