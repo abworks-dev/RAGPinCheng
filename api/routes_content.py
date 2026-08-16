@@ -441,7 +441,10 @@ async def upload_managed_documents(
     return ManagedUploadResponse(batch_id=batch_id, entries=entries)
 
 
-def _content_item_dto(row: sqlite3.Row) -> ManagedContentItemDTO:
+def _content_item_dto(
+    row: sqlite3.Row,
+    summary: ManagedVersionIndexSummary | None = None,
+) -> ManagedContentItemDTO:
     archive_metadata = json.loads(row["archive_metadata_json"] or "{}") if "archive_metadata_json" in row.keys() else {}
     return ManagedContentItemDTO(
         item_id=row["item_id"],
@@ -452,6 +455,7 @@ def _content_item_dto(row: sqlite3.Row) -> ManagedContentItemDTO:
         category_label=f"{row['display_code']} {row['display_name']}",
         category_path=row["category_path"] if "category_path" in row.keys() else f"{row['display_code']} {row['display_name']}",
         media_id=row["media_id"],
+        preview_parent_id=summary.preview_parent_id if summary else None,
         version_id=row["version_id"],
         version_number=row["version_number"],
         original_filename=row["original_filename"],
@@ -479,11 +483,19 @@ def get_content_items(
     _user: CurrentUser = Depends(require_any_content_permission(_CONTENT_READ)),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> list[ManagedContentItemDTO]:
+    rows = list_content_items(
+        conn, category_id=category_id, lifecycle_status=lifecycle_status
+    )
+    summary_version_ids = [
+        str(row["version_id"])
+        for row in rows
+        if row["latest_publication_status"] == "done"
+        and row["current_version_id"] == row["version_id"]
+    ]
+    summaries = list_managed_version_index_summaries(summary_version_ids)
     return [
-        _content_item_dto(row)
-        for row in list_content_items(
-            conn, category_id=category_id, lifecycle_status=lifecycle_status
-        )
+        _content_item_dto(row, summaries.get(str(row["version_id"])))
+        for row in rows
     ]
 
 
@@ -507,8 +519,15 @@ def get_content_items_page(
         limit=limit,
         offset=offset,
     )
+    summary_version_ids = [
+        str(row["version_id"])
+        for row in rows
+        if row["latest_publication_status"] == "done"
+        and row["current_version_id"] == row["version_id"]
+    ]
+    summaries = list_managed_version_index_summaries(summary_version_ids)
     return ManagedContentListResponse(
-        items=[_content_item_dto(row) for row in rows],
+        items=[_content_item_dto(row, summaries.get(str(row["version_id"]))) for row in rows],
         total=total,
         status_counts=status_counts,
     )
