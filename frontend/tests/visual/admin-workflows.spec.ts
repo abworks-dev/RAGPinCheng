@@ -127,6 +127,24 @@ test.describe("资料管理", () => {
     await expectNoBodyOverflow(page);
   });
 
+  test("batch download stays visible and starts a single archive download", async ({ page }) => {
+    await openTab(page, "资料管理");
+    await openRootFolder(page);
+    const firstTitle = "建筑信息模型交付标准（合成长文件名用于响应式检查）";
+    const secondTitle = "机电专业协同检查清单";
+    await page.getByRole("checkbox", { name: `选择${firstTitle}` }).check();
+    await page.getByRole("checkbox", { name: `选择${secondTitle}` }).check();
+
+    await page.getByRole("button", { name: "批量操作" }).click();
+    const downloadPromise = page.waitForEvent("download");
+    await page.getByRole("menuitem", { name: "批量下载" }).click();
+    await expect(page.getByText(/正在打包 2 份资料，请稍候/)).toBeVisible();
+    await expect(page.getByRole("button", { name: "批量操作" })).toBeDisabled();
+    expect((await downloadPromise).suggestedFilename()).toBe("managed-content.zip");
+    await expect(page.getByText(/正在打包 2 份资料，请稍候/)).toHaveCount(0);
+    await expectNoBodyOverflow(page);
+  });
+
   for (const scenario of ["loading", "empty", "error", "disabled"] as const) {
     test(`${scenario} state is explicit and contained`, async ({ page }, testInfo) => {
       await openTab(page, "资料管理", scenario);
@@ -375,8 +393,12 @@ test.describe("视频管理", () => {
     await expect(workbench.getByRole("textbox", { name: /审核备注/ })).toBeVisible();
     await expect(workbench.getByText("审核通过后可发布")).toBeVisible();
     await expect(workbench.getByText("synthetic-asr")).toBeHidden();
-    await workbench.getByRole("button", { name: "预览 Markdown" }).click();
-    await expect(workbench.locator("pre")).toContainText("培训开始");
+    await workbench.getByRole("button", { name: "校对内容" }).click();
+    await expect(workbench.getByRole("textbox", { name: "转录 Markdown 编辑器" })).toBeVisible();
+    if (page.viewportSize()!.width < 768) {
+      await workbench.getByRole("button", { name: "预览" }).click();
+    }
+    await expect(workbench.getByRole("region", { name: "Markdown 预览" })).toContainText("培训开始");
     await workbench.getByRole("button", { name: "关闭转写工作台" }).click();
     await expect(workbench).toBeHidden();
     await expectNoBodyOverflow(page);

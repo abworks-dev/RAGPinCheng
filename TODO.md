@@ -210,6 +210,16 @@
 - 依赖：Phase 1～4B 已形成契约、持久化、remote Provider 与应用上传/worker/UI 前半段；Phase 5A/5B 已实现版本审阅、发布、候选索引和检索可见性，待远端 CI；Windows ASR R3A 仓库实施及 PR #8 远端 CI 已通过，但不等于生产部署完成；R3B/R3C、真实引擎/GPU/Qdrant 和生产数据均未执行；真实环境操作另按 R3 逐项审批，单卡 GPU 保持 BGE 优先。
 - 方案链接：`docs/plans/multi-engine-auto-transcription.md`、`docs/plans/multi-engine-transcription-phase1.md`、`docs/plans/multi-engine-transcription-phase2.md`、`docs/plans/multi-engine-transcription-phase3.md`、`docs/plans/multi-engine-transcription-phase5.md`、`docs/plans/multi-engine-transcription-phase5c-windows-asr-deployment.md`、`docs/plans/transcription-admin-workflow-hardening.md`、`docs/plans/faster-whisper-provider-integration.md`、`docs/plans/faster-whisper-r3-unified-qualification.md`、`docs/plans/qwen3-asr-r2-r3-integration.md`、`docs/plans/shared-asr-qualification-corpus-migration.md`、`docs/plans/asr-local-development-lab.md`、`docs/decisions/0002-multi-engine-transcription.md`、`docs/plans/funasr-auto-transcription.md`
 
+### 转录稿 Markdown 校对
+
+- 状态：待用户验收
+- 目标：允许管理员在转写工作台校对任一转录版本，以新草稿保存、重新审核并受控发布，不覆盖 ASR 或当前正式版本。
+- 下一步：
+  - [ ] 按 `docs/USER_ACCEPTANCE.md` 在非敏感测试视频上验收桌面双栏、移动编辑/预览切换、新草稿、未保存保护、审核发布和失败恢复。
+- 完成标准：新修订可持久保存并可追溯基础版本和编辑人；并发冲突失败关闭；候选索引完成前旧正式 head 不变；用户确认目标 viewport 与核心操作可用。
+- 依赖：schema 11 迁移、转录 artifact 存储、Phase 5 审核/候选索引/正式 head 流程。
+- 方案链接：`docs/features/transcript-pipeline.md`
+
 ---
 
 ## 最近完成摘要

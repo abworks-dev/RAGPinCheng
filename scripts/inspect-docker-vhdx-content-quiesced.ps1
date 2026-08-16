@@ -46,9 +46,9 @@ function Invoke-Captured([string]$FilePath, [string[]]$Arguments) {
     $stdout=Join-Path $captureRoot 'stdout'; $stderr=Join-Path $captureRoot 'stderr'
     try {
         $process=Start-Process -FilePath $FilePath -ArgumentList $Arguments -Wait -PassThru -NoNewWindow -RedirectStandardOutput $stdout -RedirectStandardError $stderr
-        $stdoutBytes=if (Test-Path -LiteralPath $stdout) { [IO.File]::ReadAllBytes($stdout) } else { [byte[]]@() }
-        $stderrBytes=if (Test-Path -LiteralPath $stderr) { [IO.File]::ReadAllBytes($stderr) } else { [byte[]]@() }
-        return [ordered]@{ exit_code=[int]$process.ExitCode; stdout=$stdoutBytes; stderr=$stderrBytes }
+        $stdoutBase64=if ((Test-Path -LiteralPath $stdout) -and (Get-Item -LiteralPath $stdout).Length -gt 0) { [Convert]::ToBase64String([IO.File]::ReadAllBytes($stdout)) } else { '' }
+        $stderrBytes=if (Test-Path -LiteralPath $stderr) { (Get-Item -LiteralPath $stderr).Length } else { 0 }
+        return [ordered]@{ exit_code=[int]$process.ExitCode; stdout_base64=$stdoutBase64; stderr_bytes=[int64]$stderrBytes }
     } finally {
         if (Test-Path -LiteralPath $captureRoot) { [IO.Directory]::Delete($captureRoot,$true) }
     }
@@ -57,7 +57,7 @@ function Invoke-Captured([string]$FilePath, [string[]]$Arguments) {
 function Get-DockerDesktopRunning {
     $query=Invoke-Captured 'wsl.exe' @('--list','--running','--quiet')
     if ($query.exit_code -ne 0) { throw 'Unable to query running WSL distributions.' }
-    $text=ConvertFrom-WslBytes $query.stdout
+    $text=ConvertFrom-WslBytes ([Convert]::FromBase64String([string]$query.stdout_base64))
     return [bool](@($text -split '\r?\n' | Where-Object { $_.Trim() -ieq 'docker-desktop' }).Count)
 }
 
@@ -104,41 +104,49 @@ $report=[ordered]@{
     failure_stage=$null
 }
 
-$preState=$null; $desktopExecutable=$null; $quiesceAttempted=$false; $caught=$null
+$preState=$null; $desktopExecutable=$null; $quiesceAttempted=$false; $activeRuntime=$false; $caught=$null
 try {
     New-Item -ItemType Directory -Path $ReportRoot -Force | Out-Null
     $preState=Get-DockerState
     $report.pre_state=$preState
     $dockerProcesses=Get-DockerProcesses
     $desktopProcesses=@($dockerProcesses | Where-Object Name -ieq 'Docker Desktop.exe')
-    if ($desktopProcesses.Count -eq 0 -or -not $preState.docker_desktop_distribution_running) { throw 'Docker Desktop is not in the expected active state.' }
+    $activeRuntime=($desktopProcesses.Count -gt 0 -or $preState.docker_desktop_distribution_running)
+    if ($activeRuntime -and ($desktopProcesses.Count -eq 0 -or -not $preState.docker_desktop_distribution_running)) { throw 'Docker Desktop runtime state is inconsistent.' }
 
-    $currentSid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-    $ownedDesktop=[Collections.Generic.List[object]]::new()
-    foreach ($desktopProcess in $desktopProcesses) {
-        $owner=Invoke-CimMethod -InputObject $desktopProcess -MethodName GetOwnerSid -ErrorAction Stop
-        if ($owner.ReturnValue -eq 0 -and [string]$owner.Sid -eq $currentSid) { $ownedDesktop.Add($desktopProcess) }
+    if ($activeRuntime) {
+        $currentSid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+        $ownedDesktop=[Collections.Generic.List[object]]::new()
+        foreach ($desktopProcess in $desktopProcesses) {
+            $owner=Invoke-CimMethod -InputObject $desktopProcess -MethodName GetOwnerSid -ErrorAction Stop
+            if ($owner.ReturnValue -eq 0 -and [string]$owner.Sid -eq $currentSid) { $ownedDesktop.Add($desktopProcess) }
+        }
+        if ($ownedDesktop.Count -ne $desktopProcesses.Count) { throw 'Docker Desktop is not fully owned by the runner identity; restoration is not guaranteed.' }
+        $desktopExecutable=Join-Path $env:ProgramFiles 'Docker\Docker\Docker Desktop.exe'
+        if (-not (Test-Path -LiteralPath $desktopExecutable -PathType Leaf)) { throw 'The installed Docker Desktop restart executable is unavailable.' }
+        $desktopProduct=[Diagnostics.FileVersionInfo]::GetVersionInfo($desktopExecutable).ProductName
+        if ([string]$desktopProduct -notmatch '(?i)Docker Desktop') { throw 'The installed Docker Desktop restart executable identity is invalid.' }
+        $report.restart_identity='installed-docker-desktop'
+
+        $containerQuery=Invoke-Captured 'docker.exe' @('ps','-q')
+        if ($containerQuery.exit_code -ne 0) { throw 'Docker daemon state is unavailable; refusing to stop the runtime.' }
+        $containerText=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([string]$containerQuery.stdout_base64)).Trim()
+        $runningContainers=@($containerText -split '\r?\n' | Where-Object { $_.Trim() }).Count
+        $report.running_containers=$runningContainers
+        if ($runningContainers -ne 0) { throw 'Running Docker containers are present; refusing to stop the runtime.' }
+    } else {
+        $report.baseline_mode='inactive-runtime'
+        $report.running_containers=0
     }
-    if ($ownedDesktop.Count -ne $desktopProcesses.Count) { throw 'Docker Desktop is not fully owned by the runner identity; restoration is not guaranteed.' }
-    $desktopExecutable=Join-Path $env:ProgramFiles 'Docker\Docker\Docker Desktop.exe'
-    if (-not (Test-Path -LiteralPath $desktopExecutable -PathType Leaf)) { throw 'The installed Docker Desktop restart executable is unavailable.' }
-    $desktopProduct=[Diagnostics.FileVersionInfo]::GetVersionInfo($desktopExecutable).ProductName
-    if ([string]$desktopProduct -notmatch '(?i)Docker Desktop') { throw 'The installed Docker Desktop restart executable identity is invalid.' }
-    $report.restart_identity='installed-docker-desktop'
-
-    $containerQuery=Invoke-Captured 'docker.exe' @('ps','-q')
-    if ($containerQuery.exit_code -ne 0) { throw 'Docker daemon state is unavailable; refusing to stop the runtime.' }
-    $containerText=[Text.Encoding]::UTF8.GetString($containerQuery.stdout).Trim()
-    $runningContainers=@($containerText -split '\r?\n' | Where-Object { $_.Trim() }).Count
-    $report.running_containers=$runningContainers
-    if ($runningContainers -ne 0) { throw 'Running Docker containers are present; refusing to stop the runtime.' }
     $report.preflight_status='passed'
 
-    $quiesceAttempted=$true
-    $report.failure_stage='stop-docker-processes'
-    $dockerProcesses | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-    $terminate=Invoke-Captured 'wsl.exe' @('--terminate','docker-desktop')
-    if ($terminate.exit_code -ne 0) { throw 'Targeted docker-desktop termination failed.' }
+    $quiesceAttempted=$activeRuntime
+    if ($activeRuntime) {
+        $report.failure_stage='stop-docker-processes'
+        $dockerProcesses | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+        $terminate=Invoke-Captured 'wsl.exe' @('--terminate','docker-desktop')
+        if ($terminate.exit_code -ne 0) { throw 'Targeted docker-desktop termination failed.' }
+    }
 
     $deadline=[DateTimeOffset]::UtcNow.AddMinutes(3); $target=$null
     do {
@@ -194,8 +202,21 @@ try {
             if (-not $caught) { $caught=$_; $report.failure_stage='restore-runtime' }
         }
     } elseif ($preState) {
-        $report.post_state=Get-DockerState
-        $report.restore_status='not-required'
+        $postState=Get-DockerState
+        if (-not $preState.docker_desktop_distribution_running -and $postState.docker_desktop_distribution_running) {
+            $terminate=Invoke-Captured 'wsl.exe' @('--terminate','docker-desktop')
+            if ($terminate.exit_code -ne 0) { $caught=if ($caught) { $caught } else { [System.Exception]::new('Targeted inactive Docker WSL restoration failed.') } }
+            $postState=Get-DockerState
+        }
+        $restored=(
+            (Test-SameCategories $postState.process_categories $preState.process_categories) -and
+            $postState.running_services -eq $preState.running_services -and
+            $postState.running_scheduled_tasks -eq $preState.running_scheduled_tasks -and
+            $postState.docker_desktop_distribution_running -eq $preState.docker_desktop_distribution_running
+        )
+        $report.post_state=$postState
+        $report.restore_status=if ($restored) { 'completed' } else { 'failed' }
+        if (-not $restored -and -not $caught) { $caught=[System.Exception]::new('Inactive Docker runtime state was not restored.'); $report.failure_stage='restore-runtime' }
     }
     if ($report.content_audit_status -eq 'completed' -and $report.restore_status -eq 'completed') { $report.final_status='completed'; $report.failure_stage=$null }
     Write-OrchestrationReport $report

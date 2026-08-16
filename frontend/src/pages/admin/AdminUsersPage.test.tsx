@@ -34,11 +34,12 @@ vi.mock("../../components/ui/toast", () => ({
   toast: { success: mocks.toastSuccess, error: mocks.toastError },
 }));
 
-const organizerPermissions = ["workspace.view", "item.view", "category.view", "item.upload", "item.submit", "item.move_draft", "item.archive_draft", "folder.request"];
-const reviewerPermissions = ["workspace.view", "item.view", "category.view", "item.review", "item.move_review", "folder.review", "trash.view", "trash.restore"];
+const organizerPermissions = ["workspace.view", "item.view", "item.download", "category.view", "item.upload", "item.submit", "item.move_draft", "item.archive_draft", "folder.request"];
+const reviewerPermissions = ["workspace.view", "item.view", "item.download", "category.view", "item.review", "item.move_review", "folder.review", "trash.view", "trash.restore"];
 const permissionDefinitions = [
   { key: "workspace.view", domain: "access", domain_label: "入口与查看", label: "进入资料工作台", description: "进入资料管理工作台。", dependencies: [] },
-  { key: "item.view", domain: "access", domain_label: "入口与查看", label: "查看资料", description: "查看资料列表和详情。", dependencies: ["workspace.view"] },
+  { key: "item.view", domain: "access", domain_label: "入口与查看", label: "查看资料", description: "查看资料列表、详情和预览。", dependencies: ["workspace.view"] },
+  { key: "item.download", domain: "access", domain_label: "入口与查看", label: "下载资料", description: "下载单份资料或批量打包下载。", dependencies: ["workspace.view", "item.view"] },
   { key: "category.view", domain: "access", domain_label: "入口与查看", label: "查看分类", description: "查看资料分类树。", dependencies: ["workspace.view"] },
   { key: "item.upload", domain: "organize", domain_label: "资料整理", label: "上传资料", description: "上传文件并创建资料草稿。", dependencies: ["workspace.view", "item.view", "category.view"] },
   { key: "item.submit", domain: "organize", domain_label: "资料整理", label: "提交确认", description: "提交草稿。", dependencies: ["workspace.view", "item.view"] },
@@ -87,7 +88,7 @@ describe("AdminUsersPage", () => {
       { id: "bim", group_key: "bim_engineer", display_name: "BIM工程师", permissions: organizerPermissions, is_system: true, is_active: true, updated_at: 1 },
       { id: "owner", group_key: "content_owner", display_name: "资料负责人", permissions: reviewerPermissions, is_system: true, is_active: true, updated_at: 1 },
     ]);
-    mocks.catalog.mockResolvedValue({ schema_version: 2, permissions: permissionDefinitions });
+    mocks.catalog.mockResolvedValue({ schema_version: 3, permissions: permissionDefinitions });
     mocks.updatePermissions.mockResolvedValue({});
     mocks.createGroup.mockResolvedValue({});
   });

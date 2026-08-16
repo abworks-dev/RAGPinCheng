@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Iterable
 
 from .content_permission_catalog import (
+    CONTENT_PERMISSION_V2_SYSTEM_CONTENT_PERMISSION_GROUPS,
     LEGACY_SYSTEM_CONTENT_PERMISSION_GROUPS,
     SYSTEM_CONTENT_PERMISSION_GROUPS,
 )
@@ -592,6 +593,58 @@ UPLOAD_TASK_STATEMENTS = (
     "CREATE INDEX idx_upload_batch_entries_batch_sequence ON upload_batch_entries(batch_id, sequence)",
 )
 
+TRANSCRIPT_MANUAL_REVISION_STATEMENTS = (
+    "ALTER TABLE transcript_versions ADD COLUMN derived_from_version_id TEXT REFERENCES transcript_versions(id) ON DELETE RESTRICT",
+    "ALTER TABLE transcript_versions ADD COLUMN edited_by INTEGER REFERENCES users(id) ON DELETE SET NULL",
+    "ALTER TABLE transcript_versions ADD COLUMN edit_idempotency_key TEXT",
+    """CREATE UNIQUE INDEX IF NOT EXISTS uq_transcript_versions_edit_idempotency
+       ON transcript_versions(edit_idempotency_key)
+       WHERE edit_idempotency_key IS NOT NULL""",
+)
+
+CONTENT_PERMISSION_DOWNLOAD_STATEMENTS = (
+    "ALTER TABLE content_permissions RENAME TO content_permissions_v11",
+    """CREATE TABLE content_permissions (
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        permission TEXT NOT NULL CHECK (permission IN (
+            'workspace.view','item.view','item.download','category.view','item.upload','item.submit',
+            'item.move_draft','item.archive_draft','item.review','item.move_review',
+            'item.publish','item.archive_published','trash.view','trash.restore',
+            'category.manage','folder.request','folder.review','import.server','index.view'
+        )),
+        granted_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at INTEGER NOT NULL,
+        PRIMARY KEY(user_id, permission)
+    )""",
+    """INSERT INTO content_permissions(user_id,permission,granted_by,created_at)
+       SELECT user_id,permission,granted_by,created_at FROM content_permissions_v11""",
+    """INSERT INTO content_permissions(user_id,permission,granted_by,created_at)
+       SELECT user_id,'item.download',MIN(granted_by),MIN(created_at)
+       FROM content_permissions_v11
+       WHERE permission='item.view'
+       GROUP BY user_id""",
+    "DROP TABLE content_permissions_v11",
+    "ALTER TABLE content_permission_group_items RENAME TO content_permission_group_items_v11",
+    """CREATE TABLE content_permission_group_items (
+        group_id TEXT NOT NULL REFERENCES content_permission_groups(id) ON DELETE CASCADE,
+        permission TEXT NOT NULL CHECK (permission IN (
+            'workspace.view','item.view','item.download','category.view','item.upload','item.submit',
+            'item.move_draft','item.archive_draft','item.review','item.move_review',
+            'item.publish','item.archive_published','trash.view','trash.restore',
+            'category.manage','folder.request','folder.review','import.server','index.view'
+        )),
+        PRIMARY KEY(group_id, permission)
+    )""",
+    """INSERT INTO content_permission_group_items(group_id,permission)
+       SELECT group_id,permission FROM content_permission_group_items_v11""",
+    """INSERT INTO content_permission_group_items(group_id,permission)
+       SELECT group_id,'item.download'
+       FROM content_permission_group_items_v11
+       WHERE permission='item.view'
+       GROUP BY group_id""",
+    "DROP TABLE content_permission_group_items_v11",
+)
+
 MIGRATIONS = (
     Migration(1, "multi_engine_transcription_phase2", PHASE2_STATEMENTS),
     Migration(2, "answer_regeneration_versions", ANSWER_VERSION_STATEMENTS),
@@ -604,7 +657,9 @@ MIGRATIONS = (
     Migration(9, "system_maintenance_permanent_retention", SYSTEM_MAINTENANCE_RETENTION_STATEMENTS),
     Migration(10, "managed_content_version_metadata", CONTENT_VERSION_METADATA_STATEMENTS),
     Migration(11, "granular_content_permissions", CONTENT_PERMISSION_V2_STATEMENTS),
-    Migration(12, "managed_upload_tasks", UPLOAD_TASK_STATEMENTS),
+    Migration(12, "transcript_manual_revisions", TRANSCRIPT_MANUAL_REVISION_STATEMENTS),
+    Migration(13, "content_download_permission", CONTENT_PERMISSION_DOWNLOAD_STATEMENTS),
+    Migration(14, "managed_upload_tasks", UPLOAD_TASK_STATEMENTS),
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 PHASE2_TABLES = frozenset(
@@ -669,6 +724,17 @@ def validate_system_content_permission_groups(
     }
     if actual != expected:
         raise RuntimeError("system_permission_group_mismatch")
+
+
+def validate_transcript_manual_revision_schema(conn: sqlite3.Connection) -> None:
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(transcript_versions)")}
+    if not {"derived_from_version_id", "edited_by", "edit_idempotency_key"}.issubset(columns):
+        raise RuntimeError("transcript_manual_revision_schema_mismatch")
+    index = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='index' AND name='uq_transcript_versions_edit_idempotency'"
+    ).fetchone()
+    if index is None or "WHERE edit_idempotency_key IS NOT NULL" not in str(index[0]):
+        raise RuntimeError("transcript_manual_revision_schema_mismatch")
 
 
 def validate_content_version_metadata(conn: sqlite3.Connection) -> None:
@@ -769,6 +835,8 @@ def has_pending_ddl(path: Path, *, base_tables: frozenset[str]) -> bool:
         try:
             expected_groups = (
                 SYSTEM_CONTENT_PERMISSION_GROUPS
+                if any(version == 13 for version, _name in applied)
+                else CONTENT_PERMISSION_V2_SYSTEM_CONTENT_PERMISSION_GROUPS
                 if any(version == 11 for version, _name in applied)
                 else LEGACY_SYSTEM_CONTENT_PERMISSION_GROUPS
             )
@@ -785,8 +853,14 @@ def has_pending_ddl(path: Path, *, base_tables: frozenset[str]) -> bool:
             validate_content_version_metadata(conn)
         finally:
             conn.close()
-    if any(version == 12 for version, _name in applied) and not UPLOAD_TASK_TABLES.issubset(tables):
+    if any(version == 14 for version, _name in applied) and not UPLOAD_TASK_TABLES.issubset(tables):
         raise RuntimeError("migration_schema_mismatch")
+    if any(version == 12 for version, _name in applied):
+        conn = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
+        try:
+            validate_transcript_manual_revision_schema(conn)
+        finally:
+            conn.close()
     if not base_tables.issubset(tables):
         return True
     if "index_jobs" in tables and "media_id" not in index_columns:
@@ -845,15 +919,22 @@ def apply_all(conn: sqlite3.Connection, *, base_schema: str, applied_at: int) ->
             raise RuntimeError("migration_schema_mismatch")
         if not SYSTEM_MAINTENANCE_TABLES.issubset(tables):
             raise RuntimeError("migration_schema_mismatch")
-        if 12 in applied_versions and not UPLOAD_TASK_TABLES.issubset(tables):
+        if 14 in applied_versions and not UPLOAD_TASK_TABLES.issubset(tables):
             raise RuntimeError("migration_schema_mismatch")
         validate_system_content_permission_groups(
             conn,
             SYSTEM_CONTENT_PERMISSION_GROUPS
+            if 13 in applied_versions
+            else CONTENT_PERMISSION_V2_SYSTEM_CONTENT_PERMISSION_GROUPS
             if 11 in applied_versions
             else LEGACY_SYSTEM_CONTENT_PERMISSION_GROUPS,
         )
         validate_content_version_metadata(conn)
+        applied_after = {
+            row[0] for row in conn.execute("SELECT version FROM app_schema_migrations")
+        }
+        if 12 in applied_after:
+            validate_transcript_manual_revision_schema(conn)
         if conn.execute("PRAGMA foreign_key_check").fetchone() is not None:
             raise RuntimeError("migration_foreign_key_check_failed")
         result = conn.execute("PRAGMA integrity_check").fetchone()

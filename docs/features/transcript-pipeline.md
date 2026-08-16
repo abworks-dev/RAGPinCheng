@@ -7,7 +7,7 @@
 
 教学视频转录稿可以被索引和检索，回答能够显示带时间戳的视频引用，点击引用定位到来源卡片并打开视频播放器。管理员可通过三步向导批量暂存 MP4，再逐视频绑定、查看和编辑人工 Markdown，或批量应用并逐项覆盖服务端白名单 Profile 启动自动转录任务。
 
-Phase 5A/5B 已接通版本列表、只读 Markdown 预览、人工审核、显式发布、候选索引与正式 head 检索过滤。转录成功、审核通过、发布中和正式检索可见仍是独立状态；真实 ASR/GPU/Qdrant 端到端尚未运行。
+Phase 5A/5B 已接通版本列表、Markdown 校对与渲染预览、人工审核、显式发布、候选索引与正式 head 检索过滤。校对保存始终创建新的受管人工修订稿，不覆盖 ASR 或历史版本；新稿必须重新审核并在候选索引成功后才能替换正式 head。转录成功、审核通过、发布中和正式检索可见仍是独立状态；真实 ASR/GPU/Qdrant 端到端尚未运行。
 
 受管资料库已增加统一分类和内容关联所需的表字段，但不替代本链路。视频原件、转录版本、审核发布和正式 head 仍以 `media_assets`、`transcript_versions` 与 `media_transcript_heads` 为权威；普通资料的 `content_item_heads` 是另一条独立可见性边界。
 
@@ -34,6 +34,10 @@ Phase 5A/5B 已接通版本列表、只读 Markdown 预览、人工审核、显�
 - 管理端“视频媒体”标签页提供批量拖放/选择、转写方式分流和逐项配置向导；批量提交最多并发两个单视频请求，单项失败可保留重试；
 - 人工模式仍走原 MP4+Markdown 路径；自动模式只提交服务端白名单 `profile_id`，experimental Profile 强制审核策略不由前端放宽；
 - 媒体列表分别展示媒体、转录、审核、发布和索引状态，并保留快捷筛选与转写版本工作台。
+- 转写工作台支持桌面双栏 Markdown 编辑/渲染预览，移动端使用“编辑/预览”切换；关闭、收起或切换版本前会保护未保存内容；不启用 raw HTML、自动保存或 WYSIWYG。
+- 管理员在转写工作台展开“校对内容”后可同时查看视频和指定转录版本的同步时间轴；点击时间戳跳转视频，播放时自动高亮当前段落，时间轴支持自动跟随和手动暂停跟随。
+- 管理员显式“保存为新草稿”时，服务端统一 LF、校验 UTF-8 编码后的 2 MiB 上限、说话人时间戳和非空正文，并以基础版本 SHA-256 与请求幂等键防止并发误写。
+- 修订稿登记为 `source=manual`、`markdown_storage_kind=managed_artifact`，记录基础版本、编辑人和保存幂等键，审核状态重置为 `awaiting_review`；legacy 人工上传稿仍保持独立且不能通过受管发布流程发布。
 
 ### 未实现（第二阶段）
 
@@ -44,7 +48,7 @@ Phase 5A/5B 已接通版本列表、只读 Markdown 预览、人工审核、显�
 - Phase 2 的 `transcription_jobs`、`transcript_versions`、artifact refs、publication-only index jobs 和正式版本 head 已由应用层 Store/服务使用；
 - Phase 3 remote Provider 仍只返回严格 `ProviderCandidate | ProviderFailure`，由 `pipeline.py` 独占 normalizer/Canonical 结果流；
 - 管理端单 MP4 + `profile_id` 上传、任务状态/取消/恢复已接入应用 API 和后台 worker；人工 MP4+Markdown 路径保持独立；
-- 管理端按媒体 lazy 加载版本历史，可预览不可变 Markdown、提交审核备注、批准/拒绝并显式发布；人工版本不提供可用的自动发布动作；
+- 管理端按媒体 lazy 加载版本历史，可校对并渲染预览不可变版本的 Markdown、将修改保存为新的受管人工修订、提交审核备注、批准/拒绝并显式发布；legacy 人工版本不提供可用的受管发布动作；
 - 管理端媒体列表使用真实审核枚举计算唯一当前阶段，独立展示索引状态，并提供处理中、待审核、发布处理中和失败快捷筛选；筛选暂时只作用于最近加载的 100 条；
 - Remote Provider 的服务请求身份绑定应用任务、媒体与执行指纹；同一应用任务网络重试保持稳定，同一媒体新建应用重试任务生成新身份；
 - 转录任务 API 返回安全的结构化失败 `code/message/retryable`；服务请求身份冲突与契约不匹配分别处理，前端不再直接展示 Provider 技术摘要；
@@ -281,11 +285,13 @@ Ubuntu 跨节点验证失败都会使用受保护的 activation state 恢复旧 
 - 旧会话缺少 `media_id` 时正常降级（无播放按钮，不报错）；
 - 新媒体和版本字段是向前兼容的 nullable 列，不需要索引 Reset；legacy stable ID 保持。
 - Phase 2 新表为添加式迁移；不删除旧表、不回填人工稿、不触发索引 Reset。
+- Markdown 修订字段通过 schema 11 添加式迁移加入 `transcript_versions`；自动版本和 legacy 人工版本的已有字段与制品保持不可变，不需要索引 Reset。
 - `app.sqlite` transcript head 是版本化转录唯一正式可见性事实；versioned transcript 在 head DB 损坏/缺失时 fail closed。`strict` 下版本化转录独立于普通资料 head 放行，双重无版本身份的 legacy 转录不可见；生产尚未切换到 `strict`。
 - `DOCS_DIR`、`MEDIA_DIR` 和 `TRANSCRIPTION_ARTIFACT_DIR` 均可显式配置；旧式人工 Markdown 上传在 `strict` 下拒绝，避免创建无法进入正式版本可见性的源目录稿，自动转录继续使用 managed artifact。
 - T12-B 仅删除既有 `media_transcript_heads` 正式指针和其精确旧索引，不删除 `transcript_versions`、`transcription_jobs` 或 `transcript_publication_index_jobs`；后续视频需在新媒体目录重新上传、转录和发布后才产生新的正式 head。
 - experimental Profile 不能自动发布或自动索引；人工 Markdown 路径不经过 Provider。
 - `published` 只在候选索引成功并完成正式 head 原子切换后成立；不存在“已发布、稍后再手动索引”的稳定状态。
+- 受管人工修订必须审核通过并由管理员显式发布；创建修订、审核通过或候选索引处理中均不改变既有正式 head，发布失败时旧 head 继续可见。
 
 ## 验证
 
@@ -295,6 +301,7 @@ Ubuntu 跨节点验证失败都会使用受保护的 activation state 恢复旧 
 - Phase 2：临时 SQLite migration/backup、Store 事务、artifact hash、publication head、recovery、人工稿不回填和静态依赖边界；
 - Phase 3/4：纯 Python service/remote、应用任务/worker、mock engine、存储恢复、取消/恢复和静态依赖边界；
 - Phase 5：Store/事务/manual/visibility/index metadata/static 本地 29 项通过；版本管理定向前端 31 项通过；API、worker、candidate index、Qdrant Filter 与完整前端 build 由独立 CI job 验证；
+- Markdown 校对：schema 10→11、修订幂等/冲突、格式验证、审核发布、旧 head 保留和公开读取后端定向通过；前端完整 259 项通过，production build 通过；媒体页 Playwright 12 项在 `1440x900`、`1280x720`、`768x1024` 和 `390x844` 全部通过，并完成校对抽屉截图复核。
 - Phase 5C 真实 ffmpeg/ASR/GPU/Qdrant E2E 未运行。
 - 管理流程加固：Provider/应用/API 定向 40 项通过；变基到最新 master 后 Provider/应用身份定向 31 项与前端定向 34 项通过，前端 production build 通过；远端 CI、真实服务和生产回归未执行。
 - faster-whisper R2：无 FastAPI、无真实引擎的 ASR/Provider/应用回归
@@ -335,7 +342,7 @@ Ubuntu 跨节点验证失败都会使用受保护的 activation state 恢复旧 
   Qwen3-ASR experimental Profile 可见但 admission 为 disabled；尚无
   `qualification_approved` Profile；
 - 支持范围播放但无 HLS 自适应码率。
-- 媒体快捷筛选是最近 100 条的客户端筛选，不是服务端全库查询；独立转写工作台基础版仍待后续 PR。
+- 媒体快捷筛选是最近 100 条的客户端筛选，不是服务端全库查询；转写工作台的视频校对区域目前只支持已登记媒体的受控视频播放，不生成独立字幕轨道。
 
 ## 相关决策
 

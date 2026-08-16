@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import io
 import sqlite3
 import time
+import zipfile
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -145,6 +147,111 @@ def test_content_endpoints_enforce_auth_permissions_csrf_and_role_separation(con
     )
     assert published.status_code == 200
     assert queued == [published.json()["index_job_id"]]
+
+
+def test_download_permission_separates_preview_attachment_and_batch_download(content_api, monkeypatch):
+    client, sessions, _queued, db_path = content_api
+    uploaded = client.post(
+        "/api/admin/content/uploads",
+        data={"category_id": "cat-03"},
+        files=[("files", ("shared.pdf", b"pdf-one", "application/pdf"))],
+        **_auth(sessions, "organizer", csrf=True),
+    ).json()["entries"][0]
+
+    conn = connect(db_path)
+    organizer_id = conn.execute("SELECT id FROM users WHERE employee_id='organizer'").fetchone()[0]
+    conn.execute(
+        "DELETE FROM content_permissions WHERE user_id=? AND permission='item.download'",
+        (organizer_id,),
+    )
+    conn.commit()
+    conn.close()
+
+    inline = client.get(
+        f"/api/admin/content/versions/{uploaded['version_id']}/file",
+        **_auth(sessions, "organizer"),
+    )
+    assert inline.status_code == 200
+    assert inline.headers["content-disposition"].startswith("inline;")
+    assert client.get(
+        f"/api/admin/content/versions/{uploaded['version_id']}/file?download=true",
+        **_auth(sessions, "organizer"),
+    ).status_code == 403
+
+    markdown = client.post(
+        "/api/admin/content/uploads",
+        data={"category_id": "cat-03"},
+        files=[("files", ("notes.md", b"# notes", "text/markdown"))],
+        **_auth(sessions, "organizer", csrf=True),
+    ).json()["entries"][0]
+    assert client.get(
+        f"/api/admin/content/versions/{markdown['version_id']}/file",
+        **_auth(sessions, "organizer"),
+    ).status_code == 403
+    assert client.post(
+        "/api/admin/content/bulk-download",
+        json={"version_ids": [uploaded["version_id"]]},
+        **_auth(sessions, "organizer", csrf=True),
+    ).status_code == 403
+
+    conn = connect(db_path)
+    conn.execute(
+        "INSERT INTO content_permissions(user_id,permission,created_at) VALUES (?, 'item.download', 1)",
+        (organizer_id,),
+    )
+    conn.commit()
+    conn.close()
+    second = client.post(
+        "/api/admin/content/uploads",
+        data={"category_id": "cat-04"},
+        files=[("files", ("shared.pdf", b"pdf-two", "application/pdf"))],
+        **_auth(sessions, "organizer", csrf=True),
+    ).json()["entries"][0]
+
+    captured: list[Path] = []
+    real_create_archive = routes_content._create_bulk_download_archive
+
+    def capture_archive(entries):
+        path = real_create_archive(entries)
+        captured.append(path)
+        return path
+
+    monkeypatch.setattr(routes_content, "_create_bulk_download_archive", capture_archive)
+    batch = client.post(
+        "/api/admin/content/bulk-download",
+        json={"version_ids": [uploaded["version_id"], second["version_id"]]},
+        **_auth(sessions, "organizer", csrf=True),
+    )
+    assert batch.status_code == 200
+    assert batch.headers["content-type"].startswith("application/zip")
+    with zipfile.ZipFile(io.BytesIO(batch.content)) as archive:
+        assert archive.namelist() == ["shared.pdf", "shared (2).pdf"]
+        assert archive.read("shared.pdf") == b"pdf-one"
+        assert archive.read("shared (2).pdf") == b"pdf-two"
+    assert captured and all(not path.exists() for path in captured)
+
+    assert client.post(
+        "/api/admin/content/bulk-download",
+        json={"version_ids": [uploaded["version_id"], uploaded["version_id"]]},
+        **_auth(sessions, "organizer", csrf=True),
+    ).status_code == 400
+    assert client.post(
+        "/api/admin/content/bulk-download",
+        json={"version_ids": [uploaded["version_id"], "missing-version"]},
+        **_auth(sessions, "organizer", csrf=True),
+    ).status_code == 404
+    assert client.post(
+        "/api/admin/content/bulk-download",
+        json={"version_ids": [f"version-{index}" for index in range(21)]},
+        **_auth(sessions, "organizer", csrf=True),
+    ).status_code == 422
+
+    monkeypatch.setattr(routes_content, "_MAX_BULK_DOWNLOAD_BYTES", 1)
+    assert client.post(
+        "/api/admin/content/bulk-download",
+        json={"version_ids": [uploaded["version_id"]]},
+        **_auth(sessions, "organizer", csrf=True),
+    ).status_code == 413
 
 
 def test_delete_draft_requires_organize_csrf_and_preserves_object(content_api):
@@ -684,14 +791,17 @@ def test_permission_catalog_and_dependency_validation(content_api):
     admin_write = _auth(sessions, "admin", csrf=True)
     catalog = client.get("/api/admin/content/permission-catalog", **admin_read)
     assert catalog.status_code == 200
-    assert catalog.json()["schema_version"] == 2
+    assert catalog.json()["schema_version"] == 3
     assert [item["key"] for item in catalog.json()["permissions"]] == [
-        "workspace.view", "item.view", "category.view", "item.upload", "item.submit",
+        "workspace.view", "item.view", "item.download", "category.view", "item.upload", "item.submit",
         "item.move_draft", "item.archive_draft", "item.review", "item.move_review",
         "item.publish", "item.archive_published", "trash.view", "trash.restore",
         "category.manage", "folder.request", "folder.review", "import.server", "index.view",
     ]
     definitions = {item["key"]: item for item in catalog.json()["permissions"]}
+    assert definitions["item.download"]["dependencies"] == [
+        "workspace.view", "item.view"
+    ]
     assert definitions["folder.request"]["dependencies"] == [
         "workspace.view", "item.view", "category.view"
     ]

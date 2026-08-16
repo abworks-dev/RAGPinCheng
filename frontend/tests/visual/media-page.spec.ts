@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { installAdminRoutes } from "./fixtures/admin-fixtures";
-import { expectNoBodyOverflow } from "./helpers/layout";
+import { expectInViewport, expectNoBodyOverflow } from "./helpers/layout";
 
 test.describe("视频媒体", () => {
   test("媒体列表和转录任务状态可见", async ({ page }) => {
@@ -22,5 +22,34 @@ test.describe("视频媒体", () => {
     await installAdminRoutes(page, "error");
     await page.goto("/admin/media");
     await expect(page.getByText("合成加载失败").first()).toBeVisible();
+  });
+
+  test("转写工作台 Markdown 校对布局", async ({ page }, testInfo) => {
+    await installAdminRoutes(page);
+    await page.goto("/admin/media");
+    const row = page.getByText("项目交付培训", { exact: true }).locator("xpath=ancestor::li");
+    await row.getByRole("button", { name: "进入转写工作台" }).click();
+    const workbench = page.getByRole("dialog", { name: "项目交付培训" });
+    await expect(workbench).toBeVisible();
+    await workbench.getByRole("button", { name: "校对内容" }).click();
+    await expect(workbench.getByRole("textbox", { name: "转录 Markdown 编辑器" })).toBeVisible();
+    await expect(workbench.getByText("视频校对", { exact: true })).toBeVisible();
+    await expect(workbench.getByRole("button", { name: "跳转到 00:00" })).toBeVisible();
+
+    if (page.viewportSize()!.width < 768) {
+      await workbench.getByRole("button", { name: "预览" }).click();
+      await expect(workbench.getByRole("region", { name: "Markdown 预览" }).getByText("培训开始", { exact: true })).toBeVisible();
+      await workbench.getByRole("button", { name: "编辑" }).click();
+    } else {
+      await expect(workbench.getByRole("region", { name: "Markdown 预览" }).getByText("培训开始", { exact: true })).toBeVisible();
+    }
+
+    await expect.poll(() => workbench.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+    await expectInViewport(workbench);
+    await expectNoBodyOverflow(page);
+    const viewport = page.viewportSize()!;
+    await page.screenshot({
+      path: testInfo.outputPath(`transcription-markdown-editor-normal-${viewport.width}x${viewport.height}.png`),
+    });
   });
 });

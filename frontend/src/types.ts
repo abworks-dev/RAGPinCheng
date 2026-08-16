@@ -95,6 +95,7 @@ export type AuthUser = {
 export type ContentPermission =
   | "workspace.view"
   | "item.view"
+  | "item.download"
   | "category.view"
   | "item.upload"
   | "item.submit"
@@ -598,6 +599,7 @@ export type TranscriptVersion = {
   provider_key: string | null;
   model_id: string | null;
   model_revision: string | null;
+  markdown_storage_kind: "managed_artifact" | "legacy_manual" | string;
   review_status: TranscriptReviewStatus;
   reviewed_by: number | null;
   reviewed_at: number | null;
@@ -605,6 +607,8 @@ export type TranscriptVersion = {
   publication_status: TranscriptPublicationStatus;
   published_at: number | null;
   supersedes_version_id: string | null;
+  derived_from_version_id: string | null;
+  edited_by: number | null;
   markdown_sha256: string;
   created_at: number;
   updated_at: number;

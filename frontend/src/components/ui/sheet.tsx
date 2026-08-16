@@ -9,10 +9,13 @@ export const SheetClose = DialogPrimitive.Close;
 
 export const SheetContent = forwardRef<
   ElementRef<typeof DialogPrimitive.Content>,
-  ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & { closeLabel?: string }
->(({ className, children, closeLabel = "关闭", ...props }, ref) => (
+  ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & { closeLabel?: string; overlayClassName?: string }
+>(({ className, children, closeLabel = "关闭", overlayClassName, ...props }, ref) => (
   <DialogPrimitive.Portal>
-    <DialogPrimitive.Overlay className="fixed inset-0 z-overlay bg-slate-950/50 transition-opacity data-[state=closed]:opacity-0 data-[state=open]:opacity-100" />
+    <DialogPrimitive.Overlay className={cn(
+      "fixed inset-0 z-overlay bg-slate-950/50 transition-opacity data-[state=closed]:opacity-0 data-[state=open]:opacity-100",
+      overlayClassName,
+    )} />
     <DialogPrimitive.Content
       ref={ref}
       className={cn(
