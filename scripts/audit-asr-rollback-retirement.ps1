@@ -24,6 +24,8 @@ foreach ($candidate in @($refs.Keys | Sort-Object)) {
     $reasons = @(); $status = 'eligible'
     if ($candidate -eq [string]$active.candidate_id) { $status='protected'; $reasons += 'active-candidate' }
     if (@($refs[$candidate]).Count -gt 1) { $status='protected'; $reasons += 'multiple-activation-references' }
+    $candidateStates = @($states | Where-Object { $candidate -in @($_.candidate_ids) } | ForEach-Object { $_.state_status })
+    if (@($candidateStates | Where-Object { $_ -notin @('rolled-back', 'failed', 'cancelled') }).Count -gt 0) { $status='protected'; $reasons += 'non-terminal-activation-state' }
     $release = Join-Path $program "releases\$candidate"; $config = Join-Path $data "config\releases\$candidate"
     if (-not (Test-Path $release -PathType Container) -or -not (Test-Path $config -PathType Container)) { $status='protected'; $reasons += 'release-closure-incomplete' }
     try { if (Test-Path $release) { Read-AsrReleaseManifest -ProgramRoot $program -DataRoot $data -CandidateId $candidate | Out-Null } } catch { $status='protected'; $reasons += 'release-contract-invalid' }
