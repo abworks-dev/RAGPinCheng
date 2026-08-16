@@ -87,9 +87,6 @@ function Assert-WhisperXRealFile {
     if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
         throw "$Label cannot be a reparse point"
     }
-    if ([int64]$item.Length -le 0) {
-        throw "$Label is empty"
-    }
 }
 
 function Get-QualifiedWhisperXNltkRoot {
@@ -105,6 +102,7 @@ function Get-QualifiedWhisperXNltkRoot {
         -Root $nltkRoot `
         -Label "Qualified WhisperX punkt_tab resource"
     Assert-WhisperXRealDirectory -Path $punktRoot -Label "Qualified WhisperX punkt_tab resource"
+    # save_punkt_params(PunktParameters()) intentionally emits empty default tables.
     foreach ($name in @("abbrev_types.txt", "collocations.tab", "ortho_context.tab", "sent_starters.txt")) {
         Assert-WhisperXRealFile `
             -Path (Join-Path $punktRoot $name) `
