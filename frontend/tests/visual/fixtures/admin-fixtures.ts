@@ -386,6 +386,21 @@ export async function installAdminRoutes(
     if (request.method() === "GET" && path === "/api/admin/transcription/versions/11111111-1111-4111-8111-111111111111/markdown") {
       return json(route, { version_id: transcriptVersions[0].version_id, markdown: "# 项目交付培训\n\n说话人 1 00:00:00\n**培训开始**\n\n说话人 2 00:00:12\n- 核对模型命名\n- 核对交付目录\n", markdown_sha256: transcriptVersions[0].markdown_sha256 });
     }
+    if (request.method() === "GET" && path === "/api/admin/transcription/versions/11111111-1111-4111-8111-111111111111/timeline") {
+      return json(route, {
+        media_id: "media-ready",
+        version_id: transcriptVersions[0].version_id,
+        language: "zh-CN",
+        duration_ms: 30_000,
+        segments: [
+          { id: 0, start_ms: 0, end_ms: 12_000, text: "培训开始" },
+          { id: 1, start_ms: 12_000, end_ms: null, text: "核对模型命名\n核对交付目录" },
+        ],
+      });
+    }
+    if (request.method() === "GET" && path === "/api/media/media-ready") {
+      return route.fulfill({ status: 200, contentType: "video/mp4", body: "" });
+    }
     if (path === "/api/categories") return json(route, { categories: [], second_level_categories: [] });
     if (path === "/api/conversations" && request.method() === "GET") return json(route, { conversations: adminConversations.slice(0, 1) });
     if (path === "/api/conversations" && request.method() === "POST") return json(route, { ...adminConversations[0] });
@@ -396,6 +411,7 @@ export async function installAdminRoutes(
       return route.fulfill({ status: 200, contentType: "application/pdf", body: "%PDF synthetic fixture" });
     }
     if (request.method() === "POST" && path === "/api/admin/content/bulk-download") {
+      await new Promise((resolve) => setTimeout(resolve, 300));
       return route.fulfill({
         status: 200,
         contentType: "application/zip",

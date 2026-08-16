@@ -138,7 +138,10 @@ test.describe("资料管理", () => {
     await page.getByRole("button", { name: "批量操作" }).click();
     const downloadPromise = page.waitForEvent("download");
     await page.getByRole("menuitem", { name: "批量下载" }).click();
+    await expect(page.getByText(/正在打包 2 份资料，请稍候/)).toBeVisible();
+    await expect(page.getByRole("button", { name: "批量操作" })).toBeDisabled();
     expect((await downloadPromise).suggestedFilename()).toBe("managed-content.zip");
+    await expect(page.getByText(/正在打包 2 份资料，请稍候/)).toHaveCount(0);
     await expectNoBodyOverflow(page);
   });
 

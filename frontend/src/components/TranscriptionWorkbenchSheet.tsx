@@ -28,7 +28,7 @@ export function TranscriptionWorkbenchSheet({
     <Sheet open={open} onOpenChange={(nextOpen) => { if (!nextOpen) requestClose(); }}>
       <SheetContent
         closeLabel="关闭转写工作台"
-        className="gap-0 p-0 md:w-[min(52rem,76vw)] md:max-w-none"
+        className="gap-0 p-0 md:w-[min(75rem,90vw)] md:max-w-none"
       >
         <SheetHeader className="space-y-1 border-b border-border px-4 py-4 pr-16 sm:px-6 sm:py-5">
           <SheetTitle className="truncate text-ui-lg">{title || "转写工作台"}</SheetTitle>

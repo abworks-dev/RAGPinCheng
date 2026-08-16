@@ -359,16 +359,19 @@ describe("Phase 5 transcript publication API contracts", () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse([]))
       .mockResolvedValueOnce(jsonResponse({ version_id: "version-1", markdown: "正文", markdown_sha256: "a".repeat(64) }))
+      .mockResolvedValueOnce(jsonResponse({ media_id: "media-1", version_id: "version-1", language: "zh-CN", duration_ms: 1000, segments: [] }))
       .mockResolvedValueOnce(jsonResponse({ version: {}, job: null, reused: false }, 202));
     vi.stubGlobal("fetch", fetchMock);
 
     await api.listTranscriptVersions("media-1");
     await api.previewTranscriptVersion("version-1");
+    await api.previewTranscriptVersionTimeline("version-1");
     await api.publishTranscriptVersion("version-1");
 
     expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/admin/transcription/media/media-1/versions", expect.objectContaining({ credentials: "include", headers: {} }));
     expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/admin/transcription/versions/version-1/markdown", expect.objectContaining({ credentials: "include", headers: {} }));
-    expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/admin/transcription/versions/version-1/publish", expect.objectContaining({
+    expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/admin/transcription/versions/version-1/timeline", expect.objectContaining({ credentials: "include", headers: {} }));
+    expect(fetchMock).toHaveBeenNthCalledWith(4, "/api/admin/transcription/versions/version-1/publish", expect.objectContaining({
       method: "POST",
       credentials: "include",
       body: JSON.stringify({}),
