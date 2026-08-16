@@ -20,6 +20,17 @@ const PRESETS = [30, 90, 180, 365];
 const NEVER = "never";
 const retentionLabel = (days: number | null) => days === null ? "永久保留" : `保留 ${days} 天`;
 
+function runDuration(startedAt: number, finishedAt: number) {
+  const milliseconds = (finishedAt - startedAt) * 1000;
+  if (!Number.isFinite(milliseconds) || milliseconds < 0) return "耗时未知";
+  return milliseconds < 1000 ? `耗时 ${milliseconds} 毫秒` : `耗时 ${(milliseconds / 1000).toFixed(1)} 秒`;
+}
+
+function runError(run: MaintenanceRun) {
+  if (run.status !== "failed") return null;
+  return run.error_summary || "执行失败，未记录具体原因";
+}
+
 function countSummary(preview: CleanupPreview) {
   return `${preview.conversations} 条对话、${preview.messages} 条消息、${preview.auth_sessions} 个失效登录会话`;
 }
@@ -184,8 +195,8 @@ export function AdminMaintenancePage() {
       <section aria-labelledby="maintenance-runs" className="space-y-3">
         <h2 id="maintenance-runs" className="text-ui-base font-semibold">最近运行记录</h2>
         {runs.length === 0 ? <p className="rounded-ui-xl border border-border px-4 py-8 text-center text-ui-sm text-muted-foreground">尚无清理记录</p> : <>
-          <div className="hidden overflow-hidden rounded-ui-xl border border-border md:block"><table className="w-full text-ui-sm"><thead className="bg-surface-muted text-left text-muted-foreground"><tr><th className="px-4 py-3 font-medium">运行时间</th><th className="px-4 py-3 font-medium">方式</th><th className="px-4 py-3 font-medium">策略</th><th className="px-4 py-3 font-medium">清理结果</th><th className="px-4 py-3 font-medium">状态</th></tr></thead><tbody className="divide-y divide-border">{runs.map((run) => <tr key={run.id}><td className="px-4 py-3">{formatAdminDate(run.finished_at)}</td><td className="px-4 py-3">{run.trigger_source === "automatic" ? "自动" : "手动"}</td><td className="px-4 py-3">{retentionLabel(run.retention_days)}</td><td className="px-4 py-3">{run.deleted_conversations} 条对话 · {run.deleted_messages} 条消息 · {run.deleted_auth_sessions} 个登录会话</td><td className="px-4 py-3"><Badge variant={run.status === "succeeded" ? "success" : "destructive"}>{run.status === "succeeded" ? "成功" : "失败"}</Badge></td></tr>)}</tbody></table></div>
-          <ul className="divide-y divide-border rounded-ui-xl border border-border md:hidden">{runs.map((run) => <li key={run.id} className="space-y-2 p-4"><div className="flex items-center justify-between gap-3"><span className="text-ui-sm font-medium">{run.trigger_source === "automatic" ? "自动清理" : "手动清理"}</span><Badge variant={run.status === "succeeded" ? "success" : "destructive"}>{run.status === "succeeded" ? "成功" : "失败"}</Badge></div><p className="text-ui-xs text-muted-foreground">{formatAdminDate(run.finished_at)} · {retentionLabel(run.retention_days)}</p><p className="text-ui-sm">{run.deleted_conversations} 条对话 · {run.deleted_messages} 条消息 · {run.deleted_auth_sessions} 个登录会话</p></li>)}</ul>
+          <div className="hidden overflow-hidden rounded-ui-xl border border-border md:block"><table className="w-full text-ui-sm"><thead className="bg-surface-muted text-left text-muted-foreground"><tr><th className="px-4 py-3 font-medium">运行时间</th><th className="px-4 py-3 font-medium">方式</th><th className="px-4 py-3 font-medium">策略</th><th className="px-4 py-3 font-medium">清理结果</th><th className="px-4 py-3 font-medium">状态</th></tr></thead><tbody className="divide-y divide-border">{runs.map((run) => <tr key={run.id}><td className="px-4 py-3"><span className="block">{formatAdminDate(run.finished_at)}</span><span className="mt-1 block text-ui-xs text-muted-foreground">{runDuration(run.started_at, run.finished_at)}</span></td><td className="px-4 py-3">{run.trigger_source === "automatic" ? "自动" : "手动"}</td><td className="px-4 py-3">{retentionLabel(run.retention_days)}</td><td className="px-4 py-3"><span className="block">{run.deleted_conversations} 条对话 · {run.deleted_messages} 条消息 · {run.deleted_auth_sessions} 个登录会话</span>{runError(run) && <span className="mt-1 block max-w-xl break-words text-ui-xs text-destructive">{runError(run)}</span>}</td><td className="px-4 py-3"><Badge variant={run.status === "succeeded" ? "success" : "destructive"}>{run.status === "succeeded" ? "成功" : "失败"}</Badge></td></tr>)}</tbody></table></div>
+          <ul className="divide-y divide-border rounded-ui-xl border border-border md:hidden">{runs.map((run) => <li key={run.id} className="space-y-2 p-4"><div className="flex items-center justify-between gap-3"><span className="text-ui-sm font-medium">{run.trigger_source === "automatic" ? "自动清理" : "手动清理"}</span><Badge variant={run.status === "succeeded" ? "success" : "destructive"}>{run.status === "succeeded" ? "成功" : "失败"}</Badge></div><p className="text-ui-xs text-muted-foreground">{formatAdminDate(run.finished_at)} · {runDuration(run.started_at, run.finished_at)} · {retentionLabel(run.retention_days)}</p><p className="text-ui-sm">{run.deleted_conversations} 条对话 · {run.deleted_messages} 条消息 · {run.deleted_auth_sessions} 个登录会话</p>{runError(run) && <p className="break-words text-ui-xs text-destructive">{runError(run)}</p>}</li>)}</ul>
         </>}
       </section>
 

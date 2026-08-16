@@ -192,7 +192,7 @@ export function AdminLayout() {
           {tab === "managed" && <AdminManagedContentPage />}
           {tab === "categories" && <AdminCategoriesPage />}
           {tab === "media" && <AdminMediaPage />}
-          {tab === "stats" && <AdminOverviewPage />}
+          {tab === "stats" && <AdminOverviewPage onOpenMaintenance={() => setTab("maintenance")} />}
           {tab === "feedback" && <AdminFeedbackPage />}
           {tab === "maintenance" && <AdminMaintenancePage />}
         </div>
