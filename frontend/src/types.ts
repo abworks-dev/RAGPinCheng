@@ -236,6 +236,7 @@ export type ManagedContentItem = {
   category_label: string;
   category_path: string;
   media_id: string | null;
+  preview_parent_id: string | null;
   version_id: string;
   version_number: number;
   original_filename: string;
