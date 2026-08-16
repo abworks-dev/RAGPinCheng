@@ -370,10 +370,21 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertIn("schema={CURRENT_SCHEMA_VERSION}", workflow)
         self.assertIn("content_permission_groups", workflow)
         self.assertIn("content_permission_group_items", workflow)
-        self.assertIn('("member", "普通成员"): []', workflow)
-        self.assertIn('("bim_engineer", "BIM工程师"): ["organize"]', workflow)
-        self.assertIn('("content_owner", "资料负责人"): ["review"]', workflow)
-        self.assertIn('("system_admin", "系统管理员")', workflow)
+        self.assertIn(
+            "from api.content_permission_catalog import SYSTEM_CONTENT_PERMISSION_GROUPS",
+            workflow,
+        )
+        self.assertIn("in SYSTEM_CONTENT_PERMISSION_GROUPS.items()", workflow)
+        for system_group in (
+            '"member"',
+            '"viewer"',
+            '"bim_engineer"',
+            '"content_owner"',
+            '"publisher"',
+            '"category_admin"',
+            '"system_admin"',
+        ):
+            self.assertIn(system_group, (ROOT / "api" / "content_permission_catalog.py").read_text(encoding="utf-8"))
         self.assertIn("MANAGED_CONTENT status=verified", workflow)
         self.assertIn("QDRANT_BEFORE_PATH", workflow)
         self.assertIn("points_count", workflow)

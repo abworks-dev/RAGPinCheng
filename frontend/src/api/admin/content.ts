@@ -6,6 +6,7 @@ export const adminContentApi = {
   createCategory: (...args: Parameters<typeof api.createManagedCategory>) => api.createManagedCategory(...args),
   updateCategory: (...args: Parameters<typeof api.updateManagedCategory>) => api.updateManagedCategory(...args),
   permissions: (...args: Parameters<typeof api.managedContentPermissions>) => api.managedContentPermissions(...args),
+  permissionCatalog: (...args: Parameters<typeof api.managedContentPermissionCatalog>) => api.managedContentPermissionCatalog(...args),
   updatePermissions: (...args: Parameters<typeof api.updateManagedContentPermissions>) => api.updateManagedContentPermissions(...args),
   permissionGroups: (...args: Parameters<typeof api.managedContentPermissionGroups>) => api.managedContentPermissionGroups(...args),
   createPermissionGroup: (...args: Parameters<typeof api.createManagedContentPermissionGroup>) => api.createManagedContentPermissionGroup(...args),

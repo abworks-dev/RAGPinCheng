@@ -10,7 +10,7 @@ const user: AuthUser = {
   real_name: "合成资料员",
   role: "user",
   csrf_token: "csrf",
-  content_permissions: ["organize"],
+  content_permissions: ["workspace.view", "item.upload"],
 };
 
 function Probe() {
@@ -39,12 +39,12 @@ describe("AuthProvider refreshUser", () => {
       .mockReturnValueOnce(refresh);
 
     render(<AuthProvider><Probe /></AuthProvider>);
-    await screen.findByText("organize");
+    await screen.findByText("workspace.view,item.upload");
     fireEvent.click(screen.getByRole("button", { name: "并发刷新" }));
 
     expect(me).toHaveBeenCalledTimes(2);
-    resolveRefresh({ ...user, content_permissions: ["review"] });
-    await screen.findByText("review");
+    resolveRefresh({ ...user, content_permissions: ["workspace.view", "item.review"] });
+    await screen.findByText("workspace.view,item.review");
   });
 
   it("preserves the last trusted user when refresh fails", async () => {
@@ -53,10 +53,10 @@ describe("AuthProvider refreshUser", () => {
       .mockRejectedValueOnce(new TypeError("network unavailable"));
 
     render(<AuthProvider><Probe /></AuthProvider>);
-    await screen.findByText("organize");
+    await screen.findByText("workspace.view,item.upload");
     fireEvent.click(screen.getByRole("button", { name: "失败刷新" }));
 
     await waitFor(() => expect(api.me).toHaveBeenCalledTimes(2));
-    expect(screen.getByText("organize")).toBeInTheDocument();
+    expect(screen.getByText("workspace.view,item.upload")).toBeInTheDocument();
   });
 });

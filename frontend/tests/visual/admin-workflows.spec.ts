@@ -335,7 +335,7 @@ test.describe("资料管理", () => {
     const restoreRequest = page.waitForRequest((request) => request.method() === "POST" && request.url().endsWith("/items/item-5/restore"));
     await restore.click();
     const dialog = page.getByRole("dialog", { name: "恢复资料" });
-    await expect(dialog).toContainText("需要管理员重新发布后才会进入检索");
+    await expect(dialog).toContainText("需要具备发布权限的人员重新发布后才会进入检索");
     await dialog.getByRole("button", { name: "确认恢复" }).click();
     await expect(dialog.getByRole("button", { name: "恢复中…" })).toBeDisabled();
     await restoreRequest;
@@ -500,5 +500,8 @@ test.describe("用户权限", () => {
     await expect(page.getByRole("dialog", { name: "权限组管理" })).toContainText("修改模板不会改变既有用户权限");
     await expect(page.getByRole("dialog", { name: "权限组管理" }).getByRole("button", { name: "普通成员 预设" })).toBeVisible();
     await expectNoBodyOverflow(page);
+    if (page.viewportSize()!.width === 390) {
+      await expectInViewport(page.getByRole("button", { name: "保存模板" }));
+    }
   });
 });

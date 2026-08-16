@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   adminListUserConversations: vi.fn(),
   adminGetConversation: vi.fn(),
   groups: vi.fn(),
+  catalog: vi.fn(),
   updatePermissions: vi.fn(),
   createGroup: vi.fn(),
   updateGroup: vi.fn(),
@@ -22,6 +23,7 @@ vi.mock("../../api/client", () => ({
     adminListUserConversations: mocks.adminListUserConversations,
     adminGetConversation: mocks.adminGetConversation,
     managedContentPermissionGroups: mocks.groups,
+    managedContentPermissionCatalog: mocks.catalog,
     updateManagedContentPermissions: mocks.updatePermissions,
     createManagedContentPermissionGroup: mocks.createGroup,
     updateManagedContentPermissionGroup: mocks.updateGroup,
@@ -31,6 +33,25 @@ vi.mock("../../api/client", () => ({
 vi.mock("../../components/ui/toast", () => ({
   toast: { success: mocks.toastSuccess, error: mocks.toastError },
 }));
+
+const organizerPermissions = ["workspace.view", "item.view", "category.view", "item.upload", "item.submit", "item.move_draft", "item.archive_draft", "folder.request"];
+const reviewerPermissions = ["workspace.view", "item.view", "category.view", "item.review", "item.move_review", "folder.review", "trash.view", "trash.restore"];
+const permissionDefinitions = [
+  { key: "workspace.view", domain: "access", domain_label: "入口与查看", label: "进入资料工作台", description: "进入资料管理工作台。", dependencies: [] },
+  { key: "item.view", domain: "access", domain_label: "入口与查看", label: "查看资料", description: "查看资料列表和详情。", dependencies: ["workspace.view"] },
+  { key: "category.view", domain: "access", domain_label: "入口与查看", label: "查看分类", description: "查看资料分类树。", dependencies: ["workspace.view"] },
+  { key: "item.upload", domain: "organize", domain_label: "资料整理", label: "上传资料", description: "上传文件并创建资料草稿。", dependencies: ["workspace.view", "item.view", "category.view"] },
+  { key: "item.submit", domain: "organize", domain_label: "资料整理", label: "提交确认", description: "提交草稿。", dependencies: ["workspace.view", "item.view"] },
+  { key: "item.move_draft", domain: "organize", domain_label: "资料整理", label: "移动草稿", description: "移动草稿。", dependencies: ["workspace.view", "item.view", "category.view"] },
+  { key: "item.archive_draft", domain: "organize", domain_label: "资料整理", label: "归档草稿", description: "归档草稿。", dependencies: ["workspace.view", "item.view"] },
+  { key: "item.review", domain: "review", domain_label: "确认流程", label: "确认与退回", description: "确认或退回资料。", dependencies: ["workspace.view", "item.view"] },
+  { key: "item.move_review", domain: "review", domain_label: "确认流程", label: "移动待确认资料", description: "移动待确认资料。", dependencies: ["workspace.view", "item.view", "category.view"] },
+  { key: "item.publish", domain: "publish", domain_label: "发布流程", label: "发布资料", description: "发布或重新发布资料。", dependencies: ["workspace.view", "item.view"] },
+  { key: "trash.view", domain: "trash", domain_label: "回收站", label: "查看回收站", description: "查看回收站。", dependencies: ["workspace.view", "item.view"] },
+  { key: "trash.restore", domain: "trash", domain_label: "回收站", label: "恢复资料", description: "恢复资料。", dependencies: ["workspace.view", "item.view", "trash.view"] },
+  { key: "folder.request", domain: "category", domain_label: "分类与目录", label: "申请目录", description: "申请目录。", dependencies: ["workspace.view", "item.view", "category.view"] },
+  { key: "folder.review", domain: "category", domain_label: "分类与目录", label: "审批目录", description: "审批目录。", dependencies: ["workspace.view", "item.view", "category.view"] },
+];
 
 const users = [
   {
@@ -42,7 +63,7 @@ const users = [
     created_at: 1_720_000_000,
     last_login_at: 1_721_000_000,
     conversation_count: 3,
-    content_permissions: ["organize", "review", "publish", "manage_categories", "import_server"],
+    content_permissions: permissionDefinitions.map((item) => item.key),
   },
   {
     id: 2,
@@ -53,7 +74,7 @@ const users = [
     created_at: 1_720_100_000,
     last_login_at: null,
     conversation_count: 1,
-    content_permissions: ["organize"],
+    content_permissions: organizerPermissions,
   },
 ];
 
@@ -63,9 +84,10 @@ describe("AdminUsersPage", () => {
     mocks.adminListUsers.mockResolvedValue({ users });
     mocks.groups.mockResolvedValue([
       { id: "member", group_key: "member", display_name: "普通成员", permissions: [], is_system: true, is_active: true, updated_at: 1 },
-      { id: "bim", group_key: "bim_engineer", display_name: "BIM工程师", permissions: ["organize"], is_system: true, is_active: true, updated_at: 1 },
-      { id: "owner", group_key: "content_owner", display_name: "资料负责人", permissions: ["review"], is_system: true, is_active: true, updated_at: 1 },
+      { id: "bim", group_key: "bim_engineer", display_name: "BIM工程师", permissions: organizerPermissions, is_system: true, is_active: true, updated_at: 1 },
+      { id: "owner", group_key: "content_owner", display_name: "资料负责人", permissions: reviewerPermissions, is_system: true, is_active: true, updated_at: 1 },
     ]);
+    mocks.catalog.mockResolvedValue({ schema_version: 2, permissions: permissionDefinitions });
     mocks.updatePermissions.mockResolvedValue({});
     mocks.createGroup.mockResolvedValue({});
   });
@@ -128,7 +150,7 @@ describe("AdminUsersPage", () => {
     expect(screen.getByRole("dialog", { name: "设置资料权限" })).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("选择权限组"), { target: { value: "owner" } });
     fireEvent.click(screen.getByRole("button", { name: "保存权限" }));
-    await waitFor(() => expect(mocks.updatePermissions).toHaveBeenCalledWith(2, ["review"]));
+    await waitFor(() => expect(mocks.updatePermissions).toHaveBeenCalledWith(2, reviewerPermissions));
   });
 
   it("keeps permission dialogs mutually exclusive and cancel does not save", async () => {
@@ -185,9 +207,9 @@ describe("AdminUsersPage", () => {
     fireEvent.click(await screen.findByRole("button", { name: "权限组管理" }));
     fireEvent.click(screen.getByRole("button", { name: "新建权限组" }));
     fireEvent.change(screen.getByLabelText("权限组名称"), { target: { value: "项目发布员" } });
-    fireEvent.click(screen.getByLabelText("发布"));
+    fireEvent.click(screen.getByRole("checkbox", { name: /发布资料/ }));
     fireEvent.click(screen.getByRole("button", { name: "创建模板" }));
-    await waitFor(() => expect(mocks.createGroup).toHaveBeenCalledWith({ display_name: "项目发布员", permissions: ["publish"] }));
+    await waitFor(() => expect(mocks.createGroup).toHaveBeenCalledWith({ display_name: "项目发布员", permissions: ["workspace.view", "item.view", "item.publish"] }));
   });
 
   it("copies a preset into an independent editable template and reports conflicts", async () => {

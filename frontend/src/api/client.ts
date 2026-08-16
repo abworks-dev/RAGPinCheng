@@ -15,6 +15,7 @@ import type {
   Conversation,
   ConversationState,
   ContentPermission,
+  ContentPermissionCatalog,
   ContentPermissionGroup,
   ContentPermissionUser,
   FeedbackPayload,
@@ -297,6 +298,8 @@ export const api = {
     }),
   managedContentPermissions: () =>
     jsonFetch<ContentPermissionUser[]>("/api/admin/content/permissions"),
+  managedContentPermissionCatalog: () =>
+    jsonFetch<ContentPermissionCatalog>("/api/admin/content/permission-catalog"),
   updateManagedContentPermissions: (userId: number, permissions: ContentPermission[]) =>
     jsonFetch<ContentPermissionUser>(`/api/admin/content/permissions/${userId}`, {
       method: "PUT",

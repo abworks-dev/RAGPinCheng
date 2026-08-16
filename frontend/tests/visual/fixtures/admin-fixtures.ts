@@ -9,12 +9,27 @@ const admin = {
   real_name: "合成管理员",
   role: "admin",
   csrf_token: "synthetic-csrf-token",
-  content_permissions: ["organize", "review", "publish", "manage_categories", "import_server"],
+  content_permissions: [
+    "workspace.view", "item.view", "category.view", "item.upload", "item.submit",
+    "item.move_draft", "item.archive_draft", "item.review", "item.move_review",
+    "item.publish", "item.archive_published", "trash.view", "trash.restore",
+    "category.manage", "folder.request", "folder.review", "import.server", "index.view",
+  ],
 };
 
 const workspaceUsers = {
   admin,
-  bim_engineer: { ...admin, id: 9002, employee_id: "TEST-EDITOR", real_name: "合成资料员", role: "user", content_permissions: ["organize"] },
+  bim_engineer: {
+    ...admin,
+    id: 9002,
+    employee_id: "TEST-EDITOR",
+    real_name: "合成资料员",
+    role: "user",
+    content_permissions: [
+      "workspace.view", "item.view", "category.view", "item.upload", "item.submit",
+      "item.move_draft", "item.archive_draft", "folder.request",
+    ],
+  },
   member: { ...admin, id: 9003, employee_id: "TEST-MEMBER", real_name: "合成成员", role: "user", content_permissions: [] },
 };
 
@@ -160,15 +175,53 @@ const transcriptVersions = [{
 
 const permissionUsers = [
   { user_id: 9001, employee_id: "TEST-ADMIN", real_name: "合成管理员", role: "admin", is_active: true, permissions: [] },
-  { user_id: 9002, employee_id: "TEST-EDITOR", real_name: "合成资料员", role: "user", is_active: true, permissions: ["organize", "review"] },
+  {
+    user_id: 9002,
+    employee_id: "TEST-EDITOR",
+    real_name: "合成资料员",
+    role: "user",
+    is_active: true,
+    permissions: [
+      "workspace.view", "item.view", "category.view", "item.upload", "item.submit",
+      "item.move_draft", "item.archive_draft", "folder.request", "item.review",
+      "item.move_review", "folder.review", "trash.view", "trash.restore",
+    ],
+  },
   { user_id: 9003, employee_id: "TEST-INACTIVE", real_name: "停用测试用户", role: "user", is_active: false, permissions: [] },
 ];
 
+const permissionCatalog = {
+  schema_version: 2,
+  permissions: [
+    { key: "workspace.view", domain: "access", domain_label: "入口与查看", label: "进入资料工作台", description: "进入资料管理工作台。", dependencies: [] },
+    { key: "item.view", domain: "access", domain_label: "入口与查看", label: "查看资料", description: "查看资料列表、详情、预览和下载。", dependencies: ["workspace.view"] },
+    { key: "category.view", domain: "access", domain_label: "入口与查看", label: "查看分类", description: "查看资料分类树和完整路径。", dependencies: ["workspace.view"] },
+    { key: "item.upload", domain: "organize", domain_label: "资料整理", label: "上传资料", description: "上传文件并创建资料草稿。", dependencies: ["workspace.view", "item.view", "category.view"] },
+    { key: "item.submit", domain: "organize", domain_label: "资料整理", label: "提交确认", description: "将草稿或退回资料提交确认。", dependencies: ["workspace.view", "item.view"] },
+    { key: "item.move_draft", domain: "organize", domain_label: "资料整理", label: "移动草稿", description: "移动草稿或退回状态的资料。", dependencies: ["workspace.view", "item.view", "category.view"] },
+    { key: "item.archive_draft", domain: "organize", domain_label: "资料整理", label: "归档草稿", description: "将草稿或退回资料移入回收站。", dependencies: ["workspace.view", "item.view"] },
+    { key: "item.review", domain: "review", domain_label: "确认流程", label: "确认与退回", description: "确认或退回待确认资料。", dependencies: ["workspace.view", "item.view"] },
+    { key: "item.move_review", domain: "review", domain_label: "确认流程", label: "移动待确认资料", description: "移动待确认状态的资料。", dependencies: ["workspace.view", "item.view", "category.view"] },
+    { key: "item.publish", domain: "publish", domain_label: "发布流程", label: "发布资料", description: "发布或重新发布已确认资料。", dependencies: ["workspace.view", "item.view"] },
+    { key: "item.archive_published", domain: "publish", domain_label: "发布流程", label: "下架正式资料", description: "将已确认、发布失败或已发布资料移入回收站。", dependencies: ["workspace.view", "item.view"] },
+    { key: "trash.view", domain: "trash", domain_label: "回收站", label: "查看回收站", description: "查看和搜索已归档资料。", dependencies: ["workspace.view", "item.view"] },
+    { key: "trash.restore", domain: "trash", domain_label: "回收站", label: "恢复资料", description: "从回收站恢复资料。", dependencies: ["workspace.view", "item.view", "trash.view"] },
+    { key: "category.manage", domain: "category", domain_label: "分类与目录", label: "维护分类", description: "新增、修改、启用或停用资料分类。", dependencies: ["workspace.view", "category.view"] },
+    { key: "folder.request", domain: "category", domain_label: "分类与目录", label: "申请目录", description: "提交子目录创建申请。", dependencies: ["workspace.view", "item.view", "category.view"] },
+    { key: "folder.review", domain: "category", domain_label: "分类与目录", label: "审批目录", description: "查看、批准或退回目录申请。", dependencies: ["workspace.view", "item.view", "category.view"] },
+    { key: "import.server", domain: "operations", domain_label: "导入与索引", label: "服务器导入", description: "执行受控的服务器批次导入。", dependencies: ["workspace.view", "item.view", "category.view"] },
+    { key: "index.view", domain: "operations", domain_label: "导入与索引", label: "查看索引任务", description: "查看发布处理状态、失败原因和历史尝试。", dependencies: ["workspace.view", "item.view", "category.view"] },
+  ],
+};
+
 const permissionGroups = [
   { id: "permission-group-member", group_key: "member", display_name: "普通成员", permissions: [], is_system: true, is_active: true, updated_at: 1700000000 },
-  { id: "permission-group-bim-engineer", group_key: "bim_engineer", display_name: "BIM工程师", permissions: ["organize"], is_system: true, is_active: true, updated_at: 1700000000 },
-  { id: "permission-group-content-owner", group_key: "content_owner", display_name: "资料负责人", permissions: ["review"], is_system: true, is_active: true, updated_at: 1700000000 },
-  { id: "permission-group-system-admin", group_key: "system_admin", display_name: "系统管理员", permissions: ["organize", "review", "publish", "manage_categories", "import_server"], is_system: true, is_active: true, updated_at: 1700000000 },
+  { id: "permission-group-viewer", group_key: "viewer", display_name: "资料浏览者", permissions: ["workspace.view", "item.view", "category.view"], is_system: true, is_active: true, updated_at: 1700000000 },
+  { id: "permission-group-bim-engineer", group_key: "bim_engineer", display_name: "BIM工程师", permissions: ["workspace.view", "item.view", "category.view", "item.upload", "item.submit", "item.move_draft", "item.archive_draft", "folder.request"], is_system: true, is_active: true, updated_at: 1700000000 },
+  { id: "permission-group-content-owner", group_key: "content_owner", display_name: "资料负责人", permissions: ["workspace.view", "item.view", "category.view", "item.review", "item.move_review", "folder.review", "trash.view", "trash.restore"], is_system: true, is_active: true, updated_at: 1700000000 },
+  { id: "permission-group-publisher", group_key: "publisher", display_name: "发布负责人", permissions: ["workspace.view", "item.view", "category.view", "item.publish", "item.archive_published", "trash.view", "index.view"], is_system: true, is_active: true, updated_at: 1700000000 },
+  { id: "permission-group-category-admin", group_key: "category_admin", display_name: "分类管理员", permissions: ["workspace.view", "item.view", "category.view", "category.manage", "folder.review"], is_system: true, is_active: true, updated_at: 1700000000 },
+  { id: "permission-group-system-admin", group_key: "system_admin", display_name: "系统管理员", permissions: admin.content_permissions, is_system: true, is_active: true, updated_at: 1700000000 },
 ];
 
 const adminConversations = [
@@ -370,6 +423,9 @@ export async function installAdminRoutes(
     }
     if (path === "/api/admin/content/permissions") {
       return json(route, scenario === "empty" ? [] : permissionUsers);
+    }
+    if (path === "/api/admin/content/permission-catalog") {
+      return json(route, permissionCatalog);
     }
     if (path === "/api/admin/content/permission-groups") {
       return json(route, permissionGroups);
