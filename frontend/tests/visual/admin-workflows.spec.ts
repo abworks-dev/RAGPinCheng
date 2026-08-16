@@ -103,9 +103,18 @@ test.describe("资料管理", () => {
       return transfer;
     });
 
+    await expect(page.getByRole("button", { name: "上传文件" })).toBeEnabled();
+    expect(await dataTransfer.evaluate((transfer) => Array.from(transfer.types))).toContain("Files");
     await folderBrowser.dispatchEvent("dragenter", { dataTransfer });
-    await expect(folderBrowser).toHaveClass(/ring-primary/);
+    const dropOverlay = page.getByTestId("managed-content-drop-overlay");
+    await expect(dropOverlay).toBeVisible();
+    await expect(dropOverlay).toContainText("松开以上传文件到“03 公司内部标准”");
+    await expect(dropOverlay).toContainText("支持 PDF、Markdown、Word、Excel 和 PPT 文件");
+    await dropOverlay.scrollIntoViewIfNeeded();
+    await folderBrowser.dispatchEvent("dragover", { dataTransfer });
+    await expectInViewport(dropOverlay.getByText("松开以上传文件到“03 公司内部标准”"));
     await folderBrowser.dispatchEvent("drop", { dataTransfer });
+    await expect(dropOverlay).toBeHidden();
 
     const dialog = page.getByRole("dialog", { name: "确认上传" });
     await expect(dialog).toContainText("03 公司内部标准");
