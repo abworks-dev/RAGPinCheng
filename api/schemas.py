@@ -462,6 +462,10 @@ class BulkArchiveManagedContentRequest(BaseModel):
     items: list[BulkManagedContentItemRef] = Field(min_length=1, max_length=20)
 
 
+class BulkDownloadManagedContentRequest(BaseModel):
+    version_ids: list[str] = Field(min_length=1, max_length=20)
+
+
 class CreateFolderRequest(BaseModel):
     parent_category_id: str = Field(min_length=1, max_length=100)
     display_name: str = Field(min_length=1, max_length=100)

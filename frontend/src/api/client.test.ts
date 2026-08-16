@@ -96,6 +96,31 @@ describe("api client", () => {
     );
   });
 
+  it("downloads managed content as a CSRF-protected ZIP and reads its filename", async () => {
+    setCsrfToken("csrf-download");
+    const fetchMock = vi.fn().mockResolvedValue(new Response(new Blob(["zip"]), {
+      status: 200,
+      headers: {
+        "content-type": "application/zip",
+        "content-disposition": "attachment; filename*=UTF-8''%E8%B5%84%E6%96%99%E6%89%93%E5%8C%85.zip",
+      },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await api.bulkDownloadManagedContent(["version-1", "version-2"]);
+    expect(result.filename).toBe("资料打包.zip");
+    expect(result.blob.size).toBeGreaterThan(0);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/admin/content/bulk-download",
+      expect.objectContaining({
+        method: "POST",
+        credentials: "include",
+        body: JSON.stringify({ version_ids: ["version-1", "version-2"] }),
+        headers: { "content-type": "application/json", "X-CSRF-Token": "csrf-download" },
+      }),
+    );
+  });
+
   it("loads trash and restores managed content with CSRF protection", async () => {
     setCsrfToken("csrf-restore");
     const fetchMock = vi.fn()

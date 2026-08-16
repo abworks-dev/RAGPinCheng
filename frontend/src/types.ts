@@ -95,6 +95,7 @@ export type AuthUser = {
 export type ContentPermission =
   | "workspace.view"
   | "item.view"
+  | "item.download"
   | "category.view"
   | "item.upload"
   | "item.submit"

@@ -59,6 +59,11 @@ export interface ManagedContentUploadEntry {
   relativePath: string;
 }
 
+export type ManagedContentDownload = {
+  blob: Blob;
+  filename: string;
+};
+
 export type ManagedContentUploadMode = "files" | "folder";
 
 export function setUnauthorizedHandler(fn: (() => void) | null) {
@@ -156,6 +161,40 @@ async function jsonFetch<T>(path: string, init?: RequestInit): Promise<T> {
   // 204 has no body.
   if (res.status === 204) return undefined as unknown as T;
   return (await res.json()) as T;
+}
+
+function filenameFromContentDisposition(header: string | null, fallback: string): string {
+  const encoded = header?.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+  if (encoded) {
+    try {
+      return decodeURIComponent(encoded);
+    } catch {
+      /* use the quoted fallback below */
+    }
+  }
+  const quoted = header?.match(/filename="((?:\\.|[^"])*)"/i)?.[1];
+  if (quoted) return quoted.replace(/\\([\\"])/g, "$1");
+  const plain = header?.match(/filename=([^;]+)/i)?.[1]?.trim();
+  return plain || fallback;
+}
+
+async function fileFetch(path: string, fallbackFilename: string, init?: RequestInit): Promise<ManagedContentDownload> {
+  const res = await rawFetch(path, init);
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    const detail = parseErrorDetail(txt);
+    throw new ApiError(
+      res.status,
+      txt,
+      detail.message || `${res.status} ${res.statusText}`,
+      detail.code,
+      detail.retryable,
+    );
+  }
+  return {
+    blob: await res.blob(),
+    filename: filenameFromContentDisposition(res.headers.get("content-disposition"), fallbackFilename),
+  };
 }
 
 export const api = {
@@ -483,6 +522,13 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ items }),
     }),
+  bulkDownloadManagedContent: (versionIds: string[]) =>
+    fileFetch("/api/admin/content/bulk-download", "资料批量下载.zip", {
+      method: "POST",
+      body: JSON.stringify({ version_ids: versionIds }),
+    }),
+  downloadManagedContentFile: (versionId: string, fallbackFilename: string) =>
+    fileFetch(`/api/admin/content/versions/${encodeURIComponent(versionId)}/file?download=true`, fallbackFilename),
   managedContentFileUrl: (versionId: string, download = false) =>
     `/api/admin/content/versions/${encodeURIComponent(versionId)}/file${download ? "?download=true" : ""}`,
   managedContentIndexJobs: (params?: {
