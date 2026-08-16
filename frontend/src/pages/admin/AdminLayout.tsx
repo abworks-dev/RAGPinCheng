@@ -7,6 +7,7 @@ import {
   MessageSquareQuote,
   MessagesSquare,
   PanelLeftClose,
+  SlidersHorizontal,
   Tags,
   Users,
   Video,
@@ -35,6 +36,7 @@ type NavigationGroup = {
 const navigationIcons: Record<Tab, LucideIcon> = {
   stats: LayoutDashboard,
   maintenance: Wrench,
+  "answer-policy": SlidersHorizontal,
   managed: FileText,
   categories: Tags,
   media: Video,
