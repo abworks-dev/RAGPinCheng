@@ -144,7 +144,6 @@ export function AdminCategoriesPage() {
       const rows = await adminContentApi.categories(true);
       setCategories(rows);
       setSelectedId((current) => current && rows.some((category) => category.id === current) ? current : rows[0]?.id || null);
-      setExpanded((current) => current.size > 0 ? current : new Set(buildTree(rows).map((node) => node.category.id)));
       return rows;
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "分类加载失败");
@@ -314,7 +313,7 @@ export function AdminCategoriesPage() {
     <section className="flex flex-col gap-5" aria-labelledby="managed-categories-title">
       <header className="flex flex-col gap-4 border-b border-border pb-5 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <p className="text-ui-xs text-muted-foreground">资料管理</p>
+          <p className="text-ui-xs font-medium text-primary">内容管理</p>
           <h1 id="managed-categories-title" className="mt-1 text-ui-2xl font-semibold text-foreground">分类管理</h1>
           <p className="mt-1 text-ui-sm text-muted-foreground">维护资料分类、层级和可用状态。</p>
         </div>
@@ -333,7 +332,7 @@ export function AdminCategoriesPage() {
         <EmptyState title="暂无分类" description="新增第一个分类后，可在此维护名称、编号和状态。" action={<Button onClick={() => requestCreate()}><Plus className="size-4" />新增分类</Button>} />
       ) : (
         <section aria-labelledby="category-list-title" className="space-y-3">
-          <div className="flex flex-col gap-3 border-y border-border py-3 sm:flex-row sm:items-end sm:justify-between">
+          <div className="flex flex-col gap-3 border-y border-border bg-surface-muted/20 px-3 py-3 sm:flex-row sm:items-end sm:justify-between">
             <div className="flex min-w-0 flex-1 flex-col gap-3 sm:flex-row sm:items-end">
               <label className="min-w-0 flex-1 space-y-1 text-ui-xs text-muted-foreground sm:max-w-md">
                 <span>搜索分类</span>
@@ -471,7 +470,7 @@ function CategoryTreeNodeView({
         <span className="mt-1 block break-words text-ui-xs text-muted-foreground">{category.item_count} 份直接资料</span>
       </span>
     </div>
-    {hasChildren && isExpanded && <div role="group">{children.map((child, childIndex) => <CategoryTreeNodeView key={child.category.id} node={child} level={level + 1} index={childIndex} siblingCount={children.length} selectedId={selectedId} expanded={expanded} visibleNodes={visibleNodes} nodeRefs={nodeRefs} onSelect={onSelect} onToggle={onToggle} />)}</div>}
+    {hasChildren && isExpanded && <div role="group" className="bg-surface-muted/10">{children.map((child, childIndex) => <CategoryTreeNodeView key={child.category.id} node={child} level={level + 1} index={childIndex} siblingCount={children.length} selectedId={selectedId} expanded={expanded} visibleNodes={visibleNodes} nodeRefs={nodeRefs} onSelect={onSelect} onToggle={onToggle} />)}</div>}
   </>;
 }
 

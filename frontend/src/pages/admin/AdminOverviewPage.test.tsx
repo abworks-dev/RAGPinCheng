@@ -50,7 +50,7 @@ describe("AdminOverviewPage", () => {
 
     render(<AdminOverviewPage />);
 
-    expect(screen.getByText("正在加载管理概览…")).toBeInTheDocument();
+    expect(screen.getByText("正在加载系统概览…")).toBeInTheDocument();
   });
 
   it("renders the six existing statistics without changing their order", async () => {
@@ -78,7 +78,7 @@ describe("AdminOverviewPage", () => {
 
     render(<AdminOverviewPage />);
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("概览加载失败");
+    expect(await screen.findByRole("alert")).toHaveTextContent("系统概览加载失败");
     expect(screen.getByRole("alert")).toHaveTextContent("统计服务暂不可用");
   });
 
