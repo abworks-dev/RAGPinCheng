@@ -29,6 +29,7 @@ const mocks = vi.hoisted(() => ({
   trash: vi.fn(),
   restoreContent: vi.fn(),
   fileUrl: vi.fn(),
+  info: vi.fn(),
   success: vi.fn(),
   error: vi.fn(),
   openPreview: vi.fn(),
@@ -92,7 +93,7 @@ vi.mock("../../api/client", () => ({
 }));
 
 vi.mock("../../components/ui/toast", () => ({
-  toast: { success: mocks.success, error: mocks.error },
+  toast: { info: mocks.info, success: mocks.success, error: mocks.error },
 }));
 
 const category = {
@@ -224,16 +225,24 @@ describe("AdminManagedContentPage", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "批量下载" }));
 
     await waitFor(() => expect(mocks.bulkDownload).toHaveBeenCalledWith(["version-1", "version-2"]));
-    await waitFor(() => expect(screen.getByTestId("bulk-download-status")).toHaveTextContent(/正在打包 2 份资料，请稍候/));
-    expect(screen.getByTestId("bulk-download-status")).toHaveTextContent("文件较多时可能需要几秒");
+    await waitFor(() => expect(mocks.info).toHaveBeenCalledWith(
+      "正在打包 2 份资料，请稍候…",
+      expect.objectContaining({
+        id: "managed-content-bulk-download",
+        description: "文件较多时可能需要几秒。",
+        duration: Infinity,
+      }),
+    ));
     expect(screen.getByRole("button", { name: "批量操作" })).toBeDisabled();
 
     vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
     Object.defineProperty(URL, "createObjectURL", { configurable: true, value: vi.fn(() => "blob:synthetic") });
     Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
     resolveDownload({ blob: new Blob(["zip"]), filename: "资料批量下载.zip" });
-    await waitFor(() => expect(mocks.success).toHaveBeenCalledWith("已打包 2 份资料并开始下载"));
-    expect(screen.getByTestId("bulk-download-status")).not.toHaveTextContent(/正在打包 2 份资料，请稍候/);
+    await waitFor(() => expect(mocks.success).toHaveBeenCalledWith(
+      "已打包 2 份资料并开始下载",
+      expect.objectContaining({ id: "managed-content-bulk-download", duration: 4000 }),
+    ));
   });
 
   it("clears the packaging status and reports a failed batch download", async () => {
@@ -248,11 +257,16 @@ describe("AdminManagedContentPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "批量操作" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "批量下载" }));
     await waitFor(() => expect(mocks.bulkDownload).toHaveBeenCalledWith(["version-1", "version-2"]));
-    await waitFor(() => expect(screen.getByTestId("bulk-download-status")).toHaveTextContent(/正在打包 2 份资料，请稍候/));
+    await waitFor(() => expect(mocks.info).toHaveBeenCalledWith(
+      "正在打包 2 份资料，请稍候…",
+      expect.objectContaining({ id: "managed-content-bulk-download", duration: Infinity }),
+    ));
 
     rejectDownload(new Error("打包服务暂时不可用"));
-    await waitFor(() => expect(mocks.error).toHaveBeenCalledWith("打包服务暂时不可用"));
-    expect(screen.getByTestId("bulk-download-status")).not.toHaveTextContent(/正在打包 2 份资料，请稍候/);
+    await waitFor(() => expect(mocks.error).toHaveBeenCalledWith(
+      "打包服务暂时不可用",
+      expect.objectContaining({ id: "managed-content-bulk-download", duration: 5000 }),
+    ));
   });
 
   it("opens indexed files directly and restores details after an in-dialog preview", async () => {
@@ -718,6 +732,63 @@ describe("AdminManagedContentPage", () => {
 
     await waitFor(() => expect(mocks.reviewFolderRequest).toHaveBeenCalledWith("request-1", true));
     expect(mocks.success).toHaveBeenCalledWith("目录申请已批准");
+  });
+
+  it("selects a nested target directory in the single-move picker", async () => {
+    mocks.categories.mockResolvedValue([category, childCategory, projectCategory]);
+    mocks.moveContent.mockResolvedValue({ ...item, category_id: childCategory.id });
+    render(<AdminManagedContentPage />);
+    await openRootFolder();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "移动“建模标准”" })[0]);
+    const dialog = screen.getByRole("dialog", { name: "移动资料" });
+    expect(within(dialog).getByTestId("category-picker-item-cat-03")).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(within(dialog).getByRole("button", { name: "展开公司内部标准" }));
+    fireEvent.click(within(dialog).getByTestId("category-picker-item-cat-03-01"));
+    expect(within(dialog).getByText(`已选择：${childCategory.full_path}`)).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "确认移动" }));
+
+    await waitFor(() => expect(mocks.moveContent).toHaveBeenCalledWith("item-1", childCategory.id, "version-1"));
+    expect(mocks.success).toHaveBeenCalledWith("已移动“建模标准”");
+  });
+
+  it("keeps the single-move dialog open when the request fails", async () => {
+    mocks.categories.mockResolvedValue([category, projectCategory]);
+    mocks.moveContent.mockRejectedValue(new Error("目标目录已停用"));
+    render(<AdminManagedContentPage />);
+    await openRootFolder();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "移动“建模标准”" })[0]);
+    const dialog = screen.getByRole("dialog", { name: "移动资料" });
+    fireEvent.click(within(dialog).getByTestId("category-picker-item-cat-04"));
+    fireEvent.click(within(dialog).getByRole("button", { name: "确认移动" }));
+
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("目标目录已停用");
+    expect(dialog).toHaveAttribute("data-state", "open");
+    expect(mocks.error).not.toHaveBeenCalled();
+  });
+
+  it("uses the same directory picker for batch moves", async () => {
+    mocks.categories.mockResolvedValue([category, childCategory, projectCategory]);
+    const secondItem = { ...item, item_id: "item-2", title: "建模标准2", version_id: "version-2" };
+    mocks.items.mockResolvedValue({ items: [item, secondItem], total: 2, status_counts: { awaiting_review: 2 } });
+    mocks.bulkMove.mockResolvedValue({ results: [], succeeded: 2, failed: 0 });
+    render(<AdminManagedContentPage />);
+    await openRootFolder();
+    fireEvent.click(screen.getAllByRole("checkbox", { name: "选择建模标准" })[0]);
+    fireEvent.click(screen.getAllByRole("checkbox", { name: "选择建模标准2" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "批量操作" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "批量移动" }));
+
+    const dialog = screen.getByRole("dialog", { name: "批量移动资料" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "展开公司内部标准" }));
+    fireEvent.click(within(dialog).getByTestId("category-picker-item-cat-03-01"));
+    fireEvent.click(within(dialog).getByRole("button", { name: "确认执行" }));
+
+    await waitFor(() => expect(mocks.bulkMove).toHaveBeenCalledWith([
+      { item_id: "item-1", expected_version_id: "version-1" },
+      { item_id: "item-2", expected_version_id: "version-2" },
+    ], childCategory.id));
   });
 
   it("moves an existing desktop row when dropped on a child folder", async () => {
