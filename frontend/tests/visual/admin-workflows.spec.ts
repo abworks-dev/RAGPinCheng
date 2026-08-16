@@ -161,6 +161,21 @@ test.describe("资料库", () => {
     await expectNoBodyOverflow(page);
   });
 
+  test("indexed files open in the shared preview sheet", async ({ page }) => {
+    await openTab(page, "资料管理");
+    const title = page.getByText("建筑信息模型交付标准（合成长文件名用于响应式检查）", { exact: true }).filter({ visible: true });
+    const item = page.viewportSize()!.width < 1024 ? title.locator("xpath=ancestor::li") : title.locator("xpath=ancestor::tr");
+    await item.getByRole("button", { name: "查看", exact: true }).click();
+
+    const detail = page.getByRole("dialog", { name: "建筑信息模型交付标准（合成长文件名用于响应式检查）" });
+    await detail.getByRole("button", { name: "打开文件" }).click();
+    await expect(page.getByRole("button", { name: "关闭预览" })).toBeVisible();
+    await expectNoBodyOverflow(page);
+
+    await page.getByRole("button", { name: "关闭预览" }).click();
+    await expect(page.getByRole("button", { name: "关闭预览" })).toBeHidden();
+  });
+
   test("move-to-trash confirmation explains impact and exposes a stable busy state", async ({ page }) => {
     await openTab(page, "资料管理");
     const title = page.getByText("建筑信息模型交付标准（合成长文件名用于响应式检查）", { exact: true }).filter({ visible: true });

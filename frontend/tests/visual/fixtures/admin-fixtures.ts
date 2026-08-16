@@ -45,6 +45,7 @@ export const items = [
   category_label: index % 2 ? "04 项目资料" : "03 公司内部标准",
   category_path: index % 2 ? "04 项目资料 / 02 竣工交付 / 01 模型成果" : "03 公司内部标准 / 01 建模 / 02 机电",
   media_id: null,
+  preview_parent_id: index === 0 ? "parent-ready" : null,
   version_id: `version-${index + 1}`,
   version_number: index + 1,
   original_filename: filename,
