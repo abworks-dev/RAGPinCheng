@@ -207,7 +207,11 @@ export function AdminLayout() {
           {tab === "managed" && <AdminManagedContentPage />}
           {tab === "categories" && <AdminCategoriesPage />}
           {tab === "media" && <AdminMediaPage />}
-          {tab === "stats" && <AdminOverviewPage onOpenMaintenance={() => setTab("maintenance")} />}
+          {tab === "stats" && <AdminOverviewPage onOpenMaintenance={() => {
+            const nextParams = new URLSearchParams(searchParams);
+            nextParams.set("tab", "maintenance");
+            setSearchParams(nextParams);
+          }} />}
           {tab === "feedback" && <AdminFeedbackPage />}
           {tab === "maintenance" && <AdminMaintenancePage />}
         </div>
