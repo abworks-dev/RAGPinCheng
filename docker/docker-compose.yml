@@ -15,7 +15,8 @@
 #   docker compose -f docker/docker-compose.yml exec backend python scripts/build_index.py
 #   docker compose -f docker/docker-compose.yml down
 #
-# 环境变量配置：仓库根目录的 `.env` 是唯一配置源。`docker/.env` 是软链接指向它，
+# 环境变量配置：本地默认使用仓库根目录的 `.env`；生产部署通过
+# COMPOSE_ENV_FILE 指向受控的外部 secret 文件。`docker/.env` 是软链接指向本地文件，
 # 这样 compose 构建时的变量替换（如 ${BUILD_PLATFORM}）和容器运行时的 env_file:
 # 都能正常工作。必填配置项：ZHIPU_API_KEY, MINERU_API_KEY, ADMIN_EMPLOYEE_ID,
 # ADMIN_PASSWORD；GPU 服务：GPU_SERVICE_URL, GPU_SERVICE_TOKEN
@@ -65,9 +66,9 @@ services:
       qdrant:
         condition: service_healthy
     env_file:
-      # 把仓库根目录 .env 的所有变量注入容器，不需要在 environment: 逐一列出。
-      # .env 中缺失的变量会使用 src/config.py 和 api/auth.py 中的默认值。
-      - ../.env
+      # 生产 workflow 设置 COMPOSE_ENV_FILE 为外部 secret 文件；本地开发回退到仓库 .env。
+      # 文件中的变量注入容器，不需要在 environment: 逐一列出。
+      - ${COMPOSE_ENV_FILE:-../.env}
     environment:
       # 容器内 Qdrant 地址 — backend 通过 compose 服务名直接访问。
       # 这里强制写死，不使用 ${QDRANT_URL}，防止主机本地调试用的
@@ -81,9 +82,8 @@ services:
       GPU_SYSTEM_METRICS_TIMEOUT_SECONDS: ${GPU_SYSTEM_METRICS_TIMEOUT_SECONDS:-2}
       EMBED_PROVIDER: ${EMBED_PROVIDER:-remote}
       RERANK_PROVIDER: ${RERANK_PROVIDER:-remote}
-      # --env-file selects the production interpolation source, while env_file above
-      # remains the local repository file. Keep every ASR client setting explicit so
-      # production does not silently fall back to src/config.py defaults.
+      # --env-file selects the production interpolation source. Keep every ASR client
+      # setting explicit so production does not silently fall back to src/config.py defaults.
       ASR_ENABLED: ${ASR_ENABLED:-false}
       ASR_SERVICE_URL: ${ASR_SERVICE_URL:-http://127.0.0.1:8200}
       ASR_SERVICE_TOKEN: ${ASR_SERVICE_TOKEN:-}

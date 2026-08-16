@@ -26,6 +26,9 @@ class TestDeployGitSafety(unittest.TestCase):
         cls.source_decoupled_compose = (
             ROOT / "docker/compose.source-decoupled.yml"
         ).read_text(encoding="utf-8")
+        cls.base_compose = (ROOT / "docker/docker-compose.yml").read_text(
+            encoding="utf-8"
+        )
         cls.windows = (ROOT / "scripts/deploy-gpu.ps1").read_text(encoding="utf-8")
         cls.promote = (ROOT / "scripts/promote-gpu-runtime.ps1").read_text(
             encoding="utf-8"
@@ -34,6 +37,11 @@ class TestDeployGitSafety(unittest.TestCase):
             encoding="utf-8"
         )
         cls.linux = (ROOT / "scripts/deploy-app.sh").read_text(encoding="utf-8")
+
+    def test_compose_uses_production_env_file_with_local_fallback(self):
+        self.assertIn("- ${COMPOSE_ENV_FILE:-../.env}", self.base_compose)
+        self.assertNotIn("- ../.env", self.base_compose)
+        self.assertIn('COMPOSE_ARGS+=(--env-file "$COMPOSE_ENV_FILE")', self.linux)
 
     def test_no_script_persists_authenticated_remote(self):
         for name, text in (("windows", self.windows), ("linux", self.linux)):
