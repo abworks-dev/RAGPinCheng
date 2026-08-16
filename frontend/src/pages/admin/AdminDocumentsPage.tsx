@@ -66,7 +66,7 @@ function sourceOriginLabel(sourceOrigin: string | null): string {
 export function AdminDocumentsPage() {
   const { state } = useAuth();
   const canPublish = state.status === "authed"
-    && (state.user.role === "admin" || state.user.content_permissions?.includes("publish"));
+    && (state.user.role === "admin" || state.user.content_permissions?.includes("item.publish"));
   const [listing, setListing] = useState<ManagedIndexJobList>(EMPTY_LIST);
   const [categories, setCategories] = useState<ManagedCategory[]>([]);
   const [loading, setLoading] = useState(true);

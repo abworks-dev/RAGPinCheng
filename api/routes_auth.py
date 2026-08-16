@@ -18,6 +18,7 @@ from .auth import (
     set_session_cookie,
     verify_password,
 )
+from .content_permission_catalog import CONTENT_PERMISSIONS
 from .db import get_db
 from .schemas import AuthMeResponse, LoginRequest, RegisterRequest
 
@@ -26,7 +27,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 def _content_permissions(conn: sqlite3.Connection, user_id: int, role: str) -> list[str]:
     if role == "admin":
-        return ["organize", "review", "publish", "manage_categories", "import_server"]
+        return sorted(CONTENT_PERMISSIONS)
     return [
         str(row[0])
         for row in conn.execute(

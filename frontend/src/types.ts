@@ -92,7 +92,39 @@ export type AuthUser = {
   content_permissions?: ContentPermission[];
 };
 
-export type ContentPermission = "organize" | "review" | "publish" | "manage_categories" | "import_server";
+export type ContentPermission =
+  | "workspace.view"
+  | "item.view"
+  | "category.view"
+  | "item.upload"
+  | "item.submit"
+  | "item.move_draft"
+  | "item.archive_draft"
+  | "item.review"
+  | "item.move_review"
+  | "item.publish"
+  | "item.archive_published"
+  | "trash.view"
+  | "trash.restore"
+  | "category.manage"
+  | "folder.request"
+  | "folder.review"
+  | "import.server"
+  | "index.view";
+
+export type ContentPermissionDefinition = {
+  key: ContentPermission;
+  domain: string;
+  domain_label: string;
+  label: string;
+  description: string;
+  dependencies: ContentPermission[];
+};
+
+export type ContentPermissionCatalog = {
+  schema_version: number;
+  permissions: ContentPermissionDefinition[];
+};
 
 export type Conversation = {
   id: string;

@@ -7,6 +7,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
+from .content_permission_catalog import (
+    LEGACY_SYSTEM_CONTENT_PERMISSION_GROUPS,
+    SYSTEM_CONTENT_PERMISSION_GROUPS,
+)
+
 
 @dataclass(frozen=True, slots=True)
 class Migration:
@@ -483,6 +488,86 @@ CONTENT_VERSION_METADATA_STATEMENTS = (
        WHERE archived_at IS NULL AND normalized_filename IS NOT NULL""",
 )
 
+CONTENT_PERMISSION_V2_STATEMENTS = (
+    """CREATE TEMP TABLE content_permission_v11_map (
+        old_permission TEXT NOT NULL,
+        new_permission TEXT NOT NULL,
+        PRIMARY KEY(old_permission, new_permission)
+    )""",
+    """INSERT INTO content_permission_v11_map(old_permission,new_permission) VALUES
+       ('organize','workspace.view'),('organize','item.view'),('organize','category.view'),
+       ('organize','item.upload'),('organize','item.submit'),('organize','item.move_draft'),
+       ('organize','item.archive_draft'),('organize','folder.request'),
+       ('review','workspace.view'),('review','item.view'),('review','category.view'),
+       ('review','item.review'),('review','item.move_review'),('review','folder.review'),
+       ('review','trash.view'),('review','trash.restore'),
+       ('publish','workspace.view'),('publish','item.view'),('publish','category.view'),
+       ('publish','item.publish'),('publish','item.archive_published'),('publish','trash.view'),
+       ('publish','index.view'),
+       ('manage_categories','workspace.view'),('manage_categories','item.view'),
+       ('manage_categories','category.view'),('manage_categories','category.manage'),
+       ('manage_categories','folder.review'),
+       ('import_server','workspace.view'),('import_server','item.view'),
+       ('import_server','category.view'),('import_server','import.server')""",
+    "ALTER TABLE content_permissions RENAME TO content_permissions_v10",
+    """CREATE TABLE content_permissions (
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        permission TEXT NOT NULL CHECK (permission IN (
+            'workspace.view','item.view','category.view','item.upload','item.submit',
+            'item.move_draft','item.archive_draft','item.review','item.move_review',
+            'item.publish','item.archive_published','trash.view','trash.restore',
+            'category.manage','folder.request','folder.review','import.server','index.view'
+        )),
+        granted_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at INTEGER NOT NULL,
+        PRIMARY KEY(user_id, permission)
+    )""",
+    """INSERT INTO content_permissions(user_id,permission,granted_by,created_at)
+       SELECT old.user_id,mapping.new_permission,MIN(old.granted_by),MIN(old.created_at)
+       FROM content_permissions_v10 old
+       JOIN content_permission_v11_map mapping ON mapping.old_permission=old.permission
+       GROUP BY old.user_id,mapping.new_permission""",
+    "DROP TABLE content_permissions_v10",
+    "ALTER TABLE content_permission_group_items RENAME TO content_permission_group_items_v10",
+    """CREATE TABLE content_permission_group_items (
+        group_id TEXT NOT NULL REFERENCES content_permission_groups(id) ON DELETE CASCADE,
+        permission TEXT NOT NULL CHECK (permission IN (
+            'workspace.view','item.view','category.view','item.upload','item.submit',
+            'item.move_draft','item.archive_draft','item.review','item.move_review',
+            'item.publish','item.archive_published','trash.view','trash.restore',
+            'category.manage','folder.request','folder.review','import.server','index.view'
+        )),
+        PRIMARY KEY(group_id, permission)
+    )""",
+    """INSERT INTO content_permission_group_items(group_id,permission)
+       SELECT DISTINCT old.group_id,mapping.new_permission
+       FROM content_permission_group_items_v10 old
+       JOIN content_permission_v11_map mapping ON mapping.old_permission=old.permission""",
+    "DROP TABLE content_permission_group_items_v10",
+    """INSERT INTO content_permission_groups
+       (id,group_key,display_name,is_system,is_active,created_at,updated_at) VALUES
+       ('permission-group-viewer','viewer','资料浏览者',1,1,strftime('%s','now'),strftime('%s','now')),
+       ('permission-group-publisher','publisher','发布负责人',1,1,strftime('%s','now'),strftime('%s','now')),
+       ('permission-group-category-admin','category_admin','分类管理员',1,1,strftime('%s','now'),strftime('%s','now'))""",
+    """INSERT INTO content_permission_group_items(group_id,permission) VALUES
+       ('permission-group-viewer','workspace.view'),
+       ('permission-group-viewer','item.view'),
+       ('permission-group-viewer','category.view'),
+       ('permission-group-publisher','workspace.view'),
+       ('permission-group-publisher','item.view'),
+       ('permission-group-publisher','category.view'),
+       ('permission-group-publisher','item.publish'),
+       ('permission-group-publisher','item.archive_published'),
+       ('permission-group-publisher','trash.view'),
+       ('permission-group-publisher','index.view'),
+       ('permission-group-category-admin','workspace.view'),
+       ('permission-group-category-admin','item.view'),
+       ('permission-group-category-admin','category.view'),
+       ('permission-group-category-admin','category.manage'),
+       ('permission-group-category-admin','folder.review')""",
+    "DROP TABLE content_permission_v11_map",
+)
+
 MIGRATIONS = (
     Migration(1, "multi_engine_transcription_phase2", PHASE2_STATEMENTS),
     Migration(2, "answer_regeneration_versions", ANSWER_VERSION_STATEMENTS),
@@ -494,6 +579,7 @@ MIGRATIONS = (
     Migration(8, "system_maintenance", SYSTEM_MAINTENANCE_STATEMENTS),
     Migration(9, "system_maintenance_permanent_retention", SYSTEM_MAINTENANCE_RETENTION_STATEMENTS),
     Migration(10, "managed_content_version_metadata", CONTENT_VERSION_METADATA_STATEMENTS),
+    Migration(11, "granular_content_permissions", CONTENT_PERMISSION_V2_STATEMENTS),
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 PHASE2_TABLES = frozenset(
@@ -533,18 +619,10 @@ CONTENT_PERMISSION_GROUP_TABLES = frozenset(
 )
 CONTENT_FOLDER_REQUEST_TABLES = frozenset({"content_folder_requests"})
 SYSTEM_MAINTENANCE_TABLES = frozenset({"maintenance_settings", "maintenance_runs"})
-SYSTEM_CONTENT_PERMISSION_GROUPS = {
-    "member": ("普通成员", frozenset()),
-    "bim_engineer": ("BIM工程师", frozenset({"organize"})),
-    "content_owner": ("资料负责人", frozenset({"review"})),
-    "system_admin": (
-        "系统管理员",
-        frozenset({"organize", "review", "publish", "manage_categories", "import_server"}),
-    ),
-}
-
-
-def validate_system_content_permission_groups(conn: sqlite3.Connection) -> None:
+def validate_system_content_permission_groups(
+    conn: sqlite3.Connection,
+    expected_groups: dict[str, tuple[str, frozenset[str]]] = SYSTEM_CONTENT_PERMISSION_GROUPS,
+) -> None:
     rows = conn.execute(
         """SELECT g.group_key,g.display_name,g.is_system,g.is_active,i.permission
            FROM content_permission_groups g
@@ -561,7 +639,7 @@ def validate_system_content_permission_groups(conn: sqlite3.Connection) -> None:
             entry[2].add(permission)
     expected = {
         key: (display_name, 1, set(permissions))
-        for key, (display_name, permissions) in SYSTEM_CONTENT_PERMISSION_GROUPS.items()
+        for key, (display_name, permissions) in expected_groups.items()
     }
     if actual != expected:
         raise RuntimeError("system_permission_group_mismatch")
@@ -663,7 +741,12 @@ def has_pending_ddl(path: Path, *, base_tables: frozenset[str]) -> bool:
     if any(version == 6 for version, _name in applied):
         conn = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
         try:
-            validate_system_content_permission_groups(conn)
+            expected_groups = (
+                SYSTEM_CONTENT_PERMISSION_GROUPS
+                if any(version == 11 for version, _name in applied)
+                else LEGACY_SYSTEM_CONTENT_PERMISSION_GROUPS
+            )
+            validate_system_content_permission_groups(conn, expected_groups)
         finally:
             conn.close()
     if any(version == 7 for version, _name in applied) and not CONTENT_FOLDER_REQUEST_TABLES.issubset(tables):
@@ -714,6 +797,7 @@ def apply_all(conn: sqlite3.Connection, *, base_schema: str, applied_at: int) ->
                 "INSERT INTO app_schema_migrations(version, name, applied_at) VALUES (?, ?, ?)",
                 (migration.version, migration.name, applied_at),
             )
+            applied_versions.add(migration.version)
         tables = {
             row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
         }
@@ -733,7 +817,12 @@ def apply_all(conn: sqlite3.Connection, *, base_schema: str, applied_at: int) ->
             raise RuntimeError("migration_schema_mismatch")
         if not SYSTEM_MAINTENANCE_TABLES.issubset(tables):
             raise RuntimeError("migration_schema_mismatch")
-        validate_system_content_permission_groups(conn)
+        validate_system_content_permission_groups(
+            conn,
+            SYSTEM_CONTENT_PERMISSION_GROUPS
+            if 11 in applied_versions
+            else LEGACY_SYSTEM_CONTENT_PERMISSION_GROUPS,
+        )
         validate_content_version_metadata(conn)
         if conn.execute("PRAGMA foreign_key_check").fetchone() is not None:
             raise RuntimeError("migration_foreign_key_check_failed")

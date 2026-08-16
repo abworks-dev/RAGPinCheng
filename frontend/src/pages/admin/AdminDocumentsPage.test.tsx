@@ -225,7 +225,7 @@ describe("AdminDocumentsPage", () => {
 
   it("keeps republishing unavailable without publish permission", async () => {
     mocks.useAuth.mockReturnValue({
-      state: { status: "authed", user: { role: "user", content_permissions: ["review"] } },
+      state: { status: "authed", user: { role: "user", content_permissions: ["index.view"] } },
     });
     render(<AdminDocumentsPage />);
     await screen.findByText(failedJob.title);

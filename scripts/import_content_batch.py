@@ -30,11 +30,11 @@ def main() -> int:
         if args.apply:
             allowed = conn.execute(
                 """SELECT 1 FROM users u LEFT JOIN content_permissions p ON p.user_id=u.id
-                   WHERE u.id=? AND u.is_active=1 AND (u.role='admin' OR p.permission='import_server')""",
+                   WHERE u.id=? AND u.is_active=1 AND (u.role='admin' OR p.permission='import.server')""",
                 (args.actor_user_id,),
             ).fetchone()
             if allowed is None:
-                raise SystemExit("actor lacks import_server permission")
+                raise SystemExit("actor lacks import.server permission")
         batch_id, entries = import_server_batch(
             conn,
             ContentStorage(CONTENT_ROOT),

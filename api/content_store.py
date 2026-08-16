@@ -702,8 +702,8 @@ def _archive_content_item_locked(
     *,
     expected_version_id: str,
     actor_user_id: int,
-    can_organize: bool,
-    can_publish: bool,
+    can_archive_draft: bool,
+    can_archive_published: bool,
     now: int,
 ) -> ArchivedContent:
     row = conn.execute(
@@ -725,7 +725,9 @@ def _archive_content_item_locked(
         row["head_publication_id"] is not None
         or row["lifecycle_status"] not in {"draft", "rejected"}
     )
-    if (requires_publish and not can_publish) or (not requires_publish and not can_organize):
+    if (requires_publish and not can_archive_published) or (
+        not requires_publish and not can_archive_draft
+    ):
         raise ValueError("content_delete_forbidden")
     if row["version_id"] != expected_version_id:
         raise ValueError("content_version_conflict")
@@ -783,8 +785,8 @@ def archive_content_item(
     *,
     expected_version_id: str,
     actor_user_id: int,
-    can_organize: bool,
-    can_publish: bool,
+    can_archive_draft: bool,
+    can_archive_published: bool,
 ) -> ArchivedContent:
     try:
         conn.execute("BEGIN IMMEDIATE")
@@ -793,8 +795,8 @@ def archive_content_item(
             item_id,
             expected_version_id=expected_version_id,
             actor_user_id=actor_user_id,
-            can_organize=can_organize,
-            can_publish=can_publish,
+            can_archive_draft=can_archive_draft,
+            can_archive_published=can_archive_published,
             now=_now(),
         )
         conn.commit()
@@ -811,8 +813,8 @@ def move_content_item(
     target_category_id: str,
     expected_version_id: str,
     actor_user_id: int,
-    can_organize: bool,
-    can_review: bool,
+    can_move_draft: bool,
+    can_move_review: bool,
 ) -> sqlite3.Row:
     now = _now()
     try:
@@ -837,9 +839,9 @@ def move_content_item(
         if row["current_version_id"] is not None:
             raise ValueError("content_move_requires_republication")
         if row["lifecycle_status"] in {"draft", "rejected"}:
-            allowed = can_organize
+            allowed = can_move_draft
         elif row["lifecycle_status"] == "awaiting_review":
-            allowed = can_review
+            allowed = can_move_review
         else:
             raise ValueError("content_move_requires_republication")
         if not allowed:
@@ -896,15 +898,16 @@ def create_content_revision(
     title: str,
     original_filename: str,
     actor_user_id: int,
-    can_organize: bool,
-    can_publish: bool,
+    can_revise: bool,
+    can_archive_draft: bool,
+    can_archive_published: bool,
     stored: StoredContentObject | None = None,
     doc_type: str | None = None,
     source_batch_id: str | None = None,
     replace_conflict_item_id: str | None = None,
     replace_conflict_expected_version_id: str | None = None,
 ) -> RevisedContent:
-    if not can_organize:
+    if not can_revise:
         raise ValueError("content_revision_forbidden")
     clean_title = title.strip()
     if not clean_title or len(clean_title) > 300:
@@ -959,8 +962,8 @@ def create_content_revision(
                 str(conflict["item_id"]),
                 expected_version_id=str(conflict["version_id"]),
                 actor_user_id=actor_user_id,
-                can_organize=can_organize,
-                can_publish=can_publish,
+                can_archive_draft=can_archive_draft,
+                can_archive_published=can_archive_published,
                 now=now,
             )
             replaced_item_id = str(conflict["item_id"])

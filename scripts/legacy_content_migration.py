@@ -218,7 +218,7 @@ def apply_entries(
         raise LegacyMigrationError("invalid_actor_user_id")
     allowed = conn.execute(
         """SELECT 1 FROM users u LEFT JOIN content_permissions p ON p.user_id=u.id
-           WHERE u.id=? AND u.is_active=1 AND (u.role='admin' OR p.permission='import_server')""",
+           WHERE u.id=? AND u.is_active=1 AND (u.role='admin' OR p.permission='import.server')""",
         (actor_user_id,),
     ).fetchone()
     if allowed is None:
