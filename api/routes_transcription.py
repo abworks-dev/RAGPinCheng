@@ -40,6 +40,8 @@ from .schemas import (
     PublishTranscriptVersionRequest,
     PublishTranscriptVersionResponse,
     ReviewTranscriptVersionRequest,
+    MediaTranscriptDTO,
+    MediaTranscriptSegmentDTO,
     TranscriptMarkdownPreviewDTO,
     TranscriptPublicationJobDTO,
     TranscriptVersionDTO,
@@ -58,6 +60,7 @@ from .transcription_runtime import (
 )
 from .transcription_service import TranscriptionApplicationService
 from .transcription_store import SQLiteTranscriptionStore, StoreConflictError
+from .transcription_markdown import parse_transcript_segments
 from .transcription_worker import enqueue
 
 router = APIRouter(prefix="/admin/transcription", tags=["admin-transcription"])
@@ -450,6 +453,54 @@ def preview_transcript_version(version_id: str, _admin: CurrentUser = Depends(re
         raise HTTPException(status_code=404, detail="转录版本不存在")
     except ContractValidationError:
         raise HTTPException(status_code=409, detail="转录稿完整性校验失败")
+    finally:
+        conn.close()
+
+
+@router.get("/versions/{version_id}/timeline", response_model=MediaTranscriptDTO)
+def preview_transcript_version_timeline(
+    version_id: str,
+    _admin: CurrentUser = Depends(require_admin),
+) -> MediaTranscriptDTO:
+    conn = connect()
+    try:
+        service = _build_publication_service(conn)
+        version = service.store.load_version(version_id)
+        if version.canonical is not None:
+            return MediaTranscriptDTO(
+                media_id=version.media_id,
+                version_id=version.id,
+                language=version.canonical.language,
+                duration_ms=version.canonical.duration_ms,
+                segments=[
+                    MediaTranscriptSegmentDTO(
+                        id=segment.id,
+                        start_ms=segment.start_ms,
+                        end_ms=segment.end_ms,
+                        text=segment.text,
+                    )
+                    for segment in version.canonical.segments
+                ],
+            )
+
+        segments = parse_transcript_segments(service.preview_markdown(version.id))
+        return MediaTranscriptDTO(
+            media_id=version.media_id,
+            version_id=version.id,
+            segments=[
+                MediaTranscriptSegmentDTO(
+                    id=index,
+                    start_ms=segment.start_ms,
+                    end_ms=segment.end_ms,
+                    text=segment.text,
+                )
+                for index, segment in enumerate(segments)
+            ],
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="转录版本不存在")
+    except ContractValidationError:
+        raise HTTPException(status_code=409, detail="转录稿时间轴不可用")
     finally:
         conn.close()
 

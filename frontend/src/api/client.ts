@@ -584,6 +584,8 @@ export const api = {
     jsonFetch<TranscriptVersion[]>(`/api/admin/transcription/media/${mediaId}/versions`),
   previewTranscriptVersion: (versionId: string) =>
     jsonFetch<TranscriptMarkdownPreview>(`/api/admin/transcription/versions/${versionId}/markdown`),
+  previewTranscriptVersionTimeline: (versionId: string) =>
+    jsonFetch<MediaTranscript>(`/api/admin/transcription/versions/${versionId}/timeline`),
   createTranscriptRevision: (
     baseVersionId: string,
     markdown: string,

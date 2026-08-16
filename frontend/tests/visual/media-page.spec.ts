@@ -33,13 +33,15 @@ test.describe("视频媒体", () => {
     await expect(workbench).toBeVisible();
     await workbench.getByRole("button", { name: "校对内容" }).click();
     await expect(workbench.getByRole("textbox", { name: "转录 Markdown 编辑器" })).toBeVisible();
+    await expect(workbench.getByText("视频校对", { exact: true })).toBeVisible();
+    await expect(workbench.getByRole("button", { name: "跳转到 00:00" })).toBeVisible();
 
     if (page.viewportSize()!.width < 768) {
       await workbench.getByRole("button", { name: "预览" }).click();
-      await expect(workbench.getByText("培训开始", { exact: true })).toBeVisible();
+      await expect(workbench.getByRole("region", { name: "Markdown 预览" }).getByText("培训开始", { exact: true })).toBeVisible();
       await workbench.getByRole("button", { name: "编辑" }).click();
     } else {
-      await expect(workbench.getByText("培训开始", { exact: true })).toBeVisible();
+      await expect(workbench.getByRole("region", { name: "Markdown 预览" }).getByText("培训开始", { exact: true })).toBeVisible();
     }
 
     await expect.poll(() => workbench.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);

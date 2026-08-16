@@ -15,6 +15,7 @@ from api.routes_transcription import (
     _failure_dto,
     build_transcription_service,
     list_profiles,
+    preview_transcript_version_timeline,
     router as transcription_router,
 )
 from src.transcription.asr_service_contract import ASR_API_VERSION, ServiceCapabilities
@@ -51,6 +52,11 @@ def test_management_reads_require_admin_and_mutations_require_csrf_admin():
         "/admin/transcription/versions/{base_version_id}/revisions",
         "POST",
     )
+    timeline = route_for(
+        transcription_router,
+        "/admin/transcription/versions/{version_id}/timeline",
+        "GET",
+    )
     upload = route_for(admin_router, "/admin/media", "POST")
     delete = route_for(admin_router, "/admin/media/{media_id}", "DELETE")
     assert require_admin in dependency_calls(profiles)
@@ -59,6 +65,7 @@ def test_management_reads_require_admin_and_mutations_require_csrf_admin():
     assert require_csrf_admin in dependency_calls(cancel)
     assert require_csrf_admin in dependency_calls(retry)
     assert require_csrf_admin in dependency_calls(revision)
+    assert require_admin in dependency_calls(timeline)
     assert require_csrf_admin in dependency_calls(upload)
     assert require_csrf_admin in dependency_calls(delete)
 
@@ -123,6 +130,43 @@ def test_failure_dto_exposes_safe_message_and_retry_policy():
     assert identity_conflict.code == "service_request_identity_conflict"
     assert identity_conflict.retryable is False
     assert "identity_conflict" not in identity_conflict.message
+
+
+def test_admin_timeline_preview_parses_unpublished_markdown(monkeypatch):
+    import api.routes_transcription as routes_transcription
+
+    version = type("Version", (), {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "media_id": "22222222-2222-4222-8222-222222222222",
+        "canonical": None,
+    })()
+
+    class FakeService:
+        class Store:
+            @staticmethod
+            def load_version(_version_id):
+                return version
+
+        store = Store()
+
+        @staticmethod
+        def preview_markdown(_version_id):
+            return "# 校对稿\n\n说话人 1 00:00:05\n第一段\n\n说话人 2 00:00:12\n第二段\n"
+
+    class FakeConnection:
+        def close(self):
+            pass
+
+    monkeypatch.setattr(routes_transcription, "connect", lambda: FakeConnection())
+    monkeypatch.setattr(routes_transcription, "_build_publication_service", lambda _conn: FakeService())
+
+    result = preview_transcript_version_timeline(version.id, None)
+
+    assert result.media_id == version.media_id
+    assert [(item.start_ms, item.end_ms, item.text) for item in result.segments] == [
+        (5000, 12000, "第一段"),
+        (12000, None, "第二段"),
+    ]
 
 
 def test_application_runtime_registers_all_remote_provider_keys():

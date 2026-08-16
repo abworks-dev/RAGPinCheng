@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { adminMediaApi } from "../api/admin/media";
 import { useTranscriptPublicationJob } from "../hooks/useTranscriptionJobs";
-import type { TranscriptVersion } from "../types";
+import type { MediaTranscript, TranscriptVersion } from "../types";
 import { Alert, AlertDescription, AlertTitle } from "./ui/alert";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { TranscriptMarkdownEditor } from "./TranscriptMarkdownEditor";
+import { SynchronizedVideoTranscript } from "./SynchronizedVideoTranscript";
 
 function statusLabel(status: string) {
   return ({
@@ -57,6 +58,9 @@ export function TranscriptionVersionPanel({ mediaId, refreshToken, embedded = fa
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editor, setEditor] = useState<EditorState | null>(null);
+  const [timeline, setTimeline] = useState<MediaTranscript | null>(null);
+  const [timelineLoading, setTimelineLoading] = useState(false);
+  const [timelineError, setTimelineError] = useState<string | null>(null);
   const [editorMode, setEditorMode] = useState<"edit" | "preview">("edit");
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
   const [reviewNote, setReviewNote] = useState<Record<string, string>>({});
@@ -87,6 +91,8 @@ export function TranscriptionVersionPanel({ mediaId, refreshToken, embedded = fa
 
   useEffect(() => {
     setEditor(null);
+    setTimeline(null);
+    setTimelineError(null);
     setSaveSuccess(null);
   }, [mediaId]);
 
@@ -100,6 +106,8 @@ export function TranscriptionVersionPanel({ mediaId, refreshToken, embedded = fa
     if (editor?.baseVersionId === versionId) return;
     if (editorDirty && !window.confirm("当前修改尚未保存，确定切换到其他版本吗？")) return;
     setBusyVersionId(versionId);
+    setTimelineLoading(true);
+    setTimelineError(null);
     try {
       const result = await adminMediaApi.previewVersion(versionId);
       setEditor({
@@ -112,9 +120,16 @@ export function TranscriptionVersionPanel({ mediaId, refreshToken, embedded = fa
       setEditorMode("edit");
       setSaveSuccess(null);
       setError(null);
+      try {
+        setTimeline(await adminMediaApi.previewVersionTimeline(versionId));
+      } catch (caught: any) {
+        setTimeline(null);
+        setTimelineError(caught?.message || "暂时无法加载视频时间轴");
+      }
     } catch (caught: any) {
       setError(caught?.message || String(caught));
     } finally {
+      setTimelineLoading(false);
       setBusyVersionId(null);
     }
   };
@@ -137,6 +152,13 @@ export function TranscriptionVersionPanel({ mediaId, refreshToken, embedded = fa
         savedMarkdown: editor.markdown.replace(/\r\n?/g, "\n"),
         requestIdempotencyKey: newIdempotencyKey(),
       });
+      try {
+        setTimeline(await adminMediaApi.previewVersionTimeline(saved.version_id));
+        setTimelineError(null);
+      } catch (caught: any) {
+        setTimeline(null);
+        setTimelineError(caught?.message || "草稿已保存，但视频时间轴加载失败");
+      }
       setSaveSuccess("新草稿已保存，审核状态已重置为待审核。");
       await onChanged?.();
     } catch (caught: any) {
@@ -243,6 +265,8 @@ export function TranscriptionVersionPanel({ mediaId, refreshToken, embedded = fa
                         }
                         if (editorDirty && !window.confirm("当前修改尚未保存，确定收起校对内容吗？")) return;
                         setEditor(null);
+                        setTimeline(null);
+                        setTimelineError(null);
                         setSaveSuccess(null);
                       }}
                     >
@@ -250,24 +274,39 @@ export function TranscriptionVersionPanel({ mediaId, refreshToken, embedded = fa
                     </Button>
                   </div>
                   {isEditing && editor && (
-                    <TranscriptMarkdownEditor
-                      value={editor.markdown}
-                      onChange={(markdown) => {
-                        setEditor((current) => current ? {
-                          ...current,
-                          markdown,
-                          requestIdempotencyKey: current.markdown === markdown
-                            ? current.requestIdempotencyKey
-                            : newIdempotencyKey(),
-                        } : current);
-                        setSaveSuccess(null);
-                      }}
-                      mode={editorMode}
-                      onModeChange={setEditorMode}
-                      disabled={busy}
-                      onSave={() => void saveRevision()}
-                      dirty={editorDirty}
-                    />
+                    <>
+                      <section className="mt-3 space-y-2" aria-label="视频时间轴校对">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <h5 className="text-ui-xs font-medium text-foreground">视频校对</h5>
+                          {timelineError && <span className="text-ui-xs text-destructive">{timelineError}</span>}
+                        </div>
+                        <SynchronizedVideoTranscript
+                          mediaId={mediaId}
+                          segments={timeline?.segments ?? []}
+                          transcriptLoading={timelineLoading}
+                          transcriptError={timelineError}
+                          layout="split"
+                        />
+                      </section>
+                      <TranscriptMarkdownEditor
+                        value={editor.markdown}
+                        onChange={(markdown) => {
+                          setEditor((current) => current ? {
+                            ...current,
+                            markdown,
+                            requestIdempotencyKey: current.markdown === markdown
+                              ? current.requestIdempotencyKey
+                              : newIdempotencyKey(),
+                          } : current);
+                          setSaveSuccess(null);
+                        }}
+                        mode={editorMode}
+                        onModeChange={setEditorMode}
+                        disabled={busy}
+                        onSave={() => void saveRevision()}
+                        dirty={editorDirty}
+                      />
+                    </>
                   )}
                 </section>
                 <section className="mt-4 border-t border-border pt-4" aria-labelledby={`transcript-actions-${version.version_id}`}>
