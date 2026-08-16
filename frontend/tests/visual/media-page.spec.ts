@@ -31,10 +31,21 @@ test.describe("视频媒体", () => {
     await row.getByRole("button", { name: "进入转写工作台" }).click();
     const workbench = page.getByRole("dialog", { name: "项目交付培训" });
     await expect(workbench).toBeVisible();
-    await workbench.getByRole("button", { name: "校对内容" }).click();
+    await expect(workbench.getByText("5 个版本", { exact: true })).toBeVisible();
+    await expect(workbench.getByRole("button", { name: "校对内容" })).toHaveCount(5);
+    await workbench.getByRole("button", { name: "校对内容" }).first().click();
     await expect(workbench.getByRole("textbox", { name: "转录 Markdown 编辑器" })).toBeVisible();
     await expect(workbench.getByText("视频校对", { exact: true })).toBeVisible();
     await expect(workbench.getByRole("button", { name: "跳转到 00:00" })).toBeVisible();
+    await expect(workbench.getByRole("region", { name: "当前版本校对工作区" })).toHaveCount(1);
+
+    if (page.viewportSize()!.width >= 1024) {
+      const videoBounds = await workbench.getByLabel("视频播放器").boundingBox();
+      const transcriptBounds = await workbench.getByRole("region", { name: "视频转录稿" }).boundingBox();
+      expect(videoBounds).not.toBeNull();
+      expect(transcriptBounds).not.toBeNull();
+      expect(Math.abs(videoBounds!.height - transcriptBounds!.height)).toBeLessThanOrEqual(2);
+    }
 
     if (page.viewportSize()!.width < 768) {
       await workbench.getByRole("button", { name: "预览" }).click();

@@ -67,7 +67,7 @@ export function SynchronizedVideoTranscript({
   }, [mediaId, initialStartSeconds]);
 
   const videoSurface = (
-    <div className="relative aspect-video w-full overflow-hidden bg-black">
+    <div className={`relative w-full overflow-hidden bg-black ${layout === "split" ? "aspect-video lg:h-full lg:aspect-auto" : "aspect-video"}`}>
       {isLoading && (
         <div className="absolute inset-0 z-10 flex items-center justify-center text-gray-400">
           <LoaderCircle className="size-7 animate-spin" aria-label="正在加载视频" />
@@ -106,9 +106,9 @@ export function SynchronizedVideoTranscript({
   );
 
   return layout === "split" ? (
-    <div className="grid min-h-0 gap-3 lg:grid-cols-[minmax(0,1.15fr)_minmax(20rem,0.85fr)] lg:items-start">
-      <div className="min-w-0 overflow-hidden rounded-ui-md border border-border bg-black">{videoSurface}</div>
-      <div className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-ui-md border border-border bg-background lg:h-[32rem] lg:max-h-[calc(100vh-18rem)]">
+    <div className="grid min-h-0 gap-3 lg:h-[min(24rem,45vh)] lg:grid-cols-[minmax(0,1.15fr)_minmax(20rem,0.85fr)]">
+      <div className="flex min-h-0 min-w-0 overflow-hidden rounded-ui-md border border-border bg-black">{videoSurface}</div>
+      <div className="flex h-72 min-h-0 min-w-0 flex-col overflow-hidden rounded-ui-md border border-border bg-background sm:h-80 lg:h-auto">
         {transcript}
       </div>
     </div>
