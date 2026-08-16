@@ -120,9 +120,11 @@ try {
         if ($owner.ReturnValue -eq 0 -and [string]$owner.Sid -eq $currentSid) { $ownedDesktop.Add($desktopProcess) }
     }
     if ($ownedDesktop.Count -ne $desktopProcesses.Count) { throw 'Docker Desktop is not fully owned by the runner identity; restoration is not guaranteed.' }
-    $desktopExecutable=@($desktopProcesses | ForEach-Object ExecutablePath | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) } | Select-Object -Unique)
-    if ($desktopExecutable.Count -ne 1) { throw 'Docker Desktop restart identity did not resolve uniquely.' }
-    $desktopExecutable=[string]$desktopExecutable[0]
+    $desktopExecutable=Join-Path $env:ProgramFiles 'Docker\Docker\Docker Desktop.exe'
+    if (-not (Test-Path -LiteralPath $desktopExecutable -PathType Leaf)) { throw 'The installed Docker Desktop restart executable is unavailable.' }
+    $desktopProduct=[Diagnostics.FileVersionInfo]::GetVersionInfo($desktopExecutable).ProductName
+    if ([string]$desktopProduct -notmatch '(?i)Docker Desktop') { throw 'The installed Docker Desktop restart executable identity is invalid.' }
+    $report.restart_identity='installed-docker-desktop'
 
     $containerQuery=Invoke-Captured 'docker.exe' @('ps','-q')
     if ($containerQuery.exit_code -ne 0) { throw 'Docker daemon state is unavailable; refusing to stop the runtime.' }
