@@ -13,5 +13,6 @@ def test_docker_diagnostic_is_read_only_and_captures_failures():
     assert "stderr" in WORKFLOW
     assert "Start-Process" in WORKFLOW
     assert "RedirectStandardError" in WORKFLOW
+    assert "if ($null -eq $stdout)" in WORKFLOW
     for forbidden in ("docker system prune", "docker image rm", "docker volume rm", "docker compose down"):
         assert forbidden not in WORKFLOW
