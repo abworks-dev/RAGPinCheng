@@ -26,6 +26,7 @@ def test_tooling_inventory_is_read_only_private_and_serialized():
         "wsl.exe --mount",
         "Start-Service",
         "Start-Process",
+        "--mount Z:",
         "Invoke-WebRequest",
         "Install-Module",
         "Add-WindowsCapability",
@@ -52,5 +53,13 @@ def test_tooling_inventory_covers_required_capabilities():
 
 
 def test_wsl_capability_capture_includes_stderr_without_logging_raw_output():
-    assert "--version 2>&1 | Out-String" in SCRIPT
-    assert "--help 2>&1 | Out-String" in SCRIPT
+    assert "RedirectStandardOutput=$true" in SCRIPT
+    assert "RedirectStandardError=$true" in SCRIPT
+    assert "StandardOutput.BaseStream.CopyToAsync" in SCRIPT
+    assert "StandardError.BaseStream.CopyToAsync" in SCRIPT
+    assert "utf-16le-heuristic" in SCRIPT
+    assert ".Replace(\"$([char]0)\",'')" in SCRIPT
+    assert "decode_confident" in SCRIPT
+    assert "capability_status" in SCRIPT
+    assert "'indeterminate'" in SCRIPT
+    assert "command output" in SCRIPT

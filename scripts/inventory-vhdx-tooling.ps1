@@ -4,6 +4,64 @@ param([Parameter(Mandatory = $true)][string]$ReportPath)
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+function ConvertFrom-NativeBytes([byte[]]$Bytes) {
+    if (-not $Bytes -or $Bytes.Count -eq 0) {
+        return [ordered]@{ text=''; encoding='empty'; confident=$true; bytes=0 }
+    }
+    $offset=0; $encoding=$null; $encodingName=$null; $confident=$true
+    if ($Bytes.Count -ge 2 -and $Bytes[0] -eq 0xff -and $Bytes[1] -eq 0xfe) {
+        $encoding=[Text.Encoding]::Unicode; $encodingName='utf-16le-bom'; $offset=2
+    } elseif ($Bytes.Count -ge 2 -and $Bytes[0] -eq 0xfe -and $Bytes[1] -eq 0xff) {
+        $encoding=[Text.Encoding]::BigEndianUnicode; $encodingName='utf-16be-bom'; $offset=2
+    } elseif ($Bytes.Count -ge 3 -and $Bytes[0] -eq 0xef -and $Bytes[1] -eq 0xbb -and $Bytes[2] -eq 0xbf) {
+        $encoding=[Text.UTF8Encoding]::new($false,$true); $encodingName='utf-8-bom'; $offset=3
+    } else {
+        $sampleLength=[Math]::Min($Bytes.Count,512); $evenNulls=0; $oddNulls=0
+        for ($index=0; $index -lt $sampleLength; $index++) {
+            if ($Bytes[$index] -eq 0) { if (($index % 2) -eq 0) { $evenNulls++ } else { $oddNulls++ } }
+        }
+        if ($oddNulls -ge 2 -and $oddNulls -gt ($evenNulls * 3)) {
+            $encoding=[Text.Encoding]::Unicode; $encodingName='utf-16le-heuristic'
+        } elseif ($evenNulls -ge 2 -and $evenNulls -gt ($oddNulls * 3)) {
+            $encoding=[Text.Encoding]::BigEndianUnicode; $encodingName='utf-16be-heuristic'
+        } else {
+            try {
+                $encoding=[Text.UTF8Encoding]::new($false,$true)
+                [void]$encoding.GetString($Bytes)
+                $encodingName='utf-8'
+            } catch {
+                $encoding=[Text.Encoding]::Default; $encodingName='system-default'; $confident=$false
+            }
+        }
+    }
+    $text=$encoding.GetString($Bytes,$offset,$Bytes.Count-$offset).Replace("$([char]0)",'').Trim()
+    return [ordered]@{ text=$text; encoding=$encodingName; confident=$confident; bytes=$Bytes.Count }
+}
+
+function Invoke-NativeCapture([string]$Path, [string]$Argument) {
+    $start=[Diagnostics.ProcessStartInfo]::new()
+    $start.FileName=$Path; $start.Arguments=$Argument; $start.UseShellExecute=$false
+    $start.CreateNoWindow=$true; $start.RedirectStandardOutput=$true; $start.RedirectStandardError=$true
+    $process=[Diagnostics.Process]::new(); $process.StartInfo=$start
+    $stdout=[IO.MemoryStream]::new(); $stderr=[IO.MemoryStream]::new()
+    try {
+        if (-not $process.Start()) { throw 'Native capability command did not start.' }
+        $stdoutTask=$process.StandardOutput.BaseStream.CopyToAsync($stdout)
+        $stderrTask=$process.StandardError.BaseStream.CopyToAsync($stderr)
+        $process.WaitForExit(); [Threading.Tasks.Task]::WaitAll(@($stdoutTask,$stderrTask))
+        $stdoutDecoded=ConvertFrom-NativeBytes $stdout.ToArray()
+        $stderrDecoded=ConvertFrom-NativeBytes $stderr.ToArray()
+        $text=(@($stdoutDecoded.text,$stderrDecoded.text) | Where-Object { $_ }) -join [Environment]::NewLine
+        return [ordered]@{
+            exit_code=$process.ExitCode; text=$text.Trim()
+            stdout=[ordered]@{ bytes=$stdoutDecoded.bytes; encoding=$stdoutDecoded.encoding; confident=$stdoutDecoded.confident }
+            stderr=[ordered]@{ bytes=$stderrDecoded.bytes; encoding=$stderrDecoded.encoding; confident=$stderrDecoded.confident }
+            normalized_chars=$text.Replace("$([char]0)",'').Length
+            decode_confident=[bool]($stdoutDecoded.confident -and $stderrDecoded.confident)
+        }
+    } finally { $stdout.Dispose(); $stderr.Dispose(); $process.Dispose() }
+}
+
 function Get-ToolResult([string]$Label, [string]$Path) {
     $result=[ordered]@{
         label=$Label
@@ -17,20 +75,31 @@ function Get-ToolResult([string]$Label, [string]$Path) {
         supports_system=$false
         supports_name=$false
         supports_options=$false
+        capability_status=[ordered]@{}
+        version_capture=$null
+        help_capture=$null
+        version_failure_type=$null
+        help_failure_type=$null
     }
     if (-not $Path) { return $result }
     try {
-        $versionText=(& $Path --version 2>&1 | Out-String)
+        $versionCapture=Invoke-NativeCapture $Path '--version'
+        $versionText=$versionCapture.text
+        $result.version_capture=[ordered]@{ exit_code=$versionCapture.exit_code; stdout=$versionCapture.stdout; stderr=$versionCapture.stderr; normalized_chars=$versionCapture.normalized_chars; decode_confident=$versionCapture.decode_confident }
         $result.version_status=if ($versionText.Trim()) { 'available' } else { 'unsupported' }
-        if ($versionText -match '(?im)(?:WSL version|WSL 版本|Windows Subsystem for Linux).*?([0-9]+(?:\.[0-9]+){1,3})') { $result.version=$matches[1] }
-    } catch { $result.version_status='failed' }
+        if ($versionText -match '(?m)([0-9]+(?:\.[0-9]+){1,3})') { $result.version=$matches[1] }
+    } catch { $result.version_status='failed'; $result.version_failure_type=$_.Exception.GetType().FullName }
     try {
-        $help=(& $Path --help 2>&1 | Out-String)
+        $helpCapture=Invoke-NativeCapture $Path '--help'
+        $help=$helpCapture.text
+        $result.help_capture=[ordered]@{ exit_code=$helpCapture.exit_code; stdout=$helpCapture.stdout; stderr=$helpCapture.stderr; normalized_chars=$helpCapture.normalized_chars; decode_confident=$helpCapture.decode_confident }
         $result.help_status=if ($help.Trim()) { 'available' } else { 'failed' }
         foreach ($capability in @('mount','unmount','vhd','system','name','options')) {
-            $result["supports_$capability"]=$help.IndexOf("--$capability",[StringComparison]::OrdinalIgnoreCase) -ge 0
+            $supported=$help.IndexOf("--$capability",[StringComparison]::OrdinalIgnoreCase) -ge 0
+            $result["supports_$capability"]=$supported
+            $result.capability_status[$capability]=if ($supported) { 'supported' } elseif (-not $helpCapture.decode_confident -or -not $help.Trim()) { 'indeterminate' } else { 'unsupported' }
         }
-    } catch { $result.help_status='failed' }
+    } catch { $result.help_status='failed'; $result.help_failure_type=$_.Exception.GetType().FullName }
     return $result
 }
 
@@ -99,7 +168,7 @@ $systemDrive=Get-PSDrive -Name ($env:SystemDrive.TrimEnd(':')) -PSProvider FileS
 $report=[ordered]@{
     schema_version='vhdx-tooling-inventory/1'
     generated_at_utc=[DateTimeOffset]::UtcNow.ToString('o')
-    privacy='versions, capability flags, counts, and aggregate bytes only; no paths, names, settings values, or command output'
+    privacy='versions, capability flags, encoding metadata, counts, and aggregate bytes only; no paths, names, settings values, or command output'
     controls=[ordered]@{
         destructive_operations_executed=$false
         tools_downloaded=$false

@@ -15,6 +15,8 @@ export const adminContentApi = {
   folderRequests: (...args: Parameters<typeof api.managedFolderRequests>) => api.managedFolderRequests(...args),
   upload: (...args: Parameters<typeof api.uploadManagedContent>) => api.uploadManagedContent(...args),
   move: (...args: Parameters<typeof api.moveManagedContent>) => api.moveManagedContent(...args),
+  rename: (...args: Parameters<typeof api.renameManagedContent>) => api.renameManagedContent(...args),
+  updateVersion: (...args: Parameters<typeof api.updateManagedContentVersion>) => api.updateManagedContentVersion(...args),
   createFolderRequest: (...args: Parameters<typeof api.createFolderRequest>) => api.createFolderRequest(...args),
   reviewFolderRequest: (...args: Parameters<typeof api.reviewFolderRequest>) => api.reviewFolderRequest(...args),
   archive: (...args: Parameters<typeof api.deleteManagedContent>) => api.deleteManagedContent(...args),
@@ -24,6 +26,8 @@ export const adminContentApi = {
   publish: (...args: Parameters<typeof api.publishManagedContent>) => api.publishManagedContent(...args),
   bulkReview: (...args: Parameters<typeof api.bulkReviewManagedContent>) => api.bulkReviewManagedContent(...args),
   bulkPublish: (...args: Parameters<typeof api.bulkPublishManagedContent>) => api.bulkPublishManagedContent(...args),
+  bulkMove: (...args: Parameters<typeof api.bulkMoveManagedContent>) => api.bulkMoveManagedContent(...args),
+  bulkArchive: (...args: Parameters<typeof api.bulkArchiveManagedContent>) => api.bulkArchiveManagedContent(...args),
   fileUrl: (...args: Parameters<typeof api.managedContentFileUrl>) => api.managedContentFileUrl(...args),
   indexJobs: (...args: Parameters<typeof api.managedContentIndexJobs>) => api.managedContentIndexJobs(...args),
 };
