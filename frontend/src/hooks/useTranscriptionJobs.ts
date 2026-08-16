@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api } from "../api/client";
+import { adminMediaApi } from "../api/admin/media";
 import type { TranscriptPublicationJob, TranscriptionJob } from "../types";
 
 const ACTIVE_STATUSES = new Set(["pending", "running"]);
@@ -15,7 +15,7 @@ export function useTranscriptionJobs() {
     requestInFlight.current = true;
     const revisionAtStart = localRevision.current;
     try {
-      const latest = await api.listTranscriptionJobs(true, 100);
+      const latest = await adminMediaApi.jobs(true, 100);
       if (revisionAtStart === localRevision.current) {
         setJobs(latest);
         setError(null);
@@ -64,7 +64,7 @@ export function useTranscriptPublicationJob(indexJobId: string | null) {
     if (!indexJobId || requestInFlight.current) return;
     requestInFlight.current = true;
     try {
-      const latest = await api.getTranscriptPublicationJob(indexJobId);
+      const latest = await adminMediaApi.publicationJob(indexJobId);
       setJob(latest);
       setError(null);
     } catch (caught: any) {

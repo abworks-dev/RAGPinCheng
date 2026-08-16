@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Plus, RefreshCw, Save } from "lucide-react";
-import { api } from "../../api/client";
+import { adminContentApi } from "../../api/admin/content";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Checkbox } from "../../components/ui/checkbox";
@@ -24,7 +24,7 @@ export function AdminCategoriesPage() {
     refresh ? setRefreshing(true) : setLoading(true);
     setError(null);
     try {
-      const categoryRows = await api.managedCategories(true);
+      const categoryRows = await adminContentApi.categories(true);
       setCategories(categoryRows);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "分类加载失败");
@@ -39,7 +39,7 @@ export function AdminCategoriesPage() {
   const create = async () => {
     setSaving(true);
     try {
-      await api.createManagedCategory({
+      await adminContentApi.createCategory({
         parent_id: form.parent_id || null,
         display_code: form.display_code.trim(),
         display_name: form.display_name.trim(),
@@ -101,7 +101,7 @@ function CategoryEditor({ category, onSaved }: { category: ManagedCategory; onSa
   const save = async () => {
     setSaving(true);
     try {
-      await api.updateManagedCategory(category.id, { display_code: code.trim(), display_name: name.trim(), sort_order: Number(sortOrder) || 0, is_active: active, expected_version: category.version });
+      await adminContentApi.updateCategory(category.id, { display_code: code.trim(), display_name: name.trim(), sort_order: Number(sortOrder) || 0, is_active: active, expected_version: category.version });
       await onSaved();
       toast.success(`${name.trim()}已保存`);
     } catch (saveError) {

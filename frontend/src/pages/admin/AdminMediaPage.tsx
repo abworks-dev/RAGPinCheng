@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
-import { api } from "../../api/client";
+import { adminMediaApi } from "../../api/admin/media";
 import { Alert, AlertDescription, AlertTitle } from "../../components/ui/alert";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
@@ -12,9 +12,10 @@ import { LoadingState } from "../../components/ui/loading-state";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../../components/ui/dialog";
 import { TranscriptionWorkbenchSheet } from "../../components/TranscriptionWorkbenchSheet";
 import { useTranscriptionJobs } from "../../hooks/useTranscriptionJobs";
+import { useAdminMediaAssets } from "../../hooks/useAdminMediaAssets";
 import { createRequestId } from "../../lib/request-id";
 import type { MediaAsset, TranscriptionJob, TranscriptionProfile } from "../../types";
-import { formatAdminDate, formatBytes } from "./admin-formatters";
+import { formatAdminDate, formatBytes } from "../../lib/admin-formatters";
 
 type UploadMode = "manual" | "automatic";
 type UploadState = "waiting" | "uploading" | "succeeded" | "failed";
@@ -135,7 +136,6 @@ function pendingFromFile(file: File, profileId: string): PendingVideo {
 }
 
 export function AdminMediaPage() {
-  const [mediaAssets, setMediaAssets] = useState<MediaAsset[]>([]);
   const [deletingMediaId, setDeletingMediaId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<MediaAsset | null>(null);
   const [profiles, setProfiles] = useState<TranscriptionProfile[]>([]);
@@ -144,32 +144,16 @@ export function AdminMediaPage() {
   const [pending, setPending] = useState<PendingVideo[]>([]);
   const [bulkProfileId, setBulkProfileId] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [dragging, setDragging] = useState(false);
-  const [loadError, setLoadError] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [mediaFilter, setMediaFilter] = useState<MediaFilter>("all");
   const [lastLoadedAt, setLastLoadedAt] = useState<number | null>(null);
   const [selectedMediaId, setSelectedMediaId] = useState<string | null>(null);
   const retryIdempotencyKeys = useRef(new Map<string, string>());
   const previousJobStatuses = useRef(new Map<string, string>());
+  const { assets: mediaAssets, loading, error: loadError, refresh, removeAsset } = useAdminMediaAssets();
   const { jobs, jobsByMediaId, error: jobsError, refreshJobs, replaceJob } = useTranscriptionJobs();
-
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    setLoadError(null);
-    try {
-      setMediaAssets(await api.listMediaAssets());
-      setLastLoadedAt(Date.now());
-    } catch (e: any) {
-      setLoadError(e?.message || String(e));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { void refresh(); }, [refresh]);
   useEffect(() => {
     const currentStatuses = new Map(jobs.map((job) => [job.job_id, job.status]));
     const reachedTerminalState = jobs.some((job) => {
@@ -180,7 +164,7 @@ export function AdminMediaPage() {
     if (reachedTerminalState) void refresh();
   }, [jobs, refresh]);
   useEffect(() => {
-    api.listTranscriptionProfiles()
+    adminMediaApi.profiles()
       .then((items) => {
         setProfiles(items);
         const first = items.find((item) => item.admission === "enabled" && item.availability === "available");
@@ -267,6 +251,7 @@ export function AdminMediaPage() {
   const selectedAsset = selectedMediaId ? mediaAssets.find((asset) => asset.media_id === selectedMediaId) ?? null : null;
   const refreshMediaState = useCallback(async () => {
     await Promise.all([refresh(), refreshJobs()]);
+    setLastLoadedAt(Date.now());
   }, [refresh, refreshJobs]);
 
   useEffect(() => {
@@ -276,8 +261,8 @@ export function AdminMediaPage() {
   async function deleteFailedMedia(asset: MediaAsset) {
     setDeletingMediaId(asset.media_id);
     try {
-      await api.deleteFailedMediaAsset(asset.media_id);
-      setMediaAssets((items) => items.filter((item) => item.media_id !== asset.media_id));
+      await adminMediaApi.deleteFailedAsset(asset.media_id);
+      removeAsset(asset.media_id);
       setDeleteTarget(null);
     } catch (e: any) {
       setUploadError(e?.message || String(e));
@@ -290,15 +275,15 @@ export function AdminMediaPage() {
     updatePending(item.id, { state: "uploading", error: null });
     try {
       if (mode === "automatic") {
-        const uploaded = await api.uploadAutomaticMediaVideo(item.file, item.title.trim(), item.profileId, item.requestId);
-        if (uploaded.transcription_job_id) replaceJob(await api.getTranscriptionJob(uploaded.transcription_job_id));
+        const uploaded = await adminMediaApi.uploadAutomatic(item.file, item.title.trim(), item.profileId, item.requestId);
+        if (uploaded.transcription_job_id) replaceJob(await adminMediaApi.getJob(uploaded.transcription_job_id));
       } else {
         const transcript = new File(
           [item.transcriptText!],
           item.transcriptFile!.name,
           { type: "text/markdown" },
         );
-        await api.uploadMediaVideo(item.file, transcript, item.title.trim());
+        await adminMediaApi.uploadManual(item.file, transcript, item.title.trim());
       }
       updatePending(item.id, { state: "succeeded", error: null });
     } catch (e: any) {
@@ -325,7 +310,7 @@ export function AdminMediaPage() {
 
   async function cancelJob(job: TranscriptionJob) {
     try {
-      replaceJob(await api.cancelTranscriptionJob(job.job_id));
+      replaceJob(await adminMediaApi.cancelJob(job.job_id));
       await refresh();
     } catch (e: any) {
       setUploadError(e?.message || String(e));
@@ -339,7 +324,7 @@ export function AdminMediaPage() {
       retryIdempotencyKeys.current.set(job.job_id, requestKey);
     }
     try {
-      replaceJob(await api.retryTranscription(job.media_id, job.profile_id, requestKey));
+      replaceJob(await adminMediaApi.retryJob(job.media_id, job.profile_id, requestKey));
       retryIdempotencyKeys.current.delete(job.job_id);
       await refresh();
     } catch (e: any) {
@@ -512,7 +497,7 @@ export function AdminMediaPage() {
           <div><h2 id="media-assets-title" className="text-ui-base font-semibold">媒体资源</h2><p className="mt-1 text-ui-xs text-muted-foreground">按每次提交分别记录媒体与处理进度；同名文件不会合并。</p></div>
           <div className="flex items-center gap-2">
             <span className="text-ui-xs text-muted-foreground">共 {mediaAssets.length} 个视频</span>
-            <Button size="sm" variant="outline" aria-label="刷新媒体资源" title="刷新媒体资源" disabled={loading} onClick={() => void Promise.all([refresh(), refreshJobs()])}>
+            <Button size="sm" variant="outline" aria-label="刷新媒体资源" title="刷新媒体资源" disabled={loading} onClick={() => void refreshMediaState()}>
               <RefreshCw className="size-4" aria-hidden="true" />
               刷新
             </Button>

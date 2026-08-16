@@ -1,10 +1,13 @@
 import { Copy, KeyRound, MoreHorizontal, Plus, Settings, Shield, ShieldCheck, UserCheck, UserRound, UserX, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { api } from "../../api/client";
+import { adminConversationsApi } from "../../api/admin/conversations";
+import { adminContentApi } from "../../api/admin/content";
+import { adminUsersApi } from "../../api/admin/users";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Card, CardContent } from "../../components/ui/card";
+import { AdminConversationDetail } from "../../components/admin/AdminConversationDetail";
 import { Checkbox } from "../../components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../../components/ui/dialog";
 import { EmptyState } from "../../components/ui/empty-state";
@@ -15,13 +18,8 @@ import { Select } from "../../components/ui/select";
 import { toast } from "../../components/ui/toast";
 import { cn } from "../../lib/utils";
 import type { AdminConversation, AdminUser, ContentPermission, ContentPermissionGroup, ConversationState } from "../../types";
-import { formatAdminDate } from "./admin-formatters";
-
-const roleLabels: Record<ConversationState["messages"][number]["role"], string> = {
-  user: "用户",
-  assistant: "助手",
-  system: "系统",
-};
+import { formatAdminDate } from "../../lib/admin-formatters";
+import { useAdminUsers } from "../../hooks/useAdminUsers";
 
 const permissionOptions: { key: ContentPermission; label: string; description: string }[] = [
   { key: "organize", label: "整理、上传", description: "上传资料并提交确认" },
@@ -35,12 +33,12 @@ const samePermissions = (left: ContentPermission[], right: ContentPermission[]) 
   left.length === right.length && left.every((item) => right.includes(item));
 
 export function AdminUsersPage() {
-  const [users, setUsers] = useState<AdminUser[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { users, loading, error, refresh: refreshUsers } = useAdminUsers();
   const [drillUser, setDrillUser] = useState<AdminUser | null>(null);
   const [filter, setFilter] = useState("");
   const [groups, setGroups] = useState<ContentPermissionGroup[]>([]);
+  const [groupsLoading, setGroupsLoading] = useState(true);
+  const [groupsError, setGroupsError] = useState<string | null>(null);
   const [permissionUser, setPermissionUser] = useState<AdminUser | null>(null);
   const [managingGroups, setManagingGroups] = useState(false);
 
@@ -56,30 +54,29 @@ export function AdminUsersPage() {
     );
   }, [users, filter]);
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  const refreshGroups = useCallback(async () => {
+    setGroupsLoading(true);
+    setGroupsError(null);
     try {
-      const [{ users }, permissionGroups] = await Promise.all([
-        api.adminListUsers(),
-        api.managedContentPermissionGroups(),
-      ]);
-      setUsers(users);
-      setGroups(permissionGroups);
-    } catch (e: any) {
-      setError(e?.message || String(e));
+      setGroups(await adminContentApi.permissionGroups());
+    } catch (caught) {
+      setGroupsError(caught instanceof Error ? caught.message : String(caught));
     } finally {
-      setLoading(false);
+      setGroupsLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    refresh();
-  }, [refresh]);
+    void refreshGroups();
+  }, [refreshGroups]);
+
+  const refresh = useCallback(async () => {
+    await Promise.all([refreshUsers(), refreshGroups()]);
+  }, [refreshGroups, refreshUsers]);
 
   async function toggleActive(u: AdminUser) {
     try {
-      await api.adminPatchUser(u.id, { is_active: !u.is_active });
+      await adminUsersApi.patch(u.id, { is_active: !u.is_active });
       refresh();
     } catch (e: any) {
       alert(e?.message || String(e));
@@ -90,7 +87,7 @@ export function AdminUsersPage() {
     const newRole = u.role === "admin" ? "user" : "admin";
     if (!confirm(`将 ${u.real_name}（${u.employee_id}）的角色改为 ${newRole}？`)) return;
     try {
-      await api.adminPatchUser(u.id, { role: newRole });
+      await adminUsersApi.patch(u.id, { role: newRole });
       refresh();
     } catch (e: any) {
       alert(e?.message || String(e));
@@ -105,7 +102,7 @@ export function AdminUsersPage() {
       return;
     }
     try {
-      await api.adminPatchUser(u.id, { reset_password: pw });
+      await adminUsersApi.patch(u.id, { reset_password: pw });
       alert("密码已重置；该用户的所有会话已失效。");
     } catch (e: any) {
       alert(e?.message || String(e));
@@ -149,9 +146,9 @@ export function AdminUsersPage() {
         </CardContent>
       </Card>
 
-      {error ? (
-        <ErrorState title="用户列表加载失败" description={error} />
-      ) : loading ? (
+    {(error || groupsError) ? (
+        <ErrorState title="用户列表加载失败" description={error || groupsError || "权限组加载失败"} />
+      ) : loading || groupsLoading ? (
         <Card>
           <LoadingState className="min-h-56" label="正在加载用户…" />
         </Card>
@@ -270,7 +267,7 @@ function PermissionDialog({ user, groups, onClose, onSaved }: { user: AdminUser 
     if (saving) return;
     setSaving(true);
     try {
-      await api.updateManagedContentPermissions(user.id, permissions);
+      await adminContentApi.updatePermissions(user.id, permissions);
       await onSaved();
       toast.success(`${user.real_name}的资料权限已保存`);
       onClose();
@@ -326,8 +323,8 @@ function PermissionGroupsDialog({ open, groups, onOpenChange, onSaved }: { open:
     if (saving) return;
     setSaving(true);
     try {
-      if (selected) await api.updateManagedContentPermissionGroup(selected.id, { display_name: name.trim(), permissions });
-      else await api.createManagedContentPermissionGroup({ display_name: name.trim(), permissions });
+      if (selected) await adminContentApi.updatePermissionGroup(selected.id, { display_name: name.trim(), permissions });
+      else await adminContentApi.createPermissionGroup({ display_name: name.trim(), permissions });
       await onSaved(); toast.success(selected ? "权限组已保存" : "权限组已创建");
     } catch (saveError) { toast.error(saveError instanceof Error ? saveError.message : "权限组保存失败"); }
     finally { setSaving(false); }
@@ -336,7 +333,7 @@ function PermissionGroupsDialog({ open, groups, onOpenChange, onSaved }: { open:
   const deactivate = async () => {
     if (!selected || selected.is_system || saving) return;
     setSaving(true);
-    try { await api.updateManagedContentPermissionGroup(selected.id, { is_active: !selected.is_active }); await onSaved(); toast.success(selected.is_active ? "权限组已停用" : "权限组已启用"); }
+    try { await adminContentApi.updatePermissionGroup(selected.id, { is_active: !selected.is_active }); await onSaved(); toast.success(selected.is_active ? "权限组已停用" : "权限组已启用"); }
     catch (saveError) { toast.error(saveError instanceof Error ? saveError.message : "权限组状态保存失败"); }
     finally { setSaving(false); }
   };
@@ -508,7 +505,7 @@ function UserConversationsDrillIn({
   useEffect(() => {
     (async () => {
       try {
-        const { conversations } = await api.adminListUserConversations(user.id);
+        const { conversations } = await adminConversationsApi.listForUser(user.id);
         setList(conversations);
       } finally {
         setLoading(false);
@@ -550,7 +547,7 @@ function UserConversationsDrillIn({
                       type="button"
                       onClick={async () => {
                         try {
-                          const state = await api.adminGetConversation(conversation.id);
+                          const state = await adminConversationsApi.get(conversation.id);
                           setSelected(state);
                         } catch (e: any) {
                           alert(e?.message || String(e));
@@ -573,44 +570,11 @@ function UserConversationsDrillIn({
           </div>
 
           <div className="min-h-0 overflow-y-auto p-4 sm:p-5">
-            {!selected ? (
-              <EmptyState
-                className="min-h-56 border-0 bg-surface-muted"
-                title="选择一条对话"
-                description="从列表选择对话后，可在这里查看完整消息。"
-              />
-            ) : (
-              <div className="space-y-4">
-                <div className="border-b border-border pb-3">
-                  <h3 className="text-ui-lg font-semibold text-foreground">{selected.title}</h3>
-                  <p className="mt-1 text-ui-xs text-muted-foreground">{selected.turn_index} 轮对话</p>
-                </div>
-                {selected.messages.map((message, index) => {
-                  const isUser = message.role === "user";
-                  return (
-                    <article
-                      key={message.id ?? `${message.role}-${index}`}
-                      className={cn(
-                        "rounded-ui-xl border px-4 py-3",
-                        isUser
-                          ? "ml-auto w-fit max-w-[88%] border-primary/20 bg-primary/10"
-                          : "mr-auto w-full max-w-3xl border-border bg-surface-muted",
-                      )}
-                    >
-                      <Badge
-                        variant={message.role === "user" ? "info" : message.role === "system" ? "warning" : "outline"}
-                        className={message.role === "assistant" ? "border-border bg-card" : undefined}
-                      >
-                        {roleLabels[message.role]}
-                      </Badge>
-                      <p className="mt-2 max-w-[72ch] whitespace-pre-wrap break-words text-ui-sm leading-relaxed text-foreground">
-                        {message.content}
-                      </p>
-                    </article>
-                  );
-                })}
-              </div>
-            )}
+            <AdminConversationDetail
+              conversation={selected}
+              emptyTitle="选择一条对话"
+              emptyDescription="从列表选择对话后，可在这里查看完整消息。"
+            />
           </div>
         </div>
       </Card>
