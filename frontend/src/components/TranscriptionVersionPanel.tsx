@@ -14,6 +14,7 @@ function statusLabel(status: string) {
     review_rejected: "审核拒绝",
     not_required: "无需审核",
     draft: "草稿",
+    not_published: "未发布",
     publishing: "发布中",
     published: "已发布",
     publication_failed: "发布失败",
@@ -24,6 +25,10 @@ function statusLabel(status: string) {
     done: "候选索引完成",
     failed: "候选索引失败",
   } as Record<string, string>)[status] ?? status;
+}
+
+function sourceLabel(source: string) {
+  return ({ automatic: "自动转录", manual: "人工转录" } as Record<string, string>)[source] ?? "其他来源";
 }
 
 export function TranscriptionVersionPanel({ mediaId, refreshToken, embedded = false, onChanged }: { mediaId: string; refreshToken?: string | null; embedded?: boolean; onChanged?: () => void | Promise<void> }) {
@@ -113,28 +118,66 @@ export function TranscriptionVersionPanel({ mediaId, refreshToken, embedded = fa
           {versions.map((version) => {
             const busy = busyVersionId === version.version_id;
             const canPublish = version.source === "automatic" && version.review_status === "review_approved" && (version.publication_status === "not_published" || version.publication_status === "publication_failed");
+            const publishLabel = version.publication_status === "published"
+              ? "已发布"
+              : version.publication_status === "publishing"
+                ? "发布中"
+                : "发布到知识库";
+            const publishHint = version.publication_status === "published"
+              ? "当前版本已发布"
+              : version.publication_status === "publishing"
+                ? "正在处理发布任务"
+                : version.source !== "automatic"
+                  ? "人工转录版本暂不支持自动发布"
+                  : version.review_status !== "review_approved"
+                    ? "审核通过后可发布"
+                    : null;
+            const publishHintId = `publish-hint-${version.version_id}`;
             return (
-              <div key={version.version_id} className="rounded-ui-md border border-border bg-background p-3">
+              <article key={version.version_id} className="rounded-ui-md border border-border bg-background p-4">
                 <div className="flex flex-wrap items-center gap-2">
                   <Badge variant={version.is_current ? "success" : "secondary"}>{version.is_current ? "当前正式版本" : statusLabel(version.publication_status)}</Badge>
                   <Badge variant="secondary">{statusLabel(version.review_status)}</Badge>
-                  <span className="font-mono text-ui-xs text-muted-foreground">{version.version_id}</span>
                 </div>
-                <p className="mt-2 break-words text-ui-xs text-muted-foreground">
-                  来源 {version.source} · Profile {version.profile_id || "人工"} · Provider {version.provider_key || "—"} · 模型 {version.model_id || "—"}@{version.model_revision || "—"}
-                </p>
+                <dl className="mt-3 grid gap-2 text-ui-xs text-muted-foreground sm:grid-cols-2">
+                  <div><dt className="inline font-medium text-foreground">来源：</dt> <dd className="inline">{sourceLabel(version.source)}</dd></div>
+                  <div><dt className="inline font-medium text-foreground">审核状态：</dt> <dd className="inline">{statusLabel(version.review_status)}</dd></div>
+                </dl>
+                <details className="mt-3 text-ui-xs text-muted-foreground">
+                  <summary className="cursor-pointer select-none font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">查看技术详情</summary>
+                  <dl className="mt-2 grid gap-1 rounded-ui-sm bg-surface-muted/60 p-3 sm:grid-cols-2">
+                    <div><dt className="inline">版本编号：</dt> <dd className="inline break-all font-mono">{version.version_id}</dd></div>
+                    <div><dt className="inline">Profile 标识：</dt> <dd className="inline break-all font-mono">{version.profile_id || "—"}</dd></div>
+                    <div><dt className="inline">Provider 标识：</dt> <dd className="inline break-all font-mono">{version.provider_key || "—"}</dd></div>
+                    <div><dt className="inline">模型：</dt> <dd className="inline break-all font-mono">{version.model_id ? `${version.model_id}@${version.model_revision || "—"}` : "—"}</dd></div>
+                  </dl>
+                </details>
                 {version.review_note && <p className="mt-1 text-ui-xs">审核备注：{version.review_note}</p>}
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <Button size="sm" variant="outline" disabled={busy} onClick={() => void previewVersion(version.version_id)}>预览 Markdown</Button>
-                  {version.review_status === "awaiting_review" && <>
-                    <Input aria-label={`审核备注 ${version.version_id}`} className="h-8 min-w-0 flex-1 sm:w-48 sm:flex-none" value={reviewNote[version.version_id] || ""} onChange={(event) => setReviewNote((current) => ({ ...current, [version.version_id]: event.target.value }))} />
-                    <Button size="sm" disabled={busy} onClick={() => void reviewVersion(version.version_id, true)}>审核通过</Button>
-                    <Button size="sm" variant="outline" disabled={busy} onClick={() => void reviewVersion(version.version_id, false)}>拒绝</Button>
-                  </>}
-                  <Button size="sm" disabled={busy || !canPublish} onClick={() => void publishVersion(version.version_id)}>发布</Button>
-                </div>
-                {preview?.versionId === version.version_id && <pre className="mt-3 max-h-64 overflow-auto whitespace-pre-wrap rounded-ui-md bg-surface-muted p-3 text-ui-xs">{preview.markdown}</pre>}
-              </div>
+                <section className="mt-4 border-t border-border pt-4" aria-labelledby={`transcript-content-${version.version_id}`}>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h4 id={`transcript-content-${version.version_id}`} className="text-ui-sm font-semibold">转录内容</h4>
+                    <Button size="sm" variant="outline" disabled={busy} onClick={() => void previewVersion(version.version_id)}>预览 Markdown</Button>
+                  </div>
+                  {preview?.versionId === version.version_id && <pre className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap rounded-ui-md bg-surface-muted p-3 text-ui-xs">{preview.markdown}</pre>}
+                </section>
+                <section className="mt-4 border-t border-border pt-4" aria-labelledby={`transcript-actions-${version.version_id}`}>
+                  <h4 id={`transcript-actions-${version.version_id}`} className="text-ui-sm font-semibold">审核与发布</h4>
+                  {version.review_status === "awaiting_review" && <div className="mt-3">
+                    <label htmlFor={`review-note-${version.version_id}`} className="text-ui-xs font-medium">审核备注 <span className="font-normal text-muted-foreground">（可选）</span></label>
+                    <Input id={`review-note-${version.version_id}`} aria-label={`审核备注 ${version.version_id}`} className="mt-1 h-9" placeholder="记录术语、时间轴或内容判断依据" value={reviewNote[version.version_id] || ""} onChange={(event) => setReviewNote((current) => ({ ...current, [version.version_id]: event.target.value }))} />
+                  </div>}
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    {version.review_status === "awaiting_review" && <>
+                      <Button size="sm" disabled={busy} onClick={() => void reviewVersion(version.version_id, true)}>审核通过</Button>
+                      <Button size="sm" variant="outline" disabled={busy} onClick={() => void reviewVersion(version.version_id, false)}>拒绝</Button>
+                    </>}
+                    <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
+                      <Button size="sm" disabled={busy || !canPublish} aria-describedby={!canPublish ? publishHintId : undefined} onClick={() => void publishVersion(version.version_id)}>{publishLabel}</Button>
+                      {publishHint && <span id={publishHintId} className="text-ui-xs text-muted-foreground">{publishHint}</span>}
+                    </div>
+                  </div>
+                </section>
+              </article>
             );
           })}
           {currentVersionId && <p className="text-ui-xs text-muted-foreground">正式检索 head：{currentVersionId}</p>}
