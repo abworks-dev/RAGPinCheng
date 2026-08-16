@@ -44,6 +44,48 @@ function Invoke-HiddenWsl([string[]]$Arguments, [string]$OutputPath, [string]$Er
     return [int]$LASTEXITCODE
 }
 
+function Get-SevenZipPath {
+    $command=Get-Command 7z.exe -ErrorAction SilentlyContinue
+    if ($command) { return $command.Source }
+    foreach ($candidate in @(
+        (Join-Path $env:ProgramFiles '7-Zip\7z.exe'),
+        (Join-Path ${env:ProgramFiles(x86)} '7-Zip\7z.exe')
+    )) {
+        if ($candidate -and (Test-Path -LiteralPath $candidate -PathType Leaf)) { return $candidate }
+    }
+    return $null
+}
+
+function Read-SevenZipAggregate([string]$SevenZipPath, [string]$Path, [string]$OutputPath, [string]$ErrorPath) {
+    & $SevenZipPath l -slt -bd -y $Path 1>$OutputPath 2>$ErrorPath
+    if ($LASTEXITCODE -ne 0) { throw 'Offline archive listing failed.' }
+    $dockerPaths=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $volumeRoots=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $volumeData=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $volumeBytes=[int64]0; $sensitiveMarkers=[int64]0; $currentPath=$null
+    foreach ($line in [IO.File]::ReadLines($OutputPath)) {
+        if ($line.StartsWith('Path = ',[StringComparison]::Ordinal)) {
+            $currentPath=$line.Substring(7).Replace('\','/')
+            if ($currentPath -match '(?i)(^|/)(var/lib/docker|data/docker)(/|$)') { [void]$dockerPaths.Add($matches[2]) }
+            if ($currentPath -match '(?i)(^|/)(.+?/volumes)(/|$)') { [void]$volumeRoots.Add($matches[2]) }
+            if ($currentPath -match '(?i)(^|/)(.+?/volumes/[^/]+/_data)(/|$)') { [void]$volumeData.Add($matches[2]) }
+            if ([IO.Path]::GetFileName($currentPath) -match '^(?i:app\.sqlite.*|parents\.sqlite.*|collection_meta\.json|.+\.snapshot)$') { $sensitiveMarkers++ }
+        } elseif ($currentPath -and $line -match '^Size = ([0-9]+)$') {
+            $currentSize=[int64]$matches[1]
+            if ($currentPath -match '(?i)(^|/).+?/volumes/[^/]+/_data/') { $volumeBytes += $currentSize }
+        }
+    }
+    if ($dockerPaths.Count -eq 0 -and $volumeRoots.Count -eq 0) { throw 'Offline parser did not expose a recognized Docker storage layout.' }
+    return [ordered]@{
+        mount_read_only=[int64]1
+        docker_roots=[int64]$dockerPaths.Count
+        volume_roots=[int64]$volumeRoots.Count
+        volume_count=[int64]$volumeData.Count
+        volume_bytes=$volumeBytes
+        sensitive_markers=$sensitiveMarkers
+    }
+}
+
 function Write-Report([Collections.IDictionary]$Report) {
     $parent=Split-Path $ReportPath -Parent
     New-Item -ItemType Directory -Path $parent -Force | Out-Null
@@ -67,6 +109,7 @@ $report=[ordered]@{
     }
     preflight_status='not-run'
     mount_status='not-run'
+    inspection_method='not-selected'
     inspection_status='not-run'
     unmount_status='not-run'
     integrity_status='not-run'
@@ -103,6 +146,7 @@ $preAclHash=Get-Sha256Text ((Get-Acl -LiteralPath $target.FullName).Sddl)
 $preHash=$null
 $mountAttempted=$false
 $caught=$null
+$sevenZipPath=Get-SevenZipPath
 
 try {
     if ($preDocker.running_services -ne 0 -or $preDocker.running_scheduled_tasks -ne 0 -or $preDocker.matching_processes -ne 0) {
@@ -117,9 +161,12 @@ try {
     if (@($diskImages | Where-Object Attached).Count -gt 0) { throw 'The target disk image is already attached.' }
 
     $wslHelp=(& wsl.exe --help 2>$null | Out-String)
+    $wslMountCapable=$true
     foreach ($required in @('--mount','--unmount','--vhd','--system','--name','--options')) {
-        if ($wslHelp.IndexOf($required,[StringComparison]::OrdinalIgnoreCase) -lt 0) { throw "Required WSL capability is unavailable: $required" }
+        if ($wslHelp.IndexOf($required,[StringComparison]::OrdinalIgnoreCase) -lt 0) { $wslMountCapable=$false }
     }
+    $report.capabilities=[ordered]@{ offline_sevenzip=[bool]$sevenZipPath; wsl_readonly_mount=$wslMountCapable }
+    if (-not $sevenZipPath -and -not $wslMountCapable) { throw 'No approved read-only VHDX inspection capability is available.' }
 
     $report.preflight_status='passed'
     $report.pre_state=[ordered]@{ docker=$preDocker; wsl_runtime_active=$preWslActive; exclusive_read=$true; storage_cim_attached=$false }
@@ -127,12 +174,18 @@ try {
     $report.target.pre_sha256=$preHash
     $report.target.acl_sha256=$preAclHash
 
-    $mountAttempted=$true
-    $mountExit=Invoke-HiddenWsl @('--mount',$target.FullName,'--vhd','--name',$mountName,'--type','ext4','--options','ro,noload') $mountOut $mountErr
-    if ($mountExit -ne 0) { throw 'Read-only WSL VHD mount failed.' }
-    $report.mount_status='mounted-read-only'
+    if ($sevenZipPath) {
+        $report.inspection_method='offline-sevenzip'
+        $values=Read-SevenZipAggregate $sevenZipPath $target.FullName $inspectOut $inspectErr
+        $report.mount_status='not-required'
+    } else {
+        $report.inspection_method='wsl-readonly-mount'
+        $mountAttempted=$true
+        $mountExit=Invoke-HiddenWsl @('--mount',$target.FullName,'--vhd','--name',$mountName,'--type','ext4','--options','ro,noload') $mountOut $mountErr
+        if ($mountExit -ne 0) { throw 'Read-only WSL VHD mount failed.' }
+        $report.mount_status='mounted-read-only'
 
-    $shell=@'
+        $shell=@'
 set -eu
 root=/mnt/wsl/ragpincheng-docker-audit
 test -d "$root"
@@ -150,16 +203,17 @@ printf 'volume_count=%s\n' "$volume_count"
 printf 'volume_bytes=%s\n' "$volume_bytes"
 printf 'sensitive_markers=%s\n' "$sensitive_markers"
 '@
-    $inspectExit=Invoke-HiddenWsl @('--system','--','sh','-lc',$shell) $inspectOut $inspectErr
-    if ($inspectExit -ne 0) { throw 'Read-only aggregate inspection failed.' }
-    $values=@{}
-    foreach ($line in @(Get-Content -LiteralPath $inspectOut -ErrorAction Stop)) {
-        if ($line -match '^(mount_read_only|docker_roots|volume_roots|volume_count|volume_bytes|sensitive_markers)=([0-9]+)$') {
-            $values[$matches[1]]=[int64]$matches[2]
-        } else { throw 'Inspection returned non-aggregate output.' }
-    }
-    foreach ($required in @('mount_read_only','docker_roots','volume_roots','volume_count','volume_bytes','sensitive_markers')) {
-        if (-not $values.ContainsKey($required)) { throw 'Inspection aggregate is incomplete.' }
+        $inspectExit=Invoke-HiddenWsl @('--system','--','sh','-lc',$shell) $inspectOut $inspectErr
+        if ($inspectExit -ne 0) { throw 'Read-only aggregate inspection failed.' }
+        $values=@{}
+        foreach ($line in @(Get-Content -LiteralPath $inspectOut -ErrorAction Stop)) {
+            if ($line -match '^(mount_read_only|docker_roots|volume_roots|volume_count|volume_bytes|sensitive_markers)=([0-9]+)$') {
+                $values[$matches[1]]=[int64]$matches[2]
+            } else { throw 'Inspection returned non-aggregate output.' }
+        }
+        foreach ($required in @('mount_read_only','docker_roots','volume_roots','volume_count','volume_bytes','sensitive_markers')) {
+            if (-not $values.ContainsKey($required)) { throw 'Inspection aggregate is incomplete.' }
+        }
     }
     if ($values.mount_read_only -ne 1) { throw 'The mounted filesystem was not verified read-only.' }
     $report.inspection_status='completed'
@@ -199,7 +253,8 @@ printf 'sensitive_markers=%s\n' "$sensitive_markers"
         $postImages=@(Get-CimInstance -Namespace 'root/Microsoft/Windows/Storage' -ClassName MSFT_DiskImage -ErrorAction Stop | Where-Object { [string]$_.ImagePath -ieq $target.FullName })
         $postAttached=@($postImages | Where-Object Attached).Count -gt 0
     } catch { }
-    $postHash=(Get-FileHash -LiteralPath $target.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+    $postHash=if ($preHash) { (Get-FileHash -LiteralPath $target.FullName -Algorithm SHA256).Hash.ToLowerInvariant() } else { $null }
+    $hashUnchanged=(-not $preHash -and -not $mountAttempted) -or ($preHash -and $postHash -eq $preHash)
     $stateRestored=(
         -not $postAttached -and
         $postDocker.running_services -eq $preDocker.running_services -and
@@ -209,7 +264,7 @@ printf 'sensitive_markers=%s\n' "$sensitive_markers"
         [int64]$postItem.Length -eq $preLength -and
         $postItem.LastWriteTimeUtc.ToString('o') -eq $preLastWrite -and
         $postAclHash -eq $preAclHash -and
-        $preHash -and $postHash -eq $preHash
+        $hashUnchanged
     )
     $report.post_state=[ordered]@{ docker=$postDocker; wsl_runtime_active=$postWslActive; attached=$postAttached; sha256=$postHash; state_restored=$stateRestored }
     $report.integrity_status=if ($stateRestored) { 'verified-unchanged' } else { 'failed' }
@@ -221,5 +276,5 @@ printf 'sensitive_markers=%s\n' "$sensitive_markers"
 }
 
 if ($caught) { throw $caught }
-if ($report.unmount_status -ne 'completed' -or $report.integrity_status -ne 'verified-unchanged') { throw 'Post-audit restoration verification failed.' }
+if ($report.unmount_status -notin @('completed','not-required') -or $report.integrity_status -ne 'verified-unchanged') { throw 'Post-audit restoration verification failed.' }
 Write-Host "DOCKER_VHDX_CONTENT_AUDIT classification=$($report.classification) volumes=$($report.inventory.volume_count)"

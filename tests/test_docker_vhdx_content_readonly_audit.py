@@ -20,6 +20,10 @@ def test_vhdx_content_audit_is_exact_read_only_and_fail_closed():
     assert "post-audit-state-not-restored" in SCRIPT
     assert "Get-FileHash" in SCRIPT
     assert "state_restored" in SCRIPT
+    assert "offline-sevenzip" in SCRIPT
+    assert "Read-SevenZipAggregate" in SCRIPT
+    assert "No approved read-only VHDX inspection capability is available" in SCRIPT
+    assert "$postHash=if ($preHash)" in SCRIPT
     for forbidden in (
         "Remove-Item",
         "Optimize-VHD",
