@@ -172,20 +172,25 @@ test.describe("资料库", () => {
     await expectNoBodyOverflow(page);
   });
 
-  test("indexed files open in the shared preview sheet", async ({ page }) => {
+  test("indexed files return from the shared preview sheet to their detail dialog", async ({ page }) => {
     await openTab(page, "资料管理");
     await openRootFolder(page);
     const title = page.getByText("建筑信息模型交付标准（合成长文件名用于响应式检查）", { exact: true }).filter({ visible: true });
     const item = page.viewportSize()!.width < 1024 ? title.locator("xpath=ancestor::li") : title.locator("xpath=ancestor::tr");
     await item.getByRole("button", { name: "查看", exact: true }).click();
 
-    const detail = page.getByRole("dialog", { name: "建筑信息模型交付标准（合成长文件名用于响应式检查）" });
+    const detail = page.getByRole("dialog").filter({ has: page.getByRole("button", { name: "预览文件" }) });
+    await expect(detail).toBeVisible();
     await detail.getByRole("button", { name: "预览文件" }).click();
+    await expect(page.getByRole("button", { name: "返回资料详情" })).toBeVisible();
     await expect(page.getByRole("button", { name: "关闭预览" })).toBeVisible();
+    await expect(detail).toBeHidden();
     await expectNoBodyOverflow(page);
 
-    await page.getByRole("button", { name: "关闭预览" }).click();
-    await expect(page.getByRole("button", { name: "关闭预览" })).toBeHidden();
+    await page.getByRole("button", { name: "返回资料详情" }).click();
+    await expect(detail).toBeVisible();
+    await expect(detail.getByRole("link", { name: "下载" })).toBeVisible();
+    await expectNoBodyOverflow(page);
   });
 
   test("move-to-trash confirmation explains impact and exposes a stable busy state", async ({ page }) => {

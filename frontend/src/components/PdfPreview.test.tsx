@@ -58,6 +58,17 @@ function OpenPreview() {
   );
 }
 
+function ReturnTargetProbe() {
+  const { state, open, close } = usePdfPreview();
+  return (
+    <>
+      <output role="status" aria-label="预览返回目标">{state.returnTo || "none"}</output>
+      <button type="button" onClick={() => open("pdf-1", "测试规范", "pdf", 1, {}, "managed-content-detail")}>打开详情预览</button>
+      <button type="button" onClick={close}>关闭预览</button>
+    </>
+  );
+}
+
 function renderPreview() {
   render(
     <PdfPreviewProvider>
@@ -110,6 +121,20 @@ describe("PdfPreview interactions", () => {
     fireEvent.click(screen.getByRole("button", { name: "放大" }));
     expect(screen.getByRole("combobox", { name: "缩放模式" })).toHaveValue("custom");
     expect(screen.getByText("110%")).toBeInTheDocument();
+  });
+
+  it("tracks and clears the managed content return target", () => {
+    render(
+      <PdfPreviewProvider>
+        <ReturnTargetProbe />
+      </PdfPreviewProvider>,
+    );
+
+    expect(screen.getByRole("status", { name: "预览返回目标" })).toHaveTextContent("none");
+    fireEvent.click(screen.getByRole("button", { name: "打开详情预览" }));
+    expect(screen.getByRole("status", { name: "预览返回目标" })).toHaveTextContent("managed-content-detail");
+    fireEvent.click(screen.getByRole("button", { name: "关闭预览" }));
+    expect(screen.getByRole("status", { name: "预览返回目标" })).toHaveTextContent("none");
   });
 
   it("switches between hand panning and text selection", () => {

@@ -250,6 +250,9 @@ export async function installAdminRoutes(
     if (request.method() === "GET" && /^\/api\/admin\/transcription\/media\/[^/]+\/versions$/.test(path)) return json(route, []);
     if (path === "/api/categories") return json(route, { categories: [], second_level_categories: [] });
     if (path === "/api/conversations") return json(route, { conversations: [] });
+    if (request.method() === "GET" && path.startsWith("/api/pdf/")) {
+      return route.fulfill({ status: 404, contentType: "application/pdf", body: "" });
+    }
     if (path === "/api/admin/users") return json(route, { users: permissionUsers.map((user) => ({
       id: user.user_id, employee_id: user.employee_id, real_name: user.real_name, role: user.role,
       is_active: user.is_active, created_at: 1700000000, last_login_at: 1700000000,
