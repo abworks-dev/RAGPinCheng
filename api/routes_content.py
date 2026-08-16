@@ -6,7 +6,7 @@ import re
 import sqlite3
 import time
 import uuid
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
@@ -86,6 +86,9 @@ from .schemas import (
 router = APIRouter(prefix="/admin/content", tags=["managed-content"])
 _storage = ContentStorage(CONTENT_ROOT)
 _MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_MB", "200")) * 1024 * 1024
+_MAX_FOLDER_UPLOAD_FILES = int(os.getenv("MAX_FOLDER_UPLOAD_FILES", "500"))
+_MAX_FOLDER_UPLOAD_BYTES = int(os.getenv("MAX_FOLDER_UPLOAD_MB", "1024")) * 1024 * 1024
+_MAX_RELATIVE_PATH_LENGTH = 1024
 _DOC_TYPES = {
     ".pdf": "pdf",
     ".md": "markdown",
@@ -94,6 +97,143 @@ _DOC_TYPES = {
     ".pptx": "pptx",
 }
 _CONTENT_READ = CONTENT_PERMISSIONS
+
+
+def _upload_size(upload: UploadFile) -> int:
+    declared_size = getattr(upload, "size", None)
+    if declared_size is not None:
+        return max(0, int(declared_size))
+    position = upload.file.tell()
+    try:
+        upload.file.seek(0, os.SEEK_END)
+        return max(0, int(upload.file.tell()))
+    finally:
+        upload.file.seek(position)
+
+
+def _parse_folder_name(folder_name: str) -> tuple[str | None, str]:
+    match = re.fullmatch(r"(?:(\d{2})[ _-]+)?(.+)", folder_name)
+    if not match:
+        raise ValueError("invalid_folder_name")
+    code, name = match.group(1), match.group(2).strip()
+    if not name or len(name) > 100 or "\x00" in name:
+        raise ValueError("invalid_folder_name")
+    return code, name
+
+
+def _preflight_upload_paths(
+    conn: sqlite3.Connection,
+    *,
+    files: list[UploadFile],
+    category_id: str,
+    relative_paths: list[str] | None,
+    upload_mode: str,
+) -> list[str | None]:
+    if upload_mode not in {"files", "folder"}:
+        raise HTTPException(status_code=400, detail="上传模式无效")
+    category = conn.execute(
+        "SELECT level FROM category_nodes WHERE id=? AND is_active=1", (category_id,)
+    ).fetchone()
+    if category is None:
+        raise HTTPException(status_code=400, detail="目标目录不存在或已停用")
+    if upload_mode == "folder" and relative_paths is None:
+        raise HTTPException(status_code=400, detail="文件夹上传缺少相对路径")
+    if relative_paths is not None and len(relative_paths) != len(files):
+        raise HTTPException(status_code=400, detail="文件和相对路径数量不一致")
+
+    normalized_paths: list[str | None] = []
+    seen_paths: set[str] = set()
+    has_nested_path = False
+    for index, upload in enumerate(files):
+        try:
+            filename = _storage.validate_filename(upload.filename or "")
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="文件名无效") from exc
+        if relative_paths is None:
+            normalized_paths.append(None)
+            continue
+
+        candidate = relative_paths[index].replace("\\", "/")
+        parts = candidate.split("/")
+        if (
+            not candidate
+            or len(candidate) > _MAX_RELATIVE_PATH_LENGTH
+            or "\x00" in candidate
+            or candidate.startswith("/")
+            or re.match(r"^[A-Za-z]:", candidate)
+            or any(not part or part in {".", ".."} for part in parts)
+        ):
+            raise HTTPException(status_code=400, detail="文件夹路径无效")
+        if parts[-1] != filename:
+            raise HTTPException(status_code=400, detail="文件名与相对路径不一致")
+        if int(category["level"]) + len(parts) - 1 > 4:
+            raise HTTPException(status_code=400, detail="文件夹路径超过资料目录四级限制")
+        try:
+            for folder_name in parts[:-1]:
+                _parse_folder_name(folder_name)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="文件夹名称不符合规则") from exc
+        normalized = "/".join(parts)
+        if normalized in seen_paths:
+            raise HTTPException(status_code=400, detail="文件夹中存在重复的文件路径")
+        seen_paths.add(normalized)
+        normalized_paths.append(normalized)
+        has_nested_path = has_nested_path or len(parts) > 1
+
+    is_folder_upload = upload_mode == "folder" or has_nested_path
+    if is_folder_upload:
+        if len(files) > _MAX_FOLDER_UPLOAD_FILES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"文件夹最多上传 {_MAX_FOLDER_UPLOAD_FILES} 个文件",
+            )
+        total_size = sum(_upload_size(upload) for upload in files)
+        if total_size > _MAX_FOLDER_UPLOAD_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"文件夹总大小不能超过 {_MAX_FOLDER_UPLOAD_BYTES // (1024 * 1024)} MB",
+            )
+    return normalized_paths
+
+
+def _resolve_upload_category(
+    conn: sqlite3.Connection,
+    *,
+    category_id: str,
+    relative_path: str | None,
+    can_create_folders: bool,
+    actor_user_id: int,
+) -> str:
+    upload_category_id = category_id
+    if relative_path is None:
+        return upload_category_id
+    for folder_name in relative_path.split("/")[:-1]:
+        code, name = _parse_folder_name(folder_name)
+        child = conn.execute(
+            """SELECT id FROM category_nodes
+               WHERE parent_id=? AND is_active=1 AND display_name=?""",
+            (upload_category_id, name),
+        ).fetchone()
+        if child is not None:
+            upload_category_id = child["id"]
+            continue
+        if not can_create_folders:
+            raise ValueError("folder_approval_required")
+        sibling_count = int(conn.execute(
+            "SELECT count(*) FROM category_nodes WHERE parent_id=?",
+            (upload_category_id,),
+        ).fetchone()[0])
+        created = create_category(
+            conn,
+            category_key=None,
+            parent_id=upload_category_id,
+            display_code=code or f"{sibling_count + 1:02d}",
+            display_name=name,
+            sort_order=(sibling_count + 1) * 10,
+            actor_user_id=actor_user_id,
+        )
+        upload_category_id = created["id"]
+    return upload_category_id
 
 
 def _managed_index_job_dto(
@@ -368,14 +508,20 @@ async def upload_managed_documents(
     files: list[UploadFile] = File(...),
     category_id: str = Form(...),
     relative_paths: list[str] | None = Form(None),
+    upload_mode: str = Form("files"),
     user: CurrentUser = Depends(require_content_permission("organize", csrf=True)),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> ManagedUploadResponse:
     _require_feature()
     if not files:
         raise HTTPException(status_code=400, detail="至少选择一个文件")
-    if relative_paths is not None and len(relative_paths) != len(files):
-        raise HTTPException(status_code=400, detail="文件和相对路径数量不一致")
+    normalized_paths = _preflight_upload_paths(
+        conn,
+        files=files,
+        category_id=category_id,
+        relative_paths=relative_paths,
+        upload_mode=upload_mode,
+    )
     batch_id = create_web_batch(conn, actor_user_id=user.id)
     entries: list[ManagedUploadEntryDTO] = []
     can_create_folders = has_content_permission(conn, user, "manage_categories")
@@ -391,45 +537,24 @@ async def upload_managed_documents(
             )
             continue
         try:
-            upload_category_id = category_id
-            if relative_paths:
-                relative = PurePosixPath(relative_paths[index].replace("\\", "/"))
-                if relative.is_absolute() or ".." in relative.parts or len(relative.parts) > 5:
-                    raise ValueError("invalid_relative_path")
-                for folder_name in relative.parts[:-1]:
-                    clean_name = folder_name.strip()
-                    if not clean_name or clean_name in {".", ".."}:
-                        raise ValueError("invalid_relative_path")
-                    match = re.fullmatch(r"(?:(\d{2})[ _-]+)?(.+)", clean_name)
-                    if not match:
-                        raise ValueError("invalid_folder_name")
-                    code, name = match.group(1), match.group(2).strip()
-                    child = conn.execute(
-                        """SELECT id FROM category_nodes
-                           WHERE parent_id=? AND is_active=1 AND display_name=?""",
-                        (upload_category_id, name),
-                    ).fetchone()
-                    if child is not None:
-                        upload_category_id = child["id"]
-                        continue
-                    if not can_create_folders:
-                        raise ValueError("folder_approval_required")
-                    sibling_count = int(conn.execute(
-                        "SELECT count(*) FROM category_nodes WHERE parent_id=?",
-                        (upload_category_id,),
-                    ).fetchone()[0])
-                    created = create_category(
-                        conn,
-                        category_key=None,
-                        parent_id=upload_category_id,
-                        display_code=code or f"{sibling_count + 1:02d}",
-                        display_name=name,
-                        sort_order=(sibling_count + 1) * 10,
-                        actor_user_id=user.id,
-                    )
-                    upload_category_id = created["id"]
+            relative_path = normalized_paths[index]
+            if relative_path and not can_create_folders:
+                _resolve_upload_category(
+                    conn,
+                    category_id=category_id,
+                    relative_path=relative_path,
+                    can_create_folders=False,
+                    actor_user_id=user.id,
+                )
             stored = await _storage.ingest_upload(
                 upload, batch_id=batch_id, max_bytes=_MAX_UPLOAD_BYTES
+            )
+            upload_category_id = _resolve_upload_category(
+                conn,
+                category_id=category_id,
+                relative_path=relative_path,
+                can_create_folders=can_create_folders,
+                actor_user_id=user.id,
             )
             result = register_uploaded_document(
                 conn,
@@ -440,7 +565,7 @@ async def upload_managed_documents(
                 doc_type=doc_type,
                 stored=stored,
                 actor_user_id=user.id,
-                source_rel_path=relative_paths[index] if relative_paths else filename,
+                source_rel_path=relative_path or filename,
             )
             entries.append(
                 ManagedUploadEntryDTO(

@@ -341,6 +341,65 @@ def test_folder_upload_does_not_let_organizer_create_unapproved_folder(content_a
     assert response.json()["entries"][0]["reason"] == "目录尚未批准，请联系资料负责人创建后重试"
 
 
+def test_folder_upload_preflights_path_contract_before_creating_batch(content_api):
+    client, sessions, _queued, db_path = content_api
+    for relative_path, detail in (
+        ("../guide.md", "文件夹路径无效"),
+        ("资料包/other.md", "文件名与相对路径不一致"),
+    ):
+        response = client.post(
+            "/api/admin/content/uploads",
+            data={"category_id": "cat-04", "relative_paths": relative_path, "upload_mode": "folder"},
+            files=[("files", ("guide.md", b"# folder", "text/markdown"))],
+            **_auth(sessions, "admin", csrf=True),
+        )
+        assert response.status_code == 400
+        assert response.json()["detail"] == detail
+
+    conn = connect(db_path)
+    try:
+        assert conn.execute("SELECT count(*) FROM upload_batches").fetchone()[0] == 0
+        assert conn.execute("SELECT count(*) FROM content_items").fetchone()[0] == 0
+    finally:
+        conn.close()
+
+
+def test_folder_upload_rejects_depth_count_and_total_size_limits(content_api, monkeypatch):
+    client, sessions, _queued, _db_path = content_api
+    depth = client.post(
+        "/api/admin/content/uploads",
+        data={"category_id": "cat-03", "relative_paths": "a/b/c/d/guide.md", "upload_mode": "folder"},
+        files=[("files", ("guide.md", b"# folder", "text/markdown"))],
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert depth.status_code == 400
+    assert depth.json()["detail"] == "文件夹路径超过资料目录四级限制"
+
+    monkeypatch.setattr(routes_content, "_MAX_FOLDER_UPLOAD_FILES", 1)
+    count = client.post(
+        "/api/admin/content/uploads",
+        data={"category_id": "cat-03", "upload_mode": "folder", "relative_paths": ["a/one.md", "a/two.md"]},
+        files=[
+            ("files", ("one.md", b"one", "text/markdown")),
+            ("files", ("two.md", b"two", "text/markdown")),
+        ],
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert count.status_code == 413
+    assert "最多上传 1 个文件" in count.json()["detail"]
+
+    monkeypatch.setattr(routes_content, "_MAX_FOLDER_UPLOAD_FILES", 500)
+    monkeypatch.setattr(routes_content, "_MAX_FOLDER_UPLOAD_BYTES", 2)
+    total = client.post(
+        "/api/admin/content/uploads",
+        data={"category_id": "cat-03", "upload_mode": "folder", "relative_paths": "a/large.md"},
+        files=[("files", ("large.md", b"123", "text/markdown"))],
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert total.status_code == 413
+    assert "文件夹总大小" in total.json()["detail"]
+
+
 def test_delete_reviewed_content_requires_publish_and_checks_version(content_api):
     client, sessions, _queued, _db_path = content_api
     uploaded = client.post(

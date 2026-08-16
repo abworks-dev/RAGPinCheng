@@ -152,6 +152,39 @@ test.describe("资料管理", () => {
     await expectNoBodyOverflow(page);
   });
 
+  test("folder upload confirmation keeps hierarchy and summary contained", async ({ page }, testInfo) => {
+    await openTab(page, "资料管理");
+    await openRootFolder(page);
+    await page.getByRole("button", { name: "上传文件" }).click();
+    const folderButton = page.getByRole("button", { name: "上传文件夹" });
+    await expect(folderButton).toBeVisible();
+    if (page.viewportSize()!.width === 390) await expectTouchTarget(folderButton);
+
+    await page.getByLabel("选择资料文件夹").evaluate((element: HTMLInputElement) => {
+      const transfer = new DataTransfer();
+      const guide = new File(["# Synthetic guide"], "guide.md", { type: "text/markdown" });
+      Object.defineProperty(guide, "webkitRelativePath", { value: "合成资料包/01 建筑/guide.md" });
+      const ignored = new File(["synthetic video"], "demo.mp4", { type: "video/mp4" });
+      Object.defineProperty(ignored, "webkitRelativePath", { value: "合成资料包/demo.mp4" });
+      transfer.items.add(guide);
+      transfer.items.add(ignored);
+      Object.defineProperty(element, "files", { configurable: true, value: transfer.files });
+      element.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
+    const dialog = page.getByRole("dialog", { name: "上传文件夹" });
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText("合成资料包");
+    await expect(dialog).toContainText("2 个");
+    await expect(dialog).toContainText("可上传文件");
+    await expect(dialog).toContainText("已忽略");
+    await expect(dialog).toContainText("合成资料包/01 建筑/guide.md");
+    await expect(dialog).toContainText("合成资料包/demo.mp4");
+    await expectInViewport(dialog.getByRole("button", { name: "开始上传" }));
+    await expectNoBodyOverflow(page);
+    await page.screenshot({ path: testInfo.outputPath("managed-content-folder-upload-confirmation.png"), fullPage: true });
+  });
+
   test("dropping local files on the current folder requires confirmation", async ({ page }) => {
     await openTab(page, "资料管理");
     await openRootFolder(page);

@@ -358,7 +358,7 @@ describe("AdminManagedContentPage", () => {
     await openRootFolder();
     fireEvent.click(await screen.findByRole("button", { name: "上传文件" }));
     const input = await screen.findByLabelText("选择资料文件");
-    expect(screen.queryByLabelText("选择资料文件夹")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("选择资料文件夹")).toBeInTheDocument();
     const file = new File(["# Guide"], "guide.md", { type: "text/markdown" });
     fireEvent.change(input, { target: { files: [file] } });
     expect(screen.getByText("guide.md")).toBeInTheDocument();
@@ -382,6 +382,92 @@ describe("AdminManagedContentPage", () => {
     await waitFor(() => expect(mocks.error).toHaveBeenCalledWith("上传服务暂不可用"));
     expect(screen.getByRole("dialog", { name: "上传文件" })).toBeInTheDocument();
     expect(screen.getByText("retry.md")).toBeInTheDocument();
+  });
+
+  it("keeps a plain file dropped in the file upload dialog", async () => {
+    mocks.permissions = ["organize"];
+    mocks.items.mockResolvedValue({ items: [], total: 0, status_counts: {} });
+    render(<AdminManagedContentPage />);
+    await openRootFolder();
+    fireEvent.click(screen.getByRole("button", { name: "上传文件" }));
+    const input = await screen.findByLabelText("选择资料文件");
+    const file = new File(["# Dropped"], "dropped.md", { type: "text/markdown" });
+
+    fireEvent.drop(input.closest("label")!, {
+      dataTransfer: { files: [file], items: [], types: ["Files"] },
+    });
+
+    expect(await screen.findByText("dropped.md")).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "上传文件" })).toHaveTextContent("dropped.md");
+    expect(screen.queryByRole("dialog", { name: "确认上传" })).not.toBeInTheDocument();
+  });
+
+  it("confirms a selected folder with hierarchy and ignored files before uploading", async () => {
+    mocks.permissions = ["organize"];
+    mocks.items.mockResolvedValue({ items: [], total: 0, status_counts: {} });
+    mocks.upload.mockResolvedValue({
+      batch_id: "batch-folder-upload",
+      entries: [{ filename: "guide.md", item_id: "item-2", version_id: "version-2", sha256: "b".repeat(64), status: "accepted", reason: null }],
+    });
+    render(<AdminManagedContentPage />);
+    await openRootFolder();
+
+    fireEvent.click(screen.getByRole("button", { name: "上传文件" }));
+    fireEvent.click(screen.getByRole("button", { name: "上传文件夹" }));
+    const guide = new File(["# Guide"], "guide.md", { type: "text/markdown" });
+    Object.defineProperty(guide, "webkitRelativePath", { value: "资料包/01 建筑/guide.md" });
+    const video = new File(["video"], "demo.mp4", { type: "video/mp4" });
+    Object.defineProperty(video, "webkitRelativePath", { value: "资料包/demo.mp4" });
+    fireEvent.change(screen.getByLabelText("选择资料文件夹"), { target: { files: [guide, video] } });
+
+    const dialog = await screen.findByRole("dialog", { name: "上传文件夹" });
+    expect(dialog).toHaveTextContent("资料包");
+    expect(dialog).toHaveTextContent("资料包/01 建筑/guide.md");
+    expect(dialog).toHaveTextContent("资料包/demo.mp4");
+    expect(dialog).toHaveTextContent("已忽略");
+    expect(mocks.upload).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "开始上传" }));
+    await waitFor(() => expect(mocks.upload).toHaveBeenCalledWith(
+      [{ file: guide, relativePath: "资料包/01 建筑/guide.md" }],
+      "cat-03",
+      "folder",
+    ));
+  });
+
+  it("recursively scans a dropped folder before opening the folder confirmation", async () => {
+    mocks.permissions = ["organize"];
+    mocks.items.mockResolvedValue({ items: [], total: 0, status_counts: {} });
+    render(<AdminManagedContentPage />);
+    await openRootFolder();
+    const guide = new File(["# Dropped folder"], "guide.md", { type: "text/markdown" });
+    const fileEntry = {
+      isFile: true,
+      isDirectory: false,
+      name: "guide.md",
+      file: (success: (file: File) => void) => success(guide),
+    };
+    let batch = 0;
+    const folderEntry = {
+      isFile: false,
+      isDirectory: true,
+      name: "拖入资料包",
+      createReader: () => ({
+        readEntries: (success: (entries: unknown[]) => void) => success(batch++ === 0 ? [fileEntry] : []),
+      }),
+    };
+
+    fireEvent.drop(screen.getByTestId("managed-content-drop-list"), {
+      dataTransfer: {
+        files: [],
+        types: ["Files"],
+        items: [{ webkitGetAsEntry: () => folderEntry, getAsFile: () => null }],
+      },
+    });
+
+    const dialog = await screen.findByRole("dialog", { name: "上传文件夹" });
+    expect(dialog).toHaveTextContent("拖入资料包/guide.md");
+    expect(mocks.upload).not.toHaveBeenCalled();
   });
 
   it("opens a confirmation before uploading files dropped on the current folder", async () => {

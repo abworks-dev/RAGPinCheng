@@ -1,0 +1,38 @@
+name: Inventory Production VHDX Tooling
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_read_only_inventory:
+        description: Confirm read-only VHDX tooling inventory
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-gpu-exclusive
+  cancel-in-progress: false
+
+jobs:
+  inventory:
+    if: ${{ inputs.confirm_read_only_inventory == true }}
+    runs-on: [self-hosted, windows, production, gpu]
+    environment: production-asr
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inventory installed VHDX tooling capabilities
+        shell: powershell
+        timeout-minutes: 10
+        run: |
+          & .\scripts\inventory-vhdx-tooling.ps1 `
+            -ReportPath (Join-Path $env:RUNNER_TEMP 'vhdx-tooling-inventory\inventory.json')
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vhdx-tooling-inventory-${{ github.run_id }}
+          path: ${{ runner.temp }}/vhdx-tooling-inventory
+          if-no-files-found: warn
