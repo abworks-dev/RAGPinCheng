@@ -26,6 +26,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Audit offline Docker VHDX references
         shell: powershell
+        timeout-minutes: 10
         run: |
           & .\scripts\audit-docker-vhdx-references.ps1 -ReportPath (Join-Path $env:RUNNER_TEMP 'docker-vhdx-reference-audit\audit.json')
       - if: always()
