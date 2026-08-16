@@ -210,6 +210,39 @@ describe("api client", () => {
     expect(forbidden).toHaveBeenCalledTimes(1);
   });
 
+  it("preserves explicit folder paths and marks folder uploads in FormData", async () => {
+    setCsrfToken("csrf-folder");
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ batch_id: "batch-1", entries: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const guide = new File(["guide"], "guide.md", { type: "text/markdown" });
+
+    await api.uploadManagedContent(
+      [{ file: guide, relativePath: "资料包/01 建筑/guide.md" }],
+      "category-1",
+      "folder",
+    );
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const form = init.body as FormData;
+    expect(form.getAll("files")).toEqual([guide]);
+    expect(form.getAll("relative_paths")).toEqual(["资料包/01 建筑/guide.md"]);
+    expect(form.get("category_id")).toBe("category-1");
+    expect(form.get("upload_mode")).toBe("folder");
+    expect(init.headers).toEqual({ "X-CSRF-Token": "csrf-folder" });
+  });
+
+  it("keeps ordinary file uploads compatible with filename paths", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ batch_id: "batch-1", entries: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const guide = new File(["guide"], "guide.md");
+
+    await api.uploadManagedContent([guide], "category-1");
+
+    const form = fetchMock.mock.calls[0][1]?.body as FormData;
+    expect(form.getAll("relative_paths")).toEqual(["guide.md"]);
+    expect(form.get("upload_mode")).toBe("files");
+  });
+
   it("preserves safe structured error code, message and retry policy", async () => {
     vi.stubGlobal(
       "fetch",
