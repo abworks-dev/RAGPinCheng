@@ -24,6 +24,9 @@ def test_vhdx_content_audit_is_exact_read_only_and_fail_closed():
     assert "Read-SevenZipAggregate" in SCRIPT
     assert "No approved read-only VHDX inspection capability is available" in SCRIPT
     assert "$postHash=if ($preHash)" in SCRIPT
+    assert "Get-MountCapableWslPath" in SCRIPT
+    assert "-tVHDX" in SCRIPT
+    assert "if (-not $values)" in SCRIPT
     for forbidden in (
         "Remove-Item",
         "Optimize-VHD",
