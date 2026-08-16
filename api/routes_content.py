@@ -28,11 +28,13 @@ from .indexing import enqueue_content_publication
 from .content_publication import failure_detail, normalize_failure_code
 from .content_storage import ContentStorage
 from .content_store import (
+    ContentFilenameConflict,
     archive_content_item,
     audit_event,
     create_category,
     create_folder_request,
     create_publication_job,
+    create_content_revision,
     create_web_batch,
     list_content_items,
     list_content_items_page,
@@ -48,6 +50,7 @@ from .content_store import (
 )
 from .db import get_db
 from .schemas import (
+    BulkArchiveManagedContentRequest,
     CreateManagedCategoryRequest,
     CreateFolderRequest,
     CreateContentPermissionGroupRequest,
@@ -58,6 +61,7 @@ from .schemas import (
     ContentPermissionGroupDTO,
     ContentPermissionUserDTO,
     BulkManagedContentRequest,
+    BulkMoveManagedContentRequest,
     BulkManagedContentResponse,
     BulkManagedContentResultDTO,
     ManagedCategoryDTO,
@@ -65,6 +69,7 @@ from .schemas import (
     ManagedContentListResponse,
     FolderRequestDTO,
     MoveManagedContentRequest,
+    RenameManagedContentRequest,
     ManagedIndexJobDTO,
     ManagedIndexJobListResponse,
     ManagedPublicationDTO,
@@ -318,6 +323,21 @@ def _folder_request_dto(row: sqlite3.Row) -> FolderRequestDTO:
 
 def _raise_domain_error(exc: Exception) -> None:
     message = str(exc)
+    if isinstance(exc, ContentFilenameConflict):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "content_filename_conflict",
+                "message": "当前目录下已存在同名资料",
+                "retryable": False,
+                "conflict": {
+                    "item_id": exc.item_id,
+                    "version_id": exc.version_id,
+                    "title": exc.title,
+                    "original_filename": exc.original_filename,
+                },
+            },
+        ) from exc
     if isinstance(exc, sqlite3.IntegrityError):
         raise HTTPException(status_code=409, detail="分类编号或标识已存在") from exc
     if message == "category_version_conflict":
@@ -348,6 +368,14 @@ def _raise_domain_error(exc: Exception) -> None:
         raise HTTPException(status_code=403, detail="当前账号没有移动此状态资料的权限") from exc
     if message == "content_move_requires_republication":
         raise HTTPException(status_code=409, detail="已确认或已发布资料需要退回后重新归类") from exc
+    if message == "content_revision_forbidden":
+        raise HTTPException(status_code=403, detail="当前账号没有重命名或更新资料的权限") from exc
+    if message == "content_revision_in_progress":
+        raise HTTPException(status_code=409, detail="资料正在发布，暂时不能重命名或更新") from exc
+    if message == "invalid_filename":
+        raise HTTPException(status_code=400, detail="文件名无效") from exc
+    if message == "invalid_filename_extension":
+        raise HTTPException(status_code=400, detail="重命名不能改变文件扩展名") from exc
     if message == "folder_already_exists":
         raise HTTPException(status_code=409, detail="同名文件夹已经存在") from exc
     if message == "folder_request_already_reviewed":
@@ -555,6 +583,7 @@ async def upload_managed_documents(
                 "invalid_relative_path": "文件夹路径无效或超过允许深度",
                 "invalid_folder_name": "文件夹名称不符合规则",
                 "category_depth_exceeded": "资料目录最多支持四级",
+                "content_filename_conflict": "当前目录下已存在同名资料",
             }.get(str(exc), str(exc))
             entries.append(
                 ManagedUploadEntryDTO(filename=filename, status="skipped", reason=reason)
@@ -592,6 +621,7 @@ def _content_item_dto(
         source_origin=row["source_origin"],
         source_batch_id=row["source_batch_id"],
         is_current=row["current_version_id"] == row["version_id"],
+        has_published_head=row["current_version_id"] is not None,
         latest_publication_status=row["latest_publication_status"],
         publication_attempt_count=int(row["publication_attempt_count"] or 0),
         publication_failure=failure_detail(row["latest_publication_error_code"]),
@@ -753,6 +783,125 @@ def move_managed_content_item(
     return _content_item_dto(row)
 
 
+@router.post("/items/{item_id}/rename", response_model=ManagedContentItemDTO)
+def rename_managed_content_item(
+    item_id: str,
+    body: RenameManagedContentRequest,
+    user: CurrentUser = Depends(require_csrf),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> ManagedContentItemDTO:
+    _require_feature()
+    current = conn.execute(
+        """SELECT v.doc_type,v.original_filename
+           FROM content_versions v
+           JOIN content_items i ON i.id=v.item_id
+           WHERE i.id=? AND i.archived_at IS NULL
+             AND v.version_number=(
+                 SELECT max(v2.version_number) FROM content_versions v2 WHERE v2.item_id=i.id
+             )""",
+        (item_id,),
+    ).fetchone()
+    if current is None:
+        raise HTTPException(status_code=404, detail="资料不存在或已移至回收站")
+    if _DOC_TYPES.get(Path(body.original_filename).suffix.lower()) != current["doc_type"]:
+        _raise_domain_error(ValueError("invalid_filename_extension"))
+    try:
+        create_content_revision(
+            conn,
+            item_id,
+            expected_version_id=body.expected_version_id,
+            title=body.title,
+            original_filename=body.original_filename,
+            actor_user_id=user.id,
+            can_organize=has_content_permission(conn, user, "organize"),
+            can_publish=has_content_permission(conn, user, "publish"),
+            replace_conflict_item_id=body.replace_conflict_item_id,
+            replace_conflict_expected_version_id=body.replace_conflict_expected_version_id,
+        )
+    except (ValueError, sqlite3.IntegrityError) as exc:
+        _raise_domain_error(exc)
+    row = next((entry for entry in list_content_items(conn) if entry["item_id"] == item_id), None)
+    if row is None:
+        raise HTTPException(status_code=404, detail="资料不存在")
+    return _content_item_dto(row)
+
+
+@router.post("/items/{item_id}/versions", response_model=ManagedContentItemDTO)
+async def update_managed_content_item(
+    item_id: str,
+    file: UploadFile = File(...),
+    expected_version_id: str = Form(...),
+    filename_mode: str = Form(...),
+    replace_conflict_item_id: str | None = Form(None),
+    replace_conflict_expected_version_id: str | None = Form(None),
+    user: CurrentUser = Depends(require_csrf),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> ManagedContentItemDTO:
+    _require_feature()
+    if not has_content_permission(conn, user, "organize"):
+        raise HTTPException(status_code=403, detail="当前账号没有更新资料的权限")
+    current = conn.execute(
+        """SELECT COALESCE(v.title,i.title) AS title,v.original_filename
+           FROM content_versions v
+           JOIN content_items i ON i.id=v.item_id
+           WHERE i.id=? AND i.archived_at IS NULL
+             AND v.version_number=(
+                 SELECT max(v2.version_number) FROM content_versions v2 WHERE v2.item_id=i.id
+             )""",
+        (item_id,),
+    ).fetchone()
+    if current is None:
+        raise HTTPException(status_code=404, detail="资料不存在或已移至回收站")
+    incoming_name = file.filename or ""
+    suffix = Path(incoming_name).suffix.lower()
+    doc_type = _DOC_TYPES.get(suffix)
+    if doc_type is None:
+        raise HTTPException(status_code=400, detail="不支持的文件格式")
+    if filename_mode == "old":
+        old_path = Path(str(current["original_filename"]))
+        final_filename = (
+            str(current["original_filename"])
+            if old_path.suffix.lower() == suffix
+            else f"{old_path.stem}{suffix}"
+        )
+    elif filename_mode == "new":
+        final_filename = incoming_name
+    else:
+        raise HTTPException(status_code=400, detail="请选择沿用原名称或使用新文件名")
+
+    batch_id = create_web_batch(conn, actor_user_id=user.id)
+    try:
+        stored = await _storage.ingest_upload(file, batch_id=batch_id, max_bytes=_MAX_UPLOAD_BYTES)
+        create_content_revision(
+            conn,
+            item_id,
+            expected_version_id=expected_version_id,
+            title=str(current["title"]),
+            original_filename=final_filename,
+            actor_user_id=user.id,
+            can_organize=True,
+            can_publish=has_content_permission(conn, user, "publish"),
+            stored=stored,
+            doc_type=doc_type,
+            source_batch_id=batch_id,
+            replace_conflict_item_id=replace_conflict_item_id,
+            replace_conflict_expected_version_id=replace_conflict_expected_version_id,
+        )
+    except (ValueError, sqlite3.IntegrityError) as exc:
+        conn.rollback()
+        conn.execute(
+            """UPDATE upload_batches
+               SET status='failed',error_summary=?,updated_at=strftime('%s','now') WHERE id=?""",
+            ("资料更新未完成", batch_id),
+        )
+        conn.commit()
+        _raise_domain_error(exc)
+    row = next((entry for entry in list_content_items(conn) if entry["item_id"] == item_id), None)
+    if row is None:
+        raise HTTPException(status_code=404, detail="资料不存在")
+    return _content_item_dto(row)
+
+
 @router.get("/versions/{version_id}/file")
 def get_content_version_file(
     version_id: str,
@@ -853,6 +1002,106 @@ def _validate_bulk_version_ids(version_ids: list[str]) -> list[str]:
     return version_ids
 
 
+def _validate_bulk_item_refs(items: list[object]) -> list[object]:
+    item_ids = [str(getattr(item, "item_id")) for item in items]
+    if len(set(item_ids)) != len(item_ids):
+        raise HTTPException(status_code=400, detail="批量操作包含重复资料")
+    return items
+
+
+def _bulk_failure_message(exc: Exception) -> str:
+    if isinstance(exc, ContentFilenameConflict):
+        return f"目标目录已有同名资料“{exc.original_filename}”"
+    return {
+        "content_item_not_found": "资料不存在或已移至回收站",
+        "content_version_conflict": "资料版本已变化，请刷新后重试",
+        "content_move_forbidden": "当前账号没有移动此状态资料的权限",
+        "content_move_requires_republication": "资料需要先退回后才能移动",
+        "content_delete_forbidden": "当前账号没有删除此状态资料的权限",
+        "content_delete_in_progress": "资料正在发布，暂时不能移入回收站",
+        "active_category_not_found": "目标目录不存在或已停用",
+    }.get(str(exc), "资料状态已变化，请刷新后重试")
+
+
+@router.post("/bulk-move", response_model=BulkManagedContentResponse)
+def bulk_move_content_items(
+    body: BulkMoveManagedContentRequest,
+    user: CurrentUser = Depends(require_csrf),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> BulkManagedContentResponse:
+    _require_feature()
+    can_organize = has_content_permission(conn, user, "organize")
+    can_review = has_content_permission(conn, user, "review")
+    if not (can_organize or can_review):
+        raise HTTPException(status_code=403, detail="当前账号没有移动资料的权限")
+    results: list[BulkManagedContentResultDTO] = []
+    for item in _validate_bulk_item_refs(body.items):
+        try:
+            move_content_item(
+                conn,
+                item.item_id,
+                target_category_id=body.target_category_id,
+                expected_version_id=item.expected_version_id,
+                actor_user_id=user.id,
+                can_organize=can_organize,
+                can_review=can_review,
+            )
+            results.append(BulkManagedContentResultDTO(
+                item_id=item.item_id,
+                version_id=item.expected_version_id,
+                status="succeeded",
+            ))
+        except (ValueError, sqlite3.IntegrityError) as exc:
+            conn.rollback()
+            results.append(BulkManagedContentResultDTO(
+                item_id=item.item_id,
+                version_id=item.expected_version_id,
+                status="failed",
+                message=_bulk_failure_message(exc),
+            ))
+    succeeded = sum(result.status == "succeeded" for result in results)
+    return BulkManagedContentResponse(results=results, succeeded=succeeded, failed=len(results) - succeeded)
+
+
+@router.post("/bulk-archive", response_model=BulkManagedContentResponse)
+def bulk_archive_content_items(
+    body: BulkArchiveManagedContentRequest,
+    user: CurrentUser = Depends(require_csrf),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> BulkManagedContentResponse:
+    _require_feature()
+    can_organize = has_content_permission(conn, user, "organize")
+    can_publish = has_content_permission(conn, user, "publish")
+    if not (can_organize or can_publish):
+        raise HTTPException(status_code=403, detail="当前账号没有删除资料的权限")
+    results: list[BulkManagedContentResultDTO] = []
+    for item in _validate_bulk_item_refs(body.items):
+        try:
+            archive_content_item(
+                conn,
+                item.item_id,
+                expected_version_id=item.expected_version_id,
+                actor_user_id=user.id,
+                can_organize=can_organize,
+                can_publish=can_publish,
+            )
+            results.append(BulkManagedContentResultDTO(
+                item_id=item.item_id,
+                version_id=item.expected_version_id,
+                status="succeeded",
+            ))
+        except (ValueError, sqlite3.IntegrityError) as exc:
+            conn.rollback()
+            results.append(BulkManagedContentResultDTO(
+                item_id=item.item_id,
+                version_id=item.expected_version_id,
+                status="failed",
+                message=_bulk_failure_message(exc),
+            ))
+    succeeded = sum(result.status == "succeeded" for result in results)
+    return BulkManagedContentResponse(results=results, succeeded=succeeded, failed=len(results) - succeeded)
+
+
 @router.post("/bulk-review", response_model=BulkManagedContentResponse)
 def bulk_review_content_versions(
     body: BulkManagedContentRequest,
@@ -929,7 +1178,7 @@ def get_content_index_job(
                SELECT c.id,p.full_path || ' / ' || c.display_code || ' ' || c.display_name
                FROM category_nodes c JOIN paths p ON p.id=c.parent_id
            )
-           SELECT j.*,i.title,v.original_filename,v.doc_type,i.category_id,
+           SELECT j.*,COALESCE(v.title,i.title) AS title,v.original_filename,v.doc_type,i.category_id,
                   c.display_code || ' ' || c.display_name AS category_label,
                   paths.full_path AS category_path,v.version_number,v.source_origin,
                   o.size_bytes AS file_size,
@@ -997,7 +1246,7 @@ def list_content_index_jobs(
     normalized_query = query.strip()
     if normalized_query:
         scope_clauses.append(
-            "instr(lower(i.title || ' ' || v.original_filename || ' ' || "
+            "instr(lower(COALESCE(v.title,i.title) || ' ' || v.original_filename || ' ' || "
             "paths.full_path), lower(?)) > 0"
         )
         scope_params.append(normalized_query)
@@ -1041,7 +1290,7 @@ def list_content_index_jobs(
         params.append(status)
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     rows = conn.execute(
-        cte + """ SELECT j.*,i.title,v.original_filename,v.doc_type,i.category_id,
+        cte + """ SELECT j.*,COALESCE(v.title,i.title) AS title,v.original_filename,v.doc_type,i.category_id,
                   (SELECT count(*) FROM content_index_jobs jc WHERE jc.version_id=j.version_id) AS attempt_count,
                   c.display_code || ' ' || c.display_name AS category_label,
                   paths.full_path AS category_path,v.version_number,v.source_origin,

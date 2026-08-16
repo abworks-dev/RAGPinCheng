@@ -380,6 +380,7 @@ class ManagedContentItemDTO(BaseModel):
     source_origin: str
     source_batch_id: str | None
     is_current: bool
+    has_published_head: bool = False
     latest_publication_status: str | None = None
     publication_attempt_count: int = 0
     publication_failure: PublicationFailureDTO | None = None
@@ -423,6 +424,30 @@ class MoveManagedContentRequest(BaseModel):
     expected_version_id: str = Field(min_length=1, max_length=100)
 
 
+class RenameManagedContentRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=300)
+    original_filename: str = Field(min_length=1, max_length=255)
+    expected_version_id: str = Field(min_length=1, max_length=100)
+    replace_conflict_item_id: str | None = Field(default=None, min_length=1, max_length=100)
+    replace_conflict_expected_version_id: str | None = Field(
+        default=None, min_length=1, max_length=100
+    )
+
+
+class BulkManagedContentItemRef(BaseModel):
+    item_id: str = Field(min_length=1, max_length=100)
+    expected_version_id: str = Field(min_length=1, max_length=100)
+
+
+class BulkMoveManagedContentRequest(BaseModel):
+    items: list[BulkManagedContentItemRef] = Field(min_length=1, max_length=20)
+    target_category_id: str = Field(min_length=1, max_length=100)
+
+
+class BulkArchiveManagedContentRequest(BaseModel):
+    items: list[BulkManagedContentItemRef] = Field(min_length=1, max_length=20)
+
+
 class CreateFolderRequest(BaseModel):
     parent_category_id: str = Field(min_length=1, max_length=100)
     display_name: str = Field(min_length=1, max_length=100)
@@ -456,6 +481,7 @@ class BulkManagedContentRequest(BaseModel):
 
 class BulkManagedContentResultDTO(BaseModel):
     version_id: str
+    item_id: str | None = None
     status: Literal["succeeded", "failed"]
     message: str | None = None
     index_job_id: str | None = None
