@@ -14,25 +14,52 @@ html.admin-scrollbar-stable {
 }
 
 .resource-preview-overlay {
-  transition: opacity var(--duration-normal) ease-out;
+  animation-duration: var(--duration-normal);
+  animation-timing-function: ease-out;
+  animation-fill-mode: both;
 }
 
 .resource-preview-sheet {
   transform-origin: right center;
-  transition:
-    opacity var(--duration-normal) ease-out,
-    transform var(--duration-slow) cubic-bezier(0.22, 1, 0.36, 1);
-  will-change: opacity, transform;
+  animation-duration: var(--duration-slow);
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  animation-fill-mode: both;
+}
+
+.resource-preview-overlay[data-state="open"] {
+  animation-name: resource-preview-overlay-enter;
+}
+
+.resource-preview-overlay[data-state="closed"] {
+  animation-name: resource-preview-overlay-exit;
 }
 
 .resource-preview-sheet[data-state="open"] {
-  opacity: 1;
-  transform: translateX(0) scale(1);
+  animation-name: resource-preview-sheet-enter;
 }
 
 .resource-preview-sheet[data-state="closed"] {
-  opacity: 0;
-  transform: translateX(1rem) scale(0.995);
+  animation-name: resource-preview-sheet-exit;
+}
+
+@keyframes resource-preview-overlay-enter {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes resource-preview-overlay-exit {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes resource-preview-sheet-enter {
+  from { opacity: 0; transform: translateX(1rem) scale(0.995); }
+  to { opacity: 1; transform: translateX(0) scale(1); }
+}
+
+@keyframes resource-preview-sheet-exit {
+  from { opacity: 1; transform: translateX(0) scale(1); }
+  to { opacity: 0; transform: translateX(1rem) scale(0.995); }
 }
 
 @media (max-width: 767px) {
@@ -40,15 +67,21 @@ html.admin-scrollbar-stable {
     transform-origin: center bottom;
   }
 
-  .resource-preview-sheet[data-state="closed"] {
-    transform: translateY(0.75rem) scale(0.995);
+  @keyframes resource-preview-sheet-enter {
+    from { opacity: 0; transform: translateY(0.75rem) scale(0.995); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+  }
+
+  @keyframes resource-preview-sheet-exit {
+    from { opacity: 1; transform: translateY(0) scale(1); }
+    to { opacity: 0; transform: translateY(0.75rem) scale(0.995); }
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .resource-preview-overlay,
   .resource-preview-sheet {
-    transition-duration: 0s;
+    animation-duration: 0s;
   }
 }
 
