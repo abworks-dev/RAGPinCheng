@@ -76,8 +76,12 @@ describe("AdminCategoriesPage", () => {
     render(<AdminCategoriesPage />);
     const parent = await screen.findByRole("treeitem", { name: /01 行业规范与标准/ });
     expect(parent).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByText("1 个一级分类 · 共 2 个分类")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "全部展开" })).toBeInTheDocument();
+    expect(screen.getByText("0 份直接资料 · 1 个子分类")).toBeInTheDocument();
     expect(screen.queryByTestId("category-tree-item-cat-01-child")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "展开行业规范与标准" }));
+    expect(screen.getByRole("button", { name: "全部折叠" })).toBeInTheDocument();
     expect(screen.getByText("2 份直接资料")).toBeInTheDocument();
     expect(screen.queryByText("industry_standards")).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "资料权限" })).not.toBeInTheDocument();

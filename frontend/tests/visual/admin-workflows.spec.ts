@@ -308,6 +308,9 @@ test.describe("分类管理", () => {
     await openTab(page, "分类管理", "normal", "admin", { includeChildFolder: true });
     await expect(page.getByRole("heading", { name: "分类管理" })).toBeVisible();
     await expect(page.getByText("资料权限")).toHaveCount(0);
+    await expect(page.getByText("3 个一级分类 · 共 4 个分类")).toBeVisible();
+    await expect(page.getByRole("button", { name: "全部展开" })).toBeVisible();
+    await expect(page.getByText("3 份直接资料 · 1 个子分类")).toBeVisible();
     await expectNoBodyOverflow(page);
     const createButton = page.getByRole("button", { name: "新增分类", exact: true });
     await createButton.scrollIntoViewIfNeeded();
@@ -331,12 +334,15 @@ test.describe("分类管理", () => {
       await parent.focus();
       await parent.press("ArrowRight");
       await expect(child).toBeVisible();
+      await expect(page.getByRole("button", { name: "全部折叠" })).toBeVisible();
       await parent.press("ArrowRight");
       await expect(child).toBeFocused();
       await child.press("ArrowLeft");
       await expect(parent).toBeFocused();
       await expect(page.getByText("公司内部标准").last()).toBeVisible();
-      await expect(page.getByRole("button", { name: "保存修改" })).toBeDisabled();
+      const save = page.getByRole("button", { name: "保存修改" });
+      await expect(save).toBeDisabled();
+      await expectInViewport(save);
     }
   });
 
