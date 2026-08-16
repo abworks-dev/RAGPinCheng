@@ -15,6 +15,7 @@ BACKUP_DIR="${BACKUP_DIR:?BACKUP_DIR must be provided by the private deployment 
 DATA_PATH="${DATA_PATH:?DATA_PATH must be provided by the private deployment environment}"
 COMPOSE_BASE="${REPO_PATH}/docker/docker-compose.yml"
 COMPOSE_OVERRIDE="${COMPOSE_OVERRIDE:?COMPOSE_OVERRIDE must be provided by the private deployment environment}"
+COMPOSE_SOURCE_DECOUPLED="${REPO_PATH}/docker/compose.source-decoupled.yml"
 COMPOSE_ENV_FILE="${COMPOSE_ENV_FILE:?COMPOSE_ENV_FILE must be provided by the private deployment environment}"
 export COMPOSE_ENV_FILE
 COMPOSE_PROJECT="ragpincheng-prod"
@@ -84,6 +85,14 @@ case "${SOURCE_DECOUPLING_COMPLETE:-false}" in
         # The sanitized file is a complete normalized stack. Re-merging the
         # base file would restore its development-only ../.env reference.
         COMPOSE_ARGS+=(-f "$COMPOSE_OVERRIDE")
+        [ -f "$COMPOSE_SOURCE_DECOUPLED" ] || {
+            echo "ERROR: source-decoupled Compose overlay is missing: ${COMPOSE_SOURCE_DECOUPLED}"
+            exit 1
+        }
+        # Keep the final mount contract explicit at runtime. The normalized
+        # private override supplies production paths; this overlay replaces any
+        # stale /app/docs bind that survives the host Compose merge.
+        COMPOSE_ARGS+=(-f "$COMPOSE_SOURCE_DECOUPLED")
         ;;
     false|"")
         COMPOSE_ARGS+=(-f "$COMPOSE_BASE" -f "$COMPOSE_OVERRIDE")
