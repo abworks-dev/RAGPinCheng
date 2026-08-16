@@ -485,10 +485,14 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertIn(
             'COMPOSE_ARGS+=(-f "$COMPOSE_SOURCE_DECOUPLED")', self.linux
         )
+        self.assertIn(
+            'source-decoupled Compose overlay is missing', self.linux
+        )
         source_decoupled_branch = self.linux.split(
             'case "${SOURCE_DECOUPLING_COMPLETE:-false}" in', 1
         )[1].split('false|"")', 1)[0]
         self.assertNotIn('COMPOSE_BASE', source_decoupled_branch)
+        self.assertIn('COMPOSE_SOURCE_DECOUPLED', source_decoupled_branch)
         self.assertLess(
             source_decoupled_branch.index('COMPOSE_ARGS+=(-f "$COMPOSE_OVERRIDE")'),
             source_decoupled_branch.index(
