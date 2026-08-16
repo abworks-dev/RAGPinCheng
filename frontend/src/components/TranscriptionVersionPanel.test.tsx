@@ -87,5 +87,14 @@ describe("TranscriptionVersionPanel", () => {
     fireEvent.click(publish);
     await waitFor(() => expect(mocks.publishTranscriptVersion).toHaveBeenCalledWith(approvedVersion.version_id));
   });
+
+  it("notifies the parent after a review changes the media lifecycle", async () => {
+    const onChanged = vi.fn();
+    render(<TranscriptionVersionPanel mediaId="media-1" embedded onChanged={onChanged} />);
+    await screen.findByRole("button", { name: "审核通过" });
+    fireEvent.click(screen.getByRole("button", { name: "审核通过" }));
+
+    await waitFor(() => expect(onChanged).toHaveBeenCalledOnce());
+  });
 });
 

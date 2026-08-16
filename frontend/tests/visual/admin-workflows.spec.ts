@@ -207,7 +207,15 @@ test.describe("视频管理", () => {
     await expect(page.getByRole("button", { name: "刷新媒体资源" })).toBeVisible();
     await expect(page.getByText("转录服务当前暂停接收任务，请稍后重试。")).toBeVisible();
     await expect(page.getByRole("button", { name: "重试" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "进入转写工作台" }).first()).toBeVisible();
+    const readyMediaRow = page.getByTestId("media-record-row").filter({ hasText: "项目交付培训" });
+    const workbenchTrigger = readyMediaRow.getByRole("button", { name: "进入转写工作台" });
+    await expect(workbenchTrigger).toBeVisible();
+    await workbenchTrigger.click();
+    const workbench = page.getByRole("dialog", { name: "项目交付培训" });
+    await expect(workbench).toBeVisible();
+    await expect(workbench.getByText("暂无可审阅转录版本。")).toBeVisible();
+    await workbench.getByRole("button", { name: "关闭转写工作台" }).click();
+    await expect(workbench).toBeHidden();
     await expectNoBodyOverflow(page);
     if (page.viewportSize()!.width >= 1024) {
       const headerX = await page.getByTestId("media-record-header").locator(":scope > span").evaluateAll((cells) => cells.map((cell) => cell.getBoundingClientRect().x));

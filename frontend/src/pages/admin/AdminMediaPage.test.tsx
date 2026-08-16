@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   uploadAutomaticMediaVideo: vi.fn(),
   listTranscriptionProfiles: vi.fn(),
   listTranscriptionJobs: vi.fn(),
+  listTranscriptVersions: vi.fn(),
   getTranscriptionJob: vi.fn(),
   cancelTranscriptionJob: vi.fn(),
   retryTranscription: vi.fn(),
@@ -114,6 +115,7 @@ describe("AdminMediaPage wizard", () => {
     }));
     mocks.listTranscriptionProfiles.mockResolvedValue([availableProfile, secondProfile, unavailableProfile]);
     mocks.listTranscriptionJobs.mockResolvedValue([succeededJob]);
+    mocks.listTranscriptVersions.mockResolvedValue([]);
     mocks.getTranscriptionJob.mockResolvedValue(succeededJob);
     mocks.cancelTranscriptionJob.mockResolvedValue({ ...succeededJob, status: "cancelled" });
     mocks.retryTranscription.mockResolvedValue({ ...succeededJob, status: "pending" });
@@ -162,6 +164,21 @@ describe("AdminMediaPage wizard", () => {
     expect(within(row).getByText("转录失败")).toBeInTheDocument();
     expect(within(row).queryByText("失败", { exact: true })).not.toBeInTheDocument();
     expect(within(row).getByText("转录服务暂不可用")).toBeInTheDocument();
+  });
+
+  it("opens the transcription workbench in a sheet and returns to the media list", async () => {
+    render(<AdminMediaPage />);
+    const open = await screen.findByRole("button", { name: "进入转写工作台" });
+    fireEvent.click(open);
+
+    const sheet = await screen.findByRole("dialog", { name: "项目交付培训" });
+    expect(sheet).toBeInTheDocument();
+    expect(await within(sheet).findByText("暂无可审阅转录版本。")).toBeInTheDocument();
+    expect(mocks.listTranscriptVersions).toHaveBeenCalledWith("media-ready");
+
+    fireEvent.click(within(sheet).getByRole("button", { name: "关闭转写工作台" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "项目交付培训" })).not.toBeInTheDocument());
+    expect(open).toBeInTheDocument();
   });
 
   it("groups repeat submissions by filename without merging their records", async () => {
