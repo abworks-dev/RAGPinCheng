@@ -46,7 +46,7 @@ const failedJob = {
     code: "parser_request_failed",
     message: "文档解析服务请求失败。",
     retryable: true,
-    recommended_action: "请稍后在资料库重新发布。",
+    recommended_action: "请稍后在资料管理重新发布。",
   },
   attempt_count: 4,
   created_at: 1785686400,

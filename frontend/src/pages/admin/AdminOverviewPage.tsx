@@ -12,8 +12,8 @@ import { ProductionRuntimeStatus } from "./ProductionRuntimeStatus";
 
 const pageHeading = (
   <div>
-    <p className="text-ui-sm font-medium text-primary">管理概览</p>
-    <h1 className="mt-1 text-ui-2xl font-semibold tracking-tight text-foreground">运营数据概览</h1>
+    <p className="text-ui-xs font-medium text-primary">总览</p>
+    <h1 className="mt-1 text-ui-2xl font-semibold tracking-tight text-foreground">管理概览</h1>
     <p className="mt-2 max-w-2xl text-ui-sm text-muted-foreground">
       查看用户、对话和消息的整体情况。
     </p>

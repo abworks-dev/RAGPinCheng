@@ -58,8 +58,8 @@ export function AdminCategoriesPage() {
   return <section className="flex flex-col gap-6" aria-labelledby="managed-categories-title">
     <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
       <div>
-        <p className="text-ui-xs text-muted-foreground">资料管理</p>
-        <h1 id="managed-categories-title" className="mt-1 text-ui-2xl font-semibold text-foreground">分类设置</h1>
+        <p className="text-ui-xs font-medium text-primary">内容管理</p>
+        <h1 id="managed-categories-title" className="mt-1 text-ui-2xl font-semibold tracking-tight text-foreground">分类管理</h1>
         <p className="mt-1 text-ui-sm text-muted-foreground">维护资料分类、层级和可用状态。</p>
       </div>
       <Button variant="outline" size="sm" className="w-full sm:w-auto" onClick={() => void load(true)} disabled={loading || refreshing}>
@@ -67,7 +67,7 @@ export function AdminCategoriesPage() {
       </Button>
     </header>
 
-    {error && <ErrorState title="分类设置加载失败" description={error} action={<Button variant="outline" size="sm" onClick={() => void load()}>重新加载</Button>} />}
+    {error && <ErrorState title="分类管理加载失败" description={error} action={<Button variant="outline" size="sm" onClick={() => void load()}>重新加载</Button>} />}
 
     <section className="order-2 space-y-4 border-y border-border py-5 lg:order-1" aria-labelledby="new-category-title">
       <div><h2 id="new-category-title" className="text-ui-base font-semibold">新增分类</h2><p className="mt-1 text-ui-xs text-muted-foreground">分类最多四级；稳定标识由系统自动生成。</p></div>

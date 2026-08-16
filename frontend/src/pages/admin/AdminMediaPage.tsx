@@ -350,8 +350,8 @@ export function AdminMediaPage() {
   return (
     <section className="space-y-6" aria-labelledby="admin-media-title">
       <header>
-        <p className="text-ui-xs font-medium uppercase tracking-[0.14em] text-primary">媒体与转写</p>
-        <h1 id="admin-media-title" className="mt-1 text-ui-2xl font-semibold tracking-tight text-foreground">视频媒体</h1>
+        <p className="text-ui-xs font-medium text-primary">内容管理</p>
+        <h1 id="admin-media-title" className="mt-1 text-ui-2xl font-semibold tracking-tight text-foreground">视频管理</h1>
         <p className="mt-1 max-w-3xl text-ui-sm text-muted-foreground">分步骤批量上传视频，并选择人工 Markdown 或受控服务端 Profile。</p>
       </header>
 
@@ -534,7 +534,7 @@ export function AdminMediaPage() {
             <div className="hidden grid-cols-[minmax(0,31fr)_minmax(0,42fr)_minmax(0,12fr)_minmax(0,15fr)] gap-4 border-b border-border bg-surface-muted px-5 py-3 text-ui-xs font-medium text-muted-foreground lg:grid" data-testid="media-record-header">
               <span>媒体信息</span><span>处理进度</span><span>最近提交</span><span>操作</span>
             </div>
-            <ul className="divide-y divide-border" aria-label="视频媒体处理记录">
+            <ul className="divide-y divide-border" aria-label="视频处理记录">
               {visibleMediaAssets.map((asset) => {
                 const job = jobsByMediaId.get(asset.media_id);
                 const sameNameCount = mediaAssets.filter((item) => item.original_filename === asset.original_filename).length;
