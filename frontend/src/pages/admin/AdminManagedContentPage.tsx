@@ -170,8 +170,9 @@ export function AdminManagedContentPage() {
 
   const prepareFolderUpload = (incoming: File[]) => {
     const supported = incoming.filter((file) => /\.(pdf|md|docx|xlsx|pptx)$/i.test(file.name));
+    setListDropActive(false);
     if (!supported.length || !currentFolderId) {
-      if (incoming.length) toast.error("拖入的文件没有可上传的支持格式");
+      if (incoming.length) toast.error("没有可上传的支持格式，仅支持 PDF、Markdown、Word、Excel 和 PPT 文件");
       return;
     }
     setPendingUploadFiles(supported);
