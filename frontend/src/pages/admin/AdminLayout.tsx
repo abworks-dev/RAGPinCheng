@@ -1,5 +1,19 @@
 import { useEffect, useState } from "react";
-import { Menu, PanelLeftClose, X } from "lucide-react";
+import {
+  FileText,
+  LayoutDashboard,
+  ListChecks,
+  Menu,
+  MessageSquareQuote,
+  MessagesSquare,
+  PanelLeftClose,
+  Tags,
+  Users,
+  Video,
+  Wrench,
+  X,
+} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { AppBrand } from "../../components/AppBrand";
 import { IconButton } from "../../components/ui/icon-button";
 import { ThemeMenu } from "../../components/ThemeMenu";
@@ -22,26 +36,38 @@ type Tab = "users" | "conversations" | "corpus" | "managed" | "categories" | "me
 
 type NavigationGroup = {
   label: string;
-  tabs: [Tab, string][];
+  tabs: [Tab, string, LucideIcon][];
+};
+
+const navigationIcons: Record<Tab, LucideIcon> = {
+  stats: LayoutDashboard,
+  maintenance: Wrench,
+  managed: FileText,
+  categories: Tags,
+  media: Video,
+  corpus: ListChecks,
+  users: Users,
+  conversations: MessagesSquare,
+  feedback: MessageSquareQuote,
 };
 
 const adminNavigation: NavigationGroup[] = [
-  { label: "总览", tabs: [["stats", "概览"], ["maintenance", "系统维护"]] },
+  { label: "总览", tabs: [["stats", "概览", LayoutDashboard], ["maintenance", "系统维护", Wrench]] },
   {
     label: "内容管理",
     tabs: [
-      ["managed", "资料管理"],
-      ["categories", "分类管理"],
-      ["media", "视频管理"],
-      ["corpus", "索引任务"],
+      ["managed", "资料管理", FileText],
+      ["categories", "分类管理", Tags],
+      ["media", "视频管理", Video],
+      ["corpus", "索引任务", ListChecks],
     ],
   },
   {
     label: "运营管理",
     tabs: [
-      ["users", "用户管理"],
-      ["conversations", "对话记录"],
-      ["feedback", "用户反馈"],
+      ["users", "用户管理", Users],
+      ["conversations", "对话记录", MessagesSquare],
+      ["feedback", "用户反馈", MessageSquareQuote],
     ],
   },
 ];
@@ -60,7 +86,8 @@ export function AdminLayout() {
         tabs: contentWorkspaceTabs(permissions).map((key) => [
           key,
           key === "managed" ? "资料管理" : "分类管理",
-        ] as [Tab, string]),
+          navigationIcons[key],
+        ] as [Tab, string, LucideIcon]),
       }];
   const tabs = navigation.flatMap((group) => group.tabs);
   const defaultTab: Tab = isAdmin ? "stats" : "managed";
@@ -157,7 +184,7 @@ export function AdminLayout() {
                   {group.label}
                 </p>
                 <div className="grid grid-cols-2 gap-1 sm:grid-cols-3 lg:flex lg:flex-col">
-                  {group.tabs.map(([key, label]) => {
+                  {group.tabs.map(([key, label, Icon]) => {
                     const active = tab === key;
                     return (
                       <button
@@ -180,10 +207,7 @@ export function AdminLayout() {
                             : "text-muted-foreground hover:bg-surface-muted hover:text-foreground",
                         )}
                       >
-                        <span
-                          className={cn("h-2 w-2 shrink-0 rounded-full", active ? "bg-primary-foreground" : "bg-border")}
-                          aria-hidden="true"
-                        />
+                        <Icon className="size-4 shrink-0" aria-hidden="true" />
                         <span className={cn("min-w-0 whitespace-normal", sidebarCollapsed && "lg:hidden")}>{label}</span>
                       </button>
                     );
