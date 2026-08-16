@@ -15,6 +15,7 @@ BACKUP_DIR="${BACKUP_DIR:?BACKUP_DIR must be provided by the private deployment 
 DATA_PATH="${DATA_PATH:?DATA_PATH must be provided by the private deployment environment}"
 COMPOSE_BASE="${REPO_PATH}/docker/docker-compose.yml"
 COMPOSE_OVERRIDE="${COMPOSE_OVERRIDE:?COMPOSE_OVERRIDE must be provided by the private deployment environment}"
+COMPOSE_SOURCE_DECOUPLED="${REPO_PATH}/docker/compose.source-decoupled.yml"
 COMPOSE_ENV_FILE="${COMPOSE_ENV_FILE:?COMPOSE_ENV_FILE must be provided by the private deployment environment}"
 export COMPOSE_ENV_FILE
 COMPOSE_PROJECT="ragpincheng-prod"
@@ -81,9 +82,15 @@ case "${SOURCE_DECOUPLING_COMPLETE:-false}" in
             echo "ERROR: source-decoupled Compose configuration was not sanitized"
             exit 1
         }
-        # The sanitized file is a complete normalized stack. Re-merging the
-        # base file would restore its development-only ../.env reference.
+        [ -f "$COMPOSE_SOURCE_DECOUPLED" ] || {
+            echo "ERROR: source-decoupled Compose overlay is missing: ${COMPOSE_SOURCE_DECOUPLED}"
+            exit 1
+        }
+        # The sanitized file is a complete normalized stack. Apply the
+        # source-decoupled overlay last so Docker receives the explicit
+        # volumes override and service-level tmpfs contract.
         COMPOSE_ARGS+=(-f "$COMPOSE_OVERRIDE")
+        COMPOSE_ARGS+=(-f "$COMPOSE_SOURCE_DECOUPLED")
         ;;
     false|"")
         COMPOSE_ARGS+=(-f "$COMPOSE_BASE" -f "$COMPOSE_OVERRIDE")
