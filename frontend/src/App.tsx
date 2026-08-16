@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { Navigate, Route, BrowserRouter as Router, Routes } from "react-router-dom";
 import { ChatLayout } from "./components/ChatLayout";
+import { PdfPreview } from "./components/PdfPreview";
 import { VideoPlayerDrawer } from "./components/VideoPlayerDrawer";
+import { PdfPreviewProvider } from "./hooks/usePdfPreview";
 import { VideoPlayerProvider } from "./hooks/useVideoPlayer";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { AdminDashboard } from "./pages/AdminDashboard";
@@ -63,41 +65,44 @@ export default function App() {
     <Router>
       <AuthProvider>
         <VideoPlayerProvider>
-          <Routes>
-            <Route
-              path="/login"
-              element={
-                <RedirectIfAuthed>
-                  <LoginPage />
-                </RedirectIfAuthed>
-              }
-            />
-            <Route
-              path="/register"
-              element={
-                <RedirectIfAuthed>
-                  <RegisterPage />
-                </RedirectIfAuthed>
-              }
-            />
-            <Route
-              path="/admin"
-              element={
-                <RequireAdmin>
-                  <AdminDashboard />
-                </RequireAdmin>
-              }
-            />
-            <Route
-              path="/"
-              element={
-                <RequireAuth>
-                  <ChatLayout />
-                </RequireAuth>
-              }
-            />
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
+          <PdfPreviewProvider>
+            <Routes>
+              <Route
+                path="/login"
+                element={
+                  <RedirectIfAuthed>
+                    <LoginPage />
+                  </RedirectIfAuthed>
+                }
+              />
+              <Route
+                path="/register"
+                element={
+                  <RedirectIfAuthed>
+                    <RegisterPage />
+                  </RedirectIfAuthed>
+                }
+              />
+              <Route
+                path="/admin"
+                element={
+                  <RequireAdmin>
+                    <AdminDashboard />
+                  </RequireAdmin>
+                }
+              />
+              <Route
+                path="/"
+                element={
+                  <RequireAuth>
+                    <ChatLayout />
+                  </RequireAuth>
+                }
+              />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+            <PdfPreview />
+          </PdfPreviewProvider>
           <VideoPlayerDrawer />
           <Toaster />
         </VideoPlayerProvider>
