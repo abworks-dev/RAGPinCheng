@@ -1,0 +1,38 @@
+name: Audit ASR Rollback Retirement
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_read_only_audit:
+        description: Confirm read-only rollback retirement audit
+        required: true
+        default: false
+        type: boolean
+permissions:
+  contents: read
+concurrency:
+  group: production-gpu-exclusive
+  cancel-in-progress: false
+jobs:
+  audit:
+    if: ${{ inputs.confirm_read_only_audit == true }}
+    runs-on: [self-hosted, windows, production, gpu]
+    environment: production-asr
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run read-only rollback retirement audit
+        shell: powershell
+        env:
+          DATA_ROOT: ${{ vars.PRODUCTION_ASR_DATA_ROOT }}
+          PROGRAM_ROOT: ${{ vars.PRODUCTION_ASR_PROGRAM_ROOT }}
+          BACKUP_ROOT: ${{ vars.PRODUCTION_ASR_BACKUP_ROOT }}
+          REPORT_ROOT: ${{ runner.temp }}\asr-rollback-retirement
+        run: |
+          New-Item -ItemType Directory -Path $env:REPORT_ROOT -Force | Out-Null
+          & .\scripts\audit-asr-rollback-retirement.ps1 -DataRoot $env:DATA_ROOT -ProgramRoot $env:PROGRAM_ROOT -BackupRoot $env:BACKUP_ROOT -ReportPath (Join-Path $env:REPORT_ROOT 'audit.json')
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: asr-rollback-retirement-audit-${{ github.run_id }}
+          path: ${{ runner.temp }}/asr-rollback-retirement
+          if-no-files-found: warn
