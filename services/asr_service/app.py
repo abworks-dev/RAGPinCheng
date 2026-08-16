@@ -21,7 +21,7 @@ from .engine_protocol import (
     FASTER_WHISPER_SERVICE_CONFIG,
     QWEN3_ASR_SERVICE_CONFIG,
     SENSEVOICE_SERVICE_CONFIG,
-    WHISPERX_SERVICE_CONFIG,
+    WHISPERX_FULL_DECODE_SERVICE_CONFIG,
 )
 from .engine_registry import EngineRegistration, EngineRegistry
 from .engines.faster_whisper import FasterWhisperEngine
@@ -168,7 +168,9 @@ def create_app(
                     sensevoice_engine, SENSEVOICE_SERVICE_CONFIG
                 ),
                 EngineRegistration(qwen3_engine, QWEN3_ASR_SERVICE_CONFIG),
-                EngineRegistration(whisperx_engine, WHISPERX_SERVICE_CONFIG),
+                EngineRegistration(
+                    whisperx_engine, WHISPERX_FULL_DECODE_SERVICE_CONFIG
+                ),
             )
         )
         if settings.enabled and not engines.available_profile_ids():
