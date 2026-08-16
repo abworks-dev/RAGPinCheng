@@ -359,6 +359,37 @@ describe("AdminManagedContentPage", () => {
     await waitFor(() => expect(mocks.upload).toHaveBeenCalledWith([file], "cat-03"));
   });
 
+  it("shows the current folder in the list drop overlay and clears it after leaving", async () => {
+    mocks.permissions = ["organize"];
+    render(<AdminManagedContentPage />);
+    await openRootFolder();
+    const folderList = screen.getByTestId("managed-content-drop-list");
+    const dataTransfer = { files: [], types: ["Files"] };
+
+    fireEvent.dragEnter(folderList, { dataTransfer });
+    expect(screen.getByTestId("managed-content-drop-overlay")).toHaveTextContent("松开以上传文件到“03 公司内部标准”");
+    expect(screen.getByTestId("managed-content-drop-overlay")).toHaveTextContent("支持 PDF、Markdown、Word、Excel 和 PPT 文件");
+
+    fireEvent.dragLeave(folderList, { dataTransfer });
+    expect(screen.queryByTestId("managed-content-drop-overlay")).not.toBeInTheDocument();
+  });
+
+  it("clears the list drop overlay after rejecting an unsupported file", async () => {
+    mocks.permissions = ["organize"];
+    render(<AdminManagedContentPage />);
+    await openRootFolder();
+    const folderList = screen.getByTestId("managed-content-drop-list");
+    const file = new File(["video"], "sample.mp4", { type: "video/mp4" });
+    const dataTransfer = { files: [file], types: ["Files"] };
+
+    fireEvent.dragEnter(folderList, { dataTransfer });
+    expect(screen.getByTestId("managed-content-drop-overlay")).toBeInTheDocument();
+    fireEvent.drop(folderList, { dataTransfer });
+
+    expect(screen.queryByTestId("managed-content-drop-overlay")).not.toBeInTheDocument();
+    expect(mocks.error).toHaveBeenCalledWith("没有可上传的支持格式，仅支持 PDF、Markdown、Word、Excel 和 PPT 文件");
+  });
+
   it("does not upload files when a folder drop is cancelled", async () => {
     mocks.permissions = ["organize"];
     mocks.items.mockResolvedValue({ items: [], total: 0, status_counts: {} });
