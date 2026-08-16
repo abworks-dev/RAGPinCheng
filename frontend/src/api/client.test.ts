@@ -57,6 +57,18 @@ describe("api client", () => {
     );
   });
 
+  it("loads the admin production system overview as a credentialed GET", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ topology: "unknown", checked_at: 1, app: {}, gpu: {} }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.adminSystemOverview();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/admin/system-overview",
+      expect.objectContaining({ credentials: "include", headers: {} }),
+    );
+  });
+
   it("sends the managed-content delete handle with CSRF protection", async () => {
     setCsrfToken("csrf-delete");
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({

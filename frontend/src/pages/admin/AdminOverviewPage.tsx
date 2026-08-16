@@ -6,8 +6,9 @@ import { Button } from "../../components/ui/button";
 import { Card, CardContent } from "../../components/ui/card";
 import { ErrorState } from "../../components/ui/error-state";
 import { LoadingState } from "../../components/ui/loading-state";
-import type { AdminStats, MaintenanceStatus } from "../../types";
+import type { AdminStats, MaintenanceStatus, SystemOverview } from "../../types";
 import { formatAdminDate } from "./admin-formatters";
+import { ProductionRuntimeStatus } from "./ProductionRuntimeStatus";
 
 const pageHeading = (
   <div>
@@ -32,6 +33,9 @@ export function AdminOverviewPage({ onOpenMaintenance }: AdminOverviewPageProps)
   const [error, setError] = useState<string | null>(null);
   const [maintenance, setMaintenance] = useState<MaintenanceStatus | null>(null);
   const [maintenanceError, setMaintenanceError] = useState<string | null>(null);
+  const [runtime, setRuntime] = useState<SystemOverview | null>(null);
+  const [runtimeError, setRuntimeError] = useState<string | null>(null);
+  const [runtimeLoading, setRuntimeLoading] = useState(true);
 
   useEffect(() => {
     (async () => {
@@ -48,7 +52,20 @@ export function AdminOverviewPage({ onOpenMaintenance }: AdminOverviewPageProps)
         setMaintenanceError(e?.message || String(e));
       }
     })();
+    void loadRuntime();
   }, []);
+
+  async function loadRuntime() {
+    setRuntimeLoading(true);
+    setRuntimeError(null);
+    try {
+      setRuntime(await api.adminSystemOverview());
+    } catch (e: any) {
+      setRuntimeError(e?.message || String(e));
+    } finally {
+      setRuntimeLoading(false);
+    }
+  }
 
   if (error) {
     return (
@@ -103,6 +120,13 @@ export function AdminOverviewPage({ onOpenMaintenance }: AdminOverviewPageProps)
           ))}
         </div>
       </section>
+
+      <ProductionRuntimeStatus
+        data={runtime}
+        loading={runtimeLoading}
+        error={runtimeError}
+        onRefresh={() => void loadRuntime()}
+      />
 
       <section aria-labelledby="overview-maintenance-heading" className="space-y-3">
         <div className="flex items-center justify-between gap-4">

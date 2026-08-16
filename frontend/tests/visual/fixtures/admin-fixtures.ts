@@ -191,6 +191,36 @@ export async function installAdminRoutes(
         messages_7d: 18,
       });
     }
+    if (request.method() === "GET" && path === "/api/admin/system-overview") {
+      return json(route, {
+        topology: "separate",
+        checked_at: 1700000000,
+        app: {
+          status: "healthy",
+          cpu_percent: 31.2,
+          memory_used_bytes: 4 * 1024 ** 3,
+          memory_total_bytes: 16 * 1024 ** 3,
+          disk_used_bytes: 40 * 1024 ** 3,
+          disk_total_bytes: 100 * 1024 ** 3,
+          checked_at: 1700000000,
+          error_code: null,
+        },
+        gpu: {
+          status: "healthy",
+          model_loaded: true,
+          device_name: "NVIDIA RTX 合成卡",
+          vram_used_bytes: 4 * 1024 ** 3,
+          vram_total_bytes: 16 * 1024 ** 3,
+          utilization_percent: 42,
+          temperature_celsius: 53,
+          inflight_requests: 1,
+          checked_at: 1700000000,
+          data_age_seconds: 0,
+          stale: false,
+          error_code: null,
+        },
+      });
+    }
     if (request.method() === "GET" && path === "/api/admin/maintenance") {
       return json(route, {
         settings: {

@@ -25,6 +25,20 @@ for (const [navigationLabel, heading, slug] of [["资料管理", "资料库", "m
   });
 }
 
+test("管理概览生产运行状态 accepted golden", async ({ page }) => {
+  await installAdminRoutes(page, "normal");
+  await page.goto("/admin");
+  await expect(page.getByRole("heading", { name: "生产运行状态" })).toBeVisible();
+  const viewport = page.viewportSize()!;
+  expect(await page.evaluate(() => Math.max(document.body.scrollWidth, document.documentElement.scrollWidth))).toBeLessThanOrEqual(viewport.width);
+  if (process.platform === "win32") {
+    await expect(page).toHaveScreenshot(`overview-runtime-normal-${viewport.width}x${viewport.height}.png`, { fullPage: true });
+  } else {
+    // Linux CI still verifies a nonblank render and overflow; accepted pixels are Windows-specific.
+    expect((await page.screenshot({ fullPage: true })).byteLength).toBeGreaterThan(10_000);
+  }
+});
+
 test("资料库批量选择 accepted golden", async ({ page }) => {
   await installAdminRoutes(page, "normal");
   await page.goto("/admin");

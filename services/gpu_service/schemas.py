@@ -18,6 +18,20 @@ class ActivityResponse(BaseModel):
     asr_chunk_allowed: bool
 
 
+class SystemMetricsResponse(BaseModel):
+    api_version: str
+    node_id: str | None = None
+    model_loaded: bool
+    gpu_available: bool
+    device_name: str | None = None
+    vram_used_bytes: int | None = Field(default=None, ge=0)
+    vram_total_bytes: int | None = Field(default=None, ge=0)
+    utilization_percent: float | None = Field(default=None, ge=0, le=100)
+    temperature_celsius: float | None = Field(default=None, ge=-50, le=150)
+    inflight_requests: int = Field(..., ge=0)
+    checked_at: int
+
+
 class ModelInfoResponse(BaseModel):
     api_version: str
     embedding_model: str
