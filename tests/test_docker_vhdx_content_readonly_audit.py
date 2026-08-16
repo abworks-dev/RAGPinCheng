@@ -34,6 +34,7 @@ def test_vhdx_content_audit_is_exact_read_only_and_fail_closed():
     assert "Get-WslHelp $candidate" in SCRIPT
     assert "ConvertFrom-WslHelpBytes" in SCRIPT
     assert ".Replace(\"$([char]0)\",'')" in SCRIPT
+    assert "set -eu" not in SCRIPT
     for forbidden in (
         "Remove-Item",
         "Optimize-VHD",
