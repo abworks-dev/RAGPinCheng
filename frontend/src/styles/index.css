@@ -13,6 +13,45 @@ html.admin-scrollbar-stable {
   scrollbar-gutter: stable;
 }
 
+.resource-preview-overlay {
+  transition: opacity var(--duration-normal) ease-out;
+}
+
+.resource-preview-sheet {
+  transform-origin: right center;
+  transition:
+    opacity var(--duration-normal) ease-out,
+    transform var(--duration-slow) cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: opacity, transform;
+}
+
+.resource-preview-sheet[data-state="open"] {
+  opacity: 1;
+  transform: translateX(0) scale(1);
+}
+
+.resource-preview-sheet[data-state="closed"] {
+  opacity: 0;
+  transform: translateX(1rem) scale(0.995);
+}
+
+@media (max-width: 767px) {
+  .resource-preview-sheet {
+    transform-origin: center bottom;
+  }
+
+  .resource-preview-sheet[data-state="closed"] {
+    transform: translateY(0.75rem) scale(0.995);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .resource-preview-overlay,
+  .resource-preview-sheet {
+    transition-duration: 0s;
+  }
+}
+
 @media (min-width: 1024px) {
   html.admin-scrollbar-stable {
     overflow-y: hidden;

@@ -36,6 +36,8 @@ describe("ResourcePreviewShell sheet behavior", () => {
     );
 
     expect(screen.getByRole("dialog", { name: "资料预览" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "资料预览" })).toHaveClass("resource-preview-sheet");
+    expect(document.querySelector(".resource-preview-overlay")).toBeInTheDocument();
     expect(screen.getByText("内容")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "关闭预览" })).toBeInTheDocument();
   });
