@@ -17,6 +17,7 @@ COMPOSE_BASE="${REPO_PATH}/docker/docker-compose.yml"
 COMPOSE_OVERRIDE="${COMPOSE_OVERRIDE:?COMPOSE_OVERRIDE must be provided by the private deployment environment}"
 COMPOSE_SOURCE_DECOUPLED="${REPO_PATH}/docker/compose.source-decoupled.yml"
 COMPOSE_ENV_FILE="${COMPOSE_ENV_FILE:?COMPOSE_ENV_FILE must be provided by the private deployment environment}"
+export COMPOSE_ENV_FILE
 COMPOSE_PROJECT="ragpincheng-prod"
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 BACKUP_PATH="${BACKUP_DIR}/app-backup-${TIMESTAMP}"

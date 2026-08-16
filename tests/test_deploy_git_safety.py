@@ -406,6 +406,8 @@ class TestDeployGitSafety(unittest.TestCase):
 
     def test_source_decoupling_overlay_is_final_for_deploy_and_recovery(self):
         overlay = self.source_decoupled_compose
+        self.assertIn("env_file: !override", overlay)
+        self.assertIn("${COMPOSE_ENV_FILE:?COMPOSE_ENV_FILE is required}", overlay)
         self.assertIn("volumes: !override", overlay)
         self.assertIn("${DATA_PATH:?DATA_PATH is required}:/app/data", overlay)
         self.assertIn(
@@ -438,6 +440,7 @@ class TestDeployGitSafety(unittest.TestCase):
         )
         self.assertIn("sanitize_source_decoupled_override.py", self.linux)
         self.assertIn(compose_sanitizer_flags, self.linux)
+        self.assertIn("export COMPOSE_ENV_FILE", self.linux)
         self.assertIn("export COMPOSE_OVERRIDE", self.linux)
 
         self.assertIn(
