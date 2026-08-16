@@ -69,9 +69,9 @@ export function AdminConversationsPage() {
   return (
     <section className="space-y-5" aria-labelledby="admin-conversations-title">
       <header>
-        <p className="text-ui-xs font-medium uppercase tracking-[0.14em] text-primary">内容审阅</p>
+        <p className="text-ui-xs font-medium text-primary">运营管理</p>
         <h1 id="admin-conversations-title" className="mt-1 text-ui-2xl font-semibold tracking-tight text-foreground">
-          对话管理
+          对话记录
         </h1>
         <p className="mt-1 text-ui-sm text-muted-foreground">按用户或主题查找近期对话，并在详情区查看完整消息。</p>
       </header>

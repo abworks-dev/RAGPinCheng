@@ -8,7 +8,7 @@ async function openRootFolder(page: Parameters<typeof installAdminRoutes>[0]) {
   await listing;
 }
 
-for (const [navigationLabel, heading, slug] of [["资料管理", "资料库", "managed-content"], ["分类管理", "分类设置", "categories"], ["索引任务", "索引任务", "index-monitor"]] as const) {
+for (const [navigationLabel, heading, slug] of [["资料管理", "资料管理", "managed-content"], ["分类管理", "分类管理", "categories"], ["索引任务", "索引任务", "index-monitor"]] as const) {
   test(`${heading} accepted golden`, async ({ page }) => {
     test.skip(heading === "索引任务" && process.platform !== "win32", "索引任务 Linux golden 尚未在 Linux Chromium 上人工接受");
     await installAdminRoutes(page, "normal");
@@ -39,7 +39,7 @@ test("管理概览生产运行状态 accepted golden", async ({ page }) => {
   }
 });
 
-test("资料库批量选择 accepted golden", async ({ page }) => {
+test("资料管理批量选择 accepted golden", async ({ page }) => {
   await installAdminRoutes(page, "normal");
   await page.goto("/admin");
   if (page.viewportSize()!.width < 1024) {
@@ -59,7 +59,7 @@ test("资料库批量选择 accepted golden", async ({ page }) => {
   });
 });
 
-test("资料库移入回收站确认 accepted golden", async ({ page }) => {
+test("资料管理移入回收站确认 accepted golden", async ({ page }) => {
   await installAdminRoutes(page, "normal");
   await page.goto("/admin");
   if (page.viewportSize()!.width < 1024) {

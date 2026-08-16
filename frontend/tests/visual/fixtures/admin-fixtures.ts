@@ -106,7 +106,7 @@ const managedIndexJobs = [{
   error_summary: "文档解析服务请求失败，请稍后重试。",
   failure: { code: "parser_request_failed", message: "文档解析服务请求失败。", retryable: true, recommended_action: "请稍后重试；持续失败时联系系统管理员。" },
   attempt_count: 4, created_at: 1700000000, started_at: 1700000010, finished_at: 1700000020, updated_at: 1700000020,
-  title: "资料库发布失败的合成长文件名资料", original_filename: "managed-publication-failure-with-long-name.pdf",
+  title: "资料管理发布失败的合成长文件名资料", original_filename: "managed-publication-failure-with-long-name.pdf",
   doc_type: "pdf", category_id: "cat-03", category_label: "03 公司内部标准",
   category_path: "03 公司内部标准 / 01 建模标准", version_number: 4, file_size: 2_048_000,
   source_origin: "legacy", is_current_head: false, is_latest_attempt: true,

@@ -53,7 +53,7 @@ vi.mock("./AdminDocumentsPage", () => ({
 vi.mock("./AdminMediaPage", () => ({
   AdminMediaPage: () => {
     mocks.mediaMount();
-    return <div>视频媒体页面内容</div>;
+    return <div>视频管理页面内容</div>;
   },
 }));
 
@@ -74,14 +74,14 @@ vi.mock("./AdminFeedbackPage", () => ({
 vi.mock("./AdminManagedContentPage", () => ({
   AdminManagedContentPage: () => {
     mocks.managedMount();
-    return <div>资料库页面内容</div>;
+    return <div>资料管理页面内容</div>;
   },
 }));
 
 vi.mock("./AdminCategoriesPage", () => ({
   AdminCategoriesPage: () => {
     mocks.categoriesMount();
-    return <div>分类设置页面内容</div>;
+    return <div>分类管理页面内容</div>;
   },
 }));
 
@@ -161,7 +161,7 @@ describe("AdminLayout tab boundary", () => {
     const navigation = screen.getByRole("navigation", { name: "管理功能" });
     expect(within(navigation).getAllByRole("button")).toHaveLength(9);
     fireEvent.click(within(navigation).getByRole("button", { name: "分类管理" }));
-    expect(screen.getByText("分类设置页面内容")).toBeInTheDocument();
+    expect(screen.getByText("分类管理页面内容")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "展开管理功能" })).toBeInTheDocument();
   });
 
@@ -213,16 +213,16 @@ describe("AdminLayout tab boundary", () => {
     expect(screen.queryByText("用户页面内容")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "资料管理" }));
-    expect(screen.getByText("资料库页面内容")).toBeInTheDocument();
+    expect(screen.getByText("资料管理页面内容")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "索引任务" }));
     expect(screen.getByText("索引任务页面内容")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "分类管理" }));
-    expect(screen.getByText("分类设置页面内容")).toBeInTheDocument();
+    expect(screen.getByText("分类管理页面内容")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "视频管理" }));
-    expect(screen.getByText("视频媒体页面内容")).toBeInTheDocument();
+    expect(screen.getByText("视频管理页面内容")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "概览" }));
     expect(screen.getByText("概览页面内容")).toBeInTheDocument();
@@ -255,7 +255,7 @@ describe("AdminLayout tab boundary", () => {
     );
 
     expect(screen.getByRole("button", { name: "资料管理" })).toHaveAttribute("aria-current", "page");
-    expect(screen.getByText("资料库页面内容")).toBeInTheDocument();
+    expect(screen.getByText("资料管理页面内容")).toBeInTheDocument();
     expect(screen.queryByText("概览页面内容")).not.toBeInTheDocument();
   });
 
@@ -269,12 +269,12 @@ describe("AdminLayout tab boundary", () => {
     const { rerender } = render(<MemoryRouter><AdminLayout /></MemoryRouter>);
 
     fireEvent.click(screen.getByRole("button", { name: "分类管理" }));
-    expect(screen.getByText("分类设置页面内容")).toBeInTheDocument();
+    expect(screen.getByText("分类管理页面内容")).toBeInTheDocument();
 
     mocks.user = { ...mocks.user, content_permissions: ["organize"] };
     rerender(<MemoryRouter><AdminLayout /></MemoryRouter>);
 
     expect(screen.queryByRole("button", { name: "分类管理" })).not.toBeInTheDocument();
-    expect(screen.getByText("资料库页面内容")).toBeInTheDocument();
+    expect(screen.getByText("资料管理页面内容")).toBeInTheDocument();
   });
 });

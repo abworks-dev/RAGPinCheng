@@ -164,8 +164,8 @@ export function AdminDocumentsPage() {
     <section className="space-y-5" aria-labelledby="admin-documents-title">
       <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <p className="text-ui-xs font-medium text-muted-foreground">内容管理</p>
-          <h1 id="admin-documents-title" className="mt-1 text-ui-2xl font-semibold text-foreground">
+          <p className="text-ui-xs font-medium text-primary">内容管理</p>
+          <h1 id="admin-documents-title" className="mt-1 text-ui-2xl font-semibold tracking-tight text-foreground">
             索引任务
           </h1>
           <p className="mt-1 max-w-3xl text-ui-sm text-muted-foreground">
@@ -201,7 +201,7 @@ export function AdminDocumentsPage() {
       <Card className="overflow-hidden shadow-surface" aria-labelledby="managed-index-title">
         <div className="flex flex-col gap-1 px-4 py-4 sm:flex-row sm:items-end sm:justify-between sm:px-5">
           <div>
-            <h2 id="managed-index-title" className="text-ui-base font-semibold text-foreground">资料库发布任务</h2>
+            <h2 id="managed-index-title" className="text-ui-base font-semibold text-foreground">资料发布任务</h2>
             <p className="mt-1 text-ui-xs text-muted-foreground">
               {history ? "正在显示全部历史尝试。" : "每个资料版本仅显示最新一次发布尝试。"}
             </p>
@@ -282,7 +282,7 @@ export function AdminDocumentsPage() {
           <EmptyState
             className="rounded-none border-x-0 border-b-0"
             title={hasFilters ? "没有符合条件的发布任务" : "暂无发布任务"}
-            description={hasFilters ? "请调整搜索或筛选条件。" : "资料在资料库中发布后，处理状态会显示在这里。"}
+            description={hasFilters ? "请调整搜索或筛选条件。" : "资料在资料管理中发布后，处理状态会显示在这里。"}
           />
         ) : (
           <ManagedJobsTable
@@ -324,7 +324,7 @@ function ManagedJobsTable({
   return (
     <div className="overflow-x-auto border-t border-border">
       <table className="block w-full text-ui-sm lg:table lg:min-w-[78rem]">
-        <caption className="sr-only">资料库发布任务、分类、类型、状态、内容块、来源、更新时间和操作</caption>
+        <caption className="sr-only">资料发布任务、分类、类型、状态、内容块、来源、更新时间和操作</caption>
         <thead className="hidden border-b border-border bg-surface-muted text-left text-muted-foreground lg:table-header-group">
           <tr>
             <th className="min-w-[18rem] px-4 py-3 font-medium">资料</th>

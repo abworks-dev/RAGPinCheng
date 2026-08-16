@@ -115,7 +115,7 @@ export function AdminUsersPage() {
   return (
     <section className="space-y-5" aria-labelledby="admin-users-title">
       <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div><p className="text-ui-xs font-medium uppercase tracking-[0.14em] text-primary">账号与权限</p>
+        <div><p className="text-ui-xs font-medium text-primary">运营管理</p>
           <h1 id="admin-users-title" className="mt-1 text-ui-2xl font-semibold tracking-tight text-foreground">用户管理</h1>
           <p className="mt-1 text-ui-sm text-muted-foreground">查看账号状态、资料权限与使用情况，并执行受控的管理员操作。</p>
         </div>
