@@ -16,7 +16,7 @@ import { AdminManagedContentPage } from "./AdminManagedContentPage";
 import { AdminMaintenancePage } from "./AdminMaintenancePage";
 import { useAuth } from "../../context/AuthContext";
 import { contentWorkspaceTabs, workspaceLabel } from "../../lib/workspace-access";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 
 type Tab = "users" | "conversations" | "corpus" | "managed" | "categories" | "media" | "stats" | "feedback" | "maintenance";
 
@@ -49,6 +49,7 @@ const adminNavigation: NavigationGroup[] = [
 export function AdminLayout() {
   const { state, refreshUser } = useAuth();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const user = state.status === "authed" ? state.user : null;
   const isAdmin = !user?.role || user.role === "admin";
   const permissions = user?.content_permissions || [];
@@ -62,7 +63,11 @@ export function AdminLayout() {
         ] as [Tab, string]),
       }];
   const tabs = navigation.flatMap((group) => group.tabs);
-  const [tab, setTab] = useState<Tab>(isAdmin ? "users" : "managed");
+  const defaultTab: Tab = isAdmin ? "stats" : "managed";
+  const requestedTab = searchParams.get("tab");
+  const tab = tabs.some(([key]) => key === requestedTab)
+    ? (requestedTab as Tab)
+    : defaultTab;
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false);
 
@@ -89,13 +94,17 @@ export function AdminLayout() {
   }, [refreshUser]);
 
   useEffect(() => {
-    if (!user || isAdmin) return;
+    if (!user) return;
     if (tabs.length === 0) {
       navigate("/", { replace: true });
       return;
     }
-    if (!tabs.some(([key]) => key === tab)) setTab("managed");
-  }, [isAdmin, navigate, tab, tabs, user]);
+    if (requestedTab && !tabs.some(([key]) => key === requestedTab)) {
+      const nextParams = new URLSearchParams(searchParams);
+      nextParams.delete("tab");
+      setSearchParams(nextParams, { replace: true });
+    }
+  }, [navigate, requestedTab, searchParams, setSearchParams, tabs, user]);
 
   return (
     <div className="flex min-h-full flex-col bg-admin-background text-foreground lg:h-screen lg:flex-row lg:overflow-hidden">
@@ -154,7 +163,13 @@ export function AdminLayout() {
                       <button
                         key={key}
                         type="button"
-                        onClick={() => { setTab(key); setMobileNavigationOpen(false); }}
+                        onClick={() => {
+                          const nextParams = new URLSearchParams(searchParams);
+                          if (key === defaultTab) nextParams.delete("tab");
+                          else nextParams.set("tab", key);
+                          setSearchParams(nextParams);
+                          setMobileNavigationOpen(false);
+                        }}
                         aria-current={active ? "page" : undefined}
                         title={sidebarCollapsed ? label : undefined}
                         className={cn(

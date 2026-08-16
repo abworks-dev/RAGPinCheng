@@ -1,0 +1,61 @@
+name: Diagnose Production Docker Storage
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_read_only_diagnostic:
+        description: Confirm read-only Docker diagnostics on the production host
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-gpu-exclusive
+  cancel-in-progress: false
+
+jobs:
+  diagnose:
+    if: ${{ inputs.confirm_read_only_diagnostic == true }}
+    runs-on: [self-hosted, windows, production, gpu]
+    environment: production-asr
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Collect read-only Docker diagnostics
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $env:RUNNER_TEMP 'production-docker-diagnostic'
+          New-Item -ItemType Directory -Path $root -Force | Out-Null
+          $commands = @(
+            @{ name = 'docker-version'; args = @('version') },
+            @{ name = 'docker-info'; args = @('info') },
+            @{ name = 'docker-system-df'; args = @('system', 'df') }
+          )
+          $rows = @()
+          foreach ($command in $commands) {
+            $stdoutPath = Join-Path $root ($command.name + '.stdout.txt')
+            $stderrPath = Join-Path $root ($command.name + '.stderr.txt')
+            $process = Start-Process -FilePath 'docker.exe' -ArgumentList @($command.args) -Wait -PassThru -NoNewWindow -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+            $exitCode = $process.ExitCode
+            $stdout = if (Test-Path $stdoutPath) { Get-Content $stdoutPath -Raw -ErrorAction SilentlyContinue } else { '' }
+            $stderr = if (Test-Path $stderrPath) { Get-Content $stderrPath -Raw -ErrorAction SilentlyContinue } else { '' }
+            if ($null -eq $stdout) { $stdout = '' }
+            if ($null -eq $stderr) { $stderr = '' }
+            $safeStdout = [regex]::Replace([string]$stdout, '(?i)(token|password|secret|authorization)\s*[:=]\s*[^\s]+', '$1=[REDACTED]')
+            $safeStderr = [regex]::Replace([string]$stderr, '(?i)(token|password|secret|authorization)\s*[:=]\s*[^\s]+', '$1=[REDACTED]')
+            Set-Content -LiteralPath $stdoutPath -Value $safeStdout -Encoding UTF8
+            Set-Content -LiteralPath $stderrPath -Value $safeStderr -Encoding UTF8
+            $rows += [ordered]@{ command = 'docker ' + ($command.args -join ' '); exit_code = [int]$exitCode; stdout_bytes = ([Text.Encoding]::UTF8.GetByteCount($safeStdout)); stderr_bytes = ([Text.Encoding]::UTF8.GetByteCount($safeStderr)) }
+          }
+          [ordered]@{ schema_version='production-docker-diagnostic/1'; generated_at_utc=[DateTimeOffset]::UtcNow.ToString('o'); destructive_operations_executed=$false; commands=$rows } |
+            ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $root 'summary.json') -Encoding UTF8
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-docker-diagnostic-${{ github.run_id }}
+          path: ${{ runner.temp }}/production-docker-diagnostic
+          if-no-files-found: warn
