@@ -77,6 +77,9 @@ def test_quiesced_orchestrator_gates_stop_and_restores_runtime():
         "no_local_backup_accepted=$true",
         "stdout_base64",
         "FromBase64String",
+        "baseline_mode='inactive-runtime'",
+        "activeRuntime",
+        "runtime state is inconsistent",
     ):
         assert expected in ORCHESTRATOR
     for forbidden in (
