@@ -2,6 +2,9 @@ import { expect, test } from "@playwright/test";
 import process from "node:process";
 import { installAdminRoutes } from "./fixtures/admin-fixtures";
 
+// Chromium can vary the native page-size select glyph by 47 pixels between Linux processes.
+const MANAGED_CONTENT_MAX_DIFF_PIXELS = 50;
+
 async function openManagedFolder(page: Parameters<typeof installAdminRoutes>[0]) {
   const folder = page.getByRole("button", { name: /^03 公司内部标准/ });
   await expect(folder).toBeVisible();
@@ -23,7 +26,9 @@ for (const [navigationLabel, heading, slug] of [["资料管理", "资料库", "m
     await expect(page.getByRole("heading", { name: heading })).toBeVisible();
     if (heading === "资料库") await openManagedFolder(page);
     const viewport = page.viewportSize()!;
-    await expect(page).toHaveScreenshot(`${slug}-normal-${viewport.width}x${viewport.height}.png`, { fullPage: true });
+    await expect(page).toHaveScreenshot(`${slug}-normal-${viewport.width}x${viewport.height}.png`, heading === "资料库"
+      ? { fullPage: true, maxDiffPixels: MANAGED_CONTENT_MAX_DIFF_PIXELS }
+      : { fullPage: true });
   });
 }
 
@@ -42,7 +47,7 @@ test("资料库批量选择 accepted golden", async ({ page }) => {
   await expect(page.getByText(/已选择\s*1\s*份/)).toBeVisible();
   await page.getByTestId("managed-bulk-toolbar").scrollIntoViewIfNeeded();
   const viewport = page.viewportSize()!;
-  await expect(page).toHaveScreenshot(`managed-content-selected-${viewport.width}x${viewport.height}.png`);
+  await expect(page).toHaveScreenshot(`managed-content-selected-${viewport.width}x${viewport.height}.png`, { maxDiffPixels: MANAGED_CONTENT_MAX_DIFF_PIXELS });
 });
 
 test("资料库移入回收站确认 accepted golden", async ({ page }) => {
@@ -58,7 +63,7 @@ test("资料库移入回收站确认 accepted golden", async ({ page }) => {
   await item.getByRole("button", { name: "移至回收站", exact: true }).click();
   await expect(page.getByRole("dialog", { name: "移至回收站" })).toBeVisible();
   const viewport = page.viewportSize()!;
-  await expect(page).toHaveScreenshot(`managed-content-delete-confirm-${viewport.width}x${viewport.height}.png`);
+  await expect(page).toHaveScreenshot(`managed-content-delete-confirm-${viewport.width}x${viewport.height}.png`, { maxDiffPixels: MANAGED_CONTENT_MAX_DIFF_PIXELS });
 });
 
 test("索引任务区域 accepted golden", async ({ page }) => {
