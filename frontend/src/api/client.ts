@@ -53,6 +53,13 @@ export function getCsrfToken(): string | null {
 let unauthorizedHandler: (() => void) | null = null;
 let contentPermissionForbiddenHandler: (() => void) | null = null;
 
+export interface ManagedContentUploadEntry {
+  file: File;
+  relativePath: string;
+}
+
+export type ManagedContentUploadMode = "files" | "folder";
+
 export function setUnauthorizedHandler(fn: (() => void) | null) {
   unauthorizedHandler = fn;
 }
@@ -349,13 +356,20 @@ export const api = {
       `/api/admin/content/items/${encodeURIComponent(itemId)}/restore`,
       { method: "POST", body: JSON.stringify({ expected_version_id: expectedVersionId }) },
     ),
-  uploadManagedContent: async (files: File[], categoryId: string) => {
+  uploadManagedContent: async (
+    files: Array<File | ManagedContentUploadEntry>,
+    categoryId: string,
+    uploadMode: ManagedContentUploadMode = "files",
+  ) => {
     const form = new FormData();
-    files.forEach((file) => {
+    files.forEach((entry) => {
+      const file = "file" in entry ? entry.file : entry;
+      const relativePath = "file" in entry ? entry.relativePath : file.webkitRelativePath || file.name;
       form.append("files", file, file.name);
-      form.append("relative_paths", file.webkitRelativePath || file.name);
+      form.append("relative_paths", relativePath);
     });
     form.append("category_id", categoryId);
+    form.append("upload_mode", uploadMode);
     const headers: Record<string, string> = {};
     if (csrfToken) headers["X-CSRF-Token"] = csrfToken;
     const response = await fetch("/api/admin/content/uploads", {
