@@ -35,6 +35,8 @@ def test_vhdx_content_audit_is_exact_read_only_and_fail_closed():
     assert "ConvertFrom-WslHelpBytes" in SCRIPT
     assert ".Replace(\"$([char]0)\",'')" in SCRIPT
     assert "set -eu" not in SCRIPT
+    assert "shellBase64" in SCRIPT
+    assert "base64 -d | sh" in SCRIPT
     for forbidden in (
         "Remove-Item",
         "Optimize-VHD",
@@ -80,6 +82,7 @@ def test_quiesced_orchestrator_gates_stop_and_restores_runtime():
         "baseline_mode='inactive-runtime'",
         "activeRuntime",
         "runtime state is inconsistent",
+        "Inactive Docker runtime state was not restored",
     ):
         assert expected in ORCHESTRATOR
     for forbidden in (
