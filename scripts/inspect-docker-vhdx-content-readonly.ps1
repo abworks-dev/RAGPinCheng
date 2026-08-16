@@ -255,7 +255,9 @@ printf 'volume_count=%s\n' "$volume_count"
 printf 'volume_bytes=%s\n' "$volume_bytes"
 printf 'sensitive_markers=%s\n' "$sensitive_markers"
 '@
-        $inspectExit=Invoke-HiddenWsl $wslPath @('--system','--','sh','-lc',$shell) $inspectOut $inspectErr
+        $shellBase64=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($shell))
+        $shellLauncher="printf '%s' '$shellBase64' | base64 -d | sh"
+        $inspectExit=Invoke-HiddenWsl $wslPath @('--system','--','sh','-lc',$shellLauncher) $inspectOut $inspectErr
         if ($inspectExit -ne 0) { throw 'Read-only aggregate inspection failed.' }
         $values=@{}
         foreach ($line in @(Get-Content -LiteralPath $inspectOut -ErrorAction Stop)) {

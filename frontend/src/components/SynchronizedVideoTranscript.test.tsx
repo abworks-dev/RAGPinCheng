@@ -3,6 +3,23 @@ import { describe, expect, it } from "vitest";
 import { SynchronizedVideoTranscript } from "./SynchronizedVideoTranscript";
 
 describe("SynchronizedVideoTranscript", () => {
+  it("uses the supplied media URL for protected workbench playback", () => {
+    render(
+      <SynchronizedVideoTranscript
+        mediaId="media-1"
+        mediaUrl="/api/admin/media/media-1/preview"
+        segments={[]}
+        transcriptLoading={false}
+        transcriptError={null}
+      />,
+    );
+
+    expect(screen.getByLabelText("视频播放器")).toHaveAttribute(
+      "src",
+      "/api/admin/media/media-1/preview",
+    );
+  });
+
   it("seeks the embedded video when a timestamp cue is clicked", () => {
     render(
       <SynchronizedVideoTranscript

@@ -202,10 +202,23 @@ try {
             if (-not $caught) { $caught=$_; $report.failure_stage='restore-runtime' }
         }
     } elseif ($preState) {
-        $report.post_state=Get-DockerState
-        $report.restore_status='not-required'
+        $postState=Get-DockerState
+        if (-not $preState.docker_desktop_distribution_running -and $postState.docker_desktop_distribution_running) {
+            $terminate=Invoke-Captured 'wsl.exe' @('--terminate','docker-desktop')
+            if ($terminate.exit_code -ne 0) { $caught=if ($caught) { $caught } else { [System.Exception]::new('Targeted inactive Docker WSL restoration failed.') } }
+            $postState=Get-DockerState
+        }
+        $restored=(
+            (Test-SameCategories $postState.process_categories $preState.process_categories) -and
+            $postState.running_services -eq $preState.running_services -and
+            $postState.running_scheduled_tasks -eq $preState.running_scheduled_tasks -and
+            $postState.docker_desktop_distribution_running -eq $preState.docker_desktop_distribution_running
+        )
+        $report.post_state=$postState
+        $report.restore_status=if ($restored) { 'completed' } else { 'failed' }
+        if (-not $restored -and -not $caught) { $caught=[System.Exception]::new('Inactive Docker runtime state was not restored.'); $report.failure_stage='restore-runtime' }
     }
-    if ($report.content_audit_status -eq 'completed' -and (($activeRuntime -and $report.restore_status -eq 'completed') -or (-not $activeRuntime -and $report.restore_status -eq 'not-required'))) { $report.final_status='completed'; $report.failure_stage=$null }
+    if ($report.content_audit_status -eq 'completed' -and $report.restore_status -eq 'completed') { $report.final_status='completed'; $report.failure_stage=$null }
     Write-OrchestrationReport $report
 }
 
