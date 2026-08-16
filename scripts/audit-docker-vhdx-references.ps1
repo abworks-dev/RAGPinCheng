@@ -178,15 +178,18 @@ foreach ($file in $files) {
     } else {
         [ordered]@{ status='known'; attached=[bool](@($cimMatches | Where-Object Attached).Count -gt 0) }
     }
-    $knownStates=@($nativeState,$diskImageState,$cimState | Where-Object { $_.status -eq 'known' })
-    $attached=@($knownStates | Where-Object { $_.attached -eq $true }).Count -gt 0
-    $attachmentConflict=(@($knownStates | Where-Object { $_.attached -eq $true }).Count -gt 0 -and @($knownStates | Where-Object { $_.attached -eq $false }).Count -gt 0)
-    $attachmentKnown=($nativeState.status -eq 'known' -and -not $attachmentConflict)
     $exclusive='unknown'
     try {
         $stream=[IO.File]::Open($file.FullName,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::None)
         $stream.Dispose(); $exclusive='available'
     } catch { $exclusive='unavailable' }
+    $knownStates=@(@($nativeState,$diskImageState,$cimState) | Where-Object { $_.status -eq 'known' })
+    $attached=@($knownStates | Where-Object { $_.attached -eq $true }).Count -gt 0
+    $attachmentConflict=(@($knownStates | Where-Object { $_.attached -eq $true }).Count -gt 0 -and @($knownStates | Where-Object { $_.attached -eq $false }).Count -gt 0)
+    $directAttachmentKnown=($nativeState.status -eq 'known' -or $diskImageState.status -eq 'known')
+    $corroboratedDetached=(-not $attached -and $cimState.status -eq 'known' -and $cimState.attached -eq $false -and $exclusive -eq 'available')
+    $attachmentKnown=(($directAttachmentKnown -or $corroboratedDetached) -and -not $attachmentConflict)
+    $attachmentStateBasis=if (-not $attachmentKnown) { 'unknown' } elseif ($directAttachmentKnown) { 'direct-query' } else { 'storage-cim-and-exclusive-read' }
     $processReference=@($processes | Where-Object { ([string]$_.ExecutablePath).IndexOf($file.FullName,[StringComparison]::OrdinalIgnoreCase) -ge 0 -or ([string]$_.CommandLine).IndexOf($file.FullName,[StringComparison]::OrdinalIgnoreCase) -ge 0 }).Count -gt 0
     $wslRegisteredReference=@($wslRoots | Where-Object { Test-ChildPath $file.FullName $_ }).Count -gt 0
     $wslRuntimeActive=$wslProcesses.Count -gt 0
@@ -216,6 +219,7 @@ foreach ($file in $files) {
         last_write_utc=$file.LastWriteTimeUtc.ToString('o')
         attached=$attached
         attachment_state_known=$attachmentKnown
+        attachment_state_basis=$attachmentStateBasis
         attachment_state_conflict=$attachmentConflict
         attachment_queries=[ordered]@{ native=$nativeState; disk_image_cmdlet=$diskImageState; storage_cim=$cimState }
         exclusive_read=$exclusive

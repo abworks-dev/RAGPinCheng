@@ -5,6 +5,7 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
+  type WheelEvent as ReactWheelEvent,
 } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 import "react-pdf/dist/esm/Page/AnnotationLayer.css";
@@ -33,6 +34,7 @@ const MAX_SCALE = 3;
 const ZOOM_STEP = 0.1;
 const VIEWPORT_PADDING = 32;
 const PREFETCH_RADIUS = 2;
+const MOUSE_WHEEL_DELTA_THRESHOLD = 40;
 const PDF_DOCUMENT_OPTIONS = {
   disableAutoFetch: true,
   disableStream: true,
@@ -64,6 +66,34 @@ export function calculatePdfScale(
   const heightScale = Math.max(0, viewport.height - VIEWPORT_PADDING) / page.height;
   const nextScale = mode === "fit-width" ? widthScale : Math.min(widthScale, heightScale);
   return Math.min(MAX_SCALE, Math.max(MIN_SCALE, nextScale));
+}
+
+export function shouldZoomPdfWheel(
+  panEnabled: boolean,
+  event: Pick<WheelEvent, "ctrlKey" | "metaKey" | "deltaMode" | "deltaX" | "deltaY">,
+): boolean {
+  if (event.ctrlKey || event.metaKey) return true;
+  if (!panEnabled) return false;
+  if (event.deltaMode !== WheelEvent.DOM_DELTA_PIXEL) return true;
+  return Math.abs(event.deltaY) >= MOUSE_WHEEL_DELTA_THRESHOLD
+    && Math.abs(event.deltaY) > Math.abs(event.deltaX);
+}
+
+export function calculateWheelZoom(currentScale: number, deltaY: number): number {
+  if (!deltaY) return currentScale;
+  const magnitude = Math.min(0.15, Math.max(0.02, Math.abs(deltaY) * 0.001));
+  const delta = deltaY < 0 ? magnitude : -magnitude;
+  return Math.min(MAX_SCALE, Math.max(MIN_SCALE, Number((currentScale + delta).toFixed(2))));
+}
+
+export function calculateZoomedScroll(
+  scrollPosition: number,
+  pointerOffset: number,
+  currentScale: number,
+  nextScale: number,
+): number {
+  if (currentScale <= 0 || currentScale === nextScale) return scrollPosition;
+  return Math.max(0, (scrollPosition + pointerOffset) * (nextScale / currentScale) - pointerOffset);
 }
 
 function isEditableTarget(target: EventTarget | null): boolean {
@@ -218,6 +248,28 @@ export function PdfPreview() {
     setScale((current) => Math.min(MAX_SCALE, Math.max(MIN_SCALE, Number((current + delta).toFixed(2)))));
   }
 
+  function handleWheel(event: ReactWheelEvent<HTMLDivElement>) {
+    const viewport = viewportRef.current;
+    if (!viewport || !shouldZoomPdfWheel(panEnabled, event.nativeEvent)) return;
+
+    const nextScale = calculateWheelZoom(scale, event.deltaY);
+    if (nextScale === scale) return;
+
+    event.preventDefault();
+    const bounds = viewport.getBoundingClientRect();
+    const pointerX = event.clientX - bounds.left;
+    const pointerY = event.clientY - bounds.top;
+    const nextScrollLeft = calculateZoomedScroll(viewport.scrollLeft, pointerX, scale, nextScale);
+    const nextScrollTop = calculateZoomedScroll(viewport.scrollTop, pointerY, scale, nextScale);
+
+    setZoomMode("custom");
+    setScale(nextScale);
+    requestAnimationFrame(() => {
+      viewport.scrollLeft = nextScrollLeft;
+      viewport.scrollTop = nextScrollTop;
+    });
+  }
+
   function handlePointerDown(event: ReactPointerEvent<HTMLDivElement>) {
     const viewport = viewportRef.current;
     if (!viewport || !panEnabled || event.button !== 0) return;
@@ -361,6 +413,7 @@ export function PdfPreview() {
           aria-label={isPdf ? "PDF 页面" : undefined}
           tabIndex={isPdf ? 0 : undefined}
           onKeyDown={handleViewportKeyDown}
+          onWheel={handleWheel}
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={stopDragging}

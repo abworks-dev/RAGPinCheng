@@ -319,7 +319,7 @@ export function AdminCategoriesPage() {
 
   return (
     <section className="flex flex-col gap-5" aria-labelledby="managed-categories-title">
-      <header className="flex flex-col gap-4 border-b border-border pb-5 sm:flex-row sm:items-end sm:justify-between">
+      <header className="flex flex-col gap-4 border-b border-border pb-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="text-ui-xs font-medium text-primary">内容管理</p>
           <h1 id="managed-categories-title" className="mt-1 text-ui-2xl font-semibold text-foreground">分类管理</h1>
@@ -339,8 +339,8 @@ export function AdminCategoriesPage() {
       {loading ? <LoadingState className="min-h-48 border border-border" label="正在加载分类…" /> : error && categories.length === 0 ? null : categories.length === 0 ? (
         <EmptyState title="暂无分类" description="新增第一个分类后，可在此维护名称、编号和状态。" action={<Button onClick={() => requestCreate()}><Plus className="size-4" />新增分类</Button>} />
       ) : (
-        <section aria-labelledby="category-list-title" className="space-y-3">
-          <div className="overflow-hidden rounded-ui-lg border border-border bg-card">
+        <section aria-labelledby="category-list-title" className="overflow-hidden rounded-ui-lg border border-border bg-card">
+          <div>
             <div className="flex flex-col gap-3 bg-surface-muted/30 px-4 py-3 sm:flex-row sm:items-end">
               <label className="min-w-0 flex-1 space-y-1 text-ui-xs font-medium text-muted-foreground sm:max-w-md">
                 <span>搜索分类</span>
@@ -363,8 +363,8 @@ export function AdminCategoriesPage() {
             </div>
           </div>
 
-          {tree.length === 0 ? <EmptyState title="没有符合条件的分类" description="请调整搜索词或状态筛选。" /> : (
-            <div className="grid min-h-[28rem] overflow-hidden rounded-ui-lg border border-border bg-card lg:h-[calc(100vh-20rem)] lg:min-h-[22rem] lg:max-h-[40rem] lg:grid-cols-[minmax(20rem,0.82fr)_minmax(24rem,1.18fr)]">
+          {tree.length === 0 ? <EmptyState className="rounded-none border-0 border-t border-border bg-card" title="没有符合条件的分类" description="请调整搜索词或状态筛选。" /> : (
+            <div className="grid min-h-[28rem] border-t border-border lg:h-[calc(100vh-20rem)] lg:min-h-[22rem] lg:max-h-[40rem] lg:grid-cols-[minmax(20rem,0.82fr)_minmax(24rem,1.18fr)]">
               <div className="min-h-0 min-w-0 border-border bg-background/30 lg:overflow-y-auto lg:border-r">
                 <div role="tree" aria-label="分类层级" className="divide-y divide-border">
                   {tree.map((node, index) => <CategoryTreeNodeView key={node.category.id} node={node} level={1} index={index} siblingCount={tree.length} selectedId={selectedId} expanded={expanded} visibleNodes={visibleNodes} nodeRefs={nodeRefs} onSelect={selectCategory} onToggle={(id) => setExpanded((current) => { const next = new Set(current); next.has(id) ? next.delete(id) : next.add(id); return next; })} />)}
