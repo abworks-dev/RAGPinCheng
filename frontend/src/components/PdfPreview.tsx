@@ -9,11 +9,12 @@ import {
 import { Document, Page, pdfjs } from "react-pdf";
 import "react-pdf/dist/esm/Page/AnnotationLayer.css";
 import "react-pdf/dist/esm/Page/TextLayer.css";
-import { Hand, Minus, MousePointer2, Plus } from "lucide-react";
+import { ArrowLeft, Hand, Minus, MousePointer2, Plus } from "lucide-react";
 import { usePdfPreview } from "../hooks/usePdfPreview";
 import { DocxPreview } from "./DocxPreview";
 import { ResourcePreviewShell } from "./ResourcePreviewShell";
 import { SpreadsheetPreview } from "./SpreadsheetPreview";
+import { IconButton } from "./ui/icon-button";
 
 // PDF.js worker — use the CDN build so we don't need to bundle it.
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
@@ -311,8 +312,14 @@ export function PdfPreview() {
     </div>
   ) : null;
 
+  const backAction = state.returnTo === "managed-content-detail" ? (
+    <IconButton label="返回资料详情" onClick={close}>
+      <ArrowLeft className="size-4" />
+    </IconButton>
+  ) : null;
+
   return (
-    <ResourcePreviewShell open={open} title={state.title} subtitle={typeLabel} onClose={close} toolbar={toolbar}>
+    <ResourcePreviewShell open={open} title={state.title} subtitle={typeLabel} onClose={close} backAction={backAction} toolbar={toolbar}>
       <div className="flex h-full min-h-0 flex-col">
         {isPdf && numPages && numPages > 1 && (
           <div className="flex shrink-0 items-center justify-center gap-2 border-b border-border px-4 py-2">

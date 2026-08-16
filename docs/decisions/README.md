@@ -6,6 +6,6 @@
 
 ## 决策索引
 
-- [0001 — 视频转录播放器与媒体资产流水线](0001-video-transcript-player.md)：已批准设计，第一阶段尚待明确执行授权。
+- [0001 — 视频转录播放器与媒体资产流水线](0001-video-transcript-player.md)：历史设计记录；核心播放器链路已实现，当前状态见视频转录与引用功能文档。
 - [0002 — 多引擎视频自动转录与管理员选择](0002-multi-engine-transcription.md)：已批准架构，Phase 1～Phase 6 尚未授权执行。
 - [0003 — 数据库分类与受管内容资料库](0003-managed-content-library.md)：已批准架构，R2 仓库实施中，生产迁移尚未授权。

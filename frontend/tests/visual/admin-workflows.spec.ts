@@ -10,7 +10,7 @@ async function openTab(page: Parameters<typeof installAdminRoutes>[0], label: st
     await expect(mobileNavigation).toBeVisible();
     await mobileNavigation.click();
   }
-  await page.getByRole("button", { name: label, exact: true }).click();
+  await page.getByRole("link", { name: label, exact: true }).click();
 }
 
 async function openRootFolder(page: Parameters<typeof installAdminRoutes>[0], folderId = "cat-company") {
@@ -20,10 +20,10 @@ async function openRootFolder(page: Parameters<typeof installAdminRoutes>[0], fo
   await listing;
 }
 
-test.describe("资料库", () => {
+test.describe("资料管理", () => {
   test("normal layout keeps navigation and upload controls discoverable", async ({ page }) => {
     await openTab(page, "资料管理");
-    await expect(page.getByRole("heading", { name: "资料库" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "资料管理" })).toBeVisible();
     await expectNoBodyOverflow(page);
     await expectInViewport(page.getByRole("button", { name: "刷新" }));
     await expect(page.getByRole("button", { name: "/", exact: true })).toBeVisible();
@@ -66,11 +66,11 @@ test.describe("资料库", () => {
     test(`${scenario} state is explicit and contained`, async ({ page }) => {
       await openTab(page, "资料管理", scenario);
       await expectNoBodyOverflow(page);
-      if (scenario === "loading") await expect(page.getByRole("heading", { name: "资料库" })).toBeVisible();
+      if (scenario === "loading") await expect(page.getByRole("heading", { name: "资料管理" })).toBeVisible();
       if (scenario === "empty") await expect(page.getByText("没有符合条件的资料")).toBeVisible();
       if (scenario === "error") await expect(page.getByText("合成加载失败")).toBeVisible();
       if (scenario === "disabled") {
-        await expect(page.getByText("资料库当前未启用，上传和流程操作暂不可用。")).toBeVisible();
+        await expect(page.getByText("资料管理当前未启用，上传和流程操作暂不可用。")).toBeVisible();
         await expect(page.getByRole("button", { name: "上传文件" })).toBeDisabled();
       }
     });
@@ -134,7 +134,7 @@ test.describe("资料库", () => {
     if (page.viewportSize()!.width < 1024) {
       await page.getByRole("button", { name: "展开管理功能" }).click();
     }
-    await page.getByRole("button", { name: "资料管理", exact: true }).click();
+    await page.getByRole("link", { name: "资料管理", exact: true }).click();
     await expect(page.getByText("待处理目录申请")).toBeVisible();
     await expect(page.getByText("审核标准", { exact: true })).toBeVisible();
     await expectNoBodyOverflow(page);
@@ -172,20 +172,25 @@ test.describe("资料库", () => {
     await expectNoBodyOverflow(page);
   });
 
-  test("indexed files open in the shared preview sheet", async ({ page }) => {
+  test("indexed files return from the shared preview sheet to their detail dialog", async ({ page }) => {
     await openTab(page, "资料管理");
     await openRootFolder(page);
     const title = page.getByText("建筑信息模型交付标准（合成长文件名用于响应式检查）", { exact: true }).filter({ visible: true });
     const item = page.viewportSize()!.width < 1024 ? title.locator("xpath=ancestor::li") : title.locator("xpath=ancestor::tr");
     await item.getByRole("button", { name: "查看", exact: true }).click();
 
-    const detail = page.getByRole("dialog", { name: "建筑信息模型交付标准（合成长文件名用于响应式检查）" });
+    const detail = page.getByRole("dialog").filter({ has: page.getByRole("button", { name: "预览文件" }) });
+    await expect(detail).toBeVisible();
     await detail.getByRole("button", { name: "预览文件" }).click();
+    await expect(page.getByRole("button", { name: "返回资料详情" })).toBeVisible();
     await expect(page.getByRole("button", { name: "关闭预览" })).toBeVisible();
+    await expect(detail).toBeHidden();
     await expectNoBodyOverflow(page);
 
-    await page.getByRole("button", { name: "关闭预览" }).click();
-    await expect(page.getByRole("button", { name: "关闭预览" })).toBeHidden();
+    await page.getByRole("button", { name: "返回资料详情" }).click();
+    await expect(detail).toBeVisible();
+    await expect(detail.getByRole("link", { name: "下载" })).toBeVisible();
+    await expectNoBodyOverflow(page);
   });
 
   test("move-to-trash confirmation explains impact and exposes a stable busy state", async ({ page }) => {
@@ -229,7 +234,7 @@ test.describe("资料库", () => {
 test.describe("视频管理", () => {
   test("media records keep duplicate submissions and recovery actions readable", async ({ page }) => {
     await openTab(page, "视频管理");
-    await expect(page.getByRole("heading", { name: "视频媒体" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "视频管理" })).toBeVisible();
     await expect(page.getByText("同名记录 2 条").first()).toBeVisible();
     await expect(page.getByRole("button", { name: "全部 3 条" })).toBeVisible();
     await expect(page.getByRole("button", { name: "失败 2 条" })).toBeVisible();
@@ -270,7 +275,7 @@ test.describe("索引任务", () => {
   test("normal layout keeps publication identity, filters, and failures discoverable", async ({ page }) => {
     await openTab(page, "索引任务");
     await expect(page.getByRole("heading", { name: "索引任务" })).toBeVisible();
-    await expect(page.getByText("资料库发布失败的合成长文件名资料", { exact: true })).toBeVisible();
+    await expect(page.getByText("资料管理发布失败的合成长文件名资料", { exact: true })).toBeVisible();
     await expectNoBodyOverflow(page);
     await expect(page.getByRole("button", { name: "上传资料" })).toHaveCount(0);
     await expect(page.getByText("旧索引资料", { exact: true })).toHaveCount(0);
@@ -298,10 +303,10 @@ test.describe("索引任务", () => {
   }
 });
 
-test.describe("分类设置", () => {
+test.describe("分类管理", () => {
   test("normal layout keeps form and category actions discoverable", async ({ page }) => {
     await openTab(page, "分类管理");
-    await expect(page.getByRole("heading", { name: "分类设置" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "分类管理" })).toBeVisible();
     await expect(page.getByText("资料权限")).toHaveCount(0);
     await expectNoBodyOverflow(page);
     const createButton = page.getByRole("button", { name: "新增" });

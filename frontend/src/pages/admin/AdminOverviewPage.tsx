@@ -1,18 +1,19 @@
 import { useEffect, useState } from "react";
 import { ArrowRight } from "lucide-react";
-import { api } from "../../api/client";
+import { adminOverviewApi } from "../../api/admin/overview";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Card, CardContent } from "../../components/ui/card";
 import { ErrorState } from "../../components/ui/error-state";
 import { LoadingState } from "../../components/ui/loading-state";
-import type { AdminStats, MaintenanceStatus } from "../../types";
-import { formatAdminDate } from "./admin-formatters";
+import type { AdminStats, MaintenanceStatus, SystemOverview } from "../../types";
+import { formatAdminDate } from "../../lib/admin-formatters";
+import { ProductionRuntimeStatus } from "./ProductionRuntimeStatus";
 
 const pageHeading = (
   <div>
-    <p className="text-ui-sm font-medium text-primary">管理概览</p>
-    <h1 className="mt-1 text-ui-2xl font-semibold tracking-tight text-foreground">运营数据概览</h1>
+    <p className="text-ui-xs font-medium text-primary">总览</p>
+    <h1 className="mt-1 text-ui-2xl font-semibold tracking-tight text-foreground">管理概览</h1>
     <p className="mt-2 max-w-2xl text-ui-sm text-muted-foreground">
       查看用户、对话和消息的整体情况。
     </p>
@@ -32,23 +33,39 @@ export function AdminOverviewPage({ onOpenMaintenance }: AdminOverviewPageProps)
   const [error, setError] = useState<string | null>(null);
   const [maintenance, setMaintenance] = useState<MaintenanceStatus | null>(null);
   const [maintenanceError, setMaintenanceError] = useState<string | null>(null);
+  const [runtime, setRuntime] = useState<SystemOverview | null>(null);
+  const [runtimeError, setRuntimeError] = useState<string | null>(null);
+  const [runtimeLoading, setRuntimeLoading] = useState(true);
 
   useEffect(() => {
     (async () => {
       try {
-        setStats(await api.adminStats());
+        setStats(await adminOverviewApi.stats());
       } catch (e: any) {
         setError(e?.message || String(e));
       }
     })();
     (async () => {
       try {
-        setMaintenance(await api.adminMaintenance());
+        setMaintenance(await adminOverviewApi.maintenance());
       } catch (e: any) {
         setMaintenanceError(e?.message || String(e));
       }
     })();
+    void loadRuntime();
   }, []);
+
+  async function loadRuntime() {
+    setRuntimeLoading(true);
+    setRuntimeError(null);
+    try {
+      setRuntime(await adminOverviewApi.systemOverview());
+    } catch (e: any) {
+      setRuntimeError(e?.message || String(e));
+    } finally {
+      setRuntimeLoading(false);
+    }
+  }
 
   if (error) {
     return (
@@ -103,6 +120,13 @@ export function AdminOverviewPage({ onOpenMaintenance }: AdminOverviewPageProps)
           ))}
         </div>
       </section>
+
+      <ProductionRuntimeStatus
+        data={runtime}
+        loading={runtimeLoading}
+        error={runtimeError}
+        onRefresh={() => void loadRuntime()}
+      />
 
       <section aria-labelledby="overview-maintenance-heading" className="space-y-3">
         <div className="flex items-center justify-between gap-4">

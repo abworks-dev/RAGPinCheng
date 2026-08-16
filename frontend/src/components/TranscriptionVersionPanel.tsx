@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { api } from "../api/client";
+import { adminMediaApi } from "../api/admin/media";
 import { useTranscriptPublicationJob } from "../hooks/useTranscriptionJobs";
 import type { TranscriptVersion } from "../types";
 import { Alert, AlertDescription, AlertTitle } from "./ui/alert";
@@ -45,7 +45,7 @@ export function TranscriptionVersionPanel({ mediaId, refreshToken, embedded = fa
   const loadVersions = useCallback(async () => {
     setLoading(true);
     try {
-      setVersions(await api.listTranscriptVersions(mediaId));
+      setVersions(await adminMediaApi.versions(mediaId));
       setError(null);
     } catch (caught: any) {
       setError(caught?.message || String(caught));
@@ -67,7 +67,7 @@ export function TranscriptionVersionPanel({ mediaId, refreshToken, embedded = fa
   const previewVersion = async (versionId: string) => {
     setBusyVersionId(versionId);
     try {
-      const result = await api.previewTranscriptVersion(versionId);
+      const result = await adminMediaApi.previewVersion(versionId);
       setPreview({ versionId, markdown: result.markdown });
       setError(null);
     } catch (caught: any) {
@@ -80,7 +80,7 @@ export function TranscriptionVersionPanel({ mediaId, refreshToken, embedded = fa
   const reviewVersion = async (versionId: string, approved: boolean) => {
     setBusyVersionId(versionId);
     try {
-      await api.reviewTranscriptVersion(versionId, approved, reviewNote[versionId]?.trim() || null);
+      await adminMediaApi.reviewVersion(versionId, approved, reviewNote[versionId]?.trim() || null);
       await loadVersions();
       await onChanged?.();
     } catch (caught: any) {
@@ -93,7 +93,7 @@ export function TranscriptionVersionPanel({ mediaId, refreshToken, embedded = fa
   const publishVersion = async (versionId: string) => {
     setBusyVersionId(versionId);
     try {
-      const result = await api.publishTranscriptVersion(versionId);
+      const result = await adminMediaApi.publishVersion(versionId);
       setPublicationJobId(result.job?.index_job_id ?? null);
       await loadVersions();
       await onChanged?.();

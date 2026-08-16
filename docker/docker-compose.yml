@@ -77,6 +77,8 @@ services:
       # 生产 GPU 地址仅从私有 .env 注入；示例默认仅用于本机开发。
       GPU_SERVICE_URL: ${GPU_SERVICE_URL:-http://127.0.0.1:8100}
       GPU_SERVICE_TOKEN: ${GPU_SERVICE_TOKEN:-}
+      SYSTEM_NODE_ID: ${SYSTEM_NODE_ID:-app-node-1}
+      GPU_SYSTEM_METRICS_TIMEOUT_SECONDS: ${GPU_SYSTEM_METRICS_TIMEOUT_SECONDS:-2}
       EMBED_PROVIDER: ${EMBED_PROVIDER:-remote}
       RERANK_PROVIDER: ${RERANK_PROVIDER:-remote}
       # --env-file selects the production interpolation source, while env_file above

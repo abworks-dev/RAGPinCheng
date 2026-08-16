@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Plus, RefreshCw, Save } from "lucide-react";
-import { api } from "../../api/client";
+import { adminContentApi } from "../../api/admin/content";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Checkbox } from "../../components/ui/checkbox";
@@ -24,7 +24,7 @@ export function AdminCategoriesPage() {
     refresh ? setRefreshing(true) : setLoading(true);
     setError(null);
     try {
-      const categoryRows = await api.managedCategories(true);
+      const categoryRows = await adminContentApi.categories(true);
       setCategories(categoryRows);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "分类加载失败");
@@ -39,7 +39,7 @@ export function AdminCategoriesPage() {
   const create = async () => {
     setSaving(true);
     try {
-      await api.createManagedCategory({
+      await adminContentApi.createCategory({
         parent_id: form.parent_id || null,
         display_code: form.display_code.trim(),
         display_name: form.display_name.trim(),
@@ -58,8 +58,8 @@ export function AdminCategoriesPage() {
   return <section className="flex flex-col gap-6" aria-labelledby="managed-categories-title">
     <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
       <div>
-        <p className="text-ui-xs text-muted-foreground">资料管理</p>
-        <h1 id="managed-categories-title" className="mt-1 text-ui-2xl font-semibold text-foreground">分类设置</h1>
+        <p className="text-ui-xs font-medium text-primary">内容管理</p>
+        <h1 id="managed-categories-title" className="mt-1 text-ui-2xl font-semibold tracking-tight text-foreground">分类管理</h1>
         <p className="mt-1 text-ui-sm text-muted-foreground">维护资料分类、层级和可用状态。</p>
       </div>
       <Button variant="outline" size="sm" className="w-full sm:w-auto" onClick={() => void load(true)} disabled={loading || refreshing}>
@@ -67,7 +67,7 @@ export function AdminCategoriesPage() {
       </Button>
     </header>
 
-    {error && <ErrorState title="分类设置加载失败" description={error} action={<Button variant="outline" size="sm" onClick={() => void load()}>重新加载</Button>} />}
+    {error && <ErrorState title="分类管理加载失败" description={error} action={<Button variant="outline" size="sm" onClick={() => void load()}>重新加载</Button>} />}
 
     <section className="order-2 space-y-4 border-y border-border py-5 lg:order-1" aria-labelledby="new-category-title">
       <div><h2 id="new-category-title" className="text-ui-base font-semibold">新增分类</h2><p className="mt-1 text-ui-xs text-muted-foreground">分类最多四级；稳定标识由系统自动生成。</p></div>
@@ -101,7 +101,7 @@ function CategoryEditor({ category, onSaved }: { category: ManagedCategory; onSa
   const save = async () => {
     setSaving(true);
     try {
-      await api.updateManagedCategory(category.id, { display_code: code.trim(), display_name: name.trim(), sort_order: Number(sortOrder) || 0, is_active: active, expected_version: category.version });
+      await adminContentApi.updateCategory(category.id, { display_code: code.trim(), display_name: name.trim(), sort_order: Number(sortOrder) || 0, is_active: active, expected_version: category.version });
       await onSaved();
       toast.success(`${name.trim()}已保存`);
     } catch (saveError) {

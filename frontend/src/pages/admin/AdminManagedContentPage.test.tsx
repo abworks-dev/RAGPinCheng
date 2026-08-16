@@ -26,12 +26,13 @@ const mocks = vi.hoisted(() => ({
   success: vi.fn(),
   error: vi.fn(),
   openPreview: vi.fn(),
+  previewState: { parentId: null as string | null },
 }));
 
 vi.mock("../../components/PdfPreview", () => ({ PdfPreview: () => null }));
 vi.mock("../../hooks/usePdfPreview", () => ({
   PdfPreviewProvider: ({ children }: { children: React.ReactNode }) => children,
-  usePdfPreview: () => ({ open: mocks.openPreview }),
+  usePdfPreview: () => ({ open: mocks.openPreview, state: { ...mocks.previewState } }),
 }));
 
 vi.mock("../../context/AuthContext", () => ({
@@ -152,6 +153,7 @@ describe("AdminManagedContentPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.permissions = ["review"];
+    mocks.previewState.parentId = null;
     mocks.capabilities.mockResolvedValue({ enabled: true, max_upload_bytes: 1024, supported_extensions: [".pdf"] });
     mocks.categories.mockResolvedValue([category]);
     mocks.items.mockResolvedValue({ items: [item], total: 1, status_counts: { awaiting_review: 1 } });
@@ -175,12 +177,22 @@ describe("AdminManagedContentPage", () => {
   });
 
   it("opens indexed files in the shared preview drawer", async () => {
-    render(<AdminManagedContentPage />);
+    const { rerender } = render(<AdminManagedContentPage />);
     await openRootFolder();
     await screen.findAllByText("建模标准");
     fireEvent.click(screen.getAllByRole("button", { name: "查看" })[0]);
     fireEvent.click(screen.getByRole("button", { name: "预览文件" }));
-    expect(mocks.openPreview).toHaveBeenCalledWith("parent-1", "建模标准", "pdf", 1);
+    expect(mocks.openPreview).toHaveBeenCalledWith("parent-1", "建模标准", "pdf", 1, {}, "managed-content-detail");
+    expect(screen.getByRole("button", { name: "预览文件" })).toBeInTheDocument();
+
+    mocks.previewState.parentId = "parent-1";
+    rerender(<AdminManagedContentPage />);
+    expect(screen.queryByRole("dialog", { name: "建模标准" })).not.toBeInTheDocument();
+
+    mocks.previewState.parentId = null;
+    rerender(<AdminManagedContentPage />);
+    expect(screen.getByRole("dialog", { name: "建模标准" })).toHaveAttribute("data-state", "open");
+    expect(screen.getByRole("button", { name: "预览文件" })).toBeInTheDocument();
   });
 
   it("loads all statuses by default and keeps disabled bulk actions visible", async () => {

@@ -92,7 +92,7 @@ export function UserMenu({
                     const user = await refreshUser();
                     setOpen(false);
                     if (user && hasContentWorkspaceAccess(user)) {
-                      navigate("/admin");
+                      navigate(user.role === "admin" ? "/admin/users" : "/admin/content");
                     } else {
                       toast.error("你的资料工作台权限已被取消");
                     }

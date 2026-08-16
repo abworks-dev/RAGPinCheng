@@ -1,5 +1,5 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
-import { api } from "../../api/client";
+import { adminFeedbackApi } from "../../api/admin/feedback";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Card, CardContent } from "../../components/ui/card";
@@ -48,8 +48,8 @@ function statusBadge(status: FeedbackStatus) {
 
 const heading = (
   <div>
-    <p className="text-ui-sm font-medium text-primary">反馈管理</p>
-    <h1 className="mt-1 text-ui-2xl font-semibold tracking-tight text-foreground">问答与来源反馈</h1>
+    <p className="text-ui-xs font-medium text-primary">运营管理</p>
+    <h1 className="mt-1 text-ui-2xl font-semibold tracking-tight text-foreground">用户反馈</h1>
     <p className="mt-2 max-w-2xl text-ui-sm text-muted-foreground">
       跟进用户对回答和引用来源的评价，记录处理结果并形成质量改进闭环。
     </p>
@@ -77,7 +77,7 @@ export function AdminFeedbackPage() {
     setLoading(true);
     setError(null);
     try {
-      setResponse(await api.adminFeedback({ status, kind, rating, q: query, page, page_size: pageSize }));
+      setResponse(await adminFeedbackApi.list({ status, kind, rating, q: query, page, page_size: pageSize }));
     } catch (e: any) {
       setError(e?.message || String(e));
     } finally {
@@ -95,7 +95,7 @@ export function AdminFeedbackPage() {
     setBusyId(entry.feedback_id);
     setError(null);
     try {
-      await api.adminPatchFeedback(entry.feedback_id, { status: nextStatus, ...extra });
+      await adminFeedbackApi.patch(entry.feedback_id, { status: nextStatus, ...extra });
       setEditingId(null);
       await refresh();
     } catch (e: any) {

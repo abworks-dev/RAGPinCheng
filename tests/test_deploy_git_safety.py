@@ -444,6 +444,21 @@ class TestDeployGitSafety(unittest.TestCase):
             'SOURCE_DECOUPLING_COMPLETE must be true or false', self.linux
         )
         self.assertIn(
+            'COMPOSE_ARGS+=(-f "$COMPOSE_BASE" -f "$COMPOSE_OVERRIDE")',
+            self.linux,
+        )
+        self.assertIn(
+            'COMPOSE_ARGS+=(-f "$COMPOSE_SOURCE_DECOUPLED")', self.linux
+        )
+        self.assertLess(
+            self.linux.index('COMPOSE_ARGS+=(-f "$COMPOSE_BASE" -f "$COMPOSE_OVERRIDE")'),
+            self.linux.index('COMPOSE_ARGS+=(-f "$COMPOSE_SOURCE_DECOUPLED")'),
+        )
+        self.assertLess(
+            self.linux.index('COMPOSE_ARGS+=(-f "$COMPOSE_SOURCE_DECOUPLED")'),
+            self.linux.index('COMPOSE_ARGS+=(--env-file "$COMPOSE_ENV_FILE")'),
+        )
+        self.assertIn(
             '"${COMPOSE[@]}" up -d --no-deps --force-recreate backend',
             self.app_backup_recovery_workflow,
         )
@@ -500,6 +515,7 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertIn("$canonicalProcessOwned", self.promote)
         self.assertIn("$legacyProcessOwned", self.promote)
         self.assertIn("[IO.Path]::GetFullPath($ConfiguredGpuPython)", self.promote)
+        self.assertIn("$ownedTaskPresent -and", self.promote)
         self.assertIn("GPU diagnostic release is outside managed releases", self.promote)
         self.assertIn("GPU_PROMOTION_DIAGNOSTIC", self.promote)
         self.assertIn("GPU_PROMOTION_LOG", self.promote)

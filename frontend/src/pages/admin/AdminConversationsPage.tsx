@@ -1,43 +1,24 @@
-import { useEffect, useMemo, useState } from "react";
-import { api } from "../../api/client";
+import { useMemo, useState } from "react";
+import { adminConversationsApi } from "../../api/admin/conversations";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Card, CardContent } from "../../components/ui/card";
+import { AdminConversationDetail } from "../../components/admin/AdminConversationDetail";
 import { EmptyState } from "../../components/ui/empty-state";
 import { ErrorState } from "../../components/ui/error-state";
 import { Input } from "../../components/ui/input";
 import { LoadingState } from "../../components/ui/loading-state";
-import { cn } from "../../lib/utils";
 import type { AdminConversation, ConversationState } from "../../types";
-import { formatAdminDate } from "./admin-formatters";
-
-const roleLabels: Record<ConversationState["messages"][number]["role"], string> = {
-  user: "用户",
-  assistant: "助手",
-  system: "系统",
-};
+import { formatAdminDate } from "../../lib/admin-formatters";
+import { cn } from "../../lib/utils";
+import { useAdminConversations } from "../../hooks/useAdminConversations";
 
 export function AdminConversationsPage() {
-  const [list, setList] = useState<AdminConversation[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { conversations: list, loading, error } = useAdminConversations(200);
   const [selected, setSelected] = useState<ConversationState | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [loadingConversationId, setLoadingConversationId] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const { conversations } = await api.adminListAllConversations(200);
-        setList(conversations);
-      } catch (e: any) {
-        setError(e?.message || String(e));
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, []);
 
   // Filter on user name, employee_id, and conversation title — admins
   // browsing for "what was this person asking about?" benefit from matching
@@ -57,7 +38,7 @@ export function AdminConversationsPage() {
     setDetailError(null);
     setLoadingConversationId(conversation.id);
     try {
-      const state = await api.adminGetConversation(conversation.id);
+      const state = await adminConversationsApi.get(conversation.id);
       setSelected(state);
     } catch (e: any) {
       setDetailError(e?.message || String(e));
@@ -69,9 +50,9 @@ export function AdminConversationsPage() {
   return (
     <section className="space-y-5" aria-labelledby="admin-conversations-title">
       <header>
-        <p className="text-ui-xs font-medium uppercase tracking-[0.14em] text-primary">内容审阅</p>
+        <p className="text-ui-xs font-medium text-primary">运营管理</p>
         <h1 id="admin-conversations-title" className="mt-1 text-ui-2xl font-semibold tracking-tight text-foreground">
-          对话管理
+          对话记录
         </h1>
         <p className="mt-1 text-ui-sm text-muted-foreground">按用户或主题查找近期对话，并在详情区查看完整消息。</p>
       </header>
@@ -178,107 +159,11 @@ export function AdminConversationsPage() {
             </div>
 
             <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-5">
-              {detailError ? (
-                <ErrorState title="对话详情加载失败" description={detailError} />
-              ) : loadingConversationId ? (
-                <LoadingState className="min-h-48" label="正在加载对话详情…" />
-              ) : !selected ? (
-                <EmptyState
-                  className="min-h-56 border-0 bg-surface-muted"
-                  title="选择一条对话"
-                  description="从左侧列表选择对话后，可在这里查看完整消息。"
-                />
-              ) : (
-                <div className="space-y-5">
-                  <div className="border-b border-border pb-4">
-                    <h3 className="text-ui-lg font-semibold text-foreground">{selected.title}</h3>
-                    <p className="mt-1 text-ui-xs text-muted-foreground">
-                      创建于 {formatAdminDate(selected.created_at)} · 更新于 {formatAdminDate(selected.updated_at)} · {selected.turn_index} 轮
-                    </p>
-                  </div>
-
-                  <div className="space-y-3">
-                    {selected.messages.map((message, index) => {
-                      const isUser = message.role === "user";
-                      const userVersions = message.user_versions || [];
-                      const pairedAnswer = isUser && selected.messages[index + 1]?.role === "assistant"
-                        ? selected.messages[index + 1]
-                        : null;
-                      return (
-                        <article
-                          key={message.id ?? `${message.role}-${index}`}
-                          className={cn(
-                            "rounded-ui-xl border px-4 py-3",
-                            isUser
-                              ? "ml-auto w-fit max-w-[88%] border-primary/20 bg-primary/10"
-                              : "mr-auto w-fit max-w-3xl border-border bg-surface-muted",
-                          )}
-                        >
-                          <div className="mb-2 flex items-center justify-between gap-3">
-                            <Badge
-                              variant={message.role === "user" ? "info" : message.role === "system" ? "warning" : "outline"}
-                              className={message.role === "assistant" ? "border-border bg-card" : undefined}
-                            >
-                              {roleLabels[message.role]}
-                            </Badge>
-                            {isUser && userVersions.length > 1 && (
-                              <Badge variant="secondary">已编辑 · 版本 {userVersions.find((version) => version.is_active)?.version_index || userVersions.length}</Badge>
-                            )}
-                            {message.created_at && (
-                              <span className="text-ui-xs text-muted-foreground">{formatAdminDate(message.created_at)}</span>
-                            )}
-                          </div>
-                          <p className="max-w-[72ch] whitespace-pre-wrap break-words text-ui-sm leading-relaxed text-foreground">
-                            {message.content}
-                          </p>
-                          {isUser && userVersions.length > 1 && (
-                            <details className="mt-3 border-t border-primary/15 pt-3">
-                              <summary className="cursor-pointer text-ui-xs font-medium text-primary">
-                                查看编辑记录（{userVersions.length} 个版本）
-                              </summary>
-                              <div className="mt-3 space-y-3">
-                                {userVersions.map((version) => {
-                                  const linkedAnswers = pairedAnswer?.answer_versions?.filter(
-                                    (answer) =>
-                                      answer.user_version_id === version.id
-                                      || (version.version_index === 1 && answer.user_version_id == null),
-                                  ) || [];
-                                  return (
-                                    <div key={version.id} className="rounded-ui-md border border-border bg-card p-3">
-                                      <div className="flex flex-wrap items-center gap-2 text-ui-xs text-muted-foreground">
-                                        <span>问题版本 {version.version_index}</span>
-                                        {version.is_active && <Badge variant="info">当前</Badge>}
-                                        <span>{formatAdminDate(version.created_at)}</span>
-                                      </div>
-                                      <p className="mt-2 whitespace-pre-wrap break-words text-ui-sm text-foreground">
-                                        {version.content}
-                                      </p>
-                                      {linkedAnswers.length > 0 && (
-                                        <div className="mt-3 space-y-2 border-t border-border pt-2">
-                                          {linkedAnswers.map((answer) => (
-                                            <div key={answer.id}>
-                                              <p className="text-ui-xs font-medium text-muted-foreground">
-                                                对应回答版本 {answer.version_index}{answer.is_active ? " · 当前" : ""}
-                                              </p>
-                                              <p className="mt-1 whitespace-pre-wrap break-words text-ui-xs leading-relaxed text-foreground">
-                                                {answer.content}
-                                              </p>
-                                            </div>
-                                          ))}
-                                        </div>
-                                      )}
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            </details>
-                          )}
-                        </article>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
+              <AdminConversationDetail
+                conversation={selected}
+                loading={Boolean(loadingConversationId)}
+                error={detailError}
+              />
             </div>
           </Card>
         </div>
