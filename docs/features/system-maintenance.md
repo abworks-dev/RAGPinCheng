@@ -59,10 +59,11 @@ api.main._sweeper_loop（每小时）
 ## 数据契约
 
 - `maintenance_settings` 是 `singleton_id = 1` 的单例策略；
-- `conversation_retention_days` 范围为 7 至 3650；
+- `conversation_retention_days` 为 `NULL` 时表示永久保留历史对话，否则范围为 7 至 3650；默认值为 30 天；
 - `maintenance_runs` 只保存触发方式、状态、当次策略、删除数量、时间和脱敏错误类型；
 - 删除 `conversations` 时，外键级联删除关联消息、问题与回答版本；
 - API 预览数量是请求时快照，执行响应中的实际删除数量才是最终结果。
+- 永久保留策略下，预览和清理均跳过历史对话及消息删除，但仍会清理失效登录会话。
 
 ## 不变量与安全边界
 

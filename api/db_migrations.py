@@ -441,6 +441,36 @@ SYSTEM_MAINTENANCE_STATEMENTS = (
        ON maintenance_runs(started_at DESC)""",
 )
 
+SYSTEM_MAINTENANCE_RETENTION_STATEMENTS = (
+    "ALTER TABLE maintenance_settings RENAME TO maintenance_settings_v8",
+    """CREATE TABLE maintenance_settings (
+        singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
+        conversation_cleanup_enabled INTEGER NOT NULL DEFAULT 1 CHECK (conversation_cleanup_enabled IN (0,1)),
+        conversation_retention_days INTEGER DEFAULT 30 CHECK (conversation_retention_days IS NULL OR conversation_retention_days BETWEEN 7 AND 3650),
+        updated_at INTEGER NOT NULL,
+        updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL
+    )""",
+    """INSERT INTO maintenance_settings SELECT singleton_id, conversation_cleanup_enabled,
+       conversation_retention_days, updated_at, updated_by FROM maintenance_settings_v8""",
+    "DROP TABLE maintenance_settings_v8",
+    "ALTER TABLE maintenance_runs RENAME TO maintenance_runs_v8",
+    """CREATE TABLE maintenance_runs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        trigger_source TEXT NOT NULL CHECK (trigger_source IN ('automatic','manual')),
+        status TEXT NOT NULL CHECK (status IN ('succeeded','failed')),
+        retention_days INTEGER CHECK (retention_days IS NULL OR retention_days BETWEEN 7 AND 3650),
+        deleted_conversations INTEGER NOT NULL DEFAULT 0 CHECK (deleted_conversations >= 0),
+        deleted_messages INTEGER NOT NULL DEFAULT 0 CHECK (deleted_messages >= 0),
+        deleted_auth_sessions INTEGER NOT NULL DEFAULT 0 CHECK (deleted_auth_sessions >= 0),
+        started_at INTEGER NOT NULL, finished_at INTEGER NOT NULL, error_summary TEXT
+    )""",
+    """INSERT INTO maintenance_runs SELECT id, trigger_source, status, retention_days,
+       deleted_conversations, deleted_messages, deleted_auth_sessions, started_at, finished_at, error_summary
+       FROM maintenance_runs_v8""",
+    "DROP TABLE maintenance_runs_v8",
+    "CREATE INDEX idx_maintenance_runs_started_desc ON maintenance_runs(started_at DESC)",
+)
+
 MIGRATIONS = (
     Migration(1, "multi_engine_transcription_phase2", PHASE2_STATEMENTS),
     Migration(2, "answer_regeneration_versions", ANSWER_VERSION_STATEMENTS),
@@ -450,6 +480,7 @@ MIGRATIONS = (
     Migration(6, "content_permission_groups", CONTENT_PERMISSION_GROUP_STATEMENTS),
     Migration(7, "content_folder_requests", CONTENT_FOLDER_REQUEST_STATEMENTS),
     Migration(8, "system_maintenance", SYSTEM_MAINTENANCE_STATEMENTS),
+    Migration(9, "system_maintenance_permanent_retention", SYSTEM_MAINTENANCE_RETENTION_STATEMENTS),
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 PHASE2_TABLES = frozenset(

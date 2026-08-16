@@ -17,7 +17,7 @@ MAX_RUN_HISTORY = 200
 @dataclass(frozen=True, slots=True)
 class MaintenanceSettings:
     conversation_cleanup_enabled: bool
-    conversation_retention_days: int
+    conversation_retention_days: int | None
     updated_at: int | None
     updated_by: int | None
 
@@ -35,7 +35,7 @@ class CleanupPreview:
 class CleanupResult:
     run_id: int
     trigger_source: str
-    retention_days: int
+    retention_days: int | None
     deleted_conversations: int
     deleted_messages: int
     deleted_auth_sessions: int
@@ -65,10 +65,10 @@ def get_settings(conn: sqlite3.Connection | None = None) -> MaintenanceSettings:
             db.close()
 
 
-def save_settings(*, enabled: bool, retention_days: int, updated_by: int) -> MaintenanceSettings:
+def save_settings(*, enabled: bool, retention_days: int | None, updated_by: int) -> MaintenanceSettings:
     if type(enabled) is not bool:
         raise ValueError("invalid_cleanup_enabled")
-    if type(retention_days) is not int or not MIN_RETENTION_DAYS <= retention_days <= MAX_RETENTION_DAYS:
+    if retention_days is not None and (type(retention_days) is not int or not MIN_RETENTION_DAYS <= retention_days <= MAX_RETENTION_DAYS):
         raise ValueError("invalid_retention_days")
     now = int(time.time())
     conn = connect()
@@ -96,21 +96,21 @@ def preview_cleanup(*, retention_days: int | None = None, now: int | None = None
     conn = connect()
     try:
         days = get_settings(conn).conversation_retention_days if retention_days is None else retention_days
-        if type(days) is not int or not MIN_RETENTION_DAYS <= days <= MAX_RETENTION_DAYS:
+        if days is not None and (type(days) is not int or not MIN_RETENTION_DAYS <= days <= MAX_RETENTION_DAYS):
             raise ValueError("invalid_retention_days")
-        cutoff = current_time - days * 24 * 60 * 60
+        cutoff = None if days is None else current_time - days * 24 * 60 * 60
         conversation_row = conn.execute(
             """SELECT COUNT(*) AS conversations, MIN(updated_at) AS oldest_at,
                       MAX(updated_at) AS newest_at
                FROM conversations WHERE updated_at < ?""",
             (cutoff,),
-        ).fetchone()
+        ).fetchone() if cutoff is not None else {"conversations": 0, "oldest_at": None, "newest_at": None}
         messages = conn.execute(
             """SELECT COUNT(*) AS n FROM messages m
                JOIN conversations c ON c.id = m.conversation_id
                WHERE c.updated_at < ?""",
             (cutoff,),
-        ).fetchone()["n"]
+        ).fetchone()["n"] if cutoff is not None else 0
         sessions = conn.execute(
             "SELECT COUNT(*) AS n FROM auth_sessions WHERE expires_at < ?", (current_time,)
         ).fetchone()["n"]
@@ -130,10 +130,11 @@ def run_cleanup(*, trigger_source: str, now: int | None = None) -> CleanupResult
     settings = get_settings(conn)
     try:
         conn.execute("BEGIN IMMEDIATE")
-        cutoff = started_at - settings.conversation_retention_days * 24 * 60 * 60
+        cutoff = (started_at - settings.conversation_retention_days * 24 * 60 * 60
+                  if settings.conversation_retention_days is not None else None)
         deleted_messages = 0
         deleted_conversations = 0
-        if trigger_source == "manual" or settings.conversation_cleanup_enabled:
+        if cutoff is not None and (trigger_source == "manual" or settings.conversation_cleanup_enabled):
             deleted_messages = conn.execute(
                 """SELECT COUNT(*) AS n FROM messages m
                    JOIN conversations c ON c.id = m.conversation_id

@@ -24,10 +24,10 @@ test.describe("资料库", () => {
     const switchedListing = page.waitForRequest((request) => request.method() === "GET" && request.url().includes("/api/admin/content/items-page") && request.url().includes("category_id=cat-project"));
     await rootFolder.selectOption("cat-project");
     await switchedListing;
-    await expect(page.getByText("上传到：04 项目资料")).toBeVisible();
-    await page.getByRole("button", { name: "上传资料" }).scrollIntoViewIfNeeded();
-    await expectInViewport(page.getByRole("button", { name: "上传资料" }));
-    if (page.viewportSize()!.width === 390) await expectTouchTarget(page.getByRole("button", { name: "上传资料" }));
+    await expect(page.getByText(/当前目录：04 项目资料/)).toBeVisible();
+    await page.getByRole("button", { name: "上传文件" }).scrollIntoViewIfNeeded();
+    await expectInViewport(page.getByRole("button", { name: "上传文件" }));
+    if (page.viewportSize()!.width === 390) await expectTouchTarget(page.getByRole("button", { name: "上传文件" }));
     await expect(page.getByRole("combobox", { name: "状态", exact: true })).toHaveValue("");
     await expect(page.getByText("未选择资料，单次最多 20 份")).toBeVisible();
     await expect(page.getByRole("button", { name: "批量确认" })).toBeDisabled();
@@ -65,17 +65,18 @@ test.describe("资料库", () => {
       if (scenario === "error") await expect(page.getByText("合成加载失败")).toBeVisible();
       if (scenario === "disabled") {
         await expect(page.getByText("资料库当前未启用，上传和流程操作暂不可用。")).toBeVisible();
-        await expect(page.getByRole("button", { name: "上传资料" })).toBeDisabled();
+        await expect(page.getByRole("button", { name: "上传文件" })).toBeDisabled();
       }
     });
   }
 
   test("upload exposes a stable busy state", async ({ page }) => {
     await openTab(page, "资料管理");
+    await page.getByRole("button", { name: "上传文件" }).click();
     await page.getByLabel("选择资料文件", { exact: true }).setInputFiles({ name: "synthetic.pdf", mimeType: "application/pdf", buffer: Buffer.from("synthetic fixture") });
-    const upload = page.getByRole("button", { name: "上传资料" });
+    const upload = page.getByRole("button", { name: "确定上传" });
     await upload.click();
-    await expect(upload).toBeDisabled();
+    await expect(page.getByRole("button", { name: "上传中…" })).toBeDisabled();
     await expectNoBodyOverflow(page);
   });
 
@@ -87,7 +88,7 @@ test.describe("资料库", () => {
         uploadRequests.push(request.postData() || "");
       }
     });
-    const folderBrowser = page.getByTestId("managed-folder-browser");
+    const folderBrowser = page.getByTestId("managed-content-drop-list");
     const dataTransfer = await page.evaluateHandle(() => {
       const transfer = new DataTransfer();
       transfer.items.add(new File(["# Dropped fixture"], "dropped.md", { type: "text/markdown" }));
@@ -95,7 +96,7 @@ test.describe("资料库", () => {
     });
 
     await folderBrowser.dispatchEvent("dragenter", { dataTransfer });
-    await expect(folderBrowser).toHaveClass(/border-primary/);
+    await expect(folderBrowser).toHaveClass(/ring-primary/);
     await folderBrowser.dispatchEvent("drop", { dataTransfer });
 
     const dialog = page.getByRole("dialog", { name: "确认上传" });
@@ -112,7 +113,7 @@ test.describe("资料库", () => {
 
   test("folder request and review controls stay contained", async ({ page }) => {
     await openTab(page, "资料管理", "normal", "bim_engineer");
-    await page.getByRole("button", { name: "申请文件夹" }).click();
+    await page.getByRole("button", { name: "新建" }).click();
     const dialog = page.getByRole("dialog", { name: "申请新建文件夹" });
     await expect(dialog).toBeVisible();
     await expectInViewport(dialog.getByRole("button", { name: "提交申请" }));
