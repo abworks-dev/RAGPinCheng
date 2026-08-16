@@ -84,6 +84,24 @@ describe("TranscriptionVersionPanel", () => {
     );
   });
 
+  it("keeps multiple versions in a compact navigator and opens one workspace", async () => {
+    const second = { ...revisedVersion, version_id: "33333333-3333-4333-8333-333333333333" };
+    const third = { ...approvedVersion, version_id: "44444444-4444-4444-8444-444444444444" };
+    mocks.listTranscriptVersions.mockResolvedValue([awaitingVersion, second, third]);
+    render(<TranscriptionVersionPanel mediaId="media-1" embedded />);
+
+    expect(await screen.findByText("3 个版本")).toBeInTheDocument();
+    const openButtons = screen.getAllByRole("button", { name: "校对内容" });
+    expect(openButtons).toHaveLength(3);
+    fireEvent.click(openButtons[0]);
+    expect(await screen.findByRole("region", { name: "当前版本校对工作区" })).toBeInTheDocument();
+    expect(screen.getAllByRole("region", { name: "当前版本校对工作区" })).toHaveLength(1);
+
+    fireEvent.click(screen.getAllByRole("button", { name: "校对内容" })[0]);
+    await waitFor(() => expect(mocks.previewTranscriptVersion).toHaveBeenCalledWith(second.version_id));
+    expect(screen.getAllByRole("region", { name: "当前版本校对工作区" })).toHaveLength(1);
+  });
+
   it("saves edits as a new draft and refreshes the selected version", async () => {
     mocks.listTranscriptVersions
       .mockResolvedValueOnce([awaitingVersion])
