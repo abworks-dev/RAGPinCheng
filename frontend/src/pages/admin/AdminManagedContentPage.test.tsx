@@ -143,9 +143,8 @@ const item = {
 };
 
 async function openRootFolder(folderId = category.id) {
-  const rootFolder = await screen.findByRole("combobox", { name: "一级目录" });
-  fireEvent.change(rootFolder, { target: { value: folderId } });
-  await waitFor(() => expect(rootFolder).toHaveValue(folderId));
+  const folder = folderId === projectCategory.id ? projectCategory : category;
+  fireEvent.click(await screen.findByRole("button", { name: new RegExp(`${folder.display_code} ${folder.display_name}`) }));
   await waitFor(() => expect(mocks.items).toHaveBeenCalledWith(expect.objectContaining({ category_id: folderId })));
 }
 
@@ -203,9 +202,8 @@ describe("AdminManagedContentPage", () => {
     mocks.categories.mockResolvedValue([category, projectCategory]);
     render(<AdminManagedContentPage />);
 
-    const rootFolder = await screen.findByRole("combobox", { name: "一级目录" });
-    expect(rootFolder).toHaveValue("");
-    fireEvent.change(rootFolder, { target: { value: "cat-04" } });
+    expect(await screen.findByRole("button", { name: "/" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /04 项目资料/ }));
 
     await waitFor(() => expect(mocks.items).toHaveBeenCalledWith(expect.objectContaining({ category_id: "cat-04" })));
     expect(screen.getByText(/当前目录：04 项目资料/)).toBeInTheDocument();
@@ -345,7 +343,6 @@ describe("AdminManagedContentPage", () => {
     expect(screen.getByRole("dialog")).toHaveTextContent("dropped.md");
     expect(mocks.upload).not.toHaveBeenCalled();
 
-    fireEvent.change(screen.getByLabelText("一级目录"), { target: { value: "cat-04" } });
     fireEvent.click(screen.getByRole("button", { name: "确定上传" }));
     await waitFor(() => expect(mocks.upload).toHaveBeenCalledWith([file], "cat-03"));
   });

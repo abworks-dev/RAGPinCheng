@@ -4,7 +4,7 @@ import { installAdminRoutes } from "./fixtures/admin-fixtures";
 
 async function openRootFolder(page: Parameters<typeof installAdminRoutes>[0]) {
   const listing = page.waitForRequest((request) => request.method() === "GET" && request.url().includes("/api/admin/content/items-page") && request.url().includes("category_id=cat-company"));
-  await page.getByRole("combobox", { name: "一级目录" }).selectOption("cat-company");
+  await page.getByRole("button", { name: /03 公司内部标准/ }).click();
   await listing;
 }
 

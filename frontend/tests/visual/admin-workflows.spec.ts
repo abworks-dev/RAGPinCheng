@@ -15,7 +15,8 @@ async function openTab(page: Parameters<typeof installAdminRoutes>[0], label: st
 
 async function openRootFolder(page: Parameters<typeof installAdminRoutes>[0], folderId = "cat-company") {
   const listing = page.waitForRequest((request) => request.method() === "GET" && request.url().includes("/api/admin/content/items-page") && request.url().includes(`category_id=${folderId}`));
-  await page.getByRole("combobox", { name: "一级目录" }).selectOption(folderId);
+  const folderName = folderId === "cat-project" ? "04 项目资料" : "03 公司内部标准";
+  await page.getByRole("button", { name: new RegExp(folderName) }).click();
   await listing;
 }
 
@@ -25,10 +26,9 @@ test.describe("资料库", () => {
     await expect(page.getByRole("heading", { name: "资料库" })).toBeVisible();
     await expectNoBodyOverflow(page);
     await expectInViewport(page.getByRole("button", { name: "刷新" }));
-    const rootFolder = page.getByRole("combobox", { name: "一级目录" });
-    await expect(rootFolder).toHaveValue("");
+    await expect(page.getByRole("button", { name: "/", exact: true })).toBeVisible();
     const switchedListing = page.waitForRequest((request) => request.method() === "GET" && request.url().includes("/api/admin/content/items-page") && request.url().includes("category_id=cat-project"));
-    await rootFolder.selectOption("cat-project");
+    await page.getByRole("button", { name: /04 项目资料/ }).click();
     await switchedListing;
     await expect(page.getByText(/当前目录：04 项目资料/)).toBeVisible();
     await page.getByRole("button", { name: "上传文件" }).scrollIntoViewIfNeeded();
