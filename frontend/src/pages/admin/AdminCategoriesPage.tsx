@@ -311,11 +311,11 @@ export function AdminCategoriesPage() {
   };
 
   return (
-    <section className="flex flex-col gap-5" aria-labelledby="managed-categories-title">
-      <header className="flex flex-col gap-4 border-b border-border pb-5 sm:flex-row sm:items-end sm:justify-between">
+    <section className="space-y-5" aria-labelledby="managed-categories-title">
+      <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <p className="text-ui-xs text-muted-foreground">资料管理</p>
-          <h1 id="managed-categories-title" className="mt-1 text-ui-2xl font-semibold text-foreground">分类管理</h1>
+          <p className="text-ui-xs font-medium text-primary">内容管理</p>
+          <h1 id="managed-categories-title" className="mt-1 text-ui-2xl font-semibold tracking-tight text-foreground">分类管理</h1>
           <p className="mt-1 text-ui-sm text-muted-foreground">维护资料分类、层级和可用状态。</p>
         </div>
         <div className="flex w-full gap-2 sm:w-auto">
