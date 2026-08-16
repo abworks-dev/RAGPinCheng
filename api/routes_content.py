@@ -19,10 +19,13 @@ from src.indexing_pipeline import (
 
 from .auth import CurrentUser, require_admin, require_csrf, require_csrf_admin
 from .content_permissions import (
-    CONTENT_PERMISSIONS,
     has_content_permission,
-    require_any_content_permission,
     require_content_permission,
+)
+from .content_permission_catalog import (
+    CONTENT_PERMISSION_DEFINITIONS,
+    CONTENT_PERMISSIONS,
+    missing_content_permission_dependencies,
 )
 from .indexing import enqueue_content_publication
 from .content_publication import failure_detail, normalize_failure_code
@@ -59,6 +62,8 @@ from .schemas import (
     RestoreManagedContentRequest,
     RestoreManagedContentResponse,
     ContentPermissionGroupDTO,
+    ContentPermissionCatalogResponse,
+    ContentPermissionDefinitionDTO,
     ContentPermissionUserDTO,
     BulkManagedContentRequest,
     BulkMoveManagedContentRequest,
@@ -289,6 +294,13 @@ def _validate_permissions(permissions: list[str]) -> set[str]:
     requested = set(permissions)
     if len(requested) != len(permissions) or not requested.issubset(CONTENT_PERMISSIONS):
         raise HTTPException(status_code=400, detail="包含重复或未知资料权限")
+    missing = missing_content_permission_dependencies(requested)
+    if missing:
+        missing_labels = sorted({dependency for values in missing.values() for dependency in values})
+        raise HTTPException(
+            status_code=400,
+            detail=f"权限组合缺少前置权限：{'、'.join(missing_labels)}",
+        )
     return requested
 
 
@@ -392,7 +404,7 @@ def _require_feature() -> None:
 
 @router.get("/capabilities")
 def content_capabilities(
-    _user: CurrentUser = Depends(require_any_content_permission(_CONTENT_READ)),
+    _user: CurrentUser = Depends(require_content_permission("item.view")),
 ) -> dict[str, object]:
     return {
         "enabled": CONTENT_MANAGEMENT_ENABLED,
@@ -404,7 +416,7 @@ def content_capabilities(
 @router.get("/categories", response_model=list[ManagedCategoryDTO])
 def get_categories(
     include_inactive: bool = False,
-    _user: CurrentUser = Depends(require_any_content_permission(_CONTENT_READ)),
+    _user: CurrentUser = Depends(require_content_permission("category.view")),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> list[ManagedCategoryDTO]:
     return [_category_dto(row) for row in list_categories(conn, include_inactive=include_inactive)]
@@ -413,7 +425,7 @@ def get_categories(
 @router.post("/categories", response_model=ManagedCategoryDTO)
 def post_category(
     body: CreateManagedCategoryRequest,
-    user: CurrentUser = Depends(require_content_permission("manage_categories", csrf=True)),
+    user: CurrentUser = Depends(require_content_permission("category.manage", csrf=True)),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> ManagedCategoryDTO:
     _require_feature()
@@ -436,7 +448,7 @@ def post_category(
 def patch_category(
     category_id: str,
     body: UpdateManagedCategoryRequest,
-    user: CurrentUser = Depends(require_content_permission("manage_categories", csrf=True)),
+    user: CurrentUser = Depends(require_content_permission("category.manage", csrf=True)),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> ManagedCategoryDTO:
     _require_feature()
@@ -459,7 +471,7 @@ def patch_category(
 @router.post("/folder-requests", response_model=FolderRequestDTO)
 def post_folder_request(
     body: CreateFolderRequest,
-    user: CurrentUser = Depends(require_content_permission("organize", csrf=True)),
+    user: CurrentUser = Depends(require_content_permission("folder.request", csrf=True)),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> FolderRequestDTO:
     _require_feature()
@@ -476,7 +488,7 @@ def post_folder_request(
 @router.get("/folder-requests", response_model=list[FolderRequestDTO])
 def get_folder_requests(
     status: str | None = None,
-    _user: CurrentUser = Depends(require_any_content_permission({"review", "manage_categories"})),
+    _user: CurrentUser = Depends(require_content_permission("folder.review")),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> list[FolderRequestDTO]:
     return [_folder_request_dto(row) for row in list_folder_requests(conn, status=status)]
@@ -486,7 +498,7 @@ def get_folder_requests(
 def post_folder_request_review(
     request_id: str,
     body: ReviewFolderRequest,
-    user: CurrentUser = Depends(require_content_permission("review", csrf=True)),
+    user: CurrentUser = Depends(require_content_permission("folder.review", csrf=True)),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> FolderRequestDTO:
     _require_feature()
@@ -509,7 +521,7 @@ async def upload_managed_documents(
     category_id: str = Form(...),
     relative_paths: list[str] | None = Form(None),
     upload_mode: str = Form("files"),
-    user: CurrentUser = Depends(require_content_permission("organize", csrf=True)),
+    user: CurrentUser = Depends(require_content_permission("item.upload", csrf=True)),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> ManagedUploadResponse:
     _require_feature()
@@ -524,7 +536,7 @@ async def upload_managed_documents(
     )
     batch_id = create_web_batch(conn, actor_user_id=user.id)
     entries: list[ManagedUploadEntryDTO] = []
-    can_create_folders = has_content_permission(conn, user, "manage_categories")
+    can_create_folders = has_content_permission(conn, user, "category.manage")
     for index, upload in enumerate(files):
         filename = (upload.filename or "").strip()
         suffix = Path(filename).suffix.lower()
@@ -637,7 +649,7 @@ def _content_item_dto(
 def get_content_items(
     category_id: str | None = None,
     lifecycle_status: str | None = None,
-    _user: CurrentUser = Depends(require_any_content_permission(_CONTENT_READ)),
+    _user: CurrentUser = Depends(require_content_permission("item.view")),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> list[ManagedContentItemDTO]:
     rows = list_content_items(
@@ -664,7 +676,7 @@ def get_content_items_page(
     source_origin: str | None = None,
     limit: int = Query(25, ge=1, le=100),
     offset: int = Query(0, ge=0),
-    _user: CurrentUser = Depends(require_any_content_permission(_CONTENT_READ)),
+    _user: CurrentUser = Depends(require_content_permission("item.view")),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> ManagedContentListResponse:
     rows, total, status_counts = list_content_items_page(
@@ -695,7 +707,7 @@ def get_content_trash(
     query: str = Query("", max_length=200),
     limit: int = Query(25, ge=1, le=100),
     offset: int = Query(0, ge=0),
-    _user: CurrentUser = Depends(require_any_content_permission(frozenset({"review", "publish"}))),
+    _user: CurrentUser = Depends(require_content_permission("trash.view")),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> ManagedContentListResponse:
     rows, total, status_counts = list_content_items_page(
@@ -720,7 +732,7 @@ def restore_managed_content_item(
             item_id,
             expected_version_id=body.expected_version_id,
             actor_user_id=user.id,
-            can_restore=has_content_permission(conn, user, "review"),
+            can_restore=has_content_permission(conn, user, "trash.restore"),
         )
     except (ValueError, sqlite3.IntegrityError) as exc:
         _raise_domain_error(exc)
@@ -743,8 +755,8 @@ def delete_content_item(
             item_id,
             expected_version_id=body.expected_version_id,
             actor_user_id=user.id,
-            can_organize=has_content_permission(conn, user, "organize"),
-            can_publish=has_content_permission(conn, user, "publish"),
+            can_archive_draft=has_content_permission(conn, user, "item.archive_draft"),
+            can_archive_published=has_content_permission(conn, user, "item.archive_published"),
         )
     except (ValueError, sqlite3.IntegrityError) as exc:
         _raise_domain_error(exc)
@@ -772,8 +784,8 @@ def move_managed_content_item(
             target_category_id=body.target_category_id,
             expected_version_id=body.expected_version_id,
             actor_user_id=user.id,
-            can_organize=has_content_permission(conn, user, "organize"),
-            can_review=has_content_permission(conn, user, "review"),
+            can_move_draft=has_content_permission(conn, user, "item.move_draft"),
+            can_move_review=has_content_permission(conn, user, "item.move_review"),
         )
     except (ValueError, sqlite3.IntegrityError) as exc:
         _raise_domain_error(exc)
@@ -813,8 +825,9 @@ def rename_managed_content_item(
             title=body.title,
             original_filename=body.original_filename,
             actor_user_id=user.id,
-            can_organize=has_content_permission(conn, user, "organize"),
-            can_publish=has_content_permission(conn, user, "publish"),
+            can_revise=has_content_permission(conn, user, "item.upload"),
+            can_archive_draft=has_content_permission(conn, user, "item.archive_draft"),
+            can_archive_published=has_content_permission(conn, user, "item.archive_published"),
             replace_conflict_item_id=body.replace_conflict_item_id,
             replace_conflict_expected_version_id=body.replace_conflict_expected_version_id,
         )
@@ -838,7 +851,7 @@ async def update_managed_content_item(
     conn: sqlite3.Connection = Depends(get_db),
 ) -> ManagedContentItemDTO:
     _require_feature()
-    if not has_content_permission(conn, user, "organize"):
+    if not has_content_permission(conn, user, "item.upload"):
         raise HTTPException(status_code=403, detail="当前账号没有更新资料的权限")
     current = conn.execute(
         """SELECT COALESCE(v.title,i.title) AS title,v.original_filename
@@ -879,8 +892,9 @@ async def update_managed_content_item(
             title=str(current["title"]),
             original_filename=final_filename,
             actor_user_id=user.id,
-            can_organize=True,
-            can_publish=has_content_permission(conn, user, "publish"),
+            can_revise=True,
+            can_archive_draft=has_content_permission(conn, user, "item.archive_draft"),
+            can_archive_published=has_content_permission(conn, user, "item.archive_published"),
             stored=stored,
             doc_type=doc_type,
             source_batch_id=batch_id,
@@ -906,7 +920,7 @@ async def update_managed_content_item(
 def get_content_version_file(
     version_id: str,
     download: bool = False,
-    _user: CurrentUser = Depends(require_any_content_permission(_CONTENT_READ)),
+    _user: CurrentUser = Depends(require_content_permission("item.view")),
     conn: sqlite3.Connection = Depends(get_db),
 ):
     row = conn.execute(
@@ -930,7 +944,7 @@ def get_content_version_file(
 @router.post("/versions/{version_id}/submit", response_model=ManagedContentItemDTO)
 def submit_content_version(
     version_id: str,
-    user: CurrentUser = Depends(require_content_permission("organize", csrf=True)),
+    user: CurrentUser = Depends(require_content_permission("item.submit", csrf=True)),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> ManagedContentItemDTO:
     _require_feature()
@@ -951,7 +965,7 @@ def submit_content_version(
 def review_content_version(
     version_id: str,
     body: ReviewManagedContentRequest,
-    user: CurrentUser = Depends(require_content_permission("review", csrf=True)),
+    user: CurrentUser = Depends(require_content_permission("item.review", csrf=True)),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> ManagedContentItemDTO:
     _require_feature()
@@ -978,7 +992,7 @@ def review_content_version(
 @router.post("/versions/{version_id}/publish", response_model=ManagedPublicationDTO)
 def publish_content_version(
     version_id: str,
-    user: CurrentUser = Depends(require_content_permission("publish", csrf=True)),
+    user: CurrentUser = Depends(require_content_permission("item.publish", csrf=True)),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> ManagedPublicationDTO:
     _require_feature()
@@ -1030,9 +1044,9 @@ def bulk_move_content_items(
     conn: sqlite3.Connection = Depends(get_db),
 ) -> BulkManagedContentResponse:
     _require_feature()
-    can_organize = has_content_permission(conn, user, "organize")
-    can_review = has_content_permission(conn, user, "review")
-    if not (can_organize or can_review):
+    can_move_draft = has_content_permission(conn, user, "item.move_draft")
+    can_move_review = has_content_permission(conn, user, "item.move_review")
+    if not (can_move_draft or can_move_review):
         raise HTTPException(status_code=403, detail="当前账号没有移动资料的权限")
     results: list[BulkManagedContentResultDTO] = []
     for item in _validate_bulk_item_refs(body.items):
@@ -1043,8 +1057,8 @@ def bulk_move_content_items(
                 target_category_id=body.target_category_id,
                 expected_version_id=item.expected_version_id,
                 actor_user_id=user.id,
-                can_organize=can_organize,
-                can_review=can_review,
+                can_move_draft=can_move_draft,
+                can_move_review=can_move_review,
             )
             results.append(BulkManagedContentResultDTO(
                 item_id=item.item_id,
@@ -1070,9 +1084,9 @@ def bulk_archive_content_items(
     conn: sqlite3.Connection = Depends(get_db),
 ) -> BulkManagedContentResponse:
     _require_feature()
-    can_organize = has_content_permission(conn, user, "organize")
-    can_publish = has_content_permission(conn, user, "publish")
-    if not (can_organize or can_publish):
+    can_archive_draft = has_content_permission(conn, user, "item.archive_draft")
+    can_archive_published = has_content_permission(conn, user, "item.archive_published")
+    if not (can_archive_draft or can_archive_published):
         raise HTTPException(status_code=403, detail="当前账号没有删除资料的权限")
     results: list[BulkManagedContentResultDTO] = []
     for item in _validate_bulk_item_refs(body.items):
@@ -1082,8 +1096,8 @@ def bulk_archive_content_items(
                 item.item_id,
                 expected_version_id=item.expected_version_id,
                 actor_user_id=user.id,
-                can_organize=can_organize,
-                can_publish=can_publish,
+                can_archive_draft=can_archive_draft,
+                can_archive_published=can_archive_published,
             )
             results.append(BulkManagedContentResultDTO(
                 item_id=item.item_id,
@@ -1105,7 +1119,7 @@ def bulk_archive_content_items(
 @router.post("/bulk-review", response_model=BulkManagedContentResponse)
 def bulk_review_content_versions(
     body: BulkManagedContentRequest,
-    user: CurrentUser = Depends(require_content_permission("review", csrf=True)),
+    user: CurrentUser = Depends(require_content_permission("item.review", csrf=True)),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> BulkManagedContentResponse:
     _require_feature()
@@ -1137,7 +1151,7 @@ def bulk_review_content_versions(
 @router.post("/bulk-publish", response_model=BulkManagedContentResponse)
 def bulk_publish_content_versions(
     body: BulkManagedContentRequest,
-    user: CurrentUser = Depends(require_content_permission("publish", csrf=True)),
+    user: CurrentUser = Depends(require_content_permission("item.publish", csrf=True)),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> BulkManagedContentResponse:
     _require_feature()
@@ -1167,7 +1181,7 @@ def bulk_publish_content_versions(
 @router.get("/index-jobs/{index_job_id}", response_model=ManagedIndexJobDTO)
 def get_content_index_job(
     index_job_id: str,
-    _user: CurrentUser = Depends(require_any_content_permission(_CONTENT_READ)),
+    _user: CurrentUser = Depends(require_content_permission("index.view")),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> ManagedIndexJobDTO:
     row = conn.execute(
@@ -1220,7 +1234,7 @@ def list_content_index_jobs(
     history: bool = False,
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
-    _user: CurrentUser = Depends(require_any_content_permission(_CONTENT_READ)),
+    _user: CurrentUser = Depends(require_content_permission("index.view")),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> ManagedIndexJobListResponse:
     cte = """WITH RECURSIVE paths AS (
@@ -1317,6 +1331,26 @@ def list_content_index_jobs(
     )
 
 
+@router.get("/permission-catalog", response_model=ContentPermissionCatalogResponse)
+def get_permission_catalog(
+    _admin: CurrentUser = Depends(require_admin),
+) -> ContentPermissionCatalogResponse:
+    return ContentPermissionCatalogResponse(
+        schema_version=2,
+        permissions=[
+            ContentPermissionDefinitionDTO(
+                key=item.key,
+                domain=item.domain,
+                domain_label=item.domain_label,
+                label=item.label,
+                description=item.description,
+                dependencies=list(item.dependencies),
+            )
+            for item in CONTENT_PERMISSION_DEFINITIONS
+        ],
+    )
+
+
 @router.get("/permission-groups", response_model=list[ContentPermissionGroupDTO])
 def list_permission_groups(
     _admin: CurrentUser = Depends(require_admin),
@@ -1326,8 +1360,10 @@ def list_permission_groups(
         """SELECT id,group_key,display_name,is_system,is_active,updated_at
            FROM content_permission_groups
            ORDER BY CASE group_key
-               WHEN 'member' THEN 10 WHEN 'bim_engineer' THEN 20
-               WHEN 'content_owner' THEN 30 WHEN 'system_admin' THEN 40
+               WHEN 'member' THEN 10 WHEN 'viewer' THEN 20
+               WHEN 'bim_engineer' THEN 30 WHEN 'content_owner' THEN 40
+               WHEN 'publisher' THEN 50 WHEN 'category_admin' THEN 60
+               WHEN 'system_admin' THEN 70
                ELSE 100 END, created_at, display_name"""
     ).fetchall()
     return [_permission_group_dto(conn, row) for row in rows]

@@ -3,6 +3,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = (ROOT / "scripts" / "inspect-docker-vhdx-content-readonly.ps1").read_text(encoding="utf-8")
+ORCHESTRATOR = (ROOT / "scripts" / "inspect-docker-vhdx-content-quiesced.ps1").read_text(
+    encoding="utf-8"
+)
 WORKFLOW = (ROOT / ".github" / "workflows" / "inspect-production-docker-vhdx-content.yml").read_text(
     encoding="utf-8"
 )
@@ -10,7 +13,8 @@ WORKFLOW = (ROOT / ".github" / "workflows" / "inspect-production-docker-vhdx-con
 
 def test_vhdx_content_audit_is_exact_read_only_and_fail_closed():
     assert "-ExpectedLogicalBytes 92712992768" in WORKFLOW
-    assert "2026-08-08T16:50:03.9178356Z" in WORKFLOW
+    assert "2026-06-04T07:58:58.2353948Z" in WORKFLOW
+    assert "inspect-docker-vhdx-content-quiesced.ps1" in WORKFLOW
     assert "group: production-gpu-exclusive" in WORKFLOW
     assert "environment: production-asr" in WORKFLOW
     assert "'--options','ro,noload'" in SCRIPT
@@ -52,3 +56,30 @@ def test_vhdx_content_audit_reports_only_aggregate_inventory():
     assert "persistent-or-sensitive-content-present" in SCRIPT
     assert "docker-storage-found-without-persistent-volume-data" in SCRIPT
     assert "docker-storage-layout-inconclusive" in SCRIPT
+
+
+def test_quiesced_orchestrator_gates_stop_and_restores_runtime():
+    for expected in (
+        "docker.exe' @('ps','-q')",
+        "Running Docker containers are present",
+        "runner identity; restoration is not guaranteed",
+        "Stop-Process",
+        "@('--terminate','docker-desktop')",
+        "global_wsl_shutdown_requested=$false",
+        "ExpectedCreatedUtc",
+        "Test-ExclusiveRead",
+        "inspect-docker-vhdx-content-readonly.ps1",
+        "Start-Process -FilePath $desktopExecutable",
+        "restore_status",
+        "no_local_backup_accepted=$true",
+    ):
+        assert expected in ORCHESTRATOR
+    for forbidden in (
+        "--shutdown",
+        "docker system prune",
+        "Remove-Item",
+        "Optimize-VHD",
+        "Mount-VHD",
+        "Dismount-VHD",
+    ):
+        assert forbidden not in ORCHESTRATOR

@@ -37,7 +37,7 @@ test.describe("资料成员工作台入口", () => {
   });
 
   test("撤权后菜单立即移除入口且直接访问不闪现工作台", async ({ page }) => {
-    let permissions = ["organize"];
+    let permissions = ["workspace.view", "item.view"];
     await installAdminRoutes(page, "normal", "bim_engineer", () => ({
       id: 9002,
       employee_id: "TEST-EDITOR",

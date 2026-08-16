@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AdminManagedContentPage } from "./AdminManagedContentPage";
 
 const mocks = vi.hoisted(() => ({
-  permissions: ["review"] as string[],
+  permissions: ["item.review", "item.move_review", "folder.review", "trash.view", "trash.restore"] as string[],
   capabilities: vi.fn(),
   categories: vi.fn(),
   items: vi.fn(),
@@ -32,6 +32,11 @@ const mocks = vi.hoisted(() => ({
   openPreview: vi.fn(),
   previewState: { parentId: null as string | null },
 }));
+
+const REVIEWER_PERMISSIONS = ["item.review", "item.move_review", "folder.review", "trash.view", "trash.restore"];
+const ORGANIZER_PERMISSIONS = ["item.upload", "item.submit", "item.move_draft", "item.archive_draft", "folder.request"];
+const PUBLISHER_PERMISSIONS = ["item.publish", "item.archive_published", "trash.view", "index.view"];
+const CATEGORY_MANAGER_PERMISSIONS = ["category.manage", "folder.review"];
 
 vi.mock("../../components/PdfPreview", () => ({ PdfPreview: () => null }));
 vi.mock("../../hooks/usePdfPreview", () => ({
@@ -161,7 +166,7 @@ async function openRootFolder(folderId = category.id) {
 describe("AdminManagedContentPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.permissions = ["review"];
+    mocks.permissions = REVIEWER_PERMISSIONS;
     mocks.previewState.parentId = null;
     mocks.capabilities.mockResolvedValue({ enabled: true, max_upload_bytes: 1024, supported_extensions: [".pdf"] });
     mocks.categories.mockResolvedValue([category]);
@@ -221,7 +226,7 @@ describe("AdminManagedContentPage", () => {
   });
 
   it("switches the active top-level folder and its upload target", async () => {
-    mocks.permissions = ["organize"];
+    mocks.permissions = ORGANIZER_PERMISSIONS;
     mocks.categories.mockResolvedValue([category, projectCategory]);
     render(<AdminManagedContentPage />);
 
@@ -242,13 +247,28 @@ describe("AdminManagedContentPage", () => {
     fireEvent.click(screen.getByRole("tab", { name: "回收站" }));
     expect(await screen.findByText(/整理员 于/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "恢复" }));
-    expect(screen.getByRole("dialog")).toHaveTextContent("需要管理员重新发布后才会进入检索");
+    expect(screen.getByRole("dialog")).toHaveTextContent("需要具备发布权限的人员重新发布后才会进入检索");
     fireEvent.click(screen.getByRole("button", { name: "确认恢复" }));
     await waitFor(() => expect(mocks.restoreContent).toHaveBeenCalledWith("item-1", "version-1"));
   });
 
+  it("lets a publisher view trash without exposing restore actions", async () => {
+    mocks.permissions = PUBLISHER_PERMISSIONS;
+    mocks.trash.mockResolvedValue({
+      items: [{ ...item, archived_at: 1_700_000_000, archived_by_name: "发布负责人", pre_archive_lifecycle_status: "published" }],
+      total: 1,
+      status_counts: { published: 1 },
+    });
+    render(<AdminManagedContentPage />);
+
+    fireEvent.click(screen.getByRole("tab", { name: "回收站" }));
+    expect(await screen.findByText(/发布负责人 于/)).toBeInTheDocument();
+    expect(screen.getByText("查看已移出资料库的资料。")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "恢复" })).not.toBeInTheDocument();
+  });
+
   it("lets an organizer delete a draft after explicit confirmation", async () => {
-    mocks.permissions = ["organize"];
+    mocks.permissions = ORGANIZER_PERMISSIONS;
     mocks.items.mockResolvedValue({
       items: [{ ...item, lifecycle_status: "draft" }],
       total: 1,
@@ -269,14 +289,14 @@ describe("AdminManagedContentPage", () => {
   });
 
   it("requires publish permission for reviewed content and blocks publishing content", async () => {
-    mocks.permissions = ["organize"];
+    mocks.permissions = ORGANIZER_PERMISSIONS;
     const firstRender = render(<AdminManagedContentPage />);
     await openRootFolder();
     await screen.findAllByText("建模标准");
     expect(screen.getAllByRole("button", { name: /删除“建模标准”/ })[0]).toBeDisabled();
     firstRender.unmount();
 
-    mocks.permissions = ["publish"];
+    mocks.permissions = PUBLISHER_PERMISSIONS;
     mocks.items.mockResolvedValue({
       items: [{ ...item, lifecycle_status: "publishing" }],
       total: 1,
@@ -290,7 +310,7 @@ describe("AdminManagedContentPage", () => {
   });
 
   it("keeps the delete dialog open with a recoverable conflict message", async () => {
-    mocks.permissions = ["publish"];
+    mocks.permissions = PUBLISHER_PERMISSIONS;
     mocks.deleteContent.mockRejectedValue(new Error("资料版本已变化，请刷新后重试"));
     render(<AdminManagedContentPage />);
     await openRootFolder();
@@ -320,7 +340,7 @@ describe("AdminManagedContentPage", () => {
   });
 
   it("keeps only failed targets in the batch delete retry dialog", async () => {
-    mocks.permissions = ["organize"];
+    mocks.permissions = ORGANIZER_PERMISSIONS;
     const firstItem = { ...item, lifecycle_status: "draft" };
     const secondItem = { ...firstItem, item_id: "item-2", title: "建模标准2", version_id: "version-2", original_filename: "standard-2.pdf" };
     mocks.items.mockResolvedValue({ items: [firstItem, secondItem], total: 2, status_counts: { draft: 2 } });
@@ -348,7 +368,7 @@ describe("AdminManagedContentPage", () => {
   });
 
   it("uploads selected files for an organizer", async () => {
-    mocks.permissions = ["organize"];
+    mocks.permissions = ORGANIZER_PERMISSIONS;
     mocks.items.mockResolvedValue({ items: [], total: 0, status_counts: {} });
     mocks.upload.mockResolvedValue({
       batch_id: "batch-1",
@@ -368,7 +388,7 @@ describe("AdminManagedContentPage", () => {
   });
 
   it("keeps the upload dialog and selected file after an upload failure", async () => {
-    mocks.permissions = ["organize"];
+    mocks.permissions = ORGANIZER_PERMISSIONS;
     mocks.items.mockResolvedValue({ items: [], total: 0, status_counts: {} });
     mocks.upload.mockRejectedValue(new Error("上传服务暂不可用"));
     render(<AdminManagedContentPage />);
@@ -385,7 +405,7 @@ describe("AdminManagedContentPage", () => {
   });
 
   it("keeps a plain file dropped in the file upload dialog", async () => {
-    mocks.permissions = ["organize"];
+    mocks.permissions = ORGANIZER_PERMISSIONS;
     mocks.items.mockResolvedValue({ items: [], total: 0, status_counts: {} });
     render(<AdminManagedContentPage />);
     await openRootFolder();
@@ -403,7 +423,7 @@ describe("AdminManagedContentPage", () => {
   });
 
   it("confirms a selected folder with hierarchy and ignored files before uploading", async () => {
-    mocks.permissions = ["organize"];
+    mocks.permissions = ORGANIZER_PERMISSIONS;
     mocks.items.mockResolvedValue({ items: [], total: 0, status_counts: {} });
     mocks.upload.mockResolvedValue({
       batch_id: "batch-folder-upload",
@@ -436,7 +456,7 @@ describe("AdminManagedContentPage", () => {
   });
 
   it("recursively scans a dropped folder before opening the folder confirmation", async () => {
-    mocks.permissions = ["organize"];
+    mocks.permissions = ORGANIZER_PERMISSIONS;
     mocks.items.mockResolvedValue({ items: [], total: 0, status_counts: {} });
     render(<AdminManagedContentPage />);
     await openRootFolder();
@@ -471,7 +491,7 @@ describe("AdminManagedContentPage", () => {
   });
 
   it("opens a confirmation before uploading files dropped on the current folder", async () => {
-    mocks.permissions = ["organize"];
+    mocks.permissions = ORGANIZER_PERMISSIONS;
     mocks.items.mockResolvedValue({ items: [], total: 0, status_counts: {} });
     mocks.upload.mockResolvedValue({ batch_id: "batch-drop", entries: [] });
     render(<AdminManagedContentPage />);
@@ -489,7 +509,7 @@ describe("AdminManagedContentPage", () => {
   });
 
   it("shows the current folder in the list drop overlay and clears it after leaving", async () => {
-    mocks.permissions = ["organize"];
+    mocks.permissions = ORGANIZER_PERMISSIONS;
     mocks.items.mockResolvedValue({ items: [], total: 0, status_counts: {} });
     render(<AdminManagedContentPage />);
     await openRootFolder();
@@ -505,7 +525,7 @@ describe("AdminManagedContentPage", () => {
   });
 
   it("clears the list drop overlay after rejecting an unsupported file", async () => {
-    mocks.permissions = ["organize"];
+    mocks.permissions = ORGANIZER_PERMISSIONS;
     render(<AdminManagedContentPage />);
     await openRootFolder();
     const folderList = screen.getByTestId("managed-content-drop-list");
@@ -521,7 +541,7 @@ describe("AdminManagedContentPage", () => {
   });
 
   it("does not upload files when a folder drop is cancelled", async () => {
-    mocks.permissions = ["organize"];
+    mocks.permissions = ORGANIZER_PERMISSIONS;
     mocks.items.mockResolvedValue({ items: [], total: 0, status_counts: {} });
     render(<AdminManagedContentPage />);
     await openRootFolder();
@@ -535,7 +555,7 @@ describe("AdminManagedContentPage", () => {
   });
 
   it("navigates into a child folder and uploads to the current folder", async () => {
-    mocks.permissions = ["organize"];
+    mocks.permissions = ORGANIZER_PERMISSIONS;
     mocks.categories.mockResolvedValue([category, childCategory]);
     mocks.upload.mockResolvedValue({ batch_id: "batch-folder", entries: [] });
     render(<AdminManagedContentPage />);
@@ -551,7 +571,7 @@ describe("AdminManagedContentPage", () => {
   });
 
   it("lets a category manager create a controlled child folder", async () => {
-    mocks.permissions = ["manage_categories"];
+    mocks.permissions = CATEGORY_MANAGER_PERMISSIONS;
     mocks.createCategory.mockResolvedValue(childCategory);
     render(<AdminManagedContentPage />);
     await openRootFolder();
@@ -564,7 +584,7 @@ describe("AdminManagedContentPage", () => {
   });
 
   it("lets an organizer submit a child folder request", async () => {
-    mocks.permissions = ["organize"];
+    mocks.permissions = ORGANIZER_PERMISSIONS;
     mocks.createFolderRequest.mockResolvedValue({ id: "request-1" });
     render(<AdminManagedContentPage />);
     await openRootFolder();
@@ -595,7 +615,7 @@ describe("AdminManagedContentPage", () => {
   });
 
   it("moves an existing desktop row when dropped on a child folder", async () => {
-    mocks.permissions = ["organize"];
+    mocks.permissions = ORGANIZER_PERMISSIONS;
     mocks.categories.mockResolvedValue([category, childCategory]);
     mocks.items.mockResolvedValue({
       items: [{ ...item, lifecycle_status: "draft" }], total: 1, status_counts: { draft: 1 },
@@ -615,7 +635,7 @@ describe("AdminManagedContentPage", () => {
   });
 
   it("blocks moving a draft while an older published version remains searchable", async () => {
-    mocks.permissions = ["organize"];
+    mocks.permissions = ORGANIZER_PERMISSIONS;
     mocks.items.mockResolvedValue({
       items: [{ ...item, lifecycle_status: "draft", has_published_head: true }], total: 1, status_counts: { draft: 1 },
     });
@@ -627,7 +647,7 @@ describe("AdminManagedContentPage", () => {
   });
 
   it("renders six icon actions and keeps download out of the detail dialog", async () => {
-    mocks.permissions = ["organize"];
+    mocks.permissions = ORGANIZER_PERMISSIONS;
     mocks.items.mockResolvedValue({ items: [{ ...item, lifecycle_status: "draft" }], total: 1, status_counts: { draft: 1 } });
     render(<AdminManagedContentPage />);
     await openRootFolder();
@@ -642,7 +662,7 @@ describe("AdminManagedContentPage", () => {
   });
 
   it("renames titles and filenames as a new version", async () => {
-    mocks.permissions = ["organize"];
+    mocks.permissions = ORGANIZER_PERMISSIONS;
     mocks.items.mockResolvedValue({ items: [{ ...item, lifecycle_status: "draft" }], total: 1, status_counts: { draft: 1 } });
     mocks.renameContent.mockResolvedValue({ ...item, title: "更新后的标题", original_filename: "renamed.pdf", version_number: 2 });
     render(<AdminManagedContentPage />);
@@ -659,7 +679,7 @@ describe("AdminManagedContentPage", () => {
   });
 
   it("uploads a replacement file and chooses the new filename", async () => {
-    mocks.permissions = ["organize"];
+    mocks.permissions = ORGANIZER_PERMISSIONS;
     mocks.items.mockResolvedValue({ items: [{ ...item, lifecycle_status: "draft" }], total: 1, status_counts: { draft: 1 } });
     mocks.updateVersion.mockResolvedValue({ ...item, original_filename: "replacement.pdf", version_number: 2 });
     render(<AdminManagedContentPage />);
@@ -728,7 +748,7 @@ describe("AdminManagedContentPage", () => {
   });
 
   it("allows republishing after a non-retryable historical failure", async () => {
-    mocks.permissions = ["publish"];
+    mocks.permissions = PUBLISHER_PERMISSIONS;
     mocks.items.mockResolvedValue({ items: [{ ...item, lifecycle_status: "publication_failed", publication_attempt_count: 4, publication_failure: { code: "pdf_password_required", message: "PDF 需要密码才能解析。", retryable: false, recommended_action: "请上传已解除密码保护的 PDF。" } }], total: 1, status_counts: { publication_failed: 1 } });
     mocks.publish.mockResolvedValue({});
     render(<AdminManagedContentPage />);
@@ -746,7 +766,7 @@ describe("AdminManagedContentPage", () => {
   });
 
   it("includes non-retryable historical failures in bulk republish", async () => {
-    mocks.permissions = ["publish"];
+    mocks.permissions = PUBLISHER_PERMISSIONS;
     const secondItem = { ...item, item_id: "item-2", title: "建模标准2", version_id: "version-2", lifecycle_status: "publication_failed" };
     mocks.items.mockResolvedValue({ items: [{ ...item, lifecycle_status: "publication_failed", publication_attempt_count: 2, publication_failure: { code: "parser_result_invalid", message: "文档解析结果无效。", retryable: false, recommended_action: "请确认文件内容完整。" } }, secondItem], total: 2, status_counts: { publication_failed: 2 } });
     mocks.bulkPublish.mockResolvedValue({ results: [{ version_id: "version-1", status: "succeeded", message: null, index_job_id: "job-3" }, { version_id: "version-2", status: "succeeded", message: null, index_job_id: "job-4" }], succeeded: 2, failed: 0 });

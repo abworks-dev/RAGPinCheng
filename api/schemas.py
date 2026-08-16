@@ -80,6 +80,20 @@ class AdminUserListResponse(BaseModel):
     users: list[AdminUserDTO]
 
 
+class ContentPermissionDefinitionDTO(BaseModel):
+    key: str
+    domain: str
+    domain_label: str
+    label: str
+    description: str
+    dependencies: list[str] = Field(default_factory=list)
+
+
+class ContentPermissionCatalogResponse(BaseModel):
+    schema_version: int
+    permissions: list[ContentPermissionDefinitionDTO]
+
+
 class AdminUserPatchRequest(BaseModel):
     is_active: bool | None = None
     role: str | None = None  # 'user' | 'admin'

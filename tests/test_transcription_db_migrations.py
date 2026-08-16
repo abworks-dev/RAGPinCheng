@@ -85,7 +85,7 @@ def test_schema_5_database_adds_later_tables_without_changing_users(tmp_path):
     path = tmp_path / "app.sqlite"
     init_db(path, backup_dir=tmp_path / "backups")
     conn = sqlite3.connect(path)
-    conn.execute("DELETE FROM app_schema_migrations WHERE version IN (6,7,8,9,10)")
+    conn.execute("DELETE FROM app_schema_migrations WHERE version IN (6,7,8,9,10,11)")
     conn.execute("DROP TABLE maintenance_runs")
     conn.execute("DROP TABLE maintenance_settings")
     conn.execute("DROP TABLE content_folder_requests")
@@ -101,7 +101,7 @@ def test_schema_5_database_adds_later_tables_without_changing_users(tmp_path):
     conn = sqlite3.connect(path)
     assert conn.execute("SELECT max(version) FROM app_schema_migrations").fetchone()[0] == db_migrations.CURRENT_SCHEMA_VERSION
     assert conn.execute("SELECT real_name FROM users WHERE employee_id='kept'").fetchone()[0] == "保留用户"
-    assert conn.execute("SELECT count(*) FROM content_permission_groups WHERE is_system=1").fetchone()[0] == 4
+    assert conn.execute("SELECT count(*) FROM content_permission_groups WHERE is_system=1").fetchone()[0] == 7
     assert conn.execute("SELECT count(*) FROM content_folder_requests").fetchone()[0] == 0
     conn.close()
 
@@ -111,7 +111,7 @@ def test_schema_5_database_adds_later_tables_without_changing_users(tmp_path):
     [
         "UPDATE content_permission_groups SET display_name='已篡改' WHERE group_key='member'",
         "UPDATE content_permission_groups SET is_active=0 WHERE group_key='system_admin'",
-        "DELETE FROM content_permission_group_items WHERE group_id='permission-group-system-admin' AND permission='publish'",
+        "DELETE FROM content_permission_group_items WHERE group_id='permission-group-system-admin' AND permission='item.publish'",
     ],
 )
 def test_repeated_init_fails_closed_when_system_permission_group_drifts(tmp_path, statement):
@@ -124,6 +124,58 @@ def test_repeated_init_fails_closed_when_system_permission_group_drifts(tmp_path
 
     with pytest.raises(RuntimeError, match="system_permission_group_mismatch"):
         init_db(path, backup_dir=tmp_path / "backups")
+
+
+def test_schema_10_permissions_expand_to_granular_nodes(tmp_path, monkeypatch):
+    path = tmp_path / "app.sqlite"
+    migrations = db_migrations.MIGRATIONS
+    monkeypatch.setattr(db_migrations, "MIGRATIONS", migrations[:-1])
+    init_db(path, backup_dir=tmp_path / "backups")
+    conn = sqlite3.connect(path)
+    user_id = conn.execute(
+        "INSERT INTO users(employee_id,real_name,password_hash,role,is_active,created_at) "
+        "VALUES ('legacy-user','旧权限用户','x','user',1,1)"
+    ).lastrowid
+    conn.executemany(
+        "INSERT INTO content_permissions(user_id,permission,created_at) VALUES (?,?,1)",
+        [(user_id, "organize"), (user_id, "review")],
+    )
+    conn.execute(
+        "INSERT INTO content_permission_groups "
+        "(id,group_key,display_name,is_system,is_active,created_at,updated_at) "
+        "VALUES ('custom-legacy','custom_legacy','旧自定义组',0,1,1,1)"
+    )
+    conn.execute(
+        "INSERT INTO content_permission_group_items(group_id,permission) "
+        "VALUES ('custom-legacy','publish')"
+    )
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setattr(db_migrations, "MIGRATIONS", migrations)
+    init_db(path, backup_dir=tmp_path / "backups")
+    conn = sqlite3.connect(path)
+    actual_user_permissions = {
+        row[0] for row in conn.execute(
+            "SELECT permission FROM content_permissions WHERE user_id=?", (user_id,)
+        )
+    }
+    assert actual_user_permissions == {
+        "workspace.view", "item.view", "category.view", "item.upload", "item.submit",
+        "item.move_draft", "item.archive_draft", "folder.request", "item.review",
+        "item.move_review", "folder.review", "trash.view", "trash.restore",
+    }
+    assert {
+        row[0] for row in conn.execute(
+            "SELECT permission FROM content_permission_group_items WHERE group_id='custom-legacy'"
+        )
+    } == {
+        "workspace.view", "item.view", "category.view", "item.publish",
+        "item.archive_published", "trash.view", "index.view",
+    }
+    assert conn.execute("SELECT max(version) FROM app_schema_migrations").fetchone()[0] == 11
+    assert conn.execute("PRAGMA foreign_key_check").fetchone() is None
+    conn.close()
 
 
 def test_backup_happens_before_any_phase2_schema_write(tmp_path, monkeypatch):

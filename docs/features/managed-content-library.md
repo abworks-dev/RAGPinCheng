@@ -39,10 +39,15 @@
 
 ## 权限
 
-- `organize`：上传、提交，以及将 `draft`、`rejected` 状态资料移至回收站。
-- `review`：确认、退回待确认资料，以及恢复回收站资料。
-- `publish`：发布，以及将已确认、发布失败或已发布资料移至回收站；可查看回收站但不能恢复。
-- 管理员通过现有管理员回退拥有全部资料权限。
+- 入口与查看：`workspace.view` 控制资料工作台入口；`item.view` 控制资料列表、详情、预览和下载；`category.view` 控制分类树和路径。
+- 资料整理：`item.upload`、`item.submit`、`item.move_draft`、`item.archive_draft` 分别控制上传、提交、移动草稿/退回资料和将其移入回收站。
+- 确认与发布：`item.review` 控制确认和退回，`item.move_review` 控制移动待确认资料，`item.publish` 控制发布，`item.archive_published` 控制将已确认、发布失败或已发布资料移入回收站。
+- 回收站：`trash.view` 控制查看，`trash.restore` 独立控制恢复。发布负责人默认可查看但不能恢复。
+- 分类与目录：`category.manage` 控制分类维护，`folder.request` 控制目录申请，`folder.review` 控制目录审批。
+- 运维入口：`import.server` 控制服务器批次导入，`index.view` 控制索引任务页面和 API。
+- 权限节点存在显式前置依赖。用户管理页勾选动作权限时自动补齐入口和查看权限，取消前置权限时自动移除依赖动作；后端拒绝保存缺少前置权限、重复或未知节点的组合。
+- 系统预设组包括普通成员、资料浏览者、BIM工程师、资料负责人、发布负责人、分类管理员和系统管理员；权限管理和权限组维护仅允许全局管理员执行。
+- 管理员通过现有管理员回退拥有全部 18 个资料权限节点。
 - 所有修改请求都要求登录 Cookie 和 CSRF token；前端按钮可见性不是授权边界。
 
 ## 回收站语义
@@ -61,7 +66,7 @@
 
 ## 恢复边界
 
-`GET /api/admin/content/trash` 向资料负责人和系统管理员显示回收站；`POST /api/admin/content/items/{item_id}/restore` 要求当前版本号和 CSRF token。草稿、退回和待确认资料恢复原状态；已确认、发布失败或已发布资料统一恢复为“已确认”。恢复不会重建 `content_item_heads`，不会自动进入检索，必须重新发布。当前阶段不提供永久删除、自动到期清理或对象文件清理。
+`GET /api/admin/content/trash` 要求 `trash.view`；`POST /api/admin/content/items/{item_id}/restore` 额外要求 `trash.restore`、当前版本号和 CSRF token。草稿、退回和待确认资料恢复原状态；已确认、发布失败或已发布资料统一恢复为“已确认”。恢复不会重建 `content_item_heads`，不会自动进入检索，必须重新发布。当前阶段不提供永久删除、自动到期清理或对象文件清理。
 
 ## 验证入口
 

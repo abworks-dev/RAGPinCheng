@@ -50,7 +50,7 @@ from .maintenance import (
     save_settings,
 )
 from .system_overview import collect_system_overview
-from .content_permissions import CONTENT_PERMISSIONS
+from .content_permission_catalog import CONTENT_PERMISSIONS
 from .db import get_db
 from .feedback import read_records
 from .indexing import create_job, enqueue

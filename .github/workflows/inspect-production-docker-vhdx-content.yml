@@ -24,14 +24,14 @@ jobs:
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
-      - name: Inspect exact Docker VHDX through a temporary read-only mount
+      - name: Quiesce Docker Desktop and inspect exact VHDX read only
         shell: powershell
         timeout-minutes: 110
         run: |
-          & .\scripts\inspect-docker-vhdx-content-readonly.ps1 `
-            -ReportPath (Join-Path $env:RUNNER_TEMP 'docker-vhdx-content-readonly-audit\audit.json') `
+          & .\scripts\inspect-docker-vhdx-content-quiesced.ps1 `
+            -ReportRoot (Join-Path $env:RUNNER_TEMP 'docker-vhdx-content-readonly-audit') `
             -ExpectedLogicalBytes 92712992768 `
-            -ExpectedLastWriteUtc '2026-08-08T16:50:03.9178356Z'
+            -ExpectedCreatedUtc '2026-06-04T07:58:58.2353948Z'
       - if: always()
         uses: actions/upload-artifact@v4
         with:

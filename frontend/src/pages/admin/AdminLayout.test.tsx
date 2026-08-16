@@ -111,11 +111,32 @@ describe("AdminLayout route boundary", () => {
       real_name: "测试资料员",
       employee_id: "editor-test",
       role: "user",
-      content_permissions: ["organize"],
+      content_permissions: ["workspace.view", "item.view"],
     };
     renderAdmin("categories");
     expect(screen.queryByRole("link", { name: "分类管理" })).not.toBeInTheDocument();
     expect(await screen.findByText("资料库页面内容")).toBeInTheDocument();
+  });
+
+  it("shows index navigation only with index view permission", async () => {
+    mocks.user = {
+      real_name: "测试资料员",
+      employee_id: "editor-test",
+      role: "user",
+      content_permissions: ["workspace.view", "item.view", "category.view"],
+    };
+    const firstRender = renderAdmin("index");
+    expect(screen.queryByRole("link", { name: "索引任务" })).not.toBeInTheDocument();
+    expect(await screen.findByText("资料库页面内容")).toBeInTheDocument();
+    firstRender.unmount();
+
+    mocks.user = {
+      ...mocks.user,
+      content_permissions: ["workspace.view", "item.view", "category.view", "index.view"],
+    };
+    renderAdmin("index");
+    expect(screen.getByRole("link", { name: "索引任务" })).toBeInTheDocument();
+    expect(screen.getByText("索引任务页面内容")).toBeInTheDocument();
   });
 
   it("returns users without workspace permissions to chat", async () => {
