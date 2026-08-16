@@ -81,11 +81,40 @@ def test_repeated_init_is_noop_and_does_not_create_second_backup(tmp_path):
     assert list((tmp_path / "backups").glob("*.sqlite")) == first
 
 
+def test_schema_10_database_migrates_manual_revision_columns_and_index(tmp_path, monkeypatch):
+    path = tmp_path / "app.sqlite"
+    original = db_migrations.MIGRATIONS
+    monkeypatch.setattr(db_migrations, "MIGRATIONS", original[:-2])
+    init_db(path, backup_dir=tmp_path / "backups")
+    conn = sqlite3.connect(path)
+    assert conn.execute("SELECT max(version) FROM app_schema_migrations").fetchone()[0] == 10
+    assert "derived_from_version_id" not in {row[1] for row in conn.execute("PRAGMA table_info(transcript_versions)")}
+    conn.close()
+
+    monkeypatch.setattr(db_migrations, "MIGRATIONS", original)
+    init_db(path, backup_dir=tmp_path / "backups")
+
+    backups = list((tmp_path / "backups").glob("*.sqlite"))
+    assert len(backups) == 1
+    verify_backup(backups[0])
+    conn = sqlite3.connect(path)
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(transcript_versions)")}
+    indexes = {row[1] for row in conn.execute("PRAGMA index_list(transcript_versions)")}
+    assert {"derived_from_version_id", "edited_by", "edit_idempotency_key"} <= columns
+    assert "uq_transcript_versions_edit_idempotency" in indexes
+    assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    assert conn.execute("PRAGMA foreign_key_check").fetchone() is None
+    conn.close()
+
+
 def test_schema_5_database_adds_later_tables_without_changing_users(tmp_path):
     path = tmp_path / "app.sqlite"
     init_db(path, backup_dir=tmp_path / "backups")
     conn = sqlite3.connect(path)
-    conn.execute("DELETE FROM app_schema_migrations WHERE version IN (6,7,8,9,10,11)")
+    conn.execute(
+        "DELETE FROM app_schema_migrations WHERE version >= 6 AND version <= ?",
+        (db_migrations.CURRENT_SCHEMA_VERSION,),
+    )
     conn.execute("DROP TABLE maintenance_runs")
     conn.execute("DROP TABLE maintenance_settings")
     conn.execute("DROP TABLE content_folder_requests")
@@ -129,7 +158,7 @@ def test_repeated_init_fails_closed_when_system_permission_group_drifts(tmp_path
 def test_schema_10_permissions_expand_to_granular_nodes(tmp_path, monkeypatch):
     path = tmp_path / "app.sqlite"
     migrations = db_migrations.MIGRATIONS
-    monkeypatch.setattr(db_migrations, "MIGRATIONS", migrations[:-1])
+    monkeypatch.setattr(db_migrations, "MIGRATIONS", migrations[:-2])
     init_db(path, backup_dir=tmp_path / "backups")
     conn = sqlite3.connect(path)
     user_id = conn.execute(
@@ -173,7 +202,7 @@ def test_schema_10_permissions_expand_to_granular_nodes(tmp_path, monkeypatch):
         "workspace.view", "item.view", "category.view", "item.publish",
         "item.archive_published", "trash.view", "index.view",
     }
-    assert conn.execute("SELECT max(version) FROM app_schema_migrations").fetchone()[0] == 11
+    assert conn.execute("SELECT max(version) FROM app_schema_migrations").fetchone()[0] == db_migrations.CURRENT_SCHEMA_VERSION
     assert conn.execute("PRAGMA foreign_key_check").fetchone() is None
     conn.close()
 

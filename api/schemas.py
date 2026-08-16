@@ -697,6 +697,7 @@ class TranscriptVersionDTO(BaseModel):
     provider_key: str | None
     model_id: str | None
     model_revision: str | None
+    markdown_storage_kind: str
     review_status: str
     reviewed_by: int | None
     reviewed_at: int | None
@@ -704,6 +705,8 @@ class TranscriptVersionDTO(BaseModel):
     publication_status: str
     published_at: int | None
     supersedes_version_id: str | None
+    derived_from_version_id: str | None
+    edited_by: int | None
     markdown_sha256: str
     created_at: int
     updated_at: int
@@ -721,6 +724,14 @@ class ReviewTranscriptVersionRequest(BaseModel):
 
     approved: bool
     review_note: str | None = None
+
+
+class CreateTranscriptRevisionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    markdown: str
+    base_markdown_sha256: str
+    request_idempotency_key: str
 
 
 class PublishTranscriptVersionRequest(BaseModel):

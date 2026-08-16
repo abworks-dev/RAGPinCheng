@@ -568,6 +568,15 @@ CONTENT_PERMISSION_V2_STATEMENTS = (
     "DROP TABLE content_permission_v11_map",
 )
 
+TRANSCRIPT_MANUAL_REVISION_STATEMENTS = (
+    "ALTER TABLE transcript_versions ADD COLUMN derived_from_version_id TEXT REFERENCES transcript_versions(id) ON DELETE RESTRICT",
+    "ALTER TABLE transcript_versions ADD COLUMN edited_by INTEGER REFERENCES users(id) ON DELETE SET NULL",
+    "ALTER TABLE transcript_versions ADD COLUMN edit_idempotency_key TEXT",
+    """CREATE UNIQUE INDEX IF NOT EXISTS uq_transcript_versions_edit_idempotency
+       ON transcript_versions(edit_idempotency_key)
+       WHERE edit_idempotency_key IS NOT NULL""",
+)
+
 MIGRATIONS = (
     Migration(1, "multi_engine_transcription_phase2", PHASE2_STATEMENTS),
     Migration(2, "answer_regeneration_versions", ANSWER_VERSION_STATEMENTS),
@@ -580,6 +589,7 @@ MIGRATIONS = (
     Migration(9, "system_maintenance_permanent_retention", SYSTEM_MAINTENANCE_RETENTION_STATEMENTS),
     Migration(10, "managed_content_version_metadata", CONTENT_VERSION_METADATA_STATEMENTS),
     Migration(11, "granular_content_permissions", CONTENT_PERMISSION_V2_STATEMENTS),
+    Migration(12, "transcript_manual_revisions", TRANSCRIPT_MANUAL_REVISION_STATEMENTS),
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 PHASE2_TABLES = frozenset(
@@ -643,6 +653,17 @@ def validate_system_content_permission_groups(
     }
     if actual != expected:
         raise RuntimeError("system_permission_group_mismatch")
+
+
+def validate_transcript_manual_revision_schema(conn: sqlite3.Connection) -> None:
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(transcript_versions)")}
+    if not {"derived_from_version_id", "edited_by", "edit_idempotency_key"}.issubset(columns):
+        raise RuntimeError("transcript_manual_revision_schema_mismatch")
+    index = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='index' AND name='uq_transcript_versions_edit_idempotency'"
+    ).fetchone()
+    if index is None or "WHERE edit_idempotency_key IS NOT NULL" not in str(index[0]):
+        raise RuntimeError("transcript_manual_revision_schema_mismatch")
 
 
 def validate_content_version_metadata(conn: sqlite3.Connection) -> None:
@@ -759,6 +780,12 @@ def has_pending_ddl(path: Path, *, base_tables: frozenset[str]) -> bool:
             validate_content_version_metadata(conn)
         finally:
             conn.close()
+    if any(version == 12 for version, _name in applied):
+        conn = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
+        try:
+            validate_transcript_manual_revision_schema(conn)
+        finally:
+            conn.close()
     if not base_tables.issubset(tables):
         return True
     if "index_jobs" in tables and "media_id" not in index_columns:
@@ -824,6 +851,11 @@ def apply_all(conn: sqlite3.Connection, *, base_schema: str, applied_at: int) ->
             else LEGACY_SYSTEM_CONTENT_PERMISSION_GROUPS,
         )
         validate_content_version_metadata(conn)
+        applied_after = {
+            row[0] for row in conn.execute("SELECT version FROM app_schema_migrations")
+        }
+        if 12 in applied_after:
+            validate_transcript_manual_revision_schema(conn)
         if conn.execute("PRAGMA foreign_key_check").fetchone() is not None:
             raise RuntimeError("migration_foreign_key_check_failed")
         result = conn.execute("PRAGMA integrity_check").fetchone()

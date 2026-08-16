@@ -24,7 +24,8 @@ from src.transcription.types import ContractValidationError, PublicationIndexSta
 from src.transcription.workflow import TranscriptionPersistenceWorkflow
 
 from .transcription_artifacts import LocalTranscriptionArtifactStore
-from .transcription_store import SQLiteTranscriptionStore
+from .transcription_markdown import validate_editable_transcript_markdown
+from .transcription_store import SQLiteTranscriptionStore, StoreConflictError
 
 
 def _receipt_from_job(job: dict[str, object]) -> PublicationIndexReceipt:
@@ -33,7 +34,7 @@ def _receipt_from_job(job: dict[str, object]) -> PublicationIndexReceipt:
         str(job["id"]),
         str(job["transcript_version_id"]),
         str(job["candidate_version_id"]),
-        str(job["canonical_sha256"]),
+        None if job["canonical_sha256"] is None else str(job["canonical_sha256"]),
         str(job["markdown_sha256"]),
         str(job["target_index_id"]),
         PublicationIndexStatus(str(job["status"])),
@@ -175,20 +176,51 @@ class TranscriptionPublicationApplicationService:
             now=self.now(),
         )
 
+    def create_revision(
+        self,
+        base_version_id: str,
+        *,
+        markdown: str,
+        base_markdown_sha256: str,
+        edited_by: int,
+        request_idempotency_key: str,
+    ):
+        content = validate_editable_transcript_markdown(markdown)
+        base = self.store.load_version(base_version_id)
+        if base.markdown_ref.content_sha256 != base_markdown_sha256:
+            raise StoreConflictError("stale_base_markdown")
+        markdown_ref = self.artifacts.write_markdown(content)
+        if markdown_ref.content_sha256 == base.markdown_ref.content_sha256:
+            raise StoreConflictError("unchanged_markdown")
+        return self.store.register_edited_version(
+            version_id=str(uuid.uuid4()),
+            base_version_id=base.id,
+            base_markdown_sha256=base_markdown_sha256,
+            markdown_ref=markdown_ref,
+            edited_by=edited_by,
+            edit_idempotency_key=request_idempotency_key,
+            now=self.now(),
+        )
+
     def publish(self, version_id: str) -> dict[str, object]:
         version = self.store.load_version(version_id)
         if version.publication_status is PublicationStatus.published and self.store.current_head(version.media_id) == version.id:
             return {"version": version, "job": self.store.latest_publication_job(version.id), "reused": True}
         if version.publication_status is PublicationStatus.publishing:
             return {"version": version, "job": self.store.latest_publication_job(version.id), "reused": True}
-        if version.source is not TranscriptSource.automatic or version.profile_id is None:
+        managed_manual = (
+            version.source is TranscriptSource.manual
+            and version.markdown_storage_kind is MarkdownStorageKind.managed_artifact
+            and version.derived_from_version_id is not None
+        )
+        if not managed_manual and (version.source is not TranscriptSource.automatic or version.profile_id is None):
             raise ContractValidationError("manual_publication_not_connected", "version.source")
         index_job_id = str(uuid.uuid4())
         workflow = TranscriptionPersistenceWorkflow(self.store, self.artifacts, _NoIndex())
         workflow.begin_publication(
             version_id=version.id,
             index_job_id=index_job_id,
-            current_profile=self._current_profile(version.profile_id),
+            current_profile=None if managed_manual else self._current_profile(version.profile_id),
             explicit_admin_action=True,
             attempt_number=self.store.next_publication_attempt(version.id),
             now=self.now(),
@@ -208,7 +240,12 @@ class TranscriptionPublicationApplicationService:
             return existing
         if existing.status is PublicationIndexStatus.failed:
             return existing
-        if version.profile_id is None:
+        managed_manual = (
+            version.source is TranscriptSource.manual
+            and version.markdown_storage_kind is MarkdownStorageKind.managed_artifact
+            and version.derived_from_version_id is not None
+        )
+        if version.profile_id is None and not managed_manual:
             self.store.fail_publication_job(
                 index_job_id,
                 error_code="missing_profile_id",
@@ -226,7 +263,7 @@ class TranscriptionPublicationApplicationService:
                 workflow.promote(
                     version_id=version.id,
                     index_job_id=index_job_id,
-                    current_profile=self._current_profile(version.profile_id),
+                    current_profile=None if managed_manual else self._current_profile(version.profile_id),
                     explicit_admin_action=True,
                     now=self.now(),
                 )
@@ -248,12 +285,17 @@ class TranscriptionPublicationApplicationService:
         ):
             return
         job = self.store.latest_publication_job(version_id)
-        if version.profile_id is None or job is None or job["status"] != PublicationIndexStatus.done.value:
+        managed_manual = (
+            version.source is TranscriptSource.manual
+            and version.markdown_storage_kind is MarkdownStorageKind.managed_artifact
+            and version.derived_from_version_id is not None
+        )
+        if (version.profile_id is None and not managed_manual) or job is None or job["status"] != PublicationIndexStatus.done.value:
             return
         TranscriptionPersistenceWorkflow(self.store, self.artifacts, _NoIndex()).promote(
             version_id=version_id,
             index_job_id=str(job["id"]),
-            current_profile=self._current_profile(version.profile_id),
+            current_profile=None if managed_manual else self._current_profile(version.profile_id),
             explicit_admin_action=True,
             now=self.now(),
         )
