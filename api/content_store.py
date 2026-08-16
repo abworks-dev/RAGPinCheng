@@ -436,6 +436,7 @@ def list_content_items(
                    paths.full_path AS category_path,
                    v.id AS version_id,v.version_number,v.original_filename,v.doc_type,
                    v.lifecycle_status,v.object_sha256,v.source_origin,v.source_batch_id,
+                   v.source_rel_path,
                    h.current_version_id,j.status AS latest_publication_status,
                    j.error_code AS latest_publication_error_code,
                    (SELECT count(*) FROM content_index_jobs jc WHERE jc.version_id=v.id)
@@ -471,9 +472,9 @@ def list_content_items_page(
     params: list[object] = []
     normalized = query.strip()
     if normalized:
-        clauses.append("(i.title LIKE ? OR v.original_filename LIKE ? OR paths.full_path LIKE ?)")
+        clauses.append("(i.title LIKE ? OR v.original_filename LIKE ? OR paths.full_path LIKE ? OR v.source_rel_path LIKE ?)")
         pattern = f"%{normalized}%"
-        params.extend([pattern, pattern, pattern])
+        params.extend([pattern, pattern, pattern, pattern])
     if category_id:
         clauses.append("i.category_id=?")
         params.append(category_id)
@@ -516,7 +517,7 @@ def list_content_items_page(
                           i.created_at,i.updated_at,c.category_key,c.display_code,c.display_name,
                           paths.full_path AS category_path,v.id AS version_id,v.version_number,
                           v.original_filename,v.doc_type,v.lifecycle_status,v.object_sha256,
-                          v.source_origin,v.source_batch_id,h.current_version_id,
+                          v.source_origin,v.source_batch_id,v.source_rel_path,h.current_version_id,
                           j.status AS latest_publication_status,
                           j.error_code AS latest_publication_error_code,
                           i.archived_at,archive_user.real_name AS archived_by_name,

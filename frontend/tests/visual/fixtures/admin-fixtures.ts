@@ -64,6 +64,7 @@ export const items = [
 
 const trashItems = [{
   ...items[4],
+  source_rel_path: "公司知识库归档/制度与流程/企业知识库使用规范.md",
   archived_at: 1700000600,
   archived_by_name: "合成资料员",
   pre_archive_lifecycle_status: "published",

@@ -466,6 +466,7 @@ def _content_item_dto(
         object_sha256=row["object_sha256"],
         source_origin=row["source_origin"],
         source_batch_id=row["source_batch_id"],
+        source_rel_path=row["source_rel_path"] if "source_rel_path" in row.keys() else None,
         is_current=row["current_version_id"] == row["version_id"],
         latest_publication_status=row["latest_publication_status"],
         publication_attempt_count=int(row["publication_attempt_count"] or 0),

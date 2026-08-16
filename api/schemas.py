@@ -379,6 +379,7 @@ class ManagedContentItemDTO(BaseModel):
     object_sha256: str | None
     source_origin: str
     source_batch_id: str | None
+    source_rel_path: str | None = None
     is_current: bool
     latest_publication_status: str | None = None
     publication_attempt_count: int = 0

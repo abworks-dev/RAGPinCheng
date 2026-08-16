@@ -135,6 +135,7 @@ const item = {
   object_sha256: "a".repeat(64),
   source_origin: "web",
   source_batch_id: "batch-1",
+  source_rel_path: "项目资料/建模标准/standard.pdf",
   is_current: false,
   latest_publication_status: null,
   publication_attempt_count: 0,
@@ -229,8 +230,11 @@ describe("AdminManagedContentPage", () => {
     });
     render(<AdminManagedContentPage />);
     fireEvent.click(screen.getByRole("tab", { name: "回收站" }));
-    expect(await screen.findByText(/整理员 于/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "恢复" }));
+    expect((await screen.findAllByText("项目资料/建模标准/standard.pdf")).length).toBeGreaterThan(0);
+    expect(screen.getAllByText("03 公司内部标准").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("standard.pdf · v1").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("整理员").length).toBeGreaterThan(0);
+    fireEvent.click(screen.getAllByRole("button", { name: "恢复" })[0]);
     expect(screen.getByRole("dialog")).toHaveTextContent("需要管理员重新发布后才会进入检索");
     fireEvent.click(screen.getByRole("button", { name: "确认恢复" }));
     await waitFor(() => expect(mocks.restoreContent).toHaveBeenCalledWith("item-1", "version-1"));
