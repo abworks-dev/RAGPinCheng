@@ -396,6 +396,7 @@ export async function installAdminRoutes(
       return route.fulfill({ status: 200, contentType: "application/pdf", body: "%PDF synthetic fixture" });
     }
     if (request.method() === "POST" && path === "/api/admin/content/bulk-download") {
+      await new Promise((resolve) => setTimeout(resolve, 300));
       return route.fulfill({
         status: 200,
         contentType: "application/zip",
