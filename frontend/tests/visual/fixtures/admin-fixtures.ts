@@ -1,6 +1,6 @@
 import type { Page, Route } from "@playwright/test";
 
-export type AdminScenario = "normal" | "loading" | "empty" | "error" | "disabled" | "publication_failure";
+export type AdminScenario = "normal" | "loading" | "empty" | "error" | "disabled" | "publication_failure" | "media_progress" | "media_upload";
 export type WorkspaceUser = "admin" | "bim_engineer" | "member";
 
 const admin = {
@@ -425,9 +425,49 @@ export async function installAdminRoutes(
       return json(route, { entries, total: entries.length, page: 1, page_size: 20, counts: { pending: entries.filter((entry) => entry.status === "pending").length, in_progress: 0, resolved: entries.filter((entry) => entry.status === "resolved").length, archived: 0 } });
     }
     if (request.method() === "PATCH" && /^\/api\/admin\/feedback\/[^/]+$/.test(path)) return json(route, feedbackEntries[0]);
-    if (request.method() === "GET" && path === "/api/admin/media") return json(route, scenario === "empty" ? [] : mediaAssets);
+    if (request.method() === "POST" && path === "/api/admin/media" && scenario === "media_upload") {
+      await new Promise((resolve) => setTimeout(resolve, 3_000));
+      return json(route, { ...mediaAssets[2], media_id: "media-uploaded", transcription_job_id: "job-uploaded" });
+    }
+    if (request.method() === "GET" && path === "/api/admin/media") {
+      if (scenario === "empty") return json(route, []);
+      if (scenario === "media_progress") return json(route, [{ ...mediaAssets[2], status: "transcribing" }]);
+      return json(route, mediaAssets);
+    }
     if (request.method() === "GET" && path === "/api/admin/transcription/profiles") return json(route, transcriptionProfiles);
-    if (request.method() === "GET" && path === "/api/admin/transcription/jobs") return json(route, scenario === "empty" ? [] : transcriptionJobs);
+    if (request.method() === "GET" && path === "/api/admin/transcription/jobs") {
+      if (scenario === "empty" || scenario === "media_upload") return json(route, []);
+      if (scenario === "media_progress") {
+        return json(route, [{
+          ...transcriptionJobs[0],
+          job_id: "media-running-job",
+          media_id: "media-ready",
+          status: "running",
+          stage: "transcribing",
+          processed_ms: 0,
+          total_ms: 4_800_000,
+          failure_error_code: null,
+          error_summary: null,
+          failure: null,
+          started_at: Math.floor(Date.now() / 1000) - 125,
+          finished_at: null,
+          updated_at: Math.floor(Date.now() / 1000),
+        }]);
+      }
+      return json(route, transcriptionJobs);
+    }
+    if (request.method() === "GET" && path === "/api/admin/transcription/jobs/job-uploaded") {
+      return json(route, {
+        ...transcriptionJobs[0],
+        job_id: "job-uploaded",
+        media_id: "media-uploaded",
+        status: "pending",
+        stage: null,
+        failure_error_code: null,
+        error_summary: null,
+        failure: null,
+      });
+    }
     if (request.method() === "GET" && /^\/api\/admin\/transcription\/jobs\/[^/]+$/.test(path)) return json(route, transcriptionJobs[0]);
     if (request.method() === "GET" && path === "/api/admin/transcription/media/media-ready/versions") return json(route, transcriptVersions);
     if (request.method() === "GET" && /^\/api\/admin\/transcription\/media\/[^/]+\/versions$/.test(path)) return json(route, []);

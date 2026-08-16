@@ -333,6 +333,55 @@ describe("Phase 4B transcription API contracts", () => {
     expect(form.get("transcript")).toBeNull();
   });
 
+  it("reports multipart transfer progress before server-side preparation", async () => {
+    class FakeXMLHttpRequest {
+      static instance: FakeXMLHttpRequest;
+      upload = {
+        onprogress: null as ((event: ProgressEvent) => void) | null,
+        onload: null as (() => void) | null,
+      };
+      status = 200;
+      statusText = "OK";
+      responseText = JSON.stringify({ media_id: "media-1", transcription_job_id: "job-1" });
+      withCredentials = false;
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      onabort: (() => void) | null = null;
+      open = vi.fn();
+      setRequestHeader = vi.fn();
+      send = vi.fn();
+
+      constructor() {
+        FakeXMLHttpRequest.instance = this;
+      }
+    }
+    vi.stubGlobal("XMLHttpRequest", FakeXMLHttpRequest);
+    setCsrfToken("csrf-asr");
+    const onProgress = vi.fn();
+    const onUploaded = vi.fn();
+    const video = new File(["video"], "training.mp4", { type: "video/mp4" });
+
+    const result = api.uploadAutomaticMediaVideo(
+      video,
+      "培训视频",
+      "profile-1",
+      "11111111-1111-4111-8111-111111111111",
+      { onProgress, onUploaded },
+    );
+    const request = FakeXMLHttpRequest.instance;
+    request.upload.onprogress?.({ lengthComputable: true, loaded: 50, total: 100 } as ProgressEvent);
+    request.upload.onload?.();
+    request.onload?.();
+
+    await expect(result).resolves.toMatchObject({ media_id: "media-1", transcription_job_id: "job-1" });
+    expect(request.open).toHaveBeenCalledWith("POST", "/api/admin/media");
+    expect(request.withCredentials).toBe(true);
+    expect(request.setRequestHeader).toHaveBeenCalledWith("X-CSRF-Token", "csrf-asr");
+    expect(request.send).toHaveBeenCalledWith(expect.any(FormData));
+    expect(onProgress).toHaveBeenCalledWith({ loaded: 50, total: 100, ratio: 0.5 });
+    expect(onUploaded).toHaveBeenCalledOnce();
+  });
+
   it("preserves CSRF protection for cancellation and retry", async () => {
     setCsrfToken("csrf-asr");
     const fetchMock = vi.fn()

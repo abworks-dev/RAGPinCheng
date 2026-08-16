@@ -24,6 +24,67 @@ test.describe("视频媒体", () => {
     await expect(page.getByText("合成加载失败").first()).toBeVisible();
   });
 
+  test("整段转录显示活动状态而不是虚假的零进度", async ({ page }, testInfo) => {
+    await installAdminRoutes(page, "media_progress");
+    await page.goto("/admin/media");
+    const row = page.getByTestId("media-record-row");
+
+    await expect(row.getByText(/模型整段处理中/)).toContainText("视频时长 1小时20分");
+    await expect(row.getByText(/模型整段处理中/)).not.toContainText("0%");
+    await expect(row.getByRole("progressbar", { name: "转录进度：转录中" })).not.toHaveAttribute("aria-valuenow");
+    await expectNoBodyOverflow(page);
+    const viewport = page.viewportSize()!;
+    await page.screenshot({ path: testInfo.outputPath(`transcription-indeterminate-${viewport.width}x${viewport.height}.png`) });
+  });
+
+  test("文件发送完成后明确显示服务端准备阶段", async ({ page }, testInfo) => {
+    await page.addInitScript(() => {
+      class ControlledUploadRequest {
+        upload = {
+          onprogress: null as ((event: ProgressEvent) => void) | null,
+          onload: null as ((event: ProgressEvent) => void) | null,
+        };
+        status = 200;
+        statusText = "OK";
+        responseText = JSON.stringify({ media_id: "media-uploaded", transcription_job_id: "job-uploaded" });
+        withCredentials = false;
+        onload: ((event: ProgressEvent) => void) | null = null;
+        onerror: ((event: ProgressEvent) => void) | null = null;
+        onabort: ((event: ProgressEvent) => void) | null = null;
+
+        open() {}
+        setRequestHeader() {}
+        send() {
+          window.setTimeout(() => this.upload.onprogress?.(new ProgressEvent("progress", {
+            lengthComputable: true,
+            loaded: 100,
+            total: 100,
+          })), 50);
+          window.setTimeout(() => this.upload.onload?.(new ProgressEvent("load")), 100);
+          window.setTimeout(() => this.onload?.(new ProgressEvent("load")), 10_000);
+        }
+      }
+      Object.defineProperty(window, "XMLHttpRequest", { value: ControlledUploadRequest });
+    });
+    await installAdminRoutes(page, "media_upload");
+    await page.goto("/admin/media");
+    await page.getByLabel("选择视频文件").setInputFiles({
+      name: "upload-progress.mp4",
+      mimeType: "video/mp4",
+      buffer: Buffer.alloc(256 * 1024, 1),
+    });
+    await page.getByRole("button", { name: "下一步：选择转写方式" }).click();
+    await page.getByRole("button", { name: /^自动转录/ }).click();
+    await page.getByRole("button", { name: "上传并创建自动转录任务" }).click();
+
+    await expect(page.getByText("文件已上传，正在准备音轨并创建转录任务")).toBeVisible();
+    await expect(page.getByRole("progressbar", { name: "upload-progress.mp4 上传进度" })).not.toHaveAttribute("aria-valuenow");
+    await expect(page.getByText(/服务端处理 1 个/)).toBeVisible();
+    await expectNoBodyOverflow(page);
+    const viewport = page.viewportSize()!;
+    await page.screenshot({ path: testInfo.outputPath(`media-upload-preparing-${viewport.width}x${viewport.height}.png`) });
+  });
+
   test("转写工作台 Markdown 校对布局", async ({ page }, testInfo) => {
     await installAdminRoutes(page);
     await page.goto("/admin/media");

@@ -1,5 +1,5 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AdminMediaPage } from "./AdminMediaPage";
 
 const mocks = vi.hoisted(() => ({
@@ -99,6 +99,10 @@ async function addVideosAndOpenMode(files: File[], mode: "自动转录" | "人�
 }
 
 describe("AdminMediaPage wizard", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     let sequence = 0;
@@ -211,6 +215,32 @@ describe("AdminMediaPage wizard", () => {
     expect(mocks.uploadAutomaticMediaVideo.mock.calls[0][3]).not.toBe(mocks.uploadAutomaticMediaVideo.mock.calls[1][3]);
   });
 
+  it("shows exact file transfer and then a separate server preparation state", async () => {
+    let callbacks: { onProgress: (progress: { loaded: number; total: number; ratio: number }) => void; onUploaded: () => void } | undefined;
+    let finishUpload: ((value: typeof assets[number] & { transcription_job_id: string }) => void) | undefined;
+    mocks.uploadAutomaticMediaVideo.mockImplementation((_file, _title, _profile, _key, nextCallbacks) => {
+      callbacks = nextCallbacks;
+      return new Promise((resolve) => { finishUpload = resolve; });
+    });
+    render(<AdminMediaPage />);
+    await addVideosAndOpenMode([video("progress.mp4")], "自动转录");
+
+    fireEvent.click(screen.getByRole("button", { name: "上传并创建自动转录任务" }));
+    await waitFor(() => expect(callbacks).toBeDefined());
+    act(() => callbacks?.onProgress({ loaded: 50, total: 100, ratio: 0.5 }));
+
+    expect(screen.getByText("正在上传 · 50%")).toBeInTheDocument();
+    expect(screen.getByRole("progressbar", { name: "progress.mp4 上传进度" })).toHaveAttribute("aria-valuenow", "50");
+    expect(screen.getByRole("progressbar", { name: "批量文件传输进度" })).toHaveAttribute("aria-valuenow", "50");
+
+    act(() => callbacks?.onUploaded());
+    expect(screen.getByText("文件已上传，正在准备音轨并创建转录任务")).toBeInTheDocument();
+    expect(screen.getByRole("progressbar", { name: "progress.mp4 上传进度" })).not.toHaveAttribute("aria-valuenow");
+
+    await act(async () => finishUpload?.({ ...assets[0], transcription_job_id: "job-progress" }));
+    await waitFor(() => expect(screen.getByText("已提交")).toBeInTheDocument());
+  });
+
   it("allows each automatic row to override the batch profile", async () => {
     render(<AdminMediaPage />);
     await addVideosAndOpenMode([video("one.mp4"), video("two.mp4")], "自动转录");
@@ -267,6 +297,60 @@ describe("AdminMediaPage wizard", () => {
     fireEvent.click(screen.getByRole("button", { name: "重试" }));
     await waitFor(() => expect(mocks.cancelTranscriptionJob).toHaveBeenCalledWith("job-succeeded"));
     await waitFor(() => expect(mocks.retryTranscription).toHaveBeenCalledWith("media-failed", availableProfile.profile_id, expect.any(String)));
+  });
+
+  it("uses indeterminate progress instead of a false zero percent while the model runs", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(1_000_000);
+    mocks.listTranscriptionJobs.mockResolvedValue([{
+      ...succeededJob,
+      status: "running",
+      stage: "transcribing",
+      processed_ms: 0,
+      total_ms: 600_000,
+      started_at: 900,
+      finished_at: null,
+    }]);
+    render(<AdminMediaPage />);
+
+    const row = await screen.findByTestId("media-record-row");
+    expect(within(row).getByText(/模型整段处理中/)).toHaveTextContent("视频时长 10分0秒");
+    expect(within(row).getByText(/模型整段处理中/)).toHaveTextContent("已耗时 1分40秒");
+    expect(within(row).queryByText(/0%/)).not.toBeInTheDocument();
+    expect(within(row).getByRole("progressbar", { name: "转录进度：转录中" })).not.toHaveAttribute("aria-valuenow");
+  });
+
+  it("does not present an unknown video duration as zero seconds", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(1_000_000);
+    mocks.listTranscriptionJobs.mockResolvedValue([{
+      ...succeededJob,
+      status: "running",
+      stage: "transcribing",
+      processed_ms: 0,
+      total_ms: 0,
+      started_at: 900,
+      finished_at: null,
+    }]);
+    render(<AdminMediaPage />);
+
+    const row = await screen.findByTestId("media-record-row");
+    expect(within(row).getByText(/模型整段处理中/)).toHaveTextContent("正在读取视频时长");
+    expect(within(row).queryByText(/视频时长 0秒/)).not.toBeInTheDocument();
+  });
+
+  it("shows a determinate percentage only when a real checkpoint exists", async () => {
+    mocks.listTranscriptionJobs.mockResolvedValue([{
+      ...succeededJob,
+      status: "running",
+      stage: "transcribing",
+      processed_ms: 300_000,
+      total_ms: 600_000,
+      finished_at: null,
+    }]);
+    render(<AdminMediaPage />);
+
+    const row = await screen.findByTestId("media-record-row");
+    expect(within(row).getByText(/50%/)).toHaveTextContent("5分0秒 / 10分0秒");
+    expect(within(row).getByRole("progressbar", { name: "转录进度：转录中" })).toHaveAttribute("aria-valuenow", "50");
   });
 
   it("offers complete deletion only for a failed upload without a transcription job", async () => {
