@@ -6,7 +6,7 @@
 
 - `login-*.png`、`register-*.png` 是早期匿名页面诊断截图，不属于 Playwright golden。
 - 资料管理 Windows golden 覆盖正常列表、批量操作菜单和移入回收站确认三种状态，并在 `1440x900`、`1280x720`、`768x1024`、`390x844` 四个 viewport 下人工检查目录上下文、单项与批量操作、弹窗内容、遮挡和横向溢出，属于 accepted golden。分类设置截图沿用独立维护的 accepted golden。
-- 对应的资料管理 Linux golden 由 GitHub Actions `31940638528` 的 Ubuntu Chromium 实际截图生成，并按相同状态和 viewport 逐张检查后接受；未复制 Windows 图片。
+- 对应的资料管理 Linux golden 最近由 GitHub Actions `31944068300` 的 Ubuntu Chromium 实际截图生成，并按相同状态和 viewport 逐张检查后接受；未复制 Windows 图片。
 - 索引任务保存整页和资料库发布任务区域两组 Windows golden；合成数据覆盖长文件名、处理中、已发布、发布失败、来源、内容块和结构化失败原因，并按相同四个 viewport 检查桌面表格与窄屏对象列表。Linux 继续执行结构与布局检查，但新增精确像素基线须在 Linux Chromium 上人工接受后启用，不得复制 Windows 图片。
 - Playwright golden 按 `<platform>/<project>/<spec>/<页面>-<状态>-<宽>x<高>.png` 保存。Windows 与 Linux 使用各自人工审查的精确像素基线，不使用跨平台容差。
 
