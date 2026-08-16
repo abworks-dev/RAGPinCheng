@@ -92,7 +92,40 @@ export type AuthUser = {
   content_permissions?: ContentPermission[];
 };
 
-export type ContentPermission = "organize" | "review" | "publish" | "manage_categories" | "import_server";
+export type ContentPermission =
+  | "workspace.view"
+  | "item.view"
+  | "item.download"
+  | "category.view"
+  | "item.upload"
+  | "item.submit"
+  | "item.move_draft"
+  | "item.archive_draft"
+  | "item.review"
+  | "item.move_review"
+  | "item.publish"
+  | "item.archive_published"
+  | "trash.view"
+  | "trash.restore"
+  | "category.manage"
+  | "folder.request"
+  | "folder.review"
+  | "import.server"
+  | "index.view";
+
+export type ContentPermissionDefinition = {
+  key: ContentPermission;
+  domain: string;
+  domain_label: string;
+  label: string;
+  description: string;
+  dependencies: ContentPermission[];
+};
+
+export type ContentPermissionCatalog = {
+  schema_version: number;
+  permissions: ContentPermissionDefinition[];
+};
 
 export type Conversation = {
   id: string;
@@ -279,6 +312,7 @@ export type ManagedContentItem = {
   source_origin: string;
   source_batch_id: string | null;
   is_current: boolean;
+  has_published_head: boolean;
   latest_publication_status: string | null;
   publication_attempt_count: number;
   publication_failure: PublicationFailure | null;
@@ -318,6 +352,7 @@ export type FolderRequest = {
 
 export type BulkManagedContentResult = {
   version_id: string;
+  item_id?: string | null;
   status: "succeeded" | "failed";
   message: string | null;
   index_job_id: string | null;
@@ -528,6 +563,7 @@ export type TranscriptVersion = {
   provider_key: string | null;
   model_id: string | null;
   model_revision: string | null;
+  markdown_storage_kind: "managed_artifact" | "legacy_manual" | string;
   review_status: TranscriptReviewStatus;
   reviewed_by: number | null;
   reviewed_at: number | null;
@@ -535,6 +571,8 @@ export type TranscriptVersion = {
   publication_status: TranscriptPublicationStatus;
   published_at: number | null;
   supersedes_version_id: string | null;
+  derived_from_version_id: string | null;
+  edited_by: number | null;
   markdown_sha256: string;
   created_at: number;
   updated_at: number;

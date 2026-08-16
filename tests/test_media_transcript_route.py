@@ -139,6 +139,48 @@ def test_canonical_hash_mismatch_is_integrity_error(tmp_path, monkeypatch):
     assert exc.value.status_code == 409
 
 
+def test_published_managed_manual_revision_returns_edited_segments(tmp_path, monkeypatch):
+    db_path = _connection(tmp_path)
+    artifact_root = tmp_path / "artifacts"
+    markdown = "# 校对稿\n\n说话人 1 00:00:03\n修订后的第一段\n\n说话人 2 00:00:08\n第二段\n"
+    content = markdown.encode("utf-8")
+    digest = hashlib.sha256(content).hexdigest()
+    relative = f"markdown/{digest[:2]}/{digest}.md"
+    artifact = artifact_root / relative
+    artifact.parent.mkdir(parents=True)
+    artifact.write_bytes(content)
+    media_id = str(uuid.uuid4())
+    version_id = str(uuid.uuid4())
+    conn = sqlite3.connect(db_path)
+    conn.execute("INSERT INTO media_assets VALUES (?,?,NULL)", (media_id, "ready"))
+    conn.execute(
+        "INSERT INTO transcript_versions VALUES (?,?,?,?,?,?,?,?,?,?)",
+        (
+            version_id,
+            media_id,
+            "manual",
+            None,
+            None,
+            "managed_artifact",
+            relative,
+            digest,
+            len(content),
+            "published",
+        ),
+    )
+    conn.execute("INSERT INTO media_transcript_heads VALUES (?,?)", (media_id, version_id))
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(routes_media_transcript, "TRANSCRIPTION_ARTIFACT_DIR", artifact_root)
+    monkeypatch.setattr(routes_media_transcript, "db_connect", lambda: _open_rows(db_path))
+
+    result = routes_media_transcript.get_media_transcript(media_id, 1)
+
+    assert result.version_id == version_id
+    assert [segment.start_ms for segment in result.segments] == [3000, 8000]
+    assert result.segments[0].text == "修订后的第一段"
+
+
 def _open_rows(path):
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row

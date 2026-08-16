@@ -46,6 +46,11 @@ def test_management_reads_require_admin_and_mutations_require_csrf_admin():
     retry = route_for(
         transcription_router, "/admin/transcription/media/{media_id}/retry", "POST"
     )
+    revision = route_for(
+        transcription_router,
+        "/admin/transcription/versions/{base_version_id}/revisions",
+        "POST",
+    )
     upload = route_for(admin_router, "/admin/media", "POST")
     delete = route_for(admin_router, "/admin/media/{media_id}", "DELETE")
     assert require_admin in dependency_calls(profiles)
@@ -53,6 +58,7 @@ def test_management_reads_require_admin_and_mutations_require_csrf_admin():
     assert require_admin in dependency_calls(detail)
     assert require_csrf_admin in dependency_calls(cancel)
     assert require_csrf_admin in dependency_calls(retry)
+    assert require_csrf_admin in dependency_calls(revision)
     assert require_csrf_admin in dependency_calls(upload)
     assert require_csrf_admin in dependency_calls(delete)
 

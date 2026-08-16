@@ -9,9 +9,13 @@ from types import SimpleNamespace
 import pytest
 
 from api.content_permissions import has_content_permission
+from api.content_permission_catalog import (
+    LEGACY_CONTENT_PERMISSION_MAP,
+    SYSTEM_CONTENT_PERMISSION_GROUPS,
+)
 from api.content_import import import_server_batch, resolve_import_category
 from api.content_storage import ContentStorage, StoredContentObject
-from api.content_store import archive_content_item, create_category, create_web_batch, register_uploaded_document, restore_content_item
+from api.content_store import archive_content_item, create_category, create_content_revision, create_web_batch, list_categories, move_content_item, register_uploaded_document, restore_content_item
 from api.content_store import (
     create_publication_job,
     review_version,
@@ -65,11 +69,10 @@ def test_migration_seeds_permission_group_templates(tmp_path):
     groups = routes_content.list_permission_groups(
         CurrentUser(999, "admin", "管理员", "admin", "csrf"), conn
     )
+    expected_order = ["member", "viewer", "bim_engineer", "content_owner", "publisher", "category_admin", "system_admin"]
     assert [(group.group_key, group.display_name, group.permissions) for group in groups] == [
-        ("member", "普通成员", []),
-        ("bim_engineer", "BIM工程师", ["organize"]),
-        ("content_owner", "资料负责人", ["review"]),
-        ("system_admin", "系统管理员", ["import_server", "manage_categories", "organize", "publish", "review"]),
+        (key, SYSTEM_CONTENT_PERMISSION_GROUPS[key][0], sorted(SYSTEM_CONTENT_PERMISSION_GROUPS[key][1]))
+        for key in expected_order
     ]
     conn.close()
 
@@ -79,19 +82,25 @@ def test_custom_permission_group_is_a_template_not_a_user_binding(tmp_path, monk
     monkeypatch.setattr(routes_content, "CONTENT_MANAGEMENT_ENABLED", True)
     actor = CurrentUser(999, "admin", "管理员", "admin", "csrf")
     created = routes_content.create_permission_group(
-        CreateContentPermissionGroupRequest(display_name="项目发布员", permissions=["publish"]), actor, conn
+        CreateContentPermissionGroupRequest(
+            display_name="项目发布员",
+            permissions=sorted(LEGACY_CONTENT_PERMISSION_MAP["publish"]),
+        ), actor, conn
     )
     user_id = conn.execute("SELECT id FROM users WHERE employee_id='u1'").fetchone()[0]
     routes_content.put_content_permissions(
         user_id, UpdateContentPermissionsRequest(permissions=created.permissions), actor, conn
     )
     routes_content.update_permission_group(
-        created.id, UpdateContentPermissionGroupRequest(permissions=["review"]), actor, conn
+        created.id,
+        UpdateContentPermissionGroupRequest(permissions=sorted(LEGACY_CONTENT_PERMISSION_MAP["review"])),
+        actor,
+        conn,
     )
     actual = [row[0] for row in conn.execute(
         "SELECT permission FROM content_permissions WHERE user_id=?", (user_id,)
     )]
-    assert actual == ["publish"]
+    assert actual == sorted(LEGACY_CONTENT_PERMISSION_MAP["publish"])
     conn.close()
 
 
@@ -100,13 +109,13 @@ def test_content_permission_is_additive_and_admin_has_fallback(tmp_path):
     user_id = conn.execute("SELECT id FROM users WHERE employee_id='u1'").fetchone()[0]
     user = SimpleNamespace(id=user_id, role="user")
     admin = SimpleNamespace(id=999, role="admin")
-    assert has_content_permission(conn, user, "organize") is False
+    assert has_content_permission(conn, user, "item.upload") is False
     conn.execute(
-        "INSERT INTO content_permissions(user_id,permission,created_at) VALUES (?,'organize',1)",
+        "INSERT INTO content_permissions(user_id,permission,created_at) VALUES (?,'item.upload',1)",
         (user_id,),
     )
-    assert has_content_permission(conn, user, "organize") is True
-    assert has_content_permission(conn, admin, "publish") is True
+    assert has_content_permission(conn, user, "item.upload") is True
+    assert has_content_permission(conn, admin, "item.publish") is True
     conn.close()
 
 
@@ -115,16 +124,19 @@ def test_admin_can_assign_scoped_content_permissions(tmp_path, monkeypatch):
     user_id = conn.execute("SELECT id FROM users WHERE employee_id='u1'").fetchone()[0]
     monkeypatch.setattr(routes_content, "CONTENT_MANAGEMENT_ENABLED", True)
     actor = CurrentUser(999, "admin", "管理员", "admin", "csrf")
+    requested = sorted(
+        LEGACY_CONTENT_PERMISSION_MAP["organize"] | LEGACY_CONTENT_PERMISSION_MAP["review"]
+    )
     result = routes_content.put_content_permissions(
         user_id,
-        UpdateContentPermissionsRequest(permissions=["organize", "review"]),
+        UpdateContentPermissionsRequest(permissions=requested),
         actor,
         conn,
     )
-    assert result.permissions == ["organize", "review"]
+    assert result.permissions == requested
     user = SimpleNamespace(id=user_id, role="user")
-    assert has_content_permission(conn, user, "review") is True
-    assert has_content_permission(conn, user, "publish") is False
+    assert has_content_permission(conn, user, "item.review") is True
+    assert has_content_permission(conn, user, "item.publish") is False
     conn.close()
 
 
@@ -153,6 +165,36 @@ def test_category_depth_is_limited_to_four(tmp_path):
             sort_order=5,
             actor_user_id=actor,
         )
+    conn.close()
+
+
+def test_category_listing_is_depth_first_with_stable_sibling_order(tmp_path):
+    conn = _db(tmp_path)
+    rows = [
+        ("cat-sort-first", "sort_first", "cat-03", "01", "第一项", 5, 2),
+        ("cat-sort-grandchild", "sort_grandchild", "cat-sort-first", "01", "子项", 1, 3),
+        ("cat-sort-code-02", "sort_code_02", "cat-03", "02", "第二项", 10, 2),
+        ("cat-sort-code-03", "sort_code_03", "cat-03", "03", "第三项", 10, 2),
+        ("cat-sort-code", "sort_code", "cat-03", "10", "编号靠后", 10, 2),
+    ]
+    conn.executemany(
+        """INSERT INTO category_nodes
+           (id,category_key,parent_id,display_code,display_name,sort_order,level,is_active,created_at,updated_at)
+           VALUES (?,?,?,?,?,?,?,1,1,1)""",
+        rows,
+    )
+    conn.commit()
+
+    inserted_ids = {row[0] for row in rows}
+    actual = [row["id"] for row in list_categories(conn) if row["id"] in inserted_ids]
+
+    assert actual == [
+        "cat-sort-first",
+        "cat-sort-grandchild",
+        "cat-sort-code-02",
+        "cat-sort-code-03",
+        "cat-sort-code",
+    ]
     conn.close()
 
 
@@ -193,6 +235,91 @@ def test_same_object_can_back_independent_content_items(tmp_path):
     assert first.item_id != second.item_id
     assert conn.execute("SELECT count(*) FROM content_objects").fetchone()[0] == 1
     assert conn.execute("SELECT count(*) FROM content_items").fetchone()[0] == 2
+    conn.close()
+
+
+def test_revision_keeps_published_head_until_the_new_version_is_promoted(tmp_path):
+    conn = _db(tmp_path)
+    actor = conn.execute("SELECT id FROM users WHERE employee_id='u1'").fetchone()[0]
+    batch = create_web_batch(conn, actor_user_id=actor)
+    payload = b"published-content"
+    digest = hashlib.sha256(payload).hexdigest()
+    stored = StoredContentObject(
+        sha256=digest,
+        size_bytes=len(payload),
+        mime_type="application/pdf",
+        storage_rel_path=f"objects/sha256/{digest[:2]}/{digest}",
+        absolute_path=tmp_path / digest,
+        created=True,
+    )
+    uploaded = register_uploaded_document(
+        conn,
+        batch_id=batch,
+        category_id="cat-03",
+        title="已发布资料",
+        original_filename="published.pdf",
+        doc_type="pdf",
+        stored=stored,
+        actor_user_id=actor,
+    )
+    conn.execute(
+        "UPDATE content_versions SET lifecycle_status='published' WHERE id=?",
+        (uploaded.version_id,),
+    )
+    conn.execute(
+        """INSERT INTO content_publications
+           (id,version_id,status,publisher_id,created_at,updated_at,published_at)
+           VALUES ('publication-head',?,'published',?,1,1,1)""",
+        (uploaded.version_id, actor),
+    )
+    conn.execute(
+        """INSERT INTO content_item_heads(item_id,current_version_id,publication_id,updated_at)
+           VALUES (?,?,'publication-head',1)""",
+        (uploaded.item_id, uploaded.version_id),
+    )
+    conn.commit()
+
+    revised = create_content_revision(
+        conn,
+        uploaded.item_id,
+        expected_version_id=uploaded.version_id,
+        title="重命名后的资料",
+        original_filename="renamed.pdf",
+        actor_user_id=actor,
+        can_revise=True,
+        can_archive_draft=True,
+        can_archive_published=False,
+    )
+
+    assert conn.execute(
+        "SELECT current_version_id FROM content_item_heads WHERE item_id=?",
+        (uploaded.item_id,),
+    ).fetchone()[0] == uploaded.version_id
+    assert conn.execute(
+        "SELECT lifecycle_status FROM content_versions WHERE id=?", (uploaded.version_id,)
+    ).fetchone()[0] == "published"
+    assert conn.execute(
+        "SELECT lifecycle_status FROM content_versions WHERE id=?", (revised.version_id,)
+    ).fetchone()[0] == "draft"
+    with pytest.raises(ValueError, match="content_delete_forbidden"):
+        archive_content_item(
+            conn,
+            uploaded.item_id,
+            expected_version_id=revised.version_id,
+            actor_user_id=actor,
+            can_archive_draft=True,
+            can_archive_published=False,
+        )
+    with pytest.raises(ValueError, match="content_move_requires_republication"):
+        move_content_item(
+            conn,
+            uploaded.item_id,
+            target_category_id="cat-04",
+            expected_version_id=revised.version_id,
+            actor_user_id=actor,
+            can_move_draft=True,
+            can_move_review=False,
+        )
     conn.close()
 
 
@@ -341,8 +468,8 @@ def test_archiving_published_content_withdraws_head_but_preserves_history_and_ob
         uploaded.item_id,
         expected_version_id=uploaded.version_id,
         actor_user_id=actor,
-        can_organize=False,
-        can_publish=True,
+        can_archive_draft=False,
+        can_archive_published=True,
     )
     assert result.publication_withdrawn is True
     assert conn.execute("SELECT count(*) FROM content_item_heads").fetchone()[0] == 0

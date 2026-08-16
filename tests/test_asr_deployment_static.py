@@ -546,7 +546,9 @@ def test_backend_image_installs_and_deployment_verifies_ffmpeg_tools():
     assert "compose exec -T backend sh -lc" in deploy
     assert "command -v ffmpeg" in deploy
     assert "command -v ffprobe" in deploy
-    assert deploy.index("compose up -d --no-deps backend") < deploy.index(media_check)
+    assert deploy.index("compose up -d --no-deps --force-recreate backend") < deploy.index(
+        media_check
+    )
     assert deploy.index(media_check) < deploy.index("Waiting for backend health check")
 
 def test_dependency_proxy_is_scoped_to_dependency_preparation_and_restored():
@@ -2208,6 +2210,12 @@ def test_whisperx_candidate_requires_two_qualification_identities_and_stays_inac
     assert "Get-QualifiedWhisperXNltkRoot" in evidence
     assert "tokenizers/punkt_tab/english" in evidence
     assert "NltkRoot" in evidence
+    real_file_guard = evidence.split("function Assert-WhisperXRealFile", 1)[1].split(
+        "function Get-QualifiedWhisperXNltkRoot", 1
+    )[0]
+    assert "PathType Leaf" in real_file_guard
+    assert "ReparsePoint" in real_file_guard
+    assert "Length" not in real_file_guard
     assert "[string]$file.Name -eq $expectedName" in evidence
     assert "production_services_modified -ne $false" in evidence
     assert "Register-ScheduledTask" not in evidence

@@ -18,14 +18,14 @@ for (const [navigationLabel, heading, slug] of [["资料管理", "资料管理",
       await expect(mobileNavigation).toBeVisible();
       await mobileNavigation.click();
     }
-    await page.getByRole("button", { name: navigationLabel, exact: true }).click();
+    await page.getByRole("link", { name: navigationLabel, exact: true }).click();
     await expect(page.getByRole("heading", { name: heading })).toBeVisible();
     const viewport = page.viewportSize()!;
     await expect(page).toHaveScreenshot(`${slug}-normal-${viewport.width}x${viewport.height}.png`, { fullPage: true });
   });
 }
 
-test("管理概览生产运行状态 accepted golden", async ({ page }) => {
+test("系统概览生产运行状态 accepted golden", async ({ page }) => {
   await installAdminRoutes(page, "normal");
   await page.goto("/admin");
   await expect(page.getByRole("heading", { name: "生产运行状态" })).toBeVisible();
@@ -39,20 +39,22 @@ test("管理概览生产运行状态 accepted golden", async ({ page }) => {
   }
 });
 
-test("资料管理批量选择 accepted golden", async ({ page }) => {
+test("资料管理批量操作 accepted golden", async ({ page }) => {
   await installAdminRoutes(page, "normal");
   await page.goto("/admin");
   if (page.viewportSize()!.width < 1024) {
     await page.getByRole("button", { name: "展开管理功能" }).click();
   }
-  await page.getByRole("button", { name: "资料管理", exact: true }).click();
+  await page.getByRole("link", { name: "资料管理", exact: true }).click();
   await openRootFolder(page);
   const itemCheckbox = page.viewportSize()!.width < 1024
     ? page.locator("li").getByRole("checkbox", { name: "选择机电专业协同检查清单" })
     : page.getByRole("table").getByRole("checkbox", { name: "选择机电专业协同检查清单" });
   await itemCheckbox.check();
-  await expect(page.getByText(/已选择\s*1\s*份/)).toBeVisible();
-  await page.getByTestId("managed-bulk-toolbar").scrollIntoViewIfNeeded();
+  await page.getByRole("checkbox", { name: "选择建筑信息模型交付标准（合成长文件名用于响应式检查）" }).check();
+  await expect(page.getByText(/已选择\s*2\s*份/)).toBeVisible();
+  await page.getByRole("button", { name: "批量操作" }).click();
+  await expect(page.getByRole("menu", { name: "批量操作" })).toBeVisible();
   const viewport = page.viewportSize()!;
   await expect(page).toHaveScreenshot(`managed-content-selected-${viewport.width}x${viewport.height}.png`, {
     maxDiffPixels: viewport.width === 1280 ? 100 : 0,
@@ -65,12 +67,12 @@ test("资料管理移入回收站确认 accepted golden", async ({ page }) => {
   if (page.viewportSize()!.width < 1024) {
     await page.getByRole("button", { name: "展开管理功能" }).click();
   }
-  await page.getByRole("button", { name: "资料管理", exact: true }).click();
+  await page.getByRole("link", { name: "资料管理", exact: true }).click();
   await openRootFolder(page);
   const title = page.getByText("建筑信息模型交付标准（合成长文件名用于响应式检查）", { exact: true }).filter({ visible: true });
   const item = page.viewportSize()!.width < 1024 ? title.locator("xpath=ancestor::li") : title.locator("xpath=ancestor::tr");
-  await item.getByRole("button", { name: "移至回收站", exact: true }).click();
-  await expect(page.getByRole("dialog", { name: "移至回收站" })).toBeVisible();
+  await item.getByRole("button", { name: `删除“建筑信息模型交付标准（合成长文件名用于响应式检查）”`, exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "将资料移入回收站？" })).toBeVisible();
   const viewport = page.viewportSize()!;
   await expect(page).toHaveScreenshot(`managed-content-delete-confirm-${viewport.width}x${viewport.height}.png`);
 });
@@ -82,7 +84,7 @@ test("索引任务区域 accepted golden", async ({ page }) => {
   if (page.viewportSize()!.width < 1024) {
     await page.getByRole("button", { name: "展开管理功能" }).click();
   }
-  await page.getByRole("button", { name: "索引任务", exact: true }).click();
+  await page.getByRole("link", { name: "索引任务", exact: true }).click();
   const managedActivity = page.locator('[aria-labelledby="managed-index-title"]');
   await expect(page.getByText("文档解析服务请求失败。", { exact: true })).toBeVisible();
   const viewport = page.viewportSize()!;

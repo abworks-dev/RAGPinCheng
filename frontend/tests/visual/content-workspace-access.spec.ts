@@ -22,9 +22,9 @@ test.describe("资料成员工作台入口", () => {
     if (page.viewportSize()!.width < 1024) {
       await page.getByRole("button", { name: "展开管理功能" }).click();
     }
-    await expect(page.getByRole("button", { name: "资料管理", exact: true })).toBeVisible();
-    await expect(page.getByRole("button", { name: "用户管理", exact: true })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "分类管理", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "资料管理", exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: "用户管理", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "分类管理", exact: true })).toHaveCount(0);
     await expectNoBodyOverflow(page);
   });
 
@@ -37,7 +37,7 @@ test.describe("资料成员工作台入口", () => {
   });
 
   test("撤权后菜单立即移除入口且直接访问不闪现工作台", async ({ page }) => {
-    let permissions = ["organize"];
+    let permissions = ["workspace.view", "item.view"];
     await installAdminRoutes(page, "normal", "bim_engineer", () => ({
       id: 9002,
       employee_id: "TEST-EDITOR",

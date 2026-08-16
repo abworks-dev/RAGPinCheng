@@ -1,19 +1,19 @@
 import { useEffect, useState } from "react";
 import { ArrowRight } from "lucide-react";
-import { api } from "../../api/client";
+import { adminOverviewApi } from "../../api/admin/overview";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
-import { Card, CardContent } from "../../components/ui/card";
+import { Card } from "../../components/ui/card";
 import { ErrorState } from "../../components/ui/error-state";
 import { LoadingState } from "../../components/ui/loading-state";
 import type { AdminStats, MaintenanceStatus, SystemOverview } from "../../types";
-import { formatAdminDate } from "./admin-formatters";
+import { formatAdminDate } from "../../lib/admin-formatters";
 import { ProductionRuntimeStatus } from "./ProductionRuntimeStatus";
 
 const pageHeading = (
   <div>
     <p className="text-ui-xs font-medium text-primary">总览</p>
-    <h1 className="mt-1 text-ui-2xl font-semibold tracking-tight text-foreground">管理概览</h1>
+    <h1 className="mt-1 text-ui-2xl font-semibold tracking-tight text-foreground">系统概览</h1>
     <p className="mt-2 max-w-2xl text-ui-sm text-muted-foreground">
       查看用户、对话和消息的整体情况。
     </p>
@@ -40,14 +40,14 @@ export function AdminOverviewPage({ onOpenMaintenance }: AdminOverviewPageProps)
   useEffect(() => {
     (async () => {
       try {
-        setStats(await api.adminStats());
+        setStats(await adminOverviewApi.stats());
       } catch (e: any) {
         setError(e?.message || String(e));
       }
     })();
     (async () => {
       try {
-        setMaintenance(await api.adminMaintenance());
+        setMaintenance(await adminOverviewApi.maintenance());
       } catch (e: any) {
         setMaintenanceError(e?.message || String(e));
       }
@@ -59,7 +59,7 @@ export function AdminOverviewPage({ onOpenMaintenance }: AdminOverviewPageProps)
     setRuntimeLoading(true);
     setRuntimeError(null);
     try {
-      setRuntime(await api.adminSystemOverview());
+      setRuntime(await adminOverviewApi.systemOverview());
     } catch (e: any) {
       setRuntimeError(e?.message || String(e));
     } finally {
@@ -71,7 +71,7 @@ export function AdminOverviewPage({ onOpenMaintenance }: AdminOverviewPageProps)
     return (
       <div className="space-y-6">
         {pageHeading}
-        <ErrorState title="概览加载失败" description={error} className="bg-card" />
+        <ErrorState title="系统概览加载失败" description={error} className="bg-card" />
       </div>
     );
   }
@@ -81,7 +81,7 @@ export function AdminOverviewPage({ onOpenMaintenance }: AdminOverviewPageProps)
       <div className="space-y-6">
         {pageHeading}
         <Card className="shadow-surface">
-          <LoadingState className="min-h-48" label="正在加载管理概览…" />
+          <LoadingState className="min-h-48" label="正在加载系统概览…" />
         </Card>
       </div>
     );
@@ -107,18 +107,15 @@ export function AdminOverviewPage({ onOpenMaintenance }: AdminOverviewPageProps)
           </h2>
           <span className="text-ui-xs text-muted-foreground">当前数据</span>
         </div>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <dl className="grid grid-cols-1 overflow-hidden rounded-ui-xl border border-border bg-card divide-y divide-border sm:grid-cols-2 sm:divide-x sm:divide-y-0 xl:grid-cols-3 xl:divide-y">
           {cards.map(([label, value, hint]) => (
-            <Card key={label} className="overflow-hidden shadow-surface">
-              <CardContent className="relative p-5 pt-5">
-                <span className="absolute inset-x-0 top-0 h-1 bg-primary/80" aria-hidden="true" />
-                <div className="text-ui-xs font-medium text-muted-foreground">{label}</div>
-                <div className="mt-2 text-ui-2xl font-semibold tabular-nums text-card-foreground">{value}</div>
-                {hint && <div className="mt-2 text-ui-xs text-muted-foreground">{hint}</div>}
-              </CardContent>
-            </Card>
+            <div key={label} className="min-w-0 p-4 sm:p-5">
+              <dt className="text-ui-xs font-medium text-muted-foreground">{label}</dt>
+              <dd className="mt-1 text-ui-xl font-semibold tabular-nums text-card-foreground">{value}</dd>
+              {hint && <dd className="mt-1 text-ui-xs text-muted-foreground">{hint}</dd>}
+            </div>
           ))}
-        </div>
+        </dl>
       </section>
 
       <ProductionRuntimeStatus

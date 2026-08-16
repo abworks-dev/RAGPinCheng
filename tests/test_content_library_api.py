@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import io
 import sqlite3
 import time
+import zipfile
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -10,6 +12,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from api import routes_content
+from api.content_permission_catalog import LEGACY_CONTENT_PERMISSION_MAP
 from api.content_storage import ContentStorage
 from api.db import connect, get_db, init_db
 
@@ -45,17 +48,17 @@ def content_api(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
             (sid, user_id, csrf, now, now + 3600),
         )
         sessions[employee_id] = (sid, csrf)
-        permission = {
-            "organizer": "organize",
-            "reviewer": "review",
-            "publisher": "publish",
-            "importer": "import_server",
-            "category_manager": "manage_categories",
+        permissions = {
+            "organizer": LEGACY_CONTENT_PERMISSION_MAP["organize"],
+            "reviewer": LEGACY_CONTENT_PERMISSION_MAP["review"],
+            "publisher": LEGACY_CONTENT_PERMISSION_MAP["publish"],
+            "importer": LEGACY_CONTENT_PERMISSION_MAP["import_server"],
+            "category_manager": LEGACY_CONTENT_PERMISSION_MAP["manage_categories"],
         }.get(employee_id)
-        if permission:
-            conn.execute(
+        if permissions:
+            conn.executemany(
                 "INSERT INTO content_permissions(user_id,permission,created_at) VALUES (?,?,?)",
-                (user_id, permission, now),
+                [(user_id, permission, now) for permission in sorted(permissions)],
             )
     conn.commit()
     conn.close()
@@ -144,6 +147,111 @@ def test_content_endpoints_enforce_auth_permissions_csrf_and_role_separation(con
     )
     assert published.status_code == 200
     assert queued == [published.json()["index_job_id"]]
+
+
+def test_download_permission_separates_preview_attachment_and_batch_download(content_api, monkeypatch):
+    client, sessions, _queued, db_path = content_api
+    uploaded = client.post(
+        "/api/admin/content/uploads",
+        data={"category_id": "cat-03"},
+        files=[("files", ("shared.pdf", b"pdf-one", "application/pdf"))],
+        **_auth(sessions, "organizer", csrf=True),
+    ).json()["entries"][0]
+
+    conn = connect(db_path)
+    organizer_id = conn.execute("SELECT id FROM users WHERE employee_id='organizer'").fetchone()[0]
+    conn.execute(
+        "DELETE FROM content_permissions WHERE user_id=? AND permission='item.download'",
+        (organizer_id,),
+    )
+    conn.commit()
+    conn.close()
+
+    inline = client.get(
+        f"/api/admin/content/versions/{uploaded['version_id']}/file",
+        **_auth(sessions, "organizer"),
+    )
+    assert inline.status_code == 200
+    assert inline.headers["content-disposition"].startswith("inline;")
+    assert client.get(
+        f"/api/admin/content/versions/{uploaded['version_id']}/file?download=true",
+        **_auth(sessions, "organizer"),
+    ).status_code == 403
+
+    markdown = client.post(
+        "/api/admin/content/uploads",
+        data={"category_id": "cat-03"},
+        files=[("files", ("notes.md", b"# notes", "text/markdown"))],
+        **_auth(sessions, "organizer", csrf=True),
+    ).json()["entries"][0]
+    assert client.get(
+        f"/api/admin/content/versions/{markdown['version_id']}/file",
+        **_auth(sessions, "organizer"),
+    ).status_code == 403
+    assert client.post(
+        "/api/admin/content/bulk-download",
+        json={"version_ids": [uploaded["version_id"]]},
+        **_auth(sessions, "organizer", csrf=True),
+    ).status_code == 403
+
+    conn = connect(db_path)
+    conn.execute(
+        "INSERT INTO content_permissions(user_id,permission,created_at) VALUES (?, 'item.download', 1)",
+        (organizer_id,),
+    )
+    conn.commit()
+    conn.close()
+    second = client.post(
+        "/api/admin/content/uploads",
+        data={"category_id": "cat-04"},
+        files=[("files", ("shared.pdf", b"pdf-two", "application/pdf"))],
+        **_auth(sessions, "organizer", csrf=True),
+    ).json()["entries"][0]
+
+    captured: list[Path] = []
+    real_create_archive = routes_content._create_bulk_download_archive
+
+    def capture_archive(entries):
+        path = real_create_archive(entries)
+        captured.append(path)
+        return path
+
+    monkeypatch.setattr(routes_content, "_create_bulk_download_archive", capture_archive)
+    batch = client.post(
+        "/api/admin/content/bulk-download",
+        json={"version_ids": [uploaded["version_id"], second["version_id"]]},
+        **_auth(sessions, "organizer", csrf=True),
+    )
+    assert batch.status_code == 200
+    assert batch.headers["content-type"].startswith("application/zip")
+    with zipfile.ZipFile(io.BytesIO(batch.content)) as archive:
+        assert archive.namelist() == ["shared.pdf", "shared (2).pdf"]
+        assert archive.read("shared.pdf") == b"pdf-one"
+        assert archive.read("shared (2).pdf") == b"pdf-two"
+    assert captured and all(not path.exists() for path in captured)
+
+    assert client.post(
+        "/api/admin/content/bulk-download",
+        json={"version_ids": [uploaded["version_id"], uploaded["version_id"]]},
+        **_auth(sessions, "organizer", csrf=True),
+    ).status_code == 400
+    assert client.post(
+        "/api/admin/content/bulk-download",
+        json={"version_ids": [uploaded["version_id"], "missing-version"]},
+        **_auth(sessions, "organizer", csrf=True),
+    ).status_code == 404
+    assert client.post(
+        "/api/admin/content/bulk-download",
+        json={"version_ids": [f"version-{index}" for index in range(21)]},
+        **_auth(sessions, "organizer", csrf=True),
+    ).status_code == 422
+
+    monkeypatch.setattr(routes_content, "_MAX_BULK_DOWNLOAD_BYTES", 1)
+    assert client.post(
+        "/api/admin/content/bulk-download",
+        json={"version_ids": [uploaded["version_id"]]},
+        **_auth(sessions, "organizer", csrf=True),
+    ).status_code == 413
 
 
 def test_delete_draft_requires_organize_csrf_and_preserves_object(content_api):
@@ -285,6 +393,33 @@ def test_folder_request_requires_organize_csrf_and_reviewer_creates_category(con
         conn.close()
 
 
+def test_category_manager_can_review_folder_request(content_api):
+    client, sessions, _queued, _db_path = content_api
+    created = client.post(
+        "/api/admin/content/folder-requests",
+        json={"parent_category_id": "cat-04", "display_name": "分类管理员审批"},
+        **_auth(sessions, "organizer", csrf=True),
+    )
+    assert created.status_code == 200
+    request_id = created.json()["id"]
+
+    pending = client.get(
+        "/api/admin/content/folder-requests?status=pending",
+        **_auth(sessions, "category_manager"),
+    )
+    assert pending.status_code == 200
+    assert [entry["id"] for entry in pending.json()] == [request_id]
+
+    approved = client.post(
+        f"/api/admin/content/folder-requests/{request_id}/review",
+        json={"approved": True},
+        **_auth(sessions, "category_manager", csrf=True),
+    )
+    assert approved.status_code == 200
+    assert approved.json()["status"] == "approved"
+    assert approved.json()["created_category_id"]
+
+
 def test_folder_request_rejects_duplicate_pending_and_second_review(content_api):
     client, sessions, _queued, _db_path = content_api
     url = "/api/admin/content/folder-requests"
@@ -339,6 +474,65 @@ def test_folder_upload_does_not_let_organizer_create_unapproved_folder(content_a
     assert response.status_code == 200
     assert response.json()["entries"][0]["status"] == "skipped"
     assert response.json()["entries"][0]["reason"] == "目录尚未批准，请联系资料负责人创建后重试"
+
+
+def test_folder_upload_preflights_path_contract_before_creating_batch(content_api):
+    client, sessions, _queued, db_path = content_api
+    for relative_path, detail in (
+        ("../guide.md", "文件夹路径无效"),
+        ("资料包/other.md", "文件名与相对路径不一致"),
+    ):
+        response = client.post(
+            "/api/admin/content/uploads",
+            data={"category_id": "cat-04", "relative_paths": relative_path, "upload_mode": "folder"},
+            files=[("files", ("guide.md", b"# folder", "text/markdown"))],
+            **_auth(sessions, "admin", csrf=True),
+        )
+        assert response.status_code == 400
+        assert response.json()["detail"] == detail
+
+    conn = connect(db_path)
+    try:
+        assert conn.execute("SELECT count(*) FROM upload_batches").fetchone()[0] == 0
+        assert conn.execute("SELECT count(*) FROM content_items").fetchone()[0] == 0
+    finally:
+        conn.close()
+
+
+def test_folder_upload_rejects_depth_count_and_total_size_limits(content_api, monkeypatch):
+    client, sessions, _queued, _db_path = content_api
+    depth = client.post(
+        "/api/admin/content/uploads",
+        data={"category_id": "cat-03", "relative_paths": "a/b/c/d/guide.md", "upload_mode": "folder"},
+        files=[("files", ("guide.md", b"# folder", "text/markdown"))],
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert depth.status_code == 400
+    assert depth.json()["detail"] == "文件夹路径超过资料目录四级限制"
+
+    monkeypatch.setattr(routes_content, "_MAX_FOLDER_UPLOAD_FILES", 1)
+    count = client.post(
+        "/api/admin/content/uploads",
+        data={"category_id": "cat-03", "upload_mode": "folder", "relative_paths": ["a/one.md", "a/two.md"]},
+        files=[
+            ("files", ("one.md", b"one", "text/markdown")),
+            ("files", ("two.md", b"two", "text/markdown")),
+        ],
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert count.status_code == 413
+    assert "最多上传 1 个文件" in count.json()["detail"]
+
+    monkeypatch.setattr(routes_content, "_MAX_FOLDER_UPLOAD_FILES", 500)
+    monkeypatch.setattr(routes_content, "_MAX_FOLDER_UPLOAD_BYTES", 2)
+    total = client.post(
+        "/api/admin/content/uploads",
+        data={"category_id": "cat-03", "upload_mode": "folder", "relative_paths": "a/large.md"},
+        files=[("files", ("large.md", b"123", "text/markdown"))],
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert total.status_code == 413
+    assert "文件夹总大小" in total.json()["detail"]
 
 
 def test_delete_reviewed_content_requires_publish_and_checks_version(content_api):
@@ -426,6 +620,42 @@ def test_category_update_uses_csrf_and_optimistic_version(content_api):
     assert updated.json()["version"] == 2
 
 
+def test_category_with_active_child_cannot_be_disabled(content_api):
+    client, sessions, _queued, db_path = content_api
+    conn = connect(db_path)
+    now = int(time.time())
+    conn.execute(
+        """INSERT INTO category_nodes
+           (id,category_key,parent_id,display_code,display_name,sort_order,level,is_active,created_at,updated_at)
+           VALUES ('cat-03-child','company_child','cat-03','01','启用子分类',1,2,1,?,?)""",
+        (now, now),
+    )
+    conn.commit()
+    conn.close()
+    category = next(
+        item for item in client.get(
+            "/api/admin/content/categories?include_inactive=true",
+            **_auth(sessions, "category_manager"),
+        ).json()
+        if item["id"] == "cat-03"
+    )
+
+    response = client.patch(
+        "/api/admin/content/categories/cat-03",
+        json={
+            "display_code": category["display_code"],
+            "display_name": category["display_name"],
+            "sort_order": category["sort_order"],
+            "is_active": False,
+            "expected_version": category["version"],
+        },
+        **_auth(sessions, "category_manager", csrf=True),
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "该分类仍有启用的子分类，请先停用子分类"
+
+
 def test_category_manager_cannot_grant_content_permissions(content_api):
     client, sessions, _queued, _db_path = content_api
     auth = _auth(sessions, "category_manager", csrf=True)
@@ -437,19 +667,22 @@ def test_category_manager_cannot_grant_content_permissions(content_api):
     ).status_code == 403
     assert client.put(
         "/api/admin/content/permissions/1",
-        json={"permissions": ["publish"]},
+        json={"permissions": sorted(LEGACY_CONTENT_PERMISSION_MAP["publish"])},
         **auth,
     ).status_code == 403
 
 
 @pytest.mark.parametrize("employee_id", ["plain", "category_manager"])
-def test_non_admin_cannot_read_or_maintain_permission_groups(content_api, employee_id):
+def test_non_admin_cannot_read_or_maintain_permission_catalog_or_groups(content_api, employee_id):
     client, sessions, _queued, _db_path = content_api
     base = "/api/admin/content/permission-groups"
+    assert client.get(
+        "/api/admin/content/permission-catalog", **_auth(sessions, employee_id)
+    ).status_code == 403
     assert client.get(base, **_auth(sessions, employee_id)).status_code == 403
     assert client.post(
         base,
-        json={"display_name": "越权模板", "permissions": ["publish"]},
+        json={"display_name": "越权模板", "permissions": sorted(LEGACY_CONTENT_PERMISSION_MAP["publish"])},
         **_auth(sessions, employee_id, csrf=True),
     ).status_code == 403
 
@@ -457,6 +690,8 @@ def test_non_admin_cannot_read_or_maintain_permission_groups(content_api, employ
 def test_permission_management_requires_cookie_csrf_and_active_admin(content_api):
     client, sessions, _queued, db_path = content_api
     groups_url = "/api/admin/content/permission-groups"
+    catalog_url = "/api/admin/content/permission-catalog"
+    assert client.get(catalog_url).status_code == 401
     assert client.get(groups_url).status_code == 401
     assert client.post(groups_url, json={"display_name": "测试模板", "permissions": []}).status_code == 401
     assert client.post(
@@ -469,7 +704,54 @@ def test_permission_management_requires_cookie_csrf_and_active_admin(content_api
     conn.execute("UPDATE users SET is_active=0 WHERE employee_id='admin'")
     conn.commit()
     conn.close()
+    assert client.get(catalog_url, **_auth(sessions, "admin")).status_code == 401
     assert client.get(groups_url, **_auth(sessions, "admin")).status_code == 401
+
+
+def test_permission_catalog_and_dependency_validation(content_api):
+    client, sessions, _queued, db_path = content_api
+    admin_read = _auth(sessions, "admin")
+    admin_write = _auth(sessions, "admin", csrf=True)
+    catalog = client.get("/api/admin/content/permission-catalog", **admin_read)
+    assert catalog.status_code == 200
+    assert catalog.json()["schema_version"] == 3
+    assert [item["key"] for item in catalog.json()["permissions"]] == [
+        "workspace.view", "item.view", "item.download", "category.view", "item.upload", "item.submit",
+        "item.move_draft", "item.archive_draft", "item.review", "item.move_review",
+        "item.publish", "item.archive_published", "trash.view", "trash.restore",
+        "category.manage", "folder.request", "folder.review", "import.server", "index.view",
+    ]
+    definitions = {item["key"]: item for item in catalog.json()["permissions"]}
+    assert definitions["item.download"]["dependencies"] == [
+        "workspace.view", "item.view"
+    ]
+    assert definitions["folder.request"]["dependencies"] == [
+        "workspace.view", "item.view", "category.view"
+    ]
+    assert definitions["folder.review"]["dependencies"] == [
+        "workspace.view", "item.view", "category.view"
+    ]
+
+    group = client.post(
+        "/api/admin/content/permission-groups",
+        json={"display_name": "缺少前置权限", "permissions": ["item.upload"]},
+        **admin_write,
+    )
+    assert group.status_code == 400
+    assert group.json()["detail"].startswith("权限组合缺少前置权限：")
+
+    conn = connect(db_path)
+    target_id = conn.execute(
+        "SELECT id FROM users WHERE employee_id='organizer'"
+    ).fetchone()[0]
+    conn.close()
+    user_update = client.put(
+        f"/api/admin/content/permissions/{target_id}",
+        json={"permissions": ["trash.restore"]},
+        **admin_write,
+    )
+    assert user_update.status_code == 400
+    assert user_update.json()["detail"].startswith("权限组合缺少前置权限：")
 
 
 def test_permission_group_conflicts_and_system_presets_are_protected(content_api):
@@ -477,7 +759,7 @@ def test_permission_group_conflicts_and_system_presets_are_protected(content_api
     auth = _auth(sessions, "admin", csrf=True)
     base = "/api/admin/content/permission-groups"
     created = client.post(
-        base, json={"display_name": "Project Publisher", "permissions": ["publish"]}, **auth
+        base, json={"display_name": "Project Publisher", "permissions": sorted(LEGACY_CONTENT_PERMISSION_MAP["publish"])}, **auth
     )
     assert created.status_code == 201
     assert client.post(
@@ -498,7 +780,7 @@ def test_permission_update_rejects_missing_user_and_rolls_back_on_audit_failure(
     client, sessions, _queued, db_path = content_api
     auth = _auth(sessions, "admin", csrf=True)
     assert client.put(
-        "/api/admin/content/permissions/999999", json={"permissions": ["review"]}, **auth
+        "/api/admin/content/permissions/999999", json={"permissions": sorted(LEGACY_CONTENT_PERMISSION_MAP["review"])}, **auth
     ).status_code == 404
 
     conn = connect(db_path)
@@ -508,13 +790,13 @@ def test_permission_update_rejects_missing_user_and_rolls_back_on_audit_failure(
     with pytest.raises(RuntimeError, match="audit failed"):
         client.put(
             f"/api/admin/content/permissions/{target_id}",
-            json={"permissions": ["publish"]},
+            json={"permissions": sorted(LEGACY_CONTENT_PERMISSION_MAP["publish"])},
             **auth,
         )
     conn = connect(db_path)
     assert [row[0] for row in conn.execute(
         "SELECT permission FROM content_permissions WHERE user_id=? ORDER BY permission", (target_id,)
-    )] == ["organize"]
+    )] == sorted(LEGACY_CONTENT_PERMISSION_MAP["organize"])
     conn.close()
 
 
@@ -618,6 +900,127 @@ def test_bulk_actions_enforce_permissions_csrf_limits_and_unique_ids(content_api
     ).status_code == 422
 
 
+def test_rename_creates_a_new_draft_version_and_checks_filename_conflict(content_api):
+    client, sessions, _queued, db_path = content_api
+    auth = _auth(sessions, "organizer", csrf=True)
+    first = client.post(
+        "/api/admin/content/uploads",
+        data={"category_id": "cat-03"},
+        files=[("files", ("same.md", b"# first", "text/markdown"))],
+        **auth,
+    ).json()["entries"][0]
+    second = client.post(
+        "/api/admin/content/uploads",
+        data={"category_id": "cat-03"},
+        files=[("files", ("other.md", b"# second", "text/markdown"))],
+        **auth,
+    ).json()["entries"][0]
+
+    conflict = client.post(
+        f"/api/admin/content/items/{second['item_id']}/rename",
+        json={
+            "title": "第二份",
+            "original_filename": "same.md",
+            "expected_version_id": second["version_id"],
+        },
+        **auth,
+    )
+    assert conflict.status_code == 409
+    assert conflict.json()["detail"]["code"] == "content_filename_conflict"
+    assert conflict.json()["detail"]["conflict"]["item_id"] == first["item_id"]
+
+    renamed = client.post(
+        f"/api/admin/content/items/{second['item_id']}/rename",
+        json={
+            "title": "第二份",
+            "original_filename": "same.md",
+            "expected_version_id": second["version_id"],
+            "replace_conflict_item_id": first["item_id"],
+            "replace_conflict_expected_version_id": first["version_id"],
+        },
+        **auth,
+    )
+    assert renamed.status_code == 200
+    assert renamed.json()["title"] == "第二份"
+    assert renamed.json()["original_filename"] == "same.md"
+    assert renamed.json()["version_number"] == 2
+
+    conn = connect(db_path)
+    try:
+        assert conn.execute(
+            "SELECT archived_at FROM content_items WHERE id=?", (first["item_id"],)
+        ).fetchone()[0] is not None
+        assert conn.execute(
+            "SELECT title FROM content_versions WHERE id=?", (renamed.json()["version_id"],)
+        ).fetchone()[0] == "第二份"
+    finally:
+        conn.close()
+
+
+def test_update_creates_a_followup_version_and_keeps_old_object_history(content_api):
+    client, sessions, _queued, db_path = content_api
+    auth = _auth(sessions, "organizer", csrf=True)
+    uploaded = client.post(
+        "/api/admin/content/uploads",
+        data={"category_id": "cat-03"},
+        files=[("files", ("guide.md", b"# old", "text/markdown"))],
+        **auth,
+    ).json()["entries"][0]
+    updated = client.post(
+        f"/api/admin/content/items/{uploaded['item_id']}/versions",
+        data={"expected_version_id": uploaded["version_id"], "filename_mode": "new"},
+        files={"file": ("guide-v2.md", b"# new", "text/markdown")},
+        **auth,
+    )
+    assert updated.status_code == 200
+    assert updated.json()["version_number"] == 2
+    assert updated.json()["original_filename"] == "guide-v2.md"
+    assert updated.json()["lifecycle_status"] == "draft"
+
+    conn = connect(db_path)
+    try:
+        versions = conn.execute(
+            "SELECT version_number,original_filename FROM content_versions WHERE item_id=? ORDER BY version_number",
+            (uploaded["item_id"],),
+        ).fetchall()
+        assert [(row[0], row[1]) for row in versions] == [(1, "guide.md"), (2, "guide-v2.md")]
+    finally:
+        conn.close()
+
+
+def test_bulk_move_and_archive_return_item_level_results(content_api):
+    client, sessions, _queued, db_path = content_api
+    auth = _auth(sessions, "organizer", csrf=True)
+    entries = []
+    for filename in ("one.md", "two.md"):
+        entries.append(client.post(
+            "/api/admin/content/uploads",
+            data={"category_id": "cat-03"},
+            files=[("files", (filename, b"# item", "text/markdown"))],
+            **auth,
+        ).json()["entries"][0])
+    refs = [{"item_id": entry["item_id"], "expected_version_id": entry["version_id"]} for entry in entries]
+
+    moved = client.post(
+        "/api/admin/content/bulk-move",
+        json={"items": refs, "target_category_id": "cat-04"},
+        **auth,
+    )
+    assert moved.status_code == 200
+    assert (moved.json()["succeeded"], moved.json()["failed"]) == (2, 0)
+
+    archived = client.post("/api/admin/content/bulk-archive", json={"items": refs}, **auth)
+    assert archived.status_code == 200
+    assert (archived.json()["succeeded"], archived.json()["failed"]) == (2, 0)
+    conn = connect(db_path)
+    try:
+        assert conn.execute(
+            "SELECT count(*) FROM content_items WHERE category_id='cat-04' AND archived_at IS NOT NULL"
+        ).fetchone()[0] == 2
+    finally:
+        conn.close()
+
+
 def test_managed_index_job_listing_exposes_business_labels_and_filters(content_api):
     client, sessions, _queued, db_path = content_api
     conn = connect(db_path)
@@ -641,6 +1044,9 @@ def test_managed_index_job_listing_exposes_business_labels_and_filters(content_a
     client.post(f"/api/admin/content/versions/{version_id}/review", json={"approved": True}, **_auth(sessions, "reviewer", csrf=True))
     client.post(f"/api/admin/content/versions/{version_id}/publish", json={}, **_auth(sessions, "publisher", csrf=True))
 
+    assert client.get(
+        "/api/admin/content/index-jobs", **_auth(sessions, "organizer")
+    ).status_code == 403
     result = client.get("/api/admin/content/index-jobs", **_auth(sessions, "publisher"))
     assert result.status_code == 200
     assert result.json()["total"] == 1

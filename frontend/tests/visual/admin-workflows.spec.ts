@@ -10,7 +10,7 @@ async function openTab(page: Parameters<typeof installAdminRoutes>[0], label: st
     await expect(mobileNavigation).toBeVisible();
     await mobileNavigation.click();
   }
-  await page.getByRole("button", { name: label, exact: true }).click();
+  await page.getByRole("link", { name: label, exact: true }).click();
 }
 
 async function openRootFolder(page: Parameters<typeof installAdminRoutes>[0], folderId = "cat-company") {
@@ -36,38 +36,123 @@ test.describe("资料管理", () => {
     if (page.viewportSize()!.width === 390) await expectTouchTarget(page.getByRole("button", { name: "上传文件" }));
     await expect(page.getByRole("combobox", { name: "状态", exact: true })).toHaveValue("");
     await expect(page.getByText("未选择资料，单次最多 20 份")).toBeVisible();
-    await expect(page.getByRole("button", { name: "批量确认" })).toBeDisabled();
-    const toolbarHeightBeforeSelection = await page.getByTestId("managed-bulk-toolbar").evaluate((element) => element.getBoundingClientRect().height);
-    const mobile = page.viewportSize()!.width < 1024;
-    const visibleItem = mobile
-      ? page.locator("li").getByText("机电专业协同检查清单", { exact: true })
-      : page.getByRole("table").getByText("机电专业协同检查清单", { exact: true });
-    await visibleItem.scrollIntoViewIfNeeded();
-    await expect(visibleItem).toBeVisible();
-    if (page.viewportSize()!.width === 768) {
-      await expect(page.getByRole("table")).toBeHidden();
-      await expect(page.getByRole("button", { name: "确认", exact: true })).toBeVisible();
-      await expect(page.getByRole("button", { name: "退回", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "新建目录" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "批量操作" })).toHaveCount(0);
+
+    const longTitle = "建筑信息模型交付标准（合成长文件名用于响应式检查）";
+    const title = page.getByText(longTitle, { exact: true }).filter({ visible: true });
+    const item = page.viewportSize()!.width < 1024 ? title.locator("xpath=ancestor::li") : title.locator("xpath=ancestor::tr");
+    for (const actionName of [`查看“${longTitle}”的详细信息`, `查看“${longTitle}”`, `移动“${longTitle}”`, `下载“${longTitle}”`, `重命名“${longTitle}”`, `更新“${longTitle}”`, `删除“${longTitle}”`]) {
+      await expect(item.getByRole("button", { name: actionName, exact: true })).toBeVisible();
     }
-    if (page.viewportSize()!.width === 390) {
-      await expectInViewport(page.getByRole("button", { name: "确认", exact: true }).first());
-    }
-    const itemCheckbox = mobile
-      ? page.locator("li").getByRole("checkbox", { name: "选择机电专业协同检查清单" })
-      : page.getByRole("table").getByRole("checkbox", { name: "选择机电专业协同检查清单" });
-    await itemCheckbox.check();
+    const deleteButton = item.getByRole("button", { name: `删除“${longTitle}”`, exact: true });
+    await deleteButton.scrollIntoViewIfNeeded();
+    await expectInViewport(deleteButton);
+    if (page.viewportSize()!.width === 390) await expectTouchTarget(deleteButton);
+
+    await page.getByRole("checkbox", { name: `选择${longTitle}` }).check();
     await expect(page.getByText(/已选择\s*1\s*份，单次最多\s*20\s*份/)).toBeVisible();
-    await expect(page.getByRole("button", { name: "批量确认" })).toBeEnabled();
-    const toolbarHeightAfterSelection = await page.getByTestId("managed-bulk-toolbar").evaluate((element) => element.getBoundingClientRect().height);
-    expect(Math.abs(toolbarHeightAfterSelection - toolbarHeightBeforeSelection)).toBeLessThanOrEqual(1);
+    await expect(page.getByRole("button", { name: "新建目录" })).toBeVisible();
+    await page.getByRole("checkbox", { name: "选择机电专业协同检查清单" }).check();
+    const batchButton = page.getByRole("button", { name: "批量操作" });
+    await expect(batchButton).toBeVisible();
+    await expect(page.getByRole("button", { name: "新建目录" })).toHaveCount(0);
+    await batchButton.focus();
+    await batchButton.press("Enter");
+    await expectInViewport(page.getByRole("menu", { name: "批量操作" }));
+    await expect(page.getByRole("menuitem", { name: "批量移动" })).toBeFocused();
+    await page.getByRole("menuitem", { name: "批量移动" }).press("ArrowDown");
+    await expect(page.getByRole("menuitem", { name: "批量确认" })).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(batchButton).toBeFocused();
+  });
+
+  test("single-file actions expose independent move, download, rename, and update flows", async ({ page }) => {
+    await openTab(page, "资料管理");
+    await openRootFolder(page);
+    const longTitle = "建筑信息模型交付标准（合成长文件名用于响应式检查）";
+    const title = page.getByText(longTitle, { exact: true }).filter({ visible: true });
+    const item = page.viewportSize()!.width < 1024 ? title.locator("xpath=ancestor::li") : title.locator("xpath=ancestor::tr");
+
+    await item.getByRole("button", { name: `移动“${longTitle}”`, exact: true }).click();
+    const moveDialog = page.getByRole("dialog", { name: "移动资料" });
+    await expect(moveDialog).toContainText(longTitle);
+    await moveDialog.getByRole("combobox", { name: "目标目录" }).selectOption("cat-project");
+    await expect(moveDialog.getByRole("button", { name: "移动", exact: true })).toBeEnabled();
+    await expectNoBodyOverflow(page);
+    await moveDialog.getByRole("button", { name: "取消" }).click();
+
+    const downloadPromise = page.waitForEvent("download");
+    await item.getByRole("button", { name: `下载“${longTitle}”`, exact: true }).click();
+    expect((await downloadPromise).suggestedFilename()).toBe(`${longTitle}.pdf`);
+
+    await item.getByRole("button", { name: `重命名“${longTitle}”`, exact: true }).click();
+    const renameDialog = page.getByRole("dialog", { name: "重命名资料" });
+    await expect(renameDialog.getByRole("textbox", { name: "资料标题" })).toHaveValue(longTitle);
+    await expect(renameDialog.getByRole("textbox", { name: /^源文件名/ })).toHaveValue(`${longTitle}.pdf`);
+    await expect(renameDialog).toContainText("需要重新确认并发布");
+    await renameDialog.getByRole("button", { name: "取消" }).click();
+
+    await item.getByRole("button", { name: `更新“${longTitle}”`, exact: true }).click();
+    const updateDialog = page.getByRole("dialog", { name: "更新资料文件" });
+    await updateDialog.getByLabel("选择替换文件").setInputFiles({ name: "replacement.md", mimeType: "text/markdown", buffer: Buffer.from("# synthetic") });
+    await expect(updateDialog).toContainText(`将使用原名称并匹配新格式：${longTitle}.md`);
+    await expect(updateDialog.getByRole("button", { name: "确认更新" })).toBeEnabled();
+    await expectNoBodyOverflow(page);
+  });
+
+  test("batch move and delete confirmations preserve selected-file context", async ({ page }) => {
+    await openTab(page, "资料管理");
+    await openRootFolder(page);
+    const firstTitle = "建筑信息模型交付标准（合成长文件名用于响应式检查）";
+    const secondTitle = "机电专业协同检查清单";
+    await page.getByRole("checkbox", { name: `选择${firstTitle}` }).check();
+    await page.getByRole("checkbox", { name: `选择${secondTitle}` }).check();
+
+    await page.getByRole("button", { name: "批量操作" }).click();
+    await page.getByRole("menuitem", { name: "批量移动" }).click();
+    const moveDialog = page.getByRole("dialog", { name: "批量移动资料" });
+    await expect(moveDialog).toContainText("已选择 2 份资料");
+    await moveDialog.getByRole("combobox", { name: "目标目录" }).selectOption("cat-project");
+    await expect(moveDialog.getByRole("button", { name: "确认执行" })).toBeEnabled();
+    await moveDialog.getByRole("button", { name: "取消" }).click();
+
+    await page.getByRole("button", { name: "批量操作" }).click();
+    await page.getByRole("menuitem", { name: "批量删除" }).click();
+    const deleteDialog = page.getByRole("dialog", { name: "将 2 份资料移入回收站？" });
+    await expect(deleteDialog).toContainText(firstTitle);
+    await expect(deleteDialog).toContainText(secondTitle);
+    await expect(deleteDialog).toContainText("不再进入检索");
+    await expect(deleteDialog.getByRole("button", { name: "确认移入回收站" })).toBeDisabled();
+    await expectNoBodyOverflow(page);
+  });
+
+  test("batch download stays visible and starts a single archive download", async ({ page }) => {
+    await openTab(page, "资料管理");
+    await openRootFolder(page);
+    const firstTitle = "建筑信息模型交付标准（合成长文件名用于响应式检查）";
+    const secondTitle = "机电专业协同检查清单";
+    await page.getByRole("checkbox", { name: `选择${firstTitle}` }).check();
+    await page.getByRole("checkbox", { name: `选择${secondTitle}` }).check();
+
+    await page.getByRole("button", { name: "批量操作" }).click();
+    const downloadPromise = page.waitForEvent("download");
+    await page.getByRole("menuitem", { name: "批量下载" }).click();
+    expect((await downloadPromise).suggestedFilename()).toBe("managed-content.zip");
+    await expectNoBodyOverflow(page);
   });
 
   for (const scenario of ["loading", "empty", "error", "disabled"] as const) {
-    test(`${scenario} state is explicit and contained`, async ({ page }) => {
+    test(`${scenario} state is explicit and contained`, async ({ page }, testInfo) => {
       await openTab(page, "资料管理", scenario);
       await expectNoBodyOverflow(page);
       if (scenario === "loading") await expect(page.getByRole("heading", { name: "资料管理" })).toBeVisible();
-      if (scenario === "empty") await expect(page.getByText("没有符合条件的资料")).toBeVisible();
+      if (scenario === "empty") {
+        await expect(page.getByText("没有符合条件的资料")).toBeVisible();
+        const emptyListHeight = await page.getByTestId("managed-content-drop-list").evaluate((element) => element.getBoundingClientRect().height);
+        expect(emptyListHeight).toBeGreaterThanOrEqual(page.viewportSize()!.width < 640 ? 224 : 256);
+        await page.screenshot({ path: testInfo.outputPath("managed-content-empty-state.png"), fullPage: true });
+      }
       if (scenario === "error") await expect(page.getByText("合成加载失败")).toBeVisible();
       if (scenario === "disabled") {
         await expect(page.getByText("资料管理当前未启用，上传和流程操作暂不可用。")).toBeVisible();
@@ -87,8 +172,42 @@ test.describe("资料管理", () => {
     await expectNoBodyOverflow(page);
   });
 
-  test("dropping local files on the current folder requires confirmation", async ({ page }) => {
+  test("folder upload confirmation keeps hierarchy and summary contained", async ({ page }, testInfo) => {
     await openTab(page, "资料管理");
+    await openRootFolder(page);
+    await page.getByRole("button", { name: "上传文件" }).click();
+    const folderButton = page.getByRole("button", { name: "上传文件夹" });
+    await expect(folderButton).toBeVisible();
+    if (page.viewportSize()!.width === 390) await expectTouchTarget(folderButton);
+
+    await page.getByLabel("选择资料文件夹").evaluate((element: HTMLInputElement) => {
+      const transfer = new DataTransfer();
+      const guide = new File(["# Synthetic guide"], "guide.md", { type: "text/markdown" });
+      Object.defineProperty(guide, "webkitRelativePath", { value: "合成资料包/01 建筑/guide.md" });
+      const ignored = new File(["synthetic video"], "demo.mp4", { type: "video/mp4" });
+      Object.defineProperty(ignored, "webkitRelativePath", { value: "合成资料包/demo.mp4" });
+      transfer.items.add(guide);
+      transfer.items.add(ignored);
+      Object.defineProperty(element, "files", { configurable: true, value: transfer.files });
+      element.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
+    const dialog = page.getByRole("dialog", { name: "上传文件夹" });
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText("合成资料包");
+    await expect(dialog).toContainText("2 个");
+    await expect(dialog).toContainText("可上传文件");
+    await expect(dialog).toContainText("已忽略");
+    await expect(dialog).toContainText("合成资料包/01 建筑/guide.md");
+    await expect(dialog).toContainText("合成资料包/demo.mp4");
+    await expectInViewport(dialog.getByRole("button", { name: "开始上传" }));
+    await expectNoBodyOverflow(page);
+    await page.screenshot({ path: testInfo.outputPath("managed-content-folder-upload-confirmation.png"), fullPage: true });
+  });
+
+  test("dropping local files on the current folder requires confirmation", async ({ page }, testInfo) => {
+    await openTab(page, "资料管理");
+    await page.route("**/api/admin/content/items-page**", (route) => route.fulfill({ json: { items: [], total: 0, status_counts: {} } }));
     await openRootFolder(page);
     const uploadRequests: string[] = [];
     page.on("request", (request) => {
@@ -103,9 +222,19 @@ test.describe("资料管理", () => {
       return transfer;
     });
 
+    await expect(page.getByRole("button", { name: "上传文件" })).toBeEnabled();
+    expect(await dataTransfer.evaluate((transfer) => Array.from(transfer.types))).toContain("Files");
     await folderBrowser.dispatchEvent("dragenter", { dataTransfer });
-    await expect(folderBrowser).toHaveClass(/ring-primary/);
+    const dropOverlay = page.getByTestId("managed-content-drop-overlay");
+    await expect(dropOverlay).toBeVisible();
+    await expect(dropOverlay).toContainText("松开以上传文件到“03 公司内部标准”");
+    await expect(dropOverlay).toContainText("支持 PDF、Markdown、Word、Excel 和 PPT 文件");
+    await dropOverlay.scrollIntoViewIfNeeded();
+    await folderBrowser.dispatchEvent("dragover", { dataTransfer });
+    await expectInViewport(dropOverlay.getByText("松开以上传文件到“03 公司内部标准”"));
+    await page.screenshot({ path: testInfo.outputPath("managed-content-empty-drop-overlay.png"), fullPage: true });
     await folderBrowser.dispatchEvent("drop", { dataTransfer });
+    await expect(dropOverlay).toBeHidden();
 
     const dialog = page.getByRole("dialog", { name: "确认上传" });
     await expect(dialog).toContainText("03 公司内部标准");
@@ -134,7 +263,7 @@ test.describe("资料管理", () => {
     if (page.viewportSize()!.width < 1024) {
       await page.getByRole("button", { name: "展开管理功能" }).click();
     }
-    await page.getByRole("button", { name: "资料管理", exact: true }).click();
+    await page.getByRole("link", { name: "资料管理", exact: true }).click();
     await expect(page.getByText("待处理目录申请")).toBeVisible();
     await expect(page.getByText("审核标准", { exact: true })).toBeVisible();
     await expectNoBodyOverflow(page);
@@ -160,32 +289,46 @@ test.describe("资料管理", () => {
     await openTab(page, "资料管理", "publication_failure");
     await openRootFolder(page);
     await page.locator("select").filter({ has: page.locator('option[value="publication_failed"]') }).selectOption("publication_failed");
-    await expect(page.locator("p:visible", { hasText: "PDF 需要密码才能解析。" })).toBeVisible();
-    await expect(page.locator("p:visible", { hasText: "请上传已解除密码保护的 PDF。" })).toBeVisible();
-    await expect(page.locator("p:visible", { hasText: "共尝试 4 次" })).toBeVisible();
     const failedTitle = page.getByText("培训资料发布演练", { exact: true }).filter({ visible: true });
     const failedItem = page.viewportSize()!.width < 1024 ? failedTitle.locator("xpath=ancestor::li") : failedTitle.locator("xpath=ancestor::tr");
-    const republish = failedItem.getByRole("button", { name: "重新发布" });
+    await failedItem.getByRole("button", { name: "查看“培训资料发布演练”的详细信息" }).click();
+    const detail = page.getByRole("dialog", { name: "培训资料发布演练" });
+    await expect(detail).toContainText("PDF 需要密码才能解析。");
+    await expect(detail).toContainText("请上传已解除密码保护的 PDF。");
+    await expect(detail).toContainText("共尝试 4 次");
+    const republish = detail.getByRole("button", { name: "重新发布" });
     await expect(republish).toBeEnabled();
     await republish.click();
-    await expect(failedItem.getByRole("button", { name: "发布中…" })).toBeDisabled();
+    await expect(detail.getByRole("button", { name: "发布中…" })).toBeDisabled();
     await expectNoBodyOverflow(page);
   });
 
-  test("indexed files open in the shared preview sheet", async ({ page }) => {
+  test("indexed files return from the shared preview sheet to their detail dialog", async ({ page }) => {
     await openTab(page, "资料管理");
     await openRootFolder(page);
     const title = page.getByText("建筑信息模型交付标准（合成长文件名用于响应式检查）", { exact: true }).filter({ visible: true });
     const item = page.viewportSize()!.width < 1024 ? title.locator("xpath=ancestor::li") : title.locator("xpath=ancestor::tr");
-    await item.getByRole("button", { name: "查看", exact: true }).click();
-
-    const detail = page.getByRole("dialog", { name: "建筑信息模型交付标准（合成长文件名用于响应式检查）" });
-    await detail.getByRole("button", { name: "预览文件" }).click();
+    const preview = item.getByRole("button", { name: `查看“建筑信息模型交付标准（合成长文件名用于响应式检查）”`, exact: true });
+    await preview.click();
     await expect(page.getByRole("button", { name: "关闭预览" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "返回资料详情" })).toHaveCount(0);
+    await page.getByRole("button", { name: "关闭预览" }).click();
+
+    await item.getByRole("button", { name: `查看“建筑信息模型交付标准（合成长文件名用于响应式检查）”的详细信息`, exact: true }).click();
+
+    const detail = page.getByRole("dialog").filter({ has: page.getByRole("button", { name: "预览文件" }) });
+    await expect(detail).toBeVisible();
+    await detail.getByRole("button", { name: "预览文件" }).click();
+    await expect(page.getByRole("button", { name: "返回资料详情" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "关闭预览" })).toBeVisible();
+    await expect(detail).toBeHidden();
     await expectNoBodyOverflow(page);
 
-    await page.getByRole("button", { name: "关闭预览" }).click();
-    await expect(page.getByRole("button", { name: "关闭预览" })).toBeHidden();
+    await page.getByRole("button", { name: "返回资料详情" }).click();
+    await expect(detail).toBeVisible();
+    await expect(detail.getByRole("link", { name: "下载" })).toHaveCount(0);
+    await expect(detail.getByRole("button", { name: "下载" })).toHaveCount(0);
+    await expectNoBodyOverflow(page);
   });
 
   test("move-to-trash confirmation explains impact and exposes a stable busy state", async ({ page }) => {
@@ -193,15 +336,16 @@ test.describe("资料管理", () => {
     await openRootFolder(page);
     const title = page.getByText("建筑信息模型交付标准（合成长文件名用于响应式检查）", { exact: true }).filter({ visible: true });
     const item = page.viewportSize()!.width < 1024 ? title.locator("xpath=ancestor::li") : title.locator("xpath=ancestor::tr");
-    const remove = item.getByRole("button", { name: "移至回收站", exact: true });
+    const remove = item.getByRole("button", { name: `删除“建筑信息模型交付标准（合成长文件名用于响应式检查）”`, exact: true });
     await remove.scrollIntoViewIfNeeded();
     await expectInViewport(remove);
     await remove.click();
-    const dialog = page.getByRole("dialog", { name: "移至回收站" });
-    await expect(dialog).toContainText("将从资料列表和知识库检索中移除");
+    const dialog = page.getByRole("dialog", { name: "将资料移入回收站？" });
+    await expect(dialog).toContainText("将立即停止进入知识库检索");
     await expect(dialog).toContainText("文件、版本及审核发布历史会保留");
     await expectNoBodyOverflow(page);
-    const confirm = dialog.getByRole("button", { name: "确认移入" });
+    await dialog.getByRole("checkbox").check();
+    const confirm = dialog.getByRole("button", { name: "确认移入回收站" });
     await confirm.click();
     await expect(dialog.getByRole("button", { name: "处理中…" })).toBeDisabled();
   });
@@ -219,7 +363,7 @@ test.describe("资料管理", () => {
     const restoreRequest = page.waitForRequest((request) => request.method() === "POST" && request.url().endsWith("/items/item-5/restore"));
     await restore.click();
     const dialog = page.getByRole("dialog", { name: "恢复资料" });
-    await expect(dialog).toContainText("需要管理员重新发布后才会进入检索");
+    await expect(dialog).toContainText("需要具备发布权限的人员重新发布后才会进入检索");
     await dialog.getByRole("button", { name: "确认恢复" }).click();
     await expect(dialog.getByRole("button", { name: "恢复中…" })).toBeDisabled();
     await restoreRequest;
@@ -242,7 +386,16 @@ test.describe("视频管理", () => {
     await workbenchTrigger.click();
     const workbench = page.getByRole("dialog", { name: "项目交付培训" });
     await expect(workbench).toBeVisible();
-    await expect(workbench.getByText("暂无可审阅转录版本。")).toBeVisible();
+    await expect(workbench.getByText("自动转录")).toBeVisible();
+    await expect(workbench.getByRole("textbox", { name: /审核备注/ })).toBeVisible();
+    await expect(workbench.getByText("审核通过后可发布")).toBeVisible();
+    await expect(workbench.getByText("synthetic-asr")).toBeHidden();
+    await workbench.getByRole("button", { name: "校对内容" }).click();
+    await expect(workbench.getByRole("textbox", { name: "转录 Markdown 编辑器" })).toBeVisible();
+    if (page.viewportSize()!.width < 768) {
+      await workbench.getByRole("button", { name: "预览" }).click();
+    }
+    await expect(workbench.getByRole("region", { name: "Markdown 预览" })).toContainText("培训开始");
     await workbench.getByRole("button", { name: "关闭转写工作台" }).click();
     await expect(workbench).toBeHidden();
     await expectNoBodyOverflow(page);
@@ -295,27 +448,50 @@ test.describe("索引任务", () => {
 
 test.describe("分类管理", () => {
   test("normal layout keeps form and category actions discoverable", async ({ page }) => {
-    await openTab(page, "分类管理");
+    await openTab(page, "分类管理", "normal", "admin", { includeChildFolder: true });
     await expect(page.getByRole("heading", { name: "分类管理" })).toBeVisible();
     await expect(page.getByText("资料权限")).toHaveCount(0);
+    await expect(page.getByText("3 个一级分类 · 共 4 个分类")).toBeVisible();
+    await expect(page.getByRole("button", { name: "全部展开" })).toBeVisible();
+    await expect(page.getByText("3 份直接资料 · 1 个子分类")).toBeVisible();
     await expectNoBodyOverflow(page);
-    const createButton = page.getByRole("button", { name: "新增" });
+    const createButton = page.getByRole("button", { name: "新增分类", exact: true });
     await createButton.scrollIntoViewIfNeeded();
     await expectInViewport(createButton);
-    if (page.viewportSize()!.width === 390) {
+    if (page.viewportSize()!.width < 1024) {
       await expectTouchTarget(createButton);
-      const categoryToggle = page.getByRole("checkbox", { name: "公司内部标准启用" });
+      await page.getByRole("treeitem", { name: /公司内部标准/ }).click();
+      const editor = page.getByRole("dialog", { name: "公司内部标准" });
+      await expect(editor).toBeVisible();
+      const categoryToggle = editor.getByRole("checkbox", { name: "公司内部标准启用" });
       await categoryToggle.scrollIntoViewIfNeeded();
       await expectInViewport(categoryToggle);
-      const save = page.getByRole("button", { name: "保存" }).first();
+      const save = editor.getByRole("button", { name: "保存修改" });
       await save.scrollIntoViewIfNeeded();
+      await expectInViewport(save);
+    } else {
+      const parent = page.getByTestId("category-tree-item-cat-company");
+      const child = page.getByTestId("category-tree-item-cat-company-modeling");
+      await expect(parent).toHaveAttribute("aria-expanded", "false");
+      await expect(child).toHaveCount(0);
+      await parent.focus();
+      await parent.press("ArrowRight");
+      await expect(child).toBeVisible();
+      await expect(page.getByRole("button", { name: "全部折叠" })).toBeVisible();
+      await parent.press("ArrowRight");
+      await expect(child).toBeFocused();
+      await child.press("ArrowLeft");
+      await expect(parent).toBeFocused();
+      await expect(page.getByText("公司内部标准").last()).toBeVisible();
+      const save = page.getByRole("button", { name: "保存修改" });
+      await expect(save).toBeDisabled();
       await expectInViewport(save);
     }
   });
 
   for (const scenario of ["loading", "empty", "error"] as const) {
     test(`${scenario} state is explicit and contained`, async ({ page }) => {
-      await openTab(page, "分类管理", scenario);
+      await openTab(page, "分类管理", scenario, "admin", { includeChildFolder: true });
       await expectNoBodyOverflow(page);
       if (scenario === "loading") await expect(page.getByRole("button", { name: "刷新" })).toBeDisabled();
       if (scenario === "empty") await expect(page.getByText("暂无分类")).toBeVisible();
@@ -324,12 +500,14 @@ test.describe("分类管理", () => {
   }
 
   test("create exposes a stable busy state", async ({ page }) => {
-    await openTab(page, "分类管理");
-    await page.getByLabel("显示编号", { exact: true }).fill("C");
-    await page.getByLabel("分类名称", { exact: true }).fill("合成新增分类");
-    const create = page.getByRole("button", { name: "新增分类" });
+    await openTab(page, "分类管理", "normal", "admin", { includeChildFolder: true });
+    await page.getByRole("button", { name: "新增分类", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "新增分类" });
+    await dialog.getByLabel("显示编号", { exact: true }).fill("C");
+    await dialog.getByLabel("分类名称", { exact: true }).fill("合成新增分类");
+    const create = dialog.getByRole("button", { name: "新增分类", exact: true });
     await create.click();
-    await expect(create).toBeDisabled();
+    await expect(dialog.getByRole("button", { name: "新增中…", exact: true })).toBeDisabled();
   });
 });
 
@@ -354,5 +532,8 @@ test.describe("用户权限", () => {
     await expect(page.getByRole("dialog", { name: "权限组管理" })).toContainText("修改模板不会改变既有用户权限");
     await expect(page.getByRole("dialog", { name: "权限组管理" }).getByRole("button", { name: "普通成员 预设" })).toBeVisible();
     await expectNoBodyOverflow(page);
+    if (page.viewportSize()!.width === 390) {
+      await expectInViewport(page.getByRole("button", { name: "保存模板" }));
+    }
   });
 });

@@ -3,6 +3,23 @@ import { describe, expect, it, vi } from "vitest";
 import { ResourcePreviewShell } from "./ResourcePreviewShell";
 
 describe("ResourcePreviewShell sheet behavior", () => {
+  it("renders an optional back action for nested preview contexts", () => {
+    const onBack = vi.fn();
+    render(
+      <ResourcePreviewShell
+        open
+        title="资料预览"
+        onClose={vi.fn()}
+        backAction={<button type="button" onClick={onBack}>返回资料详情</button>}
+      >
+        内容
+      </ResourcePreviewShell>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "返回资料详情" }));
+    expect(onBack).toHaveBeenCalledOnce();
+  });
+
   it("renders the preview sheet only while open", () => {
     const { rerender } = render(
       <ResourcePreviewShell open={false} title="资料预览" onClose={vi.fn()}>
@@ -19,6 +36,10 @@ describe("ResourcePreviewShell sheet behavior", () => {
     );
 
     expect(screen.getByRole("dialog", { name: "资料预览" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "资料预览" })).toHaveClass("resource-preview-sheet");
+    expect(document.querySelector(".resource-preview-overlay")).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "资料预览" })).toHaveAttribute("data-state", "open");
+    expect(document.querySelector(".resource-preview-overlay")).toHaveAttribute("data-state", "open");
     expect(screen.getByText("内容")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "关闭预览" })).toBeInTheDocument();
   });

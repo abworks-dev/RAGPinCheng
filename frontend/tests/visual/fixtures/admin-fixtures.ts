@@ -9,12 +9,27 @@ const admin = {
   real_name: "合成管理员",
   role: "admin",
   csrf_token: "synthetic-csrf-token",
-  content_permissions: ["organize", "review", "publish", "manage_categories", "import_server"],
+  content_permissions: [
+    "workspace.view", "item.view", "item.download", "category.view", "item.upload", "item.submit",
+    "item.move_draft", "item.archive_draft", "item.review", "item.move_review",
+    "item.publish", "item.archive_published", "trash.view", "trash.restore",
+    "category.manage", "folder.request", "folder.review", "import.server", "index.view",
+  ],
 };
 
 const workspaceUsers = {
   admin,
-  bim_engineer: { ...admin, id: 9002, employee_id: "TEST-EDITOR", real_name: "合成资料员", role: "user", content_permissions: ["organize"] },
+  bim_engineer: {
+    ...admin,
+    id: 9002,
+    employee_id: "TEST-EDITOR",
+    real_name: "合成资料员",
+    role: "user",
+    content_permissions: [
+      "workspace.view", "item.view", "item.download", "category.view", "item.upload", "item.submit",
+      "item.move_draft", "item.archive_draft", "folder.request",
+    ],
+  },
   member: { ...admin, id: 9003, employee_id: "TEST-MEMBER", real_name: "合成成员", role: "user", content_permissions: [] },
 };
 
@@ -55,6 +70,7 @@ export const items = [
   source_origin: index === 4 ? "legacy" : "web",
   source_batch_id: null,
   is_current: true,
+  has_published_head: status === "published",
   latest_publication_status: null,
   publication_attempt_count: 0,
   publication_failure: null,
@@ -149,21 +165,92 @@ const transcriptionJobs = [{
   result_version_id: null, created_at: 1700000400, started_at: 1700000401, finished_at: 1700000402, updated_at: 1700000402,
 }];
 
+const transcriptVersions = [{
+  version_id: "11111111-1111-4111-8111-111111111111", media_id: "media-ready", source: "automatic",
+  profile_id: "synthetic-profile", provider_key: "synthetic-asr", model_id: "synthetic-model", model_revision: "r1",
+  markdown_storage_kind: "managed_artifact",
+  review_status: "awaiting_review", reviewed_by: null, reviewed_at: null, review_note: null,
+  publication_status: "not_published", published_at: null, supersedes_version_id: null,
+  derived_from_version_id: null, edited_by: null,
+  markdown_sha256: "a".repeat(64), created_at: 1700000200, updated_at: 1700000200, is_current: false,
+}];
+
 const permissionUsers = [
   { user_id: 9001, employee_id: "TEST-ADMIN", real_name: "合成管理员", role: "admin", is_active: true, permissions: [] },
-  { user_id: 9002, employee_id: "TEST-EDITOR", real_name: "合成资料员", role: "user", is_active: true, permissions: ["organize", "review"] },
+  {
+    user_id: 9002,
+    employee_id: "TEST-EDITOR",
+    real_name: "合成资料员",
+    role: "user",
+    is_active: true,
+    permissions: [
+      "workspace.view", "item.view", "item.download", "category.view", "item.upload", "item.submit",
+      "item.move_draft", "item.archive_draft", "folder.request", "item.review",
+      "item.move_review", "folder.review", "trash.view", "trash.restore",
+    ],
+  },
   { user_id: 9003, employee_id: "TEST-INACTIVE", real_name: "停用测试用户", role: "user", is_active: false, permissions: [] },
 ];
 
+const permissionCatalog = {
+  schema_version: 3,
+  permissions: [
+    { key: "workspace.view", domain: "access", domain_label: "入口与查看", label: "进入资料工作台", description: "进入资料管理工作台。", dependencies: [] },
+    { key: "item.view", domain: "access", domain_label: "入口与查看", label: "查看资料", description: "查看资料列表、详情和预览。", dependencies: ["workspace.view"] },
+    { key: "item.download", domain: "access", domain_label: "入口与查看", label: "下载资料", description: "下载单份资料或批量打包下载。", dependencies: ["workspace.view", "item.view"] },
+    { key: "category.view", domain: "access", domain_label: "入口与查看", label: "查看分类", description: "查看资料分类树和完整路径。", dependencies: ["workspace.view"] },
+    { key: "item.upload", domain: "organize", domain_label: "资料整理", label: "上传资料", description: "上传文件并创建资料草稿。", dependencies: ["workspace.view", "item.view", "category.view"] },
+    { key: "item.submit", domain: "organize", domain_label: "资料整理", label: "提交确认", description: "将草稿或退回资料提交确认。", dependencies: ["workspace.view", "item.view"] },
+    { key: "item.move_draft", domain: "organize", domain_label: "资料整理", label: "移动草稿", description: "移动草稿或退回状态的资料。", dependencies: ["workspace.view", "item.view", "category.view"] },
+    { key: "item.archive_draft", domain: "organize", domain_label: "资料整理", label: "归档草稿", description: "将草稿或退回资料移入回收站。", dependencies: ["workspace.view", "item.view"] },
+    { key: "item.review", domain: "review", domain_label: "确认流程", label: "确认与退回", description: "确认或退回待确认资料。", dependencies: ["workspace.view", "item.view"] },
+    { key: "item.move_review", domain: "review", domain_label: "确认流程", label: "移动待确认资料", description: "移动待确认状态的资料。", dependencies: ["workspace.view", "item.view", "category.view"] },
+    { key: "item.publish", domain: "publish", domain_label: "发布流程", label: "发布资料", description: "发布或重新发布已确认资料。", dependencies: ["workspace.view", "item.view"] },
+    { key: "item.archive_published", domain: "publish", domain_label: "发布流程", label: "下架正式资料", description: "将已确认、发布失败或已发布资料移入回收站。", dependencies: ["workspace.view", "item.view"] },
+    { key: "trash.view", domain: "trash", domain_label: "回收站", label: "查看回收站", description: "查看和搜索已归档资料。", dependencies: ["workspace.view", "item.view"] },
+    { key: "trash.restore", domain: "trash", domain_label: "回收站", label: "恢复资料", description: "从回收站恢复资料。", dependencies: ["workspace.view", "item.view", "trash.view"] },
+    { key: "category.manage", domain: "category", domain_label: "分类与目录", label: "维护分类", description: "新增、修改、启用或停用资料分类。", dependencies: ["workspace.view", "category.view"] },
+    { key: "folder.request", domain: "category", domain_label: "分类与目录", label: "申请目录", description: "提交子目录创建申请。", dependencies: ["workspace.view", "item.view", "category.view"] },
+    { key: "folder.review", domain: "category", domain_label: "分类与目录", label: "审批目录", description: "查看、批准或退回目录申请。", dependencies: ["workspace.view", "item.view", "category.view"] },
+    { key: "import.server", domain: "operations", domain_label: "导入与索引", label: "服务器导入", description: "执行受控的服务器批次导入。", dependencies: ["workspace.view", "item.view", "category.view"] },
+    { key: "index.view", domain: "operations", domain_label: "导入与索引", label: "查看索引任务", description: "查看发布处理状态、失败原因和历史尝试。", dependencies: ["workspace.view", "item.view", "category.view"] },
+  ],
+};
+
 const permissionGroups = [
   { id: "permission-group-member", group_key: "member", display_name: "普通成员", permissions: [], is_system: true, is_active: true, updated_at: 1700000000 },
-  { id: "permission-group-bim-engineer", group_key: "bim_engineer", display_name: "BIM工程师", permissions: ["organize"], is_system: true, is_active: true, updated_at: 1700000000 },
-  { id: "permission-group-content-owner", group_key: "content_owner", display_name: "资料负责人", permissions: ["review"], is_system: true, is_active: true, updated_at: 1700000000 },
-  { id: "permission-group-system-admin", group_key: "system_admin", display_name: "系统管理员", permissions: ["organize", "review", "publish", "manage_categories", "import_server"], is_system: true, is_active: true, updated_at: 1700000000 },
+  { id: "permission-group-viewer", group_key: "viewer", display_name: "资料浏览者", permissions: ["workspace.view", "item.view", "item.download", "category.view"], is_system: true, is_active: true, updated_at: 1700000000 },
+  { id: "permission-group-bim-engineer", group_key: "bim_engineer", display_name: "BIM工程师", permissions: ["workspace.view", "item.view", "item.download", "category.view", "item.upload", "item.submit", "item.move_draft", "item.archive_draft", "folder.request"], is_system: true, is_active: true, updated_at: 1700000000 },
+  { id: "permission-group-content-owner", group_key: "content_owner", display_name: "资料负责人", permissions: ["workspace.view", "item.view", "item.download", "category.view", "item.review", "item.move_review", "folder.review", "trash.view", "trash.restore"], is_system: true, is_active: true, updated_at: 1700000000 },
+  { id: "permission-group-publisher", group_key: "publisher", display_name: "发布负责人", permissions: ["workspace.view", "item.view", "item.download", "category.view", "item.publish", "item.archive_published", "trash.view", "index.view"], is_system: true, is_active: true, updated_at: 1700000000 },
+  { id: "permission-group-category-admin", group_key: "category_admin", display_name: "分类管理员", permissions: ["workspace.view", "item.view", "item.download", "category.view", "category.manage", "folder.review"], is_system: true, is_active: true, updated_at: 1700000000 },
+  { id: "permission-group-system-admin", group_key: "system_admin", display_name: "系统管理员", permissions: admin.content_permissions, is_system: true, is_active: true, updated_at: 1700000000 },
+];
+
+const adminConversations = [
+  { id: "conversation-1", title: "合成项目交付规范", user_id: 9002, employee_id: "TEST-EDITOR", real_name: "合成资料员", created_at: 1700000000, updated_at: 1700000400, turn_index: 2 },
+  { id: "conversation-2", title: "合成索引问题排查", user_id: 9003, employee_id: "TEST-MEMBER", real_name: "合成成员", created_at: 1700000100, updated_at: 1700000300, turn_index: 1 },
+];
+
+const conversationState = {
+  id: "conversation-1", title: "合成项目交付规范", user_id: 9002, created_at: 1700000000, updated_at: 1700000400, turn_index: 2,
+  messages: [
+    { id: 501, role: "user", content: "合成问题：交付标准有哪些？", created_at: 1700000200, user_versions: [{ id: 601, version_index: 1, content: "合成问题：交付标准有哪些？", created_at: 1700000200, is_active: false }, { id: 602, version_index: 2, content: "合成问题：交付标准有哪些？（确认版）", created_at: 1700000300, is_active: true }], answer_versions: null, sources_for_ui: null },
+    { id: 502, role: "assistant", content: "合成回答：请按项目交付清单逐项核对。", created_at: 1700000400, user_versions: null, answer_versions: [{ id: 701, version_index: 1, content: "合成回答：请按项目交付清单逐项核对。", created_at: 1700000400, is_active: true, user_version_id: 601 }], sources_for_ui: [] },
+  ],
+};
+
+const feedbackEntries = [
+  { feedback_id: "feedback-1", ts: "2026-08-15T10:00:00Z", kind: "answer", rating: "down", note: "合成反馈：回答需要补充来源", query: "如何归档？", answer_text: "请查阅归档指引。", status: "pending", resolution: null, admin_note: null, conversation_id: "conversation-1", turn_index: 2 },
+  { feedback_id: "feedback-2", ts: "2026-08-14T09:00:00Z", kind: "citation", rating: "up", note: "来源准确", status: "resolved", resolution: "no_action", admin_note: "合成已核对", conversation_id: "conversation-2", turn_index: 1 },
 ];
 
 function json(route: Route, body: unknown, status = 200) {
   return route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
+}
+
+function sse(route: Route, body: string) {
+  return route.fulfill({ status: 200, contentType: "text/event-stream", headers: { "cache-control": "no-cache" }, body });
 }
 
 export async function installAdminRoutes(
@@ -181,8 +268,33 @@ export async function installAdminRoutes(
     if (!path.startsWith("/api/")) return route.continue();
 
     if (path === "/api/auth/me") return json(route, currentUser());
+    const isIndexRead = request.method() === "GET" && path.startsWith("/api/admin/index/");
+    const isTargetRead = request.method() === "GET" && (
+      path.startsWith("/api/admin/content/")
+      || isIndexRead
+      || path.startsWith("/api/admin/media")
+      || path.startsWith("/api/admin/transcription/")
+      || path.startsWith("/api/admin/feedback")
+      || path.startsWith("/api/admin/conversations")
+      || path.startsWith("/api/admin/stats")
+      || path.startsWith("/api/admin/system-overview")
+      || path.startsWith("/api/admin/maintenance")
+    );
+    if (isTargetRead && scenario === "loading") {
+      await new Promise((resolve) => setTimeout(resolve, 1_500));
+    }
+    if (isTargetRead && scenario === "error") {
+      return json(route, { detail: "合成加载失败" }, 503);
+    }
     if (request.method() === "GET" && path === "/api/admin/stats") {
-      return json(route, {
+      return json(route, scenario === "empty" ? {
+        users_total: 0,
+        users_active: 0,
+        conversations_total: 0,
+        conversations_7d: 0,
+        messages_total: 0,
+        messages_7d: 0,
+      } : {
         users_total: 3,
         users_active: 2,
         conversations_total: 12,
@@ -244,12 +356,53 @@ export async function installAdminRoutes(
         },
       });
     }
-    if (request.method() === "GET" && path === "/api/admin/media") return json(route, mediaAssets);
+    if (request.method() === "GET" && path === "/api/admin/maintenance/cleanup-preview") {
+      return json(route, { retention_days: 30, conversations: 4, messages: 12, auth_sessions: 2, oldest_conversation_at: 1690000000, newest_conversation_at: 1695000000 });
+    }
+    if (request.method() === "GET" && path === "/api/admin/maintenance/runs") {
+      return json(route, { runs: [{ id: 1, trigger_source: "automatic", status: "succeeded", retention_days: 30, deleted_conversations: 0, deleted_messages: 0, deleted_auth_sessions: 2, started_at: 1700000000, finished_at: 1700000002, error_summary: null }] });
+    }
+    if (request.method() === "PATCH" && path === "/api/admin/maintenance/settings") {
+      const payload = request.postDataJSON();
+      return json(route, { ...payload, updated_at: 1700000100, updated_by: 9001 });
+    }
+    if (request.method() === "POST" && path === "/api/admin/maintenance/cleanup") {
+      return json(route, { run_id: 2, retention_days: 30, deleted_conversations: 4, deleted_messages: 12, deleted_auth_sessions: 2, started_at: 1700000200, finished_at: 1700000202 });
+    }
+    if (request.method() === "GET" && path === "/api/admin/conversations") return json(route, { conversations: scenario === "empty" ? [] : adminConversations });
+    if (request.method() === "GET" && /^\/api\/admin\/users\/\d+\/conversations$/.test(path)) return json(route, { conversations: scenario === "empty" ? [] : adminConversations.filter((conversation) => conversation.user_id === 9002) });
+    if (request.method() === "GET" && /^\/api\/conversations\/[^/]+$/.test(path)) return json(route, conversationState);
+    if (request.method() === "GET" && path === "/api/admin/feedback") {
+      const entries = scenario === "empty" ? [] : feedbackEntries;
+      return json(route, { entries, total: entries.length, page: 1, page_size: 20, counts: { pending: entries.filter((entry) => entry.status === "pending").length, in_progress: 0, resolved: entries.filter((entry) => entry.status === "resolved").length, archived: 0 } });
+    }
+    if (request.method() === "PATCH" && /^\/api\/admin\/feedback\/[^/]+$/.test(path)) return json(route, feedbackEntries[0]);
+    if (request.method() === "GET" && path === "/api/admin/media") return json(route, scenario === "empty" ? [] : mediaAssets);
     if (request.method() === "GET" && path === "/api/admin/transcription/profiles") return json(route, transcriptionProfiles);
-    if (request.method() === "GET" && path === "/api/admin/transcription/jobs") return json(route, transcriptionJobs);
+    if (request.method() === "GET" && path === "/api/admin/transcription/jobs") return json(route, scenario === "empty" ? [] : transcriptionJobs);
+    if (request.method() === "GET" && /^\/api\/admin\/transcription\/jobs\/[^/]+$/.test(path)) return json(route, transcriptionJobs[0]);
+    if (request.method() === "GET" && path === "/api/admin/transcription/media/media-ready/versions") return json(route, transcriptVersions);
     if (request.method() === "GET" && /^\/api\/admin\/transcription\/media\/[^/]+\/versions$/.test(path)) return json(route, []);
+    if (request.method() === "GET" && path === "/api/admin/transcription/versions/11111111-1111-4111-8111-111111111111/markdown") {
+      return json(route, { version_id: transcriptVersions[0].version_id, markdown: "# 项目交付培训\n\n说话人 1 00:00:00\n**培训开始**\n\n说话人 2 00:00:12\n- 核对模型命名\n- 核对交付目录\n", markdown_sha256: transcriptVersions[0].markdown_sha256 });
+    }
     if (path === "/api/categories") return json(route, { categories: [], second_level_categories: [] });
-    if (path === "/api/conversations") return json(route, { conversations: [] });
+    if (path === "/api/conversations" && request.method() === "GET") return json(route, { conversations: adminConversations.slice(0, 1) });
+    if (path === "/api/conversations" && request.method() === "POST") return json(route, { ...adminConversations[0] });
+    if (request.method() === "GET" && path.startsWith("/api/pdf/")) {
+      return route.fulfill({ status: 404, contentType: "application/pdf", body: "" });
+    }
+    if (request.method() === "GET" && /^\/api\/admin\/content\/versions\/[^/]+\/file$/.test(path)) {
+      return route.fulfill({ status: 200, contentType: "application/pdf", body: "%PDF synthetic fixture" });
+    }
+    if (request.method() === "POST" && path === "/api/admin/content/bulk-download") {
+      return route.fulfill({
+        status: 200,
+        contentType: "application/zip",
+        headers: { "content-disposition": "attachment; filename=managed-content.zip" },
+        body: "synthetic zip fixture",
+      });
+    }
     if (path === "/api/admin/users") return json(route, { users: permissionUsers.map((user) => ({
       id: user.user_id, employee_id: user.employee_id, real_name: user.real_name, role: user.role,
       is_active: user.is_active, created_at: 1700000000, last_login_at: 1700000000,
@@ -257,19 +410,11 @@ export async function installAdminRoutes(
       content_permissions: user.role === "admin" ? admin.content_permissions : user.permissions,
     })) });
 
-    const isIndexRead = request.method() === "GET" && path.startsWith("/api/admin/index/");
-    const isTargetRead = request.method() === "GET" && (path.startsWith("/api/admin/content/") || isIndexRead);
-    if (isTargetRead && scenario === "loading") {
-      await new Promise((resolve) => setTimeout(resolve, 1_500));
-    }
-    if (isTargetRead && scenario === "error") {
-      return json(route, { detail: "合成加载失败" }, 503);
-    }
     if (path === "/api/admin/content/capabilities") {
       return json(route, { enabled: scenario !== "disabled", max_upload_bytes: 10_000_000, supported_extensions: [".pdf", ".md", ".docx", ".xlsx", ".pptx"] });
     }
-    if (path === "/api/admin/content/categories") {
-      const childFolder = { id: "cat-company-modeling", category_key: "company_modeling", parent_id: "cat-company", display_code: "01", display_name: "建模标准", sort_order: 10, level: 2, is_active: true, version: 1, created_at: 1700000000, updated_at: 1700000000, full_path: "03 公司内部标准 / 01 建模标准", item_count: 0 };
+    if (request.method() === "GET" && path === "/api/admin/content/categories") {
+      const childFolder = { id: "cat-company-modeling", category_key: "company_modeling", parent_id: "cat-company", display_code: "01", display_name: "建模标准（长名称用于响应式检查）", sort_order: 10, level: 2, is_active: true, version: 1, created_at: 1700000000, updated_at: 1700000000, full_path: "03 公司内部标准 / 01 建模标准（长名称用于响应式检查）", item_count: 1 };
       return json(route, scenario === "empty" ? [] : options.includeChildFolder ? [...categories, childFolder] : categories);
     }
     if (path === "/api/admin/content/items-page") {
@@ -290,6 +435,9 @@ export async function installAdminRoutes(
     if (path === "/api/admin/content/permissions") {
       return json(route, scenario === "empty" ? [] : permissionUsers);
     }
+    if (path === "/api/admin/content/permission-catalog") {
+      return json(route, permissionCatalog);
+    }
     if (path === "/api/admin/content/permission-groups") {
       return json(route, permissionGroups);
     }
@@ -298,14 +446,80 @@ export async function installAdminRoutes(
     }
     if (request.method() !== "GET" && path.startsWith("/api/admin/content/")) {
       await new Promise((resolve) => setTimeout(resolve, 800));
+      if (request.method() === "POST" && path === "/api/admin/content/categories") {
+        await new Promise((resolve) => setTimeout(resolve, 1_200));
+        const body = request.postDataJSON() as { parent_id?: string | null; display_code?: string; display_name?: string; sort_order?: number };
+        const parent = categories.find((category) => category.id === body.parent_id);
+        const created = {
+          id: "cat-synthetic-created",
+          category_key: "category_synthetic_created",
+          parent_id: body.parent_id || null,
+          display_code: body.display_code || "",
+          display_name: body.display_name || "",
+          sort_order: body.sort_order || 0,
+          level: parent ? parent.level + 1 : 1,
+          is_active: true,
+          version: 1,
+          created_at: 1700000600,
+          updated_at: 1700000600,
+          full_path: `${parent ? `${parent.full_path} / ` : ""}${body.display_code || ""} ${body.display_name || ""}`.trim(),
+          item_count: 0,
+        };
+        return json(route, created);
+      }
+      if (request.method() === "PATCH" && path.startsWith("/api/admin/content/categories/")) {
+        const categoryId = path.split("/").at(-1);
+        const current = categories.find((category) => category.id === categoryId) || categories[0];
+        const body = request.postDataJSON() as Partial<typeof current>;
+        return json(route, { ...current, ...body, version: current.version + 1, updated_at: 1700000600 });
+      }
       if (path === "/api/admin/content/uploads") {
         return json(route, { batch_id: "synthetic-batch", entries: [{ filename: "synthetic.pdf", item_id: "new-item", version_id: "new-version", sha256: null, status: "accepted", reason: null }] });
       }
-      if (path.endsWith("/bulk-review") || path.endsWith("/bulk-publish")) {
-        return json(route, { results: [], succeeded: 0, failed: 0 });
+      if (path.endsWith("/bulk-review") || path.endsWith("/bulk-publish") || path.endsWith("/bulk-move") || path.endsWith("/bulk-archive")) {
+        const body = request.postDataJSON() as { version_ids?: string[]; items?: Array<{ item_id: string; expected_version_id: string }> };
+        const versionIds = body.version_ids || body.items?.map((item) => item.expected_version_id) || [];
+        return json(route, { results: versionIds.map((version_id) => ({ version_id, status: "succeeded", message: null, index_job_id: null })), succeeded: versionIds.length, failed: 0 });
       }
       return json(route, items[0]);
     }
+    if (request.method() === "DELETE" && /^\/api\/admin\/media\/[^/]+$/.test(path)) return route.fulfill({ status: 204 });
     throw new Error(`Visual fixture has no route for ${request.method()} ${path}`);
+  });
+}
+
+export async function installAuthRoutes(page: Page) {
+  await page.route("**/api/**", async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    if (!path.startsWith("/api/")) return route.continue();
+    if (path === "/api/auth/me") return json(route, { detail: "未登录" }, 401);
+    if (path === "/api/auth/login" && request.method() === "POST") return json(route, { detail: "合成用户名或密码错误" }, 401);
+    if (path === "/api/auth/register" && request.method() === "POST") return json(route, { detail: "合成用户名已存在" }, 409);
+    throw new Error(`Auth fixture has no route for ${request.method()} ${path}`);
+  });
+}
+
+export async function installChatRoutes(page: Page, scenario: "normal" | "error" = "normal") {
+  const chatUser = { ...workspaceUsers.member, csrf_token: "synthetic-chat-csrf" };
+  await page.route("**/api/**", async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    if (!path.startsWith("/api/")) return route.continue();
+    if (path === "/api/auth/me") return json(route, chatUser);
+    if (path === "/api/categories") return json(route, { categories: ["公司标准", "项目资料"], second_level_categories: [] });
+    if (path === "/api/conversations" && request.method() === "GET") return json(route, { conversations: [] });
+    if (path === "/api/conversations" && request.method() === "POST") return json(route, { id: "conversation-chat", title: "合成新对话", user_id: chatUser.id, created_at: 1700000000, updated_at: 1700000000, turn_index: 0 });
+    if (path === "/api/conversations/conversation-chat" && request.method() === "GET") return json(route, { ...conversationState, id: "conversation-chat", title: "合成新对话", user_id: chatUser.id, messages: [] });
+    if (path === "/api/conversations/conversation-chat/chat" && request.method() === "POST") {
+      if (scenario === "error") return sse(route, `event: error\ndata: ${JSON.stringify({ message: "合成回答失败" })}\n\n`);
+      return sse(route, [
+        `event: prep\ndata: ${JSON.stringify({ search_query: "合成问题", rewrite_applied: false, history_chars: 0, budget: 1000, fresh_count: 1, final_count: 1, used_sources: [], no_source_fallback: false })}\n\n`,
+        `event: token\ndata: ${JSON.stringify({ text: "合成回答" })}\n\n`,
+        `event: done\ndata: ${JSON.stringify({ answer_text: "合成回答", assistant_message_id: 503, timings: {}, sources: [], history_chars: 0, budget: 1000 })}\n\n`,
+      ].join(""));
+    }
+    if (/^\/api\/conversations\/[^/]+$/.test(path) && request.method() === "DELETE") return route.fulfill({ status: 204 });
+    throw new Error(`Chat fixture has no route for ${request.method()} ${path}`);
   });
 }

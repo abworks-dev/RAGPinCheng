@@ -1,6 +1,6 @@
 import { Eye, RefreshCw, Rocket, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { api } from "../../api/client";
+import { adminContentApi } from "../../api/admin/content";
 import { Badge } from "../../components/ui/badge";
 import { Button, buttonVariants } from "../../components/ui/button";
 import { Card, CardContent } from "../../components/ui/card";
@@ -13,7 +13,7 @@ import { toast } from "../../components/ui/toast";
 import { useAuth } from "../../context/AuthContext";
 import { cn } from "../../lib/utils";
 import type { ManagedCategory, ManagedIndexJob, ManagedIndexJobList } from "../../types";
-import { formatAdminDate, formatBytes } from "./admin-formatters";
+import { formatAdminDate, formatBytes } from "../../lib/admin-formatters";
 
 const PAGE_SIZE = 25;
 const ACTIVE_STATUSES = new Set([
@@ -66,7 +66,7 @@ function sourceOriginLabel(sourceOrigin: string | null): string {
 export function AdminDocumentsPage() {
   const { state } = useAuth();
   const canPublish = state.status === "authed"
-    && (state.user.role === "admin" || state.user.content_permissions?.includes("publish"));
+    && (state.user.role === "admin" || state.user.content_permissions?.includes("item.publish"));
   const [listing, setListing] = useState<ManagedIndexJobList>(EMPTY_LIST);
   const [categories, setCategories] = useState<ManagedCategory[]>([]);
   const [loading, setLoading] = useState(true);
@@ -106,7 +106,7 @@ export function AdminDocumentsPage() {
     background ? setRefreshing(true) : setLoading(true);
     setError(null);
     try {
-      setListing(await api.managedContentIndexJobs(params));
+      setListing(await adminContentApi.indexJobs(params));
     } catch (caught: any) {
       setError(caught?.message || String(caught));
     } finally {
@@ -116,7 +116,7 @@ export function AdminDocumentsPage() {
   }, [params]);
 
   useEffect(() => {
-    api.managedCategories(false)
+    adminContentApi.categories(false)
       .then(setCategories)
       .catch((caught: any) => setError(caught?.message || String(caught)));
   }, []);
@@ -150,7 +150,7 @@ export function AdminDocumentsPage() {
     if (!canPublish || retryingJobId || job.status !== "failed" || !job.is_latest_attempt) return;
     setRetryingJobId(job.id);
     try {
-      await api.publishManagedContent(job.version_id);
+      await adminContentApi.publish(job.version_id);
       toast.success("已重新加入发布队列");
       await load(true);
     } catch (caught) {
@@ -390,7 +390,7 @@ function ManagedJobsTable({
                   <div className="flex flex-wrap gap-2 lg:flex-col lg:items-stretch">
                     <a
                       className={buttonVariants({ variant: "outline", size: "sm" })}
-                      href={api.managedContentFileUrl(job.version_id)}
+                      href={adminContentApi.fileUrl(job.version_id)}
                       target="_blank"
                       rel="noreferrer"
                     >

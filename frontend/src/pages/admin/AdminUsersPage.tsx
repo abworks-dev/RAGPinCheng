@@ -1,10 +1,13 @@
 import { Copy, KeyRound, MoreHorizontal, Plus, Settings, Shield, ShieldCheck, UserCheck, UserRound, UserX, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { api } from "../../api/client";
+import { adminConversationsApi } from "../../api/admin/conversations";
+import { adminContentApi } from "../../api/admin/content";
+import { adminUsersApi } from "../../api/admin/users";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Card, CardContent } from "../../components/ui/card";
+import { AdminConversationDetail } from "../../components/admin/AdminConversationDetail";
 import { Checkbox } from "../../components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../../components/ui/dialog";
 import { EmptyState } from "../../components/ui/empty-state";
@@ -14,33 +17,62 @@ import { LoadingState } from "../../components/ui/loading-state";
 import { Select } from "../../components/ui/select";
 import { toast } from "../../components/ui/toast";
 import { cn } from "../../lib/utils";
-import type { AdminConversation, AdminUser, ContentPermission, ContentPermissionGroup, ConversationState } from "../../types";
-import { formatAdminDate } from "./admin-formatters";
-
-const roleLabels: Record<ConversationState["messages"][number]["role"], string> = {
-  user: "用户",
-  assistant: "助手",
-  system: "系统",
-};
-
-const permissionOptions: { key: ContentPermission; label: string; description: string }[] = [
-  { key: "organize", label: "整理、上传", description: "上传资料并提交确认" },
-  { key: "review", label: "确认", description: "确认或退回待审资料" },
-  { key: "publish", label: "发布", description: "发布资料正式版本" },
-  { key: "manage_categories", label: "分类管理", description: "维护资料分类与层级" },
-  { key: "import_server", label: "后台导入", description: "执行服务器批次导入" },
-];
+import { hasContentWorkspaceAccess } from "../../lib/workspace-access";
+import type { AdminConversation, AdminUser, ContentPermission, ContentPermissionDefinition, ContentPermissionGroup, ConversationState } from "../../types";
+import { formatAdminDate } from "../../lib/admin-formatters";
+import { useAdminUsers } from "../../hooks/useAdminUsers";
 
 const samePermissions = (left: ContentPermission[], right: ContentPermission[]) =>
   left.length === right.length && left.every((item) => right.includes(item));
 
+function updatePermissionSelection(
+  current: ContentPermission[],
+  key: ContentPermission,
+  checked: boolean,
+  options: ContentPermissionDefinition[],
+): ContentPermission[] {
+  const definitions = new Map(options.map((option) => [option.key, option]));
+  const next = new Set(current);
+  if (checked) {
+    const addWithDependencies = (permission: ContentPermission) => {
+      next.add(permission);
+      definitions.get(permission)?.dependencies.forEach(addWithDependencies);
+    };
+    addWithDependencies(key);
+  } else {
+    next.delete(key);
+    let changed = true;
+    while (changed) {
+      changed = false;
+      options.forEach((option) => {
+        if (next.has(option.key) && option.dependencies.some((dependency) => !next.has(dependency))) {
+          next.delete(option.key);
+          changed = true;
+        }
+      });
+    }
+  }
+  return options.filter((option) => next.has(option.key)).map((option) => option.key);
+}
+
+function permissionDomains(options: ContentPermissionDefinition[]) {
+  const grouped = new Map<string, { label: string; options: ContentPermissionDefinition[] }>();
+  options.forEach((option) => {
+    const entry = grouped.get(option.domain) || { label: option.domain_label, options: [] };
+    entry.options.push(option);
+    grouped.set(option.domain, entry);
+  });
+  return [...grouped.entries()].map(([key, value]) => ({ key, ...value }));
+}
+
 export function AdminUsersPage() {
-  const [users, setUsers] = useState<AdminUser[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { users, loading, error, refresh: refreshUsers } = useAdminUsers();
   const [drillUser, setDrillUser] = useState<AdminUser | null>(null);
   const [filter, setFilter] = useState("");
   const [groups, setGroups] = useState<ContentPermissionGroup[]>([]);
+  const [permissionOptions, setPermissionOptions] = useState<ContentPermissionDefinition[]>([]);
+  const [groupsLoading, setGroupsLoading] = useState(true);
+  const [groupsError, setGroupsError] = useState<string | null>(null);
   const [permissionUser, setPermissionUser] = useState<AdminUser | null>(null);
   const [managingGroups, setManagingGroups] = useState(false);
 
@@ -56,30 +88,35 @@ export function AdminUsersPage() {
     );
   }, [users, filter]);
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  const refreshGroups = useCallback(async () => {
+    setGroupsLoading(true);
+    setGroupsError(null);
     try {
-      const [{ users }, permissionGroups] = await Promise.all([
-        api.adminListUsers(),
-        api.managedContentPermissionGroups(),
+      const [permissionGroups, catalog] = await Promise.all([
+        adminContentApi.permissionGroups(),
+        adminContentApi.permissionCatalog(),
       ]);
-      setUsers(users);
+      if (catalog.schema_version !== 3) throw new Error("资料权限目录版本不兼容");
       setGroups(permissionGroups);
-    } catch (e: any) {
-      setError(e?.message || String(e));
+      setPermissionOptions(catalog.permissions);
+    } catch (caught) {
+      setGroupsError(caught instanceof Error ? caught.message : String(caught));
     } finally {
-      setLoading(false);
+      setGroupsLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    refresh();
-  }, [refresh]);
+    void refreshGroups();
+  }, [refreshGroups]);
+
+  const refresh = useCallback(async () => {
+    await Promise.all([refreshUsers(), refreshGroups()]);
+  }, [refreshGroups, refreshUsers]);
 
   async function toggleActive(u: AdminUser) {
     try {
-      await api.adminPatchUser(u.id, { is_active: !u.is_active });
+      await adminUsersApi.patch(u.id, { is_active: !u.is_active });
       refresh();
     } catch (e: any) {
       alert(e?.message || String(e));
@@ -90,7 +127,7 @@ export function AdminUsersPage() {
     const newRole = u.role === "admin" ? "user" : "admin";
     if (!confirm(`将 ${u.real_name}（${u.employee_id}）的角色改为 ${newRole}？`)) return;
     try {
-      await api.adminPatchUser(u.id, { role: newRole });
+      await adminUsersApi.patch(u.id, { role: newRole });
       refresh();
     } catch (e: any) {
       alert(e?.message || String(e));
@@ -105,7 +142,7 @@ export function AdminUsersPage() {
       return;
     }
     try {
-      await api.adminPatchUser(u.id, { reset_password: pw });
+      await adminUsersApi.patch(u.id, { reset_password: pw });
       alert("密码已重置；该用户的所有会话已失效。");
     } catch (e: any) {
       alert(e?.message || String(e));
@@ -149,9 +186,9 @@ export function AdminUsersPage() {
         </CardContent>
       </Card>
 
-      {error ? (
-        <ErrorState title="用户列表加载失败" description={error} />
-      ) : loading ? (
+    {(error || groupsError) ? (
+        <ErrorState title="用户列表加载失败" description={error || groupsError || "权限组加载失败"} />
+      ) : loading || groupsLoading ? (
         <Card>
           <LoadingState className="min-h-56" label="正在加载用户…" />
         </Card>
@@ -201,7 +238,7 @@ export function AdminUsersPage() {
                         {user.is_active ? "启用" : "已停用"}
                       </Badge>
                     </td>
-                    <td className="max-w-56 px-4 py-3"><PermissionSummary user={user} groups={groups} /></td>
+                    <td className="max-w-56 px-4 py-3"><PermissionSummary user={user} groups={groups} options={permissionOptions} /></td>
                     <td className="px-4 py-3 text-right">
                       <Button
                         variant="link"
@@ -242,23 +279,23 @@ export function AdminUsersPage() {
           onClose={() => setDrillUser(null)}
         />
       )}
-      <PermissionDialog user={permissionUser} groups={groups.filter((group) => group.is_active)} onClose={() => setPermissionUser(null)} onSaved={refresh} />
-      <PermissionGroupsDialog open={managingGroups} groups={groups} onOpenChange={setManagingGroups} onSaved={refresh} />
+      <PermissionDialog user={permissionUser} groups={groups.filter((group) => group.is_active)} options={permissionOptions} onClose={() => setPermissionUser(null)} onSaved={refresh} />
+      <PermissionGroupsDialog open={managingGroups} groups={groups} options={permissionOptions} onOpenChange={setManagingGroups} onSaved={refresh} />
     </section>
   );
 }
 
-function PermissionSummary({ user, groups }: { user: AdminUser; groups: ContentPermissionGroup[] }) {
+function PermissionSummary({ user, groups, options }: { user: AdminUser; groups: ContentPermissionGroup[]; options: ContentPermissionDefinition[] }) {
   if (user.role === "admin") return <div className="space-y-1"><Badge variant="info">系统管理员 · 全部权限</Badge><p className="text-ui-xs text-muted-foreground">完整管理工作台</p></div>;
   const permissions = user.content_permissions || [];
   const matched = groups.find((group) => group.is_active && samePermissions(group.permissions, permissions));
-  if (matched) return <div className="space-y-1"><Badge variant={permissions.length ? "outline" : "secondary"}>{matched.display_name}</Badge><p className="text-ui-xs text-muted-foreground">{permissions.length ? "可进入资料工作台" : "无工作台权限"}</p></div>;
+  if (matched) return <div className="space-y-1"><Badge variant={permissions.length ? "outline" : "secondary"}>{matched.display_name}</Badge><p className="text-ui-xs text-muted-foreground">{hasContentWorkspaceAccess(user) ? "可进入资料工作台" : "无工作台权限"}</p></div>;
   if (!permissions.length) return <div className="space-y-1"><Badge variant="secondary">无资料权限</Badge><p className="text-ui-xs text-muted-foreground">无工作台权限</p></div>;
-  const labels = permissionOptions.filter((item) => permissions.includes(item.key)).map((item) => item.label);
-  return <div className="space-y-1"><div className="flex flex-wrap items-center gap-1.5"><Badge variant="outline">自定义</Badge><span className="text-ui-xs text-muted-foreground" title={labels.join("、")}>{labels.slice(0, 2).join("、")}{labels.length > 2 ? ` +${labels.length - 2}` : ""}</span></div><p className="text-ui-xs text-muted-foreground">可进入资料工作台</p></div>;
+  const labels = options.filter((item) => permissions.includes(item.key)).map((item) => item.label);
+  return <div className="space-y-1"><div className="flex flex-wrap items-center gap-1.5"><Badge variant="outline">自定义</Badge><span className="text-ui-xs text-muted-foreground" title={labels.join("、")}>{labels.slice(0, 2).join("、")}{labels.length > 2 ? ` +${labels.length - 2}` : ""}</span></div><p className="text-ui-xs text-muted-foreground">{hasContentWorkspaceAccess(user) ? "可进入资料工作台" : "无工作台权限"}</p></div>;
 }
 
-function PermissionDialog({ user, groups, onClose, onSaved }: { user: AdminUser | null; groups: ContentPermissionGroup[]; onClose: () => void; onSaved: () => Promise<void> }) {
+function PermissionDialog({ user, groups, options, onClose, onSaved }: { user: AdminUser | null; groups: ContentPermissionGroup[]; options: ContentPermissionDefinition[]; onClose: () => void; onSaved: () => Promise<void> }) {
   const [permissions, setPermissions] = useState<ContentPermission[]>([]);
   const [saving, setSaving] = useState(false);
   useEffect(() => { setPermissions(user?.content_permissions || []); }, [user]);
@@ -266,11 +303,12 @@ function PermissionDialog({ user, groups, onClose, onSaved }: { user: AdminUser 
   const disabled = user.role === "admin" || !user.is_active;
   const matched = groups.find((group) => samePermissions(group.permissions, permissions));
   const changed = !samePermissions(permissions, user.content_permissions || []);
+  const domains = permissionDomains(options);
   const save = async () => {
     if (saving) return;
     setSaving(true);
     try {
-      await api.updateManagedContentPermissions(user.id, permissions);
+      await adminContentApi.updatePermissions(user.id, permissions);
       await onSaved();
       toast.success(`${user.real_name}的资料权限已保存`);
       onClose();
@@ -279,9 +317,9 @@ function PermissionDialog({ user, groups, onClose, onSaved }: { user: AdminUser 
     } finally { setSaving(false); }
   };
   return <Dialog open onOpenChange={(open) => { if (!open && !saving) onClose(); }}>
-    <DialogContent className="max-h-[calc(100vh-2rem)] max-w-2xl overflow-y-auto">
+    <DialogContent className="h-[calc(100dvh-2rem)] max-h-[48rem] max-w-3xl grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden">
       <DialogHeader><DialogTitle>设置资料权限</DialogTitle><DialogDescription>{user.real_name} · {user.employee_id}</DialogDescription></DialogHeader>
-      <div className="space-y-5">
+      <div className="min-h-0 space-y-5 overflow-y-auto pr-1">
         <label className="block space-y-1.5 text-ui-sm font-medium">权限组
           <Select aria-label="选择权限组" value={matched?.id || "custom"} disabled={disabled || saving} onChange={(event) => {
             const group = groups.find((item) => item.id === event.target.value);
@@ -291,27 +329,28 @@ function PermissionDialog({ user, groups, onClose, onSaved }: { user: AdminUser 
             <option value="custom">自定义配置</option>
           </Select>
         </label>
-        <fieldset disabled={disabled || saving} className="space-y-2"><legend className="mb-2 text-ui-sm font-medium">实际权限</legend>
-          <div className="grid gap-2 sm:grid-cols-2">{permissionOptions.map((option) => <label key={option.key} className="flex min-h-16 cursor-pointer items-start gap-3 rounded-ui-md border border-border p-3 has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60">
-            <Checkbox className="mt-0.5" checked={user.role === "admin" || permissions.includes(option.key)} onChange={(event) => setPermissions((current) => event.target.checked ? [...current, option.key] : current.filter((item) => item !== option.key))} />
+        <fieldset disabled={disabled || saving} className="space-y-4"><legend className="text-ui-sm font-medium">实际权限</legend>
+          {domains.map((domain) => <section key={domain.key} className="space-y-2" aria-labelledby={`permission-domain-${domain.key}`}><h3 id={`permission-domain-${domain.key}`} className="text-ui-xs font-semibold text-muted-foreground">{domain.label}</h3><div className="grid gap-2 sm:grid-cols-2">{domain.options.map((option) => <label key={option.key} className="flex min-h-16 cursor-pointer items-start gap-3 rounded-ui-md border border-border p-3 has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60">
+            <Checkbox className="mt-0.5" checked={user.role === "admin" || permissions.includes(option.key)} onChange={(event) => setPermissions((current) => updatePermissionSelection(current, option.key, event.target.checked, options))} />
             <span><span className="block text-ui-sm font-medium">{option.label}</span><span className="mt-0.5 block text-ui-xs text-muted-foreground">{option.description}</span></span>
-          </label>)}</div>
+          </label>)}</div></section>)}
         </fieldset>
         <div className="rounded-ui-md bg-surface-muted px-3 py-2 text-ui-xs text-muted-foreground" role="status">
-          {user.role === "admin" ? "管理员默认拥有全部权限和完整管理工作台，不能单独取消。" : !user.is_active ? "账号已停用，权限保留但暂不能修改。" : permissions.length ? `保存后可进入资料工作台，并拥有：${permissionOptions.filter((item) => permissions.includes(item.key)).map((item) => item.label).join("、")}` : "保存后将不拥有资料权限，也不能进入资料工作台。"}
+          {user.role === "admin" ? "管理员默认拥有全部权限和完整管理工作台，不能单独取消。" : !user.is_active ? "账号已停用，权限保留但暂不能修改。" : permissions.length ? `保存后拥有：${options.filter((item) => permissions.includes(item.key)).map((item) => item.label).join("、")}` : "保存后将不拥有资料权限，也不能进入资料工作台。"}
         </div>
       </div>
-      <DialogFooter><Button variant="outline" onClick={onClose} disabled={saving}>取消</Button><Button onClick={() => void save()} disabled={disabled || saving || !changed}>{saving ? "保存中…" : "保存权限"}</Button></DialogFooter>
+      <DialogFooter className="border-t border-border pt-4"><Button variant="outline" onClick={onClose} disabled={saving}>取消</Button><Button onClick={() => void save()} disabled={disabled || saving || !changed}>{saving ? "保存中…" : "保存权限"}</Button></DialogFooter>
     </DialogContent>
   </Dialog>;
 }
 
-function PermissionGroupsDialog({ open, groups, onOpenChange, onSaved }: { open: boolean; groups: ContentPermissionGroup[]; onOpenChange: (open: boolean) => void; onSaved: () => Promise<void> }) {
+function PermissionGroupsDialog({ open, groups, options, onOpenChange, onSaved }: { open: boolean; groups: ContentPermissionGroup[]; options: ContentPermissionDefinition[]; onOpenChange: (open: boolean) => void; onSaved: () => Promise<void> }) {
   const [selectedId, setSelectedId] = useState("");
   const [name, setName] = useState("");
   const [permissions, setPermissions] = useState<ContentPermission[]>([]);
   const [saving, setSaving] = useState(false);
   const selected = groups.find((group) => group.id === selectedId);
+  const domains = permissionDomains(options);
   useEffect(() => {
     if (!open) return;
     const first = groups[0];
@@ -326,8 +365,8 @@ function PermissionGroupsDialog({ open, groups, onOpenChange, onSaved }: { open:
     if (saving) return;
     setSaving(true);
     try {
-      if (selected) await api.updateManagedContentPermissionGroup(selected.id, { display_name: name.trim(), permissions });
-      else await api.createManagedContentPermissionGroup({ display_name: name.trim(), permissions });
+      if (selected) await adminContentApi.updatePermissionGroup(selected.id, { display_name: name.trim(), permissions });
+      else await adminContentApi.createPermissionGroup({ display_name: name.trim(), permissions });
       await onSaved(); toast.success(selected ? "权限组已保存" : "权限组已创建");
     } catch (saveError) { toast.error(saveError instanceof Error ? saveError.message : "权限组保存失败"); }
     finally { setSaving(false); }
@@ -336,21 +375,21 @@ function PermissionGroupsDialog({ open, groups, onOpenChange, onSaved }: { open:
   const deactivate = async () => {
     if (!selected || selected.is_system || saving) return;
     setSaving(true);
-    try { await api.updateManagedContentPermissionGroup(selected.id, { is_active: !selected.is_active }); await onSaved(); toast.success(selected.is_active ? "权限组已停用" : "权限组已启用"); }
+    try { await adminContentApi.updatePermissionGroup(selected.id, { is_active: !selected.is_active }); await onSaved(); toast.success(selected.is_active ? "权限组已停用" : "权限组已启用"); }
     catch (saveError) { toast.error(saveError instanceof Error ? saveError.message : "权限组状态保存失败"); }
     finally { setSaving(false); }
   };
-  return <Dialog open={open} onOpenChange={(next) => { if (!saving) onOpenChange(next); }}><DialogContent className="max-h-[calc(100vh-2rem)] max-w-3xl overflow-y-auto">
+  return <Dialog open={open} onOpenChange={(next) => { if (!saving) onOpenChange(next); }}><DialogContent className="h-[calc(100dvh-2rem)] max-h-[48rem] max-w-3xl grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden">
     <DialogHeader><DialogTitle>权限组管理</DialogTitle><DialogDescription>权限组是配置模板；修改模板不会改变既有用户权限。</DialogDescription></DialogHeader>
-    <div className="grid gap-5 md:grid-cols-[15rem_minmax(0,1fr)]">
+    <div className="grid min-h-0 gap-5 overflow-y-auto pr-1 md:grid-cols-[15rem_minmax(0,1fr)]">
       <div className="space-y-2"><Button variant="outline" className="w-full justify-start" onClick={() => choose("new")}><Plus className="size-4" />新建权限组</Button>
         <div className="divide-y divide-border border-y border-border">{groups.map((group) => <button type="button" key={group.id} onClick={() => choose(group.id)} className={cn("flex w-full items-center justify-between gap-2 px-2 py-2.5 text-left text-ui-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", selectedId === group.id && "bg-primary/10")}><span>{group.display_name}</span><Badge variant={group.is_active ? "outline" : "secondary"}>{group.is_system ? "预设" : group.is_active ? "自定义" : "停用"}</Badge></button>)}</div>
       </div>
       <div className="space-y-4"><label className="block space-y-1.5 text-ui-sm font-medium">权限组名称<Input value={name} disabled={selected?.is_system || saving} onChange={(event) => setName(event.target.value)} /></label>
-        <fieldset disabled={selected?.is_system || saving} className="space-y-2"><legend className="text-ui-sm font-medium">模板权限</legend>{permissionOptions.map((option) => <label key={option.key} className="flex min-h-control-md items-center gap-2 rounded-ui-md border border-border px-3 py-2 text-ui-sm has-[:disabled]:opacity-60"><Checkbox checked={permissions.includes(option.key)} onChange={(event) => setPermissions((current) => event.target.checked ? [...current, option.key] : current.filter((item) => item !== option.key))} />{option.label}</label>)}</fieldset>
-        <div className="flex flex-wrap justify-between gap-2"><div>{selected && <Button variant="outline" onClick={copy} disabled={saving}><Copy className="size-4" />复制</Button>}</div><div className="flex gap-2">{selected && !selected.is_system && <Button variant="outline" onClick={() => void deactivate()} disabled={saving}>{selected.is_active ? "停用" : "启用"}</Button>}<Button onClick={() => void save()} disabled={saving || selected?.is_system || name.trim().length < 2}>{saving ? "保存中…" : selected ? "保存模板" : "创建模板"}</Button></div></div>
+        <fieldset disabled={selected?.is_system || saving} className="space-y-4"><legend className="text-ui-sm font-medium">模板权限</legend>{domains.map((domain) => <section key={domain.key} className="space-y-2"><h3 className="text-ui-xs font-semibold text-muted-foreground">{domain.label}</h3><div className="grid gap-2 sm:grid-cols-2">{domain.options.map((option) => <label key={option.key} className="flex min-h-control-md items-center gap-2 rounded-ui-md border border-border px-3 py-2 text-ui-sm has-[:disabled]:opacity-60"><Checkbox checked={permissions.includes(option.key)} onChange={(event) => setPermissions((current) => updatePermissionSelection(current, option.key, event.target.checked, options))} />{option.label}</label>)}</div></section>)}</fieldset>
       </div>
     </div>
+    <DialogFooter className="border-t border-border pt-4"><div className="flex w-full flex-wrap items-center justify-between gap-2"><div>{selected && <Button variant="outline" onClick={copy} disabled={saving}><Copy className="size-4" />复制</Button>}</div><div className="flex flex-wrap gap-2">{selected && !selected.is_system && <Button variant="outline" onClick={() => void deactivate()} disabled={saving}>{selected.is_active ? "停用" : "启用"}</Button>}<Button onClick={() => void save()} disabled={saving || selected?.is_system || name.trim().length < 2}>{saving ? "保存中…" : selected ? "保存模板" : "创建模板"}</Button></div></div></DialogFooter>
   </DialogContent></Dialog>;
 }
 
@@ -508,7 +547,7 @@ function UserConversationsDrillIn({
   useEffect(() => {
     (async () => {
       try {
-        const { conversations } = await api.adminListUserConversations(user.id);
+        const { conversations } = await adminConversationsApi.listForUser(user.id);
         setList(conversations);
       } finally {
         setLoading(false);
@@ -550,7 +589,7 @@ function UserConversationsDrillIn({
                       type="button"
                       onClick={async () => {
                         try {
-                          const state = await api.adminGetConversation(conversation.id);
+                          const state = await adminConversationsApi.get(conversation.id);
                           setSelected(state);
                         } catch (e: any) {
                           alert(e?.message || String(e));
@@ -573,44 +612,11 @@ function UserConversationsDrillIn({
           </div>
 
           <div className="min-h-0 overflow-y-auto p-4 sm:p-5">
-            {!selected ? (
-              <EmptyState
-                className="min-h-56 border-0 bg-surface-muted"
-                title="选择一条对话"
-                description="从列表选择对话后，可在这里查看完整消息。"
-              />
-            ) : (
-              <div className="space-y-4">
-                <div className="border-b border-border pb-3">
-                  <h3 className="text-ui-lg font-semibold text-foreground">{selected.title}</h3>
-                  <p className="mt-1 text-ui-xs text-muted-foreground">{selected.turn_index} 轮对话</p>
-                </div>
-                {selected.messages.map((message, index) => {
-                  const isUser = message.role === "user";
-                  return (
-                    <article
-                      key={message.id ?? `${message.role}-${index}`}
-                      className={cn(
-                        "rounded-ui-xl border px-4 py-3",
-                        isUser
-                          ? "ml-auto w-fit max-w-[88%] border-primary/20 bg-primary/10"
-                          : "mr-auto w-full max-w-3xl border-border bg-surface-muted",
-                      )}
-                    >
-                      <Badge
-                        variant={message.role === "user" ? "info" : message.role === "system" ? "warning" : "outline"}
-                        className={message.role === "assistant" ? "border-border bg-card" : undefined}
-                      >
-                        {roleLabels[message.role]}
-                      </Badge>
-                      <p className="mt-2 max-w-[72ch] whitespace-pre-wrap break-words text-ui-sm leading-relaxed text-foreground">
-                        {message.content}
-                      </p>
-                    </article>
-                  );
-                })}
-              </div>
-            )}
+            <AdminConversationDetail
+              conversation={selected}
+              emptyTitle="选择一条对话"
+              emptyDescription="从列表选择对话后，可在这里查看完整消息。"
+            />
           </div>
         </div>
       </Card>

@@ -47,7 +47,7 @@ describe("UserMenu collapsed layout", () => {
   });
 
   it("shows the content workspace to users with content permissions", async () => {
-    auth.user = { id: 2, employee_id: "bim01", real_name: "李工", role: "user", csrf_token: "csrf", content_permissions: ["organize"] };
+    auth.user = { id: 2, employee_id: "bim01", real_name: "李工", role: "user", csrf_token: "csrf", content_permissions: ["workspace.view", "item.view"] };
     render(<MemoryRouter><UserMenu /></MemoryRouter>);
     fireEvent.click(screen.getByRole("button", { name: /李工/ }));
     expect(await screen.findByRole("button", { name: "资料工作台" })).toBeInTheDocument();
@@ -62,7 +62,7 @@ describe("UserMenu collapsed layout", () => {
   });
 
   it("rechecks permission before entering the content workspace", async () => {
-    auth.user = { id: 2, employee_id: "bim01", real_name: "李工", role: "user", csrf_token: "csrf", content_permissions: ["organize"] };
+    auth.user = { id: 2, employee_id: "bim01", real_name: "李工", role: "user", csrf_token: "csrf", content_permissions: ["workspace.view", "item.view"] };
     auth.refreshUser
       .mockResolvedValueOnce(auth.user)
       .mockResolvedValueOnce({ ...auth.user, content_permissions: [] });

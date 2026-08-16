@@ -4,7 +4,7 @@ import { Button } from "../../components/ui/button";
 import { IconButton } from "../../components/ui/icon-button";
 import { LoadingState } from "../../components/ui/loading-state";
 import type { AppSystemMetrics, GpuSystemMetrics, SystemOverview } from "../../types";
-import { formatAdminDate, formatBytes } from "./admin-formatters";
+import { formatAdminDate, formatBytes } from "../../lib/admin-formatters";
 
 type ProductionRuntimeStatusProps = {
   data: SystemOverview | null;
@@ -58,7 +58,7 @@ function appCard(app: AppSystemMetrics) {
   const memoryPercent = app.memory_used_bytes !== null && app.memory_total_bytes ? (app.memory_used_bytes / app.memory_total_bytes) * 100 : null;
   const diskPercent = app.disk_used_bytes !== null && app.disk_total_bytes ? (app.disk_used_bytes / app.disk_total_bytes) * 100 : null;
   return (
-    <div className="space-y-4 border border-border bg-card p-4 sm:p-5">
+    <div className="space-y-4 p-4 sm:p-5">
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-start gap-3">
           <span className="flex size-9 shrink-0 items-center justify-center rounded-ui-md bg-primary/10 text-primary"><Server className="size-4" /></span>
@@ -79,7 +79,7 @@ function appCard(app: AppSystemMetrics) {
 function gpuCard(gpu: GpuSystemMetrics) {
   const vramPercent = gpu.vram_used_bytes !== null && gpu.vram_total_bytes ? (gpu.vram_used_bytes / gpu.vram_total_bytes) * 100 : null;
   return (
-    <div className="space-y-4 border border-border bg-card p-4 sm:p-5">
+    <div className="space-y-4 p-4 sm:p-5">
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-start gap-3">
           <span className="flex size-9 shrink-0 items-center justify-center rounded-ui-md bg-info/10 text-info"><Cpu className="size-4" /></span>
@@ -112,14 +112,14 @@ export function ProductionRuntimeStatus({ data, loading, error, onRefresh }: Pro
           <RefreshCw className={loading ? "size-4 animate-spin" : "size-4"} />
         </IconButton>
       </div>
-      {loading && !data ? <div className="border border-border bg-card"><LoadingState className="min-h-40" label="正在检查生产运行状态…" /></div> : error && !data ? <div role="alert" className="flex flex-col gap-3 border border-destructive/30 bg-destructive/5 px-4 py-5 sm:flex-row sm:items-center sm:justify-between"><p className="text-ui-sm text-destructive">生产运行状态暂不可用：{error}</p><Button variant="outline" size="sm" onClick={onRefresh}>重试</Button></div> : data ? <>
-        <div className="flex flex-col gap-2 border border-border bg-surface-muted/60 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+      {loading && !data ? <div className="overflow-hidden rounded-ui-xl border border-border bg-card"><LoadingState className="min-h-40" label="正在检查生产运行状态…" /></div> : error && !data ? <div role="alert" className="flex flex-col gap-3 rounded-ui-xl border border-destructive/30 bg-destructive/5 px-4 py-5 sm:flex-row sm:items-center sm:justify-between"><p className="text-ui-sm text-destructive">生产运行状态暂不可用：{error}</p><Button variant="outline" size="sm" onClick={onRefresh}>重试</Button></div> : data ? <div className="overflow-hidden rounded-ui-xl border border-border bg-card">
+        <div className="flex flex-col gap-2 border-b border-border bg-surface-muted/60 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-2 text-ui-sm"><HardDrive className="size-4 text-muted-foreground" /><span className="font-medium text-foreground">部署关系</span><Badge variant={data.topology === "shared" ? "info" : data.topology === "separate" ? "secondary" : "warning"}>{data.topology === "shared" ? "同机部署" : data.topology === "separate" ? "分离部署" : "待确认"}</Badge></div>
           <span className="text-ui-xs text-muted-foreground">统一检查时间：{formatAdminDate(data.checked_at)}</span>
         </div>
-        {error && <p role="status" className="text-ui-xs text-warning">GPU 节点连接不稳定，页面保留最近一次可信数据。</p>}
-        <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">{appCard(data.app)}{gpuCard(data.gpu)}</div>
-      </> : null}
+        {error && <p role="status" className="border-b border-border px-4 py-2 text-ui-xs text-warning">GPU 节点连接不稳定，页面保留最近一次可信数据。</p>}
+        <div className="grid grid-cols-1 divide-y divide-border xl:grid-cols-2 xl:divide-x xl:divide-y-0">{appCard(data.app)}{gpuCard(data.gpu)}</div>
+      </div> : null}
     </section>
   );
 }

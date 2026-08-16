@@ -1,5 +1,5 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
-import { api } from "../../api/client";
+import { adminFeedbackApi } from "../../api/admin/feedback";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Card, CardContent } from "../../components/ui/card";
@@ -77,7 +77,7 @@ export function AdminFeedbackPage() {
     setLoading(true);
     setError(null);
     try {
-      setResponse(await api.adminFeedback({ status, kind, rating, q: query, page, page_size: pageSize }));
+      setResponse(await adminFeedbackApi.list({ status, kind, rating, q: query, page, page_size: pageSize }));
     } catch (e: any) {
       setError(e?.message || String(e));
     } finally {
@@ -95,7 +95,7 @@ export function AdminFeedbackPage() {
     setBusyId(entry.feedback_id);
     setError(null);
     try {
-      await api.adminPatchFeedback(entry.feedback_id, { status: nextStatus, ...extra });
+      await adminFeedbackApi.patch(entry.feedback_id, { status: nextStatus, ...extra });
       setEditingId(null);
       await refresh();
     } catch (e: any) {

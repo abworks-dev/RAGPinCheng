@@ -6,11 +6,8 @@ from collections.abc import Callable
 from fastapi import Depends, HTTPException, status
 
 from .auth import CurrentUser, require_csrf, require_user
+from .content_permission_catalog import CONTENT_PERMISSIONS
 from .db import get_db
-
-CONTENT_PERMISSIONS = frozenset(
-    {"organize", "review", "publish", "manage_categories", "import_server"}
-)
 
 
 def has_content_permission(
