@@ -181,6 +181,8 @@ describe("AdminManagedContentPage", () => {
     await openRootFolder();
     await screen.findAllByText("建模标准");
     fireEvent.click(screen.getAllByRole("button", { name: "查看" })[0]);
+    const updatedAtLabel = screen.getByText("最后更新时间");
+    expect(updatedAtLabel.parentElement).toHaveClass("grid-cols-[max-content_minmax(0,1fr)]", "[&_dt]:whitespace-nowrap");
     fireEvent.click(screen.getByRole("button", { name: "预览文件" }));
     expect(mocks.openPreview).toHaveBeenCalledWith("parent-1", "建模标准", "pdf", 1, {}, "managed-content-detail");
     expect(screen.getByRole("button", { name: "预览文件" })).toBeInTheDocument();
