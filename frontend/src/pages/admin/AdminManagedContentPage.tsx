@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { ArchiveRestore, ArrowDown, ArrowUp, ArrowUpDown, Check, ChevronDown, ChevronRight, Download, Eye, FileUp, Folder, FolderInput, FolderPlus, Info, Pencil, RefreshCw, Rocket, Search, Send, Trash2, Upload, X } from "lucide-react";
 import { adminContentApi } from "../../api/admin/content";
@@ -142,6 +142,21 @@ function BatchActionsMenu({
       document.removeEventListener("keydown", closeEscape);
     };
   }, [open]);
+
+  useLayoutEffect(() => {
+    if (!open || !triggerRef.current || !menuRef.current) return;
+    const triggerRect = triggerRef.current.getBoundingClientRect();
+    const menuRect = menuRef.current.getBoundingClientRect();
+    const minimumOffset = 12;
+    const preferredTop = triggerRect.bottom + 6;
+    const maximumTop = window.innerHeight - menuRect.height - minimumOffset;
+    const top = Math.min(preferredTop, Math.max(minimumOffset, maximumTop));
+    const left = Math.min(
+      Math.max(minimumOffset, triggerRect.right - menuRect.width),
+      Math.max(minimumOffset, window.innerWidth - menuRect.width - minimumOffset),
+    );
+    setPosition({ top, left });
+  }, [open, options.length]);
 
   useEffect(() => {
     if (!open) return;
