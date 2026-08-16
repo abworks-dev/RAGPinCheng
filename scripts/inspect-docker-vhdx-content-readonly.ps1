@@ -44,6 +44,30 @@ function Invoke-HiddenWsl([string]$WslPath, [string[]]$Arguments, [string]$Outpu
     return [int]$LASTEXITCODE
 }
 
+function ConvertFrom-WslHelpBytes([byte[]]$Bytes) {
+    if (-not $Bytes -or $Bytes.Count -eq 0) { return '' }
+    if ($Bytes.Count -ge 2 -and $Bytes[0] -eq 0xff -and $Bytes[1] -eq 0xfe) { return [Text.Encoding]::Unicode.GetString($Bytes,2,$Bytes.Count-2).Replace("$([char]0)",'') }
+    $sampleLength=[Math]::Min($Bytes.Count,512); $oddNulls=0
+    for ($index=1; $index -lt $sampleLength; $index+=2) { if ($Bytes[$index] -eq 0) { $oddNulls++ } }
+    if ($oddNulls -ge 2) { return [Text.Encoding]::Unicode.GetString($Bytes).Replace("$([char]0)",'') }
+    return [Text.Encoding]::UTF8.GetString($Bytes).Replace("$([char]0)",'')
+}
+
+function Get-WslHelp([string]$WslPath) {
+    $output=Join-Path ([IO.Path]::GetTempPath()) ("ragpincheng-wsl-help-{0}.out" -f [guid]::NewGuid().ToString('N'))
+    $errorOutput="$output.err"
+    try {
+        [void](Invoke-HiddenWsl $WslPath @('--help') $output $errorOutput)
+        $bytes=[Collections.Generic.List[byte]]::new()
+        foreach ($capture in @($output,$errorOutput)) {
+            if (Test-Path -LiteralPath $capture -PathType Leaf) { $bytes.AddRange([IO.File]::ReadAllBytes($capture)) }
+        }
+        return ConvertFrom-WslHelpBytes $bytes.ToArray()
+    } finally {
+        foreach ($capture in @($output,$errorOutput)) { if (Test-Path -LiteralPath $capture) { [IO.File]::Delete($capture) } }
+    }
+}
+
 function Get-MountCapableWslPath {
     $candidates=[Collections.Generic.List[string]]::new()
     foreach ($candidate in @(
@@ -55,7 +79,7 @@ function Get-MountCapableWslPath {
     $command=Get-Command wsl.exe -ErrorAction SilentlyContinue
     if ($command -and -not $candidates.Contains($command.Source)) { $candidates.Add($command.Source) }
     foreach ($candidate in $candidates) {
-        $help=(& $candidate --help 2>&1 | Out-String)
+        $help=Get-WslHelp $candidate
         $capable=$true
         foreach ($required in @('--mount','--unmount','--vhd','--system','--name','--options')) {
             if ($help.IndexOf($required,[StringComparison]::OrdinalIgnoreCase) -lt 0) { $capable=$false }
