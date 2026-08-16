@@ -142,6 +142,15 @@ const item = {
   updated_at: 1,
 };
 
+async function openFolder(label: RegExp, categoryId: string) {
+  fireEvent.click(await screen.findByRole("button", { name: label }));
+  await waitFor(() => expect(mocks.items).toHaveBeenLastCalledWith(expect.objectContaining({ category_id: categoryId })));
+}
+
+async function openDefaultFolder() {
+  await openFolder(/^03 公司内部标准/, "cat-03");
+}
+
 describe("AdminManagedContentPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -158,6 +167,7 @@ describe("AdminManagedContentPage", () => {
 
   it("shows only review actions to a reviewer and submits the decision", async () => {
     render(<AdminManagedContentPage />);
+    await openDefaultFolder();
     expect((await screen.findAllByText("建模标准")).length).toBeGreaterThan(0);
     expect(screen.queryByLabelText("选择资料文件")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "提交" })).not.toBeInTheDocument();
@@ -169,6 +179,7 @@ describe("AdminManagedContentPage", () => {
 
   it("opens indexed files in the shared preview drawer", async () => {
     render(<AdminManagedContentPage />);
+    await openDefaultFolder();
     await screen.findAllByText("建模标准");
     fireEvent.click(screen.getAllByRole("button", { name: "查看" })[0]);
     fireEvent.click(screen.getByRole("button", { name: "预览文件" }));
@@ -177,6 +188,7 @@ describe("AdminManagedContentPage", () => {
 
   it("loads all statuses by default and keeps disabled bulk actions visible", async () => {
     render(<AdminManagedContentPage />);
+    await openDefaultFolder();
     await screen.findAllByText("建模标准");
 
     expect(mocks.items).toHaveBeenCalledWith(expect.objectContaining({
@@ -193,11 +205,10 @@ describe("AdminManagedContentPage", () => {
     mocks.categories.mockResolvedValue([category, projectCategory]);
     render(<AdminManagedContentPage />);
 
-    const rootFolder = await screen.findByRole("combobox", { name: "一级目录" });
-    await waitFor(() => expect(rootFolder).toHaveValue("cat-03"));
-    fireEvent.change(rootFolder, { target: { value: "cat-04" } });
+    await openDefaultFolder();
+    fireEvent.click(screen.getByRole("button", { name: /^\/$/ }));
+    await openFolder(/^04 项目资料/, "cat-04");
 
-    await waitFor(() => expect(mocks.items).toHaveBeenCalledWith(expect.objectContaining({ category_id: "cat-04" })));
     expect(screen.getByText(/当前目录：04 项目资料/)).toBeInTheDocument();
   });
 
@@ -208,6 +219,7 @@ describe("AdminManagedContentPage", () => {
       status_counts: { published: 1 },
     });
     render(<AdminManagedContentPage />);
+    await openDefaultFolder();
     await screen.findAllByText("建模标准");
     fireEvent.click(screen.getByRole("tab", { name: "回收站" }));
     expect(await screen.findByText(/整理员 于/)).toBeInTheDocument();
@@ -225,6 +237,7 @@ describe("AdminManagedContentPage", () => {
       status_counts: { draft: 1 },
     });
     render(<AdminManagedContentPage />);
+    await openDefaultFolder();
     await screen.findAllByText("建模标准");
 
     fireEvent.click(screen.getAllByRole("button", { name: "移至回收站" })[0]);
@@ -238,9 +251,11 @@ describe("AdminManagedContentPage", () => {
 
   it("requires publish permission for reviewed content and blocks publishing content", async () => {
     mocks.permissions = ["organize"];
-    render(<AdminManagedContentPage />);
+    const organizerView = render(<AdminManagedContentPage />);
+    await openDefaultFolder();
     await screen.findAllByText("建模标准");
     expect(screen.queryByRole("button", { name: "移至回收站" })).not.toBeInTheDocument();
+    organizerView.unmount();
 
     mocks.permissions = ["publish"];
     mocks.items.mockResolvedValue({
@@ -249,6 +264,7 @@ describe("AdminManagedContentPage", () => {
       status_counts: { publishing: 1 },
     });
     const { unmount } = render(<AdminManagedContentPage />);
+    await openDefaultFolder();
     await waitFor(() => expect(screen.getAllByRole("button", { name: "移至回收站" })[0]).toBeDisabled());
     expect(screen.getAllByRole("button", { name: "移至回收站" })[0]).toHaveAttribute("title", "资料正在发布，暂时不能移入回收站");
     unmount();
@@ -258,6 +274,7 @@ describe("AdminManagedContentPage", () => {
     mocks.permissions = ["publish"];
     mocks.deleteContent.mockRejectedValue(new Error("资料版本已变化，请刷新后重试"));
     render(<AdminManagedContentPage />);
+    await openDefaultFolder();
     await screen.findAllByText("建模标准");
     fireEvent.click(screen.getAllByRole("button", { name: "移至回收站" })[0]);
     fireEvent.click(screen.getByRole("button", { name: "确认移入" }));
@@ -268,6 +285,7 @@ describe("AdminManagedContentPage", () => {
 
   it("enables applicable bulk actions without mounting a new toolbar", async () => {
     render(<AdminManagedContentPage />);
+    await openDefaultFolder();
     await screen.findAllByText("建模标准");
     const toolbar = screen.getByTestId("managed-bulk-toolbar");
 
@@ -287,6 +305,7 @@ describe("AdminManagedContentPage", () => {
       entries: [{ filename: "guide.md", item_id: "item-2", version_id: "version-2", sha256: "b".repeat(64), status: "accepted", reason: null }],
     });
     render(<AdminManagedContentPage />);
+    await openDefaultFolder();
     fireEvent.click(await screen.findByRole("button", { name: "上传文件" }));
     const input = await screen.findByLabelText("选择资料文件");
     expect(screen.queryByLabelText("选择资料文件夹")).not.toBeInTheDocument();
@@ -303,6 +322,7 @@ describe("AdminManagedContentPage", () => {
     mocks.items.mockResolvedValue({ items: [], total: 0, status_counts: {} });
     mocks.upload.mockRejectedValue(new Error("上传服务暂不可用"));
     render(<AdminManagedContentPage />);
+    await openDefaultFolder();
 
     fireEvent.click(await screen.findByRole("button", { name: "上传文件" }));
     const file = new File(["# Retry"], "retry.md", { type: "text/markdown" });
@@ -319,8 +339,8 @@ describe("AdminManagedContentPage", () => {
     mocks.items.mockResolvedValue({ items: [], total: 0, status_counts: {} });
     mocks.upload.mockResolvedValue({ batch_id: "batch-drop", entries: [] });
     render(<AdminManagedContentPage />);
+    await openDefaultFolder();
     const file = new File(["# Dropped"], "dropped.md", { type: "text/markdown" });
-    await waitFor(() => expect(screen.getByLabelText("一级目录")).toHaveValue("cat-03"));
     const folderCard = screen.getByTestId("managed-content-drop-list");
 
     fireEvent.drop(folderCard!, { dataTransfer: { files: [file], types: ["Files"] } });
@@ -328,7 +348,6 @@ describe("AdminManagedContentPage", () => {
     expect(screen.getByRole("dialog")).toHaveTextContent("dropped.md");
     expect(mocks.upload).not.toHaveBeenCalled();
 
-    fireEvent.change(screen.getByLabelText("一级目录"), { target: { value: "cat-04" } });
     fireEvent.click(screen.getByRole("button", { name: "确定上传" }));
     await waitFor(() => expect(mocks.upload).toHaveBeenCalledWith([file], "cat-03"));
   });
@@ -337,8 +356,8 @@ describe("AdminManagedContentPage", () => {
     mocks.permissions = ["organize"];
     mocks.items.mockResolvedValue({ items: [], total: 0, status_counts: {} });
     render(<AdminManagedContentPage />);
+    await openDefaultFolder();
     const file = new File(["cancelled"], "cancelled.pdf", { type: "application/pdf" });
-    await waitFor(() => expect(screen.getByLabelText("一级目录")).toHaveValue("cat-03"));
 
     fireEvent.drop(screen.getByTestId("managed-content-drop-list"), { dataTransfer: { files: [file], types: ["Files"] } });
     fireEvent.click(await screen.findByRole("button", { name: "取消" }));
@@ -352,6 +371,7 @@ describe("AdminManagedContentPage", () => {
     mocks.categories.mockResolvedValue([category, childCategory]);
     mocks.upload.mockResolvedValue({ batch_id: "batch-folder", entries: [] });
     render(<AdminManagedContentPage />);
+    await openDefaultFolder();
     const folderButtons = await screen.findAllByRole("button", { name: /01 建模标准/ });
     fireEvent.click(folderButtons[0]);
     await waitFor(() => expect(mocks.items).toHaveBeenCalledWith(expect.objectContaining({ category_id: "cat-03-01" })));
@@ -366,6 +386,7 @@ describe("AdminManagedContentPage", () => {
     mocks.permissions = ["manage_categories"];
     mocks.createCategory.mockResolvedValue(childCategory);
     render(<AdminManagedContentPage />);
+    await openDefaultFolder();
     fireEvent.click(await screen.findByRole("button", { name: "新建" }));
     fireEvent.change(screen.getByLabelText("文件夹名称"), { target: { value: "审核标准" } });
     fireEvent.click(screen.getByRole("button", { name: "创建" }));
@@ -378,6 +399,7 @@ describe("AdminManagedContentPage", () => {
     mocks.permissions = ["organize"];
     mocks.createFolderRequest.mockResolvedValue({ id: "request-1" });
     render(<AdminManagedContentPage />);
+    await openDefaultFolder();
 
     fireEvent.click(await screen.findByRole("button", { name: "新建" }));
     fireEvent.change(screen.getByLabelText("文件夹名称"), { target: { value: "审核标准" } });
@@ -412,6 +434,7 @@ describe("AdminManagedContentPage", () => {
     });
     mocks.moveContent.mockResolvedValue({ ...item, category_id: "cat-03-01" });
     render(<AdminManagedContentPage />);
+    await openDefaultFolder();
 
     const row = await screen.findByTitle("拖动到上方文件夹可移动资料");
     const targetFolder = screen.getAllByRole("button", { name: /01 建模标准/ })[0];
@@ -429,6 +452,7 @@ describe("AdminManagedContentPage", () => {
     render(<AdminManagedContentPage />);
     expect(screen.getByText("正在加载资料…")).toBeInTheDocument();
     resolveCapabilities?.({ enabled: true, max_upload_bytes: 1024, supported_extensions: [".pdf"] });
+    await openDefaultFolder();
     expect((await screen.findAllByText("建模标准")).length).toBeGreaterThan(0);
 
     mocks.capabilities.mockRejectedValueOnce(new Error("资料服务暂不可用"));
@@ -441,6 +465,7 @@ describe("AdminManagedContentPage", () => {
     let resolveReview: ((value: typeof item) => void) | undefined;
     mocks.review.mockReturnValueOnce(new Promise((resolve) => { resolveReview = resolve; }));
     render(<AdminManagedContentPage />);
+    await openDefaultFolder();
     await screen.findAllByText("建模标准");
     fireEvent.click(screen.getAllByRole("button", { name: "确认" })[0]);
     expect(screen.getAllByRole("button", { name: "确认中…" })[0]).toBeDisabled();
@@ -456,6 +481,7 @@ describe("AdminManagedContentPage", () => {
       failed: 1,
     });
     render(<AdminManagedContentPage />);
+    await openDefaultFolder();
     await screen.findAllByText("建模标准");
     fireEvent.click(screen.getAllByRole("checkbox", { name: "选择建模标准" })[0]);
     fireEvent.click(screen.getByRole("button", { name: "批量确认" }));
@@ -472,6 +498,7 @@ describe("AdminManagedContentPage", () => {
     mocks.items.mockResolvedValue({ items: [{ ...item, lifecycle_status: "publication_failed", publication_attempt_count: 4, publication_failure: { code: "pdf_password_required", message: "PDF 需要密码才能解析。", retryable: false, recommended_action: "请上传已解除密码保护的 PDF。" } }], total: 1, status_counts: { publication_failed: 1 } });
     mocks.publish.mockResolvedValue({});
     render(<AdminManagedContentPage />);
+    await openDefaultFolder();
     expect((await screen.findAllByText("PDF 需要密码才能解析。")).length).toBeGreaterThan(0);
     expect(screen.getAllByText("请上传已解除密码保护的 PDF。").length).toBeGreaterThan(0);
     expect(screen.getAllByText(/系统或文件处理后可重新发布/).length).toBeGreaterThan(0);
@@ -488,6 +515,7 @@ describe("AdminManagedContentPage", () => {
     mocks.items.mockResolvedValue({ items: [{ ...item, lifecycle_status: "publication_failed", publication_attempt_count: 2, publication_failure: { code: "parser_result_invalid", message: "文档解析结果无效。", retryable: false, recommended_action: "请确认文件内容完整。" } }], total: 1, status_counts: { publication_failed: 1 } });
     mocks.bulkPublish.mockResolvedValue({ results: [{ version_id: "version-1", status: "succeeded", message: null, index_job_id: "job-3" }], succeeded: 1, failed: 0 });
     render(<AdminManagedContentPage />);
+    await openDefaultFolder();
     await screen.findAllByText("文档解析结果无效。");
     fireEvent.click(screen.getAllByRole("checkbox", { name: "选择建模标准" })[0]);
     fireEvent.click(screen.getByRole("button", { name: "批量发布" }));
