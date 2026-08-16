@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from "react";
-import { ArchiveRestore, ArrowDown, ArrowUp, ArrowUpDown, Check, ChevronRight, Download, Eye, FileText, Folder, FolderPlus, Move, RefreshCw, Rocket, Search, Send, Trash2, Upload, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+import { ArchiveRestore, ArrowDown, ArrowUp, ArrowUpDown, Check, ChevronDown, ChevronRight, Download, Eye, FileUp, Folder, FolderInput, FolderPlus, Pencil, RefreshCw, Rocket, Search, Send, Trash2, Upload, X } from "lucide-react";
 import { adminContentApi } from "../../api/admin/content";
 import { Badge } from "../../components/ui/badge";
 import { Button, buttonVariants } from "../../components/ui/button";
@@ -9,6 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { EmptyState } from "../../components/ui/empty-state";
 import { ErrorState } from "../../components/ui/error-state";
 import { Input } from "../../components/ui/input";
+import { IconButton } from "../../components/ui/icon-button";
 import { LoadingState } from "../../components/ui/loading-state";
 import { Select } from "../../components/ui/select";
 import { toast } from "../../components/ui/toast";
@@ -44,7 +46,118 @@ function PublicationFailure({ item }: { item: ManagedContentItem }) {
   return <div className="mt-2 max-w-md space-y-1 text-ui-xs text-destructive" role="alert"><p className="break-words">{failure.message}</p><p className="break-words text-muted-foreground">{failure.recommended_action}</p><p className="break-words text-muted-foreground">{failure.retryable ? "可以重新发布" : "按原失败原因直接重试通常不会成功；系统或文件处理后可重新发布"}{item.publication_attempt_count > 1 ? ` · 共尝试 ${item.publication_attempt_count} 次` : ""}</p></div>;
 }
 
-type BulkAction = "approve" | "reject" | "publish";
+type BulkAction = "move" | "approve" | "reject" | "publish" | "archive";
+
+type FilenameConflict = {
+  item_id: string;
+  version_id: string;
+  title: string;
+  original_filename: string;
+};
+
+function filenameForOldMode(originalFilename: string, incomingFilename: string) {
+  const incomingDot = incomingFilename.lastIndexOf(".");
+  const originalDot = originalFilename.lastIndexOf(".");
+  if (incomingDot <= 0 || incomingDot === incomingFilename.length - 1) return originalFilename;
+  const incomingSuffix = incomingFilename.slice(incomingDot).toLocaleLowerCase("en-US");
+  const originalSuffix = originalDot > 0 ? originalFilename.slice(originalDot).toLocaleLowerCase("en-US") : "";
+  return originalSuffix === incomingSuffix
+    ? originalFilename
+    : `${originalDot > 0 ? originalFilename.slice(0, originalDot) : originalFilename}${incomingSuffix}`;
+}
+
+function filenameConflictFrom(error: unknown): FilenameConflict | null {
+  const candidate = error as { code?: unknown; body?: unknown } | null;
+  if (!candidate || candidate.code !== "content_filename_conflict" || typeof candidate.body !== "string") return null;
+  try {
+    const conflict = JSON.parse(candidate.body)?.detail?.conflict;
+    if (conflict?.item_id && conflict?.version_id && conflict?.title && conflict?.original_filename) {
+      return conflict as FilenameConflict;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function BatchActionsMenu({
+  disabled,
+  options,
+}: {
+  disabled: boolean;
+  options: Array<{ key: BulkAction; label: string; icon: ReactNode; disabled?: boolean; disabledReason?: string; destructive?: boolean; onSelect: () => void }>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [position, setPosition] = useState({ top: 0, left: 0 });
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
+
+  useEffect(() => {
+    if (!open) return;
+    const closeOutside = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (!triggerRef.current?.contains(target) && !menuRef.current?.contains(target)) setOpen(false);
+    };
+    const closeEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") { setOpen(false); triggerRef.current?.focus(); }
+    };
+    document.addEventListener("mousedown", closeOutside);
+    document.addEventListener("keydown", closeEscape);
+    return () => {
+      document.removeEventListener("mousedown", closeOutside);
+      document.removeEventListener("keydown", closeEscape);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const frame = window.requestAnimationFrame(() => {
+      optionRefs.current.find((option) => option && !option.disabled)?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [open]);
+
+  const handleMenuKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const enabledOptions = optionRefs.current.filter((option): option is HTMLButtonElement => Boolean(option && !option.disabled));
+    if (!enabledOptions.length) return;
+    const currentIndex = enabledOptions.indexOf(document.activeElement as HTMLButtonElement);
+    const nextIndex = event.key === "Home" ? 0
+      : event.key === "End" ? enabledOptions.length - 1
+      : event.key === "ArrowDown" ? (currentIndex + 1 + enabledOptions.length) % enabledOptions.length
+      : (currentIndex - 1 + enabledOptions.length) % enabledOptions.length;
+    enabledOptions[nextIndex].focus();
+  };
+
+  const toggle = () => {
+    if (!open && triggerRef.current) {
+      const rect = triggerRef.current.getBoundingClientRect();
+      const menuWidth = 176;
+      const maximumLeft = Math.max(12, window.innerWidth - menuWidth - 12);
+      setPosition({
+        top: rect.bottom + 6,
+        left: Math.min(Math.max(12, rect.right - menuWidth), maximumLeft),
+      });
+    }
+    setOpen((current) => !current);
+  };
+
+  return <>
+    <Button ref={triggerRef} size="sm" variant="outline" className="max-sm:h-control-md" disabled={disabled} aria-haspopup="menu" aria-expanded={open} onClick={toggle}>
+      批量操作<ChevronDown className="size-4" />
+    </Button>
+    {open && createPortal(<div ref={menuRef} role="menu" aria-label="批量操作" className="fixed z-dropdown w-44 overflow-hidden rounded-ui-lg border border-border bg-popover p-1.5 text-popover-foreground shadow-overlay" style={position} onKeyDown={handleMenuKeyDown}>
+      {options.map((option, index) => <div key={option.key}>
+        {option.destructive && index > 0 && <div className="my-1 border-t border-border" role="separator" />}
+        <button ref={(element) => { optionRefs.current[index] = element; }} type="button" role="menuitem" disabled={option.disabled} title={option.disabled ? option.disabledReason : undefined} className={`flex w-full items-center gap-2.5 rounded-ui-md px-2.5 py-2 text-left text-ui-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40 ${option.destructive ? "text-destructive hover:bg-destructive/10" : "hover:bg-surface-muted"}`} onClick={() => { setOpen(false); option.onSelect(); }}>
+          {option.icon}{option.label}
+        </button>
+      </div>)}
+    </div>, document.body)}
+  </>;
+}
 
 export function AdminManagedContentPage() {
   const { state } = useAuth();
@@ -78,7 +191,8 @@ export function AdminManagedContentPage() {
   const [pageSize, setPageSize] = useState(PAGE_SIZE);
   const [detail, setDetail] = useState<ManagedContentItem | null>(null);
   const [sort, setSort] = useState<{ key: SortKey; direction: SortDirection } | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<ManagedContentItem | null>(null);
+  const [deleteTargets, setDeleteTargets] = useState<ManagedContentItem[]>([]);
+  const [deleteAcknowledged, setDeleteAcknowledged] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [view, setView] = useState<"library" | "trash">("library");
   const [trashItems, setTrashItems] = useState<ManagedContentItem[]>([]);
@@ -91,6 +205,17 @@ export function AdminManagedContentPage() {
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
   const [moveTarget, setMoveTarget] = useState<ManagedContentItem | null>(null);
   const [moveFolderId, setMoveFolderId] = useState("");
+  const [bulkMoveFolderId, setBulkMoveFolderId] = useState("");
+  const [renameTarget, setRenameTarget] = useState<ManagedContentItem | null>(null);
+  const [renameTitle, setRenameTitle] = useState("");
+  const [renameFilename, setRenameFilename] = useState("");
+  const [renameConflict, setRenameConflict] = useState<FilenameConflict | null>(null);
+  const [renameError, setRenameError] = useState<string | null>(null);
+  const [updateTarget, setUpdateTarget] = useState<ManagedContentItem | null>(null);
+  const [updateFile, setUpdateFile] = useState<File | null>(null);
+  const [updateFilenameMode, setUpdateFilenameMode] = useState<"old" | "new">("old");
+  const [updateConflict, setUpdateConflict] = useState<FilenameConflict | null>(null);
+  const [updateError, setUpdateError] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [listDropActive, setListDropActive] = useState(false);
   const [listDropPromptTop, setListDropPromptTop] = useState(96);
@@ -99,6 +224,7 @@ export function AdminManagedContentPage() {
   const [requestFolderOpen, setRequestFolderOpen] = useState(false);
   const [requestFolderName, setRequestFolderName] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const updateFileInputRef = useRef<HTMLInputElement>(null);
   const listDragDepthRef = useRef(0);
 
   useEffect(() => {
@@ -348,27 +474,103 @@ export function AdminManagedContentPage() {
 
   const act = async (item: ManagedContentItem, action: string, operation: () => Promise<unknown>, success: string) => {
     setBusyAction(`${item.version_id}:${action}`);
-    try { await operation(); toast.success(success); await load(true); }
+    try { await operation(); setDetail(null); toast.success(success); await load(true); }
     catch (actionError) { toast.error(actionError instanceof Error ? actionError.message : "操作失败"); }
     finally { setBusyAction(null); }
   };
 
+  const openDeleteDialog = (targets: ManagedContentItem[]) => {
+    setDeleteTargets(targets);
+    setDeleteAcknowledged(false);
+    setDeleteError(null);
+  };
+
   const deleteContent = async () => {
-    if (!deleteTarget) return;
-    const target = deleteTarget;
-    setBusyAction(`${target.version_id}:delete`);
+    if (!deleteTargets.length || !deleteAcknowledged) return;
+    const targets = deleteTargets;
+    setBusyAction("archive");
     setDeleteError(null);
     try {
-      await adminContentApi.archive(target.item_id, target.version_id);
-      setSelected((current) => current.filter((id) => id !== target.version_id));
-      setDeleteTarget(null);
-      toast.success(`已将“${target.title}”移至回收站`);
+      const result = targets.length === 1
+        ? { results: [{ version_id: targets[0].version_id, status: "succeeded" as const, message: null }], succeeded: 1, failed: 0 }
+        : await adminContentApi.bulkArchive(targets.map((item) => ({ item_id: item.item_id, expected_version_id: item.version_id })));
+      if (targets.length === 1) await adminContentApi.archive(targets[0].item_id, targets[0].version_id);
+      const failures = result.results.filter((entry) => entry.status === "failed");
+      setSelected(failures.map((entry) => entry.version_id));
+      if (failures.length) {
+        const failedVersionIds = new Set(failures.map((entry) => entry.version_id));
+        setDeleteTargets(targets.filter((item) => failedVersionIds.has(item.version_id)));
+        setDeleteError(`成功 ${result.succeeded} 份，失败 ${result.failed} 份：${failures.map((entry) => entry.message || "请刷新后重试").join("；")}`);
+      } else {
+        setDeleteTargets([]);
+        toast.success(targets.length === 1 ? `已将“${targets[0].title}”移至回收站` : `已将 ${result.succeeded} 份资料移至回收站`);
+      }
       await load(true);
     } catch (deleteFailure) {
       setDeleteError(deleteFailure instanceof Error ? deleteFailure.message : "移入回收站失败");
     } finally {
       setBusyAction(null);
     }
+  };
+
+  const openRenameDialog = (item: ManagedContentItem) => {
+    setRenameTarget(item); setRenameTitle(item.title); setRenameFilename(item.original_filename);
+    setRenameConflict(null); setRenameError(null);
+  };
+
+  const renameContent = async (replace = false) => {
+    if (!renameTarget) return;
+    setBusyAction("rename"); setRenameError(null);
+    try {
+      await adminContentApi.rename(renameTarget.item_id, {
+        title: renameTitle.trim(), original_filename: renameFilename.trim(),
+        expected_version_id: renameTarget.version_id,
+        ...(replace && renameConflict ? {
+          replace_conflict_item_id: renameConflict.item_id,
+          replace_conflict_expected_version_id: renameConflict.version_id,
+        } : {}),
+      });
+      setRenameTarget(null); setRenameConflict(null);
+      toast.success("已创建重命名草稿，请重新提交确认并发布");
+      await load(true);
+    } catch (renameFailure) {
+      const conflict = filenameConflictFrom(renameFailure);
+      if (conflict) setRenameConflict(conflict);
+      else setRenameError(renameFailure instanceof Error ? renameFailure.message : "重命名失败");
+    } finally { setBusyAction(null); }
+  };
+
+  const openUpdateDialog = (item: ManagedContentItem) => {
+    setUpdateTarget(item); setUpdateFile(null); setUpdateFilenameMode("old");
+    setUpdateConflict(null); setUpdateError(null);
+    if (updateFileInputRef.current) updateFileInputRef.current.value = "";
+  };
+
+  const updateContent = async (replace = false) => {
+    if (!updateTarget || !updateFile) return;
+    setBusyAction("update"); setUpdateError(null);
+    try {
+      await adminContentApi.updateVersion(
+        updateTarget.item_id, updateFile, updateTarget.version_id, updateFilenameMode,
+        replace && updateConflict ? { item_id: updateConflict.item_id, version_id: updateConflict.version_id } : undefined,
+      );
+      setUpdateTarget(null); setUpdateConflict(null); setUpdateFile(null);
+      toast.success("已创建更新草稿，请重新提交确认并发布");
+      await load(true);
+    } catch (updateFailure) {
+      const conflict = filenameConflictFrom(updateFailure);
+      if (conflict) setUpdateConflict(conflict);
+      else setUpdateError(updateFailure instanceof Error ? updateFailure.message : "更新资料失败");
+    } finally { setBusyAction(null); }
+  };
+
+  const downloadContent = (item: ManagedContentItem) => {
+    const anchor = document.createElement("a");
+    anchor.href = adminContentApi.fileUrl(item.version_id, true);
+    anchor.download = item.original_filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
   };
 
   const restoreContent = async () => {
@@ -385,26 +587,42 @@ export function AdminManagedContentPage() {
     } finally { setBusyAction(null); }
   };
 
-  const eligibleSelected = useMemo(() => {
-    const allowed = bulkAction === "publish" ? new Set(["approved", "publication_failed"]) : new Set(["awaiting_review"]);
-    return items.filter((item) => selected.includes(item.version_id) && allowed.has(item.lifecycle_status));
-  }, [bulkAction, items, selected]);
+  const selectedItems = useMemo(
+    () => items.filter((item) => selected.includes(item.version_id)),
+    [items, selected],
+  );
+
+  const canMoveItem = (item: ManagedContentItem) => (
+    !item.has_published_head && (
+      (can("organize") && ["draft", "rejected"].includes(item.lifecycle_status))
+      || (can("review") && item.lifecycle_status === "awaiting_review")
+    )
+  );
+  const canDeleteItem = (item: ManagedContentItem) => {
+    const requiresPublish = item.has_published_head || !["draft", "rejected"].includes(item.lifecycle_status);
+    return requiresPublish ? can("publish") : can("organize");
+  };
 
   const executeBulk = async () => {
-    if (!bulkAction || eligibleSelected.length === 0) return;
+    if (!bulkAction || selectedItems.length === 0) return;
     setBusyAction("bulk"); setBulkFailures([]);
     try {
-      const ids = eligibleSelected.map((item) => item.version_id);
-      const result = bulkAction === "publish"
+      const ids = selectedItems.map((item) => item.version_id);
+      const result = bulkAction === "move"
+        ? await adminContentApi.bulkMove(
+          selectedItems.map((item) => ({ item_id: item.item_id, expected_version_id: item.version_id })),
+          bulkMoveFolderId,
+        )
+        : bulkAction === "publish"
         ? await adminContentApi.bulkPublish(ids)
         : await adminContentApi.bulkReview(ids, bulkAction === "approve");
-      const titles = new Map(eligibleSelected.map((item) => [item.version_id, item.title]));
+      const titles = new Map(selectedItems.map((item) => [item.version_id, item.title]));
       const failures = result.results
         .filter((entry) => entry.status === "failed")
         .map((entry) => ({ ...entry, title: titles.get(entry.version_id) || "未知资料" }));
       setBulkFailures(failures);
       if (result.failed) toast.error(`成功 ${result.succeeded} 份，失败 ${result.failed} 份`);
-      else toast.success(bulkAction === "publish" ? `已将 ${result.succeeded} 份资料加入发布队列` : `已处理 ${result.succeeded} 份资料`);
+      else toast.success(bulkAction === "publish" ? `已将 ${result.succeeded} 份资料加入发布队列` : bulkAction === "move" ? `已移动 ${result.succeeded} 份资料` : `已处理 ${result.succeeded} 份资料`);
       setSelected(failures.map((entry) => entry.version_id)); await load(true);
       if (!result.failed) setBulkAction(null);
     } catch (bulkError) { toast.error(bulkError instanceof Error ? bulkError.message : "批量操作失败"); }
@@ -417,24 +635,22 @@ export function AdminManagedContentPage() {
   const toggleAll = () => setSelected(allSelected ? [] : selectable.map((item) => item.version_id));
   const hasReviewableSelection = items.some((item) => selected.includes(item.version_id) && item.lifecycle_status === "awaiting_review");
   const hasPublishableSelection = items.some((item) => selected.includes(item.version_id) && ["approved", "publication_failed"].includes(item.lifecycle_status));
+  const hasMovableSelection = selectedItems.some(canMoveItem);
+  const hasDeletableSelection = selectedItems.some(canDeleteItem);
   const bulkDisabled = Boolean(busyAction) || refreshing || !enabled;
 
   const renderActions = (item: ManagedContentItem) => {
     const disabled = Boolean(busyAction) || refreshing || !enabled;
-    const draftLike = ["draft", "rejected"].includes(item.lifecycle_status);
-    const canDelete = (draftLike && can("organize")) || (!draftLike && can("publish"));
-    const deleteBlocked = item.lifecycle_status === "publishing";
-    return <div className="flex min-h-control-sm flex-wrap gap-2 sm:justify-end"><PublicationFailure item={item} />
-      <Button size="sm" variant="outline" disabled={disabled} onClick={() => setDetail(item)}><Eye className="size-4" />查看</Button>
-      {can("organize") && ["draft", "rejected"].includes(item.lifecycle_status) && <Button size="sm" variant="outline" disabled={disabled} onClick={() => { setMoveTarget(item); setMoveFolderId(item.category_id); }}><Move className="size-4" />移动</Button>}
-      {can("review") && item.lifecycle_status === "awaiting_review" && <Button size="sm" variant="outline" disabled={disabled} onClick={() => { setMoveTarget(item); setMoveFolderId(item.category_id); }}><Move className="size-4" />移动</Button>}
-      {can("organize") && ["draft", "rejected"].includes(item.lifecycle_status) && <Button size="sm" variant="outline" disabled={disabled} onClick={() => void act(item, "submit", () => adminContentApi.submit(item.version_id), "已提交确认")}><Send className="size-4" />{busyAction === `${item.version_id}:submit` ? "提交中…" : "提交"}</Button>}
-      {can("review") && item.lifecycle_status === "awaiting_review" && <>
-        <Button size="sm" disabled={disabled} onClick={() => void act(item, "approve", () => adminContentApi.review(item.version_id, true), "资料已确认")}><Check className="size-4" />{busyAction === `${item.version_id}:approve` ? "确认中…" : "确认"}</Button>
-        <Button size="sm" variant="outline" disabled={disabled} onClick={() => void act(item, "reject", () => adminContentApi.review(item.version_id, false), "资料已退回")}><X className="size-4" />{busyAction === `${item.version_id}:reject` ? "退回中…" : "退回"}</Button>
-      </>}
-      {can("publish") && ["approved", "publication_failed"].includes(item.lifecycle_status) && <Button size="sm" disabled={disabled} onClick={() => void act(item, "publish", () => adminContentApi.publish(item.version_id), "已进入发布队列")}><Rocket className="size-4" />{busyAction === `${item.version_id}:publish` ? "发布中…" : item.lifecycle_status === "publication_failed" ? "重新发布" : "发布"}</Button>}
-      {canDelete && <Button size="sm" variant="destructive" disabled={disabled || deleteBlocked} title={deleteBlocked ? "资料正在发布，暂时不能移入回收站" : undefined} onClick={() => { setDeleteError(null); setDeleteTarget(item); }}><Trash2 className="size-4" />移至回收站</Button>}
+    const movable = canMoveItem(item);
+    const revisionAllowed = can("organize") && item.lifecycle_status !== "publishing";
+    const deletable = canDeleteItem(item) && item.lifecycle_status !== "publishing";
+    return <div className="flex min-h-10 w-[16.25rem] items-center justify-end gap-1 sm:w-[14.75rem]">
+      <IconButton label={`查看“${item.title}”`} className="border border-border max-sm:size-10" disabled={disabled} onClick={() => setDetail(item)}><Eye className="size-4" /></IconButton>
+      <IconButton label={movable ? `移动“${item.title}”` : `移动“${item.title}”（当前状态或权限不允许）`} className="border border-border max-sm:size-10" disabled={disabled || !movable} onClick={() => { setMoveTarget(item); setMoveFolderId(item.category_id); }}><FolderInput className="size-4" /></IconButton>
+      <IconButton label={`下载“${item.title}”`} className="border border-border max-sm:size-10" disabled={disabled} onClick={() => downloadContent(item)}><Download className="size-4" /></IconButton>
+      <IconButton label={revisionAllowed ? `重命名“${item.title}”` : `重命名“${item.title}”（当前状态或权限不允许）`} className="border border-border max-sm:size-10" disabled={disabled || !revisionAllowed} onClick={() => openRenameDialog(item)}><Pencil className="size-4" /></IconButton>
+      <IconButton label={revisionAllowed ? `更新“${item.title}”` : `更新“${item.title}”（当前状态或权限不允许）`} className="border border-border max-sm:size-10" disabled={disabled || !revisionAllowed} onClick={() => openUpdateDialog(item)}><FileUp className="size-4" /></IconButton>
+      <IconButton label={deletable ? `删除“${item.title}”` : `删除“${item.title}”（当前状态或权限不允许）`} className="border border-destructive/30 text-destructive hover:bg-destructive/10 hover:text-destructive max-sm:size-10" disabled={disabled || !deletable} onClick={() => openDeleteDialog([item])}><Trash2 className="size-4" /></IconButton>
     </div>;
   };
 
@@ -468,7 +684,20 @@ export function AdminManagedContentPage() {
 
     {(can("review") || can("manage_categories")) && folderRequests.length > 0 && <Card className="overflow-hidden shadow-surface" aria-labelledby="folder-requests-title"><div className="border-b border-border px-4 py-3 sm:px-5"><h2 id="folder-requests-title" className="text-ui-base font-semibold">待处理目录申请</h2></div><ul className="divide-y divide-border">{folderRequests.map((request) => <li key={request.id} className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5"><div className="min-w-0"><p className="break-words text-ui-sm font-medium">{request.display_name}</p><p className="mt-0.5 text-ui-xs text-muted-foreground">上级目录：{request.parent_label} · 申请人：{request.requester_name || "未知"}</p></div><div className="flex gap-2"><Button size="sm" variant="outline" disabled={busyAction === `folder-request:${request.id}`} onClick={() => void reviewFolder(request, false)}><X className="size-4" />退回</Button><Button size="sm" disabled={busyAction === `folder-request:${request.id}`} onClick={() => void reviewFolder(request, true)}><Check className="size-4" />批准</Button></div></li>)}</ul></Card>}
     <Card className="overflow-hidden shadow-surface [&_table]:!min-w-[56rem]" aria-labelledby="managed-list-title">
-      <div className="flex flex-col gap-3 border-b border-border px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5"><div><h2 id="managed-list-title" className="text-ui-base font-semibold">资料列表</h2><p className="mt-1 text-ui-xs text-muted-foreground">当前目录：{currentFolder?.full_path || "请选择目录"} · 共 {total} 份</p></div><div className="flex flex-wrap gap-2">{can("organize") && <Button size="sm" className="min-h-10" onClick={openUploadDialog} disabled={!enabled || !currentFolderId || uploading}><Upload className="size-4" />上传文件</Button>}{(can("organize") || can("manage_categories")) && <Button size="sm" variant="outline" onClick={() => can("manage_categories") ? setNewFolderOpen(true) : setRequestFolderOpen(true)} disabled={!currentFolder || currentFolder.level >= 4}><FolderPlus className="size-4" />新建</Button>}<Button size="sm" variant="outline" onClick={() => void load(true)} disabled={loading || refreshing}><RefreshCw className={refreshing ? "size-4 animate-spin" : "size-4"} />{refreshing ? "刷新中…" : "刷新"}</Button></div></div>
+      <div className="flex flex-col gap-3 border-b border-border px-4 py-4 lg:flex-row lg:items-end lg:justify-between sm:px-5">
+        <div className="min-w-0"><h2 id="managed-list-title" className="text-ui-base font-semibold">资料列表</h2><p className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-ui-xs text-muted-foreground"><span>当前目录：{currentFolder?.full_path || "请选择目录"} · 共 {total} 份</span><span role="status" aria-live="polite">· {selected.length > 0 ? <>已选择 <strong>{selected.length}</strong> 份，单次最多 {BULK_LIMIT} 份</> : <>未选择资料，单次最多 {BULK_LIMIT} 份</>}</span></p></div>
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          {can("organize") && <Button size="sm" className="max-sm:h-control-md" onClick={openUploadDialog} disabled={!enabled || !currentFolderId || uploading}><Upload className="size-4" />上传文件</Button>}
+          <Button size="sm" variant="outline" className="max-sm:h-control-md" onClick={() => void load(true)} disabled={loading || refreshing}><RefreshCw className={refreshing ? "size-4 animate-spin" : "size-4"} />{refreshing ? "刷新中…" : "刷新列表"}</Button>
+          {selected.length > 1 ? <BatchActionsMenu disabled={bulkDisabled} options={[
+            { key: "move", label: "批量移动", icon: <FolderInput className="size-4" />, disabled: !hasMovableSelection, disabledReason: "所选资料中没有当前账号可移动的资料", onSelect: () => { setBulkFailures([]); setBulkMoveFolderId(""); setBulkAction("move"); } },
+            { key: "approve", label: "批量确认", icon: <Check className="size-4" />, disabled: !can("review") || !hasReviewableSelection, disabledReason: "需要确认权限，且至少选择一份待确认资料", onSelect: () => { setBulkFailures([]); setBulkAction("approve"); } },
+            { key: "reject", label: "批量退回", icon: <X className="size-4" />, disabled: !can("review") || !hasReviewableSelection, disabledReason: "需要确认权限，且至少选择一份待确认资料", onSelect: () => { setBulkFailures([]); setBulkAction("reject"); } },
+            { key: "publish", label: "批量发布", icon: <Rocket className="size-4" />, disabled: !can("publish") || !hasPublishableSelection, disabledReason: "需要发布权限，且至少选择一份已确认或发布失败资料", onSelect: () => { setBulkFailures([]); setBulkAction("publish"); } },
+            { key: "archive", label: "批量删除", icon: <Trash2 className="size-4" />, disabled: !hasDeletableSelection, disabledReason: "所选资料中没有当前账号可移入回收站的资料", destructive: true, onSelect: () => openDeleteDialog(selectedItems) },
+          ]} /> : (can("organize") || can("manage_categories")) && <Button size="sm" variant="outline" className="max-sm:h-control-md" onClick={() => can("manage_categories") ? setNewFolderOpen(true) : setRequestFolderOpen(true)} disabled={!currentFolder || currentFolder.level >= 4}><FolderPlus className="size-4" />新建目录</Button>}
+        </div>
+      </div>
       <div className="border-b border-border bg-surface-muted/40 px-4 py-3 sm:px-5" data-testid="managed-folder-address"><nav className="flex min-w-0 items-center gap-1 rounded-ui-md border border-input bg-background px-3 py-2 text-ui-sm" aria-label="资料路径"><button type="button" className="shrink-0 rounded px-1 py-0.5 font-medium hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setCurrentFolderId("")}>/</button>{breadcrumbs.map((folder) => <span key={folder.id} className="flex min-w-0 items-center gap-1"><ChevronRight className="size-4 shrink-0 text-muted-foreground" /><button type="button" className="max-w-56 truncate rounded px-1 py-0.5 hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setCurrentFolderId(folder.id)}>{folder.display_code} {folder.display_name}</button></span>)}</nav></div>
       <div className="grid gap-2 border-b border-border p-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" aria-label="子文件夹">
         {childFolders.map((folder) => <button key={folder.id} type="button" className={`flex min-h-14 items-center gap-3 rounded-ui-lg border bg-background px-3 py-2 text-left transition-colors hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${draggedItem ? "border-primary/60" : "border-border"}`} onClick={() => setCurrentFolderId(folder.id)} onDragOver={(event) => { if (draggedItem) event.preventDefault(); }} onDrop={(event) => { event.preventDefault(); if (draggedItem) void moveItemTo(draggedItem, folder.id); }}><Folder className="size-5 shrink-0 text-primary" /><span className="min-w-0"><span className="block truncate text-ui-sm font-medium">{folder.display_code} {folder.display_name}</span><span className="block text-ui-xs text-muted-foreground">{folder.item_count} 份直接资料</span></span></button>)}
@@ -482,22 +711,20 @@ export function AdminManagedContentPage() {
         <Button variant="outline" onClick={() => { setQueryInput(""); setCategoryFilter(""); setStatusFilter(""); setSourceFilter(""); }}>清除筛选</Button>
       </div>
 
-      <div className="flex min-h-[6.75rem] flex-col justify-center gap-3 border-t border-border bg-surface-muted px-4 py-3 sm:min-h-14 sm:flex-row sm:items-center sm:justify-between sm:px-5" data-testid="managed-bulk-toolbar"><p className="text-ui-sm" role="status" aria-live="polite">{selected.length > 0 ? <>已选择 <strong>{selected.length}</strong> 份，单次最多 {BULK_LIMIT} 份</> : <>未选择资料，单次最多 {BULK_LIMIT} 份</>}</p><div className="flex flex-wrap gap-2">{can("review") && <><Button size="sm" disabled={bulkDisabled || !hasReviewableSelection} onClick={() => setBulkAction("approve")}><Check className="size-4" />批量确认</Button><Button size="sm" variant="outline" disabled={bulkDisabled || !hasReviewableSelection} onClick={() => setBulkAction("reject")}><X className="size-4" />批量退回</Button></>}{can("publish") && <Button size="sm" disabled={bulkDisabled || !hasPublishableSelection} onClick={() => setBulkAction("publish")}><Rocket className="size-4" />批量发布</Button>}</div></div>
-
       <div data-testid="managed-content-drop-list" className="relative" onDragEnter={handleListDragEnter} onDragOver={handleListDragOver} onDragLeave={handleListDragLeave} onDrop={handleListDrop}>
       {listDropActive && <div data-testid="managed-content-drop-overlay" className="pointer-events-none absolute inset-1 z-sticky rounded-ui-lg border-2 border-dashed border-primary/70 bg-background/70 text-center shadow-focus backdrop-blur-[1px]" role="status" aria-live="polite"><div className="absolute left-1/2 flex w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-3" style={{ top: listDropPromptTop }}><span className="flex size-12 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-surface" aria-hidden="true"><Upload className="size-6" /></span><div className="space-y-1"><p className="break-words text-ui-base font-semibold">松开以上传文件到“{currentFolderDropLabel}”</p><p className="text-ui-xs text-muted-foreground">支持 PDF、Markdown、Word、Excel 和 PPT 文件</p></div></div></div>}
       {uploadResults.length > 0 && <ul className="border-t border-border px-4 py-3 text-ui-sm sm:px-5" aria-live="polite">{uploadResults.map((entry) => <li key={entry.filename} className="flex items-start justify-between gap-3 border-b border-border py-2 last:border-b-0"><span className="min-w-0"><span className="block break-all">{entry.filename}</span>{entry.reason && <span className="mt-0.5 block break-words text-ui-xs text-muted-foreground">{entry.reason}</span>}</span><Badge className="shrink-0" variant={entry.status === "accepted" ? "success" : "warning"}>{entry.status === "accepted" ? "已接收" : "已跳过"}</Badge></li>)}</ul>}
       {loading ? <LoadingState className="min-h-48 border-x-0 border-b-0" label="正在加载资料…" /> : !error && items.length === 0 ? <EmptyState className="rounded-none border-x-0 border-b-0" title="没有符合条件的资料" description="请调整筛选条件或上传新资料。" /> : !error && <>
-        <div className="hidden overflow-x-auto border-t border-border lg:block"><table className="w-full min-w-[64rem] text-ui-sm"><thead className="border-b border-border bg-surface-muted text-left text-muted-foreground"><tr><th className="w-12 px-3 py-3"><Checkbox aria-label="选择当前页前20份资料" checked={allSelected} onChange={toggleAll} /></th>{([ ["title", "资料"], ["category", "分类"], ["status", "状态"], ["source", "来源"] ] as [SortKey, string][]).map(([key, label]) => <th key={key} aria-sort={sort?.key === key ? sort.direction === "asc" ? "ascending" : "descending" : "none"} className="px-3 py-3 font-medium"><button type="button" className="inline-flex items-center gap-1 rounded px-1 py-0.5 hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => toggleSort(key)}>{label}{sortIcon(key)}</button></th>)}<th className="px-3 py-3 text-right font-medium">操作</th></tr></thead><tbody className="divide-y divide-border">{sortedItems.map((item, index) => { const movable = (can("organize") && ["draft", "rejected"].includes(item.lifecycle_status)) || (can("review") && item.lifecycle_status === "awaiting_review"); return <tr key={item.item_id} draggable={movable} title={movable ? "拖动到上方文件夹可移动资料" : undefined} onDragStart={() => setDraggedItem(item)} onDragEnd={() => setDraggedItem(null)} className={`transition-colors duration-normal hover:bg-surface-muted/60 ${movable ? "cursor-grab" : ""}`}><td className="px-3 py-3"><Checkbox aria-label={`选择${item.title}`} checked={selected.includes(item.version_id)} disabled={index >= BULK_LIMIT} onChange={() => setSelected((current) => current.includes(item.version_id) ? current.filter((id) => id !== item.version_id) : [...current, item.version_id].slice(0, BULK_LIMIT))} /></td><td className="max-w-xs px-3 py-3"><p className="break-words font-medium">{item.title}</p><p className="mt-0.5 break-all text-ui-xs text-muted-foreground">{item.original_filename} · v{item.version_number}</p></td><td className="max-w-xs px-3 py-3 break-words">{item.category_path || item.category_label}</td><td className="px-3 py-3"><Badge variant={statusVariant(item.lifecycle_status)}>{statusLabel[item.lifecycle_status] || "未知状态"}</Badge></td><td className="px-3 py-3">{sourceLabel[item.source_origin] || "其他来源"}</td><td className="px-3 py-3">{renderActions(item)}</td></tr>; })}</tbody></table></div>
+        <div className="hidden overflow-x-auto border-t border-border lg:block"><table className="w-full min-w-[64rem] text-ui-sm"><thead className="border-b border-border bg-surface-muted text-left text-muted-foreground"><tr><th className="w-12 px-3 py-3"><Checkbox aria-label="选择当前页前20份资料" checked={allSelected} onChange={toggleAll} /></th>{([ ["title", "资料"], ["category", "分类"], ["status", "状态"], ["source", "来源"] ] as [SortKey, string][]).map(([key, label]) => <th key={key} aria-sort={sort?.key === key ? sort.direction === "asc" ? "ascending" : "descending" : "none"} className="px-3 py-3 font-medium"><button type="button" className="inline-flex items-center gap-1 rounded px-1 py-0.5 hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => toggleSort(key)}>{label}{sortIcon(key)}</button></th>)}<th className="px-3 py-3 text-right font-medium">操作</th></tr></thead><tbody className="divide-y divide-border">{sortedItems.map((item, index) => { const movable = canMoveItem(item); return <tr key={item.item_id} draggable={movable} title={movable ? "拖动到上方文件夹可移动资料" : undefined} onDragStart={() => setDraggedItem(item)} onDragEnd={() => setDraggedItem(null)} className={`transition-colors duration-normal hover:bg-surface-muted/60 ${movable ? "cursor-grab" : ""}`}><td className="px-3 py-3"><Checkbox aria-label={`选择${item.title}`} checked={selected.includes(item.version_id)} disabled={index >= BULK_LIMIT} onChange={() => setSelected((current) => current.includes(item.version_id) ? current.filter((id) => id !== item.version_id) : [...current, item.version_id].slice(0, BULK_LIMIT))} /></td><td className="max-w-xs px-3 py-3"><p className="break-words font-medium">{item.title}</p><p className="mt-0.5 break-all text-ui-xs text-muted-foreground">{item.original_filename} · v{item.version_number}</p></td><td className="max-w-xs px-3 py-3 break-words">{item.category_path || item.category_label}</td><td className="px-3 py-3"><Badge variant={statusVariant(item.lifecycle_status)}>{statusLabel[item.lifecycle_status] || "未知状态"}</Badge></td><td className="px-3 py-3">{sourceLabel[item.source_origin] || "其他来源"}</td><td className="px-3 py-3">{renderActions(item)}</td></tr>; })}</tbody></table></div>
         <ul className="divide-y divide-border border-t border-border lg:hidden">{items.map((item, index) => <li key={item.item_id} className="space-y-3 px-4 py-4 sm:px-5"><div className="flex items-start gap-3"><Checkbox className="mt-0.5" aria-label={`选择${item.title}`} checked={selected.includes(item.version_id)} disabled={index >= BULK_LIMIT} onChange={() => setSelected((current) => current.includes(item.version_id) ? current.filter((id) => id !== item.version_id) : [...current, item.version_id].slice(0, BULK_LIMIT))} /><div className="min-w-0 flex-1"><div className="flex items-start justify-between gap-3"><p className="break-words font-medium">{item.title}</p><Badge className="shrink-0" variant={statusVariant(item.lifecycle_status)}>{statusLabel[item.lifecycle_status] || "未知状态"}</Badge></div><p className="mt-1 break-all text-ui-xs text-muted-foreground">{item.original_filename} · v{item.version_number}</p></div></div><dl className="grid grid-cols-[4rem_minmax(0,1fr)] gap-x-2 gap-y-1 text-ui-sm"><dt className="text-muted-foreground">分类</dt><dd className="break-words">{item.category_path || item.category_label}</dd><dt className="text-muted-foreground">来源</dt><dd>{sourceLabel[item.source_origin] || "其他来源"}</dd></dl>{renderActions(item)}</li>)}</ul>
         <div className="flex flex-col gap-2 border-t border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5"><p className="text-ui-xs text-muted-foreground">共 {total} 份，第 {page + 1} / {pageCount} 页</p><div className="flex flex-wrap items-center justify-end gap-2"><label className="flex items-center gap-2 text-ui-xs text-muted-foreground">每页<Select aria-label="每页条数" className="h-control-sm w-20" value={String(pageSize)} onChange={(event) => setPageSize(Number(event.target.value))}>{PAGE_SIZE_OPTIONS.map((size) => <option key={size} value={size}>{size} 条</option>)}</Select></label><Button size="sm" variant="outline" disabled={page === 0 || loading} onClick={() => setPage((value) => value - 1)}>上一页</Button><Select aria-label="跳转页码" className="h-control-sm w-24" value={String(page + 1)} onChange={(event) => setPage(Number(event.target.value) - 1)} disabled={loading}>{Array.from({ length: pageCount }, (_, index) => <option key={index + 1} value={index + 1}>第 {index + 1} 页</option>)}</Select><Button size="sm" variant="outline" disabled={page + 1 >= pageCount || loading} onClick={() => setPage((value) => value + 1)}>下一页</Button></div></div>
       </>}
       </div>
     </Card>
 
-    <Dialog open={Boolean(bulkAction)} onOpenChange={(open) => { if (!open) { setBulkAction(null); setBulkFailures([]); } }}><DialogContent><DialogHeader><DialogTitle>{bulkAction === "publish" ? "批量发布资料" : bulkAction === "reject" ? "批量退回资料" : "批量确认资料"}</DialogTitle><DialogDescription>本次将处理 {eligibleSelected.length} 份符合条件的资料。系统会逐项执行并保留失败原因。</DialogDescription></DialogHeader>{bulkFailures.length > 0 && <div className="space-y-2 text-ui-sm text-destructive" role="alert"><p>上次操作有 {bulkFailures.length} 份失败：</p><ul className="max-h-48 space-y-1 overflow-y-auto border-y border-destructive/30 py-2">{bulkFailures.map((entry) => <li key={entry.version_id} className="break-words"><span className="font-medium">{entry.title}</span>{entry.message ? `：${entry.message}` : "：请刷新后重试"}</li>)}</ul></div>}<DialogFooter><Button variant="outline" onClick={() => setBulkAction(null)} disabled={busyAction === "bulk"}>取消</Button><Button onClick={() => void executeBulk()} disabled={busyAction === "bulk" || eligibleSelected.length === 0}>{busyAction === "bulk" ? "处理中…" : bulkFailures.length ? "重试失败项" : "确认执行"}</Button></DialogFooter></DialogContent></Dialog>
+    <Dialog open={Boolean(bulkAction && bulkAction !== "archive")} onOpenChange={(open) => { if (!open) { setBulkAction(null); setBulkFailures([]); } }}><DialogContent><DialogHeader><DialogTitle>{bulkAction === "move" ? "批量移动资料" : bulkAction === "publish" ? "批量发布资料" : bulkAction === "reject" ? "批量退回资料" : "批量确认资料"}</DialogTitle><DialogDescription>已选择 {selectedItems.length} 份资料。系统会逐项执行，并保留不符合状态或权限要求的失败原因。</DialogDescription></DialogHeader>{bulkAction === "move" && <label className="space-y-1.5 text-ui-sm font-medium"><span>目标目录</span><Select value={bulkMoveFolderId} onChange={(event) => setBulkMoveFolderId(event.target.value)}><option value="">请选择目标目录</option>{categories.filter((category) => category.is_active).map((category) => <option key={category.id} value={category.id}>{category.full_path || `${category.display_code} ${category.display_name}`}</option>)}</Select></label>}{bulkFailures.length > 0 && <div className="space-y-2 text-ui-sm text-destructive" role="alert"><p>上次操作有 {bulkFailures.length} 份失败：</p><ul className="max-h-48 space-y-1 overflow-y-auto border-y border-destructive/30 py-2">{bulkFailures.map((entry) => <li key={entry.version_id} className="break-words"><span className="font-medium">{entry.title}</span>{entry.message ? `：${entry.message}` : "：请刷新后重试"}</li>)}</ul></div>}<DialogFooter><Button variant="outline" onClick={() => setBulkAction(null)} disabled={busyAction === "bulk"}>取消</Button><Button onClick={() => void executeBulk()} disabled={busyAction === "bulk" || selectedItems.length === 0 || (bulkAction === "move" && !bulkMoveFolderId)}>{busyAction === "bulk" ? "处理中…" : bulkFailures.length ? "重试失败项" : "确认执行"}</Button></DialogFooter></DialogContent></Dialog>
 
-    <Dialog open={Boolean(detail) && !previewState.parentId} onOpenChange={(open) => { if (!open && !previewState.parentId) setDetail(null); }}><DialogContent className="max-w-2xl"><DialogHeader><DialogTitle>{detail?.title || "资料详情"}</DialogTitle><DialogDescription>核对文件、分类、来源和版本后再确认或发布。</DialogDescription></DialogHeader>{detail && <div className="space-y-4"><PublicationFailure item={detail} /><dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-2 text-ui-sm [&_dt]:whitespace-nowrap"><dt className="text-muted-foreground">文件名</dt><dd className="break-all">{detail.original_filename}</dd><dt className="text-muted-foreground">分类</dt><dd className="break-words">{detail.category_path || detail.category_label}</dd><dt className="text-muted-foreground">状态</dt><dd><Badge variant={statusVariant(detail.lifecycle_status)}>{statusLabel[detail.lifecycle_status]}</Badge></dd><dt className="text-muted-foreground">来源</dt><dd>{sourceLabel[detail.source_origin] || "其他来源"}</dd><dt className="text-muted-foreground">版本</dt><dd>v{detail.version_number}</dd><dt className="text-muted-foreground">创建时间</dt><dd>{formatAdminDate(detail.created_at)}</dd><dt className="text-muted-foreground">最后更新时间</dt><dd>{formatAdminDate(detail.updated_at)}</dd><dt className="text-muted-foreground">发布尝试</dt><dd>共 {detail.publication_attempt_count} 次</dd></dl><div className="flex flex-col gap-2 sm:flex-row">{detail.preview_parent_id && ["pdf", "docx", "xlsx", "pptx"].includes(detail.doc_type) ? <Button variant="outline" onClick={() => { openDocumentPreview(detail.preview_parent_id!, detail.title, detail.doc_type, 1, {}, "managed-content-detail"); }}><Eye className="size-4" />预览文件</Button> : <a className={buttonVariants({ variant: "outline" })} href={adminContentApi.fileUrl(detail.version_id)} target="_blank" rel="noreferrer"><Eye className="size-4" />打开文件</a>}<a className={buttonVariants({ variant: "outline" })} href={adminContentApi.fileUrl(detail.version_id, true)}><Download className="size-4" />下载</a></div></div>}</DialogContent></Dialog>
+    <Dialog open={Boolean(detail) && !previewState.parentId} onOpenChange={(open) => { if (!open && !previewState.parentId) setDetail(null); }}><DialogContent className="max-w-2xl"><DialogHeader><DialogTitle>{detail?.title || "资料详情"}</DialogTitle><DialogDescription>核对文件、分类、来源和版本后再确认或发布。</DialogDescription></DialogHeader>{detail && <div className="space-y-4"><PublicationFailure item={detail} /><dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-2 text-ui-sm [&_dt]:whitespace-nowrap"><dt className="text-muted-foreground">文件名</dt><dd className="break-all">{detail.original_filename}</dd><dt className="text-muted-foreground">分类</dt><dd className="break-words">{detail.category_path || detail.category_label}</dd><dt className="text-muted-foreground">状态</dt><dd><Badge variant={statusVariant(detail.lifecycle_status)}>{statusLabel[detail.lifecycle_status]}</Badge></dd><dt className="text-muted-foreground">来源</dt><dd>{sourceLabel[detail.source_origin] || "其他来源"}</dd><dt className="text-muted-foreground">版本</dt><dd>v{detail.version_number}</dd><dt className="text-muted-foreground">创建时间</dt><dd>{formatAdminDate(detail.created_at)}</dd><dt className="text-muted-foreground">最后更新时间</dt><dd className="whitespace-nowrap">{formatAdminDate(detail.updated_at)}</dd><dt className="text-muted-foreground">发布尝试</dt><dd>共 {detail.publication_attempt_count} 次</dd></dl><div className="flex flex-wrap gap-2">{detail.preview_parent_id && ["pdf", "docx", "xlsx", "pptx"].includes(detail.doc_type) ? <Button variant="outline" onClick={() => { openDocumentPreview(detail.preview_parent_id!, detail.title, detail.doc_type, 1, {}, "managed-content-detail"); }}><Eye className="size-4" />预览文件</Button> : <a className={buttonVariants({ variant: "outline" })} href={adminContentApi.fileUrl(detail.version_id)} target="_blank" rel="noreferrer"><Eye className="size-4" />打开文件</a>}{can("organize") && ["draft", "rejected"].includes(detail.lifecycle_status) && <Button onClick={() => void act(detail, "submit", () => adminContentApi.submit(detail.version_id), "已提交确认")} disabled={Boolean(busyAction)}><Send className="size-4" />{busyAction === `${detail.version_id}:submit` ? "提交中…" : "提交确认"}</Button>}{can("review") && detail.lifecycle_status === "awaiting_review" && <><Button onClick={() => void act(detail, "approve", () => adminContentApi.review(detail.version_id, true), "资料已确认")} disabled={Boolean(busyAction)}><Check className="size-4" />{busyAction === `${detail.version_id}:approve` ? "确认中…" : "确认"}</Button><Button variant="outline" onClick={() => void act(detail, "reject", () => adminContentApi.review(detail.version_id, false), "资料已退回")} disabled={Boolean(busyAction)}><X className="size-4" />{busyAction === `${detail.version_id}:reject` ? "退回中…" : "退回"}</Button></>}{can("publish") && ["approved", "publication_failed"].includes(detail.lifecycle_status) && <Button onClick={() => void act(detail, "publish", () => adminContentApi.publish(detail.version_id), "已进入发布队列")} disabled={Boolean(busyAction)}><Rocket className="size-4" />{busyAction === `${detail.version_id}:publish` ? "发布中…" : detail.lifecycle_status === "publication_failed" ? "重新发布" : "发布"}</Button>}</div></div>}</DialogContent></Dialog>
 
     <Dialog open={requestFolderOpen} onOpenChange={setRequestFolderOpen}><DialogContent><DialogHeader><DialogTitle>申请新建文件夹</DialogTitle><DialogDescription>申请将在“{currentFolder?.display_name || "当前目录"}”下创建受控目录，由资料负责人审批。</DialogDescription></DialogHeader><label className="space-y-1.5 text-ui-sm font-medium"><span>文件夹名称</span><Input value={requestFolderName} onChange={(event) => setRequestFolderName(event.target.value)} placeholder="例如：净高分析" autoFocus /></label><DialogFooter><Button variant="outline" onClick={() => setRequestFolderOpen(false)} disabled={busyAction === "request-folder"}>取消</Button><Button onClick={() => void requestFolder()} disabled={!requestFolderName.trim() || busyAction === "request-folder"}>{busyAction === "request-folder" ? "提交中…" : "提交申请"}</Button></DialogFooter></DialogContent></Dialog>
 
@@ -505,10 +732,14 @@ export function AdminManagedContentPage() {
 
     <Dialog open={Boolean(moveTarget)} onOpenChange={(open) => { if (!open) setMoveTarget(null); }}><DialogContent><DialogHeader><DialogTitle>移动资料</DialogTitle><DialogDescription>将“{moveTarget?.title || "资料"}”移动到另一个受控目录。已确认或已发布资料需要先退回。</DialogDescription></DialogHeader><label className="space-y-1.5 text-ui-sm font-medium"><span>目标目录</span><Select value={moveFolderId} onChange={(event) => setMoveFolderId(event.target.value)}>{categories.filter((category) => category.is_active).map((category) => <option key={category.id} value={category.id}>{category.full_path || `${category.display_code} ${category.display_name}`}</option>)}</Select></label><DialogFooter><Button variant="outline" onClick={() => setMoveTarget(null)} disabled={Boolean(busyAction?.endsWith(":move"))}>取消</Button><Button onClick={() => void moveContent()} disabled={!moveFolderId || moveFolderId === moveTarget?.category_id || Boolean(busyAction?.endsWith(":move"))}>{busyAction?.endsWith(":move") ? "移动中…" : "移动"}</Button></DialogFooter></DialogContent></Dialog>
 
+    <Dialog open={Boolean(renameTarget)} onOpenChange={(open) => { if (!open && busyAction !== "rename") { setRenameTarget(null); setRenameConflict(null); setRenameError(null); } }}><DialogContent><DialogHeader><DialogTitle>重命名资料</DialogTitle><DialogDescription>标题和源文件名会作为新草稿版本保存，之后需要重新确认并发布。</DialogDescription></DialogHeader><div className="space-y-3"><label className="block space-y-1.5 text-ui-sm font-medium"><span>资料标题</span><Input value={renameTitle} onChange={(event) => { setRenameTitle(event.target.value); setRenameConflict(null); }} /></label><label className="block space-y-1.5 text-ui-sm font-medium"><span>源文件名</span><Input value={renameFilename} onChange={(event) => { setRenameFilename(event.target.value); setRenameConflict(null); }} /><span className="block text-ui-xs font-normal text-muted-foreground">只能修改名称，不能改变文件扩展名。</span></label>{renameConflict && <div className="space-y-2 rounded-ui-md border border-warning/50 bg-warning/10 p-3 text-ui-sm" role="alert"><p className="font-medium">当前目录存在同名资料，是否替换？</p><p className="break-words">{renameConflict.title}（{renameConflict.original_filename}）</p><p className="text-muted-foreground">替换会将上述资料移入回收站并立即停止检索；当前资料的新版本仍需重新确认和发布。</p></div>}{renameError && <p className="text-ui-sm text-destructive" role="alert">{renameError}</p>}</div><DialogFooter><Button variant="outline" disabled={busyAction === "rename"} onClick={() => setRenameTarget(null)}>取消</Button>{renameConflict ? <Button variant="destructive" disabled={busyAction === "rename"} onClick={() => void renameContent(true)}>{busyAction === "rename" ? "替换中…" : "确认替换并重命名"}</Button> : <Button disabled={busyAction === "rename" || !renameTitle.trim() || !renameFilename.trim()} onClick={() => void renameContent()}>{busyAction === "rename" ? "保存中…" : "保存为新版本"}</Button>}</DialogFooter></DialogContent></Dialog>
+
+    <Dialog open={Boolean(updateTarget)} onOpenChange={(open) => { if (!open && busyAction !== "update") { setUpdateTarget(null); setUpdateConflict(null); setUpdateError(null); setUpdateFile(null); } }}><DialogContent><DialogHeader><DialogTitle>更新资料文件</DialogTitle><DialogDescription>上传替换文件后会创建新草稿版本，旧发布版本会继续检索，直到新版本发布成功。</DialogDescription></DialogHeader><div className="space-y-3"><label className="flex min-h-32 cursor-pointer flex-col items-center justify-center gap-2 rounded-ui-lg border border-dashed border-input bg-background px-4 py-5 text-center hover:bg-surface-muted focus-within:ring-2 focus-within:ring-ring"><FileUp className="size-6 text-primary" /><span className="text-ui-sm font-medium">{updateFile ? updateFile.name : "选择替换文件"}</span><span className="text-ui-xs text-muted-foreground">支持 PDF、Markdown、Word、Excel 和 PPT</span><input ref={updateFileInputRef} type="file" className="sr-only" aria-label="选择替换文件" accept=".pdf,.md,.docx,.xlsx,.pptx" onChange={(event) => { setUpdateFile(event.target.files?.[0] || null); setUpdateConflict(null); }} /></label>{updateFile && <div className="space-y-2"><p className="text-ui-sm font-medium">文件名处理</p><div className="grid grid-cols-2 gap-2" role="group" aria-label="文件名处理"><Button type="button" variant={updateFilenameMode === "old" ? "default" : "outline"} aria-pressed={updateFilenameMode === "old"} onClick={() => { setUpdateFilenameMode("old"); setUpdateConflict(null); }}>沿用原名称</Button><Button type="button" variant={updateFilenameMode === "new" ? "default" : "outline"} aria-pressed={updateFilenameMode === "new"} onClick={() => { setUpdateFilenameMode("new"); setUpdateConflict(null); }}>使用新文件名</Button></div><p className="break-all text-ui-xs text-muted-foreground">{updateFilenameMode === "old" ? `将使用原名称并匹配新格式：${filenameForOldMode(updateTarget?.original_filename || "", updateFile.name)}` : `将使用：${updateFile.name}`}</p></div>}{updateConflict && <div className="space-y-2 rounded-ui-md border border-warning/50 bg-warning/10 p-3 text-ui-sm" role="alert"><p className="font-medium">当前目录存在同名资料，是否替换？</p><p>{updateConflict.title}（{updateConflict.original_filename}）</p><p className="text-muted-foreground">替换会将上述资料移入回收站并停止检索。</p></div>}{updateError && <p className="text-ui-sm text-destructive" role="alert">{updateError}</p>}</div><DialogFooter><Button variant="outline" disabled={busyAction === "update"} onClick={() => setUpdateTarget(null)}>取消</Button>{updateConflict ? <Button variant="destructive" disabled={busyAction === "update"} onClick={() => void updateContent(true)}>{busyAction === "update" ? "替换中…" : "确认替换并更新"}</Button> : <Button disabled={!updateFile || busyAction === "update"} onClick={() => void updateContent()}>{busyAction === "update" ? "上传中…" : "确认更新"}</Button>}</DialogFooter></DialogContent></Dialog>
+
     <Dialog open={uploadDialogOpen} onOpenChange={(open) => { if (!open) closeUploadDialog(); }}><DialogContent><DialogHeader><DialogTitle>上传文件</DialogTitle><DialogDescription>文件将上传到当前目录“{currentFolder?.full_path || "请选择目录"}”，上传后先进入待提交状态。</DialogDescription></DialogHeader><label onDragEnter={(event) => { event.preventDefault(); setDragActive(true); }} onDragOver={(event) => event.preventDefault()} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragActive(false); }} onDrop={(event) => { event.preventDefault(); setDragActive(false); acceptFiles(Array.from(event.dataTransfer?.files || [])); }} className={`flex min-h-36 cursor-pointer flex-col items-center justify-center gap-2 rounded-ui-lg border border-dashed px-4 py-6 text-center transition-colors duration-normal focus-within:ring-2 focus-within:ring-ring ${dragActive ? "border-primary bg-primary/5" : "border-input bg-background hover:bg-surface-muted"}`}><Upload className="size-6 text-primary" /><span className="text-ui-sm font-medium">拖动文件到这里，或选择文件</span><span className="text-ui-xs text-muted-foreground">支持 PDF、Markdown、Word、Excel 和 PPT</span><input ref={fileInputRef} aria-label="选择资料文件" type="file" multiple accept=".pdf,.md,.docx,.xlsx,.pptx" className="sr-only" disabled={uploading} onChange={(event) => acceptFiles(Array.from(event.target.files || []))} /></label>{files.length > 0 && <ul className="max-h-40 space-y-1 overflow-y-auto rounded-ui-md border border-border px-3 py-2 text-ui-sm">{files.map((file) => <li key={`${file.name}-${file.size}`} className="break-all">{file.name}<span className="ml-2 text-ui-xs text-muted-foreground">{Math.ceil(file.size / 1024)} KB</span></li>)}</ul>}<DialogFooter><Button variant="outline" onClick={closeUploadDialog} disabled={uploading}>取消</Button><Button onClick={() => void confirmDialogUpload()} disabled={!files.length || uploading || !currentFolderId}>{uploading ? "上传中…" : "确定上传"}</Button></DialogFooter></DialogContent></Dialog>
 
     <Dialog open={pendingUploadFiles.length > 0} onOpenChange={(open) => { if (!open && !uploading) { setPendingUploadFiles([]); setPendingUploadFolderId(""); } }}><DialogContent><DialogHeader><DialogTitle>确认上传</DialogTitle><DialogDescription>将上传到“{categories.find((category) => category.id === pendingUploadFolderId)?.full_path || currentFolder?.full_path || "当前目录"}”，确认后文件会进入待提交状态。</DialogDescription></DialogHeader><div className="space-y-2 text-ui-sm"><p>共 {pendingUploadFiles.length} 个文件</p><ul className="max-h-48 space-y-1 overflow-y-auto rounded-ui-md border border-border px-3 py-2">{pendingUploadFiles.map((file) => <li key={`${file.name}-${file.size}`} className="break-all">{file.name}<span className="ml-2 text-ui-xs text-muted-foreground">{Math.ceil(file.size / 1024)} KB</span></li>)}</ul></div><DialogFooter><Button variant="outline" onClick={() => { setPendingUploadFiles([]); setPendingUploadFolderId(""); }} disabled={uploading}>取消</Button><Button onClick={() => void confirmFolderUpload()} disabled={uploading}>{uploading ? "上传中…" : "确定上传"}</Button></DialogFooter></DialogContent></Dialog>
 
-    <Dialog open={Boolean(deleteTarget)} onOpenChange={(open) => { if (!open && busyAction !== `${deleteTarget?.version_id}:delete`) { setDeleteTarget(null); setDeleteError(null); } }}><DialogContent><DialogHeader><DialogTitle>移至回收站</DialogTitle><DialogDescription>“{deleteTarget?.title}”将从资料列表和知识库检索中移除，但文件、版本及审核发布历史会保留，可由资料负责人或系统管理员恢复。</DialogDescription></DialogHeader>{deleteError && <p className="rounded-ui-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-ui-sm text-destructive" role="alert">{deleteError}</p>}<DialogFooter><Button variant="outline" disabled={busyAction === `${deleteTarget?.version_id}:delete`} onClick={() => { setDeleteTarget(null); setDeleteError(null); }}>取消</Button><Button variant="destructive" disabled={busyAction === `${deleteTarget?.version_id}:delete`} onClick={() => void deleteContent()}>{busyAction === `${deleteTarget?.version_id}:delete` ? "处理中…" : "确认移入"}</Button></DialogFooter></DialogContent></Dialog>
+    <Dialog open={deleteTargets.length > 0} onOpenChange={(open) => { if (!open && busyAction !== "archive") { setDeleteTargets([]); setDeleteAcknowledged(false); setDeleteError(null); } }}><DialogContent><DialogHeader><DialogTitle>{deleteTargets.length > 1 ? `将 ${deleteTargets.length} 份资料移入回收站？` : "将资料移入回收站？"}</DialogTitle><DialogDescription>以下资料将立即停止进入知识库检索。文件、版本及审核发布历史会保留，可从回收站恢复。</DialogDescription></DialogHeader><ul className="max-h-48 space-y-2 overflow-y-auto rounded-ui-md border border-border p-3 text-ui-sm">{deleteTargets.map((item) => <li key={item.item_id} className="min-w-0"><p className="break-words font-medium">{item.title}</p><p className="break-all text-ui-xs text-muted-foreground">{item.original_filename}</p></li>)}</ul><label className="flex items-start gap-2 rounded-ui-md border border-destructive/30 bg-destructive/5 p-3 text-ui-sm"><Checkbox className="mt-0.5" checked={deleteAcknowledged} onChange={(event) => setDeleteAcknowledged(event.target.checked)} /><span>我已了解这些资料移入回收站后将不再进入检索。</span></label>{deleteError && <p className="rounded-ui-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-ui-sm text-destructive" role="alert">{deleteError}</p>}<DialogFooter><Button variant="outline" disabled={busyAction === "archive"} onClick={() => setDeleteTargets([])}>取消</Button><Button variant="destructive" disabled={busyAction === "archive" || !deleteAcknowledged} onClick={() => void deleteContent()}>{busyAction === "archive" ? "处理中…" : "确认移入回收站"}</Button></DialogFooter></DialogContent></Dialog>
   </section>;
 }

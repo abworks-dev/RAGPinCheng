@@ -11,7 +11,7 @@ import pytest
 from api.content_permissions import has_content_permission
 from api.content_import import import_server_batch, resolve_import_category
 from api.content_storage import ContentStorage, StoredContentObject
-from api.content_store import archive_content_item, create_category, create_web_batch, list_categories, register_uploaded_document, restore_content_item
+from api.content_store import archive_content_item, create_category, create_content_revision, create_web_batch, list_categories, move_content_item, register_uploaded_document, restore_content_item
 from api.content_store import (
     create_publication_job,
     review_version,
@@ -223,6 +223,90 @@ def test_same_object_can_back_independent_content_items(tmp_path):
     assert first.item_id != second.item_id
     assert conn.execute("SELECT count(*) FROM content_objects").fetchone()[0] == 1
     assert conn.execute("SELECT count(*) FROM content_items").fetchone()[0] == 2
+    conn.close()
+
+
+def test_revision_keeps_published_head_until_the_new_version_is_promoted(tmp_path):
+    conn = _db(tmp_path)
+    actor = conn.execute("SELECT id FROM users WHERE employee_id='u1'").fetchone()[0]
+    batch = create_web_batch(conn, actor_user_id=actor)
+    payload = b"published-content"
+    digest = hashlib.sha256(payload).hexdigest()
+    stored = StoredContentObject(
+        sha256=digest,
+        size_bytes=len(payload),
+        mime_type="application/pdf",
+        storage_rel_path=f"objects/sha256/{digest[:2]}/{digest}",
+        absolute_path=tmp_path / digest,
+        created=True,
+    )
+    uploaded = register_uploaded_document(
+        conn,
+        batch_id=batch,
+        category_id="cat-03",
+        title="已发布资料",
+        original_filename="published.pdf",
+        doc_type="pdf",
+        stored=stored,
+        actor_user_id=actor,
+    )
+    conn.execute(
+        "UPDATE content_versions SET lifecycle_status='published' WHERE id=?",
+        (uploaded.version_id,),
+    )
+    conn.execute(
+        """INSERT INTO content_publications
+           (id,version_id,status,publisher_id,created_at,updated_at,published_at)
+           VALUES ('publication-head',?,'published',?,1,1,1)""",
+        (uploaded.version_id, actor),
+    )
+    conn.execute(
+        """INSERT INTO content_item_heads(item_id,current_version_id,publication_id,updated_at)
+           VALUES (?,?,'publication-head',1)""",
+        (uploaded.item_id, uploaded.version_id),
+    )
+    conn.commit()
+
+    revised = create_content_revision(
+        conn,
+        uploaded.item_id,
+        expected_version_id=uploaded.version_id,
+        title="重命名后的资料",
+        original_filename="renamed.pdf",
+        actor_user_id=actor,
+        can_organize=True,
+        can_publish=False,
+    )
+
+    assert conn.execute(
+        "SELECT current_version_id FROM content_item_heads WHERE item_id=?",
+        (uploaded.item_id,),
+    ).fetchone()[0] == uploaded.version_id
+    assert conn.execute(
+        "SELECT lifecycle_status FROM content_versions WHERE id=?", (uploaded.version_id,)
+    ).fetchone()[0] == "published"
+    assert conn.execute(
+        "SELECT lifecycle_status FROM content_versions WHERE id=?", (revised.version_id,)
+    ).fetchone()[0] == "draft"
+    with pytest.raises(ValueError, match="content_delete_forbidden"):
+        archive_content_item(
+            conn,
+            uploaded.item_id,
+            expected_version_id=revised.version_id,
+            actor_user_id=actor,
+            can_organize=True,
+            can_publish=False,
+        )
+    with pytest.raises(ValueError, match="content_move_requires_republication"):
+        move_content_item(
+            conn,
+            uploaded.item_id,
+            target_category_id="cat-04",
+            expected_version_id=revised.version_id,
+            actor_user_id=actor,
+            can_organize=True,
+            can_review=False,
+        )
     conn.close()
 
 
