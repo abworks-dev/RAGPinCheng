@@ -161,7 +161,7 @@ if ($needsQualificationImport) {
         $qualifiedManifest.release_id -ne $releaseId -or
         $qualifiedManifest.status -ne "built" -or
         $qualifiedManifest.qualification_status -ne "qualified" -or
-        $qualifiedManifest.lock_validation_status -ne "candidate" -or
+        $qualifiedManifest.lock_validation_status -notin @("candidate", "validated") -or
         [string]$qualifiedManifest.repository_commit -ne [string]$metadata.source_commit -or
         [string]$qualifiedManifest.source_fingerprint -ne [string]$SourceFingerprint -or
         [string]$qualifiedManifest.lock_sha256 -ne [string]$lockHash -or

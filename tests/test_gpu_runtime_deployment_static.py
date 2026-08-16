@@ -291,6 +291,8 @@ def test_builder_is_d_drive_isolated_exact_and_records_artifacts():
     assert "Validated metadata has no managed qualification root to import" in script
     assert "-not $RequalifyValidated" in script
     assert "requires exactly one matching qualified release" in script
+    assert '$qualifiedManifest.lock_validation_status -notin @("candidate", "validated")' in script
+    assert '$qualifiedManifest.lock_validation_status -ne "candidate"' not in script
     assert "Managed qualification release does not match validated metadata" in script
     assert "Copy-Item -LiteralPath $entry.FullName" in script
     assert "$needsQualificationImport" in script
