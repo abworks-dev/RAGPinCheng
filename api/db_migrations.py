@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Iterable
 
 from .content_permission_catalog import (
+    CONTENT_PERMISSION_V2_SYSTEM_CONTENT_PERMISSION_GROUPS,
     LEGACY_SYSTEM_CONTENT_PERMISSION_GROUPS,
     SYSTEM_CONTENT_PERMISSION_GROUPS,
 )
@@ -577,6 +578,49 @@ TRANSCRIPT_MANUAL_REVISION_STATEMENTS = (
        WHERE edit_idempotency_key IS NOT NULL""",
 )
 
+CONTENT_PERMISSION_DOWNLOAD_STATEMENTS = (
+    "ALTER TABLE content_permissions RENAME TO content_permissions_v11",
+    """CREATE TABLE content_permissions (
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        permission TEXT NOT NULL CHECK (permission IN (
+            'workspace.view','item.view','item.download','category.view','item.upload','item.submit',
+            'item.move_draft','item.archive_draft','item.review','item.move_review',
+            'item.publish','item.archive_published','trash.view','trash.restore',
+            'category.manage','folder.request','folder.review','import.server','index.view'
+        )),
+        granted_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at INTEGER NOT NULL,
+        PRIMARY KEY(user_id, permission)
+    )""",
+    """INSERT INTO content_permissions(user_id,permission,granted_by,created_at)
+       SELECT user_id,permission,granted_by,created_at FROM content_permissions_v11""",
+    """INSERT INTO content_permissions(user_id,permission,granted_by,created_at)
+       SELECT user_id,'item.download',MIN(granted_by),MIN(created_at)
+       FROM content_permissions_v11
+       WHERE permission='item.view'
+       GROUP BY user_id""",
+    "DROP TABLE content_permissions_v11",
+    "ALTER TABLE content_permission_group_items RENAME TO content_permission_group_items_v11",
+    """CREATE TABLE content_permission_group_items (
+        group_id TEXT NOT NULL REFERENCES content_permission_groups(id) ON DELETE CASCADE,
+        permission TEXT NOT NULL CHECK (permission IN (
+            'workspace.view','item.view','item.download','category.view','item.upload','item.submit',
+            'item.move_draft','item.archive_draft','item.review','item.move_review',
+            'item.publish','item.archive_published','trash.view','trash.restore',
+            'category.manage','folder.request','folder.review','import.server','index.view'
+        )),
+        PRIMARY KEY(group_id, permission)
+    )""",
+    """INSERT INTO content_permission_group_items(group_id,permission)
+       SELECT group_id,permission FROM content_permission_group_items_v11""",
+    """INSERT INTO content_permission_group_items(group_id,permission)
+       SELECT group_id,'item.download'
+       FROM content_permission_group_items_v11
+       WHERE permission='item.view'
+       GROUP BY group_id""",
+    "DROP TABLE content_permission_group_items_v11",
+)
+
 MIGRATIONS = (
     Migration(1, "multi_engine_transcription_phase2", PHASE2_STATEMENTS),
     Migration(2, "answer_regeneration_versions", ANSWER_VERSION_STATEMENTS),
@@ -590,6 +634,7 @@ MIGRATIONS = (
     Migration(10, "managed_content_version_metadata", CONTENT_VERSION_METADATA_STATEMENTS),
     Migration(11, "granular_content_permissions", CONTENT_PERMISSION_V2_STATEMENTS),
     Migration(12, "transcript_manual_revisions", TRANSCRIPT_MANUAL_REVISION_STATEMENTS),
+    Migration(13, "content_download_permission", CONTENT_PERMISSION_DOWNLOAD_STATEMENTS),
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 PHASE2_TABLES = frozenset(
@@ -764,6 +809,8 @@ def has_pending_ddl(path: Path, *, base_tables: frozenset[str]) -> bool:
         try:
             expected_groups = (
                 SYSTEM_CONTENT_PERMISSION_GROUPS
+                if any(version == 13 for version, _name in applied)
+                else CONTENT_PERMISSION_V2_SYSTEM_CONTENT_PERMISSION_GROUPS
                 if any(version == 11 for version, _name in applied)
                 else LEGACY_SYSTEM_CONTENT_PERMISSION_GROUPS
             )
@@ -847,6 +894,8 @@ def apply_all(conn: sqlite3.Connection, *, base_schema: str, applied_at: int) ->
         validate_system_content_permission_groups(
             conn,
             SYSTEM_CONTENT_PERMISSION_GROUPS
+            if 13 in applied_versions
+            else CONTENT_PERMISSION_V2_SYSTEM_CONTENT_PERMISSION_GROUPS
             if 11 in applied_versions
             else LEGACY_SYSTEM_CONTENT_PERMISSION_GROUPS,
         )

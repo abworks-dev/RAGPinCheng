@@ -10,7 +10,7 @@ const admin = {
   role: "admin",
   csrf_token: "synthetic-csrf-token",
   content_permissions: [
-    "workspace.view", "item.view", "category.view", "item.upload", "item.submit",
+    "workspace.view", "item.view", "item.download", "category.view", "item.upload", "item.submit",
     "item.move_draft", "item.archive_draft", "item.review", "item.move_review",
     "item.publish", "item.archive_published", "trash.view", "trash.restore",
     "category.manage", "folder.request", "folder.review", "import.server", "index.view",
@@ -26,7 +26,7 @@ const workspaceUsers = {
     real_name: "合成资料员",
     role: "user",
     content_permissions: [
-      "workspace.view", "item.view", "category.view", "item.upload", "item.submit",
+      "workspace.view", "item.view", "item.download", "category.view", "item.upload", "item.submit",
       "item.move_draft", "item.archive_draft", "folder.request",
     ],
   },
@@ -184,7 +184,7 @@ const permissionUsers = [
     role: "user",
     is_active: true,
     permissions: [
-      "workspace.view", "item.view", "category.view", "item.upload", "item.submit",
+      "workspace.view", "item.view", "item.download", "category.view", "item.upload", "item.submit",
       "item.move_draft", "item.archive_draft", "folder.request", "item.review",
       "item.move_review", "folder.review", "trash.view", "trash.restore",
     ],
@@ -193,10 +193,11 @@ const permissionUsers = [
 ];
 
 const permissionCatalog = {
-  schema_version: 2,
+  schema_version: 3,
   permissions: [
     { key: "workspace.view", domain: "access", domain_label: "入口与查看", label: "进入资料工作台", description: "进入资料管理工作台。", dependencies: [] },
-    { key: "item.view", domain: "access", domain_label: "入口与查看", label: "查看资料", description: "查看资料列表、详情、预览和下载。", dependencies: ["workspace.view"] },
+    { key: "item.view", domain: "access", domain_label: "入口与查看", label: "查看资料", description: "查看资料列表、详情和预览。", dependencies: ["workspace.view"] },
+    { key: "item.download", domain: "access", domain_label: "入口与查看", label: "下载资料", description: "下载单份资料或批量打包下载。", dependencies: ["workspace.view", "item.view"] },
     { key: "category.view", domain: "access", domain_label: "入口与查看", label: "查看分类", description: "查看资料分类树和完整路径。", dependencies: ["workspace.view"] },
     { key: "item.upload", domain: "organize", domain_label: "资料整理", label: "上传资料", description: "上传文件并创建资料草稿。", dependencies: ["workspace.view", "item.view", "category.view"] },
     { key: "item.submit", domain: "organize", domain_label: "资料整理", label: "提交确认", description: "将草稿或退回资料提交确认。", dependencies: ["workspace.view", "item.view"] },
@@ -218,11 +219,11 @@ const permissionCatalog = {
 
 const permissionGroups = [
   { id: "permission-group-member", group_key: "member", display_name: "普通成员", permissions: [], is_system: true, is_active: true, updated_at: 1700000000 },
-  { id: "permission-group-viewer", group_key: "viewer", display_name: "资料浏览者", permissions: ["workspace.view", "item.view", "category.view"], is_system: true, is_active: true, updated_at: 1700000000 },
-  { id: "permission-group-bim-engineer", group_key: "bim_engineer", display_name: "BIM工程师", permissions: ["workspace.view", "item.view", "category.view", "item.upload", "item.submit", "item.move_draft", "item.archive_draft", "folder.request"], is_system: true, is_active: true, updated_at: 1700000000 },
-  { id: "permission-group-content-owner", group_key: "content_owner", display_name: "资料负责人", permissions: ["workspace.view", "item.view", "category.view", "item.review", "item.move_review", "folder.review", "trash.view", "trash.restore"], is_system: true, is_active: true, updated_at: 1700000000 },
-  { id: "permission-group-publisher", group_key: "publisher", display_name: "发布负责人", permissions: ["workspace.view", "item.view", "category.view", "item.publish", "item.archive_published", "trash.view", "index.view"], is_system: true, is_active: true, updated_at: 1700000000 },
-  { id: "permission-group-category-admin", group_key: "category_admin", display_name: "分类管理员", permissions: ["workspace.view", "item.view", "category.view", "category.manage", "folder.review"], is_system: true, is_active: true, updated_at: 1700000000 },
+  { id: "permission-group-viewer", group_key: "viewer", display_name: "资料浏览者", permissions: ["workspace.view", "item.view", "item.download", "category.view"], is_system: true, is_active: true, updated_at: 1700000000 },
+  { id: "permission-group-bim-engineer", group_key: "bim_engineer", display_name: "BIM工程师", permissions: ["workspace.view", "item.view", "item.download", "category.view", "item.upload", "item.submit", "item.move_draft", "item.archive_draft", "folder.request"], is_system: true, is_active: true, updated_at: 1700000000 },
+  { id: "permission-group-content-owner", group_key: "content_owner", display_name: "资料负责人", permissions: ["workspace.view", "item.view", "item.download", "category.view", "item.review", "item.move_review", "folder.review", "trash.view", "trash.restore"], is_system: true, is_active: true, updated_at: 1700000000 },
+  { id: "permission-group-publisher", group_key: "publisher", display_name: "发布负责人", permissions: ["workspace.view", "item.view", "item.download", "category.view", "item.publish", "item.archive_published", "trash.view", "index.view"], is_system: true, is_active: true, updated_at: 1700000000 },
+  { id: "permission-group-category-admin", group_key: "category_admin", display_name: "分类管理员", permissions: ["workspace.view", "item.view", "item.download", "category.view", "category.manage", "folder.review"], is_system: true, is_active: true, updated_at: 1700000000 },
   { id: "permission-group-system-admin", group_key: "system_admin", display_name: "系统管理员", permissions: admin.content_permissions, is_system: true, is_active: true, updated_at: 1700000000 },
 ];
 
@@ -408,6 +409,14 @@ export async function installAdminRoutes(
     }
     if (request.method() === "GET" && /^\/api\/admin\/content\/versions\/[^/]+\/file$/.test(path)) {
       return route.fulfill({ status: 200, contentType: "application/pdf", body: "%PDF synthetic fixture" });
+    }
+    if (request.method() === "POST" && path === "/api/admin/content/bulk-download") {
+      return route.fulfill({
+        status: 200,
+        contentType: "application/zip",
+        headers: { "content-disposition": "attachment; filename=managed-content.zip" },
+        body: "synthetic zip fixture",
+      });
     }
     if (path === "/api/admin/users") return json(route, { users: permissionUsers.map((user) => ({
       id: user.user_id, employee_id: user.employee_id, real_name: user.real_name, role: user.role,

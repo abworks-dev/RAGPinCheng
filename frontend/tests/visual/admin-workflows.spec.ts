@@ -127,6 +127,21 @@ test.describe("资料管理", () => {
     await expectNoBodyOverflow(page);
   });
 
+  test("batch download stays visible and starts a single archive download", async ({ page }) => {
+    await openTab(page, "资料管理");
+    await openRootFolder(page);
+    const firstTitle = "建筑信息模型交付标准（合成长文件名用于响应式检查）";
+    const secondTitle = "机电专业协同检查清单";
+    await page.getByRole("checkbox", { name: `选择${firstTitle}` }).check();
+    await page.getByRole("checkbox", { name: `选择${secondTitle}` }).check();
+
+    await page.getByRole("button", { name: "批量操作" }).click();
+    const downloadPromise = page.waitForEvent("download");
+    await page.getByRole("menuitem", { name: "批量下载" }).click();
+    expect((await downloadPromise).suggestedFilename()).toBe("managed-content.zip");
+    await expectNoBodyOverflow(page);
+  });
+
   for (const scenario of ["loading", "empty", "error", "disabled"] as const) {
     test(`${scenario} state is explicit and contained`, async ({ page }, testInfo) => {
       await openTab(page, "资料管理", scenario);

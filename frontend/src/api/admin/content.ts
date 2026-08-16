@@ -29,6 +29,8 @@ export const adminContentApi = {
   bulkPublish: (...args: Parameters<typeof api.bulkPublishManagedContent>) => api.bulkPublishManagedContent(...args),
   bulkMove: (...args: Parameters<typeof api.bulkMoveManagedContent>) => api.bulkMoveManagedContent(...args),
   bulkArchive: (...args: Parameters<typeof api.bulkArchiveManagedContent>) => api.bulkArchiveManagedContent(...args),
+  bulkDownload: (...args: Parameters<typeof api.bulkDownloadManagedContent>) => api.bulkDownloadManagedContent(...args),
+  downloadFile: (...args: Parameters<typeof api.downloadManagedContentFile>) => api.downloadManagedContentFile(...args),
   fileUrl: (...args: Parameters<typeof api.managedContentFileUrl>) => api.managedContentFileUrl(...args),
   indexJobs: (...args: Parameters<typeof api.managedContentIndexJobs>) => api.managedContentIndexJobs(...args),
 };
