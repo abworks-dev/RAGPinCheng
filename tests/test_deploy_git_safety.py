@@ -449,6 +449,14 @@ class TestDeployGitSafety(unittest.TestCase):
             'COMPOSE_FILES+=(-f "${SOURCE_DECOUPLED_COMPOSE}")',
             self.app_only_workflow,
         )
+        self.assertIn(
+            'container.get("HostConfig", {}).get("Tmpfs", {})',
+            self.app_only_workflow,
+        )
+        self.assertIn(
+            '"/app/docs" in service_tmpfs',
+            self.app_only_workflow,
+        )
         self.assertIn('ORIGINAL_COMPOSE_OVERRIDE="${COMPOSE_OVERRIDE}"', self.app_only_workflow)
         self.assertIn('COMPOSE=("${DEPLOY_COMPOSE[@]}")', self.app_only_workflow)
         self.assertIn("export COMPOSE_OVERRIDE", self.app_only_workflow)

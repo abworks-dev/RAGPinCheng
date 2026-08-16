@@ -619,9 +619,13 @@ jobs:
           from pathlib import Path
           container = json.load(sys.stdin)[0]
           mounts = {item["Destination"]: item for item in container.get("Mounts", [])}
+          service_tmpfs = container.get("HostConfig", {}).get("Tmpfs", {}) or {}
           docs = mounts.get("/app/docs")
-          assert docs is not None, "missing /app/docs mount"
-          assert docs.get("Type") == "tmpfs", "unexpected docs mount type: %r" % docs.get("Type")
+          if docs is None:
+              assert "/app/docs" in service_tmpfs, "missing /app/docs tmpfs"
+              assert "ro" in service_tmpfs["/app/docs"].split(",")
+          else:
+              assert docs.get("Type") == "tmpfs", "unexpected docs mount type: %r" % docs.get("Type")
           media = mounts.get("/app/media", {})
           content = mounts.get("/app/content", {})
           assert media.get("Type") == "bind", "unexpected media mount type: %r" % media.get("Type")
