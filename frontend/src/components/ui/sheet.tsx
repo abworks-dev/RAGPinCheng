@@ -9,8 +9,8 @@ export const SheetClose = DialogPrimitive.Close;
 
 export const SheetContent = forwardRef<
   ElementRef<typeof DialogPrimitive.Content>,
-  ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
->(({ className, children, ...props }, ref) => (
+  ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & { closeLabel?: string }
+>(({ className, children, closeLabel = "关闭", ...props }, ref) => (
   <DialogPrimitive.Portal>
     <DialogPrimitive.Overlay className="fixed inset-0 z-overlay bg-slate-950/50 transition-opacity data-[state=closed]:opacity-0 data-[state=open]:opacity-100" />
     <DialogPrimitive.Content
@@ -25,7 +25,7 @@ export const SheetContent = forwardRef<
     >
       {children}
       <DialogPrimitive.Close
-        aria-label="关闭"
+        aria-label={closeLabel}
         className="absolute right-4 top-4 inline-flex size-9 items-center justify-center rounded-ui-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         <X className="size-4" />

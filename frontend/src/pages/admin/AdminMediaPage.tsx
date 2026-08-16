@@ -10,7 +10,7 @@ import { ErrorState } from "../../components/ui/error-state";
 import { Input } from "../../components/ui/input";
 import { LoadingState } from "../../components/ui/loading-state";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../../components/ui/dialog";
-import { TranscriptionVersionPanel } from "../../components/TranscriptionVersionPanel";
+import { TranscriptionWorkbenchSheet } from "../../components/TranscriptionWorkbenchSheet";
 import { useTranscriptionJobs } from "../../hooks/useTranscriptionJobs";
 import { createRequestId } from "../../lib/request-id";
 import type { MediaAsset, TranscriptionJob, TranscriptionProfile } from "../../types";
@@ -264,6 +264,14 @@ export function AdminMediaPage() {
     counts[value] = mediaAssets.filter((asset) => matchesMediaFilter(asset, value)).length;
     return counts;
   }, { all: 0, processing: 0, review: 0, publishing: 0, failed: 0 });
+  const selectedAsset = selectedMediaId ? mediaAssets.find((asset) => asset.media_id === selectedMediaId) ?? null : null;
+  const refreshMediaState = useCallback(async () => {
+    await Promise.all([refresh(), refreshJobs()]);
+  }, [refresh, refreshJobs]);
+
+  useEffect(() => {
+    if (selectedMediaId && !mediaAssets.some((asset) => asset.media_id === selectedMediaId)) setSelectedMediaId(null);
+  }, [mediaAssets, selectedMediaId]);
 
   async function deleteFailedMedia(asset: MediaAsset) {
     setDeletingMediaId(asset.media_id);
@@ -557,8 +565,16 @@ export function AdminMediaPage() {
             </ul>
           </Card>}
         {visibleMediaAssets.length === 0 && mediaAssets.length > 0 && <EmptyState title="没有符合条件的媒体" description="请切换其他快捷筛选条件。" />}
-        {selectedMediaId && <Card className="p-4"><div className="flex items-center justify-between"><h3 className="font-semibold">转写版本操作</h3><Button size="sm" variant="ghost" onClick={() => setSelectedMediaId(null)}>关闭</Button></div><TranscriptionVersionPanel mediaId={selectedMediaId} refreshToken={jobsByMediaId.get(selectedMediaId)?.result_version_id} embedded /></Card>}
       </section>
+      <TranscriptionWorkbenchSheet
+        open={selectedAsset != null}
+        title={selectedAsset?.title || "转写工作台"}
+        originalFilename={selectedAsset?.original_filename || ""}
+        mediaId={selectedAsset?.media_id || null}
+        refreshToken={selectedAsset ? jobsByMediaId.get(selectedAsset.media_id)?.result_version_id : null}
+        onClose={() => setSelectedMediaId(null)}
+        onChanged={refreshMediaState}
+      />
       <Dialog open={deleteTarget != null} onOpenChange={(open) => { if (!open && !deletingMediaId) setDeleteTarget(null); }}>
         <DialogContent>
           <DialogHeader>

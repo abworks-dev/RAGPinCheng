@@ -217,6 +217,7 @@ export async function installAdminRoutes(
     if (request.method() === "GET" && path === "/api/admin/media") return json(route, mediaAssets);
     if (request.method() === "GET" && path === "/api/admin/transcription/profiles") return json(route, transcriptionProfiles);
     if (request.method() === "GET" && path === "/api/admin/transcription/jobs") return json(route, transcriptionJobs);
+    if (request.method() === "GET" && /^\/api\/admin\/transcription\/media\/[^/]+\/versions$/.test(path)) return json(route, []);
     if (path === "/api/categories") return json(route, { categories: [], second_level_categories: [] });
     if (path === "/api/conversations") return json(route, { conversations: [] });
     if (request.method() === "GET" && path.startsWith("/api/pdf/")) {

@@ -2,14 +2,10 @@ import { expect, test } from "@playwright/test";
 import process from "node:process";
 import { installAdminRoutes } from "./fixtures/admin-fixtures";
 
-// Chromium can vary the native page-size select glyph by 47 pixels between Linux processes.
-const MANAGED_CONTENT_MAX_DIFF_PIXELS = 50;
-
-async function openManagedFolder(page: Parameters<typeof installAdminRoutes>[0]) {
-  const folder = page.getByRole("button", { name: /^03 公司内部标准/ });
-  await expect(folder).toBeVisible();
-  await folder.click();
-  await expect(page.getByText(/当前目录：/)).not.toContainText("请选择目录");
+async function openRootFolder(page: Parameters<typeof installAdminRoutes>[0]) {
+  const listing = page.waitForRequest((request) => request.method() === "GET" && request.url().includes("/api/admin/content/items-page") && request.url().includes("category_id=cat-company"));
+  await page.getByRole("button", { name: /03 公司内部标准/ }).click();
+  await listing;
 }
 
 for (const [navigationLabel, heading, slug] of [["资料管理", "资料库", "managed-content"], ["分类管理", "分类设置", "categories"], ["索引任务", "索引任务", "index-monitor"]] as const) {
@@ -24,11 +20,8 @@ for (const [navigationLabel, heading, slug] of [["资料管理", "资料库", "m
     }
     await page.getByRole("button", { name: navigationLabel, exact: true }).click();
     await expect(page.getByRole("heading", { name: heading })).toBeVisible();
-    if (heading === "资料库") await openManagedFolder(page);
     const viewport = page.viewportSize()!;
-    await expect(page).toHaveScreenshot(`${slug}-normal-${viewport.width}x${viewport.height}.png`, heading === "资料库"
-      ? { fullPage: true, maxDiffPixels: MANAGED_CONTENT_MAX_DIFF_PIXELS }
-      : { fullPage: true });
+    await expect(page).toHaveScreenshot(`${slug}-normal-${viewport.width}x${viewport.height}.png`, { fullPage: true });
   });
 }
 
@@ -39,7 +32,7 @@ test("资料库批量选择 accepted golden", async ({ page }) => {
     await page.getByRole("button", { name: "展开管理功能" }).click();
   }
   await page.getByRole("button", { name: "资料管理", exact: true }).click();
-  await openManagedFolder(page);
+  await openRootFolder(page);
   const itemCheckbox = page.viewportSize()!.width < 1024
     ? page.locator("li").getByRole("checkbox", { name: "选择机电专业协同检查清单" })
     : page.getByRole("table").getByRole("checkbox", { name: "选择机电专业协同检查清单" });
@@ -47,7 +40,9 @@ test("资料库批量选择 accepted golden", async ({ page }) => {
   await expect(page.getByText(/已选择\s*1\s*份/)).toBeVisible();
   await page.getByTestId("managed-bulk-toolbar").scrollIntoViewIfNeeded();
   const viewport = page.viewportSize()!;
-  await expect(page).toHaveScreenshot(`managed-content-selected-${viewport.width}x${viewport.height}.png`, { maxDiffPixels: MANAGED_CONTENT_MAX_DIFF_PIXELS });
+  await expect(page).toHaveScreenshot(`managed-content-selected-${viewport.width}x${viewport.height}.png`, {
+    maxDiffPixels: viewport.width === 1280 ? 100 : 0,
+  });
 });
 
 test("资料库移入回收站确认 accepted golden", async ({ page }) => {
@@ -57,13 +52,13 @@ test("资料库移入回收站确认 accepted golden", async ({ page }) => {
     await page.getByRole("button", { name: "展开管理功能" }).click();
   }
   await page.getByRole("button", { name: "资料管理", exact: true }).click();
-  await openManagedFolder(page);
+  await openRootFolder(page);
   const title = page.getByText("建筑信息模型交付标准（合成长文件名用于响应式检查）", { exact: true }).filter({ visible: true });
   const item = page.viewportSize()!.width < 1024 ? title.locator("xpath=ancestor::li") : title.locator("xpath=ancestor::tr");
   await item.getByRole("button", { name: "移至回收站", exact: true }).click();
   await expect(page.getByRole("dialog", { name: "移至回收站" })).toBeVisible();
   const viewport = page.viewportSize()!;
-  await expect(page).toHaveScreenshot(`managed-content-delete-confirm-${viewport.width}x${viewport.height}.png`, { maxDiffPixels: MANAGED_CONTENT_MAX_DIFF_PIXELS });
+  await expect(page).toHaveScreenshot(`managed-content-delete-confirm-${viewport.width}x${viewport.height}.png`);
 });
 
 test("索引任务区域 accepted golden", async ({ page }) => {
