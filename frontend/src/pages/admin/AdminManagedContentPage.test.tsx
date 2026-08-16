@@ -716,6 +716,63 @@ describe("AdminManagedContentPage", () => {
     expect(mocks.success).toHaveBeenCalledWith("目录申请已批准");
   });
 
+  it("selects a nested target directory in the single-move picker", async () => {
+    mocks.categories.mockResolvedValue([category, childCategory, projectCategory]);
+    mocks.moveContent.mockResolvedValue({ ...item, category_id: childCategory.id });
+    render(<AdminManagedContentPage />);
+    await openRootFolder();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "移动“建模标准”" })[0]);
+    const dialog = screen.getByRole("dialog", { name: "移动资料" });
+    expect(within(dialog).getByTestId("category-picker-item-cat-03")).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(within(dialog).getByRole("button", { name: "展开公司内部标准" }));
+    fireEvent.click(within(dialog).getByTestId("category-picker-item-cat-03-01"));
+    expect(within(dialog).getByText(`已选择：${childCategory.full_path}`)).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "确认移动" }));
+
+    await waitFor(() => expect(mocks.moveContent).toHaveBeenCalledWith("item-1", childCategory.id, "version-1"));
+    expect(mocks.success).toHaveBeenCalledWith("已移动“建模标准”");
+  });
+
+  it("keeps the single-move dialog open when the request fails", async () => {
+    mocks.categories.mockResolvedValue([category, projectCategory]);
+    mocks.moveContent.mockRejectedValue(new Error("目标目录已停用"));
+    render(<AdminManagedContentPage />);
+    await openRootFolder();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "移动“建模标准”" })[0]);
+    const dialog = screen.getByRole("dialog", { name: "移动资料" });
+    fireEvent.click(within(dialog).getByTestId("category-picker-item-cat-04"));
+    fireEvent.click(within(dialog).getByRole("button", { name: "确认移动" }));
+
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("目标目录已停用");
+    expect(dialog).toHaveAttribute("data-state", "open");
+    expect(mocks.error).not.toHaveBeenCalled();
+  });
+
+  it("uses the same directory picker for batch moves", async () => {
+    mocks.categories.mockResolvedValue([category, childCategory, projectCategory]);
+    const secondItem = { ...item, item_id: "item-2", title: "建模标准2", version_id: "version-2" };
+    mocks.items.mockResolvedValue({ items: [item, secondItem], total: 2, status_counts: { awaiting_review: 2 } });
+    mocks.bulkMove.mockResolvedValue({ results: [], succeeded: 2, failed: 0 });
+    render(<AdminManagedContentPage />);
+    await openRootFolder();
+    fireEvent.click(screen.getAllByRole("checkbox", { name: "选择建模标准" })[0]);
+    fireEvent.click(screen.getAllByRole("checkbox", { name: "选择建模标准2" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "批量操作" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "批量移动" }));
+
+    const dialog = screen.getByRole("dialog", { name: "批量移动资料" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "展开公司内部标准" }));
+    fireEvent.click(within(dialog).getByTestId("category-picker-item-cat-03-01"));
+    fireEvent.click(within(dialog).getByRole("button", { name: "确认执行" }));
+
+    await waitFor(() => expect(mocks.bulkMove).toHaveBeenCalledWith([
+      { item_id: "item-1", expected_version_id: "version-1" },
+      { item_id: "item-2", expected_version_id: "version-2" },
+    ], childCategory.id));
+  });
+
   it("moves an existing desktop row when dropped on a child folder", async () => {
     mocks.permissions = ORGANIZER_PERMISSIONS;
     mocks.categories.mockResolvedValue([category, childCategory]);
