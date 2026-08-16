@@ -53,7 +53,9 @@ export function TranscriptPanel({
   useEffect(() => {
     if (!following || activeIndex < 0) return;
     const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-    cueRefs.current[activeIndex]?.scrollIntoView({
+    const cue = cueRefs.current[activeIndex];
+    if (typeof cue?.scrollIntoView !== "function") return;
+    cue.scrollIntoView({
       behavior: reducedMotion ? "auto" : "smooth",
       block: "center",
     });
@@ -65,7 +67,9 @@ export function TranscriptPanel({
 
   function resumeFollowing() {
     setFollowing(true);
-    cueRefs.current[activeIndex]?.scrollIntoView({ behavior: "smooth", block: "center" });
+    const cue = cueRefs.current[activeIndex];
+    if (typeof cue?.scrollIntoView !== "function") return;
+    cue.scrollIntoView({ behavior: "smooth", block: "center" });
   }
 
   return (

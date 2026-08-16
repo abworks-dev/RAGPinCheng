@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 
 from src.transcription.types import ContractValidationError
 
@@ -11,6 +12,13 @@ TRANSCRIPT_TURN_RE = re.compile(
     r"^#*\s*说话[人⼈]\s+\d+\s+(\d{1,2}:\d{2}(?::\d{2})?)\s*$",
     re.MULTILINE,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class ParsedTranscriptSegment:
+    start_ms: int
+    end_ms: int | None
+    text: str
 
 
 def normalize_markdown(markdown: str) -> str:
@@ -30,6 +38,41 @@ def parse_transcript_turns(markdown: str) -> list[tuple[str, str]]:
         if body:
             turns.append((match.group(1), body))
     return turns
+
+
+def timestamp_to_ms(timestamp: str) -> int:
+    parts = [int(part) for part in timestamp.split(":")]
+    if len(parts) == 2:
+        minutes, seconds = parts
+        if seconds > 59:
+            raise ContractValidationError("invalid_transcript_timestamp", "markdown")
+        return (minutes * 60 + seconds) * 1000
+    if len(parts) == 3:
+        hours, minutes, seconds = parts
+        if minutes > 59 or seconds > 59:
+            raise ContractValidationError("invalid_transcript_timestamp", "markdown")
+        return (hours * 3600 + minutes * 60 + seconds) * 1000
+    raise ContractValidationError("invalid_transcript_timestamp", "markdown")
+
+
+def parse_transcript_segments(markdown: str) -> list[ParsedTranscriptSegment]:
+    turns = parse_transcript_turns(markdown)
+    segments: list[ParsedTranscriptSegment] = []
+    for index, (timestamp, text) in enumerate(turns):
+        start_ms = timestamp_to_ms(timestamp)
+        next_start = (
+            timestamp_to_ms(turns[index + 1][0])
+            if index + 1 < len(turns)
+            else None
+        )
+        segments.append(
+            ParsedTranscriptSegment(
+                start_ms=start_ms,
+                end_ms=next_start if next_start is not None and next_start > start_ms else None,
+                text=text,
+            )
+        )
+    return segments
 
 
 def _validate_timestamp(timestamp: str) -> None:

@@ -5,6 +5,7 @@ import { TranscriptionVersionPanel } from "./TranscriptionVersionPanel";
 const mocks = vi.hoisted(() => ({
   listTranscriptVersions: vi.fn(),
   previewTranscriptVersion: vi.fn(),
+  previewTranscriptVersionTimeline: vi.fn(),
   createTranscriptRevision: vi.fn(),
   reviewTranscriptVersion: vi.fn(),
   publishTranscriptVersion: vi.fn(),
@@ -55,6 +56,13 @@ describe("TranscriptionVersionPanel", () => {
     vi.clearAllMocks();
     mocks.listTranscriptVersions.mockResolvedValue([awaitingVersion]);
     mocks.previewTranscriptVersion.mockResolvedValue({ version_id: awaitingVersion.version_id, markdown: "说话人 1 00:00:00\n**培训开始**\n", markdown_sha256: awaitingVersion.markdown_sha256 });
+    mocks.previewTranscriptVersionTimeline.mockResolvedValue({
+      media_id: "media-1",
+      version_id: awaitingVersion.version_id,
+      language: "zh-CN",
+      duration_ms: 7000,
+      segments: [{ id: 0, start_ms: 0, end_ms: null, text: "培训开始" }],
+    });
     mocks.createTranscriptRevision.mockResolvedValue(revisedVersion);
     mocks.reviewTranscriptVersion.mockResolvedValue(approvedVersion);
     mocks.publishTranscriptVersion.mockResolvedValue({ version: { ...approvedVersion, publication_status: "publishing" }, job: null, reused: false });
@@ -69,6 +77,7 @@ describe("TranscriptionVersionPanel", () => {
     expect(await screen.findByRole("textbox", { name: "转录 Markdown 编辑器" })).toBeInTheDocument();
     const rendered = await screen.findByText("培训开始", { selector: "strong" });
     expect(rendered).toBeInTheDocument();
+    expect(await screen.findByRole("region", { name: "视频转录稿" })).toBeInTheDocument();
   });
 
   it("saves edits as a new draft and refreshes the selected version", async () => {
