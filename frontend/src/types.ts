@@ -168,7 +168,7 @@ export type AdminStats = {
 
 export type MaintenanceSettings = {
   conversation_cleanup_enabled: boolean;
-  conversation_retention_days: number;
+  conversation_retention_days: number | null;
   updated_at: number | null;
   updated_by: number | null;
 };
@@ -177,7 +177,7 @@ export type MaintenanceRun = {
   id: number;
   trigger_source: "automatic" | "manual";
   status: "succeeded" | "failed";
-  retention_days: number;
+  retention_days: number | null;
   deleted_conversations: number;
   deleted_messages: number;
   deleted_auth_sessions: number;
@@ -193,7 +193,7 @@ export type MaintenanceStatus = {
 };
 
 export type CleanupPreview = {
-  retention_days: number;
+  retention_days: number | null;
   conversations: number;
   messages: number;
   auth_sessions: number;
@@ -203,7 +203,7 @@ export type CleanupPreview = {
 
 export type CleanupResult = {
   run_id: number;
-  retention_days: number;
+  retention_days: number | null;
   deleted_conversations: number;
   deleted_messages: number;
   deleted_auth_sessions: number;

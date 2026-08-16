@@ -152,18 +152,18 @@ class AdminFeedbackPatchRequest(BaseModel):
 
 class MaintenanceSettingsDTO(BaseModel):
     conversation_cleanup_enabled: bool
-    conversation_retention_days: int
+    conversation_retention_days: int | None
     updated_at: int | None = None
     updated_by: int | None = None
 
 
 class MaintenanceSettingsPatchRequest(BaseModel):
     conversation_cleanup_enabled: bool
-    conversation_retention_days: int = Field(ge=7, le=3650)
+    conversation_retention_days: int | None = Field(default=None, ge=7, le=3650)
 
 
 class CleanupPreviewResponse(BaseModel):
-    retention_days: int
+    retention_days: int | None
     conversations: int
     messages: int
     auth_sessions: int
@@ -175,7 +175,7 @@ class MaintenanceRunDTO(BaseModel):
     id: int
     trigger_source: Literal["automatic", "manual"]
     status: Literal["succeeded", "failed"]
-    retention_days: int
+    retention_days: int | None
     deleted_conversations: int
     deleted_messages: int
     deleted_auth_sessions: int
@@ -196,7 +196,7 @@ class MaintenanceRunsResponse(BaseModel):
 
 class CleanupResponse(BaseModel):
     run_id: int
-    retention_days: int
+    retention_days: int | None
     deleted_conversations: int
     deleted_messages: int
     deleted_auth_sessions: int

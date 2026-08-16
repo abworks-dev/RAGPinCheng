@@ -61,6 +61,20 @@ def test_saved_policy_validates_bounds_and_does_not_delete(maintenance_db):
         maintenance.save_settings(enabled=True, retention_days=6, updated_by=1)
 
 
+def test_permanent_retention_skips_conversations_but_clears_auth(maintenance_db):
+    seed_expired(maintenance_db)
+    saved = maintenance.save_settings(enabled=True, retention_days=None, updated_by=1)
+    assert saved.conversation_retention_days is None
+    preview = maintenance.preview_cleanup(now=4_000_000)
+    assert (preview.conversations, preview.messages, preview.auth_sessions) == (0, 0, 1)
+    result = maintenance.run_cleanup(trigger_source="automatic", now=4_000_000)
+    assert result.retention_days is None
+    conn = connect(maintenance_db)
+    assert conn.execute("SELECT count(*) FROM conversations").fetchone()[0] == 2
+    assert conn.execute("SELECT count(*) FROM auth_sessions").fetchone()[0] == 1
+    conn.close()
+
+
 def test_automatic_cleanup_respects_disabled_conversations_but_clears_auth(maintenance_db):
     seed_expired(maintenance_db)
     maintenance.save_settings(enabled=False, retention_days=30, updated_by=1)
