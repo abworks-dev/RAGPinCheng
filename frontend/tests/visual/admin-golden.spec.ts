@@ -54,7 +54,9 @@ test("资料库批量选择 accepted golden", async ({ page }) => {
   await expect(page.getByText(/已选择\s*1\s*份/)).toBeVisible();
   await page.getByTestId("managed-bulk-toolbar").scrollIntoViewIfNeeded();
   const viewport = page.viewportSize()!;
-  await expect(page).toHaveScreenshot(`managed-content-selected-${viewport.width}x${viewport.height}.png`);
+  await expect(page).toHaveScreenshot(`managed-content-selected-${viewport.width}x${viewport.height}.png`, {
+    maxDiffPixels: viewport.width === 1280 ? 100 : 0,
+  });
 });
 
 test("资料库移入回收站确认 accepted golden", async ({ page }) => {

@@ -26,7 +26,7 @@ function statusLabel(status: string) {
   } as Record<string, string>)[status] ?? status;
 }
 
-export function TranscriptionVersionPanel({ mediaId, refreshToken, embedded = false }: { mediaId: string; refreshToken?: string | null; embedded?: boolean }) {
+export function TranscriptionVersionPanel({ mediaId, refreshToken, embedded = false, onChanged }: { mediaId: string; refreshToken?: string | null; embedded?: boolean; onChanged?: () => void | Promise<void> }) {
   const [expanded, setExpanded] = useState(embedded);
   const [versions, setVersions] = useState<TranscriptVersion[]>([]);
   const [loading, setLoading] = useState(false);
@@ -77,6 +77,7 @@ export function TranscriptionVersionPanel({ mediaId, refreshToken, embedded = fa
     try {
       await api.reviewTranscriptVersion(versionId, approved, reviewNote[versionId]?.trim() || null);
       await loadVersions();
+      await onChanged?.();
     } catch (caught: any) {
       setError(caught?.message || String(caught));
     } finally {
@@ -90,6 +91,7 @@ export function TranscriptionVersionPanel({ mediaId, refreshToken, embedded = fa
       const result = await api.publishTranscriptVersion(versionId);
       setPublicationJobId(result.job?.index_job_id ?? null);
       await loadVersions();
+      await onChanged?.();
     } catch (caught: any) {
       setError(caught?.message || String(caught));
     } finally {
@@ -98,12 +100,12 @@ export function TranscriptionVersionPanel({ mediaId, refreshToken, embedded = fa
   };
 
   return (
-    <div className="mt-3 border-t border-border pt-3">
+    <div className={embedded ? "space-y-3" : "mt-3 border-t border-border pt-3"}>
       {!embedded && <Button size="sm" variant="outline" onClick={() => setExpanded((value) => !value)}>
         {expanded ? "收起转录版本" : "审阅转录版本"}
       </Button>}
       {expanded && (
-        <div className="mt-3 min-w-[26rem] space-y-3">
+        <div className="min-w-0 space-y-3">
           {(error || publicationError) && <Alert variant="destructive" role="alert"><AlertTitle>转录版本操作失败</AlertTitle><AlertDescription>{error || publicationError}</AlertDescription></Alert>}
           {publicationJob && <p className="text-ui-xs text-muted-foreground">候选索引：{statusLabel(publicationJob.status)}{publicationJob.error_summary ? ` · ${publicationJob.error_summary}` : ""}</p>}
           {loading && versions.length === 0 ? <p className="text-ui-xs text-muted-foreground">正在加载转录版本…</p> : null}
@@ -118,14 +120,14 @@ export function TranscriptionVersionPanel({ mediaId, refreshToken, embedded = fa
                   <Badge variant="secondary">{statusLabel(version.review_status)}</Badge>
                   <span className="font-mono text-ui-xs text-muted-foreground">{version.version_id}</span>
                 </div>
-                <p className="mt-2 text-ui-xs text-muted-foreground">
+                <p className="mt-2 break-words text-ui-xs text-muted-foreground">
                   来源 {version.source} · Profile {version.profile_id || "人工"} · Provider {version.provider_key || "—"} · 模型 {version.model_id || "—"}@{version.model_revision || "—"}
                 </p>
                 {version.review_note && <p className="mt-1 text-ui-xs">审核备注：{version.review_note}</p>}
                 <div className="mt-3 flex flex-wrap gap-2">
                   <Button size="sm" variant="outline" disabled={busy} onClick={() => void previewVersion(version.version_id)}>预览 Markdown</Button>
                   {version.review_status === "awaiting_review" && <>
-                    <Input aria-label={`审核备注 ${version.version_id}`} className="h-8 w-48" value={reviewNote[version.version_id] || ""} onChange={(event) => setReviewNote((current) => ({ ...current, [version.version_id]: event.target.value }))} />
+                    <Input aria-label={`审核备注 ${version.version_id}`} className="h-8 min-w-0 flex-1 sm:w-48 sm:flex-none" value={reviewNote[version.version_id] || ""} onChange={(event) => setReviewNote((current) => ({ ...current, [version.version_id]: event.target.value }))} />
                     <Button size="sm" disabled={busy} onClick={() => void reviewVersion(version.version_id, true)}>审核通过</Button>
                     <Button size="sm" variant="outline" disabled={busy} onClick={() => void reviewVersion(version.version_id, false)}>拒绝</Button>
                   </>}

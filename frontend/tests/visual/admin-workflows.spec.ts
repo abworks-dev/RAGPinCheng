@@ -13,11 +13,11 @@ async function openTab(page: Parameters<typeof installAdminRoutes>[0], label: st
   await page.getByRole("button", { name: label, exact: true }).click();
 }
 
-async function openManagedFolder(page: Parameters<typeof installAdminRoutes>[0], label: RegExp = /^03 公司内部标准/) {
-  const folder = page.getByRole("button", { name: label });
-  await expect(folder).toBeVisible();
-  await folder.click();
-  await expect(page.getByText(/当前目录：/)).not.toContainText("请选择目录");
+async function openRootFolder(page: Parameters<typeof installAdminRoutes>[0], folderId = "cat-company") {
+  const listing = page.waitForRequest((request) => request.method() === "GET" && request.url().includes("/api/admin/content/items-page") && request.url().includes(`category_id=${folderId}`));
+  const folderName = folderId === "cat-project" ? "04 项目资料" : "03 公司内部标准";
+  await page.getByRole("button", { name: new RegExp(folderName) }).click();
+  await listing;
 }
 
 test.describe("资料库", () => {
@@ -26,10 +26,9 @@ test.describe("资料库", () => {
     await expect(page.getByRole("heading", { name: "资料库" })).toBeVisible();
     await expectNoBodyOverflow(page);
     await expectInViewport(page.getByRole("button", { name: "刷新" }));
-    await openManagedFolder(page);
-    await page.getByRole("button", { name: /^\/$/ }).click();
+    await expect(page.getByRole("button", { name: "/", exact: true })).toBeVisible();
     const switchedListing = page.waitForRequest((request) => request.method() === "GET" && request.url().includes("/api/admin/content/items-page") && request.url().includes("category_id=cat-project"));
-    await page.getByRole("button", { name: /^04 项目资料/ }).click();
+    await page.getByRole("button", { name: /04 项目资料/ }).click();
     await switchedListing;
     await expect(page.getByText(/当前目录：04 项目资料/)).toBeVisible();
     await page.getByRole("button", { name: "上传文件" }).scrollIntoViewIfNeeded();
@@ -79,7 +78,7 @@ test.describe("资料库", () => {
 
   test("upload exposes a stable busy state", async ({ page }) => {
     await openTab(page, "资料管理");
-    await openManagedFolder(page);
+    await openRootFolder(page);
     await page.getByRole("button", { name: "上传文件" }).click();
     await page.getByLabel("选择资料文件", { exact: true }).setInputFiles({ name: "synthetic.pdf", mimeType: "application/pdf", buffer: Buffer.from("synthetic fixture") });
     const upload = page.getByRole("button", { name: "确定上传" });
@@ -90,7 +89,7 @@ test.describe("资料库", () => {
 
   test("dropping local files on the current folder requires confirmation", async ({ page }) => {
     await openTab(page, "资料管理");
-    await openManagedFolder(page);
+    await openRootFolder(page);
     const uploadRequests: string[] = [];
     page.on("request", (request) => {
       if (request.method() === "POST" && request.url().includes("/api/admin/content/uploads")) {
@@ -122,7 +121,7 @@ test.describe("资料库", () => {
 
   test("folder request and review controls stay contained", async ({ page }) => {
     await openTab(page, "资料管理", "normal", "bim_engineer");
-    await openManagedFolder(page);
+    await openRootFolder(page);
     await page.getByRole("button", { name: "新建" }).click();
     const dialog = page.getByRole("dialog", { name: "申请新建文件夹" });
     await expect(dialog).toBeVisible();
@@ -144,7 +143,7 @@ test.describe("资料库", () => {
   test("desktop rows can be dragged into a child folder", async ({ page }) => {
     test.skip(page.viewportSize()!.width < 1024, "桌面增强只在桌面表格中启用");
     await openTab(page, "资料管理", "normal", "admin", { includeChildFolder: true });
-    await openManagedFolder(page);
+    await openRootFolder(page);
     const row = page.getByTitle("拖动到上方文件夹可移动资料").first();
     const folder = page.getByRole("button", { name: /01 建模标准/ });
     await expect(row).toBeVisible();
@@ -159,7 +158,7 @@ test.describe("资料库", () => {
 
   test("publication failure stays readable and actionable", async ({ page }) => {
     await openTab(page, "资料管理", "publication_failure");
-    await openManagedFolder(page);
+    await openRootFolder(page);
     await page.locator("select").filter({ has: page.locator('option[value="publication_failed"]') }).selectOption("publication_failed");
     await expect(page.locator("p:visible", { hasText: "PDF 需要密码才能解析。" })).toBeVisible();
     await expect(page.locator("p:visible", { hasText: "请上传已解除密码保护的 PDF。" })).toBeVisible();
@@ -173,9 +172,25 @@ test.describe("资料库", () => {
     await expectNoBodyOverflow(page);
   });
 
+  test("indexed files open in the shared preview sheet", async ({ page }) => {
+    await openTab(page, "资料管理");
+    await openRootFolder(page);
+    const title = page.getByText("建筑信息模型交付标准（合成长文件名用于响应式检查）", { exact: true }).filter({ visible: true });
+    const item = page.viewportSize()!.width < 1024 ? title.locator("xpath=ancestor::li") : title.locator("xpath=ancestor::tr");
+    await item.getByRole("button", { name: "查看", exact: true }).click();
+
+    const detail = page.getByRole("dialog", { name: "建筑信息模型交付标准（合成长文件名用于响应式检查）" });
+    await detail.getByRole("button", { name: "预览文件" }).click();
+    await expect(page.getByRole("button", { name: "关闭预览" })).toBeVisible();
+    await expectNoBodyOverflow(page);
+
+    await page.getByRole("button", { name: "关闭预览" }).click();
+    await expect(page.getByRole("button", { name: "关闭预览" })).toBeHidden();
+  });
+
   test("move-to-trash confirmation explains impact and exposes a stable busy state", async ({ page }) => {
     await openTab(page, "资料管理");
-    await openManagedFolder(page);
+    await openRootFolder(page);
     const title = page.getByText("建筑信息模型交付标准（合成长文件名用于响应式检查）", { exact: true }).filter({ visible: true });
     const item = page.viewportSize()!.width < 1024 ? title.locator("xpath=ancestor::li") : title.locator("xpath=ancestor::tr");
     const remove = item.getByRole("button", { name: "移至回收站", exact: true });
@@ -221,7 +236,15 @@ test.describe("视频管理", () => {
     await expect(page.getByRole("button", { name: "刷新媒体资源" })).toBeVisible();
     await expect(page.getByText("转录服务当前暂停接收任务，请稍后重试。")).toBeVisible();
     await expect(page.getByRole("button", { name: "重试" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "进入转写工作台" }).first()).toBeVisible();
+    const readyMediaRow = page.getByTestId("media-record-row").filter({ hasText: "项目交付培训" });
+    const workbenchTrigger = readyMediaRow.getByRole("button", { name: "进入转写工作台" });
+    await expect(workbenchTrigger).toBeVisible();
+    await workbenchTrigger.click();
+    const workbench = page.getByRole("dialog", { name: "项目交付培训" });
+    await expect(workbench).toBeVisible();
+    await expect(workbench.getByText("暂无可审阅转录版本。")).toBeVisible();
+    await workbench.getByRole("button", { name: "关闭转写工作台" }).click();
+    await expect(workbench).toBeHidden();
     await expectNoBodyOverflow(page);
     if (page.viewportSize()!.width >= 1024) {
       const headerX = await page.getByTestId("media-record-header").locator(":scope > span").evaluateAll((cells) => cells.map((cell) => cell.getBoundingClientRect().x));
