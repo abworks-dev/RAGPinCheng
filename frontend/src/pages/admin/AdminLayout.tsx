@@ -1,5 +1,19 @@
 import { useEffect, useState } from "react";
-import { Menu, PanelLeftClose, X } from "lucide-react";
+import {
+  FileText,
+  LayoutDashboard,
+  ListChecks,
+  Menu,
+  MessageSquareQuote,
+  MessagesSquare,
+  PanelLeftClose,
+  Tags,
+  Users,
+  Video,
+  Wrench,
+  X,
+} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { AppBrand } from "../../components/AppBrand";
 import { IconButton } from "../../components/ui/icon-button";
 import { ThemeMenu } from "../../components/ThemeMenu";
@@ -16,6 +30,18 @@ type TabDefinition = { key: Tab; label: string; path: string };
 type NavigationGroup = {
   label: string;
   tabs: TabDefinition[];
+};
+
+const navigationIcons: Record<Tab, LucideIcon> = {
+  stats: LayoutDashboard,
+  maintenance: Wrench,
+  managed: FileText,
+  categories: Tags,
+  media: Video,
+  corpus: ListChecks,
+  users: Users,
+  conversations: MessagesSquare,
+  feedback: MessageSquareQuote,
 };
 
 const adminNavigation: NavigationGroup[] = [
@@ -138,7 +164,9 @@ export function AdminLayout() {
                   {group.label}
                 </p>
                 <div className="grid grid-cols-2 gap-1 sm:grid-cols-3 lg:flex lg:flex-col">
-                  {group.tabs.map(({ key, label, path }) => (
+                  {group.tabs.map(({ key, label, path }) => {
+                    const Icon = navigationIcons[key];
+                    return (
                       <NavLink
                         key={key}
                         to={`/admin/${path}`}
@@ -153,15 +181,11 @@ export function AdminLayout() {
                             : "text-muted-foreground hover:bg-surface-muted hover:text-foreground",
                         )}
                       >
-                        {({ isActive }) => <>
-                          <span
-                            className={cn("h-2 w-2 shrink-0 rounded-full", isActive ? "bg-primary-foreground" : "bg-border")}
-                            aria-hidden="true"
-                          />
-                          <span className={cn("min-w-0 whitespace-normal", sidebarCollapsed && "lg:hidden")}>{label}</span>
-                        </>}
+                        <Icon className="size-4 shrink-0" aria-hidden="true" />
+                        <span className={cn("min-w-0 whitespace-normal", sidebarCollapsed && "lg:hidden")}>{label}</span>
                       </NavLink>
-                  ))}
+                    );
+                  })}
                 </div>
               </section>
             ))}
