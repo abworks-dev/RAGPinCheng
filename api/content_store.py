@@ -376,25 +376,182 @@ def create_batch(
     origin: str,
     actor_user_id: int,
     storage_rel_path: str | None = None,
+    upload_mode: str = "files",
+    target_category_id: str | None = None,
+    total_files: int = 0,
+    total_bytes: int = 0,
 ) -> str:
     if origin not in {"web", "server", "legacy"}:
         raise ValueError("invalid_batch_origin")
+    if upload_mode not in {"files", "folder"}:
+        raise ValueError("invalid_upload_mode")
+    if total_files < 0 or total_bytes < 0:
+        raise ValueError("invalid_upload_totals")
     batch_id = _id("batch")
     now = _now()
     rel = storage_rel_path or f"inbox/{origin}/{batch_id}"
     conn.execute(
         """INSERT INTO upload_batches
-           (id,origin,status,storage_rel_path,created_by,created_at,updated_at)
-           VALUES (?,?,'staging',?,?,?,?)""",
-        (batch_id, origin, rel, actor_user_id, now, now),
+           (id,origin,status,storage_rel_path,created_by,created_at,updated_at,
+            upload_mode,target_category_id,total_files,total_bytes)
+           VALUES (?,?,'staging',?,?,?,?,?,?,?,?)""",
+        (batch_id, origin, rel, actor_user_id, now, now, upload_mode,
+         target_category_id, total_files, total_bytes),
     )
     audit_event(conn, "batch.created", actor_user_id=actor_user_id, batch_id=batch_id)
     conn.commit()
     return batch_id
 
 
-def create_web_batch(conn: sqlite3.Connection, *, actor_user_id: int) -> str:
-    return create_batch(conn, origin="web", actor_user_id=actor_user_id)
+def create_web_batch(
+    conn: sqlite3.Connection,
+    *,
+    actor_user_id: int,
+    upload_mode: str = "files",
+    target_category_id: str | None = None,
+    total_files: int = 0,
+    total_bytes: int = 0,
+) -> str:
+    return create_batch(
+        conn,
+        origin="web",
+        actor_user_id=actor_user_id,
+        upload_mode=upload_mode,
+        target_category_id=target_category_id,
+        total_files=total_files,
+        total_bytes=total_bytes,
+    )
+
+
+def record_upload_batch_entry(
+    conn: sqlite3.Connection,
+    *,
+    batch_id: str,
+    sequence: int,
+    filename: str,
+    relative_path: str | None,
+    size_bytes: int,
+    status: str,
+    reason: str | None = None,
+    item_id: str | None = None,
+    version_id: str | None = None,
+) -> None:
+    if sequence <= 0 or size_bytes < 0 or status not in {"accepted", "skipped"}:
+        raise ValueError("invalid_upload_batch_entry")
+    now = _now()
+    conn.execute(
+        """INSERT INTO upload_batch_entries
+           (batch_id,sequence,filename,relative_path,size_bytes,status,reason,item_id,version_id,created_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?)""",
+        (batch_id, sequence, filename, relative_path, size_bytes, status, reason, item_id, version_id, now),
+    )
+    accepted_increment = 1 if status == "accepted" else 0
+    skipped_increment = 1 if status == "skipped" else 0
+    uploaded_increment = size_bytes if status == "accepted" else 0
+    conn.execute(
+        """UPDATE upload_batches
+           SET accepted_files=accepted_files+?, skipped_files=skipped_files+?,
+               total_uploaded_bytes=total_uploaded_bytes+?, updated_at=?
+           WHERE id=?""",
+        (accepted_increment, skipped_increment, uploaded_increment, now, batch_id),
+    )
+    conn.commit()
+
+
+def list_upload_tasks(
+    conn: sqlite3.Connection,
+    *,
+    user_id: int,
+    is_admin: bool = False,
+    batch_id: str | None = None,
+    status: str | None = None,
+    query: str | None = None,
+    limit: int = 25,
+    offset: int = 0,
+) -> tuple[list[sqlite3.Row], int, dict[str, int]]:
+    if limit < 1 or limit > 100 or offset < 0:
+        raise ValueError("invalid_upload_task_pagination")
+    params: list[object] = []
+    scope = "" if is_admin else "WHERE created_by=?"
+    if not is_admin:
+        params.append(user_id)
+    task_status = """
+        CASE
+          WHEN status IN ('staging','validating') AND accepted_files+skipped_files < total_files THEN 'processing'
+          WHEN status='failed' OR (total_files > 0 AND accepted_files=0) THEN 'failed'
+          WHEN skipped_files > 0 THEN 'partial_success'
+          ELSE 'completed'
+        END
+    """
+    base = f"""WITH RECURSIVE paths AS (
+                 SELECT id,display_code || ' ' || display_name AS full_path
+                 FROM category_nodes WHERE parent_id IS NULL
+                 UNION ALL
+                 SELECT c.id,p.full_path || ' / ' || c.display_code || ' ' || c.display_name
+                 FROM category_nodes c JOIN paths p ON p.id=c.parent_id
+             ), task_rows AS (
+                 SELECT b.rowid AS batch_rowid,b.id,b.origin,b.status,b.upload_mode,b.target_category_id,
+                        b.total_files,b.accepted_files,b.skipped_files,b.total_bytes,
+                        b.total_uploaded_bytes,b.created_by,b.created_at,b.updated_at,
+                        b.error_summary,b.storage_rel_path,
+                        COALESCE(paths.full_path, '根目录') AS target_path,
+                        COALESCE(u.real_name, '未知人员') AS creator_name,
+                        {task_status} AS task_status
+                 FROM upload_batches b
+                 LEFT JOIN paths ON paths.id=b.target_category_id
+                 LEFT JOIN users u ON u.id=b.created_by
+                 WHERE b.origin='web' AND b.total_files > 0
+             )
+             SELECT * FROM task_rows {scope}"""
+    filters: list[str] = []
+    filter_params: list[object] = []
+    if batch_id:
+        filters.append("id=?")
+        filter_params.append(batch_id)
+    if status:
+        if status not in {"processing", "completed", "partial_success", "failed"}:
+            raise ValueError("invalid_upload_task_status")
+        filters.append("task_status=?")
+        filter_params.append(status)
+    if query:
+        normalized = f"%{query.strip()}%"
+        filters.append("(target_path LIKE ? OR id LIKE ? OR EXISTS (SELECT 1 FROM upload_batch_entries e WHERE e.batch_id=task_rows.id AND (e.filename LIKE ? OR e.relative_path LIKE ?)))")
+        filter_params.extend([normalized, normalized, normalized, normalized])
+    where_tail = (f" {'AND' if scope else 'WHERE'} {' AND '.join(filters)}") if filters else ""
+    rows = conn.execute(
+        f"{base}{where_tail} ORDER BY created_at DESC, batch_rowid DESC LIMIT ? OFFSET ?",
+        [*params, *filter_params, limit, offset],
+    ).fetchall()
+    total = conn.execute(
+        f"SELECT count(*) FROM ({base}{where_tail})",
+        [*params, *filter_params],
+    ).fetchone()[0]
+    count_rows = conn.execute(
+        f"SELECT task_status,count(*) AS count FROM ({base}) GROUP BY task_status",
+        params,
+    ).fetchall()
+    counts = {row["task_status"]: int(row["count"]) for row in count_rows}
+    return rows, int(total), counts
+
+
+def get_upload_task(
+    conn: sqlite3.Connection,
+    batch_id: str,
+    *,
+    user_id: int,
+    is_admin: bool = False,
+) -> tuple[sqlite3.Row | None, list[sqlite3.Row]]:
+    rows, _total, _counts = list_upload_tasks(
+        conn, user_id=user_id, is_admin=is_admin, batch_id=batch_id, limit=1, offset=0
+    )
+    row = next((candidate for candidate in rows if candidate["id"] == batch_id), None)
+    if row is None:
+        return None, []
+    entries = conn.execute(
+        "SELECT * FROM upload_batch_entries WHERE batch_id=? ORDER BY sequence",
+        (batch_id,),
+    ).fetchall()
+    return row, entries
 
 
 def register_uploaded_document(

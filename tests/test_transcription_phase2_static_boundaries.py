@@ -13,7 +13,9 @@ ADAPTERS = (
     ROOT / "api" / "transcription_store.py",
 )
 PROTECTED = {
-    "api/routes_media.py": "346b4710b0f799e9f47043c07e7b806c1659caac4be3c6fc611fa21f4d6ad761",
+    # Updated with the approved Range-response extraction used by the
+    # admin-only media preview endpoint; normalize_hash keeps this portable.
+    "api/routes_media.py": "80b05719fc394e24b8cab67eb0f9330ecd5ca302f7acdbf066c64d86eb568673",
     "api/indexing.py": "5613de8c7e9c210b404e6906f24b147bdb071cc1dda89f9adc53b631ded74d05",
     "src/chunk.py": "f22d79fe976a6da4fc4c2ba430490ad2c24205b2399e733912390e480858c542",
     "src/index.py": "993d4e101cfd0e6e1b670de7d43edaa71a73cd0778d18cef6aba72d3184d23bc",

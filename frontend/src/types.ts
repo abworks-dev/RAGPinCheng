@@ -411,6 +411,42 @@ export type ManagedUploadResponse = {
   }[];
 };
 
+export type ManagedUploadTaskEntry = {
+  sequence: number;
+  filename: string;
+  relative_path: string | null;
+  size_bytes: number;
+  status: "accepted" | "skipped";
+  reason: string | null;
+  item_id: string | null;
+  version_id: string | null;
+  created_at: number;
+};
+
+export type ManagedUploadTask = {
+  batch_id: string;
+  upload_mode: "files" | "folder";
+  status: "processing" | "completed" | "partial_success" | "failed";
+  target_category_id: string | null;
+  target_path: string;
+  total_files: number;
+  accepted_files: number;
+  skipped_files: number;
+  total_bytes: number;
+  total_uploaded_bytes: number;
+  created_by_name: string;
+  created_at: number;
+  updated_at: number;
+  error_summary: string | null;
+  entries: ManagedUploadTaskEntry[] | null;
+};
+
+export type ManagedUploadTaskList = {
+  tasks: ManagedUploadTask[];
+  total: number;
+  status_counts: Record<string, number>;
+};
+
 export type ContentPermissionUser = {
   user_id: number;
   employee_id: string;

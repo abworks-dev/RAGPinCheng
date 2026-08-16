@@ -569,6 +569,30 @@ CONTENT_PERMISSION_V2_STATEMENTS = (
     "DROP TABLE content_permission_v11_map",
 )
 
+UPLOAD_TASK_STATEMENTS = (
+    "ALTER TABLE upload_batches ADD COLUMN upload_mode TEXT NOT NULL DEFAULT 'files' CHECK (upload_mode IN ('files','folder'))",
+    "ALTER TABLE upload_batches ADD COLUMN target_category_id TEXT REFERENCES category_nodes(id) ON DELETE SET NULL",
+    "ALTER TABLE upload_batches ADD COLUMN total_files INTEGER NOT NULL DEFAULT 0 CHECK (total_files >= 0)",
+    "ALTER TABLE upload_batches ADD COLUMN accepted_files INTEGER NOT NULL DEFAULT 0 CHECK (accepted_files >= 0)",
+    "ALTER TABLE upload_batches ADD COLUMN skipped_files INTEGER NOT NULL DEFAULT 0 CHECK (skipped_files >= 0)",
+    "ALTER TABLE upload_batches ADD COLUMN total_bytes INTEGER NOT NULL DEFAULT 0 CHECK (total_bytes >= 0)",
+    "ALTER TABLE upload_batches ADD COLUMN total_uploaded_bytes INTEGER NOT NULL DEFAULT 0 CHECK (total_uploaded_bytes >= 0)",
+    """CREATE TABLE upload_batch_entries (
+        batch_id TEXT NOT NULL REFERENCES upload_batches(id) ON DELETE CASCADE,
+        sequence INTEGER NOT NULL CHECK (sequence > 0),
+        filename TEXT NOT NULL,
+        relative_path TEXT,
+        size_bytes INTEGER NOT NULL DEFAULT 0 CHECK (size_bytes >= 0),
+        status TEXT NOT NULL CHECK (status IN ('accepted','skipped')),
+        reason TEXT,
+        item_id TEXT REFERENCES content_items(id) ON DELETE SET NULL,
+        version_id TEXT REFERENCES content_versions(id) ON DELETE SET NULL,
+        created_at INTEGER NOT NULL,
+        PRIMARY KEY(batch_id, sequence)
+    )""",
+    "CREATE INDEX idx_upload_batch_entries_batch_sequence ON upload_batch_entries(batch_id, sequence)",
+)
+
 TRANSCRIPT_MANUAL_REVISION_STATEMENTS = (
     "ALTER TABLE transcript_versions ADD COLUMN derived_from_version_id TEXT REFERENCES transcript_versions(id) ON DELETE RESTRICT",
     "ALTER TABLE transcript_versions ADD COLUMN edited_by INTEGER REFERENCES users(id) ON DELETE SET NULL",
@@ -635,6 +659,7 @@ MIGRATIONS = (
     Migration(11, "granular_content_permissions", CONTENT_PERMISSION_V2_STATEMENTS),
     Migration(12, "transcript_manual_revisions", TRANSCRIPT_MANUAL_REVISION_STATEMENTS),
     Migration(13, "content_download_permission", CONTENT_PERMISSION_DOWNLOAD_STATEMENTS),
+    Migration(14, "managed_upload_tasks", UPLOAD_TASK_STATEMENTS),
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 PHASE2_TABLES = frozenset(
@@ -669,6 +694,7 @@ CONTENT_LIBRARY_TABLES = frozenset(
         "content_audit_events",
     }
 )
+UPLOAD_TASK_TABLES = frozenset({"upload_batch_entries"})
 CONTENT_PERMISSION_GROUP_TABLES = frozenset(
     {"content_permission_groups", "content_permission_group_items"}
 )
@@ -827,6 +853,8 @@ def has_pending_ddl(path: Path, *, base_tables: frozenset[str]) -> bool:
             validate_content_version_metadata(conn)
         finally:
             conn.close()
+    if any(version == 14 for version, _name in applied) and not UPLOAD_TASK_TABLES.issubset(tables):
+        raise RuntimeError("migration_schema_mismatch")
     if any(version == 12 for version, _name in applied):
         conn = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
         try:
@@ -890,6 +918,8 @@ def apply_all(conn: sqlite3.Connection, *, base_schema: str, applied_at: int) ->
         if not CONTENT_FOLDER_REQUEST_TABLES.issubset(tables):
             raise RuntimeError("migration_schema_mismatch")
         if not SYSTEM_MAINTENANCE_TABLES.issubset(tables):
+            raise RuntimeError("migration_schema_mismatch")
+        if 14 in applied_versions and not UPLOAD_TASK_TABLES.issubset(tables):
             raise RuntimeError("migration_schema_mismatch")
         validate_system_content_permission_groups(
             conn,

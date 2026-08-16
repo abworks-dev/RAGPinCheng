@@ -27,10 +27,18 @@ import { Select } from "../../components/ui/select";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "../../components/ui/sheet";
 import { toast } from "../../components/ui/toast";
 import type { ManagedCategory } from "../../types";
+import {
+  buildCategoryTree,
+  collectCategoryAncestorIds,
+  collectExpandableCategoryIds,
+  countCategoryTreeNodes,
+  filterCategoryTree,
+  flattenVisibleCategoryTree,
+  type CategoryTreeNode,
+} from "../../lib/category-tree";
 
 type CategoryFilter = "all" | "active" | "inactive";
 type CategoryDraft = Pick<ManagedCategory, "display_code" | "display_name" | "sort_order" | "is_active">;
-type CategoryTreeNode = { category: ManagedCategory; children: CategoryTreeNode[] };
 type PendingAction =
   | { kind: "select"; id: string }
   | { kind: "refresh" }
@@ -49,27 +57,6 @@ function makeDraft(category: ManagedCategory): CategoryDraft {
   };
 }
 
-function compareCategories(left: ManagedCategory, right: ManagedCategory) {
-  return left.sort_order - right.sort_order
-    || left.display_code.localeCompare(right.display_code, "zh-Hans")
-    || left.display_name.localeCompare(right.display_name, "zh-Hans")
-    || left.id.localeCompare(right.id);
-}
-
-function buildTree(categories: ManagedCategory[]): CategoryTreeNode[] {
-  const children = new Map<string | null, ManagedCategory[]>();
-  categories.forEach((category) => {
-    const siblings = children.get(category.parent_id) || [];
-    siblings.push(category);
-    children.set(category.parent_id, siblings);
-  });
-  const createNode = (category: ManagedCategory): CategoryTreeNode => ({
-    category,
-    children: (children.get(category.id) || []).sort(compareCategories).map(createNode),
-  });
-  return (children.get(null) || []).sort(compareCategories).map(createNode);
-}
-
 function filterTree(nodes: CategoryTreeNode[], query: string, filter: CategoryFilter): CategoryTreeNode[] {
   const normalizedQuery = query.trim().toLocaleLowerCase();
   const matches = (category: ManagedCategory) => {
@@ -79,35 +66,7 @@ function filterTree(nodes: CategoryTreeNode[], query: string, filter: CategoryFi
     const statusMatch = filter === "all" || (filter === "active" ? category.is_active : !category.is_active);
     return queryMatch && statusMatch;
   };
-  return nodes.flatMap((node) => {
-    const children = filterTree(node.children, query, filter);
-    return matches(node.category) || children.length > 0 ? [{ ...node, children }] : [];
-  });
-}
-
-function flattenVisible(nodes: CategoryTreeNode[], expanded: Set<string>): CategoryTreeNode[] {
-  return nodes.flatMap((node) => [node, ...(expanded.has(node.category.id) ? flattenVisible(node.children, expanded) : [])]);
-}
-
-function collectExpandableIds(nodes: CategoryTreeNode[]): string[] {
-  return nodes.flatMap((node) => node.children.length > 0
-    ? [node.category.id, ...collectExpandableIds(node.children)]
-    : []);
-}
-
-function countTreeNodes(nodes: CategoryTreeNode[]): number {
-  return nodes.reduce((count, node) => count + 1 + countTreeNodes(node.children), 0);
-}
-
-function collectAncestorIds(categories: ManagedCategory[], categoryId: string | null): string[] {
-  const byId = new Map(categories.map((category) => [category.id, category]));
-  const result: string[] = [];
-  let current = categoryId ? byId.get(categoryId) : undefined;
-  while (current?.parent_id) {
-    result.push(current.parent_id);
-    current = byId.get(current.parent_id);
-  }
-  return result;
+  return filterCategoryTree(nodes, matches);
 }
 
 function isNarrowViewport() {
@@ -177,9 +136,9 @@ export function AdminCategoriesPage() {
     }
   }, [draftCategoryId, isDirty, selectedCategory]);
 
-  const tree = useMemo(() => filterTree(buildTree(categories), query, filter), [categories, filter, query]);
-  const visibleNodes = useMemo(() => flattenVisible(tree, expanded), [expanded, tree]);
-  const filteredCount = useMemo(() => countTreeNodes(tree), [tree]);
+  const tree = useMemo(() => filterTree(buildCategoryTree(categories), query, filter), [categories, filter, query]);
+  const visibleNodes = useMemo(() => flattenVisibleCategoryTree(tree, expanded), [expanded, tree]);
+  const filteredCount = useMemo(() => countCategoryTreeNodes(tree), [tree]);
   const hasNestedNodes = categories.some((category) => categories.some((child) => child.parent_id === category.id));
   const allExpanded = hasNestedNodes && categories.filter((category) => categories.some((child) => child.parent_id === category.id)).every((category) => expanded.has(category.id));
   const activeChildIds = useMemo(() => {
@@ -190,7 +149,7 @@ export function AdminCategoriesPage() {
 
   useEffect(() => {
     if (!query.trim() && filter === "all") return;
-    const matchingBranches = collectExpandableIds(tree);
+    const matchingBranches = collectExpandableCategoryIds(tree);
     setExpanded((current) => {
       const next = new Set(current);
       matchingBranches.forEach((id) => next.add(id));
@@ -202,7 +161,7 @@ export function AdminCategoriesPage() {
     const category = categories.find((item) => item.id === id);
     if (!category) return;
     setSelectedId(id);
-    setExpanded((current) => new Set([...current, ...collectAncestorIds(categories, id)]));
+    setExpanded((current) => new Set([...current, ...collectCategoryAncestorIds(categories, id)]));
     if (isNarrowViewport()) setEditorOpen(true);
   }, [categories]);
 
@@ -294,7 +253,7 @@ export function AdminCategoriesPage() {
         setSelectedId(created.id);
         setDraft(makeDraft(created));
         setDraftCategoryId(created.id);
-        setExpanded((current) => new Set([...current, ...collectAncestorIds(rows, created.id)]));
+        setExpanded((current) => new Set([...current, ...collectCategoryAncestorIds(rows, created.id)]));
       }
       toast.success("分类已创建");
     } catch (createErrorValue) {

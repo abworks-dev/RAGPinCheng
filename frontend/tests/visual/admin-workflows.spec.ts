@@ -67,7 +67,7 @@ test.describe("资料管理", () => {
     await expect(batchButton).toBeFocused();
   });
 
-  test("single-file actions expose independent move, download, rename, and update flows", async ({ page }) => {
+  test("single-file actions expose independent move, download, rename, and update flows", async ({ page }, testInfo) => {
     await openTab(page, "资料管理");
     await openRootFolder(page);
     const longTitle = "建筑信息模型交付标准（合成长文件名用于响应式检查）";
@@ -77,8 +77,11 @@ test.describe("资料管理", () => {
     await item.getByRole("button", { name: `移动“${longTitle}”`, exact: true }).click();
     const moveDialog = page.getByRole("dialog", { name: "移动资料" });
     await expect(moveDialog).toContainText(longTitle);
-    await moveDialog.getByRole("combobox", { name: "目标目录" }).selectOption("cat-project");
-    await expect(moveDialog.getByRole("button", { name: "移动", exact: true })).toBeEnabled();
+    await expect(moveDialog.getByTestId("category-picker-item-cat-company")).toHaveAttribute("aria-disabled", "true");
+    await moveDialog.getByTestId("category-picker-item-cat-project").click();
+    await expect(moveDialog.getByText("已选择：04 项目资料")).toBeVisible();
+    await expect(moveDialog.getByRole("button", { name: "确认移动", exact: true })).toBeEnabled();
+    await page.screenshot({ path: testInfo.outputPath("managed-content-move-picker.png"), fullPage: false });
     await expectNoBodyOverflow(page);
     await moveDialog.getByRole("button", { name: "取消" }).click();
 
@@ -113,7 +116,7 @@ test.describe("资料管理", () => {
     await page.getByRole("menuitem", { name: "批量移动" }).click();
     const moveDialog = page.getByRole("dialog", { name: "批量移动资料" });
     await expect(moveDialog).toContainText("已选择 2 份资料");
-    await moveDialog.getByRole("combobox", { name: "目标目录" }).selectOption("cat-project");
+    await moveDialog.getByTestId("category-picker-item-cat-project").click();
     await expect(moveDialog.getByRole("button", { name: "确认执行" })).toBeEnabled();
     await moveDialog.getByRole("button", { name: "取消" }).click();
 
@@ -138,10 +141,15 @@ test.describe("资料管理", () => {
     await page.getByRole("button", { name: "批量操作" }).click();
     const downloadPromise = page.waitForEvent("download");
     await page.getByRole("menuitem", { name: "批量下载" }).click();
-    await expect(page.getByText(/正在打包 2 份资料，请稍候/)).toBeVisible();
+    const packagingToast = page.locator("[data-sonner-toast]").filter({ hasText: "正在打包 2 份资料，请稍候" });
+    await expect(packagingToast).toBeVisible();
+    const toastBox = await packagingToast.boundingBox();
+    expect(toastBox).not.toBeNull();
+    expect(toastBox!.y).toBeLessThan(120);
+    expect(toastBox!.x + toastBox!.width).toBeGreaterThanOrEqual(page.viewportSize()!.width - 40);
     await expect(page.getByRole("button", { name: "批量操作" })).toBeDisabled();
     expect((await downloadPromise).suggestedFilename()).toBe("managed-content.zip");
-    await expect(page.getByText(/正在打包 2 份资料，请稍候/)).toHaveCount(0);
+    await expect(page.getByText("已打包 2 份资料并开始下载")).toBeVisible();
     await expectNoBodyOverflow(page);
   });
 
@@ -389,11 +397,11 @@ test.describe("视频管理", () => {
     await workbenchTrigger.click();
     const workbench = page.getByRole("dialog", { name: "项目交付培训" });
     await expect(workbench).toBeVisible();
-    await expect(workbench.getByText("自动转录")).toBeVisible();
+    await expect(workbench.getByRole("button", { name: /自动转录/ }).first()).toBeVisible();
     await expect(workbench.getByRole("textbox", { name: /审核备注/ })).toBeVisible();
-    await expect(workbench.getByText("审核通过后可发布")).toBeVisible();
+    await expect(workbench.getByText("审核通过后可发布").first()).toBeVisible();
     await expect(workbench.getByText("synthetic-asr")).toBeHidden();
-    await workbench.getByRole("button", { name: "校对内容" }).click();
+    await workbench.getByRole("button", { name: "校对内容" }).first().click();
     await expect(workbench.getByRole("textbox", { name: "转录 Markdown 编辑器" })).toBeVisible();
     if (page.viewportSize()!.width < 768) {
       await workbench.getByRole("button", { name: "预览" }).click();

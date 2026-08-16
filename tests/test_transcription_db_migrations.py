@@ -84,7 +84,7 @@ def test_repeated_init_is_noop_and_does_not_create_second_backup(tmp_path):
 def test_schema_10_database_migrates_manual_revision_columns_and_index(tmp_path, monkeypatch):
     path = tmp_path / "app.sqlite"
     original = db_migrations.MIGRATIONS
-    monkeypatch.setattr(db_migrations, "MIGRATIONS", original[:-3])
+    monkeypatch.setattr(db_migrations, "MIGRATIONS", original[:-4])
     init_db(path, backup_dir=tmp_path / "backups")
     conn = sqlite3.connect(path)
     assert conn.execute("SELECT max(version) FROM app_schema_migrations").fetchone()[0] == 10
@@ -120,6 +120,7 @@ def test_schema_5_database_adds_later_tables_without_changing_users(tmp_path):
     conn.execute("DROP TABLE content_folder_requests")
     conn.execute("DROP TABLE content_permission_group_items")
     conn.execute("DROP TABLE content_permission_groups")
+    conn.execute("DROP TABLE upload_batch_entries")
     conn.execute("DROP TABLE content_permissions")
     conn.execute(
         """CREATE TABLE content_permissions (
@@ -168,7 +169,7 @@ def test_repeated_init_fails_closed_when_system_permission_group_drifts(tmp_path
 def test_schema_10_permissions_expand_to_granular_nodes(tmp_path, monkeypatch):
     path = tmp_path / "app.sqlite"
     migrations = db_migrations.MIGRATIONS
-    monkeypatch.setattr(db_migrations, "MIGRATIONS", migrations[:-3])
+    monkeypatch.setattr(db_migrations, "MIGRATIONS", migrations[:-4])
     init_db(path, backup_dir=tmp_path / "backups")
     conn = sqlite3.connect(path)
     user_id = conn.execute(
@@ -220,7 +221,7 @@ def test_schema_10_permissions_expand_to_granular_nodes(tmp_path, monkeypatch):
 def test_schema_11_download_permission_migration_preserves_existing_access(tmp_path, monkeypatch):
     path = tmp_path / "app.sqlite"
     migrations = db_migrations.MIGRATIONS
-    monkeypatch.setattr(db_migrations, "MIGRATIONS", migrations[:-1])
+    monkeypatch.setattr(db_migrations, "MIGRATIONS", migrations[:-2])
     init_db(path, backup_dir=tmp_path / "backups")
     conn = sqlite3.connect(path)
     viewer_id = conn.execute(

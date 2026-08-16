@@ -1,6 +1,6 @@
 import type { Page, Route } from "@playwright/test";
 
-export type AdminScenario = "normal" | "loading" | "empty" | "error" | "disabled" | "publication_failure";
+export type AdminScenario = "normal" | "loading" | "empty" | "error" | "disabled" | "publication_failure" | "media_progress" | "media_upload";
 export type WorkspaceUser = "admin" | "bim_engineer" | "member";
 
 const admin = {
@@ -165,7 +165,7 @@ const transcriptionJobs = [{
   result_version_id: null, created_at: 1700000400, started_at: 1700000401, finished_at: 1700000402, updated_at: 1700000402,
 }];
 
-const transcriptVersions = [{
+const baseTranscriptVersion = {
   version_id: "11111111-1111-4111-8111-111111111111", media_id: "media-ready", source: "automatic",
   profile_id: "synthetic-profile", provider_key: "synthetic-asr", model_id: "synthetic-model", model_revision: "r1",
   markdown_storage_kind: "managed_artifact",
@@ -173,7 +173,55 @@ const transcriptVersions = [{
   publication_status: "not_published", published_at: null, supersedes_version_id: null,
   derived_from_version_id: null, edited_by: null,
   markdown_sha256: "a".repeat(64), created_at: 1700000200, updated_at: 1700000200, is_current: false,
-}];
+};
+
+const transcriptVersions = [
+  baseTranscriptVersion,
+  {
+    ...baseTranscriptVersion,
+    version_id: "22222222-2222-4222-8222-222222222222",
+    source: "manual",
+    profile_id: null,
+    provider_key: null,
+    model_id: null,
+    model_revision: null,
+    review_status: "review_approved",
+    derived_from_version_id: baseTranscriptVersion.version_id,
+    markdown_sha256: "b".repeat(64),
+    created_at: 1700000190,
+  },
+  {
+    ...baseTranscriptVersion,
+    version_id: "33333333-3333-4333-8333-333333333333",
+    review_status: "review_rejected",
+    review_note: "时间轴术语需要重新核对",
+    markdown_sha256: "c".repeat(64),
+    created_at: 1700000180,
+  },
+  {
+    ...baseTranscriptVersion,
+    version_id: "44444444-4444-4444-8444-444444444444",
+    review_status: "review_approved",
+    publication_status: "published",
+    published_at: 1700000175,
+    markdown_sha256: "d".repeat(64),
+    created_at: 1700000170,
+    is_current: true,
+  },
+  {
+    ...baseTranscriptVersion,
+    version_id: "55555555-5555-4555-8555-555555555555",
+    source: "manual",
+    profile_id: null,
+    provider_key: null,
+    model_id: null,
+    model_revision: null,
+    markdown_storage_kind: "legacy_manual",
+    review_status: "not_required",
+    markdown_sha256: "e".repeat(64),
+    created_at: 1700000160,
+  },
+];
 
 const permissionUsers = [
   { user_id: 9001, employee_id: "TEST-ADMIN", real_name: "合成管理员", role: "admin", is_active: true, permissions: [] },
@@ -377,9 +425,49 @@ export async function installAdminRoutes(
       return json(route, { entries, total: entries.length, page: 1, page_size: 20, counts: { pending: entries.filter((entry) => entry.status === "pending").length, in_progress: 0, resolved: entries.filter((entry) => entry.status === "resolved").length, archived: 0 } });
     }
     if (request.method() === "PATCH" && /^\/api\/admin\/feedback\/[^/]+$/.test(path)) return json(route, feedbackEntries[0]);
-    if (request.method() === "GET" && path === "/api/admin/media") return json(route, scenario === "empty" ? [] : mediaAssets);
+    if (request.method() === "POST" && path === "/api/admin/media" && scenario === "media_upload") {
+      await new Promise((resolve) => setTimeout(resolve, 3_000));
+      return json(route, { ...mediaAssets[2], media_id: "media-uploaded", transcription_job_id: "job-uploaded" });
+    }
+    if (request.method() === "GET" && path === "/api/admin/media") {
+      if (scenario === "empty") return json(route, []);
+      if (scenario === "media_progress") return json(route, [{ ...mediaAssets[2], status: "transcribing" }]);
+      return json(route, mediaAssets);
+    }
     if (request.method() === "GET" && path === "/api/admin/transcription/profiles") return json(route, transcriptionProfiles);
-    if (request.method() === "GET" && path === "/api/admin/transcription/jobs") return json(route, scenario === "empty" ? [] : transcriptionJobs);
+    if (request.method() === "GET" && path === "/api/admin/transcription/jobs") {
+      if (scenario === "empty" || scenario === "media_upload") return json(route, []);
+      if (scenario === "media_progress") {
+        return json(route, [{
+          ...transcriptionJobs[0],
+          job_id: "media-running-job",
+          media_id: "media-ready",
+          status: "running",
+          stage: "transcribing",
+          processed_ms: 0,
+          total_ms: 4_800_000,
+          failure_error_code: null,
+          error_summary: null,
+          failure: null,
+          started_at: Math.floor(Date.now() / 1000) - 125,
+          finished_at: null,
+          updated_at: Math.floor(Date.now() / 1000),
+        }]);
+      }
+      return json(route, transcriptionJobs);
+    }
+    if (request.method() === "GET" && path === "/api/admin/transcription/jobs/job-uploaded") {
+      return json(route, {
+        ...transcriptionJobs[0],
+        job_id: "job-uploaded",
+        media_id: "media-uploaded",
+        status: "pending",
+        stage: null,
+        failure_error_code: null,
+        error_summary: null,
+        failure: null,
+      });
+    }
     if (request.method() === "GET" && /^\/api\/admin\/transcription\/jobs\/[^/]+$/.test(path)) return json(route, transcriptionJobs[0]);
     if (request.method() === "GET" && path === "/api/admin/transcription/media/media-ready/versions") return json(route, transcriptVersions);
     if (request.method() === "GET" && /^\/api\/admin\/transcription\/media\/[^/]+\/versions$/.test(path)) return json(route, []);
@@ -399,6 +487,9 @@ export async function installAdminRoutes(
       });
     }
     if (request.method() === "GET" && path === "/api/media/media-ready") {
+      return route.fulfill({ status: 200, contentType: "video/mp4", body: "" });
+    }
+    if (request.method() === "GET" && path === "/api/admin/media/media-ready/preview") {
       return route.fulfill({ status: 200, contentType: "video/mp4", body: "" });
     }
     if (path === "/api/categories") return json(route, { categories: [], second_level_categories: [] });
