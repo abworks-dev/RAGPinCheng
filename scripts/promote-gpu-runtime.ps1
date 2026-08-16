@@ -62,9 +62,11 @@ function Assert-OwnedTask {
 }
 
 function Stop-OwnedTaskAndListener {
+    $ownedTaskPresent = $false
     $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
     if ($null -ne $task) {
         Assert-OwnedTask -Task $task
+        $ownedTaskPresent = $true
         if ($task.State -eq "Running") {
             Stop-ScheduledTask -TaskName $TaskName
             $deadline = [DateTimeOffset]::Now.AddSeconds(30)
@@ -83,7 +85,17 @@ function Stop-OwnedTaskAndListener {
             $null -ne $process -and
             [string]$process.CommandLine -match '(?<!\S)-m\s+services\.gpu_service\.app(?:\s|$)' -and
             [string]$process.ExecutablePath -and
-            ([string]$process.ExecutablePath).StartsWith($RuntimeRoot, [StringComparison]::OrdinalIgnoreCase)
+            (
+                ([string]$process.ExecutablePath).StartsWith($RuntimeRoot, [StringComparison]::OrdinalIgnoreCase) -or
+                (
+                    $ownedTaskPresent -and
+                    [string]::Equals(
+                        [string]$process.ExecutablePath,
+                        [IO.Path]::GetFullPath($ConfiguredGpuPython),
+                        [StringComparison]::OrdinalIgnoreCase
+                    )
+                )
+            )
         )
         $legacyProcessOwned = (
             $null -ne $process -and
