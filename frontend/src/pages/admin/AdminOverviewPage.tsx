@@ -1,9 +1,13 @@
 import { useEffect, useState } from "react";
+import { ArrowRight } from "lucide-react";
 import { api } from "../../api/client";
+import { Badge } from "../../components/ui/badge";
+import { Button } from "../../components/ui/button";
 import { Card, CardContent } from "../../components/ui/card";
 import { ErrorState } from "../../components/ui/error-state";
 import { LoadingState } from "../../components/ui/loading-state";
-import type { AdminStats } from "../../types";
+import type { AdminStats, MaintenanceStatus } from "../../types";
+import { formatAdminDate } from "./admin-formatters";
 
 const pageHeading = (
   <div>
@@ -15,9 +19,19 @@ const pageHeading = (
   </div>
 );
 
-export function AdminOverviewPage() {
+type AdminOverviewPageProps = {
+  onOpenMaintenance?: () => void;
+};
+
+function retentionLabel(days: number | null) {
+  return days === null ? "永久保留" : `保留 ${days} 天`;
+}
+
+export function AdminOverviewPage({ onOpenMaintenance }: AdminOverviewPageProps) {
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [maintenance, setMaintenance] = useState<MaintenanceStatus | null>(null);
+  const [maintenanceError, setMaintenanceError] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -25,6 +39,13 @@ export function AdminOverviewPage() {
         setStats(await api.adminStats());
       } catch (e: any) {
         setError(e?.message || String(e));
+      }
+    })();
+    (async () => {
+      try {
+        setMaintenance(await api.adminMaintenance());
+      } catch (e: any) {
+        setMaintenanceError(e?.message || String(e));
       }
     })();
   }, []);
@@ -80,6 +101,30 @@ export function AdminOverviewPage() {
               </CardContent>
             </Card>
           ))}
+        </div>
+      </section>
+
+      <section aria-labelledby="overview-maintenance-heading" className="space-y-3">
+        <div className="flex items-center justify-between gap-4">
+          <h2 id="overview-maintenance-heading" className="text-ui-base font-semibold text-foreground">系统维护</h2>
+          {onOpenMaintenance && <Button variant="ghost" size="sm" onClick={onOpenMaintenance}>查看系统维护<ArrowRight className="size-4" /></Button>}
+        </div>
+        <div className="overflow-hidden rounded-ui-xl border border-border">
+          {maintenanceError ? (
+            <div className="flex flex-col gap-2 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-ui-sm text-destructive">维护状态暂不可用</p>
+              {onOpenMaintenance && <Button variant="outline" size="sm" onClick={onOpenMaintenance}>查看详情</Button>}
+            </div>
+          ) : !maintenance ? (
+            <LoadingState className="min-h-24" label="正在加载维护状态…" />
+          ) : (
+            <dl className="grid grid-cols-1 gap-px bg-border sm:grid-cols-2 xl:grid-cols-4">
+              <div className="bg-card p-4"><dt className="text-ui-xs text-muted-foreground">自动清理</dt><dd className="mt-2"><Badge variant={maintenance.settings.conversation_cleanup_enabled ? "success" : "warning"}>{maintenance.settings.conversation_cleanup_enabled ? "已启用" : "已停用"}</Badge></dd></div>
+              <div className="bg-card p-4"><dt className="text-ui-xs text-muted-foreground">当前策略</dt><dd className="mt-2 text-ui-sm font-medium">{retentionLabel(maintenance.settings.conversation_retention_days)}</dd></div>
+              <div className="bg-card p-4"><dt className="text-ui-xs text-muted-foreground">最近运行</dt><dd className="mt-2"><Badge variant={!maintenance.last_run ? "secondary" : maintenance.last_run.status === "succeeded" ? "success" : "destructive"}>{!maintenance.last_run ? "尚无记录" : maintenance.last_run.status === "succeeded" ? "成功" : "失败"}</Badge></dd></div>
+              <div className="bg-card p-4"><dt className="text-ui-xs text-muted-foreground">运行时间</dt><dd className="mt-2 text-ui-sm font-medium">{maintenance.last_run ? formatAdminDate(maintenance.last_run.finished_at) : "—"}</dd></div>
+            </dl>
+          )}
         </div>
       </section>
     </div>

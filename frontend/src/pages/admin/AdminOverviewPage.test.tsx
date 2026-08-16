@@ -1,14 +1,16 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AdminOverviewPage } from "./AdminOverviewPage";
 
 const mocks = vi.hoisted(() => ({
   adminStats: vi.fn(),
+  adminMaintenance: vi.fn(),
 }));
 
 vi.mock("../../api/client", () => ({
   api: {
     adminStats: mocks.adminStats,
+    adminMaintenance: mocks.adminMaintenance,
   },
 }));
 
@@ -24,6 +26,11 @@ const initialStats = {
 describe("AdminOverviewPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.adminMaintenance.mockResolvedValue({
+      settings: { conversation_cleanup_enabled: true, conversation_retention_days: null, updated_at: null, updated_by: null },
+      sweeper_interval_seconds: 3600,
+      last_run: { id: 1, trigger_source: "automatic", status: "succeeded", retention_days: null, deleted_conversations: 0, deleted_messages: 0, deleted_auth_sessions: 2, started_at: 10, finished_at: 11, error_summary: null },
+    });
   });
 
   afterEach(() => {
@@ -72,5 +79,25 @@ describe("AdminOverviewPage", () => {
     render(<AdminOverviewPage />);
     await screen.findByText("用户总数");
     expect(screen.queryByRole("button", { name: /清理/ })).not.toBeInTheDocument();
+  });
+
+  it("shows a compact maintenance summary and opens the maintenance tab", async () => {
+    const onOpenMaintenance = vi.fn();
+    mocks.adminStats.mockResolvedValue(initialStats);
+    render(<AdminOverviewPage onOpenMaintenance={onOpenMaintenance} />);
+
+    expect(await screen.findByText("永久保留")).toBeInTheDocument();
+    expect(screen.getByText("已启用")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "查看系统维护" }));
+    expect(onOpenMaintenance).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps core statistics visible when maintenance status fails", async () => {
+    mocks.adminStats.mockResolvedValue(initialStats);
+    mocks.adminMaintenance.mockRejectedValue(new Error("维护状态暂不可用"));
+    render(<AdminOverviewPage />);
+
+    expect(await screen.findByText("用户总数")).toBeInTheDocument();
+    expect(await screen.findByText("维护状态暂不可用")).toBeInTheDocument();
   });
 });

@@ -77,4 +77,17 @@ describe("AdminMaintenancePage", () => {
     expect(await screen.findByText(/清理完成：删除 4 条对话/)).toBeInTheDocument();
     expect(mocks.cleanup).toHaveBeenCalledTimes(1);
   });
+
+  it("shows duration and a sanitized reason for failed runs", async () => {
+    mocks.runs.mockResolvedValue({ runs: [{
+      id: 2, trigger_source: "automatic", status: "failed", retention_days: null,
+      deleted_conversations: 0, deleted_messages: 0, deleted_auth_sessions: 0,
+      started_at: 10, finished_at: 12, error_summary: "OperationalError",
+    }] });
+    render(<AdminMaintenancePage />);
+
+    expect(await screen.findAllByText("耗时 2.0 秒")).not.toHaveLength(0);
+    expect(screen.getAllByText("OperationalError")).not.toHaveLength(0);
+    expect(screen.getAllByText("永久保留")).not.toHaveLength(0);
+  });
 });

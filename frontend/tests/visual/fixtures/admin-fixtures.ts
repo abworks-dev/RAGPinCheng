@@ -191,6 +191,29 @@ export async function installAdminRoutes(
         messages_7d: 18,
       });
     }
+    if (request.method() === "GET" && path === "/api/admin/maintenance") {
+      return json(route, {
+        settings: {
+          conversation_cleanup_enabled: true,
+          conversation_retention_days: 30,
+          updated_at: 1700000000,
+          updated_by: 9001,
+        },
+        sweeper_interval_seconds: 3600,
+        last_run: {
+          id: 1,
+          trigger_source: "automatic",
+          status: "succeeded",
+          retention_days: 30,
+          deleted_conversations: 0,
+          deleted_messages: 0,
+          deleted_auth_sessions: 2,
+          started_at: 1700000000,
+          finished_at: 1700000002,
+          error_summary: null,
+        },
+      });
+    }
     if (request.method() === "GET" && path === "/api/admin/media") return json(route, mediaAssets);
     if (request.method() === "GET" && path === "/api/admin/transcription/profiles") return json(route, transcriptionProfiles);
     if (request.method() === "GET" && path === "/api/admin/transcription/jobs") return json(route, transcriptionJobs);
