@@ -43,6 +43,8 @@ jobs:
             $exitCode = $process.ExitCode
             $stdout = if (Test-Path $stdoutPath) { Get-Content $stdoutPath -Raw -ErrorAction SilentlyContinue } else { '' }
             $stderr = if (Test-Path $stderrPath) { Get-Content $stderrPath -Raw -ErrorAction SilentlyContinue } else { '' }
+            if ($null -eq $stdout) { $stdout = '' }
+            if ($null -eq $stderr) { $stderr = '' }
             $safeStdout = [regex]::Replace([string]$stdout, '(?i)(token|password|secret|authorization)\s*[:=]\s*[^\s]+', '$1=[REDACTED]')
             $safeStderr = [regex]::Replace([string]$stderr, '(?i)(token|password|secret|authorization)\s*[:=]\s*[^\s]+', '$1=[REDACTED]')
             Set-Content -LiteralPath $stdoutPath -Value $safeStdout -Encoding UTF8
