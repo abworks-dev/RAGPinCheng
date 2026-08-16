@@ -3,6 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
+CONTENT_PERMISSION_CATALOG_VERSION = 3
+
+
 @dataclass(frozen=True, slots=True)
 class ContentPermissionDefinition:
     key: str
@@ -18,7 +21,11 @@ CONTENT_PERMISSION_DEFINITIONS = (
         "workspace.view", "access", "入口与查看", "进入资料工作台", "进入资料管理工作台。"
     ),
     ContentPermissionDefinition(
-        "item.view", "access", "入口与查看", "查看资料", "查看资料列表、详情、预览和下载。", ("workspace.view",)
+        "item.view", "access", "入口与查看", "查看资料", "查看资料列表、详情和预览。", ("workspace.view",)
+    ),
+    ContentPermissionDefinition(
+        "item.download", "access", "入口与查看", "下载资料", "下载单份资料或批量打包下载。",
+        ("workspace.view", "item.view"),
     ),
     ContentPermissionDefinition(
         "category.view", "access", "入口与查看", "查看分类", "查看资料分类树和完整路径。", ("workspace.view",)
@@ -90,22 +97,22 @@ CONTENT_PERMISSIONS = frozenset(CONTENT_PERMISSION_BY_KEY)
 
 LEGACY_CONTENT_PERMISSION_MAP = {
     "organize": frozenset({
-        "workspace.view", "item.view", "category.view", "item.upload", "item.submit",
+        "workspace.view", "item.view", "item.download", "category.view", "item.upload", "item.submit",
         "item.move_draft", "item.archive_draft", "folder.request",
     }),
     "review": frozenset({
-        "workspace.view", "item.view", "category.view", "item.review", "item.move_review",
+        "workspace.view", "item.view", "item.download", "category.view", "item.review", "item.move_review",
         "folder.review", "trash.view", "trash.restore",
     }),
     "publish": frozenset({
-        "workspace.view", "item.view", "category.view", "item.publish",
+        "workspace.view", "item.view", "item.download", "category.view", "item.publish",
         "item.archive_published", "trash.view", "index.view",
     }),
     "manage_categories": frozenset({
-        "workspace.view", "item.view", "category.view", "category.manage", "folder.review",
+        "workspace.view", "item.view", "item.download", "category.view", "category.manage", "folder.review",
     }),
     "import_server": frozenset({
-        "workspace.view", "item.view", "category.view", "import.server",
+        "workspace.view", "item.view", "item.download", "category.view", "import.server",
     }),
 }
 
@@ -119,18 +126,60 @@ LEGACY_SYSTEM_CONTENT_PERMISSION_GROUPS = {
     ),
 }
 
-SYSTEM_CONTENT_PERMISSION_GROUPS = {
+# Schema 11 databases must validate against the pre-download permission catalog
+# before Schema 12 can add the new node.
+CONTENT_PERMISSION_V2_SYSTEM_CONTENT_PERMISSION_GROUPS = {
     "member": ("普通成员", frozenset()),
     "viewer": (
         "资料浏览者",
         frozenset({"workspace.view", "item.view", "category.view"}),
+    ),
+    "bim_engineer": (
+        "BIM工程师",
+        frozenset({
+            "workspace.view", "item.view", "category.view", "item.upload", "item.submit",
+            "item.move_draft", "item.archive_draft", "folder.request",
+        }),
+    ),
+    "content_owner": (
+        "资料负责人",
+        frozenset({
+            "workspace.view", "item.view", "category.view", "item.review", "item.move_review",
+            "folder.review", "trash.view", "trash.restore",
+        }),
+    ),
+    "publisher": (
+        "发布负责人",
+        frozenset({
+            "workspace.view", "item.view", "category.view", "item.publish",
+            "item.archive_published", "trash.view", "index.view",
+        }),
+    ),
+    "category_admin": (
+        "分类管理员",
+        frozenset({"workspace.view", "item.view", "category.view", "category.manage", "folder.review"}),
+    ),
+    "system_admin": (
+        "系统管理员",
+        frozenset({definition.key for definition in CONTENT_PERMISSION_DEFINITIONS if definition.key != "item.download"}),
+    ),
+}
+
+SYSTEM_CONTENT_PERMISSION_GROUPS = {
+    "member": ("普通成员", frozenset()),
+    "viewer": (
+        "资料浏览者",
+        frozenset({"workspace.view", "item.view", "item.download", "category.view"}),
     ),
     "bim_engineer": ("BIM工程师", LEGACY_CONTENT_PERMISSION_MAP["organize"]),
     "content_owner": ("资料负责人", LEGACY_CONTENT_PERMISSION_MAP["review"]),
     "publisher": ("发布负责人", LEGACY_CONTENT_PERMISSION_MAP["publish"]),
     "category_admin": (
         "分类管理员",
-        frozenset({"workspace.view", "item.view", "category.view", "category.manage", "folder.review"}),
+        frozenset({
+            "workspace.view", "item.view", "item.download", "category.view",
+            "category.manage", "folder.review",
+        }),
     ),
     "system_admin": ("系统管理员", CONTENT_PERMISSIONS),
 }

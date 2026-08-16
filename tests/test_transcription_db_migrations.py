@@ -84,7 +84,7 @@ def test_repeated_init_is_noop_and_does_not_create_second_backup(tmp_path):
 def test_schema_10_database_migrates_manual_revision_columns_and_index(tmp_path, monkeypatch):
     path = tmp_path / "app.sqlite"
     original = db_migrations.MIGRATIONS
-    monkeypatch.setattr(db_migrations, "MIGRATIONS", original[:-2])
+    monkeypatch.setattr(db_migrations, "MIGRATIONS", original[:-3])
     init_db(path, backup_dir=tmp_path / "backups")
     conn = sqlite3.connect(path)
     assert conn.execute("SELECT max(version) FROM app_schema_migrations").fetchone()[0] == 10
@@ -120,6 +120,16 @@ def test_schema_5_database_adds_later_tables_without_changing_users(tmp_path):
     conn.execute("DROP TABLE content_folder_requests")
     conn.execute("DROP TABLE content_permission_group_items")
     conn.execute("DROP TABLE content_permission_groups")
+    conn.execute("DROP TABLE content_permissions")
+    conn.execute(
+        """CREATE TABLE content_permissions (
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            permission TEXT NOT NULL CHECK (permission IN ('organize','review','publish','manage_categories','import_server')),
+            granted_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            created_at INTEGER NOT NULL,
+            PRIMARY KEY(user_id, permission)
+        )"""
+    )
     conn.execute(
         "INSERT INTO users(employee_id,real_name,password_hash,role,is_active,created_at) VALUES ('kept','保留用户','x','user',1,1)"
     )
@@ -158,7 +168,7 @@ def test_repeated_init_fails_closed_when_system_permission_group_drifts(tmp_path
 def test_schema_10_permissions_expand_to_granular_nodes(tmp_path, monkeypatch):
     path = tmp_path / "app.sqlite"
     migrations = db_migrations.MIGRATIONS
-    monkeypatch.setattr(db_migrations, "MIGRATIONS", migrations[:-2])
+    monkeypatch.setattr(db_migrations, "MIGRATIONS", migrations[:-3])
     init_db(path, backup_dir=tmp_path / "backups")
     conn = sqlite3.connect(path)
     user_id = conn.execute(
@@ -190,7 +200,7 @@ def test_schema_10_permissions_expand_to_granular_nodes(tmp_path, monkeypatch):
         )
     }
     assert actual_user_permissions == {
-        "workspace.view", "item.view", "category.view", "item.upload", "item.submit",
+        "workspace.view", "item.view", "item.download", "category.view", "item.upload", "item.submit",
         "item.move_draft", "item.archive_draft", "folder.request", "item.review",
         "item.move_review", "folder.review", "trash.view", "trash.restore",
     }
@@ -199,9 +209,66 @@ def test_schema_10_permissions_expand_to_granular_nodes(tmp_path, monkeypatch):
             "SELECT permission FROM content_permission_group_items WHERE group_id='custom-legacy'"
         )
     } == {
-        "workspace.view", "item.view", "category.view", "item.publish",
+        "workspace.view", "item.view", "item.download", "category.view", "item.publish",
         "item.archive_published", "trash.view", "index.view",
     }
+    assert conn.execute("SELECT max(version) FROM app_schema_migrations").fetchone()[0] == db_migrations.CURRENT_SCHEMA_VERSION
+    assert conn.execute("PRAGMA foreign_key_check").fetchone() is None
+    conn.close()
+
+
+def test_schema_11_download_permission_migration_preserves_existing_access(tmp_path, monkeypatch):
+    path = tmp_path / "app.sqlite"
+    migrations = db_migrations.MIGRATIONS
+    monkeypatch.setattr(db_migrations, "MIGRATIONS", migrations[:-1])
+    init_db(path, backup_dir=tmp_path / "backups")
+    conn = sqlite3.connect(path)
+    viewer_id = conn.execute(
+        "INSERT INTO users(employee_id,real_name,password_hash,role,is_active,created_at) "
+        "VALUES ('download-viewer','下载查看者','x','user',1,1)"
+    ).lastrowid
+    limited_id = conn.execute(
+        "INSERT INTO users(employee_id,real_name,password_hash,role,is_active,created_at) "
+        "VALUES ('limited-viewer','仅查看者','x','user',1,1)"
+    ).lastrowid
+    conn.executemany(
+        "INSERT INTO content_permissions(user_id,permission,created_at) VALUES (?,?,1)",
+        [(viewer_id, "workspace.view"), (viewer_id, "item.view"), (limited_id, "workspace.view")],
+    )
+    conn.execute(
+        "INSERT INTO content_permission_groups "
+        "(id,group_key,display_name,is_system,is_active,created_at,updated_at) "
+        "VALUES ('custom-viewer','custom_viewer','自定义查看组',0,1,1,1)"
+    )
+    conn.execute(
+        "INSERT INTO content_permission_group_items(group_id,permission) VALUES ('custom-viewer','item.view')"
+    )
+    conn.execute(
+        "INSERT INTO content_permission_groups "
+        "(id,group_key,display_name,is_system,is_active,created_at,updated_at) "
+        "VALUES ('custom-limited','custom_limited','自定义受限组',0,1,1,1)"
+    )
+    conn.execute(
+        "INSERT INTO content_permission_group_items(group_id,permission) VALUES ('custom-limited','workspace.view')"
+    )
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setattr(db_migrations, "MIGRATIONS", migrations)
+    init_db(path, backup_dir=tmp_path / "backups")
+    conn = sqlite3.connect(path)
+    assert conn.execute(
+        "SELECT 1 FROM content_permissions WHERE user_id=? AND permission='item.download'", (viewer_id,)
+    ).fetchone() is not None
+    assert conn.execute(
+        "SELECT 1 FROM content_permissions WHERE user_id=? AND permission='item.download'", (limited_id,)
+    ).fetchone() is None
+    assert conn.execute(
+        "SELECT 1 FROM content_permission_group_items WHERE group_id='custom-viewer' AND permission='item.download'"
+    ).fetchone() is not None
+    assert conn.execute(
+        "SELECT 1 FROM content_permission_group_items WHERE group_id='custom-limited' AND permission='item.download'"
+    ).fetchone() is None
     assert conn.execute("SELECT max(version) FROM app_schema_migrations").fetchone()[0] == db_migrations.CURRENT_SCHEMA_VERSION
     assert conn.execute("PRAGMA foreign_key_check").fetchone() is None
     conn.close()

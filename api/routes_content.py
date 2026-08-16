@@ -4,12 +4,16 @@ import json
 import os
 import re
 import sqlite3
+import tempfile
 import time
+import unicodedata
 import uuid
+import zipfile
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
+from starlette.background import BackgroundTask
 
 from src.config import CONTENT_MANAGEMENT_ENABLED, CONTENT_ROOT
 from src.indexing_pipeline import (
@@ -23,6 +27,7 @@ from .content_permissions import (
     require_content_permission,
 )
 from .content_permission_catalog import (
+    CONTENT_PERMISSION_CATALOG_VERSION,
     CONTENT_PERMISSION_DEFINITIONS,
     CONTENT_PERMISSIONS,
     missing_content_permission_dependencies,
@@ -54,6 +59,7 @@ from .content_store import (
 from .db import get_db
 from .schemas import (
     BulkArchiveManagedContentRequest,
+    BulkDownloadManagedContentRequest,
     CreateManagedCategoryRequest,
     CreateFolderRequest,
     CreateContentPermissionGroupRequest,
@@ -93,6 +99,7 @@ _storage = ContentStorage(CONTENT_ROOT)
 _MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_MB", "200")) * 1024 * 1024
 _MAX_FOLDER_UPLOAD_FILES = int(os.getenv("MAX_FOLDER_UPLOAD_FILES", "500"))
 _MAX_FOLDER_UPLOAD_BYTES = int(os.getenv("MAX_FOLDER_UPLOAD_MB", "1024")) * 1024 * 1024
+_MAX_BULK_DOWNLOAD_BYTES = int(os.getenv("MAX_BULK_DOWNLOAD_MB", "1024")) * 1024 * 1024
 _MAX_RELATIVE_PATH_LENGTH = 1024
 _DOC_TYPES = {
     ".pdf": "pdf",
@@ -920,7 +927,7 @@ async def update_managed_content_item(
 def get_content_version_file(
     version_id: str,
     download: bool = False,
-    _user: CurrentUser = Depends(require_content_permission("item.view")),
+    user: CurrentUser = Depends(require_content_permission("item.view")),
     conn: sqlite3.Connection = Depends(get_db),
 ):
     row = conn.execute(
@@ -938,7 +945,94 @@ def get_content_version_file(
     except (FileNotFoundError, ValueError):
         raise HTTPException(status_code=404, detail="资料文件不存在")
     disposition = "attachment" if download or row["doc_type"] != "pdf" else "inline"
+    if disposition == "attachment" and not has_content_permission(conn, user, "item.download"):
+        raise HTTPException(status_code=403, detail="当前账号没有下载资料的权限")
     return FileResponse(path, filename=row["original_filename"], content_disposition_type=disposition)
+
+
+def _safe_bulk_archive_name(filename: str, used_names: set[str]) -> str:
+    name = unicodedata.normalize("NFKC", filename).strip()
+    name = re.sub(r'[\x00-\x1f\x7f<>:"/\\|?*]', "_", name).rstrip(" .")
+    if not name or name in {".", ".."}:
+        name = "资料"
+    stem = Path(name).stem
+    suffix = Path(name).suffix
+    max_stem_length = max(1, 240 - len(suffix))
+    name = f"{stem[:max_stem_length]}{suffix}"
+    candidate = name
+    counter = 1
+    while candidate.casefold() in used_names:
+        counter += 1
+        marker = f" ({counter})"
+        candidate = f"{stem[:max(1, max_stem_length - len(marker))]}{marker}{suffix}"
+    used_names.add(candidate.casefold())
+    return candidate
+
+
+def _resolve_bulk_download_entries(
+    conn: sqlite3.Connection,
+    version_ids: list[str],
+) -> list[tuple[Path, str]]:
+    total_bytes = 0
+    entries: list[tuple[Path, str]] = []
+    used_names: set[str] = set()
+    for version_id in _validate_bulk_version_ids(version_ids):
+        row = conn.execute(
+            """SELECT v.original_filename,o.storage_rel_path
+               FROM content_versions v
+               JOIN content_items i ON i.id=v.item_id
+               JOIN content_objects o ON o.sha256=v.object_sha256
+               WHERE v.id=? AND i.archived_at IS NULL""",
+            (version_id,),
+        ).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="部分资料不存在或已移至回收站，请刷新后重试")
+        try:
+            path = _storage.resolve_object(row["storage_rel_path"])
+            size = path.stat().st_size
+        except (FileNotFoundError, OSError, ValueError):
+            raise HTTPException(status_code=404, detail="部分资料文件不可用，请刷新后重试")
+        if not path.is_file() or path.is_symlink():
+            raise HTTPException(status_code=404, detail="部分资料文件不可用，请刷新后重试")
+        total_bytes += size
+        if total_bytes > _MAX_BULK_DOWNLOAD_BYTES:
+            raise HTTPException(status_code=413, detail="批量下载文件总量不能超过 1 GiB")
+        entries.append((path, _safe_bulk_archive_name(row["original_filename"], used_names)))
+    return entries
+
+
+def _create_bulk_download_archive(entries: list[tuple[Path, str]]) -> Path:
+    temporary = tempfile.NamedTemporaryFile(prefix="managed-content-", suffix=".zip", delete=False)
+    archive_path = Path(temporary.name)
+    temporary.close()
+    try:
+        with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED, allowZip64=True) as archive:
+            for source, archive_name in entries:
+                archive.write(source, arcname=archive_name)
+    except Exception:
+        archive_path.unlink(missing_ok=True)
+        raise
+    return archive_path
+
+
+@router.post("/bulk-download")
+def bulk_download_content(
+    body: BulkDownloadManagedContentRequest,
+    user: CurrentUser = Depends(require_content_permission("item.download", csrf=True)),
+    conn: sqlite3.Connection = Depends(get_db),
+):
+    _require_feature()
+    entries = _resolve_bulk_download_entries(conn, body.version_ids)
+    try:
+        archive_path = _create_bulk_download_archive(entries)
+    except OSError as exc:
+        raise HTTPException(status_code=404, detail="资料文件不可用，请刷新后重试") from exc
+    return FileResponse(
+        archive_path,
+        media_type="application/zip",
+        filename=f"资料批量下载-{time.strftime('%Y%m%d-%H%M%S')}.zip",
+        background=BackgroundTask(archive_path.unlink, missing_ok=True),
+    )
 
 
 @router.post("/versions/{version_id}/submit", response_model=ManagedContentItemDTO)
@@ -1336,7 +1430,7 @@ def get_permission_catalog(
     _admin: CurrentUser = Depends(require_admin),
 ) -> ContentPermissionCatalogResponse:
     return ContentPermissionCatalogResponse(
-        schema_version=2,
+        schema_version=CONTENT_PERMISSION_CATALOG_VERSION,
         permissions=[
             ContentPermissionDefinitionDTO(
                 key=item.key,

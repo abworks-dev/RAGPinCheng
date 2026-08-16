@@ -23,6 +23,8 @@ const mocks = vi.hoisted(() => ({
   bulkPublish: vi.fn(),
   bulkMove: vi.fn(),
   bulkArchive: vi.fn(),
+  bulkDownload: vi.fn(),
+  downloadFile: vi.fn(),
   deleteContent: vi.fn(),
   trash: vi.fn(),
   restoreContent: vi.fn(),
@@ -33,9 +35,9 @@ const mocks = vi.hoisted(() => ({
   previewState: { parentId: null as string | null },
 }));
 
-const REVIEWER_PERMISSIONS = ["item.review", "item.move_review", "folder.review", "trash.view", "trash.restore"];
-const ORGANIZER_PERMISSIONS = ["item.upload", "item.submit", "item.move_draft", "item.archive_draft", "folder.request"];
-const PUBLISHER_PERMISSIONS = ["item.publish", "item.archive_published", "trash.view", "index.view"];
+const REVIEWER_PERMISSIONS = ["item.review", "item.move_review", "folder.review", "trash.view", "trash.restore", "item.download"];
+const ORGANIZER_PERMISSIONS = ["item.upload", "item.submit", "item.move_draft", "item.archive_draft", "folder.request", "item.download"];
+const PUBLISHER_PERMISSIONS = ["item.publish", "item.archive_published", "trash.view", "index.view", "item.download"];
 const CATEGORY_MANAGER_PERMISSIONS = ["category.manage", "folder.review"];
 
 vi.mock("../../components/PdfPreview", () => ({ PdfPreview: () => null }));
@@ -80,6 +82,8 @@ vi.mock("../../api/client", () => ({
     bulkPublishManagedContent: mocks.bulkPublish,
     bulkMoveManagedContent: mocks.bulkMove,
     bulkArchiveManagedContent: mocks.bulkArchive,
+    bulkDownloadManagedContent: mocks.bulkDownload,
+    downloadManagedContentFile: mocks.downloadFile,
     deleteManagedContent: mocks.deleteContent,
     managedContentTrash: mocks.trash,
     restoreManagedContent: mocks.restoreContent,
@@ -176,6 +180,8 @@ describe("AdminManagedContentPage", () => {
     mocks.deleteContent.mockResolvedValue({ item_id: "item-1", version_id: "version-1", archived_at: 2, previous_status: "awaiting_review", publication_withdrawn: false });
     mocks.trash.mockResolvedValue({ items: [], total: 0, status_counts: {} });
     mocks.restoreContent.mockResolvedValue({ item_id: "item-1", version_id: "version-1", restored_status: "approved" });
+    mocks.bulkDownload.mockResolvedValue({ blob: new Blob(["zip"]), filename: "资料批量下载.zip" });
+    mocks.downloadFile.mockResolvedValue({ blob: new Blob(["file"]), filename: "standard.pdf" });
   });
 
   it("shows only review actions to a reviewer and submits the decision", async () => {
@@ -189,6 +195,19 @@ describe("AdminManagedContentPage", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "查看“建模标准”的详细信息" })[0]);
     fireEvent.click(screen.getByRole("button", { name: "确认" }));
     await waitFor(() => expect(mocks.review).toHaveBeenCalledWith("version-1", true));
+  });
+
+  it("keeps single and batch downloads disabled without item.download", async () => {
+    mocks.permissions = REVIEWER_PERMISSIONS.filter((permission) => permission !== "item.download");
+    const secondItem = { ...item, item_id: "item-2", title: "建模标准2", version_id: "version-2" };
+    mocks.items.mockResolvedValue({ items: [item, secondItem], total: 2, status_counts: { awaiting_review: 2 } });
+    render(<AdminManagedContentPage />);
+    await openRootFolder();
+    expect(screen.getAllByRole("button", { name: "下载“建模标准”" })[0]).toBeDisabled();
+    fireEvent.click(screen.getAllByRole("checkbox", { name: "选择建模标准" })[0]);
+    fireEvent.click(screen.getAllByRole("checkbox", { name: "选择建模标准2" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "批量操作" }));
+    expect(screen.getByRole("menuitem", { name: "批量下载" })).toBeDisabled();
   });
 
   it("opens indexed files directly and restores details after an in-dialog preview", async () => {
