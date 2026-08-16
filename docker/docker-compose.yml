@@ -66,8 +66,8 @@ services:
       qdrant:
         condition: service_healthy
     env_file:
-      # 生产 workflow 设置 COMPOSE_ENV_FILE 为外部 secret 文件；本地开发回退到仓库 .env。
-      # 文件中的变量注入容器，不需要在 environment: 逐一列出。
+      # Production passes COMPOSE_ENV_FILE through the private deployment environment.
+      # Local development keeps the repository-root .env fallback.
       - ${COMPOSE_ENV_FILE:-../.env}
     environment:
       # 容器内 Qdrant 地址 — backend 通过 compose 服务名直接访问。

@@ -414,6 +414,8 @@ class TestDeployGitSafety(unittest.TestCase):
 
     def test_source_decoupling_overlay_is_final_for_deploy_and_recovery(self):
         overlay = self.source_decoupled_compose
+        self.assertIn("env_file: !override", overlay)
+        self.assertIn("${COMPOSE_ENV_FILE:?COMPOSE_ENV_FILE is required}", overlay)
         self.assertIn("volumes: !override", overlay)
         self.assertIn("${DATA_PATH:?DATA_PATH is required}:/app/data", overlay)
         self.assertIn(
@@ -434,6 +436,14 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertIn(compose_sanitizer_flags, self.app_only_workflow)
         self.assertIn('docker-compose.yml" -f "${COMPOSE_OVERRIDE}', self.app_only_workflow)
         self.assertIn('COMPOSE_FILES=(-f "${COMPOSE_OVERRIDE}")', self.app_only_workflow)
+        self.assertIn(
+            'git show "${DEPLOY_COMMIT_SHA}:docker/compose.source-decoupled.yml"',
+            self.app_only_workflow,
+        )
+        self.assertIn(
+            'COMPOSE_FILES+=(-f "${SOURCE_DECOUPLED_COMPOSE}")',
+            self.app_only_workflow,
+        )
         self.assertIn('ORIGINAL_COMPOSE_OVERRIDE="${COMPOSE_OVERRIDE}"', self.app_only_workflow)
         self.assertIn('COMPOSE=("${DEPLOY_COMPOSE[@]}")', self.app_only_workflow)
         self.assertIn("export COMPOSE_OVERRIDE", self.app_only_workflow)
@@ -446,26 +456,41 @@ class TestDeployGitSafety(unittest.TestCase):
         )
         self.assertIn("sanitize_source_decoupled_override.py", self.linux)
         self.assertIn(compose_sanitizer_flags, self.linux)
+        self.assertIn("export COMPOSE_ENV_FILE", self.linux)
         self.assertIn("export COMPOSE_OVERRIDE", self.linux)
+        self.assertIn(
+            'docker compose -f "$COMPOSE_BASE" -f "$COMPOSE_OVERRIDE"',
+            self.linux,
+        )
+        self.assertIn(
+            "export COMPOSE_OVERRIDE SOURCE_DECOUPLED_OVERRIDE_SANITIZED",
+            self.linux,
+        )
 
         self.assertIn(
             'SOURCE_DECOUPLING_COMPLETE must be true or false', self.linux
         )
         self.assertIn(
-            'COMPOSE_ARGS+=(-f "$COMPOSE_BASE" -f "$COMPOSE_OVERRIDE")',
+            'source-decoupled Compose configuration was not sanitized',
             self.linux,
+        )
+        self.assertIn(
+            'COMPOSE_ARGS+=(-f "$COMPOSE_OVERRIDE")', self.linux
         )
         self.assertIn(
             'COMPOSE_ARGS+=(-f "$COMPOSE_SOURCE_DECOUPLED")', self.linux
         )
+        source_decoupled_branch = self.linux.split(
+            'case "${SOURCE_DECOUPLING_COMPLETE:-false}" in', 1
+        )[1].split('false|"")', 1)[0]
+        self.assertNotIn('COMPOSE_BASE', source_decoupled_branch)
         self.assertLess(
-            self.linux.index('COMPOSE_ARGS+=(-f "$COMPOSE_BASE" -f "$COMPOSE_OVERRIDE")'),
-            self.linux.index('COMPOSE_ARGS+=(-f "$COMPOSE_SOURCE_DECOUPLED")'),
+            source_decoupled_branch.index('COMPOSE_ARGS+=(-f "$COMPOSE_OVERRIDE")'),
+            source_decoupled_branch.index(
+                'COMPOSE_ARGS+=(-f "$COMPOSE_SOURCE_DECOUPLED")'
+            ),
         )
-        self.assertLess(
-            self.linux.index('COMPOSE_ARGS+=(-f "$COMPOSE_SOURCE_DECOUPLED")'),
-            self.linux.index('COMPOSE_ARGS+=(--env-file "$COMPOSE_ENV_FILE")'),
-        )
+        self.assertIn('service-level tmpfs contract', source_decoupled_branch)
         self.assertIn(
             '"${COMPOSE[@]}" up -d --no-deps --force-recreate backend',
             self.app_backup_recovery_workflow,

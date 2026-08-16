@@ -17,6 +17,7 @@ COMPOSE_BASE="${REPO_PATH}/docker/docker-compose.yml"
 COMPOSE_OVERRIDE="${COMPOSE_OVERRIDE:?COMPOSE_OVERRIDE must be provided by the private deployment environment}"
 COMPOSE_SOURCE_DECOUPLED="${REPO_PATH}/docker/compose.source-decoupled.yml"
 COMPOSE_ENV_FILE="${COMPOSE_ENV_FILE:?COMPOSE_ENV_FILE must be provided by the private deployment environment}"
+export COMPOSE_ENV_FILE
 COMPOSE_PROJECT="ragpincheng-prod"
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 BACKUP_PATH="${BACKUP_DIR}/app-backup-${TIMESTAMP}"
@@ -56,13 +57,15 @@ sanitize_source_decoupled_override() {
     local sanitized
     sanitized="${BACKUP_DIR}/.compose-private-source-decoupled-${TIMESTAMP}.json"
     mkdir -p "$BACKUP_DIR"
-    docker compose -f "$COMPOSE_OVERRIDE" --env-file "$COMPOSE_ENV_FILE" \
+    docker compose -f "$COMPOSE_BASE" -f "$COMPOSE_OVERRIDE" \
+        --env-file "$COMPOSE_ENV_FILE" \
         config --no-interpolate --no-env-resolution --no-consistency --format json \
         | python3 "${REPO_PATH}/scripts/sanitize_source_decoupled_override.py" \
             > "${sanitized}.tmp"
     mv "${sanitized}.tmp" "$sanitized"
     COMPOSE_OVERRIDE="$sanitized"
-    export COMPOSE_OVERRIDE
+    SOURCE_DECOUPLED_OVERRIDE_SANITIZED=true
+    export COMPOSE_OVERRIDE SOURCE_DECOUPLED_OVERRIDE_SANITIZED
 }
 
 if [ "${SOURCE_DECOUPLING_COMPLETE:-false}" = "true" ] && \
@@ -75,14 +78,18 @@ COMPOSE_ARGS=(
 )
 case "${SOURCE_DECOUPLING_COMPLETE:-false}" in
     true)
-        # The private production file is an override, not a standalone stack.
-        # Keep the base services (including Qdrant's pinned image) in the merge
-        # and apply the source-decoupled mount contract last.
-        COMPOSE_ARGS+=(-f "$COMPOSE_BASE" -f "$COMPOSE_OVERRIDE")
+        [ "${SOURCE_DECOUPLED_OVERRIDE_SANITIZED:-false}" = "true" ] || {
+            echo "ERROR: source-decoupled Compose configuration was not sanitized"
+            exit 1
+        }
         [ -f "$COMPOSE_SOURCE_DECOUPLED" ] || {
             echo "ERROR: source-decoupled Compose overlay is missing: ${COMPOSE_SOURCE_DECOUPLED}"
             exit 1
         }
+        # The sanitized file is a complete normalized stack. Apply the
+        # source-decoupled overlay last so Docker receives the explicit
+        # volumes override and service-level tmpfs contract.
+        COMPOSE_ARGS+=(-f "$COMPOSE_OVERRIDE")
         COMPOSE_ARGS+=(-f "$COMPOSE_SOURCE_DECOUPLED")
         ;;
     false|"")

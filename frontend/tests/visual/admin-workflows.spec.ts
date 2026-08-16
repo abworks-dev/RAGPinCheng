@@ -247,7 +247,12 @@ test.describe("视频管理", () => {
     await workbenchTrigger.click();
     const workbench = page.getByRole("dialog", { name: "项目交付培训" });
     await expect(workbench).toBeVisible();
-    await expect(workbench.getByText("暂无可审阅转录版本。")).toBeVisible();
+    await expect(workbench.getByText("自动转录")).toBeVisible();
+    await expect(workbench.getByRole("textbox", { name: /审核备注/ })).toBeVisible();
+    await expect(workbench.getByText("审核通过后可发布")).toBeVisible();
+    await expect(workbench.getByText("synthetic-asr")).toBeHidden();
+    await workbench.getByRole("button", { name: "预览 Markdown" }).click();
+    await expect(workbench.locator("pre")).toContainText("培训开始");
     await workbench.getByRole("button", { name: "关闭转写工作台" }).click();
     await expect(workbench).toBeHidden();
     await expectNoBodyOverflow(page);
