@@ -74,7 +74,17 @@ describe("AdminCategoriesPage", () => {
 
   it("shows hierarchy, direct counts, and keeps internal keys hidden", async () => {
     render(<AdminCategoriesPage />);
-    expect(await screen.findByRole("treeitem", { name: /01 行业规范与标准/ })).toBeInTheDocument();
+    const parent = await screen.findByRole("treeitem", { name: /01 行业规范与标准/ });
+    const status = within(parent).getByText("启用");
+    const identity = within(parent).getByText("01 行业规范与标准");
+    expect(status.compareDocumentPosition(identity) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(parent).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByText("1 个一级分类 · 共 2 个分类")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "全部展开" })).toBeInTheDocument();
+    expect(screen.getByText("0 份直接资料 · 1 个子分类")).toBeInTheDocument();
+    expect(screen.queryByTestId("category-tree-item-cat-01-child")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "展开行业规范与标准" }));
+    expect(screen.getByRole("button", { name: "全部折叠" })).toBeInTheDocument();
     expect(screen.getByText("2 份直接资料")).toBeInTheDocument();
     expect(screen.queryByText("industry_standards")).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "资料权限" })).not.toBeInTheDocument();
@@ -89,7 +99,7 @@ describe("AdminCategoriesPage", () => {
 
   it("reveals matching descendants after their parent was collapsed", async () => {
     render(<AdminCategoriesPage />);
-    fireEvent.click(await screen.findByRole("button", { name: "收起行业规范与标准" }));
+    expect(await screen.findByRole("button", { name: "展开行业规范与标准" })).toBeInTheDocument();
     expect(screen.queryByTestId("category-tree-item-cat-01-child")).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByRole("searchbox", { name: "搜索分类" }), { target: { value: "测试子分类" } });
@@ -100,9 +110,10 @@ describe("AdminCategoriesPage", () => {
   it("moves tree focus between an expanded parent and its child", async () => {
     render(<AdminCategoriesPage />);
     const parent = await screen.findByTestId("category-tree-item-cat-01");
-    const childItem = screen.getByTestId("category-tree-item-cat-01-child");
     parent.focus();
 
+    fireEvent.keyDown(parent, { key: "ArrowRight" });
+    const childItem = await screen.findByTestId("category-tree-item-cat-01-child");
     fireEvent.keyDown(parent, { key: "ArrowRight" });
     expect(childItem).toHaveFocus();
     fireEvent.keyDown(childItem, { key: "ArrowLeft" });

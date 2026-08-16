@@ -85,7 +85,7 @@ def test_schema_5_database_adds_later_tables_without_changing_users(tmp_path):
     path = tmp_path / "app.sqlite"
     init_db(path, backup_dir=tmp_path / "backups")
     conn = sqlite3.connect(path)
-    conn.execute("DELETE FROM app_schema_migrations WHERE version IN (6,7,8,9)")
+    conn.execute("DELETE FROM app_schema_migrations WHERE version IN (6,7,8,9,10)")
     conn.execute("DROP TABLE maintenance_runs")
     conn.execute("DROP TABLE maintenance_settings")
     conn.execute("DROP TABLE content_folder_requests")

@@ -1,6 +1,7 @@
 """Forward-only application database migration runner."""
 from __future__ import annotations
 
+import re
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
@@ -471,6 +472,17 @@ SYSTEM_MAINTENANCE_RETENTION_STATEMENTS = (
     "CREATE INDEX idx_maintenance_runs_started_desc ON maintenance_runs(started_at DESC)",
 )
 
+CONTENT_VERSION_METADATA_STATEMENTS = (
+    "ALTER TABLE content_items ADD COLUMN normalized_filename TEXT",
+    "ALTER TABLE content_versions ADD COLUMN title TEXT",
+    """UPDATE content_versions
+       SET title=(SELECT i.title FROM content_items i WHERE i.id=content_versions.item_id)
+       WHERE title IS NULL""",
+    """CREATE UNIQUE INDEX IF NOT EXISTS uq_content_items_active_filename
+       ON content_items(category_id, normalized_filename)
+       WHERE archived_at IS NULL AND normalized_filename IS NOT NULL""",
+)
+
 MIGRATIONS = (
     Migration(1, "multi_engine_transcription_phase2", PHASE2_STATEMENTS),
     Migration(2, "answer_regeneration_versions", ANSWER_VERSION_STATEMENTS),
@@ -481,6 +493,7 @@ MIGRATIONS = (
     Migration(7, "content_folder_requests", CONTENT_FOLDER_REQUEST_STATEMENTS),
     Migration(8, "system_maintenance", SYSTEM_MAINTENANCE_STATEMENTS),
     Migration(9, "system_maintenance_permanent_retention", SYSTEM_MAINTENANCE_RETENTION_STATEMENTS),
+    Migration(10, "managed_content_version_metadata", CONTENT_VERSION_METADATA_STATEMENTS),
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 PHASE2_TABLES = frozenset(
@@ -554,6 +567,18 @@ def validate_system_content_permission_groups(conn: sqlite3.Connection) -> None:
         raise RuntimeError("system_permission_group_mismatch")
 
 
+def validate_content_version_metadata(conn: sqlite3.Connection) -> None:
+    item_columns = {row[1] for row in conn.execute("PRAGMA table_info(content_items)")}
+    version_columns = {row[1] for row in conn.execute("PRAGMA table_info(content_versions)")}
+    indexes = {row[1] for row in conn.execute("PRAGMA index_list(content_items)")}
+    if "normalized_filename" not in item_columns or "title" not in version_columns:
+        raise RuntimeError("migration_schema_mismatch")
+    if "uq_content_items_active_filename" not in indexes:
+        raise RuntimeError("migration_schema_mismatch")
+    if conn.execute("SELECT 1 FROM content_versions WHERE title IS NULL LIMIT 1").fetchone():
+        raise RuntimeError("migration_schema_mismatch")
+
+
 def split_sql_statements(script: str) -> tuple[str, ...]:
     statements: list[str] = []
     buffer = ""
@@ -567,6 +592,20 @@ def split_sql_statements(script: str) -> tuple[str, ...]:
     if buffer.strip():
         raise ValueError("incomplete_sql_statement")
     return tuple(statements)
+
+
+def execute_migration_statement(conn: sqlite3.Connection, statement: str) -> None:
+    match = re.fullmatch(
+        r"ALTER TABLE ([A-Za-z_][A-Za-z0-9_]*) ADD COLUMN ([A-Za-z_][A-Za-z0-9_]*) .+",
+        statement.strip(),
+        flags=re.DOTALL,
+    )
+    if match:
+        table_name, column_name = match.groups()
+        columns = {row[1] for row in conn.execute(f"PRAGMA table_info({table_name})")}
+        if column_name in columns:
+            return
+    conn.execute(statement)
 
 
 def read_schema_inventory(path: Path) -> tuple[frozenset[str], frozenset[str], tuple[tuple[int, str], ...]]:
@@ -631,6 +670,12 @@ def has_pending_ddl(path: Path, *, base_tables: frozenset[str]) -> bool:
         raise RuntimeError("migration_schema_mismatch")
     if any(version == 8 for version, _name in applied) and not SYSTEM_MAINTENANCE_TABLES.issubset(tables):
         raise RuntimeError("migration_schema_mismatch")
+    if any(version == 10 for version, _name in applied):
+        conn = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
+        try:
+            validate_content_version_metadata(conn)
+        finally:
+            conn.close()
     if not base_tables.issubset(tables):
         return True
     if "index_jobs" in tables and "media_id" not in index_columns:
@@ -664,7 +709,7 @@ def apply_all(conn: sqlite3.Connection, *, base_schema: str, applied_at: int) ->
             if migration.version in applied_versions:
                 continue
             for statement in migration.statements:
-                conn.execute(statement)
+                execute_migration_statement(conn, statement)
             conn.execute(
                 "INSERT INTO app_schema_migrations(version, name, applied_at) VALUES (?, ?, ?)",
                 (migration.version, migration.name, applied_at),
@@ -689,6 +734,7 @@ def apply_all(conn: sqlite3.Connection, *, base_schema: str, applied_at: int) ->
         if not SYSTEM_MAINTENANCE_TABLES.issubset(tables):
             raise RuntimeError("migration_schema_mismatch")
         validate_system_content_permission_groups(conn)
+        validate_content_version_metadata(conn)
         if conn.execute("PRAGMA foreign_key_check").fetchone() is not None:
             raise RuntimeError("migration_foreign_key_check_failed")
         result = conn.execute("PRAGMA integrity_check").fetchone()

@@ -6,7 +6,7 @@ test.describe("管理员概览", () => {
   test("统计指标、运行状态和维护摘要可见", async ({ page }) => {
     await installAdminRoutes(page);
     await page.goto("/admin/overview");
-    await expect(page.getByRole("heading", { name: "管理概览" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "系统概览" })).toBeVisible();
     await expect(page.getByText("用户总数")).toBeVisible();
     await expect(page.getByRole("heading", { name: "生产运行状态" })).toBeVisible();
     await expect(page.getByText("当前策略").locator("xpath=..")).toContainText("保留 30 天");

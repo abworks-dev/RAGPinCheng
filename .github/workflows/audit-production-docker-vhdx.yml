@@ -1,0 +1,37 @@
+name: Audit Production Docker VHDX References
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_read_only_audit:
+        description: Confirm read-only Docker VHDX reference audit
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-gpu-exclusive
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    if: ${{ inputs.confirm_read_only_audit == true }}
+    runs-on: [self-hosted, windows, production, gpu]
+    environment: production-asr
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Audit offline Docker VHDX references
+        shell: powershell
+        timeout-minutes: 10
+        run: |
+          & .\scripts\audit-docker-vhdx-references.ps1 -ReportPath (Join-Path $env:RUNNER_TEMP 'docker-vhdx-reference-audit\audit.json')
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-vhdx-reference-audit-${{ github.run_id }}
+          path: ${{ runner.temp }}/docker-vhdx-reference-audit
+          if-no-files-found: warn

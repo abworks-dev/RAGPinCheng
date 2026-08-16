@@ -341,6 +341,65 @@ def test_folder_upload_does_not_let_organizer_create_unapproved_folder(content_a
     assert response.json()["entries"][0]["reason"] == "目录尚未批准，请联系资料负责人创建后重试"
 
 
+def test_folder_upload_preflights_path_contract_before_creating_batch(content_api):
+    client, sessions, _queued, db_path = content_api
+    for relative_path, detail in (
+        ("../guide.md", "文件夹路径无效"),
+        ("资料包/other.md", "文件名与相对路径不一致"),
+    ):
+        response = client.post(
+            "/api/admin/content/uploads",
+            data={"category_id": "cat-04", "relative_paths": relative_path, "upload_mode": "folder"},
+            files=[("files", ("guide.md", b"# folder", "text/markdown"))],
+            **_auth(sessions, "admin", csrf=True),
+        )
+        assert response.status_code == 400
+        assert response.json()["detail"] == detail
+
+    conn = connect(db_path)
+    try:
+        assert conn.execute("SELECT count(*) FROM upload_batches").fetchone()[0] == 0
+        assert conn.execute("SELECT count(*) FROM content_items").fetchone()[0] == 0
+    finally:
+        conn.close()
+
+
+def test_folder_upload_rejects_depth_count_and_total_size_limits(content_api, monkeypatch):
+    client, sessions, _queued, _db_path = content_api
+    depth = client.post(
+        "/api/admin/content/uploads",
+        data={"category_id": "cat-03", "relative_paths": "a/b/c/d/guide.md", "upload_mode": "folder"},
+        files=[("files", ("guide.md", b"# folder", "text/markdown"))],
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert depth.status_code == 400
+    assert depth.json()["detail"] == "文件夹路径超过资料目录四级限制"
+
+    monkeypatch.setattr(routes_content, "_MAX_FOLDER_UPLOAD_FILES", 1)
+    count = client.post(
+        "/api/admin/content/uploads",
+        data={"category_id": "cat-03", "upload_mode": "folder", "relative_paths": ["a/one.md", "a/two.md"]},
+        files=[
+            ("files", ("one.md", b"one", "text/markdown")),
+            ("files", ("two.md", b"two", "text/markdown")),
+        ],
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert count.status_code == 413
+    assert "最多上传 1 个文件" in count.json()["detail"]
+
+    monkeypatch.setattr(routes_content, "_MAX_FOLDER_UPLOAD_FILES", 500)
+    monkeypatch.setattr(routes_content, "_MAX_FOLDER_UPLOAD_BYTES", 2)
+    total = client.post(
+        "/api/admin/content/uploads",
+        data={"category_id": "cat-03", "upload_mode": "folder", "relative_paths": "a/large.md"},
+        files=[("files", ("large.md", b"123", "text/markdown"))],
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert total.status_code == 413
+    assert "文件夹总大小" in total.json()["detail"]
+
+
 def test_delete_reviewed_content_requires_publish_and_checks_version(content_api):
     client, sessions, _queued, _db_path = content_api
     uploaded = client.post(
@@ -652,6 +711,127 @@ def test_bulk_actions_enforce_permissions_csrf_limits_and_unique_ids(content_api
         json={"version_ids": [f"version-{i}" for i in range(21)]},
         **_auth(sessions, "publisher", csrf=True),
     ).status_code == 422
+
+
+def test_rename_creates_a_new_draft_version_and_checks_filename_conflict(content_api):
+    client, sessions, _queued, db_path = content_api
+    auth = _auth(sessions, "organizer", csrf=True)
+    first = client.post(
+        "/api/admin/content/uploads",
+        data={"category_id": "cat-03"},
+        files=[("files", ("same.md", b"# first", "text/markdown"))],
+        **auth,
+    ).json()["entries"][0]
+    second = client.post(
+        "/api/admin/content/uploads",
+        data={"category_id": "cat-03"},
+        files=[("files", ("other.md", b"# second", "text/markdown"))],
+        **auth,
+    ).json()["entries"][0]
+
+    conflict = client.post(
+        f"/api/admin/content/items/{second['item_id']}/rename",
+        json={
+            "title": "第二份",
+            "original_filename": "same.md",
+            "expected_version_id": second["version_id"],
+        },
+        **auth,
+    )
+    assert conflict.status_code == 409
+    assert conflict.json()["detail"]["code"] == "content_filename_conflict"
+    assert conflict.json()["detail"]["conflict"]["item_id"] == first["item_id"]
+
+    renamed = client.post(
+        f"/api/admin/content/items/{second['item_id']}/rename",
+        json={
+            "title": "第二份",
+            "original_filename": "same.md",
+            "expected_version_id": second["version_id"],
+            "replace_conflict_item_id": first["item_id"],
+            "replace_conflict_expected_version_id": first["version_id"],
+        },
+        **auth,
+    )
+    assert renamed.status_code == 200
+    assert renamed.json()["title"] == "第二份"
+    assert renamed.json()["original_filename"] == "same.md"
+    assert renamed.json()["version_number"] == 2
+
+    conn = connect(db_path)
+    try:
+        assert conn.execute(
+            "SELECT archived_at FROM content_items WHERE id=?", (first["item_id"],)
+        ).fetchone()[0] is not None
+        assert conn.execute(
+            "SELECT title FROM content_versions WHERE id=?", (renamed.json()["version_id"],)
+        ).fetchone()[0] == "第二份"
+    finally:
+        conn.close()
+
+
+def test_update_creates_a_followup_version_and_keeps_old_object_history(content_api):
+    client, sessions, _queued, db_path = content_api
+    auth = _auth(sessions, "organizer", csrf=True)
+    uploaded = client.post(
+        "/api/admin/content/uploads",
+        data={"category_id": "cat-03"},
+        files=[("files", ("guide.md", b"# old", "text/markdown"))],
+        **auth,
+    ).json()["entries"][0]
+    updated = client.post(
+        f"/api/admin/content/items/{uploaded['item_id']}/versions",
+        data={"expected_version_id": uploaded["version_id"], "filename_mode": "new"},
+        files={"file": ("guide-v2.md", b"# new", "text/markdown")},
+        **auth,
+    )
+    assert updated.status_code == 200
+    assert updated.json()["version_number"] == 2
+    assert updated.json()["original_filename"] == "guide-v2.md"
+    assert updated.json()["lifecycle_status"] == "draft"
+
+    conn = connect(db_path)
+    try:
+        versions = conn.execute(
+            "SELECT version_number,original_filename FROM content_versions WHERE item_id=? ORDER BY version_number",
+            (uploaded["item_id"],),
+        ).fetchall()
+        assert [(row[0], row[1]) for row in versions] == [(1, "guide.md"), (2, "guide-v2.md")]
+    finally:
+        conn.close()
+
+
+def test_bulk_move_and_archive_return_item_level_results(content_api):
+    client, sessions, _queued, db_path = content_api
+    auth = _auth(sessions, "organizer", csrf=True)
+    entries = []
+    for filename in ("one.md", "two.md"):
+        entries.append(client.post(
+            "/api/admin/content/uploads",
+            data={"category_id": "cat-03"},
+            files=[("files", (filename, b"# item", "text/markdown"))],
+            **auth,
+        ).json()["entries"][0])
+    refs = [{"item_id": entry["item_id"], "expected_version_id": entry["version_id"]} for entry in entries]
+
+    moved = client.post(
+        "/api/admin/content/bulk-move",
+        json={"items": refs, "target_category_id": "cat-04"},
+        **auth,
+    )
+    assert moved.status_code == 200
+    assert (moved.json()["succeeded"], moved.json()["failed"]) == (2, 0)
+
+    archived = client.post("/api/admin/content/bulk-archive", json={"items": refs}, **auth)
+    assert archived.status_code == 200
+    assert (archived.json()["succeeded"], archived.json()["failed"]) == (2, 0)
+    conn = connect(db_path)
+    try:
+        assert conn.execute(
+            "SELECT count(*) FROM content_items WHERE category_id='cat-04' AND archived_at IS NOT NULL"
+        ).fetchone()[0] == 2
+    finally:
+        conn.close()
 
 
 def test_managed_index_job_listing_exposes_business_labels_and_filters(content_api):

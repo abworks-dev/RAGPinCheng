@@ -55,6 +55,7 @@ export const items = [
   source_origin: index === 4 ? "legacy" : "web",
   source_batch_id: null,
   is_current: true,
+  has_published_head: status === "published",
   latest_publication_status: null,
   publication_attempt_count: 0,
   publication_failure: null,
@@ -335,6 +336,9 @@ export async function installAdminRoutes(
     if (request.method() === "GET" && path.startsWith("/api/pdf/")) {
       return route.fulfill({ status: 404, contentType: "application/pdf", body: "" });
     }
+    if (request.method() === "GET" && /^\/api\/admin\/content\/versions\/[^/]+\/file$/.test(path)) {
+      return route.fulfill({ status: 200, contentType: "application/pdf", body: "%PDF synthetic fixture" });
+    }
     if (path === "/api/admin/users") return json(route, { users: permissionUsers.map((user) => ({
       id: user.user_id, employee_id: user.employee_id, real_name: user.real_name, role: user.role,
       is_active: user.is_active, created_at: 1700000000, last_login_at: 1700000000,
@@ -405,8 +409,10 @@ export async function installAdminRoutes(
       if (path === "/api/admin/content/uploads") {
         return json(route, { batch_id: "synthetic-batch", entries: [{ filename: "synthetic.pdf", item_id: "new-item", version_id: "new-version", sha256: null, status: "accepted", reason: null }] });
       }
-      if (path.endsWith("/bulk-review") || path.endsWith("/bulk-publish")) {
-        return json(route, { results: [], succeeded: 0, failed: 0 });
+      if (path.endsWith("/bulk-review") || path.endsWith("/bulk-publish") || path.endsWith("/bulk-move") || path.endsWith("/bulk-archive")) {
+        const body = request.postDataJSON() as { version_ids?: string[]; items?: Array<{ item_id: string; expected_version_id: string }> };
+        const versionIds = body.version_ids || body.items?.map((item) => item.expected_version_id) || [];
+        return json(route, { results: versionIds.map((version_id) => ({ version_id, status: "succeeded", message: null, index_job_id: null })), succeeded: versionIds.length, failed: 0 });
       }
       return json(route, items[0]);
     }

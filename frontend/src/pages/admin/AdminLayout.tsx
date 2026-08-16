@@ -20,7 +20,7 @@ type NavigationGroup = {
 
 const adminNavigation: NavigationGroup[] = [
   { label: "总览", tabs: [
-    { key: "stats", label: "概览", path: "overview" },
+    { key: "stats", label: "系统概览", path: "overview" },
     { key: "maintenance", label: "系统维护", path: "maintenance" },
   ] },
   {

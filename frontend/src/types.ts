@@ -279,6 +279,7 @@ export type ManagedContentItem = {
   source_origin: string;
   source_batch_id: string | null;
   is_current: boolean;
+  has_published_head: boolean;
   latest_publication_status: string | null;
   publication_attempt_count: number;
   publication_failure: PublicationFailure | null;
@@ -318,6 +319,7 @@ export type FolderRequest = {
 
 export type BulkManagedContentResult = {
   version_id: string;
+  item_id?: string | null;
   status: "succeeded" | "failed";
   message: string | null;
   index_job_id: string | null;

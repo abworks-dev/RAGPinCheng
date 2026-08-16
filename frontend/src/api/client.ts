@@ -53,6 +53,13 @@ export function getCsrfToken(): string | null {
 let unauthorizedHandler: (() => void) | null = null;
 let contentPermissionForbiddenHandler: (() => void) | null = null;
 
+export interface ManagedContentUploadEntry {
+  file: File;
+  relativePath: string;
+}
+
+export type ManagedContentUploadMode = "files" | "folder";
+
 export function setUnauthorizedHandler(fn: (() => void) | null) {
   unauthorizedHandler = fn;
 }
@@ -349,13 +356,20 @@ export const api = {
       `/api/admin/content/items/${encodeURIComponent(itemId)}/restore`,
       { method: "POST", body: JSON.stringify({ expected_version_id: expectedVersionId }) },
     ),
-  uploadManagedContent: async (files: File[], categoryId: string) => {
+  uploadManagedContent: async (
+    files: Array<File | ManagedContentUploadEntry>,
+    categoryId: string,
+    uploadMode: ManagedContentUploadMode = "files",
+  ) => {
     const form = new FormData();
-    files.forEach((file) => {
+    files.forEach((entry) => {
+      const file = "file" in entry ? entry.file : entry;
+      const relativePath = "file" in entry ? entry.relativePath : file.webkitRelativePath || file.name;
       form.append("files", file, file.name);
-      form.append("relative_paths", file.webkitRelativePath || file.name);
+      form.append("relative_paths", relativePath);
     });
     form.append("category_id", categoryId);
+    form.append("upload_mode", uploadMode);
     const headers: Record<string, string> = {};
     if (csrfToken) headers["X-CSRF-Token"] = csrfToken;
     const response = await fetch("/api/admin/content/uploads", {
@@ -377,6 +391,48 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ target_category_id: targetCategoryId, expected_version_id: expectedVersionId }),
     }),
+  renameManagedContent: (
+    itemId: string,
+    body: {
+      title: string;
+      original_filename: string;
+      expected_version_id: string;
+      replace_conflict_item_id?: string;
+      replace_conflict_expected_version_id?: string;
+    },
+  ) => jsonFetch<ManagedContentItem>(`/api/admin/content/items/${encodeURIComponent(itemId)}/rename`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  }),
+  updateManagedContentVersion: async (
+    itemId: string,
+    file: File,
+    expectedVersionId: string,
+    filenameMode: "old" | "new",
+    conflict?: { item_id: string; version_id: string },
+  ) => {
+    const form = new FormData();
+    form.append("file", file, file.name);
+    form.append("expected_version_id", expectedVersionId);
+    form.append("filename_mode", filenameMode);
+    if (conflict) {
+      form.append("replace_conflict_item_id", conflict.item_id);
+      form.append("replace_conflict_expected_version_id", conflict.version_id);
+    }
+    const headers: Record<string, string> = {};
+    if (csrfToken) headers["X-CSRF-Token"] = csrfToken;
+    const path = `/api/admin/content/items/${encodeURIComponent(itemId)}/versions`;
+    const response = await fetch(path, {
+      method: "POST", headers, body: form, credentials: "include",
+    });
+    notifyResponse(path, response);
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      const detail = parseErrorDetail(body);
+      throw new ApiError(response.status, body, detail.message || `${response.status} ${response.statusText}`, detail.code, detail.retryable);
+    }
+    return (await response.json()) as ManagedContentItem;
+  },
   createFolderRequest: (parentCategoryId: string, displayName: string) =>
     jsonFetch<FolderRequest>("/api/admin/content/folder-requests", {
       method: "POST", body: JSON.stringify({ parent_category_id: parentCategoryId, display_name: displayName }),
@@ -411,6 +467,18 @@ export const api = {
     jsonFetch<BulkManagedContentResponse>("/api/admin/content/bulk-publish", {
       method: "POST",
       body: JSON.stringify({ version_ids: versionIds }),
+    }),
+  bulkMoveManagedContent: (
+    items: Array<{ item_id: string; expected_version_id: string }>,
+    targetCategoryId: string,
+  ) => jsonFetch<BulkManagedContentResponse>("/api/admin/content/bulk-move", {
+    method: "POST",
+    body: JSON.stringify({ items, target_category_id: targetCategoryId }),
+  }),
+  bulkArchiveManagedContent: (items: Array<{ item_id: string; expected_version_id: string }>) =>
+    jsonFetch<BulkManagedContentResponse>("/api/admin/content/bulk-archive", {
+      method: "POST",
+      body: JSON.stringify({ items }),
     }),
   managedContentFileUrl: (versionId: string, download = false) =>
     `/api/admin/content/versions/${encodeURIComponent(versionId)}/file${download ? "?download=true" : ""}`,
