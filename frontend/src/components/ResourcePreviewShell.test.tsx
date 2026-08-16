@@ -3,6 +3,23 @@ import { describe, expect, it, vi } from "vitest";
 import { ResourcePreviewShell } from "./ResourcePreviewShell";
 
 describe("ResourcePreviewShell animation state", () => {
+  it("renders an optional back action for nested preview contexts", () => {
+    const onBack = vi.fn();
+    render(
+      <ResourcePreviewShell
+        open
+        title="资料预览"
+        onClose={vi.fn()}
+        backAction={<button type="button" onClick={onBack}>返回资料详情</button>}
+      >
+        内容
+      </ResourcePreviewShell>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "返回资料详情" }));
+    expect(onBack).toHaveBeenCalledOnce();
+  });
+
   it("applies the shared enter state to every resource preview", () => {
     const { rerender } = render(
       <ResourcePreviewShell open={false} title="资料预览" onClose={vi.fn()}>

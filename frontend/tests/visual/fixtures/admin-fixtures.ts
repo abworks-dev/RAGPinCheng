@@ -45,6 +45,7 @@ export const items = [
   category_label: index % 2 ? "04 项目资料" : "03 公司内部标准",
   category_path: index % 2 ? "04 项目资料 / 02 竣工交付 / 01 模型成果" : "03 公司内部标准 / 01 建模 / 02 机电",
   media_id: null,
+  preview_parent_id: index === 0 ? "parent-ready" : null,
   version_id: `version-${index + 1}`,
   version_number: index + 1,
   original_filename: filename,
@@ -195,6 +196,9 @@ export async function installAdminRoutes(
     if (request.method() === "GET" && path === "/api/admin/transcription/jobs") return json(route, transcriptionJobs);
     if (path === "/api/categories") return json(route, { categories: [], second_level_categories: [] });
     if (path === "/api/conversations") return json(route, { conversations: [] });
+    if (request.method() === "GET" && path.startsWith("/api/pdf/")) {
+      return route.fulfill({ status: 404, contentType: "application/pdf", body: "" });
+    }
     if (path === "/api/admin/users") return json(route, { users: permissionUsers.map((user) => ({
       id: user.user_id, employee_id: user.employee_id, real_name: user.real_name, role: user.role,
       is_active: user.is_active, created_at: 1700000000, last_login_at: 1700000000,

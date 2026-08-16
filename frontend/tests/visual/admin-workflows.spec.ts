@@ -56,6 +56,29 @@ test.describe("资料库", () => {
     expect(Math.abs(toolbarHeightAfterSelection - toolbarHeightBeforeSelection)).toBeLessThanOrEqual(1);
   });
 
+  test("document preview returns to the originating detail dialog", async ({ page }) => {
+    await openTab(page, "资料管理");
+    const titleText = "建筑信息模型交付标准（合成长文件名用于响应式检查）";
+    const title = page.getByText(titleText, { exact: true }).filter({ visible: true });
+    const item = page.viewportSize()!.width < 1024
+      ? title.locator("xpath=ancestor::li")
+      : title.locator("xpath=ancestor::tr");
+
+    await item.getByRole("button", { name: "查看", exact: true }).click();
+    const detail = page.getByRole("dialog").filter({ has: page.getByRole("button", { name: "预览文件" }) });
+    await expect(detail).toBeVisible();
+    await detail.getByRole("button", { name: "预览文件" }).click();
+
+    await expect(page.getByRole("button", { name: "返回资料详情" })).toBeVisible();
+    await expect(detail).toBeHidden();
+    await expectNoBodyOverflow(page);
+
+    await page.getByRole("button", { name: "返回资料详情" }).click();
+    await expect(detail).toBeVisible();
+    await expect(detail.getByRole("link", { name: "下载" })).toBeVisible();
+    await expectNoBodyOverflow(page);
+  });
+
   for (const scenario of ["loading", "empty", "error", "disabled"] as const) {
     test(`${scenario} state is explicit and contained`, async ({ page }) => {
       await openTab(page, "资料管理", scenario);

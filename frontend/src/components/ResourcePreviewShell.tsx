@@ -7,6 +7,7 @@ export function ResourcePreviewShell({
   title,
   subtitle,
   onClose,
+  backAction,
   toolbar,
   children,
 }: {
@@ -14,6 +15,7 @@ export function ResourcePreviewShell({
   title: string;
   subtitle?: string;
   onClose: () => void;
+  backAction?: ReactNode;
   toolbar?: ReactNode;
   children: ReactNode;
 }) {
@@ -81,6 +83,7 @@ export function ResourcePreviewShell({
         className="resource-preview-panel absolute inset-0 flex flex-col bg-card shadow-overlay md:left-auto md:w-[min(60rem,75vw)]"
       >
         <header className="flex min-h-14 shrink-0 items-center gap-3 border-b border-border px-4">
+          {backAction}
           <div className="min-w-0 flex-1">
             <h2 className="truncate text-sm font-semibold text-foreground">{title}</h2>
             {subtitle && <p className="truncate text-[11px] text-muted-foreground">{subtitle}</p>}
