@@ -406,6 +406,8 @@ class TestDeployGitSafety(unittest.TestCase):
 
     def test_source_decoupling_overlay_is_final_for_deploy_and_recovery(self):
         overlay = self.source_decoupled_compose
+        self.assertIn("env_file: !override", overlay)
+        self.assertIn("${COMPOSE_ENV_FILE:?COMPOSE_ENV_FILE is required}", overlay)
         self.assertIn("volumes: !override", overlay)
         self.assertIn("${DATA_PATH:?DATA_PATH is required}:/app/data", overlay)
         self.assertIn(
@@ -438,26 +440,33 @@ class TestDeployGitSafety(unittest.TestCase):
         )
         self.assertIn("sanitize_source_decoupled_override.py", self.linux)
         self.assertIn(compose_sanitizer_flags, self.linux)
+        self.assertIn("export COMPOSE_ENV_FILE", self.linux)
         self.assertIn("export COMPOSE_OVERRIDE", self.linux)
+        self.assertIn(
+            'docker compose -f "$COMPOSE_BASE" -f "$COMPOSE_OVERRIDE"',
+            self.linux,
+        )
+        self.assertIn(
+            "export COMPOSE_OVERRIDE SOURCE_DECOUPLED_OVERRIDE_SANITIZED",
+            self.linux,
+        )
 
         self.assertIn(
             'SOURCE_DECOUPLING_COMPLETE must be true or false', self.linux
         )
         self.assertIn(
-            'COMPOSE_ARGS+=(-f "$COMPOSE_BASE" -f "$COMPOSE_OVERRIDE")',
+            'source-decoupled Compose configuration was not sanitized',
             self.linux,
         )
         self.assertIn(
-            'COMPOSE_ARGS+=(-f "$COMPOSE_SOURCE_DECOUPLED")', self.linux
+            'COMPOSE_ARGS+=(-f "$COMPOSE_OVERRIDE")', self.linux
         )
-        self.assertLess(
-            self.linux.index('COMPOSE_ARGS+=(-f "$COMPOSE_BASE" -f "$COMPOSE_OVERRIDE")'),
-            self.linux.index('COMPOSE_ARGS+=(-f "$COMPOSE_SOURCE_DECOUPLED")'),
-        )
-        self.assertLess(
-            self.linux.index('COMPOSE_ARGS+=(-f "$COMPOSE_SOURCE_DECOUPLED")'),
-            self.linux.index('COMPOSE_ARGS+=(--env-file "$COMPOSE_ENV_FILE")'),
-        )
+        source_decoupled_branch = self.linux.split(
+            'case "${SOURCE_DECOUPLING_COMPLETE:-false}" in', 1
+        )[1].split('false|"")', 1)[0]
+        self.assertNotIn('COMPOSE_BASE', source_decoupled_branch)
+        self.assertNotIn('COMPOSE_SOURCE_DECOUPLED', source_decoupled_branch)
+        self.assertIn('../.env reference', source_decoupled_branch)
         self.assertIn(
             '"${COMPOSE[@]}" up -d --no-deps --force-recreate backend',
             self.app_backup_recovery_workflow,
