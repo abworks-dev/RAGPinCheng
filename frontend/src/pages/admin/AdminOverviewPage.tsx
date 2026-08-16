@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react";
 import { ArrowRight } from "lucide-react";
-import { api } from "../../api/client";
+import { adminOverviewApi } from "../../api/admin/overview";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Card, CardContent } from "../../components/ui/card";
 import { ErrorState } from "../../components/ui/error-state";
 import { LoadingState } from "../../components/ui/loading-state";
 import type { AdminStats, MaintenanceStatus, SystemOverview } from "../../types";
-import { formatAdminDate } from "./admin-formatters";
+import { formatAdminDate } from "../../lib/admin-formatters";
 import { ProductionRuntimeStatus } from "./ProductionRuntimeStatus";
 
 const pageHeading = (
@@ -40,14 +40,14 @@ export function AdminOverviewPage({ onOpenMaintenance }: AdminOverviewPageProps)
   useEffect(() => {
     (async () => {
       try {
-        setStats(await api.adminStats());
+        setStats(await adminOverviewApi.stats());
       } catch (e: any) {
         setError(e?.message || String(e));
       }
     })();
     (async () => {
       try {
-        setMaintenance(await api.adminMaintenance());
+        setMaintenance(await adminOverviewApi.maintenance());
       } catch (e: any) {
         setMaintenanceError(e?.message || String(e));
       }
@@ -59,7 +59,7 @@ export function AdminOverviewPage({ onOpenMaintenance }: AdminOverviewPageProps)
     setRuntimeLoading(true);
     setRuntimeError(null);
     try {
-      setRuntime(await api.adminSystemOverview());
+      setRuntime(await adminOverviewApi.systemOverview());
     } catch (e: any) {
       setRuntimeError(e?.message || String(e));
     } finally {

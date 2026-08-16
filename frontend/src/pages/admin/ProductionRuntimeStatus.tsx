@@ -4,7 +4,7 @@ import { Button } from "../../components/ui/button";
 import { IconButton } from "../../components/ui/icon-button";
 import { LoadingState } from "../../components/ui/loading-state";
 import type { AppSystemMetrics, GpuSystemMetrics, SystemOverview } from "../../types";
-import { formatAdminDate, formatBytes } from "./admin-formatters";
+import { formatAdminDate, formatBytes } from "../../lib/admin-formatters";
 
 type ProductionRuntimeStatusProps = {
   data: SystemOverview | null;

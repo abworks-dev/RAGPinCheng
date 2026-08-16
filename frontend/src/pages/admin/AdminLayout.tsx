@@ -5,69 +5,58 @@ import { IconButton } from "../../components/ui/icon-button";
 import { ThemeMenu } from "../../components/ThemeMenu";
 import { UserMenu } from "../../components/UserMenu";
 import { cn } from "../../lib/utils";
-import { AdminConversationsPage } from "./AdminConversationsPage";
-import { AdminDocumentsPage } from "./AdminDocumentsPage";
-import { AdminFeedbackPage } from "./AdminFeedbackPage";
-import { AdminMediaPage } from "./AdminMediaPage";
-import { AdminOverviewPage } from "./AdminOverviewPage";
-import { AdminUsersPage } from "./AdminUsersPage";
-import { AdminCategoriesPage } from "./AdminCategoriesPage";
-import { AdminManagedContentPage } from "./AdminManagedContentPage";
-import { AdminMaintenancePage } from "./AdminMaintenancePage";
 import { useAuth } from "../../context/AuthContext";
 import { contentWorkspaceTabs, workspaceLabel } from "../../lib/workspace-access";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Navigate, NavLink, Outlet, useLocation } from "react-router-dom";
 
 type Tab = "users" | "conversations" | "corpus" | "managed" | "categories" | "media" | "stats" | "feedback" | "maintenance";
 
+type TabDefinition = { key: Tab; label: string; path: string };
+
 type NavigationGroup = {
   label: string;
-  tabs: [Tab, string][];
+  tabs: TabDefinition[];
 };
 
 const adminNavigation: NavigationGroup[] = [
-  { label: "总览", tabs: [["stats", "概览"], ["maintenance", "系统维护"]] },
+  { label: "总览", tabs: [
+    { key: "stats", label: "概览", path: "overview" },
+    { key: "maintenance", label: "系统维护", path: "maintenance" },
+  ] },
   {
     label: "内容管理",
     tabs: [
-      ["managed", "资料管理"],
-      ["categories", "分类管理"],
-      ["media", "视频管理"],
-      ["corpus", "索引任务"],
+      { key: "managed", label: "资料管理", path: "content" },
+      { key: "categories", label: "分类管理", path: "categories" },
+      { key: "media", label: "视频管理", path: "media" },
+      { key: "corpus", label: "索引任务", path: "index" },
     ],
   },
   {
     label: "运营管理",
     tabs: [
-      ["users", "用户管理"],
-      ["conversations", "对话记录"],
-      ["feedback", "用户反馈"],
+      { key: "users", label: "用户管理", path: "users" },
+      { key: "conversations", label: "对话记录", path: "conversations" },
+      { key: "feedback", label: "用户反馈", path: "feedback" },
     ],
   },
 ];
 
+const adminTabByKey = new Map(adminNavigation.flatMap((group) => group.tabs).map((tab) => [tab.key, tab]));
+
 export function AdminLayout() {
   const { state, refreshUser } = useAuth();
-  const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
+  const location = useLocation();
   const user = state.status === "authed" ? state.user : null;
   const isAdmin = !user?.role || user.role === "admin";
   const permissions = user?.content_permissions || [];
   const navigation: NavigationGroup[] = isAdmin
     ? adminNavigation
-    : [{
+    : permissions.length > 0 ? [{
         label: "内容管理",
-        tabs: contentWorkspaceTabs(permissions).map((key) => [
-          key,
-          key === "managed" ? "资料管理" : "分类管理",
-        ] as [Tab, string]),
-      }];
+        tabs: contentWorkspaceTabs(permissions).map((key) => adminTabByKey.get(key)!),
+      }] : [];
   const tabs = navigation.flatMap((group) => group.tabs);
-  const defaultTab: Tab = isAdmin ? "stats" : "managed";
-  const requestedTab = searchParams.get("tab");
-  const tab = tabs.some(([key]) => key === requestedTab)
-    ? (requestedTab as Tab)
-    : defaultTab;
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false);
 
@@ -93,18 +82,10 @@ export function AdminLayout() {
     };
   }, [refreshUser]);
 
-  useEffect(() => {
-    if (!user) return;
-    if (tabs.length === 0) {
-      navigate("/", { replace: true });
-      return;
-    }
-    if (requestedTab && !tabs.some(([key]) => key === requestedTab)) {
-      const nextParams = new URLSearchParams(searchParams);
-      nextParams.delete("tab");
-      setSearchParams(nextParams, { replace: true });
-    }
-  }, [navigate, requestedTab, searchParams, setSearchParams, tabs, user]);
+  const currentPath = location.pathname.replace(/^\/admin\/?/, "").split("/")[0];
+  const currentTab = tabs.find((tab) => tab.path === currentPath);
+  if (user && tabs.length === 0) return <Navigate to="/" replace />;
+  if (user && currentPath && !currentTab) return <Navigate to={`/admin/${tabs[0].path}`} replace />;
 
   return (
     <div className="flex min-h-full flex-col bg-admin-background text-foreground lg:h-screen lg:flex-row lg:overflow-hidden">
@@ -157,37 +138,30 @@ export function AdminLayout() {
                   {group.label}
                 </p>
                 <div className="grid grid-cols-2 gap-1 sm:grid-cols-3 lg:flex lg:flex-col">
-                  {group.tabs.map(([key, label]) => {
-                    const active = tab === key;
-                    return (
-                      <button
+                  {group.tabs.map(({ key, label, path }) => (
+                      <NavLink
                         key={key}
-                        type="button"
-                        onClick={() => {
-                          const nextParams = new URLSearchParams(searchParams);
-                          if (key === defaultTab) nextParams.delete("tab");
-                          else nextParams.set("tab", key);
-                          setSearchParams(nextParams);
-                          setMobileNavigationOpen(false);
-                        }}
-                        aria-current={active ? "page" : undefined}
+                        to={`/admin/${path}`}
+                        end
+                        onClick={() => setMobileNavigationOpen(false)}
                         title={sidebarCollapsed ? label : undefined}
-                        className={cn(
+                        className={({ isActive }) => cn(
                           "flex h-control-md min-w-0 items-center rounded-ui-lg text-left text-ui-sm font-medium transition-colors duration-normal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                           sidebarCollapsed ? "lg:w-9 lg:justify-center lg:px-0" : "gap-3 px-3",
-                          active
+                          isActive
                             ? "bg-primary text-primary-foreground shadow-surface"
                             : "text-muted-foreground hover:bg-surface-muted hover:text-foreground",
                         )}
                       >
-                        <span
-                          className={cn("h-2 w-2 shrink-0 rounded-full", active ? "bg-primary-foreground" : "bg-border")}
-                          aria-hidden="true"
-                        />
-                        <span className={cn("min-w-0 whitespace-normal", sidebarCollapsed && "lg:hidden")}>{label}</span>
-                      </button>
-                    );
-                  })}
+                        {({ isActive }) => <>
+                          <span
+                            className={cn("h-2 w-2 shrink-0 rounded-full", isActive ? "bg-primary-foreground" : "bg-border")}
+                            aria-hidden="true"
+                          />
+                          <span className={cn("min-w-0 whitespace-normal", sidebarCollapsed && "lg:hidden")}>{label}</span>
+                        </>}
+                      </NavLink>
+                  ))}
                 </div>
               </section>
             ))}
@@ -201,19 +175,7 @@ export function AdminLayout() {
 
       <main className="min-w-0 flex-1 p-4 sm:p-6 lg:overflow-y-auto lg:p-8 lg:[scrollbar-gutter:stable]">
         <div className="mx-auto max-w-7xl">
-          {tab === "users" && <AdminUsersPage />}
-          {tab === "conversations" && <AdminConversationsPage />}
-          {tab === "corpus" && <AdminDocumentsPage />}
-          {tab === "managed" && <AdminManagedContentPage />}
-          {tab === "categories" && <AdminCategoriesPage />}
-          {tab === "media" && <AdminMediaPage />}
-          {tab === "stats" && <AdminOverviewPage onOpenMaintenance={() => {
-            const nextParams = new URLSearchParams(searchParams);
-            nextParams.set("tab", "maintenance");
-            setSearchParams(nextParams);
-          }} />}
-          {tab === "feedback" && <AdminFeedbackPage />}
-          {tab === "maintenance" && <AdminMaintenancePage />}
+          <Outlet />
         </div>
       </main>
     </div>

@@ -10,7 +10,7 @@ async function openTab(page: Parameters<typeof installAdminRoutes>[0], label: st
     await expect(mobileNavigation).toBeVisible();
     await mobileNavigation.click();
   }
-  await page.getByRole("button", { name: label, exact: true }).click();
+  await page.getByRole("link", { name: label, exact: true }).click();
 }
 
 async function openRootFolder(page: Parameters<typeof installAdminRoutes>[0], folderId = "cat-company") {
@@ -134,7 +134,7 @@ test.describe("资料管理", () => {
     if (page.viewportSize()!.width < 1024) {
       await page.getByRole("button", { name: "展开管理功能" }).click();
     }
-    await page.getByRole("button", { name: "资料管理", exact: true }).click();
+    await page.getByRole("link", { name: "资料管理", exact: true }).click();
     await expect(page.getByText("待处理目录申请")).toBeVisible();
     await expect(page.getByText("审核标准", { exact: true })).toBeVisible();
     await expectNoBodyOverflow(page);
