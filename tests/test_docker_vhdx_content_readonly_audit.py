@@ -74,6 +74,8 @@ def test_quiesced_orchestrator_gates_stop_and_restores_runtime():
         "Start-Process -FilePath $desktopExecutable",
         "restore_status",
         "no_local_backup_accepted=$true",
+        "stdout_base64",
+        "FromBase64String",
     ):
         assert expected in ORCHESTRATOR
     for forbidden in (
