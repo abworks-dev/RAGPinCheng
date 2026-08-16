@@ -82,16 +82,14 @@ case "${SOURCE_DECOUPLING_COMPLETE:-false}" in
             echo "ERROR: source-decoupled Compose configuration was not sanitized"
             exit 1
         }
-        # The sanitized file is a complete normalized stack. Re-merging the
-        # base file would restore its development-only ../.env reference.
-        COMPOSE_ARGS+=(-f "$COMPOSE_OVERRIDE")
         [ -f "$COMPOSE_SOURCE_DECOUPLED" ] || {
             echo "ERROR: source-decoupled Compose overlay is missing: ${COMPOSE_SOURCE_DECOUPLED}"
             exit 1
         }
-        # Keep the final mount contract explicit at runtime. The normalized
-        # private override supplies production paths; this overlay replaces any
-        # stale /app/docs bind that survives the host Compose merge.
+        # The sanitized file is a complete normalized stack. Apply the
+        # source-decoupled overlay last so Docker receives the explicit
+        # volumes override and service-level tmpfs contract.
+        COMPOSE_ARGS+=(-f "$COMPOSE_OVERRIDE")
         COMPOSE_ARGS+=(-f "$COMPOSE_SOURCE_DECOUPLED")
         ;;
     false|"")
@@ -188,7 +186,7 @@ compose build backend 2>&1 | tail -5
 
 # ── 7. Deploy (rolling update) ────────────────────────────────────────────
 echo ">> Deploying services"
-compose up -d --no-deps backend 2>&1
+compose up -d --no-deps --force-recreate backend 2>&1
 
 # ── 8. Verify required backend media tools ────────────────────────────────
 echo ">> Verifying backend media tools"
