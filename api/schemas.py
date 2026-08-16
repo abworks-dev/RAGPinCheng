@@ -95,6 +95,39 @@ class AdminStatsResponse(BaseModel):
     messages_7d: int
 
 
+class AppSystemMetricsDTO(BaseModel):
+    status: Literal["healthy", "degraded", "unavailable"]
+    cpu_percent: float | None = Field(default=None, ge=0, le=100)
+    memory_used_bytes: int | None = Field(default=None, ge=0)
+    memory_total_bytes: int | None = Field(default=None, ge=0)
+    disk_used_bytes: int | None = Field(default=None, ge=0)
+    disk_total_bytes: int | None = Field(default=None, ge=0)
+    checked_at: int
+    error_code: str | None = None
+
+
+class GpuSystemMetricsDTO(BaseModel):
+    status: Literal["healthy", "degraded", "unavailable"]
+    model_loaded: bool | None = None
+    device_name: str | None = None
+    vram_used_bytes: int | None = Field(default=None, ge=0)
+    vram_total_bytes: int | None = Field(default=None, ge=0)
+    utilization_percent: float | None = Field(default=None, ge=0, le=100)
+    temperature_celsius: float | None = Field(default=None, ge=-50, le=150)
+    inflight_requests: int | None = Field(default=None, ge=0)
+    checked_at: int
+    data_age_seconds: int | None = Field(default=None, ge=0)
+    stale: bool = False
+    error_code: str | None = None
+
+
+class SystemOverviewResponse(BaseModel):
+    topology: Literal["shared", "separate", "unknown"]
+    checked_at: int
+    app: AppSystemMetricsDTO
+    gpu: GpuSystemMetricsDTO
+
+
 class AdminConversationSummaryDTO(BaseModel):
     id: str
     title: str

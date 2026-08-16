@@ -116,6 +116,8 @@ RELEVANCE_GATE_POLICY_VERSION = os.getenv("RELEVANCE_GATE_POLICY_VERSION", "unca
 # Remote GPU service — only used when the provider above is "remote"
 GPU_SERVICE_URL = os.getenv("GPU_SERVICE_URL", "http://127.0.0.1:8100")
 GPU_SERVICE_TOKEN = os.getenv("GPU_SERVICE_TOKEN", "")
+SYSTEM_NODE_ID = os.getenv("SYSTEM_NODE_ID", "").strip()
+GPU_SYSTEM_METRICS_TIMEOUT_SECONDS = float(os.getenv("GPU_SYSTEM_METRICS_TIMEOUT_SECONDS", "2"))
 GPU_CONNECT_TIMEOUT = int(os.getenv("GPU_CONNECT_TIMEOUT", "10"))  # seconds
 GPU_READ_TIMEOUT = int(os.getenv("GPU_READ_TIMEOUT", "60"))  # seconds
 GPU_MAX_RETRIES = int(os.getenv("GPU_MAX_RETRIES", "3"))

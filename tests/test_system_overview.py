@@ -1,0 +1,81 @@
+from __future__ import annotations
+
+from unittest.mock import Mock
+
+from api import system_overview
+
+
+def test_collect_system_overview_reports_separate_nodes(monkeypatch):
+    monkeypatch.setattr(system_overview, "SYSTEM_NODE_ID", "app-node")
+    monkeypatch.setattr(system_overview, "collect_app_metrics", lambda now: {
+        "status": "healthy",
+        "cpu_percent": 20.0,
+        "memory_used_bytes": 20,
+        "memory_total_bytes": 100,
+        "disk_used_bytes": 30,
+        "disk_total_bytes": 100,
+        "checked_at": now,
+        "error_code": None,
+    })
+    monkeypatch.setattr(system_overview, "fetch_gpu_metrics", lambda now: {
+        "status": "healthy",
+        "model_loaded": True,
+        "device_name": "test-gpu",
+        "vram_used_bytes": 40,
+        "vram_total_bytes": 100,
+        "utilization_percent": 50.0,
+        "temperature_celsius": 55.0,
+        "inflight_requests": 0,
+        "checked_at": now,
+        "data_age_seconds": 0,
+        "stale": False,
+        "error_code": None,
+        "_node_id": "gpu-node",
+    })
+
+    payload = system_overview.collect_system_overview(now=100)
+
+    assert payload["topology"] == "separate"
+    assert payload["app"]["disk_used_bytes"] == 30
+    assert payload["gpu"]["device_name"] == "test-gpu"
+    assert "_node_id" not in payload["gpu"]
+
+
+def test_collect_system_overview_reports_shared_nodes(monkeypatch):
+    monkeypatch.setattr(system_overview, "SYSTEM_NODE_ID", "same-node")
+    monkeypatch.setattr(system_overview, "collect_app_metrics", lambda now: {"status": "healthy", "checked_at": now, "error_code": None})
+    monkeypatch.setattr(system_overview, "fetch_gpu_metrics", lambda now: {"status": "degraded", "checked_at": now, "_node_id": "same-node"})
+
+    payload = system_overview.collect_system_overview(now=101)
+
+    assert payload["topology"] == "shared"
+
+
+def test_fetch_gpu_metrics_keeps_recent_snapshot_when_probe_fails(monkeypatch):
+    system_overview._LAST_GPU_SNAPSHOT = None
+    system_overview._LAST_GPU_AT = 0
+    response = Mock()
+    response.raise_for_status.return_value = None
+    response.json.return_value = {
+        "api_version": "gpu-system-metrics/1",
+        "node_id": "gpu-node",
+        "model_loaded": True,
+        "gpu_available": True,
+        "device_name": "test-gpu",
+        "vram_used_bytes": 40,
+        "vram_total_bytes": 100,
+        "utilization_percent": 50,
+        "temperature_celsius": 55,
+        "inflight_requests": 0,
+        "checked_at": 200,
+    }
+    monkeypatch.setattr(system_overview.httpx, "get", Mock(return_value=response))
+    first = system_overview.fetch_gpu_metrics(now=200)
+    monkeypatch.setattr(system_overview.httpx, "get", Mock(side_effect=system_overview.httpx.TimeoutException("timeout")))
+
+    stale = system_overview.fetch_gpu_metrics(now=210)
+
+    assert first["stale"] is False
+    assert stale["stale"] is True
+    assert stale["data_age_seconds"] == 10
+    assert stale["device_name"] == "test-gpu"

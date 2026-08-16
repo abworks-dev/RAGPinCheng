@@ -166,6 +166,39 @@ export type AdminStats = {
   messages_7d: number;
 };
 
+export type AppSystemMetrics = {
+  status: "healthy" | "degraded" | "unavailable";
+  cpu_percent: number | null;
+  memory_used_bytes: number | null;
+  memory_total_bytes: number | null;
+  disk_used_bytes: number | null;
+  disk_total_bytes: number | null;
+  checked_at: number;
+  error_code: string | null;
+};
+
+export type GpuSystemMetrics = {
+  status: "healthy" | "degraded" | "unavailable";
+  model_loaded: boolean | null;
+  device_name: string | null;
+  vram_used_bytes: number | null;
+  vram_total_bytes: number | null;
+  utilization_percent: number | null;
+  temperature_celsius: number | null;
+  inflight_requests: number | null;
+  checked_at: number;
+  data_age_seconds: number | null;
+  stale: boolean;
+  error_code: string | null;
+};
+
+export type SystemOverview = {
+  topology: "shared" | "separate" | "unknown";
+  checked_at: number;
+  app: AppSystemMetrics;
+  gpu: GpuSystemMetrics;
+};
+
 export type MaintenanceSettings = {
   conversation_cleanup_enabled: boolean;
   conversation_retention_days: number | null;

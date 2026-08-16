@@ -12,6 +12,7 @@ PORT = int(os.getenv("PORT", "8100"))
 
 # ── Auth ─────────────────────────────────────────────────────────────────────
 GPU_SERVICE_TOKEN = os.getenv("GPU_SERVICE_TOKEN", "")
+SYSTEM_NODE_ID = os.getenv("SYSTEM_NODE_ID", "").strip()
 
 # ── Models ───────────────────────────────────────────────────────────────────
 EMBED_MODEL = os.getenv("EMBED_MODEL", "BAAI/bge-m3")
