@@ -38,8 +38,12 @@ def test_vhdx_audit_is_read_only_private_and_fail_closed():
     assert "timeout-minutes: 10" in WORKFLOW
 
 
-def test_orphan_classification_requires_native_detachment_and_no_runtime_references():
-    assert "$attachmentKnown=($nativeState.status -eq 'known'" in SCRIPT
+def test_orphan_classification_requires_confirmed_detachment_and_no_runtime_references():
+    assert "$directAttachmentKnown=($nativeState.status -eq 'known'" in SCRIPT
+    assert "$corroboratedDetached=(-not $attached" in SCRIPT
+    assert "$cimState.attached -eq $false" in SCRIPT
+    assert "$exclusive -eq 'available'" in SCRIPT
+    assert "attachment_state_basis=$attachmentStateBasis" in SCRIPT
     assert "$attachmentConflict" in SCRIPT
     assert "$wslRegisteredReference" in SCRIPT
     assert "$wslRegistryStatus -ne 'known' -and $wslRuntimeActive" in SCRIPT
