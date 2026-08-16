@@ -146,9 +146,12 @@ def test_candidate_resolver_is_manual_d_drive_isolated_and_evidence_only():
     assert 'Groups["release"].Value' in promotion
     assert "$canonicalProcessOwned = (" in promotion
     assert "$legacyProcessOwned = (" in promotion
+    assert "$ownedTaskPresent = $false" in promotion
+    assert "$ownedTaskPresent = $true" in promotion
     assert "-match '(?<!\\S)-m\\s+services\\.gpu_service\\.app(?:\\s|$)'" in promotion
     assert "-match '(?<!\\S)-m\\s+gpu_service\\.app(?:\\s|$)'" in promotion
     assert "[IO.Path]::GetFullPath($ConfiguredGpuPython)" in promotion
+    assert "$ownedTaskPresent -and" in promotion
     assert "-not $canonicalProcessOwned -and" in promotion
     assert "-not $legacyProcessOwned" in promotion
     assert "function Write-PromotionDiagnostics" in promotion
