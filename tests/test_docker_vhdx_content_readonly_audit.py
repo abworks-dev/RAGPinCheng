@@ -37,6 +37,8 @@ def test_vhdx_content_audit_is_exact_read_only_and_fail_closed():
     assert "set -eu" not in SCRIPT
     assert "shellBase64" in SCRIPT
     assert "base64 -d | sh" in SCRIPT
+    assert "ignored_output_lines" in SCRIPT
+    assert "contains duplicate fields" in SCRIPT
     for forbidden in (
         "Remove-Item",
         "Optimize-VHD",
