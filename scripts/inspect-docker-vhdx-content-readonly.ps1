@@ -39,9 +39,30 @@ function Get-WslRuntimeActive {
     return [bool](@(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^(?i:wsl|wslhost|wslservice|vmmem|vmmemwsl)\.exe$' }).Count -gt 0)
 }
 
-function Invoke-HiddenWsl([string[]]$Arguments, [string]$OutputPath, [string]$ErrorPath) {
-    & wsl.exe @Arguments 1>$OutputPath 2>$ErrorPath
+function Invoke-HiddenWsl([string]$WslPath, [string[]]$Arguments, [string]$OutputPath, [string]$ErrorPath) {
+    & $WslPath @Arguments 1>$OutputPath 2>$ErrorPath
     return [int]$LASTEXITCODE
+}
+
+function Get-MountCapableWslPath {
+    $candidates=[Collections.Generic.List[string]]::new()
+    foreach ($candidate in @(
+        (Join-Path $env:ProgramFiles 'WSL\wsl.exe'),
+        (Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\wsl.exe')
+    )) {
+        if ($candidate -and (Test-Path -LiteralPath $candidate -PathType Leaf)) { $candidates.Add($candidate) }
+    }
+    $command=Get-Command wsl.exe -ErrorAction SilentlyContinue
+    if ($command -and -not $candidates.Contains($command.Source)) { $candidates.Add($command.Source) }
+    foreach ($candidate in $candidates) {
+        $help=(& $candidate --help 2>$null | Out-String)
+        $capable=$true
+        foreach ($required in @('--mount','--unmount','--vhd','--system','--name','--options')) {
+            if ($help.IndexOf($required,[StringComparison]::OrdinalIgnoreCase) -lt 0) { $capable=$false }
+        }
+        if ($capable) { return $candidate }
+    }
+    return $null
 }
 
 function Get-SevenZipPath {
@@ -57,8 +78,12 @@ function Get-SevenZipPath {
 }
 
 function Read-SevenZipAggregate([string]$SevenZipPath, [string]$Path, [string]$OutputPath, [string]$ErrorPath) {
-    & $SevenZipPath l -slt -bd -y $Path 1>$OutputPath 2>$ErrorPath
-    if ($LASTEXITCODE -ne 0) { throw 'Offline archive listing failed.' }
+    & $SevenZipPath l -tVHDX -slt -bd -y $Path 1>$OutputPath 2>$ErrorPath
+    if ($LASTEXITCODE -ne 0) {
+        $errorText=if (Test-Path -LiteralPath $ErrorPath) { Get-Content -LiteralPath $ErrorPath -Raw } else { '' }
+        $category=if ($errorText -match '(?i)access.*denied') { 'access-denied' } elseif ($errorText -match '(?i)not.*archive') { 'not-recognized' } elseif ($errorText -match '(?i)unsupported') { 'unsupported' } else { 'failed' }
+        throw "Offline archive listing unavailable: $category."
+    }
     $dockerPaths=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     $volumeRoots=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     $volumeData=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
@@ -147,6 +172,7 @@ $preHash=$null
 $mountAttempted=$false
 $caught=$null
 $sevenZipPath=Get-SevenZipPath
+$wslPath=Get-MountCapableWslPath
 
 try {
     if ($preDocker.running_services -ne 0 -or $preDocker.running_scheduled_tasks -ne 0 -or $preDocker.matching_processes -ne 0) {
@@ -160,11 +186,7 @@ try {
     $diskImages=@(Get-CimInstance -Namespace 'root/Microsoft/Windows/Storage' -ClassName MSFT_DiskImage -ErrorAction Stop | Where-Object { [string]$_.ImagePath -ieq $target.FullName })
     if (@($diskImages | Where-Object Attached).Count -gt 0) { throw 'The target disk image is already attached.' }
 
-    $wslHelp=(& wsl.exe --help 2>$null | Out-String)
-    $wslMountCapable=$true
-    foreach ($required in @('--mount','--unmount','--vhd','--system','--name','--options')) {
-        if ($wslHelp.IndexOf($required,[StringComparison]::OrdinalIgnoreCase) -lt 0) { $wslMountCapable=$false }
-    }
+    $wslMountCapable=[bool]$wslPath
     $report.capabilities=[ordered]@{ offline_sevenzip=[bool]$sevenZipPath; wsl_readonly_mount=$wslMountCapable }
     if (-not $sevenZipPath -and -not $wslMountCapable) { throw 'No approved read-only VHDX inspection capability is available.' }
 
@@ -174,14 +196,21 @@ try {
     $report.target.pre_sha256=$preHash
     $report.target.acl_sha256=$preAclHash
 
+    $values=$null
     if ($sevenZipPath) {
         $report.inspection_method='offline-sevenzip'
-        $values=Read-SevenZipAggregate $sevenZipPath $target.FullName $inspectOut $inspectErr
-        $report.mount_status='not-required'
-    } else {
+        try {
+            $values=Read-SevenZipAggregate $sevenZipPath $target.FullName $inspectOut $inspectErr
+            $report.mount_status='not-required'
+        } catch {
+            $report.offline_parser_status='failed'
+            if (-not $wslMountCapable) { throw }
+        }
+    }
+    if (-not $values) {
         $report.inspection_method='wsl-readonly-mount'
         $mountAttempted=$true
-        $mountExit=Invoke-HiddenWsl @('--mount',$target.FullName,'--vhd','--name',$mountName,'--type','ext4','--options','ro,noload') $mountOut $mountErr
+        $mountExit=Invoke-HiddenWsl $wslPath @('--mount',$target.FullName,'--vhd','--name',$mountName,'--type','ext4','--options','ro,noload') $mountOut $mountErr
         if ($mountExit -ne 0) { throw 'Read-only WSL VHD mount failed.' }
         $report.mount_status='mounted-read-only'
 
@@ -203,7 +232,7 @@ printf 'volume_count=%s\n' "$volume_count"
 printf 'volume_bytes=%s\n' "$volume_bytes"
 printf 'sensitive_markers=%s\n' "$sensitive_markers"
 '@
-        $inspectExit=Invoke-HiddenWsl @('--system','--','sh','-lc',$shell) $inspectOut $inspectErr
+        $inspectExit=Invoke-HiddenWsl $wslPath @('--system','--','sh','-lc',$shell) $inspectOut $inspectErr
         if ($inspectExit -ne 0) { throw 'Read-only aggregate inspection failed.' }
         $values=@{}
         foreach ($line in @(Get-Content -LiteralPath $inspectOut -ErrorAction Stop)) {
@@ -240,7 +269,7 @@ printf 'sensitive_markers=%s\n' "$sensitive_markers"
     if ($report.reasons -contains 'audit-not-complete') { $report.reasons=@('audit-failed-closed') }
 } finally {
     if ($mountAttempted) {
-        $unmountExit=Invoke-HiddenWsl @('--unmount',$target.FullName) $unmountOut $unmountErr
+        $unmountExit=Invoke-HiddenWsl $wslPath @('--unmount',$target.FullName) $unmountOut $unmountErr
         $report.unmount_status=if ($unmountExit -eq 0) { 'completed' } else { 'failed' }
     } else { $report.unmount_status='not-required' }
 
