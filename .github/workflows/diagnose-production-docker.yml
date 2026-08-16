@@ -39,8 +39,8 @@ jobs:
           foreach ($command in $commands) {
             $stdoutPath = Join-Path $root ($command.name + '.stdout.txt')
             $stderrPath = Join-Path $root ($command.name + '.stderr.txt')
-            $output = & docker @($command.args) 1> $stdoutPath 2> $stderrPath
-            $exitCode = $LASTEXITCODE
+            $process = Start-Process -FilePath 'docker.exe' -ArgumentList @($command.args) -Wait -PassThru -NoNewWindow -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+            $exitCode = $process.ExitCode
             $stdout = if (Test-Path $stdoutPath) { Get-Content $stdoutPath -Raw -ErrorAction SilentlyContinue } else { '' }
             $stderr = if (Test-Path $stderrPath) { Get-Content $stderrPath -Raw -ErrorAction SilentlyContinue } else { '' }
             $safeStdout = [regex]::Replace([string]$stdout, '(?i)(token|password|secret|authorization)\s*[:=]\s*[^\s]+', '$1=[REDACTED]')
