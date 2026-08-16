@@ -179,7 +179,7 @@ compose build backend 2>&1 | tail -5
 
 # ── 7. Deploy (rolling update) ────────────────────────────────────────────
 echo ">> Deploying services"
-compose up -d --no-deps backend 2>&1
+compose up -d --no-deps --force-recreate backend 2>&1
 
 # ── 8. Verify required backend media tools ────────────────────────────────
 echo ">> Verifying backend media tools"

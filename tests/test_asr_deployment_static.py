@@ -546,7 +546,9 @@ def test_backend_image_installs_and_deployment_verifies_ffmpeg_tools():
     assert "compose exec -T backend sh -lc" in deploy
     assert "command -v ffmpeg" in deploy
     assert "command -v ffprobe" in deploy
-    assert deploy.index("compose up -d --no-deps backend") < deploy.index(media_check)
+    assert deploy.index("compose up -d --no-deps --force-recreate backend") < deploy.index(
+        media_check
+    )
     assert deploy.index(media_check) < deploy.index("Waiting for backend health check")
 
 def test_dependency_proxy_is_scoped_to_dependency_preparation_and_restored():
