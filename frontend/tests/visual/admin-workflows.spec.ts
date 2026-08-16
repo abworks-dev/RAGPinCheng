@@ -179,7 +179,7 @@ test.describe("资料库", () => {
     const item = page.viewportSize()!.width < 1024 ? title.locator("xpath=ancestor::li") : title.locator("xpath=ancestor::tr");
     await item.getByRole("button", { name: "查看", exact: true }).click();
 
-    const detail = page.getByRole("dialog", { name: "建筑信息模型交付标准（合成长文件名用于响应式检查）" });
+    const detail = page.getByRole("dialog").filter({ has: page.getByRole("button", { name: "预览文件" }) });
     await expect(detail).toBeVisible();
     await detail.getByRole("button", { name: "预览文件" }).click();
     await expect(page.getByRole("button", { name: "返回资料详情" })).toBeVisible();
