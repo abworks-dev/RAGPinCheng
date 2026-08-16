@@ -105,6 +105,43 @@ def iter_file_chunked(path: Path, start: int, end: int, chunk_size: int = 1024 *
             remaining -= len(chunk)
 
 
+def stream_media_file(
+    file_path: Path,
+    mime_type: str,
+    range_header: str | None,
+    *,
+    cache_control: str = "public, max-age=86400",
+) -> Response:
+    """Build a Range-capable response for an already authorized media path."""
+    file_size = file_path.stat().st_size
+    byte_range = parse_range_header(range_header, file_size)
+
+    if byte_range is None:
+        return StreamingResponse(
+            iter_file_chunked(file_path, 0, file_size - 1),
+            media_type=mime_type,
+            headers={
+                "Accept-Ranges": "bytes",
+                "Content-Length": str(file_size),
+                "Cache-Control": cache_control,
+            },
+        )
+
+    start, end = byte_range
+    content_length = end - start + 1
+    return StreamingResponse(
+        iter_file_chunked(file_path, start, end),
+        media_type=mime_type,
+        status_code=206,
+        headers={
+            "Accept-Ranges": "bytes",
+            "Content-Range": f"bytes {start}-{end}/{file_size}",
+            "Content-Length": str(content_length),
+            "Cache-Control": cache_control,
+        },
+    )
+
+
 # ── Endpoints ────────────────────────────────────────────────────────────────
 
 
@@ -156,41 +193,10 @@ def get_media(
     if not file_path.exists() or not file_path.is_file():
         raise HTTPException(status_code=404, detail="Media file missing")
 
-    file_size = file_path.stat().st_size
-    mime_type = row["mime_type"]
-
-    range_header = request.headers.get("range")
-    try:
-        byte_range = parse_range_header(range_header, file_size)
-    except HTTPException as e:
-        # 416 needs Content-Range header set; already attached by parse_range_header
-        raise e
-
-    if byte_range is None:
-        # Full file response
-        return StreamingResponse(
-            iter_file_chunked(file_path, 0, file_size - 1),
-            media_type=mime_type,
-            headers={
-                "Accept-Ranges": "bytes",
-                "Content-Length": str(file_size),
-                "Cache-Control": "public, max-age=86400",
-            },
-        )
-
-    start, end = byte_range
-    content_length = end - start + 1
-
-    return StreamingResponse(
-        iter_file_chunked(file_path, start, end),
-        media_type=mime_type,
-        status_code=206,
-        headers={
-            "Accept-Ranges": "bytes",
-            "Content-Range": f"bytes {start}-{end}/{file_size}",
-            "Content-Length": str(content_length),
-            "Cache-Control": "public, max-age=86400",
-        },
+    return stream_media_file(
+        file_path,
+        row["mime_type"],
+        request.headers.get("range"),
     )
 
 

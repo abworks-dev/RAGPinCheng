@@ -59,6 +59,7 @@ def test_management_reads_require_admin_and_mutations_require_csrf_admin():
     )
     upload = route_for(admin_router, "/admin/media", "POST")
     delete = route_for(admin_router, "/admin/media/{media_id}", "DELETE")
+    preview = route_for(admin_router, "/admin/media/{media_id}/preview", "GET")
     assert require_admin in dependency_calls(profiles)
     assert require_admin in dependency_calls(listing)
     assert require_admin in dependency_calls(detail)
@@ -68,6 +69,7 @@ def test_management_reads_require_admin_and_mutations_require_csrf_admin():
     assert require_admin in dependency_calls(timeline)
     assert require_csrf_admin in dependency_calls(upload)
     assert require_csrf_admin in dependency_calls(delete)
+    assert require_admin in dependency_calls(preview)
 
 
 def test_failed_media_delete_removes_file_and_record_but_rejects_history(tmp_path, monkeypatch):
