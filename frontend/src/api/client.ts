@@ -29,6 +29,8 @@ import type {
   BulkManagedContentResponse,
   ManagedIndexJobList,
   ManagedUploadResponse,
+  ManagedUploadTask,
+  ManagedUploadTaskList,
   MediaTranscript,
   TranscriptionJob,
   TranscriptionProfile,
@@ -76,6 +78,11 @@ export type ManagedContentDownload = {
 };
 
 export type ManagedContentUploadMode = "files" | "folder";
+export type ManagedUploadProgress = {
+  phase: "uploading" | "processing";
+  loaded: number;
+  total: number;
+};
 
 export function setUnauthorizedHandler(fn: (() => void) | null) {
   unauthorizedHandler = fn;
@@ -473,6 +480,7 @@ export const api = {
     files: Array<File | ManagedContentUploadEntry>,
     categoryId: string,
     uploadMode: ManagedContentUploadMode = "files",
+    onProgress?: (progress: ManagedUploadProgress) => void,
   ) => {
     const form = new FormData();
     files.forEach((entry) => {
@@ -483,22 +491,63 @@ export const api = {
     });
     form.append("category_id", categoryId);
     form.append("upload_mode", uploadMode);
-    const headers: Record<string, string> = {};
-    if (csrfToken) headers["X-CSRF-Token"] = csrfToken;
-    const response = await fetch("/api/admin/content/uploads", {
-      method: "POST",
-      headers,
-      body: form,
-      credentials: "include",
-    });
-    notifyResponse("/api/admin/content/uploads", response);
-    if (!response.ok) {
-      const body = await response.text().catch(() => "");
-      const detail = parseErrorDetail(body);
-      throw new ApiError(response.status, body, detail.message || `${response.status} ${response.statusText}`, detail.code, detail.retryable);
+    if (!onProgress) {
+      const headers: Record<string, string> = {};
+      if (csrfToken) headers["X-CSRF-Token"] = csrfToken;
+      const response = await fetch("/api/admin/content/uploads", {
+        method: "POST", headers, body: form, credentials: "include",
+      });
+      notifyResponse("/api/admin/content/uploads", response);
+      if (!response.ok) {
+        const body = await response.text().catch(() => "");
+        const detail = parseErrorDetail(body);
+        throw new ApiError(response.status, body, detail.message || `${response.status} ${response.statusText}`, detail.code, detail.retryable);
+      }
+      return (await response.json()) as ManagedUploadResponse;
     }
-    return (await response.json()) as ManagedUploadResponse;
+    return await new Promise<ManagedUploadResponse>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", "/api/admin/content/uploads");
+      xhr.withCredentials = true;
+      if (csrfToken) xhr.setRequestHeader("X-CSRF-Token", csrfToken);
+      xhr.upload.onprogress = (event) => {
+        onProgress({ phase: "uploading", loaded: event.loaded, total: event.total || 0 });
+      };
+      xhr.onerror = () => reject(new ApiError(0, "", "网络连接失败，请稍后重试", null, true));
+      xhr.onabort = () => reject(new ApiError(0, "", "上传已中断", null, true));
+      xhr.onload = () => {
+        const body = xhr.responseText || "";
+        onProgress({ phase: "processing", loaded: xhr.status >= 200 && xhr.status < 300 ? 1 : 0, total: 1 });
+        if (xhr.status === 401 && unauthorizedHandler) {
+          try { unauthorizedHandler(); } catch { /* noop */ }
+        }
+        if (xhr.status === 403 && contentPermissionForbiddenHandler) {
+          try { contentPermissionForbiddenHandler(); } catch { /* noop */ }
+        }
+        if (xhr.status < 200 || xhr.status >= 300) {
+          const detail = parseErrorDetail(body);
+          reject(new ApiError(xhr.status, body, detail.message || `${xhr.status} ${xhr.statusText}`, detail.code, detail.retryable));
+          return;
+        }
+        try {
+          resolve(JSON.parse(body) as ManagedUploadResponse);
+        } catch {
+          reject(new ApiError(xhr.status, body, "服务器返回了无效响应", null, true));
+        }
+      };
+      xhr.send(form);
+    });
   },
+  managedUploadTasks: (params?: { status?: string; query?: string; limit?: number; offset?: number }) => {
+    const search = new URLSearchParams();
+    if (params?.status) search.set("status", params.status);
+    if (params?.query) search.set("query", params.query);
+    if (params?.limit != null) search.set("limit", String(params.limit));
+    if (params?.offset != null) search.set("offset", String(params.offset));
+    return jsonFetch<ManagedUploadTaskList>(`/api/admin/content/upload-tasks?${search}`);
+  },
+  managedUploadTask: (batchId: string) =>
+    jsonFetch<ManagedUploadTask>(`/api/admin/content/upload-tasks/${encodeURIComponent(batchId)}`),
   moveManagedContent: (itemId: string, targetCategoryId: string, expectedVersionId: string) =>
     jsonFetch<ManagedContentItem>(`/api/admin/content/items/${encodeURIComponent(itemId)}/move`, {
       method: "POST",

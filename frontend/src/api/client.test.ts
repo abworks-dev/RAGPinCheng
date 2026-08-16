@@ -268,6 +268,27 @@ describe("api client", () => {
     expect(form.get("upload_mode")).toBe("files");
   });
 
+  it("serializes managed upload task filters and loads task details", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ tasks: [], total: 0, status_counts: {} }))
+      .mockResolvedValueOnce(jsonResponse({ batch_id: "batch/1", entries: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.managedUploadTasks({ status: "failed", query: "规范", limit: 10, offset: 20 });
+    await api.managedUploadTask("batch/1");
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/admin/content/upload-tasks?status=failed&query=%E8%A7%84%E8%8C%83&limit=10&offset=20",
+      expect.objectContaining({ credentials: "include", headers: {} }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/admin/content/upload-tasks/batch%2F1",
+      expect.objectContaining({ credentials: "include", headers: {} }),
+    );
+  });
+
   it("preserves safe structured error code, message and retry policy", async () => {
     vi.stubGlobal(
       "fetch",

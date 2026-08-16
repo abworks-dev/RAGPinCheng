@@ -535,6 +535,83 @@ def test_folder_upload_rejects_depth_count_and_total_size_limits(content_api, mo
     assert "文件夹总大小" in total.json()["detail"]
 
 
+def test_upload_task_history_persists_partial_results_and_scopes_users(content_api):
+    client, sessions, _queued, db_path = content_api
+    partial = client.post(
+        "/api/admin/content/uploads",
+        data={"category_id": "cat-03"},
+        files=[
+            ("files", ("duplicate.md", b"# first", "text/markdown")),
+            ("files", ("duplicate.md", b"# second", "text/markdown")),
+        ],
+        **_auth(sessions, "organizer", csrf=True),
+    )
+    assert partial.status_code == 200
+    assert [entry["status"] for entry in partial.json()["entries"]] == ["accepted", "skipped"]
+    partial_batch_id = partial.json()["batch_id"]
+
+    failed = client.post(
+        "/api/admin/content/uploads",
+        data={"category_id": "cat-04"},
+        files=[("files", ("unsupported.mp4", b"synthetic", "video/mp4"))],
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert failed.status_code == 200
+    assert failed.json()["entries"][0]["status"] == "skipped"
+    failed_batch_id = failed.json()["batch_id"]
+
+    assert client.get("/api/admin/content/upload-tasks", **_auth(sessions, "plain")).status_code == 403
+    organizer_tasks = client.get(
+        "/api/admin/content/upload-tasks", **_auth(sessions, "organizer")
+    )
+    assert organizer_tasks.status_code == 200
+    assert [task["batch_id"] for task in organizer_tasks.json()["tasks"]] == [partial_batch_id]
+    assert organizer_tasks.json()["tasks"][0]["status"] == "partial_success"
+    assert organizer_tasks.json()["status_counts"] == {"partial_success": 1}
+    assert client.get(
+        f"/api/admin/content/upload-tasks/{failed_batch_id}", **_auth(sessions, "organizer")
+    ).status_code == 404
+
+    admin_tasks = client.get(
+        "/api/admin/content/upload-tasks?limit=1&offset=0", **_auth(sessions, "admin")
+    )
+    assert admin_tasks.status_code == 200
+    assert admin_tasks.json()["total"] == 2
+    assert admin_tasks.json()["tasks"][0]["batch_id"] == failed_batch_id
+    assert admin_tasks.json()["status_counts"] == {"failed": 1, "partial_success": 1}
+    filtered = client.get(
+        "/api/admin/content/upload-tasks?status=failed&query=unsupported.mp4",
+        **_auth(sessions, "admin"),
+    )
+    assert filtered.status_code == 200
+    assert [task["batch_id"] for task in filtered.json()["tasks"]] == [failed_batch_id]
+
+    detail = client.get(
+        f"/api/admin/content/upload-tasks/{partial_batch_id}", **_auth(sessions, "admin")
+    )
+    assert detail.status_code == 200
+    assert detail.json()["target_path"] == "03 公司内部标准"
+    assert detail.json()["accepted_files"] == 1
+    assert detail.json()["skipped_files"] == 1
+    assert [entry["status"] for entry in detail.json()["entries"]] == ["accepted", "skipped"]
+    assert detail.json()["entries"][1]["reason"] == "当前目录下已存在同名资料"
+
+    conn = connect(db_path)
+    try:
+        batch = conn.execute(
+            "SELECT upload_mode,target_category_id,total_files,accepted_files,skipped_files,total_bytes "
+            "FROM upload_batches WHERE id=?",
+            (partial_batch_id,),
+        ).fetchone()
+        assert tuple(batch[:5]) == ("files", "cat-03", 2, 1, 1)
+        assert batch[5] == len(b"# first") + len(b"# second")
+        assert conn.execute(
+            "SELECT count(*) FROM upload_batch_entries WHERE batch_id=?", (partial_batch_id,)
+        ).fetchone()[0] == 2
+    finally:
+        conn.close()
+
+
 def test_delete_reviewed_content_requires_publish_and_checks_version(content_api):
     client, sessions, _queued, _db_path = content_api
     uploaded = client.post(

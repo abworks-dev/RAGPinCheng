@@ -368,6 +368,42 @@ class ManagedUploadResponse(BaseModel):
     entries: list[ManagedUploadEntryDTO]
 
 
+class ManagedUploadTaskEntryDTO(BaseModel):
+    sequence: int
+    filename: str
+    relative_path: str | None = None
+    size_bytes: int
+    status: Literal["accepted", "skipped"]
+    reason: str | None = None
+    item_id: str | None = None
+    version_id: str | None = None
+    created_at: int
+
+
+class ManagedUploadTaskDTO(BaseModel):
+    batch_id: str
+    upload_mode: Literal["files", "folder"]
+    status: Literal["processing", "completed", "partial_success", "failed"]
+    target_category_id: str | None = None
+    target_path: str
+    total_files: int
+    accepted_files: int
+    skipped_files: int
+    total_bytes: int
+    total_uploaded_bytes: int
+    created_by_name: str
+    created_at: int
+    updated_at: int
+    error_summary: str | None = None
+    entries: list[ManagedUploadTaskEntryDTO] | None = None
+
+
+class ManagedUploadTaskListResponse(BaseModel):
+    tasks: list[ManagedUploadTaskDTO]
+    total: int
+    status_counts: dict[str, int]
+
+
 class PublicationFailureDTO(BaseModel):
     code: str
     message: str
