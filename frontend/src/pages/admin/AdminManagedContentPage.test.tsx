@@ -171,7 +171,7 @@ describe("AdminManagedContentPage", () => {
     render(<AdminManagedContentPage />);
     await screen.findAllByText("建模标准");
     fireEvent.click(screen.getAllByRole("button", { name: "查看" })[0]);
-    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    fireEvent.click(screen.getByRole("button", { name: "预览文件" }));
     expect(mocks.openPreview).toHaveBeenCalledWith("parent-1", "建模标准", "pdf", 1);
   });
 
