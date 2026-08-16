@@ -149,6 +149,14 @@ const transcriptionJobs = [{
   result_version_id: null, created_at: 1700000400, started_at: 1700000401, finished_at: 1700000402, updated_at: 1700000402,
 }];
 
+const transcriptVersions = [{
+  version_id: "11111111-1111-4111-8111-111111111111", media_id: "media-ready", source: "automatic",
+  profile_id: "synthetic-profile", provider_key: "synthetic-asr", model_id: "synthetic-model", model_revision: "r1",
+  review_status: "awaiting_review", reviewed_by: null, reviewed_at: null, review_note: null,
+  publication_status: "not_published", published_at: null, supersedes_version_id: null,
+  markdown_sha256: "a".repeat(64), created_at: 1700000200, updated_at: 1700000200, is_current: false,
+}];
+
 const permissionUsers = [
   { user_id: 9001, employee_id: "TEST-ADMIN", real_name: "合成管理员", role: "admin", is_active: true, permissions: [] },
   { user_id: 9002, employee_id: "TEST-EDITOR", real_name: "合成资料员", role: "user", is_active: true, permissions: ["organize", "review"] },
@@ -217,7 +225,11 @@ export async function installAdminRoutes(
     if (request.method() === "GET" && path === "/api/admin/media") return json(route, mediaAssets);
     if (request.method() === "GET" && path === "/api/admin/transcription/profiles") return json(route, transcriptionProfiles);
     if (request.method() === "GET" && path === "/api/admin/transcription/jobs") return json(route, transcriptionJobs);
+    if (request.method() === "GET" && path === "/api/admin/transcription/media/media-ready/versions") return json(route, transcriptVersions);
     if (request.method() === "GET" && /^\/api\/admin\/transcription\/media\/[^/]+\/versions$/.test(path)) return json(route, []);
+    if (request.method() === "GET" && path === "/api/admin/transcription/versions/11111111-1111-4111-8111-111111111111/markdown") {
+      return json(route, { version_id: transcriptVersions[0].version_id, markdown: "# 项目交付培训\n\n说话人 1 00:00:00\n培训开始\n", markdown_sha256: transcriptVersions[0].markdown_sha256 });
+    }
     if (path === "/api/categories") return json(route, { categories: [], second_level_categories: [] });
     if (path === "/api/conversations") return json(route, { conversations: [] });
     if (path === "/api/admin/users") return json(route, { users: permissionUsers.map((user) => ({

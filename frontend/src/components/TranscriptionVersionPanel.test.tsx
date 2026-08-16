@@ -55,8 +55,9 @@ describe("TranscriptionVersionPanel", () => {
   it("submits review note and keeps publish disabled before approval", async () => {
     render(<TranscriptionVersionPanel mediaId="media-1" />);
     fireEvent.click(screen.getByRole("button", { name: "审阅转录版本" }));
-    await screen.findByText("待审核");
-    expect(screen.getByRole("button", { name: "发布" })).toBeDisabled();
+    await screen.findByRole("textbox", { name: `审核备注 ${awaitingVersion.version_id}` });
+    expect(screen.getByRole("button", { name: "发布到知识库" })).toBeDisabled();
+    expect(screen.getByText("审核通过后可发布")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText(`审核备注 ${awaitingVersion.version_id}`), { target: { value: "已校对" } });
     fireEvent.click(screen.getByRole("button", { name: "审核通过" }));
     await waitFor(() => expect(mocks.reviewTranscriptVersion).toHaveBeenCalledWith(awaitingVersion.version_id, true, "已校对"));
@@ -65,7 +66,7 @@ describe("TranscriptionVersionPanel", () => {
   it("rejects a version with the immutable review note", async () => {
     render(<TranscriptionVersionPanel mediaId="media-1" />);
     fireEvent.click(screen.getByRole("button", { name: "审阅转录版本" }));
-    await screen.findByText("待审核");
+    await screen.findByRole("textbox", { name: `审核备注 ${awaitingVersion.version_id}` });
     fireEvent.change(screen.getByLabelText(`审核备注 ${awaitingVersion.version_id}`), { target: { value: "时间轴需修正" } });
     fireEvent.click(screen.getByRole("button", { name: "拒绝" }));
     await waitFor(() => expect(mocks.reviewTranscriptVersion).toHaveBeenCalledWith(awaitingVersion.version_id, false, "时间轴需修正"));
@@ -75,14 +76,14 @@ describe("TranscriptionVersionPanel", () => {
     mocks.listTranscriptVersions.mockResolvedValue([{ ...approvedVersion, source: "manual", profile_id: null, provider_key: null, model_id: null, model_revision: null }]);
     render(<TranscriptionVersionPanel mediaId="media-1" />);
     fireEvent.click(screen.getByRole("button", { name: "审阅转录版本" }));
-    expect(await screen.findByRole("button", { name: "发布" })).toBeDisabled();
+    expect(await screen.findByRole("button", { name: "发布到知识库" })).toBeDisabled();
   });
 
   it("publishes only an approved version", async () => {
     mocks.listTranscriptVersions.mockResolvedValue([approvedVersion]);
     render(<TranscriptionVersionPanel mediaId="media-1" />);
     fireEvent.click(screen.getByRole("button", { name: "审阅转录版本" }));
-    const publish = await screen.findByRole("button", { name: "发布" });
+    const publish = await screen.findByRole("button", { name: "发布到知识库" });
     expect(publish).toBeEnabled();
     fireEvent.click(publish);
     await waitFor(() => expect(mocks.publishTranscriptVersion).toHaveBeenCalledWith(approvedVersion.version_id));
