@@ -31,6 +31,7 @@ type PrefetchablePdfDocument = {
 
 const MIN_SCALE = 0.5;
 const MAX_SCALE = 3;
+const MIN_FIT_SCALE = 0.1;
 const ZOOM_STEP = 0.1;
 const VIEWPORT_PADDING = 32;
 const PREFETCH_RADIUS = 2;
@@ -65,7 +66,7 @@ export function calculatePdfScale(
   const widthScale = Math.max(0, viewport.width - VIEWPORT_PADDING) / page.width;
   const heightScale = Math.max(0, viewport.height - VIEWPORT_PADDING) / page.height;
   const nextScale = mode === "fit-width" ? widthScale : Math.min(widthScale, heightScale);
-  return Math.min(MAX_SCALE, Math.max(MIN_SCALE, nextScale));
+  return Math.min(MAX_SCALE, Math.max(MIN_FIT_SCALE, nextScale));
 }
 
 export function shouldZoomPdfWheel(
@@ -81,6 +82,7 @@ export function shouldZoomPdfWheel(
 
 export function calculateWheelZoom(currentScale: number, deltaY: number): number {
   if (!deltaY) return currentScale;
+  if (deltaY > 0 && currentScale <= MIN_SCALE) return currentScale;
   const magnitude = Math.min(0.15, Math.max(0.02, Math.abs(deltaY) * 0.001));
   const delta = deltaY < 0 ? magnitude : -magnitude;
   return Math.min(MAX_SCALE, Math.max(MIN_SCALE, Number((currentScale + delta).toFixed(2))));
@@ -189,8 +191,25 @@ export function PdfPreview() {
 
   useEffect(() => {
     if (!isPdf || zoomMode === "custom") return;
-    setScale(calculatePdfScale(zoomMode, viewportSize, pageSize));
+    const viewport = viewportRef.current;
+    const currentViewportSize = viewport
+      ? { width: viewport.clientWidth, height: viewport.clientHeight }
+      : viewportSize;
+    setScale(calculatePdfScale(zoomMode, currentViewportSize, pageSize));
   }, [isPdf, pageSize, viewportSize, zoomMode]);
+
+  useEffect(() => {
+    if (!isPdf || zoomMode === "custom") return;
+    const frame = requestAnimationFrame(() => {
+      const viewport = viewportRef.current;
+      if (!viewport) return;
+      viewport.scrollLeft = Math.max(0, (viewport.scrollWidth - viewport.clientWidth) / 2);
+      viewport.scrollTop = zoomMode === "fit-page"
+        ? Math.max(0, (viewport.scrollHeight - viewport.clientHeight) / 2)
+        : 0;
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [isPdf, scale, state.pageNumber, zoomMode]);
 
   useEffect(() => {
     const onPreviewOpen = (event: Event) => {
@@ -239,8 +258,12 @@ export function PdfPreview() {
   }, []);
 
   function setPresetZoom(mode: Exclude<ZoomMode, "custom">) {
+    const viewport = viewportRef.current;
+    const currentViewportSize = viewport
+      ? { width: viewport.clientWidth, height: viewport.clientHeight }
+      : viewportSize;
     setZoomMode(mode);
-    setScale(calculatePdfScale(mode, viewportSize, pageSize));
+    setScale(calculatePdfScale(mode, currentViewportSize, pageSize));
   }
 
   function changeZoom(delta: number) {

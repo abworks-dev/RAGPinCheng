@@ -96,7 +96,8 @@ describe("calculatePdfScale", () => {
 
   it("fits width independently and keeps supported bounds", () => {
     expect(calculatePdfScale("fit-width", { width: 632, height: 400 }, { width: 600, height: 800 })).toBe(1);
-    expect(calculatePdfScale("fit-width", { width: 100, height: 100 }, { width: 600, height: 800 })).toBe(0.5);
+    expect(calculatePdfScale("fit-width", { width: 100, height: 100 }, { width: 600, height: 800 })).toBeCloseTo(0.1133);
+    expect(calculatePdfScale("fit-page", { width: 332, height: 232 }, { width: 1200, height: 1600 })).toBe(0.125);
     expect(calculatePdfScale("actual", { width: 100, height: 100 }, { width: 600, height: 800 })).toBe(1);
   });
 });
@@ -118,6 +119,8 @@ describe("PDF wheel zoom helpers", () => {
     expect(calculateWheelZoom(1, -100)).toBe(1.1);
     expect(calculateWheelZoom(2.95, -100)).toBe(3);
     expect(calculateWheelZoom(0.52, 100)).toBe(0.5);
+    expect(calculateWheelZoom(0.3, 100)).toBe(0.3);
+    expect(calculateWheelZoom(0.3, -100)).toBe(0.5);
     expect(calculateZoomedScroll(200, 100, 1, 1.5)).toBe(350);
   });
 });
@@ -140,6 +143,7 @@ describe("PdfPreview interactions", () => {
       callback(0);
       return 1;
     });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
     pdfMocks.getOperatorList.mockReset().mockResolvedValue({});
     pdfMocks.getPage.mockReset().mockImplementation(async () => ({
       getOperatorList: pdfMocks.getOperatorList,
@@ -153,6 +157,33 @@ describe("PdfPreview interactions", () => {
     fireEvent.click(screen.getByRole("button", { name: "放大" }));
     expect(screen.getByRole("combobox", { name: "缩放模式" })).toHaveValue("custom");
     expect(screen.getByText("110%")).toBeInTheDocument();
+  });
+
+  it("applies fit-page, fit-width, and actual-size presets to the rendered page", () => {
+    const clientWidth = vi.spyOn(Element.prototype, "clientWidth", "get").mockReturnValue(332);
+    const clientHeight = vi.spyOn(Element.prototype, "clientHeight", "get").mockReturnValue(232);
+    renderPreview();
+    clientWidth.mockRestore();
+    clientHeight.mockRestore();
+
+    const viewport = screen.getByRole("region", { name: "PDF 页面" });
+    Object.defineProperties(viewport, {
+      clientWidth: { configurable: true, value: 332 },
+      clientHeight: { configurable: true, value: 232 },
+      scrollWidth: { configurable: true, value: 1200 },
+      scrollHeight: { configurable: true, value: 1600 },
+    });
+
+    fireEvent.change(screen.getByRole("combobox", { name: "缩放模式" }), { target: { value: "fit-width" } });
+    expect(screen.getByLabelText("渲染缩放")).toHaveTextContent("0.5");
+    expect(viewport.scrollTop).toBe(0);
+
+    fireEvent.change(screen.getByRole("combobox", { name: "缩放模式" }), { target: { value: "fit-page" } });
+    expect(screen.getByLabelText("渲染缩放")).toHaveTextContent("0.25");
+
+    fireEvent.change(screen.getByRole("combobox", { name: "缩放模式" }), { target: { value: "actual" } });
+    expect(screen.getByLabelText("渲染缩放")).toHaveTextContent("1");
+    expect(viewport.scrollTop).toBe(0);
   });
 
   it("tracks and clears the managed content return target", () => {
