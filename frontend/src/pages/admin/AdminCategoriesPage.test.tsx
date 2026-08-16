@@ -62,7 +62,10 @@ describe("AdminCategoriesPage", () => {
     render(<AdminCategoriesPage />);
     const name = await screen.findByLabelText("显示名称");
     fireEvent.change(name, { target: { value: "行业规范" } });
-    fireEvent.click(screen.getByRole("button", { name: "保存修改" }));
+    await waitFor(() => expect(name).toHaveValue("行业规范"));
+    const save = screen.getByRole("button", { name: "保存修改" });
+    await waitFor(() => expect(save).toBeEnabled());
+    fireEvent.click(save);
     await waitFor(() => expect(mocks.update).toHaveBeenCalledWith("cat-01", {
       display_code: "01",
       display_name: "行业规范",
