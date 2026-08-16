@@ -439,6 +439,11 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertIn("sanitize_source_decoupled_override.py", self.linux)
         self.assertIn(compose_sanitizer_flags, self.linux)
         self.assertIn("export COMPOSE_OVERRIDE", self.linux)
+        self.assertIn('COMPOSE_ARGS+=(-f "$COMPOSE_SOURCE_DECOUPLED")', self.linux)
+        self.assertIn(
+            "source-decoupled Compose overlay is missing",
+            self.linux,
+        )
 
         self.assertIn(
             'SOURCE_DECOUPLING_COMPLETE must be true or false', self.linux

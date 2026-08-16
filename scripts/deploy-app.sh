@@ -76,6 +76,14 @@ COMPOSE_ARGS=(
 case "${SOURCE_DECOUPLING_COMPLETE:-false}" in
     true)
         COMPOSE_ARGS+=(-f "$COMPOSE_OVERRIDE")
+        [ -f "$COMPOSE_SOURCE_DECOUPLED" ] || {
+            echo "ERROR: source-decoupled Compose overlay is missing: ${COMPOSE_SOURCE_DECOUPLED}"
+            exit 1
+        }
+        # Keep the final mount contract explicit at runtime. The normalized
+        # private override supplies production paths; this overlay replaces any
+        # stale /app/docs bind that may survive an older Compose merge.
+        COMPOSE_ARGS+=(-f "$COMPOSE_SOURCE_DECOUPLED")
         ;;
     false|"")
         COMPOSE_ARGS+=(-f "$COMPOSE_BASE" -f "$COMPOSE_OVERRIDE")
