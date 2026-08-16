@@ -42,8 +42,8 @@ test.describe("资料管理", () => {
     const longTitle = "建筑信息模型交付标准（合成长文件名用于响应式检查）";
     const title = page.getByText(longTitle, { exact: true }).filter({ visible: true });
     const item = page.viewportSize()!.width < 1024 ? title.locator("xpath=ancestor::li") : title.locator("xpath=ancestor::tr");
-    for (const action of ["查看", "移动", "下载", "重命名", "更新", "删除"]) {
-      await expect(item.getByRole("button", { name: `${action}“${longTitle}”`, exact: true })).toBeVisible();
+    for (const actionName of [`查看“${longTitle}”的详细信息`, `查看“${longTitle}”`, `移动“${longTitle}”`, `下载“${longTitle}”`, `重命名“${longTitle}”`, `更新“${longTitle}”`, `删除“${longTitle}”`]) {
+      await expect(item.getByRole("button", { name: actionName, exact: true })).toBeVisible();
     }
     const deleteButton = item.getByRole("button", { name: `删除“${longTitle}”`, exact: true });
     await deleteButton.scrollIntoViewIfNeeded();
@@ -276,7 +276,7 @@ test.describe("资料管理", () => {
     await page.locator("select").filter({ has: page.locator('option[value="publication_failed"]') }).selectOption("publication_failed");
     const failedTitle = page.getByText("培训资料发布演练", { exact: true }).filter({ visible: true });
     const failedItem = page.viewportSize()!.width < 1024 ? failedTitle.locator("xpath=ancestor::li") : failedTitle.locator("xpath=ancestor::tr");
-    await failedItem.getByRole("button", { name: "查看“培训资料发布演练”" }).click();
+    await failedItem.getByRole("button", { name: "查看“培训资料发布演练”的详细信息" }).click();
     const detail = page.getByRole("dialog", { name: "培训资料发布演练" });
     await expect(detail).toContainText("PDF 需要密码才能解析。");
     await expect(detail).toContainText("请上传已解除密码保护的 PDF。");
@@ -293,7 +293,13 @@ test.describe("资料管理", () => {
     await openRootFolder(page);
     const title = page.getByText("建筑信息模型交付标准（合成长文件名用于响应式检查）", { exact: true }).filter({ visible: true });
     const item = page.viewportSize()!.width < 1024 ? title.locator("xpath=ancestor::li") : title.locator("xpath=ancestor::tr");
-    await item.getByRole("button", { name: `查看“建筑信息模型交付标准（合成长文件名用于响应式检查）”`, exact: true }).click();
+    const preview = item.getByRole("button", { name: `查看“建筑信息模型交付标准（合成长文件名用于响应式检查）”`, exact: true });
+    await preview.click();
+    await expect(page.getByRole("button", { name: "关闭预览" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "返回资料详情" })).toHaveCount(0);
+    await page.getByRole("button", { name: "关闭预览" }).click();
+
+    await item.getByRole("button", { name: `查看“建筑信息模型交付标准（合成长文件名用于响应式检查）”的详细信息`, exact: true }).click();
 
     const detail = page.getByRole("dialog").filter({ has: page.getByRole("button", { name: "预览文件" }) });
     await expect(detail).toBeVisible();
