@@ -138,10 +138,15 @@ test.describe("资料管理", () => {
     await page.getByRole("button", { name: "批量操作" }).click();
     const downloadPromise = page.waitForEvent("download");
     await page.getByRole("menuitem", { name: "批量下载" }).click();
-    await expect(page.getByText(/正在打包 2 份资料，请稍候/)).toBeVisible();
+    const packagingToast = page.locator("[data-sonner-toast]").filter({ hasText: "正在打包 2 份资料，请稍候" });
+    await expect(packagingToast).toBeVisible();
+    const toastBox = await packagingToast.boundingBox();
+    expect(toastBox).not.toBeNull();
+    expect(toastBox!.y).toBeLessThan(120);
+    expect(toastBox!.x + toastBox!.width).toBeGreaterThanOrEqual(page.viewportSize()!.width - 40);
     await expect(page.getByRole("button", { name: "批量操作" })).toBeDisabled();
     expect((await downloadPromise).suggestedFilename()).toBe("managed-content.zip");
-    await expect(page.getByText(/正在打包 2 份资料，请稍候/)).toHaveCount(0);
+    await expect(page.getByText("已打包 2 份资料并开始下载")).toBeVisible();
     await expectNoBodyOverflow(page);
   });
 
