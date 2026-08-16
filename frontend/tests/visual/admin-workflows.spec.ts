@@ -305,27 +305,40 @@ test.describe("索引任务", () => {
 
 test.describe("分类管理", () => {
   test("normal layout keeps form and category actions discoverable", async ({ page }) => {
-    await openTab(page, "分类管理");
+    await openTab(page, "分类管理", "normal", "admin", { includeChildFolder: true });
     await expect(page.getByRole("heading", { name: "分类管理" })).toBeVisible();
     await expect(page.getByText("资料权限")).toHaveCount(0);
     await expectNoBodyOverflow(page);
-    const createButton = page.getByRole("button", { name: "新增" });
+    const createButton = page.getByRole("button", { name: "新增分类", exact: true });
     await createButton.scrollIntoViewIfNeeded();
     await expectInViewport(createButton);
-    if (page.viewportSize()!.width === 390) {
+    if (page.viewportSize()!.width < 1024) {
       await expectTouchTarget(createButton);
-      const categoryToggle = page.getByRole("checkbox", { name: "公司内部标准启用" });
+      await page.getByRole("treeitem", { name: /公司内部标准/ }).click();
+      const editor = page.getByRole("dialog", { name: "公司内部标准" });
+      await expect(editor).toBeVisible();
+      const categoryToggle = editor.getByRole("checkbox", { name: "公司内部标准启用" });
       await categoryToggle.scrollIntoViewIfNeeded();
       await expectInViewport(categoryToggle);
-      const save = page.getByRole("button", { name: "保存" }).first();
+      const save = editor.getByRole("button", { name: "保存修改" });
       await save.scrollIntoViewIfNeeded();
       await expectInViewport(save);
+    } else {
+      const parent = page.getByTestId("category-tree-item-cat-company");
+      const child = page.getByTestId("category-tree-item-cat-company-modeling");
+      await parent.focus();
+      await parent.press("ArrowRight");
+      await expect(child).toBeFocused();
+      await child.press("ArrowLeft");
+      await expect(parent).toBeFocused();
+      await expect(page.getByText("公司内部标准").last()).toBeVisible();
+      await expect(page.getByRole("button", { name: "保存修改" })).toBeDisabled();
     }
   });
 
   for (const scenario of ["loading", "empty", "error"] as const) {
     test(`${scenario} state is explicit and contained`, async ({ page }) => {
-      await openTab(page, "分类管理", scenario);
+      await openTab(page, "分类管理", scenario, "admin", { includeChildFolder: true });
       await expectNoBodyOverflow(page);
       if (scenario === "loading") await expect(page.getByRole("button", { name: "刷新" })).toBeDisabled();
       if (scenario === "empty") await expect(page.getByText("暂无分类")).toBeVisible();
@@ -334,12 +347,14 @@ test.describe("分类管理", () => {
   }
 
   test("create exposes a stable busy state", async ({ page }) => {
-    await openTab(page, "分类管理");
-    await page.getByLabel("显示编号", { exact: true }).fill("C");
-    await page.getByLabel("分类名称", { exact: true }).fill("合成新增分类");
-    const create = page.getByRole("button", { name: "新增分类" });
+    await openTab(page, "分类管理", "normal", "admin", { includeChildFolder: true });
+    await page.getByRole("button", { name: "新增分类", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "新增分类" });
+    await dialog.getByLabel("显示编号", { exact: true }).fill("C");
+    await dialog.getByLabel("分类名称", { exact: true }).fill("合成新增分类");
+    const create = dialog.getByRole("button", { name: "新增分类", exact: true });
     await create.click();
-    await expect(create).toBeDisabled();
+    await expect(dialog.getByRole("button", { name: "新增中…", exact: true })).toBeDisabled();
   });
 });
 

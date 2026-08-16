@@ -345,8 +345,8 @@ export async function installAdminRoutes(
     if (path === "/api/admin/content/capabilities") {
       return json(route, { enabled: scenario !== "disabled", max_upload_bytes: 10_000_000, supported_extensions: [".pdf", ".md", ".docx", ".xlsx", ".pptx"] });
     }
-    if (path === "/api/admin/content/categories") {
-      const childFolder = { id: "cat-company-modeling", category_key: "company_modeling", parent_id: "cat-company", display_code: "01", display_name: "建模标准", sort_order: 10, level: 2, is_active: true, version: 1, created_at: 1700000000, updated_at: 1700000000, full_path: "03 公司内部标准 / 01 建模标准", item_count: 0 };
+    if (request.method() === "GET" && path === "/api/admin/content/categories") {
+      const childFolder = { id: "cat-company-modeling", category_key: "company_modeling", parent_id: "cat-company", display_code: "01", display_name: "建模标准（长名称用于响应式检查）", sort_order: 10, level: 2, is_active: true, version: 1, created_at: 1700000000, updated_at: 1700000000, full_path: "03 公司内部标准 / 01 建模标准（长名称用于响应式检查）", item_count: 1 };
       return json(route, scenario === "empty" ? [] : options.includeChildFolder ? [...categories, childFolder] : categories);
     }
     if (path === "/api/admin/content/items-page") {
@@ -375,6 +375,33 @@ export async function installAdminRoutes(
     }
     if (request.method() !== "GET" && path.startsWith("/api/admin/content/")) {
       await new Promise((resolve) => setTimeout(resolve, 800));
+      if (request.method() === "POST" && path === "/api/admin/content/categories") {
+        await new Promise((resolve) => setTimeout(resolve, 1_200));
+        const body = request.postDataJSON() as { parent_id?: string | null; display_code?: string; display_name?: string; sort_order?: number };
+        const parent = categories.find((category) => category.id === body.parent_id);
+        const created = {
+          id: "cat-synthetic-created",
+          category_key: "category_synthetic_created",
+          parent_id: body.parent_id || null,
+          display_code: body.display_code || "",
+          display_name: body.display_name || "",
+          sort_order: body.sort_order || 0,
+          level: parent ? parent.level + 1 : 1,
+          is_active: true,
+          version: 1,
+          created_at: 1700000600,
+          updated_at: 1700000600,
+          full_path: `${parent ? `${parent.full_path} / ` : ""}${body.display_code || ""} ${body.display_name || ""}`.trim(),
+          item_count: 0,
+        };
+        return json(route, created);
+      }
+      if (request.method() === "PATCH" && path.startsWith("/api/admin/content/categories/")) {
+        const categoryId = path.split("/").at(-1);
+        const current = categories.find((category) => category.id === categoryId) || categories[0];
+        const body = request.postDataJSON() as Partial<typeof current>;
+        return json(route, { ...current, ...body, version: current.version + 1, updated_at: 1700000600 });
+      }
       if (path === "/api/admin/content/uploads") {
         return json(route, { batch_id: "synthetic-batch", entries: [{ filename: "synthetic.pdf", item_id: "new-item", version_id: "new-version", sha256: null, status: "accepted", reason: null }] });
       }
