@@ -186,20 +186,24 @@ describe("AdminManagedContentPage", () => {
     expect(screen.queryByRole("button", { name: "提交" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "发布" })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getAllByRole("button", { name: "查看“建模标准”" })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: "查看“建模标准”的详细信息" })[0]);
     fireEvent.click(screen.getByRole("button", { name: "确认" }));
     await waitFor(() => expect(mocks.review).toHaveBeenCalledWith("version-1", true));
   });
 
-  it("opens indexed files in the shared preview drawer", async () => {
+  it("opens indexed files directly and restores details after an in-dialog preview", async () => {
     const { rerender } = render(<AdminManagedContentPage />);
     await openRootFolder();
     await screen.findAllByText("建模标准");
     fireEvent.click(screen.getAllByRole("button", { name: "查看“建模标准”" })[0]);
+    expect(mocks.openPreview).toHaveBeenCalledWith("parent-1", "建模标准", "pdf", 1, {}, null);
+    expect(screen.queryByRole("dialog", { name: "建模标准" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "查看“建模标准”的详细信息" })[0]);
     const updatedAtLabel = screen.getByText("最后更新时间");
     expect(updatedAtLabel.parentElement).toHaveClass("grid-cols-[max-content_minmax(0,1fr)]", "[&_dt]:whitespace-nowrap");
     fireEvent.click(screen.getByRole("button", { name: "预览文件" }));
-    expect(mocks.openPreview).toHaveBeenCalledWith("parent-1", "建模标准", "pdf", 1, {}, "managed-content-detail");
+    expect(mocks.openPreview).toHaveBeenLastCalledWith("parent-1", "建模标准", "pdf", 1, {}, "managed-content-detail");
     expect(screen.getByRole("button", { name: "预览文件" })).toBeInTheDocument();
 
     mocks.previewState.parentId = "parent-1";
@@ -210,6 +214,41 @@ describe("AdminManagedContentPage", () => {
     rerender(<AdminManagedContentPage />);
     expect(screen.getByRole("dialog", { name: "建模标准" })).toHaveAttribute("data-state", "open");
     expect(screen.getByRole("button", { name: "预览文件" })).toBeInTheDocument();
+  });
+
+  it("disables direct preview when an item has no previewable content", async () => {
+    mocks.items.mockResolvedValue({
+      items: [{ ...item, preview_parent_id: null }], total: 1, status_counts: { awaiting_review: 1 },
+    });
+    render(<AdminManagedContentPage />);
+    await openRootFolder();
+
+    const previewButton = screen.getAllByRole("button", { name: "查看“建模标准”（暂无可预览内容）" })[0];
+    expect(previewButton).toBeDisabled();
+    expect(previewButton).toHaveAttribute("title", "查看“建模标准”（暂无可预览内容）");
+    expect(mocks.openPreview).not.toHaveBeenCalled();
+  });
+
+  it("shows minute-level update times and sorts them in both directions", async () => {
+    const olderItem = { ...item, item_id: "item-older", version_id: "version-older", title: "较早资料", updated_at: 1_700_000_000 };
+    const newerItem = { ...item, item_id: "item-newer", version_id: "version-newer", title: "较新资料", updated_at: 1_800_000_000 };
+    mocks.items.mockResolvedValue({ items: [newerItem, olderItem], total: 2, status_counts: { awaiting_review: 2 } });
+    render(<AdminManagedContentPage />);
+    await openRootFolder();
+
+    const table = screen.getByRole("table");
+    expect(within(table).queryByRole("columnheader", { name: "分类" })).not.toBeInTheDocument();
+    const updatedAtHeader = within(table).getByRole("columnheader", { name: /更新时间/ });
+    expect(updatedAtHeader).toHaveAttribute("aria-sort", "none");
+    expect(within(table).getAllByText(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/)).toHaveLength(2);
+
+    fireEvent.click(within(updatedAtHeader).getByRole("button", { name: /更新时间/ }));
+    expect(updatedAtHeader).toHaveAttribute("aria-sort", "ascending");
+    expect(within(table).getAllByRole("row")[1]).toHaveTextContent("较早资料");
+
+    fireEvent.click(within(updatedAtHeader).getByRole("button", { name: /更新时间/ }));
+    expect(updatedAtHeader).toHaveAttribute("aria-sort", "descending");
+    expect(within(table).getAllByRole("row")[1]).toHaveTextContent("较新资料");
   });
 
   it("loads all statuses by default and keeps batch actions hidden without multi-selection", async () => {
@@ -645,16 +684,18 @@ describe("AdminManagedContentPage", () => {
     expect(screen.getAllByRole("button", { name: /移动“建模标准”/ }).every((button) => button.hasAttribute("disabled"))).toBe(true);
   });
 
-  it("renders six icon actions and keeps download out of the detail dialog", async () => {
+  it("right-aligns seven icon actions and keeps download out of the detail dialog", async () => {
     mocks.permissions = ORGANIZER_PERMISSIONS;
     mocks.items.mockResolvedValue({ items: [{ ...item, lifecycle_status: "draft" }], total: 1, status_counts: { draft: 1 } });
     render(<AdminManagedContentPage />);
     await openRootFolder();
 
-    for (const action of ["查看", "移动", "下载", "重命名", "更新", "删除"]) {
-      expect(screen.getAllByRole("button", { name: new RegExp(`^${action}“建模标准”`) }).length).toBeGreaterThan(0);
+    for (const actionName of ["查看“建模标准”的详细信息", "查看“建模标准”", "移动“建模标准”", "下载“建模标准”", "重命名“建模标准”", "更新“建模标准”", "删除“建模标准”"]) {
+      expect(screen.getAllByRole("button", { name: actionName }).length).toBeGreaterThan(0);
     }
-    fireEvent.click(screen.getAllByRole("button", { name: "查看“建模标准”" })[0]);
+    const detailsButton = screen.getAllByRole("button", { name: "查看“建模标准”的详细信息" })[0];
+    expect(detailsButton.parentElement).toHaveClass("ml-auto", "justify-end");
+    fireEvent.click(detailsButton);
     const dialog = screen.getByRole("dialog", { name: "建模标准" });
     expect(within(dialog).queryByRole("button", { name: /下载/ })).not.toBeInTheDocument();
     expect(within(dialog).queryByRole("link", { name: /下载/ })).not.toBeInTheDocument();
@@ -715,7 +756,7 @@ describe("AdminManagedContentPage", () => {
     render(<AdminManagedContentPage />);
     await openRootFolder();
     await screen.findAllByText("建模标准");
-    fireEvent.click(screen.getAllByRole("button", { name: "查看“建模标准”" })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: "查看“建模标准”的详细信息" })[0]);
     fireEvent.click(screen.getByRole("button", { name: "确认" }));
     expect(screen.getByRole("button", { name: "确认中…" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "退回" })).toBeDisabled();
@@ -752,7 +793,7 @@ describe("AdminManagedContentPage", () => {
     mocks.publish.mockResolvedValue({});
     render(<AdminManagedContentPage />);
     await openRootFolder();
-    fireEvent.click(screen.getAllByRole("button", { name: "查看“建模标准”" })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: "查看“建模标准”的详细信息" })[0]);
     expect((await screen.findAllByText("PDF 需要密码才能解析。")).length).toBeGreaterThan(0);
     expect(screen.getAllByText("请上传已解除密码保护的 PDF。").length).toBeGreaterThan(0);
     expect(screen.getAllByText(/系统或文件处理后可重新发布/).length).toBeGreaterThan(0);
