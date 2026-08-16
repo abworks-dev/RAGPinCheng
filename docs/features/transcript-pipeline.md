@@ -1,6 +1,6 @@
 # 视频转录链路
 
-- 状态：人工上传/播放链路与多引擎 Phase 5A/5B 应用闭环已实现；faster-whisper R3 资格曾通过，WhisperX 组合 candidate R2 接线已实现但新依赖基线尚未重跑 R3；首次迁移和应用 Profile 仍未启用
+- 状态：人工上传/播放链路与多引擎 Phase 5A/5B 应用闭环已实现；faster-whisper 与 WhisperX R3 已通过，生产 ASR 已准入 SenseVoice、faster-whisper 与 WhisperX；WhisperX 服务注册固定使用已资格的 `full-decode`
 - 最后核对：2026-08-16
 
 ## 用户可观察能力
@@ -92,6 +92,14 @@ BF16、临时服务、8 样本完整执行、确定性和清理，但未通过�
 `1b75034f679b415a65aad4182286408d6983f467` 上通过：固定 8 个非敏感样本全部通过，
 canonical、Markdown 与 parser turns 两遍结果一致，固定模型 revision 和 wheel cache
 身份均通过校验。该资格不自动开放应用 Profile，也不等于生产部署或生产流量验收。
+
+WhisperX R3 Run `31889569116` 已在
+`befa81db9df9333b0e44823208390d5dacc2d2bb` 上通过：固定 8 个非敏感样本的三组解码矩阵
+选择 `full-decode`，原有质量、确定性、时间戳、资源和许可证门禁全部通过，峰值 GPU
+显存为 `1323.55 MiB`，且资格过程未修改生产服务。生产服务保持原
+`whisperx-large-v3-zh-align-v1` Profile 身份，仅将其注册配置固定为已资格的 12 项热词、
+`beam_size=10`、`temperature=0.1` 和工程 `initial_prompt`；资格结论本身不替代 active
+release 的部署、promotion 与实时验收。
 
 faster-whisper、Qwen3-ASR 和 WhisperX qualification 统一读取
 `asr-qualification-corpus/1` 只读 manifest，并沿用已 PASS 的
@@ -300,9 +308,9 @@ Ubuntu 跨节点验证失败都会使用受保护的 activation state 恢复旧 
   lazy-load service adapter、ASR/中文对齐双模型 manifest 门禁及手动 Windows CUDA
   冒烟 workflow；另已实现复用既有 8 个自制中文样本和统一阈值的资格 workflow，
   通过现有 `TranscriptionProvider → ProviderCandidate → normalizer → Canonical`
-  契约计算质量、确定性、时间戳、RTF、显存和许可证门禁。Profile admission 保持
-  disabled；真实资格结论只以合并后 `production-asr` workflow 的脱敏审计为准，
-  未通过前不能认定 WhisperX 可用。资格失败诊断只输出文本哈希、字符类别、长度、
+  契约计算质量、确定性、时间戳、RTF、显存和许可证门禁。Run `31889569116` 已通过
+  `production-asr` workflow 的脱敏审计并选择 `full-decode`；生产服务注册使用该配置，
+  应用 admission 仍由独立 allowlist 控制。资格失败诊断只输出文本哈希、字符类别、长度、
   token 形状、编辑类型计数、期望项命中布尔值和固定分类，不输出参考文本、原始
   ProviderCandidate 文本或 Canonical 文本，也不改变模型、样本或准入阈值。
   后续解码评估固定为同一次隔离 qualification 内的三组顺序对照：当前 WhisperX
@@ -311,7 +319,7 @@ Ubuntu 跨节点验证失败都会使用受保护的 activation state 恢复旧 
   WhisperX `3.8.6` 公开的 `load_model(asr_options=...)` 接口设置；切换候选时复用
   已加载的底层 ASR 权重和中文 aligner。只有完整候选通过原有全部门禁、标准编号
   召回严格优于基线、噪声 BIM CER 严格低于基线且负样本误命中为零，矩阵结论才
-  可为通过。该代码能力不代表真实 GPU 资格已经通过，Profile admission 仍为 disabled。
+  可为通过。正式资格不等于生产部署或真实业务媒体验收。
 
 ## 已知限制
 
@@ -320,11 +328,11 @@ Ubuntu 跨节点验证失败都会使用受保护的 activation state 恢复旧 
 - SenseVoice 短媒体自动转录已完成生产验收，但候选稿发布/Qdrant 正式可见性 E2E
   尚未执行；faster-whisper 已完成隔离 R3、Windows promotion 和应用 admission 激活，
   尚未使用真实业务媒体执行生产流量验收；
-- WhisperX 已具备组合 candidate 的 R2 接线，但 Torch/NumPy 新基线合并后仍须在同一
-  master SHA 分别重跑 faster-whisper 与 WhisperX R3，再执行只读部署预检和旁路 candidate
-  staging；当前没有 WhisperX candidate、promotion、首次推理或显存共存验收结论；
-- 当前允许新建任务的自动 Profile 是 experimental SenseVoice 与 faster-whisper；
-  Qwen3-ASR 与 WhisperX experimental Profile 可见但 admission 为 disabled；尚无
+- WhisperX `full-decode` 已通过隔离 R3 并成为服务注册配置；每次 runtime contract 变化后
+  仍须在同一 master SHA 分别重跑 faster-whisper 与 WhisperX R3，再执行只读部署预检、
+  旁路 candidate staging、promotion 和实时验收；尚未使用真实业务媒体完成质量验收；
+- 当前允许新建任务的自动 Profile 是 experimental SenseVoice、faster-whisper 与 WhisperX；
+  Qwen3-ASR experimental Profile 可见但 admission 为 disabled；尚无
   `qualification_approved` Profile；
 - 支持范围播放但无 HLS 自适应码率。
 - 媒体快捷筛选是最近 100 条的客户端筛选，不是服务端全库查询；独立转写工作台基础版仍待后续 PR。
