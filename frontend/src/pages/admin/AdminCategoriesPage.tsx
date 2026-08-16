@@ -318,11 +318,11 @@ export function AdminCategoriesPage() {
   };
 
   return (
-    <section className="flex flex-col gap-5" aria-labelledby="managed-categories-title">
-      <header className="flex flex-col gap-4 border-b border-border pb-4 sm:flex-row sm:items-end sm:justify-between">
+    <section className="space-y-5" aria-labelledby="managed-categories-title">
+      <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="text-ui-xs font-medium text-primary">内容管理</p>
-          <h1 id="managed-categories-title" className="mt-1 text-ui-2xl font-semibold text-foreground">分类管理</h1>
+          <h1 id="managed-categories-title" className="mt-1 text-ui-2xl font-semibold tracking-tight text-foreground">分类管理</h1>
           <p className="mt-1 text-ui-sm text-muted-foreground">维护资料分类、层级和可用状态。</p>
         </div>
         <div className="flex w-full gap-2 sm:w-auto">
@@ -479,7 +479,7 @@ function CategoryTreeNodeView({
         {hasChildren ? <button type="button" aria-label={isExpanded ? `收起${category.display_name}` : `展开${category.display_name}`} title={isExpanded ? "收起" : "展开"} onClick={(event) => { event.stopPropagation(); onToggle(category.id); }} className="inline-flex size-6 items-center justify-center rounded-ui-sm text-muted-foreground hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{isExpanded ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}</button> : <span className="size-1.5 rounded-full bg-border" aria-hidden="true" />}
       </span>
       <span className="min-w-0 flex-1">
-        <span className="flex flex-wrap items-center gap-2"><span className={`break-words ${level === 1 ? "font-semibold" : "font-medium"}`}>{category.display_code} {category.display_name}</span><Badge variant={category.is_active ? "success" : "secondary"}>{category.is_active ? "启用" : "停用"}</Badge></span>
+        <span className="flex flex-wrap items-center gap-2"><Badge className="shrink-0" variant={category.is_active ? "success" : "secondary"}>{category.is_active ? "启用" : "停用"}</Badge><span className={`break-words ${level === 1 ? "font-semibold" : "font-medium"}`}>{category.display_code} {category.display_name}</span></span>
         <span className="mt-1 block break-words text-ui-xs text-muted-foreground">{category.item_count} 份直接资料{hasChildren ? ` · ${children.length} 个子分类` : ""}</span>
       </span>
     </div>
