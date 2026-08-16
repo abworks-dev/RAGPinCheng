@@ -201,11 +201,20 @@ test.describe("视频管理", () => {
   test("media records keep duplicate submissions and recovery actions readable", async ({ page }) => {
     await openTab(page, "视频管理");
     await expect(page.getByRole("heading", { name: "视频媒体" })).toBeVisible();
-    await expect(page.getByText("重复提交 2 次").first()).toBeVisible();
+    await expect(page.getByText("同名记录 2 条").first()).toBeVisible();
+    await expect(page.getByRole("button", { name: "全部 3 条" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "失败 2 条" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "刷新媒体资源" })).toBeVisible();
     await expect(page.getByText("转录服务当前暂停接收任务，请稍后重试。")).toBeVisible();
     await expect(page.getByRole("button", { name: "重试" })).toBeVisible();
     await expect(page.getByRole("button", { name: "进入转写工作台" }).first()).toBeVisible();
     await expectNoBodyOverflow(page);
+    if (page.viewportSize()!.width >= 1024) {
+      const headerX = await page.getByTestId("media-record-header").locator(":scope > span").evaluateAll((cells) => cells.map((cell) => cell.getBoundingClientRect().x));
+      const rowX = await page.getByTestId("media-record-row").first().locator(":scope > div > *").evaluateAll((cells) => cells.map((cell) => cell.getBoundingClientRect().x));
+      expect(rowX).toHaveLength(headerX.length);
+      rowX.forEach((x, index) => expect(Math.abs(x - headerX[index])).toBeLessThanOrEqual(1));
+    }
     if (page.viewportSize()!.width === 390) {
       const retry = page.getByRole("button", { name: "重试" });
       await retry.scrollIntoViewIfNeeded();
