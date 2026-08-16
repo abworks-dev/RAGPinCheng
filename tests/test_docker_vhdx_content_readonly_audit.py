@@ -63,6 +63,8 @@ def test_quiesced_orchestrator_gates_stop_and_restores_runtime():
         "docker.exe' @('ps','-q')",
         "Running Docker containers are present",
         "runner identity; restoration is not guaranteed",
+        "Docker\\Docker\\Docker Desktop.exe",
+        "restart executable identity is invalid",
         "Stop-Process",
         "@('--terminate','docker-desktop')",
         "global_wsl_shutdown_requested=$false",
