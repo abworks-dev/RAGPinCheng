@@ -202,6 +202,9 @@ test.describe("视频管理", () => {
     await openTab(page, "视频管理");
     await expect(page.getByRole("heading", { name: "视频媒体" })).toBeVisible();
     await expect(page.getByText("同名记录 2 条").first()).toBeVisible();
+    await expect(page.getByRole("button", { name: "全部 3 条" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "失败 2 条" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "刷新媒体资源" })).toBeVisible();
     await expect(page.getByText("转录服务当前暂停接收任务，请稍后重试。")).toBeVisible();
     await expect(page.getByRole("button", { name: "重试" })).toBeVisible();
     await expect(page.getByRole("button", { name: "进入转写工作台" }).first()).toBeVisible();

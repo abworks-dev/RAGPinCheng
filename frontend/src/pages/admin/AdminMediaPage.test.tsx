@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AdminMediaPage } from "./AdminMediaPage";
 
@@ -127,6 +127,41 @@ describe("AdminMediaPage wizard", () => {
     expect(screen.getByText("未发布")).toBeInTheDocument();
     expect(screen.getByText("未开始")).toBeInTheDocument();
     expect(screen.getByText("草稿已生成，等待后续审核与发布。")).toBeInTheDocument();
+  });
+
+  it("shows filter counts and refreshes media and transcription state together", async () => {
+    render(<AdminMediaPage />);
+    await screen.findByText("项目交付培训");
+
+    expect(screen.getByRole("button", { name: "全部 1 条" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "待审核 1 条" })).toBeInTheDocument();
+    const mediaLoads = mocks.listMediaAssets.mock.calls.length;
+    const jobLoads = mocks.listTranscriptionJobs.mock.calls.length;
+    fireEvent.click(screen.getByRole("button", { name: "刷新媒体资源" }));
+
+    await waitFor(() => expect(mocks.listMediaAssets).toHaveBeenCalledTimes(mediaLoads + 1));
+    await waitFor(() => expect(mocks.listTranscriptionJobs).toHaveBeenCalledTimes(jobLoads + 1));
+    expect(screen.getByText(/最近刷新/)).toBeInTheDocument();
+  });
+
+  it("uses one transcription status when media and transcription both fail", async () => {
+    const failedJob = {
+      ...succeededJob,
+      job_id: "job-media-failed",
+      media_id: "media-transcription-failed",
+      status: "failed" as const,
+      failure_error_code: "provider_unavailable",
+      error_summary: "转录服务暂不可用",
+      failure: { code: "provider_unavailable", message: "转录服务暂不可用", retryable: true },
+    };
+    mocks.listMediaAssets.mockResolvedValue([{ ...assets[0], media_id: "media-transcription-failed", title: "转录失败视频", status: "failed" }]);
+    mocks.listTranscriptionJobs.mockResolvedValue([failedJob]);
+    render(<AdminMediaPage />);
+
+    const row = await screen.findByTestId("media-record-row");
+    expect(within(row).getByText("转录失败")).toBeInTheDocument();
+    expect(within(row).queryByText("失败", { exact: true })).not.toBeInTheDocument();
+    expect(within(row).getByText("转录服务暂不可用")).toBeInTheDocument();
   });
 
   it("groups repeat submissions by filename without merging their records", async () => {
