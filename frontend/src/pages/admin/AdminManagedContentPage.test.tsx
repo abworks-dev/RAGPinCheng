@@ -490,6 +490,7 @@ describe("AdminManagedContentPage", () => {
 
   it("shows the current folder in the list drop overlay and clears it after leaving", async () => {
     mocks.permissions = ["organize"];
+    mocks.items.mockResolvedValue({ items: [], total: 0, status_counts: {} });
     render(<AdminManagedContentPage />);
     await openRootFolder();
     const folderList = screen.getByTestId("managed-content-drop-list");

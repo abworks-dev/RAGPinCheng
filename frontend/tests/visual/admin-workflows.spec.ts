@@ -128,11 +128,16 @@ test.describe("资料管理", () => {
   });
 
   for (const scenario of ["loading", "empty", "error", "disabled"] as const) {
-    test(`${scenario} state is explicit and contained`, async ({ page }) => {
+    test(`${scenario} state is explicit and contained`, async ({ page }, testInfo) => {
       await openTab(page, "资料管理", scenario);
       await expectNoBodyOverflow(page);
       if (scenario === "loading") await expect(page.getByRole("heading", { name: "资料管理" })).toBeVisible();
-      if (scenario === "empty") await expect(page.getByText("没有符合条件的资料")).toBeVisible();
+      if (scenario === "empty") {
+        await expect(page.getByText("没有符合条件的资料")).toBeVisible();
+        const emptyListHeight = await page.getByTestId("managed-content-drop-list").evaluate((element) => element.getBoundingClientRect().height);
+        expect(emptyListHeight).toBeGreaterThanOrEqual(page.viewportSize()!.width < 640 ? 224 : 256);
+        await page.screenshot({ path: testInfo.outputPath("managed-content-empty-state.png"), fullPage: true });
+      }
       if (scenario === "error") await expect(page.getByText("合成加载失败")).toBeVisible();
       if (scenario === "disabled") {
         await expect(page.getByText("资料管理当前未启用，上传和流程操作暂不可用。")).toBeVisible();
@@ -185,8 +190,9 @@ test.describe("资料管理", () => {
     await page.screenshot({ path: testInfo.outputPath("managed-content-folder-upload-confirmation.png"), fullPage: true });
   });
 
-  test("dropping local files on the current folder requires confirmation", async ({ page }) => {
+  test("dropping local files on the current folder requires confirmation", async ({ page }, testInfo) => {
     await openTab(page, "资料管理");
+    await page.route("**/api/admin/content/items-page**", (route) => route.fulfill({ json: { items: [], total: 0, status_counts: {} } }));
     await openRootFolder(page);
     const uploadRequests: string[] = [];
     page.on("request", (request) => {
@@ -211,6 +217,7 @@ test.describe("资料管理", () => {
     await dropOverlay.scrollIntoViewIfNeeded();
     await folderBrowser.dispatchEvent("dragover", { dataTransfer });
     await expectInViewport(dropOverlay.getByText("松开以上传文件到“03 公司内部标准”"));
+    await page.screenshot({ path: testInfo.outputPath("managed-content-empty-drop-overlay.png"), fullPage: true });
     await folderBrowser.dispatchEvent("drop", { dataTransfer });
     await expect(dropOverlay).toBeHidden();
 
