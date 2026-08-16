@@ -102,7 +102,8 @@ def delete_conversation(conn: sqlite3.Connection, conversation_id: str) -> bool:
 def list_messages(conn: sqlite3.Connection, conversation_id: str) -> list[sqlite3.Row]:
     return conn.execute(
         "SELECT m.id, m.role, COALESCE(uv.content, v.content, m.content) AS content, "
-        "COALESCE(v.sources_json, m.sources_json) AS sources_json, m.created_at "
+        "COALESCE(v.sources_json, m.sources_json) AS sources_json, "
+        "v.policy_version, v.policy_json, m.created_at "
         "FROM messages m "
         "LEFT JOIN message_answer_heads h ON h.assistant_message_id = m.id "
         "LEFT JOIN message_answer_versions v ON v.id = h.active_version_id "
@@ -174,6 +175,16 @@ def _retrieved_parents_from_json(raw: str | None) -> list[RetrievedParent]:
     return out
 
 
+def _policy_snapshot_from_json(raw: str | None) -> dict:
+    if not raw:
+        return {}
+    try:
+        value = json.loads(raw)
+    except Exception:
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
 def hydrate_session(conn: sqlite3.Connection, conv_row: sqlite3.Row) -> ChatSession:
     """Build a fresh ChatSession populated from the DB conversation state."""
     session = ChatSession()
@@ -189,6 +200,7 @@ def hydrate_session(conn: sqlite3.Connection, conv_row: sqlite3.Row) -> ChatSess
             role=m["role"],
             content=m["content"],
             sources_for_ui=sources_for_ui,
+            policy_snapshot=_policy_snapshot_from_json(m["policy_json"]),
         ))
     session.state.turn_index = int(conv_row["turn_index"])
     session.state.last_search_query = conv_row["last_search_query"] or ""
@@ -230,6 +242,16 @@ def persist_turn(
         return
 
     now = int(time.time())
+    policy_json = (
+        json.dumps(asst_msg.policy_snapshot, ensure_ascii=False, sort_keys=True)
+        if asst_msg.policy_snapshot
+        else None
+    )
+    policy_version = (
+        str(asst_msg.policy_snapshot.get("policy_version"))
+        if asst_msg.policy_snapshot.get("policy_version")
+        else None
+    )
     conn = connect()
     try:
         if plan.edit_user_message_id is not None:
@@ -287,7 +309,8 @@ def persist_turn(
                 original_answer_cur = conn.execute(
                     "INSERT INTO message_answer_versions "
                     "(assistant_message_id, version_index, content, sources_json, "
-                    "final_sources_json, search_query, created_at) VALUES (?, 1, ?, ?, ?, ?, ?)",
+                    "final_sources_json, search_query, created_at, policy_version, policy_json) "
+                    "VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         plan.edit_assistant_message_id,
                         target["assistant_content"],
@@ -295,6 +318,8 @@ def persist_turn(
                         previous_state["last_sources_json"],
                         previous_state["last_search_query"],
                         now,
+                        None,
+                        None,
                     ),
                 )
                 conn.execute(
@@ -315,8 +340,8 @@ def persist_turn(
             edited_answer_cur = conn.execute(
                 "INSERT INTO message_answer_versions "
                 "(assistant_message_id, version_index, content, sources_json, "
-                "final_sources_json, search_query, created_at, user_version_id) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "final_sources_json, search_query, created_at, user_version_id, "
+                "policy_version, policy_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     plan.edit_assistant_message_id,
                     next_answer_index,
@@ -326,6 +351,8 @@ def persist_turn(
                     state.last_search_query,
                     now,
                     edited_user_cur.lastrowid,
+                    policy_version,
+                    policy_json,
                 ),
             )
             conn.execute(
@@ -376,7 +403,8 @@ def persist_turn(
                 conn.execute(
                     "INSERT INTO message_answer_versions "
                     "(assistant_message_id, version_index, content, sources_json, "
-                    "final_sources_json, search_query, created_at) VALUES (?, 1, ?, ?, ?, ?, ?)",
+                    "final_sources_json, search_query, created_at, policy_version, policy_json) "
+                    "VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         plan.regenerate_assistant_message_id,
                         target["content"],
@@ -384,6 +412,8 @@ def persist_turn(
                         previous_state["last_sources_json"],
                         previous_state["last_search_query"],
                         now,
+                        None,
+                        None,
                     ),
                 )
             next_index = conn.execute(
@@ -407,8 +437,8 @@ def persist_turn(
             cur = conn.execute(
                 "INSERT INTO message_answer_versions "
                 "(assistant_message_id, version_index, content, sources_json, "
-                "final_sources_json, search_query, created_at, user_version_id) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "final_sources_json, search_query, created_at, user_version_id, "
+                "policy_version, policy_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     plan.regenerate_assistant_message_id,
                     next_index,
@@ -418,6 +448,8 @@ def persist_turn(
                     state.last_search_query,
                     now,
                     active_user_version["active_version_id"] if active_user_version else None,
+                    policy_version,
+                    policy_json,
                 ),
             )
             conn.execute(
@@ -458,7 +490,7 @@ def persist_turn(
         version_cur = conn.execute(
             "INSERT INTO message_answer_versions "
             "(assistant_message_id, version_index, content, sources_json, final_sources_json, "
-            "search_query, created_at) VALUES (?, 1, ?, ?, ?, ?, ?)",
+            "search_query, created_at, policy_version, policy_json) VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?)",
             (
                 asst_cur.lastrowid,
                 asst_msg.content,
@@ -466,6 +498,8 @@ def persist_turn(
                 _retrieved_parents_to_json(state.last_sources),
                 state.last_search_query,
                 now,
+                policy_version,
+                policy_json,
             ),
         )
         conn.execute(

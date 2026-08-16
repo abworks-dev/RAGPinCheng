@@ -315,6 +315,10 @@ async def chat(
                     ],
                     "no_source_fallback": prep.no_source_fallback,
                     "relevance": prep.relevance,
+                    "policy_version": prep.policy_snapshot.get("policy_version"),
+                    "answer_max_output_tokens": prep.policy_snapshot.get("answer_max_output_tokens"),
+                    "answer_context_chars": prep.policy_snapshot.get("answer_context_chars"),
+                    "relevance_gate_enabled": prep.policy_snapshot.get("relevance_gate_enabled"),
                 })
 
                 _STOP = object()
@@ -379,6 +383,10 @@ async def chat(
                         "history_chars": result.history_chars,
                         "budget": result.budget,
                         "finish_reason": "retrieval_low_confidence" if result.relevance.get("action") == "low_confidence" else "stop",
+                        "policy_version": result.policy_snapshot.get("policy_version"),
+                        "answer_max_output_tokens": result.policy_snapshot.get("answer_max_output_tokens"),
+                        "answer_context_chars": result.policy_snapshot.get("answer_context_chars"),
+                        "relevance_gate_enabled": result.policy_snapshot.get("relevance_gate_enabled"),
                         "sources": [
                             source_to_dto(s).model_dump()
                             for s in session._sources_for_ui(result.sources)

@@ -45,6 +45,8 @@ def test_empty_database_initializes_all_phase2_tables(tmp_path):
         "content_permission_group_items",
         "maintenance_settings",
         "maintenance_runs",
+        "answer_policy_settings",
+        "answer_policy_audit",
     } <= tables
     assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     assert conn.execute("PRAGMA foreign_key_check").fetchone() is None
@@ -84,7 +86,9 @@ def test_repeated_init_is_noop_and_does_not_create_second_backup(tmp_path):
 def test_schema_10_database_migrates_manual_revision_columns_and_index(tmp_path, monkeypatch):
     path = tmp_path / "app.sqlite"
     original = db_migrations.MIGRATIONS
-    monkeypatch.setattr(db_migrations, "MIGRATIONS", original[:-3])
+    monkeypatch.setattr(
+        db_migrations, "MIGRATIONS", tuple(item for item in original if item.version <= 10),
+    )
     init_db(path, backup_dir=tmp_path / "backups")
     conn = sqlite3.connect(path)
     assert conn.execute("SELECT max(version) FROM app_schema_migrations").fetchone()[0] == 10
@@ -168,7 +172,9 @@ def test_repeated_init_fails_closed_when_system_permission_group_drifts(tmp_path
 def test_schema_10_permissions_expand_to_granular_nodes(tmp_path, monkeypatch):
     path = tmp_path / "app.sqlite"
     migrations = db_migrations.MIGRATIONS
-    monkeypatch.setattr(db_migrations, "MIGRATIONS", migrations[:-3])
+    monkeypatch.setattr(
+        db_migrations, "MIGRATIONS", tuple(item for item in migrations if item.version <= 10),
+    )
     init_db(path, backup_dir=tmp_path / "backups")
     conn = sqlite3.connect(path)
     user_id = conn.execute(
@@ -220,7 +226,9 @@ def test_schema_10_permissions_expand_to_granular_nodes(tmp_path, monkeypatch):
 def test_schema_11_download_permission_migration_preserves_existing_access(tmp_path, monkeypatch):
     path = tmp_path / "app.sqlite"
     migrations = db_migrations.MIGRATIONS
-    monkeypatch.setattr(db_migrations, "MIGRATIONS", migrations[:-1])
+    monkeypatch.setattr(
+        db_migrations, "MIGRATIONS", tuple(item for item in migrations if item.version <= 12),
+    )
     init_db(path, backup_dir=tmp_path / "backups")
     conn = sqlite3.connect(path)
     viewer_id = conn.execute(

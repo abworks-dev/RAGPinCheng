@@ -422,6 +422,33 @@ CONTENT_FOLDER_REQUEST_STATEMENTS = (
        WHERE status='pending'""",
 )
 
+ANSWER_POLICY_STATEMENTS = (
+    "ALTER TABLE message_answer_versions ADD COLUMN policy_version TEXT",
+    "ALTER TABLE message_answer_versions ADD COLUMN policy_json TEXT",
+    """CREATE TABLE IF NOT EXISTS answer_policy_settings (
+        singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
+        answer_temperature REAL NOT NULL CHECK (answer_temperature BETWEEN 0 AND 1),
+        answer_max_output_tokens INTEGER NOT NULL CHECK (answer_max_output_tokens BETWEEN 256 AND 4096),
+        answer_context_chars INTEGER NOT NULL CHECK (answer_context_chars BETWEEN 2000 AND 12000),
+        relevance_gate_enabled INTEGER NOT NULL DEFAULT 0 CHECK (relevance_gate_enabled IN (0,1)),
+        relevance_min_score REAL NOT NULL DEFAULT 0 CHECK (relevance_min_score >= 0),
+        relevance_min_rrf REAL NOT NULL DEFAULT 0 CHECK (relevance_min_rrf >= 0),
+        relevance_min_margin REAL NOT NULL DEFAULT 0 CHECK (relevance_min_margin >= 0),
+        policy_version TEXT NOT NULL,
+        updated_at INTEGER NOT NULL,
+        updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL
+    )""",
+    """CREATE TABLE IF NOT EXISTS answer_policy_audit (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        old_policy_json TEXT NOT NULL,
+        new_policy_json TEXT NOT NULL,
+        changed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        change_reason TEXT,
+        created_at INTEGER NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_answer_policy_audit_created_desc ON answer_policy_audit(created_at DESC, id DESC)",
+)
+
 SYSTEM_MAINTENANCE_STATEMENTS = (
     """CREATE TABLE maintenance_settings (
         singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
@@ -635,6 +662,7 @@ MIGRATIONS = (
     Migration(11, "granular_content_permissions", CONTENT_PERMISSION_V2_STATEMENTS),
     Migration(12, "transcript_manual_revisions", TRANSCRIPT_MANUAL_REVISION_STATEMENTS),
     Migration(13, "content_download_permission", CONTENT_PERMISSION_DOWNLOAD_STATEMENTS),
+    Migration(14, "answer_policy_settings_and_snapshots", ANSWER_POLICY_STATEMENTS),
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 PHASE2_TABLES = frozenset(
@@ -674,6 +702,9 @@ CONTENT_PERMISSION_GROUP_TABLES = frozenset(
 )
 CONTENT_FOLDER_REQUEST_TABLES = frozenset({"content_folder_requests"})
 SYSTEM_MAINTENANCE_TABLES = frozenset({"maintenance_settings", "maintenance_runs"})
+ANSWER_POLICY_TABLES = frozenset({"answer_policy_settings", "answer_policy_audit"})
+
+
 def validate_system_content_permission_groups(
     conn: sqlite3.Connection,
     expected_groups: dict[str, tuple[str, frozenset[str]]] = SYSTEM_CONTENT_PERMISSION_GROUPS,
@@ -720,6 +751,16 @@ def validate_content_version_metadata(conn: sqlite3.Connection) -> None:
     if "uq_content_items_active_filename" not in indexes:
         raise RuntimeError("migration_schema_mismatch")
     if conn.execute("SELECT 1 FROM content_versions WHERE title IS NULL LIMIT 1").fetchone():
+        raise RuntimeError("migration_schema_mismatch")
+
+
+def validate_answer_policy_schema(conn: sqlite3.Connection) -> None:
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(message_answer_versions)")}
+    if not {"policy_version", "policy_json"}.issubset(columns):
+        raise RuntimeError("migration_schema_mismatch")
+    if not ANSWER_POLICY_TABLES.issubset(
+        {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    ):
         raise RuntimeError("migration_schema_mismatch")
 
 
@@ -821,6 +862,12 @@ def has_pending_ddl(path: Path, *, base_tables: frozenset[str]) -> bool:
         raise RuntimeError("migration_schema_mismatch")
     if any(version == 8 for version, _name in applied) and not SYSTEM_MAINTENANCE_TABLES.issubset(tables):
         raise RuntimeError("migration_schema_mismatch")
+    if any(version == 14 for version, _name in applied):
+        conn = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
+        try:
+            validate_answer_policy_schema(conn)
+        finally:
+            conn.close()
     if any(version == 10 for version, _name in applied):
         conn = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
         try:
@@ -891,6 +938,8 @@ def apply_all(conn: sqlite3.Connection, *, base_schema: str, applied_at: int) ->
             raise RuntimeError("migration_schema_mismatch")
         if not SYSTEM_MAINTENANCE_TABLES.issubset(tables):
             raise RuntimeError("migration_schema_mismatch")
+        if any(migration.version == 14 for migration in MIGRATIONS):
+            validate_answer_policy_schema(conn)
         validate_system_content_permission_groups(
             conn,
             SYSTEM_CONTENT_PERMISSION_GROUPS
