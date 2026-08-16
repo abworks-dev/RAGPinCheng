@@ -18,6 +18,10 @@ def test_maintenance_reads_require_admin():
     assert require_admin in dependencies("/admin/maintenance/runs", "GET")
 
 
+def test_system_overview_requires_admin():
+    assert require_admin in dependencies("/admin/system-overview", "GET")
+
+
 def test_maintenance_mutations_require_admin_csrf():
     assert require_csrf_admin in dependencies("/admin/maintenance/settings", "PATCH")
     assert require_csrf_admin in dependencies("/admin/maintenance/cleanup", "POST")

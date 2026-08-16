@@ -121,6 +121,7 @@ promotion前备份当前任务XML、GPU环境文件和release指针。新release
 - embedding模型仍为 `BAAI/bge-m3`，维度仍为1024，不需要索引Reset；
 - reranker仍为 `BAAI/bge-reranker-v2-m3`，不得静默禁用或切换CPU；
 - `/health` 在模型未加载时返回HTTP 503；既有ASR资格脚本（`qualify-faster-whisper-production.ps1`、`qualify-qwen3-asr-production.ps1`、`funasr_phase0/07_verify_bge.ps1`）用 `Invoke-RestMethod`/`Invoke-WebRequest` 读该端点，模型未加载时会抛HTTP异常而非命中脚本自有报错；均仍fail-closed，`src/providers.py` 只消费 `/model-info` 不受影响；
+- `/v1/system-metrics` 使用现有 `GPU_SERVICE_TOKEN` 鉴权，只执行固定参数、2 秒超时的 `nvidia-smi` 查询并返回脱敏资源摘要；该管理指标探测不参与 embedding/rerank 健康门禁，失败时不影响推理请求；
 - 应用部署必须同时验证GPU health和model-info契约；
 - 候选workflow不promotion、不修改全局包、不注册生产任务；
 - 候选解析workflow不加载或下载模型、不直接写正式锁，只产出待人工复核的证据artifact；

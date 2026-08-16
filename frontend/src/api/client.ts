@@ -3,6 +3,7 @@ import type {
   AdminFeedbackEntry,
   AdminFeedbackResponse,
   AdminStats,
+  SystemOverview,
   CleanupPreview,
   CleanupResult,
   MaintenanceRun,
@@ -210,6 +211,7 @@ export const api = {
   adminGetConversation: (id: string) =>
     jsonFetch<ConversationState>(`/api/conversations/${id}`),
   adminStats: () => jsonFetch<AdminStats>("/api/admin/stats"),
+  adminSystemOverview: () => jsonFetch<SystemOverview>("/api/admin/system-overview"),
   adminFeedback: (params: {
     status?: string;
     kind?: string;

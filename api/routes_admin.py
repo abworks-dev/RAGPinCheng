@@ -49,6 +49,7 @@ from .maintenance import (
     run_cleanup,
     save_settings,
 )
+from .system_overview import collect_system_overview
 from .content_permissions import CONTENT_PERMISSIONS
 from .db import get_db
 from .feedback import read_records
@@ -80,6 +81,7 @@ from .schemas import (
     MaintenanceSettingsDTO,
     MaintenanceSettingsPatchRequest,
     MaintenanceStatusResponse,
+    SystemOverviewResponse,
     UploadResponse,
 )
 from .transcription_store import StoreConflictError
@@ -443,6 +445,13 @@ def maintenance_status(
         sweeper_interval_seconds=60 * 60,
         last_run=MaintenanceRunDTO(**runs[0]) if runs else None,
     )
+
+
+@router.get("/system-overview", response_model=SystemOverviewResponse)
+def system_overview(
+    _admin: CurrentUser = Depends(require_admin),
+) -> SystemOverviewResponse:
+    return SystemOverviewResponse(**collect_system_overview())
 
 
 @router.patch("/maintenance/settings", response_model=MaintenanceSettingsDTO)
