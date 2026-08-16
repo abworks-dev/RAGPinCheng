@@ -337,6 +337,7 @@ class ManagedContentItemDTO(BaseModel):
     category_label: str
     category_path: str = ""
     media_id: str | None
+    preview_parent_id: str | None = None
     version_id: str
     version_number: int
     original_filename: str
