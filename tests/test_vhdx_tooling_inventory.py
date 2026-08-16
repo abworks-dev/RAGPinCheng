@@ -49,3 +49,8 @@ def test_tooling_inventory_covers_required_capabilities():
         "system_drive_free_bytes",
     ):
         assert expected in SCRIPT
+
+
+def test_wsl_capability_capture_includes_stderr_without_logging_raw_output():
+    assert "--version 2>&1 | Out-String" in SCRIPT
+    assert "--help 2>&1 | Out-String" in SCRIPT

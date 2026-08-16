@@ -20,13 +20,13 @@ function Get-ToolResult([string]$Label, [string]$Path) {
     }
     if (-not $Path) { return $result }
     try {
-        $versionText=(& $Path --version 2>$null | Out-String)
-        $result.version_status=if ($LASTEXITCODE -eq 0) { 'available' } else { 'unsupported' }
-        if ($versionText -match '(?im)(?:WSL version:|Windows Subsystem for Linux).*?([0-9]+(?:\.[0-9]+){1,3})') { $result.version=$matches[1] }
+        $versionText=(& $Path --version 2>&1 | Out-String)
+        $result.version_status=if ($versionText.Trim()) { 'available' } else { 'unsupported' }
+        if ($versionText -match '(?im)(?:WSL version|WSL 版本|Windows Subsystem for Linux).*?([0-9]+(?:\.[0-9]+){1,3})') { $result.version=$matches[1] }
     } catch { $result.version_status='failed' }
     try {
-        $help=(& $Path --help 2>$null | Out-String)
-        $result.help_status=if ($LASTEXITCODE -eq 0) { 'available' } else { 'failed' }
+        $help=(& $Path --help 2>&1 | Out-String)
+        $result.help_status=if ($help.Trim()) { 'available' } else { 'failed' }
         foreach ($capability in @('mount','unmount','vhd','system','name','options')) {
             $result["supports_$capability"]=$help.IndexOf("--$capability",[StringComparison]::OrdinalIgnoreCase) -ge 0
         }

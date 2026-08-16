@@ -55,7 +55,7 @@ function Get-MountCapableWslPath {
     $command=Get-Command wsl.exe -ErrorAction SilentlyContinue
     if ($command -and -not $candidates.Contains($command.Source)) { $candidates.Add($command.Source) }
     foreach ($candidate in $candidates) {
-        $help=(& $candidate --help 2>$null | Out-String)
+        $help=(& $candidate --help 2>&1 | Out-String)
         $capable=$true
         foreach ($required in @('--mount','--unmount','--vhd','--system','--name','--options')) {
             if ($help.IndexOf($required,[StringComparison]::OrdinalIgnoreCase) -lt 0) { $capable=$false }
