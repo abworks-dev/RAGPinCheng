@@ -10,6 +10,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from api import routes_content
+from api.content_permission_catalog import LEGACY_CONTENT_PERMISSION_MAP
 from api.content_storage import ContentStorage
 from api.db import connect, get_db, init_db
 
@@ -45,17 +46,17 @@ def content_api(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
             (sid, user_id, csrf, now, now + 3600),
         )
         sessions[employee_id] = (sid, csrf)
-        permission = {
-            "organizer": "organize",
-            "reviewer": "review",
-            "publisher": "publish",
-            "importer": "import_server",
-            "category_manager": "manage_categories",
+        permissions = {
+            "organizer": LEGACY_CONTENT_PERMISSION_MAP["organize"],
+            "reviewer": LEGACY_CONTENT_PERMISSION_MAP["review"],
+            "publisher": LEGACY_CONTENT_PERMISSION_MAP["publish"],
+            "importer": LEGACY_CONTENT_PERMISSION_MAP["import_server"],
+            "category_manager": LEGACY_CONTENT_PERMISSION_MAP["manage_categories"],
         }.get(employee_id)
-        if permission:
-            conn.execute(
+        if permissions:
+            conn.executemany(
                 "INSERT INTO content_permissions(user_id,permission,created_at) VALUES (?,?,?)",
-                (user_id, permission, now),
+                [(user_id, permission, now) for permission in sorted(permissions)],
             )
     conn.commit()
     conn.close()
@@ -283,6 +284,33 @@ def test_folder_request_requires_organize_csrf_and_reviewer_creates_category(con
         assert [row[0] for row in events] == ["folder.request.approved", "folder.requested"]
     finally:
         conn.close()
+
+
+def test_category_manager_can_review_folder_request(content_api):
+    client, sessions, _queued, _db_path = content_api
+    created = client.post(
+        "/api/admin/content/folder-requests",
+        json={"parent_category_id": "cat-04", "display_name": "分类管理员审批"},
+        **_auth(sessions, "organizer", csrf=True),
+    )
+    assert created.status_code == 200
+    request_id = created.json()["id"]
+
+    pending = client.get(
+        "/api/admin/content/folder-requests?status=pending",
+        **_auth(sessions, "category_manager"),
+    )
+    assert pending.status_code == 200
+    assert [entry["id"] for entry in pending.json()] == [request_id]
+
+    approved = client.post(
+        f"/api/admin/content/folder-requests/{request_id}/review",
+        json={"approved": True},
+        **_auth(sessions, "category_manager", csrf=True),
+    )
+    assert approved.status_code == 200
+    assert approved.json()["status"] == "approved"
+    assert approved.json()["created_category_id"]
 
 
 def test_folder_request_rejects_duplicate_pending_and_second_review(content_api):
@@ -532,19 +560,22 @@ def test_category_manager_cannot_grant_content_permissions(content_api):
     ).status_code == 403
     assert client.put(
         "/api/admin/content/permissions/1",
-        json={"permissions": ["publish"]},
+        json={"permissions": sorted(LEGACY_CONTENT_PERMISSION_MAP["publish"])},
         **auth,
     ).status_code == 403
 
 
 @pytest.mark.parametrize("employee_id", ["plain", "category_manager"])
-def test_non_admin_cannot_read_or_maintain_permission_groups(content_api, employee_id):
+def test_non_admin_cannot_read_or_maintain_permission_catalog_or_groups(content_api, employee_id):
     client, sessions, _queued, _db_path = content_api
     base = "/api/admin/content/permission-groups"
+    assert client.get(
+        "/api/admin/content/permission-catalog", **_auth(sessions, employee_id)
+    ).status_code == 403
     assert client.get(base, **_auth(sessions, employee_id)).status_code == 403
     assert client.post(
         base,
-        json={"display_name": "越权模板", "permissions": ["publish"]},
+        json={"display_name": "越权模板", "permissions": sorted(LEGACY_CONTENT_PERMISSION_MAP["publish"])},
         **_auth(sessions, employee_id, csrf=True),
     ).status_code == 403
 
@@ -552,6 +583,8 @@ def test_non_admin_cannot_read_or_maintain_permission_groups(content_api, employ
 def test_permission_management_requires_cookie_csrf_and_active_admin(content_api):
     client, sessions, _queued, db_path = content_api
     groups_url = "/api/admin/content/permission-groups"
+    catalog_url = "/api/admin/content/permission-catalog"
+    assert client.get(catalog_url).status_code == 401
     assert client.get(groups_url).status_code == 401
     assert client.post(groups_url, json={"display_name": "测试模板", "permissions": []}).status_code == 401
     assert client.post(
@@ -564,7 +597,51 @@ def test_permission_management_requires_cookie_csrf_and_active_admin(content_api
     conn.execute("UPDATE users SET is_active=0 WHERE employee_id='admin'")
     conn.commit()
     conn.close()
+    assert client.get(catalog_url, **_auth(sessions, "admin")).status_code == 401
     assert client.get(groups_url, **_auth(sessions, "admin")).status_code == 401
+
+
+def test_permission_catalog_and_dependency_validation(content_api):
+    client, sessions, _queued, db_path = content_api
+    admin_read = _auth(sessions, "admin")
+    admin_write = _auth(sessions, "admin", csrf=True)
+    catalog = client.get("/api/admin/content/permission-catalog", **admin_read)
+    assert catalog.status_code == 200
+    assert catalog.json()["schema_version"] == 2
+    assert [item["key"] for item in catalog.json()["permissions"]] == [
+        "workspace.view", "item.view", "category.view", "item.upload", "item.submit",
+        "item.move_draft", "item.archive_draft", "item.review", "item.move_review",
+        "item.publish", "item.archive_published", "trash.view", "trash.restore",
+        "category.manage", "folder.request", "folder.review", "import.server", "index.view",
+    ]
+    definitions = {item["key"]: item for item in catalog.json()["permissions"]}
+    assert definitions["folder.request"]["dependencies"] == [
+        "workspace.view", "item.view", "category.view"
+    ]
+    assert definitions["folder.review"]["dependencies"] == [
+        "workspace.view", "item.view", "category.view"
+    ]
+
+    group = client.post(
+        "/api/admin/content/permission-groups",
+        json={"display_name": "缺少前置权限", "permissions": ["item.upload"]},
+        **admin_write,
+    )
+    assert group.status_code == 400
+    assert group.json()["detail"].startswith("权限组合缺少前置权限：")
+
+    conn = connect(db_path)
+    target_id = conn.execute(
+        "SELECT id FROM users WHERE employee_id='organizer'"
+    ).fetchone()[0]
+    conn.close()
+    user_update = client.put(
+        f"/api/admin/content/permissions/{target_id}",
+        json={"permissions": ["trash.restore"]},
+        **admin_write,
+    )
+    assert user_update.status_code == 400
+    assert user_update.json()["detail"].startswith("权限组合缺少前置权限：")
 
 
 def test_permission_group_conflicts_and_system_presets_are_protected(content_api):
@@ -572,7 +649,7 @@ def test_permission_group_conflicts_and_system_presets_are_protected(content_api
     auth = _auth(sessions, "admin", csrf=True)
     base = "/api/admin/content/permission-groups"
     created = client.post(
-        base, json={"display_name": "Project Publisher", "permissions": ["publish"]}, **auth
+        base, json={"display_name": "Project Publisher", "permissions": sorted(LEGACY_CONTENT_PERMISSION_MAP["publish"])}, **auth
     )
     assert created.status_code == 201
     assert client.post(
@@ -593,7 +670,7 @@ def test_permission_update_rejects_missing_user_and_rolls_back_on_audit_failure(
     client, sessions, _queued, db_path = content_api
     auth = _auth(sessions, "admin", csrf=True)
     assert client.put(
-        "/api/admin/content/permissions/999999", json={"permissions": ["review"]}, **auth
+        "/api/admin/content/permissions/999999", json={"permissions": sorted(LEGACY_CONTENT_PERMISSION_MAP["review"])}, **auth
     ).status_code == 404
 
     conn = connect(db_path)
@@ -603,13 +680,13 @@ def test_permission_update_rejects_missing_user_and_rolls_back_on_audit_failure(
     with pytest.raises(RuntimeError, match="audit failed"):
         client.put(
             f"/api/admin/content/permissions/{target_id}",
-            json={"permissions": ["publish"]},
+            json={"permissions": sorted(LEGACY_CONTENT_PERMISSION_MAP["publish"])},
             **auth,
         )
     conn = connect(db_path)
     assert [row[0] for row in conn.execute(
         "SELECT permission FROM content_permissions WHERE user_id=? ORDER BY permission", (target_id,)
-    )] == ["organize"]
+    )] == sorted(LEGACY_CONTENT_PERMISSION_MAP["organize"])
     conn.close()
 
 
@@ -857,6 +934,9 @@ def test_managed_index_job_listing_exposes_business_labels_and_filters(content_a
     client.post(f"/api/admin/content/versions/{version_id}/review", json={"approved": True}, **_auth(sessions, "reviewer", csrf=True))
     client.post(f"/api/admin/content/versions/{version_id}/publish", json={}, **_auth(sessions, "publisher", csrf=True))
 
+    assert client.get(
+        "/api/admin/content/index-jobs", **_auth(sessions, "organizer")
+    ).status_code == 403
     result = client.get("/api/admin/content/index-jobs", **_auth(sessions, "publisher"))
     assert result.status_code == 200
     assert result.json()["total"] == 1
