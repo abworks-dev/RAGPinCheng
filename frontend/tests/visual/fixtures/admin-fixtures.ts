@@ -181,6 +181,16 @@ export async function installAdminRoutes(
     if (!path.startsWith("/api/")) return route.continue();
 
     if (path === "/api/auth/me") return json(route, currentUser());
+    if (request.method() === "GET" && path === "/api/admin/stats") {
+      return json(route, {
+        users_total: 3,
+        users_active: 2,
+        conversations_total: 12,
+        conversations_7d: 4,
+        messages_total: 64,
+        messages_7d: 18,
+      });
+    }
     if (request.method() === "GET" && path === "/api/admin/media") return json(route, mediaAssets);
     if (request.method() === "GET" && path === "/api/admin/transcription/profiles") return json(route, transcriptionProfiles);
     if (request.method() === "GET" && path === "/api/admin/transcription/jobs") return json(route, transcriptionJobs);

@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AdminLayout } from "./AdminLayout";
 
@@ -91,6 +91,11 @@ vi.mock("./AdminMaintenancePage", () => ({
     return <div>系统维护页面内容</div>;
   },
 }));
+
+function LocationProbe() {
+  const { search } = useLocation();
+  return <output data-testid="location-search">{search}</output>;
+}
 
 describe("AdminLayout tab boundary", () => {
   beforeEach(() => {
@@ -197,9 +202,9 @@ describe("AdminLayout tab boundary", () => {
       "用户反馈",
     ]);
 
-    expect(screen.getByRole("button", { name: "用户管理" })).toHaveAttribute("aria-current", "page");
-    expect(screen.getByText("用户页面内容")).toBeInTheDocument();
-    expect(screen.queryByText("对话页面内容")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "概览" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByText("概览页面内容")).toBeInTheDocument();
+    expect(screen.queryByText("用户页面内容")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "对话记录" }));
     expect(screen.getByRole("button", { name: "对话记录" })).toHaveAttribute("aria-current", "page");
@@ -227,7 +232,31 @@ describe("AdminLayout tab boundary", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "用户管理" }));
     expect(screen.getByText("用户页面内容")).toBeInTheDocument();
-    expect(mocks.usersMount).toHaveBeenCalledTimes(2);
+    expect(mocks.usersMount).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses the overview on a bare entry and preserves a selected page on reload", () => {
+    const firstRender = render(
+      <MemoryRouter initialEntries={["/admin"]}>
+        <LocationProbe />
+        <AdminLayout />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("概览页面内容")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "资料管理" }));
+    expect(screen.getByTestId("location-search")).toHaveTextContent("?tab=managed");
+    firstRender.unmount();
+
+    render(
+      <MemoryRouter initialEntries={["/admin?tab=managed"]}>
+        <AdminLayout />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole("button", { name: "资料管理" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByText("资料库页面内容")).toBeInTheDocument();
+    expect(screen.queryByText("概览页面内容")).not.toBeInTheDocument();
   });
 
   it("returns a content user to the library when category permission is removed", () => {
