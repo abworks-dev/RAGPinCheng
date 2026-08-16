@@ -46,9 +46,9 @@ function Invoke-Captured([string]$FilePath, [string[]]$Arguments) {
     $stdout=Join-Path $captureRoot 'stdout'; $stderr=Join-Path $captureRoot 'stderr'
     try {
         $process=Start-Process -FilePath $FilePath -ArgumentList $Arguments -Wait -PassThru -NoNewWindow -RedirectStandardOutput $stdout -RedirectStandardError $stderr
-        $stdoutBytes=if (Test-Path -LiteralPath $stdout) { [IO.File]::ReadAllBytes($stdout) } else { [byte[]]@() }
-        $stderrBytes=if (Test-Path -LiteralPath $stderr) { [IO.File]::ReadAllBytes($stderr) } else { [byte[]]@() }
-        return [ordered]@{ exit_code=[int]$process.ExitCode; stdout=$stdoutBytes; stderr=$stderrBytes }
+        $stdoutBase64=if ((Test-Path -LiteralPath $stdout) -and (Get-Item -LiteralPath $stdout).Length -gt 0) { [Convert]::ToBase64String([IO.File]::ReadAllBytes($stdout)) } else { '' }
+        $stderrBytes=if (Test-Path -LiteralPath $stderr) { (Get-Item -LiteralPath $stderr).Length } else { 0 }
+        return [ordered]@{ exit_code=[int]$process.ExitCode; stdout_base64=$stdoutBase64; stderr_bytes=[int64]$stderrBytes }
     } finally {
         if (Test-Path -LiteralPath $captureRoot) { [IO.Directory]::Delete($captureRoot,$true) }
     }
@@ -57,7 +57,7 @@ function Invoke-Captured([string]$FilePath, [string[]]$Arguments) {
 function Get-DockerDesktopRunning {
     $query=Invoke-Captured 'wsl.exe' @('--list','--running','--quiet')
     if ($query.exit_code -ne 0) { throw 'Unable to query running WSL distributions.' }
-    $text=ConvertFrom-WslBytes $query.stdout
+    $text=ConvertFrom-WslBytes ([Convert]::FromBase64String([string]$query.stdout_base64))
     return [bool](@($text -split '\r?\n' | Where-Object { $_.Trim() -ieq 'docker-desktop' }).Count)
 }
 
@@ -128,7 +128,7 @@ try {
 
     $containerQuery=Invoke-Captured 'docker.exe' @('ps','-q')
     if ($containerQuery.exit_code -ne 0) { throw 'Docker daemon state is unavailable; refusing to stop the runtime.' }
-    $containerText=[Text.Encoding]::UTF8.GetString($containerQuery.stdout).Trim()
+    $containerText=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([string]$containerQuery.stdout_base64)).Trim()
     $runningContainers=@($containerText -split '\r?\n' | Where-Object { $_.Trim() }).Count
     $report.running_containers=$runningContainers
     if ($runningContainers -ne 0) { throw 'Running Docker containers are present; refusing to stop the runtime.' }
