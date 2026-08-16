@@ -165,7 +165,7 @@ const transcriptionJobs = [{
   result_version_id: null, created_at: 1700000400, started_at: 1700000401, finished_at: 1700000402, updated_at: 1700000402,
 }];
 
-const transcriptVersions = [{
+const baseTranscriptVersion = {
   version_id: "11111111-1111-4111-8111-111111111111", media_id: "media-ready", source: "automatic",
   profile_id: "synthetic-profile", provider_key: "synthetic-asr", model_id: "synthetic-model", model_revision: "r1",
   markdown_storage_kind: "managed_artifact",
@@ -173,7 +173,55 @@ const transcriptVersions = [{
   publication_status: "not_published", published_at: null, supersedes_version_id: null,
   derived_from_version_id: null, edited_by: null,
   markdown_sha256: "a".repeat(64), created_at: 1700000200, updated_at: 1700000200, is_current: false,
-}];
+};
+
+const transcriptVersions = [
+  baseTranscriptVersion,
+  {
+    ...baseTranscriptVersion,
+    version_id: "22222222-2222-4222-8222-222222222222",
+    source: "manual",
+    profile_id: null,
+    provider_key: null,
+    model_id: null,
+    model_revision: null,
+    review_status: "review_approved",
+    derived_from_version_id: baseTranscriptVersion.version_id,
+    markdown_sha256: "b".repeat(64),
+    created_at: 1700000190,
+  },
+  {
+    ...baseTranscriptVersion,
+    version_id: "33333333-3333-4333-8333-333333333333",
+    review_status: "review_rejected",
+    review_note: "时间轴术语需要重新核对",
+    markdown_sha256: "c".repeat(64),
+    created_at: 1700000180,
+  },
+  {
+    ...baseTranscriptVersion,
+    version_id: "44444444-4444-4444-8444-444444444444",
+    review_status: "review_approved",
+    publication_status: "published",
+    published_at: 1700000175,
+    markdown_sha256: "d".repeat(64),
+    created_at: 1700000170,
+    is_current: true,
+  },
+  {
+    ...baseTranscriptVersion,
+    version_id: "55555555-5555-4555-8555-555555555555",
+    source: "manual",
+    profile_id: null,
+    provider_key: null,
+    model_id: null,
+    model_revision: null,
+    markdown_storage_kind: "legacy_manual",
+    review_status: "not_required",
+    markdown_sha256: "e".repeat(64),
+    created_at: 1700000160,
+  },
+];
 
 const permissionUsers = [
   { user_id: 9001, employee_id: "TEST-ADMIN", real_name: "合成管理员", role: "admin", is_active: true, permissions: [] },
