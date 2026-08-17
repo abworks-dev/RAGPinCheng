@@ -38,6 +38,11 @@ describe("AdminAnswerPolicyPage", () => {
   it("loads global settings and requires a reason before enabling the gate", async () => {
     render(<AdminAnswerPolicyPage />);
     expect(await screen.findByRole("heading", { name: "回答策略" })).toBeInTheDocument();
+    expect(screen.getByText("范围 256 至 4096，默认 1200。")).toBeInTheDocument();
+    expect(screen.getByText("范围 2000 至 12000，默认 6000，包含检索资料预算。")).toBeInTheDocument();
+    expect(screen.getByText("第一名资料的重排相关性分数；低于阈值时拦截。")).toBeInTheDocument();
+    expect(screen.getByText("第一名资料的混合检索融合分数；低于阈值时拦截。")).toBeInTheDocument();
+    expect(screen.getByText("第一名与第二名的重排分数差；低于阈值时拦截。")).toBeInTheDocument();
     const gate = screen.getByRole("checkbox", { name: /启用低相关性回答拦截/ });
     fireEvent.click(gate);
     fireEvent.click(screen.getByRole("button", { name: "保存策略" }));

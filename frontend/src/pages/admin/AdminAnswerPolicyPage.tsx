@@ -135,8 +135,8 @@ export function AdminAnswerPolicyPage() {
         <CardHeader><CardTitle>回答生成</CardTitle><CardDescription>控制模型输出的稳定性和最大长度。数值越大不代表回答一定更长。</CardDescription></CardHeader>
         <CardContent className="grid gap-4 sm:grid-cols-3">
           <label className="space-y-1.5 text-ui-sm font-medium"><span>回答温度</span><Input type="number" min={0} max={1} step={0.05} value={draft.answer_temperature} onChange={(e) => setDraft({ ...draft, answer_temperature: Number(e.target.value) })} /><span className="block text-ui-xs font-normal text-muted-foreground">范围 0 至 1，默认 0.2。</span></label>
-          <label className="space-y-1.5 text-ui-sm font-medium"><span>最大输出 Token</span><Input type="number" min={256} max={4096} step={64} value={draft.answer_max_output_tokens} onChange={(e) => setDraft({ ...draft, answer_max_output_tokens: Number(e.target.value) })} /><span className="block text-ui-xs font-normal text-muted-foreground">范围 256 至 4096。</span></label>
-          <label className="space-y-1.5 text-ui-sm font-medium"><span>上下文字符上限</span><Input type="number" min={2000} max={12000} step={500} value={draft.answer_context_chars} onChange={(e) => setDraft({ ...draft, answer_context_chars: Number(e.target.value) })} /><span className="block text-ui-xs font-normal text-muted-foreground">范围 2000 至 12000，包含检索资料预算。</span></label>
+          <label className="space-y-1.5 text-ui-sm font-medium"><span>最大输出 Token</span><Input type="number" min={256} max={4096} step={64} value={draft.answer_max_output_tokens} onChange={(e) => setDraft({ ...draft, answer_max_output_tokens: Number(e.target.value) })} /><span className="block text-ui-xs font-normal text-muted-foreground">范围 256 至 4096，默认 1200。</span></label>
+          <label className="space-y-1.5 text-ui-sm font-medium"><span>上下文字符上限</span><Input type="number" min={2000} max={12000} step={500} value={draft.answer_context_chars} onChange={(e) => setDraft({ ...draft, answer_context_chars: Number(e.target.value) })} /><span className="block text-ui-xs font-normal text-muted-foreground">范围 2000 至 12000，默认 6000，包含检索资料预算。</span></label>
         </CardContent>
       </Card>
 
@@ -145,9 +145,9 @@ export function AdminAnswerPolicyPage() {
         <CardContent className="space-y-5">
           <label className="flex items-start gap-3 rounded-ui-lg border border-border p-4"><Checkbox checked={draft.relevance_gate_enabled} onChange={(e) => setDraft({ ...draft, relevance_gate_enabled: e.target.checked })} disabled={busy !== null} /><span><span className="block text-ui-sm font-medium">启用低相关性回答拦截</span><span className="mt-1 block text-ui-xs text-muted-foreground">只影响满足门禁资格的单轮检索请求，不改变查询守卫。</span></span></label>
           <div className="grid gap-4 sm:grid-cols-3">
-            <label className="space-y-1.5 text-ui-sm font-medium"><span>最低重排分数</span><Input type="number" min={0} step={0.01} value={draft.relevance_min_score} onChange={(e) => setDraft({ ...draft, relevance_min_score: Number(e.target.value) })} /></label>
-            <label className="space-y-1.5 text-ui-sm font-medium"><span>最低 RRF 分数</span><Input type="number" min={0} step={0.0001} value={draft.relevance_min_rrf} onChange={(e) => setDraft({ ...draft, relevance_min_rrf: Number(e.target.value) })} /></label>
-            <label className="space-y-1.5 text-ui-sm font-medium"><span>最低分数差</span><Input type="number" min={0} step={0.01} value={draft.relevance_min_margin} onChange={(e) => setDraft({ ...draft, relevance_min_margin: Number(e.target.value) })} /></label>
+            <label className="space-y-1.5 text-ui-sm font-medium"><span>最低重排分数</span><Input type="number" min={0} step={0.01} value={draft.relevance_min_score} onChange={(e) => setDraft({ ...draft, relevance_min_score: Number(e.target.value) })} /><span className="block text-ui-xs font-normal text-muted-foreground">第一名资料的重排相关性分数；低于阈值时拦截。</span></label>
+            <label className="space-y-1.5 text-ui-sm font-medium"><span>最低 RRF 分数</span><Input type="number" min={0} step={0.0001} value={draft.relevance_min_rrf} onChange={(e) => setDraft({ ...draft, relevance_min_rrf: Number(e.target.value) })} /><span className="block text-ui-xs font-normal text-muted-foreground">第一名资料的混合检索融合分数；低于阈值时拦截。</span></label>
+            <label className="space-y-1.5 text-ui-sm font-medium"><span>最低分数差</span><Input type="number" min={0} step={0.01} value={draft.relevance_min_margin} onChange={(e) => setDraft({ ...draft, relevance_min_margin: Number(e.target.value) })} /><span className="block text-ui-xs font-normal text-muted-foreground">第一名与第二名的重排分数差；低于阈值时拦截。</span></label>
           </div>
           <div className="flex flex-wrap items-center gap-2 text-ui-xs text-muted-foreground">当前策略版本：<Badge variant="outline">{policy.policy_version}</Badge></div>
         </CardContent>
