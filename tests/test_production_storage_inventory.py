@@ -272,7 +272,26 @@ def test_inventory_validates_and_protects_referenced_wheel_cache(tmp_path: Path)
     qualification_root = tmp_path / "faster-whisper-qualification"
     verdict = qualification_root / "runs" / "123" / "reports" / "qualification-verdict.json"
     verdict.parent.mkdir(parents=True)
-    verdict.write_text(json.dumps({"wheel_cache_key": cache_key}), encoding="utf-8")
+    verdict.write_text(json.dumps({
+        "schema_version": "faster-whisper-r3-verdict/3", "status": "pass",
+        "run_id": "123", "wheel_cache_key": cache_key,
+    }), encoding="utf-8")
+    failed_verdict = qualification_root / "runs" / "122" / "reports" / "qualification-verdict.json"
+    failed_verdict.parent.mkdir(parents=True)
+    failed_verdict.write_text(json.dumps({
+        "schema_version": "faster-whisper-r3-verdict/3", "status": "fail", "run_id": "122",
+    }), encoding="utf-8")
+    release = {"schema_version": "asr-production-release/1", "engines": [
+        {"engine": "faster-whisper", "qualification_run_id": "123"}
+    ]}
+    program_root = tmp_path / "asr-program"
+    release_manifest = program_root / "releases" / "release-1" / "release-manifest.json"
+    release_manifest.parent.mkdir(parents=True)
+    release_manifest.write_text(json.dumps(release), encoding="utf-8")
+    backup_root = tmp_path / "asr-backups"
+    rollback_manifest = backup_root / "activation-1" / "release-manifest.json"
+    rollback_manifest.parent.mkdir(parents=True)
+    rollback_manifest.write_text(json.dumps(release), encoding="utf-8")
     staging = data_root / "qualification" / "wheel-cache" / f".staging-{cache_key}-123"
     staging.mkdir()
     invalid_key = "f" * 64
@@ -285,11 +304,17 @@ def test_inventory_validates_and_protects_referenced_wheel_cache(tmp_path: Path)
     result = subprocess.run(
         [executable, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
          "-File", str(SCRIPT), "-ReportPath", str(report_path), "-AsrDataRoot", str(data_root),
+         "-AsrProgramRoot", str(program_root), "-AsrActivationBackupRoot", str(backup_root),
          "-FasterWhisperQualificationRoot", str(qualification_root)],
         cwd=ROOT, text=True, capture_output=True, check=False,
     )
     assert result.returncode == 0, result.stderr
     inventory = json.loads(report_path.read_text(encoding="utf-8-sig"))["faster_whisper_wheel_cache_inventory"]
+    assert inventory["reference_status"] == "measured"
+    assert inventory["reference_diagnostics"]["verdicts"] == {
+        "valid_pass": 1, "non_pass": 1, "invalid": 0, "invalid_runs": []
+    }
+    assert inventory["reference_diagnostics"]["release_references"]["resolved"] == 2
     entries = {item["name"]: item for item in inventory["entries"]}
     assert entries[cache_key]["integrity_status"] == "valid"
     assert "qualification-evidence-reference" in entries[cache_key]["advisory_reasons"]
@@ -299,3 +324,41 @@ def test_inventory_validates_and_protects_referenced_wheel_cache(tmp_path: Path)
     assert "cache-contract-invalid" in entries[invalid_key]["advisory_reasons"]
     assert entries[unknown.name]["kind"] == "unknown"
     assert entries[unknown.name]["advisory_status"] == "protected"
+
+
+def test_inventory_fails_closed_for_missing_release_verdict(tmp_path: Path):
+    executable = _powershell()
+    if executable is None:
+        pytest.skip("Windows PowerShell is unavailable")
+    data_root = tmp_path / "asr-data"
+    (data_root / "qualification" / "wheel-cache").mkdir(parents=True)
+    qualification_root = tmp_path / "qualification"
+    qualification_root.mkdir()
+    invalid_verdict = qualification_root / "runs" / "998" / "reports" / "qualification-verdict.json"
+    invalid_verdict.parent.mkdir(parents=True)
+    invalid_verdict.write_text("{invalid", encoding="utf-8")
+    program_root = tmp_path / "program"
+    manifest = program_root / "releases" / "release-1" / "release-manifest.json"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text(json.dumps({
+        "schema_version": "asr-production-release/1",
+        "engines": [{"engine": "faster-whisper", "qualification_run_id": "999"}],
+    }), encoding="utf-8")
+    report_path = tmp_path / "inventory.json"
+    result = subprocess.run(
+        [executable, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+         "-File", str(SCRIPT), "-ReportPath", str(report_path), "-AsrDataRoot", str(data_root),
+         "-AsrProgramRoot", str(program_root), "-FasterWhisperQualificationRoot", str(qualification_root)],
+        cwd=ROOT, text=True, capture_output=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    inventory = json.loads(report_path.read_text(encoding="utf-8-sig"))["faster_whisper_wheel_cache_inventory"]
+    assert inventory["reference_status"] == "incomplete"
+    assert inventory["reference_diagnostics"]["verdicts"]["invalid"] == 1
+    assert inventory["reference_diagnostics"]["verdicts"]["invalid_runs"] == [
+        {"run_id": "998", "reason": "invalid-verdict-contract"}
+    ]
+    assert inventory["reference_diagnostics"]["release_references"]["unresolved"] == 1
+    assert inventory["reference_diagnostics"]["release_references"]["unresolved_runs"] == [
+        {"run_id": "999", "reason": "release-verdict-missing-or-invalid"}
+    ]
