@@ -1,4 +1,4 @@
-import { Activity, Cpu, HardDrive, RefreshCw, Server, Thermometer } from "lucide-react";
+import { Activity, Cpu, FileSpreadsheet, HardDrive, RefreshCw, Server, Thermometer } from "lucide-react";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { IconButton } from "../../components/ui/icon-button";
@@ -116,6 +116,18 @@ export function ProductionRuntimeStatus({ data, loading, error, onRefresh }: Pro
         <div className="flex flex-col gap-2 border-b border-border bg-surface-muted/60 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-2 text-ui-sm"><HardDrive className="size-4 text-muted-foreground" /><span className="font-medium text-foreground">部署关系</span><Badge variant={data.topology === "shared" ? "info" : data.topology === "separate" ? "secondary" : "warning"}>{data.topology === "shared" ? "同机部署" : data.topology === "separate" ? "分离部署" : "待确认"}</Badge></div>
           <span className="text-ui-xs text-muted-foreground">统一检查时间：{formatAdminDate(data.checked_at)}</span>
+        </div>
+        <div className="flex flex-col gap-2 border-b border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-2 text-ui-sm">
+            <FileSpreadsheet className="size-4 text-muted-foreground" />
+            <span className="font-medium text-foreground">Office 新资料处理</span>
+            <Badge variant={data.office_processing.enabled ? "success" : "warning"}>
+              {data.office_processing.enabled ? "已开启" : "已停用"}
+            </Badge>
+          </div>
+          <p className="max-w-xl text-ui-xs text-muted-foreground sm:text-right">
+            部署配置，仅影响新的 Office 上传、导入与发布；既有资料仍可检索和预览。
+          </p>
         </div>
         {error && <p role="status" className="border-b border-border px-4 py-2 text-ui-xs text-warning">GPU 节点连接不稳定，页面保留最近一次可信数据。</p>}
         <div className="grid grid-cols-1 divide-y divide-border xl:grid-cols-2 xl:divide-x xl:divide-y-0">{appCard(data.app)}{gpuCard(data.gpu)}</div>

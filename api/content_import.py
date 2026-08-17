@@ -6,6 +6,8 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
+from src.config import OFFICE_DOC_TYPES, OFFICE_PROCESSING_ENABLED
+
 from .content_storage import ContentStorage
 from .content_store import (
     create_batch,
@@ -117,6 +119,11 @@ def import_server_batch(
             entries.append(ImportEntry(rel_text, "skipped", "cat-99", True, reason="unsupported_type"))
             continue
         category_id, needs_mapping = resolve_import_category(conn, rel.parts[:-1])
+        if doc_type in OFFICE_DOC_TYPES and not OFFICE_PROCESSING_ENABLED:
+            entries.append(
+                ImportEntry(rel_text, "skipped", category_id, needs_mapping, reason="office_processing_disabled")
+            )
+            continue
         if path.stat().st_size > max_bytes:
             entries.append(ImportEntry(rel_text, "skipped", category_id, needs_mapping, reason="content_too_large"))
             continue

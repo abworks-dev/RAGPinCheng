@@ -14,6 +14,7 @@ from src.config import (
     GPU_SERVICE_TOKEN,
     GPU_SERVICE_URL,
     GPU_SYSTEM_METRICS_TIMEOUT_SECONDS,
+    OFFICE_PROCESSING_ENABLED,
     SYSTEM_NODE_ID,
 )
 
@@ -197,4 +198,14 @@ def collect_system_overview(now: int | None = None) -> dict[str, Any]:
     app = collect_app_metrics(checked_at)
     gpu = fetch_gpu_metrics(checked_at)
     topology = _topology(gpu.pop("_node_id", None))
-    return {"topology": topology, "checked_at": checked_at, "app": app, "gpu": gpu}
+    return {
+        "topology": topology,
+        "checked_at": checked_at,
+        "app": app,
+        "gpu": gpu,
+        "office_processing": {
+            "enabled": OFFICE_PROCESSING_ENABLED,
+            "mode": "deployment_config",
+            "disabled_reason": None if OFFICE_PROCESSING_ENABLED else "office_processing_disabled",
+        },
+    }

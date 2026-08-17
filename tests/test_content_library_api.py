@@ -577,6 +577,59 @@ def test_managed_office_upload_limit_cleans_staging_and_creates_no_content(conte
         conn.close()
 
 
+def test_managed_upload_skips_office_but_accepts_markdown_when_disabled(content_api, monkeypatch):
+    client, sessions, _queued, db_path = content_api
+    monkeypatch.setattr(routes_content, "OFFICE_PROCESSING_ENABLED", False)
+
+    response = client.post(
+        "/api/admin/content/uploads",
+        data={"category_id": "cat-03"},
+        files=[
+            ("files", ("disabled.docx", b"not-read", "application/octet-stream")),
+            ("files", ("kept.md", b"# kept", "text/markdown")),
+        ],
+        **_auth(sessions, "admin", csrf=True),
+    )
+
+    assert response.status_code == 200
+    entries = response.json()["entries"]
+    assert [(entry["filename"], entry["status"]) for entry in entries] == [
+        ("disabled.docx", "skipped"),
+        ("kept.md", "accepted"),
+    ]
+    assert entries[0]["reason"] == "Office 处理当前已停用"
+    assert entries[0]["reason_code"] == "office_processing_disabled"
+    conn = connect(db_path)
+    try:
+        assert conn.execute("SELECT count(*) FROM content_versions WHERE doc_type='docx'").fetchone()[0] == 0
+        assert conn.execute("SELECT count(*) FROM content_versions WHERE doc_type='markdown'").fetchone()[0] == 1
+    finally:
+        conn.close()
+
+
+def test_managed_office_publish_returns_stable_conflict_when_disabled(content_api, monkeypatch):
+    client, sessions, _queued, _db_path = content_api
+    uploaded = client.post(
+        "/api/admin/content/uploads",
+        data={"category_id": "cat-03"},
+        files=[("files", ("draft.docx", b"synthetic", "application/octet-stream"))],
+        **_auth(sessions, "admin", csrf=True),
+    )
+    version_id = uploaded.json()["entries"][0]["version_id"]
+    monkeypatch.setattr(routes_content, "OFFICE_PROCESSING_ENABLED", False)
+
+    response = client.post(
+        f"/api/admin/content/versions/{version_id}/publish",
+        **_auth(sessions, "admin", csrf=True),
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == {
+        "code": "office_processing_disabled",
+        "message": "Office 处理当前已停用",
+    }
+
+
 def test_upload_task_history_persists_partial_results_and_scopes_users(content_api):
     client, sessions, _queued, db_path = content_api
     partial = client.post(
