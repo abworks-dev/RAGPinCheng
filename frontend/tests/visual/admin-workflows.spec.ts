@@ -441,10 +441,19 @@ test.describe("资料管理", () => {
     const title = page.getByText("机电专业协同检查清单", { exact: true }).filter({ visible: true });
     const item = page.viewportSize()!.width < 1024 ? title.locator("xpath=ancestor::li") : title.locator("xpath=ancestor::tr");
     const workflow = item.getByRole("button", { name: "审核", exact: true });
+    const detailButton = item.getByRole("button", { name: "查看“机电专业协同检查清单”的详细信息" });
     await expect(workflow).toBeVisible();
-    if (page.viewportSize()!.width === 390) {
+    if (page.viewportSize()!.width >= 1024) {
       const workflowBox = await workflow.boundingBox();
-      const detailBox = await item.getByRole("button", { name: "查看“机电专业协同检查清单”的详细信息" }).boundingBox();
+      const detailBox = await detailButton.boundingBox();
+      expect(workflowBox).not.toBeNull();
+      expect(detailBox).not.toBeNull();
+      const actionGap = detailBox!.x - (workflowBox!.x + workflowBox!.width);
+      expect(actionGap).toBeGreaterThanOrEqual(4);
+      expect(actionGap).toBeLessThanOrEqual(12);
+    } else if (page.viewportSize()!.width === 390) {
+      const workflowBox = await workflow.boundingBox();
+      const detailBox = await detailButton.boundingBox();
       expect(workflowBox).not.toBeNull();
       expect(detailBox).not.toBeNull();
       expect(workflowBox!.y + workflowBox!.height).toBeLessThanOrEqual(detailBox!.y);
