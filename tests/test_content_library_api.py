@@ -550,6 +550,33 @@ def test_folder_upload_rejects_depth_count_and_total_size_limits(content_api, mo
     assert "文件夹总大小" in total.json()["detail"]
 
 
+def test_managed_office_upload_limit_cleans_staging_and_creates_no_content(content_api, monkeypatch):
+    client, sessions, _queued, db_path = content_api
+    monkeypatch.setattr(routes_content, "_MAX_UPLOAD_BYTES", 4)
+
+    response = client.post(
+        "/api/admin/content/uploads",
+        data={"category_id": "cat-03"},
+        files=[("files", ("large.docx", b"PK123", "application/octet-stream"))],
+        **_auth(sessions, "admin", csrf=True),
+    )
+
+    assert response.status_code == 200
+    entry = response.json()["entries"][0]
+    assert entry["filename"] == "large.docx"
+    assert entry["status"] == "skipped"
+    assert entry["reason"] == "文件超过上传大小上限"
+    assert entry["item_id"] is None
+    assert entry["version_id"] is None
+    assert not list(routes_content._storage.inbox_root.rglob("*.upload"))
+    conn = connect(db_path)
+    try:
+        assert conn.execute("SELECT count(*) FROM content_items").fetchone()[0] == 0
+        assert conn.execute("SELECT count(*) FROM content_versions").fetchone()[0] == 0
+    finally:
+        conn.close()
+
+
 def test_upload_task_history_persists_partial_results_and_scopes_users(content_api):
     client, sessions, _queued, db_path = content_api
     partial = client.post(

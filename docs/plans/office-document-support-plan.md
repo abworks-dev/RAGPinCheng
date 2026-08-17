@@ -4,7 +4,7 @@
 > 适用项目：RAGPinCheng  
 > 使用者：Claude Code、Codex 和项目维护人员。
 
-本文件保留 Office 能力的整体设计和实施背景，不作为完成事实清单。完成时间、实际修改和验证结果以 `WORKLOG.md` 为准。
+本文件保留 Office 能力的整体设计和实施背景，不作为完成事实清单。完成时间、实际修改和验证结果以 Git commit、PR 和 CI checks 为准。
 
 ## 1. 目标
 
@@ -158,17 +158,18 @@ DocumentPreview
 - 上传采用流式写盘并限制单文件大小。
 - Office ZIP 文件头、压缩比和宏内容已有检查。
 - 索引任务由单 worker 串行处理；LibreOffice HTTP 调用有超时。
-- 删除入口会清理 Qdrant、parents.sqlite、原文件和同 stem 的解析 Markdown。
+- 删除入口会清理 Qdrant、parents.sqlite、原文件、同 stem 的解析 Markdown，以及确定性命名的 `.preview.pdf` 和 `.preview.xlsx`。
 - Docling、openpyxl、docx-preview、SheetJS、LibreOffice 独立容器、Compose 环境变量均已落地。
 - `tests/test_xlsx_converter.py` 覆盖部分 XLSX 值格式、公式、隐藏 Sheet、数据区域和定位元数据。
+- `tests/test_office_conversion_resilience.py` 使用合成 DOCX/PPTX 覆盖定位元数据、LibreOffice HTTP/超时/损坏输出和临时目录清理。
+- `tests/test_office_upload_security.py` 覆盖现有 OOXML 签名、宏和压缩炸弹保护契约。
+- Office API 测试覆盖受管与 legacy 上传超限清理，以及 DOCX/XLSX/PPTX 原文件和兼容预览的匿名、普通用户、管理员访问矩阵。
+- `docs/operations/OFFICE_CONVERSION.md` 记录独立容器的部署、健康检查、资源观察、停用和回滚边界。
 
 ### 仍需完成
 
 - 外部链接/嵌入对象检测、统一解析超时、磁盘空间告警。
-- 删除时补齐 `.preview.pdf`、`.preview.xlsx` 等全部派生产物，并增加自动化验证。
-- 完善 Office/LibreOffice 部署、健康检查、资源影响、停用和回滚说明。
 - 评估独立功能开关与灰度策略。
-- 增加 DOCX/PPTX、上传安全、鉴权、失败重试、删除清理和前端引用定位测试。
 - 形成非敏感样本的完整用户验收矩阵。
 
 这些剩余项的可执行清单只保留在 `TODO.md`，避免本方案再次成为第二份待办。

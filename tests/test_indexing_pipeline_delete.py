@@ -33,6 +33,24 @@ def test_delete_document_reports_deleted_source_file(monkeypatch, tmp_path):
     assert not source.exists()
 
 
+def test_delete_document_removes_office_preview_artifacts(monkeypatch, tmp_path):
+    _install_fakes(monkeypatch)
+    source = tmp_path / "document.pptx"
+    pdf_preview = source.with_suffix(".preview.pdf")
+    xlsx_preview = source.with_suffix(".preview.xlsx")
+    unrelated = tmp_path / "document.preview.txt"
+    for path in (source, pdf_preview, xlsx_preview, unrelated):
+        path.write_bytes(b"synthetic")
+
+    result = indexing_pipeline.delete_document(str(source), delete_file=True)
+
+    assert result["file_delete_status"] == "deleted"
+    assert not source.exists()
+    assert not pdf_preview.exists()
+    assert not xlsx_preview.exists()
+    assert unrelated.exists()
+
+
 def test_delete_document_treats_already_missing_source_as_idempotent(monkeypatch, tmp_path):
     _install_fakes(monkeypatch)
     source = tmp_path / "missing.pdf"

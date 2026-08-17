@@ -544,7 +544,8 @@ describe("AdminManagedContentPage", () => {
     fireEvent.click(screen.getByTestId("managed-folder-row-cat-04"));
 
     await waitFor(() => expect(mocks.items).toHaveBeenCalledWith(expect.objectContaining({ category_id: "cat-04" })));
-    expect(screen.getByText(/当前目录：04 项目资料/)).toBeInTheDocument();
+    expect(screen.queryByText(/当前目录：/)).not.toBeInTheDocument();
+    expect(within(screen.getByRole("navigation", { name: "资料路径" })).getByRole("button", { name: "04 项目资料" })).toBeInTheDocument();
   });
 
   it("shows archived metadata and restores an item from trash", async () => {
@@ -1228,6 +1229,8 @@ describe("AdminManagedContentPage", () => {
     render(<AdminManagedContentPage />);
     expect(await screen.findByRole("heading", { name: "上传任务" })).toBeInTheDocument();
     expect(await screen.findByText("03 公司内部标准 / 01 建模标准")).toBeInTheDocument();
+    expect(screen.getByText("已接收 1 个 · 跳过 1 个")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "处理结果：已接收 1 个 · 跳过 1 个" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "详情" }));
     expect(await screen.findByText("文件明细")).toBeInTheDocument();
     expect(screen.getByText("资料包/video.mp4")).toBeInTheDocument();
@@ -1236,5 +1239,60 @@ describe("AdminManagedContentPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "关闭" }));
     fireEvent.click(screen.getByRole("tab", { name: "资料库" }));
     expect(window.location.search).toBe("");
+  });
+
+  it("submits upload task searches and toggles summary filters", async () => {
+    mocks.permissions = ORGANIZER_PERMISSIONS;
+    const task = {
+      batch_id: "batch-upload-search",
+      upload_mode: "files" as const,
+      status: "failed" as const,
+      target_category_id: "cat-03",
+      target_path: "03 公司内部标准 / 02 文件夹上传测试",
+      total_files: 1,
+      accepted_files: 0,
+      skipped_files: 0,
+      total_bytes: 10,
+      total_uploaded_bytes: 0,
+      created_by_name: "整理员",
+      created_at: 1,
+      updated_at: 2,
+      error_summary: "上传中断",
+      entries: null,
+    };
+    mocks.uploadTasks.mockResolvedValue({ tasks: [task], total: 1, status_counts: { failed: 1 } });
+    window.history.replaceState({}, "", "/admin/content?view=uploads");
+
+    render(<AdminManagedContentPage />);
+    expect(await screen.findByText("03 公司内部标准 / 02 文件夹上传测试")).toBeInTheDocument();
+    expect(screen.getByText("未完成 1 个")).toBeInTheDocument();
+
+    const search = screen.getByRole("searchbox", { name: "搜索上传任务" });
+    fireEvent.change(search, { target: { value: " guide.md " } });
+    fireEvent.click(screen.getByRole("button", { name: "搜索" }));
+    await waitFor(() => expect(mocks.uploadTasks).toHaveBeenLastCalledWith(expect.objectContaining({
+      query: "guide.md",
+      status: undefined,
+      offset: 0,
+    })));
+
+    const failedFilter = screen.getByRole("button", { name: /失败\s*1/ });
+    fireEvent.click(failedFilter);
+    await waitFor(() => expect(mocks.uploadTasks).toHaveBeenLastCalledWith(expect.objectContaining({
+      query: "guide.md",
+      status: "failed",
+    })));
+    expect(failedFilter).toHaveAttribute("aria-pressed", "true");
+
+    fireEvent.click(failedFilter);
+    await waitFor(() => expect(mocks.uploadTasks).toHaveBeenLastCalledWith(expect.objectContaining({ status: undefined })));
+    expect(failedFilter).toHaveAttribute("aria-pressed", "false");
+
+    fireEvent.click(screen.getByRole("button", { name: "清除筛选" }));
+    await waitFor(() => expect(mocks.uploadTasks).toHaveBeenLastCalledWith(expect.objectContaining({
+      query: undefined,
+      status: undefined,
+    })));
+    expect(search).toHaveValue("");
   });
 });

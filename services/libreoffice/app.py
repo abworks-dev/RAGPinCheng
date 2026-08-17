@@ -112,6 +112,26 @@ def _cleanup_dirs(dirs: list[Path]) -> None:
                 p.unlink(missing_ok=True)
 
 
+def _select_conversion_output(output_dir: Path, target_format: str) -> Path:
+    """Return the single expected conversion artifact after validating it."""
+    expected = list(output_dir.glob(f"*.{target_format}"))
+    if len(expected) != 1:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Conversion produced {len(expected)} .{target_format} outputs",
+        )
+    output_path = expected[0]
+    if target_format == "pdf":
+        try:
+            with output_path.open("rb") as output_file:
+                header = output_file.read(5)
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail=f"Cannot read conversion output: {exc}")
+        if header != b"%PDF-":
+            raise HTTPException(status_code=500, detail="Conversion produced an invalid PDF")
+    return output_path
+
+
 @app.post("/v1/recalculate")
 async def recalculate(file: UploadFile):
     """Recalculate XLSX formulas and return a file with cached values.
@@ -190,6 +210,9 @@ async def convert(file: UploadFile, target_format: str = "pdf"):
 
     Supports: .docx, .pptx, .xlsx → .pdf
     """
+    if target_format != "pdf":
+        raise HTTPException(status_code=400, detail="Only PDF conversion is supported")
+
     ext = Path(file.filename or "input").suffix.lower()
     if ext not in _SUPPORTED_INPUT:
         raise HTTPException(status_code=400, detail=f"Unsupported input format: {ext}")
@@ -216,11 +239,7 @@ async def convert(file: UploadFile, target_format: str = "pdf"):
                 str(input_path),
             ])
 
-        out_files = list(output_dir.iterdir())
-        if not out_files:
-            raise HTTPException(status_code=500, detail="Conversion produced no output")
-
-        output_path = out_files[0]
+        output_path = _select_conversion_output(output_dir, target_format)
         media_type = "application/pdf" if target_format == "pdf" else "application/octet-stream"
         cleanup_dirs = [work_dir, output_dir]
 

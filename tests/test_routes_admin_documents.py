@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import sqlite3
 from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
+from starlette.datastructures import UploadFile
 
 from api import routes_admin
 from api.routes_admin import _document_id, _job_row_to_dto, delete_document, list_documents
@@ -73,6 +75,24 @@ def test_legacy_upload_is_rejected_before_writing_when_managed_content_is_enable
         asyncio.run(routes_admin.upload_documents([], "公司标准", "", object(), conn))
     assert exc.value.status_code == 409
     assert "资料库" in exc.value.detail
+    assert conn.execute("SELECT count(*) FROM index_jobs").fetchone()[0] == 0
+    conn.close()
+
+
+def test_legacy_office_upload_limit_removes_partial_file_and_job(monkeypatch, tmp_path):
+    conn = _connection()
+    monkeypatch.setattr(routes_admin, "CONTENT_MANAGEMENT_ENABLED", False)
+    monkeypatch.setattr(routes_admin, "DOCS_DIR", tmp_path)
+    monkeypatch.setattr(routes_admin, "MAX_UPLOAD_BYTES", 1024 * 1024)
+    upload = UploadFile(filename="large.docx", file=io.BytesIO(b"PK" + b"0" * 1024 * 1024))
+
+    result = asyncio.run(
+        routes_admin.upload_documents([upload], "公司标准", "", SimpleNamespace(id=1), conn)
+    )
+
+    assert result.accepted == []
+    assert result.skipped == [{"filename": "large.docx", "reason": "文件超过 1MB 上限"}]
+    assert not (tmp_path / "公司标准" / "large.docx").exists()
     assert conn.execute("SELECT count(*) FROM index_jobs").fetchone()[0] == 0
     conn.close()
 

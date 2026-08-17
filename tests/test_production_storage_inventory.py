@@ -62,6 +62,8 @@ def test_inventory_reports_only_aggregate_metadata(tmp_path: Path):
         b"content-not-for-report"
     )
     assert "candidate-secret-name" not in raw
+    assert report["policy"]["advisory_only"] is True
+    assert report["candidates"][0]["advisory_status"] == "protected"
 
 
 def test_inventory_classifies_candidate_release_and_active_references(tmp_path: Path):
@@ -100,7 +102,8 @@ def test_inventory_classifies_candidate_release_and_active_references(tmp_path: 
         ], cwd=ROOT, text=True, capture_output=True, check=False,
     )
     assert result.returncode == 0, result.stderr
-    candidates = {item["candidate_id"]: item for item in json.loads(report_path.read_text(encoding="utf-8-sig"))["candidates"]}
+    report = json.loads(report_path.read_text(encoding="utf-8-sig"))
+    candidates = {item["candidate_id"]: item for item in report["candidates"]}
     assert candidates["101"]["status"] == "identity-conflict"
     assert "active-release-state" in candidates["101"]["reasons"]
     assert candidates["102"]["status"] == "rollback-referenced"
@@ -109,6 +112,52 @@ def test_inventory_classifies_candidate_release_and_active_references(tmp_path: 
     activation_audit = report["activation_audit"]
     assert activation_audit["references"][0]["activation_id"] == "900"
     assert activation_audit["references"][0]["candidate_ids"] == ["102", "101"]
+
+
+def test_inventory_reports_other_entries_and_gpu_advisory_details(tmp_path: Path):
+    executable = _powershell()
+    if executable is None:
+        pytest.skip("Windows PowerShell is unavailable")
+    data_root = tmp_path / "asr-data"
+    runtime_root = tmp_path / "runtime"
+    (data_root / "unclassified-output").mkdir(parents=True)
+    (data_root / "unclassified-output" / "payload.bin").write_bytes(b"abc")
+    invalid_release = runtime_root / "releases" / "invalid-release"
+    invalid_release.mkdir(parents=True)
+    (invalid_release / "runtime-manifest.json").write_text(
+        '{"release_id":"different","qualification_status":"pending"}', encoding="utf-8"
+    )
+    (runtime_root / "qualification" / "101").mkdir(parents=True)
+    (runtime_root / "resolver" / "pip-cache").mkdir(parents=True)
+    (runtime_root / "resolver" / "pip-cache" / "cached.whl").write_bytes(b"cache")
+    report_path = tmp_path / "inventory.json"
+    result = subprocess.run(
+        [
+            executable, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+            "-File", str(SCRIPT), "-ReportPath", str(report_path),
+            "-AsrDataRoot", str(data_root), "-RuntimeRoot", str(runtime_root),
+        ], cwd=ROOT, text=True, capture_output=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    report = json.loads(report_path.read_text(encoding="utf-8-sig"))
+    other = report["breakdowns"]["asr_data"]["other_entries"]
+    assert other[0]["name"] == "unclassified-output"
+    assert other[0]["bytes"] == 3
+    release = report["gpu_runtime_inventory"]["releases"][0]
+    assert release["identity"] == "invalid-release-contract"
+    assert "failed-release_id_matches" in release["advisory_reasons"]
+    assert release["advisory_status"] == "protected"
+    resolver_cache = report["gpu_runtime_inventory"]["caches"]["resolver-pip-cache"]
+    assert resolver_cache["bytes"] == len(b"cache")
+    assert resolver_cache["advisory_status"] == "protected-inventory-only"
+    assert report["gpu_runtime_inventory"]["resolver"] == []
+    assert report["gpu_runtime_inventory"]["reference_inventory_status"] in {
+        "measured", "unavailable-protect-all"
+    }
+    sources = report["gpu_runtime_inventory"]["reference_sources"]
+    assert sources["scheduled_tasks"]["task_names"] == [
+        "RAGPinCheng-GPU", "RAGPinCheng-GPU-Runtime-Cleanup"
+    ]
 
 
 def test_inventory_workflow_uses_asr_activation_backup_root():

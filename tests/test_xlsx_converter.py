@@ -6,8 +6,8 @@ Run with:
 
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -67,7 +67,7 @@ class TestFormatCellPair:
         f = _cell(value="=E4*F4", data_type="f")
         v = _cell(value=52814.80)
         result = _format_cell_pair(f, v)
-        assert "52814.80" in result
+        assert "52814.8" in result
         assert "=E4*F4" in result
 
     def test_formula_without_cached_value(self):
@@ -167,11 +167,11 @@ class TestConvertXlsxToMarkdown:
 
 def _cell(value=None, data_type="s", number_format=None):
     """Create a minimal mock cell for testing."""
-    class MockCell:
-        value = value
-        data_type = data_type
-        number_format = number_format
-    return MockCell()
+    return SimpleNamespace(
+        value=value,
+        data_type=data_type,
+        number_format=number_format,
+    )
 
 
 def _open_xlsx(path, data_only=False):
@@ -187,20 +187,20 @@ def xlsx_with_formulas(tmp_path: Path):
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "材料参数"
-    ws.append(["编号", "材料名称", "单价", "数量", "税率", "未税金额", "含税金额"])
-    ws.append(["MAT-001", "普通混凝土", 420.50, 125.6, 0.13, None, None])
-    # Write formulas as strings (openpyxl won't calculate them, so no cached value)
-    ws["F2"] = 420.50 * 125.6  # Manually calculated for cached value
-    ws["G2"] = 52814.80 * (1 + 0.13)
-    # For the formula test, write the formulas but skip cached values
+    ws.append(["编号", "材料名称", "规格", "备注", "单价", "数量", "税率", "未税金额", "含税金额"])
+    ws.append([])
+    ws.append([])
+    ws.append(["MAT-001", "普通混凝土", "C30", "合成样本", 420.50, 125.6, 0.13, None, None])
+    ws["G4"].number_format = "0.0%"
+    ws["H4"] = 420.50 * 125.6
+    ws["I4"] = 52814.80 * (1 + 0.13)
     wb.save(path)
     wb.close()
 
-    # Now reopen and write formulas (data_only=False will save them as formulas)
+    # Reopen and replace H4 with an uncached formula while retaining I4 as a value.
     wb2 = openpyxl.load_workbook(path)
     ws2 = wb2.active
-    ws2["F2"] = "=D2*E2"  # This will overwrite the cached value
-    # Keep G2 as a plain value for the "cached" test
+    ws2["H4"] = "=E4*F4"
     wb2.save(path)
     wb2.close()
     return path

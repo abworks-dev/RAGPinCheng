@@ -65,7 +65,14 @@ jobs:
             -WhisperXCacheRoot $env:WHISPERX_CACHE_ROOT `
             -RunnerWorkRoot $env:RUNNER_WORK_ROOT `
             -RunnerTempRoot $env:RUNNER_TEMP_ROOT `
-            -RunnerToolCacheRoot $env:RUNNER_TOOL_CACHE_ROOT
+            -RunnerToolCacheRoot $env:RUNNER_TOOL_CACHE_ROOT `
+            -DependencyRetentionDays 7 `
+            -DependencyKeepCount 2 `
+            -ReleaseRetentionDays 30 `
+            -ReleaseKeepCount 2 `
+            -QualificationRetentionDays 30 `
+            -QualificationKeepCount 3 `
+            -ResolverRetentionDays 14
 
       - name: Upload aggregate inventory
         if: always()

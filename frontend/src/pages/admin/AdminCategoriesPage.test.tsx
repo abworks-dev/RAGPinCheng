@@ -78,6 +78,7 @@ describe("AdminCategoriesPage", () => {
   it("shows hierarchy, direct counts, and keeps internal keys hidden", async () => {
     render(<AdminCategoriesPage />);
     const parent = await screen.findByRole("treeitem", { name: /01 行业规范与标准/ });
+    expect(screen.getByRole("tree", { name: "分类层级" })).toHaveClass("border-b", "border-border");
     const status = within(parent).getByText("启用");
     const identity = within(parent).getByText("01 行业规范与标准");
     expect(status.compareDocumentPosition(identity) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();

@@ -633,7 +633,7 @@ def delete_document(
                 file_delete_status = "missing"
             except OSError:
                 file_delete_status = "failed"
-            # Best-effort cleanup of the cached markdown too (PDFs only).
+            # Best-effort cleanup of deterministic parse and preview artifacts.
             try:
                 stem = _safe_stem(p)
                 md = PARSED_DIR / f"{stem}.md"
@@ -642,6 +642,14 @@ def delete_document(
             except (ValueError, OSError):
                 # ValueError if file isn't under DOCS_DIR; fine to skip.
                 pass
+            for artifact in (
+                p.with_suffix(".preview.pdf"),
+                p.with_suffix(".preview.xlsx"),
+            ):
+                try:
+                    artifact.unlink(missing_ok=True)
+                except OSError:
+                    pass
 
     return {
         "parents_deleted": parents_deleted,
