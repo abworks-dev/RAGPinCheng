@@ -81,7 +81,7 @@ git pull && docker compose -f docker/docker-compose.yml build && docker compose 
 
 ## Adding documents
 
-**Via admin UI** (`/admin` → 资料管理 → 上传资料): upload `.pdf` or `.md` files directly from the browser. PDFs are parsed by MinerU, chunked, and embedded automatically; progress is shown in the 索引任务 table. No shell access needed.
+**Via admin UI** (`/admin` → 资料管理 → 上传资料): upload `.pdf` or `.md` files directly from the browser. PDFs are parsed by MinerU, chunked, and embedded automatically; progress is shown under 资料管理 → 索引任务. No shell access needed.
 
 **Via filesystem + CLI** (for bulk loads):
 

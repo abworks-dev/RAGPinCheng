@@ -19,7 +19,11 @@ describe("workspace access", () => {
   });
 
   it("adds category settings only for category managers", () => {
-    expect(contentWorkspaceTabs(["workspace.view", "item.view", "category.manage", "index.view"])).toEqual(["managed", "categories", "corpus"]);
+    expect(contentWorkspaceTabs(["workspace.view", "item.view", "category.manage", "index.view"])).toEqual(["managed", "categories"]);
+  });
+
+  it("routes index viewers through content management", () => {
+    expect(contentWorkspaceTabs(["workspace.view", "index.view"])).toEqual(["managed"]);
   });
 
   it("gives administrators the management workspace regardless of explicit permissions", () => {

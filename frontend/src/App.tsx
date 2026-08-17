@@ -11,7 +11,6 @@ import { RegisterPage } from "./pages/RegisterPage";
 import { AdminCategoriesPage } from "./pages/admin/AdminCategoriesPage";
 import { AdminAnswerPolicyPage } from "./pages/admin/AdminAnswerPolicyPage";
 import { AdminConversationsPage } from "./pages/admin/AdminConversationsPage";
-import { AdminDocumentsPage } from "./pages/admin/AdminDocumentsPage";
 import { AdminFeedbackPage } from "./pages/admin/AdminFeedbackPage";
 import { AdminLayout } from "./pages/admin/AdminLayout";
 import { AdminMaintenancePage } from "./pages/admin/AdminMaintenancePage";
@@ -126,7 +125,7 @@ export default function App() {
                 <Route path="content" element={<AdminManagedContentPage />} />
                 <Route path="categories" element={<AdminCategoriesPage />} />
                 <Route path="media" element={<AdminMediaPage />} />
-                <Route path="index" element={<AdminDocumentsPage />} />
+                <Route path="index" element={<Navigate to="/admin/content?view=index" replace />} />
                 <Route path="users" element={<AdminUsersPage />} />
                 <Route path="conversations" element={<AdminConversationsPage />} />
                 <Route path="feedback" element={<AdminFeedbackPage />} />
