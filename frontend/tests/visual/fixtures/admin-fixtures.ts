@@ -125,6 +125,13 @@ const trashItems = [{
   archived_at: 1700000600,
   archived_by_name: "合成资料员",
   pre_archive_lifecycle_status: "published",
+  retention_status: "expiring", retention_days_remaining: 4, purge_eligible_at: 1700346200,
+}, {
+  ...items[0], item_id: "item-trash-overdue", version_id: "version-trash-overdue",
+  title: "项目交付检查清单", original_filename: "项目交付检查清单.pdf",
+  archived_at: 1690000000, archived_by_name: "合成管理员",
+  pre_archive_lifecycle_status: "approved", retention_status: "overdue",
+  retention_days_remaining: -12, purge_eligible_at: 1697776000,
 }];
 
 const uploadTasks = [
@@ -191,9 +198,25 @@ const managedIndexJobs = [{
   title: "资料管理发布失败的合成长文件名资料", original_filename: "managed-publication-failure-with-long-name.pdf",
   doc_type: "pdf", category_id: "cat-03", category_label: "03 公司内部标准",
   category_path: "03 公司内部标准 / 01 建模标准", version_number: 4, file_size: 2_048_000,
-  source_origin: "legacy", is_current_head: false, is_latest_attempt: true,
+  source_origin: "legacy", is_archived: false, is_current_head: false, is_latest_attempt: true,
   parent_count: null, preview_parent_id: null,
 }];
+
+const archivedManagedIndexJob = {
+  ...managedIndexJobs[0],
+  id: "managed-job-archived",
+  publication_id: "publication-archived",
+  version_id: "version-archived",
+  status: "done",
+  error_code: null,
+  error_summary: null,
+  failure: null,
+  attempt_count: 1,
+  title: "已移入回收站的合成资料",
+  original_filename: "archived-managed-document.xlsx",
+  doc_type: "xlsx",
+  is_archived: true,
+};
 
 const mediaAssets = [
   {
@@ -692,7 +715,11 @@ export async function installAdminRoutes(
     }
     if (path === "/api/admin/content/trash") {
       const rows = scenario === "empty" ? [] : trashItems;
-      return json(route, { items: rows, total: rows.length, status_counts: rows.length ? { published: 1 } : {} });
+      return json(route, { items: rows, total: rows.length, status_counts: rows.length ? { published: 1, approved: 1 } : {}, retention_counts: rows.length ? { retained: 0, expiring: 1, overdue: 1 } : {} });
+    }
+    if (path === "/api/admin/content/bulk-restore/preflight") {
+      const payload = request.postDataJSON() as { items: Array<{ item_id: string; expected_version_id: string }> };
+      return json(route, { results: payload.items.map((item) => ({ ...item, version_id: item.expected_version_id, status: "ready", message: "可以恢复", target_category_path: "03 公司内部标准" })), ready: payload.items.length, blocked: 0 });
     }
     if (request.method() === "GET" && /^\/api\/admin\/content\/items\/[^/]+\/audit-events$/.test(path)) {
       return json(route, [{
@@ -714,8 +741,15 @@ export async function installAdminRoutes(
       return json(route, options.includeFolderRequest ? folderRequests : []);
     }
     if (path === "/api/admin/content/index-jobs") {
-      const jobs = scenario === "empty" ? [] : managedIndexJobs;
-      return json(route, { jobs, total: jobs.length, status_counts: jobs.length ? { processing: 0, ready: 0, failed: 1 } : {} });
+      const includesArchived = url.searchParams.get("include_archived") === "true";
+      const jobs = scenario === "empty" ? [] : includesArchived ? [...managedIndexJobs, archivedManagedIndexJob] : managedIndexJobs;
+      return json(route, {
+        jobs,
+        total: jobs.length,
+        status_counts: jobs.length
+          ? { processing: 0, ready: includesArchived ? 1 : 0, failed: 1 }
+          : {},
+      });
     }
     if (path === "/api/admin/content/permissions") {
       return json(route, scenario === "empty" ? [] : permissionUsers);

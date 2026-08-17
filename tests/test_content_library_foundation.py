@@ -171,11 +171,11 @@ def test_category_depth_is_limited_to_four(tmp_path):
 def test_category_listing_is_depth_first_with_stable_sibling_order(tmp_path):
     conn = _db(tmp_path)
     rows = [
-        ("cat-sort-first", "sort_first", "cat-03", "01", "第一项", 90, 2),
+        ("cat-sort-first", "sort_first", "cat-03", "01", "第一项", 5, 2),
         ("cat-sort-grandchild", "sort_grandchild", "cat-sort-first", "01", "子项", 1, 3),
-        ("cat-sort-code-02", "sort_code_02", "cat-03", "02", "第二项", 1, 2),
-        ("cat-sort-code-03", "sort_code_03", "cat-03", "03", "第三项", 1, 2),
-        ("cat-sort-code", "sort_code", "cat-03", "10", "编号靠后", 1, 2),
+        ("cat-sort-code-02", "sort_code_02", "cat-03", "02", "第二项", 10, 2),
+        ("cat-sort-code-03", "sort_code_03", "cat-03", "03", "第三项", 10, 2),
+        ("cat-sort-code", "sort_code", "cat-03", "10", "编号靠后", 10, 2),
     ]
     conn.executemany(
         """INSERT INTO category_nodes
@@ -191,8 +191,8 @@ def test_category_listing_is_depth_first_with_stable_sibling_order(tmp_path):
     assert actual == [
         "cat-sort-first",
         "cat-sort-grandchild",
-        "cat-sort-code-02",
         "cat-sort-code-03",
+        "cat-sort-code-02",
         "cat-sort-code",
     ]
     conn.close()

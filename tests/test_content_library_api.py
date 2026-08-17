@@ -1110,7 +1110,124 @@ def test_category_update_uses_csrf_and_optimistic_version(content_api):
     assert updated.json()["version"] == 2
 
 
-def test_category_manager_orders_by_display_code_and_reparents_categories(content_api):
+def test_category_quick_actions_enforce_normalized_names_and_allow_duplicate_sort_orders(content_api):
+    client, sessions, _queued, db_path = content_api
+    now = int(time.time())
+    conn = connect(db_path)
+    conn.executemany(
+        """INSERT INTO category_nodes
+           (id,category_key,parent_id,display_code,display_name,sort_order,level,is_active,created_at,updated_at)
+           VALUES (?,?,?,?,?,?,2,1,?,?)""",
+        [
+            ("cat-03-a", "company_a", "cat-03", "01", "项目资料", 10, now, now),
+            ("cat-03-b", "company_b", "cat-03", "02", "其他资料", 20, now, now),
+        ],
+    )
+    conn.commit()
+    conn.close()
+    auth = _auth(sessions, "category_manager", csrf=True)
+
+    no_csrf = client.patch(
+        "/api/admin/content/categories/cat-03-b/name",
+        json={"display_name": "新名称", "expected_version": 1},
+        **_auth(sessions, "category_manager"),
+    )
+    assert no_csrf.status_code == 403
+    conflict = client.patch(
+        "/api/admin/content/categories/cat-03-b/name",
+        json={"display_name": "  项目资料  ", "expected_version": 1},
+        **auth,
+    )
+    assert conflict.status_code == 409
+    assert conflict.json()["detail"] == "当前目录已有同名文件夹，请使用其他名称"
+
+    renamed = client.patch(
+        "/api/admin/content/categories/cat-03-b/name",
+        json={"display_name": "新名称", "expected_version": 1},
+        **auth,
+    )
+    assert renamed.status_code == 200
+    assert (renamed.json()["display_name"], renamed.json()["version"]) == ("新名称", 2)
+
+    duplicate_order = client.patch(
+        "/api/admin/content/categories/cat-03-b/sort-order",
+        json={"sort_order": 10, "expected_version": 2},
+        **auth,
+    )
+    assert duplicate_order.status_code == 200
+    assert duplicate_order.json()["sort_order"] == 10
+    unset_order = client.patch(
+        "/api/admin/content/categories/cat-03-a/sort-order",
+        json={"sort_order": 0, "expected_version": 1},
+        **auth,
+    )
+    assert unset_order.status_code == 200
+
+    categories = client.get(
+        "/api/admin/content/categories?include_inactive=true",
+        **_auth(sessions, "category_manager"),
+    ).json()
+    children = [row for row in categories if row["parent_id"] == "cat-03"]
+    assert children[-1]["id"] == "cat-03-a"
+
+    conn = connect(db_path)
+    try:
+        events = conn.execute(
+            """SELECT event_type FROM content_audit_events
+               WHERE category_id IN ('cat-03-a','cat-03-b') ORDER BY created_at,event_type"""
+        ).fetchall()
+        assert {row[0] for row in events} == {"category.renamed", "category.sort_order_updated"}
+    finally:
+        conn.close()
+
+
+def test_category_move_blocks_sibling_name_and_code_conflicts_and_appends_order(content_api):
+    client, sessions, _queued, db_path = content_api
+    now = int(time.time())
+    conn = connect(db_path)
+    conn.executemany(
+        """INSERT INTO category_nodes
+           (id,category_key,parent_id,display_code,display_name,sort_order,level,is_active,created_at,updated_at)
+           VALUES (?,?,?,?,?,?,2,1,?,?)""",
+        [
+            ("cat-source-name", "source_name", "cat-03", "71", "同名目录", 10, now, now),
+            ("cat-source-code", "source_code", "cat-03", "72", "待移动目录", 20, now, now),
+            ("cat-target-name", "target_name", "cat-04", "81", "同名目录", 10, now, now),
+            ("cat-target-code", "target_code", "cat-04", "72", "其他目录", 20, now, now),
+            ("cat-target-existing", "target_existing", "cat-05", "82", "已有目录", 40, now, now),
+        ],
+    )
+    conn.commit()
+    conn.close()
+    auth = _auth(sessions, "category_manager", csrf=True)
+
+    name_conflict = client.post(
+        "/api/admin/content/categories/cat-source-name/move",
+        json={"target_parent_id": "cat-04", "before_category_id": None, "expected_version": 1},
+        **auth,
+    )
+    assert name_conflict.status_code == 409
+    assert name_conflict.json()["detail"] == "当前目录已有同名文件夹，请使用其他名称"
+
+    code_conflict = client.post(
+        "/api/admin/content/categories/cat-source-code/move",
+        json={"target_parent_id": "cat-04", "before_category_id": None, "expected_version": 1},
+        **auth,
+    )
+    assert code_conflict.status_code == 409
+    assert code_conflict.json()["detail"] == "目标目录已有相同显示编号的文件夹，请先修改显示编号"
+
+    moved = client.post(
+        "/api/admin/content/categories/cat-source-code/move",
+        json={"target_parent_id": "cat-05", "before_category_id": None, "expected_version": 1},
+        **auth,
+    )
+    assert moved.status_code == 200
+    moved_row = next(row for row in moved.json() if row["id"] == "cat-source-code")
+    assert (moved_row["parent_id"], moved_row["sort_order"]) == ("cat-05", 50)
+
+
+def test_category_manager_can_reorder_and_reparent_categories(content_api):
     client, sessions, _queued, db_path = content_api
     auth = _auth(sessions, "category_manager", csrf=True)
     categories = client.get(
@@ -1119,7 +1236,7 @@ def test_category_manager_orders_by_display_code_and_reparents_categories(conten
     ).json()
     by_id = {category["id"]: category for category in categories}
 
-    canonicalized = client.post(
+    reordered = client.post(
         "/api/admin/content/categories/cat-99/move",
         json={
             "target_parent_id": None,
@@ -1128,16 +1245,12 @@ def test_category_manager_orders_by_display_code_and_reparents_categories(conten
         },
         **auth,
     )
-    assert canonicalized.status_code == 200
-    root_rows = [row for row in canonicalized.json() if row["parent_id"] is None]
-    assert [row["display_code"] for row in root_rows] == sorted(
-        row["display_code"] for row in root_rows
-    )
-    assert [row["sort_order"] for row in root_rows] == list(
-        range(10, len(root_rows) * 10 + 1, 10)
-    )
+    assert reordered.status_code == 200
+    assert [row["id"] for row in reordered.json() if row["parent_id"] is None][:3] == [
+        "cat-01", "cat-99", "cat-02",
+    ]
 
-    current = next(row for row in canonicalized.json() if row["id"] == "cat-05")
+    current = next(row for row in reordered.json() if row["id"] == "cat-05")
     moved = client.post(
         "/api/admin/content/categories/cat-05/move",
         json={
@@ -1922,6 +2035,51 @@ def test_trash_retention_states_are_informational_and_overdue_remains_restorable
     assert restored.status_code == 200
 
 
+def test_bulk_restore_preflight_reports_ready_and_conflict_without_mutating(content_api):
+    client, sessions, _queued, db_path = content_api
+    organizer = _auth(sessions, "organizer", csrf=True)
+    ready = client.post("/api/admin/content/uploads", data={"category_id": "cat-03"},
+        files=[("files", ("ready.md", b"# ready", "text/markdown"))], **organizer).json()["entries"][0]
+    conflict = client.post("/api/admin/content/uploads", data={"category_id": "cat-04"},
+        files=[("files", ("same.md", b"# archived", "text/markdown"))], **organizer).json()["entries"][0]
+    client.post("/api/admin/content/uploads", data={"category_id": "cat-03"},
+        files=[("files", ("same.md", b"# active", "text/markdown"))], **organizer)
+    refs = [{"item_id": entry["item_id"], "expected_version_id": entry["version_id"]} for entry in (ready, conflict)]
+    client.post("/api/admin/content/bulk-archive", json={"items": [refs[0]]}, **organizer)
+    client.request("DELETE", f"/api/admin/content/items/{conflict['item_id']}",
+        json={"expected_version_id": conflict["version_id"]}, **organizer)
+    result = client.post("/api/admin/content/bulk-restore/preflight",
+        json={"items": refs, "target_category_id": "cat-03"}, **_auth(sessions, "reviewer"))
+    assert result.status_code == 200
+    assert (result.json()["ready"], result.json()["blocked"]) == (1, 1)
+    assert [entry["status"] for entry in result.json()["results"]] == ["ready", "conflict"]
+    conn = connect(db_path)
+    try:
+        assert conn.execute("SELECT count(*) FROM content_items WHERE id IN (?,?) AND archived_at IS NOT NULL",
+            (ready["item_id"], conflict["item_id"])).fetchone()[0] == 2
+    finally:
+        conn.close()
+
+
+def test_trash_export_requires_csrf_and_records_audit(content_api):
+    client, sessions, _queued, db_path = content_api
+    organizer = _auth(sessions, "organizer", csrf=True)
+    entry = client.post("/api/admin/content/uploads", data={"category_id": "cat-03"},
+        files=[("files", ("export.md", b"# export", "text/markdown"))], **organizer).json()["entries"][0]
+    client.request("DELETE", f"/api/admin/content/items/{entry['item_id']}",
+        json={"expected_version_id": entry["version_id"]}, **organizer)
+    assert client.post("/api/admin/content/trash/export", json={}, **_auth(sessions, "reviewer")).status_code == 403
+    exported = client.post("/api/admin/content/trash/export", json={}, **_auth(sessions, "reviewer", csrf=True))
+    assert exported.status_code == 200
+    assert exported.content.startswith(b"\xef\xbb\xbf")
+    assert "export.md" in exported.content.decode("utf-8-sig")
+    conn = connect(db_path)
+    try:
+        assert conn.execute("SELECT count(*) FROM content_audit_events WHERE event_type='content.trash_exported'").fetchone()[0] == 1
+    finally:
+        conn.close()
+
+
 def test_managed_index_job_listing_exposes_business_labels_and_filters(content_api):
     client, sessions, _queued, db_path = content_api
     conn = connect(db_path)
@@ -1959,6 +2117,7 @@ def test_managed_index_job_listing_exposes_business_labels_and_filters(content_a
     assert result.json()["jobs"][0]["version_number"] == 1
     assert result.json()["jobs"][0]["file_size"] == len(b"# indexed")
     assert result.json()["jobs"][0]["source_origin"] == "web"
+    assert result.json()["jobs"][0]["is_archived"] is False
     assert result.json()["jobs"][0]["is_current_head"] is False
     assert result.json()["jobs"][0]["is_latest_attempt"] is True
     assert result.json()["jobs"][0]["parent_count"] is None
@@ -2171,6 +2330,88 @@ def test_published_pptx_preview_status_and_regeneration(content_api, monkeypatch
     ).json()["items"][0]
     assert ready["preview_status"] == "ready"
     assert ready["preview_parent_id"] == "parent-pptx"
+
+
+def test_managed_index_jobs_hide_archived_items_by_default(content_api):
+    client, sessions, _queued, db_path = content_api
+    upload = client.post(
+        "/api/admin/content/uploads",
+        data={"category_id": "cat-03"},
+        files=[("files", ("archived.md", b"# archived", "text/markdown"))],
+        **_auth(sessions, "organizer", csrf=True),
+    ).json()["entries"][0]
+    version_id = upload["version_id"]
+    client.post(
+        f"/api/admin/content/versions/{version_id}/submit",
+        json={},
+        **_auth(sessions, "organizer", csrf=True),
+    )
+    client.post(
+        f"/api/admin/content/versions/{version_id}/review",
+        json={"approved": True},
+        **_auth(sessions, "reviewer", csrf=True),
+    )
+    publication = client.post(
+        f"/api/admin/content/versions/{version_id}/publish",
+        json={},
+        **_auth(sessions, "publisher", csrf=True),
+    ).json()
+
+    conn = connect(db_path)
+    now = int(time.time())
+    conn.execute(
+        "UPDATE content_index_jobs SET status='done',finished_at=?,updated_at=? WHERE id=?",
+        (now, now, publication["index_job_id"]),
+    )
+    conn.execute(
+        "UPDATE content_publications SET status='published',published_at=?,updated_at=? WHERE id=?",
+        (now, now, publication["publication_id"]),
+    )
+    conn.execute(
+        "UPDATE content_versions SET lifecycle_status='published',updated_at=? WHERE id=?",
+        (now, version_id),
+    )
+    conn.execute(
+        "INSERT INTO content_item_heads(item_id,current_version_id,publication_id,updated_at) VALUES (?,?,?,?)",
+        (upload["item_id"], version_id, publication["publication_id"], now),
+    )
+    conn.commit()
+    conn.close()
+
+    archived = client.request(
+        "DELETE",
+        f"/api/admin/content/items/{upload['item_id']}",
+        json={"expected_version_id": version_id},
+        **_auth(sessions, "publisher", csrf=True),
+    )
+    assert archived.status_code == 200
+    assert archived.json()["publication_withdrawn"] is True
+
+    current = client.get(
+        "/api/admin/content/index-jobs", **_auth(sessions, "publisher")
+    ).json()
+    assert current == {
+        "jobs": [],
+        "total": 0,
+        "status_counts": {"processing": 0, "ready": 0, "failed": 0},
+    }
+
+    included = client.get(
+        "/api/admin/content/index-jobs?include_archived=true",
+        **_auth(sessions, "publisher"),
+    ).json()
+    assert included["total"] == 1
+    assert included["status_counts"] == {"processing": 0, "ready": 1, "failed": 0}
+    assert included["jobs"][0]["is_archived"] is True
+    assert included["jobs"][0]["is_current_head"] is False
+    assert included["jobs"][0]["parent_count"] is None
+
+    detail = client.get(
+        f"/api/admin/content/index-jobs/{publication['index_job_id']}",
+        **_auth(sessions, "publisher"),
+    ).json()
+    assert detail["is_archived"] is True
+    assert detail["is_current_head"] is False
 
 
 def test_legacy_index_monitoring_routes_are_not_exposed(content_api):

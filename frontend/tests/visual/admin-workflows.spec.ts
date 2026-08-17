@@ -19,7 +19,7 @@ async function openRootFolder(page: Parameters<typeof installAdminRoutes>[0], fo
   const folder = page.viewportSize()!.width < 1024
     ? page.getByTestId(`managed-folder-mobile-${folderId}`)
     : page.getByTestId(`managed-folder-row-${folderId}`);
-  await folder.click();
+  await folder.getByRole("button").first().click();
   await listing;
 }
 
@@ -34,7 +34,7 @@ test.describe("资料管理", () => {
     const projectFolder = page.viewportSize()!.width < 1024
       ? page.getByTestId("managed-folder-mobile-cat-project")
       : page.getByTestId("managed-folder-row-cat-project");
-    await projectFolder.click();
+    await projectFolder.getByRole("button").first().click();
     await switchedListing;
     await expect(page.getByText(/当前目录：/)).toHaveCount(0);
     await expect(page.getByRole("navigation", { name: "资料路径" }).getByRole("button", { name: "04 项目资料" })).toBeVisible();
@@ -150,11 +150,11 @@ test.describe("资料管理", () => {
     expect(folderBox).not.toBeNull();
     expect(fileBox).not.toBeNull();
     expect(folderBox!.y).toBeLessThan(fileBox!.y);
-    if (isMobile) await expectTouchTarget(folder.getByRole("button", { name: /01 建模标准/ }));
+    if (isMobile) await expectTouchTarget(folder.getByRole("button").first());
     await expectNoBodyOverflow(page);
 
     const childListing = page.waitForRequest((request) => request.method() === "GET" && request.url().includes("/api/admin/content/items-page") && request.url().includes("category_id=cat-company-modeling"));
-    await folder.click();
+    await folder.getByRole("button").first().click();
     await childListing;
     await expect(page.getByRole("navigation", { name: "资料路径" })).toContainText("01 建模标准（长名称用于响应式检查）");
   });
@@ -249,6 +249,10 @@ test.describe("资料管理", () => {
     await openTab(page, "资料管理");
     await page.getByRole("tab", { name: "回收站" }).click();
     await expect(page.getByRole("heading", { name: "回收站", exact: true })).toBeVisible();
+    await expect(page.getByRole("checkbox", { name: "选择恢复“企业知识库使用规范”" })).toBeVisible();
+    await expect(page.getByRole("checkbox", { name: "选择恢复“项目交付检查清单”" })).toBeVisible();
+    await page.getByRole("checkbox", { name: "选择恢复“企业知识库使用规范”" }).check();
+    await expect(page.getByText(/已选择 1 份/)).toBeVisible();
 
     const desktop = page.viewportSize()!.width >= 1024;
     const row = desktop
@@ -543,7 +547,8 @@ test.describe("资料管理", () => {
     await expect(page.getByText("合成资料员", { exact: true }).filter({ visible: true }).first()).toBeVisible();
     await expect(page.getByText("已发布", { exact: true }).filter({ visible: true }).first()).toBeVisible();
     await expectNoBodyOverflow(page);
-    const restore = page.getByRole("button", { name: "恢复", exact: true });
+    const restore = page.locator(page.viewportSize()!.width >= 1024 ? "tr" : "li")
+      .filter({ hasText: "企业知识库使用规范" }).getByRole("button", { name: "恢复", exact: true });
     await restore.scrollIntoViewIfNeeded();
     await expectInViewport(restore);
     const restoreRequest = page.waitForRequest((request) => request.method() === "POST" && request.url().endsWith("/items/item-5/restore"));
@@ -635,6 +640,22 @@ test.describe("索引任务", () => {
     await expectNoBodyOverflow(page);
   });
 
+  test("archived publication history is opt-in and clearly withdrawn", async ({ page }) => {
+    await openTab(page, "索引任务");
+    await expect(page.getByText("已移入回收站的合成资料", { exact: true })).toHaveCount(0);
+
+    const includeArchived = page.getByRole("checkbox", { name: "包含回收站资料" });
+    await includeArchived.click();
+    const archivedTitle = page.getByText("已移入回收站的合成资料", { exact: true });
+    await expect(archivedTitle).toBeVisible();
+    const row = archivedTitle.locator("xpath=ancestor::tr");
+    await expect(row.getByText("已下架", { exact: true })).toBeVisible();
+    await expect(row.getByText("资料已移入回收站，不参与知识库检索", { exact: true })).toBeVisible();
+    await expect(row.getByRole("button", { name: "重新发布" })).toHaveCount(0);
+    await expectNoBodyOverflow(page);
+    if (page.viewportSize()!.width === 390) await expectTouchTarget(includeArchived.locator("xpath=ancestor::label"));
+  });
+
   for (const scenario of ["loading", "empty", "error"] as const) {
     test(`${scenario} state is explicit and contained`, async ({ page }) => {
       await openTab(page, "索引任务", scenario);
@@ -691,8 +712,10 @@ test.describe("分类管理", () => {
       await child.press("ArrowLeft");
       await expect(parent).toBeFocused();
       await expect(page.getByText("公司内部标准").last()).toBeVisible();
-      await expect(page.getByRole("button", { name: "调整结构" })).toHaveCount(0);
-      await expect(page.getByText("同级分类按显示编号自动排列。")).toBeVisible();
+      await page.getByRole("button", { name: "调整结构" }).click();
+      await expect(page.getByRole("button", { name: "完成调整" })).toBeVisible();
+      await expect(page.getByText("拖动手柄调整同级顺序；跨层级移动会要求确认。")).toBeVisible();
+      await expect(page.getByRole("button", { name: "拖动公司内部标准" })).toBeVisible();
       const save = page.getByRole("button", { name: "保存修改" });
       await expect(save).toBeDisabled();
       await expectInViewport(save);
@@ -705,17 +728,16 @@ test.describe("分类管理", () => {
     const editor = page.viewportSize()!.width < 1024
       ? page.getByRole("dialog", { name: "项目资料" })
       : page.locator("[aria-labelledby='category-list-title']").getByText("基本信息").locator("xpath=ancestor::div[contains(@class,'h-full')]");
-    await expect(editor.getByRole("button", { name: /上移|下移/ })).toHaveCount(0);
+    await expect(editor.getByRole("button", { name: "上移分类" })).toBeEnabled();
+    await expect(editor.getByRole("button", { name: "下移分类" })).toBeEnabled();
     await editor.getByRole("button", { name: "移动至" }).click();
     const dialog = page.getByRole("dialog", { name: "移动分类" });
     await expect(dialog).toContainText("04 项目资料");
-    await expect(dialog.getByRole("searchbox", { name: "搜索目标目录" })).toBeVisible();
-    await expect(dialog.getByRole("tree", { name: "目标目录树" })).toBeVisible();
-    await expect(dialog.getByRole("button", { name: "一级分类（当前父级）" })).toBeDisabled();
-    await expect(dialog.getByTestId("category-picker-item-cat-project")).toHaveCount(0);
-    await expect(dialog.getByTestId("category-picker-item-cat-archive")).toHaveCount(0);
-    await dialog.getByRole("searchbox", { name: "搜索目标目录" }).fill("公司内部");
-    await dialog.getByTestId("category-picker-item-cat-company").click();
+    const parentSelect = dialog.getByRole("combobox", { name: "目标父分类" });
+    await expect(parentSelect).toHaveValue("");
+    await expect(parentSelect.locator("option[value='cat-project']")).toHaveCount(0);
+    await expect(parentSelect.locator("option[value='cat-archive']")).toHaveCount(0);
+    await parentSelect.selectOption("cat-company");
     await expect(dialog).toContainText("新路径：03 公司内部标准 / 04 项目资料");
     const moveRequest = page.waitForRequest((request) => request.method() === "POST" && request.url().endsWith("/api/admin/content/categories/cat-project/move"));
     await dialog.getByRole("button", { name: "确认移动" }).click();

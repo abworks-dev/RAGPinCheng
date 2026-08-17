@@ -391,15 +391,24 @@ class CreateManagedCategoryRequest(BaseModel):
     parent_id: str | None = None
     display_code: str = Field(min_length=1, max_length=12)
     display_name: str = Field(min_length=1, max_length=100)
-    sort_order: int = 0
+    sort_order: int = Field(default=0, ge=0, le=999_999)
 
 
 class UpdateManagedCategoryRequest(BaseModel):
     display_code: str = Field(min_length=1, max_length=12)
     display_name: str = Field(min_length=1, max_length=100)
-    # Accepted for compatibility with older clients; ordering is server-maintained.
-    sort_order: int | None = None
+    sort_order: int = Field(ge=0, le=999_999)
     is_active: bool
+    expected_version: int = Field(gt=0)
+
+
+class RenameManagedCategoryRequest(BaseModel):
+    display_name: str = Field(min_length=1, max_length=100)
+    expected_version: int = Field(gt=0)
+
+
+class UpdateManagedCategorySortOrderRequest(BaseModel):
+    sort_order: int = Field(ge=0, le=999_999)
     expected_version: int = Field(gt=0)
 
 
@@ -515,6 +524,7 @@ class ManagedContentListResponse(BaseModel):
     items: list[ManagedContentItemDTO]
     total: int
     status_counts: dict[str, int]
+    retention_counts: dict[str, int] = Field(default_factory=dict)
 
 
 class DeleteManagedContentRequest(BaseModel):
@@ -594,6 +604,30 @@ class BulkArchiveManagedContentRequest(BaseModel):
 class BulkRestoreManagedContentRequest(BaseModel):
     items: list[BulkManagedContentItemRef] = Field(min_length=1, max_length=20)
     target_category_id: str | None = Field(default=None, min_length=1, max_length=100)
+
+
+class BulkRestorePreflightResultDTO(BaseModel):
+    item_id: str
+    version_id: str
+    status: Literal["ready", "conflict", "inactive_category", "version_changed", "in_progress", "not_found"]
+    message: str
+    target_category_path: str | None = None
+
+
+class BulkRestorePreflightResponse(BaseModel):
+    results: list[BulkRestorePreflightResultDTO]
+    ready: int
+    blocked: int
+
+
+class TrashExportRequest(BaseModel):
+    query: str = Field(default="", max_length=200)
+    retention_status: Literal["retained", "expiring", "overdue"] | None = None
+    archived_from: int | None = Field(default=None, ge=0)
+    archived_to: int | None = Field(default=None, ge=0)
+    category_id: str | None = Field(default=None, max_length=100)
+    archived_by: str = Field(default="", max_length=100)
+    sort_direction: Literal["asc", "desc"] = "desc"
 
 
 class BulkDownloadManagedContentRequest(BaseModel):
@@ -703,6 +737,7 @@ class ManagedIndexJobDTO(BaseModel):
     version_number: int | None = None
     file_size: int | None = None
     source_origin: str | None = None
+    is_archived: bool = False
     is_current_head: bool = False
     is_latest_attempt: bool = True
     parent_count: int | None = None

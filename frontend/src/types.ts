@@ -426,6 +426,15 @@ export type ManagedContentList = {
   items: ManagedContentItem[];
   total: number;
   status_counts: Record<string, number>;
+  retention_counts?: Record<string, number>;
+};
+
+export type BulkRestorePreflightResult = {
+  item_id: string;
+  version_id: string;
+  status: "ready" | "conflict" | "inactive_category" | "version_changed" | "in_progress" | "not_found";
+  message: string;
+  target_category_path: string | null;
 };
 
 export type FolderRequest = {
@@ -479,6 +488,7 @@ export type ManagedIndexJob = {
   version_number: number | null;
   file_size: number | null;
   source_origin: string | null;
+  is_archived: boolean;
   is_current_head: boolean;
   is_latest_attempt: boolean;
   parent_count: number | null;

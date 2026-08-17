@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import csv
+import io
 import json
 import logging
 import os
@@ -15,7 +17,7 @@ from typing import Literal
 
 import httpx
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from starlette.background import BackgroundTask
 
 from src.config import (
@@ -52,6 +54,7 @@ from .content_reclassification import (
 )
 from .content_storage import ContentStorage
 from .content_store import (
+    _category_path,
     ContentFilenameConflict,
     archive_content_item,
     audit_event,
@@ -60,9 +63,11 @@ from .content_store import (
     create_publication_job,
     create_content_revision,
     create_web_batch,
+    find_sibling_category_by_name,
     get_upload_task,
     list_content_items,
     list_content_items_page,
+    find_content_filename_conflict,
     list_content_audit_events,
     list_upload_tasks,
     restore_content_item,
@@ -72,15 +77,22 @@ from .content_store import (
     move_content_item,
     register_uploaded_document,
     record_upload_batch_entry,
+    rename_category,
     review_folder_request,
     review_version,
     submit_version_for_review,
     update_category,
+    update_category_sort_order,
+    next_category_display_code,
+    next_category_sort_order,
 )
 from .db import get_db
 from .schemas import (
     BulkArchiveManagedContentRequest,
     BulkRestoreManagedContentRequest,
+    BulkRestorePreflightResponse,
+    BulkRestorePreflightResultDTO,
+    TrashExportRequest,
     BulkDownloadManagedContentRequest,
     CreateManagedCategoryRequest,
     CreateFolderRequest,
@@ -106,6 +118,7 @@ from .schemas import (
     FolderRequestDTO,
     MoveManagedContentRequest,
     RenameManagedContentRequest,
+    RenameManagedCategoryRequest,
     ManagedIndexJobDTO,
     ManagedIndexJobListResponse,
     ManagedPublicationDTO,
@@ -118,6 +131,7 @@ from .schemas import (
     ReviewManagedContentRequest,
     ReviewFolderRequest,
     UpdateManagedCategoryRequest,
+    UpdateManagedCategorySortOrderRequest,
     UpdateContentPermissionsRequest,
     UpdateContentPermissionGroupRequest,
 )
@@ -251,27 +265,21 @@ def _resolve_upload_category(
         return upload_category_id
     for folder_name in relative_path.split("/")[:-1]:
         code, name = _parse_folder_name(folder_name)
-        child = conn.execute(
-            """SELECT id FROM category_nodes
-               WHERE parent_id=? AND is_active=1 AND display_name=?""",
-            (upload_category_id, name),
-        ).fetchone()
+        child = find_sibling_category_by_name(
+            conn, upload_category_id, name, active_only=True
+        )
         if child is not None:
             upload_category_id = child["id"]
             continue
         if not can_create_folders:
             raise ValueError("folder_approval_required")
-        sibling_count = int(conn.execute(
-            "SELECT count(*) FROM category_nodes WHERE parent_id=?",
-            (upload_category_id,),
-        ).fetchone()[0])
         created = create_category(
             conn,
             category_key=None,
             parent_id=upload_category_id,
-            display_code=code or f"{sibling_count + 1:02d}",
+            display_code=code or next_category_display_code(conn, upload_category_id),
             display_name=name,
-            sort_order=(sibling_count + 1) * 10,
+            sort_order=next_category_sort_order(conn, upload_category_id),
             actor_user_id=actor_user_id,
         )
         upload_category_id = created["id"]
@@ -305,6 +313,7 @@ def _managed_index_job_dto(
         version_number=row["version_number"],
         file_size=row["file_size"],
         source_origin=row["source_origin"],
+        is_archived=row["archived_at"] is not None,
         is_current_head=bool(row["is_current_head"]),
         is_latest_attempt=bool(row["is_latest_attempt"]),
         parent_count=summary.parent_count if summary else None,
@@ -409,6 +418,16 @@ def _raise_domain_error(exc: Exception) -> None:
         raise HTTPException(status_code=409, detail="分类编号或标识已存在") from exc
     if message == "category_version_conflict":
         raise HTTPException(status_code=409, detail="分类已被其他人修改，请刷新后重试") from exc
+    if message == "category_sibling_name_conflict":
+        raise HTTPException(status_code=409, detail="当前目录已有同名文件夹，请使用其他名称") from exc
+    if message == "category_sibling_code_conflict_current":
+        raise HTTPException(status_code=409, detail="当前目录已存在该分类编号") from exc
+    if message == "category_sibling_code_conflict":
+        raise HTTPException(status_code=409, detail="目标目录已有相同显示编号的文件夹，请先修改显示编号") from exc
+    if message == "invalid_category_sort_order":
+        raise HTTPException(status_code=400, detail="排序序号必须是 0 到 999999 之间的整数") from exc
+    if message == "folder_request_pending":
+        raise HTTPException(status_code=409, detail="当前目录已有同名文件夹申请待处理") from exc
     if message == "category_not_found":
         raise HTTPException(status_code=404, detail="分类不存在") from exc
     if message == "category_move_cycle":
@@ -560,7 +579,50 @@ def patch_category(
             category_id,
             display_code=body.display_code,
             display_name=body.display_name,
+            sort_order=body.sort_order,
             is_active=body.is_active,
+            expected_version=body.expected_version,
+            actor_user_id=user.id,
+        )
+    except (ValueError, sqlite3.IntegrityError) as exc:
+        _raise_domain_error(exc)
+    return _category_dto(row)
+
+
+@router.patch("/categories/{category_id}/name", response_model=ManagedCategoryDTO)
+def patch_category_name(
+    category_id: str,
+    body: RenameManagedCategoryRequest,
+    user: CurrentUser = Depends(require_content_permission("category.manage", csrf=True)),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> ManagedCategoryDTO:
+    _require_feature()
+    try:
+        row = rename_category(
+            conn,
+            category_id,
+            display_name=body.display_name,
+            expected_version=body.expected_version,
+            actor_user_id=user.id,
+        )
+    except (ValueError, sqlite3.IntegrityError) as exc:
+        _raise_domain_error(exc)
+    return _category_dto(row)
+
+
+@router.patch("/categories/{category_id}/sort-order", response_model=ManagedCategoryDTO)
+def patch_category_sort_order(
+    category_id: str,
+    body: UpdateManagedCategorySortOrderRequest,
+    user: CurrentUser = Depends(require_content_permission("category.manage", csrf=True)),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> ManagedCategoryDTO:
+    _require_feature()
+    try:
+        row = update_category_sort_order(
+            conn,
+            category_id,
+            sort_order=body.sort_order,
             expected_version=body.expected_version,
             actor_user_id=user.id,
         )
@@ -988,6 +1050,22 @@ def get_content_items_page(
     )
 
 
+def _trash_retention_bounds(
+    retention_status: str | None, archived_from: int | None, archived_to: int | None
+) -> tuple[int | None, int | None]:
+    now = int(time.time())
+    retention_boundary = now - CONTENT_TRASH_RETENTION_DAYS * 86400
+    warning_boundary = retention_boundary + CONTENT_TRASH_EXPIRING_WARNING_DAYS * 86400
+    if retention_status == "overdue":
+        archived_to = min(archived_to, retention_boundary - 1) if archived_to is not None else retention_boundary - 1
+    elif retention_status == "expiring":
+        archived_from = max(archived_from, retention_boundary) if archived_from is not None else retention_boundary
+        archived_to = min(archived_to, warning_boundary) if archived_to is not None else warning_boundary
+    elif retention_status == "retained":
+        archived_from = max(archived_from, warning_boundary + 1) if archived_from is not None else warning_boundary + 1
+    return archived_from, archived_to
+
+
 @router.get("/trash", response_model=ManagedContentListResponse)
 def get_content_trash(
     query: str = Query("", max_length=200),
@@ -1002,28 +1080,95 @@ def get_content_trash(
     _user: CurrentUser = Depends(require_content_permission("trash.view")),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> ManagedContentListResponse:
-    now = int(time.time())
-    retention_boundary = now - CONTENT_TRASH_RETENTION_DAYS * 86400
-    warning_boundary = retention_boundary + CONTENT_TRASH_EXPIRING_WARNING_DAYS * 86400
-    if retention_status == "overdue":
-        archived_to = (
-            min(archived_to, retention_boundary - 1)
-            if archived_to is not None
-            else retention_boundary - 1
-        )
-    elif retention_status == "expiring":
-        archived_from = max(archived_from, retention_boundary) if archived_from is not None else retention_boundary
-        archived_to = min(archived_to, warning_boundary) if archived_to is not None else warning_boundary
-    elif retention_status == "retained":
-        archived_from = max(archived_from, warning_boundary + 1) if archived_from is not None else warning_boundary + 1
+    base_from, base_to = archived_from, archived_to
+    archived_from, archived_to = _trash_retention_bounds(retention_status, archived_from, archived_to)
     rows, total, status_counts = list_content_items_page(
         conn, query=query, limit=limit, offset=offset, archived=True,
         archived_from=archived_from, archived_to=archived_to, category_id=category_id,
         archived_by=archived_by, archived_sort_direction=sort_direction
     )
-    return ManagedContentListResponse(
-        items=[_content_item_dto(row) for row in rows], total=total, status_counts=status_counts
+    retention_counts: dict[str, int] = {}
+    for state in ("retained", "expiring", "overdue"):
+        state_from, state_to = _trash_retention_bounds(state, base_from, base_to)
+        _, state_total, _ = list_content_items_page(
+            conn, query=query, limit=1, offset=0, archived=True,
+            archived_from=state_from, archived_to=state_to, category_id=category_id,
+            archived_by=archived_by, archived_sort_direction=sort_direction,
+        )
+        retention_counts[state] = state_total
+    return ManagedContentListResponse(items=[_content_item_dto(row) for row in rows], total=total,
+        status_counts=status_counts, retention_counts=retention_counts)
+
+
+@router.post("/bulk-restore/preflight", response_model=BulkRestorePreflightResponse)
+def preflight_bulk_restore(
+    body: BulkRestoreManagedContentRequest,
+    _user: CurrentUser = Depends(require_content_permission("trash.restore")),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> BulkRestorePreflightResponse:
+    results: list[BulkRestorePreflightResultDTO] = []
+    for item in _validate_bulk_item_refs(body.items):
+        row = conn.execute(
+            """SELECT i.id,i.archived_at,i.category_id,v.id AS version_id,v.original_filename
+               FROM content_items i JOIN content_versions v ON v.item_id=i.id
+                AND v.version_number=(SELECT max(v2.version_number) FROM content_versions v2 WHERE v2.item_id=i.id)
+               WHERE i.id=? AND i.content_kind='document'""", (item.item_id,),
+        ).fetchone()
+        status, message, target_path = "ready", "可以恢复", None
+        if row is None or row["archived_at"] is None:
+            status, message = "not_found", "资料已不在回收站"
+        elif row["version_id"] != item.expected_version_id:
+            status, message = "version_changed", "资料版本已变化，请刷新后重试"
+        else:
+            target_id = body.target_category_id or str(row["category_id"])
+            category = conn.execute("SELECT id FROM category_nodes WHERE id=? AND is_active=1", (target_id,)).fetchone()
+            target_path = _category_path(conn, target_id)
+            if category is None:
+                status, message = "inactive_category", "目标目录已停用"
+            elif conn.execute("SELECT 1 FROM content_index_jobs WHERE version_id=? AND status IN ('pending','parsing','chunking','summarizing','embedding') LIMIT 1", (item.expected_version_id,)).fetchone():
+                status, message = "in_progress", "资料仍有索引任务"
+            elif find_content_filename_conflict(conn, category_id=target_id,
+                    original_filename=str(row["original_filename"]), exclude_item_id=item.item_id):
+                status, message = "conflict", "目标目录存在同名资料"
+        results.append(BulkRestorePreflightResultDTO(item_id=item.item_id,
+            version_id=item.expected_version_id, status=status, message=message,
+            target_category_path=target_path))
+    ready = sum(result.status == "ready" for result in results)
+    return BulkRestorePreflightResponse(results=results, ready=ready, blocked=len(results) - ready)
+
+
+@router.post("/trash/export")
+def export_content_trash(
+    body: TrashExportRequest,
+    user: CurrentUser = Depends(require_csrf),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> StreamingResponse:
+    if not has_content_permission(conn, user, "trash.view"):
+        raise HTTPException(status_code=403, detail="当前账号没有查看回收站的权限")
+    archived_from, archived_to = _trash_retention_bounds(
+        body.retention_status, body.archived_from, body.archived_to
     )
+    rows, total, _ = list_content_items_page(
+        conn, query=body.query, limit=10000, offset=0, archived=True,
+        archived_from=archived_from, archived_to=archived_to,
+        category_id=body.category_id, archived_by=body.archived_by,
+        archived_sort_direction=body.sort_direction,
+    )
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["资料名称", "文件名", "原目录", "原状态", "移入人员", "移入时间", "保留状态", "剩余天数"])
+    for row in rows:
+        dto = _content_item_dto(row)
+        writer.writerow([dto.title, dto.original_filename, dto.category_path,
+            dto.pre_archive_lifecycle_status or dto.lifecycle_status,
+            dto.archived_by_name or "", dto.archived_at or "",
+            dto.retention_status or "", dto.retention_days_remaining])
+    audit_event(conn, "content.trash_exported", actor_user_id=user.id,
+        metadata={"count": total, "retention_status": body.retention_status or "all"})
+    conn.commit()
+    data = "\ufeff" + output.getvalue()
+    return StreamingResponse(iter([data.encode("utf-8")]), media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="content-trash.csv"'})
 
 
 @router.post("/bulk-restore", response_model=BulkManagedContentResponse)
@@ -1899,6 +2044,7 @@ def get_content_index_job(
                FROM category_nodes c JOIN paths p ON p.id=c.parent_id
            )
            SELECT j.*,COALESCE(v.title,i.title) AS title,v.original_filename,v.doc_type,i.category_id,
+                  i.archived_at,
                   c.display_code || ' ' || c.display_name AS category_label,
                   paths.full_path AS category_path,v.version_number,v.source_origin,
                   o.size_bytes AS file_size,
@@ -1938,6 +2084,7 @@ def list_content_index_jobs(
     ),
     status: str | None = Query(None, max_length=50),
     history: bool = False,
+    include_archived: bool = False,
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
     _user: CurrentUser = Depends(require_content_permission("index.view")),
@@ -1957,7 +2104,7 @@ def list_content_index_jobs(
                JOIN paths ON paths.id=i.category_id
                LEFT JOIN content_objects o ON o.sha256=v.object_sha256
                LEFT JOIN content_item_heads h ON h.item_id=i.id"""
-    scope_clauses: list[str] = []
+    scope_clauses: list[str] = [] if include_archived else ["i.archived_at IS NULL"]
     scope_params: list[object] = []
     latest_attempt = (
         "j.id=(SELECT j2.id FROM content_index_jobs j2 WHERE j2.version_id=j.version_id "
@@ -2011,6 +2158,7 @@ def list_content_index_jobs(
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     rows = conn.execute(
         cte + """ SELECT j.*,COALESCE(v.title,i.title) AS title,v.original_filename,v.doc_type,i.category_id,
+                  i.archived_at,
                   (SELECT count(*) FROM content_index_jobs jc WHERE jc.version_id=j.version_id) AS attempt_count,
                   c.display_code || ' ' || c.display_name AS category_label,
                   paths.full_path AS category_path,v.version_number,v.source_origin,

@@ -30,6 +30,7 @@ import type {
   ContentReclassificationJob,
   ManagedContentList,
   BulkManagedContentResponse,
+  BulkRestorePreflightResult,
   ManagedIndexJobList,
   ManagedUploadResponse,
   ManagedUploadTask,
@@ -439,6 +440,20 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(body),
     }),
+  renameManagedCategory: (
+    categoryId: string,
+    body: { display_name: string; expected_version: number },
+  ) => jsonFetch<ManagedCategory>(
+    `/api/admin/content/categories/${encodeURIComponent(categoryId)}/name`,
+    { method: "PATCH", body: JSON.stringify(body) },
+  ),
+  updateManagedCategorySortOrder: (
+    categoryId: string,
+    body: { sort_order: number; expected_version: number },
+  ) => jsonFetch<ManagedCategory>(
+    `/api/admin/content/categories/${encodeURIComponent(categoryId)}/sort-order`,
+    { method: "PATCH", body: JSON.stringify(body) },
+  ),
   managedContentPermissions: () =>
     jsonFetch<ContentPermissionUser[]>("/api/admin/content/permissions"),
   managedContentPermissionCatalog: () =>
@@ -509,7 +524,7 @@ export const api = {
       method: "DELETE",
       body: JSON.stringify({ expected_version_id: expectedVersionId }),
     }),
-  managedContentTrash: (params?: { query?: string; limit?: number; offset?: number; retention_status?: string; archived_from?: number; archived_to?: number }) => {
+  managedContentTrash: (params?: { query?: string; limit?: number; offset?: number; retention_status?: string; archived_from?: number; archived_to?: number; category_id?: string; archived_by?: string; sort_direction?: string }) => {
     const search = new URLSearchParams();
     if (params?.query) search.set("query", params.query);
     if (params?.limit != null) search.set("limit", String(params.limit));
@@ -517,6 +532,9 @@ export const api = {
     if (params?.retention_status) search.set("retention_status", params.retention_status);
     if (params?.archived_from != null) search.set("archived_from", String(params.archived_from));
     if (params?.archived_to != null) search.set("archived_to", String(params.archived_to));
+    if (params?.category_id) search.set("category_id", params.category_id);
+    if (params?.archived_by) search.set("archived_by", params.archived_by);
+    if (params?.sort_direction) search.set("sort_direction", params.sort_direction);
     return jsonFetch<ManagedContentList>(`/api/admin/content/trash?${search}`);
   },
   restoreManagedContent: (
@@ -743,6 +761,14 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ items, target_category_id: targetCategoryId }),
     }),
+  preflightBulkRestoreManagedContent: (items: Array<{ item_id: string; expected_version_id: string }>, targetCategoryId?: string) =>
+    jsonFetch<{ results: BulkRestorePreflightResult[]; ready: number; blocked: number }>("/api/admin/content/bulk-restore/preflight", {
+      method: "POST", body: JSON.stringify({ items, target_category_id: targetCategoryId }),
+    }),
+  exportManagedContentTrash: (filters: Record<string, unknown>) =>
+    fileFetch("/api/admin/content/trash/export", "回收站处置清单.csv", {
+      method: "POST", body: JSON.stringify(filters),
+    }),
   bulkDownloadManagedContent: (versionIds: string[]) =>
     fileFetch("/api/admin/content/bulk-download", "资料批量下载.zip", {
       method: "POST",
@@ -759,6 +785,7 @@ export const api = {
     source_origin?: string;
     status?: string;
     history?: boolean;
+    include_archived?: boolean;
     limit?: number;
     offset?: number;
   }) => {
@@ -769,6 +796,7 @@ export const api = {
     if (params?.source_origin) search.set("source_origin", params.source_origin);
     if (params?.status) search.set("status", params.status);
     if (params?.history) search.set("history", "true");
+    if (params?.include_archived) search.set("include_archived", "true");
     if (params?.limit != null) search.set("limit", String(params.limit));
     if (params?.offset != null) search.set("offset", String(params.offset));
     return jsonFetch<ManagedIndexJobList>(`/api/admin/content/index-jobs?${search}`);
