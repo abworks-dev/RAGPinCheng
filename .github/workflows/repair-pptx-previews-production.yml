@@ -234,7 +234,7 @@ jobs:
                 | head -n 25 || true
             } > "${REPORT_ROOT}/libreoffice-recovery.txt"
 
-            if ! docker restart --time 30 "${LIBREOFFICE_ID}"; then
+            if ! docker restart --timeout 30 "${LIBREOFFICE_ID}"; then
               echo "LIBREOFFICE_RECOVERY restart=failed fallback=start"
               docker start "${LIBREOFFICE_ID}" || {
                 echo "ERROR: existing production LibreOffice container could not be started"
@@ -390,8 +390,8 @@ jobs:
 
           run_dry_run() {
             local output_path="$1"
-            docker exec "${BACKEND_ID}" \
-              python /app/scripts/repair_pptx_previews.py > "${output_path}"
+            docker exec --workdir /app "${BACKEND_ID}" \
+              python -m scripts.repair_pptx_previews > "${output_path}"
             python3 - "${output_path}" <<'PY'
           import json
           import sys
@@ -500,7 +500,8 @@ jobs:
             PART_INDEX=$((PART_INDEX + 1))
             PART_PATH="$(printf '%s/part-%05d.json' "${PARTS_ROOT}" "${PART_INDEX}")"
             set +e
-            docker exec "${BACKEND_ID}" python /app/scripts/repair_pptx_previews.py \
+            docker exec --workdir /app "${BACKEND_ID}" \
+              python -m scripts.repair_pptx_previews \
               --apply --confirm REPAIR_PPTX_PREVIEWS --version-id "${VERSION_ID}" \
               > "${PART_PATH}"
             PART_EXIT=$?
