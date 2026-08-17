@@ -50,6 +50,8 @@ jobs:
       REPO_PATH: ${{ vars.PRODUCTION_APP_REPO_PATH }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Download approved preview evidence
         if: ${{ inputs.operation == 'apply' }}
@@ -134,7 +136,8 @@ jobs:
             echo "ERROR: production App HEAD differs from expected_app_head"
             exit 1
           }
-          git merge-base --is-ancestor "${DEPLOYED_HEAD}" "${GITHUB_SHA}" || {
+          git -C "${GITHUB_WORKSPACE}" merge-base --is-ancestor \
+            "${DEPLOYED_HEAD}" "${GITHUB_SHA}" || {
             echo "ERROR: deployed App HEAD is not an ancestor of the selected master workflow"
             exit 1
           }
