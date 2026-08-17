@@ -33,6 +33,7 @@ def test_production_workflow_has_preview_apply_and_manifest_gates() -> None:
         "runs-on: [self-hosted, linux, ubuntu, production, app]",
         "environment: production-asr",
         "group: production-app-manual-v1",
+        "git config --get remote.origin.url",
         "actions/download-artifact@v4",
         "EXPECTED_MANIFEST_SHA256",
         "production PPTX preview state changed after the approved dry-run",

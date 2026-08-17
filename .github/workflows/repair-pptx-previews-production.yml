@@ -100,11 +100,27 @@ jobs:
               ;;
           esac
 
-          [ "${REPO_PATH}" = "/data/business/ragpincheng/source" ] || {
-            echo "ERROR: production repository path is not the approved fixed path"
+          [ -n "${REPO_PATH}" ] && [[ "${REPO_PATH}" = /* ]] || {
+            echo "ERROR: production repository path must be absolute"
             exit 1
           }
           cd "${REPO_PATH}"
+          REPOSITORY_ROOT="$(git rev-parse --show-toplevel)"
+          [ "$(realpath "${REPOSITORY_ROOT}")" = "$(realpath "${REPO_PATH}")" ] || {
+            echo "ERROR: configured production path is not the repository root"
+            exit 1
+          }
+          ORIGIN_URL="$(git config --get remote.origin.url)"
+          case "${ORIGIN_URL}" in
+            https://github.com/abworks-dev/RAGPinCheng|\
+            https://github.com/abworks-dev/RAGPinCheng.git|\
+            git@github.com:abworks-dev/RAGPinCheng.git|\
+            ssh://git@github.com/abworks-dev/RAGPinCheng.git) ;;
+            *)
+              echo "ERROR: production repository origin is not RAGPinCheng"
+              exit 1
+              ;;
+          esac
           [ "$(git branch --show-current)" = "master" ] || {
             echo "ERROR: production repository must be on master"
             exit 1
