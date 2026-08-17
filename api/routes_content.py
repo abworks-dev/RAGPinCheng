@@ -27,7 +27,7 @@ from src.indexing_pipeline import (
     list_managed_version_index_summaries,
 )
 
-from .auth import CurrentUser, require_admin, require_csrf, require_csrf_admin
+from .auth import CurrentUser, require_admin, require_csrf, require_csrf_admin, require_user
 from .content_permissions import (
     has_content_permission,
     require_content_permission,
@@ -59,6 +59,7 @@ from .content_store import (
     get_upload_task,
     list_content_items,
     list_content_items_page,
+    list_content_audit_events,
     list_upload_tasks,
     restore_content_item,
     list_categories,
@@ -87,6 +88,7 @@ from .schemas import (
     DeleteManagedContentResponse,
     RestoreManagedContentRequest,
     RestoreManagedContentResponse,
+    ContentTrashAuditEventDTO,
     ContentPermissionGroupDTO,
     ContentPermissionCatalogResponse,
     ContentReclassificationJobDTO,
@@ -389,15 +391,21 @@ def _raise_domain_error(exc: Exception) -> None:
                     "version_id": exc.version_id,
                     "title": exc.title,
                     "original_filename": exc.original_filename,
+                    "lifecycle_status": exc.lifecycle_status,
+                    "has_published_head": exc.has_published_head,
                 },
             },
         ) from exc
+    if isinstance(exc, sqlite3.IntegrityError) and "uq_category_nodes_sibling_code" in message:
+        raise HTTPException(status_code=409, detail="当前目录已存在该分类编号") from exc
     if isinstance(exc, sqlite3.IntegrityError):
         raise HTTPException(status_code=409, detail="分类编号或标识已存在") from exc
     if message == "category_version_conflict":
         raise HTTPException(status_code=409, detail="分类已被其他人修改，请刷新后重试") from exc
     if message == "category_sibling_name_conflict":
         raise HTTPException(status_code=409, detail="当前目录已有同名文件夹，请使用其他名称") from exc
+    if message == "category_sibling_code_conflict_current":
+        raise HTTPException(status_code=409, detail="当前目录已存在该分类编号") from exc
     if message == "category_sibling_code_conflict":
         raise HTTPException(status_code=409, detail="目标目录已有相同显示编号的文件夹，请先修改显示编号") from exc
     if message == "invalid_category_sort_order":
@@ -442,6 +450,10 @@ def _raise_domain_error(exc: Exception) -> None:
         raise HTTPException(status_code=409, detail="原分类已停用，请先启用分类后再恢复") from exc
     if message == "content_restore_in_progress":
         raise HTTPException(status_code=409, detail="资料仍有索引任务，暂时不能恢复") from exc
+    if message == "content_restore_conflict_reference_invalid":
+        raise HTTPException(status_code=400, detail="同名冲突确认信息不完整") from exc
+    if message == "content_restore_conflict_changed":
+        raise HTTPException(status_code=409, detail="同名资料已发生变化，请刷新后重新确认") from exc
     if message == "content_move_forbidden":
         raise HTTPException(status_code=403, detail="当前账号没有移动此状态资料的权限") from exc
     if message == "content_move_requires_republication":
@@ -1012,12 +1024,60 @@ def restore_managed_content_item(
             expected_version_id=body.expected_version_id,
             actor_user_id=user.id,
             can_restore=has_content_permission(conn, user, "trash.restore"),
+            target_category_id=body.target_category_id,
+            replace_conflict_item_id=body.replace_conflict_item_id,
+            replace_conflict_expected_version_id=body.replace_conflict_expected_version_id,
+            can_archive_draft=has_content_permission(conn, user, "item.archive_draft"),
+            can_archive_published=has_content_permission(conn, user, "item.archive_published"),
         )
-    except (ValueError, sqlite3.IntegrityError) as exc:
+    except (ValueError, ContentFilenameConflict, sqlite3.IntegrityError) as exc:
         _raise_domain_error(exc)
     return RestoreManagedContentResponse(
-        item_id=result.item_id, version_id=result.version_id, restored_status=result.restored_status
+        item_id=result.item_id,
+        version_id=result.version_id,
+        restored_status=result.restored_status,
+        category_id=result.category_id,
+        moved_to_alternate_category=result.moved_to_alternate_category,
+        replaced_conflict=result.replaced_conflict,
     )
+
+
+@router.get(
+    "/items/{item_id}/audit-events",
+    response_model=list[ContentTrashAuditEventDTO],
+)
+def get_content_trash_audit_events(
+    item_id: str,
+    user: CurrentUser = Depends(require_user),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> list[ContentTrashAuditEventDTO]:
+    item = conn.execute(
+        "SELECT archived_at FROM content_items WHERE id=? AND content_kind='document'",
+        (item_id,),
+    ).fetchone()
+    if item is None:
+        raise HTTPException(status_code=404, detail="资料不存在")
+    permission = "trash.view" if item["archived_at"] is not None else "item.view"
+    if not has_content_permission(conn, user, permission):
+        raise HTTPException(status_code=403, detail="当前账号没有查看资料操作记录的权限")
+    events: list[ContentTrashAuditEventDTO] = []
+    for row in list_content_audit_events(conn, item_id):
+        metadata = json.loads(row["metadata_json"] or "{}")
+        events.append(ContentTrashAuditEventDTO(
+            event_type=row["event_type"],
+            actor_name=row["actor_name"],
+            created_at=row["created_at"],
+            previous_status=metadata.get("previous_status"),
+            restored_status=metadata.get("restored_status"),
+            restore_strategy=metadata.get("restore_strategy"),
+            source_category_path=metadata.get("source_category_path"),
+            target_category_path=metadata.get("target_category_path"),
+            category_path=metadata.get("category_path"),
+            archive_reason=metadata.get("archive_reason"),
+            replaced_title=metadata.get("replaced_title"),
+            replaced_filename=metadata.get("replaced_filename"),
+        ))
+    return events
 
 
 @router.delete("/items/{item_id}", response_model=DeleteManagedContentResponse)

@@ -441,10 +441,19 @@ test.describe("资料管理", () => {
     const title = page.getByText("机电专业协同检查清单", { exact: true }).filter({ visible: true });
     const item = page.viewportSize()!.width < 1024 ? title.locator("xpath=ancestor::li") : title.locator("xpath=ancestor::tr");
     const workflow = item.getByRole("button", { name: "审核", exact: true });
+    const detailButton = item.getByRole("button", { name: "查看“机电专业协同检查清单”的详细信息" });
     await expect(workflow).toBeVisible();
-    if (page.viewportSize()!.width === 390) {
+    if (page.viewportSize()!.width >= 1024) {
       const workflowBox = await workflow.boundingBox();
-      const detailBox = await item.getByRole("button", { name: "查看“机电专业协同检查清单”的详细信息" }).boundingBox();
+      const detailBox = await detailButton.boundingBox();
+      expect(workflowBox).not.toBeNull();
+      expect(detailBox).not.toBeNull();
+      const actionGap = detailBox!.x - (workflowBox!.x + workflowBox!.width);
+      expect(actionGap).toBeGreaterThanOrEqual(4);
+      expect(actionGap).toBeLessThanOrEqual(12);
+    } else if (page.viewportSize()!.width === 390) {
+      const workflowBox = await workflow.boundingBox();
+      const detailBox = await detailButton.boundingBox();
       expect(workflowBox).not.toBeNull();
       expect(detailBox).not.toBeNull();
       expect(workflowBox!.y + workflowBox!.height).toBeLessThanOrEqual(detailBox!.y);
@@ -532,10 +541,23 @@ test.describe("资料管理", () => {
     const restoreRequest = page.waitForRequest((request) => request.method() === "POST" && request.url().endsWith("/items/item-5/restore"));
     await restore.click();
     const dialog = page.getByRole("dialog", { name: "恢复资料" });
-    await expect(dialog).toContainText("需要具备发布权限的人员重新发布后才会进入检索");
+    await expect(dialog).toContainText("重新发布后才会进入检索");
+    await expect(dialog).toContainText("恢复到目录");
+    await expectNoBodyOverflow(page);
     await dialog.getByRole("button", { name: "确认恢复" }).click();
     await expect(dialog.getByRole("button", { name: "恢复中…" })).toBeDisabled();
     await restoreRequest;
+  });
+
+  test("trash audit records remain available independently of restore", async ({ page }) => {
+    await openTab(page, "资料管理");
+    await page.getByRole("tab", { name: "回收站" }).click();
+    const record = page.getByRole("button", { name: /记录/ }).filter({ visible: true }).first();
+    await record.click();
+    const dialog = page.getByRole("dialog", { name: "操作记录" });
+    await expect(dialog).toContainText("移入回收站");
+    await expect(dialog).toContainText("操作人：合成资料员");
+    await expectNoBodyOverflow(page);
   });
 });
 
@@ -661,9 +683,8 @@ test.describe("分类管理", () => {
       await child.press("ArrowLeft");
       await expect(parent).toBeFocused();
       await expect(page.getByText("公司内部标准").last()).toBeVisible();
-      await page.getByRole("button", { name: "调整结构" }).click();
-      await expect(page.getByRole("button", { name: "完成调整" })).toHaveAttribute("aria-pressed", "true");
-      await expect(page.getByRole("button", { name: "拖动公司内部标准" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "调整结构" })).toHaveCount(0);
+      await expect(page.getByText("同级分类按显示编号自动排列。")).toBeVisible();
       const save = page.getByRole("button", { name: "保存修改" });
       await expect(save).toBeDisabled();
       await expectInViewport(save);
@@ -676,12 +697,17 @@ test.describe("分类管理", () => {
     const editor = page.viewportSize()!.width < 1024
       ? page.getByRole("dialog", { name: "项目资料" })
       : page.locator("[aria-labelledby='category-list-title']").getByText("基本信息").locator("xpath=ancestor::div[contains(@class,'h-full')]");
-    await expect(editor.getByRole("button", { name: "上移" })).toBeVisible();
-    await expect(editor.getByRole("button", { name: "下移" })).toBeVisible();
+    await expect(editor.getByRole("button", { name: /上移|下移/ })).toHaveCount(0);
     await editor.getByRole("button", { name: "移动至" }).click();
     const dialog = page.getByRole("dialog", { name: "移动分类" });
     await expect(dialog).toContainText("04 项目资料");
-    await dialog.getByRole("combobox", { name: "目标父分类" }).selectOption("cat-company");
+    await expect(dialog.getByRole("searchbox", { name: "搜索目标目录" })).toBeVisible();
+    await expect(dialog.getByRole("tree", { name: "目标目录树" })).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "一级分类（当前父级）" })).toBeDisabled();
+    await expect(dialog.getByTestId("category-picker-item-cat-project")).toHaveCount(0);
+    await expect(dialog.getByTestId("category-picker-item-cat-archive")).toHaveCount(0);
+    await dialog.getByRole("searchbox", { name: "搜索目标目录" }).fill("公司内部");
+    await dialog.getByTestId("category-picker-item-cat-company").click();
     await expect(dialog).toContainText("新路径：03 公司内部标准 / 04 项目资料");
     const moveRequest = page.waitForRequest((request) => request.method() === "POST" && request.url().endsWith("/api/admin/content/categories/cat-project/move"));
     await dialog.getByRole("button", { name: "确认移动" }).click();

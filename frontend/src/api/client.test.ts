@@ -125,11 +125,17 @@ describe("api client", () => {
     setCsrfToken("csrf-restore");
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({ items: [], total: 0, status_counts: {} }))
-      .mockResolvedValueOnce(jsonResponse({ item_id: "item-1", version_id: "version-1", restored_status: "approved" }));
+      .mockResolvedValueOnce(jsonResponse({ item_id: "item-1", version_id: "version-1", restored_status: "approved" }))
+      .mockResolvedValueOnce(jsonResponse([]));
     vi.stubGlobal("fetch", fetchMock);
 
     await api.managedContentTrash({ query: "标准", limit: 25, offset: 0 });
-    await api.restoreManagedContent("item/1", "version-1");
+    await api.restoreManagedContent("item/1", "version-1", {
+      target_category_id: "cat-04",
+      replace_conflict_item_id: "item-2",
+      replace_conflict_expected_version_id: "version-2",
+    });
+    await api.managedContentAuditEvents("item/1");
 
     expect(fetchMock).toHaveBeenNthCalledWith(1,
       "/api/admin/content/trash?query=%E6%A0%87%E5%87%86&limit=25&offset=0",
@@ -139,9 +145,18 @@ describe("api client", () => {
       "/api/admin/content/items/item%2F1/restore",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ expected_version_id: "version-1" }),
+        body: JSON.stringify({
+          expected_version_id: "version-1",
+          target_category_id: "cat-04",
+          replace_conflict_item_id: "item-2",
+          replace_conflict_expected_version_id: "version-2",
+        }),
         headers: { "content-type": "application/json", "X-CSRF-Token": "csrf-restore" },
       }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(3,
+      "/api/admin/content/items/item%2F1/audit-events",
+      expect.objectContaining({ credentials: "include", headers: {} }),
     );
   });
 

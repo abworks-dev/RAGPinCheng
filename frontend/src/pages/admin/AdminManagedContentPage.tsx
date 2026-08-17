@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { AlertTriangle, ArchiveRestore, ArrowDown, ArrowUp, ArrowUpDown, Captions, Check, CheckCircle2, ChevronDown, ChevronRight, Download, ExternalLink, Eye, FileCode2, FileSpreadsheet, FileText, FileType2, FileUp, Film, Folder, FolderInput, FolderPlus, Info, ListChecks, ListOrdered, Pencil, Presentation, RefreshCw, RotateCcw, Rocket, Search, Send, SlidersHorizontal, Trash2, Upload, X, XCircle } from "lucide-react";
+import { AlertTriangle, ArchiveRestore, ArrowDown, ArrowUp, ArrowUpDown, Captions, Check, CheckCircle2, ChevronDown, ChevronRight, Download, ExternalLink, Eye, FileCode2, FileSpreadsheet, FileText, FileType2, FileUp, Film, Folder, FolderInput, FolderPlus, History, Info, ListChecks, ListOrdered, Pencil, Presentation, RefreshCw, RotateCcw, Rocket, Search, Send, SlidersHorizontal, Trash2, Upload, X, XCircle } from "lucide-react";
 import { adminContentApi } from "../../api/admin/content";
 import { Badge } from "../../components/ui/badge";
 import { CategoryTreePicker } from "../../components/admin/CategoryTreePicker";
@@ -19,7 +19,7 @@ import { toast } from "../../components/ui/toast";
 import { useAuth } from "../../context/AuthContext";
 import { usePdfPreview } from "../../hooks/usePdfPreview";
 import { useVideoPlayer } from "../../hooks/useVideoPlayer";
-import type { BulkManagedContentResult, ContentPermission, FolderRequest, ManagedCategory, ManagedContentItem, ManagedUploadTask, ManagedUploadTaskEntry } from "../../types";
+import type { BulkManagedContentResult, ContentPermission, ContentTrashAuditEvent, FolderRequest, ManagedCategory, ManagedContentItem, ManagedUploadTask, ManagedUploadTaskEntry } from "../../types";
 import type { ManagedUploadProgress } from "../../api/client";
 import { formatAdminDate } from "../../lib/admin-formatters";
 import { AdminDocumentsPage } from "./AdminDocumentsPage";
@@ -298,6 +298,8 @@ type FilenameConflict = {
   version_id: string;
   title: string;
   original_filename: string;
+  lifecycle_status: string;
+  has_published_head: boolean;
 };
 
 function filenameForOldMode(originalFilename: string, incomingFilename: string) {
@@ -584,7 +586,13 @@ export function AdminManagedContentPage() {
   const [trashTotal, setTrashTotal] = useState(0);
   const [trashLoading, setTrashLoading] = useState(false);
   const [restoreTarget, setRestoreTarget] = useState<ManagedContentItem | null>(null);
+  const [restoreFolderId, setRestoreFolderId] = useState("");
+  const [restoreConflict, setRestoreConflict] = useState<FilenameConflict | null>(null);
   const [restoreError, setRestoreError] = useState<string | null>(null);
+  const [auditTarget, setAuditTarget] = useState<ManagedContentItem | null>(null);
+  const [auditEvents, setAuditEvents] = useState<ContentTrashAuditEvent[]>([]);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [auditError, setAuditError] = useState<string | null>(null);
   const [newFolderOpen, setNewFolderOpen] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
@@ -1332,18 +1340,45 @@ export function AdminManagedContentPage() {
     }
   };
 
-  const restoreContent = async () => {
+  const openRestore = (target: ManagedContentItem) => {
+    setRestoreTarget(target);
+    setRestoreFolderId(categories.some((category) => category.id === target.category_id) ? target.category_id : "");
+    setRestoreConflict(null);
+    setRestoreError(null);
+  };
+
+  const restoreContent = async (replaceConflict = false) => {
     if (!restoreTarget) return;
     const target = restoreTarget;
     setBusyAction(`${target.version_id}:restore`); setRestoreError(null);
     try {
-      await adminContentApi.restore(target.item_id, target.version_id);
+      const result = await adminContentApi.restore(target.item_id, target.version_id, {
+        target_category_id: restoreFolderId,
+        ...(replaceConflict && restoreConflict ? {
+          replace_conflict_item_id: restoreConflict.item_id,
+          replace_conflict_expected_version_id: restoreConflict.version_id,
+        } : {}),
+      });
       setRestoreTarget(null);
-      toast.success(`已恢复“${target.title}”`);
+      setRestoreConflict(null);
+      toast.success(result.replaced_conflict
+        ? `已替换同名资料并恢复“${target.title}”`
+        : result.moved_to_alternate_category
+          ? `已恢复“${target.title}”到所选目录`
+          : `已恢复“${target.title}”`);
       await loadTrash();
     } catch (restoreFailure) {
-      setRestoreError(restoreFailure instanceof Error ? restoreFailure.message : "恢复资料失败");
+      const conflict = filenameConflictFrom(restoreFailure);
+      if (conflict) setRestoreConflict(conflict);
+      else setRestoreError(restoreFailure instanceof Error ? restoreFailure.message : "恢复资料失败");
     } finally { setBusyAction(null); }
+  };
+
+  const openAudit = async (target: ManagedContentItem) => {
+    setAuditTarget(target); setAuditEvents([]); setAuditError(null); setAuditLoading(true);
+    try { setAuditEvents(await adminContentApi.auditEvents(target.item_id)); }
+    catch (auditFailure) { setAuditError(auditFailure instanceof Error ? auditFailure.message : "操作记录加载失败"); }
+    finally { setAuditLoading(false); }
   };
 
   const selectedItems = useMemo(
@@ -1514,7 +1549,7 @@ export function AdminManagedContentPage() {
             : "当前账号没有删除草稿或已退回资料的权限");
     return <div className="ml-auto flex w-full flex-col items-stretch gap-2 lg:w-auto lg:flex-row lg:items-center">
       {workflow && <Button size="sm" className="w-full shrink-0 max-sm:h-10 lg:w-auto" disabled={disabled} onClick={workflow.action}>{workflow.label}</Button>}
-      <div className="ml-auto flex min-h-10 w-[19rem] max-w-full items-center justify-end gap-1 sm:w-[17.25rem]">
+      <div className="ml-auto flex min-h-10 w-[19rem] max-w-full items-center justify-end gap-1 sm:w-[17.25rem] lg:ml-0">
         <IconButton label={`查看“${item.title}”的详细信息`} tooltip={unavailableReason || "查看资料详情"} className="border border-border max-sm:size-10" disabled={disabled} onClick={() => setDetail(item)}><Info className="size-4" /></IconButton>
         <IconButton label={`预览“${item.title}”`} tooltip={previewTooltip} className="border border-border max-sm:size-10" disabled={disabled || !previewable} onClick={() => openDocumentPreview(item.preview_parent_id!, item.title, item.doc_type, 1, {}, null)}><Eye className="size-4" /></IconButton>
         <IconButton label={item.has_published_head ? `调整“${item.title}”的分类` : `移动“${item.title}”`} tooltip={moveTooltip} className="border border-border max-sm:size-10" disabled={disabled || !movable} onClick={() => { setMoveTarget(item); setMoveFolderId(""); setMoveError(null); }}><FolderInput className="size-4" /></IconButton>
@@ -1560,6 +1595,14 @@ export function AdminManagedContentPage() {
     </div>
   );
 
+  const auditDialog = <Dialog open={Boolean(auditTarget)} onOpenChange={(open) => { if (!open) { setAuditTarget(null); setAuditEvents([]); setAuditError(null); } }}>
+    <DialogContent className="max-w-2xl">
+      <DialogHeader><DialogTitle>操作记录</DialogTitle><DialogDescription>“{auditTarget?.title}”移入回收站和恢复的历史记录。</DialogDescription></DialogHeader>
+      {auditLoading ? <LoadingState className="min-h-36 border-0" label="正在加载操作记录…" /> : auditError ? <ErrorState title="操作记录加载失败" description={auditError} action={auditTarget ? <Button size="sm" variant="outline" onClick={() => void openAudit(auditTarget)}>重新加载</Button> : undefined} /> : auditEvents.length === 0 ? <EmptyState className="min-h-36 rounded-none border-0" title="暂无操作记录" description="移入回收站或恢复后会在这里留下记录。" /> : <ol className="max-h-[55vh] divide-y divide-border overflow-y-auto rounded-ui-md border border-border">{auditEvents.map((event, index) => <li key={`${event.created_at}-${event.event_type}-${index}`} className="space-y-2 px-4 py-3 text-ui-sm"><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium">{event.event_type === "content.restored" ? "恢复资料" : event.archive_reason === "restore_conflict_replacement" ? "同名替换移入回收站" : "移入回收站"}</p><time className="text-ui-xs text-muted-foreground">{formatAdminDate(event.created_at)}</time></div><p className="text-muted-foreground">操作人：{event.actor_name || "未知人员"}</p>{event.event_type === "content.restored" && <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-1"><dt className="text-muted-foreground">恢复结果</dt><dd>{statusLabel[event.restored_status || ""] || event.restored_status || "已恢复"}</dd><dt className="text-muted-foreground">目标目录</dt><dd className="break-words">{event.target_category_path || "原目录"}</dd><dt className="text-muted-foreground">处理方式</dt><dd>{event.restore_strategy === "replace_conflict" ? "替换同名资料" : event.restore_strategy === "alternate_directory" ? "恢复到其他目录" : "恢复到原目录"}</dd>{event.replaced_title && <><dt className="text-muted-foreground">被替换资料</dt><dd className="break-words">{event.replaced_title}{event.replaced_filename ? `（${event.replaced_filename}）` : ""}</dd></>}</dl>}</li>)}</ol>}
+      <DialogFooter><Button variant="outline" onClick={() => setAuditTarget(null)}>关闭</Button></DialogFooter>
+    </DialogContent>
+  </Dialog>;
+
   if (view === "index") {
     return <section className="space-y-5" aria-labelledby="managed-content-title">
       <header><p className="text-ui-xs font-medium text-primary">内容管理</p><h1 id="managed-content-title" className="mt-1 text-ui-2xl font-semibold tracking-tight">资料管理</h1><p className="mt-1 text-ui-sm text-muted-foreground">统一管理资料的上传、分类、确认和发布。</p></header>
@@ -1584,12 +1627,13 @@ export function AdminManagedContentPage() {
       {error && <ErrorState title="回收站加载失败" description={error} action={<Button size="sm" variant="outline" onClick={() => void loadTrash()}>重新加载</Button>} />}
       <Card className="overflow-hidden shadow-surface [&_table]:!min-w-[58rem]"><div className="flex flex-col gap-3 border-b border-border px-4 py-4 sm:flex-row sm:items-end sm:justify-between sm:px-5"><label className="max-w-xl flex-1 space-y-1 text-ui-xs text-muted-foreground"><span>搜索回收站</span><span className="relative block"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2" /><Input className="pl-9" value={queryInput} onChange={(event) => setQueryInput(event.target.value)} placeholder="搜索名称、文件名、原目录或上传路径…" /></span></label><p className="text-ui-xs text-muted-foreground">共 {trashTotal} 份</p></div>
         {trashLoading ? <LoadingState className="min-h-48 border-0" label="正在加载回收站…" /> : trashItems.length === 0 ? <EmptyState className="rounded-none border-0" title="回收站为空" description="移至回收站的资料会显示在这里。" /> : <>
-          <div className="hidden overflow-x-auto lg:block"><table className="w-full text-ui-sm"><thead className="border-b border-border bg-surface-muted text-left text-muted-foreground"><tr><th className="px-4 py-3 font-medium">资料</th><th className="px-4 py-3 font-medium">原目录</th><th className="px-4 py-3 font-medium">原状态</th><th className="px-4 py-3 font-medium">来源</th><th className="px-4 py-3 font-medium">移入回收站</th>{can("trash.restore") && <th className="px-4 py-3 text-right font-medium">操作</th>}</tr></thead><tbody className="divide-y divide-border">{trashItems.map((item) => { const previousStatus = item.pre_archive_lifecycle_status || item.lifecycle_status; const sourcePath = item.source_rel_path && item.source_rel_path !== item.original_filename ? item.source_rel_path : null; return <tr key={item.item_id} className="align-top transition-colors duration-normal hover:bg-surface-muted/60"><td className="max-w-xs px-4 py-3"><p className="break-words font-medium">{item.title}</p><p className="mt-1 break-all text-ui-xs text-muted-foreground">{item.original_filename} · v{item.version_number}</p></td><td className="max-w-sm px-4 py-3"><p className="break-words">{item.category_path || item.category_label}</p>{sourcePath && <p className="mt-1 break-all text-ui-xs text-muted-foreground">上传路径：{sourcePath}</p>}</td><td className="px-4 py-3"><Badge variant={statusVariant(previousStatus)}>{statusLabel[previousStatus] || "未知状态"}</Badge></td><td className="px-4 py-3">{sourceLabel[item.source_origin] || "其他来源"}</td><td className="px-4 py-3"><p>{item.archived_by_name || "未知人员"}</p><p className="mt-1 whitespace-nowrap text-ui-xs text-muted-foreground">{formatAdminDate(item.archived_at)}</p></td>{can("trash.restore") && <td className="px-4 py-3 text-right"><Button size="sm" variant="outline" disabled={Boolean(busyAction)} onClick={() => { setRestoreError(null); setRestoreTarget(item); }}><ArchiveRestore className="size-4" />恢复</Button></td>}</tr>; })}</tbody></table></div>
-          <ul className="divide-y divide-border lg:hidden">{trashItems.map((item) => { const previousStatus = item.pre_archive_lifecycle_status || item.lifecycle_status; const sourcePath = item.source_rel_path && item.source_rel_path !== item.original_filename ? item.source_rel_path : null; return <li key={item.item_id} className="space-y-3 px-4 py-4 sm:px-5"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="break-words font-medium">{item.title}</p><p className="mt-1 break-all text-ui-xs text-muted-foreground">{item.original_filename} · v{item.version_number}</p></div><Badge className="shrink-0" variant={statusVariant(previousStatus)}>{statusLabel[previousStatus] || "未知状态"}</Badge></div><dl className="grid grid-cols-[5rem_minmax(0,1fr)] gap-x-2 gap-y-1 text-ui-sm"><dt className="text-muted-foreground">原目录</dt><dd className="break-words">{item.category_path || item.category_label}</dd>{sourcePath && <><dt className="text-muted-foreground">上传路径</dt><dd className="break-all">{sourcePath}</dd></>}<dt className="text-muted-foreground">来源</dt><dd>{sourceLabel[item.source_origin] || "其他来源"}</dd><dt className="text-muted-foreground">移入人员</dt><dd>{item.archived_by_name || "未知人员"}</dd><dt className="text-muted-foreground">移入时间</dt><dd>{formatAdminDate(item.archived_at)}</dd></dl>{can("trash.restore") && <Button size="sm" variant="outline" className="w-full sm:w-auto" disabled={Boolean(busyAction)} onClick={() => { setRestoreError(null); setRestoreTarget(item); }}><ArchiveRestore className="size-4" />恢复</Button>}</li>; })}</ul>
+          <div className="hidden overflow-x-auto lg:block"><table className="w-full text-ui-sm"><thead className="border-b border-border bg-surface-muted text-left text-muted-foreground"><tr><th className="px-4 py-3 font-medium">资料</th><th className="px-4 py-3 font-medium">原目录</th><th className="px-4 py-3 font-medium">原状态</th><th className="px-4 py-3 font-medium">来源</th><th className="px-4 py-3 font-medium">移入回收站</th><th className="px-4 py-3 text-right font-medium">操作</th></tr></thead><tbody className="divide-y divide-border">{trashItems.map((item) => { const previousStatus = item.pre_archive_lifecycle_status || item.lifecycle_status; const sourcePath = item.source_rel_path && item.source_rel_path !== item.original_filename ? item.source_rel_path : null; return <tr key={item.item_id} className="align-top transition-colors duration-normal hover:bg-surface-muted/60"><td className="max-w-xs px-4 py-3"><p className="break-words font-medium">{item.title}</p><p className="mt-1 break-all text-ui-xs text-muted-foreground">{item.original_filename} · v{item.version_number}</p></td><td className="max-w-sm px-4 py-3"><p className="break-words">{item.category_path || item.category_label}</p>{sourcePath && <p className="mt-1 break-all text-ui-xs text-muted-foreground">上传路径：{sourcePath}</p>}</td><td className="px-4 py-3"><Badge variant={statusVariant(previousStatus)}>{statusLabel[previousStatus] || "未知状态"}</Badge></td><td className="px-4 py-3">{sourceLabel[item.source_origin] || "其他来源"}</td><td className="px-4 py-3"><p>{item.archived_by_name || "未知人员"}</p><p className="mt-1 whitespace-nowrap text-ui-xs text-muted-foreground">{formatAdminDate(item.archived_at)}</p></td><td className="px-4 py-3"><div className="flex justify-end gap-2"><Button size="sm" variant="outline" onClick={() => void openAudit(item)}><History className="size-4" />记录</Button>{can("trash.restore") && <Button size="sm" variant="outline" disabled={Boolean(busyAction)} onClick={() => openRestore(item)}><ArchiveRestore className="size-4" />恢复</Button>}</div></td></tr>; })}</tbody></table></div>
+          <ul className="divide-y divide-border lg:hidden">{trashItems.map((item) => { const previousStatus = item.pre_archive_lifecycle_status || item.lifecycle_status; const sourcePath = item.source_rel_path && item.source_rel_path !== item.original_filename ? item.source_rel_path : null; return <li key={item.item_id} className="space-y-3 px-4 py-4 sm:px-5"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="break-words font-medium">{item.title}</p><p className="mt-1 break-all text-ui-xs text-muted-foreground">{item.original_filename} · v{item.version_number}</p></div><Badge className="shrink-0" variant={statusVariant(previousStatus)}>{statusLabel[previousStatus] || "未知状态"}</Badge></div><dl className="grid grid-cols-[5rem_minmax(0,1fr)] gap-x-2 gap-y-1 text-ui-sm"><dt className="text-muted-foreground">原目录</dt><dd className="break-words">{item.category_path || item.category_label}</dd>{sourcePath && <><dt className="text-muted-foreground">上传路径</dt><dd className="break-all">{sourcePath}</dd></>}<dt className="text-muted-foreground">来源</dt><dd>{sourceLabel[item.source_origin] || "其他来源"}</dd><dt className="text-muted-foreground">移入人员</dt><dd>{item.archived_by_name || "未知人员"}</dd><dt className="text-muted-foreground">移入时间</dt><dd>{formatAdminDate(item.archived_at)}</dd></dl><div className="grid grid-cols-2 gap-2"><Button size="sm" variant="outline" onClick={() => void openAudit(item)}><History className="size-4" />操作记录</Button>{can("trash.restore") && <Button size="sm" variant="outline" disabled={Boolean(busyAction)} onClick={() => openRestore(item)}><ArchiveRestore className="size-4" />恢复</Button>}</div></li>; })}</ul>
         </>}
         <div className="flex items-center justify-between border-t border-border px-4 py-3 sm:px-5"><p className="text-ui-xs text-muted-foreground">第 {page + 1} / {trashPageCount} 页</p><div className="flex gap-2"><Button size="sm" variant="outline" disabled={page === 0 || trashLoading} onClick={() => setPage((value) => value - 1)}>上一页</Button><Button size="sm" variant="outline" disabled={page + 1 >= trashPageCount || trashLoading} onClick={() => setPage((value) => value + 1)}>下一页</Button></div></div>
       </Card>
-      <Dialog open={Boolean(restoreTarget)} onOpenChange={(open) => { if (!open && !busyAction) { setRestoreTarget(null); setRestoreError(null); } }}><DialogContent><DialogHeader><DialogTitle>恢复资料</DialogTitle><DialogDescription>“{restoreTarget?.title}”将恢复到资料库。已发布或发布失败的资料会恢复为“已确认”，需要具备发布权限的人员重新发布后才会进入检索。</DialogDescription></DialogHeader>{restoreError && <p className="rounded-ui-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-ui-sm text-destructive" role="alert">{restoreError}</p>}<DialogFooter><Button variant="outline" disabled={Boolean(busyAction)} onClick={() => setRestoreTarget(null)}>取消</Button><Button disabled={Boolean(busyAction)} onClick={() => void restoreContent()}>{busyAction ? "恢复中…" : "确认恢复"}</Button></DialogFooter></DialogContent></Dialog>
+      <Dialog open={Boolean(restoreTarget)} onOpenChange={(open) => { if (!open && !busyAction) { setRestoreTarget(null); setRestoreFolderId(""); setRestoreConflict(null); setRestoreError(null); } }}><DialogContent className="max-w-2xl"><DialogHeader><DialogTitle>恢复资料</DialogTitle><DialogDescription>“{restoreTarget?.title}”将恢复到资料库。已发布或发布失败的资料会恢复为“已确认”，重新发布后才会进入检索。</DialogDescription></DialogHeader><div className="space-y-4"><dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-2 text-ui-sm"><dt className="text-muted-foreground">文件名</dt><dd className="break-all">{restoreTarget?.original_filename}</dd><dt className="text-muted-foreground">原目录</dt><dd className="break-words">{restoreTarget?.category_path || restoreTarget?.category_label}</dd></dl><CategoryTreePicker categories={categories} value={restoreFolderId} currentCategoryId={restoreTarget?.category_id} onChange={(categoryId) => { setRestoreFolderId(categoryId); setRestoreConflict(null); setRestoreError(null); }} label="恢复到目录" />{!categories.some((category) => category.id === restoreTarget?.category_id) && <p className="rounded-ui-md border border-warning/40 bg-warning/10 px-3 py-2 text-ui-sm" role="status">原目录已停用，请选择其他有效目录。</p>}{restoreConflict && <div className="space-y-2 rounded-ui-md border border-warning/50 bg-warning/10 p-3 text-ui-sm" role="alert"><p className="font-medium">所选目录存在同名资料</p><p className="break-words">{restoreConflict.title}（{restoreConflict.original_filename}）</p><p className="text-muted-foreground">可以选择其他目录；确认替换会将上述资料移入回收站。已发布资料会立即停止检索。</p></div>}{restoreError && <p className="rounded-ui-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-ui-sm text-destructive" role="alert">{restoreError}</p>}</div><DialogFooter><Button variant="outline" disabled={Boolean(busyAction)} onClick={() => setRestoreTarget(null)}>取消</Button>{restoreConflict && ((restoreConflict.has_published_head || !["draft", "rejected"].includes(restoreConflict.lifecycle_status)) ? can("item.archive_published") : can("item.archive_draft")) && <Button variant="destructive" disabled={Boolean(busyAction) || !restoreFolderId} onClick={() => void restoreContent(true)}>{busyAction ? "替换中…" : "替换并恢复"}</Button>}<Button disabled={Boolean(busyAction) || !restoreFolderId || Boolean(restoreConflict)} onClick={() => void restoreContent()}>{busyAction ? "恢复中…" : "确认恢复"}</Button></DialogFooter></DialogContent></Dialog>
+      {auditDialog}
     </section>;
   }
 
@@ -1773,6 +1817,7 @@ export function AdminManagedContentPage() {
             <Button variant="outline" onClick={() => { setDetail(null); openVideoPreview({ mediaId: detail.media_id!, title: detail.title, startSeconds: 0, fromSource: false }); }} disabled={!detail.media_id}><Film className="size-4" />播放视频与转录稿</Button>
             <a className={buttonVariants({ variant: "outline" })} href={`/admin/media?media_id=${encodeURIComponent(detail.media_id || "")}&workbench=1`}><ExternalLink className="size-4" />进入视频管理</a>
           </div> : <div className="flex flex-wrap gap-2">
+            <Button variant="outline" onClick={() => { const target = detail; setDetail(null); void openAudit(target); }}><History className="size-4" />操作记录</Button>
             {detail.preview_parent_id && ["pdf", "docx", "xlsx", "pptx"].includes(detail.doc_type) ? <Button variant="outline" onClick={() => { openDocumentPreview(detail.preview_parent_id!, detail.title, detail.doc_type, 1, {}, "managed-content-detail"); }}><Eye className="size-4" />预览文件</Button> : detail.doc_type === "pdf" || can("item.download") ? <a className={buttonVariants({ variant: "outline" })} href={adminContentApi.fileUrl(detail.version_id)} target="_blank" rel="noreferrer"><Eye className="size-4" />打开文件</a> : <Button variant="outline" disabled title="打开文件（需要下载权限）"><Eye className="size-4" />打开文件</Button>}
             {can("item.submit") && ["draft", "rejected"].includes(detail.lifecycle_status) && <Button onClick={() => void act(detail, "submit", () => adminContentApi.submit(detail.version_id), "已提交确认")} disabled={Boolean(busyAction)}><Send className="size-4" />{busyAction === `${detail.version_id}:submit` ? "提交中…" : detail.lifecycle_status === "rejected" ? "重新提交" : "提交"}</Button>}
             {can("item.review") && detail.lifecycle_status === "awaiting_review" && <Button onClick={() => openReviewDialog(detail)} disabled={Boolean(busyAction)}><Check className="size-4" />审核</Button>}
@@ -1781,6 +1826,8 @@ export function AdminManagedContentPage() {
         </div>}
       </DialogContent>
     </Dialog>
+
+    {auditDialog}
 
     <Dialog open={Boolean(reviewTarget) && !previewState.parentId} onOpenChange={(open) => {
       if (!open && !previewState.parentId && busyAction !== "review") {

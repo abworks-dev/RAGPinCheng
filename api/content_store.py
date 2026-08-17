@@ -46,6 +46,9 @@ class RestoredContent:
     item_id: str
     version_id: str
     restored_status: str
+    category_id: str
+    moved_to_alternate_category: bool
+    replaced_conflict: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +66,8 @@ class ContentFilenameConflict(ValueError):
         self.version_id = str(row["version_id"])
         self.title = str(row["title"])
         self.original_filename = str(row["original_filename"])
+        self.lifecycle_status = str(row["lifecycle_status"])
+        self.has_published_head = bool(row["has_published_head"])
 
 
 def _now() -> int:
@@ -132,6 +137,7 @@ def _ensure_category_sibling_identity_available(
     display_name: str,
     display_code: str | None = None,
     exclude_category_id: str | None = None,
+    code_conflict_error: str = "category_sibling_code_conflict",
 ) -> None:
     _clean, name_key = normalize_category_name(display_name)
     for row in _category_siblings(conn, parent_id):
@@ -140,7 +146,7 @@ def _ensure_category_sibling_identity_available(
         if normalize_category_name(str(row["display_name"]))[1] == name_key:
             raise ValueError("category_sibling_name_conflict")
         if display_code is not None and str(row["display_code"]) == display_code:
-            raise ValueError("category_sibling_code_conflict")
+            raise ValueError(code_conflict_error)
 
 
 def next_category_sort_order(conn: sqlite3.Connection, parent_id: str | None) -> int:
@@ -175,7 +181,9 @@ def find_content_filename_conflict(
     _clean, normalized = normalize_content_filename(original_filename)
     rows = conn.execute(
         """SELECT i.id AS item_id,COALESCE(v.title,i.title) AS title,
-                  v.id AS version_id,v.original_filename
+                  v.id AS version_id,v.original_filename,v.lifecycle_status,
+                  EXISTS(SELECT 1 FROM content_item_heads h WHERE h.item_id=i.id)
+                    AS has_published_head
            FROM content_items i
            JOIN content_versions v ON v.item_id=i.id
             AND v.version_number=(
@@ -230,6 +238,39 @@ def _category_sibling_sort_key(row: sqlite3.Row) -> tuple[bool, int, str, str]:
         unicodedata.normalize("NFKC", str(row["display_name"])).strip(),
         str(row["id"]),
     )
+
+
+def _category_path(conn: sqlite3.Connection, category_id: str) -> str:
+    row = conn.execute(
+        """WITH RECURSIVE ancestors AS (
+               SELECT id,parent_id,display_code,display_name,0 AS depth
+               FROM category_nodes WHERE id=?
+               UNION ALL
+               SELECT parent.id,parent.parent_id,parent.display_code,parent.display_name,
+                      child.depth + 1
+               FROM category_nodes parent
+               JOIN ancestors child ON child.parent_id=parent.id
+           )
+           SELECT group_concat(label, ' / ') AS full_path FROM (
+               SELECT display_code || ' ' || display_name AS label
+               FROM ancestors ORDER BY depth DESC
+           )""",
+        (category_id,),
+    ).fetchone()
+    return str(row["full_path"] or "") if row is not None else ""
+
+
+def list_content_audit_events(
+    conn: sqlite3.Connection, item_id: str, *, limit: int = 50
+) -> list[sqlite3.Row]:
+    return conn.execute(
+        """SELECT ae.event_type,ae.metadata_json,ae.created_at,u.real_name AS actor_name
+           FROM content_audit_events ae
+           LEFT JOIN users u ON u.id=ae.actor_user_id
+           WHERE ae.item_id=? AND ae.event_type IN ('content.archived','content.restored')
+           ORDER BY ae.created_at DESC,ae.rowid DESC LIMIT ?""",
+        (item_id, limit),
+    ).fetchall()
 
 
 def list_categories(conn: sqlite3.Connection, *, include_inactive: bool = False) -> list[sqlite3.Row]:
@@ -318,6 +359,7 @@ def create_category(
             parent_id=parent_id,
             display_name=name,
             display_code=code,
+            code_conflict_error="category_sibling_code_conflict_current",
         )
         category_id = _id("cat")
         now = _now()
@@ -368,6 +410,7 @@ def update_category(
             display_name=name,
             display_code=code,
             exclude_category_id=category_id,
+            code_conflict_error="category_sibling_code_conflict_current",
         )
         if not is_active:
             child = conn.execute(
@@ -1253,6 +1296,11 @@ def restore_content_item(
     expected_version_id: str,
     actor_user_id: int,
     can_restore: bool,
+    target_category_id: str | None = None,
+    replace_conflict_item_id: str | None = None,
+    replace_conflict_expected_version_id: str | None = None,
+    can_archive_draft: bool = False,
+    can_archive_published: bool = False,
 ) -> RestoredContent:
     now = _now()
     try:
@@ -1284,16 +1332,45 @@ def restore_content_item(
             raise ValueError("content_restore_forbidden")
         if row["version_id"] != expected_version_id:
             raise ValueError("content_version_conflict")
-        if not row["is_active"]:
+        if bool(replace_conflict_item_id) != bool(replace_conflict_expected_version_id):
+            raise ValueError("content_restore_conflict_reference_invalid")
+        source_category_id = str(row["category_id"])
+        resolved_category_id = target_category_id or source_category_id
+        target_category = conn.execute(
+            "SELECT id FROM category_nodes WHERE id=? AND is_active=1",
+            (resolved_category_id,),
+        ).fetchone()
+        if target_category is None and resolved_category_id == source_category_id:
             raise ValueError("content_restore_category_inactive")
+        if target_category is None:
+            raise ValueError("active_category_not_found")
         conflict = find_content_filename_conflict(
             conn,
-            category_id=str(row["category_id"]),
+            category_id=resolved_category_id,
             original_filename=str(row["original_filename"]),
             exclude_item_id=item_id,
         )
         if conflict is not None:
-            raise ContentFilenameConflict(conflict)
+            if (
+                replace_conflict_item_id != str(conflict["item_id"])
+                or replace_conflict_expected_version_id != str(conflict["version_id"])
+            ):
+                raise ContentFilenameConflict(conflict)
+            _archive_content_item_locked(
+                conn,
+                str(conflict["item_id"]),
+                expected_version_id=str(conflict["version_id"]),
+                actor_user_id=actor_user_id,
+                can_archive_draft=can_archive_draft,
+                can_archive_published=can_archive_published,
+                now=now,
+                audit_metadata={
+                    "archive_reason": "restore_conflict_replacement",
+                    "restored_item_id": item_id,
+                },
+            )
+        elif replace_conflict_item_id is not None:
+            raise ValueError("content_restore_conflict_changed")
         active_job = conn.execute(
             """SELECT 1 FROM content_index_jobs
                WHERE version_id=? AND status IN (
@@ -1311,11 +1388,12 @@ def restore_content_item(
             else "approved"
         )
         result = conn.execute(
-            """UPDATE content_items SET archived_at=NULL,updated_at=?,normalized_filename=?
+            """UPDATE content_items SET archived_at=NULL,updated_at=?,normalized_filename=?,category_id=?
                WHERE id=? AND archived_at IS NOT NULL""",
             (
                 now,
                 normalize_content_filename(str(row["original_filename"]))[1],
+                resolved_category_id,
                 item_id,
             ),
         )
@@ -1332,13 +1410,34 @@ def restore_content_item(
             item_id=item_id,
             version_id=expected_version_id,
             batch_id=row["source_batch_id"],
-            metadata={"previous_status": previous_status, "restored_status": restored_status},
+            category_id=resolved_category_id,
+            metadata={
+                "previous_status": previous_status,
+                "restored_status": restored_status,
+                "restore_strategy": "replace_conflict" if conflict is not None else (
+                    "alternate_directory" if resolved_category_id != source_category_id else "original_directory"
+                ),
+                "source_category_id": source_category_id,
+                "source_category_path": _category_path(conn, source_category_id),
+                "target_category_id": resolved_category_id,
+                "target_category_path": _category_path(conn, resolved_category_id),
+                "replaced_item_id": str(conflict["item_id"]) if conflict is not None else None,
+                "replaced_title": str(conflict["title"]) if conflict is not None else None,
+                "replaced_filename": str(conflict["original_filename"]) if conflict is not None else None,
+            },
         )
         conn.commit()
     except Exception:
         conn.rollback()
         raise
-    return RestoredContent(item_id=item_id, version_id=expected_version_id, restored_status=restored_status)
+    return RestoredContent(
+        item_id=item_id,
+        version_id=expected_version_id,
+        restored_status=restored_status,
+        category_id=resolved_category_id,
+        moved_to_alternate_category=resolved_category_id != source_category_id,
+        replaced_conflict=conflict is not None,
+    )
 
 
 def _archive_content_item_locked(
@@ -1350,6 +1449,7 @@ def _archive_content_item_locked(
     can_archive_draft: bool,
     can_archive_published: bool,
     now: int,
+    audit_metadata: dict[str, object] | None = None,
 ) -> ArchivedContent:
     item_kind = conn.execute(
         "SELECT content_kind FROM content_items WHERE id=?", (item_id,)
@@ -1357,7 +1457,7 @@ def _archive_content_item_locked(
     if item_kind is not None and item_kind["content_kind"] == "media_transcript":
         raise ValueError("media_transcript_operation_not_supported")
     row = conn.execute(
-        """SELECT i.id AS item_id,i.archived_at,v.id AS version_id,
+        """SELECT i.id AS item_id,i.archived_at,i.category_id,v.id AS version_id,
                   v.lifecycle_status,v.source_batch_id,
                   h.publication_id AS head_publication_id
            FROM content_items i
@@ -1423,9 +1523,12 @@ def _archive_content_item_locked(
         item_id=item_id,
         version_id=expected_version_id,
         batch_id=row["source_batch_id"],
+        category_id=row["category_id"],
         metadata={
             "previous_status": row["lifecycle_status"],
             "publication_withdrawn": publication_withdrawn,
+            "category_path": _category_path(conn, str(row["category_id"])),
+            **(audit_metadata or {}),
         },
     )
     return ArchivedContent(

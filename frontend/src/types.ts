@@ -370,6 +370,21 @@ export type ManagedContentItem = {
   reclassification_status: string | null;
 };
 
+export type ContentTrashAuditEvent = {
+  event_type: "content.archived" | "content.restored";
+  actor_name: string | null;
+  created_at: number;
+  previous_status: string | null;
+  restored_status: string | null;
+  restore_strategy: "original_directory" | "alternate_directory" | "replace_conflict" | null;
+  source_category_path: string | null;
+  target_category_path: string | null;
+  category_path: string | null;
+  archive_reason: "restore_conflict_replacement" | null;
+  replaced_title: string | null;
+  replaced_filename: string | null;
+};
+
 export type ContentReclassificationJob = {
   id: string;
   item_id: string;

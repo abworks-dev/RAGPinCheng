@@ -25,6 +25,7 @@ import type {
   ManagedCategory,
   FolderRequest,
   ManagedContentItem,
+  ContentTrashAuditEvent,
   ContentReclassificationJob,
   ManagedContentList,
   BulkManagedContentResponse,
@@ -417,7 +418,7 @@ export const api = {
     parent_id: string | null;
     display_code: string;
     display_name: string;
-    sort_order: number;
+    sort_order?: number;
   }) =>
     jsonFetch<ManagedCategory>("/api/admin/content/categories", {
       method: "POST",
@@ -428,7 +429,7 @@ export const api = {
     body: {
       display_code: string;
       display_name: string;
-      sort_order: number;
+      sort_order?: number;
       is_active: boolean;
       expected_version: number;
     },
@@ -528,10 +529,29 @@ export const api = {
     if (params?.offset != null) search.set("offset", String(params.offset));
     return jsonFetch<ManagedContentList>(`/api/admin/content/trash?${search}`);
   },
-  restoreManagedContent: (itemId: string, expectedVersionId: string) =>
-    jsonFetch<{ item_id: string; version_id: string; restored_status: string }>(
+  restoreManagedContent: (
+    itemId: string,
+    expectedVersionId: string,
+    options?: {
+      target_category_id?: string;
+      replace_conflict_item_id?: string;
+      replace_conflict_expected_version_id?: string;
+    },
+  ) =>
+    jsonFetch<{
+      item_id: string;
+      version_id: string;
+      restored_status: string;
+      category_id: string;
+      moved_to_alternate_category: boolean;
+      replaced_conflict: boolean;
+    }>(
       `/api/admin/content/items/${encodeURIComponent(itemId)}/restore`,
-      { method: "POST", body: JSON.stringify({ expected_version_id: expectedVersionId }) },
+      { method: "POST", body: JSON.stringify({ expected_version_id: expectedVersionId, ...options }) },
+    ),
+  managedContentAuditEvents: (itemId: string) =>
+    jsonFetch<ContentTrashAuditEvent[]>(
+      `/api/admin/content/items/${encodeURIComponent(itemId)}/audit-events`,
     ),
   uploadManagedContent: async (
     files: Array<File | ManagedContentUploadEntry>,
