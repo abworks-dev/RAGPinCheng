@@ -71,6 +71,7 @@ function ReturnTargetProbe() {
     <>
       <output role="status" aria-label="预览返回目标">{state.returnTo || "none"}</output>
       <button type="button" onClick={() => open("pdf-1", "测试规范", "pdf", 1, {}, "managed-content-detail")}>打开详情预览</button>
+      <button type="button" onClick={() => open("pdf-1", "测试规范", "pdf", 1, {}, "managed-content-review")}>打开审核预览</button>
       <button type="button" onClick={close}>关闭预览</button>
     </>
   );
@@ -196,8 +197,22 @@ describe("PdfPreview interactions", () => {
     expect(screen.getByRole("status", { name: "预览返回目标" })).toHaveTextContent("none");
     fireEvent.click(screen.getByRole("button", { name: "打开详情预览" }));
     expect(screen.getByRole("status", { name: "预览返回目标" })).toHaveTextContent("managed-content-detail");
+    fireEvent.click(screen.getByRole("button", { name: "打开审核预览" }));
+    expect(screen.getByRole("status", { name: "预览返回目标" })).toHaveTextContent("managed-content-review");
     fireEvent.click(screen.getByRole("button", { name: "关闭预览" }));
     expect(screen.getByRole("status", { name: "预览返回目标" })).toHaveTextContent("none");
+  });
+
+  it("labels the review return action distinctly", () => {
+    render(
+      <PdfPreviewProvider>
+        <ReturnTargetProbe />
+        <PdfPreview />
+      </PdfPreviewProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "打开审核预览" }));
+    expect(screen.getByRole("button", { name: "返回资料审核" })).toBeInTheDocument();
   });
 
   it("switches between hand panning and text selection", () => {

@@ -170,6 +170,10 @@ const item = {
   latest_publication_status: null,
   publication_attempt_count: 0,
   publication_failure: null,
+  latest_reviewed_by_name: null,
+  latest_reviewed_at: null,
+  latest_review_decision: null,
+  latest_review_note: null,
   media_duration_ms: null,
   media_file_size: null,
   has_pending_revision: false,
@@ -227,7 +231,7 @@ describe("AdminManagedContentPage", () => {
     mocks.downloadFile.mockResolvedValue({ blob: new Blob(["file"]), filename: "standard.pdf" });
   });
 
-  it("shows only review actions to a reviewer and submits the decision", async () => {
+  it("opens the dedicated review dialog and submits an optional approval note", async () => {
     render(<AdminManagedContentPage />);
     await openRootFolder();
     expect((await screen.findAllByText("建模标准")).length).toBeGreaterThan(0);
@@ -235,9 +239,74 @@ describe("AdminManagedContentPage", () => {
     expect(screen.queryByRole("button", { name: "提交" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "发布" })).not.toBeInTheDocument();
 
+    fireEvent.click(screen.getAllByRole("button", { name: "审核" })[0]);
+    const dialog = screen.getByRole("dialog", { name: "审核资料" });
+    expect(dialog).toHaveTextContent("03 公司内部标准");
+    expect(dialog).toHaveTextContent("v1");
+    expect(dialog).toHaveTextContent("网页上传");
+    fireEvent.click(within(dialog).getByRole("button", { name: "预览文件" }));
+    expect(mocks.openPreview).toHaveBeenCalledWith("parent-1", "建模标准", "pdf", 1, {}, "managed-content-review");
+    fireEvent.change(within(dialog).getByRole("textbox", { name: "审核备注（可选）" }), { target: { value: "符合发布要求" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "确认通过" }));
+    await waitFor(() => expect(mocks.review).toHaveBeenCalledWith("version-1", true, "符合发布要求"));
+  });
+
+  it("reuses the review entry from details and shows the latest review record", async () => {
+    mocks.items.mockResolvedValue({
+      items: [{
+        ...item,
+        latest_reviewed_by_name: "负责人",
+        latest_reviewed_at: 1_700_000_000,
+        latest_review_decision: "rejected",
+        latest_review_note: "请补充适用范围",
+      }],
+      total: 1,
+      status_counts: { awaiting_review: 1 },
+    });
+    render(<AdminManagedContentPage />);
+    await openRootFolder();
     fireEvent.click(screen.getAllByRole("button", { name: "查看“建模标准”的详细信息" })[0]);
-    fireEvent.click(screen.getByRole("button", { name: "确认" }));
-    await waitFor(() => expect(mocks.review).toHaveBeenCalledWith("version-1", true));
+    const detailDialog = screen.getByRole("dialog", { name: "建模标准" });
+    expect(detailDialog).toHaveTextContent("负责人");
+    expect(detailDialog).toHaveTextContent("退回修改");
+    expect(detailDialog).toHaveTextContent("请补充适用范围");
+    expect(within(detailDialog).queryByRole("button", { name: "确认" })).not.toBeInTheDocument();
+    expect(within(detailDialog).queryByRole("button", { name: "退回" })).not.toBeInTheDocument();
+    fireEvent.click(within(detailDialog).getByRole("button", { name: "审核" }));
+    expect(screen.getByRole("dialog", { name: "审核资料" })).toBeInTheDocument();
+  });
+
+  it("renders only the permitted next workflow action for each lifecycle state", async () => {
+    mocks.permissions = [...new Set([...REVIEWER_PERMISSIONS, ...ORGANIZER_PERMISSIONS, ...PUBLISHER_PERMISSIONS])];
+    const statuses = ["draft", "rejected", "awaiting_review", "approved", "publication_failed", "publishing", "published", "superseded"];
+    mocks.items.mockResolvedValue({
+      items: statuses.map((lifecycle_status, index) => ({
+        ...item,
+        item_id: `item-${index}`,
+        version_id: `version-${index}`,
+        title: `资料-${lifecycle_status}`,
+        lifecycle_status,
+      })),
+      total: statuses.length,
+      status_counts: {},
+    });
+    render(<AdminManagedContentPage />);
+    await openRootFolder();
+
+    for (const label of ["提交", "重新提交", "审核", "发布", "重新发布"]) {
+      expect(screen.getAllByRole("button", { name: label }).length).toBeGreaterThan(0);
+    }
+    for (const label of ["发布中", "已发布", "历史版本"]) {
+      expect(screen.queryByRole("button", { name: label })).not.toBeInTheDocument();
+    }
+  });
+
+  it("hides workflow actions when the account lacks the required permission", async () => {
+    mocks.permissions = ["item.view"];
+    mocks.items.mockResolvedValue({ items: [{ ...item, lifecycle_status: "draft" }], total: 1, status_counts: { draft: 1 } });
+    render(<AdminManagedContentPage />);
+    await openRootFolder();
+    expect(screen.queryByRole("button", { name: "提交" })).not.toBeInTheDocument();
   });
 
   it("keeps single and batch downloads disabled without item.download", async () => {
@@ -1058,7 +1127,7 @@ describe("AdminManagedContentPage", () => {
     expect(screen.getAllByRole("button", { name: /移动“建模标准”/ }).every((button) => button.hasAttribute("disabled"))).toBe(true);
   });
 
-  it("right-aligns seven icon actions and keeps download out of the detail dialog", async () => {
+  it("keeps the workflow button before seven icon actions and download out of details", async () => {
     mocks.permissions = ORGANIZER_PERMISSIONS;
     mocks.items.mockResolvedValue({ items: [{ ...item, lifecycle_status: "draft" }], total: 1, status_counts: { draft: 1 } });
     render(<AdminManagedContentPage />);
@@ -1068,7 +1137,12 @@ describe("AdminManagedContentPage", () => {
       expect(screen.getAllByRole("button", { name: actionName }).length).toBeGreaterThan(0);
     }
     const detailsButton = screen.getAllByRole("button", { name: "查看“建模标准”的详细信息" })[0];
-    expect(detailsButton.parentElement?.parentElement).toHaveClass("ml-auto", "justify-end");
+    const iconGroup = detailsButton.parentElement?.parentElement;
+    expect(iconGroup).toHaveClass("ml-auto", "justify-end");
+    const actionGroup = iconGroup?.parentElement;
+    expect(actionGroup).not.toBeNull();
+    expect(within(actionGroup as HTMLElement).getAllByRole("button")[0]).toHaveTextContent("提交");
+    expect(within(actionGroup as HTMLElement).getByRole("button", { name: "提交" })).toHaveClass("w-full");
     fireEvent.click(detailsButton);
     const dialog = screen.getByRole("dialog", { name: "建模标准" });
     expect(within(dialog).queryByRole("button", { name: /下载/ })).not.toBeInTheDocument();
@@ -1172,12 +1246,32 @@ describe("AdminManagedContentPage", () => {
     render(<AdminManagedContentPage />);
     await openRootFolder();
     await screen.findAllByText("建模标准");
-    fireEvent.click(screen.getAllByRole("button", { name: "查看“建模标准”的详细信息" })[0]);
-    fireEvent.click(screen.getByRole("button", { name: "确认" }));
-    expect(screen.getByRole("button", { name: "确认中…" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "退回" })).toBeDisabled();
+    fireEvent.click(screen.getAllByRole("button", { name: "审核" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "确认通过" }));
+    expect(screen.getByRole("button", { name: "提交中…" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "选择退回修改" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "提交中…" }));
+    expect(mocks.review).toHaveBeenCalledTimes(1);
     resolveReview?.({ ...item, lifecycle_status: "approved" });
     await waitFor(() => expect(mocks.success).toHaveBeenCalledWith("资料已确认"));
+  });
+
+  it("requires a rejection reason and preserves it after a failed request", async () => {
+    mocks.review.mockRejectedValueOnce(new Error("审核服务暂不可用"));
+    render(<AdminManagedContentPage />);
+    await openRootFolder();
+    fireEvent.click(screen.getAllByRole("button", { name: "审核" })[0]);
+    const dialog = screen.getByRole("dialog", { name: "审核资料" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "选择退回修改" }));
+    const submit = within(dialog).getByRole("button", { name: "确认退回" });
+    expect(submit).toBeDisabled();
+    const reason = within(dialog).getByRole("textbox", { name: "退回原因" });
+    expect(reason).toHaveAttribute("maxlength", "2000");
+    fireEvent.change(reason, { target: { value: "请补充适用范围" } });
+    fireEvent.click(submit);
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("审核服务暂不可用");
+    expect(reason).toHaveValue("请补充适用范围");
+    expect(mocks.review).toHaveBeenCalledWith("version-1", false, "请补充适用范围");
   });
 
   it("keeps failed bulk items selected and shows their per-item reason", async () => {
@@ -1203,6 +1297,24 @@ describe("AdminManagedContentPage", () => {
     expect(screen.getAllByRole("checkbox", { name: "选择建模标准" })[0]).toBeChecked();
   });
 
+  it("requires and submits a reason for bulk rejection", async () => {
+    const secondItem = { ...item, item_id: "item-2", title: "建模标准2", version_id: "version-2" };
+    mocks.items.mockResolvedValue({ items: [item, secondItem], total: 2, status_counts: { awaiting_review: 2 } });
+    mocks.bulkReview.mockResolvedValue({ results: [], succeeded: 2, failed: 0 });
+    render(<AdminManagedContentPage />);
+    await openRootFolder();
+    fireEvent.click(screen.getAllByRole("checkbox", { name: "选择建模标准" })[0]);
+    fireEvent.click(screen.getAllByRole("checkbox", { name: "选择建模标准2" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "批量操作" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "批量退回" }));
+    const dialog = screen.getByRole("dialog", { name: "批量退回资料" });
+    const submit = within(dialog).getByRole("button", { name: "确认执行" });
+    expect(submit).toBeDisabled();
+    fireEvent.change(within(dialog).getByRole("textbox", { name: "批量退回原因" }), { target: { value: "统一补充来源" } });
+    fireEvent.click(submit);
+    await waitFor(() => expect(mocks.bulkReview).toHaveBeenCalledWith(["version-1", "version-2"], false, "统一补充来源"));
+  });
+
   it("allows republishing after a non-retryable historical failure", async () => {
     mocks.permissions = PUBLISHER_PERMISSIONS;
     mocks.items.mockResolvedValue({ items: [{ ...item, lifecycle_status: "publication_failed", publication_attempt_count: 4, publication_failure: { code: "pdf_password_required", message: "PDF 需要密码才能解析。", retryable: false, recommended_action: "请上传已解除密码保护的 PDF。" } }], total: 1, status_counts: { publication_failed: 1 } });
@@ -1215,9 +1327,14 @@ describe("AdminManagedContentPage", () => {
     expect(screen.getAllByText(/系统或文件处理后可重新发布/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/共尝试 4 次/).length).toBeGreaterThan(0);
     expect(screen.queryByText("pdf_password_required")).not.toBeInTheDocument();
-    const republish = screen.getByRole("button", { name: "重新发布" });
+    const detailDialog = screen.getByRole("dialog", { name: "建模标准" });
+    const republish = within(detailDialog).getByRole("button", { name: "重新发布" });
     expect(republish).toBeEnabled();
     fireEvent.click(republish);
+    const dialog = screen.getByRole("dialog", { name: "重新发布资料" });
+    expect(dialog).toHaveTextContent("完成后资料才会进入知识库检索");
+    expect(mocks.publish).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "确认重新发布" }));
     await waitFor(() => expect(mocks.publish).toHaveBeenCalledWith("version-1"));
   });
 

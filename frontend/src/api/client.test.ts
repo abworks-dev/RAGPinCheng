@@ -145,6 +145,34 @@ describe("api client", () => {
     );
   });
 
+  it("normalizes managed-content review notes for single and bulk requests", async () => {
+    setCsrfToken("csrf-review");
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ version_id: "version-1" }))
+      .mockResolvedValueOnce(jsonResponse({ results: [], succeeded: 0, failed: 0 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.reviewManagedContent("version/1", false, "  请补充范围  ");
+    await api.bulkReviewManagedContent(["version-1", "version-2"], false, "  统一退回  ");
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1,
+      "/api/admin/content/versions/version%2F1/review",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ approved: false, note: "请补充范围", category_id: null }),
+        headers: { "content-type": "application/json", "X-CSRF-Token": "csrf-review" },
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(2,
+      "/api/admin/content/bulk-review",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ version_ids: ["version-1", "version-2"], approved: false, note: "统一退回" }),
+        headers: { "content-type": "application/json", "X-CSRF-Token": "csrf-review" },
+      }),
+    );
+  });
+
   it("preserves the administrator PATCH contract", async () => {
     setCsrfToken("csrf-admin");
     const fetchMock = vi.fn().mockResolvedValue(

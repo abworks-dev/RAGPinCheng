@@ -815,6 +815,10 @@ _CONTENT_LIBRARY_CTE = """WITH RECURSIVE paths AS (
                v.source_rel_path,h.current_version_id,
                j.status AS latest_publication_status,
                j.error_code AS latest_publication_error_code,
+               review_user.real_name AS latest_reviewed_by_name,
+               latest_review.created_at AS latest_reviewed_at,
+               latest_review.decision AS latest_review_decision,
+               latest_review.note AS latest_review_note,
                (SELECT count(*) FROM content_index_jobs jc WHERE jc.version_id=v.id)
                  AS publication_attempt_count,
                i.archived_at,archive_user.real_name AS archived_by_name,
@@ -829,6 +833,11 @@ _CONTENT_LIBRARY_CTE = """WITH RECURSIVE paths AS (
             SELECT j2.id FROM content_index_jobs j2 WHERE j2.version_id=v.id
             ORDER BY j2.attempt_number DESC,j2.created_at DESC,j2.id DESC LIMIT 1
         )
+        LEFT JOIN content_reviews latest_review ON latest_review.id=(
+            SELECT r2.id FROM content_reviews r2 WHERE r2.version_id=v.id
+            ORDER BY r2.created_at DESC,r2.rowid DESC LIMIT 1
+        )
+        LEFT JOIN users review_user ON review_user.id=latest_review.reviewer_id
         LEFT JOIN content_audit_events archive_event ON archive_event.id=(
             SELECT ae.id FROM content_audit_events ae
             WHERE ae.item_id=i.id AND ae.event_type='content.archived'
@@ -850,6 +859,8 @@ _CONTENT_LIBRARY_CTE = """WITH RECURSIVE paths AS (
                NULL AS source_batch_id,m.original_filename AS source_rel_path,
                h.current_version_id,j.status AS latest_publication_status,
                j.error_code AS latest_publication_error_code,
+               NULL AS latest_reviewed_by_name,NULL AS latest_reviewed_at,
+               NULL AS latest_review_decision,NULL AS latest_review_note,
                (SELECT count(*) FROM transcript_publication_index_jobs attempts
                 WHERE attempts.transcript_version_id=tv.id) AS publication_attempt_count,
                NULL AS archived_at,NULL AS archived_by_name,NULL AS archive_metadata_json,
@@ -1555,6 +1566,8 @@ def review_version(
     ).fetchone()
     if row is None or row["lifecycle_status"] != "awaiting_review":
         raise ValueError("version_not_reviewable")
+    if not approved and not (note or "").strip():
+        raise ValueError("review_note_required")
     if category_id:
         category = conn.execute(
             "SELECT 1 FROM category_nodes WHERE id=? AND is_active=1", (category_id,)

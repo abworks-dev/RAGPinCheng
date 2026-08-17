@@ -415,6 +415,8 @@ def _raise_domain_error(exc: Exception) -> None:
         raise HTTPException(status_code=403, detail="当前账号没有移动此状态资料的权限") from exc
     if message == "content_move_requires_republication":
         raise HTTPException(status_code=409, detail="已确认或已发布资料需要退回后重新归类") from exc
+    if message == "review_note_required":
+        raise HTTPException(status_code=400, detail="退回修改时必须填写原因") from exc
     if message == "media_transcript_operation_not_supported":
         raise HTTPException(
             status_code=409,
@@ -796,6 +798,10 @@ def _content_item_dto(
         latest_publication_status=row["latest_publication_status"],
         publication_attempt_count=int(row["publication_attempt_count"] or 0),
         publication_failure=failure_detail(row["latest_publication_error_code"]),
+        latest_reviewed_by_name=row["latest_reviewed_by_name"] if "latest_reviewed_by_name" in row.keys() else None,
+        latest_reviewed_at=row["latest_reviewed_at"] if "latest_reviewed_at" in row.keys() else None,
+        latest_review_decision=row["latest_review_decision"] if "latest_review_decision" in row.keys() else None,
+        latest_review_note=row["latest_review_note"] if "latest_review_note" in row.keys() else None,
         created_at=row["created_at"],
         updated_at=row["updated_at"],
         archived_at=row["archived_at"] if "archived_at" in row.keys() else None,
@@ -1411,6 +1417,8 @@ def bulk_review_content_versions(
     _require_feature()
     if body.approved is None:
         raise HTTPException(status_code=400, detail="请选择确认或退回")
+    if not body.approved and not (body.note or "").strip():
+        raise HTTPException(status_code=400, detail="批量退回时必须填写原因")
     results: list[BulkManagedContentResultDTO] = []
     for version_id in _validate_bulk_version_ids(body.version_ids):
         try:

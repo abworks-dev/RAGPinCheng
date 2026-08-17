@@ -11,7 +11,7 @@ export interface PdfPreviewLocation {
   paragraphAnchor?: string | null;
 }
 
-export type PdfPreviewReturnTarget = "managed-content-detail";
+export type PdfPreviewReturnTarget = "managed-content-detail" | "managed-content-review";
 
 export interface PdfPreviewState {
   /** The parent_id of the source to preview, or null if closed. */

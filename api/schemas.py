@@ -487,6 +487,10 @@ class ManagedContentItemDTO(BaseModel):
     latest_publication_status: str | None = None
     publication_attempt_count: int = 0
     publication_failure: PublicationFailureDTO | None = None
+    latest_reviewed_by_name: str | None = None
+    latest_reviewed_at: int | None = None
+    latest_review_decision: str | None = None
+    latest_review_note: str | None = None
     created_at: int
     updated_at: int
     archived_at: int | None = None

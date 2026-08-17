@@ -353,6 +353,10 @@ export type ManagedContentItem = {
   latest_publication_status: string | null;
   publication_attempt_count: number;
   publication_failure: PublicationFailure | null;
+  latest_reviewed_by_name: string | null;
+  latest_reviewed_at: number | null;
+  latest_review_decision: string | null;
+  latest_review_note: string | null;
   created_at: number;
   updated_at: number;
   archived_at?: number | null;
