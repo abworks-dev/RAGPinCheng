@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { LoaderCircle } from "lucide-react";
 import type { MediaTranscriptSegment } from "../types";
 import { TranscriptPanel } from "./TranscriptPanel";
+import { clearPlaybackProgress, getPlaybackProgress, savePlaybackProgress } from "../lib/video-playback-progress";
 
 type SynchronizedVideoTranscriptProps = {
   mediaId: string;
@@ -11,6 +12,7 @@ type SynchronizedVideoTranscriptProps = {
   mediaUrl?: string;
   initialStartSeconds?: number;
   layout?: "stacked" | "split";
+  playbackUserScope?: string;
 };
 
 export function SynchronizedVideoTranscript({
@@ -21,11 +23,13 @@ export function SynchronizedVideoTranscript({
   mediaUrl,
   initialStartSeconds = 0,
   layout = "stacked",
+  playbackUserScope,
 }: SynchronizedVideoTranscriptProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [videoError, setVideoError] = useState<string | null>(null);
   const [currentTimeMs, setCurrentTimeMs] = useState(initialStartSeconds * 1000);
+  const lastSavedAtRef = useRef(0);
 
   useEffect(() => {
     setIsLoading(true);
@@ -36,17 +40,37 @@ export function SynchronizedVideoTranscript({
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
+    let metadataLoaded = false;
 
     function onLoadedMetadata() {
+      metadataLoaded = true;
       setIsLoading(false);
-      if (initialStartSeconds > 0 && Math.abs(video!.currentTime - initialStartSeconds) > 0.1) {
-        video!.currentTime = initialStartSeconds;
+      const savedSeconds = playbackUserScope ? getPlaybackProgress(mediaId, playbackUserScope) : null;
+      const startSeconds = initialStartSeconds > 0 ? initialStartSeconds : savedSeconds;
+      if (startSeconds !== null && startSeconds > 0 && Math.abs(video!.currentTime - startSeconds) > 0.1) {
+        video!.currentTime = startSeconds;
+        setCurrentTimeMs(Math.round(startSeconds * 1000));
       }
       video!.play().catch(() => undefined);
     }
 
-    function onTimeUpdate() {
+    function persistProgress(force = false) {
+      if (!metadataLoaded || !playbackUserScope || !Number.isFinite(video!.currentTime)) return;
+      const now = Date.now();
+      const nearEnd = video!.duration > 0
+        && (video!.currentTime / video!.duration >= 0.95 || video!.duration - video!.currentTime < 10);
+      if (nearEnd) {
+        clearPlaybackProgress(mediaId, playbackUserScope, now);
+        lastSavedAtRef.current = now;
+      } else if (force || now - lastSavedAtRef.current >= 5000) {
+        savePlaybackProgress(mediaId, playbackUserScope, video!.currentTime, now);
+        lastSavedAtRef.current = now;
+      }
+    }
+
+    function onTimeUpdate(event?: Event) {
       setCurrentTimeMs(Math.round(video!.currentTime * 1000));
+      persistProgress(event?.type !== "timeupdate");
     }
 
     function onError() {
@@ -57,14 +81,22 @@ export function SynchronizedVideoTranscript({
     video.addEventListener("loadedmetadata", onLoadedMetadata);
     video.addEventListener("timeupdate", onTimeUpdate);
     video.addEventListener("seeked", onTimeUpdate);
+    video.addEventListener("pause", onTimeUpdate);
+    video.addEventListener("ended", onTimeUpdate);
     video.addEventListener("error", onError);
+    const onPageHide = () => persistProgress(true);
+    window.addEventListener("pagehide", onPageHide);
     return () => {
       video.removeEventListener("loadedmetadata", onLoadedMetadata);
       video.removeEventListener("timeupdate", onTimeUpdate);
       video.removeEventListener("seeked", onTimeUpdate);
+      video.removeEventListener("pause", onTimeUpdate);
+      video.removeEventListener("ended", onTimeUpdate);
       video.removeEventListener("error", onError);
+      window.removeEventListener("pagehide", onPageHide);
+      persistProgress(true);
     };
-  }, [mediaId, initialStartSeconds]);
+  }, [mediaId, initialStartSeconds, playbackUserScope]);
 
   const videoSurface = (
     <div className={`relative w-full overflow-hidden bg-black ${layout === "split" ? "aspect-video lg:h-full lg:aspect-auto" : "aspect-video"}`}>
