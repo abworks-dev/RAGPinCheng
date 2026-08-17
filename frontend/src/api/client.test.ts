@@ -222,6 +222,27 @@ describe("api client", () => {
     );
   });
 
+  it("regenerates a managed PPTX preview with CSRF protection", async () => {
+    setCsrfToken("csrf-preview");
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+      version_id: "version/1",
+      preview_parent_id: "parent-1",
+      preview_status: "ready",
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.regenerateManagedContentPreview("version/1");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/admin/content/versions/version%2F1/preview",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({}),
+        headers: { "content-type": "application/json", "X-CSRF-Token": "csrf-preview" },
+      }),
+    );
+  });
+
   it("preserves the administrator PATCH contract", async () => {
     setCsrfToken("csrf-admin");
     const fetchMock = vi.fn().mockResolvedValue(

@@ -28,6 +28,7 @@ const mocks = vi.hoisted(() => ({
   submit: vi.fn(),
   review: vi.fn(),
   publish: vi.fn(),
+  regeneratePreview: vi.fn(),
   bulkReview: vi.fn(),
   bulkPublish: vi.fn(),
   bulkMove: vi.fn(),
@@ -107,6 +108,7 @@ vi.mock("../../api/client", () => ({
     submitManagedContent: mocks.submit,
     reviewManagedContent: mocks.review,
     publishManagedContent: mocks.publish,
+    regenerateManagedContentPreview: mocks.regeneratePreview,
     bulkReviewManagedContent: mocks.bulkReview,
     bulkPublishManagedContent: mocks.bulkPublish,
     bulkMoveManagedContent: mocks.bulkMove,
@@ -178,6 +180,7 @@ const item = {
   category_path: "03 公司内部标准",
   media_id: null,
   preview_parent_id: "parent-1",
+  preview_status: "ready" as const,
   version_id: "version-1",
   version_number: 1,
   original_filename: "standard.pdf",
@@ -244,6 +247,7 @@ describe("AdminManagedContentPage", () => {
     mocks.items.mockResolvedValue({ items: [item], total: 1, status_counts: { awaiting_review: 1 } });
     mocks.folderRequests.mockResolvedValue([]);
     mocks.review.mockResolvedValue({ ...item, lifecycle_status: "approved" });
+    mocks.regeneratePreview.mockResolvedValue({ version_id: "version-1", preview_parent_id: "parent-pptx", preview_status: "ready" });
     mocks.deleteContent.mockResolvedValue({ item_id: "item-1", version_id: "version-1", archived_at: 2, previous_status: "awaiting_review", publication_withdrawn: false });
     mocks.trash.mockResolvedValue({ items: [], total: 0, status_counts: {} });
     mocks.restoreContent.mockResolvedValue({ item_id: "item-1", version_id: "version-1", restored_status: "approved", category_id: "cat-03", moved_to_alternate_category: false, replaced_conflict: false });
@@ -446,6 +450,39 @@ describe("AdminManagedContentPage", () => {
     fireEvent.mouseEnter(previewButton.parentElement!);
     expect(screen.getByRole("tooltip")).toHaveTextContent("该资料尚未生成可预览文件");
     expect(mocks.openPreview).not.toHaveBeenCalled();
+  });
+
+  it("regenerates a missing published PPTX preview from details", async () => {
+    mocks.permissions = PUBLISHER_PERMISSIONS;
+    mocks.items.mockResolvedValue({
+      items: [{
+        ...item,
+        doc_type: "pptx",
+        original_filename: "slides.pptx",
+        lifecycle_status: "published",
+        is_current: true,
+        has_published_head: true,
+        latest_publication_status: "done",
+        preview_parent_id: null,
+        preview_status: "missing",
+      }],
+      total: 1,
+      status_counts: { published: 1 },
+    });
+
+    render(<AdminManagedContentPage />);
+    await openRootFolder();
+    const previewButton = screen.getAllByRole("button", { name: "预览“建模标准”" })[0];
+    expect(previewButton).toBeDisabled();
+    fireEvent.mouseEnter(previewButton.parentElement!);
+    expect(screen.getByRole("tooltip")).toHaveTextContent("PPTX 预览生成失败");
+
+    fireEvent.click(screen.getAllByRole("button", { name: "查看“建模标准”的详细信息" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "重新生成预览" }));
+
+    await waitFor(() => expect(mocks.regeneratePreview).toHaveBeenCalledWith("version-1"));
+    expect(await screen.findByRole("button", { name: "预览文件" })).toBeInTheDocument();
+    expect(mocks.success).toHaveBeenCalledWith("PPTX 预览已生成");
   });
 
   it("shows minute-level update times and sorts them in both directions", async () => {
@@ -752,22 +789,56 @@ describe("AdminManagedContentPage", () => {
     await waitFor(() => expect(mocks.restoreContent).toHaveBeenCalledWith("item-1", "version-1", { target_category_id: "cat-03" }));
   });
 
-  it("selects individual trash items and preflights only the chosen restore", async () => {
+  it("selects trash items in the list and preflights the chosen batch from the restore dialog", async () => {
     const second = { ...item, item_id: "item-2", version_id: "version-2", title: "项目标准", original_filename: "project.pdf" };
     mocks.trash.mockResolvedValue({ items: [
       { ...item, archived_at: 1_700_000_000, retention_status: "retained", retention_days_remaining: 30 },
       { ...second, archived_at: 1_699_000_000, retention_status: "overdue", retention_days_remaining: -2 },
     ], total: 2, status_counts: {}, retention_counts: { retained: 1, expiring: 0, overdue: 1 } });
-    mocks.preflightBulkRestore.mockResolvedValue({ results: [{ item_id: "item-2", version_id: "version-2", status: "ready", message: "可以恢复", target_category_path: "03 公司内部标准" }], ready: 1, blocked: 0 });
+    mocks.preflightBulkRestore.mockResolvedValue({ results: [
+      { item_id: "item-1", version_id: "version-1", status: "ready", message: "可以恢复", target_category_path: "03 公司内部标准" },
+      { item_id: "item-2", version_id: "version-2", status: "ready", message: "可以恢复", target_category_path: "03 公司内部标准" },
+    ], ready: 2, blocked: 0 });
     render(<AdminManagedContentPage />);
     fireEvent.click(screen.getByRole("tab", { name: "回收站" }));
-    fireEvent.click(await screen.findByRole("checkbox", { name: "选择恢复“项目标准”" }));
-    expect(screen.getByText("已选择 1 份，单次最多 20 份；翻页或修改筛选会清空选择。")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "批量恢复（1）" }));
+    fireEvent.click((await screen.findAllByRole("checkbox", { name: "选择恢复“建模标准”" }))[0]);
+    fireEvent.click(screen.getAllByRole("checkbox", { name: "选择恢复“项目标准”" })[0]);
+    expect(screen.getByRole("status")).toHaveTextContent("已选择 2 份，单次最多 20 份");
+    fireEvent.click(screen.getByRole("button", { name: "批量恢复（2）" }));
+    const dialog = screen.getByRole("dialog", { name: "批量恢复" });
+    expect(within(dialog).getByRole("combobox", { name: "恢复到" })).toHaveValue("original");
+    fireEvent.click(within(dialog).getByRole("button", { name: "检查恢复条件" }));
     await waitFor(() => expect(mocks.preflightBulkRestore).toHaveBeenCalledWith([
+      { item_id: "item-1", expected_version_id: "version-1" },
       { item_id: "item-2", expected_version_id: "version-2" },
     ], undefined));
-    expect(await screen.findByRole("dialog", { name: "确认批量恢复" })).toHaveTextContent("可恢复 1 份");
+    expect(await screen.findByRole("dialog", { name: "确认批量恢复" })).toHaveTextContent("可恢复 2 份");
+  });
+
+  it("keeps trash filters inside search and sorts from the archived-time column", async () => {
+    mocks.trash.mockResolvedValue({
+      items: [{ ...item, archived_at: 1_700_000_000, retention_status: "retained", retention_days_remaining: 30 }],
+      total: 1,
+      status_counts: {},
+      retention_counts: { retained: 1, expiring: 0, overdue: 0 },
+    });
+    render(<AdminManagedContentPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "回收站" }));
+    await screen.findAllByText("建模标准");
+
+    expect(screen.queryByLabelText("回收站筛选")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "展开回收站筛选" }));
+    const filters = screen.getByRole("dialog", { name: "回收站搜索筛选" });
+    expect(within(filters).getByRole("option", { name: "保留中（1）" })).toBeInTheDocument();
+    fireEvent.change(within(filters).getByRole("combobox", { name: "保留状态" }), { target: { value: "retained" } });
+    fireEvent.change(within(filters).getByRole("textbox", { name: "移入人员" }), { target: { value: "管理员" } });
+    await waitFor(() => expect(mocks.trash).toHaveBeenLastCalledWith(expect.objectContaining({
+      retention_status: "retained",
+      archived_by: "管理员",
+    })));
+
+    fireEvent.click(screen.getByRole("button", { name: /移入回收站/ }));
+    await waitFor(() => expect(mocks.trash).toHaveBeenLastCalledWith(expect.objectContaining({ sort_direction: "asc" })));
   });
 
   it("keeps the restore dialog open and confirms a same-name replacement", async () => {

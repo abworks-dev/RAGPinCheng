@@ -55,6 +55,7 @@ from .office_convert import (
     convert_docx_to_markdown,
     convert_pptx_to_markdown,
     convert_pptx_to_pdf,
+    is_valid_pdf_file,
     convert_xlsx_to_markdown,
     recalculate_xlsx,
 )
@@ -331,15 +332,16 @@ def _build_pptx_doc(
             on_status("parsing")
             markdown, _slides = convert_pptx_to_markdown(source_path)
             md_path.write_text(markdown, encoding="utf-8")
-            # Convert to PDF for preview via LibreOffice
-            if write_preview:
-                try:
-                    convert_pptx_to_pdf(source_path)
-                except Exception as exc:
-                    logger.warning("PPTX to PDF conversion failed (non-fatal): %s", exc)
         except Exception as exc:
             logger.error("PPTX parsing failed: %s", exc)
             raise
+
+    preview_path = source_path.with_suffix(".preview.pdf")
+    if write_preview and not is_valid_pdf_file(preview_path):
+        try:
+            convert_pptx_to_pdf(source_path)
+        except Exception as exc:
+            logger.warning("PPTX to PDF conversion failed (non-fatal): %s", exc)
 
     category, company = _derive_category_and_company(source_path)
     return ParsedDoc(

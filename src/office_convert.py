@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -456,6 +458,17 @@ def convert_pptx_to_markdown(path: Path) -> tuple[str, list[dict[str, Any]]]:
     return markdown, slides
 
 
+def is_valid_pdf_file(path: Path) -> bool:
+    """Return whether a regular file has a PDF signature."""
+    try:
+        if not path.is_file() or path.is_symlink():
+            return False
+        with path.open("rb") as handle:
+            return handle.read(5) == b"%PDF-"
+    except OSError:
+        return False
+
+
 def convert_pptx_to_pdf(path: Path) -> Path:
     """Convert a PPTX file to PDF using LibreOffice service.
 
@@ -482,9 +495,29 @@ def convert_pptx_to_pdf(path: Path) -> Path:
         if not resp.content.startswith(b"%PDF-"):
             raise RuntimeError("PPTX to PDF conversion failed: invalid PDF output")
 
-    # Save the PDF to a temp location next to the source
+    # Write beside the final artifact so os.replace remains atomic on the
+    # mounted production filesystem. A failed write never damages an existing
+    # valid preview.
     pdf_path = path.with_suffix(".preview.pdf")
-    pdf_path.write_bytes(resp.content)
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb",
+            prefix=f".{pdf_path.name}.",
+            suffix=".tmp",
+            dir=pdf_path.parent,
+            delete=False,
+        ) as handle:
+            temporary_path = Path(handle.name)
+            handle.write(resp.content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        if not is_valid_pdf_file(temporary_path):
+            raise RuntimeError("PPTX to PDF conversion failed: invalid PDF output")
+        os.replace(temporary_path, pdf_path)
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
 
     elapsed = time.time() - start
     logger.info("PPTX to PDF done: %s (%.1fs)", path.name, elapsed)
