@@ -395,6 +395,8 @@ def _raise_domain_error(exc: Exception) -> None:
                 },
             },
         ) from exc
+    if isinstance(exc, sqlite3.IntegrityError) and "uq_category_nodes_sibling_code" in message:
+        raise HTTPException(status_code=409, detail="当前目录已存在该分类编号") from exc
     if isinstance(exc, sqlite3.IntegrityError):
         raise HTTPException(status_code=409, detail="分类编号或标识已存在") from exc
     if message == "category_version_conflict":
@@ -550,7 +552,6 @@ def patch_category(
             category_id,
             display_code=body.display_code,
             display_name=body.display_name,
-            sort_order=body.sort_order,
             is_active=body.is_active,
             expected_version=body.expected_version,
             actor_user_id=user.id,

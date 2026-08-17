@@ -72,7 +72,6 @@ describe("AdminCategoriesPage", () => {
     await waitFor(() => expect(mocks.update).toHaveBeenCalledWith("cat-01", {
       display_code: "01",
       display_name: "行业规范",
-      sort_order: 10,
       is_active: true,
       expected_version: 3,
     }));
@@ -138,23 +137,20 @@ describe("AdminCategoriesPage", () => {
     expect(parent).toHaveFocus();
   });
 
-  it("uses an explicit structure mode and sends stable sibling positions", async () => {
-    const sibling = { ...category, id: "cat-02", category_key: "client", display_code: "02", display_name: "客户标准", sort_order: 20, full_path: "02 客户标准" };
-    mocks.categories.mockResolvedValueOnce([category, sibling]);
-    mocks.move.mockResolvedValueOnce([sibling, { ...category, sort_order: 20, version: 4 }]);
+  it("orders siblings by display code and removes manual ordering controls", async () => {
+    const first = { ...category, sort_order: 90 };
+    const sibling = { ...category, id: "cat-02", category_key: "client", display_code: "02", display_name: "客户标准", sort_order: 1, full_path: "02 客户标准" };
+    mocks.categories.mockResolvedValueOnce([sibling, first]);
     render(<AdminCategoriesPage />);
 
-    const structure = await screen.findByRole("button", { name: "调整结构" });
-    fireEvent.click(structure);
-    expect(screen.getByRole("button", { name: "完成调整" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByText("拖动手柄调整同级顺序；跨层级移动会要求确认。")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "下移分类" }));
-    await waitFor(() => expect(mocks.move).toHaveBeenCalledWith("cat-01", {
-      target_parent_id: null,
-      before_category_id: null,
-      expected_version: 3,
-    }));
+    const treeItems = await screen.findAllByRole("treeitem");
+    expect(treeItems.map((item) => item.dataset.testid)).toEqual([
+      "category-tree-item-cat-01",
+      "category-tree-item-cat-02",
+    ]);
+    expect(screen.queryByRole("button", { name: "调整结构" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /上移|下移/ })).not.toBeInTheDocument();
+    expect(screen.getByText("同级分类按显示编号自动排列。")).toBeInTheDocument();
   });
 
   it("confirms a parent change with the old and new paths", async () => {
@@ -166,7 +162,10 @@ describe("AdminCategoriesPage", () => {
     fireEvent.click(await screen.findByRole("button", { name: "移动至" }));
     const dialog = await screen.findByRole("dialog", { name: "移动分类" });
     expect(within(dialog).getByText("01 行业规范与标准")).toBeInTheDocument();
-    fireEvent.change(within(dialog).getByLabelText("目标父分类"), { target: { value: "cat-02" } });
+    expect(within(dialog).getByRole("searchbox", { name: "搜索目标目录" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("tree", { name: "目标目录树" })).toBeInTheDocument();
+    expect(within(dialog).queryByTestId("category-picker-item-cat-01")).not.toBeInTheDocument();
+    fireEvent.click(within(dialog).getByTestId("category-picker-item-cat-02"));
     expect(within(dialog).getByText(/新路径：02 客户标准 \/ 01 行业规范与标准/)).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole("button", { name: "确认移动" }));
     await waitFor(() => expect(mocks.move).toHaveBeenCalledWith("cat-01", {
@@ -187,7 +186,6 @@ describe("AdminCategoriesPage", () => {
       parent_id: null,
       display_code: "09",
       display_name: "新分类",
-      sort_order: 20,
     }));
   });
 
