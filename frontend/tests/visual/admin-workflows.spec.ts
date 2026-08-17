@@ -401,7 +401,7 @@ test.describe("资料管理", () => {
     test.skip(page.viewportSize()!.width < 1024, "桌面增强只在桌面表格中启用");
     await openTab(page, "资料管理", "normal", "admin", { includeChildFolder: true });
     await openRootFolder(page);
-    const row = page.getByTitle("拖动到文件夹行可移动资料").first();
+    const row = page.getByTitle("拖动到文件夹行可调整目录").first();
     const folder = page.getByTestId("managed-folder-row-cat-company-modeling");
     await expect(row).toBeVisible();
     await expect(folder).toBeVisible();

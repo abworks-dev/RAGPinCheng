@@ -12,7 +12,7 @@ const admin = {
   content_permissions: [
     "workspace.view", "item.view", "item.download", "category.view", "item.upload", "item.submit",
     "item.move_draft", "item.archive_draft", "item.review", "item.move_review",
-    "item.publish", "item.archive_published", "trash.view", "trash.restore",
+    "item.publish", "item.reclassify_published", "item.archive_published", "trash.view", "trash.restore",
     "category.manage", "folder.request", "folder.review", "import.server", "index.view",
   ],
 };
@@ -78,6 +78,8 @@ export const items = [
   latest_reviewed_at: index === 1 ? 1700000500 : null,
   latest_review_decision: index === 1 ? "rejected" : null,
   latest_review_note: index === 1 ? "请补充机电碰撞检查范围" : null,
+  reclassification_job_id: null,
+  reclassification_status: null,
   created_at: 1700000000,
   updated_at: 1700000000,
 }));
@@ -109,6 +111,8 @@ const mediaLibraryItem = {
   media_duration_ms: 3_723_000,
   media_file_size: 84_934_656,
   has_pending_revision: true,
+  reclassification_job_id: null,
+  reclassification_status: null,
   created_at: 1700000000,
   updated_at: 1700000600,
 };
@@ -348,7 +352,7 @@ const permissionUsers = [
 ];
 
 const permissionCatalog = {
-  schema_version: 3,
+  schema_version: 4,
   permissions: [
     { key: "workspace.view", domain: "access", domain_label: "入口与查看", label: "进入资料工作台", description: "进入资料管理工作台。", dependencies: [] },
     { key: "item.view", domain: "access", domain_label: "入口与查看", label: "查看资料", description: "查看资料列表、详情和预览。", dependencies: ["workspace.view"] },
@@ -361,6 +365,7 @@ const permissionCatalog = {
     { key: "item.review", domain: "review", domain_label: "确认流程", label: "确认与退回", description: "确认或退回待确认资料。", dependencies: ["workspace.view", "item.view"] },
     { key: "item.move_review", domain: "review", domain_label: "确认流程", label: "移动待确认资料", description: "移动待确认状态的资料。", dependencies: ["workspace.view", "item.view", "category.view"] },
     { key: "item.publish", domain: "publish", domain_label: "发布流程", label: "发布资料", description: "发布或重新发布已确认资料。", dependencies: ["workspace.view", "item.view"] },
+    { key: "item.reclassify_published", domain: "publish", domain_label: "发布流程", label: "调整已发布资料分类", description: "调整已发布普通资料的分类，并同步正式索引和只读目录。", dependencies: ["workspace.view", "item.view", "category.view"] },
     { key: "item.archive_published", domain: "publish", domain_label: "发布流程", label: "下架正式资料", description: "将已确认、发布失败或已发布资料移入回收站。", dependencies: ["workspace.view", "item.view"] },
     { key: "trash.view", domain: "trash", domain_label: "回收站", label: "查看回收站", description: "查看和搜索已归档资料。", dependencies: ["workspace.view", "item.view"] },
     { key: "trash.restore", domain: "trash", domain_label: "回收站", label: "恢复资料", description: "从回收站恢复资料。", dependencies: ["workspace.view", "item.view", "trash.view"] },
@@ -377,7 +382,7 @@ const permissionGroups = [
   { id: "permission-group-viewer", group_key: "viewer", display_name: "资料浏览者", permissions: ["workspace.view", "item.view", "item.download", "category.view"], is_system: true, is_active: true, updated_at: 1700000000 },
   { id: "permission-group-bim-engineer", group_key: "bim_engineer", display_name: "BIM工程师", permissions: ["workspace.view", "item.view", "item.download", "category.view", "item.upload", "item.submit", "item.move_draft", "item.archive_draft", "folder.request"], is_system: true, is_active: true, updated_at: 1700000000 },
   { id: "permission-group-content-owner", group_key: "content_owner", display_name: "资料负责人", permissions: ["workspace.view", "item.view", "item.download", "category.view", "item.review", "item.move_review", "folder.review", "trash.view", "trash.restore"], is_system: true, is_active: true, updated_at: 1700000000 },
-  { id: "permission-group-publisher", group_key: "publisher", display_name: "发布负责人", permissions: ["workspace.view", "item.view", "item.download", "category.view", "item.publish", "item.archive_published", "trash.view", "index.view"], is_system: true, is_active: true, updated_at: 1700000000 },
+  { id: "permission-group-publisher", group_key: "publisher", display_name: "发布负责人", permissions: ["workspace.view", "item.view", "item.download", "category.view", "item.publish", "item.reclassify_published", "item.archive_published", "trash.view", "index.view"], is_system: true, is_active: true, updated_at: 1700000000 },
   { id: "permission-group-category-admin", group_key: "category_admin", display_name: "分类管理员", permissions: ["workspace.view", "item.view", "item.download", "category.view", "category.manage", "folder.review"], is_system: true, is_active: true, updated_at: 1700000000 },
   { id: "permission-group-system-admin", group_key: "system_admin", display_name: "系统管理员", permissions: admin.content_permissions, is_system: true, is_active: true, updated_at: 1700000000 },
 ];

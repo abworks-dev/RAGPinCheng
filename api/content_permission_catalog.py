@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
-CONTENT_PERMISSION_CATALOG_VERSION = 3
+CONTENT_PERMISSION_CATALOG_VERSION = 4
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +59,11 @@ CONTENT_PERMISSION_DEFINITIONS = (
         ("workspace.view", "item.view"),
     ),
     ContentPermissionDefinition(
+        "item.reclassify_published", "publish", "发布流程", "调整已发布资料分类",
+        "调整已发布普通资料的分类，并同步正式索引和只读目录。",
+        ("workspace.view", "item.view", "category.view"),
+    ),
+    ContentPermissionDefinition(
         "item.archive_published", "publish", "发布流程", "下架正式资料", "将已确认、发布失败或已发布资料移入回收站。",
         ("workspace.view", "item.view"),
     ),
@@ -106,7 +111,7 @@ LEGACY_CONTENT_PERMISSION_MAP = {
     }),
     "publish": frozenset({
         "workspace.view", "item.view", "item.download", "category.view", "item.publish",
-        "item.archive_published", "trash.view", "index.view",
+        "item.reclassify_published", "item.archive_published", "trash.view", "index.view",
     }),
     "manage_categories": frozenset({
         "workspace.view", "item.view", "item.download", "category.view", "category.manage", "folder.review",
@@ -161,7 +166,11 @@ CONTENT_PERMISSION_V2_SYSTEM_CONTENT_PERMISSION_GROUPS = {
     ),
     "system_admin": (
         "系统管理员",
-        frozenset({definition.key for definition in CONTENT_PERMISSION_DEFINITIONS if definition.key != "item.download"}),
+        frozenset({
+            definition.key
+            for definition in CONTENT_PERMISSION_DEFINITIONS
+            if definition.key not in {"item.download", "item.reclassify_published"}
+        }),
     ),
 }
 
@@ -182,6 +191,11 @@ SYSTEM_CONTENT_PERMISSION_GROUPS = {
         }),
     ),
     "system_admin": ("系统管理员", CONTENT_PERMISSIONS),
+}
+
+PRE_RECLASSIFICATION_SYSTEM_CONTENT_PERMISSION_GROUPS = {
+    key: (display_name, permissions - {"item.reclassify_published"})
+    for key, (display_name, permissions) in SYSTEM_CONTENT_PERMISSION_GROUPS.items()
 }
 
 
