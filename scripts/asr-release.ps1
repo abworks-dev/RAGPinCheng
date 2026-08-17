@@ -37,7 +37,7 @@ function Get-AsrReleaseAdmissionAdapter {
             return [pscustomobject][ordered]@{
                 engine = $Engine
                 enabled = $true
-                service_profiles = @("whisperx-large-v3-zh-align-v1")
+                service_profiles = @("whisperx-large-v3-zh-align-v2")
             }
         }
     }

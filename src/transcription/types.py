@@ -109,6 +109,8 @@ class TranscriptWarningCode(Enum):
     segment_overlap = "segment_overlap"
     short_segment_merged = "short_segment_merged"
     long_segment_split = "long_segment_split"
+    terminology_corrected = "terminology_corrected"
+    duration_segment_split = "duration_segment_split"
 
 
 def _fullmatch(pattern: str, value: str) -> bool:
@@ -399,3 +401,66 @@ class NormalizerConfig:
     def from_json_dict(cls, data: object) -> "NormalizerConfig":
         obj = reject_unknown_fields(data, {"min_segment_chars", "max_segment_chars", "max_merge_gap_ms"}, "normalizer_config")
         return cls(obj["min_segment_chars"], obj["max_segment_chars"], obj["max_merge_gap_ms"])
+
+
+@dataclass(frozen=True, slots=True)
+class TranscriptSegmentationConfig:
+    """Server-owned timestamp presentation preset.
+
+    WhisperX alignment remains the source of truth. These bounds only control
+    conservative post-processing of already aligned segments.
+    """
+
+    preset: str
+    max_segment_duration_ms: int | None
+    max_segment_chars: int
+    max_merge_gap_ms: int
+
+    def __post_init__(self) -> None:
+        if self.preset not in ("natural", "balanced", "fine"):
+            raise ContractValidationError("invalid_segmentation_preset", "preset")
+        if self.max_segment_duration_ms is not None:
+            require_int(self.max_segment_duration_ms, "max_segment_duration_ms", positive=True)
+        require_int(self.max_segment_chars, "max_segment_chars", positive=True)
+        require_int(self.max_merge_gap_ms, "max_merge_gap_ms")
+
+    def to_json_dict(self) -> dict[str, Any]:
+        return {
+            "preset": self.preset,
+            "max_segment_duration_ms": self.max_segment_duration_ms,
+            "max_segment_chars": self.max_segment_chars,
+            "max_merge_gap_ms": self.max_merge_gap_ms,
+        }
+
+    @classmethod
+    def from_json_dict(cls, data: object) -> "TranscriptSegmentationConfig":
+        obj = reject_unknown_fields(
+            data,
+            {"preset", "max_segment_duration_ms", "max_segment_chars", "max_merge_gap_ms"},
+            "segmentation_config",
+        )
+        return cls(
+            obj["preset"],
+            obj["max_segment_duration_ms"],
+            obj["max_segment_chars"],
+            obj["max_merge_gap_ms"],
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class TerminologyCorrectionConfig:
+    """Identifier for an immutable, server-owned correction rule set."""
+
+    rule_set_id: str
+
+    def __post_init__(self) -> None:
+        if self.rule_set_id not in ("none", "bim-engineering-v1"):
+            raise ContractValidationError("invalid_terminology_rule_set", "rule_set_id")
+
+    def to_json_dict(self) -> dict[str, str]:
+        return {"rule_set_id": self.rule_set_id}
+
+    @classmethod
+    def from_json_dict(cls, data: object) -> "TerminologyCorrectionConfig":
+        obj = reject_unknown_fields(data, {"rule_set_id"}, "terminology_config")
+        return cls(obj["rule_set_id"])

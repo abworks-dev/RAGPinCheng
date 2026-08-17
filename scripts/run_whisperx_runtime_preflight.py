@@ -79,11 +79,11 @@ def _profile_admission() -> str:
         if isinstance(node, ast.Assign)
         and len(node.targets) == 1
         and isinstance(node.targets[0], ast.Name)
-        and node.targets[0].id == "WHISPERX_PROFILE_ID"
+        and node.targets[0].id == "WHISPERX_BALANCED_PROFILE_ID"
         and isinstance(node.value, ast.Constant)
         and isinstance(node.value.value, str)
     ]
-    if profile_id_matches != ["whisperx-large-v3-zh-align-experimental-v1"]:
+    if profile_id_matches != ["whisperx-large-v3-zh-balanced-v2"]:
         raise ValueError("profile-catalog-invalid")
 
     admissions: list[str] = []
@@ -101,7 +101,7 @@ def _profile_admission() -> str:
         admission = keywords.get("admission")
         if not (
             isinstance(profile_id, ast.Name)
-            and profile_id.id == "WHISPERX_PROFILE_ID"
+            and profile_id.id == "WHISPERX_BALANCED_PROFILE_ID"
             and isinstance(admission, ast.Attribute)
             and isinstance(admission.value, ast.Name)
             and admission.value.id == "ProfileAdmission"

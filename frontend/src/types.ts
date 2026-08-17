@@ -593,6 +593,74 @@ export type TranscriptionProfile = {
   auto_index: boolean;
 };
 
+export type AsrSegmentation = {
+  preset: "natural" | "balanced" | "fine";
+  max_segment_duration_ms: number | null;
+  max_segment_chars: number;
+  max_merge_gap_ms: number;
+};
+
+export type AsrManagedProfile = {
+  profile_id: string;
+  display_name: string;
+  description: string;
+  profile_version: string;
+  application_config_hash: string;
+  qualification: string;
+  admission: string;
+  availability: string;
+  unavailable_reason_code: string | null;
+  release_eligible: boolean;
+  segmentation: AsrSegmentation | null;
+  terminology_rule_set: string | null;
+  protected_terms: string[];
+  decode: {
+    service_profile_id: string;
+    model_name: string;
+    beam_size: number;
+    temperature: number;
+    hotword_count: number;
+    prompt_asset_id: string | null;
+    service_profile_config_hash: string | null;
+    qualification_policy: string | null;
+  };
+};
+
+export type AsrServiceStatus = {
+  status: "disabled" | "healthy" | "degraded" | "unavailable";
+  queue_depth: number | null;
+  queue_limit: number | null;
+  pause_reason: string | null;
+};
+
+export type AsrProfileReleaseRequest = {
+  request_id: string;
+  profile_id: string;
+  profile_display_name: string;
+  profile_config_hash: string;
+  status: "requested" | "completed" | "rejected" | "cancelled";
+  request_reason: string | null;
+  requested_by_name: string | null;
+  created_at: number;
+  updated_at: number;
+};
+
+export type AsrProfileAuditEvent = {
+  event_id: number;
+  event_type: "release_requested";
+  profile_id: string;
+  profile_display_name: string;
+  actor_name: string | null;
+  created_at: number;
+};
+
+export type AsrSettings = {
+  service: AsrServiceStatus;
+  profiles: AsrManagedProfile[];
+  release_requests: AsrProfileReleaseRequest[];
+  audit_events: AsrProfileAuditEvent[];
+};
+
 export type TranscriptionJobStatus = "pending" | "running" | "succeeded" | "failed" | "cancelled";
 
 export type TranscriptionFailure = {

@@ -14,7 +14,7 @@ from services.asr_service.engine_protocol import (
     FASTER_WHISPER_SERVICE_CONFIG,
     SENSEVOICE_SERVICE_CONFIG,
     ServiceEngineCapabilities,
-    WHISPERX_FULL_DECODE_SERVICE_CONFIG,
+    WHISPERX_V2_FULL_DECODE_SERVICE_CONFIG,
 )
 from services.asr_service.engine_registry import EngineRegistration, EngineRegistry
 from services.asr_service.engines.fake import FakeEngine
@@ -174,6 +174,33 @@ def test_capabilities_expose_each_available_registered_profile(tmp_path):
     ]
 
 
+def test_authenticated_profile_identities_expose_hashes_without_prompt_text(tmp_path):
+    app = app_for(tmp_path)
+    with TestClient(app) as client:
+        assert client.get("/v1/profile-identities").status_code == 401
+        payload = client.get("/v1/profile-identities", headers=headers()).json()
+    assert payload == {
+        "schema_version": "asr-profile-identities/1",
+        "profiles": [
+            {
+                "service_profile_id": "faster-whisper-large-v3-turbo-v1",
+                "provider_key": "faster-whisper",
+                "profile_config_hash": FASTER_WHISPER_SERVICE_CONFIG.config_hash,
+                "prompt_asset_id": "asr_engineering_zh_v1",
+                "qualification_policy": "not-required",
+            },
+            {
+                "service_profile_id": "funasr-sensevoice-small-v1",
+                "provider_key": "funasr-sensevoice",
+                "profile_config_hash": SENSEVOICE_SERVICE_CONFIG.config_hash,
+                "prompt_asset_id": None,
+                "qualification_policy": "not-required",
+            },
+        ],
+    }
+    assert "initial_prompt" not in str(payload)
+
+
 def test_api_errors_are_finite_and_do_not_leak_paths_or_body(tmp_path):
     client = TestClient(app_for(tmp_path))
     missing = "22222222-2222-4222-8222-222222222222"
@@ -295,6 +322,6 @@ def test_default_wiring_uses_qualified_whisperx_config_without_optional_caches(
         "faster-whisper-large-v3-turbo-v1",
         "funasr-sensevoice-small-v1",
         "qwen3-asr-06b-aligner-v1",
-        "whisperx-large-v3-zh-align-v1",
+        "whisperx-large-v3-zh-align-v2",
     )
-    assert registrations[-1].config == WHISPERX_FULL_DECODE_SERVICE_CONFIG
+    assert registrations[-1].config == WHISPERX_V2_FULL_DECODE_SERVICE_CONFIG

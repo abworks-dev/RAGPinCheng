@@ -40,6 +40,8 @@ import type {
   PublishTranscriptVersionResult,
   AnswerPolicy,
   AnswerPolicyAuditEntry,
+  AsrSettings,
+  AsrProfileReleaseRequest,
 } from "../types";
 
 // Mutating methods send X-CSRF-Token. Cookies always go along via credentials.
@@ -389,6 +391,15 @@ export const api = {
     jsonFetch<AnswerPolicy>("/api/admin/answer-policy/reset", { method: "POST" }),
   adminAnswerPolicyAudit: (limit = 50) =>
     jsonFetch<{ entries: AnswerPolicyAuditEntry[] }>(`/api/admin/answer-policy/audit?limit=${limit}`),
+  adminAsrSettings: () => jsonFetch<AsrSettings>("/api/admin/asr"),
+  adminCreateAsrReleaseRequest: (body: {
+    profile_id: string;
+    request_idempotency_key: string;
+    request_reason?: string | null;
+  }) => jsonFetch<AsrProfileReleaseRequest>("/api/admin/asr/release-requests", {
+    method: "POST",
+    body: JSON.stringify(body),
+  }),
 
   // admin: managed content library
   managedContentCapabilities: () =>

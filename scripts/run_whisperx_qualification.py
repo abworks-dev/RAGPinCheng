@@ -34,7 +34,7 @@ from scripts.run_whisperx_cuda_smoke import (
 
 REPORT_SCHEMA_VERSION = "whisperx-qualification-report/1"
 MATRIX_REPORT_SCHEMA_VERSION = "whisperx-decoding-matrix-report/1"
-WHISPERX_PROFILE_ID = "whisperx-large-v3-zh-align-experimental-v1"
+WHISPERX_PROFILE_ID = "whisperx-large-v3-zh-balanced-v2"
 CLEAR_CER_LIMIT = shared.CLEAR_CER_LIMIT
 BIM_NOISE_CER_LIMIT = shared.BIM_NOISE_CER_LIMIT
 TERM_RECALL_LIMIT = shared.TERM_RECALL_LIMIT
@@ -128,6 +128,7 @@ def _build_engine(model_root: Path):
             "WhisperX qualification model cache validation failed"
         )
     return WhisperXEngine(
+        service_profile_id="whisperx-large-v3-zh-align-v2",
         model_cache_ready=lambda: True,
         model_path=asr_cache.model_path,
         align_model_path=align_cache.model_path,
@@ -406,14 +407,14 @@ def run_qualification(
     service_config=None,
     repetitions: int = 2,
 ):
-    from services.asr_service.engine_protocol import WHISPERX_SERVICE_CONFIG
+    from services.asr_service.engine_protocol import WHISPERX_V2_SERVICE_CONFIG
 
     global _ACTIVE_SERVICE_CONFIG
     previous_run_once = shared._run_once
     previous_profile = shared.QWEN3_ASR_PROFILE_ID
     previous_schema = shared.REPORT_SCHEMA_VERSION
     previous_config = _ACTIVE_SERVICE_CONFIG
-    _ACTIVE_SERVICE_CONFIG = service_config or WHISPERX_SERVICE_CONFIG
+    _ACTIVE_SERVICE_CONFIG = service_config or WHISPERX_V2_SERVICE_CONFIG
     shared._run_once = _run_once
     shared.QWEN3_ASR_PROFILE_ID = WHISPERX_PROFILE_ID
     shared.REPORT_SCHEMA_VERSION = REPORT_SCHEMA_VERSION
@@ -445,15 +446,15 @@ def run_candidate_matrix(
     manifest: SampleManifest, *, timeout_ms: int
 ) -> dict[str, object]:
     from services.asr_service.engine_protocol import (
-        WHISPERX_FULL_DECODE_SERVICE_CONFIG,
-        WHISPERX_HOTWORDS_SERVICE_CONFIG,
-        WHISPERX_SERVICE_CONFIG,
+        WHISPERX_V2_FULL_DECODE_SERVICE_CONFIG,
+        WHISPERX_V2_HOTWORDS_SERVICE_CONFIG,
+        WHISPERX_V2_SERVICE_CONFIG,
     )
 
     candidates = (
-        ("baseline", WHISPERX_SERVICE_CONFIG),
-        ("hotwords", WHISPERX_HOTWORDS_SERVICE_CONFIG),
-        ("full-decode", WHISPERX_FULL_DECODE_SERVICE_CONFIG),
+        ("baseline", WHISPERX_V2_SERVICE_CONFIG),
+        ("hotwords", WHISPERX_V2_HOTWORDS_SERVICE_CONFIG),
+        ("full-decode", WHISPERX_V2_FULL_DECODE_SERVICE_CONFIG),
     )
     reports: dict[str, dict[str, object]] = {}
     for candidate_id, config in candidates:
@@ -469,7 +470,11 @@ def run_candidate_matrix(
                 [config.temperature] if config.temperature != 0.0 else None
             ),
             "initial_prompt_enabled": bool(config.initial_prompt),
+            "prompt_asset_id": config.prompt_asset_id or None,
         }
+        report["service_profile_id"] = config.service_profile_id
+        report["profile_config_hash"] = config.config_hash
+        report["qualification_policy"] = config.qualification_policy
         reports[candidate_id] = report
 
     baseline = reports["baseline"]

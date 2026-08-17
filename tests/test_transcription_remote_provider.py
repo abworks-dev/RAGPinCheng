@@ -9,11 +9,14 @@ import httpx
 from src.transcription.asr_service_contract import (
     ASR_API_VERSION,
     ASR_JOB_SCHEMA_VERSION,
+    ASR_PROFILE_IDENTITIES_SCHEMA_VERSION,
     ASR_RESULT_SCHEMA_VERSION,
     ServiceCapabilities,
     ServiceFailureCode,
     ServiceJob,
     ServiceJobState,
+    ServiceProfileIdentities,
+    ServiceProfileIdentity,
     ServiceResult,
 )
 from src.transcription.candidate import CandidateSegment
@@ -374,6 +377,33 @@ def test_http_client_uses_bearer_and_strict_json_without_network():
     assert client.capabilities().service_profiles == (SERVICE_PROFILE_ID,)
     assert captured[0].method == "GET"
     assert captured[0].url.path == "/v1/capabilities"
+    assert captured[0].headers["authorization"] == "Bearer secret"
+
+
+def test_http_client_validates_authenticated_profile_identities_without_network():
+    expected = ServiceProfileIdentities(
+        ASR_PROFILE_IDENTITIES_SCHEMA_VERSION,
+        (
+            ServiceProfileIdentity(
+                SERVICE_PROFILE_ID,
+                PROVIDER_KEY,
+                "0" * 64,
+                None,
+                "not-required",
+            ),
+        ),
+    )
+    captured = []
+
+    def handler(request):
+        captured.append(request)
+        return httpx.Response(200, json=expected.to_json_dict())
+
+    client = HttpxAsrServiceClient(
+        "https://asr.invalid", "secret", transport=httpx.MockTransport(handler)
+    )
+    assert client.profile_identities() == expected
+    assert captured[0].url.path == "/v1/profile-identities"
     assert captured[0].headers["authorization"] == "Bearer secret"
 
 

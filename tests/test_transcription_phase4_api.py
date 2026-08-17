@@ -178,6 +178,9 @@ def test_application_runtime_registers_all_remote_provider_keys():
         "funasr-sensevoice-zh-experimental-v1",
         "qwen3-asr-zh-experimental-v1",
         "whisperx-large-v3-zh-align-experimental-v1",
+        "whisperx-large-v3-zh-balanced-v2",
+        "whisperx-large-v3-zh-fine-v2",
+        "whisperx-large-v3-zh-natural-v2",
     )
     assert tuple(item.provider_key for item in service.providers.factories) == (
         "faster-whisper",

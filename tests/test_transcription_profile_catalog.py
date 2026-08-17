@@ -35,8 +35,12 @@ from src.transcription.profile_catalog import (
     QWEN3_ASR_SERVICE_PROFILE_ID,
     WHISPERX_MODEL_ID,
     WHISPERX_MODEL_REVISION,
+    WHISPERX_BALANCED_PROFILE_ID,
+    WHISPERX_FINE_PROFILE_ID,
+    WHISPERX_NATURAL_PROFILE_ID,
     WHISPERX_PROFILE_ID,
     WHISPERX_SERVICE_PROFILE_ID,
+    WHISPERX_V2_SERVICE_PROFILE_ID,
     build_phase3_profile_catalog,
     build_phase3_profile_registry,
 )
@@ -62,18 +66,22 @@ def entry_for(profile_id: str, **kwargs):
     )
 
 
-def test_catalog_has_four_exact_experimental_profiles_and_release_policies():
+def test_catalog_preserves_legacy_profiles_and_adds_three_qualified_v2_presets():
     entries = build_phase3_profile_catalog()
     assert tuple(item.profile.profile_id for item in entries) == (
         FASTER_WHISPER_PROFILE_ID,
         FUNASR_SENSEVOICE_PROFILE_ID,
         QWEN3_ASR_PROFILE_ID,
         WHISPERX_PROFILE_ID,
+        WHISPERX_BALANCED_PROFILE_ID,
+        WHISPERX_FINE_PROFILE_ID,
+        WHISPERX_NATURAL_PROFILE_ID,
     )
-    faster = entries[0].profile
-    sensevoice = entries[1].profile
-    qwen = entries[2].profile
-    whisperx = entries[3].profile
+    profiles = {item.profile.profile_id: item.profile for item in entries}
+    faster = profiles[FASTER_WHISPER_PROFILE_ID]
+    sensevoice = profiles[FUNASR_SENSEVOICE_PROFILE_ID]
+    qwen = profiles[QWEN3_ASR_PROFILE_ID]
+    whisperx = profiles[WHISPERX_PROFILE_ID]
     assert faster.qualification is ProfileQualification.experimental
     assert faster.admission is ProfileAdmission.disabled
     assert faster.provider_config.to_json_dict() == {
@@ -137,6 +145,31 @@ def test_catalog_has_four_exact_experimental_profiles_and_release_policies():
             "auto_publish": False,
             "auto_index": False,
         }
+    expected_presets = {
+        WHISPERX_NATURAL_PROFILE_ID: ("natural", None, 500, 1000),
+        WHISPERX_BALANCED_PROFILE_ID: ("balanced", 30_000, 240, 750),
+        WHISPERX_FINE_PROFILE_ID: ("fine", 15_000, 120, 500),
+    }
+    for profile_id, expected in expected_presets.items():
+        profile = profiles[profile_id]
+        assert profile.qualification is ProfileQualification.qualification_approved
+        assert profile.admission is ProfileAdmission.disabled
+        assert profile.provider_config.service_profile_id == WHISPERX_V2_SERVICE_PROFILE_ID
+        assert profile.provider_config.config_version == "2"
+        assert profile.segmentation_config is not None
+        assert (
+            profile.segmentation_config.preset,
+            profile.segmentation_config.max_segment_duration_ms,
+            profile.segmentation_config.max_segment_chars,
+            profile.segmentation_config.max_merge_gap_ms,
+        ) == expected
+        assert profile.terminology_config is not None
+        assert profile.terminology_config.rule_set_id == "bim-engineering-v1"
+        assert profile.release_policy.to_json_dict() == {
+            "requires_review": True,
+            "auto_publish": False,
+            "auto_index": False,
+        }
 
 
 def test_faster_whisper_profile_is_visible_but_cannot_start_in_r2():
@@ -165,6 +198,9 @@ def test_phase4_registry_applies_transport_settings_to_both_profiles():
         FUNASR_SENSEVOICE_PROFILE_ID,
         QWEN3_ASR_PROFILE_ID,
         WHISPERX_PROFILE_ID,
+        WHISPERX_BALANCED_PROFILE_ID,
+        WHISPERX_FINE_PROFILE_ID,
+        WHISPERX_NATURAL_PROFILE_ID,
     )
     assert all(
         item.provider_config.upload_part_bytes == 4 * 1024**2

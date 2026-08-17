@@ -7,12 +7,14 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from .canonical import CanonicalSegment, CanonicalTranscript, _build_canonical, warning_sort_key
 from .profile import ProfileSnapshot, TranscriptionExecutionConfig, validate_execution_consistency
 from .provider_protocol import ProviderCandidate
+from .terminology import correct_terminology, protected_terminology_spans
 from .types import (
     ContractValidationError,
     TimeUnit,
     TranscriptWarning,
     TranscriptWarningCode,
     TranscriptionInputRef,
+    TerminologyCorrectionConfig,
 )
 
 
@@ -25,7 +27,7 @@ class _WorkSegment:
     original_positions: tuple[int, ...]
 
 
-_BOUNDARY_GROUPS = ("\n", "。！？!?；;", "，,")
+_BOUNDARY_GROUPS = ("\n", "。！？!?；;", "，,", " \t")
 
 
 def _to_milliseconds(value: str, unit: TimeUnit) -> int:
@@ -47,19 +49,51 @@ def _warning(
     return TranscriptWarning(code, primary, tuple(sorted(set(related))))
 
 
-def _split_raw_text(text: str, maximum: int) -> list[str]:
+def _safe_boundary(
+    position: int,
+    protected_spans: tuple[tuple[int, int], ...],
+) -> bool:
+    return not any(start < position < end for start, end in protected_spans)
+
+
+def _split_raw_text(
+    text: str,
+    maximum: int,
+    *,
+    max_duration_ms: int | None = None,
+    duration_ms: int | None = None,
+    terminology_config: TerminologyCorrectionConfig | None = None,
+) -> list[str]:
+    if max_duration_ms is not None and duration_ms is not None and duration_ms > max_duration_ms:
+        duration_character_limit = max(1, len(text) * max_duration_ms // duration_ms)
+        maximum = min(maximum, duration_character_limit)
     pieces: list[str] = []
     remaining = text
     while len(remaining) > maximum:
         chosen = 0
         window = remaining[:maximum]
+        protected_spans = protected_terminology_spans(remaining, terminology_config)
         for group in _BOUNDARY_GROUPS:
-            positions = [index + 1 for index, char in enumerate(window) if char in group]
+            positions = [
+                index + 1
+                for index, char in enumerate(window)
+                if char in group and _safe_boundary(index + 1, protected_spans)
+            ]
             if positions:
                 chosen = positions[-1]
                 break
         if chosen == 0:
             chosen = maximum
+            containing = next(
+                (
+                    (start, end)
+                    for start, end in protected_spans
+                    if start < chosen < end
+                ),
+                None,
+            )
+            if containing is not None:
+                chosen = containing[0] if containing[0] > 0 else containing[1]
         pieces.append(remaining[:chosen])
         remaining = remaining[chosen:]
     if remaining:
@@ -67,8 +101,20 @@ def _split_raw_text(text: str, maximum: int) -> list[str]:
     return pieces
 
 
-def _split_segment(segment: _WorkSegment, maximum: int) -> list[_WorkSegment]:
-    raw_pieces = _split_raw_text(segment.text, maximum)
+def _split_segment(
+    segment: _WorkSegment,
+    maximum: int,
+    *,
+    max_duration_ms: int | None = None,
+    terminology_config: TerminologyCorrectionConfig | None = None,
+) -> list[_WorkSegment]:
+    raw_pieces = _split_raw_text(
+        segment.text,
+        maximum,
+        max_duration_ms=max_duration_ms,
+        duration_ms=segment.end_ms - segment.start_ms,
+        terminology_config=terminology_config,
+    )
     if len(raw_pieces) == 1:
         return [segment]
     if segment.end_ms - segment.start_ms < len(raw_pieces):
@@ -160,6 +206,17 @@ def normalize_candidate(
             )
 
     config = execution_config.normalizer_config
+    segmentation = execution_config.segmentation_config
+    merge_gap_ms = (
+        config.max_merge_gap_ms
+        if segmentation is None
+        else segmentation.max_merge_gap_ms
+    )
+    max_segment_chars = (
+        config.max_segment_chars
+        if segmentation is None
+        else segmentation.max_segment_chars
+    )
     merged: list[_WorkSegment] = []
     index = 0
     while index < len(deduplicated):
@@ -171,8 +228,8 @@ def normalize_candidate(
             if (
                 len(current.text) < config.min_segment_chars
                 and gap >= 0
-                and gap <= config.max_merge_gap_ms
-                and len(joined_text) <= config.max_segment_chars
+                and gap <= merge_gap_ms
+                and len(joined_text) <= max_segment_chars
             ):
                 positions = current.original_positions + following.original_positions
                 merged.append(_WorkSegment(current.start_ms, following.end_ms, joined_text, None, positions))
@@ -188,13 +245,52 @@ def normalize_candidate(
         merged.append(current)
         index += 1
 
-    final_segments: list[_WorkSegment] = []
+    corrected_segments: list[_WorkSegment] = []
     for item in merged:
-        pieces = _split_segment(item, config.max_segment_chars)
+        corrected_text, changed = correct_terminology(
+            item.text, execution_config.terminology_config
+        )
+        corrected_segments.append(
+            _WorkSegment(
+                item.start_ms,
+                item.end_ms,
+                corrected_text,
+                item.confidence,
+                item.original_positions,
+            )
+        )
+        if changed:
+            warnings.append(
+                _warning(
+                    TranscriptWarningCode.terminology_corrected,
+                    item.original_positions[0],
+                    item.original_positions[1:],
+                )
+            )
+
+    final_segments: list[_WorkSegment] = []
+    for item in corrected_segments:
+        pieces = _split_segment(
+            item,
+            max_segment_chars,
+            max_duration_ms=(
+                None
+                if segmentation is None
+                else segmentation.max_segment_duration_ms
+            ),
+            terminology_config=execution_config.terminology_config,
+        )
         if len(pieces) > 1:
             warnings.append(
                 _warning(
-                    TranscriptWarningCode.long_segment_split,
+                    (
+                        TranscriptWarningCode.duration_segment_split
+                        if segmentation is not None
+                        and segmentation.max_segment_duration_ms is not None
+                        and item.end_ms - item.start_ms
+                        > segmentation.max_segment_duration_ms
+                        else TranscriptWarningCode.long_segment_split
+                    ),
                     item.original_positions[0],
                     item.original_positions[1:],
                 )

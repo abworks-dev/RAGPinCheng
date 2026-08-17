@@ -212,6 +212,53 @@ const transcriptionProfiles = [{
   requires_review: true, auto_publish: false, auto_index: false,
 }];
 
+const asrProfiles = ([
+  ["natural", null, 500, 1000, "自然分段"],
+  ["balanced", 30_000, 240, 750, "均衡分段"],
+  ["fine", 15_000, 120, 500, "细分段"],
+] as const).map(([preset, maxDuration, maxChars, mergeGap, label]) => ({
+  profile_id: `whisperx-large-v3-zh-${preset}-v2`,
+  display_name: `WhisperX 工程转录 ${label} v2`,
+  description: `${label}合成配置，用于验证长中文名称、固定术语和响应式布局。`,
+  profile_version: "2",
+  application_config_hash: preset.padEnd(64, "a"),
+  qualification: "qualification_approved",
+  admission: preset === "balanced" ? "enabled" : "disabled",
+  availability: "available",
+  unavailable_reason_code: null,
+  release_eligible: true,
+  segmentation: {
+    preset,
+    max_segment_duration_ms: maxDuration,
+    max_segment_chars: maxChars,
+    max_merge_gap_ms: mergeGap,
+  },
+  terminology_rule_set: "bim-engineering-v1",
+  protected_terms: ["Revit", "Navisworks", "AutoCAD", "BIM", "BIM-2026-0805", "12.5", "208", "95%"],
+  decode: {
+    service_profile_id: "whisperx-large-v3-zh-align-v2",
+    model_name: "Whisper large-v3 + 中文对齐",
+    beam_size: 10,
+    temperature: 0.1,
+    hotword_count: 20,
+    prompt_asset_id: "asr_engineering_zh_v2",
+    service_profile_config_hash: "a".repeat(64),
+    qualification_policy: "whisperx-r3/1",
+  },
+}));
+
+const asrReleaseRequest = {
+  request_id: "11111111-1111-4111-8111-111111111111",
+  profile_id: "whisperx-large-v3-zh-balanced-v2",
+  profile_display_name: "WhisperX 工程转录 均衡分段 v2",
+  profile_config_hash: "balanced".padEnd(64, "a"),
+  status: "requested",
+  request_reason: "合成培训视频发布申请",
+  requested_by_name: "合成管理员",
+  created_at: 1700000000,
+  updated_at: 1700000000,
+};
+
 const transcriptionJobs = [{
   job_id: "media-failed-job", media_id: "media-failed-1", attempt_number: 1,
   profile_id: "funasr-sensevoice-zh-experimental-v1", status: "failed", stage: null,
@@ -378,6 +425,7 @@ export async function installAdminRoutes(
       || isIndexRead
       || path.startsWith("/api/admin/media")
       || path.startsWith("/api/admin/transcription/")
+      || path.startsWith("/api/admin/asr")
       || path.startsWith("/api/admin/feedback")
       || path.startsWith("/api/admin/conversations")
       || path.startsWith("/api/admin/stats")
@@ -496,6 +544,24 @@ export async function installAdminRoutes(
       return json(route, mediaAssets);
     }
     if (request.method() === "GET" && path === "/api/admin/transcription/profiles") return json(route, transcriptionProfiles);
+    if (request.method() === "GET" && path === "/api/admin/asr") {
+      if (scenario === "empty") {
+        return json(route, { service: { status: "healthy", queue_depth: 0, queue_limit: 8, pause_reason: null }, profiles: [], release_requests: [], audit_events: [] });
+      }
+      const service = scenario === "disabled"
+        ? { status: "disabled", queue_depth: null, queue_limit: null, pause_reason: null }
+        : { status: "healthy", queue_depth: 1, queue_limit: 8, pause_reason: null };
+      const profiles = scenario === "disabled"
+        ? asrProfiles.map((profile) => ({ ...profile, release_eligible: false, availability: "unavailable", unavailable_reason_code: "asr_service_disabled" }))
+        : asrProfiles;
+      return json(route, { service, profiles, release_requests: [], audit_events: [] });
+    }
+    if (request.method() === "POST" && path === "/api/admin/asr/release-requests") {
+      await new Promise((resolve) => setTimeout(resolve, 800));
+      const body = request.postDataJSON() as { profile_id: string; request_reason?: string | null };
+      const selected = asrProfiles.find((profile) => profile.profile_id === body.profile_id) || asrProfiles[1];
+      return json(route, { ...asrReleaseRequest, profile_id: selected.profile_id, profile_display_name: selected.display_name, profile_config_hash: selected.application_config_hash, request_reason: body.request_reason || null });
+    }
     if (request.method() === "GET" && path === "/api/admin/transcription/jobs") {
       if (scenario === "empty" || scenario === "media_upload") return json(route, []);
       if (scenario === "media_progress") {

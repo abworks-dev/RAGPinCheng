@@ -111,7 +111,7 @@ def test_schema_10_database_migrates_manual_revision_columns_and_index(tmp_path,
     conn.close()
 
 
-def test_schema_14_database_migrates_answer_policy_and_later_schema(tmp_path, monkeypatch):
+def test_schema_14_database_migrates_answer_policy_and_asr_profiles(tmp_path, monkeypatch):
     path = tmp_path / "app.sqlite"
     migrations = db_migrations.MIGRATIONS
     monkeypatch.setattr(
@@ -133,7 +133,13 @@ def test_schema_14_database_migrates_answer_policy_and_later_schema(tmp_path, mo
     tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     columns = {row[1] for row in conn.execute("PRAGMA table_info(message_answer_versions)")}
     assert conn.execute("SELECT max(version) FROM app_schema_migrations").fetchone()[0] == db_migrations.CURRENT_SCHEMA_VERSION
-    assert {"upload_batch_entries", "answer_policy_settings", "answer_policy_audit"} <= tables
+    assert {
+        "upload_batch_entries",
+        "answer_policy_settings",
+        "answer_policy_audit",
+        "asr_profile_release_requests",
+        "asr_profile_audit_events",
+    } <= tables
     assert {"policy_version", "policy_json"} <= columns
     assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     assert conn.execute("PRAGMA foreign_key_check").fetchone() is None
@@ -218,6 +224,8 @@ def test_schema_5_database_adds_later_tables_without_changing_users(tmp_path):
         "DELETE FROM app_schema_migrations WHERE version >= 6 AND version <= ?",
         (db_migrations.CURRENT_SCHEMA_VERSION,),
     )
+    conn.execute("DROP TABLE asr_profile_audit_events")
+    conn.execute("DROP TABLE asr_profile_release_requests")
     conn.execute("DROP TABLE maintenance_runs")
     conn.execute("DROP TABLE maintenance_settings")
     conn.execute("DROP TABLE content_folder_requests")
