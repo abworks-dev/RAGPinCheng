@@ -13,6 +13,15 @@ from .content_storage import StoredContentObject
 
 _CATEGORY_KEY_RE = re.compile(r"^[a-z][a-z0-9_]{1,62}$")
 _DISPLAY_CODE_RE = re.compile(r"^[0-9A-Za-z_-]{1,12}$")
+_KNOWN_LIBRARY_DOC_TYPES = ("pdf", "docx", "xlsx", "pptx", "markdown", "transcript")
+_DOC_TYPE_SORT_ORDER = {
+    "pdf": 1,
+    "docx": 2,
+    "xlsx": 3,
+    "pptx": 4,
+    "markdown": 5,
+    "transcript": 6,
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -935,12 +944,21 @@ def list_content_items_page(
     lifecycle_status: str | None = None,
     source_origin: str | None = None,
     content_kind: str | None = None,
+    doc_type: str | None = None,
+    sort_by: str | None = None,
+    sort_direction: str = "asc",
     limit: int = 25,
     offset: int = 0,
     archived: bool = False,
 ) -> tuple[list[sqlite3.Row], int, dict[str, int]]:
     if content_kind not in {None, "document", "media_transcript"}:
         raise ValueError("invalid_content_kind")
+    if doc_type not in {None, *_KNOWN_LIBRARY_DOC_TYPES, "other"}:
+        raise ValueError("invalid_doc_type")
+    if sort_by not in {None, "doc_type"}:
+        raise ValueError("invalid_sort_by")
+    if sort_direction not in {"asc", "desc"}:
+        raise ValueError("invalid_sort_direction")
     clauses = ["archived_at IS NOT NULL" if archived else "archived_at IS NULL"]
     params: list[object] = []
     normalized = query.strip()
@@ -959,17 +977,31 @@ def list_content_items_page(
     if content_kind:
         clauses.append("content_kind=?")
         params.append(content_kind)
+    if doc_type == "other":
+        placeholders = ",".join("?" for _ in _KNOWN_LIBRARY_DOC_TYPES)
+        clauses.append(f"doc_type NOT IN ({placeholders})")
+        params.extend(_KNOWN_LIBRARY_DOC_TYPES)
+    elif doc_type:
+        clauses.append("doc_type=?")
+        params.append(doc_type)
     base_where = " AND ".join(clauses)
     status_where = base_where
     status_params = list(params)
     if lifecycle_status:
         status_where += " AND lifecycle_status=?"
         status_params.append(lifecycle_status)
+    order_by = "updated_at DESC,item_id"
+    if sort_by == "doc_type":
+        cases = " ".join(
+            f"WHEN '{value}' THEN {rank}" for value, rank in _DOC_TYPE_SORT_ORDER.items()
+        )
+        direction = "ASC" if sort_direction == "asc" else "DESC"
+        order_by = f"CASE doc_type {cases} ELSE 7 END {direction},title COLLATE NOCASE ASC,item_id ASC"
     rows = conn.execute(
         _CONTENT_LIBRARY_CTE
         + f""" SELECT * FROM library_rows
                  WHERE {status_where}
-                 ORDER BY updated_at DESC,item_id LIMIT ? OFFSET ?""",
+                 ORDER BY {order_by} LIMIT ? OFFSET ?""",
         [*status_params, limit, offset],
     ).fetchall()
     total = int(

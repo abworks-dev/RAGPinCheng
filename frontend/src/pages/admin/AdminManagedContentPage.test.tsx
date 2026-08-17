@@ -1182,12 +1182,32 @@ describe("AdminManagedContentPage", () => {
     await openRootFolder();
 
     fireEvent.click(screen.getByRole("button", { name: "展开搜索筛选" }));
+    expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual(expect.arrayContaining([
+      "全部类型", "PDF", "Word", "Excel", "PPT", "Markdown", "视频转录稿", "其他",
+    ]));
     fireEvent.change(screen.getByRole("combobox", { name: "类型" }), {
-      target: { value: "media_transcript" },
+      target: { value: "transcript" },
     });
     await waitFor(() => expect(mocks.items).toHaveBeenCalledWith(expect.objectContaining({
       category_id: category.id,
-      content_kind: "media_transcript",
+      doc_type: "transcript",
+    })));
+  });
+
+  it("requests server-side file type sorting in both directions", async () => {
+    render(<AdminManagedContentPage />);
+    await openRootFolder();
+
+    const typeSort = screen.getByRole("button", { name: /类型/ });
+    fireEvent.click(typeSort);
+    await waitFor(() => expect(mocks.items).toHaveBeenCalledWith(expect.objectContaining({
+      sort_by: "doc_type",
+      sort_direction: "asc",
+    })));
+    fireEvent.click(typeSort);
+    await waitFor(() => expect(mocks.items).toHaveBeenCalledWith(expect.objectContaining({
+      sort_by: "doc_type",
+      sort_direction: "desc",
     })));
   });
 

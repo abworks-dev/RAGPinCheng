@@ -476,6 +476,9 @@ export const api = {
     lifecycle_status?: string;
     source_origin?: string;
     content_kind?: "document" | "media_transcript";
+    doc_type?: "pdf" | "docx" | "xlsx" | "pptx" | "markdown" | "transcript" | "other";
+    sort_by?: "doc_type";
+    sort_direction?: "asc" | "desc";
     limit?: number;
     offset?: number;
   }) => {
@@ -485,6 +488,9 @@ export const api = {
     if (params?.lifecycle_status) search.set("lifecycle_status", params.lifecycle_status);
     if (params?.source_origin) search.set("source_origin", params.source_origin);
     if (params?.content_kind) search.set("content_kind", params.content_kind);
+    if (params?.doc_type) search.set("doc_type", params.doc_type);
+    if (params?.sort_by) search.set("sort_by", params.sort_by);
+    if (params?.sort_direction) search.set("sort_direction", params.sort_direction);
     if (params?.limit != null) search.set("limit", String(params.limit));
     if (params?.offset != null) search.set("offset", String(params.offset));
     return jsonFetch<ManagedContentList>(`/api/admin/content/items-page?${search}`);
