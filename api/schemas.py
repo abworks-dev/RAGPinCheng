@@ -394,7 +394,8 @@ class CreateManagedCategoryRequest(BaseModel):
 class UpdateManagedCategoryRequest(BaseModel):
     display_code: str = Field(min_length=1, max_length=12)
     display_name: str = Field(min_length=1, max_length=100)
-    sort_order: int
+    # Accepted for compatibility with older clients; ordering is server-maintained.
+    sort_order: int | None = None
     is_active: bool
     expected_version: int = Field(gt=0)
 
