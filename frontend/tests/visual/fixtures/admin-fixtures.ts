@@ -689,6 +689,22 @@ export async function installAdminRoutes(
       const rows = scenario === "empty" ? [] : trashItems;
       return json(route, { items: rows, total: rows.length, status_counts: rows.length ? { published: 1 } : {} });
     }
+    if (request.method() === "GET" && /^\/api\/admin\/content\/items\/[^/]+\/audit-events$/.test(path)) {
+      return json(route, [{
+        event_type: "content.archived",
+        actor_name: "合成资料员",
+        created_at: 1700000800,
+        previous_status: "published",
+        restored_status: null,
+        restore_strategy: null,
+        source_category_path: null,
+        target_category_path: null,
+        category_path: "03 公司内部标准 / 03-01 建模标准",
+        archive_reason: null,
+        replaced_title: null,
+        replaced_filename: null,
+      }]);
+    }
     if (path === "/api/admin/content/folder-requests") {
       return json(route, options.includeFolderRequest ? folderRequests : []);
     }
