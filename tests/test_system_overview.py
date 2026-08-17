@@ -39,6 +39,25 @@ def test_collect_system_overview_reports_separate_nodes(monkeypatch):
     assert payload["app"]["disk_used_bytes"] == 30
     assert payload["gpu"]["device_name"] == "test-gpu"
     assert "_node_id" not in payload["gpu"]
+    assert payload["office_processing"] == {
+        "enabled": True,
+        "mode": "deployment_config",
+        "disabled_reason": None,
+    }
+
+
+def test_collect_system_overview_reports_disabled_office_processing(monkeypatch):
+    monkeypatch.setattr(system_overview, "OFFICE_PROCESSING_ENABLED", False)
+    monkeypatch.setattr(system_overview, "collect_app_metrics", lambda now: {"status": "healthy", "checked_at": now})
+    monkeypatch.setattr(system_overview, "fetch_gpu_metrics", lambda now: {"status": "unavailable", "checked_at": now, "_node_id": None})
+
+    payload = system_overview.collect_system_overview(now=100)
+
+    assert payload["office_processing"] == {
+        "enabled": False,
+        "mode": "deployment_config",
+        "disabled_reason": "office_processing_disabled",
+    }
 
 
 def test_collect_system_overview_reports_shared_nodes(monkeypatch):

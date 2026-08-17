@@ -6,7 +6,7 @@ import time
 
 import requests
 
-from src.config import CONTENT_ROOT
+from src.config import CONTENT_ROOT, OFFICE_DOC_TYPES, OFFICE_PROCESSING_ENABLED
 from src.ingest import PublicationParseError
 from src.index import EmbeddingInputTooLong
 from src.indexing_pipeline import ManagedIndexMetadata, index_managed_content
@@ -28,6 +28,9 @@ _MANAGED_STATUS_MAP = {
     "embedding": "embedding",
 }
 _FAILURE_DETAILS = {
+    "office_processing_disabled": (
+        "Office 处理当前已停用。", False, "请启用 Office 处理后重新发布。"
+    ),
     "managed_source_unavailable": ("资料源文件不可用。", False, "请联系系统管理员检查内容存储。"),
     "managed_parse_path_invalid": ("资料解析目录不可用。", True, "请联系系统管理员检查解析目录权限后重试。"),
     "pdf_password_required": ("PDF 需要密码才能解析。", False, "请上传已解除密码保护的 PDF。"),
@@ -89,6 +92,7 @@ def _update_job(index_job_id: str, status: str, **fields: object) -> None:
 
 
 def run_content_publication(index_job_id: str) -> None:
+    office_disabled = False
     conn = connect()
     try:
         row = conn.execute(
@@ -111,18 +115,25 @@ def run_content_publication(index_job_id: str) -> None:
         if row["status"] != "pending":
             logger.info("managed publication job %s status=%s; skipping", index_job_id, row["status"])
             return
-        now = int(time.time())
-        conn.execute(
-            "UPDATE content_publications SET status='indexing',updated_at=? WHERE id=?",
-            (now, row["publication_id"]),
-        )
-        conn.execute(
-            "UPDATE content_index_jobs SET started_at=?,updated_at=? WHERE id=?",
-            (now, now, index_job_id),
-        )
-        conn.commit()
+        if row["doc_type"] in OFFICE_DOC_TYPES and not OFFICE_PROCESSING_ENABLED:
+            office_disabled = True
+        else:
+            now = int(time.time())
+            conn.execute(
+                "UPDATE content_publications SET status='indexing',updated_at=? WHERE id=?",
+                (now, row["publication_id"]),
+            )
+            conn.execute(
+                "UPDATE content_index_jobs SET started_at=?,updated_at=? WHERE id=?",
+                (now, now, index_job_id),
+            )
+            conn.commit()
     finally:
         conn.close()
+
+    if office_disabled:
+        _fail(index_job_id, "office_processing_disabled")
+        return
 
     current_stage = "pending"
 

@@ -66,11 +66,13 @@ docker compose -f docker/docker-compose.yml exec libreoffice sh -lc "du -sh /dat
 
 ## 停用与回滚
 
-当前没有独立的 Office 功能开关。停止 `libreoffice` 容器只会停用 PPTX 转 PDF和 XLSX 重算；DOCX/PPTX Docling 解析与 XLSX openpyxl 解析仍在 backend 中运行。因此，完整停用 Office 新解析需要回滚到启用 Office 之前的已验证应用镜像，不能用停止单个容器冒充完整停用。
+部署级开关 `OFFICE_PROCESSING_ENABLED` 默认值为 `true`。设置为 `false` 并重启 backend 后，系统会阻止新的 DOCX/XLSX/PPTX 上传、server import、发布、重试和 Worker 实际处理；PDF、Markdown、转录稿以及既有 Office 资料的检索、原文件和预览读取不受影响。管理后台系统概览仅向系统管理员显示当前状态。
+
+关闭开关不会删除、隐藏或重建既有文件、索引和派生产物。入口返回稳定错误码 `office_processing_disabled`，已排队但尚未执行的 Office 任务由 Worker 标记为失败。恢复时将开关设回 `true`、重启 backend，再由管理员重新上传、发布或重试失败任务。
 
 受控回滚顺序：
 
-1. 停止接收新的 Office 上传或发布任务，等待在途索引任务结束。
+1. 将 `OFFICE_PROCESSING_ENABLED=false` 写入目标环境的私有配置并重启 backend；确认管理后台显示“Office 新资料处理：已停用”。
 2. 记录当前 backend 和 `libreoffice` 镜像摘要、Compose 配置及失败文件标识，不记录客户文档内容。
 3. 将应用和转换服务恢复到上一组已验证镜像；不要修改 PDF、Markdown 或转录服务配置。
 4. 保留原始 Office 文件。派生 PDF/Markdown 可以在恢复后重新生成，不应作为唯一恢复点。

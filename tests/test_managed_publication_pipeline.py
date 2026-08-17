@@ -12,6 +12,38 @@ from pypdf import PdfWriter
 from pypdf.errors import DependencyError
 
 
+def test_managed_worker_fails_queued_office_job_before_materializing(monkeypatch):
+    class Cursor:
+        def fetchone(self):
+            return {
+                "id": "job-1",
+                "status": "pending",
+                "doc_type": "pptx",
+                "publication_id": "publication-1",
+            }
+
+    class Connection:
+        def execute(self, *_args, **_kwargs):
+            return Cursor()
+
+        def close(self):
+            pass
+
+    failures = []
+    monkeypatch.setattr(content_publication, "connect", Connection)
+    monkeypatch.setattr(content_publication, "OFFICE_PROCESSING_ENABLED", False)
+    monkeypatch.setattr(content_publication, "_fail", lambda job_id, code: failures.append((job_id, code)))
+    monkeypatch.setattr(
+        content_publication._storage,
+        "resolve_object",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("Office source was materialized")),
+    )
+
+    content_publication.run_content_publication("job-1")
+
+    assert failures == [("job-1", "office_processing_disabled")]
+
+
 def test_managed_cloud_pdf_uses_version_cache_and_reuses_markdown(tmp_path, monkeypatch):
     source = tmp_path / "content" / "published" / "item" / "version" / "guide.pdf"
     source.parent.mkdir(parents=True)
@@ -103,6 +135,12 @@ def test_publication_failure_classification_is_controlled_and_redacted():
         "message": "PDF 需要密码才能解析。",
         "retryable": False,
         "recommended_action": "请上传已解除密码保护的 PDF。",
+    }
+    assert content_publication.failure_detail("office_processing_disabled") == {
+        "code": "office_processing_disabled",
+        "message": "Office 处理当前已停用。",
+        "retryable": False,
+        "recommended_action": "请启用 Office 处理后重新发布。",
     }
 
 
