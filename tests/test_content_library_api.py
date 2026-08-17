@@ -2035,6 +2035,51 @@ def test_trash_retention_states_are_informational_and_overdue_remains_restorable
     assert restored.status_code == 200
 
 
+def test_bulk_restore_preflight_reports_ready_and_conflict_without_mutating(content_api):
+    client, sessions, _queued, db_path = content_api
+    organizer = _auth(sessions, "organizer", csrf=True)
+    ready = client.post("/api/admin/content/uploads", data={"category_id": "cat-03"},
+        files=[("files", ("ready.md", b"# ready", "text/markdown"))], **organizer).json()["entries"][0]
+    conflict = client.post("/api/admin/content/uploads", data={"category_id": "cat-04"},
+        files=[("files", ("same.md", b"# archived", "text/markdown"))], **organizer).json()["entries"][0]
+    client.post("/api/admin/content/uploads", data={"category_id": "cat-03"},
+        files=[("files", ("same.md", b"# active", "text/markdown"))], **organizer)
+    refs = [{"item_id": entry["item_id"], "expected_version_id": entry["version_id"]} for entry in (ready, conflict)]
+    client.post("/api/admin/content/bulk-archive", json={"items": [refs[0]]}, **organizer)
+    client.request("DELETE", f"/api/admin/content/items/{conflict['item_id']}",
+        json={"expected_version_id": conflict["version_id"]}, **organizer)
+    result = client.post("/api/admin/content/bulk-restore/preflight",
+        json={"items": refs, "target_category_id": "cat-03"}, **_auth(sessions, "reviewer"))
+    assert result.status_code == 200
+    assert (result.json()["ready"], result.json()["blocked"]) == (1, 1)
+    assert [entry["status"] for entry in result.json()["results"]] == ["ready", "conflict"]
+    conn = connect(db_path)
+    try:
+        assert conn.execute("SELECT count(*) FROM content_items WHERE id IN (?,?) AND archived_at IS NOT NULL",
+            (ready["item_id"], conflict["item_id"])).fetchone()[0] == 2
+    finally:
+        conn.close()
+
+
+def test_trash_export_requires_csrf_and_records_audit(content_api):
+    client, sessions, _queued, db_path = content_api
+    organizer = _auth(sessions, "organizer", csrf=True)
+    entry = client.post("/api/admin/content/uploads", data={"category_id": "cat-03"},
+        files=[("files", ("export.md", b"# export", "text/markdown"))], **organizer).json()["entries"][0]
+    client.request("DELETE", f"/api/admin/content/items/{entry['item_id']}",
+        json={"expected_version_id": entry["version_id"]}, **organizer)
+    assert client.post("/api/admin/content/trash/export", json={}, **_auth(sessions, "reviewer")).status_code == 403
+    exported = client.post("/api/admin/content/trash/export", json={}, **_auth(sessions, "reviewer", csrf=True))
+    assert exported.status_code == 200
+    assert exported.content.startswith(b"\xef\xbb\xbf")
+    assert "export.md" in exported.content.decode("utf-8-sig")
+    conn = connect(db_path)
+    try:
+        assert conn.execute("SELECT count(*) FROM content_audit_events WHERE event_type='content.trash_exported'").fetchone()[0] == 1
+    finally:
+        conn.close()
+
+
 def test_managed_index_job_listing_exposes_business_labels_and_filters(content_api):
     client, sessions, _queued, db_path = content_api
     conn = connect(db_path)

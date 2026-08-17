@@ -249,6 +249,10 @@ test.describe("资料管理", () => {
     await openTab(page, "资料管理");
     await page.getByRole("tab", { name: "回收站" }).click();
     await expect(page.getByRole("heading", { name: "回收站", exact: true })).toBeVisible();
+    await expect(page.getByRole("checkbox", { name: "选择恢复“企业知识库使用规范”" })).toBeVisible();
+    await expect(page.getByRole("checkbox", { name: "选择恢复“项目交付检查清单”" })).toBeVisible();
+    await page.getByRole("checkbox", { name: "选择恢复“企业知识库使用规范”" }).check();
+    await expect(page.getByText(/已选择 1 份/)).toBeVisible();
 
     const desktop = page.viewportSize()!.width >= 1024;
     const row = desktop
@@ -543,7 +547,8 @@ test.describe("资料管理", () => {
     await expect(page.getByText("合成资料员", { exact: true }).filter({ visible: true }).first()).toBeVisible();
     await expect(page.getByText("已发布", { exact: true }).filter({ visible: true }).first()).toBeVisible();
     await expectNoBodyOverflow(page);
-    const restore = page.getByRole("button", { name: "恢复", exact: true });
+    const restore = page.locator(page.viewportSize()!.width >= 1024 ? "tr" : "li")
+      .filter({ hasText: "企业知识库使用规范" }).getByRole("button", { name: "恢复", exact: true });
     await restore.scrollIntoViewIfNeeded();
     await expectInViewport(restore);
     const restoreRequest = page.waitForRequest((request) => request.method() === "POST" && request.url().endsWith("/items/item-5/restore"));

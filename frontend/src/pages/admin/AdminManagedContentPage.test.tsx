@@ -33,6 +33,9 @@ const mocks = vi.hoisted(() => ({
   bulkMove: vi.fn(),
   bulkReclassify: vi.fn(),
   bulkArchive: vi.fn(),
+  bulkRestore: vi.fn(),
+  preflightBulkRestore: vi.fn(),
+  exportTrash: vi.fn(),
   bulkDownload: vi.fn(),
   downloadFile: vi.fn(),
   deleteContent: vi.fn(),
@@ -109,6 +112,9 @@ vi.mock("../../api/client", () => ({
     bulkMoveManagedContent: mocks.bulkMove,
     bulkReclassifyManagedContent: mocks.bulkReclassify,
     bulkArchiveManagedContent: mocks.bulkArchive,
+    bulkRestoreManagedContent: mocks.bulkRestore,
+    preflightBulkRestoreManagedContent: mocks.preflightBulkRestore,
+    exportManagedContentTrash: mocks.exportTrash,
     bulkDownloadManagedContent: mocks.bulkDownload,
     downloadManagedContentFile: mocks.downloadFile,
     deleteManagedContent: mocks.deleteContent,
@@ -737,6 +743,24 @@ describe("AdminManagedContentPage", () => {
     expect(screen.getByRole("dialog")).toHaveTextContent("重新发布后才会进入检索");
     fireEvent.click(screen.getByRole("button", { name: "确认恢复" }));
     await waitFor(() => expect(mocks.restoreContent).toHaveBeenCalledWith("item-1", "version-1", { target_category_id: "cat-03" }));
+  });
+
+  it("selects individual trash items and preflights only the chosen restore", async () => {
+    const second = { ...item, item_id: "item-2", version_id: "version-2", title: "项目标准", original_filename: "project.pdf" };
+    mocks.trash.mockResolvedValue({ items: [
+      { ...item, archived_at: 1_700_000_000, retention_status: "retained", retention_days_remaining: 30 },
+      { ...second, archived_at: 1_699_000_000, retention_status: "overdue", retention_days_remaining: -2 },
+    ], total: 2, status_counts: {}, retention_counts: { retained: 1, expiring: 0, overdue: 1 } });
+    mocks.preflightBulkRestore.mockResolvedValue({ results: [{ item_id: "item-2", version_id: "version-2", status: "ready", message: "可以恢复", target_category_path: "03 公司内部标准" }], ready: 1, blocked: 0 });
+    render(<AdminManagedContentPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "回收站" }));
+    fireEvent.click(await screen.findByRole("checkbox", { name: "选择恢复“项目标准”" }));
+    expect(screen.getByText("已选择 1 份，单次最多 20 份；翻页或修改筛选会清空选择。")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "批量恢复（1）" }));
+    await waitFor(() => expect(mocks.preflightBulkRestore).toHaveBeenCalledWith([
+      { item_id: "item-2", expected_version_id: "version-2" },
+    ], undefined));
+    expect(await screen.findByRole("dialog", { name: "确认批量恢复" })).toHaveTextContent("可恢复 1 份");
   });
 
   it("keeps the restore dialog open and confirms a same-name replacement", async () => {

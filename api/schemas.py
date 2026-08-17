@@ -520,6 +520,7 @@ class ManagedContentListResponse(BaseModel):
     items: list[ManagedContentItemDTO]
     total: int
     status_counts: dict[str, int]
+    retention_counts: dict[str, int] = Field(default_factory=dict)
 
 
 class DeleteManagedContentRequest(BaseModel):
@@ -599,6 +600,30 @@ class BulkArchiveManagedContentRequest(BaseModel):
 class BulkRestoreManagedContentRequest(BaseModel):
     items: list[BulkManagedContentItemRef] = Field(min_length=1, max_length=20)
     target_category_id: str | None = Field(default=None, min_length=1, max_length=100)
+
+
+class BulkRestorePreflightResultDTO(BaseModel):
+    item_id: str
+    version_id: str
+    status: Literal["ready", "conflict", "inactive_category", "version_changed", "in_progress", "not_found"]
+    message: str
+    target_category_path: str | None = None
+
+
+class BulkRestorePreflightResponse(BaseModel):
+    results: list[BulkRestorePreflightResultDTO]
+    ready: int
+    blocked: int
+
+
+class TrashExportRequest(BaseModel):
+    query: str = Field(default="", max_length=200)
+    retention_status: Literal["retained", "expiring", "overdue"] | None = None
+    archived_from: int | None = Field(default=None, ge=0)
+    archived_to: int | None = Field(default=None, ge=0)
+    category_id: str | None = Field(default=None, max_length=100)
+    archived_by: str = Field(default="", max_length=100)
+    sort_direction: Literal["asc", "desc"] = "desc"
 
 
 class BulkDownloadManagedContentRequest(BaseModel):
