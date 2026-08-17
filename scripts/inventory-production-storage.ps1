@@ -431,6 +431,10 @@ function Get-GpuRuntimeInventory {
         resolver = @()
         caches = [ordered]@{}
         reference_inventory_status = 'not-run'
+        reference_sources = [ordered]@{
+            processes = [ordered]@{ status = 'not-run'; error_type = '' }
+            scheduled_tasks = [ordered]@{ status = 'not-run'; error_type = ''; task_names = @('RAGPinCheng-GPU', 'RAGPinCheng-GPU-Runtime-Cleanup') }
+        }
     }
     if ([string]::IsNullOrWhiteSpace($Root)) { return $result }
     if (-not (Test-Path -LiteralPath $Root -PathType Container)) { $result.status = 'missing'; return $result }
@@ -443,19 +447,34 @@ function Get-GpuRuntimeInventory {
                 if (-not [string]::IsNullOrWhiteSpace($value)) { $referenceTexts.Add($value) }
             }
         }
-        foreach ($task in @(Get-ScheduledTask -ErrorAction Stop)) {
+        $result.reference_sources.processes.status = 'measured'
+    }
+    catch {
+        $referenceInventoryAvailable = $false
+        $result.reference_sources.processes.status = 'unavailable-protect-all'
+        $result.reference_sources.processes.error_type = $_.Exception.GetType().Name
+    }
+    try {
+        if (-not (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue)) {
+            throw 'Get-ScheduledTask is unavailable'
+        }
+        foreach ($taskName in @('RAGPinCheng-GPU', 'RAGPinCheng-GPU-Runtime-Cleanup')) {
+            $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+            if (-not $task) { continue }
             foreach ($action in @($task.Actions)) {
                 foreach ($value in @([string]$action.Execute, [string]$action.Arguments)) {
                     if (-not [string]::IsNullOrWhiteSpace($value)) { $referenceTexts.Add($value) }
                 }
             }
         }
-        $result.reference_inventory_status = 'measured'
+        $result.reference_sources.scheduled_tasks.status = 'measured'
     }
     catch {
         $referenceInventoryAvailable = $false
-        $result.reference_inventory_status = 'unavailable-protect-all'
+        $result.reference_sources.scheduled_tasks.status = 'unavailable-protect-all'
+        $result.reference_sources.scheduled_tasks.error_type = $_.Exception.GetType().Name
     }
+    $result.reference_inventory_status = if ($referenceInventoryAvailable) { 'measured' } else { 'unavailable-protect-all' }
     $current = Get-JsonFile -Path (Join-Path $Root 'current-release.json')
     if ($current) {
         foreach ($propertyName in @('release_root', 'release_path')) {
