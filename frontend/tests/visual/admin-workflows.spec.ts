@@ -570,7 +570,7 @@ test.describe("分类管理", () => {
     await expect(page.getByText("资料权限")).toHaveCount(0);
     await expect(page.getByText("3 个一级分类 · 共 4 个分类")).toBeVisible();
     await expect(page.getByRole("button", { name: "全部展开" })).toBeVisible();
-    await expect(page.getByText("3 份直接资料 · 1 个子分类")).toBeVisible();
+    if (page.viewportSize()!.width >= 640) await expect(page.getByText("3 份 · 1 项")).toBeVisible();
     await expectNoBodyOverflow(page);
     const tree = page.getByRole("tree", { name: "分类层级" });
     await expect(tree).toHaveCSS("border-bottom-width", "1px");
@@ -608,10 +608,32 @@ test.describe("分类管理", () => {
       await child.press("ArrowLeft");
       await expect(parent).toBeFocused();
       await expect(page.getByText("公司内部标准").last()).toBeVisible();
+      await page.getByRole("button", { name: "调整结构" }).click();
+      await expect(page.getByRole("button", { name: "完成调整" })).toHaveAttribute("aria-pressed", "true");
+      await expect(page.getByRole("button", { name: "拖动公司内部标准" })).toBeVisible();
       const save = page.getByRole("button", { name: "保存修改" });
       await expect(save).toBeDisabled();
       await expectInViewport(save);
     }
+  });
+
+  test("explicit move confirms the path and sends the concurrency contract", async ({ page }) => {
+    await openTab(page, "分类管理", "normal", "admin", { includeChildFolder: true });
+    await page.getByRole("treeitem", { name: /项目资料/ }).click();
+    const editor = page.viewportSize()!.width < 1024
+      ? page.getByRole("dialog", { name: "项目资料" })
+      : page.locator("[aria-labelledby='category-list-title']").getByText("基本信息").locator("xpath=ancestor::div[contains(@class,'h-full')]");
+    await expect(editor.getByRole("button", { name: "上移" })).toBeVisible();
+    await expect(editor.getByRole("button", { name: "下移" })).toBeVisible();
+    await editor.getByRole("button", { name: "移动至" }).click();
+    const dialog = page.getByRole("dialog", { name: "移动分类" });
+    await expect(dialog).toContainText("04 项目资料");
+    await dialog.getByRole("combobox", { name: "目标父分类" }).selectOption("cat-company");
+    await expect(dialog).toContainText("新路径：03 公司内部标准 / 04 项目资料");
+    const moveRequest = page.waitForRequest((request) => request.method() === "POST" && request.url().endsWith("/api/admin/content/categories/cat-project/move"));
+    await dialog.getByRole("button", { name: "确认移动" }).click();
+    const request = await moveRequest;
+    expect(request.postDataJSON()).toEqual({ target_parent_id: "cat-company", before_category_id: null, expected_version: 2 });
   });
 
   for (const scenario of ["loading", "empty", "error"] as const) {

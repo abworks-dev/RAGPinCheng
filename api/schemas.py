@@ -392,6 +392,12 @@ class UpdateManagedCategoryRequest(BaseModel):
     expected_version: int = Field(gt=0)
 
 
+class MoveManagedCategoryRequest(BaseModel):
+    target_parent_id: str | None = None
+    before_category_id: str | None = None
+    expected_version: int = Field(gt=0)
+
+
 class ManagedUploadEntryDTO(BaseModel):
     filename: str
     item_id: str | None = None

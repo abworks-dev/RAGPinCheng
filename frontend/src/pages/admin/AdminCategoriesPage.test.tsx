@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   categories: vi.fn(),
   create: vi.fn(),
   update: vi.fn(),
+  move: vi.fn(),
   success: vi.fn(),
   error: vi.fn(),
 }));
@@ -15,6 +16,7 @@ vi.mock("../../api/client", () => ({
     managedCategories: mocks.categories,
     createManagedCategory: mocks.create,
     updateManagedCategory: mocks.update,
+    moveManagedCategory: mocks.move,
   },
 }));
 
@@ -56,6 +58,7 @@ describe("AdminCategoriesPage", () => {
     mocks.categories.mockResolvedValue([category, child]);
     mocks.update.mockResolvedValue({ ...category, version: 4, display_name: "行业规范" });
     mocks.create.mockResolvedValue({ ...category, id: "cat-new", display_code: "09", display_name: "新分类", full_path: "09 新分类" });
+    mocks.move.mockResolvedValue([category, child]);
   });
 
   it("sends the selected category version for optimistic concurrency", async () => {
@@ -85,11 +88,11 @@ describe("AdminCategoriesPage", () => {
     expect(parent).toHaveAttribute("aria-expanded", "false");
     expect(screen.getByText("1 个一级分类 · 共 2 个分类")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "全部展开" })).toBeInTheDocument();
-    expect(screen.getByText("0 份直接资料 · 1 个子分类")).toBeInTheDocument();
+    expect(within(parent).getByText("0 份 · 1 项")).toBeInTheDocument();
     expect(screen.queryByTestId("category-tree-item-cat-01-child")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "展开行业规范与标准" }));
     expect(screen.getByRole("button", { name: "全部折叠" })).toBeInTheDocument();
-    expect(screen.getByText("2 份直接资料")).toBeInTheDocument();
+    expect(within(screen.getByTestId("category-tree-item-cat-01-child")).getByText("2 份")).toBeInTheDocument();
     expect(screen.queryByText("industry_standards")).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "资料权限" })).not.toBeInTheDocument();
   });
@@ -133,6 +136,44 @@ describe("AdminCategoriesPage", () => {
     expect(childItem).toHaveFocus();
     fireEvent.keyDown(childItem, { key: "ArrowLeft" });
     expect(parent).toHaveFocus();
+  });
+
+  it("uses an explicit structure mode and sends stable sibling positions", async () => {
+    const sibling = { ...category, id: "cat-02", category_key: "client", display_code: "02", display_name: "客户标准", sort_order: 20, full_path: "02 客户标准" };
+    mocks.categories.mockResolvedValueOnce([category, sibling]);
+    mocks.move.mockResolvedValueOnce([sibling, { ...category, sort_order: 20, version: 4 }]);
+    render(<AdminCategoriesPage />);
+
+    const structure = await screen.findByRole("button", { name: "调整结构" });
+    fireEvent.click(structure);
+    expect(screen.getByRole("button", { name: "完成调整" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("拖动手柄调整同级顺序；跨层级移动会要求确认。")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "下移分类" }));
+    await waitFor(() => expect(mocks.move).toHaveBeenCalledWith("cat-01", {
+      target_parent_id: null,
+      before_category_id: null,
+      expected_version: 3,
+    }));
+  });
+
+  it("confirms a parent change with the old and new paths", async () => {
+    const target = { ...category, id: "cat-02", category_key: "client", display_code: "02", display_name: "客户标准", sort_order: 20, full_path: "02 客户标准" };
+    mocks.categories.mockResolvedValueOnce([category, target]);
+    mocks.move.mockResolvedValueOnce([{ ...category, parent_id: "cat-02", level: 2, version: 4, full_path: "02 客户标准 / 01 行业规范与标准" }, target]);
+    render(<AdminCategoriesPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "移动至" }));
+    const dialog = await screen.findByRole("dialog", { name: "移动分类" });
+    expect(within(dialog).getByText("01 行业规范与标准")).toBeInTheDocument();
+    fireEvent.change(within(dialog).getByLabelText("目标父分类"), { target: { value: "cat-02" } });
+    expect(within(dialog).getByText(/新路径：02 客户标准 \/ 01 行业规范与标准/)).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "确认移动" }));
+    await waitFor(() => expect(mocks.move).toHaveBeenCalledWith("cat-01", {
+      target_parent_id: "cat-02",
+      before_category_id: null,
+      expected_version: 3,
+    }));
   });
 
   it("creates a category from the Sheet form", async () => {

@@ -591,6 +591,20 @@ export async function installAdminRoutes(
     }
     if (request.method() !== "GET" && path.startsWith("/api/admin/content/")) {
       await new Promise((resolve) => setTimeout(resolve, 800));
+      if (request.method() === "POST" && /^\/api\/admin\/content\/categories\/[^/]+\/move$/.test(path)) {
+        const categoryId = path.split("/").at(-2);
+        const body = request.postDataJSON() as { target_parent_id?: string | null; before_category_id?: string | null; expected_version: number };
+        const current = categories.find((category) => category.id === categoryId) || categories[0];
+        const parent = categories.find((category) => category.id === body.target_parent_id);
+        return json(route, categories.map((category) => category.id === categoryId ? {
+          ...current,
+          parent_id: body.target_parent_id || null,
+          level: parent ? parent.level + 1 : 1,
+          full_path: `${parent ? `${parent.full_path} / ` : ""}${current.display_code} ${current.display_name}`,
+          version: current.version + 1,
+          updated_at: 1700000600,
+        } : category));
+      }
       if (request.method() === "POST" && path === "/api/admin/content/categories") {
         await new Promise((resolve) => setTimeout(resolve, 1_200));
         const body = request.postDataJSON() as { parent_id?: string | null; display_code?: string; display_name?: string; sort_order?: number };

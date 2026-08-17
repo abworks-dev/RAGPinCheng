@@ -448,6 +448,17 @@ export const api = {
     method: "PATCH",
     body: JSON.stringify(body),
   }),
+  moveManagedCategory: (
+    categoryId: string,
+    body: {
+      target_parent_id: string | null;
+      before_category_id: string | null;
+      expected_version: number;
+    },
+  ) => jsonFetch<ManagedCategory[]>(`/api/admin/content/categories/${encodeURIComponent(categoryId)}/move`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  }),
   managedContentItems: (params?: {
     query?: string;
     category_id?: string;
