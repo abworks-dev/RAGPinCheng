@@ -12,6 +12,7 @@ from .config import (
     RERANKER_MODEL,
     RERANK_PROVIDER,
 )
+from .answer_policy import AnswerPolicy, POLICY_DEFAULT_VERSION
 from .retrieve import RetrievedParent
 
 LOW_CONFIDENCE_MESSAGE = "未找到足够相关的资料。请补充具体的构件、规范、软件操作或项目资料名称。"
@@ -40,6 +41,7 @@ def evaluate_relevance(
     *,
     has_history: bool,
     decomposition_applied: bool,
+    policy: AnswerPolicy | None = None,
 ) -> RelevanceDecision:
     ranked = sorted(sources, key=lambda p: p.score, reverse=True)
     top1 = float(ranked[0].score) if ranked else None
@@ -53,21 +55,35 @@ def evaluate_relevance(
         reason = "no_sources"
     elif not eligible:
         reason = "ineligible_path"
-    elif not RELEVANCE_GATE_ENABLED:
+    # Keep environment fallback behavior observable for callers/tests that
+    # override the legacy module constants. Persisted admin policies carry a
+    # distinct version and take precedence for real requests.
+    persisted = policy is not None and policy.policy_version != POLICY_DEFAULT_VERSION
+    enabled = policy.relevance_gate_enabled if persisted else RELEVANCE_GATE_ENABLED
+    min_score = policy.relevance_min_score if persisted else RELEVANCE_GATE_MIN_SCORE
+    min_rrf = policy.relevance_min_rrf if persisted else RELEVANCE_GATE_MIN_RRF
+    min_margin = policy.relevance_min_margin if persisted else 0.0
+    if min_margin < 0:
+        min_margin = 0.0
+    if not ranked or not eligible:
+        pass
+    elif not enabled:
         reason = "disabled"
-    elif top1 is not None and top1 < RELEVANCE_GATE_MIN_SCORE:
+    elif top1 is not None and top1 < min_score:
         action, reason = "low_confidence", "top1_score"
-    elif top1_rrf is not None and top1_rrf < RELEVANCE_GATE_MIN_RRF:
+    elif top1_rrf is not None and top1_rrf < min_rrf:
         action, reason = "low_confidence", "top1_rrf"
-    else:
+    elif margin is not None and margin < min_margin:
+        action, reason = "low_confidence", "score_margin"
+    elif enabled and eligible:
         reason = "thresholds_passed"
 
     return RelevanceDecision(
         action=action,
         reason=reason,
         eligible=eligible,
-        enabled=RELEVANCE_GATE_ENABLED,
-        policy_version=RELEVANCE_GATE_POLICY_VERSION,
+        enabled=enabled,
+        policy_version=policy.policy_version if policy is not None else RELEVANCE_GATE_POLICY_VERSION,
         rerank_provider=RERANK_PROVIDER,
         reranker_model=RERANKER_MODEL,
         source_count=len(ranked),

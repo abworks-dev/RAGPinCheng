@@ -6,12 +6,10 @@ the LLM to hallucinate an answer.
 
 Rules follow a priority:
   1. Always pass when a recognized standard code (GB 50017, JGJ etc.) is present.
-  2. Block pure-numeric / pure-punctuation inputs on first turn.
-  3. Block isolated section numbers (11.1, 3.2.4) that don't belong to any
-     identifiable document.
-  4. Block overly-short queries with no professional object nouns.
-  5. With history, the bar is lower: short follow-ups are expected to be
-     resolved by the rewriter.
+  2. Block pure-numeric inputs on every turn.
+  3. Block isolated section numbers (11.1, 3.2.4) on the first turn.
+  4. Pass recognized professional objects before applying numeric heuristics.
+  5. Block numeric-dominant and overly-short first-turn inputs.
 """
 from __future__ import annotations
 
@@ -46,16 +44,16 @@ _PROFESSIONAL_TERMS = {
 }
 
 # Isolated section number: digits.digits.digits... with nothing else meaningful.
-# Matches "11", "11.1", "3.2.4", "9.3.3.1" but NOT "GB 50017 11.1" or
+# Matches "11.1", "3.2.4", "9.3.3.1" but NOT "11", "GB 50017 11.1" or
 # "第11章" (those have surrounding context).
-_SECTION_ONLY_RE = re.compile(r"^\s*[\d．.]+\s*$")
+_SECTION_ONLY_RE = re.compile(r"^\s*\d+(?:[．.]\d+)+\s*$")
 
 # Purely numeric/punctuation: optional whitespace around digits/punctuation only.
 _PURE_NOISE_RE = re.compile(r"^\s*[\d\W_]+\s*$")
 
 # Pure digits only — no Chinese characters, no letters.
-# "222" matches; "那 22 呢" does not.
-_PURE_DIGITS_ONLY_RE = re.compile(r"^\s*\d[\d\s．.]*\s*$")
+# "222" matches; "11.1" and "那 22 呢" do not.
+_PURE_DIGITS_ONLY_RE = re.compile(r"^\s*\d[\d\s]*\s*$")
 
 
 @dataclass
@@ -117,15 +115,14 @@ def _contains_professional_term(query: str) -> bool:
 
 
 def validate_search_query(search_query: str, *, has_history: bool) -> QueryValidation:
-    """Validate a standalone search query before running retrieval.
+    """Validate the original user query before running retrieval.
 
-    This is called AFTER the multi-turn rewriter has produced its best
-    independent-query output, so short follow-ups like "Q390呢？" have
-    already been expanded into full questions and will pass normally.
+    ChatSession deliberately validates the original text rather than the
+    rewritten query, because a rewrite model can invent context around a bare
+    number and accidentally turn an ambiguous input into a plausible query.
 
     Args:
-        search_query: The query that will be sent to retrieval (rewritten if
-            history was present).
+        search_query: The original user text.
         has_history: Whether this is not the first turn in the conversation.
             When True, the validation bar is lower because the rewriter had a
             chance to expand a short follow-up; if it couldn't expand it,
@@ -143,36 +140,6 @@ def validate_search_query(search_query: str, *, has_history: bool) -> QueryValid
     # Standard code found → definitely a domain question; pass immediately.
     # This covers "GB 50011", "05G336", etc. even though they are short.
     if _contains_standard_code(stripped):
-        return QueryValidation.ok()
-
-    # Numeric-dominant query (e.g., "22 细部工程") — the rewriter may append
-    # generic filler words around a pure number, but it's still fundamentally ambiguous.
-    # Strict on first turn regardless of appended context.
-    if _is_numeric_dominant(stripped, threshold=0.4):
-        if not has_history:
-            return QueryValidation.reject(
-                reason="numeric_dominant",
-                message=(
-                    f'你的问题"{stripped}"信息不足，主要为数字。请补充具体上下文，'
-                    '例如 "第 22 节讲了什么内容？" 或 '
-                    '"22 号构件的构造要求是什么？"'
-                ),
-            )
-        # With history, numeric-dominant is allowed because it could be
-        # a legitimate follow-up (e.g., "那 22 呢?"). But pure digits still
-        # need a hint — the history might not contain any document reference.
-        if _PURE_NOISE_RE.match(stripped):
-            return QueryValidation.reject(
-                reason="numeric_only",
-                message=(
-                    f'你的问题"{stripped}"信息不足。请补充具体的查询对象，'
-                    '例如 "在上个规范中第 22 节的要求是什么？"'
-                ),
-            )
-        return QueryValidation.ok()
-
-    # Professional domain term found → user is asking about something specific.
-    if _contains_professional_term(stripped):
         return QueryValidation.ok()
 
     # Pure digits only — no Chinese characters, no letters.
@@ -199,38 +166,6 @@ def validate_search_query(search_query: str, *, has_history: bool) -> QueryValid
             ),
         )
 
-    # Pure noise (digits and/or punctuation only) with no other content.
-    # Strict on first turn; lenient with history (the rewriter might have
-    # output something numeric that was extracted from context).
-    if _PURE_NOISE_RE.match(stripped):
-        if not has_history:
-            return QueryValidation.reject(
-                reason="numeric_only",
-                message=(
-                    f'你的问题"{stripped}"信息不足。请补充要查询的对象，'
-                    '例如 "GB 50327 第 11 节讲了什么？" 或 '
-                    '"11 号构件的要求是什么？"'
-                ),
-            )
-        return QueryValidation.ok()
-
-    # Numeric-dominant query (e.g., "22 细部工程") — the rewriter may append
-    # generic filler words around a pure number, but it's still fundamentally ambiguous.
-    # Strict on first turn regardless of appended context.
-    if _is_numeric_dominant(stripped, threshold=0.4):
-        if not has_history:
-            return QueryValidation.reject(
-                reason="numeric_dominant",
-                message=(
-                    f'你的问题"{stripped}"信息不足，主要为数字。请补充具体上下文，'
-                    '例如 "第 22 节讲了什么内容？" 或 '
-                    '"22 号构件的构造要求是什么？"'
-                ),
-            )
-        # With history, numeric-dominant is allowed because it could be
-        # a legitimate follow-up like "那第 22 条呢?" with non-numeric particles.
-        return QueryValidation.ok()
-
     # Isolated section number with no surrounding document context.
     # "11.1" → reject; "GB 50017 11.1" → passed by the code check above.
     # With history, this could be a legitimate follow-up like "那 11.1 呢?".
@@ -241,6 +176,37 @@ def validate_search_query(search_query: str, *, has_history: bool) -> QueryValid
                 message=(
                     f'章节号"{stripped}"缺少所属文档。请补充对应的规范或文档名称，'
                     '例如 "GB 50017 第 8 节的要求是什么？"'
+                ),
+            )
+        return QueryValidation.ok()
+
+    # Professional context wins over the generic numeric heuristic. This is
+    # what keeps valid queries such as "M20 螺栓", "Q345 钢材" and
+    # "11 号构件" from being rejected merely because they contain digits.
+    if _contains_professional_term(stripped):
+        return QueryValidation.ok()
+
+    # Pure punctuation/noise carries no retrievable intent.
+    if _PURE_NOISE_RE.match(stripped):
+        return QueryValidation.reject(
+            reason="too_short",
+            message=(
+                f'你的问题"{stripped}"过于简短。请补充具体的构件、材料或规范名称，'
+                '以便准确检索相关资料。'
+            ),
+        )
+
+    # A first-turn query dominated by digits but lacking a recognized object
+    # is ambiguous. With history, non-bare numeric follow-ups are allowed so
+    # the already-computed rewrite can carry the prior object into retrieval.
+    if _is_numeric_dominant(stripped, threshold=0.3):
+        if not has_history:
+            return QueryValidation.reject(
+                reason="numeric_dominant",
+                message=(
+                    f'你的问题"{stripped}"信息不足，主要为数字。请补充具体上下文，'
+                    '例如 "第 22 节讲了什么内容？" 或 '
+                    '"22 号构件的构造要求是什么？"'
                 ),
             )
         return QueryValidation.ok()

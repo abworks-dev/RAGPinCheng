@@ -26,6 +26,10 @@ export type PrepData = {
   used_sources: Source[];
   no_source_fallback: boolean;
   relevance?: Record<string, unknown>;
+  policy_version?: string;
+  answer_max_output_tokens?: number;
+  answer_context_chars?: number;
+  relevance_gate_enabled?: boolean;
 };
 
 export type DoneData = {
@@ -36,6 +40,33 @@ export type DoneData = {
   history_chars: number;
   budget: number;
   finish_reason?: string;
+  policy_version?: string;
+  answer_max_output_tokens?: number;
+  answer_context_chars?: number;
+  relevance_gate_enabled?: boolean;
+};
+
+export type AnswerPolicy = {
+  answer_temperature: number;
+  answer_max_output_tokens: number;
+  answer_context_chars: number;
+  relevance_gate_enabled: boolean;
+  relevance_min_score: number;
+  relevance_min_rrf: number;
+  relevance_min_margin: number;
+  policy_version: string;
+  updated_at: number | null;
+  updated_by: number | null;
+};
+
+export type AnswerPolicyAuditEntry = {
+  id: number;
+  old_policy_json: string;
+  new_policy_json: string;
+  changed_by: number | null;
+  changed_by_name: string | null;
+  change_reason: string | null;
+  created_at: number;
 };
 
 export type ChatEvent =

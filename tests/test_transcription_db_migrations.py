@@ -45,6 +45,8 @@ def test_empty_database_initializes_all_phase2_tables(tmp_path):
         "content_permission_group_items",
         "maintenance_settings",
         "maintenance_runs",
+        "answer_policy_settings",
+        "answer_policy_audit",
     } <= tables
     assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     assert conn.execute("PRAGMA foreign_key_check").fetchone() is None
@@ -84,7 +86,9 @@ def test_repeated_init_is_noop_and_does_not_create_second_backup(tmp_path):
 def test_schema_10_database_migrates_manual_revision_columns_and_index(tmp_path, monkeypatch):
     path = tmp_path / "app.sqlite"
     original = db_migrations.MIGRATIONS
-    monkeypatch.setattr(db_migrations, "MIGRATIONS", original[:-4])
+    monkeypatch.setattr(
+        db_migrations, "MIGRATIONS", tuple(item for item in original if item.version <= 10),
+    )
     init_db(path, backup_dir=tmp_path / "backups")
     conn = sqlite3.connect(path)
     assert conn.execute("SELECT max(version) FROM app_schema_migrations").fetchone()[0] == 10
@@ -102,6 +106,35 @@ def test_schema_10_database_migrates_manual_revision_columns_and_index(tmp_path,
     indexes = {row[1] for row in conn.execute("PRAGMA index_list(transcript_versions)")}
     assert {"derived_from_version_id", "edited_by", "edit_idempotency_key"} <= columns
     assert "uq_transcript_versions_edit_idempotency" in indexes
+    assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    assert conn.execute("PRAGMA foreign_key_check").fetchone() is None
+    conn.close()
+
+
+def test_schema_14_database_migrates_answer_policy_as_version_15(tmp_path, monkeypatch):
+    path = tmp_path / "app.sqlite"
+    migrations = db_migrations.MIGRATIONS
+    monkeypatch.setattr(
+        db_migrations, "MIGRATIONS", tuple(item for item in migrations if item.version <= 14),
+    )
+    init_db(path, backup_dir=tmp_path / "backups")
+    conn = sqlite3.connect(path)
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(message_answer_versions)")}
+    assert conn.execute("SELECT max(version) FROM app_schema_migrations").fetchone()[0] == 14
+    assert "upload_batch_entries" in tables
+    assert "answer_policy_settings" not in tables
+    assert "policy_version" not in columns
+    conn.close()
+
+    monkeypatch.setattr(db_migrations, "MIGRATIONS", migrations)
+    init_db(path, backup_dir=tmp_path / "backups")
+    conn = sqlite3.connect(path)
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(message_answer_versions)")}
+    assert conn.execute("SELECT max(version) FROM app_schema_migrations").fetchone()[0] == 15
+    assert {"upload_batch_entries", "answer_policy_settings", "answer_policy_audit"} <= tables
+    assert {"policy_version", "policy_json"} <= columns
     assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     assert conn.execute("PRAGMA foreign_key_check").fetchone() is None
     conn.close()
@@ -169,7 +202,9 @@ def test_repeated_init_fails_closed_when_system_permission_group_drifts(tmp_path
 def test_schema_10_permissions_expand_to_granular_nodes(tmp_path, monkeypatch):
     path = tmp_path / "app.sqlite"
     migrations = db_migrations.MIGRATIONS
-    monkeypatch.setattr(db_migrations, "MIGRATIONS", migrations[:-4])
+    monkeypatch.setattr(
+        db_migrations, "MIGRATIONS", tuple(item for item in migrations if item.version <= 10),
+    )
     init_db(path, backup_dir=tmp_path / "backups")
     conn = sqlite3.connect(path)
     user_id = conn.execute(
@@ -221,7 +256,9 @@ def test_schema_10_permissions_expand_to_granular_nodes(tmp_path, monkeypatch):
 def test_schema_11_download_permission_migration_preserves_existing_access(tmp_path, monkeypatch):
     path = tmp_path / "app.sqlite"
     migrations = db_migrations.MIGRATIONS
-    monkeypatch.setattr(db_migrations, "MIGRATIONS", migrations[:-2])
+    monkeypatch.setattr(
+        db_migrations, "MIGRATIONS", tuple(item for item in migrations if item.version <= 12),
+    )
     init_db(path, backup_dir=tmp_path / "backups")
     conn = sqlite3.connect(path)
     viewer_id = conn.execute(

@@ -38,6 +38,8 @@ import type {
   TranscriptPublicationJob,
   TranscriptVersion,
   PublishTranscriptVersionResult,
+  AnswerPolicy,
+  AnswerPolicyAuditEntry,
 } from "../types";
 
 // Mutating methods send X-CSRF-Token. Cookies always go along via credentials.
@@ -377,6 +379,16 @@ export const api = {
     jsonFetch<CleanupResult>("/api/admin/maintenance/cleanup", { method: "POST" }),
   adminMaintenanceRuns: (limit = 20) =>
     jsonFetch<{ runs: MaintenanceRun[] }>(`/api/admin/maintenance/runs?limit=${limit}`),
+  adminAnswerPolicy: () => jsonFetch<AnswerPolicy>("/api/admin/answer-policy"),
+  adminUpdateAnswerPolicy: (settings: Omit<AnswerPolicy, "policy_version" | "updated_at" | "updated_by"> & { change_reason?: string }) =>
+    jsonFetch<AnswerPolicy>("/api/admin/answer-policy", {
+      method: "PATCH",
+      body: JSON.stringify(settings),
+    }),
+  adminResetAnswerPolicy: () =>
+    jsonFetch<AnswerPolicy>("/api/admin/answer-policy/reset", { method: "POST" }),
+  adminAnswerPolicyAudit: (limit = 50) =>
+    jsonFetch<{ entries: AnswerPolicyAuditEntry[] }>(`/api/admin/answer-policy/audit?limit=${limit}`),
 
   // admin: managed content library
   managedContentCapabilities: () =>

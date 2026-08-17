@@ -241,6 +241,44 @@ class MaintenanceRunsResponse(BaseModel):
     runs: list[MaintenanceRunDTO]
 
 
+class AnswerPolicyDTO(BaseModel):
+    answer_temperature: float = Field(ge=0, le=1)
+    answer_max_output_tokens: int = Field(ge=256, le=4096)
+    answer_context_chars: int = Field(ge=2000, le=12000)
+    relevance_gate_enabled: bool
+    relevance_min_score: float = Field(ge=0)
+    relevance_min_rrf: float = Field(ge=0)
+    relevance_min_margin: float = Field(ge=0)
+    policy_version: str
+    updated_at: int | None = None
+    updated_by: int | None = None
+
+
+class AnswerPolicyPatchRequest(BaseModel):
+    answer_temperature: float = Field(ge=0, le=1)
+    answer_max_output_tokens: int = Field(ge=256, le=4096)
+    answer_context_chars: int = Field(ge=2000, le=12000)
+    relevance_gate_enabled: bool
+    relevance_min_score: float = Field(ge=0)
+    relevance_min_rrf: float = Field(ge=0)
+    relevance_min_margin: float = Field(ge=0)
+    change_reason: str | None = Field(default=None, max_length=500)
+
+
+class AnswerPolicyAuditDTO(BaseModel):
+    id: int
+    old_policy_json: str
+    new_policy_json: str
+    changed_by: int | None = None
+    changed_by_name: str | None = None
+    change_reason: str | None = None
+    created_at: int
+
+
+class AnswerPolicyAuditResponse(BaseModel):
+    entries: list[AnswerPolicyAuditDTO]
+
+
 class CleanupResponse(BaseModel):
     run_id: int
     retention_days: int | None
@@ -800,6 +838,37 @@ class PublishTranscriptVersionResponse(BaseModel):
     reused: bool
 
 
+# SSE event payload helpers (not validated on the wire, but documented).
+class PrepEvent(BaseModel):
+    search_query: str
+    rewrite_applied: bool
+    history_chars: int
+    budget: int
+    fresh_count: int
+    final_count: int
+    used_sources: list[SourceDTO]
+    no_source_fallback: bool = False
+    relevance: dict = Field(default_factory=dict)
+    policy_version: str | None = None
+    answer_max_output_tokens: int | None = None
+    answer_context_chars: int | None = None
+    relevance_gate_enabled: bool | None = None
+
+
+class DoneEvent(BaseModel):
+    timings: dict[str, float]
+    sources: list[SourceDTO]
+    answer_text: str
+    assistant_message_id: int | None = None
+    history_chars: int
+    budget: int
+    finish_reason: str = "stop"
+    policy_version: str | None = None
+    answer_max_output_tokens: int | None = None
+    answer_context_chars: int | None = None
+    relevance_gate_enabled: bool | None = None
+
+
 class RetryTranscriptionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -881,29 +950,6 @@ class LLMHealthResponse(BaseModel):
 
 class CategoriesResponse(BaseModel):
     categories: list[str]
-
-
-# SSE event payload helpers (not validated on the wire, but documented).
-class PrepEvent(BaseModel):
-    search_query: str
-    rewrite_applied: bool
-    history_chars: int
-    budget: int
-    fresh_count: int
-    final_count: int
-    used_sources: list[SourceDTO]
-    no_source_fallback: bool = False
-    relevance: dict = Field(default_factory=dict)
-
-
-class DoneEvent(BaseModel):
-    timings: dict[str, float]
-    sources: list[SourceDTO]
-    answer_text: str
-    assistant_message_id: int | None = None
-    history_chars: int
-    budget: int
-    finish_reason: str = "stop"
 
 
 class FeedbackRequest(BaseModel):
