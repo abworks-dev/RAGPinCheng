@@ -280,6 +280,10 @@ test.describe("资料管理", () => {
     if (desktop) {
       await expect(page.getByRole("columnheader", { name: "原目录" })).toBeVisible();
       await expect(page.getByRole("columnheader", { name: "原状态" })).toBeVisible();
+      await expect(row).toHaveCSS("vertical-align", "middle");
+      const auditButtonHeight = await row.getByRole("button", { name: "查看“企业知识库使用规范”的回收站记录" }).evaluate((element) => element.getBoundingClientRect().height);
+      const restoreButtonHeight = await row.getByRole("button", { name: "恢复" }).evaluate((element) => element.getBoundingClientRect().height);
+      expect(restoreButtonHeight).toBe(auditButtonHeight);
     } else {
       await expect(page.getByRole("table")).toBeHidden();
       await expect(row.getByText("上传路径", { exact: true })).toBeVisible();
