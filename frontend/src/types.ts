@@ -266,6 +266,9 @@ export type SystemOverview = {
     enabled: boolean;
     mode: "deployment_config";
     disabled_reason: "office_processing_disabled" | null;
+    status: "healthy" | "unavailable" | "disabled";
+    checked_at: number;
+    error_code: string | null;
   };
 };
 
@@ -340,6 +343,7 @@ export type ManagedContentItem = {
   category_path: string;
   media_id: string | null;
   preview_parent_id: string | null;
+  preview_status: "ready" | "pending" | "missing" | "not_applicable";
   version_id: string;
   version_number: number;
   original_filename: string;
@@ -371,6 +375,12 @@ export type ManagedContentItem = {
   has_pending_revision: boolean;
   reclassification_job_id: string | null;
   reclassification_status: string | null;
+};
+
+export type ManagedPreview = {
+  version_id: string;
+  preview_parent_id: string;
+  preview_status: "ready";
 };
 
 export type ContentTrashAuditEvent = {

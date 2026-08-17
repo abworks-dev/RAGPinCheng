@@ -61,6 +61,7 @@ export const items = [
   category_path: index % 2 ? "04 项目资料 / 02 竣工交付 / 01 模型成果" : "03 公司内部标准 / 01 建模 / 02 机电",
   media_id: null,
   preview_parent_id: index <= 1 ? "parent-ready" : null,
+  preview_status: index <= 1 ? "ready" : filename.endsWith(".pptx") || filename.endsWith(".xlsx") ? "pending" : "not_applicable",
   version_id: `version-${index + 1}`,
   version_number: index + 1,
   original_filename: filename,
@@ -94,6 +95,7 @@ const mediaLibraryItem = {
   category_path: "03 公司内部标准 / 01 建模 / 02 培训视频",
   media_id: "media-library-1",
   preview_parent_id: null,
+  preview_status: "not_applicable",
   version_id: "66666666-6666-4666-8666-666666666666",
   version_number: 3,
   original_filename: "bim-project-delivery-training-long-responsive-name.mp4",
@@ -519,6 +521,9 @@ export async function installAdminRoutes(
           enabled: false,
           mode: "deployment_config",
           disabled_reason: "office_processing_disabled",
+          status: "disabled",
+          checked_at: 1700000000,
+          error_code: null,
         },
       });
     }

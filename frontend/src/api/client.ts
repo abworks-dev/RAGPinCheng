@@ -25,6 +25,7 @@ import type {
   ManagedCategory,
   FolderRequest,
   ManagedContentItem,
+  ManagedPreview,
   ContentTrashAuditEvent,
   ContentReclassificationJob,
   ManagedContentList,
@@ -719,6 +720,11 @@ export const api = {
   publishManagedContent: (versionId: string) =>
     jsonFetch<{ publication_id: string; index_job_id: string; status: string }>(
       `/api/admin/content/versions/${encodeURIComponent(versionId)}/publish`,
+      { method: "POST", body: JSON.stringify({}) },
+    ),
+  regenerateManagedContentPreview: (versionId: string) =>
+    jsonFetch<ManagedPreview>(
+      `/api/admin/content/versions/${encodeURIComponent(versionId)}/preview`,
       { method: "POST", body: JSON.stringify({}) },
     ),
   bulkReviewManagedContent: (versionIds: string[], approved: boolean, note?: string) =>

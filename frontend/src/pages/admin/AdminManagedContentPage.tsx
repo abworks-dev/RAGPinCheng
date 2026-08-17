@@ -1188,6 +1188,26 @@ export function AdminManagedContentPage() {
     finally { setBusyAction(null); }
   };
 
+  const regeneratePreview = async (item: ManagedContentItem) => {
+    const actionKey = `${item.version_id}:preview`;
+    if (busyAction) return;
+    setBusyAction(actionKey);
+    try {
+      const result = await adminContentApi.regeneratePreview(item.version_id);
+      const applyReadyPreview = (candidate: ManagedContentItem) => candidate.version_id === item.version_id
+        ? { ...candidate, preview_parent_id: result.preview_parent_id, preview_status: "ready" as const }
+        : candidate;
+      setItems((current) => current.map(applyReadyPreview));
+      setDetail((current) => current ? applyReadyPreview(current) : current);
+      setReviewTarget((current) => current ? applyReadyPreview(current) : current);
+      toast.success("PPTX 预览已生成");
+    } catch (previewError) {
+      toast.error(previewError instanceof Error ? previewError.message : "PPTX 预览生成失败，请稍后重试");
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
   const openReviewDialog = (item: ManagedContentItem) => {
     setDetail(null);
     setReviewTarget(item);
@@ -1564,8 +1584,12 @@ export function AdminManagedContentPage() {
     const previewTooltip = unavailableReason
       || (previewable
         ? "预览文件"
-        : !item.preview_parent_id
-          ? "该资料尚未生成可预览文件"
+        : item.preview_status === "missing" && item.doc_type === "pptx"
+          ? "PPTX 预览生成失败，可在资料详情中重新生成"
+          : item.preview_status === "pending"
+            ? "发布完成后可在线预览"
+          : !item.preview_parent_id
+            ? "该资料尚未生成可预览文件"
           : "当前文件格式暂不支持在线预览");
     const moveTooltip = unavailableReason
       || (movable
@@ -1884,6 +1908,7 @@ export function AdminManagedContentPage() {
           </div> : <div className="flex flex-wrap gap-2">
             <Button variant="outline" onClick={() => { const target = detail; setDetail(null); void openAudit(target); }}><History className="size-4" />操作记录</Button>
             {detail.preview_parent_id && ["pdf", "docx", "xlsx", "pptx"].includes(detail.doc_type) ? <Button variant="outline" onClick={() => { openDocumentPreview(detail.preview_parent_id!, detail.title, detail.doc_type, 1, {}, "managed-content-detail"); }}><Eye className="size-4" />预览文件</Button> : detail.doc_type === "pdf" || can("item.download") ? <a className={buttonVariants({ variant: "outline" })} href={adminContentApi.fileUrl(detail.version_id)} target="_blank" rel="noreferrer"><Eye className="size-4" />打开文件</a> : <Button variant="outline" disabled title="打开文件（需要下载权限）"><Eye className="size-4" />打开文件</Button>}
+            {detail.doc_type === "pptx" && detail.preview_status === "missing" && detail.lifecycle_status === "published" && can("item.publish") && <Button variant="outline" onClick={() => void regeneratePreview(detail)} disabled={Boolean(busyAction)}><RotateCcw className={busyAction === `${detail.version_id}:preview` ? "size-4 animate-spin" : "size-4"} />{busyAction === `${detail.version_id}:preview` ? "生成中…" : "重新生成预览"}</Button>}
             {can("item.submit") && ["draft", "rejected"].includes(detail.lifecycle_status) && <Button onClick={() => void act(detail, "submit", () => adminContentApi.submit(detail.version_id), "已提交确认")} disabled={Boolean(busyAction)}><Send className="size-4" />{busyAction === `${detail.version_id}:submit` ? "提交中…" : detail.lifecycle_status === "rejected" ? "重新提交" : "提交"}</Button>}
             {can("item.review") && detail.lifecycle_status === "awaiting_review" && <Button onClick={() => openReviewDialog(detail)} disabled={Boolean(busyAction)}><Check className="size-4" />审核</Button>}
             {can("item.publish") && ["approved", "publication_failed"].includes(detail.lifecycle_status) && <Button onClick={() => openPublishDialog(detail)} disabled={Boolean(busyAction)}><Rocket className="size-4" />{detail.lifecycle_status === "publication_failed" ? "重新发布" : "发布"}</Button>}

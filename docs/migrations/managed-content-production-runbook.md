@@ -288,6 +288,31 @@ docker compose -p ragpincheng-prod \
 `content_items.archived_at` 并写 `content.generated_preview_archived` 审计事件；不删除对象字节、旧源文件、
 parents.sqlite 或 Qdrant point。生产执行前后都要记录候选数、阻塞数、正式 head 和审计事件增量。
 
+### 7.5 缺失 PPTX 预览的受控补生成
+
+`scripts/repair_pptx_previews.py` 只扫描当前正式 head 中 `lifecycle_status=published` 的 PPTX。默认 dry-run，
+不读取正文到日志，只输出版本 ID 和预览状态；有效 `.preview.pdf` 不会被覆盖：
+
+```bash
+docker compose -p ragpincheng-prod \
+  -f /data/business/ragpincheng/source/docker/docker-compose.yml \
+  exec -T backend python scripts/repair_pptx_previews.py \
+  --manifest /app/data/pptx-preview-repair-dry-run.json
+```
+
+确认 LibreOffice `/health` 正常、dry-run 清单只包含预期缺失项后，按单线程执行补生成：
+
+```bash
+docker compose -p ragpincheng-prod \
+  -f /data/business/ragpincheng/source/docker/docker-compose.yml \
+  exec -T backend python scripts/repair_pptx_previews.py \
+  --apply --confirm REPAIR_PPTX_PREVIEWS \
+  --manifest /app/data/pptx-preview-repair-apply.json
+```
+
+补生成只在现有 PPTX 旁新增经 PDF 签名验证的派生文件，不修改原文件、正式 head、发布状态、
+parents.sqlite 或 Qdrant。部分失败时脚本返回非零，并在 manifest 中记录稳定错误码；恢复服务后可安全重跑。
+
 ## 8. 只读视图
 
 发布完成后，由管理员在受控窗口重建：
