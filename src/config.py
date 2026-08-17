@@ -206,3 +206,4 @@ TRANSCRIPTION_ARTIFACT_DIR = Path(
 # LibreOffice conversion service
 LIBREOFFICE_URL = os.getenv("LIBREOFFICE_URL") or "http://libreoffice:8101"
 LIBREOFFICE_TIMEOUT = int(os.getenv("LIBREOFFICE_TIMEOUT", "120"))  # seconds
+LIBREOFFICE_HEALTH_TIMEOUT = float(os.getenv("LIBREOFFICE_HEALTH_TIMEOUT", "5"))

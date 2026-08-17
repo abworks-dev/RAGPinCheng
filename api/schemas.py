@@ -139,6 +139,9 @@ class OfficeProcessingStatusDTO(BaseModel):
     enabled: bool
     mode: Literal["deployment_config"] = "deployment_config"
     disabled_reason: Literal["office_processing_disabled"] | None = None
+    status: Literal["healthy", "unavailable", "disabled"]
+    checked_at: int
+    error_code: str | None = None
 
 
 class SystemOverviewResponse(BaseModel):
@@ -474,6 +477,7 @@ class ManagedContentItemDTO(BaseModel):
     category_path: str = ""
     media_id: str | None
     preview_parent_id: str | None = None
+    preview_status: Literal["ready", "pending", "missing", "not_applicable"] = "not_applicable"
     version_id: str
     version_number: int
     original_filename: str
@@ -651,6 +655,12 @@ class ManagedPublicationDTO(BaseModel):
     publication_id: str
     index_job_id: str
     status: str
+
+
+class ManagedPreviewDTO(BaseModel):
+    version_id: str
+    preview_parent_id: str
+    preview_status: Literal["ready"] = "ready"
 
 
 class ContentReclassificationJobDTO(BaseModel):

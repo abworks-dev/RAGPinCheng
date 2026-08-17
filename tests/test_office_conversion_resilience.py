@@ -117,6 +117,23 @@ def test_pptx_preview_surfaces_http_and_timeout_failures(tmp_path: Path):
     assert not source.with_suffix(".preview.pdf").exists()
 
 
+def test_pptx_preview_failure_preserves_existing_valid_artifact(tmp_path: Path):
+    source = _synthetic_ooxml(tmp_path / "sample.pptx", "presentation")
+    preview = source.with_suffix(".preview.pdf")
+    preview.write_bytes(b"%PDF-1.7\nexisting")
+    response = Mock(status_code=200, content=b"not-a-pdf", text="")
+    client = Mock()
+    client.__enter__ = Mock(return_value=client)
+    client.__exit__ = Mock(return_value=False)
+    client.post.return_value = response
+
+    with patch("httpx.Client", return_value=client):
+        with pytest.raises(RuntimeError, match="invalid PDF output"):
+            convert_pptx_to_pdf(source)
+
+    assert preview.read_bytes() == b"%PDF-1.7\nexisting"
+
+
 def test_service_selects_only_one_valid_pdf_and_cleanup_removes_artifacts(tmp_path: Path):
     output_dir = tmp_path / "output"
     output_dir.mkdir()

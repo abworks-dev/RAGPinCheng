@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import sqlite3
@@ -12,6 +13,7 @@ import zipfile
 from pathlib import Path
 from typing import Literal
 
+import httpx
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
@@ -28,6 +30,7 @@ from src.indexing_pipeline import (
     ManagedVersionIndexSummary,
     list_managed_version_index_summaries,
 )
+from src.office_convert import convert_pptx_to_pdf, is_valid_pdf_file
 
 from .auth import CurrentUser, require_admin, require_csrf, require_csrf_admin, require_user
 from .content_permissions import (
@@ -106,6 +109,7 @@ from .schemas import (
     ManagedIndexJobDTO,
     ManagedIndexJobListResponse,
     ManagedPublicationDTO,
+    ManagedPreviewDTO,
     ManagedUploadEntryDTO,
     ManagedUploadResponse,
     ManagedUploadTaskDTO,
@@ -120,6 +124,7 @@ from .schemas import (
 
 
 router = APIRouter(prefix="/admin/content", tags=["managed-content"])
+logger = logging.getLogger(__name__)
 _storage = ContentStorage(CONTENT_ROOT)
 _MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_MB", "200")) * 1024 * 1024
 _MAX_FOLDER_UPLOAD_FILES = int(os.getenv("MAX_FOLDER_UPLOAD_FILES", "500"))
@@ -842,6 +847,25 @@ def _content_item_dto(
         if retention_days_remaining <= CONTENT_TRASH_EXPIRING_WARNING_DAYS
         else "retained"
     )
+    preview_status: Literal["ready", "pending", "missing", "not_applicable"] = "not_applicable"
+    preview_parent_id: str | None = None
+    if row["doc_type"] in {"pdf", "docx", "xlsx", "pptx"}:
+        preview_status = "pending"
+        if summary and summary.preview_parent_id:
+            if row["doc_type"] == "pptx":
+                source_path = _storage.published_source_path(
+                    content_item_id=row["item_id"],
+                    content_version_id=row["version_id"],
+                    filename=row["original_filename"],
+                )
+                preview_status = "ready" if is_valid_pdf_file(source_path.with_suffix(".preview.pdf")) else "missing"
+            else:
+                preview_status = "ready"
+            if preview_status == "ready":
+                preview_parent_id = summary.preview_parent_id
+        elif row["lifecycle_status"] in {"published", "superseded"}:
+            preview_status = "missing"
+
     return ManagedContentItemDTO(
         item_id=row["item_id"],
         title=row["title"],
@@ -851,7 +875,8 @@ def _content_item_dto(
         category_label=f"{row['display_code']} {row['display_name']}",
         category_path=row["category_path"] if "category_path" in row.keys() else f"{row['display_code']} {row['display_name']}",
         media_id=row["media_id"],
-        preview_parent_id=summary.preview_parent_id if summary else None,
+        preview_parent_id=preview_parent_id,
+        preview_status=preview_status,
         version_id=row["version_id"],
         version_number=row["version_number"],
         original_filename=row["original_filename"],
@@ -1398,6 +1423,78 @@ def get_content_version_file(
     if disposition == "attachment" and not has_content_permission(conn, user, "item.download"):
         raise HTTPException(status_code=403, detail="当前账号没有下载资料的权限")
     return FileResponse(path, filename=row["original_filename"], content_disposition_type=disposition)
+
+
+@router.post("/versions/{version_id}/preview", response_model=ManagedPreviewDTO)
+def regenerate_pptx_preview(
+    version_id: str,
+    user: CurrentUser = Depends(require_content_permission("item.publish", csrf=True)),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> ManagedPreviewDTO:
+    """Regenerate the derived PDF preview for the current published PPTX."""
+    _require_feature()
+    if not OFFICE_PROCESSING_ENABLED:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "office_processing_disabled", "message": "Office 处理当前已停用"},
+        )
+    row = conn.execute(
+        """SELECT v.id AS version_id,v.item_id,v.original_filename,v.doc_type,
+                  v.lifecycle_status,h.current_version_id
+           FROM content_versions v
+           JOIN content_items i ON i.id=v.item_id
+           LEFT JOIN content_item_heads h ON h.item_id=v.item_id
+           WHERE v.id=? AND i.archived_at IS NULL""",
+        (version_id,),
+    ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="资料不存在")
+    if row["doc_type"] != "pptx":
+        raise HTTPException(status_code=400, detail="只有 PPTX 文件需要生成 PDF 预览")
+    if row["lifecycle_status"] != "published" or row["current_version_id"] != version_id:
+        raise HTTPException(status_code=409, detail="只有当前已发布版本可以重新生成预览")
+
+    summary = list_managed_version_index_summaries([version_id]).get(version_id)
+    if summary is None or not summary.preview_parent_id:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "preview_parent_missing", "message": "资料索引尚未就绪，请先完成发布"},
+        )
+    source_path = _storage.published_source_path(
+        content_item_id=row["item_id"],
+        content_version_id=version_id,
+        filename=row["original_filename"],
+    )
+    if not source_path.is_file() or source_path.is_symlink():
+        raise HTTPException(status_code=404, detail="已发布的 PPTX 原文件不可用")
+    try:
+        convert_pptx_to_pdf(source_path)
+    except httpx.HTTPError as exc:
+        logger.warning("PPTX preview service unavailable for version %s: %s", version_id, exc)
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "preview_service_unavailable", "message": "PPTX 预览服务暂不可用，请稍后重试"},
+        ) from exc
+    except (OSError, RuntimeError) as exc:
+        logger.warning("PPTX preview conversion failed for version %s: %s", version_id, exc)
+        raise HTTPException(
+            status_code=502,
+            detail={"code": "preview_conversion_failed", "message": "PPTX 转换失败，请检查文件后重试"},
+        ) from exc
+
+    audit_event(
+        conn,
+        "content.preview_regenerated",
+        actor_user_id=user.id,
+        item_id=row["item_id"],
+        version_id=version_id,
+        metadata={"preview_format": "pdf"},
+    )
+    conn.commit()
+    return ManagedPreviewDTO(
+        version_id=version_id,
+        preview_parent_id=summary.preview_parent_id,
+    )
 
 
 def _safe_bulk_archive_name(filename: str, used_names: set[str]) -> str:

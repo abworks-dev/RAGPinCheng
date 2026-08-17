@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   submit: vi.fn(),
   review: vi.fn(),
   publish: vi.fn(),
+  regeneratePreview: vi.fn(),
   bulkReview: vi.fn(),
   bulkPublish: vi.fn(),
   bulkMove: vi.fn(),
@@ -98,6 +99,7 @@ vi.mock("../../api/client", () => ({
     submitManagedContent: mocks.submit,
     reviewManagedContent: mocks.review,
     publishManagedContent: mocks.publish,
+    regenerateManagedContentPreview: mocks.regeneratePreview,
     bulkReviewManagedContent: mocks.bulkReview,
     bulkPublishManagedContent: mocks.bulkPublish,
     bulkMoveManagedContent: mocks.bulkMove,
@@ -166,6 +168,7 @@ const item = {
   category_path: "03 公司内部标准",
   media_id: null,
   preview_parent_id: "parent-1",
+  preview_status: "ready" as const,
   version_id: "version-1",
   version_number: 1,
   original_filename: "standard.pdf",
@@ -232,6 +235,7 @@ describe("AdminManagedContentPage", () => {
     mocks.items.mockResolvedValue({ items: [item], total: 1, status_counts: { awaiting_review: 1 } });
     mocks.folderRequests.mockResolvedValue([]);
     mocks.review.mockResolvedValue({ ...item, lifecycle_status: "approved" });
+    mocks.regeneratePreview.mockResolvedValue({ version_id: "version-1", preview_parent_id: "parent-pptx", preview_status: "ready" });
     mocks.deleteContent.mockResolvedValue({ item_id: "item-1", version_id: "version-1", archived_at: 2, previous_status: "awaiting_review", publication_withdrawn: false });
     mocks.trash.mockResolvedValue({ items: [], total: 0, status_counts: {} });
     mocks.restoreContent.mockResolvedValue({ item_id: "item-1", version_id: "version-1", restored_status: "approved", category_id: "cat-03", moved_to_alternate_category: false, replaced_conflict: false });
@@ -431,6 +435,39 @@ describe("AdminManagedContentPage", () => {
     fireEvent.mouseEnter(previewButton.parentElement!);
     expect(screen.getByRole("tooltip")).toHaveTextContent("该资料尚未生成可预览文件");
     expect(mocks.openPreview).not.toHaveBeenCalled();
+  });
+
+  it("regenerates a missing published PPTX preview from details", async () => {
+    mocks.permissions = PUBLISHER_PERMISSIONS;
+    mocks.items.mockResolvedValue({
+      items: [{
+        ...item,
+        doc_type: "pptx",
+        original_filename: "slides.pptx",
+        lifecycle_status: "published",
+        is_current: true,
+        has_published_head: true,
+        latest_publication_status: "done",
+        preview_parent_id: null,
+        preview_status: "missing",
+      }],
+      total: 1,
+      status_counts: { published: 1 },
+    });
+
+    render(<AdminManagedContentPage />);
+    await openRootFolder();
+    const previewButton = screen.getAllByRole("button", { name: "预览“建模标准”" })[0];
+    expect(previewButton).toBeDisabled();
+    fireEvent.mouseEnter(previewButton.parentElement!);
+    expect(screen.getByRole("tooltip")).toHaveTextContent("PPTX 预览生成失败");
+
+    fireEvent.click(screen.getAllByRole("button", { name: "查看“建模标准”的详细信息" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "重新生成预览" }));
+
+    await waitFor(() => expect(mocks.regeneratePreview).toHaveBeenCalledWith("version-1"));
+    expect(await screen.findByRole("button", { name: "预览文件" })).toBeInTheDocument();
+    expect(mocks.success).toHaveBeenCalledWith("PPTX 预览已生成");
   });
 
   it("shows minute-level update times and sorts them in both directions", async () => {
