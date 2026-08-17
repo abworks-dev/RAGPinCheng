@@ -22,6 +22,7 @@ from src.config import ASR_ENABLED, ASR_SERVICE_TOKEN
 
 from .auth import bootstrap_admin_from_env
 from .maintenance import run_cleanup
+from .content_trash_cleanup import run_automatic_cleanup, seed_trash_settings_from_environment
 from .db import init_db
 from .indexing import (
     configure_content_reclassification_runner,
@@ -88,6 +89,22 @@ async def _sweeper_loop() -> None:
             continue
 
 
+async def _trash_cleanup_loop() -> None:
+    while True:
+        try:
+            await asyncio.sleep(SWEEPER_INTERVAL_SECONDS)
+            result = await asyncio.to_thread(run_automatic_cleanup)
+            if result:
+                logger.info(
+                    "automatic trash cleanup %s: %d succeeded, %d failed",
+                    result["run_id"], result["succeeded_count"], result["failed_count"],
+                )
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            logger.exception("automatic trash cleanup iteration failed (non-fatal)")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Bring parents.sqlite forward to the current schema if it pre-dates a
@@ -102,6 +119,7 @@ async def lifespan(app: FastAPI):
 
     # App-level DB (users, auth_sessions, conversations, messages).
     init_db()
+    seed_trash_settings_from_environment()
     bootstrap_admin_from_env()
 
     # Fail fast if Qdrant is unreachable — better an immediate startup error
@@ -140,6 +158,7 @@ async def lifespan(app: FastAPI):
             logger.warning("provider warmup failed: %s (service will retry on first request)", exc)
 
     sweeper_task = asyncio.create_task(_sweeper_loop())
+    trash_cleanup_task = asyncio.create_task(_trash_cleanup_loop())
     # Indexing worker: started before resuming pending jobs so the queue
     # has a consumer ready when resume_pending_on_boot enqueues them.
     configure_publication_runner(run_publication_index_job)
@@ -167,8 +186,13 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         sweeper_task.cancel()
+        trash_cleanup_task.cancel()
         try:
             await sweeper_task
+        except (asyncio.CancelledError, Exception):
+            pass
+        try:
+            await trash_cleanup_task
         except (asyncio.CancelledError, Exception):
             pass
         if transcription_runtime_ready:
@@ -192,7 +216,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=_origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 

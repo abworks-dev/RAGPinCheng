@@ -139,6 +139,8 @@ export type ContentPermission =
   | "item.archive_published"
   | "trash.view"
   | "trash.restore"
+  | "trash.purge"
+  | "trash.policy_manage"
   | "category.manage"
   | "folder.request"
   | "folder.review"
@@ -435,6 +437,46 @@ export type BulkRestorePreflightResult = {
   status: "ready" | "conflict" | "inactive_category" | "version_changed" | "in_progress" | "not_found";
   message: string;
   target_category_path: string | null;
+};
+
+export type TrashSettings = {
+  cleanup_enabled: boolean;
+  retention_days: number;
+  warning_days: number;
+  batch_limit: number;
+  updated_by: number | null;
+  updated_at: number;
+};
+
+export type TrashPurgeItem = {
+  item_id: string;
+  version_id: string;
+  status: "ready" | "blocked";
+  reason: string | null;
+  title: string;
+  original_filename: string;
+  category_path: string;
+  size_bytes: number;
+};
+
+export type TrashPurgePreflight = {
+  items: TrashPurgeItem[];
+  ready_count: number;
+  blocked_count: number;
+  total_size_bytes: number;
+  confirmation_phrase: string;
+};
+
+export type TrashPurgeRun = {
+  id: string;
+  trigger_type: "manual" | "automatic";
+  status: "running" | "succeeded" | "partial" | "failed";
+  candidate_count: number;
+  succeeded_count: number;
+  failed_count: number;
+  actor_name: string | null;
+  created_at: number;
+  finished_at: number | null;
 };
 
 export type FolderRequest = {

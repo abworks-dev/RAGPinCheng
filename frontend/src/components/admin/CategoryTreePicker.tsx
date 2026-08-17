@@ -18,6 +18,7 @@ type CategoryTreePickerProps = {
   value: string;
   onChange: (categoryId: string) => void;
   currentCategoryId?: string | null;
+  currentCategorySelectable?: boolean;
   disabled?: boolean;
   label?: string;
   rootOption?: {
@@ -34,6 +35,7 @@ export function CategoryTreePicker({
   value,
   onChange,
   currentCategoryId = null,
+  currentCategorySelectable = false,
   disabled = false,
   label = "目标目录",
   rootOption,
@@ -145,6 +147,7 @@ export function CategoryTreePicker({
           selectedId={value}
           focusableCategoryId={focusableCategoryId}
           currentCategoryId={currentCategoryId}
+          currentCategorySelectable={currentCategorySelectable}
           disabled={disabled}
           expanded={expanded}
           visibleNodes={visibleNodes}
@@ -170,6 +173,7 @@ function CategoryTreePickerNode({
   selectedId,
   focusableCategoryId,
   currentCategoryId,
+  currentCategorySelectable,
   disabled,
   expanded,
   visibleNodes,
@@ -188,6 +192,7 @@ function CategoryTreePickerNode({
   selectedId: string;
   focusableCategoryId: string | undefined;
   currentCategoryId: string | null;
+  currentCategorySelectable: boolean;
   disabled: boolean;
   expanded: Set<string>;
   visibleNodes: CategoryTreeNode[];
@@ -205,7 +210,7 @@ function CategoryTreePickerNode({
   const isCurrent = category.id === currentCategoryId;
   const isSelected = selectedId === category.id;
   const disabledReason = disabledCategoryReasons[category.id];
-  const categoryDisabled = disabled || isCurrent || Boolean(disabledReason);
+  const categoryDisabled = disabled || (isCurrent && !currentCategorySelectable) || Boolean(disabledReason);
   const visibleIndex = visibleNodes.findIndex((item) => item.category.id === category.id);
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const currentIndex = visibleIndex < 0 ? index : visibleIndex;
@@ -259,6 +264,6 @@ function CategoryTreePickerNode({
         <span className="mt-1 block break-words text-ui-xs text-muted-foreground">{disabledReason || `${category.item_count} 份直接资料${hasChildren ? ` · ${children.length} 个子目录` : ""}`}</span>
       </span>
     </div>
-    {hasChildren && isExpanded && <div role="group" className="ml-5 border-l border-border/70 bg-surface-muted/10 sm:ml-6">{children.map((child, childIndex) => <CategoryTreePickerNode key={child.category.id} node={child} level={level + 1} index={childIndex} siblingCount={children.length} selectedId={selectedId} focusableCategoryId={focusableCategoryId} currentCategoryId={currentCategoryId} disabled={disabled} expanded={expanded} visibleNodes={visibleNodes} nodeRefs={nodeRefs} rootAvailable={rootAvailable} onFocusRoot={onFocusRoot} disabledCategoryReasons={disabledCategoryReasons} onSelect={onSelect} onToggle={onToggle} onFocusNode={onFocusNode} />)}</div>}
+    {hasChildren && isExpanded && <div role="group" className="ml-5 border-l border-border/70 bg-surface-muted/10 sm:ml-6">{children.map((child, childIndex) => <CategoryTreePickerNode key={child.category.id} node={child} level={level + 1} index={childIndex} siblingCount={children.length} selectedId={selectedId} focusableCategoryId={focusableCategoryId} currentCategoryId={currentCategoryId} currentCategorySelectable={currentCategorySelectable} disabled={disabled} expanded={expanded} visibleNodes={visibleNodes} nodeRefs={nodeRefs} rootAvailable={rootAvailable} onFocusRoot={onFocusRoot} disabledCategoryReasons={disabledCategoryReasons} onSelect={onSelect} onToggle={onToggle} onFocusNode={onFocusNode} />)}</div>}
   </>;
 }

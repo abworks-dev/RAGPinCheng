@@ -31,6 +31,9 @@ import type {
   ManagedContentList,
   BulkManagedContentResponse,
   BulkRestorePreflightResult,
+  TrashPurgePreflight,
+  TrashPurgeRun,
+  TrashSettings,
   ManagedIndexJobList,
   ManagedUploadResponse,
   ManagedUploadTask,
@@ -550,6 +553,24 @@ export const api = {
     if (params?.sort_direction) search.set("sort_direction", params.sort_direction);
     return jsonFetch<ManagedContentList>(`/api/admin/content/trash?${search}`);
   },
+  managedContentTrashSettings: () =>
+    jsonFetch<TrashSettings>("/api/admin/content/trash/settings"),
+  updateManagedContentTrashSettings: (body: Omit<TrashSettings, "updated_by" | "updated_at">) =>
+    jsonFetch<TrashSettings>("/api/admin/content/trash/settings", {
+      method: "PUT", body: JSON.stringify(body),
+    }),
+  preflightManagedContentTrashPurge: (items: Array<{ item_id: string; expected_version_id: string }>) =>
+    jsonFetch<TrashPurgePreflight>("/api/admin/content/trash/purge/preflight", {
+      method: "POST", body: JSON.stringify({ items }),
+    }),
+  previewOverdueManagedContentTrashPurge: () =>
+    jsonFetch<TrashPurgePreflight>("/api/admin/content/trash/purge-preview"),
+  purgeManagedContentTrash: (items: Array<{ item_id: string; expected_version_id: string }>, confirmation: string) =>
+    jsonFetch<{ run_id: string; status: string; candidate_count: number; succeeded_count: number; failed_count: number }>(
+      "/api/admin/content/trash/purge", { method: "POST", body: JSON.stringify({ items, confirmation }) },
+    ),
+  managedContentTrashPurgeRuns: () =>
+    jsonFetch<TrashPurgeRun[]>("/api/admin/content/trash/purge-runs"),
   restoreManagedContent: (
     itemId: string,
     expectedVersionId: string,
