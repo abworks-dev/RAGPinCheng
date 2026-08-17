@@ -305,6 +305,7 @@ jobs:
 
           active = {
               "content_index_jobs": ("pending", "parsing", "chunking", "summarizing", "embedding"),
+              "content_reclassification_jobs": ("pending", "applying", "committing", "rolling_back"),
               "index_jobs": ("pending", "running", "uploading", "queued_mineru", "parsing", "chunking", "embedding"),
               "transcript_publication_index_jobs": ("pending", "parsing", "chunking", "embedding"),
               "transcription_jobs": ("pending", "running", "processing"),
@@ -583,6 +584,10 @@ jobs:
                   "SELECT count(*) FROM content_index_jobs "
                   "WHERE status IN ('pending','parsing','chunking','summarizing','embedding')"
               ).fetchone()[0]
+              active_reclassifications = database.execute(
+                  "SELECT count(*) FROM content_reclassification_jobs "
+                  "WHERE status IN ('pending','applying','committing','rolling_back')"
+              ).fetchone()[0]
               permission_groups = database.execute(
                   "SELECT g.group_key,g.display_name,i.permission "
                   "FROM content_permission_groups g "
@@ -593,6 +598,7 @@ jobs:
           assert version == CURRENT_SCHEMA_VERSION
           assert [tuple(row) for row in categories] == expected_categories
           assert active_jobs == 0
+          assert active_reclassifications == 0
           actual_groups = {}
           for group_key, display_name, permission in permission_groups:
               actual_groups.setdefault((group_key, display_name), [])

@@ -10,6 +10,7 @@ from typing import Iterable
 from .content_permission_catalog import (
     CONTENT_PERMISSION_V2_SYSTEM_CONTENT_PERMISSION_GROUPS,
     LEGACY_SYSTEM_CONTENT_PERMISSION_GROUPS,
+    PRE_RECLASSIFICATION_SYSTEM_CONTENT_PERMISSION_GROUPS,
     SYSTEM_CONTENT_PERMISSION_GROUPS,
 )
 
@@ -720,6 +721,78 @@ CONTENT_PERMISSION_DOWNLOAD_STATEMENTS = (
     "DROP TABLE content_permission_group_items_v11",
 )
 
+CONTENT_RECLASSIFICATION_STATEMENTS = (
+    "ALTER TABLE content_permissions RENAME TO content_permissions_v18",
+    """CREATE TABLE content_permissions (
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        permission TEXT NOT NULL CHECK (permission IN (
+            'workspace.view','item.view','item.download','category.view','item.upload','item.submit',
+            'item.move_draft','item.archive_draft','item.review','item.move_review',
+            'item.publish','item.reclassify_published','item.archive_published','trash.view','trash.restore',
+            'category.manage','folder.request','folder.review','import.server','index.view'
+        )),
+        granted_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at INTEGER NOT NULL,
+        PRIMARY KEY(user_id, permission)
+    )""",
+    """INSERT INTO content_permissions(user_id,permission,granted_by,created_at)
+       SELECT user_id,permission,granted_by,created_at FROM content_permissions_v18""",
+    "DROP TABLE content_permissions_v18",
+    "ALTER TABLE content_permission_group_items RENAME TO content_permission_group_items_v18",
+    """CREATE TABLE content_permission_group_items (
+        group_id TEXT NOT NULL REFERENCES content_permission_groups(id) ON DELETE CASCADE,
+        permission TEXT NOT NULL CHECK (permission IN (
+            'workspace.view','item.view','item.download','category.view','item.upload','item.submit',
+            'item.move_draft','item.archive_draft','item.review','item.move_review',
+            'item.publish','item.reclassify_published','item.archive_published','trash.view','trash.restore',
+            'category.manage','folder.request','folder.review','import.server','index.view'
+        )),
+        PRIMARY KEY(group_id, permission)
+    )""",
+    """INSERT INTO content_permission_group_items(group_id,permission)
+       SELECT group_id,permission FROM content_permission_group_items_v18""",
+    """INSERT INTO content_permission_group_items(group_id,permission)
+       SELECT id,'item.reclassify_published' FROM content_permission_groups
+       WHERE is_system=1 AND group_key IN ('publisher','system_admin')""",
+    "DROP TABLE content_permission_group_items_v18",
+    """CREATE TABLE IF NOT EXISTS content_reclassification_jobs (
+        id TEXT PRIMARY KEY,
+        item_id TEXT NOT NULL REFERENCES content_items(id) ON DELETE RESTRICT,
+        expected_version_id TEXT NOT NULL REFERENCES content_versions(id) ON DELETE RESTRICT,
+        source_category_id TEXT NOT NULL REFERENCES category_nodes(id) ON DELETE RESTRICT,
+        target_category_id TEXT NOT NULL REFERENCES category_nodes(id) ON DELETE RESTRICT,
+        source_category_key TEXT NOT NULL,
+        source_category_label TEXT NOT NULL,
+        source_category_version INTEGER NOT NULL,
+        target_category_key TEXT NOT NULL,
+        target_category_label TEXT NOT NULL,
+        target_category_version INTEGER NOT NULL,
+        actor_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        retry_of_job_id TEXT REFERENCES content_reclassification_jobs(id) ON DELETE SET NULL,
+        status TEXT NOT NULL CHECK (status IN (
+            'pending','applying','committing','rolling_back','succeeded','failed'
+        )),
+        qdrant_point_count INTEGER NOT NULL DEFAULT 0 CHECK (qdrant_point_count >= 0),
+        parent_count INTEGER NOT NULL DEFAULT 0 CHECK (parent_count >= 0),
+        qdrant_applied INTEGER NOT NULL DEFAULT 0 CHECK (qdrant_applied IN (0,1)),
+        parents_applied INTEGER NOT NULL DEFAULT 0 CHECK (parents_applied IN (0,1)),
+        item_committed INTEGER NOT NULL DEFAULT 0 CHECK (item_committed IN (0,1)),
+        view_activated INTEGER NOT NULL DEFAULT 0 CHECK (view_activated IN (0,1)),
+        candidate_view_path TEXT,
+        error_code TEXT,
+        error_summary TEXT,
+        created_at INTEGER NOT NULL,
+        started_at INTEGER,
+        finished_at INTEGER,
+        updated_at INTEGER NOT NULL
+    )""",
+    """CREATE UNIQUE INDEX IF NOT EXISTS uq_content_reclassification_active_item
+       ON content_reclassification_jobs(item_id)
+       WHERE status IN ('pending','applying','committing','rolling_back')""",
+    """CREATE INDEX IF NOT EXISTS idx_content_reclassification_item_created
+       ON content_reclassification_jobs(item_id,created_at DESC)""",
+)
+
 MIGRATIONS = (
     Migration(1, "multi_engine_transcription_phase2", PHASE2_STATEMENTS),
     Migration(2, "answer_regeneration_versions", ANSWER_VERSION_STATEMENTS),
@@ -738,6 +811,7 @@ MIGRATIONS = (
     Migration(15, "answer_policy_settings_and_snapshots", ANSWER_POLICY_STATEMENTS),
     Migration(16, "media_transcript_library_catalog", MEDIA_TRANSCRIPT_LIBRARY_STATEMENTS),
     Migration(17, "asr_profile_management", ASR_PROFILE_MANAGEMENT_STATEMENTS),
+    Migration(18, "published_content_reclassification", CONTENT_RECLASSIFICATION_STATEMENTS),
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 PHASE2_TABLES = frozenset(
@@ -782,6 +856,7 @@ ANSWER_POLICY_TABLES = frozenset({"answer_policy_settings", "answer_policy_audit
 ASR_PROFILE_MANAGEMENT_TABLES = frozenset(
     {"asr_profile_release_requests", "asr_profile_audit_events"}
 )
+CONTENT_RECLASSIFICATION_TABLES = frozenset({"content_reclassification_jobs"})
 
 
 def validate_system_content_permission_groups(
@@ -929,6 +1004,8 @@ def has_pending_ddl(path: Path, *, base_tables: frozenset[str]) -> bool:
         try:
             expected_groups = (
                 SYSTEM_CONTENT_PERMISSION_GROUPS
+                if any(version == 18 for version, _name in applied)
+                else PRE_RECLASSIFICATION_SYSTEM_CONTENT_PERMISSION_GROUPS
                 if any(version == 13 for version, _name in applied)
                 else CONTENT_PERMISSION_V2_SYSTEM_CONTENT_PERMISSION_GROUPS
                 if any(version == 11 for version, _name in applied)
@@ -948,6 +1025,8 @@ def has_pending_ddl(path: Path, *, base_tables: frozenset[str]) -> bool:
         finally:
             conn.close()
     if any(version == 17 for version, _name in applied) and not ASR_PROFILE_MANAGEMENT_TABLES.issubset(tables):
+        raise RuntimeError("migration_schema_mismatch")
+    if any(version == 18 for version, _name in applied) and not CONTENT_RECLASSIFICATION_TABLES.issubset(tables):
         raise RuntimeError("migration_schema_mismatch")
     if any(version == 10 for version, _name in applied):
         conn = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
@@ -1027,9 +1106,13 @@ def apply_all(conn: sqlite3.Connection, *, base_schema: str, applied_at: int) ->
             validate_answer_policy_schema(conn)
         if 17 in applied_versions and not ASR_PROFILE_MANAGEMENT_TABLES.issubset(tables):
             raise RuntimeError("migration_schema_mismatch")
+        if 18 in applied_versions and not CONTENT_RECLASSIFICATION_TABLES.issubset(tables):
+            raise RuntimeError("migration_schema_mismatch")
         validate_system_content_permission_groups(
             conn,
             SYSTEM_CONTENT_PERMISSION_GROUPS
+            if 18 in applied_versions
+            else PRE_RECLASSIFICATION_SYSTEM_CONTENT_PERMISSION_GROUPS
             if 13 in applied_versions
             else CONTENT_PERMISSION_V2_SYSTEM_CONTENT_PERMISSION_GROUPS
             if 11 in applied_versions

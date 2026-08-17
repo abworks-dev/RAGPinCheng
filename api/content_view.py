@@ -4,9 +4,16 @@ import os
 import shutil
 import sqlite3
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 
 from .content_storage import ContentStorage
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedContentView:
+    generation: Path
+    item_count: int
 
 
 def _remove_tree(path: Path) -> None:
@@ -34,11 +41,17 @@ def _category_path(conn: sqlite3.Connection, category_id: str) -> tuple[str, ...
     return tuple(reversed(parts))
 
 
-def rebuild_read_only_view(conn: sqlite3.Connection, storage: ContentStorage) -> int:
+def prepare_read_only_view(
+    conn: sqlite3.Connection,
+    storage: ContentStorage,
+    *,
+    category_overrides: dict[str, str] | None = None,
+) -> PreparedContentView:
     storage.ensure_layout()
     views_parent = storage.views_root.parent
     generation = views_parent / f".next-{uuid.uuid4().hex}"
     generation.mkdir(parents=True)
+    overrides = category_overrides or {}
     rows = conn.execute(
         """SELECT i.id AS item_id,i.category_id,v.original_filename,o.storage_rel_path
            FROM content_item_heads h
@@ -51,7 +64,8 @@ def rebuild_read_only_view(conn: sqlite3.Connection, storage: ContentStorage) ->
     count = 0
     try:
         for row in rows:
-            target_dir = generation.joinpath(*_category_path(conn, row["category_id"]))
+            category_id = overrides.get(str(row["item_id"]), str(row["category_id"]))
+            target_dir = generation.joinpath(*_category_path(conn, category_id))
             target_dir.mkdir(parents=True, exist_ok=True)
             filename = row["original_filename"]
             target = target_dir / filename
@@ -69,16 +83,55 @@ def rebuild_read_only_view(conn: sqlite3.Connection, storage: ContentStorage) ->
         ):
             directory.chmod(0o550)
         generation.chmod(0o550)
-        previous = views_parent / ".previous"
-        if previous.exists():
-            _remove_tree(previous)
-        if storage.views_root.exists():
-            storage.views_root.rename(previous)
-        generation.rename(storage.views_root)
-        if previous.exists():
-            _remove_tree(previous)
-        return count
+        return PreparedContentView(generation=generation, item_count=count)
     except Exception:
         if generation.exists():
             _remove_tree(generation)
+        raise
+
+
+def discard_prepared_read_only_view(storage: ContentStorage, generation: Path) -> None:
+    views_parent = storage.views_root.parent.resolve(strict=False)
+    candidate = generation.resolve(strict=False)
+    if candidate.parent != views_parent or not candidate.name.startswith(".next-"):
+        raise ValueError("invalid_content_view_generation")
+    if candidate.exists():
+        _remove_tree(candidate)
+
+
+def activate_prepared_read_only_view(
+    storage: ContentStorage,
+    prepared: PreparedContentView,
+) -> int:
+    generation = prepared.generation
+    views_parent = storage.views_root.parent
+    if generation.resolve(strict=False).parent != views_parent.resolve(strict=False):
+        raise ValueError("invalid_content_view_generation")
+    if not generation.name.startswith(".next-") or not generation.is_dir():
+        raise ValueError("content_view_generation_missing")
+    previous = views_parent / ".previous"
+    if previous.exists():
+        _remove_tree(previous)
+    moved_current = False
+    try:
+        if storage.views_root.exists():
+            storage.views_root.rename(previous)
+            moved_current = True
+        generation.rename(storage.views_root)
+    except Exception:
+        if moved_current and not storage.views_root.exists() and previous.exists():
+            previous.rename(storage.views_root)
+        raise
+    if previous.exists():
+        _remove_tree(previous)
+    return prepared.item_count
+
+
+def rebuild_read_only_view(conn: sqlite3.Connection, storage: ContentStorage) -> int:
+    prepared = prepare_read_only_view(conn, storage)
+    try:
+        return activate_prepared_read_only_view(storage, prepared)
+    except Exception:
+        if prepared.generation.exists():
+            discard_prepared_read_only_view(storage, prepared.generation)
         raise

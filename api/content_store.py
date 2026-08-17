@@ -832,7 +832,13 @@ _CONTENT_LIBRARY_CTE = """WITH RECURSIVE paths AS (
                  AS publication_attempt_count,
                i.archived_at,archive_user.real_name AS archived_by_name,
                archive_event.metadata_json AS archive_metadata_json,
-               NULL AS media_duration_ms,NULL AS media_file_size,0 AS has_pending_revision
+                NULL AS media_duration_ms,NULL AS media_file_size,0 AS has_pending_revision,
+                (SELECT r.id FROM content_reclassification_jobs r
+                 WHERE r.item_id=i.id ORDER BY r.created_at DESC,r.id DESC LIMIT 1)
+                  AS reclassification_job_id,
+                (SELECT r.status FROM content_reclassification_jobs r
+                 WHERE r.item_id=i.id ORDER BY r.created_at DESC,r.id DESC LIMIT 1)
+                  AS reclassification_status
         FROM content_items i
         JOIN category_nodes c ON c.id=i.category_id
         JOIN paths ON paths.id=i.category_id
@@ -884,7 +890,8 @@ _CONTENT_LIBRARY_CTE = """WITH RECURSIVE paths AS (
                      AND pending.publication_status<>'published'
                      AND (pending.created_at>tv.created_at OR
                           (pending.created_at=tv.created_at AND pending.id>tv.id))
-               ) AS has_pending_revision
+                ) AS has_pending_revision,
+                NULL AS reclassification_job_id,NULL AS reclassification_status
         FROM content_items i
         JOIN category_nodes c ON c.id=i.category_id
         JOIN paths ON paths.id=i.category_id
@@ -1164,8 +1171,16 @@ def _archive_content_item_locked(
            ) LIMIT 1""",
         (expected_version_id,),
     ).fetchone()
+    active_reclassification = conn.execute(
+        """SELECT 1 FROM content_reclassification_jobs
+           WHERE item_id=? AND status IN ('pending','applying','committing','rolling_back')
+           LIMIT 1""",
+        (item_id,),
+    ).fetchone()
     if row["lifecycle_status"] == "publishing" or active_job is not None:
         raise ValueError("content_delete_in_progress")
+    if active_reclassification is not None:
+        raise ValueError("content_delete_reclassification_in_progress")
 
     publication_withdrawn = row["head_publication_id"] is not None
     if publication_withdrawn:
@@ -1451,8 +1466,16 @@ def create_content_revision(
                ) LIMIT 1""",
             (expected_version_id,),
         ).fetchone()
+        active_reclassification = conn.execute(
+            """SELECT 1 FROM content_reclassification_jobs
+               WHERE item_id=? AND status IN ('pending','applying','committing','rolling_back')
+               LIMIT 1""",
+            (item_id,),
+        ).fetchone()
         if row["lifecycle_status"] == "publishing" or active_job is not None:
             raise ValueError("content_revision_in_progress")
+        if active_reclassification is not None:
+            raise ValueError("content_revision_reclassification_in_progress")
 
         conflict = find_content_filename_conflict(
             conn,

@@ -34,9 +34,16 @@ const PAGE_SIZE = 25;
 const PAGE_SIZE_OPTIONS = [25, 50, 100];
 const BULK_LIMIT = 20;
 const BULK_DOWNLOAD_TOAST_ID = "managed-content-bulk-download";
+const ACTIVE_RECLASSIFICATION_STATUSES = new Set(["pending", "applying", "committing", "rolling_back"]);
 type SortKey = "docType" | "title" | "updatedAt" | "status" | "source";
 type SortDirection = "asc" | "desc";
 type ManagedContentView = "library" | "trash" | "uploads" | "index";
+type MoveOperation = "move" | "reclassify" | "archive";
+
+function moveOperation(item: ManagedContentItem): MoveOperation {
+  if (item.content_kind === "media_transcript") return "archive";
+  return item.has_published_head ? "reclassify" : "move";
+}
 
 function formatManagedUpdatedAt(timestamp: number | null | undefined) {
   if (!timestamp) return "—";
@@ -658,6 +665,14 @@ export function AdminManagedContentPage() {
   }, [currentFolderId, page, pageSize, query, sourceFilter, statusFilter, kindFilter, sort]);
 
   useEffect(() => { void load(); }, [load]);
+  const hasActiveReclassification = items.some((item) =>
+    ACTIVE_RECLASSIFICATION_STATUSES.has(item.reclassification_status || ""),
+  );
+  useEffect(() => {
+    if (!hasActiveReclassification || view !== "library") return undefined;
+    const timer = window.setInterval(() => { void load(); }, 2000);
+    return () => window.clearInterval(timer);
+  }, [hasActiveReclassification, load, view]);
 
   const loadTrash = useCallback(async () => {
     if (!can("trash.view")) return;
@@ -908,10 +923,17 @@ export function AdminManagedContentPage() {
     setBusyAction(`${moveTarget.version_id}:move`);
     setMoveError(null);
     try {
-      await adminContentApi.move(moveTarget.item_id, moveFolderId, moveTarget.version_id);
-      toast.success(`已移动“${moveTarget.title}”`); setMoveTarget(null); setMoveFolderId(""); await load(true);
+      const mode = moveOperation(moveTarget);
+      if (mode === "reclassify") {
+        await adminContentApi.reclassify(moveTarget.item_id, moveFolderId, moveTarget.version_id);
+        toast.success("分类调整任务已提交");
+      } else {
+        await adminContentApi.move(moveTarget.item_id, moveFolderId, moveTarget.version_id);
+        toast.success(mode === "archive" ? "归档目录已调整" : `已移动“${moveTarget.title}”`);
+      }
+      setMoveTarget(null); setMoveFolderId(""); await load(true);
     } catch (moveFailure) {
-      setMoveError(moveFailure instanceof Error ? moveFailure.message : "移动资料失败");
+      setMoveError(moveFailure instanceof Error ? moveFailure.message : "调整目录失败");
     }
     finally { setBusyAction(null); }
   };
@@ -920,9 +942,12 @@ export function AdminManagedContentPage() {
     if (item.category_id === targetFolderId) return;
     setBusyAction(`${item.version_id}:move`);
     try {
-      await adminContentApi.move(item.item_id, targetFolderId, item.version_id);
-      toast.success(`已移动“${item.title}”`); setDraggedItem(null); await load(true);
-    } catch (moveError) { toast.error(moveError instanceof Error ? moveError.message : "移动资料失败"); }
+      const mode = moveOperation(item);
+      if (mode === "reclassify") await adminContentApi.reclassify(item.item_id, targetFolderId, item.version_id);
+      else await adminContentApi.move(item.item_id, targetFolderId, item.version_id);
+      toast.success(mode === "archive" ? "归档目录已调整" : mode === "reclassify" ? "分类调整任务已提交" : `已移动“${item.title}”`);
+      setDraggedItem(null); await load(true);
+    } catch (moveError) { toast.error(moveError instanceof Error ? moveError.message : "调整目录失败"); }
     finally { setBusyAction(null); }
   };
 
@@ -1168,12 +1193,15 @@ export function AdminManagedContentPage() {
     [items, selected],
   );
 
-  const canMoveItem = (item: ManagedContentItem) => (
-    item.content_kind === "media_transcript" ? can("item.publish") : !item.has_published_head && (
-      (can("item.move_draft") && ["draft", "rejected"].includes(item.lifecycle_status))
-      || (can("item.move_review") && item.lifecycle_status === "awaiting_review")
-    )
-  );
+  const canMoveItem = (item: ManagedContentItem) => {
+    if (ACTIVE_RECLASSIFICATION_STATUSES.has(item.reclassification_status || "")) return false;
+    if (item.content_kind === "media_transcript") return can("item.publish");
+    if (item.has_published_head) {
+      return can("item.reclassify_published") && item.is_current && item.lifecycle_status === "published";
+    }
+    return (can("item.move_draft") && ["draft", "rejected"].includes(item.lifecycle_status))
+      || (can("item.move_review") && item.lifecycle_status === "awaiting_review");
+  };
   const canDeleteItem = (item: ManagedContentItem) => {
     if (item.content_kind === "media_transcript") return false;
     const requiresPublish = item.has_published_head || !["draft", "rejected"].includes(item.lifecycle_status);
@@ -1186,11 +1214,12 @@ export function AdminManagedContentPage() {
     setBusyAction("bulk"); setBulkFailures([]);
     try {
       const ids = selectedItems.map((item) => item.version_id);
+      const selectedMoveOperation = moveOperation(selectedItems[0]);
+      const moveItems = selectedItems.map((item) => ({ item_id: item.item_id, expected_version_id: item.version_id }));
       const result = bulkAction === "move"
-        ? await adminContentApi.bulkMove(
-          selectedItems.map((item) => ({ item_id: item.item_id, expected_version_id: item.version_id })),
-          bulkMoveFolderId,
-        )
+        ? selectedMoveOperation === "reclassify"
+          ? await adminContentApi.bulkReclassify(moveItems, bulkMoveFolderId)
+          : await adminContentApi.bulkMove(moveItems, bulkMoveFolderId)
         : bulkAction === "publish"
         ? await adminContentApi.bulkPublish(ids)
         : await adminContentApi.bulkReview(ids, bulkAction === "approve", bulkNote);
@@ -1200,7 +1229,13 @@ export function AdminManagedContentPage() {
         .map((entry) => ({ ...entry, title: titles.get(entry.version_id) || "未知资料" }));
       setBulkFailures(failures);
       if (result.failed) toast.error(`成功 ${result.succeeded} 份，失败 ${result.failed} 份`);
-      else toast.success(bulkAction === "publish" ? `已将 ${result.succeeded} 份资料加入发布队列` : bulkAction === "move" ? `已移动 ${result.succeeded} 份资料` : `已处理 ${result.succeeded} 份资料`);
+      else toast.success(bulkAction === "publish"
+        ? `已将 ${result.succeeded} 份资料加入发布队列`
+        : bulkAction === "move" && selectedMoveOperation === "reclassify"
+          ? `已提交 ${result.succeeded} 份资料的分类调整任务`
+          : bulkAction === "move" && selectedMoveOperation === "archive"
+            ? `${result.succeeded} 份视频转录稿的归档目录已调整`
+            : bulkAction === "move" ? `已移动 ${result.succeeded} 份资料` : `已处理 ${result.succeeded} 份资料`);
       setSelected(failures.map((entry) => entry.version_id)); await load(true);
       if (!result.failed) setBulkAction(null);
     } catch (bulkError) { toast.error(bulkError instanceof Error ? bulkError.message : "批量操作失败"); }
@@ -1214,19 +1249,38 @@ export function AdminManagedContentPage() {
   const documentSelection = selectedItems.every((item) => item.content_kind === "document");
   const hasReviewableSelection = documentSelection && selectedItems.some((item) => item.lifecycle_status === "awaiting_review");
   const hasPublishableSelection = documentSelection && selectedItems.some((item) => ["approved", "publication_failed"].includes(item.lifecycle_status));
-  const hasMovableSelection = selectedItems.length > 0 && selectedItems.every(canMoveItem);
+  const selectedMoveOperations = new Set(selectedItems.map(moveOperation));
+  const hasMovableSelection = selectedItems.length > 0
+    && selectedItems.every(canMoveItem)
+    && selectedMoveOperations.size === 1;
+  const bulkMoveLabel = selectedMoveOperations.size === 1 && selectedMoveOperations.has("reclassify")
+    ? "批量调整分类"
+    : selectedMoveOperations.size === 1 && selectedMoveOperations.has("archive")
+      ? "批量调整归档目录"
+      : "批量移动资料";
   const hasDeletableSelection = documentSelection && selectedItems.some(canDeleteItem);
   const hasDownloadableSelection = documentSelection && selectedItems.length > 1 && can("item.download");
   const bulkDisabled = Boolean(busyAction) || refreshing || !enabled;
 
+  const renderItemStatus = (item: ManagedContentItem) => {
+    if (ACTIVE_RECLASSIFICATION_STATUSES.has(item.reclassification_status || "")) {
+      return <Badge variant="warning">分类调整中</Badge>;
+    }
+    if (item.reclassification_status === "failed") {
+      return <Badge variant="destructive">分类调整失败</Badge>;
+    }
+    return <Badge variant={statusVariant(item.lifecycle_status)}>{statusLabel[item.lifecycle_status] || "未知状态"}</Badge>;
+  };
+
   const renderActions = (item: ManagedContentItem) => {
     const disabled = Boolean(busyAction) || refreshing || !enabled;
     const isMediaTranscript = item.content_kind === "media_transcript";
+    const reclassifying = ACTIVE_RECLASSIFICATION_STATUSES.has(item.reclassification_status || "");
     const previewable = Boolean(item.preview_parent_id && ["pdf", "docx", "xlsx", "pptx"].includes(item.doc_type));
     const movable = canMoveItem(item);
     const downloadable = !isMediaTranscript && can("item.download");
-    const revisionAllowed = !isMediaTranscript && can("item.upload") && item.lifecycle_status !== "publishing";
-    const deletable = canDeleteItem(item) && item.lifecycle_status !== "publishing";
+    const revisionAllowed = !isMediaTranscript && can("item.upload") && item.lifecycle_status !== "publishing" && !reclassifying;
+    const deletable = canDeleteItem(item) && item.lifecycle_status !== "publishing" && !reclassifying;
     const workflow = item.lifecycle_status === "draft" && can("item.submit")
       ? { label: "提交", action: () => void act(item, "submit", () => adminContentApi.submit(item.version_id), "已提交确认") }
       : item.lifecycle_status === "rejected" && can("item.submit")
@@ -1246,11 +1300,11 @@ export function AdminManagedContentPage() {
           ? "资料管理功能当前不可用"
           : null;
     if (isMediaTranscript) {
-      const moveTooltip = unavailableReason || (movable ? "移动资料目录" : "当前账号没有发布权限");
+      const moveTooltip = unavailableReason || (movable ? "调整归档目录" : "当前账号没有发布权限");
       return <div className="ml-auto flex min-h-10 w-[10.5rem] items-center justify-end gap-1">
         <IconButton label={`查看“${item.title}”的详细信息`} tooltip={unavailableReason || "查看视频转录稿详情"} className="border border-border max-sm:size-10" disabled={disabled} onClick={() => setDetail(item)}><Info className="size-4" /></IconButton>
         <IconButton label={`播放“${item.title}”`} tooltip={unavailableReason || (item.media_id ? "播放视频与转录稿" : "媒体关联缺失，暂无法播放")} className="border border-border max-sm:size-10" disabled={disabled || !item.media_id} onClick={() => openVideoPreview({ mediaId: item.media_id!, title: item.title, startSeconds: 0, fromSource: false })}><Film className="size-4" /></IconButton>
-        <IconButton label={`移动“${item.title}”`} tooltip={moveTooltip} className="border border-border max-sm:size-10" disabled={disabled || !movable} onClick={() => { setMoveTarget(item); setMoveFolderId(""); setMoveError(null); }}><FolderInput className="size-4" /></IconButton>
+        <IconButton label={`调整“${item.title}”的归档目录`} tooltip={moveTooltip} className="border border-border max-sm:size-10" disabled={disabled || !movable} onClick={() => { setMoveTarget(item); setMoveFolderId(""); setMoveError(null); }}><FolderInput className="size-4" /></IconButton>
         <a aria-label={`在视频管理中打开“${item.title}”`} title={`在视频管理中打开“${item.title}”`} className={buttonVariants({ variant: "outline", size: "icon", className: "!size-9 max-sm:!size-10" })} href={`/admin/media?media_id=${encodeURIComponent(item.media_id || "")}&workbench=1`}><ExternalLink className="size-4" /></a>
       </div>;
     }
@@ -1262,9 +1316,13 @@ export function AdminManagedContentPage() {
           : "当前文件格式暂不支持在线预览");
     const moveTooltip = unavailableReason
       || (movable
-        ? "移动资料"
+        ? item.has_published_head ? "调整分类" : "移动资料"
+        : ACTIVE_RECLASSIFICATION_STATUSES.has(item.reclassification_status || "")
+          ? "分类调整正在同步索引和目录"
         : item.has_published_head
-          ? "已有发布版本的资料不能移动"
+          ? item.is_current && item.lifecycle_status === "published"
+            ? "当前账号没有调整已发布资料分类的权限"
+            : "存在待处理的新版本，暂时不能调整正式分类"
           : !["draft", "rejected", "awaiting_review"].includes(item.lifecycle_status)
             ? "仅草稿、已退回或待确认的资料可以移动"
             : item.lifecycle_status === "awaiting_review"
@@ -1275,18 +1333,24 @@ export function AdminManagedContentPage() {
         ? "重命名资料"
         : item.lifecycle_status === "publishing"
           ? "资料正在发布，暂不能重命名"
+          : reclassifying
+            ? "资料正在调整分类，暂不能重命名"
           : "当前账号没有上传和修改资料的权限");
     const updateTooltip = unavailableReason
       || (revisionAllowed
         ? "更新资料文件"
         : item.lifecycle_status === "publishing"
           ? "资料正在发布，暂不能更新文件"
+          : reclassifying
+            ? "资料正在调整分类，暂不能更新文件"
           : "当前账号没有上传和修改资料的权限");
     const deleteTooltip = unavailableReason
       || (deletable
         ? "移入回收站"
         : item.lifecycle_status === "publishing"
           ? "资料正在发布，暂不能移入回收站"
+          : reclassifying
+            ? "资料正在调整分类，暂不能移入回收站"
           : item.has_published_head || !["draft", "rejected"].includes(item.lifecycle_status)
             ? "当前账号没有删除已审核或已发布资料的权限"
             : "当前账号没有删除草稿或已退回资料的权限");
@@ -1295,7 +1359,7 @@ export function AdminManagedContentPage() {
       <div className="ml-auto flex min-h-10 w-[19rem] max-w-full items-center justify-end gap-1 sm:w-[17.25rem] lg:ml-0">
         <IconButton label={`查看“${item.title}”的详细信息`} tooltip={unavailableReason || "查看资料详情"} className="border border-border max-sm:size-10" disabled={disabled} onClick={() => setDetail(item)}><Info className="size-4" /></IconButton>
         <IconButton label={`预览“${item.title}”`} tooltip={previewTooltip} className="border border-border max-sm:size-10" disabled={disabled || !previewable} onClick={() => openDocumentPreview(item.preview_parent_id!, item.title, item.doc_type, 1, {}, null)}><Eye className="size-4" /></IconButton>
-        <IconButton label={`移动“${item.title}”`} tooltip={moveTooltip} className="border border-border max-sm:size-10" disabled={disabled || !movable} onClick={() => { setMoveTarget(item); setMoveFolderId(""); setMoveError(null); }}><FolderInput className="size-4" /></IconButton>
+        <IconButton label={item.has_published_head ? `调整“${item.title}”的分类` : `移动“${item.title}”`} tooltip={moveTooltip} className="border border-border max-sm:size-10" disabled={disabled || !movable} onClick={() => { setMoveTarget(item); setMoveFolderId(""); setMoveError(null); }}><FolderInput className="size-4" /></IconButton>
         <IconButton label={`下载“${item.title}”`} tooltip={unavailableReason || (downloadable ? "下载文件" : "当前账号没有下载文件的权限")} className="border border-border max-sm:size-10" disabled={disabled || !downloadable} onClick={() => void downloadContent(item)}><Download className="size-4" /></IconButton>
         <IconButton label={`重命名“${item.title}”`} tooltip={revisionTooltip} className="border border-border max-sm:size-10" disabled={disabled || !revisionAllowed} onClick={() => openRenameDialog(item)}><Pencil className="size-4" /></IconButton>
         <IconButton label={`更新“${item.title}”`} tooltip={updateTooltip} className="border border-border max-sm:size-10" disabled={disabled || !revisionAllowed} onClick={() => openUpdateDialog(item)}><FileUp className="size-4" /></IconButton>
@@ -1385,7 +1449,7 @@ export function AdminManagedContentPage() {
           {can("item.upload") && <Button size="sm" className="max-sm:h-control-md" onClick={openUploadDialog} disabled={!enabled || !currentFolderId || uploading || folderScanning}><Upload className="size-4" />{folderScanning ? "读取文件夹中…" : "上传文件"}</Button>}
           <Button size="sm" variant="outline" className="max-sm:h-control-md" onClick={() => void load(true)} disabled={loading || refreshing}><RefreshCw className={refreshing ? "size-4 animate-spin" : "size-4"} />{refreshing ? "刷新中…" : "刷新列表"}</Button>
           {selected.length > 1 ? <BatchActionsMenu disabled={bulkDisabled} options={[
-            { key: "move", label: "批量移动", icon: <FolderInput className="size-4" />, disabled: !hasMovableSelection, disabledReason: "所选资料必须全部可由当前账号移动", onSelect: () => { setBulkFailures([]); setBulkMoveFolderId(""); setBulkAction("move"); } },
+            { key: "move", label: bulkMoveLabel, icon: <FolderInput className="size-4" />, disabled: !hasMovableSelection, disabledReason: "所选资料必须属于同一状态且都可调整目录", onSelect: () => { setBulkFailures([]); setBulkMoveFolderId(""); setBulkNote(""); setBulkAction("move"); } },
             { key: "approve", label: "批量确认", icon: <Check className="size-4" />, disabled: !can("item.review") || !hasReviewableSelection, disabledReason: "仅文档支持批量确认，且至少包含一份待确认文档", onSelect: () => { setBulkFailures([]); setBulkNote(""); setBulkAction("approve"); } },
             { key: "reject", label: "批量退回", icon: <X className="size-4" />, disabled: !can("item.review") || !hasReviewableSelection, disabledReason: "仅文档支持批量退回，且至少包含一份待确认文档", onSelect: () => { setBulkFailures([]); setBulkNote(""); setBulkAction("reject"); } },
             { key: "publish", label: "批量发布", icon: <Rocket className="size-4" />, disabled: !can("item.publish") || !hasPublishableSelection, disabledReason: "仅文档支持此处发布，视频转录稿请前往视频管理", onSelect: () => { setBulkFailures([]); setBulkNote(""); setBulkAction("publish"); } },
@@ -1404,11 +1468,11 @@ export function AdminManagedContentPage() {
             const folderLabel = `${folder.display_code} ${folder.display_name}`;
             return <tr key={folder.id} data-testid={`managed-folder-row-${folder.id}`} className={`cursor-pointer transition-colors duration-normal hover:bg-surface-muted/60 ${draggedItem ? "bg-primary/5 outline outline-1 -outline-offset-1 outline-primary/50" : ""}`} onClick={() => setCurrentFolderId(folder.id)} onDragOver={(event) => { if (draggedItem) { event.preventDefault(); event.stopPropagation(); } }} onDrop={(event) => { if (!draggedItem) return; event.preventDefault(); event.stopPropagation(); void moveItemTo(draggedItem, folder.id); }}><td className="px-3 py-3" /><td className="px-3 py-3"><ManagedItemType folder /></td><td className="max-w-xs px-3 py-3"><button type="button" className="block max-w-full rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setCurrentFolderId(folder.id)}><span className="block break-words font-medium">{folderLabel}</span><span className="mt-0.5 block text-ui-xs text-muted-foreground">{folder.item_count} 份直接资料</span></button></td><td className="whitespace-nowrap px-3 py-3 tabular-nums">{formatManagedUpdatedAt(folder.updated_at)}</td><td className="px-3 py-3 text-muted-foreground">—</td><td className="px-3 py-3 text-muted-foreground">—</td><td className="px-3 py-3 text-right"><IconButton label={`打开文件夹“${folderLabel}”`} className="border border-border" onClick={() => setCurrentFolderId(folder.id)}><ChevronRight className="size-4" /></IconButton></td></tr>;
           })}
-          {sortedItems.map((item, index) => { const movable = canMoveItem(item); const rowSelectable = item.content_kind === "document" || movable; return <tr key={item.item_id} draggable={movable} title={movable ? "拖动到文件夹行可移动资料" : undefined} onDragStart={() => setDraggedItem(item)} onDragEnd={() => setDraggedItem(null)} className={`transition-colors duration-normal hover:bg-surface-muted/60 ${movable ? "cursor-grab" : ""}`}><td className="px-3 py-3"><Checkbox aria-label={`选择${item.title}`} checked={selected.includes(item.version_id)} disabled={index >= BULK_LIMIT || !rowSelectable} title={!rowSelectable ? "视频转录稿需要发布权限才能批量移动" : undefined} onChange={() => setSelected((current) => current.includes(item.version_id) ? current.filter((id) => id !== item.version_id) : [...current, item.version_id].slice(0, BULK_LIMIT))} /></td><td className="px-3 py-3"><ManagedItemType docType={item.doc_type} /></td><td className="max-w-xs px-3 py-3"><ManagedItemIdentity item={item} /></td><td className="whitespace-nowrap px-3 py-3 tabular-nums">{formatManagedUpdatedAt(item.updated_at)}</td><td className="px-3 py-3"><Badge variant={statusVariant(item.lifecycle_status)}>{statusLabel[item.lifecycle_status] || "未知状态"}</Badge></td><td className="px-3 py-3">{sourceLabel[item.source_origin] || "其他来源"}</td><td className="px-3 py-3 text-right">{renderActions(item)}</td></tr>; })}</tbody></table></div>
+          {sortedItems.map((item, index) => { const movable = canMoveItem(item); const draggable = movable && moveOperation(item) !== "reclassify"; const rowSelectable = item.content_kind === "document" || movable; return <tr key={item.item_id} draggable={draggable} title={draggable ? "拖动到文件夹行可调整目录" : undefined} onDragStart={() => setDraggedItem(item)} onDragEnd={() => setDraggedItem(null)} className={`transition-colors duration-normal hover:bg-surface-muted/60 ${draggable ? "cursor-grab" : ""}`}><td className="px-3 py-3"><Checkbox aria-label={`选择${item.title}`} checked={selected.includes(item.version_id)} disabled={index >= BULK_LIMIT || !rowSelectable} title={!rowSelectable ? "视频转录稿需要发布权限才能批量调整归档目录" : undefined} onChange={() => setSelected((current) => current.includes(item.version_id) ? current.filter((id) => id !== item.version_id) : [...current, item.version_id].slice(0, BULK_LIMIT))} /></td><td className="px-3 py-3"><ManagedItemType docType={item.doc_type} /></td><td className="max-w-xs px-3 py-3"><ManagedItemIdentity item={item} /></td><td className="whitespace-nowrap px-3 py-3 tabular-nums">{formatManagedUpdatedAt(item.updated_at)}</td><td className="px-3 py-3">{renderItemStatus(item)}</td><td className="px-3 py-3">{sourceLabel[item.source_origin] || "其他来源"}</td><td className="px-3 py-3 text-right">{renderActions(item)}</td></tr>; })}</tbody></table></div>
         <ul className="divide-y divide-border border-t border-border lg:hidden">{sortedChildFolders.map((folder) => {
           const folderLabel = `${folder.display_code} ${folder.display_name}`;
           return <li key={folder.id} data-testid={`managed-folder-mobile-${folder.id}`}><button type="button" className="flex min-h-16 w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-surface-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:px-5" onClick={() => setCurrentFolderId(folder.id)}><Folder className="size-5 shrink-0 text-primary" aria-hidden="true" /><span className="min-w-0 flex-1"><span className="block break-words font-medium">{folderLabel}</span><span className="mt-0.5 block text-ui-xs text-muted-foreground">{folder.item_count} 份直接资料</span></span><ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" /></button></li>;
-        })}{sortedItems.map((item, index) => { const rowSelectable = item.content_kind === "document" || canMoveItem(item); return <li key={item.item_id} className="space-y-3 px-4 py-4 sm:px-5"><div className="flex items-start gap-3"><Checkbox className="mt-0.5" aria-label={`选择${item.title}`} checked={selected.includes(item.version_id)} disabled={index >= BULK_LIMIT || !rowSelectable} title={!rowSelectable ? "视频转录稿需要发布权限才能批量移动" : undefined} onChange={() => setSelected((current) => current.includes(item.version_id) ? current.filter((id) => id !== item.version_id) : [...current, item.version_id].slice(0, BULK_LIMIT))} /><ManagedItemType docType={item.doc_type} /><div className="min-w-0 flex-1"><ManagedItemIdentity item={item} /></div></div><dl className="grid grid-cols-[4rem_minmax(0,1fr)] gap-x-2 gap-y-1 text-ui-sm"><dt className="text-muted-foreground">状态</dt><dd><Badge variant={statusVariant(item.lifecycle_status)}>{statusLabel[item.lifecycle_status] || "未知状态"}</Badge></dd><dt className="text-muted-foreground">更新时间</dt><dd className="whitespace-nowrap tabular-nums">{formatManagedUpdatedAt(item.updated_at)}</dd><dt className="text-muted-foreground">来源</dt><dd>{sourceLabel[item.source_origin] || "其他来源"}</dd></dl>{renderActions(item)}</li>; })}</ul>
+        })}{sortedItems.map((item, index) => { const rowSelectable = item.content_kind === "document" || canMoveItem(item); return <li key={item.item_id} className="space-y-3 px-4 py-4 sm:px-5"><div className="flex items-start gap-3"><Checkbox className="mt-0.5" aria-label={`选择${item.title}`} checked={selected.includes(item.version_id)} disabled={index >= BULK_LIMIT || !rowSelectable} title={!rowSelectable ? "视频转录稿需要发布权限才能批量调整归档目录" : undefined} onChange={() => setSelected((current) => current.includes(item.version_id) ? current.filter((id) => id !== item.version_id) : [...current, item.version_id].slice(0, BULK_LIMIT))} /><ManagedItemType docType={item.doc_type} /><div className="min-w-0 flex-1"><ManagedItemIdentity item={item} /></div></div><dl className="grid grid-cols-[4rem_minmax(0,1fr)] gap-x-2 gap-y-1 text-ui-sm"><dt className="text-muted-foreground">状态</dt><dd>{renderItemStatus(item)}</dd><dt className="text-muted-foreground">更新时间</dt><dd className="whitespace-nowrap tabular-nums">{formatManagedUpdatedAt(item.updated_at)}</dd><dt className="text-muted-foreground">来源</dt><dd>{sourceLabel[item.source_origin] || "其他来源"}</dd></dl>{renderActions(item)}</li>; })}</ul>
         <div className="flex flex-col gap-2 border-t border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5"><p className="text-ui-xs text-muted-foreground">共 {total} 份，第 {page + 1} / {pageCount} 页</p><div className="flex flex-wrap items-center justify-end gap-2"><label className="flex items-center gap-2 text-ui-xs text-muted-foreground">每页<Select aria-label="每页条数" className="h-control-sm w-20" value={String(pageSize)} onChange={(event) => setPageSize(Number(event.target.value))}>{PAGE_SIZE_OPTIONS.map((size) => <option key={size} value={size}>{size} 条</option>)}</Select></label><Button size="sm" variant="outline" disabled={page === 0 || loading} onClick={() => setPage((value) => value - 1)}>上一页</Button><Select aria-label="跳转页码" className="h-control-sm w-24" value={String(page + 1)} onChange={(event) => setPage(Number(event.target.value) - 1)} disabled={loading}>{Array.from({ length: pageCount }, (_, index) => <option key={index + 1} value={index + 1}>第 {index + 1} 页</option>)}</Select><Button size="sm" variant="outline" disabled={page + 1 >= pageCount || loading} onClick={() => setPage((value) => value + 1)}>下一页</Button></div></div>
       </>}
       </div>
@@ -1424,10 +1488,10 @@ export function AdminManagedContentPage() {
     }}>
       <DialogContent className={bulkAction === "move" ? "max-h-[calc(100vh-2rem)] max-w-2xl overflow-y-auto" : undefined}>
         <DialogHeader>
-          <DialogTitle>{bulkAction === "move" ? "批量移动资料" : bulkAction === "publish" ? "批量发布资料" : bulkAction === "reject" ? "批量退回资料" : "批量确认资料"}</DialogTitle>
+          <DialogTitle>{bulkAction === "move" ? bulkMoveLabel : bulkAction === "publish" ? "批量发布资料" : bulkAction === "reject" ? "批量退回资料" : "批量确认资料"}</DialogTitle>
           <DialogDescription>已选择 {selectedItems.length} 份资料。系统会逐项执行，并保留不符合状态或权限要求的失败原因。</DialogDescription>
         </DialogHeader>
-        {bulkAction === "move" && <CategoryTreePicker categories={categories} value={bulkMoveFolderId} onChange={setBulkMoveFolderId} label="移动到" />}
+        {bulkAction === "move" && <CategoryTreePicker categories={categories} value={bulkMoveFolderId} onChange={setBulkMoveFolderId} label="目标目录" />}
         {bulkAction === "reject" && <label className="block space-y-1.5 text-ui-sm font-medium">
           <span>退回原因</span>
           <textarea aria-label="批量退回原因" value={bulkNote} onChange={(event) => setBulkNote(event.target.value)} maxLength={2000} className="min-h-28 w-full resize-y rounded-ui-md border border-input bg-background px-3 py-2 text-ui-sm" placeholder="请说明需要修改的内容" />
@@ -1555,7 +1619,7 @@ export function AdminManagedContentPage() {
 
     <Dialog open={newFolderOpen} onOpenChange={setNewFolderOpen}><DialogContent><DialogHeader><DialogTitle>新建文件夹</DialogTitle><DialogDescription>文件夹将建立在“{currentFolder?.display_name || "当前目录"}”下，最多支持四级目录。</DialogDescription></DialogHeader><label className="space-y-1.5 text-ui-sm font-medium"><span>文件夹名称</span><Input value={newFolderName} onChange={(event) => setNewFolderName(event.target.value)} placeholder="例如：净高分析" autoFocus /></label><DialogFooter><Button variant="outline" onClick={() => setNewFolderOpen(false)} disabled={busyAction === "new-folder"}>取消</Button><Button onClick={() => void createFolder()} disabled={!newFolderName.trim() || busyAction === "new-folder"}>{busyAction === "new-folder" ? "创建中…" : "创建"}</Button></DialogFooter></DialogContent></Dialog>
 
-    <Dialog open={Boolean(moveTarget)} onOpenChange={(open) => { if (!open && !busyAction?.endsWith(":move")) { setMoveTarget(null); setMoveFolderId(""); setMoveError(null); } }}><DialogContent className="max-w-2xl max-h-[calc(100vh-2rem)] overflow-y-auto"><DialogHeader><DialogTitle>移动资料</DialogTitle><DialogDescription>{moveTarget?.content_kind === "media_transcript" ? `只调整“${moveTarget.title}”在资料库中的目录，不改变视频、转录发布状态或索引。` : `将“${moveTarget?.title || "资料"}”从当前目录调整到另一个受控目录。已确认或已发布资料需要先退回。`}</DialogDescription></DialogHeader>{moveTarget && <CategoryTreePicker categories={categories} value={moveFolderId} currentCategoryId={moveTarget.category_id} onChange={(categoryId) => { setMoveFolderId(categoryId); setMoveError(null); }} />}{moveError && <p className="rounded-ui-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-ui-sm text-destructive" role="alert">{moveError}</p>}<DialogFooter><Button variant="outline" onClick={() => { setMoveTarget(null); setMoveFolderId(""); setMoveError(null); }} disabled={Boolean(busyAction?.endsWith(":move"))}>取消</Button><Button onClick={() => void moveContent()} disabled={!moveFolderId || moveFolderId === moveTarget?.category_id || Boolean(busyAction?.endsWith(":move"))}>{busyAction?.endsWith(":move") ? "移动中…" : "确认移动"}</Button></DialogFooter></DialogContent></Dialog>
+    <Dialog open={Boolean(moveTarget)} onOpenChange={(open) => { if (!open && !busyAction?.endsWith(":move")) { setMoveTarget(null); setMoveFolderId(""); setMoveError(null); } }}><DialogContent className="max-w-2xl max-h-[calc(100vh-2rem)] overflow-y-auto"><DialogHeader><DialogTitle>{moveTarget?.content_kind === "media_transcript" ? "调整归档目录" : moveTarget?.has_published_head ? "调整分类" : "移动资料"}</DialogTitle><DialogDescription>{moveTarget?.content_kind === "media_transcript" ? `只调整“${moveTarget.title}”在资料库中的归档目录，不改变视频、转录发布状态或索引。` : moveTarget?.has_published_head ? `调整“${moveTarget.title}”的正式分类。同步完成前资料仍保留在原目录并继续正常检索。` : `将“${moveTarget?.title || "资料"}”从当前目录移动到另一个受控目录。`}</DialogDescription></DialogHeader>{moveTarget && <CategoryTreePicker categories={categories} value={moveFolderId} currentCategoryId={moveTarget.category_id} onChange={(categoryId) => { setMoveFolderId(categoryId); setMoveError(null); }} label="目标目录" />}{moveError && <p className="rounded-ui-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-ui-sm text-destructive" role="alert">{moveError}</p>}<DialogFooter><Button variant="outline" onClick={() => { setMoveTarget(null); setMoveFolderId(""); setMoveError(null); }} disabled={Boolean(busyAction?.endsWith(":move"))}>取消</Button><Button onClick={() => void moveContent()} disabled={!moveFolderId || moveFolderId === moveTarget?.category_id || Boolean(busyAction?.endsWith(":move"))}>{busyAction?.endsWith(":move") ? "处理中…" : moveTarget?.content_kind === "media_transcript" ? "确认调整" : moveTarget?.has_published_head ? "提交分类调整" : "确认移动"}</Button></DialogFooter></DialogContent></Dialog>
 
     <Dialog open={Boolean(renameTarget)} onOpenChange={(open) => { if (!open && busyAction !== "rename") { setRenameTarget(null); setRenameConflict(null); setRenameError(null); } }}><DialogContent><DialogHeader><DialogTitle>重命名资料</DialogTitle><DialogDescription>标题和源文件名会作为新草稿版本保存，之后需要重新确认并发布。</DialogDescription></DialogHeader><div className="space-y-3"><label className="block space-y-1.5 text-ui-sm font-medium"><span>资料标题</span><Input value={renameTitle} onChange={(event) => { setRenameTitle(event.target.value); setRenameConflict(null); }} /></label><label className="block space-y-1.5 text-ui-sm font-medium"><span>源文件名</span><Input value={renameFilename} onChange={(event) => { setRenameFilename(event.target.value); setRenameConflict(null); }} /><span className="block text-ui-xs font-normal text-muted-foreground">只能修改名称，不能改变文件扩展名。</span></label>{renameConflict && <div className="space-y-2 rounded-ui-md border border-warning/50 bg-warning/10 p-3 text-ui-sm" role="alert"><p className="font-medium">当前目录存在同名资料，是否替换？</p><p className="break-words">{renameConflict.title}（{renameConflict.original_filename}）</p><p className="text-muted-foreground">替换会将上述资料移入回收站并立即停止检索；当前资料的新版本仍需重新确认和发布。</p></div>}{renameError && <p className="text-ui-sm text-destructive" role="alert">{renameError}</p>}</div><DialogFooter><Button variant="outline" disabled={busyAction === "rename"} onClick={() => setRenameTarget(null)}>取消</Button>{renameConflict ? <Button variant="destructive" disabled={busyAction === "rename"} onClick={() => void renameContent(true)}>{busyAction === "rename" ? "替换中…" : "确认替换并重命名"}</Button> : <Button disabled={busyAction === "rename" || !renameTitle.trim() || !renameFilename.trim()} onClick={() => void renameContent()}>{busyAction === "rename" ? "保存中…" : "保存为新版本"}</Button>}</DialogFooter></DialogContent></Dialog>
 

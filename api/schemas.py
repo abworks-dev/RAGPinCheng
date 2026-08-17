@@ -499,6 +499,8 @@ class ManagedContentItemDTO(BaseModel):
     media_duration_ms: int | None = None
     media_file_size: int | None = None
     has_pending_revision: bool = False
+    reclassification_job_id: str | None = None
+    reclassification_status: str | None = None
 
 
 class ManagedContentListResponse(BaseModel):
@@ -617,6 +619,23 @@ class ManagedPublicationDTO(BaseModel):
     publication_id: str
     index_job_id: str
     status: str
+
+
+class ContentReclassificationJobDTO(BaseModel):
+    id: str
+    item_id: str
+    expected_version_id: str
+    source_category_id: str
+    target_category_id: str
+    status: Literal["pending", "applying", "committing", "rolling_back", "succeeded", "failed"]
+    qdrant_point_count: int
+    parent_count: int
+    error_code: str | None
+    error_summary: str | None
+    created_at: int
+    started_at: int | None
+    finished_at: int | None
+    updated_at: int
 
 
 class ManagedIndexJobDTO(BaseModel):

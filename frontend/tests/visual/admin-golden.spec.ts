@@ -105,6 +105,34 @@ test("资料管理视频转录稿 accepted golden", async ({ page }) => {
   }
 });
 
+test("资料管理已发布文档调整分类 accepted golden", async ({ page }) => {
+  await installAdminRoutes(page, "normal");
+  await page.goto("/admin");
+  if (page.viewportSize()!.width < 1024) {
+    await page.getByRole("button", { name: "展开管理功能" }).click();
+  }
+  await page.getByRole("link", { name: "资料管理", exact: true }).click();
+  await openRootFolder(page);
+
+  const title = "企业知识库使用规范";
+  const itemTitle = page.getByText(title, { exact: true }).filter({ visible: true });
+  const item = page.viewportSize()!.width < 1024
+    ? itemTitle.locator("xpath=ancestor::li")
+    : itemTitle.locator("xpath=ancestor::tr");
+  await item.getByRole("button", { name: `调整“${title}”的分类` }).click();
+  const dialog = page.getByRole("dialog", { name: "调整分类" });
+  await expect(dialog).toContainText("同步完成前资料仍保留在原目录");
+  await expect(dialog.getByText("目标目录", { exact: true })).toBeVisible();
+
+  const viewport = page.viewportSize()!;
+  expect(await page.evaluate(() => Math.max(document.body.scrollWidth, document.documentElement.scrollWidth))).toBeLessThanOrEqual(viewport.width);
+  if (process.platform === "win32") {
+    await expect(page).toHaveScreenshot(`managed-content-reclassify-${viewport.width}x${viewport.height}.png`);
+  } else {
+    expect((await page.screenshot()).byteLength).toBeGreaterThan(10_000);
+  }
+});
+
 test("系统概览生产运行状态 accepted golden", async ({ page }) => {
   await installAdminRoutes(page, "normal");
   await page.goto("/admin");
