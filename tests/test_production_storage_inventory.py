@@ -182,7 +182,10 @@ def test_inventory_classifies_model_preparation_and_repair_caches(tmp_path: Path
     (revision / "weights.bin").write_bytes(b"model")
 
     preparation_root = data_root / "model-preparation" / "faster-whisper"
-    final_manifest = data_root / "models" / "faster-whisper" / "revision" / "model-manifest.json"
+    final_manifest = (
+        data_root / "models" / "faster-whisper-large-v3-turbo" /
+        "0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf" / "model-manifest.json"
+    )
     final_manifest.parent.mkdir(parents=True)
     final_manifest.write_text('{"status":"ready"}', encoding="utf-8")
     manifest_sha = hashlib.sha256(final_manifest.read_bytes()).hexdigest()
@@ -195,6 +198,14 @@ def test_inventory_classifies_model_preparation_and_repair_caches(tmp_path: Path
         )
         (run / "offline-validation.json").write_text('{"status":"validated-offline"}', encoding="utf-8")
         os.utime(run, (old.timestamp() + int(run_id), old.timestamp() + int(run_id)))
+    candidate_manifest = (
+        preparation_root / "100" / "staging" / "candidate-cache" /
+        "faster-whisper-large-v3-turbo" / "0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf" /
+        "model-manifest.json"
+    )
+    candidate_manifest.parent.mkdir(parents=True)
+    candidate_manifest.write_bytes(final_manifest.read_bytes())
+    os.utime(preparation_root / "100", (old.timestamp() + 100, old.timestamp() + 100))
 
     repair = runtime_root / "model-cache-repair" / "200"
     for repository in ("models--BAAI--bge-m3", "models--BAAI--bge-reranker-v2-m3"):
@@ -226,3 +237,63 @@ def test_inventory_classifies_model_preparation_and_repair_caches(tmp_path: Path
     assert repair_run["reranker_complete"] is True
     assert repair_run["advisory_status"] == "protected"
     assert "configured-model-cache-source" in repair_run["advisory_reasons"]
+    assert runs["100"]["final_manifest_match"] is True
+    assert runs["100"]["candidate_manifest_matches_final"] is True
+    assert {item["kind"] for item in runs["100"]["components"]} == {
+        "staging/download", "staging/candidate-cache", "report"
+    }
+
+
+def test_inventory_validates_and_protects_referenced_wheel_cache(tmp_path: Path):
+    executable = _powershell()
+    if executable is None:
+        pytest.skip("Windows PowerShell is unavailable")
+    data_root = tmp_path / "asr-data"
+    wheel = b"wheel-content"
+    wheel_sha = hashlib.sha256(wheel).hexdigest()
+    key_material = {"schema_version": "faster-whisper-wheel-cache-key/1", "test": "inventory"}
+    cache_key = hashlib.sha256(
+        json.dumps(key_material, separators=(",", ":")).encode()
+    ).hexdigest()
+    cache = data_root / "qualification" / "wheel-cache" / cache_key
+    cache.mkdir(parents=True)
+    (cache / "package.whl").write_bytes(wheel)
+    (cache / "cache-manifest.json").write_text(
+        json.dumps({
+            "schema_version": "faster-whisper-wheel-cache/1",
+            "cache_key": cache_key,
+            "key_material": key_material,
+            "wheel_manifest": {
+                "schema_version": "faster-whisper-wheel-manifest/3",
+                "files": [{"file_name": "package.whl", "size_bytes": len(wheel), "sha256": wheel_sha}],
+            },
+        }), encoding="utf-8",
+    )
+    verdict = data_root / "qualification" / "runs" / "123" / "reports" / "qualification-verdict.json"
+    verdict.parent.mkdir(parents=True)
+    verdict.write_text(json.dumps({"wheel_cache_key": cache_key}), encoding="utf-8")
+    staging = data_root / "qualification" / "wheel-cache" / f".staging-{cache_key}-123"
+    staging.mkdir()
+    invalid_key = "f" * 64
+    invalid = data_root / "qualification" / "wheel-cache" / invalid_key
+    invalid.mkdir()
+    (invalid / "cache-manifest.json").write_text("{}", encoding="utf-8")
+    unknown = data_root / "qualification" / "wheel-cache" / "unexpected-entry"
+    unknown.mkdir()
+    report_path = tmp_path / "inventory.json"
+    result = subprocess.run(
+        [executable, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+         "-File", str(SCRIPT), "-ReportPath", str(report_path), "-AsrDataRoot", str(data_root)],
+        cwd=ROOT, text=True, capture_output=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    inventory = json.loads(report_path.read_text(encoding="utf-8-sig"))["faster_whisper_wheel_cache_inventory"]
+    entries = {item["name"]: item for item in inventory["entries"]}
+    assert entries[cache_key]["integrity_status"] == "valid"
+    assert "qualification-evidence-reference" in entries[cache_key]["advisory_reasons"]
+    assert entries[staging.name]["kind"] == "staging"
+    assert entries[staging.name]["advisory_status"] == "protected"
+    assert entries[invalid_key]["integrity_status"] == "invalid"
+    assert "cache-contract-invalid" in entries[invalid_key]["advisory_reasons"]
+    assert entries[unknown.name]["kind"] == "unknown"
+    assert entries[unknown.name]["advisory_status"] == "protected"
