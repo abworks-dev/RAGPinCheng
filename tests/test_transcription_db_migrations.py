@@ -178,7 +178,10 @@ def test_schema_17_adds_reclassification_jobs_without_granting_custom_principals
     monkeypatch.setattr(db_migrations, "MIGRATIONS", migrations)
     init_db(path, backup_dir=tmp_path / "backups")
     conn = sqlite3.connect(path)
-    assert conn.execute("SELECT max(version) FROM app_schema_migrations").fetchone()[0] == 18
+    assert (
+        conn.execute("SELECT max(version) FROM app_schema_migrations").fetchone()[0]
+        == db_migrations.CURRENT_SCHEMA_VERSION
+    )
     assert conn.execute(
         "SELECT 1 FROM content_permissions WHERE user_id=? AND permission='item.reclassify_published'",
         (user_id,),
@@ -295,7 +298,10 @@ def test_schema_16_database_migrates_asr_profile_management(tmp_path, monkeypatc
 
     conn = sqlite3.connect(path)
     tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-    assert conn.execute("SELECT max(version) FROM app_schema_migrations").fetchone()[0] == 17
+    assert (
+        conn.execute("SELECT max(version) FROM app_schema_migrations").fetchone()[0]
+        == db_migrations.CURRENT_SCHEMA_VERSION
+    )
     assert {"asr_profile_release_requests", "asr_profile_audit_events"} <= tables
     assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     assert conn.execute("PRAGMA foreign_key_check").fetchone() is None
