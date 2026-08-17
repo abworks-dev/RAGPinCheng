@@ -253,6 +253,75 @@ def test_content_endpoints_enforce_auth_permissions_csrf_and_role_separation(con
     assert queued == [published.json()["index_job_id"]]
 
 
+def test_published_reclassification_enforces_permission_csrf_and_active_job(
+    content_api, monkeypatch
+):
+    client, sessions, queued, db_path = content_api
+    monkeypatch.setattr(routes_content, "enqueue_content_reclassification", queued.append)
+    uploaded = client.post(
+        "/api/admin/content/uploads",
+        data={"category_id": "cat-03"},
+        files=[("files", ("published.md", b"# Published", "text/markdown"))],
+        **_auth(sessions, "organizer", csrf=True),
+    ).json()["entries"][0]
+    conn = connect(db_path)
+    publisher_id = conn.execute(
+        "SELECT id FROM users WHERE employee_id='publisher'"
+    ).fetchone()[0]
+    conn.execute(
+        "UPDATE content_versions SET lifecycle_status='published' WHERE id=?",
+        (uploaded["version_id"],),
+    )
+    conn.execute(
+        """INSERT INTO content_publications
+           (id,version_id,status,publisher_id,created_at,updated_at,published_at)
+           VALUES ('published-head',?,'published',?,1,1,1)""",
+        (uploaded["version_id"], publisher_id),
+    )
+    conn.execute(
+        """INSERT INTO content_item_heads(item_id,current_version_id,publication_id,updated_at)
+           VALUES (?,?,'published-head',1)""",
+        (uploaded["item_id"], uploaded["version_id"]),
+    )
+    conn.commit()
+    conn.close()
+    url = f"/api/admin/content/items/{uploaded['item_id']}/reclassify"
+    body = {"target_category_id": "cat-04", "expected_version_id": uploaded["version_id"]}
+
+    assert client.post(url, json=body, **_auth(sessions, "publisher")).status_code == 403
+    assert client.post(
+        url, json=body, **_auth(sessions, "organizer", csrf=True)
+    ).status_code == 403
+    stale = client.post(
+        url,
+        json={**body, "expected_version_id": "stale-version"},
+        **_auth(sessions, "publisher", csrf=True),
+    )
+    assert stale.status_code == 409
+    accepted = client.post(
+        url, json=body, **_auth(sessions, "publisher", csrf=True)
+    )
+    assert accepted.status_code == 202
+    assert accepted.json()["status"] == "pending"
+    assert queued[-1] == accepted.json()["id"]
+    assert client.get(
+        f"/api/admin/content/reclassification-jobs/{accepted.json()['id']}",
+        **_auth(sessions, "organizer"),
+    ).status_code == 200
+    duplicate = client.post(
+        url, json=body, **_auth(sessions, "publisher", csrf=True)
+    )
+    assert duplicate.status_code == 409
+    listing = client.get(
+        "/api/admin/content/items-page?category_id=cat-03",
+        **_auth(sessions, "publisher"),
+    )
+    assert listing.status_code == 200
+    listed = next(item for item in listing.json()["items"] if item["item_id"] == uploaded["item_id"])
+    assert listed["reclassification_job_id"] == accepted.json()["id"]
+    assert listed["reclassification_status"] == "pending"
+
+
 def test_download_permission_separates_preview_attachment_and_batch_download(content_api, monkeypatch):
     client, sessions, _queued, db_path = content_api
     uploaded = client.post(
@@ -1114,11 +1183,11 @@ def test_permission_catalog_and_dependency_validation(content_api):
     admin_write = _auth(sessions, "admin", csrf=True)
     catalog = client.get("/api/admin/content/permission-catalog", **admin_read)
     assert catalog.status_code == 200
-    assert catalog.json()["schema_version"] == 3
+    assert catalog.json()["schema_version"] == 4
     assert [item["key"] for item in catalog.json()["permissions"]] == [
         "workspace.view", "item.view", "item.download", "category.view", "item.upload", "item.submit",
         "item.move_draft", "item.archive_draft", "item.review", "item.move_review",
-        "item.publish", "item.archive_published", "trash.view", "trash.restore",
+        "item.publish", "item.reclassify_published", "item.archive_published", "trash.view", "trash.restore",
         "category.manage", "folder.request", "folder.review", "import.server", "index.view",
     ]
     definitions = {item["key"]: item for item in catalog.json()["permissions"]}

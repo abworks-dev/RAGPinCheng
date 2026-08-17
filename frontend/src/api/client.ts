@@ -25,6 +25,7 @@ import type {
   ManagedCategory,
   FolderRequest,
   ManagedContentItem,
+  ContentReclassificationJob,
   ManagedContentList,
   BulkManagedContentResponse,
   ManagedIndexJobList,
@@ -595,6 +596,23 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ target_category_id: targetCategoryId, expected_version_id: expectedVersionId }),
     }),
+  reclassifyManagedContent: (itemId: string, targetCategoryId: string, expectedVersionId: string) =>
+    jsonFetch<ContentReclassificationJob>(
+      `/api/admin/content/items/${encodeURIComponent(itemId)}/reclassify`,
+      {
+        method: "POST",
+        body: JSON.stringify({ target_category_id: targetCategoryId, expected_version_id: expectedVersionId }),
+      },
+    ),
+  managedContentReclassificationJob: (jobId: string) =>
+    jsonFetch<ContentReclassificationJob>(
+      `/api/admin/content/reclassification-jobs/${encodeURIComponent(jobId)}`,
+    ),
+  retryManagedContentReclassification: (jobId: string) =>
+    jsonFetch<ContentReclassificationJob>(
+      `/api/admin/content/reclassification-jobs/${encodeURIComponent(jobId)}/retry`,
+      { method: "POST", body: JSON.stringify({}) },
+    ),
   renameManagedContent: (
     itemId: string,
     body: {
@@ -676,6 +694,13 @@ export const api = {
     items: Array<{ item_id: string; expected_version_id: string }>,
     targetCategoryId: string,
   ) => jsonFetch<BulkManagedContentResponse>("/api/admin/content/bulk-move", {
+    method: "POST",
+    body: JSON.stringify({ items, target_category_id: targetCategoryId }),
+  }),
+  bulkReclassifyManagedContent: (
+    items: Array<{ item_id: string; expected_version_id: string }>,
+    targetCategoryId: string,
+  ) => jsonFetch<BulkManagedContentResponse>("/api/admin/content/bulk-reclassify", {
     method: "POST",
     body: JSON.stringify({ items, target_category_id: targetCategoryId }),
   }),
