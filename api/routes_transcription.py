@@ -1,7 +1,11 @@
 """Admin application API for automatic transcription jobs."""
 from __future__ import annotations
 
+import re
 import time
+import unicodedata
+import uuid
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -35,6 +39,7 @@ from src.transcription.types import ContractValidationError, TranscriptionJobSta
 from .auth import CurrentUser, require_admin, require_csrf_admin
 from .db import connect
 from .schemas import (
+    CreateMediaMetadataRevisionRequest,
     CreateTranscriptRevisionRequest,
     RetryTranscriptionRequest,
     PublishTranscriptVersionRequest,
@@ -422,6 +427,78 @@ def _publication_job_dto(job: dict[str, object] | None) -> TranscriptPublication
         finished_at=None if job["finished_at"] is None else int(job["finished_at"]),
         updated_at=int(job["updated_at"]),
     )
+
+
+def _normalized_media_metadata(title: str, original_filename: str) -> tuple[str, str]:
+    clean_title = unicodedata.normalize("NFKC", title).strip()
+    clean_filename = unicodedata.normalize("NFKC", original_filename).strip()
+    if not clean_title or len(clean_title) > 200 or any(char in clean_title for char in "\r\n\x00"):
+        raise ContractValidationError("invalid_media_title", "title")
+    if (
+        not clean_filename
+        or len(clean_filename) > 255
+        or clean_filename != Path(clean_filename).name
+        or re.search(r'[\x00-\x1f\x7f<>:"/\\|?*]', clean_filename)
+        or clean_filename.rstrip(" .") != clean_filename
+        or Path(clean_filename).suffix.lower() != ".mp4"
+    ):
+        raise ContractValidationError("invalid_media_filename", "original_filename")
+    return clean_title, clean_filename
+
+
+@router.post(
+    "/media/{media_id}/metadata-revisions",
+    response_model=TranscriptVersionDTO,
+    status_code=201,
+)
+def create_media_metadata_revision(
+    media_id: str,
+    body: CreateMediaMetadataRevisionRequest,
+    admin: CurrentUser = Depends(require_csrf_admin),
+):
+    conn = connect()
+    try:
+        title, original_filename = _normalized_media_metadata(
+            body.title, body.original_filename
+        )
+        service = _build_publication_service(conn)
+        store = service.store
+        base = store.load_version(body.expected_version_id)
+        markdown_ref = service.artifacts.write_markdown(
+            service.preview_markdown(base.id).encode("utf-8")
+        )
+        version = store.register_metadata_revision(
+            revision_id=str(uuid.uuid4()),
+            version_id=str(uuid.uuid4()),
+            media_id=media_id,
+            base_version_id=body.expected_version_id,
+            markdown_ref=markdown_ref,
+            proposed_title=title,
+            proposed_original_filename=original_filename,
+            requested_by=admin.id,
+            request_idempotency_key=body.request_idempotency_key,
+            now=int(time.time()),
+        )
+        return _version_dto(version, store.current_head(media_id))
+    except KeyError:
+        raise HTTPException(status_code=404, detail="视频或正式转录版本不存在")
+    except StoreConflictError as exc:
+        detail = {
+            "metadata_base_version_conflict": "正式转录版本已变化，请刷新后重试。",
+            "metadata_revision_active": "该视频已有待处理的媒体信息修订。",
+            "media_replacement_active": "该视频正在替换，暂不能修改媒体信息。",
+            "metadata_idempotency_conflict": "本次保存请求与已处理请求不一致，请重新提交。",
+        }.get(str(exc), "媒体信息修订发生并发冲突，请刷新后重试。")
+        raise HTTPException(status_code=409, detail=detail)
+    except ContractValidationError as exc:
+        detail = (
+            "源文件名必须是安全的 .mp4 文件名，且不能包含路径或非法字符。"
+            if exc.code == "invalid_media_filename"
+            else "视频标题不能为空、不能换行且不能超过 200 字。"
+        )
+        raise HTTPException(status_code=400, detail=detail)
+    finally:
+        conn.close()
 
 
 @router.get("/media/{media_id}/versions", response_model=list[TranscriptVersionDTO])

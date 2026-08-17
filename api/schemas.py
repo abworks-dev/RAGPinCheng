@@ -595,6 +595,15 @@ class RenameManagedContentRequest(BaseModel):
     )
 
 
+class CreateMediaMetadataRevisionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_version_id: str = Field(min_length=1, max_length=100)
+    title: str = Field(min_length=1, max_length=200)
+    original_filename: str = Field(min_length=1, max_length=255)
+    request_idempotency_key: str = Field(min_length=36, max_length=36)
+
+
 class BulkManagedContentItemRef(BaseModel):
     item_id: str = Field(min_length=1, max_length=100)
     expected_version_id: str = Field(min_length=1, max_length=100)
@@ -838,6 +847,9 @@ class MediaAssetDTO(BaseModel):
     publication_status: str | None = None
     publication_index_status: str | None = None
     is_current_version: bool = False
+    replacement_source_media_id: str | None = None
+    replacement_candidate_media_id: str | None = None
+    replacement_status: str | None = None
 
 
 class MediaTranscriptSegmentDTO(BaseModel):

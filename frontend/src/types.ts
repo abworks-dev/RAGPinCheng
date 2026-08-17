@@ -838,6 +838,9 @@ export type MediaAsset = {
   publication_status?: TranscriptPublicationStatus | null;
   publication_index_status?: "pending" | "parsing" | "chunking" | "embedding" | "done" | "failed" | null;
   is_current_version?: boolean;
+  replacement_source_media_id?: string | null;
+  replacement_candidate_media_id?: string | null;
+  replacement_status?: "pending" | "failed" | "activated" | "cancelled" | null;
 };
 
 export type MediaTranscriptSegment = {

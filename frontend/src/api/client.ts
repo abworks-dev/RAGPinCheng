@@ -789,6 +789,14 @@ export const api = {
     }),
   downloadManagedContentFile: (versionId: string, fallbackFilename: string) =>
     fileFetch(`/api/admin/content/versions/${encodeURIComponent(versionId)}/file?download=true`, fallbackFilename),
+  downloadManagedMedia: (
+    itemId: string,
+    part: "video" | "transcript" | "all",
+    fallbackFilename: string,
+  ) => fileFetch(
+    `/api/admin/content/items/${encodeURIComponent(itemId)}/media-download?part=${encodeURIComponent(part)}`,
+    fallbackFilename,
+  ),
   managedContentFileUrl: (versionId: string, download = false) =>
     `/api/admin/content/versions/${encodeURIComponent(versionId)}/file${download ? "?download=true" : ""}`,
   managedContentIndexJobs: (params?: {
@@ -842,6 +850,22 @@ export const api = {
     fd.append("request_idempotency_key", requestIdempotencyKey);
     return multipartFetch<MediaAsset>("/api/admin/media", fd, callbacks);
   },
+  uploadReplacementMediaVideo: async (
+    video: File,
+    title: string,
+    profileId: string,
+    requestIdempotencyKey: string,
+    sourceMediaId: string,
+    callbacks?: MultipartUploadCallbacks,
+  ) => {
+    const fd = new FormData();
+    fd.append("video", video, video.name);
+    fd.append("title", title);
+    fd.append("profile_id", profileId);
+    fd.append("request_idempotency_key", requestIdempotencyKey);
+    fd.append("replacement_source_media_id", sourceMediaId);
+    return multipartFetch<MediaAsset>("/api/admin/media", fd, callbacks);
+  },
   listMediaAssets: () => jsonFetch<MediaAsset[]>("/api/admin/media"),
   deleteFailedMediaAsset: (mediaId: string) =>
     jsonFetch<void>(`/api/admin/media/${mediaId}`, { method: "DELETE" }),
@@ -880,6 +904,24 @@ export const api = {
         request_idempotency_key: requestIdempotencyKey,
       }),
     }),
+  createMediaMetadataRevision: (
+    mediaId: string,
+    expectedVersionId: string,
+    title: string,
+    originalFilename: string,
+    requestIdempotencyKey: string,
+  ) => jsonFetch<TranscriptVersion>(
+    `/api/admin/transcription/media/${encodeURIComponent(mediaId)}/metadata-revisions`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        expected_version_id: expectedVersionId,
+        title,
+        original_filename: originalFilename,
+        request_idempotency_key: requestIdempotencyKey,
+      }),
+    },
+  ),
   reviewTranscriptVersion: (versionId: string, approved: boolean, reviewNote: string | null = null) =>
     jsonFetch<TranscriptVersion>(`/api/admin/transcription/versions/${versionId}/review`, {
       method: "POST",

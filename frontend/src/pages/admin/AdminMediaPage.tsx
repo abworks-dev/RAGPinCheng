@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { RefreshCw, Settings2 } from "lucide-react";
+import { FileUp, RefreshCw, Settings2 } from "lucide-react";
 import { adminMediaApi } from "../../api/admin/media";
 import { Alert, AlertDescription, AlertTitle } from "../../components/ui/alert";
 import { Badge } from "../../components/ui/badge";
@@ -186,6 +186,24 @@ export function AdminMediaPage() {
     const params = new URLSearchParams(window.location.search);
     return params.get("workbench") === "1" ? params.get("media_id") : null;
   });
+  const [workbenchAction, setWorkbenchAction] = useState<"edit-current" | null>(() => {
+    if (typeof window === "undefined") return null;
+    return new URLSearchParams(window.location.search).get("action") === "edit-current" ? "edit-current" : null;
+  });
+  const [workbenchVersionId] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null;
+    return new URLSearchParams(window.location.search).get("version_id");
+  });
+  const [replaceSourceMediaId, setReplaceSourceMediaId] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null;
+    const params = new URLSearchParams(window.location.search);
+    return params.get("action") === "replace" ? params.get("media_id") : null;
+  });
+  const [replacementFile, setReplacementFile] = useState<File | null>(null);
+  const [replacementProfileId, setReplacementProfileId] = useState("");
+  const [replacementProgress, setReplacementProgress] = useState(0);
+  const [replacementBusy, setReplacementBusy] = useState(false);
+  const [replacementError, setReplacementError] = useState<string | null>(null);
   const retryIdempotencyKeys = useRef(new Map<string, string>());
   const previousJobStatuses = useRef(new Map<string, string>());
   const { assets: mediaAssets, loading, error: loadError, refresh, removeAsset } = useAdminMediaAssets();
@@ -206,6 +224,7 @@ export function AdminMediaPage() {
         const first = items.find((item) => item.admission === "enabled" && item.availability === "available");
         if (first) {
           setBulkProfileId(first.profile_id);
+          setReplacementProfileId((current) => current || first.profile_id);
           setPending((current) => current.map((item) => item.profileId ? item : { ...item, profileId: first.profile_id }));
         }
       })
@@ -285,16 +304,21 @@ export function AdminMediaPage() {
     return counts;
   }, { all: 0, processing: 0, review: 0, publishing: 0, failed: 0 });
   const selectedAsset = selectedMediaId ? mediaAssets.find((asset) => asset.media_id === selectedMediaId) ?? null : null;
+  const replaceSourceAsset = replaceSourceMediaId ? mediaAssets.find((asset) => asset.media_id === replaceSourceMediaId) ?? null : null;
   const refreshMediaState = useCallback(async () => {
     await Promise.all([refresh(), refreshJobs()]);
     setLastLoadedAt(Date.now());
   }, [refresh, refreshJobs]);
 
-  const openWorkbench = (mediaId: string) => {
+  const openWorkbench = (mediaId: string, action: "edit-current" | null = null) => {
     setSelectedMediaId(mediaId);
+    setWorkbenchAction(action);
     const params = new URLSearchParams(window.location.search);
     params.set("media_id", mediaId);
     params.set("workbench", "1");
+    if (action) params.set("action", action);
+    else params.delete("action");
+    params.delete("version_id");
     window.history.replaceState({}, "", `${window.location.pathname}?${params}`);
   };
 
@@ -303,6 +327,8 @@ export function AdminMediaPage() {
     const params = new URLSearchParams(window.location.search);
     params.delete("media_id");
     params.delete("workbench");
+    params.delete("action");
+    params.delete("version_id");
     const query = params.toString();
     window.history.replaceState({}, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
   };
@@ -310,6 +336,52 @@ export function AdminMediaPage() {
   useEffect(() => {
     if (!loading && selectedMediaId && !mediaAssets.some((asset) => asset.media_id === selectedMediaId)) closeWorkbench();
   }, [loading, mediaAssets, selectedMediaId]);
+
+  const closeReplacement = () => {
+    if (replacementBusy) return;
+    setReplaceSourceMediaId(null);
+    setReplacementFile(null);
+    setReplacementError(null);
+    setReplacementProgress(0);
+    const params = new URLSearchParams(window.location.search);
+    params.delete("media_id");
+    params.delete("action");
+    const query = params.toString();
+    window.history.replaceState({}, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
+  };
+
+  useEffect(() => {
+    if (!loading && replaceSourceMediaId && !replaceSourceAsset) closeReplacement();
+  }, [loading, replaceSourceAsset, replaceSourceMediaId]);
+
+  async function submitReplacement() {
+    if (!replaceSourceAsset || !replacementFile || !replacementProfileId) return;
+    setReplacementBusy(true);
+    setReplacementError(null);
+    setReplacementProgress(0);
+    try {
+      const uploaded = await adminMediaApi.uploadReplacement(
+        replacementFile,
+        replaceSourceAsset.title,
+        replacementProfileId,
+        createRequestId(),
+        replaceSourceAsset.media_id,
+        {
+          onProgress: ({ ratio }) => setReplacementProgress(ratio),
+          onUploaded: () => setReplacementProgress(1),
+        },
+      );
+      if (uploaded.transcription_job_id) {
+        replaceJob(await adminMediaApi.getJob(uploaded.transcription_job_id));
+      }
+      setReplacementBusy(false);
+      closeReplacement();
+      await refreshMediaState();
+    } catch (caught: any) {
+      setReplacementError(caught?.message || String(caught));
+      setReplacementBusy(false);
+    }
+  }
 
   async function deleteFailedMedia(asset: MediaAsset) {
     setDeletingMediaId(asset.media_id);
@@ -651,7 +723,7 @@ export function AdminMediaPage() {
                     <div className="min-w-0">
                       <p className="truncate font-medium" title={asset.title}>{asset.title}</p>
                       <p className="mt-1 truncate font-mono text-ui-xs text-muted-foreground" title={asset.original_filename}>{asset.original_filename}</p>
-                      <div className="mt-2 flex flex-wrap gap-2 text-ui-xs text-muted-foreground"><span>{formatBytes(asset.file_size)}</span>{sameNameCount > 1 && <Badge variant="secondary">同名记录 {sameNameCount} 条</Badge>}</div>
+                      <div className="mt-2 flex flex-wrap gap-2 text-ui-xs text-muted-foreground"><span>{formatBytes(asset.file_size)}</span>{sameNameCount > 1 && <Badge variant="secondary">同名记录 {sameNameCount} 条</Badge>}{asset.replacement_source_media_id && <Badge variant={asset.replacement_status === "activated" ? "success" : asset.replacement_status === "failed" ? "destructive" : "warning"}>{asset.replacement_status === "activated" ? "替换已生效" : asset.replacement_status === "failed" ? "替换候选失败" : "替换候选"}</Badge>}{asset.replacement_candidate_media_id && asset.replacement_status === "pending" && <Badge variant="warning">替换处理中</Badge>}</div>
                     </div>
                     <div className="min-w-0 space-y-2">
                       <div className="flex flex-wrap items-center gap-2"><StatusBadge value={job?.status || asset.status} meta={job ? jobStatusMeta : mediaStatusMeta} /></div>
@@ -679,9 +751,27 @@ export function AdminMediaPage() {
         originalFilename={selectedAsset?.original_filename || ""}
         mediaId={selectedAsset?.media_id || null}
         refreshToken={selectedAsset ? jobsByMediaId.get(selectedAsset.media_id)?.result_version_id : null}
+        initialAction={workbenchAction}
+        initialVersionId={workbenchVersionId}
         onClose={closeWorkbench}
         onChanged={refreshMediaState}
       />
+      <Dialog open={replaceSourceMediaId != null} onOpenChange={(open) => { if (!open) closeReplacement(); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>替换视频</DialogTitle>
+            <DialogDescription>新视频会作为独立候选完成转录、审核和发布；当前视频在候选正式发布前持续可用。</DialogDescription>
+          </DialogHeader>
+          {replaceSourceAsset && <div className="space-y-4">
+            <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-2 text-ui-sm"><dt className="text-muted-foreground">当前资料</dt><dd className="break-words font-medium">{replaceSourceAsset.title}</dd><dt className="text-muted-foreground">当前文件</dt><dd className="break-all">{replaceSourceAsset.original_filename}</dd></dl>
+            <label className="flex min-h-28 cursor-pointer flex-col items-center justify-center gap-2 rounded-ui-lg border border-dashed border-input bg-background px-4 py-4 text-center hover:bg-surface-muted focus-within:ring-2 focus-within:ring-ring"><FileUp className="size-6 text-primary" /><span className="text-ui-sm font-medium">{replacementFile?.name || "选择新的 MP4 视频"}</span>{replacementFile && <span className="text-ui-xs text-muted-foreground">{formatBytes(replacementFile.size)}</span>}<input type="file" className="sr-only" aria-label="选择替换视频" accept=".mp4,video/mp4" disabled={replacementBusy} onChange={(event) => { setReplacementFile(event.target.files?.[0] || null); setReplacementError(null); setReplacementProgress(0); }} /></label>
+            <label className="block text-ui-sm font-medium">转录 Profile<select aria-label="替换视频转录 Profile" className="mt-1 h-control-md w-full rounded-ui-md border border-input bg-background px-3 text-ui-sm" value={replacementProfileId} disabled={replacementBusy} onChange={(event) => setReplacementProfileId(event.target.value)}><option value="">请选择可用 Profile</option>{profiles.map((profile) => <option key={profile.profile_id} value={profile.profile_id} disabled={profile.admission !== "enabled" || profile.availability !== "available"}>{profile.display_name}{profile.qualification === "experimental" ? "（实验性·强制审核）" : ""}{profile.availability !== "available" ? "（不可用）" : ""}</option>)}</select></label>
+            {replacementBusy && <div className="space-y-1.5" role="status"><div className="flex items-center justify-between text-ui-xs"><span>{replacementProgress < 1 ? "正在上传候选视频" : "服务端正在准备转录任务"}</span><span className="tabular-nums text-muted-foreground">{Math.round(replacementProgress * 100)}%</span></div><Progress label="替换视频上传进度" value={replacementProgress < 1 ? replacementProgress * 100 : null} /></div>}
+            {replacementError && <Alert variant="destructive" role="alert"><AlertTitle>替换任务创建失败</AlertTitle><AlertDescription>{replacementError}</AlertDescription></Alert>}
+          </div>}
+          <DialogFooter><Button variant="outline" disabled={replacementBusy} onClick={closeReplacement}>取消</Button><Button disabled={replacementBusy || !replacementFile || !replacementProfileId} onClick={() => void submitReplacement()}>{replacementBusy ? "提交中…" : "上传并开始转录"}</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
       <Dialog open={deleteTarget != null} onOpenChange={(open) => { if (!open && !deletingMediaId) setDeleteTarget(null); }}>
         <DialogContent>
           <DialogHeader>

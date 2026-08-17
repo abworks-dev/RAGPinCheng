@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import hashlib
 import logging
 import os
 import re
@@ -27,7 +28,13 @@ from src.config import (
     OFFICE_PROCESSING_ENABLED,
     CONTENT_TRASH_RETENTION_DAYS,
     CONTENT_TRASH_EXPIRING_WARNING_DAYS,
+    DOCS_DIR,
+    MEDIA_DIR,
+    ROOT,
+    TRANSCRIPTION_ARTIFACT_DIR,
 )
+from src.transcription.persistence import ManagedMarkdownRef
+from src.transcription.types import ContractValidationError
 from src.indexing_pipeline import (
     ManagedVersionIndexSummary,
     list_managed_version_index_summaries,
@@ -88,6 +95,7 @@ from .content_store import (
     next_category_sort_order,
 )
 from .db import get_db
+from .routes_media import safe_join
 from .schemas import (
     BulkArchiveManagedContentRequest,
     BulkRestoreManagedContentRequest,
@@ -137,6 +145,7 @@ from .schemas import (
     UpdateContentPermissionsRequest,
     UpdateContentPermissionGroupRequest,
 )
+from .transcription_artifacts import LocalTranscriptionArtifactStore
 
 
 router = APIRouter(prefix="/admin/content", tags=["managed-content"])
@@ -1678,6 +1687,126 @@ def regenerate_pptx_preview(
     return ManagedPreviewDTO(
         version_id=version_id,
         preview_parent_id=summary.preview_parent_id,
+    )
+
+
+def _verified_media_transcript_bytes(row: sqlite3.Row) -> bytes:
+    try:
+        if row["markdown_storage_kind"] == "managed_artifact":
+            return LocalTranscriptionArtifactStore(TRANSCRIPTION_ARTIFACT_DIR).load_verified(
+                ManagedMarkdownRef(
+                    row["markdown_rel_path"],
+                    row["markdown_sha256"],
+                    row["markdown_size_bytes"],
+                )
+            )
+        if row["markdown_storage_kind"] != "legacy_manual":
+            raise ContractValidationError("invalid_markdown_storage", "markdown_storage_kind")
+        relative = str(row["markdown_rel_path"])
+        if not relative.startswith("docs/"):
+            raise ContractValidationError("invalid_legacy_manual_path", "markdown_rel_path")
+        path = (ROOT / Path(*relative.split("/"))).resolve(strict=False)
+        docs_root = DOCS_DIR.resolve(strict=False)
+        if path != docs_root and docs_root not in path.parents:
+            raise ContractValidationError("artifact_path_escape", "markdown_rel_path")
+        content = path.read_bytes()
+        if (
+            len(content) != row["markdown_size_bytes"]
+            or hashlib.sha256(content).hexdigest() != row["markdown_sha256"]
+        ):
+            raise ContractValidationError("artifact_hash_mismatch", "markdown")
+        return content
+    except (OSError, ValueError, ContractValidationError) as exc:
+        raise HTTPException(status_code=409, detail="当前正式转录稿完整性校验失败") from exc
+
+
+@router.get("/items/{item_id}/media-download")
+def download_media_library_item(
+    item_id: str,
+    part: Literal["video", "transcript", "all"] = Query(...),
+    _user: CurrentUser = Depends(require_content_permission("item.download")),
+    conn: sqlite3.Connection = Depends(get_db),
+):
+    _require_feature()
+    row = conn.execute(
+        """SELECT i.title,m.original_filename,m.storage_rel_path,m.mime_type,m.file_size,m.sha256,
+                  v.markdown_storage_kind,v.markdown_rel_path,v.markdown_sha256,
+                  v.markdown_size_bytes,v.publication_status
+           FROM content_items i
+           JOIN media_assets m ON m.media_id=i.media_id AND m.status<>'archived'
+           JOIN media_transcript_heads h ON h.media_id=m.media_id
+           JOIN transcript_versions v ON v.id=h.current_version_id AND v.media_id=m.media_id
+           WHERE i.id=? AND i.content_kind='media_transcript' AND i.archived_at IS NULL""",
+        (item_id,),
+    ).fetchone()
+    if row is None or row["publication_status"] != "published":
+        raise HTTPException(status_code=404, detail="视频资料不存在或尚未正式发布")
+    try:
+        video_path = safe_join(MEDIA_DIR, row["storage_rel_path"])
+        video_size = video_path.stat().st_size
+    except (OSError, ValueError):
+        raise HTTPException(status_code=404, detail="视频文件不可用")
+    if not video_path.is_file() or video_path.is_symlink() or video_size != row["file_size"]:
+        raise HTTPException(status_code=409, detail="视频文件完整性校验失败")
+    if row["sha256"]:
+        digest = hashlib.sha256()
+        try:
+            with video_path.open("rb") as handle:
+                for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                    digest.update(chunk)
+        except OSError as exc:
+            raise HTTPException(status_code=404, detail="视频文件不可用") from exc
+        if digest.hexdigest() != row["sha256"]:
+            raise HTTPException(status_code=409, detail="视频文件完整性校验失败")
+    video_filename = _safe_bulk_archive_name(str(row["original_filename"]), set())
+    transcript_filename = _safe_bulk_archive_name(f"{row['title']}-转录稿.md", set())
+    if part == "video":
+        return FileResponse(
+            video_path,
+            media_type=row["mime_type"],
+            filename=video_filename,
+            content_disposition_type="attachment",
+        )
+    transcript = _verified_media_transcript_bytes(row)
+    if part == "transcript":
+        temporary = tempfile.NamedTemporaryFile(
+            prefix="media-transcript-", suffix=".md", delete=False
+        )
+        transcript_path = Path(temporary.name)
+        try:
+            temporary.write(transcript)
+        finally:
+            temporary.close()
+        return FileResponse(
+            transcript_path,
+            media_type="text/markdown; charset=utf-8",
+            filename=transcript_filename,
+            background=BackgroundTask(transcript_path.unlink, missing_ok=True),
+        )
+    if video_size + len(transcript) > _MAX_BULK_DOWNLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="视频与转录稿总量不能超过 1 GiB")
+    temporary = tempfile.NamedTemporaryFile(
+        prefix="media-library-download-", suffix=".zip", delete=False
+    )
+    archive_path = Path(temporary.name)
+    temporary.close()
+    try:
+        with zipfile.ZipFile(archive_path, "w", allowZip64=True) as archive:
+            archive.write(video_path, arcname=video_filename, compress_type=zipfile.ZIP_STORED)
+            archive.writestr(
+                transcript_filename,
+                transcript,
+                compress_type=zipfile.ZIP_DEFLATED,
+            )
+    except Exception:
+        archive_path.unlink(missing_ok=True)
+        raise
+    archive_filename = _safe_bulk_archive_name(f"{row['title']}-视频资料.zip", set())
+    return FileResponse(
+        archive_path,
+        media_type="application/zip",
+        filename=archive_filename,
+        background=BackgroundTask(archive_path.unlink, missing_ok=True),
     )
 
 

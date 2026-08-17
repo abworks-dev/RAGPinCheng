@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { AlertTriangle, ArchiveRestore, ArrowDown, ArrowUp, ArrowUpDown, Captions, Check, CheckCircle2, ChevronDown, ChevronRight, Download, ExternalLink, Eye, FileCode2, FileSpreadsheet, FileText, FileType2, FileUp, Film, Folder, FolderInput, FolderPlus, History, Info, ListChecks, ListOrdered, Pencil, Presentation, RefreshCw, RotateCcw, Rocket, Search, Send, SlidersHorizontal, Trash2, Upload, X, XCircle } from "lucide-react";
+import { AlertTriangle, ArchiveRestore, ArrowDown, ArrowUp, ArrowUpDown, Captions, Check, CheckCircle2, ChevronDown, ChevronRight, Download, ExternalLink, Eye, FileCode2, FilePenLine, FileSpreadsheet, FileText, FileType2, FileUp, Film, Folder, FolderInput, FolderPlus, History, Info, ListChecks, ListOrdered, MoreHorizontal, Pencil, Presentation, RefreshCw, RotateCcw, Rocket, Search, Send, SlidersHorizontal, Trash2, Upload, Video, X, XCircle } from "lucide-react";
 import { adminContentApi } from "../../api/admin/content";
 import { Badge } from "../../components/ui/badge";
 import { CategoryTreePicker } from "../../components/admin/CategoryTreePicker";
@@ -22,6 +22,7 @@ import { useVideoPlayer } from "../../hooks/useVideoPlayer";
 import type { BulkManagedContentResult, BulkRestorePreflightResult, ContentPermission, ContentTrashAuditEvent, FolderRequest, ManagedCategory, ManagedContentItem, ManagedUploadTask, ManagedUploadTaskEntry } from "../../types";
 import type { ManagedUploadProgress } from "../../api/client";
 import { formatAdminDate } from "../../lib/admin-formatters";
+import { createRequestId } from "../../lib/request-id";
 import { AdminDocumentsPage } from "./AdminDocumentsPage";
 import { compareManagedCategories } from "../../lib/category-tree";
 import {
@@ -341,18 +342,35 @@ function triggerManagedDownload(blob: Blob, filename: string) {
   }
 }
 
-function BatchActionsMenu({
+type ActionMenuOption = {
+  key: string;
+  label: string;
+  icon: ReactNode;
+  disabled?: boolean;
+  disabledReason?: string;
+  destructive?: boolean;
+  href?: string;
+  onSelect?: () => void;
+};
+
+function ActionsMenu({
   disabled,
   options,
+  triggerLabel,
+  menuLabel,
+  compact = false,
 }: {
   disabled: boolean;
-  options: Array<{ key: BulkAction; label: string; icon: ReactNode; disabled?: boolean; disabledReason?: string; destructive?: boolean; onSelect: () => void }>;
+  options: ActionMenuOption[];
+  triggerLabel: string;
+  menuLabel: string;
+  compact?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [position, setPosition] = useState({ top: 0, left: 0 });
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
-  const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const optionRefs = useRef<Array<HTMLElement | null>>([]);
 
   useEffect(() => {
     if (!open) return;
@@ -389,7 +407,7 @@ function BatchActionsMenu({
   useEffect(() => {
     if (!open) return;
     const frame = window.requestAnimationFrame(() => {
-      optionRefs.current.find((option) => option && !option.disabled)?.focus();
+      optionRefs.current.find((option) => option && option.getAttribute("aria-disabled") !== "true")?.focus();
     });
     return () => window.cancelAnimationFrame(frame);
   }, [open]);
@@ -397,9 +415,9 @@ function BatchActionsMenu({
   const handleMenuKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
     event.preventDefault();
-    const enabledOptions = optionRefs.current.filter((option): option is HTMLButtonElement => Boolean(option && !option.disabled));
+    const enabledOptions = optionRefs.current.filter((option): option is HTMLElement => Boolean(option && option.getAttribute("aria-disabled") !== "true"));
     if (!enabledOptions.length) return;
-    const currentIndex = enabledOptions.indexOf(document.activeElement as HTMLButtonElement);
+    const currentIndex = enabledOptions.indexOf(document.activeElement as HTMLElement);
     const nextIndex = event.key === "Home" ? 0
       : event.key === "End" ? enabledOptions.length - 1
       : event.key === "ArrowDown" ? (currentIndex + 1 + enabledOptions.length) % enabledOptions.length
@@ -410,7 +428,7 @@ function BatchActionsMenu({
   const toggle = () => {
     if (!open && triggerRef.current) {
       const rect = triggerRef.current.getBoundingClientRect();
-      const menuWidth = 176;
+      const menuWidth = compact ? 208 : 176;
       const maximumLeft = Math.max(12, window.innerWidth - menuWidth - 12);
       setPosition({
         top: rect.bottom + 6,
@@ -421,18 +439,28 @@ function BatchActionsMenu({
   };
 
   return <>
-    <Button ref={triggerRef} size="sm" variant="outline" className="max-sm:h-control-md" disabled={disabled} aria-haspopup="menu" aria-expanded={open} onClick={toggle}>
-      批量操作<ChevronDown className="size-4" />
+    <Button ref={triggerRef} size={compact ? "icon" : "sm"} variant="outline" className={compact ? "!size-9 max-sm:!size-10" : "max-sm:h-control-md"} disabled={disabled} aria-label={triggerLabel} title={triggerLabel} aria-haspopup="menu" aria-expanded={open} onClick={toggle}>
+      {compact ? <MoreHorizontal className="size-4" /> : <>{triggerLabel}<ChevronDown className="size-4" /></>}
     </Button>
-    {open && createPortal(<div ref={menuRef} role="menu" aria-label="批量操作" className="fixed z-dropdown w-44 overflow-hidden rounded-ui-lg border border-border bg-popover p-1.5 text-popover-foreground shadow-overlay" style={position} onKeyDown={handleMenuKeyDown}>
+    {open && createPortal(<div ref={menuRef} role="menu" aria-label={menuLabel} className={`fixed z-dropdown overflow-hidden rounded-ui-lg border border-border bg-popover p-1.5 text-popover-foreground shadow-overlay ${compact ? "w-52" : "w-44"}`} style={position} onKeyDown={handleMenuKeyDown}>
       {options.map((option, index) => <div key={option.key}>
         {option.destructive && index > 0 && <div className="my-1 border-t border-border" role="separator" />}
-        <button ref={(element) => { optionRefs.current[index] = element; }} type="button" role="menuitem" disabled={option.disabled} title={option.disabled ? option.disabledReason : undefined} className={`flex w-full items-center gap-2.5 rounded-ui-md px-2.5 py-2 text-left text-ui-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40 ${option.destructive ? "text-destructive hover:bg-destructive/10" : "hover:bg-surface-muted"}`} onClick={() => { setOpen(false); option.onSelect(); }}>
+        {option.href && !option.disabled ? <a ref={(element) => { optionRefs.current[index] = element; }} role="menuitem" href={option.href} className={`flex w-full items-center gap-2.5 rounded-ui-md px-2.5 py-2 text-left text-ui-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${option.destructive ? "text-destructive hover:bg-destructive/10" : "hover:bg-surface-muted"}`} onClick={() => setOpen(false)}>{option.icon}{option.label}</a> : <button ref={(element) => { optionRefs.current[index] = element; }} type="button" role="menuitem" aria-disabled={option.disabled || undefined} disabled={option.disabled} title={option.disabled ? option.disabledReason : undefined} className={`flex w-full items-center gap-2.5 rounded-ui-md px-2.5 py-2 text-left text-ui-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40 ${option.destructive ? "text-destructive hover:bg-destructive/10" : "hover:bg-surface-muted"}`} onClick={() => { setOpen(false); option.onSelect?.(); }}>
           {option.icon}{option.label}
-        </button>
+        </button>}
       </div>)}
     </div>, document.body)}
   </>;
+}
+
+function BatchActionsMenu({
+  disabled,
+  options,
+}: {
+  disabled: boolean;
+  options: Array<ActionMenuOption & { key: BulkAction; onSelect: () => void }>;
+}) {
+  return <ActionsMenu disabled={disabled} options={options} triggerLabel="批量操作" menuLabel="批量操作" />;
 }
 
 function ManagedContentSearchFilters({
@@ -717,6 +745,12 @@ export function AdminManagedContentPage() {
   const [renameFilename, setRenameFilename] = useState("");
   const [renameConflict, setRenameConflict] = useState<FilenameConflict | null>(null);
   const [renameError, setRenameError] = useState<string | null>(null);
+  const [downloadTarget, setDownloadTarget] = useState<ManagedContentItem | null>(null);
+  const [downloadPart, setDownloadPart] = useState<"video" | "transcript" | "all">("all");
+  const [mediaInfoTarget, setMediaInfoTarget] = useState<ManagedContentItem | null>(null);
+  const [mediaInfoTitle, setMediaInfoTitle] = useState("");
+  const [mediaInfoFilename, setMediaInfoFilename] = useState("");
+  const [mediaInfoError, setMediaInfoError] = useState<string | null>(null);
   const [updateTarget, setUpdateTarget] = useState<ManagedContentItem | null>(null);
   const [updateFile, setUpdateFile] = useState<File | null>(null);
   const [updateFilenameMode, setUpdateFilenameMode] = useState<"old" | "new">("old");
@@ -1459,6 +1493,64 @@ export function AdminManagedContentPage() {
     }
   };
 
+  const openMediaDownload = (item: ManagedContentItem) => {
+    setDownloadTarget(item);
+    setDownloadPart("all");
+  };
+
+  const downloadMedia = async () => {
+    if (!downloadTarget) return;
+    const fallbackFilename = downloadPart === "video"
+      ? downloadTarget.original_filename
+      : downloadPart === "transcript"
+        ? `${downloadTarget.title}-转录稿.md`
+        : `${downloadTarget.title}-视频资料.zip`;
+    setBusyAction(`${downloadTarget.version_id}:download`);
+    try {
+      const result = await adminContentApi.downloadMedia(
+        downloadTarget.item_id,
+        downloadPart,
+        fallbackFilename,
+      );
+      triggerManagedDownload(result.blob, result.filename);
+      toast.success(`已开始下载“${downloadTarget.title}”`);
+      setDownloadTarget(null);
+    } catch (downloadError) {
+      toast.error(downloadError instanceof Error ? downloadError.message : "下载视频资料失败");
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const openMediaInfoDialog = (item: ManagedContentItem) => {
+    setMediaInfoTarget(item);
+    setMediaInfoTitle(item.title);
+    setMediaInfoFilename(item.original_filename);
+    setMediaInfoError(null);
+  };
+
+  const createMediaInfoRevision = async () => {
+    if (!mediaInfoTarget?.media_id) return;
+    setBusyAction("media-metadata");
+    setMediaInfoError(null);
+    try {
+      await adminContentApi.createMediaMetadataRevision(
+        mediaInfoTarget.media_id,
+        mediaInfoTarget.version_id,
+        mediaInfoTitle.trim(),
+        mediaInfoFilename.trim(),
+        createRequestId(),
+      );
+      setMediaInfoTarget(null);
+      toast.success("媒体信息修订已创建，请在转写工作台审核并发布");
+      await load(true);
+    } catch (metadataError) {
+      setMediaInfoError(metadataError instanceof Error ? metadataError.message : "媒体信息修订创建失败");
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
   const downloadSelected = async () => {
     if (selectedItems.length < 2 || !can("item.download")) return;
     const selectedCount = selectedItems.length;
@@ -1652,7 +1744,7 @@ export function AdminManagedContentPage() {
     const reclassifying = ACTIVE_RECLASSIFICATION_STATUSES.has(item.reclassification_status || "");
     const previewable = Boolean(item.preview_parent_id && ["pdf", "docx", "xlsx", "pptx"].includes(item.doc_type));
     const movable = canMoveItem(item);
-    const downloadable = !isMediaTranscript && can("item.download");
+    const downloadable = can("item.download");
     const revisionAllowed = !isMediaTranscript && can("item.upload") && item.lifecycle_status !== "publishing" && !reclassifying;
     const deletable = canDeleteItem(item) && item.lifecycle_status !== "publishing" && !reclassifying;
     const workflow = item.lifecycle_status === "draft" && can("item.submit")
@@ -1675,11 +1767,25 @@ export function AdminManagedContentPage() {
           : null;
     if (isMediaTranscript) {
       const moveTooltip = unavailableReason || (movable ? "调整归档目录" : "当前账号没有发布权限");
-      return <div className="ml-auto flex min-h-10 w-[10.5rem] items-center justify-end gap-1">
+      const mediaManageAllowed = state.status === "authed" && state.user.role === "admin" && Boolean(item.media_id);
+      const mediaBaseUrl = `/admin/media?media_id=${encodeURIComponent(item.media_id || "")}`;
+      return <div className="ml-auto flex min-h-10 w-[13.5rem] max-w-full items-center justify-end gap-1">
         <IconButton label={`查看“${item.title}”的详细信息`} tooltip={unavailableReason || "查看视频转录稿详情"} className="border border-border max-sm:size-10" disabled={disabled} onClick={() => setDetail(item)}><Info className="size-4" /></IconButton>
         <IconButton label={`播放“${item.title}”`} tooltip={unavailableReason || (item.media_id ? "播放视频与转录稿" : "媒体关联缺失，暂无法播放")} className="border border-border max-sm:size-10" disabled={disabled || !item.media_id} onClick={() => openVideoPreview({ mediaId: item.media_id!, title: item.title, startSeconds: 0, fromSource: false })}><Film className="size-4" /></IconButton>
+        <IconButton label={`下载“${item.title}”`} tooltip={unavailableReason || (downloadable ? "选择下载视频、转录稿或两者" : "当前账号没有下载资料的权限")} className="border border-border max-sm:size-10" disabled={disabled || !downloadable || !item.media_id} onClick={() => openMediaDownload(item)}><Download className="size-4" /></IconButton>
         <IconButton label={`调整“${item.title}”的归档目录`} tooltip={moveTooltip} className="border border-border max-sm:size-10" disabled={disabled || !movable} onClick={() => { setMoveTarget(item); setMoveFolderId(""); setMoveError(null); }}><FolderInput className="size-4" /></IconButton>
-        <a aria-label={`在视频管理中打开“${item.title}”`} title={`在视频管理中打开“${item.title}”`} className={buttonVariants({ variant: "outline", size: "icon", className: "!size-9 max-sm:!size-10" })} href={`/admin/media?media_id=${encodeURIComponent(item.media_id || "")}&workbench=1`}><ExternalLink className="size-4" /></a>
+        <ActionsMenu
+          compact
+          disabled={disabled}
+          triggerLabel={`更多“${item.title}”的操作`}
+          menuLabel={`“${item.title}”的更多操作`}
+          options={[
+            { key: "edit-transcript", label: "编辑转录稿", icon: <FilePenLine className="size-4" />, href: mediaManageAllowed ? `${mediaBaseUrl}&workbench=1&action=edit-current` : undefined, disabled: !mediaManageAllowed, disabledReason: "当前账号没有发布权限" },
+            { key: "edit-media-info", label: "编辑媒体信息", icon: <Pencil className="size-4" />, disabled: !mediaManageAllowed, disabledReason: "当前账号没有发布权限", onSelect: () => openMediaInfoDialog(item) },
+            { key: "replace-video", label: "替换视频", icon: <Video className="size-4" />, href: mediaManageAllowed ? `${mediaBaseUrl}&action=replace` : undefined, disabled: !mediaManageAllowed, disabledReason: "当前账号没有发布权限" },
+            { key: "open-media", label: "进入视频管理", icon: <ExternalLink className="size-4" />, href: mediaManageAllowed ? `${mediaBaseUrl}&workbench=1` : undefined, disabled: !mediaManageAllowed, disabledReason: item.media_id ? "仅系统管理员可以进入视频管理" : "媒体关联缺失" },
+          ]}
+        />
       </div>;
     }
     const previewTooltip = unavailableReason
@@ -1734,14 +1840,22 @@ export function AdminManagedContentPage() {
             : "当前账号没有删除草稿或已退回资料的权限");
     return <div className="ml-auto flex w-full flex-col items-stretch gap-2 lg:w-auto lg:flex-row lg:items-center lg:justify-end">
       {workflow && <Button size="sm" className="w-full shrink-0 max-sm:h-10 lg:w-auto" disabled={disabled} onClick={workflow.action}>{workflow.label}</Button>}
-      <div className="ml-auto flex min-h-10 w-[19rem] max-w-full items-center justify-end gap-1 sm:w-[17.25rem] lg:ml-0 lg:w-auto">
+      <div className="ml-auto flex min-h-10 w-[13.5rem] max-w-full items-center justify-end gap-1 lg:ml-0 lg:w-auto">
         <IconButton label={`查看“${item.title}”的详细信息`} tooltip={unavailableReason || "查看资料详情"} className="border border-border max-sm:size-10" disabled={disabled} onClick={() => setDetail(item)}><Info className="size-4" /></IconButton>
         <IconButton label={`预览“${item.title}”`} tooltip={previewTooltip} className="border border-border max-sm:size-10" disabled={disabled || !previewable} onClick={() => openDocumentPreview(item.preview_parent_id!, item.title, item.doc_type, 1, {}, null)}><Eye className="size-4" /></IconButton>
-        <IconButton label={item.has_published_head ? `调整“${item.title}”的分类` : `移动“${item.title}”`} tooltip={moveTooltip} className="border border-border max-sm:size-10" disabled={disabled || !movable} onClick={() => { setMoveTarget(item); setMoveFolderId(""); setMoveError(null); }}><FolderInput className="size-4" /></IconButton>
         <IconButton label={`下载“${item.title}”`} tooltip={unavailableReason || (downloadable ? "下载文件" : "当前账号没有下载文件的权限")} className="border border-border max-sm:size-10" disabled={disabled || !downloadable} onClick={() => void downloadContent(item)}><Download className="size-4" /></IconButton>
-        <IconButton label={`重命名“${item.title}”`} tooltip={revisionTooltip} className="border border-border max-sm:size-10" disabled={disabled || !revisionAllowed} onClick={() => openRenameDialog(item)}><Pencil className="size-4" /></IconButton>
-        <IconButton label={`更新“${item.title}”`} tooltip={updateTooltip} className="border border-border max-sm:size-10" disabled={disabled || !revisionAllowed} onClick={() => openUpdateDialog(item)}><FileUp className="size-4" /></IconButton>
-        <IconButton label={`删除“${item.title}”`} tooltip={deleteTooltip} className="border border-destructive/30 text-destructive hover:bg-destructive/10 hover:text-destructive max-sm:size-10" disabled={disabled || !deletable} onClick={() => openDeleteDialog([item])}><Trash2 className="size-4" /></IconButton>
+        <IconButton label={item.has_published_head ? `调整“${item.title}”的分类` : `移动“${item.title}”`} tooltip={moveTooltip} className="border border-border max-sm:size-10" disabled={disabled || !movable} onClick={() => { setMoveTarget(item); setMoveFolderId(""); setMoveError(null); }}><FolderInput className="size-4" /></IconButton>
+        <ActionsMenu
+          compact
+          disabled={disabled}
+          triggerLabel={`更多“${item.title}”的操作`}
+          menuLabel={`“${item.title}”的更多操作`}
+          options={[
+            { key: "rename", label: "重命名", icon: <Pencil className="size-4" />, disabled: !revisionAllowed, disabledReason: revisionTooltip, onSelect: () => openRenameDialog(item) },
+            { key: "update", label: "更新资料", icon: <FileUp className="size-4" />, disabled: !revisionAllowed, disabledReason: updateTooltip, onSelect: () => openUpdateDialog(item) },
+            { key: "archive", label: "移至回收站", icon: <Trash2 className="size-4" />, destructive: true, disabled: !deletable, disabledReason: deleteTooltip, onSelect: () => openDeleteDialog([item]) },
+          ]}
+        />
       </div>
     </div>;
   };
@@ -1844,8 +1958,8 @@ export function AdminManagedContentPage() {
         </div>
       </div>
         {trashLoading ? <LoadingState className="min-h-48 border-0" label="正在加载回收站…" /> : trashItems.length === 0 ? <EmptyState className="rounded-none border-0" title="回收站为空" description="移至回收站的资料会显示在这里。" /> : <>
-          <div className="hidden overflow-x-auto lg:block"><table className="w-full text-ui-sm"><thead className="border-b border-border bg-surface-muted text-left text-muted-foreground"><tr>{can("trash.restore") && <th className="w-12 px-3 py-3"><Checkbox aria-label="选择当前页前20份回收站资料" checked={trashAllSelected} onChange={toggleAllTrash} /></th>}<th className="px-3 py-3 font-medium">资料</th><th className="px-3 py-3 font-medium">原目录</th><th className="px-3 py-3 font-medium">原状态</th><th className="px-3 py-3 font-medium">来源</th><th className="px-3 py-3 font-medium">保留期限</th><th aria-sort={trashSortDirection === "asc" ? "ascending" : "descending"} className="px-3 py-3 font-medium"><button type="button" className="inline-flex items-center gap-1 rounded px-1 py-0.5 hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => { setTrashSortDirection((current) => current === "asc" ? "desc" : "asc"); setPage(0); }}>移入回收站{trashSortDirection === "asc" ? <ArrowUp className="size-3.5" /> : <ArrowDown className="size-3.5" />}</button></th><th className="px-3 py-3 text-right font-medium">操作</th></tr></thead><tbody className="divide-y divide-border">{trashItems.map((item) => { const previousStatus = item.pre_archive_lifecycle_status || item.lifecycle_status; const sourcePath = item.source_rel_path && item.source_rel_path !== item.original_filename ? item.source_rel_path : null; const checked = trashSelected.includes(item.version_id); return <tr key={item.item_id} className={`align-top transition-colors duration-normal hover:bg-surface-muted/60 ${checked ? "bg-primary/5" : ""}`}>{can("trash.restore") && <td className="px-3 py-3"><Checkbox aria-label={`选择恢复“${item.title}”`} checked={checked} onChange={() => setTrashSelected((current) => current.includes(item.version_id) ? current.filter((id) => id !== item.version_id) : [...current, item.version_id].slice(0, BULK_LIMIT))} /></td>}<td className="max-w-xs px-3 py-3"><p className="break-words font-medium">{item.title}</p><p className="mt-1 break-all text-ui-xs text-muted-foreground">{item.original_filename} · v{item.version_number}</p></td><td className="max-w-sm px-3 py-3"><p className="break-words">{item.category_path || item.category_label}</p>{sourcePath && <p className="mt-1 break-all text-ui-xs text-muted-foreground">上传路径：{sourcePath}</p>}</td><td className="px-3 py-3"><Badge variant={statusVariant(previousStatus)}>{statusLabel[previousStatus] || "未知状态"}</Badge></td><td className="px-3 py-3">{sourceLabel[item.source_origin] || "其他来源"}</td><td className="whitespace-nowrap px-3 py-3 text-ui-xs text-muted-foreground">{retentionText(item)}</td><td className="px-3 py-3"><p>{item.archived_by_name || "未知人员"}</p><p className="mt-1 whitespace-nowrap text-ui-xs text-muted-foreground">{formatAdminDate(item.archived_at)}</p></td><td className="px-3 py-3"><div className="flex justify-end gap-1"><IconButton label={`查看“${item.title}”的回收站记录`} tooltip="查看操作记录" className="border border-border" onClick={() => void openAudit(item)}><History className="size-4" /></IconButton>{can("trash.restore") && <Button size="sm" variant="outline" disabled={Boolean(busyAction)} onClick={() => openRestore(item)}><ArchiveRestore className="size-4" />恢复</Button>}</div></td></tr>; })}</tbody></table></div>
-          <ul className="divide-y divide-border lg:hidden">{trashItems.map((item) => { const previousStatus = item.pre_archive_lifecycle_status || item.lifecycle_status; const sourcePath = item.source_rel_path && item.source_rel_path !== item.original_filename ? item.source_rel_path : null; const checked = trashSelected.includes(item.version_id); return <li key={item.item_id} className={`space-y-3 px-4 py-4 sm:px-5 ${checked ? "bg-primary/5" : ""}`}><div className="flex items-start gap-3">{can("trash.restore") && <Checkbox className="mt-0.5" aria-label={`选择恢复“${item.title}”`} checked={checked} onChange={() => setTrashSelected((current) => current.includes(item.version_id) ? current.filter((id) => id !== item.version_id) : [...current, item.version_id].slice(0, BULK_LIMIT))} />}<div className="min-w-0 flex-1"><p className="break-words font-medium">{item.title}</p><p className="mt-1 break-all text-ui-xs text-muted-foreground">{item.original_filename} · v{item.version_number}</p></div><Badge className="shrink-0" variant={statusVariant(previousStatus)}>{statusLabel[previousStatus] || "未知状态"}</Badge></div><dl className="grid grid-cols-[5rem_minmax(0,1fr)] gap-x-2 gap-y-1 text-ui-sm"><dt className="text-muted-foreground">原目录</dt><dd className="break-words">{item.category_path || item.category_label}</dd>{sourcePath && <><dt className="text-muted-foreground">上传路径</dt><dd className="break-all">{sourcePath}</dd></>}<dt className="text-muted-foreground">来源</dt><dd>{sourceLabel[item.source_origin] || "其他来源"}</dd><dt className="text-muted-foreground">保留期限</dt><dd>{retentionText(item)}</dd><dt className="text-muted-foreground">移入人员</dt><dd>{item.archived_by_name || "未知人员"}</dd><dt className="text-muted-foreground">移入时间</dt><dd>{formatAdminDate(item.archived_at)}</dd></dl><div className="flex items-center justify-end gap-2"><IconButton label={`查看“${item.title}”的回收站记录`} tooltip="查看操作记录" className="border border-border max-sm:size-10" onClick={() => void openAudit(item)}><History className="size-4" /></IconButton>{can("trash.restore") && <Button size="sm" variant="outline" className="max-sm:h-10" disabled={Boolean(busyAction)} onClick={() => openRestore(item)}><ArchiveRestore className="size-4" />恢复</Button>}</div></li>; })}</ul>
+          <div className="hidden overflow-x-auto lg:block"><table className="w-full text-ui-sm"><thead className="border-b border-border bg-surface-muted text-left text-muted-foreground"><tr>{can("trash.restore") && <th className="w-12 px-3 py-3"><Checkbox aria-label="选择当前页前20份回收站资料" checked={trashAllSelected} onChange={toggleAllTrash} /></th>}<th className="px-3 py-3 font-medium">资料</th><th className="px-3 py-3 font-medium">原目录</th><th className="px-3 py-3 font-medium">原状态</th><th className="px-3 py-3 font-medium">来源</th><th className="px-3 py-3 font-medium">保留期限</th><th aria-sort={trashSortDirection === "asc" ? "ascending" : "descending"} className="px-3 py-3 font-medium"><button type="button" className="inline-flex items-center gap-1 rounded px-1 py-0.5 hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => { setTrashSortDirection((current) => current === "asc" ? "desc" : "asc"); setPage(0); }}>移入回收站{trashSortDirection === "asc" ? <ArrowUp className="size-3.5" /> : <ArrowDown className="size-3.5" />}</button></th><th className="px-3 py-3 text-right font-medium">操作</th></tr></thead><tbody className="divide-y divide-border">{trashItems.map((item) => { const previousStatus = item.pre_archive_lifecycle_status || item.lifecycle_status; const sourcePath = item.source_rel_path && item.source_rel_path !== item.original_filename ? item.source_rel_path : null; const checked = trashSelected.includes(item.version_id); return <tr key={item.item_id} className={`align-middle transition-colors duration-normal hover:bg-surface-muted/60 ${checked ? "bg-primary/5" : ""}`}>{can("trash.restore") && <td className="px-3 py-3"><Checkbox aria-label={`选择恢复“${item.title}”`} checked={checked} onChange={() => setTrashSelected((current) => current.includes(item.version_id) ? current.filter((id) => id !== item.version_id) : [...current, item.version_id].slice(0, BULK_LIMIT))} /></td>}<td className="max-w-xs px-3 py-3"><p className="break-words font-medium">{item.title}</p><p className="mt-1 break-all text-ui-xs text-muted-foreground">{item.original_filename} · v{item.version_number}</p></td><td className="max-w-sm px-3 py-3"><p className="break-words">{item.category_path || item.category_label}</p>{sourcePath && <p className="mt-1 break-all text-ui-xs text-muted-foreground">上传路径：{sourcePath}</p>}</td><td className="px-3 py-3"><Badge variant={statusVariant(previousStatus)}>{statusLabel[previousStatus] || "未知状态"}</Badge></td><td className="px-3 py-3">{sourceLabel[item.source_origin] || "其他来源"}</td><td className="whitespace-nowrap px-3 py-3 text-ui-xs text-muted-foreground">{retentionText(item)}</td><td className="px-3 py-3"><p>{item.archived_by_name || "未知人员"}</p><p className="mt-1 whitespace-nowrap text-ui-xs text-muted-foreground">{formatAdminDate(item.archived_at)}</p></td><td className="px-3 py-3"><div className="flex justify-end gap-1"><IconButton label={`查看“${item.title}”的回收站记录`} tooltip="查看操作记录" className="size-control-sm border border-border" onClick={() => void openAudit(item)}><History className="size-4" /></IconButton>{can("trash.restore") && <Button size="sm" variant="outline" disabled={Boolean(busyAction)} onClick={() => openRestore(item)}><ArchiveRestore className="size-4" />恢复</Button>}</div></td></tr>; })}</tbody></table></div>
+          <ul className="divide-y divide-border lg:hidden">{trashItems.map((item) => { const previousStatus = item.pre_archive_lifecycle_status || item.lifecycle_status; const sourcePath = item.source_rel_path && item.source_rel_path !== item.original_filename ? item.source_rel_path : null; const checked = trashSelected.includes(item.version_id); return <li key={item.item_id} className={`space-y-3 px-4 py-4 sm:px-5 ${checked ? "bg-primary/5" : ""}`}><div className="flex items-start gap-3">{can("trash.restore") && <Checkbox className="mt-0.5" aria-label={`选择恢复“${item.title}”`} checked={checked} onChange={() => setTrashSelected((current) => current.includes(item.version_id) ? current.filter((id) => id !== item.version_id) : [...current, item.version_id].slice(0, BULK_LIMIT))} />}<div className="min-w-0 flex-1"><p className="break-words font-medium">{item.title}</p><p className="mt-1 break-all text-ui-xs text-muted-foreground">{item.original_filename} · v{item.version_number}</p></div><Badge className="shrink-0" variant={statusVariant(previousStatus)}>{statusLabel[previousStatus] || "未知状态"}</Badge></div><dl className="grid grid-cols-[5rem_minmax(0,1fr)] gap-x-2 gap-y-1 text-ui-sm"><dt className="text-muted-foreground">原目录</dt><dd className="break-words">{item.category_path || item.category_label}</dd>{sourcePath && <><dt className="text-muted-foreground">上传路径</dt><dd className="break-all">{sourcePath}</dd></>}<dt className="text-muted-foreground">来源</dt><dd>{sourceLabel[item.source_origin] || "其他来源"}</dd><dt className="text-muted-foreground">保留期限</dt><dd>{retentionText(item)}</dd><dt className="text-muted-foreground">移入人员</dt><dd>{item.archived_by_name || "未知人员"}</dd><dt className="text-muted-foreground">移入时间</dt><dd>{formatAdminDate(item.archived_at)}</dd></dl><div className="flex items-center justify-end gap-2"><IconButton label={`查看“${item.title}”的回收站记录`} tooltip="查看操作记录" className="size-control-sm border border-border max-sm:size-control-md" onClick={() => void openAudit(item)}><History className="size-4" /></IconButton>{can("trash.restore") && <Button size="sm" variant="outline" className="max-sm:h-control-md" disabled={Boolean(busyAction)} onClick={() => openRestore(item)}><ArchiveRestore className="size-4" />恢复</Button>}</div></li>; })}</ul>
         </>}
         <div className="flex flex-col gap-2 border-t border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5"><p className="text-ui-xs text-muted-foreground">共 {trashTotal} 份，第 {page + 1} / {trashPageCount} 页</p><div className="flex flex-wrap items-center justify-end gap-2"><Button size="sm" variant="outline" disabled={page === 0 || trashLoading} onClick={() => setPage((value) => value - 1)}>上一页</Button><Select aria-label="跳转回收站页码" className="h-control-sm w-24" value={String(page + 1)} onChange={(event) => setPage(Number(event.target.value) - 1)} disabled={trashLoading}>{Array.from({ length: trashPageCount }, (_, index) => <option key={index + 1} value={index + 1}>第 {index + 1} 页</option>)}</Select><Button size="sm" variant="outline" disabled={page + 1 >= trashPageCount || trashLoading} onClick={() => setPage((value) => value + 1)}>下一页</Button></div></div>
       </Card>
@@ -2043,7 +2157,7 @@ export function AdminManagedContentPage() {
           </dl>
           {detail.content_kind === "media_transcript" ? <div className="flex flex-wrap gap-2">
             <Button variant="outline" onClick={() => { setDetail(null); openVideoPreview({ mediaId: detail.media_id!, title: detail.title, startSeconds: 0, fromSource: false }); }} disabled={!detail.media_id}><Film className="size-4" />播放视频与转录稿</Button>
-            <a className={buttonVariants({ variant: "outline" })} href={`/admin/media?media_id=${encodeURIComponent(detail.media_id || "")}&workbench=1`}><ExternalLink className="size-4" />进入视频管理</a>
+            {state.status === "authed" && state.user.role === "admin" && <a className={buttonVariants({ variant: "outline" })} href={`/admin/media?media_id=${encodeURIComponent(detail.media_id || "")}&workbench=1`}><ExternalLink className="size-4" />进入视频管理</a>}
           </div> : <div className="flex flex-wrap gap-2">
             <Button variant="outline" onClick={() => { const target = detail; setDetail(null); void openAudit(target); }}><History className="size-4" />操作记录</Button>
             {detail.preview_parent_id && ["pdf", "docx", "xlsx", "pptx"].includes(detail.doc_type) ? <Button variant="outline" onClick={() => { openDocumentPreview(detail.preview_parent_id!, detail.title, detail.doc_type, 1, {}, "managed-content-detail"); }}><Eye className="size-4" />预览文件</Button> : detail.doc_type === "pdf" || can("item.download") ? <a className={buttonVariants({ variant: "outline" })} href={adminContentApi.fileUrl(detail.version_id)} target="_blank" rel="noreferrer"><Eye className="size-4" />打开文件</a> : <Button variant="outline" disabled title="打开文件（需要下载权限）"><Eye className="size-4" />打开文件</Button>}
@@ -2130,6 +2244,14 @@ export function AdminManagedContentPage() {
     <Dialog open={newFolderOpen} onOpenChange={setNewFolderOpen}><DialogContent><DialogHeader><DialogTitle>新建文件夹</DialogTitle><DialogDescription>文件夹将建立在“{currentFolder?.display_name || "当前目录"}”下，最多支持四级目录。</DialogDescription></DialogHeader><label className="space-y-1.5 text-ui-sm font-medium"><span>文件夹名称</span><Input value={newFolderName} onChange={(event) => setNewFolderName(event.target.value)} placeholder="例如：净高分析" autoFocus /></label><DialogFooter><Button variant="outline" onClick={() => setNewFolderOpen(false)} disabled={busyAction === "new-folder"}>取消</Button><Button onClick={() => void createFolder()} disabled={!newFolderName.trim() || busyAction === "new-folder"}>{busyAction === "new-folder" ? "创建中…" : "创建"}</Button></DialogFooter></DialogContent></Dialog>
 
     <Dialog open={Boolean(moveTarget)} onOpenChange={(open) => { if (!open && !busyAction?.endsWith(":move")) { setMoveTarget(null); setMoveFolderId(""); setMoveError(null); } }}><DialogContent className="max-w-2xl max-h-[calc(100vh-2rem)] overflow-y-auto"><DialogHeader><DialogTitle>{moveTarget?.content_kind === "media_transcript" ? "调整归档目录" : moveTarget?.has_published_head ? "调整分类" : "移动资料"}</DialogTitle><DialogDescription>{moveTarget?.content_kind === "media_transcript" ? `只调整“${moveTarget.title}”在资料库中的归档目录，不改变视频、转录发布状态或索引。` : moveTarget?.has_published_head ? `调整“${moveTarget.title}”的正式分类。同步完成前资料仍保留在原目录并继续正常检索。` : `将“${moveTarget?.title || "资料"}”从当前目录移动到另一个受控目录。`}</DialogDescription></DialogHeader>{moveTarget && <CategoryTreePicker categories={categories} value={moveFolderId} currentCategoryId={moveTarget.category_id} onChange={(categoryId) => { setMoveFolderId(categoryId); setMoveError(null); }} label="目标目录" />}{moveError && <p className="rounded-ui-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-ui-sm text-destructive" role="alert">{moveError}</p>}<DialogFooter><Button variant="outline" onClick={() => { setMoveTarget(null); setMoveFolderId(""); setMoveError(null); }} disabled={Boolean(busyAction?.endsWith(":move"))}>取消</Button><Button onClick={() => void moveContent()} disabled={!moveFolderId || moveFolderId === moveTarget?.category_id || Boolean(busyAction?.endsWith(":move"))}>{busyAction?.endsWith(":move") ? "处理中…" : moveTarget?.content_kind === "media_transcript" ? "确认调整" : moveTarget?.has_published_head ? "提交分类调整" : "确认移动"}</Button></DialogFooter></DialogContent></Dialog>
+
+    <Dialog open={Boolean(downloadTarget)} onOpenChange={(open) => { if (!open && !busyAction?.endsWith(":download")) setDownloadTarget(null); }}><DialogContent><DialogHeader><DialogTitle>下载视频资料</DialogTitle><DialogDescription>选择“{downloadTarget?.title}”需要下载的内容。</DialogDescription></DialogHeader><div className="grid gap-2" role="radiogroup" aria-label="下载内容">{([
+      { value: "video", title: "仅视频", description: "下载原始 MP4 视频文件", icon: <Film className="size-5" /> },
+      { value: "transcript", title: "仅转录稿", description: "下载当前正式发布的 Markdown", icon: <FileText className="size-5" /> },
+      { value: "all", title: "视频与转录稿", description: "将 MP4 和 Markdown 打包为 ZIP", icon: <Download className="size-5" /> },
+    ] as const).map((option) => <button key={option.value} type="button" role="radio" aria-checked={downloadPart === option.value} className={`flex min-h-16 items-center gap-3 rounded-ui-md border px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${downloadPart === option.value ? "border-primary bg-primary/5" : "border-border hover:bg-surface-muted"}`} onClick={() => setDownloadPart(option.value)}><span className={downloadPart === option.value ? "text-primary" : "text-muted-foreground"}>{option.icon}</span><span className="min-w-0"><span className="block text-ui-sm font-medium">{option.title}</span><span className="mt-0.5 block text-ui-xs text-muted-foreground">{option.description}</span></span>{downloadPart === option.value && <Check className="ml-auto size-4 shrink-0 text-primary" />}</button>)}</div><DialogFooter><Button variant="outline" disabled={Boolean(busyAction?.endsWith(":download"))} onClick={() => setDownloadTarget(null)}>取消</Button><Button disabled={Boolean(busyAction?.endsWith(":download"))} onClick={() => void downloadMedia()}>{busyAction?.endsWith(":download") ? "准备下载…" : "开始下载"}</Button></DialogFooter></DialogContent></Dialog>
+
+    <Dialog open={Boolean(mediaInfoTarget)} onOpenChange={(open) => { if (!open && busyAction !== "media-metadata") { setMediaInfoTarget(null); setMediaInfoError(null); } }}><DialogContent><DialogHeader><DialogTitle>编辑媒体信息</DialogTitle><DialogDescription>保存后会创建待审核候选；当前正式名称会保留到候选审核、索引和发布全部成功。</DialogDescription></DialogHeader><div className="space-y-3"><label className="block space-y-1.5 text-ui-sm font-medium"><span>视频标题</span><Input value={mediaInfoTitle} onChange={(event) => setMediaInfoTitle(event.target.value)} /></label><label className="block space-y-1.5 text-ui-sm font-medium"><span>源文件名</span><Input value={mediaInfoFilename} onChange={(event) => setMediaInfoFilename(event.target.value)} /><span className="block text-ui-xs font-normal text-muted-foreground">保留 .mp4 扩展名，不能包含路径或文件系统非法字符。</span></label>{mediaInfoError && <p className="rounded-ui-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-ui-sm text-destructive" role="alert">{mediaInfoError}</p>}</div><DialogFooter><Button variant="outline" disabled={busyAction === "media-metadata"} onClick={() => setMediaInfoTarget(null)}>取消</Button><Button disabled={busyAction === "media-metadata" || !mediaInfoTitle.trim() || !mediaInfoFilename.trim()} onClick={() => void createMediaInfoRevision()}>{busyAction === "media-metadata" ? "保存中…" : "创建修订"}</Button></DialogFooter></DialogContent></Dialog>
 
     <Dialog open={Boolean(renameTarget)} onOpenChange={(open) => { if (!open && busyAction !== "rename") { setRenameTarget(null); setRenameConflict(null); setRenameError(null); } }}><DialogContent><DialogHeader><DialogTitle>重命名资料</DialogTitle><DialogDescription>标题和源文件名会作为新草稿版本保存，之后需要重新确认并发布。</DialogDescription></DialogHeader><div className="space-y-3"><label className="block space-y-1.5 text-ui-sm font-medium"><span>资料标题</span><Input value={renameTitle} onChange={(event) => { setRenameTitle(event.target.value); setRenameConflict(null); }} /></label><label className="block space-y-1.5 text-ui-sm font-medium"><span>源文件名</span><Input value={renameFilename} onChange={(event) => { setRenameFilename(event.target.value); setRenameConflict(null); }} /><span className="block text-ui-xs font-normal text-muted-foreground">只能修改名称，不能改变文件扩展名。</span></label>{renameConflict && <div className="space-y-2 rounded-ui-md border border-warning/50 bg-warning/10 p-3 text-ui-sm" role="alert"><p className="font-medium">当前目录存在同名资料，是否替换？</p><p className="break-words">{renameConflict.title}（{renameConflict.original_filename}）</p><p className="text-muted-foreground">替换会将上述资料移入回收站并立即停止检索；当前资料的新版本仍需重新确认和发布。</p></div>}{renameError && <p className="text-ui-sm text-destructive" role="alert">{renameError}</p>}</div><DialogFooter><Button variant="outline" disabled={busyAction === "rename"} onClick={() => setRenameTarget(null)}>取消</Button>{renameConflict ? <Button variant="destructive" disabled={busyAction === "rename"} onClick={() => void renameContent(true)}>{busyAction === "rename" ? "替换中…" : "确认替换并重命名"}</Button> : <Button disabled={busyAction === "rename" || !renameTitle.trim() || !renameFilename.trim()} onClick={() => void renameContent()}>{busyAction === "rename" ? "保存中…" : "保存为新版本"}</Button>}</DialogFooter></DialogContent></Dialog>
 

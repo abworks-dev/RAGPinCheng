@@ -102,6 +102,22 @@ describe("TranscriptionVersionPanel", () => {
     expect(screen.getAllByRole("region", { name: "当前版本校对工作区" })).toHaveLength(1);
   });
 
+  it("opens the current published version directly for an edit-current deep link", async () => {
+    const historical = { ...awaitingVersion, version_id: "33333333-3333-4333-8333-333333333333" };
+    const current = { ...approvedVersion, version_id: "44444444-4444-4444-8444-444444444444", is_current: true };
+    mocks.listTranscriptVersions.mockResolvedValue([historical, current]);
+    mocks.previewTranscriptVersion.mockResolvedValue({
+      version_id: current.version_id,
+      markdown: "说话人 1 00:00:00\n当前正式稿\n",
+      markdown_sha256: current.markdown_sha256,
+    });
+    render(<TranscriptionVersionPanel mediaId="media-1" embedded initialAction="edit-current" />);
+
+    expect(await screen.findByRole("region", { name: "当前版本校对工作区" })).toBeInTheDocument();
+    await waitFor(() => expect(mocks.previewTranscriptVersion).toHaveBeenCalledWith(current.version_id));
+    expect(screen.getByRole("textbox", { name: "转录 Markdown 编辑器" })).toHaveValue("说话人 1 00:00:00\n当前正式稿\n");
+  });
+
   it("saves edits as a new draft and refreshes the selected version", async () => {
     mocks.listTranscriptVersions
       .mockResolvedValueOnce([awaitingVersion])

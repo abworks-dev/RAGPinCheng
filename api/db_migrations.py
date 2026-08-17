@@ -793,6 +793,42 @@ CONTENT_RECLASSIFICATION_STATEMENTS = (
        ON content_reclassification_jobs(item_id,created_at DESC)""",
 )
 
+MEDIA_LIBRARY_VIDEO_ACTIONS_STATEMENTS = (
+    """CREATE TABLE IF NOT EXISTS media_metadata_revisions (
+        id TEXT PRIMARY KEY,
+        media_id TEXT NOT NULL REFERENCES media_assets(media_id) ON DELETE RESTRICT,
+        transcript_version_id TEXT NOT NULL UNIQUE REFERENCES transcript_versions(id) ON DELETE RESTRICT,
+        base_version_id TEXT NOT NULL REFERENCES transcript_versions(id) ON DELETE RESTRICT,
+        proposed_title TEXT NOT NULL,
+        proposed_original_filename TEXT NOT NULL,
+        requested_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        request_idempotency_key TEXT NOT NULL UNIQUE,
+        status TEXT NOT NULL CHECK (status IN ('pending','rejected','failed','activated')),
+        created_at INTEGER NOT NULL,
+        activated_at INTEGER,
+        updated_at INTEGER NOT NULL
+    )""",
+    """CREATE UNIQUE INDEX IF NOT EXISTS uq_media_metadata_revisions_active
+       ON media_metadata_revisions(media_id) WHERE status='pending'""",
+    """CREATE TABLE IF NOT EXISTS media_replacements (
+        id TEXT PRIMARY KEY,
+        source_media_id TEXT NOT NULL REFERENCES media_assets(media_id) ON DELETE RESTRICT,
+        candidate_media_id TEXT NOT NULL UNIQUE REFERENCES media_assets(media_id) ON DELETE CASCADE,
+        source_catalog_item_id TEXT NOT NULL REFERENCES content_items(id) ON DELETE RESTRICT,
+        source_head_version_id TEXT NOT NULL REFERENCES transcript_versions(id) ON DELETE RESTRICT,
+        profile_id TEXT NOT NULL,
+        request_idempotency_key TEXT NOT NULL UNIQUE,
+        requested_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        status TEXT NOT NULL CHECK (status IN ('pending','failed','activated','cancelled')),
+        error_code TEXT,
+        created_at INTEGER NOT NULL,
+        activated_at INTEGER,
+        updated_at INTEGER NOT NULL
+    )""",
+    """CREATE UNIQUE INDEX IF NOT EXISTS uq_media_replacements_active_source
+       ON media_replacements(source_media_id) WHERE status='pending'""",
+)
+
 MIGRATIONS = (
     Migration(1, "multi_engine_transcription_phase2", PHASE2_STATEMENTS),
     Migration(2, "answer_regeneration_versions", ANSWER_VERSION_STATEMENTS),
@@ -812,6 +848,7 @@ MIGRATIONS = (
     Migration(16, "media_transcript_library_catalog", MEDIA_TRANSCRIPT_LIBRARY_STATEMENTS),
     Migration(17, "asr_profile_management", ASR_PROFILE_MANAGEMENT_STATEMENTS),
     Migration(18, "published_content_reclassification", CONTENT_RECLASSIFICATION_STATEMENTS),
+    Migration(19, "media_library_video_actions", MEDIA_LIBRARY_VIDEO_ACTIONS_STATEMENTS),
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 PHASE2_TABLES = frozenset(
@@ -857,6 +894,9 @@ ASR_PROFILE_MANAGEMENT_TABLES = frozenset(
     {"asr_profile_release_requests", "asr_profile_audit_events"}
 )
 CONTENT_RECLASSIFICATION_TABLES = frozenset({"content_reclassification_jobs"})
+MEDIA_LIBRARY_VIDEO_ACTIONS_TABLES = frozenset(
+    {"media_metadata_revisions", "media_replacements"}
+)
 
 
 def validate_system_content_permission_groups(
@@ -1028,6 +1068,8 @@ def has_pending_ddl(path: Path, *, base_tables: frozenset[str]) -> bool:
         raise RuntimeError("migration_schema_mismatch")
     if any(version == 18 for version, _name in applied) and not CONTENT_RECLASSIFICATION_TABLES.issubset(tables):
         raise RuntimeError("migration_schema_mismatch")
+    if any(version == 19 for version, _name in applied) and not MEDIA_LIBRARY_VIDEO_ACTIONS_TABLES.issubset(tables):
+        raise RuntimeError("migration_schema_mismatch")
     if any(version == 10 for version, _name in applied):
         conn = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
         try:
@@ -1107,6 +1149,8 @@ def apply_all(conn: sqlite3.Connection, *, base_schema: str, applied_at: int) ->
         if 17 in applied_versions and not ASR_PROFILE_MANAGEMENT_TABLES.issubset(tables):
             raise RuntimeError("migration_schema_mismatch")
         if 18 in applied_versions and not CONTENT_RECLASSIFICATION_TABLES.issubset(tables):
+            raise RuntimeError("migration_schema_mismatch")
+        if 19 in applied_versions and not MEDIA_LIBRARY_VIDEO_ACTIONS_TABLES.issubset(tables):
             raise RuntimeError("migration_schema_mismatch")
         validate_system_content_permission_groups(
             conn,

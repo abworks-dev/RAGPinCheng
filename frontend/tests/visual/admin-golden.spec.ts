@@ -115,10 +115,21 @@ test("资料管理视频转录稿 accepted golden", async ({ page }) => {
   await expect(page.getByText("视频转录稿", { exact: true }).filter({ visible: true }).first()).toBeVisible();
   await expect(page.getByText("有新转录稿待处理", { exact: true }).filter({ visible: true })).toBeVisible();
   await expect(page.getByRole("button", { name: `播放“${title}”` }).filter({ visible: true })).toBeVisible();
-  await expect(page.getByRole("link", { name: `在视频管理中打开“${title}”` }).filter({ visible: true })).toHaveAttribute(
+  await expect(page.getByRole("button", { name: `下载“${title}”` }).filter({ visible: true })).toBeVisible();
+  await page.getByRole("button", { name: `更多“${title}”的操作` }).filter({ visible: true }).click();
+  await expect(page.getByRole("menuitem", { name: "编辑转录稿" })).toHaveAttribute(
+    "href",
+    "/admin/media?media_id=media-library-1&workbench=1&action=edit-current",
+  );
+  await expect(page.getByRole("menuitem", { name: "替换视频" })).toHaveAttribute(
+    "href",
+    "/admin/media?media_id=media-library-1&action=replace",
+  );
+  await expect(page.getByRole("menuitem", { name: "进入视频管理" })).toHaveAttribute(
     "href",
     "/admin/media?media_id=media-library-1&workbench=1",
   );
+  await page.keyboard.press("Escape");
 
   const viewport = page.viewportSize()!;
   expect(await page.evaluate(() => Math.max(document.body.scrollWidth, document.documentElement.scrollWidth))).toBeLessThanOrEqual(viewport.width);
@@ -203,7 +214,8 @@ test("资料管理移入回收站确认 accepted golden", async ({ page }) => {
   await openRootFolder(page);
   const title = page.getByText("建筑信息模型交付标准（合成长文件名用于响应式检查）", { exact: true }).filter({ visible: true });
   const item = page.viewportSize()!.width < 1024 ? title.locator("xpath=ancestor::li") : title.locator("xpath=ancestor::tr");
-  await item.getByRole("button", { name: `删除“建筑信息模型交付标准（合成长文件名用于响应式检查）”`, exact: true }).click();
+  await item.getByRole("button", { name: `更多“建筑信息模型交付标准（合成长文件名用于响应式检查）”的操作`, exact: true }).click();
+  await page.getByRole("menu", { name: "“建筑信息模型交付标准（合成长文件名用于响应式检查）”的更多操作" }).getByRole("menuitem", { name: "移至回收站" }).click();
   await expect(page.getByRole("dialog", { name: "将资料移入回收站？" })).toBeVisible();
   const viewport = page.viewportSize()!;
   await expect(page).toHaveScreenshot(`managed-content-delete-confirm-${viewport.width}x${viewport.height}.png`);

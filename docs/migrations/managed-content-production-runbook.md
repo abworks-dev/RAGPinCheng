@@ -293,6 +293,14 @@ parents.sqlite 或 Qdrant point。生产执行前后都要记录候选数、阻�
 `scripts/repair_pptx_previews.py` 只扫描当前正式 head 中 `lifecycle_status=published` 的 PPTX。默认 dry-run，
 不读取正文到日志，只输出版本 ID 和预览状态；有效 `.preview.pdf` 不会被覆盖：
 
+生产环境优先使用 `Repair Production PPTX Previews` workflow。`preview` 要求输入生产节点当前完整
+Commit SHA 和 `PREVIEW_PPTX`，并先验证 LibreOffice `/health` 及合成 PPTX 到 PDF 的真实转换；产物中的
+`manifest.json`、`manifest.sha256` 和 `context.json` 是 apply 审批依据。`apply` 必须引用同一 preview run ID、
+清单 SHA-256、相同生产 Commit，并选择 `REPAIR_PPTX`。workflow 会重新核对清单，只按获批的缺失
+version ID 单线程补生成；生产 head 或候选集合发生变化时拒绝执行。
+
+以下命令只用于已登录生产节点的人工应急执行，不替代 workflow 的两阶段清单门禁：
+
 ```bash
 docker compose -p ragpincheng-prod \
   -f /data/business/ragpincheng/source/docker/docker-compose.yml \

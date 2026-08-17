@@ -239,6 +239,18 @@ const mediaAssets = [
   },
 ];
 
+const mediaLibraryAsset = {
+  ...mediaAssets[2],
+  media_id: mediaLibraryItem.media_id,
+  title: mediaLibraryItem.title,
+  original_filename: mediaLibraryItem.original_filename,
+  file_size: mediaLibraryItem.file_size,
+  review_status: "review_approved",
+  publication_status: "published",
+  publication_index_status: "done",
+  is_current_version: true,
+};
+
 const transcriptionProfiles = [{
   profile_id: "funasr-sensevoice-zh-experimental-v1", display_name: "受控中文转录", description: "合成服务端 Profile",
   qualification: "experimental", admission: "enabled", availability: "available", unavailable_reason_code: null,
@@ -578,6 +590,7 @@ export async function installAdminRoutes(
     if (request.method() === "GET" && path === "/api/admin/media") {
       if (scenario === "empty") return json(route, []);
       if (scenario === "media_progress") return json(route, [{ ...mediaAssets[2], status: "transcribing" }]);
+      if (scenario === "media_library") return json(route, [mediaLibraryAsset]);
       return json(route, mediaAssets);
     }
     if (request.method() === "GET" && path === "/api/admin/transcription/profiles") return json(route, transcriptionProfiles);
@@ -672,6 +685,12 @@ export async function installAdminRoutes(
     if (request.method() === "GET" && /^\/api\/admin\/content\/versions\/[^/]+\/file$/.test(path)) {
       return route.fulfill({ status: 200, contentType: "application/pdf", body: "%PDF synthetic fixture" });
     }
+    if (request.method() === "GET" && /^\/api\/admin\/content\/items\/[^/]+\/media-download$/.test(path)) {
+      const part = url.searchParams.get("part");
+      const filename = part === "video" ? "synthetic-video.mp4" : part === "transcript" ? "synthetic-transcript.md" : "synthetic-media.zip";
+      const contentType = part === "video" ? "video/mp4" : part === "transcript" ? "text/markdown" : "application/zip";
+      return route.fulfill({ status: 200, contentType, headers: { "content-disposition": `attachment; filename=${filename}` }, body: "synthetic media fixture" });
+    }
     if (request.method() === "POST" && path === "/api/admin/content/bulk-download") {
       await new Promise((resolve) => setTimeout(resolve, 300));
       return route.fulfill({
@@ -762,6 +781,10 @@ export async function installAdminRoutes(
     }
     if (request.method() === "GET" && path === "/api/admin/index/category-tree") {
       return json(route, { categories: [{ name: "公司标准", two_level: false, subcategories: [] }, { name: "客户标准", two_level: true, subcategories: ["合成客户"] }, { name: "项目资料", two_level: false, subcategories: [] }], second_level_categories: ["客户标准"] });
+    }
+    if (request.method() === "POST" && /^\/api\/admin\/transcription\/media\/[^/]+\/metadata-revisions$/.test(path)) {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      return json(route, { ...baseTranscriptVersion, version_id: "77777777-7777-4777-8777-777777777777", media_id: mediaLibraryItem.media_id });
     }
     if (request.method() !== "GET" && path.startsWith("/api/admin/content/")) {
       await new Promise((resolve) => setTimeout(resolve, 800));

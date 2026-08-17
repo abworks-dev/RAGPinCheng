@@ -3,6 +3,7 @@ import { api } from "../client";
 export const adminMediaApi = {
   uploadManual: (...args: Parameters<typeof api.uploadMediaVideo>) => api.uploadMediaVideo(...args),
   uploadAutomatic: (...args: Parameters<typeof api.uploadAutomaticMediaVideo>) => api.uploadAutomaticMediaVideo(...args),
+  uploadReplacement: (...args: Parameters<typeof api.uploadReplacementMediaVideo>) => api.uploadReplacementMediaVideo(...args),
   listAssets: (...args: Parameters<typeof api.listMediaAssets>) => api.listMediaAssets(...args),
   deleteFailedAsset: (...args: Parameters<typeof api.deleteFailedMediaAsset>) => api.deleteFailedMediaAsset(...args),
   profiles: (...args: Parameters<typeof api.listTranscriptionProfiles>) => api.listTranscriptionProfiles(...args),
