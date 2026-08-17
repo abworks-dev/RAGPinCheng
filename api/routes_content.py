@@ -51,6 +51,7 @@ from .content_store import (
     restore_content_item,
     list_categories,
     list_folder_requests,
+    move_category,
     move_content_item,
     register_uploaded_document,
     record_upload_batch_entry,
@@ -79,6 +80,7 @@ from .schemas import (
     BulkManagedContentResponse,
     BulkManagedContentResultDTO,
     ManagedCategoryDTO,
+    MoveManagedCategoryRequest,
     ManagedContentItemDTO,
     ManagedContentListResponse,
     FolderRequestDTO,
@@ -367,6 +369,20 @@ def _raise_domain_error(exc: Exception) -> None:
         raise HTTPException(status_code=409, detail="分类编号或标识已存在") from exc
     if message == "category_version_conflict":
         raise HTTPException(status_code=409, detail="分类已被其他人修改，请刷新后重试") from exc
+    if message == "category_not_found":
+        raise HTTPException(status_code=404, detail="分类不存在") from exc
+    if message == "category_move_cycle":
+        raise HTTPException(status_code=409, detail="分类不能移动到自身或其子分类中") from exc
+    if message == "category_move_position_not_found":
+        raise HTTPException(status_code=409, detail="目标排序位置已变化，请刷新后重试") from exc
+    if message == "category_move_position_invalid":
+        raise HTTPException(status_code=400, detail="目标排序位置不属于所选父分类") from exc
+    if message == "parent_category_not_found":
+        raise HTTPException(status_code=404, detail="目标父分类不存在") from exc
+    if message == "parent_category_inactive":
+        raise HTTPException(status_code=409, detail="不能移动到已停用的分类中") from exc
+    if message == "category_depth_exceeded":
+        raise HTTPException(status_code=409, detail="移动后分类层级将超过四级") from exc
     if message == "active_child_category_exists":
         raise HTTPException(status_code=409, detail="该分类仍有启用的子分类，请先停用子分类") from exc
     if message == "content_too_large":
@@ -481,6 +497,28 @@ def patch_category(
     except (ValueError, sqlite3.IntegrityError) as exc:
         _raise_domain_error(exc)
     return _category_dto(row)
+
+
+@router.post("/categories/{category_id}/move", response_model=list[ManagedCategoryDTO])
+def move_managed_category(
+    category_id: str,
+    body: MoveManagedCategoryRequest,
+    user: CurrentUser = Depends(require_content_permission("category.manage", csrf=True)),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> list[ManagedCategoryDTO]:
+    _require_feature()
+    try:
+        rows = move_category(
+            conn,
+            category_id,
+            target_parent_id=body.target_parent_id,
+            before_category_id=body.before_category_id,
+            expected_version=body.expected_version,
+            actor_user_id=user.id,
+        )
+    except (ValueError, sqlite3.IntegrityError) as exc:
+        _raise_domain_error(exc)
+    return [_category_dto(row) for row in rows]
 
 
 @router.post("/folder-requests", response_model=FolderRequestDTO)

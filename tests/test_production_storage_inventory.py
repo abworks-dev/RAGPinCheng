@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import shutil
 import subprocess
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -164,3 +166,63 @@ def test_inventory_workflow_uses_asr_activation_backup_root():
     workflow = (ROOT / ".github" / "workflows" / "inventory-production-storage.yml").read_text(encoding="utf-8")
     assert "PRODUCTION_ASR_BACKUP_ROOT" in workflow
     assert "-AsrActivationBackupRoot" in workflow
+    assert "GPU_MODEL_CACHE_SOURCE" in workflow
+    assert "-GpuConfiguredModelCachePath" in workflow
+
+
+def test_inventory_classifies_model_preparation_and_repair_caches(tmp_path: Path):
+    executable = _powershell()
+    if executable is None:
+        pytest.skip("Windows PowerShell is unavailable")
+    data_root = tmp_path / "asr-data"
+    runtime_root = tmp_path / "runtime"
+    revision = data_root / "qualification" / "qwen3-asr" / "models" / "Qwen3-ASR-0.6B" / "abc123"
+    revision.mkdir(parents=True)
+    (revision / "model-manifest.json").write_text('{"status":"ready"}', encoding="utf-8")
+    (revision / "weights.bin").write_bytes(b"model")
+
+    preparation_root = data_root / "model-preparation" / "faster-whisper"
+    final_manifest = data_root / "models" / "faster-whisper" / "revision" / "model-manifest.json"
+    final_manifest.parent.mkdir(parents=True)
+    final_manifest.write_text('{"status":"ready"}', encoding="utf-8")
+    manifest_sha = hashlib.sha256(final_manifest.read_bytes()).hexdigest()
+    old = datetime.now(timezone.utc) - timedelta(days=40)
+    for run_id in ("100", "101", "102"):
+        run = preparation_root / run_id
+        run.mkdir(parents=True)
+        (run / "model-preparation.json").write_text(
+            json.dumps({"schema_version":"faster-whisper-model-preparation/1","status":"prepared","manifest_path":str(final_manifest),"manifest_sha256":manifest_sha}), encoding="utf-8"
+        )
+        (run / "offline-validation.json").write_text('{"status":"validated-offline"}', encoding="utf-8")
+        os.utime(run, (old.timestamp() + int(run_id), old.timestamp() + int(run_id)))
+
+    repair = runtime_root / "model-cache-repair" / "200"
+    for repository in ("models--BAAI--bge-m3", "models--BAAI--bge-reranker-v2-m3"):
+        snapshot = repair / "hub" / repository / "snapshots" / "rev"
+        snapshot.mkdir(parents=True)
+        (snapshot / "config.json").write_text("{}", encoding="utf-8")
+        (snapshot / "model.safetensors").write_bytes(b"weights")
+    os.utime(repair, (old.timestamp(), old.timestamp()))
+
+    report_path = tmp_path / "inventory.json"
+    result = subprocess.run(
+        [
+            executable, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+            "-File", str(SCRIPT), "-ReportPath", str(report_path),
+            "-AsrDataRoot", str(data_root), "-RuntimeRoot", str(runtime_root),
+            "-GpuConfiguredModelCachePath", str(repair),
+        ], cwd=ROOT, text=True, capture_output=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    report = json.loads(report_path.read_text(encoding="utf-8-sig"))
+    shared = report["asr_qualification_inventory"]["shared_model_revisions"][0]
+    assert shared["advisory_status"] == "protected-active-model"
+    runs = {item["run_id"]: item for item in report["asr_model_preparation_inventory"]["runs"]}
+    assert runs["100"]["completion_status"] == "complete"
+    if report["project_reference_inventory"]["status"] == "measured":
+        assert runs["100"]["advisory_status"] == "eligible-advisory"
+    repair_run = report["gpu_model_cache_repair_inventory"]["runs"][0]
+    assert repair_run["embedding_complete"] is True
+    assert repair_run["reranker_complete"] is True
+    assert repair_run["advisory_status"] == "protected"
+    assert "configured-model-cache-source" in repair_run["advisory_reasons"]

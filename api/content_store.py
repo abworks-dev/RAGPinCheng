@@ -266,6 +266,148 @@ def update_category(
     return conn.execute("SELECT * FROM category_nodes WHERE id=?", (category_id,)).fetchone()
 
 
+def move_category(
+    conn: sqlite3.Connection,
+    category_id: str,
+    *,
+    target_parent_id: str | None,
+    before_category_id: str | None,
+    expected_version: int,
+    actor_user_id: int,
+) -> list[sqlite3.Row]:
+    now = _now()
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        category = conn.execute(
+            "SELECT id,parent_id,sort_order,level,version FROM category_nodes WHERE id=?",
+            (category_id,),
+        ).fetchone()
+        if category is None:
+            raise ValueError("category_not_found")
+        if int(category["version"]) != expected_version:
+            raise ValueError("category_version_conflict")
+        if target_parent_id == category_id:
+            raise ValueError("category_move_cycle")
+
+        target_level = 1
+        if target_parent_id:
+            parent = conn.execute(
+                "SELECT id,level,is_active FROM category_nodes WHERE id=?",
+                (target_parent_id,),
+            ).fetchone()
+            if parent is None:
+                raise ValueError("parent_category_not_found")
+            if not parent["is_active"]:
+                raise ValueError("parent_category_inactive")
+            target_level = int(parent["level"]) + 1
+            descendant = conn.execute(
+                """WITH RECURSIVE descendants(id) AS (
+                       SELECT id FROM category_nodes WHERE parent_id=?
+                       UNION ALL
+                       SELECT c.id FROM category_nodes c JOIN descendants d ON c.parent_id=d.id
+                   ) SELECT 1 FROM descendants WHERE id=? LIMIT 1""",
+                (category_id, target_parent_id),
+            ).fetchone()
+            if descendant:
+                raise ValueError("category_move_cycle")
+
+        descendants = conn.execute(
+            """WITH RECURSIVE descendants(id,level) AS (
+                   SELECT id,level FROM category_nodes WHERE id=?
+                   UNION ALL
+                   SELECT c.id,c.level FROM category_nodes c JOIN descendants d ON c.parent_id=d.id
+               ) SELECT id,level FROM descendants""",
+            (category_id,),
+        ).fetchall()
+        subtree_height = max(int(row["level"]) for row in descendants) - int(category["level"])
+        if target_level + subtree_height > 4:
+            raise ValueError("category_depth_exceeded")
+
+        if before_category_id:
+            before = conn.execute(
+                "SELECT id,parent_id FROM category_nodes WHERE id=?",
+                (before_category_id,),
+            ).fetchone()
+            if before is None:
+                raise ValueError("category_move_position_not_found")
+            if before["id"] == category_id or before["parent_id"] != target_parent_id:
+                raise ValueError("category_move_position_invalid")
+
+        old_parent_id = category["parent_id"]
+
+        def sibling_ids(parent_id: str | None) -> list[str]:
+            if parent_id is None:
+                rows = conn.execute(
+                    """SELECT id FROM category_nodes WHERE parent_id IS NULL AND id<>?
+                       ORDER BY sort_order,display_code,display_name,id""",
+                    (category_id,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """SELECT id FROM category_nodes WHERE parent_id=? AND id<>?
+                       ORDER BY sort_order,display_code,display_name,id""",
+                    (parent_id, category_id),
+                ).fetchall()
+            return [str(row["id"]) for row in rows]
+
+        destination = sibling_ids(target_parent_id)
+        insert_at = destination.index(before_category_id) if before_category_id else len(destination)
+        destination.insert(insert_at, category_id)
+
+        if old_parent_id != target_parent_id:
+            for index, sibling_id in enumerate(sibling_ids(old_parent_id), start=1):
+                new_order = index * 10
+                conn.execute(
+                    """UPDATE category_nodes SET sort_order=?,updated_at=?,version=version+1
+                       WHERE id=? AND sort_order<>?""",
+                    (new_order, now, sibling_id, new_order),
+                )
+
+        level_delta = target_level - int(category["level"])
+        for index, sibling_id in enumerate(destination, start=1):
+            new_order = index * 10
+            if sibling_id == category_id:
+                conn.execute(
+                    """UPDATE category_nodes
+                       SET parent_id=?,sort_order=?,level=?,updated_at=?,version=version+1
+                       WHERE id=?""",
+                    (target_parent_id, new_order, target_level, now, category_id),
+                )
+            else:
+                conn.execute(
+                    """UPDATE category_nodes SET sort_order=?,updated_at=?,version=version+1
+                       WHERE id=? AND sort_order<>?""",
+                    (new_order, now, sibling_id, new_order),
+                )
+
+        if level_delta:
+            for row in descendants:
+                if row["id"] == category_id:
+                    continue
+                conn.execute(
+                    """UPDATE category_nodes SET level=level+?,updated_at=?,version=version+1
+                       WHERE id=?""",
+                    (level_delta, now, row["id"]),
+                )
+
+        audit_event(
+            conn,
+            "category.moved",
+            actor_user_id=actor_user_id,
+            category_id=category_id,
+            metadata={
+                "from_parent_id": old_parent_id,
+                "to_parent_id": target_parent_id,
+                "before_category_id": before_category_id,
+            },
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    return list_categories(conn, include_inactive=True)
+
+
 def create_folder_request(
     conn: sqlite3.Connection,
     *,

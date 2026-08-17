@@ -98,3 +98,6 @@ def test_storage_inventory_is_aggregate_and_read_only():
     assert "-ReleaseKeepCount 2" in workflow
     assert "-QualificationKeepCount 3" in workflow
     assert "-ResolverRetentionDays 14" in workflow
+    assert "asr_qualification_inventory" in script
+    assert "asr_model_preparation_inventory" in script
+    assert "gpu_model_cache_repair_inventory" in script
