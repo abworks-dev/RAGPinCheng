@@ -44,6 +44,12 @@ const mocks = vi.hoisted(() => ({
   createMediaMetadataRevision: vi.fn(),
   deleteContent: vi.fn(),
   trash: vi.fn(),
+  trashSettings: vi.fn(),
+  updateTrashSettings: vi.fn(),
+  preflightTrashPurge: vi.fn(),
+  previewOverdueTrashPurge: vi.fn(),
+  purgeTrash: vi.fn(),
+  trashPurgeRuns: vi.fn(),
   restoreContent: vi.fn(),
   auditEvents: vi.fn(),
   fileUrl: vi.fn(),
@@ -126,6 +132,12 @@ vi.mock("../../api/client", () => ({
     createMediaMetadataRevision: mocks.createMediaMetadataRevision,
     deleteManagedContent: mocks.deleteContent,
     managedContentTrash: mocks.trash,
+    managedContentTrashSettings: mocks.trashSettings,
+    updateManagedContentTrashSettings: mocks.updateTrashSettings,
+    preflightManagedContentTrashPurge: mocks.preflightTrashPurge,
+    previewOverdueManagedContentTrashPurge: mocks.previewOverdueTrashPurge,
+    purgeManagedContentTrash: mocks.purgeTrash,
+    managedContentTrashPurgeRuns: mocks.trashPurgeRuns,
     restoreManagedContent: mocks.restoreContent,
     managedContentAuditEvents: mocks.auditEvents,
     managedContentFileUrl: mocks.fileUrl,
@@ -261,6 +273,8 @@ describe("AdminManagedContentPage", () => {
     mocks.regeneratePreview.mockResolvedValue({ version_id: "version-1", preview_parent_id: "parent-pptx", preview_status: "ready" });
     mocks.deleteContent.mockResolvedValue({ item_id: "item-1", version_id: "version-1", archived_at: 2, previous_status: "awaiting_review", publication_withdrawn: false });
     mocks.trash.mockResolvedValue({ items: [], total: 0, status_counts: {} });
+    mocks.trashSettings.mockResolvedValue({ cleanup_enabled: false, retention_days: 90, warning_days: 7, batch_limit: 20, updated_by: null, updated_at: 0 });
+    mocks.trashPurgeRuns.mockResolvedValue([]);
     mocks.restoreContent.mockResolvedValue({ item_id: "item-1", version_id: "version-1", restored_status: "approved", category_id: "cat-03", moved_to_alternate_category: false, replaced_conflict: false });
     mocks.auditEvents.mockResolvedValue([]);
     mocks.uploadTasks.mockResolvedValue({ tasks: [], total: 0, status_counts: {} });
@@ -821,6 +835,7 @@ describe("AdminManagedContentPage", () => {
   });
 
   it("shows archived metadata and restores an item from trash", async () => {
+    mocks.categories.mockResolvedValue([category, projectCategory]);
     mocks.trash.mockResolvedValue({
       items: [{ ...item, archived_at: 1_700_000_000, archived_by_name: "整理员", pre_archive_lifecycle_status: "published" }],
       total: 1,
@@ -834,6 +849,8 @@ describe("AdminManagedContentPage", () => {
     expect(screen.getAllByText("整理员").length).toBeGreaterThan(0);
     fireEvent.click(screen.getAllByRole("button", { name: "恢复" })[0]);
     expect(screen.getByRole("dialog")).toHaveTextContent("重新发布后才会进入检索");
+    fireEvent.click(screen.getByTestId("category-picker-item-cat-04"));
+    fireEvent.click(screen.getByTestId("category-picker-item-cat-03"));
     fireEvent.click(screen.getByRole("button", { name: "确认恢复" }));
     await waitFor(() => expect(mocks.restoreContent).toHaveBeenCalledWith("item-1", "version-1", { target_category_id: "cat-03" }));
   });
@@ -862,6 +879,30 @@ describe("AdminManagedContentPage", () => {
       { item_id: "item-2", expected_version_id: "version-2" },
     ], undefined));
     expect(await screen.findByRole("dialog", { name: "确认批量恢复" })).toHaveTextContent("可恢复 2 份");
+  });
+
+  it("preflights selected trash items and requires the exact permanent-delete phrase", async () => {
+    mocks.permissions = [...REVIEWER_PERMISSIONS, "trash.purge", "trash.policy_manage"];
+    mocks.trash.mockResolvedValue({ items: [
+      { ...item, archived_at: 1_700_000_000, retention_status: "overdue", retention_days_remaining: -2 },
+    ], total: 1, status_counts: {}, retention_counts: { retained: 0, expiring: 0, overdue: 1 } });
+    mocks.preflightTrashPurge.mockResolvedValue({
+      items: [{ item_id: "item-1", version_id: "version-1", status: "ready", reason: null, title: "建模标准", original_filename: "standard.pdf", category_path: "03 公司内部标准", size_bytes: 1024 }],
+      ready_count: 1, blocked_count: 0, total_size_bytes: 1024, confirmation_phrase: "永久删除 1 份资料",
+    });
+    mocks.purgeTrash.mockResolvedValue({ run_id: "purge-1", status: "succeeded", candidate_count: 1, succeeded_count: 1, failed_count: 0 });
+    render(<AdminManagedContentPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "回收站" }));
+    fireEvent.click((await screen.findAllByRole("checkbox", { name: "选择恢复“建模标准”" }))[0]);
+    fireEvent.click(screen.getByRole("button", { name: "永久删除（1）" }));
+    const dialog = await screen.findByRole("dialog", { name: "永久删除资料" });
+    const confirm = within(dialog).getByRole("button", { name: "永久删除" });
+    expect(confirm).toBeDisabled();
+    fireEvent.change(within(dialog).getByRole("textbox"), { target: { value: "永久删除 1 份资料" } });
+    fireEvent.click(confirm);
+    await waitFor(() => expect(mocks.purgeTrash).toHaveBeenCalledWith([
+      { item_id: "item-1", expected_version_id: "version-1" },
+    ], "永久删除 1 份资料"));
   });
 
   it("keeps trash filters inside search and sorts from the archived-time column", async () => {

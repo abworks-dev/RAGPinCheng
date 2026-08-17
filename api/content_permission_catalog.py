@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
-CONTENT_PERMISSION_CATALOG_VERSION = 4
+CONTENT_PERMISSION_CATALOG_VERSION = 5
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,6 +73,14 @@ CONTENT_PERMISSION_DEFINITIONS = (
     ),
     ContentPermissionDefinition(
         "trash.restore", "trash", "回收站", "恢复资料", "从回收站恢复资料。",
+        ("workspace.view", "item.view", "trash.view"),
+    ),
+    ContentPermissionDefinition(
+        "trash.purge", "trash", "回收站", "永久删除资料", "永久删除回收站中的资料及关联索引。",
+        ("workspace.view", "item.view", "trash.view"),
+    ),
+    ContentPermissionDefinition(
+        "trash.policy_manage", "trash", "回收站", "管理清理策略", "配置自动清理策略并查看清理记录。",
         ("workspace.view", "item.view", "trash.view"),
     ),
     ContentPermissionDefinition(
@@ -169,7 +177,9 @@ CONTENT_PERMISSION_V2_SYSTEM_CONTENT_PERMISSION_GROUPS = {
         frozenset({
             definition.key
             for definition in CONTENT_PERMISSION_DEFINITIONS
-            if definition.key not in {"item.download", "item.reclassify_published"}
+            if definition.key not in {
+                "item.download", "item.reclassify_published", "trash.purge", "trash.policy_manage"
+            }
         }),
     ),
 }
@@ -194,7 +204,14 @@ SYSTEM_CONTENT_PERMISSION_GROUPS = {
 }
 
 PRE_RECLASSIFICATION_SYSTEM_CONTENT_PERMISSION_GROUPS = {
-    key: (display_name, permissions - {"item.reclassify_published"})
+    key: (display_name, permissions - {
+        "item.reclassify_published", "trash.purge", "trash.policy_manage"
+    })
+    for key, (display_name, permissions) in SYSTEM_CONTENT_PERMISSION_GROUPS.items()
+}
+
+PRE_TRASH_LIFECYCLE_SYSTEM_CONTENT_PERMISSION_GROUPS = {
+    key: (display_name, permissions - {"trash.purge", "trash.policy_manage"})
     for key, (display_name, permissions) in SYSTEM_CONTENT_PERMISSION_GROUPS.items()
 }
 

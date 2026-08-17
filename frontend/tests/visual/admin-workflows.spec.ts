@@ -316,6 +316,22 @@ test.describe("资料管理", () => {
     }
     await expectNoBodyOverflow(page);
     await page.screenshot({ path: testInfo.outputPath("trash-list-layout.png"), fullPage: true });
+
+    await page.getByRole("button", { name: "清理已超期资料" }).click();
+    const purgeDialog = page.getByRole("dialog", { name: "永久删除资料" });
+    await expect(purgeDialog).toContainText("永久删除 1 份资料");
+    await expect(purgeDialog.getByRole("button", { name: "永久删除" })).toBeDisabled();
+    await expectInViewport(purgeDialog);
+    await page.screenshot({ path: testInfo.outputPath("trash-purge-confirmation.png"), fullPage: false });
+    await purgeDialog.getByRole("button", { name: "取消" }).click();
+
+    await page.getByRole("button", { name: "清理策略" }).click();
+    const settingsDialog = page.getByRole("dialog", { name: "回收站清理策略" });
+    await expect(settingsDialog).toContainText("当前状态：已关闭");
+    await expect(settingsDialog.getByRole("checkbox", { name: "启用自动清理" })).not.toBeChecked();
+    await expectInViewport(settingsDialog);
+    await page.screenshot({ path: testInfo.outputPath("trash-cleanup-settings.png"), fullPage: false });
+    await settingsDialog.getByRole("button", { name: "取消" }).click();
   });
 
   for (const scenario of ["loading", "empty", "error", "disabled"] as const) {

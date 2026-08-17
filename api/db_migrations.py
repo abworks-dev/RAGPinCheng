@@ -11,6 +11,7 @@ from .content_permission_catalog import (
     CONTENT_PERMISSION_V2_SYSTEM_CONTENT_PERMISSION_GROUPS,
     LEGACY_SYSTEM_CONTENT_PERMISSION_GROUPS,
     PRE_RECLASSIFICATION_SYSTEM_CONTENT_PERMISSION_GROUPS,
+    PRE_TRASH_LIFECYCLE_SYSTEM_CONTENT_PERMISSION_GROUPS,
     SYSTEM_CONTENT_PERMISSION_GROUPS,
 )
 
@@ -829,6 +830,94 @@ MEDIA_LIBRARY_VIDEO_ACTIONS_STATEMENTS = (
        ON media_replacements(source_media_id) WHERE status='pending'""",
 )
 
+CONTENT_TRASH_LIFECYCLE_STATEMENTS = (
+    "ALTER TABLE content_permissions RENAME TO content_permissions_v20",
+    """CREATE TABLE content_permissions (
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        permission TEXT NOT NULL CHECK (permission IN (
+            'workspace.view','item.view','item.download','category.view','item.upload','item.submit',
+            'item.move_draft','item.archive_draft','item.review','item.move_review',
+            'item.publish','item.reclassify_published','item.archive_published','trash.view','trash.restore',
+            'trash.purge','trash.policy_manage','category.manage','folder.request','folder.review',
+            'import.server','index.view'
+        )),
+        granted_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at INTEGER NOT NULL,
+        PRIMARY KEY(user_id, permission)
+    )""",
+    """INSERT INTO content_permissions(user_id,permission,granted_by,created_at)
+       SELECT user_id,permission,granted_by,created_at FROM content_permissions_v20""",
+    "DROP TABLE content_permissions_v20",
+    "ALTER TABLE content_permission_group_items RENAME TO content_permission_group_items_v20",
+    """CREATE TABLE content_permission_group_items (
+        group_id TEXT NOT NULL REFERENCES content_permission_groups(id) ON DELETE CASCADE,
+        permission TEXT NOT NULL CHECK (permission IN (
+            'workspace.view','item.view','item.download','category.view','item.upload','item.submit',
+            'item.move_draft','item.archive_draft','item.review','item.move_review',
+            'item.publish','item.reclassify_published','item.archive_published','trash.view','trash.restore',
+            'trash.purge','trash.policy_manage','category.manage','folder.request','folder.review',
+            'import.server','index.view'
+        )),
+        PRIMARY KEY(group_id, permission)
+    )""",
+    """INSERT INTO content_permission_group_items(group_id,permission)
+       SELECT group_id,permission FROM content_permission_group_items_v20""",
+    """INSERT INTO content_permission_group_items(group_id,permission)
+       SELECT id,'trash.purge' FROM content_permission_groups
+       WHERE is_system=1 AND group_key='system_admin'""",
+    """INSERT INTO content_permission_group_items(group_id,permission)
+       SELECT id,'trash.policy_manage' FROM content_permission_groups
+       WHERE is_system=1 AND group_key='system_admin'""",
+    "DROP TABLE content_permission_group_items_v20",
+    """CREATE TABLE IF NOT EXISTS content_trash_settings (
+        singleton_id INTEGER PRIMARY KEY CHECK (singleton_id=1),
+        cleanup_enabled INTEGER NOT NULL DEFAULT 0 CHECK (cleanup_enabled IN (0,1)),
+        retention_days INTEGER NOT NULL DEFAULT 90 CHECK (retention_days BETWEEN 1 AND 3650),
+        warning_days INTEGER NOT NULL DEFAULT 7 CHECK (warning_days BETWEEN 0 AND 365),
+        batch_limit INTEGER NOT NULL DEFAULT 20 CHECK (batch_limit BETWEEN 1 AND 20),
+        lease_owner TEXT,
+        lease_expires_at INTEGER,
+        updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        updated_at INTEGER NOT NULL
+    )""",
+    """INSERT OR IGNORE INTO content_trash_settings(
+        singleton_id,cleanup_enabled,retention_days,warning_days,batch_limit,updated_at
+    ) VALUES (1,0,90,7,20,0)""",
+    """CREATE TABLE IF NOT EXISTS content_trash_purge_runs (
+        id TEXT PRIMARY KEY,
+        trigger_type TEXT NOT NULL CHECK (trigger_type IN ('manual','automatic')),
+        policy_json TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('running','succeeded','partial','failed')),
+        candidate_count INTEGER NOT NULL DEFAULT 0,
+        succeeded_count INTEGER NOT NULL DEFAULT 0,
+        failed_count INTEGER NOT NULL DEFAULT 0,
+        actor_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        error_summary TEXT,
+        created_at INTEGER NOT NULL,
+        finished_at INTEGER
+    )""",
+    """CREATE TABLE IF NOT EXISTS content_trash_purge_items (
+        id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL REFERENCES content_trash_purge_runs(id) ON DELETE RESTRICT,
+        item_id TEXT NOT NULL,
+        version_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        original_filename TEXT NOT NULL,
+        category_path TEXT NOT NULL,
+        object_sha256 TEXT,
+        status TEXT NOT NULL CHECK (status IN ('planned','succeeded','failed','blocked')),
+        reason TEXT,
+        qdrant_points_deleted INTEGER NOT NULL DEFAULT 0,
+        parents_deleted INTEGER NOT NULL DEFAULT 0,
+        object_deleted INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        finished_at INTEGER,
+        UNIQUE(run_id,item_id)
+    )""",
+    """CREATE INDEX IF NOT EXISTS idx_content_trash_purge_runs_created
+       ON content_trash_purge_runs(created_at DESC)""",
+)
+
 MIGRATIONS = (
     Migration(1, "multi_engine_transcription_phase2", PHASE2_STATEMENTS),
     Migration(2, "answer_regeneration_versions", ANSWER_VERSION_STATEMENTS),
@@ -849,6 +938,7 @@ MIGRATIONS = (
     Migration(17, "asr_profile_management", ASR_PROFILE_MANAGEMENT_STATEMENTS),
     Migration(18, "published_content_reclassification", CONTENT_RECLASSIFICATION_STATEMENTS),
     Migration(19, "media_library_video_actions", MEDIA_LIBRARY_VIDEO_ACTIONS_STATEMENTS),
+    Migration(20, "content_trash_lifecycle", CONTENT_TRASH_LIFECYCLE_STATEMENTS),
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 PHASE2_TABLES = frozenset(
@@ -896,6 +986,9 @@ ASR_PROFILE_MANAGEMENT_TABLES = frozenset(
 CONTENT_RECLASSIFICATION_TABLES = frozenset({"content_reclassification_jobs"})
 MEDIA_LIBRARY_VIDEO_ACTIONS_TABLES = frozenset(
     {"media_metadata_revisions", "media_replacements"}
+)
+CONTENT_TRASH_LIFECYCLE_TABLES = frozenset(
+    {"content_trash_settings", "content_trash_purge_runs", "content_trash_purge_items"}
 )
 
 
@@ -1044,6 +1137,8 @@ def has_pending_ddl(path: Path, *, base_tables: frozenset[str]) -> bool:
         try:
             expected_groups = (
                 SYSTEM_CONTENT_PERMISSION_GROUPS
+                if any(version == 20 for version, _name in applied)
+                else PRE_TRASH_LIFECYCLE_SYSTEM_CONTENT_PERMISSION_GROUPS
                 if any(version == 18 for version, _name in applied)
                 else PRE_RECLASSIFICATION_SYSTEM_CONTENT_PERMISSION_GROUPS
                 if any(version == 13 for version, _name in applied)
@@ -1069,6 +1164,8 @@ def has_pending_ddl(path: Path, *, base_tables: frozenset[str]) -> bool:
     if any(version == 18 for version, _name in applied) and not CONTENT_RECLASSIFICATION_TABLES.issubset(tables):
         raise RuntimeError("migration_schema_mismatch")
     if any(version == 19 for version, _name in applied) and not MEDIA_LIBRARY_VIDEO_ACTIONS_TABLES.issubset(tables):
+        raise RuntimeError("migration_schema_mismatch")
+    if any(version == 20 for version, _name in applied) and not CONTENT_TRASH_LIFECYCLE_TABLES.issubset(tables):
         raise RuntimeError("migration_schema_mismatch")
     if any(version == 10 for version, _name in applied):
         conn = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
@@ -1152,9 +1249,13 @@ def apply_all(conn: sqlite3.Connection, *, base_schema: str, applied_at: int) ->
             raise RuntimeError("migration_schema_mismatch")
         if 19 in applied_versions and not MEDIA_LIBRARY_VIDEO_ACTIONS_TABLES.issubset(tables):
             raise RuntimeError("migration_schema_mismatch")
+        if 20 in applied_versions and not CONTENT_TRASH_LIFECYCLE_TABLES.issubset(tables):
+            raise RuntimeError("migration_schema_mismatch")
         validate_system_content_permission_groups(
             conn,
             SYSTEM_CONTENT_PERMISSION_GROUPS
+            if 20 in applied_versions
+            else PRE_TRASH_LIFECYCLE_SYSTEM_CONTENT_PERMISSION_GROUPS
             if 18 in applied_versions
             else PRE_RECLASSIFICATION_SYSTEM_CONTENT_PERMISSION_GROUPS
             if 13 in applied_versions

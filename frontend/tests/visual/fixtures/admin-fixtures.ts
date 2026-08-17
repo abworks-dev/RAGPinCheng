@@ -13,6 +13,7 @@ const admin = {
     "workspace.view", "item.view", "item.download", "category.view", "item.upload", "item.submit",
     "item.move_draft", "item.archive_draft", "item.review", "item.move_review",
     "item.publish", "item.reclassify_published", "item.archive_published", "trash.view", "trash.restore",
+    "trash.purge", "trash.policy_manage",
     "category.manage", "folder.request", "folder.review", "import.server", "index.view",
   ],
 };
@@ -389,7 +390,7 @@ const permissionUsers = [
 ];
 
 const permissionCatalog = {
-  schema_version: 4,
+  schema_version: 5,
   permissions: [
     { key: "workspace.view", domain: "access", domain_label: "入口与查看", label: "进入资料工作台", description: "进入资料管理工作台。", dependencies: [] },
     { key: "item.view", domain: "access", domain_label: "入口与查看", label: "查看资料", description: "查看资料列表、详情和预览。", dependencies: ["workspace.view"] },
@@ -406,6 +407,8 @@ const permissionCatalog = {
     { key: "item.archive_published", domain: "publish", domain_label: "发布流程", label: "下架正式资料", description: "将已确认、发布失败或已发布资料移入回收站。", dependencies: ["workspace.view", "item.view"] },
     { key: "trash.view", domain: "trash", domain_label: "回收站", label: "查看回收站", description: "查看和搜索已归档资料。", dependencies: ["workspace.view", "item.view"] },
     { key: "trash.restore", domain: "trash", domain_label: "回收站", label: "恢复资料", description: "从回收站恢复资料。", dependencies: ["workspace.view", "item.view", "trash.view"] },
+    { key: "trash.purge", domain: "trash", domain_label: "回收站", label: "永久删除资料", description: "永久删除回收站中的资料及关联索引。", dependencies: ["workspace.view", "item.view", "trash.view"] },
+    { key: "trash.policy_manage", domain: "trash", domain_label: "回收站", label: "管理清理策略", description: "配置自动清理策略并查看清理记录。", dependencies: ["workspace.view", "item.view", "trash.view"] },
     { key: "category.manage", domain: "category", domain_label: "分类与目录", label: "维护分类", description: "新增、修改、启用或停用资料分类。", dependencies: ["workspace.view", "category.view"] },
     { key: "folder.request", domain: "category", domain_label: "分类与目录", label: "申请目录", description: "提交子目录创建申请。", dependencies: ["workspace.view", "item.view", "category.view"] },
     { key: "folder.review", domain: "category", domain_label: "分类与目录", label: "审批目录", description: "查看、批准或退回目录申请。", dependencies: ["workspace.view", "item.view", "category.view"] },
@@ -818,6 +821,19 @@ export async function installAdminRoutes(
     if (path === "/api/admin/content/trash") {
       const rows = scenario === "empty" ? [] : trashItems;
       return json(route, { items: rows, total: rows.length, status_counts: rows.length ? { published: 1, approved: 1 } : {}, retention_counts: rows.length ? { retained: 0, expiring: 1, overdue: 1 } : {} });
+    }
+    if (path === "/api/admin/content/trash/settings") {
+      return json(route, { cleanup_enabled: false, retention_days: 90, warning_days: 7, batch_limit: 20, updated_by: null, updated_at: 1700000000 });
+    }
+    if (path === "/api/admin/content/trash/purge-runs") return json(route, []);
+    if (path === "/api/admin/content/trash/purge-preview") {
+      const item = trashItems[1];
+      return json(route, { items: [{ item_id: item.item_id, version_id: item.version_id, status: "ready", reason: null, title: item.title, original_filename: item.original_filename, category_path: item.category_path, size_bytes: 2048000 }], ready_count: 1, blocked_count: 0, total_size_bytes: 2048000, confirmation_phrase: "永久删除 1 份资料" });
+    }
+    if (path === "/api/admin/content/trash/purge/preflight") {
+      const payload = request.postDataJSON() as { items: Array<{ item_id: string; expected_version_id: string }> };
+      const selected = trashItems.filter((item) => payload.items.some((entry) => entry.item_id === item.item_id));
+      return json(route, { items: selected.map((item) => ({ item_id: item.item_id, version_id: item.version_id, status: "ready", reason: null, title: item.title, original_filename: item.original_filename, category_path: item.category_path, size_bytes: 2048000 })), ready_count: selected.length, blocked_count: 0, total_size_bytes: selected.length * 2048000, confirmation_phrase: `永久删除 ${selected.length} 份资料` });
     }
     if (path === "/api/admin/content/bulk-restore/preflight") {
       const payload = request.postDataJSON() as { items: Array<{ item_id: string; expected_version_id: string }> };

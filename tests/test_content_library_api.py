@@ -14,6 +14,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from api import routes_content
+from api import content_trash_cleanup
 from api.content_permission_catalog import LEGACY_CONTENT_PERMISSION_MAP
 from api.content_storage import ContentStorage
 from api.db import connect, get_db, init_db
@@ -472,6 +473,9 @@ def test_delete_draft_requires_organize_csrf_and_preserves_object(content_api):
             "UPDATE content_versions SET source_rel_path=? WHERE id=?",
             ("项目资料/建模/回收路径.md", uploaded["version_id"]),
         )
+        conn.execute(
+            "UPDATE category_nodes SET display_name='归档后改名' WHERE id='cat-03'"
+        )
         conn.commit()
     finally:
         conn.close()
@@ -551,6 +555,86 @@ def test_restore_can_target_an_active_category_when_original_is_inactive(content
         "moved_to_alternate_category": True,
         "replaced_conflict": False,
     }
+
+
+def test_trash_settings_and_permanent_delete_require_admin_confirmation(
+    content_api, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    client, sessions, _queued, db_path = content_api
+    settings_url = "/api/admin/content/trash/settings"
+    assert client.get(settings_url, **_auth(sessions, "reviewer")).json()["cleanup_enabled"] is False
+    assert client.put(settings_url, json={
+        "cleanup_enabled": False, "retention_days": 60, "warning_days": 5, "batch_limit": 10,
+    }, **_auth(sessions, "reviewer", csrf=True)).status_code == 403
+    assert client.put(settings_url, json={
+        "cleanup_enabled": False, "retention_days": 60, "warning_days": 5, "batch_limit": 10,
+    }, **_auth(sessions, "admin")).status_code == 403
+    saved = client.put(settings_url, json={
+        "cleanup_enabled": False, "retention_days": 60, "warning_days": 5, "batch_limit": 10,
+    }, **_auth(sessions, "admin", csrf=True))
+    assert saved.status_code == 200
+    assert saved.json()["cleanup_enabled"] is False
+
+    uploaded = client.post(
+        "/api/admin/content/uploads", data={"category_id": "cat-03"},
+        files=[("files", ("purge-me.md", b"# synthetic", "text/markdown"))],
+        **_auth(sessions, "organizer", csrf=True),
+    ).json()["entries"][0]
+    assert client.request(
+        "DELETE", f"/api/admin/content/items/{uploaded['item_id']}",
+        json={"expected_version_id": uploaded["version_id"]},
+        **_auth(sessions, "organizer", csrf=True),
+    ).status_code == 200
+    conn = connect(db_path)
+    conn.execute(
+        "UPDATE content_items SET archived_at=? WHERE id=?",
+        (int(time.time()) - 61 * 86400, uploaded["item_id"]),
+    )
+    conn.commit()
+    conn.close()
+    refs = [{"item_id": uploaded["item_id"], "expected_version_id": uploaded["version_id"]}]
+    assert client.post(
+        "/api/admin/content/trash/purge/preflight", json={"items": refs},
+        **_auth(sessions, "reviewer", csrf=True),
+    ).status_code == 403
+    preview = client.post(
+        "/api/admin/content/trash/purge/preflight", json={"items": refs},
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert preview.status_code == 200
+    assert preview.json()["confirmation_phrase"] == "永久删除 1 份资料"
+    overdue_preview = client.get(
+        "/api/admin/content/trash/purge-preview", **_auth(sessions, "admin")
+    )
+    assert overdue_preview.status_code == 200
+    assert overdue_preview.json()["ready_count"] == 1
+    wrong = client.post(
+        "/api/admin/content/trash/purge", json={"items": refs, "confirmation": "永久删除"},
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert wrong.status_code == 400
+
+    storage = ContentStorage(tmp_path / "content")
+    monkeypatch.setattr(content_trash_cleanup, "_storage", storage)
+    monkeypatch.setattr(content_trash_cleanup, "_delete_external", lambda *_args: (0, 0))
+    purged = client.post(
+        "/api/admin/content/trash/purge",
+        json={"items": refs, "confirmation": "永久删除 1 份资料"},
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert purged.status_code == 200
+    assert purged.json()["succeeded_count"] == 1
+    conn = connect(db_path)
+    try:
+        assert conn.execute("SELECT 1 FROM content_items WHERE id=?", (uploaded["item_id"],)).fetchone() is None
+        audit = conn.execute(
+            "SELECT status,title,category_path FROM content_trash_purge_items WHERE item_id=?",
+            (uploaded["item_id"],),
+        ).fetchone()
+        assert tuple(audit) == ("succeeded", "purge-me", "03 公司内部标准")
+        assert conn.execute("SELECT cleanup_enabled FROM content_trash_settings").fetchone()[0] == 0
+    finally:
+        conn.close()
 
 
 def test_restore_conflict_requires_archive_permission_and_replaces_atomically(content_api):
@@ -1556,11 +1640,12 @@ def test_permission_catalog_and_dependency_validation(content_api):
     admin_write = _auth(sessions, "admin", csrf=True)
     catalog = client.get("/api/admin/content/permission-catalog", **admin_read)
     assert catalog.status_code == 200
-    assert catalog.json()["schema_version"] == 4
+    assert catalog.json()["schema_version"] == 5
     assert [item["key"] for item in catalog.json()["permissions"]] == [
         "workspace.view", "item.view", "item.download", "category.view", "item.upload", "item.submit",
         "item.move_draft", "item.archive_draft", "item.review", "item.move_review",
         "item.publish", "item.reclassify_published", "item.archive_published", "trash.view", "trash.restore",
+        "trash.purge", "trash.policy_manage",
         "category.manage", "folder.request", "folder.review", "import.server", "index.view",
     ]
     definitions = {item["key"]: item for item in catalog.json()["permissions"]}

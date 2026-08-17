@@ -60,6 +60,14 @@ from .content_reclassification import (
     retry_reclassification_job,
 )
 from .content_storage import ContentStorage
+from .content_trash_cleanup import (
+    get_trash_settings,
+    list_purge_runs,
+    overdue_purge_candidates,
+    preflight_purge,
+    purge_items,
+    update_trash_settings,
+)
 from .content_store import (
     _category_path,
     ContentFilenameConflict,
@@ -102,6 +110,13 @@ from .schemas import (
     BulkRestorePreflightResponse,
     BulkRestorePreflightResultDTO,
     TrashExportRequest,
+    TrashPurgePreflightRequest,
+    TrashPurgePreflightResponse,
+    TrashPurgeRequest,
+    TrashPurgeResponse,
+    TrashSettingsDTO,
+    TrashPurgeRunDTO,
+    UpdateTrashSettingsRequest,
     BulkDownloadManagedContentRequest,
     CreateManagedCategoryRequest,
     CreateFolderRequest,
@@ -937,11 +952,17 @@ def get_managed_upload_task(
 def _content_item_dto(
     row: sqlite3.Row,
     summary: ManagedVersionIndexSummary | None = None,
+    *,
+    retention_days: int = CONTENT_TRASH_RETENTION_DAYS,
+    warning_days: int = CONTENT_TRASH_EXPIRING_WARNING_DAYS,
 ) -> ManagedContentItemDTO:
     archive_metadata = json.loads(row["archive_metadata_json"] or "{}") if "archive_metadata_json" in row.keys() else {}
     archived_at = row["archived_at"] if "archived_at" in row.keys() else None
+    category_path = row["category_path"] if "category_path" in row.keys() else ""
+    if archived_at:
+        category_path = str(archive_metadata.get("category_path") or category_path)
     purge_eligible_at = (
-        archived_at + CONTENT_TRASH_RETENTION_DAYS * 86400 if archived_at else None
+        archived_at + retention_days * 86400 if archived_at else None
     )
     retention_days_remaining = (
         (purge_eligible_at - int(time.time()) + 86399) // 86400
@@ -954,7 +975,7 @@ def _content_item_dto(
         else "overdue"
         if retention_days_remaining < 0
         else "expiring"
-        if retention_days_remaining <= CONTENT_TRASH_EXPIRING_WARNING_DAYS
+        if retention_days_remaining <= warning_days
         else "retained"
     )
     preview_status: Literal["ready", "pending", "missing", "not_applicable"] = "not_applicable"
@@ -983,7 +1004,7 @@ def _content_item_dto(
         category_id=row["category_id"],
         category_key=row["category_key"],
         category_label=f"{row['display_code']} {row['display_name']}",
-        category_path=row["category_path"] if "category_path" in row.keys() else f"{row['display_code']} {row['display_name']}",
+        category_path=category_path or f"{row['display_code']} {row['display_name']}",
         media_id=row["media_id"],
         preview_parent_id=preview_parent_id,
         preview_status=preview_status,
@@ -1099,11 +1120,13 @@ def get_content_items_page(
 
 
 def _trash_retention_bounds(
-    retention_status: str | None, archived_from: int | None, archived_to: int | None
+    retention_status: str | None, archived_from: int | None, archived_to: int | None,
+    *, retention_days: int = CONTENT_TRASH_RETENTION_DAYS,
+    warning_days: int = CONTENT_TRASH_EXPIRING_WARNING_DAYS,
 ) -> tuple[int | None, int | None]:
     now = int(time.time())
-    retention_boundary = now - CONTENT_TRASH_RETENTION_DAYS * 86400
-    warning_boundary = retention_boundary + CONTENT_TRASH_EXPIRING_WARNING_DAYS * 86400
+    retention_boundary = now - retention_days * 86400
+    warning_boundary = retention_boundary + warning_days * 86400
     if retention_status == "overdue":
         archived_to = min(archived_to, retention_boundary - 1) if archived_to is not None else retention_boundary - 1
     elif retention_status == "expiring":
@@ -1128,8 +1151,12 @@ def get_content_trash(
     _user: CurrentUser = Depends(require_content_permission("trash.view")),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> ManagedContentListResponse:
+    settings = get_trash_settings(conn)
     base_from, base_to = archived_from, archived_to
-    archived_from, archived_to = _trash_retention_bounds(retention_status, archived_from, archived_to)
+    archived_from, archived_to = _trash_retention_bounds(
+        retention_status, archived_from, archived_to,
+        retention_days=settings["retention_days"], warning_days=settings["warning_days"],
+    )
     rows, total, status_counts = list_content_items_page(
         conn, query=query, limit=limit, offset=offset, archived=True,
         archived_from=archived_from, archived_to=archived_to, category_id=category_id,
@@ -1137,15 +1164,106 @@ def get_content_trash(
     )
     retention_counts: dict[str, int] = {}
     for state in ("retained", "expiring", "overdue"):
-        state_from, state_to = _trash_retention_bounds(state, base_from, base_to)
+        state_from, state_to = _trash_retention_bounds(
+            state, base_from, base_to,
+            retention_days=settings["retention_days"], warning_days=settings["warning_days"],
+        )
         _, state_total, _ = list_content_items_page(
             conn, query=query, limit=1, offset=0, archived=True,
             archived_from=state_from, archived_to=state_to, category_id=category_id,
             archived_by=archived_by, archived_sort_direction=sort_direction,
         )
         retention_counts[state] = state_total
-    return ManagedContentListResponse(items=[_content_item_dto(row) for row in rows], total=total,
+    return ManagedContentListResponse(items=[_content_item_dto(
+        row, retention_days=settings["retention_days"], warning_days=settings["warning_days"]
+    ) for row in rows], total=total,
         status_counts=status_counts, retention_counts=retention_counts)
+
+
+@router.get("/trash/settings", response_model=TrashSettingsDTO)
+def get_content_trash_settings(
+    _user: CurrentUser = Depends(require_content_permission("trash.view")),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> TrashSettingsDTO:
+    return TrashSettingsDTO(**get_trash_settings(conn))
+
+
+@router.put("/trash/settings", response_model=TrashSettingsDTO)
+def put_content_trash_settings(
+    body: UpdateTrashSettingsRequest,
+    user: CurrentUser = Depends(require_csrf),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> TrashSettingsDTO:
+    if not has_content_permission(conn, user, "trash.policy_manage"):
+        raise HTTPException(status_code=403, detail="当前账号没有管理回收站清理策略的权限")
+    try:
+        result = update_trash_settings(conn, actor_user_id=user.id, **body.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="即将到期天数必须小于保留天数") from exc
+    return TrashSettingsDTO(**result)
+
+
+def _purge_preflight_response(results: list[dict[str, object]]) -> TrashPurgePreflightResponse:
+    ready = sum(result["status"] == "ready" for result in results)
+    return TrashPurgePreflightResponse(
+        items=results, ready_count=ready, blocked_count=len(results) - ready,
+        total_size_bytes=sum(int(result["size_bytes"]) for result in results if result["status"] == "ready"),
+        confirmation_phrase=f"永久删除 {ready} 份资料",
+    )
+
+
+@router.post("/trash/purge/preflight", response_model=TrashPurgePreflightResponse)
+def preflight_content_trash_purge(
+    body: TrashPurgePreflightRequest,
+    user: CurrentUser = Depends(require_csrf),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> TrashPurgePreflightResponse:
+    if not has_content_permission(conn, user, "trash.purge"):
+        raise HTTPException(status_code=403, detail="当前账号没有永久删除资料的权限")
+    refs = _validate_bulk_item_refs(body.items)
+    return _purge_preflight_response(preflight_purge(
+        conn, [(item.item_id, item.expected_version_id) for item in refs]
+    ))
+
+
+@router.get("/trash/purge-preview", response_model=TrashPurgePreflightResponse)
+def preview_overdue_content_trash_purge(
+    _user: CurrentUser = Depends(require_content_permission("trash.purge")),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> TrashPurgePreflightResponse:
+    return _purge_preflight_response(overdue_purge_candidates(conn))
+
+
+@router.post("/trash/purge", response_model=TrashPurgeResponse)
+def purge_content_trash(
+    body: TrashPurgeRequest,
+    user: CurrentUser = Depends(require_csrf),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> TrashPurgeResponse:
+    if not has_content_permission(conn, user, "trash.purge"):
+        raise HTTPException(status_code=403, detail="当前账号没有永久删除资料的权限")
+    refs = _validate_bulk_item_refs(body.items)
+    preflight = preflight_purge(conn, [(item.item_id, item.expected_version_id) for item in refs])
+    ready = [item for item in preflight if item["status"] == "ready"]
+    expected_phrase = f"永久删除 {len(ready)} 份资料"
+    if len(ready) != len(refs):
+        raise HTTPException(status_code=409, detail="资料状态已变化，请重新检查")
+    if body.confirmation != expected_phrase:
+        raise HTTPException(status_code=400, detail=f"请输入“{expected_phrase}”确认")
+    result = purge_items(conn, [(item.item_id, item.expected_version_id) for item in refs],
+                         actor_user_id=user.id)
+    return TrashPurgeResponse(**{key: result[key] for key in (
+        "run_id", "status", "candidate_count", "succeeded_count", "failed_count"
+    )})
+
+
+@router.get("/trash/purge-runs", response_model=list[TrashPurgeRunDTO])
+def get_content_trash_purge_runs(
+    limit: int = Query(20, ge=1, le=100),
+    _user: CurrentUser = Depends(require_content_permission("trash.policy_manage")),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> list[TrashPurgeRunDTO]:
+    return [TrashPurgeRunDTO(**row) for row in list_purge_runs(conn, limit)]
 
 
 @router.post("/bulk-restore/preflight", response_model=BulkRestorePreflightResponse)
@@ -1193,8 +1311,10 @@ def export_content_trash(
 ) -> StreamingResponse:
     if not has_content_permission(conn, user, "trash.view"):
         raise HTTPException(status_code=403, detail="当前账号没有查看回收站的权限")
+    settings = get_trash_settings(conn)
     archived_from, archived_to = _trash_retention_bounds(
-        body.retention_status, body.archived_from, body.archived_to
+        body.retention_status, body.archived_from, body.archived_to,
+        retention_days=settings["retention_days"], warning_days=settings["warning_days"],
     )
     rows, total, _ = list_content_items_page(
         conn, query=body.query, limit=10000, offset=0, archived=True,
@@ -1206,7 +1326,9 @@ def export_content_trash(
     writer = csv.writer(output)
     writer.writerow(["资料名称", "文件名", "原目录", "原状态", "移入人员", "移入时间", "保留状态", "剩余天数"])
     for row in rows:
-        dto = _content_item_dto(row)
+        dto = _content_item_dto(
+            row, retention_days=settings["retention_days"], warning_days=settings["warning_days"]
+        )
         writer.writerow([dto.title, dto.original_filename, dto.category_path,
             dto.pre_archive_lifecycle_status or dto.lifecycle_status,
             dto.archived_by_name or "", dto.archived_at or "",
