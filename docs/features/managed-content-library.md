@@ -108,7 +108,11 @@ Schema 16 为历史上已有正式 head 的未归档视频补建目录壳。目�
 
 `POST /api/admin/content/bulk-restore` 每批接受 1–20 份资料，可分别恢复到原目录，或统一恢复到一个活动目录。每份资料独立事务提交并返回逐项结果；同名冲突不会在批量操作中自动替换，失败项继续留在回收站，供单项恢复处理。每个成功项继续写入独立的 `content.restored` 审计事件。
 
+回收站桌面端和移动端都提供逐项多选、全选当前页、已选计数和取消选择；单次最多 20 份，翻页或改变筛选会清空选择。批量恢复先调用 `POST /api/admin/content/bulk-restore/preflight` 检查版本、目标目录、活动索引任务和同名冲突，确认窗口只提交检查通过的资料；冲突项不自动替换，继续通过单项恢复处理。
+
 回收站默认保留期为 90 天，并在到期前 7 天标记“即将到期”；部署可通过 `CONTENT_TRASH_RETENTION_DAYS` 和 `CONTENT_TRASH_EXPIRING_WARNING_DAYS` 调整。列表返回 `purge_eligible_at`、`retention_status` 和 `retention_days_remaining`，并支持保留状态、归档时间、原目录、归档人员和归档时间排序筛选。该生命周期当前只提供提示和筛选：已超期资料仍可恢复，不会自动或手动物理删除对象、SQLite 记录或 Qdrant points。
+
+`POST /api/admin/content/trash/export` 按当前筛选导出带 UTF-8 BOM 的 CSV 到期处置清单，要求 `trash.view`、登录 Cookie 和 CSRF，并写入 `content.trash_exported` 审计事件。导出不改变资料状态，不代表清理审批或执行永久删除。
 
 `GET /api/admin/content/items/{item_id}/audit-events` 返回资料移入回收站和恢复的产品化操作记录。活动资料要求 `item.view`，回收站资料要求 `trash.view`；接口只返回操作类型、人员、时间、目录快照、状态和冲突处理结果，不暴露内部 metadata 或存储路径。当前阶段仍不提供永久删除、自动到期清理或对象文件清理。
 

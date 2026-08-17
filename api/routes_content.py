@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import csv
+import io
 import json
 import os
 import re
@@ -13,7 +15,7 @@ from pathlib import Path
 from typing import Literal
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from starlette.background import BackgroundTask
 
 from src.config import (
@@ -49,6 +51,7 @@ from .content_reclassification import (
 )
 from .content_storage import ContentStorage
 from .content_store import (
+    _category_path,
     ContentFilenameConflict,
     archive_content_item,
     audit_event,
@@ -61,6 +64,7 @@ from .content_store import (
     get_upload_task,
     list_content_items,
     list_content_items_page,
+    find_content_filename_conflict,
     list_content_audit_events,
     list_upload_tasks,
     restore_content_item,
@@ -83,6 +87,9 @@ from .db import get_db
 from .schemas import (
     BulkArchiveManagedContentRequest,
     BulkRestoreManagedContentRequest,
+    BulkRestorePreflightResponse,
+    BulkRestorePreflightResultDTO,
+    TrashExportRequest,
     BulkDownloadManagedContentRequest,
     CreateManagedCategoryRequest,
     CreateFolderRequest,
@@ -1018,6 +1025,22 @@ def get_content_items_page(
     )
 
 
+def _trash_retention_bounds(
+    retention_status: str | None, archived_from: int | None, archived_to: int | None
+) -> tuple[int | None, int | None]:
+    now = int(time.time())
+    retention_boundary = now - CONTENT_TRASH_RETENTION_DAYS * 86400
+    warning_boundary = retention_boundary + CONTENT_TRASH_EXPIRING_WARNING_DAYS * 86400
+    if retention_status == "overdue":
+        archived_to = min(archived_to, retention_boundary - 1) if archived_to is not None else retention_boundary - 1
+    elif retention_status == "expiring":
+        archived_from = max(archived_from, retention_boundary) if archived_from is not None else retention_boundary
+        archived_to = min(archived_to, warning_boundary) if archived_to is not None else warning_boundary
+    elif retention_status == "retained":
+        archived_from = max(archived_from, warning_boundary + 1) if archived_from is not None else warning_boundary + 1
+    return archived_from, archived_to
+
+
 @router.get("/trash", response_model=ManagedContentListResponse)
 def get_content_trash(
     query: str = Query("", max_length=200),
@@ -1032,28 +1055,95 @@ def get_content_trash(
     _user: CurrentUser = Depends(require_content_permission("trash.view")),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> ManagedContentListResponse:
-    now = int(time.time())
-    retention_boundary = now - CONTENT_TRASH_RETENTION_DAYS * 86400
-    warning_boundary = retention_boundary + CONTENT_TRASH_EXPIRING_WARNING_DAYS * 86400
-    if retention_status == "overdue":
-        archived_to = (
-            min(archived_to, retention_boundary - 1)
-            if archived_to is not None
-            else retention_boundary - 1
-        )
-    elif retention_status == "expiring":
-        archived_from = max(archived_from, retention_boundary) if archived_from is not None else retention_boundary
-        archived_to = min(archived_to, warning_boundary) if archived_to is not None else warning_boundary
-    elif retention_status == "retained":
-        archived_from = max(archived_from, warning_boundary + 1) if archived_from is not None else warning_boundary + 1
+    base_from, base_to = archived_from, archived_to
+    archived_from, archived_to = _trash_retention_bounds(retention_status, archived_from, archived_to)
     rows, total, status_counts = list_content_items_page(
         conn, query=query, limit=limit, offset=offset, archived=True,
         archived_from=archived_from, archived_to=archived_to, category_id=category_id,
         archived_by=archived_by, archived_sort_direction=sort_direction
     )
-    return ManagedContentListResponse(
-        items=[_content_item_dto(row) for row in rows], total=total, status_counts=status_counts
+    retention_counts: dict[str, int] = {}
+    for state in ("retained", "expiring", "overdue"):
+        state_from, state_to = _trash_retention_bounds(state, base_from, base_to)
+        _, state_total, _ = list_content_items_page(
+            conn, query=query, limit=1, offset=0, archived=True,
+            archived_from=state_from, archived_to=state_to, category_id=category_id,
+            archived_by=archived_by, archived_sort_direction=sort_direction,
+        )
+        retention_counts[state] = state_total
+    return ManagedContentListResponse(items=[_content_item_dto(row) for row in rows], total=total,
+        status_counts=status_counts, retention_counts=retention_counts)
+
+
+@router.post("/bulk-restore/preflight", response_model=BulkRestorePreflightResponse)
+def preflight_bulk_restore(
+    body: BulkRestoreManagedContentRequest,
+    _user: CurrentUser = Depends(require_content_permission("trash.restore")),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> BulkRestorePreflightResponse:
+    results: list[BulkRestorePreflightResultDTO] = []
+    for item in _validate_bulk_item_refs(body.items):
+        row = conn.execute(
+            """SELECT i.id,i.archived_at,i.category_id,v.id AS version_id,v.original_filename
+               FROM content_items i JOIN content_versions v ON v.item_id=i.id
+                AND v.version_number=(SELECT max(v2.version_number) FROM content_versions v2 WHERE v2.item_id=i.id)
+               WHERE i.id=? AND i.content_kind='document'""", (item.item_id,),
+        ).fetchone()
+        status, message, target_path = "ready", "可以恢复", None
+        if row is None or row["archived_at"] is None:
+            status, message = "not_found", "资料已不在回收站"
+        elif row["version_id"] != item.expected_version_id:
+            status, message = "version_changed", "资料版本已变化，请刷新后重试"
+        else:
+            target_id = body.target_category_id or str(row["category_id"])
+            category = conn.execute("SELECT id FROM category_nodes WHERE id=? AND is_active=1", (target_id,)).fetchone()
+            target_path = _category_path(conn, target_id)
+            if category is None:
+                status, message = "inactive_category", "目标目录已停用"
+            elif conn.execute("SELECT 1 FROM content_index_jobs WHERE version_id=? AND status IN ('pending','parsing','chunking','summarizing','embedding') LIMIT 1", (item.expected_version_id,)).fetchone():
+                status, message = "in_progress", "资料仍有索引任务"
+            elif find_content_filename_conflict(conn, category_id=target_id,
+                    original_filename=str(row["original_filename"]), exclude_item_id=item.item_id):
+                status, message = "conflict", "目标目录存在同名资料"
+        results.append(BulkRestorePreflightResultDTO(item_id=item.item_id,
+            version_id=item.expected_version_id, status=status, message=message,
+            target_category_path=target_path))
+    ready = sum(result.status == "ready" for result in results)
+    return BulkRestorePreflightResponse(results=results, ready=ready, blocked=len(results) - ready)
+
+
+@router.post("/trash/export")
+def export_content_trash(
+    body: TrashExportRequest,
+    user: CurrentUser = Depends(require_csrf),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> StreamingResponse:
+    if not has_content_permission(conn, user, "trash.view"):
+        raise HTTPException(status_code=403, detail="当前账号没有查看回收站的权限")
+    archived_from, archived_to = _trash_retention_bounds(
+        body.retention_status, body.archived_from, body.archived_to
     )
+    rows, total, _ = list_content_items_page(
+        conn, query=body.query, limit=10000, offset=0, archived=True,
+        archived_from=archived_from, archived_to=archived_to,
+        category_id=body.category_id, archived_by=body.archived_by,
+        archived_sort_direction=body.sort_direction,
+    )
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["资料名称", "文件名", "原目录", "原状态", "移入人员", "移入时间", "保留状态", "剩余天数"])
+    for row in rows:
+        dto = _content_item_dto(row)
+        writer.writerow([dto.title, dto.original_filename, dto.category_path,
+            dto.pre_archive_lifecycle_status or dto.lifecycle_status,
+            dto.archived_by_name or "", dto.archived_at or "",
+            dto.retention_status or "", dto.retention_days_remaining])
+    audit_event(conn, "content.trash_exported", actor_user_id=user.id,
+        metadata={"count": total, "retention_status": body.retention_status or "all"})
+    conn.commit()
+    data = "\ufeff" + output.getvalue()
+    return StreamingResponse(iter([data.encode("utf-8")]), media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="content-trash.csv"'})
 
 
 @router.post("/bulk-restore", response_model=BulkManagedContentResponse)

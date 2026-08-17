@@ -416,6 +416,15 @@ export type ManagedContentList = {
   items: ManagedContentItem[];
   total: number;
   status_counts: Record<string, number>;
+  retention_counts?: Record<string, number>;
+};
+
+export type BulkRestorePreflightResult = {
+  item_id: string;
+  version_id: string;
+  status: "ready" | "conflict" | "inactive_category" | "version_changed" | "in_progress" | "not_found";
+  message: string;
+  target_category_path: string | null;
 };
 
 export type FolderRequest = {
