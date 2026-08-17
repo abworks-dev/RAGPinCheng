@@ -28,6 +28,30 @@ for (const [navigationLabel, heading, slug] of [["资料管理", "资料管理",
   });
 }
 
+test("资料管理搜索筛选展开 accepted golden", async ({ page }) => {
+  await installAdminRoutes(page, "normal");
+  await page.goto("/admin");
+  if (page.viewportSize()!.width < 1024) {
+    await page.getByRole("button", { name: "展开管理功能" }).click();
+  }
+  await page.getByRole("link", { name: "资料管理", exact: true }).click();
+  await openRootFolder(page);
+  await page.getByRole("textbox", { name: "搜索资料" }).click();
+  const searchFilters = page.getByRole("dialog", { name: "搜索筛选" });
+  await expect(searchFilters).toBeVisible();
+  await expect(searchFilters.getByRole("combobox", { name: "状态", exact: true })).toHaveValue("");
+  await expect(searchFilters.getByRole("combobox", { name: "来源", exact: true })).toHaveValue("");
+  await expect(searchFilters.getByRole("combobox", { name: "分类", exact: true })).toHaveCount(0);
+  const viewport = page.viewportSize()!;
+  expect(await page.evaluate(() => Math.max(document.body.scrollWidth, document.documentElement.scrollWidth))).toBeLessThanOrEqual(viewport.width);
+  if (process.platform === "win32") {
+    await expect(page).toHaveScreenshot(`managed-content-search-filters-${viewport.width}x${viewport.height}.png`, { fullPage: true });
+  } else {
+    // Linux CI still verifies the expanded layer renders; accepted pixels are Windows-specific.
+    expect((await page.screenshot({ fullPage: true })).byteLength).toBeGreaterThan(10_000);
+  }
+});
+
 test("系统概览生产运行状态 accepted golden", async ({ page }) => {
   await installAdminRoutes(page, "normal");
   await page.goto("/admin");
