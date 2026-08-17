@@ -89,6 +89,7 @@ export function AdminCategoriesPage() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [draft, setDraft] = useState<CategoryDraft | null>(null);
   const [draftCategoryId, setDraftCategoryId] = useState<string | null>(null);
+  const [draftCategoryVersion, setDraftCategoryVersion] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
@@ -139,14 +140,16 @@ export function AdminCategoriesPage() {
     if (!selectedCategory) {
       setDraft(null);
       setDraftCategoryId(null);
+      setDraftCategoryVersion(null);
       return;
     }
-    if (draftCategoryId !== selectedCategory.id || !isDirty) {
+    if (draftCategoryId !== selectedCategory.id || draftCategoryVersion !== selectedCategory.version) {
       setDraft(makeDraft(selectedCategory));
       setDraftCategoryId(selectedCategory.id);
+      setDraftCategoryVersion(selectedCategory.version);
       setSaveError(null);
     }
-  }, [draftCategoryId, isDirty, selectedCategory]);
+  }, [draftCategoryId, draftCategoryVersion, selectedCategory]);
 
   const tree = useMemo(() => filterTree(buildCategoryTree(categories), query, filter), [categories, filter, query]);
   const visibleNodes = useMemo(() => flattenVisibleCategoryTree(tree, expanded), [expanded, tree]);
@@ -251,6 +254,7 @@ export function AdminCategoriesPage() {
     setPendingAction(null);
     if (selectedCategory) setDraft(makeDraft(selectedCategory));
     setDraftCategoryId(selectedCategory?.id || null);
+    setDraftCategoryVersion(selectedCategory?.version ?? null);
     setSaveError(null);
     const action = pendingAction;
     if (!action) return;
@@ -279,6 +283,7 @@ export function AdminCategoriesPage() {
         expected_version: selectedCategory.version,
       });
       setDraft(makeDraft(updated));
+      setDraftCategoryVersion(updated.version);
       await load(true);
       toast.success(`${updated.display_name}已保存`);
     } catch (saveErrorValue) {
@@ -312,6 +317,7 @@ export function AdminCategoriesPage() {
         setSelectedId(created.id);
         setDraft(makeDraft(created));
         setDraftCategoryId(created.id);
+        setDraftCategoryVersion(created.version);
         setExpanded((current) => new Set([...current, ...collectCategoryAncestorIds(rows, created.id)]));
       }
       toast.success("分类已创建");
@@ -332,6 +338,7 @@ export function AdminCategoriesPage() {
   const cancelEdit = () => {
     if (selectedCategory) setDraft(makeDraft(selectedCategory));
     setDraftCategoryId(selectedCategory?.id || null);
+    setDraftCategoryVersion(selectedCategory?.version ?? null);
     setSaveError(null);
   };
 
@@ -351,6 +358,7 @@ export function AdminCategoriesPage() {
       if (updated) {
         setDraft(makeDraft(updated));
         setDraftCategoryId(updated.id);
+        setDraftCategoryVersion(updated.version);
       }
       setExpanded((current) => new Set([...current, ...collectCategoryAncestorIds(rows, selectedCategory.id)]));
       setMoveOpen(false);
@@ -400,6 +408,7 @@ export function AdminCategoriesPage() {
       if (updated) {
         setDraft(makeDraft(updated));
         setDraftCategoryId(updated.id);
+        setDraftCategoryVersion(updated.version);
       }
       setNumberTarget(null);
       setNumberConfirming(false);
