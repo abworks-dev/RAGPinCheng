@@ -39,8 +39,18 @@ def source_preview_api(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     conn.commit()
     conn.close()
 
-    source = docs_dir / "guide.pdf"
-    source.write_bytes(b"%PDF-synthetic")
+    sources = {
+        "pdf-parent": docs_dir / "guide.pdf",
+        "docx-parent": docs_dir / "guide.docx",
+        "xlsx-parent": docs_dir / "schedule.xlsx",
+        "pptx-parent": docs_dir / "deck.pptx",
+    }
+    sources["pdf-parent"].write_bytes(b"%PDF-synthetic")
+    sources["docx-parent"].write_bytes(b"PK-docx-synthetic")
+    sources["xlsx-parent"].write_bytes(b"PK-xlsx-synthetic")
+    sources["pptx-parent"].write_bytes(b"PK-pptx-synthetic")
+    sources["xlsx-parent"].with_suffix(".preview.xlsx").write_bytes(b"PK-xlsx-preview")
+    sources["pptx-parent"].with_suffix(".preview.pdf").write_bytes(b"%PDF-pptx-preview")
     parent_conn = sqlite3.connect(parents_db)
     parent_conn.execute(
         """CREATE TABLE parents (
@@ -51,9 +61,12 @@ def source_preview_api(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     parent_conn.executemany(
         "INSERT INTO parents VALUES (?,?,?,?,?)",
         [
-            ("pdf-parent", str(source), "pdf", None, None),
+            ("pdf-parent", str(sources["pdf-parent"]), "pdf", None, None),
+            ("docx-parent", str(sources["docx-parent"]), "docx", None, None),
+            ("xlsx-parent", str(sources["xlsx-parent"]), "xlsx", None, None),
+            ("pptx-parent", str(sources["pptx-parent"]), "pptx", None, None),
             ("missing-parent", str(docs_dir / "internal-missing.docx"), "docx", None, None),
-            ("pptx-parent", str(docs_dir / "internal-deck.pptx"), "pptx", None, None),
+            ("missing-pptx-parent", str(docs_dir / "internal-deck.pptx"), "pptx", None, None),
         ],
     )
     parent_conn.commit()
@@ -93,13 +106,30 @@ def test_source_preview_requires_login_and_allows_authenticated_roles(source_pre
         assert pdf.status_code == 200
 
 
+def test_office_source_and_preview_matrix_for_authenticated_roles(source_preview_api):
+    client, sessions, _docs_dir = source_preview_api
+    endpoints = (
+        ("/api/source/docx-parent/raw", b"PK-docx-synthetic"),
+        ("/api/source/xlsx-parent/raw", b"PK-xlsx-preview"),
+        ("/api/source/pptx-parent/raw", b"PK-pptx-synthetic"),
+        ("/api/pdf/pptx-parent", b"%PDF-pptx-preview"),
+    )
+    for endpoint, _expected in endpoints:
+        assert client.get(endpoint).status_code == 401
+    for employee_id in ("plain", "admin"):
+        for endpoint, expected in endpoints:
+            response = client.get(endpoint, **_auth(sessions, employee_id))
+            assert response.status_code == 200
+            assert response.content == expected
+
+
 def test_source_preview_failures_do_not_expose_internal_paths(source_preview_api):
     client, sessions, docs_dir = source_preview_api
     auth = _auth(sessions, "plain")
 
     missing_parent = client.get("/api/source/unknown/raw", **auth)
     missing_source = client.get("/api/source/missing-parent/raw", **auth)
-    missing_conversion = client.get("/api/pdf/pptx-parent", **auth)
+    missing_conversion = client.get("/api/pdf/missing-pptx-parent", **auth)
 
     assert missing_parent.status_code == 404
     assert missing_source.status_code == 404
