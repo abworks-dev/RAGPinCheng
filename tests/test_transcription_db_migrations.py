@@ -216,6 +216,34 @@ def test_schema_15_backfills_published_media_catalog_without_document_or_index_r
     assert len(list((tmp_path / "backups").glob("*.sqlite"))) == 1
 
 
+def test_schema_16_database_migrates_asr_profile_management(tmp_path, monkeypatch):
+    path = tmp_path / "app.sqlite"
+    migrations = db_migrations.MIGRATIONS
+    monkeypatch.setattr(
+        db_migrations, "MIGRATIONS", tuple(item for item in migrations if item.version <= 16),
+    )
+    init_db(path, backup_dir=tmp_path / "backups")
+
+    conn = sqlite3.connect(path)
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert conn.execute("SELECT max(version) FROM app_schema_migrations").fetchone()[0] == 16
+    assert "asr_profile_release_requests" not in tables
+    assert "asr_profile_audit_events" not in tables
+    conn.close()
+
+    monkeypatch.setattr(db_migrations, "MIGRATIONS", migrations)
+    init_db(path, backup_dir=tmp_path / "backups")
+
+    conn = sqlite3.connect(path)
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert conn.execute("SELECT max(version) FROM app_schema_migrations").fetchone()[0] == 17
+    assert {"asr_profile_release_requests", "asr_profile_audit_events"} <= tables
+    assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    assert conn.execute("PRAGMA foreign_key_check").fetchone() is None
+    conn.close()
+    assert len(list((tmp_path / "backups").glob("*.sqlite"))) == 1
+
+
 def test_schema_5_database_adds_later_tables_without_changing_users(tmp_path):
     path = tmp_path / "app.sqlite"
     init_db(path, backup_dir=tmp_path / "backups")

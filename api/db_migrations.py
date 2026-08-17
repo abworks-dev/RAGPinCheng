@@ -947,7 +947,7 @@ def has_pending_ddl(path: Path, *, base_tables: frozenset[str]) -> bool:
             validate_answer_policy_schema(conn)
         finally:
             conn.close()
-    if any(version == 16 for version, _name in applied) and not ASR_PROFILE_MANAGEMENT_TABLES.issubset(tables):
+    if any(version == 17 for version, _name in applied) and not ASR_PROFILE_MANAGEMENT_TABLES.issubset(tables):
         raise RuntimeError("migration_schema_mismatch")
     if any(version == 10 for version, _name in applied):
         conn = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
@@ -1025,7 +1025,7 @@ def apply_all(conn: sqlite3.Connection, *, base_schema: str, applied_at: int) ->
             raise RuntimeError("migration_schema_mismatch")
         if 15 in applied_versions:
             validate_answer_policy_schema(conn)
-        if 16 in applied_versions and not ASR_PROFILE_MANAGEMENT_TABLES.issubset(tables):
+        if 17 in applied_versions and not ASR_PROFILE_MANAGEMENT_TABLES.issubset(tables):
             raise RuntimeError("migration_schema_mismatch")
         validate_system_content_permission_groups(
             conn,
