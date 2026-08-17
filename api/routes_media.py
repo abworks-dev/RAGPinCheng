@@ -172,7 +172,14 @@ def get_media(
     conn = db_connect()
     try:
         row = conn.execute(
-            "SELECT storage_rel_path, mime_type, status FROM media_assets WHERE media_id = ?",
+            """SELECT m.storage_rel_path,m.mime_type,m.status,
+                      EXISTS(
+                        SELECT 1 FROM media_transcript_heads h
+                        JOIN transcript_versions v
+                          ON v.id=h.current_version_id AND v.media_id=h.media_id
+                        WHERE h.media_id=m.media_id AND v.publication_status='published'
+                      ) AS has_published_transcript
+               FROM media_assets m WHERE m.media_id=?""",
             (media_id,),
         ).fetchone()
     finally:
@@ -181,7 +188,9 @@ def get_media(
     if not row:
         raise HTTPException(status_code=404, detail="Media not found")
 
-    if row["status"] != "ready":
+    if row["status"] == "archived" or (
+        row["status"] != "ready" and not row["has_published_transcript"]
+    ):
         raise HTTPException(status_code=404, detail="Media not ready")
 
     # Safe path resolution with traversal protection

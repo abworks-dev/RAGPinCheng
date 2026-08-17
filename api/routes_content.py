@@ -10,6 +10,7 @@ import unicodedata
 import uuid
 import zipfile
 from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
@@ -414,6 +415,15 @@ def _raise_domain_error(exc: Exception) -> None:
         raise HTTPException(status_code=403, detail="当前账号没有移动此状态资料的权限") from exc
     if message == "content_move_requires_republication":
         raise HTTPException(status_code=409, detail="已确认或已发布资料需要退回后重新归类") from exc
+    if message == "media_transcript_operation_not_supported":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "media_transcript_operation_not_supported",
+                "message": "视频转录稿由视频管理统一维护",
+                "retryable": False,
+            },
+        ) from exc
     if message == "content_revision_forbidden":
         raise HTTPException(status_code=403, detail="当前账号没有重命名或更新资料的权限") from exc
     if message == "content_revision_in_progress":
@@ -791,6 +801,11 @@ def _content_item_dto(
         archived_at=row["archived_at"] if "archived_at" in row.keys() else None,
         archived_by_name=row["archived_by_name"] if "archived_by_name" in row.keys() else None,
         pre_archive_lifecycle_status=archive_metadata.get("previous_status"),
+        media_duration_ms=row["media_duration_ms"] if "media_duration_ms" in row.keys() else None,
+        media_file_size=row["media_file_size"] if "media_file_size" in row.keys() else None,
+        has_pending_revision=bool(row["has_pending_revision"])
+        if "has_pending_revision" in row.keys()
+        else False,
     )
 
 
@@ -798,16 +813,21 @@ def _content_item_dto(
 def get_content_items(
     category_id: str | None = None,
     lifecycle_status: str | None = None,
+    content_kind: Literal["document", "media_transcript"] | None = None,
     _user: CurrentUser = Depends(require_content_permission("item.view")),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> list[ManagedContentItemDTO]:
     rows = list_content_items(
-        conn, category_id=category_id, lifecycle_status=lifecycle_status
+        conn,
+        category_id=category_id,
+        lifecycle_status=lifecycle_status,
+        content_kind=content_kind,
     )
     summary_version_ids = [
         str(row["version_id"])
         for row in rows
-        if row["latest_publication_status"] == "done"
+        if row["content_kind"] == "document"
+        and row["latest_publication_status"] == "done"
         and row["current_version_id"] == row["version_id"]
     ]
     summaries = list_managed_version_index_summaries(summary_version_ids)
@@ -823,6 +843,7 @@ def get_content_items_page(
     category_id: str | None = None,
     lifecycle_status: str | None = None,
     source_origin: str | None = None,
+    content_kind: Literal["document", "media_transcript"] | None = None,
     limit: int = Query(25, ge=1, le=100),
     offset: int = Query(0, ge=0),
     _user: CurrentUser = Depends(require_content_permission("item.view")),
@@ -834,13 +855,15 @@ def get_content_items_page(
         category_id=category_id,
         lifecycle_status=lifecycle_status,
         source_origin=source_origin,
+        content_kind=content_kind,
         limit=limit,
         offset=offset,
     )
     summary_version_ids = [
         str(row["version_id"])
         for row in rows
-        if row["latest_publication_status"] == "done"
+        if row["content_kind"] == "document"
+        and row["latest_publication_status"] == "done"
         and row["current_version_id"] == row["version_id"]
     ]
     summaries = list_managed_version_index_summaries(summary_version_ids)
@@ -935,6 +958,7 @@ def move_managed_content_item(
             actor_user_id=user.id,
             can_move_draft=has_content_permission(conn, user, "item.move_draft"),
             can_move_review=has_content_permission(conn, user, "item.move_review"),
+            can_move_published=has_content_permission(conn, user, "item.publish"),
         )
     except (ValueError, sqlite3.IntegrityError) as exc:
         _raise_domain_error(exc)
@@ -952,6 +976,12 @@ def rename_managed_content_item(
     conn: sqlite3.Connection = Depends(get_db),
 ) -> ManagedContentItemDTO:
     _require_feature()
+    item_kind = conn.execute(
+        "SELECT content_kind FROM content_items WHERE id=? AND archived_at IS NULL",
+        (item_id,),
+    ).fetchone()
+    if item_kind is not None and item_kind["content_kind"] == "media_transcript":
+        _raise_domain_error(ValueError("media_transcript_operation_not_supported"))
     current = conn.execute(
         """SELECT v.doc_type,v.original_filename
            FROM content_versions v
@@ -1000,6 +1030,12 @@ async def update_managed_content_item(
     conn: sqlite3.Connection = Depends(get_db),
 ) -> ManagedContentItemDTO:
     _require_feature()
+    item_kind = conn.execute(
+        "SELECT content_kind FROM content_items WHERE id=? AND archived_at IS NULL",
+        (item_id,),
+    ).fetchone()
+    if item_kind is not None and item_kind["content_kind"] == "media_transcript":
+        _raise_domain_error(ValueError("media_transcript_operation_not_supported"))
     if not has_content_permission(conn, user, "item.upload"):
         raise HTTPException(status_code=403, detail="当前账号没有更新资料的权限")
     current = conn.execute(
@@ -1278,6 +1314,7 @@ def _bulk_failure_message(exc: Exception) -> str:
         "content_version_conflict": "资料版本已变化，请刷新后重试",
         "content_move_forbidden": "当前账号没有移动此状态资料的权限",
         "content_move_requires_republication": "资料需要先退回后才能移动",
+        "media_transcript_operation_not_supported": "视频转录稿请前往视频管理处理",
         "content_delete_forbidden": "当前账号没有删除此状态资料的权限",
         "content_delete_in_progress": "资料正在发布，暂时不能移入回收站",
         "active_category_not_found": "目标目录不存在或已停用",
@@ -1293,7 +1330,8 @@ def bulk_move_content_items(
     _require_feature()
     can_move_draft = has_content_permission(conn, user, "item.move_draft")
     can_move_review = has_content_permission(conn, user, "item.move_review")
-    if not (can_move_draft or can_move_review):
+    can_move_published = has_content_permission(conn, user, "item.publish")
+    if not (can_move_draft or can_move_review or can_move_published):
         raise HTTPException(status_code=403, detail="当前账号没有移动资料的权限")
     results: list[BulkManagedContentResultDTO] = []
     for item in _validate_bulk_item_refs(body.items):
@@ -1306,6 +1344,7 @@ def bulk_move_content_items(
                 actor_user_id=user.id,
                 can_move_draft=can_move_draft,
                 can_move_review=can_move_review,
+                can_move_published=can_move_published,
             )
             results.append(BulkManagedContentResultDTO(
                 item_id=item.item_id,

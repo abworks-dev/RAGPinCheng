@@ -449,6 +449,24 @@ ANSWER_POLICY_STATEMENTS = (
     "CREATE INDEX IF NOT EXISTS idx_answer_policy_audit_created_desc ON answer_policy_audit(created_at DESC, id DESC)",
 )
 
+MEDIA_TRANSCRIPT_LIBRARY_STATEMENTS = (
+    """INSERT INTO content_items(
+           id,title,content_kind,category_id,media_id,created_by,created_at,
+           updated_at,archived_at,normalized_filename
+       )
+       SELECT 'media-transcript-' || m.media_id,m.title,'media_transcript','cat-05',
+              m.media_id,m.created_by,m.created_at,
+              CASE WHEN m.updated_at > h.updated_at THEN m.updated_at ELSE h.updated_at END,
+              NULL,NULL
+       FROM media_transcript_heads h
+       JOIN media_assets m ON m.media_id=h.media_id
+       JOIN transcript_versions v ON v.id=h.current_version_id AND v.media_id=m.media_id
+       WHERE m.status <> 'archived' AND v.publication_status='published'
+         AND NOT EXISTS (
+             SELECT 1 FROM content_items i WHERE i.media_id=m.media_id
+         )""",
+)
+
 SYSTEM_MAINTENANCE_STATEMENTS = (
     """CREATE TABLE maintenance_settings (
         singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
@@ -688,6 +706,7 @@ MIGRATIONS = (
     Migration(13, "content_download_permission", CONTENT_PERMISSION_DOWNLOAD_STATEMENTS),
     Migration(14, "managed_upload_tasks", UPLOAD_TASK_STATEMENTS),
     Migration(15, "answer_policy_settings_and_snapshots", ANSWER_POLICY_STATEMENTS),
+    Migration(16, "media_transcript_library_catalog", MEDIA_TRANSCRIPT_LIBRARY_STATEMENTS),
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 PHASE2_TABLES = frozenset(

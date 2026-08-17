@@ -53,6 +53,34 @@ test("资料管理搜索筛选展开 accepted golden", async ({ page }) => {
   }
 });
 
+test("资料管理视频转录稿 accepted golden", async ({ page }) => {
+  await installAdminRoutes(page, "media_library");
+  await page.goto("/admin");
+  if (page.viewportSize()!.width < 1024) {
+    await page.getByRole("button", { name: "展开管理功能" }).click();
+  }
+  await page.getByRole("link", { name: "资料管理", exact: true }).click();
+  await openRootFolder(page);
+
+  const title = "BIM 项目交付培训视频（合成长标题用于响应式检查）";
+  await expect(page.getByText(title, { exact: true }).filter({ visible: true })).toBeVisible();
+  await expect(page.getByText("视频转录稿", { exact: true }).filter({ visible: true })).toBeVisible();
+  await expect(page.getByText("有新转录稿待处理", { exact: true }).filter({ visible: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: `播放“${title}”` }).filter({ visible: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: `在视频管理中打开“${title}”` }).filter({ visible: true })).toHaveAttribute(
+    "href",
+    "/admin/media?media_id=media-library-1&workbench=1",
+  );
+
+  const viewport = page.viewportSize()!;
+  expect(await page.evaluate(() => Math.max(document.body.scrollWidth, document.documentElement.scrollWidth))).toBeLessThanOrEqual(viewport.width);
+  if (process.platform === "win32") {
+    await expect(page).toHaveScreenshot(`managed-content-media-transcript-${viewport.width}x${viewport.height}.png`, { fullPage: true });
+  } else {
+    expect((await page.screenshot({ fullPage: true })).byteLength).toBeGreaterThan(10_000);
+  }
+});
+
 test("系统概览生产运行状态 accepted golden", async ({ page }) => {
   await installAdminRoutes(page, "normal");
   await page.goto("/admin");
