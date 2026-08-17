@@ -191,8 +191,8 @@ def test_category_listing_is_depth_first_with_stable_sibling_order(tmp_path):
     assert actual == [
         "cat-sort-first",
         "cat-sort-grandchild",
-        "cat-sort-code-02",
         "cat-sort-code-03",
+        "cat-sort-code-02",
         "cat-sort-code",
     ]
     conn.close()

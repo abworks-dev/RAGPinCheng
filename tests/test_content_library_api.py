@@ -965,6 +965,123 @@ def test_category_update_uses_csrf_and_optimistic_version(content_api):
     assert updated.json()["version"] == 2
 
 
+def test_category_quick_actions_enforce_normalized_names_and_allow_duplicate_sort_orders(content_api):
+    client, sessions, _queued, db_path = content_api
+    now = int(time.time())
+    conn = connect(db_path)
+    conn.executemany(
+        """INSERT INTO category_nodes
+           (id,category_key,parent_id,display_code,display_name,sort_order,level,is_active,created_at,updated_at)
+           VALUES (?,?,?,?,?,?,2,1,?,?)""",
+        [
+            ("cat-03-a", "company_a", "cat-03", "01", "项目资料", 10, now, now),
+            ("cat-03-b", "company_b", "cat-03", "02", "其他资料", 20, now, now),
+        ],
+    )
+    conn.commit()
+    conn.close()
+    auth = _auth(sessions, "category_manager", csrf=True)
+
+    no_csrf = client.patch(
+        "/api/admin/content/categories/cat-03-b/name",
+        json={"display_name": "新名称", "expected_version": 1},
+        **_auth(sessions, "category_manager"),
+    )
+    assert no_csrf.status_code == 403
+    conflict = client.patch(
+        "/api/admin/content/categories/cat-03-b/name",
+        json={"display_name": "  项目资料  ", "expected_version": 1},
+        **auth,
+    )
+    assert conflict.status_code == 409
+    assert conflict.json()["detail"] == "当前目录已有同名文件夹，请使用其他名称"
+
+    renamed = client.patch(
+        "/api/admin/content/categories/cat-03-b/name",
+        json={"display_name": "新名称", "expected_version": 1},
+        **auth,
+    )
+    assert renamed.status_code == 200
+    assert (renamed.json()["display_name"], renamed.json()["version"]) == ("新名称", 2)
+
+    duplicate_order = client.patch(
+        "/api/admin/content/categories/cat-03-b/sort-order",
+        json={"sort_order": 10, "expected_version": 2},
+        **auth,
+    )
+    assert duplicate_order.status_code == 200
+    assert duplicate_order.json()["sort_order"] == 10
+    unset_order = client.patch(
+        "/api/admin/content/categories/cat-03-a/sort-order",
+        json={"sort_order": 0, "expected_version": 1},
+        **auth,
+    )
+    assert unset_order.status_code == 200
+
+    categories = client.get(
+        "/api/admin/content/categories?include_inactive=true",
+        **_auth(sessions, "category_manager"),
+    ).json()
+    children = [row for row in categories if row["parent_id"] == "cat-03"]
+    assert children[-1]["id"] == "cat-03-a"
+
+    conn = connect(db_path)
+    try:
+        events = conn.execute(
+            """SELECT event_type FROM content_audit_events
+               WHERE category_id IN ('cat-03-a','cat-03-b') ORDER BY created_at,event_type"""
+        ).fetchall()
+        assert {row[0] for row in events} == {"category.renamed", "category.sort_order_updated"}
+    finally:
+        conn.close()
+
+
+def test_category_move_blocks_sibling_name_and_code_conflicts_and_appends_order(content_api):
+    client, sessions, _queued, db_path = content_api
+    now = int(time.time())
+    conn = connect(db_path)
+    conn.executemany(
+        """INSERT INTO category_nodes
+           (id,category_key,parent_id,display_code,display_name,sort_order,level,is_active,created_at,updated_at)
+           VALUES (?,?,?,?,?,?,2,1,?,?)""",
+        [
+            ("cat-source-name", "source_name", "cat-03", "71", "同名目录", 10, now, now),
+            ("cat-source-code", "source_code", "cat-03", "72", "待移动目录", 20, now, now),
+            ("cat-target-name", "target_name", "cat-04", "81", "同名目录", 10, now, now),
+            ("cat-target-code", "target_code", "cat-04", "72", "其他目录", 20, now, now),
+            ("cat-target-existing", "target_existing", "cat-05", "82", "已有目录", 40, now, now),
+        ],
+    )
+    conn.commit()
+    conn.close()
+    auth = _auth(sessions, "category_manager", csrf=True)
+
+    name_conflict = client.post(
+        "/api/admin/content/categories/cat-source-name/move",
+        json={"target_parent_id": "cat-04", "before_category_id": None, "expected_version": 1},
+        **auth,
+    )
+    assert name_conflict.status_code == 409
+    assert name_conflict.json()["detail"] == "当前目录已有同名文件夹，请使用其他名称"
+
+    code_conflict = client.post(
+        "/api/admin/content/categories/cat-source-code/move",
+        json={"target_parent_id": "cat-04", "before_category_id": None, "expected_version": 1},
+        **auth,
+    )
+    assert code_conflict.status_code == 409
+    assert code_conflict.json()["detail"] == "目标目录已有相同显示编号的文件夹，请先修改显示编号"
+
+    moved = client.post(
+        "/api/admin/content/categories/cat-source-code/move",
+        json={"target_parent_id": "cat-05", "before_category_id": None, "expected_version": 1},
+        **auth,
+    )
+    assert moved.status_code == 200
+    moved_row = next(row for row in moved.json() if row["id"] == "cat-source-code")
+    assert (moved_row["parent_id"], moved_row["sort_order"]) == ("cat-05", 50)
+
+
 def test_category_manager_can_reorder_and_reparent_categories(content_api):
     client, sessions, _queued, db_path = content_api
     auth = _auth(sessions, "category_manager", csrf=True)

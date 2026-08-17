@@ -19,7 +19,7 @@ async function openRootFolder(page: Parameters<typeof installAdminRoutes>[0], fo
   const folder = page.viewportSize()!.width < 1024
     ? page.getByTestId(`managed-folder-mobile-${folderId}`)
     : page.getByTestId(`managed-folder-row-${folderId}`);
-  await folder.click();
+  await folder.getByRole("button").first().click();
   await listing;
 }
 
@@ -34,7 +34,7 @@ test.describe("资料管理", () => {
     const projectFolder = page.viewportSize()!.width < 1024
       ? page.getByTestId("managed-folder-mobile-cat-project")
       : page.getByTestId("managed-folder-row-cat-project");
-    await projectFolder.click();
+    await projectFolder.getByRole("button").first().click();
     await switchedListing;
     await expect(page.getByText(/当前目录：/)).toHaveCount(0);
     await expect(page.getByRole("navigation", { name: "资料路径" }).getByRole("button", { name: "04 项目资料" })).toBeVisible();

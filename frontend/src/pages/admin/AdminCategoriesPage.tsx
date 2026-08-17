@@ -49,6 +49,7 @@ import { toast } from "../../components/ui/toast";
 import type { ManagedCategory } from "../../types";
 import {
   buildCategoryTree,
+  compareManagedCategories,
   collectCategoryAncestorIds,
   collectExpandableCategoryIds,
   countCategoryTreeNodes,
@@ -183,7 +184,7 @@ export function AdminCategoriesPage() {
   }, [categories]);
   const selectedSiblings = useMemo(
     () => selectedCategory
-      ? categories.filter((category) => category.parent_id === selectedCategory.parent_id).sort((left, right) => left.sort_order - right.sort_order)
+      ? categories.filter((category) => category.parent_id === selectedCategory.parent_id).sort(compareManagedCategories)
       : [],
     [categories, selectedCategory],
   );
@@ -391,7 +392,7 @@ export function AdminCategoriesPage() {
       return;
     }
     const siblings = categories.filter((category) => category.parent_id === dragged.parent_id)
-      .sort((left, right) => left.sort_order - right.sort_order);
+      .sort(compareManagedCategories);
     const activeIndex = siblings.findIndex((category) => category.id === dragged.id);
     const overIndex = siblings.findIndex((category) => category.id === target.id);
     const beforeCategoryId = activeIndex < overIndex ? siblings[overIndex + 1]?.id || null : target.id;
@@ -656,6 +657,7 @@ function CategoryDetail({
       <section aria-labelledby={`category-fields-${category.id}`} className="space-y-4">
         <h4 id={`category-fields-${category.id}`} className="text-ui-sm font-semibold">基本信息</h4>
         <div className="grid gap-4 sm:grid-cols-2"><Field label="显示编号"><Input value={draft.display_code} onChange={(event) => onChange({ ...draft, display_code: event.target.value })} aria-label="显示编号" /></Field><Field label="显示名称"><Input value={draft.display_name} onChange={(event) => onChange({ ...draft, display_name: event.target.value })} aria-label="显示名称" /></Field></div>
+        <Field label="排序序号"><Input type="number" min={0} max={999999} value={draft.sort_order} onChange={(event) => onChange({ ...draft, sort_order: Number(event.target.value) || 0 })} aria-label="排序序号" /><span className="mt-1 block text-ui-xs font-normal text-muted-foreground">同级允许使用相同序号；相同时按名称排序，0 表示未设置并排在末尾。</span></Field>
       </section>
       <section aria-labelledby={`category-status-${category.id}`} className="space-y-3 border-t border-border pt-4">
         <h4 id={`category-status-${category.id}`} className="text-ui-sm font-semibold">可用状态</h4>
@@ -693,7 +695,7 @@ function CategoryCreateForm({
   onCreate: () => void;
 }) {
   const canCreate = draft.display_code.trim() && draft.display_name.trim();
-  return <div className="space-y-4"><Field label="父分类"><Select value={draft.parent_id} onChange={(event) => onChange({ ...draft, parent_id: event.target.value })} aria-label="父分类"><option value="">一级分类</option>{categories.filter((category) => category.is_active && category.level < 4).map((category) => <option key={category.id} value={category.id}>{category.full_path}</option>)}</Select></Field><div className="grid gap-4 sm:grid-cols-2"><Field label="显示编号"><Input value={draft.display_code} onChange={(event) => onChange({ ...draft, display_code: event.target.value })} placeholder="例如 03" aria-label="显示编号" /></Field><Field label="分类名称"><Input value={draft.display_name} onChange={(event) => onChange({ ...draft, display_name: event.target.value })} placeholder="例如 公司内部标准" aria-label="分类名称" /></Field></div><Field label="同级排序"><Input type="number" value={draft.sort_order} onChange={(event) => onChange({ ...draft, sort_order: event.target.value })} aria-label="同级排序" /></Field><Button className="w-full" onClick={onCreate} disabled={saving || !canCreate}><Plus className="size-4" />{saving ? "新增中…" : "新增分类"}</Button></div>;
+  return <div className="space-y-4"><Field label="父分类"><Select value={draft.parent_id} onChange={(event) => onChange({ ...draft, parent_id: event.target.value })} aria-label="父分类"><option value="">一级分类</option>{categories.filter((category) => category.is_active && category.level < 4).map((category) => <option key={category.id} value={category.id}>{category.full_path}</option>)}</Select></Field><div className="grid gap-4 sm:grid-cols-2"><Field label="显示编号"><Input value={draft.display_code} onChange={(event) => onChange({ ...draft, display_code: event.target.value })} placeholder="例如 03" aria-label="显示编号" /></Field><Field label="分类名称"><Input value={draft.display_name} onChange={(event) => onChange({ ...draft, display_name: event.target.value })} placeholder="例如 公司内部标准" aria-label="分类名称" /></Field></div><Field label="排序序号"><Input type="number" min={0} max={999999} value={draft.sort_order} onChange={(event) => onChange({ ...draft, sort_order: event.target.value })} aria-label="排序序号" /><span className="mt-1 block text-ui-xs font-normal text-muted-foreground">建议使用 10、20、30 等间隔值；0 表示未设置。</span></Field><Button className="w-full" onClick={onCreate} disabled={saving || !canCreate}><Plus className="size-4" />{saving ? "新增中…" : "新增分类"}</Button></div>;
 }
 
 function Field({ label, children }: { label: string; children: ReactNode }) {

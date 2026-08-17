@@ -13,6 +13,9 @@ const mocks = vi.hoisted(() => ({
   uploadTask: vi.fn(),
   indexJobs: vi.fn(),
   createCategory: vi.fn(),
+  renameCategory: vi.fn(),
+  updateCategorySortOrder: vi.fn(),
+  moveCategory: vi.fn(),
   moveContent: vi.fn(),
   reclassifyContent: vi.fn(),
   reclassificationJob: vi.fn(),
@@ -85,6 +88,9 @@ vi.mock("../../api/client", () => ({
     managedUploadTask: mocks.uploadTask,
     managedContentIndexJobs: mocks.indexJobs,
     createManagedCategory: mocks.createCategory,
+    renameManagedCategory: mocks.renameCategory,
+    updateManagedCategorySortOrder: mocks.updateCategorySortOrder,
+    moveManagedCategory: mocks.moveCategory,
     moveManagedContent: mocks.moveContent,
     reclassifyManagedContent: mocks.reclassifyContent,
     managedContentReclassificationJob: mocks.reclassificationJob,
@@ -237,6 +243,9 @@ describe("AdminManagedContentPage", () => {
     mocks.uploadTask.mockResolvedValue({});
     mocks.indexJobs.mockResolvedValue({ jobs: [], total: 0, status_counts: {} });
     mocks.reclassifyContent.mockResolvedValue({ id: "reclass-1", status: "pending" });
+    mocks.renameCategory.mockResolvedValue({ ...childCategory, display_name: "新目录名称", version: 2 });
+    mocks.updateCategorySortOrder.mockResolvedValue({ ...childCategory, sort_order: 20, version: 2 });
+    mocks.moveCategory.mockResolvedValue([category, childCategory, projectCategory]);
     mocks.bulkReclassify.mockResolvedValue({ results: [], succeeded: 2, failed: 0 });
     window.history.replaceState({}, "", "/admin/content");
     mocks.bulkDownload.mockResolvedValue({ blob: new Blob(["zip"]), filename: "资料批量下载.zip" });
@@ -470,7 +479,7 @@ describe("AdminManagedContentPage", () => {
 
     const mobileList = screen.getByTestId(`managed-folder-mobile-${folder.id}`).parentElement!;
     expect(mobileList.firstElementChild).toBe(screen.getByTestId(`managed-folder-mobile-${folder.id}`));
-    expect(within(screen.getByTestId(`managed-folder-mobile-${folder.id}`)).getByRole("button", { name: /02 模型目录/ })).toBeInTheDocument();
+    expect(within(screen.getByTestId(`managed-folder-mobile-${folder.id}`)).getAllByRole("button", { name: /02 模型目录/ })).toHaveLength(2);
 
     fireEvent.focus(screen.getByRole("textbox", { name: "搜索资料" }));
     fireEvent.change(within(screen.getByRole("dialog", { name: "搜索筛选" })).getByRole("combobox", { name: "状态" }), { target: { value: "published" } });
@@ -487,6 +496,84 @@ describe("AdminManagedContentPage", () => {
     expect(screen.getByTestId(`managed-folder-row-${projectCategory.id}`)).toBeInTheDocument();
     expect(screen.queryByText("没有符合条件的资料")).not.toBeInTheDocument();
     expect(screen.getByText("共 0 份，第 1 / 1 页")).toBeInTheDocument();
+  });
+
+  it("keeps folder management actions before the rightmost open button", async () => {
+    mocks.permissions = CATEGORY_MANAGER_PERMISSIONS;
+    mocks.categories.mockResolvedValue([category, childCategory]);
+    render(<AdminManagedContentPage />);
+    await openRootFolder();
+
+    const row = screen.getByTestId(`managed-folder-row-${childCategory.id}`);
+    const labels = within(row).getAllByRole("button").map((button) => button.getAttribute("aria-label") || button.textContent);
+    expect(labels.slice(-4)).toEqual([
+      expect.stringContaining("设置文件夹"),
+      expect.stringContaining("移动文件夹"),
+      expect.stringContaining("重命名文件夹"),
+      expect.stringContaining("打开文件夹"),
+    ]);
+  });
+
+  it("allows duplicate folder sort orders and explains the stable tie break", async () => {
+    mocks.permissions = CATEGORY_MANAGER_PERMISSIONS;
+    const sibling = { ...childCategory, id: "cat-03-02", display_code: "02", display_name: "第二目录", sort_order: 30 };
+    mocks.categories.mockResolvedValue([category, childCategory, sibling]);
+    render(<AdminManagedContentPage />);
+    await openRootFolder();
+
+    const row = screen.getByTestId(`managed-folder-row-${childCategory.id}`);
+    fireEvent.click(within(row).getByRole("button", { name: /设置文件夹/ }));
+    const dialog = screen.getByRole("dialog", { name: "设置文件夹顺序" });
+    fireEvent.change(within(dialog).getByRole("spinbutton", { name: "排序序号" }), { target: { value: "30" } });
+    expect(dialog).toHaveTextContent("已有 1 个文件夹使用序号 30");
+    fireEvent.click(within(dialog).getByRole("button", { name: "保存顺序" }));
+    await waitFor(() => expect(mocks.updateCategorySortOrder).toHaveBeenCalledWith(childCategory.id, {
+      sort_order: 30,
+      expected_version: childCategory.version,
+    }));
+  });
+
+  it("blocks normalized sibling name conflicts and renames with optimistic versioning", async () => {
+    mocks.permissions = CATEGORY_MANAGER_PERMISSIONS;
+    const sibling = { ...childCategory, id: "cat-03-02", display_code: "02", display_name: "项目 资料" };
+    mocks.categories.mockResolvedValue([category, childCategory, sibling]);
+    render(<AdminManagedContentPage />);
+    await openRootFolder();
+
+    const row = screen.getByTestId(`managed-folder-row-${childCategory.id}`);
+    fireEvent.click(within(row).getByRole("button", { name: /重命名文件夹/ }));
+    let dialog = screen.getByRole("dialog", { name: "重命名文件夹" });
+    const input = within(dialog).getByRole("textbox", { name: "文件夹名称" });
+    fireEvent.change(input, { target: { value: " 项目 资料 " } });
+    expect(dialog).toHaveTextContent("当前目录已有同名文件夹");
+    expect(within(dialog).getByRole("button", { name: "保存名称" })).toBeDisabled();
+
+    fireEvent.change(input, { target: { value: "新目录名称" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "保存名称" }));
+    await waitFor(() => expect(mocks.renameCategory).toHaveBeenCalledWith(childCategory.id, {
+      display_name: "新目录名称",
+      expected_version: childCategory.version,
+    }));
+    dialog = screen.queryByRole("dialog", { name: "重命名文件夹" }) as HTMLElement;
+    expect(dialog).not.toBeInTheDocument();
+  });
+
+  it("reuses the tree picker and disables conflicting folder move destinations", async () => {
+    mocks.permissions = CATEGORY_MANAGER_PERMISSIONS;
+    const destination = { ...projectCategory, item_count: 0 };
+    const conflict = { ...childCategory, id: "cat-04-01", parent_id: destination.id, display_code: childCategory.display_code, display_name: "其他名称", full_path: `${destination.full_path} / ${childCategory.display_code} 其他名称` };
+    mocks.categories.mockResolvedValue([category, childCategory, destination, conflict]);
+    render(<AdminManagedContentPage />);
+    await openRootFolder();
+
+    const row = screen.getByTestId(`managed-folder-row-${childCategory.id}`);
+    fireEvent.click(within(row).getByRole("button", { name: /移动文件夹/ }));
+    const dialog = screen.getByRole("dialog", { name: "移动文件夹位置" });
+    const destinationNode = within(dialog).getByTestId(`category-picker-item-${destination.id}`);
+    expect(destinationNode).toHaveAttribute("aria-disabled", "true");
+    expect(destinationNode).toHaveTextContent("已存在显示编号");
+    fireEvent.click(within(dialog).getByRole("button", { name: "展开公司内部标准" }));
+    expect(within(dialog).getByTestId(`category-picker-item-${childCategory.id}`)).toHaveTextContent("不能移动到文件夹自身");
   });
 
   it("sorts folder and file groups independently while keeping folders first", async () => {
