@@ -21,7 +21,7 @@ $envFile = if ($ConfigPath) {
 }
 $senseVoiceProfile = "funasr-sensevoice-small-v1"
 $fasterWhisperProfile = "faster-whisper-large-v3-turbo-v1"
-$whisperXProfile = "whisperx-large-v3-zh-align-v1"
+$whisperXProfile = "whisperx-large-v3-zh-align-v2"
 $expectedIdentity = $ExpectedProfiles -join "`n"
 if ($expectedIdentity -notin @(
     $senseVoiceProfile,

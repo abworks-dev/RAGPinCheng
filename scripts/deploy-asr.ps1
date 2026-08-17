@@ -390,6 +390,7 @@ if ($StageCandidate) {
     New-Item -ItemType Directory -Path $staging | Out-Null
 }
 Copy-Item -LiteralPath (Join-Path $resolvedSource "src") -Destination $staging -Recurse
+Copy-Item -LiteralPath (Join-Path $resolvedSource "prompts") -Destination $staging -Recurse
 $stagingServices = Join-Path $staging "services"
 New-Item -ItemType Directory -Path $stagingServices -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $resolvedSource "services\__init__.py") -Destination $stagingServices
@@ -859,7 +860,7 @@ try {
             $expectedProfiles = @(
                 "faster-whisper-large-v3-turbo-v1",
                 "funasr-sensevoice-small-v1",
-                "whisperx-large-v3-zh-align-v1"
+                "whisperx-large-v3-zh-align-v2"
             )
         }
         & (Join-Path $scriptRoot "verify-asr-service.ps1") `

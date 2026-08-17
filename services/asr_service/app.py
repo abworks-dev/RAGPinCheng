@@ -21,7 +21,7 @@ from .engine_protocol import (
     FASTER_WHISPER_SERVICE_CONFIG,
     QWEN3_ASR_SERVICE_CONFIG,
     SENSEVOICE_SERVICE_CONFIG,
-    WHISPERX_FULL_DECODE_SERVICE_CONFIG,
+    WHISPERX_V2_FULL_DECODE_SERVICE_CONFIG,
 )
 from .engine_registry import EngineRegistration, EngineRegistry
 from .engines.faster_whisper import FasterWhisperEngine
@@ -144,6 +144,7 @@ def create_app(
             )
         )
         whisperx_engine = WhisperXEngine(
+            service_profile_id="whisperx-large-v3-zh-align-v2",
             model_cache_ready=lambda: whisperx_ready,
             model_path=whisperx_cache.model_path,
             align_model_path=whisperx_align_cache.model_path,
@@ -169,7 +170,7 @@ def create_app(
                 ),
                 EngineRegistration(qwen3_engine, QWEN3_ASR_SERVICE_CONFIG),
                 EngineRegistration(
-                    whisperx_engine, WHISPERX_FULL_DECODE_SERVICE_CONFIG
+                    whisperx_engine, WHISPERX_V2_FULL_DECODE_SERVICE_CONFIG
                 ),
             )
         )

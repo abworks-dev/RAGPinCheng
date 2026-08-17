@@ -61,6 +61,8 @@ class AsrServiceClientError(RuntimeError):
 class AsrServiceClient(Protocol):
     def capabilities(self) -> ServiceCapabilities: ...
 
+    def diagnostics(self) -> dict[str, object]: ...
+
     def create_job(self, request: CreateJobRequest) -> ServiceJob: ...
 
     def upload_part(self, job_id: str, part: InputPart) -> ServiceJob: ...
@@ -173,6 +175,12 @@ class HttpxAsrServiceClient:
         return ServiceCapabilities.from_json_dict(
             self._request("GET", "/v1/capabilities")
         )
+
+    def diagnostics(self) -> dict[str, object]:
+        payload = self._request("GET", "/v1/diagnostics")
+        if type(payload) is not dict:
+            raise AsrServiceClientError(200, "invalid_diagnostics")
+        return payload
 
     def create_job(self, request: CreateJobRequest) -> ServiceJob:
         return ServiceJob.from_json_dict(

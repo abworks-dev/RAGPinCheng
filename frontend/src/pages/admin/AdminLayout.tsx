@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import {
+  AudioLines,
   FileText,
   LayoutDashboard,
   Menu,
@@ -23,7 +24,7 @@ import { useAuth } from "../../context/AuthContext";
 import { contentWorkspaceTabs, workspaceLabel } from "../../lib/workspace-access";
 import { Navigate, NavLink, Outlet, useLocation } from "react-router-dom";
 
-type Tab = "users" | "conversations" | "managed" | "categories" | "media" | "stats" | "feedback" | "maintenance" | "answer-policy";
+type Tab = "users" | "conversations" | "managed" | "categories" | "media" | "stats" | "feedback" | "maintenance" | "answer-policy" | "asr";
 
 type TabDefinition = { key: Tab; label: string; path: string };
 
@@ -36,6 +37,7 @@ const navigationIcons: Record<Tab, LucideIcon> = {
   stats: LayoutDashboard,
   maintenance: Wrench,
   "answer-policy": SlidersHorizontal,
+  asr: AudioLines,
   managed: FileText,
   categories: Tags,
   media: Video,
@@ -49,6 +51,7 @@ const adminNavigation: NavigationGroup[] = [
     { key: "stats", label: "系统概览", path: "overview" },
     { key: "maintenance", label: "系统维护", path: "maintenance" },
     { key: "answer-policy", label: "回答策略", path: "answer-policy" },
+    { key: "asr", label: "转录配置", path: "asr" },
   ] },
   {
     label: "内容管理",

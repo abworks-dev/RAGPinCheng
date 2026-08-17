@@ -118,7 +118,7 @@ jobs:
               export TRANSCRIPTION_ADMITTED_PROFILE_IDS="funasr-sensevoice-zh-experimental-v1,faster-whisper-zh-experimental-v1"
               ;;
             ENABLE_FASTER_WHISPER_AND_WHISPERX)
-              export TRANSCRIPTION_ADMITTED_PROFILE_IDS="funasr-sensevoice-zh-experimental-v1,faster-whisper-zh-experimental-v1,whisperx-large-v3-zh-align-experimental-v1"
+              export TRANSCRIPTION_ADMITTED_PROFILE_IDS="funasr-sensevoice-zh-experimental-v1,faster-whisper-zh-experimental-v1,whisperx-large-v3-zh-balanced-v2"
               ;;
             *)
               echo "ERROR: unsupported transcription admission action"

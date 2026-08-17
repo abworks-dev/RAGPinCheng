@@ -161,6 +161,8 @@ def build_phase4_profile_registry(
                 normalizer_version=base.normalizer_version,
                 formatter_version=base.formatter_version,
                 evidence_refs=base.evidence_refs,
+                segmentation_config=base.segmentation_config,
+                terminology_config=base.terminology_config,
             )
         )
     return ProfileRegistry(tuple(profiles))
@@ -196,6 +198,14 @@ class RemoteAsrProviderFactory:
             self.connect_timeout_seconds,
             self.request_timeout_seconds,
         ).capabilities()
+
+    def diagnostics(self) -> dict[str, object]:
+        return HttpxAsrServiceClient(
+            self.base_url,
+            self.token,
+            self.connect_timeout_seconds,
+            self.request_timeout_seconds,
+        ).diagnostics()
 
 
 @dataclass(frozen=True, slots=True)

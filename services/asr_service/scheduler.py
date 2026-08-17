@@ -114,6 +114,10 @@ class Scheduler:
                 profiles.append(
                     {
                         "service_profile_id": registration.config.service_profile_id,
+                        "provider_key": registration.config.provider_key,
+                        "profile_config_hash": registration.config.config_hash,
+                        "prompt_asset_id": registration.config.prompt_asset_id or None,
+                        "qualification_policy": registration.config.qualification_policy,
                         "available": available,
                         "unavailable_reason_code": reason,
                     }

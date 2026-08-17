@@ -243,7 +243,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "pinned model preparation failed" }
     Clear-RunProxy
 
-    & $VenvPython -c "from src.transcription.profile_catalog import WHISPERX_PROFILE_ID,build_phase3_profile_catalog; p=next(x.profile for x in build_phase3_profile_catalog() if x.profile.profile_id==WHISPERX_PROFILE_ID); assert p.qualification.value=='experimental' and p.admission.value=='disabled'"
+    & $VenvPython -c "from src.transcription.profile_catalog import WHISPERX_BALANCED_PROFILE_ID,build_phase3_profile_catalog; p=next(x.profile for x in build_phase3_profile_catalog() if x.profile.profile_id==WHISPERX_BALANCED_PROFILE_ID); assert p.qualification.value=='qualification_approved' and p.admission.value=='disabled'"
     if ($LASTEXITCODE -ne 0) { throw "WhisperX Profile is not disabled" }
 
     $diagnosticArgs = @()
