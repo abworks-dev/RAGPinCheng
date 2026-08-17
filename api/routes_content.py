@@ -301,6 +301,7 @@ def _managed_index_job_dto(
         version_number=row["version_number"],
         file_size=row["file_size"],
         source_origin=row["source_origin"],
+        is_archived=row["archived_at"] is not None,
         is_current_head=bool(row["is_current_head"]),
         is_latest_attempt=bool(row["is_latest_attempt"]),
         parent_count=summary.parent_count if summary else None,
@@ -1856,6 +1857,7 @@ def get_content_index_job(
                FROM category_nodes c JOIN paths p ON p.id=c.parent_id
            )
            SELECT j.*,COALESCE(v.title,i.title) AS title,v.original_filename,v.doc_type,i.category_id,
+                  i.archived_at,
                   c.display_code || ' ' || c.display_name AS category_label,
                   paths.full_path AS category_path,v.version_number,v.source_origin,
                   o.size_bytes AS file_size,
@@ -1895,6 +1897,7 @@ def list_content_index_jobs(
     ),
     status: str | None = Query(None, max_length=50),
     history: bool = False,
+    include_archived: bool = False,
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
     _user: CurrentUser = Depends(require_content_permission("index.view")),
@@ -1914,7 +1917,7 @@ def list_content_index_jobs(
                JOIN paths ON paths.id=i.category_id
                LEFT JOIN content_objects o ON o.sha256=v.object_sha256
                LEFT JOIN content_item_heads h ON h.item_id=i.id"""
-    scope_clauses: list[str] = []
+    scope_clauses: list[str] = [] if include_archived else ["i.archived_at IS NULL"]
     scope_params: list[object] = []
     latest_attempt = (
         "j.id=(SELECT j2.id FROM content_index_jobs j2 WHERE j2.version_id=j.version_id "
@@ -1968,6 +1971,7 @@ def list_content_index_jobs(
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     rows = conn.execute(
         cte + """ SELECT j.*,COALESCE(v.title,i.title) AS title,v.original_filename,v.doc_type,i.category_id,
+                  i.archived_at,
                   (SELECT count(*) FROM content_index_jobs jc WHERE jc.version_id=j.version_id) AS attempt_count,
                   c.display_code || ' ' || c.display_name AS category_label,
                   paths.full_path AS category_path,v.version_number,v.source_origin,

@@ -2072,6 +2072,7 @@ def test_managed_index_job_listing_exposes_business_labels_and_filters(content_a
     assert result.json()["jobs"][0]["version_number"] == 1
     assert result.json()["jobs"][0]["file_size"] == len(b"# indexed")
     assert result.json()["jobs"][0]["source_origin"] == "web"
+    assert result.json()["jobs"][0]["is_archived"] is False
     assert result.json()["jobs"][0]["is_current_head"] is False
     assert result.json()["jobs"][0]["is_latest_attempt"] is True
     assert result.json()["jobs"][0]["parent_count"] is None
@@ -2199,6 +2200,88 @@ def test_managed_index_jobs_expose_current_head_parent_summary(content_api, monk
     assert detail["category_path"] == "03 公司内部标准"
     assert detail["parent_count"] == 12
     assert calls == [[version_id], [version_id]]
+
+
+def test_managed_index_jobs_hide_archived_items_by_default(content_api):
+    client, sessions, _queued, db_path = content_api
+    upload = client.post(
+        "/api/admin/content/uploads",
+        data={"category_id": "cat-03"},
+        files=[("files", ("archived.md", b"# archived", "text/markdown"))],
+        **_auth(sessions, "organizer", csrf=True),
+    ).json()["entries"][0]
+    version_id = upload["version_id"]
+    client.post(
+        f"/api/admin/content/versions/{version_id}/submit",
+        json={},
+        **_auth(sessions, "organizer", csrf=True),
+    )
+    client.post(
+        f"/api/admin/content/versions/{version_id}/review",
+        json={"approved": True},
+        **_auth(sessions, "reviewer", csrf=True),
+    )
+    publication = client.post(
+        f"/api/admin/content/versions/{version_id}/publish",
+        json={},
+        **_auth(sessions, "publisher", csrf=True),
+    ).json()
+
+    conn = connect(db_path)
+    now = int(time.time())
+    conn.execute(
+        "UPDATE content_index_jobs SET status='done',finished_at=?,updated_at=? WHERE id=?",
+        (now, now, publication["index_job_id"]),
+    )
+    conn.execute(
+        "UPDATE content_publications SET status='published',published_at=?,updated_at=? WHERE id=?",
+        (now, now, publication["publication_id"]),
+    )
+    conn.execute(
+        "UPDATE content_versions SET lifecycle_status='published',updated_at=? WHERE id=?",
+        (now, version_id),
+    )
+    conn.execute(
+        "INSERT INTO content_item_heads(item_id,current_version_id,publication_id,updated_at) VALUES (?,?,?,?)",
+        (upload["item_id"], version_id, publication["publication_id"], now),
+    )
+    conn.commit()
+    conn.close()
+
+    archived = client.request(
+        "DELETE",
+        f"/api/admin/content/items/{upload['item_id']}",
+        json={"expected_version_id": version_id},
+        **_auth(sessions, "publisher", csrf=True),
+    )
+    assert archived.status_code == 200
+    assert archived.json()["publication_withdrawn"] is True
+
+    current = client.get(
+        "/api/admin/content/index-jobs", **_auth(sessions, "publisher")
+    ).json()
+    assert current == {
+        "jobs": [],
+        "total": 0,
+        "status_counts": {"processing": 0, "ready": 0, "failed": 0},
+    }
+
+    included = client.get(
+        "/api/admin/content/index-jobs?include_archived=true",
+        **_auth(sessions, "publisher"),
+    ).json()
+    assert included["total"] == 1
+    assert included["status_counts"] == {"processing": 0, "ready": 1, "failed": 0}
+    assert included["jobs"][0]["is_archived"] is True
+    assert included["jobs"][0]["is_current_head"] is False
+    assert included["jobs"][0]["parent_count"] is None
+
+    detail = client.get(
+        f"/api/admin/content/index-jobs/{publication['index_job_id']}",
+        **_auth(sessions, "publisher"),
+    ).json()
+    assert detail["is_archived"] is True
+    assert detail["is_current_head"] is False
 
 
 def test_legacy_index_monitoring_routes_are_not_exposed(content_api):

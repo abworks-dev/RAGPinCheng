@@ -4,6 +4,7 @@ import { adminContentApi } from "../../api/admin/content";
 import { Badge } from "../../components/ui/badge";
 import { Button, buttonVariants } from "../../components/ui/button";
 import { Card, CardContent } from "../../components/ui/card";
+import { Checkbox } from "../../components/ui/checkbox";
 import { EmptyState } from "../../components/ui/empty-state";
 import { ErrorState } from "../../components/ui/error-state";
 import { Input } from "../../components/ui/input";
@@ -79,6 +80,7 @@ export function AdminDocumentsPage({ embedded = false }: { embedded?: boolean })
   const [sourceOrigin, setSourceOrigin] = useState("");
   const [status, setStatus] = useState<StatusFilter>("all");
   const [history, setHistory] = useState(false);
+  const [includeArchived, setIncludeArchived] = useState(false);
   const [page, setPage] = useState(0);
   const [retryingJobId, setRetryingJobId] = useState<string | null>(null);
 
@@ -89,7 +91,7 @@ export function AdminDocumentsPage({ embedded = false }: { embedded?: boolean })
 
   useEffect(() => {
     setPage(0);
-  }, [query, categoryId, docType, sourceOrigin, status, history]);
+  }, [query, categoryId, docType, sourceOrigin, status, history, includeArchived]);
 
   const params = useMemo(() => ({
     query: query || undefined,
@@ -98,9 +100,10 @@ export function AdminDocumentsPage({ embedded = false }: { embedded?: boolean })
     source_origin: sourceOrigin || undefined,
     status: status === "all" ? undefined : status,
     history,
+    include_archived: includeArchived,
     limit: PAGE_SIZE,
     offset: page * PAGE_SIZE,
-  }), [query, categoryId, docType, sourceOrigin, status, history, page]);
+  }), [query, categoryId, docType, sourceOrigin, status, history, includeArchived, page]);
 
   const load = useCallback(async (background = false) => {
     background ? setRefreshing(true) : setLoading(true);
@@ -135,7 +138,8 @@ export function AdminDocumentsPage({ embedded = false }: { embedded?: boolean })
   const counts = listing.status_counts;
   const allCount = Object.values(counts).reduce((sum, value) => sum + value, 0);
   const pageCount = Math.max(1, Math.ceil(listing.total / PAGE_SIZE));
-  const hasFilters = Boolean(query || categoryId || docType || sourceOrigin || status !== "all");
+  const hasFilters = Boolean(query || categoryId || docType || sourceOrigin || status !== "all" || includeArchived);
+  const listingScopeDescription = `${history ? "正在显示全部历史尝试。" : "每个资料版本仅显示最新一次发布尝试。"} ${includeArchived ? "已包含回收站资料。" : "默认不显示回收站资料。"}`;
 
   const clearFilters = () => {
     setSearchInput("");
@@ -144,10 +148,11 @@ export function AdminDocumentsPage({ embedded = false }: { embedded?: boolean })
     setDocType("");
     setSourceOrigin("");
     setStatus("all");
+    setIncludeArchived(false);
   };
 
   const retryPublication = async (job: ManagedIndexJob) => {
-    if (!canPublish || retryingJobId || job.status !== "failed" || !job.is_latest_attempt) return;
+    if (!canPublish || retryingJobId || job.is_archived || job.status !== "failed" || !job.is_latest_attempt) return;
     setRetryingJobId(job.id);
     try {
       await adminContentApi.publish(job.version_id);
@@ -207,7 +212,7 @@ export function AdminDocumentsPage({ embedded = false }: { embedded?: boolean })
               ? <h3 id="managed-index-title" className="text-ui-base font-semibold text-foreground">资料发布任务</h3>
               : <h2 id="managed-index-title" className="text-ui-base font-semibold text-foreground">资料发布任务</h2>}
             <p className="mt-1 text-ui-xs text-muted-foreground">
-              {history ? "正在显示全部历史尝试。" : "每个资料版本仅显示最新一次发布尝试。"}
+              {listingScopeDescription}
             </p>
           </div>
           <p className="text-ui-xs tabular-nums text-muted-foreground">当前共 {listing.total} 条</p>
@@ -275,9 +280,18 @@ export function AdminDocumentsPage({ embedded = false }: { embedded?: boolean })
               </Button>
             ))}
           </div>
-          <Button size="sm" variant="outline" aria-pressed={history} onClick={() => setHistory((value) => !value)}>
-            {history ? "仅看最新尝试" : "查看历史尝试"}
-          </Button>
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="flex min-h-control-md cursor-pointer items-center gap-2 text-ui-sm text-foreground">
+              <Checkbox
+                checked={includeArchived}
+                onChange={(event) => setIncludeArchived(event.target.checked)}
+              />
+              <span>包含回收站资料</span>
+            </label>
+            <Button size="sm" variant="outline" aria-pressed={history} onClick={() => setHistory((value) => !value)}>
+              {history ? "仅看最新尝试" : "查看历史尝试"}
+            </Button>
+          </div>
         </div>
 
         {loading ? (
@@ -344,8 +358,10 @@ function ManagedJobsTable({
         <tbody className="block divide-y divide-border lg:table-row-group">
           {jobs.map((job) => {
             const meta = STATUS_META[job.status] || { label: job.status, hint: "状态待确认", variant: "secondary" as const };
-            const statusHint = job.status === "done"
-              ? job.is_current_head ? "当前正式版本可检索" : "已发布历史版本"
+            const statusHint = job.is_archived
+              ? "资料已移入回收站，不参与知识库检索"
+              : job.status === "done"
+              ? job.is_current_head ? "当前正式版本可检索" : "非当前正式版本"
               : meta.hint;
             const retrying = retryingJobId === job.id;
             return (
@@ -370,7 +386,10 @@ function ManagedJobsTable({
                   <span className="lg:hidden">类型： </span>{documentTypeLabel(job.doc_type)}
                 </td>
                 <td className="col-span-2 block lg:table-cell lg:px-4 lg:py-3">
-                  <Badge variant={meta.variant}>{meta.label}</Badge>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant={meta.variant}>{meta.label}</Badge>
+                    {job.is_archived && <Badge variant="secondary">已下架</Badge>}
+                  </div>
                   <p className="mt-1 text-ui-xs text-muted-foreground">{statusHint}</p>
                   {job.failure && (
                     <div className="mt-2 max-w-md space-y-1 text-ui-xs">
@@ -401,7 +420,7 @@ function ManagedJobsTable({
                       <Eye className="size-4" />
                       查看文件
                     </a>
-                    {canPublish && job.status === "failed" && job.is_latest_attempt && (
+                    {canPublish && !job.is_archived && job.status === "failed" && job.is_latest_attempt && (
                       <Button size="sm" disabled={Boolean(retryingJobId)} onClick={() => onRetry(job)}>
                         <Rocket className={cn("size-4", retrying && "animate-pulse")} />
                         {retrying ? "发布中…" : "重新发布"}

@@ -635,6 +635,22 @@ test.describe("索引任务", () => {
     await expectNoBodyOverflow(page);
   });
 
+  test("archived publication history is opt-in and clearly withdrawn", async ({ page }) => {
+    await openTab(page, "索引任务");
+    await expect(page.getByText("已移入回收站的合成资料", { exact: true })).toHaveCount(0);
+
+    const includeArchived = page.getByRole("checkbox", { name: "包含回收站资料" });
+    await includeArchived.click();
+    const archivedTitle = page.getByText("已移入回收站的合成资料", { exact: true });
+    await expect(archivedTitle).toBeVisible();
+    const row = archivedTitle.locator("xpath=ancestor::tr");
+    await expect(row.getByText("已下架", { exact: true })).toBeVisible();
+    await expect(row.getByText("资料已移入回收站，不参与知识库检索", { exact: true })).toBeVisible();
+    await expect(row.getByRole("button", { name: "重新发布" })).toHaveCount(0);
+    await expectNoBodyOverflow(page);
+    if (page.viewportSize()!.width === 390) await expectTouchTarget(includeArchived.locator("xpath=ancestor::label"));
+  });
+
   for (const scenario of ["loading", "empty", "error"] as const) {
     test(`${scenario} state is explicit and contained`, async ({ page }) => {
       await openTab(page, "索引任务", scenario);

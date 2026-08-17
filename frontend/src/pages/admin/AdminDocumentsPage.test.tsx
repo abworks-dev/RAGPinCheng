@@ -62,6 +62,7 @@ const failedJob = {
   version_number: 3,
   file_size: 2048,
   source_origin: "legacy",
+  is_archived: false,
   is_current_head: false,
   is_latest_attempt: true,
   parent_count: null,
@@ -131,6 +132,7 @@ describe("AdminDocumentsPage", () => {
       source_origin: "legacy",
       status: "processing",
       history: false,
+      include_archived: false,
       limit: 25,
       offset: 0,
     })));
@@ -143,8 +145,27 @@ describe("AdminDocumentsPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "查看历史尝试" }));
 
     await waitFor(() => expect(mocks.managedContentIndexJobs).toHaveBeenLastCalledWith(expect.objectContaining({ history: true })));
-    expect(screen.getByText("正在显示全部历史尝试。")).toBeInTheDocument();
+    expect(screen.getByText("正在显示全部历史尝试。 默认不显示回收站资料。")).toBeInTheDocument();
     expect(screen.getByText("共尝试 4 次 · 当前第 4 次")).toBeInTheDocument();
+  });
+
+  it("includes archived jobs on demand and marks them as withdrawn", async () => {
+    mocks.managedContentIndexJobs.mockImplementation((params) => Promise.resolve(
+      params?.include_archived
+        ? { ...listing, jobs: [{ ...failedJob, is_archived: true }] }
+        : { jobs: [], total: 0, status_counts: { processing: 0, ready: 0, failed: 0 } },
+    ));
+    render(<AdminDocumentsPage />);
+
+    expect(await screen.findByText("暂无发布任务")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("checkbox", { name: "包含回收站资料" }));
+
+    const row = (await screen.findByText(failedJob.title)).closest("tr") as HTMLElement;
+    expect(within(row).getByText("已下架")).toBeInTheDocument();
+    expect(within(row).getByText("资料已移入回收站，不参与知识库检索")).toBeInTheDocument();
+    expect(within(row).queryByRole("button", { name: "重新发布" })).not.toBeInTheDocument();
+    expect(screen.getByText(/已包含回收站资料/)).toBeInTheDocument();
+    expect(mocks.managedContentIndexJobs).toHaveBeenLastCalledWith(expect.objectContaining({ include_archived: true }));
   });
 
   it("clears the visible publication filters together", async () => {
@@ -172,6 +193,7 @@ describe("AdminDocumentsPage", () => {
       doc_type: undefined,
       source_origin: undefined,
       status: undefined,
+      include_archived: false,
     })));
   });
 

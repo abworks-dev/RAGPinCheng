@@ -767,6 +767,7 @@ export const api = {
     source_origin?: string;
     status?: string;
     history?: boolean;
+    include_archived?: boolean;
     limit?: number;
     offset?: number;
   }) => {
@@ -777,6 +778,7 @@ export const api = {
     if (params?.source_origin) search.set("source_origin", params.source_origin);
     if (params?.status) search.set("status", params.status);
     if (params?.history) search.set("history", "true");
+    if (params?.include_archived) search.set("include_archived", "true");
     if (params?.limit != null) search.set("limit", String(params.limit));
     if (params?.offset != null) search.set("offset", String(params.offset));
     return jsonFetch<ManagedIndexJobList>(`/api/admin/content/index-jobs?${search}`);
