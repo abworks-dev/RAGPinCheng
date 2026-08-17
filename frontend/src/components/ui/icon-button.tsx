@@ -11,17 +11,18 @@ type IconButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
 export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(
   ({ label, tooltip = label, children, className, type = "button", disabled, onFocus, onBlur, ...props }, ref) => {
     const tooltipId = useId();
-    const anchorRef = useRef<HTMLSpanElement>(null);
     const buttonRef = useRef<HTMLButtonElement | null>(null);
+    const tooltipRef = useRef<HTMLSpanElement | null>(null);
     const [open, setOpen] = useState(false);
     const [position, setPosition] = useState({ left: 0, top: 0, below: false });
 
     useLayoutEffect(() => {
-      if (!open || !buttonRef.current) return;
+      if (!open || !buttonRef.current || !tooltipRef.current) return;
       const updatePosition = () => {
         const rect = buttonRef.current!.getBoundingClientRect();
-        const tooltipWidth = Math.min(288, window.innerWidth - 16);
-        const left = Math.min(Math.max(8, rect.right - tooltipWidth), window.innerWidth - tooltipWidth - 8);
+        const tooltipWidth = tooltipRef.current!.offsetWidth;
+        const centeredLeft = rect.left + rect.width / 2 - tooltipWidth / 2;
+        const left = Math.min(Math.max(8, centeredLeft), window.innerWidth - tooltipWidth - 8);
         const below = rect.top < 56;
         setPosition({ left, top: below ? rect.bottom + 8 : rect.top - 8, below });
       };
@@ -45,7 +46,6 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(
 
     return <>
       <span
-        ref={anchorRef}
         className={disabled ? "relative inline-flex shrink-0" : "contents"}
         tabIndex={disabled ? 0 : undefined}
         aria-label={disabled ? `${label}：${tooltip}` : undefined}
@@ -76,6 +76,7 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(
       </span>
       {open && createPortal(
         <span
+          ref={tooltipRef}
           id={tooltipId}
           role="tooltip"
           className="pointer-events-none fixed z-[100] w-max max-w-72 rounded-ui-md border border-border bg-popover px-2.5 py-1.5 text-left text-ui-xs leading-5 text-popover-foreground shadow-overlay"
