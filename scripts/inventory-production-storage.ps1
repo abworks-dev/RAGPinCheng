@@ -607,7 +607,14 @@ function Get-FasterWhisperWheelCacheInventory {
         [int]$RetentionDays = 30,
         [int]$KeepCount = 2
     )
-    $result = [ordered]@{ status='not-configured'; reference_status='measured'; referenced_cache_keys=@(); entries=@() }
+    $result = [ordered]@{
+        status='not-configured'; reference_status='measured'; referenced_cache_keys=@(); entries=@()
+        reference_diagnostics=[ordered]@{
+            verdicts=[ordered]@{valid_pass=0;non_pass=0;invalid=0;invalid_runs=@()}
+            release_references=[ordered]@{resolved=0;unresolved=0;unresolved_runs=@()}
+            scan_failures=0
+        }
+    }
     if ([string]::IsNullOrWhiteSpace($DataRoot)) { return $result }
     $root = Join-Path $DataRoot 'qualification\wheel-cache'
     if (-not (Test-Path -LiteralPath $root -PathType Container)) { $result.status='missing'; return $result }
@@ -623,13 +630,24 @@ function Get-FasterWhisperWheelCacheInventory {
         try {
             foreach ($verdictPath in @(Get-ChildItem -LiteralPath $verdictRoot -Filter 'qualification-verdict.json' -File -Recurse -Force -ErrorAction Stop)) {
                 $verdict = Get-JsonFile -Path $verdictPath.FullName
-                if ($verdict -and -not ($verdict.PSObject.Properties.Name -contains '__parse_error') -and
-                    ($verdict.PSObject.Properties.Name -contains 'wheel_cache_key') -and
-                    [string]$verdict.wheel_cache_key -match '^[0-9a-f]{64}$') {
+                $runId = $verdictPath.Directory.Parent.Name
+                $properties = if($verdict){@($verdict.psobject.Properties|ForEach-Object Name)}else{@()}
+                if ($verdict -and -not ($properties -contains '__parse_error') -and
+                    ($properties -contains 'schema_version') -and [string]$verdict.schema_version -eq 'faster-whisper-r3-verdict/3' -and
+                    ($properties -contains 'status') -and [string]$verdict.status -eq 'pass' -and
+                    ($properties -contains 'wheel_cache_key') -and [string]$verdict.wheel_cache_key -match '^[0-9a-f]{64}$') {
                     [void]$referencedKeys.Add(([string]$verdict.wheel_cache_key).ToLowerInvariant())
-                } else { $result.reference_status='incomplete' }
+                    $result.reference_diagnostics.verdicts.valid_pass++
+                } elseif ($verdict -and -not ($properties -contains '__parse_error') -and
+                    ($properties -contains 'schema_version') -and [string]$verdict.schema_version -eq 'faster-whisper-r3-verdict/3' -and
+                    ($properties -contains 'status') -and [string]$verdict.status -eq 'fail') {
+                    $result.reference_diagnostics.verdicts.non_pass++
+                } else {
+                    $result.reference_status='incomplete'; $result.reference_diagnostics.verdicts.invalid++
+                    $result.reference_diagnostics.verdicts.invalid_runs += [ordered]@{run_id=$runId;reason='invalid-verdict-contract'}
+                }
             }
-        } catch { $result.reference_status='incomplete' }
+        } catch { $result.reference_status='incomplete'; $result.reference_diagnostics.scan_failures++ }
     }
 
     # Release and rollback manifests identify qualification runs; resolve their retained verdicts above.
@@ -640,18 +658,27 @@ function Get-FasterWhisperWheelCacheInventory {
         try {
             foreach ($manifestPath in @(Get-ChildItem -LiteralPath $manifestRoot -Filter 'release-manifest.json' -File -Recurse -Force -ErrorAction Stop)) {
                 $manifest = Get-JsonFile -Path $manifestPath.FullName
-                if (-not $manifest -or ($manifest.PSObject.Properties.Name -contains '__parse_error')) { $result.reference_status='incomplete'; continue }
+                if (-not $manifest -or ($manifest.PSObject.Properties.Name -contains '__parse_error')) { $result.reference_status='incomplete'; $result.reference_diagnostics.scan_failures++; continue }
                 if (-not ($manifest.PSObject.Properties.Name -contains 'schema_version') -or [string]$manifest.schema_version -ne 'asr-production-release/1') { continue }
-                if (-not ($manifest.PSObject.Properties.Name -contains 'engines')) { $result.reference_status='incomplete'; continue }
+                if (-not ($manifest.PSObject.Properties.Name -contains 'engines')) { $result.reference_status='incomplete'; $result.reference_diagnostics.scan_failures++; continue }
                 foreach ($engine in @($manifest.engines | Where-Object { [string]$_.engine -eq 'faster-whisper' })) {
                     $runId = [string]$engine.qualification_run_id
                     $verdict = Get-JsonFile -Path (Join-Path $verdictRoot "$runId\reports\qualification-verdict.json")
-                    if ($verdict -and -not ($verdict.PSObject.Properties.Name -contains '__parse_error') -and [string]$verdict.wheel_cache_key -match '^[0-9a-f]{64}$') {
+                    $verdictProperties=if($verdict){@($verdict.psobject.Properties|ForEach-Object Name)}else{@()}
+                    if ($verdict -and -not ($verdictProperties -contains '__parse_error') -and
+                        ($verdictProperties -contains 'schema_version') -and [string]$verdict.schema_version -eq 'faster-whisper-r3-verdict/3' -and
+                        ($verdictProperties -contains 'status') -and [string]$verdict.status -eq 'pass' -and
+                        ($verdictProperties -contains 'run_id') -and [string]$verdict.run_id -eq $runId -and
+                        ($verdictProperties -contains 'wheel_cache_key') -and [string]$verdict.wheel_cache_key -match '^[0-9a-f]{64}$') {
                         [void]$referencedKeys.Add(([string]$verdict.wheel_cache_key).ToLowerInvariant())
-                    } else { $result.reference_status='incomplete' }
+                        $result.reference_diagnostics.release_references.resolved++
+                    } else {
+                        $result.reference_status='incomplete'; $result.reference_diagnostics.release_references.unresolved++
+                        $result.reference_diagnostics.release_references.unresolved_runs += [ordered]@{run_id=$runId;reason='release-verdict-missing-or-invalid'}
+                    }
                 }
             }
-        } catch { $result.reference_status='incomplete' }
+        } catch { $result.reference_status='incomplete'; $result.reference_diagnostics.scan_failures++ }
     }
     $result.referenced_cache_keys = @($referencedKeys | Sort-Object)
 
