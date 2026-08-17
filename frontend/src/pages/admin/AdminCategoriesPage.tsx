@@ -4,6 +4,8 @@ import {
   ChevronRight,
   ChevronsDown,
   ChevronsUp,
+  Folder,
+  FolderOpen,
   FolderTree,
   Plus,
   RefreshCw,
@@ -15,7 +17,6 @@ import { adminContentApi } from "../../api/admin/content";
 import { Alert, AlertDescription, AlertTitle } from "../../components/ui/alert";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
-import { Checkbox } from "../../components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../../components/ui/dialog";
 import { EmptyState } from "../../components/ui/empty-state";
 import { ErrorState } from "../../components/ui/error-state";
@@ -432,17 +433,18 @@ function CategoryTreeNodeView({
       data-testid={`category-tree-item-${category.id}`}
       onClick={() => onSelect(category.id)}
       onKeyDown={onKeyDown}
-      className={`relative flex min-h-[4.5rem] cursor-pointer items-start gap-2 border-l-2 py-3 pr-3 outline-none transition-colors duration-normal focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${level === 1 ? "pl-3" : "pl-2 before:absolute before:left-0 before:top-6 before:w-2 before:border-t before:border-border/70"} ${selectedId === category.id ? "border-l-primary bg-primary/10" : "border-l-transparent hover:bg-surface-muted/60"}`}
+      className={`relative flex min-h-[4.5rem] cursor-pointer items-start gap-2 border-l-2 py-3 pr-3 outline-none transition-colors duration-normal focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${level === 1 ? "pl-3" : "pl-3 before:absolute before:left-0 before:top-7 before:w-3 before:border-t before:border-border"} ${selectedId === category.id ? "border-l-primary bg-primary/10" : "border-l-transparent hover:bg-surface-muted/60"}`}
     >
-      <span className="flex size-6 shrink-0 items-center justify-center pt-0.5">
-        {hasChildren ? <button type="button" aria-label={isExpanded ? `收起${category.display_name}` : `展开${category.display_name}`} title={isExpanded ? "收起" : "展开"} onClick={(event) => { event.stopPropagation(); onToggle(category.id); }} className="inline-flex size-6 items-center justify-center rounded-ui-sm text-muted-foreground hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{isExpanded ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}</button> : <span className="size-1.5 rounded-full bg-border" aria-hidden="true" />}
+      <span className="flex w-11 shrink-0 items-center gap-1 pt-0.5">
+        {hasChildren ? <button type="button" aria-label={isExpanded ? `收起${category.display_name}` : `展开${category.display_name}`} title={isExpanded ? "收起" : "展开"} onClick={(event) => { event.stopPropagation(); onToggle(category.id); }} className="inline-flex size-6 items-center justify-center rounded-ui-sm text-muted-foreground hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{isExpanded ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}</button> : <span className="size-6" aria-hidden="true" />}
+        {hasChildren && isExpanded ? <FolderOpen className="size-4 text-primary/80" aria-hidden="true" /> : <Folder className="size-4 text-muted-foreground" aria-hidden="true" />}
       </span>
       <span className="min-w-0 flex-1">
         <span className="flex flex-wrap items-center gap-2"><Badge className="shrink-0" variant={category.is_active ? "success" : "secondary"}>{category.is_active ? "启用" : "停用"}</Badge><span className={`break-words ${level === 1 ? "font-semibold" : "font-medium"}`}>{category.display_code} {category.display_name}</span></span>
         <span className="mt-1 block break-words text-ui-xs text-muted-foreground">{category.item_count} 份直接资料{hasChildren ? ` · ${children.length} 个子分类` : ""}</span>
       </span>
     </div>
-    {hasChildren && isExpanded && <div role="group" className="ml-5 border-l border-border/70 bg-surface-muted/10 sm:ml-6">{children.map((child, childIndex) => <CategoryTreeNodeView key={child.category.id} node={child} level={level + 1} index={childIndex} siblingCount={children.length} selectedId={selectedId} expanded={expanded} visibleNodes={visibleNodes} nodeRefs={nodeRefs} onSelect={onSelect} onToggle={onToggle} />)}</div>}
+    {hasChildren && isExpanded && <div role="group" className="ml-5 border-l border-border bg-surface-muted/10 sm:ml-6">{children.map((child, childIndex) => <CategoryTreeNodeView key={child.category.id} node={child} level={level + 1} index={childIndex} siblingCount={children.length} selectedId={selectedId} expanded={expanded} visibleNodes={visibleNodes} nodeRefs={nodeRefs} onSelect={onSelect} onToggle={onToggle} />)}</div>}
   </>;
 }
 
@@ -470,8 +472,9 @@ function CategoryDetail({
   if (!category || !draft) return <EmptyState title="选择一个分类" description="从左侧选择分类后，在此维护分类信息。" />;
   const isDirty = draft.display_code !== category.display_code || draft.display_name !== category.display_name || draft.sort_order !== category.sort_order || draft.is_active !== category.is_active;
   const cannotDisable = draft.is_active && (category.item_count > 0 || hasActiveChild);
+  const statusHelpId = `category-status-help-${category.id}`;
   return <div className="flex h-full flex-col">
-    <div className="border-b border-border px-5 py-4 sm:px-6"><div className="flex flex-wrap items-center gap-2"><h3 className="font-semibold">{category.display_code} {category.display_name}</h3><Badge variant={draft.is_active ? "success" : "secondary"}>{draft.is_active ? "启用" : "停用"}</Badge></div><p className="mt-1 break-words text-ui-xs text-muted-foreground">{category.full_path}</p></div>
+    <div className="border-b border-border px-5 py-4 sm:px-6"><div className="flex flex-wrap items-center gap-2"><h3 className="font-semibold">{category.display_code} {category.display_name}</h3><Badge variant={category.is_active ? "success" : "secondary"}>{category.is_active ? "启用" : "停用"}</Badge>{isDirty && draft.is_active !== category.is_active && <Badge variant="warning">待保存：{draft.is_active ? "启用" : "停用"}</Badge>}</div><p className="mt-1 break-words text-ui-xs text-muted-foreground">{category.full_path}</p></div>
     <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-5">
       {error && <Alert variant="destructive" role="alert"><AlertTitle>保存失败</AlertTitle><AlertDescription>{error}</AlertDescription></Alert>}
       <section aria-labelledby={`category-fields-${category.id}`} className="space-y-4">
@@ -481,8 +484,19 @@ function CategoryDetail({
       </section>
       <section aria-labelledby={`category-status-${category.id}`} className="space-y-3 border-t border-border pt-4">
         <h4 id={`category-status-${category.id}`} className="text-ui-sm font-semibold">可用状态</h4>
-        <label className="flex h-control-md cursor-pointer items-center gap-2 text-ui-sm font-medium"><Checkbox checked={draft.is_active} disabled={saving || cannotDisable} onChange={(event) => onChange({ ...draft, is_active: event.target.checked })} aria-label={`${category.display_name}启用`} />启用分类</label>
-        {cannotDisable && <div className="flex gap-2 rounded-ui-md border border-warning/30 bg-warning/10 px-3 py-2 text-ui-xs text-warning" role="status"><TriangleAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" /><p>{category.item_count > 0 && `该分类有 ${category.item_count} 份直接资料，需重新归类后才能停用。`}{category.item_count > 0 && hasActiveChild && " "}{hasActiveChild && "该分类仍有启用的子分类，请先停用子分类。"}</p></div>}
+        <div role="radiogroup" aria-labelledby={`category-status-${category.id}`} aria-describedby={cannotDisable ? statusHelpId : undefined} className="grid gap-2 sm:grid-cols-2">
+          <label className={`flex min-h-control-md items-start gap-2 rounded-ui-md border px-3 py-2 text-ui-sm transition-colors focus-within:ring-2 focus-within:ring-ring ${draft.is_active ? "border-primary/50 bg-primary/10" : "border-border hover:bg-surface-muted/60"}`}>
+            <input type="radio" name={`category-status-${category.id}`} value="active" checked={draft.is_active} disabled={saving} onChange={() => onChange({ ...draft, is_active: true })} className="peer sr-only" aria-label={`${category.display_name}启用`} />
+            <span className="mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border border-input peer-checked:border-primary"><span className="size-2 rounded-full bg-primary opacity-0 peer-checked:opacity-100" /></span>
+            <span><span className="block font-medium">启用</span><span className="block text-ui-xs text-muted-foreground">可用于上传和归类</span></span>
+          </label>
+          <label className={`flex min-h-control-md items-start gap-2 rounded-ui-md border px-3 py-2 text-ui-sm transition-colors focus-within:ring-2 focus-within:ring-ring ${cannotDisable ? "cursor-not-allowed border-border bg-surface-muted/40 opacity-60" : draft.is_active ? "border-border hover:bg-surface-muted/60" : "border-primary/50 bg-primary/10"}`}>
+            <input type="radio" name={`category-status-${category.id}`} value="inactive" checked={!draft.is_active} disabled={saving || cannotDisable} onChange={() => onChange({ ...draft, is_active: false })} className="peer sr-only" aria-label={`${category.display_name}停用`} />
+            <span className="mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border border-input peer-checked:border-primary"><span className="size-2 rounded-full bg-primary opacity-0 peer-checked:opacity-100" /></span>
+            <span><span className="block font-medium">停用</span><span className="block text-ui-xs text-muted-foreground">不再出现在可选目录中</span></span>
+          </label>
+        </div>
+        {cannotDisable && <div id={statusHelpId} className="flex gap-2 rounded-ui-md border border-border bg-surface-muted/50 px-3 py-2 text-ui-xs text-muted-foreground" role="status"><TriangleAlert className="mt-0.5 size-4 shrink-0 text-warning" aria-hidden="true" /><div className="space-y-1"><p className="font-medium text-foreground">暂不能停用</p>{category.item_count > 0 && <p>该分类有 {category.item_count} 份直接资料，需重新归类后才能停用。</p>}{hasActiveChild && <p>该分类仍有启用的子分类，请先停用子分类。</p>}</div></div>}
       </section>
       <section aria-labelledby={`category-level-${category.id}`} className="space-y-3 border-t border-border pt-4"><div><h4 id={`category-level-${category.id}`} className="text-ui-sm font-semibold">分类层级</h4><p className="mt-1 text-ui-xs text-muted-foreground">第 {category.level} 级 · {category.item_count} 份直接资料</p></div><Button variant="outline" onClick={onAddChild} disabled={category.level >= 4 || !category.is_active}><Plus className="size-4" />新增子分类</Button></section>
     </div>
