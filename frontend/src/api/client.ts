@@ -29,6 +29,8 @@ import type {
   BulkManagedContentResponse,
   ManagedIndexJobList,
   ManagedUploadResponse,
+  ManagedUploadTask,
+  ManagedUploadTaskList,
   MediaTranscript,
   TranscriptionJob,
   TranscriptionProfile,
@@ -56,6 +58,17 @@ export function getCsrfToken(): string | null {
 let unauthorizedHandler: (() => void) | null = null;
 let contentPermissionForbiddenHandler: (() => void) | null = null;
 
+export type MultipartUploadProgress = {
+  loaded: number;
+  total: number;
+  ratio: number;
+};
+
+export type MultipartUploadCallbacks = {
+  onProgress?: (progress: MultipartUploadProgress) => void;
+  onUploaded?: () => void;
+};
+
 export interface ManagedContentUploadEntry {
   file: File;
   relativePath: string;
@@ -67,6 +80,11 @@ export type ManagedContentDownload = {
 };
 
 export type ManagedContentUploadMode = "files" | "folder";
+export type ManagedUploadProgress = {
+  phase: "uploading" | "processing";
+  loaded: number;
+  total: number;
+};
 
 export function setUnauthorizedHandler(fn: (() => void) | null) {
   unauthorizedHandler = fn;
@@ -76,8 +94,8 @@ export function setContentPermissionForbiddenHandler(fn: (() => void) | null) {
   contentPermissionForbiddenHandler = fn;
 }
 
-function notifyResponse(path: string, response: Response) {
-  if (response.status === 401 && unauthorizedHandler) {
+function notifyStatus(path: string, status: number) {
+  if (status === 401 && unauthorizedHandler) {
     try {
       unauthorizedHandler();
     } catch {
@@ -85,7 +103,7 @@ function notifyResponse(path: string, response: Response) {
     }
   }
   if (
-    response.status === 403
+    status === 403
     && path.startsWith("/api/admin/content/")
     && contentPermissionForbiddenHandler
   ) {
@@ -95,6 +113,10 @@ function notifyResponse(path: string, response: Response) {
       /* noop */
     }
   }
+}
+
+function notifyResponse(path: string, response: Response) {
+  notifyStatus(path, response.status);
 }
 
 export class ApiError extends Error {
@@ -136,7 +158,7 @@ async function rawFetch(path: string, init: RequestInit = {}): Promise<Response>
   const headers: Record<string, string> = {
     ...(init.headers as Record<string, string> | undefined),
   };
-  if (init.body && !headers["content-type"] && !headers["Content-Type"]) {
+  if (init.body && !(init.body instanceof FormData) && !headers["content-type"] && !headers["Content-Type"]) {
     headers["content-type"] = "application/json";
   }
   if (MUTATING.has(method) && csrfToken) {
@@ -163,6 +185,62 @@ async function jsonFetch<T>(path: string, init?: RequestInit): Promise<T> {
   // 204 has no body.
   if (res.status === 204) return undefined as unknown as T;
   return (await res.json()) as T;
+}
+
+async function multipartFetch<T>(
+  path: string,
+  form: FormData,
+  callbacks?: MultipartUploadCallbacks,
+): Promise<T> {
+  if (!callbacks) {
+    const res = await rawFetch(path, { method: "POST", body: form });
+    if (!res.ok) {
+      const txt = await res.text().catch(() => "");
+      const detail = parseErrorDetail(txt);
+      throw new ApiError(res.status, txt, detail.message || `${res.status} ${res.statusText}`, detail.code, detail.retryable);
+    }
+    return (await res.json()) as T;
+  }
+
+  return new Promise<T>((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    request.open("POST", path);
+    request.withCredentials = true;
+    if (csrfToken) request.setRequestHeader("X-CSRF-Token", csrfToken);
+
+    request.upload.onprogress = (event) => {
+      const total = event.lengthComputable && event.total > 0 ? event.total : 0;
+      callbacks.onProgress?.({
+        loaded: event.loaded,
+        total,
+        ratio: total > 0 ? Math.min(1, event.loaded / total) : 0,
+      });
+    };
+    request.upload.onload = () => callbacks.onUploaded?.();
+    request.onerror = () => reject(new ApiError(0, "", "网络连接失败，请检查后重试。"));
+    request.onabort = () => reject(new ApiError(0, "", "上传已取消。"));
+    request.onload = () => {
+      notifyStatus(path, request.status);
+      const body = request.responseText || "";
+      if (request.status < 200 || request.status >= 300) {
+        const detail = parseErrorDetail(body);
+        reject(new ApiError(
+          request.status,
+          body,
+          detail.message || `${request.status} ${request.statusText}`,
+          detail.code,
+          detail.retryable,
+        ));
+        return;
+      }
+      try {
+        resolve(JSON.parse(body) as T);
+      } catch {
+        reject(new ApiError(request.status, body, "服务器返回了无法识别的上传结果。"));
+      }
+    };
+    request.send(form);
+  });
 }
 
 function filenameFromContentDisposition(header: string | null, fallback: string): string {
@@ -414,6 +492,7 @@ export const api = {
     files: Array<File | ManagedContentUploadEntry>,
     categoryId: string,
     uploadMode: ManagedContentUploadMode = "files",
+    onProgress?: (progress: ManagedUploadProgress) => void,
   ) => {
     const form = new FormData();
     files.forEach((entry) => {
@@ -424,22 +503,63 @@ export const api = {
     });
     form.append("category_id", categoryId);
     form.append("upload_mode", uploadMode);
-    const headers: Record<string, string> = {};
-    if (csrfToken) headers["X-CSRF-Token"] = csrfToken;
-    const response = await fetch("/api/admin/content/uploads", {
-      method: "POST",
-      headers,
-      body: form,
-      credentials: "include",
-    });
-    notifyResponse("/api/admin/content/uploads", response);
-    if (!response.ok) {
-      const body = await response.text().catch(() => "");
-      const detail = parseErrorDetail(body);
-      throw new ApiError(response.status, body, detail.message || `${response.status} ${response.statusText}`, detail.code, detail.retryable);
+    if (!onProgress) {
+      const headers: Record<string, string> = {};
+      if (csrfToken) headers["X-CSRF-Token"] = csrfToken;
+      const response = await fetch("/api/admin/content/uploads", {
+        method: "POST", headers, body: form, credentials: "include",
+      });
+      notifyResponse("/api/admin/content/uploads", response);
+      if (!response.ok) {
+        const body = await response.text().catch(() => "");
+        const detail = parseErrorDetail(body);
+        throw new ApiError(response.status, body, detail.message || `${response.status} ${response.statusText}`, detail.code, detail.retryable);
+      }
+      return (await response.json()) as ManagedUploadResponse;
     }
-    return (await response.json()) as ManagedUploadResponse;
+    return await new Promise<ManagedUploadResponse>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", "/api/admin/content/uploads");
+      xhr.withCredentials = true;
+      if (csrfToken) xhr.setRequestHeader("X-CSRF-Token", csrfToken);
+      xhr.upload.onprogress = (event) => {
+        onProgress({ phase: "uploading", loaded: event.loaded, total: event.total || 0 });
+      };
+      xhr.onerror = () => reject(new ApiError(0, "", "网络连接失败，请稍后重试", null, true));
+      xhr.onabort = () => reject(new ApiError(0, "", "上传已中断", null, true));
+      xhr.onload = () => {
+        const body = xhr.responseText || "";
+        onProgress({ phase: "processing", loaded: xhr.status >= 200 && xhr.status < 300 ? 1 : 0, total: 1 });
+        if (xhr.status === 401 && unauthorizedHandler) {
+          try { unauthorizedHandler(); } catch { /* noop */ }
+        }
+        if (xhr.status === 403 && contentPermissionForbiddenHandler) {
+          try { contentPermissionForbiddenHandler(); } catch { /* noop */ }
+        }
+        if (xhr.status < 200 || xhr.status >= 300) {
+          const detail = parseErrorDetail(body);
+          reject(new ApiError(xhr.status, body, detail.message || `${xhr.status} ${xhr.statusText}`, detail.code, detail.retryable));
+          return;
+        }
+        try {
+          resolve(JSON.parse(body) as ManagedUploadResponse);
+        } catch {
+          reject(new ApiError(xhr.status, body, "服务器返回了无效响应", null, true));
+        }
+      };
+      xhr.send(form);
+    });
   },
+  managedUploadTasks: (params?: { status?: string; query?: string; limit?: number; offset?: number }) => {
+    const search = new URLSearchParams();
+    if (params?.status) search.set("status", params.status);
+    if (params?.query) search.set("query", params.query);
+    if (params?.limit != null) search.set("limit", String(params.limit));
+    if (params?.offset != null) search.set("offset", String(params.offset));
+    return jsonFetch<ManagedUploadTaskList>(`/api/admin/content/upload-tasks?${search}`);
+  },
+  managedUploadTask: (batchId: string) =>
+    jsonFetch<ManagedUploadTask>(`/api/admin/content/upload-tasks/${encodeURIComponent(batchId)}`),
   moveManagedContent: (itemId: string, targetCategoryId: string, expectedVersionId: string) =>
     jsonFetch<ManagedContentItem>(`/api/admin/content/items/${encodeURIComponent(itemId)}/move`, {
       method: "POST",
@@ -566,59 +686,31 @@ export const api = {
   },
 
   // admin: media
-  uploadMediaVideo: async (video: File, transcript: File, title: string) => {
+  uploadMediaVideo: async (
+    video: File,
+    transcript: File,
+    title: string,
+    callbacks?: MultipartUploadCallbacks,
+  ) => {
     const fd = new FormData();
     fd.append("video", video, video.name);
     fd.append("transcript", transcript, transcript.name);
     fd.append("title", title);
-    const method = "POST";
-    const csrf = csrfToken;
-    const headers: Record<string, string> = {};
-    if (csrf) headers["X-CSRF-Token"] = csrf;
-    const res = await fetch("/api/admin/media", {
-      method,
-      headers,
-      body: fd,
-      credentials: "include",
-    });
-    if (res.status === 401 && unauthorizedHandler) {
-      try { unauthorizedHandler(); } catch { /* noop */ }
-    }
-    if (!res.ok) {
-      const txt = await res.text().catch(() => "");
-      const detail = parseErrorDetail(txt);
-      throw new ApiError(res.status, txt, detail.message || `${res.status} ${res.statusText}`, detail.code, detail.retryable);
-    }
-    return (await res.json()) as MediaAsset;
+    return multipartFetch<MediaAsset>("/api/admin/media", fd, callbacks);
   },
   uploadAutomaticMediaVideo: async (
     video: File,
     title: string,
     profileId: string,
     requestIdempotencyKey: string,
+    callbacks?: MultipartUploadCallbacks,
   ) => {
     const fd = new FormData();
     fd.append("video", video, video.name);
     fd.append("title", title);
     fd.append("profile_id", profileId);
     fd.append("request_idempotency_key", requestIdempotencyKey);
-    const headers: Record<string, string> = {};
-    if (csrfToken) headers["X-CSRF-Token"] = csrfToken;
-    const res = await fetch("/api/admin/media", {
-      method: "POST",
-      headers,
-      body: fd,
-      credentials: "include",
-    });
-    if (res.status === 401 && unauthorizedHandler) {
-      try { unauthorizedHandler(); } catch { /* noop */ }
-    }
-    if (!res.ok) {
-      const txt = await res.text().catch(() => "");
-      const detail = parseErrorDetail(txt);
-      throw new ApiError(res.status, txt, detail.message || `${res.status} ${res.statusText}`, detail.code, detail.retryable);
-    }
-    return (await res.json()) as MediaAsset;
+    return multipartFetch<MediaAsset>("/api/admin/media", fd, callbacks);
   },
   listMediaAssets: () => jsonFetch<MediaAsset[]>("/api/admin/media"),
   deleteFailedMediaAsset: (mediaId: string) =>

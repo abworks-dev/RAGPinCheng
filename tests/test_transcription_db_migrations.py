@@ -111,6 +111,35 @@ def test_schema_10_database_migrates_manual_revision_columns_and_index(tmp_path,
     conn.close()
 
 
+def test_schema_14_database_migrates_answer_policy_as_version_15(tmp_path, monkeypatch):
+    path = tmp_path / "app.sqlite"
+    migrations = db_migrations.MIGRATIONS
+    monkeypatch.setattr(
+        db_migrations, "MIGRATIONS", tuple(item for item in migrations if item.version <= 14),
+    )
+    init_db(path, backup_dir=tmp_path / "backups")
+    conn = sqlite3.connect(path)
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(message_answer_versions)")}
+    assert conn.execute("SELECT max(version) FROM app_schema_migrations").fetchone()[0] == 14
+    assert "upload_batch_entries" in tables
+    assert "answer_policy_settings" not in tables
+    assert "policy_version" not in columns
+    conn.close()
+
+    monkeypatch.setattr(db_migrations, "MIGRATIONS", migrations)
+    init_db(path, backup_dir=tmp_path / "backups")
+    conn = sqlite3.connect(path)
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(message_answer_versions)")}
+    assert conn.execute("SELECT max(version) FROM app_schema_migrations").fetchone()[0] == 15
+    assert {"upload_batch_entries", "answer_policy_settings", "answer_policy_audit"} <= tables
+    assert {"policy_version", "policy_json"} <= columns
+    assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    assert conn.execute("PRAGMA foreign_key_check").fetchone() is None
+    conn.close()
+
+
 def test_schema_5_database_adds_later_tables_without_changing_users(tmp_path):
     path = tmp_path / "app.sqlite"
     init_db(path, backup_dir=tmp_path / "backups")
@@ -124,6 +153,7 @@ def test_schema_5_database_adds_later_tables_without_changing_users(tmp_path):
     conn.execute("DROP TABLE content_folder_requests")
     conn.execute("DROP TABLE content_permission_group_items")
     conn.execute("DROP TABLE content_permission_groups")
+    conn.execute("DROP TABLE upload_batch_entries")
     conn.execute("DROP TABLE content_permissions")
     conn.execute(
         """CREATE TABLE content_permissions (
