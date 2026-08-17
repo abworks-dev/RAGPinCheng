@@ -16,7 +16,7 @@ PROTECTED = {
     # Updated with the approved Range-response extraction used by the
     # admin-only media preview endpoint; normalize_hash keeps this portable.
     "api/routes_media.py": "80b05719fc394e24b8cab67eb0f9330ecd5ca302f7acdbf066c64d86eb568673",
-    "api/indexing.py": "5613de8c7e9c210b404e6906f24b147bdb071cc1dda89f9adc53b631ded74d05",
+    "api/indexing.py": "a1dd2c0e1cb976a66c11dda9125f1042206f75d2cc00b08e50c02d5a669408da",
     "src/chunk.py": "f22d79fe976a6da4fc4c2ba430490ad2c24205b2399e733912390e480858c542",
     "src/index.py": "993d4e101cfd0e6e1b670de7d43edaa71a73cd0778d18cef6aba72d3184d23bc",
     "src/indexing_pipeline.py": "59218fa103cf235ab7e06afa48965eb5f1837da14c6d2e2ffd27b78082d717d4",

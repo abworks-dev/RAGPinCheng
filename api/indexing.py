@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Callable, TypeAlias
 
 from src.indexing_pipeline import index_single
+from src.config import OFFICE_DOC_TYPES, OFFICE_PROCESSING_ENABLED
 
 from .db import connect
 
@@ -174,6 +175,16 @@ async def _run_one(job_id: int) -> None:
     source_path = Path(row["source_path"])
     doc_type = row["doc_type"]
     media_id = row["media_id"]  # may be None
+
+    if doc_type in OFFICE_DOC_TYPES and not OFFICE_PROCESSING_ENABLED:
+        _update_status(
+            job_id,
+            status="failed",
+            started_at=int(time.time()),
+            finished_at=int(time.time()),
+            error="office_processing_disabled",
+        )
+        return
 
     # `.md` files (transcript or regular document) skip the MinerU upload/queue
     # phases entirely — they're already markdown on disk. Start at "chunking"

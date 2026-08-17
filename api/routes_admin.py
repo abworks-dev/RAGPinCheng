@@ -28,6 +28,8 @@ from src.config import (
     SECOND_LEVEL_CATEGORIES,
     CONTENT_HEAD_ENFORCEMENT,
     CONTENT_MANAGEMENT_ENABLED,
+    OFFICE_DOC_TYPES,
+    OFFICE_PROCESSING_ENABLED,
 )
 from src.answer_policy import (
     AnswerPolicy,
@@ -808,6 +810,13 @@ async def upload_documents(
         if doc_type is None:
             skipped.append({"filename": name, "reason": "仅支持 .pdf、.md、.docx、.xlsx、.pptx"})
             continue
+        if doc_type in OFFICE_DOC_TYPES and not OFFICE_PROCESSING_ENABLED:
+            skipped.append({
+                "filename": name,
+                "reason": "Office 处理当前已停用",
+                "reason_code": "office_processing_disabled",
+            })
+            continue
 
         target = category_dir / name
         # Stream to disk so we don't load the whole file into memory.
@@ -905,11 +914,18 @@ def retry_index_job(
     _admin: CurrentUser = Depends(require_csrf_admin),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> IndexJobDTO:
-    row = conn.execute("SELECT status, source_path FROM index_jobs WHERE id = ?", (job_id,)).fetchone()
+    row = conn.execute(
+        "SELECT status, source_path, doc_type FROM index_jobs WHERE id = ?", (job_id,)
+    ).fetchone()
     if row is None:
         raise HTTPException(status_code=404, detail="job not found")
     if row["status"] not in ("failed", "done"):
         raise HTTPException(status_code=400, detail="只有失败或已完成的任务可以重试")
+    if row["doc_type"] in OFFICE_DOC_TYPES and not OFFICE_PROCESSING_ENABLED:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "office_processing_disabled", "message": "Office 处理当前已停用"},
+        )
     if not Path(row["source_path"]).exists():
         raise HTTPException(status_code=400, detail="源文件已不存在，请重新上传")
     conn.execute(

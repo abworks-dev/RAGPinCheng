@@ -99,6 +99,7 @@ services:
       TRANSCRIPTION_ADMITTED_PROFILE_IDS: ${TRANSCRIPTION_ADMITTED_PROFILE_IDS:-funasr-sensevoice-zh-experimental-v1}
       # LibreOffice 转换服务地址 — 在同一 Docker 网络内，通过服务名访问。
       LIBREOFFICE_URL: ${LIBREOFFICE_URL:-http://libreoffice:8101}
+      OFFICE_PROCESSING_ENABLED: ${OFFICE_PROCESSING_ENABLED:-true}
       CONTENT_ROOT: /app/content
       DOCS_DIR: /app/docs
       MEDIA_DIR: /app/media
