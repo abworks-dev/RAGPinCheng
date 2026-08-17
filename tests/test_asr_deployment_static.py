@@ -162,7 +162,12 @@ def test_faster_whisper_production_evidence_treats_runner_exit_as_informational(
 def test_faster_whisper_qualification_accepts_only_pinned_production_profile_sets():
     qualification = read("scripts/qualify-faster-whisper-production.ps1")
 
+    assert '$legacyWhisperXProfile = "whisperx-large-v3-zh-align-v1"' in qualification
     assert '$whisperXProfile = "whisperx-large-v3-zh-align-v2"' in qualification
+    assert (
+        '"$fasterWhisperProfile`n$senseVoiceProfile`n$legacyWhisperXProfile"'
+        in qualification
+    )
     assert '"$fasterWhisperProfile`n$senseVoiceProfile`n$whisperXProfile"' in qualification
     assert "Production ASR capabilities do not match a pinned profile contract" in qualification
 

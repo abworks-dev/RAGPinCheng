@@ -607,10 +607,12 @@ function Get-PinnedProductionAsrCapabilities {
     $profileIdentity = $profiles -join "`n"
     $senseVoiceProfile = "funasr-sensevoice-small-v1"
     $fasterWhisperProfile = "faster-whisper-large-v3-turbo-v1"
+    $legacyWhisperXProfile = "whisperx-large-v3-zh-align-v1"
     $whisperXProfile = "whisperx-large-v3-zh-align-v2"
     if ($profileIdentity -notin @(
         $senseVoiceProfile,
         "$fasterWhisperProfile`n$senseVoiceProfile",
+        "$fasterWhisperProfile`n$senseVoiceProfile`n$legacyWhisperXProfile",
         "$fasterWhisperProfile`n$senseVoiceProfile`n$whisperXProfile"
     )) {
         throw "Production ASR capabilities do not match a pinned profile contract"
