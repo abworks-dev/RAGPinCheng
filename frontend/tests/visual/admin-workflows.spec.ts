@@ -245,7 +245,7 @@ test.describe("资料管理", () => {
     await expectNoBodyOverflow(page);
   });
 
-  test("trash shows original location and archive metadata without overflowing", async ({ page }) => {
+  test("trash shows original location and archive metadata without overflowing", async ({ page }, testInfo) => {
     await openTab(page, "资料管理");
     await page.getByRole("tab", { name: "回收站" }).click();
     await expect(page.getByRole("heading", { name: "回收站", exact: true })).toBeVisible();
@@ -253,6 +253,19 @@ test.describe("资料管理", () => {
     await expect(page.getByRole("checkbox", { name: "选择恢复“项目交付检查清单”" })).toBeVisible();
     await page.getByRole("checkbox", { name: "选择恢复“企业知识库使用规范”" }).check();
     await expect(page.getByText(/已选择 1 份/)).toBeVisible();
+    await page.getByRole("checkbox", { name: "选择恢复“项目交付检查清单”" }).check();
+    await expect(page.getByRole("button", { name: "批量恢复（2）" })).toBeVisible();
+    await page.getByRole("button", { name: "批量恢复（2）" }).click();
+    const batchRestore = page.getByRole("dialog", { name: "批量恢复" });
+    await expect(batchRestore.getByRole("combobox", { name: "恢复到" })).toHaveValue("original");
+    await batchRestore.getByRole("button", { name: "取消" }).click();
+
+    await page.getByRole("button", { name: "展开回收站筛选" }).click();
+    const filters = page.getByRole("dialog", { name: "回收站搜索筛选" });
+    await expect(filters.getByRole("combobox", { name: "保留状态" })).toBeVisible();
+    await expectInViewport(filters);
+    await page.screenshot({ path: testInfo.outputPath("trash-filter-layout.png"), fullPage: true });
+    await page.keyboard.press("Escape");
 
     const desktop = page.viewportSize()!.width >= 1024;
     const row = desktop
@@ -272,6 +285,7 @@ test.describe("资料管理", () => {
       await expect(row.getByText("上传路径", { exact: true })).toBeVisible();
     }
     await expectNoBodyOverflow(page);
+    await page.screenshot({ path: testInfo.outputPath("trash-list-layout.png"), fullPage: true });
   });
 
   for (const scenario of ["loading", "empty", "error", "disabled"] as const) {
@@ -565,7 +579,7 @@ test.describe("资料管理", () => {
   test("trash audit records remain available independently of restore", async ({ page }) => {
     await openTab(page, "资料管理");
     await page.getByRole("tab", { name: "回收站" }).click();
-    const record = page.getByRole("button", { name: /记录/ }).filter({ visible: true }).first();
+    const record = page.getByRole("button", { name: /回收站记录/ }).filter({ visible: true }).first();
     await record.click();
     const dialog = page.getByRole("dialog", { name: "操作记录" });
     await expect(dialog).toContainText("移入回收站");
