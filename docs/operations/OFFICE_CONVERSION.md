@@ -49,6 +49,24 @@ docker compose -f docker/docker-compose.yml exec libreoffice curl -fsS http://lo
 
 服务会限制为最多两个并发 LibreOffice 进程。超时、HTTP 失败、缺失输出和损坏 PDF 均应受控失败，不得把无效内容发布为预览文件。
 
+## 生产 LibreOffice 受控恢复
+
+生产 `/health` 返回 503 且确认是 LibreOffice 进程资源异常时，使用 GitHub Actions 中的
+`Repair Production PPTX Previews` workflow，选择 `recover`、确认值 `RECOVER_LIBREOFFICE`，并填写
+当前已部署 App 的完整 Commit SHA。恢复操作会先确认内容索引、分类调整、旧索引、转录发布索引和
+转录任务均不在活动状态，然后只重启 Compose 项目 `ragpincheng-prod` 中唯一的现有 `libreoffice`
+容器。它不会重建或拉取镜像，也不会重启 backend。
+
+workflow 会记录不含命令参数的有限容器、镜像和 PID 诊断，校验重启前后镜像 ID 一致，并在 120 秒内
+等待容器恢复健康。随后必须通过 `/health` 和合成 PPTX 转 PDF 验证，才会生成与 `preview` 相同的
+`manifest.json`、`manifest.sha256` 和 `context.json`。这些产物只包含版本 ID、状态和稳定错误码，
+不包含客户文档内容。
+
+若 dry-run 显示缺失预览，后续 `apply` 必须引用该 recovery run ID 和准确的 manifest SHA-256，并使用
+`REPAIR_PPTX` 确认。若容器未恢复健康、镜像 ID 变化、生产 Commit 变化、活动任务出现或候选集合变化，
+workflow 会停止，不执行预览补生成。恢复本身的回滚方式是停止后续 apply；原容器和原镜像均被保留，
+如需镜像重建、配置修改或 backend 重启，必须另行审批。
+
 ## 临时产物与资源观察
 
 转换输入写入 `/data/input/<uuid>`，输出写入 `/data/output/<uuid>`。成功响应发送完成后由后台任务清理；转换异常会立即清理对应输入和输出目录。backend 生成的 PPTX 预览使用源文件同目录的 `.preview.pdf` 后缀。

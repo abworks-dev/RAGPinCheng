@@ -4,23 +4,23 @@ on:
   workflow_dispatch:
     inputs:
       operation:
-        description: Inspect missing previews or apply an approved preview manifest
+        description: Inspect, recover LibreOffice and inspect, or apply an approved manifest
         required: true
         default: preview
         type: choice
-        options: [preview, apply]
+        options: [preview, recover, apply]
       confirm_production:
         description: Explicit production confirmation for the selected operation
         required: true
         default: CANCEL
         type: choice
-        options: [CANCEL, PREVIEW_PPTX, REPAIR_PPTX]
+        options: [CANCEL, PREVIEW_PPTX, RECOVER_LIBREOFFICE, REPAIR_PPTX]
       expected_app_head:
         description: Exact deployed production App commit
         required: true
         type: string
       preview_run_id:
-        description: Preview workflow run ID; required for apply
+        description: Preview or recovery workflow run ID; required for apply
         required: false
         type: string
       manifest_sha256:
@@ -79,6 +79,12 @@ jobs:
             preview)
               [ "${CONFIRM_PRODUCTION}" = "PREVIEW_PPTX" ] || {
                 echo "ERROR: preview was not explicitly confirmed"
+                exit 1
+              }
+              ;;
+            recover)
+              [ "${CONFIRM_PRODUCTION}" = "RECOVER_LIBREOFFICE" ] || {
+                echo "ERROR: LibreOffice recovery was not explicitly confirmed"
                 exit 1
               }
               ;;
@@ -158,15 +164,121 @@ jobs:
 
           REPORT_ROOT="${RUNNER_TEMP}/pptx-preview-repair/current"
           mkdir -p "${REPORT_ROOT}"
-          mapfile -t LIBREOFFICE_IDS < <(docker ps \
+          mapfile -t LIBREOFFICE_IDS < <(docker ps -a \
             --filter 'label=com.docker.compose.project=ragpincheng-prod' \
             --filter 'label=com.docker.compose.service=libreoffice' \
             --format '{{.ID}}')
           [ "${#LIBREOFFICE_IDS[@]}" -eq 1 ] || {
-            echo "ERROR: expected exactly one running production LibreOffice container"
+            echo "ERROR: expected exactly one production LibreOffice container"
             exit 1
           }
           LIBREOFFICE_ID="${LIBREOFFICE_IDS[0]}"
+          LIBREOFFICE_IMAGE_BEFORE="$(docker inspect --format '{{.Image}}' "${LIBREOFFICE_ID}")"
+
+          if [ "${OPERATION}" = "recover" ]; then
+            docker exec -i "${BACKEND_ID}" python - <<'PY'
+          import sqlite3
+
+          from src.config import APP_DB_PATH
+
+          active = {
+              "content_index_jobs": ("pending", "parsing", "chunking", "summarizing", "embedding"),
+              "content_reclassification_jobs": ("pending", "applying", "committing", "rolling_back"),
+              "index_jobs": ("pending", "running", "uploading", "queued_mineru", "parsing", "chunking", "embedding"),
+              "transcript_publication_index_jobs": ("pending", "parsing", "chunking", "embedding"),
+              "transcription_jobs": ("pending", "running", "processing"),
+          }
+          connection = sqlite3.connect(
+              f"file:{APP_DB_PATH.as_posix()}?mode=ro",
+              uri=True,
+          )
+          try:
+              existing = {
+                  row[0]
+                  for row in connection.execute(
+                      "SELECT name FROM sqlite_master WHERE type='table'"
+                  )
+              }
+              counts = {}
+              for table, statuses in active.items():
+                  if table not in existing:
+                      counts[table] = 0
+                      continue
+                  placeholders = ",".join("?" for _ in statuses)
+                  counts[table] = int(
+                      connection.execute(
+                          f"SELECT count(*) FROM {table} WHERE status IN ({placeholders})",
+                          statuses,
+                      ).fetchone()[0]
+                  )
+          finally:
+              connection.close()
+          print(
+              "LIBREOFFICE_RECOVERY_ACTIVE_JOB_PREFLIGHT "
+              + " ".join(f"{name}={counts[name]}" for name in active)
+          )
+          if any(counts.values()):
+              raise SystemExit(
+                  "ERROR: active application jobs must finish before LibreOffice recovery"
+              )
+          PY
+
+            {
+              printf 'container_id=%s\nimage_id_before=%s\n' \
+                "${LIBREOFFICE_ID}" "${LIBREOFFICE_IMAGE_BEFORE}"
+              docker inspect --format \
+                'state_before={{.State.Status}} health_before={{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}} restart_count_before={{.RestartCount}} init_pid_before={{.State.Pid}}' \
+                "${LIBREOFFICE_ID}"
+              echo 'processes_before:'
+              docker top "${LIBREOFFICE_ID}" -eo pid,ppid,stat,comm 2>/dev/null \
+                | head -n 25 || true
+            } > "${REPORT_ROOT}/libreoffice-recovery.txt"
+
+            if ! docker restart --time 30 "${LIBREOFFICE_ID}"; then
+              echo "LIBREOFFICE_RECOVERY restart=failed fallback=start"
+              docker start "${LIBREOFFICE_ID}" || {
+                echo "ERROR: existing production LibreOffice container could not be started"
+                exit 1
+              }
+            fi
+
+            LIBREOFFICE_IMAGE_AFTER="$(docker inspect --format '{{.Image}}' "${LIBREOFFICE_ID}")"
+            [ "${LIBREOFFICE_IMAGE_AFTER}" = "${LIBREOFFICE_IMAGE_BEFORE}" ] || {
+              echo "ERROR: LibreOffice image changed during recovery"
+              exit 1
+            }
+            {
+              printf 'image_id_after=%s\n' "${LIBREOFFICE_IMAGE_AFTER}"
+              docker inspect --format \
+                'state_after_restart={{.State.Status}} health_after_restart={{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}} restart_count_after={{.RestartCount}} init_pid_after={{.State.Pid}}' \
+                "${LIBREOFFICE_ID}"
+              echo 'processes_after_restart:'
+              docker top "${LIBREOFFICE_ID}" -eo pid,ppid,stat,comm 2>/dev/null \
+                | head -n 25 || true
+            } >> "${REPORT_ROOT}/libreoffice-recovery.txt"
+
+            LIBREOFFICE_READY=false
+            for _ in $(seq 1 24); do
+              if [ "$(docker inspect --format \
+                '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' \
+                "${LIBREOFFICE_ID}")" = "healthy" ]; then
+                LIBREOFFICE_READY=true
+                break
+              fi
+              sleep 5
+            done
+            [ "${LIBREOFFICE_READY}" = "true" ] || {
+              echo "ERROR: production LibreOffice did not become healthy within 120 seconds"
+              exit 1
+            }
+            echo "LIBREOFFICE_RECOVERY status=healthy image_unchanged=true"
+          else
+            [ "$(docker inspect --format '{{.State.Running}}' "${LIBREOFFICE_ID}")" = "true" ] || {
+              echo "ERROR: production LibreOffice container is not running"
+              exit 1
+            }
+          fi
+
           LIBREOFFICE_CONTAINER_HEALTH="$(docker inspect --format \
             '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' \
             "${LIBREOFFICE_ID}")"
@@ -302,7 +414,7 @@ jobs:
           PY
           }
 
-          if [ "${OPERATION}" = "preview" ]; then
+          if [ "${OPERATION}" != "apply" ]; then
             MANIFEST="${REPORT_ROOT}/manifest.json"
             run_dry_run "${MANIFEST}"
             MANIFEST_SHA256="$(sha256sum "${MANIFEST}" | awk '{print $1}')"
