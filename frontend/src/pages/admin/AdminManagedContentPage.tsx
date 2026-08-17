@@ -1103,14 +1103,57 @@ export function AdminManagedContentPage() {
     const downloadable = can("item.download");
     const revisionAllowed = can("item.upload") && item.lifecycle_status !== "publishing";
     const deletable = canDeleteItem(item) && item.lifecycle_status !== "publishing";
+    const unavailableReason = busyAction
+      ? "正在处理其他操作，请稍候"
+      : refreshing
+        ? "资料列表正在刷新，请稍候"
+        : !enabled
+          ? "资料管理功能当前不可用"
+          : null;
+    const previewTooltip = unavailableReason
+      || (previewable
+        ? "预览文件"
+        : !item.preview_parent_id
+          ? "该资料尚未生成可预览文件"
+          : "当前文件格式暂不支持在线预览");
+    const moveTooltip = unavailableReason
+      || (movable
+        ? "移动资料"
+        : item.has_published_head
+          ? "已有发布版本的资料不能移动"
+          : !["draft", "rejected", "awaiting_review"].includes(item.lifecycle_status)
+            ? "仅草稿、已退回或待确认的资料可以移动"
+            : item.lifecycle_status === "awaiting_review"
+              ? "当前账号没有移动待确认资料的权限"
+              : "当前账号没有移动草稿或已退回资料的权限");
+    const revisionTooltip = unavailableReason
+      || (revisionAllowed
+        ? "重命名资料"
+        : item.lifecycle_status === "publishing"
+          ? "资料正在发布，暂不能重命名"
+          : "当前账号没有上传和修改资料的权限");
+    const updateTooltip = unavailableReason
+      || (revisionAllowed
+        ? "更新资料文件"
+        : item.lifecycle_status === "publishing"
+          ? "资料正在发布，暂不能更新文件"
+          : "当前账号没有上传和修改资料的权限");
+    const deleteTooltip = unavailableReason
+      || (deletable
+        ? "移入回收站"
+        : item.lifecycle_status === "publishing"
+          ? "资料正在发布，暂不能移入回收站"
+          : item.has_published_head || !["draft", "rejected"].includes(item.lifecycle_status)
+            ? "当前账号没有删除已审核或已发布资料的权限"
+            : "当前账号没有删除草稿或已退回资料的权限");
     return <div className="ml-auto flex min-h-10 w-[19rem] items-center justify-end gap-1 sm:w-[17.25rem]">
-      <IconButton label={`查看“${item.title}”的详细信息`} className="border border-border max-sm:size-10" disabled={disabled} onClick={() => setDetail(item)}><Info className="size-4" /></IconButton>
-      <IconButton label={previewable ? `查看“${item.title}”` : `查看“${item.title}”（暂无可预览内容）`} className="border border-border max-sm:size-10" disabled={disabled || !previewable} onClick={() => openDocumentPreview(item.preview_parent_id!, item.title, item.doc_type, 1, {}, null)}><Eye className="size-4" /></IconButton>
-      <IconButton label={movable ? `移动“${item.title}”` : `移动“${item.title}”（当前状态或权限不允许）`} className="border border-border max-sm:size-10" disabled={disabled || !movable} onClick={() => { setMoveTarget(item); setMoveFolderId(""); setMoveError(null); }}><FolderInput className="size-4" /></IconButton>
-      <IconButton label={`下载“${item.title}”`} title={downloadable ? `下载“${item.title}”` : `下载“${item.title}”（需要下载权限）`} className="border border-border max-sm:size-10" disabled={disabled || !downloadable} onClick={() => void downloadContent(item)}><Download className="size-4" /></IconButton>
-      <IconButton label={revisionAllowed ? `重命名“${item.title}”` : `重命名“${item.title}”（当前状态或权限不允许）`} className="border border-border max-sm:size-10" disabled={disabled || !revisionAllowed} onClick={() => openRenameDialog(item)}><Pencil className="size-4" /></IconButton>
-      <IconButton label={revisionAllowed ? `更新“${item.title}”` : `更新“${item.title}”（当前状态或权限不允许）`} className="border border-border max-sm:size-10" disabled={disabled || !revisionAllowed} onClick={() => openUpdateDialog(item)}><FileUp className="size-4" /></IconButton>
-      <IconButton label={deletable ? `删除“${item.title}”` : `删除“${item.title}”（当前状态或权限不允许）`} className="border border-destructive/30 text-destructive hover:bg-destructive/10 hover:text-destructive max-sm:size-10" disabled={disabled || !deletable} onClick={() => openDeleteDialog([item])}><Trash2 className="size-4" /></IconButton>
+      <IconButton label={`查看“${item.title}”的详细信息`} tooltip={unavailableReason || "查看资料详情"} className="border border-border max-sm:size-10" disabled={disabled} onClick={() => setDetail(item)}><Info className="size-4" /></IconButton>
+      <IconButton label={`预览“${item.title}”`} tooltip={previewTooltip} className="border border-border max-sm:size-10" disabled={disabled || !previewable} onClick={() => openDocumentPreview(item.preview_parent_id!, item.title, item.doc_type, 1, {}, null)}><Eye className="size-4" /></IconButton>
+      <IconButton label={`移动“${item.title}”`} tooltip={moveTooltip} className="border border-border max-sm:size-10" disabled={disabled || !movable} onClick={() => { setMoveTarget(item); setMoveFolderId(""); setMoveError(null); }}><FolderInput className="size-4" /></IconButton>
+      <IconButton label={`下载“${item.title}”`} tooltip={unavailableReason || (downloadable ? "下载文件" : "当前账号没有下载文件的权限")} className="border border-border max-sm:size-10" disabled={disabled || !downloadable} onClick={() => void downloadContent(item)}><Download className="size-4" /></IconButton>
+      <IconButton label={`重命名“${item.title}”`} tooltip={revisionTooltip} className="border border-border max-sm:size-10" disabled={disabled || !revisionAllowed} onClick={() => openRenameDialog(item)}><Pencil className="size-4" /></IconButton>
+      <IconButton label={`更新“${item.title}”`} tooltip={updateTooltip} className="border border-border max-sm:size-10" disabled={disabled || !revisionAllowed} onClick={() => openUpdateDialog(item)}><FileUp className="size-4" /></IconButton>
+      <IconButton label={`删除“${item.title}”`} tooltip={deleteTooltip} className="border border-destructive/30 text-destructive hover:bg-destructive/10 hover:text-destructive max-sm:size-10" disabled={disabled || !deletable} onClick={() => openDeleteDialog([item])}><Trash2 className="size-4" /></IconButton>
     </div>;
   };
 
