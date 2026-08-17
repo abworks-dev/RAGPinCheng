@@ -48,6 +48,7 @@ jobs:
           RUNNER_WORK_ROOT: ${{ runner.temp }}\..
           RUNNER_TEMP_ROOT: ${{ runner.temp }}
           RUNNER_TOOL_CACHE_ROOT: ${{ runner.tool_cache }}
+          GPU_CONFIGURED_MODEL_CACHE: ${{ vars.GPU_MODEL_CACHE_SOURCE }}
         run: |
           Set-StrictMode -Version Latest
           $ErrorActionPreference = 'Stop'
@@ -66,6 +67,7 @@ jobs:
             -RunnerWorkRoot $env:RUNNER_WORK_ROOT `
             -RunnerTempRoot $env:RUNNER_TEMP_ROOT `
             -RunnerToolCacheRoot $env:RUNNER_TOOL_CACHE_ROOT `
+            -GpuConfiguredModelCachePath $env:GPU_CONFIGURED_MODEL_CACHE `
             -DependencyRetentionDays 7 `
             -DependencyKeepCount 2 `
             -ReleaseRetentionDays 30 `

@@ -16,6 +16,7 @@ param(
     [string]$RunnerWorkRoot,
     [string]$RunnerTempRoot,
     [string]$RunnerToolCacheRoot,
+    [string]$GpuConfiguredModelCachePath = '',
     [int]$DependencyRetentionDays = 7,
     [int]$DependencyKeepCount = 2,
     [int]$ReleaseRetentionDays = 30,
@@ -251,6 +252,17 @@ function Get-CandidateInventory {
         }
     }
     return @($items | Sort-Object candidate_id)
+}
+
+function Get-InventoryFileSha256 {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    $stream = [IO.File]::OpenRead($Path)
+    try {
+        $sha256 = [Security.Cryptography.SHA256]::Create()
+        try { return ([BitConverter]::ToString($sha256.ComputeHash($stream))).Replace('-', '').ToLowerInvariant() }
+        finally { $sha256.Dispose() }
+    }
+    finally { $stream.Dispose() }
 }
 
 function Get-ActivationAudit {
@@ -505,6 +517,138 @@ function Get-GpuRuntimeInventory {
     return $result
 }
 
+function Get-ProjectReferenceInventory {
+    $result = [ordered]@{ status = 'measured'; texts = @(); sources = [ordered]@{} }
+    $texts = [System.Collections.Generic.List[string]]::new()
+    try {
+        foreach ($process in @(Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object { $_.ProcessId -ne $PID })) {
+            foreach ($value in @([string]$process.ExecutablePath, [string]$process.CommandLine)) {
+                if (-not [string]::IsNullOrWhiteSpace($value)) { $texts.Add($value) }
+            }
+        }
+        $result.sources.processes = [ordered]@{ status = 'measured'; error_type = '' }
+    }
+    catch {
+        $result.status = 'unavailable-protect-all'
+        $result.sources.processes = [ordered]@{ status = 'unavailable-protect-all'; error_type = $_.Exception.GetType().Name }
+    }
+    $taskNames = @('RAGPinCheng-ASR', 'RAGPinCheng-GPU', 'RAGPinCheng-GPU-Runtime-Cleanup')
+    try {
+        if (-not (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue)) { throw 'Get-ScheduledTask is unavailable' }
+        foreach ($taskName in $taskNames) {
+            $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+            if (-not $task) { continue }
+            foreach ($action in @($task.Actions)) {
+                foreach ($value in @([string]$action.Execute, [string]$action.Arguments)) {
+                    if (-not [string]::IsNullOrWhiteSpace($value)) { $texts.Add($value) }
+                }
+            }
+        }
+        $result.sources.scheduled_tasks = [ordered]@{ status = 'measured'; error_type = ''; task_names = $taskNames }
+    }
+    catch {
+        $result.status = 'unavailable-protect-all'
+        $result.sources.scheduled_tasks = [ordered]@{ status = 'unavailable-protect-all'; error_type = $_.Exception.GetType().Name; task_names = $taskNames }
+    }
+    $result.texts = $texts.ToArray()
+    return $result
+}
+
+function Test-ReferenceMatch {
+    param([string]$Path, [object]$References)
+    if ($References.status -ne 'measured') { return $true }
+    return @($References.texts | Where-Object { $_.IndexOf($Path, [StringComparison]::OrdinalIgnoreCase) -ge 0 }).Count -gt 0
+}
+
+function Get-AsrQualificationInventory {
+    param([string]$DataRoot)
+    $result = [ordered]@{ status = 'not-configured'; entries = @(); shared_model_revisions = @() }
+    if ([string]::IsNullOrWhiteSpace($DataRoot)) { return $result }
+    $root = Join-Path $DataRoot 'qualification'
+    if (-not (Test-Path -LiteralPath $root -PathType Container)) { $result.status = 'missing'; return $result }
+    $result.status = 'measured'
+    foreach ($entry in @(Get-ChildItem -LiteralPath $root -Force)) {
+        $measurement = if ($entry.PSIsContainer) { Measure-Tree -Path $entry.FullName } else { [ordered]@{ status='measured'; bytes=[int64]$entry.Length; files=1 } }
+        $result.entries += [ordered]@{ name=$entry.Name; path=$entry.FullName; kind=if($entry.PSIsContainer){'directory'}else{'file'}; status=$measurement.status; bytes=[int64]$measurement.bytes; files=[int]$measurement.files; advisory_status='protected-shared-qualification' }
+    }
+    $modelsRoot = Join-Path $root 'qwen3-asr\models'
+    if (Test-Path -LiteralPath $modelsRoot -PathType Container) {
+        foreach ($model in @(Get-ChildItem -LiteralPath $modelsRoot -Directory -Force)) {
+            foreach ($revision in @(Get-ChildItem -LiteralPath $model.FullName -Directory -Force)) {
+                $measurement = Measure-Tree -Path $revision.FullName
+                $manifest = Get-JsonFile -Path (Join-Path $revision.FullName 'model-manifest.json')
+                $result.shared_model_revisions += [ordered]@{
+                    model=$model.Name; revision=$revision.Name; path=$revision.FullName
+                    bytes=[int64]$measurement.bytes; files=[int]$measurement.files; measurement_status=$measurement.status
+                    manifest_status=if(-not $manifest){'missing'}elseif($manifest.PSObject.Properties.Name -contains '__parse_error'){'invalid'}else{'present'}
+                    advisory_status='protected-active-model'
+                }
+            }
+        }
+    }
+    return $result
+}
+
+function Get-AsrModelPreparationInventory {
+    param([string]$DataRoot, [object]$References, [int]$RetentionDays = 7, [int]$KeepCount = 2)
+    $result = [ordered]@{ status='not-configured'; engine='faster-whisper'; runs=@() }
+    if ([string]::IsNullOrWhiteSpace($DataRoot)) { return $result }
+    $root = Join-Path $DataRoot 'model-preparation\faster-whisper'
+    if (-not (Test-Path -LiteralPath $root -PathType Container)) { $result.status='missing'; return $result }
+    $result.status='measured'
+    $runs = @(Get-ChildItem -LiteralPath $root -Directory -Force | Sort-Object LastWriteTimeUtc -Descending)
+    for ($index=0; $index -lt $runs.Count; $index++) {
+        $run=$runs[$index]; $measurement=Measure-Tree -Path $run.FullName
+        $prepare=Get-JsonFile -Path (Join-Path $run.FullName 'model-preparation.json')
+        $offline=Get-JsonFile -Path (Join-Path $run.FullName 'offline-validation.json')
+        $recognized=$run.Name -match '^[0-9]{1,20}$'
+        $prepareValid=[bool]($prepare -and -not ($prepare.PSObject.Properties.Name -contains '__parse_error') -and ($prepare.PSObject.Properties.Name -contains 'status') -and [string]$prepare.status -in @('prepared','reused'))
+        $offlineValid=[bool]($offline -and -not ($offline.PSObject.Properties.Name -contains '__parse_error') -and ($offline.PSObject.Properties.Name -contains 'status') -and [string]$offline.status -eq 'validated-offline')
+        $manifestValid=$false
+        if($prepareValid -and ($prepare.PSObject.Properties.Name -contains 'manifest_path') -and ($prepare.PSObject.Properties.Name -contains 'manifest_sha256')){
+            $manifestPath=[IO.Path]::GetFullPath([string]$prepare.manifest_path)
+            $modelsPrefix=[IO.Path]::GetFullPath((Join-Path $DataRoot 'models')).TrimEnd('\')+'\'
+            if($manifestPath.StartsWith($modelsPrefix,[StringComparison]::OrdinalIgnoreCase) -and (Test-Path -LiteralPath $manifestPath -PathType Leaf)){
+                $manifestValid=(Get-InventoryFileSha256 -Path $manifestPath).Equals([string]$prepare.manifest_sha256,[StringComparison]::OrdinalIgnoreCase)
+            }
+        }
+        $complete=[bool]($prepareValid -and $offlineValid -and $manifestValid)
+        $reasons=[System.Collections.Generic.List[string]]::new()
+        if(-not $recognized){$reasons.Add('unrecognized-run-id')}; if(-not $complete){$reasons.Add('preparation-or-offline-validation-incomplete')}
+        if($measurement.status -ne 'measured'){$reasons.Add($measurement.status)}; if(Test-ReferenceMatch -Path $run.FullName -References $References){$reasons.Add('process-task-reference-or-inventory-unavailable')}
+        if($index -lt $KeepCount){$reasons.Add("within-newest-$KeepCount")}; if($run.LastWriteTimeUtc -gt [DateTime]::UtcNow.AddDays(-$RetentionDays)){$reasons.Add("younger-than-$RetentionDays-days")}
+        $result.runs += [ordered]@{ run_id=$run.Name; path=$run.FullName; bytes=[int64]$measurement.bytes; files=[int]$measurement.files; last_write_utc=$run.LastWriteTimeUtc.ToString('o'); identity=if($recognized){'recognized'}else{'unknown'}; completion_status=if($complete){'complete'}else{'incomplete'}; advisory_status=if($reasons.Count -eq 0){'eligible-advisory'}else{'protected'}; advisory_reasons=@($reasons) }
+    }
+    return $result
+}
+
+function Test-GpuModelRepository {
+    param([string]$CacheRoot, [string]$RepositoryName)
+    $snapshots=Join-Path $CacheRoot "hub\$RepositoryName\snapshots"
+    if(-not (Test-Path -LiteralPath $snapshots -PathType Container)){return $false}
+    foreach($snapshot in @(Get-ChildItem -LiteralPath $snapshots -Directory -Force)){
+        if((Test-Path -LiteralPath (Join-Path $snapshot.FullName 'config.json') -PathType Leaf) -and @(Get-ChildItem -LiteralPath $snapshot.FullName -File -Force | Where-Object { $_.Name -match '^(?:model(?:-.*)?\.safetensors|model\.safetensors\.index\.json|pytorch_model.*\.bin)$' }).Count -gt 0){return $true}
+    }
+    return $false
+}
+
+function Get-GpuModelCacheRepairInventory {
+    param([string]$RuntimeRoot, [string]$ConfiguredPath, [object]$References, [int]$RetentionDays = 30, [int]$KeepCount = 2)
+    $result=[ordered]@{status='not-configured'; configured_path=$ConfiguredPath; runs=@()}
+    if([string]::IsNullOrWhiteSpace($RuntimeRoot)){return $result}; $root=Join-Path $RuntimeRoot 'model-cache-repair'
+    if(-not(Test-Path -LiteralPath $root -PathType Container)){$result.status='missing';return $result}; $result.status='measured'
+    $runs=@(Get-ChildItem -LiteralPath $root -Directory -Force | Sort-Object LastWriteTimeUtc -Descending)
+    for($index=0;$index -lt $runs.Count;$index++){
+        $run=$runs[$index];$measurement=Measure-Tree -Path $run.FullName;$reasons=[System.Collections.Generic.List[string]]::new()
+        $recognized=$run.Name -match '^[0-9]{1,20}$';$embedding=Test-GpuModelRepository -CacheRoot $run.FullName -RepositoryName 'models--BAAI--bge-m3';$reranker=Test-GpuModelRepository -CacheRoot $run.FullName -RepositoryName 'models--BAAI--bge-reranker-v2-m3'
+        if(-not $recognized){$reasons.Add('unrecognized-run-id')};if(-not($embedding -and $reranker)){$reasons.Add('combined-cache-incomplete')};if($measurement.status -ne 'measured'){$reasons.Add($measurement.status)}
+        if($ConfiguredPath -and ([IO.Path]::GetFullPath($ConfiguredPath).TrimEnd('\')).Equals(([IO.Path]::GetFullPath($run.FullName).TrimEnd('\')),[StringComparison]::OrdinalIgnoreCase)){$reasons.Add('configured-model-cache-source')}
+        if(Test-ReferenceMatch -Path $run.FullName -References $References){$reasons.Add('process-task-reference-or-inventory-unavailable')};if($index -lt $KeepCount){$reasons.Add("within-newest-$KeepCount")};if($run.LastWriteTimeUtc -gt [DateTime]::UtcNow.AddDays(-$RetentionDays)){$reasons.Add("younger-than-$RetentionDays-days")}
+        $result.runs += [ordered]@{run_id=$run.Name;path=$run.FullName;bytes=[int64]$measurement.bytes;files=[int]$measurement.files;last_write_utc=$run.LastWriteTimeUtc.ToString('o');embedding_complete=$embedding;reranker_complete=$reranker;advisory_status=if($reasons.Count -eq 0){'eligible-advisory'}else{'protected'};advisory_reasons=@($reasons)}
+    }
+    return $result
+}
+
 $roots = [ordered]@{
     asr_data = $AsrDataRoot
     asr_program = $AsrProgramRoot
@@ -539,6 +683,8 @@ if ($dockerCommand) {
         $docker['error_type'] = $_.Exception.GetType().Name
     }
 }
+
+$projectReferences = Get-ProjectReferenceInventory
 
 $report = [ordered]@{
     schema_version = 'production-storage-inventory/1'
@@ -590,6 +736,10 @@ $report = [ordered]@{
     candidates = @(Get-CandidateInventory -DataRoot $AsrDataRoot -ProgramRoot $AsrProgramRoot -BackupRoot $(if ($AsrActivationBackupRoot) { $AsrActivationBackupRoot } else { $BackupDirectory }) -RetentionDays $DependencyRetentionDays -KeepCount $DependencyKeepCount)
     activation_audit = Get-ActivationAudit -DataRoot $AsrDataRoot -BackupRoot $(if ($AsrActivationBackupRoot) { $AsrActivationBackupRoot } else { $BackupDirectory })
     gpu_runtime_inventory = Get-GpuRuntimeInventory -Root $RuntimeRoot
+    project_reference_inventory = [ordered]@{ status=$projectReferences.status; sources=$projectReferences.sources }
+    asr_qualification_inventory = Get-AsrQualificationInventory -DataRoot $AsrDataRoot
+    asr_model_preparation_inventory = Get-AsrModelPreparationInventory -DataRoot $AsrDataRoot -References $projectReferences
+    gpu_model_cache_repair_inventory = Get-GpuModelCacheRepairInventory -RuntimeRoot $RuntimeRoot -ConfiguredPath $GpuConfiguredModelCachePath -References $projectReferences
     docker = $docker
 }
 
