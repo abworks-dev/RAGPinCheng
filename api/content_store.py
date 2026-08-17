@@ -1021,6 +1021,10 @@ def list_content_items_page(
     limit: int = 25,
     offset: int = 0,
     archived: bool = False,
+    archived_from: int | None = None,
+    archived_to: int | None = None,
+    archived_by: str = "",
+    archived_sort_direction: str = "desc",
 ) -> tuple[list[sqlite3.Row], int, dict[str, int]]:
     if content_kind not in {None, "document", "media_transcript"}:
         raise ValueError("invalid_content_kind")
@@ -1030,8 +1034,20 @@ def list_content_items_page(
         raise ValueError("invalid_sort_by")
     if sort_direction not in {"asc", "desc"}:
         raise ValueError("invalid_sort_direction")
+    if archived_sort_direction not in {"asc", "desc"}:
+        raise ValueError("invalid_sort_direction")
     clauses = ["archived_at IS NOT NULL" if archived else "archived_at IS NULL"]
     params: list[object] = []
+    if archived_from is not None:
+        clauses.append("archived_at>=?")
+        params.append(archived_from)
+    if archived_to is not None:
+        clauses.append("archived_at<=?")
+        params.append(archived_to)
+    normalized_archived_by = archived_by.strip()
+    if normalized_archived_by:
+        clauses.append("archived_by_name LIKE ?")
+        params.append(f"%{normalized_archived_by}%")
     normalized = query.strip()
     if normalized:
         clauses.append(
@@ -1061,7 +1077,7 @@ def list_content_items_page(
     if lifecycle_status:
         status_where += " AND lifecycle_status=?"
         status_params.append(lifecycle_status)
-    order_by = "updated_at DESC,item_id"
+    order_by = f"archived_at {archived_sort_direction.upper()},item_id" if archived else "updated_at DESC,item_id"
     if sort_by == "doc_type":
         cases = " ".join(
             f"WHEN '{value}' THEN {rank}" for value, rank in _DOC_TYPE_SORT_ORDER.items()

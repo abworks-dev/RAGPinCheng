@@ -64,6 +64,7 @@ Schema 16 为历史上已有正式 head 的未归档视频补建目录壳。目�
 
 - `POST /api/admin/content/bulk-move`
 - `POST /api/admin/content/bulk-archive`
+- `POST /api/admin/content/bulk-restore`
 - `POST /api/admin/content/bulk-download`
 - `POST /api/admin/content/items/{item_id}/rename`
 - `POST /api/admin/content/items/{item_id}/versions`
@@ -105,7 +106,11 @@ Schema 16 为历史上已有正式 head 的未归档视频补建目录壳。目�
 
 恢复默认回到原目录，也可选择其他活动目录；原目录停用时必须改选目录。同一活动目录仍按 Unicode NFKC 和不区分大小写规则禁止同名资料。发生冲突时可改选目录，或在同时具备冲突资料对应归档权限时确认替换。替换会将冲突资料移入回收站，并与当前资料恢复在同一 SQLite 事务内完成；任一版本、权限、活动索引或分类调整校验失败时整笔回滚。
 
-`GET /api/admin/content/items/{item_id}/audit-events` 返回资料移入回收站和恢复的产品化操作记录。活动资料要求 `item.view`，回收站资料要求 `trash.view`；接口只返回操作类型、人员、时间、目录快照、状态和冲突处理结果，不暴露内部 metadata 或存储路径。当前阶段仍不提供永久删除、自动到期清理、批量恢复或对象文件清理。
+`POST /api/admin/content/bulk-restore` 每批接受 1–20 份资料，可分别恢复到原目录，或统一恢复到一个活动目录。每份资料独立事务提交并返回逐项结果；同名冲突不会在批量操作中自动替换，失败项继续留在回收站，供单项恢复处理。每个成功项继续写入独立的 `content.restored` 审计事件。
+
+回收站默认保留期为 90 天，并在到期前 7 天标记“即将到期”；部署可通过 `CONTENT_TRASH_RETENTION_DAYS` 和 `CONTENT_TRASH_EXPIRING_WARNING_DAYS` 调整。列表返回 `purge_eligible_at`、`retention_status` 和 `retention_days_remaining`，并支持保留状态、归档时间、原目录、归档人员和归档时间排序筛选。该生命周期当前只提供提示和筛选：已超期资料仍可恢复，不会自动或手动物理删除对象、SQLite 记录或 Qdrant points。
+
+`GET /api/admin/content/items/{item_id}/audit-events` 返回资料移入回收站和恢复的产品化操作记录。活动资料要求 `item.view`，回收站资料要求 `trash.view`；接口只返回操作类型、人员、时间、目录快照、状态和冲突处理结果，不暴露内部 metadata 或存储路径。当前阶段仍不提供永久删除、自动到期清理或对象文件清理。
 
 ## 验证入口
 
