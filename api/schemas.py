@@ -647,6 +647,70 @@ class TrashExportRequest(BaseModel):
     sort_direction: Literal["asc", "desc"] = "desc"
 
 
+class TrashSettingsDTO(BaseModel):
+    cleanup_enabled: bool
+    retention_days: int
+    warning_days: int
+    batch_limit: int
+    updated_by: int | None = None
+    updated_at: int
+
+
+class UpdateTrashSettingsRequest(BaseModel):
+    cleanup_enabled: bool
+    retention_days: int = Field(ge=1, le=3650)
+    warning_days: int = Field(ge=0, le=365)
+    batch_limit: int = Field(ge=1, le=20)
+
+
+class TrashPurgeRequest(BaseModel):
+    items: list[BulkManagedContentItemRef] = Field(min_length=1, max_length=20)
+    confirmation: str = Field(min_length=1, max_length=100)
+
+
+class TrashPurgePreflightRequest(BaseModel):
+    items: list[BulkManagedContentItemRef] = Field(min_length=1, max_length=20)
+
+
+class TrashPurgeItemDTO(BaseModel):
+    item_id: str
+    version_id: str
+    status: Literal["ready", "blocked"]
+    reason: str | None = None
+    title: str
+    original_filename: str
+    category_path: str
+    size_bytes: int
+
+
+class TrashPurgePreflightResponse(BaseModel):
+    items: list[TrashPurgeItemDTO]
+    ready_count: int
+    blocked_count: int
+    total_size_bytes: int
+    confirmation_phrase: str
+
+
+class TrashPurgeRunDTO(BaseModel):
+    id: str
+    trigger_type: Literal["manual", "automatic"]
+    status: Literal["running", "succeeded", "partial", "failed"]
+    candidate_count: int
+    succeeded_count: int
+    failed_count: int
+    actor_name: str | None = None
+    created_at: int
+    finished_at: int | None = None
+
+
+class TrashPurgeResponse(BaseModel):
+    run_id: str
+    status: Literal["succeeded", "partial", "failed"]
+    candidate_count: int
+    succeeded_count: int
+    failed_count: int
+
+
 class BulkDownloadManagedContentRequest(BaseModel):
     version_ids: list[str] = Field(min_length=1, max_length=20)
 

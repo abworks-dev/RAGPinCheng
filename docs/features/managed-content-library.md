@@ -84,7 +84,7 @@ Schema 19 增加 `media_metadata_revisions` 和 `media_replacements`。媒体标
 - 资料整理：`item.upload`、`item.submit`、`item.move_draft`、`item.archive_draft` 分别控制上传、提交、移动草稿/退回资料和将其移入回收站。
 - 确认与发布：`item.review` 控制确认和退回，`item.move_review` 控制移动待确认资料，`item.publish` 控制发布和重新生成当前已发布 PPTX 的预览，`item.archive_published` 控制将已确认、发布失败或已发布资料移入回收站。
 - 视频转录稿：`item.view` 控制资料库查看，已登录用户按当前正式 head 读取播放和转录预览；`item.download` 控制原视频、正式转录稿和组合 ZIP 下载；`item.publish` 同时允许只调整视频目录壳。转录校对、媒体信息修订、替换视频和视频管理沿用全局管理员边界。资料库接口拒绝对视频条目执行普通文档重命名、更新、发布、归档或恢复。
-- 回收站：`trash.view` 控制查看，`trash.restore` 独立控制恢复。发布负责人默认可查看但不能恢复。
+- 回收站：`trash.view` 控制查看，`trash.restore` 独立控制恢复，`trash.purge` 控制永久删除，`trash.policy_manage` 控制自动清理策略和运行记录。后两项仅默认授予系统管理员。
 - 分类与目录：`category.manage` 控制分类维护，`folder.request` 控制目录申请，`folder.review` 控制目录审批。
 - 运维入口：`import.server` 控制服务器批次导入，`index.view` 控制索引任务页面和 API。
 - 批量下载要求 `item.download`、登录 Cookie 和 CSRF token；每批 1–20 个唯一版本，未归档资料的对象文件总量默认不超过 1 GiB。视频单项下载要求 `item.download` 和登录 Cookie，组合 ZIP 同样不超过 1 GiB，并在响应前校验视频大小/哈希及正式 Markdown 大小/哈希。文件缺失、资料已归档、路径越界、完整性不符或超过上限时整笔失败，不生成残缺压缩包；临时 Markdown/ZIP 在响应完成后清理。
@@ -119,11 +119,15 @@ Schema 19 增加 `media_metadata_revisions` 和 `media_replacements`。媒体标
 
 回收站复用资料库的列表交互：桌面端在表格首列逐项选择或全选当前页，移动端在每条资料标题前选择，列表标题显示已选数量；单次最多 20 份，翻页或改变筛选会清空选择。选择两份及以上资料后才显示“批量恢复”，恢复位置在弹窗内选择；随后调用 `POST /api/admin/content/bulk-restore/preflight` 检查版本、目标目录、活动索引任务和同名冲突，确认窗口只提交检查通过的资料。冲突项不自动替换，继续通过单项恢复处理。
 
-回收站默认保留期为 90 天，并在到期前 7 天标记“即将到期”；部署可通过 `CONTENT_TRASH_RETENTION_DAYS` 和 `CONTENT_TRASH_EXPIRING_WARNING_DAYS` 调整。列表返回 `purge_eligible_at`、`retention_status` 和 `retention_days_remaining`。保留状态及数量、原目录、归档人员和归档日期范围收纳在搜索框的筛选浮层内；归档时间通过“移入回收站”表头排序，保留期限显示在对应资料行内。该生命周期当前只提供提示和筛选：已超期资料仍可恢复，不会自动或手动物理删除对象、SQLite 记录或 Qdrant points。
+回收站默认保留期为 90 天，并在到期前 7 天标记“即将到期”；Schema 20 将策略保存到 `content_trash_settings`，自动清理默认关闭。列表返回 `purge_eligible_at`、`retention_status` 和 `retention_days_remaining`，并使用同一份数据库策略计算筛选和提示。保留状态及数量、原目录、归档人员和归档日期范围收纳在搜索框的筛选浮层内；归档时间通过“移入回收站”表头排序，保留期限显示在对应资料行内。原目录显示归档事件中的路径快照，目录后续改名、移动或停用不会改变历史含义；恢复仍使用目录 ID，并要求目标目录处于启用状态。
+
+系统管理员可对 1–20 份已选普通文档执行永久删除。`POST /api/admin/content/trash/purge/preflight` 检查归档状态、当前版本和活动索引/分类调整任务；`POST /api/admin/content/trash/purge` 再次执行相同检查，并要求输入精确的“永久删除 N 份资料”确认语句。清理逐版本删除 Qdrant points、`parents.sqlite` 行和发布产物，仅在无其他版本引用时删除对象文件，最后删除业务记录；运行及逐项结果保留在独立审计表中。
+
+`PUT /api/admin/content/trash/settings` 配置保留天数、到期提醒天数、单批上限和自动清理开关。独立的每小时任务使用 SQLite 租约避免多实例重复执行，只在开关启用时批量处理已超期资料；迁移和应用启动本身不会执行清理。`GET /api/admin/content/trash/purge-runs` 返回最近的手动/自动清理记录。
 
 `POST /api/admin/content/trash/export` 按当前筛选导出带 UTF-8 BOM 的 CSV 到期处置清单，要求 `trash.view`、登录 Cookie 和 CSRF，并写入 `content.trash_exported` 审计事件。导出不改变资料状态，不代表清理审批或执行永久删除。
 
-`GET /api/admin/content/items/{item_id}/audit-events` 返回资料移入回收站和恢复的产品化操作记录。活动资料要求 `item.view`，回收站资料要求 `trash.view`；接口只返回操作类型、人员、时间、目录快照、状态和冲突处理结果，不暴露内部 metadata 或存储路径。当前阶段仍不提供永久删除、自动到期清理或对象文件清理。
+`GET /api/admin/content/items/{item_id}/audit-events` 返回资料移入回收站和恢复的产品化操作记录。活动资料要求 `item.view`，回收站资料要求 `trash.view`；接口只返回操作类型、人员、时间、目录快照、状态和冲突处理结果，不暴露内部 metadata 或存储路径。永久删除审计通过清理运行接口查看，源资料删除后仍保留标题、文件名、归档时目录和清理结果快照。
 
 ## 验证入口
 
