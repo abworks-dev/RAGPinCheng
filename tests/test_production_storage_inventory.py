@@ -338,17 +338,40 @@ def test_inventory_fails_closed_for_missing_release_verdict(tmp_path: Path):
     invalid_verdict.parent.mkdir(parents=True)
     invalid_verdict.write_text("{invalid", encoding="utf-8")
     program_root = tmp_path / "program"
-    manifest = program_root / "releases" / "release-1" / "release-manifest.json"
-    manifest.parent.mkdir(parents=True)
-    manifest.write_text(json.dumps({
+    backup_root = tmp_path / "backups"
+    release_template = {
         "schema_version": "asr-production-release/1",
         "engines": [{"engine": "faster-whisper", "qualification_run_id": "999"}],
-    }), encoding="utf-8")
+    }
+    active_state = data_root / "release-state" / "active.json"
+    active_state.parent.mkdir(parents=True)
+    active_state.write_text(json.dumps({"candidate_id": "1000"}), encoding="utf-8")
+    for candidate_id in ("1000", "1005"):
+        manifest = program_root / "releases" / candidate_id / "release-manifest.json"
+        manifest.parent.mkdir(parents=True)
+        manifest.write_text(json.dumps({**release_template, "candidate_id": candidate_id}), encoding="utf-8")
+    activation_cases = (
+        ("2001", "1001", "", "rolled-back"),
+        ("2002", "1002", "", "prepared"),
+        ("2003", "1004", "1003", "active-local-verified"),
+        ("2004", "1006", "", "unknown-state"),
+    )
+    for activation_id, candidate_id, previous_id, status in activation_cases:
+        activation = backup_root / activation_id
+        activation.mkdir(parents=True)
+        (activation / "candidate-activation-state.json").write_text(json.dumps({
+            "candidate_id": candidate_id, "previous_candidate_id": previous_id, "status": status,
+        }), encoding="utf-8")
+        referenced_candidate = previous_id or candidate_id
+        (activation / "release-manifest.json").write_text(json.dumps({
+            **release_template, "candidate_id": referenced_candidate,
+        }), encoding="utf-8")
     report_path = tmp_path / "inventory.json"
     result = subprocess.run(
         [executable, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
          "-File", str(SCRIPT), "-ReportPath", str(report_path), "-AsrDataRoot", str(data_root),
-         "-AsrProgramRoot", str(program_root), "-FasterWhisperQualificationRoot", str(qualification_root)],
+         "-AsrProgramRoot", str(program_root), "-AsrActivationBackupRoot", str(backup_root),
+         "-FasterWhisperQualificationRoot", str(qualification_root)],
         cwd=ROOT, text=True, capture_output=True, check=False,
     )
     assert result.returncode == 0, result.stderr
@@ -358,7 +381,18 @@ def test_inventory_fails_closed_for_missing_release_verdict(tmp_path: Path):
     assert inventory["reference_diagnostics"]["verdicts"]["invalid_runs"] == [
         {"run_id": "998", "reason": "invalid-verdict-contract"}
     ]
-    assert inventory["reference_diagnostics"]["release_references"]["unresolved"] == 1
+    assert inventory["reference_diagnostics"]["release_references"]["unresolved"] == 6
     assert inventory["reference_diagnostics"]["release_references"]["unresolved_runs"] == [
-        {"run_id": "999", "reason": "release-verdict-missing-or-invalid"}
+        {
+            "run_id": "999", "reason": "release-verdict-missing-or-invalid", "source_count": 6,
+            "classifications": [
+                "active-release", "invalid-reference-contract", "live-rollback-reference", "nonterminal-activation",
+                "orphan-release-manifest", "terminal-rollback-history",
+            ],
+        }
     ]
+    sources = inventory["reference_diagnostics"]["release_references"]["source_references"]
+    assert {item["classification"] for item in sources} == {
+        "active-release", "invalid-reference-contract", "live-rollback-reference", "nonterminal-activation",
+        "orphan-release-manifest", "terminal-rollback-history",
+    }

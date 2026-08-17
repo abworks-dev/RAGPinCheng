@@ -611,7 +611,7 @@ function Get-FasterWhisperWheelCacheInventory {
         status='not-configured'; reference_status='measured'; referenced_cache_keys=@(); entries=@()
         reference_diagnostics=[ordered]@{
             verdicts=[ordered]@{valid_pass=0;non_pass=0;invalid=0;invalid_runs=@()}
-            release_references=[ordered]@{resolved=0;unresolved=0;unresolved_runs=@()}
+            release_references=[ordered]@{resolved=0;unresolved=0;unresolved_runs=@();source_references=@()}
             scan_failures=0
         }
     }
@@ -651,8 +651,27 @@ function Get-FasterWhisperWheelCacheInventory {
     }
 
     # Release and rollback manifests identify qualification runs; resolve their retained verdicts above.
+    $activeState=Get-JsonFile -Path (Join-Path $DataRoot 'release-state\active.json')
+    $activeCandidateId=if($activeState -and ($activeState.psobject.Properties.Name -contains 'candidate_id')){[string]$activeState.candidate_id}else{''}
+    $activationStates=@()
+    if(-not[string]::IsNullOrWhiteSpace($BackupRoot) -and (Test-Path -LiteralPath $BackupRoot -PathType Container)){
+        foreach($statePath in @(Get-ChildItem -LiteralPath $BackupRoot -Filter 'candidate-activation-state.json' -File -Recurse -Force -ErrorAction SilentlyContinue)){
+            $state=Get-JsonFile -Path $statePath.FullName
+            $properties=if($state){@($state.psobject.Properties|ForEach-Object Name)}else{@()}
+            if($state -and -not($properties -contains '__parse_error')){
+                $activationStates += [pscustomobject]@{
+                    activation_id=Split-Path (Split-Path $statePath.FullName -Parent) -Leaf
+                    candidate_id=if($properties -contains 'candidate_id'){[string]$state.candidate_id}else{''}
+                    previous_candidate_id=if($properties -contains 'previous_candidate_id'){[string]$state.previous_candidate_id}else{''}
+                    status=if($properties -contains 'status'){[string]$state.status}else{'unknown'}
+                }
+            }
+        }
+    }
+    $unresolvedByRun=@{}
     $manifestRoots = @($BackupRoot)
-    if (-not [string]::IsNullOrWhiteSpace($ProgramRoot)) { $manifestRoots += Join-Path $ProgramRoot 'releases' }
+    $programReleasesRoot=if(-not[string]::IsNullOrWhiteSpace($ProgramRoot)){Join-Path $ProgramRoot 'releases'}else{''}
+    if ($programReleasesRoot) { $manifestRoots += $programReleasesRoot }
     foreach ($manifestRoot in $manifestRoots) {
         if ([string]::IsNullOrWhiteSpace($manifestRoot) -or -not (Test-Path -LiteralPath $manifestRoot -PathType Container)) { continue }
         try {
@@ -674,12 +693,29 @@ function Get-FasterWhisperWheelCacheInventory {
                         $result.reference_diagnostics.release_references.resolved++
                     } else {
                         $result.reference_status='incomplete'; $result.reference_diagnostics.release_references.unresolved++
-                        $result.reference_diagnostics.release_references.unresolved_runs += [ordered]@{run_id=$runId;reason='release-verdict-missing-or-invalid'}
+                        $candidateId=if($manifest.psobject.Properties.Name -contains 'candidate_id'){[string]$manifest.candidate_id}else{''}
+                        $isProgramRelease=[bool]($programReleasesRoot -and $manifestPath.FullName.StartsWith(([IO.Path]::GetFullPath($programReleasesRoot).TrimEnd('\')+'\'),[StringComparison]::OrdinalIgnoreCase))
+                        $sourceKind=if($isProgramRelease){'program-release'}else{'activation-backup'}
+                        $relatedStates=if($isProgramRelease){@($activationStates|Where-Object{$_.candidate_id -eq $candidateId -or $_.previous_candidate_id -eq $candidateId})}else{
+                            $activationId=$manifestPath.FullName.Substring([IO.Path]::GetFullPath($manifestRoot).TrimEnd('\').Length).TrimStart('\').Split('\')[0]
+                            @($activationStates|Where-Object activation_id -eq $activationId)
+                        }
+                        $relationships=@();foreach($related in $relatedStates){
+                            $relationship=if($related.candidate_id -eq $candidateId){'candidate'}elseif($related.previous_candidate_id -eq $candidateId){'previous-candidate'}else{'unknown'}
+                            $relationships += [ordered]@{activation_id=$related.activation_id;state_status=$related.status;relationship=$relationship}
+                        }
+                        $classification=if($candidateId -match '^[0-9]{1,20}$' -and $candidateId -eq $activeCandidateId){'active-release'}elseif($candidateId -notmatch '^[0-9]{1,20}$' -or @($relationships|Where-Object{$_.state_status -notin @('prepared','active-local-verified','rolled-back') -or $_.relationship -eq 'unknown'}).Count){'invalid-reference-contract'}elseif(@($relationships|Where-Object{$_.state_status -eq 'active-local-verified' -and $_.relationship -eq 'previous-candidate'}).Count){'live-rollback-reference'}elseif(@($relationships|Where-Object{$_.state_status -in @('prepared','active-local-verified')}).Count){'nonterminal-activation'}elseif(@($relationships|Where-Object state_status -eq 'rolled-back').Count){'terminal-rollback-history'}elseif($relationships.Count -eq 0){'orphan-release-manifest'}else{'invalid-reference-contract'}
+                        $source=[ordered]@{run_id=$runId;candidate_id=$candidateId;source_kind=$sourceKind;classification=$classification;activation_relationships=$relationships}
+                        $result.reference_diagnostics.release_references.source_references += $source
+                        if(-not$unresolvedByRun.ContainsKey($runId)){$unresolvedByRun[$runId]=[ordered]@{run_id=$runId;reason='release-verdict-missing-or-invalid';classifications=@();source_count=0}}
+                        $unresolvedByRun[$runId].source_count++
+                        $unresolvedByRun[$runId].classifications=@($unresolvedByRun[$runId].classifications+$classification|Sort-Object -Unique)
                     }
                 }
             }
         } catch { $result.reference_status='incomplete'; $result.reference_diagnostics.scan_failures++ }
     }
+    $result.reference_diagnostics.release_references.unresolved_runs=@($unresolvedByRun.Values|Sort-Object run_id)
     $result.referenced_cache_keys = @($referencedKeys | Sort-Object)
 
     $entries = @(Get-ChildItem -LiteralPath $root -Force | Sort-Object LastWriteTimeUtc -Descending)
