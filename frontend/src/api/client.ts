@@ -420,6 +420,8 @@ export const api = {
     display_code: string;
     display_name: string;
     sort_order?: number;
+    target_position?: number;
+    confirm_number_shift?: boolean;
   }) =>
     jsonFetch<ManagedCategory>("/api/admin/content/categories", {
       method: "POST",
@@ -451,6 +453,17 @@ export const api = {
     body: { sort_order: number; expected_version: number },
   ) => jsonFetch<ManagedCategory>(
     `/api/admin/content/categories/${encodeURIComponent(categoryId)}/sort-order`,
+    { method: "PATCH", body: JSON.stringify(body) },
+  ),
+  updateManagedCategoryNumber: (
+    categoryId: string,
+    body: {
+      target_position: number;
+      confirm_number_shift: boolean;
+      expected_version: number;
+    },
+  ) => jsonFetch<ManagedCategory[]>(
+    `/api/admin/content/categories/${encodeURIComponent(categoryId)}/number`,
     { method: "PATCH", body: JSON.stringify(body) },
   ),
   managedContentPermissions: () =>

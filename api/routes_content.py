@@ -79,6 +79,7 @@ from .content_store import (
     review_version,
     submit_version_for_review,
     update_category,
+    update_category_number,
     update_category_sort_order,
     next_category_display_code,
     next_category_sort_order,
@@ -127,6 +128,7 @@ from .schemas import (
     ReviewManagedContentRequest,
     ReviewFolderRequest,
     UpdateManagedCategoryRequest,
+    UpdateManagedCategoryNumberRequest,
     UpdateManagedCategorySortOrderRequest,
     UpdateContentPermissionsRequest,
     UpdateContentPermissionGroupRequest,
@@ -419,6 +421,19 @@ def _raise_domain_error(exc: Exception) -> None:
         raise HTTPException(status_code=409, detail="当前目录已存在该分类编号") from exc
     if message == "category_sibling_code_conflict":
         raise HTTPException(status_code=409, detail="目标目录已有相同显示编号的文件夹，请先修改显示编号") from exc
+    if message == "category_number_confirmation_required":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "category_number_confirmation_required",
+                "message": "目标编号已被占用，确认后将自动顺延同级文件夹编号",
+                "retryable": True,
+            },
+        ) from exc
+    if message == "invalid_category_position":
+        raise HTTPException(status_code=400, detail="编号必须是当前同级文件夹范围内的位置") from exc
+    if message == "category_number_limit_exceeded":
+        raise HTTPException(status_code=409, detail="同级文件夹数量已超过可编号范围") from exc
     if message == "invalid_category_sort_order":
         raise HTTPException(status_code=400, detail="排序序号必须是 0 到 999999 之间的整数") from exc
     if message == "folder_request_pending":
@@ -554,6 +569,8 @@ def post_category(
             display_name=body.display_name,
             sort_order=body.sort_order,
             actor_user_id=user.id,
+            target_position=body.target_position,
+            confirm_number_shift=body.confirm_number_shift,
         )
     except (ValueError, sqlite3.IntegrityError) as exc:
         _raise_domain_error(exc)
@@ -624,6 +641,28 @@ def patch_category_sort_order(
     except (ValueError, sqlite3.IntegrityError) as exc:
         _raise_domain_error(exc)
     return _category_dto(row)
+
+
+@router.patch("/categories/{category_id}/number", response_model=list[ManagedCategoryDTO])
+def patch_category_number(
+    category_id: str,
+    body: UpdateManagedCategoryNumberRequest,
+    user: CurrentUser = Depends(require_content_permission("category.manage", csrf=True)),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> list[ManagedCategoryDTO]:
+    _require_feature()
+    try:
+        rows = update_category_number(
+            conn,
+            category_id,
+            target_position=body.target_position,
+            confirm_number_shift=body.confirm_number_shift,
+            expected_version=body.expected_version,
+            actor_user_id=user.id,
+        )
+    except (ValueError, sqlite3.IntegrityError) as exc:
+        _raise_domain_error(exc)
+    return [_category_dto(row) for row in rows]
 
 
 @router.post("/categories/{category_id}/move", response_model=list[ManagedCategoryDTO])

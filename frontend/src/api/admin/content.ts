@@ -7,6 +7,7 @@ export const adminContentApi = {
   updateCategory: (...args: Parameters<typeof api.updateManagedCategory>) => api.updateManagedCategory(...args),
   renameCategory: (...args: Parameters<typeof api.renameManagedCategory>) => api.renameManagedCategory(...args),
   updateCategorySortOrder: (...args: Parameters<typeof api.updateManagedCategorySortOrder>) => api.updateManagedCategorySortOrder(...args),
+  updateCategoryNumber: (...args: Parameters<typeof api.updateManagedCategoryNumber>) => api.updateManagedCategoryNumber(...args),
   moveCategory: (...args: Parameters<typeof api.moveManagedCategory>) => api.moveManagedCategory(...args),
   permissions: (...args: Parameters<typeof api.managedContentPermissions>) => api.managedContentPermissions(...args),
   permissionCatalog: (...args: Parameters<typeof api.managedContentPermissionCatalog>) => api.managedContentPermissionCatalog(...args),

@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   categories: vi.fn(),
   create: vi.fn(),
   update: vi.fn(),
+  updateNumber: vi.fn(),
   move: vi.fn(),
   success: vi.fn(),
   error: vi.fn(),
@@ -16,6 +17,7 @@ vi.mock("../../api/client", () => ({
     managedCategories: mocks.categories,
     createManagedCategory: mocks.create,
     updateManagedCategory: mocks.update,
+    updateManagedCategoryNumber: mocks.updateNumber,
     moveManagedCategory: mocks.move,
   },
 }));
@@ -58,6 +60,7 @@ describe("AdminCategoriesPage", () => {
     mocks.categories.mockResolvedValue([category, child]);
     mocks.update.mockResolvedValue({ ...category, version: 4, display_name: "行业规范" });
     mocks.create.mockResolvedValue({ ...category, id: "cat-new", display_code: "09", display_name: "新分类", full_path: "09 新分类" });
+    mocks.updateNumber.mockResolvedValue([category, child]);
     mocks.move.mockResolvedValue([category, child]);
   });
 
@@ -94,6 +97,8 @@ describe("AdminCategoriesPage", () => {
     expect(screen.getByRole("button", { name: "全部折叠" })).toBeInTheDocument();
     expect(within(screen.getByTestId("category-tree-item-cat-01-child")).getByText("2 份")).toBeInTheDocument();
     expect(screen.queryByText("industry_standards")).not.toBeInTheDocument();
+    expect(screen.queryByText("排序序号")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "调整结构" })).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "资料权限" })).not.toBeInTheDocument();
   });
 
@@ -138,21 +143,22 @@ describe("AdminCategoriesPage", () => {
     expect(parent).toHaveFocus();
   });
 
-  it("uses an explicit structure mode and sends stable sibling positions", async () => {
+  it("confirms an occupied category number before shifting siblings", async () => {
     const sibling = { ...category, id: "cat-02", category_key: "client", display_code: "02", display_name: "客户标准", sort_order: 20, full_path: "02 客户标准" };
     mocks.categories.mockResolvedValueOnce([category, sibling]);
-    mocks.move.mockResolvedValueOnce([sibling, { ...category, sort_order: 20, version: 4 }]);
+    mocks.updateNumber.mockResolvedValueOnce([{ ...sibling, display_code: "01", sort_order: 10, version: 4 }, { ...category, display_code: "02", sort_order: 20, version: 4 }]);
     render(<AdminCategoriesPage />);
 
-    const structure = await screen.findByRole("button", { name: "调整结构" });
-    fireEvent.click(structure);
-    expect(screen.getByRole("button", { name: "完成调整" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByText("拖动手柄调整同级顺序；跨层级移动会要求确认。")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "下移分类" }));
-    await waitFor(() => expect(mocks.move).toHaveBeenCalledWith("cat-01", {
-      target_parent_id: null,
-      before_category_id: null,
+    fireEvent.click(await screen.findByRole("button", { name: "调整编号" }));
+    let dialog = screen.getByRole("dialog", { name: "调整分类编号" });
+    fireEvent.change(within(dialog).getByRole("spinbutton", { name: "目标编号" }), { target: { value: "2" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "下一步" }));
+    dialog = screen.getByRole("dialog", { name: "确认调整编号" });
+    expect(dialog).toHaveTextContent("编号 02 当前由“客户标准”使用");
+    fireEvent.click(within(dialog).getByRole("button", { name: "继续调整" }));
+    await waitFor(() => expect(mocks.updateNumber).toHaveBeenCalledWith("cat-01", {
+      target_position: 2,
+      confirm_number_shift: true,
       expected_version: 3,
     }));
   });
@@ -167,7 +173,7 @@ describe("AdminCategoriesPage", () => {
     const dialog = await screen.findByRole("dialog", { name: "移动分类" });
     expect(within(dialog).getByText("01 行业规范与标准")).toBeInTheDocument();
     fireEvent.change(within(dialog).getByLabelText("目标父分类"), { target: { value: "cat-02" } });
-    expect(within(dialog).getByText(/新路径：02 客户标准 \/ 01 行业规范与标准/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/目标位置：02 客户标准 \/ 末尾/)).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole("button", { name: "确认移动" }));
     await waitFor(() => expect(mocks.move).toHaveBeenCalledWith("cat-01", {
       target_parent_id: "cat-02",
@@ -180,14 +186,37 @@ describe("AdminCategoriesPage", () => {
     render(<AdminCategoriesPage />);
     fireEvent.click(await screen.findByRole("button", { name: "新增分类" }));
     const dialog = await screen.findByRole("dialog", { name: "新增分类" });
-    fireEvent.change(within(dialog).getByLabelText("显示编号"), { target: { value: "09" } });
     fireEvent.change(within(dialog).getByLabelText("分类名称"), { target: { value: "新分类" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "新增分类" }));
     await waitFor(() => expect(mocks.create).toHaveBeenCalledWith({
       parent_id: null,
-      display_code: "09",
+      display_code: "02",
       display_name: "新分类",
       sort_order: 20,
+      target_position: 2,
+      confirm_number_shift: false,
+    }));
+  });
+
+  it("confirms before creating at an occupied number", async () => {
+    const sibling = { ...category, id: "cat-02", category_key: "client", display_code: "02", display_name: "客户标准", sort_order: 20, full_path: "02 客户标准" };
+    mocks.categories.mockResolvedValueOnce([category, sibling]);
+    render(<AdminCategoriesPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "新增分类" }));
+    let dialog = await screen.findByRole("dialog", { name: "新增分类" });
+    fireEvent.change(within(dialog).getByLabelText("分类名称"), { target: { value: "插入分类" } });
+    fireEvent.change(within(dialog).getByLabelText("编号"), { target: { value: "2" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "新增分类" }));
+    expect(mocks.create).not.toHaveBeenCalled();
+    expect(within(dialog).getByText("编号 02 已被占用")).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "继续创建" }));
+    await waitFor(() => expect(mocks.create).toHaveBeenCalledWith({
+      parent_id: null,
+      display_code: "02",
+      display_name: "插入分类",
+      sort_order: 20,
+      target_position: 2,
+      confirm_number_shift: true,
     }));
   });
 

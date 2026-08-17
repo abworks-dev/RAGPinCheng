@@ -14,7 +14,7 @@ const mocks = vi.hoisted(() => ({
   indexJobs: vi.fn(),
   createCategory: vi.fn(),
   renameCategory: vi.fn(),
-  updateCategorySortOrder: vi.fn(),
+  updateCategoryNumber: vi.fn(),
   moveCategory: vi.fn(),
   moveContent: vi.fn(),
   reclassifyContent: vi.fn(),
@@ -93,7 +93,7 @@ vi.mock("../../api/client", () => ({
     managedContentIndexJobs: mocks.indexJobs,
     createManagedCategory: mocks.createCategory,
     renameManagedCategory: mocks.renameCategory,
-    updateManagedCategorySortOrder: mocks.updateCategorySortOrder,
+    updateManagedCategoryNumber: mocks.updateCategoryNumber,
     moveManagedCategory: mocks.moveCategory,
     moveManagedContent: mocks.moveContent,
     reclassifyManagedContent: mocks.reclassifyContent,
@@ -253,7 +253,7 @@ describe("AdminManagedContentPage", () => {
     mocks.indexJobs.mockResolvedValue({ jobs: [], total: 0, status_counts: {} });
     mocks.reclassifyContent.mockResolvedValue({ id: "reclass-1", status: "pending" });
     mocks.renameCategory.mockResolvedValue({ ...childCategory, display_name: "新目录名称", version: 2 });
-    mocks.updateCategorySortOrder.mockResolvedValue({ ...childCategory, sort_order: 20, version: 2 });
+    mocks.updateCategoryNumber.mockResolvedValue([category, { ...childCategory, version: 2 }, projectCategory]);
     mocks.moveCategory.mockResolvedValue([category, childCategory, projectCategory]);
     mocks.bulkReclassify.mockResolvedValue({ results: [], succeeded: 2, failed: 0 });
     window.history.replaceState({}, "", "/admin/content");
@@ -477,7 +477,9 @@ describe("AdminManagedContentPage", () => {
     await openRootFolder();
 
     const table = screen.getByRole("table");
+    expect(within(table).queryByRole("columnheader", { name: "顺序" })).not.toBeInTheDocument();
     const folderRow = within(table).getByTestId(`managed-folder-row-${folder.id}`);
+    expect(within(folderRow).getByText("02 模型目录")).toBeInTheDocument();
     const fileRow = within(table).getByText("standard.pdf · v1").closest("tr");
     expect(folderRow.compareDocumentPosition(fileRow!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
     expect(within(folderRow).queryByRole("checkbox")).not.toBeInTheDocument();
@@ -516,14 +518,14 @@ describe("AdminManagedContentPage", () => {
     const row = screen.getByTestId(`managed-folder-row-${childCategory.id}`);
     const labels = within(row).getAllByRole("button").map((button) => button.getAttribute("aria-label") || button.textContent);
     expect(labels.slice(-4)).toEqual([
-      expect.stringContaining("设置文件夹"),
+      expect.stringContaining("调整文件夹"),
       expect.stringContaining("移动文件夹"),
       expect.stringContaining("重命名文件夹"),
       expect.stringContaining("打开文件夹"),
     ]);
   });
 
-  it("allows duplicate folder sort orders and explains the stable tie break", async () => {
+  it("confirms an occupied folder number and shifts sibling numbers", async () => {
     mocks.permissions = CATEGORY_MANAGER_PERMISSIONS;
     const sibling = { ...childCategory, id: "cat-03-02", display_code: "02", display_name: "第二目录", sort_order: 30 };
     mocks.categories.mockResolvedValue([category, childCategory, sibling]);
@@ -531,13 +533,17 @@ describe("AdminManagedContentPage", () => {
     await openRootFolder();
 
     const row = screen.getByTestId(`managed-folder-row-${childCategory.id}`);
-    fireEvent.click(within(row).getByRole("button", { name: /设置文件夹/ }));
-    const dialog = screen.getByRole("dialog", { name: "设置文件夹顺序" });
-    fireEvent.change(within(dialog).getByRole("spinbutton", { name: "排序序号" }), { target: { value: "30" } });
-    expect(dialog).toHaveTextContent("已有 1 个文件夹使用序号 30");
-    fireEvent.click(within(dialog).getByRole("button", { name: "保存顺序" }));
-    await waitFor(() => expect(mocks.updateCategorySortOrder).toHaveBeenCalledWith(childCategory.id, {
-      sort_order: 30,
+    fireEvent.click(within(row).getByRole("button", { name: /调整文件夹/ }));
+    let dialog = screen.getByRole("dialog", { name: "调整文件夹编号" });
+    fireEvent.change(within(dialog).getByRole("spinbutton", { name: "目标编号" }), { target: { value: "2" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "下一步" }));
+    dialog = screen.getByRole("dialog", { name: "确认调整编号" });
+    expect(dialog).toHaveTextContent("编号 02 当前由“第二目录”使用");
+    expect(dialog).toHaveTextContent("整体调整同级文件夹编号");
+    fireEvent.click(within(dialog).getByRole("button", { name: "继续调整" }));
+    await waitFor(() => expect(mocks.updateCategoryNumber).toHaveBeenCalledWith(childCategory.id, {
+      target_position: 2,
+      confirm_number_shift: true,
       expected_version: childCategory.version,
     }));
   });
@@ -567,7 +573,7 @@ describe("AdminManagedContentPage", () => {
     expect(dialog).not.toBeInTheDocument();
   });
 
-  it("reuses the tree picker and disables conflicting folder move destinations", async () => {
+  it("reuses the tree picker and allows an old number collision because the target is renumbered", async () => {
     mocks.permissions = CATEGORY_MANAGER_PERMISSIONS;
     const destination = { ...projectCategory, item_count: 0 };
     const conflict = { ...childCategory, id: "cat-04-01", parent_id: destination.id, display_code: childCategory.display_code, display_name: "其他名称", full_path: `${destination.full_path} / ${childCategory.display_code} 其他名称` };
@@ -579,8 +585,9 @@ describe("AdminManagedContentPage", () => {
     fireEvent.click(within(row).getByRole("button", { name: /移动文件夹/ }));
     const dialog = screen.getByRole("dialog", { name: "移动文件夹位置" });
     const destinationNode = within(dialog).getByTestId(`category-picker-item-${destination.id}`);
-    expect(destinationNode).toHaveAttribute("aria-disabled", "true");
-    expect(destinationNode).toHaveTextContent("已存在显示编号");
+    expect(destinationNode).toHaveAttribute("aria-disabled", "false");
+    fireEvent.click(destinationNode);
+    expect(dialog).toHaveTextContent("移动后自动排在末尾并重新编号");
     fireEvent.click(within(dialog).getByRole("button", { name: "展开公司内部标准" }));
     expect(within(dialog).getByTestId(`category-picker-item-${childCategory.id}`)).toHaveTextContent("不能移动到文件夹自身");
   });
@@ -617,8 +624,8 @@ describe("AdminManagedContentPage", () => {
 
     fireEvent.click(within(table).getByRole("button", { name: /更新时间/ }));
     rows = within(table).getAllByRole("row").slice(1);
-    expect(rows[0]).toHaveTextContent("09 Z 目录");
-    expect(rows[1]).toHaveTextContent("01 A 目录");
+    expect(rows[0]).toHaveTextContent("01 A 目录");
+    expect(rows[1]).toHaveTextContent("09 Z 目录");
   });
 
   it("keeps search and filters scoped to the current directory", async () => {

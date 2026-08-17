@@ -16,10 +16,13 @@ function compareUnicodeCodePoints(left: string, right: string) {
 }
 
 export function compareManagedCategories(left: ManagedCategory, right: ManagedCategory) {
-  const leftUnset = left.sort_order <= 0;
-  const rightUnset = right.sort_order <= 0;
-  if (leftUnset !== rightUnset) return leftUnset ? 1 : -1;
-  return left.sort_order - right.sort_order
+  const leftNumeric = /^\d+$/.test(left.display_code);
+  const rightNumeric = /^\d+$/.test(right.display_code);
+  if (leftNumeric !== rightNumeric) return leftNumeric ? -1 : 1;
+  const codeComparison = leftNumeric && rightNumeric
+    ? Number(left.display_code) - Number(right.display_code)
+    : compareUnicodeCodePoints(left.display_code, right.display_code);
+  return codeComparison
     || compareUnicodeCodePoints(left.display_name, right.display_name)
     || compareUnicodeCodePoints(left.id, right.id);
 }
