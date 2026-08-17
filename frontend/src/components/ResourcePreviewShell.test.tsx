@@ -44,6 +44,35 @@ describe("ResourcePreviewShell sheet behavior", () => {
     expect(screen.getByRole("button", { name: "关闭预览" })).toBeInTheDocument();
   });
 
+  it("opts into the video-only mobile bottom sheet without changing the default", () => {
+    const { rerender } = render(
+      <ResourcePreviewShell open title="资料预览" onClose={vi.fn()}>
+        内容
+      </ResourcePreviewShell>,
+    );
+    const dialog = screen.getByRole("dialog", { name: "资料预览" });
+    expect(dialog).toHaveAttribute("data-mobile-presentation", "fullscreen");
+    expect(dialog).not.toHaveClass("resource-preview-sheet--bottom");
+
+    rerender(
+      <ResourcePreviewShell
+        open
+        title="视频预览"
+        mobilePresentation="bottom-sheet"
+        onClose={vi.fn()}
+      >
+        内容
+      </ResourcePreviewShell>,
+    );
+    expect(screen.getByRole("dialog", { name: "视频预览" })).toHaveAttribute(
+      "data-mobile-presentation",
+      "bottom-sheet",
+    );
+    expect(screen.getByRole("dialog", { name: "视频预览" })).toHaveClass(
+      "resource-preview-sheet--bottom",
+    );
+  });
+
   it("closes with Escape and restores focus to the opener", async () => {
     const onClose = vi.fn();
     const view = (open: boolean) => (
