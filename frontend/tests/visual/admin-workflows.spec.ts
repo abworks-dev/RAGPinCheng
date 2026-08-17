@@ -254,7 +254,7 @@ test.describe("资料管理", () => {
   });
 
   test("trash shows original location and archive metadata without overflowing", async ({ page }, testInfo) => {
-    await openTab(page, "资料管理");
+    await openTab(page, "资料管理", "normal", "admin", { includeChildFolder: true });
     await page.getByRole("tab", { name: "回收站" }).click();
     await expect(page.getByRole("heading", { name: "回收站", exact: true })).toBeVisible();
     await expect(page.getByRole("checkbox", { name: "选择恢复“企业知识库使用规范”" })).toBeVisible();
@@ -271,12 +271,24 @@ test.describe("资料管理", () => {
     await page.getByRole("button", { name: "展开回收站筛选" }).click();
     const filters = page.getByRole("dialog", { name: "回收站搜索筛选" });
     await expect(filters.getByRole("combobox", { name: "保留状态" })).toBeVisible();
+    await filters.getByRole("button", { name: "全部目录" }).click();
+    const cascader = filters.getByRole("dialog", { name: "原目录级联选择" });
+    const desktop = page.viewportSize()!.width >= 640;
+    await cascader.getByTestId(`category-cascader-${desktop ? "desktop" : "mobile"}-option-cat-company`).click();
+    await expect(cascader.getByTestId(`category-cascader-${desktop ? "desktop" : "mobile"}-option-cat-company-modeling`)).toBeVisible();
+    const categoryRequest = page.waitForRequest((request) => request.url().includes("/api/admin/content/trash") && request.url().includes("category_id=cat-company-modeling"));
+    await cascader.getByTestId(`category-cascader-${desktop ? "desktop" : "mobile"}-option-cat-company-modeling`).click();
+    await cascader.getByRole("button", { name: "选择当前目录" }).click();
+    await categoryRequest;
+    await expect(filters.getByRole("button", { name: /03 公司内部标准 \/ 01 建模标准/ })).toBeVisible();
+    await filters.getByRole("button", { name: /03 公司内部标准 \/ 01 建模标准/ }).click();
+    await expectInViewport(cascader);
     await expectInViewport(filters);
     await page.screenshot({ path: testInfo.outputPath("trash-filter-layout.png"), fullPage: true });
     await page.keyboard.press("Escape");
 
-    const desktop = page.viewportSize()!.width >= 1024;
-    const row = desktop
+    const desktopTable = page.viewportSize()!.width >= 1024;
+    const row = desktopTable
       ? page.getByRole("table").getByRole("row").filter({ hasText: "企业知识库使用规范" })
       : page.locator("li").filter({ hasText: "企业知识库使用规范" });
     await expect(row.getByText("03 公司内部标准 / 01 建模 / 02 机电")).toBeVisible();
@@ -285,7 +297,7 @@ test.describe("资料管理", () => {
     await expect(row.getByText("合成资料员")).toBeVisible();
     await row.getByRole("button", { name: "恢复" }).scrollIntoViewIfNeeded();
     await expectInViewport(row.getByRole("button", { name: "恢复" }));
-    if (desktop) {
+    if (desktopTable) {
       await expect(page.getByRole("columnheader", { name: "原目录" })).toBeVisible();
       await expect(page.getByRole("columnheader", { name: "原状态" })).toBeVisible();
       await expect(row).toHaveCSS("vertical-align", "middle");

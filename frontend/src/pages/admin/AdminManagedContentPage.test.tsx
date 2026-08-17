@@ -829,6 +829,7 @@ describe("AdminManagedContentPage", () => {
   });
 
   it("keeps trash filters inside search and sorts from the archived-time column", async () => {
+    mocks.categories.mockResolvedValue([category, childCategory]);
     mocks.trash.mockResolvedValue({
       items: [{ ...item, archived_at: 1_700_000_000, retention_status: "retained", retention_days_remaining: 30 }],
       total: 1,
@@ -845,9 +846,14 @@ describe("AdminManagedContentPage", () => {
     expect(within(filters).getByRole("option", { name: "保留中（1）" })).toBeInTheDocument();
     fireEvent.change(within(filters).getByRole("combobox", { name: "保留状态" }), { target: { value: "retained" } });
     fireEvent.change(within(filters).getByRole("textbox", { name: "移入人员" }), { target: { value: "管理员" } });
+    fireEvent.click(within(filters).getByRole("button", { name: "全部目录" }));
+    fireEvent.click(within(filters).getByTestId("category-cascader-desktop-option-cat-03"));
+    fireEvent.click(within(filters).getByTestId("category-cascader-desktop-option-cat-03-01"));
+    fireEvent.click(within(filters).getByRole("button", { name: "选择当前目录" }));
     await waitFor(() => expect(mocks.trash).toHaveBeenLastCalledWith(expect.objectContaining({
       retention_status: "retained",
       archived_by: "管理员",
+      category_id: "cat-03-01",
     })));
 
     fireEvent.click(screen.getByRole("button", { name: /移入回收站/ }));
