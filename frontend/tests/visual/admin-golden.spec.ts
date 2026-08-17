@@ -4,7 +4,10 @@ import { installAdminRoutes } from "./fixtures/admin-fixtures";
 
 async function openRootFolder(page: Parameters<typeof installAdminRoutes>[0]) {
   const listing = page.waitForRequest((request) => request.method() === "GET" && request.url().includes("/api/admin/content/items-page") && request.url().includes("category_id=cat-company"));
-  await page.getByRole("button", { name: /03 公司内部标准/ }).click();
+  const folder = page.viewportSize()!.width < 1024
+    ? page.getByTestId("managed-folder-mobile-cat-company")
+    : page.getByTestId("managed-folder-row-cat-company");
+  await folder.click();
   await listing;
 }
 
