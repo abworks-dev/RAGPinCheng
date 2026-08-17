@@ -30,12 +30,18 @@ test.describe("资料管理", () => {
     await expectNoBodyOverflow(page);
     await expectInViewport(page.getByRole("button", { name: "刷新" }));
     await expect(page.getByRole("button", { name: "/", exact: true })).toBeVisible();
+    const upButton = page.getByRole("button", { name: "返回上一目录" });
+    await expect(upButton).toBeDisabled();
+    await expectInViewport(upButton);
+    if (page.viewportSize()!.width === 390) await expectTouchTarget(upButton);
+    await expect(page.getByRole("region", { name: "资料状态概览" }).getByText("5", { exact: true })).toBeVisible();
     const switchedListing = page.waitForRequest((request) => request.method() === "GET" && request.url().includes("/api/admin/content/items-page") && request.url().includes("category_id=cat-project"));
     const projectFolder = page.viewportSize()!.width < 1024
       ? page.getByTestId("managed-folder-mobile-cat-project")
       : page.getByTestId("managed-folder-row-cat-project");
     await projectFolder.getByRole("button").first().click();
     await switchedListing;
+    await expect(upButton).toBeEnabled();
     await expect(page.getByText(/当前目录：/)).toHaveCount(0);
     await expect(page.getByRole("navigation", { name: "资料路径" }).getByRole("button", { name: "04 项目资料" })).toBeVisible();
     await page.getByRole("button", { name: "上传文件" }).scrollIntoViewIfNeeded();

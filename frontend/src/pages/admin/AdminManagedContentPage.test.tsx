@@ -278,6 +278,42 @@ describe("AdminManagedContentPage", () => {
     mocks.createMediaMetadataRevision.mockResolvedValue({});
   });
 
+  it("shows library-wide status counts at the root while keeping the file list empty", async () => {
+    mocks.items.mockResolvedValue({
+      items: [item],
+      total: 8,
+      status_counts: { draft: 2, awaiting_review: 3, approved: 1, published: 2 },
+    });
+    render(<AdminManagedContentPage />);
+
+    expect(await screen.findByTestId(`managed-folder-row-${category.id}`)).toBeInTheDocument();
+    const overview = screen.getByRole("region", { name: "资料状态概览" });
+    expect(within(overview).getByText("全部资料").parentElement).toHaveTextContent("8");
+    expect(within(overview).getByText("待确认").parentElement).toHaveTextContent("3");
+    expect(within(overview).getByText("已确认").parentElement).toHaveTextContent("1");
+    expect(within(overview).getByText("已发布").parentElement).toHaveTextContent("2");
+    expect(screen.queryByText("standard.pdf · v1")).not.toBeInTheDocument();
+    expect(screen.getByText("共 0 份，第 1 / 1 页")).toBeInTheDocument();
+  });
+
+  it("returns to each parent directory and disables the action at the root", async () => {
+    mocks.categories.mockResolvedValue([category, childCategory]);
+    render(<AdminManagedContentPage />);
+
+    const upButton = screen.getByRole("button", { name: "返回上一目录" });
+    expect(upButton).toBeDisabled();
+    await openRootFolder();
+    expect(upButton).toBeEnabled();
+
+    fireEvent.click(await screen.findByTestId(`managed-folder-row-${childCategory.id}`));
+    await waitFor(() => expect(mocks.items).toHaveBeenLastCalledWith(expect.objectContaining({ category_id: childCategory.id })));
+    fireEvent.click(upButton);
+    await waitFor(() => expect(mocks.items).toHaveBeenLastCalledWith(expect.objectContaining({ category_id: category.id })));
+    fireEvent.click(upButton);
+    await waitFor(() => expect(mocks.items).toHaveBeenLastCalledWith(expect.objectContaining({ category_id: undefined })));
+    expect(upButton).toBeDisabled();
+  });
+
   it("opens the dedicated review dialog and submits an optional approval note", async () => {
     render(<AdminManagedContentPage />);
     await openRootFolder();
