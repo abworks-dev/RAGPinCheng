@@ -469,6 +469,7 @@ export type ManagedIndexJob = {
   version_number: number | null;
   file_size: number | null;
   source_origin: string | null;
+  is_archived: boolean;
   is_current_head: boolean;
   is_latest_attempt: boolean;
   parent_count: number | null;

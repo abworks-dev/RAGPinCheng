@@ -693,6 +693,7 @@ class ManagedIndexJobDTO(BaseModel):
     version_number: int | None = None
     file_size: int | None = None
     source_origin: str | None = None
+    is_archived: bool = False
     is_current_head: bool = False
     is_latest_attempt: bool = True
     parent_count: int | None = None

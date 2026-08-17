@@ -189,9 +189,25 @@ const managedIndexJobs = [{
   title: "资料管理发布失败的合成长文件名资料", original_filename: "managed-publication-failure-with-long-name.pdf",
   doc_type: "pdf", category_id: "cat-03", category_label: "03 公司内部标准",
   category_path: "03 公司内部标准 / 01 建模标准", version_number: 4, file_size: 2_048_000,
-  source_origin: "legacy", is_current_head: false, is_latest_attempt: true,
+  source_origin: "legacy", is_archived: false, is_current_head: false, is_latest_attempt: true,
   parent_count: null, preview_parent_id: null,
 }];
+
+const archivedManagedIndexJob = {
+  ...managedIndexJobs[0],
+  id: "managed-job-archived",
+  publication_id: "publication-archived",
+  version_id: "version-archived",
+  status: "done",
+  error_code: null,
+  error_summary: null,
+  failure: null,
+  attempt_count: 1,
+  title: "已移入回收站的合成资料",
+  original_filename: "archived-managed-document.xlsx",
+  doc_type: "xlsx",
+  is_archived: true,
+};
 
 const mediaAssets = [
   {
@@ -709,8 +725,15 @@ export async function installAdminRoutes(
       return json(route, options.includeFolderRequest ? folderRequests : []);
     }
     if (path === "/api/admin/content/index-jobs") {
-      const jobs = scenario === "empty" ? [] : managedIndexJobs;
-      return json(route, { jobs, total: jobs.length, status_counts: jobs.length ? { processing: 0, ready: 0, failed: 1 } : {} });
+      const includesArchived = url.searchParams.get("include_archived") === "true";
+      const jobs = scenario === "empty" ? [] : includesArchived ? [...managedIndexJobs, archivedManagedIndexJob] : managedIndexJobs;
+      return json(route, {
+        jobs,
+        total: jobs.length,
+        status_counts: jobs.length
+          ? { processing: 0, ready: includesArchived ? 1 : 0, failed: 1 }
+          : {},
+      });
     }
     if (path === "/api/admin/content/permissions") {
       return json(route, scenario === "empty" ? [] : permissionUsers);
