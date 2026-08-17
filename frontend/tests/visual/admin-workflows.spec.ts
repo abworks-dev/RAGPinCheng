@@ -39,7 +39,14 @@ test.describe("资料管理", () => {
     await page.getByRole("button", { name: "上传文件" }).scrollIntoViewIfNeeded();
     await expectInViewport(page.getByRole("button", { name: "上传文件" }));
     if (page.viewportSize()!.width === 390) await expectTouchTarget(page.getByRole("button", { name: "上传文件" }));
-    await expect(page.getByRole("combobox", { name: "状态", exact: true })).toHaveValue("");
+    const search = page.getByRole("textbox", { name: "搜索资料" });
+    await search.click();
+    const searchFilters = page.getByRole("dialog", { name: "搜索筛选" });
+    await expect(searchFilters).toBeVisible();
+    await expect(searchFilters.getByRole("combobox", { name: "状态", exact: true })).toHaveValue("");
+    await expect(searchFilters.getByRole("combobox", { name: "来源", exact: true })).toHaveValue("");
+    await expect(searchFilters.getByRole("combobox", { name: "分类", exact: true })).toHaveCount(0);
+    await page.keyboard.press("Escape");
     await expect(page.getByText("未选择资料，单次最多 20 份")).toBeVisible();
     await expect(page.getByRole("button", { name: "新建目录" })).toBeVisible();
     await expect(page.getByRole("button", { name: "批量操作" })).toHaveCount(0);
@@ -357,7 +364,8 @@ test.describe("资料管理", () => {
   test("publication failure stays readable and actionable", async ({ page }) => {
     await openTab(page, "资料管理", "publication_failure");
     await openRootFolder(page);
-    await page.locator("select").filter({ has: page.locator('option[value="publication_failed"]') }).selectOption("publication_failed");
+    await page.getByRole("textbox", { name: "搜索资料" }).click();
+    await page.getByRole("dialog", { name: "搜索筛选" }).getByRole("combobox", { name: "状态", exact: true }).selectOption("publication_failed");
     const failedTitle = page.getByText("培训资料发布演练", { exact: true }).filter({ visible: true });
     const failedItem = page.viewportSize()!.width < 1024 ? failedTitle.locator("xpath=ancestor::li") : failedTitle.locator("xpath=ancestor::tr");
     await failedItem.getByRole("button", { name: "查看“培训资料发布演练”的详细信息" }).click();

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { AlertTriangle, ArchiveRestore, ArrowDown, ArrowUp, ArrowUpDown, Check, CheckCircle2, ChevronDown, ChevronRight, Download, Eye, FileUp, Folder, FolderInput, FolderPlus, Info, ListChecks, Pencil, RefreshCw, RotateCcw, Rocket, Search, Send, Trash2, Upload, X, XCircle } from "lucide-react";
+import { AlertTriangle, ArchiveRestore, ArrowDown, ArrowUp, ArrowUpDown, Check, CheckCircle2, ChevronDown, ChevronRight, Download, Eye, FileUp, Folder, FolderInput, FolderPlus, Info, ListChecks, Pencil, RefreshCw, RotateCcw, Rocket, Search, Send, SlidersHorizontal, Trash2, Upload, X, XCircle } from "lucide-react";
 import { adminContentApi } from "../../api/admin/content";
 import { Badge } from "../../components/ui/badge";
 import { CategoryTreePicker } from "../../components/admin/CategoryTreePicker";
@@ -322,6 +322,97 @@ function BatchActionsMenu({
   </>;
 }
 
+function ManagedContentSearchFilters({
+  queryInput,
+  statusFilter,
+  sourceFilter,
+  disabled,
+  onQueryInputChange,
+  onStatusFilterChange,
+  onSourceFilterChange,
+  onClear,
+}: {
+  queryInput: string;
+  statusFilter: string;
+  sourceFilter: string;
+  disabled: boolean;
+  onQueryInputChange: (value: string) => void;
+  onStatusFilterChange: (value: string) => void;
+  onSourceFilterChange: (value: string) => void;
+  onClear: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const activeFilterCount = Number(Boolean(statusFilter)) + Number(Boolean(sourceFilter));
+  const panelId = "managed-content-search-filters";
+
+  useEffect(() => {
+    if (!open) return;
+    const closeOutside = (event: MouseEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const closeEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      inputRef.current?.focus();
+      setOpen(false);
+    };
+    document.addEventListener("mousedown", closeOutside);
+    document.addEventListener("keydown", closeEscape);
+    return () => {
+      document.removeEventListener("mousedown", closeOutside);
+      document.removeEventListener("keydown", closeEscape);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (disabled) setOpen(false);
+  }, [disabled]);
+
+  const filterButtonLabel = open ? "收起搜索筛选" : "展开搜索筛选";
+
+  return <div ref={rootRef} className="relative min-w-0 w-full xl:mx-auto xl:max-w-xl">
+    <div className="relative">
+      <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+      <Input
+        ref={inputRef}
+        className="h-control-sm pl-9 pr-11"
+        value={queryInput}
+        onChange={(event) => onQueryInputChange(event.target.value)}
+        onFocus={() => setOpen(true)}
+        aria-label="搜索资料"
+        placeholder={disabled ? "选择目录后搜索资料" : "搜索名称或文件名…"}
+        disabled={disabled}
+      />
+      <button
+        type="button"
+        className="absolute right-1 top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded-ui-sm text-muted-foreground transition-colors hover:bg-surface-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+        aria-label={filterButtonLabel}
+        title={filterButtonLabel}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-controls={panelId}
+        disabled={disabled}
+        onClick={() => setOpen((current) => !current)}
+      >
+        <SlidersHorizontal className="size-4" aria-hidden="true" />
+        {activeFilterCount > 0 && <span className="absolute right-0.5 top-0.5 size-1.5 rounded-full bg-primary" aria-hidden="true" />}
+        {activeFilterCount > 0 && <span className="sr-only">，已启用 {activeFilterCount} 项筛选</span>}
+      </button>
+    </div>
+    {open && <div id={panelId} role="dialog" aria-modal="false" aria-label="搜索筛选" className="absolute inset-x-0 top-full z-dropdown mt-2 rounded-ui-lg border border-border bg-popover p-3 text-popover-foreground shadow-overlay">
+      <div className="grid grid-cols-2 gap-3">
+        <label className="space-y-1 text-ui-xs text-muted-foreground"><span>状态</span><Select className="h-control-sm" value={statusFilter} onChange={(event) => onStatusFilterChange(event.target.value)}><option value="">全部状态</option>{Object.entries(statusLabel).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</Select></label>
+        <label className="space-y-1 text-ui-xs text-muted-foreground"><span>来源</span><Select className="h-control-sm" value={sourceFilter} onChange={(event) => onSourceFilterChange(event.target.value)}><option value="">全部来源</option>{Object.entries(sourceLabel).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</Select></label>
+      </div>
+      <div className="mt-3 flex flex-col gap-2 border-t border-border pt-3 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-ui-xs text-muted-foreground" role="status">{activeFilterCount > 0 ? `已启用 ${activeFilterCount} 项筛选` : "未启用附加筛选"}</p>
+        <Button size="sm" variant="outline" onClick={onClear} disabled={!queryInput && activeFilterCount === 0}>清除搜索与筛选</Button>
+      </div>
+    </div>}
+  </div>;
+}
+
 export function AdminManagedContentPage() {
   const { state } = useAuth();
   const { open: openDocumentPreview, state: previewState } = usePdfPreview();
@@ -350,7 +441,6 @@ export function AdminManagedContentPage() {
   const [bulkFailures, setBulkFailures] = useState<Array<BulkManagedContentResult & { title: string }>>([]);
   const [queryInput, setQueryInput] = useState("");
   const [query, setQuery] = useState("");
-  const [categoryFilter, setCategoryFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [sourceFilter, setSourceFilter] = useState("");
   const [page, setPage] = useState(0);
@@ -416,7 +506,7 @@ export function AdminManagedContentPage() {
     const timer = window.setTimeout(() => setQuery(queryInput.trim()), 250);
     return () => window.clearTimeout(timer);
   }, [queryInput]);
-  useEffect(() => { setPage(0); setSelected([]); }, [query, categoryFilter, currentFolderId, statusFilter, sourceFilter, pageSize]);
+  useEffect(() => { setPage(0); setSelected([]); }, [query, currentFolderId, statusFilter, sourceFilter, pageSize]);
 
   const load = useCallback(async (refresh = false) => {
     if (refresh) setRefreshing(true);
@@ -426,7 +516,7 @@ export function AdminManagedContentPage() {
       const [capabilities, categoryRows, listing] = await Promise.all([
         adminContentApi.capabilities(), adminContentApi.categories(), adminContentApi.items({
           query: query || undefined,
-          category_id: query ? categoryFilter || undefined : currentFolderId || categoryFilter || undefined,
+          category_id: currentFolderId || undefined,
           lifecycle_status: statusFilter || undefined,
           source_origin: sourceFilter || undefined,
           limit: pageSize,
@@ -448,7 +538,7 @@ export function AdminManagedContentPage() {
     } finally {
       setLoading(false); setRefreshing(false);
     }
-  }, [categoryFilter, currentFolderId, page, pageSize, query, sourceFilter, statusFilter]);
+  }, [currentFolderId, page, pageSize, query, sourceFilter, statusFilter]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -1014,9 +1104,19 @@ export function AdminManagedContentPage() {
     {error && <ErrorState title="资料列表加载失败" description={error} action={<Button size="sm" variant="outline" onClick={() => void load()}>重新加载</Button>} />}
 
     {can("folder.review") && folderRequests.length > 0 && <Card className="overflow-hidden shadow-surface" aria-labelledby="folder-requests-title"><div className="border-b border-border px-4 py-3 sm:px-5"><h2 id="folder-requests-title" className="text-ui-base font-semibold">待处理目录申请</h2></div><ul className="divide-y divide-border">{folderRequests.map((request) => <li key={request.id} className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5"><div className="min-w-0"><p className="break-words text-ui-sm font-medium">{request.display_name}</p><p className="mt-0.5 text-ui-xs text-muted-foreground">上级目录：{request.parent_label} · 申请人：{request.requester_name || "未知"}</p></div><div className="flex gap-2"><Button size="sm" variant="outline" disabled={busyAction === `folder-request:${request.id}`} onClick={() => void reviewFolder(request, false)}><X className="size-4" />退回</Button><Button size="sm" disabled={busyAction === `folder-request:${request.id}`} onClick={() => void reviewFolder(request, true)}><Check className="size-4" />批准</Button></div></li>)}</ul></Card>}
-    <Card className="overflow-hidden shadow-surface [&_table]:!min-w-[56rem]" aria-labelledby="managed-list-title">
-      <div className="flex flex-col gap-3 border-b border-border px-4 py-4 lg:flex-row lg:items-end lg:justify-between sm:px-5">
-      <div className="min-w-0"><h2 id="managed-list-title" className="text-ui-base font-semibold">资料列表</h2><p className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-ui-xs text-muted-foreground"><span>当前目录：{currentFolder?.full_path || "请选择目录"} · 共 {total} 份</span><span role="status" aria-live="polite">· {selected.length > 0 ? <>已选择 <strong>{selected.length}</strong> 份，单次最多 {BULK_LIMIT} 份</> : <>未选择资料，单次最多 {BULK_LIMIT} 份</>}</span></p></div>
+    <Card className="shadow-surface [&_table]:!min-w-[56rem]" aria-labelledby="managed-list-title">
+      <div className="grid gap-3 border-b border-border px-4 py-4 xl:grid-cols-[minmax(13rem,auto)_minmax(16rem,1fr)_auto] xl:items-end sm:px-5">
+        <div className="min-w-0"><h2 id="managed-list-title" className="text-ui-base font-semibold">资料列表</h2><p className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-ui-xs text-muted-foreground"><span>当前目录：{currentFolder?.full_path || "请选择目录"} · 共 {total} 份</span><span role="status" aria-live="polite">· {selected.length > 0 ? <>已选择 <strong>{selected.length}</strong> 份，单次最多 {BULK_LIMIT} 份</> : <>未选择资料，单次最多 {BULK_LIMIT} 份</>}</span></p></div>
+        <ManagedContentSearchFilters
+          queryInput={queryInput}
+          statusFilter={statusFilter}
+          sourceFilter={sourceFilter}
+          disabled={!currentFolderId}
+          onQueryInputChange={setQueryInput}
+          onStatusFilterChange={setStatusFilter}
+          onSourceFilterChange={setSourceFilter}
+          onClear={() => { setQueryInput(""); setStatusFilter(""); setSourceFilter(""); }}
+        />
         <div className="flex shrink-0 flex-wrap items-center gap-2">
           {can("item.upload") && <Button size="sm" className="max-sm:h-control-md" onClick={openUploadDialog} disabled={!enabled || !currentFolderId || uploading || folderScanning}><Upload className="size-4" />{folderScanning ? "读取文件夹中…" : "上传文件"}</Button>}
           <Button size="sm" variant="outline" className="max-sm:h-control-md" onClick={() => void load(true)} disabled={loading || refreshing}><RefreshCw className={refreshing ? "size-4 animate-spin" : "size-4"} />{refreshing ? "刷新中…" : "刷新列表"}</Button>
@@ -1031,13 +1131,6 @@ export function AdminManagedContentPage() {
         </div>
       </div>
       <div className="border-b border-border bg-surface-muted/40 px-4 py-3 sm:px-5" data-testid="managed-folder-address"><nav className="flex min-w-0 items-center gap-1 rounded-ui-md border border-input bg-background px-3 py-2 text-ui-sm" aria-label="资料路径"><button type="button" className="shrink-0 rounded px-1 py-0.5 font-medium hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setCurrentFolderId("")}>/</button>{breadcrumbs.map((folder) => <span key={folder.id} className="flex min-w-0 items-center gap-1"><ChevronRight className="size-4 shrink-0 text-muted-foreground" /><button type="button" className="max-w-56 truncate rounded px-1 py-0.5 hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setCurrentFolderId(folder.id)}>{folder.display_code} {folder.display_name}</button></span>)}</nav></div>
-      <div className="grid gap-2 border-t border-border px-4 py-4 md:grid-cols-2 xl:grid-cols-[minmax(12rem,1fr)_minmax(10rem,12rem)_9rem_9rem_auto] xl:items-end sm:px-5">
-        <label className="space-y-1 text-ui-xs text-muted-foreground md:col-span-2 xl:col-span-1"><span>搜索</span><span className="relative block"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input className="pl-9" value={queryInput} onChange={(event) => setQueryInput(event.target.value)} placeholder="搜索名称、文件名或分类…" /></span></label>
-        <label className="space-y-1 text-ui-xs text-muted-foreground"><span>分类</span><Select value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}><option value="">全部分类</option>{categories.map((category) => <option key={category.id} value={category.id}>{category.full_path || category.display_name}</option>)}</Select></label>
-        <label className="space-y-1 text-ui-xs text-muted-foreground"><span>状态</span><Select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="">全部状态</option>{Object.entries(statusLabel).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</Select></label>
-        <label className="space-y-1 text-ui-xs text-muted-foreground"><span>来源</span><Select value={sourceFilter} onChange={(event) => setSourceFilter(event.target.value)}><option value="">全部来源</option>{Object.entries(sourceLabel).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</Select></label>
-        <Button variant="outline" onClick={() => { setQueryInput(""); setCategoryFilter(""); setStatusFilter(""); setSourceFilter(""); }}>清除筛选</Button>
-      </div>
 
       <div data-testid="managed-content-drop-list" className="relative" onDragEnter={handleListDragEnter} onDragOver={handleListDragOver} onDragLeave={handleListDragLeave} onDrop={handleListDrop}>
       {listDropActive && <div data-testid="managed-content-drop-overlay" className="pointer-events-none absolute inset-1 z-sticky rounded-ui-lg border-2 border-dashed border-primary/70 bg-background/70 text-center shadow-focus backdrop-blur-[1px]" role="status" aria-live="polite"><div className="absolute left-1/2 flex w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-3" style={{ top: listDropPromptTop }}><span className="flex size-12 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-surface" aria-hidden="true"><Upload className="size-6" /></span><div className="space-y-1"><p className="break-words text-ui-base font-semibold">松开以上传文件到“{currentFolderDropLabel}”</p><p className="text-ui-xs text-muted-foreground">也支持拖入文件夹；支持 PDF、Markdown、Word、Excel 和 PPT 文件</p></div></div></div>}
