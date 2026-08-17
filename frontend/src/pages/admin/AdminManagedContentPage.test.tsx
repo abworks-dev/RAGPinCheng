@@ -355,7 +355,8 @@ describe("AdminManagedContentPage", () => {
     expect(mobileList.firstElementChild).toBe(screen.getByTestId(`managed-folder-mobile-${folder.id}`));
     expect(within(screen.getByTestId(`managed-folder-mobile-${folder.id}`)).getByRole("button", { name: /02 模型目录/ })).toBeInTheDocument();
 
-    fireEvent.change(screen.getByRole("combobox", { name: "状态" }), { target: { value: "published" } });
+    fireEvent.focus(screen.getByRole("textbox", { name: "搜索资料" }));
+    fireEvent.change(within(screen.getByRole("dialog", { name: "搜索筛选" })).getByRole("combobox", { name: "状态" }), { target: { value: "published" } });
     await waitFor(() => expect(mocks.items).toHaveBeenLastCalledWith(expect.objectContaining({ lifecycle_status: "published" })));
     expect(await screen.findByTestId(`managed-folder-row-${folder.id}`)).toBeInTheDocument();
   });
@@ -407,6 +408,46 @@ describe("AdminManagedContentPage", () => {
     expect(rows[1]).toHaveTextContent("01 A 目录");
   });
 
+  it("keeps search and filters scoped to the current directory", async () => {
+    render(<AdminManagedContentPage />);
+    const search = screen.getByRole("textbox", { name: "搜索资料" });
+    expect(search).toBeDisabled();
+    expect(search).toHaveAttribute("placeholder", "选择目录后搜索资料");
+    await openRootFolder();
+
+    expect(search).toBeEnabled();
+    fireEvent.focus(search);
+    const filters = screen.getByRole("dialog", { name: "搜索筛选" });
+    expect(within(filters).queryByRole("combobox", { name: "分类" })).not.toBeInTheDocument();
+
+    fireEvent.change(search, { target: { value: "标准" } });
+    fireEvent.change(within(filters).getByRole("combobox", { name: "状态" }), { target: { value: "published" } });
+    fireEvent.change(within(filters).getByRole("combobox", { name: "来源" }), { target: { value: "web" } });
+    await waitFor(() => expect(mocks.items).toHaveBeenLastCalledWith(expect.objectContaining({
+      query: "标准",
+      category_id: category.id,
+      lifecycle_status: "published",
+      source_origin: "web",
+    })));
+
+    fireEvent.click(within(filters).getByRole("button", { name: "清除搜索与筛选" }));
+    await waitFor(() => expect(mocks.items).toHaveBeenLastCalledWith(expect.objectContaining({
+      query: undefined,
+      category_id: category.id,
+      lifecycle_status: undefined,
+      source_origin: undefined,
+    })));
+    expect(search).toHaveValue("");
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(search).toHaveFocus();
+    expect(screen.queryByRole("dialog", { name: "搜索筛选" })).not.toBeInTheDocument();
+
+    fireEvent.focus(search);
+    expect(screen.getByRole("dialog", { name: "搜索筛选" })).toBeInTheDocument();
+    fireEvent.mouseDown(document.body);
+    expect(screen.queryByRole("dialog", { name: "搜索筛选" })).not.toBeInTheDocument();
+  });
+
   it("loads all statuses by default and keeps batch actions hidden without multi-selection", async () => {
     render(<AdminManagedContentPage />);
     await openRootFolder();
@@ -415,8 +456,13 @@ describe("AdminManagedContentPage", () => {
     expect(mocks.items).toHaveBeenCalledWith(expect.objectContaining({
       lifecycle_status: undefined,
     }));
-    expect(screen.getByRole("combobox", { name: "状态" })).toHaveValue("");
-    expect(screen.getByRole("status")).toHaveTextContent("未选择资料，单次最多 20 份");
+    fireEvent.focus(screen.getByRole("textbox", { name: "搜索资料" }));
+    expect(within(screen.getByRole("dialog", { name: "搜索筛选" })).getByRole("combobox", { name: "状态" })).toHaveValue("");
+    expect(
+      screen.getAllByRole("status").some((node) =>
+        node.textContent?.includes("未选择资料，单次最多 20 份"),
+      ),
+    ).toBe(true);
     expect(screen.queryByRole("button", { name: "批量操作" })).not.toBeInTheDocument();
   });
 
