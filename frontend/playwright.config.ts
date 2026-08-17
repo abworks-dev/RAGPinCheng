@@ -37,10 +37,17 @@ export default defineConfig({
     screenshot: "only-on-failure",
     trace: "retain-on-failure",
   },
-  projects: viewports.map(({ name, width, height }) => ({
-    name,
-    use: { viewport: { width, height } },
-  })),
+  projects: [
+    ...viewports.map(({ name, width, height }) => ({
+      name,
+      use: { viewport: { width, height } },
+    })),
+    {
+      name: "chromium-844x390",
+      testMatch: /video-preview\.spec\.ts/,
+      use: { viewport: { width: 844, height: 390 } },
+    },
+  ],
   webServer: {
     command: `npm run dev -- --host 127.0.0.1 --port ${testPort} --strictPort`,
     url: `http://127.0.0.1:${testPort}`,

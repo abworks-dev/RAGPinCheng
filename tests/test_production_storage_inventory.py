@@ -154,6 +154,10 @@ def test_inventory_reports_other_entries_and_gpu_advisory_details(tmp_path: Path
     assert report["gpu_runtime_inventory"]["reference_inventory_status"] in {
         "measured", "unavailable-protect-all"
     }
+    sources = report["gpu_runtime_inventory"]["reference_sources"]
+    assert sources["scheduled_tasks"]["task_names"] == [
+        "RAGPinCheng-GPU", "RAGPinCheng-GPU-Runtime-Cleanup"
+    ]
 
 
 def test_inventory_workflow_uses_asr_activation_backup_root():

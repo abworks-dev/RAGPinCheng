@@ -99,7 +99,7 @@ export function SynchronizedVideoTranscript({
   }, [mediaId, initialStartSeconds, playbackUserScope]);
 
   const videoSurface = (
-    <div className={`relative w-full overflow-hidden bg-black ${layout === "split" ? "aspect-video lg:h-full lg:aspect-auto" : "aspect-video"}`}>
+    <div className={`relative w-full overflow-hidden bg-black ${layout === "split" ? "aspect-video lg:h-full lg:aspect-auto" : "video-preview-surface aspect-video"}`}>
       {isLoading && (
         <div className="absolute inset-0 z-10 flex items-center justify-center text-gray-400">
           <LoaderCircle className="size-7 animate-spin" aria-label="正在加载视频" />
@@ -145,7 +145,7 @@ export function SynchronizedVideoTranscript({
       </div>
     </div>
   ) : (
-    <div className="flex min-h-0 flex-1 flex-col bg-card">
+    <div className="flex h-full min-h-0 flex-1 flex-col bg-card">
       {videoSurface}
       {transcript}
     </div>

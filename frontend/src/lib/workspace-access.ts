@@ -10,11 +10,10 @@ export function workspaceLabel(user: WorkspaceUser): "管理工作台" | "资料
   return user.role === "admin" ? "管理工作台" : "资料工作台";
 }
 
-export function contentWorkspaceTabs(permissions: ContentPermission[]): ("managed" | "categories" | "corpus")[] {
+export function contentWorkspaceTabs(permissions: ContentPermission[]): ("managed" | "categories")[] {
   if (!permissions.includes("workspace.view")) return [];
-  const tabs: ("managed" | "categories" | "corpus")[] = [];
-  if (permissions.includes("item.view")) tabs.push("managed");
+  const tabs: ("managed" | "categories")[] = [];
+  if (permissions.includes("item.view") || permissions.includes("index.view")) tabs.push("managed");
   if (permissions.includes("category.manage")) tabs.push("categories");
-  if (permissions.includes("index.view")) tabs.push("corpus");
   return tabs;
 }
