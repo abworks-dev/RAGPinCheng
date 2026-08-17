@@ -45,6 +45,8 @@ export const adminContentApi = {
   exportTrash: (...args: Parameters<typeof api.exportManagedContentTrash>) => api.exportManagedContentTrash(...args),
   bulkDownload: (...args: Parameters<typeof api.bulkDownloadManagedContent>) => api.bulkDownloadManagedContent(...args),
   downloadFile: (...args: Parameters<typeof api.downloadManagedContentFile>) => api.downloadManagedContentFile(...args),
+  downloadMedia: (...args: Parameters<typeof api.downloadManagedMedia>) => api.downloadManagedMedia(...args),
+  createMediaMetadataRevision: (...args: Parameters<typeof api.createMediaMetadataRevision>) => api.createMediaMetadataRevision(...args),
   fileUrl: (...args: Parameters<typeof api.managedContentFileUrl>) => api.managedContentFileUrl(...args),
   indexJobs: (...args: Parameters<typeof api.managedContentIndexJobs>) => api.managedContentIndexJobs(...args),
 };

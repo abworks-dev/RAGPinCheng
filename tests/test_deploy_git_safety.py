@@ -244,6 +244,12 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertIn('ROLLBACK_IMAGE_TAG="pincheng-rag-backend:app-only-rollback-', workflow)
         self.assertIn('docker tag "${OLD_IMAGE_ID}" "${ROLLBACK_IMAGE_TAG}"', workflow)
         self.assertIn('docker tag "${ROLLBACK_IMAGE_TAG}" pincheng-rag-backend:latest', workflow)
+        self.assertIn('backend-rollback-tag.txt', workflow)
+        self.assertIn('APP_ONLY_ROLLBACK_READY status=retained', workflow)
+        self.assertLess(
+            workflow.rindex('docker image rm "${ROLLBACK_IMAGE_TAG}"'),
+            workflow.index('APP_ONLY_ROLLBACK_READY status=retained'),
+        )
         self.assertIn(
             'git show "${DEPLOY_COMMIT_SHA}:scripts/deploy-app.sh"', workflow
         )

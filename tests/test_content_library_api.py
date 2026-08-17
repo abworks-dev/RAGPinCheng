@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import hashlib
 import sqlite3
 import time
 import zipfile
@@ -16,6 +17,7 @@ from api.content_permission_catalog import LEGACY_CONTENT_PERMISSION_MAP
 from api.content_storage import ContentStorage
 from api.db import connect, get_db, init_db
 from api.media_transcript_catalog import ensure_media_transcript_catalog_item
+from api.transcription_artifacts import LocalTranscriptionArtifactStore
 
 
 @pytest.fixture
@@ -77,6 +79,12 @@ def content_api(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     queued: list[str] = []
     monkeypatch.setattr(routes_content, "CONTENT_MANAGEMENT_ENABLED", True)
     monkeypatch.setattr(routes_content, "_storage", ContentStorage(tmp_path / "content"))
+    media_dir = (tmp_path / "media").resolve()
+    artifact_dir = (tmp_path / "transcription-artifacts").resolve()
+    media_dir.mkdir(parents=True, exist_ok=True)
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(routes_content, "MEDIA_DIR", media_dir)
+    monkeypatch.setattr(routes_content, "TRANSCRIPTION_ARTIFACT_DIR", artifact_dir)
     monkeypatch.setattr(routes_content, "enqueue_content_publication", queued.append)
     with TestClient(app) as client:
         yield client, sessions, queued, db_path
@@ -1803,6 +1811,160 @@ def test_published_media_transcripts_share_library_listing_without_document_mirr
         assert conn.execute("SELECT count(*) FROM content_index_jobs").fetchone()[0] == 0
     finally:
         conn.close()
+
+
+def test_published_media_downloads_video_transcript_and_zip_with_permission_checks(
+    content_api, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    client, sessions, _queued, db_path = content_api
+    media_id = "123e4567-e89b-12d3-a456-426614174130"
+    version_id = "123e4567-e89b-12d3-a456-426614174131"
+    video = b"synthetic-mp4-content"
+    transcript = "# 培训视频\n\n说话人 1 00:00:00\n下载测试。\n".encode()
+    conn = connect(db_path)
+    item_id = _insert_published_media(
+        conn,
+        media_id=media_id,
+        version_id=version_id,
+        title="下载/测试视频",
+        filename="training-video.mp4",
+        now=300,
+    )
+    video_path = tmp_path / "media" / "synthetic" / f"{media_id}.mp4"
+    video_path.parent.mkdir(parents=True, exist_ok=True)
+    video_path.write_bytes(video)
+    markdown_ref = LocalTranscriptionArtifactStore(
+        (tmp_path / "transcription-artifacts").resolve()
+    ).write_markdown(transcript)
+    conn.execute(
+        "UPDATE media_assets SET file_size=?,sha256=? WHERE media_id=?",
+        (len(video), hashlib.sha256(video).hexdigest(), media_id),
+    )
+    conn.execute(
+        """UPDATE transcript_versions
+           SET markdown_rel_path=?,markdown_sha256=?,markdown_size_bytes=? WHERE id=?""",
+        (
+            markdown_ref.relative_path,
+            markdown_ref.content_sha256,
+            markdown_ref.size_bytes,
+            version_id,
+        ),
+    )
+    conn.commit()
+    conn.close()
+    endpoint = f"/api/admin/content/items/{item_id}/media-download"
+
+    assert client.get(endpoint, params={"part": "video"}).status_code == 401
+    assert client.get(
+        endpoint, params={"part": "video"}, **_auth(sessions, "plain")
+    ).status_code == 403
+
+    video_response = client.get(
+        endpoint, params={"part": "video"}, **_auth(sessions, "publisher")
+    )
+    assert video_response.status_code == 200
+    assert video_response.content == video
+    assert "training-video.mp4" in video_response.headers["content-disposition"]
+
+    transcript_response = client.get(
+        endpoint, params={"part": "transcript"}, **_auth(sessions, "publisher")
+    )
+    assert transcript_response.status_code == 200
+    assert transcript_response.content == transcript
+    assert transcript_response.headers["content-type"].startswith("text/markdown")
+
+    archive_response = client.get(
+        endpoint, params={"part": "all"}, **_auth(sessions, "publisher")
+    )
+    assert archive_response.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(archive_response.content)) as archive:
+        assert archive.namelist() == ["training-video.mp4", "下载_测试视频-转录稿.md"]
+        assert archive.read("training-video.mp4") == video
+        assert archive.read("下载_测试视频-转录稿.md") == transcript
+
+    monkeypatch.setattr(routes_content, "_MAX_BULK_DOWNLOAD_BYTES", len(video) + len(transcript) - 1)
+    oversized = client.get(
+        endpoint, params={"part": "all"}, **_auth(sessions, "publisher")
+    )
+    assert oversized.status_code == 413
+
+
+def test_media_download_rejects_path_escape_and_integrity_mismatches(content_api, tmp_path: Path):
+    client, sessions, _queued, db_path = content_api
+    media_id = "123e4567-e89b-12d3-a456-426614174140"
+    version_id = "123e4567-e89b-12d3-a456-426614174141"
+    video = b"verified-video"
+    transcript = b"# Transcript\n\nSpeaker 1 00:00:00\nVerified.\n"
+    conn = connect(db_path)
+    item_id = _insert_published_media(
+        conn,
+        media_id=media_id,
+        version_id=version_id,
+        title="Integrity test",
+        filename="integrity.mp4",
+        now=400,
+    )
+    video_path = tmp_path / "media" / "synthetic" / f"{media_id}.mp4"
+    video_path.parent.mkdir(parents=True, exist_ok=True)
+    video_path.write_bytes(video)
+    markdown_ref = LocalTranscriptionArtifactStore(
+        (tmp_path / "transcription-artifacts").resolve()
+    ).write_markdown(transcript)
+    conn.execute(
+        "UPDATE media_assets SET file_size=?,sha256=? WHERE media_id=?",
+        (len(video), hashlib.sha256(video).hexdigest(), media_id),
+    )
+    conn.execute(
+        """UPDATE transcript_versions
+           SET markdown_rel_path=?,markdown_sha256=?,markdown_size_bytes=? WHERE id=?""",
+        (
+            markdown_ref.relative_path,
+            markdown_ref.content_sha256,
+            markdown_ref.size_bytes,
+            version_id,
+        ),
+    )
+    conn.commit()
+    endpoint = f"/api/admin/content/items/{item_id}/media-download"
+    auth = _auth(sessions, "publisher")
+
+    conn.execute("UPDATE media_assets SET file_size=file_size+1 WHERE media_id=?", (media_id,))
+    conn.commit()
+    assert client.get(endpoint, params={"part": "video"}, **auth).status_code == 409
+
+    conn.execute(
+        "UPDATE media_assets SET file_size=?,sha256=? WHERE media_id=?",
+        (len(video), "0" * 64, media_id),
+    )
+    conn.commit()
+    assert client.get(endpoint, params={"part": "video"}, **auth).status_code == 409
+
+    outside = tmp_path / "outside.mp4"
+    outside.write_bytes(video)
+    conn.execute(
+        "UPDATE media_assets SET storage_rel_path='../outside.mp4',sha256=? WHERE media_id=?",
+        (hashlib.sha256(video).hexdigest(), media_id),
+    )
+    conn.commit()
+    assert client.get(endpoint, params={"part": "video"}, **auth).status_code == 404
+
+    conn.execute(
+        """UPDATE media_assets SET storage_rel_path=?,file_size=?,sha256=? WHERE media_id=?""",
+        (
+            f"synthetic/{media_id}.mp4",
+            len(video),
+            hashlib.sha256(video).hexdigest(),
+            media_id,
+        ),
+    )
+    conn.execute(
+        "UPDATE transcript_versions SET markdown_sha256=? WHERE id=?",
+        ("1" * 64, version_id),
+    )
+    conn.commit()
+    conn.close()
+    assert client.get(endpoint, params={"part": "transcript"}, **auth).status_code == 409
+    assert client.get(endpoint, params={"part": "all"}, **auth).status_code == 409
 
 
 def test_bulk_review_and_publish_report_partial_failures(content_api):

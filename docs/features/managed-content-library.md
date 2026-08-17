@@ -45,17 +45,21 @@ media_assets + transcript_versions
 
 Schema 16 为历史上已有正式 head 的未归档视频补建目录壳。目录壳只保存 `media_id`、标题和 `category_id`，不创建 `content_versions`、`content_publications`、`content_index_jobs`、`content_item_heads` 或对象副本，因此不会重复文件、发布状态、索引任务或 Qdrant points。新发布的视频转录稿在正式 head 切换事务内同步登记目录壳，失败时整笔发布回滚。
 
+Schema 19 增加 `media_metadata_revisions` 和 `media_replacements`。媒体标题/源文件名修订复用当前正式 Markdown 创建待审核候选；替换视频作为新的媒体、转录和索引候选处理。两类候选都在审核、索引和发布成功前保留旧 `media_transcript_heads`、目录壳和检索可见内容；最终激活在一个 SQLite 事务内切换 head 与目录关联，失败整笔回滚。旧视频只在替换成功后标记归档，物理文件不在该事务中删除。
+
 ## 列表与版本操作
 
 - 列表标题区显示当前目录、资料数量和选择摘要；搜索框位于标题右侧，状态与来源筛选收纳在搜索框展开层内，目录范围始终跟随当前地址栏；选择两份及以上资料时，“新建目录”切换为“批量操作”。
 - 当前目录的直接子文件夹与资料共用同一列表，文件夹始终排在分页资料之前；根目录显示一级文件夹，进入目录后显示其直接子文件夹。文件夹不计入资料总数、分页、勾选和批量操作，文件筛选也不会隐藏文件夹；“资料”列排序分别对文件夹组和资料组排序，其他列只排序资料组。
 - 批量移动和批量删除以 `item_id + expected_version_id` 进行并发校验，返回逐项成功或失败；确认、退回和发布沿用版本级批量接口，批量退回必须填写最多 2000 字的原因。选择两份及以上资料时，批量操作菜单还支持一次下载最多 20 份普通文档的 ZIP 压缩包。
-- 普通文档保留查看详情、预览、移动、下载、重命名、更新和删除七个固定图标操作，并在其左侧按状态显示唯一的下一步文字按钮：草稿“提交”、已退回“重新提交”、待确认“审核”、已确认“发布”、发布失败“重新发布”。发布中、已发布和历史版本不显示流程按钮；账号缺少对应 `item.submit`、`item.review` 或 `item.publish` 权限时也不显示禁用占位。移动端的流程按钮独占一行，工具按钮位于下一行。
+- 普通文档固定展示详情、预览、下载和移动四个常用图标；重命名、更新资料和移至回收站收纳在“更多”菜单。状态驱动的唯一下一步文字按钮仍位于常用操作左侧：草稿“提交”、已退回“重新提交”、待确认“审核”、已确认“发布”、发布失败“重新发布”。发布中、已发布和历史版本不显示流程按钮；账号缺少对应 `item.submit`、`item.review` 或 `item.publish` 权限时也不显示禁用占位。移动端的流程按钮独占一行，工具按钮位于下一行。
 - “审核”打开专用窗口，展示资料、目录、文件、版本、来源和预览入口。确认通过的备注可选；退回修改的原因必填且最多 2000 字。提交期间窗口防止重复操作，请求失败时保留当前结果选择和输入。详情弹窗复用该审核入口，并显示最近审核人、时间、结果和审核备注或退回原因。
 - “发布”和“重新发布”先打开确认窗口，确认后才创建索引任务；历史发布失败信息继续在详情和确认窗口中展示。
 - PPTX 发布时通过 LibreOffice 生成同版本 `.preview.pdf` 派生产物。列表接口以预览文件的 PDF 签名为准返回 `preview_status`，缺失或损坏时不再开放预览按钮；发布负责人可在资料详情中单独重新生成预览，该操作不重新索引，也不改变资料发布状态。转换写入使用同目录临时文件和原子替换，失败不会破坏已有有效预览。
 - PPTX 预览生成失败仍不阻断资料索引与发布。PDF 预览窗口显示中文失败原因；系统概览实际探测 LibreOffice `/health`，区分“运行正常”“服务异常”和“已停用”。
-- 视频转录稿只提供详情、播放、移动目录和进入视频管理，校对、发布、改名和完整删除仍由视频管理负责，不显示普通文档的状态流程按钮。
+- 视频转录稿固定展示详情、播放、下载和移动目录；下载窗口可选择原始 MP4、当前正式 Markdown 或两者的 ZIP。系统管理员可从“更多”菜单直接编辑当前正式转录稿、创建媒体信息修订、进入替换视频流程或打开视频管理；普通发布负责人不会看到可进入管理员视频管理的伪入口。完整删除仍由视频管理负责，视频条目不显示普通文档的状态流程按钮。
+- 编辑媒体信息不会立即修改正式条目。候选稿必须重新审核、索引并发布，成功后标题、源文件名、目录壳和正式 head 同时生效；审核拒绝或索引/事务失败时旧名称和旧 head 保持不变。
+- 替换视频必须从视频管理选择新的 MP4 和当前可用的服务端 Profile。重复请求以幂等键同时绑定上传者、标题、文件名、文件内容、Profile 和源视频；转录或发布失败不会归档旧视频。候选正式发布后，原目录壳原地关联新媒体并保留目录位置。
 - 视频转录稿只展示 `media_transcript_heads` 指向的当前正式版本。产生较新的待处理稿时，旧正式稿继续在资料库和检索中可见，并显示“有新转录稿待处理”；待处理稿不会作为第二份资料出现。
 - 历史视频默认进入 `05 培训资料`；发布负责人可移动视频目录壳，移动不会改变视频文件、转录发布状态、正式 head 或 Qdrant 索引。同名视频允许共存，不参与普通文档的目录文件名冲突约束。
 - 重命名同时修改资料标题和源文件名；更新上传新对象，并可沿用原名称或使用上传文件名。两者都会新增递增的草稿版本，不覆盖历史版本或对象。
@@ -70,17 +74,20 @@ Schema 16 为历史上已有正式 head 的未归档视频补建目录壳。目�
 - `POST /api/admin/content/bulk-download`
 - `POST /api/admin/content/items/{item_id}/rename`
 - `POST /api/admin/content/items/{item_id}/versions`
+- `GET /api/admin/content/items/{item_id}/media-download?part=video|transcript|all`
+- `POST /api/admin/transcription/media/{media_id}/metadata-revisions`
+- `POST /api/admin/media`（替换时额外提交 `replacement_source_media_id`，且必须使用自动转录 Profile）
 
 ## 权限
 
 - 入口与查看：`workspace.view` 控制资料工作台入口；`item.view` 控制资料列表、详情和预览；`item.download` 控制单份附件下载和批量 ZIP 下载；`category.view` 控制分类树和路径。
 - 资料整理：`item.upload`、`item.submit`、`item.move_draft`、`item.archive_draft` 分别控制上传、提交、移动草稿/退回资料和将其移入回收站。
 - 确认与发布：`item.review` 控制确认和退回，`item.move_review` 控制移动待确认资料，`item.publish` 控制发布和重新生成当前已发布 PPTX 的预览，`item.archive_published` 控制将已确认、发布失败或已发布资料移入回收站。
-- 视频转录稿：`item.view` 控制资料库查看，已登录用户按当前正式 head 读取播放和转录预览；`item.publish` 同时允许只调整视频目录壳。资料库接口拒绝对视频条目执行重命名、更新、普通发布、归档或恢复。
+- 视频转录稿：`item.view` 控制资料库查看，已登录用户按当前正式 head 读取播放和转录预览；`item.download` 控制原视频、正式转录稿和组合 ZIP 下载；`item.publish` 同时允许只调整视频目录壳。转录校对、媒体信息修订、替换视频和视频管理沿用全局管理员边界。资料库接口拒绝对视频条目执行普通文档重命名、更新、发布、归档或恢复。
 - 回收站：`trash.view` 控制查看，`trash.restore` 独立控制恢复。发布负责人默认可查看但不能恢复。
 - 分类与目录：`category.manage` 控制分类维护，`folder.request` 控制目录申请，`folder.review` 控制目录审批。
 - 运维入口：`import.server` 控制服务器批次导入，`index.view` 控制索引任务页面和 API。
-- 批量下载要求 `item.download`、登录 Cookie 和 CSRF token；每批 1–20 个唯一版本，未归档资料的对象文件总量默认不超过 1 GiB。文件缺失、资料已归档或超过总量上限时整批失败，不生成残缺压缩包；临时 ZIP 在响应完成后清理。
+- 批量下载要求 `item.download`、登录 Cookie 和 CSRF token；每批 1–20 个唯一版本，未归档资料的对象文件总量默认不超过 1 GiB。视频单项下载要求 `item.download` 和登录 Cookie，组合 ZIP 同样不超过 1 GiB，并在响应前校验视频大小/哈希及正式 Markdown 大小/哈希。文件缺失、资料已归档、路径越界、完整性不符或超过上限时整笔失败，不生成残缺压缩包；临时 Markdown/ZIP 在响应完成后清理。
 - 权限节点存在显式前置依赖。用户管理页勾选动作权限时自动补齐入口和查看权限，取消前置权限时自动移除依赖动作；后端拒绝保存缺少前置权限、重复或未知节点的组合。
 - 系统预设组包括普通成员、资料浏览者、BIM工程师、资料负责人、发布负责人、分类管理员和系统管理员；权限管理和权限组维护仅允许全局管理员执行。
 - 管理员通过现有管理员回退拥有全部 19 个资料权限节点。
@@ -122,6 +129,7 @@ Schema 16 为历史上已有正式 head 的未归档视频补建目录壳。目�
 
 - API 与权限：`tests/test_content_library_api.py`
 - 视频目录登记与访问：`tests/test_transcription_publication_transaction.py`、`tests/test_media_library_access.py`
+- 视频下载、媒体信息修订与替换事务：`tests/test_media_library_video_actions.py`、`tests/test_content_library_api.py`
 - 状态、对象与检索可见性：`tests/test_content_library_foundation.py`
 - 页面交互：`frontend/src/pages/admin/AdminManagedContentPage.test.tsx`
 - 浏览器布局：`frontend/tests/visual/admin-workflows.spec.ts`

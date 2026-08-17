@@ -41,6 +41,8 @@ def test_empty_database_initializes_all_phase2_tables(tmp_path):
         "content_index_jobs",
         "content_item_heads",
         "content_audit_events",
+        "media_metadata_revisions",
+        "media_replacements",
         "content_permission_groups",
         "content_permission_group_items",
         "maintenance_settings",
@@ -174,7 +176,6 @@ def test_schema_17_adds_reclassification_jobs_without_granting_custom_principals
     )
     conn.commit()
     conn.close()
-
     monkeypatch.setattr(db_migrations, "MIGRATIONS", migrations)
     init_db(path, backup_dir=tmp_path / "backups")
     conn = sqlite3.connect(path)
@@ -205,6 +206,34 @@ def test_schema_17_adds_reclassification_jobs_without_granting_custom_principals
         "target_category_id", "status", "qdrant_point_count", "parent_count",
         "error_code", "error_summary",
     }
+    conn.close()
+
+
+def test_schema_18_adds_media_library_video_action_tables(tmp_path, monkeypatch):
+    path = tmp_path / "app.sqlite"
+    migrations = db_migrations.MIGRATIONS
+    monkeypatch.setattr(
+        db_migrations, "MIGRATIONS", tuple(item for item in migrations if item.version <= 18),
+    )
+    init_db(path, backup_dir=tmp_path / "backups")
+    conn = sqlite3.connect(path)
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert conn.execute("SELECT max(version) FROM app_schema_migrations").fetchone()[0] == 18
+    assert "media_metadata_revisions" not in tables
+    assert "media_replacements" not in tables
+    conn.close()
+
+    monkeypatch.setattr(db_migrations, "MIGRATIONS", migrations)
+    init_db(path, backup_dir=tmp_path / "backups")
+    backups = list((tmp_path / "backups").glob("*.sqlite"))
+    assert len(backups) == 1
+    verify_backup(backups[0])
+    conn = sqlite3.connect(path)
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert {"media_metadata_revisions", "media_replacements"} <= tables
+    assert conn.execute("SELECT max(version) FROM app_schema_migrations").fetchone()[0] == 19
+    assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    assert conn.execute("PRAGMA foreign_key_check").fetchone() is None
     conn.close()
 
 
