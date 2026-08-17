@@ -33,6 +33,12 @@ OFFICE_DOC_TYPES = frozenset({"docx", "xlsx", "pptx"})
 CONTENT_HEAD_ENFORCEMENT = os.getenv("CONTENT_HEAD_ENFORCEMENT", "compat").strip().lower()
 if CONTENT_HEAD_ENFORCEMENT not in {"compat", "strict"}:
     raise ValueError("CONTENT_HEAD_ENFORCEMENT must be 'compat' or 'strict'")
+CONTENT_TRASH_RETENTION_DAYS = int(os.getenv("CONTENT_TRASH_RETENTION_DAYS", "90"))
+CONTENT_TRASH_EXPIRING_WARNING_DAYS = int(os.getenv("CONTENT_TRASH_EXPIRING_WARNING_DAYS", "7"))
+if not 0 <= CONTENT_TRASH_EXPIRING_WARNING_DAYS <= CONTENT_TRASH_RETENTION_DAYS:
+    raise ValueError("CONTENT_TRASH_EXPIRING_WARNING_DAYS must be between 0 and the retention period")
+if CONTENT_TRASH_RETENTION_DAYS < 1:
+    raise ValueError("CONTENT_TRASH_RETENTION_DAYS must be positive")
 
 for d in (DATA_DIR, PARSED_DIR, DOCS_DIR, MEDIA_DIR):
     d.mkdir(parents=True, exist_ok=True)
