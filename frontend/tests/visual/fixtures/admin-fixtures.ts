@@ -438,8 +438,48 @@ const conversationState = {
 };
 
 const feedbackEntries = [
-  { feedback_id: "feedback-1", ts: "2026-08-15T10:00:00Z", kind: "answer", rating: "down", note: "合成反馈：回答需要补充来源", query: "如何归档？", answer_text: "请查阅归档指引。", status: "pending", resolution: null, admin_note: null, conversation_id: "conversation-1", turn_index: 2 },
-  { feedback_id: "feedback-2", ts: "2026-08-14T09:00:00Z", kind: "citation", rating: "up", note: "来源准确", status: "resolved", resolution: "no_action", admin_note: "合成已核对", conversation_id: "conversation-2", turn_index: 1 },
+  {
+    feedback_id: "feedback-1", ts: "2026-08-15T10:00:00Z", kind: "answer", rating: "down",
+    note: "回答给出了归档方向，但没有说明模型成果、图纸和交付清单的核对顺序，也缺少对应资料来源。",
+    query: "项目竣工交付前，BIM 模型和配套资料应该按什么顺序检查并归档？",
+    answer_text: "建议先确认交付范围，再依次核对模型完整性、图纸一致性、问题关闭情况和文件命名。完成内部复核后，按项目交付清单整理模型、图纸、报告和审批记录，并将最终版本归档到项目资料库。",
+    category: "回答完整性", status: "pending", resolution: null, admin_note: null,
+    conversation_id: "conversation-1", turn_index: 2, assignee_user_id: null, assignee_name: null,
+    updated_at: 1786788000, resolved_at: null,
+  },
+  {
+    feedback_id: "feedback-2", ts: "2026-08-15T08:35:00Z", kind: "citation", rating: "down",
+    note: "引用的章节只讲文件命名，没有覆盖问题中提到的模型质量检查，希望定位到交付检查章节。",
+    parent_id: "parent-ready", doc_title: "建筑信息模型交付标准（合成长资料名称用于响应式检查）",
+    section_path: "第三章 / 3.2 文件组织与命名 / 3.2.4 交付目录", start_time: null,
+    category: "来源准确性", status: "pending", resolution: null, admin_note: null,
+    conversation_id: "conversation-1", turn_index: 2, assignee_user_id: null, assignee_name: null,
+    updated_at: 1786782900, resolved_at: null,
+  },
+  {
+    feedback_id: "feedback-3", ts: "2026-08-14T16:20:00Z", kind: "answer", rating: "down",
+    note: "术语与公司标准不一致，正在核对最新发布版本。", query: "碰撞检查报告需要保留哪些字段？",
+    answer_text: "报告应记录问题编号、专业、位置、责任人、处理状态和关闭依据。",
+    category: "术语一致性", status: "in_progress", resolution: null, admin_note: "已领取，待资料员确认标准版本。",
+    conversation_id: "conversation-1", turn_index: 1, assignee_user_id: 9001, assignee_name: "合成管理员",
+    updated_at: 1786724400, resolved_at: null,
+  },
+  {
+    feedback_id: "feedback-4", ts: "2026-08-13T09:10:00Z", kind: "citation", rating: "up",
+    note: "来源位置准确，已确认无需调整。", parent_id: "parent-ready", doc_title: "项目资料归档指引",
+    section_path: "第五章 / 5.1 竣工资料归档", category: "来源准确性", status: "resolved",
+    resolution: "no_action", admin_note: "引用与当前发布版本一致，无需处理。",
+    conversation_id: "conversation-1", turn_index: 1, assignee_user_id: 9001, assignee_name: "合成管理员",
+    updated_at: 1786602600, resolved_at: 1786602600,
+  },
+  {
+    feedback_id: "feedback-5", ts: "2026-08-12T14:45:00Z", kind: "answer", rating: "up",
+    note: "重复反馈，已合并到同类问题。", query: "资料归档后还能重新分类吗？",
+    answer_text: "已发布资料可以按权限重新分类，系统会保留版本和操作记录。",
+    category: "重复反馈", status: "archived", resolution: "duplicate", admin_note: "与反馈 feedback-4 重复。",
+    conversation_id: "conversation-1", turn_index: 1, assignee_user_id: 9001, assignee_name: "合成管理员",
+    updated_at: 1786536300, resolved_at: null,
+  },
 ];
 
 function json(route: Route, body: unknown, status = 200) {
@@ -455,8 +495,10 @@ export async function installAdminRoutes(
   scenario: AdminScenario = "normal",
   workspaceUser: WorkspaceUser = "admin",
   currentUser: () => typeof admin = () => workspaceUsers[workspaceUser],
-  options: { includeChildFolder?: boolean; includeFolderRequest?: boolean } = {},
+  options: { includeChildFolder?: boolean; includeFolderRequest?: boolean; feedbackPatchDelayMs?: number } = {},
 ) {
+  const activeFeedbackEntries = feedbackEntries.map((entry) => ({ ...entry }));
+
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -579,10 +621,51 @@ export async function installAdminRoutes(
     if (request.method() === "GET" && /^\/api\/admin\/users\/\d+\/conversations$/.test(path)) return json(route, { conversations: scenario === "empty" ? [] : adminConversations.filter((conversation) => conversation.user_id === 9002) });
     if (request.method() === "GET" && /^\/api\/conversations\/[^/]+$/.test(path)) return json(route, conversationState);
     if (request.method() === "GET" && path === "/api/admin/feedback") {
-      const entries = scenario === "empty" ? [] : feedbackEntries;
-      return json(route, { entries, total: entries.length, page: 1, page_size: 20, counts: { pending: entries.filter((entry) => entry.status === "pending").length, in_progress: 0, resolved: entries.filter((entry) => entry.status === "resolved").length, archived: 0 } });
+      const sourceEntries = scenario === "empty" ? [] : activeFeedbackEntries;
+      const status = url.searchParams.get("status") || "pending";
+      const kind = url.searchParams.get("kind") || "";
+      const rating = url.searchParams.get("rating") || "";
+      const query = (url.searchParams.get("q") || "").trim().toLocaleLowerCase("zh-CN");
+      const pageNumber = Math.max(1, Number(url.searchParams.get("page")) || 1);
+      const pageSize = Math.max(1, Number(url.searchParams.get("page_size")) || 20);
+      const searchableFields = ["note", "query", "answer_text", "doc_title", "section_path", "category"] as const;
+      const filteredEntries = sourceEntries.filter((entry) => (
+        (status === "all" || entry.status === status)
+        && (!kind || entry.kind === kind)
+        && (!rating || entry.rating === rating)
+        && (!query || searchableFields.some((field) => String(entry[field] || "").toLocaleLowerCase("zh-CN").includes(query)))
+      ));
+      const offset = (pageNumber - 1) * pageSize;
+      return json(route, {
+        entries: filteredEntries.slice(offset, offset + pageSize),
+        total: filteredEntries.length,
+        page: pageNumber,
+        page_size: pageSize,
+        counts: {
+          pending: sourceEntries.filter((entry) => entry.status === "pending").length,
+          in_progress: sourceEntries.filter((entry) => entry.status === "in_progress").length,
+          resolved: sourceEntries.filter((entry) => entry.status === "resolved").length,
+          archived: sourceEntries.filter((entry) => entry.status === "archived").length,
+        },
+      });
     }
-    if (request.method() === "PATCH" && /^\/api\/admin\/feedback\/[^/]+$/.test(path)) return json(route, feedbackEntries[0]);
+    if (request.method() === "PATCH" && /^\/api\/admin\/feedback\/[^/]+$/.test(path)) {
+      const feedbackId = decodeURIComponent(path.split("/").pop() || "");
+      const entry = activeFeedbackEntries.find((candidate) => candidate.feedback_id === feedbackId);
+      if (!entry) return json(route, { detail: "合成反馈不存在" }, 404);
+      const payload = request.postDataJSON();
+      if (options.feedbackPatchDelayMs) {
+        await new Promise((resolve) => setTimeout(resolve, options.feedbackPatchDelayMs));
+      }
+      Object.assign(entry, payload, {
+        resolution: payload.status === "resolved" ? payload.resolution : null,
+        assignee_user_id: ["in_progress", "resolved"].includes(payload.status) ? 9001 : null,
+        assignee_name: ["in_progress", "resolved"].includes(payload.status) ? "合成管理员" : null,
+        updated_at: 1786953600,
+        resolved_at: payload.status === "resolved" ? 1786953600 : null,
+      });
+      return json(route, entry);
+    }
     if (request.method() === "POST" && path === "/api/admin/media" && scenario === "media_upload") {
       await new Promise((resolve) => setTimeout(resolve, 3_000));
       return json(route, { ...mediaAssets[2], media_id: "media-uploaded", transcription_job_id: "job-uploaded" });
