@@ -782,22 +782,56 @@ describe("AdminManagedContentPage", () => {
     await waitFor(() => expect(mocks.restoreContent).toHaveBeenCalledWith("item-1", "version-1", { target_category_id: "cat-03" }));
   });
 
-  it("selects individual trash items and preflights only the chosen restore", async () => {
+  it("selects trash items in the list and preflights the chosen batch from the restore dialog", async () => {
     const second = { ...item, item_id: "item-2", version_id: "version-2", title: "项目标准", original_filename: "project.pdf" };
     mocks.trash.mockResolvedValue({ items: [
       { ...item, archived_at: 1_700_000_000, retention_status: "retained", retention_days_remaining: 30 },
       { ...second, archived_at: 1_699_000_000, retention_status: "overdue", retention_days_remaining: -2 },
     ], total: 2, status_counts: {}, retention_counts: { retained: 1, expiring: 0, overdue: 1 } });
-    mocks.preflightBulkRestore.mockResolvedValue({ results: [{ item_id: "item-2", version_id: "version-2", status: "ready", message: "可以恢复", target_category_path: "03 公司内部标准" }], ready: 1, blocked: 0 });
+    mocks.preflightBulkRestore.mockResolvedValue({ results: [
+      { item_id: "item-1", version_id: "version-1", status: "ready", message: "可以恢复", target_category_path: "03 公司内部标准" },
+      { item_id: "item-2", version_id: "version-2", status: "ready", message: "可以恢复", target_category_path: "03 公司内部标准" },
+    ], ready: 2, blocked: 0 });
     render(<AdminManagedContentPage />);
     fireEvent.click(screen.getByRole("tab", { name: "回收站" }));
-    fireEvent.click(await screen.findByRole("checkbox", { name: "选择恢复“项目标准”" }));
-    expect(screen.getByText("已选择 1 份，单次最多 20 份；翻页或修改筛选会清空选择。")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "批量恢复（1）" }));
+    fireEvent.click((await screen.findAllByRole("checkbox", { name: "选择恢复“建模标准”" }))[0]);
+    fireEvent.click(screen.getAllByRole("checkbox", { name: "选择恢复“项目标准”" })[0]);
+    expect(screen.getByRole("status")).toHaveTextContent("已选择 2 份，单次最多 20 份");
+    fireEvent.click(screen.getByRole("button", { name: "批量恢复（2）" }));
+    const dialog = screen.getByRole("dialog", { name: "批量恢复" });
+    expect(within(dialog).getByRole("combobox", { name: "恢复到" })).toHaveValue("original");
+    fireEvent.click(within(dialog).getByRole("button", { name: "检查恢复条件" }));
     await waitFor(() => expect(mocks.preflightBulkRestore).toHaveBeenCalledWith([
+      { item_id: "item-1", expected_version_id: "version-1" },
       { item_id: "item-2", expected_version_id: "version-2" },
     ], undefined));
-    expect(await screen.findByRole("dialog", { name: "确认批量恢复" })).toHaveTextContent("可恢复 1 份");
+    expect(await screen.findByRole("dialog", { name: "确认批量恢复" })).toHaveTextContent("可恢复 2 份");
+  });
+
+  it("keeps trash filters inside search and sorts from the archived-time column", async () => {
+    mocks.trash.mockResolvedValue({
+      items: [{ ...item, archived_at: 1_700_000_000, retention_status: "retained", retention_days_remaining: 30 }],
+      total: 1,
+      status_counts: {},
+      retention_counts: { retained: 1, expiring: 0, overdue: 0 },
+    });
+    render(<AdminManagedContentPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "回收站" }));
+    await screen.findAllByText("建模标准");
+
+    expect(screen.queryByLabelText("回收站筛选")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "展开回收站筛选" }));
+    const filters = screen.getByRole("dialog", { name: "回收站搜索筛选" });
+    expect(within(filters).getByRole("option", { name: "保留中（1）" })).toBeInTheDocument();
+    fireEvent.change(within(filters).getByRole("combobox", { name: "保留状态" }), { target: { value: "retained" } });
+    fireEvent.change(within(filters).getByRole("textbox", { name: "移入人员" }), { target: { value: "管理员" } });
+    await waitFor(() => expect(mocks.trash).toHaveBeenLastCalledWith(expect.objectContaining({
+      retention_status: "retained",
+      archived_by: "管理员",
+    })));
+
+    fireEvent.click(screen.getByRole("button", { name: /移入回收站/ }));
+    await waitFor(() => expect(mocks.trash).toHaveBeenLastCalledWith(expect.objectContaining({ sort_direction: "asc" })));
   });
 
   it("keeps the restore dialog open and confirms a same-name replacement", async () => {

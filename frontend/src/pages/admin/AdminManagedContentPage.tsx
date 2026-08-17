@@ -531,6 +531,107 @@ function ManagedContentSearchFilters({
   </div>;
 }
 
+function TrashSearchFilters({
+  queryInput,
+  retentionFilter,
+  retentionCounts,
+  categoryFilter,
+  archivedBy,
+  archivedFrom,
+  archivedTo,
+  categories,
+  onQueryInputChange,
+  onRetentionFilterChange,
+  onCategoryFilterChange,
+  onArchivedByChange,
+  onArchivedFromChange,
+  onArchivedToChange,
+  onClear,
+}: {
+  queryInput: string;
+  retentionFilter: string;
+  retentionCounts: Record<string, number>;
+  categoryFilter: string;
+  archivedBy: string;
+  archivedFrom: string;
+  archivedTo: string;
+  categories: ManagedCategory[];
+  onQueryInputChange: (value: string) => void;
+  onRetentionFilterChange: (value: string) => void;
+  onCategoryFilterChange: (value: string) => void;
+  onArchivedByChange: (value: string) => void;
+  onArchivedFromChange: (value: string) => void;
+  onArchivedToChange: (value: string) => void;
+  onClear: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const activeFilterCount = [retentionFilter, categoryFilter, archivedBy, archivedFrom, archivedTo].filter(Boolean).length;
+  const panelId = "trash-search-filters";
+
+  useEffect(() => {
+    if (!open) return;
+    const closeOutside = (event: MouseEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const closeEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      inputRef.current?.focus();
+      setOpen(false);
+    };
+    document.addEventListener("mousedown", closeOutside);
+    document.addEventListener("keydown", closeEscape);
+    return () => {
+      document.removeEventListener("mousedown", closeOutside);
+      document.removeEventListener("keydown", closeEscape);
+    };
+  }, [open]);
+
+  const filterButtonLabel = open ? "收起回收站筛选" : "展开回收站筛选";
+
+  return <div ref={rootRef} className="relative min-w-0 w-full xl:w-72 xl:max-w-72 xl:justify-self-center min-[1400px]:w-96 min-[1400px]:max-w-96">
+    <div className="relative">
+      <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+      <Input
+        ref={inputRef}
+        className="h-control-sm pl-9 pr-11"
+        value={queryInput}
+        onChange={(event) => onQueryInputChange(event.target.value)}
+        onFocus={() => setOpen(true)}
+        aria-label="搜索回收站"
+        placeholder="搜索名称、文件名、原目录或上传路径…"
+      />
+      <button
+        type="button"
+        className="absolute right-1 top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded-ui-sm text-muted-foreground transition-colors hover:bg-surface-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        aria-label={filterButtonLabel}
+        title={filterButtonLabel}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-controls={panelId}
+        onClick={() => setOpen((current) => !current)}
+      >
+        <SlidersHorizontal className="size-4" aria-hidden="true" />
+        {activeFilterCount > 0 && <span className="absolute right-0.5 top-0.5 size-1.5 rounded-full bg-primary" aria-hidden="true" />}
+        {activeFilterCount > 0 && <span className="sr-only">，已启用 {activeFilterCount} 项筛选</span>}
+      </button>
+    </div>
+    {open && <div id={panelId} role="dialog" aria-modal="false" aria-label="回收站搜索筛选" className="absolute inset-x-0 top-full z-dropdown mt-2 rounded-ui-lg border border-border bg-popover p-3 text-popover-foreground shadow-overlay sm:min-w-[36rem] sm:left-auto sm:right-0">
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="space-y-1 text-ui-xs text-muted-foreground"><span>保留状态</span><Select className="h-control-sm" value={retentionFilter} onChange={(event) => onRetentionFilterChange(event.target.value)}><option value="">全部状态</option><option value="retained">保留中（{retentionCounts.retained || 0}）</option><option value="expiring">即将到期（{retentionCounts.expiring || 0}）</option><option value="overdue">已超期（{retentionCounts.overdue || 0}）</option></Select></label>
+        <label className="space-y-1 text-ui-xs text-muted-foreground"><span>原目录</span><Select className="h-control-sm" value={categoryFilter} onChange={(event) => onCategoryFilterChange(event.target.value)}><option value="">全部目录</option>{categories.map((category) => <option key={category.id} value={category.id}>{category.full_path || category.display_name}</option>)}</Select></label>
+        <label className="space-y-1 text-ui-xs text-muted-foreground"><span>移入人员</span><Input className="h-control-sm" value={archivedBy} onChange={(event) => onArchivedByChange(event.target.value)} placeholder="输入姓名" /></label>
+        <fieldset className="grid grid-cols-2 gap-2"><legend className="mb-1 text-ui-xs text-muted-foreground">移入日期</legend><Input className="h-control-sm" type="date" aria-label="移入开始日期" value={archivedFrom} onChange={(event) => onArchivedFromChange(event.target.value)} /><Input className="h-control-sm" type="date" aria-label="移入结束日期" value={archivedTo} onChange={(event) => onArchivedToChange(event.target.value)} /></fieldset>
+      </div>
+      <div className="mt-3 flex flex-col gap-2 border-t border-border pt-3 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-ui-xs text-muted-foreground" role="status">{activeFilterCount > 0 ? `已启用 ${activeFilterCount} 项筛选` : "未启用附加筛选"}</p>
+        <Button size="sm" variant="outline" onClick={onClear} disabled={!queryInput && activeFilterCount === 0}>清除搜索与筛选</Button>
+      </div>
+    </div>}
+  </div>;
+}
+
 export function AdminManagedContentPage() {
   const { state } = useAuth();
   const { open: openDocumentPreview, state: previewState } = usePdfPreview();
@@ -1421,7 +1522,7 @@ export function AdminManagedContentPage() {
       const result = await adminContentApi.bulkRestore(targets.map((item) => ({ item_id: item.item_id, expected_version_id: item.version_id })), trashBulkTarget === "original" ? undefined : trashBulkTarget);
       const failedIds = result.results.filter((entry) => entry.status === "failed").map((entry) => entry.version_id);
       setTrashSelected(failedIds);
-      setTrashPreflightOpen(false); setTrashPreflight([]);
+      setTrashPreflightOpen(false); setTrashPreflight([]); setTrashBulkTarget("original");
       if (result.failed) toast.error(`已恢复 ${result.succeeded} 份，${result.failed} 份因同名冲突或状态变化仍保留在回收站`);
       else toast.success(`已恢复 ${result.succeeded} 份资料`);
       await loadTrash();
@@ -1705,23 +1806,51 @@ export function AdminManagedContentPage() {
 
   if (view === "trash") {
     const trashPageCount = Math.max(1, Math.ceil(trashTotal / PAGE_SIZE));
+    const trashAllSelected = trashItems.length > 0 && trashItems.every((item) => trashSelected.includes(item.version_id));
+    const toggleAllTrash = () => setTrashSelected(trashAllSelected ? [] : trashItems.slice(0, BULK_LIMIT).map((item) => item.version_id));
+    const retentionText = (item: ManagedContentItem) => item.retention_status === "overdue"
+      ? `已超期 ${Math.abs(item.retention_days_remaining || 0)} 天`
+      : item.retention_status === "expiring"
+        ? `即将到期，剩余 ${item.retention_days_remaining || 0} 天`
+        : `保留中，剩余 ${item.retention_days_remaining || 0} 天`;
     return <section className="space-y-5" aria-labelledby="managed-content-title">
-      <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"><div><p className="text-ui-xs font-medium text-primary">内容管理</p><h1 id="managed-content-title" className="mt-1 text-ui-2xl font-semibold tracking-tight">回收站</h1><p className="mt-1 text-ui-sm text-muted-foreground">{can("trash.restore") ? "查看和恢复已移出资料库的资料。" : "查看已移出资料库的资料。"}</p></div><Button size="sm" variant="outline" onClick={() => void loadTrash()} disabled={trashLoading}><RefreshCw className={trashLoading ? "size-4 animate-spin" : "size-4"} />刷新</Button></header>
+      <header><p className="text-ui-xs font-medium text-primary">内容管理</p><h1 id="managed-content-title" className="mt-1 text-ui-2xl font-semibold tracking-tight">回收站</h1><p className="mt-1 text-ui-sm text-muted-foreground">{can("trash.restore") ? "查看和恢复已移出资料库的资料。" : "查看已移出资料库的资料。"}</p></header>
       {viewTabs}
-      {can("trash.restore") && <div className="flex flex-col gap-2 sm:flex-row sm:items-end"><label className="block max-w-sm flex-1 space-y-1 text-ui-xs text-muted-foreground"><span>批量恢复到</span><Select value={trashBulkTarget} onChange={(event) => setTrashBulkTarget(event.target.value)}><option value="original">各自原目录</option>{categories.map((category) => <option key={category.id} value={category.id}>{category.full_path || `${category.display_code} ${category.display_name}`}</option>)}</Select></label><div className="flex flex-wrap items-center gap-2"><Button size="sm" disabled={Boolean(busyAction) || trashSelected.length === 0} onClick={() => void preflightBulkRestore()}><ArchiveRestore className="size-4" />{busyAction === "restore-preflight" ? "检查中…" : `批量恢复${trashSelected.length ? `（${trashSelected.length}）` : ""}`}</Button>{trashSelected.length > 0 && <Button size="sm" variant="ghost" disabled={Boolean(busyAction)} onClick={() => setTrashSelected([])}>取消选择</Button>}<Button size="sm" variant="outline" disabled={Boolean(busyAction)} onClick={() => void exportTrash()}><Download className="size-4" />{busyAction === "trash-export" ? "导出中…" : "导出处置清单"}</Button></div></div>}
       {error && <ErrorState title="回收站加载失败" description={error} action={<Button size="sm" variant="outline" onClick={() => void loadTrash()}>重新加载</Button>} />}
-      <section className="grid grid-cols-3 gap-2" aria-label="回收站生命周期概览">{[["保留中", trashRetentionCounts.retained || 0], ["即将到期", trashRetentionCounts.expiring || 0], ["已超期", trashRetentionCounts.overdue || 0]].map(([label, count]) => <div key={String(label)} className="border border-border px-3 py-2"><p className="text-ui-xs text-muted-foreground">{label}</p><p className="mt-1 font-semibold tabular-nums">{count}</p></div>)}</section>
-      <section className="grid gap-3 border-y border-border py-3 sm:grid-cols-2 xl:grid-cols-5" aria-label="回收站筛选"><label className="space-y-1 text-ui-xs text-muted-foreground"><span>原目录</span><Select value={trashCategoryFilter} onChange={(event) => { setTrashCategoryFilter(event.target.value); setPage(0); }}><option value="">全部目录</option>{categories.map((category) => <option key={category.id} value={category.id}>{category.full_path || category.display_name}</option>)}</Select></label><label className="space-y-1 text-ui-xs text-muted-foreground"><span>移入人员</span><Input value={trashArchivedBy} onChange={(event) => { setTrashArchivedBy(event.target.value); setPage(0); }} placeholder="输入姓名" /></label><label className="space-y-1 text-ui-xs text-muted-foreground"><span>开始日期</span><Input type="date" value={trashArchivedFrom} onChange={(event) => { setTrashArchivedFrom(event.target.value); setPage(0); }} /></label><label className="space-y-1 text-ui-xs text-muted-foreground"><span>结束日期</span><Input type="date" value={trashArchivedTo} onChange={(event) => { setTrashArchivedTo(event.target.value); setPage(0); }} /></label><label className="space-y-1 text-ui-xs text-muted-foreground"><span>移入时间排序</span><Select value={trashSortDirection} onChange={(event) => { setTrashSortDirection(event.target.value as "asc" | "desc"); setPage(0); }}><option value="desc">最新优先</option><option value="asc">最早优先</option></Select></label></section>
-      {can("trash.restore") && trashItems.length > 0 && <fieldset className="border-b border-border pb-3"><legend className="text-ui-sm font-medium">选择要批量恢复的资料</legend><div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2"><label className="flex items-center gap-2 text-ui-sm font-medium"><Checkbox aria-label="选择当前页全部回收站资料" checked={trashItems.every((item) => trashSelected.includes(item.version_id))} onChange={() => setTrashSelected(trashItems.every((item) => trashSelected.includes(item.version_id)) ? [] : trashItems.slice(0, BULK_LIMIT).map((item) => item.version_id))} />全选当前页</label>{trashItems.map((item) => <label key={item.item_id} className="flex max-w-full items-center gap-2 text-ui-sm"><Checkbox aria-label={`选择恢复“${item.title}”`} checked={trashSelected.includes(item.version_id)} onChange={() => setTrashSelected((current) => current.includes(item.version_id) ? current.filter((id) => id !== item.version_id) : [...current, item.version_id].slice(0, BULK_LIMIT))} /><span className="min-w-0 max-w-64"><span className="block truncate" title={item.title}>{item.title}</span><span className="block text-ui-xs text-muted-foreground">{item.retention_status === "overdue" ? `已超期 ${Math.abs(item.retention_days_remaining || 0)} 天` : item.retention_status === "expiring" ? `即将到期，剩余 ${item.retention_days_remaining || 0} 天` : `保留中，剩余 ${item.retention_days_remaining || 0} 天`}</span></span></label>)}</div><p className="mt-2 text-ui-xs text-muted-foreground" role="status" aria-live="polite">已选择 {trashSelected.length} 份，单次最多 {BULK_LIMIT} 份；翻页或修改筛选会清空选择。</p></fieldset>}
-      <Card className="overflow-hidden shadow-surface [&_table]:!min-w-[58rem]"><div className="grid gap-3 border-b border-border px-4 py-4 sm:grid-cols-[minmax(12rem,1fr)_12rem_auto] sm:items-end sm:px-5"><label className="space-y-1 text-ui-xs text-muted-foreground"><span>搜索回收站</span><span className="relative block"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2" /><Input className="pl-9" value={queryInput} onChange={(event) => setQueryInput(event.target.value)} placeholder="搜索名称、文件名、原目录或上传路径…" /></span></label><label className="space-y-1 text-ui-xs text-muted-foreground"><span>保留状态</span><Select value={trashRetentionFilter} onChange={(event) => { setTrashRetentionFilter(event.target.value); setPage(0); }}><option value="">全部状态</option><option value="retained">保留中</option><option value="expiring">即将到期</option><option value="overdue">已超期（仍可恢复）</option></Select></label><div className="flex flex-wrap items-center justify-end gap-2"><span className="text-ui-xs text-muted-foreground">共 {trashTotal} 份</span>{can("trash.restore") && trashSelected.length > 1 && <Button size="sm" disabled={Boolean(busyAction)} onClick={() => void bulkRestoreTrash()}><ArchiveRestore className="size-4" />{busyAction === "bulk-restore" ? "恢复中…" : `批量恢复（${trashSelected.length}）`}</Button>}</div></div>
+      <Card className="shadow-surface [&_table]:!min-w-[68rem]" aria-labelledby="trash-list-title"><div className="grid gap-3 border-b border-border px-4 py-4 xl:grid-cols-[minmax(13rem,1fr)_18rem_auto] xl:items-end min-[1400px]:grid-cols-[minmax(13rem,1fr)_24rem_auto] sm:px-5">
+        <div className="min-w-0"><h2 id="trash-list-title" className="text-ui-base font-semibold">回收站资料</h2><p className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-ui-xs text-muted-foreground"><span>共 {trashTotal} 份</span><span role="status" aria-live="polite">· {trashSelected.length > 0 ? <>已选择 <strong>{trashSelected.length}</strong> 份，单次最多 {BULK_LIMIT} 份</> : <>未选择资料，单次最多 {BULK_LIMIT} 份</>}</span></p></div>
+        <TrashSearchFilters
+          queryInput={queryInput}
+          retentionFilter={trashRetentionFilter}
+          retentionCounts={trashRetentionCounts}
+          categoryFilter={trashCategoryFilter}
+          archivedBy={trashArchivedBy}
+          archivedFrom={trashArchivedFrom}
+          archivedTo={trashArchivedTo}
+          categories={categories}
+          onQueryInputChange={setQueryInput}
+          onRetentionFilterChange={(value) => { setTrashRetentionFilter(value); setPage(0); }}
+          onCategoryFilterChange={(value) => { setTrashCategoryFilter(value); setPage(0); }}
+          onArchivedByChange={(value) => { setTrashArchivedBy(value); setPage(0); }}
+          onArchivedFromChange={(value) => { setTrashArchivedFrom(value); setPage(0); }}
+          onArchivedToChange={(value) => { setTrashArchivedTo(value); setPage(0); }}
+          onClear={() => { setQueryInput(""); setTrashRetentionFilter(""); setTrashCategoryFilter(""); setTrashArchivedBy(""); setTrashArchivedFrom(""); setTrashArchivedTo(""); setPage(0); }}
+        />
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <Button size="sm" variant="outline" className="max-sm:h-control-md" disabled={Boolean(busyAction)} onClick={() => void exportTrash()}><Download className="size-4" />{busyAction === "trash-export" ? "导出中…" : "导出处置清单"}</Button>
+          <Button size="sm" variant="outline" className="max-sm:h-control-md" onClick={() => void loadTrash()} disabled={trashLoading}><RefreshCw className={trashLoading ? "size-4 animate-spin" : "size-4"} />{trashLoading ? "刷新中…" : "刷新列表"}</Button>
+          {can("trash.restore") && trashSelected.length > 1 && <Button size="sm" className="max-sm:h-control-md" disabled={Boolean(busyAction)} onClick={() => { setTrashBulkTarget("original"); setTrashPreflight([]); setTrashPreflightOpen(true); }}><ArchiveRestore className="size-4" />批量恢复（{trashSelected.length}）</Button>}
+          {trashSelected.length > 0 && <Button size="sm" variant="ghost" className="max-sm:h-control-md" disabled={Boolean(busyAction)} onClick={() => setTrashSelected([])}>取消选择</Button>}
+        </div>
+      </div>
         {trashLoading ? <LoadingState className="min-h-48 border-0" label="正在加载回收站…" /> : trashItems.length === 0 ? <EmptyState className="rounded-none border-0" title="回收站为空" description="移至回收站的资料会显示在这里。" /> : <>
-          <div className="hidden overflow-x-auto lg:block"><table className="w-full text-ui-sm"><thead className="border-b border-border bg-surface-muted text-left text-muted-foreground"><tr><th className="px-4 py-3 font-medium">资料</th><th className="px-4 py-3 font-medium">原目录</th><th className="px-4 py-3 font-medium">原状态</th><th className="px-4 py-3 font-medium">来源</th><th className="px-4 py-3 font-medium">移入回收站</th><th className="px-4 py-3 text-right font-medium">操作</th></tr></thead><tbody className="divide-y divide-border">{trashItems.map((item) => { const previousStatus = item.pre_archive_lifecycle_status || item.lifecycle_status; const sourcePath = item.source_rel_path && item.source_rel_path !== item.original_filename ? item.source_rel_path : null; return <tr key={item.item_id} className="align-top transition-colors duration-normal hover:bg-surface-muted/60"><td className="max-w-xs px-4 py-3"><p className="break-words font-medium">{item.title}</p><p className="mt-1 break-all text-ui-xs text-muted-foreground">{item.original_filename} · v{item.version_number}</p></td><td className="max-w-sm px-4 py-3"><p className="break-words">{item.category_path || item.category_label}</p>{sourcePath && <p className="mt-1 break-all text-ui-xs text-muted-foreground">上传路径：{sourcePath}</p>}</td><td className="px-4 py-3"><Badge variant={statusVariant(previousStatus)}>{statusLabel[previousStatus] || "未知状态"}</Badge></td><td className="px-4 py-3">{sourceLabel[item.source_origin] || "其他来源"}</td><td className="px-4 py-3"><p>{item.archived_by_name || "未知人员"}</p><p className="mt-1 whitespace-nowrap text-ui-xs text-muted-foreground">{formatAdminDate(item.archived_at)}</p></td><td className="px-4 py-3"><div className="flex justify-end gap-2"><Button size="sm" variant="outline" onClick={() => void openAudit(item)}><History className="size-4" />记录</Button>{can("trash.restore") && <Button size="sm" variant="outline" disabled={Boolean(busyAction)} onClick={() => openRestore(item)}><ArchiveRestore className="size-4" />恢复</Button>}</div></td></tr>; })}</tbody></table></div>
-          <ul className="divide-y divide-border lg:hidden">{trashItems.map((item) => { const previousStatus = item.pre_archive_lifecycle_status || item.lifecycle_status; const sourcePath = item.source_rel_path && item.source_rel_path !== item.original_filename ? item.source_rel_path : null; return <li key={item.item_id} className="space-y-3 px-4 py-4 sm:px-5"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="break-words font-medium">{item.title}</p><p className="mt-1 break-all text-ui-xs text-muted-foreground">{item.original_filename} · v{item.version_number}</p></div><Badge className="shrink-0" variant={statusVariant(previousStatus)}>{statusLabel[previousStatus] || "未知状态"}</Badge></div><dl className="grid grid-cols-[5rem_minmax(0,1fr)] gap-x-2 gap-y-1 text-ui-sm"><dt className="text-muted-foreground">原目录</dt><dd className="break-words">{item.category_path || item.category_label}</dd>{sourcePath && <><dt className="text-muted-foreground">上传路径</dt><dd className="break-all">{sourcePath}</dd></>}<dt className="text-muted-foreground">来源</dt><dd>{sourceLabel[item.source_origin] || "其他来源"}</dd><dt className="text-muted-foreground">移入人员</dt><dd>{item.archived_by_name || "未知人员"}</dd><dt className="text-muted-foreground">移入时间</dt><dd>{formatAdminDate(item.archived_at)}</dd></dl><div className="grid grid-cols-2 gap-2"><Button size="sm" variant="outline" onClick={() => void openAudit(item)}><History className="size-4" />操作记录</Button>{can("trash.restore") && <Button size="sm" variant="outline" disabled={Boolean(busyAction)} onClick={() => openRestore(item)}><ArchiveRestore className="size-4" />恢复</Button>}</div></li>; })}</ul>
+          <div className="hidden overflow-x-auto lg:block"><table className="w-full text-ui-sm"><thead className="border-b border-border bg-surface-muted text-left text-muted-foreground"><tr>{can("trash.restore") && <th className="w-12 px-3 py-3"><Checkbox aria-label="选择当前页前20份回收站资料" checked={trashAllSelected} onChange={toggleAllTrash} /></th>}<th className="px-3 py-3 font-medium">资料</th><th className="px-3 py-3 font-medium">原目录</th><th className="px-3 py-3 font-medium">原状态</th><th className="px-3 py-3 font-medium">来源</th><th className="px-3 py-3 font-medium">保留期限</th><th aria-sort={trashSortDirection === "asc" ? "ascending" : "descending"} className="px-3 py-3 font-medium"><button type="button" className="inline-flex items-center gap-1 rounded px-1 py-0.5 hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => { setTrashSortDirection((current) => current === "asc" ? "desc" : "asc"); setPage(0); }}>移入回收站{trashSortDirection === "asc" ? <ArrowUp className="size-3.5" /> : <ArrowDown className="size-3.5" />}</button></th><th className="px-3 py-3 text-right font-medium">操作</th></tr></thead><tbody className="divide-y divide-border">{trashItems.map((item) => { const previousStatus = item.pre_archive_lifecycle_status || item.lifecycle_status; const sourcePath = item.source_rel_path && item.source_rel_path !== item.original_filename ? item.source_rel_path : null; const checked = trashSelected.includes(item.version_id); return <tr key={item.item_id} className={`align-top transition-colors duration-normal hover:bg-surface-muted/60 ${checked ? "bg-primary/5" : ""}`}>{can("trash.restore") && <td className="px-3 py-3"><Checkbox aria-label={`选择恢复“${item.title}”`} checked={checked} onChange={() => setTrashSelected((current) => current.includes(item.version_id) ? current.filter((id) => id !== item.version_id) : [...current, item.version_id].slice(0, BULK_LIMIT))} /></td>}<td className="max-w-xs px-3 py-3"><p className="break-words font-medium">{item.title}</p><p className="mt-1 break-all text-ui-xs text-muted-foreground">{item.original_filename} · v{item.version_number}</p></td><td className="max-w-sm px-3 py-3"><p className="break-words">{item.category_path || item.category_label}</p>{sourcePath && <p className="mt-1 break-all text-ui-xs text-muted-foreground">上传路径：{sourcePath}</p>}</td><td className="px-3 py-3"><Badge variant={statusVariant(previousStatus)}>{statusLabel[previousStatus] || "未知状态"}</Badge></td><td className="px-3 py-3">{sourceLabel[item.source_origin] || "其他来源"}</td><td className="whitespace-nowrap px-3 py-3 text-ui-xs text-muted-foreground">{retentionText(item)}</td><td className="px-3 py-3"><p>{item.archived_by_name || "未知人员"}</p><p className="mt-1 whitespace-nowrap text-ui-xs text-muted-foreground">{formatAdminDate(item.archived_at)}</p></td><td className="px-3 py-3"><div className="flex justify-end gap-1"><IconButton label={`查看“${item.title}”的回收站记录`} tooltip="查看操作记录" className="border border-border" onClick={() => void openAudit(item)}><History className="size-4" /></IconButton>{can("trash.restore") && <Button size="sm" variant="outline" disabled={Boolean(busyAction)} onClick={() => openRestore(item)}><ArchiveRestore className="size-4" />恢复</Button>}</div></td></tr>; })}</tbody></table></div>
+          <ul className="divide-y divide-border lg:hidden">{trashItems.map((item) => { const previousStatus = item.pre_archive_lifecycle_status || item.lifecycle_status; const sourcePath = item.source_rel_path && item.source_rel_path !== item.original_filename ? item.source_rel_path : null; const checked = trashSelected.includes(item.version_id); return <li key={item.item_id} className={`space-y-3 px-4 py-4 sm:px-5 ${checked ? "bg-primary/5" : ""}`}><div className="flex items-start gap-3">{can("trash.restore") && <Checkbox className="mt-0.5" aria-label={`选择恢复“${item.title}”`} checked={checked} onChange={() => setTrashSelected((current) => current.includes(item.version_id) ? current.filter((id) => id !== item.version_id) : [...current, item.version_id].slice(0, BULK_LIMIT))} />}<div className="min-w-0 flex-1"><p className="break-words font-medium">{item.title}</p><p className="mt-1 break-all text-ui-xs text-muted-foreground">{item.original_filename} · v{item.version_number}</p></div><Badge className="shrink-0" variant={statusVariant(previousStatus)}>{statusLabel[previousStatus] || "未知状态"}</Badge></div><dl className="grid grid-cols-[5rem_minmax(0,1fr)] gap-x-2 gap-y-1 text-ui-sm"><dt className="text-muted-foreground">原目录</dt><dd className="break-words">{item.category_path || item.category_label}</dd>{sourcePath && <><dt className="text-muted-foreground">上传路径</dt><dd className="break-all">{sourcePath}</dd></>}<dt className="text-muted-foreground">来源</dt><dd>{sourceLabel[item.source_origin] || "其他来源"}</dd><dt className="text-muted-foreground">保留期限</dt><dd>{retentionText(item)}</dd><dt className="text-muted-foreground">移入人员</dt><dd>{item.archived_by_name || "未知人员"}</dd><dt className="text-muted-foreground">移入时间</dt><dd>{formatAdminDate(item.archived_at)}</dd></dl><div className="flex items-center justify-end gap-2"><IconButton label={`查看“${item.title}”的回收站记录`} tooltip="查看操作记录" className="border border-border max-sm:size-10" onClick={() => void openAudit(item)}><History className="size-4" /></IconButton>{can("trash.restore") && <Button size="sm" variant="outline" className="max-sm:h-10" disabled={Boolean(busyAction)} onClick={() => openRestore(item)}><ArchiveRestore className="size-4" />恢复</Button>}</div></li>; })}</ul>
         </>}
-        <div className="flex items-center justify-between border-t border-border px-4 py-3 sm:px-5"><p className="text-ui-xs text-muted-foreground">第 {page + 1} / {trashPageCount} 页</p><div className="flex gap-2"><Button size="sm" variant="outline" disabled={page === 0 || trashLoading} onClick={() => setPage((value) => value - 1)}>上一页</Button><Button size="sm" variant="outline" disabled={page + 1 >= trashPageCount || trashLoading} onClick={() => setPage((value) => value + 1)}>下一页</Button></div></div>
+        <div className="flex flex-col gap-2 border-t border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5"><p className="text-ui-xs text-muted-foreground">共 {trashTotal} 份，第 {page + 1} / {trashPageCount} 页</p><div className="flex flex-wrap items-center justify-end gap-2"><Button size="sm" variant="outline" disabled={page === 0 || trashLoading} onClick={() => setPage((value) => value - 1)}>上一页</Button><Select aria-label="跳转回收站页码" className="h-control-sm w-24" value={String(page + 1)} onChange={(event) => setPage(Number(event.target.value) - 1)} disabled={trashLoading}>{Array.from({ length: trashPageCount }, (_, index) => <option key={index + 1} value={index + 1}>第 {index + 1} 页</option>)}</Select><Button size="sm" variant="outline" disabled={page + 1 >= trashPageCount || trashLoading} onClick={() => setPage((value) => value + 1)}>下一页</Button></div></div>
       </Card>
       <Dialog open={Boolean(restoreTarget)} onOpenChange={(open) => { if (!open && !busyAction) { setRestoreTarget(null); setRestoreFolderId(""); setRestoreConflict(null); setRestoreError(null); } }}><DialogContent className="max-w-2xl"><DialogHeader><DialogTitle>恢复资料</DialogTitle><DialogDescription>“{restoreTarget?.title}”将恢复到资料库。已发布或发布失败的资料会恢复为“已确认”，重新发布后才会进入检索。</DialogDescription></DialogHeader><div className="space-y-4"><dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-2 text-ui-sm"><dt className="text-muted-foreground">文件名</dt><dd className="break-all">{restoreTarget?.original_filename}</dd><dt className="text-muted-foreground">原目录</dt><dd className="break-words">{restoreTarget?.category_path || restoreTarget?.category_label}</dd></dl><CategoryTreePicker categories={categories} value={restoreFolderId} currentCategoryId={restoreTarget?.category_id} onChange={(categoryId) => { setRestoreFolderId(categoryId); setRestoreConflict(null); setRestoreError(null); }} label="恢复到目录" />{!categories.some((category) => category.id === restoreTarget?.category_id) && <p className="rounded-ui-md border border-warning/40 bg-warning/10 px-3 py-2 text-ui-sm" role="status">原目录已停用，请选择其他有效目录。</p>}{restoreConflict && <div className="space-y-2 rounded-ui-md border border-warning/50 bg-warning/10 p-3 text-ui-sm" role="alert"><p className="font-medium">所选目录存在同名资料</p><p className="break-words">{restoreConflict.title}（{restoreConflict.original_filename}）</p><p className="text-muted-foreground">可以选择其他目录；确认替换会将上述资料移入回收站。已发布资料会立即停止检索。</p></div>}{restoreError && <p className="rounded-ui-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-ui-sm text-destructive" role="alert">{restoreError}</p>}</div><DialogFooter><Button variant="outline" disabled={Boolean(busyAction)} onClick={() => setRestoreTarget(null)}>取消</Button>{restoreConflict && ((restoreConflict.has_published_head || !["draft", "rejected"].includes(restoreConflict.lifecycle_status)) ? can("item.archive_published") : can("item.archive_draft")) && <Button variant="destructive" disabled={Boolean(busyAction) || !restoreFolderId} onClick={() => void restoreContent(true)}>{busyAction ? "替换中…" : "替换并恢复"}</Button>}<Button disabled={Boolean(busyAction) || !restoreFolderId || Boolean(restoreConflict)} onClick={() => void restoreContent()}>{busyAction ? "恢复中…" : "确认恢复"}</Button></DialogFooter></DialogContent></Dialog>
-      <Dialog open={trashPreflightOpen} onOpenChange={(open) => { if (!open && busyAction !== "bulk-restore") { setTrashPreflightOpen(false); setTrashPreflight([]); } }}><DialogContent className="max-w-2xl"><DialogHeader><DialogTitle>确认批量恢复</DialogTitle><DialogDescription>系统已检查目录、同名冲突、版本和活动任务。只会恢复检查通过的资料。</DialogDescription></DialogHeader><div className="space-y-3"><p className="text-ui-sm">可恢复 <strong>{trashPreflight.filter((entry) => entry.status === "ready").length}</strong> 份，需处理 <strong>{trashPreflight.filter((entry) => entry.status !== "ready").length}</strong> 份。</p><ul className="max-h-72 divide-y divide-border overflow-y-auto border-y border-border">{trashPreflight.map((entry) => { const target = trashItems.find((item) => item.version_id === entry.version_id); return <li key={entry.item_id} className="flex items-start justify-between gap-3 py-2 text-ui-sm"><span className="min-w-0 break-words">{target?.title || "资料"}<span className="mt-0.5 block text-ui-xs text-muted-foreground">{entry.target_category_path || "目标目录不可用"}</span></span><Badge variant={entry.status === "ready" ? "success" : "warning"}>{entry.message}</Badge></li>; })}</ul>{trashPreflight.some((entry) => entry.status === "conflict") && <p className="text-ui-xs text-muted-foreground">同名冲突不会自动替换，请关闭后使用单项“恢复”处理。</p>}</div><DialogFooter><Button variant="outline" disabled={busyAction === "bulk-restore"} onClick={() => setTrashPreflightOpen(false)}>取消</Button><Button disabled={busyAction === "bulk-restore" || !trashPreflight.some((entry) => entry.status === "ready")} onClick={() => void bulkRestoreTrash()}>{busyAction === "bulk-restore" ? "恢复中…" : "恢复检查通过的资料"}</Button></DialogFooter></DialogContent></Dialog>
+      <Dialog open={trashPreflightOpen} onOpenChange={(open) => { if (!open && busyAction !== "bulk-restore" && busyAction !== "restore-preflight") { setTrashPreflightOpen(false); setTrashPreflight([]); setTrashBulkTarget("original"); } }}><DialogContent className="max-w-2xl"><DialogHeader><DialogTitle>{trashPreflight.length > 0 ? "确认批量恢复" : "批量恢复"}</DialogTitle><DialogDescription>{trashPreflight.length > 0 ? "系统已检查目录、同名冲突、版本和活动任务。只会恢复检查通过的资料。" : `已选择 ${trashSelected.length} 份资料。选择恢复位置后，系统会先检查冲突和当前状态。`}</DialogDescription></DialogHeader><div className="space-y-4"><label className="block space-y-1.5 text-ui-sm font-medium"><span>恢复到</span><Select value={trashBulkTarget} onChange={(event) => { setTrashBulkTarget(event.target.value); setTrashPreflight([]); }}><option value="original">各自原目录</option>{categories.map((category) => <option key={category.id} value={category.id}>{category.full_path || `${category.display_code} ${category.display_name}`}</option>)}</Select></label>{trashPreflight.length > 0 && <div className="space-y-3"><p className="text-ui-sm">可恢复 <strong>{trashPreflight.filter((entry) => entry.status === "ready").length}</strong> 份，需处理 <strong>{trashPreflight.filter((entry) => entry.status !== "ready").length}</strong> 份。</p><ul className="max-h-72 divide-y divide-border overflow-y-auto border-y border-border">{trashPreflight.map((entry) => { const target = trashItems.find((item) => item.version_id === entry.version_id); return <li key={entry.item_id} className="flex items-start justify-between gap-3 py-2 text-ui-sm"><span className="min-w-0 break-words">{target?.title || "资料"}<span className="mt-0.5 block text-ui-xs text-muted-foreground">{entry.target_category_path || "目标目录不可用"}</span></span><Badge variant={entry.status === "ready" ? "success" : "warning"}>{entry.message}</Badge></li>; })}</ul>{trashPreflight.some((entry) => entry.status === "conflict") && <p className="text-ui-xs text-muted-foreground">同名冲突不会自动替换，请关闭后使用单项“恢复”处理。</p>}</div>}</div><DialogFooter><Button variant="outline" disabled={busyAction === "bulk-restore" || busyAction === "restore-preflight"} onClick={() => { setTrashPreflightOpen(false); setTrashPreflight([]); setTrashBulkTarget("original"); }}>取消</Button>{trashPreflight.length === 0 ? <Button disabled={busyAction === "restore-preflight"} onClick={() => void preflightBulkRestore()}>{busyAction === "restore-preflight" ? "检查中…" : "检查恢复条件"}</Button> : <Button disabled={busyAction === "bulk-restore" || !trashPreflight.some((entry) => entry.status === "ready")} onClick={() => void bulkRestoreTrash()}>{busyAction === "bulk-restore" ? "恢复中…" : "恢复检查通过的资料"}</Button>}</DialogFooter></DialogContent></Dialog>
       {auditDialog}
     </section>;
   }
