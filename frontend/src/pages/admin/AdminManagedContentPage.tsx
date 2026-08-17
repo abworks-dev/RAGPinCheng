@@ -21,6 +21,7 @@ import { usePdfPreview } from "../../hooks/usePdfPreview";
 import type { BulkManagedContentResult, ContentPermission, FolderRequest, ManagedCategory, ManagedContentItem, ManagedUploadTask, ManagedUploadTaskEntry } from "../../types";
 import type { ManagedUploadProgress } from "../../api/client";
 import { formatAdminDate } from "../../lib/admin-formatters";
+import { AdminDocumentsPage } from "./AdminDocumentsPage";
 import {
   collectDroppedUpload,
   folderSelectionFromFiles,
@@ -34,6 +35,7 @@ const BULK_LIMIT = 20;
 const BULK_DOWNLOAD_TOAST_ID = "managed-content-bulk-download";
 type SortKey = "title" | "updatedAt" | "status" | "source";
 type SortDirection = "asc" | "desc";
+type ManagedContentView = "library" | "trash" | "uploads" | "index";
 
 function formatManagedUpdatedAt(timestamp: number | null | undefined) {
   if (!timestamp) return "—";
@@ -507,9 +509,10 @@ export function AdminManagedContentPage() {
   const [deleteTargets, setDeleteTargets] = useState<ManagedContentItem[]>([]);
   const [deleteAcknowledged, setDeleteAcknowledged] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
-  const [view, setViewState] = useState<"library" | "trash" | "uploads">(() => {
+  const [view, setViewState] = useState<ManagedContentView>(() => {
     if (typeof window === "undefined") return "library";
-    return new URLSearchParams(window.location.search).get("view") === "uploads" ? "uploads" : "library";
+    const requestedView = new URLSearchParams(window.location.search).get("view");
+    return requestedView === "uploads" || requestedView === "index" ? requestedView : "library";
   });
   const [trashItems, setTrashItems] = useState<ManagedContentItem[]>([]);
   const [trashTotal, setTrashTotal] = useState(0);
@@ -546,7 +549,7 @@ export function AdminManagedContentPage() {
   const folderInputRef = useRef<HTMLInputElement>(null);
   const listDragDepthRef = useRef(0);
 
-  const setView = (nextView: "library" | "trash" | "uploads") => {
+  const setView = (nextView: ManagedContentView) => {
     setViewState(nextView);
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
@@ -557,6 +560,7 @@ export function AdminManagedContentPage() {
   };
   useEffect(() => {
     if (view === "uploads" && !can("item.upload")) setView("library");
+    if (view === "index" && !can("index.view")) setView("library");
   }, [view, state.status, permissions]);
 
   useEffect(() => {
@@ -1188,10 +1192,32 @@ export function AdminManagedContentPage() {
     </div>;
   };
 
+  const selectView = (nextView: ManagedContentView) => {
+    setView(nextView);
+    if (nextView === "library" || nextView === "trash") setPage(0);
+    if (nextView !== "library") setSelected([]);
+  };
+  const viewTabs = (can("trash.view") || can("item.upload") || can("index.view")) && (
+    <div className="flex flex-wrap gap-2" role="tablist" aria-label="资料视图">
+      <Button size="sm" variant={view === "library" ? "default" : "outline"} role="tab" aria-selected={view === "library"} onClick={() => selectView("library")}>资料库</Button>
+      {can("trash.view") && <Button size="sm" variant={view === "trash" ? "default" : "outline"} role="tab" aria-selected={view === "trash"} onClick={() => selectView("trash")}>回收站</Button>}
+      {can("item.upload") && <Button size="sm" variant={view === "uploads" ? "default" : "outline"} role="tab" aria-selected={view === "uploads"} onClick={() => selectView("uploads")}><Upload className="size-4" />上传任务</Button>}
+      {can("index.view") && <Button size="sm" variant={view === "index" ? "default" : "outline"} role="tab" aria-selected={view === "index"} onClick={() => selectView("index")}><ListChecks className="size-4" />索引任务</Button>}
+    </div>
+  );
+
+  if (view === "index") {
+    return <section className="space-y-5" aria-labelledby="managed-content-title">
+      <header><p className="text-ui-xs font-medium text-primary">内容管理</p><h1 id="managed-content-title" className="mt-1 text-ui-2xl font-semibold tracking-tight">资料管理</h1><p className="mt-1 text-ui-sm text-muted-foreground">统一管理资料的上传、分类、确认和发布。</p></header>
+      {viewTabs}
+      <AdminDocumentsPage embedded />
+    </section>;
+  }
+
   if (view === "uploads") {
     return <section className="space-y-5" aria-labelledby="managed-content-title">
       <header><p className="text-ui-xs font-medium text-primary">内容管理</p><h1 id="managed-content-title" className="mt-1 text-ui-2xl font-semibold tracking-tight">资料管理</h1><p className="mt-1 text-ui-sm text-muted-foreground">统一管理资料的上传、分类、确认和发布。</p></header>
-      <div className="flex flex-wrap gap-2" role="tablist" aria-label="资料视图"><Button size="sm" variant="outline" role="tab" aria-selected="false" onClick={() => setView("library")}>资料库</Button>{can("trash.view") && <Button size="sm" variant="outline" role="tab" aria-selected="false" onClick={() => { setView("trash"); setPage(0); }}>回收站</Button>}{can("item.upload") && <Button size="sm" role="tab" aria-selected="true"><Upload className="size-4" />上传任务</Button>}</div>
+      {viewTabs}
       <UploadTasksPanel activeUpload={activeUpload} canRetry={(task) => Boolean(lastUploadAttempt?.batchId === task.batch_id)} onRetry={(task) => void retryUploadTask(task)} />
     </section>;
   }
@@ -1200,7 +1226,7 @@ export function AdminManagedContentPage() {
     const trashPageCount = Math.max(1, Math.ceil(trashTotal / PAGE_SIZE));
     return <section className="space-y-5" aria-labelledby="managed-content-title">
       <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"><div><p className="text-ui-xs font-medium text-primary">内容管理</p><h1 id="managed-content-title" className="mt-1 text-ui-2xl font-semibold tracking-tight">回收站</h1><p className="mt-1 text-ui-sm text-muted-foreground">{can("trash.restore") ? "查看和恢复已移出资料库的资料。" : "查看已移出资料库的资料。"}</p></div><Button size="sm" variant="outline" onClick={() => void loadTrash()} disabled={trashLoading}><RefreshCw className={trashLoading ? "size-4 animate-spin" : "size-4"} />刷新</Button></header>
-      <div className="flex flex-wrap gap-2" role="tablist" aria-label="资料视图"><Button size="sm" variant="outline" role="tab" aria-selected="false" onClick={() => { setView("library"); setPage(0); }}>资料库</Button><Button size="sm" role="tab" aria-selected="true">回收站</Button>{can("item.upload") && <Button size="sm" variant="outline" role="tab" aria-selected="false" onClick={() => setView("uploads")}><Upload className="size-4" />上传任务</Button>}</div>
+      {viewTabs}
       {error && <ErrorState title="回收站加载失败" description={error} action={<Button size="sm" variant="outline" onClick={() => void loadTrash()}>重新加载</Button>} />}
       <Card className="overflow-hidden shadow-surface [&_table]:!min-w-[58rem]"><div className="flex flex-col gap-3 border-b border-border px-4 py-4 sm:flex-row sm:items-end sm:justify-between sm:px-5"><label className="max-w-xl flex-1 space-y-1 text-ui-xs text-muted-foreground"><span>搜索回收站</span><span className="relative block"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2" /><Input className="pl-9" value={queryInput} onChange={(event) => setQueryInput(event.target.value)} placeholder="搜索名称、文件名、原目录或上传路径…" /></span></label><p className="text-ui-xs text-muted-foreground">共 {trashTotal} 份</p></div>
         {trashLoading ? <LoadingState className="min-h-48 border-0" label="正在加载回收站…" /> : trashItems.length === 0 ? <EmptyState className="rounded-none border-0" title="回收站为空" description="移至回收站的资料会显示在这里。" /> : <>
@@ -1218,7 +1244,7 @@ export function AdminManagedContentPage() {
       <div><p className="text-ui-xs font-medium text-primary">内容管理</p><h1 id="managed-content-title" className="mt-1 text-ui-2xl font-semibold tracking-tight text-foreground">资料管理</h1><p className="mt-1 text-ui-sm text-muted-foreground">统一管理资料的上传、分类、确认和发布。</p></div>
     </header>
 
-    {(can("trash.view") || can("item.upload")) && <div className="flex flex-wrap gap-2" role="tablist" aria-label="资料视图"><Button size="sm" role="tab" aria-selected="true">资料库</Button>{can("trash.view") && <Button size="sm" variant="outline" role="tab" aria-selected="false" onClick={() => { setView("trash"); setPage(0); setSelected([]); }}>回收站</Button>}{can("item.upload") && <Button size="sm" variant="outline" role="tab" aria-selected="false" onClick={() => setView("uploads")}><Upload className="size-4" />上传任务</Button>}</div>}
+    {viewTabs}
 
     <section className="grid grid-cols-2 gap-3 lg:grid-cols-4" aria-label="资料状态概览">
       {[["全部资料", Object.values(counts).reduce((sum, value) => sum + value, 0)], ["待确认", counts.awaiting_review || 0], ["已确认", counts.approved || 0], ["已发布", counts.published || 0]].map(([label, value]) => <Card key={label} className="overflow-hidden shadow-surface"><CardContent className="relative p-4 pt-4"><span className="absolute inset-x-0 top-0 h-1 bg-primary/80" aria-hidden="true" /><p className="text-ui-xs font-medium text-muted-foreground">{label}</p><p className="mt-2 text-ui-xl font-semibold tabular-nums text-foreground">{value}</p></CardContent></Card>)}

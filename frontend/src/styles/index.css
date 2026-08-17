@@ -67,6 +67,23 @@ html.admin-scrollbar-stable {
     transform-origin: center bottom;
   }
 
+  .resource-preview-sheet--bottom {
+    inset: auto 0 0;
+    width: 100%;
+    height: min(92dvh, 52rem);
+    max-height: calc(100dvh - env(safe-area-inset-top, 0px));
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    border-top: 1px solid rgb(var(--border));
+    border-radius: 8px 8px 0 0;
+  }
+
+  .resource-preview-sheet--bottom > button[aria-label="关闭预览"] {
+    top: 0.375rem;
+    right: max(0.5rem, env(safe-area-inset-right, 0px));
+    width: 2.75rem;
+    height: 2.75rem;
+  }
+
   @keyframes resource-preview-sheet-enter {
     from { opacity: 0; transform: translateY(0.75rem) scale(0.995); }
     to { opacity: 1; transform: translateY(0) scale(1); }
@@ -82,6 +99,12 @@ html.admin-scrollbar-stable {
   .resource-preview-overlay,
   .resource-preview-sheet {
     animation-duration: 0s;
+  }
+}
+
+@media (max-height: 500px) {
+  .video-preview-surface {
+    max-height: 44dvh;
   }
 }
 

@@ -29,7 +29,8 @@ for (const row of rows) {
   }
   const [page, route, , , , , , unit, visual, manual] = columns;
   const routeValue = route.replaceAll("`", "").trim();
-  const appRoute = routeValue.startsWith("/admin/") ? routeValue.replace("/admin/", "") : routeValue;
+  const routePath = routeValue.split(/[?#]/, 1)[0];
+  const appRoute = routePath.startsWith("/admin/") ? routePath.replace("/admin/", "") : routePath;
   if (!appSource.includes(`path="${appRoute}"`)) {
     errors.push(`${page}: 路由未在 App.tsx 找到 ${routeValue}`);
   }

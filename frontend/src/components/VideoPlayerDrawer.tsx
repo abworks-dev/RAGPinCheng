@@ -56,7 +56,13 @@ export function VideoPlayerDrawer() {
   if (!isOpen || !currentRequest) return null;
 
   return (
-    <ResourcePreviewShell open={isOpen} title={currentRequest.title} subtitle={`从 ${formatTime(currentRequest.startSeconds)} 开始播放`} onClose={close}>
+    <ResourcePreviewShell
+      open={isOpen}
+      title={currentRequest.title}
+      subtitle={`从 ${formatTime(currentRequest.startSeconds)} 开始播放`}
+      mobilePresentation="bottom-sheet"
+      onClose={close}
+    >
       <SynchronizedVideoTranscript
         mediaId={currentRequest.mediaId}
         segments={transcript}

@@ -10,7 +10,8 @@ async function openTab(page: Parameters<typeof installAdminRoutes>[0], label: st
     await expect(mobileNavigation).toBeVisible();
     await mobileNavigation.click();
   }
-  await page.getByRole("link", { name: label, exact: true }).click();
+  await page.getByRole("link", { name: label === "索引任务" ? "资料管理" : label, exact: true }).click();
+  if (label === "索引任务") await page.getByRole("tab", { name: "索引任务", exact: true }).click();
 }
 
 async function openRootFolder(page: Parameters<typeof installAdminRoutes>[0], folderId = "cat-company") {

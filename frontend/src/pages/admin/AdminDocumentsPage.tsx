@@ -63,7 +63,7 @@ function sourceOriginLabel(sourceOrigin: string | null): string {
   }[sourceOrigin || ""] || "其他来源";
 }
 
-export function AdminDocumentsPage() {
+export function AdminDocumentsPage({ embedded = false }: { embedded?: boolean }) {
   const { state } = useAuth();
   const canPublish = state.status === "authed"
     && (state.user.role === "admin" || state.user.content_permissions?.includes("item.publish"));
@@ -160,14 +160,16 @@ export function AdminDocumentsPage() {
     }
   };
 
+  const titleId = embedded ? "managed-index-view-title" : "admin-documents-title";
+
   return (
-    <section className="space-y-5" aria-labelledby="admin-documents-title">
+    <section className="space-y-5" aria-labelledby={titleId}>
       <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <p className="text-ui-xs font-medium text-primary">内容管理</p>
-          <h1 id="admin-documents-title" className="mt-1 text-ui-2xl font-semibold tracking-tight text-foreground">
-            索引任务
-          </h1>
+          {!embedded && <p className="text-ui-xs font-medium text-primary">内容管理</p>}
+          {embedded
+            ? <h2 id={titleId} className="text-ui-xl font-semibold tracking-tight text-foreground">索引任务</h2>
+            : <h1 id={titleId} className="mt-1 text-ui-2xl font-semibold tracking-tight text-foreground">索引任务</h1>}
           <p className="mt-1 max-w-3xl text-ui-sm text-muted-foreground">
             跟踪资料版本的发布处理状态，并处理可重试的失败任务。
           </p>
@@ -201,7 +203,9 @@ export function AdminDocumentsPage() {
       <Card className="overflow-hidden shadow-surface" aria-labelledby="managed-index-title">
         <div className="flex flex-col gap-1 px-4 py-4 sm:flex-row sm:items-end sm:justify-between sm:px-5">
           <div>
-            <h2 id="managed-index-title" className="text-ui-base font-semibold text-foreground">资料发布任务</h2>
+            {embedded
+              ? <h3 id="managed-index-title" className="text-ui-base font-semibold text-foreground">资料发布任务</h3>
+              : <h2 id="managed-index-title" className="text-ui-base font-semibold text-foreground">资料发布任务</h2>}
             <p className="mt-1 text-ui-xs text-muted-foreground">
               {history ? "正在显示全部历史尝试。" : "每个资料版本仅显示最新一次发布尝试。"}
             </p>

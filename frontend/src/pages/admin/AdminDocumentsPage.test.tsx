@@ -106,6 +106,14 @@ describe("AdminDocumentsPage", () => {
     expect(screen.getByText("8")).toBeInTheDocument();
   });
 
+  it("uses section headings when embedded in content management", async () => {
+    render(<AdminDocumentsPage embedded />);
+
+    expect(await screen.findByRole("heading", { name: "索引任务", level: 2 })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "资料发布任务", level: 3 })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { level: 1 })).not.toBeInTheDocument();
+  });
+
   it("sends search, database category, file type, source and grouped status filters", async () => {
     render(<AdminDocumentsPage />);
     await screen.findByText(failedJob.title);

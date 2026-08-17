@@ -656,8 +656,24 @@ export async function installAuthRoutes(page: Page) {
   });
 }
 
-export async function installChatRoutes(page: Page, scenario: "normal" | "error" = "normal") {
+export async function installChatRoutes(page: Page, scenario: "normal" | "error" | "video" = "normal") {
   const chatUser = { ...workspaceUsers.member, csrf_token: "synthetic-chat-csrf" };
+  const videoSource = {
+    parent_id: "video-parent",
+    doc_title: "项目交付培训视频：移动端长标题适配验证",
+    section_path: "培训 / 项目交付",
+    category: "教学视频",
+    score: 0.91,
+    rrf_score: 0.88,
+    text: "核对模型命名、交付目录与归档要求。",
+    doc_type: "transcript",
+    start_time: "00:00:12",
+    media_id: "media-ready",
+    sheet_name: null,
+    cell_range: null,
+    slide_number: null,
+    paragraph_anchor: null,
+  };
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
@@ -669,11 +685,26 @@ export async function installChatRoutes(page: Page, scenario: "normal" | "error"
     if (path === "/api/conversations/conversation-chat" && request.method() === "GET") return json(route, { ...conversationState, id: "conversation-chat", title: "合成新对话", user_id: chatUser.id, messages: [] });
     if (path === "/api/conversations/conversation-chat/chat" && request.method() === "POST") {
       if (scenario === "error") return sse(route, `event: error\ndata: ${JSON.stringify({ message: "合成回答失败" })}\n\n`);
+      const sources = scenario === "video" ? [videoSource] : [];
       return sse(route, [
-        `event: prep\ndata: ${JSON.stringify({ search_query: "合成问题", rewrite_applied: false, history_chars: 0, budget: 1000, fresh_count: 1, final_count: 1, used_sources: [], no_source_fallback: false })}\n\n`,
+        `event: prep\ndata: ${JSON.stringify({ search_query: "合成问题", rewrite_applied: false, history_chars: 0, budget: 1000, fresh_count: 1, final_count: 1, used_sources: sources, no_source_fallback: false })}\n\n`,
         `event: token\ndata: ${JSON.stringify({ text: "合成回答" })}\n\n`,
-        `event: done\ndata: ${JSON.stringify({ answer_text: "合成回答", assistant_message_id: 503, timings: {}, sources: [], history_chars: 0, budget: 1000 })}\n\n`,
+        `event: done\ndata: ${JSON.stringify({ answer_text: "合成回答", assistant_message_id: 503, timings: {}, sources, history_chars: 0, budget: 1000 })}\n\n`,
       ].join(""));
+    }
+    if (scenario === "video" && path === "/api/media/media-ready/transcript") {
+      return json(route, {
+        media_id: "media-ready",
+        segments: Array.from({ length: 24 }, (_, index) => ({
+          id: index,
+          start_ms: index * 12_000,
+          end_ms: (index + 1) * 12_000,
+          text: `第 ${index + 1} 段合成转录内容，用于验证移动端滚动区域和底部安全距离。`,
+        })),
+      });
+    }
+    if (scenario === "video" && path === "/api/media/media-ready") {
+      return route.fulfill({ status: 200, contentType: "video/mp4", body: "" });
     }
     if (/^\/api\/conversations\/[^/]+$/.test(path) && request.method() === "DELETE") return route.fulfill({ status: 204 });
     throw new Error(`Chat fixture has no route for ${request.method()} ${path}`);
