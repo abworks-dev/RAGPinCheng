@@ -166,7 +166,8 @@ function Read-AsrReleaseManifest {
         [Parameter(Mandatory = $true)][string]$ProgramRoot,
         [Parameter(Mandatory = $true)][string]$DataRoot,
         [Parameter(Mandatory = $true)][string]$CandidateId,
-        [string]$ExpectedSha256 = ""
+        [string]$ExpectedSha256 = "",
+        [switch]$AllowLegacyWhisperXV1Profiles
     )
     $layout = Get-AsrReleaseLayout -ProgramRoot $ProgramRoot -DataRoot $DataRoot -CandidateId $CandidateId
     Assert-AsrReleasePath -Path $layout.release_root -Root (Join-Path $ProgramRoot "releases") -MustExist | Out-Null
@@ -248,7 +249,19 @@ function Read-AsrReleaseManifest {
         $engineNames += [string]$engine.engine
     }
     $expectedProfiles = Get-AsrReleaseExpectedProfiles -Engines $engineNames
-    if ((@($manifest.expected_profiles) -join "`n") -ne ($expectedProfiles -join "`n")) {
+    $actualProfileIdentity = @($manifest.expected_profiles) -join "`n"
+    $expectedProfileIdentity = $expectedProfiles -join "`n"
+    $legacyWhisperXEngines = @("faster-whisper", "whisperx")
+    $legacyWhisperXV1Profiles = @(
+        "faster-whisper-large-v3-turbo-v1",
+        "funasr-sensevoice-small-v1",
+        "whisperx-large-v3-zh-align-v1"
+    )
+    $legacyWhisperXV1Match =
+        $AllowLegacyWhisperXV1Profiles -and
+        (($engineNames -join "`n") -eq ($legacyWhisperXEngines -join "`n")) -and
+        ($actualProfileIdentity -eq ($legacyWhisperXV1Profiles -join "`n"))
+    if ($actualProfileIdentity -ne $expectedProfileIdentity -and -not $legacyWhisperXV1Match) {
         throw "ASR release expected profiles do not match the admission adapters"
     }
     return [pscustomobject][ordered]@{
