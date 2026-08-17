@@ -282,7 +282,7 @@ describe("AdminManagedContentPage", () => {
     const { rerender } = render(<AdminManagedContentPage />);
     await openRootFolder();
     await screen.findAllByText("建模标准");
-    fireEvent.click(screen.getAllByRole("button", { name: "查看“建模标准”" })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: "预览“建模标准”" })[0]);
     expect(mocks.openPreview).toHaveBeenCalledWith("parent-1", "建模标准", "pdf", 1, {}, null);
     expect(screen.queryByRole("dialog", { name: "建模标准" })).not.toBeInTheDocument();
 
@@ -310,9 +310,10 @@ describe("AdminManagedContentPage", () => {
     render(<AdminManagedContentPage />);
     await openRootFolder();
 
-    const previewButton = screen.getAllByRole("button", { name: "查看“建模标准”（暂无可预览内容）" })[0];
+    const previewButton = screen.getAllByRole("button", { name: "预览“建模标准”" })[0];
     expect(previewButton).toBeDisabled();
-    expect(previewButton).toHaveAttribute("title", "查看“建模标准”（暂无可预览内容）");
+    fireEvent.mouseEnter(previewButton.parentElement!);
+    expect(screen.getByRole("tooltip")).toHaveTextContent("该资料尚未生成可预览文件");
     expect(mocks.openPreview).not.toHaveBeenCalled();
   });
 
@@ -588,8 +589,45 @@ describe("AdminManagedContentPage", () => {
     const { unmount } = render(<AdminManagedContentPage />);
     await openRootFolder();
     await waitFor(() => expect(screen.getAllByRole("button", { name: /删除“建模标准”/ })[0]).toBeDisabled());
-    expect(screen.getAllByRole("button", { name: /删除“建模标准”/ })[0]).toHaveAttribute("title", expect.stringContaining("当前状态或权限不允许"));
+    const disabledDelete = screen.getAllByRole("button", { name: /删除“建模标准”/ })[0];
+    fireEvent.mouseEnter(disabledDelete.parentElement!);
+    expect(screen.getByRole("tooltip")).toHaveTextContent("资料正在发布，暂不能移入回收站");
     unmount();
+  });
+
+  it("explains row actions on hover and gives specific reasons for disabled actions", async () => {
+    mocks.items.mockResolvedValue({
+      items: [{ ...item, lifecycle_status: "published", has_published_head: true }],
+      total: 1,
+      status_counts: { published: 1 },
+    });
+    const firstRender = render(<AdminManagedContentPage />);
+    await openRootFolder();
+
+    const details = screen.getAllByRole("button", { name: /查看“建模标准”的详细信息/ })[0];
+    fireEvent.mouseEnter(details.parentElement!);
+    expect(screen.getByRole("tooltip")).toHaveTextContent("查看资料详情");
+    fireEvent.mouseLeave(details.parentElement!);
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+
+    const disabledMove = screen.getAllByRole("button", { name: /移动“建模标准”/ })[0];
+    expect(disabledMove).toBeDisabled();
+    fireEvent.mouseEnter(disabledMove.parentElement!);
+    expect(screen.getByRole("tooltip")).toHaveTextContent("已有发布版本的资料不能移动");
+    fireEvent.click(disabledMove);
+    expect(screen.queryByRole("dialog", { name: /移动/ })).not.toBeInTheDocument();
+    firstRender.unmount();
+
+    mocks.permissions = [];
+    mocks.items.mockResolvedValue({ items: [item], total: 1, status_counts: { awaiting_review: 1 } });
+    render(<AdminManagedContentPage />);
+    await openRootFolder();
+    const permissionBlockedMove = screen.getAllByRole("button", { name: /移动“建模标准”/ })[0];
+    expect(permissionBlockedMove.parentElement).toHaveAttribute("aria-label", "移动“建模标准”：当前账号没有移动待确认资料的权限");
+    fireEvent.focus(permissionBlockedMove.parentElement!);
+    expect(screen.getByRole("tooltip")).toHaveTextContent("当前账号没有移动待确认资料的权限");
+    fireEvent.blur(permissionBlockedMove.parentElement!);
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
   });
 
   it("keeps the delete dialog open with a recoverable conflict message", async () => {
@@ -994,11 +1032,11 @@ describe("AdminManagedContentPage", () => {
     render(<AdminManagedContentPage />);
     await openRootFolder();
 
-    for (const actionName of ["查看“建模标准”的详细信息", "查看“建模标准”", "移动“建模标准”", "下载“建模标准”", "重命名“建模标准”", "更新“建模标准”", "删除“建模标准”"]) {
+    for (const actionName of ["查看“建模标准”的详细信息", "预览“建模标准”", "移动“建模标准”", "下载“建模标准”", "重命名“建模标准”", "更新“建模标准”", "删除“建模标准”"]) {
       expect(screen.getAllByRole("button", { name: actionName }).length).toBeGreaterThan(0);
     }
     const detailsButton = screen.getAllByRole("button", { name: "查看“建模标准”的详细信息" })[0];
-    expect(detailsButton.parentElement).toHaveClass("ml-auto", "justify-end");
+    expect(detailsButton.parentElement?.parentElement).toHaveClass("ml-auto", "justify-end");
     fireEvent.click(detailsButton);
     const dialog = screen.getByRole("dialog", { name: "建模标准" });
     expect(within(dialog).queryByRole("button", { name: /下载/ })).not.toBeInTheDocument();

@@ -90,8 +90,8 @@ describe("FeedbackBar", () => {
     const copy = screen.getByRole("button", { name: "复制回答" });
     const regenerateButton = screen.getByRole("button", { name: "重新生成回答" });
     const versions = screen.getByLabelText("回答版本");
-    expect(versions.nextElementSibling).toBe(regenerateButton);
-    expect(regenerateButton.nextElementSibling).toBe(copy);
+    expect(versions.nextElementSibling).toBe(regenerateButton.parentElement);
+    expect(regenerateButton.parentElement?.nextElementSibling).toBe(copy.parentElement);
 
     fireEvent.click(regenerateButton);
     expect(regenerate).toHaveBeenCalledWith(message.id);
