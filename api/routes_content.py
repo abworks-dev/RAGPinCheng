@@ -618,6 +618,7 @@ async def upload_managed_documents(
                 "invalid_folder_name": "文件夹名称不符合规则",
                 "category_depth_exceeded": "资料目录最多支持四级",
                 "content_filename_conflict": "当前目录下已存在同名资料",
+                "content_too_large": "文件超过上传大小上限",
             }.get(str(exc), str(exc))
             entries.append(ManagedUploadEntryDTO(filename=filename, status="skipped", reason=reason))
             record_upload_batch_entry(
