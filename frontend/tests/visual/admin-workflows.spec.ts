@@ -430,7 +430,7 @@ test.describe("资料管理", () => {
     await openRootFolder(page);
     const title = page.getByText("建筑信息模型交付标准（合成长文件名用于响应式检查）", { exact: true }).filter({ visible: true });
     const item = page.viewportSize()!.width < 1024 ? title.locator("xpath=ancestor::li") : title.locator("xpath=ancestor::tr");
-    const preview = item.getByRole("button", { name: `查看“建筑信息模型交付标准（合成长文件名用于响应式检查）”`, exact: true });
+    const preview = item.getByRole("button", { name: `预览“建筑信息模型交付标准（合成长文件名用于响应式检查）”`, exact: true });
     await preview.click();
     await expect(page.getByRole("button", { name: "关闭预览" })).toBeVisible();
     await expect(page.getByRole("button", { name: "返回资料详情" })).toHaveCount(0);

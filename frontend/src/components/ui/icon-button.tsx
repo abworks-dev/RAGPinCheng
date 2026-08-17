@@ -12,13 +12,14 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(
   ({ label, tooltip = label, children, className, type = "button", disabled, onFocus, onBlur, ...props }, ref) => {
     const tooltipId = useId();
     const anchorRef = useRef<HTMLSpanElement>(null);
+    const buttonRef = useRef<HTMLButtonElement | null>(null);
     const [open, setOpen] = useState(false);
     const [position, setPosition] = useState({ left: 0, top: 0, below: false });
 
     useLayoutEffect(() => {
-      if (!open || !anchorRef.current) return;
+      if (!open || !buttonRef.current) return;
       const updatePosition = () => {
-        const rect = anchorRef.current!.getBoundingClientRect();
+        const rect = buttonRef.current!.getBoundingClientRect();
         const tooltipWidth = Math.min(288, window.innerWidth - 16);
         const left = Math.min(Math.max(8, rect.right - tooltipWidth), window.innerWidth - tooltipWidth - 8);
         const below = rect.top < 56;
@@ -36,11 +37,16 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(
     const handleBlur = (event: FocusEvent<HTMLSpanElement>) => {
       if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false);
     };
+    const setButtonRef = (node: HTMLButtonElement | null) => {
+      buttonRef.current = node;
+      if (typeof ref === "function") ref(node);
+      else if (ref) (ref as { current: HTMLButtonElement | null }).current = node;
+    };
 
     return <>
       <span
         ref={anchorRef}
-        className="relative inline-flex shrink-0"
+        className={disabled ? "relative inline-flex shrink-0" : "contents"}
         tabIndex={disabled ? 0 : undefined}
         aria-label={disabled ? `${label}：${tooltip}` : undefined}
         aria-describedby={disabled ? tooltipId : undefined}
@@ -50,7 +56,7 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(
         onBlurCapture={handleBlur}
       >
         <button
-          ref={ref}
+          ref={setButtonRef}
           type={type}
           aria-label={label}
           aria-describedby={!disabled ? tooltipId : undefined}
