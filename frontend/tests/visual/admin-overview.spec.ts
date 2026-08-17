@@ -9,6 +9,9 @@ test.describe("管理员概览", () => {
     await expect(page.getByRole("heading", { name: "系统概览" })).toBeVisible();
     await expect(page.getByText("用户总数")).toBeVisible();
     await expect(page.getByRole("heading", { name: "生产运行状态" })).toBeVisible();
+    await expect(page.getByText("Office 新资料处理")).toBeVisible();
+    await expect(page.getByText("已停用")).toBeVisible();
+    await expect(page.getByText(/既有资料仍可检索和预览/)).toBeVisible();
     await expect(page.getByText("当前策略").locator("xpath=..")).toContainText("保留 30 天");
     await expect(page.getByRole("button", { name: /查看系统维护/ })).toBeVisible();
     await expectNoBodyOverflow(page);

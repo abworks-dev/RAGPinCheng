@@ -73,7 +73,7 @@
 - 目标：补全已部署 Office 能力的生产说明、可观测性和回滚约定。
 - 下一步：
   - [ ] 记录镜像体积与 CPU、内存、磁盘资源影响。
-  - [ ] 评估是否需要独立 Office 功能开关和分阶段灰度策略。
+  - [ ] 基于已实现的部署级 Office 功能开关设计分阶段生产灰度策略。
 - 完成标准：新环境可以按文档部署并检查 Office 链路；故障时能停用新解析且不影响 PDF、Markdown 和转录稿。
 - 依赖：Python/前端依赖、LibreOffice 独立容器、Compose 和 `LIBREOFFICE_URL` 已落地。
 - 方案链接：`docs/plans/office-document-support-plan.md`

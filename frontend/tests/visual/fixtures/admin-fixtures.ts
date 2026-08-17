@@ -408,6 +408,11 @@ export async function installAdminRoutes(
           stale: false,
           error_code: null,
         },
+        office_processing: {
+          enabled: false,
+          mode: "deployment_config",
+          disabled_reason: "office_processing_disabled",
+        },
       });
     }
     if (request.method() === "GET" && path === "/api/admin/maintenance") {

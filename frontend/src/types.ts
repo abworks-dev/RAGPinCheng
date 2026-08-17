@@ -261,6 +261,11 @@ export type SystemOverview = {
   checked_at: number;
   app: AppSystemMetrics;
   gpu: GpuSystemMetrics;
+  office_processing: {
+    enabled: boolean;
+    mode: "deployment_config";
+    disabled_reason: "office_processing_disabled" | null;
+  };
 };
 
 export type MaintenanceSettings = {
@@ -444,6 +449,7 @@ export type ManagedUploadResponse = {
     sha256: string | null;
     status: "accepted" | "skipped";
     reason: string | null;
+    reason_code: string | null;
   }[];
 };
 

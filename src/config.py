@@ -26,6 +26,10 @@ CONTENT_MANAGEMENT_ENABLED = os.getenv("CONTENT_MANAGEMENT_ENABLED", "").strip()
     "yes",
     "on",
 )
+OFFICE_PROCESSING_ENABLED = os.getenv("OFFICE_PROCESSING_ENABLED", "true").strip().lower() in (
+    "1", "true", "yes", "on",
+)
+OFFICE_DOC_TYPES = frozenset({"docx", "xlsx", "pptx"})
 CONTENT_HEAD_ENFORCEMENT = os.getenv("CONTENT_HEAD_ENFORCEMENT", "compat").strip().lower()
 if CONTENT_HEAD_ENFORCEMENT not in {"compat", "strict"}:
     raise ValueError("CONTENT_HEAD_ENFORCEMENT must be 'compat' or 'strict'")

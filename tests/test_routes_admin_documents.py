@@ -97,6 +97,52 @@ def test_legacy_office_upload_limit_removes_partial_file_and_job(monkeypatch, tm
     conn.close()
 
 
+def test_legacy_office_upload_is_skipped_before_writing_when_disabled(monkeypatch, tmp_path):
+    conn = _connection()
+    monkeypatch.setattr(routes_admin, "CONTENT_MANAGEMENT_ENABLED", False)
+    monkeypatch.setattr(routes_admin, "OFFICE_PROCESSING_ENABLED", False)
+    monkeypatch.setattr(routes_admin, "DOCS_DIR", tmp_path)
+    upload = UploadFile(filename="disabled.docx", file=io.BytesIO(b"not-read"))
+
+    result = asyncio.run(
+        routes_admin.upload_documents([upload], "公司标准", "", SimpleNamespace(id=1), conn)
+    )
+
+    assert result.accepted == []
+    assert result.skipped == [{
+        "filename": "disabled.docx",
+        "reason": "Office 处理当前已停用",
+        "reason_code": "office_processing_disabled",
+    }]
+    assert not (tmp_path / "公司标准" / "disabled.docx").exists()
+    assert conn.execute("SELECT count(*) FROM index_jobs").fetchone()[0] == 0
+    conn.close()
+
+
+def test_legacy_office_retry_returns_stable_conflict_when_disabled(monkeypatch, tmp_path):
+    conn = _connection()
+    source = tmp_path / "existing.docx"
+    source.write_bytes(b"office")
+    conn.execute(
+        """INSERT INTO index_jobs(
+            id,user_id,filename,category,doc_type,source_path,file_size,status,created_at
+        ) VALUES (1,1,'existing.docx','公司标准','docx',?,6,'failed',1)""",
+        (str(source),),
+    )
+    monkeypatch.setattr(routes_admin, "OFFICE_PROCESSING_ENABLED", False)
+
+    with pytest.raises(HTTPException) as exc:
+        routes_admin.retry_index_job(1, object(), conn)
+
+    assert exc.value.status_code == 409
+    assert exc.value.detail == {
+        "code": "office_processing_disabled",
+        "message": "Office 处理当前已停用",
+    }
+    assert conn.execute("SELECT status FROM index_jobs WHERE id=1").fetchone()[0] == "failed"
+    conn.close()
+
+
 def test_document_listing_merges_latest_job_and_hides_raw_failure(monkeypatch):
     conn = _connection()
     conn.executemany(

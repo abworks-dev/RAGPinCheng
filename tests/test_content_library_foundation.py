@@ -520,6 +520,33 @@ def test_server_batch_dry_run_maps_numbered_directory_without_writes(tmp_path):
     conn.close()
 
 
+def test_server_batch_skips_office_when_processing_is_disabled(tmp_path, monkeypatch):
+    from api import content_import
+
+    conn = _db(tmp_path)
+    batch_root = tmp_path / "office-disabled"
+    source_dir = batch_root / "03_公司内部标准"
+    source_dir.mkdir(parents=True)
+    (source_dir / "guide.docx").write_bytes(b"not-read")
+    monkeypatch.setattr(content_import, "OFFICE_PROCESSING_ENABLED", False)
+
+    batch_id, entries = content_import.import_server_batch(
+        conn,
+        ContentStorage(tmp_path / "content"),
+        batch_root,
+        actor_user_id=1,
+        max_bytes=1024,
+        apply=False,
+    )
+
+    assert batch_id is None
+    assert entries[0].status == "skipped"
+    assert entries[0].reason == "office_processing_disabled"
+    assert entries[0].category_id == "cat-03"
+    assert conn.execute("SELECT count(*) FROM content_items").fetchone()[0] == 0
+    conn.close()
+
+
 def test_unknown_server_folder_routes_to_pending_confirmation(tmp_path):
     conn = _db(tmp_path)
     category_id, needs_mapping = resolve_import_category(conn, ("未知目录",))

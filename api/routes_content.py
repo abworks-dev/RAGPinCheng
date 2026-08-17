@@ -15,7 +15,12 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
 
-from src.config import CONTENT_MANAGEMENT_ENABLED, CONTENT_ROOT
+from src.config import (
+    CONTENT_MANAGEMENT_ENABLED,
+    CONTENT_ROOT,
+    OFFICE_DOC_TYPES,
+    OFFICE_PROCESSING_ENABLED,
+)
 from src.indexing_pipeline import (
     ManagedVersionIndexSummary,
     list_managed_version_index_summaries,
@@ -613,6 +618,19 @@ async def upload_managed_documents(
                 relative_path=relative_path, size_bytes=size_bytes, status="skipped", reason=reason,
             )
             continue
+        if doc_type in OFFICE_DOC_TYPES and not OFFICE_PROCESSING_ENABLED:
+            reason = "Office 处理当前已停用"
+            entries.append(ManagedUploadEntryDTO(
+                filename=filename,
+                status="skipped",
+                reason=reason,
+                reason_code="office_processing_disabled",
+            ))
+            record_upload_batch_entry(
+                conn, batch_id=batch_id, sequence=index + 1, filename=filename,
+                relative_path=relative_path, size_bytes=size_bytes, status="skipped", reason=reason,
+            )
+            continue
         try:
             if relative_path and not can_create_folders:
                 _resolve_upload_category(
@@ -1007,6 +1025,11 @@ async def update_managed_content_item(
     doc_type = _DOC_TYPES.get(suffix)
     if doc_type is None:
         raise HTTPException(status_code=400, detail="不支持的文件格式")
+    if doc_type in OFFICE_DOC_TYPES and not OFFICE_PROCESSING_ENABLED:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "office_processing_disabled", "message": "Office 处理当前已停用"},
+        )
     if filename_mode == "old":
         old_path = Path(str(current["original_filename"]))
         final_filename = (
@@ -1220,6 +1243,12 @@ def publish_content_version(
     conn: sqlite3.Connection = Depends(get_db),
 ) -> ManagedPublicationDTO:
     _require_feature()
+    version = conn.execute("SELECT doc_type FROM content_versions WHERE id=?", (version_id,)).fetchone()
+    if version is not None and version["doc_type"] in OFFICE_DOC_TYPES and not OFFICE_PROCESSING_ENABLED:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "office_processing_disabled", "message": "Office 处理当前已停用"},
+        )
     try:
         publication_id, index_job_id = create_publication_job(
             conn, version_id, actor_user_id=user.id
@@ -1383,6 +1412,14 @@ def bulk_publish_content_versions(
     _require_feature()
     results: list[BulkManagedContentResultDTO] = []
     for version_id in _validate_bulk_version_ids(body.version_ids):
+        version = conn.execute("SELECT doc_type FROM content_versions WHERE id=?", (version_id,)).fetchone()
+        if version is not None and version["doc_type"] in OFFICE_DOC_TYPES and not OFFICE_PROCESSING_ENABLED:
+            results.append(BulkManagedContentResultDTO(
+                version_id=version_id,
+                status="failed",
+                message="Office 处理当前已停用",
+            ))
+            continue
         try:
             _publication_id, index_job_id = create_publication_job(
                 conn, version_id, actor_user_id=user.id

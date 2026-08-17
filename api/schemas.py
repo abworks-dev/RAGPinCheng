@@ -135,11 +135,18 @@ class GpuSystemMetricsDTO(BaseModel):
     error_code: str | None = None
 
 
+class OfficeProcessingStatusDTO(BaseModel):
+    enabled: bool
+    mode: Literal["deployment_config"] = "deployment_config"
+    disabled_reason: Literal["office_processing_disabled"] | None = None
+
+
 class SystemOverviewResponse(BaseModel):
     topology: Literal["shared", "separate", "unknown"]
     checked_at: int
     app: AppSystemMetricsDTO
     gpu: GpuSystemMetricsDTO
+    office_processing: OfficeProcessingStatusDTO
 
 
 class AdminConversationSummaryDTO(BaseModel):
@@ -405,6 +412,7 @@ class ManagedUploadEntryDTO(BaseModel):
     sha256: str | None = None
     status: Literal["accepted", "skipped"]
     reason: str | None = None
+    reason_code: str | None = None
 
 
 class ManagedUploadResponse(BaseModel):
