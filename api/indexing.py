@@ -40,17 +40,24 @@ class ManagedContentPublicationJob:
 
 
 @dataclass(frozen=True, slots=True)
+class ContentReclassificationJob:
+    job_id: str
+
+
+@dataclass(frozen=True, slots=True)
 class StopIndexWorker:
     pass
 
 
-IndexWorkItem: TypeAlias = DocumentIndexJob | TranscriptPublicationJob | ManagedContentPublicationJob | StopIndexWorker
+IndexWorkItem: TypeAlias = DocumentIndexJob | TranscriptPublicationJob | ManagedContentPublicationJob | ContentReclassificationJob | StopIndexWorker
 _queue: asyncio.Queue[IndexWorkItem] = asyncio.Queue()
 _worker_task: asyncio.Task | None = None
 _publication_runner: Callable[[str], None] | None = None
 _content_publication_runner: Callable[[str], None] | None = None
+_content_reclassification_runner: Callable[[str], None] | None = None
 _publication_queue_ids: set[str] = set()
 _content_publication_queue_ids: set[str] = set()
+_content_reclassification_queue_ids: set[str] = set()
 _stopping = False
 
 
@@ -62,6 +69,11 @@ def configure_publication_runner(runner: Callable[[str], None] | None) -> None:
 def configure_content_publication_runner(runner: Callable[[str], None] | None) -> None:
     global _content_publication_runner
     _content_publication_runner = runner
+
+
+def configure_content_reclassification_runner(runner: Callable[[str], None] | None) -> None:
+    global _content_reclassification_runner
+    _content_reclassification_runner = runner
 
 
 # ── job row helpers ────────────────────────────────────────────────────────
@@ -128,6 +140,14 @@ def enqueue_content_publication(index_job_id: str) -> bool:
         return False
     _content_publication_queue_ids.add(index_job_id)
     _queue.put_nowait(ManagedContentPublicationJob(index_job_id))
+    return True
+
+
+def enqueue_content_reclassification(job_id: str) -> bool:
+    if job_id in _content_reclassification_queue_ids:
+        return False
+    _content_reclassification_queue_ids.add(job_id)
+    _queue.put_nowait(ContentReclassificationJob(job_id))
     return True
 
 
@@ -279,6 +299,12 @@ async def _worker_loop() -> None:
                 else:
                     loop = asyncio.get_running_loop()
                     await loop.run_in_executor(None, lambda: _content_publication_runner(item.index_job_id))
+            elif isinstance(item, ContentReclassificationJob):
+                if _content_reclassification_runner is None:
+                    logger.error("content reclassification runner is not configured; job %s remains pending", item.job_id)
+                else:
+                    loop = asyncio.get_running_loop()
+                    await loop.run_in_executor(None, lambda: _content_reclassification_runner(item.job_id))
             elif _publication_runner is None:
                 logger.error("publication runner is not configured; job %s remains pending", item.index_job_id)
             else:
@@ -291,6 +317,8 @@ async def _worker_loop() -> None:
                 _publication_queue_ids.discard(item.index_job_id)
             elif isinstance(item, ManagedContentPublicationJob):
                 _content_publication_queue_ids.discard(item.index_job_id)
+            elif isinstance(item, ContentReclassificationJob):
+                _content_reclassification_queue_ids.discard(item.job_id)
             _queue.task_done()
         if _stopping:
             return

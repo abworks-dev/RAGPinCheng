@@ -24,12 +24,18 @@ from .auth import bootstrap_admin_from_env
 from .maintenance import run_cleanup
 from .db import init_db
 from .indexing import (
+    configure_content_reclassification_runner,
     configure_content_publication_runner,
     configure_publication_runner,
     enqueue_content_publication,
+    enqueue_content_reclassification,
     resume_pending_on_boot,
     start_worker,
     stop_worker,
+)
+from .content_reclassification import (
+    recover_reclassifications_on_boot,
+    run_content_reclassification,
 )
 from .content_publication import (
     recover_content_publications_on_boot,
@@ -140,11 +146,15 @@ async def lifespan(app: FastAPI):
     configure_content_publication_runner(
         run_content_publication if CONTENT_MANAGEMENT_ENABLED else None
     )
+    configure_content_reclassification_runner(
+        run_content_reclassification if CONTENT_MANAGEMENT_ENABLED else None
+    )
     await start_worker()
     resume_pending_on_boot()
     recover_publications_on_boot()
     if CONTENT_MANAGEMENT_ENABLED:
         recover_content_publications_on_boot(enqueue_content_publication)
+        recover_reclassifications_on_boot(enqueue_content_reclassification)
     configure_transcription_worker(build_transcription_service)
     transcription_runtime_ready = ASR_ENABLED and bool(ASR_SERVICE_TOKEN)
     if transcription_runtime_ready:
@@ -166,6 +176,7 @@ async def lifespan(app: FastAPI):
         await stop_worker()
         configure_publication_runner(None)
         configure_content_publication_runner(None)
+        configure_content_reclassification_runner(None)
 
 
 app = FastAPI(title="PinCheng RAG API", version="0.2.0", lifespan=lifespan)

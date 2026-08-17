@@ -135,6 +135,7 @@ export type ContentPermission =
   | "item.review"
   | "item.move_review"
   | "item.publish"
+  | "item.reclassify_published"
   | "item.archive_published"
   | "trash.view"
   | "trash.restore"
@@ -365,6 +366,25 @@ export type ManagedContentItem = {
   media_duration_ms?: number | null;
   media_file_size?: number | null;
   has_pending_revision: boolean;
+  reclassification_job_id: string | null;
+  reclassification_status: string | null;
+};
+
+export type ContentReclassificationJob = {
+  id: string;
+  item_id: string;
+  expected_version_id: string;
+  source_category_id: string;
+  target_category_id: string;
+  status: "pending" | "applying" | "committing" | "rolling_back" | "succeeded" | "failed";
+  qdrant_point_count: number;
+  parent_count: number;
+  error_code: string | null;
+  error_summary: string | null;
+  created_at: number;
+  started_at: number | null;
+  finished_at: number | null;
+  updated_at: number;
 };
 
 export type PublicationFailure = {

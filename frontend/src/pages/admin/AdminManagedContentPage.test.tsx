@@ -14,6 +14,9 @@ const mocks = vi.hoisted(() => ({
   indexJobs: vi.fn(),
   createCategory: vi.fn(),
   moveContent: vi.fn(),
+  reclassifyContent: vi.fn(),
+  reclassificationJob: vi.fn(),
+  retryReclassification: vi.fn(),
   renameContent: vi.fn(),
   updateVersion: vi.fn(),
   folderRequests: vi.fn(),
@@ -25,6 +28,7 @@ const mocks = vi.hoisted(() => ({
   bulkReview: vi.fn(),
   bulkPublish: vi.fn(),
   bulkMove: vi.fn(),
+  bulkReclassify: vi.fn(),
   bulkArchive: vi.fn(),
   bulkDownload: vi.fn(),
   downloadFile: vi.fn(),
@@ -42,7 +46,7 @@ const mocks = vi.hoisted(() => ({
 
 const REVIEWER_PERMISSIONS = ["item.review", "item.move_review", "folder.review", "trash.view", "trash.restore", "item.download"];
 const ORGANIZER_PERMISSIONS = ["item.upload", "item.submit", "item.move_draft", "item.archive_draft", "folder.request", "item.download"];
-const PUBLISHER_PERMISSIONS = ["item.publish", "item.archive_published", "trash.view", "index.view", "item.download"];
+const PUBLISHER_PERMISSIONS = ["item.publish", "item.reclassify_published", "item.archive_published", "trash.view", "index.view", "item.download"];
 const CATEGORY_MANAGER_PERMISSIONS = ["category.manage", "folder.review"];
 
 vi.mock("../../components/PdfPreview", () => ({ PdfPreview: () => null }));
@@ -82,6 +86,9 @@ vi.mock("../../api/client", () => ({
     managedContentIndexJobs: mocks.indexJobs,
     createManagedCategory: mocks.createCategory,
     moveManagedContent: mocks.moveContent,
+    reclassifyManagedContent: mocks.reclassifyContent,
+    managedContentReclassificationJob: mocks.reclassificationJob,
+    retryManagedContentReclassification: mocks.retryReclassification,
     renameManagedContent: mocks.renameContent,
     updateManagedContentVersion: mocks.updateVersion,
     managedFolderRequests: mocks.folderRequests,
@@ -93,6 +100,7 @@ vi.mock("../../api/client", () => ({
     bulkReviewManagedContent: mocks.bulkReview,
     bulkPublishManagedContent: mocks.bulkPublish,
     bulkMoveManagedContent: mocks.bulkMove,
+    bulkReclassifyManagedContent: mocks.bulkReclassify,
     bulkArchiveManagedContent: mocks.bulkArchive,
     bulkDownloadManagedContent: mocks.bulkDownload,
     downloadManagedContentFile: mocks.downloadFile,
@@ -177,6 +185,8 @@ const item = {
   media_duration_ms: null,
   media_file_size: null,
   has_pending_revision: false,
+  reclassification_job_id: null,
+  reclassification_status: null,
   created_at: 1,
   updated_at: 1,
 };
@@ -226,6 +236,8 @@ describe("AdminManagedContentPage", () => {
     mocks.uploadTasks.mockResolvedValue({ tasks: [], total: 0, status_counts: {} });
     mocks.uploadTask.mockResolvedValue({});
     mocks.indexJobs.mockResolvedValue({ jobs: [], total: 0, status_counts: {} });
+    mocks.reclassifyContent.mockResolvedValue({ id: "reclass-1", status: "pending" });
+    mocks.bulkReclassify.mockResolvedValue({ results: [], succeeded: 2, failed: 0 });
     window.history.replaceState({}, "", "/admin/content");
     mocks.bulkDownload.mockResolvedValue({ blob: new Blob(["zip"]), filename: "资料批量下载.zip" });
     mocks.downloadFile.mockResolvedValue({ blob: new Blob(["file"]), filename: "standard.pdf" });
@@ -711,12 +723,12 @@ describe("AdminManagedContentPage", () => {
     fireEvent.mouseLeave(details.parentElement!);
     expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
 
-    const disabledMove = screen.getAllByRole("button", { name: /移动“建模标准”/ })[0];
+    const disabledMove = screen.getAllByRole("button", { name: /调整“建模标准”的分类/ })[0];
     expect(disabledMove).toBeDisabled();
     fireEvent.mouseEnter(disabledMove.parentElement!);
-    expect(screen.getByRole("tooltip")).toHaveTextContent("已有发布版本的资料不能移动");
+    expect(screen.getByRole("tooltip")).toHaveTextContent("存在待处理的新版本，暂时不能调整正式分类");
     fireEvent.click(disabledMove);
-    expect(screen.queryByRole("dialog", { name: /移动/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: /调整分类/ })).not.toBeInTheDocument();
     firstRender.unmount();
 
     mocks.permissions = [];
@@ -1071,6 +1083,52 @@ describe("AdminManagedContentPage", () => {
     expect(mocks.error).not.toHaveBeenCalled();
   });
 
+  it("queues a published document classification adjustment", async () => {
+    mocks.permissions = PUBLISHER_PERMISSIONS;
+    mocks.categories.mockResolvedValue([category, projectCategory]);
+    const publishedItem = {
+      ...item,
+      lifecycle_status: "published",
+      is_current: true,
+      has_published_head: true,
+    };
+    mocks.items.mockResolvedValue({ items: [publishedItem], total: 1, status_counts: { published: 1 } });
+    render(<AdminManagedContentPage />);
+    await openRootFolder();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "调整“建模标准”的分类" })[0]);
+    const dialog = screen.getByRole("dialog", { name: "调整分类" });
+    expect(within(dialog).getByText(/同步完成前资料仍保留在原目录/)).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByTestId("category-picker-item-cat-04"));
+    fireEvent.click(within(dialog).getByRole("button", { name: "提交分类调整" }));
+
+    await waitFor(() => expect(mocks.reclassifyContent).toHaveBeenCalledWith(
+      "item-1", "cat-04", "version-1",
+    ));
+    expect(mocks.success).toHaveBeenCalledWith("分类调整任务已提交");
+  });
+
+  it("shows classification progress and disables another adjustment", async () => {
+    mocks.permissions = PUBLISHER_PERMISSIONS;
+    mocks.items.mockResolvedValue({
+      items: [{
+        ...item,
+        lifecycle_status: "published",
+        is_current: true,
+        has_published_head: true,
+        reclassification_job_id: "reclass-1",
+        reclassification_status: "applying",
+      }],
+      total: 1,
+      status_counts: { published: 1 },
+    });
+    render(<AdminManagedContentPage />);
+    await openRootFolder();
+
+    expect((await screen.findAllByText("分类调整中")).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("button", { name: "调整“建模标准”的分类" })[0]).toBeDisabled();
+  });
+
   it("uses the same directory picker for batch moves", async () => {
     mocks.categories.mockResolvedValue([category, childCategory, projectCategory]);
     const secondItem = { ...item, item_id: "item-2", title: "建模标准2", version_id: "version-2" };
@@ -1081,7 +1139,7 @@ describe("AdminManagedContentPage", () => {
     fireEvent.click(screen.getAllByRole("checkbox", { name: "选择建模标准" })[0]);
     fireEvent.click(screen.getAllByRole("checkbox", { name: "选择建模标准2" })[0]);
     fireEvent.click(screen.getByRole("button", { name: "批量操作" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "批量移动" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "批量移动资料" }));
 
     const dialog = screen.getByRole("dialog", { name: "批量移动资料" });
     fireEvent.click(within(dialog).getByRole("button", { name: "展开公司内部标准" }));
@@ -1104,7 +1162,7 @@ describe("AdminManagedContentPage", () => {
     render(<AdminManagedContentPage />);
     await openRootFolder();
 
-    const row = await screen.findByTitle("拖动到文件夹行可移动资料");
+    const row = await screen.findByTitle("拖动到文件夹行可调整目录");
     const targetFolder = screen.getByTestId("managed-folder-row-cat-03-01");
     fireEvent.dragStart(row);
     expect(targetFolder).toHaveClass("bg-primary/5");
@@ -1123,8 +1181,8 @@ describe("AdminManagedContentPage", () => {
     render(<AdminManagedContentPage />);
     await openRootFolder();
 
-    expect(screen.queryByTitle("拖动到文件夹行可移动资料")).not.toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: /移动“建模标准”/ }).every((button) => button.hasAttribute("disabled"))).toBe(true);
+    expect(screen.queryByTitle("拖动到文件夹行可调整目录")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /调整“建模标准”的分类/ }).every((button) => button.hasAttribute("disabled"))).toBe(true);
   });
 
   it("keeps the workflow button before seven icon actions and download out of details", async () => {
@@ -1161,6 +1219,7 @@ describe("AdminManagedContentPage", () => {
     expect(screen.queryByRole("button", { name: "下载“WhisperX 培训视频”" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "重命名“WhisperX 培训视频”" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "删除“WhisperX 培训视频”" })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "调整“WhisperX 培训视频”的归档目录" }).length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getAllByRole("button", { name: "播放“WhisperX 培训视频”" })[0]);
     expect(mocks.openVideo).toHaveBeenCalledWith({

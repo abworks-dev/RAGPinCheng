@@ -38,8 +38,13 @@ from .content_permission_catalog import (
     CONTENT_PERMISSIONS,
     missing_content_permission_dependencies,
 )
-from .indexing import enqueue_content_publication
+from .indexing import enqueue_content_publication, enqueue_content_reclassification
 from .content_publication import failure_detail, normalize_failure_code
+from .content_reclassification import (
+    create_reclassification_job,
+    failure_summary as reclassification_failure_summary,
+    retry_reclassification_job,
+)
 from .content_storage import ContentStorage
 from .content_store import (
     ContentFilenameConflict,
@@ -79,6 +84,7 @@ from .schemas import (
     RestoreManagedContentResponse,
     ContentPermissionGroupDTO,
     ContentPermissionCatalogResponse,
+    ContentReclassificationJobDTO,
     ContentPermissionDefinitionDTO,
     ContentPermissionUserDTO,
     BulkManagedContentRequest,
@@ -354,6 +360,20 @@ def _folder_request_dto(row: sqlite3.Row) -> FolderRequestDTO:
     )
 
 
+def _reclassification_job_dto(row: sqlite3.Row) -> ContentReclassificationJobDTO:
+    return ContentReclassificationJobDTO(
+        id=row["id"], item_id=row["item_id"],
+        expected_version_id=row["expected_version_id"],
+        source_category_id=row["source_category_id"],
+        target_category_id=row["target_category_id"], status=row["status"],
+        qdrant_point_count=int(row["qdrant_point_count"]),
+        parent_count=int(row["parent_count"]), error_code=row["error_code"],
+        error_summary=row["error_summary"] or reclassification_failure_summary(row["error_code"]),
+        created_at=row["created_at"], started_at=row["started_at"],
+        finished_at=row["finished_at"], updated_at=row["updated_at"],
+    )
+
+
 def _raise_domain_error(exc: Exception) -> None:
     message = str(exc)
     if isinstance(exc, ContentFilenameConflict):
@@ -401,6 +421,8 @@ def _raise_domain_error(exc: Exception) -> None:
         raise HTTPException(status_code=409, detail="资料版本已变化，请刷新后重试") from exc
     if message == "content_delete_in_progress":
         raise HTTPException(status_code=409, detail="资料正在发布，暂时不能移入回收站") from exc
+    if message == "content_delete_reclassification_in_progress":
+        raise HTTPException(status_code=409, detail="资料正在调整分类，暂时不能移入回收站") from exc
     if message == "content_delete_forbidden":
         raise HTTPException(status_code=403, detail="当前账号没有将此状态资料移入回收站的权限") from exc
     if message == "content_trash_item_not_found":
@@ -417,6 +439,20 @@ def _raise_domain_error(exc: Exception) -> None:
         raise HTTPException(status_code=409, detail="已确认或已发布资料需要退回后重新归类") from exc
     if message == "review_note_required":
         raise HTTPException(status_code=400, detail="退回修改时必须填写原因") from exc
+    if message == "content_reclassification_forbidden":
+        raise HTTPException(status_code=403, detail="当前账号没有调整已发布资料分类的权限") from exc
+    if message == "content_reclassification_not_published":
+        raise HTTPException(status_code=409, detail="仅当前正式发布版本可以调整分类") from exc
+    if message == "content_reclassification_in_progress":
+        raise HTTPException(status_code=409, detail="该资料正在调整分类，请等待当前任务结束") from exc
+    if message == "content_publication_in_progress":
+        raise HTTPException(status_code=409, detail="资料正在发布，暂时不能调整分类") from exc
+    if message == "content_reclassification_same_category":
+        raise HTTPException(status_code=409, detail="资料已经位于所选分类") from exc
+    if message == "content_reclassification_job_not_found":
+        raise HTTPException(status_code=404, detail="分类调整任务不存在") from exc
+    if message == "content_reclassification_not_retryable":
+        raise HTTPException(status_code=409, detail="只有失败的分类调整任务可以重试") from exc
     if message == "media_transcript_operation_not_supported":
         raise HTTPException(
             status_code=409,
@@ -430,6 +466,8 @@ def _raise_domain_error(exc: Exception) -> None:
         raise HTTPException(status_code=403, detail="当前账号没有重命名或更新资料的权限") from exc
     if message == "content_revision_in_progress":
         raise HTTPException(status_code=409, detail="资料正在发布，暂时不能重命名或更新") from exc
+    if message == "content_revision_reclassification_in_progress":
+        raise HTTPException(status_code=409, detail="资料正在调整分类，暂时不能重命名或更新") from exc
     if message == "invalid_filename":
         raise HTTPException(status_code=400, detail="文件名无效") from exc
     if message == "invalid_filename_extension":
@@ -812,6 +850,12 @@ def _content_item_dto(
         has_pending_revision=bool(row["has_pending_revision"])
         if "has_pending_revision" in row.keys()
         else False,
+        reclassification_job_id=row["reclassification_job_id"]
+        if "reclassification_job_id" in row.keys()
+        else None,
+        reclassification_status=row["reclassification_status"]
+        if "reclassification_status" in row.keys()
+        else None,
     )
 
 
@@ -978,6 +1022,79 @@ def move_managed_content_item(
     if row is None:
         raise HTTPException(status_code=404, detail="资料不存在")
     return _content_item_dto(row)
+
+
+@router.post(
+    "/items/{item_id}/reclassify",
+    response_model=ContentReclassificationJobDTO,
+    status_code=202,
+)
+def reclassify_published_content_item(
+    item_id: str,
+    body: MoveManagedContentRequest,
+    user: CurrentUser = Depends(
+        require_content_permission("item.reclassify_published", csrf=True)
+    ),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> ContentReclassificationJobDTO:
+    _require_feature()
+    try:
+        row = create_reclassification_job(
+            conn,
+            item_id,
+            target_category_id=body.target_category_id,
+            expected_version_id=body.expected_version_id,
+            actor_user_id=user.id,
+            can_reclassify=True,
+        )
+    except (ValueError, ContentFilenameConflict, sqlite3.IntegrityError) as exc:
+        _raise_domain_error(exc)
+    enqueue_content_reclassification(str(row["id"]))
+    return _reclassification_job_dto(row)
+
+
+@router.get(
+    "/reclassification-jobs/{job_id}",
+    response_model=ContentReclassificationJobDTO,
+)
+def get_content_reclassification_job(
+    job_id: str,
+    _user: CurrentUser = Depends(require_content_permission("item.view")),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> ContentReclassificationJobDTO:
+    _require_feature()
+    row = conn.execute(
+        "SELECT * FROM content_reclassification_jobs WHERE id=?", (job_id,)
+    ).fetchone()
+    if row is None:
+        _raise_domain_error(ValueError("content_reclassification_job_not_found"))
+    return _reclassification_job_dto(row)
+
+
+@router.post(
+    "/reclassification-jobs/{job_id}/retry",
+    response_model=ContentReclassificationJobDTO,
+    status_code=202,
+)
+def retry_content_reclassification(
+    job_id: str,
+    user: CurrentUser = Depends(
+        require_content_permission("item.reclassify_published", csrf=True)
+    ),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> ContentReclassificationJobDTO:
+    _require_feature()
+    try:
+        row = retry_reclassification_job(
+            conn,
+            job_id,
+            actor_user_id=user.id,
+            can_reclassify=True,
+        )
+    except (ValueError, ContentFilenameConflict, sqlite3.IntegrityError) as exc:
+        _raise_domain_error(exc)
+    enqueue_content_reclassification(str(row["id"]))
+    return _reclassification_job_dto(row)
 
 
 @router.post("/items/{item_id}/rename", response_model=ManagedContentItemDTO)
@@ -1326,9 +1443,14 @@ def _bulk_failure_message(exc: Exception) -> str:
         "content_version_conflict": "资料版本已变化，请刷新后重试",
         "content_move_forbidden": "当前账号没有移动此状态资料的权限",
         "content_move_requires_republication": "资料需要先退回后才能移动",
+        "content_reclassification_not_published": "仅当前正式发布版本可以调整分类",
+        "content_reclassification_in_progress": "该资料正在调整分类",
+        "content_publication_in_progress": "该资料正在发布，暂时不能调整分类",
+        "content_reclassification_same_category": "资料已经位于所选分类",
         "media_transcript_operation_not_supported": "视频转录稿请前往视频管理处理",
         "content_delete_forbidden": "当前账号没有删除此状态资料的权限",
         "content_delete_in_progress": "资料正在发布，暂时不能移入回收站",
+        "content_delete_reclassification_in_progress": "资料正在调整分类，暂时不能移入回收站",
         "active_category_not_found": "目标目录不存在或已停用",
     }.get(str(exc), "资料状态已变化，请刷新后重试")
 
@@ -1373,6 +1495,47 @@ def bulk_move_content_items(
             ))
     succeeded = sum(result.status == "succeeded" for result in results)
     return BulkManagedContentResponse(results=results, succeeded=succeeded, failed=len(results) - succeeded)
+
+
+@router.post("/bulk-reclassify", response_model=BulkManagedContentResponse, status_code=202)
+def bulk_reclassify_content_items(
+    body: BulkMoveManagedContentRequest,
+    user: CurrentUser = Depends(
+        require_content_permission("item.reclassify_published", csrf=True)
+    ),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> BulkManagedContentResponse:
+    _require_feature()
+    results: list[BulkManagedContentResultDTO] = []
+    for item in _validate_bulk_item_refs(body.items):
+        try:
+            row = create_reclassification_job(
+                conn,
+                item.item_id,
+                target_category_id=body.target_category_id,
+                expected_version_id=item.expected_version_id,
+                actor_user_id=user.id,
+                can_reclassify=True,
+            )
+            enqueue_content_reclassification(str(row["id"]))
+            results.append(BulkManagedContentResultDTO(
+                item_id=item.item_id,
+                version_id=item.expected_version_id,
+                status="succeeded",
+                index_job_id=row["id"],
+            ))
+        except (ValueError, ContentFilenameConflict, sqlite3.IntegrityError) as exc:
+            conn.rollback()
+            results.append(BulkManagedContentResultDTO(
+                item_id=item.item_id,
+                version_id=item.expected_version_id,
+                status="failed",
+                message=_bulk_failure_message(exc),
+            ))
+    succeeded = sum(result.status == "succeeded" for result in results)
+    return BulkManagedContentResponse(
+        results=results, succeeded=succeeded, failed=len(results) - succeeded
+    )
 
 
 @router.post("/bulk-archive", response_model=BulkManagedContentResponse)

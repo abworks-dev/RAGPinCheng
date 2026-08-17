@@ -146,6 +146,65 @@ def test_schema_14_database_migrates_answer_policy_and_asr_profiles(tmp_path, mo
     conn.close()
 
 
+def test_schema_17_adds_reclassification_jobs_without_granting_custom_principals(
+    tmp_path, monkeypatch
+):
+    path = tmp_path / "app.sqlite"
+    migrations = db_migrations.MIGRATIONS
+    monkeypatch.setattr(
+        db_migrations, "MIGRATIONS", tuple(item for item in migrations if item.version <= 17),
+    )
+    init_db(path, backup_dir=tmp_path / "backups")
+    conn = sqlite3.connect(path)
+    user_id = conn.execute(
+        """INSERT INTO users(employee_id,real_name,password_hash,role,is_active,created_at)
+           VALUES ('custom','自定义用户','x','user',1,1)"""
+    ).lastrowid
+    conn.execute(
+        "INSERT INTO content_permissions(user_id,permission,created_at) VALUES (?,'item.publish',1)",
+        (user_id,),
+    )
+    conn.execute(
+        """INSERT INTO content_permission_groups
+           (id,group_key,display_name,is_system,is_active,created_at,updated_at)
+           VALUES ('custom-group','custom','自定义组',0,1,1,1)"""
+    )
+    conn.execute(
+        "INSERT INTO content_permission_group_items(group_id,permission) VALUES ('custom-group','item.publish')"
+    )
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setattr(db_migrations, "MIGRATIONS", migrations)
+    init_db(path, backup_dir=tmp_path / "backups")
+    conn = sqlite3.connect(path)
+    assert conn.execute("SELECT max(version) FROM app_schema_migrations").fetchone()[0] == 18
+    assert conn.execute(
+        "SELECT 1 FROM content_permissions WHERE user_id=? AND permission='item.reclassify_published'",
+        (user_id,),
+    ).fetchone() is None
+    assert conn.execute(
+        """SELECT 1 FROM content_permission_group_items
+           WHERE group_id='custom-group' AND permission='item.reclassify_published'"""
+    ).fetchone() is None
+    assert {
+        row[0]
+        for row in conn.execute(
+            """SELECT g.group_key FROM content_permission_groups g
+               JOIN content_permission_group_items i ON i.group_id=g.id
+               WHERE i.permission='item.reclassify_published'"""
+        )
+    } == {"publisher", "system_admin"}
+    assert {
+        row[1] for row in conn.execute("PRAGMA table_info(content_reclassification_jobs)")
+    } >= {
+        "id", "item_id", "expected_version_id", "source_category_id",
+        "target_category_id", "status", "qdrant_point_count", "parent_count",
+        "error_code", "error_summary",
+    }
+    conn.close()
+
+
 def test_schema_15_backfills_published_media_catalog_without_document_or_index_rows(
     tmp_path, monkeypatch
 ):
