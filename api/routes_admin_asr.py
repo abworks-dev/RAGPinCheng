@@ -8,7 +8,12 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from services.asr_service.engine_protocol import (
+from src.transcription.asr_service_contract import (
+    ServiceCapabilities,
+    ServiceProfileIdentities,
+    ServiceProfileIdentity,
+)
+from src.transcription.service_profiles import (
     FASTER_WHISPER_SERVICE_CONFIG,
     QWEN3_ASR_SERVICE_CONFIG,
     SENSEVOICE_SERVICE_CONFIG,
@@ -67,9 +72,13 @@ _SERVICE_CONFIG_BY_ID = {
 }
 
 
-def _runtime_state() -> tuple[object | None, dict[str, object] | None]:
+def _runtime_state() -> tuple[
+    ServiceCapabilities | None,
+    dict[str, object] | None,
+    ServiceProfileIdentities | None,
+]:
     if not ASR_ENABLED or not ASR_SERVICE_TOKEN:
-        return None, None
+        return None, None, None
     factory = RemoteAsrProviderFactory(
         ASR_SERVICE_URL,
         ASR_SERVICE_TOKEN,
@@ -78,9 +87,13 @@ def _runtime_state() -> tuple[object | None, dict[str, object] | None]:
         FUNASR_SENSEVOICE_PROVIDER_KEY,
     )
     try:
-        return factory.capabilities(), factory.diagnostics()
+        return (
+            factory.capabilities(),
+            factory.diagnostics(),
+            factory.profile_identities(),
+        )
     except Exception:
-        return None, None
+        return None, None, None
 
 
 def _diagnostic_profiles(diagnostics: dict[str, object] | None) -> dict[str, dict[str, object]]:
@@ -95,6 +108,14 @@ def _diagnostic_profiles(diagnostics: dict[str, object] | None) -> dict[str, dic
             continue
         result[profile_id] = item
     return result
+
+
+def _profile_identities(
+    identities: ServiceProfileIdentities | None,
+) -> dict[str, ServiceProfileIdentity]:
+    if identities is None:
+        return {}
+    return {item.service_profile_id: item for item in identities.profiles}
 
 
 def _service_status(diagnostics: dict[str, object] | None) -> AsrServiceStatusDTO:
@@ -116,8 +137,9 @@ def _service_status(diagnostics: dict[str, object] | None) -> AsrServiceStatusDT
 
 
 def _profile_dtos(
-    capabilities: object | None,
+    capabilities: ServiceCapabilities | None,
     diagnostics: dict[str, object] | None,
+    identities: ServiceProfileIdentities | None,
 ) -> list[AsrManagedProfileDTO]:
     entries = build_phase4_profile_catalog(
         service_enabled=ASR_ENABLED,
@@ -126,6 +148,7 @@ def _profile_dtos(
         admitted_profile_ids=TRANSCRIPTION_ADMITTED_PROFILE_IDS,
     )
     runtime_profiles = _diagnostic_profiles(diagnostics)
+    runtime_identities = _profile_identities(identities)
     result: list[AsrManagedProfileDTO] = []
     for entry in entries:
         profile = entry.profile
@@ -133,13 +156,20 @@ def _profile_dtos(
             continue
         service_config = _SERVICE_CONFIG_BY_ID[profile.provider_config.service_profile_id]
         runtime = runtime_profiles.get(service_config.service_profile_id)
-        runtime_hash = None
-        if runtime is not None and type(runtime.get("profile_config_hash")) is str:
-            runtime_hash = runtime["profile_config_hash"]
+        runtime_identity = runtime_identities.get(service_config.service_profile_id)
+        runtime_hash = (
+            runtime_identity.profile_config_hash
+            if runtime_identity is not None
+            else None
+        )
         runtime_identity_matches = (
             runtime is not None
             and runtime.get("available") is True
+            and runtime_identity is not None
+            and runtime_identity.provider_key == service_config.provider_key
             and runtime_hash == service_config.config_hash
+            and runtime_identity.qualification_policy
+            == service_config.qualification_policy
         )
         segmentation = profile.segmentation_config
         result.append(
@@ -186,8 +216,8 @@ def _profile_dtos(
                     prompt_asset_id=service_config.prompt_asset_id or None,
                     service_profile_config_hash=runtime_hash,
                     qualification_policy=(
-                        runtime.get("qualification_policy")
-                        if runtime is not None and type(runtime.get("qualification_policy")) is str
+                        runtime_identity.qualification_policy
+                        if runtime_identity is not None
                         else None
                     ),
                 ),
@@ -261,8 +291,8 @@ def _audit_events(
 
 
 def _settings_response(conn: sqlite3.Connection) -> AsrSettingsResponse:
-    capabilities, diagnostics = _runtime_state()
-    profiles = _profile_dtos(capabilities, diagnostics)
+    capabilities, diagnostics, identities = _runtime_state()
+    profiles = _profile_dtos(capabilities, diagnostics, identities)
     profile_names = {item.profile_id: item.display_name for item in profiles}
     return AsrSettingsResponse(
         service=_service_status(diagnostics),
@@ -307,8 +337,8 @@ def create_release_request(
         }
         return _release_request_dto(existing, names)
 
-    capabilities, diagnostics = _runtime_state()
-    profiles = _profile_dtos(capabilities, diagnostics)
+    capabilities, diagnostics, identities = _runtime_state()
+    profiles = _profile_dtos(capabilities, diagnostics, identities)
     profile = next((item for item in profiles if item.profile_id == body.profile_id), None)
     if profile is None:
         raise HTTPException(status_code=404, detail="转录配置不存在")

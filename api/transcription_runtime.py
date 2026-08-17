@@ -6,7 +6,10 @@ from dataclasses import dataclass, replace
 from threading import Event
 from typing import Callable
 
-from src.transcription.asr_service_contract import ServiceCapabilities
+from src.transcription.asr_service_contract import (
+    ServiceCapabilities,
+    ServiceProfileIdentities,
+)
 from src.transcription.persistence import CHECKPOINT_SCHEMA_VERSION, TranscriptionCheckpoint
 from src.transcription.profile import (
     FasterWhisperRemoteConfig,
@@ -206,6 +209,14 @@ class RemoteAsrProviderFactory:
             self.connect_timeout_seconds,
             self.request_timeout_seconds,
         ).diagnostics()
+
+    def profile_identities(self) -> ServiceProfileIdentities:
+        return HttpxAsrServiceClient(
+            self.base_url,
+            self.token,
+            self.connect_timeout_seconds,
+            self.request_timeout_seconds,
+        ).profile_identities()
 
 
 @dataclass(frozen=True, slots=True)

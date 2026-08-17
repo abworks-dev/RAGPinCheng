@@ -17,6 +17,7 @@ ALLOWED = {
     "provider_protocol": {"types", "candidate", "profile"},
     "canonical": {"types", "profile"},
     "terminology": {"types"},
+    "service_profiles": {"types", "terminology"},
     "normalizer": {"types", "candidate", "provider_protocol", "profile", "canonical", "terminology"},
     "pipeline": {"types", "profile", "provider_protocol", "normalizer", "canonical"},
     "formatter": {"types", "canonical"},

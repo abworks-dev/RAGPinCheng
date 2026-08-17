@@ -15,6 +15,7 @@ from .asr_service_contract import (
     ServiceFailureCode,
     ServiceJob,
     ServiceJobState,
+    ServiceProfileIdentities,
     ServiceResult,
 )
 from .profile import (
@@ -62,6 +63,8 @@ class AsrServiceClient(Protocol):
     def capabilities(self) -> ServiceCapabilities: ...
 
     def diagnostics(self) -> dict[str, object]: ...
+
+    def profile_identities(self) -> ServiceProfileIdentities: ...
 
     def create_job(self, request: CreateJobRequest) -> ServiceJob: ...
 
@@ -181,6 +184,11 @@ class HttpxAsrServiceClient:
         if type(payload) is not dict:
             raise AsrServiceClientError(200, "invalid_diagnostics")
         return payload
+
+    def profile_identities(self) -> ServiceProfileIdentities:
+        return ServiceProfileIdentities.from_json_dict(
+            self._request("GET", "/v1/profile-identities")
+        )
 
     def create_job(self, request: CreateJobRequest) -> ServiceJob:
         return ServiceJob.from_json_dict(

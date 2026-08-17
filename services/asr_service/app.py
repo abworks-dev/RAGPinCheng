@@ -8,8 +8,11 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 
 from src.transcription.asr_service_contract import (
     ASR_API_VERSION,
+    ASR_PROFILE_IDENTITIES_SCHEMA_VERSION,
     CreateJobRequest,
     ServiceCapabilities,
+    ServiceProfileIdentities,
+    ServiceProfileIdentity,
 )
 from src.transcription.runtime_ports import InputPart
 from src.transcription.types import ContractValidationError
@@ -219,6 +222,22 @@ def create_app(
             profiles if settings.enabled else (),
             settings.max_upload_part_bytes,
             settings.max_input_bytes,
+        ).to_json_dict()
+
+    @app.get("/v1/profile-identities", dependencies=[auth])
+    def profile_identities() -> dict[str, object]:
+        return ServiceProfileIdentities(
+            ASR_PROFILE_IDENTITIES_SCHEMA_VERSION,
+            tuple(
+                ServiceProfileIdentity(
+                    registration.config.service_profile_id,
+                    registration.config.provider_key,
+                    registration.config.config_hash,
+                    registration.config.prompt_asset_id or None,
+                    registration.config.qualification_policy,
+                )
+                for registration in scheduler.engines.registrations
+            ),
         ).to_json_dict()
 
     @app.get("/v1/diagnostics", dependencies=[auth])

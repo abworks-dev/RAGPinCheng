@@ -11,12 +11,18 @@ from fastapi.testclient import TestClient
 from api import routes_admin_asr
 from api.auth import require_admin, require_csrf_admin
 from api.db import connect, get_db, init_db
-from services.asr_service.engine_protocol import WHISPERX_V2_FULL_DECODE_SERVICE_CONFIG
-from src.transcription.asr_service_contract import ASR_API_VERSION, ServiceCapabilities
+from src.transcription.asr_service_contract import (
+    ASR_API_VERSION,
+    ASR_PROFILE_IDENTITIES_SCHEMA_VERSION,
+    ServiceCapabilities,
+    ServiceProfileIdentities,
+    ServiceProfileIdentity,
+)
 from src.transcription.profile_catalog import (
     WHISPERX_BALANCED_PROFILE_ID,
     WHISPERX_V2_SERVICE_PROFILE_ID,
 )
+from src.transcription.service_profiles import WHISPERX_V2_FULL_DECODE_SERVICE_CONFIG
 
 
 def _route(path: str, method: str):
@@ -47,16 +53,24 @@ def _runtime_state(*, config_hash: str | None = None):
         "profiles": [
             {
                 "service_profile_id": WHISPERX_V2_SERVICE_PROFILE_ID,
-                "provider_key": "whisperx",
-                "profile_config_hash": service_hash,
-                "prompt_asset_id": "asr_engineering_zh_v2",
-                "qualification_policy": "whisperx-r3/1",
                 "available": True,
                 "unavailable_reason_code": None,
             }
         ],
     }
-    return capabilities, diagnostics
+    identities = ServiceProfileIdentities(
+        ASR_PROFILE_IDENTITIES_SCHEMA_VERSION,
+        (
+            ServiceProfileIdentity(
+                WHISPERX_V2_SERVICE_PROFILE_ID,
+                "whisperx",
+                service_hash,
+                "asr_engineering_zh_v2",
+                "whisperx-r3/1",
+            ),
+        ),
+    )
+    return capabilities, diagnostics, identities
 
 
 @pytest.fixture
@@ -191,7 +205,11 @@ def test_release_request_is_transactional_idempotent_and_replays_snapshot(asr_ap
     created_payload = created.json()
     assert created_payload["profile_display_name"] == "WhisperX 工程转录 均衡分段 v2"
 
-    monkeypatch.setattr(routes_admin_asr, "_runtime_state", lambda: (None, None))
+    monkeypatch.setattr(
+        routes_admin_asr,
+        "_runtime_state",
+        lambda: (None, None, None),
+    )
     replayed = client.post(
         "/api/admin/asr/release-requests",
         json=_request_body(),
