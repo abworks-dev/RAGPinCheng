@@ -513,7 +513,8 @@ describe("AdminManagedContentPage", () => {
     fireEvent.click(screen.getByTestId("managed-folder-row-cat-04"));
 
     await waitFor(() => expect(mocks.items).toHaveBeenCalledWith(expect.objectContaining({ category_id: "cat-04" })));
-    expect(screen.getByText(/当前目录：04 项目资料/)).toBeInTheDocument();
+    expect(screen.queryByText(/当前目录：/)).not.toBeInTheDocument();
+    expect(within(screen.getByRole("navigation", { name: "资料路径" })).getByRole("button", { name: "04 项目资料" })).toBeInTheDocument();
   });
 
   it("shows archived metadata and restores an item from trash", async () => {

@@ -36,7 +36,8 @@ test.describe("资料管理", () => {
       : page.getByTestId("managed-folder-row-cat-project");
     await projectFolder.click();
     await switchedListing;
-    await expect(page.getByText(/当前目录：04 项目资料/)).toBeVisible();
+    await expect(page.getByText(/当前目录：/)).toHaveCount(0);
+    await expect(page.getByRole("navigation", { name: "资料路径" }).getByRole("button", { name: "04 项目资料" })).toBeVisible();
     await page.getByRole("button", { name: "上传文件" }).scrollIntoViewIfNeeded();
     await expectInViewport(page.getByRole("button", { name: "上传文件" }));
     if (page.viewportSize()!.width === 390) await expectTouchTarget(page.getByRole("button", { name: "上传文件" }));

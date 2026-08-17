@@ -87,10 +87,14 @@ def test_storage_inventory_is_aggregate_and_read_only():
     workflow = read_text(".github/workflows/inventory-production-storage.yml")
 
     assert "production-storage-inventory/1" in script
-    assert "aggregate metadata only; no file names or file contents" in script
+    assert "directory metadata only; no nested file names or file contents" in script
     assert "Remove-Item" not in script
     assert "Move-Item" not in script
     assert "Set-Content" in script
     assert "workflow_dispatch:" in workflow
     assert "confirm_read_only_inventory" in workflow
     assert "actions/upload-artifact@v4" in workflow
+    assert "-DependencyRetentionDays 7" in workflow
+    assert "-ReleaseKeepCount 2" in workflow
+    assert "-QualificationKeepCount 3" in workflow
+    assert "-ResolverRetentionDays 14" in workflow
