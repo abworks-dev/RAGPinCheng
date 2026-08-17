@@ -342,6 +342,7 @@ export type ManagedContentItem = {
   object_sha256: string | null;
   source_origin: string;
   source_batch_id: string | null;
+  source_rel_path?: string | null;
   is_current: boolean;
   has_published_head: boolean;
   latest_publication_status: string | null;

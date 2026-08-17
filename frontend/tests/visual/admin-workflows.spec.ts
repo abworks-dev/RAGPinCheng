@@ -186,6 +186,31 @@ test.describe("资料管理", () => {
     await expectNoBodyOverflow(page);
   });
 
+  test("trash shows original location and archive metadata without overflowing", async ({ page }) => {
+    await openTab(page, "资料管理");
+    await page.getByRole("tab", { name: "回收站" }).click();
+    await expect(page.getByRole("heading", { name: "回收站", exact: true })).toBeVisible();
+
+    const desktop = page.viewportSize()!.width >= 1024;
+    const row = desktop
+      ? page.getByRole("table").getByRole("row").filter({ hasText: "企业知识库使用规范" })
+      : page.locator("li").filter({ hasText: "企业知识库使用规范" });
+    await expect(row.getByText("03 公司内部标准 / 01 建模 / 02 机电")).toBeVisible();
+    await expect(row.getByText("公司知识库归档/制度与流程/企业知识库使用规范.md")).toBeVisible();
+    await expect(row.getByText("历史迁移")).toBeVisible();
+    await expect(row.getByText("合成资料员")).toBeVisible();
+    await row.getByRole("button", { name: "恢复" }).scrollIntoViewIfNeeded();
+    await expectInViewport(row.getByRole("button", { name: "恢复" }));
+    if (desktop) {
+      await expect(page.getByRole("columnheader", { name: "原目录" })).toBeVisible();
+      await expect(page.getByRole("columnheader", { name: "原状态" })).toBeVisible();
+    } else {
+      await expect(page.getByRole("table")).toBeHidden();
+      await expect(row.getByText("上传路径", { exact: true })).toBeVisible();
+    }
+    await expectNoBodyOverflow(page);
+  });
+
   for (const scenario of ["loading", "empty", "error", "disabled"] as const) {
     test(`${scenario} state is explicit and contained`, async ({ page }, testInfo) => {
       await openTab(page, "资料管理", scenario);
@@ -398,8 +423,8 @@ test.describe("资料管理", () => {
     await openTab(page, "资料管理");
     await page.getByRole("tab", { name: "回收站" }).click();
     await expect(page.getByRole("heading", { name: "回收站", exact: true })).toBeVisible();
-    await expect(page.getByText(/合成资料员 于/)).toBeVisible();
-    await expect(page.getByText("原状态：已发布")).toBeVisible();
+    await expect(page.getByText("合成资料员", { exact: true }).filter({ visible: true }).first()).toBeVisible();
+    await expect(page.getByText("已发布", { exact: true }).filter({ visible: true }).first()).toBeVisible();
     await expectNoBodyOverflow(page);
     const restore = page.getByRole("button", { name: "恢复", exact: true });
     await restore.scrollIntoViewIfNeeded();

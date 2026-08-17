@@ -286,6 +286,11 @@ def test_delete_draft_requires_organize_csrf_and_preserves_object(content_api):
         assert conn.execute(
             "SELECT count(*) FROM content_audit_events WHERE event_type='content.archived'"
         ).fetchone()[0] == 1
+        conn.execute(
+            "UPDATE content_versions SET source_rel_path=? WHERE id=?",
+            ("项目资料/建模/回收路径.md", uploaded["version_id"]),
+        )
+        conn.commit()
     finally:
         conn.close()
     listing = client.get("/api/admin/content/items-page", **_auth(sessions, "organizer"))
@@ -299,8 +304,18 @@ def test_delete_draft_requires_organize_csrf_and_preserves_object(content_api):
     trash = client.get("/api/admin/content/trash", **_auth(sessions, "reviewer"))
     assert trash.status_code == 200
     assert trash.json()["total"] == 1
-    assert trash.json()["items"][0]["archived_by_name"] == "整理员"
-    assert trash.json()["items"][0]["pre_archive_lifecycle_status"] == "draft"
+    trash_item = trash.json()["items"][0]
+    assert trash_item["archived_by_name"] == "整理员"
+    assert trash_item["pre_archive_lifecycle_status"] == "draft"
+    assert trash_item["category_path"] == "03 公司内部标准"
+    assert trash_item["source_rel_path"] == "项目资料/建模/回收路径.md"
+    searched_trash = client.get(
+        "/api/admin/content/trash",
+        params={"query": "回收路径"},
+        **_auth(sessions, "reviewer"),
+    )
+    assert searched_trash.status_code == 200
+    assert searched_trash.json()["total"] == 1
 
     restore_url = f"/api/admin/content/items/{uploaded['item_id']}/restore"
     assert client.post(restore_url, json=body, **_auth(sessions, "organizer", csrf=True)).status_code == 403
