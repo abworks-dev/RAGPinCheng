@@ -26,6 +26,10 @@ export type PrepData = {
   used_sources: Source[];
   no_source_fallback: boolean;
   relevance?: Record<string, unknown>;
+  policy_version?: string;
+  answer_max_output_tokens?: number;
+  answer_context_chars?: number;
+  relevance_gate_enabled?: boolean;
 };
 
 export type DoneData = {
@@ -36,6 +40,33 @@ export type DoneData = {
   history_chars: number;
   budget: number;
   finish_reason?: string;
+  policy_version?: string;
+  answer_max_output_tokens?: number;
+  answer_context_chars?: number;
+  relevance_gate_enabled?: boolean;
+};
+
+export type AnswerPolicy = {
+  answer_temperature: number;
+  answer_max_output_tokens: number;
+  answer_context_chars: number;
+  relevance_gate_enabled: boolean;
+  relevance_min_score: number;
+  relevance_min_rrf: number;
+  relevance_min_margin: number;
+  policy_version: string;
+  updated_at: number | null;
+  updated_by: number | null;
+};
+
+export type AnswerPolicyAuditEntry = {
+  id: number;
+  old_policy_json: string;
+  new_policy_json: string;
+  changed_by: number | null;
+  changed_by_name: string | null;
+  change_reason: string | null;
+  created_at: number;
 };
 
 export type ChatEvent =
@@ -410,6 +441,42 @@ export type ManagedUploadResponse = {
     status: "accepted" | "skipped";
     reason: string | null;
   }[];
+};
+
+export type ManagedUploadTaskEntry = {
+  sequence: number;
+  filename: string;
+  relative_path: string | null;
+  size_bytes: number;
+  status: "accepted" | "skipped";
+  reason: string | null;
+  item_id: string | null;
+  version_id: string | null;
+  created_at: number;
+};
+
+export type ManagedUploadTask = {
+  batch_id: string;
+  upload_mode: "files" | "folder";
+  status: "processing" | "completed" | "partial_success" | "failed";
+  target_category_id: string | null;
+  target_path: string;
+  total_files: number;
+  accepted_files: number;
+  skipped_files: number;
+  total_bytes: number;
+  total_uploaded_bytes: number;
+  created_by_name: string;
+  created_at: number;
+  updated_at: number;
+  error_summary: string | null;
+  entries: ManagedUploadTaskEntry[] | null;
+};
+
+export type ManagedUploadTaskList = {
+  tasks: ManagedUploadTask[];
+  total: number;
+  status_counts: Record<string, number>;
 };
 
 export type ContentPermissionUser = {

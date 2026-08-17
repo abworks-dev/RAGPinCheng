@@ -9,6 +9,8 @@ const mocks = vi.hoisted(() => ({
   categories: vi.fn(),
   items: vi.fn(),
   upload: vi.fn(),
+  uploadTasks: vi.fn(),
+  uploadTask: vi.fn(),
   createCategory: vi.fn(),
   moveContent: vi.fn(),
   renameContent: vi.fn(),
@@ -69,6 +71,8 @@ vi.mock("../../api/client", () => ({
     managedCategories: mocks.categories,
     managedContentItems: mocks.items,
     uploadManagedContent: mocks.upload,
+    managedUploadTasks: mocks.uploadTasks,
+    managedUploadTask: mocks.uploadTask,
     createManagedCategory: mocks.createCategory,
     moveManagedContent: mocks.moveContent,
     renameManagedContent: mocks.renameContent,
@@ -164,8 +168,7 @@ const item = {
 };
 
 async function openRootFolder(folderId = category.id) {
-  const folder = folderId === projectCategory.id ? projectCategory : category;
-  fireEvent.click(await screen.findByRole("button", { name: new RegExp(`${folder.display_code} ${folder.display_name}`) }));
+  fireEvent.click(await screen.findByTestId(`managed-folder-row-${folderId}`));
   await waitFor(() => expect(mocks.items).toHaveBeenCalledWith(expect.objectContaining({ category_id: folderId })));
 }
 
@@ -182,6 +185,9 @@ describe("AdminManagedContentPage", () => {
     mocks.deleteContent.mockResolvedValue({ item_id: "item-1", version_id: "version-1", archived_at: 2, previous_status: "awaiting_review", publication_withdrawn: false });
     mocks.trash.mockResolvedValue({ items: [], total: 0, status_counts: {} });
     mocks.restoreContent.mockResolvedValue({ item_id: "item-1", version_id: "version-1", restored_status: "approved" });
+    mocks.uploadTasks.mockResolvedValue({ tasks: [], total: 0, status_counts: {} });
+    mocks.uploadTask.mockResolvedValue({});
+    window.history.replaceState({}, "", "/admin/content");
     mocks.bulkDownload.mockResolvedValue({ blob: new Blob(["zip"]), filename: "资料批量下载.zip" });
     mocks.downloadFile.mockResolvedValue({ blob: new Blob(["file"]), filename: "standard.pdf" });
   });
@@ -329,6 +335,78 @@ describe("AdminManagedContentPage", () => {
     expect(within(table).getAllByRole("row")[1]).toHaveTextContent("较新资料");
   });
 
+  it("integrates folders before files without adding them to selection or pagination", async () => {
+    const folder = { ...childCategory, display_code: "02", display_name: "模型目录", item_count: 3 };
+    mocks.categories.mockResolvedValue([category, folder]);
+    render(<AdminManagedContentPage />);
+    await openRootFolder();
+
+    const table = screen.getByRole("table");
+    const folderRow = within(table).getByTestId(`managed-folder-row-${folder.id}`);
+    const fileRow = within(table).getByText("standard.pdf · v1").closest("tr");
+    expect(folderRow.compareDocumentPosition(fileRow!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(within(folderRow).queryByRole("checkbox")).not.toBeInTheDocument();
+
+    fireEvent.click(within(table).getByRole("checkbox", { name: "选择当前页前20份资料" }));
+    expect(within(table).getByRole("checkbox", { name: "选择建模标准" })).toBeChecked();
+    expect(screen.getByText("共 1 份，第 1 / 1 页")).toBeInTheDocument();
+
+    const mobileList = screen.getByTestId(`managed-folder-mobile-${folder.id}`).parentElement!;
+    expect(mobileList.firstElementChild).toBe(screen.getByTestId(`managed-folder-mobile-${folder.id}`));
+    expect(within(screen.getByTestId(`managed-folder-mobile-${folder.id}`)).getByRole("button", { name: /02 模型目录/ })).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("combobox", { name: "状态" }), { target: { value: "published" } });
+    await waitFor(() => expect(mocks.items).toHaveBeenLastCalledWith(expect.objectContaining({ lifecycle_status: "published" })));
+    expect(await screen.findByTestId(`managed-folder-row-${folder.id}`)).toBeInTheDocument();
+  });
+
+  it("shows a folder-only root instead of the empty state", async () => {
+    mocks.categories.mockResolvedValue([category, projectCategory]);
+    mocks.items.mockResolvedValue({ items: [], total: 0, status_counts: {} });
+    render(<AdminManagedContentPage />);
+
+    expect(await screen.findByTestId(`managed-folder-row-${category.id}`)).toBeInTheDocument();
+    expect(screen.getByTestId(`managed-folder-row-${projectCategory.id}`)).toBeInTheDocument();
+    expect(screen.queryByText("没有符合条件的资料")).not.toBeInTheDocument();
+    expect(screen.getByText("共 0 份，第 1 / 1 页")).toBeInTheDocument();
+  });
+
+  it("sorts folder and file groups independently while keeping folders first", async () => {
+    const alphaFolder = { ...childCategory, id: "folder-alpha", display_code: "01", display_name: "A 目录" };
+    const zetaFolder = { ...childCategory, id: "folder-zeta", display_code: "09", display_name: "Z 目录" };
+    const alphaFile = { ...item, item_id: "file-alpha", version_id: "version-alpha", title: "A 资料" };
+    const zetaFile = { ...item, item_id: "file-zeta", version_id: "version-zeta", title: "Z 资料" };
+    mocks.categories.mockResolvedValue([category, zetaFolder, alphaFolder]);
+    mocks.items.mockResolvedValue({ items: [zetaFile, alphaFile], total: 2, status_counts: { awaiting_review: 2 } });
+    render(<AdminManagedContentPage />);
+    await openRootFolder();
+
+    const table = screen.getByRole("table");
+    const titleSortButton = within(table).getByRole("button", { name: /^资料$/ });
+    fireEvent.click(titleSortButton);
+    let rows = within(table).getAllByRole("row").slice(1);
+    expect(rows.map((row) => row.textContent)).toEqual([
+      expect.stringContaining("01 A 目录"),
+      expect.stringContaining("09 Z 目录"),
+      expect.stringContaining("A 资料"),
+      expect.stringContaining("Z 资料"),
+    ]);
+
+    fireEvent.click(titleSortButton);
+    rows = within(table).getAllByRole("row").slice(1);
+    expect(rows.map((row) => row.textContent)).toEqual([
+      expect.stringContaining("09 Z 目录"),
+      expect.stringContaining("01 A 目录"),
+      expect.stringContaining("Z 资料"),
+      expect.stringContaining("A 资料"),
+    ]);
+
+    fireEvent.click(within(table).getByRole("button", { name: /更新时间/ }));
+    rows = within(table).getAllByRole("row").slice(1);
+    expect(rows[0]).toHaveTextContent("09 Z 目录");
+    expect(rows[1]).toHaveTextContent("01 A 目录");
+  });
+
   it("loads all statuses by default and keeps batch actions hidden without multi-selection", async () => {
     render(<AdminManagedContentPage />);
     await openRootFolder();
@@ -348,7 +426,7 @@ describe("AdminManagedContentPage", () => {
     render(<AdminManagedContentPage />);
 
     expect(await screen.findByRole("button", { name: "/" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /04 项目资料/ }));
+    fireEvent.click(screen.getByTestId("managed-folder-row-cat-04"));
 
     await waitFor(() => expect(mocks.items).toHaveBeenCalledWith(expect.objectContaining({ category_id: "cat-04" })));
     expect(screen.getByText(/当前目录：04 项目资料/)).toBeInTheDocument();
@@ -503,8 +581,8 @@ describe("AdminManagedContentPage", () => {
     fireEvent.change(input, { target: { files: [file] } });
     expect(screen.getByText("guide.md")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "确定上传" }));
-    await waitFor(() => expect(mocks.upload).toHaveBeenCalledWith([file], "cat-03"));
-    expect(await screen.findByText("已接收")).toBeInTheDocument();
+    await waitFor(() => expect(mocks.upload).toHaveBeenCalledWith([file], "cat-03", "files", expect.any(Function)));
+    expect(mocks.success).toHaveBeenCalledWith("已接收 1 个文件");
   });
 
   it("keeps the upload dialog and selected file after an upload failure", async () => {
@@ -572,6 +650,7 @@ describe("AdminManagedContentPage", () => {
       [{ file: guide, relativePath: "资料包/01 建筑/guide.md" }],
       "cat-03",
       "folder",
+      expect.any(Function),
     ));
   });
 
@@ -625,7 +704,7 @@ describe("AdminManagedContentPage", () => {
     expect(mocks.upload).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: "确定上传" }));
-    await waitFor(() => expect(mocks.upload).toHaveBeenCalledWith([file], "cat-03"));
+    await waitFor(() => expect(mocks.upload).toHaveBeenCalledWith([file], "cat-03", "files", expect.any(Function)));
   });
 
   it("shows the current folder in the list drop overlay and clears it after leaving", async () => {
@@ -687,7 +766,7 @@ describe("AdminManagedContentPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "上传文件" }));
     fireEvent.change(await screen.findByLabelText("选择资料文件"), { target: { files: [file] } });
     fireEvent.click(screen.getByRole("button", { name: "确定上传" }));
-    await waitFor(() => expect(mocks.upload).toHaveBeenCalledWith([file], "cat-03-01"));
+    await waitFor(() => expect(mocks.upload).toHaveBeenCalledWith([file], "cat-03-01", "files", expect.any(Function)));
   });
 
   it("lets a category manager create a controlled child folder", async () => {
@@ -801,9 +880,10 @@ describe("AdminManagedContentPage", () => {
     render(<AdminManagedContentPage />);
     await openRootFolder();
 
-    const row = await screen.findByTitle("拖动到上方文件夹可移动资料");
-    const targetFolder = screen.getAllByRole("button", { name: /01 建模标准/ })[0];
+    const row = await screen.findByTitle("拖动到文件夹行可移动资料");
+    const targetFolder = screen.getByTestId("managed-folder-row-cat-03-01");
     fireEvent.dragStart(row);
+    expect(targetFolder).toHaveClass("bg-primary/5");
     fireEvent.dragOver(targetFolder);
     fireEvent.drop(targetFolder);
 
@@ -819,7 +899,7 @@ describe("AdminManagedContentPage", () => {
     render(<AdminManagedContentPage />);
     await openRootFolder();
 
-    expect(screen.queryByTitle("拖动到上方文件夹可移动资料")).not.toBeInTheDocument();
+    expect(screen.queryByTitle("拖动到文件夹行可移动资料")).not.toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: /移动“建模标准”/ }).every((button) => button.hasAttribute("disabled"))).toBe(true);
   });
 
@@ -958,5 +1038,41 @@ describe("AdminManagedContentPage", () => {
     expect(screen.getByRole("dialog")).toHaveTextContent("已选择 2 份资料");
     fireEvent.click(screen.getByRole("button", { name: "确认执行" }));
     await waitFor(() => expect(mocks.bulkPublish).toHaveBeenCalledWith(["version-1", "version-2"]));
+  });
+
+  it("opens the upload task page from a deep link and loads task details", async () => {
+    mocks.permissions = ORGANIZER_PERMISSIONS;
+    const task = {
+      batch_id: "batch-upload-1",
+      upload_mode: "folder" as const,
+      status: "partial_success" as const,
+      target_category_id: "cat-03",
+      target_path: "03 公司内部标准 / 01 建模标准",
+      total_files: 2,
+      accepted_files: 1,
+      skipped_files: 1,
+      total_bytes: 20,
+      total_uploaded_bytes: 10,
+      created_by_name: "整理员",
+      created_at: 1,
+      updated_at: 2,
+      error_summary: null,
+      entries: null,
+    };
+    mocks.uploadTasks.mockResolvedValue({ tasks: [task], total: 1, status_counts: { partial_success: 1 } });
+    mocks.uploadTask.mockResolvedValue({ ...task, entries: [{ sequence: 1, filename: "guide.md", relative_path: "资料包/guide.md", size_bytes: 10, status: "accepted", reason: null, item_id: "item-1", version_id: "version-1", created_at: 1 }, { sequence: 2, filename: "video.mp4", relative_path: "资料包/video.mp4", size_bytes: 10, status: "skipped", reason: "不支持的文件格式", item_id: null, version_id: null, created_at: 1 }] });
+    window.history.replaceState({}, "", "/admin/content?view=uploads");
+
+    render(<AdminManagedContentPage />);
+    expect(await screen.findByRole("heading", { name: "上传任务" })).toBeInTheDocument();
+    expect(await screen.findByText("03 公司内部标准 / 01 建模标准")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "详情" }));
+    expect(await screen.findByText("文件明细")).toBeInTheDocument();
+    expect(screen.getByText("资料包/video.mp4")).toBeInTheDocument();
+    expect(mocks.uploadTask).toHaveBeenCalledWith("batch-upload-1");
+
+    fireEvent.click(screen.getByRole("button", { name: "关闭" }));
+    fireEvent.click(screen.getByRole("tab", { name: "资料库" }));
+    expect(window.location.search).toBe("");
   });
 });

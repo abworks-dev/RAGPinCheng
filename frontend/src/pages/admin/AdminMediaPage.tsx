@@ -9,6 +9,7 @@ import { EmptyState } from "../../components/ui/empty-state";
 import { ErrorState } from "../../components/ui/error-state";
 import { Input } from "../../components/ui/input";
 import { LoadingState } from "../../components/ui/loading-state";
+import { Progress } from "../../components/ui/progress";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../../components/ui/dialog";
 import { TranscriptionWorkbenchSheet } from "../../components/TranscriptionWorkbenchSheet";
 import { useTranscriptionJobs } from "../../hooks/useTranscriptionJobs";
@@ -18,7 +19,7 @@ import type { MediaAsset, TranscriptionJob, TranscriptionProfile } from "../../t
 import { formatAdminDate, formatBytes } from "../../lib/admin-formatters";
 
 type UploadMode = "manual" | "automatic";
-type UploadState = "waiting" | "uploading" | "succeeded" | "failed";
+type UploadState = "waiting" | "uploading" | "preparing" | "succeeded" | "failed";
 type StatusVariant = "secondary" | "success" | "warning" | "destructive" | "info";
 type MediaFilter = "all" | "processing" | "review" | "publishing" | "failed";
 
@@ -32,6 +33,7 @@ type PendingVideo = {
   transcriptText: string | null;
   requestId: string;
   state: UploadState;
+  transferRatio: number;
   error: string | null;
 };
 
@@ -93,13 +95,41 @@ function StatusBadge({ value, meta, empty = "未开始" }: {
   return <Badge variant={item?.variant ?? "secondary"}>{item?.label ?? value ?? empty}</Badge>;
 }
 
+function formatDuration(milliseconds: number) {
+  const seconds = Math.max(0, Math.floor(milliseconds / 1000));
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const remainingSeconds = seconds % 60;
+  if (hours > 0) return `${hours}小时${minutes}分`;
+  if (minutes > 0) return `${minutes}分${remainingSeconds}秒`;
+  return `${remainingSeconds}秒`;
+}
+
 function JobSummary({ job }: { job: TranscriptionJob }) {
   if (job.status === "succeeded") return <p className="mt-1 text-ui-xs text-muted-foreground">草稿已生成，等待后续审核与发布。</p>;
   if (job.status === "failed") return <p className="mt-1 text-ui-xs text-destructive">{job.failure?.message || job.error_summary || job.failure_error_code || "转录失败"}</p>;
   if (job.status === "cancelled") return <p className="mt-1 text-ui-xs text-muted-foreground">任务已取消，可重新转录。</p>;
   const stage = job.stage ? stageLabels[job.stage] || job.stage : "排队中";
-  const progress = job.total_ms > 0 ? Math.min(100, Math.round((job.processed_ms / job.total_ms) * 100)) : 0;
-  return <p className="mt-1 text-ui-xs text-muted-foreground">{stage} · {progress}%</p>;
+  if (job.status === "pending") return <p className="mt-1 text-ui-xs text-muted-foreground">{stage} · 等待服务调度</p>;
+
+  const elapsedMs = Math.max(0, Date.now() - (job.started_at ?? job.created_at) * 1000);
+  const hasCheckpoint = job.total_ms > 0 && job.processed_ms > 0 && job.processed_ms < job.total_ms;
+  const progress = hasCheckpoint ? Math.min(100, Math.round((job.processed_ms / job.total_ms) * 100)) : null;
+  const isTranscribing = job.stage === "transcribing";
+  const durationDetail = job.total_ms > 0
+    ? `视频时长 ${formatDuration(job.total_ms)}`
+    : "正在读取视频时长";
+  const detail = hasCheckpoint
+    ? `${formatDuration(job.processed_ms)} / ${formatDuration(job.total_ms)}`
+    : isTranscribing
+      ? `模型整段处理中 · ${durationDetail} · 已耗时 ${formatDuration(elapsedMs)}`
+      : "正在完成结果处理";
+  return (
+    <div className="mt-1 space-y-1.5 text-ui-xs text-muted-foreground">
+      <p>{stage} · {progress === null ? detail : `${progress}% · ${detail}`}</p>
+      <Progress label={`转录进度：${stage}`} value={progress} />
+    </div>
+  );
 }
 
 function LifecycleRail({ asset }: { asset: MediaAsset }) {
@@ -131,6 +161,7 @@ function pendingFromFile(file: File, profileId: string): PendingVideo {
     transcriptText: null,
     requestId: createRequestId(),
     state: "waiting",
+    transferRatio: 0,
     error: null,
   };
 }
@@ -145,6 +176,7 @@ export function AdminMediaPage() {
   const [bulkProfileId, setBulkProfileId] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [activeBatchIds, setActiveBatchIds] = useState<string[]>([]);
   const [dragging, setDragging] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [mediaFilter, setMediaFilter] = useState<MediaFilter>("all");
@@ -272,10 +304,22 @@ export function AdminMediaPage() {
   }
 
   async function uploadOne(item: PendingVideo) {
-    updatePending(item.id, { state: "uploading", error: null });
+    const callbacks = {
+      onProgress: ({ ratio }: { ratio: number }) => updatePending(item.id, {
+        state: "uploading",
+        transferRatio: ratio,
+        error: null,
+      }),
+      onUploaded: () => updatePending(item.id, {
+        state: "preparing",
+        transferRatio: 1,
+        error: null,
+      }),
+    };
+    updatePending(item.id, { state: "uploading", transferRatio: 0, error: null });
     try {
       if (mode === "automatic") {
-        const uploaded = await adminMediaApi.uploadAutomatic(item.file, item.title.trim(), item.profileId, item.requestId);
+        const uploaded = await adminMediaApi.uploadAutomatic(item.file, item.title.trim(), item.profileId, item.requestId, callbacks);
         if (uploaded.transcription_job_id) replaceJob(await adminMediaApi.getJob(uploaded.transcription_job_id));
       } else {
         const transcript = new File(
@@ -283,9 +327,9 @@ export function AdminMediaPage() {
           item.transcriptFile!.name,
           { type: "text/markdown" },
         );
-        await adminMediaApi.uploadManual(item.file, transcript, item.title.trim());
+        await adminMediaApi.uploadManual(item.file, transcript, item.title.trim(), callbacks);
       }
-      updatePending(item.id, { state: "succeeded", error: null });
+      updatePending(item.id, { state: "succeeded", transferRatio: 1, error: null });
     } catch (e: any) {
       updatePending(item.id, { state: "failed", error: e?.message || String(e) });
     }
@@ -296,6 +340,7 @@ export function AdminMediaPage() {
     setSubmitting(true);
     setUploadError(null);
     const queue = [...readyItems];
+    setActiveBatchIds(queue.map((item) => item.id));
     let cursor = 0;
     const worker = async () => {
       while (cursor < queue.length) {
@@ -331,6 +376,21 @@ export function AdminMediaPage() {
       setUploadError(e?.message || String(e));
     }
   }
+
+  const activeBatchItems = activeBatchIds
+    .map((id) => pending.find((item) => item.id === id))
+    .filter((item): item is PendingVideo => Boolean(item));
+  const batchTotalBytes = activeBatchItems.reduce((total, item) => total + item.file.size, 0);
+  const batchTransferredBytes = activeBatchItems.reduce(
+    (total, item) => total + item.file.size * item.transferRatio,
+    0,
+  );
+  const batchTransferProgress = batchTotalBytes > 0
+    ? Math.min(100, Math.round((batchTransferredBytes / batchTotalBytes) * 100))
+    : 0;
+  const batchSettledCount = activeBatchItems.filter((item) => item.state === "succeeded" || item.state === "failed").length;
+  const batchUploadingCount = activeBatchItems.filter((item) => item.state === "uploading").length;
+  const batchPreparingCount = activeBatchItems.filter((item) => item.state === "preparing").length;
 
   return (
     <section className="space-y-6" aria-labelledby="admin-media-title">
@@ -432,8 +492,30 @@ export function AdminMediaPage() {
                           <p className="truncate font-medium">{item.file.name}</p>
                           <p className="text-ui-xs text-muted-foreground">{formatBytes(item.file.size)}</p>
                         </div>
-                        <StatusBadge value={item.state} meta={{ waiting: { label: "待提交", variant: "secondary" }, uploading: { label: "上传中", variant: "warning" }, succeeded: { label: "已提交", variant: "success" }, failed: { label: "提交失败", variant: "destructive" } }} />
+                        <StatusBadge value={item.state} meta={{ waiting: { label: "待提交", variant: "secondary" }, uploading: { label: "上传中", variant: "warning" }, preparing: { label: "服务端处理中", variant: "info" }, succeeded: { label: "已提交", variant: "success" }, failed: { label: "提交失败", variant: "destructive" } }} />
                       </div>
+                      {(item.state === "uploading" || item.state === "preparing") && (
+                        <div className="mt-3 space-y-1.5" role="status" aria-live="polite" aria-atomic="true">
+                          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-ui-xs">
+                            <span className="font-medium text-foreground">
+                              {item.state === "uploading"
+                                ? `正在上传 · ${Math.round(item.transferRatio * 100)}%`
+                                : mode === "automatic"
+                                  ? "文件已上传，正在准备音轨并创建转录任务"
+                                  : "文件已上传，正在创建媒体记录"}
+                            </span>
+                            {item.state === "uploading" && (
+                              <span className="tabular-nums text-muted-foreground">
+                                {formatBytes(Math.round(item.file.size * item.transferRatio))} / {formatBytes(item.file.size)}
+                              </span>
+                            )}
+                          </div>
+                          <Progress
+                            label={`${item.file.name} 上传进度`}
+                            value={item.state === "uploading" ? item.transferRatio * 100 : null}
+                          />
+                        </div>
+                      )}
                       <div className="mt-3 grid gap-3 lg:grid-cols-2">
                         <label className="text-ui-sm font-medium">视频标题
                           <Input aria-label={`${item.file.name} 的视频标题`} className="mt-1" value={item.title} disabled={submitting || item.state === "succeeded"} onChange={(event) => updatePending(item.id, { title: event.target.value, requestId: createRequestId(), state: "waiting", error: null })} />
@@ -465,6 +547,22 @@ export function AdminMediaPage() {
                   );
                 })}
               </div>
+
+              {submitting && activeBatchItems.length > 0 && (
+                <div className="space-y-2 border-t border-border pt-4" role="status" aria-live="polite" aria-atomic="true">
+                  <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-ui-xs">
+                    <span className="font-medium text-foreground">
+                      已处理 {batchSettledCount}/{activeBatchItems.length}
+                      {batchUploadingCount > 0 ? ` · 正在上传 ${batchUploadingCount} 个` : ""}
+                      {batchPreparingCount > 0 ? ` · 服务端处理 ${batchPreparingCount} 个` : ""}
+                    </span>
+                    <span className="tabular-nums text-muted-foreground">
+                      文件传输 {batchTransferProgress}% · {formatBytes(batchTransferredBytes)} / {formatBytes(batchTotalBytes)}
+                    </span>
+                  </div>
+                  <Progress label="批量文件传输进度" value={batchTransferProgress} />
+                </div>
+              )}
 
               <div className="flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
                 <Button variant="outline" disabled={submitting} onClick={() => setStep(2)}>返回选择方式</Button>

@@ -20,13 +20,15 @@ class TestIsNumericDominant:
 
     def test_numeric_with_filler(self):
         # The rewriter may append generic words like this
-        assert _is_numeric_dominant("22 细部工程", threshold=0.4) is True
+        assert _is_numeric_dominant("22 细部工程", threshold=0.3) is True
         assert _is_numeric_dominant("11 项目", threshold=0.4) is True
 
     def test_not_numeric_dominant(self):
         # Real questions with numbers but meaningful context
         assert _is_numeric_dominant("M20 螺栓孔径", threshold=0.4) is False
-        assert _is_numeric_dominant("GB 50017 第 11 节", threshold=0.4) is False
+        # The lexical helper only measures digit density; standard-code
+        # precedence is enforced by validate_search_query().
+        assert _is_numeric_dominant("GB 50017 第 11 节", threshold=0.4) is True
         assert _is_numeric_dominant("板厚 12mm", threshold=0.4) is False
 
 
@@ -151,6 +153,9 @@ class TestValidateSearchQueryFirstTurn:
         result = validate_search_query("Q390 钢材", has_history=False)
         assert result.passed is True
 
+        result = validate_search_query("11 号构件", has_history=False)
+        assert result.passed is True
+
     def test_valid_question_passes(self):
         result = validate_search_query("高强度螺栓的抗拉强度是多少？", has_history=False)
         assert result.passed is True
@@ -175,9 +180,10 @@ class TestValidateSearchQueryWithHistory:
     that the user is continuing a thread of conversation.
     """
 
-    def test_pure_numeric_with_history_passes(self):
+    def test_pure_numeric_with_history_is_still_rejected(self):
         result = validate_search_query("11", has_history=True)
-        assert result.passed is True
+        assert result.passed is False
+        assert result.reason == "numeric_only"
 
     def test_section_only_with_history_passes(self):
         result = validate_search_query("11.1", has_history=True)

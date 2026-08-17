@@ -422,6 +422,33 @@ CONTENT_FOLDER_REQUEST_STATEMENTS = (
        WHERE status='pending'""",
 )
 
+ANSWER_POLICY_STATEMENTS = (
+    "ALTER TABLE message_answer_versions ADD COLUMN policy_version TEXT",
+    "ALTER TABLE message_answer_versions ADD COLUMN policy_json TEXT",
+    """CREATE TABLE IF NOT EXISTS answer_policy_settings (
+        singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
+        answer_temperature REAL NOT NULL CHECK (answer_temperature BETWEEN 0 AND 1),
+        answer_max_output_tokens INTEGER NOT NULL CHECK (answer_max_output_tokens BETWEEN 256 AND 4096),
+        answer_context_chars INTEGER NOT NULL CHECK (answer_context_chars BETWEEN 2000 AND 12000),
+        relevance_gate_enabled INTEGER NOT NULL DEFAULT 0 CHECK (relevance_gate_enabled IN (0,1)),
+        relevance_min_score REAL NOT NULL DEFAULT 0 CHECK (relevance_min_score >= 0),
+        relevance_min_rrf REAL NOT NULL DEFAULT 0 CHECK (relevance_min_rrf >= 0),
+        relevance_min_margin REAL NOT NULL DEFAULT 0 CHECK (relevance_min_margin >= 0),
+        policy_version TEXT NOT NULL,
+        updated_at INTEGER NOT NULL,
+        updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL
+    )""",
+    """CREATE TABLE IF NOT EXISTS answer_policy_audit (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        old_policy_json TEXT NOT NULL,
+        new_policy_json TEXT NOT NULL,
+        changed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        change_reason TEXT,
+        created_at INTEGER NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_answer_policy_audit_created_desc ON answer_policy_audit(created_at DESC, id DESC)",
+)
+
 SYSTEM_MAINTENANCE_STATEMENTS = (
     """CREATE TABLE maintenance_settings (
         singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
@@ -569,6 +596,30 @@ CONTENT_PERMISSION_V2_STATEMENTS = (
     "DROP TABLE content_permission_v11_map",
 )
 
+UPLOAD_TASK_STATEMENTS = (
+    "ALTER TABLE upload_batches ADD COLUMN upload_mode TEXT NOT NULL DEFAULT 'files' CHECK (upload_mode IN ('files','folder'))",
+    "ALTER TABLE upload_batches ADD COLUMN target_category_id TEXT REFERENCES category_nodes(id) ON DELETE SET NULL",
+    "ALTER TABLE upload_batches ADD COLUMN total_files INTEGER NOT NULL DEFAULT 0 CHECK (total_files >= 0)",
+    "ALTER TABLE upload_batches ADD COLUMN accepted_files INTEGER NOT NULL DEFAULT 0 CHECK (accepted_files >= 0)",
+    "ALTER TABLE upload_batches ADD COLUMN skipped_files INTEGER NOT NULL DEFAULT 0 CHECK (skipped_files >= 0)",
+    "ALTER TABLE upload_batches ADD COLUMN total_bytes INTEGER NOT NULL DEFAULT 0 CHECK (total_bytes >= 0)",
+    "ALTER TABLE upload_batches ADD COLUMN total_uploaded_bytes INTEGER NOT NULL DEFAULT 0 CHECK (total_uploaded_bytes >= 0)",
+    """CREATE TABLE upload_batch_entries (
+        batch_id TEXT NOT NULL REFERENCES upload_batches(id) ON DELETE CASCADE,
+        sequence INTEGER NOT NULL CHECK (sequence > 0),
+        filename TEXT NOT NULL,
+        relative_path TEXT,
+        size_bytes INTEGER NOT NULL DEFAULT 0 CHECK (size_bytes >= 0),
+        status TEXT NOT NULL CHECK (status IN ('accepted','skipped')),
+        reason TEXT,
+        item_id TEXT REFERENCES content_items(id) ON DELETE SET NULL,
+        version_id TEXT REFERENCES content_versions(id) ON DELETE SET NULL,
+        created_at INTEGER NOT NULL,
+        PRIMARY KEY(batch_id, sequence)
+    )""",
+    "CREATE INDEX idx_upload_batch_entries_batch_sequence ON upload_batch_entries(batch_id, sequence)",
+)
+
 TRANSCRIPT_MANUAL_REVISION_STATEMENTS = (
     "ALTER TABLE transcript_versions ADD COLUMN derived_from_version_id TEXT REFERENCES transcript_versions(id) ON DELETE RESTRICT",
     "ALTER TABLE transcript_versions ADD COLUMN edited_by INTEGER REFERENCES users(id) ON DELETE SET NULL",
@@ -635,6 +686,8 @@ MIGRATIONS = (
     Migration(11, "granular_content_permissions", CONTENT_PERMISSION_V2_STATEMENTS),
     Migration(12, "transcript_manual_revisions", TRANSCRIPT_MANUAL_REVISION_STATEMENTS),
     Migration(13, "content_download_permission", CONTENT_PERMISSION_DOWNLOAD_STATEMENTS),
+    Migration(14, "managed_upload_tasks", UPLOAD_TASK_STATEMENTS),
+    Migration(15, "answer_policy_settings_and_snapshots", ANSWER_POLICY_STATEMENTS),
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 PHASE2_TABLES = frozenset(
@@ -669,11 +722,15 @@ CONTENT_LIBRARY_TABLES = frozenset(
         "content_audit_events",
     }
 )
+UPLOAD_TASK_TABLES = frozenset({"upload_batch_entries"})
 CONTENT_PERMISSION_GROUP_TABLES = frozenset(
     {"content_permission_groups", "content_permission_group_items"}
 )
 CONTENT_FOLDER_REQUEST_TABLES = frozenset({"content_folder_requests"})
 SYSTEM_MAINTENANCE_TABLES = frozenset({"maintenance_settings", "maintenance_runs"})
+ANSWER_POLICY_TABLES = frozenset({"answer_policy_settings", "answer_policy_audit"})
+
+
 def validate_system_content_permission_groups(
     conn: sqlite3.Connection,
     expected_groups: dict[str, tuple[str, frozenset[str]]] = SYSTEM_CONTENT_PERMISSION_GROUPS,
@@ -720,6 +777,16 @@ def validate_content_version_metadata(conn: sqlite3.Connection) -> None:
     if "uq_content_items_active_filename" not in indexes:
         raise RuntimeError("migration_schema_mismatch")
     if conn.execute("SELECT 1 FROM content_versions WHERE title IS NULL LIMIT 1").fetchone():
+        raise RuntimeError("migration_schema_mismatch")
+
+
+def validate_answer_policy_schema(conn: sqlite3.Connection) -> None:
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(message_answer_versions)")}
+    if not {"policy_version", "policy_json"}.issubset(columns):
+        raise RuntimeError("migration_schema_mismatch")
+    if not ANSWER_POLICY_TABLES.issubset(
+        {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    ):
         raise RuntimeError("migration_schema_mismatch")
 
 
@@ -821,12 +888,20 @@ def has_pending_ddl(path: Path, *, base_tables: frozenset[str]) -> bool:
         raise RuntimeError("migration_schema_mismatch")
     if any(version == 8 for version, _name in applied) and not SYSTEM_MAINTENANCE_TABLES.issubset(tables):
         raise RuntimeError("migration_schema_mismatch")
+    if any(version == 15 for version, _name in applied):
+        conn = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
+        try:
+            validate_answer_policy_schema(conn)
+        finally:
+            conn.close()
     if any(version == 10 for version, _name in applied):
         conn = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
         try:
             validate_content_version_metadata(conn)
         finally:
             conn.close()
+    if any(version == 14 for version, _name in applied) and not UPLOAD_TASK_TABLES.issubset(tables):
+        raise RuntimeError("migration_schema_mismatch")
     if any(version == 12 for version, _name in applied):
         conn = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
         try:
@@ -891,6 +966,10 @@ def apply_all(conn: sqlite3.Connection, *, base_schema: str, applied_at: int) ->
             raise RuntimeError("migration_schema_mismatch")
         if not SYSTEM_MAINTENANCE_TABLES.issubset(tables):
             raise RuntimeError("migration_schema_mismatch")
+        if 14 in applied_versions and not UPLOAD_TASK_TABLES.issubset(tables):
+            raise RuntimeError("migration_schema_mismatch")
+        if 15 in applied_versions:
+            validate_answer_policy_schema(conn)
         validate_system_content_permission_groups(
             conn,
             SYSTEM_CONTENT_PERMISSION_GROUPS

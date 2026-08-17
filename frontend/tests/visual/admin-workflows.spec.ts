@@ -15,8 +15,10 @@ async function openTab(page: Parameters<typeof installAdminRoutes>[0], label: st
 
 async function openRootFolder(page: Parameters<typeof installAdminRoutes>[0], folderId = "cat-company") {
   const listing = page.waitForRequest((request) => request.method() === "GET" && request.url().includes("/api/admin/content/items-page") && request.url().includes(`category_id=${folderId}`));
-  const folderName = folderId === "cat-project" ? "04 项目资料" : "03 公司内部标准";
-  await page.getByRole("button", { name: new RegExp(folderName) }).click();
+  const folder = page.viewportSize()!.width < 1024
+    ? page.getByTestId(`managed-folder-mobile-${folderId}`)
+    : page.getByTestId(`managed-folder-row-${folderId}`);
+  await folder.click();
   await listing;
 }
 
@@ -28,7 +30,10 @@ test.describe("资料管理", () => {
     await expectInViewport(page.getByRole("button", { name: "刷新" }));
     await expect(page.getByRole("button", { name: "/", exact: true })).toBeVisible();
     const switchedListing = page.waitForRequest((request) => request.method() === "GET" && request.url().includes("/api/admin/content/items-page") && request.url().includes("category_id=cat-project"));
-    await page.getByRole("button", { name: /04 项目资料/ }).click();
+    const projectFolder = page.viewportSize()!.width < 1024
+      ? page.getByTestId("managed-folder-mobile-cat-project")
+      : page.getByTestId("managed-folder-row-cat-project");
+    await projectFolder.click();
     await switchedListing;
     await expect(page.getByText(/当前目录：04 项目资料/)).toBeVisible();
     await page.getByRole("button", { name: "上传文件" }).scrollIntoViewIfNeeded();
@@ -65,6 +70,34 @@ test.describe("资料管理", () => {
     await expect(page.getByRole("menuitem", { name: "批量确认" })).toBeFocused();
     await page.keyboard.press("Escape");
     await expect(batchButton).toBeFocused();
+  });
+
+  test("child folders share the list and stay before paginated files", async ({ page }) => {
+    await openTab(page, "资料管理", "normal", "admin", { includeChildFolder: true });
+    await openRootFolder(page);
+
+    const isMobile = page.viewportSize()!.width < 1024;
+    const folder = isMobile
+      ? page.getByTestId("managed-folder-mobile-cat-company-modeling")
+      : page.getByTestId("managed-folder-row-cat-company-modeling");
+    const fileTitle = page.getByText("建筑信息模型交付标准（合成长文件名用于响应式检查）", { exact: true }).filter({ visible: true });
+    const fileEntry = isMobile ? fileTitle.locator("xpath=ancestor::li") : fileTitle.locator("xpath=ancestor::tr");
+    await expect(folder).toBeVisible();
+    await expect(fileEntry).toBeVisible();
+    await expect(folder.getByRole("checkbox")).toHaveCount(0);
+    await expect(page.getByText("共 5 份，第 1 / 1 页")).toBeVisible();
+
+    const [folderBox, fileBox] = await Promise.all([folder.boundingBox(), fileEntry.boundingBox()]);
+    expect(folderBox).not.toBeNull();
+    expect(fileBox).not.toBeNull();
+    expect(folderBox!.y).toBeLessThan(fileBox!.y);
+    if (isMobile) await expectTouchTarget(folder.getByRole("button", { name: /01 建模标准/ }));
+    await expectNoBodyOverflow(page);
+
+    const childListing = page.waitForRequest((request) => request.method() === "GET" && request.url().includes("/api/admin/content/items-page") && request.url().includes("category_id=cat-company-modeling"));
+    await folder.click();
+    await childListing;
+    await expect(page.getByRole("navigation", { name: "资料路径" })).toContainText("01 建模标准（长名称用于响应式检查）");
   });
 
   test("single-file actions expose independent move, download, rename, and update flows", async ({ page }, testInfo) => {
@@ -309,12 +342,12 @@ test.describe("资料管理", () => {
     test.skip(page.viewportSize()!.width < 1024, "桌面增强只在桌面表格中启用");
     await openTab(page, "资料管理", "normal", "admin", { includeChildFolder: true });
     await openRootFolder(page);
-    const row = page.getByTitle("拖动到上方文件夹可移动资料").first();
-    const folder = page.getByRole("button", { name: /01 建模标准/ });
+    const row = page.getByTitle("拖动到文件夹行可移动资料").first();
+    const folder = page.getByTestId("managed-folder-row-cat-company-modeling");
     await expect(row).toBeVisible();
     await expect(folder).toBeVisible();
     await row.dispatchEvent("dragstart");
-    await expect(folder).toHaveClass(/border-primary/);
+    await expect(folder).toHaveClass(/bg-primary\/5/);
     const requestPromise = page.waitForRequest((request) => request.method() === "POST" && request.url().includes("/move"));
     await folder.dispatchEvent("dragover");
     await folder.dispatchEvent("drop");
@@ -448,6 +481,7 @@ test.describe("视频管理", () => {
       await expectTouchTarget(retry);
     }
   });
+
 });
 
 test.describe("索引任务", () => {
@@ -499,7 +533,7 @@ test.describe("分类管理", () => {
       await page.getByRole("treeitem", { name: /公司内部标准/ }).click();
       const editor = page.getByRole("dialog", { name: "公司内部标准" });
       await expect(editor).toBeVisible();
-      const categoryToggle = editor.getByRole("checkbox", { name: "公司内部标准启用" });
+      const categoryToggle = editor.getByRole("radio", { name: "公司内部标准停用" });
       await categoryToggle.scrollIntoViewIfNeeded();
       await expectInViewport(categoryToggle);
       const save = editor.getByRole("button", { name: "保存修改" });

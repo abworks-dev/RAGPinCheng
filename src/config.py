@@ -75,6 +75,9 @@ RERANK_TOP_K = 40
 RERANK_BATCH_CAP = 96
 FINAL_TOP_K = 5
 MAX_CONTEXT_CHARS = 6000
+# Answer-generation defaults. Runtime overrides are stored in app.sqlite by
+# the system-admin policy page; these remain the bootstrap fallback.
+ANSWER_MAX_OUTPUT_TOKENS = int(os.getenv("ANSWER_MAX_OUTPUT_TOKENS", "1200"))
 
 # Query decomposition / multi-hop retrieval (Phase 2 — comparison intent only).
 # When a question compares/contrasts multiple entities but carries no standard
@@ -111,6 +114,7 @@ RERANK_PROVIDER = os.getenv("RERANK_PROVIDER", "local")
 RELEVANCE_GATE_ENABLED = os.getenv("RELEVANCE_GATE_ENABLED", "false").strip().lower() in ("1", "true", "yes", "on")
 RELEVANCE_GATE_MIN_SCORE = float(os.getenv("RELEVANCE_GATE_MIN_SCORE", "0.0"))
 RELEVANCE_GATE_MIN_RRF = float(os.getenv("RELEVANCE_GATE_MIN_RRF", "0.0"))
+RELEVANCE_GATE_MIN_MARGIN = float(os.getenv("RELEVANCE_GATE_MIN_MARGIN", "0.0"))
 RELEVANCE_GATE_POLICY_VERSION = os.getenv("RELEVANCE_GATE_POLICY_VERSION", "uncalibrated-v1")
 
 # Remote GPU service — only used when the provider above is "remote"

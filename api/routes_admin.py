@@ -29,6 +29,13 @@ from src.config import (
     CONTENT_HEAD_ENFORCEMENT,
     CONTENT_MANAGEMENT_ENABLED,
 )
+from src.answer_policy import (
+    AnswerPolicy,
+    default_policy,
+    list_answer_policy_audit,
+    load_answer_policy,
+    save_answer_policy,
+)
 from src.indexing_pipeline import (
     delete_document as delete_indexed_document,
     list_indexed_documents,
@@ -63,6 +70,10 @@ from .schemas import (
     AdminFeedbackPatchRequest,
     AdminFeedbackResponse,
     AdminStatsResponse,
+    AnswerPolicyAuditDTO,
+    AnswerPolicyAuditResponse,
+    AnswerPolicyDTO,
+    AnswerPolicyPatchRequest,
     AdminUserDTO,
     AdminUserListResponse,
     AdminUserPatchRequest,
@@ -470,6 +481,80 @@ def patch_maintenance_settings(
         updated_by=admin.id,
     )
     return _settings_dto(settings)
+
+
+# ── answer policy ─────────────────────────────────────────────────────────
+
+
+def _answer_policy_dto(policy: AnswerPolicy) -> AnswerPolicyDTO:
+    return AnswerPolicyDTO(**policy.public_dict())
+
+
+@router.get("/answer-policy", response_model=AnswerPolicyDTO)
+def answer_policy_status(
+    _admin: CurrentUser = Depends(require_admin),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> AnswerPolicyDTO:
+    return _answer_policy_dto(load_answer_policy(conn))
+
+
+@router.patch("/answer-policy", response_model=AnswerPolicyDTO)
+def patch_answer_policy(
+    body: AnswerPolicyPatchRequest,
+    admin: CurrentUser = Depends(require_csrf_admin),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> AnswerPolicyDTO:
+    current = load_answer_policy(conn)
+    if body.relevance_gate_enabled and not current.relevance_gate_enabled and not (body.change_reason or "").strip():
+        raise HTTPException(status_code=422, detail="开启相关性门禁时必须填写变更原因")
+    try:
+        next_policy = save_answer_policy(
+            conn,
+            AnswerPolicy(
+                answer_temperature=body.answer_temperature,
+                answer_max_output_tokens=body.answer_max_output_tokens,
+                answer_context_chars=body.answer_context_chars,
+                relevance_gate_enabled=body.relevance_gate_enabled,
+                relevance_min_score=body.relevance_min_score,
+                relevance_min_rrf=body.relevance_min_rrf,
+                relevance_min_margin=body.relevance_min_margin,
+            ),
+            updated_by=admin.id,
+            change_reason=body.change_reason,
+        )
+        conn.commit()
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return _answer_policy_dto(next_policy)
+
+
+@router.post("/answer-policy/reset", response_model=AnswerPolicyDTO)
+def reset_answer_policy(
+    admin: CurrentUser = Depends(require_csrf_admin),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> AnswerPolicyDTO:
+    try:
+        policy = save_answer_policy(
+            conn,
+            default_policy(),
+            updated_by=admin.id,
+            change_reason="恢复系统默认回答策略",
+        )
+        conn.commit()
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return _answer_policy_dto(policy)
+
+
+@router.get("/answer-policy/audit", response_model=AnswerPolicyAuditResponse)
+def answer_policy_audit(
+    limit: int = Query(50, ge=1, le=100),
+    _admin: CurrentUser = Depends(require_admin),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> AnswerPolicyAuditResponse:
+    return AnswerPolicyAuditResponse(
+        entries=[AnswerPolicyAuditDTO(**row) for row in list_answer_policy_audit(conn, limit=limit)]
+    )
 
 
 @router.get("/maintenance/cleanup-preview", response_model=CleanupPreviewResponse)

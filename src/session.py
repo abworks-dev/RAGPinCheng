@@ -23,6 +23,7 @@ from typing import Iterator
 
 from .config import DECOMPOSE_MAX_CONTEXT_CHARS, MAX_CONTEXT_CHARS, QUERY_DECOMPOSE_ENABLED
 from .decompose import maybe_decompose
+from .answer_policy import MAX_CONTEXT_CHARS_CONFIG, AnswerPolicy, load_answer_policy
 from .generate import Answer, GenerationPrep, generate, rewrite_query, stream_generate
 from .query_guard import QueryValidation, validate_search_query
 from .relevance_gate import LOW_CONFIDENCE_MESSAGE, evaluate_relevance
@@ -43,19 +44,18 @@ CARRY_SOURCES = 2
 
 
 def _context_budget(
-    final_sources: list["RetrievedParent"], history_chars: int
+    final_sources: list["RetrievedParent"], history_chars: int, policy: AnswerPolicy
 ) -> int:
     """Char budget for the answer context.
 
-    Uses the wider DECOMPOSE_MAX_CONTEXT_CHARS when this turn took the
-    decomposed path (any source carries a subquery_idx), so both comparison
-    sides fit; otherwise the normal MAX_CONTEXT_CHARS.
+    The admin policy controls the normal budget. Decomposed comparisons retain
+    the existing 2,000-character headroom, with the configured policy maximum
+    remaining the hard cap.
     """
-    base = (
-        DECOMPOSE_MAX_CONTEXT_CHARS
-        if any(getattr(p, "subquery_idx", None) is not None for p in final_sources)
-        else MAX_CONTEXT_CHARS
-    )
+    base = policy.answer_context_chars
+    if any(getattr(p, "subquery_idx", None) is not None for p in final_sources):
+        decomposition_headroom = DECOMPOSE_MAX_CONTEXT_CHARS - MAX_CONTEXT_CHARS
+        base = min(policy.answer_context_chars + decomposition_headroom, MAX_CONTEXT_CHARS_CONFIG)
     return max(base - history_chars - RESERVE_CHARS, 0)
 
 
@@ -70,6 +70,7 @@ class Message:
     role: str  # "user" | "assistant"
     content: str
     sources_for_ui: list[dict] | None = None
+    policy_snapshot: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -93,6 +94,7 @@ class SessionState:
         user_text: str,
         assistant_text: str,
         sources_for_ui: list[dict] | None = None,
+        policy_snapshot: dict | None = None,
     ) -> None:
         self.messages.append(Message(role="user", content=user_text))
         self.messages.append(
@@ -100,6 +102,7 @@ class SessionState:
                 role="assistant",
                 content=assistant_text,
                 sources_for_ui=sources_for_ui,
+                policy_snapshot=dict(policy_snapshot or {}),
             )
         )
         self.turn_index += 1
@@ -141,6 +144,7 @@ class TurnResult:
     # identifying which rule triggered.
     guard_reason: str = ""
     relevance: dict = field(default_factory=dict)
+    policy_snapshot: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -163,6 +167,7 @@ class StreamingTurnPrep:
     no_source_fallback: bool = False
     guard_reason: str = ""
     relevance: dict = field(default_factory=dict)
+    policy_snapshot: dict = field(default_factory=dict)
 
 
 _USAGE_KEYS = ("prompt_tokens", "completion_tokens", "total_tokens")
@@ -341,6 +346,8 @@ class ChatSession:
     ) -> TurnResult:
         timings: dict[str, float] = {}
         rewrite_usage: dict = {}
+        policy = load_answer_policy()
+        policy_snapshot = policy.public_dict()
 
         # ① REWRITE
         search_query, rewrite_t = self._resolve_search_query(
@@ -359,7 +366,7 @@ class ChatSession:
             # Guard rejection: return early without retrieving or generating.
             # IMPORTANT: we DON'T clear last_sources here, so the user can
             # follow up with additional context and still reference prior turns.
-            self.state.append_turn(query, guard.message, sources_for_ui=[])
+            self.state.append_turn(query, guard.message, sources_for_ui=[], policy_snapshot=policy_snapshot)
             self.state.last_search_query = search_query
             timings["guard"] = 0.0
             timings["retrieve"] = 0.0
@@ -377,6 +384,7 @@ class ChatSession:
                 rewrite_applied=rewrite_applied,
                 timings=timings,
                 guard_reason=guard.reason,
+                policy_snapshot=policy_snapshot,
             )
             self.last_turn_result = result
             return result
@@ -389,12 +397,12 @@ class ChatSession:
             categories=categories,
         )
         timings["retrieve"] = perf_counter() - t
-        relevance = evaluate_relevance(final_sources, has_history=has_history, decomposition_applied=any(p.subquery_idx is not None for p in final_sources)).to_dict()
+        relevance = evaluate_relevance(final_sources, has_history=has_history, decomposition_applied=any(p.subquery_idx is not None for p in final_sources), policy=policy).to_dict()
 
         # No-source escape hatch.
         if not final_sources:
             fallback = "资料中未找到相关内容。"
-            self.state.append_turn(query, fallback, sources_for_ui=[])
+            self.state.append_turn(query, fallback, sources_for_ui=[], policy_snapshot=policy_snapshot)
             self.state.last_sources = []
             self.state.last_search_query = search_query
             timings["generate"] = 0.0
@@ -412,12 +420,13 @@ class ChatSession:
                 timings=timings,
                 guard_reason="",
                 relevance=relevance,
+                policy_snapshot=policy_snapshot,
             )
             self.last_turn_result = result
             return result
 
         if relevance["action"] == "low_confidence":
-            self.state.append_turn(query, LOW_CONFIDENCE_MESSAGE, sources_for_ui=[])
+            self.state.append_turn(query, LOW_CONFIDENCE_MESSAGE, sources_for_ui=[], policy_snapshot=policy_snapshot)
             self.state.last_sources = []
             self.state.last_search_query = search_query
             timings["generate"] = 0.0
@@ -434,6 +443,7 @@ class ChatSession:
                 rewrite_applied=rewrite_applied,
                 timings=timings,
                 relevance=relevance,
+                policy_snapshot=policy_snapshot,
             )
             self.last_turn_result = result
             return result
@@ -441,13 +451,14 @@ class ChatSession:
         # ④ GENERATE with history + dynamic budget.
         history_msgs = self.state.history_for_llm(k=HISTORY_TURNS)
         history_chars = sum(len(m["content"]) for m in history_msgs)
-        budget = _context_budget(final_sources, history_chars)
+        budget = _context_budget(final_sources, history_chars, policy)
         t = perf_counter()
         answer = generate(
             query=query,
             parents=final_sources,
             history=history_msgs,
             budget=budget,
+            policy=policy,
         )
         timings["generate"] = perf_counter() - t
         timings["total"] = sum(timings.values())
@@ -455,7 +466,7 @@ class ChatSession:
 
         # ⑤ UPDATE STATE — assistant text only; sources stripped from history.
         sources_for_ui = self._sources_for_ui(answer.sources)
-        self.state.append_turn(query, answer.text, sources_for_ui=sources_for_ui)
+        self.state.append_turn(query, answer.text, sources_for_ui=sources_for_ui, policy_snapshot=policy_snapshot)
         self.state.last_sources = final_sources
         self.state.last_search_query = search_query
 
@@ -474,6 +485,7 @@ class ChatSession:
             usage_by_call=usage_by_call,
             guard_reason="",
             relevance=relevance,
+            policy_snapshot=policy_snapshot,
         )
         self.last_turn_result = result
         return result
@@ -491,6 +503,8 @@ class ChatSession:
         """
         timings: dict[str, float] = {}
         rewrite_usage: dict = {}
+        policy = load_answer_policy()
+        policy_snapshot = policy.public_dict()
 
         # ① REWRITE
         search_query, rewrite_t = self._resolve_search_query(
@@ -520,6 +534,7 @@ class ChatSession:
                 timings=dict(timings),
                 no_source_fallback=True,
                 guard_reason=guard.reason,
+                policy_snapshot=policy_snapshot,
             )
 
             def _fallback_iter() -> Iterator[str]:
@@ -538,6 +553,7 @@ class ChatSession:
                 timings_so_far=dict(timings),
                 rewrite_usage=dict(rewrite_usage),
                 guard_reason=guard.reason,
+                policy=policy,
             )
             return prep, stream
 
@@ -549,7 +565,7 @@ class ChatSession:
             categories=categories,
         )
         timings["retrieve"] = perf_counter() - t
-        relevance = evaluate_relevance(final_sources, has_history=has_history, decomposition_applied=any(p.subquery_idx is not None for p in final_sources)).to_dict()
+        relevance = evaluate_relevance(final_sources, has_history=has_history, decomposition_applied=any(p.subquery_idx is not None for p in final_sources), policy=policy).to_dict()
 
         # No-source path: stream the fallback message and finalize.
         if not final_sources:
@@ -565,6 +581,7 @@ class ChatSession:
                 timings=dict(timings),
                 no_source_fallback=True,
                 relevance=relevance,
+                policy_snapshot=policy_snapshot,
             )
 
             def _fallback_iter() -> Iterator[str]:
@@ -583,6 +600,7 @@ class ChatSession:
                 timings_so_far=dict(timings),
                 rewrite_usage=dict(rewrite_usage),
                 guard_reason="",
+                policy=policy,
             )
             return prep, stream
 
@@ -598,21 +616,23 @@ class ChatSession:
                 timings=dict(timings),
                 no_source_fallback=True,
                 relevance=relevance,
+                policy_snapshot=policy_snapshot,
             )
             def _low_confidence_iter() -> Iterator[str]:
                 yield LOW_CONFIDENCE_MESSAGE
-            stream = self._wrap_stream(_low_confidence_iter(), query=query, search_query=search_query, rewrite_applied=rewrite_applied, fresh_sources=fresh_sources, final_sources=[], gen_prep=None, history_chars=0, budget=0, timings_so_far=dict(timings), rewrite_usage=dict(rewrite_usage), relevance=relevance)
+            stream = self._wrap_stream(_low_confidence_iter(), query=query, search_query=search_query, rewrite_applied=rewrite_applied, fresh_sources=fresh_sources, final_sources=[], gen_prep=None, history_chars=0, budget=0, timings_so_far=dict(timings), rewrite_usage=dict(rewrite_usage), relevance=relevance, policy=policy)
             return prep, stream
 
         # ④ STREAM GENERATE with history + dynamic budget.
         history_msgs = self.state.history_for_llm(k=HISTORY_TURNS)
         history_chars = sum(len(m["content"]) for m in history_msgs)
-        budget = _context_budget(final_sources, history_chars)
+        budget = _context_budget(final_sources, history_chars, policy)
         gen_prep, raw_stream = stream_generate(
             query=query,
             parents=final_sources,
             history=history_msgs,
             budget=budget,
+            policy=policy,
         )
 
         prep = StreamingTurnPrep(
@@ -625,6 +645,7 @@ class ChatSession:
             budget=budget,
             timings=dict(timings),
             relevance=relevance,
+            policy_snapshot=policy_snapshot,
         )
 
         stream = self._wrap_stream(
@@ -640,6 +661,7 @@ class ChatSession:
             timings_so_far=dict(timings),
             rewrite_usage=dict(rewrite_usage),
             relevance=relevance,
+            policy=policy,
         )
         return prep, stream
 
@@ -659,6 +681,7 @@ class ChatSession:
         rewrite_usage: dict,
         guard_reason: str = "",
         relevance: dict | None = None,
+        policy: AnswerPolicy | None = None,
     ) -> Iterator[str]:
         """Accumulate streamed text, time the generate stage, then finalize.
 
@@ -692,6 +715,7 @@ class ChatSession:
                 rewrite_usage=rewrite_usage,
                 guard_reason=guard_reason,
                 relevance=dict(relevance or {}),
+                policy=policy,
             )
 
     def _finalize_streaming_turn(
@@ -710,11 +734,14 @@ class ChatSession:
         rewrite_usage: dict,
         guard_reason: str = "",
         relevance: dict | None = None,
+        policy: AnswerPolicy | None = None,
     ) -> None:
         """Mirror of the ⑤ UPDATE STATE block in `ask()`, for the streaming path."""
         if gen_prep is None:
             # no-source fallback or guard rejection
-            self.state.append_turn(query, full_text, sources_for_ui=[])
+            effective_policy = policy or load_answer_policy()
+            policy_snapshot = effective_policy.public_dict()
+            self.state.append_turn(query, full_text, sources_for_ui=[], policy_snapshot=policy_snapshot)
             # IMPORTANT: Don't clear last_sources on guard rejection —
             # the user may follow up with context that references prior turns.
             if guard_reason:
@@ -738,11 +765,13 @@ class ChatSession:
                 usage_by_call=usage_by_call,
                 guard_reason=guard_reason,
                 relevance=dict(relevance or {}),
+                policy_snapshot=policy_snapshot,
             )
             return
 
         sources_for_ui = self._sources_for_ui(gen_prep.used_sources)
-        self.state.append_turn(query, full_text, sources_for_ui=sources_for_ui)
+        policy_snapshot = gen_prep.policy.public_dict()
+        self.state.append_turn(query, full_text, sources_for_ui=sources_for_ui, policy_snapshot=policy_snapshot)
         self.state.last_sources = final_sources
         self.state.last_search_query = search_query
 
@@ -772,4 +801,5 @@ class ChatSession:
             usage_by_call=usage_by_call,
             guard_reason="",
             relevance=dict(relevance or {}),
+            policy_snapshot=policy_snapshot,
         )

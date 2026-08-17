@@ -9,6 +9,7 @@ import { AuthProvider, useAuth } from "./context/AuthContext";
 import { LoginPage } from "./pages/LoginPage";
 import { RegisterPage } from "./pages/RegisterPage";
 import { AdminCategoriesPage } from "./pages/admin/AdminCategoriesPage";
+import { AdminAnswerPolicyPage } from "./pages/admin/AdminAnswerPolicyPage";
 import { AdminConversationsPage } from "./pages/admin/AdminConversationsPage";
 import { AdminDocumentsPage } from "./pages/admin/AdminDocumentsPage";
 import { AdminFeedbackPage } from "./pages/admin/AdminFeedbackPage";
@@ -60,6 +61,13 @@ function RequireAdmin({ children }: { children: JSX.Element }) {
   if (access === "checking") return <FullPageLoader label="正在核对工作台权限…" />;
   if (access === "denied") return <Navigate to="/" replace />;
   return children;
+}
+
+function RequireSystemAdmin({ children }: { children: JSX.Element }) {
+  const { state } = useAuth();
+  if (state.status === "loading") return <FullPageLoader label="正在核对系统管理员权限…" />;
+  if (state.status !== "authed") return <Navigate to="/login" replace />;
+  return state.user.role === "admin" ? children : <Navigate to="/admin" replace />;
 }
 
 function RedirectIfAuthed({ children }: { children: JSX.Element }) {
@@ -114,6 +122,7 @@ export default function App() {
                 <Route index element={<AdminIndexRedirect />} />
                 <Route path="overview" element={<AdminOverviewRoute />} />
                 <Route path="maintenance" element={<AdminMaintenancePage />} />
+                <Route path="answer-policy" element={<RequireSystemAdmin><AdminAnswerPolicyPage /></RequireSystemAdmin>} />
                 <Route path="content" element={<AdminManagedContentPage />} />
                 <Route path="categories" element={<AdminCategoriesPage />} />
                 <Route path="media" element={<AdminMediaPage />} />

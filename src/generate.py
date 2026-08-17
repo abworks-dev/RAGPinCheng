@@ -10,11 +10,10 @@ from openai import OpenAI
 from .config import (
     LLM_MODEL,
     LLM_REWRITE_MODEL,
-    LLM_TEMPERATURE,
-    MAX_CONTEXT_CHARS,
     ZHIPU_API_KEY,
     ZHIPU_BASE_URL,
 )
+from .answer_policy import AnswerPolicy, load_answer_policy
 from .prompts import load_prompt, render_prompt
 from .retrieve import RetrievedParent
 
@@ -45,6 +44,7 @@ class GenerationPrep:
     model: str
     context_chars: int
     budget: int
+    policy: AnswerPolicy
     # Populated by the streaming iterator as it consumes the final
     # usage-bearing chunk. Empty until the stream is exhausted.
     usage: dict = field(default_factory=dict)
@@ -144,13 +144,15 @@ def _prepare_generation(
     parents: list[RetrievedParent],
     history: list[dict] | None,
     budget: int | None,
+    policy: AnswerPolicy | None = None,
 ) -> GenerationPrep:
     """Build the messages list and decide which parents fit under `budget`.
 
     Pure / synchronous: makes no API call. Both `generate()` and
     `stream_generate()` build on this so they agree on what gets sent.
     """
-    effective_budget = MAX_CONTEXT_CHARS if budget is None else max(budget, 0)
+    effective_policy = policy or load_answer_policy()
+    effective_budget = effective_policy.answer_context_chars if budget is None else max(budget, 0)
     context, used = _build_context(parents, effective_budget)
     user_msg = render_prompt("answer_user", context=context, query=query)
 
@@ -171,6 +173,7 @@ def _prepare_generation(
         model=LLM_MODEL,
         context_chars=len(context),
         budget=effective_budget,
+        policy=effective_policy,
     )
 
 
@@ -250,6 +253,7 @@ def generate(
     parents: list[RetrievedParent],
     history: list[dict] | None = None,
     budget: int | None = None,
+    policy: AnswerPolicy | None = None,
 ) -> Answer:
     """Run the answering LLM call (non-streaming).
 
@@ -261,11 +265,12 @@ def generate(
         message only, never into history.
       - `query` is the user's original question, not the retrieval rewrite.
     """
-    prep = _prepare_generation(query, parents, history, budget)
+    prep = _prepare_generation(query, parents, history, budget, policy)
     client = _client()
     resp = client.chat.completions.create(
         model=prep.model,
-        temperature=LLM_TEMPERATURE,
+        temperature=prep.policy.answer_temperature,
+        max_tokens=prep.policy.answer_max_output_tokens,
         messages=prep.messages,
         extra_body={"thinking": {"type": "disabled"}},
     )
@@ -286,6 +291,7 @@ def stream_generate(
     parents: list[RetrievedParent],
     history: list[dict] | None = None,
     budget: int | None = None,
+    policy: AnswerPolicy | None = None,
 ) -> tuple[GenerationPrep, Iterator[str]]:
     """Streaming variant of `generate()`.
 
@@ -298,11 +304,12 @@ def stream_generate(
 
     The same channel-separation rules as `generate()` apply.
     """
-    prep = _prepare_generation(query, parents, history, budget)
+    prep = _prepare_generation(query, parents, history, budget, policy)
     client = _client()
     resp = client.chat.completions.create(
         model=prep.model,
-        temperature=LLM_TEMPERATURE,
+        temperature=prep.policy.answer_temperature,
+        max_tokens=prep.policy.answer_max_output_tokens,
         messages=prep.messages,
         stream=True,
         # Ask the provider to send a final chunk carrying token usage.
