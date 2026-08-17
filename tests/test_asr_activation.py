@@ -330,7 +330,13 @@ def test_local_verifier_has_unique_enabled_profile_and_gpu_assertions():
     assert '$health.status -ne "ok"' in script
     assert '"funasr-sensevoice-small-v1"' in script
     assert '"faster-whisper-large-v3-turbo-v1"' in script
+    assert '"whisperx-large-v3-zh-align-v1"' in script
     assert '"whisperx-large-v3-zh-align-v2"' in script
+    assert (
+        '"$fasterWhisperProfile`n$senseVoiceProfile`n$legacyWhisperXProfile"'
+        in script
+    )
+    assert "$ExpectedProfiles -contains $legacyWhisperXProfile" in script
     assert '($profiles -join "`n") -ne ($ExpectedProfiles -join "`n")' in script
     assert "ASR_FASTER_WHISPER_MODEL_CACHE_ROOT" in script
     assert "ASR_FASTER_WHISPER_MODEL_MANIFEST_PATH" in script
