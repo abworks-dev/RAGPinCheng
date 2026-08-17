@@ -35,6 +35,7 @@ const mocks = vi.hoisted(() => ({
   deleteContent: vi.fn(),
   trash: vi.fn(),
   restoreContent: vi.fn(),
+  auditEvents: vi.fn(),
   fileUrl: vi.fn(),
   info: vi.fn(),
   success: vi.fn(),
@@ -107,6 +108,7 @@ vi.mock("../../api/client", () => ({
     deleteManagedContent: mocks.deleteContent,
     managedContentTrash: mocks.trash,
     restoreManagedContent: mocks.restoreContent,
+    managedContentAuditEvents: mocks.auditEvents,
     managedContentFileUrl: mocks.fileUrl,
   },
 }));
@@ -232,7 +234,8 @@ describe("AdminManagedContentPage", () => {
     mocks.review.mockResolvedValue({ ...item, lifecycle_status: "approved" });
     mocks.deleteContent.mockResolvedValue({ item_id: "item-1", version_id: "version-1", archived_at: 2, previous_status: "awaiting_review", publication_withdrawn: false });
     mocks.trash.mockResolvedValue({ items: [], total: 0, status_counts: {} });
-    mocks.restoreContent.mockResolvedValue({ item_id: "item-1", version_id: "version-1", restored_status: "approved" });
+    mocks.restoreContent.mockResolvedValue({ item_id: "item-1", version_id: "version-1", restored_status: "approved", category_id: "cat-03", moved_to_alternate_category: false, replaced_conflict: false });
+    mocks.auditEvents.mockResolvedValue([]);
     mocks.uploadTasks.mockResolvedValue({ tasks: [], total: 0, status_counts: {} });
     mocks.uploadTask.mockResolvedValue({});
     mocks.indexJobs.mockResolvedValue({ jobs: [], total: 0, status_counts: {} });
@@ -644,9 +647,52 @@ describe("AdminManagedContentPage", () => {
     expect(screen.getAllByText("standard.pdf · v1").length).toBeGreaterThan(0);
     expect(screen.getAllByText("整理员").length).toBeGreaterThan(0);
     fireEvent.click(screen.getAllByRole("button", { name: "恢复" })[0]);
-    expect(screen.getByRole("dialog")).toHaveTextContent("需要具备发布权限的人员重新发布后才会进入检索");
+    expect(screen.getByRole("dialog")).toHaveTextContent("重新发布后才会进入检索");
     fireEvent.click(screen.getByRole("button", { name: "确认恢复" }));
-    await waitFor(() => expect(mocks.restoreContent).toHaveBeenCalledWith("item-1", "version-1"));
+    await waitFor(() => expect(mocks.restoreContent).toHaveBeenCalledWith("item-1", "version-1", { target_category_id: "cat-03" }));
+  });
+
+  it("keeps the restore dialog open and confirms a same-name replacement", async () => {
+    mocks.permissions = [...REVIEWER_PERMISSIONS, "item.archive_published"];
+    mocks.trash.mockResolvedValue({
+      items: [{ ...item, archived_at: 1_700_000_000, archived_by_name: "整理员", pre_archive_lifecycle_status: "published" }],
+      total: 1,
+      status_counts: { published: 1 },
+    });
+    const conflict = {
+      item_id: "item-conflict", version_id: "version-conflict", title: "现有标准",
+      original_filename: "standard.pdf", lifecycle_status: "published", has_published_head: true,
+    };
+    mocks.restoreContent
+      .mockRejectedValueOnce(Object.assign(new Error("当前目录下已存在同名资料"), {
+        code: "content_filename_conflict",
+        body: JSON.stringify({ detail: { conflict } }),
+      }))
+      .mockResolvedValueOnce({ item_id: "item-1", version_id: "version-1", restored_status: "approved", category_id: "cat-03", moved_to_alternate_category: false, replaced_conflict: true });
+    render(<AdminManagedContentPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "回收站" }));
+    fireEvent.click((await screen.findAllByRole("button", { name: "恢复" }))[0]);
+    fireEvent.click(screen.getByRole("button", { name: "确认恢复" }));
+    expect(await screen.findByText("所选目录存在同名资料")).toBeInTheDocument();
+    expect(screen.getByText(/现有标准/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "替换并恢复" }));
+    await waitFor(() => expect(mocks.restoreContent).toHaveBeenLastCalledWith("item-1", "version-1", {
+      target_category_id: "cat-03",
+      replace_conflict_item_id: "item-conflict",
+      replace_conflict_expected_version_id: "version-conflict",
+    }));
+    expect(mocks.success).toHaveBeenCalledWith("已替换同名资料并恢复“建模标准”");
+  });
+
+  it("shows productized trash audit records to a view-only publisher", async () => {
+    mocks.permissions = PUBLISHER_PERMISSIONS;
+    mocks.trash.mockResolvedValue({ items: [{ ...item, archived_at: 1_700_000_000 }], total: 1, status_counts: {} });
+    mocks.auditEvents.mockResolvedValue([{ event_type: "content.archived", actor_name: "整理员", created_at: 1_700_000_000, previous_status: "published", restored_status: null, restore_strategy: null, source_category_path: null, target_category_path: null, category_path: "03 公司内部标准", archive_reason: null, replaced_title: null, replaced_filename: null }]);
+    render(<AdminManagedContentPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "回收站" }));
+    fireEvent.click((await screen.findAllByRole("button", { name: /记录/ }))[0]);
+    expect(await screen.findByRole("dialog", { name: "操作记录" })).toHaveTextContent("操作人：整理员");
+    expect(mocks.auditEvents).toHaveBeenCalledWith("item-1");
   });
 
   it("lets a publisher view trash without exposing restore actions", async () => {
