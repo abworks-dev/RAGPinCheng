@@ -387,8 +387,13 @@ export function PdfPreview() {
     </div>
   ) : null;
 
-  const backAction = state.returnTo === "managed-content-detail" ? (
-    <IconButton label="返回资料详情" onClick={close}>
+  const returnLabel = state.returnTo === "managed-content-detail"
+    ? "返回资料详情"
+    : state.returnTo === "managed-content-review"
+      ? "返回资料审核"
+      : null;
+  const backAction = returnLabel ? (
+    <IconButton label={returnLabel} onClick={close}>
       <ArrowLeft className="size-4" />
     </IconButton>
   ) : null;

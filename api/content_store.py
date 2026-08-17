@@ -664,6 +664,10 @@ def list_content_items(
                    v.source_rel_path,
                    h.current_version_id,j.status AS latest_publication_status,
                    j.error_code AS latest_publication_error_code,
+                   review_user.real_name AS latest_reviewed_by_name,
+                   latest_review.created_at AS latest_reviewed_at,
+                   latest_review.decision AS latest_review_decision,
+                   latest_review.note AS latest_review_note,
                    (SELECT count(*) FROM content_index_jobs jc WHERE jc.version_id=v.id)
                      AS publication_attempt_count
             FROM content_items i
@@ -676,6 +680,11 @@ def list_content_items(
                 SELECT j2.id FROM content_index_jobs j2 WHERE j2.version_id=v.id
                 ORDER BY j2.attempt_number DESC,j2.created_at DESC,j2.id DESC LIMIT 1
             )
+            LEFT JOIN content_reviews latest_review ON latest_review.id=(
+                SELECT r2.id FROM content_reviews r2 WHERE r2.version_id=v.id
+                ORDER BY r2.created_at DESC,r2.rowid DESC LIMIT 1
+            )
+            LEFT JOIN users review_user ON review_user.id=latest_review.reviewer_id
             WHERE {where}
             ORDER BY i.updated_at DESC,i.id""",
         params,
@@ -731,6 +740,11 @@ def list_content_items_page(
                     SELECT j2.id FROM content_index_jobs j2 WHERE j2.version_id=v.id
                     ORDER BY j2.attempt_number DESC,j2.created_at DESC,j2.id DESC LIMIT 1
                 )
+                LEFT JOIN content_reviews latest_review ON latest_review.id=(
+                    SELECT r2.id FROM content_reviews r2 WHERE r2.version_id=v.id
+                    ORDER BY r2.created_at DESC,r2.rowid DESC LIMIT 1
+                )
+                LEFT JOIN users review_user ON review_user.id=latest_review.reviewer_id
                 LEFT JOIN content_audit_events archive_event ON archive_event.id=(
                     SELECT ae.id FROM content_audit_events ae
                     WHERE ae.item_id=i.id AND ae.event_type='content.archived'
@@ -745,6 +759,10 @@ def list_content_items_page(
                           v.source_origin,v.source_batch_id,v.source_rel_path,h.current_version_id,
                           j.status AS latest_publication_status,
                           j.error_code AS latest_publication_error_code,
+                          review_user.real_name AS latest_reviewed_by_name,
+                          latest_review.created_at AS latest_reviewed_at,
+                          latest_review.decision AS latest_review_decision,
+                          latest_review.note AS latest_review_note,
                           i.archived_at,archive_user.real_name AS archived_by_name,
                           archive_event.metadata_json AS archive_metadata_json,
                           (SELECT count(*) FROM content_index_jobs jc WHERE jc.version_id=v.id)
@@ -1240,12 +1258,15 @@ def review_version(
     category_id: str | None,
     actor_user_id: int,
 ) -> sqlite3.Row:
+    normalized_note = (note or "").strip() or None
     row = conn.execute(
         "SELECT item_id,lifecycle_status,source_batch_id FROM content_versions WHERE id=?",
         (version_id,),
     ).fetchone()
     if row is None or row["lifecycle_status"] != "awaiting_review":
         raise ValueError("version_not_reviewable")
+    if not approved and normalized_note is None:
+        raise ValueError("review_note_required")
     if category_id:
         category = conn.execute(
             "SELECT 1 FROM category_nodes WHERE id=? AND is_active=1", (category_id,)
@@ -1260,7 +1281,7 @@ def review_version(
     now = _now()
     conn.execute(
         "INSERT INTO content_reviews(id,version_id,decision,reviewer_id,note,created_at) VALUES (?,?,?,?,?,?)",
-        (_id("review"), version_id, decision, actor_user_id, (note or "").strip() or None, now),
+        (_id("review"), version_id, decision, actor_user_id, normalized_note, now),
     )
     conn.execute(
         "UPDATE content_versions SET lifecycle_status=?,updated_at=? WHERE id=?",

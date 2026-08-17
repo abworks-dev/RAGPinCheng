@@ -439,6 +439,7 @@ export function AdminManagedContentPage() {
   const [selected, setSelected] = useState<string[]>([]);
   const [bulkAction, setBulkAction] = useState<BulkAction | null>(null);
   const [bulkFailures, setBulkFailures] = useState<Array<BulkManagedContentResult & { title: string }>>([]);
+  const [bulkNote, setBulkNote] = useState("");
   const [queryInput, setQueryInput] = useState("");
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
@@ -446,6 +447,12 @@ export function AdminManagedContentPage() {
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(PAGE_SIZE);
   const [detail, setDetail] = useState<ManagedContentItem | null>(null);
+  const [reviewTarget, setReviewTarget] = useState<ManagedContentItem | null>(null);
+  const [reviewDecision, setReviewDecision] = useState<"approve" | "reject">("approve");
+  const [reviewNote, setReviewNote] = useState("");
+  const [reviewError, setReviewError] = useState<string | null>(null);
+  const [publishTarget, setPublishTarget] = useState<ManagedContentItem | null>(null);
+  const [publishError, setPublishError] = useState<string | null>(null);
   const [sort, setSort] = useState<{ key: SortKey; direction: SortDirection } | null>(null);
   const [deleteTargets, setDeleteTargets] = useState<ManagedContentItem[]>([]);
   const [deleteAcknowledged, setDeleteAcknowledged] = useState(false);
@@ -861,6 +868,58 @@ export function AdminManagedContentPage() {
     finally { setBusyAction(null); }
   };
 
+  const openReviewDialog = (item: ManagedContentItem) => {
+    setDetail(null);
+    setReviewTarget(item);
+    setReviewDecision("approve");
+    setReviewNote("");
+    setReviewError(null);
+  };
+
+  const submitReview = async () => {
+    if (!reviewTarget || busyAction === "review") return;
+    const approved = reviewDecision === "approve";
+    if (!approved && !reviewNote.trim()) {
+      setReviewError("退回修改时必须填写原因");
+      return;
+    }
+    setBusyAction("review");
+    setReviewError(null);
+    try {
+      await adminContentApi.review(reviewTarget.version_id, approved, reviewNote);
+      setReviewTarget(null);
+      toast.success(approved ? "资料已确认" : "资料已退回");
+      await load(true);
+    } catch (actionError) {
+      setReviewError(actionError instanceof Error ? actionError.message : "审核失败，请重试");
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const openPublishDialog = (item: ManagedContentItem) => {
+    setDetail(null);
+    setPublishTarget(item);
+    setPublishError(null);
+  };
+
+  const publishContent = async () => {
+    if (!publishTarget || busyAction === "publish") return;
+    const target = publishTarget;
+    setBusyAction("publish");
+    setPublishError(null);
+    try {
+      await adminContentApi.publish(target.version_id);
+      setPublishTarget(null);
+      toast.success("已进入发布队列");
+      await load(true);
+    } catch (actionError) {
+      setPublishError(actionError instanceof Error ? actionError.message : "发布失败，请重试");
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
   const openDeleteDialog = (targets: ManagedContentItem[]) => {
     setDeleteTargets(targets);
     setDeleteAcknowledged(false);
@@ -1010,7 +1069,8 @@ export function AdminManagedContentPage() {
   };
 
   const executeBulk = async () => {
-    if (!bulkAction || selectedItems.length === 0) return;
+    if (!bulkAction || selectedItems.length === 0 || busyAction === "bulk") return;
+    if (bulkAction === "reject" && !bulkNote.trim()) return;
     setBusyAction("bulk"); setBulkFailures([]);
     try {
       const ids = selectedItems.map((item) => item.version_id);
@@ -1021,7 +1081,7 @@ export function AdminManagedContentPage() {
         )
         : bulkAction === "publish"
         ? await adminContentApi.bulkPublish(ids)
-        : await adminContentApi.bulkReview(ids, bulkAction === "approve");
+        : await adminContentApi.bulkReview(ids, bulkAction === "approve", bulkNote);
       const titles = new Map(selectedItems.map((item) => [item.version_id, item.title]));
       const failures = result.results
         .filter((entry) => entry.status === "failed")
@@ -1053,7 +1113,20 @@ export function AdminManagedContentPage() {
     const downloadable = can("item.download");
     const revisionAllowed = can("item.upload") && item.lifecycle_status !== "publishing";
     const deletable = canDeleteItem(item) && item.lifecycle_status !== "publishing";
-    return <div className="ml-auto flex min-h-10 w-[19rem] items-center justify-end gap-1 sm:w-[17.25rem]">
+    const workflow = item.lifecycle_status === "draft" && can("item.submit")
+      ? { label: "提交", action: () => void act(item, "submit", () => adminContentApi.submit(item.version_id), "已提交确认") }
+      : item.lifecycle_status === "rejected" && can("item.submit")
+        ? { label: "重新提交", action: () => void act(item, "submit", () => adminContentApi.submit(item.version_id), "已重新提交确认") }
+        : item.lifecycle_status === "awaiting_review" && can("item.review")
+          ? { label: "审核", action: () => openReviewDialog(item) }
+          : item.lifecycle_status === "approved" && can("item.publish")
+            ? { label: "发布", action: () => openPublishDialog(item) }
+            : item.lifecycle_status === "publication_failed" && can("item.publish")
+              ? { label: "重新发布", action: () => openPublishDialog(item) }
+              : null;
+    return <div className="ml-auto flex w-full flex-col items-stretch gap-2 lg:w-auto lg:flex-row lg:items-center">
+      {workflow && <Button size="sm" className="w-full shrink-0 max-sm:h-10 lg:w-auto" disabled={disabled} onClick={workflow.action}>{workflow.label}</Button>}
+      <div className="ml-auto flex min-h-10 w-full items-center justify-end gap-1 lg:w-[17.25rem]">
       <IconButton label={`查看“${item.title}”的详细信息`} className="border border-border max-sm:size-10" disabled={disabled} onClick={() => setDetail(item)}><Info className="size-4" /></IconButton>
       <IconButton label={previewable ? `查看“${item.title}”` : `查看“${item.title}”（暂无可预览内容）`} className="border border-border max-sm:size-10" disabled={disabled || !previewable} onClick={() => openDocumentPreview(item.preview_parent_id!, item.title, item.doc_type, 1, {}, null)}><Eye className="size-4" /></IconButton>
       <IconButton label={movable ? `移动“${item.title}”` : `移动“${item.title}”（当前状态或权限不允许）`} className="border border-border max-sm:size-10" disabled={disabled || !movable} onClick={() => { setMoveTarget(item); setMoveFolderId(""); setMoveError(null); }}><FolderInput className="size-4" /></IconButton>
@@ -1061,6 +1134,7 @@ export function AdminManagedContentPage() {
       <IconButton label={revisionAllowed ? `重命名“${item.title}”` : `重命名“${item.title}”（当前状态或权限不允许）`} className="border border-border max-sm:size-10" disabled={disabled || !revisionAllowed} onClick={() => openRenameDialog(item)}><Pencil className="size-4" /></IconButton>
       <IconButton label={revisionAllowed ? `更新“${item.title}”` : `更新“${item.title}”（当前状态或权限不允许）`} className="border border-border max-sm:size-10" disabled={disabled || !revisionAllowed} onClick={() => openUpdateDialog(item)}><FileUp className="size-4" /></IconButton>
       <IconButton label={deletable ? `删除“${item.title}”` : `删除“${item.title}”（当前状态或权限不允许）`} className="border border-destructive/30 text-destructive hover:bg-destructive/10 hover:text-destructive max-sm:size-10" disabled={disabled || !deletable} onClick={() => openDeleteDialog([item])}><Trash2 className="size-4" /></IconButton>
+      </div>
     </div>;
   };
 
@@ -1122,9 +1196,9 @@ export function AdminManagedContentPage() {
           <Button size="sm" variant="outline" className="max-sm:h-control-md" onClick={() => void load(true)} disabled={loading || refreshing}><RefreshCw className={refreshing ? "size-4 animate-spin" : "size-4"} />{refreshing ? "刷新中…" : "刷新列表"}</Button>
           {selected.length > 1 ? <BatchActionsMenu disabled={bulkDisabled} options={[
             { key: "move", label: "批量移动", icon: <FolderInput className="size-4" />, disabled: !hasMovableSelection, disabledReason: "所选资料中没有当前账号可移动的资料", onSelect: () => { setBulkFailures([]); setBulkMoveFolderId(""); setBulkAction("move"); } },
-            { key: "approve", label: "批量确认", icon: <Check className="size-4" />, disabled: !can("item.review") || !hasReviewableSelection, disabledReason: "需要确认权限，且至少选择一份待确认资料", onSelect: () => { setBulkFailures([]); setBulkAction("approve"); } },
-            { key: "reject", label: "批量退回", icon: <X className="size-4" />, disabled: !can("item.review") || !hasReviewableSelection, disabledReason: "需要确认权限，且至少选择一份待确认资料", onSelect: () => { setBulkFailures([]); setBulkAction("reject"); } },
-            { key: "publish", label: "批量发布", icon: <Rocket className="size-4" />, disabled: !can("item.publish") || !hasPublishableSelection, disabledReason: "需要发布权限，且至少选择一份已确认或发布失败资料", onSelect: () => { setBulkFailures([]); setBulkAction("publish"); } },
+            { key: "approve", label: "批量确认", icon: <Check className="size-4" />, disabled: !can("item.review") || !hasReviewableSelection, disabledReason: "需要确认权限，且至少选择一份待确认资料", onSelect: () => { setBulkFailures([]); setBulkNote(""); setBulkAction("approve"); } },
+            { key: "reject", label: "批量退回", icon: <X className="size-4" />, disabled: !can("item.review") || !hasReviewableSelection, disabledReason: "需要确认权限，且至少选择一份待确认资料", onSelect: () => { setBulkFailures([]); setBulkNote(""); setBulkAction("reject"); } },
+            { key: "publish", label: "批量发布", icon: <Rocket className="size-4" />, disabled: !can("item.publish") || !hasPublishableSelection, disabledReason: "需要发布权限，且至少选择一份已确认或发布失败资料", onSelect: () => { setBulkFailures([]); setBulkNote(""); setBulkAction("publish"); } },
             { key: "download", label: "批量下载", icon: <Download className="size-4" />, disabled: !hasDownloadableSelection, disabledReason: "需要下载权限", onSelect: () => { void downloadSelected(); } },
             { key: "archive", label: "批量删除", icon: <Trash2 className="size-4" />, disabled: !hasDeletableSelection, disabledReason: "所选资料中没有当前账号可移入回收站的资料", destructive: true, onSelect: () => openDeleteDialog(selectedItems) },
           ]} /> : (can("folder.request") || can("category.manage")) && <Button size="sm" variant="outline" className="max-sm:h-control-md" onClick={() => can("category.manage") ? setNewFolderOpen(true) : setRequestFolderOpen(true)} disabled={!currentFolder || currentFolder.level >= 4}><FolderPlus className="size-4" />新建目录</Button>}
@@ -1150,9 +1224,133 @@ export function AdminManagedContentPage() {
       </div>
     </Card>
 
-    <Dialog open={Boolean(bulkAction && bulkAction !== "archive")} onOpenChange={(open) => { if (!open) { setBulkAction(null); setBulkFailures([]); setBulkMoveFolderId(""); } }}><DialogContent className={bulkAction === "move" ? "max-w-2xl max-h-[calc(100vh-2rem)] overflow-y-auto" : undefined}><DialogHeader><DialogTitle>{bulkAction === "move" ? "批量移动资料" : bulkAction === "publish" ? "批量发布资料" : bulkAction === "reject" ? "批量退回资料" : "批量确认资料"}</DialogTitle><DialogDescription>已选择 {selectedItems.length} 份资料。系统会逐项执行，并保留不符合状态或权限要求的失败原因。</DialogDescription></DialogHeader>{bulkAction === "move" && <CategoryTreePicker categories={categories} value={bulkMoveFolderId} onChange={setBulkMoveFolderId} label="移动到" />}{bulkFailures.length > 0 && <div className="space-y-2 text-ui-sm text-destructive" role="alert"><p>上次操作有 {bulkFailures.length} 份失败：</p><ul className="max-h-48 space-y-1 overflow-y-auto border-y border-destructive/30 py-2">{bulkFailures.map((entry) => <li key={entry.version_id} className="break-words"><span className="font-medium">{entry.title}</span>{entry.message ? `：${entry.message}` : "：请刷新后重试"}</li>)}</ul></div>}<DialogFooter><Button variant="outline" onClick={() => setBulkAction(null)} disabled={busyAction === "bulk"}>取消</Button><Button onClick={() => void executeBulk()} disabled={busyAction === "bulk" || selectedItems.length === 0 || (bulkAction === "move" && !bulkMoveFolderId)}>{busyAction === "bulk" ? "处理中…" : bulkFailures.length ? "重试失败项" : "确认执行"}</Button></DialogFooter></DialogContent></Dialog>
+    <Dialog open={Boolean(bulkAction && bulkAction !== "archive")} onOpenChange={(open) => {
+      if (!open && busyAction !== "bulk") {
+        setBulkAction(null);
+        setBulkFailures([]);
+        setBulkMoveFolderId("");
+        setBulkNote("");
+      }
+    }}>
+      <DialogContent className={bulkAction === "move" ? "max-h-[calc(100vh-2rem)] max-w-2xl overflow-y-auto" : undefined}>
+        <DialogHeader>
+          <DialogTitle>{bulkAction === "move" ? "批量移动资料" : bulkAction === "publish" ? "批量发布资料" : bulkAction === "reject" ? "批量退回资料" : "批量确认资料"}</DialogTitle>
+          <DialogDescription>已选择 {selectedItems.length} 份资料。系统会逐项执行，并保留不符合状态或权限要求的失败原因。</DialogDescription>
+        </DialogHeader>
+        {bulkAction === "move" && <CategoryTreePicker categories={categories} value={bulkMoveFolderId} onChange={setBulkMoveFolderId} label="移动到" />}
+        {bulkAction === "reject" && <label className="block space-y-1.5 text-ui-sm font-medium">
+          <span>退回原因</span>
+          <textarea aria-label="批量退回原因" value={bulkNote} onChange={(event) => setBulkNote(event.target.value)} maxLength={2000} className="min-h-28 w-full resize-y rounded-ui-md border border-input bg-background px-3 py-2 text-ui-sm" placeholder="请说明需要修改的内容" />
+          <span className="block text-right text-ui-xs font-normal text-muted-foreground">{bulkNote.length}/2000</span>
+        </label>}
+        {bulkFailures.length > 0 && <div className="space-y-2 text-ui-sm text-destructive" role="alert"><p>上次操作有 {bulkFailures.length} 份失败：</p><ul className="max-h-48 space-y-1 overflow-y-auto border-y border-destructive/30 py-2">{bulkFailures.map((entry) => <li key={entry.version_id} className="break-words"><span className="font-medium">{entry.title}</span>{entry.message ? `：${entry.message}` : "：请刷新后重试"}</li>)}</ul></div>}
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setBulkAction(null)} disabled={busyAction === "bulk"}>取消</Button>
+          <Button onClick={() => void executeBulk()} disabled={busyAction === "bulk" || selectedItems.length === 0 || (bulkAction === "move" && !bulkMoveFolderId) || (bulkAction === "reject" && !bulkNote.trim())}>{busyAction === "bulk" ? "处理中…" : bulkFailures.length ? "重试失败项" : "确认执行"}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
 
-    <Dialog open={Boolean(detail) && !previewState.parentId} onOpenChange={(open) => { if (!open && !previewState.parentId) setDetail(null); }}><DialogContent className="max-w-2xl"><DialogHeader><DialogTitle>{detail?.title || "资料详情"}</DialogTitle><DialogDescription>核对文件、分类、来源和版本后再确认或发布。</DialogDescription></DialogHeader>{detail && <div className="space-y-4"><PublicationFailure item={detail} /><dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-2 text-ui-sm [&_dt]:whitespace-nowrap"><dt className="text-muted-foreground">文件名</dt><dd className="break-all">{detail.original_filename}</dd><dt className="text-muted-foreground">分类</dt><dd className="break-words">{detail.category_path || detail.category_label}</dd><dt className="text-muted-foreground">状态</dt><dd><Badge variant={statusVariant(detail.lifecycle_status)}>{statusLabel[detail.lifecycle_status]}</Badge></dd><dt className="text-muted-foreground">来源</dt><dd>{sourceLabel[detail.source_origin] || "其他来源"}</dd><dt className="text-muted-foreground">版本</dt><dd>v{detail.version_number}</dd><dt className="text-muted-foreground">创建时间</dt><dd>{formatAdminDate(detail.created_at)}</dd><dt className="text-muted-foreground">最后更新时间</dt><dd className="whitespace-nowrap">{formatAdminDate(detail.updated_at)}</dd><dt className="text-muted-foreground">发布尝试</dt><dd>共 {detail.publication_attempt_count} 次</dd></dl><div className="flex flex-wrap gap-2">{detail.preview_parent_id && ["pdf", "docx", "xlsx", "pptx"].includes(detail.doc_type) ? <Button variant="outline" onClick={() => { openDocumentPreview(detail.preview_parent_id!, detail.title, detail.doc_type, 1, {}, "managed-content-detail"); }}><Eye className="size-4" />预览文件</Button> : detail.doc_type === "pdf" || can("item.download") ? <a className={buttonVariants({ variant: "outline" })} href={adminContentApi.fileUrl(detail.version_id)} target="_blank" rel="noreferrer"><Eye className="size-4" />打开文件</a> : <Button variant="outline" disabled title="打开文件（需要下载权限）"><Eye className="size-4" />打开文件</Button>}{can("item.submit") && ["draft", "rejected"].includes(detail.lifecycle_status) && <Button onClick={() => void act(detail, "submit", () => adminContentApi.submit(detail.version_id), "已提交确认")} disabled={Boolean(busyAction)}><Send className="size-4" />{busyAction === `${detail.version_id}:submit` ? "提交中…" : "提交确认"}</Button>}{can("item.review") && detail.lifecycle_status === "awaiting_review" && <><Button onClick={() => void act(detail, "approve", () => adminContentApi.review(detail.version_id, true), "资料已确认")} disabled={Boolean(busyAction)}><Check className="size-4" />{busyAction === `${detail.version_id}:approve` ? "确认中…" : "确认"}</Button><Button variant="outline" onClick={() => void act(detail, "reject", () => adminContentApi.review(detail.version_id, false), "资料已退回")} disabled={Boolean(busyAction)}><X className="size-4" />{busyAction === `${detail.version_id}:reject` ? "退回中…" : "退回"}</Button></>}{can("item.publish") && ["approved", "publication_failed"].includes(detail.lifecycle_status) && <Button onClick={() => void act(detail, "publish", () => adminContentApi.publish(detail.version_id), "已进入发布队列")} disabled={Boolean(busyAction)}><Rocket className="size-4" />{busyAction === `${detail.version_id}:publish` ? "发布中…" : detail.lifecycle_status === "publication_failed" ? "重新发布" : "发布"}</Button>}</div></div>}</DialogContent></Dialog>
+    <Dialog open={Boolean(detail) && !previewState.parentId} onOpenChange={(open) => { if (!open && !previewState.parentId) setDetail(null); }}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>{detail?.title || "资料详情"}</DialogTitle>
+          <DialogDescription>核对文件、分类、来源、版本和最近审核记录。</DialogDescription>
+        </DialogHeader>
+        {detail && <div className="space-y-4">
+          <PublicationFailure item={detail} />
+          <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-2 text-ui-sm [&_dt]:whitespace-nowrap">
+            <dt className="text-muted-foreground">文件名</dt><dd className="break-all">{detail.original_filename}</dd>
+            <dt className="text-muted-foreground">分类</dt><dd className="break-words">{detail.category_path || detail.category_label}</dd>
+            <dt className="text-muted-foreground">状态</dt><dd><Badge variant={statusVariant(detail.lifecycle_status)}>{statusLabel[detail.lifecycle_status]}</Badge></dd>
+            <dt className="text-muted-foreground">来源</dt><dd>{sourceLabel[detail.source_origin] || "其他来源"}</dd>
+            <dt className="text-muted-foreground">版本</dt><dd>v{detail.version_number}</dd>
+            <dt className="text-muted-foreground">创建时间</dt><dd>{formatAdminDate(detail.created_at)}</dd>
+            <dt className="text-muted-foreground">最后更新时间</dt><dd className="whitespace-nowrap">{formatAdminDate(detail.updated_at)}</dd>
+            <dt className="text-muted-foreground">发布尝试</dt><dd>共 {detail.publication_attempt_count} 次</dd>
+            {detail.latest_review_decision && <>
+              <dt className="text-muted-foreground">最近审核人</dt><dd>{detail.latest_reviewed_by_name || "未知"}</dd>
+              <dt className="text-muted-foreground">审核时间</dt><dd>{detail.latest_reviewed_at ? formatAdminDate(detail.latest_reviewed_at) : "未知"}</dd>
+              <dt className="text-muted-foreground">审核结果</dt><dd>{detail.latest_review_decision === "approved" ? "确认通过" : "退回修改"}</dd>
+              <dt className="text-muted-foreground">{detail.latest_review_decision === "rejected" ? "退回原因" : "审核备注"}</dt><dd className="break-words">{detail.latest_review_note || "未填写"}</dd>
+            </>}
+          </dl>
+          <div className="flex flex-wrap gap-2">
+            {detail.preview_parent_id && ["pdf", "docx", "xlsx", "pptx"].includes(detail.doc_type) ? <Button variant="outline" onClick={() => { openDocumentPreview(detail.preview_parent_id!, detail.title, detail.doc_type, 1, {}, "managed-content-detail"); }}><Eye className="size-4" />预览文件</Button> : detail.doc_type === "pdf" || can("item.download") ? <a className={buttonVariants({ variant: "outline" })} href={adminContentApi.fileUrl(detail.version_id)} target="_blank" rel="noreferrer"><Eye className="size-4" />打开文件</a> : <Button variant="outline" disabled title="打开文件（需要下载权限）"><Eye className="size-4" />打开文件</Button>}
+            {can("item.submit") && ["draft", "rejected"].includes(detail.lifecycle_status) && <Button onClick={() => void act(detail, "submit", () => adminContentApi.submit(detail.version_id), "已提交确认")} disabled={Boolean(busyAction)}><Send className="size-4" />{busyAction === `${detail.version_id}:submit` ? "提交中…" : detail.lifecycle_status === "rejected" ? "重新提交" : "提交"}</Button>}
+            {can("item.review") && detail.lifecycle_status === "awaiting_review" && <Button onClick={() => openReviewDialog(detail)} disabled={Boolean(busyAction)}><Check className="size-4" />审核</Button>}
+            {can("item.publish") && ["approved", "publication_failed"].includes(detail.lifecycle_status) && <Button onClick={() => openPublishDialog(detail)} disabled={Boolean(busyAction)}><Rocket className="size-4" />{detail.lifecycle_status === "publication_failed" ? "重新发布" : "发布"}</Button>}
+          </div>
+        </div>}
+      </DialogContent>
+    </Dialog>
+
+    <Dialog open={Boolean(reviewTarget) && !previewState.parentId} onOpenChange={(open) => {
+      if (!open && !previewState.parentId && busyAction !== "review") {
+        setReviewTarget(null);
+        setReviewError(null);
+      }
+    }}>
+      <DialogContent className="max-h-[calc(100vh-2rem)] max-w-2xl overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>审核资料</DialogTitle>
+          <DialogDescription>确认资料信息并记录本次审核结果。</DialogDescription>
+        </DialogHeader>
+        {reviewTarget && <div className="space-y-4">
+          <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-2 text-ui-sm [&_dt]:whitespace-nowrap">
+            <dt className="text-muted-foreground">资料</dt><dd className="break-words font-medium">{reviewTarget.title}</dd>
+            <dt className="text-muted-foreground">目录</dt><dd className="break-words">{reviewTarget.category_path || reviewTarget.category_label}</dd>
+            <dt className="text-muted-foreground">文件</dt><dd className="break-all">{reviewTarget.original_filename}</dd>
+            <dt className="text-muted-foreground">版本</dt><dd>v{reviewTarget.version_number}</dd>
+            <dt className="text-muted-foreground">来源</dt><dd>{sourceLabel[reviewTarget.source_origin] || "其他来源"}</dd>
+          </dl>
+          <div>
+            {reviewTarget.preview_parent_id && ["pdf", "docx", "xlsx", "pptx"].includes(reviewTarget.doc_type) ? <Button variant="outline" onClick={() => openDocumentPreview(reviewTarget.preview_parent_id!, reviewTarget.title, reviewTarget.doc_type, 1, {}, "managed-content-review")}><Eye className="size-4" />预览文件</Button> : reviewTarget.doc_type === "pdf" || can("item.download") ? <a className={buttonVariants({ variant: "outline" })} href={adminContentApi.fileUrl(reviewTarget.version_id)} target="_blank" rel="noreferrer"><Eye className="size-4" />打开文件</a> : <Button variant="outline" disabled title="打开文件（需要下载权限）"><Eye className="size-4" />打开文件</Button>}
+          </div>
+          <div className="grid grid-cols-2 gap-2" role="group" aria-label="审核结果">
+            <Button type="button" aria-label="选择确认通过" variant={reviewDecision === "approve" ? "default" : "outline"} aria-pressed={reviewDecision === "approve"} disabled={busyAction === "review"} onClick={() => { setReviewDecision("approve"); setReviewError(null); }}><Check className="size-4" />确认通过</Button>
+            <Button type="button" aria-label="选择退回修改" variant={reviewDecision === "reject" ? "destructive" : "outline"} aria-pressed={reviewDecision === "reject"} disabled={busyAction === "review"} onClick={() => { setReviewDecision("reject"); setReviewError(null); }}><X className="size-4" />退回修改</Button>
+          </div>
+          <label className="block space-y-1.5 text-ui-sm font-medium">
+            <span>{reviewDecision === "approve" ? "审核备注（可选）" : "退回原因"}</span>
+            <textarea aria-label={reviewDecision === "approve" ? "审核备注（可选）" : "退回原因"} value={reviewNote} onChange={(event) => { setReviewNote(event.target.value); setReviewError(null); }} maxLength={2000} className="min-h-28 w-full resize-y rounded-ui-md border border-input bg-background px-3 py-2 text-ui-sm" placeholder={reviewDecision === "approve" ? "可记录审核依据" : "请说明需要修改的内容"} autoFocus />
+            <span className="block text-right text-ui-xs font-normal text-muted-foreground">{reviewNote.length}/2000</span>
+          </label>
+          {reviewError && <p className="rounded-ui-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-ui-sm text-destructive" role="alert">{reviewError}</p>}
+        </div>}
+        <DialogFooter>
+          <Button variant="outline" disabled={busyAction === "review"} onClick={() => setReviewTarget(null)}>取消</Button>
+          <Button variant={reviewDecision === "reject" ? "destructive" : "default"} disabled={busyAction === "review" || (reviewDecision === "reject" && !reviewNote.trim())} onClick={() => void submitReview()}>{busyAction === "review" ? "提交中…" : reviewDecision === "approve" ? "确认通过" : "确认退回"}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog open={Boolean(publishTarget)} onOpenChange={(open) => {
+      if (!open && busyAction !== "publish") {
+        setPublishTarget(null);
+        setPublishError(null);
+      }
+    }}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{publishTarget?.lifecycle_status === "publication_failed" ? "重新发布资料" : "发布资料"}</DialogTitle>
+          <DialogDescription>发布后系统会创建索引任务，完成后资料才会进入知识库检索。</DialogDescription>
+        </DialogHeader>
+        {publishTarget && <div className="space-y-3 text-ui-sm">
+          <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-2">
+            <dt className="text-muted-foreground">资料</dt><dd className="break-words font-medium">{publishTarget.title}</dd>
+            <dt className="text-muted-foreground">目录</dt><dd className="break-words">{publishTarget.category_path || publishTarget.category_label}</dd>
+            <dt className="text-muted-foreground">版本</dt><dd>v{publishTarget.version_number}</dd>
+          </dl>
+          <PublicationFailure item={publishTarget} />
+          {publishError && <p className="rounded-ui-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-destructive" role="alert">{publishError}</p>}
+        </div>}
+        <DialogFooter>
+          <Button variant="outline" disabled={busyAction === "publish"} onClick={() => setPublishTarget(null)}>取消</Button>
+          <Button disabled={busyAction === "publish"} onClick={() => void publishContent()}>{busyAction === "publish" ? "发布中…" : publishTarget?.lifecycle_status === "publication_failed" ? "确认重新发布" : "确认发布"}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
 
     <Dialog open={requestFolderOpen} onOpenChange={setRequestFolderOpen}><DialogContent><DialogHeader><DialogTitle>申请新建文件夹</DialogTitle><DialogDescription>申请将在“{currentFolder?.display_name || "当前目录"}”下创建受控目录，由资料负责人审批。</DialogDescription></DialogHeader><label className="space-y-1.5 text-ui-sm font-medium"><span>文件夹名称</span><Input value={requestFolderName} onChange={(event) => setRequestFolderName(event.target.value)} placeholder="例如：净高分析" autoFocus /></label><DialogFooter><Button variant="outline" onClick={() => setRequestFolderOpen(false)} disabled={busyAction === "request-folder"}>取消</Button><Button onClick={() => void requestFolder()} disabled={!requestFolderName.trim() || busyAction === "request-folder"}>{busyAction === "request-folder" ? "提交中…" : "提交申请"}</Button></DialogFooter></DialogContent></Dialog>
 

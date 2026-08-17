@@ -622,20 +622,20 @@ export const api = {
       method: "POST",
       body: JSON.stringify({}),
     }),
-  reviewManagedContent: (versionId: string, approved: boolean, categoryId?: string) =>
+  reviewManagedContent: (versionId: string, approved: boolean, note?: string, categoryId?: string) =>
     jsonFetch<ManagedContentItem>(`/api/admin/content/versions/${encodeURIComponent(versionId)}/review`, {
       method: "POST",
-      body: JSON.stringify({ approved, category_id: categoryId || null }),
+      body: JSON.stringify({ approved, note: note?.trim() || null, category_id: categoryId || null }),
     }),
   publishManagedContent: (versionId: string) =>
     jsonFetch<{ publication_id: string; index_job_id: string; status: string }>(
       `/api/admin/content/versions/${encodeURIComponent(versionId)}/publish`,
       { method: "POST", body: JSON.stringify({}) },
     ),
-  bulkReviewManagedContent: (versionIds: string[], approved: boolean) =>
+  bulkReviewManagedContent: (versionIds: string[], approved: boolean, note?: string) =>
     jsonFetch<BulkManagedContentResponse>("/api/admin/content/bulk-review", {
       method: "POST",
-      body: JSON.stringify({ version_ids: versionIds, approved }),
+      body: JSON.stringify({ version_ids: versionIds, approved, note: note?.trim() || null }),
     }),
   bulkPublishManagedContent: (versionIds: string[]) =>
     jsonFetch<BulkManagedContentResponse>("/api/admin/content/bulk-publish", {

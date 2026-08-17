@@ -376,7 +376,47 @@ test.describe("资料管理", () => {
     const republish = detail.getByRole("button", { name: "重新发布" });
     await expect(republish).toBeEnabled();
     await republish.click();
-    await expect(detail.getByRole("button", { name: "发布中…" })).toBeDisabled();
+    const confirmation = page.getByRole("dialog", { name: "重新发布资料" });
+    await expect(confirmation).toContainText("完成后资料才会进入知识库检索");
+    await confirmation.getByRole("button", { name: "确认重新发布" }).click();
+    await expect(confirmation.getByRole("button", { name: "发布中…" })).toBeDisabled();
+    await expectNoBodyOverflow(page);
+  });
+
+  test("review workflow requires a rejection reason and preserves its busy layout", async ({ page }) => {
+    await openTab(page, "资料管理");
+    await openRootFolder(page);
+    const title = page.getByText("机电专业协同检查清单", { exact: true }).filter({ visible: true });
+    const item = page.viewportSize()!.width < 1024 ? title.locator("xpath=ancestor::li") : title.locator("xpath=ancestor::tr");
+    const workflow = item.getByRole("button", { name: "审核", exact: true });
+    await expect(workflow).toBeVisible();
+    if (page.viewportSize()!.width === 390) {
+      const workflowBox = await workflow.boundingBox();
+      const detailBox = await item.getByRole("button", { name: "查看“机电专业协同检查清单”的详细信息" }).boundingBox();
+      expect(workflowBox).not.toBeNull();
+      expect(detailBox).not.toBeNull();
+      expect(workflowBox!.y + workflowBox!.height).toBeLessThanOrEqual(detailBox!.y);
+      await expectTouchTarget(workflow);
+    }
+    await workflow.click();
+
+    const dialog = page.getByRole("dialog", { name: "审核资料" });
+    await expect(dialog).toContainText("04 项目资料 / 02 竣工交付 / 01 模型成果");
+    await expect(dialog).toContainText("v2");
+    await expect(dialog.getByRole("button", { name: "预览文件" })).toBeVisible();
+    await dialog.getByRole("button", { name: "预览文件" }).click();
+    await expect(page.getByRole("button", { name: "返回资料审核" })).toBeVisible();
+    await page.getByRole("button", { name: "返回资料审核" }).click();
+    await expect(dialog).toBeVisible();
+
+    await dialog.getByRole("button", { name: "选择退回修改" }).click();
+    const confirm = dialog.getByRole("button", { name: "确认退回" });
+    await expect(confirm).toBeDisabled();
+    const reason = dialog.getByRole("textbox", { name: "退回原因" });
+    await reason.fill("请补充机电碰撞检查范围");
+    await confirm.click();
+    await expect(dialog.getByRole("button", { name: "提交中…" })).toBeDisabled();
+    await expect(reason).toHaveValue("请补充机电碰撞检查范围");
     await expectNoBodyOverflow(page);
   });
 

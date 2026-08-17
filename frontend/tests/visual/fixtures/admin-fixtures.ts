@@ -60,7 +60,7 @@ export const items = [
   category_label: index % 2 ? "04 项目资料" : "03 公司内部标准",
   category_path: index % 2 ? "04 项目资料 / 02 竣工交付 / 01 模型成果" : "03 公司内部标准 / 01 建模 / 02 机电",
   media_id: null,
-  preview_parent_id: index === 0 ? "parent-ready" : null,
+  preview_parent_id: index <= 1 ? "parent-ready" : null,
   version_id: `version-${index + 1}`,
   version_number: index + 1,
   original_filename: filename,
@@ -74,6 +74,10 @@ export const items = [
   latest_publication_status: null,
   publication_attempt_count: 0,
   publication_failure: null,
+  latest_reviewed_by_name: index === 1 ? "合成审核员" : null,
+  latest_reviewed_at: index === 1 ? 1700000500 : null,
+  latest_review_decision: index === 1 ? "rejected" : null,
+  latest_review_note: index === 1 ? "请补充机电碰撞检查范围" : null,
   created_at: 1700000000,
   updated_at: 1700000000,
 }));
@@ -498,6 +502,13 @@ export async function installAdminRoutes(
     if (path === "/api/conversations" && request.method() === "POST") return json(route, { ...adminConversations[0] });
     if (request.method() === "GET" && path.startsWith("/api/pdf/")) {
       return route.fulfill({ status: 404, contentType: "application/pdf", body: "" });
+    }
+    if (request.method() === "GET" && path === "/api/source/parent-ready/raw") {
+      return route.fulfill({
+        status: 200,
+        contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        body: "synthetic docx fixture",
+      });
     }
     if (request.method() === "GET" && /^\/api\/admin\/content\/versions\/[^/]+\/file$/.test(path)) {
       return route.fulfill({ status: 200, contentType: "application/pdf", body: "%PDF synthetic fixture" });

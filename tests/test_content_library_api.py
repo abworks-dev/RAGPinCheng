@@ -938,6 +938,108 @@ def test_managed_content_page_supports_filters_counts_and_category_paths(content
     assert body["items"][0]["category_path"] == "03 公司内部标准"
 
 
+def test_review_requires_rejection_reason_and_exposes_latest_audit(content_api):
+    client, sessions, _queued, _db_path = content_api
+    organizer_auth = _auth(sessions, "organizer", csrf=True)
+    reviewer_auth = _auth(sessions, "reviewer", csrf=True)
+    uploaded = client.post(
+        "/api/admin/content/uploads",
+        data={"category_id": "cat-03"},
+        files=[("files", ("review.md", b"# review", "text/markdown"))],
+        **organizer_auth,
+    ).json()["entries"][0]
+    version_id = uploaded["version_id"]
+    client.post(
+        f"/api/admin/content/versions/{version_id}/submit", json={}, **organizer_auth
+    )
+    review_url = f"/api/admin/content/versions/{version_id}/review"
+
+    missing = client.post(
+        review_url, json={"approved": False}, **reviewer_auth
+    )
+    assert missing.status_code == 400
+    assert missing.json()["detail"] == "退回修改时必须填写原因"
+    blank = client.post(
+        review_url, json={"approved": False, "note": "   "}, **reviewer_auth
+    )
+    assert blank.status_code == 400
+
+    rejected = client.post(
+        review_url,
+        json={"approved": False, "note": "  请补充适用范围  "},
+        **reviewer_auth,
+    )
+    assert rejected.status_code == 200
+    rejected_body = rejected.json()
+    assert rejected_body["lifecycle_status"] == "rejected"
+    assert rejected_body["latest_reviewed_by_name"] == "负责人"
+    assert rejected_body["latest_reviewed_at"] is not None
+    assert rejected_body["latest_review_decision"] == "rejected"
+    assert rejected_body["latest_review_note"] == "请补充适用范围"
+
+    listed = client.get(
+        "/api/admin/content/items-page?category_id=cat-03",
+        **_auth(sessions, "reviewer"),
+    )
+    listed_item = next(
+        item for item in listed.json()["items"] if item["version_id"] == version_id
+    )
+    assert listed_item["latest_reviewed_by_name"] == "负责人"
+    assert listed_item["latest_review_decision"] == "rejected"
+    assert listed_item["latest_review_note"] == "请补充适用范围"
+
+    client.post(
+        f"/api/admin/content/versions/{version_id}/submit", json={}, **organizer_auth
+    )
+    approved = client.post(review_url, json={"approved": True}, **reviewer_auth)
+    assert approved.status_code == 200
+    assert approved.json()["latest_review_decision"] == "approved"
+    assert approved.json()["latest_review_note"] is None
+
+
+def test_bulk_rejection_requires_and_persists_reason(content_api):
+    client, sessions, _queued, _db_path = content_api
+    organizer_auth = _auth(sessions, "organizer", csrf=True)
+    uploaded = client.post(
+        "/api/admin/content/uploads",
+        data={"category_id": "cat-03"},
+        files=[("files", ("bulk-reject.md", b"# bulk", "text/markdown"))],
+        **organizer_auth,
+    ).json()["entries"][0]
+    version_id = uploaded["version_id"]
+    client.post(
+        f"/api/admin/content/versions/{version_id}/submit", json={}, **organizer_auth
+    )
+    review_auth = _auth(sessions, "reviewer", csrf=True)
+
+    missing = client.post(
+        "/api/admin/content/bulk-review",
+        json={"version_ids": [version_id], "approved": False, "note": " "},
+        **review_auth,
+    )
+    assert missing.status_code == 400
+    assert missing.json()["detail"] == "批量退回时必须填写原因"
+
+    rejected = client.post(
+        "/api/admin/content/bulk-review",
+        json={
+            "version_ids": [version_id],
+            "approved": False,
+            "note": "统一补充版本说明",
+        },
+        **review_auth,
+    )
+    assert rejected.status_code == 200
+    assert rejected.json()["succeeded"] == 1
+    listed = client.get(
+        "/api/admin/content/items-page?category_id=cat-03",
+        **_auth(sessions, "reviewer"),
+    ).json()["items"]
+    listed_item = next(item for item in listed if item["version_id"] == version_id)
+    assert listed_item["latest_review_decision"] == "rejected"
+    assert listed_item["latest_review_note"] == "统一补充版本说明"
+
+
 def test_bulk_review_and_publish_report_partial_failures(content_api):
     client, sessions, queued, _db_path = content_api
     uploaded = client.post(
