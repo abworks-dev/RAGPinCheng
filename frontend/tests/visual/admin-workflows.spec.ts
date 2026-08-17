@@ -442,15 +442,23 @@ test.describe("资料管理", () => {
     const item = page.viewportSize()!.width < 1024 ? title.locator("xpath=ancestor::li") : title.locator("xpath=ancestor::tr");
     const workflow = item.getByRole("button", { name: "审核", exact: true });
     const detailButton = item.getByRole("button", { name: "查看“机电专业协同检查清单”的详细信息" });
+    const deleteButton = item.getByRole("button", { name: "删除“机电专业协同检查清单”" });
     await expect(workflow).toBeVisible();
     if (page.viewportSize()!.width >= 1024) {
       const workflowBox = await workflow.boundingBox();
       const detailBox = await detailButton.boundingBox();
+      const actionCellBox = await item.locator("td").last().boundingBox();
+      const deleteBox = await deleteButton.boundingBox();
       expect(workflowBox).not.toBeNull();
       expect(detailBox).not.toBeNull();
+      expect(actionCellBox).not.toBeNull();
+      expect(deleteBox).not.toBeNull();
       const actionGap = detailBox!.x - (workflowBox!.x + workflowBox!.width);
       expect(actionGap).toBeGreaterThanOrEqual(4);
       expect(actionGap).toBeLessThanOrEqual(12);
+      const rightGap = actionCellBox!.x + actionCellBox!.width - (deleteBox!.x + deleteBox!.width);
+      expect(rightGap).toBeGreaterThanOrEqual(8);
+      expect(rightGap).toBeLessThanOrEqual(16);
     } else if (page.viewportSize()!.width === 390) {
       const workflowBox = await workflow.boundingBox();
       const detailBox = await detailButton.boundingBox();
