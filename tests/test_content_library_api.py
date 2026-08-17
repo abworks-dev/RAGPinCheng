@@ -712,6 +712,99 @@ def test_category_update_uses_csrf_and_optimistic_version(content_api):
     assert updated.json()["version"] == 2
 
 
+def test_category_manager_can_reorder_and_reparent_categories(content_api):
+    client, sessions, _queued, db_path = content_api
+    auth = _auth(sessions, "category_manager", csrf=True)
+    categories = client.get(
+        "/api/admin/content/categories?include_inactive=true",
+        **_auth(sessions, "category_manager"),
+    ).json()
+    by_id = {category["id"]: category for category in categories}
+
+    reordered = client.post(
+        "/api/admin/content/categories/cat-99/move",
+        json={
+            "target_parent_id": None,
+            "before_category_id": "cat-02",
+            "expected_version": by_id["cat-99"]["version"],
+        },
+        **auth,
+    )
+    assert reordered.status_code == 200
+    assert [row["id"] for row in reordered.json() if row["parent_id"] is None][:3] == [
+        "cat-01", "cat-99", "cat-02",
+    ]
+
+    current = next(row for row in reordered.json() if row["id"] == "cat-05")
+    moved = client.post(
+        "/api/admin/content/categories/cat-05/move",
+        json={
+            "target_parent_id": "cat-03",
+            "before_category_id": None,
+            "expected_version": current["version"],
+        },
+        **auth,
+    )
+    assert moved.status_code == 200
+    moved_row = next(row for row in moved.json() if row["id"] == "cat-05")
+    assert (moved_row["parent_id"], moved_row["level"], moved_row["full_path"]) == (
+        "cat-03", 2, "03 公司内部标准 / 05 培训资料",
+    )
+
+    conn = connect(db_path)
+    try:
+        events = conn.execute(
+            "SELECT count(*) FROM content_audit_events WHERE event_type='category.moved'"
+        ).fetchone()[0]
+        assert events == 2
+    finally:
+        conn.close()
+
+
+def test_category_move_rejects_cycles_depth_conflicts_and_stale_versions(content_api):
+    client, sessions, _queued, db_path = content_api
+    conn = connect(db_path)
+    now = int(time.time())
+    conn.executemany(
+        """INSERT INTO category_nodes
+           (id,category_key,parent_id,display_code,display_name,sort_order,level,is_active,created_at,updated_at)
+           VALUES (?,?,?,?,?,?,?,1,?,?)""",
+        [
+            ("cat-cycle-child", "cycle_child", "cat-03", "01", "循环子类", 10, 2, now, now),
+            ("cat-depth-2", "depth_2", "cat-04", "01", "第二级", 10, 2, now, now),
+            ("cat-depth-3", "depth_3", "cat-depth-2", "01", "第三级", 10, 3, now, now),
+            ("cat-depth-4", "depth_4", "cat-depth-3", "01", "第四级", 10, 4, now, now),
+        ],
+    )
+    conn.commit()
+    conn.close()
+    auth = _auth(sessions, "category_manager", csrf=True)
+
+    cycle = client.post(
+        "/api/admin/content/categories/cat-03/move",
+        json={"target_parent_id": "cat-cycle-child", "before_category_id": None, "expected_version": 1},
+        **auth,
+    )
+    assert cycle.status_code == 409
+    assert cycle.json()["detail"] == "分类不能移动到自身或其子分类中"
+
+    too_deep = client.post(
+        "/api/admin/content/categories/cat-01/move",
+        json={"target_parent_id": "cat-depth-4", "before_category_id": None, "expected_version": 1},
+        **auth,
+    )
+    assert too_deep.status_code == 409
+    assert too_deep.json()["detail"] == "移动后分类层级将超过四级"
+
+    stale = client.post(
+        "/api/admin/content/categories/cat-02/move",
+        json={"target_parent_id": None, "before_category_id": "cat-01", "expected_version": 99},
+        **auth,
+    )
+    assert stale.status_code == 409
+    assert stale.json()["detail"] == "分类已被其他人修改，请刷新后重试"
+
+
 def test_category_with_active_child_cannot_be_disabled(content_api):
     client, sessions, _queued, db_path = content_api
     conn = connect(db_path)
