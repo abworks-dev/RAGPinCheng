@@ -80,6 +80,43 @@ test.describe("资料管理", () => {
     await expect(batchButton).toBeFocused();
   });
 
+  test("upload tasks keep columns aligned and apply explicit search filters", async ({ page }, testInfo) => {
+    await openTab(page, "资料管理");
+    await page.getByRole("tab", { name: "上传任务" }).click();
+    await expect(page.getByRole("heading", { name: "上传任务" })).toBeVisible();
+    await expect(page.getByText("已接收 2 个 · 跳过 1 个")).toBeVisible();
+    await expect(page.getByText("未完成 1 个")).toBeVisible();
+    await expectNoBodyOverflow(page);
+    await page.screenshot({ path: testInfo.outputPath("managed-content-upload-tasks-normal.png"), fullPage: true });
+
+    if (page.viewportSize()!.width >= 1280) {
+      const headerX = await page.getByTestId("upload-task-header").locator(":scope > span").evaluateAll((cells) => cells.map((cell) => cell.getBoundingClientRect().x));
+      const rows = page.getByTestId("upload-task-row");
+      for (let index = 0; index < await rows.count(); index += 1) {
+        const rowX = await rows.nth(index).locator(":scope > *").evaluateAll((cells) => cells.map((cell) => cell.getBoundingClientRect().x));
+        expect(rowX).toHaveLength(headerX.length);
+        rowX.forEach((x, column) => expect(Math.abs(x - headerX[column])).toBeLessThanOrEqual(1));
+      }
+    } else {
+      await expect(page.getByTestId("upload-task-header")).toBeHidden();
+    }
+
+    const search = page.getByRole("searchbox", { name: "搜索上传任务" });
+    await search.fill("竣工交付");
+    const searchRequest = page.waitForRequest((request) => new URL(request.url()).searchParams.get("query") === "竣工交付");
+    await page.getByRole("button", { name: "搜索", exact: true }).click();
+    await searchRequest;
+    await expect(page.getByText("04 项目资料 / 02 竣工交付")).toBeVisible();
+    await expect(page.getByText("01 行业规范与标准 / 02 文件夹上传测试")).toHaveCount(0);
+
+    await page.getByRole("button", { name: "清除筛选", exact: true }).click();
+    await expect(page.getByText("01 行业规范与标准 / 02 文件夹上传测试")).toBeVisible();
+    await page.getByRole("button", { name: /失败\s*1/ }).click();
+    await expect(page.getByText("01 行业规范与标准 / 02 文件夹上传测试")).toBeVisible();
+    await expect(page.getByText("04 项目资料 / 02 竣工交付")).toHaveCount(0);
+    await expectNoBodyOverflow(page);
+  });
+
   test("child folders share the list and stay before paginated files", async ({ page }) => {
     await openTab(page, "资料管理", "normal", "admin", { includeChildFolder: true });
     await openRootFolder(page);

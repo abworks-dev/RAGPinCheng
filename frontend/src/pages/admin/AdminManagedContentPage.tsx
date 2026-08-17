@@ -77,6 +77,39 @@ function uploadTaskEntryStatus(entry: ManagedUploadTaskEntry) {
   return entry.status === "accepted" ? "已接收" : "已跳过";
 }
 
+function UploadTaskResult({ task }: { task: ManagedUploadTask }) {
+  const total = Math.max(0, task.total_files);
+  const accepted = Math.min(total, Math.max(0, task.accepted_files));
+  const skipped = Math.min(total - accepted, Math.max(0, task.skipped_files));
+  const unresolved = Math.max(0, total - accepted - skipped);
+  const processed = accepted + skipped;
+  const processedPercent = total > 0 ? Math.round((processed / total) * 100) : 0;
+  const acceptedPercent = total > 0 ? (accepted / total) * 100 : 0;
+  const skippedPercent = total > 0 ? (skipped / total) * 100 : 0;
+  const unresolvedPercent = total > 0 ? (unresolved / total) * 100 : 0;
+
+  const summary = task.status === "processing"
+    ? `已处理 ${processed} / ${total} 个`
+    : task.status === "completed"
+      ? `已接收 ${accepted} / ${total} 个`
+      : [accepted > 0 ? `已接收 ${accepted} 个` : null, skipped > 0 ? `跳过 ${skipped} 个` : null, unresolved > 0 ? `未完成 ${unresolved} 个` : null]
+        .filter(Boolean)
+        .join(" · ") || "没有文件被接收";
+
+  return <div className="min-w-0">
+    <div className="flex items-center justify-between gap-2 text-ui-xs">
+      <span className="text-muted-foreground">{summary}</span>
+      {task.status === "processing" && <span className="shrink-0 tabular-nums text-muted-foreground">{processedPercent}%</span>}
+    </div>
+    <div className="mt-1.5 flex h-1.5 overflow-hidden rounded-full bg-surface-muted" role="img" aria-label={`处理结果：${summary}`}>
+      {acceptedPercent > 0 && <span className="h-full bg-success" style={{ width: `${acceptedPercent}%` }} />}
+      {skippedPercent > 0 && <span className="h-full bg-warning" style={{ width: `${skippedPercent}%` }} />}
+      {task.status === "failed" && unresolvedPercent > 0 && <span className="h-full bg-destructive" style={{ width: `${unresolvedPercent}%` }} />}
+      {task.status === "processing" && processed === 0 && <span className="h-full w-1/4 animate-pulse bg-primary" />}
+    </div>
+  </div>;
+}
+
 function UploadTasksPanel({
   activeUpload,
   canRetry,
@@ -99,10 +132,6 @@ function UploadTasksPanel({
   const [detailLoading, setDetailLoading] = useState(false);
   const pageSize = 10;
 
-  useEffect(() => {
-    const timer = window.setTimeout(() => setQuery(queryInput.trim()), 250);
-    return () => window.clearTimeout(timer);
-  }, [queryInput]);
   useEffect(() => { setPage(0); }, [query, statusFilter]);
 
   const loadTasks = useCallback(async () => {
@@ -134,6 +163,18 @@ function UploadTasksPanel({
   };
   const visibleTasks = tasks;
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  const hasFilters = Boolean(query) || statusFilter !== "all";
+  const applySearch = () => {
+    const nextQuery = queryInput.trim();
+    setPage(0);
+    setQuery(nextQuery);
+  };
+  const clearFilters = () => {
+    setQueryInput("");
+    setQuery("");
+    setStatusFilter("all");
+    setPage(0);
+  };
   const progressPercent = activeUpload && activeUpload.totalBytes > 0
     ? Math.min(100, Math.round((activeUpload.loadedBytes / activeUpload.totalBytes) * 100))
     : activeUpload?.phase === "completed" ? 100 : 0;
@@ -146,13 +187,22 @@ function UploadTasksPanel({
       <Button size="sm" variant="outline" onClick={() => void loadTasks()} disabled={loading}><RefreshCw className={loading ? "size-4 animate-spin" : "size-4"} />刷新任务</Button>
     </header>
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-4" aria-label="上传任务状态概览">
-      {[{ key: "active", label: "进行中", value: (counts.processing || 0) + (activeUpload && ["uploading", "processing"].includes(activeUpload.phase) ? 1 : 0), icon: <Upload className="size-4" /> }, { key: "completed", label: "已完成", value: counts.completed || 0, icon: <CheckCircle2 className="size-4" /> }, { key: "partial_success", label: "部分成功", value: counts.partial_success || 0, icon: <AlertTriangle className="size-4" /> }, { key: "failed", label: "失败", value: counts.failed || 0, icon: <XCircle className="size-4" /> }].map((summary) => <button type="button" key={summary.key} className={`rounded-ui-lg border bg-background p-3 text-left transition-colors hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${statusFilter === summary.key ? "border-primary ring-1 ring-primary/30" : "border-border"}`} onClick={() => setStatusFilter(summary.key as typeof statusFilter)}><span className="flex items-center justify-between text-ui-xs text-muted-foreground"><span>{summary.label}</span>{summary.icon}</span><span className="mt-2 block text-ui-xl font-semibold tabular-nums">{summary.value}</span></button>)}
+      {[{ key: "active", label: "进行中", value: (counts.processing || 0) + (activeUpload && ["uploading", "processing"].includes(activeUpload.phase) ? 1 : 0), icon: <Upload className="size-4" /> }, { key: "completed", label: "已完成", value: counts.completed || 0, icon: <CheckCircle2 className="size-4" /> }, { key: "partial_success", label: "部分成功", value: counts.partial_success || 0, icon: <AlertTriangle className="size-4" /> }, { key: "failed", label: "失败", value: counts.failed || 0, icon: <XCircle className="size-4" /> }].map((summary) => <button type="button" key={summary.key} className={`rounded-ui-lg border bg-background p-3 text-left transition-colors hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${statusFilter === summary.key ? "border-primary ring-1 ring-primary/30" : "border-border"}`} aria-pressed={statusFilter === summary.key} onClick={() => setStatusFilter((current) => current === summary.key ? "all" : summary.key as typeof statusFilter)}><span className="flex items-center justify-between text-ui-xs text-muted-foreground"><span>{summary.label}</span>{summary.icon}</span><span className="mt-2 block text-ui-xl font-semibold tabular-nums">{summary.value}</span></button>)}
     </div>
     {activeUpload && <div className="rounded-ui-lg border border-primary/40 bg-primary/5 px-4 py-3" role="status" aria-live="polite"><div className="flex items-start gap-3">{activeStatusIcon}<div className="min-w-0 flex-1"><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium">{activeLabel}</p><span className="text-ui-xs tabular-nums text-muted-foreground">{progressPercent}%</span></div><p className="mt-1 break-words text-ui-xs text-muted-foreground">{activeUpload.uploadMode === "folder" ? "文件夹" : "文件"} · {activeUpload.totalFiles} 个 · {activeUpload.targetPath}</p><div className="mt-2 h-2 overflow-hidden rounded-full bg-primary/15"><div className="h-full rounded-full bg-primary transition-[width] duration-normal" style={{ width: `${progressPercent}%` }} /></div>{activeUpload.message && <p className="mt-2 break-words text-ui-xs text-destructive">{activeUpload.message}</p>}</div></div></div>}
     <Card className="overflow-hidden shadow-surface">
-      <div className="grid gap-3 border-b border-border px-4 py-4 sm:px-5 lg:grid-cols-[minmax(16rem,1fr)_auto]"><label className="space-y-1 text-ui-xs text-muted-foreground"><span>搜索任务</span><span className="relative block"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2" /><Input className="pl-9" value={queryInput} onChange={(event) => setQueryInput(event.target.value)} placeholder="搜索目录、文件名或任务…" /></span></label><div className="flex items-end gap-2"><Button size="sm" variant="outline" onClick={() => { setQueryInput(""); setStatusFilter("all"); }} disabled={!queryInput && statusFilter === "all"}>清除筛选</Button><span className="pb-2 text-ui-xs text-muted-foreground">共 {total} 个任务</span></div></div>
+      <div className="grid gap-3 border-b border-border px-4 py-4 sm:px-5 lg:grid-cols-[minmax(16rem,1fr)_auto] lg:items-end">
+        <form className="grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end" role="search" onSubmit={(event) => { event.preventDefault(); applySearch(); }}>
+          <label className="min-w-0 space-y-1 text-ui-xs text-muted-foreground"><span>搜索任务</span><span className="relative block"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2" /><Input type="search" aria-label="搜索上传任务" className="pl-9" value={queryInput} onChange={(event) => setQueryInput(event.target.value)} placeholder="搜索目标目录或文件名…" /></span></label>
+          <Button type="submit" className="h-control-md" disabled={loading || queryInput.trim() === query}><Search className="size-4" />搜索</Button>
+        </form>
+        <div className="flex flex-wrap items-center gap-2 lg:justify-end"><Button size="sm" variant="outline" onClick={clearFilters} disabled={!queryInput && !hasFilters}>清除筛选</Button><span className="text-ui-xs text-muted-foreground" role="status">共 {total} 个任务</span></div>
+      </div>
       {error && <ErrorState title="上传任务加载失败" description={error} action={<Button size="sm" variant="outline" onClick={() => void loadTasks()}>重新加载</Button>} />}
-      {loading ? <LoadingState className="min-h-48 border-0" label="正在加载上传任务…" /> : statusFilter === "active" && !activeUpload && visibleTasks.length === 0 ? <EmptyState className="rounded-none border-0" title="暂无进行中的上传" description="开始上传文件或文件夹后，进度会显示在这里。" /> : visibleTasks.length === 0 ? <EmptyState className="rounded-none border-0" title="暂无上传任务" description="上传文件或文件夹后，任务记录会显示在这里。" /> : <ul className="divide-y divide-border">{visibleTasks.map((task) => <li key={task.batch_id} className="flex flex-col gap-3 px-4 py-4 md:grid md:grid-cols-[minmax(12rem,1.5fr)_8rem_minmax(12rem,1fr)_10rem_8rem_auto] md:items-center md:px-5"><div className="min-w-0"><p className="break-all font-medium">{task.upload_mode === "folder" ? "文件夹上传" : "文件上传"}</p><p className="mt-1 break-all text-ui-xs text-muted-foreground">{task.target_path}</p></div><span className="text-ui-xs text-muted-foreground">{task.upload_mode === "folder" ? "文件夹" : "文件"} · {task.total_files} 个</span><div className="min-w-0"><div className="flex items-center justify-between gap-2 text-ui-xs"><span className="text-muted-foreground">{task.accepted_files}/{task.total_files} 个文件</span><span className="tabular-nums text-muted-foreground">{task.total_bytes ? Math.round((task.total_uploaded_bytes / task.total_bytes) * 100) : 100}%</span></div><div className="mt-1 h-1.5 overflow-hidden rounded-full bg-surface-muted"><div className={`h-full rounded-full ${task.status === "failed" ? "bg-destructive" : task.status === "partial_success" ? "bg-warning" : task.status === "processing" ? "bg-primary" : "bg-success"}`} style={{ width: `${task.total_bytes ? Math.min(100, Math.round((task.total_uploaded_bytes / task.total_bytes) * 100)) : 100}%` }} /></div></div><span className="text-ui-xs text-muted-foreground">{formatManagedUpdatedAt(task.created_at)}</span><Badge variant={uploadTaskStatusVariant(task.status)}>{uploadTaskStatusLabel[task.status]}</Badge><div className="flex gap-2 md:justify-end"><Button size="sm" variant="outline" onClick={() => void openDetail(task)}><ListChecks className="size-4" />详情</Button>{task.status === "failed" && <Button size="sm" variant="outline" disabled={!canRetry(task)} onClick={() => onRetry(task)}><RotateCcw className="size-4" />重试</Button>}</div></li>)}</ul>}
+      {loading ? <LoadingState className="min-h-48 border-0" label="正在加载上传任务…" /> : statusFilter === "active" && !activeUpload && visibleTasks.length === 0 ? <EmptyState className="rounded-none border-0" title="暂无进行中的上传" description="开始上传文件或文件夹后，进度会显示在这里。" action={<Button size="sm" variant="outline" onClick={clearFilters}>查看全部任务</Button>} /> : visibleTasks.length === 0 ? <EmptyState className="rounded-none border-0" title={hasFilters ? "没有符合条件的上传任务" : "暂无上传任务"} description={hasFilters ? "请调整搜索关键词或状态筛选。" : "上传文件或文件夹后，任务记录会显示在这里。"} action={hasFilters ? <Button size="sm" variant="outline" onClick={clearFilters}>清除筛选</Button> : undefined} /> : <>
+        <div className="hidden grid-cols-[minmax(10rem,1.7fr)_5.5rem_minmax(11rem,1fr)_8rem_6rem_9.75rem] gap-x-4 border-b border-border bg-surface-muted/40 px-5 py-2.5 text-ui-xs font-medium text-muted-foreground xl:grid" data-testid="upload-task-header"><span>任务</span><span>文件</span><span>处理结果</span><span>创建时间</span><span>状态</span><span className="text-right">操作</span></div>
+        <ul className="divide-y divide-border">{visibleTasks.map((task) => <li key={task.batch_id} className="flex flex-col gap-3 px-4 py-4 sm:px-5 xl:grid xl:grid-cols-[minmax(10rem,1.7fr)_5.5rem_minmax(11rem,1fr)_8rem_6rem_9.75rem] xl:items-center xl:gap-x-4" data-testid="upload-task-row"><div className="min-w-0"><p className="break-all font-medium">{task.upload_mode === "folder" ? "文件夹上传" : "文件上传"}</p><p className="mt-1 break-all text-ui-xs text-muted-foreground">{task.target_path}</p></div><div><span className="mb-1 block text-ui-xs font-medium text-muted-foreground xl:hidden">文件</span><span className="text-ui-xs text-muted-foreground">{task.upload_mode === "folder" ? "文件夹" : "文件"} · {task.total_files} 个</span></div><div><span className="mb-1 block text-ui-xs font-medium text-muted-foreground xl:hidden">处理结果</span><UploadTaskResult task={task} /></div><div><span className="mb-1 block text-ui-xs font-medium text-muted-foreground xl:hidden">创建时间</span><span className="text-ui-xs text-muted-foreground">{formatManagedUpdatedAt(task.created_at)}</span></div><div><span className="mb-1 block text-ui-xs font-medium text-muted-foreground xl:hidden">状态</span><Badge variant={uploadTaskStatusVariant(task.status)}>{uploadTaskStatusLabel[task.status]}</Badge></div><div className="flex gap-2 xl:justify-end"><Button size="sm" variant="outline" onClick={() => void openDetail(task)}><ListChecks className="size-4" />详情</Button>{task.status === "failed" && <Button size="sm" variant="outline" disabled={!canRetry(task)} onClick={() => onRetry(task)}><RotateCcw className="size-4" />重试</Button>}</div></li>)}</ul>
+      </>}
       <div className="flex items-center justify-between border-t border-border px-4 py-3 sm:px-5"><p className="text-ui-xs text-muted-foreground">第 {page + 1} / {pageCount} 页</p><div className="flex gap-2"><Button size="sm" variant="outline" disabled={page === 0 || loading} onClick={() => setPage((value) => value - 1)}>上一页</Button><Button size="sm" variant="outline" disabled={page + 1 >= pageCount || loading} onClick={() => setPage((value) => value + 1)}>下一页</Button></div></div>
     </Card>
     <Sheet open={Boolean(detail)} onOpenChange={(open) => { if (!open) setDetail(null); }}><SheetContent className="max-w-xl overflow-y-auto"><SheetHeader><SheetTitle>上传任务详情</SheetTitle><SheetDescription>{detail?.target_path || "查看任务明细"}</SheetDescription></SheetHeader>{detailLoading ? <LoadingState className="mt-6 border-0" label="正在加载任务详情…" /> : detail && <div className="mt-6 space-y-5"><dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4 gap-y-2 text-ui-sm"><dt className="text-muted-foreground">状态</dt><dd><Badge variant={uploadTaskStatusVariant(detail.status)}>{uploadTaskStatusLabel[detail.status]}</Badge></dd><dt className="text-muted-foreground">目标目录</dt><dd className="break-words">{detail.target_path}</dd><dt className="text-muted-foreground">创建人</dt><dd>{detail.created_by_name}</dd><dt className="text-muted-foreground">创建时间</dt><dd>{formatManagedUpdatedAt(detail.created_at)}</dd><dt className="text-muted-foreground">文件统计</dt><dd>{detail.accepted_files} 个已接收，{detail.skipped_files} 个已跳过，共 {detail.total_files} 个</dd>{detail.error_summary && <><dt className="text-muted-foreground">失败原因</dt><dd className="break-words text-destructive">{detail.error_summary}</dd></>}</dl><div><h3 className="text-ui-sm font-semibold">文件明细</h3><ul className="mt-2 divide-y divide-border rounded-ui-md border border-border">{(detail.entries || []).map((entry) => <li key={entry.sequence} className="flex items-start justify-between gap-3 px-3 py-2 text-ui-sm"><span className="min-w-0"><span className="block break-all">{entry.relative_path || entry.filename}</span>{entry.reason && <span className="mt-0.5 block break-words text-ui-xs text-muted-foreground">{entry.reason}</span>}</span><span className={`shrink-0 text-ui-xs ${entry.status === "accepted" ? "text-success" : "text-warning"}`}>{uploadTaskEntryStatus(entry)}</span></li>)}</ul></div>{detail.status === "failed" && <Button variant="outline" disabled={!canRetry(detail)} onClick={() => { onRetry(detail); setDetail(null); }}><RotateCcw className="size-4" />重试此任务</Button>}</div>}</SheetContent></Sheet>
