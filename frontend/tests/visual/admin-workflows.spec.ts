@@ -474,7 +474,7 @@ test.describe("分类管理", () => {
       await page.getByRole("treeitem", { name: /公司内部标准/ }).click();
       const editor = page.getByRole("dialog", { name: "公司内部标准" });
       await expect(editor).toBeVisible();
-      const categoryToggle = editor.getByRole("checkbox", { name: "公司内部标准启用" });
+      const categoryToggle = editor.getByRole("radio", { name: "公司内部标准停用" });
       await categoryToggle.scrollIntoViewIfNeeded();
       await expectInViewport(categoryToggle);
       const save = editor.getByRole("button", { name: "保存修改" });

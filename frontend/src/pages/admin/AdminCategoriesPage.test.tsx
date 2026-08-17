@@ -62,7 +62,10 @@ describe("AdminCategoriesPage", () => {
     render(<AdminCategoriesPage />);
     const name = await screen.findByLabelText("显示名称");
     fireEvent.change(name, { target: { value: "行业规范" } });
-    fireEvent.click(screen.getByRole("button", { name: "保存修改" }));
+    await waitFor(() => expect(name).toHaveValue("行业规范"));
+    const save = screen.getByRole("button", { name: "保存修改" });
+    await waitFor(() => expect(save).toBeEnabled());
+    fireEvent.click(save);
     await waitFor(() => expect(mocks.update).toHaveBeenCalledWith("cat-01", {
       display_code: "01",
       display_name: "行业规范",
@@ -92,9 +95,20 @@ describe("AdminCategoriesPage", () => {
 
   it("guards a parent category with active children from being disabled", async () => {
     render(<AdminCategoriesPage />);
-    const toggle = await screen.findByRole("checkbox", { name: "行业规范与标准启用" });
+    const toggle = await screen.findByRole("radio", { name: "行业规范与标准停用" });
     expect(toggle).toBeDisabled();
+    expect(screen.getByText("暂不能停用")).toBeInTheDocument();
     expect(screen.getByText("该分类仍有启用的子分类，请先停用子分类。")).toBeInTheDocument();
+  });
+
+  it("keeps the saved status visible while a status change is pending", async () => {
+    mocks.categories.mockResolvedValueOnce([{ ...category, item_count: 0 }]);
+    render(<AdminCategoriesPage />);
+    const disable = await screen.findByRole("radio", { name: "行业规范与标准停用" });
+    fireEvent.click(disable);
+    const detailHeading = screen.getByRole("heading", { name: "01 行业规范与标准" });
+    expect(within(detailHeading.parentElement!).getByText("启用")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText("待保存：停用")).toBeInTheDocument());
   });
 
   it("reveals matching descendants after their parent was collapsed", async () => {
