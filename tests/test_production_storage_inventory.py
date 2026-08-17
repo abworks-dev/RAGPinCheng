@@ -269,7 +269,8 @@ def test_inventory_validates_and_protects_referenced_wheel_cache(tmp_path: Path)
             },
         }), encoding="utf-8",
     )
-    verdict = data_root / "qualification" / "runs" / "123" / "reports" / "qualification-verdict.json"
+    qualification_root = tmp_path / "faster-whisper-qualification"
+    verdict = qualification_root / "runs" / "123" / "reports" / "qualification-verdict.json"
     verdict.parent.mkdir(parents=True)
     verdict.write_text(json.dumps({"wheel_cache_key": cache_key}), encoding="utf-8")
     staging = data_root / "qualification" / "wheel-cache" / f".staging-{cache_key}-123"
@@ -283,7 +284,8 @@ def test_inventory_validates_and_protects_referenced_wheel_cache(tmp_path: Path)
     report_path = tmp_path / "inventory.json"
     result = subprocess.run(
         [executable, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
-         "-File", str(SCRIPT), "-ReportPath", str(report_path), "-AsrDataRoot", str(data_root)],
+         "-File", str(SCRIPT), "-ReportPath", str(report_path), "-AsrDataRoot", str(data_root),
+         "-FasterWhisperQualificationRoot", str(qualification_root)],
         cwd=ROOT, text=True, capture_output=True, check=False,
     )
     assert result.returncode == 0, result.stderr

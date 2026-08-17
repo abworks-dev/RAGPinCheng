@@ -602,6 +602,7 @@ function Get-FasterWhisperWheelCacheInventory {
         [string]$DataRoot,
         [string]$ProgramRoot,
         [string]$BackupRoot,
+        [string]$QualificationRoot,
         [object]$References,
         [int]$RetentionDays = 30,
         [int]$KeepCount = 2
@@ -613,7 +614,11 @@ function Get-FasterWhisperWheelCacheInventory {
     $result.status='measured'
 
     $referencedKeys = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-    $verdictRoot = Join-Path $DataRoot 'qualification\runs'
+    $verdictRoot = if ([string]::IsNullOrWhiteSpace($QualificationRoot)) {
+        Join-Path $DataRoot 'qualification\runs'
+    } else {
+        Join-Path $QualificationRoot 'runs'
+    }
     if (Test-Path -LiteralPath $verdictRoot -PathType Container) {
         try {
             foreach ($verdictPath in @(Get-ChildItem -LiteralPath $verdictRoot -Filter 'qualification-verdict.json' -File -Recurse -Force -ErrorAction Stop)) {
@@ -852,7 +857,7 @@ $report = [ordered]@{
     gpu_runtime_inventory = Get-GpuRuntimeInventory -Root $RuntimeRoot
     project_reference_inventory = [ordered]@{ status=$projectReferences.status; sources=$projectReferences.sources }
     asr_qualification_inventory = Get-AsrQualificationInventory -DataRoot $AsrDataRoot
-    faster_whisper_wheel_cache_inventory = Get-FasterWhisperWheelCacheInventory -DataRoot $AsrDataRoot -ProgramRoot $AsrProgramRoot -BackupRoot $(if ($AsrActivationBackupRoot) { $AsrActivationBackupRoot } else { $BackupDirectory }) -References $projectReferences
+    faster_whisper_wheel_cache_inventory = Get-FasterWhisperWheelCacheInventory -DataRoot $AsrDataRoot -ProgramRoot $AsrProgramRoot -BackupRoot $(if ($AsrActivationBackupRoot) { $AsrActivationBackupRoot } else { $BackupDirectory }) -QualificationRoot $FasterWhisperQualificationRoot -References $projectReferences
     asr_model_preparation_inventory = Get-AsrModelPreparationInventory -DataRoot $AsrDataRoot -References $projectReferences
     gpu_model_cache_repair_inventory = Get-GpuModelCacheRepairInventory -RuntimeRoot $RuntimeRoot -ConfiguredPath $GpuConfiguredModelCachePath -References $projectReferences
     docker = $docker
