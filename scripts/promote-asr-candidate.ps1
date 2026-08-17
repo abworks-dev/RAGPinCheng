@@ -169,7 +169,8 @@ function Get-PreviousReleaseContext {
             -ProgramRoot $ProgramRoot `
             -DataRoot $DataRoot `
             -CandidateId ([string]$active.candidate_id) `
-            -ExpectedSha256 ([string]$active.release_manifest_sha256)
+            -ExpectedSha256 ([string]$active.release_manifest_sha256) `
+            -AllowLegacyWhisperXV1Profiles
         $arguments = Get-CandidateTaskArguments -Release $release
         $venvRoot = $release.layout.venv_root
         $appModule = Get-ReleaseAppModule -Release $release
@@ -371,7 +372,8 @@ function Invoke-CandidateRollback {
             -ProgramRoot $ProgramRoot `
             -DataRoot $DataRoot `
             -CandidateId ([string]$previousActive.candidate_id) `
-            -ExpectedSha256 ([string]$previousActive.release_manifest_sha256)
+            -ExpectedSha256 ([string]$previousActive.release_manifest_sha256) `
+            -AllowLegacyWhisperXV1Profiles
         $previousTaskArguments = Get-CandidateTaskArguments -Release $previousRelease
     } elseif ([string]$state.previous_candidate_id) {
         throw "Candidate rollback previous release identity is inconsistent"
@@ -411,7 +413,8 @@ function Invoke-CandidateRollback {
             -ProgramRoot $ProgramRoot `
             -DataRoot $DataRoot `
             -CandidateId ([string]$currentActive.candidate_id) `
-            -ExpectedSha256 ([string]$currentActive.release_manifest_sha256)
+            -ExpectedSha256 ([string]$currentActive.release_manifest_sha256) `
+            -AllowLegacyWhisperXV1Profiles
         $currentTaskArguments = Get-CandidateTaskArguments -Release $currentRelease
         $currentAllowedTaskArguments = @($currentTaskArguments)
         $currentListenerVenv = $currentRelease.layout.venv_root

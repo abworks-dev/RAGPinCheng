@@ -80,6 +80,29 @@ def test_asr_candidate_promotion_owns_both_verified_release_layouts():
     assert "Register-ScheduledTask" not in recovery
 
 
+def test_asr_candidate_promotion_accepts_only_the_exact_legacy_whisperx_rollback_profile_set():
+    release = read("scripts/asr-release.ps1")
+    promotion = read("scripts/promote-asr-candidate.ps1")
+
+    assert "AllowLegacyWhisperXV1Profiles" in release
+    assert '$legacyWhisperXEngines = @("faster-whisper", "whisperx")' in release
+    assert '"whisperx-large-v3-zh-align-v1"' in release
+    assert "$actualProfileIdentity -eq ($legacyWhisperXV1Profiles -join" in release
+
+    strict_candidate_read = promotion.rsplit(
+        "$candidate = Read-AsrReleaseManifest", 1
+    )[1].split("Assert-AtomicFileReplaceSupported", 1)[0]
+    assert "AllowLegacyWhisperXV1Profiles" not in strict_candidate_read
+
+    previous_release_context = promotion.split(
+        "function Get-PreviousReleaseContext", 1
+    )[1].split("function Stop-VerifiedListeners", 1)[0]
+    assert "AllowLegacyWhisperXV1Profiles" in previous_release_context
+
+    rollback = promotion.split("function Invoke-CandidateRollback", 1)[1]
+    assert rollback.count("AllowLegacyWhisperXV1Profiles") == 2
+
+
 def test_legacy_asr_deploy_copies_the_service_directory_from_services_root():
     deploy = read("scripts/deploy-asr.ps1")
 
