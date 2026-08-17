@@ -60,6 +60,19 @@ function Get-NormalizedPath {
     )
 }
 
+function Test-PathWithin {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Root
+    )
+
+    $normalizedPath = Get-NormalizedPath -Path $Path
+    $normalizedRoot = Get-NormalizedPath -Path $Root
+    if ($pathComparer.Equals($normalizedPath, $normalizedRoot)) { return $true }
+    $prefix = $normalizedRoot + [System.IO.Path]::DirectorySeparatorChar
+    return $normalizedPath.StartsWith($prefix, $pathComparison)
+}
+
 $errors = [System.Collections.Generic.List[string]]::new()
 $warnings = [System.Collections.Generic.List[string]]::new()
 $reasonCodes = [System.Collections.Generic.List[string]]::new()
@@ -84,6 +97,11 @@ $pathComparer = if ($IsWindows) {
     [System.StringComparer]::OrdinalIgnoreCase
 } else {
     [System.StringComparer]::Ordinal
+}
+$pathComparison = if ($IsWindows) {
+    [System.StringComparison]::OrdinalIgnoreCase
+} else {
+    [System.StringComparison]::Ordinal
 }
 
 try {
@@ -125,6 +143,42 @@ try {
     $primaryPath = if ($registeredPaths.Count -gt 0) { $registeredPaths[0] } else { $null }
     $isPrimary = $null -ne $primaryPath -and $pathComparer.Equals($repositoryRoot, $primaryPath)
 
+    $codexHome = if (-not [string]::IsNullOrWhiteSpace($env:CODEX_HOME)) {
+        Get-NormalizedPath -Path $env:CODEX_HOME
+    } else {
+        Get-NormalizedPath -Path (Join-Path ([Environment]::GetFolderPath("UserProfile")) ".codex")
+    }
+    $managedWorktreeRoot = Get-NormalizedPath -Path (Join-Path $codexHome "worktrees")
+    $primaryParent = Split-Path -Parent $primaryPath
+    $repositoryName = Split-Path -Leaf $primaryPath
+    $manualWorktreeRoot = Get-NormalizedPath -Path (
+        Join-Path (Join-Path $primaryParent ".worktrees") $repositoryName
+    )
+    $legacyInternalRoot = Get-NormalizedPath -Path (Join-Path $primaryPath ".codex-worktrees")
+    $tempRoot = Get-NormalizedPath -Path ([System.IO.Path]::GetTempPath())
+    $repositoryParent = Split-Path -Parent $repositoryRoot
+    $repositoryLeaf = Split-Path -Leaf $repositoryRoot
+
+    $worktreeLocation = if ($isPrimary) {
+        "primary"
+    } elseif (Test-PathWithin -Path $repositoryRoot -Root $managedWorktreeRoot) {
+        "codex-managed"
+    } elseif (Test-PathWithin -Path $repositoryRoot -Root $manualWorktreeRoot) {
+        "manual-standard"
+    } elseif (Test-PathWithin -Path $repositoryRoot -Root $legacyInternalRoot) {
+        "legacy-internal"
+    } elseif (
+        $pathComparer.Equals($repositoryParent, $primaryParent) -and
+        $repositoryLeaf.StartsWith($repositoryName + "-", $pathComparison)
+    ) {
+        "legacy-sibling"
+    } elseif (Test-PathWithin -Path $repositoryRoot -Root $tempRoot) {
+        "legacy-temp"
+    } else {
+        "legacy-other"
+    }
+    $isStandardWriteLocation = $worktreeLocation -in @("codex-managed", "manual-standard")
+
     $branchResult = Invoke-GitText -Path $repositoryRoot -Arguments @("branch", "--show-current")
     $branch = $branchResult.Text
     $isDetached = [string]::IsNullOrWhiteSpace($branch)
@@ -160,6 +214,15 @@ try {
                 -Message "Write mode is not allowed in the primary worktree." `
                 -RecommendedAction "CREATE_MANAGED_WORKTREE"
             $recommendedAction = "CREATE_MANAGED_WORKTREE"
+        }
+        if (-not $isPrimary -and -not $isStandardWriteLocation) {
+            if ($Intent -eq "New") {
+                Add-WorkspaceError -Code "NEW_WORKTREE_LOCATION_FORBIDDEN" `
+                    -Message "New write tasks require a Codex-managed or standard manual worktree; current location is '$worktreeLocation'." `
+                    -RecommendedAction "CREATE_MANAGED_WORKTREE"
+            } elseif ($Intent -eq "Continue") {
+                $warnings.Add("Legacy worktree location '$worktreeLocation' is allowed only for continuation; do not create new worktrees here.")
+            }
         }
         if ($isDetached) {
             Add-WorkspaceError -Code "DETACHED_HEAD_WRITE_FORBIDDEN" `
@@ -212,6 +275,9 @@ try {
         same_repository = $sameRepository
         registered_worktree = $isRegistered
         primary_worktree = $isPrimary
+        worktree_location = $worktreeLocation
+        managed_worktree_root = $managedWorktreeRoot
+        manual_worktree_root = $manualWorktreeRoot
         branch = if ($isDetached) { $null } else { $branch }
         detached_head = $isDetached
         head = $head
@@ -242,6 +308,9 @@ try {
         same_repository = $false
         registered_worktree = $false
         primary_worktree = $false
+        worktree_location = $null
+        managed_worktree_root = $null
+        manual_worktree_root = $null
         branch = $null
         detached_head = $false
         head = $null
