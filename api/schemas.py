@@ -388,15 +388,24 @@ class CreateManagedCategoryRequest(BaseModel):
     parent_id: str | None = None
     display_code: str = Field(min_length=1, max_length=12)
     display_name: str = Field(min_length=1, max_length=100)
-    sort_order: int = 0
+    sort_order: int = Field(default=0, ge=0, le=999_999)
 
 
 class UpdateManagedCategoryRequest(BaseModel):
     display_code: str = Field(min_length=1, max_length=12)
     display_name: str = Field(min_length=1, max_length=100)
-    # Accepted for compatibility with older clients; ordering is server-maintained.
-    sort_order: int | None = None
+    sort_order: int = Field(ge=0, le=999_999)
     is_active: bool
+    expected_version: int = Field(gt=0)
+
+
+class RenameManagedCategoryRequest(BaseModel):
+    display_name: str = Field(min_length=1, max_length=100)
+    expected_version: int = Field(gt=0)
+
+
+class UpdateManagedCategorySortOrderRequest(BaseModel):
+    sort_order: int = Field(ge=0, le=999_999)
     expected_version: int = Field(gt=0)
 
 

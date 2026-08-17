@@ -7,7 +7,7 @@ async function openRootFolder(page: Parameters<typeof installAdminRoutes>[0]) {
   const folder = page.viewportSize()!.width < 1024
     ? page.getByTestId("managed-folder-mobile-cat-company")
     : page.getByTestId("managed-folder-row-cat-company");
-  await folder.click();
+  await folder.getByRole("button").first().click();
   await listing;
 }
 
@@ -50,6 +50,30 @@ test("资料管理搜索筛选展开 accepted golden", async ({ page }) => {
   } else {
     // Linux CI still verifies the expanded layer renders; accepted pixels are Windows-specific.
     expect((await page.screenshot({ fullPage: true })).byteLength).toBeGreaterThan(10_000);
+  }
+});
+
+test("资料管理文件夹移动 accepted golden", async ({ page }) => {
+  await installAdminRoutes(page, "normal");
+  await page.goto("/admin");
+  if (page.viewportSize()!.width < 1024) {
+    await page.getByRole("button", { name: "展开管理功能" }).click();
+  }
+  await page.getByRole("link", { name: "资料管理", exact: true }).click();
+  const folder = page.viewportSize()!.width < 1024
+    ? page.getByTestId("managed-folder-mobile-cat-company")
+    : page.getByTestId("managed-folder-row-cat-company");
+  await folder.getByRole("button", { name: /移动文件夹/ }).click();
+  const dialog = page.getByRole("dialog", { name: "移动文件夹位置" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByText("文件夹已经位于根目录")).toBeVisible();
+  await expect(dialog.getByText("不能移动到文件夹自身")).toBeVisible();
+  const viewport = page.viewportSize()!;
+  expect(await page.evaluate(() => Math.max(document.body.scrollWidth, document.documentElement.scrollWidth))).toBeLessThanOrEqual(viewport.width);
+  if (process.platform === "win32") {
+    await expect(page).toHaveScreenshot(`managed-content-folder-move-${viewport.width}x${viewport.height}.png`);
+  } else {
+    expect((await page.screenshot()).byteLength).toBeGreaterThan(10_000);
   }
 });
 

@@ -160,6 +160,36 @@ describe("api client", () => {
     );
   });
 
+  it("renames and reorders managed folders through narrow CSRF-protected PATCH routes", async () => {
+    setCsrfToken("csrf-category");
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ id: "folder/1", display_name: "新目录", version: 3 }))
+      .mockResolvedValueOnce(jsonResponse({ id: "folder/1", sort_order: 40, version: 4 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.renameManagedCategory("folder/1", { display_name: "新目录", expected_version: 2 });
+    await api.updateManagedCategorySortOrder("folder/1", { sort_order: 40, expected_version: 3 });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1,
+      "/api/admin/content/categories/folder%2F1/name",
+      expect.objectContaining({
+        method: "PATCH",
+        credentials: "include",
+        body: JSON.stringify({ display_name: "新目录", expected_version: 2 }),
+        headers: { "content-type": "application/json", "X-CSRF-Token": "csrf-category" },
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(2,
+      "/api/admin/content/categories/folder%2F1/sort-order",
+      expect.objectContaining({
+        method: "PATCH",
+        credentials: "include",
+        body: JSON.stringify({ sort_order: 40, expected_version: 3 }),
+        headers: { "content-type": "application/json", "X-CSRF-Token": "csrf-category" },
+      }),
+    );
+  });
+
   it("normalizes managed-content review notes for single and bulk requests", async () => {
     setCsrfToken("csrf-review");
     const fetchMock = vi.fn()

@@ -438,6 +438,20 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(body),
     }),
+  renameManagedCategory: (
+    categoryId: string,
+    body: { display_name: string; expected_version: number },
+  ) => jsonFetch<ManagedCategory>(
+    `/api/admin/content/categories/${encodeURIComponent(categoryId)}/name`,
+    { method: "PATCH", body: JSON.stringify(body) },
+  ),
+  updateManagedCategorySortOrder: (
+    categoryId: string,
+    body: { sort_order: number; expected_version: number },
+  ) => jsonFetch<ManagedCategory>(
+    `/api/admin/content/categories/${encodeURIComponent(categoryId)}/sort-order`,
+    { method: "PATCH", body: JSON.stringify(body) },
+  ),
   managedContentPermissions: () =>
     jsonFetch<ContentPermissionUser[]>("/api/admin/content/permissions"),
   managedContentPermissionCatalog: () =>

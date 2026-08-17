@@ -57,6 +57,7 @@ from .content_store import (
     create_publication_job,
     create_content_revision,
     create_web_batch,
+    find_sibling_category_by_name,
     get_upload_task,
     list_content_items,
     list_content_items_page,
@@ -69,10 +70,14 @@ from .content_store import (
     move_content_item,
     register_uploaded_document,
     record_upload_batch_entry,
+    rename_category,
     review_folder_request,
     review_version,
     submit_version_for_review,
     update_category,
+    update_category_sort_order,
+    next_category_display_code,
+    next_category_sort_order,
 )
 from .db import get_db
 from .schemas import (
@@ -103,6 +108,7 @@ from .schemas import (
     FolderRequestDTO,
     MoveManagedContentRequest,
     RenameManagedContentRequest,
+    RenameManagedCategoryRequest,
     ManagedIndexJobDTO,
     ManagedIndexJobListResponse,
     ManagedPublicationDTO,
@@ -114,6 +120,7 @@ from .schemas import (
     ReviewManagedContentRequest,
     ReviewFolderRequest,
     UpdateManagedCategoryRequest,
+    UpdateManagedCategorySortOrderRequest,
     UpdateContentPermissionsRequest,
     UpdateContentPermissionGroupRequest,
 )
@@ -246,27 +253,21 @@ def _resolve_upload_category(
         return upload_category_id
     for folder_name in relative_path.split("/")[:-1]:
         code, name = _parse_folder_name(folder_name)
-        child = conn.execute(
-            """SELECT id FROM category_nodes
-               WHERE parent_id=? AND is_active=1 AND display_name=?""",
-            (upload_category_id, name),
-        ).fetchone()
+        child = find_sibling_category_by_name(
+            conn, upload_category_id, name, active_only=True
+        )
         if child is not None:
             upload_category_id = child["id"]
             continue
         if not can_create_folders:
             raise ValueError("folder_approval_required")
-        sibling_count = int(conn.execute(
-            "SELECT count(*) FROM category_nodes WHERE parent_id=?",
-            (upload_category_id,),
-        ).fetchone()[0])
         created = create_category(
             conn,
             category_key=None,
             parent_id=upload_category_id,
-            display_code=code or f"{sibling_count + 1:02d}",
+            display_code=code or next_category_display_code(conn, upload_category_id),
             display_name=name,
-            sort_order=(sibling_count + 1) * 10,
+            sort_order=next_category_sort_order(conn, upload_category_id),
             actor_user_id=actor_user_id,
         )
         upload_category_id = created["id"]
@@ -404,6 +405,16 @@ def _raise_domain_error(exc: Exception) -> None:
         raise HTTPException(status_code=409, detail="分类编号或标识已存在") from exc
     if message == "category_version_conflict":
         raise HTTPException(status_code=409, detail="分类已被其他人修改，请刷新后重试") from exc
+    if message == "category_sibling_name_conflict":
+        raise HTTPException(status_code=409, detail="当前目录已有同名文件夹，请使用其他名称") from exc
+    if message == "category_sibling_code_conflict_current":
+        raise HTTPException(status_code=409, detail="当前目录已存在该分类编号") from exc
+    if message == "category_sibling_code_conflict":
+        raise HTTPException(status_code=409, detail="目标目录已有相同显示编号的文件夹，请先修改显示编号") from exc
+    if message == "invalid_category_sort_order":
+        raise HTTPException(status_code=400, detail="排序序号必须是 0 到 999999 之间的整数") from exc
+    if message == "folder_request_pending":
+        raise HTTPException(status_code=409, detail="当前目录已有同名文件夹申请待处理") from exc
     if message == "category_not_found":
         raise HTTPException(status_code=404, detail="分类不存在") from exc
     if message == "category_move_cycle":
@@ -555,7 +566,50 @@ def patch_category(
             category_id,
             display_code=body.display_code,
             display_name=body.display_name,
+            sort_order=body.sort_order,
             is_active=body.is_active,
+            expected_version=body.expected_version,
+            actor_user_id=user.id,
+        )
+    except (ValueError, sqlite3.IntegrityError) as exc:
+        _raise_domain_error(exc)
+    return _category_dto(row)
+
+
+@router.patch("/categories/{category_id}/name", response_model=ManagedCategoryDTO)
+def patch_category_name(
+    category_id: str,
+    body: RenameManagedCategoryRequest,
+    user: CurrentUser = Depends(require_content_permission("category.manage", csrf=True)),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> ManagedCategoryDTO:
+    _require_feature()
+    try:
+        row = rename_category(
+            conn,
+            category_id,
+            display_name=body.display_name,
+            expected_version=body.expected_version,
+            actor_user_id=user.id,
+        )
+    except (ValueError, sqlite3.IntegrityError) as exc:
+        _raise_domain_error(exc)
+    return _category_dto(row)
+
+
+@router.patch("/categories/{category_id}/sort-order", response_model=ManagedCategoryDTO)
+def patch_category_sort_order(
+    category_id: str,
+    body: UpdateManagedCategorySortOrderRequest,
+    user: CurrentUser = Depends(require_content_permission("category.manage", csrf=True)),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> ManagedCategoryDTO:
+    _require_feature()
+    try:
+        row = update_category_sort_order(
+            conn,
+            category_id,
+            sort_order=body.sort_order,
             expected_version=body.expected_version,
             actor_user_id=user.id,
         )

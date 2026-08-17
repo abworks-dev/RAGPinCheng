@@ -5,10 +5,23 @@ export type CategoryTreeNode = {
   children: CategoryTreeNode[];
 };
 
+function compareUnicodeCodePoints(left: string, right: string) {
+  const leftPoints = Array.from(left.normalize("NFKC").trim(), (character) => character.codePointAt(0)!);
+  const rightPoints = Array.from(right.normalize("NFKC").trim(), (character) => character.codePointAt(0)!);
+  const sharedLength = Math.min(leftPoints.length, rightPoints.length);
+  for (let index = 0; index < sharedLength; index += 1) {
+    if (leftPoints[index] !== rightPoints[index]) return leftPoints[index] - rightPoints[index];
+  }
+  return leftPoints.length - rightPoints.length;
+}
+
 export function compareManagedCategories(left: ManagedCategory, right: ManagedCategory) {
-  return left.display_code.localeCompare(right.display_code, "zh-Hans")
-    || left.display_name.localeCompare(right.display_name, "zh-Hans")
-    || left.id.localeCompare(right.id);
+  const leftUnset = left.sort_order <= 0;
+  const rightUnset = right.sort_order <= 0;
+  if (leftUnset !== rightUnset) return leftUnset ? 1 : -1;
+  return left.sort_order - right.sort_order
+    || compareUnicodeCodePoints(left.display_name, right.display_name)
+    || compareUnicodeCodePoints(left.id, right.id);
 }
 
 export function buildCategoryTree(categories: ManagedCategory[]): CategoryTreeNode[] {

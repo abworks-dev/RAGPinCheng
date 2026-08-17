@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { AlertTriangle, ArchiveRestore, ArrowDown, ArrowUp, ArrowUpDown, Captions, Check, CheckCircle2, ChevronDown, ChevronRight, Download, ExternalLink, Eye, FileCode2, FileSpreadsheet, FileText, FileType2, FileUp, Film, Folder, FolderInput, FolderPlus, History, Info, ListChecks, Pencil, Presentation, RefreshCw, RotateCcw, Rocket, Search, Send, SlidersHorizontal, Trash2, Upload, X, XCircle } from "lucide-react";
+import { AlertTriangle, ArchiveRestore, ArrowDown, ArrowUp, ArrowUpDown, Captions, Check, CheckCircle2, ChevronDown, ChevronRight, Download, ExternalLink, Eye, FileCode2, FileSpreadsheet, FileText, FileType2, FileUp, Film, Folder, FolderInput, FolderPlus, History, Info, ListChecks, ListOrdered, Pencil, Presentation, RefreshCw, RotateCcw, Rocket, Search, Send, SlidersHorizontal, Trash2, Upload, X, XCircle } from "lucide-react";
 import { adminContentApi } from "../../api/admin/content";
 import { Badge } from "../../components/ui/badge";
 import { CategoryTreePicker } from "../../components/admin/CategoryTreePicker";
@@ -23,6 +23,7 @@ import type { BulkManagedContentResult, ContentPermission, ContentTrashAuditEven
 import type { ManagedUploadProgress } from "../../api/client";
 import { formatAdminDate } from "../../lib/admin-formatters";
 import { AdminDocumentsPage } from "./AdminDocumentsPage";
+import { compareManagedCategories } from "../../lib/category-tree";
 import {
   collectDroppedUpload,
   folderSelectionFromFiles,
@@ -35,10 +36,15 @@ const PAGE_SIZE_OPTIONS = [25, 50, 100];
 const BULK_LIMIT = 20;
 const BULK_DOWNLOAD_TOAST_ID = "managed-content-bulk-download";
 const ACTIVE_RECLASSIFICATION_STATUSES = new Set(["pending", "applying", "committing", "rolling_back"]);
-type SortKey = "docType" | "title" | "updatedAt" | "status" | "source";
+type SortKey = "docType" | "folderOrder" | "title" | "updatedAt" | "status" | "source";
 type SortDirection = "asc" | "desc";
 type ManagedContentView = "library" | "trash" | "uploads" | "index";
 type MoveOperation = "move" | "reclassify" | "archive";
+const ROOT_FOLDER_VALUE = "__root__";
+
+function normalizeFolderName(value: string) {
+  return value.normalize("NFKC").trim().toLocaleLowerCase("zh-CN");
+}
 
 function moveOperation(item: ManagedContentItem): MoveOperation {
   if (item.content_kind === "media_transcript") return "archive";
@@ -615,6 +621,13 @@ export function AdminManagedContentPage() {
   const [folderRequests, setFolderRequests] = useState<FolderRequest[]>([]);
   const [requestFolderOpen, setRequestFolderOpen] = useState(false);
   const [requestFolderName, setRequestFolderName] = useState("");
+  const [folderRenameTarget, setFolderRenameTarget] = useState<ManagedCategory | null>(null);
+  const [folderRenameName, setFolderRenameName] = useState("");
+  const [folderSortTarget, setFolderSortTarget] = useState<ManagedCategory | null>(null);
+  const [folderSortValue, setFolderSortValue] = useState("");
+  const [folderMoveTarget, setFolderMoveTarget] = useState<ManagedCategory | null>(null);
+  const [folderMoveParentId, setFolderMoveParentId] = useState("");
+  const [folderActionError, setFolderActionError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const updateFileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
@@ -884,6 +897,16 @@ export function AdminManagedContentPage() {
   }, [categories, currentFolder]);
   const currentRootFolderId = breadcrumbs[0]?.id || "";
   const sortedChildFolders = useMemo(() => {
+    if (sort?.key === "folderOrder") {
+      return [...childFolders].sort((left, right) => {
+        const leftUnset = left.sort_order <= 0;
+        const rightUnset = right.sort_order <= 0;
+        if (leftUnset !== rightUnset) return leftUnset ? 1 : -1;
+        const orderComparison = left.sort_order - right.sort_order;
+        if (orderComparison !== 0) return sort.direction === "asc" ? orderComparison : -orderComparison;
+        return compareManagedCategories(left, right);
+      });
+    }
     if (sort?.key !== "title") return childFolders;
     return [...childFolders].sort((left, right) => {
       const comparison = `${left.display_code} ${left.display_name}`.localeCompare(
@@ -894,9 +917,60 @@ export function AdminManagedContentPage() {
       return sort.direction === "asc" ? comparison : -comparison;
     });
   }, [childFolders, sort]);
+  const folderRenameConflict = useMemo(() => {
+    if (!folderRenameTarget) return null;
+    const key = normalizeFolderName(folderRenameName);
+    if (!key) return null;
+    return categories.find((category) => category.id !== folderRenameTarget.id
+      && category.parent_id === folderRenameTarget.parent_id
+      && normalizeFolderName(category.display_name) === key) || null;
+  }, [categories, folderRenameName, folderRenameTarget]);
+  const parsedFolderSortOrder = folderSortValue.trim() ? Number(folderSortValue) : 0;
+  const folderSortValid = Number.isInteger(parsedFolderSortOrder)
+    && parsedFolderSortOrder >= 0
+    && parsedFolderSortOrder <= 999_999;
+  const folderSortDuplicateCount = folderSortTarget && parsedFolderSortOrder > 0
+    ? categories.filter((category) => category.id !== folderSortTarget.id
+      && category.parent_id === folderSortTarget.parent_id
+      && category.sort_order === parsedFolderSortOrder).length
+    : 0;
+  const folderMoveConstraints = useMemo(() => {
+    const reasons: Record<string, string> = {};
+    if (!folderMoveTarget) return { reasons, rootReason: "" };
+    const descendants = new Set<string>();
+    const visit = (parentId: string) => categories.filter((category) => category.parent_id === parentId).forEach((child) => {
+      descendants.add(child.id);
+      visit(child.id);
+    });
+    visit(folderMoveTarget.id);
+    const subtreeHeight = Math.max(0, ...categories
+      .filter((category) => descendants.has(category.id))
+      .map((category) => category.level - folderMoveTarget.level));
+    const destinationConflict = (parentId: string | null) => {
+      const siblings = categories.filter((category) => category.id !== folderMoveTarget.id && category.parent_id === parentId);
+      if (siblings.some((category) => normalizeFolderName(category.display_name) === normalizeFolderName(folderMoveTarget.display_name))) {
+        return `目标目录下已存在同名文件夹“${folderMoveTarget.display_name}”`;
+      }
+      if (siblings.some((category) => category.display_code === folderMoveTarget.display_code)) {
+        return `目标目录下已存在显示编号“${folderMoveTarget.display_code}”`;
+      }
+      return "";
+    };
+    categories.forEach((category) => {
+      if (category.id === folderMoveTarget.id) reasons[category.id] = "不能移动到文件夹自身";
+      else if (descendants.has(category.id)) reasons[category.id] = "不能移动到自身的子目录";
+      else if (category.id === folderMoveTarget.parent_id) reasons[category.id] = "文件夹已经位于此目录";
+      else if (category.level + 1 + subtreeHeight > 4) reasons[category.id] = "移动后目录层级将超过四级";
+      else reasons[category.id] = destinationConflict(category.id);
+    });
+    const rootReason = folderMoveTarget.parent_id === null
+      ? "文件夹已经位于根目录"
+      : destinationConflict(null);
+    return { reasons, rootReason };
+  }, [categories, folderMoveTarget]);
   const sortedItems = useMemo(() => {
     if (!sort) return items;
-    if (sort.key === "docType") return items;
+    if (sort.key === "docType" || sort.key === "folderOrder") return items;
     return [...items].sort((left, right) => {
       let comparison: number;
       switch (sort.key) {
@@ -917,16 +991,100 @@ export function AdminManagedContentPage() {
     if (!currentFolder || !newFolderName.trim()) return;
     setBusyAction("new-folder");
     try {
-      const siblingNumber = childFolders.length + 1;
+      const usedCodes = new Set(childFolders.map((folder) => folder.display_code));
+      let siblingNumber = 1;
+      while (usedCodes.has(String(siblingNumber).padStart(2, "0"))) siblingNumber += 1;
+      const nextSortOrder = Math.max(0, ...childFolders.map((folder) => folder.sort_order)) + 10;
       await adminContentApi.createCategory({
         parent_id: currentFolder.id,
         display_code: String(siblingNumber).padStart(2, "0"),
         display_name: newFolderName.trim(),
-        sort_order: siblingNumber * 10,
+        sort_order: nextSortOrder,
       });
       setNewFolderName(""); setNewFolderOpen(false); toast.success("文件夹已创建"); await load(true);
     } catch (folderError) { toast.error(folderError instanceof Error ? folderError.message : "创建文件夹失败"); }
     finally { setBusyAction(null); }
+  };
+
+  const openFolderRename = (folder: ManagedCategory) => {
+    setFolderRenameTarget(folder);
+    setFolderRenameName(folder.display_name);
+    setFolderActionError(null);
+  };
+
+  const saveFolderRename = async () => {
+    if (!folderRenameTarget || !folderRenameName.trim() || folderRenameConflict) return;
+    setBusyAction(`folder:${folderRenameTarget.id}:rename`);
+    setFolderActionError(null);
+    try {
+      await adminContentApi.renameCategory(folderRenameTarget.id, {
+        display_name: folderRenameName.trim(),
+        expected_version: folderRenameTarget.version,
+      });
+      toast.success(`已重命名为“${folderRenameName.trim()}”`);
+      setFolderRenameTarget(null);
+      await load(true);
+    } catch (renameError) {
+      setFolderActionError(renameError instanceof Error ? renameError.message : "重命名文件夹失败");
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const openFolderSort = (folder: ManagedCategory) => {
+    setFolderSortTarget(folder);
+    setFolderSortValue(folder.sort_order > 0 ? String(folder.sort_order) : "");
+    setFolderActionError(null);
+  };
+
+  const saveFolderSort = async () => {
+    if (!folderSortTarget || !folderSortValid) return;
+    setBusyAction(`folder:${folderSortTarget.id}:sort`);
+    setFolderActionError(null);
+    try {
+      await adminContentApi.updateCategorySortOrder(folderSortTarget.id, {
+        sort_order: parsedFolderSortOrder,
+        expected_version: folderSortTarget.version,
+      });
+      toast.success(parsedFolderSortOrder > 0 ? `排序序号已设置为 ${parsedFolderSortOrder}` : "已清除排序序号");
+      setFolderSortTarget(null);
+      await load(true);
+    } catch (sortError) {
+      setFolderActionError(sortError instanceof Error ? sortError.message : "设置排序序号失败");
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const openFolderMove = (folder: ManagedCategory) => {
+    setFolderMoveTarget(folder);
+    setFolderMoveParentId("");
+    setFolderActionError(null);
+  };
+
+  const saveFolderMove = async () => {
+    if (!folderMoveTarget || !folderMoveParentId) return;
+    const disabledReason = folderMoveParentId === ROOT_FOLDER_VALUE
+      ? folderMoveConstraints.rootReason
+      : folderMoveConstraints.reasons[folderMoveParentId];
+    if (disabledReason) return;
+    setBusyAction(`folder:${folderMoveTarget.id}:move`);
+    setFolderActionError(null);
+    try {
+      await adminContentApi.moveCategory(folderMoveTarget.id, {
+        target_parent_id: folderMoveParentId === ROOT_FOLDER_VALUE ? null : folderMoveParentId,
+        before_category_id: null,
+        expected_version: folderMoveTarget.version,
+      });
+      toast.success(`已移动文件夹“${folderMoveTarget.display_name}”`);
+      setFolderMoveTarget(null);
+      setFolderMoveParentId("");
+      await load(true);
+    } catch (moveFailure) {
+      setFolderActionError(moveFailure instanceof Error ? moveFailure.message : "移动文件夹失败");
+    } finally {
+      setBusyAction(null);
+    }
   };
 
   const moveContent = async () => {
@@ -1422,6 +1580,26 @@ export function AdminManagedContentPage() {
     </div>;
   };
 
+  const renderFolderActions = (folder: ManagedCategory) => {
+    const folderLabel = `${folder.display_code} ${folder.display_name}`;
+    const disabled = Boolean(busyAction) || refreshing || !enabled;
+    const unavailableReason = busyAction
+      ? "正在处理其他操作，请稍候"
+      : refreshing
+        ? "资料列表正在刷新，请稍候"
+        : !enabled
+          ? "资料管理功能当前不可用"
+          : null;
+    return <div className="ml-auto flex min-h-10 shrink-0 items-center justify-end gap-1" onClick={(event) => event.stopPropagation()}>
+      {can("category.manage") && <>
+        <IconButton label={`设置文件夹“${folderLabel}”的顺序`} tooltip={unavailableReason || "设置排序序号"} className="border border-border max-sm:size-10" disabled={disabled} onClick={() => openFolderSort(folder)}><ListOrdered className="size-4" /></IconButton>
+        <IconButton label={`移动文件夹“${folderLabel}”`} tooltip={unavailableReason || "移动文件夹位置"} className="border border-border max-sm:size-10" disabled={disabled} onClick={() => openFolderMove(folder)}><FolderInput className="size-4" /></IconButton>
+        <IconButton label={`重命名文件夹“${folderLabel}”`} tooltip={unavailableReason || "重命名文件夹"} className="border border-border max-sm:size-10" disabled={disabled} onClick={() => openFolderRename(folder)}><Pencil className="size-4" /></IconButton>
+      </>}
+      <IconButton label={`打开文件夹“${folderLabel}”`} tooltip={unavailableReason || "打开文件夹"} className="border border-border max-sm:size-10" disabled={disabled} onClick={() => setCurrentFolderId(folder.id)}><ChevronRight className="size-4" /></IconButton>
+    </div>;
+  };
+
   const selectView = (nextView: ManagedContentView) => {
     setView(nextView);
     if (nextView === "library" || nextView === "trash") setPage(0);
@@ -1527,20 +1705,76 @@ export function AdminManagedContentPage() {
       <div data-testid="managed-content-drop-list" className="relative" onDragEnter={handleListDragEnter} onDragOver={handleListDragOver} onDragLeave={handleListDragLeave} onDrop={handleListDrop}>
       {listDropActive && <div data-testid="managed-content-drop-overlay" className="pointer-events-none absolute inset-1 z-sticky rounded-ui-lg border-2 border-dashed border-primary/70 bg-background/70 text-center shadow-focus backdrop-blur-[1px]" role="status" aria-live="polite"><div className="absolute left-1/2 flex w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-3" style={{ top: listDropPromptTop }}><span className="flex size-12 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-surface" aria-hidden="true"><Upload className="size-6" /></span><div className="space-y-1"><p className="break-words text-ui-base font-semibold">松开以上传文件到“{currentFolderDropLabel}”</p><p className="text-ui-xs text-muted-foreground">也支持拖入文件夹；支持 PDF、Markdown、Word、Excel 和 PPT 文件</p></div></div></div>}
       {loading ? <LoadingState className="min-h-48 border-x-0 border-b-0" label="正在加载资料…" /> : !error && items.length === 0 && childFolders.length === 0 ? <EmptyState className="min-h-56 rounded-none border-x-0 border-b-0 sm:min-h-64" title="没有符合条件的资料" description="请调整筛选条件或上传新资料。" /> : !error && <>
-        <div className="hidden overflow-x-auto border-t border-border lg:block"><table className="w-full min-w-[74rem] text-ui-sm"><thead className="border-b border-border bg-surface-muted text-left text-muted-foreground"><tr><th className="w-12 px-3 py-3"><Checkbox aria-label="选择当前页前20份资料" checked={allSelected} onChange={toggleAll} /></th>{([ ["docType", "类型"], ["title", "资料"], ["updatedAt", "更新时间"], ["status", "状态"], ["source", "来源"] ] as [SortKey, string][]).map(([key, label]) => <th key={key} aria-sort={sort?.key === key ? sort.direction === "asc" ? "ascending" : "descending" : "none"} className={key === "docType" ? "w-24 px-3 py-3 text-center font-medium" : "px-3 py-3 font-medium"}><button type="button" className="inline-flex items-center gap-1 rounded px-1 py-0.5 hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => toggleSort(key)}>{label}{sortIcon(key)}</button></th>)}<th className="px-3 py-3 text-right font-medium">操作</th></tr></thead><tbody className="divide-y divide-border">
+        <div className="hidden overflow-x-auto border-t border-border lg:block"><table className="w-full min-w-[80rem] text-ui-sm"><thead className="border-b border-border bg-surface-muted text-left text-muted-foreground"><tr><th className="w-12 px-3 py-3"><Checkbox aria-label="选择当前页前20份资料" checked={allSelected} onChange={toggleAll} /></th>{([ ["docType", "类型"], ["folderOrder", "顺序"], ["title", "资料"], ["updatedAt", "更新时间"], ["status", "状态"], ["source", "来源"] ] as [SortKey, string][]).map(([key, label]) => <th key={key} aria-sort={sort?.key === key ? sort.direction === "asc" ? "ascending" : "descending" : "none"} className={key === "docType" ? "w-24 px-3 py-3 text-center font-medium" : key === "folderOrder" ? "w-20 px-3 py-3 text-center font-medium" : "px-3 py-3 font-medium"}><button type="button" className="inline-flex items-center gap-1 rounded px-1 py-0.5 hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => toggleSort(key)}>{label}{sortIcon(key)}</button></th>)}<th className="px-3 py-3 text-right font-medium">操作</th></tr></thead><tbody className="divide-y divide-border">
           {sortedChildFolders.map((folder) => {
             const folderLabel = `${folder.display_code} ${folder.display_name}`;
-            return <tr key={folder.id} data-testid={`managed-folder-row-${folder.id}`} className={`cursor-pointer transition-colors duration-normal hover:bg-surface-muted/60 ${draggedItem ? "bg-primary/5 outline outline-1 -outline-offset-1 outline-primary/50" : ""}`} onClick={() => setCurrentFolderId(folder.id)} onDragOver={(event) => { if (draggedItem) { event.preventDefault(); event.stopPropagation(); } }} onDrop={(event) => { if (!draggedItem) return; event.preventDefault(); event.stopPropagation(); void moveItemTo(draggedItem, folder.id); }}><td className="px-3 py-3" /><td className="px-3 py-3"><ManagedItemType folder /></td><td className="max-w-xs px-3 py-3"><button type="button" className="block max-w-full rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setCurrentFolderId(folder.id)}><span className="block break-words font-medium">{folderLabel}</span><span className="mt-0.5 block text-ui-xs text-muted-foreground">{folder.item_count} 份直接资料</span></button></td><td className="whitespace-nowrap px-3 py-3 tabular-nums">{formatManagedUpdatedAt(folder.updated_at)}</td><td className="px-3 py-3 text-muted-foreground">—</td><td className="px-3 py-3 text-muted-foreground">—</td><td className="px-3 py-3 text-right"><IconButton label={`打开文件夹“${folderLabel}”`} className="border border-border" onClick={() => setCurrentFolderId(folder.id)}><ChevronRight className="size-4" /></IconButton></td></tr>;
+            return <tr key={folder.id} data-testid={`managed-folder-row-${folder.id}`} className={`cursor-pointer transition-colors duration-normal hover:bg-surface-muted/60 ${draggedItem ? "bg-primary/5 outline outline-1 -outline-offset-1 outline-primary/50" : ""}`} onClick={() => setCurrentFolderId(folder.id)} onDragOver={(event) => { if (draggedItem) { event.preventDefault(); event.stopPropagation(); } }} onDrop={(event) => { if (!draggedItem) return; event.preventDefault(); event.stopPropagation(); void moveItemTo(draggedItem, folder.id); }}><td className="px-3 py-3" /><td className="px-3 py-3"><ManagedItemType folder /></td><td className="px-3 py-3 text-center tabular-nums">{folder.sort_order > 0 ? folder.sort_order : "—"}</td><td className="max-w-xs px-3 py-3"><button type="button" className="block max-w-full rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setCurrentFolderId(folder.id)}><span className="block break-words font-medium">{folderLabel}</span><span className="mt-0.5 block text-ui-xs text-muted-foreground">{folder.item_count} 份直接资料</span></button></td><td className="whitespace-nowrap px-3 py-3 tabular-nums">{formatManagedUpdatedAt(folder.updated_at)}</td><td className="px-3 py-3 text-muted-foreground">—</td><td className="px-3 py-3 text-muted-foreground">—</td><td className="px-3 py-3 text-right">{renderFolderActions(folder)}</td></tr>;
           })}
-          {sortedItems.map((item, index) => { const movable = canMoveItem(item); const draggable = movable && moveOperation(item) !== "reclassify"; const rowSelectable = item.content_kind === "document" || movable; return <tr key={item.item_id} draggable={draggable} title={draggable ? "拖动到文件夹行可调整目录" : undefined} onDragStart={() => setDraggedItem(item)} onDragEnd={() => setDraggedItem(null)} className={`transition-colors duration-normal hover:bg-surface-muted/60 ${draggable ? "cursor-grab" : ""}`}><td className="px-3 py-3"><Checkbox aria-label={`选择${item.title}`} checked={selected.includes(item.version_id)} disabled={index >= BULK_LIMIT || !rowSelectable} title={!rowSelectable ? "视频转录稿需要发布权限才能批量调整归档目录" : undefined} onChange={() => setSelected((current) => current.includes(item.version_id) ? current.filter((id) => id !== item.version_id) : [...current, item.version_id].slice(0, BULK_LIMIT))} /></td><td className="px-3 py-3"><ManagedItemType docType={item.doc_type} /></td><td className="max-w-xs px-3 py-3"><ManagedItemIdentity item={item} /></td><td className="whitespace-nowrap px-3 py-3 tabular-nums">{formatManagedUpdatedAt(item.updated_at)}</td><td className="px-3 py-3">{renderItemStatus(item)}</td><td className="px-3 py-3">{sourceLabel[item.source_origin] || "其他来源"}</td><td className="px-3 py-3 text-right">{renderActions(item)}</td></tr>; })}</tbody></table></div>
+          {sortedItems.map((item, index) => { const movable = canMoveItem(item); const draggable = movable && moveOperation(item) !== "reclassify"; const rowSelectable = item.content_kind === "document" || movable; return <tr key={item.item_id} draggable={draggable} title={draggable ? "拖动到文件夹行可调整目录" : undefined} onDragStart={() => setDraggedItem(item)} onDragEnd={() => setDraggedItem(null)} className={`transition-colors duration-normal hover:bg-surface-muted/60 ${draggable ? "cursor-grab" : ""}`}><td className="px-3 py-3"><Checkbox aria-label={`选择${item.title}`} checked={selected.includes(item.version_id)} disabled={index >= BULK_LIMIT || !rowSelectable} title={!rowSelectable ? "视频转录稿需要发布权限才能批量调整归档目录" : undefined} onChange={() => setSelected((current) => current.includes(item.version_id) ? current.filter((id) => id !== item.version_id) : [...current, item.version_id].slice(0, BULK_LIMIT))} /></td><td className="px-3 py-3"><ManagedItemType docType={item.doc_type} /></td><td className="px-3 py-3 text-center text-muted-foreground">—</td><td className="max-w-xs px-3 py-3"><ManagedItemIdentity item={item} /></td><td className="whitespace-nowrap px-3 py-3 tabular-nums">{formatManagedUpdatedAt(item.updated_at)}</td><td className="px-3 py-3">{renderItemStatus(item)}</td><td className="px-3 py-3">{sourceLabel[item.source_origin] || "其他来源"}</td><td className="px-3 py-3 text-right">{renderActions(item)}</td></tr>; })}</tbody></table></div>
         <ul className="divide-y divide-border border-t border-border lg:hidden">{sortedChildFolders.map((folder) => {
           const folderLabel = `${folder.display_code} ${folder.display_name}`;
-          return <li key={folder.id} data-testid={`managed-folder-mobile-${folder.id}`}><button type="button" className="flex min-h-16 w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-surface-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:px-5" onClick={() => setCurrentFolderId(folder.id)}><Folder className="size-5 shrink-0 text-primary" aria-hidden="true" /><span className="min-w-0 flex-1"><span className="block break-words font-medium">{folderLabel}</span><span className="mt-0.5 block text-ui-xs text-muted-foreground">{folder.item_count} 份直接资料</span></span><ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" /></button></li>;
+          return <li key={folder.id} data-testid={`managed-folder-mobile-${folder.id}`} className="min-h-16 space-y-2 px-4 py-3 sm:px-5"><button type="button" className="flex w-full min-w-0 items-center gap-3 rounded-ui-md text-left transition-colors hover:bg-surface-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setCurrentFolderId(folder.id)}><Folder className="size-5 shrink-0 text-primary" aria-hidden="true" /><span className="min-w-0 flex-1"><span className="block break-words font-medium">{folderLabel}</span><span className="mt-0.5 block text-ui-xs text-muted-foreground">排序 {folder.sort_order > 0 ? folder.sort_order : "未设置"} · {folder.item_count} 份直接资料</span></span></button>{renderFolderActions(folder)}</li>;
         })}{sortedItems.map((item, index) => { const rowSelectable = item.content_kind === "document" || canMoveItem(item); return <li key={item.item_id} className="space-y-3 px-4 py-4 sm:px-5"><div className="flex items-start gap-3"><Checkbox className="mt-0.5" aria-label={`选择${item.title}`} checked={selected.includes(item.version_id)} disabled={index >= BULK_LIMIT || !rowSelectable} title={!rowSelectable ? "视频转录稿需要发布权限才能批量调整归档目录" : undefined} onChange={() => setSelected((current) => current.includes(item.version_id) ? current.filter((id) => id !== item.version_id) : [...current, item.version_id].slice(0, BULK_LIMIT))} /><ManagedItemType docType={item.doc_type} /><div className="min-w-0 flex-1"><ManagedItemIdentity item={item} /></div></div><dl className="grid grid-cols-[4rem_minmax(0,1fr)] gap-x-2 gap-y-1 text-ui-sm"><dt className="text-muted-foreground">状态</dt><dd>{renderItemStatus(item)}</dd><dt className="text-muted-foreground">更新时间</dt><dd className="whitespace-nowrap tabular-nums">{formatManagedUpdatedAt(item.updated_at)}</dd><dt className="text-muted-foreground">来源</dt><dd>{sourceLabel[item.source_origin] || "其他来源"}</dd></dl>{renderActions(item)}</li>; })}</ul>
         <div className="flex flex-col gap-2 border-t border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5"><p className="text-ui-xs text-muted-foreground">共 {total} 份，第 {page + 1} / {pageCount} 页</p><div className="flex flex-wrap items-center justify-end gap-2"><label className="flex items-center gap-2 text-ui-xs text-muted-foreground">每页<Select aria-label="每页条数" className="h-control-sm w-20" value={String(pageSize)} onChange={(event) => setPageSize(Number(event.target.value))}>{PAGE_SIZE_OPTIONS.map((size) => <option key={size} value={size}>{size} 条</option>)}</Select></label><Button size="sm" variant="outline" disabled={page === 0 || loading} onClick={() => setPage((value) => value - 1)}>上一页</Button><Select aria-label="跳转页码" className="h-control-sm w-24" value={String(page + 1)} onChange={(event) => setPage(Number(event.target.value) - 1)} disabled={loading}>{Array.from({ length: pageCount }, (_, index) => <option key={index + 1} value={index + 1}>第 {index + 1} 页</option>)}</Select><Button size="sm" variant="outline" disabled={page + 1 >= pageCount || loading} onClick={() => setPage((value) => value + 1)}>下一页</Button></div></div>
       </>}
       </div>
     </Card>
+
+    <Dialog open={Boolean(folderSortTarget)} onOpenChange={(open) => {
+      if (!open && !busyAction?.startsWith("folder:")) {
+        setFolderSortTarget(null);
+        setFolderActionError(null);
+      }
+    }}>
+      <DialogContent>
+        <DialogHeader><DialogTitle>设置文件夹顺序</DialogTitle><DialogDescription>排序序号只控制同级文件夹的显示顺序，不会改变地址栏中的显示编号。</DialogDescription></DialogHeader>
+        {folderSortTarget && <div className="space-y-4">
+          <div className="rounded-ui-md border border-border bg-surface-muted/40 px-3 py-2 text-ui-sm"><p className="text-ui-xs text-muted-foreground">当前路径</p><p className="mt-1 break-words font-medium">{folderSortTarget.full_path}</p></div>
+          <label className="block space-y-1.5 text-ui-sm font-medium"><span>排序序号</span><Input type="number" min={0} max={999999} step={1} value={folderSortValue} onChange={(event) => { setFolderSortValue(event.target.value); setFolderActionError(null); }} placeholder="留空表示未设置" aria-label="排序序号" /><span className="block text-ui-xs font-normal text-muted-foreground">建议使用 10、20、30 等间隔值，后续插入更方便。</span></label>
+          {!folderSortValid && <p className="text-ui-sm text-destructive" role="alert">请输入 0 到 999999 之间的整数，或留空。</p>}
+          {folderSortDuplicateCount > 0 && <p className="rounded-ui-md border border-warning/40 bg-warning/10 px-3 py-2 text-ui-sm" role="status">当前目录已有 {folderSortDuplicateCount} 个文件夹使用序号 {parsedFolderSortOrder}，保存后将按名称继续排序。</p>}
+          {folderActionError && <p className="text-ui-sm text-destructive" role="alert">{folderActionError}</p>}
+        </div>}
+        <DialogFooter><Button variant="outline" onClick={() => setFolderSortTarget(null)} disabled={busyAction === `folder:${folderSortTarget?.id}:sort`}>取消</Button><Button onClick={() => void saveFolderSort()} disabled={!folderSortValid || busyAction === `folder:${folderSortTarget?.id}:sort`}>{busyAction === `folder:${folderSortTarget?.id}:sort` ? "保存中…" : "保存顺序"}</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog open={Boolean(folderRenameTarget)} onOpenChange={(open) => {
+      if (!open && !busyAction?.startsWith("folder:")) {
+        setFolderRenameTarget(null);
+        setFolderActionError(null);
+      }
+    }}>
+      <DialogContent>
+        <DialogHeader><DialogTitle>重命名文件夹</DialogTitle><DialogDescription>只修改文件夹名称；显示编号、资料归属和发布状态保持不变。</DialogDescription></DialogHeader>
+        {folderRenameTarget && <div className="space-y-4">
+          <div className="rounded-ui-md border border-border bg-surface-muted/40 px-3 py-2 text-ui-sm"><p className="text-ui-xs text-muted-foreground">当前路径</p><p className="mt-1 break-words font-medium">{folderRenameTarget.full_path}</p></div>
+          <label className="block space-y-1.5 text-ui-sm font-medium"><span>文件夹名称</span><Input value={folderRenameName} maxLength={100} onChange={(event) => { setFolderRenameName(event.target.value); setFolderActionError(null); }} aria-label="文件夹名称" autoFocus /><span className="block text-right text-ui-xs font-normal text-muted-foreground">{folderRenameName.trim().length}/100</span></label>
+          {folderRenameConflict && <p className="rounded-ui-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-ui-sm text-destructive" role="alert">当前目录已有同名文件夹“{folderRenameConflict.display_name}”，请使用其他名称。</p>}
+          {folderActionError && <p className="text-ui-sm text-destructive" role="alert">{folderActionError}</p>}
+        </div>}
+        <DialogFooter><Button variant="outline" onClick={() => setFolderRenameTarget(null)} disabled={busyAction === `folder:${folderRenameTarget?.id}:rename`}>取消</Button><Button onClick={() => void saveFolderRename()} disabled={!folderRenameName.trim() || Boolean(folderRenameConflict) || normalizeFolderName(folderRenameName) === normalizeFolderName(folderRenameTarget?.display_name || "") || busyAction === `folder:${folderRenameTarget?.id}:rename`}>{busyAction === `folder:${folderRenameTarget?.id}:rename` ? "保存中…" : "保存名称"}</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog open={Boolean(folderMoveTarget)} onOpenChange={(open) => {
+      if (!open && !busyAction?.startsWith("folder:")) {
+        setFolderMoveTarget(null);
+        setFolderMoveParentId("");
+        setFolderActionError(null);
+      }
+    }}>
+      <DialogContent className="max-h-[calc(100vh-2rem)] max-w-2xl overflow-y-auto">
+        <DialogHeader><DialogTitle>移动文件夹位置</DialogTitle><DialogDescription>移动会更新完整路径，但不会改变资料归属、发布状态或稳定分类标识。</DialogDescription></DialogHeader>
+        {folderMoveTarget && <div className="space-y-4">
+          <div className="rounded-ui-md border border-border bg-surface-muted/40 px-3 py-2 text-ui-sm"><p className="text-ui-xs text-muted-foreground">当前路径</p><p className="mt-1 break-words font-medium">{folderMoveTarget.full_path}</p></div>
+          <CategoryTreePicker categories={categories} value={folderMoveParentId} onChange={(value) => { setFolderMoveParentId(value); setFolderActionError(null); }} currentCategoryId={folderMoveTarget.parent_id} label="目标位置" rootOption={{ value: ROOT_FOLDER_VALUE, label: "根目录 /", disabledReason: folderMoveConstraints.rootReason }} disabledCategoryReasons={folderMoveConstraints.reasons} disabled={busyAction === `folder:${folderMoveTarget.id}:move`} />
+          {folderMoveParentId && <p className="break-words text-ui-xs text-muted-foreground">新路径：{folderMoveParentId === ROOT_FOLDER_VALUE ? "/" : categories.find((category) => category.id === folderMoveParentId)?.full_path} / {folderMoveTarget.display_code} {folderMoveTarget.display_name}</p>}
+          {folderActionError && <p className="text-ui-sm text-destructive" role="alert">{folderActionError}</p>}
+        </div>}
+        <DialogFooter><Button variant="outline" onClick={() => setFolderMoveTarget(null)} disabled={busyAction === `folder:${folderMoveTarget?.id}:move`}>取消</Button><Button onClick={() => void saveFolderMove()} disabled={!folderMoveParentId || Boolean(folderMoveParentId === ROOT_FOLDER_VALUE ? folderMoveConstraints.rootReason : folderMoveConstraints.reasons[folderMoveParentId]) || busyAction === `folder:${folderMoveTarget?.id}:move`}><FolderInput className="size-4" />{busyAction === `folder:${folderMoveTarget?.id}:move` ? "移动中…" : "确认移动"}</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
 
     <Dialog open={Boolean(bulkAction && bulkAction !== "archive")} onOpenChange={(open) => {
       if (!open && busyAction !== "bulk") {
