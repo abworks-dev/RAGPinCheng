@@ -158,16 +158,91 @@ jobs:
 
           REPORT_ROOT="${RUNNER_TEMP}/pptx-preview-repair/current"
           mkdir -p "${REPORT_ROOT}"
-          docker exec -i "${BACKEND_ID}" python - <<'PY'
+          mapfile -t LIBREOFFICE_IDS < <(docker ps \
+            --filter 'label=com.docker.compose.project=ragpincheng-prod' \
+            --filter 'label=com.docker.compose.service=libreoffice' \
+            --format '{{.ID}}')
+          [ "${#LIBREOFFICE_IDS[@]}" -eq 1 ] || {
+            echo "ERROR: expected exactly one running production LibreOffice container"
+            exit 1
+          }
+          LIBREOFFICE_ID="${LIBREOFFICE_IDS[0]}"
+          LIBREOFFICE_CONTAINER_HEALTH="$(docker inspect --format \
+            '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' \
+            "${LIBREOFFICE_ID}")"
+          LIBREOFFICE_BINARY_PRESENT=false
+          if docker exec "${LIBREOFFICE_ID}" sh -c \
+            'command -v libreoffice >/dev/null 2>&1'; then
+            LIBREOFFICE_BINARY_PRESENT=true
+          fi
+          LIBREOFFICE_HOME_WRITABLE=false
+          if docker exec "${LIBREOFFICE_ID}" sh -c \
+            '[ -n "${HOME:-}" ] && [ -d "$HOME" ] && [ -w "$HOME" ]'; then
+            LIBREOFFICE_HOME_WRITABLE=true
+          fi
+          printf 'container_health=%s\nbinary_present=%s\nhome_writable=%s\n' \
+            "${LIBREOFFICE_CONTAINER_HEALTH}" \
+            "${LIBREOFFICE_BINARY_PRESENT}" \
+            "${LIBREOFFICE_HOME_WRITABLE}" \
+            > "${REPORT_ROOT}/libreoffice-container.txt"
+
+          set +e
+          docker exec -i "${BACKEND_ID}" python - \
+            > "${REPORT_ROOT}/libreoffice-health.json" <<'PY'
+          import json
+          import re
+
           import httpx
 
-          response = httpx.get("http://libreoffice:8101/health", timeout=20)
-          response.raise_for_status()
-          payload = response.json()
-          if payload.get("status") != "ok":
-              raise SystemExit("LibreOffice health response was not ok")
-          print("LIBREOFFICE_HEALTH status=ok")
+          report = {
+              "schema_version": "libreoffice-health/1",
+              "status": "unavailable",
+              "http_status": None,
+              "detail": "unknown",
+          }
+          exit_code = 1
+          try:
+              response = httpx.get("http://libreoffice:8101/health", timeout=20)
+              report["http_status"] = response.status_code
+              try:
+                  payload = response.json()
+              except ValueError:
+                  payload = {}
+              if response.status_code == 200 and payload.get("status") == "ok":
+                  report["status"] = "ok"
+                  report["detail"] = "ok"
+                  exit_code = 0
+              else:
+                  detail = str(payload.get("detail") or "unexpected_health_response")
+                  detail = re.sub(
+                      r"(?i)(token|password|secret|authorization)\s*[:=]\s*\S+",
+                      r"\1=[REDACTED]",
+                      detail,
+                  )
+                  report["detail"] = detail[:500]
+          except httpx.HTTPError as exc:
+              report["detail"] = type(exc).__name__
+          print(json.dumps(report, ensure_ascii=True, sort_keys=True))
+          raise SystemExit(exit_code)
           PY
+          LIBREOFFICE_HEALTH_EXIT=$?
+          set -e
+          python3 - "${REPORT_ROOT}/libreoffice-health.json" <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as handle:
+              report = json.load(handle)
+          print(
+              "LIBREOFFICE_HEALTH"
+              f" status={report['status']} http_status={report['http_status']}"
+              f" detail={report['detail']}"
+          )
+          PY
+          [ "${LIBREOFFICE_HEALTH_EXIT}" -eq 0 ] || {
+            echo "ERROR: production LibreOffice health check failed"
+            exit 1
+          }
 
           FIXTURE_HOST="${RUNNER_TEMP}/pptx-preview-repair/synthetic-preview-check.pptx"
           FIXTURE_CONTAINER="/tmp/ragpincheng-pptx-preview-${GITHUB_RUN_ID}.pptx"
