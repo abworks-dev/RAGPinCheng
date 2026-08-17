@@ -464,6 +464,7 @@ export const api = {
     category_id?: string;
     lifecycle_status?: string;
     source_origin?: string;
+    content_kind?: "document" | "media_transcript";
     limit?: number;
     offset?: number;
   }) => {
@@ -472,6 +473,7 @@ export const api = {
     if (params?.category_id) search.set("category_id", params.category_id);
     if (params?.lifecycle_status) search.set("lifecycle_status", params.lifecycle_status);
     if (params?.source_origin) search.set("source_origin", params.source_origin);
+    if (params?.content_kind) search.set("content_kind", params.content_kind);
     if (params?.limit != null) search.set("limit", String(params.limit));
     if (params?.offset != null) search.set("offset", String(params.offset));
     return jsonFetch<ManagedContentList>(`/api/admin/content/items-page?${search}`);

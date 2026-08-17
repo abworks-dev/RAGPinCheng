@@ -15,6 +15,7 @@ from api import routes_content
 from api.content_permission_catalog import LEGACY_CONTENT_PERMISSION_MAP
 from api.content_storage import ContentStorage
 from api.db import connect, get_db, init_db
+from api.media_transcript_catalog import ensure_media_transcript_catalog_item
 
 
 @pytest.fixture
@@ -85,6 +86,109 @@ def _auth(sessions: dict[str, tuple[str, str]], employee_id: str, *, csrf: bool 
     sid, token = sessions[employee_id]
     headers = {"X-CSRF-Token": token} if csrf else {}
     return {"cookies": {"pc_sid": sid}, "headers": headers}
+
+
+def _insert_published_media(
+    conn: sqlite3.Connection,
+    *,
+    media_id: str,
+    version_id: str,
+    title: str,
+    filename: str,
+    now: int,
+    pending_revision: bool = False,
+) -> str:
+    conn.execute(
+        """INSERT INTO media_assets(
+               media_id,title,original_filename,storage_rel_path,mime_type,file_size,sha256,
+               transcript_source_path,transcript_origin,status,created_by,created_at,updated_at,error
+           ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            media_id,
+            title,
+            filename,
+            f"synthetic/{media_id}.mp4",
+            "video/mp4",
+            3 * 1024 * 1024,
+            None,
+            None,
+            "generated",
+            "transcript_ready",
+            None,
+            now,
+            now,
+            None,
+        ),
+    )
+    conn.execute(
+        """INSERT INTO transcription_jobs(
+               id,media_id,attempt_number,request_idempotency_key,execution_identity,
+               profile_id,provider_key,profile_definition_version,config_hash,
+               profile_snapshot_json,execution_config_json,execution_fingerprint,audio_sha256,
+               input_kind,input_size_bytes,total_ms,status,created_at,finished_at,updated_at
+           ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'media',?,65000,'succeeded',?,?,?)""",
+        (
+            f"{media_id[:-1]}a",
+            media_id,
+            1,
+            f"{media_id[:-1]}b",
+            "synthetic-execution",
+            "synthetic-profile",
+            "synthetic-provider",
+            "1",
+            "c" * 64,
+            "{}",
+            "{}",
+            "d" * 64,
+            "e" * 64,
+            1024,
+            now,
+            now,
+            now,
+        ),
+    )
+    conn.execute(
+        """INSERT INTO transcript_versions(
+               id,media_id,source,markdown_storage_kind,markdown_rel_path,markdown_sha256,
+               markdown_size_bytes,review_status,publication_status,published_at,created_at,updated_at
+           ) VALUES (?,?,'manual','managed_artifact',?,?,10,
+                     'review_approved','published',?,?,?)""",
+        (version_id, media_id, f"markdown/{version_id}.md", "f" * 64, now, now, now),
+    )
+    index_job_id = f"{version_id[:-1]}c"
+    conn.execute(
+        """INSERT INTO transcript_publication_index_jobs(
+               id,transcript_version_id,candidate_version_id,attempt_number,markdown_sha256,
+               target_index_id,status,created_at,finished_at,updated_at
+           ) VALUES (?,?,?,1,?,?,'done',?,?,?)""",
+        (index_job_id, version_id, version_id, "f" * 64, f"synthetic-{version_id}", now, now, now),
+    )
+    conn.execute(
+        "INSERT INTO media_transcript_heads(media_id,current_version_id,updated_at) VALUES (?,?,?)",
+        (media_id, version_id, now),
+    )
+    if pending_revision:
+        pending_id = f"{version_id[:-1]}d"
+        conn.execute(
+            """INSERT INTO transcript_versions(
+                   id,media_id,source,markdown_storage_kind,markdown_rel_path,markdown_sha256,
+                   markdown_size_bytes,review_status,publication_status,created_at,updated_at,
+                   derived_from_version_id
+               ) VALUES (?,?,'manual','managed_artifact',?,?,11,
+                         'awaiting_review','not_published',?,?,?)""",
+            (
+                pending_id,
+                media_id,
+                f"markdown/{pending_id}.md",
+                "1" * 64,
+                now + 1,
+                now + 1,
+                version_id,
+            ),
+        )
+    item_id = ensure_media_transcript_catalog_item(conn, media_id=media_id, now=now)
+    conn.commit()
+    return item_id
 
 
 def test_content_endpoints_enforce_auth_permissions_csrf_and_role_separation(content_api):
@@ -1211,6 +1315,100 @@ def test_bulk_rejection_requires_and_persists_reason(content_api):
     listed_item = next(item for item in listed if item["version_id"] == version_id)
     assert listed_item["latest_review_decision"] == "rejected"
     assert listed_item["latest_review_note"] == "统一补充版本说明"
+def test_published_media_transcripts_share_library_listing_without_document_mirrors(content_api):
+    client, sessions, _queued, db_path = content_api
+    first_media_id = "123e4567-e89b-12d3-a456-426614174110"
+    first_version_id = "123e4567-e89b-12d3-a456-426614174111"
+    second_media_id = "123e4567-e89b-12d3-a456-426614174120"
+    second_version_id = "123e4567-e89b-12d3-a456-426614174121"
+    conn = connect(db_path)
+    first_item_id = _insert_published_media(
+        conn,
+        media_id=first_media_id,
+        version_id=first_version_id,
+        title="WhisperX 培训",
+        filename="same-name.mp4",
+        now=100,
+        pending_revision=True,
+    )
+    _insert_published_media(
+        conn,
+        media_id=second_media_id,
+        version_id=second_version_id,
+        title="同名视频的第二次发布",
+        filename="same-name.mp4",
+        now=200,
+    )
+    conn.close()
+
+    listing = client.get(
+        "/api/admin/content/items-page?category_id=cat-05&content_kind=media_transcript",
+        **_auth(sessions, "publisher"),
+    )
+    assert listing.status_code == 200
+    body = listing.json()
+    assert body["total"] == 2
+    assert body["status_counts"] == {"published": 2}
+    by_id = {item["media_id"]: item for item in body["items"]}
+    assert {
+        key: by_id[first_media_id][key]
+        for key in (
+            "content_kind",
+            "version_id",
+            "lifecycle_status",
+            "source_origin",
+            "media_duration_ms",
+            "media_file_size",
+            "has_pending_revision",
+        )
+    } == {
+        "content_kind": "media_transcript",
+        "version_id": first_version_id,
+        "lifecycle_status": "published",
+        "source_origin": "transcription",
+        "media_duration_ms": 65000,
+        "media_file_size": 3 * 1024 * 1024,
+        "has_pending_revision": True,
+    }
+    assert by_id[second_media_id]["has_pending_revision"] is False
+    assert client.get(
+        "/api/admin/content/items-page?query=WhisperX&content_kind=media_transcript",
+        **_auth(sessions, "publisher"),
+    ).json()["total"] == 1
+    assert client.get(
+        "/api/admin/content/items-page?content_kind=document",
+        **_auth(sessions, "publisher"),
+    ).json()["total"] == 0
+
+    move_url = f"/api/admin/content/items/{first_item_id}/move"
+    body = {"target_category_id": "cat-04", "expected_version_id": first_version_id}
+    assert client.post(
+        move_url, json=body, **_auth(sessions, "organizer", csrf=True)
+    ).status_code == 403
+    moved = client.post(move_url, json=body, **_auth(sessions, "publisher", csrf=True))
+    assert moved.status_code == 200
+    assert moved.json()["category_id"] == "cat-04"
+    assert moved.json()["version_id"] == first_version_id
+
+    rejected = client.request(
+        "DELETE",
+        f"/api/admin/content/items/{first_item_id}",
+        json={"expected_version_id": first_version_id},
+        **_auth(sessions, "publisher", csrf=True),
+    )
+    assert rejected.status_code == 409
+    assert rejected.json()["detail"]["code"] == "media_transcript_operation_not_supported"
+
+    conn = connect(db_path)
+    try:
+        assert conn.execute(
+            "SELECT count(*) FROM content_items WHERE content_kind='media_transcript'"
+        ).fetchone()[0] == 2
+        assert conn.execute("SELECT count(*) FROM content_versions").fetchone()[0] == 0
+        assert conn.execute("SELECT count(*) FROM content_item_heads").fetchone()[0] == 0
+        assert conn.execute("SELECT count(*) FROM content_index_jobs").fetchone()[0] == 0
+    finally:
+        conn.close()
 
 
 def test_bulk_review_and_publish_report_partial_failures(content_api):

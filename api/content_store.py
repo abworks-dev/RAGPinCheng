@@ -150,7 +150,17 @@ def list_categories(conn: sqlite3.Connection, *, include_inactive: bool = False)
                 FROM category_nodes c JOIN paths p ON p.id=c.parent_id
             )
             SELECT p.*,(SELECT count(*) FROM content_items i
-                        WHERE i.category_id=p.id AND i.archived_at IS NULL) AS item_count
+                        WHERE i.category_id=p.id AND i.archived_at IS NULL
+                          AND (
+                            i.content_kind='document' OR EXISTS (
+                              SELECT 1 FROM media_assets m
+                              JOIN media_transcript_heads h ON h.media_id=m.media_id
+                              JOIN transcript_versions v
+                                ON v.id=h.current_version_id AND v.media_id=m.media_id
+                              WHERE m.media_id=i.media_id AND m.status<>'archived'
+                                AND v.publication_status='published'
+                            )
+                          )) AS item_count
             FROM paths p {where}
             """
     ).fetchall()
@@ -245,7 +255,17 @@ def update_category(
         if child:
             raise ValueError("active_child_category_exists")
         item = conn.execute(
-            "SELECT 1 FROM content_items WHERE category_id=? AND archived_at IS NULL LIMIT 1",
+            """SELECT 1 FROM content_items i
+               WHERE i.category_id=? AND i.archived_at IS NULL AND (
+                 i.content_kind='document' OR EXISTS (
+                   SELECT 1 FROM media_assets m
+                   JOIN media_transcript_heads h ON h.media_id=m.media_id
+                   JOIN transcript_versions v
+                     ON v.id=h.current_version_id AND v.media_id=m.media_id
+                   WHERE m.media_id=i.media_id AND m.status<>'archived'
+                     AND v.publication_status='published'
+                 )
+               ) LIMIT 1""",
             (category_id,),
         ).fetchone()
         if item:
@@ -775,60 +795,134 @@ def register_uploaded_document(
     return UploadedContent(batch_id=batch_id, item_id=item_id, version_id=version_id)
 
 
+_CONTENT_LIBRARY_CTE = """WITH RECURSIVE paths AS (
+        SELECT id,display_code || ' ' || display_name AS full_path
+        FROM category_nodes WHERE parent_id IS NULL
+        UNION ALL
+        SELECT c.id,p.full_path || ' / ' || c.display_code || ' ' || c.display_name
+        FROM category_nodes c JOIN paths p ON p.id=c.parent_id
+    ), latest_documents AS (
+        SELECT v.* FROM content_versions v
+        WHERE v.version_number=(
+            SELECT max(v2.version_number) FROM content_versions v2 WHERE v2.item_id=v.item_id
+        )
+    ), document_rows AS (
+        SELECT i.id AS item_id,COALESCE(v.title,i.title) AS title,i.content_kind,
+               i.category_id,i.media_id,i.created_at,i.updated_at,c.category_key,
+               c.display_code,c.display_name,paths.full_path AS category_path,
+               v.id AS version_id,v.version_number,v.original_filename,v.doc_type,
+               v.lifecycle_status,v.object_sha256,v.source_origin,v.source_batch_id,
+               v.source_rel_path,h.current_version_id,
+               j.status AS latest_publication_status,
+               j.error_code AS latest_publication_error_code,
+               review_user.real_name AS latest_reviewed_by_name,
+               latest_review.created_at AS latest_reviewed_at,
+               latest_review.decision AS latest_review_decision,
+               latest_review.note AS latest_review_note,
+               (SELECT count(*) FROM content_index_jobs jc WHERE jc.version_id=v.id)
+                 AS publication_attempt_count,
+               i.archived_at,archive_user.real_name AS archived_by_name,
+               archive_event.metadata_json AS archive_metadata_json,
+               NULL AS media_duration_ms,NULL AS media_file_size,0 AS has_pending_revision
+        FROM content_items i
+        JOIN category_nodes c ON c.id=i.category_id
+        JOIN paths ON paths.id=i.category_id
+        JOIN latest_documents v ON v.item_id=i.id
+        LEFT JOIN content_item_heads h ON h.item_id=i.id
+        LEFT JOIN content_index_jobs j ON j.id=(
+            SELECT j2.id FROM content_index_jobs j2 WHERE j2.version_id=v.id
+            ORDER BY j2.attempt_number DESC,j2.created_at DESC,j2.id DESC LIMIT 1
+        )
+        LEFT JOIN content_reviews latest_review ON latest_review.id=(
+            SELECT r2.id FROM content_reviews r2 WHERE r2.version_id=v.id
+            ORDER BY r2.created_at DESC,r2.rowid DESC LIMIT 1
+        )
+        LEFT JOIN users review_user ON review_user.id=latest_review.reviewer_id
+        LEFT JOIN content_audit_events archive_event ON archive_event.id=(
+            SELECT ae.id FROM content_audit_events ae
+            WHERE ae.item_id=i.id AND ae.event_type='content.archived'
+            ORDER BY ae.created_at DESC,ae.id DESC LIMIT 1
+        )
+        LEFT JOIN users archive_user ON archive_user.id=archive_event.actor_user_id
+        WHERE i.content_kind='document'
+    ), media_rows AS (
+        SELECT i.id AS item_id,i.title,i.content_kind,i.category_id,i.media_id,
+               i.created_at,i.updated_at,c.category_key,c.display_code,c.display_name,
+               paths.full_path AS category_path,tv.id AS version_id,
+               (SELECT count(*) FROM transcript_versions numbered
+                WHERE numbered.media_id=tv.media_id AND (
+                    numbered.created_at<tv.created_at OR
+                    (numbered.created_at=tv.created_at AND numbered.id<=tv.id)
+                )) AS version_number,
+               m.original_filename,'transcript' AS doc_type,'published' AS lifecycle_status,
+               NULL AS object_sha256,'transcription' AS source_origin,
+               NULL AS source_batch_id,m.original_filename AS source_rel_path,
+               h.current_version_id,j.status AS latest_publication_status,
+               j.error_code AS latest_publication_error_code,
+               NULL AS latest_reviewed_by_name,NULL AS latest_reviewed_at,
+               NULL AS latest_review_decision,NULL AS latest_review_note,
+               (SELECT count(*) FROM transcript_publication_index_jobs attempts
+                WHERE attempts.transcript_version_id=tv.id) AS publication_attempt_count,
+               NULL AS archived_at,NULL AS archived_by_name,NULL AS archive_metadata_json,
+               (SELECT succeeded.total_ms FROM transcription_jobs succeeded
+                WHERE succeeded.media_id=m.media_id AND succeeded.status='succeeded'
+                ORDER BY succeeded.finished_at DESC,succeeded.updated_at DESC,succeeded.id DESC LIMIT 1)
+                 AS media_duration_ms,
+               m.file_size AS media_file_size,
+               EXISTS(
+                   SELECT 1 FROM transcript_versions pending
+                   WHERE pending.media_id=tv.media_id AND pending.id<>tv.id
+                     AND pending.publication_status<>'published'
+                     AND (pending.created_at>tv.created_at OR
+                          (pending.created_at=tv.created_at AND pending.id>tv.id))
+               ) AS has_pending_revision
+        FROM content_items i
+        JOIN category_nodes c ON c.id=i.category_id
+        JOIN paths ON paths.id=i.category_id
+        JOIN media_assets m ON m.media_id=i.media_id AND m.status<>'archived'
+        JOIN media_transcript_heads h ON h.media_id=m.media_id
+        JOIN transcript_versions tv
+          ON tv.id=h.current_version_id AND tv.media_id=m.media_id
+        LEFT JOIN transcript_publication_index_jobs j ON j.id=(
+            SELECT j2.id FROM transcript_publication_index_jobs j2
+            WHERE j2.transcript_version_id=tv.id
+            ORDER BY j2.attempt_number DESC,j2.created_at DESC,j2.id DESC LIMIT 1
+        )
+        WHERE i.content_kind='media_transcript' AND i.archived_at IS NULL
+          AND tv.publication_status='published'
+    ), library_rows AS (
+        SELECT * FROM document_rows
+        UNION ALL
+        SELECT * FROM media_rows
+    )"""
+
+
 def list_content_items(
     conn: sqlite3.Connection,
     *,
     category_id: str | None = None,
     lifecycle_status: str | None = None,
+    content_kind: str | None = None,
 ) -> list[sqlite3.Row]:
-    clauses = ["i.archived_at IS NULL"]
+    if content_kind not in {None, "document", "media_transcript"}:
+        raise ValueError("invalid_content_kind")
+    clauses = ["archived_at IS NULL"]
     params: list[object] = []
     if category_id:
-        clauses.append("i.category_id=?")
+        clauses.append("category_id=?")
         params.append(category_id)
     if lifecycle_status:
-        clauses.append("v.lifecycle_status=?")
+        clauses.append("lifecycle_status=?")
         params.append(lifecycle_status)
+    if content_kind:
+        clauses.append("content_kind=?")
+        params.append(content_kind)
     where = " AND ".join(clauses)
     return conn.execute(
-        f"""WITH RECURSIVE paths AS (
-                SELECT id,display_code || ' ' || display_name AS full_path
-                FROM category_nodes WHERE parent_id IS NULL
-                UNION ALL
-                SELECT c.id,p.full_path || ' / ' || c.display_code || ' ' || c.display_name
-                FROM category_nodes c JOIN paths p ON p.id=c.parent_id
-            )
-            SELECT i.id AS item_id,COALESCE(v.title,i.title) AS title,i.content_kind,i.category_id,i.media_id,
-                   i.created_at,i.updated_at,c.category_key,c.display_code,c.display_name,
-                   paths.full_path AS category_path,
-                   v.id AS version_id,v.version_number,v.original_filename,v.doc_type,
-                   v.lifecycle_status,v.object_sha256,v.source_origin,v.source_batch_id,
-                   v.source_rel_path,
-                   h.current_version_id,j.status AS latest_publication_status,
-                   j.error_code AS latest_publication_error_code,
-                   review_user.real_name AS latest_reviewed_by_name,
-                   latest_review.created_at AS latest_reviewed_at,
-                   latest_review.decision AS latest_review_decision,
-                   latest_review.note AS latest_review_note,
-                   (SELECT count(*) FROM content_index_jobs jc WHERE jc.version_id=v.id)
-                     AS publication_attempt_count
-            FROM content_items i
-            JOIN category_nodes c ON c.id=i.category_id
-            JOIN paths ON paths.id=i.category_id
-            JOIN content_versions v ON v.item_id=i.id
-             AND v.version_number=(SELECT max(v2.version_number) FROM content_versions v2 WHERE v2.item_id=i.id)
-            LEFT JOIN content_item_heads h ON h.item_id=i.id
-            LEFT JOIN content_index_jobs j ON j.id=(
-                SELECT j2.id FROM content_index_jobs j2 WHERE j2.version_id=v.id
-                ORDER BY j2.attempt_number DESC,j2.created_at DESC,j2.id DESC LIMIT 1
-            )
-            LEFT JOIN content_reviews latest_review ON latest_review.id=(
-                SELECT r2.id FROM content_reviews r2 WHERE r2.version_id=v.id
-                ORDER BY r2.created_at DESC,r2.rowid DESC LIMIT 1
-            )
-            LEFT JOIN users review_user ON review_user.id=latest_review.reviewer_id
-            WHERE {where}
-            ORDER BY i.updated_at DESC,i.id""",
+        _CONTENT_LIBRARY_CTE
+        + f""" SELECT * FROM library_rows
+                 WHERE {where}
+                 ORDER BY updated_at DESC,item_id""",
         params,
     ).fetchall()
 
@@ -840,84 +934,56 @@ def list_content_items_page(
     category_id: str | None = None,
     lifecycle_status: str | None = None,
     source_origin: str | None = None,
+    content_kind: str | None = None,
     limit: int = 25,
     offset: int = 0,
     archived: bool = False,
 ) -> tuple[list[sqlite3.Row], int, dict[str, int]]:
-    clauses = ["i.archived_at IS NOT NULL" if archived else "i.archived_at IS NULL"]
+    if content_kind not in {None, "document", "media_transcript"}:
+        raise ValueError("invalid_content_kind")
+    clauses = ["archived_at IS NOT NULL" if archived else "archived_at IS NULL"]
     params: list[object] = []
     normalized = query.strip()
     if normalized:
-        clauses.append("(COALESCE(v.title,i.title) LIKE ? OR v.original_filename LIKE ? OR paths.full_path LIKE ? OR v.source_rel_path LIKE ?)")
+        clauses.append(
+            "(title LIKE ? OR original_filename LIKE ? OR category_path LIKE ? OR source_rel_path LIKE ?)"
+        )
         pattern = f"%{normalized}%"
         params.extend([pattern, pattern, pattern, pattern])
     if category_id:
-        clauses.append("i.category_id=?")
+        clauses.append("category_id=?")
         params.append(category_id)
     if source_origin:
-        clauses.append("v.source_origin=?")
+        clauses.append("source_origin=?")
         params.append(source_origin)
+    if content_kind:
+        clauses.append("content_kind=?")
+        params.append(content_kind)
     base_where = " AND ".join(clauses)
     status_where = base_where
     status_params = list(params)
     if lifecycle_status:
-        status_where += " AND v.lifecycle_status=?"
+        status_where += " AND lifecycle_status=?"
         status_params.append(lifecycle_status)
-    cte = """WITH RECURSIVE paths AS (
-                SELECT id,display_code || ' ' || display_name AS full_path
-                FROM category_nodes WHERE parent_id IS NULL
-                UNION ALL
-                SELECT c.id,p.full_path || ' / ' || c.display_code || ' ' || c.display_name
-                FROM category_nodes c JOIN paths p ON p.id=c.parent_id
-            ), latest AS (
-                SELECT v.* FROM content_versions v
-                WHERE v.version_number=(SELECT max(v2.version_number) FROM content_versions v2 WHERE v2.item_id=v.item_id)
-            )"""
-    joins = """ FROM content_items i
-                JOIN category_nodes c ON c.id=i.category_id
-                JOIN paths ON paths.id=i.category_id
-                JOIN latest v ON v.item_id=i.id
-                LEFT JOIN content_item_heads h ON h.item_id=i.id
-                LEFT JOIN content_index_jobs j ON j.id=(
-                    SELECT j2.id FROM content_index_jobs j2 WHERE j2.version_id=v.id
-                    ORDER BY j2.attempt_number DESC,j2.created_at DESC,j2.id DESC LIMIT 1
-                )
-                LEFT JOIN content_reviews latest_review ON latest_review.id=(
-                    SELECT r2.id FROM content_reviews r2 WHERE r2.version_id=v.id
-                    ORDER BY r2.created_at DESC,r2.rowid DESC LIMIT 1
-                )
-                LEFT JOIN users review_user ON review_user.id=latest_review.reviewer_id
-                LEFT JOIN content_audit_events archive_event ON archive_event.id=(
-                    SELECT ae.id FROM content_audit_events ae
-                    WHERE ae.item_id=i.id AND ae.event_type='content.archived'
-                    ORDER BY ae.created_at DESC,ae.id DESC LIMIT 1
-                )
-                LEFT JOIN users archive_user ON archive_user.id=archive_event.actor_user_id"""
     rows = conn.execute(
-        cte + """ SELECT i.id AS item_id,COALESCE(v.title,i.title) AS title,i.content_kind,i.category_id,i.media_id,
-                          i.created_at,i.updated_at,c.category_key,c.display_code,c.display_name,
-                          paths.full_path AS category_path,v.id AS version_id,v.version_number,
-                          v.original_filename,v.doc_type,v.lifecycle_status,v.object_sha256,
-                          v.source_origin,v.source_batch_id,v.source_rel_path,h.current_version_id,
-                          j.status AS latest_publication_status,
-                          j.error_code AS latest_publication_error_code,
-                          review_user.real_name AS latest_reviewed_by_name,
-                          latest_review.created_at AS latest_reviewed_at,
-                          latest_review.decision AS latest_review_decision,
-                          latest_review.note AS latest_review_note,
-                          i.archived_at,archive_user.real_name AS archived_by_name,
-                          archive_event.metadata_json AS archive_metadata_json,
-                          (SELECT count(*) FROM content_index_jobs jc WHERE jc.version_id=v.id)
-                            AS publication_attempt_count""" + joins +
-        f" WHERE {status_where} ORDER BY i.updated_at DESC,i.id LIMIT ? OFFSET ?",
+        _CONTENT_LIBRARY_CTE
+        + f""" SELECT * FROM library_rows
+                 WHERE {status_where}
+                 ORDER BY updated_at DESC,item_id LIMIT ? OFFSET ?""",
         [*status_params, limit, offset],
     ).fetchall()
-    total = int(conn.execute(cte + "SELECT count(*)" + joins + f" WHERE {status_where}", status_params).fetchone()[0])
+    total = int(
+        conn.execute(
+            _CONTENT_LIBRARY_CTE + f"SELECT count(*) FROM library_rows WHERE {status_where}",
+            status_params,
+        ).fetchone()[0]
+    )
     counts = {
         str(row[0]): int(row[1])
         for row in conn.execute(
-            cte + "SELECT v.lifecycle_status,count(*)" + joins +
-            f" WHERE {base_where} GROUP BY v.lifecycle_status",
+            _CONTENT_LIBRARY_CTE
+            + f"""SELECT lifecycle_status,count(*) FROM library_rows
+                  WHERE {base_where} GROUP BY lifecycle_status""",
             params,
         ).fetchall()
     }
@@ -935,6 +1001,11 @@ def restore_content_item(
     now = _now()
     try:
         conn.execute("BEGIN IMMEDIATE")
+        item_kind = conn.execute(
+            "SELECT content_kind FROM content_items WHERE id=?", (item_id,)
+        ).fetchone()
+        if item_kind is not None and item_kind["content_kind"] == "media_transcript":
+            raise ValueError("media_transcript_operation_not_supported")
         row = conn.execute(
             """SELECT i.id AS item_id,i.archived_at,i.category_id,c.is_active,
                       v.id AS version_id,v.lifecycle_status,v.object_sha256,v.source_batch_id,
@@ -1024,6 +1095,11 @@ def _archive_content_item_locked(
     can_archive_published: bool,
     now: int,
 ) -> ArchivedContent:
+    item_kind = conn.execute(
+        "SELECT content_kind FROM content_items WHERE id=?", (item_id,)
+    ).fetchone()
+    if item_kind is not None and item_kind["content_kind"] == "media_transcript":
+        raise ValueError("media_transcript_operation_not_supported")
     row = conn.execute(
         """SELECT i.id AS item_id,i.archived_at,v.id AS version_id,
                   v.lifecycle_status,v.source_batch_id,
@@ -1133,7 +1209,23 @@ def move_content_item(
     actor_user_id: int,
     can_move_draft: bool,
     can_move_review: bool,
+    can_move_published: bool = False,
 ) -> sqlite3.Row:
+    item_kind = conn.execute(
+        "SELECT content_kind FROM content_items WHERE id=? AND archived_at IS NULL",
+        (item_id,),
+    ).fetchone()
+    if item_kind is None:
+        raise ValueError("content_item_not_found")
+    if item_kind["content_kind"] == "media_transcript":
+        return _move_media_transcript_item(
+            conn,
+            item_id,
+            target_category_id=target_category_id,
+            expected_version_id=expected_version_id,
+            actor_user_id=actor_user_id,
+            can_move_published=can_move_published,
+        )
     now = _now()
     try:
         conn.execute("BEGIN IMMEDIATE")
@@ -1208,6 +1300,68 @@ def move_content_item(
     ).fetchone()
 
 
+def _move_media_transcript_item(
+    conn: sqlite3.Connection,
+    item_id: str,
+    *,
+    target_category_id: str,
+    expected_version_id: str,
+    actor_user_id: int,
+    can_move_published: bool,
+) -> sqlite3.Row:
+    now = _now()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            """SELECT i.id AS item_id,i.category_id,h.current_version_id
+               FROM content_items i
+               JOIN media_assets m ON m.media_id=i.media_id AND m.status<>'archived'
+               JOIN media_transcript_heads h ON h.media_id=i.media_id
+               JOIN transcript_versions v
+                 ON v.id=h.current_version_id AND v.media_id=i.media_id
+               WHERE i.id=? AND i.content_kind='media_transcript'
+                 AND i.archived_at IS NULL AND v.publication_status='published'""",
+            (item_id,),
+        ).fetchone()
+        if row is None:
+            raise ValueError("content_item_not_found")
+        if row["current_version_id"] != expected_version_id:
+            raise ValueError("content_version_conflict")
+        if not can_move_published:
+            raise ValueError("content_move_forbidden")
+        target = conn.execute(
+            "SELECT id FROM category_nodes WHERE id=? AND is_active=1",
+            (target_category_id,),
+        ).fetchone()
+        if target is None:
+            raise ValueError("active_category_not_found")
+        if row["category_id"] != target_category_id:
+            conn.execute(
+                """UPDATE content_items
+                   SET category_id=?,updated_at=?,normalized_filename=NULL WHERE id=?""",
+                (target_category_id, now, item_id),
+            )
+            audit_event(
+                conn,
+                "content.moved",
+                actor_user_id=actor_user_id,
+                item_id=item_id,
+                category_id=target_category_id,
+                metadata={
+                    "content_kind": "media_transcript",
+                    "from_category_id": row["category_id"],
+                    "transcript_version_id": expected_version_id,
+                },
+            )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    return conn.execute(
+        "SELECT id,category_id,updated_at FROM content_items WHERE id=?", (item_id,)
+    ).fetchone()
+
+
 def create_content_revision(
     conn: sqlite3.Connection,
     item_id: str,
@@ -1248,7 +1402,13 @@ def create_content_revision(
                WHERE i.id=? AND i.archived_at IS NULL""",
             (item_id,),
         ).fetchone()
-        if row is None or row["content_kind"] != "document":
+        if row is None:
+            item_kind = conn.execute(
+                "SELECT content_kind FROM content_items WHERE id=? AND archived_at IS NULL",
+                (item_id,),
+            ).fetchone()
+            if item_kind is not None and item_kind["content_kind"] == "media_transcript":
+                raise ValueError("media_transcript_operation_not_supported")
             raise ValueError("content_item_not_found")
         if row["version_id"] != expected_version_id:
             raise ValueError("content_version_conflict")
@@ -1400,14 +1560,13 @@ def review_version(
     category_id: str | None,
     actor_user_id: int,
 ) -> sqlite3.Row:
-    normalized_note = (note or "").strip() or None
     row = conn.execute(
         "SELECT item_id,lifecycle_status,source_batch_id FROM content_versions WHERE id=?",
         (version_id,),
     ).fetchone()
     if row is None or row["lifecycle_status"] != "awaiting_review":
         raise ValueError("version_not_reviewable")
-    if not approved and normalized_note is None:
+    if not approved and not (note or "").strip():
         raise ValueError("review_note_required")
     if category_id:
         category = conn.execute(
@@ -1423,7 +1582,7 @@ def review_version(
     now = _now()
     conn.execute(
         "INSERT INTO content_reviews(id,version_id,decision,reviewer_id,note,created_at) VALUES (?,?,?,?,?,?)",
-        (_id("review"), version_id, decision, actor_user_id, normalized_note, now),
+        (_id("review"), version_id, decision, actor_user_id, (note or "").strip() or None, now),
     )
     conn.execute(
         "UPDATE content_versions SET lifecycle_status=?,updated_at=? WHERE id=?",

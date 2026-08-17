@@ -496,6 +496,9 @@ class ManagedContentItemDTO(BaseModel):
     archived_at: int | None = None
     archived_by_name: str | None = None
     pre_archive_lifecycle_status: str | None = None
+    media_duration_ms: int | None = None
+    media_file_size: int | None = None
+    has_pending_revision: bool = False
 
 
 class ManagedContentListResponse(BaseModel):

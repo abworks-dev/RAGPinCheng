@@ -36,6 +36,7 @@ const mocks = vi.hoisted(() => ({
   success: vi.fn(),
   error: vi.fn(),
   openPreview: vi.fn(),
+  openVideo: vi.fn(),
   previewState: { parentId: null as string | null },
 }));
 
@@ -48,6 +49,10 @@ vi.mock("../../components/PdfPreview", () => ({ PdfPreview: () => null }));
 vi.mock("../../hooks/usePdfPreview", () => ({
   PdfPreviewProvider: ({ children }: { children: React.ReactNode }) => children,
   usePdfPreview: () => ({ open: mocks.openPreview, state: { ...mocks.previewState } }),
+}));
+
+vi.mock("../../hooks/useVideoPlayer", () => ({
+  useVideoPlayer: () => ({ open: mocks.openVideo, close: vi.fn(), isOpen: false, currentRequest: null }),
 }));
 
 vi.mock("../../context/AuthContext", () => ({
@@ -169,8 +174,35 @@ const item = {
   latest_reviewed_at: null,
   latest_review_decision: null,
   latest_review_note: null,
+  media_duration_ms: null,
+  media_file_size: null,
+  has_pending_revision: false,
   created_at: 1,
   updated_at: 1,
+};
+
+const mediaItem = {
+  ...item,
+  item_id: "media-transcript-media-1",
+  title: "WhisperX 培训视频",
+  content_kind: "media_transcript",
+  media_id: "123e4567-e89b-12d3-a456-426614174110",
+  preview_parent_id: null,
+  version_id: "123e4567-e89b-12d3-a456-426614174111",
+  original_filename: "training.mp4",
+  doc_type: "transcript",
+  lifecycle_status: "published",
+  object_sha256: null,
+  source_origin: "transcription",
+  source_batch_id: null,
+  source_rel_path: "training.mp4",
+  is_current: true,
+  has_published_head: true,
+  latest_publication_status: "done",
+  publication_attempt_count: 1,
+  media_duration_ms: 65_000,
+  media_file_size: 3 * 1024 * 1024,
+  has_pending_revision: true,
 };
 
 async function openRootFolder(folderId = category.id) {
@@ -1115,6 +1147,48 @@ describe("AdminManagedContentPage", () => {
     const dialog = screen.getByRole("dialog", { name: "建模标准" });
     expect(within(dialog).queryByRole("button", { name: /下载/ })).not.toBeInTheDocument();
     expect(within(dialog).queryByRole("link", { name: /下载/ })).not.toBeInTheDocument();
+  });
+
+  it("renders published video transcripts with preview and video-management actions only", async () => {
+    mocks.permissions = PUBLISHER_PERMISSIONS;
+    mocks.items.mockResolvedValue({ items: [mediaItem], total: 1, status_counts: { published: 1 } });
+    render(<AdminManagedContentPage />);
+    await openRootFolder();
+
+    expect((await screen.findAllByText("视频转录稿")).length).toBeGreaterThan(0);
+    expect(screen.getAllByText("有新转录稿待处理").length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/00:01:05/).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: "下载“WhisperX 培训视频”" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "重命名“WhisperX 培训视频”" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "删除“WhisperX 培训视频”" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "播放“WhisperX 培训视频”" })[0]);
+    expect(mocks.openVideo).toHaveBeenCalledWith({
+      mediaId: mediaItem.media_id,
+      title: mediaItem.title,
+      startSeconds: 0,
+      fromSource: false,
+    });
+    expect(screen.getAllByRole("link", { name: "在视频管理中打开“WhisperX 培训视频”" })[0]).toHaveAttribute(
+      "href",
+      `/admin/media?media_id=${mediaItem.media_id}&workbench=1`,
+    );
+  });
+
+  it("filters the library by video transcript type", async () => {
+    mocks.permissions = PUBLISHER_PERMISSIONS;
+    mocks.items.mockResolvedValue({ items: [mediaItem], total: 1, status_counts: { published: 1 } });
+    render(<AdminManagedContentPage />);
+    await openRootFolder();
+
+    fireEvent.click(screen.getByRole("button", { name: "展开搜索筛选" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "类型" }), {
+      target: { value: "media_transcript" },
+    });
+    await waitFor(() => expect(mocks.items).toHaveBeenCalledWith(expect.objectContaining({
+      category_id: category.id,
+      content_kind: "media_transcript",
+    })));
   });
 
   it("renames titles and filenames as a new version", async () => {

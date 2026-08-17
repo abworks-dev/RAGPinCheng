@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { AlertTriangle, ArchiveRestore, ArrowDown, ArrowUp, ArrowUpDown, Check, CheckCircle2, ChevronDown, ChevronRight, Download, Eye, FileUp, Folder, FolderInput, FolderPlus, Info, ListChecks, Pencil, RefreshCw, RotateCcw, Rocket, Search, Send, SlidersHorizontal, Trash2, Upload, X, XCircle } from "lucide-react";
+import { AlertTriangle, ArchiveRestore, ArrowDown, ArrowUp, ArrowUpDown, Check, CheckCircle2, ChevronDown, ChevronRight, Download, ExternalLink, Eye, FileUp, Film, Folder, FolderInput, FolderPlus, Info, ListChecks, Pencil, RefreshCw, RotateCcw, Rocket, Search, Send, SlidersHorizontal, Trash2, Upload, X, XCircle } from "lucide-react";
 import { adminContentApi } from "../../api/admin/content";
 import { Badge } from "../../components/ui/badge";
 import { CategoryTreePicker } from "../../components/admin/CategoryTreePicker";
@@ -18,6 +18,7 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { toast } from "../../components/ui/toast";
 import { useAuth } from "../../context/AuthContext";
 import { usePdfPreview } from "../../hooks/usePdfPreview";
+import { useVideoPlayer } from "../../hooks/useVideoPlayer";
 import type { BulkManagedContentResult, ContentPermission, FolderRequest, ManagedCategory, ManagedContentItem, ManagedUploadTask, ManagedUploadTaskEntry } from "../../types";
 import type { ManagedUploadProgress } from "../../api/client";
 import { formatAdminDate } from "../../lib/admin-formatters";
@@ -48,6 +49,15 @@ function formatUploadSize(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${Math.ceil(bytes / 1024)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatMediaDuration(milliseconds: number | null | undefined) {
+  if (!milliseconds) return null;
+  const totalSeconds = Math.floor(milliseconds / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return [hours, minutes, seconds].map((value) => String(value).padStart(2, "0")).join(":");
 }
 
 type ActiveUploadState = {
@@ -232,6 +242,21 @@ function PublicationFailure({ item }: { item: ManagedContentItem }) {
   return <div className="mt-2 max-w-md space-y-1 text-ui-xs text-destructive" role="alert"><p className="break-words">{failure.message}</p><p className="break-words text-muted-foreground">{failure.recommended_action}</p><p className="break-words text-muted-foreground">{failure.retryable ? "可以重新发布" : "按原失败原因直接重试通常不会成功；系统或文件处理后可重新发布"}{item.publication_attempt_count > 1 ? ` · 共尝试 ${item.publication_attempt_count} 次` : ""}</p></div>;
 }
 
+function ManagedItemIdentity({ item }: { item: ManagedContentItem }) {
+  const isMediaTranscript = item.content_kind === "media_transcript";
+  const mediaDetails = isMediaTranscript
+    ? [formatMediaDuration(item.media_duration_ms), item.media_file_size != null ? formatUploadSize(item.media_file_size) : null].filter(Boolean)
+    : [];
+  return <div className="min-w-0">
+    <div className="flex items-start gap-2">
+      {isMediaTranscript && <Film className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden="true" />}
+      <p className="break-words font-medium">{item.title}</p>
+    </div>
+    <p className="mt-0.5 break-all text-ui-xs text-muted-foreground">{item.original_filename} · v{item.version_number}{mediaDetails.length ? ` · ${mediaDetails.join(" · ")}` : ""}</p>
+    {isMediaTranscript && <div className="mt-2 flex flex-wrap gap-1.5"><Badge variant="secondary">视频转录稿</Badge>{item.has_pending_revision && <Badge variant="warning">有新转录稿待处理</Badge>}</div>}
+  </div>;
+}
+
 type BulkAction = "move" | "approve" | "reject" | "publish" | "download" | "archive";
 
 type FilenameConflict = {
@@ -378,25 +403,29 @@ function ManagedContentSearchFilters({
   queryInput,
   statusFilter,
   sourceFilter,
+  kindFilter,
   disabled,
   onQueryInputChange,
   onStatusFilterChange,
   onSourceFilterChange,
+  onKindFilterChange,
   onClear,
 }: {
   queryInput: string;
   statusFilter: string;
   sourceFilter: string;
+  kindFilter: string;
   disabled: boolean;
   onQueryInputChange: (value: string) => void;
   onStatusFilterChange: (value: string) => void;
   onSourceFilterChange: (value: string) => void;
+  onKindFilterChange: (value: string) => void;
   onClear: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
-  const activeFilterCount = Number(Boolean(statusFilter)) + Number(Boolean(sourceFilter));
+  const activeFilterCount = Number(Boolean(statusFilter)) + Number(Boolean(sourceFilter)) + Number(Boolean(kindFilter));
   const panelId = "managed-content-search-filters";
 
   useEffect(() => {
@@ -453,7 +482,8 @@ function ManagedContentSearchFilters({
       </button>
     </div>
     {open && <div id={panelId} role="dialog" aria-modal="false" aria-label="搜索筛选" className="absolute inset-x-0 top-full z-dropdown mt-2 rounded-ui-lg border border-border bg-popover p-3 text-popover-foreground shadow-overlay">
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid gap-3 sm:grid-cols-3">
+        <label className="space-y-1 text-ui-xs text-muted-foreground"><span>类型</span><Select className="h-control-sm" value={kindFilter} onChange={(event) => onKindFilterChange(event.target.value)}><option value="">全部类型</option><option value="document">文档</option><option value="media_transcript">视频转录稿</option></Select></label>
         <label className="space-y-1 text-ui-xs text-muted-foreground"><span>状态</span><Select className="h-control-sm" value={statusFilter} onChange={(event) => onStatusFilterChange(event.target.value)}><option value="">全部状态</option>{Object.entries(statusLabel).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</Select></label>
         <label className="space-y-1 text-ui-xs text-muted-foreground"><span>来源</span><Select className="h-control-sm" value={sourceFilter} onChange={(event) => onSourceFilterChange(event.target.value)}><option value="">全部来源</option>{Object.entries(sourceLabel).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</Select></label>
       </div>
@@ -468,6 +498,7 @@ function ManagedContentSearchFilters({
 export function AdminManagedContentPage() {
   const { state } = useAuth();
   const { open: openDocumentPreview, state: previewState } = usePdfPreview();
+  const { open: openVideoPreview } = useVideoPlayer();
   const permissions = state.status === "authed" ? state.user.content_permissions || [] : [];
   const can = (permission: ContentPermission) => state.status === "authed" && (state.user.role === "admin" || permissions.includes(permission));
   const [items, setItems] = useState<ManagedContentItem[]>([]);
@@ -496,6 +527,7 @@ export function AdminManagedContentPage() {
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [sourceFilter, setSourceFilter] = useState("");
+  const [kindFilter, setKindFilter] = useState("");
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(PAGE_SIZE);
   const [detail, setDetail] = useState<ManagedContentItem | null>(null);
@@ -567,7 +599,7 @@ export function AdminManagedContentPage() {
     const timer = window.setTimeout(() => setQuery(queryInput.trim()), 250);
     return () => window.clearTimeout(timer);
   }, [queryInput]);
-  useEffect(() => { setPage(0); setSelected([]); }, [query, currentFolderId, statusFilter, sourceFilter, pageSize]);
+  useEffect(() => { setPage(0); setSelected([]); }, [query, currentFolderId, statusFilter, sourceFilter, kindFilter, pageSize]);
 
   const load = useCallback(async (refresh = false) => {
     if (refresh) setRefreshing(true);
@@ -580,6 +612,7 @@ export function AdminManagedContentPage() {
           category_id: currentFolderId || undefined,
           lifecycle_status: statusFilter || undefined,
           source_origin: sourceFilter || undefined,
+          content_kind: kindFilter === "document" || kindFilter === "media_transcript" ? kindFilter : undefined,
           limit: pageSize,
           offset: page * pageSize,
         }),
@@ -599,7 +632,7 @@ export function AdminManagedContentPage() {
     } finally {
       setLoading(false); setRefreshing(false);
     }
-  }, [currentFolderId, page, pageSize, query, sourceFilter, statusFilter]);
+  }, [currentFolderId, page, pageSize, query, sourceFilter, statusFilter, kindFilter]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -1112,12 +1145,13 @@ export function AdminManagedContentPage() {
   );
 
   const canMoveItem = (item: ManagedContentItem) => (
-    !item.has_published_head && (
+    item.content_kind === "media_transcript" ? can("item.publish") : !item.has_published_head && (
       (can("item.move_draft") && ["draft", "rejected"].includes(item.lifecycle_status))
       || (can("item.move_review") && item.lifecycle_status === "awaiting_review")
     )
   );
   const canDeleteItem = (item: ManagedContentItem) => {
+    if (item.content_kind === "media_transcript") return false;
     const requiresPublish = item.has_published_head || !["draft", "rejected"].includes(item.lifecycle_status);
     return requiresPublish ? can("item.archive_published") : can("item.archive_draft");
   };
@@ -1150,22 +1184,24 @@ export function AdminManagedContentPage() {
   };
 
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
-  const selectable = items.slice(0, BULK_LIMIT);
+  const selectable = items.filter((item) => item.content_kind === "document" || canMoveItem(item)).slice(0, BULK_LIMIT);
   const allSelected = selectable.length > 0 && selectable.every((item) => selected.includes(item.version_id));
   const toggleAll = () => setSelected(allSelected ? [] : selectable.map((item) => item.version_id));
-  const hasReviewableSelection = items.some((item) => selected.includes(item.version_id) && item.lifecycle_status === "awaiting_review");
-  const hasPublishableSelection = items.some((item) => selected.includes(item.version_id) && ["approved", "publication_failed"].includes(item.lifecycle_status));
-  const hasMovableSelection = selectedItems.some(canMoveItem);
-  const hasDeletableSelection = selectedItems.some(canDeleteItem);
-  const hasDownloadableSelection = selectedItems.length > 1 && can("item.download");
+  const documentSelection = selectedItems.every((item) => item.content_kind === "document");
+  const hasReviewableSelection = documentSelection && selectedItems.some((item) => item.lifecycle_status === "awaiting_review");
+  const hasPublishableSelection = documentSelection && selectedItems.some((item) => ["approved", "publication_failed"].includes(item.lifecycle_status));
+  const hasMovableSelection = selectedItems.length > 0 && selectedItems.every(canMoveItem);
+  const hasDeletableSelection = documentSelection && selectedItems.some(canDeleteItem);
+  const hasDownloadableSelection = documentSelection && selectedItems.length > 1 && can("item.download");
   const bulkDisabled = Boolean(busyAction) || refreshing || !enabled;
 
   const renderActions = (item: ManagedContentItem) => {
     const disabled = Boolean(busyAction) || refreshing || !enabled;
+    const isMediaTranscript = item.content_kind === "media_transcript";
     const previewable = Boolean(item.preview_parent_id && ["pdf", "docx", "xlsx", "pptx"].includes(item.doc_type));
     const movable = canMoveItem(item);
-    const downloadable = can("item.download");
-    const revisionAllowed = can("item.upload") && item.lifecycle_status !== "publishing";
+    const downloadable = !isMediaTranscript && can("item.download");
+    const revisionAllowed = !isMediaTranscript && can("item.upload") && item.lifecycle_status !== "publishing";
     const deletable = canDeleteItem(item) && item.lifecycle_status !== "publishing";
     const workflow = item.lifecycle_status === "draft" && can("item.submit")
       ? { label: "提交", action: () => void act(item, "submit", () => adminContentApi.submit(item.version_id), "已提交确认") }
@@ -1185,6 +1221,15 @@ export function AdminManagedContentPage() {
         : !enabled
           ? "资料管理功能当前不可用"
           : null;
+    if (isMediaTranscript) {
+      const moveTooltip = unavailableReason || (movable ? "移动资料目录" : "当前账号没有发布权限");
+      return <div className="ml-auto flex min-h-10 w-[10.5rem] items-center justify-end gap-1">
+        <IconButton label={`查看“${item.title}”的详细信息`} tooltip={unavailableReason || "查看视频转录稿详情"} className="border border-border max-sm:size-10" disabled={disabled} onClick={() => setDetail(item)}><Info className="size-4" /></IconButton>
+        <IconButton label={`播放“${item.title}”`} tooltip={unavailableReason || (item.media_id ? "播放视频与转录稿" : "媒体关联缺失，暂无法播放")} className="border border-border max-sm:size-10" disabled={disabled || !item.media_id} onClick={() => openVideoPreview({ mediaId: item.media_id!, title: item.title, startSeconds: 0, fromSource: false })}><Film className="size-4" /></IconButton>
+        <IconButton label={`移动“${item.title}”`} tooltip={moveTooltip} className="border border-border max-sm:size-10" disabled={disabled || !movable} onClick={() => { setMoveTarget(item); setMoveFolderId(""); setMoveError(null); }}><FolderInput className="size-4" /></IconButton>
+        <a aria-label={`在视频管理中打开“${item.title}”`} title={`在视频管理中打开“${item.title}”`} className={buttonVariants({ variant: "outline", size: "icon", className: "!size-9 max-sm:!size-10" })} href={`/admin/media?media_id=${encodeURIComponent(item.media_id || "")}&workbench=1`}><ExternalLink className="size-4" /></a>
+      </div>;
+    }
     const previewTooltip = unavailableReason
       || (previewable
         ? "预览文件"
@@ -1304,22 +1349,24 @@ export function AdminManagedContentPage() {
           queryInput={queryInput}
           statusFilter={statusFilter}
           sourceFilter={sourceFilter}
+          kindFilter={kindFilter}
           disabled={!currentFolderId}
           onQueryInputChange={setQueryInput}
           onStatusFilterChange={setStatusFilter}
           onSourceFilterChange={setSourceFilter}
-          onClear={() => { setQueryInput(""); setStatusFilter(""); setSourceFilter(""); }}
+          onKindFilterChange={setKindFilter}
+          onClear={() => { setQueryInput(""); setStatusFilter(""); setSourceFilter(""); setKindFilter(""); }}
         />
         <div className="flex shrink-0 flex-wrap items-center gap-2">
           {can("item.upload") && <Button size="sm" className="max-sm:h-control-md" onClick={openUploadDialog} disabled={!enabled || !currentFolderId || uploading || folderScanning}><Upload className="size-4" />{folderScanning ? "读取文件夹中…" : "上传文件"}</Button>}
           <Button size="sm" variant="outline" className="max-sm:h-control-md" onClick={() => void load(true)} disabled={loading || refreshing}><RefreshCw className={refreshing ? "size-4 animate-spin" : "size-4"} />{refreshing ? "刷新中…" : "刷新列表"}</Button>
           {selected.length > 1 ? <BatchActionsMenu disabled={bulkDisabled} options={[
-            { key: "move", label: "批量移动", icon: <FolderInput className="size-4" />, disabled: !hasMovableSelection, disabledReason: "所选资料中没有当前账号可移动的资料", onSelect: () => { setBulkFailures([]); setBulkMoveFolderId(""); setBulkAction("move"); } },
-            { key: "approve", label: "批量确认", icon: <Check className="size-4" />, disabled: !can("item.review") || !hasReviewableSelection, disabledReason: "需要确认权限，且至少选择一份待确认资料", onSelect: () => { setBulkFailures([]); setBulkNote(""); setBulkAction("approve"); } },
-            { key: "reject", label: "批量退回", icon: <X className="size-4" />, disabled: !can("item.review") || !hasReviewableSelection, disabledReason: "需要确认权限，且至少选择一份待确认资料", onSelect: () => { setBulkFailures([]); setBulkNote(""); setBulkAction("reject"); } },
-            { key: "publish", label: "批量发布", icon: <Rocket className="size-4" />, disabled: !can("item.publish") || !hasPublishableSelection, disabledReason: "需要发布权限，且至少选择一份已确认或发布失败资料", onSelect: () => { setBulkFailures([]); setBulkNote(""); setBulkAction("publish"); } },
-            { key: "download", label: "批量下载", icon: <Download className="size-4" />, disabled: !hasDownloadableSelection, disabledReason: "需要下载权限", onSelect: () => { void downloadSelected(); } },
-            { key: "archive", label: "批量删除", icon: <Trash2 className="size-4" />, disabled: !hasDeletableSelection, disabledReason: "所选资料中没有当前账号可移入回收站的资料", destructive: true, onSelect: () => openDeleteDialog(selectedItems) },
+            { key: "move", label: "批量移动", icon: <FolderInput className="size-4" />, disabled: !hasMovableSelection, disabledReason: "所选资料必须全部可由当前账号移动", onSelect: () => { setBulkFailures([]); setBulkMoveFolderId(""); setBulkAction("move"); } },
+            { key: "approve", label: "批量确认", icon: <Check className="size-4" />, disabled: !can("item.review") || !hasReviewableSelection, disabledReason: "仅文档支持批量确认，且至少包含一份待确认文档", onSelect: () => { setBulkFailures([]); setBulkNote(""); setBulkAction("approve"); } },
+            { key: "reject", label: "批量退回", icon: <X className="size-4" />, disabled: !can("item.review") || !hasReviewableSelection, disabledReason: "仅文档支持批量退回，且至少包含一份待确认文档", onSelect: () => { setBulkFailures([]); setBulkNote(""); setBulkAction("reject"); } },
+            { key: "publish", label: "批量发布", icon: <Rocket className="size-4" />, disabled: !can("item.publish") || !hasPublishableSelection, disabledReason: "仅文档支持此处发布，视频转录稿请前往视频管理", onSelect: () => { setBulkFailures([]); setBulkNote(""); setBulkAction("publish"); } },
+            { key: "download", label: "批量下载", icon: <Download className="size-4" />, disabled: !hasDownloadableSelection, disabledReason: "仅文档支持批量下载，且需要下载权限", onSelect: () => { void downloadSelected(); } },
+            { key: "archive", label: "批量删除", icon: <Trash2 className="size-4" />, disabled: !hasDeletableSelection, disabledReason: "视频转录稿需在视频管理中删除", destructive: true, onSelect: () => openDeleteDialog(selectedItems) },
           ]} /> : (can("folder.request") || can("category.manage")) && <Button size="sm" variant="outline" className="max-sm:h-control-md" onClick={() => can("category.manage") ? setNewFolderOpen(true) : setRequestFolderOpen(true)} disabled={!currentFolder || currentFolder.level >= 4}><FolderPlus className="size-4" />新建目录</Button>}
         </div>
       </div>
@@ -1333,11 +1380,11 @@ export function AdminManagedContentPage() {
             const folderLabel = `${folder.display_code} ${folder.display_name}`;
             return <tr key={folder.id} data-testid={`managed-folder-row-${folder.id}`} className={`cursor-pointer transition-colors duration-normal hover:bg-surface-muted/60 ${draggedItem ? "bg-primary/5 outline outline-1 -outline-offset-1 outline-primary/50" : ""}`} onClick={() => setCurrentFolderId(folder.id)} onDragOver={(event) => { if (draggedItem) { event.preventDefault(); event.stopPropagation(); } }} onDrop={(event) => { if (!draggedItem) return; event.preventDefault(); event.stopPropagation(); void moveItemTo(draggedItem, folder.id); }}><td className="px-3 py-3"><Folder className="mx-auto size-5 text-primary" aria-hidden="true" /></td><td className="max-w-xs px-3 py-3"><button type="button" className="block max-w-full rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setCurrentFolderId(folder.id)}><span className="block break-words font-medium">{folderLabel}</span><span className="mt-0.5 block text-ui-xs text-muted-foreground">{folder.item_count} 份直接资料</span></button></td><td className="whitespace-nowrap px-3 py-3 tabular-nums">{formatManagedUpdatedAt(folder.updated_at)}</td><td className="px-3 py-3 text-muted-foreground">—</td><td className="px-3 py-3 text-muted-foreground">—</td><td className="px-3 py-3 text-right"><IconButton label={`打开文件夹“${folderLabel}”`} className="border border-border" onClick={() => setCurrentFolderId(folder.id)}><ChevronRight className="size-4" /></IconButton></td></tr>;
           })}
-          {sortedItems.map((item, index) => { const movable = canMoveItem(item); return <tr key={item.item_id} draggable={movable} title={movable ? "拖动到文件夹行可移动资料" : undefined} onDragStart={() => setDraggedItem(item)} onDragEnd={() => setDraggedItem(null)} className={`transition-colors duration-normal hover:bg-surface-muted/60 ${movable ? "cursor-grab" : ""}`}><td className="px-3 py-3"><Checkbox aria-label={`选择${item.title}`} checked={selected.includes(item.version_id)} disabled={index >= BULK_LIMIT} onChange={() => setSelected((current) => current.includes(item.version_id) ? current.filter((id) => id !== item.version_id) : [...current, item.version_id].slice(0, BULK_LIMIT))} /></td><td className="max-w-xs px-3 py-3"><p className="break-words font-medium">{item.title}</p><p className="mt-0.5 break-all text-ui-xs text-muted-foreground">{item.original_filename} · v{item.version_number}</p></td><td className="whitespace-nowrap px-3 py-3 tabular-nums">{formatManagedUpdatedAt(item.updated_at)}</td><td className="px-3 py-3"><Badge variant={statusVariant(item.lifecycle_status)}>{statusLabel[item.lifecycle_status] || "未知状态"}</Badge></td><td className="px-3 py-3">{sourceLabel[item.source_origin] || "其他来源"}</td><td className="px-3 py-3 text-right">{renderActions(item)}</td></tr>; })}</tbody></table></div>
+          {sortedItems.map((item, index) => { const movable = canMoveItem(item); const rowSelectable = item.content_kind === "document" || movable; return <tr key={item.item_id} draggable={movable} title={movable ? "拖动到文件夹行可移动资料" : undefined} onDragStart={() => setDraggedItem(item)} onDragEnd={() => setDraggedItem(null)} className={`transition-colors duration-normal hover:bg-surface-muted/60 ${movable ? "cursor-grab" : ""}`}><td className="px-3 py-3"><Checkbox aria-label={`选择${item.title}`} checked={selected.includes(item.version_id)} disabled={index >= BULK_LIMIT || !rowSelectable} title={!rowSelectable ? "视频转录稿需要发布权限才能批量移动" : undefined} onChange={() => setSelected((current) => current.includes(item.version_id) ? current.filter((id) => id !== item.version_id) : [...current, item.version_id].slice(0, BULK_LIMIT))} /></td><td className="max-w-xs px-3 py-3"><ManagedItemIdentity item={item} /></td><td className="whitespace-nowrap px-3 py-3 tabular-nums">{formatManagedUpdatedAt(item.updated_at)}</td><td className="px-3 py-3"><Badge variant={statusVariant(item.lifecycle_status)}>{statusLabel[item.lifecycle_status] || "未知状态"}</Badge></td><td className="px-3 py-3">{sourceLabel[item.source_origin] || "其他来源"}</td><td className="px-3 py-3 text-right">{renderActions(item)}</td></tr>; })}</tbody></table></div>
         <ul className="divide-y divide-border border-t border-border lg:hidden">{sortedChildFolders.map((folder) => {
           const folderLabel = `${folder.display_code} ${folder.display_name}`;
           return <li key={folder.id} data-testid={`managed-folder-mobile-${folder.id}`}><button type="button" className="flex min-h-16 w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-surface-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:px-5" onClick={() => setCurrentFolderId(folder.id)}><Folder className="size-5 shrink-0 text-primary" aria-hidden="true" /><span className="min-w-0 flex-1"><span className="block break-words font-medium">{folderLabel}</span><span className="mt-0.5 block text-ui-xs text-muted-foreground">{folder.item_count} 份直接资料</span></span><ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" /></button></li>;
-        })}{sortedItems.map((item, index) => <li key={item.item_id} className="space-y-3 px-4 py-4 sm:px-5"><div className="flex items-start gap-3"><Checkbox className="mt-0.5" aria-label={`选择${item.title}`} checked={selected.includes(item.version_id)} disabled={index >= BULK_LIMIT} onChange={() => setSelected((current) => current.includes(item.version_id) ? current.filter((id) => id !== item.version_id) : [...current, item.version_id].slice(0, BULK_LIMIT))} /><div className="min-w-0 flex-1"><div className="flex items-start justify-between gap-3"><p className="break-words font-medium">{item.title}</p><Badge className="shrink-0" variant={statusVariant(item.lifecycle_status)}>{statusLabel[item.lifecycle_status] || "未知状态"}</Badge></div><p className="mt-1 break-all text-ui-xs text-muted-foreground">{item.original_filename} · v{item.version_number}</p></div></div><dl className="grid grid-cols-[4rem_minmax(0,1fr)] gap-x-2 gap-y-1 text-ui-sm"><dt className="text-muted-foreground">更新时间</dt><dd className="whitespace-nowrap tabular-nums">{formatManagedUpdatedAt(item.updated_at)}</dd><dt className="text-muted-foreground">来源</dt><dd>{sourceLabel[item.source_origin] || "其他来源"}</dd></dl>{renderActions(item)}</li>)}</ul>
+        })}{sortedItems.map((item, index) => { const rowSelectable = item.content_kind === "document" || canMoveItem(item); return <li key={item.item_id} className="space-y-3 px-4 py-4 sm:px-5"><div className="flex items-start gap-3"><Checkbox className="mt-0.5" aria-label={`选择${item.title}`} checked={selected.includes(item.version_id)} disabled={index >= BULK_LIMIT || !rowSelectable} title={!rowSelectable ? "视频转录稿需要发布权限才能批量移动" : undefined} onChange={() => setSelected((current) => current.includes(item.version_id) ? current.filter((id) => id !== item.version_id) : [...current, item.version_id].slice(0, BULK_LIMIT))} /><div className="min-w-0 flex-1"><div className="flex items-start justify-between gap-3"><ManagedItemIdentity item={item} /><Badge className="shrink-0" variant={statusVariant(item.lifecycle_status)}>{statusLabel[item.lifecycle_status] || "未知状态"}</Badge></div></div></div><dl className="grid grid-cols-[4rem_minmax(0,1fr)] gap-x-2 gap-y-1 text-ui-sm"><dt className="text-muted-foreground">更新时间</dt><dd className="whitespace-nowrap tabular-nums">{formatManagedUpdatedAt(item.updated_at)}</dd><dt className="text-muted-foreground">来源</dt><dd>{sourceLabel[item.source_origin] || "其他来源"}</dd></dl>{renderActions(item)}</li>; })}</ul>
         <div className="flex flex-col gap-2 border-t border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5"><p className="text-ui-xs text-muted-foreground">共 {total} 份，第 {page + 1} / {pageCount} 页</p><div className="flex flex-wrap items-center justify-end gap-2"><label className="flex items-center gap-2 text-ui-xs text-muted-foreground">每页<Select aria-label="每页条数" className="h-control-sm w-20" value={String(pageSize)} onChange={(event) => setPageSize(Number(event.target.value))}>{PAGE_SIZE_OPTIONS.map((size) => <option key={size} value={size}>{size} 条</option>)}</Select></label><Button size="sm" variant="outline" disabled={page === 0 || loading} onClick={() => setPage((value) => value - 1)}>上一页</Button><Select aria-label="跳转页码" className="h-control-sm w-24" value={String(page + 1)} onChange={(event) => setPage(Number(event.target.value) - 1)} disabled={loading}>{Array.from({ length: pageCount }, (_, index) => <option key={index + 1} value={index + 1}>第 {index + 1} 页</option>)}</Select><Button size="sm" variant="outline" disabled={page + 1 >= pageCount || loading} onClick={() => setPage((value) => value + 1)}>下一页</Button></div></div>
       </>}
       </div>
@@ -1374,16 +1421,22 @@ export function AdminManagedContentPage() {
       <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>{detail?.title || "资料详情"}</DialogTitle>
-          <DialogDescription>核对文件、分类、来源、版本和最近审核记录。</DialogDescription>
+          <DialogDescription>{detail?.content_kind === "media_transcript" ? "查看已发布的视频转录稿；校对、发布和删除仍在视频管理中完成。" : "核对文件、分类、来源、版本和最近审核记录。"}</DialogDescription>
         </DialogHeader>
         {detail && <div className="space-y-4">
           <PublicationFailure item={detail} />
           <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-2 text-ui-sm [&_dt]:whitespace-nowrap">
+            <dt className="text-muted-foreground">类型</dt><dd>{detail.content_kind === "media_transcript" ? "视频转录稿" : "文档"}</dd>
             <dt className="text-muted-foreground">文件名</dt><dd className="break-all">{detail.original_filename}</dd>
             <dt className="text-muted-foreground">分类</dt><dd className="break-words">{detail.category_path || detail.category_label}</dd>
             <dt className="text-muted-foreground">状态</dt><dd><Badge variant={statusVariant(detail.lifecycle_status)}>{statusLabel[detail.lifecycle_status]}</Badge></dd>
             <dt className="text-muted-foreground">来源</dt><dd>{sourceLabel[detail.source_origin] || "其他来源"}</dd>
             <dt className="text-muted-foreground">版本</dt><dd>v{detail.version_number}</dd>
+            {detail.content_kind === "media_transcript" && <>
+              <dt className="text-muted-foreground">视频时长</dt><dd>{formatMediaDuration(detail.media_duration_ms) || "未记录"}</dd>
+              <dt className="text-muted-foreground">视频大小</dt><dd>{detail.media_file_size != null ? formatUploadSize(detail.media_file_size) : "未记录"}</dd>
+              <dt className="text-muted-foreground">后续版本</dt><dd>{detail.has_pending_revision ? <Badge variant="warning">有新转录稿待处理</Badge> : "无待处理稿"}</dd>
+            </>}
             <dt className="text-muted-foreground">创建时间</dt><dd>{formatAdminDate(detail.created_at)}</dd>
             <dt className="text-muted-foreground">最后更新时间</dt><dd className="whitespace-nowrap">{formatAdminDate(detail.updated_at)}</dd>
             <dt className="text-muted-foreground">发布尝试</dt><dd>共 {detail.publication_attempt_count} 次</dd>
@@ -1394,12 +1447,15 @@ export function AdminManagedContentPage() {
               <dt className="text-muted-foreground">{detail.latest_review_decision === "rejected" ? "退回原因" : "审核备注"}</dt><dd className="break-words">{detail.latest_review_note || "未填写"}</dd>
             </>}
           </dl>
-          <div className="flex flex-wrap gap-2">
+          {detail.content_kind === "media_transcript" ? <div className="flex flex-wrap gap-2">
+            <Button variant="outline" onClick={() => { setDetail(null); openVideoPreview({ mediaId: detail.media_id!, title: detail.title, startSeconds: 0, fromSource: false }); }} disabled={!detail.media_id}><Film className="size-4" />播放视频与转录稿</Button>
+            <a className={buttonVariants({ variant: "outline" })} href={`/admin/media?media_id=${encodeURIComponent(detail.media_id || "")}&workbench=1`}><ExternalLink className="size-4" />进入视频管理</a>
+          </div> : <div className="flex flex-wrap gap-2">
             {detail.preview_parent_id && ["pdf", "docx", "xlsx", "pptx"].includes(detail.doc_type) ? <Button variant="outline" onClick={() => { openDocumentPreview(detail.preview_parent_id!, detail.title, detail.doc_type, 1, {}, "managed-content-detail"); }}><Eye className="size-4" />预览文件</Button> : detail.doc_type === "pdf" || can("item.download") ? <a className={buttonVariants({ variant: "outline" })} href={adminContentApi.fileUrl(detail.version_id)} target="_blank" rel="noreferrer"><Eye className="size-4" />打开文件</a> : <Button variant="outline" disabled title="打开文件（需要下载权限）"><Eye className="size-4" />打开文件</Button>}
             {can("item.submit") && ["draft", "rejected"].includes(detail.lifecycle_status) && <Button onClick={() => void act(detail, "submit", () => adminContentApi.submit(detail.version_id), "已提交确认")} disabled={Boolean(busyAction)}><Send className="size-4" />{busyAction === `${detail.version_id}:submit` ? "提交中…" : detail.lifecycle_status === "rejected" ? "重新提交" : "提交"}</Button>}
             {can("item.review") && detail.lifecycle_status === "awaiting_review" && <Button onClick={() => openReviewDialog(detail)} disabled={Boolean(busyAction)}><Check className="size-4" />审核</Button>}
             {can("item.publish") && ["approved", "publication_failed"].includes(detail.lifecycle_status) && <Button onClick={() => openPublishDialog(detail)} disabled={Boolean(busyAction)}><Rocket className="size-4" />{detail.lifecycle_status === "publication_failed" ? "重新发布" : "发布"}</Button>}
-          </div>
+          </div>}
         </div>}
       </DialogContent>
     </Dialog>
@@ -1475,7 +1531,7 @@ export function AdminManagedContentPage() {
 
     <Dialog open={newFolderOpen} onOpenChange={setNewFolderOpen}><DialogContent><DialogHeader><DialogTitle>新建文件夹</DialogTitle><DialogDescription>文件夹将建立在“{currentFolder?.display_name || "当前目录"}”下，最多支持四级目录。</DialogDescription></DialogHeader><label className="space-y-1.5 text-ui-sm font-medium"><span>文件夹名称</span><Input value={newFolderName} onChange={(event) => setNewFolderName(event.target.value)} placeholder="例如：净高分析" autoFocus /></label><DialogFooter><Button variant="outline" onClick={() => setNewFolderOpen(false)} disabled={busyAction === "new-folder"}>取消</Button><Button onClick={() => void createFolder()} disabled={!newFolderName.trim() || busyAction === "new-folder"}>{busyAction === "new-folder" ? "创建中…" : "创建"}</Button></DialogFooter></DialogContent></Dialog>
 
-    <Dialog open={Boolean(moveTarget)} onOpenChange={(open) => { if (!open && !busyAction?.endsWith(":move")) { setMoveTarget(null); setMoveFolderId(""); setMoveError(null); } }}><DialogContent className="max-w-2xl max-h-[calc(100vh-2rem)] overflow-y-auto"><DialogHeader><DialogTitle>移动资料</DialogTitle><DialogDescription>将“{moveTarget?.title || "资料"}”从当前目录调整到另一个受控目录。已确认或已发布资料需要先退回。</DialogDescription></DialogHeader>{moveTarget && <CategoryTreePicker categories={categories} value={moveFolderId} currentCategoryId={moveTarget.category_id} onChange={(categoryId) => { setMoveFolderId(categoryId); setMoveError(null); }} />}{moveError && <p className="rounded-ui-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-ui-sm text-destructive" role="alert">{moveError}</p>}<DialogFooter><Button variant="outline" onClick={() => { setMoveTarget(null); setMoveFolderId(""); setMoveError(null); }} disabled={Boolean(busyAction?.endsWith(":move"))}>取消</Button><Button onClick={() => void moveContent()} disabled={!moveFolderId || moveFolderId === moveTarget?.category_id || Boolean(busyAction?.endsWith(":move"))}>{busyAction?.endsWith(":move") ? "移动中…" : "确认移动"}</Button></DialogFooter></DialogContent></Dialog>
+    <Dialog open={Boolean(moveTarget)} onOpenChange={(open) => { if (!open && !busyAction?.endsWith(":move")) { setMoveTarget(null); setMoveFolderId(""); setMoveError(null); } }}><DialogContent className="max-w-2xl max-h-[calc(100vh-2rem)] overflow-y-auto"><DialogHeader><DialogTitle>移动资料</DialogTitle><DialogDescription>{moveTarget?.content_kind === "media_transcript" ? `只调整“${moveTarget.title}”在资料库中的目录，不改变视频、转录发布状态或索引。` : `将“${moveTarget?.title || "资料"}”从当前目录调整到另一个受控目录。已确认或已发布资料需要先退回。`}</DialogDescription></DialogHeader>{moveTarget && <CategoryTreePicker categories={categories} value={moveFolderId} currentCategoryId={moveTarget.category_id} onChange={(categoryId) => { setMoveFolderId(categoryId); setMoveError(null); }} />}{moveError && <p className="rounded-ui-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-ui-sm text-destructive" role="alert">{moveError}</p>}<DialogFooter><Button variant="outline" onClick={() => { setMoveTarget(null); setMoveFolderId(""); setMoveError(null); }} disabled={Boolean(busyAction?.endsWith(":move"))}>取消</Button><Button onClick={() => void moveContent()} disabled={!moveFolderId || moveFolderId === moveTarget?.category_id || Boolean(busyAction?.endsWith(":move"))}>{busyAction?.endsWith(":move") ? "移动中…" : "确认移动"}</Button></DialogFooter></DialogContent></Dialog>
 
     <Dialog open={Boolean(renameTarget)} onOpenChange={(open) => { if (!open && busyAction !== "rename") { setRenameTarget(null); setRenameConflict(null); setRenameError(null); } }}><DialogContent><DialogHeader><DialogTitle>重命名资料</DialogTitle><DialogDescription>标题和源文件名会作为新草稿版本保存，之后需要重新确认并发布。</DialogDescription></DialogHeader><div className="space-y-3"><label className="block space-y-1.5 text-ui-sm font-medium"><span>资料标题</span><Input value={renameTitle} onChange={(event) => { setRenameTitle(event.target.value); setRenameConflict(null); }} /></label><label className="block space-y-1.5 text-ui-sm font-medium"><span>源文件名</span><Input value={renameFilename} onChange={(event) => { setRenameFilename(event.target.value); setRenameConflict(null); }} /><span className="block text-ui-xs font-normal text-muted-foreground">只能修改名称，不能改变文件扩展名。</span></label>{renameConflict && <div className="space-y-2 rounded-ui-md border border-warning/50 bg-warning/10 p-3 text-ui-sm" role="alert"><p className="font-medium">当前目录存在同名资料，是否替换？</p><p className="break-words">{renameConflict.title}（{renameConflict.original_filename}）</p><p className="text-muted-foreground">替换会将上述资料移入回收站并立即停止检索；当前资料的新版本仍需重新确认和发布。</p></div>}{renameError && <p className="text-ui-sm text-destructive" role="alert">{renameError}</p>}</div><DialogFooter><Button variant="outline" disabled={busyAction === "rename"} onClick={() => setRenameTarget(null)}>取消</Button>{renameConflict ? <Button variant="destructive" disabled={busyAction === "rename"} onClick={() => void renameContent(true)}>{busyAction === "rename" ? "替换中…" : "确认替换并重命名"}</Button> : <Button disabled={busyAction === "rename" || !renameTitle.trim() || !renameFilename.trim()} onClick={() => void renameContent()}>{busyAction === "rename" ? "保存中…" : "保存为新版本"}</Button>}</DialogFooter></DialogContent></Dialog>
 

@@ -362,6 +362,9 @@ export type ManagedContentItem = {
   archived_at?: number | null;
   archived_by_name?: string | null;
   pre_archive_lifecycle_status?: string | null;
+  media_duration_ms?: number | null;
+  media_file_size?: number | null;
+  has_pending_revision: boolean;
 };
 
 export type PublicationFailure = {

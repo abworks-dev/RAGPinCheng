@@ -2,7 +2,7 @@
 
 ## 状态
 
-已实现。资料经过上传、提交、确认和发布后进入检索；资料管理页按当前受控目录展示资料，支持上传、拖放确认、新建目录、搜索、状态/来源筛选、状态驱动的单项流程操作、批量流程操作、七个固定工具操作，以及移入回收站和恢复。回收站后新增“上传任务”页，集中展示当前账号的上传历史和当前浏览器内的传输进度。
+已实现。普通文档经过上传、提交、确认和发布后进入检索；已正式发布的视频转录稿也会以视频条目出现在受管目录中。资料管理页按当前受控目录展示两类资料，支持上传、拖放确认、新建目录、搜索、状态/来源/类型筛选、状态驱动的单项流程操作、批量流程操作，以及与资料类型匹配的单项操作。回收站后新增“上传任务”页，集中展示当前账号的上传历史和当前浏览器内的传输进度。
 
 ## 入口与调用链
 
@@ -12,6 +12,7 @@
 - 状态与事务：`api/content_store.py`
 - 对象存储：`api/content_storage.py`
 - 发布：`api/content_publication.py`
+- 视频目录登记：`api/media_transcript_catalog.py`、`api/transcription_store.py`
 - 检索可见性：`src/content_retrieval_visibility.py`
 - Schema：`api/schemas.py`、`api/db_migrations.py`
 
@@ -34,14 +35,27 @@ multipart 上传 -> upload_batches + upload_batch_entries
 -> PublishedContentSnapshot -> RAG 检索可见
 ```
 
+视频转录稿沿用独立的发布和索引权威链路：
+
+```text
+media_assets + transcript_versions
+-> transcript_publication_index_jobs -> media_transcript_heads
+-> content_items(media_transcript) 目录壳 -> 资料库联合列表
+```
+
+Schema 16 为历史上已有正式 head 的未归档视频补建目录壳。目录壳只保存 `media_id`、标题和 `category_id`，不创建 `content_versions`、`content_publications`、`content_index_jobs`、`content_item_heads` 或对象副本，因此不会重复文件、发布状态、索引任务或 Qdrant points。新发布的视频转录稿在正式 head 切换事务内同步登记目录壳，失败时整笔发布回滚。
+
 ## 列表与版本操作
 
 - 列表标题区显示当前目录、资料数量和选择摘要；搜索框位于标题右侧，状态与来源筛选收纳在搜索框展开层内，目录范围始终跟随当前地址栏；选择两份及以上资料时，“新建目录”切换为“批量操作”。
 - 当前目录的直接子文件夹与资料共用同一列表，文件夹始终排在分页资料之前；根目录显示一级文件夹，进入目录后显示其直接子文件夹。文件夹不计入资料总数、分页、勾选和批量操作，文件筛选也不会隐藏文件夹；“资料”列排序分别对文件夹组和资料组排序，其他列只排序资料组。
-- 批量移动和批量删除以 `item_id + expected_version_id` 进行并发校验，返回逐项成功或失败；确认、退回和发布沿用版本级批量接口，批量退回必须填写最多 2000 字的原因。选择两份及以上资料时，批量操作菜单还支持一次下载最多 20 份资料的 ZIP 压缩包。
-- 每份资料保留查看详情、预览、移动、下载、重命名、更新和删除七个固定图标操作，并在其左侧按状态显示唯一的下一步文字按钮：草稿“提交”、已退回“重新提交”、待确认“审核”、已确认“发布”、发布失败“重新发布”。发布中、已发布和历史版本不显示流程按钮；账号缺少对应 `item.submit`、`item.review` 或 `item.publish` 权限时也不显示禁用占位。移动端的流程按钮独占一行，工具按钮位于下一行。
+- 批量移动和批量删除以 `item_id + expected_version_id` 进行并发校验，返回逐项成功或失败；确认、退回和发布沿用版本级批量接口，批量退回必须填写最多 2000 字的原因。选择两份及以上资料时，批量操作菜单还支持一次下载最多 20 份普通文档的 ZIP 压缩包。
+- 普通文档保留查看详情、预览、移动、下载、重命名、更新和删除七个固定图标操作，并在其左侧按状态显示唯一的下一步文字按钮：草稿“提交”、已退回“重新提交”、待确认“审核”、已确认“发布”、发布失败“重新发布”。发布中、已发布和历史版本不显示流程按钮；账号缺少对应 `item.submit`、`item.review` 或 `item.publish` 权限时也不显示禁用占位。移动端的流程按钮独占一行，工具按钮位于下一行。
 - “审核”打开专用窗口，展示资料、目录、文件、版本、来源和预览入口。确认通过的备注可选；退回修改的原因必填且最多 2000 字。提交期间窗口防止重复操作，请求失败时保留当前结果选择和输入。详情弹窗复用该审核入口，并显示最近审核人、时间、结果和审核备注或退回原因。
 - “发布”和“重新发布”先打开确认窗口，确认后才创建索引任务；历史发布失败信息继续在详情和确认窗口中展示。
+- 视频转录稿只提供详情、播放、移动目录和进入视频管理，校对、发布、改名和完整删除仍由视频管理负责，不显示普通文档的状态流程按钮。
+- 视频转录稿只展示 `media_transcript_heads` 指向的当前正式版本。产生较新的待处理稿时，旧正式稿继续在资料库和检索中可见，并显示“有新转录稿待处理”；待处理稿不会作为第二份资料出现。
+- 历史视频默认进入 `05 培训资料`；发布负责人可移动视频目录壳，移动不会改变视频文件、转录发布状态、正式 head 或 Qdrant 索引。同名视频允许共存，不参与普通文档的目录文件名冲突约束。
 - 重命名同时修改资料标题和源文件名；更新上传新对象，并可沿用原名称或使用上传文件名。两者都会新增递增的草稿版本，不覆盖历史版本或对象。
 - 已发布资料生成新草稿时，旧 `content_item_heads` 保持有效，直到新版本发布成功，避免检索空窗。此期间不能移动或由仅有整理权限的账号删除该资料。
 - 文件名按 Unicode NFKC 和不区分大小写形式规范化。同一活动目录下出现同名资料时返回结构化 `409`；用户确认替换后，冲突资料与新版本写入在同一事务中完成，冲突资料进入回收站并立即退出检索。
@@ -59,6 +73,7 @@ multipart 上传 -> upload_batches + upload_batch_entries
 - 入口与查看：`workspace.view` 控制资料工作台入口；`item.view` 控制资料列表、详情和预览；`item.download` 控制单份附件下载和批量 ZIP 下载；`category.view` 控制分类树和路径。
 - 资料整理：`item.upload`、`item.submit`、`item.move_draft`、`item.archive_draft` 分别控制上传、提交、移动草稿/退回资料和将其移入回收站。
 - 确认与发布：`item.review` 控制确认和退回，`item.move_review` 控制移动待确认资料，`item.publish` 控制发布，`item.archive_published` 控制将已确认、发布失败或已发布资料移入回收站。
+- 视频转录稿：`item.view` 控制资料库查看，已登录用户按当前正式 head 读取播放和转录预览；`item.publish` 同时允许只调整视频目录壳。资料库接口拒绝对视频条目执行重命名、更新、普通发布、归档或恢复。
 - 回收站：`trash.view` 控制查看，`trash.restore` 独立控制恢复。发布负责人默认可查看但不能恢复。
 - 分类与目录：`category.manage` 控制分类维护，`folder.request` 控制目录申请，`folder.review` 控制目录审批。
 - 运维入口：`import.server` 控制服务器批次导入，`index.view` 控制索引任务页面和 API。
@@ -80,6 +95,8 @@ multipart 上传 -> upload_batches + upload_batch_entries
 4. 归档版本的文件 HTTP 入口返回 404；
 5. 保留 `content_objects`、`content_versions`、审核、发布、索引和审计记录，不物理删除共享对象或 Qdrant points。
 
+以上回收站语义只适用于普通文档。视频转录稿的下架或完整删除必须从视频管理执行；媒体归档或正式 head 消失后，对应目录壳即使保留也不会出现在资料列表、分类计数或搜索结果中。
+
 正在发布或仍有活动索引任务的资料返回 `409`。版本不一致返回 `409`，权限不足返回 `403`，不存在或已归档返回 `404`。
 
 ## 恢复边界
@@ -89,6 +106,7 @@ multipart 上传 -> upload_batches + upload_batch_entries
 ## 验证入口
 
 - API 与权限：`tests/test_content_library_api.py`
+- 视频目录登记与访问：`tests/test_transcription_publication_transaction.py`、`tests/test_media_library_access.py`
 - 状态、对象与检索可见性：`tests/test_content_library_foundation.py`
 - 页面交互：`frontend/src/pages/admin/AdminManagedContentPage.test.tsx`
 - 浏览器布局：`frontend/tests/visual/admin-workflows.spec.ts`

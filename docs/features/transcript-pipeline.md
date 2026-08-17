@@ -1,7 +1,7 @@
 # 视频转录链路
 
 - 状态：人工上传/播放链路与多引擎 Phase 5A/5B 应用闭环已实现；faster-whisper 与 WhisperX R3 已通过，生产 ASR 已准入 SenseVoice、faster-whisper 与 WhisperX；WhisperX 服务注册固定使用已资格的 `full-decode`
-- 最后核对：2026-08-16
+- 最后核对：2026-08-17
 
 ## 用户可观察能力
 
@@ -9,7 +9,7 @@
 
 Phase 5A/5B 已接通版本列表、Markdown 校对与渲染预览、人工审核、显式发布、候选索引与正式 head 检索过滤。校对保存始终创建新的受管人工修订稿，不覆盖 ASR 或历史版本；新稿必须重新审核并在候选索引成功后才能替换正式 head。转录成功、审核通过、发布中和正式检索可见仍是独立状态；真实 ASR/GPU/Qdrant 端到端尚未运行。
 
-受管资料库已增加统一分类和内容关联所需的表字段，但不替代本链路。视频原件、转录版本、审核发布和正式 head 仍以 `media_assets`、`transcript_versions` 与 `media_transcript_heads` 为权威；普通资料的 `content_item_heads` 是另一条独立可见性边界。
+已发布的视频转录稿会通过 `content_items(content_kind=media_transcript)` 目录壳进入受管资料库，但不替代本链路。视频原件、转录版本、审核发布和正式 head 仍以 `media_assets`、`transcript_versions`、`transcript_publication_index_jobs` 与 `media_transcript_heads` 为唯一权威；目录壳不复制文件、版本、发布或索引记录，普通资料的 `content_item_heads` 仍是另一条独立可见性边界。
 
 ## 当前边界
 
@@ -27,6 +27,8 @@ Phase 5A/5B 已接通版本列表、Markdown 校对与渲染预览、人工审�
 - 前端单实例播放器抽屉（桌面右侧、移动端底部弹层），支持 metadata seek 和自动播放降级；
 - 播放器下方提供交互式转录稿，按播放进度高亮当前分段并自动跟随；点击分段可跳转，用户主动滚动时暂停跟随并可一键回到当前进度；
 - 资料管理页的视频转写行在存在唯一 `media_id` 时复用同一播放器抽屉，从视频起点打开上方视频与下方转写稿；
+- 正式 head 切换成功时在同一 SQLite 事务中创建或更新视频目录壳；历史正式视频由 Schema 16 幂等回填到 `05 培训资料`，之后可由具备发布权限的人员只调整资料库目录；
+- 资料库只列出未归档媒体的当前正式 head。较新的待审核或待发布稿不会替换旧条目，只显示待处理提醒；媒体归档或正式 head 移除后条目从资料库和分类计数中消失；
 - 普通登录用户可通过只读接口读取当前已发布转录版本；无版本头的既有人工上传媒体兼容读取其已登记、受控且完成索引的人工稿；
 - 引用角标点击自动打开视频播放器并跳转对应时间点；
 - 来源卡片显示”从 HH:MM:SS 播放”按钮；
@@ -55,6 +57,7 @@ Phase 5A/5B 已接通版本列表、Markdown 校对与渲染预览、人工审�
 - publication adapter 只走 `chunk_document → store_parents → index_children`，不调用 purge、reset 或普通 `index_single`；
 - Parent、Child 和 Qdrant payload 添加 nullable `transcript_version_id` / `publication_target_id`，legacy stable ID 算法保持不变；
 - 正式可见性唯一读取 `app.sqlite.media_transcript_heads.current_version_id`；Qdrant recall 和 Parent expansion 使用同一快照，损坏/缺失 head 对 versioned transcript fail closed，legacy/普通文档继续可见；
+- `content_items` 对视频只承担目录放置；不会建立对应 `content_versions`、`content_publications`、`content_index_jobs`、`content_item_heads` 或 `content_objects`，因此资料库集成不触发二次索引；
 - 普通索引与 publication 索引共用现有单 worker/单队列，publication job 支持幂等恢复与失败状态持久化。
 - 静态 Profile catalog 保留 qualification 基线：experimental SenseVoice 为 enabled，
   faster-whisper、Qwen3-ASR 和 WhisperX 为 disabled。Phase 4 应用组装层通过严格的
