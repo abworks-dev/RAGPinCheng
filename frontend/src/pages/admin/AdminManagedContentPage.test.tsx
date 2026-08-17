@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AdminManagedContentPage } from "./AdminManagedContentPage";
 
 const mocks = vi.hoisted(() => ({
+  role: "user" as "user" | "admin",
   permissions: ["item.review", "item.move_review", "folder.review", "trash.view", "trash.restore"] as string[],
   capabilities: vi.fn(),
   categories: vi.fn(),
@@ -39,6 +40,8 @@ const mocks = vi.hoisted(() => ({
   exportTrash: vi.fn(),
   bulkDownload: vi.fn(),
   downloadFile: vi.fn(),
+  downloadMedia: vi.fn(),
+  createMediaMetadataRevision: vi.fn(),
   deleteContent: vi.fn(),
   trash: vi.fn(),
   restoreContent: vi.fn(),
@@ -75,7 +78,7 @@ vi.mock("../../context/AuthContext", () => ({
         id: 2,
         employee_id: "reviewer",
         real_name: "负责人",
-        role: "user",
+        role: mocks.role,
         csrf_token: "csrf",
         content_permissions: mocks.permissions,
       },
@@ -119,6 +122,8 @@ vi.mock("../../api/client", () => ({
     exportManagedContentTrash: mocks.exportTrash,
     bulkDownloadManagedContent: mocks.bulkDownload,
     downloadManagedContentFile: mocks.downloadFile,
+    downloadManagedMedia: mocks.downloadMedia,
+    createMediaMetadataRevision: mocks.createMediaMetadataRevision,
     deleteManagedContent: mocks.deleteContent,
     managedContentTrash: mocks.trash,
     restoreManagedContent: mocks.restoreContent,
@@ -237,9 +242,15 @@ async function openRootFolder(folderId = category.id) {
   await waitFor(() => expect(mocks.items).toHaveBeenCalledWith(expect.objectContaining({ category_id: folderId })));
 }
 
+function openMoreActions(title: string, index = 0) {
+  fireEvent.click(screen.getAllByRole("button", { name: `更多“${title}”的操作` })[index]);
+  return screen.getByRole("menu", { name: `“${title}”的更多操作` });
+}
+
 describe("AdminManagedContentPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.role = "user";
     mocks.permissions = REVIEWER_PERMISSIONS;
     mocks.previewState.parentId = null;
     mocks.capabilities.mockResolvedValue({ enabled: true, max_upload_bytes: 1024, supported_extensions: [".pdf"] });
@@ -263,6 +274,8 @@ describe("AdminManagedContentPage", () => {
     window.history.replaceState({}, "", "/admin/content");
     mocks.bulkDownload.mockResolvedValue({ blob: new Blob(["zip"]), filename: "资料批量下载.zip" });
     mocks.downloadFile.mockResolvedValue({ blob: new Blob(["file"]), filename: "standard.pdf" });
+    mocks.downloadMedia.mockResolvedValue({ blob: new Blob(["media"]), filename: "WhisperX 培训视频-视频资料.zip" });
+    mocks.createMediaMetadataRevision.mockResolvedValue({});
   });
 
   it("opens the dedicated review dialog and submits an optional approval note", async () => {
@@ -903,7 +916,7 @@ describe("AdminManagedContentPage", () => {
     await openRootFolder();
     await screen.findAllByText("建模标准");
 
-    fireEvent.click(screen.getAllByRole("button", { name: /删除“建模标准”/ })[0]);
+    fireEvent.click(within(openMoreActions("建模标准")).getByRole("menuitem", { name: "移至回收站" }));
     expect(screen.getByRole("dialog")).toHaveTextContent("将立即停止进入知识库检索");
     expect(screen.getByRole("dialog")).toHaveTextContent("文件、版本及审核发布历史会保留");
     fireEvent.click(screen.getByRole("checkbox"));
@@ -918,7 +931,7 @@ describe("AdminManagedContentPage", () => {
     const firstRender = render(<AdminManagedContentPage />);
     await openRootFolder();
     await screen.findAllByText("建模标准");
-    expect(screen.getAllByRole("button", { name: /删除“建模标准”/ })[0]).toBeDisabled();
+    expect(within(openMoreActions("建模标准")).getByRole("menuitem", { name: "移至回收站" })).toBeDisabled();
     firstRender.unmount();
 
     mocks.permissions = PUBLISHER_PERMISSIONS;
@@ -929,10 +942,9 @@ describe("AdminManagedContentPage", () => {
     });
     const { unmount } = render(<AdminManagedContentPage />);
     await openRootFolder();
-    await waitFor(() => expect(screen.getAllByRole("button", { name: /删除“建模标准”/ })[0]).toBeDisabled());
-    const disabledDelete = screen.getAllByRole("button", { name: /删除“建模标准”/ })[0];
-    fireEvent.mouseEnter(disabledDelete.parentElement!);
-    expect(screen.getByRole("tooltip")).toHaveTextContent("资料正在发布，暂不能移入回收站");
+    const disabledDelete = within(openMoreActions("建模标准")).getByRole("menuitem", { name: "移至回收站" });
+    expect(disabledDelete).toBeDisabled();
+    expect(disabledDelete).toHaveAttribute("title", "资料正在发布，暂不能移入回收站");
     unmount();
   });
 
@@ -977,7 +989,7 @@ describe("AdminManagedContentPage", () => {
     render(<AdminManagedContentPage />);
     await openRootFolder();
     await screen.findAllByText("建模标准");
-    fireEvent.click(screen.getAllByRole("button", { name: /删除“建模标准”/ })[0]);
+    fireEvent.click(within(openMoreActions("建模标准")).getByRole("menuitem", { name: "移至回收站" }));
     fireEvent.click(screen.getByRole("checkbox"));
     fireEvent.click(screen.getByRole("button", { name: "确认移入回收站" }));
 
@@ -1413,15 +1425,20 @@ describe("AdminManagedContentPage", () => {
     expect(screen.getAllByRole("button", { name: /调整“建模标准”的分类/ }).every((button) => button.hasAttribute("disabled"))).toBe(true);
   });
 
-  it("keeps the workflow button before seven icon actions and download out of details", async () => {
+  it("keeps the workflow button before common actions and moves secondary actions into More", async () => {
     mocks.permissions = ORGANIZER_PERMISSIONS;
     mocks.items.mockResolvedValue({ items: [{ ...item, lifecycle_status: "draft" }], total: 1, status_counts: { draft: 1 } });
     render(<AdminManagedContentPage />);
     await openRootFolder();
 
-    for (const actionName of ["查看“建模标准”的详细信息", "预览“建模标准”", "移动“建模标准”", "下载“建模标准”", "重命名“建模标准”", "更新“建模标准”", "删除“建模标准”"]) {
+    for (const actionName of ["查看“建模标准”的详细信息", "预览“建模标准”", "移动“建模标准”", "下载“建模标准”", "更多“建模标准”的操作"]) {
       expect(screen.getAllByRole("button", { name: actionName }).length).toBeGreaterThan(0);
     }
+    const moreMenu = openMoreActions("建模标准");
+    for (const actionName of ["重命名", "更新资料", "移至回收站"]) {
+      expect(within(moreMenu).getByRole("menuitem", { name: actionName })).toBeInTheDocument();
+    }
+    fireEvent.keyDown(document, { key: "Escape" });
     const detailsButton = screen.getAllByRole("button", { name: "查看“建模标准”的详细信息" })[0];
     const iconGroup = detailsButton.parentElement?.parentElement;
     expect(iconGroup).toHaveClass("ml-auto", "justify-end");
@@ -1435,7 +1452,8 @@ describe("AdminManagedContentPage", () => {
     expect(within(dialog).queryByRole("link", { name: /下载/ })).not.toBeInTheDocument();
   });
 
-  it("renders published video transcripts with preview and video-management actions only", async () => {
+  it("renders published video transcripts with download and managed secondary actions", async () => {
+    mocks.role = "admin";
     mocks.permissions = PUBLISHER_PERMISSIONS;
     mocks.items.mockResolvedValue({ items: [mediaItem], total: 1, status_counts: { published: 1 } });
     render(<AdminManagedContentPage />);
@@ -1444,7 +1462,7 @@ describe("AdminManagedContentPage", () => {
     expect((await screen.findAllByText("视频转录稿")).length).toBeGreaterThan(0);
     expect(screen.getAllByText("有新转录稿待处理").length).toBeGreaterThan(0);
     expect(screen.getAllByText(/00:01:05/).length).toBeGreaterThan(0);
-    expect(screen.queryByRole("button", { name: "下载“WhisperX 培训视频”" })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "下载“WhisperX 培训视频”" }).length).toBeGreaterThan(0);
     expect(screen.queryByRole("button", { name: "重命名“WhisperX 培训视频”" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "删除“WhisperX 培训视频”" })).not.toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "调整“WhisperX 培训视频”的归档目录" }).length).toBeGreaterThan(0);
@@ -1456,10 +1474,70 @@ describe("AdminManagedContentPage", () => {
       startSeconds: 0,
       fromSource: false,
     });
-    expect(screen.getAllByRole("link", { name: "在视频管理中打开“WhisperX 培训视频”" })[0]).toHaveAttribute(
-      "href",
-      `/admin/media?media_id=${mediaItem.media_id}&workbench=1`,
-    );
+    const moreMenu = openMoreActions("WhisperX 培训视频");
+    expect(within(moreMenu).getByRole("menuitem", { name: "编辑转录稿" })).toHaveAttribute("href", `/admin/media?media_id=${mediaItem.media_id}&workbench=1&action=edit-current`);
+    expect(within(moreMenu).getByRole("menuitem", { name: "替换视频" })).toHaveAttribute("href", `/admin/media?media_id=${mediaItem.media_id}&action=replace`);
+    expect(within(moreMenu).getByRole("menuitem", { name: "进入视频管理" })).toHaveAttribute("href", `/admin/media?media_id=${mediaItem.media_id}&workbench=1`);
+  });
+
+  it.each([
+    ["仅视频", "video", "training.mp4"],
+    ["仅转录稿", "transcript", "WhisperX 培训视频-转录稿.md"],
+    ["视频与转录稿", "all", "WhisperX 培训视频-视频资料.zip"],
+  ] as const)("downloads published media using the %s choice", async (choice, part, fallbackFilename) => {
+    mocks.permissions = PUBLISHER_PERMISSIONS;
+    mocks.items.mockResolvedValue({ items: [mediaItem], total: 1, status_counts: { published: 1 } });
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: vi.fn(() => "blob:media") });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
+    render(<AdminManagedContentPage />);
+    await openRootFolder();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "下载“WhisperX 培训视频”" })[0]);
+    const dialog = screen.getByRole("dialog", { name: "下载视频资料" });
+    expect(within(dialog).getAllByRole("radio")).toHaveLength(3);
+    fireEvent.click(within(dialog).getByRole("radio", { name: new RegExp(`^${choice}`) }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "开始下载" }));
+
+    await waitFor(() => expect(mocks.downloadMedia).toHaveBeenCalledWith(mediaItem.item_id, part, fallbackFilename));
+    expect(mocks.success).toHaveBeenCalledWith("已开始下载“WhisperX 培训视频”");
+  });
+
+  it("creates a reviewed media metadata candidate while preserving the published item", async () => {
+    mocks.role = "admin";
+    mocks.permissions = PUBLISHER_PERMISSIONS;
+    mocks.items.mockResolvedValue({ items: [mediaItem], total: 1, status_counts: { published: 1 } });
+    render(<AdminManagedContentPage />);
+    await openRootFolder();
+
+    fireEvent.click(within(openMoreActions("WhisperX 培训视频")).getByRole("menuitem", { name: "编辑媒体信息" }));
+    const dialog = screen.getByRole("dialog", { name: "编辑媒体信息" });
+    expect(dialog).toHaveTextContent("当前正式名称会保留");
+    fireEvent.change(within(dialog).getByLabelText("视频标题"), { target: { value: "更新后的培训视频" } });
+    fireEvent.change(within(dialog).getByLabelText(/^源文件名/), { target: { value: "updated-training.mp4" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "创建修订" }));
+
+    await waitFor(() => expect(mocks.createMediaMetadataRevision).toHaveBeenCalledWith(
+      mediaItem.media_id,
+      mediaItem.version_id,
+      "更新后的培训视频",
+      "updated-training.mp4",
+      expect.any(String),
+    ));
+    expect(mocks.success).toHaveBeenCalledWith("媒体信息修订已创建，请在转写工作台审核并发布");
+  });
+
+  it("does not send a non-admin publisher into admin-only video management", async () => {
+    mocks.permissions = PUBLISHER_PERMISSIONS;
+    mocks.items.mockResolvedValue({ items: [mediaItem], total: 1, status_counts: { published: 1 } });
+    render(<AdminManagedContentPage />);
+    await openRootFolder();
+
+    const moreMenu = openMoreActions("WhisperX 培训视频");
+    for (const action of ["编辑转录稿", "编辑媒体信息", "替换视频", "进入视频管理"]) {
+      expect(within(moreMenu).getByRole("menuitem", { name: action })).toBeDisabled();
+    }
+    expect(within(moreMenu).queryByRole("link")).not.toBeInTheDocument();
   });
 
   it("filters the library by video transcript type", async () => {
@@ -1504,7 +1582,7 @@ describe("AdminManagedContentPage", () => {
     mocks.renameContent.mockResolvedValue({ ...item, title: "更新后的标题", original_filename: "renamed.pdf", version_number: 2 });
     render(<AdminManagedContentPage />);
     await openRootFolder();
-    fireEvent.click(screen.getAllByRole("button", { name: "重命名“建模标准”" })[0]);
+    fireEvent.click(within(openMoreActions("建模标准")).getByRole("menuitem", { name: "重命名" }));
     fireEvent.change(screen.getByLabelText("资料标题"), { target: { value: "更新后的标题" } });
     fireEvent.change(screen.getByLabelText(/^源文件名/), { target: { value: "renamed.pdf" } });
     fireEvent.click(screen.getByRole("button", { name: "保存为新版本" }));
@@ -1521,7 +1599,7 @@ describe("AdminManagedContentPage", () => {
     mocks.updateVersion.mockResolvedValue({ ...item, original_filename: "replacement.pdf", version_number: 2 });
     render(<AdminManagedContentPage />);
     await openRootFolder();
-    fireEvent.click(screen.getAllByRole("button", { name: "更新“建模标准”" })[0]);
+    fireEvent.click(within(openMoreActions("建模标准")).getByRole("menuitem", { name: "更新资料" }));
     const replacement = new File(["# replacement"], "replacement.md", { type: "text/markdown" });
     fireEvent.change(screen.getByLabelText("选择替换文件"), { target: { files: [replacement] } });
     expect(screen.getByText("将使用原名称并匹配新格式：standard.md")).toBeInTheDocument();

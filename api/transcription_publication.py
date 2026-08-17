@@ -95,7 +95,10 @@ class QdrantTranscriptPublicationIndexAdapter(PublicationIndexPort):
             content = self.artifacts.load_verified(version.markdown_ref)
             if sha256_hex(content) != request.markdown_sha256:
                 raise ContractValidationError("artifact_hash_mismatch", "markdown")
-            title = self.media_title(version.media_id).strip() or version.media_id
+            title = self.store.publication_title(
+                version.id,
+                self.media_title(version.media_id),
+            ).strip() or version.media_id
             synthetic_source = DOCS_DIR / "教学视频" / "_media" / f"{version.media_id}.md"
             with tempfile.TemporaryDirectory(prefix="transcript-candidate-") as temp_dir:
                 markdown_path = Path(temp_dir) / "transcript.md"

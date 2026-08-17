@@ -8,6 +8,8 @@ export function TranscriptionWorkbenchSheet({
   originalFilename,
   mediaId,
   refreshToken,
+  initialAction,
+  initialVersionId,
   onClose,
   onChanged,
 }: {
@@ -16,6 +18,8 @@ export function TranscriptionWorkbenchSheet({
   originalFilename: string;
   mediaId: string | null;
   refreshToken?: string | null;
+  initialAction?: "edit-current" | null;
+  initialVersionId?: string | null;
   onClose: () => void;
   onChanged?: () => void | Promise<void>;
 }) {
@@ -41,6 +45,8 @@ export function TranscriptionWorkbenchSheet({
             <TranscriptionVersionPanel
               mediaId={mediaId}
               refreshToken={refreshToken}
+              initialAction={initialAction}
+              initialVersionId={initialVersionId}
               embedded
               onChanged={onChanged}
               onDirtyChange={setDirty}

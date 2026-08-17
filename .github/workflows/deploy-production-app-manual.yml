@@ -813,6 +813,7 @@ jobs:
             exit 1
           }
           printf '%s\n' "${OLD_IMAGE_ID}" > "${BACKUP_PATH}/backend-image.txt"
+          printf '%s\n' "${ROLLBACK_IMAGE_TAG}" > "${BACKUP_PATH}/backend-rollback-tag.txt"
           echo "APP_ONLY_BACKUP status=complete path=${BACKUP_PATH} rollback_image=retained"
 
           rollback_backend() {
@@ -960,5 +961,4 @@ jobs:
             echo "ERROR: App-only deployment failed strict verification"
             exit 1
           fi
-          docker image rm "${ROLLBACK_IMAGE_TAG}" >/dev/null 2>&1 || \
-            echo "WARNING: retained rollback tag could not be removed"
+          echo "APP_ONLY_ROLLBACK_READY status=retained backup=${BACKUP_PATH} image=${ROLLBACK_IMAGE_TAG}"
