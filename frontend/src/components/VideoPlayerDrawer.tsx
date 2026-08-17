@@ -4,8 +4,10 @@ import { ResourcePreviewShell } from "./ResourcePreviewShell";
 import { SynchronizedVideoTranscript } from "./SynchronizedVideoTranscript";
 import { api, ApiError } from "../api/client";
 import type { MediaTranscriptSegment } from "../types";
+import { useAuth } from "../context/AuthContext";
 
 export function VideoPlayerDrawer() {
+  const { state: authState } = useAuth();
   const { isOpen, currentRequest, close } = useVideoPlayer();
   const [transcript, setTranscript] = useState<MediaTranscriptSegment[]>([]);
   const [transcriptLoading, setTranscriptLoading] = useState(true);
@@ -61,6 +63,7 @@ export function VideoPlayerDrawer() {
         transcriptLoading={transcriptLoading}
         transcriptError={transcriptError}
         initialStartSeconds={currentRequest.startSeconds}
+        playbackUserScope={authState.status === "authed" ? `user:${authState.user.id}` : undefined}
       />
     </ResourcePreviewShell>
   );
