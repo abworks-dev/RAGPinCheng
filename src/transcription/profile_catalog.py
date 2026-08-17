@@ -18,6 +18,8 @@ from .types import (
     ProfileAdmission,
     ProfileQualification,
     ProviderAvailability,
+    TerminologyCorrectionConfig,
+    TranscriptSegmentationConfig,
 )
 
 FASTER_WHISPER_PROFILE_ID = "faster-whisper-zh-experimental-v1"
@@ -42,6 +44,10 @@ FUNASR_SENSEVOICE_MODEL_REVISION = "7bf452403abd7353a300cd760f7adae7701c92c1"
 WHISPERX_PROFILE_ID = "whisperx-large-v3-zh-align-experimental-v1"
 WHISPERX_PROVIDER_KEY = "whisperx"
 WHISPERX_SERVICE_PROFILE_ID = "whisperx-large-v3-zh-align-v1"
+WHISPERX_V2_SERVICE_PROFILE_ID = "whisperx-large-v3-zh-align-v2"
+WHISPERX_NATURAL_PROFILE_ID = "whisperx-large-v3-zh-natural-v2"
+WHISPERX_BALANCED_PROFILE_ID = "whisperx-large-v3-zh-balanced-v2"
+WHISPERX_FINE_PROFILE_ID = "whisperx-large-v3-zh-fine-v2"
 WHISPERX_MODEL_ID = "Systran/faster-whisper-large-v3"
 WHISPERX_MODEL_REVISION = "53ecf83a5bedc5597eb8c8b34eac29e5345520ff"
 
@@ -75,6 +81,24 @@ def _availability(
 
 
 def _profiles() -> tuple[TranscriptionProfileDefinition, ...]:
+    whisperx_v2_common = {
+        "provider_key": WHISPERX_PROVIDER_KEY,
+        "provider_config": WhisperXRemoteConfig(
+            config_version="2",
+            service_profile_id=WHISPERX_V2_SERVICE_PROFILE_ID,
+        ),
+        "normalizer_config": NormalizerConfig(2, 500, 1000),
+        "qualification": ProfileQualification.qualification_approved,
+        "admission": ProfileAdmission.disabled,
+        "release_policy": ReleasePolicy(True, False, False),
+        "profile_definition_version": "2",
+        "normalizer_version": "2",
+        "terminology_config": TerminologyCorrectionConfig("bim-engineering-v1"),
+        "evidence_refs": (
+            "docs/features/transcript-pipeline.md",
+            "scripts/run_whisperx_qualification.py",
+        ),
+    }
     profiles = (
         TranscriptionProfileDefinition.create(
             profile_id=FASTER_WHISPER_PROFILE_ID,
@@ -144,6 +168,33 @@ def _profiles() -> tuple[TranscriptionProfileDefinition, ...]:
             admission=ProfileAdmission.disabled,
             release_policy=ReleasePolicy(True, False, False),
             evidence_refs=("docs/plans/whisperx-r2-r3-execution-plan.md",),
+        ),
+        TranscriptionProfileDefinition.create(
+            profile_id=WHISPERX_NATURAL_PROFILE_ID,
+            display_name="WhisperX 工程转录 自然分段 v2",
+            description="保留模型自然分段，仅保守合并相邻短句；适合逐句校对。",
+            segmentation_config=TranscriptSegmentationConfig(
+                "natural", None, 500, 1000
+            ),
+            **whisperx_v2_common,
+        ),
+        TranscriptionProfileDefinition.create(
+            profile_id=WHISPERX_BALANCED_PROFILE_ID,
+            display_name="WhisperX 工程转录 均衡分段 v2",
+            description="优先按标点分段，单段目标不超过 30 秒；适合常规培训视频。",
+            segmentation_config=TranscriptSegmentationConfig(
+                "balanced", 30_000, 240, 750
+            ),
+            **whisperx_v2_common,
+        ),
+        TranscriptionProfileDefinition.create(
+            profile_id=WHISPERX_FINE_PROFILE_ID,
+            display_name="WhisperX 工程转录 细分段 v2",
+            description="优先按标点分段，单段目标不超过 15 秒；适合密集校对和定位。",
+            segmentation_config=TranscriptSegmentationConfig(
+                "fine", 15_000, 120, 500
+            ),
+            **whisperx_v2_common,
         ),
     )
     return tuple(sorted(profiles, key=lambda profile: profile.profile_id))

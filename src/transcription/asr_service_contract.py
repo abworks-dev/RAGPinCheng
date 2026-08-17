@@ -24,6 +24,7 @@ ASR_JOB_SCHEMA_VERSION = "asr-service-job/1"
 ASR_RESULT_SCHEMA_VERSION = "asr-service-result/1"
 ASR_UPLOAD_SCHEMA_VERSION = "asr-upload-manifest/1"
 ASR_CHECKPOINT_SCHEMA_VERSION = "asr-service-checkpoint/1"
+ASR_PROFILE_IDENTITIES_SCHEMA_VERSION = "asr-profile-identities/1"
 
 
 class ServiceJobState(Enum):
@@ -159,6 +160,101 @@ class ServiceCapabilities:
             tuple(obj["service_profiles"]),
             obj["max_upload_part_bytes"],
             obj["max_input_bytes"],
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ServiceProfileIdentity:
+    service_profile_id: str
+    provider_key: str
+    profile_config_hash: str
+    prompt_asset_id: str | None
+    qualification_policy: str
+
+    def __post_init__(self) -> None:
+        validate_provider_key(self.service_profile_id, "service_profile_id")
+        validate_provider_key(self.provider_key)
+        validate_sha256(self.profile_config_hash, "profile_config_hash")
+        if self.prompt_asset_id is not None:
+            prompt_asset_id = require_string(self.prompt_asset_id, "prompt_asset_id")
+            if len(prompt_asset_id) > 100:
+                raise ContractValidationError("string_too_long", "prompt_asset_id")
+        if self.qualification_policy not in ("not-required", "whisperx-r3/1"):
+            raise ContractValidationError(
+                "invalid_qualification_policy", "qualification_policy"
+            )
+
+    def to_json_dict(self) -> dict[str, Any]:
+        return {
+            "service_profile_id": self.service_profile_id,
+            "provider_key": self.provider_key,
+            "profile_config_hash": self.profile_config_hash,
+            "prompt_asset_id": self.prompt_asset_id,
+            "qualification_policy": self.qualification_policy,
+        }
+
+    @classmethod
+    def from_json_dict(cls, data: object) -> "ServiceProfileIdentity":
+        obj = reject_unknown_fields(
+            data,
+            {
+                "service_profile_id",
+                "provider_key",
+                "profile_config_hash",
+                "prompt_asset_id",
+                "qualification_policy",
+            },
+            "service_profile_identity",
+        )
+        return cls(
+            obj["service_profile_id"],
+            obj["provider_key"],
+            obj["profile_config_hash"],
+            obj["prompt_asset_id"],
+            obj["qualification_policy"],
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ServiceProfileIdentities:
+    schema_version: str
+    profiles: tuple[ServiceProfileIdentity, ...]
+
+    def __post_init__(self) -> None:
+        if self.schema_version != ASR_PROFILE_IDENTITIES_SCHEMA_VERSION:
+            raise ContractValidationError(
+                "unsupported_service_version", "profile_identities.schema_version"
+            )
+        if type(self.profiles) is not tuple:
+            raise ContractValidationError("mutable_collection", "profiles")
+        if any(type(item) is not ServiceProfileIdentity for item in self.profiles):
+            raise ContractValidationError("invalid_profile_identity", "profiles")
+        profile_ids = tuple(item.service_profile_id for item in self.profiles)
+        if profile_ids != tuple(sorted(set(profile_ids))):
+            raise ContractValidationError(
+                "profile_identities_not_sorted_unique", "profiles"
+            )
+
+    def to_json_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "profiles": [item.to_json_dict() for item in self.profiles],
+        }
+
+    @classmethod
+    def from_json_dict(cls, data: object) -> "ServiceProfileIdentities":
+        obj = reject_unknown_fields(
+            data,
+            {"schema_version", "profiles"},
+            "service_profile_identities",
+        )
+        if type(obj["profiles"]) is not list:
+            raise ContractValidationError(
+                "invalid_array", "service_profile_identities.profiles"
+            )
+        return cls(
+            obj["schema_version"],
+            tuple(ServiceProfileIdentity.from_json_dict(item) for item in obj["profiles"]),
         )
 
 

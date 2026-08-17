@@ -8,8 +8,11 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 
 from src.transcription.asr_service_contract import (
     ASR_API_VERSION,
+    ASR_PROFILE_IDENTITIES_SCHEMA_VERSION,
     CreateJobRequest,
     ServiceCapabilities,
+    ServiceProfileIdentities,
+    ServiceProfileIdentity,
 )
 from src.transcription.runtime_ports import InputPart
 from src.transcription.types import ContractValidationError
@@ -21,7 +24,7 @@ from .engine_protocol import (
     FASTER_WHISPER_SERVICE_CONFIG,
     QWEN3_ASR_SERVICE_CONFIG,
     SENSEVOICE_SERVICE_CONFIG,
-    WHISPERX_FULL_DECODE_SERVICE_CONFIG,
+    WHISPERX_V2_FULL_DECODE_SERVICE_CONFIG,
 )
 from .engine_registry import EngineRegistration, EngineRegistry
 from .engines.faster_whisper import FasterWhisperEngine
@@ -144,6 +147,7 @@ def create_app(
             )
         )
         whisperx_engine = WhisperXEngine(
+            service_profile_id="whisperx-large-v3-zh-align-v2",
             model_cache_ready=lambda: whisperx_ready,
             model_path=whisperx_cache.model_path,
             align_model_path=whisperx_align_cache.model_path,
@@ -169,7 +173,7 @@ def create_app(
                 ),
                 EngineRegistration(qwen3_engine, QWEN3_ASR_SERVICE_CONFIG),
                 EngineRegistration(
-                    whisperx_engine, WHISPERX_FULL_DECODE_SERVICE_CONFIG
+                    whisperx_engine, WHISPERX_V2_FULL_DECODE_SERVICE_CONFIG
                 ),
             )
         )
@@ -218,6 +222,22 @@ def create_app(
             profiles if settings.enabled else (),
             settings.max_upload_part_bytes,
             settings.max_input_bytes,
+        ).to_json_dict()
+
+    @app.get("/v1/profile-identities", dependencies=[auth])
+    def profile_identities() -> dict[str, object]:
+        return ServiceProfileIdentities(
+            ASR_PROFILE_IDENTITIES_SCHEMA_VERSION,
+            tuple(
+                ServiceProfileIdentity(
+                    registration.config.service_profile_id,
+                    registration.config.provider_key,
+                    registration.config.config_hash,
+                    registration.config.prompt_asset_id or None,
+                    registration.config.qualification_policy,
+                )
+                for registration in scheduler.engines.registrations
+            ),
         ).to_json_dict()
 
     @app.get("/v1/diagnostics", dependencies=[auth])

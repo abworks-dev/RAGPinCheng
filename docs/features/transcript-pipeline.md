@@ -7,6 +7,8 @@
 
 教学视频转录稿可以被索引和检索，回答能够显示带时间戳的视频引用，点击引用定位到来源卡片并打开视频播放器。管理员可通过三步向导批量暂存 MP4，再逐视频绑定、查看和编辑人工 Markdown，或批量应用并逐项覆盖服务端白名单 Profile 启动自动转录任务。
 
+系统管理员可在 `/admin/asr` 的“转录配置”页比较三个服务器固定的 WhisperX v2 分段 Profile，查看固定工程词、Prompt 资产和应用/服务配置哈希，并提交只写审计记录的发布申请。页面不接受自由 Prompt、模型路径或任意解码参数；发布申请不持有部署凭据，也不直接触发生产 workflow。
+
 Phase 5A/5B 已接通版本列表、Markdown 校对与渲染预览、人工审核、显式发布、候选索引与正式 head 检索过滤。校对保存始终创建新的受管人工修订稿，不覆盖 ASR 或历史版本；新稿必须重新审核并在候选索引成功后才能替换正式 head。转录成功、审核通过、发布中和正式检索可见仍是独立状态；真实 ASR/GPU/Qdrant 端到端尚未运行。
 
 已发布的视频转录稿会通过 `content_items(content_kind=media_transcript)` 目录壳进入受管资料库，但不替代本链路。视频原件、转录版本、审核发布和正式 head 仍以 `media_assets`、`transcript_versions`、`transcript_publication_index_jobs` 与 `media_transcript_heads` 为唯一权威；目录壳不复制文件、版本、发布或索引记录，普通资料的 `content_item_heads` 仍是另一条独立可见性边界。
@@ -40,6 +42,9 @@ Phase 5A/5B 已接通版本列表、Markdown 校对与渲染预览、人工审�
 - 管理员在转写工作台展开“校对内容”后可同时查看视频和指定转录版本的同步时间轴；点击时间戳跳转视频，播放时自动高亮当前段落，时间轴支持自动跟随和手动暂停跟随。
 - 管理员显式“保存为新草稿”时，服务端统一 LF、校验 UTF-8 编码后的 2 MiB 上限、说话人时间戳和非空正文，并以基础版本 SHA-256 与请求幂等键防止并发误写。
 - 修订稿登记为 `source=manual`、`markdown_storage_kind=managed_artifact`，记录基础版本、编辑人和保存幂等键，审核状态重置为 `awaiting_review`；legacy 人工上传稿仍保持独立且不能通过受管发布流程发布。
+- WhisperX v2 提供自然、均衡和细分三个只读 Profile：自然分段不强制时长，均衡/细分最长分别为 30/15 秒，字符上限分别为 500/240/120，短段合并间隔分别为 1000/750/500 ms；超限段按换行、句末标点、逗号、空格和字符边界确定性切分，段内时间按字符比例计算。
+- v2 固定工程词包括 `Revit`、`Navisworks`、`AutoCAD`、`BIM`、`BIM-2026-0805`、`12.5`、`208`、`95%`；`Auto CAD`、`B I M`、大小写、标准编号空格/连字符、小数和百分号仅按明确模式做确定性校正，不做模糊替换。
+- schema 17 添加 `asr_profile_release_requests` 与 `asr_profile_audit_events`。读取要求管理员，创建要求管理员 CSRF、UUID 幂等键、实时 capability 和受认证 `/v1/profile-identities` 服务配置哈希匹配；申请与审计在同一 SQLite 事务写入。
 
 ### 未实现（第二阶段）
 
@@ -65,6 +70,7 @@ Phase 5A/5B 已接通版本列表、Markdown 校对与渲染预览、人工审�
   当前生产应用的准入由受控 deployment workflow 持久化并以实时 capabilities 复核：
   SenseVoice、faster-whisper 与 WhisperX 已准入，Qwen3-ASR 保持关闭。四者复用同一
   Remote Provider 与唯一 Candidate → Canonical 结果流；
+- 静态目录同时新增三个 `qualification_approved` WhisperX v2 Profile，默认均为 disabled；只有实时服务暴露 `whisperx-large-v3-zh-align-v2` 且运行身份哈希与仓库固定配置一致时，管理页才允许创建发布申请。`/v1/diagnostics` 继续只返回有界运行状态，不承载 Prompt 或配置身份。标准应用发布动作只准入均衡 Profile，自然和细分 Profile 继续保持只读候选。
 - ASR service 注册四个固定 service Profile；faster-whisper、Qwen3-ASR 或 WhisperX
   缓存/依赖缺失时仅相应 Profile 不可用，不阻止现有 SenseVoice 服务启动；
 - faster-whisper adapter 固定
@@ -103,10 +109,10 @@ canonical、Markdown 与 parser turns 两遍结果一致，固定模型 revision
 WhisperX R3 Run `31889569116` 已在
 `befa81db9df9333b0e44823208390d5dacc2d2bb` 上通过：固定 8 个非敏感样本的三组解码矩阵
 选择 `full-decode`，原有质量、确定性、时间戳、资源和许可证门禁全部通过，峰值 GPU
-显存为 `1323.55 MiB`，且资格过程未修改生产服务。生产服务保持原
-`whisperx-large-v3-zh-align-v1` Profile 身份，仅将其注册配置固定为已资格的 12 项热词、
-`beam_size=10`、`temperature=0.1` 和工程 `initial_prompt`；资格结论本身不替代 active
-release 的部署、promotion 与实时验收。
+显存为 `1323.55 MiB`，且资格过程未修改生产服务。该记录是 v1 `full-decode` 的历史资格
+证据。v2 服务身份扩充固定工程词与版本化 Prompt，因此 runtime contract 已变化，必须在
+同一目标 master revision 重新运行 faster-whisper 与 WhisperX R3，不能复用 v1 资格；
+资格结论仍不替代 active release 的部署、promotion 与实时验收。
 
 faster-whisper、Qwen3-ASR 和 WhisperX qualification 统一读取
 `asr-qualification-corpus/1` 只读 manifest，并沿用已 PASS 的
@@ -162,7 +168,7 @@ faster-whisper 的新资格也必须绑定相同 Torch 基线。部署强制创�
 下载阶段必须保留两引擎全部已资格 wheel，安装阶段仅从完整 wheelhouse 离线安装，并验证
 SenseVoice、faster-whisper 与 WhisperX 模块来源及模型缓存。三 Profile 顺序固定为
 `faster-whisper-large-v3-turbo-v1`、`funasr-sensevoice-small-v1`、
-`whisperx-large-v3-zh-align-v1`。candidate
+`whisperx-large-v3-zh-align-v2`。candidate
 以 workflow run ID 为不可变身份，应用、venv、受 ACL 保护的独立配置和 release manifest
 分别发布到版本化目录；manifest 绑定 deployment contract、qualification identity、wheel
 依赖身份、`pip freeze` 身份及应用文件 hash。写入前要求每个受管卷至少有 20 GiB 可用
@@ -173,8 +179,8 @@ candidate promotion 由独立手动 workflow 执行，使用 manifest SHA-256 �
 reparse-point、应用文件、Python 环境、模型缓存和当前 task 所有权；promotion 才将 candidate
 配置启用、停止经验证的旧 listener、写入原子 active state 并启动 candidate。任何本机或
 Ubuntu 跨节点验证失败都会使用受保护的 activation state 恢复旧 task action、active state
-和 candidate 配置并重启旧 release。首次生产迁移尚未执行；在迁移前当前固定 `app/venv`
-槽位继续作为 legacy release，不能把代码就绪描述为生产启用。
+和 candidate 配置并重启旧 release。当前 active release 的实际身份以受保护的 active state、
+candidate manifest 和 promotion workflow evidence 为准，不能把代码就绪描述为生产启用。
 
 ## 入口与调用链
 
@@ -341,9 +347,7 @@ Ubuntu 跨节点验证失败都会使用受保护的 activation state 恢复旧 
 - WhisperX `full-decode` 已通过隔离 R3 并成为服务注册配置；每次 runtime contract 变化后
   仍须在同一 master SHA 分别重跑 faster-whisper 与 WhisperX R3，再执行只读部署预检、
   旁路 candidate staging、promotion 和实时验收；尚未使用真实业务媒体完成质量验收；
-- 当前允许新建任务的自动 Profile 是 experimental SenseVoice、faster-whisper 与 WhisperX；
-  Qwen3-ASR experimental Profile 可见但 admission 为 disabled；尚无
-  `qualification_approved` Profile；
+- 当前静态目录包含三个 `qualification_approved` WhisperX v2 Profile，但默认关闭；生产应用动作仅在 v2 R3、candidate promotion 和实时哈希验证通过后准入均衡 Profile。Qwen3-ASR experimental Profile 继续为 disabled；
 - 支持范围播放但无 HLS 自适应码率。
 - 媒体快捷筛选是最近 100 条的客户端筛选，不是服务端全库查询；转写工作台的视频校对区域目前只支持已登记媒体的受控视频播放，不生成独立字幕轨道。
 

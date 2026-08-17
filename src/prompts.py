@@ -4,9 +4,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
-from .config import ROOT
-
-PROMPTS_DIR = ROOT / "prompts"
+PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
 
 
 @lru_cache(maxsize=None)

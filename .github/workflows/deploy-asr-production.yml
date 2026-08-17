@@ -212,7 +212,7 @@ jobs:
             profile_args=(
               --expected-profile faster-whisper-large-v3-turbo-v1
               --expected-profile funasr-sensevoice-small-v1
-              --expected-profile whisperx-large-v3-zh-align-v1
+              --expected-profile whisperx-large-v3-zh-align-v2
             )
           fi
           python3 scripts/verify_asr_from_ubuntu.py \

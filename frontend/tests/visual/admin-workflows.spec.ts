@@ -64,6 +64,12 @@ test.describe("资料管理", () => {
     const actionTooltip = page.getByRole("tooltip", { name: "预览文件" });
     await expect(actionTooltip).toBeVisible();
     await expectInViewport(actionTooltip);
+    const [previewBox, tooltipBox] = await Promise.all([previewButton.boundingBox(), actionTooltip.boundingBox()]);
+    expect(previewBox).not.toBeNull();
+    expect(tooltipBox).not.toBeNull();
+    const previewCenter = previewBox!.x + previewBox!.width / 2;
+    const tooltipCenter = tooltipBox!.x + tooltipBox!.width / 2;
+    expect(Math.abs(previewCenter - tooltipCenter)).toBeLessThanOrEqual(2);
     await page.mouse.move(0, 0);
     await expect(actionTooltip).toBeHidden();
     const deleteButton = item.getByRole("button", { name: `删除“${longTitle}”`, exact: true });

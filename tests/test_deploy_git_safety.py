@@ -269,7 +269,7 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertIn("transcription_admission:", workflow)
         self.assertIn("ENABLE_FASTER_WHISPER", workflow)
         self.assertIn("ENABLE_FASTER_WHISPER_AND_WHISPERX", workflow)
-        self.assertIn("whisperx-large-v3-zh-align-experimental-v1", workflow)
+        self.assertIn("whisperx-large-v3-zh-balanced-v2", workflow)
         self.assertIn("CONFIGURED_TRANSCRIPTION_ADMITTED_PROFILE_IDS", workflow)
         self.assertIn("PREVIOUS_TRANSCRIPTION_ADMITTED_PROFILE_IDS", workflow)
         self.assertIn(
@@ -292,7 +292,10 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertIn('if [ "${DEPLOY_STATUS}" -ne 0 ]; then', workflow)
         self.assertNotIn("if ! (", workflow)
         self.assertIn('states[FASTER_WHISPER_PROFILE_ID] == ("enabled", "available")', workflow)
-        self.assertIn('states[WHISPERX_PROFILE_ID] == ("enabled", "available")', workflow)
+        self.assertIn(
+            'states[WHISPERX_BALANCED_PROFILE_ID] == ("enabled", "available")',
+            workflow,
+        )
         self.assertIn("profiles=\" + \",\".join(sorted(expected))", workflow)
 
         compose = (ROOT / "docker" / "docker-compose.yml").read_text(encoding="utf-8")

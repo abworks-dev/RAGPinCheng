@@ -467,6 +467,36 @@ MEDIA_TRANSCRIPT_LIBRARY_STATEMENTS = (
          )""",
 )
 
+ASR_PROFILE_MANAGEMENT_STATEMENTS = (
+    """CREATE TABLE asr_profile_release_requests (
+        id TEXT PRIMARY KEY,
+        idempotency_key TEXT NOT NULL UNIQUE,
+        profile_id TEXT NOT NULL,
+        profile_config_hash TEXT NOT NULL,
+        profile_snapshot_json TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'requested'
+            CHECK (status IN ('requested','completed','rejected','cancelled')),
+        request_reason TEXT,
+        requested_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+    )""",
+    """CREATE INDEX idx_asr_profile_release_requests_created
+       ON asr_profile_release_requests(created_at DESC)""",
+    """CREATE TABLE asr_profile_audit_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        event_type TEXT NOT NULL CHECK (event_type IN ('release_requested')),
+        release_request_id TEXT REFERENCES asr_profile_release_requests(id) ON DELETE RESTRICT,
+        profile_id TEXT NOT NULL,
+        profile_config_hash TEXT NOT NULL,
+        actor_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        event_json TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+    )""",
+    """CREATE INDEX idx_asr_profile_audit_events_created
+       ON asr_profile_audit_events(created_at DESC)""",
+)
+
 SYSTEM_MAINTENANCE_STATEMENTS = (
     """CREATE TABLE maintenance_settings (
         singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
@@ -707,6 +737,7 @@ MIGRATIONS = (
     Migration(14, "managed_upload_tasks", UPLOAD_TASK_STATEMENTS),
     Migration(15, "answer_policy_settings_and_snapshots", ANSWER_POLICY_STATEMENTS),
     Migration(16, "media_transcript_library_catalog", MEDIA_TRANSCRIPT_LIBRARY_STATEMENTS),
+    Migration(17, "asr_profile_management", ASR_PROFILE_MANAGEMENT_STATEMENTS),
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 PHASE2_TABLES = frozenset(
@@ -748,6 +779,9 @@ CONTENT_PERMISSION_GROUP_TABLES = frozenset(
 CONTENT_FOLDER_REQUEST_TABLES = frozenset({"content_folder_requests"})
 SYSTEM_MAINTENANCE_TABLES = frozenset({"maintenance_settings", "maintenance_runs"})
 ANSWER_POLICY_TABLES = frozenset({"answer_policy_settings", "answer_policy_audit"})
+ASR_PROFILE_MANAGEMENT_TABLES = frozenset(
+    {"asr_profile_release_requests", "asr_profile_audit_events"}
+)
 
 
 def validate_system_content_permission_groups(
@@ -913,6 +947,8 @@ def has_pending_ddl(path: Path, *, base_tables: frozenset[str]) -> bool:
             validate_answer_policy_schema(conn)
         finally:
             conn.close()
+    if any(version == 16 for version, _name in applied) and not ASR_PROFILE_MANAGEMENT_TABLES.issubset(tables):
+        raise RuntimeError("migration_schema_mismatch")
     if any(version == 10 for version, _name in applied):
         conn = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
         try:
@@ -989,6 +1025,8 @@ def apply_all(conn: sqlite3.Connection, *, base_schema: str, applied_at: int) ->
             raise RuntimeError("migration_schema_mismatch")
         if 15 in applied_versions:
             validate_answer_policy_schema(conn)
+        if 16 in applied_versions and not ASR_PROFILE_MANAGEMENT_TABLES.issubset(tables):
+            raise RuntimeError("migration_schema_mismatch")
         validate_system_content_permission_groups(
             conn,
             SYSTEM_CONTENT_PERMISSION_GROUPS

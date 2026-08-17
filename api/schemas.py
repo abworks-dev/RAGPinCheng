@@ -764,6 +764,84 @@ class TranscriptionProfileDTO(BaseModel):
     auto_index: bool
 
 
+class AsrSegmentationDTO(BaseModel):
+    preset: Literal["natural", "balanced", "fine"]
+    max_segment_duration_ms: int | None
+    max_segment_chars: int
+    max_merge_gap_ms: int
+
+
+class AsrDecodeConfigDTO(BaseModel):
+    service_profile_id: str
+    model_name: str
+    beam_size: int
+    temperature: float
+    hotword_count: int
+    prompt_asset_id: str | None
+    service_profile_config_hash: str | None
+    qualification_policy: str | None
+
+
+class AsrManagedProfileDTO(BaseModel):
+    profile_id: str
+    display_name: str
+    description: str
+    profile_version: str
+    application_config_hash: str
+    qualification: str
+    admission: str
+    availability: str
+    unavailable_reason_code: str | None
+    release_eligible: bool
+    segmentation: AsrSegmentationDTO | None
+    terminology_rule_set: str | None
+    protected_terms: list[str]
+    decode: AsrDecodeConfigDTO
+
+
+class AsrServiceStatusDTO(BaseModel):
+    status: Literal["disabled", "healthy", "degraded", "unavailable"]
+    queue_depth: int | None = None
+    queue_limit: int | None = None
+    pause_reason: str | None = None
+
+
+class AsrProfileReleaseRequestDTO(BaseModel):
+    request_id: str
+    profile_id: str
+    profile_display_name: str
+    profile_config_hash: str
+    status: Literal["requested", "completed", "rejected", "cancelled"]
+    request_reason: str | None
+    requested_by_name: str | None
+    created_at: int
+    updated_at: int
+
+
+class AsrProfileAuditEventDTO(BaseModel):
+    event_id: int
+    event_type: Literal["release_requested"]
+    profile_id: str
+    profile_display_name: str
+    actor_name: str | None
+    created_at: int
+
+
+class AsrSettingsResponse(BaseModel):
+    service: AsrServiceStatusDTO
+    profiles: list[AsrManagedProfileDTO]
+    release_requests: list[AsrProfileReleaseRequestDTO]
+    audit_events: list[AsrProfileAuditEventDTO]
+
+
+class AsrProfileReleaseRequestCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    profile_id: str = Field(..., min_length=3, max_length=64)
+    request_idempotency_key: str = Field(..., min_length=36, max_length=36)
+    request_reason: str | None = Field(default=None, max_length=500)
+
+
 class TranscriptionJobDTO(BaseModel):
     job_id: str
     media_id: str

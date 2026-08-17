@@ -7,6 +7,18 @@ from typing import Protocol, TypeAlias
 
 from src.transcription.candidate import CandidateSegment
 from src.transcription.provider_protocol import ProviderFailure
+from src.transcription.service_profiles import (
+    FASTER_WHISPER_SERVICE_CONFIG,
+    QWEN3_ASR_SERVICE_CONFIG,
+    SENSEVOICE_SERVICE_CONFIG,
+    WHISPERX_FULL_DECODE_SERVICE_CONFIG,
+    WHISPERX_HOTWORDS_SERVICE_CONFIG,
+    WHISPERX_SERVICE_CONFIG,
+    WHISPERX_V2_FULL_DECODE_SERVICE_CONFIG,
+    WHISPERX_V2_HOTWORDS_SERVICE_CONFIG,
+    WHISPERX_V2_SERVICE_CONFIG,
+    ServiceProfileConfig,
+)
 from src.transcription.types import (
     ArtifactReference,
     ContractValidationError,
@@ -14,159 +26,6 @@ from src.transcription.types import (
     require_int,
     validate_language,
     validate_provider_key,
-)
-
-
-@dataclass(frozen=True, slots=True)
-class ServiceProfileConfig:
-    service_profile_id: str
-    provider_key: str
-    model_id: str
-    model_revision: str
-    language: str
-    aligner_model_id: str | None = None
-    aligner_model_revision: str | None = None
-    hotwords: tuple[str, ...] = ()
-    beam_size: int = 1
-    temperature: float = 0.0
-    initial_prompt: str = ""
-
-    def __post_init__(self) -> None:
-        validate_provider_key(self.service_profile_id, "service_profile_id")
-        validate_provider_key(self.provider_key)
-        expected = {
-            "funasr-sensevoice-small-v1": (
-                "funasr-sensevoice",
-                "iic/SenseVoiceSmall",
-                "7bf452403abd7353a300cd760f7adae7701c92c1",
-                "zh-CN",
-                None,
-                None,
-            ),
-            "faster-whisper-large-v3-turbo-v1": (
-                "faster-whisper",
-                "dropbox-dash/faster-whisper-large-v3-turbo",
-                "0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf",
-                "zh-CN",
-                None,
-                None,
-            ),
-            "qwen3-asr-06b-aligner-v1": (
-                "qwen3-asr",
-                "Qwen/Qwen3-ASR-0.6B",
-                "5eb144179a02acc5e5ba31e748d22b0cf3e303b0",
-                "zh-CN",
-                "Qwen/Qwen3-ForcedAligner-0.6B",
-                "c7cbfc2048c462b0d63a45797104fc9db3ad62b7",
-            ),
-            "whisperx-large-v3-zh-align-v1": (
-                "whisperx",
-                "Systran/faster-whisper-large-v3",
-                "53ecf83a5bedc5597eb8c8b34eac29e5345520ff",
-                "zh-CN",
-                None,
-                None,
-            ),
-        }.get(self.service_profile_id)
-        if expected is None:
-            raise ContractValidationError(
-                "unsupported_service_profile", "service_profile_id"
-            )
-        if self.provider_key != expected[0]:
-            raise ContractValidationError("provider_config_mismatch", "provider_key")
-        if self.model_id != expected[1]:
-            raise ContractValidationError("invalid_model_id", "model_id")
-        if self.model_revision != expected[2]:
-            raise ContractValidationError("invalid_model_revision", "model_revision")
-        validate_language(self.language)
-        if self.language != expected[3]:
-            raise ContractValidationError("invalid_language", "language")
-        if self.aligner_model_id != expected[4]:
-            raise ContractValidationError("invalid_aligner_model_id", "aligner_model_id")
-        if self.aligner_model_revision != expected[5]:
-            raise ContractValidationError(
-                "invalid_aligner_model_revision", "aligner_model_revision"
-            )
-        if type(self.hotwords) is not tuple:
-            raise ContractValidationError("invalid_hotwords", "hotwords")
-        for word in self.hotwords:
-            if type(word) is not str or not word.strip() or len(word) > 64:
-                raise ContractValidationError("invalid_hotword", "hotwords")
-
-
-SENSEVOICE_SERVICE_CONFIG = ServiceProfileConfig(
-    "funasr-sensevoice-small-v1",
-    "funasr-sensevoice",
-    "iic/SenseVoiceSmall",
-    "7bf452403abd7353a300cd760f7adae7701c92c1",
-    "zh-CN",
-)
-
-FASTER_WHISPER_SERVICE_CONFIG = ServiceProfileConfig(
-    "faster-whisper-large-v3-turbo-v1",
-    "faster-whisper",
-    "dropbox-dash/faster-whisper-large-v3-turbo",
-    "0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf",
-    "zh-CN",
-    hotwords=(
-        "GB 50016-2014",
-        "建筑设计防火规范",
-        "GB 50011-2010",
-        "建筑抗震设计规范",
-        "构件碰撞",
-        "净高分析",
-        "复核",
-        "建筑信息模型",
-        "钢结构",
-        "焊缝",
-        "螺栓",
-        "规范编号",
-    ),
-    beam_size=10,
-    temperature=0.0,
-    initial_prompt=(
-        "以下是嘈杂环境下的中文工程语音转写，建筑信息模型、BIM、"
-        "构件碰撞、净高分析、钢结构、焊缝、螺栓、规范编号等专业术语要准确识别。"
-    ),
-)
-
-QWEN3_ASR_SERVICE_CONFIG = ServiceProfileConfig(
-    "qwen3-asr-06b-aligner-v1",
-    "qwen3-asr",
-    "Qwen/Qwen3-ASR-0.6B",
-    "5eb144179a02acc5e5ba31e748d22b0cf3e303b0",
-    "zh-CN",
-    "Qwen/Qwen3-ForcedAligner-0.6B",
-    "c7cbfc2048c462b0d63a45797104fc9db3ad62b7",
-)
-
-WHISPERX_SERVICE_CONFIG = ServiceProfileConfig(
-    "whisperx-large-v3-zh-align-v1",
-    "whisperx",
-    "Systran/faster-whisper-large-v3",
-    "53ecf83a5bedc5597eb8c8b34eac29e5345520ff",
-    "zh-CN",
-)
-
-WHISPERX_HOTWORDS_SERVICE_CONFIG = ServiceProfileConfig(
-    "whisperx-large-v3-zh-align-v1",
-    "whisperx",
-    "Systran/faster-whisper-large-v3",
-    "53ecf83a5bedc5597eb8c8b34eac29e5345520ff",
-    "zh-CN",
-    hotwords=FASTER_WHISPER_SERVICE_CONFIG.hotwords,
-)
-
-WHISPERX_FULL_DECODE_SERVICE_CONFIG = ServiceProfileConfig(
-    "whisperx-large-v3-zh-align-v1",
-    "whisperx",
-    "Systran/faster-whisper-large-v3",
-    "53ecf83a5bedc5597eb8c8b34eac29e5345520ff",
-    "zh-CN",
-    hotwords=FASTER_WHISPER_SERVICE_CONFIG.hotwords,
-    beam_size=FASTER_WHISPER_SERVICE_CONFIG.beam_size,
-    temperature=0.1,
-    initial_prompt=FASTER_WHISPER_SERVICE_CONFIG.initial_prompt,
 )
 
 

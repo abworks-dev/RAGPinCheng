@@ -37,6 +37,7 @@ from .content_publication import (
 )
 from .routes import router as core_router
 from .routes_admin import router as admin_router
+from .routes_admin_asr import router as admin_asr_router
 from .routes_auth import router as auth_router
 from .routes_chat import router as chat_router
 from .routes_content import router as content_router
@@ -189,6 +190,7 @@ app.include_router(auth_router, prefix="/api")
 app.include_router(chat_router, prefix="/api")
 app.include_router(content_router, prefix="/api")
 app.include_router(admin_router, prefix="/api")
+app.include_router(admin_asr_router, prefix="/api")
 app.include_router(media_router, prefix="/api")
 app.include_router(media_transcript_router, prefix="/api")
 app.include_router(transcription_router, prefix="/api")

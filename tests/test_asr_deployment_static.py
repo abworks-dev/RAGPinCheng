@@ -49,7 +49,7 @@ def test_active_asr_restart_is_identity_bound_and_reversible():
     assert "restore-stopped-after-cross-node-failure" in workflow
     assert "faster-whisper-large-v3-turbo-v1" in workflow
     assert "funasr-sensevoice-small-v1" in workflow
-    assert "whisperx-large-v3-zh-align-v1" in workflow
+    assert "whisperx-large-v3-zh-align-v2" in workflow
     assert "deploy-asr.ps1" not in workflow
     assert "promote-asr-candidate.ps1" not in workflow
 
@@ -162,7 +162,7 @@ def test_faster_whisper_production_evidence_treats_runner_exit_as_informational(
 def test_faster_whisper_qualification_accepts_only_pinned_production_profile_sets():
     qualification = read("scripts/qualify-faster-whisper-production.ps1")
 
-    assert '$whisperXProfile = "whisperx-large-v3-zh-align-v1"' in qualification
+    assert '$whisperXProfile = "whisperx-large-v3-zh-align-v2"' in qualification
     assert '"$fasterWhisperProfile`n$senseVoiceProfile`n$whisperXProfile"' in qualification
     assert "Production ASR capabilities do not match a pinned profile contract" in qualification
 
@@ -184,6 +184,8 @@ def test_asr_runtime_and_deployment_contracts_are_engine_generic_and_fail_closed
     assert contract.count('"scripts/asr_model_download.py"') == 2
     assert '"scripts/prepare_qwen3_asr_models.py"' in contract
     assert '"scripts/run_whisperx_cuda_smoke.py"' in contract
+    assert '"prompts/asr_engineering_zh_v1.md"' in contract
+    assert '"prompts/asr_engineering_zh_v2.md"' in contract
     assert '"scripts/run_whisperx_qualification.py"' in contract
 
     qualifications = {
@@ -2106,7 +2108,7 @@ def test_asr_candidate_release_contract_is_engine_generic_and_path_safe():
     assert release.count("enabled = $true") == 2
     assert 'enabled = $false' in release
     assert 'service_profiles = @("faster-whisper-large-v3-turbo-v1")' in release
-    assert 'service_profiles = @("whisperx-large-v3-zh-align-v1")' in release
+    assert 'service_profiles = @("whisperx-large-v3-zh-align-v2")' in release
     assert 'profiles = @("funasr-sensevoice-small-v1")' in release
     assert "Get-AsrReleaseExpectedProfiles" in release
     assert "WhisperX release requires the admitted faster-whisper engine" in release
@@ -2199,7 +2201,7 @@ def test_whisperx_candidate_requires_two_qualification_identities_and_stays_inac
         assert setting in deploy
     assert 'schema_version = "production-asr-shared-wheel-key/3"' in deploy
     assert 'engine = "whisperx"' in deploy
-    assert '"whisperx-large-v3-zh-align-v1"' in deploy
+    assert '"whisperx-large-v3-zh-align-v2"' in deploy
     assert 'evidence_adapter = "whisperx-r3/1"' in contract
     assert '"scripts/whisperx-production-evidence.ps1"' in contract
     assert "Get-QualifiedWhisperXEvidence" in preflight

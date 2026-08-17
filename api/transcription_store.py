@@ -46,6 +46,8 @@ from src.transcription.types import (
     ReviewStatus,
     TranscriptionJobStage,
     TranscriptionJobStatus,
+    TerminologyCorrectionConfig,
+    TranscriptSegmentationConfig,
     canonical_json_bytes,
     reject_unknown_fields,
     require_int,
@@ -79,7 +81,7 @@ def _load_json(text: object, field: str) -> object:
 
 
 def _execution_from_json(data: object) -> TranscriptionExecutionConfig:
-    allowed = {
+    required = {
         "profile_id",
         "provider_key",
         "profile_definition_version",
@@ -93,7 +95,16 @@ def _execution_from_json(data: object) -> TranscriptionExecutionConfig:
         "formatter_version",
         "execution_fingerprint",
     }
-    obj = reject_unknown_fields(data, allowed, "execution_config")
+    optional = {"segmentation_config", "terminology_config"}
+    if type(data) is not dict:
+        raise ContractValidationError("invalid_object", "execution_config")
+    unknown = set(data) - required - optional
+    missing = required - set(data)
+    if unknown:
+        raise ContractValidationError("unknown_field", f"execution_config.{sorted(unknown)[0]}")
+    if missing:
+        raise ContractValidationError("missing_field", f"execution_config.{sorted(missing)[0]}")
+    obj = data
     return TranscriptionExecutionConfig(
         obj["profile_id"],
         obj["provider_key"],
@@ -107,6 +118,16 @@ def _execution_from_json(data: object) -> TranscriptionExecutionConfig:
         obj["normalizer_version"],
         obj["formatter_version"],
         obj["execution_fingerprint"],
+        (
+            TranscriptSegmentationConfig.from_json_dict(obj["segmentation_config"])
+            if "segmentation_config" in obj
+            else None
+        ),
+        (
+            TerminologyCorrectionConfig.from_json_dict(obj["terminology_config"])
+            if "terminology_config" in obj
+            else None
+        ),
     )
 
 

@@ -29,6 +29,8 @@ _WARNING_ORDER = {
     TranscriptWarningCode.segment_overlap: 2,
     TranscriptWarningCode.short_segment_merged: 3,
     TranscriptWarningCode.long_segment_split: 4,
+    TranscriptWarningCode.terminology_corrected: 5,
+    TranscriptWarningCode.duration_segment_split: 6,
 }
 
 

@@ -14,7 +14,7 @@ from typing import Any, Callable
 ASR_API_VERSION = "asr-service/1"
 SENSEVOICE_PROFILE = "funasr-sensevoice-small-v1"
 FASTER_WHISPER_PROFILE = "faster-whisper-large-v3-turbo-v1"
-WHISPERX_PROFILE = "whisperx-large-v3-zh-align-v1"
+WHISPERX_PROFILE = "whisperx-large-v3-zh-align-v2"
 ALLOWED_PROFILE_SETS = {
     (SENSEVOICE_PROFILE,),
     (FASTER_WHISPER_PROFILE, SENSEVOICE_PROFILE),

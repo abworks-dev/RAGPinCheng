@@ -41,6 +41,8 @@ from src.transcription.types import (
     ArtifactKind,
     ArtifactReference,
     NormalizerConfig,
+    TerminologyCorrectionConfig,
+    TranscriptSegmentationConfig,
     ProfileAdmission,
     ProfileQualification,
     PublicationIndexStatus,
@@ -98,6 +100,8 @@ def make_profile(
     admission: ProfileAdmission = ProfileAdmission.enabled,
     release_policy: ReleasePolicy | None = None,
     normalizer_config: NormalizerConfig | None = None,
+    segmentation_config: TranscriptSegmentationConfig | None = None,
+    terminology_config: TerminologyCorrectionConfig | None = None,
 ) -> TranscriptionProfileDefinition:
     if release_policy is None:
         release_policy = (
@@ -115,6 +119,8 @@ def make_profile(
         qualification=qualification,
         admission=admission,
         release_policy=release_policy,
+        segmentation_config=segmentation_config,
+        terminology_config=terminology_config,
     )
 
 

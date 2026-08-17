@@ -61,9 +61,9 @@ def test_profile_admission_is_verified_without_importing_transcription_package(
 ):
     catalog = tmp_path / "profile_catalog.py"
     catalog.write_text(
-        "WHISPERX_PROFILE_ID = 'whisperx-large-v3-zh-align-experimental-v1'\n"
+        "WHISPERX_BALANCED_PROFILE_ID = 'whisperx-large-v3-zh-balanced-v2'\n"
         "TranscriptionProfileDefinition.create(\n"
-        "    profile_id=WHISPERX_PROFILE_ID,\n"
+        "    profile_id=WHISPERX_BALANCED_PROFILE_ID,\n"
         "    admission=ProfileAdmission.disabled,\n"
         ")\n",
         encoding="utf-8",
