@@ -479,6 +479,8 @@ def convert_pptx_to_pdf(path: Path) -> Path:
             raise RuntimeError(
                 f"PPTX to PDF conversion failed (HTTP {resp.status_code}): {resp.text[:200]}"
             )
+        if not resp.content.startswith(b"%PDF-"):
+            raise RuntimeError("PPTX to PDF conversion failed: invalid PDF output")
 
     # Save the PDF to a temp location next to the source
     pdf_path = path.with_suffix(".preview.pdf")
