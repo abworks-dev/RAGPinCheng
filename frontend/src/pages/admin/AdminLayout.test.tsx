@@ -78,7 +78,7 @@ describe("AdminLayout route boundary", () => {
     renderAdmin();
     fireEvent.click(screen.getByRole("button", { name: "展开管理功能" }));
     const navigation = screen.getByRole("navigation", { name: "管理功能" });
-    expect(within(navigation).getAllByRole("link")).toHaveLength(10);
+    expect(within(navigation).getAllByRole("link")).toHaveLength(9);
     fireEvent.click(within(navigation).getByRole("link", { name: "分类管理" }));
     expect(screen.getByText("分类设置页面内容")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "展开管理功能" })).toBeInTheDocument();
@@ -91,7 +91,7 @@ describe("AdminLayout route boundary", () => {
     expect(within(navigation).getByText("内容管理")).toBeInTheDocument();
     expect(within(navigation).getByText("运营管理")).toBeInTheDocument();
     expect(within(navigation).getAllByRole("link").map((link) => link.textContent?.trim())).toEqual([
-      "系统概览", "系统维护", "回答策略", "资料管理", "分类管理", "视频管理", "索引任务", "用户管理", "对话记录", "用户反馈",
+      "系统概览", "系统维护", "回答策略", "资料管理", "分类管理", "视频管理", "用户管理", "对话记录", "用户反馈",
     ]);
     expect(screen.getByRole("link", { name: "对话记录" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByText("对话页面内容")).toBeInTheDocument();
@@ -118,7 +118,7 @@ describe("AdminLayout route boundary", () => {
     expect(await screen.findByText("资料库页面内容")).toBeInTheDocument();
   });
 
-  it("shows index navigation only with index view permission", async () => {
+  it("keeps index tasks inside content management and preserves the legacy entry", async () => {
     mocks.user = {
       real_name: "测试资料员",
       employee_id: "editor-test",
@@ -135,8 +135,8 @@ describe("AdminLayout route boundary", () => {
       content_permissions: ["workspace.view", "item.view", "category.view", "index.view"],
     };
     renderAdmin("index");
-    expect(screen.getByRole("link", { name: "索引任务" })).toBeInTheDocument();
-    expect(screen.getByText("索引任务页面内容")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "索引任务" })).not.toBeInTheDocument();
+    expect(await screen.findByText("资料库页面内容")).toBeInTheDocument();
   });
 
   it("returns users without workspace permissions to chat", async () => {

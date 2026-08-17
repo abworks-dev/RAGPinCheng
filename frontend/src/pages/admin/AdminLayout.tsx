@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import {
   FileText,
   LayoutDashboard,
-  ListChecks,
   Menu,
   MessageSquareQuote,
   MessagesSquare,
@@ -24,7 +23,7 @@ import { useAuth } from "../../context/AuthContext";
 import { contentWorkspaceTabs, workspaceLabel } from "../../lib/workspace-access";
 import { Navigate, NavLink, Outlet, useLocation } from "react-router-dom";
 
-type Tab = "users" | "conversations" | "corpus" | "managed" | "categories" | "media" | "stats" | "feedback" | "maintenance" | "answer-policy";
+type Tab = "users" | "conversations" | "managed" | "categories" | "media" | "stats" | "feedback" | "maintenance" | "answer-policy";
 
 type TabDefinition = { key: Tab; label: string; path: string };
 
@@ -40,7 +39,6 @@ const navigationIcons: Record<Tab, LucideIcon> = {
   managed: FileText,
   categories: Tags,
   media: Video,
-  corpus: ListChecks,
   users: Users,
   conversations: MessagesSquare,
   feedback: MessageSquareQuote,
@@ -58,7 +56,6 @@ const adminNavigation: NavigationGroup[] = [
       { key: "managed", label: "资料管理", path: "content" },
       { key: "categories", label: "分类管理", path: "categories" },
       { key: "media", label: "视频管理", path: "media" },
-      { key: "corpus", label: "索引任务", path: "index" },
     ],
   },
   {
@@ -114,6 +111,9 @@ export function AdminLayout() {
   const currentPath = location.pathname.replace(/^\/admin\/?/, "").split("/")[0];
   const currentTab = tabs.find((tab) => tab.path === currentPath);
   if (user && tabs.length === 0) return <Navigate to="/" replace />;
+  if (user && currentPath === "index" && (isAdmin || permissions.includes("index.view"))) {
+    return <Navigate to="/admin/content?view=index" replace />;
+  }
   if (user && currentPath && !currentTab) return <Navigate to={`/admin/${tabs[0].path}`} replace />;
 
   return (

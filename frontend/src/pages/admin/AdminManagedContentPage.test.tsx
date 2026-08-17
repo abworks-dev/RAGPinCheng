@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   upload: vi.fn(),
   uploadTasks: vi.fn(),
   uploadTask: vi.fn(),
+  indexJobs: vi.fn(),
   createCategory: vi.fn(),
   moveContent: vi.fn(),
   renameContent: vi.fn(),
@@ -73,6 +74,7 @@ vi.mock("../../api/client", () => ({
     uploadManagedContent: mocks.upload,
     managedUploadTasks: mocks.uploadTasks,
     managedUploadTask: mocks.uploadTask,
+    managedContentIndexJobs: mocks.indexJobs,
     createManagedCategory: mocks.createCategory,
     moveManagedContent: mocks.moveContent,
     renameManagedContent: mocks.renameContent,
@@ -187,6 +189,7 @@ describe("AdminManagedContentPage", () => {
     mocks.restoreContent.mockResolvedValue({ item_id: "item-1", version_id: "version-1", restored_status: "approved" });
     mocks.uploadTasks.mockResolvedValue({ tasks: [], total: 0, status_counts: {} });
     mocks.uploadTask.mockResolvedValue({});
+    mocks.indexJobs.mockResolvedValue({ jobs: [], total: 0, status_counts: {} });
     window.history.replaceState({}, "", "/admin/content");
     mocks.bulkDownload.mockResolvedValue({ blob: new Blob(["zip"]), filename: "资料批量下载.zip" });
     mocks.downloadFile.mockResolvedValue({ blob: new Blob(["file"]), filename: "standard.pdf" });
@@ -464,6 +467,41 @@ describe("AdminManagedContentPage", () => {
       ),
     ).toBe(true);
     expect(screen.queryByRole("button", { name: "批量操作" })).not.toBeInTheDocument();
+  });
+
+  it("places index tasks after upload tasks and keeps the selected view in the URL", async () => {
+    mocks.permissions = [...PUBLISHER_PERMISSIONS, "item.upload"];
+    render(<AdminManagedContentPage />);
+
+    const tabs = screen.getByRole("tablist", { name: "资料视图" });
+    expect(within(tabs).getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
+      "资料库", "回收站", "上传任务", "索引任务",
+    ]);
+
+    fireEvent.click(within(tabs).getByRole("tab", { name: "索引任务" }));
+    expect(window.location.search).toBe("?view=index");
+    expect(screen.getByRole("heading", { name: "资料管理", level: 1 })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "索引任务", level: 2 })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "索引任务" })).toHaveAttribute("aria-selected", "true");
+    await waitFor(() => expect(mocks.indexJobs).toHaveBeenCalled());
+  });
+
+  it("restores a permitted index view from a direct URL", async () => {
+    mocks.permissions = PUBLISHER_PERMISSIONS;
+    window.history.replaceState({}, "", "/admin/content?view=index");
+    render(<AdminManagedContentPage />);
+
+    expect(await screen.findByRole("heading", { name: "索引任务", level: 2 })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "索引任务" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("falls back to the library when index view permission is missing", async () => {
+    window.history.replaceState({}, "", "/admin/content?view=index");
+    render(<AdminManagedContentPage />);
+
+    await waitFor(() => expect(window.location.search).toBe(""));
+    expect(screen.getByRole("tab", { name: "资料库" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.queryByRole("heading", { name: "索引任务" })).not.toBeInTheDocument();
   });
 
   it("switches the active top-level folder and its upload target", async () => {

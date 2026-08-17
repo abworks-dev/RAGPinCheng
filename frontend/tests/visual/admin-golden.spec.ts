@@ -21,7 +21,8 @@ for (const [navigationLabel, heading, slug] of [["资料管理", "资料管理",
       await expect(mobileNavigation).toBeVisible();
       await mobileNavigation.click();
     }
-    await page.getByRole("link", { name: navigationLabel, exact: true }).click();
+    await page.getByRole("link", { name: navigationLabel === "索引任务" ? "资料管理" : navigationLabel, exact: true }).click();
+    if (navigationLabel === "索引任务") await page.getByRole("tab", { name: "索引任务", exact: true }).click();
     await expect(page.getByRole("heading", { name: heading })).toBeVisible();
     const viewport = page.viewportSize()!;
     await expect(page).toHaveScreenshot(`${slug}-normal-${viewport.width}x${viewport.height}.png`, { fullPage: true });
@@ -111,7 +112,8 @@ test("索引任务区域 accepted golden", async ({ page }) => {
   if (page.viewportSize()!.width < 1024) {
     await page.getByRole("button", { name: "展开管理功能" }).click();
   }
-  await page.getByRole("link", { name: "索引任务", exact: true }).click();
+  await page.getByRole("link", { name: "资料管理", exact: true }).click();
+  await page.getByRole("tab", { name: "索引任务", exact: true }).click();
   const managedActivity = page.locator('[aria-labelledby="managed-index-title"]');
   await expect(page.getByText("文档解析服务请求失败。", { exact: true })).toBeVisible();
   const viewport = page.viewportSize()!;
