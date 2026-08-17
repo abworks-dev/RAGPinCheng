@@ -88,7 +88,7 @@ test("资料管理视频转录稿 accepted golden", async ({ page }) => {
 
   const title = "BIM 项目交付培训视频（合成长标题用于响应式检查）";
   await expect(page.getByText(title, { exact: true }).filter({ visible: true })).toBeVisible();
-  await expect(page.getByText("视频转录稿", { exact: true }).filter({ visible: true })).toBeVisible();
+  await expect(page.getByText("视频转录稿", { exact: true }).filter({ visible: true }).first()).toBeVisible();
   await expect(page.getByText("有新转录稿待处理", { exact: true }).filter({ visible: true })).toBeVisible();
   await expect(page.getByRole("button", { name: `播放“${title}”` }).filter({ visible: true })).toBeVisible();
   await expect(page.getByRole("link", { name: `在视频管理中打开“${title}”` }).filter({ visible: true })).toHaveAttribute(

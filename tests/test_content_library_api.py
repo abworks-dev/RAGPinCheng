@@ -1215,6 +1215,42 @@ def test_managed_content_page_supports_filters_counts_and_category_paths(content
     assert body["items"][0]["category_path"] == "03 公司内部标准"
 
 
+def test_managed_content_page_filters_and_sorts_file_types_before_pagination(content_api):
+    client, sessions, _queued, _db_path = content_api
+    auth = _auth(sessions, "organizer", csrf=True)
+    for filename, content_type in (
+        ("z-markdown.md", "text/markdown"),
+        ("a-document.pdf", "application/pdf"),
+    ):
+        uploaded = client.post(
+            "/api/admin/content/uploads",
+            data={"category_id": "cat-03"},
+            files=[("files", (filename, b"document", content_type))],
+            **auth,
+        )
+        assert uploaded.status_code == 200
+
+    pdf_only = client.get(
+        "/api/admin/content/items-page?category_id=cat-03&doc_type=pdf",
+        **_auth(sessions, "organizer"),
+    )
+    assert pdf_only.status_code == 200
+    assert pdf_only.json()["total"] == 1
+    assert pdf_only.json()["items"][0]["doc_type"] == "pdf"
+
+    ascending = client.get(
+        "/api/admin/content/items-page?category_id=cat-03&sort_by=doc_type&sort_direction=asc&limit=1",
+        **_auth(sessions, "organizer"),
+    ).json()
+    descending = client.get(
+        "/api/admin/content/items-page?category_id=cat-03&sort_by=doc_type&sort_direction=desc&limit=1",
+        **_auth(sessions, "organizer"),
+    ).json()
+    assert ascending["total"] == descending["total"] == 2
+    assert ascending["items"][0]["doc_type"] == "pdf"
+    assert descending["items"][0]["doc_type"] == "markdown"
+
+
 def test_review_requires_rejection_reason_and_exposes_latest_audit(content_api):
     client, sessions, _queued, _db_path = content_api
     organizer_auth = _auth(sessions, "organizer", csrf=True)

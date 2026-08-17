@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { AlertTriangle, ArchiveRestore, ArrowDown, ArrowUp, ArrowUpDown, Check, CheckCircle2, ChevronDown, ChevronRight, Download, ExternalLink, Eye, FileUp, Film, Folder, FolderInput, FolderPlus, Info, ListChecks, Pencil, RefreshCw, RotateCcw, Rocket, Search, Send, SlidersHorizontal, Trash2, Upload, X, XCircle } from "lucide-react";
+import { AlertTriangle, ArchiveRestore, ArrowDown, ArrowUp, ArrowUpDown, Captions, Check, CheckCircle2, ChevronDown, ChevronRight, Download, ExternalLink, Eye, FileCode2, FileSpreadsheet, FileText, FileType2, FileUp, Film, Folder, FolderInput, FolderPlus, Info, ListChecks, Pencil, Presentation, RefreshCw, RotateCcw, Rocket, Search, Send, SlidersHorizontal, Trash2, Upload, X, XCircle } from "lucide-react";
 import { adminContentApi } from "../../api/admin/content";
 import { Badge } from "../../components/ui/badge";
 import { CategoryTreePicker } from "../../components/admin/CategoryTreePicker";
@@ -34,7 +34,7 @@ const PAGE_SIZE = 25;
 const PAGE_SIZE_OPTIONS = [25, 50, 100];
 const BULK_LIMIT = 20;
 const BULK_DOWNLOAD_TOAST_ID = "managed-content-bulk-download";
-type SortKey = "title" | "updatedAt" | "status" | "source";
+type SortKey = "docType" | "title" | "updatedAt" | "status" | "source";
 type SortDirection = "asc" | "desc";
 type ManagedContentView = "library" | "trash" | "uploads" | "index";
 
@@ -229,6 +229,30 @@ const sourceLabel: Record<string, string> = {
   web: "网页上传", server: "后台导入", legacy: "历史迁移", transcription: "视频转写",
 };
 
+const documentTypeOptions = [
+  ["pdf", "PDF"],
+  ["docx", "Word"],
+  ["xlsx", "Excel"],
+  ["pptx", "PPT"],
+  ["markdown", "Markdown"],
+  ["transcript", "视频转录稿"],
+  ["other", "其他"],
+] as const;
+
+function ManagedItemType({ docType, folder = false }: { docType?: string; folder?: boolean }) {
+  if (folder) return <div className="flex w-20 flex-col items-center gap-1 text-center text-ui-xs font-medium text-muted-foreground"><Folder className="size-6 text-primary" aria-hidden="true" /><span>文件夹</span></div>;
+  const definition = ({
+    pdf: ["PDF", FileText, "text-destructive"],
+    docx: ["Word", FileType2, "text-primary"],
+    xlsx: ["Excel", FileSpreadsheet, "text-success"],
+    pptx: ["PPT", Presentation, "text-warning"],
+    markdown: ["Markdown", FileCode2, "text-foreground"],
+    transcript: ["视频转录稿", Captions, "text-primary"],
+  } as const)[docType || ""] || (["其他", FileText, "text-muted-foreground"] as const);
+  const [label, Icon, color] = definition;
+  return <div className="flex w-20 flex-col items-center gap-1 text-center text-ui-xs font-medium" title={label}><Icon className={`size-6 ${color}`} aria-hidden="true" /><span className="max-w-full break-words leading-tight">{label}</span></div>;
+}
+
 function statusVariant(status: string) {
   if (status === "published") return "success" as const;
   if (status.includes("failed") || status === "rejected") return "destructive" as const;
@@ -248,12 +272,9 @@ function ManagedItemIdentity({ item }: { item: ManagedContentItem }) {
     ? [formatMediaDuration(item.media_duration_ms), item.media_file_size != null ? formatUploadSize(item.media_file_size) : null].filter(Boolean)
     : [];
   return <div className="min-w-0">
-    <div className="flex items-start gap-2">
-      {isMediaTranscript && <Film className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden="true" />}
-      <p className="break-words font-medium">{item.title}</p>
-    </div>
+    <p className="break-words font-medium">{item.title}</p>
     <p className="mt-0.5 break-all text-ui-xs text-muted-foreground">{item.original_filename} · v{item.version_number}{mediaDetails.length ? ` · ${mediaDetails.join(" · ")}` : ""}</p>
-    {isMediaTranscript && <div className="mt-2 flex flex-wrap gap-1.5"><Badge variant="secondary">视频转录稿</Badge>{item.has_pending_revision && <Badge variant="warning">有新转录稿待处理</Badge>}</div>}
+    {isMediaTranscript && item.has_pending_revision && <div className="mt-2 flex flex-wrap gap-1.5"><Badge variant="warning">有新转录稿待处理</Badge></div>}
   </div>;
 }
 
@@ -483,7 +504,7 @@ function ManagedContentSearchFilters({
     </div>
     {open && <div id={panelId} role="dialog" aria-modal="false" aria-label="搜索筛选" className="absolute inset-x-0 top-full z-dropdown mt-2 rounded-ui-lg border border-border bg-popover p-3 text-popover-foreground shadow-overlay">
       <div className="grid gap-3 sm:grid-cols-3">
-        <label className="space-y-1 text-ui-xs text-muted-foreground"><span>类型</span><Select className="h-control-sm" value={kindFilter} onChange={(event) => onKindFilterChange(event.target.value)}><option value="">全部类型</option><option value="document">文档</option><option value="media_transcript">视频转录稿</option></Select></label>
+        <label className="space-y-1 text-ui-xs text-muted-foreground"><span>类型</span><Select className="h-control-sm" value={kindFilter} onChange={(event) => onKindFilterChange(event.target.value)}><option value="">全部类型</option>{documentTypeOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</Select></label>
         <label className="space-y-1 text-ui-xs text-muted-foreground"><span>状态</span><Select className="h-control-sm" value={statusFilter} onChange={(event) => onStatusFilterChange(event.target.value)}><option value="">全部状态</option>{Object.entries(statusLabel).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</Select></label>
         <label className="space-y-1 text-ui-xs text-muted-foreground"><span>来源</span><Select className="h-control-sm" value={sourceFilter} onChange={(event) => onSourceFilterChange(event.target.value)}><option value="">全部来源</option>{Object.entries(sourceLabel).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</Select></label>
       </div>
@@ -612,7 +633,9 @@ export function AdminManagedContentPage() {
           category_id: currentFolderId || undefined,
           lifecycle_status: statusFilter || undefined,
           source_origin: sourceFilter || undefined,
-          content_kind: kindFilter === "document" || kindFilter === "media_transcript" ? kindFilter : undefined,
+          doc_type: kindFilter ? kindFilter as "pdf" | "docx" | "xlsx" | "pptx" | "markdown" | "transcript" | "other" : undefined,
+          sort_by: sort?.key === "docType" ? "doc_type" : undefined,
+          sort_direction: sort?.key === "docType" ? sort.direction : undefined,
           limit: pageSize,
           offset: page * pageSize,
         }),
@@ -632,7 +655,7 @@ export function AdminManagedContentPage() {
     } finally {
       setLoading(false); setRefreshing(false);
     }
-  }, [currentFolderId, page, pageSize, query, sourceFilter, statusFilter, kindFilter]);
+  }, [currentFolderId, page, pageSize, query, sourceFilter, statusFilter, kindFilter, sort]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -847,14 +870,15 @@ export function AdminManagedContentPage() {
   }, [childFolders, sort]);
   const sortedItems = useMemo(() => {
     if (!sort) return items;
+    if (sort.key === "docType") return items;
     return [...items].sort((left, right) => {
-      const comparison = sort.key === "updatedAt"
-        ? (left.updated_at || 0) - (right.updated_at || 0)
-        : ({
-          title: left.title.localeCompare(right.title, "zh-CN", { numeric: true, sensitivity: "base" }),
-          status: (statusLabel[left.lifecycle_status] || left.lifecycle_status).localeCompare(statusLabel[right.lifecycle_status] || right.lifecycle_status, "zh-CN", { numeric: true, sensitivity: "base" }),
-          source: (sourceLabel[left.source_origin] || left.source_origin).localeCompare(sourceLabel[right.source_origin] || right.source_origin, "zh-CN", { numeric: true, sensitivity: "base" }),
-        })[sort.key];
+      let comparison: number;
+      switch (sort.key) {
+        case "updatedAt": comparison = (left.updated_at || 0) - (right.updated_at || 0); break;
+        case "status": comparison = (statusLabel[left.lifecycle_status] || left.lifecycle_status).localeCompare(statusLabel[right.lifecycle_status] || right.lifecycle_status, "zh-CN", { numeric: true, sensitivity: "base" }); break;
+        case "source": comparison = (sourceLabel[left.source_origin] || left.source_origin).localeCompare(sourceLabel[right.source_origin] || right.source_origin, "zh-CN", { numeric: true, sensitivity: "base" }); break;
+        default: comparison = left.title.localeCompare(right.title, "zh-CN", { numeric: true, sensitivity: "base" });
+      }
       return sort.direction === "asc" ? comparison : -comparison;
     });
   }, [items, sort]);
@@ -1375,16 +1399,16 @@ export function AdminManagedContentPage() {
       <div data-testid="managed-content-drop-list" className="relative" onDragEnter={handleListDragEnter} onDragOver={handleListDragOver} onDragLeave={handleListDragLeave} onDrop={handleListDrop}>
       {listDropActive && <div data-testid="managed-content-drop-overlay" className="pointer-events-none absolute inset-1 z-sticky rounded-ui-lg border-2 border-dashed border-primary/70 bg-background/70 text-center shadow-focus backdrop-blur-[1px]" role="status" aria-live="polite"><div className="absolute left-1/2 flex w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-3" style={{ top: listDropPromptTop }}><span className="flex size-12 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-surface" aria-hidden="true"><Upload className="size-6" /></span><div className="space-y-1"><p className="break-words text-ui-base font-semibold">松开以上传文件到“{currentFolderDropLabel}”</p><p className="text-ui-xs text-muted-foreground">也支持拖入文件夹；支持 PDF、Markdown、Word、Excel 和 PPT 文件</p></div></div></div>}
       {loading ? <LoadingState className="min-h-48 border-x-0 border-b-0" label="正在加载资料…" /> : !error && items.length === 0 && childFolders.length === 0 ? <EmptyState className="min-h-56 rounded-none border-x-0 border-b-0 sm:min-h-64" title="没有符合条件的资料" description="请调整筛选条件或上传新资料。" /> : !error && <>
-        <div className="hidden overflow-x-auto border-t border-border lg:block"><table className="w-full min-w-[68rem] text-ui-sm"><thead className="border-b border-border bg-surface-muted text-left text-muted-foreground"><tr><th className="w-12 px-3 py-3"><Checkbox aria-label="选择当前页前20份资料" checked={allSelected} onChange={toggleAll} /></th>{([ ["title", "资料"], ["updatedAt", "更新时间"], ["status", "状态"], ["source", "来源"] ] as [SortKey, string][]).map(([key, label]) => <th key={key} aria-sort={sort?.key === key ? sort.direction === "asc" ? "ascending" : "descending" : "none"} className="px-3 py-3 font-medium"><button type="button" className="inline-flex items-center gap-1 rounded px-1 py-0.5 hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => toggleSort(key)}>{label}{sortIcon(key)}</button></th>)}<th className="px-3 py-3 text-right font-medium">操作</th></tr></thead><tbody className="divide-y divide-border">
+        <div className="hidden overflow-x-auto border-t border-border lg:block"><table className="w-full min-w-[74rem] text-ui-sm"><thead className="border-b border-border bg-surface-muted text-left text-muted-foreground"><tr><th className="w-12 px-3 py-3"><Checkbox aria-label="选择当前页前20份资料" checked={allSelected} onChange={toggleAll} /></th>{([ ["docType", "类型"], ["title", "资料"], ["updatedAt", "更新时间"], ["status", "状态"], ["source", "来源"] ] as [SortKey, string][]).map(([key, label]) => <th key={key} aria-sort={sort?.key === key ? sort.direction === "asc" ? "ascending" : "descending" : "none"} className={key === "docType" ? "w-24 px-3 py-3 text-center font-medium" : "px-3 py-3 font-medium"}><button type="button" className="inline-flex items-center gap-1 rounded px-1 py-0.5 hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => toggleSort(key)}>{label}{sortIcon(key)}</button></th>)}<th className="px-3 py-3 text-right font-medium">操作</th></tr></thead><tbody className="divide-y divide-border">
           {sortedChildFolders.map((folder) => {
             const folderLabel = `${folder.display_code} ${folder.display_name}`;
-            return <tr key={folder.id} data-testid={`managed-folder-row-${folder.id}`} className={`cursor-pointer transition-colors duration-normal hover:bg-surface-muted/60 ${draggedItem ? "bg-primary/5 outline outline-1 -outline-offset-1 outline-primary/50" : ""}`} onClick={() => setCurrentFolderId(folder.id)} onDragOver={(event) => { if (draggedItem) { event.preventDefault(); event.stopPropagation(); } }} onDrop={(event) => { if (!draggedItem) return; event.preventDefault(); event.stopPropagation(); void moveItemTo(draggedItem, folder.id); }}><td className="px-3 py-3"><Folder className="mx-auto size-5 text-primary" aria-hidden="true" /></td><td className="max-w-xs px-3 py-3"><button type="button" className="block max-w-full rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setCurrentFolderId(folder.id)}><span className="block break-words font-medium">{folderLabel}</span><span className="mt-0.5 block text-ui-xs text-muted-foreground">{folder.item_count} 份直接资料</span></button></td><td className="whitespace-nowrap px-3 py-3 tabular-nums">{formatManagedUpdatedAt(folder.updated_at)}</td><td className="px-3 py-3 text-muted-foreground">—</td><td className="px-3 py-3 text-muted-foreground">—</td><td className="px-3 py-3 text-right"><IconButton label={`打开文件夹“${folderLabel}”`} className="border border-border" onClick={() => setCurrentFolderId(folder.id)}><ChevronRight className="size-4" /></IconButton></td></tr>;
+            return <tr key={folder.id} data-testid={`managed-folder-row-${folder.id}`} className={`cursor-pointer transition-colors duration-normal hover:bg-surface-muted/60 ${draggedItem ? "bg-primary/5 outline outline-1 -outline-offset-1 outline-primary/50" : ""}`} onClick={() => setCurrentFolderId(folder.id)} onDragOver={(event) => { if (draggedItem) { event.preventDefault(); event.stopPropagation(); } }} onDrop={(event) => { if (!draggedItem) return; event.preventDefault(); event.stopPropagation(); void moveItemTo(draggedItem, folder.id); }}><td className="px-3 py-3" /><td className="px-3 py-3"><ManagedItemType folder /></td><td className="max-w-xs px-3 py-3"><button type="button" className="block max-w-full rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setCurrentFolderId(folder.id)}><span className="block break-words font-medium">{folderLabel}</span><span className="mt-0.5 block text-ui-xs text-muted-foreground">{folder.item_count} 份直接资料</span></button></td><td className="whitespace-nowrap px-3 py-3 tabular-nums">{formatManagedUpdatedAt(folder.updated_at)}</td><td className="px-3 py-3 text-muted-foreground">—</td><td className="px-3 py-3 text-muted-foreground">—</td><td className="px-3 py-3 text-right"><IconButton label={`打开文件夹“${folderLabel}”`} className="border border-border" onClick={() => setCurrentFolderId(folder.id)}><ChevronRight className="size-4" /></IconButton></td></tr>;
           })}
-          {sortedItems.map((item, index) => { const movable = canMoveItem(item); const rowSelectable = item.content_kind === "document" || movable; return <tr key={item.item_id} draggable={movable} title={movable ? "拖动到文件夹行可移动资料" : undefined} onDragStart={() => setDraggedItem(item)} onDragEnd={() => setDraggedItem(null)} className={`transition-colors duration-normal hover:bg-surface-muted/60 ${movable ? "cursor-grab" : ""}`}><td className="px-3 py-3"><Checkbox aria-label={`选择${item.title}`} checked={selected.includes(item.version_id)} disabled={index >= BULK_LIMIT || !rowSelectable} title={!rowSelectable ? "视频转录稿需要发布权限才能批量移动" : undefined} onChange={() => setSelected((current) => current.includes(item.version_id) ? current.filter((id) => id !== item.version_id) : [...current, item.version_id].slice(0, BULK_LIMIT))} /></td><td className="max-w-xs px-3 py-3"><ManagedItemIdentity item={item} /></td><td className="whitespace-nowrap px-3 py-3 tabular-nums">{formatManagedUpdatedAt(item.updated_at)}</td><td className="px-3 py-3"><Badge variant={statusVariant(item.lifecycle_status)}>{statusLabel[item.lifecycle_status] || "未知状态"}</Badge></td><td className="px-3 py-3">{sourceLabel[item.source_origin] || "其他来源"}</td><td className="px-3 py-3 text-right">{renderActions(item)}</td></tr>; })}</tbody></table></div>
+          {sortedItems.map((item, index) => { const movable = canMoveItem(item); const rowSelectable = item.content_kind === "document" || movable; return <tr key={item.item_id} draggable={movable} title={movable ? "拖动到文件夹行可移动资料" : undefined} onDragStart={() => setDraggedItem(item)} onDragEnd={() => setDraggedItem(null)} className={`transition-colors duration-normal hover:bg-surface-muted/60 ${movable ? "cursor-grab" : ""}`}><td className="px-3 py-3"><Checkbox aria-label={`选择${item.title}`} checked={selected.includes(item.version_id)} disabled={index >= BULK_LIMIT || !rowSelectable} title={!rowSelectable ? "视频转录稿需要发布权限才能批量移动" : undefined} onChange={() => setSelected((current) => current.includes(item.version_id) ? current.filter((id) => id !== item.version_id) : [...current, item.version_id].slice(0, BULK_LIMIT))} /></td><td className="px-3 py-3"><ManagedItemType docType={item.doc_type} /></td><td className="max-w-xs px-3 py-3"><ManagedItemIdentity item={item} /></td><td className="whitespace-nowrap px-3 py-3 tabular-nums">{formatManagedUpdatedAt(item.updated_at)}</td><td className="px-3 py-3"><Badge variant={statusVariant(item.lifecycle_status)}>{statusLabel[item.lifecycle_status] || "未知状态"}</Badge></td><td className="px-3 py-3">{sourceLabel[item.source_origin] || "其他来源"}</td><td className="px-3 py-3 text-right">{renderActions(item)}</td></tr>; })}</tbody></table></div>
         <ul className="divide-y divide-border border-t border-border lg:hidden">{sortedChildFolders.map((folder) => {
           const folderLabel = `${folder.display_code} ${folder.display_name}`;
           return <li key={folder.id} data-testid={`managed-folder-mobile-${folder.id}`}><button type="button" className="flex min-h-16 w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-surface-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:px-5" onClick={() => setCurrentFolderId(folder.id)}><Folder className="size-5 shrink-0 text-primary" aria-hidden="true" /><span className="min-w-0 flex-1"><span className="block break-words font-medium">{folderLabel}</span><span className="mt-0.5 block text-ui-xs text-muted-foreground">{folder.item_count} 份直接资料</span></span><ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" /></button></li>;
-        })}{sortedItems.map((item, index) => { const rowSelectable = item.content_kind === "document" || canMoveItem(item); return <li key={item.item_id} className="space-y-3 px-4 py-4 sm:px-5"><div className="flex items-start gap-3"><Checkbox className="mt-0.5" aria-label={`选择${item.title}`} checked={selected.includes(item.version_id)} disabled={index >= BULK_LIMIT || !rowSelectable} title={!rowSelectable ? "视频转录稿需要发布权限才能批量移动" : undefined} onChange={() => setSelected((current) => current.includes(item.version_id) ? current.filter((id) => id !== item.version_id) : [...current, item.version_id].slice(0, BULK_LIMIT))} /><div className="min-w-0 flex-1"><div className="flex items-start justify-between gap-3"><ManagedItemIdentity item={item} /><Badge className="shrink-0" variant={statusVariant(item.lifecycle_status)}>{statusLabel[item.lifecycle_status] || "未知状态"}</Badge></div></div></div><dl className="grid grid-cols-[4rem_minmax(0,1fr)] gap-x-2 gap-y-1 text-ui-sm"><dt className="text-muted-foreground">更新时间</dt><dd className="whitespace-nowrap tabular-nums">{formatManagedUpdatedAt(item.updated_at)}</dd><dt className="text-muted-foreground">来源</dt><dd>{sourceLabel[item.source_origin] || "其他来源"}</dd></dl>{renderActions(item)}</li>; })}</ul>
+        })}{sortedItems.map((item, index) => { const rowSelectable = item.content_kind === "document" || canMoveItem(item); return <li key={item.item_id} className="space-y-3 px-4 py-4 sm:px-5"><div className="flex items-start gap-3"><Checkbox className="mt-0.5" aria-label={`选择${item.title}`} checked={selected.includes(item.version_id)} disabled={index >= BULK_LIMIT || !rowSelectable} title={!rowSelectable ? "视频转录稿需要发布权限才能批量移动" : undefined} onChange={() => setSelected((current) => current.includes(item.version_id) ? current.filter((id) => id !== item.version_id) : [...current, item.version_id].slice(0, BULK_LIMIT))} /><ManagedItemType docType={item.doc_type} /><div className="min-w-0 flex-1"><ManagedItemIdentity item={item} /></div></div><dl className="grid grid-cols-[4rem_minmax(0,1fr)] gap-x-2 gap-y-1 text-ui-sm"><dt className="text-muted-foreground">状态</dt><dd><Badge variant={statusVariant(item.lifecycle_status)}>{statusLabel[item.lifecycle_status] || "未知状态"}</Badge></dd><dt className="text-muted-foreground">更新时间</dt><dd className="whitespace-nowrap tabular-nums">{formatManagedUpdatedAt(item.updated_at)}</dd><dt className="text-muted-foreground">来源</dt><dd>{sourceLabel[item.source_origin] || "其他来源"}</dd></dl>{renderActions(item)}</li>; })}</ul>
         <div className="flex flex-col gap-2 border-t border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5"><p className="text-ui-xs text-muted-foreground">共 {total} 份，第 {page + 1} / {pageCount} 页</p><div className="flex flex-wrap items-center justify-end gap-2"><label className="flex items-center gap-2 text-ui-xs text-muted-foreground">每页<Select aria-label="每页条数" className="h-control-sm w-20" value={String(pageSize)} onChange={(event) => setPageSize(Number(event.target.value))}>{PAGE_SIZE_OPTIONS.map((size) => <option key={size} value={size}>{size} 条</option>)}</Select></label><Button size="sm" variant="outline" disabled={page === 0 || loading} onClick={() => setPage((value) => value - 1)}>上一页</Button><Select aria-label="跳转页码" className="h-control-sm w-24" value={String(page + 1)} onChange={(event) => setPage(Number(event.target.value) - 1)} disabled={loading}>{Array.from({ length: pageCount }, (_, index) => <option key={index + 1} value={index + 1}>第 {index + 1} 页</option>)}</Select><Button size="sm" variant="outline" disabled={page + 1 >= pageCount || loading} onClick={() => setPage((value) => value + 1)}>下一页</Button></div></div>
       </>}
       </div>
