@@ -5,12 +5,14 @@ import {
   ChevronDown,
   ChevronRight,
   Clipboard,
+  ClipboardCopy,
   CirclePlay,
   FileSpreadsheet,
   FileText,
   LocateFixed,
   Presentation,
   Video,
+  Download,
 } from "lucide-react";
 import { api } from "../api/client";
 import { usePdfPreview } from "../hooks/usePdfPreview";
@@ -26,30 +28,14 @@ import {
 } from "./citations";
 import { FeedbackDialog, type FeedbackSubmission } from "./FeedbackDialog";
 import { sourceSetsFromMessages } from "./sourceSelection";
+import {
+  cleanSourceSection,
+  formatSourcesAsMarkdown,
+  sourceDisplayTitle,
+  sourceLocator,
+} from "../lib/source-export";
 
 const citationFeedbackReasons = ["引用内容不符", "来源定位错误", "资料已过时", "其他"] as const;
-
-function cleanSection(source: Source): string {
-  return (source.section_path || "")
-    .replace(/<[^>]*>/g, "")
-    .split(" > ")
-    .filter(Boolean)
-    .join(" / ");
-}
-
-function sourceLocator(source: Source): string {
-  if (source.doc_type === "transcript") return source.start_time || "未提供时间";
-  if (source.doc_type === "xlsx" && (source.sheet_name || source.cell_range)) {
-    return [source.sheet_name, source.cell_range].filter(Boolean).join(" · ");
-  }
-  if (source.doc_type === "pptx" && source.slide_number) return `第 ${source.slide_number} 页`;
-  return cleanSection(source) || "未提供定位信息";
-}
-
-function sourceDisplayTitle(source: Source): string {
-  if (source.doc_type !== "transcript") return source.doc_title;
-  return source.doc_title.replace(/__[0-9a-f]{8}$/i, "");
-}
 
 function SourceTypeIcon({ source }: { source: Source }) {
   if (source.doc_type === "transcript") return <Video className="size-4" />;
@@ -104,6 +90,34 @@ export function SourceWorkspace({
   const activeSet = sets.find((set) => set.messageId === activeMessageId) || latest;
   const source = activeSet?.sources[activeIndex] || activeSet?.sources[0];
   const safeIndex = source ? Math.max(0, activeSet!.sources.indexOf(source)) : 0;
+  const [exportStatus, setExportStatus] = useState<string | null>(null);
+
+  useEffect(() => setExportStatus(null), [activeMessageId]);
+
+  const copyAllSources = async () => {
+    if (!activeSet?.sources.length) return;
+    try {
+      await navigator.clipboard.writeText(formatSourcesAsMarkdown(activeSet.sources));
+      setExportStatus(`已复制 ${activeSet.sources.length} 项来源`);
+    } catch {
+      setExportStatus("复制全部来源失败，请检查浏览器剪贴板权限。");
+    }
+  };
+
+  const downloadAllSources = () => {
+    if (!activeSet?.sources.length) return;
+    try {
+      const url = URL.createObjectURL(new Blob([formatSourcesAsMarkdown(activeSet.sources)], { type: "text/markdown;charset=utf-8" }));
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = "回答来源.md";
+      anchor.click();
+      URL.revokeObjectURL(url);
+      setExportStatus(`已下载 ${activeSet.sources.length} 项来源`);
+    } catch {
+      setExportStatus("下载来源失败，请稍后重试。");
+    }
+  };
 
   useEffect(() => {
     if (latest && !sets.some((set) => set.messageId === activeMessageId)) {
@@ -140,7 +154,7 @@ export function SourceWorkspace({
   if (!activeSet || !source) {
     return (
       <aside className="flex h-full flex-col bg-card">
-        <WorkspaceHeader count={0} />
+        <WorkspaceHeader count={0} onCopy={() => undefined} onDownload={() => undefined} status={null} />
         <div className="flex flex-1 flex-col items-center justify-center px-8 text-center">
           <Clipboard className="mb-3 size-8 text-muted-foreground/60" />
           <h2 className="text-sm font-medium text-foreground">暂无可核验来源</h2>
@@ -154,7 +168,7 @@ export function SourceWorkspace({
 
   return (
     <aside className="flex h-full min-h-0 flex-col bg-card">
-      <WorkspaceHeader count={activeSet.sources.length} />
+      <WorkspaceHeader count={activeSet.sources.length} onCopy={() => void copyAllSources()} onDownload={downloadAllSources} status={exportStatus} />
       {sets.length > 1 && (
         <label className="border-b border-border px-4 py-3">
           <span className="mb-1 block text-[11px] font-medium text-muted-foreground">回答轮次</span>
@@ -233,12 +247,21 @@ export function SourceWorkspace({
   );
 }
 
-function WorkspaceHeader({ count }: { count: number }) {
+function WorkspaceHeader({ count, onCopy, onDownload, status }: { count: number; onCopy: () => void; onDownload: () => void; status: string | null }) {
   return (
-    <div className="flex h-14 shrink-0 items-center border-b border-border px-4">
-      <div>
+    <div className="flex min-h-14 shrink-0 items-center justify-between gap-2 border-b border-border px-4 py-2">
+      <div className="min-w-0">
         <h2 className="text-sm font-semibold text-foreground">来源核验</h2>
         <p className="text-[11px] text-muted-foreground">{count ? `${count} 项回答依据` : "等待检索结果"}</p>
+        {status && <p className="mt-0.5 text-[11px] text-muted-foreground" role="status">{status}</p>}
+      </div>
+      <div className="flex shrink-0 items-center gap-1">
+        <button type="button" onClick={onCopy} disabled={!count} aria-label="复制全部来源" title="复制全部来源" className="inline-flex size-8 items-center justify-center rounded-ui-md border border-border text-muted-foreground hover:bg-secondary hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40">
+          <ClipboardCopy className="size-4" />
+        </button>
+        <button type="button" onClick={onDownload} disabled={!count} aria-label="下载来源 Markdown" title="下载来源 Markdown" className="inline-flex size-8 items-center justify-center rounded-ui-md border border-border text-muted-foreground hover:bg-secondary hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40">
+          <Download className="size-4" />
+        </button>
       </div>
     </div>
   );
@@ -297,7 +320,7 @@ function SourceDetail({
   const copySource = async () => {
     try {
       await navigator.clipboard.writeText(
-        `[${source.doc_title}] ${sourceLocator(source)}\n${cleanSection(source)}\n\n${text}`,
+        `[${source.doc_title}] ${sourceLocator(source)}\n${cleanSourceSection(source)}\n\n${text}`,
       );
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1500);

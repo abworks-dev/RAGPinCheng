@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatMessage, Source } from "../types";
 import { SourceWorkspace } from "./SourceWorkspace";
 
@@ -66,6 +66,11 @@ function renderWorkspace(source = videoSource) {
 }
 
 describe("SourceWorkspace video sources", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    videoPlayerOpen.mockReset();
+    documentPreviewOpen.mockReset();
+  });
   it("uses the video card treatment without exposing the binding suffix", () => {
     renderWorkspace();
 
@@ -104,5 +109,48 @@ describe("SourceWorkspace video sources", () => {
         paragraphAnchor: null,
       },
     );
+  });
+
+  it("copies and downloads all sources for the active answer only", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    const createObjectURL = vi.fn().mockReturnValue("blob:sources");
+    const revokeObjectURL = vi.fn();
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: createObjectURL });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: revokeObjectURL });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+    renderWorkspace(spreadsheetSource);
+
+    fireEvent.click(screen.getByRole("button", { name: "复制全部来源" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("已复制 1 项来源");
+    expect(writeText).toHaveBeenCalledWith(expect.stringContaining("## 1. 构件清单"));
+
+    fireEvent.click(screen.getByRole("button", { name: "下载来源 Markdown" }));
+    expect(createObjectURL).toHaveBeenCalledOnce();
+    expect(click).toHaveBeenCalledOnce();
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:sources");
+  });
+
+  it("exports only the explicitly selected answer sources", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    const messages: ChatMessage[] = [
+      { id: "assistant-1", role: "assistant", content: "第一版", sources: [videoSource] },
+      { id: "assistant-2", role: "assistant", content: "第二版", sources: [spreadsheetSource] },
+    ];
+    render(<SourceWorkspace messages={messages} conversationId="conversation-1" selectedMessageId="assistant-1" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "复制全部来源" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent("已复制 1 项来源");
+    expect(writeText).toHaveBeenCalledWith(expect.stringContaining("## 1. Revit界面介绍"));
+    expect(writeText).not.toHaveBeenCalledWith(expect.stringContaining("构件清单"));
+  });
+
+  it("disables bulk export when there are no sources", () => {
+    render(<SourceWorkspace messages={[]} conversationId="conversation-1" />);
+
+    expect(screen.getByRole("button", { name: "复制全部来源" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "下载来源 Markdown" })).toBeDisabled();
   });
 });
