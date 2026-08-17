@@ -1389,9 +1389,9 @@ export function AdminManagedContentPage() {
           : item.has_published_head || !["draft", "rejected"].includes(item.lifecycle_status)
             ? "当前账号没有删除已审核或已发布资料的权限"
             : "当前账号没有删除草稿或已退回资料的权限");
-    return <div className="ml-auto flex w-full flex-col items-stretch gap-2 lg:w-auto lg:flex-row lg:items-center">
+    return <div className="ml-auto flex w-full flex-col items-stretch gap-2 lg:w-auto lg:flex-row lg:items-center lg:justify-end">
       {workflow && <Button size="sm" className="w-full shrink-0 max-sm:h-10 lg:w-auto" disabled={disabled} onClick={workflow.action}>{workflow.label}</Button>}
-      <div className="ml-auto flex min-h-10 w-[19rem] max-w-full items-center justify-end gap-1 sm:w-[17.25rem] lg:ml-0">
+      <div className="ml-auto flex min-h-10 w-[19rem] max-w-full items-center justify-end gap-1 sm:w-[17.25rem] lg:ml-0 lg:w-auto">
         <IconButton label={`查看“${item.title}”的详细信息`} tooltip={unavailableReason || "查看资料详情"} className="border border-border max-sm:size-10" disabled={disabled} onClick={() => setDetail(item)}><Info className="size-4" /></IconButton>
         <IconButton label={`预览“${item.title}”`} tooltip={previewTooltip} className="border border-border max-sm:size-10" disabled={disabled || !previewable} onClick={() => openDocumentPreview(item.preview_parent_id!, item.title, item.doc_type, 1, {}, null)}><Eye className="size-4" /></IconButton>
         <IconButton label={item.has_published_head ? `调整“${item.title}”的分类` : `移动“${item.title}”`} tooltip={moveTooltip} className="border border-border max-sm:size-10" disabled={disabled || !movable} onClick={() => { setMoveTarget(item); setMoveFolderId(""); setMoveError(null); }}><FolderInput className="size-4" /></IconButton>
