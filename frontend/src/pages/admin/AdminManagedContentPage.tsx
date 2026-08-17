@@ -4,6 +4,7 @@ import { AlertTriangle, ArchiveRestore, ArrowDown, ArrowUp, ArrowUpDown, Caption
 import { adminContentApi } from "../../api/admin/content";
 import { Badge } from "../../components/ui/badge";
 import { CategoryTreePicker } from "../../components/admin/CategoryTreePicker";
+import { CategoryCascader } from "../../components/admin/CategoryCascader";
 import { Button, buttonVariants } from "../../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../components/ui/card";
 import { Checkbox } from "../../components/ui/checkbox";
@@ -648,7 +649,7 @@ function TrashSearchFilters({
     {open && <div id={panelId} role="dialog" aria-modal="false" aria-label="回收站搜索筛选" className="absolute inset-x-0 top-full z-dropdown mt-2 rounded-ui-lg border border-border bg-popover p-3 text-popover-foreground shadow-overlay sm:min-w-[36rem] sm:left-auto sm:right-0">
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="space-y-1 text-ui-xs text-muted-foreground"><span>保留状态</span><Select className="h-control-sm" value={retentionFilter} onChange={(event) => onRetentionFilterChange(event.target.value)}><option value="">全部状态</option><option value="retained">保留中（{retentionCounts.retained || 0}）</option><option value="expiring">即将到期（{retentionCounts.expiring || 0}）</option><option value="overdue">已超期（{retentionCounts.overdue || 0}）</option></Select></label>
-        <label className="space-y-1 text-ui-xs text-muted-foreground"><span>原目录</span><Select className="h-control-sm" value={categoryFilter} onChange={(event) => onCategoryFilterChange(event.target.value)}><option value="">全部目录</option>{categories.map((category) => <option key={category.id} value={category.id}>{category.full_path || category.display_name}</option>)}</Select></label>
+        <CategoryCascader label="原目录" categories={categories} value={categoryFilter} onChange={onCategoryFilterChange} />
         <label className="space-y-1 text-ui-xs text-muted-foreground"><span>移入人员</span><Input className="h-control-sm" value={archivedBy} onChange={(event) => onArchivedByChange(event.target.value)} placeholder="输入姓名" /></label>
         <fieldset className="grid grid-cols-2 gap-2"><legend className="mb-1 text-ui-xs text-muted-foreground">移入日期</legend><Input className="h-control-sm" type="date" aria-label="移入开始日期" value={archivedFrom} onChange={(event) => onArchivedFromChange(event.target.value)} /><Input className="h-control-sm" type="date" aria-label="移入结束日期" value={archivedTo} onChange={(event) => onArchivedToChange(event.target.value)} /></fieldset>
       </div>
