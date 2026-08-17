@@ -533,6 +533,14 @@ test.describe("分类管理", () => {
     await expect(page.getByRole("button", { name: "全部展开" })).toBeVisible();
     await expect(page.getByText("3 份直接资料 · 1 个子分类")).toBeVisible();
     await expectNoBodyOverflow(page);
+    const tree = page.getByRole("tree", { name: "分类层级" });
+    await expect(tree).toHaveCSS("border-bottom-width", "1px");
+    await expect(tree).toHaveCSS("border-bottom-style", "solid");
+    const treeBox = await tree.boundingBox();
+    const lastRootBox = await tree.locator(":scope > [role='treeitem']").last().boundingBox();
+    expect(treeBox).not.toBeNull();
+    expect(lastRootBox).not.toBeNull();
+    expect(Math.abs(treeBox!.y + treeBox!.height - lastRootBox!.y - lastRootBox!.height)).toBeLessThanOrEqual(1);
     const createButton = page.getByRole("button", { name: "新增分类", exact: true });
     await createButton.scrollIntoViewIfNeeded();
     await expectInViewport(createButton);
