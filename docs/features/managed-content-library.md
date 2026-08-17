@@ -101,7 +101,11 @@ Schema 16 为历史上已有正式 head 的未归档视频补建目录壳。目�
 
 ## 恢复边界
 
-`GET /api/admin/content/trash` 要求 `trash.view`；`POST /api/admin/content/items/{item_id}/restore` 额外要求 `trash.restore`、当前版本号和 CSRF token。草稿、退回和待确认资料恢复原状态；已确认、发布失败或已发布资料统一恢复为“已确认”。恢复不会重建 `content_item_heads`，不会自动进入检索，必须重新发布。当前阶段不提供永久删除、自动到期清理或对象文件清理。
+`GET /api/admin/content/trash` 要求 `trash.view`；`POST /api/admin/content/items/{item_id}/restore` 额外要求 `trash.restore`、当前版本号和 CSRF token。草稿、退回和待确认资料恢复原状态；已确认、发布失败或已发布资料统一恢复为“已确认”。恢复不会重建 `content_item_heads`，不会自动进入检索，必须重新发布。
+
+恢复默认回到原目录，也可选择其他活动目录；原目录停用时必须改选目录。同一活动目录仍按 Unicode NFKC 和不区分大小写规则禁止同名资料。发生冲突时可改选目录，或在同时具备冲突资料对应归档权限时确认替换。替换会将冲突资料移入回收站，并与当前资料恢复在同一 SQLite 事务内完成；任一版本、权限、活动索引或分类调整校验失败时整笔回滚。
+
+`GET /api/admin/content/items/{item_id}/audit-events` 返回资料移入回收站和恢复的产品化操作记录。活动资料要求 `item.view`，回收站资料要求 `trash.view`；接口只返回操作类型、人员、时间、目录快照、状态和冲突处理结果，不暴露内部 metadata 或存储路径。当前阶段仍不提供永久删除、自动到期清理、批量恢复或对象文件清理。
 
 ## 验证入口
 

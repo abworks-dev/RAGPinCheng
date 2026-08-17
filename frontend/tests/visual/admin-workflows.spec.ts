@@ -441,10 +441,19 @@ test.describe("资料管理", () => {
     const title = page.getByText("机电专业协同检查清单", { exact: true }).filter({ visible: true });
     const item = page.viewportSize()!.width < 1024 ? title.locator("xpath=ancestor::li") : title.locator("xpath=ancestor::tr");
     const workflow = item.getByRole("button", { name: "审核", exact: true });
+    const detailButton = item.getByRole("button", { name: "查看“机电专业协同检查清单”的详细信息" });
     await expect(workflow).toBeVisible();
-    if (page.viewportSize()!.width === 390) {
+    if (page.viewportSize()!.width >= 1024) {
       const workflowBox = await workflow.boundingBox();
-      const detailBox = await item.getByRole("button", { name: "查看“机电专业协同检查清单”的详细信息" }).boundingBox();
+      const detailBox = await detailButton.boundingBox();
+      expect(workflowBox).not.toBeNull();
+      expect(detailBox).not.toBeNull();
+      const actionGap = detailBox!.x - (workflowBox!.x + workflowBox!.width);
+      expect(actionGap).toBeGreaterThanOrEqual(4);
+      expect(actionGap).toBeLessThanOrEqual(12);
+    } else if (page.viewportSize()!.width === 390) {
+      const workflowBox = await workflow.boundingBox();
+      const detailBox = await detailButton.boundingBox();
       expect(workflowBox).not.toBeNull();
       expect(detailBox).not.toBeNull();
       expect(workflowBox!.y + workflowBox!.height).toBeLessThanOrEqual(detailBox!.y);
@@ -532,10 +541,23 @@ test.describe("资料管理", () => {
     const restoreRequest = page.waitForRequest((request) => request.method() === "POST" && request.url().endsWith("/items/item-5/restore"));
     await restore.click();
     const dialog = page.getByRole("dialog", { name: "恢复资料" });
-    await expect(dialog).toContainText("需要具备发布权限的人员重新发布后才会进入检索");
+    await expect(dialog).toContainText("重新发布后才会进入检索");
+    await expect(dialog).toContainText("恢复到目录");
+    await expectNoBodyOverflow(page);
     await dialog.getByRole("button", { name: "确认恢复" }).click();
     await expect(dialog.getByRole("button", { name: "恢复中…" })).toBeDisabled();
     await restoreRequest;
+  });
+
+  test("trash audit records remain available independently of restore", async ({ page }) => {
+    await openTab(page, "资料管理");
+    await page.getByRole("tab", { name: "回收站" }).click();
+    const record = page.getByRole("button", { name: /记录/ }).filter({ visible: true }).first();
+    await record.click();
+    const dialog = page.getByRole("dialog", { name: "操作记录" });
+    await expect(dialog).toContainText("移入回收站");
+    await expect(dialog).toContainText("操作人：合成资料员");
+    await expectNoBodyOverflow(page);
   });
 });
 

@@ -507,6 +507,151 @@ def test_delete_draft_requires_organize_csrf_and_preserves_object(content_api):
         conn.close()
 
 
+def test_restore_can_target_an_active_category_when_original_is_inactive(content_api):
+    client, sessions, _queued, db_path = content_api
+    uploaded = client.post(
+        "/api/admin/content/uploads",
+        data={"category_id": "cat-03"},
+        files=[("files", ("inactive-origin.md", b"# synthetic", "text/markdown"))],
+        **_auth(sessions, "organizer", csrf=True),
+    ).json()["entries"][0]
+    item_url = f"/api/admin/content/items/{uploaded['item_id']}"
+    body = {"expected_version_id": uploaded["version_id"]}
+    assert client.request(
+        "DELETE", item_url, json=body, **_auth(sessions, "organizer", csrf=True)
+    ).status_code == 200
+    conn = connect(db_path)
+    conn.execute("UPDATE category_nodes SET is_active=0 WHERE id='cat-03'")
+    conn.commit()
+    conn.close()
+
+    restore_url = f"{item_url}/restore"
+    inactive = client.post(restore_url, json=body, **_auth(sessions, "reviewer", csrf=True))
+    assert inactive.status_code == 409
+    restored = client.post(
+        restore_url,
+        json={**body, "target_category_id": "cat-04"},
+        **_auth(sessions, "reviewer", csrf=True),
+    )
+    assert restored.status_code == 200
+    assert restored.json() == {
+        "item_id": uploaded["item_id"],
+        "version_id": uploaded["version_id"],
+        "restored_status": "draft",
+        "category_id": "cat-04",
+        "moved_to_alternate_category": True,
+        "replaced_conflict": False,
+    }
+
+
+def test_restore_conflict_requires_archive_permission_and_replaces_atomically(content_api):
+    client, sessions, _queued, db_path = content_api
+    conflict = client.post(
+        "/api/admin/content/uploads",
+        data={"category_id": "cat-03"},
+        files=[("files", ("same-name.md", b"# active", "text/markdown"))],
+        **_auth(sessions, "organizer", csrf=True),
+    ).json()["entries"][0]
+    archived = client.post(
+        "/api/admin/content/uploads",
+        data={"category_id": "cat-04"},
+        files=[("files", ("same-name.md", b"# archived", "text/markdown"))],
+        **_auth(sessions, "organizer", csrf=True),
+    ).json()["entries"][0]
+    archived_url = f"/api/admin/content/items/{archived['item_id']}"
+    assert client.request(
+        "DELETE",
+        archived_url,
+        json={"expected_version_id": archived["version_id"]},
+        **_auth(sessions, "organizer", csrf=True),
+    ).status_code == 200
+    restore_url = f"{archived_url}/restore"
+    request_body = {
+        "expected_version_id": archived["version_id"],
+        "target_category_id": "cat-03",
+    }
+    collision = client.post(
+        restore_url, json=request_body, **_auth(sessions, "reviewer", csrf=True)
+    )
+    assert collision.status_code == 409
+    detail = collision.json()["detail"]
+    assert detail["code"] == "content_filename_conflict"
+    assert detail["conflict"] == {
+        "item_id": conflict["item_id"],
+        "version_id": conflict["version_id"],
+        "title": "same-name",
+        "original_filename": "same-name.md",
+        "lifecycle_status": "draft",
+        "has_published_head": False,
+    }
+
+    replace_body = {
+        **request_body,
+        "replace_conflict_item_id": conflict["item_id"],
+        "replace_conflict_expected_version_id": conflict["version_id"],
+    }
+    forbidden = client.post(
+        restore_url, json=replace_body, **_auth(sessions, "reviewer", csrf=True)
+    )
+    assert forbidden.status_code == 403
+    conn = connect(db_path)
+    assert conn.execute(
+        "SELECT archived_at FROM content_items WHERE id=?", (archived["item_id"],)
+    ).fetchone()[0] is not None
+    assert conn.execute(
+        "SELECT archived_at FROM content_items WHERE id=?", (conflict["item_id"],)
+    ).fetchone()[0] is None
+    conn.close()
+
+    replaced = client.post(
+        restore_url, json=replace_body, **_auth(sessions, "admin", csrf=True)
+    )
+    assert replaced.status_code == 200
+    assert replaced.json()["replaced_conflict"] is True
+    conn = connect(db_path)
+    restored_row = conn.execute(
+        "SELECT archived_at,category_id FROM content_items WHERE id=?", (archived["item_id"],)
+    ).fetchone()
+    assert tuple(restored_row) == (None, "cat-03")
+    assert conn.execute(
+        "SELECT archived_at FROM content_items WHERE id=?", (conflict["item_id"],)
+    ).fetchone()[0] is not None
+    conn.close()
+
+
+def test_content_trash_audit_events_are_authorized_and_productized(content_api):
+    client, sessions, _queued, _db_path = content_api
+    uploaded = client.post(
+        "/api/admin/content/uploads",
+        data={"category_id": "cat-03"},
+        files=[("files", ("audit-me.md", b"# synthetic", "text/markdown"))],
+        **_auth(sessions, "organizer", csrf=True),
+    ).json()["entries"][0]
+    item_url = f"/api/admin/content/items/{uploaded['item_id']}"
+    body = {"expected_version_id": uploaded["version_id"]}
+    assert client.request(
+        "DELETE", item_url, json=body, **_auth(sessions, "organizer", csrf=True)
+    ).status_code == 200
+    audit_url = f"{item_url}/audit-events"
+    assert client.get(audit_url, **_auth(sessions, "plain")).status_code == 403
+    archived_events = client.get(audit_url, **_auth(sessions, "reviewer"))
+    assert archived_events.status_code == 200
+    assert archived_events.json()[0]["event_type"] == "content.archived"
+    assert archived_events.json()[0]["actor_name"] == "整理员"
+    assert "item_id" not in archived_events.json()[0]
+    assert client.post(
+        f"{item_url}/restore", json=body, **_auth(sessions, "reviewer", csrf=True)
+    ).status_code == 200
+    active_events = client.get(audit_url, **_auth(sessions, "organizer"))
+    assert [event["event_type"] for event in active_events.json()] == [
+        "content.restored", "content.archived"
+    ]
+    restored_event = active_events.json()[0]
+    assert restored_event["restore_strategy"] == "original_directory"
+    assert restored_event["source_category_path"] == "03 公司内部标准"
+    assert restored_event["target_category_path"] == "03 公司内部标准"
+
+
 def test_move_draft_requires_permission_and_preserves_version(content_api):
     client, sessions, _queued, db_path = content_api
     uploaded = client.post(

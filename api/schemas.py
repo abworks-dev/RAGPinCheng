@@ -524,12 +524,35 @@ class DeleteManagedContentResponse(BaseModel):
 
 class RestoreManagedContentRequest(BaseModel):
     expected_version_id: str = Field(min_length=1, max_length=100)
+    target_category_id: str | None = Field(default=None, min_length=1, max_length=100)
+    replace_conflict_item_id: str | None = Field(default=None, min_length=1, max_length=100)
+    replace_conflict_expected_version_id: str | None = Field(
+        default=None, min_length=1, max_length=100
+    )
 
 
 class RestoreManagedContentResponse(BaseModel):
     item_id: str
     version_id: str
     restored_status: str
+    category_id: str
+    moved_to_alternate_category: bool
+    replaced_conflict: bool
+
+
+class ContentTrashAuditEventDTO(BaseModel):
+    event_type: Literal["content.archived", "content.restored"]
+    actor_name: str | None = None
+    created_at: int
+    previous_status: str | None = None
+    restored_status: str | None = None
+    restore_strategy: str | None = None
+    source_category_path: str | None = None
+    target_category_path: str | None = None
+    category_path: str | None = None
+    archive_reason: str | None = None
+    replaced_title: str | None = None
+    replaced_filename: str | None = None
 
 
 class MoveManagedContentRequest(BaseModel):
