@@ -106,10 +106,12 @@ def _category_siblings(
 ) -> list[sqlite3.Row]:
     if parent_id is None:
         return conn.execute(
-            "SELECT id,display_code,display_name,sort_order,is_active FROM category_nodes WHERE parent_id IS NULL"
+            """SELECT id,parent_id,display_code,display_name,sort_order,is_active,version
+               FROM category_nodes WHERE parent_id IS NULL"""
         ).fetchall()
     return conn.execute(
-        "SELECT id,display_code,display_name,sort_order,is_active FROM category_nodes WHERE parent_id=?",
+        """SELECT id,parent_id,display_code,display_name,sort_order,is_active,version
+           FROM category_nodes WHERE parent_id=?""",
         (parent_id,),
     ).fetchall()
 
@@ -160,7 +162,8 @@ def next_category_sort_order(conn: sqlite3.Connection, parent_id: str | None) ->
 
 def next_category_display_code(conn: sqlite3.Connection, parent_id: str | None) -> str:
     used = {str(row["display_code"]) for row in _category_siblings(conn, parent_id)}
-    candidate = 1
+    numeric_codes = [int(code) for code in used if code.isdigit()]
+    candidate = (max(numeric_codes) if numeric_codes else 0) + 1
     while f"{candidate:02d}" in used:
         candidate += 1
     return f"{candidate:02d}"
@@ -230,14 +233,80 @@ def audit_event(
     )
 
 
-def _category_sibling_sort_key(row: sqlite3.Row) -> tuple[bool, int, str, str]:
-    sort_order = int(row["sort_order"])
-    return (
-        sort_order <= 0,
-        sort_order if sort_order > 0 else 0,
-        unicodedata.normalize("NFKC", str(row["display_name"])).strip(),
-        str(row["id"]),
-    )
+def _category_sibling_sort_key(row: sqlite3.Row) -> tuple[int, int, str, str, str]:
+    code = unicodedata.normalize("NFKC", str(row["display_code"])).strip()
+    name = unicodedata.normalize("NFKC", str(row["display_name"])).strip()
+    if code.isdigit():
+        return (0, int(code), "", name, str(row["id"]))
+    return (1, 0, code.casefold(), name, str(row["id"]))
+
+
+def _category_number(position: int, sibling_count: int) -> str:
+    width = max(2, len(str(sibling_count)))
+    code = str(position).zfill(width)
+    if len(code) > 12:
+        raise ValueError("category_number_limit_exceeded")
+    return code
+
+
+def _category_position_changes(
+    rows: list[sqlite3.Row],
+) -> list[dict[str, object]]:
+    sibling_count = len(rows)
+    changes: list[dict[str, object]] = []
+    for position, row in enumerate(rows, start=1):
+        new_code = _category_number(position, sibling_count)
+        new_sort_order = position * 10
+        if new_sort_order > _MAX_CATEGORY_SORT_ORDER:
+            raise ValueError("category_number_limit_exceeded")
+        if str(row["display_code"]) != new_code or int(row["sort_order"]) != new_sort_order:
+            changes.append(
+                {
+                    "id": str(row["id"]),
+                    "from": str(row["display_code"]),
+                    "to": new_code,
+                    "sort_order": new_sort_order,
+                }
+            )
+    return changes
+
+
+def _rewrite_category_positions(
+    conn: sqlite3.Connection,
+    rows: list[sqlite3.Row],
+    *,
+    now: int,
+    already_versioned_ids: set[str] | None = None,
+) -> list[dict[str, object]]:
+    changes = _category_position_changes(rows)
+    if not changes:
+        return []
+    changed_ids = {str(change["id"]) for change in changes}
+    already_versioned = already_versioned_ids or set()
+    temporary_prefix = f"__tmp_{uuid.uuid4().hex}_"
+    for index, row in enumerate(rows, start=1):
+        conn.execute(
+            "UPDATE category_nodes SET display_code=? WHERE id=?",
+            (f"{temporary_prefix}{index}", row["id"]),
+        )
+    sibling_count = len(rows)
+    for position, row in enumerate(rows, start=1):
+        category_id = str(row["id"])
+        code = _category_number(position, sibling_count)
+        sort_order = position * 10
+        if category_id in changed_ids and category_id not in already_versioned:
+            conn.execute(
+                """UPDATE category_nodes
+                   SET display_code=?,sort_order=?,updated_at=?,version=version+1
+                   WHERE id=?""",
+                (code, sort_order, now, category_id),
+            )
+        else:
+            conn.execute(
+                "UPDATE category_nodes SET display_code=?,sort_order=? WHERE id=?",
+                (code, sort_order, category_id),
+            )
+    return changes
 
 
 def _category_path(conn: sqlite3.Connection, category_id: str) -> str:
@@ -304,7 +373,7 @@ def list_categories(conn: sqlite3.Connection, *, include_inactive: bool = False)
     ).fetchall()
 
     # Keep the API flat for existing consumers while returning a stable depth-first
-    # tree order. Sibling order is controlled by the editable sort_order field.
+    # tree order. The visible sibling number is the single user-facing order.
     children: dict[str | None, list[sqlite3.Row]] = {}
     for row in rows:
         children.setdefault(row["parent_id"], []).append(row)
@@ -329,6 +398,8 @@ def create_category(
     display_name: str,
     sort_order: int,
     actor_user_id: int,
+    target_position: int | None = None,
+    confirm_number_shift: bool = False,
     commit: bool = True,
 ) -> sqlite3.Row:
     if commit and not conn.in_transaction:
@@ -354,23 +425,85 @@ def create_category(
             level = int(parent["level"]) + 1
             if level > 4:
                 raise ValueError("category_depth_exceeded")
-        _ensure_category_sibling_identity_available(
-            conn,
-            parent_id=parent_id,
-            display_name=name,
-            display_code=code,
-            code_conflict_error="category_sibling_code_conflict_current",
-        )
+        siblings = sorted(_category_siblings(conn, parent_id), key=_category_sibling_sort_key)
+        if target_position is not None:
+            if target_position < 1 or target_position > len(siblings) + 1:
+                raise ValueError("invalid_category_position")
+            code = _category_number(target_position, len(siblings) + 1)
+            proposed_existing = list(siblings)
+            requires_shift = target_position <= len(siblings)
+            if not requires_shift:
+                for position, sibling in enumerate(proposed_existing, start=1):
+                    if str(sibling["display_code"]) != _category_number(position, len(siblings) + 1):
+                        requires_shift = True
+                        break
+            if requires_shift and not confirm_number_shift:
+                raise ValueError("category_number_confirmation_required")
+            _ensure_category_sibling_identity_available(
+                conn,
+                parent_id=parent_id,
+                display_name=name,
+            )
+        else:
+            _ensure_category_sibling_identity_available(
+                conn,
+                parent_id=parent_id,
+                display_name=name,
+                display_code=code,
+                code_conflict_error="category_sibling_code_conflict_current",
+            )
         category_id = _id("cat")
         now = _now()
+        insert_code = f"__tmp_create_{uuid.uuid4().hex}" if target_position is not None else code
+        insert_sort_order = (
+            (len(siblings) + 1) * 10 if target_position is not None else sort_order
+        )
         conn.execute(
             """INSERT INTO category_nodes
                (id,category_key,parent_id,display_code,display_name,sort_order,level,is_active,
                 created_by,created_at,updated_at,version)
                VALUES (?,?,?,?,?,?,?,?,?,?,?,1)""",
-            (category_id, key, parent_id, code, name, sort_order, level, 1, actor_user_id, now, now),
+            (
+                category_id,
+                key,
+                parent_id,
+                insert_code,
+                name,
+                insert_sort_order,
+                level,
+                1,
+                actor_user_id,
+                now,
+                now,
+            ),
         )
-        audit_event(conn, "category.created", actor_user_id=actor_user_id, category_id=category_id)
+        number_changes: list[dict[str, object]] = []
+        if target_position is not None:
+            created = conn.execute(
+                """SELECT id,parent_id,display_code,display_name,sort_order,is_active,version
+                   FROM category_nodes WHERE id=?""",
+                (category_id,),
+            ).fetchone()
+            ordered = list(siblings)
+            ordered.insert(target_position - 1, created)
+            number_changes = _rewrite_category_positions(
+                conn,
+                ordered,
+                now=now,
+                already_versioned_ids={category_id},
+            )
+        audit_event(
+            conn,
+            "category.created",
+            actor_user_id=actor_user_id,
+            category_id=category_id,
+            metadata={
+                "target_position": target_position,
+                "number_changes": number_changes,
+            }
+            if target_position is not None
+            else None,
+        )
         if commit:
             conn.commit()
         return conn.execute("SELECT * FROM category_nodes WHERE id=?", (category_id,)).fetchone()
@@ -536,6 +669,62 @@ def update_category_sort_order(
     return conn.execute("SELECT * FROM category_nodes WHERE id=?", (category_id,)).fetchone()
 
 
+def update_category_number(
+    conn: sqlite3.Connection,
+    category_id: str,
+    *,
+    target_position: int,
+    confirm_number_shift: bool,
+    expected_version: int,
+    actor_user_id: int,
+) -> list[sqlite3.Row]:
+    now = _now()
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        category = conn.execute(
+            """SELECT id,parent_id,display_code,display_name,sort_order,is_active,version
+               FROM category_nodes WHERE id=?""",
+            (category_id,),
+        ).fetchone()
+        if category is None:
+            raise ValueError("category_not_found")
+        if int(category["version"]) != expected_version:
+            raise ValueError("category_version_conflict")
+        siblings = sorted(
+            _category_siblings(conn, category["parent_id"]),
+            key=_category_sibling_sort_key,
+        )
+        if target_position < 1 or target_position > len(siblings):
+            raise ValueError("invalid_category_position")
+        current_position = next(
+            index for index, row in enumerate(siblings, start=1) if row["id"] == category_id
+        )
+        if target_position == current_position:
+            conn.commit()
+            return list_categories(conn, include_inactive=True)
+        if not confirm_number_shift:
+            raise ValueError("category_number_confirmation_required")
+        ordered = [row for row in siblings if row["id"] != category_id]
+        ordered.insert(target_position - 1, category)
+        changes = _rewrite_category_positions(conn, ordered, now=now)
+        audit_event(
+            conn,
+            "category.number_updated",
+            actor_user_id=actor_user_id,
+            category_id=category_id,
+            metadata={
+                "from_position": current_position,
+                "to_position": target_position,
+                "changes": changes,
+            },
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    return list_categories(conn, include_inactive=True)
+
+
 def move_category(
     conn: sqlite3.Connection,
     category_id: str,
@@ -598,7 +787,6 @@ def move_category(
             conn,
             parent_id=target_parent_id,
             display_name=str(category["display_name"]),
-            display_code=str(category["display_code"]),
             exclude_category_id=category_id,
         )
 
@@ -613,51 +801,47 @@ def move_category(
                 raise ValueError("category_move_position_invalid")
 
         old_parent_id = category["parent_id"]
-
-        def sibling_ids(parent_id: str | None) -> list[str]:
-            if parent_id is None:
-                rows = conn.execute(
-                    """SELECT id,display_name,sort_order FROM category_nodes
-                       WHERE parent_id IS NULL AND id<>?""",
-                    (category_id,),
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    """SELECT id,display_name,sort_order FROM category_nodes
-                       WHERE parent_id=? AND id<>?""",
-                    (parent_id, category_id),
-                ).fetchall()
-            return [str(row["id"]) for row in sorted(rows, key=_category_sibling_sort_key)]
-
         level_delta = target_level - int(category["level"])
-        if old_parent_id != target_parent_id and before_category_id is None:
-            new_order = next_category_sort_order(conn, target_parent_id)
-            _validate_category_sort_order(new_order)
-            conn.execute(
-                """UPDATE category_nodes
-                   SET parent_id=?,sort_order=?,level=?,updated_at=?,version=version+1
-                   WHERE id=?""",
-                (target_parent_id, new_order, target_level, now, category_id),
-            )
+        source_rows = sorted(
+            [row for row in _category_siblings(conn, old_parent_id) if row["id"] != category_id],
+            key=_category_sibling_sort_key,
+        )
+        if old_parent_id == target_parent_id:
+            destination_rows = list(source_rows)
         else:
-            destination = sibling_ids(target_parent_id)
-            insert_at = destination.index(before_category_id) if before_category_id else len(destination)
-            destination.insert(insert_at, category_id)
-            for index, sibling_id in enumerate(destination, start=1):
-                new_order = index * 10
-                if sibling_id == category_id:
-                    conn.execute(
-                        """UPDATE category_nodes
-                           SET parent_id=?,sort_order=?,level=?,updated_at=?,version=version+1
-                           WHERE id=?""",
-                        (target_parent_id, new_order, target_level, now, category_id),
-                    )
-                else:
-                    conn.execute(
-                        """UPDATE category_nodes SET sort_order=?,updated_at=?,version=version+1
-                           WHERE id=? AND sort_order<>?""",
-                        (new_order, now, sibling_id, new_order),
-                    )
+            destination_rows = sorted(
+                _category_siblings(conn, target_parent_id),
+                key=_category_sibling_sort_key,
+            )
+        insert_at = (
+            next(
+                index
+                for index, row in enumerate(destination_rows)
+                if row["id"] == before_category_id
+            )
+            if before_category_id
+            else len(destination_rows)
+        )
+        destination_rows.insert(insert_at, category)
+
+        temporary_code = f"__tmp_move_{uuid.uuid4().hex}"
+        conn.execute(
+            """UPDATE category_nodes
+               SET parent_id=?,display_code=?,level=?,updated_at=?,version=version+1
+               WHERE id=?""",
+            (target_parent_id, temporary_code, target_level, now, category_id),
+        )
+        source_changes = (
+            _rewrite_category_positions(conn, source_rows, now=now)
+            if old_parent_id != target_parent_id
+            else []
+        )
+        destination_changes = _rewrite_category_positions(
+            conn,
+            destination_rows,
+            now=now,
+            already_versioned_ids={category_id},
+        )
 
         if level_delta:
             for row in descendants:
@@ -678,6 +862,8 @@ def move_category(
                 "from_parent_id": old_parent_id,
                 "to_parent_id": target_parent_id,
                 "before_category_id": before_category_id,
+                "source_number_changes": source_changes,
+                "destination_number_changes": destination_changes,
             },
         )
         conn.commit()

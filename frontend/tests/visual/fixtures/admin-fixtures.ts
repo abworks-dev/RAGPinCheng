@@ -823,6 +823,27 @@ export async function installAdminRoutes(
         };
         return json(route, created);
       }
+      if (request.method() === "PATCH" && /^\/api\/admin\/content\/categories\/[^/]+\/number$/.test(path)) {
+        const categoryId = path.split("/").at(-2);
+        const body = request.postDataJSON() as { target_position: number; expected_version: number };
+        const current = categories.find((category) => category.id === categoryId) || categories[0];
+        const siblings = categories
+          .filter((category) => category.parent_id === current.parent_id)
+          .sort((left, right) => Number(left.display_code) - Number(right.display_code));
+        const ordered = siblings.filter((category) => category.id !== categoryId);
+        ordered.splice(body.target_position - 1, 0, current);
+        const positions = new Map(ordered.map((category, index) => [category.id, index + 1]));
+        return json(route, categories.map((category) => {
+          const position = positions.get(category.id);
+          return position ? {
+            ...category,
+            display_code: String(position).padStart(2, "0"),
+            sort_order: position * 10,
+            version: category.version + 1,
+            updated_at: 1700000600,
+          } : category;
+        }));
+      }
       if (request.method() === "PATCH" && path.startsWith("/api/admin/content/categories/")) {
         const categoryId = path.split("/").at(-1);
         const current = categories.find((category) => category.id === categoryId) || categories[0];

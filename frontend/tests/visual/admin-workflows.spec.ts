@@ -780,6 +780,7 @@ test.describe("分类管理", () => {
       const categoryToggle = editor.getByRole("radio", { name: "公司内部标准停用" });
       await categoryToggle.scrollIntoViewIfNeeded();
       await expectInViewport(categoryToggle);
+      await expect(editor.getByRole("button", { name: "调整编号" })).toBeVisible();
       const save = editor.getByRole("button", { name: "保存修改" });
       await save.scrollIntoViewIfNeeded();
       await expectInViewport(save);
@@ -797,10 +798,9 @@ test.describe("分类管理", () => {
       await child.press("ArrowLeft");
       await expect(parent).toBeFocused();
       await expect(page.getByText("公司内部标准").last()).toBeVisible();
-      await page.getByRole("button", { name: "调整结构" }).click();
-      await expect(page.getByRole("button", { name: "完成调整" })).toBeVisible();
-      await expect(page.getByText("拖动手柄调整同级顺序；跨层级移动会要求确认。")).toBeVisible();
-      await expect(page.getByRole("button", { name: "拖动公司内部标准" })).toBeVisible();
+      await expect(page.getByRole("textbox", { name: "当前编号" })).toHaveValue("03");
+      await expect(page.getByRole("button", { name: "调整编号" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "调整结构" })).toHaveCount(0);
       const save = page.getByRole("button", { name: "保存修改" });
       await expect(save).toBeDisabled();
       await expectInViewport(save);
@@ -813,8 +813,9 @@ test.describe("分类管理", () => {
     const editor = page.viewportSize()!.width < 1024
       ? page.getByRole("dialog", { name: "项目资料" })
       : page.locator("[aria-labelledby='category-list-title']").getByText("基本信息").locator("xpath=ancestor::div[contains(@class,'h-full')]");
-    await expect(editor.getByRole("button", { name: "上移分类" })).toBeEnabled();
-    await expect(editor.getByRole("button", { name: "下移分类" })).toBeEnabled();
+    await expect(editor.getByRole("button", { name: "调整编号" })).toBeEnabled();
+    await expect(editor.getByRole("button", { name: "上移分类" })).toHaveCount(0);
+    await expect(editor.getByRole("button", { name: "下移分类" })).toHaveCount(0);
     await editor.getByRole("button", { name: "移动至" }).click();
     const dialog = page.getByRole("dialog", { name: "移动分类" });
     await expect(dialog).toContainText("04 项目资料");
@@ -823,11 +824,29 @@ test.describe("分类管理", () => {
     await expect(parentSelect.locator("option[value='cat-project']")).toHaveCount(0);
     await expect(parentSelect.locator("option[value='cat-archive']")).toHaveCount(0);
     await parentSelect.selectOption("cat-company");
-    await expect(dialog).toContainText("新路径：03 公司内部标准 / 04 项目资料");
+    await expect(dialog).toContainText("目标位置：03 公司内部标准 / 末尾（系统自动编号）");
     const moveRequest = page.waitForRequest((request) => request.method() === "POST" && request.url().endsWith("/api/admin/content/categories/cat-project/move"));
     await dialog.getByRole("button", { name: "确认移动" }).click();
     const request = await moveRequest;
     expect(request.postDataJSON()).toEqual({ target_parent_id: "cat-company", before_category_id: null, expected_version: 2 });
+  });
+
+  test("occupied number requires confirmation before sibling renumbering", async ({ page }) => {
+    await openTab(page, "分类管理", "normal", "admin", { includeChildFolder: true });
+    await page.getByRole("treeitem", { name: /项目资料/ }).click();
+    const editor = page.viewportSize()!.width < 1024
+      ? page.getByRole("dialog", { name: "项目资料" })
+      : page.locator("[aria-labelledby='category-list-title']").getByText("基本信息").locator("xpath=ancestor::div[contains(@class,'h-full')]");
+    await editor.getByRole("button", { name: "调整编号" }).click();
+    let dialog = page.getByRole("dialog", { name: "调整分类编号" });
+    await dialog.getByRole("spinbutton", { name: "目标编号" }).fill("1");
+    await dialog.getByRole("button", { name: "下一步" }).click();
+    dialog = page.getByRole("dialog", { name: "确认调整编号" });
+    await expect(dialog).toContainText("编号 01 当前由“公司内部标准”使用");
+    const numberRequest = page.waitForRequest((request) => request.method() === "PATCH" && request.url().endsWith("/api/admin/content/categories/cat-project/number"));
+    await dialog.getByRole("button", { name: "继续调整" }).click();
+    const request = await numberRequest;
+    expect(request.postDataJSON()).toEqual({ target_position: 1, confirm_number_shift: true, expected_version: 2 });
   });
 
   for (const scenario of ["loading", "empty", "error"] as const) {
@@ -844,8 +863,8 @@ test.describe("分类管理", () => {
     await openTab(page, "分类管理", "normal", "admin", { includeChildFolder: true });
     await page.getByRole("button", { name: "新增分类", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "新增分类" });
-    await dialog.getByLabel("显示编号", { exact: true }).fill("C");
     await dialog.getByLabel("分类名称", { exact: true }).fill("合成新增分类");
+    await dialog.getByLabel("编号", { exact: true }).fill("4");
     const create = dialog.getByRole("button", { name: "新增分类", exact: true });
     await create.click();
     await expect(dialog.getByRole("button", { name: "新增中…", exact: true })).toBeDisabled();

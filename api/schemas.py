@@ -392,6 +392,8 @@ class CreateManagedCategoryRequest(BaseModel):
     display_code: str = Field(min_length=1, max_length=12)
     display_name: str = Field(min_length=1, max_length=100)
     sort_order: int = Field(default=0, ge=0, le=999_999)
+    target_position: int | None = Field(default=None, ge=1, le=99_999)
+    confirm_number_shift: bool = False
 
 
 class UpdateManagedCategoryRequest(BaseModel):
@@ -409,6 +411,12 @@ class RenameManagedCategoryRequest(BaseModel):
 
 class UpdateManagedCategorySortOrderRequest(BaseModel):
     sort_order: int = Field(ge=0, le=999_999)
+    expected_version: int = Field(gt=0)
+
+
+class UpdateManagedCategoryNumberRequest(BaseModel):
+    target_position: int = Field(ge=1, le=99_999)
+    confirm_number_shift: bool = False
     expected_version: int = Field(gt=0)
 
 

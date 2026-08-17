@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import hashlib
+import json
 import sqlite3
 import time
 import zipfile
@@ -1118,7 +1119,7 @@ def test_category_update_uses_csrf_and_optimistic_version(content_api):
     assert updated.json()["version"] == 2
 
 
-def test_category_quick_actions_enforce_normalized_names_and_allow_duplicate_sort_orders(content_api):
+def test_category_quick_actions_keep_legacy_sort_updates_compatible_without_changing_number_order(content_api):
     client, sessions, _queued, db_path = content_api
     now = int(time.time())
     conn = connect(db_path)
@@ -1176,7 +1177,7 @@ def test_category_quick_actions_enforce_normalized_names_and_allow_duplicate_sor
         **_auth(sessions, "category_manager"),
     ).json()
     children = [row for row in categories if row["parent_id"] == "cat-03"]
-    assert children[-1]["id"] == "cat-03-a"
+    assert [row["id"] for row in children] == ["cat-03-a", "cat-03-b"]
 
     conn = connect(db_path)
     try:
@@ -1189,7 +1190,7 @@ def test_category_quick_actions_enforce_normalized_names_and_allow_duplicate_sor
         conn.close()
 
 
-def test_category_move_blocks_sibling_name_and_code_conflicts_and_appends_order(content_api):
+def test_category_move_blocks_sibling_names_but_renumbers_old_code_collisions(content_api):
     client, sessions, _queued, db_path = content_api
     now = int(time.time())
     conn = connect(db_path)
@@ -1217,22 +1218,128 @@ def test_category_move_blocks_sibling_name_and_code_conflicts_and_appends_order(
     assert name_conflict.status_code == 409
     assert name_conflict.json()["detail"] == "当前目录已有同名文件夹，请使用其他名称"
 
-    code_conflict = client.post(
+    code_collision = client.post(
         "/api/admin/content/categories/cat-source-code/move",
         json={"target_parent_id": "cat-04", "before_category_id": None, "expected_version": 1},
         **auth,
     )
-    assert code_conflict.status_code == 409
-    assert code_conflict.json()["detail"] == "目标目录已有相同显示编号的文件夹，请先修改显示编号"
+    assert code_collision.status_code == 200
+    moved_row = next(row for row in code_collision.json() if row["id"] == "cat-source-code")
+    assert (moved_row["parent_id"], moved_row["display_code"], moved_row["sort_order"]) == (
+        "cat-04", "03", 30,
+    )
+    target_rows = [row for row in code_collision.json() if row["parent_id"] == "cat-04"]
+    assert [row["display_code"] for row in target_rows] == ["01", "02", "03"]
 
     moved = client.post(
-        "/api/admin/content/categories/cat-source-code/move",
-        json={"target_parent_id": "cat-05", "before_category_id": None, "expected_version": 1},
+        "/api/admin/content/categories/cat-source-name/move",
+        json={
+            "target_parent_id": "cat-05",
+            "before_category_id": None,
+            "expected_version": next(
+                row for row in code_collision.json() if row["id"] == "cat-source-name"
+            )["version"],
+        },
         **auth,
     )
     assert moved.status_code == 200
-    moved_row = next(row for row in moved.json() if row["id"] == "cat-source-code")
-    assert (moved_row["parent_id"], moved_row["sort_order"]) == ("cat-05", 50)
+    moved_row = next(row for row in moved.json() if row["id"] == "cat-source-name")
+    assert (moved_row["parent_id"], moved_row["display_code"], moved_row["sort_order"]) == (
+        "cat-05", "02", 20,
+    )
+
+
+def test_category_number_requires_confirmation_and_renumbers_siblings(content_api):
+    client, sessions, _queued, db_path = content_api
+    auth = _auth(sessions, "category_manager", csrf=True)
+    categories = client.get(
+        "/api/admin/content/categories?include_inactive=true",
+        **_auth(sessions, "category_manager"),
+    ).json()
+    target = next(row for row in categories if row["id"] == "cat-05")
+    url = "/api/admin/content/categories/cat-05/number"
+
+    no_csrf = client.patch(
+        url,
+        json={"target_position": 2, "confirm_number_shift": True, "expected_version": target["version"]},
+        **_auth(sessions, "category_manager"),
+    )
+    assert no_csrf.status_code == 403
+
+    confirmation = client.patch(
+        url,
+        json={"target_position": 2, "confirm_number_shift": False, "expected_version": target["version"]},
+        **auth,
+    )
+    assert confirmation.status_code == 409
+    assert confirmation.json()["detail"] == {
+        "code": "category_number_confirmation_required",
+        "message": "目标编号已被占用，确认后将自动顺延同级文件夹编号",
+        "retryable": True,
+    }
+
+    updated = client.patch(
+        url,
+        json={"target_position": 2, "confirm_number_shift": True, "expected_version": target["version"]},
+        **auth,
+    )
+    assert updated.status_code == 200
+    top_level = [row for row in updated.json() if row["parent_id"] is None]
+    assert [row["id"] for row in top_level[:3]] == ["cat-01", "cat-05", "cat-02"]
+    assert [row["display_code"] for row in top_level] == [f"{index:02d}" for index in range(1, 8)]
+    assert [row["sort_order"] for row in top_level] == [index * 10 for index in range(1, 8)]
+
+    conn = connect(db_path)
+    try:
+        event = conn.execute(
+            """SELECT metadata_json FROM content_audit_events
+               WHERE event_type='category.number_updated' AND category_id='cat-05'"""
+        ).fetchone()
+        assert event is not None
+        metadata = json.loads(event["metadata_json"])
+        assert (metadata["from_position"], metadata["to_position"]) == (5, 2)
+        assert len(metadata["changes"]) >= 4
+    finally:
+        conn.close()
+
+
+def test_category_create_at_occupied_number_requires_confirmation(content_api):
+    client, sessions, _queued, _db_path = content_api
+    auth = _auth(sessions, "category_manager", csrf=True)
+    body = {
+        "parent_id": None,
+        "display_code": "02",
+        "display_name": "插入分类",
+        "sort_order": 20,
+        "target_position": 2,
+        "confirm_number_shift": False,
+    }
+
+    confirmation = client.post("/api/admin/content/categories", json=body, **auth)
+    assert confirmation.status_code == 409
+    assert confirmation.json()["detail"]["code"] == "category_number_confirmation_required"
+    assert all(
+        row["display_name"] != "插入分类"
+        for row in client.get(
+            "/api/admin/content/categories?include_inactive=true",
+            **_auth(sessions, "category_manager"),
+        ).json()
+    )
+
+    created = client.post(
+        "/api/admin/content/categories",
+        json={**body, "confirm_number_shift": True},
+        **auth,
+    )
+    assert created.status_code == 200
+    assert (created.json()["display_code"], created.json()["sort_order"]) == ("02", 20)
+    categories = client.get(
+        "/api/admin/content/categories?include_inactive=true",
+        **_auth(sessions, "category_manager"),
+    ).json()
+    top_level = [row for row in categories if row["parent_id"] is None]
+    assert [row["id"] for row in top_level[:3]] == ["cat-01", created.json()["id"], "cat-02"]
+    assert [row["display_code"] for row in top_level] == [f"{index:02d}" for index in range(1, 9)]
 
 
 def test_category_manager_can_reorder_and_reparent_categories(content_api):
@@ -1271,7 +1378,7 @@ def test_category_manager_can_reorder_and_reparent_categories(content_api):
     assert moved.status_code == 200
     moved_row = next(row for row in moved.json() if row["id"] == "cat-05")
     assert (moved_row["parent_id"], moved_row["level"], moved_row["full_path"]) == (
-        "cat-03", 2, "03 公司内部标准 / 05 培训资料",
+        "cat-03", 2, "04 公司内部标准 / 01 培训资料",
     )
 
     conn = connect(db_path)

@@ -19,7 +19,7 @@ const category = (id: string, displayName: string, sortOrder: number): ManagedCa
 });
 
 describe("compareManagedCategories", () => {
-  it("matches the backend order for duplicate and unset sort values", () => {
+  it("matches the backend numeric display-code order", () => {
     const rows = [
       category("02", "第二项", 10),
       category("10", "编号靠后", 10),
@@ -29,11 +29,11 @@ describe("compareManagedCategories", () => {
     ];
 
     expect(rows.sort(compareManagedCategories).map((row) => row.id)).toEqual([
-      "01",
-      "03",
-      "02",
-      "10",
       "00",
+      "01",
+      "02",
+      "03",
+      "10",
     ]);
   });
 });
