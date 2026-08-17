@@ -15,7 +15,14 @@ param(
     [string]$WhisperXCacheRoot,
     [string]$RunnerWorkRoot,
     [string]$RunnerTempRoot,
-    [string]$RunnerToolCacheRoot
+    [string]$RunnerToolCacheRoot,
+    [int]$DependencyRetentionDays = 7,
+    [int]$DependencyKeepCount = 2,
+    [int]$ReleaseRetentionDays = 30,
+    [int]$ReleaseKeepCount = 2,
+    [int]$QualificationRetentionDays = 30,
+    [int]$QualificationKeepCount = 3,
+    [int]$ResolverRetentionDays = 14
 )
 
 Set-StrictMode -Version Latest
@@ -111,7 +118,13 @@ function Get-JsonFile {
 }
 
 function Get-CandidateInventory {
-    param([string]$DataRoot, [string]$ProgramRoot, [string]$BackupRoot)
+    param(
+        [string]$DataRoot,
+        [string]$ProgramRoot,
+        [string]$BackupRoot,
+        [int]$RetentionDays = 7,
+        [int]$KeepCount = 2
+    )
     $items = @()
     if ([string]::IsNullOrWhiteSpace($DataRoot)) { return $items }
     $dependencyRoot = Join-Path $DataRoot 'dependency-runs'
@@ -204,6 +217,37 @@ function Get-CandidateInventory {
             release_present = [bool]($release -and (Test-Path $release -PathType Container))
             config_present = [bool]($config -and (Test-Path $config -PathType Container))
             reasons = @($reasons)
+            advisory_status = 'protected'
+            advisory_reasons = @()
+        }
+    }
+
+    $cutoff = [DateTime]::UtcNow.AddDays(-$RetentionDays)
+    $newestIds = @(
+        $items |
+            Where-Object { $_.candidate_id -match '^[0-9]{1,20}$' } |
+            Sort-Object { [DateTime]$_.last_write_utc } -Descending |
+            Select-Object -First $KeepCount |
+            ForEach-Object { [string]$_.candidate_id }
+    )
+    foreach ($item in $items) {
+        $advisoryReasons = [System.Collections.Generic.List[string]]::new()
+        if ($item.status -notin @('dependency-only', 'staged-complete')) {
+            $advisoryReasons.Add("protected-status-$($item.status)")
+        }
+        if ([string]$item.candidate_id -in $newestIds) {
+            $advisoryReasons.Add("within-newest-$KeepCount")
+        }
+        if ([DateTime]$item.last_write_utc -gt $cutoff) {
+            $advisoryReasons.Add("younger-than-$RetentionDays-days")
+        }
+        if ($advisoryReasons.Count -eq 0) {
+            $item.advisory_status = 'eligible-advisory'
+            $item.advisory_reasons = @('recognized, unreferenced, outside count and age retention')
+        }
+        else {
+            $item.advisory_status = 'protected'
+            $item.advisory_reasons = @($advisoryReasons)
         }
     }
     return @($items | Sort-Object candidate_id)
@@ -238,7 +282,7 @@ function Measure-RootBreakdown {
         [Parameter(Mandatory = $true)][hashtable]$CategoryPatterns
     )
 
-    $result = [ordered]@{ status = 'not-configured'; categories = [ordered]@{} }
+    $result = [ordered]@{ status = 'not-configured'; categories = [ordered]@{}; other_entries = @() }
     foreach ($category in @($CategoryPatterns.Keys | Sort-Object)) {
         $result.categories[$category] = [ordered]@{ entries = 0; bytes = [int64]0; files = 0 }
     }
@@ -270,6 +314,174 @@ function Measure-RootBreakdown {
         $result.categories[$category].entries++
         $result.categories[$category].bytes += [int64]$measurement.bytes
         $result.categories[$category].files += [int]$measurement.files
+        if ($category -eq 'other') {
+            $result.other_entries += [ordered]@{
+                name = $entry.Name
+                path = $entry.FullName
+                kind = if ($entry.PSIsContainer) { 'directory' } else { 'file' }
+                status = $measurement.status
+                bytes = [int64]$measurement.bytes
+                files = [int]$measurement.files
+                last_write_utc = $entry.LastWriteTimeUtc.ToString('o')
+                advisory_status = 'protected-unclassified'
+            }
+        }
+    }
+    return $result
+}
+
+function Get-RuntimeDirectoryInventory {
+    param(
+        [string]$Root,
+        [string]$Kind,
+        [int]$RetentionDays,
+        [int]$KeepCount = 0,
+        [string]$CurrentReleaseRoot = '',
+        [string[]]$ExcludeNames = @(),
+        [string[]]$ReferenceTexts = @(),
+        [bool]$ReferenceInventoryAvailable = $true
+    )
+    $items = @()
+    if ([string]::IsNullOrWhiteSpace($Root) -or -not (Test-Path -LiteralPath $Root -PathType Container)) { return $items }
+    $directories = @(
+        Get-ChildItem -LiteralPath $Root -Directory -Force |
+            Where-Object { $_.Name -notin $ExcludeNames } |
+            Sort-Object LastWriteTimeUtc -Descending
+    )
+    for ($index = 0; $index -lt $directories.Count; $index++) {
+        $directory = $directories[$index]
+        $measurement = Measure-Tree -Path $directory.FullName
+        $reasons = [System.Collections.Generic.List[string]]::new()
+        $identity = 'recognized'
+        $manifestChecks = $null
+        if (($directory.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or $measurement.status -ne 'measured') {
+            $identity = 'unsafe-tree'
+            $reasons.Add($measurement.status)
+        }
+        elseif ($Kind -eq 'release') {
+            $manifestPath = Join-Path $directory.FullName 'runtime-manifest.json'
+            $manifest = Get-JsonFile -Path $manifestPath
+            $checks = [ordered]@{
+                manifest_present = [bool]$manifest
+                manifest_parseable = [bool]($manifest -and -not ($manifest.PSObject.Properties.Name -contains '__parse_error'))
+                release_id_matches = $false
+                qualification_status_qualified = $false
+                lock_validation_status_validated = $false
+            }
+            if ($checks.manifest_parseable) {
+                if ($manifest.PSObject.Properties.Name -contains 'release_id') {
+                    $checks.release_id_matches = [string]$manifest.release_id -eq $directory.Name
+                }
+                if ($manifest.PSObject.Properties.Name -contains 'qualification_status') {
+                    $checks.qualification_status_qualified = [string]$manifest.qualification_status -eq 'qualified'
+                }
+                if ($manifest.PSObject.Properties.Name -contains 'lock_validation_status') {
+                    $checks.lock_validation_status_validated = [string]$manifest.lock_validation_status -eq 'validated'
+                }
+            }
+            $manifestChecks = $checks
+            foreach ($check in $checks.GetEnumerator()) {
+                if (-not $check.Value) { $reasons.Add("failed-$($check.Key)") }
+            }
+            if ($reasons.Count -gt 0) { $identity = 'invalid-release-contract' }
+        }
+        elseif ($directory.Name -notmatch '^\d+(?:-\d+)?$') {
+            $identity = 'unrecognized-name'
+            $reasons.Add('directory-name-not-recognized')
+        }
+
+        $normalizedCurrent = if ($CurrentReleaseRoot) { [IO.Path]::GetFullPath($CurrentReleaseRoot).TrimEnd('\') } else { '' }
+        $normalizedDirectory = [IO.Path]::GetFullPath($directory.FullName).TrimEnd('\')
+        if ($normalizedCurrent -and $normalizedDirectory.Equals($normalizedCurrent, [StringComparison]::OrdinalIgnoreCase)) {
+            $reasons.Add('current-release')
+        }
+        if (-not $ReferenceInventoryAvailable) {
+            $reasons.Add('process-or-task-reference-inventory-unavailable')
+        }
+        elseif (@($ReferenceTexts | Where-Object { $_.IndexOf($directory.FullName, [StringComparison]::OrdinalIgnoreCase) -ge 0 }).Count -gt 0) {
+            $reasons.Add('process-or-scheduled-task-reference')
+        }
+        if ($KeepCount -gt 0 -and $index -lt $KeepCount) { $reasons.Add("within-newest-$KeepCount") }
+        if ($directory.LastWriteTimeUtc -gt [DateTime]::UtcNow.AddDays(-$RetentionDays)) { $reasons.Add("younger-than-$RetentionDays-days") }
+        if ($identity -ne 'recognized' -and $reasons.Count -eq 0) { $reasons.Add($identity) }
+        $advisoryStatus = if ($identity -eq 'recognized' -and $reasons.Count -eq 0) { 'eligible-advisory' } else { 'protected' }
+        $items += [ordered]@{
+            name = $directory.Name
+            path = $directory.FullName
+            kind = $Kind
+            identity = $identity
+            bytes = [int64]$measurement.bytes
+            files = [int]$measurement.files
+            last_write_utc = $directory.LastWriteTimeUtc.ToString('o')
+            advisory_status = $advisoryStatus
+            advisory_reasons = @($reasons)
+            manifest_checks = $manifestChecks
+        }
+    }
+    return $items
+}
+
+function Get-GpuRuntimeInventory {
+    param([string]$Root)
+    $result = [ordered]@{
+        status = 'not-configured'
+        current_release_root = ''
+        releases = @()
+        qualification = @()
+        resolver = @()
+        caches = [ordered]@{}
+        reference_inventory_status = 'not-run'
+    }
+    if ([string]::IsNullOrWhiteSpace($Root)) { return $result }
+    if (-not (Test-Path -LiteralPath $Root -PathType Container)) { $result.status = 'missing'; return $result }
+    $result.status = 'measured'
+    $referenceTexts = [System.Collections.Generic.List[string]]::new()
+    $referenceInventoryAvailable = $true
+    try {
+        foreach ($process in @(Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object { $_.ProcessId -ne $PID })) {
+            foreach ($value in @([string]$process.ExecutablePath, [string]$process.CommandLine)) {
+                if (-not [string]::IsNullOrWhiteSpace($value)) { $referenceTexts.Add($value) }
+            }
+        }
+        foreach ($task in @(Get-ScheduledTask -ErrorAction Stop)) {
+            foreach ($action in @($task.Actions)) {
+                foreach ($value in @([string]$action.Execute, [string]$action.Arguments)) {
+                    if (-not [string]::IsNullOrWhiteSpace($value)) { $referenceTexts.Add($value) }
+                }
+            }
+        }
+        $result.reference_inventory_status = 'measured'
+    }
+    catch {
+        $referenceInventoryAvailable = $false
+        $result.reference_inventory_status = 'unavailable-protect-all'
+    }
+    $current = Get-JsonFile -Path (Join-Path $Root 'current-release.json')
+    if ($current) {
+        foreach ($propertyName in @('release_root', 'release_path')) {
+            if ($current.PSObject.Properties.Name -contains $propertyName -and $current.$propertyName) {
+                $result.current_release_root = [string]$current.$propertyName
+                break
+            }
+        }
+    }
+    $referenceArray = $referenceTexts.ToArray()
+    $result.releases = @(Get-RuntimeDirectoryInventory -Root (Join-Path $Root 'releases') -Kind 'release' -RetentionDays $ReleaseRetentionDays -KeepCount $ReleaseKeepCount -CurrentReleaseRoot $result.current_release_root -ReferenceTexts $referenceArray -ReferenceInventoryAvailable $referenceInventoryAvailable)
+    $result.qualification = @(Get-RuntimeDirectoryInventory -Root (Join-Path $Root 'qualification') -Kind 'qualification' -RetentionDays $QualificationRetentionDays -KeepCount $QualificationKeepCount -ReferenceTexts $referenceArray -ReferenceInventoryAvailable $referenceInventoryAvailable)
+    $result.resolver = @(Get-RuntimeDirectoryInventory -Root (Join-Path $Root 'resolver') -Kind 'resolver' -RetentionDays $ResolverRetentionDays -ExcludeNames @('pip-cache') -ReferenceTexts $referenceArray -ReferenceInventoryAvailable $referenceInventoryAvailable)
+    foreach ($cache in @(
+        [ordered]@{ name = 'runtime-pip-cache'; path = (Join-Path $Root 'pip-cache'); retention_days = 30 },
+        [ordered]@{ name = 'resolver-pip-cache'; path = (Join-Path $Root 'resolver\pip-cache'); retention_days = $ResolverRetentionDays }
+    )) {
+        $measurement = Measure-Tree -Path $cache.path
+        $result.caches[$cache.name] = [ordered]@{
+            path = $cache.path
+            status = $measurement.status
+            bytes = [int64]$measurement.bytes
+            files = [int]$measurement.files
+            retention_days = $cache.retention_days
+            advisory_status = 'protected-inventory-only'
+        }
     }
     return $result
 }
@@ -312,7 +524,18 @@ if ($dockerCommand) {
 $report = [ordered]@{
     schema_version = 'production-storage-inventory/1'
     generated_at_utc = [DateTimeOffset]::UtcNow.ToString('o')
-    privacy = 'aggregate metadata only; no file names or file contents'
+    privacy = 'directory metadata only; no nested file names or file contents'
+    policy = [ordered]@{
+        dependency_retention_days = $DependencyRetentionDays
+        dependency_keep_count = $DependencyKeepCount
+        release_retention_days = $ReleaseRetentionDays
+        release_keep_count = $ReleaseKeepCount
+        qualification_retention_days = $QualificationRetentionDays
+        qualification_keep_count = $QualificationKeepCount
+        resolver_retention_days = $ResolverRetentionDays
+        unknown_or_unclassified = 'protected'
+        advisory_only = $true
+    }
     roots = $measurements
     breakdowns = [ordered]@{
         asr_data = Measure-RootBreakdown -Root $AsrDataRoot -CategoryPatterns @{
@@ -345,8 +568,9 @@ $report = [ordered]@{
         }
     }
     dependency_runs = Measure-DependencyRuns -DataRoot $AsrDataRoot
-    candidates = Get-CandidateInventory -DataRoot $AsrDataRoot -ProgramRoot $AsrProgramRoot -BackupRoot $(if ($AsrActivationBackupRoot) { $AsrActivationBackupRoot } else { $BackupDirectory })
+    candidates = @(Get-CandidateInventory -DataRoot $AsrDataRoot -ProgramRoot $AsrProgramRoot -BackupRoot $(if ($AsrActivationBackupRoot) { $AsrActivationBackupRoot } else { $BackupDirectory }) -RetentionDays $DependencyRetentionDays -KeepCount $DependencyKeepCount)
     activation_audit = Get-ActivationAudit -DataRoot $AsrDataRoot -BackupRoot $(if ($AsrActivationBackupRoot) { $AsrActivationBackupRoot } else { $BackupDirectory })
+    gpu_runtime_inventory = Get-GpuRuntimeInventory -Root $RuntimeRoot
     docker = $docker
 }
 
