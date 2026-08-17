@@ -6,8 +6,7 @@ export type CategoryTreeNode = {
 };
 
 export function compareManagedCategories(left: ManagedCategory, right: ManagedCategory) {
-  return left.sort_order - right.sort_order
-    || left.display_code.localeCompare(right.display_code, "zh-Hans")
+  return left.display_code.localeCompare(right.display_code, "zh-Hans")
     || left.display_name.localeCompare(right.display_name, "zh-Hans")
     || left.id.localeCompare(right.id);
 }

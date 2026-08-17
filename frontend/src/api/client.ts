@@ -416,7 +416,7 @@ export const api = {
     parent_id: string | null;
     display_code: string;
     display_name: string;
-    sort_order: number;
+    sort_order?: number;
   }) =>
     jsonFetch<ManagedCategory>("/api/admin/content/categories", {
       method: "POST",
@@ -427,7 +427,7 @@ export const api = {
     body: {
       display_code: string;
       display_name: string;
-      sort_order: number;
+      sort_order?: number;
       is_active: boolean;
       expected_version: number;
     },

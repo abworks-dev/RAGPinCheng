@@ -896,7 +896,7 @@ def test_category_update_uses_csrf_and_optimistic_version(content_api):
     assert updated.json()["version"] == 2
 
 
-def test_category_manager_can_reorder_and_reparent_categories(content_api):
+def test_category_manager_orders_by_display_code_and_reparents_categories(content_api):
     client, sessions, _queued, db_path = content_api
     auth = _auth(sessions, "category_manager", csrf=True)
     categories = client.get(
@@ -905,7 +905,7 @@ def test_category_manager_can_reorder_and_reparent_categories(content_api):
     ).json()
     by_id = {category["id"]: category for category in categories}
 
-    reordered = client.post(
+    canonicalized = client.post(
         "/api/admin/content/categories/cat-99/move",
         json={
             "target_parent_id": None,
@@ -914,12 +914,16 @@ def test_category_manager_can_reorder_and_reparent_categories(content_api):
         },
         **auth,
     )
-    assert reordered.status_code == 200
-    assert [row["id"] for row in reordered.json() if row["parent_id"] is None][:3] == [
-        "cat-01", "cat-99", "cat-02",
-    ]
+    assert canonicalized.status_code == 200
+    root_rows = [row for row in canonicalized.json() if row["parent_id"] is None]
+    assert [row["display_code"] for row in root_rows] == sorted(
+        row["display_code"] for row in root_rows
+    )
+    assert [row["sort_order"] for row in root_rows] == list(
+        range(10, len(root_rows) * 10 + 1, 10)
+    )
 
-    current = next(row for row in reordered.json() if row["id"] == "cat-05")
+    current = next(row for row in canonicalized.json() if row["id"] == "cat-05")
     moved = client.post(
         "/api/admin/content/categories/cat-05/move",
         json={
@@ -943,6 +947,33 @@ def test_category_manager_can_reorder_and_reparent_categories(content_api):
         assert events == 2
     finally:
         conn.close()
+
+
+def test_category_display_code_is_unique_within_each_parent(content_api):
+    client, sessions, _queued, _db_path = content_api
+    auth = _auth(sessions, "category_manager", csrf=True)
+
+    first = client.post(
+        "/api/admin/content/categories",
+        json={"parent_id": "cat-03", "display_code": "01", "display_name": "建模标准"},
+        **auth,
+    )
+    assert first.status_code == 200
+
+    duplicate = client.post(
+        "/api/admin/content/categories",
+        json={"parent_id": "cat-03", "display_code": "01", "display_name": "审核标准"},
+        **auth,
+    )
+    assert duplicate.status_code == 409
+    assert duplicate.json()["detail"] == "当前目录已存在该分类编号"
+
+    another_parent = client.post(
+        "/api/admin/content/categories",
+        json={"parent_id": "cat-04", "display_code": "01", "display_name": "模型成果"},
+        **auth,
+    )
+    assert another_parent.status_code == 200
 
 
 def test_category_move_rejects_cycles_depth_conflicts_and_stale_versions(content_api):
