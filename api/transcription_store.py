@@ -54,6 +54,8 @@ from src.transcription.types import (
     validate_uuid,
 )
 
+from .media_transcript_catalog import ensure_media_transcript_catalog_item
+
 
 class StoreConflictError(RuntimeError):
     pass
@@ -687,6 +689,11 @@ class SQLiteTranscriptionStore:
             ).rowcount
             if changed != 1:
                 raise StoreConflictError("promotion_transition_conflict")
+            ensure_media_transcript_catalog_item(
+                self._conn,
+                media_id=version.media_id,
+                now=now,
+            )
         return self.load_version(version_id)
 
     def list_jobs(

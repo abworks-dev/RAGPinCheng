@@ -181,7 +181,11 @@ export function AdminMediaPage() {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [mediaFilter, setMediaFilter] = useState<MediaFilter>("all");
   const [lastLoadedAt, setLastLoadedAt] = useState<number | null>(null);
-  const [selectedMediaId, setSelectedMediaId] = useState<string | null>(null);
+  const [selectedMediaId, setSelectedMediaId] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null;
+    const params = new URLSearchParams(window.location.search);
+    return params.get("workbench") === "1" ? params.get("media_id") : null;
+  });
   const retryIdempotencyKeys = useRef(new Map<string, string>());
   const previousJobStatuses = useRef(new Map<string, string>());
   const { assets: mediaAssets, loading, error: loadError, refresh, removeAsset } = useAdminMediaAssets();
@@ -286,9 +290,26 @@ export function AdminMediaPage() {
     setLastLoadedAt(Date.now());
   }, [refresh, refreshJobs]);
 
+  const openWorkbench = (mediaId: string) => {
+    setSelectedMediaId(mediaId);
+    const params = new URLSearchParams(window.location.search);
+    params.set("media_id", mediaId);
+    params.set("workbench", "1");
+    window.history.replaceState({}, "", `${window.location.pathname}?${params}`);
+  };
+
+  const closeWorkbench = () => {
+    setSelectedMediaId(null);
+    const params = new URLSearchParams(window.location.search);
+    params.delete("media_id");
+    params.delete("workbench");
+    const query = params.toString();
+    window.history.replaceState({}, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
+  };
+
   useEffect(() => {
-    if (selectedMediaId && !mediaAssets.some((asset) => asset.media_id === selectedMediaId)) setSelectedMediaId(null);
-  }, [mediaAssets, selectedMediaId]);
+    if (!loading && selectedMediaId && !mediaAssets.some((asset) => asset.media_id === selectedMediaId)) closeWorkbench();
+  }, [loading, mediaAssets, selectedMediaId]);
 
   async function deleteFailedMedia(asset: MediaAsset) {
     setDeletingMediaId(asset.media_id);
@@ -637,7 +658,7 @@ export function AdminMediaPage() {
                     </div>
                     <p className="text-ui-xs text-muted-foreground"><span className="sr-only">提交时间：</span>{formatAdminDate(asset.created_at)}</p>
                     <div className="flex flex-wrap gap-1.5 lg:justify-end" aria-label={`媒体操作：${asset.title}`}>
-                      <Button className="min-h-10 sm:min-h-0" size="sm" variant="outline" onClick={() => setSelectedMediaId(asset.media_id)}>进入转写工作台</Button>
+                      <Button className="min-h-10 sm:min-h-0" size="sm" variant="outline" onClick={() => openWorkbench(asset.media_id)}>进入转写工作台</Button>
                       {(job?.status === "pending" || job?.status === "running") && <Button className="min-h-10 sm:min-h-0" size="sm" variant="outline" onClick={() => void cancelJob(job)}>取消</Button>}
                       {(job?.status === "failed" || job?.status === "cancelled") && job.failure?.retryable !== false && <Button className="min-h-10 sm:min-h-0" size="sm" variant="outline" onClick={() => void retryJob(job)}>重试</Button>}
                       {canDelete && <Button className="min-h-10 sm:min-h-0" size="sm" variant="destructive" disabled={deletingMediaId === asset.media_id} onClick={() => setDeleteTarget(asset)}>{deletingMediaId === asset.media_id ? "删除中" : "完整删除"}</Button>}
@@ -655,7 +676,7 @@ export function AdminMediaPage() {
         originalFilename={selectedAsset?.original_filename || ""}
         mediaId={selectedAsset?.media_id || null}
         refreshToken={selectedAsset ? jobsByMediaId.get(selectedAsset.media_id)?.result_version_id : null}
-        onClose={() => setSelectedMediaId(null)}
+        onClose={closeWorkbench}
         onChanged={refreshMediaState}
       />
       <Dialog open={deleteTarget != null} onOpenChange={(open) => { if (!open && !deletingMediaId) setDeleteTarget(null); }}>

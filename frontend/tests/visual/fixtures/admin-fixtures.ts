@@ -1,6 +1,6 @@
 import type { Page, Route } from "@playwright/test";
 
-export type AdminScenario = "normal" | "loading" | "empty" | "error" | "disabled" | "publication_failure" | "media_progress" | "media_upload";
+export type AdminScenario = "normal" | "loading" | "empty" | "error" | "disabled" | "publication_failure" | "media_progress" | "media_upload" | "media_library";
 export type WorkspaceUser = "admin" | "bim_engineer" | "member";
 
 const admin = {
@@ -77,6 +77,37 @@ export const items = [
   created_at: 1700000000,
   updated_at: 1700000000,
 }));
+
+const mediaLibraryItem = {
+  item_id: "media-transcript-media-library-1",
+  title: "BIM 项目交付培训视频（合成长标题用于响应式检查）",
+  content_kind: "media_transcript",
+  category_id: "cat-company",
+  category_key: "company_standard",
+  category_label: "03 公司内部标准",
+  category_path: "03 公司内部标准 / 01 建模 / 02 培训视频",
+  media_id: "media-library-1",
+  preview_parent_id: null,
+  version_id: "66666666-6666-4666-8666-666666666666",
+  version_number: 3,
+  original_filename: "bim-project-delivery-training-long-responsive-name.mp4",
+  doc_type: "transcript",
+  lifecycle_status: "published",
+  object_sha256: null,
+  source_origin: "transcription",
+  source_batch_id: null,
+  source_rel_path: "bim-project-delivery-training-long-responsive-name.mp4",
+  is_current: true,
+  has_published_head: true,
+  latest_publication_status: "done",
+  publication_attempt_count: 2,
+  publication_failure: null,
+  media_duration_ms: 3_723_000,
+  media_file_size: 84_934_656,
+  has_pending_revision: true,
+  created_at: 1700000000,
+  updated_at: 1700000600,
+};
 
 const trashItems = [{
   ...items[4],
@@ -568,7 +599,8 @@ export async function installAdminRoutes(
       return task ? json(route, task) : json(route, { detail: "合成任务不存在" }, 404);
     }
     if (path === "/api/admin/content/items-page") {
-      const rows = scenario === "empty" ? [] : items.map((item) => item.lifecycle_status === "publication_failed" && scenario === "publication_failure" ? { ...item, latest_publication_status: "failed", publication_attempt_count: 4, publication_failure: { code: "pdf_password_required", message: "PDF 需要密码才能解析。", retryable: false, recommended_action: "请上传已解除密码保护的 PDF。" } } : item);
+      const fixtureItems = scenario === "media_library" ? [mediaLibraryItem] : items;
+      const rows = scenario === "empty" ? [] : fixtureItems.map((item) => item.lifecycle_status === "publication_failed" && scenario === "publication_failure" ? { ...item, latest_publication_status: "failed", publication_attempt_count: 4, publication_failure: { code: "pdf_password_required", message: "PDF 需要密码才能解析。", retryable: false, recommended_action: "请上传已解除密码保护的 PDF。" } } : item);
       return json(route, { items: rows, total: rows.length, status_counts: rows.reduce<Record<string, number>>((counts, item) => ({ ...counts, [item.lifecycle_status]: (counts[item.lifecycle_status] || 0) + 1 }), {}) });
     }
     if (path === "/api/admin/content/trash") {

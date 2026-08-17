@@ -105,6 +105,7 @@ describe("AdminMediaPage wizard", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    window.history.replaceState({}, "", "/admin/media");
     let sequence = 0;
     vi.stubGlobal("crypto", {
       randomUUID: vi.fn(() => `11111111-1111-4111-8111-${String(++sequence).padStart(12, "0")}`),
@@ -133,6 +134,17 @@ describe("AdminMediaPage wizard", () => {
     expect(screen.getByText("未发布")).toBeInTheDocument();
     expect(screen.getByText("未开始")).toBeInTheDocument();
     expect(screen.getByText("草稿已生成，等待后续审核与发布。")).toBeInTheDocument();
+  });
+
+  it("opens the requested workbench from a library deep link and clears it on close", async () => {
+    window.history.replaceState({}, "", "/admin/media?media_id=media-ready&workbench=1");
+    render(<AdminMediaPage />);
+
+    const workbench = await screen.findByRole("dialog", { name: "项目交付培训" });
+    expect(workbench).toBeInTheDocument();
+    fireEvent.click(within(workbench).getByRole("button", { name: "关闭转写工作台" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "项目交付培训" })).not.toBeInTheDocument());
+    expect(window.location.search).toBe("");
   });
 
   it("shows filter counts and refreshes media and transcription state together", async () => {

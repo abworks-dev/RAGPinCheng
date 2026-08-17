@@ -13,9 +13,9 @@ ADAPTERS = (
     ROOT / "api" / "transcription_store.py",
 )
 PROTECTED = {
-    # Updated with the approved Range-response extraction used by the
-    # admin-only media preview endpoint; normalize_hash keeps this portable.
-    "api/routes_media.py": "80b05719fc394e24b8cab67eb0f9330ecd5ca302f7acdbf066c64d86eb568673",
+    # Includes Range responses plus published-transcript preview access while
+    # archived and unpublished media remain hidden; normalize_hash is portable.
+    "api/routes_media.py": "be62e86673fa78adaa4db8a253c106b0698dd0460ecda75538716dad74f487f7",
     "api/indexing.py": "a1dd2c0e1cb976a66c11dda9125f1042206f75d2cc00b08e50c02d5a669408da",
     "src/chunk.py": "f22d79fe976a6da4fc4c2ba430490ad2c24205b2399e733912390e480858c542",
     "src/index.py": "993d4e101cfd0e6e1b670de7d43edaa71a73cd0778d18cef6aba72d3184d23bc",
