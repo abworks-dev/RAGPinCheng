@@ -167,8 +167,7 @@ const item = {
 };
 
 async function openRootFolder(folderId = category.id) {
-  const folder = folderId === projectCategory.id ? projectCategory : category;
-  fireEvent.click(await screen.findByRole("button", { name: new RegExp(`${folder.display_code} ${folder.display_name}`) }));
+  fireEvent.click(await screen.findByTestId(`managed-folder-row-${folderId}`));
   await waitFor(() => expect(mocks.items).toHaveBeenCalledWith(expect.objectContaining({ category_id: folderId })));
 }
 
@@ -335,6 +334,78 @@ describe("AdminManagedContentPage", () => {
     expect(within(table).getAllByRole("row")[1]).toHaveTextContent("较新资料");
   });
 
+  it("integrates folders before files without adding them to selection or pagination", async () => {
+    const folder = { ...childCategory, display_code: "02", display_name: "模型目录", item_count: 3 };
+    mocks.categories.mockResolvedValue([category, folder]);
+    render(<AdminManagedContentPage />);
+    await openRootFolder();
+
+    const table = screen.getByRole("table");
+    const folderRow = within(table).getByTestId(`managed-folder-row-${folder.id}`);
+    const fileRow = within(table).getByText("standard.pdf · v1").closest("tr");
+    expect(folderRow.compareDocumentPosition(fileRow!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(within(folderRow).queryByRole("checkbox")).not.toBeInTheDocument();
+
+    fireEvent.click(within(table).getByRole("checkbox", { name: "选择当前页前20份资料" }));
+    expect(within(table).getByRole("checkbox", { name: "选择建模标准" })).toBeChecked();
+    expect(screen.getByText("共 1 份，第 1 / 1 页")).toBeInTheDocument();
+
+    const mobileList = screen.getByTestId(`managed-folder-mobile-${folder.id}`).parentElement!;
+    expect(mobileList.firstElementChild).toBe(screen.getByTestId(`managed-folder-mobile-${folder.id}`));
+    expect(within(screen.getByTestId(`managed-folder-mobile-${folder.id}`)).getByRole("button", { name: /02 模型目录/ })).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("combobox", { name: "状态" }), { target: { value: "published" } });
+    await waitFor(() => expect(mocks.items).toHaveBeenLastCalledWith(expect.objectContaining({ lifecycle_status: "published" })));
+    expect(await screen.findByTestId(`managed-folder-row-${folder.id}`)).toBeInTheDocument();
+  });
+
+  it("shows a folder-only root instead of the empty state", async () => {
+    mocks.categories.mockResolvedValue([category, projectCategory]);
+    mocks.items.mockResolvedValue({ items: [], total: 0, status_counts: {} });
+    render(<AdminManagedContentPage />);
+
+    expect(await screen.findByTestId(`managed-folder-row-${category.id}`)).toBeInTheDocument();
+    expect(screen.getByTestId(`managed-folder-row-${projectCategory.id}`)).toBeInTheDocument();
+    expect(screen.queryByText("没有符合条件的资料")).not.toBeInTheDocument();
+    expect(screen.getByText("共 0 份，第 1 / 1 页")).toBeInTheDocument();
+  });
+
+  it("sorts folder and file groups independently while keeping folders first", async () => {
+    const alphaFolder = { ...childCategory, id: "folder-alpha", display_code: "01", display_name: "A 目录" };
+    const zetaFolder = { ...childCategory, id: "folder-zeta", display_code: "09", display_name: "Z 目录" };
+    const alphaFile = { ...item, item_id: "file-alpha", version_id: "version-alpha", title: "A 资料" };
+    const zetaFile = { ...item, item_id: "file-zeta", version_id: "version-zeta", title: "Z 资料" };
+    mocks.categories.mockResolvedValue([category, zetaFolder, alphaFolder]);
+    mocks.items.mockResolvedValue({ items: [zetaFile, alphaFile], total: 2, status_counts: { awaiting_review: 2 } });
+    render(<AdminManagedContentPage />);
+    await openRootFolder();
+
+    const table = screen.getByRole("table");
+    const titleSortButton = within(table).getByRole("button", { name: /^资料$/ });
+    fireEvent.click(titleSortButton);
+    let rows = within(table).getAllByRole("row").slice(1);
+    expect(rows.map((row) => row.textContent)).toEqual([
+      expect.stringContaining("01 A 目录"),
+      expect.stringContaining("09 Z 目录"),
+      expect.stringContaining("A 资料"),
+      expect.stringContaining("Z 资料"),
+    ]);
+
+    fireEvent.click(titleSortButton);
+    rows = within(table).getAllByRole("row").slice(1);
+    expect(rows.map((row) => row.textContent)).toEqual([
+      expect.stringContaining("09 Z 目录"),
+      expect.stringContaining("01 A 目录"),
+      expect.stringContaining("Z 资料"),
+      expect.stringContaining("A 资料"),
+    ]);
+
+    fireEvent.click(within(table).getByRole("button", { name: /更新时间/ }));
+    rows = within(table).getAllByRole("row").slice(1);
+    expect(rows[0]).toHaveTextContent("09 Z 目录");
+    expect(rows[1]).toHaveTextContent("01 A 目录");
+  });
+
   it("loads all statuses by default and keeps batch actions hidden without multi-selection", async () => {
     render(<AdminManagedContentPage />);
     await openRootFolder();
@@ -354,7 +425,7 @@ describe("AdminManagedContentPage", () => {
     render(<AdminManagedContentPage />);
 
     expect(await screen.findByRole("button", { name: "/" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /04 项目资料/ }));
+    fireEvent.click(screen.getByTestId("managed-folder-row-cat-04"));
 
     await waitFor(() => expect(mocks.items).toHaveBeenCalledWith(expect.objectContaining({ category_id: "cat-04" })));
     expect(screen.getByText(/当前目录：04 项目资料/)).toBeInTheDocument();
@@ -805,9 +876,10 @@ describe("AdminManagedContentPage", () => {
     render(<AdminManagedContentPage />);
     await openRootFolder();
 
-    const row = await screen.findByTitle("拖动到上方文件夹可移动资料");
-    const targetFolder = screen.getAllByRole("button", { name: /01 建模标准/ })[0];
+    const row = await screen.findByTitle("拖动到文件夹行可移动资料");
+    const targetFolder = screen.getByTestId("managed-folder-row-cat-03-01");
     fireEvent.dragStart(row);
+    expect(targetFolder).toHaveClass("bg-primary/5");
     fireEvent.dragOver(targetFolder);
     fireEvent.drop(targetFolder);
 
@@ -823,7 +895,7 @@ describe("AdminManagedContentPage", () => {
     render(<AdminManagedContentPage />);
     await openRootFolder();
 
-    expect(screen.queryByTitle("拖动到上方文件夹可移动资料")).not.toBeInTheDocument();
+    expect(screen.queryByTitle("拖动到文件夹行可移动资料")).not.toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: /移动“建模标准”/ }).every((button) => button.hasAttribute("disabled"))).toBe(true);
   });
 
