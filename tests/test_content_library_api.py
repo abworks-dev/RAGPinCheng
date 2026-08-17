@@ -1980,6 +1980,61 @@ def test_bulk_move_and_archive_return_item_level_results(content_api):
         conn.close()
 
 
+def test_bulk_restore_is_partial_and_audits_each_success(content_api):
+    client, sessions, _queued, db_path = content_api
+    organizer = _auth(sessions, "organizer", csrf=True)
+    entries = [client.post(
+        "/api/admin/content/uploads", data={"category_id": "cat-03"},
+        files=[("files", (filename, b"# item", "text/markdown"))], **organizer,
+    ).json()["entries"][0] for filename in ("restore-one.md", "restore-two.md")]
+    refs = [{"item_id": entry["item_id"], "expected_version_id": entry["version_id"]} for entry in entries]
+    assert client.post("/api/admin/content/bulk-archive", json={"items": refs}, **organizer).status_code == 200
+
+    refs[1]["expected_version_id"] = "stale-version"
+    assert client.post("/api/admin/content/bulk-restore", json={"items": refs}, **_auth(sessions, "reviewer")).status_code == 403
+    restored = client.post("/api/admin/content/bulk-restore", json={"items": refs}, **_auth(sessions, "reviewer", csrf=True))
+    assert restored.status_code == 200
+    assert (restored.json()["succeeded"], restored.json()["failed"]) == (1, 1)
+    assert [entry["status"] for entry in restored.json()["results"]] == ["succeeded", "failed"]
+    conn = connect(db_path)
+    try:
+        assert conn.execute("SELECT archived_at FROM content_items WHERE id=?", (entries[0]["item_id"],)).fetchone()[0] is None
+        assert conn.execute("SELECT archived_at FROM content_items WHERE id=?", (entries[1]["item_id"],)).fetchone()[0] is not None
+        assert conn.execute("SELECT count(*) FROM content_audit_events WHERE event_type='content.restored'").fetchone()[0] == 1
+    finally:
+        conn.close()
+
+
+def test_trash_retention_states_are_informational_and_overdue_remains_restorable(content_api):
+    client, sessions, _queued, db_path = content_api
+    organizer = _auth(sessions, "organizer", csrf=True)
+    entries = []
+    for filename in ("retained.md", "expiring.md", "overdue.md"):
+        entry = client.post("/api/admin/content/uploads", data={"category_id": "cat-03"},
+            files=[("files", (filename, b"# item", "text/markdown"))], **organizer).json()["entries"][0]
+        client.request("DELETE", f"/api/admin/content/items/{entry['item_id']}",
+            json={"expected_version_id": entry["version_id"]}, **organizer)
+        entries.append(entry)
+    now = int(time.time())
+    conn = connect(db_path)
+    try:
+        conn.execute("UPDATE content_items SET archived_at=? WHERE id=?", (now - 10 * 86400, entries[0]["item_id"]))
+        conn.execute("UPDATE content_items SET archived_at=? WHERE id=?", (now - 85 * 86400, entries[1]["item_id"]))
+        conn.execute("UPDATE content_items SET archived_at=? WHERE id=?", (now - 91 * 86400, entries[2]["item_id"]))
+        conn.commit()
+    finally:
+        conn.close()
+    reviewer = _auth(sessions, "reviewer")
+    items = client.get("/api/admin/content/trash", **reviewer).json()["items"]
+    assert {item["retention_status"] for item in items} == {"retained", "expiring", "overdue"}
+    overdue = client.get("/api/admin/content/trash?retention_status=overdue", **reviewer).json()
+    assert overdue["total"] == 1
+    assert overdue["items"][0]["retention_days_remaining"] < 0
+    restored = client.post(f"/api/admin/content/items/{entries[2]['item_id']}/restore",
+        json={"expected_version_id": entries[2]["version_id"]}, **_auth(sessions, "reviewer", csrf=True))
+    assert restored.status_code == 200
+
+
 def test_managed_index_job_listing_exposes_business_labels_and_filters(content_api):
     client, sessions, _queued, db_path = content_api
     conn = connect(db_path)

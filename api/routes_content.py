@@ -21,6 +21,8 @@ from src.config import (
     CONTENT_ROOT,
     OFFICE_DOC_TYPES,
     OFFICE_PROCESSING_ENABLED,
+    CONTENT_TRASH_RETENTION_DAYS,
+    CONTENT_TRASH_EXPIRING_WARNING_DAYS,
 )
 from src.indexing_pipeline import (
     ManagedVersionIndexSummary,
@@ -80,6 +82,7 @@ from .content_store import (
 from .db import get_db
 from .schemas import (
     BulkArchiveManagedContentRequest,
+    BulkRestoreManagedContentRequest,
     BulkDownloadManagedContentRequest,
     CreateManagedCategoryRequest,
     CreateFolderRequest,
@@ -875,6 +878,24 @@ def _content_item_dto(
     summary: ManagedVersionIndexSummary | None = None,
 ) -> ManagedContentItemDTO:
     archive_metadata = json.loads(row["archive_metadata_json"] or "{}") if "archive_metadata_json" in row.keys() else {}
+    archived_at = row["archived_at"] if "archived_at" in row.keys() else None
+    purge_eligible_at = (
+        archived_at + CONTENT_TRASH_RETENTION_DAYS * 86400 if archived_at else None
+    )
+    retention_days_remaining = (
+        (purge_eligible_at - int(time.time()) + 86399) // 86400
+        if purge_eligible_at
+        else None
+    )
+    retention_status = (
+        None
+        if retention_days_remaining is None
+        else "overdue"
+        if retention_days_remaining < 0
+        else "expiring"
+        if retention_days_remaining <= CONTENT_TRASH_EXPIRING_WARNING_DAYS
+        else "retained"
+    )
     return ManagedContentItemDTO(
         item_id=row["item_id"],
         title=row["title"],
@@ -905,9 +926,12 @@ def _content_item_dto(
         latest_review_note=row["latest_review_note"] if "latest_review_note" in row.keys() else None,
         created_at=row["created_at"],
         updated_at=row["updated_at"],
-        archived_at=row["archived_at"] if "archived_at" in row.keys() else None,
+        archived_at=archived_at,
         archived_by_name=row["archived_by_name"] if "archived_by_name" in row.keys() else None,
         pre_archive_lifecycle_status=archive_metadata.get("previous_status"),
+        purge_eligible_at=purge_eligible_at,
+        retention_status=retention_status,
+        retention_days_remaining=retention_days_remaining,
         media_duration_ms=row["media_duration_ms"] if "media_duration_ms" in row.keys() else None,
         media_file_size=row["media_file_size"] if "media_file_size" in row.keys() else None,
         has_pending_revision=bool(row["has_pending_revision"])
@@ -998,15 +1022,72 @@ def get_content_trash(
     query: str = Query("", max_length=200),
     limit: int = Query(25, ge=1, le=100),
     offset: int = Query(0, ge=0),
+    retention_status: Literal["retained", "expiring", "overdue"] | None = None,
+    archived_from: int | None = Query(None, ge=0),
+    archived_to: int | None = Query(None, ge=0),
+    category_id: str | None = None,
+    archived_by: str = Query("", max_length=100),
+    sort_direction: Literal["asc", "desc"] = "desc",
     _user: CurrentUser = Depends(require_content_permission("trash.view")),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> ManagedContentListResponse:
+    now = int(time.time())
+    retention_boundary = now - CONTENT_TRASH_RETENTION_DAYS * 86400
+    warning_boundary = retention_boundary + CONTENT_TRASH_EXPIRING_WARNING_DAYS * 86400
+    if retention_status == "overdue":
+        archived_to = (
+            min(archived_to, retention_boundary - 1)
+            if archived_to is not None
+            else retention_boundary - 1
+        )
+    elif retention_status == "expiring":
+        archived_from = max(archived_from, retention_boundary) if archived_from is not None else retention_boundary
+        archived_to = min(archived_to, warning_boundary) if archived_to is not None else warning_boundary
+    elif retention_status == "retained":
+        archived_from = max(archived_from, warning_boundary + 1) if archived_from is not None else warning_boundary + 1
     rows, total, status_counts = list_content_items_page(
-        conn, query=query, limit=limit, offset=offset, archived=True
+        conn, query=query, limit=limit, offset=offset, archived=True,
+        archived_from=archived_from, archived_to=archived_to, category_id=category_id,
+        archived_by=archived_by, archived_sort_direction=sort_direction
     )
     return ManagedContentListResponse(
         items=[_content_item_dto(row) for row in rows], total=total, status_counts=status_counts
     )
+
+
+@router.post("/bulk-restore", response_model=BulkManagedContentResponse)
+def bulk_restore_managed_content_items(
+    body: BulkRestoreManagedContentRequest,
+    user: CurrentUser = Depends(require_csrf),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> BulkManagedContentResponse:
+    _require_feature()
+    if not has_content_permission(conn, user, "trash.restore"):
+        raise HTTPException(status_code=403, detail="当前账号没有恢复资料的权限")
+    can_archive_draft = has_content_permission(conn, user, "item.archive_draft")
+    can_archive_published = has_content_permission(conn, user, "item.archive_published")
+    results: list[BulkManagedContentResultDTO] = []
+    for item in _validate_bulk_item_refs(body.items):
+        try:
+            restore_content_item(
+                conn, item.item_id, expected_version_id=item.expected_version_id,
+                actor_user_id=user.id, can_restore=True,
+                can_archive_draft=can_archive_draft,
+                can_archive_published=can_archive_published,
+                target_category_id=body.target_category_id,
+            )
+            results.append(BulkManagedContentResultDTO(
+                item_id=item.item_id, version_id=item.expected_version_id,
+                status="succeeded",
+            ))
+        except (ValueError, ContentFilenameConflict, sqlite3.IntegrityError) as exc:
+            conn.rollback()
+            results.append(BulkManagedContentResultDTO(
+                item_id=item.item_id, version_id=item.expected_version_id,
+                status="failed", message=_bulk_failure_message(exc),
+            ))
+    succeeded = sum(result.status == "succeeded" for result in results)
+    return BulkManagedContentResponse(results=results, succeeded=succeeded, failed=len(results) - succeeded)
 
 
 @router.post("/items/{item_id}/restore", response_model=RestoreManagedContentResponse)

@@ -522,11 +522,14 @@ export const api = {
       method: "DELETE",
       body: JSON.stringify({ expected_version_id: expectedVersionId }),
     }),
-  managedContentTrash: (params?: { query?: string; limit?: number; offset?: number }) => {
+  managedContentTrash: (params?: { query?: string; limit?: number; offset?: number; retention_status?: string; archived_from?: number; archived_to?: number }) => {
     const search = new URLSearchParams();
     if (params?.query) search.set("query", params.query);
     if (params?.limit != null) search.set("limit", String(params.limit));
     if (params?.offset != null) search.set("offset", String(params.offset));
+    if (params?.retention_status) search.set("retention_status", params.retention_status);
+    if (params?.archived_from != null) search.set("archived_from", String(params.archived_from));
+    if (params?.archived_to != null) search.set("archived_to", String(params.archived_to));
     return jsonFetch<ManagedContentList>(`/api/admin/content/trash?${search}`);
   },
   restoreManagedContent: (
@@ -742,6 +745,11 @@ export const api = {
     jsonFetch<BulkManagedContentResponse>("/api/admin/content/bulk-archive", {
       method: "POST",
       body: JSON.stringify({ items }),
+    }),
+  bulkRestoreManagedContent: (items: Array<{ item_id: string; expected_version_id: string }>, targetCategoryId?: string) =>
+    jsonFetch<BulkManagedContentResponse>("/api/admin/content/bulk-restore", {
+      method: "POST",
+      body: JSON.stringify({ items, target_category_id: targetCategoryId }),
     }),
   bulkDownloadManagedContent: (versionIds: string[]) =>
     fileFetch("/api/admin/content/bulk-download", "资料批量下载.zip", {

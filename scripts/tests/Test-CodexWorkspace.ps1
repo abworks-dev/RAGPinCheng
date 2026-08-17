@@ -5,13 +5,20 @@ $sourceScript = (Resolve-Path (Join-Path $PSScriptRoot "..\Test-CodexWorkspace.p
 $testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("ragpincheng-workspace-test-" + [guid]::NewGuid().ToString("N"))
 $repository = Join-Path $testRoot "project repo"
 $scriptsDirectory = Join-Path $repository "scripts"
-$linked = Join-Path $testRoot "linked worktree"
-$feature = Join-Path $testRoot "feature worktree"
-$detached = Join-Path $testRoot "detached worktree"
+$manualRoot = Join-Path $testRoot ".worktrees\project repo"
+$linked = Join-Path $manualRoot "linked worktree"
+$feature = Join-Path $manualRoot "feature worktree"
+$detached = Join-Path $manualRoot "detached worktree"
+$testCodexHome = Join-Path $testRoot "codex-home"
+$managed = Join-Path $testCodexHome "worktrees\managed\project repo"
+$legacyInternal = Join-Path $repository ".codex-worktrees\legacy task"
+$legacySibling = Join-Path $testRoot "project repo-legacy-task"
+$legacyTemp = Join-Path $testRoot "unstructured temporary task"
 $otherRepository = Join-Path $testRoot "other repo"
 $testScript = Join-Path $scriptsDirectory "Test-CodexWorkspace.ps1"
 $pwsh = (Get-Process -Id $PID).Path
 $passed = 0
+$previousCodexHome = $env:CODEX_HOME
 
 function Invoke-GitChecked {
     param([Parameter(Mandatory = $true)][string[]]$Arguments)
@@ -44,6 +51,7 @@ function Assert-Case {
 }
 
 try {
+    $env:CODEX_HOME = $testCodexHome
     New-Item -ItemType Directory -Path $scriptsDirectory -Force | Out-Null
     Copy-Item -LiteralPath $sourceScript -Destination $testScript
 
@@ -58,6 +66,10 @@ try {
     Invoke-GitChecked @("-C", $repository, "worktree", "add", "-b", "codex/test-task", $linked, "master")
     Invoke-GitChecked @("-C", $repository, "worktree", "add", "-b", "feature/test-task", $feature, "master")
     Invoke-GitChecked @("-C", $repository, "worktree", "add", "--detach", $detached, "master")
+    Invoke-GitChecked @("-C", $repository, "worktree", "add", "-b", "codex/managed-task", $managed, "master")
+    Invoke-GitChecked @("-C", $repository, "worktree", "add", "-b", "codex/legacy-internal", $legacyInternal, "master")
+    Invoke-GitChecked @("-C", $repository, "worktree", "add", "-b", "codex/legacy-sibling", $legacySibling, "master")
+    Invoke-GitChecked @("-C", $repository, "worktree", "add", "-b", "codex/legacy-temp", $legacyTemp, "master")
     Invoke-GitChecked @("init", "-b", "master", $otherRepository)
 
     $case = Invoke-WorkspaceCheck -Path $repository -Mode ReadOnly
@@ -82,7 +94,44 @@ try {
     )
 
     $case = Invoke-WorkspaceCheck -Path $linked -Mode Write -ExtraArguments @("-Intent", "New")
-    Assert-Case "linked codex branch allowed" ($case.ExitCode -eq 0 -and $case.Result.registered_worktree)
+    Assert-Case "standard manual codex branch allowed" (
+        $case.ExitCode -eq 0 -and $case.Result.registered_worktree -and
+        $case.Result.worktree_location -eq "manual-standard"
+    )
+
+    $case = Invoke-WorkspaceCheck -Path $managed -Mode Write -ExtraArguments @("-Intent", "New")
+    Assert-Case "Codex-managed location allowed" (
+        $case.ExitCode -eq 0 -and $case.Result.worktree_location -eq "codex-managed"
+    )
+
+    $case = Invoke-WorkspaceCheck -Path $legacyInternal -Mode Write -ExtraArguments @("-Intent", "New")
+    Assert-Case "legacy internal location rejected for new task" (
+        $case.ExitCode -ne 0 -and
+        $case.Result.worktree_location -eq "legacy-internal" -and
+        $case.Result.reason_codes -contains "NEW_WORKTREE_LOCATION_FORBIDDEN" -and
+        $case.Result.recommended_action -eq "CREATE_MANAGED_WORKTREE"
+    )
+
+    $case = Invoke-WorkspaceCheck -Path $legacyInternal -Mode Write -ExtraArguments @(
+        "-Intent", "Continue", "-ExpectedBranch", "codex/legacy-internal"
+    )
+    Assert-Case "legacy internal location allowed for continuation" (
+        $case.ExitCode -eq 0 -and $case.Result.warnings.Count -gt 0
+    )
+
+    $case = Invoke-WorkspaceCheck -Path $legacySibling -Mode Write -ExtraArguments @(
+        "-Intent", "Continue", "-ExpectedBranch", "codex/legacy-sibling"
+    )
+    Assert-Case "legacy sibling location allowed for continuation" (
+        $case.ExitCode -eq 0 -and $case.Result.worktree_location -eq "legacy-sibling"
+    )
+
+    $case = Invoke-WorkspaceCheck -Path $legacyTemp -Mode Write -ExtraArguments @("-Intent", "New")
+    Assert-Case "temporary location rejected for new task" (
+        $case.ExitCode -ne 0 -and
+        $case.Result.worktree_location -eq "legacy-temp" -and
+        $case.Result.reason_codes -contains "NEW_WORKTREE_LOCATION_FORBIDDEN"
+    )
 
     $case = Invoke-WorkspaceCheck -Path $detached -Mode Write -ExtraArguments @("-Intent", "New")
     Assert-Case "detached write rejected" (
@@ -151,9 +200,12 @@ try {
 
     Write-Host "Workspace harness tests passed: $passed"
 } finally {
+    $env:CODEX_HOME = $previousCodexHome
     if (Test-Path -LiteralPath $testRoot) {
         if (Test-Path -LiteralPath $repository) {
-            foreach ($fixtureWorktree in @($linked, $feature, $detached)) {
+            foreach ($fixtureWorktree in @(
+                $linked, $feature, $detached, $managed, $legacyInternal, $legacySibling, $legacyTemp
+            )) {
                 if (Test-Path -LiteralPath $fixtureWorktree) {
                     & git -C $repository worktree remove --force -- $fixtureWorktree 2>$null
                 }

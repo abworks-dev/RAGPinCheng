@@ -28,6 +28,7 @@ Codex 不主动接管 Claude Code 正在负责的工作，不因发现邻近问�
 
 - 只读调查、解释、方案和代码审查可以使用主 worktree，但不得在其中编辑文件、切换分支或执行会改变 Git 状态的命令。开始前运行 `pwsh -NoProfile -File scripts/Test-CodexWorkspace.ps1 -Mode ReadOnly`。
 - 任何写任务必须使用同一仓库正式注册的 linked worktree。新任务在编辑前运行 `pwsh -NoProfile -File scripts/Test-CodexWorkspace.ps1 -Mode Write -Intent New`；继续原任务运行 `pwsh -NoProfile -File scripts/Test-CodexWorkspace.ps1 -Mode Write -Intent Continue -ExpectedBranch <branch>`。主 worktree 即使当前不在 `master` 也不得用于写任务。
+- Codex App 管理的任务使用官方 `$CODEX_HOME/worktrees/**`；确需人工创建的长期 worktree 统一放在主仓库父目录的 `.worktrees/<仓库名>/**`（本项目默认 `E:\Repository\Github\.worktrees\RAGPinCheng\**`）。禁止为新任务使用仓库内部 `.codex-worktrees/**`、系统临时目录或 `RAGPinCheng-*` 同级散列目录。已注册旧位置仅允许原任务以 `Intent Continue` 继续，并应在任务结束后按 R3 流程清理，不要求中途强制迁移。
 - 写任务默认使用 `codex/*` 分支。恢复、发布或用户明确指定的非 `codex/*` 分支只有在说明理由并取得对应授权后，才可同时使用 `-AllowNonCodexBranch -ExceptionReason <reason>` 例外；原因会进入诊断结果，但不替代用户授权，也不放宽其他项目或风险边界。
 - Agent 不得自行执行 `git worktree add`、`git worktree remove`、`git worktree prune`，也不得通过手工目录复制建立任务工作区。需要创建、迁移或清理 worktree 时，必须先向用户说明原因、起点与目标分支、路径管理方式和影响，并取得明确授权；优先使用 Codex App 管理的 Worktree 任务。因缺少该授权而阻塞时，回复最末尾必须只提出一个具体、可直接回答的授权问题，并在问题前列明上述信息，不得把多个选择或后续技术步骤拆成多个问题。
 - 继续既有任务必须返回原对话及其原 worktree，并在需要时用 `-ExpectedBranch` 核对分支。不得新开对话接管仍有未提交内容的任务，也不得把一个任务的未提交修改搬入主 worktree继续开发。

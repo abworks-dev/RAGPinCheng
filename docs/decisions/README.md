@@ -9,3 +9,4 @@
 - [0001 — 视频转录播放器与媒体资产流水线](0001-video-transcript-player.md)：历史设计记录；核心播放器链路已实现，当前状态见视频转录与引用功能文档。
 - [0002 — 多引擎视频自动转录与管理员选择](0002-multi-engine-transcription.md)：已批准架构，Phase 1～Phase 6 尚未授权执行。
 - [0003 — 数据库分类与受管内容资料库](0003-managed-content-library.md)：已批准架构，R2 仓库实施中，生产迁移尚未授权。
+- [0004 — Git worktree 创建位置与兼容策略](0004-worktree-location-policy.md)：Codex 受管目录优先，人工长期 worktree 集中到仓库外统一目录，旧位置仅允许继续。

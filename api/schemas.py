@@ -506,6 +506,9 @@ class ManagedContentItemDTO(BaseModel):
     archived_at: int | None = None
     archived_by_name: str | None = None
     pre_archive_lifecycle_status: str | None = None
+    purge_eligible_at: int | None = None
+    retention_status: Literal["retained", "expiring", "overdue"] | None = None
+    retention_days_remaining: int | None = None
     media_duration_ms: int | None = None
     media_file_size: int | None = None
     has_pending_revision: bool = False
@@ -591,6 +594,11 @@ class BulkMoveManagedContentRequest(BaseModel):
 
 class BulkArchiveManagedContentRequest(BaseModel):
     items: list[BulkManagedContentItemRef] = Field(min_length=1, max_length=20)
+
+
+class BulkRestoreManagedContentRequest(BaseModel):
+    items: list[BulkManagedContentItemRef] = Field(min_length=1, max_length=20)
+    target_category_id: str | None = Field(default=None, min_length=1, max_length=100)
 
 
 class BulkDownloadManagedContentRequest(BaseModel):
