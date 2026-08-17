@@ -86,6 +86,30 @@ const trashItems = [{
   pre_archive_lifecycle_status: "published",
 }];
 
+const uploadTasks = [
+  {
+    batch_id: "batch-upload-failed", upload_mode: "files", status: "failed",
+    target_category_id: "cat-company", target_path: "01 行业规范与标准 / 02 文件夹上传测试",
+    total_files: 1, accepted_files: 0, skipped_files: 0, total_bytes: 42_000, total_uploaded_bytes: 0,
+    created_by_name: "合成资料员", created_at: 1786927800, updated_at: 1786927800,
+    error_summary: "上传连接中断，可以重试。", entries: null,
+  },
+  {
+    batch_id: "batch-upload-partial", upload_mode: "folder", status: "partial_success",
+    target_category_id: "cat-project", target_path: "04 项目资料 / 01 模型成果 / 合成长目录名称用于响应式检查",
+    total_files: 3, accepted_files: 2, skipped_files: 1, total_bytes: 126_000, total_uploaded_bytes: 84_000,
+    created_by_name: "合成管理员", created_at: 1786927500, updated_at: 1786927500,
+    error_summary: null, entries: null,
+  },
+  {
+    batch_id: "batch-upload-completed", upload_mode: "files", status: "completed",
+    target_category_id: "cat-project", target_path: "04 项目资料 / 02 竣工交付",
+    total_files: 2, accepted_files: 2, skipped_files: 0, total_bytes: 86_000, total_uploaded_bytes: 86_000,
+    created_by_name: "合成资料员", created_at: 1786927200, updated_at: 1786927200,
+    error_summary: null, entries: null,
+  },
+];
+
 const indexedDocuments = [
   {
     document_id: "document-ready", display_path: "公司标准 / synthetic-ready.pdf",
@@ -524,6 +548,19 @@ export async function installAdminRoutes(
     if (request.method() === "GET" && path === "/api/admin/content/categories") {
       const childFolder = { id: "cat-company-modeling", category_key: "company_modeling", parent_id: "cat-company", display_code: "01", display_name: "建模标准（长名称用于响应式检查）", sort_order: 10, level: 2, is_active: true, version: 1, created_at: 1700000000, updated_at: 1700000000, full_path: "03 公司内部标准 / 01 建模标准（长名称用于响应式检查）", item_count: 1 };
       return json(route, scenario === "empty" ? [] : options.includeChildFolder ? [...categories, childFolder] : categories);
+    }
+    if (request.method() === "GET" && path === "/api/admin/content/upload-tasks") {
+      const status = url.searchParams.get("status");
+      const query = (url.searchParams.get("query") || "").trim().toLocaleLowerCase("zh-CN");
+      const rows = (scenario === "empty" ? [] : uploadTasks).filter((task) =>
+        (!status || task.status === status)
+        && (!query || task.target_path.toLocaleLowerCase("zh-CN").includes(query)),
+      );
+      return json(route, { tasks: rows, total: rows.length, status_counts: { completed: 1, partial_success: 1, failed: 1 } });
+    }
+    if (request.method() === "GET" && path.startsWith("/api/admin/content/upload-tasks/")) {
+      const task = uploadTasks.find((candidate) => candidate.batch_id === path.split("/").at(-1));
+      return task ? json(route, task) : json(route, { detail: "合成任务不存在" }, 404);
     }
     if (path === "/api/admin/content/items-page") {
       const rows = scenario === "empty" ? [] : items.map((item) => item.lifecycle_status === "publication_failed" && scenario === "publication_failure" ? { ...item, latest_publication_status: "failed", publication_attempt_count: 4, publication_failure: { code: "pdf_password_required", message: "PDF 需要密码才能解析。", retryable: false, recommended_action: "请上传已解除密码保护的 PDF。" } } : item);
