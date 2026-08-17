@@ -260,11 +260,14 @@ printf 'sensitive_markers=%s\n' "$sensitive_markers"
         $inspectExit=Invoke-HiddenWsl $wslPath @('--system','--','sh','-lc',$shellLauncher) $inspectOut $inspectErr
         if ($inspectExit -ne 0) { throw 'Read-only aggregate inspection failed.' }
         $values=@{}
+        $ignoredOutputLines=0
         foreach ($line in @(Get-Content -LiteralPath $inspectOut -ErrorAction Stop)) {
             if ($line -match '^(mount_read_only|docker_roots|volume_roots|volume_count|volume_bytes|sensitive_markers)=([0-9]+)$') {
+                if ($values.ContainsKey($matches[1])) { throw 'Inspection aggregate contains duplicate fields.' }
                 $values[$matches[1]]=[int64]$matches[2]
-            } else { throw 'Inspection returned non-aggregate output.' }
+            } elseif ($line.Trim()) { $ignoredOutputLines++ }
         }
+        $report.ignored_output_lines=$ignoredOutputLines
         foreach ($required in @('mount_read_only','docker_roots','volume_roots','volume_count','volume_bytes','sensitive_markers')) {
             if (-not $values.ContainsKey($required)) { throw 'Inspection aggregate is incomplete.' }
         }
