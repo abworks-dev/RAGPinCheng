@@ -2,7 +2,7 @@
 
 ## 状态
 
-已实现。普通文档经过上传、提交、确认和发布后进入检索；已正式发布的视频转录稿也会以视频条目出现在受管目录中。资料管理页按当前受控目录展示两类资料，支持上传、拖放确认、新建目录、搜索、状态/来源/类型筛选、状态驱动的单项流程操作、批量流程操作，以及与资料类型匹配的单项操作。回收站后新增“上传任务”页，集中展示当前账号的上传历史和当前浏览器内的传输进度。
+已实现。普通文档经过上传、提交、确认和发布后进入检索；已正式发布的视频转录稿也会以视频条目出现在受管目录中。资料管理页按当前受控目录展示两类资料，支持上传、拖放确认、新建和删除目录、搜索、状态/来源/类型筛选、状态驱动的单项流程操作、批量流程操作，以及与资料类型匹配的单项操作。回收站后新增“上传任务”页，集中展示当前账号的上传历史和当前浏览器内的传输进度。
 
 ## 入口与调用链
 
@@ -76,6 +76,8 @@ Schema 19 增加 `media_metadata_revisions` 和 `media_replacements`。媒体标
 - `POST /api/admin/content/bulk-archive`
 - `POST /api/admin/content/bulk-restore`
 - `POST /api/admin/content/bulk-download`
+- `GET /api/admin/content/categories/{category_id}/delete-preview`
+- `DELETE /api/admin/content/categories/{category_id}`
 - `POST /api/admin/content/items/{item_id}/rename`
 - `POST /api/admin/content/items/{item_id}/versions`
 - `GET /api/admin/content/items/{item_id}/media-download?part=video|transcript|all`
@@ -89,12 +91,12 @@ Schema 19 增加 `media_metadata_revisions` 和 `media_replacements`。媒体标
 - 确认与发布：`item.review` 控制确认和退回，`item.move_review` 控制移动待确认资料，`item.publish` 控制发布和重新生成当前已发布 PPTX 的预览，`item.archive_published` 控制将已确认、发布失败或已发布资料移入回收站。
 - 视频转录稿：`item.view` 控制资料库查看，已登录用户按当前正式 head 读取播放和转录预览；`item.download` 控制原视频、正式转录稿和组合 ZIP 下载；`item.publish` 同时允许只调整视频目录壳。转录校对、媒体信息修订、替换视频和视频管理沿用全局管理员边界。视频归档要求 `item.archive_published`，恢复要求 `trash.restore`；资料库接口仍拒绝对视频条目执行普通文档重命名、更新或发布。
 - 回收站：`trash.view` 控制查看，`trash.restore` 独立控制恢复，`trash.purge` 控制永久删除，`trash.policy_manage` 控制自动清理策略和运行记录。后两项仅默认授予系统管理员。
-- 分类与目录：`category.manage` 控制分类维护，`folder.request` 控制目录申请，`folder.review` 控制目录审批。
+- 分类与目录：`category.manage` 控制分类维护和普通目录删除，`category.force_delete` 独立控制不可恢复的目录树强制删除，`folder.request` 控制目录申请，`folder.review` 控制目录审批。强制删除还依赖 `trash.purge`，仅默认授予系统管理员。
 - 运维入口：`import.server` 控制服务器批次导入，`index.view` 控制索引任务页面和 API。
 - 批量下载要求 `item.download`、登录 Cookie 和 CSRF token；每批 1–20 个唯一版本，未归档资料的对象文件总量默认不超过 1 GiB。视频单项下载要求 `item.download` 和登录 Cookie，组合 ZIP 同样不超过 1 GiB，并在响应前校验视频大小/哈希及正式 Markdown 大小/哈希。文件缺失、资料已归档、路径越界、完整性不符或超过上限时整笔失败，不生成残缺压缩包；临时 Markdown/ZIP 在响应完成后清理。
 - 权限节点存在显式前置依赖。用户管理页勾选动作权限时自动补齐入口和查看权限，取消前置权限时自动移除依赖动作；后端拒绝保存缺少前置权限、重复或未知节点的组合。
 - 系统预设组包括普通成员、资料浏览者、BIM工程师、资料负责人、发布负责人、分类管理员和系统管理员；权限管理和权限组维护仅允许全局管理员执行。
-- 管理员通过现有管理员回退拥有全部 19 个资料权限节点。
+- 管理员通过现有管理员回退拥有全部 20 个资料权限节点。
 - 所有修改请求都要求登录 Cookie 和 CSRF token；前端按钮可见性不是授权边界。
 
 ## 回收站语义
@@ -112,6 +114,22 @@ Schema 19 增加 `media_metadata_revisions` 和 `media_replacements`。媒体标
 视频转录稿也使用同一回收站，但归档仅隐藏目录壳并把当前媒体标记为 `archived`，不撤销正式 head 或立即删除索引，因而可原样恢复。活动转录或发布索引任务会阻止归档和永久删除。
 
 正在发布或仍有活动索引任务的资料返回 `409`。版本不一致返回 `409`，权限不足返回 `403`，不存在或已归档返回 `404`。
+
+## 目录删除语义
+
+分类管理和资料管理的目录条目复用同一删除确认窗口。预览接口返回完整目录路径、目录版本、子目录数、普通资料数、视频转录稿数、上传任务数和索引任务数；执行接口再次校验目录版本，避免预览后目录状态发生变化。
+
+普通删除要求目标目录树内没有资料、视频转录稿、上传任务或索引任务。删除父目录时一并删除其空子目录，并按剩余兄弟目录的现有顺序重新生成连续编号。系统一级分类不能删除。
+
+系统管理员可在普通删除被内容阻止时切换为强制永久删除。操作必须同时输入预览返回的完整目录路径并勾选不可恢复确认；服务端要求 `category.force_delete`，不能通过前端显隐绕过。强制删除会：
+
+1. 将目录树内仍在运行的索引和分类调整任务标记为失败，防止 worker 在删除后继续提交；
+2. 清除普通资料（包括回收站资料）、版本、发布记录、上传批次和索引任务；
+3. 删除对应 Qdrant points、`parents.sqlite` 行和发布副本，仅在没有其他版本引用时删除对象文件；
+4. 删除目录树并重新生成同级目录的连续编号；
+5. 在 `category_force_delete_runs` 和资料审计事件中记录结果，外部存储清理不完整时标记为 `partial` 并向操作者返回明确错误。
+
+系统一级分类和包含视频转录稿的目录树始终禁止强制删除；视频完整删除继续由视频管理的独立生命周期负责。上传路径必须位于受管内容根目录内，符号链接、路径逃逸和过宽目录均被拒绝。强制删除在 HTTP 请求内同步执行，大目录可能受到网关超时限制，当前没有后台重试界面。
 
 ## 恢复边界
 

@@ -2022,6 +2022,54 @@ def test_category_manager_cannot_grant_content_permissions(content_api):
     ).status_code == 403
 
 
+def test_category_force_delete_requires_dedicated_permission_and_exact_path(content_api):
+    client, sessions, _queued, _db_path = content_api
+    created = client.post(
+        "/api/admin/content/categories",
+        json={"parent_id": "cat-04", "display_code": "01", "display_name": "强删权限测试", "sort_order": 10},
+        **_auth(sessions, "category_manager", csrf=True),
+    )
+    assert created.status_code == 200
+    category = created.json()
+    preview = client.get(
+        f"/api/admin/content/categories/{category['id']}/delete-preview",
+        **_auth(sessions, "category_manager"),
+    )
+    assert preview.status_code == 200
+
+    body = {
+        "expected_version": category["version"], "confirmed": True, "force": True,
+        "typed_path": preview.json()["full_path"],
+    }
+    denied = client.request(
+        "DELETE", f"/api/admin/content/categories/{category['id']}", json=body,
+        **_auth(sessions, "category_manager", csrf=True),
+    )
+    assert denied.status_code == 403
+
+    wrong_path = client.request(
+        "DELETE", f"/api/admin/content/categories/{category['id']}",
+        json={**body, "typed_path": f" {preview.json()['full_path']}"},
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert wrong_path.status_code == 400
+    assert "完整目录路径" in wrong_path.json()["detail"]
+
+    protected = client.get(
+        "/api/admin/content/categories/cat-04/delete-preview", **_auth(sessions, "admin")
+    ).json()
+    blocked = client.request(
+        "DELETE", "/api/admin/content/categories/cat-04",
+        json={
+            "expected_version": protected["version"], "confirmed": True, "force": True,
+            "typed_path": protected["full_path"],
+        },
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert blocked.status_code == 409
+    assert "系统默认分类" in blocked.json()["detail"]
+
+
 @pytest.mark.parametrize("employee_id", ["plain", "category_manager"])
 def test_non_admin_cannot_read_or_maintain_permission_catalog_or_groups(content_api, employee_id):
     client, sessions, _queued, _db_path = content_api
@@ -2064,13 +2112,13 @@ def test_permission_catalog_and_dependency_validation(content_api):
     admin_write = _auth(sessions, "admin", csrf=True)
     catalog = client.get("/api/admin/content/permission-catalog", **admin_read)
     assert catalog.status_code == 200
-    assert catalog.json()["schema_version"] == 5
+    assert catalog.json()["schema_version"] == 6
     assert [item["key"] for item in catalog.json()["permissions"]] == [
         "workspace.view", "item.view", "item.download", "category.view", "item.upload", "item.submit",
         "item.move_draft", "item.archive_draft", "item.review", "item.move_review",
         "item.publish", "item.reclassify_published", "item.archive_published", "trash.view", "trash.restore",
         "trash.purge", "trash.policy_manage",
-        "category.manage", "folder.request", "folder.review", "import.server", "index.view",
+        "category.manage", "category.force_delete", "folder.request", "folder.review", "import.server", "index.view",
     ]
     definitions = {item["key"]: item for item in catalog.json()["permissions"]}
     assert definitions["item.download"]["dependencies"] == [

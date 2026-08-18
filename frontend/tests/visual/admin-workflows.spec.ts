@@ -936,6 +936,37 @@ test.describe("分类管理", () => {
     expect(request.postDataJSON()).toEqual({ target_position: 1, confirm_number_shift: true, expected_version: 2 });
   });
 
+  test("force delete keeps destructive confirmation explicit and contained", async ({ page }) => {
+    await openTab(page, "分类管理", "normal", "admin", { includeChildFolder: true });
+    await page.getByRole("treeitem", { name: /项目资料/ }).click();
+    const editor = page.viewportSize()!.width < 1024
+      ? page.getByRole("dialog", { name: "项目资料" })
+      : page.locator("[aria-labelledby='category-list-title']").getByText("基本信息").locator("xpath=ancestor::div[contains(@class,'h-full')]");
+    await editor.getByRole("button", { name: "删除文件夹" }).click();
+
+    let dialog = page.getByRole("dialog", { name: "删除文件夹" });
+    await expect(dialog).toContainText("资料（含回收站）：2 份");
+    await dialog.getByRole("button", { name: "强制永久删除" }).click();
+    dialog = page.getByRole("dialog", { name: "强制永久删除文件夹" });
+    await expect(dialog).toContainText("此操作不可恢复");
+    await expect(dialog).toContainText("其中回收站资料");
+    const confirm = dialog.getByRole("button", { name: "确认永久删除" });
+    await expect(confirm).toBeDisabled();
+    await dialog.getByLabel("输入完整目录路径确认").fill("04 项目资料");
+    await dialog.getByRole("checkbox").check();
+    await expect(confirm).toBeEnabled();
+    await confirm.scrollIntoViewIfNeeded();
+    await expectInViewport(confirm);
+    await expectNoBodyOverflow(page);
+
+    const deleteRequest = page.waitForRequest((request) => request.method() === "DELETE" && request.url().endsWith("/api/admin/content/categories/cat-project"));
+    await confirm.click();
+    const request = await deleteRequest;
+    expect(request.postDataJSON()).toEqual({
+      expected_version: 2, confirmed: true, force: true, typed_path: "04 项目资料",
+    });
+  });
+
   for (const scenario of ["loading", "empty", "error"] as const) {
     test(`${scenario} state is explicit and contained`, async ({ page }) => {
       await openTab(page, "分类管理", scenario, "admin", { includeChildFolder: true });

@@ -462,6 +462,251 @@ def get_category_delete_preview(conn: sqlite3.Connection, category_id: str) -> d
     return {key: value for key, value in preview.items() if key != "subtree_ids"}
 
 
+_PROTECTED_ROOT_CATEGORY_KEYS = frozenset({
+    "industry_standards", "client_requirements", "company_standards",
+    "project_materials", "training_materials", "project_experience",
+    "pending_confirmation",
+})
+
+
+def _category_force_delete_preview(conn: sqlite3.Connection, category_id: str) -> dict[str, object]:
+    base = _category_delete_preview(conn, category_id)
+    category = conn.execute(
+        "SELECT category_key,parent_id,level FROM category_nodes WHERE id=? AND deleted_at IS NULL",
+        (category_id,),
+    ).fetchone()
+    subtree_ids = list(base["subtree_ids"])
+    placeholders = ",".join("?" for _ in subtree_ids)
+    content_rows = conn.execute(
+        f"""SELECT i.id,i.content_kind,i.archived_at,v.id AS version_id
+            FROM content_items i
+            LEFT JOIN content_versions v ON v.item_id=i.id
+             AND v.version_number=(SELECT max(v2.version_number) FROM content_versions v2 WHERE v2.item_id=i.id)
+            WHERE i.category_id IN ({placeholders})""",
+        subtree_ids,
+    ).fetchall()
+    active_index_count = int(conn.execute(
+        f"""SELECT count(*) FROM content_index_jobs j
+            JOIN content_versions v ON v.id=j.version_id
+            JOIN content_items i ON i.id=v.item_id
+            WHERE i.category_id IN ({placeholders})
+              AND j.status IN ('pending','parsing','chunking','summarizing','embedding')""",
+        subtree_ids,
+    ).fetchone()[0])
+    upload_batch_count = int(conn.execute(
+        f"""SELECT count(*) FROM upload_batches b
+            WHERE b.target_category_id IN ({placeholders})
+               OR b.id IN (
+                   SELECT DISTINCT v.source_batch_id FROM content_versions v
+                   JOIN content_items i ON i.id=v.item_id
+                   WHERE i.category_id IN ({placeholders}) AND v.source_batch_id IS NOT NULL
+               )""",
+        [*subtree_ids, *subtree_ids],
+    ).fetchone()[0])
+    protected_category = bool(
+        category
+        and category["parent_id"] is None
+        and category["category_key"] in _PROTECTED_ROOT_CATEGORY_KEYS
+    )
+    media_count = sum(1 for row in content_rows if row["content_kind"] == "media_transcript")
+    documents = [row for row in content_rows if row["content_kind"] == "document"]
+    base.update({
+        "active_index_count": active_index_count,
+        "archived_content_count": sum(1 for row in documents if row["archived_at"] is not None),
+        "active_content_count": sum(1 for row in documents if row["archived_at"] is None),
+        "upload_batch_count": upload_batch_count,
+        "media_transcript_count": media_count,
+        "can_force_delete": not protected_category and media_count == 0,
+        "protected_category": protected_category,
+    })
+    return base
+
+
+def get_category_force_delete_preview(conn: sqlite3.Connection, category_id: str) -> dict[str, object]:
+    preview = _category_force_delete_preview(conn, category_id)
+    return {key: value for key, value in preview.items() if key != "subtree_ids"}
+
+
+def force_delete_category(
+    conn: sqlite3.Connection,
+    category_id: str,
+    *,
+    expected_version: int,
+    confirmed: bool,
+    typed_path: str,
+    actor_user_id: int,
+) -> dict[str, object]:
+    if not confirmed:
+        raise ValueError("category_delete_confirmation_required")
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        preview = _category_force_delete_preview(conn, category_id)
+        if int(preview["version"]) != expected_version:
+            raise ValueError("category_version_conflict")
+        if typed_path != str(preview["full_path"]):
+            raise ValueError("category_force_delete_path_confirmation_required")
+        if not bool(preview["can_force_delete"]):
+            if preview["protected_category"]:
+                raise ValueError("category_force_delete_protected")
+            raise ValueError("category_force_delete_media_blocked")
+        subtree_ids = list(preview["subtree_ids"])
+        placeholders = ",".join("?" for _ in subtree_ids)
+        now = _now()
+        run_id = f"category-force-delete-{uuid.uuid4().hex}"
+        conn.execute(
+            """INSERT INTO category_force_delete_runs(
+               id,category_id,category_path,status,folder_count,item_count,upload_batch_count,
+               index_job_count,actor_user_id,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            (run_id, category_id, preview["full_path"], "running", preview["folder_count"],
+             preview["content_count"], preview["upload_batch_count"], preview["active_index_count"],
+             actor_user_id, now),
+        )
+        item_rows = conn.execute(
+            f"""SELECT i.id,v.id AS version_id FROM content_items i
+                JOIN content_versions v ON v.item_id=i.id
+                 AND v.version_number=(SELECT max(v2.version_number) FROM content_versions v2 WHERE v2.item_id=i.id)
+                WHERE i.category_id IN ({placeholders}) AND i.content_kind='document'""",
+            subtree_ids,
+        ).fetchall()
+        batch_rows = conn.execute(
+            f"""SELECT id,storage_rel_path,manifest_rel_path FROM upload_batches b
+                WHERE b.target_category_id IN ({placeholders})
+                   OR b.id IN (
+                       SELECT DISTINCT v.source_batch_id FROM content_versions v
+                       JOIN content_items i ON i.id=v.item_id
+                       WHERE i.category_id IN ({placeholders}) AND v.source_batch_id IS NOT NULL
+                   )""",
+            [*subtree_ids, *subtree_ids],
+        ).fetchall()
+        # Stop new work from racing the purge. Workers re-check these terminal states before processing.
+        stopped_index_jobs = conn.execute(
+            f"""UPDATE content_index_jobs SET status='failed',error_code='category_force_deleted',
+                error_summary='目录已强制永久删除',finished_at=?,updated_at=?
+                WHERE version_id IN (SELECT v.id FROM content_versions v JOIN content_items i ON i.id=v.item_id
+                                     WHERE i.category_id IN ({placeholders}))
+                  AND status IN ('pending','parsing','chunking','summarizing','embedding')""",
+            [now, now, *subtree_ids],
+        ).rowcount
+        conn.execute(
+            f"""UPDATE content_reclassification_jobs SET status='failed',error_code='category_force_deleted',
+                error_summary='目录已强制永久删除',finished_at=?,updated_at=?
+                WHERE (source_category_id IN ({placeholders}) OR target_category_id IN ({placeholders}))
+                  AND status IN ('pending','applying','committing','rolling_back')""",
+            [now, now, *subtree_ids, *subtree_ids],
+        )
+        conn.execute(
+            f"""UPDATE upload_batches SET status='failed',error_summary='目录已强制永久删除',updated_at=?
+                WHERE (target_category_id IN ({placeholders})
+                   OR id IN (
+                       SELECT DISTINCT v.source_batch_id FROM content_versions v
+                       JOIN content_items i ON i.id=v.item_id
+                       WHERE i.category_id IN ({placeholders}) AND v.source_batch_id IS NOT NULL
+                   ))
+                  AND status IN ('staging','validating','awaiting_mapping','ready_for_review')""",
+            [now, *subtree_ids, *subtree_ids],
+        )
+        conn.execute(
+            f"""UPDATE content_folder_requests SET status='rejected',reviewed_by=?,review_note='目录已强制永久删除',reviewed_at=?,updated_at=?
+                WHERE parent_category_id IN ({placeholders}) AND status='pending'""",
+            [actor_user_id, now, now, *subtree_ids],
+        )
+        for row in item_rows:
+            item = conn.execute("SELECT archived_at FROM content_items WHERE id=?", (row["id"],)).fetchone()
+            if item is not None and item["archived_at"] is None:
+                _archive_content_item_locked(
+                    conn, str(row["id"]), expected_version_id=str(row["version_id"]),
+                    actor_user_id=actor_user_id, can_archive_draft=True,
+                    can_archive_published=True, allow_in_progress=True, now=now,
+                    audit_metadata={"archive_reason": "category_force_delete", "run_id": run_id},
+                )
+        conn.execute(
+            f"""UPDATE category_import_aliases SET is_active=0,updated_at=?
+                WHERE is_active=1 AND (parent_category_id IN ({placeholders})
+                  OR target_category_id IN ({placeholders}))""",
+            [now, *subtree_ids, *subtree_ids],
+        )
+        conn.execute(
+            f"""UPDATE category_nodes SET is_active=0,chat_search_enabled=0,chat_filter_selectable=0,
+                deleted_at=?,deleted_by=?,updated_at=?,version=version+1
+                WHERE id IN ({placeholders}) AND deleted_at IS NULL""",
+            [now, actor_user_id, now, *subtree_ids],
+        )
+        remaining_siblings = sorted(
+            _category_siblings(conn, preview["parent_id"]), key=_category_sibling_sort_key
+        )
+        number_changes = _rewrite_category_positions(conn, remaining_siblings, now=now)
+        audit_event(
+            conn, "category.force_deleted", actor_user_id=actor_user_id, category_id=category_id,
+            metadata={"path": preview["full_path"], "run_id": run_id, "deleted_category_ids": subtree_ids,
+                      "sibling_number_changes": number_changes},
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+
+    from .content_trash_cleanup import delete_upload_batch_storage, purge_items
+
+    item_pairs = [(str(row["id"]), str(row["version_id"])) for row in item_rows]
+    deleted_items = 0
+    qdrant_points = 0
+    deleted_objects = 0
+    errors: list[str] = []
+    for start in range(0, len(item_pairs), 20):
+        try:
+            result = purge_items(conn, item_pairs[start:start + 20], actor_user_id=actor_user_id,
+                                 trigger_type="manual", overdue_only=False)
+        except Exception as exc:  # noqa: BLE001 - preserve the force-delete run for operator follow-up
+            errors.append(f"purge:{type(exc).__name__}")
+            continue
+        if result["status"] != "succeeded":
+            errors.append(f"purge:{result['status']}")
+        deleted_items += int(result["succeeded_count"])
+        purge_run = conn.execute(
+            """SELECT coalesce(sum(qdrant_points_deleted),0),coalesce(sum(object_deleted),0)
+               FROM content_trash_purge_items WHERE run_id=? AND status='succeeded'""",
+            (result["run_id"],),
+        ).fetchone()
+        qdrant_points += int(purge_run[0])
+        deleted_objects += int(purge_run[1])
+
+    deleted_batches = 0
+    for batch in batch_rows:
+        try:
+            if conn.execute("SELECT 1 FROM content_versions WHERE source_batch_id=? LIMIT 1", (batch["id"],)).fetchone():
+                continue
+            delete_upload_batch_storage(batch["storage_rel_path"], batch["manifest_rel_path"])
+            conn.execute("DELETE FROM upload_batches WHERE id=?", (batch["id"],))
+            conn.commit()
+            deleted_batches += 1
+        except Exception as exc:  # noqa: BLE001 - retain a retryable run record
+            conn.rollback()
+            errors.append(f"batch:{type(exc).__name__}")
+    cleanup_status = "partial" if errors else "succeeded"
+    conn.execute(
+        """UPDATE category_force_delete_runs SET status=?,item_count=?,upload_batch_count=?,qdrant_point_count=?,
+           object_count=?,error_summary=?,finished_at=? WHERE id=?""",
+        (cleanup_status, deleted_items, deleted_batches, qdrant_points,
+         deleted_objects, "; ".join(errors)[:500] if errors else None, _now(), run_id),
+    )
+    conn.commit()
+    return {
+        "deleted_folder_count": int(preview["folder_count"]),
+        "renumbered_sibling_count": len(number_changes),
+        "parent_id": preview["parent_id"],
+        "categories": list_categories(conn, include_inactive=True),
+        "force_delete": True,
+        "cleanup_status": cleanup_status,
+        "cleanup_error_count": len(errors),
+        "run_id": run_id,
+        "deleted_item_count": deleted_items,
+        "deleted_upload_batch_count": deleted_batches,
+        "deleted_index_job_count": int(stopped_index_jobs),
+        "qdrant_point_count": qdrant_points,
+        "deleted_object_count": deleted_objects,
+    }
+
+
 def delete_category(
     conn: sqlite3.Connection,
     category_id: str,
@@ -1860,6 +2105,7 @@ def _archive_content_item_locked(
     actor_user_id: int,
     can_archive_draft: bool,
     can_archive_published: bool,
+    allow_in_progress: bool = False,
     now: int,
     audit_metadata: dict[str, object] | None = None,
 ) -> ArchivedContent:
@@ -1906,9 +2152,9 @@ def _archive_content_item_locked(
            LIMIT 1""",
         (item_id,),
     ).fetchone()
-    if row["lifecycle_status"] == "publishing" or active_job is not None:
+    if not allow_in_progress and (row["lifecycle_status"] == "publishing" or active_job is not None):
         raise ValueError("content_delete_in_progress")
-    if active_reclassification is not None:
+    if not allow_in_progress and active_reclassification is not None:
         raise ValueError("content_delete_reclassification_in_progress")
 
     publication_withdrawn = row["head_publication_id"] is not None

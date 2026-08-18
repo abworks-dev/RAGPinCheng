@@ -462,13 +462,22 @@ class DeleteManagedCategoryPreviewDTO(BaseModel):
     pending_request_count: int
     active_upload_count: int
     active_reclassification_count: int
+    active_index_count: int
+    archived_content_count: int
+    active_content_count: int
+    upload_batch_count: int
+    media_transcript_count: int
     renumbered_sibling_count: int
     can_delete: bool
+    can_force_delete: bool
+    protected_category: bool
 
 
 class DeleteManagedCategoryRequest(BaseModel):
     expected_version: int = Field(gt=0)
     confirmed: bool
+    force: bool = False
+    typed_path: str | None = Field(default=None, max_length=2000)
 
 
 class DeleteManagedCategoryResponse(BaseModel):
@@ -476,6 +485,15 @@ class DeleteManagedCategoryResponse(BaseModel):
     renumbered_sibling_count: int
     parent_id: str | None
     categories: list[ManagedCategoryDTO]
+    force_delete: bool = False
+    cleanup_status: Literal["succeeded", "partial"] | None = None
+    cleanup_error_count: int = 0
+    run_id: str | None = None
+    deleted_item_count: int = 0
+    deleted_upload_batch_count: int = 0
+    deleted_index_job_count: int = 0
+    qdrant_point_count: int = 0
+    deleted_object_count: int = 0
 
 
 class ManagedUploadPreflightEntryRequest(BaseModel):

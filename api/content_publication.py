@@ -59,6 +59,10 @@ _FAILURE_DETAILS = {
 _FAILURE_SUMMARIES = {code: detail[0] for code, detail in _FAILURE_DETAILS.items()}
 
 
+class ContentPublicationCancelled(RuntimeError):
+    pass
+
+
 def normalize_failure_code(error_code: object) -> str | None:
     if error_code is None:
         return None
@@ -84,13 +88,25 @@ def _update_job(index_job_id: str, status: str, **fields: object) -> None:
     values.append(index_job_id)
     conn = connect()
     try:
-        conn.execute(
-            f"UPDATE content_index_jobs SET {','.join(assignments)} WHERE id=?",
-            values,
+        result = conn.execute(
+            f"UPDATE content_index_jobs SET {','.join(assignments)} "
+            f"WHERE id=? AND status IN ({','.join('?' * len(_ACTIVE_STATUSES))})",
+            [*values, *sorted(_ACTIVE_STATUSES)],
         )
         conn.commit()
+        if result.rowcount != 1:
+            raise ContentPublicationCancelled("content_publication_cancelled")
     finally:
         conn.close()
+
+
+def _delete_cancelled_artifacts(row: sqlite3.Row) -> None:
+    try:
+        from .content_trash_cleanup import _delete_external
+
+        _delete_external(str(row["version_id"]), str(row["item_id"]), str(row["original_filename"]))
+    except Exception:  # noqa: BLE001 - cancellation cleanup is best-effort and separately logged
+        logger.exception("failed to clean cancelled publication artifacts for %s", row["version_id"])
 
 
 def run_content_publication(index_job_id: str) -> None:
@@ -166,9 +182,13 @@ def run_content_publication(index_job_id: str) -> None:
         )
         index_managed_content(source_path, row["doc_type"], metadata, on_status)
         _promote(index_job_id)
+    except ContentPublicationCancelled:
+        logger.info("managed publication job %s was cancelled", index_job_id)
+        _delete_cancelled_artifacts(row)
     except Exception as exc:  # noqa: BLE001 - persisted failure keeps worker alive
         logger.exception("managed publication job %s failed", index_job_id)
-        _fail(index_job_id, _classify_failure(exc, current_stage))
+        if not _fail(index_job_id, _classify_failure(exc, current_stage)):
+            _delete_cancelled_artifacts(row)
 
 
 def _classify_failure(exc: Exception, stage: str) -> str:
@@ -216,7 +236,7 @@ def _promote(index_job_id: str) -> None:
             (index_job_id,),
         ).fetchone()
         if row is None:
-            raise RuntimeError("content_index_job_not_promotable")
+            raise ContentPublicationCancelled("content_publication_cancelled")
         previous = conn.execute(
             "SELECT current_version_id FROM content_item_heads WHERE item_id=?",
             (row["item_id"],),
@@ -269,18 +289,21 @@ def _promote(index_job_id: str) -> None:
         conn.close()
 
 
-def _fail(index_job_id: str, error_code: str) -> None:
+def _fail(index_job_id: str, error_code: str) -> bool:
     conn = connect()
     now = int(time.time())
     try:
         conn.execute("BEGIN IMMEDIATE")
         row = conn.execute(
-            "SELECT publication_id,version_id FROM content_index_jobs WHERE id=?",
+            "SELECT publication_id,version_id,status,error_code FROM content_index_jobs WHERE id=?",
             (index_job_id,),
         ).fetchone()
         if row is None:
             conn.rollback()
-            return
+            return False
+        if row["status"] == "failed" and row["error_code"] == "category_force_deleted":
+            conn.rollback()
+            return False
         error_code = normalize_failure_code(error_code) or "unknown_publication_failure"
         summary = _FAILURE_SUMMARIES[error_code]
         conn.execute(
@@ -296,6 +319,7 @@ def _fail(index_job_id: str, error_code: str) -> None:
             (now, row["version_id"]),
         )
         conn.commit()
+        return True
     except Exception:
         conn.rollback()
         raise

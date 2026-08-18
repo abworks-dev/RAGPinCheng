@@ -88,7 +88,7 @@ describe("AdminUsersPage", () => {
       { id: "bim", group_key: "bim_engineer", display_name: "BIM工程师", permissions: organizerPermissions, is_system: true, is_active: true, updated_at: 1 },
       { id: "owner", group_key: "content_owner", display_name: "资料负责人", permissions: reviewerPermissions, is_system: true, is_active: true, updated_at: 1 },
     ]);
-    mocks.catalog.mockResolvedValue({ schema_version: 5, permissions: permissionDefinitions });
+    mocks.catalog.mockResolvedValue({ schema_version: 6, permissions: permissionDefinitions });
     mocks.updatePermissions.mockResolvedValue({});
     mocks.createGroup.mockResolvedValue({});
   });

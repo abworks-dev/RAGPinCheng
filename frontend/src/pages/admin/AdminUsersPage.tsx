@@ -96,7 +96,7 @@ export function AdminUsersPage() {
         adminContentApi.permissionGroups(),
         adminContentApi.permissionCatalog(),
       ]);
-      if (catalog.schema_version !== 5) throw new Error("资料权限目录版本不兼容");
+      if (catalog.schema_version !== 6) throw new Error("资料权限目录版本不兼容");
       setGroups(permissionGroups);
       setPermissionOptions(catalog.permissions);
     } catch (caught) {

@@ -36,6 +36,35 @@ _ACTIVE_TRANSCRIPTION_STATES = ("pending", "running")
 _ACTIVE_TRANSCRIPT_INDEX_STATES = ("pending", "parsing", "chunking", "embedding")
 
 
+def delete_upload_batch_storage(storage_rel_path: str | None, manifest_rel_path: str | None) -> None:
+    """Remove only batch-owned inbox/manifest paths after DB references are gone."""
+    allowed_roots = (_storage.inbox_root.resolve(strict=False), _storage.manifests_root.resolve(strict=False))
+    for relative in (storage_rel_path, manifest_rel_path):
+        if not relative:
+            continue
+        lexical_candidate = _storage.root / relative
+        candidate = lexical_candidate.resolve(strict=False)
+        owning_root = next(
+            (root for root in allowed_roots if candidate != root and root in candidate.parents),
+            None,
+        )
+        if owning_root is None:
+            raise ValueError("content_batch_path_escape")
+        if owning_root == allowed_roots[0] and len(candidate.relative_to(owning_root).parts) < 2:
+            raise ValueError("content_batch_path_escape")
+        current = lexical_candidate
+        while current != _storage.root and _storage.root in current.parents:
+            if current.is_symlink():
+                raise ValueError("content_batch_symlink_rejected")
+            current = current.parent
+        if lexical_candidate.is_symlink():
+            raise ValueError("content_batch_symlink_rejected")
+        if lexical_candidate.is_dir():
+            shutil.rmtree(lexical_candidate)
+        elif lexical_candidate.exists():
+            lexical_candidate.unlink()
+
+
 def seed_trash_settings_from_environment() -> None:
     retention_days = min(3650, max(1, CONTENT_TRASH_RETENTION_DAYS))
     warning_days = min(365, max(0, CONTENT_TRASH_EXPIRING_WARNING_DAYS))

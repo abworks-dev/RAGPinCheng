@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
-CONTENT_PERMISSION_CATALOG_VERSION = 5
+CONTENT_PERMISSION_CATALOG_VERSION = 6
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,6 +86,11 @@ CONTENT_PERMISSION_DEFINITIONS = (
     ContentPermissionDefinition(
         "category.manage", "category", "分类与目录", "维护分类", "新增、修改、启用或停用资料分类。",
         ("workspace.view", "category.view"),
+    ),
+    ContentPermissionDefinition(
+        "category.force_delete", "category", "分类与目录", "强制永久删除目录",
+        "永久删除目录及其关联资料、上传任务和索引数据，此操作不可恢复。",
+        ("workspace.view", "category.view", "category.manage", "trash.purge"),
     ),
     ContentPermissionDefinition(
         "folder.request", "category", "分类与目录", "申请目录", "提交子目录创建申请。",
@@ -178,7 +183,8 @@ CONTENT_PERMISSION_V2_SYSTEM_CONTENT_PERMISSION_GROUPS = {
             definition.key
             for definition in CONTENT_PERMISSION_DEFINITIONS
             if definition.key not in {
-                "item.download", "item.reclassify_published", "trash.purge", "trash.policy_manage"
+                "item.download", "item.reclassify_published", "trash.purge", "trash.policy_manage",
+                "category.force_delete",
             }
         }),
     ),
@@ -203,16 +209,19 @@ SYSTEM_CONTENT_PERMISSION_GROUPS = {
     "system_admin": ("系统管理员", CONTENT_PERMISSIONS),
 }
 
-PRE_RECLASSIFICATION_SYSTEM_CONTENT_PERMISSION_GROUPS = {
-    key: (display_name, permissions - {
-        "item.reclassify_published", "trash.purge", "trash.policy_manage"
-    })
+PRE_CATEGORY_FORCE_DELETE_SYSTEM_CONTENT_PERMISSION_GROUPS = {
+    key: (display_name, permissions - {"category.force_delete"})
     for key, (display_name, permissions) in SYSTEM_CONTENT_PERMISSION_GROUPS.items()
+}
+
+PRE_RECLASSIFICATION_SYSTEM_CONTENT_PERMISSION_GROUPS = {
+    key: (display_name, permissions - {"item.reclassify_published", "trash.purge", "trash.policy_manage"})
+    for key, (display_name, permissions) in PRE_CATEGORY_FORCE_DELETE_SYSTEM_CONTENT_PERMISSION_GROUPS.items()
 }
 
 PRE_TRASH_LIFECYCLE_SYSTEM_CONTENT_PERMISSION_GROUPS = {
     key: (display_name, permissions - {"trash.purge", "trash.policy_manage"})
-    for key, (display_name, permissions) in SYSTEM_CONTENT_PERMISSION_GROUPS.items()
+    for key, (display_name, permissions) in PRE_CATEGORY_FORCE_DELETE_SYSTEM_CONTENT_PERMISSION_GROUPS.items()
 }
 
 

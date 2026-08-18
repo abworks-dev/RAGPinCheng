@@ -15,13 +15,14 @@ from api.content_permission_catalog import (
 )
 from api.content_import import import_server_batch, resolve_import_category
 from api.content_storage import ContentStorage, StoredContentObject
-from api.content_store import archive_content_item, create_category, create_content_revision, create_web_batch, delete_category, get_category_delete_preview, list_categories, move_content_item, register_uploaded_document, restore_content_item
+from api.content_store import archive_content_item, create_category, create_content_revision, create_web_batch, delete_category, force_delete_category, get_category_delete_preview, get_category_force_delete_preview, list_categories, move_content_item, register_uploaded_document, restore_content_item
 from api.content_store import (
     create_publication_job,
     review_version,
     submit_version_for_review,
 )
 from api import content_publication
+from api import content_trash_cleanup
 from api import routes_content
 from api.auth import CurrentUser
 from api.schemas import (
@@ -110,6 +111,156 @@ def test_category_delete_is_blocked_by_archived_content(tmp_path):
     with pytest.raises(ValueError, match="category_delete_blocked"):
         delete_category(conn, target["id"], expected_version=target["version"], confirmed=True, actor_user_id=1)
     assert conn.execute("SELECT deleted_at FROM category_nodes WHERE id=?", (target["id"],)).fetchone()[0] is None
+    conn.close()
+
+
+def test_category_force_delete_purges_documents_tasks_batches_and_renumbers(tmp_path, monkeypatch):
+    conn = _db(tmp_path)
+    actor = conn.execute("SELECT id FROM users WHERE employee_id='u1'").fetchone()[0]
+    target = create_category(conn, category_key=None, parent_id="cat-04", display_code="01", display_name="待强删", sort_order=10, target_position=1, confirm_number_shift=True, actor_user_id=actor)
+    child = create_category(conn, category_key=None, parent_id=target["id"], display_code="01", display_name="子目录", sort_order=10, target_position=1, confirm_number_shift=True, actor_user_id=actor)
+    sibling = create_category(conn, category_key=None, parent_id="cat-04", display_code="02", display_name="保留", sort_order=20, target_position=2, confirm_number_shift=True, actor_user_id=actor)
+    storage = ContentStorage(tmp_path / "content")
+    storage.ensure_layout()
+
+    def upload(category_id: str, filename: str, payload: bytes):
+        digest = hashlib.sha256(payload).hexdigest()
+        object_path = storage.object_path_for_sha256(digest)
+        object_path.parent.mkdir(parents=True, exist_ok=True)
+        object_path.write_bytes(payload)
+        batch_id = create_web_batch(conn, actor_user_id=actor, target_category_id=category_id)
+        batch_path = storage.root / f"inbox/web/{batch_id}"
+        batch_path.mkdir(parents=True, exist_ok=True)
+        (batch_path / "staged.upload").write_bytes(payload)
+        uploaded = register_uploaded_document(
+            conn, batch_id=batch_id, category_id=category_id, title=filename,
+            original_filename=filename, doc_type="markdown",
+            stored=StoredContentObject(digest, len(payload), "text/markdown",
+                                       object_path.relative_to(storage.root).as_posix(), object_path, True),
+            actor_user_id=actor,
+        )
+        return batch_id, uploaded, object_path
+
+    active_batch, active, active_object = upload(target["id"], "active.md", b"active")
+    archived_batch, archived, archived_object = upload(child["id"], "archived.md", b"archived")
+    shared_batch = create_web_batch(conn, actor_user_id=actor, target_category_id="cat-03")
+    shared = register_uploaded_document(
+        conn, batch_id=shared_batch, category_id="cat-03", title="共享对象",
+        original_filename="shared.md", doc_type="markdown",
+        stored=StoredContentObject(
+            hashlib.sha256(b"active").hexdigest(), len(b"active"), "text/markdown",
+            active_object.relative_to(storage.root).as_posix(), active_object, False,
+        ),
+        actor_user_id=actor,
+    )
+    archive_content_item(
+        conn, archived.item_id, expected_version_id=archived.version_id, actor_user_id=actor,
+        can_archive_draft=True, can_archive_published=True,
+    )
+    conn.execute("UPDATE content_versions SET lifecycle_status='publishing' WHERE id=?", (active.version_id,))
+    conn.execute(
+        "INSERT INTO content_publications(id,version_id,status,publisher_id,created_at,updated_at) VALUES ('pub-force',?,'indexing',?,1,1)",
+        (active.version_id, actor),
+    )
+    conn.execute(
+        """INSERT INTO content_index_jobs
+           (id,publication_id,version_id,attempt_number,target_index_id,status,created_at,updated_at)
+           VALUES ('job-force','pub-force',?,1,'target-force','embedding',1,1)""",
+        (active.version_id,),
+    )
+    conn.commit()
+
+    preview = get_category_force_delete_preview(conn, target["id"])
+    assert (preview["active_content_count"], preview["archived_content_count"]) == (1, 1)
+    assert (preview["active_index_count"], preview["upload_batch_count"]) == (1, 2)
+    with pytest.raises(ValueError, match="category_force_delete_path_confirmation_required"):
+        force_delete_category(
+            conn, target["id"], expected_version=target["version"], confirmed=True,
+            typed_path="错误路径", actor_user_id=actor,
+        )
+    assert conn.execute("SELECT deleted_at FROM category_nodes WHERE id=?", (target["id"],)).fetchone()[0] is None
+
+    monkeypatch.setattr(content_trash_cleanup, "_storage", storage)
+    monkeypatch.setattr(content_trash_cleanup, "_delete_external", lambda *_args: (3, 2))
+    result = force_delete_category(
+        conn, target["id"], expected_version=target["version"], confirmed=True,
+        typed_path=preview["full_path"], actor_user_id=actor,
+    )
+
+    assert result["cleanup_status"] == "succeeded"
+    assert result["deleted_item_count"] == 2
+    assert result["deleted_upload_batch_count"] == 2
+    assert result["deleted_index_job_count"] == 1
+    assert result["qdrant_point_count"] == 6
+    assert conn.execute("SELECT count(*) FROM content_items WHERE id IN (?,?)", (active.item_id, archived.item_id)).fetchone()[0] == 0
+    assert conn.execute("SELECT count(*) FROM upload_batches WHERE id IN (?,?)", (active_batch, archived_batch)).fetchone()[0] == 0
+    assert conn.execute("SELECT count(*) FROM category_nodes WHERE id IN (?,?) AND deleted_at IS NOT NULL", (target["id"], child["id"])).fetchone()[0] == 2
+    assert conn.execute("SELECT display_code FROM category_nodes WHERE id=?", (sibling["id"],)).fetchone()[0] == "01"
+    assert active_object.exists() and not archived_object.exists()
+    assert conn.execute("SELECT 1 FROM content_items WHERE id=?", (shared.item_id,)).fetchone() is not None
+    assert conn.execute("SELECT 1 FROM upload_batches WHERE id=?", (shared_batch,)).fetchone() is not None
+    assert not (storage.root / f"inbox/web/{active_batch}").exists()
+    run = conn.execute("SELECT status,item_count,upload_batch_count FROM category_force_delete_runs WHERE id=?", (result["run_id"],)).fetchone()
+    assert tuple(run) == ("succeeded", 2, 2)
+    assert conn.execute("SELECT 1 FROM content_audit_events WHERE event_type='category.force_deleted'").fetchone() is not None
+    conn.close()
+
+
+def test_category_force_delete_protects_system_roots_and_media_transcripts(tmp_path):
+    conn = _db(tmp_path)
+    actor = conn.execute("SELECT id FROM users WHERE employee_id='u1'").fetchone()[0]
+    protected = get_category_force_delete_preview(conn, "cat-04")
+    assert protected["protected_category"] is True
+    assert protected["can_force_delete"] is False
+    with pytest.raises(ValueError, match="category_force_delete_protected"):
+        force_delete_category(
+            conn, "cat-04", expected_version=protected["version"], confirmed=True,
+            typed_path=protected["full_path"], actor_user_id=actor,
+        )
+
+    target = create_category(conn, category_key=None, parent_id="cat-04", display_code="01", display_name="含转录稿", sort_order=10, target_position=1, confirm_number_shift=True, actor_user_id=actor)
+    conn.execute(
+        """INSERT INTO content_items(id,title,content_kind,category_id,created_by,created_at,updated_at)
+           VALUES ('media-force-block','转录稿','media_transcript',?, ?,1,1)""",
+        (target["id"], actor),
+    )
+    conn.commit()
+    preview = get_category_force_delete_preview(conn, target["id"])
+    assert preview["media_transcript_count"] == 1
+    assert preview["can_force_delete"] is False
+    with pytest.raises(ValueError, match="category_force_delete_media_blocked"):
+        force_delete_category(
+            conn, target["id"], expected_version=target["version"], confirmed=True,
+            typed_path=preview["full_path"], actor_user_id=actor,
+        )
+    conn.close()
+
+
+def test_category_force_delete_records_partial_cleanup_instead_of_leaving_running(tmp_path, monkeypatch):
+    conn = _db(tmp_path)
+    actor = conn.execute("SELECT id FROM users WHERE employee_id='u1'").fetchone()[0]
+    target = create_category(conn, category_key=None, parent_id="cat-04", display_code="01", display_name="部分清理", sort_order=10, target_position=1, confirm_number_shift=True, actor_user_id=actor)
+    batch_id = create_web_batch(conn, actor_user_id=actor, target_category_id=target["id"])
+    conn.execute("UPDATE upload_batches SET storage_rel_path='objects/not-batch-owned' WHERE id=?", (batch_id,))
+    conn.commit()
+    monkeypatch.setattr(content_trash_cleanup, "_storage", ContentStorage(tmp_path / "content"))
+    preview = get_category_force_delete_preview(conn, target["id"])
+
+    result = force_delete_category(
+        conn, target["id"], expected_version=target["version"], confirmed=True,
+        typed_path=preview["full_path"], actor_user_id=actor,
+    )
+
+    assert result["cleanup_status"] == "partial"
+    assert result["cleanup_error_count"] == 1
+    run = conn.execute(
+        "SELECT status,error_summary,finished_at FROM category_force_delete_runs WHERE id=?",
+        (result["run_id"],),
+    ).fetchone()
+    assert run["status"] == "partial"
+    assert run["error_summary"] == "batch:ValueError"
+    assert run["finished_at"] is not None
+    assert conn.execute("SELECT 1 FROM upload_batches WHERE id=?", (batch_id,)).fetchone() is not None
     conn.close()
 
 
@@ -466,6 +617,55 @@ def test_review_publish_promotes_only_completed_candidate(tmp_path, monkeypatch)
     snapshot = SQLitePublishedContentVisibility(tmp_path / "app.sqlite", "strict").snapshot()
     assert snapshot.allows(uploaded.version_id)
     assert snapshot.allows(None) is False
+
+
+def test_force_deleted_publication_job_cannot_resume_or_promote(tmp_path, monkeypatch):
+    conn = _db(tmp_path)
+    actor = conn.execute("SELECT id FROM users WHERE employee_id='u1'").fetchone()[0]
+    storage = ContentStorage(tmp_path / "content")
+    storage.ensure_layout()
+    payload = b"# Cancelled publication"
+    digest = hashlib.sha256(payload).hexdigest()
+    object_path = storage.object_path_for_sha256(digest)
+    object_path.parent.mkdir(parents=True, exist_ok=True)
+    object_path.write_bytes(payload)
+    uploaded = register_uploaded_document(
+        conn, batch_id=create_web_batch(conn, actor_user_id=actor), category_id="cat-03",
+        title="取消发布", original_filename="cancelled.md", doc_type="markdown",
+        stored=StoredContentObject(digest, len(payload), "text/markdown",
+                                   object_path.relative_to(storage.root).as_posix(), object_path, True),
+        actor_user_id=actor,
+    )
+    submit_version_for_review(conn, uploaded.version_id, actor_user_id=actor)
+    review_version(conn, uploaded.version_id, approved=True, note="确认", category_id=None, actor_user_id=actor)
+    _publication_id, job_id = create_publication_job(conn, uploaded.version_id, actor_user_id=actor)
+    conn.close()
+
+    monkeypatch.setattr(content_publication, "connect", lambda: _db_connect(tmp_path / "app.sqlite"))
+    monkeypatch.setattr(content_publication, "_storage", storage)
+    cleaned: list[str] = []
+    monkeypatch.setattr(content_publication, "_delete_cancelled_artifacts", lambda row: cleaned.append(str(row["version_id"])))
+
+    def cancelled_index(_path, _doc_type, _metadata, on_status):
+        on_status("parsing")
+        check = _db_connect(tmp_path / "app.sqlite")
+        check.execute(
+            "UPDATE content_index_jobs SET status='failed',error_code='category_force_deleted' WHERE id=?",
+            (job_id,),
+        )
+        check.commit()
+        check.close()
+        on_status("embedding")
+        raise AssertionError("cancelled indexing must stop at the next stage boundary")
+
+    monkeypatch.setattr(content_publication, "index_managed_content", cancelled_index)
+    content_publication.run_content_publication(job_id)
+
+    check = _db_connect(tmp_path / "app.sqlite")
+    assert tuple(check.execute("SELECT status,error_code FROM content_index_jobs WHERE id=?", (job_id,)).fetchone()) == ("failed", "category_force_deleted")
+    assert check.execute("SELECT count(*) FROM content_item_heads WHERE item_id=?", (uploaded.item_id,)).fetchone()[0] == 0
+    assert cleaned == [uploaded.version_id]
+    check.close()
 
 
 def test_archiving_published_content_withdraws_head_but_preserves_history_and_object(tmp_path, monkeypatch):

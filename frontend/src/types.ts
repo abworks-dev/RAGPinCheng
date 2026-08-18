@@ -142,6 +142,7 @@ export type ContentPermission =
   | "trash.purge"
   | "trash.policy_manage"
   | "category.manage"
+  | "category.force_delete"
   | "folder.request"
   | "folder.review"
   | "import.server"
@@ -356,8 +357,15 @@ export type CategoryDeletePreview = {
   pending_request_count: number;
   active_upload_count: number;
   active_reclassification_count: number;
+  active_index_count: number;
+  archived_content_count: number;
+  active_content_count: number;
+  upload_batch_count: number;
+  media_transcript_count: number;
   renumbered_sibling_count: number;
   can_delete: boolean;
+  can_force_delete: boolean;
+  protected_category: boolean;
 };
 
 export type CategoryDeleteResult = {
@@ -365,6 +373,15 @@ export type CategoryDeleteResult = {
   renumbered_sibling_count: number;
   parent_id: string | null;
   categories: ManagedCategory[];
+  force_delete: boolean;
+  cleanup_status: "succeeded" | "partial" | null;
+  cleanup_error_count: number;
+  run_id: string | null;
+  deleted_item_count: number;
+  deleted_upload_batch_count: number;
+  deleted_index_job_count: number;
+  qdrant_point_count: number;
+  deleted_object_count: number;
 };
 
 export type KnowledgeScope = {

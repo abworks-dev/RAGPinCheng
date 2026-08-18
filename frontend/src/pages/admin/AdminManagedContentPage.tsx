@@ -1461,7 +1461,11 @@ export function AdminManagedContentPage() {
     if (currentFolderId && !result.categories.some((category) => category.id === currentFolderId)) {
       setCurrentFolderId(result.parent_id || "");
     }
-    toast.success(result.deleted_folder_count > 1
+    if (result.force_delete) {
+      if (result.cleanup_status === "partial") {
+        toast.error(`目录已移除，但有 ${result.cleanup_error_count} 项关联数据清理失败，请联系系统管理员`);
+      } else toast.success(`已永久删除 ${result.deleted_item_count} 份资料和 ${result.deleted_folder_count} 个文件夹`);
+    } else toast.success(result.deleted_folder_count > 1
       ? "已删除 " + result.deleted_folder_count + " 个文件夹"
       : "文件夹已删除");
     await load(true);
@@ -2678,7 +2682,7 @@ export function AdminManagedContentPage() {
     </Dialog>
 
     {auditDialog}
-    <CategoryDeleteDialog category={folderDeleteTarget} onClose={() => setFolderDeleteTarget(null)} onDeleted={categoryDeleted} />
+    <CategoryDeleteDialog category={folderDeleteTarget} canForceDelete={can("category.force_delete")} onClose={() => setFolderDeleteTarget(null)} onDeleted={categoryDeleted} />
 
     <Dialog open={Boolean(reviewTarget) && !previewState.parentId} onOpenChange={(open) => {
       if (!open && !previewState.parentId && busyAction !== "review") {
