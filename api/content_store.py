@@ -676,6 +676,8 @@ def force_delete_category(
             if conn.execute("SELECT 1 FROM content_versions WHERE source_batch_id=? LIMIT 1", (batch["id"],)).fetchone():
                 continue
             delete_upload_batch_storage(batch["storage_rel_path"], batch["manifest_rel_path"])
+            # Keep the immutable audit event while releasing its optional batch link.
+            conn.execute("UPDATE content_audit_events SET batch_id=NULL WHERE batch_id=?", (batch["id"],))
             conn.execute("DELETE FROM upload_batches WHERE id=?", (batch["id"],))
             conn.commit()
             deleted_batches += 1

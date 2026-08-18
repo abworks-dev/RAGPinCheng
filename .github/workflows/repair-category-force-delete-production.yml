@@ -1,0 +1,251 @@
+name: Repair Category Force Delete Production Residuals
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_repair:
+        description: Select REPAIR_BATCH_RESIDUALS to repair the approved residual run
+        required: true
+        default: CANCEL
+        type: choice
+        options:
+          - CANCEL
+          - REPAIR_BATCH_RESIDUALS
+      run_ref:
+        description: Hashed diagnostic run reference
+        required: true
+        type: string
+      expected_batch_count:
+        description: Exact residual upload batch count
+        required: true
+        default: "12"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-category-force-delete-repair
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    environment: production-asr
+    runs-on: [self-hosted, linux, ubuntu, production, app]
+    timeout-minutes: 15
+    env:
+      REPO_PATH: ${{ vars.PRODUCTION_APP_REPO_PATH }}
+      BACKUP_DIR: ${{ vars.PRODUCTION_APP_BACKUP_DIRECTORY }}
+      DATA_PATH: ${{ vars.PRODUCTION_APP_DATA_PATH }}
+      COMPOSE_OVERRIDE: ${{ vars.PRODUCTION_APP_COMPOSE_OVERRIDE }}
+      COMPOSE_ENV_FILE: ${{ vars.PRODUCTION_APP_ENV_FILE }}
+      CONTENT_ROOT: ${{ vars.PRODUCTION_CONTENT_ROOT }}
+      CONFIRM_REPAIR: ${{ inputs.confirm_repair }}
+      RUN_REF: ${{ inputs.run_ref }}
+      EXPECTED_BATCH_COUNT: ${{ inputs.expected_batch_count }}
+    steps:
+      - name: Back up, repair the approved residuals, and verify the App
+        run: |
+          set -euo pipefail
+          [ "${CONFIRM_REPAIR}" = "REPAIR_BATCH_RESIDUALS" ] || {
+            echo "ERROR: residual repair was not confirmed"
+            exit 1
+          }
+          [ "${{ github.ref }}" = "refs/heads/master" ] || {
+            echo "ERROR: production residual repair only accepts master"
+            exit 1
+          }
+          [[ "${RUN_REF}" =~ ^[0-9a-f]{12}$ ]] || {
+            echo "ERROR: run_ref must be a 12-character diagnostic hash"
+            exit 1
+          }
+          [[ "${EXPECTED_BATCH_COUNT}" =~ ^[1-9][0-9]?$ ]] || {
+            echo "ERROR: expected_batch_count must be between 1 and 99"
+            exit 1
+          }
+          [ "${CONTENT_ROOT}" = "/data/business/ragpincheng/content" ] || {
+            echo "ERROR: production content root is outside the approved path"
+            exit 1
+          }
+          cd "${REPO_PATH}"
+          COMPOSE=(docker compose -p ragpincheng-prod \
+            -f "${REPO_PATH}/docker/docker-compose.yml" \
+            -f "${COMPOSE_OVERRIDE}" --env-file "${COMPOSE_ENV_FILE}")
+          "${COMPOSE[@]}" ps -q backend | grep -q . || {
+            echo "ERROR: production backend container is not running"
+            exit 1
+          }
+
+          BACKUP_PATH="${BACKUP_DIR}/category-force-delete-repair-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          mkdir -p "${BACKUP_PATH}"
+          SRC="${DATA_PATH}" DST="${BACKUP_PATH}" python3 - <<'PY'
+          import os
+          import sqlite3
+          from pathlib import Path
+
+          source = Path(os.environ["SRC"])
+          destination = Path(os.environ["DST"])
+          for name in ("app.sqlite", "parents.sqlite"):
+              source_path = source / name
+              backup_path = destination / name
+              if not source_path.is_file():
+                  raise SystemExit(f"missing production database: {name}")
+              with sqlite3.connect(f"file:{source_path}?mode=ro", uri=True) as current:
+                  with sqlite3.connect(backup_path) as backup:
+                      current.backup(backup)
+                      if backup.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                          raise SystemExit(f"backup integrity failed: {name}")
+              print(f"CATEGORY_FORCE_DELETE_REPAIR backup=ok database={name}")
+          PY
+
+          "${COMPOSE[@]}" stop backend
+          set +e
+          DATABASE_PATH="${DATA_PATH}/app.sqlite" CONTENT_ROOT_PATH="${CONTENT_ROOT}" \
+            RUN_REF="${RUN_REF}" EXPECTED_BATCH_COUNT="${EXPECTED_BATCH_COUNT}" python3 - <<'PY'
+          from __future__ import annotations
+
+          import hashlib
+          import json
+          import os
+          import sqlite3
+          import time
+          from collections import Counter
+          from pathlib import Path
+
+          database_path = Path(os.environ["DATABASE_PATH"])
+          content_root = Path(os.environ["CONTENT_ROOT_PATH"]).resolve(strict=False)
+          expected_count = int(os.environ["EXPECTED_BATCH_COUNT"])
+          connection = sqlite3.connect(database_path)
+          connection.row_factory = sqlite3.Row
+          connection.execute("PRAGMA foreign_keys=ON")
+          connection.execute("PRAGMA busy_timeout=30000")
+          run = connection.execute(
+              """SELECT * FROM category_force_delete_runs
+                 WHERE status='partial' ORDER BY created_at DESC LIMIT 1"""
+          ).fetchone()
+          if run is None:
+              raise SystemExit("ERROR: no partial category force-delete run exists")
+          run_ref = hashlib.sha256(str(run["id"]).encode("utf-8")).hexdigest()[:12]
+          if run_ref != os.environ["RUN_REF"]:
+              raise SystemExit("ERROR: latest partial run does not match the approved run_ref")
+          if Counter(part for part in (run["error_summary"] or "").split("; ") if part) != Counter({"batch:IntegrityError": expected_count}):
+              raise SystemExit("ERROR: partial run error types do not match the approved IntegrityError residual")
+
+          audit = connection.execute(
+              """SELECT metadata_json FROM content_audit_events
+                 WHERE event_type='category.force_deleted'
+                   AND json_extract(metadata_json,'$.run_id')=?
+                 ORDER BY created_at DESC LIMIT 1""",
+              (run["id"],),
+          ).fetchone()
+          metadata = json.loads(audit["metadata_json"]) if audit else {}
+          category_ids = [
+              value for value in metadata.get("deleted_category_ids", [])
+              if isinstance(value, str) and value
+          ] or [str(run["category_id"])]
+          placeholders = ",".join("?" for _ in category_ids)
+          content_count = connection.execute(
+              f"SELECT count(*) FROM content_items WHERE category_id IN ({placeholders})",
+              category_ids,
+          ).fetchone()[0]
+          if content_count:
+              raise SystemExit("ERROR: residual repair is blocked while content items remain")
+
+          batches = connection.execute(
+              f"""SELECT id,storage_rel_path,manifest_rel_path FROM upload_batches b
+                   WHERE b.target_category_id IN ({placeholders})
+                      OR b.id IN (
+                          SELECT DISTINCT v.source_batch_id FROM content_versions v
+                          JOIN content_items i ON i.id=v.item_id
+                          WHERE i.category_id IN ({placeholders})
+                            AND v.source_batch_id IS NOT NULL
+                      )""",
+              [*category_ids, *category_ids],
+          ).fetchall()
+          if len(batches) != expected_count:
+              raise SystemExit(f"ERROR: expected {expected_count} residual batches, found {len(batches)}")
+          for batch in batches:
+              if connection.execute(
+                  "SELECT 1 FROM content_versions WHERE source_batch_id=? LIMIT 1", (batch["id"],)
+              ).fetchone():
+                  raise SystemExit("ERROR: a residual batch is still referenced by a content version")
+              for relative in (batch["storage_rel_path"], batch["manifest_rel_path"]):
+                  if not relative:
+                      continue
+                  candidate = (content_root / relative).resolve(strict=False)
+                  if content_root not in candidate.parents:
+                      raise SystemExit("ERROR: residual batch path escapes the content root")
+                  if candidate.exists() or candidate.is_symlink():
+                      raise SystemExit("ERROR: residual batch storage still exists; refusing repair")
+
+          ids = [str(batch["id"]) for batch in batches]
+          id_placeholders = ",".join("?" for _ in ids)
+          try:
+              connection.execute("BEGIN IMMEDIATE")
+              connection.execute(
+                  f"UPDATE content_audit_events SET batch_id=NULL WHERE batch_id IN ({id_placeholders})",
+                  ids,
+              )
+              deleted = connection.execute(
+                  f"DELETE FROM upload_batches WHERE id IN ({id_placeholders})", ids
+              ).rowcount
+              if deleted != expected_count:
+                  raise RuntimeError(f"expected {expected_count} deleted batches, deleted {deleted}")
+              now = int(time.time())
+              connection.execute(
+                  """UPDATE category_force_delete_runs
+                     SET status='succeeded',upload_batch_count=?,error_summary=NULL,finished_at=?
+                     WHERE id=?""",
+                  (expected_count, now, run["id"]),
+              )
+              connection.execute(
+                  """INSERT INTO content_audit_events(
+                     id,event_type,actor_user_id,category_id,metadata_json,created_at
+                     ) VALUES (?,?,?,?,?,?)""",
+                  (
+                      f"audit-{hashlib.sha256((run['id'] + '-repair').encode()).hexdigest()}",
+                      "category.force_delete.repaired",
+                      None,
+                      run["category_id"],
+                      json.dumps({"run_ref": run_ref, "deleted_batch_count": deleted}, ensure_ascii=False),
+                      now,
+                  ),
+              )
+              if connection.execute("PRAGMA foreign_key_check").fetchone() is not None:
+                  raise RuntimeError("foreign_key_check failed")
+              if connection.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                  raise RuntimeError("integrity_check failed")
+              connection.commit()
+          except Exception:
+              connection.rollback()
+              raise
+
+          remaining = connection.execute(
+              f"SELECT count(*) FROM upload_batches WHERE id IN ({id_placeholders})", ids
+          ).fetchone()[0]
+          connection.close()
+          if remaining:
+              raise SystemExit("ERROR: residual upload batches remain after repair")
+          print(f"CATEGORY_FORCE_DELETE_REPAIR status=complete run_ref={run_ref} batches={deleted}")
+          PY
+          REPAIR_STATUS=$?
+          set -e
+
+          if [ "${REPAIR_STATUS}" -ne 0 ]; then
+            "${COMPOSE[@]}" up -d --no-deps backend || true
+            echo "ERROR: residual repair transaction failed; database transaction was rolled back"
+            exit "${REPAIR_STATUS}"
+          fi
+          "${COMPOSE[@]}" up -d --no-deps backend
+          for ATTEMPT in $(seq 1 36); do
+            CONTAINER_ID="$(${COMPOSE[@]} ps -q backend 2>/dev/null || true)"
+            if [ -n "${CONTAINER_ID}" ] && \
+               [ "$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "${CONTAINER_ID}" 2>/dev/null || true)" = "healthy" ] && \
+               curl -fsS --connect-timeout 5 --max-time 10 http://localhost/api/health >/dev/null 2>&1; then
+              echo "CATEGORY_FORCE_DELETE_REPAIR status=verified backup=${BACKUP_PATH}"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "CRITICAL: backend did not become healthy after residual repair"
+          exit 1
