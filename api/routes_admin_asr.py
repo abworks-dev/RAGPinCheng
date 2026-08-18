@@ -51,7 +51,21 @@ from .schemas import (
     AsrSegmentationDTO,
     AsrServiceStatusDTO,
     AsrSettingsResponse,
+    TranscriptionBaseDTO,
+    TranscriptionSchemeCopy,
+    TranscriptionSchemeCreate,
+    TranscriptionSchemeDTO,
+    TranscriptionSchemeOrder,
+    TranscriptionSchemeUpdate,
 )
+from .transcription_schemes import (
+    create_scheme,
+    get_scheme,
+    list_schemes,
+    reorder_schemes,
+    update_scheme,
+)
+from src.transcription.scheme import SchemeValidationError
 from .transcription_runtime import (
     RemoteAsrProviderFactory,
     build_phase4_profile_catalog,
@@ -308,6 +322,117 @@ def get_asr_settings(
     conn: sqlite3.Connection = Depends(get_db),
 ) -> AsrSettingsResponse:
     return _settings_response(conn)
+
+
+def _base_dto(row: sqlite3.Row) -> TranscriptionBaseDTO:
+    return TranscriptionBaseDTO(
+        id=row["id"], provider=row["provider"], model=row["model"], revision=row["revision"],
+        service_profile_id=row["service_profile_id"], config_hash=row["config_hash"],
+        qualification=row["qualification"], admission=row["admission"], availability=row["availability"],
+        capabilities=json.loads(row["capabilities_json"]), defaults=json.loads(row["defaults_json"]),
+    )
+
+
+def _scheme_dto(item: dict[str, object]) -> TranscriptionSchemeDTO:
+    return TranscriptionSchemeDTO(**item)
+
+
+@router.get("/bases", response_model=list[TranscriptionBaseDTO])
+def list_transcription_bases(
+    _admin: CurrentUser = Depends(require_admin),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> list[TranscriptionBaseDTO]:
+    return [_base_dto(row) for row in conn.execute("SELECT * FROM transcription_bases ORDER BY id").fetchall()]
+
+
+@router.get("/schemes", response_model=list[TranscriptionSchemeDTO])
+def list_transcription_schemes(
+    include_archived: bool = True,
+    _admin: CurrentUser = Depends(require_admin),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> list[TranscriptionSchemeDTO]:
+    return [_scheme_dto(item) for item in list_schemes(conn, include_archived=include_archived)]
+
+
+@router.post("/schemes", response_model=TranscriptionSchemeDTO, status_code=201)
+def create_transcription_scheme(
+    body: TranscriptionSchemeCreate,
+    admin: CurrentUser = Depends(require_csrf_admin),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> TranscriptionSchemeDTO:
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        result = create_scheme(conn, name=body.name, description=body.description, base_id=body.base_id, parameters=body.parameters, actor_id=admin.id)
+        conn.commit()
+        return _scheme_dto(result)
+    except SchemeValidationError as exc:
+        conn.rollback()
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception:
+        conn.rollback()
+        raise
+
+
+@router.post("/schemes/{scheme_id}/copy", response_model=TranscriptionSchemeDTO, status_code=201)
+def copy_transcription_scheme(
+    scheme_id: str,
+    body: TranscriptionSchemeCopy,
+    admin: CurrentUser = Depends(require_csrf_admin),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> TranscriptionSchemeDTO:
+    source = get_scheme(conn, scheme_id)
+    if source is None:
+        raise HTTPException(status_code=404, detail="转录方案不存在")
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        result = create_scheme(conn, name=body.name, description=body.description or source["description"], base_id=source["base_id"], parameters=source["parameters"], actor_id=admin.id, source_id=scheme_id)
+        conn.commit()
+        return _scheme_dto(result)
+    except SchemeValidationError as exc:
+        conn.rollback()
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.patch("/schemes/{scheme_id}", response_model=TranscriptionSchemeDTO)
+def patch_transcription_scheme(
+    scheme_id: str,
+    body: TranscriptionSchemeUpdate,
+    admin: CurrentUser = Depends(require_csrf_admin),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> TranscriptionSchemeDTO:
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        result = update_scheme(conn, scheme_id, name=body.name, description=body.description, parameters=body.parameters, enabled=body.enabled, archived=body.archived, expected_version=body.expected_version, actor_id=admin.id)
+        conn.commit()
+        return _scheme_dto(result)
+    except KeyError as exc:
+        conn.rollback()
+        raise HTTPException(status_code=404, detail="转录方案不存在") from exc
+    except RuntimeError as exc:
+        conn.rollback()
+        raise HTTPException(status_code=409, detail="转录方案版本已变化，请刷新后重试") from exc
+    except SchemeValidationError as exc:
+        conn.rollback()
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/schemes/order", response_model=list[TranscriptionSchemeDTO])
+def reorder_transcription_schemes(
+    body: TranscriptionSchemeOrder,
+    admin: CurrentUser = Depends(require_csrf_admin),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> list[TranscriptionSchemeDTO]:
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        result = reorder_schemes(conn, [item.model_dump() for item in body.order], expected_version=body.expected_version, actor_id=admin.id)
+        conn.commit()
+        return [_scheme_dto(item) for item in result]
+    except RuntimeError as exc:
+        conn.rollback()
+        raise HTTPException(status_code=409, detail="转录方案版本已变化，请刷新后重试") from exc
+    except SchemeValidationError as exc:
+        conn.rollback()
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.post("/release-requests", response_model=AsrProfileReleaseRequestDTO)

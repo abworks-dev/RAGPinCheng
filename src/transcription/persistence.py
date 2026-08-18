@@ -18,6 +18,7 @@ from .profile import (
     TranscriptionProfileDefinition,
     validate_execution_consistency,
 )
+from .scheme import TranscriptionSchemeSnapshot
 from .provider_protocol import ProviderErrorCode, ProviderFailure, ProviderFailureClassification
 from .types import (
     ArtifactReference,
@@ -294,6 +295,8 @@ class TranscriptionJobRecord:
     started_at: int | None
     finished_at: int | None
     updated_at: int
+    scheme_id: str | None = None
+    scheme_snapshot: TranscriptionSchemeSnapshot | None = None
 
     def __post_init__(self) -> None:
         validate_uuid(self.id, "job.id")
@@ -304,6 +307,10 @@ class TranscriptionJobRecord:
         validate_uuid(self.request_idempotency_key, "job.request_idempotency_key")
         validate_sha256(self.execution_identity, "job.execution_identity")
         validate_profile_id(self.profile_id, "job.profile_id")
+        if (self.scheme_id is None) != (self.scheme_snapshot is None):
+            raise ContractValidationError("incomplete_scheme_identity", "job.scheme")
+        if self.scheme_snapshot is not None and self.scheme_id != self.scheme_snapshot.scheme_id:
+            raise ContractValidationError("scheme_snapshot_mismatch", "job.scheme_id")
         validate_provider_key(self.provider_key, "job.provider_key")
         if (self.model_id is None) != (self.model_revision is None):
             raise ContractValidationError("incomplete_model_identity", "job.model")
@@ -436,11 +443,17 @@ class TranscriptVersionRecord:
     derived_from_version_id: str | None = None
     edited_by: int | None = None
     edit_idempotency_key: str | None = None
+    scheme_id: str | None = None
+    scheme_snapshot: TranscriptionSchemeSnapshot | None = None
 
     def __post_init__(self) -> None:
         validate_uuid(self.id, "version.id")
         validate_uuid(self.media_id, "version.media_id")
         _optional_uuid(self.transcription_job_id, "version.transcription_job_id")
+        if (self.scheme_id is None) != (self.scheme_snapshot is None):
+            raise ContractValidationError("incomplete_scheme_identity", "version.scheme")
+        if self.scheme_snapshot is not None and self.scheme_id != self.scheme_snapshot.scheme_id:
+            raise ContractValidationError("scheme_snapshot_mismatch", "version.scheme_id")
         require_exact_enum(self.source, TranscriptSource, "version.source")
         require_exact_enum(self.markdown_storage_kind, MarkdownStorageKind, "version.markdown_storage_kind")
         if type(self.markdown_ref) is not ManagedMarkdownRef:

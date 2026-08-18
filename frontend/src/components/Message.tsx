@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
+import React, { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -10,14 +10,20 @@ import { Check, ChevronLeft, ChevronRight, CircleAlert, CirclePlay, Copy, Files,
 import {
   CITATION_EVENT,
   CITATION_HOVER_EVENT,
+  CITATION_TOOLTIP_ACTIVE_EVENT,
   dispatchCitation,
   linkifyCitations,
   resolveCitation,
   type CitationHoverDetail,
+  type CitationTooltipActiveDetail,
 } from "./citations";
 import { copyText } from "../utils/clipboard";
 
 const CITATION_TOOLTIP_CLOSE_DELAY_MS = 150;
+const CitationContext = React.createContext<{ messageId: string; sources: Source[] }>({
+  messageId: "",
+  sources: [],
+});
 
 // Demote inline `$$...$$` to `$...$` so KaTeX renders it inline instead of as
 // a block break. Standalone display blocks on their own line are kept.
@@ -109,8 +115,22 @@ function CitationMarker({
   const [isHighlighted, setIsHighlighted] = useState(false);
   const [showBelow, setShowBelow] = useState(false);
   const [showRightAligned, setShowRightAligned] = useState(false);
+  const [isPositioned, setIsPositioned] = useState(false);
+  const markerRef = useRef<HTMLElement>(null);
   const tooltipRef = useRef<HTMLSpanElement>(null);
   const closeTimerRef = useRef<number | null>(null);
+  const tooltipActiveRef = useRef(false);
+  const markerId = useId();
+
+  const setTooltipActive = (active: boolean) => {
+    if (tooltipActiveRef.current === active) return;
+    tooltipActiveRef.current = active;
+    window.dispatchEvent(
+      new CustomEvent<CitationTooltipActiveDetail>(CITATION_TOOLTIP_ACTIVE_EVENT, {
+        detail: { markerId, active },
+      }),
+    );
+  };
   const cancelClose = () => {
     if (closeTimerRef.current !== null) {
       window.clearTimeout(closeTimerRef.current);
@@ -120,6 +140,8 @@ function CitationMarker({
 
   const openTooltip = () => {
     cancelClose();
+    if (!tooltipActiveRef.current) setIsPositioned(false);
+    setTooltipActive(true);
     setIsHovered(true);
   };
 
@@ -127,11 +149,16 @@ function CitationMarker({
     cancelClose();
     closeTimerRef.current = window.setTimeout(() => {
       setIsHovered(false);
+      setIsPositioned(false);
+      setTooltipActive(false);
       closeTimerRef.current = null;
     }, CITATION_TOOLTIP_CLOSE_DELAY_MS);
   };
 
-  useEffect(() => () => cancelClose(), []);
+  useEffect(() => () => {
+    cancelClose();
+    setTooltipActive(false);
+  }, []);
 
   // Listen for hover events from SourcesPanel (card → in-message highlight).
   useEffect(() => {
@@ -144,23 +171,17 @@ function CitationMarker({
     return () => window.removeEventListener(CITATION_HOVER_EVENT, onHover);
   }, [messageId, idx]);
 
-  // Smart vertical and horizontal positioning: flip to below if overflowing viewport top,
-  // flip to right-aligned if overflowing viewport right edge.
+  // Calculate the final placement while hidden so the first hover never visibly jumps.
   useLayoutEffect(() => {
-    if (!isHovered || !tooltipRef.current) {
-      setShowBelow(false);
-      setShowRightAligned(false);
+    if (!isHovered || !markerRef.current || !tooltipRef.current) {
+      setIsPositioned(false);
       return;
     }
-    const rect = tooltipRef.current.getBoundingClientRect();
-    // If tooltip top edge is above viewport (with 10px margin), flip to below
-    if (rect.top < 10) {
-      setShowBelow(true);
-    }
-    // If tooltip right edge is beyond viewport (with 10px margin), flip to leftwards
-    if (rect.right > window.innerWidth - 10) {
-      setShowRightAligned(true);
-    }
+    const markerRect = markerRef.current.getBoundingClientRect();
+    const tooltipRect = tooltipRef.current.getBoundingClientRect();
+    setShowBelow(markerRect.top - tooltipRect.height < 10);
+    setShowRightAligned(markerRect.left + tooltipRect.width > window.innerWidth - 10);
+    setIsPositioned(true);
   }, [isHovered]);
 
   if (!source) {
@@ -175,6 +196,7 @@ function CitationMarker({
   return (
     <>
       <sup
+        ref={markerRef}
         className="relative top-[-0.35em] mx-px align-baseline"
         onMouseEnter={openTooltip}
         onMouseLeave={scheduleClose}
@@ -208,7 +230,11 @@ function CitationMarker({
             onMouseLeave={scheduleClose}
             className={`absolute z-[100] block min-w-[200px] max-w-[320px] rounded-ui-lg border border-border bg-popover p-3 text-xs text-popover-foreground shadow-overlay break-words ${
               showBelow ? "top-full" : "bottom-full"
-            } ${showRightAligned ? "right-0" : "left-0"}`}
+            } ${showRightAligned ? "right-0" : "left-0"} ${
+              isPositioned
+                ? "visible pointer-events-auto opacity-100"
+                : "invisible pointer-events-none opacity-0"
+            }`}
           >
             <span className="mb-1 block truncate font-medium text-popover-foreground">{source.doc_title}</span>
             <span className="mb-2 flex items-center gap-1.5 truncate text-muted-foreground">
@@ -233,6 +259,29 @@ function CitationMarker({
     </>
   );
 }
+
+function MessageMarkdownLink({
+  href,
+  children,
+  node: _node,
+  ...props
+}: React.ComponentPropsWithoutRef<"a"> & { node?: unknown }) {
+  const { messageId, sources } = React.useContext(CitationContext);
+  if (href?.startsWith("#cite-")) {
+    return (
+      <CitationMarker href={href} sources={sources} messageId={messageId} {...props}>
+        {children}
+      </CitationMarker>
+    );
+  }
+  return (
+    <a href={href} target="_blank" rel="noopener noreferrer" {...props}>
+      {children}
+    </a>
+  );
+}
+
+const MESSAGE_MARKDOWN_COMPONENTS = { a: MessageMarkdownLink };
 
 export function Message({
   msg,
@@ -440,33 +489,15 @@ export function Message({
             <AnswerStatus msg={msg} />
             <div className={"prose-tight relative " + (msg.streaming && msg.content ? "caret" : "")}>
               {msg.content ? (
-                <ReactMarkdown
-                  remarkPlugins={[remarkGfm, remarkMath]}
-                  rehypePlugins={[rehypeKatex]}
-                  components={{
-                    a: ({ href, children, ...props }) => {
-                      if (href && href.startsWith("#cite-")) {
-                        return (
-                          <CitationMarker
-                            href={href}
-                            sources={msg.sources || []}
-                            messageId={msg.id}
-                            {...props}
-                          >
-                            {children}
-                          </CitationMarker>
-                        );
-                      }
-                      return (
-                        <a href={href} target="_blank" rel="noopener noreferrer" {...props}>
-                          {children}
-                        </a>
-                      );
-                    },
-                  }}
-                >
-                  {linkifyCitations(normalizeMath(msg.content))}
-                </ReactMarkdown>
+                <CitationContext.Provider value={{ messageId: msg.id, sources: msg.sources || [] }}>
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm, remarkMath]}
+                    rehypePlugins={[rehypeKatex]}
+                    components={MESSAGE_MARKDOWN_COMPONENTS}
+                  >
+                    {linkifyCitations(normalizeMath(msg.content))}
+                  </ReactMarkdown>
+                </CitationContext.Provider>
               ) : null}
             </div>
             {msg.error && (

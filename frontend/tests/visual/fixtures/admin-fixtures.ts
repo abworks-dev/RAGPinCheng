@@ -307,6 +307,51 @@ const asrProfiles = ([
   },
 }));
 
+const transcriptionSchemes = asrProfiles.map((profile, index) => ({
+  id: profile.profile_id,
+  name: profile.display_name.replace(" v2", ""),
+  description: profile.description,
+  base_id: "whisperx-v2",
+  parameters: {
+    segmentation_preset: profile.segmentation?.preset || "natural",
+    max_duration_ms: profile.segmentation?.max_segment_duration_ms ?? null,
+    max_chars: profile.segmentation?.max_segment_chars || 500,
+    merge_gap_ms: profile.segmentation?.max_merge_gap_ms || 1000,
+    terminology_profile: "bim-engineering-v1",
+    prompt_asset: "asr_engineering_zh_v2",
+    preprocessing_preset: "standard-audio-v1",
+    vad_preset: "service-default-v1",
+    decode_preset: "service-default-v1",
+  },
+  config_hash: profile.application_config_hash,
+  enabled: profile.admission === "enabled",
+  archived: false,
+  system_preset: true,
+  sort_order: index,
+  version: 1,
+  created_at: 1700000000,
+  updated_at: 1700000000,
+}));
+
+const transcriptionBases = [{
+  id: "whisperx-v2", provider: "whisperx", model: "WhisperX full-decode v2", revision: "full-decode-v2",
+  service_profile_id: "whisperx-large-v3-zh-align-v2", config_hash: "b".repeat(64),
+  qualification: "qualification_approved", admission: "enabled", availability: "runtime",
+  capabilities: { segmentation: true, decode_presets: true }, defaults: { segmentation_preset: "balanced" },
+}];
+const transcriptionSchemeOptions = transcriptionSchemes.map((scheme) => ({
+  scheme_id: scheme.id,
+  name: scheme.name,
+  description: scheme.description,
+  base_id: scheme.base_id,
+  config_hash: scheme.config_hash,
+  enabled: scheme.enabled,
+  archived: scheme.archived,
+  sort_order: scheme.sort_order,
+  version: scheme.version,
+  availability: scheme.enabled ? "available" : "unavailable",
+}));
+
 const asrReleaseRequest = {
   request_id: "11111111-1111-4111-8111-111111111111",
   profile_id: "whisperx-large-v3-zh-balanced-v2",
@@ -699,6 +744,9 @@ export async function installAdminRoutes(
       return json(route, mediaAssets);
     }
     if (request.method() === "GET" && path === "/api/admin/transcription/profiles") return json(route, transcriptionProfiles);
+    if (request.method() === "GET" && path === "/api/admin/transcription/schemes") return json(route, scenario === "empty" ? [] : transcriptionSchemeOptions);
+    if (request.method() === "GET" && path === "/api/admin/asr/bases") return json(route, scenario === "empty" ? [] : transcriptionBases);
+    if (request.method() === "GET" && path === "/api/admin/asr/schemes") return json(route, scenario === "empty" ? [] : transcriptionSchemes);
     if (request.method() === "GET" && path === "/api/admin/asr") {
       if (scenario === "empty") {
         return json(route, { service: { status: "healthy", queue_depth: 0, queue_limit: 8, pause_reason: null }, profiles: [], release_requests: [], audit_events: [] });
@@ -1027,10 +1075,11 @@ export async function installChatRoutes(page: Page, scenario: "normal" | "error"
     if (path === "/api/conversations/conversation-chat/chat" && request.method() === "POST") {
       if (scenario === "error") return sse(route, `event: error\ndata: ${JSON.stringify({ message: "合成回答失败" })}\n\n`);
       const sources = scenario === "video" ? [videoSource] : [];
+      const answerText = scenario === "video" ? "合成回答[1]" : "合成回答";
       return sse(route, [
         `event: prep\ndata: ${JSON.stringify({ search_query: "合成问题", rewrite_applied: false, history_chars: 0, budget: 1000, fresh_count: 1, final_count: 1, used_sources: sources, no_source_fallback: false })}\n\n`,
-        `event: token\ndata: ${JSON.stringify({ text: "合成回答" })}\n\n`,
-        `event: done\ndata: ${JSON.stringify({ answer_text: "合成回答", assistant_message_id: 503, timings: {}, sources, history_chars: 0, budget: 1000 })}\n\n`,
+        `event: token\ndata: ${JSON.stringify({ text: answerText })}\n\n`,
+        `event: done\ndata: ${JSON.stringify({ answer_text: answerText, assistant_message_id: 503, timings: {}, sources, history_chars: 0, budget: 1000 })}\n\n`,
       ].join(""));
     }
     if (scenario === "video" && path === "/api/media/media-ready/transcript") {

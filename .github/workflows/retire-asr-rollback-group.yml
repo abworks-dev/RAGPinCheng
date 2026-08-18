@@ -56,6 +56,7 @@ jobs:
             '31512225203' = '31513770886'
             '31516434826' = '31517785623'
             '31877287791' = '31877991737'
+            '32042245485' = '32043837069'
           }
           if (-not $approved.ContainsKey($env:CANDIDATE_ID) -or $approved[$env:CANDIDATE_ID] -ne $env:ACTIVATION_ID) { throw 'Requested group is outside the approved retirement boundary' }
           if ($env:OPERATION -eq 'apply' -and ('${{ inputs.preview_run_id }}' -notmatch '^[0-9]{1,20}$' -or $env:EXPECTED_SHA256 -notmatch '^[0-9a-fA-F]{64}$')) { throw 'apply requires preview_run_id and manifest_sha256' }
@@ -84,7 +85,7 @@ jobs:
             & .\scripts\retire-asr-rollback-group.ps1 -Mode Quarantine @common -ExpectedManifestSha256 $env:EXPECTED_SHA256 -Confirm:$false
             . .\scripts\asr-release.ps1
             $active = Get-Content (Join-Path $env:ASR_DATA_ROOT 'release-state\active.json') -Raw -Encoding UTF8 | ConvertFrom-Json
-            if ([string]$active.candidate_id -ne '31879196389') { throw 'Active candidate changed outside the approved production identity' }
+            if ([string]$active.candidate_id -ne '31982245231') { throw 'Active candidate changed outside the approved production identity' }
             $release = Read-AsrReleaseManifest -ProgramRoot $env:ASR_PROGRAM_ROOT -DataRoot $env:ASR_DATA_ROOT -CandidateId ([string]$active.candidate_id) -ExpectedSha256 ([string]$active.release_manifest_sha256)
             $approved = Get-Content -LiteralPath $manifest -Raw -Encoding UTF8 | ConvertFrom-Json
             $task = Get-ScheduledTask -TaskName 'RAGPinCheng-ASR' -ErrorAction Stop

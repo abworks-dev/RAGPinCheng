@@ -68,6 +68,7 @@ test.describe("视频媒体", () => {
     });
     await installAdminRoutes(page, "media_upload");
     await page.goto("/admin/media");
+    await page.getByRole("button", { name: "上传视频" }).click();
     await page.getByLabel("选择视频文件").setInputFiles({
       name: "upload-progress.mp4",
       mimeType: "video/mp4",
