@@ -53,3 +53,21 @@ def test_office_external_links_and_embeds_are_rejected(tmp_path: Path):
 
     assert _check_office_external_links_or_embeds(external) == "office_external_link"
     assert _check_office_external_links_or_embeds(embedded) == "office_embedded_object"
+
+
+def test_office_relationship_scan_preserves_case_sensitive_member_names(tmp_path: Path):
+    safe = tmp_path / "safe.pptx"
+    with zipfile.ZipFile(safe, "w") as archive:
+        archive.writestr(
+            "ppt/slideMasters/_rels/slideMaster1.xml.rels",
+            "<Relationships />",
+        )
+    external = tmp_path / "external.pptx"
+    with zipfile.ZipFile(external, "w") as archive:
+        archive.writestr(
+            "ppt/slideMasters/_rels/slideMaster1.xml.rels",
+            '<Relationship TargetMode="External" Type="hyperlink"/>',
+        )
+
+    assert _check_office_external_links_or_embeds(safe) is None
+    assert _check_office_external_links_or_embeds(external) == "office_external_link"
