@@ -2003,6 +2003,8 @@ export function AdminManagedContentPage() {
     const requiresPublish = item.has_published_head || !["draft", "rejected"].includes(item.lifecycle_status);
     return requiresPublish ? can("item.archive_published") : can("item.archive_draft");
   };
+  const canPublishItem = (item: ManagedContentItem) => item.content_kind === "document"
+    && ["approved", "publication_failed"].includes(item.lifecycle_status);
 
   const openBulkWorkbench = (action: "submit" | "approve" | "reject") => {
     const targets = selectedItems.filter((item) => item.content_kind === "document" && (
@@ -2070,7 +2072,8 @@ export function AdminManagedContentPage() {
     if (bulkAction === "reject" && !bulkNote.trim()) return;
     setBusyAction("bulk"); setBulkFailures([]);
     try {
-      const ids = selectedItems.map((item) => item.version_id);
+      const actionItems = bulkAction === "publish" ? selectedItems.filter(canPublishItem) : selectedItems;
+      const ids = actionItems.map((item) => item.version_id);
       const selectedMoveOperation = moveOperation(selectedItems[0]);
       const moveItems = selectedItems.map((item) => ({ item_id: item.item_id, expected_version_id: item.version_id }));
       const result = bulkAction === "move"
@@ -2106,7 +2109,9 @@ export function AdminManagedContentPage() {
   const documentSelection = selectedItems.every((item) => item.content_kind === "document");
   const hasSubmittableSelection = documentSelection && selectedItems.some((item) => ["draft", "rejected"].includes(item.lifecycle_status));
   const hasReviewableSelection = documentSelection && selectedItems.some((item) => item.lifecycle_status === "awaiting_review");
-  const hasPublishableSelection = documentSelection && selectedItems.some((item) => ["approved", "publication_failed"].includes(item.lifecycle_status));
+  const publishableSelectedItems = selectedItems.filter(canPublishItem);
+  const skippedPublishSelectedItems = selectedItems.filter((item) => !canPublishItem(item));
+  const hasPublishableSelection = documentSelection && publishableSelectedItems.length > 0;
   const selectedMoveOperations = new Set(selectedItems.map(moveOperation));
   const hasMovableSelection = selectedItems.length > 0
     && selectedItems.every(canMoveItem)
@@ -2445,7 +2450,7 @@ export function AdminManagedContentPage() {
             { key: "submit", label: "批量提交审核", icon: <Send className="size-4" />, disabled: !can("item.submit") || !hasSubmittableSelection, disabledReason: "仅草稿或已退回文档可以提交审核", onSelect: () => openBulkWorkbench("submit") },
             { key: "approve", label: "批量确认", icon: <Check className="size-4" />, disabled: !can("item.review") || !hasReviewableSelection, disabledReason: "仅文档支持批量确认，且至少包含一份待确认文档", onSelect: () => openBulkWorkbench("approve") },
             { key: "reject", label: "批量退回", icon: <X className="size-4" />, disabled: !can("item.review") || !hasReviewableSelection, disabledReason: "仅文档支持批量退回，且至少包含一份待确认文档", onSelect: () => openBulkWorkbench("reject") },
-            { key: "publish", label: "批量发布", icon: <Rocket className="size-4" />, disabled: !can("item.publish") || !hasPublishableSelection, disabledReason: "仅文档支持此处发布，视频转录稿请前往视频管理", onSelect: () => { setBulkFailures([]); setBulkNote(""); setBulkAction("publish"); } },
+            { key: "publish", label: "批量发布", icon: <Rocket className="size-4" />, disabled: !can("item.publish") || !hasPublishableSelection, disabledReason: "仅已确认或发布失败的文档可批量发布", onSelect: () => { setBulkFailures([]); setBulkNote(""); setBulkAction("publish"); } },
             { key: "download", label: "批量下载", icon: <Download className="size-4" />, disabled: !hasDownloadableSelection, disabledReason: "仅文档支持批量下载，且需要下载权限", onSelect: () => { void downloadSelected(); } },
             { key: "archive", label: "批量删除", icon: <Trash2 className="size-4" />, disabled: !hasDeletableSelection, disabledReason: "视频转录稿需在视频管理中删除", destructive: true, onSelect: () => openDeleteDialog(selectedItems) },
           ]} /> : (can("folder.request") || can("category.manage")) && <Button size="sm" variant="outline" className="max-sm:h-control-md" onClick={() => can("category.manage") ? setNewFolderOpen(true) : setRequestFolderOpen(true)} disabled={!currentFolder || currentFolder.level >= 4}><FolderPlus className="size-4" />新建目录</Button>}
@@ -2547,12 +2552,33 @@ export function AdminManagedContentPage() {
         setBulkWorkbenchResults({});
       }
     }}>
-      <DialogContent className={bulkAction === "move" || bulkAction === "submit" || bulkAction === "approve" || bulkAction === "reject" ? "max-h-[calc(100vh-2rem)] max-w-3xl overflow-y-auto" : undefined}>
+      <DialogContent className={bulkAction === "move" || bulkAction === "publish" || bulkAction === "submit" || bulkAction === "approve" || bulkAction === "reject" ? "max-h-[calc(100vh-2rem)] max-w-3xl overflow-y-auto" : undefined}>
         <DialogHeader>
           <DialogTitle>{bulkAction === "move" ? bulkMoveLabel : bulkAction === "publish" ? "批量发布资料" : bulkAction === "submit" ? "批量提交审核" : "批量审核资料"}</DialogTitle>
-          <DialogDescription>{bulkAction === "submit" || bulkAction === "approve" || bulkAction === "reject" ? `本次工作台包含 ${bulkWorkbenchTargets.length} 份资料。单独处理成功的资料不会再被一键操作重复处理。` : `已选择 ${selectedItems.length} 份资料。系统会逐项执行，并保留不符合状态或权限要求的失败原因。`}</DialogDescription>
+          <DialogDescription>{bulkAction === "publish" ? `已选择 ${selectedItems.length} 份资料，请确认本次实际发布范围。` : bulkAction === "submit" || bulkAction === "approve" || bulkAction === "reject" ? `本次工作台包含 ${bulkWorkbenchTargets.length} 份资料。单独处理成功的资料不会再被一键操作重复处理。` : `已选择 ${selectedItems.length} 份资料。系统会逐项执行，并保留不符合状态或权限要求的失败原因。`}</DialogDescription>
         </DialogHeader>
         {bulkAction === "move" && <CategoryTreePicker categories={categories} value={bulkMoveFolderId} onChange={setBulkMoveFolderId} label="目标目录" />}
+        {bulkAction === "publish" && <>
+          <div className="flex flex-wrap gap-2 text-ui-xs" role="status">
+            <Badge variant="success">将发布 {publishableSelectedItems.length}</Badge>
+            {skippedPublishSelectedItems.length > 0 && <Badge variant="outline">已跳过 {skippedPublishSelectedItems.length}</Badge>}
+          </div>
+          <div className="space-y-2">
+            <p className="text-ui-sm font-medium">本次将批量发布</p>
+            <div className="max-h-64 divide-y divide-border overflow-y-auto border-y border-border" aria-label="批量发布文件列表">
+              {publishableSelectedItems.map((item) => <div key={item.version_id} className="grid gap-2 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+                <div className="min-w-0"><p className="break-words text-ui-sm font-medium">{item.title}</p><p className="mt-1 break-all text-ui-xs text-muted-foreground">{item.original_filename} · {item.category_path || item.category_label}</p></div>
+                <Badge variant="outline">{statusLabel[item.lifecycle_status] || item.lifecycle_status}</Badge>
+              </div>)}
+            </div>
+          </div>
+          {skippedPublishSelectedItems.length > 0 && <div className="space-y-2">
+            <p className="text-ui-sm font-medium text-muted-foreground">不会重复发布</p>
+            <div className="max-h-40 divide-y divide-border overflow-y-auto border-y border-border" aria-label="批量发布跳过列表">
+              {skippedPublishSelectedItems.map((item) => <div key={item.version_id} className="grid gap-2 py-2.5 text-ui-sm sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"><span className="break-words">{item.title}</span><span className="text-ui-xs text-muted-foreground">{item.lifecycle_status === "published" ? "已发布，无需重复操作" : `${statusLabel[item.lifecycle_status] || item.lifecycle_status}，当前不可发布`}</span></div>)}
+            </div>
+          </div>}
+        </>}
         {(bulkAction === "submit" || bulkAction === "approve" || bulkAction === "reject") && <>
           <div className="flex flex-wrap gap-2 text-ui-xs" role="status">
             {bulkPendingSubmitIds.length > 0 && <Badge>待提交 {bulkPendingSubmitIds.length}</Badge>}
@@ -2600,7 +2626,7 @@ export function AdminManagedContentPage() {
               <Button variant="outline" disabled={Boolean(busyAction) || Boolean(bulkItemBusy) || !bulkNote.trim()} onClick={() => void executeBulkWorkbench("reject", bulkPendingReviewIds)}><X className="size-4" />一键退回（{bulkPendingReviewIds.length}）</Button>
               <Button disabled={Boolean(busyAction) || Boolean(bulkItemBusy)} onClick={() => void executeBulkWorkbench("approve", bulkPendingReviewIds)}><Check className="size-4" />一键通过（{bulkPendingReviewIds.length}）</Button>
             </>}
-          </> : <Button onClick={() => void executeBulk()} disabled={busyAction === "bulk" || selectedItems.length === 0 || (bulkAction === "move" && !bulkMoveFolderId)}>{busyAction === "bulk" ? "处理中…" : bulkFailures.length ? "重试失败项" : "确认执行"}</Button>}
+          </> : <Button onClick={() => void executeBulk()} disabled={busyAction === "bulk" || selectedItems.length === 0 || (bulkAction === "move" && !bulkMoveFolderId) || (bulkAction === "publish" && publishableSelectedItems.length === 0)}>{busyAction === "bulk" ? "处理中…" : bulkFailures.length ? "重试失败项" : bulkAction === "publish" ? `确认发布（${publishableSelectedItems.length}）` : "确认执行"}</Button>}
         </DialogFooter>
       </DialogContent>
     </Dialog>
