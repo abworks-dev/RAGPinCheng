@@ -361,7 +361,13 @@ describe("Message assistant actions", () => {
     fireEvent.mouseEnter(marker);
     const tooltip = screen.getByRole("tooltip");
     expect(tooltip).toHaveTextContent("测试标准");
-    expect(tooltip).toHaveClass("bg-popover", "text-popover-foreground", "top-full");
+    expect(tooltip).toHaveClass(
+      "bg-popover",
+      "text-popover-foreground",
+      "top-full",
+      "visible",
+      "pointer-events-auto",
+    );
 
     fireEvent.mouseLeave(marker);
     fireEvent.mouseEnter(tooltip);
@@ -372,6 +378,29 @@ describe("Message assistant actions", () => {
     act(() => vi.advanceTimersByTime(150));
     expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
     vi.useRealTimers();
+  });
+
+  it("keeps an open citation tooltip when the assistant id becomes persisted", () => {
+    const { rerender } = render(
+      <Message
+        msg={assistant({ id: "assistant-pending", content: "命名规则见[1]。", streaming: true })}
+        conversationId="conversation-1"
+        turnIndex={1}
+      />,
+    );
+
+    fireEvent.mouseEnter(screen.getByRole("superscript"));
+    expect(screen.getByRole("tooltip")).toBeVisible();
+
+    rerender(
+      <Message
+        msg={assistant({ id: "42", content: "命名规则见[1]。", streaming: false })}
+        conversationId="conversation-1"
+        turnIndex={1}
+      />,
+    );
+
+    expect(screen.getByRole("tooltip")).toBeVisible();
   });
 
   it("opens source verification without opening the player for video citations", () => {

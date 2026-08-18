@@ -1027,10 +1027,11 @@ export async function installChatRoutes(page: Page, scenario: "normal" | "error"
     if (path === "/api/conversations/conversation-chat/chat" && request.method() === "POST") {
       if (scenario === "error") return sse(route, `event: error\ndata: ${JSON.stringify({ message: "合成回答失败" })}\n\n`);
       const sources = scenario === "video" ? [videoSource] : [];
+      const answerText = scenario === "video" ? "合成回答[1]" : "合成回答";
       return sse(route, [
         `event: prep\ndata: ${JSON.stringify({ search_query: "合成问题", rewrite_applied: false, history_chars: 0, budget: 1000, fresh_count: 1, final_count: 1, used_sources: sources, no_source_fallback: false })}\n\n`,
-        `event: token\ndata: ${JSON.stringify({ text: "合成回答" })}\n\n`,
-        `event: done\ndata: ${JSON.stringify({ answer_text: "合成回答", assistant_message_id: 503, timings: {}, sources, history_chars: 0, budget: 1000 })}\n\n`,
+        `event: token\ndata: ${JSON.stringify({ text: answerText })}\n\n`,
+        `event: done\ndata: ${JSON.stringify({ answer_text: answerText, assistant_message_id: 503, timings: {}, sources, history_chars: 0, budget: 1000 })}\n\n`,
       ].join(""));
     }
     if (scenario === "video" && path === "/api/media/media-ready/transcript") {

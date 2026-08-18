@@ -4,6 +4,10 @@ import type { ChatMessage } from "../types";
 import { useAutoHideScrollbar } from "../hooks/useAutoHideScrollbar";
 import { Message } from "./Message";
 import { TurnNavigator, type TurnNavigationItem } from "./TurnNavigator";
+import {
+  CITATION_TOOLTIP_ACTIVE_EVENT,
+  type CitationTooltipActiveDetail,
+} from "./citations";
 
 type MessageTurn = TurnNavigationItem & {
   messages: ChatMessage[];
@@ -62,6 +66,7 @@ export function MessageList({
   const scrollFrame = useRef<number | null>(null);
   const navigationTarget = useRef<string | null>(null);
   const navigationSettleTimer = useRef<number | null>(null);
+  const activeCitationTooltips = useRef(new Set<string>());
   const [activeTurnId, setActiveTurnId] = useState<string | null>(null);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const scrollbar = useAutoHideScrollbar<HTMLDivElement>();
@@ -123,9 +128,25 @@ export function MessageList({
   }, [scrollbar.ref, turns]);
 
   useEffect(() => {
+    const onCitationTooltipActive = (event: Event) => {
+      const { markerId, active } = (event as CustomEvent<CitationTooltipActiveDetail>).detail;
+      if (active) activeCitationTooltips.current.add(markerId);
+      else activeCitationTooltips.current.delete(markerId);
+    };
+    window.addEventListener(CITATION_TOOLTIP_ACTIVE_EVENT, onCitationTooltipActive);
+    return () => {
+      window.removeEventListener(CITATION_TOOLTIP_ACTIVE_EVENT, onCitationTooltipActive);
+      activeCitationTooltips.current.clear();
+    };
+  }, []);
+
+  useEffect(() => {
     const conversationChanged = previousConversationId.current !== conversationId;
     const messageAdded = messages.length > previousMessageCount.current;
-    if (conversationChanged || messageAdded || (lastMessage?.streaming && shouldFollowOutput.current)) {
+    const shouldAutoFollow =
+      activeCitationTooltips.current.size === 0 &&
+      (conversationChanged || messageAdded || (lastMessage?.streaming && shouldFollowOutput.current));
+    if (shouldAutoFollow) {
       scrollToBottom();
     }
     previousConversationId.current = conversationId;
@@ -200,7 +221,7 @@ export function MessageList({
             data-turn-id={turn.id}
             className="scroll-mt-6"
           >
-            {turn.messages.map((message) => {
+            {turn.messages.map((message, messageIndex) => {
               const turnUserMessage = turn.messages.find((item) => item.role === "user");
               const activeQuestionVersion = turnUserMessage?.userVersions?.find((version) => version.isActive);
               const viewingActiveQuestion =
@@ -208,7 +229,7 @@ export function MessageList({
                 || turnUserMessage?.viewedUserVersionIndex === activeQuestionVersion.versionIndex;
               return (
             <Message
-              key={message.id}
+              key={message.role === "assistant" ? `${turn.id}:assistant:${messageIndex}` : message.id}
               msg={message}
               conversationId={conversationId}
               turnIndex={turn.turnIndex}

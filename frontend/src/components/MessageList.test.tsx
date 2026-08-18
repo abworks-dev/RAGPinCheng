@@ -3,6 +3,10 @@ import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatMessage } from "../types";
 import { groupMessagesIntoTurns, MessageList } from "./MessageList";
+import {
+  CITATION_TOOLTIP_ACTIVE_EVENT,
+  type CitationTooltipActiveDetail,
+} from "./citations";
 
 vi.mock("./Message", () => ({
   Message: ({ msg, onToggleSources }: { msg: ChatMessage; onToggleSources?: (id: string) => void }) => (
@@ -77,6 +81,73 @@ describe("MessageList", () => {
     fireEvent.click(screen.getByRole("button", { name: "查看来源 assistant-1" }));
 
     expect(scrollIntoView).not.toHaveBeenCalled();
+  });
+
+  it("pauses streaming auto-follow while a citation tooltip is active", () => {
+    const streamingMessages: ChatMessage[] = [
+      { id: "user-1", role: "user", content: "问题" },
+      { id: "assistant-1", role: "assistant", content: "回答", streaming: true },
+    ];
+    const { rerender } = render(
+      <MessageList messages={streamingMessages} conversationId="conversation-1" />,
+    );
+    scrollIntoView.mockClear();
+
+    window.dispatchEvent(
+      new CustomEvent<CitationTooltipActiveDetail>(CITATION_TOOLTIP_ACTIVE_EVENT, {
+        detail: { markerId: "assistant-1:0", active: true },
+      }),
+    );
+    rerender(
+      <MessageList
+        messages={[
+          streamingMessages[0],
+          { ...streamingMessages[1], content: "回答继续" },
+        ]}
+        conversationId="conversation-1"
+      />,
+    );
+    expect(scrollIntoView).not.toHaveBeenCalled();
+
+    window.dispatchEvent(
+      new CustomEvent<CitationTooltipActiveDetail>(CITATION_TOOLTIP_ACTIVE_EVENT, {
+        detail: { markerId: "assistant-1:0", active: false },
+      }),
+    );
+    rerender(
+      <MessageList
+        messages={[
+          streamingMessages[0],
+          { ...streamingMessages[1], content: "回答继续输出" },
+        ]}
+        conversationId="conversation-1"
+      />,
+    );
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: "end" });
+  });
+
+  it("preserves the assistant render instance when its optimistic id becomes persisted", () => {
+    const optimisticMessages: ChatMessage[] = [
+      { id: "user-1", role: "user", content: "问题" },
+      { id: "assistant-pending", role: "assistant", content: "回答", streaming: true },
+    ];
+    const { rerender } = render(
+      <MessageList messages={optimisticMessages} conversationId="conversation-1" />,
+    );
+    const originalAssistant = screen.getByText("回答").parentElement;
+
+    rerender(
+      <MessageList
+        messages={[
+          optimisticMessages[0],
+          { ...optimisticMessages[1], id: "42", streaming: false },
+        ]}
+        conversationId="conversation-1"
+      />,
+    );
+
+    expect(screen.getByText("回答").parentElement).toBe(originalAssistant);
+    expect(screen.getByRole("button", { name: "查看来源 42" })).toBeInTheDocument();
   });
 
   it("smoothly navigates to the selected turn", () => {
