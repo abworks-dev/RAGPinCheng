@@ -86,7 +86,7 @@ jobs:
             . .\scripts\asr-release.ps1
             $active = Get-Content (Join-Path $env:ASR_DATA_ROOT 'release-state\active.json') -Raw -Encoding UTF8 | ConvertFrom-Json
             if ([string]$active.candidate_id -ne '31982245231') { throw 'Active candidate changed outside the approved production identity' }
-            $release = Read-AsrReleaseManifest -ProgramRoot $env:ASR_PROGRAM_ROOT -DataRoot $env:ASR_DATA_ROOT -CandidateId ([string]$active.candidate_id) -ExpectedSha256 ([string]$active.release_manifest_sha256)
+            $release = Read-AsrReleaseManifest -ProgramRoot $env:ASR_PROGRAM_ROOT -DataRoot $env:ASR_DATA_ROOT -CandidateId ([string]$active.candidate_id) -ExpectedSha256 ([string]$active.release_manifest_sha256) -AllowLegacyWhisperXV1Profiles
             $approved = Get-Content -LiteralPath $manifest -Raw -Encoding UTF8 | ConvertFrom-Json
             $task = Get-ScheduledTask -TaskName 'RAGPinCheng-ASR' -ErrorAction Stop
             $action = @($task.Actions)

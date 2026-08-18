@@ -58,7 +58,7 @@ function Get-ValidatedContext {
     $active = Get-Content -LiteralPath (Join-Path $data 'release-state\active.json') -Raw -Encoding UTF8 | ConvertFrom-Json
     if ([string]$active.candidate_id -eq $CandidateId) { throw 'Active candidate is permanently protected' }
     if ([string]$active.candidate_id -notmatch '^[0-9]{1,20}$' -or [string]$active.release_manifest_sha256 -notmatch '^[0-9a-fA-F]{64}$') { throw 'Active release identity is invalid' }
-    $activeRelease = Read-AsrReleaseManifest -ProgramRoot $program -DataRoot $data -CandidateId ([string]$active.candidate_id) -ExpectedSha256 ([string]$active.release_manifest_sha256)
+    $activeRelease = Read-AsrReleaseManifest -ProgramRoot $program -DataRoot $data -CandidateId ([string]$active.candidate_id) -ExpectedSha256 ([string]$active.release_manifest_sha256) -AllowLegacyWhisperXV1Profiles
 
     $references = @()
     foreach ($statePath in @(Get-ChildItem -LiteralPath $backup -Filter 'candidate-activation-state.json' -File -Recurse -Force -ErrorAction Stop)) {
@@ -80,7 +80,7 @@ function Get-ValidatedContext {
     $releaseRoot = Join-Path $program "releases\$CandidateId"
     $configRoot = Join-Path $data "config\releases\$CandidateId"
     if (-not (Test-Path -LiteralPath $releaseRoot -PathType Container) -or -not (Test-Path -LiteralPath $configRoot -PathType Container)) { throw 'Candidate release closure is incomplete' }
-    Read-AsrReleaseManifest -ProgramRoot $program -DataRoot $data -CandidateId $CandidateId | Out-Null
+    Read-AsrReleaseManifest -ProgramRoot $program -DataRoot $data -CandidateId $CandidateId -AllowLegacyWhisperXV1Profiles | Out-Null
     $candidateInfo = Get-TreeInfo $candidateOriginal
     $activationInfo = Get-TreeInfo $activationOriginal
     if ([int64]$candidateInfo.bytes -gt ([int64]$MaxDeleteGB * 1GB)) { throw "Candidate exceeds the $MaxDeleteGB GiB deletion cap" }

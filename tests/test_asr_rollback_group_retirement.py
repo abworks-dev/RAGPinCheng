@@ -14,6 +14,7 @@ def test_retirement_is_exact_hash_locked_and_recoverable():
     assert "Active candidate is permanently protected" in SCRIPT
     assert "Approved manifest SHA-256 mismatch" in SCRIPT
     assert "Scheduled Task identity changed after preview" in SCRIPT
+    assert "-AllowLegacyWhisperXV1Profiles" in SCRIPT
     assert "-Mode Restore" in WORKFLOW
     assert "group: production-gpu-exclusive" in WORKFLOW
 
@@ -29,3 +30,4 @@ def test_workflow_is_limited_to_the_approved_groups():
         assert f"'{candidate}' = '{activation}'" in WORKFLOW
     assert "Requested group is outside the approved retirement boundary" in WORKFLOW
     assert "if ([string]$active.candidate_id -ne '31982245231')" in WORKFLOW
+    assert "-AllowLegacyWhisperXV1Profiles" in WORKFLOW

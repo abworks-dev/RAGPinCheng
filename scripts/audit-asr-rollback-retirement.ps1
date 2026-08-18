@@ -28,7 +28,7 @@ foreach ($candidate in @($refs.Keys | Sort-Object)) {
     if (@($candidateStates | Where-Object { $_ -notin @('rolled-back', 'failed', 'cancelled') }).Count -gt 0) { $status='protected'; $reasons += 'non-terminal-activation-state' }
     $release = Join-Path $program "releases\$candidate"; $config = Join-Path $data "config\releases\$candidate"
     if (-not (Test-Path $release -PathType Container) -or -not (Test-Path $config -PathType Container)) { $status='protected'; $reasons += 'release-closure-incomplete' }
-    try { if (Test-Path $release) { Read-AsrReleaseManifest -ProgramRoot $program -DataRoot $data -CandidateId $candidate | Out-Null } } catch { $status='protected'; $reasons += 'release-contract-invalid' }
+    try { if (Test-Path $release) { Read-AsrReleaseManifest -ProgramRoot $program -DataRoot $data -CandidateId $candidate -AllowLegacyWhisperXV1Profiles | Out-Null } } catch { $status='protected'; $reasons += 'release-contract-invalid' }
     $rows += [ordered]@{ candidate_id=$candidate; status=$status; reasons=$reasons; activation_ids=@($refs[$candidate]) }
 }
 $report = [ordered]@{ schema_version='asr-rollback-retirement-audit/1'; generated_at_utc=[DateTimeOffset]::UtcNow.ToString('o'); active_candidate_id=[string]$active.candidate_id; activation_states=$states; candidates=$rows }
