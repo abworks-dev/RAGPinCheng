@@ -440,16 +440,19 @@ describe("Phase 4B transcription API contracts", () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse([]))
       .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(jsonResponse([]))
       .mockResolvedValueOnce(jsonResponse([]));
     vi.stubGlobal("fetch", fetchMock);
 
     await api.listMediaAssets();
     await api.listTranscriptionProfiles();
+    await api.listTranscriptionSchemes();
     await api.listTranscriptionJobs(true, 25);
 
     expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/admin/media", expect.objectContaining({ credentials: "include" }));
     expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/admin/transcription/profiles", expect.objectContaining({ credentials: "include" }));
-    expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/admin/transcription/jobs?latest_per_media=true&limit=25", expect.objectContaining({ credentials: "include" }));
+    expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/admin/transcription/schemes", expect.objectContaining({ credentials: "include" }));
+    expect(fetchMock).toHaveBeenNthCalledWith(4, "/api/admin/transcription/jobs?latest_per_media=true&limit=25", expect.objectContaining({ credentials: "include" }));
   });
 
   it("uploads automatic media as exact FormData without forcing Content-Type", async () => {
@@ -468,6 +471,7 @@ describe("Phase 4B transcription API contracts", () => {
     expect((form.get("video") as File).name).toBe("training.mp4");
     expect(form.get("title")).toBe("培训视频");
     expect(form.get("profile_id")).toBe("profile-1");
+    expect(form.get("scheme_id")).toBe("profile-1");
     expect(form.get("request_idempotency_key")).toBe("11111111-1111-4111-8111-111111111111");
     expect(form.get("transcript")).toBeNull();
   });
@@ -493,6 +497,7 @@ describe("Phase 4B transcription API contracts", () => {
     expect((form.get("video") as File).name).toBe("training-v2.mp4");
     expect(form.get("title")).toBe("培训视频");
     expect(form.get("profile_id")).toBe("profile-2");
+    expect(form.get("scheme_id")).toBe("profile-2");
     expect(form.get("request_idempotency_key")).toBe("22222222-2222-4222-8222-222222222222");
     expect(form.get("replacement_source_media_id")).toBe("source-media-1");
   });

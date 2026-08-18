@@ -16,6 +16,7 @@ from .persistence import (
 )
 from .policy import effective_release_policy, review_gate_satisfied
 from .profile import ProfileSnapshot, TranscriptionExecutionConfig, TranscriptionProfileDefinition
+from .scheme import TranscriptionSchemeSnapshot
 from .provider_protocol import ProviderFailure, ProviderFailureClassification
 from .types import (
     ContractValidationError,
@@ -63,6 +64,7 @@ def build_pending_job(
     created_by: int | None = None,
     model_id: str | None = None,
     model_revision: str | None = None,
+    scheme_snapshot: TranscriptionSchemeSnapshot | None = None,
 ) -> TranscriptionJobRecord:
     return TranscriptionJobRecord(
         id=job_id,
@@ -105,6 +107,8 @@ def build_pending_job(
         started_at=None,
         finished_at=None,
         updated_at=created_at,
+        scheme_id=None if scheme_snapshot is None else scheme_snapshot.scheme_id,
+        scheme_snapshot=scheme_snapshot,
     )
 
 
