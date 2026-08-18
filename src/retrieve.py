@@ -71,6 +71,10 @@ class RetrievedParent:
     start_time: str | None = None
     company: str | None = None
     media_id: str | None = None  # associated video asset if any
+    sheet_name: str | None = None
+    cell_range: str | None = None
+    slide_number: int | None = None
+    paragraph_anchor: str | None = None
     transcript_version_id: str | None = None
     content_item_id: str | None = None
     content_version_id: str | None = None
@@ -473,6 +477,10 @@ def _dedup_to_parents(
                 start_time=parent_hit_time.get(pid) or p.get("start_time"),
                 company=p.get("company"),
                 media_id=p.get("media_id"),
+                sheet_name=p.get("sheet_name"),
+                cell_range=p.get("cell_range"),
+                slide_number=p.get("slide_number"),
+                paragraph_anchor=p.get("paragraph_anchor"),
                 transcript_version_id=p.get("transcript_version_id"),
                 content_item_id=p.get("content_item_id"),
                 content_version_id=p.get("content_version_id"),

@@ -1,12 +1,12 @@
 // Citation linker: turn inline `[doc §section]` / `[doc @HH:MM:SS]` markers
 // produced by the LLM into markdown links with a sentinel `#cite-…` href.
 // react-markdown renders them as <a>; Message.tsx intercepts the click and
-// dispatches a CITATION_EVENT so the matching SourcesPanel can open + scroll.
+// dispatches a CITATION_EVENT so the matching SourceWorkspace can open + scroll.
 
 import type { Source } from "../types";
 
 export const CITATION_EVENT = "pincheng:citation-click";
-// Sent from SourcesPanel when hovering a source card to highlight the citation in-message.
+// Sent from SourceWorkspace when hovering a source card to highlight the citation in-message.
 export const CITATION_HOVER_EVENT = "pincheng:citation-hover";
 // Sent while an inline citation tooltip is active so streaming auto-follow does not move it.
 export const CITATION_TOOLTIP_ACTIVE_EVENT = "pincheng:citation-tooltip-active";

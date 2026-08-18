@@ -115,6 +115,11 @@ def test_parent_expansion_enforces_content_head_and_uses_current_category_label(
         "source_path": "content://item/version-old",
         "text": "evidence",
         "doc_type": "markdown",
+        "company": "品茗股份",
+        "sheet_name": "统计表",
+        "cell_range": "B2:F20",
+        "slide_number": 8,
+        "paragraph_anchor": "第 3.2 节",
         "content_item_id": "item",
         "content_version_id": "version-old",
         "category_key": "company_standards",
@@ -137,6 +142,11 @@ def test_parent_expansion_enforces_content_head_and_uses_current_category_label(
     )
     assert result[0].category == "公司内部标准"
     assert result[0].content_version_id == "version-old"
+    assert result[0].company == "品茗股份"
+    assert result[0].sheet_name == "统计表"
+    assert result[0].cell_range == "B2:F20"
+    assert result[0].slide_number == 8
+    assert result[0].paragraph_anchor == "第 3.2 节"
 
 
 def test_managed_source_reference_resolves_to_content_object(tmp_path, monkeypatch):

@@ -7,7 +7,7 @@
 ## 调用链
 
 ```text
-FeedbackBar / SourcesPanel
+FeedbackBar / SourceWorkspace
 → POST /api/feedback
 → data/feedback.jsonl（原始反馈）
 

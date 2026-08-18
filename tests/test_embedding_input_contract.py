@@ -48,6 +48,13 @@ def test_oversized_html_table_splits_children_and_preserves_parent_evidence(tmp_
     validate_embedding_inputs(children)
 
 
+def test_headingless_document_keeps_stable_intro_section_path(tmp_path):
+    parents, children = chunk_document(_document(tmp_path, "文档开头的审核说明。"))
+
+    assert {parent.section_path for parent in parents} == {"(intro)"}
+    assert {child.section_path for child in children} == {"(intro)"}
+
+
 def test_single_oversized_html_cell_splits_only_child_not_parent(tmp_path):
     header = "<tr><th>条目</th><th>要求</th></tr>"
     row = f"<tr><td>1</td><td>{'单行要求' * 2500}</td></tr>"

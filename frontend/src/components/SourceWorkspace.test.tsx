@@ -111,6 +111,21 @@ describe("SourceWorkspace video sources", () => {
     );
   });
 
+  it("shows friendly intro and company labels in the list and detail", () => {
+    renderWorkspace({
+      ...spreadsheetSource,
+      doc_type: "pdf",
+      section_path: "(intro)",
+      category: "公司内部标准",
+      company: "品茗股份",
+      sheet_name: null,
+      cell_range: null,
+    });
+
+    expect(screen.getByText("公司内部标准 · 品茗股份 · 文档开头")).toBeInTheDocument();
+    expect(screen.getByText("来源 1 · 公司内部标准 · 品茗股份")).toBeInTheDocument();
+  });
+
   it("copies and downloads all sources for the active answer only", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
