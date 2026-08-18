@@ -335,11 +335,25 @@ export type ManagedCategory = {
   sort_order: number;
   level: number;
   is_active: boolean;
+  chat_search_enabled?: boolean;
+  chat_filter_selectable?: boolean;
   version: number;
   created_at: number;
   updated_at: number;
   full_path: string;
   item_count: number;
+};
+
+export type KnowledgeScope = {
+  id: string;
+  parent_id: string | null;
+  display_code: string;
+  display_name: string;
+  full_path: string;
+  level: number;
+  descendant_count: number;
+  chat_search_enabled: boolean;
+  chat_filter_selectable: boolean;
 };
 
 export type ManagedContentItem = {

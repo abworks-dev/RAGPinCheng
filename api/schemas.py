@@ -37,6 +37,7 @@ class ChatRequest(BaseModel):
 
     query: str | None = Field(default=None, min_length=1)
     categories: list[str] | None = None
+    category_ids: list[str] | None = Field(default=None, max_length=20)
     regenerate_assistant_message_id: int | None = None
     edit_user_message_id: int | None = None
 
@@ -382,6 +383,8 @@ class ManagedCategoryDTO(BaseModel):
     sort_order: int
     level: int
     is_active: bool
+    chat_search_enabled: bool
+    chat_filter_selectable: bool
     version: int
     created_at: int
     updated_at: int
@@ -404,7 +407,25 @@ class UpdateManagedCategoryRequest(BaseModel):
     display_name: str = Field(min_length=1, max_length=100)
     sort_order: int = Field(ge=0, le=999_999)
     is_active: bool
+    chat_search_enabled: bool | None = None
+    chat_filter_selectable: bool | None = None
     expected_version: int = Field(gt=0)
+
+
+class KnowledgeScopeDTO(BaseModel):
+    id: str
+    parent_id: str | None
+    display_code: str
+    display_name: str
+    full_path: str
+    level: int
+    descendant_count: int = 0
+    chat_search_enabled: bool = True
+    chat_filter_selectable: bool = True
+
+
+class KnowledgeScopeResponse(BaseModel):
+    scopes: list[KnowledgeScopeDTO]
 
 
 class RenameManagedCategoryRequest(BaseModel):

@@ -153,7 +153,7 @@ export function useChat({
       try {
         for await (const ev of streamChat(
           cid,
-          { query: trimmed, categories: categories && categories.length ? categories : null },
+          { query: trimmed, category_ids: categories && categories.length ? categories : null },
           ctrl.signal,
         )) {
           if (ev.type === "prep") {

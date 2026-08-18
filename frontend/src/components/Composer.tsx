@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { Send, Square } from "lucide-react";
 import { KnowledgeScopePicker } from "./KnowledgeScopePicker";
+import type { KnowledgeScope } from "../types";
 
 export function Composer({
   onSend,
   disabled,
   sending,
   onStop,
-  categories,
+  scopes,
   selected,
   onToggleCategory,
   onClearCategories,
@@ -17,7 +18,7 @@ export function Composer({
   disabled: boolean;
   sending: boolean;
   onStop: () => void;
-  categories: string[];
+  scopes: KnowledgeScope[];
   selected: string[];
   onToggleCategory: (category: string) => void;
   onClearCategories: () => void;
@@ -60,7 +61,7 @@ export function Composer({
           className="block max-h-60 min-h-11 w-full resize-none bg-transparent px-2 py-2 text-sm leading-relaxed text-foreground placeholder:text-muted-foreground focus:outline-none"
         />
         <div className="flex min-h-9 items-center justify-between gap-2 border-t border-border pt-2">
-          <KnowledgeScopePicker categories={categories} selected={selected} onToggle={onToggleCategory} onClear={onClearCategories} compact />
+          <KnowledgeScopePicker scopes={scopes} selected={selected} onToggle={onToggleCategory} onClear={onClearCategories} compact />
           <button type="button" aria-label={sending ? "停止回答" : "发送问题"} title={sending ? "停止" : "发送"} onClick={sending ? onStop : submit} disabled={disabled || (!sending && !text.trim())} className="inline-flex size-9 shrink-0 items-center justify-center rounded-ui-md bg-primary text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40">
             {sending ? <Square className="size-4" fill="currentColor" /> : <Send className="size-4" />}
           </button>

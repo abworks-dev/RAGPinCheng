@@ -152,19 +152,45 @@ def _bootstrap_indexes() -> bool:
 
 
 def _category_filter(categories: list[str] | None) -> models.Filter | None:
+    if categories is None:
+        return None
     if not categories:
         return None
+    managed_keys = _category_keys_for_values(categories)
+    if len(managed_keys) == len(set(categories)):
+        return models.Filter(
+            must=[models.FieldCondition(
+                key="category_key", match=models.MatchAny(any=managed_keys)
+            )]
+        )
     conditions: list = [
         models.FieldCondition(key="category", match=models.MatchAny(any=list(categories)))
     ]
-    category_keys = _category_keys_for_labels(categories)
-    if category_keys:
+    if managed_keys:
         conditions.append(
-            models.FieldCondition(
-                key="category_key", match=models.MatchAny(any=category_keys)
-            )
+            models.FieldCondition(key="category_key", match=models.MatchAny(any=managed_keys))
         )
     return models.Filter(should=conditions)
+
+
+def _category_keys_for_values(values: list[str]) -> list[str]:
+    if not APP_DB_PATH.exists() or not values:
+        return []
+    conn = sqlite3.connect(f"file:{APP_DB_PATH.as_posix()}?mode=ro", uri=True)
+    try:
+        if conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='category_nodes'"
+        ).fetchone() is None:
+            return []
+        placeholders = ",".join("?" for _ in values)
+        rows = conn.execute(
+            f"SELECT category_key FROM category_nodes WHERE category_key IN ({placeholders}) "
+            "AND is_active=1 AND chat_search_enabled=1",
+            values,
+        ).fetchall()
+        return [str(row[0]) for row in rows]
+    finally:
+        conn.close()
 
 
 def _category_keys_for_labels(labels: list[str]) -> list[str]:
@@ -180,7 +206,8 @@ def _category_keys_for_labels(labels: list[str]) -> list[str]:
         return [
             str(row[0])
             for row in conn.execute(
-                f"SELECT category_key FROM category_nodes WHERE display_name IN ({placeholders}) AND is_active=1",
+                f"SELECT category_key FROM category_nodes WHERE display_name IN ({placeholders}) "
+                "AND is_active=1 AND chat_search_enabled=1",
                 labels,
             ).fetchall()
         ]

@@ -31,6 +31,7 @@ from src.llm_health import check_llm, to_dict as llm_health_to_dict
 from . import feedback as feedback_log
 from .auth import CurrentUser, require_user
 from .db import connect as db_connect
+from .knowledge_scope import list_knowledge_scopes
 from .content_storage import ContentStorage
 from .schemas import (
     CategoriesResponse,
@@ -39,6 +40,8 @@ from .schemas import (
     FeedbackResponse,
     HealthResponse,
     LLMHealthResponse,
+    KnowledgeScopeResponse,
+    KnowledgeScopeDTO,
 )
 
 logger = logging.getLogger("api.routes")
@@ -175,6 +178,19 @@ def get_categories() -> CategoriesResponse:
     finally:
         conn.close()
     return CategoriesResponse(categories=sorted(categories))
+
+
+@router.get("/knowledge-scopes", response_model=KnowledgeScopeResponse)
+def get_knowledge_scopes(
+    _user: CurrentUser = Depends(require_user),
+) -> KnowledgeScopeResponse:
+    conn = db_connect()
+    try:
+        return KnowledgeScopeResponse(
+            scopes=[KnowledgeScopeDTO(**item) for item in list_knowledge_scopes(conn)]
+        )
+    finally:
+        conn.close()
 
 
 @router.get("/source/{parent_id}/raw")

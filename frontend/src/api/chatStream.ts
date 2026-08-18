@@ -12,6 +12,7 @@ export async function* streamChat(
   body: {
     query?: string;
     categories?: string[] | null;
+    category_ids?: string[] | null;
     regenerate_assistant_message_id?: number;
     edit_user_message_id?: number;
   },
