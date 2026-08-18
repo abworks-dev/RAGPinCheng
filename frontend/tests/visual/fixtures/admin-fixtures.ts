@@ -35,10 +35,24 @@ const workspaceUsers = {
 };
 
 export const categories = [
-  { id: "cat-company", category_key: "company_standard", parent_id: null, display_code: "03", display_name: "公司内部标准", sort_order: 10, level: 1, is_active: true, version: 3, created_at: 1700000000, updated_at: 1700000000, full_path: "03 公司内部标准", item_count: 3 },
-  { id: "cat-project", category_key: "project_delivery", parent_id: null, display_code: "04", display_name: "项目资料", sort_order: 20, level: 1, is_active: true, version: 2, created_at: 1700000000, updated_at: 1700000000, full_path: "04 项目资料", item_count: 2 },
-  { id: "cat-archive", category_key: "archived", parent_id: null, display_code: "99", display_name: "待确认资料", sort_order: 90, level: 1, is_active: false, version: 1, created_at: 1700000000, updated_at: 1700000000, full_path: "99 待确认资料", item_count: 0 },
+  { id: "cat-company", category_key: "company_standard", parent_id: null, display_code: "03", display_name: "公司内部标准", sort_order: 10, level: 1, is_active: true, chat_search_enabled: true, chat_filter_selectable: true, version: 3, created_at: 1700000000, updated_at: 1700000000, full_path: "03 公司内部标准", item_count: 3 },
+  { id: "cat-project", category_key: "project_delivery", parent_id: null, display_code: "04", display_name: "项目资料", sort_order: 20, level: 1, is_active: true, chat_search_enabled: true, chat_filter_selectable: true, version: 2, created_at: 1700000000, updated_at: 1700000000, full_path: "04 项目资料", item_count: 2 },
+  { id: "cat-archive", category_key: "archived", parent_id: null, display_code: "99", display_name: "待确认资料", sort_order: 90, level: 1, is_active: false, chat_search_enabled: false, chat_filter_selectable: false, version: 1, created_at: 1700000000, updated_at: 1700000000, full_path: "99 待确认资料", item_count: 0 },
 ];
+
+const knowledgeScopes = categories
+  .filter((category) => category.is_active && category.chat_search_enabled && category.chat_filter_selectable)
+  .map((category) => ({
+    id: category.id,
+    parent_id: category.parent_id,
+    display_code: category.display_code,
+    display_name: category.display_name,
+    full_path: category.full_path,
+    level: category.level,
+    descendant_count: 0,
+    chat_search_enabled: category.chat_search_enabled,
+    chat_filter_selectable: category.chat_filter_selectable,
+  }));
 
 const folderRequests = [{
   id: "folder-request-1", parent_category_id: "cat-company", parent_label: "03 公司内部标准",
@@ -761,6 +775,7 @@ export async function installAdminRoutes(
       return route.fulfill({ status: 200, contentType: "video/mp4", body: "" });
     }
     if (path === "/api/categories") return json(route, { categories: [], second_level_categories: [] });
+    if (path === "/api/knowledge-scopes") return json(route, { scopes: knowledgeScopes });
     if (path === "/api/conversations" && request.method() === "GET") return json(route, { conversations: adminConversations.slice(0, 1) });
     if (path === "/api/conversations" && request.method() === "POST") return json(route, { ...adminConversations[0] });
     if (request.method() === "GET" && path.startsWith("/api/pdf/")) {
@@ -802,7 +817,7 @@ export async function installAdminRoutes(
       return json(route, { enabled: scenario !== "disabled", max_upload_bytes: 10_000_000, supported_extensions: [".pdf", ".md", ".docx", ".xlsx", ".pptx"] });
     }
     if (request.method() === "GET" && path === "/api/admin/content/categories") {
-      const childFolder = { id: "cat-company-modeling", category_key: "company_modeling", parent_id: "cat-company", display_code: "01", display_name: "建模标准（长名称用于响应式检查）", sort_order: 10, level: 2, is_active: true, version: 1, created_at: 1700000000, updated_at: 1700000000, full_path: "03 公司内部标准 / 01 建模标准（长名称用于响应式检查）", item_count: 1 };
+      const childFolder = { id: "cat-company-modeling", category_key: "company_modeling", parent_id: "cat-company", display_code: "01", display_name: "建模标准（长名称用于响应式检查）", sort_order: 10, level: 2, is_active: true, chat_search_enabled: true, chat_filter_selectable: true, version: 1, created_at: 1700000000, updated_at: 1700000000, full_path: "03 公司内部标准 / 01 建模标准（长名称用于响应式检查）", item_count: 1 };
       return json(route, scenario === "empty" ? [] : options.includeChildFolder ? [...categories, childFolder] : categories);
     }
     if (request.method() === "GET" && path === "/api/admin/content/upload-tasks") {
@@ -1005,6 +1020,7 @@ export async function installChatRoutes(page: Page, scenario: "normal" | "error"
     if (!path.startsWith("/api/")) return route.continue();
     if (path === "/api/auth/me") return json(route, chatUser);
     if (path === "/api/categories") return json(route, { categories: ["公司标准", "项目资料"], second_level_categories: [] });
+    if (path === "/api/knowledge-scopes") return json(route, { scopes: knowledgeScopes });
     if (path === "/api/conversations" && request.method() === "GET") return json(route, { conversations: [] });
     if (path === "/api/conversations" && request.method() === "POST") return json(route, { id: "conversation-chat", title: "合成新对话", user_id: chatUser.id, created_at: 1700000000, updated_at: 1700000000, turn_index: 0 });
     if (path === "/api/conversations/conversation-chat" && request.method() === "GET") return json(route, { ...conversationState, id: "conversation-chat", title: "合成新对话", user_id: chatUser.id, messages: [] });

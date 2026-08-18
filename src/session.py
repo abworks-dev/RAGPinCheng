@@ -221,10 +221,11 @@ def retrieve_for_turn(
         return list(fresh)
 
     seen = {p.parent_id for p in fresh}
-    allowed = set(categories) if categories else None
+    allowed = None if categories is None else set(categories)
     carry_candidates = [
         p for p in last_sources[:carry]
-        if p.parent_id not in seen and (allowed is None or p.category in allowed)
+        if p.parent_id not in seen
+        and (allowed is None or p.category_key in allowed or p.category in allowed)
     ]
     if not carry_candidates:
         return list(fresh)
@@ -303,6 +304,11 @@ class ChatSession:
         Decomposition latency stays folded into the caller's `retrieve` timing;
         gate/applied telemetry is recorded into `debug` when provided.
         """
+        # An explicitly empty resolved scope means the administrator has not
+        # enabled any knowledge for chat.  Do not pass it to the lower-level
+        # retriever, where [] retains its legacy "no filter" meaning.
+        if categories == []:
+            return []
         if not QUERY_DECOMPOSE_ENABLED:
             return retrieve(search_query, categories=categories)
 

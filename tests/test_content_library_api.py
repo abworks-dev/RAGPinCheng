@@ -1183,7 +1183,13 @@ def test_delete_rejects_active_publication(content_api):
 
 
 def test_category_update_uses_csrf_and_optimistic_version(content_api):
-    client, sessions, _queued, _db_path = content_api
+    client, sessions, _queued, db_path = content_api
+    conn = connect(db_path)
+    conn.execute(
+        "UPDATE category_nodes SET chat_search_enabled=0,chat_filter_selectable=0 WHERE id='cat-01'"
+    )
+    conn.commit()
+    conn.close()
     url = "/api/admin/content/categories/cat-01"
     body = {
         "display_code": "01",
@@ -1204,6 +1210,8 @@ def test_category_update_uses_csrf_and_optimistic_version(content_api):
     assert updated.status_code == 200
     assert updated.json()["display_name"] == "行业规范"
     assert updated.json()["version"] == 2
+    assert updated.json()["chat_search_enabled"] is False
+    assert updated.json()["chat_filter_selectable"] is False
 
 
 def test_category_quick_actions_keep_legacy_sort_updates_compatible_without_changing_number_order(content_api):

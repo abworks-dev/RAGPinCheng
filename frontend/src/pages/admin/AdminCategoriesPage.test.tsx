@@ -77,6 +77,8 @@ describe("AdminCategoriesPage", () => {
       display_name: "行业规范",
       sort_order: 10,
       is_active: true,
+      chat_search_enabled: true,
+      chat_filter_selectable: true,
       expected_version: 3,
     }));
   });

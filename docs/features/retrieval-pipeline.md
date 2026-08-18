@@ -1,7 +1,7 @@
 # 检索与重排
 
 - 状态：已实现
-- 最后核对：2026-08-16
+- 最后核对：2026-08-18
 
 ## 用户可观察能力
 
@@ -12,7 +12,7 @@
 ### 已实现
 
 - BGE-M3 Dense + Sparse 检索；
-- RRF 融合、分类过滤和规范编号 code boost；
+- RRF 融合、基于稳定 `category_key` 的严格分类过滤和规范编号 code boost；旧分类名称调用仍兼容解析；
 - Child 命中聚合回 SQLite Parent；
 - BGE reranker 重排；
 - 多轮上下文携带和预算裁剪；上下文字符基线由全局回答策略控制，比较题保留
@@ -51,6 +51,7 @@ ChatSession
 - Qdrant Child payload 必须含 `parent_id`、文档元数据和原始子块文本；
 - `RetrievedParent` 是检索到生成阶段的父证据契约；
 - Parent 正文从 `parents.sqlite` 回取，不以 Child 文本替代。
+- HTTP 对话入口把目录 ID 解析为允许的 `category_key` 列表后再进入 `ChatSession`；显式空列表表示没有可检索目录并直接返回无来源，不等价于底层兼容接口的“不过滤”。
 
 ## 依赖与下游消费者
 
@@ -62,12 +63,14 @@ ChatSession
 - Parent 用于回答，Child 用于检索；
 - 修改 Chunk、ID、Embedding、Payload 或 Collection 必须说明旧索引兼容性和是否需要 Reset；
 - 不得为了获得通过结果修改黄金集答案或屏蔽失败类型。
+- 对话范围切换时不得携带范围外的历史 Parent；新索引和受管分类调整必须继续维护 Child 与 Parent 的 `category_key`。
 
 ## 验证
 
 - 先执行单问题检索冒烟；
 - 按影响运行固定黄金集，分别报告 Recall@1、Recall@5、MRR 和 no-answer；
 - 对规范编号、表格公式、转录本和多轮案例做定向检查；
+- 对目录 ID、父目录递归、全部范围、空范围及范围切换的 `category_key` 过滤做定向检查；
 - 比较题（4 条同池 GB50189/GB55015 规范）走 Phase A 2×2 离线协议：
   `scripts/run_eval_retrieval.py --kinds comparison` 跑出
   off_k5/off_k8/on_k5/on_k8 四单元格真实调用 + ITT/applied-only 两种分析集

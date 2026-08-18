@@ -231,7 +231,10 @@ def test_schema_18_adds_media_library_video_action_tables(tmp_path, monkeypatch)
     conn = sqlite3.connect(path)
     tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert {"media_metadata_revisions", "media_replacements"} <= tables
-    assert conn.execute("SELECT max(version) FROM app_schema_migrations").fetchone()[0] == db_migrations.CURRENT_SCHEMA_VERSION
+    assert (
+        conn.execute("SELECT max(version) FROM app_schema_migrations").fetchone()[0]
+        == db_migrations.CURRENT_SCHEMA_VERSION
+    )
     assert {"content_trash_settings", "content_trash_purge_runs", "content_trash_purge_items"} <= tables
     settings = conn.execute(
         "SELECT cleanup_enabled,retention_days,warning_days,batch_limit FROM content_trash_settings"

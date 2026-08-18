@@ -959,6 +959,15 @@ MIGRATIONS = (
     Migration(19, "media_library_video_actions", MEDIA_LIBRARY_VIDEO_ACTIONS_STATEMENTS),
     Migration(20, "content_trash_lifecycle", CONTENT_TRASH_LIFECYCLE_STATEMENTS),
     Migration(21, "external_service_usage", USAGE_STATEMENTS),
+    Migration(
+        22,
+        "category_chat_scope_settings",
+        (
+            "ALTER TABLE category_nodes ADD COLUMN chat_search_enabled INTEGER NOT NULL DEFAULT 1 CHECK (chat_search_enabled IN (0,1))",
+            "ALTER TABLE category_nodes ADD COLUMN chat_filter_selectable INTEGER NOT NULL DEFAULT 1 CHECK (chat_filter_selectable IN (0,1))",
+            "UPDATE category_nodes SET chat_search_enabled=is_active, chat_filter_selectable=is_active",
+        ),
+    ),
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 PHASE2_TABLES = frozenset(

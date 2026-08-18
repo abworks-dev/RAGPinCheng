@@ -33,6 +33,8 @@ from .conversation_runtime import (
     wrap_stream_with_persistence,
 )
 from .db import get_db
+from .db import connect as db_connect
+from .knowledge_scope import resolve_category_scope
 from .rate_limit import chat_limiter
 from .schemas import (
     ChatRequest,
@@ -200,7 +202,6 @@ async def chat(
 
     # Authorization + existence check up front, with its own short-lived
     # connection so we don't hold one through the SSE stream.
-    from .db import connect as db_connect
     pre_conn = db_connect()
     try:
         row = pre_conn.execute(
@@ -253,23 +254,34 @@ async def chat(
                 hydrate_conn = db_connect()
                 try:
                     edit_assistant_message_id = None
+                    persisted_categories: list[str] | None = None
                     if body.edit_user_message_id is not None:
                         try:
-                            session, categories, edit_assistant_message_id = prepare_user_edit(
+                            session, raw_categories, edit_assistant_message_id = prepare_user_edit(
                                 hydrate_conn,
                                 conversation_id,
                                 body.edit_user_message_id,
                             )
                             query = (body.query or "").strip()
+                            categories = resolve_category_scope(
+                                hydrate_conn, raw_categories,
+                                legacy_categories=raw_categories,
+                            )
+                            persisted_categories = raw_categories
                         except ValueError as exc:
                             raise HTTPException(status_code=409, detail=str(exc)) from exc
                     elif body.regenerate_assistant_message_id is not None:
                         try:
-                            session, query, categories = prepare_regeneration(
+                            session, query, raw_categories = prepare_regeneration(
                                 hydrate_conn,
                                 conversation_id,
                                 body.regenerate_assistant_message_id,
                             )
+                            categories = resolve_category_scope(
+                                hydrate_conn, raw_categories,
+                                legacy_categories=raw_categories,
+                            )
+                            persisted_categories = raw_categories
                         except ValueError as exc:
                             raise HTTPException(status_code=409, detail=str(exc)) from exc
                     else:
@@ -279,7 +291,15 @@ async def chat(
                         ).fetchone()
                         session = hydrate_session(hydrate_conn, conv_row)
                         query = body.query or ""
-                        categories = body.categories
+                        try:
+                            categories = resolve_category_scope(
+                                hydrate_conn,
+                                body.category_ids,
+                                legacy_categories=body.categories,
+                            )
+                        except ValueError as exc:
+                            raise HTTPException(status_code=409, detail=str(exc)) from exc
+                        persisted_categories = body.category_ids if body.category_ids is not None else body.categories
                 finally:
                     hydrate_conn.close()
 
@@ -293,7 +313,7 @@ async def chat(
                     conversation_id=conversation_id,
                     user_text=query,
                     is_first_turn=is_first_turn,
-                    categories=categories,
+                    categories=persisted_categories,
                     regenerate_assistant_message_id=body.regenerate_assistant_message_id,
                     edit_user_message_id=body.edit_user_message_id,
                     edit_assistant_message_id=edit_assistant_message_id,

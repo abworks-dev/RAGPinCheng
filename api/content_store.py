@@ -347,12 +347,14 @@ def list_categories(conn: sqlite3.Connection, *, include_inactive: bool = False)
     rows = conn.execute(
         f"""WITH RECURSIVE paths AS (
                 SELECT id,category_key,parent_id,display_code,display_name,sort_order,
-                       level,is_active,version,created_at,updated_at,
+                       level,is_active,chat_search_enabled,chat_filter_selectable,
+                       version,created_at,updated_at,
                        display_code || ' ' || display_name AS full_path
                 FROM category_nodes WHERE parent_id IS NULL
                 UNION ALL
                 SELECT c.id,c.category_key,c.parent_id,c.display_code,c.display_name,c.sort_order,
-                       c.level,c.is_active,c.version,c.created_at,c.updated_at,
+                       c.level,c.is_active,c.chat_search_enabled,c.chat_filter_selectable,
+                       c.version,c.created_at,c.updated_at,
                        p.full_path || ' / ' || c.display_code || ' ' || c.display_name
                 FROM category_nodes c JOIN paths p ON p.id=c.parent_id
             )
@@ -523,6 +525,8 @@ def update_category(
     is_active: bool,
     expected_version: int,
     actor_user_id: int,
+    chat_search_enabled: bool | None = None,
+    chat_filter_selectable: bool | None = None,
 ) -> sqlite3.Row:
     code = display_code.strip()
     name, _name_key = normalize_category_name(display_name)
@@ -533,10 +537,21 @@ def update_category(
         conn.execute("BEGIN IMMEDIATE")
     try:
         category = conn.execute(
-            "SELECT parent_id FROM category_nodes WHERE id=?", (category_id,)
+            "SELECT parent_id,chat_search_enabled,chat_filter_selectable "
+            "FROM category_nodes WHERE id=?",
+            (category_id,),
         ).fetchone()
         if category is None:
             raise ValueError("category_not_found")
+        if chat_search_enabled is None:
+            chat_search_enabled = bool(category["chat_search_enabled"])
+        if chat_filter_selectable is None:
+            chat_filter_selectable = bool(category["chat_filter_selectable"])
+        if not is_active:
+            chat_search_enabled = False
+            chat_filter_selectable = False
+        if chat_filter_selectable and not chat_search_enabled:
+            raise ValueError("category_filter_requires_chat_search")
         _ensure_category_sibling_identity_available(
             conn,
             parent_id=category["parent_id"],
@@ -570,9 +585,20 @@ def update_category(
         now = _now()
         result = conn.execute(
             """UPDATE category_nodes
-               SET display_code=?,display_name=?,sort_order=?,is_active=?,updated_at=?,version=version+1
+               SET display_code=?,display_name=?,sort_order=?,is_active=?,
+                   chat_search_enabled=?,chat_filter_selectable=?,updated_at=?,version=version+1
                WHERE id=? AND version=?""",
-            (code, name, sort_order, int(is_active), now, category_id, expected_version),
+            (
+                code,
+                name,
+                sort_order,
+                int(is_active),
+                int(chat_search_enabled),
+                int(chat_filter_selectable),
+                now,
+                category_id,
+                expected_version,
+            ),
         )
         if result.rowcount != 1:
             if conn.execute("SELECT 1 FROM category_nodes WHERE id=?", (category_id,)).fetchone() is None:

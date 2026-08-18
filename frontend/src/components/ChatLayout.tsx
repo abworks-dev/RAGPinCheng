@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api/client";
 import { useChat } from "../hooks/useChat";
-import type { Conversation } from "../types";
+import type { Conversation, KnowledgeScope } from "../types";
 import { Composer } from "./Composer";
 import { MessageList } from "./MessageList";
 import { Sidebar } from "./Sidebar";
@@ -20,7 +20,7 @@ import {
 import { getSelectedSourceCount } from "./sourceSelection";
 
 export function ChatLayout() {
-  const [categories, setCategories] = useState<string[]>([]);
+  const [scopes, setScopes] = useState<KnowledgeScope[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [conversationsLoading, setConversationsLoading] = useState(true);
@@ -44,7 +44,7 @@ export function ChatLayout() {
   }, []);
 
   useEffect(() => {
-    api.categories().then((r) => setCategories(r.categories)).catch(() => {});
+    api.knowledgeScopes().then((r) => setScopes(r.scopes)).catch(() => {});
     refreshConversations();
   }, [refreshConversations]);
 
@@ -127,7 +127,7 @@ export function ChatLayout() {
 
   const currentConversation = conversations.find((conversation) => conversation.id === currentId);
   const sourceCount = getSelectedSourceCount(messages, activeSourceMessageId);
-  const scopeLabel = selected.length === 0 ? "全部企业知识" : selected.length === 1 ? selected[0] : `${selected.length} 个范围`;
+  const scopeLabel = selected.length === 0 ? "全部企业知识" : selected.length === 1 ? scopes.find((scope) => scope.id === selected[0])?.display_name || "已选范围" : `${selected.length} 个范围`;
 
   const clearCitationHighlight = useCallback(() => {
     if (activeCitation) {
@@ -166,7 +166,7 @@ export function ChatLayout() {
       currentConversationId={currentId}
       onSelectConversation={onSelectConversation}
       onDeleteConversation={onDeleteConversation}
-      categories={categories}
+      categories={scopes.map((scope) => scope.display_name)}
       selected={selected}
       onToggle={toggleCategory}
       onClearCategories={() => setSelected([])}
@@ -204,7 +204,7 @@ export function ChatLayout() {
                 disabled={loading}
                 sending={sending}
                 onStop={stop}
-                categories={categories}
+                scopes={scopes}
                 selected={selected}
                 onToggleCategory={toggleCategory}
                 onClearCategories={() => setSelected([])}
@@ -228,7 +228,7 @@ export function ChatLayout() {
             disabled={loading}
             sending={sending}
             onStop={stop}
-            categories={categories}
+            scopes={scopes}
             selected={selected}
             onToggleCategory={toggleCategory}
             onClearCategories={() => setSelected([])}

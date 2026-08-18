@@ -387,6 +387,8 @@ def _category_dto(row: sqlite3.Row) -> ManagedCategoryDTO:
         sort_order=row["sort_order"],
         level=row["level"],
         is_active=bool(row["is_active"]),
+        chat_search_enabled=bool(row["chat_search_enabled"]),
+        chat_filter_selectable=bool(row["chat_filter_selectable"]),
         version=row["version"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
@@ -445,6 +447,8 @@ def _raise_domain_error(exc: Exception) -> None:
         raise HTTPException(status_code=409, detail="分类编号或标识已存在") from exc
     if message == "category_version_conflict":
         raise HTTPException(status_code=409, detail="分类已被其他人修改，请刷新后重试") from exc
+    if message == "category_filter_requires_chat_search":
+        raise HTTPException(status_code=400, detail="显示为对话筛选项前必须先纳入企业知识问答") from exc
     if message == "category_sibling_name_conflict":
         raise HTTPException(status_code=409, detail="当前目录已有同名文件夹，请使用其他名称") from exc
     if message == "category_sibling_code_conflict_current":
@@ -623,6 +627,8 @@ def patch_category(
             display_name=body.display_name,
             sort_order=body.sort_order,
             is_active=body.is_active,
+            chat_search_enabled=body.chat_search_enabled,
+            chat_filter_selectable=body.chat_filter_selectable,
             expected_version=body.expected_version,
             actor_user_id=user.id,
         )

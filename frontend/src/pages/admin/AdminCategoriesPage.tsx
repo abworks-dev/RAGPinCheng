@@ -41,7 +41,12 @@ import {
 } from "../../lib/category-tree";
 
 type CategoryFilter = "all" | "active" | "inactive";
-type CategoryDraft = Pick<ManagedCategory, "display_name" | "is_active">;
+type CategoryDraft = {
+  display_name: string;
+  is_active: boolean;
+  chat_search_enabled: boolean;
+  chat_filter_selectable: boolean;
+};
 type CategoryCreateDraft = { parent_id: string; display_name: string; target_position: string };
 type PendingAction =
   | { kind: "select"; id: string }
@@ -54,6 +59,8 @@ function makeDraft(category: ManagedCategory): CategoryDraft {
   return {
     display_name: category.display_name,
     is_active: category.is_active,
+    chat_search_enabled: category.chat_search_enabled !== false,
+    chat_filter_selectable: category.chat_filter_selectable !== false,
   };
 }
 
@@ -114,7 +121,9 @@ export function AdminCategoriesPage() {
   const selectedCategory = categories.find((category) => category.id === selectedId) || null;
   const isDirty = Boolean(selectedCategory && draft && draftCategoryId === selectedCategory.id
     && (draft.display_name !== selectedCategory.display_name
-      || draft.is_active !== selectedCategory.is_active));
+      || draft.is_active !== selectedCategory.is_active
+      || draft.chat_search_enabled !== (selectedCategory.chat_search_enabled !== false)
+      || draft.chat_filter_selectable !== (selectedCategory.chat_filter_selectable !== false)));
 
   const load = useCallback(async (refresh = false) => {
     if (refresh) setRefreshing(true);
@@ -280,6 +289,8 @@ export function AdminCategoriesPage() {
         display_name: draft.display_name.trim(),
         sort_order: selectedCategory.sort_order,
         is_active: draft.is_active,
+        chat_search_enabled: draft.chat_search_enabled,
+        chat_filter_selectable: draft.chat_filter_selectable,
         expected_version: selectedCategory.version,
       });
       setDraft(makeDraft(updated));
@@ -673,7 +684,9 @@ function CategoryDetail({
   onAdjustNumber: () => void;
 }) {
   if (!category || !draft) return <EmptyState title="选择一个分类" description="从左侧选择分类后，在此维护分类信息。" />;
-  const isDirty = draft.display_name !== category.display_name || draft.is_active !== category.is_active;
+  const isDirty = draft.display_name !== category.display_name || draft.is_active !== category.is_active
+    || draft.chat_search_enabled !== (category.chat_search_enabled !== false)
+    || draft.chat_filter_selectable !== (category.chat_filter_selectable !== false);
   const cannotDisable = draft.is_active && (category.item_count > 0 || hasActiveChild);
   const statusHelpId = `category-status-help-${category.id}`;
   const parent = categories.find((item) => item.id === category.parent_id);
@@ -694,12 +707,24 @@ function CategoryDetail({
             <span><span className="block font-medium">启用</span><span className="block text-ui-xs text-muted-foreground">可用于上传和归类</span></span>
           </label>
           <label className={`flex min-h-control-md items-start gap-2 rounded-ui-md border px-3 py-2 text-ui-sm transition-colors focus-within:ring-2 focus-within:ring-ring ${cannotDisable ? "cursor-not-allowed border-border bg-surface-muted/40 opacity-60" : draft.is_active ? "border-border hover:bg-surface-muted/60" : "border-primary/50 bg-primary/10"}`}>
-            <input type="radio" name={`category-status-${category.id}`} value="inactive" checked={!draft.is_active} disabled={saving || cannotDisable} onChange={() => onChange({ ...draft, is_active: false })} className="peer sr-only" aria-label={`${category.display_name}停用`} />
+            <input type="radio" name={`category-status-${category.id}`} value="inactive" checked={!draft.is_active} disabled={saving || cannotDisable} onChange={() => onChange({ ...draft, is_active: false, chat_search_enabled: false, chat_filter_selectable: false })} className="peer sr-only" aria-label={`${category.display_name}停用`} />
             <span className="mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border border-input peer-checked:border-primary"><span className="size-2 rounded-full bg-primary opacity-0 peer-checked:opacity-100" /></span>
             <span><span className="block font-medium">停用</span><span className="block text-ui-xs text-muted-foreground">不再出现在可选目录中</span></span>
           </label>
         </div>
         {cannotDisable && <div id={statusHelpId} className="flex gap-2 rounded-ui-md border border-border bg-surface-muted/50 px-3 py-2 text-ui-xs text-muted-foreground" role="status"><TriangleAlert className="mt-0.5 size-4 shrink-0 text-warning" aria-hidden="true" /><div className="space-y-1"><p className="font-medium text-foreground">暂不能停用</p>{category.item_count > 0 && <p>该分类有 {category.item_count} 份直接资料，需重新归类后才能停用。</p>}{hasActiveChild && <p>该分类仍有启用的子分类，请先停用子分类。</p>}</div></div>}
+      </section>
+      <section aria-labelledby={`category-chat-scope-${category.id}`} className="space-y-3 border-t border-border pt-4">
+        <div><h4 id={`category-chat-scope-${category.id}`} className="text-ui-sm font-semibold">企业知识问答</h4><p className="mt-1 text-ui-xs text-muted-foreground">控制目录内容是否进入问答，以及是否允许用户在对话中单独筛选。</p></div>
+        <label className={`flex items-start gap-2 rounded-ui-md border px-3 py-2 text-ui-sm ${draft.chat_search_enabled ? "border-primary/50 bg-primary/10" : "border-border"}`}>
+          <input type="checkbox" checked={draft.chat_search_enabled} disabled={saving || !draft.is_active} onChange={(event) => onChange({ ...draft, chat_search_enabled: event.target.checked, chat_filter_selectable: event.target.checked ? draft.chat_filter_selectable : false })} className="mt-1 size-4 accent-primary" />
+          <span><span className="block font-medium">纳入企业知识问答</span><span className="block text-ui-xs text-muted-foreground">目录下已发布资料可被企业知识检索使用。</span></span>
+        </label>
+        <label className={`flex items-start gap-2 rounded-ui-md border px-3 py-2 text-ui-sm ${draft.chat_filter_selectable ? "border-primary/50 bg-primary/10" : "border-border"}`}>
+          <input type="checkbox" checked={draft.chat_filter_selectable} disabled={saving || !draft.is_active || !draft.chat_search_enabled} onChange={(event) => onChange({ ...draft, chat_filter_selectable: event.target.checked })} className="mt-1 size-4 accent-primary" />
+          <span><span className="block font-medium">显示为对话筛选项</span><span className="block text-ui-xs text-muted-foreground">用户可以选择此目录，并同时覆盖可用子目录。</span></span>
+        </label>
+        {!draft.is_active && <p className="text-ui-xs text-muted-foreground">停用目录不会进入企业知识问答，也不会显示为筛选项。</p>}
       </section>
       <section aria-labelledby={`category-level-${category.id}`} className="space-y-3 border-t border-border pt-4"><div><h4 id={`category-level-${category.id}`} className="text-ui-sm font-semibold">目录结构</h4><p className="mt-1 break-words text-ui-xs text-muted-foreground">父分类：{parent ? `${parent.display_code} ${parent.display_name}` : "一级分类"} · 第 {category.level} 级 · {category.item_count} 份直接资料</p></div><div className="flex flex-wrap gap-2"><Button variant="outline" onClick={onAddChild} disabled={moving || category.level >= 4 || !category.is_active}><Plus className="size-4" />新增子分类</Button><Button variant="outline" onClick={onMove} disabled={moving || isDirty}><Move className="size-4" />移动至</Button></div></section>
     </div>
