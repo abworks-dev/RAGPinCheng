@@ -76,12 +76,13 @@ from .content_store import (
     audit_event,
     create_category,
     delete_category,
+    force_delete_category,
     create_folder_request,
     create_publication_job,
     create_content_revision,
     create_web_batch,
     find_sibling_category_by_name,
-    get_category_delete_preview,
+    get_category_force_delete_preview,
     get_upload_task,
     list_content_items,
     list_content_items_page,
@@ -603,6 +604,12 @@ def _raise_domain_error(exc: Exception) -> None:
         raise HTTPException(status_code=400, detail="请确认删除文件夹") from exc
     if message == "category_delete_blocked":
         raise HTTPException(status_code=409, detail="文件夹或子文件夹中仍有资料或待处理任务，请先处理后再删除") from exc
+    if message == "category_force_delete_path_confirmation_required":
+        raise HTTPException(status_code=400, detail="请输入完整目录路径以确认永久删除") from exc
+    if message == "category_force_delete_protected":
+        raise HTTPException(status_code=409, detail="系统默认分类受保护，不能强制永久删除") from exc
+    if message == "category_force_delete_media_blocked":
+        raise HTTPException(status_code=409, detail="目录中包含视频转录稿，请先在视频管理中处理") from exc
     if message == "category_move_cycle":
         raise HTTPException(status_code=409, detail="分类不能移动到自身或其子分类中") from exc
     if message == "category_move_position_not_found":
@@ -863,7 +870,7 @@ def get_managed_category_delete_preview(
 ) -> DeleteManagedCategoryPreviewDTO:
     _require_feature()
     try:
-        return DeleteManagedCategoryPreviewDTO(**get_category_delete_preview(conn, category_id))
+        return DeleteManagedCategoryPreviewDTO(**get_category_force_delete_preview(conn, category_id))
     except ValueError as exc:
         _raise_domain_error(exc)
 
@@ -880,13 +887,20 @@ def delete_managed_category(
 ) -> DeleteManagedCategoryResponse:
     _require_feature()
     try:
-        result = delete_category(
-            conn,
-            category_id,
-            expected_version=body.expected_version,
-            confirmed=body.confirmed,
-            actor_user_id=user.id,
-        )
+        if body.force:
+            if not has_content_permission(conn, user, "category.force_delete"):
+                raise HTTPException(status_code=403, detail="当前账号没有强制永久删除目录的权限")
+            if not body.typed_path:
+                raise ValueError("category_force_delete_path_confirmation_required")
+            result = force_delete_category(
+                conn, category_id, expected_version=body.expected_version,
+                confirmed=body.confirmed, typed_path=body.typed_path, actor_user_id=user.id,
+            )
+        else:
+            result = delete_category(
+                conn, category_id, expected_version=body.expected_version,
+                confirmed=body.confirmed, actor_user_id=user.id,
+            )
     except (ValueError, sqlite3.IntegrityError) as exc:
         _raise_domain_error(exc)
     return DeleteManagedCategoryResponse(
@@ -894,6 +908,15 @@ def delete_managed_category(
         renumbered_sibling_count=int(result["renumbered_sibling_count"]),
         parent_id=result["parent_id"],
         categories=[_category_dto(row) for row in result["categories"]],
+        force_delete=bool(result.get("force_delete", False)),
+        cleanup_status=result.get("cleanup_status"),
+        cleanup_error_count=int(result.get("cleanup_error_count", 0)),
+        run_id=result.get("run_id"),
+        deleted_item_count=int(result.get("deleted_item_count", 0)),
+        deleted_upload_batch_count=int(result.get("deleted_upload_batch_count", 0)),
+        deleted_index_job_count=int(result.get("deleted_index_job_count", 0)),
+        qdrant_point_count=int(result.get("qdrant_point_count", 0)),
+        deleted_object_count=int(result.get("deleted_object_count", 0)),
     )
 
 

@@ -14,7 +14,7 @@ const admin = {
     "item.move_draft", "item.archive_draft", "item.review", "item.move_review",
     "item.publish", "item.reclassify_published", "item.archive_published", "trash.view", "trash.restore",
     "trash.purge", "trash.policy_manage",
-    "category.manage", "folder.request", "folder.review", "import.server", "index.view",
+    "category.manage", "category.force_delete", "folder.request", "folder.review", "import.server", "index.view",
   ],
 };
 
@@ -449,7 +449,7 @@ const permissionUsers = [
 ];
 
 const permissionCatalog = {
-  schema_version: 5,
+  schema_version: 6,
   permissions: [
     { key: "workspace.view", domain: "access", domain_label: "入口与查看", label: "进入资料工作台", description: "进入资料管理工作台。", dependencies: [] },
     { key: "item.view", domain: "access", domain_label: "入口与查看", label: "查看资料", description: "查看资料列表、详情和预览。", dependencies: ["workspace.view"] },
@@ -469,6 +469,7 @@ const permissionCatalog = {
     { key: "trash.purge", domain: "trash", domain_label: "回收站", label: "永久删除资料", description: "永久删除回收站中的资料及关联索引。", dependencies: ["workspace.view", "item.view", "trash.view"] },
     { key: "trash.policy_manage", domain: "trash", domain_label: "回收站", label: "管理清理策略", description: "配置自动清理策略并查看清理记录。", dependencies: ["workspace.view", "item.view", "trash.view"] },
     { key: "category.manage", domain: "category", domain_label: "分类与目录", label: "维护分类", description: "新增、修改、启用或停用资料分类。", dependencies: ["workspace.view", "category.view"] },
+    { key: "category.force_delete", domain: "category", domain_label: "分类与目录", label: "强制永久删除目录", description: "永久删除目录及其关联资料、上传任务和索引数据，此操作不可恢复。", dependencies: ["workspace.view", "category.view", "category.manage", "trash.purge"] },
     { key: "folder.request", domain: "category", domain_label: "分类与目录", label: "申请目录", description: "提交子目录创建申请。", dependencies: ["workspace.view", "item.view", "category.view"] },
     { key: "folder.review", domain: "category", domain_label: "分类与目录", label: "审批目录", description: "查看、批准或退回目录申请。", dependencies: ["workspace.view", "item.view", "category.view"] },
     { key: "import.server", domain: "operations", domain_label: "导入与索引", label: "服务器导入", description: "执行受控的服务器批次导入。", dependencies: ["workspace.view", "item.view", "category.view"] },
@@ -868,6 +869,19 @@ export async function installAdminRoutes(
       const childFolder = { id: "cat-company-modeling", category_key: "company_modeling", parent_id: "cat-company", display_code: "01", display_name: "建模标准（长名称用于响应式检查）", sort_order: 10, level: 2, is_active: true, chat_search_enabled: true, chat_filter_selectable: true, version: 1, created_at: 1700000000, updated_at: 1700000000, full_path: "03 公司内部标准 / 01 建模标准（长名称用于响应式检查）", item_count: 1 };
       return json(route, scenario === "empty" ? [] : options.includeChildFolder ? [...categories, childFolder] : categories);
     }
+    if (request.method() === "GET" && /^\/api\/admin\/content\/categories\/[^/]+\/delete-preview$/.test(path)) {
+      const categoryId = path.split("/").at(-2)!;
+      const category = categories.find((candidate) => candidate.id === categoryId) || categories[0];
+      return json(route, {
+        category_id: category.id, parent_id: category.parent_id, display_name: category.display_name,
+        full_path: category.full_path, version: category.version, descendant_count: 0, folder_count: 1,
+        content_count: 2, pending_request_count: 0, active_upload_count: 1,
+        active_reclassification_count: 0, active_index_count: 1, archived_content_count: 1,
+        active_content_count: 1, upload_batch_count: 2, media_transcript_count: 0,
+        renumbered_sibling_count: 1, can_delete: false, can_force_delete: true,
+        protected_category: false,
+      });
+    }
     if (request.method() === "GET" && path === "/api/admin/content/upload-tasks") {
       const status = url.searchParams.get("status");
       const query = (url.searchParams.get("query") || "").trim().toLocaleLowerCase("zh-CN");
@@ -955,6 +969,16 @@ export async function installAdminRoutes(
     }
     if (request.method() !== "GET" && path.startsWith("/api/admin/content/")) {
       await new Promise((resolve) => setTimeout(resolve, 800));
+      if (request.method() === "DELETE" && /^\/api\/admin\/content\/categories\/[^/]+$/.test(path)) {
+        const categoryId = path.split("/").at(-1)!;
+        return json(route, {
+          deleted_folder_count: 1, renumbered_sibling_count: 1, parent_id: null,
+          categories: categories.filter((category) => category.id !== categoryId), force_delete: true,
+          cleanup_status: "succeeded", cleanup_error_count: 0, run_id: "category-force-delete-synthetic",
+          deleted_item_count: 2, deleted_upload_batch_count: 2, deleted_index_job_count: 1,
+          qdrant_point_count: 8, deleted_object_count: 2,
+        });
+      }
       if (request.method() === "POST" && /^\/api\/admin\/content\/categories\/[^/]+\/move$/.test(path)) {
         const categoryId = path.split("/").at(-2);
         const body = request.postDataJSON() as { target_parent_id?: string | null; before_category_id?: string | null; expected_version: number };

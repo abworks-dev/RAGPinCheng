@@ -447,6 +447,14 @@ export function AdminCategoriesPage() {
     setCategories(result.categories);
     setSelectedId(result.parent_id || result.categories[0]?.id || null);
     setEditorOpen(false);
+    if (result.force_delete) {
+      if (result.cleanup_status === "partial") {
+        toast.error(`目录已移除，但有 ${result.cleanup_error_count} 项关联数据清理失败，请联系系统管理员`);
+        return;
+      }
+      toast.success(`已永久删除 ${result.deleted_item_count} 份资料和 ${result.deleted_folder_count} 个文件夹`);
+      return;
+    }
     toast.success(result.deleted_folder_count > 1
       ? `已删除 ${result.deleted_folder_count} 个文件夹`
       : "文件夹已删除");
@@ -578,7 +586,7 @@ export function AdminCategoriesPage() {
           <DialogFooter><Button variant="outline" onClick={() => { setDiscardOpen(false); setPendingAction(null); }}>继续编辑</Button><Button variant="destructive" onClick={confirmDiscard}>放弃修改</Button></DialogFooter>
         </DialogContent>
       </Dialog>
-      <CategoryDeleteDialog category={deleteTarget} onClose={() => setDeleteTarget(null)} onDeleted={categoryDeleted} />
+      <CategoryDeleteDialog category={deleteTarget} canForceDelete onClose={() => setDeleteTarget(null)} onDeleted={categoryDeleted} />
     </section>
   );
 }

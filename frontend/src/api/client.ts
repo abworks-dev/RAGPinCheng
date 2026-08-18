@@ -491,12 +491,21 @@ export const api = {
     jsonFetch<CategoryDeletePreview>(
       `/api/admin/content/categories/${encodeURIComponent(categoryId)}/delete-preview`,
     ),
-  deleteManagedCategory: (categoryId: string, expectedVersion: number) =>
+  deleteManagedCategory: (
+    categoryId: string,
+    expectedVersion: number,
+    options?: { force?: boolean; typedPath?: string },
+  ) =>
     jsonFetch<CategoryDeleteResult>(
       `/api/admin/content/categories/${encodeURIComponent(categoryId)}`,
       {
         method: "DELETE",
-        body: JSON.stringify({ expected_version: expectedVersion, confirmed: true }),
+        body: JSON.stringify({
+          expected_version: expectedVersion,
+          confirmed: true,
+          force: Boolean(options?.force),
+          typed_path: options?.typedPath || null,
+        }),
       },
     ),
   managedContentPermissions: () =>

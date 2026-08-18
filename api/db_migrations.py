@@ -10,6 +10,7 @@ from typing import Iterable
 from .content_permission_catalog import (
     CONTENT_PERMISSION_V2_SYSTEM_CONTENT_PERMISSION_GROUPS,
     LEGACY_SYSTEM_CONTENT_PERMISSION_GROUPS,
+    PRE_CATEGORY_FORCE_DELETE_SYSTEM_CONTENT_PERMISSION_GROUPS,
     PRE_RECLASSIFICATION_SYSTEM_CONTENT_PERMISSION_GROUPS,
     PRE_TRASH_LIFECYCLE_SYSTEM_CONTENT_PERMISSION_GROUPS,
     SYSTEM_CONTENT_PERMISSION_GROUPS,
@@ -1040,6 +1041,64 @@ MIGRATIONS = (
             "CREATE INDEX IF NOT EXISTS idx_category_nodes_deleted_at ON category_nodes(deleted_at)",
         ),
     ),
+    Migration(
+        25,
+        "category_force_delete",
+        (
+            "ALTER TABLE content_permissions RENAME TO content_permissions_v24",
+            """CREATE TABLE content_permissions (
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                permission TEXT NOT NULL CHECK (permission IN (
+                    'workspace.view','item.view','item.download','category.view','item.upload','item.submit',
+                    'item.move_draft','item.archive_draft','item.review','item.move_review',
+                    'item.publish','item.reclassify_published','item.archive_published','trash.view','trash.restore',
+                    'trash.purge','trash.policy_manage','category.manage','category.force_delete','folder.request',
+                    'folder.review','import.server','index.view'
+                )),
+                granted_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                created_at INTEGER NOT NULL,
+                PRIMARY KEY(user_id, permission)
+            )""",
+            """INSERT INTO content_permissions(user_id,permission,granted_by,created_at)
+               SELECT user_id,permission,granted_by,created_at FROM content_permissions_v24""",
+            "DROP TABLE content_permissions_v24",
+            "ALTER TABLE content_permission_group_items RENAME TO content_permission_group_items_v24",
+            """CREATE TABLE content_permission_group_items (
+                group_id TEXT NOT NULL REFERENCES content_permission_groups(id) ON DELETE CASCADE,
+                permission TEXT NOT NULL CHECK (permission IN (
+                    'workspace.view','item.view','item.download','category.view','item.upload','item.submit',
+                    'item.move_draft','item.archive_draft','item.review','item.move_review',
+                    'item.publish','item.reclassify_published','item.archive_published','trash.view','trash.restore',
+                    'trash.purge','trash.policy_manage','category.manage','category.force_delete','folder.request',
+                    'folder.review','import.server','index.view'
+                )),
+                PRIMARY KEY(group_id, permission)
+            )""",
+            """INSERT INTO content_permission_group_items(group_id,permission)
+               SELECT group_id,permission FROM content_permission_group_items_v24""",
+            """INSERT OR IGNORE INTO content_permission_group_items(group_id,permission)
+               SELECT id,'category.force_delete' FROM content_permission_groups
+               WHERE is_system=1 AND group_key='system_admin'""",
+            "DROP TABLE content_permission_group_items_v24",
+            """CREATE TABLE IF NOT EXISTS category_force_delete_runs (
+                id TEXT PRIMARY KEY,
+                category_id TEXT NOT NULL,
+                category_path TEXT NOT NULL,
+                status TEXT NOT NULL CHECK (status IN ('running','succeeded','partial','failed')),
+                folder_count INTEGER NOT NULL DEFAULT 0,
+                item_count INTEGER NOT NULL DEFAULT 0,
+                upload_batch_count INTEGER NOT NULL DEFAULT 0,
+                index_job_count INTEGER NOT NULL DEFAULT 0,
+                qdrant_point_count INTEGER NOT NULL DEFAULT 0,
+                object_count INTEGER NOT NULL DEFAULT 0,
+                actor_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                error_summary TEXT,
+                created_at INTEGER NOT NULL,
+                finished_at INTEGER
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_category_force_delete_runs_created ON category_force_delete_runs(created_at DESC)",
+        ),
+    ),
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 PHASE2_TABLES = frozenset(
@@ -1092,6 +1151,7 @@ CONTENT_TRASH_LIFECYCLE_TABLES = frozenset(
     {"content_trash_settings", "content_trash_purge_runs", "content_trash_purge_items"}
 )
 TRANSCRIPTION_SCHEME_TABLES = frozenset({"transcription_bases", "transcription_schemes", "transcription_scheme_audit_events"})
+CATEGORY_FORCE_DELETE_TABLES = frozenset({"category_force_delete_runs"})
 
 
 def validate_system_content_permission_groups(
@@ -1239,6 +1299,8 @@ def has_pending_ddl(path: Path, *, base_tables: frozenset[str]) -> bool:
         try:
             expected_groups = (
                 SYSTEM_CONTENT_PERMISSION_GROUPS
+                if any(version == 25 for version, _name in applied)
+                else PRE_CATEGORY_FORCE_DELETE_SYSTEM_CONTENT_PERMISSION_GROUPS
                 if any(version == 20 for version, _name in applied)
                 else PRE_TRASH_LIFECYCLE_SYSTEM_CONTENT_PERMISSION_GROUPS
                 if any(version == 18 for version, _name in applied)
@@ -1353,11 +1415,15 @@ def apply_all(conn: sqlite3.Connection, *, base_schema: str, applied_at: int) ->
             raise RuntimeError("migration_schema_mismatch")
         if 20 in applied_versions and not CONTENT_TRASH_LIFECYCLE_TABLES.issubset(tables):
             raise RuntimeError("migration_schema_mismatch")
+        if 25 in applied_versions and not CATEGORY_FORCE_DELETE_TABLES.issubset(tables):
+            raise RuntimeError("migration_schema_mismatch")
         if 21 in applied_versions and not TRANSCRIPTION_SCHEME_TABLES.issubset(tables):
             raise RuntimeError("migration_schema_mismatch")
         validate_system_content_permission_groups(
             conn,
             SYSTEM_CONTENT_PERMISSION_GROUPS
+            if 25 in applied_versions
+            else PRE_CATEGORY_FORCE_DELETE_SYSTEM_CONTENT_PERMISSION_GROUPS
             if 20 in applied_versions
             else PRE_TRASH_LIFECYCLE_SYSTEM_CONTENT_PERMISSION_GROUPS
             if 18 in applied_versions

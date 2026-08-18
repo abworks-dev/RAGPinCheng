@@ -520,6 +520,53 @@ def test_schema_11_download_permission_migration_preserves_existing_access(tmp_p
     conn.close()
 
 
+def test_schema_25_grants_force_delete_only_to_system_admin_template(tmp_path, monkeypatch):
+    path = tmp_path / "app.sqlite"
+    migrations = db_migrations.MIGRATIONS
+    monkeypatch.setattr(
+        db_migrations, "MIGRATIONS", tuple(item for item in migrations if item.version <= 24),
+    )
+    init_db(path, backup_dir=tmp_path / "backups")
+    conn = sqlite3.connect(path)
+    user_id = conn.execute(
+        "INSERT INTO users(employee_id,real_name,password_hash,role,is_active,created_at) "
+        "VALUES ('category-admin','分类管理员','x','user',1,1)"
+    ).lastrowid
+    conn.execute(
+        "INSERT INTO content_permissions(user_id,permission,created_at) VALUES (?, 'category.manage', 1)",
+        (user_id,),
+    )
+    conn.execute(
+        """INSERT INTO content_permission_groups
+           (id,group_key,display_name,is_system,is_active,created_at,updated_at)
+           VALUES ('custom-category','custom_category','自定义分类组',0,1,1,1)"""
+    )
+    conn.execute(
+        "INSERT INTO content_permission_group_items(group_id,permission) VALUES ('custom-category','category.manage')"
+    )
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setattr(db_migrations, "MIGRATIONS", migrations)
+    init_db(path, backup_dir=tmp_path / "backups")
+    conn = sqlite3.connect(path)
+    assert conn.execute(
+        "SELECT 1 FROM content_permissions WHERE user_id=? AND permission='category.force_delete'",
+        (user_id,),
+    ).fetchone() is None
+    assert conn.execute(
+        "SELECT 1 FROM content_permission_group_items WHERE group_id='custom-category' AND permission='category.force_delete'"
+    ).fetchone() is None
+    assert conn.execute(
+        """SELECT 1 FROM content_permission_group_items i
+           JOIN content_permission_groups g ON g.id=i.group_id
+           WHERE g.group_key='system_admin' AND i.permission='category.force_delete'"""
+    ).fetchone() is not None
+    assert conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='category_force_delete_runs'").fetchone() is not None
+    assert conn.execute("PRAGMA foreign_key_check").fetchone() is None
+    conn.close()
+
+
 def test_backup_happens_before_any_phase2_schema_write(tmp_path, monkeypatch):
     path = tmp_path / "app.sqlite"
     conn = sqlite3.connect(path)
