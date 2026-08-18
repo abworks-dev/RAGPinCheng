@@ -18,13 +18,14 @@ def test_retirement_is_exact_hash_locked_and_recoverable():
     assert "group: production-gpu-exclusive" in WORKFLOW
 
 
-def test_workflow_is_limited_to_the_three_approved_groups():
+def test_workflow_is_limited_to_the_approved_groups():
     expected = {
         "31512225203": "31513770886",
         "31516434826": "31517785623",
         "31877287791": "31877991737",
+        "32042245485": "32043837069",
     }
     for candidate, activation in expected.items():
         assert f"'{candidate}' = '{activation}'" in WORKFLOW
     assert "Requested group is outside the approved retirement boundary" in WORKFLOW
-    assert "if ([string]$active.candidate_id -ne '31879196389')" in WORKFLOW
+    assert "if ([string]$active.candidate_id -ne '31982245231')" in WORKFLOW
