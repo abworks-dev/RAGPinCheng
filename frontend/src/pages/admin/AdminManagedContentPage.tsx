@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { AlertTriangle, Archive, ArchiveRestore, ArrowDown, ArrowUp, ArrowUpDown, Captions, Check, CheckCircle2, ChevronDown, ChevronRight, Download, ExternalLink, Eye, FileCode2, FilePenLine, FileSpreadsheet, FileText, FileType2, FileUp, Film, Folder, FolderInput, FolderPlus, History, Info, ListChecks, ListOrdered, MoreHorizontal, Pencil, Presentation, RefreshCw, RotateCcw, Rocket, Search, Send, SlidersHorizontal, Trash2, Upload, Video, X, XCircle } from "lucide-react";
+import { AlertTriangle, Archive, ArchiveRestore, ArrowDown, ArrowUp, ArrowUpDown, Check, CheckCircle2, ChevronDown, ChevronRight, Download, ExternalLink, Eye, FilePenLine, FileText, FileUp, Film, Folder, FolderInput, FolderPlus, History, Info, ListChecks, ListOrdered, MoreHorizontal, Pencil, RefreshCw, RotateCcw, Rocket, Search, Send, SlidersHorizontal, Trash2, Upload, Video, X, XCircle } from "lucide-react";
 import { adminContentApi } from "../../api/admin/content";
 import { Badge } from "../../components/ui/badge";
 import { CategoryTreePicker } from "../../components/admin/CategoryTreePicker";
@@ -27,6 +27,7 @@ import { createRequestId } from "../../lib/request-id";
 import { AdminDocumentsPage } from "./AdminDocumentsPage";
 import { ManagedSummaryCard } from "../../components/admin/ManagedSummaryCard";
 import { CategoryDeleteDialog } from "../../components/admin/CategoryDeleteDialog";
+import { ManagedItemType } from "../../components/admin/ManagedItemType";
 import { compareManagedCategories } from "../../lib/category-tree";
 import {
   collectDroppedUpload,
@@ -327,20 +328,6 @@ const documentTypeOptions = [
   ["transcript", "视频转录稿"],
   ["other", "其他"],
 ] as const;
-
-function ManagedItemType({ docType, folder = false }: { docType?: string; folder?: boolean }) {
-  if (folder) return <div className="flex w-20 flex-col items-center gap-1 text-center text-ui-xs font-medium text-muted-foreground"><Folder className="size-6 text-primary" aria-hidden="true" /><span>文件夹</span></div>;
-  const definition = ({
-    pdf: ["PDF", FileText, "text-destructive"],
-    docx: ["Word", FileType2, "text-primary"],
-    xlsx: ["Excel", FileSpreadsheet, "text-success"],
-    pptx: ["PPT", Presentation, "text-warning"],
-    markdown: ["Markdown", FileCode2, "text-foreground"],
-    transcript: ["视频转录稿", Captions, "text-primary"],
-  } as const)[docType || ""] || (["其他", FileText, "text-muted-foreground"] as const);
-  const [label, Icon, color] = definition;
-  return <div className="flex w-20 flex-col items-center gap-1 text-center text-ui-xs font-medium" title={label}><Icon className={`size-6 ${color}`} aria-hidden="true" /><span className="max-w-full break-words leading-tight">{label}</span></div>;
-}
 
 function statusVariant(status: string) {
   if (status === "published") return "success" as const;

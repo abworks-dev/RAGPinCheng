@@ -16,8 +16,10 @@ import { cn } from "../../lib/utils";
 import type { ManagedCategory, ManagedIndexJob, ManagedIndexJobList } from "../../types";
 import { formatAdminDate, formatBytes } from "../../lib/admin-formatters";
 import { ManagedSummaryCard } from "../../components/admin/ManagedSummaryCard";
+import { ManagedItemType } from "../../components/admin/ManagedItemType";
 
 const PAGE_SIZE = 25;
+const PAGE_SIZE_OPTIONS = [25, 50, 100];
 const ACTIVE_STATUSES = new Set([
   "pending",
   "uploading",
@@ -44,17 +46,6 @@ const STATUS_META: Record<string, { label: string; hint: string; variant: Status
   done: { label: "已发布", hint: "当前版本可检索", variant: "success" },
   failed: { label: "发布失败", hint: "请查看失败原因", variant: "destructive" },
 };
-
-function documentTypeLabel(docType: string | null): string {
-  return {
-    pdf: "PDF",
-    markdown: "Markdown",
-    docx: "Word",
-    xlsx: "Excel",
-    pptx: "PPT",
-    transcript: "视频转写",
-  }[docType || ""] || docType || "未知";
-}
 
 function sourceOriginLabel(sourceOrigin: string | null): string {
   return {
@@ -100,7 +91,7 @@ function IndexTaskSearchFilters({
     };
   }, [open]);
 
-  return <div ref={containerRef} className="relative min-w-0">
+  return <div ref={containerRef} className="relative min-w-0 w-full xl:w-72 xl:max-w-72 xl:justify-self-center min-[1400px]:w-96 min-[1400px]:max-w-96">
     <div className="relative">
       <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
       <Input ref={searchRef} aria-label="搜索发布任务" type="search" value={searchInput} onChange={(event) => onSearchInputChange(event.target.value)} placeholder="搜索名称、文件名或分类…" className="h-control-sm pl-9 pr-11" />
@@ -143,6 +134,7 @@ export function AdminDocumentsPage({ embedded = false }: { embedded?: boolean })
   const [history, setHistory] = useState(false);
   const [includeArchived, setIncludeArchived] = useState(false);
   const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(PAGE_SIZE);
   const [retryingJobId, setRetryingJobId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -152,7 +144,7 @@ export function AdminDocumentsPage({ embedded = false }: { embedded?: boolean })
 
   useEffect(() => {
     setPage(0);
-  }, [query, categoryId, docType, sourceOrigin, status, history, includeArchived]);
+  }, [query, categoryId, docType, sourceOrigin, status, history, includeArchived, pageSize]);
 
   const params = useMemo(() => ({
     query: query || undefined,
@@ -162,9 +154,9 @@ export function AdminDocumentsPage({ embedded = false }: { embedded?: boolean })
     status: status === "all" ? undefined : status,
     history,
     include_archived: includeArchived,
-    limit: PAGE_SIZE,
-    offset: page * PAGE_SIZE,
-  }), [query, categoryId, docType, sourceOrigin, status, history, includeArchived, page]);
+    limit: pageSize,
+    offset: page * pageSize,
+  }), [query, categoryId, docType, sourceOrigin, status, history, includeArchived, page, pageSize]);
 
   const load = useCallback(async (background = false) => {
     background ? setRefreshing(true) : setLoading(true);
@@ -198,7 +190,7 @@ export function AdminDocumentsPage({ embedded = false }: { embedded?: boolean })
 
   const counts = listing.status_counts;
   const allCount = Object.values(counts).reduce((sum, value) => sum + value, 0);
-  const pageCount = Math.max(1, Math.ceil(listing.total / PAGE_SIZE));
+  const pageCount = Math.max(1, Math.ceil(listing.total / pageSize));
   const hasFilters = Boolean(query || categoryId || docType || sourceOrigin || status !== "all" || history || includeArchived);
   const listingScopeDescription = `${history ? "正在显示全部历史尝试。" : "每个资料版本仅显示最新一次发布尝试。"} ${includeArchived ? "已包含回收站资料。" : "默认不显示回收站资料。"}`;
 
@@ -249,7 +241,7 @@ export function AdminDocumentsPage({ embedded = false }: { embedded?: boolean })
       </section>
 
       <Card className="overflow-hidden shadow-surface" aria-labelledby={embedded ? titleId : "managed-index-title"}>
-        <div className="grid gap-3 border-b border-border px-4 py-4 sm:px-5 lg:grid-cols-[minmax(13rem,1fr)_minmax(16rem,2fr)_auto] lg:items-end">
+        <div className="grid gap-3 border-b border-border px-4 py-4 sm:px-5 xl:grid-cols-[minmax(13rem,1fr)_18rem_auto] xl:items-end min-[1400px]:grid-cols-[minmax(13rem,1fr)_24rem_auto]">
           <div>
             {embedded
               ? <h2 id={titleId} className="text-ui-base font-semibold text-foreground">索引任务</h2>
@@ -259,7 +251,7 @@ export function AdminDocumentsPage({ embedded = false }: { embedded?: boolean })
             </p>
           </div>
           <IndexTaskSearchFilters searchInput={searchInput} categoryId={categoryId} docType={docType} sourceOrigin={sourceOrigin} status={status} history={history} includeArchived={includeArchived} categories={categories} onSearchInputChange={setSearchInput} onCategoryChange={setCategoryId} onDocTypeChange={setDocType} onSourceChange={setSourceOrigin} onStatusChange={setStatus} onHistoryChange={setHistory} onIncludeArchivedChange={setIncludeArchived} onClear={clearFilters} />
-          <div className="flex items-center justify-end gap-2"><Button variant="outline" size="sm" disabled={loading || refreshing} onClick={() => void load(true)}><RefreshCw className={cn("size-4", refreshing && "animate-spin")} />{refreshing ? "刷新中" : "刷新"}</Button><p className="text-ui-xs tabular-nums text-muted-foreground">当前共 {listing.total} 条</p></div>
+          <div className="flex shrink-0 flex-wrap items-center gap-2"><Button variant="outline" size="sm" className="max-sm:h-control-md" disabled={loading || refreshing} onClick={() => void load(true)}><RefreshCw className={cn("size-4", refreshing && "animate-spin")} />{refreshing ? "刷新中…" : "刷新列表"}</Button></div>
         </div>
 
         {loading ? (
@@ -283,9 +275,11 @@ export function AdminDocumentsPage({ embedded = false }: { embedded?: boolean })
         {!loading && listing.total > 0 && (
           <div className="flex flex-col gap-2 border-t border-border px-4 py-3 text-ui-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between sm:px-5">
             <span>共 {listing.total} 条任务，第 {page + 1} / {pageCount} 页</span>
-            <div className="flex gap-2">
-              <Button size="sm" variant="outline" disabled={page === 0} onClick={() => setPage((value) => value - 1)}>上一页</Button>
-              <Button size="sm" variant="outline" disabled={page + 1 >= pageCount} onClick={() => setPage((value) => value + 1)}>下一页</Button>
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <label className="flex items-center gap-2 text-ui-xs text-muted-foreground">每页<Select aria-label="每页索引任务条数" className="h-control-sm w-20" value={String(pageSize)} onChange={(event) => setPageSize(Number(event.target.value))}>{PAGE_SIZE_OPTIONS.map((size) => <option key={size} value={size}>{size} 条</option>)}</Select></label>
+              <Button size="sm" variant="outline" disabled={page === 0 || loading} onClick={() => setPage((value) => value - 1)}>上一页</Button>
+              <Select aria-label="跳转索引任务页码" className="h-control-sm w-24" value={String(page + 1)} onChange={(event) => setPage(Number(event.target.value) - 1)} disabled={loading}>{Array.from({ length: pageCount }, (_, index) => <option key={index + 1} value={index + 1}>第 {index + 1} 页</option>)}</Select>
+              <Button size="sm" variant="outline" disabled={page + 1 >= pageCount || loading} onClick={() => setPage((value) => value + 1)}>下一页</Button>
             </div>
           </div>
         )}
@@ -308,18 +302,16 @@ function ManagedJobsTable({
 }) {
   return (
     <div className="overflow-x-auto border-t border-border">
-      <table className="block w-full text-ui-sm lg:table lg:min-w-[78rem]">
-        <caption className="sr-only">资料发布任务、分类、类型、状态、内容块、来源、更新时间和操作</caption>
+      <table className="block w-full text-ui-sm lg:table lg:min-w-[56rem]">
+        <caption className="sr-only">资料发布任务、类型、更新时间、状态、来源、内容块和操作</caption>
         <thead className="hidden border-b border-border bg-surface-muted text-left text-muted-foreground lg:table-header-group">
           <tr>
-            <th className="min-w-[18rem] px-4 py-3 font-medium">资料</th>
-            <th className="min-w-[12rem] px-4 py-3 font-medium">分类</th>
-            <th className="w-20 whitespace-nowrap px-4 py-3 font-medium">类型</th>
-            <th className="min-w-[16rem] px-4 py-3 font-medium">状态</th>
-            <th className="w-24 whitespace-nowrap px-4 py-3 font-medium">内容块</th>
-            <th className="w-28 whitespace-nowrap px-4 py-3 font-medium">来源</th>
-            <th className="min-w-[10rem] whitespace-nowrap px-4 py-3 font-medium">更新时间</th>
-            <th className="sticky right-0 w-32 whitespace-nowrap bg-surface-muted px-4 py-3 font-medium">操作</th>
+            <th className="w-16 px-2 py-3 text-center font-medium">类型</th>
+            <th className="min-w-48 px-2 py-3 font-medium">资料</th>
+            <th className="min-w-24 whitespace-nowrap px-3 py-3 font-medium">更新时间</th>
+            <th className="min-w-48 px-3 py-3 font-medium">状态</th>
+            <th className="w-24 whitespace-nowrap px-3 py-3 font-medium">来源</th>
+            <th className="w-32 whitespace-nowrap px-3 py-3 text-right font-medium">操作</th>
           </tr>
         </thead>
         <tbody className="block divide-y divide-border lg:table-row-group">
@@ -332,8 +324,9 @@ function ManagedJobsTable({
               : meta.hint;
             const retrying = retryingJobId === job.id;
             return (
-              <tr key={job.id} className="group grid grid-cols-2 gap-x-3 gap-y-3 p-4 transition-colors duration-normal hover:bg-surface-muted/60 lg:table-row lg:p-0">
-                <td className="col-span-2 block min-w-0 lg:table-cell lg:px-4 lg:py-3">
+              <tr key={job.id} className="group grid grid-cols-[5rem_minmax(0,1fr)] gap-x-2 gap-y-3 px-4 py-4 transition-colors duration-normal hover:bg-surface-muted/60 sm:px-5 lg:table-row lg:p-0">
+                <td className="block lg:table-cell lg:px-2 lg:py-3"><ManagedItemType docType={job.doc_type} /></td>
+                <td className="block min-w-0 lg:table-cell lg:px-2 lg:py-3">
                   <p className="break-words font-medium text-foreground" title={job.title || job.original_filename || undefined}>
                     {job.title || job.original_filename || "未命名资料"}
                   </p>
@@ -345,14 +338,12 @@ function ManagedJobsTable({
                       共尝试 {job.attempt_count} 次{history ? ` · 当前第 ${job.attempt_number} 次` : ""}
                     </p>
                   )}
+                  <p className="mt-1 break-words text-ui-xs text-muted-foreground">分类：{job.category_path || job.category_label || "—"}</p>
                 </td>
-                <td className="block text-ui-xs text-muted-foreground lg:table-cell lg:px-4 lg:py-3 lg:text-ui-sm lg:text-foreground">
-                  <span className="lg:hidden">分类： </span>{job.category_path || job.category_label || "—"}
+                <td className="col-span-2 block text-ui-xs text-muted-foreground lg:table-cell lg:whitespace-nowrap lg:px-3 lg:py-3">
+                  <span className="lg:hidden">更新时间： </span>{formatAdminDate(job.updated_at)}
                 </td>
-                <td className="block text-right text-ui-xs text-muted-foreground lg:table-cell lg:whitespace-nowrap lg:px-4 lg:py-3 lg:text-left lg:text-ui-sm lg:text-foreground">
-                  <span className="lg:hidden">类型： </span>{documentTypeLabel(job.doc_type)}
-                </td>
-                <td className="col-span-2 block lg:table-cell lg:px-4 lg:py-3">
+                <td className="col-span-2 block lg:table-cell lg:px-3 lg:py-3">
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge variant={meta.variant}>{meta.label}</Badge>
                     {job.is_archived && <Badge variant="secondary">已下架</Badge>}
@@ -366,20 +357,14 @@ function ManagedJobsTable({
                     </div>
                   )}
                 </td>
-                <td className="block text-ui-xs text-muted-foreground lg:table-cell lg:whitespace-nowrap lg:px-4 lg:py-3 lg:text-ui-sm lg:text-foreground">
-                  <span className="lg:hidden">内容块： </span>
-                  {job.status === "done" && job.is_current_head && job.parent_count != null ? `${job.parent_count} 个` : "—"}
-                </td>
-                <td className="block text-right text-ui-xs text-muted-foreground lg:table-cell lg:whitespace-nowrap lg:px-4 lg:py-3 lg:text-left lg:text-ui-sm lg:text-foreground">
+                <td className="col-span-2 block text-ui-xs text-muted-foreground lg:table-cell lg:whitespace-nowrap lg:px-3 lg:py-3 lg:text-ui-sm lg:text-foreground">
                   <span className="lg:hidden">来源： </span>{sourceOriginLabel(job.source_origin)}
+                  <span className="mt-1 block text-ui-xs text-muted-foreground">内容块：{job.status === "done" && job.is_current_head && job.parent_count != null ? `${job.parent_count} 个` : "—"}</span>
                 </td>
-                <td className="col-span-2 block text-ui-xs text-muted-foreground lg:table-cell lg:whitespace-nowrap lg:px-4 lg:py-3">
-                  <span className="lg:hidden">更新时间： </span>{formatAdminDate(job.updated_at)}
-                </td>
-                <td className="col-span-2 flex flex-wrap gap-2 lg:sticky lg:right-0 lg:table-cell lg:bg-background lg:px-4 lg:py-3 lg:group-hover:bg-surface-muted">
-                  <div className="flex flex-wrap gap-2 lg:flex-col lg:items-stretch">
+                <td className="col-span-2 flex flex-wrap justify-end gap-2 lg:table-cell lg:px-3 lg:py-3">
+                  <div className="flex flex-wrap justify-end gap-2">
                     <a
-                      className={buttonVariants({ variant: "outline", size: "sm" })}
+                      className={cn(buttonVariants({ variant: "outline", size: "sm" }), "max-sm:h-control-md")}
                       href={adminContentApi.fileUrl(job.version_id)}
                       target="_blank"
                       rel="noreferrer"
@@ -388,7 +373,7 @@ function ManagedJobsTable({
                       查看文件
                     </a>
                     {canPublish && !job.is_archived && job.status === "failed" && job.is_latest_attempt && (
-                      <Button size="sm" disabled={Boolean(retryingJobId)} onClick={() => onRetry(job)}>
+                      <Button size="sm" className="max-sm:h-control-md" disabled={Boolean(retryingJobId)} onClick={() => onRetry(job)}>
                         <Rocket className={cn("size-4", retrying && "animate-pulse")} />
                         {retrying ? "发布中…" : "重新发布"}
                       </Button>
