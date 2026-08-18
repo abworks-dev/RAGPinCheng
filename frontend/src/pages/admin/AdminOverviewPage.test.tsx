@@ -148,6 +148,7 @@ describe("AdminOverviewPage", () => {
       app: { status: "healthy", cpu_percent: null, memory_used_bytes: null, memory_total_bytes: null, disk_used_bytes: null, disk_total_bytes: null, checked_at: 20, error_code: null },
       gpu: { status: "unavailable", model_loaded: null, device_name: null, vram_used_bytes: null, vram_total_bytes: null, utilization_percent: null, temperature_celsius: null, inflight_requests: null, checked_at: 20, data_age_seconds: null, stale: false, error_code: "gpu_metrics_unreachable" },
       office_processing: { enabled: true, mode: "deployment_config", disabled_reason: null, status: "unavailable", checked_at: 20, error_code: "office_service_unreachable" },
+      external_usage: { today: {}, month: {}, all: {} },
     });
     render(<AdminOverviewPage />);
     expect(await screen.findByText("服务异常")).toBeInTheDocument();
