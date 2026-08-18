@@ -44,6 +44,10 @@ import type {
   MediaTranscript,
   TranscriptionJob,
   TranscriptionProfile,
+  TranscriptionBase,
+  TranscriptionScheme,
+  TranscriptionSchemeParameters,
+  TranscriptionSchemeOption,
   TranscriptMarkdownPreview,
   TranscriptPublicationJob,
   TranscriptVersion,
@@ -886,6 +890,7 @@ export const api = {
     fd.append("video", video, video.name);
     fd.append("title", title);
     fd.append("profile_id", profileId);
+    fd.append("scheme_id", profileId);
     fd.append("request_idempotency_key", requestIdempotencyKey);
     return multipartFetch<MediaAsset>("/api/admin/media", fd, callbacks);
   },
@@ -901,6 +906,7 @@ export const api = {
     fd.append("video", video, video.name);
     fd.append("title", title);
     fd.append("profile_id", profileId);
+    fd.append("scheme_id", profileId);
     fd.append("request_idempotency_key", requestIdempotencyKey);
     fd.append("replacement_source_media_id", sourceMediaId);
     return multipartFetch<MediaAsset>("/api/admin/media", fd, callbacks);
@@ -910,6 +916,20 @@ export const api = {
     jsonFetch<void>(`/api/admin/media/${mediaId}`, { method: "DELETE" }),
   listTranscriptionProfiles: () =>
     jsonFetch<TranscriptionProfile[]>("/api/admin/transcription/profiles"),
+  listTranscriptionSchemes: () =>
+    jsonFetch<TranscriptionSchemeOption[]>("/api/admin/transcription/schemes"),
+  adminTranscriptionBases: () =>
+    jsonFetch<TranscriptionBase[]>("/api/admin/asr/bases"),
+  adminTranscriptionSchemes: (includeArchived = true) =>
+    jsonFetch<TranscriptionScheme[]>(`/api/admin/asr/schemes?include_archived=${includeArchived}`),
+  adminCreateTranscriptionScheme: (body: { name: string; description: string; base_id: string; parameters: Partial<TranscriptionSchemeParameters> }) =>
+    jsonFetch<TranscriptionScheme>("/api/admin/asr/schemes", { method: "POST", body: JSON.stringify(body) }),
+  adminCopyTranscriptionScheme: (schemeId: string, body: { name: string; description?: string }) =>
+    jsonFetch<TranscriptionScheme>(`/api/admin/asr/schemes/${encodeURIComponent(schemeId)}/copy`, { method: "POST", body: JSON.stringify(body) }),
+  adminUpdateTranscriptionScheme: (schemeId: string, body: Partial<Pick<TranscriptionScheme, "name" | "description" | "parameters" | "enabled" | "archived">> & { expected_version: number }) =>
+    jsonFetch<TranscriptionScheme>(`/api/admin/asr/schemes/${encodeURIComponent(schemeId)}`, { method: "PATCH", body: JSON.stringify(body) }),
+  adminReorderTranscriptionSchemes: (order: Array<{ id: string; expected_version: number }>) =>
+    jsonFetch<TranscriptionScheme[]>("/api/admin/asr/schemes/order", { method: "POST", body: JSON.stringify({ order }) }),
   listTranscriptionJobs: (latestPerMedia = true, limit = 100) =>
     jsonFetch<TranscriptionJob[]>(
       `/api/admin/transcription/jobs?latest_per_media=${latestPerMedia}&limit=${limit}`,

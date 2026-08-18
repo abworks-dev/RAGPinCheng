@@ -66,6 +66,7 @@ from .db import get_db
 from .feedback import read_records
 from .indexing import create_job, enqueue
 from .routes_transcription import build_transcription_service
+from .transcription_schemes import get_scheme
 from .routes_media import safe_join, stream_media_file
 from .schemas import (
     AdminConversationListResponse,
@@ -1200,6 +1201,7 @@ async def upload_media(
     admin: CurrentUser = Depends(require_csrf_admin),
     conn: sqlite3.Connection = Depends(get_db),
     replacement_source_media_id: Annotated[str | None, Form()] = None,
+    scheme_id: Annotated[str | None, Form()] = None,
 ) -> MediaAssetDTO:
     """Upload one MP4 with either a manual transcript or a trusted Profile."""
     import uuid
@@ -1208,6 +1210,17 @@ async def upload_media(
     transcript_name = (transcript.filename or "").strip() if transcript else ""
     clean_title = title.strip()
     automatic = transcript is None
+
+    if automatic and scheme_id is not None:
+        scheme = get_scheme(conn, scheme_id)
+        if scheme is None or scheme["archived"] or not scheme["enabled"]:
+            raise HTTPException(status_code=409, detail="所选转录方案当前不可用")
+        # Seeded system scheme IDs remain the historical profile IDs.  This
+        # preserves the immutable job/profile snapshot contract while clients
+        # migrate from profile_id to scheme_id.
+        if profile_id is not None and profile_id != scheme_id:
+            raise HTTPException(status_code=400, detail="scheme_id 与 profile_id 不一致")
+        profile_id = scheme_id
 
     if replacement_source_media_id is not None:
         if not automatic:
@@ -1231,14 +1244,14 @@ async def upload_media(
 
     if automatic:
         if not profile_id or request_idempotency_key is None:
-            raise HTTPException(status_code=400, detail="自动转录必须提供 profile_id 和幂等键")
+            raise HTTPException(status_code=400, detail="自动转录必须提供 scheme_id/profile_id 和幂等键")
         try:
             validate_uuid(request_idempotency_key, "request_idempotency_key")
         except ContractValidationError:
             raise HTTPException(status_code=400, detail="自动转录幂等键不合法")
         transcript_bytes = None
     else:
-        if profile_id is not None or request_idempotency_key is not None:
+        if profile_id is not None or scheme_id is not None or request_idempotency_key is not None:
             raise HTTPException(status_code=400, detail="人工转录不得同时指定自动转录参数")
         if not transcript_name.lower().endswith(".md"):
             raise HTTPException(status_code=400, detail="转录稿必须是 .md 格式")
@@ -1252,7 +1265,7 @@ async def upload_media(
     if automatic:
         existing = conn.execute(
             """
-            SELECT j.id AS job_id,j.profile_id,j.created_by,
+            SELECT j.id AS job_id,j.profile_id,j.scheme_id,j.created_by,
                    m.media_id,m.title,m.original_filename,m.mime_type,m.file_size,
                    m.sha256,m.transcript_origin,m.status,m.created_at,m.updated_at,m.error,
                    r.source_media_id AS replacement_source_media_id
@@ -1282,7 +1295,7 @@ async def upload_media(
                 raise HTTPException(status_code=400, detail="视频文件不能为空")
             same_identity = (
                 existing["created_by"] == admin.id
-                and existing["profile_id"] == profile_id
+                and (existing["scheme_id"] or existing["profile_id"]) == (scheme_id or profile_id)
                 and existing["title"] == clean_title
                 and existing["original_filename"] == video_name
                 and existing["file_size"] == retry_size
@@ -1469,6 +1482,7 @@ async def upload_media(
                 profile_id=profile_id,
                 request_idempotency_key=request_idempotency_key,
                 created_by=admin.id,
+                scheme_id=scheme_id,
             )
             transcription_job_id = transcription_job.id
             enqueue_transcription(transcription_job.id)

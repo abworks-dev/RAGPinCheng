@@ -709,7 +709,7 @@ test.describe("资料管理", () => {
     await expect(replacementDialog).toContainText(title);
     await expect(replacementDialog).toContainText("bim-project-delivery-training-long-responsive-name.mp4");
     await replacementDialog.getByLabel("选择替换视频").setInputFiles({ name: "replacement-training.mp4", mimeType: "video/mp4", buffer: Buffer.from("synthetic mp4") });
-    await replacementDialog.getByRole("combobox", { name: "替换视频转录 Profile" }).selectOption("funasr-sensevoice-zh-experimental-v1");
+    await replacementDialog.getByRole("combobox", { name: "替换视频转录方案" }).selectOption("whisperx-large-v3-zh-balanced-v2");
     await expect(replacementDialog.getByRole("button", { name: "上传并开始转录" })).toBeEnabled();
     await expectInViewport(replacementDialog.getByRole("button", { name: "上传并开始转录" }));
     await expectNoBodyOverflow(page);

@@ -1066,6 +1066,84 @@ class AsrSettingsResponse(BaseModel):
     audit_events: list[AsrProfileAuditEventDTO]
 
 
+class TranscriptionBaseDTO(BaseModel):
+    id: str
+    provider: str
+    model: str
+    revision: str
+    service_profile_id: str
+    config_hash: str
+    qualification: str
+    admission: str
+    availability: str
+    capabilities: dict[str, object]
+    defaults: dict[str, object]
+
+
+class TranscriptionSchemeDTO(BaseModel):
+    id: str
+    name: str
+    description: str
+    base_id: str
+    parameters: dict[str, object]
+    config_hash: str
+    enabled: bool
+    archived: bool
+    system_preset: bool
+    sort_order: int
+    version: int
+    created_at: int
+    updated_at: int
+
+
+class TranscriptionSchemeOptionDTO(BaseModel):
+    scheme_id: str
+    name: str
+    description: str
+    base_id: str
+    config_hash: str
+    enabled: bool
+    archived: bool
+    sort_order: int
+    version: int
+    availability: str
+
+
+class TranscriptionSchemeCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(..., min_length=1, max_length=120)
+    description: str = Field(default="", max_length=500)
+    base_id: str = Field(..., min_length=2, max_length=80)
+    parameters: dict[str, object] = Field(default_factory=dict)
+
+
+class TranscriptionSchemeUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    description: str | None = Field(default=None, max_length=500)
+    parameters: dict[str, object] | None = None
+    enabled: bool | None = None
+    archived: bool | None = None
+    expected_version: int = Field(..., ge=1)
+
+
+class TranscriptionSchemeCopy(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(..., min_length=1, max_length=120)
+    description: str | None = Field(default=None, max_length=500)
+
+
+class TranscriptionSchemeOrderItem(BaseModel):
+    id: str
+    expected_version: int | None = Field(default=None, ge=1)
+
+
+class TranscriptionSchemeOrder(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    order: list[TranscriptionSchemeOrderItem]
+    expected_version: int | None = Field(default=None, ge=1)
+
+
 class AsrProfileReleaseRequestCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -1079,6 +1157,7 @@ class TranscriptionJobDTO(BaseModel):
     media_id: str
     attempt_number: int
     profile_id: str
+    scheme_id: str | None = None
     status: str
     stage: str | None
     processed_ms: int
@@ -1104,6 +1183,7 @@ class TranscriptVersionDTO(BaseModel):
     media_id: str
     source: str
     profile_id: str | None
+    scheme_id: str | None = None
     provider_key: str | None
     model_id: str | None
     model_revision: str | None

@@ -8,6 +8,8 @@ import type { Source } from "../types";
 export const CITATION_EVENT = "pincheng:citation-click";
 // Sent from SourcesPanel when hovering a source card to highlight the citation in-message.
 export const CITATION_HOVER_EVENT = "pincheng:citation-hover";
+// Sent while an inline citation tooltip is active so streaming auto-follow does not move it.
+export const CITATION_TOOLTIP_ACTIVE_EVENT = "pincheng:citation-tooltip-active";
 
 export type CitationDetail = {
   messageId: string;
@@ -19,6 +21,11 @@ export type CitationSelection = CitationDetail | null;
 export type CitationHoverDetail = {
   messageId: string;
   sourceIndex: number | null; // null = clear highlight
+};
+
+export type CitationTooltipActiveDetail = {
+  markerId: string;
+  active: boolean;
 };
 
 export function toggleCitationSelection(

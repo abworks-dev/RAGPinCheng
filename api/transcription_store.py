@@ -35,6 +35,7 @@ from src.transcription.profile import (
     TranscriptionProfileDefinition,
     provider_config_from_json,
 )
+from src.transcription.scheme import TranscriptionSchemeSnapshot
 from src.transcription.provider_protocol import ProviderFailure, ProviderFailureClassification
 from src.transcription.types import (
     ArtifactReference,
@@ -165,12 +166,12 @@ class SQLiteTranscriptionStore:
                 self._conn.execute(
                     """INSERT INTO transcription_jobs(
                         id,media_id,created_by,attempt_number,request_idempotency_key,execution_identity,
-                        profile_id,provider_key,model_id,model_revision,profile_definition_version,config_hash,
+                        profile_id,scheme_id,scheme_snapshot_json,provider_key,model_id,model_revision,profile_definition_version,config_hash,
                         profile_snapshot_json,execution_config_json,execution_fingerprint,audio_sha256,input_kind,
                         input_size_bytes,total_ms,processed_ms,status,stage,failure_error_code,failure_classification,
                         error_summary,checkpoint_json,result_version_id,canonical_sha256,draft_markdown_rel_path,
                         draft_markdown_sha256,created_at,started_at,finished_at,updated_at
-                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     self._job_values(record),
                 )
                 self._conn.execute(
@@ -289,13 +290,15 @@ class SQLiteTranscriptionStore:
             canonical_text = canonical.to_json_bytes().decode("utf-8")
             self._conn.execute(
                 """INSERT INTO transcript_versions(
-                    id,media_id,transcription_job_id,source,profile_id,provider_key,model_id,model_revision,
+                    id,media_id,transcription_job_id,source,profile_id,scheme_id,scheme_snapshot_json,provider_key,model_id,model_revision,
                     config_hash,profile_snapshot_json,canonical_json,canonical_sha256,markdown_storage_kind,
                     markdown_rel_path,markdown_sha256,markdown_size_bytes,review_status,reviewed_by,
                     reviewed_at,review_note,publication_status,published_at,supersedes_version_id,created_at,updated_at
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     version_id, job.media_id, job.id, TranscriptSource.automatic.value, job.profile_id,
+                    job.scheme_id,
+                    _json_text(job.scheme_snapshot.to_json_dict()) if job.scheme_snapshot else None,
                     job.provider_key, model_id, model_revision, job.config_hash,
                     _json_text(job.profile_snapshot.to_json_dict()), canonical_text, canonical.content_sha256,
                     MarkdownStorageKind.managed_artifact.value, markdown_ref.relative_path,
@@ -1118,6 +1121,13 @@ class SQLiteTranscriptionStore:
             raise KeyError(job_id)
         try:
             snapshot = ProfileSnapshot.from_json_dict(_load_json(row["profile_snapshot_json"], "profile_snapshot_json"))
+            scheme_snapshot = (
+                TranscriptionSchemeSnapshot.from_json_dict(
+                    _load_json(row["scheme_snapshot_json"], "scheme_snapshot_json")
+                )
+                if row["scheme_snapshot_json"] is not None
+                else None
+            )
             execution = _execution_from_json(_load_json(row["execution_config_json"], "execution_config_json"))
             checkpoint = (
                 TranscriptionCheckpoint.from_json_dict(_load_json(row["checkpoint_json"], "checkpoint_json"))
@@ -1126,6 +1136,8 @@ class SQLiteTranscriptionStore:
             )
             if _json_text(snapshot.to_json_dict()) != row["profile_snapshot_json"]:
                 raise ContractValidationError("noncanonical_persisted_json", "profile_snapshot_json")
+            if scheme_snapshot is not None and _json_text(scheme_snapshot.to_json_dict()) != row["scheme_snapshot_json"]:
+                raise ContractValidationError("noncanonical_persisted_json", "scheme_snapshot_json")
             if _json_text(execution.to_json_dict()) != row["execution_config_json"]:
                 raise ContractValidationError("noncanonical_persisted_json", "execution_config_json")
             if checkpoint is not None and _json_text(checkpoint.to_json_dict()) != row["checkpoint_json"]:
@@ -1147,6 +1159,7 @@ class SQLiteTranscriptionStore:
                 row["error_summary"], checkpoint, row["result_version_id"], row["canonical_sha256"],
                 row["draft_markdown_rel_path"], row["draft_markdown_sha256"], row["created_at"],
                 row["started_at"], row["finished_at"], row["updated_at"],
+                scheme_id=row["scheme_id"], scheme_snapshot=scheme_snapshot,
             )
         except (ValueError, TypeError, ContractValidationError) as exc:
             raise PersistedStateError(f"invalid_job:{job_id}") from exc
@@ -1165,6 +1178,13 @@ class SQLiteTranscriptionStore:
                 if row["profile_snapshot_json"] is not None
                 else None
             )
+            scheme_snapshot = (
+                TranscriptionSchemeSnapshot.from_json_dict(
+                    _load_json(row["scheme_snapshot_json"], "scheme_snapshot_json")
+                )
+                if row["scheme_snapshot_json"] is not None
+                else None
+            )
             canonical = (
                 CanonicalTranscript.from_json_dict(_load_json(row["canonical_json"], "canonical_json"))
                 if row["canonical_json"] is not None
@@ -1172,6 +1192,8 @@ class SQLiteTranscriptionStore:
             )
             if snapshot is not None and _json_text(snapshot.to_json_dict()) != row["profile_snapshot_json"]:
                 raise ContractValidationError("noncanonical_persisted_json", "version.profile_snapshot_json")
+            if scheme_snapshot is not None and _json_text(scheme_snapshot.to_json_dict()) != row["scheme_snapshot_json"]:
+                raise ContractValidationError("noncanonical_persisted_json", "version.scheme_snapshot_json")
             if canonical is not None and canonical.to_json_bytes().decode("utf-8") != row["canonical_json"]:
                 raise ContractValidationError("noncanonical_persisted_json", "version.canonical_json")
             record = TranscriptVersionRecord(
@@ -1184,6 +1206,7 @@ class SQLiteTranscriptionStore:
                 PublicationStatus(row["publication_status"]), row["published_at"], row["supersedes_version_id"],
                 row["created_at"], row["updated_at"], row["derived_from_version_id"],
                 row["edited_by"], row["edit_idempotency_key"],
+                scheme_id=row["scheme_id"], scheme_snapshot=scheme_snapshot,
             )
             artifacts = tuple(
                 ArtifactReference.from_json_dict(
@@ -1330,6 +1353,8 @@ class SQLiteTranscriptionStore:
         return (
             record.id, record.media_id, record.created_by, record.attempt_number,
             record.request_idempotency_key, record.execution_identity, record.profile_id,
+            record.scheme_id,
+            _json_text(record.scheme_snapshot.to_json_dict()) if record.scheme_snapshot else None,
             record.provider_key, record.model_id, record.model_revision,
             record.profile_definition_version, record.config_hash,
             _json_text(record.profile_snapshot.to_json_dict()), _json_text(record.execution_config.to_json_dict()),

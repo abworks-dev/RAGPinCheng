@@ -417,7 +417,7 @@ class TranscriptSegmentationConfig:
     max_merge_gap_ms: int
 
     def __post_init__(self) -> None:
-        if self.preset not in ("natural", "balanced", "fine"):
+        if self.preset not in ("natural", "balanced", "fine", "custom"):
             raise ContractValidationError("invalid_segmentation_preset", "preset")
         if self.max_segment_duration_ms is not None:
             require_int(self.max_segment_duration_ms, "max_segment_duration_ms", positive=True)
