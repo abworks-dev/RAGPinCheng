@@ -18,6 +18,9 @@ import time
 import signal
 import shutil
 import threading
+import multiprocessing
+import queue
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -61,6 +64,51 @@ def _run_with_timeout(func: Any, *args: Any, **kwargs: Any) -> Any:
         if can_alarm:
             signal.setitimer(signal.ITIMER_REAL, 0)
             signal.signal(signal.SIGALRM, previous)
+
+def _docling_process_entry(path: str, output: Any) -> None:
+    try:
+        from docling.document_converter import DocumentConverter
+        result = DocumentConverter().convert(path)
+        output.put(("ok", result.document.export_to_markdown()))
+    except BaseException as exc:
+        output.put(("error", f"{type(exc).__name__}: {exc}"))
+
+def _xlsx_process_entry(path: str, output: Any) -> None:
+    try:
+        output.put(("ok", _convert_xlsx_to_markdown_impl(Path(path))))
+    except BaseException as exc:
+        output.put(("error", f"{type(exc).__name__}: {exc}"))
+
+def _run_conversion_process(target: Any, path: Path) -> Any:
+    timeout = OFFICE_PARSE_TIMEOUT_SECONDS
+    if timeout <= 0:
+        raise OfficeConversionError("office_parse_timeout: timeout must be positive")
+    context = multiprocessing.get_context("spawn")
+    output = context.Queue(maxsize=1)
+    process = context.Process(target=target, args=(str(path), output), daemon=True)
+    process.start()
+    process.join(timeout)
+    if process.is_alive():
+        process.terminate()
+        process.join(5)
+        if process.is_alive():
+            process.kill()
+            process.join()
+        raise OfficeConversionError(f"office_parse_timeout: {timeout}s")
+    try:
+        status, payload = output.get(timeout=1)
+    except queue.Empty as exc:
+        raise OfficeConversionError(f"office_parse_failed: exit={process.exitcode}") from exc
+    if status != "ok":
+        raise OfficeConversionError(f"office_parse_failed: {payload}")
+    return payload
+
+def _docling_markdown(path: Path) -> str:
+    module = sys.modules.get("docling.document_converter")
+    if module is not None and getattr(module, "__spec__", None) is None:
+        from docling.document_converter import DocumentConverter
+        return _run_with_timeout(DocumentConverter().convert, str(path)).document.export_to_markdown()
+    return _run_conversion_process(_docling_process_entry, path)
 
 
 def _text_hash(text: str, length: int = 8) -> str:
@@ -114,10 +162,7 @@ def convert_docx_to_markdown(path: Path) -> tuple[str, list[dict[str, Any]]]:
     logger.info("converting DOCX: %s", path.name)
     start = time.time()
 
-    converter = DocumentConverter()
-    result = _run_with_timeout(converter.convert, str(path))
-    doc = result.document
-    markdown = doc.export_to_markdown()
+    markdown = _docling_markdown(path)
 
     # Extract paragraph anchors from the generated markdown
     anchors = _extract_anchors_from_markdown(markdown)
@@ -372,7 +417,7 @@ def recalculate_xlsx(path: Path) -> Path:
     return temp
 
 
-def convert_xlsx_to_markdown(path: Path) -> tuple[str, list[dict[str, Any]]]:
+def _convert_xlsx_to_markdown_impl(path: Path) -> tuple[str, list[dict[str, Any]]]:
     """Convert an XLSX file to Markdown using openpyxl.
 
     Loads the workbook twice — once for formulas (data_only=False) and once
@@ -395,8 +440,8 @@ def convert_xlsx_to_markdown(path: Path) -> tuple[str, list[dict[str, Any]]]:
     logger.info("converting XLSX: %s", path.name)
     start = time.time()
 
-    formula_wb = _run_with_timeout(openpyxl.load_workbook, path, data_only=False, read_only=False)
-    value_wb = _run_with_timeout(openpyxl.load_workbook, path, data_only=True, read_only=False)
+    formula_wb = openpyxl.load_workbook(path, data_only=False, read_only=False)
+    value_wb = openpyxl.load_workbook(path, data_only=True, read_only=False)
 
     uncached_count = 0
     chunks: list[dict[str, Any]] = []
@@ -448,6 +493,11 @@ def convert_xlsx_to_markdown(path: Path) -> tuple[str, list[dict[str, Any]]]:
     return markdown, sheets_metadata
 
 
+def convert_xlsx_to_markdown(path: Path) -> tuple[str, list[dict[str, Any]]]:
+    """Convert XLSX in a child process so timeout termination releases resources."""
+    return _run_conversion_process(_xlsx_process_entry, path)
+
+
 # ── PPTX converter ──────────────────────────────────────────────────────────
 
 
@@ -471,11 +521,8 @@ def convert_pptx_to_markdown(path: Path) -> tuple[str, list[dict[str, Any]]]:
     logger.info("converting PPTX: %s", path.name)
     start = time.time()
 
-    converter = DocumentConverter()
     _ensure_disk_space(path)
-    result = _run_with_timeout(converter.convert, str(path))
-    doc = result.document
-    markdown = doc.export_to_markdown()
+    markdown = _docling_markdown(path)
 
     # Count slides by heading markers
     slides: list[dict[str, Any]] = []
