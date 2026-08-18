@@ -2565,6 +2565,7 @@ def _bulk_failure_message(exc: Exception) -> str:
         "content_delete_forbidden": "当前账号没有删除此状态资料的权限",
         "content_delete_in_progress": "资料正在发布，暂时不能移入回收站",
         "content_delete_reclassification_in_progress": "资料正在调整分类，暂时不能移入回收站",
+        "version_not_submittable": "仅草稿或已退回资料可以提交审核",
         "active_category_not_found": "目标目录不存在或已停用",
     }.get(str(exc), "资料状态已变化，请刷新后重试")
 
@@ -2723,6 +2724,37 @@ def bulk_review_content_versions(
             ))
     succeeded = sum(result.status == "succeeded" for result in results)
     return BulkManagedContentResponse(results=results, succeeded=succeeded, failed=len(results) - succeeded)
+
+
+@router.post("/bulk-submit", response_model=BulkManagedContentResponse)
+def bulk_submit_content_versions(
+    body: BulkManagedContentRequest,
+    user: CurrentUser = Depends(require_content_permission("item.submit", csrf=True)),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> BulkManagedContentResponse:
+    _require_feature()
+    results: list[BulkManagedContentResultDTO] = []
+    for version_id in _validate_bulk_version_ids(body.version_ids):
+        try:
+            row = submit_version_for_review(conn, version_id, actor_user_id=user.id)
+            results.append(BulkManagedContentResultDTO(
+                item_id=row["item_id"],
+                version_id=version_id,
+                status="succeeded",
+            ))
+        except (ValueError, sqlite3.IntegrityError) as exc:
+            conn.rollback()
+            results.append(BulkManagedContentResultDTO(
+                version_id=version_id,
+                status="failed",
+                message=_bulk_failure_message(exc),
+            ))
+    succeeded = sum(result.status == "succeeded" for result in results)
+    return BulkManagedContentResponse(
+        results=results,
+        succeeded=succeeded,
+        failed=len(results) - succeeded,
+    )
 
 
 @router.post("/bulk-publish", response_model=BulkManagedContentResponse)

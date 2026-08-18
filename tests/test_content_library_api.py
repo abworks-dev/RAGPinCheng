@@ -2432,6 +2432,45 @@ def test_bulk_review_and_publish_report_partial_failures(content_api):
     assert len(queued) == 1
 
 
+def test_bulk_submit_reports_partial_failures_and_audits_each_success(content_api):
+    client, sessions, _queued, db_path = content_api
+    entries = client.post(
+        "/api/admin/content/uploads",
+        data={"category_id": "cat-03"},
+        files=[
+            ("files", ("bulk-submit-a.md", b"# a", "text/markdown")),
+            ("files", ("bulk-submit-b.md", b"# b", "text/markdown")),
+        ],
+        **_auth(sessions, "organizer", csrf=True),
+    ).json()["entries"]
+    first_id, second_id = [entry["version_id"] for entry in entries]
+    client.post(
+        f"/api/admin/content/versions/{second_id}/submit",
+        json={},
+        **_auth(sessions, "organizer", csrf=True),
+    )
+
+    response = client.post(
+        "/api/admin/content/bulk-submit",
+        json={"version_ids": [first_id, second_id]},
+        **_auth(sessions, "organizer", csrf=True),
+    )
+
+    assert response.status_code == 200
+    assert (response.json()["succeeded"], response.json()["failed"]) == (1, 1)
+    assert response.json()["results"][1]["message"] == "仅草稿或已退回资料可以提交审核"
+    conn = connect(db_path)
+    assert conn.execute(
+        "SELECT count(*) FROM content_versions WHERE id IN (?,?) AND lifecycle_status='awaiting_review'",
+        (first_id, second_id),
+    ).fetchone()[0] == 2
+    assert conn.execute(
+        "SELECT count(*) FROM content_audit_events WHERE event_type='content.submitted' AND version_id IN (?,?)",
+        (first_id, second_id),
+    ).fetchone()[0] == 2
+    conn.close()
+
+
 def test_bulk_actions_enforce_permissions_csrf_limits_and_unique_ids(content_api):
     client, sessions, _queued, _db_path = content_api
     body = {"version_ids": ["version-1"], "approved": True}
@@ -2440,6 +2479,12 @@ def test_bulk_actions_enforce_permissions_csrf_limits_and_unique_ids(content_api
     ).status_code == 403
     assert client.post(
         "/api/admin/content/bulk-review", json=body, **_auth(sessions, "reviewer")
+    ).status_code == 403
+    assert client.post(
+        "/api/admin/content/bulk-submit", json=body, **_auth(sessions, "reviewer", csrf=True)
+    ).status_code == 403
+    assert client.post(
+        "/api/admin/content/bulk-submit", json=body, **_auth(sessions, "organizer")
     ).status_code == 403
     assert client.post(
         "/api/admin/content/bulk-review",

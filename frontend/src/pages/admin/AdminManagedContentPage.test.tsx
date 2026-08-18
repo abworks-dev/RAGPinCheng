@@ -32,6 +32,7 @@ const mocks = vi.hoisted(() => ({
   publish: vi.fn(),
   regeneratePreview: vi.fn(),
   bulkReview: vi.fn(),
+  bulkSubmit: vi.fn(),
   bulkPublish: vi.fn(),
   bulkMove: vi.fn(),
   bulkReclassify: vi.fn(),
@@ -121,6 +122,7 @@ vi.mock("../../api/client", () => ({
     publishManagedContent: mocks.publish,
     regenerateManagedContentPreview: mocks.regeneratePreview,
     bulkReviewManagedContent: mocks.bulkReview,
+    bulkSubmitManagedContent: mocks.bulkSubmit,
     bulkPublishManagedContent: mocks.bulkPublish,
     bulkMoveManagedContent: mocks.bulkMove,
     bulkReclassifyManagedContent: mocks.bulkReclassify,
@@ -1107,7 +1109,56 @@ describe("AdminManagedContentPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "批量操作" }));
     expect(screen.getByRole("menu", { name: "批量操作" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("menuitem", { name: "批量确认" }));
-    expect(screen.getByRole("dialog")).toHaveTextContent("已选择 2 份资料");
+    expect(screen.getByRole("dialog")).toHaveTextContent("本次工作台包含 2 份资料");
+  });
+
+  it("lists draft files before submitting them for review in one batch", async () => {
+    mocks.permissions = ORGANIZER_PERMISSIONS;
+    const firstItem = { ...item, lifecycle_status: "draft" };
+    const secondItem = { ...firstItem, item_id: "item-2", title: "建模标准2", version_id: "version-2", original_filename: "standard-2.pdf" };
+    mocks.items.mockResolvedValue({ items: [firstItem, secondItem], total: 2, status_counts: { draft: 2 } });
+    mocks.bulkSubmit.mockResolvedValue({
+      results: [firstItem, secondItem].map((target) => ({ version_id: target.version_id, item_id: target.item_id, status: "succeeded", message: null, index_job_id: null })),
+      succeeded: 2,
+      failed: 0,
+    });
+    render(<AdminManagedContentPage />);
+    await openRootFolder();
+    fireEvent.click(screen.getAllByRole("checkbox", { name: "选择建模标准" })[0]);
+    fireEvent.click(screen.getAllByRole("checkbox", { name: "选择建模标准2" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "批量操作" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "批量提交审核" }));
+
+    const dialog = screen.getByRole("dialog", { name: "批量提交审核" });
+    expect(within(dialog).getByLabelText("批量审核文件列表")).toHaveTextContent("建模标准");
+    expect(within(dialog).getByLabelText("批量审核文件列表")).toHaveTextContent("建模标准2");
+    fireEvent.click(within(dialog).getByRole("button", { name: "一键提交（2）" }));
+
+    await waitFor(() => expect(mocks.bulkSubmit).toHaveBeenCalledWith(["version-1", "version-2"]));
+    expect(await within(dialog).findByText("已提交 2")).toBeInTheDocument();
+  });
+
+  it("excludes an individually reviewed file from the remaining one-click decision", async () => {
+    const secondItem = { ...item, item_id: "item-2", title: "建模标准2", version_id: "version-2", original_filename: "standard-2.pdf" };
+    mocks.items.mockResolvedValue({ items: [item, secondItem], total: 2, status_counts: { awaiting_review: 2 } });
+    mocks.bulkReview
+      .mockResolvedValueOnce({ results: [{ version_id: "version-1", status: "succeeded", message: null, index_job_id: null }], succeeded: 1, failed: 0 })
+      .mockResolvedValueOnce({ results: [{ version_id: "version-2", status: "succeeded", message: null, index_job_id: null }], succeeded: 1, failed: 0 });
+    render(<AdminManagedContentPage />);
+    await openRootFolder();
+    fireEvent.click(screen.getAllByRole("checkbox", { name: "选择建模标准" })[0]);
+    fireEvent.click(screen.getAllByRole("checkbox", { name: "选择建模标准2" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "批量操作" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "批量确认" }));
+
+    const dialog = screen.getByRole("dialog", { name: "批量审核资料" });
+    const list = within(dialog).getByLabelText("批量审核文件列表");
+    fireEvent.click(within(list).getAllByRole("button", { name: "通过" })[0]);
+    await waitFor(() => expect(mocks.bulkReview).toHaveBeenNthCalledWith(1, ["version-1"], true, ""));
+    fireEvent.change(within(dialog).getByLabelText("批量退回原因"), { target: { value: "请补充依据" } });
+    fireEvent.click(await within(dialog).findByRole("button", { name: "一键退回（1）" }));
+
+    await waitFor(() => expect(mocks.bulkReview).toHaveBeenNthCalledWith(2, ["version-2"], false, "请补充依据"));
   });
 
   it("keeps only failed targets in the batch delete retry dialog", async () => {
@@ -1832,7 +1883,10 @@ describe("AdminManagedContentPage", () => {
     const secondItem = { ...item, item_id: "item-2", title: "建模标准2", version_id: "version-2" };
     mocks.items.mockResolvedValue({ items: [item, secondItem], total: 2, status_counts: { awaiting_review: 2 } });
     mocks.bulkReview.mockResolvedValue({
-      results: [{ version_id: "version-1", status: "failed", message: "资料状态已变化，请刷新后重试", index_job_id: null }],
+      results: [
+        { version_id: "version-1", status: "failed", message: "资料状态已变化，请刷新后重试", index_job_id: null },
+        { version_id: "version-2", status: "succeeded", message: null, index_job_id: null },
+      ],
       succeeded: 1,
       failed: 1,
     });
@@ -1843,11 +1897,12 @@ describe("AdminManagedContentPage", () => {
     fireEvent.click(screen.getAllByRole("checkbox", { name: "选择建模标准2" })[0]);
     fireEvent.click(screen.getByRole("button", { name: "批量操作" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "批量确认" }));
-    fireEvent.click(screen.getByRole("button", { name: "确认执行" }));
+    const dialog = screen.getByRole("dialog", { name: "批量审核资料" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "一键通过（2）" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("建模标准：资料状态已变化，请刷新后重试");
-    expect(screen.getByRole("button", { name: "重试失败项" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("资料状态已变化，请刷新后重试");
+    expect(within(dialog).getByRole("button", { name: "一键通过（1）" })).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "取消" }));
     expect(screen.getAllByRole("checkbox", { name: "选择建模标准" })[0]).toBeChecked();
   });
 
@@ -1861,8 +1916,8 @@ describe("AdminManagedContentPage", () => {
     fireEvent.click(screen.getAllByRole("checkbox", { name: "选择建模标准2" })[0]);
     fireEvent.click(screen.getByRole("button", { name: "批量操作" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "批量退回" }));
-    const dialog = screen.getByRole("dialog", { name: "批量退回资料" });
-    const submit = within(dialog).getByRole("button", { name: "确认执行" });
+    const dialog = screen.getByRole("dialog", { name: "批量审核资料" });
+    const submit = within(dialog).getByRole("button", { name: "一键退回（2）" });
     expect(submit).toBeDisabled();
     fireEvent.change(within(dialog).getByRole("textbox", { name: "批量退回原因" }), { target: { value: "统一补充来源" } });
     fireEvent.click(submit);

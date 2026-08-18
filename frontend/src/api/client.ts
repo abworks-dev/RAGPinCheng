@@ -821,6 +821,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ version_ids: versionIds, approved, note: note?.trim() || null }),
     }),
+  bulkSubmitManagedContent: (versionIds: string[]) =>
+    jsonFetch<BulkManagedContentResponse>("/api/admin/content/bulk-submit", {
+      method: "POST",
+      body: JSON.stringify({ version_ids: versionIds }),
+    }),
   bulkPublishManagedContent: (versionIds: string[]) =>
     jsonFetch<BulkManagedContentResponse>("/api/admin/content/bulk-publish", {
       method: "POST",

@@ -46,6 +46,7 @@ export const adminContentApi = {
   publish: (...args: Parameters<typeof api.publishManagedContent>) => api.publishManagedContent(...args),
   regeneratePreview: (...args: Parameters<typeof api.regenerateManagedContentPreview>) => api.regenerateManagedContentPreview(...args),
   bulkReview: (...args: Parameters<typeof api.bulkReviewManagedContent>) => api.bulkReviewManagedContent(...args),
+  bulkSubmit: (...args: Parameters<typeof api.bulkSubmitManagedContent>) => api.bulkSubmitManagedContent(...args),
   bulkPublish: (...args: Parameters<typeof api.bulkPublishManagedContent>) => api.bulkPublishManagedContent(...args),
   bulkMove: (...args: Parameters<typeof api.bulkMoveManagedContent>) => api.bulkMoveManagedContent(...args),
   bulkReclassify: (...args: Parameters<typeof api.bulkReclassifyManagedContent>) => api.bulkReclassifyManagedContent(...args),
