@@ -21,12 +21,15 @@
 ## 工作前必须做
 
 1. 阅读与任务相关的入口、调用链、类型和配置；
-2. 只读任务先运行 `pwsh -NoProfile -File scripts/Test-CodexWorkspace.ps1 -Mode ReadOnly`；新写任务在编辑前运行 `-Mode Write -Intent New`，继续既有任务运行 `-Mode Write -Intent Continue -ExpectedBranch <branch>`；
-3. 检查 `git status --short --branch`，保护用户已有修改；workspace 预检失败时停止编辑，不得自动创建、切换、清理或修复 worktree；
-4. 新写任务优先使用 Codex App 在 `$CODEX_HOME/worktrees` 创建的受管 worktree；人工长期 worktree 只放在主仓库父目录的 `.worktrees/<仓库名>`，旧位置只用于继续原任务；
-5. 区分只读调查、普通实现、高风险修改和破坏性操作；
-6. 说明最小修改面、验证方式和明确不做的内容；
-7. 中高风险任务先调查和计划，再实施。
+2. 先运行 `pwsh -NoProfile -File scripts/Resolve-CodexWorkspace.ps1 -Mode <ReadOnly|Write> -TaskRisk <R0|R1|R2|R3> [-Intent <New|Continue>] [-ExpectedBranch <branch>]` 获取只读的 worktree、环境和基线建议；计划修改依赖时追加 `-DependencyIntent Change`；
+3. 只读任务在目标目录运行 `pwsh -NoProfile -File scripts/Test-CodexWorkspace.ps1 -Mode ReadOnly`；新写任务在编辑前运行 `-Mode Write -Intent New`，继续既有任务运行 `-Mode Write -Intent Continue -ExpectedBranch <branch>`；
+4. 检查 `git status --short --branch`，保护用户已有修改；workspace 预检失败时停止编辑，不得自动创建、切换、清理或修复 worktree；
+5. 新写任务优先使用 Codex App 在 `$CODEX_HOME/worktrees` 创建的受管 worktree；人工长期 worktree只放在主仓库父目录的 `.worktrees/<仓库名>`，旧位置只用于继续原任务；
+6. `Resolve-CodexWorkspace.ps1` 的 `allowed=true` 只表示决策有效，不表示当前目录可写；实际编辑仍要求目标 worktree 的 `workspace_allowed=true` 和写预检通过；
+7. `recommended_environment=shared` 时只通过返回的绝对 `environment_path` 执行依赖不变的命令，不得修改共享环境；依赖变化、检查不完整或需要安装包时使用隔离环境；
+8. 区分只读调查、普通实现、高风险修改和破坏性操作；
+9. 说明最小修改面、验证方式和明确不做的内容；
+10. 中高风险任务先调查和计划，再实施。
 
 不要因为发现邻近问题而自动扩大范围。
 
@@ -98,7 +101,7 @@ Rules 由 Claude Code 根据路径配置自动发现；本段是职责地图，�
 
 ## 常用命令
 
-所有命令从仓库根目录执行；Python命令使用项目 `.venv`。
+所有命令从仓库根目录执行；Python命令使用决策器返回的 `environment_path`。共享环境只用于依赖不变的执行，不得安装、升级或卸载包；隔离环境由获批任务按需准备，决策器本身不会创建或修改 `.venv`。
 
 ```text
 后端开发：uvicorn api.main:app --reload --port 8000

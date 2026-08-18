@@ -2,6 +2,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $sourceScript = (Resolve-Path (Join-Path $PSScriptRoot "..\Test-CodexWorkspace.ps1")).Path
+$sourceResolver = (Resolve-Path (Join-Path $PSScriptRoot "..\Resolve-CodexWorkspace.ps1")).Path
 $testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("ragpincheng-workspace-test-" + [guid]::NewGuid().ToString("N"))
 $repository = Join-Path $testRoot "project repo"
 $scriptsDirectory = Join-Path $repository "scripts"
@@ -16,6 +17,7 @@ $legacySibling = Join-Path $testRoot "project repo-legacy-task"
 $legacyTemp = Join-Path $testRoot "unstructured temporary task"
 $otherRepository = Join-Path $testRoot "other repo"
 $testScript = Join-Path $scriptsDirectory "Test-CodexWorkspace.ps1"
+$resolverScript = Join-Path $scriptsDirectory "Resolve-CodexWorkspace.ps1"
 $pwsh = (Get-Process -Id $PID).Path
 $passed = 0
 $previousCodexHome = $env:CODEX_HOME
@@ -39,6 +41,23 @@ function Invoke-WorkspaceCheck {
     return [pscustomobject]@{ ExitCode = $exitCode; Result = $json }
 }
 
+function Invoke-WorkspaceDecision {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Mode,
+        [Parameter(Mandatory = $true)][string]$TaskRisk,
+        [string[]]$ExtraArguments = @()
+    )
+
+    $output = @(
+        & $pwsh -NoProfile -File $resolverScript -Mode $Mode -TaskRisk $TaskRisk `
+            -RepositoryPath $Path -Json @ExtraArguments
+    )
+    $exitCode = $LASTEXITCODE
+    $json = ($output -join "`n") | ConvertFrom-Json
+    return [pscustomobject]@{ ExitCode = $exitCode; Result = $json }
+}
+
 function Assert-Case {
     param(
         [Parameter(Mandatory = $true)][string]$Name,
@@ -54,11 +73,14 @@ try {
     $env:CODEX_HOME = $testCodexHome
     New-Item -ItemType Directory -Path $scriptsDirectory -Force | Out-Null
     Copy-Item -LiteralPath $sourceScript -Destination $testScript
+    Copy-Item -LiteralPath $sourceResolver -Destination $resolverScript
 
     Invoke-GitChecked @("init", "-b", "master", $repository)
     Invoke-GitChecked @("-C", $repository, "config", "user.name", "Workspace Test")
     Invoke-GitChecked @("-C", $repository, "config", "user.email", "workspace-test@example.invalid")
     Set-Content -LiteralPath (Join-Path $repository "README.md") -Value "fixture" -Encoding utf8NoBOM
+    Set-Content -LiteralPath (Join-Path $repository ".gitignore") -Value ".venv/" -Encoding utf8NoBOM
+    Set-Content -LiteralPath (Join-Path $repository "requirements.txt") -Value "fixture==1" -Encoding utf8NoBOM
     Invoke-GitChecked @("-C", $repository, "add", ".")
     Invoke-GitChecked @("-C", $repository, "commit", "-m", "fixture")
     Invoke-GitChecked @("-C", $repository, "remote", "add", "origin", $repository)
@@ -72,11 +94,117 @@ try {
     Invoke-GitChecked @("-C", $repository, "worktree", "add", "-b", "codex/legacy-temp", $legacyTemp, "master")
     Invoke-GitChecked @("init", "-b", "master", $otherRepository)
 
+    $primaryVenv = Join-Path $repository ".venv"
+    New-Item -ItemType Directory -Path $primaryVenv -Force | Out-Null
+
     $case = Invoke-WorkspaceCheck -Path $repository -Mode ReadOnly
     Assert-Case "primary readonly allowed" (
         $case.ExitCode -eq 0 -and $case.Result.primary_worktree -and
-        $case.Result.reason_codes.Count -eq 0 -and $null -eq $case.Result.recommended_action
+        $case.Result.reason_codes.Count -eq 0 -and $null -eq $case.Result.recommended_action -and
+        $case.Result.recommended_worktree_action -eq "primary_read_only" -and
+        $case.Result.recommended_environment -eq "none" -and
+        $case.Result.base_freshness -eq "current"
     )
+
+    $decision = Invoke-WorkspaceDecision -Path $repository -Mode ReadOnly -TaskRisk R0
+    Assert-Case "resolver selects primary for readonly" (
+        $decision.ExitCode -eq 0 -and $decision.Result.allowed -and
+        $decision.Result.recommended_worktree_action -eq "primary_read_only" -and
+        $decision.Result.candidate_worktree -eq $repository -and
+        $decision.Result.recommended_environment -eq "none"
+    )
+
+    $decision = Invoke-WorkspaceDecision -Path $repository -Mode Write -TaskRisk R1 `
+        -ExtraArguments @("-Intent", "New")
+    Assert-Case "resolver recommends managed worktree for new task from primary" (
+        $decision.ExitCode -eq 0 -and $decision.Result.allowed -and
+        -not $decision.Result.workspace_allowed -and
+        $decision.Result.recommended_worktree_action -eq "create_new" -and
+        $null -eq $decision.Result.candidate_worktree -and
+        $decision.Result.recommended_environment -eq "shared" -and
+        $decision.Result.environment_read_only
+    )
+
+    $decision = Invoke-WorkspaceDecision -Path $repository -Mode Write -TaskRisk R1 `
+        -ExtraArguments @("-Intent", "New", "-DependencyIntent", "Change")
+    Assert-Case "resolver isolates planned dependency changes" (
+        $decision.ExitCode -eq 0 -and
+        $decision.Result.dependency_change_detected -and
+        $decision.Result.recommended_environment -eq "isolated" -and
+        -not $decision.Result.environment_exists
+    )
+
+    $decision = Invoke-WorkspaceDecision -Path $managed -Mode Write -TaskRisk R1 `
+        -ExtraArguments @("-Intent", "New")
+    Assert-Case "resolver reuses clean managed worktree" (
+        $decision.ExitCode -eq 0 -and $decision.Result.workspace_allowed -and
+        $decision.Result.recommended_worktree_action -eq "reuse_existing" -and
+        $decision.Result.candidate_worktree -eq $managed -and
+        $decision.Result.recommended_environment -eq "shared"
+    )
+
+    $decision = Invoke-WorkspaceDecision -Path $repository -Mode Write -TaskRisk R2 `
+        -ExtraArguments @("-Intent", "Continue", "-ExpectedBranch", "codex/test-task")
+    Assert-Case "resolver finds original continuation worktree" (
+        $decision.ExitCode -eq 0 -and $decision.Result.approval_required -and
+        $decision.Result.recommended_worktree_action -eq "reuse_existing" -and
+        $decision.Result.candidate_worktree -eq $linked -and
+        $decision.Result.candidate_branch -eq "codex/test-task"
+    )
+
+    $decision = Invoke-WorkspaceDecision -Path $repository -Mode ReadOnly -TaskRisk R1
+    Assert-Case "resolver rejects risk and mode mismatch" (
+        $decision.ExitCode -ne 0 -and -not $decision.Result.allowed -and
+        $decision.Result.reason_codes -contains "TASK_RISK_MODE_MISMATCH"
+    )
+
+    $managedVenv = Join-Path $managed ".venv"
+    New-Item -ItemType Directory -Path $managedVenv -Force | Out-Null
+    $decision = Invoke-WorkspaceDecision -Path $managed -Mode Write -TaskRisk R1 `
+        -ExtraArguments @("-Intent", "New")
+    Assert-Case "resolver prefers existing worktree-local environment" (
+        $decision.ExitCode -eq 0 -and
+        $decision.Result.recommended_environment -eq "isolated" -and
+        $decision.Result.environment_path -eq $managedVenv -and
+        $decision.Result.environment_exists
+    )
+
+    [System.IO.Directory]::Delete($primaryVenv, $true)
+    $decision = Invoke-WorkspaceDecision -Path $repository -Mode Write -TaskRisk R1 `
+        -ExtraArguments @("-Intent", "New")
+    Assert-Case "resolver reports a missing environment" (
+        $decision.ExitCode -eq 0 -and
+        $decision.Result.recommended_environment -eq "missing" -and
+        $null -eq $decision.Result.environment_path -and
+        -not $decision.Result.environment_exists
+    )
+    New-Item -ItemType Directory -Path $primaryVenv -Force | Out-Null
+
+    Set-Content -LiteralPath (Join-Path $linked "requirements.txt") -Value "fixture==2" -Encoding utf8NoBOM
+    $decision = Invoke-WorkspaceDecision -Path $repository -Mode Write -TaskRisk R2 `
+        -ExtraArguments @("-Intent", "Continue", "-ExpectedBranch", "codex/test-task")
+    Assert-Case "resolver isolates detected dependency changes" (
+        $decision.ExitCode -eq 0 -and
+        $decision.Result.dependency_change_detected -and
+        $decision.Result.dependency_files -contains "requirements.txt" -and
+        $decision.Result.recommended_environment -eq "isolated" -and
+        -not $decision.Result.environment_read_only
+    )
+    Invoke-GitChecked @("-C", $linked, "restore", "requirements.txt")
+
+    $masterCommit = (@(& git -C $repository rev-parse master) -join "`n").Trim()
+    if ($LASTEXITCODE -ne 0) { throw "git rev-parse master failed" }
+    $masterTree = (@(& git -C $repository rev-parse "master^{tree}") -join "`n").Trim()
+    if ($LASTEXITCODE -ne 0) { throw "git rev-parse master tree failed" }
+    $futureCommit = ("future origin" | & git -C $repository commit-tree $masterTree -p $masterCommit).Trim()
+    if ($LASTEXITCODE -ne 0) { throw "git commit-tree failed" }
+    Invoke-GitChecked @("-C", $repository, "update-ref", "refs/remotes/origin/master", $futureCommit)
+    $decision = Invoke-WorkspaceDecision -Path $repository -Mode ReadOnly -TaskRisk R0
+    Assert-Case "resolver reports stale base without updating it" (
+        $decision.ExitCode -eq 0 -and $decision.Result.base_freshness -eq "behind" -and
+        $decision.Result.behind -eq 1 -and $decision.Result.warnings.Count -gt 0
+    )
+    Invoke-GitChecked @("-C", $repository, "update-ref", "refs/remotes/origin/master", $masterCommit)
 
     $case = Invoke-WorkspaceCheck -Path $repository -Mode Write -ExtraArguments @("-Intent", "New")
     Assert-Case "primary write rejected" (
@@ -176,6 +304,14 @@ try {
         $case.Result.recommended_action -eq "USE_CLEAN_MANAGED_WORKTREE" -and $before -ceq $after
     )
 
+    $decision = Invoke-WorkspaceDecision -Path $linked -Mode Write -TaskRisk R1 `
+        -ExtraArguments @("-Intent", "New")
+    Assert-Case "resolver does not reuse a dirty worktree for a new task" (
+        $decision.ExitCode -eq 0 -and -not $decision.Result.workspace_allowed -and
+        $decision.Result.recommended_worktree_action -eq "create_new" -and
+        $null -eq $decision.Result.candidate_worktree
+    )
+
     $case = Invoke-WorkspaceCheck -Path $linked -Mode Write -ExtraArguments @(
         "-Intent", "Continue", "-ExpectedBranch", "codex/test-task"
     )
@@ -195,7 +331,15 @@ try {
     Assert-Case "other repository rejected" (
         $case.ExitCode -ne 0 -and -not $case.Result.same_repository -and
         $case.Result.reason_codes -contains "DIFFERENT_REPOSITORY" -and
-        $case.Result.recommended_action -eq "USE_PROJECT_WORKTREE"
+        $case.Result.recommended_action -eq "USE_PROJECT_WORKTREE" -and
+        $case.Result.recommended_worktree_action -eq "blocked"
+    )
+
+    $decision = Invoke-WorkspaceDecision -Path $otherRepository -Mode ReadOnly -TaskRisk R0
+    Assert-Case "resolver blocks another repository" (
+        $decision.ExitCode -ne 0 -and -not $decision.Result.allowed -and
+        $decision.Result.recommended_worktree_action -eq "blocked" -and
+        $decision.Result.reason_codes -contains "DIFFERENT_REPOSITORY"
     )
 
     Write-Host "Workspace harness tests passed: $passed"
