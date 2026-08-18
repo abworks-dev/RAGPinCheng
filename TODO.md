@@ -25,25 +25,21 @@
 - 下一步：
   - [ ] 使用一条已发布规范完成真实问答检索和来源文件链接验收，确认引用可打开且不再依赖旧 `source`。
   - [ ] source 解耦后观察 1 至 2 周，再独立决定旧 `source/docs`、`source/media` 的物理归档或删除；不得删除整个生产仓库目录。
-- 完成标准：116 个正式普通资料 head 与未来正式 transcript head 在 `strict` 下可检索；无版本旧索引不可见且受控下线；生产容器不再依赖 `source/docs`、`source/media`；切换和物理归档均有独立恢复点。
-- 依赖：T11 已于 2026-08-14 删除 19,981 个旧普通资料 Parent 和 38,387 个 Qdrant Point；T12-B 数据 workflow `31767567546` 已按冻结摘要 `a36bbef…c53a` 完成独立备份、4 条旧媒体归档、2 个 transcript head、44 个 Parent 和 104 个 Point 的精确下线。App-only workflow `31769119451` 已将生产切换到 `strict`，并通过 41,191 个 Point、SQLite 完整性、受管配置、GPU、后台页面和无旧 `source` 容器挂载核验。
+- 完成标准：正式资料 head 在 `strict` 下可检索；无版本旧索引不可见；生产容器不再依赖旧 `source`；切换和物理归档均有独立恢复点。
+- 依赖：受管资料生产迁移与 `strict` 切换已完成并留有 workflow 证据；真实来源链接验收和旧目录观察期尚未完成。
 - 方案链接：`docs/plans/managed-content-library.md`、`docs/decisions/0003-managed-content-library.md`、`docs/migrations/managed-content-production-runbook.md`
 
-### 查询拆分 Phase A 生产评测
+### 查询拆分 Phase B 生产评测
 
 - 状态：进行中
-- 目标：量化查询拆分对比较型问题的检索收益、稳定性和成本，为是否灰度开启提供依据。
-- 阶段 1：Phase A（已完成）
-  - 已完成：在 Ubuntu 活索引运行 Phase A 2×2 评测，保存 ITT、applied-only、5 个 contrast、gain/loss 和错误状态结果（2026-07-31，commit `d57fe1c` + 两个 bug fix `e3c80d5`/`7626d1c`）。
-  - 已完成：机制层验证：4 题 comparison 跑通；transitions 守恒；4-样本警告触发；负 delta 触发 WARN 不改 exit code。结论：拆分确有正向收益（k5 +0.500、k8 +0.250 `delta_all_sides_hit_rate`），但 4 题、同一文档对、均带强规范编号，不构成统计决策。
-- 阶段 2：ChatSession 开关 A/B（未跑，Phase B 核心）
-  - [ ] 真实环境开关运行完整 ChatSession：on 路径走 `_fresh_retrieve`（gate + rewrite + guard + carry + context packaging + generate），off 路径走原 `_fresh_retrieve(开关关)`。
+- 目标：在完整 ChatSession 链路量化查询拆分对比较型问题的回答质量、稳定性和成本，为是否灰度开启提供依据。
+- 下一步：
+  - [ ] 编写 `docs/plans/phase-b-comparison-greyout.md`，提交独立 R2 方案审批。
+  - [ ] 扩充代表性 comparison 黄金集后，在真实环境对开关 on/off 运行完整 ChatSession A/B。
   - [ ] 收集回答质量、引用支持度、partial/no-answer、`final_sources → used_sources` 侧覆盖损失、延迟 P50/P95、Token 成本、timeout、fallback、错误率。
-  - [ ] 写 `docs/plans/phase-b-comparison-greyout.md` 作为独立 R2 方案（待新写）。
-  - [ ] 显式声明结果**不**构成灰度依据的边界（样本不足、in-process 风险、query rewrite/guard 干扰等）。
-- 完成标准：Phase A 协议层✅ + Phase B 真实链路数据齐；普通黄金集不退化；比较集收益、延迟和成本有可复核结论；明确给出开启、继续关闭或补实验的建议。
-- 依赖：Ubuntu 活索引、GPU 服务、当前 79 题黄金集、`### 黄金集第二期扩展`（用于 A/B 跑出代表性数据）；默认开关保持关闭。
-- 方案链接：`scripts/run_eval_retrieval.py`、`docs/features/retrieval-pipeline.md`、本节阶段 2 产出的 Phase B 计划文件（待写）
+- 完成标准：普通黄金集不退化；比较集收益、延迟和成本有可复核结论；明确给出开启、继续关闭或补实验的建议。
+- 依赖：Phase A 机制评测已完成；黄金集第二期扩展、Ubuntu 活索引和 GPU 服务；默认开关保持关闭。
+- 方案链接：`scripts/run_eval_retrieval.py`、`docs/features/retrieval-pipeline.md`，以及待新增的 Phase B 方案。
 
 ### 查询拆分灰度决策
 
@@ -52,7 +48,7 @@
 - 下一步：
   - [ ] 等 Phase B 跑通后，提交独立灰度方案 + 回滚条件 + canary 流量比例 + 监控阈值 + 恢复方式。
 - 完成标准：用户明确批准或否决灰度；如批准，具备监控指标、停止条件和回滚步骤。
-- 依赖：`### 查询拆分 Phase A 生产评测` 全部完成；`### 黄金集第二期扩展` 完成后扩样；该项改变 RAG 行为，属于 R2。
+- 依赖：`### 查询拆分 Phase B 生产评测` 完成；该项改变 RAG 行为，属于 R2。
 - 方案链接：待 Phase B 完成后新增到 `docs/plans/`。
 
 ### Office 安全与故障恢复补齐
@@ -147,8 +143,7 @@
   - [ ] 增加培训视频转录问题和纯数字、纯代码、无意义输入等边界用例。
   - [ ] 在实际召回验证基础上继续补充内容对称的比较题。
 - 完成标准：新增题集经过人工审核，索引指纹已冻结，评分口径与检索黄金集、生成质量评测边界清晰。
-- 依赖：第一期 79 题基线、comparison 评分和索引陈旧告警已经完成。
-- **Phase B 前置关系**：`### 查询拆分 Phase A 生产评测` 阶段 2 真实链路 A/B 需要在 20-30 道代表性 comparison 题（含跨文档、无强规范码、多实体、gate 真假阳阴）上跑才有意义；当前第一期 4 题同池 GB50189↔GB55015、均带强规范编号，Phase B 跑在这 4 题上只会重复 Phase A 的"机制层信号"，得不出"代表性数据"。**本条目视为 Phase B 的强制前置**，不先做则 Phase B 的 A/B 价值有限。
+- 依赖：第一期 79 题基线、comparison 评分和索引陈旧告警已经完成；Phase B 需要 20 至 30 道覆盖跨文档、弱规范码、多实体和 gate 边界的代表性 comparison 题。
 - 方案链接：`docs/golden-set-staleness-guard.md`
 
 ---
@@ -170,26 +165,12 @@
 - 状态：代码完成待验证
 - 目标：建立引擎无关的转录、审核、版本发布和索引流水线，让管理员只能从服务端白名单 Profile 中启动自动转录，同时永久保留人工 Markdown 路径。
 - 下一步：
-  - [ ] 由远端 CI 在干净环境验证 Phase 5 API、worker、candidate index、Qdrant Filter 组合、完整前端测试与构建，要求新增 job 零失败、零跳过且既有 jobs 不退化。
-  - [ ] 将转录管理流程加固 PR 1 交由 scoped code review、远端 CI 和用户验收；PR 2 独立工作台须重新按 R2 审批后再实施。
-  - [ ] CI 通过后进行 scoped code review 和用户验收；不得把本地缺依赖的测试写成已通过。
-  - [ ] 如需执行 R3B，逐项审批 Windows 目录/ACL、独立 venv 依赖安装、固定 revision 模型离线准备、防火墙限源、Token 写入和 Scheduled Task 注册；默认保持不执行。
-  - [ ] R3B 通过后另行审批 R3C，仅用非敏感短媒体和 experimental Profile 做隔离端到端验收；不得自动开放正式 Profile、自动发布、自动索引或生产灰度。
-  - [ ] 任何真实 GPU qualification 继续按引擎逐项审批，列明目标 workflow、完整 master
-    SHA、样本准备状态和副作用；共享语料迁移通过不自动授权推理或 Profile admission。
-  - [ ] 同 SHA R3 通过后另行提交生产 R3 执行方案，逐项覆盖维护窗口、`asr.env`/应用/venv
-    备份、Windows 本机双 Profile 验证、Ubuntu 跨节点验证、跨节点失败后的自动回滚和应用侧
-    `ASR_ENABLED=false` 门禁；未经批准不得执行。
-  - [ ] Qwen3-ASR R2 代码通过 scoped review、干净环境 CI 并合并后，按统一 R3
-    一次性方案审批并执行单一 workflow；内部依次通过依赖/许可证/CUDA、双模型、
-    真实推理、8 样本质量与资源门禁，任一前置门禁失败即停止，Profile 保持 disabled。
-    首次 workflow `30970277613` 已在 `pip_download` 失败关闭；先完成固定 source
-    run/SHA 的上下文安全结构化；只读取诊断 workflow `30972780438` 的三个固定本地文件，
-    对剩余 2 条相同上下文记录仅提取规范化 requested/owner requirement 关系。取得严格
-    脱敏 v3 JSON 后停止，不得运行 pip、修改 pin/freeze、服务或 Profile admission。
+  - [ ] 在干净环境完成 Phase 5 API、worker、候选索引、Qdrant Filter、前端测试和构建验证，再进行 scoped code review 与用户验收。
+  - [ ] 为 Windows ASR 环境准备独立 R3 部署与隔离验收方案，覆盖备份、目录权限、固定依赖、网络限源、Token、回滚和 `ASR_ENABLED=false` 门禁。
+  - [ ] Qwen3-ASR 完成 R2 代码审查与 CI 后，再提交统一 R3 qualification 方案；验证通过前保持 experimental/disabled。
 - 完成标准：人工转录流程不退化；管理员只能选择服务端白名单 Profile；同一媒体可保留多个历史版本且只有 `app.sqlite` head 指向的版本进入正式检索；experimental Profile 强制审核；至少一个 `qualification_approved` Profile 完成隔离端到端验证后才讨论生产灰度。
-- 依赖：Phase 1～4B 已形成契约、持久化、remote Provider 与应用上传/worker/UI 前半段；Phase 5A/5B 已实现版本审阅、发布、候选索引和检索可见性，待远端 CI；Windows ASR R3A 仓库实施及 PR #8 远端 CI 已通过，但不等于生产部署完成；R3B/R3C、真实引擎/GPU/Qdrant 和生产数据均未执行；真实环境操作另按 R3 逐项审批，单卡 GPU 保持 BGE 优先。
-- 方案链接：`docs/plans/multi-engine-auto-transcription.md`、`docs/plans/multi-engine-transcription-phase1.md`、`docs/plans/multi-engine-transcription-phase2.md`、`docs/plans/multi-engine-transcription-phase3.md`、`docs/plans/multi-engine-transcription-phase5.md`、`docs/plans/multi-engine-transcription-phase5c-windows-asr-deployment.md`、`docs/plans/transcription-admin-workflow-hardening.md`、`docs/plans/faster-whisper-provider-integration.md`、`docs/plans/faster-whisper-r3-unified-qualification.md`、`docs/plans/qwen3-asr-r2-r3-integration.md`、`docs/plans/shared-asr-qualification-corpus-migration.md`、`docs/plans/asr-local-development-lab.md`、`docs/decisions/0002-multi-engine-transcription.md`、`docs/plans/funasr-auto-transcription.md`
+- 依赖：Phase 1 至 5B 已形成代码链路但仍待完整验证；Windows 部署、真实引擎/GPU/Qdrant 和生产数据操作必须另按 R3 审批，单卡 GPU 保持 BGE 优先。
+- 方案链接：`docs/plans/multi-engine-auto-transcription.md`、`docs/plans/multi-engine-transcription-phase5.md`、`docs/plans/multi-engine-transcription-phase5c-windows-asr-deployment.md`、`docs/plans/qwen3-asr-r2-r3-integration.md`、`docs/decisions/0002-multi-engine-transcription.md`
 
 ### 转录稿 Markdown 校对
 
@@ -210,7 +191,7 @@
 1. 当前回答来源支持批量复制和 Markdown 下载（2026-08-17，PR #462）。
 2. 视频播放进度按用户和媒体恢复，明确时间引用仍优先（2026-08-17，PR #460）。
 3. 项目文档目录统一为 `docs/`，legacy 资料默认路径迁至 `content/legacy-docs/`，生产部署验证通过（2026-08-14，PR #268，workflow `31802581728`）。
-4. [受管知识资料库](docs/features/document-indexing.md)生产基础能力启用，保持 `compat` 且未迁移旧资料（2026-08-11，PR #221/#222，workflow `31500815860`）。
+4. [受管知识资料库](docs/features/managed-content-library.md)生产基础能力启用，保持 `compat` 且未迁移旧资料（2026-08-11，PR #221/#222，workflow `31500815860`）。
 5. [Qwen3-ASR / WhisperX 本地快速实验室](docs/plans/asr-local-development-lab.md)及双引擎 full 实测（2026-08-11）。
 6. 三引擎共享 ASR qualification corpus 中性变量迁移（2026-08-10）。
 7. faster-whisper 生产准入代码准备（2026-08-10）。
