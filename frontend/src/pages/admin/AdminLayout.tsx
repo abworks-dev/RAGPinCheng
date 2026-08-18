@@ -123,7 +123,7 @@ export function AdminLayout() {
     <div className="flex min-h-full flex-col bg-admin-background text-foreground lg:h-screen lg:flex-row lg:overflow-hidden">
       <aside
         className={cn(
-          "flex shrink-0 flex-col bg-sidebar text-sidebar-foreground lg:h-full lg:transition-[width] lg:duration-normal",
+          "flex shrink-0 flex-col overflow-hidden bg-sidebar text-sidebar-foreground lg:h-full lg:transition-[width] lg:duration-normal",
           sidebarCollapsed ? "lg:w-16" : "lg:w-[17rem]",
         )}
       >
@@ -180,7 +180,7 @@ export function AdminLayout() {
                         onClick={() => setMobileNavigationOpen(false)}
                         title={sidebarCollapsed ? label : undefined}
                         className={({ isActive }) => cn(
-                          "flex h-control-md min-w-0 items-center rounded-ui-lg text-left text-ui-sm font-medium transition-colors duration-normal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                          "flex h-control-md min-w-0 items-center overflow-hidden rounded-ui-lg text-left text-ui-sm font-medium transition-colors duration-normal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                           sidebarCollapsed ? "lg:w-9 lg:justify-center lg:px-0" : "gap-3 px-3",
                           isActive
                             ? "bg-primary text-primary-foreground shadow-surface"
@@ -188,7 +188,7 @@ export function AdminLayout() {
                         )}
                       >
                         <Icon className="size-4 shrink-0" aria-hidden="true" />
-                        <span className={cn("min-w-0 whitespace-normal", sidebarCollapsed && "lg:hidden")}>{label}</span>
+                        <span className={cn("min-w-0 truncate whitespace-nowrap", sidebarCollapsed && "lg:hidden")}>{label}</span>
                       </NavLink>
                     );
                   })}
