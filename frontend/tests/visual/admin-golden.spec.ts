@@ -89,7 +89,7 @@ test("资料管理审核窗口 accepted golden", async ({ page }) => {
   const item = page.viewportSize()!.width < 1024 ? title.locator("xpath=ancestor::li") : title.locator("xpath=ancestor::tr");
   await item.getByRole("button", { name: "审核", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "审核资料" });
-  await dialog.getByRole("button", { name: "选择退回修改" }).click();
+  await dialog.getByRole("button", { name: "退回修改", exact: true }).click();
   await dialog.getByRole("textbox", { name: "退回原因" }).fill("请补充机电碰撞检查范围");
   await expect(dialog.getByRole("button", { name: "确认退回" })).toBeEnabled();
   const viewport = page.viewportSize()!;

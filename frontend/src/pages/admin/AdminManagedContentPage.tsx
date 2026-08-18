@@ -2558,10 +2558,6 @@ export function AdminManagedContentPage() {
           <div>
             {reviewTarget.preview_parent_id && ["pdf", "docx", "xlsx", "pptx"].includes(reviewTarget.doc_type) ? <Button variant="outline" onClick={() => openDocumentPreview(reviewTarget.preview_parent_id!, reviewTarget.title, reviewTarget.doc_type, 1, {}, "managed-content-review")}><Eye className="size-4" />预览文件</Button> : reviewTarget.doc_type === "pdf" || can("item.download") ? <a className={buttonVariants({ variant: "outline" })} href={adminContentApi.fileUrl(reviewTarget.version_id)} target="_blank" rel="noreferrer"><Eye className="size-4" />打开文件</a> : <Button variant="outline" disabled title="打开文件（需要下载权限）"><Eye className="size-4" />打开文件</Button>}
           </div>
-          <div className="grid grid-cols-2 gap-2" role="group" aria-label="审核结果">
-            <Button type="button" aria-label="选择确认通过" variant={reviewDecision === "approve" ? "default" : "outline"} aria-pressed={reviewDecision === "approve"} disabled={busyAction === "review"} onClick={() => { setReviewDecision("approve"); setReviewError(null); }}><Check className="size-4" />确认通过</Button>
-            <Button type="button" aria-label="选择退回修改" variant={reviewDecision === "reject" ? "destructive" : "outline"} aria-pressed={reviewDecision === "reject"} disabled={busyAction === "review"} onClick={() => { setReviewDecision("reject"); setReviewError(null); }}><X className="size-4" />退回修改</Button>
-          </div>
           <label className="block space-y-1.5 text-ui-sm font-medium">
             <span>{reviewDecision === "approve" ? "审核备注（可选）" : "退回原因"}</span>
             <textarea aria-label={reviewDecision === "approve" ? "审核备注（可选）" : "退回原因"} value={reviewNote} onChange={(event) => { setReviewNote(event.target.value); setReviewError(null); }} maxLength={2000} className="min-h-28 w-full resize-y rounded-ui-md border border-input bg-background px-3 py-2 text-ui-sm" placeholder={reviewDecision === "approve" ? "可记录审核依据" : "请说明需要修改的内容"} autoFocus />
@@ -2569,9 +2565,10 @@ export function AdminManagedContentPage() {
           </label>
           {reviewError && <p className="rounded-ui-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-ui-sm text-destructive" role="alert">{reviewError}</p>}
         </div>}
-        <DialogFooter>
-          <Button variant="outline" disabled={busyAction === "review"} onClick={() => setReviewTarget(null)}>取消</Button>
-          <Button variant={reviewDecision === "reject" ? "destructive" : "default"} disabled={busyAction === "review" || (reviewDecision === "reject" && !reviewNote.trim())} onClick={() => void submitReview()}>{busyAction === "review" ? "提交中…" : reviewDecision === "approve" ? "确认通过" : "确认退回"}</Button>
+        <DialogFooter role="group" aria-label="审核操作" className="flex-col items-stretch sm:flex-row sm:items-center">
+          <Button className="w-full sm:w-auto" variant="outline" disabled={busyAction === "review"} onClick={() => setReviewTarget(null)}>取消</Button>
+          <Button className="w-full sm:w-auto" type="button" variant="outline" disabled={busyAction === "review"} onClick={() => { setReviewDecision(reviewDecision === "approve" ? "reject" : "approve"); setReviewError(null); }}>{reviewDecision === "approve" ? <><X className="size-4" />退回修改</> : <><Check className="size-4" />改为确认通过</>}</Button>
+          <Button className="w-full sm:w-auto" variant={reviewDecision === "reject" ? "destructive" : "default"} disabled={busyAction === "review" || (reviewDecision === "reject" && !reviewNote.trim())} onClick={() => void submitReview()}>{busyAction === "review" ? "提交中…" : reviewDecision === "approve" ? <><Check className="size-4" />确认通过</> : <><X className="size-4" />确认退回</>}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
