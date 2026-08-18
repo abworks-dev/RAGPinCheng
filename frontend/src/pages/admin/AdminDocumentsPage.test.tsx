@@ -97,7 +97,8 @@ describe("AdminDocumentsPage", () => {
     expect(screen.getByRole("heading", { name: "索引任务" })).toBeInTheDocument();
     expect(within(row).getByText("发布失败")).toHaveClass("bg-destructive/15");
     expect(within(row).getByText(/PDF/)).toBeInTheDocument();
-    expect(within(row).getByText("03 公司内部标准 / 01 建模标准")).toBeInTheDocument();
+    expect(within(row).getByText("PDF").parentElement).toHaveClass("flex", "w-20", "flex-col");
+    expect(within(row).getByText(/分类：03 公司内部标准 \/ 01 建模标准/)).toBeInTheDocument();
     expect(within(row).getByText("managed-document.pdf · v3 · 2.0 KB")).toBeInTheDocument();
     expect(within(row).getByText(/历史迁移/)).toBeInTheDocument();
     expect(within(row).getByText("文档解析服务请求失败。")).toBeInTheDocument();
@@ -105,6 +106,8 @@ describe("AdminDocumentsPage", () => {
     expect(within(row).getByRole("link", { name: "查看文件" })).toHaveAttribute("href", "/managed-files/version-1");
     expect(within(row).getByRole("button", { name: "重新发布" })).toBeEnabled();
     expect(screen.getByText("8")).toBeInTheDocument();
+    expect(screen.queryByText(/当前共/)).not.toBeInTheDocument();
+    expect(screen.getByText("共 1 条任务，第 1 / 1 页")).toBeInTheDocument();
   });
 
   it("uses section headings when embedded in content management", async () => {
@@ -234,7 +237,7 @@ describe("AdminDocumentsPage", () => {
 
     const row = (await screen.findByText(failedJob.title)).closest("tr") as HTMLElement;
     expect(within(row).getByText("当前正式版本可检索")).toBeInTheDocument();
-    expect(within(row).getByText("17 个")).toBeInTheDocument();
+    expect(within(row).getByText(/内容块：17 个/)).toBeInTheDocument();
     expect(within(row).queryByRole("button", { name: "重新发布" })).not.toBeInTheDocument();
   });
 
@@ -266,7 +269,7 @@ describe("AdminDocumentsPage", () => {
       jobs: [{ ...failedJob, is_latest_attempt: false }],
     });
     rerender(<AdminDocumentsPage />);
-    fireEvent.click(screen.getByRole("button", { name: "刷新" }));
+    fireEvent.click(screen.getByRole("button", { name: "刷新列表" }));
     await waitFor(() => expect(screen.queryByRole("button", { name: "重新发布" })).not.toBeInTheDocument());
   });
 
@@ -289,6 +292,10 @@ describe("AdminDocumentsPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "下一页" }));
 
     await waitFor(() => expect(mocks.managedContentIndexJobs).toHaveBeenLastCalledWith(expect.objectContaining({ offset: 25 })));
+    expect(screen.getByRole("combobox", { name: "跳转索引任务页码" })).toHaveValue("2");
+
+    fireEvent.change(screen.getByRole("combobox", { name: "每页索引任务条数" }), { target: { value: "50" } });
+    await waitFor(() => expect(mocks.managedContentIndexJobs).toHaveBeenLastCalledWith(expect.objectContaining({ limit: 50, offset: 0 })));
   });
 
   it("keeps an explicit recoverable error state", async () => {
