@@ -56,6 +56,7 @@ jobs:
             '31512225203' = '31513770886'
             '31516434826' = '31517785623'
             '31877287791' = '31877991737'
+            '31879196389' = '31879926958'
             '32042245485' = '32043837069'
           }
           if (-not $approved.ContainsKey($env:CANDIDATE_ID) -or $approved[$env:CANDIDATE_ID] -ne $env:ACTIVATION_ID) { throw 'Requested group is outside the approved retirement boundary' }

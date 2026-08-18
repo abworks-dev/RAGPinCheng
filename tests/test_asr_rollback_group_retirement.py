@@ -24,6 +24,7 @@ def test_workflow_is_limited_to_the_approved_groups():
         "31512225203": "31513770886",
         "31516434826": "31517785623",
         "31877287791": "31877991737",
+        "31879196389": "31879926958",
         "32042245485": "32043837069",
     }
     for candidate, activation in expected.items():
