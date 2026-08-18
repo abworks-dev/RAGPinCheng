@@ -937,7 +937,9 @@ USAGE_STATEMENTS = (
     "CREATE INDEX IF NOT EXISTS idx_external_service_usage_provider ON external_service_usage(provider, operation, created_at)",
 TRANSCRIPTION_SCHEME_STATEMENTS = (
     """ALTER TABLE transcription_jobs ADD COLUMN scheme_id TEXT""",
+    """ALTER TABLE transcription_jobs ADD COLUMN scheme_snapshot_json TEXT""",
     """ALTER TABLE transcript_versions ADD COLUMN scheme_id TEXT""",
+    """ALTER TABLE transcript_versions ADD COLUMN scheme_snapshot_json TEXT""",
     """CREATE TABLE IF NOT EXISTS transcription_bases (
         id TEXT PRIMARY KEY,
         provider TEXT NOT NULL,

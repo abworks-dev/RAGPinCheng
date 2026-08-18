@@ -7,6 +7,7 @@ prompt bodies, or arbitrary decoder JSON into the runtime.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 from dataclasses import dataclass
 from typing import Any
@@ -14,6 +15,13 @@ from typing import Any
 
 SCHEME_SCHEMA_VERSION = "transcription-scheme/1"
 _SEGMENTATION_PRESETS = {"natural", "balanced", "fine", "custom"}
+_CONTROLLED_ASSETS = {
+    "terminology_profile": {"none", "bim-engineering-v1"},
+    "prompt_asset": {"asr_engineering_zh_v1", "asr_engineering_zh_v2"},
+    "preprocessing_preset": {"standard-audio-v1"},
+    "vad_preset": {"service-default-v1"},
+    "decode_preset": {"service-default-v1"},
+}
 _ALLOWED_KEYS = {
     "segmentation_preset",
     "max_duration_ms",
@@ -54,8 +62,8 @@ def canonical_parameters(value: dict[str, Any]) -> dict[str, Any]:
         item = result[key]
         if item is not None and (type(item) is not int or not minimum <= item <= maximum):
             raise SchemeValidationError("scheme parameter out of range")
-    for key in ("terminology_profile", "prompt_asset", "preprocessing_preset", "vad_preset", "decode_preset"):
-        if type(result[key]) is not str or not result[key] or len(result[key]) > 128:
+    for key, allowed in _CONTROLLED_ASSETS.items():
+        if result[key] not in allowed:
             raise SchemeValidationError("invalid controlled asset reference")
     return result
 
@@ -73,6 +81,16 @@ class TranscriptionSchemeSnapshot:
     parameters: dict[str, Any]
     config_hash: str
 
+    def __post_init__(self) -> None:
+        if type(self.scheme_id) is not str or not self.scheme_id or len(self.scheme_id) > 64:
+            raise SchemeValidationError("invalid scheme id")
+        if type(self.base_id) is not str or not self.base_id or len(self.base_id) > 80:
+            raise SchemeValidationError("invalid base id")
+        if type(self.version) is not int or self.version < 1:
+            raise SchemeValidationError("invalid scheme version")
+        if not hmac.compare_digest(parameters_hash(self.parameters), self.config_hash):
+            raise SchemeValidationError("scheme config hash mismatch")
+
     def to_json_dict(self) -> dict[str, Any]:
         return {
             "schema_version": SCHEME_SCHEMA_VERSION,
@@ -82,3 +100,21 @@ class TranscriptionSchemeSnapshot:
             "parameters": canonical_parameters(self.parameters),
             "config_hash": self.config_hash,
         }
+
+    @classmethod
+    def create(cls, *, scheme_id: str, base_id: str, version: int, parameters: dict[str, Any]) -> "TranscriptionSchemeSnapshot":
+        normalized = canonical_parameters(parameters)
+        return cls(scheme_id, base_id, version, normalized, parameters_hash(normalized))
+
+    @classmethod
+    def from_json_dict(cls, value: object) -> "TranscriptionSchemeSnapshot":
+        if type(value) is not dict or set(value) != {
+            "schema_version", "scheme_id", "base_id", "version", "parameters", "config_hash"
+        }:
+            raise SchemeValidationError("invalid scheme snapshot")
+        if value["schema_version"] != SCHEME_SCHEMA_VERSION:
+            raise SchemeValidationError("unsupported scheme snapshot")
+        return cls(
+            value["scheme_id"], value["base_id"], value["version"],
+            canonical_parameters(value["parameters"]), value["config_hash"],
+        )

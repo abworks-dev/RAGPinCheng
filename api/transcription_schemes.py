@@ -54,8 +54,13 @@ def create_scheme(conn, *, name: str, description: str, base_id: str, parameters
     description = description.strip()
     if not 1 <= len(name) <= 120 or len(description) > 500:
         raise SchemeValidationError("invalid scheme name or description")
-    if conn.execute("SELECT 1 FROM transcription_bases WHERE id=?", (base_id,)).fetchone() is None:
+    base = conn.execute(
+        "SELECT admission,availability FROM transcription_bases WHERE id=?", (base_id,)
+    ).fetchone()
+    if base is None:
         raise SchemeValidationError("unknown transcription base")
+    if base["admission"] != "enabled" or base["availability"] == "disabled":
+        raise SchemeValidationError("transcription base is not admitted")
     normalized = canonical_parameters(parameters)
     scheme_id = str(uuid.uuid4())
     now = _now()
@@ -86,14 +91,15 @@ def update_scheme(conn, scheme_id: str, *, name: str | None, description: str | 
     return get_scheme(conn, scheme_id)
 
 
-def reorder_schemes(conn, order: list[dict[str, Any]], *, expected_version: int, actor_id: int | None) -> list[dict[str, Any]]:
+def reorder_schemes(conn, order: list[dict[str, Any]], *, expected_version: int | None, actor_id: int | None) -> list[dict[str, Any]]:
     current = list_schemes(conn)
     if len(order) != len(current) or {item.get("id") for item in order} != {item["id"] for item in current}:
         raise SchemeValidationError("order must include every scheme")
     now = _now()
     for index, item in enumerate(order):
         row = next(row for row in current if row["id"] == item["id"])
-        if row["version"] != expected_version:
+        item_version = item.get("expected_version") or expected_version
+        if item_version is None or row["version"] != item_version:
             raise RuntimeError("scheme_version_conflict")
         conn.execute("UPDATE transcription_schemes SET sort_order=?,version=version+1,updated_by=?,updated_at=? WHERE id=?", (index, actor_id, now, row["id"]))
         _audit(conn, row["id"], actor_id, "reordered", {"sort_order": index}, now)

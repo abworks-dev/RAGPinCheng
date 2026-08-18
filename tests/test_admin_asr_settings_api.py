@@ -209,6 +209,40 @@ def test_system_scheme_core_is_immutable_but_can_be_copied(asr_api):
     assert copied.json()["system_preset"] is False
 
 
+def test_disabled_base_is_rejected_and_reorder_uses_each_scheme_version(asr_api):
+    client, _ = asr_api
+    blocked = client.post(
+        "/api/admin/asr/schemes",
+        json={"name": "不可用底座", "base_id": "qwen3-asr-v1", "parameters": {}},
+        **_auth("admin", csrf=True),
+    )
+    assert blocked.status_code == 422
+
+    schemes = client.get("/api/admin/asr/schemes", **_auth("admin")).json()
+    first = schemes[0]
+    changed = client.patch(
+        f"/api/admin/asr/schemes/{first['id']}",
+        json={"expected_version": first["version"], "enabled": False},
+        **_auth("admin", csrf=True),
+    ).json()
+    current = client.get("/api/admin/asr/schemes", **_auth("admin")).json()
+    assert len({item["version"] for item in current}) > 1
+    reordered = list(reversed(current))
+    response = client.post(
+        "/api/admin/asr/schemes/order",
+        json={
+            "order": [
+                {"id": item["id"], "expected_version": item["version"]}
+                for item in reordered
+            ]
+        },
+        **_auth("admin", csrf=True),
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()[0]["id"] == reordered[0]["id"]
+    assert changed["version"] > first["version"]
+
+
 def test_routes_enforce_admin_reads_and_csrf_admin_mutations():
     assert require_admin in _dependencies("/admin/asr", "GET")
     assert require_csrf_admin in _dependencies(

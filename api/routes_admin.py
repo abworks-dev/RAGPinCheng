@@ -1265,7 +1265,7 @@ async def upload_media(
     if automatic:
         existing = conn.execute(
             """
-            SELECT j.id AS job_id,j.profile_id,j.created_by,
+            SELECT j.id AS job_id,j.profile_id,j.scheme_id,j.created_by,
                    m.media_id,m.title,m.original_filename,m.mime_type,m.file_size,
                    m.sha256,m.transcript_origin,m.status,m.created_at,m.updated_at,m.error,
                    r.source_media_id AS replacement_source_media_id
@@ -1295,7 +1295,7 @@ async def upload_media(
                 raise HTTPException(status_code=400, detail="视频文件不能为空")
             same_identity = (
                 existing["created_by"] == admin.id
-                and existing["profile_id"] == profile_id
+                and (existing["scheme_id"] or existing["profile_id"]) == (scheme_id or profile_id)
                 and existing["title"] == clean_title
                 and existing["original_filename"] == video_name
                 and existing["file_size"] == retry_size
@@ -1482,6 +1482,7 @@ async def upload_media(
                 profile_id=profile_id,
                 request_idempotency_key=request_idempotency_key,
                 created_by=admin.id,
+                scheme_id=scheme_id,
             )
             transcription_job_id = transcription_job.id
             enqueue_transcription(transcription_job.id)

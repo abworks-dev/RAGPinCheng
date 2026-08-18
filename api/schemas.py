@@ -1107,12 +1107,13 @@ class TranscriptionSchemeCopy(BaseModel):
 
 class TranscriptionSchemeOrderItem(BaseModel):
     id: str
+    expected_version: int | None = Field(default=None, ge=1)
 
 
 class TranscriptionSchemeOrder(BaseModel):
     model_config = ConfigDict(extra="forbid")
     order: list[TranscriptionSchemeOrderItem]
-    expected_version: int = Field(..., ge=1)
+    expected_version: int | None = Field(default=None, ge=1)
 
 
 class AsrProfileReleaseRequestCreate(BaseModel):
@@ -1128,6 +1129,7 @@ class TranscriptionJobDTO(BaseModel):
     media_id: str
     attempt_number: int
     profile_id: str
+    scheme_id: str | None = None
     status: str
     stage: str | None
     processed_ms: int
@@ -1153,6 +1155,7 @@ class TranscriptVersionDTO(BaseModel):
     media_id: str
     source: str
     profile_id: str | None
+    scheme_id: str | None = None
     provider_key: str | None
     model_id: str | None
     model_revision: str | None

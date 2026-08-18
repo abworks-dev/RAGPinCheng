@@ -24,8 +24,18 @@ from src.transcription.profile import (
     RemoteAsrServiceConfig,
     Qwen3AsrRemoteConfig,
     TranscriptionExecutionConfig,
+    TranscriptionProfileDefinition,
     WhisperXRemoteConfig,
 )
+from src.transcription.profile_catalog import (
+    FASTER_WHISPER_PROFILE_ID,
+    FUNASR_SENSEVOICE_PROFILE_ID,
+    QWEN3_ASR_PROFILE_ID,
+    WHISPERX_BALANCED_PROFILE_ID,
+    WHISPERX_FINE_PROFILE_ID,
+    WHISPERX_NATURAL_PROFILE_ID,
+)
+from src.transcription.scheme import TranscriptionSchemeSnapshot
 from src.transcription.provider_protocol import (
     ProviderErrorCode,
     ProviderFailure,
@@ -38,6 +48,9 @@ from src.transcription.provider_registry import (
 )
 from src.transcription.types import (
     ContractValidationError,
+    NormalizerConfig,
+    TerminologyCorrectionConfig,
+    TranscriptSegmentationConfig,
     TranscriptionJobStage,
     TranscriptionJobStatus,
     validate_uuid,
@@ -49,6 +62,62 @@ from .transcription_artifacts import LocalTranscriptionArtifactStore
 from .transcription_media import FfmpegMediaAudioPreparer, FileTranscriptionInputSource
 from .transcription_runtime import CompositeCancellationProbe, StoreCancellationProbe, StoreProgressSink
 from .transcription_store import SQLiteTranscriptionStore, StoreConflictError
+from .transcription_schemes import get_scheme
+
+
+_BASE_PROFILE_IDS = {
+    "sensevoice-v1": FUNASR_SENSEVOICE_PROFILE_ID,
+    "faster-whisper-v1": FASTER_WHISPER_PROFILE_ID,
+    "qwen3-asr-v1": QWEN3_ASR_PROFILE_ID,
+}
+
+
+def _scheme_profile_id(base_id: str, parameters: dict[str, object]) -> str:
+    if base_id != "whisperx-v2":
+        try:
+            return _BASE_PROFILE_IDS[base_id]
+        except KeyError as exc:
+            raise ContractValidationError("unknown_scheme_base", "scheme_id") from exc
+    return {
+        "natural": WHISPERX_NATURAL_PROFILE_ID,
+        "balanced": WHISPERX_BALANCED_PROFILE_ID,
+        "fine": WHISPERX_FINE_PROFILE_ID,
+        "custom": WHISPERX_BALANCED_PROFILE_ID,
+    }[str(parameters["segmentation_preset"])]
+
+
+def _apply_scheme_parameters(
+    profile: TranscriptionProfileDefinition,
+    parameters: dict[str, object],
+) -> TranscriptionProfileDefinition:
+    max_chars = int(parameters["max_chars"])
+    merge_gap_ms = int(parameters["merge_gap_ms"])
+    return TranscriptionProfileDefinition.create(
+        profile_id=profile.profile_id,
+        display_name=profile.display_name,
+        description=profile.description,
+        provider_key=profile.provider_key,
+        provider_config=profile.provider_config,
+        normalizer_config=NormalizerConfig(
+            profile.normalizer_config.min_segment_chars, max_chars, merge_gap_ms
+        ),
+        qualification=profile.qualification,
+        admission=profile.admission,
+        release_policy=profile.release_policy,
+        profile_definition_version=profile.profile_definition_version,
+        provider_adapter_version=profile.provider_adapter_version,
+        canonical_schema_version=profile.canonical_schema_version,
+        normalizer_version=profile.normalizer_version,
+        formatter_version=profile.formatter_version,
+        evidence_refs=profile.evidence_refs,
+        segmentation_config=TranscriptSegmentationConfig(
+            str(parameters["segmentation_preset"]),
+            parameters["max_duration_ms"],
+            max_chars,
+            merge_gap_ms,
+        ),
+        terminology_config=TerminologyCorrectionConfig(str(parameters["terminology_profile"])),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,27 +167,10 @@ class TranscriptionApplicationService:
         request_idempotency_key: str,
         created_by: int,
         operation: ProfileOperation = ProfileOperation.new_attempt,
+        scheme_id: str | None = None,
     ) -> TranscriptionJobRecord:
         validate_uuid(media_id, "media_id")
         validate_uuid(request_idempotency_key, "request_idempotency_key")
-        profile = self.resolve_profile(profile_id, operation)
-        prepared = self.preparer.prepare(media_id)
-        execution = TranscriptionExecutionConfig.create(
-            profile,
-            prepared.input_ref,
-            language="zh-CN",
-            timeout_ms=self.job_timeout_ms,
-        )
-        snapshot = ProfileSnapshot.create(profile, execution)
-        provider_config = execution.provider_config
-        if type(provider_config) not in (
-            RemoteAsrServiceConfig,
-            FasterWhisperRemoteConfig,
-            Qwen3AsrRemoteConfig,
-            WhisperXRemoteConfig,
-        ):
-            raise ContractValidationError("unsupported_application_profile", "profile_id")
-
         conn = self.connect_factory()
         try:
             store = SQLiteTranscriptionStore(conn)
@@ -127,6 +179,32 @@ class TranscriptionApplicationService:
             ).fetchone()
             if row is None:
                 raise ContractValidationError("media_not_found", "media_id")
+            scheme_snapshot = None
+            if scheme_id is not None:
+                scheme = get_scheme(conn, scheme_id)
+                if scheme is None or scheme["archived"] or not scheme["enabled"]:
+                    raise ContractValidationError("scheme_unavailable", "scheme_id")
+                base_profile_id = _scheme_profile_id(scheme["base_id"], scheme["parameters"])
+                profile = _apply_scheme_parameters(
+                    self.resolve_profile(base_profile_id, operation), scheme["parameters"]
+                )
+                scheme_snapshot = TranscriptionSchemeSnapshot.create(
+                    scheme_id=scheme["id"], base_id=scheme["base_id"],
+                    version=scheme["version"], parameters=scheme["parameters"],
+                )
+            else:
+                profile = self.resolve_profile(profile_id, operation)
+            prepared = self.preparer.prepare(media_id)
+            execution = TranscriptionExecutionConfig.create(
+                profile, prepared.input_ref, language="zh-CN", timeout_ms=self.job_timeout_ms,
+            )
+            snapshot = ProfileSnapshot.create(profile, execution)
+            provider_config = execution.provider_config
+            if type(provider_config) not in (
+                RemoteAsrServiceConfig, FasterWhisperRemoteConfig,
+                Qwen3AsrRemoteConfig, WhisperXRemoteConfig,
+            ):
+                raise ContractValidationError("unsupported_application_profile", "profile_id")
             record = build_pending_job(
                 job_id=str(uuid.uuid4()),
                 request_idempotency_key=request_idempotency_key,
@@ -138,9 +216,56 @@ class TranscriptionApplicationService:
                 created_by=created_by,
                 model_id=provider_config.model_id,
                 model_revision=provider_config.model_revision,
+                scheme_snapshot=scheme_snapshot,
             )
             created = store.create_job(record)
-            if created.media_id != media_id or created.profile_id != profile_id:
+            if created.media_id != media_id or (
+                scheme_id is None and created.profile_id != profile_id
+            ) or created.scheme_id != scheme_id:
+                raise StoreConflictError("idempotency_identity_conflict")
+            return created
+        finally:
+            conn.close()
+
+    def create_retry_job(
+        self,
+        *,
+        previous_job_id: str,
+        request_idempotency_key: str,
+        created_by: int,
+    ) -> TranscriptionJobRecord:
+        validate_uuid(previous_job_id, "previous_job_id")
+        validate_uuid(request_idempotency_key, "request_idempotency_key")
+        conn = self.connect_factory()
+        try:
+            store = SQLiteTranscriptionStore(conn)
+            previous = store.load_job(previous_job_id)
+            if previous.status not in (
+                TranscriptionJobStatus.failed,
+                TranscriptionJobStatus.cancelled,
+                TranscriptionJobStatus.succeeded,
+            ):
+                raise ContractValidationError("retry_requires_terminal_job", "previous_job_id")
+            prepared = self.preparer.prepare(previous.media_id)
+            record = build_pending_job(
+                job_id=str(uuid.uuid4()),
+                request_idempotency_key=request_idempotency_key,
+                attempt_number=store.next_attempt_number(previous.media_id),
+                input_ref=prepared.input_ref,
+                execution=previous.execution_config,
+                snapshot=previous.profile_snapshot,
+                created_at=int(self.clock()),
+                created_by=created_by,
+                model_id=previous.model_id,
+                model_revision=previous.model_revision,
+                scheme_snapshot=previous.scheme_snapshot,
+            )
+            created = store.create_job(record)
+            if (
+                created.media_id != previous.media_id
+                or created.profile_id != previous.profile_id
+                or created.scheme_id != previous.scheme_id
+            ):
                 raise StoreConflictError("idempotency_identity_conflict")
             return created
         finally:

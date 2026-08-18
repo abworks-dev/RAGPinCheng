@@ -26,7 +26,6 @@ from src.config import (
     TRANSCRIPTION_ADMITTED_PROFILE_IDS,
     TRANSCRIPTION_ARTIFACT_DIR,
 )
-from src.transcription.profile import ProfileOperation
 from src.transcription.profile_catalog import (
     FASTER_WHISPER_PROVIDER_KEY,
     FUNASR_SENSEVOICE_PROVIDER_KEY,
@@ -161,6 +160,7 @@ def _job_dto(job) -> TranscriptionJobDTO:
         media_id=job.media_id,
         attempt_number=job.attempt_number,
         profile_id=job.profile_id,
+        scheme_id=job.scheme_id,
         status=job.status.value,
         stage=None if job.stage is None else job.stage.value,
         processed_ms=job.processed_ms,
@@ -294,11 +294,11 @@ def retry_job(
     conn = connect()
     try:
         existing = conn.execute(
-            "SELECT id,media_id,profile_id FROM transcription_jobs WHERE request_idempotency_key=?",
+            "SELECT id,media_id,profile_id,scheme_id FROM transcription_jobs WHERE request_idempotency_key=?",
             (body.request_idempotency_key,),
         ).fetchone()
         if existing is not None:
-            if existing["media_id"] != media_id or existing["profile_id"] != body.profile_id:
+            if existing["media_id"] != media_id or (existing["scheme_id"] or existing["profile_id"]) != body.profile_id:
                 raise HTTPException(
                     status_code=409,
                     detail={
@@ -323,20 +323,21 @@ def retry_job(
         if active is not None:
             raise HTTPException(status_code=409, detail="该媒体已有活动转录任务")
         previous = conn.execute(
-            "SELECT status FROM transcription_jobs WHERE media_id=? ORDER BY attempt_number DESC LIMIT 1",
+            "SELECT id,status,profile_id,scheme_id FROM transcription_jobs WHERE media_id=? ORDER BY attempt_number DESC LIMIT 1",
             (media_id,),
         ).fetchone()
         if previous is None or previous["status"] not in ("failed", "cancelled", "succeeded"):
             raise HTTPException(status_code=409, detail="该媒体没有可重试的终态任务")
+        if (previous["scheme_id"] or previous["profile_id"]) != body.profile_id:
+            raise HTTPException(status_code=409, detail="重试必须保留原转录方案")
+        previous_job_id = previous["id"]
     finally:
         conn.close()
     try:
-        job = build_transcription_service().create_pending_job(
-            media_id=media_id,
-            profile_id=body.profile_id,
+        job = build_transcription_service().create_retry_job(
+            previous_job_id=previous_job_id,
             request_idempotency_key=body.request_idempotency_key,
             created_by=admin.id,
-            operation=ProfileOperation.retry,
         )
     except StoreConflictError:
         raise HTTPException(status_code=409, detail="转录任务状态发生冲突")
@@ -412,6 +413,7 @@ def _version_dto(version, current_version_id: str | None = None) -> TranscriptVe
         media_id=version.media_id,
         source=version.source.value,
         profile_id=version.profile_id,
+        scheme_id=version.scheme_id,
         provider_key=version.provider_key,
         model_id=version.model_id,
         model_revision=version.model_revision,
