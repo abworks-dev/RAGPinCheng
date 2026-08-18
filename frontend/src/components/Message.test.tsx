@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { ChatMessage, Source } from "../types";
-import { Message } from "./Message";
+import { calculateCitationTooltipPlacement, Message } from "./Message";
 
 const videoPlayerOpen = vi.hoisted(() => vi.fn());
 
@@ -84,6 +84,38 @@ function prep(finalCount: number, noSourceFallback = false) {
 }
 
 describe("Message assistant actions", () => {
+  it("keeps a top-edge tooltip below the message fade boundary", () => {
+    const placement = calculateCitationTooltipPlacement({
+      markerTop: 340,
+      markerBottom: 358,
+      markerLeft: 320,
+      tooltipWidth: 320,
+      tooltipHeight: 220,
+      viewportWidth: 1024,
+      viewportHeight: 720,
+      boundaryTop: 96,
+    });
+
+    expect(placement.showBelow).toBe(false);
+    expect(placement.top).toBeGreaterThanOrEqual(64);
+  });
+
+  it("flips a citation tooltip below when the top boundary has no room", () => {
+    const placement = calculateCitationTooltipPlacement({
+      markerTop: 120,
+      markerBottom: 138,
+      markerLeft: 320,
+      tooltipWidth: 240,
+      tooltipHeight: 220,
+      viewportWidth: 1024,
+      viewportHeight: 720,
+      boundaryTop: 96,
+    });
+
+    expect(placement.showBelow).toBe(true);
+    expect(placement.top).toBe(140);
+  });
+
   it("places sources on the left and answer actions in the same footer", () => {
     render(<Message msg={assistant()} conversationId="conversation-1" turnIndex={1} />);
 
@@ -364,7 +396,7 @@ describe("Message assistant actions", () => {
     expect(tooltip).toHaveClass(
       "bg-popover",
       "text-popover-foreground",
-      "top-full",
+      "fixed",
       "visible",
       "pointer-events-auto",
     );

@@ -1,4 +1,5 @@
 import React, { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -20,6 +21,56 @@ import {
 import { copyText } from "../utils/clipboard";
 
 const CITATION_TOOLTIP_CLOSE_DELAY_MS = 150;
+const CITATION_TOOLTIP_VIEWPORT_GUTTER = 8;
+const CITATION_TOOLTIP_GAP = 2;
+// Keep fixed previews below the 2.5rem top fade used by MessageList.
+const CITATION_TOOLTIP_TOP_FADE_HEIGHT = 40;
+
+export type CitationTooltipPlacementInput = {
+  markerTop: number;
+  markerBottom: number;
+  markerLeft: number;
+  tooltipWidth: number;
+  tooltipHeight: number;
+  viewportWidth: number;
+  viewportHeight: number;
+  boundaryTop: number;
+  boundaryBottom?: number;
+};
+
+export type CitationTooltipPlacement = {
+  top: number;
+  left: number;
+  showBelow: boolean;
+};
+
+export function calculateCitationTooltipPlacement({
+  markerTop,
+  markerBottom,
+  markerLeft,
+  tooltipWidth,
+  tooltipHeight,
+  viewportWidth,
+  viewportHeight,
+  boundaryTop,
+  boundaryBottom = viewportHeight,
+}: CitationTooltipPlacementInput): CitationTooltipPlacement {
+  const topBoundary = Math.max(CITATION_TOOLTIP_VIEWPORT_GUTTER, boundaryTop + CITATION_TOOLTIP_VIEWPORT_GUTTER);
+  const bottomBoundary = Math.min(viewportHeight - CITATION_TOOLTIP_VIEWPORT_GUTTER, boundaryBottom - CITATION_TOOLTIP_VIEWPORT_GUTTER);
+  const spaceAbove = markerTop - topBoundary;
+  const spaceBelow = bottomBoundary - markerBottom;
+  const showBelow = spaceAbove < tooltipHeight + CITATION_TOOLTIP_GAP && spaceBelow >= spaceAbove;
+  const unclampedTop = showBelow
+    ? markerBottom + CITATION_TOOLTIP_GAP
+    : markerTop - tooltipHeight - CITATION_TOOLTIP_GAP;
+  const maxTop = Math.max(topBoundary, bottomBoundary - tooltipHeight);
+  const top = Math.min(Math.max(topBoundary, unclampedTop), maxTop);
+  const maxLeft = Math.max(CITATION_TOOLTIP_VIEWPORT_GUTTER, viewportWidth - tooltipWidth - CITATION_TOOLTIP_VIEWPORT_GUTTER);
+  const left = Math.min(Math.max(CITATION_TOOLTIP_VIEWPORT_GUTTER, markerLeft), maxLeft);
+
+  return { top, left, showBelow };
+}
+
 const CitationContext = React.createContext<{ messageId: string; sources: Source[] }>({
   messageId: "",
   sources: [],
@@ -114,7 +165,7 @@ function CitationMarker({
   const [isHovered, setIsHovered] = useState(false);
   const [isHighlighted, setIsHighlighted] = useState(false);
   const [showBelow, setShowBelow] = useState(false);
-  const [showRightAligned, setShowRightAligned] = useState(false);
+  const [tooltipPosition, setTooltipPosition] = useState({ top: 0, left: 0 });
   const [isPositioned, setIsPositioned] = useState(false);
   const markerRef = useRef<HTMLElement>(null);
   const tooltipRef = useRef<HTMLSpanElement>(null);
@@ -171,17 +222,43 @@ function CitationMarker({
     return () => window.removeEventListener(CITATION_HOVER_EVENT, onHover);
   }, [messageId, idx]);
 
-  // Calculate the final placement while hidden so the first hover never visibly jumps.
+  // Calculate while hidden so the first hover never visibly jumps into the fade layer.
   useLayoutEffect(() => {
     if (!isHovered || !markerRef.current || !tooltipRef.current) {
       setIsPositioned(false);
       return;
     }
-    const markerRect = markerRef.current.getBoundingClientRect();
-    const tooltipRect = tooltipRef.current.getBoundingClientRect();
-    setShowBelow(markerRect.top - tooltipRect.height < 10);
-    setShowRightAligned(markerRect.left + tooltipRect.width > window.innerWidth - 10);
-    setIsPositioned(true);
+
+    const positionTooltip = () => {
+      if (!markerRef.current || !tooltipRef.current) return;
+      const markerRect = markerRef.current.getBoundingClientRect();
+      const tooltipRect = tooltipRef.current.getBoundingClientRect();
+      const scrollContainer = markerRef.current.closest<HTMLElement>("[data-message-scroll-container]");
+      const scrollRect = scrollContainer?.getBoundingClientRect();
+      const placement = calculateCitationTooltipPlacement({
+        markerTop: markerRect.top,
+        markerBottom: markerRect.bottom,
+        markerLeft: markerRect.left,
+        tooltipWidth: tooltipRect.width,
+        tooltipHeight: tooltipRect.height,
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight,
+        boundaryTop: scrollRect ? scrollRect.top + CITATION_TOOLTIP_TOP_FADE_HEIGHT : 0,
+        boundaryBottom: scrollRect ? Math.min(window.innerHeight, scrollRect.bottom) : window.innerHeight,
+      });
+      setShowBelow(placement.showBelow);
+      setTooltipPosition({ top: placement.top, left: placement.left });
+      setIsPositioned(true);
+    };
+
+    positionTooltip();
+    const onViewportChange = () => positionTooltip();
+    window.addEventListener("resize", onViewportChange);
+    window.addEventListener("scroll", onViewportChange, true);
+    return () => {
+      window.removeEventListener("resize", onViewportChange);
+      window.removeEventListener("scroll", onViewportChange, true);
+    };
   }, [isHovered]);
 
   if (!source) {
@@ -217,45 +294,41 @@ function CitationMarker({
           {idx + 1}
         </a>
 
-        {/* Tooltip: smart vertical and horizontal positioning.
-            Default: above the superscript (with tiny overlap to prevent gap flicker).
-            If overflowing viewport top: flip to below (via showBelow state).
-            Horizontal alignment: left-0 (rightwards) by default to avoid sidebar clipping.
-            If overflowing viewport right edge: flip to right-0 (leftwards) via showRightAligned state. */}
-        {isHovered && (
-          <span
-            ref={tooltipRef}
-            role="tooltip"
-            onMouseEnter={openTooltip}
-            onMouseLeave={scheduleClose}
-            className={`absolute z-[100] block min-w-[200px] max-w-[320px] rounded-ui-lg border border-border bg-popover p-3 text-xs text-popover-foreground shadow-overlay break-words ${
-              showBelow ? "top-full" : "bottom-full"
-            } ${showRightAligned ? "right-0" : "left-0"} ${
-              isPositioned
-                ? "visible pointer-events-auto opacity-100"
-                : "invisible pointer-events-none opacity-0"
-            }`}
-          >
-            <span className="mb-1 block truncate font-medium text-popover-foreground">{source.doc_title}</span>
-            <span className="mb-2 flex items-center gap-1.5 truncate text-muted-foreground">
-              {source.doc_type === "transcript" ? (
-                <>
-                  {source.media_id && (
-                    <CirclePlay className="size-3.5 text-primary" aria-hidden="true" />
-                  )}
-                  @{source.start_time || ""}
-                </>
-              ) : (
-                `§${((source.section_path || "").replace(/<[^>]*>/g, ""))}`
-              )}
-            </span>
-            <span className="block whitespace-pre-wrap break-words leading-relaxed text-popover-foreground/85">{preview}</span>
-            <span className="mt-2 block text-[10px] text-muted-foreground">
-              点击打开来源核验
-            </span>
-          </span>
-        )}
       </sup>
+      {isHovered && typeof document !== "undefined" && createPortal(
+        <span
+          ref={tooltipRef}
+          role="tooltip"
+          data-placement={showBelow ? "below" : "above"}
+          onMouseEnter={openTooltip}
+          onMouseLeave={scheduleClose}
+          style={{ top: tooltipPosition.top, left: tooltipPosition.left }}
+          className={`fixed z-[100] block min-w-[200px] max-w-[320px] max-h-[min(80vh,22rem)] overflow-y-auto rounded-ui-lg border border-border bg-popover p-3 text-xs text-popover-foreground shadow-overlay break-words ${
+            isPositioned
+              ? "visible pointer-events-auto opacity-100"
+              : "invisible pointer-events-none opacity-0"
+          }`}
+        >
+          <span className="mb-1 block truncate font-medium text-popover-foreground">{source.doc_title}</span>
+          <span className="mb-2 flex items-center gap-1.5 truncate text-muted-foreground">
+            {source.doc_type === "transcript" ? (
+              <>
+                {source.media_id && (
+                  <CirclePlay className="size-3.5 text-primary" aria-hidden="true" />
+                )}
+                @{source.start_time || ""}
+              </>
+            ) : (
+              `§${((source.section_path || "").replace(/<[^>]*>/g, ""))}`
+            )}
+          </span>
+          <span className="block whitespace-pre-wrap break-words leading-relaxed text-popover-foreground/85">{preview}</span>
+          <span className="mt-2 block text-[10px] text-muted-foreground">
+            点击打开来源核验
+          </span>
+        </span>,
+        document.body,
+      )}
     </>
   );
 }

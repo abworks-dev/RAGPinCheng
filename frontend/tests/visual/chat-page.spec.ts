@@ -42,4 +42,28 @@ test.describe("聊天工作台", () => {
     await expectInViewport(tooltip);
     await expectNoBodyOverflow(page);
   });
+
+  test("顶部消息的引用预览避开渐隐区域", async ({ page }) => {
+    await installChatRoutes(page, "video");
+    await page.goto("/");
+    await page.getByPlaceholder("向企业知识库提问").fill("合成顶部引用问题");
+    await page.getByRole("button", { name: "发送问题" }).click();
+
+    const marker = page.getByRole("superscript");
+    const scroller = page.locator("[data-message-scroll-container]");
+    await marker.evaluate((element) => element.scrollIntoView({ block: "start" }));
+    await marker.hover();
+
+    const tooltip = page.getByRole("tooltip");
+    await expect(tooltip).toBeVisible();
+    const [tooltipBox, scrollerBox] = await Promise.all([
+      tooltip.boundingBox(),
+      scroller.boundingBox(),
+    ]);
+    expect(tooltipBox).not.toBeNull();
+    expect(scrollerBox).not.toBeNull();
+    expect(tooltipBox!.y).toBeGreaterThanOrEqual(scrollerBox!.y + 40);
+    await expectInViewport(tooltip);
+    await expectNoBodyOverflow(page);
+  });
 });
