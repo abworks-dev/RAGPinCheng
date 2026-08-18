@@ -896,12 +896,12 @@ export async function installAdminRoutes(
     if (path === "/api/admin/content/trash/purge-runs") return json(route, []);
     if (path === "/api/admin/content/trash/purge-preview") {
       const item = trashItems[1];
-      return json(route, { items: [{ item_id: item.item_id, version_id: item.version_id, status: "ready", reason: null, title: item.title, original_filename: item.original_filename, category_path: item.category_path, size_bytes: 2048000 }], ready_count: 1, blocked_count: 0, total_size_bytes: 2048000, confirmation_phrase: "永久删除 1 份资料" });
+      return json(route, { items: [{ item_id: item.item_id, version_id: item.version_id, status: "ready", reason: null, title: item.title, original_filename: item.original_filename, category_path: item.category_path, size_bytes: 2048000, content_kind: "document", media_count: 0, transcript_version_count: 0, artifact_count: 0, index_job_count: 0 }], ready_count: 1, blocked_count: 0, total_size_bytes: 2048000, media_count: 0, transcript_version_count: 0, artifact_count: 0, index_job_count: 0, confirmation_phrase: "永久删除 1 份资料" });
     }
     if (path === "/api/admin/content/trash/purge/preflight") {
       const payload = request.postDataJSON() as { items: Array<{ item_id: string; expected_version_id: string }> };
       const selected = trashItems.filter((item) => payload.items.some((entry) => entry.item_id === item.item_id));
-      return json(route, { items: selected.map((item) => ({ item_id: item.item_id, version_id: item.version_id, status: "ready", reason: null, title: item.title, original_filename: item.original_filename, category_path: item.category_path, size_bytes: 2048000 })), ready_count: selected.length, blocked_count: 0, total_size_bytes: selected.length * 2048000, confirmation_phrase: `永久删除 ${selected.length} 份资料` });
+      return json(route, { items: selected.map((item) => ({ item_id: item.item_id, version_id: item.version_id, status: "ready", reason: null, title: item.title, original_filename: item.original_filename, category_path: item.category_path, size_bytes: 2048000, content_kind: "document", media_count: 0, transcript_version_count: 0, artifact_count: 0, index_job_count: 0 })), ready_count: selected.length, blocked_count: 0, total_size_bytes: selected.length * 2048000, media_count: 0, transcript_version_count: 0, artifact_count: 0, index_job_count: 0, confirmation_phrase: `永久删除 ${selected.length} 份资料` });
     }
     if (path === "/api/admin/content/bulk-restore/preflight") {
       const payload = request.postDataJSON() as { items: Array<{ item_id: string; expected_version_id: string }> };

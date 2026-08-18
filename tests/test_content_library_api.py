@@ -637,6 +637,200 @@ def test_trash_settings_and_permanent_delete_require_admin_confirmation(
         conn.close()
 
 
+def test_permanent_delete_archived_media_removes_lineage_files_indexes_and_records(
+    content_api, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    client, sessions, _queued, db_path = content_api
+    media_id = "123e4567-e89b-12d3-a456-426614174210"
+    version_id = "123e4567-e89b-12d3-a456-426614174211"
+    conn = connect(db_path)
+    item_id = _insert_published_media(
+        conn, media_id=media_id, version_id=version_id,
+        title="待永久删除视频", filename="purge-video.mp4", now=int(time.time()),
+    )
+    conn.close()
+
+    media_dir = (tmp_path / "media").resolve()
+    artifact_dir = (tmp_path / "transcription-artifacts").resolve()
+    video_path = media_dir / "synthetic" / f"{media_id}.mp4"
+    markdown_path = artifact_dir / "markdown" / f"{version_id}.md"
+    video_path.parent.mkdir(parents=True, exist_ok=True)
+    markdown_path.parent.mkdir(parents=True, exist_ok=True)
+    video_path.write_bytes(b"synthetic-video")
+    markdown_path.write_bytes(b"# synthetic transcript")
+    parents_db = tmp_path / "parents.sqlite"
+    parents = sqlite3.connect(parents_db)
+    parents.execute("CREATE TABLE parents(parent_id TEXT PRIMARY KEY,transcript_version_id TEXT)")
+    parents.execute("INSERT INTO parents VALUES (?,?)", ("parent-media-1", version_id))
+    parents.commit()
+    parents.close()
+
+    monkeypatch.setattr(content_trash_cleanup, "MEDIA_DIR", media_dir)
+    monkeypatch.setattr(content_trash_cleanup, "TRANSCRIPTION_ARTIFACT_DIR", artifact_dir)
+    monkeypatch.setattr(content_trash_cleanup, "PARENTS_DB", parents_db)
+
+    qdrant_deletes: list[dict[str, object]] = []
+
+    class SyntheticQdrantCollection:
+        @staticmethod
+        def collection_exists(_collection: str) -> bool:
+            return True
+
+        @staticmethod
+        def count(**_kwargs):
+            return type("CountResult", (), {"count": 2})()
+
+        @staticmethod
+        def delete(**kwargs):
+            qdrant_deletes.append(kwargs)
+
+    monkeypatch.setattr(content_trash_cleanup, "_client", lambda: SyntheticQdrantCollection())
+    archived = client.request(
+        "DELETE", f"/api/admin/content/items/{item_id}",
+        json={"expected_version_id": version_id},
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert archived.status_code == 200
+    refs = [{"item_id": item_id, "expected_version_id": version_id}]
+    assert client.post(
+        "/api/admin/content/trash/purge/preflight", json={"items": refs}
+    ).status_code == 401
+    assert client.post(
+        "/api/admin/content/trash/purge/preflight", json={"items": refs},
+        **_auth(sessions, "admin"),
+    ).status_code == 403
+    assert client.post(
+        "/api/admin/content/trash/purge", json={"items": refs, "confirmation": "invalid"},
+        **_auth(sessions, "plain", csrf=True),
+    ).status_code == 403
+    preflight = client.post(
+        "/api/admin/content/trash/purge/preflight", json={"items": refs},
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert preflight.status_code == 200
+    assert preflight.json() == {
+        "items": [{
+            "item_id": item_id, "version_id": version_id, "status": "ready", "reason": None,
+            "title": "待永久删除视频", "original_filename": "purge-video.mp4",
+            "category_path": "05 培训资料", "size_bytes": 3 * 1024 * 1024 + 10,
+            "content_kind": "media_transcript", "media_count": 1,
+            "transcript_version_count": 1, "artifact_count": 1, "index_job_count": 1,
+        }],
+        "ready_count": 1, "blocked_count": 0,
+        "total_size_bytes": 3 * 1024 * 1024 + 10,
+        "media_count": 1, "transcript_version_count": 1,
+        "artifact_count": 1, "index_job_count": 1,
+        "confirmation_phrase": "永久删除 1 份资料（含 1 个视频）",
+    }
+    purged = client.post(
+        "/api/admin/content/trash/purge",
+        json={"items": refs, "confirmation": preflight.json()["confirmation_phrase"]},
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert purged.status_code == 200, purged.text
+    assert purged.json()["succeeded_count"] == 1
+    assert len(qdrant_deletes) == 1
+    assert not video_path.exists()
+    assert not markdown_path.exists()
+    parents = sqlite3.connect(parents_db)
+    try:
+        assert parents.execute("SELECT count(*) FROM parents").fetchone()[0] == 0
+    finally:
+        parents.close()
+    conn = connect(db_path)
+    try:
+        for table in (
+            "content_items", "media_assets", "media_transcript_heads", "transcript_versions",
+            "transcription_jobs", "transcript_publication_index_jobs",
+        ):
+            assert conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0] == 0
+        audit = conn.execute(
+            "SELECT item_id,event_type FROM content_audit_events WHERE event_type='content.archived'"
+        ).fetchone()
+        assert tuple(audit) == (None, "content.archived")
+        purge_audit = conn.execute(
+            "SELECT status,title,original_filename,qdrant_points_deleted,parents_deleted FROM content_trash_purge_items WHERE item_id=?",
+            (item_id,),
+        ).fetchone()
+        assert tuple(purge_audit) == ("succeeded", "待永久删除视频", "purge-video.mp4", 2, 1)
+    finally:
+        conn.close()
+
+
+def test_media_purge_preflight_blocks_active_work_pending_revision_and_version_conflict(
+    content_api, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    client, sessions, _queued, db_path = content_api
+    media_id = "123e4567-e89b-12d3-a456-426614174220"
+    version_id = "123e4567-e89b-12d3-a456-426614174221"
+    conn = connect(db_path)
+    item_id = _insert_published_media(
+        conn, media_id=media_id, version_id=version_id,
+        title="受保护视频", filename="protected.mp4", now=int(time.time()),
+    )
+    conn.close()
+    monkeypatch.setattr(content_trash_cleanup, "MEDIA_DIR", (tmp_path / "media").resolve())
+    monkeypatch.setattr(
+        content_trash_cleanup, "TRANSCRIPTION_ARTIFACT_DIR",
+        (tmp_path / "transcription-artifacts").resolve(),
+    )
+    assert client.request(
+        "DELETE", f"/api/admin/content/items/{item_id}",
+        json={"expected_version_id": version_id}, **_auth(sessions, "admin", csrf=True),
+    ).status_code == 200
+    refs = [{"item_id": item_id, "expected_version_id": version_id}]
+
+    def blocked_reason(request_refs=refs):
+        response = client.post(
+            "/api/admin/content/trash/purge/preflight", json={"items": request_refs},
+            **_auth(sessions, "admin", csrf=True),
+        )
+        assert response.status_code == 200
+        return response.json()["items"][0]["reason"]
+
+    conn = connect(db_path)
+    conn.execute("UPDATE transcription_jobs SET status='running' WHERE media_id=?", (media_id,))
+    conn.commit()
+    conn.close()
+    assert blocked_reason() == "视频仍有转录任务"
+
+    conn = connect(db_path)
+    conn.execute("UPDATE transcription_jobs SET status='succeeded' WHERE media_id=?", (media_id,))
+    conn.execute(
+        "UPDATE transcript_publication_index_jobs SET status='embedding' WHERE transcript_version_id=?",
+        (version_id,),
+    )
+    conn.commit()
+    conn.close()
+    assert blocked_reason() == "视频仍有发布索引任务"
+
+    pending_version_id = "123e4567-e89b-12d3-a456-426614174222"
+    conn = connect(db_path)
+    conn.execute(
+        "UPDATE transcript_publication_index_jobs SET status='done' WHERE transcript_version_id=?",
+        (version_id,),
+    )
+    conn.execute(
+        """INSERT INTO transcript_versions(
+               id,media_id,source,markdown_storage_kind,markdown_rel_path,markdown_sha256,
+               markdown_size_bytes,review_status,publication_status,created_at,updated_at
+           ) VALUES (?,?,'manual','managed_artifact',?,?,1,'awaiting_review','not_published',1,1)""",
+        (pending_version_id, media_id, f"markdown/{pending_version_id}.md", "a" * 64),
+    )
+    conn.commit()
+    conn.close()
+    assert blocked_reason() == "视频仍有待审核的转录修订"
+    assert blocked_reason([{"item_id": item_id, "expected_version_id": pending_version_id}]) == "资料版本已变化"
+
+    conn = connect(db_path)
+    conn.execute(
+        "UPDATE media_assets SET storage_rel_path='../outside.mp4' WHERE media_id=?", (media_id,)
+    )
+    conn.commit()
+    conn.close()
+    assert blocked_reason() == "视频或转录产物存储路径异常"
+
+
 def test_restore_conflict_requires_archive_permission_and_replaces_atomically(content_api):
     client, sessions, _queued, db_path = content_api
     conflict = client.post(

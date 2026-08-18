@@ -1649,10 +1649,19 @@ def put_content_trash_settings(
 
 def _purge_preflight_response(results: list[dict[str, object]]) -> TrashPurgePreflightResponse:
     ready = sum(result["status"] == "ready" for result in results)
+    ready_results = [result for result in results if result["status"] == "ready"]
+    media_count = sum(int(result["media_count"]) for result in ready_results)
     return TrashPurgePreflightResponse(
         items=results, ready_count=ready, blocked_count=len(results) - ready,
-        total_size_bytes=sum(int(result["size_bytes"]) for result in results if result["status"] == "ready"),
-        confirmation_phrase=f"永久删除 {ready} 份资料",
+        total_size_bytes=sum(int(result["size_bytes"]) for result in ready_results),
+        media_count=media_count,
+        transcript_version_count=sum(int(result["transcript_version_count"]) for result in ready_results),
+        artifact_count=sum(int(result["artifact_count"]) for result in ready_results),
+        index_job_count=sum(int(result["index_job_count"]) for result in ready_results),
+        confirmation_phrase=(
+            f"永久删除 {ready} 份资料（含 {media_count} 个视频）"
+            if media_count else f"永久删除 {ready} 份资料"
+        ),
     )
 
 
@@ -1689,7 +1698,7 @@ def purge_content_trash(
     refs = _validate_bulk_item_refs(body.items)
     preflight = preflight_purge(conn, [(item.item_id, item.expected_version_id) for item in refs])
     ready = [item for item in preflight if item["status"] == "ready"]
-    expected_phrase = f"永久删除 {len(ready)} 份资料"
+    expected_phrase = _purge_preflight_response(preflight).confirmation_phrase
     if len(ready) != len(refs):
         raise HTTPException(status_code=409, detail="资料状态已变化，请重新检查")
     if body.confirmation != expected_phrase:

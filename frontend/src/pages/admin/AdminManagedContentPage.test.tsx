@@ -895,8 +895,8 @@ describe("AdminManagedContentPage", () => {
       { ...item, archived_at: 1_700_000_000, retention_status: "overdue", retention_days_remaining: -2 },
     ], total: 1, status_counts: {}, retention_counts: { retained: 0, expiring: 0, overdue: 1 } });
     mocks.preflightTrashPurge.mockResolvedValue({
-      items: [{ item_id: "item-1", version_id: "version-1", status: "ready", reason: null, title: "建模标准", original_filename: "standard.pdf", category_path: "03 公司内部标准", size_bytes: 1024 }],
-      ready_count: 1, blocked_count: 0, total_size_bytes: 1024, confirmation_phrase: "永久删除 1 份资料",
+      items: [{ item_id: "item-1", version_id: "version-1", status: "ready", reason: null, title: "建模标准", original_filename: "standard.pdf", category_path: "03 公司内部标准", size_bytes: 1024, content_kind: "document", media_count: 0, transcript_version_count: 0, artifact_count: 0, index_job_count: 0 }],
+      ready_count: 1, blocked_count: 0, total_size_bytes: 1024, media_count: 0, transcript_version_count: 0, artifact_count: 0, index_job_count: 0, confirmation_phrase: "永久删除 1 份资料",
     });
     mocks.purgeTrash.mockResolvedValue({ run_id: "purge-1", status: "succeeded", candidate_count: 1, succeeded_count: 1, failed_count: 0 });
     render(<AdminManagedContentPage />);
@@ -912,6 +912,31 @@ describe("AdminManagedContentPage", () => {
     await waitFor(() => expect(mocks.purgeTrash).toHaveBeenCalledWith([
       { item_id: "item-1", expected_version_id: "version-1" },
     ], "永久删除 1 份资料"));
+  });
+
+  it("shows media impact counts and requires the media-specific purge phrase", async () => {
+    mocks.permissions = [...REVIEWER_PERMISSIONS, "trash.purge"];
+    const mediaItem = { ...item, item_id: "media-item-1", version_id: "media-version-1", title: "培训视频", original_filename: "training.mp4", content_kind: "media_transcript", media_id: "media-1", doc_type: "transcript" };
+    mocks.trash.mockResolvedValue({ items: [
+      { ...mediaItem, archived_at: 1_700_000_000, retention_status: "retained", retention_days_remaining: 20 },
+    ], total: 1, status_counts: {}, retention_counts: { retained: 1, expiring: 0, overdue: 0 } });
+    mocks.preflightTrashPurge.mockResolvedValue({
+      items: [{ item_id: "media-item-1", version_id: "media-version-1", status: "ready", reason: null, title: "培训视频", original_filename: "training.mp4", category_path: "05 培训资料", size_bytes: 4096, content_kind: "media_transcript", media_count: 1, transcript_version_count: 3, artifact_count: 2, index_job_count: 4 }],
+      ready_count: 1, blocked_count: 0, total_size_bytes: 4096, media_count: 1, transcript_version_count: 3, artifact_count: 2, index_job_count: 4, confirmation_phrase: "永久删除 1 份资料（含 1 个视频）",
+    });
+    render(<AdminManagedContentPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "回收站" }));
+    fireEvent.click((await screen.findAllByRole("checkbox", { name: "选择恢复“培训视频”" }))[0]);
+    fireEvent.click(screen.getByRole("button", { name: "批量操作" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "永久删除所选（1）" }));
+    const dialog = await screen.findByRole("dialog", { name: "永久删除资料" });
+    expect(dialog).toHaveTextContent("视频文件1 个");
+    expect(dialog).toHaveTextContent("转录版本3 个");
+    expect(dialog).toHaveTextContent("转录产物2 个");
+    expect(dialog).toHaveTextContent("索引任务记录4 条");
+    expect(within(dialog).getByRole("alert")).toHaveTextContent("全部转录版本及其检索数据");
+    fireEvent.change(within(dialog).getByRole("textbox"), { target: { value: "永久删除 1 份资料（含 1 个视频）" } });
+    expect(within(dialog).getByRole("button", { name: "永久删除" })).toBeEnabled();
   });
 
   it("keeps trash filters inside search and sorts from the archived-time column", async () => {
