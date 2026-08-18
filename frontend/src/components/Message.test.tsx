@@ -481,7 +481,12 @@ describe("Message assistant actions", () => {
     );
 
     fireEvent.mouseEnter(screen.getByRole("superscript"));
-    fireEvent.click(screen.getByRole("button", { name: "从 00:00:12 播放视频" }));
+    const action = screen.getByRole("button", { name: "从 00:00:12 播放视频" });
+    const title = screen.getByText("Revit界面介绍");
+    expect(action.parentElement).toBe(title.parentElement);
+    expect(action.parentElement).toHaveClass("flex", "items-center");
+    expect(action.parentElement).not.toHaveClass("border-t");
+    fireEvent.click(action);
 
     expect(videoPlayerOpen).toHaveBeenCalledWith({
       mediaId: "media-1",

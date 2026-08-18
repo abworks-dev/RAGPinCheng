@@ -406,7 +406,31 @@ function CitationMarker({
               : "invisible pointer-events-none opacity-0"
           }`}
         >
-          <span className="mb-1 block truncate font-medium text-popover-foreground">{sourceDisplayTitle(source)}</span>
+          <div className="mb-1 flex min-w-0 items-center justify-between gap-2">
+            <span className="min-w-0 flex-1 truncate font-medium text-popover-foreground">{sourceDisplayTitle(source)}</span>
+            {canPlayVideo && (
+              <button
+                type="button"
+                onClick={playVideoAtCitation}
+                aria-label={`从 ${sourceLocator(source)} 播放视频`}
+                title={`从 ${sourceLocator(source)} 播放视频`}
+                className="inline-flex size-8 shrink-0 items-center justify-center rounded-ui-md text-primary transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <Play className="size-4" aria-hidden="true" />
+              </button>
+            )}
+            {canPreviewDocument && (
+              <button
+                type="button"
+                onClick={previewDocumentAtCitation}
+                aria-label={`预览文档：${sourceDisplayTitle(source)}`}
+                title="预览文档"
+                className="inline-flex size-8 shrink-0 items-center justify-center rounded-ui-md text-primary transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <Eye className="size-4" aria-hidden="true" />
+              </button>
+            )}
+          </div>
           <span className="mb-2 flex items-center gap-1.5 truncate text-muted-foreground">
             {isVideo ? (
               <>
@@ -418,32 +442,6 @@ function CitationMarker({
             )}
           </span>
           <span className="block whitespace-pre-wrap break-words leading-relaxed text-popover-foreground/85">{preview}</span>
-          {(canPlayVideo || canPreviewDocument) && (
-            <div className="mt-2 flex justify-end gap-1 border-t border-border pt-2">
-              {canPlayVideo && (
-                <button
-                  type="button"
-                  onClick={playVideoAtCitation}
-                  aria-label={`从 ${sourceLocator(source)} 播放视频`}
-                  title={`从 ${sourceLocator(source)} 播放视频`}
-                  className="inline-flex size-8 items-center justify-center rounded-ui-md text-primary transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                >
-                  <Play className="size-4" aria-hidden="true" />
-                </button>
-              )}
-              {canPreviewDocument && (
-                <button
-                  type="button"
-                  onClick={previewDocumentAtCitation}
-                  aria-label={`预览文档：${sourceDisplayTitle(source)}`}
-                  title="预览文档"
-                  className="inline-flex size-8 items-center justify-center rounded-ui-md text-primary transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                >
-                  <Eye className="size-4" aria-hidden="true" />
-                </button>
-              )}
-            </div>
-          )}
         </div>,
         document.body,
       )}
