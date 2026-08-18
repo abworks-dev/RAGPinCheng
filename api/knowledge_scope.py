@@ -13,12 +13,13 @@ def _rows(conn: sqlite3.Connection) -> list[sqlite3.Row]:
                SELECT id,parent_id,category_key,display_code,display_name,level,is_active,
                       chat_search_enabled,chat_filter_selectable,
                       display_code || ' ' || display_name AS full_path
-               FROM category_nodes WHERE parent_id IS NULL
+               FROM category_nodes WHERE parent_id IS NULL AND deleted_at IS NULL
                UNION ALL
                SELECT c.id,c.parent_id,c.category_key,c.display_code,c.display_name,c.level,c.is_active,
                       c.chat_search_enabled,c.chat_filter_selectable,
                       p.full_path || ' / ' || c.display_code || ' ' || c.display_name
                FROM category_nodes c JOIN paths p ON p.id=c.parent_id
+               WHERE c.deleted_at IS NULL
              )
              SELECT * FROM paths
            )

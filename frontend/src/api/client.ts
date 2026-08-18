@@ -23,6 +23,8 @@ import type {
   LlmHealth,
   MediaAsset,
   ManagedCategory,
+  CategoryDeletePreview,
+  CategoryDeleteResult,
   KnowledgeScope,
   FolderRequest,
   ManagedContentItem,
@@ -474,6 +476,18 @@ export const api = {
     `/api/admin/content/categories/${encodeURIComponent(categoryId)}/number`,
     { method: "PATCH", body: JSON.stringify(body) },
   ),
+  managedCategoryDeletePreview: (categoryId: string) =>
+    jsonFetch<CategoryDeletePreview>(
+      `/api/admin/content/categories/${encodeURIComponent(categoryId)}/delete-preview`,
+    ),
+  deleteManagedCategory: (categoryId: string, expectedVersion: number) =>
+    jsonFetch<CategoryDeleteResult>(
+      `/api/admin/content/categories/${encodeURIComponent(categoryId)}`,
+      {
+        method: "DELETE",
+        body: JSON.stringify({ expected_version: expectedVersion, confirmed: true }),
+      },
+    ),
   managedContentPermissions: () =>
     jsonFetch<ContentPermissionUser[]>("/api/admin/content/permissions"),
   managedContentPermissionCatalog: () =>

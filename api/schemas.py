@@ -450,6 +450,34 @@ class MoveManagedCategoryRequest(BaseModel):
     expected_version: int = Field(gt=0)
 
 
+class DeleteManagedCategoryPreviewDTO(BaseModel):
+    category_id: str
+    parent_id: str | None
+    display_name: str
+    full_path: str
+    version: int
+    descendant_count: int
+    folder_count: int
+    content_count: int
+    pending_request_count: int
+    active_upload_count: int
+    active_reclassification_count: int
+    renumbered_sibling_count: int
+    can_delete: bool
+
+
+class DeleteManagedCategoryRequest(BaseModel):
+    expected_version: int = Field(gt=0)
+    confirmed: bool
+
+
+class DeleteManagedCategoryResponse(BaseModel):
+    deleted_folder_count: int
+    renumbered_sibling_count: int
+    parent_id: str | None
+    categories: list[ManagedCategoryDTO]
+
+
 class ManagedUploadEntryDTO(BaseModel):
     filename: str
     item_id: str | None = None

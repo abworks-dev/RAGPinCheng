@@ -13,9 +13,11 @@ import {
   RefreshCw,
   Save,
   Search,
+  Trash2,
   TriangleAlert,
 } from "lucide-react";
 import { adminContentApi } from "../../api/admin/content";
+import { CategoryDeleteDialog } from "../../components/admin/CategoryDeleteDialog";
 import { Alert, AlertDescription, AlertTitle } from "../../components/ui/alert";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
@@ -116,6 +118,7 @@ export function AdminCategoriesPage() {
   const [numberConfirming, setNumberConfirming] = useState(false);
   const [numberSaving, setNumberSaving] = useState(false);
   const [numberError, setNumberError] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<ManagedCategory | null>(null);
   const nodeRefs = useRef(new Map<string, HTMLDivElement>());
 
   const selectedCategory = categories.find((category) => category.id === selectedId) || null;
@@ -440,6 +443,15 @@ export function AdminCategoriesPage() {
     if (requestAction({ kind: "close" })) setEditorOpen(false);
   };
 
+  const categoryDeleted = async (result: Awaited<ReturnType<typeof adminContentApi.deleteCategory>>) => {
+    setCategories(result.categories);
+    setSelectedId(result.parent_id || result.categories[0]?.id || null);
+    setEditorOpen(false);
+    toast.success(result.deleted_folder_count > 1
+      ? `已删除 ${result.deleted_folder_count} 个文件夹`
+      : "文件夹已删除");
+  };
+
   return (
     <section className="space-y-5" aria-labelledby="managed-categories-title">
       <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
@@ -496,7 +508,7 @@ export function AdminCategoriesPage() {
                 </div>
               </div>
               <div className="hidden min-h-0 min-w-0 overflow-hidden lg:block">
-                <CategoryDetail category={selectedCategory} draft={draft} categories={categories} saving={saving} moving={moving || numberSaving} error={saveError} hasActiveChild={selectedCategory ? activeChildIds.has(selectedCategory.id) : false} onChange={setDraft} onSave={() => void saveSelected()} onCancel={cancelEdit} onAddChild={() => selectedCategory && requestCreate(selectedCategory.id)} onMove={openMoveDialog} onAdjustNumber={openNumberDialog} />
+                <CategoryDetail category={selectedCategory} draft={draft} categories={categories} saving={saving} moving={moving || numberSaving} error={saveError} hasActiveChild={selectedCategory ? activeChildIds.has(selectedCategory.id) : false} onChange={setDraft} onSave={() => void saveSelected()} onCancel={cancelEdit} onAddChild={() => selectedCategory && requestCreate(selectedCategory.id)} onMove={openMoveDialog} onAdjustNumber={openNumberDialog} onDelete={() => selectedCategory && setDeleteTarget(selectedCategory)} />
               </div>
             </div>
           )}
@@ -520,7 +532,7 @@ export function AdminCategoriesPage() {
       <Sheet open={editorOpen} onOpenChange={handleEditorOpenChange}>
         <SheetContent className="max-w-xl overflow-y-auto lg:hidden">
           <SheetHeader><SheetTitle>{selectedCategory?.display_name || "编辑分类"}</SheetTitle><SheetDescription>{selectedCategory?.full_path || "维护分类信息"}</SheetDescription></SheetHeader>
-          <div className="p-6"><CategoryDetail category={selectedCategory} draft={draft} categories={categories} saving={saving} moving={moving || numberSaving} error={saveError} hasActiveChild={selectedCategory ? activeChildIds.has(selectedCategory.id) : false} onChange={setDraft} onSave={() => void saveSelected()} onCancel={cancelEdit} onAddChild={() => selectedCategory && requestCreate(selectedCategory.id)} onMove={openMoveDialog} onAdjustNumber={openNumberDialog} /></div>
+          <div className="p-6"><CategoryDetail category={selectedCategory} draft={draft} categories={categories} saving={saving} moving={moving || numberSaving} error={saveError} hasActiveChild={selectedCategory ? activeChildIds.has(selectedCategory.id) : false} onChange={setDraft} onSave={() => void saveSelected()} onCancel={cancelEdit} onAddChild={() => selectedCategory && requestCreate(selectedCategory.id)} onMove={openMoveDialog} onAdjustNumber={openNumberDialog} onDelete={() => selectedCategory && setDeleteTarget(selectedCategory)} /></div>
         </SheetContent>
       </Sheet>
 
@@ -566,6 +578,7 @@ export function AdminCategoriesPage() {
           <DialogFooter><Button variant="outline" onClick={() => { setDiscardOpen(false); setPendingAction(null); }}>继续编辑</Button><Button variant="destructive" onClick={confirmDiscard}>放弃修改</Button></DialogFooter>
         </DialogContent>
       </Dialog>
+      <CategoryDeleteDialog category={deleteTarget} onClose={() => setDeleteTarget(null)} onDeleted={categoryDeleted} />
     </section>
   );
 }
@@ -668,6 +681,7 @@ function CategoryDetail({
   onAddChild,
   onMove,
   onAdjustNumber,
+  onDelete,
 }: {
   category: ManagedCategory | null;
   draft: CategoryDraft | null;
@@ -682,6 +696,7 @@ function CategoryDetail({
   onAddChild: () => void;
   onMove: () => void;
   onAdjustNumber: () => void;
+  onDelete: () => void;
 }) {
   if (!category || !draft) return <EmptyState title="选择一个分类" description="从左侧选择分类后，在此维护分类信息。" />;
   const isDirty = draft.display_name !== category.display_name || draft.is_active !== category.is_active
@@ -726,7 +741,7 @@ function CategoryDetail({
         </label>
         {!draft.is_active && <p className="text-ui-xs text-muted-foreground">停用目录不会进入企业知识问答，也不会显示为筛选项。</p>}
       </section>
-      <section aria-labelledby={`category-level-${category.id}`} className="space-y-3 border-t border-border pt-4"><div><h4 id={`category-level-${category.id}`} className="text-ui-sm font-semibold">目录结构</h4><p className="mt-1 break-words text-ui-xs text-muted-foreground">父分类：{parent ? `${parent.display_code} ${parent.display_name}` : "一级分类"} · 第 {category.level} 级 · {category.item_count} 份直接资料</p></div><div className="flex flex-wrap gap-2"><Button variant="outline" onClick={onAddChild} disabled={moving || category.level >= 4 || !category.is_active}><Plus className="size-4" />新增子分类</Button><Button variant="outline" onClick={onMove} disabled={moving || isDirty}><Move className="size-4" />移动至</Button></div></section>
+      <section aria-labelledby={`category-level-${category.id}`} className="space-y-3 border-t border-border pt-4"><div><h4 id={`category-level-${category.id}`} className="text-ui-sm font-semibold">目录结构</h4><p className="mt-1 break-words text-ui-xs text-muted-foreground">父分类：{parent ? `${parent.display_code} ${parent.display_name}` : "一级分类"} · 第 {category.level} 级 · {category.item_count} 份直接资料</p></div><div className="flex flex-wrap gap-2"><Button variant="outline" onClick={onAddChild} disabled={moving || category.level >= 4 || !category.is_active}><Plus className="size-4" />新增子分类</Button><Button variant="outline" onClick={onMove} disabled={moving || isDirty}><Move className="size-4" />移动至</Button><Button variant="outline" className="text-destructive hover:text-destructive" onClick={onDelete} disabled={moving || isDirty}><Trash2 className="size-4" />删除文件夹</Button></div></section>
     </div>
     <div className="flex flex-col-reverse gap-2 border-t border-border px-5 py-4 sm:flex-row sm:justify-end"><Button variant="outline" onClick={onCancel} disabled={saving || moving || !isDirty}>取消</Button><Button onClick={onSave} disabled={saving || moving || !isDirty || !draft.display_name.trim()}><Save className="size-4" />{saving ? "保存中…" : "保存修改"}</Button></div>
   </div>;

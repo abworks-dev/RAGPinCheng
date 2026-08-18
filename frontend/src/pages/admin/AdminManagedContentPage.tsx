@@ -26,6 +26,7 @@ import { formatAdminDate } from "../../lib/admin-formatters";
 import { createRequestId } from "../../lib/request-id";
 import { AdminDocumentsPage } from "./AdminDocumentsPage";
 import { ManagedSummaryCard } from "../../components/admin/ManagedSummaryCard";
+import { CategoryDeleteDialog } from "../../components/admin/CategoryDeleteDialog";
 import { compareManagedCategories } from "../../lib/category-tree";
 import {
   collectDroppedUpload,
@@ -829,6 +830,7 @@ export function AdminManagedContentPage() {
   const [folderNumberValue, setFolderNumberValue] = useState("");
   const [folderNumberConfirming, setFolderNumberConfirming] = useState(false);
   const [folderMoveTarget, setFolderMoveTarget] = useState<ManagedCategory | null>(null);
+  const [folderDeleteTarget, setFolderDeleteTarget] = useState<ManagedCategory | null>(null);
   const [folderMoveParentId, setFolderMoveParentId] = useState("");
   const [folderActionError, setFolderActionError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -1269,6 +1271,18 @@ export function AdminManagedContentPage() {
     setFolderMoveTarget(folder);
     setFolderMoveParentId("");
     setFolderActionError(null);
+  };
+
+  const categoryDeleted = async (result: Awaited<ReturnType<typeof adminContentApi.deleteCategory>>) => {
+    setCategories(result.categories);
+    setFolderDeleteTarget(null);
+    if (currentFolderId && !result.categories.some((category) => category.id === currentFolderId)) {
+      setCurrentFolderId(result.parent_id || "");
+    }
+    toast.success(result.deleted_folder_count > 1
+      ? "已删除 " + result.deleted_folder_count + " 个文件夹"
+      : "文件夹已删除");
+    await load(true);
   };
 
   const saveFolderMove = async () => {
@@ -2009,6 +2023,7 @@ export function AdminManagedContentPage() {
         <IconButton label={`调整文件夹“${folderLabel}”的编号`} tooltip={unavailableReason || "调整文件夹编号"} className="border border-border max-sm:size-10" disabled={disabled} onClick={() => openFolderNumber(folder)}><ListOrdered className="size-4" /></IconButton>
         <IconButton label={`移动文件夹“${folderLabel}”`} tooltip={unavailableReason || "移动文件夹位置"} className="border border-border max-sm:size-10" disabled={disabled} onClick={() => openFolderMove(folder)}><FolderInput className="size-4" /></IconButton>
         <IconButton label={`重命名文件夹“${folderLabel}”`} tooltip={unavailableReason || "重命名文件夹"} className="border border-border max-sm:size-10" disabled={disabled} onClick={() => openFolderRename(folder)}><Pencil className="size-4" /></IconButton>
+        <IconButton label={`删除文件夹“${folderLabel}”`} tooltip={unavailableReason || "删除文件夹"} className="border border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive max-sm:size-10" disabled={disabled} onClick={() => setFolderDeleteTarget(folder)}><Trash2 className="size-4" /></IconButton>
       </>}
       <IconButton label={`打开文件夹“${folderLabel}”`} tooltip={unavailableReason || "打开文件夹"} className="border border-border max-sm:size-10" disabled={disabled} onClick={() => setCurrentFolderId(folder.id)}><ChevronRight className="size-4" /></IconButton>
     </div>;
@@ -2341,6 +2356,7 @@ export function AdminManagedContentPage() {
     </Dialog>
 
     {auditDialog}
+    <CategoryDeleteDialog category={folderDeleteTarget} onClose={() => setFolderDeleteTarget(null)} onDeleted={categoryDeleted} />
 
     <Dialog open={Boolean(reviewTarget) && !previewState.parentId} onOpenChange={(open) => {
       if (!open && !previewState.parentId && busyAction !== "review") {

@@ -75,11 +75,13 @@ from .content_store import (
     archive_content_item,
     audit_event,
     create_category,
+    delete_category,
     create_folder_request,
     create_publication_job,
     create_content_revision,
     create_web_batch,
     find_sibling_category_by_name,
+    get_category_delete_preview,
     get_upload_task,
     list_content_items,
     list_content_items_page,
@@ -124,6 +126,9 @@ from .schemas import (
     CreateContentPermissionGroupRequest,
     DeleteManagedContentRequest,
     DeleteManagedContentResponse,
+    DeleteManagedCategoryPreviewDTO,
+    DeleteManagedCategoryRequest,
+    DeleteManagedCategoryResponse,
     RestoreManagedContentRequest,
     RestoreManagedContentResponse,
     ContentTrashAuditEventDTO,
@@ -474,6 +479,10 @@ def _raise_domain_error(exc: Exception) -> None:
         raise HTTPException(status_code=409, detail="当前目录已有同名文件夹申请待处理") from exc
     if message == "category_not_found":
         raise HTTPException(status_code=404, detail="分类不存在") from exc
+    if message == "category_delete_confirmation_required":
+        raise HTTPException(status_code=400, detail="请确认删除文件夹") from exc
+    if message == "category_delete_blocked":
+        raise HTTPException(status_code=409, detail="文件夹或子文件夹中仍有资料或待处理任务，请先处理后再删除") from exc
     if message == "category_move_cycle":
         raise HTTPException(status_code=409, detail="分类不能移动到自身或其子分类中") from exc
     if message == "category_move_position_not_found":
@@ -721,6 +730,51 @@ def move_managed_category(
     except (ValueError, sqlite3.IntegrityError) as exc:
         _raise_domain_error(exc)
     return [_category_dto(row) for row in rows]
+
+
+@router.get(
+    "/categories/{category_id}/delete-preview",
+    response_model=DeleteManagedCategoryPreviewDTO,
+)
+def get_managed_category_delete_preview(
+    category_id: str,
+    _user: CurrentUser = Depends(require_content_permission("category.manage")),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> DeleteManagedCategoryPreviewDTO:
+    _require_feature()
+    try:
+        return DeleteManagedCategoryPreviewDTO(**get_category_delete_preview(conn, category_id))
+    except ValueError as exc:
+        _raise_domain_error(exc)
+
+
+@router.delete(
+    "/categories/{category_id}",
+    response_model=DeleteManagedCategoryResponse,
+)
+def delete_managed_category(
+    category_id: str,
+    body: DeleteManagedCategoryRequest,
+    user: CurrentUser = Depends(require_content_permission("category.manage", csrf=True)),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> DeleteManagedCategoryResponse:
+    _require_feature()
+    try:
+        result = delete_category(
+            conn,
+            category_id,
+            expected_version=body.expected_version,
+            confirmed=body.confirmed,
+            actor_user_id=user.id,
+        )
+    except (ValueError, sqlite3.IntegrityError) as exc:
+        _raise_domain_error(exc)
+    return DeleteManagedCategoryResponse(
+        deleted_folder_count=int(result["deleted_folder_count"]),
+        renumbered_sibling_count=int(result["renumbered_sibling_count"]),
+        parent_id=result["parent_id"],
+        categories=[_category_dto(row) for row in result["categories"]],
+    )
 
 
 @router.post("/folder-requests", response_model=FolderRequestDTO)

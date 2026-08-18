@@ -344,6 +344,29 @@ export type ManagedCategory = {
   item_count: number;
 };
 
+export type CategoryDeletePreview = {
+  category_id: string;
+  parent_id: string | null;
+  display_name: string;
+  full_path: string;
+  version: number;
+  descendant_count: number;
+  folder_count: number;
+  content_count: number;
+  pending_request_count: number;
+  active_upload_count: number;
+  active_reclassification_count: number;
+  renumbered_sibling_count: number;
+  can_delete: boolean;
+};
+
+export type CategoryDeleteResult = {
+  deleted_folder_count: number;
+  renumbered_sibling_count: number;
+  parent_id: string | null;
+  categories: ManagedCategory[];
+};
+
 export type KnowledgeScope = {
   id: string;
   parent_id: string | null;
