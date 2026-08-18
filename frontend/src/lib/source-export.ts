@@ -1,12 +1,18 @@
 import type { Source } from "../types";
 import { stripMarkdown } from "../utils/markdown";
 
-export function cleanSourceSection(source: Source): string {
-  return (source.section_path || "")
+export function formatSectionPath(sectionPath: string | null | undefined): string {
+  const parts = (sectionPath || "")
     .replace(/<[^>]*>/g, "")
     .split(" > ")
-    .filter(Boolean)
-    .join(" / ");
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (parts.length === 1 && parts[0].toLowerCase() === "(intro)") return "文档开头";
+  return parts.join(" / ");
+}
+
+export function cleanSourceSection(source: Source): string {
+  return formatSectionPath(source.section_path);
 }
 
 export function sourceLocator(source: Source): string {
@@ -17,6 +23,13 @@ export function sourceLocator(source: Source): string {
   if (source.doc_type === "pptx" && source.slide_number) return `第 ${source.slide_number} 页`;
   if (source.doc_type === "docx" && source.paragraph_anchor) return source.paragraph_anchor;
   return cleanSourceSection(source) || "未提供定位信息";
+}
+
+export function sourceCategoryLabel(source: Source): string {
+  const category = source.category?.trim() || "未分类";
+  const company = source.company?.trim();
+  if (!company || company === category) return category;
+  return `${category} · ${company}`;
 }
 
 export function sourceDisplayTitle(source: Source): string {
@@ -42,7 +55,7 @@ export function formatSourcesAsMarkdown(sources: Source[]): string {
       `## ${index + 1}. ${sourceDisplayTitle(source)}`,
       "",
       `- 类型：${sourceTypeLabels[source.doc_type] || source.doc_type}`,
-      `- 分类：${source.category || "未分类"}`,
+      `- 分类：${sourceCategoryLabel(source)}`,
       `- 定位：${sourceLocator(source)}`,
       "",
       quotedText,

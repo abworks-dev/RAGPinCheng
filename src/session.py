@@ -341,6 +341,11 @@ class ChatSession:
                 "doc_type": p.doc_type,
                 "start_time": p.start_time,
                 "media_id": p.media_id,
+                "company": p.company,
+                "sheet_name": p.sheet_name,
+                "cell_range": p.cell_range,
+                "slide_number": p.slide_number,
+                "paragraph_anchor": p.paragraph_anchor,
             }
             for p in parents
         ]

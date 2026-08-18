@@ -31,6 +31,7 @@ import { sourceSetsFromMessages } from "./sourceSelection";
 import {
   cleanSourceSection,
   formatSourcesAsMarkdown,
+  sourceCategoryLabel,
   sourceDisplayTitle,
   sourceLocator,
 } from "../lib/source-export";
@@ -227,7 +228,7 @@ export function SourceWorkspace({
                   <span className="truncate">{sourceDisplayTitle(item)}</span>
                 </span>
                 <span className="mt-1.5 block truncate text-xs text-muted-foreground">
-                  {item.category || "未分类"} ·{" "}
+                  {sourceCategoryLabel(item)} ·{" "}
                   {item.doc_type === "transcript" ? `时间 ${sourceLocator(item)}` : sourceLocator(item)}
                 </span>
               </span>
@@ -354,7 +355,7 @@ function SourceDetail({
           <SourceTypeIcon source={source} />
         </span>
         <div className="min-w-0">
-          <div className="text-xs text-muted-foreground">来源 {sourceIndex + 1} · {source.category || "未分类"}</div>
+          <div className="text-xs text-muted-foreground">来源 {sourceIndex + 1} · {sourceCategoryLabel(source)}</div>
           <h3 className="mt-0.5 break-words text-sm font-semibold text-foreground">{sourceDisplayTitle(source)}</h3>
         </div>
       </div>

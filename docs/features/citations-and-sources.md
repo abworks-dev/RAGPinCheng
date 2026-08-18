@@ -1,7 +1,7 @@
 # 引用与来源面板
 
 - 状态：已实现（含视频引用播放）
-- 最后核对：2026-08-18
+- 最后核对：2026-08-19
 
 ## 用户可观察能力
 
@@ -15,13 +15,17 @@
 - `SourceDTO` 从会话状态传递到 SSE、历史消息和前端；
 - 引用解析、来源匹配、双向悬停高亮和来源卡片定位；
 - 支持鼠标和键盘的引用摘要浮层，以及 PDF、DOCX、XLSX、PPTX 文档预览；
+- 来源工作区支持关键词高亮、单条复制、批量复制和 Markdown 下载；
+- 文档开头的内部章节标记 `(intro)` 对用户统一显示为“文档开头”，空章节显示为“未提供定位信息”；
+- Excel 工作表/单元格、PowerPoint 页码和 Word 段落锚点优先作为定位信息，缺失时回退到章节路径；
+- 公司内部标准可在分类旁展示具体公司名称；
 - 视频引用独立播放按钮触发的播放器打开、metadata seek 和自动播放失败降级；
 - 来源卡片的“从时间点播放”入口；未关联视频的历史来源继续只展示时间引用。
 
 ### 未实现
 
 - PDF 页码直接跳转；
-- 复制、分类分组、关键词高亮和批量导出。
+- 按分类折叠或分组来源。
 
 ## 入口与调用链
 
@@ -46,12 +50,14 @@ RetrievedParent
 - `frontend/src/types.ts`
 - `frontend/src/components/citations.ts`
 - `frontend/src/components/Message.tsx`
-- `frontend/src/components/SourcesPanel.tsx`
+- `frontend/src/components/SourceWorkspace.tsx`
+- `frontend/src/lib/source-export.ts`
 
 ## 数据契约
 
 - `SourceDTO` 与前端 `Source` 字段必须同步；
-- 当前核心字段包括 `parent_id`、标题、章节、分类、分数、证据文本、`doc_type`、`start_time` 和可空 `media_id`；
+- 当前核心字段包括 `parent_id`、标题、章节、分类、可空公司名称、分数、证据文本、`doc_type`、`start_time`、可空 `media_id`，以及 Office 定位字段 `sheet_name`、`cell_range`、`slide_number`、`paragraph_anchor`；
+- 旧会话缺少后加字段时按空值恢复；旧 `(intro)` 索引不需要重建，由前端共享格式化层转换显示；
 - 回答文本引用只是展示标记，权威来源详情来自结构化 `sources`。
 
 ## 依赖与下游消费者

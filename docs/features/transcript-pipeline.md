@@ -261,7 +261,7 @@ candidate manifest 和 promotion workflow evidence 为准，不能把代码就�
   `.github/workflows/cleanup-production.yml`
   （单次 run 精确收缩、周期保留策略、路径安全检查与 JSON 审计）
 - `frontend/src/components/citations.ts`
-- `frontend/src/components/SourcesPanel.tsx`（播放按钮）
+- `frontend/src/components/SourceWorkspace.tsx`（来源详情播放按钮）
 - `frontend/src/components/Message.tsx`（引用悬浮卡播放按钮）
 - `frontend/src/components/VideoPlayerDrawer.tsx`（新增）
 - `frontend/src/components/TranscriptPanel.tsx`（同步转录列表）

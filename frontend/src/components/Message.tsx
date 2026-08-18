@@ -260,7 +260,7 @@ function CitationMarker({
     setTooltipActive(false);
   }, []);
 
-  // Listen for hover events from SourcesPanel (card → in-message highlight).
+  // Listen for hover events from SourceWorkspace (card -> in-message highlight).
   useEffect(() => {
     function onHover(e: Event) {
       const detail = (e as CustomEvent<CitationHoverDetail>).detail;

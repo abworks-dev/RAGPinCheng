@@ -1129,7 +1129,7 @@ export async function installAuthRoutes(page: Page) {
   });
 }
 
-export async function installChatRoutes(page: Page, scenario: "normal" | "error" | "video" | "document" = "normal") {
+export async function installChatRoutes(page: Page, scenario: "normal" | "error" | "video" | "document" | "source-location" = "normal") {
   const chatUser = { ...workspaceUsers.member, csrf_token: "synthetic-chat-csrf" };
   const videoSource = {
     parent_id: "video-parent",
@@ -1163,6 +1163,40 @@ export async function installChatRoutes(page: Page, scenario: "normal" | "error"
     slide_number: null,
     paragraph_anchor: "model-naming",
   };
+  const sourceLocationSources = [
+    {
+      ...documentSource,
+      parent_id: "intro-parent",
+      doc_title: "BIM机电地下室管综审核要点",
+      section_path: "(intro)",
+      category: "公司内部标准",
+      company: "品茗股份",
+      doc_type: "pdf",
+      paragraph_anchor: null,
+    },
+    {
+      ...documentSource,
+      parent_id: "xlsx-parent",
+      doc_title: "设备统计清单",
+      section_path: "设备统计 > 汇总",
+      category: "项目资料",
+      company: null,
+      doc_type: "xlsx",
+      sheet_name: "统计表",
+      cell_range: "B2:F20",
+      paragraph_anchor: null,
+    },
+    {
+      ...documentSource,
+      parent_id: "legacy-parent",
+      doc_title: "既有行业规范",
+      section_path: "",
+      category: "行业规范",
+      company: null,
+      doc_type: "pdf",
+      paragraph_anchor: null,
+    },
+  ];
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
@@ -1175,10 +1209,21 @@ export async function installChatRoutes(page: Page, scenario: "normal" | "error"
     if (path === "/api/conversations/conversation-chat" && request.method() === "GET") return json(route, { ...conversationState, id: "conversation-chat", title: "合成新对话", user_id: chatUser.id, messages: [] });
     if (path === "/api/conversations/conversation-chat/chat" && request.method() === "POST") {
       if (scenario === "error") return sse(route, `event: error\ndata: ${JSON.stringify({ message: "合成回答失败" })}\n\n`);
-      const sources = scenario === "video" ? [videoSource] : scenario === "document" ? [documentSource] : [];
-      const answerText = scenario === "video" || scenario === "document" ? "合成回答[1]" : "合成回答";
+      const sources = scenario === "video"
+        ? [videoSource]
+        : scenario === "document"
+          ? [documentSource]
+          : scenario === "source-location"
+            ? sourceLocationSources
+            : [];
+      const answerText = scenario === "source-location"
+        ? "合成回答[1][2][3]"
+        : scenario === "video" || scenario === "document"
+          ? "合成回答[1]"
+          : "合成回答";
+      const sourceCount = scenario === "source-location" ? 3 : 1;
       return sse(route, [
-        `event: prep\ndata: ${JSON.stringify({ search_query: "合成问题", rewrite_applied: false, history_chars: 0, budget: 1000, fresh_count: 1, final_count: 1, used_sources: sources, no_source_fallback: false })}\n\n`,
+        `event: prep\ndata: ${JSON.stringify({ search_query: "合成问题", rewrite_applied: false, history_chars: 0, budget: 1000, fresh_count: sourceCount, final_count: sourceCount, used_sources: sources, no_source_fallback: false })}\n\n`,
         `event: token\ndata: ${JSON.stringify({ text: answerText })}\n\n`,
         `event: done\ndata: ${JSON.stringify({ answer_text: answerText, assistant_message_id: 503, timings: {}, sources, history_chars: 0, budget: 1000 })}\n\n`,
       ].join(""));

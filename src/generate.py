@@ -66,7 +66,7 @@ def _render_source(p: RetrievedParent, n: int) -> str:
     # Show the LLM only the leaf of the breadcrumb (e.g. `(5) 钢材耐腐蚀性差`)
     # instead of the full path `第1章 概述 > 1.1 ... > 1.1.1 ... > (5) ...`.
     # Inline citations stay short and readable; the full breadcrumb is
-    # exposed in the SourcesPanel expand view.
+    # exposed in the SourceWorkspace detail view.
     section_leaf = p.section_path.split(" > ")[-1] if p.section_path else ""
     return (
         f'<source index="{n}" id="{p.parent_id[:8]}" doc="{p.doc_title}" '

@@ -9,6 +9,7 @@ export type Source = {
   doc_type: string; // "pdf" | "transcript" | "docx" | "xlsx" | "pptx"
   start_time: string | null;
   media_id: string | null;
+  company?: string | null;
   // Office document fields
   sheet_name: string | null;
   cell_range: string | null;

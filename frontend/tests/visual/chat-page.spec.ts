@@ -105,4 +105,35 @@ test.describe("聊天工作台", () => {
     await expect(page.getByText("Word 文档", { exact: true })).toBeVisible();
     await expectNoBodyOverflow(page);
   });
+
+  test("来源定位在列表、详情和引用预览中保持一致", async ({ page }, testInfo) => {
+    const consoleErrors: string[] = [];
+    page.on("console", (message) => {
+      if (message.type() === "error") consoleErrors.push(message.text());
+    });
+    await installChatRoutes(page, "source-location");
+    await page.goto("/");
+    await page.getByPlaceholder("向企业知识库提问").fill("合成来源定位问题");
+    await page.getByRole("button", { name: "发送问题" }).click();
+
+    const firstMarker = page.getByRole("superscript").first();
+    await firstMarker.hover();
+    const preview = page.getByRole("dialog", { name: "来源 1 预览" });
+    await expect(preview.getByText("文档来源 · 文档开头", { exact: true })).toBeVisible();
+    await expectInViewport(preview);
+
+    await page.getByRole("button", { name: "查看 3 个来源" }).click();
+    await page.mouse.move(0, 0);
+    await page.waitForTimeout(400);
+    await expect(page.getByText("公司内部标准 · 品茗股份 · 文档开头", { exact: true }).filter({ visible: true })).toBeVisible();
+    await expect(page.getByText("项目资料 · 统计表 · B2:F20", { exact: true }).filter({ visible: true })).toBeVisible();
+    await expect(page.getByText("行业规范 · 未提供定位信息", { exact: true }).filter({ visible: true })).toBeVisible();
+    await expect(page.getByText("来源 1 · 公司内部标准 · 品茗股份", { exact: true }).filter({ visible: true })).toBeVisible();
+    await expectNoBodyOverflow(page);
+    expect(consoleErrors).toEqual([]);
+    await testInfo.attach("source-location-workspace", {
+      body: await page.screenshot({ fullPage: true }),
+      contentType: "image/png",
+    });
+  });
 });

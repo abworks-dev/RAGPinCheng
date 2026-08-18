@@ -170,7 +170,17 @@ def _retrieved_parents_from_json(raw: str | None) -> list[RetrievedParent]:
             doc_type=r.get("doc_type", "pdf"),
             start_time=r.get("start_time"),
             company=r.get("company"),
+            media_id=r.get("media_id"),
+            sheet_name=r.get("sheet_name"),
+            cell_range=r.get("cell_range"),
+            slide_number=r.get("slide_number"),
+            paragraph_anchor=r.get("paragraph_anchor"),
+            transcript_version_id=r.get("transcript_version_id"),
+            content_item_id=r.get("content_item_id"),
+            content_version_id=r.get("content_version_id"),
+            category_key=r.get("category_key"),
             rrf_score=float(r.get("rrf_score", 0.0)),
+            subquery_idx=r.get("subquery_idx"),
         ))
     return out
 
