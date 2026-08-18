@@ -62,6 +62,7 @@ from .maintenance import (
 from .system_overview import collect_system_overview
 from src.external_usage import usage_summary
 from .content_permission_catalog import CONTENT_PERMISSIONS
+from .content_store import archive_content_item
 from .db import get_db
 from .feedback import read_records
 from .indexing import create_job, enqueue
@@ -86,6 +87,7 @@ from .schemas import (
     CategoryTreeResponse,
     DeleteDocumentRequest,
     DeleteDocumentResponse,
+    DeleteManagedContentResponse,
     IndexJobDTO,
     IndexJobListResponse,
     IndexedDocumentDTO,
@@ -1665,6 +1667,22 @@ def preview_media_asset(
         request.headers.get("range"),
         cache_control="private, no-store",
     )
+
+
+@router.post("/media/{media_id}/archive", response_model=DeleteManagedContentResponse)
+def archive_media_asset(media_id: str, admin: CurrentUser = Depends(require_csrf_admin), conn: sqlite3.Connection = Depends(get_db)) -> DeleteManagedContentResponse:
+    try: validate_uuid(media_id, "media_id")
+    except ContractValidationError: raise HTTPException(status_code=404, detail="媒体不存在")
+    row = conn.execute("""SELECT i.id AS item_id,h.current_version_id AS version_id
+                         FROM content_items i JOIN media_transcript_heads h ON h.media_id=i.media_id
+                         WHERE i.media_id=? AND i.content_kind='media_transcript' AND i.archived_at IS NULL""", (media_id,)).fetchone()
+    if row is None: raise HTTPException(status_code=409, detail="该视频没有可归档的已发布转写资料")
+    try:
+        result = archive_content_item(conn, str(row["item_id"]), expected_version_id=str(row["version_id"]), actor_user_id=admin.id, can_archive_draft=True, can_archive_published=True)
+    except ValueError as exc:
+        detail = {"content_delete_in_progress": "视频正在处理，请完成或取消任务后再归档", "content_version_conflict": "视频版本已变化，请刷新后重试"}.get(str(exc), "视频当前不能移入回收站")
+        raise HTTPException(status_code=409, detail=detail)
+    return DeleteManagedContentResponse(item_id=result.item_id, version_id=result.version_id, archived_at=result.archived_at, previous_status=result.previous_status, publication_withdrawn=result.publication_withdrawn)
 
 
 @router.delete("/media/{media_id}", status_code=204)

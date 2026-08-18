@@ -6,6 +6,7 @@ export const adminMediaApi = {
   uploadReplacement: (...args: Parameters<typeof api.uploadReplacementMediaVideo>) => api.uploadReplacementMediaVideo(...args),
   listAssets: (...args: Parameters<typeof api.listMediaAssets>) => api.listMediaAssets(...args),
   deleteFailedAsset: (...args: Parameters<typeof api.deleteFailedMediaAsset>) => api.deleteFailedMediaAsset(...args),
+  archiveAsset: (...args: Parameters<typeof api.archiveMediaAsset>) => api.archiveMediaAsset(...args),
   profiles: (...args: Parameters<typeof api.listTranscriptionProfiles>) => api.listTranscriptionProfiles(...args),
   schemes: (...args: Parameters<typeof api.listTranscriptionSchemes>) => api.listTranscriptionSchemes(...args),
   jobs: (...args: Parameters<typeof api.listTranscriptionJobs>) => api.listTranscriptionJobs(...args),

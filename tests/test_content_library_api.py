@@ -1995,14 +1995,24 @@ def test_published_media_transcripts_share_library_listing_without_document_mirr
     assert moved.json()["category_id"] == "cat-04"
     assert moved.json()["version_id"] == first_version_id
 
-    rejected = client.request(
+    archived = client.request(
         "DELETE",
         f"/api/admin/content/items/{first_item_id}",
         json={"expected_version_id": first_version_id},
         **_auth(sessions, "publisher", csrf=True),
     )
-    assert rejected.status_code == 409
-    assert rejected.json()["detail"]["code"] == "media_transcript_operation_not_supported"
+    assert archived.status_code == 200, archived.text
+    assert archived.json()["version_id"] == first_version_id
+    trash = client.get("/api/admin/content/trash?category_id=cat-04", **_auth(sessions, "publisher"))
+    assert trash.status_code == 200
+    assert trash.json()["total"] == 1
+    restored = client.post(
+        f"/api/admin/content/items/{first_item_id}/restore",
+        json={"expected_version_id": first_version_id},
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert restored.status_code == 200
+    assert restored.json()["restored_status"] == "published"
 
     conn = connect(db_path)
     try:

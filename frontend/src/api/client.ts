@@ -914,6 +914,7 @@ export const api = {
   listMediaAssets: () => jsonFetch<MediaAsset[]>("/api/admin/media"),
   deleteFailedMediaAsset: (mediaId: string) =>
     jsonFetch<void>(`/api/admin/media/${mediaId}`, { method: "DELETE" }),
+  archiveMediaAsset: (mediaId: string) => jsonFetch(`/api/admin/media/${mediaId}/archive`, { method: "POST", body: JSON.stringify({}) }),
   listTranscriptionProfiles: () =>
     jsonFetch<TranscriptionProfile[]>("/api/admin/transcription/profiles"),
   listTranscriptionSchemes: () =>

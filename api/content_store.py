@@ -1481,7 +1481,8 @@ _CONTENT_LIBRARY_CTE = """WITH RECURSIVE paths AS (
                NULL AS latest_review_decision,NULL AS latest_review_note,
                (SELECT count(*) FROM transcript_publication_index_jobs attempts
                 WHERE attempts.transcript_version_id=tv.id) AS publication_attempt_count,
-               NULL AS archived_at,NULL AS archived_by_name,NULL AS archive_metadata_json,
+               i.archived_at,archive_user.real_name AS archived_by_name,
+               archive_event.metadata_json AS archive_metadata_json,
                (SELECT succeeded.total_ms FROM transcription_jobs succeeded
                 WHERE succeeded.media_id=m.media_id AND succeeded.status='succeeded'
                 ORDER BY succeeded.finished_at DESC,succeeded.updated_at DESC,succeeded.id DESC LIMIT 1)
@@ -1498,7 +1499,7 @@ _CONTENT_LIBRARY_CTE = """WITH RECURSIVE paths AS (
         FROM content_items i
         JOIN category_nodes c ON c.id=i.category_id
         JOIN paths ON paths.id=i.category_id
-        JOIN media_assets m ON m.media_id=i.media_id AND m.status<>'archived'
+        JOIN media_assets m ON m.media_id=i.media_id
         JOIN media_transcript_heads h ON h.media_id=m.media_id
         JOIN transcript_versions tv
           ON tv.id=h.current_version_id AND tv.media_id=m.media_id
@@ -1507,8 +1508,13 @@ _CONTENT_LIBRARY_CTE = """WITH RECURSIVE paths AS (
             WHERE j2.transcript_version_id=tv.id
             ORDER BY j2.attempt_number DESC,j2.created_at DESC,j2.id DESC LIMIT 1
         )
-        WHERE i.content_kind='media_transcript' AND i.archived_at IS NULL
-          AND tv.publication_status='published'
+        LEFT JOIN content_audit_events archive_event ON archive_event.id=(
+            SELECT ae.id FROM content_audit_events ae
+            WHERE ae.item_id=i.id AND ae.event_type='content.archived'
+            ORDER BY ae.created_at DESC,ae.id DESC LIMIT 1
+        )
+        LEFT JOIN users archive_user ON archive_user.id=archive_event.actor_user_id
+        WHERE i.content_kind='media_transcript' AND tv.publication_status='published'
     ), library_rows AS (
         SELECT * FROM document_rows
         UNION ALL
@@ -1648,6 +1654,51 @@ def list_content_items_page(
     return rows, total, counts
 
 
+def _archive_media_transcript_item_locked(conn: sqlite3.Connection, item_id: str, *, expected_version_id: str, actor_user_id: int, can_archive_published: bool, now: int) -> ArchivedContent:
+    row = conn.execute("""SELECT i.media_id,i.archived_at,i.category_id,m.status AS media_status,
+                                 h.current_version_id,tv.publication_status
+                          FROM content_items i JOIN media_assets m ON m.media_id=i.media_id
+                          JOIN media_transcript_heads h ON h.media_id=m.media_id
+                          JOIN transcript_versions tv ON tv.id=h.current_version_id
+                          WHERE i.id=? AND i.content_kind='media_transcript'""", (item_id,)).fetchone()
+    if row is None or row["archived_at"] is not None:
+        raise ValueError("content_item_not_found")
+    if row["current_version_id"] != expected_version_id:
+        raise ValueError("content_version_conflict")
+    if not can_archive_published:
+        raise ValueError("content_delete_forbidden")
+    if conn.execute("SELECT 1 FROM transcription_jobs WHERE media_id=? AND status IN ('pending','running')", (row["media_id"],)).fetchone():
+        raise ValueError("content_delete_in_progress")
+    if conn.execute("SELECT 1 FROM transcript_publication_index_jobs WHERE transcript_version_id=? AND status IN ('pending','parsing','chunking','embedding')", (expected_version_id,)).fetchone():
+        raise ValueError("content_delete_in_progress")
+    if row["publication_status"] == "publishing":
+        raise ValueError("content_delete_in_progress")
+    conn.execute("UPDATE content_items SET archived_at=?,updated_at=? WHERE id=?", (now, now, item_id))
+    conn.execute("UPDATE media_assets SET status='archived',updated_at=? WHERE media_id=?", (now, row["media_id"]))
+    audit_event(conn, "content.archived", actor_user_id=actor_user_id, item_id=item_id, category_id=row["category_id"], metadata={"previous_status": "published", "media_status": row["media_status"], "content_kind": "media_transcript", "transcript_version_id": expected_version_id, "publication_withdrawn": False})
+    return ArchivedContent(item_id=item_id, version_id=expected_version_id, archived_at=now, previous_status="published", publication_withdrawn=False)
+
+
+def _restore_media_transcript_item_locked(conn: sqlite3.Connection, item_id: str, *, expected_version_id: str, actor_user_id: int, can_restore: bool, now: int) -> RestoredContent:
+    row = conn.execute("""SELECT i.media_id,i.archived_at,i.category_id,h.current_version_id,
+                                 (SELECT ae.metadata_json FROM content_audit_events ae WHERE ae.item_id=i.id AND ae.event_type='content.archived' ORDER BY ae.created_at DESC,ae.id DESC LIMIT 1) AS metadata_json
+                          FROM content_items i JOIN media_assets m ON m.media_id=i.media_id
+                          JOIN media_transcript_heads h ON h.media_id=m.media_id
+                          WHERE i.id=? AND i.content_kind='media_transcript'""", (item_id,)).fetchone()
+    if row is None or row["archived_at"] is None:
+        raise ValueError("content_trash_item_not_found")
+    if row["current_version_id"] != expected_version_id:
+        raise ValueError("content_version_conflict")
+    if not can_restore:
+        raise ValueError("content_restore_forbidden")
+    metadata = json.loads(row["metadata_json"] or "{}")
+    media_status = str(metadata.get("media_status") or "ready")
+    conn.execute("UPDATE content_items SET archived_at=NULL,updated_at=? WHERE id=?", (now, item_id))
+    conn.execute("UPDATE media_assets SET status=?,updated_at=? WHERE media_id=?", (media_status, now, row["media_id"]))
+    audit_event(conn, "content.restored", actor_user_id=actor_user_id, item_id=item_id, category_id=row["category_id"], metadata={"previous_status": "published", "restored_status": "published", "restore_strategy": "original_directory", "content_kind": "media_transcript", "transcript_version_id": expected_version_id})
+    return RestoredContent(item_id=item_id, version_id=expected_version_id, restored_status="published", category_id=str(row["category_id"]), moved_to_alternate_category=False, replaced_conflict=False)
+
+
 def restore_content_item(
     conn: sqlite3.Connection,
     item_id: str,
@@ -1668,7 +1719,9 @@ def restore_content_item(
             "SELECT content_kind FROM content_items WHERE id=?", (item_id,)
         ).fetchone()
         if item_kind is not None and item_kind["content_kind"] == "media_transcript":
-            raise ValueError("media_transcript_operation_not_supported")
+            result = _restore_media_transcript_item_locked(conn, item_id, expected_version_id=expected_version_id, actor_user_id=actor_user_id, can_restore=can_restore, now=now)
+            conn.commit()
+            return result
         row = conn.execute(
             """SELECT i.id AS item_id,i.archived_at,i.category_id,c.is_active,
                       v.id AS version_id,v.lifecycle_status,v.object_sha256,v.source_batch_id,
@@ -1814,7 +1867,7 @@ def _archive_content_item_locked(
         "SELECT content_kind FROM content_items WHERE id=?", (item_id,)
     ).fetchone()
     if item_kind is not None and item_kind["content_kind"] == "media_transcript":
-        raise ValueError("media_transcript_operation_not_supported")
+        return _archive_media_transcript_item_locked(conn, item_id, expected_version_id=expected_version_id, actor_user_id=actor_user_id, can_archive_published=can_archive_published, now=now)
     row = conn.execute(
         """SELECT i.id AS item_id,i.archived_at,i.category_id,v.id AS version_id,
                   v.lifecycle_status,v.source_batch_id,
