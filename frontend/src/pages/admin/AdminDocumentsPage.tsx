@@ -1,9 +1,9 @@
-import { Eye, RefreshCw, Rocket, Search } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { CheckCircle2, CircleAlert, Clock3, Eye, ListChecks, RefreshCw, Rocket, Search, SlidersHorizontal } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { adminContentApi } from "../../api/admin/content";
 import { Badge } from "../../components/ui/badge";
 import { Button, buttonVariants } from "../../components/ui/button";
-import { Card, CardContent } from "../../components/ui/card";
+import { Card } from "../../components/ui/card";
 import { Checkbox } from "../../components/ui/checkbox";
 import { EmptyState } from "../../components/ui/empty-state";
 import { ErrorState } from "../../components/ui/error-state";
@@ -15,6 +15,7 @@ import { useAuth } from "../../context/AuthContext";
 import { cn } from "../../lib/utils";
 import type { ManagedCategory, ManagedIndexJob, ManagedIndexJobList } from "../../types";
 import { formatAdminDate, formatBytes } from "../../lib/admin-formatters";
+import { ManagedSummaryCard } from "../../components/admin/ManagedSummaryCard";
 
 const PAGE_SIZE = 25;
 const ACTIVE_STATUSES = new Set([
@@ -62,6 +63,66 @@ function sourceOriginLabel(sourceOrigin: string | null): string {
     legacy: "历史迁移",
     transcription: "视频转录",
   }[sourceOrigin || ""] || "其他来源";
+}
+function IndexTaskSearchFilters({
+  searchInput, categoryId, docType, sourceOrigin, status, history, includeArchived, categories,
+  onSearchInputChange, onCategoryChange, onDocTypeChange, onSourceChange, onStatusChange,
+  onHistoryChange, onIncludeArchivedChange, onClear,
+}: {
+  searchInput: string; categoryId: string; docType: string; sourceOrigin: string; status: StatusFilter;
+  history: boolean; includeArchived: boolean; categories: ManagedCategory[];
+  onSearchInputChange: (value: string) => void; onCategoryChange: (value: string) => void;
+  onDocTypeChange: (value: string) => void; onSourceChange: (value: string) => void;
+  onStatusChange: (value: StatusFilter) => void; onHistoryChange: (value: boolean) => void;
+  onIncludeArchivedChange: (value: boolean) => void; onClear: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const searchRef = useRef<HTMLInputElement | null>(null);
+  const filtersId = "index-task-search-filters";
+  const activeFilterCount = Number(Boolean(categoryId)) + Number(Boolean(docType)) + Number(Boolean(sourceOrigin)) + Number(status !== "all") + Number(history) + Number(includeArchived);
+
+  useEffect(() => {
+    if (!open) return;
+    const closeOutside = (event: MouseEvent) => {
+      if (!containerRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const closeEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setOpen(false);
+      searchRef.current?.focus();
+    };
+    document.addEventListener("mousedown", closeOutside);
+    document.addEventListener("keydown", closeEscape);
+    return () => {
+      document.removeEventListener("mousedown", closeOutside);
+      document.removeEventListener("keydown", closeEscape);
+    };
+  }, [open]);
+
+  return <div ref={containerRef} className="relative min-w-0">
+    <div className="relative">
+      <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+      <Input ref={searchRef} aria-label="搜索发布任务" type="search" value={searchInput} onChange={(event) => onSearchInputChange(event.target.value)} placeholder="搜索名称、文件名或分类…" className="h-control-sm pl-9 pr-11" />
+      <button type="button" className="absolute right-1 top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded-ui-sm text-muted-foreground transition-colors hover:bg-surface-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label={open ? "收起索引任务筛选" : "展开索引任务筛选"} title="筛选" aria-haspopup="dialog" aria-expanded={open} aria-controls={filtersId} onClick={() => setOpen((current) => !current)}>
+        <SlidersHorizontal className="size-4" aria-hidden="true" />
+        {activeFilterCount > 0 && <span className="absolute right-0.5 top-0.5 size-1.5 rounded-full bg-primary" aria-hidden="true" />}
+        {activeFilterCount > 0 && <span className="sr-only">，已启用 {activeFilterCount} 项筛选</span>}
+      </button>
+    </div>
+    {open && <div id={filtersId} role="dialog" aria-label="索引任务搜索筛选" className="fixed inset-x-4 bottom-4 top-4 z-dropdown overflow-y-auto rounded-ui-lg border border-border bg-popover p-3 text-popover-foreground shadow-overlay sm:absolute sm:inset-x-auto sm:bottom-auto sm:left-auto sm:right-0 sm:top-full sm:mt-2 sm:min-w-[36rem] sm:overflow-visible">
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="space-y-1 text-ui-xs text-muted-foreground"><span>分类</span><Select className="h-control-sm" aria-label="按数据库分类筛选" value={categoryId} onChange={(event) => onCategoryChange(event.target.value)}><option value="">全部分类</option>{categories.map((category) => <option key={category.id} value={category.id}>{category.full_path}</option>)}</Select></label>
+        <label className="space-y-1 text-ui-xs text-muted-foreground"><span>类型</span><Select className="h-control-sm" aria-label="按文件类型筛选" value={docType} onChange={(event) => onDocTypeChange(event.target.value)}><option value="">全部类型</option><option value="pdf">PDF</option><option value="markdown">Markdown</option><option value="docx">Word</option><option value="xlsx">Excel</option><option value="pptx">PPT</option><option value="transcript">视频转写</option></Select></label>
+        <label className="space-y-1 text-ui-xs text-muted-foreground"><span>来源</span><Select className="h-control-sm" aria-label="按资料来源筛选" value={sourceOrigin} onChange={(event) => onSourceChange(event.target.value)}><option value="">全部来源</option><option value="web">网页上传</option><option value="server">服务器导入</option><option value="legacy">历史迁移</option><option value="transcription">视频转录</option></Select></label>
+        <label className="space-y-1 text-ui-xs text-muted-foreground"><span>发布状态</span><Select className="h-control-sm" aria-label="按发布状态筛选" value={status} onChange={(event) => onStatusChange(event.target.value as StatusFilter)}><option value="all">全部状态</option><option value="processing">处理中</option><option value="ready">已发布</option><option value="failed">发布失败</option></Select></label>
+      </div>
+      <div className="mt-3 flex flex-col gap-2 border-t border-border pt-3 text-ui-sm sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-wrap gap-4"><label className="flex min-h-control-md cursor-pointer items-center gap-2"><Checkbox checked={includeArchived} onChange={(event) => onIncludeArchivedChange(event.target.checked)} /><span>包含回收站资料</span></label><label className="flex min-h-control-md cursor-pointer items-center gap-2"><Checkbox checked={history} onChange={(event) => onHistoryChange(event.target.checked)} /><span>查看历史尝试</span></label></div>
+        <Button size="sm" variant="outline" onClick={onClear} disabled={!searchInput && activeFilterCount === 0}>清除搜索与筛选</Button>
+      </div>
+    </div>}
+  </div>;
 }
 
 export function AdminDocumentsPage({ embedded = false }: { embedded?: boolean }) {
@@ -138,7 +199,7 @@ export function AdminDocumentsPage({ embedded = false }: { embedded?: boolean })
   const counts = listing.status_counts;
   const allCount = Object.values(counts).reduce((sum, value) => sum + value, 0);
   const pageCount = Math.max(1, Math.ceil(listing.total / PAGE_SIZE));
-  const hasFilters = Boolean(query || categoryId || docType || sourceOrigin || status !== "all" || includeArchived);
+  const hasFilters = Boolean(query || categoryId || docType || sourceOrigin || status !== "all" || history || includeArchived);
   const listingScopeDescription = `${history ? "正在显示全部历史尝试。" : "每个资料版本仅显示最新一次发布尝试。"} ${includeArchived ? "已包含回收站资料。" : "默认不显示回收站资料。"}`;
 
   const clearFilters = () => {
@@ -148,6 +209,7 @@ export function AdminDocumentsPage({ embedded = false }: { embedded?: boolean })
     setDocType("");
     setSourceOrigin("");
     setStatus("all");
+    setHistory(false);
     setIncludeArchived(false);
   };
 
@@ -169,26 +231,7 @@ export function AdminDocumentsPage({ embedded = false }: { embedded?: boolean })
 
   return (
     <section className="space-y-5" aria-labelledby={titleId}>
-      <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-        <div>
-          {!embedded && <p className="text-ui-xs font-medium text-primary">内容管理</p>}
-          {embedded
-            ? <h2 id={titleId} className="text-ui-xl font-semibold tracking-tight text-foreground">索引任务</h2>
-            : <h1 id={titleId} className="mt-1 text-ui-2xl font-semibold tracking-tight text-foreground">索引任务</h1>}
-          <p className="mt-1 max-w-3xl text-ui-sm text-muted-foreground">
-            跟踪资料版本的发布处理状态，并处理可重试的失败任务。
-          </p>
-        </div>
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={loading || refreshing}
-          onClick={() => void load(true)}
-        >
-          <RefreshCw className={cn("size-4", refreshing && "animate-spin")} />
-          {refreshing ? "刷新中" : "刷新"}
-        </Button>
-      </header>
+      {!embedded && <header><p className="text-ui-xs font-medium text-primary">内容管理</p><h1 id={titleId} className="mt-1 text-ui-2xl font-semibold tracking-tight text-foreground">索引任务</h1><p className="mt-1 max-w-3xl text-ui-sm text-muted-foreground">跟踪资料版本的发布处理状态，并处理可重试的失败任务。</p></header>}
 
       {error && (
         <ErrorState
@@ -199,99 +242,24 @@ export function AdminDocumentsPage({ embedded = false }: { embedded?: boolean })
       )}
 
       <section className="grid grid-cols-2 gap-3 lg:grid-cols-4" aria-label="发布任务状态概览">
-        <SummaryCard label="发布版本" value={allCount} />
-        <SummaryCard label="处理中" value={counts.processing || 0} />
-        <SummaryCard label="已发布" value={counts.ready || 0} />
-        <SummaryCard label="发布失败" value={counts.failed || 0} />
+        <ManagedSummaryCard label="发布版本" value={allCount} icon={<ListChecks className="size-4" />} active={status === "all"} onClick={() => setStatus("all")} />
+        <ManagedSummaryCard label="处理中" value={counts.processing || 0} icon={<Clock3 className="size-4" />} tone="warning" active={status === "processing"} onClick={() => setStatus((current) => current === "processing" ? "all" : "processing")} />
+        <ManagedSummaryCard label="已发布" value={counts.ready || 0} icon={<CheckCircle2 className="size-4" />} tone="success" active={status === "ready"} onClick={() => setStatus((current) => current === "ready" ? "all" : "ready")} />
+        <ManagedSummaryCard label="发布失败" value={counts.failed || 0} icon={<CircleAlert className="size-4" />} tone="destructive" active={status === "failed"} onClick={() => setStatus((current) => current === "failed" ? "all" : "failed")} />
       </section>
 
-      <Card className="overflow-hidden shadow-surface" aria-labelledby="managed-index-title">
-        <div className="flex flex-col gap-1 px-4 py-4 sm:flex-row sm:items-end sm:justify-between sm:px-5">
+      <Card className="overflow-hidden shadow-surface" aria-labelledby={embedded ? titleId : "managed-index-title"}>
+        <div className="grid gap-3 border-b border-border px-4 py-4 sm:px-5 lg:grid-cols-[minmax(13rem,1fr)_minmax(16rem,2fr)_auto] lg:items-end">
           <div>
             {embedded
-              ? <h3 id="managed-index-title" className="text-ui-base font-semibold text-foreground">资料发布任务</h3>
+              ? <h2 id={titleId} className="text-ui-base font-semibold text-foreground">索引任务</h2>
               : <h2 id="managed-index-title" className="text-ui-base font-semibold text-foreground">资料发布任务</h2>}
             <p className="mt-1 text-ui-xs text-muted-foreground">
-              {listingScopeDescription}
+              {embedded ? "跟踪资料版本的发布处理状态，并处理可重试的失败任务。" : listingScopeDescription}
             </p>
           </div>
-          <p className="text-ui-xs tabular-nums text-muted-foreground">当前共 {listing.total} 条</p>
-        </div>
-
-        <div className="grid gap-2 border-t border-border px-4 py-4 md:grid-cols-2 xl:grid-cols-[minmax(14rem,1fr)_minmax(11rem,14rem)_9rem_10rem_auto] xl:items-end sm:px-5">
-          <label className="space-y-1 text-ui-xs text-muted-foreground md:col-span-2 xl:col-span-1">
-            <span>搜索</span>
-            <span className="relative block">
-              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                aria-label="搜索发布任务"
-                type="search"
-                value={searchInput}
-                onChange={(event) => setSearchInput(event.target.value)}
-                placeholder="搜索名称、文件名或分类…"
-                className="pl-9"
-              />
-            </span>
-          </label>
-          <label className="space-y-1 text-ui-xs text-muted-foreground">
-            <span>分类</span>
-            <Select aria-label="按数据库分类筛选" value={categoryId} onChange={(event) => setCategoryId(event.target.value)}>
-              <option value="">全部分类</option>
-              {categories.map((category) => (
-                <option key={category.id} value={category.id}>{category.full_path}</option>
-              ))}
-            </Select>
-          </label>
-          <label className="space-y-1 text-ui-xs text-muted-foreground">
-            <span>类型</span>
-            <Select aria-label="按文件类型筛选" value={docType} onChange={(event) => setDocType(event.target.value)}>
-              <option value="">全部类型</option>
-              <option value="pdf">PDF</option>
-              <option value="markdown">Markdown</option>
-              <option value="docx">Word</option>
-              <option value="xlsx">Excel</option>
-              <option value="pptx">PPT</option>
-              <option value="transcript">视频转写</option>
-            </Select>
-          </label>
-          <label className="space-y-1 text-ui-xs text-muted-foreground">
-            <span>来源</span>
-            <Select aria-label="按资料来源筛选" value={sourceOrigin} onChange={(event) => setSourceOrigin(event.target.value)}>
-              <option value="">全部来源</option>
-              <option value="web">网页上传</option>
-              <option value="server">服务器导入</option>
-              <option value="legacy">历史迁移</option>
-              <option value="transcription">视频转录</option>
-            </Select>
-          </label>
-          <Button className="md:col-span-2 xl:col-span-1" variant="outline" onClick={clearFilters} disabled={!hasFilters}>清除筛选</Button>
-        </div>
-
-        <div className="flex flex-col gap-3 border-t border-border bg-surface-muted px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
-          <div className="flex flex-wrap gap-2" aria-label="按发布状态筛选">
-            {([
-              ["all", "全部"],
-              ["processing", "处理中"],
-              ["ready", "已发布"],
-              ["failed", "发布失败"],
-            ] as const).map(([value, label]) => (
-              <Button key={value} size="sm" variant={status === value ? "default" : "outline"} onClick={() => setStatus(value)}>
-                {label}
-              </Button>
-            ))}
-          </div>
-          <div className="flex flex-wrap items-center gap-3">
-            <label className="flex min-h-control-md cursor-pointer items-center gap-2 text-ui-sm text-foreground">
-              <Checkbox
-                checked={includeArchived}
-                onChange={(event) => setIncludeArchived(event.target.checked)}
-              />
-              <span>包含回收站资料</span>
-            </label>
-            <Button size="sm" variant="outline" aria-pressed={history} onClick={() => setHistory((value) => !value)}>
-              {history ? "仅看最新尝试" : "查看历史尝试"}
-            </Button>
-          </div>
+          <IndexTaskSearchFilters searchInput={searchInput} categoryId={categoryId} docType={docType} sourceOrigin={sourceOrigin} status={status} history={history} includeArchived={includeArchived} categories={categories} onSearchInputChange={setSearchInput} onCategoryChange={setCategoryId} onDocTypeChange={setDocType} onSourceChange={setSourceOrigin} onStatusChange={setStatus} onHistoryChange={setHistory} onIncludeArchivedChange={setIncludeArchived} onClear={clearFilters} />
+          <div className="flex items-center justify-end gap-2"><Button variant="outline" size="sm" disabled={loading || refreshing} onClick={() => void load(true)}><RefreshCw className={cn("size-4", refreshing && "animate-spin")} />{refreshing ? "刷新中" : "刷新"}</Button><p className="text-ui-xs tabular-nums text-muted-foreground">当前共 {listing.total} 条</p></div>
         </div>
 
         {loading ? (
@@ -325,7 +293,6 @@ export function AdminDocumentsPage({ embedded = false }: { embedded?: boolean })
     </section>
   );
 }
-
 function ManagedJobsTable({
   jobs,
   history,
@@ -434,20 +401,5 @@ function ManagedJobsTable({
         </tbody>
       </table>
     </div>
-  );
-}
-
-function SummaryCard({ label, value }: {
-  label: string;
-  value: number;
-}) {
-  return (
-    <Card className="overflow-hidden shadow-surface">
-      <CardContent className="relative p-4 pt-4">
-        <span className="absolute inset-x-0 top-0 h-1 bg-primary/80" aria-hidden="true" />
-        <p className="text-ui-xs font-medium text-muted-foreground">{label}</p>
-        <p className="mt-2 text-ui-xl font-semibold tabular-nums text-foreground">{value}</p>
-      </CardContent>
-    </Card>
   );
 }
