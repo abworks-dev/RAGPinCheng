@@ -181,6 +181,8 @@ Docker状态：docker compose -f docker/docker-compose.yml ps
 
 并行子任务只向主任务返回结构化的修改、验证和风险摘要，不单独修改共享完成文档，也不为说明性记录单独 commit 或 push。主任务负责人在阶段收口时统一汇总最终回复、PR 描述和必要的 TODO/功能文档变更。只有能独立交付的 PR 才在自身范围内同步受影响的当前事实文档。
 
+创建 PR 前还必须通过 `scripts/Test-CodexDelivery.ps1`：一个任务默认收口到一个分支和一个主 PR；同范围 CI、review 和验证修复继续推送原 PR；已合并分支不得复用。PR 正文必须记录风险、范围、实际验证、回滚方式以及 R2/R3 的方案批准证据。GitHub 的 `delivery-policy` required check 是远端最终门禁，规则细节见 `AGENTS.md` 的“分支与交付收口”。
+
 最终汇报：
 
 - 实际修改文件；

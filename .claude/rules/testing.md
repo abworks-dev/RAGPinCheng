@@ -16,3 +16,4 @@ paths:
 - 验证命令中的通配符和环境变量必须考虑 Bash 与 PowerShell 差异；报告实际执行的文件集合、通过数、跳过数及未覆盖环境。
 - CI 配置或跨平台测试规则变化后，至少运行相关专项测试和静态检查；本地无法等价覆盖 Linux、依赖或服务时必须明确说明，并以远端 CI 复跑作为最终验证。
 - 修改 workspace 身份门禁或协作入口时，运行 `pwsh -NoProfile -File scripts/tests/Test-CodexWorkspace.ps1`，并覆盖主/linked worktree、detached HEAD、新建/继续意图、分支例外、dirty 状态和跨仓库拒绝场景。该测试同时接入 CI，且不得清理或改写真实项目 worktree。
+- 修改 delivery 门禁、PR 模板或交付规则时，运行 `pwsh -NoProfile -File scripts/tests/Test-CodexDelivery.ps1`，并覆盖首次 PR、已有开放 PR、合并分支复用、历史基线兼容、风险字段和 R2/R3 审批证据。远端门禁必须从默认分支加载受信策略，不执行 PR 分支中的门禁脚本。
