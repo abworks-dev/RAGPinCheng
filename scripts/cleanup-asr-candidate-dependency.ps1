@@ -64,7 +64,7 @@ if ($Mode -in @('Preview', 'Quarantine')) {
     $releaseRoot = Join-Path $program "releases\$CandidateId"
     $configRoot = Join-Path $data "config\releases\$CandidateId"
     if ((Test-Path $releaseRoot) -xor (Test-Path $configRoot)) { throw 'Candidate release closure is incomplete' }
-    if (Test-Path $releaseRoot) { Read-AsrReleaseManifest -ProgramRoot $program -DataRoot $data -CandidateId $CandidateId | Out-Null }
+    if (Test-Path $releaseRoot) { Read-AsrReleaseManifest -ProgramRoot $program -DataRoot $data -CandidateId $CandidateId -AllowLegacyWhisperXV1Profiles | Out-Null }
     $info = Get-TreeInfo $original
     if ([int64]$info.bytes -gt ([int64]$MaxDeleteGB * 1GB)) { throw "Candidate exceeds the $MaxDeleteGB GiB deletion cap" }
     $manifest = [ordered]@{ schema_version='asr-candidate-dependency-cleanup/1'; candidate_id=$CandidateId; path=$original; bytes=$info.bytes; files=$info.files; last_write_utc=$info.last_write_utc }

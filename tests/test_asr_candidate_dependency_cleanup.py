@@ -77,3 +77,4 @@ def test_candidate_cleanup_workflow_is_single_candidate_and_hash_locked():
     assert "-Mode Quarantine" in workflow
     assert "-Mode Restore" in workflow
     assert "-Mode Finalize" in workflow
+    assert "-AllowLegacyWhisperXV1Profiles" in workflow
