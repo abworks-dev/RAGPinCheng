@@ -617,10 +617,11 @@ describe("AdminManagedContentPage", () => {
 
     const row = screen.getByTestId(`managed-folder-row-${childCategory.id}`);
     const labels = within(row).getAllByRole("button").map((button) => button.getAttribute("aria-label") || button.textContent);
-    expect(labels.slice(-4)).toEqual([
+    expect(labels.slice(-5)).toEqual([
       expect.stringContaining("调整文件夹"),
       expect.stringContaining("移动文件夹"),
       expect.stringContaining("重命名文件夹"),
+      expect.stringContaining("删除文件夹"),
       expect.stringContaining("打开文件夹"),
     ]);
   });

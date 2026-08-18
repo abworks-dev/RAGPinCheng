@@ -15,7 +15,7 @@ from api.content_permission_catalog import (
 )
 from api.content_import import import_server_batch, resolve_import_category
 from api.content_storage import ContentStorage, StoredContentObject
-from api.content_store import archive_content_item, create_category, create_content_revision, create_web_batch, list_categories, move_content_item, register_uploaded_document, restore_content_item
+from api.content_store import archive_content_item, create_category, create_content_revision, create_web_batch, delete_category, get_category_delete_preview, list_categories, move_content_item, register_uploaded_document, restore_content_item
 from api.content_store import (
     create_publication_job,
     review_version,
@@ -61,6 +61,55 @@ def test_migration_seeds_approved_top_level_categories(tmp_path):
         ("06", "项目经验与案例"),
         ("99", "待确认资料"),
     ]
+    conn.close()
+
+
+def test_category_delete_removes_empty_subtree_and_renumbers_siblings(tmp_path):
+    conn = _db(tmp_path)
+    first = create_category(conn, category_key=None, parent_id="cat-04", display_code="01", display_name="保留一", sort_order=10, target_position=1, confirm_number_shift=True, actor_user_id=1)
+    target = create_category(conn, category_key=None, parent_id="cat-04", display_code="02", display_name="待删除", sort_order=20, target_position=2, confirm_number_shift=True, actor_user_id=1)
+    child = create_category(conn, category_key=None, parent_id=target["id"], display_code="01", display_name="空子目录", sort_order=10, target_position=1, confirm_number_shift=True, actor_user_id=1)
+    last = create_category(conn, category_key=None, parent_id="cat-04", display_code="03", display_name="保留二", sort_order=30, target_position=3, confirm_number_shift=True, actor_user_id=1)
+    conn.execute(
+        """INSERT INTO category_import_aliases
+           (id,parent_category_id,folder_name,target_category_id,created_at,updated_at)
+           VALUES ('alias-delete-test',NULL,'待删除别名',?,1,1)""",
+        (target["id"],),
+    )
+    conn.commit()
+
+    preview = get_category_delete_preview(conn, target["id"])
+    assert preview["can_delete"] is True
+    assert preview["descendant_count"] == 1
+    assert preview["renumbered_sibling_count"] == 1
+    result = delete_category(conn, target["id"], expected_version=target["version"], confirmed=True, actor_user_id=1)
+
+    assert result["deleted_folder_count"] == 2
+    assert [tuple(row) for row in conn.execute(
+        "SELECT id,display_code FROM category_nodes WHERE parent_id='cat-04' AND deleted_at IS NULL ORDER BY sort_order"
+    )] == [(first["id"], "01"), (last["id"], "02")]
+    assert conn.execute("SELECT is_active FROM category_import_aliases WHERE id='alias-delete-test'").fetchone()[0] == 0
+    assert conn.execute("SELECT count(*) FROM category_nodes WHERE id IN (?,?) AND deleted_at IS NOT NULL", (target["id"], child["id"])).fetchone()[0] == 2
+    assert all(row["id"] not in {target["id"], child["id"]} for row in list_categories(conn, include_inactive=True))
+    conn.close()
+
+
+def test_category_delete_is_blocked_by_archived_content(tmp_path):
+    conn = _db(tmp_path)
+    target = create_category(conn, category_key=None, parent_id="cat-04", display_code="01", display_name="有回收站资料", sort_order=10, target_position=1, confirm_number_shift=True, actor_user_id=1)
+    conn.execute(
+        """INSERT INTO content_items
+           (id,title,content_kind,category_id,created_by,created_at,updated_at,archived_at)
+           VALUES ('item-delete-blocker','历史资料','document',?,1,1,1,2)""",
+        (target["id"],),
+    )
+    conn.commit()
+    preview = get_category_delete_preview(conn, target["id"])
+    assert preview["can_delete"] is False
+    assert preview["content_count"] == 1
+    with pytest.raises(ValueError, match="category_delete_blocked"):
+        delete_category(conn, target["id"], expected_version=target["version"], confirmed=True, actor_user_id=1)
+    assert conn.execute("SELECT deleted_at FROM category_nodes WHERE id=?", (target["id"],)).fetchone()[0] is None
     conn.close()
 
 

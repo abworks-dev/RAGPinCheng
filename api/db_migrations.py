@@ -1027,6 +1027,19 @@ MIGRATIONS = (
         ),
     ),
     Migration(23, "transcription_scheme_management", TRANSCRIPTION_SCHEME_STATEMENTS),
+    Migration(
+        24,
+        "category_logical_deletion",
+        (
+            "ALTER TABLE category_nodes ADD COLUMN deleted_at INTEGER",
+            "ALTER TABLE category_nodes ADD COLUMN deleted_by INTEGER REFERENCES users(id) ON DELETE SET NULL",
+            "DROP INDEX uq_category_nodes_sibling_code",
+            """CREATE UNIQUE INDEX uq_category_nodes_sibling_code
+               ON category_nodes(COALESCE(parent_id,''), display_code)
+               WHERE deleted_at IS NULL""",
+            "CREATE INDEX IF NOT EXISTS idx_category_nodes_deleted_at ON category_nodes(deleted_at)",
+        ),
+    ),
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 PHASE2_TABLES = frozenset(

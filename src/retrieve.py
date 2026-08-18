@@ -185,7 +185,7 @@ def _category_keys_for_values(values: list[str]) -> list[str]:
         placeholders = ",".join("?" for _ in values)
         rows = conn.execute(
             f"SELECT category_key FROM category_nodes WHERE category_key IN ({placeholders}) "
-            "AND is_active=1 AND chat_search_enabled=1",
+            "AND is_active=1 AND chat_search_enabled=1 AND deleted_at IS NULL",
             values,
         ).fetchall()
         return [str(row[0]) for row in rows]
@@ -207,7 +207,7 @@ def _category_keys_for_labels(labels: list[str]) -> list[str]:
             str(row[0])
             for row in conn.execute(
                 f"SELECT category_key FROM category_nodes WHERE display_name IN ({placeholders}) "
-                "AND is_active=1 AND chat_search_enabled=1",
+                "AND is_active=1 AND chat_search_enabled=1 AND deleted_at IS NULL",
                 labels,
             ).fetchall()
         ]
@@ -227,7 +227,7 @@ def _managed_category_labels() -> dict[str, str]:
         return {
             str(row[0]): str(row[1])
             for row in conn.execute(
-                "SELECT category_key,display_name FROM category_nodes"
+                "SELECT category_key,display_name FROM category_nodes WHERE deleted_at IS NULL"
             ).fetchall()
         }
     finally:

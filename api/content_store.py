@@ -107,11 +107,11 @@ def _category_siblings(
     if parent_id is None:
         return conn.execute(
             """SELECT id,parent_id,display_code,display_name,sort_order,is_active,version
-               FROM category_nodes WHERE parent_id IS NULL"""
+               FROM category_nodes WHERE parent_id IS NULL AND deleted_at IS NULL"""
         ).fetchall()
     return conn.execute(
         """SELECT id,parent_id,display_code,display_name,sort_order,is_active,version
-           FROM category_nodes WHERE parent_id=?""",
+           FROM category_nodes WHERE parent_id=? AND deleted_at IS NULL""",
         (parent_id,),
     ).fetchall()
 
@@ -350,13 +350,14 @@ def list_categories(conn: sqlite3.Connection, *, include_inactive: bool = False)
                        level,is_active,chat_search_enabled,chat_filter_selectable,
                        version,created_at,updated_at,
                        display_code || ' ' || display_name AS full_path
-                FROM category_nodes WHERE parent_id IS NULL
+                FROM category_nodes WHERE parent_id IS NULL AND deleted_at IS NULL
                 UNION ALL
                 SELECT c.id,c.category_key,c.parent_id,c.display_code,c.display_name,c.sort_order,
                        c.level,c.is_active,c.chat_search_enabled,c.chat_filter_selectable,
                        c.version,c.created_at,c.updated_at,
                        p.full_path || ' / ' || c.display_code || ' ' || c.display_name
                 FROM category_nodes c JOIN paths p ON p.id=c.parent_id
+                WHERE c.deleted_at IS NULL
             )
             SELECT p.*,(SELECT count(*) FROM content_items i
                         WHERE i.category_id=p.id AND i.archived_at IS NULL
@@ -389,6 +390,136 @@ def list_categories(conn: sqlite3.Connection, *, include_inactive: bool = False)
 
     visit(None)
     return ordered
+
+
+def _category_delete_preview(conn: sqlite3.Connection, category_id: str) -> dict[str, object]:
+    category = conn.execute(
+        """SELECT id,parent_id,display_name,version FROM category_nodes
+           WHERE id=? AND deleted_at IS NULL""",
+        (category_id,),
+    ).fetchone()
+    if category is None:
+        raise ValueError("category_not_found")
+    subtree = conn.execute(
+        """WITH RECURSIVE descendants(id) AS (
+               SELECT id FROM category_nodes WHERE id=? AND deleted_at IS NULL
+               UNION ALL
+               SELECT c.id FROM category_nodes c JOIN descendants d ON c.parent_id=d.id
+               WHERE c.deleted_at IS NULL
+           ) SELECT id FROM descendants""",
+        (category_id,),
+    ).fetchall()
+    subtree_ids = [str(row["id"]) for row in subtree]
+    placeholders = ",".join("?" for _ in subtree_ids)
+    content_count = int(conn.execute(
+        f"SELECT count(*) FROM content_items WHERE category_id IN ({placeholders})",
+        subtree_ids,
+    ).fetchone()[0])
+    pending_request_count = int(conn.execute(
+        f"""SELECT count(*) FROM content_folder_requests
+            WHERE status='pending' AND parent_category_id IN ({placeholders})""",
+        subtree_ids,
+    ).fetchone()[0])
+    active_upload_count = int(conn.execute(
+        f"""SELECT count(*) FROM upload_batches
+            WHERE target_category_id IN ({placeholders})
+              AND status IN ('staging','validating','awaiting_mapping','ready_for_review')""",
+        subtree_ids,
+    ).fetchone()[0])
+    reclassification_params = [*subtree_ids, *subtree_ids]
+    active_reclassification_count = int(conn.execute(
+        f"""SELECT count(*) FROM content_reclassification_jobs
+            WHERE status IN ('pending','applying','committing','rolling_back')
+              AND (source_category_id IN ({placeholders}) OR target_category_id IN ({placeholders}))""",
+        reclassification_params,
+    ).fetchone()[0])
+    remaining_siblings = sorted(
+        [row for row in _category_siblings(conn, category["parent_id"]) if row["id"] != category_id],
+        key=_category_sibling_sort_key,
+    )
+    renumber_count = len(_category_position_changes(remaining_siblings))
+    blockers = content_count + pending_request_count + active_upload_count + active_reclassification_count
+    return {
+        "category_id": category_id,
+        "parent_id": category["parent_id"],
+        "display_name": str(category["display_name"]),
+        "full_path": _category_path(conn, category_id),
+        "version": int(category["version"]),
+        "descendant_count": len(subtree_ids) - 1,
+        "folder_count": len(subtree_ids),
+        "content_count": content_count,
+        "pending_request_count": pending_request_count,
+        "active_upload_count": active_upload_count,
+        "active_reclassification_count": active_reclassification_count,
+        "renumbered_sibling_count": renumber_count,
+        "can_delete": blockers == 0,
+        "subtree_ids": subtree_ids,
+    }
+
+
+def get_category_delete_preview(conn: sqlite3.Connection, category_id: str) -> dict[str, object]:
+    preview = _category_delete_preview(conn, category_id)
+    return {key: value for key, value in preview.items() if key != "subtree_ids"}
+
+
+def delete_category(
+    conn: sqlite3.Connection,
+    category_id: str,
+    *,
+    expected_version: int,
+    confirmed: bool,
+    actor_user_id: int,
+) -> dict[str, object]:
+    if not confirmed:
+        raise ValueError("category_delete_confirmation_required")
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        preview = _category_delete_preview(conn, category_id)
+        if int(preview["version"]) != expected_version:
+            raise ValueError("category_version_conflict")
+        if not bool(preview["can_delete"]):
+            raise ValueError("category_delete_blocked")
+        subtree_ids = list(preview["subtree_ids"])
+        placeholders = ",".join("?" for _ in subtree_ids)
+        now = _now()
+        conn.execute(
+            f"""UPDATE category_import_aliases SET is_active=0,updated_at=?
+                WHERE is_active=1 AND (parent_category_id IN ({placeholders})
+                  OR target_category_id IN ({placeholders}))""",
+            [now, *subtree_ids, *subtree_ids],
+        )
+        conn.execute(
+            f"""UPDATE category_nodes
+                SET is_active=0,chat_search_enabled=0,chat_filter_selectable=0,
+                    deleted_at=?,deleted_by=?,updated_at=?,version=version+1
+                WHERE id IN ({placeholders}) AND deleted_at IS NULL""",
+            [now, actor_user_id, now, *subtree_ids],
+        )
+        remaining_siblings = sorted(
+            _category_siblings(conn, preview["parent_id"]), key=_category_sibling_sort_key
+        )
+        number_changes = _rewrite_category_positions(conn, remaining_siblings, now=now)
+        audit_event(
+            conn,
+            "category.deleted",
+            actor_user_id=actor_user_id,
+            category_id=category_id,
+            metadata={
+                "path": preview["full_path"],
+                "deleted_category_ids": subtree_ids,
+                "sibling_number_changes": number_changes,
+            },
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    return {
+        "deleted_folder_count": int(preview["folder_count"]),
+        "renumbered_sibling_count": len(number_changes),
+        "parent_id": preview["parent_id"],
+        "categories": list_categories(conn, include_inactive=True),
+    }
 
 
 def create_category(
