@@ -123,11 +123,11 @@ export function AdminLayout() {
     <div className="flex min-h-full flex-col bg-admin-background text-foreground lg:h-screen lg:flex-row lg:overflow-hidden">
       <aside
         className={cn(
-          "flex shrink-0 flex-col overflow-hidden bg-sidebar text-sidebar-foreground lg:h-full lg:transition-[width] lg:duration-normal",
+          "flex shrink-0 flex-col bg-sidebar text-sidebar-foreground lg:h-full lg:transition-[width] lg:duration-normal",
           sidebarCollapsed ? "lg:w-16" : "lg:w-[17rem]",
         )}
       >
-        <div className="border-b border-sidebar-border px-3 py-3 lg:border-b-0">
+        <div className="overflow-hidden border-b border-sidebar-border px-3 py-3 lg:border-b-0">
           <div className="flex h-9 items-center justify-between">
             <button
               type="button"
@@ -156,7 +156,7 @@ export function AdminLayout() {
           </div>
         </div>
 
-        <div className={cn("px-3 py-3 lg:min-h-0 lg:flex-1", !mobileNavigationOpen && "hidden lg:block")}>
+        <div className={cn("overflow-hidden px-3 py-3 lg:min-h-0 lg:flex-1", !mobileNavigationOpen && "hidden lg:block")}>
           <nav aria-label="管理功能" className="space-y-3">
             {navigation.map((group) => (
               <section key={group.label} aria-labelledby={`admin-nav-${group.label}`}>
