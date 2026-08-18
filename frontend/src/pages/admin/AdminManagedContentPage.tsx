@@ -31,6 +31,7 @@ import {
 
 const PAGE_SIZE = 25;
 const PAGE_SIZE_OPTIONS = [25, 50, 100];
+const UPLOAD_TASK_PAGE_SIZE_OPTIONS = [10, 25, 50];
 const BULK_LIMIT = 20;
 const BULK_DOWNLOAD_TOAST_ID = "managed-content-bulk-download";
 type SortKey = "title" | "updatedAt" | "status" | "source";
@@ -112,6 +113,32 @@ function UploadTaskResult({ task }: { task: ManagedUploadTask }) {
   </div>;
 }
 
+function csvCell(value: string | number | null | undefined) {
+  const text = String(value ?? "");
+  const safeText = /^[=+\-@]/.test(text) ? `'${text}` : text;
+  return `"${safeText.replace(/"/g, '""')}"`;
+}
+
+function uploadTaskSummaryCsv(tasks: ManagedUploadTask[]) {
+  const header = ["任务类型", "目标路径", "文件总数", "已接收", "已跳过", "未完成", "状态", "创建人", "创建时间", "失败原因"];
+  const rows = tasks.map((task) => {
+    const unresolved = Math.max(0, task.total_files - task.accepted_files - task.skipped_files);
+    return [
+      task.upload_mode === "folder" ? "文件夹上传" : "文件上传",
+      task.target_path,
+      task.total_files,
+      task.accepted_files,
+      task.skipped_files,
+      unresolved,
+      uploadTaskStatusLabel[task.status] || task.status,
+      task.created_by_name,
+      formatManagedUpdatedAt(task.created_at),
+      task.error_summary,
+    ].map(csvCell).join(",");
+  });
+  return [header.map(csvCell).join(","), ...rows].join("\r\n");
+}
+
 function UploadTasksPanel({
   activeUpload,
   canRetry,
@@ -128,13 +155,13 @@ function UploadTasksPanel({
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "completed" | "partial_success" | "failed">("all");
   const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(UPLOAD_TASK_PAGE_SIZE_OPTIONS[0]);
+  const [selected, setSelected] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [detail, setDetail] = useState<ManagedUploadTask | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
-  const pageSize = 10;
-
-  useEffect(() => { setPage(0); }, [query, statusFilter]);
+  useEffect(() => { setPage(0); setSelected([]); }, [query, statusFilter, pageSize]);
 
   const loadTasks = useCallback(async () => {
     setLoading(true); setError(null);
@@ -149,7 +176,7 @@ function UploadTasksPanel({
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "上传任务加载失败");
     } finally { setLoading(false); }
-  }, [page, query, statusFilter]);
+  }, [page, pageSize, query, statusFilter]);
 
   useEffect(() => { void loadTasks(); }, [loadTasks]);
   useEffect(() => {
@@ -165,6 +192,27 @@ function UploadTasksPanel({
   };
   const visibleTasks = tasks;
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  const selectableTasks = visibleTasks.slice(0, BULK_LIMIT);
+  const allSelected = selectableTasks.length > 0 && selectableTasks.every((task) => selected.includes(task.batch_id));
+  const selectedTasks = visibleTasks.filter((task) => selected.includes(task.batch_id));
+  const changePage = (nextPage: number) => {
+    setSelected([]);
+    setPage(Math.max(0, Math.min(nextPage, pageCount - 1)));
+  };
+  const toggleAll = () => {
+    setSelected(allSelected ? [] : selectableTasks.map((task) => task.batch_id).slice(0, BULK_LIMIT));
+  };
+  const toggleTask = (batchId: string) => {
+    setSelected((current) => current.includes(batchId)
+      ? current.filter((id) => id !== batchId)
+      : current.length >= BULK_LIMIT ? current : [...current, batchId]);
+  };
+  const exportSelected = () => {
+    if (selectedTasks.length === 0) return;
+    const date = new Date().toISOString().slice(0, 10);
+    triggerManagedDownload(new Blob([`\uFEFF${uploadTaskSummaryCsv(selectedTasks)}`], { type: "text/csv;charset=utf-8" }), `上传任务摘要-${date}.csv`);
+    toast.success(`已导出 ${selectedTasks.length} 个任务摘要`);
+  };
   const hasFilters = Boolean(query) || statusFilter !== "all";
   const applySearch = () => {
     const nextQuery = queryInput.trim();
@@ -198,16 +246,21 @@ function UploadTasksPanel({
           <label className="min-w-0 space-y-1 text-ui-xs text-muted-foreground"><span>搜索任务</span><span className="relative block"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2" /><Input type="search" aria-label="搜索上传任务" className="pl-9" value={queryInput} onChange={(event) => setQueryInput(event.target.value)} placeholder="搜索目标目录或文件名…" /></span></label>
           <Button type="submit" className="h-control-md" disabled={loading || queryInput.trim() === query}><Search className="size-4" />搜索</Button>
         </form>
-        <div className="flex flex-wrap items-center gap-2 lg:justify-end"><Button size="sm" variant="outline" onClick={clearFilters} disabled={!queryInput && !hasFilters}>清除筛选</Button><span className="text-ui-xs text-muted-foreground" role="status">共 {total} 个任务</span></div>
+        <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+          <Button size="sm" variant="outline" onClick={clearFilters} disabled={!queryInput && !hasFilters}>清除筛选</Button>
+          {selected.length > 0 && <Button size="sm" variant="outline" onClick={() => setSelected([])}>取消选择</Button>}
+          {selected.length > 1 && <BatchActionsMenu disabled={loading} options={[{ key: "export_upload_summary", label: "导出任务摘要", icon: <Download className="size-4" />, onSelect: exportSelected }]} />}
+          <span className="text-ui-xs text-muted-foreground" role="status" aria-live="polite">共 {total} 个任务 · {selected.length > 0 ? <>已选择 <strong>{selected.length}</strong> 个，单次最多 {BULK_LIMIT} 个</> : <>未选择任务，单次最多 {BULK_LIMIT} 个</>}</span>
+        </div>
       </div>
       {error && <ErrorState title="上传任务加载失败" description={error} action={<Button size="sm" variant="outline" onClick={() => void loadTasks()}>重新加载</Button>} />}
       {loading ? <LoadingState className="min-h-48 border-0" label="正在加载上传任务…" /> : statusFilter === "active" && !activeUpload && visibleTasks.length === 0 ? <EmptyState className="rounded-none border-0" title="暂无进行中的上传" description="开始上传文件或文件夹后，进度会显示在这里。" action={<Button size="sm" variant="outline" onClick={clearFilters}>查看全部任务</Button>} /> : visibleTasks.length === 0 ? <EmptyState className="rounded-none border-0" title={hasFilters ? "没有符合条件的上传任务" : "暂无上传任务"} description={hasFilters ? "请调整搜索关键词或状态筛选。" : "上传文件或文件夹后，任务记录会显示在这里。"} action={hasFilters ? <Button size="sm" variant="outline" onClick={clearFilters}>清除筛选</Button> : undefined} /> : <>
-        <div className="hidden grid-cols-[minmax(10rem,1.7fr)_5.5rem_minmax(11rem,1fr)_8rem_6rem_9.75rem] gap-x-4 border-b border-border bg-surface-muted/40 px-5 py-2.5 text-ui-xs font-medium text-muted-foreground xl:grid" data-testid="upload-task-header"><span>任务</span><span>文件</span><span>处理结果</span><span>创建时间</span><span>状态</span><span className="text-right">操作</span></div>
-        <ul className="divide-y divide-border">{visibleTasks.map((task) => <li key={task.batch_id} className="flex flex-col gap-3 px-4 py-4 sm:px-5 xl:grid xl:grid-cols-[minmax(10rem,1.7fr)_5.5rem_minmax(11rem,1fr)_8rem_6rem_9.75rem] xl:items-center xl:gap-x-4" data-testid="upload-task-row"><div className="min-w-0"><p className="break-all font-medium">{task.upload_mode === "folder" ? "文件夹上传" : "文件上传"}</p><p className="mt-1 break-all text-ui-xs text-muted-foreground">{task.target_path}</p></div><div><span className="mb-1 block text-ui-xs font-medium text-muted-foreground xl:hidden">文件</span><span className="text-ui-xs text-muted-foreground">{task.upload_mode === "folder" ? "文件夹" : "文件"} · {task.total_files} 个</span></div><div><span className="mb-1 block text-ui-xs font-medium text-muted-foreground xl:hidden">处理结果</span><UploadTaskResult task={task} /></div><div><span className="mb-1 block text-ui-xs font-medium text-muted-foreground xl:hidden">创建时间</span><span className="text-ui-xs text-muted-foreground">{formatManagedUpdatedAt(task.created_at)}</span></div><div><span className="mb-1 block text-ui-xs font-medium text-muted-foreground xl:hidden">状态</span><Badge variant={uploadTaskStatusVariant(task.status)}>{uploadTaskStatusLabel[task.status]}</Badge></div><div className="flex gap-2 xl:justify-end"><Button size="sm" variant="outline" onClick={() => void openDetail(task)}><ListChecks className="size-4" />详情</Button>{task.status === "failed" && <Button size="sm" variant="outline" disabled={!canRetry(task)} onClick={() => onRetry(task)}><RotateCcw className="size-4" />重试</Button>}</div></li>)}</ul>
+        <div className="hidden grid-cols-[2rem_minmax(10rem,1.7fr)_5.5rem_minmax(11rem,1fr)_8rem_6rem_9.75rem] gap-x-4 border-b border-border bg-surface-muted/40 px-5 py-2.5 text-ui-xs font-medium text-muted-foreground xl:grid" data-testid="upload-task-header"><Checkbox aria-label="选择当前页上传任务" checked={allSelected} disabled={selectableTasks.length === 0} onChange={toggleAll} /><span>任务</span><span>文件</span><span>处理结果</span><span>创建时间</span><span>状态</span><span className="text-right">操作</span></div>
+        <ul className="divide-y divide-border">{visibleTasks.map((task) => <li key={task.batch_id} className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-3 px-4 py-4 sm:px-5 xl:grid-cols-[2rem_minmax(10rem,1.7fr)_5.5rem_minmax(11rem,1fr)_8rem_6rem_9.75rem] xl:items-center xl:gap-x-4" data-testid="upload-task-row"><Checkbox className="mt-0.5 xl:mt-0" aria-label={`选择${task.upload_mode === "folder" ? "文件夹上传" : "文件上传"} ${task.target_path}`} checked={selected.includes(task.batch_id)} disabled={!selected.includes(task.batch_id) && selected.length >= BULK_LIMIT} title={!selected.includes(task.batch_id) && selected.length >= BULK_LIMIT ? `单次最多选择 ${BULK_LIMIT} 个任务` : undefined} onChange={() => toggleTask(task.batch_id)} /><div className="min-w-0"><p className="break-all font-medium">{task.upload_mode === "folder" ? "文件夹上传" : "文件上传"}</p><p className="mt-1 break-all text-ui-xs text-muted-foreground">{task.target_path}</p></div><div className="col-span-2 xl:col-span-1"><span className="mb-1 block text-ui-xs font-medium text-muted-foreground xl:hidden">文件</span><span className="text-ui-xs text-muted-foreground">{task.upload_mode === "folder" ? "文件夹" : "文件"} · {task.total_files} 个</span></div><div className="col-span-2 xl:col-span-1"><span className="mb-1 block text-ui-xs font-medium text-muted-foreground xl:hidden">处理结果</span><UploadTaskResult task={task} /></div><div className="col-span-2 xl:col-span-1"><span className="mb-1 block text-ui-xs font-medium text-muted-foreground xl:hidden">创建时间</span><span className="text-ui-xs text-muted-foreground">{formatManagedUpdatedAt(task.created_at)}</span></div><div className="col-span-2 xl:col-span-1"><span className="mb-1 block text-ui-xs font-medium text-muted-foreground xl:hidden">状态</span><Badge variant={uploadTaskStatusVariant(task.status)}>{uploadTaskStatusLabel[task.status]}</Badge></div><div className="col-span-2 flex flex-wrap gap-2 xl:col-span-1 xl:justify-end"><>{task.status === "failed" && <Button size="sm" variant="outline" disabled={!canRetry(task)} aria-label={canRetry(task) ? "重试" : "重试（原始文件不可用）"} title={!canRetry(task) ? "原始文件仅保留在当前浏览器会话中，当前不可重试" : undefined} onClick={() => onRetry(task)}><RotateCcw className="size-4" />重试</Button>}<Button size="sm" variant="outline" onClick={() => void openDetail(task)}><ListChecks className="size-4" />详情</Button></></div></li>)}</ul>
       </>}
-      <div className="flex items-center justify-between border-t border-border px-4 py-3 sm:px-5"><p className="text-ui-xs text-muted-foreground">第 {page + 1} / {pageCount} 页</p><div className="flex gap-2"><Button size="sm" variant="outline" disabled={page === 0 || loading} onClick={() => setPage((value) => value - 1)}>上一页</Button><Button size="sm" variant="outline" disabled={page + 1 >= pageCount || loading} onClick={() => setPage((value) => value + 1)}>下一页</Button></div></div>
+      <div className="flex flex-col gap-2 border-t border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5"><p className="text-ui-xs text-muted-foreground">共 {total} 个任务，第 {page + 1} / {pageCount} 页</p><div className="flex flex-wrap items-center justify-end gap-2"><label className="flex items-center gap-2 text-ui-xs text-muted-foreground">每页<Select aria-label="每页上传任务条数" className="h-control-sm w-20" value={String(pageSize)} onChange={(event) => setPageSize(Number(event.target.value))}>{UPLOAD_TASK_PAGE_SIZE_OPTIONS.map((size) => <option key={size} value={size}>{size} 条</option>)}</Select></label><Button size="sm" variant="outline" disabled={page === 0 || loading} onClick={() => changePage(page - 1)}>上一页</Button><Select aria-label="跳转上传任务页码" className="h-control-sm w-24" value={String(page + 1)} onChange={(event) => changePage(Number(event.target.value) - 1)} disabled={loading}>{Array.from({ length: pageCount }, (_, index) => <option key={index + 1} value={index + 1}>第 {index + 1} 页</option>)}</Select><Button size="sm" variant="outline" disabled={page + 1 >= pageCount || loading} onClick={() => changePage(page + 1)}>下一页</Button></div></div>
     </Card>
-    <Sheet open={Boolean(detail)} onOpenChange={(open) => { if (!open) setDetail(null); }}><SheetContent className="max-w-xl overflow-y-auto"><SheetHeader><SheetTitle>上传任务详情</SheetTitle><SheetDescription>{detail?.target_path || "查看任务明细"}</SheetDescription></SheetHeader>{detailLoading ? <LoadingState className="mt-6 border-0" label="正在加载任务详情…" /> : detail && <div className="mt-6 space-y-5"><dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4 gap-y-2 text-ui-sm"><dt className="text-muted-foreground">状态</dt><dd><Badge variant={uploadTaskStatusVariant(detail.status)}>{uploadTaskStatusLabel[detail.status]}</Badge></dd><dt className="text-muted-foreground">目标目录</dt><dd className="break-words">{detail.target_path}</dd><dt className="text-muted-foreground">创建人</dt><dd>{detail.created_by_name}</dd><dt className="text-muted-foreground">创建时间</dt><dd>{formatManagedUpdatedAt(detail.created_at)}</dd><dt className="text-muted-foreground">文件统计</dt><dd>{detail.accepted_files} 个已接收，{detail.skipped_files} 个已跳过，共 {detail.total_files} 个</dd>{detail.error_summary && <><dt className="text-muted-foreground">失败原因</dt><dd className="break-words text-destructive">{detail.error_summary}</dd></>}</dl><div><h3 className="text-ui-sm font-semibold">文件明细</h3><ul className="mt-2 divide-y divide-border rounded-ui-md border border-border">{(detail.entries || []).map((entry) => <li key={entry.sequence} className="flex items-start justify-between gap-3 px-3 py-2 text-ui-sm"><span className="min-w-0"><span className="block break-all">{entry.relative_path || entry.filename}</span>{entry.reason && <span className="mt-0.5 block break-words text-ui-xs text-muted-foreground">{entry.reason}</span>}</span><span className={`shrink-0 text-ui-xs ${entry.status === "accepted" ? "text-success" : "text-warning"}`}>{uploadTaskEntryStatus(entry)}</span></li>)}</ul></div>{detail.status === "failed" && <Button variant="outline" disabled={!canRetry(detail)} onClick={() => { onRetry(detail); setDetail(null); }}><RotateCcw className="size-4" />重试此任务</Button>}</div>}</SheetContent></Sheet>
+    <Sheet open={Boolean(detail)} onOpenChange={(open) => { if (!open) setDetail(null); }}><SheetContent className="max-w-xl overflow-y-auto"><SheetHeader><SheetTitle>上传任务详情</SheetTitle><SheetDescription>{detail?.target_path || "查看任务明细"}</SheetDescription></SheetHeader>{detailLoading ? <LoadingState className="mt-6 border-0" label="正在加载任务详情…" /> : detail && <div className="mt-6 space-y-5"><dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4 gap-y-2 text-ui-sm"><dt className="text-muted-foreground">状态</dt><dd><Badge variant={uploadTaskStatusVariant(detail.status)}>{uploadTaskStatusLabel[detail.status]}</Badge></dd><dt className="text-muted-foreground">目标目录</dt><dd className="break-words">{detail.target_path}</dd><dt className="text-muted-foreground">创建人</dt><dd>{detail.created_by_name}</dd><dt className="text-muted-foreground">创建时间</dt><dd>{formatManagedUpdatedAt(detail.created_at)}</dd><dt className="text-muted-foreground">文件统计</dt><dd>{detail.accepted_files} 个已接收，{detail.skipped_files} 个已跳过，共 {detail.total_files} 个</dd>{detail.error_summary && <><dt className="text-muted-foreground">失败原因</dt><dd className="break-words text-destructive">{detail.error_summary}</dd></>}</dl><div><h3 className="text-ui-sm font-semibold">文件明细</h3><ul className="mt-2 divide-y divide-border rounded-ui-md border border-border">{(detail.entries || []).map((entry) => <li key={entry.sequence} className="flex items-start justify-between gap-3 px-3 py-2 text-ui-sm"><span className="min-w-0"><span className="block break-all">{entry.relative_path || entry.filename}</span>{entry.reason && <span className="mt-0.5 block break-words text-ui-xs text-muted-foreground">{entry.reason}</span>}</span><span className={`shrink-0 text-ui-xs ${entry.status === "accepted" ? "text-success" : "text-warning"}`}>{uploadTaskEntryStatus(entry)}</span></li>)}</ul></div>{detail.status === "failed" && <Button variant="outline" disabled={!canRetry(detail)} aria-label={canRetry(detail) ? "重试此任务" : "重试此任务（原始文件不可用）"} title={!canRetry(detail) ? "原始文件仅保留在当前浏览器会话中，当前不可重试" : undefined} onClick={() => { onRetry(detail); setDetail(null); }}><RotateCcw className="size-4" />重试此任务</Button>}</div>}</SheetContent></Sheet>
   </section>;
 }
 
@@ -232,7 +285,7 @@ function PublicationFailure({ item }: { item: ManagedContentItem }) {
   return <div className="mt-2 max-w-md space-y-1 text-ui-xs text-destructive" role="alert"><p className="break-words">{failure.message}</p><p className="break-words text-muted-foreground">{failure.recommended_action}</p><p className="break-words text-muted-foreground">{failure.retryable ? "可以重新发布" : "按原失败原因直接重试通常不会成功；系统或文件处理后可重新发布"}{item.publication_attempt_count > 1 ? ` · 共尝试 ${item.publication_attempt_count} 次` : ""}</p></div>;
 }
 
-type BulkAction = "move" | "approve" | "reject" | "publish" | "download" | "archive";
+type BulkAction = "move" | "approve" | "reject" | "publish" | "download" | "archive" | "export_upload_summary";
 
 type FilenameConflict = {
   item_id: string;
