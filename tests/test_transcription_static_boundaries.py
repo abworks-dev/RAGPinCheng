@@ -23,7 +23,7 @@ ALLOWED = {
     "pipeline": {"types", "profile", "provider_protocol", "normalizer", "canonical"},
     "formatter": {"types", "canonical"},
     "policy": {"types", "profile"},
-    "persistence": {"types", "profile", "provider_protocol", "canonical"},
+    "persistence": {"types", "profile", "provider_protocol", "canonical", "scheme"},
     "workflow": {"types", "profile", "provider_protocol", "canonical", "persistence", "policy"},
     "runtime_ports": {"types"},
     "provider_registry": {"types", "provider_protocol", "runtime_ports"},
