@@ -1894,6 +1894,11 @@ describe("AdminManagedContentPage", () => {
     render(<AdminManagedContentPage />);
     expect(await screen.findByText("03 公司内部标准 / 02 文件夹上传测试")).toBeInTheDocument();
     expect(screen.getByText("未完成 1 个")).toBeInTheDocument();
+    const failedRow = screen.getByTestId("upload-task-row");
+    const failedActions = within(failedRow).getAllByRole("button");
+    expect(failedActions.map((button) => button.textContent)).toEqual(["重试", "详情"]);
+    expect(failedActions[0]).toBeDisabled();
+    expect(failedActions[0]).toHaveAttribute("title", "原始文件仅保留在当前浏览器会话中，当前不可重试");
 
     const search = screen.getByRole("searchbox", { name: "搜索上传任务" });
     fireEvent.change(search, { target: { value: " guide.md " } });
@@ -1922,5 +1927,58 @@ describe("AdminManagedContentPage", () => {
       status: undefined,
     })));
     expect(search).toHaveValue("");
+  });
+
+  it("supports upload-task selection, summary export, and pagination resets", async () => {
+    mocks.permissions = ORGANIZER_PERMISSIONS;
+    const tasks = Array.from({ length: 21 }, (_, index) => ({
+      batch_id: `batch-page-${index + 1}`,
+      upload_mode: index % 2 ? "folder" as const : "files" as const,
+      status: index === 0 ? "failed" as const : "completed" as const,
+      target_category_id: "cat-03",
+      target_path: `03 公司内部标准 / 任务 ${index + 1}`,
+      total_files: 2,
+      accepted_files: index === 0 ? 0 : 2,
+      skipped_files: 0,
+      total_bytes: 20,
+      total_uploaded_bytes: index === 0 ? 0 : 20,
+      created_by_name: "整理员",
+      created_at: index + 1,
+      updated_at: index + 1,
+      error_summary: index === 0 ? "上传中断" : null,
+      entries: null,
+    }));
+    mocks.uploadTasks.mockImplementation(async (params: { limit?: number; offset?: number } = {}) => {
+      const limit = params.limit || 10;
+      const offset = params.offset || 0;
+      return { tasks: tasks.slice(offset, offset + limit), total: tasks.length, status_counts: { completed: 20, failed: 1 } };
+    });
+    window.history.replaceState({}, "", "/admin/content?view=uploads");
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: vi.fn(() => "blob:upload-summary") });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
+
+    render(<AdminManagedContentPage />);
+    expect(await screen.findByText("03 公司内部标准 / 任务 1")).toBeInTheDocument();
+    const rows = screen.getAllByTestId("upload-task-row");
+    fireEvent.click(within(rows[0]).getByRole("checkbox"));
+    fireEvent.click(within(rows[1]).getByRole("checkbox"));
+    expect(screen.getAllByRole("status").some((status) => status.textContent?.includes("已选择 2 个"))).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "批量操作" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "导出任务摘要" }));
+    expect(mocks.success).toHaveBeenCalledWith("已导出 2 个任务摘要");
+
+    fireEvent.click(screen.getByRole("button", { name: "下一页" }));
+    await waitFor(() => expect(mocks.uploadTasks).toHaveBeenLastCalledWith(expect.objectContaining({ limit: 10, offset: 10 })));
+    expect(screen.queryByRole("button", { name: "批量操作" })).not.toBeInTheDocument();
+    expect(screen.getByText("03 公司内部标准 / 任务 11")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("combobox", { name: "每页上传任务条数" }), { target: { value: "25" } });
+    await waitFor(() => expect(mocks.uploadTasks).toHaveBeenLastCalledWith(expect.objectContaining({ limit: 25, offset: 0 })));
+    expect(screen.getByText("共 21 个任务，第 1 / 1 页")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("checkbox", { name: "选择当前页上传任务" }));
+    expect(screen.getAllByRole("status").some((status) => status.textContent?.includes("已选择 20 个"))).toBe(true);
+    const cappedRows = screen.getAllByTestId("upload-task-row");
+    expect(within(cappedRows[20]).getByRole("checkbox")).toBeDisabled();
   });
 });

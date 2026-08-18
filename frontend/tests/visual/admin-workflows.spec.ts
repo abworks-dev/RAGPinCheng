@@ -112,6 +112,8 @@ test.describe("资料管理", () => {
     await expect(page.getByRole("heading", { name: "上传任务" })).toBeVisible();
     await expect(page.getByText("已接收 2 个 · 跳过 1 个")).toBeVisible();
     await expect(page.getByText("未完成 1 个")).toBeVisible();
+    await expect(page.getByRole("combobox", { name: "每页上传任务条数" })).toHaveValue("10");
+    await expect(page.getByRole("combobox", { name: "跳转上传任务页码" })).toHaveValue("1");
     await expectNoBodyOverflow(page);
     await page.screenshot({ path: testInfo.outputPath("managed-content-upload-tasks-normal.png"), fullPage: true });
 
@@ -127,11 +129,30 @@ test.describe("资料管理", () => {
       await expect(page.getByTestId("upload-task-header")).toBeHidden();
     }
 
+    const rows = page.getByTestId("upload-task-row");
+    const failedRow = rows.filter({ hasText: "01 行业规范与标准 / 02 文件夹上传测试" });
+    const failedActions = failedRow.getByRole("button");
+    await expect(failedActions).toHaveCount(2);
+    expect(await failedActions.allTextContents()).toEqual(["重试", "详情"]);
+    const retry = failedRow.getByRole("button", { name: "重试（原始文件不可用）", exact: true });
+    await expect(retry).toBeDisabled();
+    await expect(retry).toHaveAttribute("title", "原始文件仅保留在当前浏览器会话中，当前不可重试");
+
+    await rows.nth(0).getByRole("checkbox").check();
+    await rows.nth(1).getByRole("checkbox").check();
+    await expect(page.getByText(/已选择\s*2\s*个/)).toBeVisible();
+    const batchButton = page.getByRole("button", { name: "批量操作" });
+    await expect(batchButton).toBeVisible();
+    await batchButton.click();
+    await expect(page.getByRole("menuitem", { name: "导出任务摘要" })).toBeVisible();
+    await page.keyboard.press("Escape");
+
     const search = page.getByRole("searchbox", { name: "搜索上传任务" });
     await search.fill("竣工交付");
     const searchRequest = page.waitForRequest((request) => new URL(request.url()).searchParams.get("query") === "竣工交付");
     await page.getByRole("button", { name: "搜索", exact: true }).click();
     await searchRequest;
+    await expect(batchButton).toHaveCount(0);
     await expect(page.getByText("04 项目资料 / 02 竣工交付")).toBeVisible();
     await expect(page.getByText("01 行业规范与标准 / 02 文件夹上传测试")).toHaveCount(0);
 
