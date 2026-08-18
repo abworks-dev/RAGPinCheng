@@ -15,13 +15,52 @@ import logging
 import os
 import tempfile
 import time
+import signal
+import shutil
+import threading
 from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 # Timeout for document conversion (seconds)
-_DOCX_TIMEOUT = 120
+from .config import OFFICE_MIN_FREE_DISK_MB, OFFICE_PARSE_TIMEOUT_SECONDS
+
+class OfficeConversionError(RuntimeError):
+    """Recoverable Office conversion failure with a stable reason."""
+
+class _ParseTimeout(Exception):
+    pass
+
+def _ensure_disk_space(path: Path) -> None:
+    usage = shutil.disk_usage(path.parent)
+    required = OFFICE_MIN_FREE_DISK_MB * 1024 * 1024
+    if usage.free < required:
+        raise OfficeConversionError(f"office_disk_space_low: free={usage.free} required={required}")
+
+def _run_with_timeout(func: Any, *args: Any, **kwargs: Any) -> Any:
+    timeout = OFFICE_PARSE_TIMEOUT_SECONDS
+    if timeout <= 0:
+        raise OfficeConversionError("office_parse_timeout: timeout must be positive")
+    can_alarm = hasattr(signal, "SIGALRM") and threading.current_thread() is threading.main_thread()
+    previous = None
+    def _alarm(_signum: int, _frame: Any) -> None:
+        raise _ParseTimeout
+    started = time.monotonic()
+    try:
+        if can_alarm:
+            previous = signal.signal(signal.SIGALRM, _alarm)
+            signal.setitimer(signal.ITIMER_REAL, timeout)
+        result = func(*args, **kwargs)
+        if time.monotonic() - started > timeout:
+            raise _ParseTimeout
+        return result
+    except _ParseTimeout as exc:
+        raise OfficeConversionError(f"office_parse_timeout: {timeout}s") from exc
+    finally:
+        if can_alarm:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            signal.signal(signal.SIGALRM, previous)
 
 
 def _text_hash(text: str, length: int = 8) -> str:
@@ -71,11 +110,12 @@ def convert_docx_to_markdown(path: Path) -> tuple[str, list[dict[str, Any]]]:
             "docling is not installed. Run: pip install docling"
         )
 
+    _ensure_disk_space(path)
     logger.info("converting DOCX: %s", path.name)
     start = time.time()
 
     converter = DocumentConverter()
-    result = converter.convert(str(path))
+    result = _run_with_timeout(converter.convert, str(path))
     doc = result.document
     markdown = doc.export_to_markdown()
 
@@ -350,12 +390,13 @@ def convert_xlsx_to_markdown(path: Path) -> tuple[str, list[dict[str, Any]]]:
         raise ImportError(
             "openpyxl is not installed. Run: pip install openpyxl"
         )
+    _ensure_disk_space(path)
 
     logger.info("converting XLSX: %s", path.name)
     start = time.time()
 
-    formula_wb = openpyxl.load_workbook(path, data_only=False, read_only=False)
-    value_wb = openpyxl.load_workbook(path, data_only=True, read_only=False)
+    formula_wb = _run_with_timeout(openpyxl.load_workbook, path, data_only=False, read_only=False)
+    value_wb = _run_with_timeout(openpyxl.load_workbook, path, data_only=True, read_only=False)
 
     uncached_count = 0
     chunks: list[dict[str, Any]] = []
@@ -431,7 +472,8 @@ def convert_pptx_to_markdown(path: Path) -> tuple[str, list[dict[str, Any]]]:
     start = time.time()
 
     converter = DocumentConverter()
-    result = converter.convert(str(path))
+    _ensure_disk_space(path)
+    result = _run_with_timeout(converter.convert, str(path))
     doc = result.document
     markdown = doc.export_to_markdown()
 

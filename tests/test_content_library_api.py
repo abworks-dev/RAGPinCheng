@@ -1020,10 +1020,13 @@ def test_managed_upload_skips_office_but_accepts_markdown_when_disabled(content_
 
 def test_managed_office_publish_returns_stable_conflict_when_disabled(content_api, monkeypatch):
     client, sessions, _queued, _db_path = content_api
+    office_bytes = io.BytesIO()
+    with zipfile.ZipFile(office_bytes, "w") as archive:
+        archive.writestr("[Content_Types].xml", "<Types />")
     uploaded = client.post(
         "/api/admin/content/uploads",
         data={"category_id": "cat-03"},
-        files=[("files", ("draft.docx", b"synthetic", "application/octet-stream"))],
+        files=[("files", ("draft.docx", office_bytes.getvalue(), "application/octet-stream"))],
         **_auth(sessions, "admin", csrf=True),
     )
     version_id = uploaded.json()["entries"][0]["version_id"]

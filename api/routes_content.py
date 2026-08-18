@@ -33,6 +33,7 @@ from src.config import (
     ROOT,
     TRANSCRIPTION_ARTIFACT_DIR,
 )
+from src.office_security import find_unsafe_office_content
 from src.transcription.persistence import ManagedMarkdownRef
 from src.transcription.types import ContractValidationError
 from src.indexing_pipeline import (
@@ -833,6 +834,12 @@ async def upload_managed_documents(
             stored = await _storage.ingest_upload(
                 upload, batch_id=batch_id, max_bytes=_MAX_UPLOAD_BYTES
             )
+            if doc_type in OFFICE_DOC_TYPES:
+                package_issue = find_unsafe_office_content(stored.absolute_path)
+                if package_issue:
+                    if stored.created:
+                        stored.absolute_path.unlink(missing_ok=True)
+                    raise ValueError(package_issue)
             upload_category_id = _resolve_upload_category(
                 conn,
                 category_id=category_id,
@@ -867,6 +874,9 @@ async def upload_managed_documents(
                 "category_depth_exceeded": "资料目录最多支持四级",
                 "content_filename_conflict": "当前目录下已存在同名资料",
                 "content_too_large": "文件超过上传大小上限",
+                "office_external_link": "Office 文件包含外部链接，已拒绝处理",
+                "office_embedded_object": "Office 文件包含嵌入对象，已拒绝处理",
+                "office_package_invalid": "Office 文件格式无效",
             }.get(str(exc), str(exc))
             entries.append(ManagedUploadEntryDTO(filename=filename, status="skipped", reason=reason))
             record_upload_batch_entry(

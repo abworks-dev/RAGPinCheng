@@ -611,6 +611,10 @@ MAX_UPLOAD_BYTES = int(_os.getenv("MAX_UPLOAD_MB", "200")) * 1024 * 1024
 # Office file security constants
 _MAX_ZIP_BOMB_RATIO = 200  # max decompression ratio for zip bomb protection
 
+def _check_office_external_links_or_embeds(path: Path) -> str | None:
+    from src.office_security import find_unsafe_office_content
+    return find_unsafe_office_content(path)
+
 
 def _verify_office_signature(path: Path, ext: str) -> bool:
     """Verify the file starts with PK\x03\x04 (ZIP header) for Office formats."""
@@ -868,6 +872,11 @@ async def upload_documents(
             if _check_office_macros(target):
                 target.unlink()
                 skipped.append({"filename": name, "reason": "不支持带宏的 Office 文件"})
+                continue
+            package_issue = _check_office_external_links_or_embeds(target)
+            if package_issue:
+                target.unlink()
+                skipped.append({"filename": name, "reason": "Office 文件包含外部链接或嵌入对象，已拒绝处理", "reason_code": package_issue})
                 continue
 
         job_id = create_job(
