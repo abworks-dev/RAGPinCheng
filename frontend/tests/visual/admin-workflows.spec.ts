@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { installAdminRoutes, type AdminScenario } from "./fixtures/admin-fixtures";
 import { expectInViewport, expectNoBodyOverflow, expectTouchTarget } from "./helpers/layout";
 
-async function openTab(page: Parameters<typeof installAdminRoutes>[0], label: string, scenario: AdminScenario = "normal", workspaceUser: "admin" | "bim_engineer" | "member" = "admin", options: { includeChildFolder?: boolean; includeFolderRequest?: boolean } = {}) {
+async function openTab(page: Parameters<typeof installAdminRoutes>[0], label: string, scenario: AdminScenario = "normal", workspaceUser: "admin" | "bim_engineer" | "member" = "admin", options: { includeChildFolder?: boolean; includeFolderRequest?: boolean; uploadConflict?: boolean } = {}) {
   await installAdminRoutes(page, scenario, workspaceUser, undefined, options);
   await page.goto("/admin");
   if (page.viewportSize()!.width < 1024) {
@@ -376,15 +376,41 @@ test.describe("资料管理", () => {
     });
   }
 
-  test("upload exposes a stable busy state", async ({ page }) => {
+  test("upload waits for the multipart request and closes the upload dialog", async ({ page }) => {
     await openTab(page, "资料管理");
     await openRootFolder(page);
     await page.getByRole("button", { name: "上传文件" }).click();
     await page.getByLabel("选择资料文件", { exact: true }).setInputFiles({ name: "synthetic.pdf", mimeType: "application/pdf", buffer: Buffer.from("synthetic fixture") });
     const upload = page.getByRole("button", { name: "确定上传" });
+    const multipartUpload = page.waitForResponse((response) => {
+      const request = response.request();
+      const contentType = request.headers()["content-type"] || "";
+      return request.method() === "POST"
+        && response.url().includes("/api/admin/content/uploads")
+        && contentType.startsWith("multipart/form-data;");
+    });
     await upload.click();
-    await expect(page.getByRole("button", { name: "上传中…" })).toBeDisabled();
+    await expect((await multipartUpload).ok()).toBeTruthy();
+    await expect(page.getByRole("dialog", { name: "上传文件" })).toBeHidden();
+    await expect(page.getByText("已接收 1 个文件", { exact: true })).toBeVisible();
     await expectNoBodyOverflow(page);
+  });
+
+  test("upload filename conflicts stay contained in the resolution dialog", async ({ page }, testInfo) => {
+    await openTab(page, "资料管理", "normal", "admin", { uploadConflict: true });
+    await openRootFolder(page);
+    await page.getByRole("button", { name: "上传文件" }).click();
+    await page.getByLabel("选择资料文件", { exact: true }).setInputFiles({ name: "synthetic.pdf", mimeType: "application/pdf", buffer: Buffer.from("synthetic fixture") });
+    await page.getByRole("button", { name: "确定上传" }).click();
+
+    const dialog = page.getByRole("dialog", { name: "处理上传冲突" });
+    await expect(dialog).toContainText("现有合成资料");
+    await expect(dialog.getByRole("combobox")).toHaveValue("skip");
+    await dialog.getByRole("combobox").selectOption("rename");
+    await expect(dialog.getByLabel("新文件名")).toHaveValue("synthetic (1).pdf");
+    await expectInViewport(dialog.getByRole("button", { name: "按选择上传" }));
+    await expectNoBodyOverflow(page);
+    await page.screenshot({ path: testInfo.outputPath("managed-content-upload-conflict.png"), fullPage: false });
   });
 
   test("folder upload confirmation keeps hierarchy and summary contained", async ({ page }, testInfo) => {
@@ -426,7 +452,7 @@ test.describe("资料管理", () => {
     await openRootFolder(page);
     const uploadRequests: string[] = [];
     page.on("request", (request) => {
-      if (request.method() === "POST" && request.url().includes("/api/admin/content/uploads")) {
+      if (request.method() === "POST" && new URL(request.url()).pathname === "/api/admin/content/uploads") {
         uploadRequests.push(request.postData() || "");
       }
     });
