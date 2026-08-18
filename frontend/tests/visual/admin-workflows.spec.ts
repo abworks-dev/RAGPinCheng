@@ -101,6 +101,8 @@ test.describe("资料管理", () => {
     await expectInViewport(page.getByRole("menu", { name: "批量操作" }));
     await expect(page.getByRole("menuitem", { name: "批量移动" })).toBeFocused();
     await page.getByRole("menuitem", { name: "批量移动" }).press("ArrowDown");
+    await expect(page.getByRole("menuitem", { name: "批量提交审核" })).toBeFocused();
+    await page.getByRole("menuitem", { name: "批量提交审核" }).press("ArrowDown");
     await expect(page.getByRole("menuitem", { name: "批量确认" })).toBeFocused();
     await page.keyboard.press("Escape");
     await expect(batchButton).toBeFocused();
