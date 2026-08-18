@@ -75,7 +75,16 @@ test.describe("聊天工作台", () => {
 
     await page.getByRole("superscript").hover();
     const preview = page.getByRole("dialog", { name: "来源 1 预览" });
-    await preview.getByRole("button", { name: "从 00:00:12 播放视频" }).click();
+    const title = preview.getByText("项目交付培训视频：移动端长标题适配验证", { exact: true });
+    const playButton = preview.getByRole("button", { name: "从 00:00:12 播放视频" });
+    const [titleBox, playButtonBox] = await Promise.all([title.boundingBox(), playButton.boundingBox()]);
+    expect(titleBox).not.toBeNull();
+    expect(playButtonBox).not.toBeNull();
+    expect(titleBox!.x + titleBox!.width).toBeLessThanOrEqual(playButtonBox!.x);
+    expect(Math.abs(
+      titleBox!.y + titleBox!.height / 2 - (playButtonBox!.y + playButtonBox!.height / 2),
+    )).toBeLessThanOrEqual(1);
+    await playButton.click();
 
     const player = page.getByRole("dialog").filter({ hasText: "从 00:12 开始播放" });
     await expect(player).toBeVisible();
