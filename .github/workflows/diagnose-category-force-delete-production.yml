@@ -1,0 +1,202 @@
+name: Diagnose Category Force Delete Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_diagnostic:
+        description: Select DIAGNOSE_READ_ONLY to inspect the latest partial force-delete run
+        required: true
+        default: CANCEL
+        type: choice
+        options:
+          - CANCEL
+          - DIAGNOSE_READ_ONLY
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-category-force-delete-diagnostic
+  cancel-in-progress: false
+
+jobs:
+  diagnose:
+    environment: production-asr
+    runs-on: [self-hosted, linux, ubuntu, production, app]
+    timeout-minutes: 10
+    env:
+      REPO_PATH: ${{ vars.PRODUCTION_APP_REPO_PATH }}
+      COMPOSE_OVERRIDE: ${{ vars.PRODUCTION_APP_COMPOSE_OVERRIDE }}
+      COMPOSE_ENV_FILE: ${{ vars.PRODUCTION_APP_ENV_FILE }}
+      CONFIRM_DIAGNOSTIC: ${{ inputs.confirm_diagnostic }}
+    steps:
+      - name: Inspect the latest partial category cleanup without mutation
+        run: |
+          set -euo pipefail
+          [ "${CONFIRM_DIAGNOSTIC}" = "DIAGNOSE_READ_ONLY" ] || {
+            echo "ERROR: read-only production diagnostic was not confirmed"
+            exit 1
+          }
+          [ "${{ github.ref }}" = "refs/heads/master" ] || {
+            echo "ERROR: production diagnostics only accept master"
+            exit 1
+          }
+          cd "${REPO_PATH}"
+          COMPOSE=(docker compose -p ragpincheng-prod \
+            -f "${REPO_PATH}/docker/docker-compose.yml" \
+            -f "${COMPOSE_OVERRIDE}" --env-file "${COMPOSE_ENV_FILE}")
+          "${COMPOSE[@]}" ps -q backend | grep -q . || {
+            echo "ERROR: production backend container is not running"
+            exit 1
+          }
+          "${COMPOSE[@]}" exec -T backend python - <<'PY'
+          from __future__ import annotations
+
+          import hashlib
+          import json
+          import os
+          import sqlite3
+          import time
+          from collections import Counter
+          from pathlib import Path
+
+          database_path = Path("/app/data/app.sqlite")
+          connection = sqlite3.connect(
+              f"file:{database_path.as_posix()}?mode=ro",
+              uri=True,
+          )
+          connection.row_factory = sqlite3.Row
+          connection.execute("PRAGMA query_only=ON")
+
+          run = connection.execute(
+              """SELECT * FROM category_force_delete_runs
+                 WHERE status='partial' ORDER BY created_at DESC LIMIT 1"""
+          ).fetchone()
+          if run is None:
+              raise SystemExit("ERROR: no partial category force-delete run exists")
+          age_seconds = max(0, int(time.time()) - int(run["created_at"]))
+          if age_seconds > 86400:
+              raise SystemExit("ERROR: latest partial run is older than 24 hours")
+
+          audit = connection.execute(
+              """SELECT metadata_json FROM content_audit_events
+                 WHERE event_type='category.force_deleted'
+                   AND json_extract(metadata_json,'$.run_id')=?
+                 ORDER BY created_at DESC LIMIT 1""",
+              (run["id"],),
+          ).fetchone()
+          metadata = json.loads(audit["metadata_json"]) if audit else {}
+          category_ids = [
+              value for value in metadata.get("deleted_category_ids", [])
+              if isinstance(value, str) and value
+          ]
+          if not category_ids:
+              category_ids = [str(run["category_id"])]
+          placeholders = ",".join("?" for _ in category_ids)
+
+          residual = {
+              "category_nodes": connection.execute(
+                  f"SELECT count(*) FROM category_nodes WHERE id IN ({placeholders})",
+                  category_ids,
+              ).fetchone()[0],
+              "content_items": connection.execute(
+                  f"SELECT count(*) FROM content_items WHERE category_id IN ({placeholders})",
+                  category_ids,
+              ).fetchone()[0],
+              "index_jobs": connection.execute(
+                  f"""SELECT count(*) FROM content_index_jobs j
+                       JOIN content_versions v ON v.id=j.version_id
+                       JOIN content_items i ON i.id=v.item_id
+                       WHERE i.category_id IN ({placeholders})""",
+                  category_ids,
+              ).fetchone()[0],
+          }
+          batches = connection.execute(
+              f"""SELECT origin,status,storage_rel_path,manifest_rel_path
+                   FROM upload_batches b
+                   WHERE b.target_category_id IN ({placeholders})
+                      OR b.id IN (
+                          SELECT DISTINCT v.source_batch_id FROM content_versions v
+                          JOIN content_items i ON i.id=v.item_id
+                          WHERE i.category_id IN ({placeholders})
+                            AND v.source_batch_id IS NOT NULL
+                      )""",
+              [*category_ids, *category_ids],
+          ).fetchall()
+          residual["upload_batches"] = len(batches)
+
+          content_root = Path("/app/content")
+          resolved_root = content_root.resolve(strict=False)
+          allowed_roots = (
+              (content_root / "inbox").resolve(strict=False),
+              (content_root / "manifests").resolve(strict=False),
+          )
+
+          def classify_path(relative: str | None) -> str:
+              if not relative:
+                  return "empty"
+              lexical = content_root / relative
+              candidate = lexical.resolve(strict=False)
+              owning_root = next(
+                  (root for root in allowed_roots if candidate != root and root in candidate.parents),
+                  None,
+              )
+              if owning_root is None:
+                  return "outside_owned_roots"
+              if owning_root == allowed_roots[0] and len(candidate.relative_to(owning_root).parts) < 2:
+                  return "inbox_path_too_broad"
+              current = lexical
+              while current != content_root and resolved_root in current.resolve(strict=False).parents:
+                  if current.is_symlink():
+                      return "symlink_rejected"
+                  current = current.parent
+              if not lexical.exists():
+                  return "valid_missing"
+              if not os.access(lexical, os.W_OK | (os.X_OK if lexical.is_dir() else 0)):
+                  return "permission_denied"
+              return "valid_existing_directory" if lexical.is_dir() else "valid_existing_file"
+
+          path_classes: Counter[str] = Counter()
+          batch_states: Counter[str] = Counter()
+          for batch in batches:
+              batch_states[f"{batch['origin']}:{batch['status']}"] += 1
+              path_classes[f"storage:{classify_path(batch['storage_rel_path'])}"] += 1
+              path_classes[f"manifest:{classify_path(batch['manifest_rel_path'])}"] += 1
+
+          error_types = Counter(
+              part for part in (run["error_summary"] or "").split("; ") if part
+          )
+          window_end = int(run["finished_at"] or run["created_at"]) + 10
+          purge_rows = connection.execute(
+              """SELECT status,succeeded_count,failed_count FROM content_trash_purge_runs
+                 WHERE trigger_type='manual' AND created_at BETWEEN ? AND ?""",
+              (int(run["created_at"]) - 2, window_end),
+          ).fetchall()
+          purge_summary = {
+              "runs": len(purge_rows),
+              "statuses": dict(Counter(str(row["status"]) for row in purge_rows)),
+              "succeeded_items": sum(int(row["succeeded_count"]) for row in purge_rows),
+              "failed_items": sum(int(row["failed_count"]) for row in purge_rows),
+          }
+          connection.close()
+
+          payload = {
+              "run_ref": hashlib.sha256(str(run["id"]).encode("utf-8")).hexdigest()[:12],
+              "age_seconds": age_seconds,
+              "status": run["status"],
+              "recorded": {
+                  "folders": int(run["folder_count"]),
+                  "items_deleted": int(run["item_count"]),
+                  "upload_batches_deleted": int(run["upload_batch_count"]),
+                  "index_jobs_stopped": int(run["index_job_count"]),
+                  "qdrant_points_deleted": int(run["qdrant_point_count"]),
+                  "objects_deleted": int(run["object_count"]),
+              },
+              "error_type_counts": dict(sorted(error_types.items())),
+              "residual_counts": residual,
+              "residual_batch_states": dict(sorted(batch_states.items())),
+              "residual_path_classes": dict(sorted(path_classes.items())),
+              "nearby_purge_summary": purge_summary,
+          }
+          print("CATEGORY_FORCE_DELETE_DIAGNOSTIC " + json.dumps(payload, sort_keys=True))
+          PY
