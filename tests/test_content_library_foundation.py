@@ -116,6 +116,8 @@ def test_category_delete_is_blocked_by_archived_content(tmp_path):
 
 def test_category_force_delete_purges_documents_tasks_batches_and_renumbers(tmp_path, monkeypatch):
     conn = _db(tmp_path)
+    conn.execute("PRAGMA foreign_keys=ON")
+    assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
     actor = conn.execute("SELECT id FROM users WHERE employee_id='u1'").fetchone()[0]
     target = create_category(conn, category_key=None, parent_id="cat-04", display_code="01", display_name="待强删", sort_order=10, target_position=1, confirm_number_shift=True, actor_user_id=actor)
     child = create_category(conn, category_key=None, parent_id=target["id"], display_code="01", display_name="子目录", sort_order=10, target_position=1, confirm_number_shift=True, actor_user_id=actor)
@@ -194,6 +196,7 @@ def test_category_force_delete_purges_documents_tasks_batches_and_renumbers(tmp_
     assert result["qdrant_point_count"] == 6
     assert conn.execute("SELECT count(*) FROM content_items WHERE id IN (?,?)", (active.item_id, archived.item_id)).fetchone()[0] == 0
     assert conn.execute("SELECT count(*) FROM upload_batches WHERE id IN (?,?)", (active_batch, archived_batch)).fetchone()[0] == 0
+    assert conn.execute("SELECT count(*) FROM content_audit_events WHERE batch_id IN (?,?)", (active_batch, archived_batch)).fetchone()[0] == 0
     assert conn.execute("SELECT count(*) FROM category_nodes WHERE id IN (?,?) AND deleted_at IS NOT NULL", (target["id"], child["id"])).fetchone()[0] == 2
     assert conn.execute("SELECT display_code FROM category_nodes WHERE id=?", (sibling["id"],)).fetchone()[0] == "01"
     assert active_object.exists() and not archived_object.exists()
