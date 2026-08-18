@@ -13,6 +13,7 @@ import { Progress } from "../../components/ui/progress";
 import { Select } from "../../components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../../components/ui/dialog";
 import { TranscriptionWorkbenchSheet } from "../../components/TranscriptionWorkbenchSheet";
+import { ManagedSummaryCard } from "../../components/admin/ManagedSummaryCard";
 import { useTranscriptionJobs } from "../../hooks/useTranscriptionJobs";
 import { useAdminMediaAssets } from "../../hooks/useAdminMediaAssets";
 import { createRequestId } from "../../lib/request-id";
@@ -735,28 +736,24 @@ export function AdminMediaPage() {
 
       {uploadError && <Alert variant="destructive" role="alert"><AlertTitle>操作失败</AlertTitle><AlertDescription>{uploadError}</AlertDescription></Alert>}
 
-      <section className="space-y-3" aria-labelledby="media-assets-title">
-          <div className="flex flex-wrap items-end justify-between gap-3">
-          <div><h2 id="media-assets-title" className="text-ui-base font-semibold">媒体资源</h2><p className="mt-1 flex flex-wrap gap-x-2 text-ui-xs text-muted-foreground"><span>共 {mediaAssets.length} 个视频</span><span>·</span><span>按每次提交分别记录媒体与处理进度；同名文件不会合并。</span></p></div>
-          <div className="flex items-center gap-2">
-            <Button size="sm" onClick={() => setUploadDialogOpen(true)}><Upload className="size-4" />{hasUploadDraft ? `继续上传${pending.length ? `（${pending.length}）` : ""}` : "上传视频"}</Button>
-            <Button size="sm" variant="outline" aria-label="刷新媒体资源" title="刷新媒体资源" disabled={loading} onClick={() => void refreshMediaState()}>
-              <RefreshCw className="size-4" aria-hidden="true" />
-              刷新
-            </Button>
-          </div>
-        </div>
+      <section className="space-y-5" aria-labelledby="media-assets-title">
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5" aria-label="媒体快捷筛选">
-          {mediaFilterOptions.map(([value, label]) => { const icons = { all: <Film className="size-4" />, processing: <LoaderCircle className="size-4" />, review: <ClipboardCheck className="size-4" />, publishing: <Rocket className="size-4" />, failed: <XCircle className="size-4" /> }; return (
-            <button type="button" key={value} className={`rounded-ui-lg border bg-background p-3 text-left transition-colors hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${mediaFilter === value ? "border-primary ring-1 ring-primary/30" : "border-border"}`} aria-pressed={mediaFilter === value} aria-label={`${label} ${filterCounts[value]} 条`} onClick={() => setMediaFilter(value)}><span className="flex items-center justify-between text-ui-xs text-muted-foreground"><span>{label}</span>{icons[value]}</span><span className="mt-2 block text-ui-xl font-semibold tabular-nums">{filterCounts[value]}</span></button>
-          ); })}
+          {mediaFilterOptions.map(([value, label]) => { const icons = { all: <Film className="size-4" />, processing: <LoaderCircle className="size-4" />, review: <ClipboardCheck className="size-4" />, publishing: <Rocket className="size-4" />, failed: <XCircle className="size-4" /> }; return <ManagedSummaryCard key={value} label={label} value={filterCounts[value]} icon={icons[value]} tone={value === "failed" ? "destructive" : value === "review" || value === "publishing" ? "warning" : "primary"} active={mediaFilter === value} onClick={() => setMediaFilter(value)} />; })}
         </div>
-        <p className="text-ui-xs text-muted-foreground">当前显示 {visibleMediaAssets.length} / {mediaAssets.length} 条记录{lastLoadedAt ? ` · 最近刷新 ${new Date(lastLoadedAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}` : ""}。</p>
+        <Card className="overflow-hidden shadow-surface">
+          <div className="flex flex-col gap-3 border-b border-border px-4 py-4 sm:px-5 lg:flex-row lg:items-center lg:justify-between">
+            <div className="min-w-0"><h2 id="media-assets-title" className="text-ui-base font-semibold">媒体资源</h2><p className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-ui-xs text-muted-foreground"><span>共 {mediaAssets.length} 个视频</span><span>·</span><span>按每次提交分别记录媒体与处理进度；同名文件不会合并。</span></p></div>
+            <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+              <Button size="sm" variant="outline" aria-label="刷新媒体资源" title="刷新媒体资源" disabled={loading} onClick={() => void refreshMediaState()}><RefreshCw className="size-4" aria-hidden="true" />刷新列表</Button>
+              <Button size="sm" onClick={() => setUploadDialogOpen(true)}><Upload className="size-4" />{hasUploadDraft ? `继续上传${pending.length ? `（${pending.length}）` : ""}` : "上传视频"}</Button>
+            </div>
+          </div>
+          <p className="border-b border-border px-4 py-3 text-ui-xs text-muted-foreground sm:px-5">当前显示 {visibleMediaAssets.length} / {mediaAssets.length} 条记录{lastLoadedAt ? ` · 最近刷新 ${new Date(lastLoadedAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}` : ""}。</p>
         {jobsError && <Alert role="alert"><AlertTitle>任务状态暂时无法刷新</AlertTitle><AlertDescription>{jobsError}</AlertDescription></Alert>}
         {loadError ? <ErrorState title="媒体资源加载失败" description={loadError} action={<Button variant="outline" size="sm" onClick={refresh}>重新加载</Button>} />
           : loading ? <Card><LoadingState className="min-h-48" label="正在加载媒体资源…" /></Card>
           : mediaAssets.length === 0 ? <EmptyState title="暂无媒体资源" description="完成向导后，视频和各阶段状态会显示在这里。" />
-          : <Card className="overflow-hidden shadow-surface">
+          : <>
             <div className="hidden grid-cols-[minmax(0,31fr)_minmax(0,42fr)_minmax(0,12fr)_minmax(0,15fr)] gap-4 border-b border-border bg-surface-muted px-5 py-3 text-ui-xs font-medium text-muted-foreground lg:grid" data-testid="media-record-header">
               <span>媒体信息</span><span>处理进度</span><span>最近提交</span><span>操作</span>
             </div>
@@ -789,8 +786,9 @@ export function AdminMediaPage() {
                 </li>;
               })}
             </ul>
-          </Card>}
+          </>}
         {visibleMediaAssets.length === 0 && mediaAssets.length > 0 && <EmptyState title="没有符合条件的媒体" description="请切换其他快捷筛选条件。" />}
+        </Card>
       </section>
       <TranscriptionWorkbenchSheet
         open={selectedAsset != null}
