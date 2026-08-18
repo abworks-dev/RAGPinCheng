@@ -53,7 +53,9 @@ from .schemas import (
     TranscriptionJobDTO,
     TranscriptionFailureDTO,
     TranscriptionProfileDTO,
+    TranscriptionSchemeOptionDTO,
 )
+from .transcription_schemes import available_schemes
 from .transcription_artifacts import LocalTranscriptionArtifactStore
 from .transcription_publication import TranscriptionPublicationApplicationService
 from .indexing import enqueue_publication
@@ -69,6 +71,25 @@ from .transcription_markdown import parse_transcript_segments
 from .transcription_worker import enqueue
 
 router = APIRouter(prefix="/admin/transcription", tags=["admin-transcription"])
+
+
+@router.get("/schemes", response_model=list[TranscriptionSchemeOptionDTO])
+def list_scheme_options(
+    _admin: CurrentUser = Depends(require_admin),
+) -> list[TranscriptionSchemeOptionDTO]:
+    conn = connect()
+    try:
+        return [
+            TranscriptionSchemeOptionDTO(
+                scheme_id=item["id"], name=item["name"], description=item["description"],
+                base_id=item["base_id"], config_hash=item["config_hash"], enabled=item["enabled"],
+                archived=item["archived"], sort_order=item["sort_order"], version=item["version"],
+                availability="available",
+            )
+            for item in available_schemes(conn)
+        ]
+    finally:
+        conn.close()
 
 
 def build_transcription_service() -> TranscriptionApplicationService:

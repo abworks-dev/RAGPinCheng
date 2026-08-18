@@ -935,6 +935,60 @@ USAGE_STATEMENTS = (
     )""",
     "CREATE INDEX IF NOT EXISTS idx_external_service_usage_created ON external_service_usage(created_at)",
     "CREATE INDEX IF NOT EXISTS idx_external_service_usage_provider ON external_service_usage(provider, operation, created_at)",
+TRANSCRIPTION_SCHEME_STATEMENTS = (
+    """ALTER TABLE transcription_jobs ADD COLUMN scheme_id TEXT""",
+    """ALTER TABLE transcript_versions ADD COLUMN scheme_id TEXT""",
+    """CREATE TABLE IF NOT EXISTS transcription_bases (
+        id TEXT PRIMARY KEY,
+        provider TEXT NOT NULL,
+        model TEXT NOT NULL,
+        revision TEXT NOT NULL,
+        service_profile_id TEXT NOT NULL,
+        config_hash TEXT NOT NULL,
+        qualification TEXT NOT NULL,
+        admission TEXT NOT NULL,
+        availability TEXT NOT NULL,
+        capabilities_json TEXT NOT NULL,
+        defaults_json TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+    )""",
+    """CREATE TABLE IF NOT EXISTS transcription_schemes (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        base_id TEXT NOT NULL REFERENCES transcription_bases(id) ON DELETE RESTRICT,
+        config_json TEXT NOT NULL,
+        config_hash TEXT NOT NULL,
+        enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1)),
+        archived INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0,1)),
+        system_preset INTEGER NOT NULL DEFAULT 0 CHECK (system_preset IN (0,1)),
+        sort_order INTEGER NOT NULL CHECK (sort_order >= 0),
+        version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0),
+        created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+    )""",
+    """CREATE INDEX IF NOT EXISTS idx_transcription_schemes_order ON transcription_schemes(archived,enabled,sort_order,id)""",
+    """CREATE TABLE IF NOT EXISTS transcription_scheme_audit_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        scheme_id TEXT NOT NULL REFERENCES transcription_schemes(id) ON DELETE RESTRICT,
+        event_type TEXT NOT NULL,
+        actor_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        event_json TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+    )""",
+    """INSERT OR IGNORE INTO transcription_bases(id,provider,model,revision,service_profile_id,config_hash,qualification,admission,availability,capabilities_json,defaults_json,created_at) VALUES
+      ('sensevoice-v1','funasr','SenseVoiceSmall','managed-v1','funasr-sensevoice-small-v1','managed-base-sensevoice-v1','qualification_approved','enabled','runtime','{"segmentation":true,"decode_presets":true}','{"segmentation_preset":"natural"}',strftime('%s','now')),
+      ('faster-whisper-v1','faster-whisper','large-v3-turbo','0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf','faster-whisper-large-v3-turbo-v1','managed-base-faster-v1','qualification_approved','enabled','runtime','{"segmentation":true,"decode_presets":true}','{"segmentation_preset":"natural"}',strftime('%s','now')),
+      ('whisperx-v2','whisperx','large-v3-zh-align','full-decode-v2','whisperx-large-v3-zh-align-v2','managed-base-whisperx-v2','qualification_approved','enabled','runtime','{"segmentation":true,"decode_presets":true}','{"segmentation_preset":"balanced"}',strftime('%s','now')),
+      ('qwen3-asr-v1','qwen3-asr','Qwen3-ASR-0.6B','5eb144179a02acc5e5ba31e748d22b0cf3e303b0','qwen3-asr-06b-aligner-v1','managed-base-qwen3-v1','experimental','disabled','disabled','{"segmentation":false,"decode_presets":false}','{"segmentation_preset":"natural"}',strftime('%s','now'))""",
+    """INSERT OR IGNORE INTO transcription_schemes(id,name,description,base_id,config_json,config_hash,enabled,archived,system_preset,sort_order,version,created_at,updated_at) VALUES
+      ('funasr-sensevoice-zh-experimental-v1','SenseVoice 快速中文','SenseVoice 中文快速转录','sensevoice-v1','{"decode_preset":"service-default-v1","max_chars":500,"max_duration_ms":null,"merge_gap_ms":1000,"preprocessing_preset":"standard-audio-v1","prompt_asset":"asr_engineering_zh_v2","segmentation_preset":"natural","terminology_profile":"bim-engineering-v1","vad_preset":"service-default-v1"}','cab80220f6aad3ad4ecf937115a9c2289d7f3fe8d22f95ed0cb140bd91453e58',1,0,1,0,1,strftime('%s','now'),strftime('%s','now')),
+      ('faster-whisper-zh-experimental-v1','faster-whisper 工程术语','固定工程术语与服务端解码预设','faster-whisper-v1','{"decode_preset":"service-default-v1","max_chars":500,"max_duration_ms":null,"merge_gap_ms":1000,"preprocessing_preset":"standard-audio-v1","prompt_asset":"asr_engineering_zh_v1","segmentation_preset":"natural","terminology_profile":"bim-engineering-v1","vad_preset":"service-default-v1"}','95bc0d6219805563287db268e08a2f1d051e20ada8c29991fb3261f138e4d98a',1,0,1,1,1,strftime('%s','now'),strftime('%s','now')),
+      ('whisperx-large-v3-zh-natural-v2','WhisperX 自然分段','WhisperX v2 自然分段','whisperx-v2','{"decode_preset":"service-default-v1","max_chars":500,"max_duration_ms":null,"merge_gap_ms":1000,"preprocessing_preset":"standard-audio-v1","prompt_asset":"asr_engineering_zh_v2","segmentation_preset":"natural","terminology_profile":"bim-engineering-v1","vad_preset":"service-default-v1"}','cab80220f6aad3ad4ecf937115a9c2289d7f3fe8d22f95ed0cb140bd91453e58',1,0,1,2,1,strftime('%s','now'),strftime('%s','now')),
+      ('whisperx-large-v3-zh-balanced-v2','WhisperX 均衡分段','WhisperX v2 均衡分段','whisperx-v2','{"decode_preset":"service-default-v1","max_chars":500,"max_duration_ms":30000,"merge_gap_ms":750,"preprocessing_preset":"standard-audio-v1","prompt_asset":"asr_engineering_zh_v2","segmentation_preset":"balanced","terminology_profile":"bim-engineering-v1","vad_preset":"service-default-v1"}','95a70a87376bd304459ecb766f438a57919e7223932cdc7c5675026191cb96a8',1,0,1,3,1,strftime('%s','now'),strftime('%s','now')),
+      ('whisperx-large-v3-zh-fine-v2','WhisperX 精细分段','WhisperX v2 精细分段','whisperx-v2','{"decode_preset":"service-default-v1","max_chars":240,"max_duration_ms":15000,"merge_gap_ms":500,"preprocessing_preset":"standard-audio-v1","prompt_asset":"asr_engineering_zh_v2","segmentation_preset":"fine","terminology_profile":"bim-engineering-v1","vad_preset":"service-default-v1"}','82d57ba229516849be26b7068182f67154119606736f2774afc22472401d2cf2',1,0,1,4,1,strftime('%s','now'),strftime('%s','now'))""",
 )
 
 MIGRATIONS = (
@@ -968,6 +1022,7 @@ MIGRATIONS = (
             "UPDATE category_nodes SET chat_search_enabled=is_active, chat_filter_selectable=is_active",
         ),
     ),
+    Migration(23, "transcription_scheme_management", TRANSCRIPTION_SCHEME_STATEMENTS),
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 PHASE2_TABLES = frozenset(
@@ -1019,6 +1074,7 @@ MEDIA_LIBRARY_VIDEO_ACTIONS_TABLES = frozenset(
 CONTENT_TRASH_LIFECYCLE_TABLES = frozenset(
     {"content_trash_settings", "content_trash_purge_runs", "content_trash_purge_items"}
 )
+TRANSCRIPTION_SCHEME_TABLES = frozenset({"transcription_bases", "transcription_schemes", "transcription_scheme_audit_events"})
 
 
 def validate_system_content_permission_groups(
@@ -1279,6 +1335,8 @@ def apply_all(conn: sqlite3.Connection, *, base_schema: str, applied_at: int) ->
         if 19 in applied_versions and not MEDIA_LIBRARY_VIDEO_ACTIONS_TABLES.issubset(tables):
             raise RuntimeError("migration_schema_mismatch")
         if 20 in applied_versions and not CONTENT_TRASH_LIFECYCLE_TABLES.issubset(tables):
+            raise RuntimeError("migration_schema_mismatch")
+        if 21 in applied_versions and not TRANSCRIPTION_SCHEME_TABLES.issubset(tables):
             raise RuntimeError("migration_schema_mismatch")
         validate_system_content_permission_groups(
             conn,

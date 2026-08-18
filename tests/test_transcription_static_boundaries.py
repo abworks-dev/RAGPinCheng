@@ -14,6 +14,7 @@ ALLOWED = {
     "types": set(),
     "candidate": {"types"},
     "profile": {"types"},
+    "scheme": set(),
     "provider_protocol": {"types", "candidate", "profile"},
     "canonical": {"types", "profile"},
     "terminology": {"types"},

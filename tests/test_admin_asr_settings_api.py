@@ -131,6 +131,84 @@ def _request_body(*, reason: str | None = "常规培训视频") -> dict[str, obj
     }
 
 
+def test_scheme_endpoints_enforce_admin_and_csrf(asr_api):
+    client, _ = asr_api
+    assert client.get("/api/admin/asr/bases").status_code == 401
+    assert client.get("/api/admin/asr/schemes", **_auth("member")).status_code == 403
+    response = client.post(
+        "/api/admin/asr/schemes",
+        json={"name": "自定义方案", "description": "", "base_id": "whisperx-v2", "parameters": {}},
+        **_auth("admin"),
+    )
+    assert response.status_code == 403
+
+
+def test_scheme_crud_is_controlled_and_optimistically_locked(asr_api):
+    client, _ = asr_api
+    bases = client.get("/api/admin/asr/bases", **_auth("admin")).json()
+    assert {item["id"] for item in bases} == {"sensevoice-v1", "faster-whisper-v1", "whisperx-v2", "qwen3-asr-v1"}
+    qwen = next(item for item in bases if item["id"] == "qwen3-asr-v1")
+    assert qwen["admission"] == "disabled"
+
+    response = client.post(
+        "/api/admin/asr/schemes",
+        json={
+            "name": "项目术语方案",
+            "description": "受控参数",
+            "base_id": "whisperx-v2",
+            "parameters": {"segmentation_preset": "balanced", "max_duration_ms": 30000},
+        },
+        **_auth("admin", csrf=True),
+    )
+    assert response.status_code == 201, response.text
+    created = response.json()
+    assert created["version"] == 1 and created["system_preset"] is False
+
+    invalid = client.patch(
+        f"/api/admin/asr/schemes/{created['id']}",
+        json={"expected_version": 1, "parameters": {"model_path": "C:/unsafe"}},
+        **_auth("admin", csrf=True),
+    )
+    assert invalid.status_code == 422
+
+    updated = client.patch(
+        f"/api/admin/asr/schemes/{created['id']}",
+        json={"expected_version": 1, "name": "项目术语方案 v2", "enabled": False},
+        **_auth("admin", csrf=True),
+    )
+    assert updated.status_code == 200
+    assert updated.json()["version"] == 2 and updated.json()["enabled"] is False
+
+    conflict = client.patch(
+        f"/api/admin/asr/schemes/{created['id']}",
+        json={"expected_version": 1, "name": "过期写入"},
+        **_auth("admin", csrf=True),
+    )
+    assert conflict.status_code == 409
+
+
+def test_system_scheme_core_is_immutable_but_can_be_copied(asr_api):
+    client, _ = asr_api
+    schemes = client.get("/api/admin/asr/schemes", **_auth("admin")).json()
+    assert [item["name"] for item in schemes[:5]] == [
+        "SenseVoice 快速中文", "faster-whisper 工程术语", "WhisperX 自然分段", "WhisperX 均衡分段", "WhisperX 精细分段",
+    ]
+    source = schemes[0]
+    blocked = client.patch(
+        f"/api/admin/asr/schemes/{source['id']}",
+        json={"expected_version": source["version"], "parameters": {"segmentation_preset": "fine"}},
+        **_auth("admin", csrf=True),
+    )
+    assert blocked.status_code == 422
+    copied = client.post(
+        f"/api/admin/asr/schemes/{source['id']}/copy",
+        json={"name": "SenseVoice 自定义副本"},
+        **_auth("admin", csrf=True),
+    )
+    assert copied.status_code == 201
+    assert copied.json()["system_preset"] is False
+
+
 def test_routes_enforce_admin_reads_and_csrf_admin_mutations():
     assert require_admin in _dependencies("/admin/asr", "GET")
     assert require_csrf_admin in _dependencies(
