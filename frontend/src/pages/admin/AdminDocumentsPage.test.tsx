@@ -111,7 +111,7 @@ describe("AdminDocumentsPage", () => {
     render(<AdminDocumentsPage embedded />);
 
     expect(await screen.findByRole("heading", { name: "索引任务", level: 2 })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "资料发布任务", level: 3 })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "资料发布任务" })).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { level: 1 })).not.toBeInTheDocument();
   });
 
@@ -120,10 +120,11 @@ describe("AdminDocumentsPage", () => {
     await screen.findByText(failedJob.title);
 
     fireEvent.change(screen.getByRole("searchbox", { name: "搜索发布任务" }), { target: { value: "管综" } });
+    fireEvent.click(screen.getByRole("button", { name: "展开索引任务筛选" }));
     fireEvent.change(screen.getByRole("combobox", { name: "按数据库分类筛选" }), { target: { value: "cat-03" } });
     fireEvent.change(screen.getByRole("combobox", { name: "按文件类型筛选" }), { target: { value: "pdf" } });
     fireEvent.change(screen.getByRole("combobox", { name: "按资料来源筛选" }), { target: { value: "legacy" } });
-    fireEvent.click(screen.getByRole("button", { name: "处理中" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "按发布状态筛选" }), { target: { value: "processing" } });
 
     await waitFor(() => expect(mocks.managedContentIndexJobs).toHaveBeenLastCalledWith(expect.objectContaining({
       query: "管综",
@@ -142,7 +143,8 @@ describe("AdminDocumentsPage", () => {
     render(<AdminDocumentsPage />);
     await screen.findByText(failedJob.title);
 
-    fireEvent.click(screen.getByRole("button", { name: "查看历史尝试" }));
+    fireEvent.click(screen.getByRole("button", { name: "展开索引任务筛选" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "查看历史尝试" }));
 
     await waitFor(() => expect(mocks.managedContentIndexJobs).toHaveBeenLastCalledWith(expect.objectContaining({ history: true })));
     expect(screen.getByText("正在显示全部历史尝试。 默认不显示回收站资料。")).toBeInTheDocument();
@@ -158,6 +160,7 @@ describe("AdminDocumentsPage", () => {
     render(<AdminDocumentsPage />);
 
     expect(await screen.findByText("暂无发布任务")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "展开索引任务筛选" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "包含回收站资料" }));
 
     const row = (await screen.findByText(failedJob.title)).closest("tr") as HTMLElement;
@@ -173,6 +176,7 @@ describe("AdminDocumentsPage", () => {
     await screen.findByText(failedJob.title);
 
     const search = screen.getByRole("searchbox", { name: "搜索发布任务" });
+    fireEvent.click(screen.getByRole("button", { name: "展开索引任务筛选" }));
     const category = screen.getByRole("combobox", { name: "按数据库分类筛选" });
     const type = screen.getByRole("combobox", { name: "按文件类型筛选" });
     const source = screen.getByRole("combobox", { name: "按资料来源筛选" });
@@ -180,8 +184,8 @@ describe("AdminDocumentsPage", () => {
     fireEvent.change(category, { target: { value: "cat-03" } });
     fireEvent.change(type, { target: { value: "pdf" } });
     fireEvent.change(source, { target: { value: "legacy" } });
-    fireEvent.click(screen.getByRole("button", { name: "发布失败" }));
-    fireEvent.click(screen.getByRole("button", { name: "清除筛选" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "按发布状态筛选" }), { target: { value: "failed" } });
+    fireEvent.click(screen.getByRole("button", { name: "清除搜索与筛选" }));
 
     expect(search).toHaveValue("");
     expect(category).toHaveValue("");
@@ -195,6 +199,19 @@ describe("AdminDocumentsPage", () => {
       status: undefined,
       include_archived: false,
     })));
+  });
+
+  it("closes search filters with Escape and restores focus to search", async () => {
+    render(<AdminDocumentsPage />);
+    await screen.findByText(failedJob.title);
+
+    const search = screen.getByRole("searchbox", { name: "搜索发布任务" });
+    fireEvent.click(screen.getByRole("button", { name: "展开索引任务筛选" }));
+    expect(screen.getByRole("dialog", { name: "索引任务搜索筛选" })).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(screen.queryByRole("dialog", { name: "索引任务搜索筛选" })).not.toBeInTheDocument();
+    expect(search).toHaveFocus();
   });
 
   it("shows current-head indexing state and Parent count", async () => {

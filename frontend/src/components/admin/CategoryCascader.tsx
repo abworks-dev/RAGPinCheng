@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronDown, ChevronLeft, ChevronRight, Folder, Search } from "lucide-react";
 import { buildCategoryTree, type CategoryTreeNode } from "../../lib/category-tree";
 import type { ManagedCategory } from "../../types";
@@ -47,7 +47,9 @@ export function CategoryCascader({ categories, value, onChange, label = "目录"
   const panelId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
+  const [openUpward, setOpenUpward] = useState(false);
   const [query, setQuery] = useState("");
   const [candidateId, setCandidateId] = useState(value);
   const activeCategories = useMemo(() => categories.filter((category) => category.is_active), [categories]);
@@ -105,6 +107,15 @@ export function CategoryCascader({ categories, value, onChange, label = "目录"
     };
   }, [open]);
 
+  useLayoutEffect(() => {
+    if (!open || !triggerRef.current || !panelRef.current) return;
+    const triggerRect = triggerRef.current.getBoundingClientRect();
+    const panelHeight = panelRef.current.getBoundingClientRect().height;
+    const spaceBelow = window.innerHeight - triggerRect.bottom - 12;
+    const spaceAbove = triggerRect.top - 12;
+    setOpenUpward(panelHeight > spaceBelow && spaceAbove > spaceBelow);
+  }, [open, query, columns.length]);
+
   const stageCategory = (category: ManagedCategory, level?: number) => {
     setCandidateId(category.id);
     setActivePath((current) => level === undefined
@@ -159,11 +170,12 @@ export function CategoryCascader({ categories, value, onChange, label = "目录"
       <ChevronDown className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
     </button>
     {open && <div
+      ref={panelRef}
       id={panelId}
       role="dialog"
       aria-modal="false"
       aria-label={`${label}级联选择`}
-      className="absolute inset-x-0 top-full z-10 mt-2 min-w-0 max-w-full overflow-hidden rounded-ui-md border border-border bg-popover text-popover-foreground shadow-overlay sm:left-auto sm:right-0 sm:w-[34rem] sm:max-w-[calc(100vw-2rem)]"
+      className={`absolute inset-x-0 z-10 min-w-0 max-w-full overflow-hidden rounded-ui-md border border-border bg-popover text-popover-foreground shadow-overlay sm:left-auto sm:right-0 sm:w-[34rem] sm:max-w-[calc(100vw-2rem)] ${openUpward ? "bottom-full mb-2" : "top-full mt-2"}`}
     >
       <div className="border-b border-border p-3">
         <label className="relative block min-w-0">
