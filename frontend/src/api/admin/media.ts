@@ -7,6 +7,7 @@ export const adminMediaApi = {
   listAssets: (...args: Parameters<typeof api.listMediaAssets>) => api.listMediaAssets(...args),
   deleteFailedAsset: (...args: Parameters<typeof api.deleteFailedMediaAsset>) => api.deleteFailedMediaAsset(...args),
   profiles: (...args: Parameters<typeof api.listTranscriptionProfiles>) => api.listTranscriptionProfiles(...args),
+  schemes: (...args: Parameters<typeof api.listTranscriptionSchemes>) => api.listTranscriptionSchemes(...args),
   jobs: (...args: Parameters<typeof api.listTranscriptionJobs>) => api.listTranscriptionJobs(...args),
   getJob: (...args: Parameters<typeof api.getTranscriptionJob>) => api.getTranscriptionJob(...args),
   cancelJob: (...args: Parameters<typeof api.cancelTranscriptionJob>) => api.cancelTranscriptionJob(...args),

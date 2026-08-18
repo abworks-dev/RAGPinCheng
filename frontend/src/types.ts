@@ -718,6 +718,61 @@ export type TranscriptionProfile = {
   auto_index: boolean;
 };
 
+export type TranscriptionSchemeOption = {
+  scheme_id: string;
+  name: string;
+  description: string;
+  base_id: string;
+  config_hash: string;
+  enabled: boolean;
+  archived: boolean;
+  sort_order: number;
+  version: number;
+  availability: string;
+};
+
+export type TranscriptionSchemeParameters = {
+  segmentation_preset: "natural" | "balanced" | "fine" | "custom";
+  max_duration_ms: number | null;
+  max_chars: number;
+  merge_gap_ms: number;
+  terminology_profile: "none" | "bim-engineering-v1";
+  prompt_asset: "asr_engineering_zh_v1" | "asr_engineering_zh_v2";
+  preprocessing_preset: "standard-audio-v1";
+  vad_preset: "service-default-v1";
+  decode_preset: "service-default-v1";
+};
+
+export type TranscriptionScheme = {
+  id: string;
+  name: string;
+  description: string;
+  base_id: string;
+  parameters: TranscriptionSchemeParameters;
+  config_hash: string;
+  enabled: boolean;
+  archived: boolean;
+  system_preset: boolean;
+  sort_order: number;
+  version: number;
+  created_at: number;
+  updated_at: number;
+};
+
+export type TranscriptionBase = {
+  id: string;
+  provider: string;
+  model: string;
+  revision: string;
+  service_profile_id: string;
+  config_hash: string;
+  qualification: string;
+  admission: string;
+  availability: string;
+  capabilities: Record<string, unknown>;
+  defaults: Record<string, unknown>;
+};
+
 export type AsrSegmentation = {
   preset: "natural" | "balanced" | "fine";
   max_segment_duration_ms: number | null;
@@ -799,6 +854,7 @@ export type TranscriptionJob = {
   media_id: string;
   attempt_number: number;
   profile_id: string;
+  scheme_id?: string | null;
   status: TranscriptionJobStatus;
   stage: string | null;
   processed_ms: number;

@@ -10,12 +10,13 @@ import { ErrorState } from "../../components/ui/error-state";
 import { Input } from "../../components/ui/input";
 import { LoadingState } from "../../components/ui/loading-state";
 import { Progress } from "../../components/ui/progress";
+import { Select } from "../../components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../../components/ui/dialog";
 import { TranscriptionWorkbenchSheet } from "../../components/TranscriptionWorkbenchSheet";
 import { useTranscriptionJobs } from "../../hooks/useTranscriptionJobs";
 import { useAdminMediaAssets } from "../../hooks/useAdminMediaAssets";
 import { createRequestId } from "../../lib/request-id";
-import type { MediaAsset, TranscriptionJob, TranscriptionProfile } from "../../types";
+import type { MediaAsset, TranscriptionJob, TranscriptionSchemeOption } from "../../types";
 import { formatAdminDate, formatBytes } from "../../lib/admin-formatters";
 
 type UploadMode = "manual" | "automatic";
@@ -169,7 +170,8 @@ function pendingFromFile(file: File, profileId: string): PendingVideo {
 export function AdminMediaPage() {
   const [deletingMediaId, setDeletingMediaId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<MediaAsset | null>(null);
-  const [profiles, setProfiles] = useState<TranscriptionProfile[]>([]);
+  const [schemes, setSchemes] = useState<TranscriptionSchemeOption[]>([]);
+  const [schemeError, setSchemeError] = useState<string | null>(null);
   const [step, setStep] = useState(1);
   const [mode, setMode] = useState<UploadMode | null>(null);
   const [pending, setPending] = useState<PendingVideo[]>([]);
@@ -219,26 +221,30 @@ export function AdminMediaPage() {
     if (reachedTerminalState) void refresh();
   }, [jobs, refresh]);
   useEffect(() => {
-    adminMediaApi.profiles()
+    adminMediaApi.schemes()
       .then((items) => {
-        setProfiles(items);
-        const first = items.find((item) => item.admission === "enabled" && item.availability === "available");
+        setSchemes(items);
+        setSchemeError(null);
+        const first = items.find((item) => item.enabled && !item.archived && item.availability === "available");
         if (first) {
-          setBulkProfileId(first.profile_id);
-          setReplacementProfileId((current) => current || first.profile_id);
-          setPending((current) => current.map((item) => item.profileId ? item : { ...item, profileId: first.profile_id }));
+          setBulkProfileId(first.scheme_id);
+          setReplacementProfileId((current) => current || first.scheme_id);
+          setPending((current) => current.map((item) => item.profileId ? item : { ...item, profileId: first.scheme_id }));
         }
       })
-      .catch(() => setProfiles([]));
+      .catch((cause) => {
+        setSchemes([]);
+        setSchemeError(cause instanceof Error ? cause.message : "转录方案加载失败");
+      });
   }, []);
 
-  const enabledProfiles = profiles.filter((item) => item.admission === "enabled" && item.availability === "available");
+  const enabledSchemes = schemes.filter((item) => item.enabled && !item.archived && item.availability === "available");
   const editingItem = pending.find((item) => item.id === editingId);
 
   function addVideos(files: FileList | File[]) {
     const next = Array.from(files)
       .filter((file) => file.type === "video/mp4" || file.name.toLowerCase().endsWith(".mp4"))
-      .map((file) => pendingFromFile(file, bulkProfileId || enabledProfiles[0]?.profile_id || ""));
+      .map((file) => pendingFromFile(file, bulkProfileId || enabledSchemes[0]?.scheme_id || ""));
     if (next.length) setPending((current) => [...current, ...next]);
   }
 
@@ -270,8 +276,8 @@ export function AdminMediaPage() {
   function validateItem(item: PendingVideo) {
     if (!item.title.trim()) return "请填写视频标题";
     if (mode === "automatic") {
-      const profile = profiles.find((entry) => entry.profile_id === item.profileId);
-      if (!profile || profile.admission !== "enabled" || profile.availability !== "available") return "请选择可用的服务端 Profile";
+      const scheme = schemes.find((entry) => entry.scheme_id === item.profileId);
+      if (!scheme || !scheme.enabled || scheme.archived || scheme.availability !== "available") return "请选择当前可用的转录方案";
     } else {
       if (!item.transcriptFile || item.transcriptText === null) return "请绑定 Markdown 转写文件";
       if (!item.transcriptFile.name.toLowerCase().endsWith(".md")) return "转写文件必须是 .md";
@@ -357,6 +363,17 @@ export function AdminMediaPage() {
 
   async function submitReplacement() {
     if (!replaceSourceAsset || !replacementFile || !replacementProfileId) return;
+    try {
+      const current = await adminMediaApi.schemes();
+      setSchemes(current);
+      if (!current.some((item) => item.scheme_id === replacementProfileId && item.enabled && item.availability === "available")) {
+        setReplacementError("所选转录方案已不可用，请重新选择");
+        return;
+      }
+    } catch (caught: any) {
+      setReplacementError(caught?.message || "无法确认转录方案状态");
+      return;
+    }
     setReplacementBusy(true);
     setReplacementError(null);
     setReplacementProgress(0);
@@ -431,6 +448,24 @@ export function AdminMediaPage() {
 
   async function submitBatch() {
     if (!canSubmit) return;
+    if (mode === "automatic") {
+      try {
+        const current = await adminMediaApi.schemes();
+        setSchemes(current);
+        const available = new Set(current.filter((item) => item.enabled && item.availability === "available").map((item) => item.scheme_id));
+        const unavailable = readyItems.filter((item) => !available.has(item.profileId));
+        if (unavailable.length > 0) {
+          setPending((items) => items.map((item) => unavailable.some((entry) => entry.id === item.id)
+            ? { ...item, error: "所选转录方案已不可用，请重新选择" }
+            : item));
+          setUploadError("部分视频所选方案已不可用，提交已停止");
+          return;
+        }
+      } catch (caught: any) {
+        setUploadError(caught?.message || "无法确认转录方案状态");
+        return;
+      }
+    }
     setSubmitting(true);
     setUploadError(null);
     const queue = [...readyItems];
@@ -463,7 +498,7 @@ export function AdminMediaPage() {
       retryIdempotencyKeys.current.set(job.job_id, requestKey);
     }
     try {
-      replaceJob(await adminMediaApi.retryJob(job.media_id, job.profile_id, requestKey));
+      replaceJob(await adminMediaApi.retryJob(job.media_id, job.scheme_id || job.profile_id, requestKey));
       retryIdempotencyKeys.current.delete(job.job_id);
       await refresh();
     } catch (e: any) {
@@ -499,10 +534,12 @@ export function AdminMediaPage() {
         <div>
           <p className="text-ui-xs font-medium text-primary">内容管理</p>
           <h1 id="admin-media-title" className="mt-1 text-ui-2xl font-semibold tracking-tight text-foreground">视频管理</h1>
-          <p className="mt-1 max-w-3xl text-ui-sm text-muted-foreground">分步骤批量上传视频，并选择人工 Markdown 或受控服务端 Profile。</p>
+          <p className="mt-1 max-w-3xl text-ui-sm text-muted-foreground">分步骤批量上传视频，并选择人工 Markdown 或受控转录方案。</p>
         </div>
         <a className={buttonVariants({ variant: "outline" })} href="/admin/asr"><Settings2 className="size-4" />转录配置</a>
       </header>
+
+      {schemeError && <Alert variant="destructive" role="alert"><AlertTitle>转录方案加载失败</AlertTitle><AlertDescription>{schemeError}</AlertDescription></Alert>}
 
       <Dialog open={uploadDialogOpen} onOpenChange={requestUploadDialogClose}>
       <DialogContent className="max-h-[90vh] max-w-4xl overflow-y-auto">
@@ -557,7 +594,7 @@ export function AdminMediaPage() {
               <div className="grid gap-4 md:grid-cols-2">
                 <button type="button" className="rounded-ui-xl border border-border p-5 text-left hover:border-primary hover:bg-primary/5" onClick={() => chooseMode("automatic")}>
                   <span className="font-semibold">自动转录</span>
-                  <span className="mt-2 block text-ui-sm text-muted-foreground">使用服务端白名单 Profile 生成候选草稿。实验性 Profile 强制人工审核。</span>
+                  <span className="mt-2 block text-ui-sm text-muted-foreground">使用管理员维护的有序转录方案生成候选草稿。</span>
                 </button>
                 <button type="button" className="rounded-ui-xl border border-border p-5 text-left hover:border-primary hover:bg-primary/5" onClick={() => chooseMode("manual")}>
                   <span className="font-semibold">人工转写</span>
@@ -575,11 +612,11 @@ export function AdminMediaPage() {
                 <Button variant="outline" size="sm" onClick={() => setPending((current) => current.map((item) => ({ ...item, selected: false })))}>取消全选</Button>
                 {mode === "automatic" && (
                   <>
-                    <label className="text-ui-sm font-medium">批量转录 Profile
-                      <select aria-label="批量转录 Profile" value={bulkProfileId} onChange={(event) => setBulkProfileId(event.target.value)} className="mt-1 block h-control-md min-w-64 rounded-ui-md border border-input bg-background px-3 text-ui-sm">
-                        <option value="">请选择服务端 Profile</option>
-                        {profiles.map((profile) => <option key={profile.profile_id} value={profile.profile_id} disabled={profile.admission !== "enabled" || profile.availability !== "available"}>{profile.display_name}{profile.qualification === "experimental" ? "（实验性·强制审核）" : ""}{profile.availability !== "available" ? "（不可用）" : ""}</option>)}
-                      </select>
+                    <label className="text-ui-sm font-medium">批量转录方案
+                      <Select aria-label="批量转录方案" value={bulkProfileId} onChange={(event) => setBulkProfileId(event.target.value)} className="mt-1 min-w-64">
+                        <option value="">请选择转录方案</option>
+                        {schemes.map((scheme) => <option key={scheme.scheme_id} value={scheme.scheme_id} disabled={!scheme.enabled || scheme.archived || scheme.availability !== "available"}>{scheme.name}{scheme.availability !== "available" ? "（不可用）" : ""}</option>)}
+                      </Select>
                     </label>
                     <Button variant="outline" onClick={() => setPending((current) => current.map((item) => item.selected ? { ...item, profileId: bulkProfileId, requestId: createRequestId(), state: "waiting", error: null } : item))}>应用到已选择视频</Button>
                   </>
@@ -589,7 +626,7 @@ export function AdminMediaPage() {
               <div className="max-h-[32rem] space-y-3 overflow-y-auto pr-1" aria-label="上传配置列表">
                 {pending.map((item) => {
                   const validationError = validateItem(item);
-                  const profile = profiles.find((entry) => entry.profile_id === item.profileId);
+                  const scheme = schemes.find((entry) => entry.scheme_id === item.profileId);
                   return (
                     <div key={item.id} className="rounded-ui-xl border border-border p-4">
                       <div className="flex gap-3">
@@ -627,12 +664,12 @@ export function AdminMediaPage() {
                           <Input aria-label={`${item.file.name} 的视频标题`} className="mt-1" value={item.title} disabled={submitting || item.state === "succeeded"} onChange={(event) => updatePending(item.id, { title: event.target.value, requestId: createRequestId(), state: "waiting", error: null })} />
                         </label>
                         {mode === "automatic" ? (
-                          <label className="text-ui-sm font-medium">转录 Profile
-                            <select aria-label={`${item.file.name} 的转录 Profile`} className="mt-1 h-control-md w-full rounded-ui-md border border-input bg-background px-3 text-ui-sm" value={item.profileId} disabled={submitting || item.state === "succeeded"} onChange={(event) => updatePending(item.id, { profileId: event.target.value, requestId: createRequestId(), state: "waiting", error: null })}>
-                              <option value="">请选择服务端 Profile</option>
-                              {profiles.map((entry) => <option key={entry.profile_id} value={entry.profile_id} disabled={entry.admission !== "enabled" || entry.availability !== "available"}>{entry.display_name}{entry.qualification === "experimental" ? "（实验性·强制审核）" : ""}{entry.availability !== "available" ? "（不可用）" : ""}</option>)}
-                            </select>
-                            {profile?.requires_review && <span className="mt-1 block text-ui-xs text-warning">此 Profile 生成的草稿必须人工审核，不能自动发布或索引。</span>}
+                          <label className="text-ui-sm font-medium">转录方案
+                            <Select aria-label={`${item.file.name} 的转录方案`} className="mt-1" value={item.profileId} disabled={submitting || item.state === "succeeded"} onChange={(event) => updatePending(item.id, { profileId: event.target.value, requestId: createRequestId(), state: "waiting", error: null })}>
+                              <option value="">请选择转录方案</option>
+                              {schemes.map((entry) => <option key={entry.scheme_id} value={entry.scheme_id} disabled={!entry.enabled || entry.archived || entry.availability !== "available"}>{entry.name}{entry.availability !== "available" ? "（不可用）" : ""}</option>)}
+                            </Select>
+                            {scheme && <span className="mt-1 block text-ui-xs text-muted-foreground">{scheme.description}</span>}
                           </label>
                         ) : (
                           <div>
@@ -775,7 +812,7 @@ export function AdminMediaPage() {
           {replaceSourceAsset && <div className="space-y-4">
             <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-2 text-ui-sm"><dt className="text-muted-foreground">当前资料</dt><dd className="break-words font-medium">{replaceSourceAsset.title}</dd><dt className="text-muted-foreground">当前文件</dt><dd className="break-all">{replaceSourceAsset.original_filename}</dd></dl>
             <label className="flex min-h-28 cursor-pointer flex-col items-center justify-center gap-2 rounded-ui-lg border border-dashed border-input bg-background px-4 py-4 text-center hover:bg-surface-muted focus-within:ring-2 focus-within:ring-ring"><FileUp className="size-6 text-primary" /><span className="text-ui-sm font-medium">{replacementFile?.name || "选择新的 MP4 视频"}</span>{replacementFile && <span className="text-ui-xs text-muted-foreground">{formatBytes(replacementFile.size)}</span>}<input type="file" className="sr-only" aria-label="选择替换视频" accept=".mp4,video/mp4" disabled={replacementBusy} onChange={(event) => { setReplacementFile(event.target.files?.[0] || null); setReplacementError(null); setReplacementProgress(0); }} /></label>
-            <label className="block text-ui-sm font-medium">转录 Profile<select aria-label="替换视频转录 Profile" className="mt-1 h-control-md w-full rounded-ui-md border border-input bg-background px-3 text-ui-sm" value={replacementProfileId} disabled={replacementBusy} onChange={(event) => setReplacementProfileId(event.target.value)}><option value="">请选择可用 Profile</option>{profiles.map((profile) => <option key={profile.profile_id} value={profile.profile_id} disabled={profile.admission !== "enabled" || profile.availability !== "available"}>{profile.display_name}{profile.qualification === "experimental" ? "（实验性·强制审核）" : ""}{profile.availability !== "available" ? "（不可用）" : ""}</option>)}</select></label>
+            <label className="block text-ui-sm font-medium">转录方案<Select aria-label="替换视频转录方案" className="mt-1" value={replacementProfileId} disabled={replacementBusy} onChange={(event) => setReplacementProfileId(event.target.value)}><option value="">请选择可用方案</option>{schemes.map((scheme) => <option key={scheme.scheme_id} value={scheme.scheme_id} disabled={!scheme.enabled || scheme.archived || scheme.availability !== "available"}>{scheme.name}{scheme.availability !== "available" ? "（不可用）" : ""}</option>)}</Select></label>
             {replacementBusy && <div className="space-y-1.5" role="status"><div className="flex items-center justify-between text-ui-xs"><span>{replacementProgress < 1 ? "正在上传候选视频" : "服务端正在准备转录任务"}</span><span className="tabular-nums text-muted-foreground">{Math.round(replacementProgress * 100)}%</span></div><Progress label="替换视频上传进度" value={replacementProgress < 1 ? replacementProgress * 100 : null} /></div>}
             {replacementError && <Alert variant="destructive" role="alert"><AlertTitle>替换任务创建失败</AlertTitle><AlertDescription>{replacementError}</AlertDescription></Alert>}
           </div>}

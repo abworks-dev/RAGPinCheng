@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   uploadAutomaticMediaVideo: vi.fn(),
   uploadReplacementMediaVideo: vi.fn(),
   listTranscriptionProfiles: vi.fn(),
+  listTranscriptionSchemes: vi.fn(),
   listTranscriptionJobs: vi.fn(),
   listTranscriptVersions: vi.fn(),
   getTranscriptionJob: vi.fn(),
@@ -19,11 +20,15 @@ const mocks = vi.hoisted(() => ({
 vi.mock("../../api/client", () => ({ api: mocks }));
 
 const availableProfile = {
-  profile_id: "funasr-sensevoice-zh-experimental-v1",
-  display_name: "受控中文转录",
-  description: "服务端白名单 Profile",
-  qualification: "experimental",
-  admission: "enabled",
+  scheme_id: "funasr-sensevoice-zh-experimental-v1",
+  name: "受控中文转录",
+  description: "服务端受控转录方案",
+  base_id: "sensevoice-v1",
+  config_hash: "a".repeat(64),
+  enabled: true,
+  archived: false,
+  sort_order: 0,
+  version: 1,
   availability: "available",
   unavailable_reason_code: null,
   requires_review: true,
@@ -33,15 +38,16 @@ const availableProfile = {
 
 const secondProfile = {
   ...availableProfile,
-  profile_id: "approved-profile",
-  display_name: "正式中文转录",
-  qualification: "qualified",
+  scheme_id: "approved-profile",
+  name: "正式中文转录",
+  sort_order: 1,
 };
 
 const unavailableProfile = {
   ...availableProfile,
-  profile_id: "disabled-profile",
-  display_name: "不可用 Profile",
+  scheme_id: "disabled-profile",
+  name: "不可用方案",
+  sort_order: 2,
   availability: "unavailable",
 };
 
@@ -65,7 +71,7 @@ const succeededJob = {
   job_id: "job-succeeded",
   media_id: "media-ready",
   attempt_number: 1,
-  profile_id: availableProfile.profile_id,
+  profile_id: availableProfile.scheme_id,
   status: "succeeded" as const,
   stage: "formatting",
   processed_ms: 1000,
@@ -125,7 +131,8 @@ describe("AdminMediaPage wizard", () => {
       media_id: "media-replacement-candidate",
       transcription_job_id: "job-replacement",
     });
-    mocks.listTranscriptionProfiles.mockResolvedValue([availableProfile, secondProfile, unavailableProfile]);
+    mocks.listTranscriptionProfiles.mockResolvedValue([]);
+    mocks.listTranscriptionSchemes.mockResolvedValue([availableProfile, secondProfile, unavailableProfile]);
     mocks.listTranscriptionJobs.mockResolvedValue([succeededJob]);
     mocks.listTranscriptVersions.mockResolvedValue([]);
     mocks.getTranscriptionJob.mockResolvedValue(succeededJob);
@@ -166,18 +173,18 @@ describe("AdminMediaPage wizard", () => {
     render(<AdminMediaPage />);
 
     const dialog = await screen.findByRole("dialog", { name: "替换视频" });
-    const profile = within(dialog).getByRole("combobox", { name: "替换视频转录 Profile" });
-    await waitFor(() => expect(profile).toHaveValue(availableProfile.profile_id));
-    expect(within(dialog).getByRole("option", { name: /不可用 Profile/ })).toBeDisabled();
+    const profile = within(dialog).getByRole("combobox", { name: "替换视频转录方案" });
+    await waitFor(() => expect(profile).toHaveValue(availableProfile.scheme_id));
+    expect(within(dialog).getByRole("option", { name: /不可用方案/ })).toBeDisabled();
     const replacement = video("delivery-training-v2.mp4");
     fireEvent.change(within(dialog).getByLabelText("选择替换视频"), { target: { files: [replacement] } });
-    fireEvent.change(profile, { target: { value: secondProfile.profile_id } });
+    fireEvent.change(profile, { target: { value: secondProfile.scheme_id } });
     fireEvent.click(within(dialog).getByRole("button", { name: "上传并开始转录" }));
 
     await waitFor(() => expect(mocks.uploadReplacementMediaVideo).toHaveBeenCalledWith(
       replacement,
       assets[0].title,
-      secondProfile.profile_id,
+      secondProfile.scheme_id,
       expect.any(String),
       assets[0].media_id,
       expect.objectContaining({ onProgress: expect.any(Function), onUploaded: expect.any(Function) }),
@@ -260,20 +267,19 @@ describe("AdminMediaPage wizard", () => {
     expect(screen.getByText("第二次提交")).toBeInTheDocument();
   });
 
-  it("accepts multiple MP4 files and applies one server profile to selected rows", async () => {
+  it("accepts multiple MP4 files and applies one ordered scheme to selected rows", async () => {
     render(<AdminMediaPage />);
     await addVideosAndOpenMode([video("one.mp4"), video("two.mp4")], "自动转录");
 
-    expect(screen.getAllByText("实验性·强制审核", { exact: false }).length).toBeGreaterThan(0);
-    expect(screen.getAllByRole("option", { name: /不可用 Profile/ }).every((option) => option.hasAttribute("disabled"))).toBe(true);
-    fireEvent.change(screen.getByLabelText("批量转录 Profile"), { target: { value: secondProfile.profile_id } });
+    expect(screen.getAllByRole("option", { name: /不可用方案/ }).every((option) => option.hasAttribute("disabled"))).toBe(true);
+    fireEvent.change(screen.getByLabelText("批量转录方案"), { target: { value: secondProfile.scheme_id } });
     fireEvent.click(screen.getByRole("button", { name: "应用到已选择视频" }));
-    expect(screen.getByLabelText("one.mp4 的转录 Profile")).toHaveValue(secondProfile.profile_id);
-    expect(screen.getByLabelText("two.mp4 的转录 Profile")).toHaveValue(secondProfile.profile_id);
+    expect(screen.getByLabelText("one.mp4 的转录方案")).toHaveValue(secondProfile.scheme_id);
+    expect(screen.getByLabelText("two.mp4 的转录方案")).toHaveValue(secondProfile.scheme_id);
 
     fireEvent.click(screen.getByRole("button", { name: "上传并创建自动转录任务" }));
     await waitFor(() => expect(mocks.uploadAutomaticMediaVideo).toHaveBeenCalledTimes(2));
-    expect(mocks.uploadAutomaticMediaVideo.mock.calls[0][2]).toBe(secondProfile.profile_id);
+    expect(mocks.uploadAutomaticMediaVideo.mock.calls[0][2]).toBe(secondProfile.scheme_id);
     expect(mocks.uploadAutomaticMediaVideo.mock.calls[0][3]).not.toBe(mocks.uploadAutomaticMediaVideo.mock.calls[1][3]);
   });
 
@@ -303,16 +309,16 @@ describe("AdminMediaPage wizard", () => {
     await waitFor(() => expect(screen.getByText("已提交")).toBeInTheDocument());
   });
 
-  it("allows each automatic row to override the batch profile", async () => {
+  it("allows each automatic row to override the batch scheme", async () => {
     render(<AdminMediaPage />);
     await addVideosAndOpenMode([video("one.mp4"), video("two.mp4")], "自动转录");
-    fireEvent.change(screen.getByLabelText("two.mp4 的转录 Profile"), { target: { value: secondProfile.profile_id } });
+    fireEvent.change(screen.getByLabelText("two.mp4 的转录方案"), { target: { value: secondProfile.scheme_id } });
     fireEvent.click(screen.getByRole("button", { name: "上传并创建自动转录任务" }));
 
     await waitFor(() => expect(mocks.uploadAutomaticMediaVideo).toHaveBeenCalledTimes(2));
     const calls = mocks.uploadAutomaticMediaVideo.mock.calls;
-    expect(calls.find((call) => call[0].name === "one.mp4")?.[2]).toBe(availableProfile.profile_id);
-    expect(calls.find((call) => call[0].name === "two.mp4")?.[2]).toBe(secondProfile.profile_id);
+    expect(calls.find((call) => call[0].name === "one.mp4")?.[2]).toBe(availableProfile.scheme_id);
+    expect(calls.find((call) => call[0].name === "two.mp4")?.[2]).toBe(secondProfile.scheme_id);
   });
 
   it("keeps manual Markdown per video and uploads edited text through the existing path", async () => {
@@ -359,7 +365,7 @@ describe("AdminMediaPage wizard", () => {
     fireEvent.click(screen.getByRole("button", { name: "取消" }));
     fireEvent.click(screen.getByRole("button", { name: "重试" }));
     await waitFor(() => expect(mocks.cancelTranscriptionJob).toHaveBeenCalledWith("job-succeeded"));
-    await waitFor(() => expect(mocks.retryTranscription).toHaveBeenCalledWith("media-failed", availableProfile.profile_id, expect.any(String)));
+    await waitFor(() => expect(mocks.retryTranscription).toHaveBeenCalledWith("media-failed", availableProfile.scheme_id, expect.any(String)));
   });
 
   it("uses indeterminate progress instead of a false zero percent while the model runs", async () => {
