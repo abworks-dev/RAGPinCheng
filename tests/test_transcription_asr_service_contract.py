@@ -7,6 +7,7 @@ import pytest
 from src.transcription.asr_service_contract import (
     ASR_API_VERSION,
     ASR_JOB_SCHEMA_VERSION,
+    ASR_PROFILE_IDENTITIES_SCHEMA_VERSION,
     ASR_RESULT_SCHEMA_VERSION,
     ASR_UPLOAD_SCHEMA_VERSION,
     CreateJobRequest,
@@ -14,6 +15,8 @@ from src.transcription.asr_service_contract import (
     ServiceJob,
     ServiceJobState,
     ServicePauseReason,
+    ServiceProfileIdentities,
+    ServiceProfileIdentity,
     ServiceResult,
     UploadManifest,
     UploadPartRecord,
@@ -57,6 +60,18 @@ def candidate() -> ProviderCandidate:
         lambda: request(),
         lambda: ServiceCapabilities(
             ASR_API_VERSION, ("funasr-sensevoice-small-v1",), 1024, 2048
+        ),
+        lambda: ServiceProfileIdentities(
+            ASR_PROFILE_IDENTITIES_SCHEMA_VERSION,
+            (
+                ServiceProfileIdentity(
+                    "funasr-sensevoice-small-v1",
+                    "funasr-sensevoice",
+                    "0" * 64,
+                    None,
+                    "not-required",
+                ),
+            ),
         ),
         lambda: UploadManifest(
             ASR_UPLOAD_SCHEMA_VERSION,

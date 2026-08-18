@@ -265,6 +265,14 @@ function Get-InventoryFileSha256 {
     finally { $stream.Dispose() }
 }
 
+function Get-InventoryTextSha256 {
+    param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Value)
+    $bytes = [Text.UTF8Encoding]::new($false).GetBytes($Value)
+    $sha256 = [Security.Cryptography.SHA256]::Create()
+    try { return ([BitConverter]::ToString($sha256.ComputeHash($bytes))).Replace('-', '').ToLowerInvariant() }
+    finally { $sha256.Dispose() }
+}
+
 function Get-ActivationAudit {
     param([string]$DataRoot, [string]$BackupRoot)
     $result = [ordered]@{ status = 'not-configured'; active_candidate_id = ''; references = @() }
@@ -589,6 +597,163 @@ function Get-AsrQualificationInventory {
     return $result
 }
 
+function Get-FasterWhisperWheelCacheInventory {
+    param(
+        [string]$DataRoot,
+        [string]$ProgramRoot,
+        [string]$BackupRoot,
+        [string]$QualificationRoot,
+        [object]$References,
+        [int]$RetentionDays = 30,
+        [int]$KeepCount = 2
+    )
+    $result = [ordered]@{
+        status='not-configured'; reference_status='measured'; referenced_cache_keys=@(); entries=@()
+        reference_diagnostics=[ordered]@{
+            verdicts=[ordered]@{valid_pass=0;non_pass=0;invalid=0;invalid_runs=@()}
+            release_references=[ordered]@{resolved=0;unresolved=0;unresolved_runs=@();source_references=@()}
+            scan_failures=0
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($DataRoot)) { return $result }
+    $root = Join-Path $DataRoot 'qualification\wheel-cache'
+    if (-not (Test-Path -LiteralPath $root -PathType Container)) { $result.status='missing'; return $result }
+    $result.status='measured'
+
+    $referencedKeys = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $verdictRoot = if ([string]::IsNullOrWhiteSpace($QualificationRoot)) {
+        Join-Path $DataRoot 'qualification\runs'
+    } else {
+        Join-Path $QualificationRoot 'runs'
+    }
+    if (Test-Path -LiteralPath $verdictRoot -PathType Container) {
+        try {
+            foreach ($verdictPath in @(Get-ChildItem -LiteralPath $verdictRoot -Filter 'qualification-verdict.json' -File -Recurse -Force -ErrorAction Stop)) {
+                $verdict = Get-JsonFile -Path $verdictPath.FullName
+                $runId = $verdictPath.Directory.Parent.Name
+                $properties = if($verdict){@($verdict.psobject.Properties|ForEach-Object Name)}else{@()}
+                if ($verdict -and -not ($properties -contains '__parse_error') -and
+                    ($properties -contains 'schema_version') -and [string]$verdict.schema_version -eq 'faster-whisper-r3-verdict/3' -and
+                    ($properties -contains 'status') -and [string]$verdict.status -eq 'pass' -and
+                    ($properties -contains 'wheel_cache_key') -and [string]$verdict.wheel_cache_key -match '^[0-9a-f]{64}$') {
+                    [void]$referencedKeys.Add(([string]$verdict.wheel_cache_key).ToLowerInvariant())
+                    $result.reference_diagnostics.verdicts.valid_pass++
+                } elseif ($verdict -and -not ($properties -contains '__parse_error') -and
+                    ($properties -contains 'schema_version') -and [string]$verdict.schema_version -eq 'faster-whisper-r3-verdict/3' -and
+                    ($properties -contains 'status') -and [string]$verdict.status -eq 'fail') {
+                    $result.reference_diagnostics.verdicts.non_pass++
+                } else {
+                    $result.reference_status='incomplete'; $result.reference_diagnostics.verdicts.invalid++
+                    $result.reference_diagnostics.verdicts.invalid_runs += [ordered]@{run_id=$runId;reason='invalid-verdict-contract'}
+                }
+            }
+        } catch { $result.reference_status='incomplete'; $result.reference_diagnostics.scan_failures++ }
+    }
+
+    # Release and rollback manifests identify qualification runs; resolve their retained verdicts above.
+    $activeState=Get-JsonFile -Path (Join-Path $DataRoot 'release-state\active.json')
+    $activeCandidateId=if($activeState -and ($activeState.psobject.Properties.Name -contains 'candidate_id')){[string]$activeState.candidate_id}else{''}
+    $activationStates=@()
+    if(-not[string]::IsNullOrWhiteSpace($BackupRoot) -and (Test-Path -LiteralPath $BackupRoot -PathType Container)){
+        foreach($statePath in @(Get-ChildItem -LiteralPath $BackupRoot -Filter 'candidate-activation-state.json' -File -Recurse -Force -ErrorAction SilentlyContinue)){
+            $state=Get-JsonFile -Path $statePath.FullName
+            $properties=if($state){@($state.psobject.Properties|ForEach-Object Name)}else{@()}
+            if($state -and -not($properties -contains '__parse_error')){
+                $activationStates += [pscustomobject]@{
+                    activation_id=Split-Path (Split-Path $statePath.FullName -Parent) -Leaf
+                    candidate_id=if($properties -contains 'candidate_id'){[string]$state.candidate_id}else{''}
+                    previous_candidate_id=if($properties -contains 'previous_candidate_id'){[string]$state.previous_candidate_id}else{''}
+                    status=if($properties -contains 'status'){[string]$state.status}else{'unknown'}
+                }
+            }
+        }
+    }
+    $unresolvedByRun=@{}
+    $manifestRoots = @($BackupRoot)
+    $programReleasesRoot=if(-not[string]::IsNullOrWhiteSpace($ProgramRoot)){Join-Path $ProgramRoot 'releases'}else{''}
+    if ($programReleasesRoot) { $manifestRoots += $programReleasesRoot }
+    foreach ($manifestRoot in $manifestRoots) {
+        if ([string]::IsNullOrWhiteSpace($manifestRoot) -or -not (Test-Path -LiteralPath $manifestRoot -PathType Container)) { continue }
+        try {
+            foreach ($manifestPath in @(Get-ChildItem -LiteralPath $manifestRoot -Filter 'release-manifest.json' -File -Recurse -Force -ErrorAction Stop)) {
+                $manifest = Get-JsonFile -Path $manifestPath.FullName
+                if (-not $manifest -or ($manifest.PSObject.Properties.Name -contains '__parse_error')) { $result.reference_status='incomplete'; $result.reference_diagnostics.scan_failures++; continue }
+                if (-not ($manifest.PSObject.Properties.Name -contains 'schema_version') -or [string]$manifest.schema_version -ne 'asr-production-release/1') { continue }
+                if (-not ($manifest.PSObject.Properties.Name -contains 'engines')) { $result.reference_status='incomplete'; $result.reference_diagnostics.scan_failures++; continue }
+                foreach ($engine in @($manifest.engines | Where-Object { [string]$_.engine -eq 'faster-whisper' })) {
+                    $runId = [string]$engine.qualification_run_id
+                    $verdict = Get-JsonFile -Path (Join-Path $verdictRoot "$runId\reports\qualification-verdict.json")
+                    $verdictProperties=if($verdict){@($verdict.psobject.Properties|ForEach-Object Name)}else{@()}
+                    if ($verdict -and -not ($verdictProperties -contains '__parse_error') -and
+                        ($verdictProperties -contains 'schema_version') -and [string]$verdict.schema_version -eq 'faster-whisper-r3-verdict/3' -and
+                        ($verdictProperties -contains 'status') -and [string]$verdict.status -eq 'pass' -and
+                        ($verdictProperties -contains 'run_id') -and [string]$verdict.run_id -eq $runId -and
+                        ($verdictProperties -contains 'wheel_cache_key') -and [string]$verdict.wheel_cache_key -match '^[0-9a-f]{64}$') {
+                        [void]$referencedKeys.Add(([string]$verdict.wheel_cache_key).ToLowerInvariant())
+                        $result.reference_diagnostics.release_references.resolved++
+                    } else {
+                        $result.reference_status='incomplete'; $result.reference_diagnostics.release_references.unresolved++
+                        $candidateId=if($manifest.psobject.Properties.Name -contains 'candidate_id'){[string]$manifest.candidate_id}else{''}
+                        $isProgramRelease=[bool]($programReleasesRoot -and $manifestPath.FullName.StartsWith(([IO.Path]::GetFullPath($programReleasesRoot).TrimEnd('\')+'\'),[StringComparison]::OrdinalIgnoreCase))
+                        $sourceKind=if($isProgramRelease){'program-release'}else{'activation-backup'}
+                        $relatedStates=if($isProgramRelease){@($activationStates|Where-Object{$_.candidate_id -eq $candidateId -or $_.previous_candidate_id -eq $candidateId})}else{
+                            $activationId=$manifestPath.FullName.Substring([IO.Path]::GetFullPath($manifestRoot).TrimEnd('\').Length).TrimStart('\').Split('\')[0]
+                            @($activationStates|Where-Object activation_id -eq $activationId)
+                        }
+                        $relationships=@();foreach($related in $relatedStates){
+                            $relationship=if($related.candidate_id -eq $candidateId){'candidate'}elseif($related.previous_candidate_id -eq $candidateId){'previous-candidate'}else{'unknown'}
+                            $relationships += [ordered]@{activation_id=$related.activation_id;state_status=$related.status;relationship=$relationship}
+                        }
+                        $classification=if($candidateId -match '^[0-9]{1,20}$' -and $candidateId -eq $activeCandidateId){'active-release'}elseif($candidateId -notmatch '^[0-9]{1,20}$' -or @($relationships|Where-Object{$_.state_status -notin @('prepared','active-local-verified','rolled-back') -or $_.relationship -eq 'unknown'}).Count){'invalid-reference-contract'}elseif(@($relationships|Where-Object{$_.state_status -eq 'active-local-verified' -and $_.relationship -eq 'previous-candidate'}).Count){'live-rollback-reference'}elseif(@($relationships|Where-Object{$_.state_status -in @('prepared','active-local-verified')}).Count){'nonterminal-activation'}elseif(@($relationships|Where-Object state_status -eq 'rolled-back').Count){'terminal-rollback-history'}elseif($relationships.Count -eq 0){'orphan-release-manifest'}else{'invalid-reference-contract'}
+                        $source=[ordered]@{run_id=$runId;candidate_id=$candidateId;source_kind=$sourceKind;classification=$classification;activation_relationships=$relationships}
+                        $result.reference_diagnostics.release_references.source_references += $source
+                        if(-not$unresolvedByRun.ContainsKey($runId)){$unresolvedByRun[$runId]=[ordered]@{run_id=$runId;reason='release-verdict-missing-or-invalid';classifications=@();source_count=0}}
+                        $unresolvedByRun[$runId].source_count++
+                        $unresolvedByRun[$runId].classifications=@($unresolvedByRun[$runId].classifications+$classification|Sort-Object -Unique)
+                    }
+                }
+            }
+        } catch { $result.reference_status='incomplete'; $result.reference_diagnostics.scan_failures++ }
+    }
+    $result.reference_diagnostics.release_references.unresolved_runs=@($unresolvedByRun.Values|Sort-Object run_id)
+    $result.referenced_cache_keys = @($referencedKeys | Sort-Object)
+
+    $entries = @(Get-ChildItem -LiteralPath $root -Force | Sort-Object LastWriteTimeUtc -Descending)
+    $validIndex = 0
+    foreach ($entry in $entries) {
+        $measurement = if ($entry.PSIsContainer) { Measure-Tree -Path $entry.FullName } else { [ordered]@{status='measured';bytes=[int64]$entry.Length;files=1} }
+        $kind = if ($entry.Name -match '^[0-9a-f]{64}$' -and $entry.PSIsContainer) {'cache-key'} elseif ($entry.Name -like '.staging-*') {'staging'} elseif ($entry.Name -eq 'quarantine') {'quarantine'} else {'unknown'}
+        $integrity = 'not-applicable'; $reasons = [Collections.Generic.List[string]]::new()
+        if ($kind -eq 'cache-key') {
+            $integrity='invalid'; $manifest=Get-JsonFile -Path (Join-Path $entry.FullName 'cache-manifest.json')
+            [string[]]$manifestProperties = if ($manifest) { @($manifest.psobject.Properties | ForEach-Object Name) } else { @() }
+            $manifestPropertySignature = (@($manifestProperties | Sort-Object) -join ',')
+            if ($manifest -and -not ($manifestProperties -contains '__parse_error') -and
+                $manifestPropertySignature -eq 'cache_key,key_material,schema_version,wheel_manifest' -and
+                [string]$manifest.schema_version -eq 'faster-whisper-wheel-cache/1' -and
+                [string]$manifest.cache_key -eq $entry.Name -and
+                [string]$manifest.key_material.schema_version -eq 'faster-whisper-wheel-cache-key/1' -and
+                (Get-InventoryTextSha256 -Value ($manifest.key_material | ConvertTo-Json -Depth 8 -Compress)) -eq $entry.Name -and
+                [string]$manifest.wheel_manifest.schema_version -eq 'faster-whisper-wheel-manifest/3') {
+                $expected=@($manifest.wheel_manifest.files); $actual=@(Get-ChildItem -LiteralPath $entry.FullName -File -Force)
+                $expectedNames=@(@($expected | ForEach-Object {[string]$_.file_name}) + 'cache-manifest.json' | Sort-Object)
+                $actualNames=@($actual | ForEach-Object Name | Sort-Object)
+                $integrity=if($expected.Count -gt 0 -and -not (Compare-Object -ReferenceObject $expectedNames -DifferenceObject $actualNames)){'valid'}else{'invalid'}
+                if($integrity -eq 'valid') { foreach($wheel in $expected){ $path=Join-Path $entry.FullName ([string]$wheel.file_name); if(-not(Test-Path -LiteralPath $path -PathType Leaf) -or [int64](Get-Item -LiteralPath $path).Length -ne [int64]$wheel.size_bytes -or (Get-InventoryFileSha256 -Path $path) -ne [string]$wheel.sha256){$integrity='invalid';break} } }
+            }
+            if($integrity -ne 'valid'){$reasons.Add('cache-contract-invalid')}
+            if($referencedKeys.Contains($entry.Name)){$reasons.Add('qualification-evidence-reference')}
+            if($validIndex -lt $KeepCount){$reasons.Add("within-newest-$KeepCount")}; $validIndex++
+            if($entry.LastWriteTimeUtc -gt [DateTime]::UtcNow.AddDays(-$RetentionDays)){$reasons.Add("younger-than-$RetentionDays-days")}
+        } else { $reasons.Add("$kind-entry") }
+        if($result.reference_status -ne 'measured'){$reasons.Add('reference-inventory-incomplete')}
+        if($measurement.status -ne 'measured'){$reasons.Add($measurement.status)}
+        if(Test-ReferenceMatch -Path $entry.FullName -References $References){$reasons.Add('process-task-reference-or-inventory-unavailable')}
+        $result.entries += [ordered]@{name=$entry.Name;path=$entry.FullName;kind=$kind;bytes=[int64]$measurement.bytes;files=[int]$measurement.files;last_write_utc=$entry.LastWriteTimeUtc.ToString('o');integrity_status=$integrity;advisory_status=if($reasons.Count -eq 0){'eligible-advisory'}else{'protected'};advisory_reasons=@($reasons)}
+    }
+    return $result
+}
+
 function Get-AsrModelPreparationInventory {
     param([string]$DataRoot, [object]$References, [int]$RetentionDays = 7, [int]$KeepCount = 2)
     $result = [ordered]@{ status='not-configured'; engine='faster-whisper'; runs=@() }
@@ -613,11 +778,28 @@ function Get-AsrModelPreparationInventory {
             }
         }
         $complete=[bool]($prepareValid -and $offlineValid -and $manifestValid)
+        $relativeModelPath='faster-whisper-large-v3-turbo\0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf'
+        $candidateManifestPath=Join-Path (Join-Path $run.FullName 'staging\candidate-cache') (Join-Path $relativeModelPath 'model-manifest.json')
+        $finalManifestPath=Join-Path (Join-Path $DataRoot 'models') (Join-Path $relativeModelPath 'model-manifest.json')
+        $candidateManifestMatchesFinal=[bool](
+            (Test-Path -LiteralPath $candidateManifestPath -PathType Leaf) -and
+            (Test-Path -LiteralPath $finalManifestPath -PathType Leaf) -and
+            (Get-InventoryFileSha256 -Path $candidateManifestPath) -eq (Get-InventoryFileSha256 -Path $finalManifestPath)
+        )
+        $components=@()
+        foreach($relative in @('staging\download','staging\candidate-cache')){
+            $componentPath=Join-Path $run.FullName $relative; $componentMeasurement=Measure-Tree -Path $componentPath
+            $components += [ordered]@{kind=$relative.Replace('\','/');path=$componentPath;status=$componentMeasurement.status;bytes=[int64]$componentMeasurement.bytes;files=[int]$componentMeasurement.files}
+        }
+        foreach($reportName in @('model-preparation.json','offline-validation.json')){
+            $reportFile=Join-Path $run.FullName $reportName
+            $components += [ordered]@{kind='report';path=$reportFile;status=if(Test-Path -LiteralPath $reportFile -PathType Leaf){'measured'}else{'missing'};bytes=if(Test-Path -LiteralPath $reportFile -PathType Leaf){[int64](Get-Item -LiteralPath $reportFile).Length}else{[int64]0};files=if(Test-Path -LiteralPath $reportFile -PathType Leaf){1}else{0}}
+        }
         $reasons=[System.Collections.Generic.List[string]]::new()
         if(-not $recognized){$reasons.Add('unrecognized-run-id')}; if(-not $complete){$reasons.Add('preparation-or-offline-validation-incomplete')}
         if($measurement.status -ne 'measured'){$reasons.Add($measurement.status)}; if(Test-ReferenceMatch -Path $run.FullName -References $References){$reasons.Add('process-task-reference-or-inventory-unavailable')}
         if($index -lt $KeepCount){$reasons.Add("within-newest-$KeepCount")}; if($run.LastWriteTimeUtc -gt [DateTime]::UtcNow.AddDays(-$RetentionDays)){$reasons.Add("younger-than-$RetentionDays-days")}
-        $result.runs += [ordered]@{ run_id=$run.Name; path=$run.FullName; bytes=[int64]$measurement.bytes; files=[int]$measurement.files; last_write_utc=$run.LastWriteTimeUtc.ToString('o'); identity=if($recognized){'recognized'}else{'unknown'}; completion_status=if($complete){'complete'}else{'incomplete'}; advisory_status=if($reasons.Count -eq 0){'eligible-advisory'}else{'protected'}; advisory_reasons=@($reasons) }
+        $result.runs += [ordered]@{ run_id=$run.Name; path=$run.FullName; bytes=[int64]$measurement.bytes; files=[int]$measurement.files; last_write_utc=$run.LastWriteTimeUtc.ToString('o'); identity=if($recognized){'recognized'}else{'unknown'}; completion_status=if($complete){'complete'}else{'incomplete'}; final_manifest_match=$manifestValid; candidate_manifest_path=$candidateManifestPath; candidate_manifest_matches_final=$candidateManifestMatchesFinal; components=$components; advisory_status=if($reasons.Count -eq 0){'eligible-advisory'}else{'protected'}; advisory_reasons=@($reasons) }
     }
     return $result
 }
@@ -738,6 +920,7 @@ $report = [ordered]@{
     gpu_runtime_inventory = Get-GpuRuntimeInventory -Root $RuntimeRoot
     project_reference_inventory = [ordered]@{ status=$projectReferences.status; sources=$projectReferences.sources }
     asr_qualification_inventory = Get-AsrQualificationInventory -DataRoot $AsrDataRoot
+    faster_whisper_wheel_cache_inventory = Get-FasterWhisperWheelCacheInventory -DataRoot $AsrDataRoot -ProgramRoot $AsrProgramRoot -BackupRoot $(if ($AsrActivationBackupRoot) { $AsrActivationBackupRoot } else { $BackupDirectory }) -QualificationRoot $FasterWhisperQualificationRoot -References $projectReferences
     asr_model_preparation_inventory = Get-AsrModelPreparationInventory -DataRoot $AsrDataRoot -References $projectReferences
     gpu_model_cache_repair_inventory = Get-GpuModelCacheRepairInventory -RuntimeRoot $RuntimeRoot -ConfiguredPath $GpuConfiguredModelCachePath -References $projectReferences
     docker = $docker

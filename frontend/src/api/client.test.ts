@@ -121,15 +121,40 @@ describe("api client", () => {
     );
   });
 
+  it("downloads one managed media part and preserves the server filename", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(new Blob(["markdown"]), {
+      status: 200,
+      headers: {
+        "content-type": "text/markdown; charset=utf-8",
+        "content-disposition": "attachment; filename*=UTF-8''training-transcript.md",
+      },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await api.downloadManagedMedia("media/item", "transcript", "fallback.md");
+    expect(result.filename).toBe("training-transcript.md");
+    expect(result.blob.size).toBeGreaterThan(0);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/admin/content/items/media%2Fitem/media-download?part=transcript",
+      expect.objectContaining({ credentials: "include" }),
+    );
+  });
+
   it("loads trash and restores managed content with CSRF protection", async () => {
     setCsrfToken("csrf-restore");
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({ items: [], total: 0, status_counts: {} }))
-      .mockResolvedValueOnce(jsonResponse({ item_id: "item-1", version_id: "version-1", restored_status: "approved" }));
+      .mockResolvedValueOnce(jsonResponse({ item_id: "item-1", version_id: "version-1", restored_status: "approved" }))
+      .mockResolvedValueOnce(jsonResponse([]));
     vi.stubGlobal("fetch", fetchMock);
 
     await api.managedContentTrash({ query: "标准", limit: 25, offset: 0 });
-    await api.restoreManagedContent("item/1", "version-1");
+    await api.restoreManagedContent("item/1", "version-1", {
+      target_category_id: "cat-04",
+      replace_conflict_item_id: "item-2",
+      replace_conflict_expected_version_id: "version-2",
+    });
+    await api.managedContentAuditEvents("item/1");
 
     expect(fetchMock).toHaveBeenNthCalledWith(1,
       "/api/admin/content/trash?query=%E6%A0%87%E5%87%86&limit=25&offset=0",
@@ -139,8 +164,100 @@ describe("api client", () => {
       "/api/admin/content/items/item%2F1/restore",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ expected_version_id: "version-1" }),
+        body: JSON.stringify({
+          expected_version_id: "version-1",
+          target_category_id: "cat-04",
+          replace_conflict_item_id: "item-2",
+          replace_conflict_expected_version_id: "version-2",
+        }),
         headers: { "content-type": "application/json", "X-CSRF-Token": "csrf-restore" },
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(3,
+      "/api/admin/content/items/item%2F1/audit-events",
+      expect.objectContaining({ credentials: "include", headers: {} }),
+    );
+  });
+
+  it("renames and renumbers managed folders through narrow CSRF-protected PATCH routes", async () => {
+    setCsrfToken("csrf-category");
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ id: "folder/1", display_name: "新目录", version: 3 }))
+      .mockResolvedValueOnce(jsonResponse([{ id: "folder/1", display_code: "02", version: 4 }]));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.renameManagedCategory("folder/1", { display_name: "新目录", expected_version: 2 });
+    await api.updateManagedCategoryNumber("folder/1", {
+      target_position: 2,
+      confirm_number_shift: true,
+      expected_version: 3,
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1,
+      "/api/admin/content/categories/folder%2F1/name",
+      expect.objectContaining({
+        method: "PATCH",
+        credentials: "include",
+        body: JSON.stringify({ display_name: "新目录", expected_version: 2 }),
+        headers: { "content-type": "application/json", "X-CSRF-Token": "csrf-category" },
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(2,
+      "/api/admin/content/categories/folder%2F1/number",
+      expect.objectContaining({
+        method: "PATCH",
+        credentials: "include",
+        body: JSON.stringify({ target_position: 2, confirm_number_shift: true, expected_version: 3 }),
+        headers: { "content-type": "application/json", "X-CSRF-Token": "csrf-category" },
+      }),
+    );
+  });
+
+  it("normalizes managed-content review notes for single and bulk requests", async () => {
+    setCsrfToken("csrf-review");
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ version_id: "version-1" }))
+      .mockResolvedValueOnce(jsonResponse({ results: [], succeeded: 0, failed: 0 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.reviewManagedContent("version/1", false, "  请补充范围  ");
+    await api.bulkReviewManagedContent(["version-1", "version-2"], false, "  统一退回  ");
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1,
+      "/api/admin/content/versions/version%2F1/review",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ approved: false, note: "请补充范围", category_id: null }),
+        headers: { "content-type": "application/json", "X-CSRF-Token": "csrf-review" },
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(2,
+      "/api/admin/content/bulk-review",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ version_ids: ["version-1", "version-2"], approved: false, note: "统一退回" }),
+        headers: { "content-type": "application/json", "X-CSRF-Token": "csrf-review" },
+      }),
+    );
+  });
+
+  it("regenerates a managed PPTX preview with CSRF protection", async () => {
+    setCsrfToken("csrf-preview");
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+      version_id: "version/1",
+      preview_parent_id: "parent-1",
+      preview_status: "ready",
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.regenerateManagedContentPreview("version/1");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/admin/content/versions/version%2F1/preview",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({}),
+        headers: { "content-type": "application/json", "X-CSRF-Token": "csrf-preview" },
       }),
     );
   });
@@ -181,12 +298,13 @@ describe("api client", () => {
       source_origin: "legacy",
       status: "processing",
       history: true,
+      include_archived: true,
       limit: 25,
       offset: 50,
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/admin/content/index-jobs?query=%E6%96%BD%E5%B7%A5+%E6%A0%87%E5%87%86&category_id=cat-03&doc_type=pdf&source_origin=legacy&status=processing&history=true&limit=25&offset=50",
+      "/api/admin/content/index-jobs?query=%E6%96%BD%E5%B7%A5+%E6%A0%87%E5%87%86&category_id=cat-03&doc_type=pdf&source_origin=legacy&status=processing&history=true&include_archived=true&limit=25&offset=50",
       expect.objectContaining({ credentials: "include", headers: {} }),
     );
   });
@@ -352,6 +470,60 @@ describe("Phase 4B transcription API contracts", () => {
     expect(form.get("profile_id")).toBe("profile-1");
     expect(form.get("request_idempotency_key")).toBe("11111111-1111-4111-8111-111111111111");
     expect(form.get("transcript")).toBeNull();
+  });
+
+  it("binds a replacement upload to its source media and selected profile", async () => {
+    setCsrfToken("csrf-replacement");
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ media_id: "candidate-1", transcription_job_id: "job-1" }));
+    vi.stubGlobal("fetch", fetchMock);
+    const video = new File(["video-v2"], "training-v2.mp4", { type: "video/mp4" });
+
+    await api.uploadReplacementMediaVideo(
+      video,
+      "培训视频",
+      "profile-2",
+      "22222222-2222-4222-8222-222222222222",
+      "source-media-1",
+    );
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/admin/media");
+    expect(init).toMatchObject({ method: "POST", credentials: "include", headers: { "X-CSRF-Token": "csrf-replacement" } });
+    const form = init.body as FormData;
+    expect((form.get("video") as File).name).toBe("training-v2.mp4");
+    expect(form.get("title")).toBe("培训视频");
+    expect(form.get("profile_id")).toBe("profile-2");
+    expect(form.get("request_idempotency_key")).toBe("22222222-2222-4222-8222-222222222222");
+    expect(form.get("replacement_source_media_id")).toBe("source-media-1");
+  });
+
+  it("creates a media metadata revision with CSRF and an immutable expected version", async () => {
+    setCsrfToken("csrf-metadata");
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ version_id: "candidate-version" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.createMediaMetadataRevision(
+      "media/1",
+      "published-version",
+      "更新后的标题",
+      "updated.mp4",
+      "33333333-3333-4333-8333-333333333333",
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/admin/transcription/media/media%2F1/metadata-revisions",
+      expect.objectContaining({
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json", "X-CSRF-Token": "csrf-metadata" },
+        body: JSON.stringify({
+          expected_version_id: "published-version",
+          title: "更新后的标题",
+          original_filename: "updated.mp4",
+          request_idempotency_key: "33333333-3333-4333-8333-333333333333",
+        }),
+      }),
+    );
   });
 
   it("reports multipart transfer progress before server-side preparation", async () => {

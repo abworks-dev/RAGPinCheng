@@ -126,7 +126,7 @@ def test_ubuntu_verifier_accepts_exact_whisperx_admission_contract(tmp_path: Pat
                 "service_profiles": [
                     "faster-whisper-large-v3-turbo-v1",
                     "funasr-sensevoice-small-v1",
-                    "whisperx-large-v3-zh-align-v1",
+                    "whisperx-large-v3-zh-align-v2",
                 ],
                 "max_upload_part_bytes": 8388608,
                 "max_input_bytes": 2147483648,
@@ -331,6 +331,12 @@ def test_local_verifier_has_unique_enabled_profile_and_gpu_assertions():
     assert '"funasr-sensevoice-small-v1"' in script
     assert '"faster-whisper-large-v3-turbo-v1"' in script
     assert '"whisperx-large-v3-zh-align-v1"' in script
+    assert '"whisperx-large-v3-zh-align-v2"' in script
+    assert (
+        '"$fasterWhisperProfile`n$senseVoiceProfile`n$legacyWhisperXProfile"'
+        in script
+    )
+    assert "$ExpectedProfiles -contains $legacyWhisperXProfile" in script
     assert '($profiles -join "`n") -ne ($ExpectedProfiles -join "`n")' in script
     assert "ASR_FASTER_WHISPER_MODEL_CACHE_ROOT" in script
     assert "ASR_FASTER_WHISPER_MODEL_MANIFEST_PATH" in script
@@ -373,7 +379,7 @@ def test_candidate_promotion_is_manual_identity_bound_and_cross_node_gated():
     assert "Roll back failed candidate promotion" in workflow
     assert "--expected-profile faster-whisper-large-v3-turbo-v1" in workflow
     assert "--expected-profile funasr-sensevoice-small-v1" in workflow
-    assert "--expected-profile whisperx-large-v3-zh-align-v1" in workflow
+    assert "--expected-profile whisperx-large-v3-zh-align-v2" in workflow
     assert "push:" not in workflow
     assert "pull_request:" not in workflow
 

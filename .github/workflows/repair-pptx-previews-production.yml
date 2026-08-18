@@ -1,0 +1,592 @@
+name: Repair Production PPTX Previews
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Inspect, recover LibreOffice and inspect, or apply an approved manifest
+        required: true
+        default: preview
+        type: choice
+        options: [preview, recover, apply]
+      confirm_production:
+        description: Explicit production confirmation for the selected operation
+        required: true
+        default: CANCEL
+        type: choice
+        options: [CANCEL, PREVIEW_PPTX, RECOVER_LIBREOFFICE, REPAIR_PPTX]
+      expected_app_head:
+        description: Exact deployed production App commit
+        required: true
+        type: string
+      preview_run_id:
+        description: Preview or recovery workflow run ID; required for apply
+        required: false
+        type: string
+      manifest_sha256:
+        description: Exact preview manifest SHA-256; required for apply
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: production-app-manual-v1
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    environment: production-asr
+    runs-on: [self-hosted, linux, ubuntu, production, app]
+    timeout-minutes: 45
+    env:
+      OPERATION: ${{ inputs.operation }}
+      CONFIRM_PRODUCTION: ${{ inputs.confirm_production }}
+      EXPECTED_APP_HEAD: ${{ inputs.expected_app_head }}
+      EXPECTED_MANIFEST_SHA256: ${{ inputs.manifest_sha256 }}
+      PREVIEW_RUN_ID: ${{ inputs.preview_run_id }}
+      REPO_PATH: ${{ vars.PRODUCTION_APP_REPO_PATH }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download approved preview evidence
+        if: ${{ inputs.operation == 'apply' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: pptx-preview-repair-${{ inputs.preview_run_id }}
+          path: ${{ runner.temp }}/pptx-preview-repair/approved
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.preview_run_id }}
+
+      - name: Validate LibreOffice and preview or repair approved versions
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          [ "${GITHUB_REF}" = "refs/heads/master" ] || {
+            echo "ERROR: production PPTX repair only accepts master"
+            exit 1
+          }
+          [[ "${EXPECTED_APP_HEAD}" =~ ^[0-9a-fA-F]{40}$ ]] || {
+            echo "ERROR: expected_app_head must be a full Git SHA"
+            exit 1
+          }
+          case "${OPERATION}" in
+            preview)
+              [ "${CONFIRM_PRODUCTION}" = "PREVIEW_PPTX" ] || {
+                echo "ERROR: preview was not explicitly confirmed"
+                exit 1
+              }
+              ;;
+            recover)
+              [ "${CONFIRM_PRODUCTION}" = "RECOVER_LIBREOFFICE" ] || {
+                echo "ERROR: LibreOffice recovery was not explicitly confirmed"
+                exit 1
+              }
+              ;;
+            apply)
+              [ "${CONFIRM_PRODUCTION}" = "REPAIR_PPTX" ] || {
+                echo "ERROR: repair was not explicitly confirmed"
+                exit 1
+              }
+              [[ "${PREVIEW_RUN_ID}" =~ ^[0-9]{1,20}$ ]] || {
+                echo "ERROR: apply requires a numeric preview_run_id"
+                exit 1
+              }
+              [[ "${EXPECTED_MANIFEST_SHA256}" =~ ^[0-9a-fA-F]{64}$ ]] || {
+                echo "ERROR: apply requires a full manifest_sha256"
+                exit 1
+              }
+              ;;
+            *)
+              echo "ERROR: unsupported operation"
+              exit 1
+              ;;
+          esac
+
+          [ -n "${REPO_PATH}" ] && [[ "${REPO_PATH}" = /* ]] || {
+            echo "ERROR: production repository path must be absolute"
+            exit 1
+          }
+          cd "${REPO_PATH}"
+          REPOSITORY_ROOT="$(git rev-parse --show-toplevel)"
+          [ "$(realpath "${REPOSITORY_ROOT}")" = "$(realpath "${REPO_PATH}")" ] || {
+            echo "ERROR: configured production path is not the repository root"
+            exit 1
+          }
+          ORIGIN_URL="$(git config --get remote.origin.url)"
+          case "${ORIGIN_URL}" in
+            https://github.com/abworks-dev/RAGPinCheng|\
+            https://github.com/abworks-dev/RAGPinCheng.git|\
+            git@github.com:abworks-dev/RAGPinCheng.git|\
+            ssh://git@github.com/abworks-dev/RAGPinCheng.git) ;;
+            *)
+              echo "ERROR: production repository origin is not RAGPinCheng"
+              exit 1
+              ;;
+          esac
+          [ "$(git branch --show-current)" = "master" ] || {
+            echo "ERROR: production repository must be on master"
+            exit 1
+          }
+          [ -z "$(git status --porcelain --untracked-files=no)" ] || {
+            echo "ERROR: production repository has tracked local changes"
+            exit 1
+          }
+          DEPLOYED_HEAD="$(git rev-parse HEAD)"
+          [ "${DEPLOYED_HEAD}" = "${EXPECTED_APP_HEAD,,}" ] || {
+            echo "ERROR: production App HEAD differs from expected_app_head"
+            exit 1
+          }
+          git -C "${GITHUB_WORKSPACE}" merge-base --is-ancestor \
+            "${DEPLOYED_HEAD}" "${GITHUB_SHA}" || {
+            echo "ERROR: deployed App HEAD is not an ancestor of the selected master workflow"
+            exit 1
+          }
+
+          mapfile -t BACKEND_IDS < <(docker ps \
+            --filter 'label=com.docker.compose.project=ragpincheng-prod' \
+            --filter 'label=com.docker.compose.service=backend' \
+            --format '{{.ID}}')
+          [ "${#BACKEND_IDS[@]}" -eq 1 ] || {
+            echo "ERROR: expected exactly one running production backend container"
+            exit 1
+          }
+          BACKEND_ID="${BACKEND_IDS[0]}"
+          [ "$(docker inspect --format '{{.State.Health.Status}}' "${BACKEND_ID}")" = "healthy" ] || {
+            echo "ERROR: production backend container is not healthy"
+            exit 1
+          }
+
+          REPORT_ROOT="${RUNNER_TEMP}/pptx-preview-repair/current"
+          mkdir -p "${REPORT_ROOT}"
+          mapfile -t LIBREOFFICE_IDS < <(docker ps -a \
+            --filter 'label=com.docker.compose.project=ragpincheng-prod' \
+            --filter 'label=com.docker.compose.service=libreoffice' \
+            --format '{{.ID}}')
+          [ "${#LIBREOFFICE_IDS[@]}" -eq 1 ] || {
+            echo "ERROR: expected exactly one production LibreOffice container"
+            exit 1
+          }
+          LIBREOFFICE_ID="${LIBREOFFICE_IDS[0]}"
+          LIBREOFFICE_IMAGE_BEFORE="$(docker inspect --format '{{.Image}}' "${LIBREOFFICE_ID}")"
+
+          if [ "${OPERATION}" = "recover" ]; then
+            docker exec -i "${BACKEND_ID}" python - <<'PY'
+          import sqlite3
+
+          from src.config import APP_DB_PATH
+
+          active = {
+              "content_index_jobs": ("pending", "parsing", "chunking", "summarizing", "embedding"),
+              "content_reclassification_jobs": ("pending", "applying", "committing", "rolling_back"),
+              "index_jobs": ("pending", "running", "uploading", "queued_mineru", "parsing", "chunking", "embedding"),
+              "transcript_publication_index_jobs": ("pending", "parsing", "chunking", "embedding"),
+              "transcription_jobs": ("pending", "running", "processing"),
+          }
+          connection = sqlite3.connect(
+              f"file:{APP_DB_PATH.as_posix()}?mode=ro",
+              uri=True,
+          )
+          try:
+              existing = {
+                  row[0]
+                  for row in connection.execute(
+                      "SELECT name FROM sqlite_master WHERE type='table'"
+                  )
+              }
+              counts = {}
+              for table, statuses in active.items():
+                  if table not in existing:
+                      counts[table] = 0
+                      continue
+                  placeholders = ",".join("?" for _ in statuses)
+                  counts[table] = int(
+                      connection.execute(
+                          f"SELECT count(*) FROM {table} WHERE status IN ({placeholders})",
+                          statuses,
+                      ).fetchone()[0]
+                  )
+          finally:
+              connection.close()
+          print(
+              "LIBREOFFICE_RECOVERY_ACTIVE_JOB_PREFLIGHT "
+              + " ".join(f"{name}={counts[name]}" for name in active)
+          )
+          if any(counts.values()):
+              raise SystemExit(
+                  "ERROR: active application jobs must finish before LibreOffice recovery"
+              )
+          PY
+
+            {
+              printf 'container_id=%s\nimage_id_before=%s\n' \
+                "${LIBREOFFICE_ID}" "${LIBREOFFICE_IMAGE_BEFORE}"
+              docker inspect --format \
+                'state_before={{.State.Status}} health_before={{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}} restart_count_before={{.RestartCount}} init_pid_before={{.State.Pid}}' \
+                "${LIBREOFFICE_ID}"
+              echo 'processes_before:'
+              docker top "${LIBREOFFICE_ID}" -eo pid,ppid,stat,comm 2>/dev/null \
+                | head -n 25 || true
+            } > "${REPORT_ROOT}/libreoffice-recovery.txt"
+
+            if ! docker restart --timeout 30 "${LIBREOFFICE_ID}"; then
+              echo "LIBREOFFICE_RECOVERY restart=failed fallback=start"
+              docker start "${LIBREOFFICE_ID}" || {
+                echo "ERROR: existing production LibreOffice container could not be started"
+                exit 1
+              }
+            fi
+
+            LIBREOFFICE_IMAGE_AFTER="$(docker inspect --format '{{.Image}}' "${LIBREOFFICE_ID}")"
+            [ "${LIBREOFFICE_IMAGE_AFTER}" = "${LIBREOFFICE_IMAGE_BEFORE}" ] || {
+              echo "ERROR: LibreOffice image changed during recovery"
+              exit 1
+            }
+            {
+              printf 'image_id_after=%s\n' "${LIBREOFFICE_IMAGE_AFTER}"
+              docker inspect --format \
+                'state_after_restart={{.State.Status}} health_after_restart={{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}} restart_count_after={{.RestartCount}} init_pid_after={{.State.Pid}}' \
+                "${LIBREOFFICE_ID}"
+              echo 'processes_after_restart:'
+              docker top "${LIBREOFFICE_ID}" -eo pid,ppid,stat,comm 2>/dev/null \
+                | head -n 25 || true
+            } >> "${REPORT_ROOT}/libreoffice-recovery.txt"
+
+            LIBREOFFICE_READY=false
+            for _ in $(seq 1 24); do
+              if [ "$(docker inspect --format \
+                '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' \
+                "${LIBREOFFICE_ID}")" = "healthy" ]; then
+                LIBREOFFICE_READY=true
+                break
+              fi
+              sleep 5
+            done
+            [ "${LIBREOFFICE_READY}" = "true" ] || {
+              echo "ERROR: production LibreOffice did not become healthy within 120 seconds"
+              exit 1
+            }
+            echo "LIBREOFFICE_RECOVERY status=healthy image_unchanged=true"
+          else
+            [ "$(docker inspect --format '{{.State.Running}}' "${LIBREOFFICE_ID}")" = "true" ] || {
+              echo "ERROR: production LibreOffice container is not running"
+              exit 1
+            }
+          fi
+
+          LIBREOFFICE_CONTAINER_HEALTH="$(docker inspect --format \
+            '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' \
+            "${LIBREOFFICE_ID}")"
+          LIBREOFFICE_BINARY_PRESENT=false
+          if docker exec "${LIBREOFFICE_ID}" sh -c \
+            'command -v libreoffice >/dev/null 2>&1'; then
+            LIBREOFFICE_BINARY_PRESENT=true
+          fi
+          LIBREOFFICE_HOME_WRITABLE=false
+          if docker exec "${LIBREOFFICE_ID}" sh -c \
+            '[ -n "${HOME:-}" ] && [ -d "$HOME" ] && [ -w "$HOME" ]'; then
+            LIBREOFFICE_HOME_WRITABLE=true
+          fi
+          printf 'container_health=%s\nbinary_present=%s\nhome_writable=%s\n' \
+            "${LIBREOFFICE_CONTAINER_HEALTH}" \
+            "${LIBREOFFICE_BINARY_PRESENT}" \
+            "${LIBREOFFICE_HOME_WRITABLE}" \
+            > "${REPORT_ROOT}/libreoffice-container.txt"
+
+          set +e
+          docker exec -i "${BACKEND_ID}" python - \
+            > "${REPORT_ROOT}/libreoffice-health.json" <<'PY'
+          import json
+          import re
+
+          import httpx
+
+          report = {
+              "schema_version": "libreoffice-health/1",
+              "status": "unavailable",
+              "http_status": None,
+              "detail": "unknown",
+          }
+          exit_code = 1
+          try:
+              response = httpx.get("http://libreoffice:8101/health", timeout=20)
+              report["http_status"] = response.status_code
+              try:
+                  payload = response.json()
+              except ValueError:
+                  payload = {}
+              if response.status_code == 200 and payload.get("status") == "ok":
+                  report["status"] = "ok"
+                  report["detail"] = "ok"
+                  exit_code = 0
+              else:
+                  detail = str(payload.get("detail") or "unexpected_health_response")
+                  detail = re.sub(
+                      r"(?i)(token|password|secret|authorization)\s*[:=]\s*\S+",
+                      r"\1=[REDACTED]",
+                      detail,
+                  )
+                  report["detail"] = detail[:500]
+          except httpx.HTTPError as exc:
+              report["detail"] = type(exc).__name__
+          print(json.dumps(report, ensure_ascii=True, sort_keys=True))
+          raise SystemExit(exit_code)
+          PY
+          LIBREOFFICE_HEALTH_EXIT=$?
+          set -e
+          python3 - "${REPORT_ROOT}/libreoffice-health.json" <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as handle:
+              report = json.load(handle)
+          print(
+              "LIBREOFFICE_HEALTH"
+              f" status={report['status']} http_status={report['http_status']}"
+              f" detail={report['detail']}"
+          )
+          PY
+          [ "${LIBREOFFICE_HEALTH_EXIT}" -eq 0 ] || {
+            echo "ERROR: production LibreOffice health check failed"
+            exit 1
+          }
+
+          FIXTURE_HOST="${RUNNER_TEMP}/pptx-preview-repair/synthetic-preview-check.pptx"
+          FIXTURE_CONTAINER="/tmp/ragpincheng-pptx-preview-${GITHUB_RUN_ID}.pptx"
+          base64 --decode \
+            "${GITHUB_WORKSPACE}/tests/fixtures/office/synthetic-preview-check.pptx.b64" \
+            > "${FIXTURE_HOST}"
+          [ "$(sha256sum "${FIXTURE_HOST}" | awk '{print $1}')" = \
+            "4c8306cef6f06ec2a2a474a39d671c3991d116eccca9f6fdf8b6ed0559287833" ] || {
+            echo "ERROR: synthetic PPTX fixture checksum mismatch"
+            exit 1
+          }
+          docker cp "${FIXTURE_HOST}" "${BACKEND_ID}:${FIXTURE_CONTAINER}"
+          cleanup_fixture() {
+            docker exec "${BACKEND_ID}" rm -f \
+              "${FIXTURE_CONTAINER}" "${FIXTURE_CONTAINER%.pptx}.preview.pdf" \
+              >/dev/null 2>&1 || true
+          }
+          trap cleanup_fixture EXIT
+          docker exec -i "${BACKEND_ID}" python - "${FIXTURE_CONTAINER}" <<'PY'
+          import sys
+          from pathlib import Path
+
+          from src.office_convert import convert_pptx_to_pdf, is_valid_pdf_file
+
+          source = Path(sys.argv[1])
+          preview = convert_pptx_to_pdf(source)
+          if not is_valid_pdf_file(preview):
+              raise SystemExit("synthetic PPTX conversion did not produce a valid PDF")
+          print("LIBREOFFICE_CONVERSION status=valid_pdf")
+          PY
+          cleanup_fixture
+          trap - EXIT
+
+          run_dry_run() {
+            local output_path="$1"
+            docker exec --workdir /app "${BACKEND_ID}" \
+              python -m scripts.repair_pptx_previews > "${output_path}"
+            python3 - "${output_path}" <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as handle:
+              report = json.load(handle)
+          if report.get("mode") != "dry-run" or report.get("failed") != 0:
+              raise SystemExit("invalid PPTX preview dry-run report")
+          results = report.get("results")
+          if not isinstance(results, list) or any(
+              set(item) - {"version_id", "status", "error_code"}
+              or item.get("status") not in {"ready", "missing"}
+              for item in results
+          ):
+              raise SystemExit("PPTX preview dry-run contains an invalid result")
+          print(
+              "PPTX_PREVIEW_DRY_RUN"
+              f" total={report['total']} ready={report['ready']} missing={report['missing']}"
+          )
+          PY
+          }
+
+          if [ "${OPERATION}" != "apply" ]; then
+            MANIFEST="${REPORT_ROOT}/manifest.json"
+            run_dry_run "${MANIFEST}"
+            MANIFEST_SHA256="$(sha256sum "${MANIFEST}" | awk '{print $1}')"
+            printf '%s\n' "${MANIFEST_SHA256}" > "${REPORT_ROOT}/manifest.sha256"
+            printf '{"schema_version":"pptx-preview-repair/1","workflow_run_id":"%s","deployed_head":"%s","manifest_sha256":"%s"}\n' \
+              "${GITHUB_RUN_ID}" "${DEPLOYED_HEAD}" "${MANIFEST_SHA256}" \
+              > "${REPORT_ROOT}/context.json"
+            echo "PPTX_PREVIEW_EVIDENCE run_id=${GITHUB_RUN_ID} manifest_sha256=${MANIFEST_SHA256}"
+            exit 0
+          fi
+
+          APPROVED_ROOT="${RUNNER_TEMP}/pptx-preview-repair/approved"
+          APPROVED_MANIFEST="${APPROVED_ROOT}/manifest.json"
+          APPROVED_CONTEXT="${APPROVED_ROOT}/context.json"
+          [ -f "${APPROVED_MANIFEST}" ] && [ -f "${APPROVED_CONTEXT}" ] || {
+            echo "ERROR: approved preview artifact is incomplete"
+            exit 1
+          }
+          ACTUAL_MANIFEST_SHA256="$(sha256sum "${APPROVED_MANIFEST}" | awk '{print $1}')"
+          [ "${ACTUAL_MANIFEST_SHA256}" = "${EXPECTED_MANIFEST_SHA256,,}" ] || {
+            echo "ERROR: approved preview manifest checksum mismatch"
+            exit 1
+          }
+          python3 - "${APPROVED_CONTEXT}" "${PREVIEW_RUN_ID}" \
+            "${DEPLOYED_HEAD}" "${ACTUAL_MANIFEST_SHA256}" <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as handle:
+              context = json.load(handle)
+          expected = {
+              "schema_version": "pptx-preview-repair/1",
+              "workflow_run_id": sys.argv[2],
+              "deployed_head": sys.argv[3],
+              "manifest_sha256": sys.argv[4],
+          }
+          if context != expected:
+              raise SystemExit("approved preview context does not match this apply request")
+          PY
+
+          CURRENT_BEFORE="${REPORT_ROOT}/current-before.json"
+          run_dry_run "${CURRENT_BEFORE}"
+          python3 - "${APPROVED_MANIFEST}" "${CURRENT_BEFORE}" \
+            "${REPORT_ROOT}/missing-version-ids.txt" <<'PY'
+          import json
+          import sys
+
+          def load(path):
+              with open(path, encoding="utf-8") as handle:
+                  return json.load(handle)
+
+          approved = load(sys.argv[1])
+          current = load(sys.argv[2])
+          approved_results = [
+              (item.get("version_id"), item.get("status"))
+              for item in approved.get("results", [])
+          ]
+          current_results = [
+              (item.get("version_id"), item.get("status"))
+              for item in current.get("results", [])
+          ]
+          if approved.get("mode") != "dry-run" or approved.get("failed") != 0:
+              raise SystemExit("approved manifest is not a successful dry-run")
+          if approved_results != current_results:
+              raise SystemExit("production PPTX preview state changed after the approved dry-run")
+          missing = [version_id for version_id, status in approved_results if status == "missing"]
+          with open(sys.argv[3], "w", encoding="ascii", newline="\n") as handle:
+              for version_id in missing:
+                  handle.write(f"{version_id}\n")
+          print(f"PPTX_PREVIEW_APPROVED missing={len(missing)}")
+          PY
+
+          PARTS_ROOT="${REPORT_ROOT}/parts"
+          mkdir -p "${PARTS_ROOT}"
+          PART_INDEX=0
+          EXECUTION_FAILED=0
+          while IFS= read -r VERSION_ID; do
+            [ -n "${VERSION_ID}" ] || continue
+            [[ "${VERSION_ID}" =~ ^[A-Za-z0-9_-]{1,128}$ ]] || {
+              echo "ERROR: approved manifest contains an invalid version ID"
+              exit 1
+            }
+            PART_INDEX=$((PART_INDEX + 1))
+            PART_PATH="$(printf '%s/part-%05d.json' "${PARTS_ROOT}" "${PART_INDEX}")"
+            set +e
+            docker exec --workdir /app "${BACKEND_ID}" \
+              python -m scripts.repair_pptx_previews \
+              --apply --confirm REPAIR_PPTX_PREVIEWS --version-id "${VERSION_ID}" \
+              > "${PART_PATH}"
+            PART_EXIT=$?
+            set -e
+            if [ "${PART_EXIT}" -ne 0 ]; then
+              EXECUTION_FAILED=1
+            fi
+            [ -s "${PART_PATH}" ] || {
+              printf '{"mode":"apply","total":1,"ready":0,"missing":0,"generated":0,"failed":1,"results":[{"version_id":"%s","status":"failed","error_code":"repair_execution_failed"}]}\n' \
+                "${VERSION_ID}" > "${PART_PATH}"
+            }
+          done < "${REPORT_ROOT}/missing-version-ids.txt"
+
+          APPLY_MANIFEST="${REPORT_ROOT}/manifest.json"
+          python3 - "${APPROVED_MANIFEST}" "${PARTS_ROOT}" "${APPLY_MANIFEST}" <<'PY'
+          import json
+          import sys
+          import time
+          from pathlib import Path
+
+          with open(sys.argv[1], encoding="utf-8") as handle:
+              approved = json.load(handle)
+          ready = [
+              item for item in approved["results"] if item.get("status") == "ready"
+          ]
+          repaired = []
+          for path in sorted(Path(sys.argv[2]).glob("part-*.json")):
+              with path.open(encoding="utf-8") as handle:
+                  part = json.load(handle)
+              if part.get("mode") != "apply" or len(part.get("results", [])) != 1:
+                  raise SystemExit("invalid per-version PPTX repair report")
+              repaired.extend(part["results"])
+          results = ready + repaired
+          report = {
+              "mode": "apply",
+              "checked_at": int(time.time()),
+              "total": len(results),
+              "ready": sum(item.get("status") == "ready" for item in results),
+              "missing": sum(item.get("status") == "missing" for item in results),
+              "generated": sum(item.get("status") == "generated" for item in results),
+              "failed": sum(item.get("status") == "failed" for item in results),
+              "results": results,
+          }
+          with open(sys.argv[3], "w", encoding="utf-8", newline="\n") as handle:
+              json.dump(report, handle, ensure_ascii=True, indent=2)
+              handle.write("\n")
+          print(
+              "PPTX_PREVIEW_APPLY"
+              f" total={report['total']} ready={report['ready']}"
+              f" generated={report['generated']} failed={report['failed']}"
+          )
+          if report["failed"]:
+              raise SystemExit("one or more approved PPTX previews failed to generate")
+          PY
+
+          CURRENT_AFTER="${REPORT_ROOT}/current-after.json"
+          run_dry_run "${CURRENT_AFTER}"
+          python3 - "${APPROVED_MANIFEST}" "${CURRENT_AFTER}" <<'PY'
+          import json
+          import sys
+
+          def load(path):
+              with open(path, encoding="utf-8") as handle:
+                  return json.load(handle)
+
+          approved = load(sys.argv[1])
+          current = load(sys.argv[2])
+          approved_ids = {item["version_id"] for item in approved["results"]}
+          current_by_id = {item["version_id"]: item["status"] for item in current["results"]}
+          if any(current_by_id.get(version_id) != "ready" for version_id in approved_ids):
+              raise SystemExit("an approved PPTX preview is not ready after repair")
+          if current.get("missing") != 0:
+              raise SystemExit("a new missing PPTX preview appeared during repair")
+          print(f"PPTX_PREVIEW_POSTCHECK ready={current['ready']} missing=0")
+          PY
+          [ "${EXECUTION_FAILED}" -eq 0 ] || {
+            echo "ERROR: one or more per-version repair commands failed"
+            exit 1
+          }
+
+      - name: Upload PPTX preview evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pptx-preview-repair-${{ github.run_id }}
+          path: ${{ runner.temp }}/pptx-preview-repair/current
+          if-no-files-found: warn
+          retention-days: 30

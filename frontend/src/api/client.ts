@@ -25,8 +25,15 @@ import type {
   ManagedCategory,
   FolderRequest,
   ManagedContentItem,
+  ManagedPreview,
+  ContentTrashAuditEvent,
+  ContentReclassificationJob,
   ManagedContentList,
   BulkManagedContentResponse,
+  BulkRestorePreflightResult,
+  TrashPurgePreflight,
+  TrashPurgeRun,
+  TrashSettings,
   ManagedIndexJobList,
   ManagedUploadResponse,
   ManagedUploadTask,
@@ -40,6 +47,8 @@ import type {
   PublishTranscriptVersionResult,
   AnswerPolicy,
   AnswerPolicyAuditEntry,
+  AsrSettings,
+  AsrProfileReleaseRequest,
 } from "../types";
 
 // Mutating methods send X-CSRF-Token. Cookies always go along via credentials.
@@ -389,6 +398,15 @@ export const api = {
     jsonFetch<AnswerPolicy>("/api/admin/answer-policy/reset", { method: "POST" }),
   adminAnswerPolicyAudit: (limit = 50) =>
     jsonFetch<{ entries: AnswerPolicyAuditEntry[] }>(`/api/admin/answer-policy/audit?limit=${limit}`),
+  adminAsrSettings: () => jsonFetch<AsrSettings>("/api/admin/asr"),
+  adminCreateAsrReleaseRequest: (body: {
+    profile_id: string;
+    request_idempotency_key: string;
+    request_reason?: string | null;
+  }) => jsonFetch<AsrProfileReleaseRequest>("/api/admin/asr/release-requests", {
+    method: "POST",
+    body: JSON.stringify(body),
+  }),
 
   // admin: managed content library
   managedContentCapabilities: () =>
@@ -405,7 +423,9 @@ export const api = {
     parent_id: string | null;
     display_code: string;
     display_name: string;
-    sort_order: number;
+    sort_order?: number;
+    target_position?: number;
+    confirm_number_shift?: boolean;
   }) =>
     jsonFetch<ManagedCategory>("/api/admin/content/categories", {
       method: "POST",
@@ -416,7 +436,7 @@ export const api = {
     body: {
       display_code: string;
       display_name: string;
-      sort_order: number;
+      sort_order?: number;
       is_active: boolean;
       expected_version: number;
     },
@@ -425,6 +445,31 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(body),
     }),
+  renameManagedCategory: (
+    categoryId: string,
+    body: { display_name: string; expected_version: number },
+  ) => jsonFetch<ManagedCategory>(
+    `/api/admin/content/categories/${encodeURIComponent(categoryId)}/name`,
+    { method: "PATCH", body: JSON.stringify(body) },
+  ),
+  updateManagedCategorySortOrder: (
+    categoryId: string,
+    body: { sort_order: number; expected_version: number },
+  ) => jsonFetch<ManagedCategory>(
+    `/api/admin/content/categories/${encodeURIComponent(categoryId)}/sort-order`,
+    { method: "PATCH", body: JSON.stringify(body) },
+  ),
+  updateManagedCategoryNumber: (
+    categoryId: string,
+    body: {
+      target_position: number;
+      confirm_number_shift: boolean;
+      expected_version: number;
+    },
+  ) => jsonFetch<ManagedCategory[]>(
+    `/api/admin/content/categories/${encodeURIComponent(categoryId)}/number`,
+    { method: "PATCH", body: JSON.stringify(body) },
+  ),
   managedContentPermissions: () =>
     jsonFetch<ContentPermissionUser[]>("/api/admin/content/permissions"),
   managedContentPermissionCatalog: () =>
@@ -464,6 +509,10 @@ export const api = {
     category_id?: string;
     lifecycle_status?: string;
     source_origin?: string;
+    content_kind?: "document" | "media_transcript";
+    doc_type?: "pdf" | "docx" | "xlsx" | "pptx" | "markdown" | "transcript" | "other";
+    sort_by?: "doc_type";
+    sort_direction?: "asc" | "desc";
     limit?: number;
     offset?: number;
   }) => {
@@ -472,6 +521,10 @@ export const api = {
     if (params?.category_id) search.set("category_id", params.category_id);
     if (params?.lifecycle_status) search.set("lifecycle_status", params.lifecycle_status);
     if (params?.source_origin) search.set("source_origin", params.source_origin);
+    if (params?.content_kind) search.set("content_kind", params.content_kind);
+    if (params?.doc_type) search.set("doc_type", params.doc_type);
+    if (params?.sort_by) search.set("sort_by", params.sort_by);
+    if (params?.sort_direction) search.set("sort_direction", params.sort_direction);
     if (params?.limit != null) search.set("limit", String(params.limit));
     if (params?.offset != null) search.set("offset", String(params.offset));
     return jsonFetch<ManagedContentList>(`/api/admin/content/items-page?${search}`);
@@ -487,17 +540,60 @@ export const api = {
       method: "DELETE",
       body: JSON.stringify({ expected_version_id: expectedVersionId }),
     }),
-  managedContentTrash: (params?: { query?: string; limit?: number; offset?: number }) => {
+  managedContentTrash: (params?: { query?: string; limit?: number; offset?: number; retention_status?: string; archived_from?: number; archived_to?: number; category_id?: string; archived_by?: string; sort_direction?: string }) => {
     const search = new URLSearchParams();
     if (params?.query) search.set("query", params.query);
     if (params?.limit != null) search.set("limit", String(params.limit));
     if (params?.offset != null) search.set("offset", String(params.offset));
+    if (params?.retention_status) search.set("retention_status", params.retention_status);
+    if (params?.archived_from != null) search.set("archived_from", String(params.archived_from));
+    if (params?.archived_to != null) search.set("archived_to", String(params.archived_to));
+    if (params?.category_id) search.set("category_id", params.category_id);
+    if (params?.archived_by) search.set("archived_by", params.archived_by);
+    if (params?.sort_direction) search.set("sort_direction", params.sort_direction);
     return jsonFetch<ManagedContentList>(`/api/admin/content/trash?${search}`);
   },
-  restoreManagedContent: (itemId: string, expectedVersionId: string) =>
-    jsonFetch<{ item_id: string; version_id: string; restored_status: string }>(
+  managedContentTrashSettings: () =>
+    jsonFetch<TrashSettings>("/api/admin/content/trash/settings"),
+  updateManagedContentTrashSettings: (body: Omit<TrashSettings, "updated_by" | "updated_at">) =>
+    jsonFetch<TrashSettings>("/api/admin/content/trash/settings", {
+      method: "PUT", body: JSON.stringify(body),
+    }),
+  preflightManagedContentTrashPurge: (items: Array<{ item_id: string; expected_version_id: string }>) =>
+    jsonFetch<TrashPurgePreflight>("/api/admin/content/trash/purge/preflight", {
+      method: "POST", body: JSON.stringify({ items }),
+    }),
+  previewOverdueManagedContentTrashPurge: () =>
+    jsonFetch<TrashPurgePreflight>("/api/admin/content/trash/purge-preview"),
+  purgeManagedContentTrash: (items: Array<{ item_id: string; expected_version_id: string }>, confirmation: string) =>
+    jsonFetch<{ run_id: string; status: string; candidate_count: number; succeeded_count: number; failed_count: number }>(
+      "/api/admin/content/trash/purge", { method: "POST", body: JSON.stringify({ items, confirmation }) },
+    ),
+  managedContentTrashPurgeRuns: () =>
+    jsonFetch<TrashPurgeRun[]>("/api/admin/content/trash/purge-runs"),
+  restoreManagedContent: (
+    itemId: string,
+    expectedVersionId: string,
+    options?: {
+      target_category_id?: string;
+      replace_conflict_item_id?: string;
+      replace_conflict_expected_version_id?: string;
+    },
+  ) =>
+    jsonFetch<{
+      item_id: string;
+      version_id: string;
+      restored_status: string;
+      category_id: string;
+      moved_to_alternate_category: boolean;
+      replaced_conflict: boolean;
+    }>(
       `/api/admin/content/items/${encodeURIComponent(itemId)}/restore`,
-      { method: "POST", body: JSON.stringify({ expected_version_id: expectedVersionId }) },
+      { method: "POST", body: JSON.stringify({ expected_version_id: expectedVersionId, ...options }) },
+    ),
+  managedContentAuditEvents: (itemId: string) =>
+    jsonFetch<ContentTrashAuditEvent[]>(
+      `/api/admin/content/items/${encodeURIComponent(itemId)}/audit-events`,
     ),
   uploadManagedContent: async (
     files: Array<File | ManagedContentUploadEntry>,
@@ -576,6 +672,23 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ target_category_id: targetCategoryId, expected_version_id: expectedVersionId }),
     }),
+  reclassifyManagedContent: (itemId: string, targetCategoryId: string, expectedVersionId: string) =>
+    jsonFetch<ContentReclassificationJob>(
+      `/api/admin/content/items/${encodeURIComponent(itemId)}/reclassify`,
+      {
+        method: "POST",
+        body: JSON.stringify({ target_category_id: targetCategoryId, expected_version_id: expectedVersionId }),
+      },
+    ),
+  managedContentReclassificationJob: (jobId: string) =>
+    jsonFetch<ContentReclassificationJob>(
+      `/api/admin/content/reclassification-jobs/${encodeURIComponent(jobId)}`,
+    ),
+  retryManagedContentReclassification: (jobId: string) =>
+    jsonFetch<ContentReclassificationJob>(
+      `/api/admin/content/reclassification-jobs/${encodeURIComponent(jobId)}/retry`,
+      { method: "POST", body: JSON.stringify({}) },
+    ),
   renameManagedContent: (
     itemId: string,
     body: {
@@ -633,20 +746,25 @@ export const api = {
       method: "POST",
       body: JSON.stringify({}),
     }),
-  reviewManagedContent: (versionId: string, approved: boolean, categoryId?: string) =>
+  reviewManagedContent: (versionId: string, approved: boolean, note?: string, categoryId?: string) =>
     jsonFetch<ManagedContentItem>(`/api/admin/content/versions/${encodeURIComponent(versionId)}/review`, {
       method: "POST",
-      body: JSON.stringify({ approved, category_id: categoryId || null }),
+      body: JSON.stringify({ approved, note: note?.trim() || null, category_id: categoryId || null }),
     }),
   publishManagedContent: (versionId: string) =>
     jsonFetch<{ publication_id: string; index_job_id: string; status: string }>(
       `/api/admin/content/versions/${encodeURIComponent(versionId)}/publish`,
       { method: "POST", body: JSON.stringify({}) },
     ),
-  bulkReviewManagedContent: (versionIds: string[], approved: boolean) =>
+  regenerateManagedContentPreview: (versionId: string) =>
+    jsonFetch<ManagedPreview>(
+      `/api/admin/content/versions/${encodeURIComponent(versionId)}/preview`,
+      { method: "POST", body: JSON.stringify({}) },
+    ),
+  bulkReviewManagedContent: (versionIds: string[], approved: boolean, note?: string) =>
     jsonFetch<BulkManagedContentResponse>("/api/admin/content/bulk-review", {
       method: "POST",
-      body: JSON.stringify({ version_ids: versionIds, approved }),
+      body: JSON.stringify({ version_ids: versionIds, approved, note: note?.trim() || null }),
     }),
   bulkPublishManagedContent: (versionIds: string[]) =>
     jsonFetch<BulkManagedContentResponse>("/api/admin/content/bulk-publish", {
@@ -660,10 +778,30 @@ export const api = {
     method: "POST",
     body: JSON.stringify({ items, target_category_id: targetCategoryId }),
   }),
+  bulkReclassifyManagedContent: (
+    items: Array<{ item_id: string; expected_version_id: string }>,
+    targetCategoryId: string,
+  ) => jsonFetch<BulkManagedContentResponse>("/api/admin/content/bulk-reclassify", {
+    method: "POST",
+    body: JSON.stringify({ items, target_category_id: targetCategoryId }),
+  }),
   bulkArchiveManagedContent: (items: Array<{ item_id: string; expected_version_id: string }>) =>
     jsonFetch<BulkManagedContentResponse>("/api/admin/content/bulk-archive", {
       method: "POST",
       body: JSON.stringify({ items }),
+    }),
+  bulkRestoreManagedContent: (items: Array<{ item_id: string; expected_version_id: string }>, targetCategoryId?: string) =>
+    jsonFetch<BulkManagedContentResponse>("/api/admin/content/bulk-restore", {
+      method: "POST",
+      body: JSON.stringify({ items, target_category_id: targetCategoryId }),
+    }),
+  preflightBulkRestoreManagedContent: (items: Array<{ item_id: string; expected_version_id: string }>, targetCategoryId?: string) =>
+    jsonFetch<{ results: BulkRestorePreflightResult[]; ready: number; blocked: number }>("/api/admin/content/bulk-restore/preflight", {
+      method: "POST", body: JSON.stringify({ items, target_category_id: targetCategoryId }),
+    }),
+  exportManagedContentTrash: (filters: Record<string, unknown>) =>
+    fileFetch("/api/admin/content/trash/export", "回收站处置清单.csv", {
+      method: "POST", body: JSON.stringify(filters),
     }),
   bulkDownloadManagedContent: (versionIds: string[]) =>
     fileFetch("/api/admin/content/bulk-download", "资料批量下载.zip", {
@@ -672,6 +810,14 @@ export const api = {
     }),
   downloadManagedContentFile: (versionId: string, fallbackFilename: string) =>
     fileFetch(`/api/admin/content/versions/${encodeURIComponent(versionId)}/file?download=true`, fallbackFilename),
+  downloadManagedMedia: (
+    itemId: string,
+    part: "video" | "transcript" | "all",
+    fallbackFilename: string,
+  ) => fileFetch(
+    `/api/admin/content/items/${encodeURIComponent(itemId)}/media-download?part=${encodeURIComponent(part)}`,
+    fallbackFilename,
+  ),
   managedContentFileUrl: (versionId: string, download = false) =>
     `/api/admin/content/versions/${encodeURIComponent(versionId)}/file${download ? "?download=true" : ""}`,
   managedContentIndexJobs: (params?: {
@@ -681,6 +827,7 @@ export const api = {
     source_origin?: string;
     status?: string;
     history?: boolean;
+    include_archived?: boolean;
     limit?: number;
     offset?: number;
   }) => {
@@ -691,6 +838,7 @@ export const api = {
     if (params?.source_origin) search.set("source_origin", params.source_origin);
     if (params?.status) search.set("status", params.status);
     if (params?.history) search.set("history", "true");
+    if (params?.include_archived) search.set("include_archived", "true");
     if (params?.limit != null) search.set("limit", String(params.limit));
     if (params?.offset != null) search.set("offset", String(params.offset));
     return jsonFetch<ManagedIndexJobList>(`/api/admin/content/index-jobs?${search}`);
@@ -721,6 +869,22 @@ export const api = {
     fd.append("title", title);
     fd.append("profile_id", profileId);
     fd.append("request_idempotency_key", requestIdempotencyKey);
+    return multipartFetch<MediaAsset>("/api/admin/media", fd, callbacks);
+  },
+  uploadReplacementMediaVideo: async (
+    video: File,
+    title: string,
+    profileId: string,
+    requestIdempotencyKey: string,
+    sourceMediaId: string,
+    callbacks?: MultipartUploadCallbacks,
+  ) => {
+    const fd = new FormData();
+    fd.append("video", video, video.name);
+    fd.append("title", title);
+    fd.append("profile_id", profileId);
+    fd.append("request_idempotency_key", requestIdempotencyKey);
+    fd.append("replacement_source_media_id", sourceMediaId);
     return multipartFetch<MediaAsset>("/api/admin/media", fd, callbacks);
   },
   listMediaAssets: () => jsonFetch<MediaAsset[]>("/api/admin/media"),
@@ -761,6 +925,24 @@ export const api = {
         request_idempotency_key: requestIdempotencyKey,
       }),
     }),
+  createMediaMetadataRevision: (
+    mediaId: string,
+    expectedVersionId: string,
+    title: string,
+    originalFilename: string,
+    requestIdempotencyKey: string,
+  ) => jsonFetch<TranscriptVersion>(
+    `/api/admin/transcription/media/${encodeURIComponent(mediaId)}/metadata-revisions`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        expected_version_id: expectedVersionId,
+        title,
+        original_filename: originalFilename,
+        request_idempotency_key: requestIdempotencyKey,
+      }),
+    },
+  ),
   reviewTranscriptVersion: (versionId: string, approved: boolean, reviewNote: string | null = null) =>
     jsonFetch<TranscriptVersion>(`/api/admin/transcription/versions/${versionId}/review`, {
       method: "POST",

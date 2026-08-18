@@ -5,7 +5,12 @@ from __future__ import annotations
 import zipfile
 from pathlib import Path
 
-from api.routes_admin import _check_office_macros, _check_zip_bomb, _verify_office_signature
+from api.routes_admin import (
+    _check_office_external_links_or_embeds,
+    _check_office_macros,
+    _check_zip_bomb,
+    _verify_office_signature,
+)
 
 
 def test_office_signature_rejects_non_zip_and_accepts_ooxml(tmp_path: Path):
@@ -36,3 +41,15 @@ def test_office_zip_bomb_ratio_and_corrupt_zip_are_rejected(tmp_path: Path):
 
     assert not _check_zip_bomb(compressed)
     assert not _check_zip_bomb(corrupt)
+
+
+def test_office_external_links_and_embeds_are_rejected(tmp_path: Path):
+    external = tmp_path / "external.docx"
+    with zipfile.ZipFile(external, "w") as archive:
+        archive.writestr("word/_rels/document.xml.rels", '<Relationship TargetMode="External" Type="hyperlink"/>')
+    embedded = tmp_path / "embedded.docx"
+    with zipfile.ZipFile(embedded, "w") as archive:
+        archive.writestr("word/embeddings/oleObject1.bin", b"synthetic")
+
+    assert _check_office_external_links_or_embeds(external) == "office_external_link"
+    assert _check_office_external_links_or_embeds(embedded) == "office_embedded_object"

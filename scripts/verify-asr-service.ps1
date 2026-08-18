@@ -21,11 +21,13 @@ $envFile = if ($ConfigPath) {
 }
 $senseVoiceProfile = "funasr-sensevoice-small-v1"
 $fasterWhisperProfile = "faster-whisper-large-v3-turbo-v1"
-$whisperXProfile = "whisperx-large-v3-zh-align-v1"
+$legacyWhisperXProfile = "whisperx-large-v3-zh-align-v1"
+$whisperXProfile = "whisperx-large-v3-zh-align-v2"
 $expectedIdentity = $ExpectedProfiles -join "`n"
 if ($expectedIdentity -notin @(
     $senseVoiceProfile,
     "$fasterWhisperProfile`n$senseVoiceProfile",
+    "$fasterWhisperProfile`n$senseVoiceProfile`n$legacyWhisperXProfile",
     "$fasterWhisperProfile`n$senseVoiceProfile`n$whisperXProfile"
 )) {
     throw "ExpectedProfiles must match a pinned admitted ASR profile contract"
@@ -90,7 +92,10 @@ if ($ExpectedProfiles -contains $fasterWhisperProfile) {
         }
     }
 }
-if ($ExpectedProfiles -contains $whisperXProfile) {
+if (
+    ($ExpectedProfiles -contains $legacyWhisperXProfile) -or
+    ($ExpectedProfiles -contains $whisperXProfile)
+) {
     foreach ($required in @(
         "ASR_WHISPERX_MODEL_CACHE_ROOT",
         "ASR_WHISPERX_MODEL_MANIFEST_PATH",

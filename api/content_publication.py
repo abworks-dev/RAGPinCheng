@@ -39,6 +39,8 @@ _FAILURE_DETAILS = {
     "parser_unavailable": ("文档解析服务不可用。", True, "请恢复解析服务后重试。"),
     "parser_request_failed": ("文档解析服务请求失败。", True, "请稍后重试；持续失败时联系系统管理员。"),
     "parser_result_invalid": ("文档解析结果无效。", False, "请确认文件内容完整，必要时重新导出后上传。"),
+    "office_parse_timeout": ("Office 文档解析超时。", True, "请稍后重试；大型文件请拆分后再上传。"),
+    "office_disk_space_low": ("解析服务磁盘空间不足。", True, "请联系系统管理员清理磁盘后重试。"),
     "embedding_input_too_long": (
         "文档中存在超过向量化限制的内容块。",
         True,
@@ -171,6 +173,10 @@ def run_content_publication(index_job_id: str) -> None:
 
 def _classify_failure(exc: Exception, stage: str) -> str:
     message = str(exc)
+    if message.startswith("office_parse_timeout"):
+        return "office_parse_timeout"
+    if message.startswith("office_disk_space_low"):
+        return "office_disk_space_low"
     if isinstance(exc, EmbeddingInputTooLong) and exc.content_type == "formula":
         return "embedding_formula_too_long"
     if isinstance(exc, EmbeddingInputTooLong):

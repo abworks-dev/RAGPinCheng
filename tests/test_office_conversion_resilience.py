@@ -14,7 +14,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from services.libreoffice.app import _cleanup_dirs, _select_conversion_output, app
-from src.office_convert import convert_docx_to_markdown, convert_pptx_to_markdown, convert_pptx_to_pdf
+from src.office_convert import OfficeConversionError, convert_docx_to_markdown, convert_pptx_to_markdown, convert_pptx_to_pdf
 
 
 def _synthetic_ooxml(path: Path, content_type: str) -> Path:
@@ -52,6 +52,14 @@ def test_generated_docx_preserves_paragraph_anchors(tmp_path: Path, monkeypatch:
     assert markdown.startswith("# 总则")
     assert anchors[0]["text"] == "总则"
     assert len(anchors[0]["anchor"]) == 8
+
+
+def test_docx_parse_timeout_has_stable_failure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    source = _synthetic_ooxml(tmp_path / "slow.docx", "word")
+    _install_fake_docling(monkeypatch, "content")
+    monkeypatch.setattr("src.office_convert.OFFICE_PARSE_TIMEOUT_SECONDS", 0)
+    with pytest.raises(OfficeConversionError, match="office_parse_timeout"):
+        convert_docx_to_markdown(source)
 
 
 def test_generated_pptx_preserves_slide_metadata(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -115,6 +123,23 @@ def test_pptx_preview_surfaces_http_and_timeout_failures(tmp_path: Path):
             convert_pptx_to_pdf(source)
 
     assert not source.with_suffix(".preview.pdf").exists()
+
+
+def test_pptx_preview_failure_preserves_existing_valid_artifact(tmp_path: Path):
+    source = _synthetic_ooxml(tmp_path / "sample.pptx", "presentation")
+    preview = source.with_suffix(".preview.pdf")
+    preview.write_bytes(b"%PDF-1.7\nexisting")
+    response = Mock(status_code=200, content=b"not-a-pdf", text="")
+    client = Mock()
+    client.__enter__ = Mock(return_value=client)
+    client.__exit__ = Mock(return_value=False)
+    client.post.return_value = response
+
+    with patch("httpx.Client", return_value=client):
+        with pytest.raises(RuntimeError, match="invalid PDF output"):
+            convert_pptx_to_pdf(source)
+
+    assert preview.read_bytes() == b"%PDF-1.7\nexisting"
 
 
 def test_service_selects_only_one_valid_pdf_and_cleanup_removes_artifacts(tmp_path: Path):

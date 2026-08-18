@@ -79,7 +79,7 @@ def get_media_transcript(
             "SELECT status, transcript_source_path FROM media_assets WHERE media_id=?",
             (media_id,),
         ).fetchone()
-        if not media or media["status"] != "ready":
+        if not media or media["status"] == "archived":
             raise _not_found()
         version = conn.execute(
             """SELECT v.id,v.source,v.canonical_json,v.canonical_sha256,
@@ -136,6 +136,9 @@ def get_media_transcript(
         if not segments:
             raise _integrity_error()
         return MediaTranscriptDTO(media_id=media_id, version_id=version["id"], segments=segments)
+
+    if media["status"] != "ready":
+        raise _not_found()
 
     # Legacy manual uploads predate transcript_versions and intentionally have no
     # head. Their already-indexed source path remains the authoritative fallback.

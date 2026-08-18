@@ -139,6 +139,11 @@ class OfficeProcessingStatusDTO(BaseModel):
     enabled: bool
     mode: Literal["deployment_config"] = "deployment_config"
     disabled_reason: Literal["office_processing_disabled"] | None = None
+    status: Literal["healthy", "degraded", "unavailable", "disabled"]
+    checked_at: int
+    error_code: str | None = None
+    disk_free_mb: int = Field(ge=0)
+    disk_minimum_mb: int = Field(ge=0)
 
 
 class SystemOverviewResponse(BaseModel):
@@ -388,14 +393,32 @@ class CreateManagedCategoryRequest(BaseModel):
     parent_id: str | None = None
     display_code: str = Field(min_length=1, max_length=12)
     display_name: str = Field(min_length=1, max_length=100)
-    sort_order: int = 0
+    sort_order: int = Field(default=0, ge=0, le=999_999)
+    target_position: int | None = Field(default=None, ge=1, le=99_999)
+    confirm_number_shift: bool = False
 
 
 class UpdateManagedCategoryRequest(BaseModel):
     display_code: str = Field(min_length=1, max_length=12)
     display_name: str = Field(min_length=1, max_length=100)
-    sort_order: int
+    sort_order: int = Field(ge=0, le=999_999)
     is_active: bool
+    expected_version: int = Field(gt=0)
+
+
+class RenameManagedCategoryRequest(BaseModel):
+    display_name: str = Field(min_length=1, max_length=100)
+    expected_version: int = Field(gt=0)
+
+
+class UpdateManagedCategorySortOrderRequest(BaseModel):
+    sort_order: int = Field(ge=0, le=999_999)
+    expected_version: int = Field(gt=0)
+
+
+class UpdateManagedCategoryNumberRequest(BaseModel):
+    target_position: int = Field(ge=1, le=99_999)
+    confirm_number_shift: bool = False
     expected_version: int = Field(gt=0)
 
 
@@ -473,6 +496,7 @@ class ManagedContentItemDTO(BaseModel):
     category_path: str = ""
     media_id: str | None
     preview_parent_id: str | None = None
+    preview_status: Literal["ready", "pending", "missing", "not_applicable"] = "not_applicable"
     version_id: str
     version_number: int
     original_filename: str
@@ -487,17 +511,30 @@ class ManagedContentItemDTO(BaseModel):
     latest_publication_status: str | None = None
     publication_attempt_count: int = 0
     publication_failure: PublicationFailureDTO | None = None
+    latest_reviewed_by_name: str | None = None
+    latest_reviewed_at: int | None = None
+    latest_review_decision: str | None = None
+    latest_review_note: str | None = None
     created_at: int
     updated_at: int
     archived_at: int | None = None
     archived_by_name: str | None = None
     pre_archive_lifecycle_status: str | None = None
+    purge_eligible_at: int | None = None
+    retention_status: Literal["retained", "expiring", "overdue"] | None = None
+    retention_days_remaining: int | None = None
+    media_duration_ms: int | None = None
+    media_file_size: int | None = None
+    has_pending_revision: bool = False
+    reclassification_job_id: str | None = None
+    reclassification_status: str | None = None
 
 
 class ManagedContentListResponse(BaseModel):
     items: list[ManagedContentItemDTO]
     total: int
     status_counts: dict[str, int]
+    retention_counts: dict[str, int] = Field(default_factory=dict)
 
 
 class DeleteManagedContentRequest(BaseModel):
@@ -514,12 +551,35 @@ class DeleteManagedContentResponse(BaseModel):
 
 class RestoreManagedContentRequest(BaseModel):
     expected_version_id: str = Field(min_length=1, max_length=100)
+    target_category_id: str | None = Field(default=None, min_length=1, max_length=100)
+    replace_conflict_item_id: str | None = Field(default=None, min_length=1, max_length=100)
+    replace_conflict_expected_version_id: str | None = Field(
+        default=None, min_length=1, max_length=100
+    )
 
 
 class RestoreManagedContentResponse(BaseModel):
     item_id: str
     version_id: str
     restored_status: str
+    category_id: str
+    moved_to_alternate_category: bool
+    replaced_conflict: bool
+
+
+class ContentTrashAuditEventDTO(BaseModel):
+    event_type: Literal["content.archived", "content.restored"]
+    actor_name: str | None = None
+    created_at: int
+    previous_status: str | None = None
+    restored_status: str | None = None
+    restore_strategy: str | None = None
+    source_category_path: str | None = None
+    target_category_path: str | None = None
+    category_path: str | None = None
+    archive_reason: str | None = None
+    replaced_title: str | None = None
+    replaced_filename: str | None = None
 
 
 class MoveManagedContentRequest(BaseModel):
@@ -537,6 +597,15 @@ class RenameManagedContentRequest(BaseModel):
     )
 
 
+class CreateMediaMetadataRevisionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_version_id: str = Field(min_length=1, max_length=100)
+    title: str = Field(min_length=1, max_length=200)
+    original_filename: str = Field(min_length=1, max_length=255)
+    request_idempotency_key: str = Field(min_length=36, max_length=36)
+
+
 class BulkManagedContentItemRef(BaseModel):
     item_id: str = Field(min_length=1, max_length=100)
     expected_version_id: str = Field(min_length=1, max_length=100)
@@ -549,6 +618,99 @@ class BulkMoveManagedContentRequest(BaseModel):
 
 class BulkArchiveManagedContentRequest(BaseModel):
     items: list[BulkManagedContentItemRef] = Field(min_length=1, max_length=20)
+
+
+class BulkRestoreManagedContentRequest(BaseModel):
+    items: list[BulkManagedContentItemRef] = Field(min_length=1, max_length=20)
+    target_category_id: str | None = Field(default=None, min_length=1, max_length=100)
+
+
+class BulkRestorePreflightResultDTO(BaseModel):
+    item_id: str
+    version_id: str
+    status: Literal["ready", "conflict", "inactive_category", "version_changed", "in_progress", "not_found"]
+    message: str
+    target_category_path: str | None = None
+
+
+class BulkRestorePreflightResponse(BaseModel):
+    results: list[BulkRestorePreflightResultDTO]
+    ready: int
+    blocked: int
+
+
+class TrashExportRequest(BaseModel):
+    query: str = Field(default="", max_length=200)
+    retention_status: Literal["retained", "expiring", "overdue"] | None = None
+    archived_from: int | None = Field(default=None, ge=0)
+    archived_to: int | None = Field(default=None, ge=0)
+    category_id: str | None = Field(default=None, max_length=100)
+    archived_by: str = Field(default="", max_length=100)
+    sort_direction: Literal["asc", "desc"] = "desc"
+
+
+class TrashSettingsDTO(BaseModel):
+    cleanup_enabled: bool
+    retention_days: int
+    warning_days: int
+    batch_limit: int
+    updated_by: int | None = None
+    updated_at: int
+
+
+class UpdateTrashSettingsRequest(BaseModel):
+    cleanup_enabled: bool
+    retention_days: int = Field(ge=1, le=3650)
+    warning_days: int = Field(ge=0, le=365)
+    batch_limit: int = Field(ge=1, le=20)
+
+
+class TrashPurgeRequest(BaseModel):
+    items: list[BulkManagedContentItemRef] = Field(min_length=1, max_length=20)
+    confirmation: str = Field(min_length=1, max_length=100)
+
+
+class TrashPurgePreflightRequest(BaseModel):
+    items: list[BulkManagedContentItemRef] = Field(min_length=1, max_length=20)
+
+
+class TrashPurgeItemDTO(BaseModel):
+    item_id: str
+    version_id: str
+    status: Literal["ready", "blocked"]
+    reason: str | None = None
+    title: str
+    original_filename: str
+    category_path: str
+    size_bytes: int
+
+
+class TrashPurgePreflightResponse(BaseModel):
+    items: list[TrashPurgeItemDTO]
+    ready_count: int
+    blocked_count: int
+    total_size_bytes: int
+    confirmation_phrase: str
+
+
+class TrashPurgeRunDTO(BaseModel):
+    id: str
+    trigger_type: Literal["manual", "automatic"]
+    status: Literal["running", "succeeded", "partial", "failed"]
+    candidate_count: int
+    succeeded_count: int
+    failed_count: int
+    actor_name: str | None = None
+    created_at: int
+    finished_at: int | None = None
+
+
+class TrashPurgeResponse(BaseModel):
+    run_id: str
+    status: Literal["succeeded", "partial", "failed"]
+    candidate_count: int
+    succeeded_count: int
+    failed_count: int
 
 
 class BulkDownloadManagedContentRequest(BaseModel):
@@ -612,6 +774,29 @@ class ManagedPublicationDTO(BaseModel):
     status: str
 
 
+class ManagedPreviewDTO(BaseModel):
+    version_id: str
+    preview_parent_id: str
+    preview_status: Literal["ready"] = "ready"
+
+
+class ContentReclassificationJobDTO(BaseModel):
+    id: str
+    item_id: str
+    expected_version_id: str
+    source_category_id: str
+    target_category_id: str
+    status: Literal["pending", "applying", "committing", "rolling_back", "succeeded", "failed"]
+    qdrant_point_count: int
+    parent_count: int
+    error_code: str | None
+    error_summary: str | None
+    created_at: int
+    started_at: int | None
+    finished_at: int | None
+    updated_at: int
+
+
 class ManagedIndexJobDTO(BaseModel):
     id: str
     publication_id: str
@@ -635,6 +820,7 @@ class ManagedIndexJobDTO(BaseModel):
     version_number: int | None = None
     file_size: int | None = None
     source_origin: str | None = None
+    is_archived: bool = False
     is_current_head: bool = False
     is_latest_attempt: bool = True
     parent_count: int | None = None
@@ -727,6 +913,9 @@ class MediaAssetDTO(BaseModel):
     publication_status: str | None = None
     publication_index_status: str | None = None
     is_current_version: bool = False
+    replacement_source_media_id: str | None = None
+    replacement_candidate_media_id: str | None = None
+    replacement_status: str | None = None
 
 
 class MediaTranscriptSegmentDTO(BaseModel):
@@ -755,6 +944,84 @@ class TranscriptionProfileDTO(BaseModel):
     requires_review: bool
     auto_publish: bool
     auto_index: bool
+
+
+class AsrSegmentationDTO(BaseModel):
+    preset: Literal["natural", "balanced", "fine"]
+    max_segment_duration_ms: int | None
+    max_segment_chars: int
+    max_merge_gap_ms: int
+
+
+class AsrDecodeConfigDTO(BaseModel):
+    service_profile_id: str
+    model_name: str
+    beam_size: int
+    temperature: float
+    hotword_count: int
+    prompt_asset_id: str | None
+    service_profile_config_hash: str | None
+    qualification_policy: str | None
+
+
+class AsrManagedProfileDTO(BaseModel):
+    profile_id: str
+    display_name: str
+    description: str
+    profile_version: str
+    application_config_hash: str
+    qualification: str
+    admission: str
+    availability: str
+    unavailable_reason_code: str | None
+    release_eligible: bool
+    segmentation: AsrSegmentationDTO | None
+    terminology_rule_set: str | None
+    protected_terms: list[str]
+    decode: AsrDecodeConfigDTO
+
+
+class AsrServiceStatusDTO(BaseModel):
+    status: Literal["disabled", "healthy", "degraded", "unavailable"]
+    queue_depth: int | None = None
+    queue_limit: int | None = None
+    pause_reason: str | None = None
+
+
+class AsrProfileReleaseRequestDTO(BaseModel):
+    request_id: str
+    profile_id: str
+    profile_display_name: str
+    profile_config_hash: str
+    status: Literal["requested", "completed", "rejected", "cancelled"]
+    request_reason: str | None
+    requested_by_name: str | None
+    created_at: int
+    updated_at: int
+
+
+class AsrProfileAuditEventDTO(BaseModel):
+    event_id: int
+    event_type: Literal["release_requested"]
+    profile_id: str
+    profile_display_name: str
+    actor_name: str | None
+    created_at: int
+
+
+class AsrSettingsResponse(BaseModel):
+    service: AsrServiceStatusDTO
+    profiles: list[AsrManagedProfileDTO]
+    release_requests: list[AsrProfileReleaseRequestDTO]
+    audit_events: list[AsrProfileAuditEventDTO]
+
+
+class AsrProfileReleaseRequestCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    profile_id: str = Field(..., min_length=3, max_length=64)
+    request_idempotency_key: str = Field(..., min_length=36, max_length=36)
+    request_reason: str | None = Field(default=None, max_length=500)
 
 
 class TranscriptionJobDTO(BaseModel):

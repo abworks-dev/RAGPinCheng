@@ -135,9 +135,12 @@ export type ContentPermission =
   | "item.review"
   | "item.move_review"
   | "item.publish"
+  | "item.reclassify_published"
   | "item.archive_published"
   | "trash.view"
   | "trash.restore"
+  | "trash.purge"
+  | "trash.policy_manage"
   | "category.manage"
   | "folder.request"
   | "folder.review"
@@ -265,6 +268,11 @@ export type SystemOverview = {
     enabled: boolean;
     mode: "deployment_config";
     disabled_reason: "office_processing_disabled" | null;
+    status: "healthy" | "degraded" | "unavailable" | "disabled";
+    checked_at: number;
+    error_code: string | null;
+    disk_free_mb?: number;
+    disk_minimum_mb?: number;
   };
 };
 
@@ -339,6 +347,7 @@ export type ManagedContentItem = {
   category_path: string;
   media_id: string | null;
   preview_parent_id: string | null;
+  preview_status: "ready" | "pending" | "missing" | "not_applicable";
   version_id: string;
   version_number: number;
   original_filename: string;
@@ -353,11 +362,61 @@ export type ManagedContentItem = {
   latest_publication_status: string | null;
   publication_attempt_count: number;
   publication_failure: PublicationFailure | null;
+  latest_reviewed_by_name: string | null;
+  latest_reviewed_at: number | null;
+  latest_review_decision: string | null;
+  latest_review_note: string | null;
   created_at: number;
   updated_at: number;
   archived_at?: number | null;
   archived_by_name?: string | null;
   pre_archive_lifecycle_status?: string | null;
+  purge_eligible_at?: number | null;
+  retention_status?: "retained" | "expiring" | "overdue" | null;
+  retention_days_remaining?: number | null;
+  media_duration_ms?: number | null;
+  media_file_size?: number | null;
+  has_pending_revision: boolean;
+  reclassification_job_id: string | null;
+  reclassification_status: string | null;
+};
+
+export type ManagedPreview = {
+  version_id: string;
+  preview_parent_id: string;
+  preview_status: "ready";
+};
+
+export type ContentTrashAuditEvent = {
+  event_type: "content.archived" | "content.restored";
+  actor_name: string | null;
+  created_at: number;
+  previous_status: string | null;
+  restored_status: string | null;
+  restore_strategy: "original_directory" | "alternate_directory" | "replace_conflict" | null;
+  source_category_path: string | null;
+  target_category_path: string | null;
+  category_path: string | null;
+  archive_reason: "restore_conflict_replacement" | null;
+  replaced_title: string | null;
+  replaced_filename: string | null;
+};
+
+export type ContentReclassificationJob = {
+  id: string;
+  item_id: string;
+  expected_version_id: string;
+  source_category_id: string;
+  target_category_id: string;
+  status: "pending" | "applying" | "committing" | "rolling_back" | "succeeded" | "failed";
+  qdrant_point_count: number;
+  parent_count: number;
+  error_code: string | null;
+  error_summary: string | null;
+  created_at: number;
+  started_at: number | null;
+  finished_at: number | null;
+  updated_at: number;
 };
 
 export type PublicationFailure = {
@@ -371,6 +430,55 @@ export type ManagedContentList = {
   items: ManagedContentItem[];
   total: number;
   status_counts: Record<string, number>;
+  retention_counts?: Record<string, number>;
+};
+
+export type BulkRestorePreflightResult = {
+  item_id: string;
+  version_id: string;
+  status: "ready" | "conflict" | "inactive_category" | "version_changed" | "in_progress" | "not_found";
+  message: string;
+  target_category_path: string | null;
+};
+
+export type TrashSettings = {
+  cleanup_enabled: boolean;
+  retention_days: number;
+  warning_days: number;
+  batch_limit: number;
+  updated_by: number | null;
+  updated_at: number;
+};
+
+export type TrashPurgeItem = {
+  item_id: string;
+  version_id: string;
+  status: "ready" | "blocked";
+  reason: string | null;
+  title: string;
+  original_filename: string;
+  category_path: string;
+  size_bytes: number;
+};
+
+export type TrashPurgePreflight = {
+  items: TrashPurgeItem[];
+  ready_count: number;
+  blocked_count: number;
+  total_size_bytes: number;
+  confirmation_phrase: string;
+};
+
+export type TrashPurgeRun = {
+  id: string;
+  trigger_type: "manual" | "automatic";
+  status: "running" | "succeeded" | "partial" | "failed";
+  candidate_count: number;
+  succeeded_count: number;
+  failed_count: number;
+  actor_name: string | null;
+  created_at: number;
+  finished_at: number | null;
 };
 
 export type FolderRequest = {
@@ -424,6 +532,7 @@ export type ManagedIndexJob = {
   version_number: number | null;
   file_size: number | null;
   source_origin: string | null;
+  is_archived: boolean;
   is_current_head: boolean;
   is_latest_attempt: boolean;
   parent_count: number | null;
@@ -590,6 +699,74 @@ export type TranscriptionProfile = {
   auto_index: boolean;
 };
 
+export type AsrSegmentation = {
+  preset: "natural" | "balanced" | "fine";
+  max_segment_duration_ms: number | null;
+  max_segment_chars: number;
+  max_merge_gap_ms: number;
+};
+
+export type AsrManagedProfile = {
+  profile_id: string;
+  display_name: string;
+  description: string;
+  profile_version: string;
+  application_config_hash: string;
+  qualification: string;
+  admission: string;
+  availability: string;
+  unavailable_reason_code: string | null;
+  release_eligible: boolean;
+  segmentation: AsrSegmentation | null;
+  terminology_rule_set: string | null;
+  protected_terms: string[];
+  decode: {
+    service_profile_id: string;
+    model_name: string;
+    beam_size: number;
+    temperature: number;
+    hotword_count: number;
+    prompt_asset_id: string | null;
+    service_profile_config_hash: string | null;
+    qualification_policy: string | null;
+  };
+};
+
+export type AsrServiceStatus = {
+  status: "disabled" | "healthy" | "degraded" | "unavailable";
+  queue_depth: number | null;
+  queue_limit: number | null;
+  pause_reason: string | null;
+};
+
+export type AsrProfileReleaseRequest = {
+  request_id: string;
+  profile_id: string;
+  profile_display_name: string;
+  profile_config_hash: string;
+  status: "requested" | "completed" | "rejected" | "cancelled";
+  request_reason: string | null;
+  requested_by_name: string | null;
+  created_at: number;
+  updated_at: number;
+};
+
+export type AsrProfileAuditEvent = {
+  event_id: number;
+  event_type: "release_requested";
+  profile_id: string;
+  profile_display_name: string;
+  actor_name: string | null;
+  created_at: number;
+};
+
+export type AsrSettings = {
+  service: AsrServiceStatus;
+  profiles: AsrManagedProfile[];
+  release_requests: AsrProfileReleaseRequest[];
+  audit_events: AsrProfileAuditEvent[];
+};
+
 export type TranscriptionJobStatus = "pending" | "running" | "succeeded" | "failed" | "cancelled";
 
 export type TranscriptionFailure = {
@@ -705,6 +882,9 @@ export type MediaAsset = {
   publication_status?: TranscriptPublicationStatus | null;
   publication_index_status?: "pending" | "parsing" | "chunking" | "embedding" | "done" | "failed" | null;
   is_current_version?: boolean;
+  replacement_source_media_id?: string | null;
+  replacement_candidate_media_id?: string | null;
+  replacement_status?: "pending" | "failed" | "activated" | "cancelled" | null;
 };
 
 export type MediaTranscriptSegment = {

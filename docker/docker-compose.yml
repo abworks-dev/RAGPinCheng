@@ -100,6 +100,8 @@ services:
       # LibreOffice 转换服务地址 — 在同一 Docker 网络内，通过服务名访问。
       LIBREOFFICE_URL: ${LIBREOFFICE_URL:-http://libreoffice:8101}
       OFFICE_PROCESSING_ENABLED: ${OFFICE_PROCESSING_ENABLED:-true}
+      OFFICE_PARSE_TIMEOUT_SECONDS: ${OFFICE_PARSE_TIMEOUT_SECONDS:-120}
+      OFFICE_MIN_FREE_DISK_MB: ${OFFICE_MIN_FREE_DISK_MB:-1024}
       CONTENT_ROOT: /app/content
       DOCS_DIR: /app/docs
       MEDIA_DIR: /app/media

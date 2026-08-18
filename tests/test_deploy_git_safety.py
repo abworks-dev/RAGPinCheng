@@ -244,6 +244,12 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertIn('ROLLBACK_IMAGE_TAG="pincheng-rag-backend:app-only-rollback-', workflow)
         self.assertIn('docker tag "${OLD_IMAGE_ID}" "${ROLLBACK_IMAGE_TAG}"', workflow)
         self.assertIn('docker tag "${ROLLBACK_IMAGE_TAG}" pincheng-rag-backend:latest', workflow)
+        self.assertIn('backend-rollback-tag.txt', workflow)
+        self.assertIn('APP_ONLY_ROLLBACK_READY status=retained', workflow)
+        self.assertLess(
+            workflow.rindex('docker image rm "${ROLLBACK_IMAGE_TAG}"'),
+            workflow.index('APP_ONLY_ROLLBACK_READY status=retained'),
+        )
         self.assertIn(
             'git show "${DEPLOY_COMMIT_SHA}:scripts/deploy-app.sh"', workflow
         )
@@ -269,7 +275,7 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertIn("transcription_admission:", workflow)
         self.assertIn("ENABLE_FASTER_WHISPER", workflow)
         self.assertIn("ENABLE_FASTER_WHISPER_AND_WHISPERX", workflow)
-        self.assertIn("whisperx-large-v3-zh-align-experimental-v1", workflow)
+        self.assertIn("whisperx-large-v3-zh-balanced-v2", workflow)
         self.assertIn("CONFIGURED_TRANSCRIPTION_ADMITTED_PROFILE_IDS", workflow)
         self.assertIn("PREVIOUS_TRANSCRIPTION_ADMITTED_PROFILE_IDS", workflow)
         self.assertIn(
@@ -292,7 +298,10 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertIn('if [ "${DEPLOY_STATUS}" -ne 0 ]; then', workflow)
         self.assertNotIn("if ! (", workflow)
         self.assertIn('states[FASTER_WHISPER_PROFILE_ID] == ("enabled", "available")', workflow)
-        self.assertIn('states[WHISPERX_PROFILE_ID] == ("enabled", "available")', workflow)
+        self.assertIn(
+            'states[WHISPERX_BALANCED_PROFILE_ID] == ("enabled", "available")',
+            workflow,
+        )
         self.assertIn("profiles=\" + \",\".join(sorted(expected))", workflow)
 
         compose = (ROOT / "docker" / "docker-compose.yml").read_text(encoding="utf-8")

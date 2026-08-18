@@ -94,6 +94,13 @@ def test_done_candidate_promotes_head_atomically(tmp_path):
     assert store.current_head(version.media_id) == VERSION_ID
     assert published.publication_status.value == "published"
     assert port.calls == 1
+    catalog = conn.execute(
+        "SELECT content_kind,category_id,media_id,normalized_filename FROM content_items"
+    ).fetchone()
+    assert tuple(catalog) == ("media_transcript", "cat-05", version.media_id, None)
+    assert conn.execute("SELECT count(*) FROM content_versions").fetchone()[0] == 0
+    assert conn.execute("SELECT count(*) FROM content_item_heads").fetchone()[0] == 0
+    assert conn.execute("SELECT count(*) FROM content_index_jobs").fetchone()[0] == 0
     conn.close()
 
 
@@ -224,6 +231,30 @@ def test_transaction_failure_rolls_back_head_switch(tmp_path):
     conn.close()
 
 
+def test_catalog_failure_rolls_back_promotion_and_head(tmp_path):
+    conn, store, workflow, _port, profile, version = persist_candidate(tmp_path)
+    begin(workflow, profile)
+    workflow.run_publication_index(index_job_id=INDEX_JOB_ID, now=41)
+    conn.execute(
+        """CREATE TRIGGER fail_media_catalog BEFORE INSERT ON content_items
+           WHEN NEW.content_kind='media_transcript'
+           BEGIN SELECT RAISE(ABORT, 'injected catalog failure'); END"""
+    )
+    conn.commit()
+    with pytest.raises(sqlite3.IntegrityError, match="injected catalog failure"):
+        workflow.promote(
+            version_id=VERSION_ID,
+            index_job_id=INDEX_JOB_ID,
+            current_profile=profile,
+            explicit_admin_action=False,
+            now=42,
+        )
+    assert store.current_head(version.media_id) is None
+    assert store.load_version(VERSION_ID).publication_status.value == "publishing"
+    assert conn.execute("SELECT count(*) FROM content_items").fetchone()[0] == 0
+    conn.close()
+
+
 def test_new_publication_switches_one_head_and_keeps_old_published_history(tmp_path):
     conn, store, workflow, _port, profile, first = persist_candidate(tmp_path)
     begin(workflow, profile)
@@ -235,6 +266,11 @@ def test_new_publication_switches_one_head_and_keeps_old_published_history(tmp_p
         explicit_admin_action=False,
         now=42,
     )
+    conn.execute(
+        "UPDATE content_items SET category_id='cat-04' WHERE media_id=?",
+        (first.media_id,),
+    )
+    conn.commit()
     second_job_id = "123e4567-e89b-12d3-a456-426614174030"
     second_request_id = "123e4567-e89b-12d3-a456-426614174031"
     second_version_id = "123e4567-e89b-12d3-a456-426614174032"
@@ -277,4 +313,9 @@ def test_new_publication_switches_one_head_and_keeps_old_published_history(tmp_p
     assert second.supersedes_version_id == VERSION_ID
     assert store.load_version(VERSION_ID).publication_status.value == "published"
     assert conn.execute("SELECT count(*) FROM media_transcript_heads").fetchone()[0] == 1
+    catalog = conn.execute(
+        "SELECT count(*),category_id FROM content_items WHERE media_id=?",
+        (first.media_id,),
+    ).fetchone()
+    assert tuple(catalog) == (1, "cat-04")
     conn.close()

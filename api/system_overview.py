@@ -14,7 +14,10 @@ from src.config import (
     GPU_SERVICE_TOKEN,
     GPU_SERVICE_URL,
     GPU_SYSTEM_METRICS_TIMEOUT_SECONDS,
+    LIBREOFFICE_HEALTH_TIMEOUT,
+    LIBREOFFICE_URL,
     OFFICE_PROCESSING_ENABLED,
+    OFFICE_MIN_FREE_DISK_MB,
     SYSTEM_NODE_ID,
 )
 
@@ -193,6 +196,54 @@ def fetch_gpu_metrics(now: int | None = None) -> dict[str, Any]:
         return _unavailable_gpu(checked_at)
 
 
+def fetch_office_processing_health(now: int | None = None) -> dict[str, Any]:
+    checked_at = int(time.time() if now is None else now)
+    disk = shutil.disk_usage(DATA_DIR)
+    free_mb = disk.free // (1024 * 1024)
+    disk_low = free_mb < OFFICE_MIN_FREE_DISK_MB
+    if not OFFICE_PROCESSING_ENABLED:
+        return {
+            "enabled": False,
+            "mode": "deployment_config",
+            "disabled_reason": "office_processing_disabled",
+            "status": "disabled",
+            "checked_at": checked_at,
+            "error_code": None,
+            "disk_free_mb": free_mb,
+            "disk_minimum_mb": OFFICE_MIN_FREE_DISK_MB,
+        }
+    try:
+        response = httpx.get(
+            f"{LIBREOFFICE_URL.rstrip('/')}/health",
+            timeout=LIBREOFFICE_HEALTH_TIMEOUT,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, dict) or payload.get("status") != "ok":
+            raise ValueError("unexpected_office_health_response")
+        return {
+            "enabled": True,
+            "mode": "deployment_config",
+            "disabled_reason": None,
+            "status": "degraded" if disk_low else "healthy",
+            "checked_at": checked_at,
+            "error_code": "office_disk_space_low" if disk_low else None,
+            "disk_free_mb": free_mb,
+            "disk_minimum_mb": OFFICE_MIN_FREE_DISK_MB,
+        }
+    except (httpx.HTTPError, ValueError, TypeError):
+        return {
+            "enabled": True,
+            "mode": "deployment_config",
+            "disabled_reason": None,
+            "status": "unavailable",
+            "checked_at": checked_at,
+            "error_code": "office_service_unreachable",
+            "disk_free_mb": free_mb,
+            "disk_minimum_mb": OFFICE_MIN_FREE_DISK_MB,
+        }
+
+
 def collect_system_overview(now: int | None = None) -> dict[str, Any]:
     checked_at = int(time.time() if now is None else now)
     app = collect_app_metrics(checked_at)
@@ -203,9 +254,5 @@ def collect_system_overview(now: int | None = None) -> dict[str, Any]:
         "checked_at": checked_at,
         "app": app,
         "gpu": gpu,
-        "office_processing": {
-            "enabled": OFFICE_PROCESSING_ENABLED,
-            "mode": "deployment_config",
-            "disabled_reason": None if OFFICE_PROCESSING_ENABLED else "office_processing_disabled",
-        },
+        "office_processing": fetch_office_processing_health(checked_at),
     }

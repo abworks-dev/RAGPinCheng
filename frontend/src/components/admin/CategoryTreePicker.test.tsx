@@ -84,4 +84,51 @@ describe("CategoryTreePicker", () => {
     fireEvent.click(screen.getByTestId("category-picker-item-cat-sibling"));
     expect(onChange).not.toHaveBeenCalled();
   });
+
+  it("offers a selectable root destination and explains why a destination is unavailable", () => {
+    const onChange = vi.fn();
+    const { rerender } = render(<CategoryTreePicker
+      categories={[root, child, sibling]}
+      value="cat-root"
+      onChange={onChange}
+      rootOption={{ value: "__root__", label: "根目录 /", description: "一级目录所在位置" }}
+      disabledCategoryReasons={{ [sibling.id]: "目标目录已有同名文件夹" }}
+    />);
+
+    const rootOption = screen.getByRole("treeitem", { name: /根目录/ });
+    fireEvent.click(rootOption);
+    expect(onChange).toHaveBeenCalledWith("__root__");
+
+    const unavailable = screen.getByTestId("category-picker-item-cat-sibling");
+    expect(unavailable).toHaveAttribute("aria-disabled", "true");
+    expect(unavailable).toHaveAttribute("title", "目标目录已有同名文件夹");
+    expect(unavailable).toHaveTextContent("目标目录已有同名文件夹");
+    fireEvent.click(unavailable);
+    expect(onChange).toHaveBeenCalledTimes(1);
+
+    rerender(<CategoryTreePicker
+      categories={[root, child, sibling]}
+      value="__root__"
+      onChange={onChange}
+      rootOption={{ value: "__root__", label: "根目录 /", disabledReason: "文件夹已经位于根目录" }}
+    />);
+    expect(screen.getByRole("treeitem", { name: /根目录/ })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByText("文件夹已经位于根目录")).toBeInTheDocument();
+  });
+
+  it("keeps a single keyboard tab stop when the root destination is enabled", () => {
+    const onChange = vi.fn();
+    render(<CategoryTreePicker
+      categories={[root, child, sibling]}
+      value="__root__"
+      onChange={onChange}
+      rootOption={{ value: "__root__", label: "根目录 /" }}
+    />);
+
+    expect(screen.getAllByRole("treeitem").filter((item) => item.tabIndex === 0)).toHaveLength(1);
+    const rootItem = screen.getByRole("treeitem", { name: /根目录/ });
+    rootItem.focus();
+    fireEvent.keyDown(rootItem, { key: "ArrowDown" });
+    expect(screen.getByTestId("category-picker-item-cat-root")).toHaveFocus();
+  });
 });

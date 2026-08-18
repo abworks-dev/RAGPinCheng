@@ -16,6 +16,7 @@ import sqlite3
 import time
 from dataclasses import asdict
 from pathlib import Path
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 
@@ -98,7 +99,7 @@ from .schemas import (
     SystemOverviewResponse,
     UploadResponse,
 )
-from .transcription_store import StoreConflictError
+from .transcription_store import SQLiteTranscriptionStore, StoreConflictError
 from .transcription_worker import enqueue as enqueue_transcription
 
 logger = logging.getLogger("api.routes_admin")
@@ -610,6 +611,10 @@ MAX_UPLOAD_BYTES = int(_os.getenv("MAX_UPLOAD_MB", "200")) * 1024 * 1024
 # Office file security constants
 _MAX_ZIP_BOMB_RATIO = 200  # max decompression ratio for zip bomb protection
 
+def _check_office_external_links_or_embeds(path: Path) -> str | None:
+    from src.office_security import find_unsafe_office_content
+    return find_unsafe_office_content(path)
+
 
 def _verify_office_signature(path: Path, ext: str) -> bool:
     """Verify the file starts with PK\x03\x04 (ZIP header) for Office formats."""
@@ -867,6 +872,11 @@ async def upload_documents(
             if _check_office_macros(target):
                 target.unlink()
                 skipped.append({"filename": name, "reason": "不支持带宏的 Office 文件"})
+                continue
+            package_issue = _check_office_external_links_or_embeds(target)
+            if package_issue:
+                target.unlink()
+                skipped.append({"filename": name, "reason": "Office 文件包含外部链接或嵌入对象，已拒绝处理", "reason_code": package_issue})
                 continue
 
         job_id = create_job(
@@ -1185,6 +1195,7 @@ async def upload_media(
     request_idempotency_key: str | None = Form(None),
     admin: CurrentUser = Depends(require_csrf_admin),
     conn: sqlite3.Connection = Depends(get_db),
+    replacement_source_media_id: Annotated[str | None, Form()] = None,
 ) -> MediaAssetDTO:
     """Upload one MP4 with either a manual transcript or a trusted Profile."""
     import uuid
@@ -1193,6 +1204,14 @@ async def upload_media(
     transcript_name = (transcript.filename or "").strip() if transcript else ""
     clean_title = title.strip()
     automatic = transcript is None
+
+    if replacement_source_media_id is not None:
+        if not automatic:
+            raise HTTPException(status_code=400, detail="替换视频必须使用自动转录 Profile")
+        try:
+            validate_uuid(replacement_source_media_id, "replacement_source_media_id")
+        except ContractValidationError:
+            raise HTTPException(status_code=400, detail="待替换视频标识不合法")
 
     if not automatic and CONTENT_HEAD_ENFORCEMENT == "strict":
         raise HTTPException(
@@ -1231,9 +1250,11 @@ async def upload_media(
             """
             SELECT j.id AS job_id,j.profile_id,j.created_by,
                    m.media_id,m.title,m.original_filename,m.mime_type,m.file_size,
-                   m.sha256,m.transcript_origin,m.status,m.created_at,m.updated_at,m.error
+                   m.sha256,m.transcript_origin,m.status,m.created_at,m.updated_at,m.error,
+                   r.source_media_id AS replacement_source_media_id
             FROM transcription_jobs j
             JOIN media_assets m ON m.media_id=j.media_id
+            LEFT JOIN media_replacements r ON r.candidate_media_id=m.media_id
             WHERE j.request_idempotency_key=?
               AND m.status <> 'archived'
             """,
@@ -1259,8 +1280,10 @@ async def upload_media(
                 existing["created_by"] == admin.id
                 and existing["profile_id"] == profile_id
                 and existing["title"] == clean_title
+                and existing["original_filename"] == video_name
                 and existing["file_size"] == retry_size
                 and existing["sha256"] == retry_digest.hexdigest()
+                and existing["replacement_source_media_id"] == replacement_source_media_id
             )
             if not same_identity:
                 raise HTTPException(
@@ -1284,6 +1307,38 @@ async def upload_media(
                 error=existing["error"],
                 transcription_job_id=existing["job_id"],
             )
+        if replacement_source_media_id is not None:
+            source = conn.execute(
+                """SELECT m.title
+                   FROM media_assets m
+                   JOIN media_transcript_heads h ON h.media_id=m.media_id
+                   JOIN content_items i ON i.media_id=m.media_id
+                     AND i.content_kind='media_transcript' AND i.archived_at IS NULL
+                   WHERE m.media_id=? AND m.status<>'archived'""",
+                (replacement_source_media_id,),
+            ).fetchone()
+            if source is None:
+                raise HTTPException(status_code=409, detail="待替换视频当前没有可用的正式版本")
+            if conn.execute(
+                """SELECT 1 FROM media_replacements
+                   WHERE source_media_id=? AND status='pending'""",
+                (replacement_source_media_id,),
+            ).fetchone() is not None:
+                raise HTTPException(status_code=409, detail="该视频已有正在处理的替换任务")
+            if conn.execute(
+                """SELECT 1 FROM media_metadata_revisions
+                   WHERE media_id=? AND status='pending'""",
+                (replacement_source_media_id,),
+            ).fetchone() is not None:
+                raise HTTPException(status_code=409, detail="请先完成当前媒体信息修订")
+            if conn.execute(
+                """SELECT 1 FROM transcript_versions
+                   WHERE media_id=? AND publication_status='publishing'""",
+                (replacement_source_media_id,),
+            ).fetchone() is not None:
+                raise HTTPException(status_code=409, detail="视频正在发布，暂不能创建替换任务")
+            if clean_title != str(source["title"]):
+                raise HTTPException(status_code=409, detail="替换视频必须沿用当前资料标题")
         if not ASR_ENABLED or not ASR_SERVICE_TOKEN:
             raise HTTPException(status_code=503, detail="自动转录当前不可用")
         try:
@@ -1383,6 +1438,25 @@ async def upload_media(
     )
     conn.commit()
 
+    if replacement_source_media_id is not None:
+        try:
+            SQLiteTranscriptionStore(conn).register_replacement(
+                replacement_id=str(uuid.uuid4()),
+                source_media_id=replacement_source_media_id,
+                candidate_media_id=media_id,
+                profile_id=profile_id,
+                request_idempotency_key=request_idempotency_key,
+                requested_by=admin.id,
+                now=now,
+            )
+        except (ContractValidationError, StoreConflictError):
+            conn.execute(
+                "UPDATE media_assets SET status='failed',error=?,updated_at=? WHERE media_id=?",
+                ("replacement request could not be registered", int(time.time()), media_id),
+            )
+            conn.commit()
+            raise HTTPException(status_code=409, detail="无法创建替换任务，请刷新后重试")
+
     transcription_job_id = None
     if automatic:
         try:
@@ -1399,6 +1473,11 @@ async def upload_media(
                 "UPDATE media_assets SET status='failed',error=?,updated_at=? WHERE media_id=?",
                 ("request idempotency key belongs to another media asset", int(time.time()), media_id),
             )
+            conn.execute(
+                """UPDATE media_replacements SET status='failed',error_code='job_conflict',updated_at=?
+                   WHERE candidate_media_id=? AND status='pending'""",
+                (int(time.time()), media_id),
+            )
             conn.commit()
             raise HTTPException(
                 status_code=409,
@@ -1412,6 +1491,11 @@ async def upload_media(
             conn.execute(
                 "UPDATE media_assets SET status='failed',error=?,updated_at=? WHERE media_id=?",
                 ("automatic transcription job could not be created", int(time.time()), media_id),
+            )
+            conn.execute(
+                """UPDATE media_replacements SET status='failed',error_code='job_create_failed',updated_at=?
+                   WHERE candidate_media_id=? AND status='pending'""",
+                (int(time.time()), media_id),
             )
             conn.commit()
             raise HTTPException(status_code=500, detail="无法创建自动转录任务")
@@ -1472,7 +1556,16 @@ def list_media_assets(
                    WHERE p.transcript_version_id=v.id
                    ORDER BY p.attempt_number DESC
                    LIMIT 1
-               ) AS publication_index_status
+               ) AS publication_index_status,
+               (SELECT r.source_media_id FROM media_replacements r
+                WHERE r.candidate_media_id=m.media_id
+                ORDER BY r.created_at DESC,r.id DESC LIMIT 1) AS replacement_source_media_id,
+               (SELECT r.candidate_media_id FROM media_replacements r
+                WHERE r.source_media_id=m.media_id
+                ORDER BY r.created_at DESC,r.id DESC LIMIT 1) AS replacement_candidate_media_id,
+               (SELECT r.status FROM media_replacements r
+                WHERE r.candidate_media_id=m.media_id OR r.source_media_id=m.media_id
+                ORDER BY r.created_at DESC,r.id DESC LIMIT 1) AS replacement_status
         FROM media_assets m
         LEFT JOIN transcript_versions v ON v.id=(
             SELECT v2.id FROM transcript_versions v2
@@ -1503,6 +1596,9 @@ def list_media_assets(
             publication_status=r["publication_status"],
             publication_index_status=r["publication_index_status"],
             is_current_version=bool(r["is_current_version"]),
+            replacement_source_media_id=r["replacement_source_media_id"],
+            replacement_candidate_media_id=r["replacement_candidate_media_id"],
+            replacement_status=r["replacement_status"],
         )
         for r in rows
     ]

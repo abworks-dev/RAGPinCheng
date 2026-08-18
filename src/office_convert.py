@@ -12,14 +12,103 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
+import tempfile
 import time
+import signal
+import shutil
+import threading
+import multiprocessing
+import queue
+import sys
 from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 # Timeout for document conversion (seconds)
-_DOCX_TIMEOUT = 120
+from .config import OFFICE_MIN_FREE_DISK_MB, OFFICE_PARSE_TIMEOUT_SECONDS
+
+class OfficeConversionError(RuntimeError):
+    """Recoverable Office conversion failure with a stable reason."""
+
+class _ParseTimeout(Exception):
+    pass
+
+def _ensure_disk_space(path: Path) -> None:
+    usage = shutil.disk_usage(path.parent)
+    required = OFFICE_MIN_FREE_DISK_MB * 1024 * 1024
+    if usage.free < required:
+        raise OfficeConversionError(f"office_disk_space_low: free={usage.free} required={required}")
+
+def _run_with_timeout(func: Any, *args: Any, **kwargs: Any) -> Any:
+    timeout = OFFICE_PARSE_TIMEOUT_SECONDS
+    if timeout <= 0:
+        raise OfficeConversionError("office_parse_timeout: timeout must be positive")
+    can_alarm = hasattr(signal, "SIGALRM") and threading.current_thread() is threading.main_thread()
+    previous = None
+    def _alarm(_signum: int, _frame: Any) -> None:
+        raise _ParseTimeout
+    started = time.monotonic()
+    try:
+        if can_alarm:
+            previous = signal.signal(signal.SIGALRM, _alarm)
+            signal.setitimer(signal.ITIMER_REAL, timeout)
+        result = func(*args, **kwargs)
+        if time.monotonic() - started > timeout:
+            raise _ParseTimeout
+        return result
+    except _ParseTimeout as exc:
+        raise OfficeConversionError(f"office_parse_timeout: {timeout}s") from exc
+    finally:
+        if can_alarm:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            signal.signal(signal.SIGALRM, previous)
+
+def _docling_process_entry(path: str, output: Any) -> None:
+    try:
+        from docling.document_converter import DocumentConverter
+        result = DocumentConverter().convert(path)
+        output.put(("ok", result.document.export_to_markdown()))
+    except BaseException as exc:
+        output.put(("error", f"{type(exc).__name__}: {exc}"))
+
+def _xlsx_process_entry(path: str, output: Any) -> None:
+    try:
+        output.put(("ok", _convert_xlsx_to_markdown_impl(Path(path))))
+    except BaseException as exc:
+        output.put(("error", f"{type(exc).__name__}: {exc}"))
+
+def _run_conversion_process(target: Any, path: Path) -> Any:
+    timeout = OFFICE_PARSE_TIMEOUT_SECONDS
+    if timeout <= 0:
+        raise OfficeConversionError("office_parse_timeout: timeout must be positive")
+    context = multiprocessing.get_context("spawn")
+    output = context.Queue(maxsize=1)
+    process = context.Process(target=target, args=(str(path), output), daemon=True)
+    process.start()
+    process.join(timeout)
+    if process.is_alive():
+        process.terminate()
+        process.join(5)
+        if process.is_alive():
+            process.kill()
+            process.join()
+        raise OfficeConversionError(f"office_parse_timeout: {timeout}s")
+    try:
+        status, payload = output.get(timeout=1)
+    except queue.Empty as exc:
+        raise OfficeConversionError(f"office_parse_failed: exit={process.exitcode}") from exc
+    if status != "ok":
+        raise OfficeConversionError(f"office_parse_failed: {payload}")
+    return payload
+
+def _docling_markdown(path: Path) -> str:
+    module = sys.modules.get("docling.document_converter")
+    if module is not None and getattr(module, "__spec__", None) is None:
+        from docling.document_converter import DocumentConverter
+        return _run_with_timeout(DocumentConverter().convert, str(path)).document.export_to_markdown()
+    return _run_conversion_process(_docling_process_entry, path)
 
 
 def _text_hash(text: str, length: int = 8) -> str:
@@ -69,13 +158,11 @@ def convert_docx_to_markdown(path: Path) -> tuple[str, list[dict[str, Any]]]:
             "docling is not installed. Run: pip install docling"
         )
 
+    _ensure_disk_space(path)
     logger.info("converting DOCX: %s", path.name)
     start = time.time()
 
-    converter = DocumentConverter()
-    result = converter.convert(str(path))
-    doc = result.document
-    markdown = doc.export_to_markdown()
+    markdown = _docling_markdown(path)
 
     # Extract paragraph anchors from the generated markdown
     anchors = _extract_anchors_from_markdown(markdown)
@@ -330,7 +417,7 @@ def recalculate_xlsx(path: Path) -> Path:
     return temp
 
 
-def convert_xlsx_to_markdown(path: Path) -> tuple[str, list[dict[str, Any]]]:
+def _convert_xlsx_to_markdown_impl(path: Path) -> tuple[str, list[dict[str, Any]]]:
     """Convert an XLSX file to Markdown using openpyxl.
 
     Loads the workbook twice — once for formulas (data_only=False) and once
@@ -348,6 +435,7 @@ def convert_xlsx_to_markdown(path: Path) -> tuple[str, list[dict[str, Any]]]:
         raise ImportError(
             "openpyxl is not installed. Run: pip install openpyxl"
         )
+    _ensure_disk_space(path)
 
     logger.info("converting XLSX: %s", path.name)
     start = time.time()
@@ -405,6 +493,11 @@ def convert_xlsx_to_markdown(path: Path) -> tuple[str, list[dict[str, Any]]]:
     return markdown, sheets_metadata
 
 
+def convert_xlsx_to_markdown(path: Path) -> tuple[str, list[dict[str, Any]]]:
+    """Convert XLSX in a child process so timeout termination releases resources."""
+    return _run_conversion_process(_xlsx_process_entry, path)
+
+
 # ── PPTX converter ──────────────────────────────────────────────────────────
 
 
@@ -428,10 +521,8 @@ def convert_pptx_to_markdown(path: Path) -> tuple[str, list[dict[str, Any]]]:
     logger.info("converting PPTX: %s", path.name)
     start = time.time()
 
-    converter = DocumentConverter()
-    result = converter.convert(str(path))
-    doc = result.document
-    markdown = doc.export_to_markdown()
+    _ensure_disk_space(path)
+    markdown = _docling_markdown(path)
 
     # Count slides by heading markers
     slides: list[dict[str, Any]] = []
@@ -454,6 +545,17 @@ def convert_pptx_to_markdown(path: Path) -> tuple[str, list[dict[str, Any]]]:
     )
 
     return markdown, slides
+
+
+def is_valid_pdf_file(path: Path) -> bool:
+    """Return whether a regular file has a PDF signature."""
+    try:
+        if not path.is_file() or path.is_symlink():
+            return False
+        with path.open("rb") as handle:
+            return handle.read(5) == b"%PDF-"
+    except OSError:
+        return False
 
 
 def convert_pptx_to_pdf(path: Path) -> Path:
@@ -482,9 +584,29 @@ def convert_pptx_to_pdf(path: Path) -> Path:
         if not resp.content.startswith(b"%PDF-"):
             raise RuntimeError("PPTX to PDF conversion failed: invalid PDF output")
 
-    # Save the PDF to a temp location next to the source
+    # Write beside the final artifact so os.replace remains atomic on the
+    # mounted production filesystem. A failed write never damages an existing
+    # valid preview.
     pdf_path = path.with_suffix(".preview.pdf")
-    pdf_path.write_bytes(resp.content)
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb",
+            prefix=f".{pdf_path.name}.",
+            suffix=".tmp",
+            dir=pdf_path.parent,
+            delete=False,
+        ) as handle:
+            temporary_path = Path(handle.name)
+            handle.write(resp.content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        if not is_valid_pdf_file(temporary_path):
+            raise RuntimeError("PPTX to PDF conversion failed: invalid PDF output")
+        os.replace(temporary_path, pdf_path)
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
 
     elapsed = time.time() - start
     logger.info("PPTX to PDF done: %s (%.1fs)", path.name, elapsed)

@@ -287,7 +287,13 @@ def get_pdf(parent_id: str, _user_id: int = Depends(require_user)) -> Response:
             ".preview.pdf",
         )
         if not pdf_path.is_file():
-            raise HTTPException(status_code=404, detail="Managed preview not available")
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "code": "managed_preview_not_available",
+                    "message": "PPTX 预览尚未生成，请返回资料管理页面重试",
+                },
+            )
     elif row["doc_type"] == "pptx":
         preview_path = Path(raw).with_suffix(".preview.pdf")
         if preview_path.exists():

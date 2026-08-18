@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import csv
+import io
 import json
+import hashlib
+import logging
 import os
 import re
 import sqlite3
@@ -10,9 +14,11 @@ import unicodedata
 import uuid
 import zipfile
 from pathlib import Path
+from typing import Literal
 
+import httpx
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from starlette.background import BackgroundTask
 
 from src.config import (
@@ -20,13 +26,23 @@ from src.config import (
     CONTENT_ROOT,
     OFFICE_DOC_TYPES,
     OFFICE_PROCESSING_ENABLED,
+    CONTENT_TRASH_RETENTION_DAYS,
+    CONTENT_TRASH_EXPIRING_WARNING_DAYS,
+    DOCS_DIR,
+    MEDIA_DIR,
+    ROOT,
+    TRANSCRIPTION_ARTIFACT_DIR,
 )
+from src.office_security import find_unsafe_office_content
+from src.transcription.persistence import ManagedMarkdownRef
+from src.transcription.types import ContractValidationError
 from src.indexing_pipeline import (
     ManagedVersionIndexSummary,
     list_managed_version_index_summaries,
 )
+from src.office_convert import convert_pptx_to_pdf, is_valid_pdf_file
 
-from .auth import CurrentUser, require_admin, require_csrf, require_csrf_admin
+from .auth import CurrentUser, require_admin, require_csrf, require_csrf_admin, require_user
 from .content_permissions import (
     has_content_permission,
     require_content_permission,
@@ -37,10 +53,24 @@ from .content_permission_catalog import (
     CONTENT_PERMISSIONS,
     missing_content_permission_dependencies,
 )
-from .indexing import enqueue_content_publication
+from .indexing import enqueue_content_publication, enqueue_content_reclassification
 from .content_publication import failure_detail, normalize_failure_code
+from .content_reclassification import (
+    create_reclassification_job,
+    failure_summary as reclassification_failure_summary,
+    retry_reclassification_job,
+)
 from .content_storage import ContentStorage
+from .content_trash_cleanup import (
+    get_trash_settings,
+    list_purge_runs,
+    overdue_purge_candidates,
+    preflight_purge,
+    purge_items,
+    update_trash_settings,
+)
 from .content_store import (
+    _category_path,
     ContentFilenameConflict,
     archive_content_item,
     audit_event,
@@ -49,9 +79,12 @@ from .content_store import (
     create_publication_job,
     create_content_revision,
     create_web_batch,
+    find_sibling_category_by_name,
     get_upload_task,
     list_content_items,
     list_content_items_page,
+    find_content_filename_conflict,
+    list_content_audit_events,
     list_upload_tasks,
     restore_content_item,
     list_categories,
@@ -60,14 +93,31 @@ from .content_store import (
     move_content_item,
     register_uploaded_document,
     record_upload_batch_entry,
+    rename_category,
     review_folder_request,
     review_version,
     submit_version_for_review,
     update_category,
+    update_category_number,
+    update_category_sort_order,
+    next_category_display_code,
+    next_category_sort_order,
 )
 from .db import get_db
+from .routes_media import safe_join
 from .schemas import (
     BulkArchiveManagedContentRequest,
+    BulkRestoreManagedContentRequest,
+    BulkRestorePreflightResponse,
+    BulkRestorePreflightResultDTO,
+    TrashExportRequest,
+    TrashPurgePreflightRequest,
+    TrashPurgePreflightResponse,
+    TrashPurgeRequest,
+    TrashPurgeResponse,
+    TrashSettingsDTO,
+    TrashPurgeRunDTO,
+    UpdateTrashSettingsRequest,
     BulkDownloadManagedContentRequest,
     CreateManagedCategoryRequest,
     CreateFolderRequest,
@@ -76,8 +126,10 @@ from .schemas import (
     DeleteManagedContentResponse,
     RestoreManagedContentRequest,
     RestoreManagedContentResponse,
+    ContentTrashAuditEventDTO,
     ContentPermissionGroupDTO,
     ContentPermissionCatalogResponse,
+    ContentReclassificationJobDTO,
     ContentPermissionDefinitionDTO,
     ContentPermissionUserDTO,
     BulkManagedContentRequest,
@@ -91,9 +143,11 @@ from .schemas import (
     FolderRequestDTO,
     MoveManagedContentRequest,
     RenameManagedContentRequest,
+    RenameManagedCategoryRequest,
     ManagedIndexJobDTO,
     ManagedIndexJobListResponse,
     ManagedPublicationDTO,
+    ManagedPreviewDTO,
     ManagedUploadEntryDTO,
     ManagedUploadResponse,
     ManagedUploadTaskDTO,
@@ -102,12 +156,16 @@ from .schemas import (
     ReviewManagedContentRequest,
     ReviewFolderRequest,
     UpdateManagedCategoryRequest,
+    UpdateManagedCategoryNumberRequest,
+    UpdateManagedCategorySortOrderRequest,
     UpdateContentPermissionsRequest,
     UpdateContentPermissionGroupRequest,
 )
+from .transcription_artifacts import LocalTranscriptionArtifactStore
 
 
 router = APIRouter(prefix="/admin/content", tags=["managed-content"])
+logger = logging.getLogger(__name__)
 _storage = ContentStorage(CONTENT_ROOT)
 _MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_MB", "200")) * 1024 * 1024
 _MAX_FOLDER_UPLOAD_FILES = int(os.getenv("MAX_FOLDER_UPLOAD_FILES", "500"))
@@ -234,27 +292,21 @@ def _resolve_upload_category(
         return upload_category_id
     for folder_name in relative_path.split("/")[:-1]:
         code, name = _parse_folder_name(folder_name)
-        child = conn.execute(
-            """SELECT id FROM category_nodes
-               WHERE parent_id=? AND is_active=1 AND display_name=?""",
-            (upload_category_id, name),
-        ).fetchone()
+        child = find_sibling_category_by_name(
+            conn, upload_category_id, name, active_only=True
+        )
         if child is not None:
             upload_category_id = child["id"]
             continue
         if not can_create_folders:
             raise ValueError("folder_approval_required")
-        sibling_count = int(conn.execute(
-            "SELECT count(*) FROM category_nodes WHERE parent_id=?",
-            (upload_category_id,),
-        ).fetchone()[0])
         created = create_category(
             conn,
             category_key=None,
             parent_id=upload_category_id,
-            display_code=code or f"{sibling_count + 1:02d}",
+            display_code=code or next_category_display_code(conn, upload_category_id),
             display_name=name,
-            sort_order=(sibling_count + 1) * 10,
+            sort_order=next_category_sort_order(conn, upload_category_id),
             actor_user_id=actor_user_id,
         )
         upload_category_id = created["id"]
@@ -288,6 +340,7 @@ def _managed_index_job_dto(
         version_number=row["version_number"],
         file_size=row["file_size"],
         source_origin=row["source_origin"],
+        is_archived=row["archived_at"] is not None,
         is_current_head=bool(row["is_current_head"]),
         is_latest_attempt=bool(row["is_latest_attempt"]),
         parent_count=summary.parent_count if summary else None,
@@ -353,6 +406,20 @@ def _folder_request_dto(row: sqlite3.Row) -> FolderRequestDTO:
     )
 
 
+def _reclassification_job_dto(row: sqlite3.Row) -> ContentReclassificationJobDTO:
+    return ContentReclassificationJobDTO(
+        id=row["id"], item_id=row["item_id"],
+        expected_version_id=row["expected_version_id"],
+        source_category_id=row["source_category_id"],
+        target_category_id=row["target_category_id"], status=row["status"],
+        qdrant_point_count=int(row["qdrant_point_count"]),
+        parent_count=int(row["parent_count"]), error_code=row["error_code"],
+        error_summary=row["error_summary"] or reclassification_failure_summary(row["error_code"]),
+        created_at=row["created_at"], started_at=row["started_at"],
+        finished_at=row["finished_at"], updated_at=row["updated_at"],
+    )
+
+
 def _raise_domain_error(exc: Exception) -> None:
     message = str(exc)
     if isinstance(exc, ContentFilenameConflict):
@@ -367,13 +434,40 @@ def _raise_domain_error(exc: Exception) -> None:
                     "version_id": exc.version_id,
                     "title": exc.title,
                     "original_filename": exc.original_filename,
+                    "lifecycle_status": exc.lifecycle_status,
+                    "has_published_head": exc.has_published_head,
                 },
             },
         ) from exc
+    if isinstance(exc, sqlite3.IntegrityError) and "uq_category_nodes_sibling_code" in message:
+        raise HTTPException(status_code=409, detail="当前目录已存在该分类编号") from exc
     if isinstance(exc, sqlite3.IntegrityError):
         raise HTTPException(status_code=409, detail="分类编号或标识已存在") from exc
     if message == "category_version_conflict":
         raise HTTPException(status_code=409, detail="分类已被其他人修改，请刷新后重试") from exc
+    if message == "category_sibling_name_conflict":
+        raise HTTPException(status_code=409, detail="当前目录已有同名文件夹，请使用其他名称") from exc
+    if message == "category_sibling_code_conflict_current":
+        raise HTTPException(status_code=409, detail="当前目录已存在该分类编号") from exc
+    if message == "category_sibling_code_conflict":
+        raise HTTPException(status_code=409, detail="目标目录已有相同显示编号的文件夹，请先修改显示编号") from exc
+    if message == "category_number_confirmation_required":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "category_number_confirmation_required",
+                "message": "目标编号已被占用，确认后将自动顺延同级文件夹编号",
+                "retryable": True,
+            },
+        ) from exc
+    if message == "invalid_category_position":
+        raise HTTPException(status_code=400, detail="编号必须是当前同级文件夹范围内的位置") from exc
+    if message == "category_number_limit_exceeded":
+        raise HTTPException(status_code=409, detail="同级文件夹数量已超过可编号范围") from exc
+    if message == "invalid_category_sort_order":
+        raise HTTPException(status_code=400, detail="排序序号必须是 0 到 999999 之间的整数") from exc
+    if message == "folder_request_pending":
+        raise HTTPException(status_code=409, detail="当前目录已有同名文件夹申请待处理") from exc
     if message == "category_not_found":
         raise HTTPException(status_code=404, detail="分类不存在") from exc
     if message == "category_move_cycle":
@@ -400,6 +494,8 @@ def _raise_domain_error(exc: Exception) -> None:
         raise HTTPException(status_code=409, detail="资料版本已变化，请刷新后重试") from exc
     if message == "content_delete_in_progress":
         raise HTTPException(status_code=409, detail="资料正在发布，暂时不能移入回收站") from exc
+    if message == "content_delete_reclassification_in_progress":
+        raise HTTPException(status_code=409, detail="资料正在调整分类，暂时不能移入回收站") from exc
     if message == "content_delete_forbidden":
         raise HTTPException(status_code=403, detail="当前账号没有将此状态资料移入回收站的权限") from exc
     if message == "content_trash_item_not_found":
@@ -410,14 +506,45 @@ def _raise_domain_error(exc: Exception) -> None:
         raise HTTPException(status_code=409, detail="原分类已停用，请先启用分类后再恢复") from exc
     if message == "content_restore_in_progress":
         raise HTTPException(status_code=409, detail="资料仍有索引任务，暂时不能恢复") from exc
+    if message == "content_restore_conflict_reference_invalid":
+        raise HTTPException(status_code=400, detail="同名冲突确认信息不完整") from exc
+    if message == "content_restore_conflict_changed":
+        raise HTTPException(status_code=409, detail="同名资料已发生变化，请刷新后重新确认") from exc
     if message == "content_move_forbidden":
         raise HTTPException(status_code=403, detail="当前账号没有移动此状态资料的权限") from exc
     if message == "content_move_requires_republication":
         raise HTTPException(status_code=409, detail="已确认或已发布资料需要退回后重新归类") from exc
+    if message == "review_note_required":
+        raise HTTPException(status_code=400, detail="退回修改时必须填写原因") from exc
+    if message == "content_reclassification_forbidden":
+        raise HTTPException(status_code=403, detail="当前账号没有调整已发布资料分类的权限") from exc
+    if message == "content_reclassification_not_published":
+        raise HTTPException(status_code=409, detail="仅当前正式发布版本可以调整分类") from exc
+    if message == "content_reclassification_in_progress":
+        raise HTTPException(status_code=409, detail="该资料正在调整分类，请等待当前任务结束") from exc
+    if message == "content_publication_in_progress":
+        raise HTTPException(status_code=409, detail="资料正在发布，暂时不能调整分类") from exc
+    if message == "content_reclassification_same_category":
+        raise HTTPException(status_code=409, detail="资料已经位于所选分类") from exc
+    if message == "content_reclassification_job_not_found":
+        raise HTTPException(status_code=404, detail="分类调整任务不存在") from exc
+    if message == "content_reclassification_not_retryable":
+        raise HTTPException(status_code=409, detail="只有失败的分类调整任务可以重试") from exc
+    if message == "media_transcript_operation_not_supported":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "media_transcript_operation_not_supported",
+                "message": "视频转录稿由视频管理统一维护",
+                "retryable": False,
+            },
+        ) from exc
     if message == "content_revision_forbidden":
         raise HTTPException(status_code=403, detail="当前账号没有重命名或更新资料的权限") from exc
     if message == "content_revision_in_progress":
         raise HTTPException(status_code=409, detail="资料正在发布，暂时不能重命名或更新") from exc
+    if message == "content_revision_reclassification_in_progress":
+        raise HTTPException(status_code=409, detail="资料正在调整分类，暂时不能重命名或更新") from exc
     if message == "invalid_filename":
         raise HTTPException(status_code=400, detail="文件名无效") from exc
     if message == "invalid_filename_extension":
@@ -472,6 +599,8 @@ def post_category(
             display_name=body.display_name,
             sort_order=body.sort_order,
             actor_user_id=user.id,
+            target_position=body.target_position,
+            confirm_number_shift=body.confirm_number_shift,
         )
     except (ValueError, sqlite3.IntegrityError) as exc:
         _raise_domain_error(exc)
@@ -500,6 +629,70 @@ def patch_category(
     except (ValueError, sqlite3.IntegrityError) as exc:
         _raise_domain_error(exc)
     return _category_dto(row)
+
+
+@router.patch("/categories/{category_id}/name", response_model=ManagedCategoryDTO)
+def patch_category_name(
+    category_id: str,
+    body: RenameManagedCategoryRequest,
+    user: CurrentUser = Depends(require_content_permission("category.manage", csrf=True)),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> ManagedCategoryDTO:
+    _require_feature()
+    try:
+        row = rename_category(
+            conn,
+            category_id,
+            display_name=body.display_name,
+            expected_version=body.expected_version,
+            actor_user_id=user.id,
+        )
+    except (ValueError, sqlite3.IntegrityError) as exc:
+        _raise_domain_error(exc)
+    return _category_dto(row)
+
+
+@router.patch("/categories/{category_id}/sort-order", response_model=ManagedCategoryDTO)
+def patch_category_sort_order(
+    category_id: str,
+    body: UpdateManagedCategorySortOrderRequest,
+    user: CurrentUser = Depends(require_content_permission("category.manage", csrf=True)),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> ManagedCategoryDTO:
+    _require_feature()
+    try:
+        row = update_category_sort_order(
+            conn,
+            category_id,
+            sort_order=body.sort_order,
+            expected_version=body.expected_version,
+            actor_user_id=user.id,
+        )
+    except (ValueError, sqlite3.IntegrityError) as exc:
+        _raise_domain_error(exc)
+    return _category_dto(row)
+
+
+@router.patch("/categories/{category_id}/number", response_model=list[ManagedCategoryDTO])
+def patch_category_number(
+    category_id: str,
+    body: UpdateManagedCategoryNumberRequest,
+    user: CurrentUser = Depends(require_content_permission("category.manage", csrf=True)),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> list[ManagedCategoryDTO]:
+    _require_feature()
+    try:
+        rows = update_category_number(
+            conn,
+            category_id,
+            target_position=body.target_position,
+            confirm_number_shift=body.confirm_number_shift,
+            expected_version=body.expected_version,
+            actor_user_id=user.id,
+        )
+    except (ValueError, sqlite3.IntegrityError) as exc:
+        _raise_domain_error(exc)
+    return [_category_dto(row) for row in rows]
 
 
 @router.post("/categories/{category_id}/move", response_model=list[ManagedCategoryDTO])
@@ -641,6 +834,12 @@ async def upload_managed_documents(
             stored = await _storage.ingest_upload(
                 upload, batch_id=batch_id, max_bytes=_MAX_UPLOAD_BYTES
             )
+            if doc_type in OFFICE_DOC_TYPES:
+                package_issue = find_unsafe_office_content(stored.absolute_path)
+                if package_issue:
+                    if stored.created:
+                        stored.absolute_path.unlink(missing_ok=True)
+                    raise ValueError(package_issue)
             upload_category_id = _resolve_upload_category(
                 conn,
                 category_id=category_id,
@@ -675,6 +874,9 @@ async def upload_managed_documents(
                 "category_depth_exceeded": "资料目录最多支持四级",
                 "content_filename_conflict": "当前目录下已存在同名资料",
                 "content_too_large": "文件超过上传大小上限",
+                "office_external_link": "Office 文件包含外部链接，已拒绝处理",
+                "office_embedded_object": "Office 文件包含嵌入对象，已拒绝处理",
+                "office_package_invalid": "Office 文件格式无效",
             }.get(str(exc), str(exc))
             entries.append(ManagedUploadEntryDTO(filename=filename, status="skipped", reason=reason))
             record_upload_batch_entry(
@@ -760,8 +962,51 @@ def get_managed_upload_task(
 def _content_item_dto(
     row: sqlite3.Row,
     summary: ManagedVersionIndexSummary | None = None,
+    *,
+    retention_days: int = CONTENT_TRASH_RETENTION_DAYS,
+    warning_days: int = CONTENT_TRASH_EXPIRING_WARNING_DAYS,
 ) -> ManagedContentItemDTO:
     archive_metadata = json.loads(row["archive_metadata_json"] or "{}") if "archive_metadata_json" in row.keys() else {}
+    archived_at = row["archived_at"] if "archived_at" in row.keys() else None
+    category_path = row["category_path"] if "category_path" in row.keys() else ""
+    if archived_at:
+        category_path = str(archive_metadata.get("category_path") or category_path)
+    purge_eligible_at = (
+        archived_at + retention_days * 86400 if archived_at else None
+    )
+    retention_days_remaining = (
+        (purge_eligible_at - int(time.time()) + 86399) // 86400
+        if purge_eligible_at
+        else None
+    )
+    retention_status = (
+        None
+        if retention_days_remaining is None
+        else "overdue"
+        if retention_days_remaining < 0
+        else "expiring"
+        if retention_days_remaining <= warning_days
+        else "retained"
+    )
+    preview_status: Literal["ready", "pending", "missing", "not_applicable"] = "not_applicable"
+    preview_parent_id: str | None = None
+    if row["doc_type"] in {"pdf", "docx", "xlsx", "pptx"}:
+        preview_status = "pending"
+        if summary and summary.preview_parent_id:
+            if row["doc_type"] == "pptx":
+                source_path = _storage.published_source_path(
+                    content_item_id=row["item_id"],
+                    content_version_id=row["version_id"],
+                    filename=row["original_filename"],
+                )
+                preview_status = "ready" if is_valid_pdf_file(source_path.with_suffix(".preview.pdf")) else "missing"
+            else:
+                preview_status = "ready"
+            if preview_status == "ready":
+                preview_parent_id = summary.preview_parent_id
+        elif row["lifecycle_status"] in {"published", "superseded"}:
+            preview_status = "missing"
+
     return ManagedContentItemDTO(
         item_id=row["item_id"],
         title=row["title"],
@@ -769,9 +1014,10 @@ def _content_item_dto(
         category_id=row["category_id"],
         category_key=row["category_key"],
         category_label=f"{row['display_code']} {row['display_name']}",
-        category_path=row["category_path"] if "category_path" in row.keys() else f"{row['display_code']} {row['display_name']}",
+        category_path=category_path or f"{row['display_code']} {row['display_name']}",
         media_id=row["media_id"],
-        preview_parent_id=summary.preview_parent_id if summary else None,
+        preview_parent_id=preview_parent_id,
+        preview_status=preview_status,
         version_id=row["version_id"],
         version_number=row["version_number"],
         original_filename=row["original_filename"],
@@ -786,11 +1032,29 @@ def _content_item_dto(
         latest_publication_status=row["latest_publication_status"],
         publication_attempt_count=int(row["publication_attempt_count"] or 0),
         publication_failure=failure_detail(row["latest_publication_error_code"]),
+        latest_reviewed_by_name=row["latest_reviewed_by_name"] if "latest_reviewed_by_name" in row.keys() else None,
+        latest_reviewed_at=row["latest_reviewed_at"] if "latest_reviewed_at" in row.keys() else None,
+        latest_review_decision=row["latest_review_decision"] if "latest_review_decision" in row.keys() else None,
+        latest_review_note=row["latest_review_note"] if "latest_review_note" in row.keys() else None,
         created_at=row["created_at"],
         updated_at=row["updated_at"],
-        archived_at=row["archived_at"] if "archived_at" in row.keys() else None,
+        archived_at=archived_at,
         archived_by_name=row["archived_by_name"] if "archived_by_name" in row.keys() else None,
         pre_archive_lifecycle_status=archive_metadata.get("previous_status"),
+        purge_eligible_at=purge_eligible_at,
+        retention_status=retention_status,
+        retention_days_remaining=retention_days_remaining,
+        media_duration_ms=row["media_duration_ms"] if "media_duration_ms" in row.keys() else None,
+        media_file_size=row["media_file_size"] if "media_file_size" in row.keys() else None,
+        has_pending_revision=bool(row["has_pending_revision"])
+        if "has_pending_revision" in row.keys()
+        else False,
+        reclassification_job_id=row["reclassification_job_id"]
+        if "reclassification_job_id" in row.keys()
+        else None,
+        reclassification_status=row["reclassification_status"]
+        if "reclassification_status" in row.keys()
+        else None,
     )
 
 
@@ -798,16 +1062,21 @@ def _content_item_dto(
 def get_content_items(
     category_id: str | None = None,
     lifecycle_status: str | None = None,
+    content_kind: Literal["document", "media_transcript"] | None = None,
     _user: CurrentUser = Depends(require_content_permission("item.view")),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> list[ManagedContentItemDTO]:
     rows = list_content_items(
-        conn, category_id=category_id, lifecycle_status=lifecycle_status
+        conn,
+        category_id=category_id,
+        lifecycle_status=lifecycle_status,
+        content_kind=content_kind,
     )
     summary_version_ids = [
         str(row["version_id"])
         for row in rows
-        if row["latest_publication_status"] == "done"
+        if row["content_kind"] == "document"
+        and row["latest_publication_status"] == "done"
         and row["current_version_id"] == row["version_id"]
     ]
     summaries = list_managed_version_index_summaries(summary_version_ids)
@@ -823,6 +1092,10 @@ def get_content_items_page(
     category_id: str | None = None,
     lifecycle_status: str | None = None,
     source_origin: str | None = None,
+    content_kind: Literal["document", "media_transcript"] | None = None,
+    doc_type: Literal["pdf", "docx", "xlsx", "pptx", "markdown", "transcript", "other"] | None = None,
+    sort_by: Literal["doc_type"] | None = None,
+    sort_direction: Literal["asc", "desc"] = "asc",
     limit: int = Query(25, ge=1, le=100),
     offset: int = Query(0, ge=0),
     _user: CurrentUser = Depends(require_content_permission("item.view")),
@@ -834,13 +1107,18 @@ def get_content_items_page(
         category_id=category_id,
         lifecycle_status=lifecycle_status,
         source_origin=source_origin,
+        content_kind=content_kind,
+        doc_type=doc_type,
+        sort_by=sort_by,
+        sort_direction=sort_direction,
         limit=limit,
         offset=offset,
     )
     summary_version_ids = [
         str(row["version_id"])
         for row in rows
-        if row["latest_publication_status"] == "done"
+        if row["content_kind"] == "document"
+        and row["latest_publication_status"] == "done"
         and row["current_version_id"] == row["version_id"]
     ]
     summaries = list_managed_version_index_summaries(summary_version_ids)
@@ -851,20 +1129,261 @@ def get_content_items_page(
     )
 
 
+def _trash_retention_bounds(
+    retention_status: str | None, archived_from: int | None, archived_to: int | None,
+    *, retention_days: int = CONTENT_TRASH_RETENTION_DAYS,
+    warning_days: int = CONTENT_TRASH_EXPIRING_WARNING_DAYS,
+) -> tuple[int | None, int | None]:
+    now = int(time.time())
+    retention_boundary = now - retention_days * 86400
+    warning_boundary = retention_boundary + warning_days * 86400
+    if retention_status == "overdue":
+        archived_to = min(archived_to, retention_boundary - 1) if archived_to is not None else retention_boundary - 1
+    elif retention_status == "expiring":
+        archived_from = max(archived_from, retention_boundary) if archived_from is not None else retention_boundary
+        archived_to = min(archived_to, warning_boundary) if archived_to is not None else warning_boundary
+    elif retention_status == "retained":
+        archived_from = max(archived_from, warning_boundary + 1) if archived_from is not None else warning_boundary + 1
+    return archived_from, archived_to
+
+
 @router.get("/trash", response_model=ManagedContentListResponse)
 def get_content_trash(
     query: str = Query("", max_length=200),
     limit: int = Query(25, ge=1, le=100),
     offset: int = Query(0, ge=0),
+    retention_status: Literal["retained", "expiring", "overdue"] | None = None,
+    archived_from: int | None = Query(None, ge=0),
+    archived_to: int | None = Query(None, ge=0),
+    category_id: str | None = None,
+    archived_by: str = Query("", max_length=100),
+    sort_direction: Literal["asc", "desc"] = "desc",
     _user: CurrentUser = Depends(require_content_permission("trash.view")),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> ManagedContentListResponse:
+    settings = get_trash_settings(conn)
+    base_from, base_to = archived_from, archived_to
+    archived_from, archived_to = _trash_retention_bounds(
+        retention_status, archived_from, archived_to,
+        retention_days=settings["retention_days"], warning_days=settings["warning_days"],
+    )
     rows, total, status_counts = list_content_items_page(
-        conn, query=query, limit=limit, offset=offset, archived=True
+        conn, query=query, limit=limit, offset=offset, archived=True,
+        archived_from=archived_from, archived_to=archived_to, category_id=category_id,
+        archived_by=archived_by, archived_sort_direction=sort_direction
     )
-    return ManagedContentListResponse(
-        items=[_content_item_dto(row) for row in rows], total=total, status_counts=status_counts
+    retention_counts: dict[str, int] = {}
+    for state in ("retained", "expiring", "overdue"):
+        state_from, state_to = _trash_retention_bounds(
+            state, base_from, base_to,
+            retention_days=settings["retention_days"], warning_days=settings["warning_days"],
+        )
+        _, state_total, _ = list_content_items_page(
+            conn, query=query, limit=1, offset=0, archived=True,
+            archived_from=state_from, archived_to=state_to, category_id=category_id,
+            archived_by=archived_by, archived_sort_direction=sort_direction,
+        )
+        retention_counts[state] = state_total
+    return ManagedContentListResponse(items=[_content_item_dto(
+        row, retention_days=settings["retention_days"], warning_days=settings["warning_days"]
+    ) for row in rows], total=total,
+        status_counts=status_counts, retention_counts=retention_counts)
+
+
+@router.get("/trash/settings", response_model=TrashSettingsDTO)
+def get_content_trash_settings(
+    _user: CurrentUser = Depends(require_content_permission("trash.view")),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> TrashSettingsDTO:
+    return TrashSettingsDTO(**get_trash_settings(conn))
+
+
+@router.put("/trash/settings", response_model=TrashSettingsDTO)
+def put_content_trash_settings(
+    body: UpdateTrashSettingsRequest,
+    user: CurrentUser = Depends(require_csrf),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> TrashSettingsDTO:
+    if not has_content_permission(conn, user, "trash.policy_manage"):
+        raise HTTPException(status_code=403, detail="当前账号没有管理回收站清理策略的权限")
+    try:
+        result = update_trash_settings(conn, actor_user_id=user.id, **body.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="即将到期天数必须小于保留天数") from exc
+    return TrashSettingsDTO(**result)
+
+
+def _purge_preflight_response(results: list[dict[str, object]]) -> TrashPurgePreflightResponse:
+    ready = sum(result["status"] == "ready" for result in results)
+    return TrashPurgePreflightResponse(
+        items=results, ready_count=ready, blocked_count=len(results) - ready,
+        total_size_bytes=sum(int(result["size_bytes"]) for result in results if result["status"] == "ready"),
+        confirmation_phrase=f"永久删除 {ready} 份资料",
     )
+
+
+@router.post("/trash/purge/preflight", response_model=TrashPurgePreflightResponse)
+def preflight_content_trash_purge(
+    body: TrashPurgePreflightRequest,
+    user: CurrentUser = Depends(require_csrf),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> TrashPurgePreflightResponse:
+    if not has_content_permission(conn, user, "trash.purge"):
+        raise HTTPException(status_code=403, detail="当前账号没有永久删除资料的权限")
+    refs = _validate_bulk_item_refs(body.items)
+    return _purge_preflight_response(preflight_purge(
+        conn, [(item.item_id, item.expected_version_id) for item in refs]
+    ))
+
+
+@router.get("/trash/purge-preview", response_model=TrashPurgePreflightResponse)
+def preview_overdue_content_trash_purge(
+    _user: CurrentUser = Depends(require_content_permission("trash.purge")),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> TrashPurgePreflightResponse:
+    return _purge_preflight_response(overdue_purge_candidates(conn))
+
+
+@router.post("/trash/purge", response_model=TrashPurgeResponse)
+def purge_content_trash(
+    body: TrashPurgeRequest,
+    user: CurrentUser = Depends(require_csrf),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> TrashPurgeResponse:
+    if not has_content_permission(conn, user, "trash.purge"):
+        raise HTTPException(status_code=403, detail="当前账号没有永久删除资料的权限")
+    refs = _validate_bulk_item_refs(body.items)
+    preflight = preflight_purge(conn, [(item.item_id, item.expected_version_id) for item in refs])
+    ready = [item for item in preflight if item["status"] == "ready"]
+    expected_phrase = f"永久删除 {len(ready)} 份资料"
+    if len(ready) != len(refs):
+        raise HTTPException(status_code=409, detail="资料状态已变化，请重新检查")
+    if body.confirmation != expected_phrase:
+        raise HTTPException(status_code=400, detail=f"请输入“{expected_phrase}”确认")
+    result = purge_items(conn, [(item.item_id, item.expected_version_id) for item in refs],
+                         actor_user_id=user.id)
+    return TrashPurgeResponse(**{key: result[key] for key in (
+        "run_id", "status", "candidate_count", "succeeded_count", "failed_count"
+    )})
+
+
+@router.get("/trash/purge-runs", response_model=list[TrashPurgeRunDTO])
+def get_content_trash_purge_runs(
+    limit: int = Query(20, ge=1, le=100),
+    _user: CurrentUser = Depends(require_content_permission("trash.policy_manage")),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> list[TrashPurgeRunDTO]:
+    return [TrashPurgeRunDTO(**row) for row in list_purge_runs(conn, limit)]
+
+
+@router.post("/bulk-restore/preflight", response_model=BulkRestorePreflightResponse)
+def preflight_bulk_restore(
+    body: BulkRestoreManagedContentRequest,
+    _user: CurrentUser = Depends(require_content_permission("trash.restore")),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> BulkRestorePreflightResponse:
+    results: list[BulkRestorePreflightResultDTO] = []
+    for item in _validate_bulk_item_refs(body.items):
+        row = conn.execute(
+            """SELECT i.id,i.archived_at,i.category_id,v.id AS version_id,v.original_filename
+               FROM content_items i JOIN content_versions v ON v.item_id=i.id
+                AND v.version_number=(SELECT max(v2.version_number) FROM content_versions v2 WHERE v2.item_id=i.id)
+               WHERE i.id=? AND i.content_kind='document'""", (item.item_id,),
+        ).fetchone()
+        status, message, target_path = "ready", "可以恢复", None
+        if row is None or row["archived_at"] is None:
+            status, message = "not_found", "资料已不在回收站"
+        elif row["version_id"] != item.expected_version_id:
+            status, message = "version_changed", "资料版本已变化，请刷新后重试"
+        else:
+            target_id = body.target_category_id or str(row["category_id"])
+            category = conn.execute("SELECT id FROM category_nodes WHERE id=? AND is_active=1", (target_id,)).fetchone()
+            target_path = _category_path(conn, target_id)
+            if category is None:
+                status, message = "inactive_category", "目标目录已停用"
+            elif conn.execute("SELECT 1 FROM content_index_jobs WHERE version_id=? AND status IN ('pending','parsing','chunking','summarizing','embedding') LIMIT 1", (item.expected_version_id,)).fetchone():
+                status, message = "in_progress", "资料仍有索引任务"
+            elif find_content_filename_conflict(conn, category_id=target_id,
+                    original_filename=str(row["original_filename"]), exclude_item_id=item.item_id):
+                status, message = "conflict", "目标目录存在同名资料"
+        results.append(BulkRestorePreflightResultDTO(item_id=item.item_id,
+            version_id=item.expected_version_id, status=status, message=message,
+            target_category_path=target_path))
+    ready = sum(result.status == "ready" for result in results)
+    return BulkRestorePreflightResponse(results=results, ready=ready, blocked=len(results) - ready)
+
+
+@router.post("/trash/export")
+def export_content_trash(
+    body: TrashExportRequest,
+    user: CurrentUser = Depends(require_csrf),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> StreamingResponse:
+    if not has_content_permission(conn, user, "trash.view"):
+        raise HTTPException(status_code=403, detail="当前账号没有查看回收站的权限")
+    settings = get_trash_settings(conn)
+    archived_from, archived_to = _trash_retention_bounds(
+        body.retention_status, body.archived_from, body.archived_to,
+        retention_days=settings["retention_days"], warning_days=settings["warning_days"],
+    )
+    rows, total, _ = list_content_items_page(
+        conn, query=body.query, limit=10000, offset=0, archived=True,
+        archived_from=archived_from, archived_to=archived_to,
+        category_id=body.category_id, archived_by=body.archived_by,
+        archived_sort_direction=body.sort_direction,
+    )
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["资料名称", "文件名", "原目录", "原状态", "移入人员", "移入时间", "保留状态", "剩余天数"])
+    for row in rows:
+        dto = _content_item_dto(
+            row, retention_days=settings["retention_days"], warning_days=settings["warning_days"]
+        )
+        writer.writerow([dto.title, dto.original_filename, dto.category_path,
+            dto.pre_archive_lifecycle_status or dto.lifecycle_status,
+            dto.archived_by_name or "", dto.archived_at or "",
+            dto.retention_status or "", dto.retention_days_remaining])
+    audit_event(conn, "content.trash_exported", actor_user_id=user.id,
+        metadata={"count": total, "retention_status": body.retention_status or "all"})
+    conn.commit()
+    data = "\ufeff" + output.getvalue()
+    return StreamingResponse(iter([data.encode("utf-8")]), media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="content-trash.csv"'})
+
+
+@router.post("/bulk-restore", response_model=BulkManagedContentResponse)
+def bulk_restore_managed_content_items(
+    body: BulkRestoreManagedContentRequest,
+    user: CurrentUser = Depends(require_csrf),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> BulkManagedContentResponse:
+    _require_feature()
+    if not has_content_permission(conn, user, "trash.restore"):
+        raise HTTPException(status_code=403, detail="当前账号没有恢复资料的权限")
+    can_archive_draft = has_content_permission(conn, user, "item.archive_draft")
+    can_archive_published = has_content_permission(conn, user, "item.archive_published")
+    results: list[BulkManagedContentResultDTO] = []
+    for item in _validate_bulk_item_refs(body.items):
+        try:
+            restore_content_item(
+                conn, item.item_id, expected_version_id=item.expected_version_id,
+                actor_user_id=user.id, can_restore=True,
+                can_archive_draft=can_archive_draft,
+                can_archive_published=can_archive_published,
+                target_category_id=body.target_category_id,
+            )
+            results.append(BulkManagedContentResultDTO(
+                item_id=item.item_id, version_id=item.expected_version_id,
+                status="succeeded",
+            ))
+        except (ValueError, ContentFilenameConflict, sqlite3.IntegrityError) as exc:
+            conn.rollback()
+            results.append(BulkManagedContentResultDTO(
+                item_id=item.item_id, version_id=item.expected_version_id,
+                status="failed", message=_bulk_failure_message(exc),
+            ))
+    succeeded = sum(result.status == "succeeded" for result in results)
+    return BulkManagedContentResponse(results=results, succeeded=succeeded, failed=len(results) - succeeded)
 
 
 @router.post("/items/{item_id}/restore", response_model=RestoreManagedContentResponse)
@@ -882,12 +1401,60 @@ def restore_managed_content_item(
             expected_version_id=body.expected_version_id,
             actor_user_id=user.id,
             can_restore=has_content_permission(conn, user, "trash.restore"),
+            target_category_id=body.target_category_id,
+            replace_conflict_item_id=body.replace_conflict_item_id,
+            replace_conflict_expected_version_id=body.replace_conflict_expected_version_id,
+            can_archive_draft=has_content_permission(conn, user, "item.archive_draft"),
+            can_archive_published=has_content_permission(conn, user, "item.archive_published"),
         )
-    except (ValueError, sqlite3.IntegrityError) as exc:
+    except (ValueError, ContentFilenameConflict, sqlite3.IntegrityError) as exc:
         _raise_domain_error(exc)
     return RestoreManagedContentResponse(
-        item_id=result.item_id, version_id=result.version_id, restored_status=result.restored_status
+        item_id=result.item_id,
+        version_id=result.version_id,
+        restored_status=result.restored_status,
+        category_id=result.category_id,
+        moved_to_alternate_category=result.moved_to_alternate_category,
+        replaced_conflict=result.replaced_conflict,
     )
+
+
+@router.get(
+    "/items/{item_id}/audit-events",
+    response_model=list[ContentTrashAuditEventDTO],
+)
+def get_content_trash_audit_events(
+    item_id: str,
+    user: CurrentUser = Depends(require_user),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> list[ContentTrashAuditEventDTO]:
+    item = conn.execute(
+        "SELECT archived_at FROM content_items WHERE id=? AND content_kind='document'",
+        (item_id,),
+    ).fetchone()
+    if item is None:
+        raise HTTPException(status_code=404, detail="资料不存在")
+    permission = "trash.view" if item["archived_at"] is not None else "item.view"
+    if not has_content_permission(conn, user, permission):
+        raise HTTPException(status_code=403, detail="当前账号没有查看资料操作记录的权限")
+    events: list[ContentTrashAuditEventDTO] = []
+    for row in list_content_audit_events(conn, item_id):
+        metadata = json.loads(row["metadata_json"] or "{}")
+        events.append(ContentTrashAuditEventDTO(
+            event_type=row["event_type"],
+            actor_name=row["actor_name"],
+            created_at=row["created_at"],
+            previous_status=metadata.get("previous_status"),
+            restored_status=metadata.get("restored_status"),
+            restore_strategy=metadata.get("restore_strategy"),
+            source_category_path=metadata.get("source_category_path"),
+            target_category_path=metadata.get("target_category_path"),
+            category_path=metadata.get("category_path"),
+            archive_reason=metadata.get("archive_reason"),
+            replaced_title=metadata.get("replaced_title"),
+            replaced_filename=metadata.get("replaced_filename"),
+        ))
+    return events
 
 
 @router.delete("/items/{item_id}", response_model=DeleteManagedContentResponse)
@@ -935,6 +1502,7 @@ def move_managed_content_item(
             actor_user_id=user.id,
             can_move_draft=has_content_permission(conn, user, "item.move_draft"),
             can_move_review=has_content_permission(conn, user, "item.move_review"),
+            can_move_published=has_content_permission(conn, user, "item.publish"),
         )
     except (ValueError, sqlite3.IntegrityError) as exc:
         _raise_domain_error(exc)
@@ -942,6 +1510,79 @@ def move_managed_content_item(
     if row is None:
         raise HTTPException(status_code=404, detail="资料不存在")
     return _content_item_dto(row)
+
+
+@router.post(
+    "/items/{item_id}/reclassify",
+    response_model=ContentReclassificationJobDTO,
+    status_code=202,
+)
+def reclassify_published_content_item(
+    item_id: str,
+    body: MoveManagedContentRequest,
+    user: CurrentUser = Depends(
+        require_content_permission("item.reclassify_published", csrf=True)
+    ),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> ContentReclassificationJobDTO:
+    _require_feature()
+    try:
+        row = create_reclassification_job(
+            conn,
+            item_id,
+            target_category_id=body.target_category_id,
+            expected_version_id=body.expected_version_id,
+            actor_user_id=user.id,
+            can_reclassify=True,
+        )
+    except (ValueError, ContentFilenameConflict, sqlite3.IntegrityError) as exc:
+        _raise_domain_error(exc)
+    enqueue_content_reclassification(str(row["id"]))
+    return _reclassification_job_dto(row)
+
+
+@router.get(
+    "/reclassification-jobs/{job_id}",
+    response_model=ContentReclassificationJobDTO,
+)
+def get_content_reclassification_job(
+    job_id: str,
+    _user: CurrentUser = Depends(require_content_permission("item.view")),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> ContentReclassificationJobDTO:
+    _require_feature()
+    row = conn.execute(
+        "SELECT * FROM content_reclassification_jobs WHERE id=?", (job_id,)
+    ).fetchone()
+    if row is None:
+        _raise_domain_error(ValueError("content_reclassification_job_not_found"))
+    return _reclassification_job_dto(row)
+
+
+@router.post(
+    "/reclassification-jobs/{job_id}/retry",
+    response_model=ContentReclassificationJobDTO,
+    status_code=202,
+)
+def retry_content_reclassification(
+    job_id: str,
+    user: CurrentUser = Depends(
+        require_content_permission("item.reclassify_published", csrf=True)
+    ),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> ContentReclassificationJobDTO:
+    _require_feature()
+    try:
+        row = retry_reclassification_job(
+            conn,
+            job_id,
+            actor_user_id=user.id,
+            can_reclassify=True,
+        )
+    except (ValueError, ContentFilenameConflict, sqlite3.IntegrityError) as exc:
+        _raise_domain_error(exc)
+    enqueue_content_reclassification(str(row["id"]))
+    return _reclassification_job_dto(row)
 
 
 @router.post("/items/{item_id}/rename", response_model=ManagedContentItemDTO)
@@ -952,6 +1593,12 @@ def rename_managed_content_item(
     conn: sqlite3.Connection = Depends(get_db),
 ) -> ManagedContentItemDTO:
     _require_feature()
+    item_kind = conn.execute(
+        "SELECT content_kind FROM content_items WHERE id=? AND archived_at IS NULL",
+        (item_id,),
+    ).fetchone()
+    if item_kind is not None and item_kind["content_kind"] == "media_transcript":
+        _raise_domain_error(ValueError("media_transcript_operation_not_supported"))
     current = conn.execute(
         """SELECT v.doc_type,v.original_filename
            FROM content_versions v
@@ -1000,6 +1647,12 @@ async def update_managed_content_item(
     conn: sqlite3.Connection = Depends(get_db),
 ) -> ManagedContentItemDTO:
     _require_feature()
+    item_kind = conn.execute(
+        "SELECT content_kind FROM content_items WHERE id=? AND archived_at IS NULL",
+        (item_id,),
+    ).fetchone()
+    if item_kind is not None and item_kind["content_kind"] == "media_transcript":
+        _raise_domain_error(ValueError("media_transcript_operation_not_supported"))
     if not has_content_permission(conn, user, "item.upload"):
         raise HTTPException(status_code=403, detail="当前账号没有更新资料的权限")
     current = conn.execute(
@@ -1095,6 +1748,198 @@ def get_content_version_file(
     if disposition == "attachment" and not has_content_permission(conn, user, "item.download"):
         raise HTTPException(status_code=403, detail="当前账号没有下载资料的权限")
     return FileResponse(path, filename=row["original_filename"], content_disposition_type=disposition)
+
+
+@router.post("/versions/{version_id}/preview", response_model=ManagedPreviewDTO)
+def regenerate_pptx_preview(
+    version_id: str,
+    user: CurrentUser = Depends(require_content_permission("item.publish", csrf=True)),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> ManagedPreviewDTO:
+    """Regenerate the derived PDF preview for the current published PPTX."""
+    _require_feature()
+    if not OFFICE_PROCESSING_ENABLED:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "office_processing_disabled", "message": "Office 处理当前已停用"},
+        )
+    row = conn.execute(
+        """SELECT v.id AS version_id,v.item_id,v.original_filename,v.doc_type,
+                  v.lifecycle_status,h.current_version_id
+           FROM content_versions v
+           JOIN content_items i ON i.id=v.item_id
+           LEFT JOIN content_item_heads h ON h.item_id=v.item_id
+           WHERE v.id=? AND i.archived_at IS NULL""",
+        (version_id,),
+    ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="资料不存在")
+    if row["doc_type"] != "pptx":
+        raise HTTPException(status_code=400, detail="只有 PPTX 文件需要生成 PDF 预览")
+    if row["lifecycle_status"] != "published" or row["current_version_id"] != version_id:
+        raise HTTPException(status_code=409, detail="只有当前已发布版本可以重新生成预览")
+
+    summary = list_managed_version_index_summaries([version_id]).get(version_id)
+    if summary is None or not summary.preview_parent_id:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "preview_parent_missing", "message": "资料索引尚未就绪，请先完成发布"},
+        )
+    source_path = _storage.published_source_path(
+        content_item_id=row["item_id"],
+        content_version_id=version_id,
+        filename=row["original_filename"],
+    )
+    if not source_path.is_file() or source_path.is_symlink():
+        raise HTTPException(status_code=404, detail="已发布的 PPTX 原文件不可用")
+    try:
+        convert_pptx_to_pdf(source_path)
+    except httpx.HTTPError as exc:
+        logger.warning("PPTX preview service unavailable for version %s: %s", version_id, exc)
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "preview_service_unavailable", "message": "PPTX 预览服务暂不可用，请稍后重试"},
+        ) from exc
+    except (OSError, RuntimeError) as exc:
+        logger.warning("PPTX preview conversion failed for version %s: %s", version_id, exc)
+        raise HTTPException(
+            status_code=502,
+            detail={"code": "preview_conversion_failed", "message": "PPTX 转换失败，请检查文件后重试"},
+        ) from exc
+
+    audit_event(
+        conn,
+        "content.preview_regenerated",
+        actor_user_id=user.id,
+        item_id=row["item_id"],
+        version_id=version_id,
+        metadata={"preview_format": "pdf"},
+    )
+    conn.commit()
+    return ManagedPreviewDTO(
+        version_id=version_id,
+        preview_parent_id=summary.preview_parent_id,
+    )
+
+
+def _verified_media_transcript_bytes(row: sqlite3.Row) -> bytes:
+    try:
+        if row["markdown_storage_kind"] == "managed_artifact":
+            return LocalTranscriptionArtifactStore(TRANSCRIPTION_ARTIFACT_DIR).load_verified(
+                ManagedMarkdownRef(
+                    row["markdown_rel_path"],
+                    row["markdown_sha256"],
+                    row["markdown_size_bytes"],
+                )
+            )
+        if row["markdown_storage_kind"] != "legacy_manual":
+            raise ContractValidationError("invalid_markdown_storage", "markdown_storage_kind")
+        relative = str(row["markdown_rel_path"])
+        if not relative.startswith("docs/"):
+            raise ContractValidationError("invalid_legacy_manual_path", "markdown_rel_path")
+        path = (ROOT / Path(*relative.split("/"))).resolve(strict=False)
+        docs_root = DOCS_DIR.resolve(strict=False)
+        if path != docs_root and docs_root not in path.parents:
+            raise ContractValidationError("artifact_path_escape", "markdown_rel_path")
+        content = path.read_bytes()
+        if (
+            len(content) != row["markdown_size_bytes"]
+            or hashlib.sha256(content).hexdigest() != row["markdown_sha256"]
+        ):
+            raise ContractValidationError("artifact_hash_mismatch", "markdown")
+        return content
+    except (OSError, ValueError, ContractValidationError) as exc:
+        raise HTTPException(status_code=409, detail="当前正式转录稿完整性校验失败") from exc
+
+
+@router.get("/items/{item_id}/media-download")
+def download_media_library_item(
+    item_id: str,
+    part: Literal["video", "transcript", "all"] = Query(...),
+    _user: CurrentUser = Depends(require_content_permission("item.download")),
+    conn: sqlite3.Connection = Depends(get_db),
+):
+    _require_feature()
+    row = conn.execute(
+        """SELECT i.title,m.original_filename,m.storage_rel_path,m.mime_type,m.file_size,m.sha256,
+                  v.markdown_storage_kind,v.markdown_rel_path,v.markdown_sha256,
+                  v.markdown_size_bytes,v.publication_status
+           FROM content_items i
+           JOIN media_assets m ON m.media_id=i.media_id AND m.status<>'archived'
+           JOIN media_transcript_heads h ON h.media_id=m.media_id
+           JOIN transcript_versions v ON v.id=h.current_version_id AND v.media_id=m.media_id
+           WHERE i.id=? AND i.content_kind='media_transcript' AND i.archived_at IS NULL""",
+        (item_id,),
+    ).fetchone()
+    if row is None or row["publication_status"] != "published":
+        raise HTTPException(status_code=404, detail="视频资料不存在或尚未正式发布")
+    try:
+        video_path = safe_join(MEDIA_DIR, row["storage_rel_path"])
+        video_size = video_path.stat().st_size
+    except (OSError, ValueError):
+        raise HTTPException(status_code=404, detail="视频文件不可用")
+    if not video_path.is_file() or video_path.is_symlink() or video_size != row["file_size"]:
+        raise HTTPException(status_code=409, detail="视频文件完整性校验失败")
+    if row["sha256"]:
+        digest = hashlib.sha256()
+        try:
+            with video_path.open("rb") as handle:
+                for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                    digest.update(chunk)
+        except OSError as exc:
+            raise HTTPException(status_code=404, detail="视频文件不可用") from exc
+        if digest.hexdigest() != row["sha256"]:
+            raise HTTPException(status_code=409, detail="视频文件完整性校验失败")
+    video_filename = _safe_bulk_archive_name(str(row["original_filename"]), set())
+    transcript_filename = _safe_bulk_archive_name(f"{row['title']}-转录稿.md", set())
+    if part == "video":
+        return FileResponse(
+            video_path,
+            media_type=row["mime_type"],
+            filename=video_filename,
+            content_disposition_type="attachment",
+        )
+    transcript = _verified_media_transcript_bytes(row)
+    if part == "transcript":
+        temporary = tempfile.NamedTemporaryFile(
+            prefix="media-transcript-", suffix=".md", delete=False
+        )
+        transcript_path = Path(temporary.name)
+        try:
+            temporary.write(transcript)
+        finally:
+            temporary.close()
+        return FileResponse(
+            transcript_path,
+            media_type="text/markdown; charset=utf-8",
+            filename=transcript_filename,
+            background=BackgroundTask(transcript_path.unlink, missing_ok=True),
+        )
+    if video_size + len(transcript) > _MAX_BULK_DOWNLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="视频与转录稿总量不能超过 1 GiB")
+    temporary = tempfile.NamedTemporaryFile(
+        prefix="media-library-download-", suffix=".zip", delete=False
+    )
+    archive_path = Path(temporary.name)
+    temporary.close()
+    try:
+        with zipfile.ZipFile(archive_path, "w", allowZip64=True) as archive:
+            archive.write(video_path, arcname=video_filename, compress_type=zipfile.ZIP_STORED)
+            archive.writestr(
+                transcript_filename,
+                transcript,
+                compress_type=zipfile.ZIP_DEFLATED,
+            )
+    except Exception:
+        archive_path.unlink(missing_ok=True)
+        raise
+    archive_filename = _safe_bulk_archive_name(f"{row['title']}-视频资料.zip", set())
+    return FileResponse(
+        archive_path,
+        media_type="application/zip",
+        filename=archive_filename,
+        background=BackgroundTask(archive_path.unlink, missing_ok=True),
+    )
 
 
 def _safe_bulk_archive_name(filename: str, used_names: set[str]) -> str:
@@ -1278,8 +2123,14 @@ def _bulk_failure_message(exc: Exception) -> str:
         "content_version_conflict": "资料版本已变化，请刷新后重试",
         "content_move_forbidden": "当前账号没有移动此状态资料的权限",
         "content_move_requires_republication": "资料需要先退回后才能移动",
+        "content_reclassification_not_published": "仅当前正式发布版本可以调整分类",
+        "content_reclassification_in_progress": "该资料正在调整分类",
+        "content_publication_in_progress": "该资料正在发布，暂时不能调整分类",
+        "content_reclassification_same_category": "资料已经位于所选分类",
+        "media_transcript_operation_not_supported": "视频转录稿请前往视频管理处理",
         "content_delete_forbidden": "当前账号没有删除此状态资料的权限",
         "content_delete_in_progress": "资料正在发布，暂时不能移入回收站",
+        "content_delete_reclassification_in_progress": "资料正在调整分类，暂时不能移入回收站",
         "active_category_not_found": "目标目录不存在或已停用",
     }.get(str(exc), "资料状态已变化，请刷新后重试")
 
@@ -1293,7 +2144,8 @@ def bulk_move_content_items(
     _require_feature()
     can_move_draft = has_content_permission(conn, user, "item.move_draft")
     can_move_review = has_content_permission(conn, user, "item.move_review")
-    if not (can_move_draft or can_move_review):
+    can_move_published = has_content_permission(conn, user, "item.publish")
+    if not (can_move_draft or can_move_review or can_move_published):
         raise HTTPException(status_code=403, detail="当前账号没有移动资料的权限")
     results: list[BulkManagedContentResultDTO] = []
     for item in _validate_bulk_item_refs(body.items):
@@ -1306,6 +2158,7 @@ def bulk_move_content_items(
                 actor_user_id=user.id,
                 can_move_draft=can_move_draft,
                 can_move_review=can_move_review,
+                can_move_published=can_move_published,
             )
             results.append(BulkManagedContentResultDTO(
                 item_id=item.item_id,
@@ -1322,6 +2175,47 @@ def bulk_move_content_items(
             ))
     succeeded = sum(result.status == "succeeded" for result in results)
     return BulkManagedContentResponse(results=results, succeeded=succeeded, failed=len(results) - succeeded)
+
+
+@router.post("/bulk-reclassify", response_model=BulkManagedContentResponse, status_code=202)
+def bulk_reclassify_content_items(
+    body: BulkMoveManagedContentRequest,
+    user: CurrentUser = Depends(
+        require_content_permission("item.reclassify_published", csrf=True)
+    ),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> BulkManagedContentResponse:
+    _require_feature()
+    results: list[BulkManagedContentResultDTO] = []
+    for item in _validate_bulk_item_refs(body.items):
+        try:
+            row = create_reclassification_job(
+                conn,
+                item.item_id,
+                target_category_id=body.target_category_id,
+                expected_version_id=item.expected_version_id,
+                actor_user_id=user.id,
+                can_reclassify=True,
+            )
+            enqueue_content_reclassification(str(row["id"]))
+            results.append(BulkManagedContentResultDTO(
+                item_id=item.item_id,
+                version_id=item.expected_version_id,
+                status="succeeded",
+                index_job_id=row["id"],
+            ))
+        except (ValueError, ContentFilenameConflict, sqlite3.IntegrityError) as exc:
+            conn.rollback()
+            results.append(BulkManagedContentResultDTO(
+                item_id=item.item_id,
+                version_id=item.expected_version_id,
+                status="failed",
+                message=_bulk_failure_message(exc),
+            ))
+    succeeded = sum(result.status == "succeeded" for result in results)
+    return BulkManagedContentResponse(
+        results=results, succeeded=succeeded, failed=len(results) - succeeded
+    )
 
 
 @router.post("/bulk-archive", response_model=BulkManagedContentResponse)
@@ -1372,6 +2266,8 @@ def bulk_review_content_versions(
     _require_feature()
     if body.approved is None:
         raise HTTPException(status_code=400, detail="请选择确认或退回")
+    if not body.approved and not (body.note or "").strip():
+        raise HTTPException(status_code=400, detail="批量退回时必须填写原因")
     results: list[BulkManagedContentResultDTO] = []
     for version_id in _validate_bulk_version_ids(body.version_ids):
         try:
@@ -1448,6 +2344,7 @@ def get_content_index_job(
                FROM category_nodes c JOIN paths p ON p.id=c.parent_id
            )
            SELECT j.*,COALESCE(v.title,i.title) AS title,v.original_filename,v.doc_type,i.category_id,
+                  i.archived_at,
                   c.display_code || ' ' || c.display_name AS category_label,
                   paths.full_path AS category_path,v.version_number,v.source_origin,
                   o.size_bytes AS file_size,
@@ -1487,6 +2384,7 @@ def list_content_index_jobs(
     ),
     status: str | None = Query(None, max_length=50),
     history: bool = False,
+    include_archived: bool = False,
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
     _user: CurrentUser = Depends(require_content_permission("index.view")),
@@ -1506,7 +2404,7 @@ def list_content_index_jobs(
                JOIN paths ON paths.id=i.category_id
                LEFT JOIN content_objects o ON o.sha256=v.object_sha256
                LEFT JOIN content_item_heads h ON h.item_id=i.id"""
-    scope_clauses: list[str] = []
+    scope_clauses: list[str] = [] if include_archived else ["i.archived_at IS NULL"]
     scope_params: list[object] = []
     latest_attempt = (
         "j.id=(SELECT j2.id FROM content_index_jobs j2 WHERE j2.version_id=j.version_id "
@@ -1560,6 +2458,7 @@ def list_content_index_jobs(
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     rows = conn.execute(
         cte + """ SELECT j.*,COALESCE(v.title,i.title) AS title,v.original_filename,v.doc_type,i.category_id,
+                  i.archived_at,
                   (SELECT count(*) FROM content_index_jobs jc WHERE jc.version_id=j.version_id) AS attempt_count,
                   c.display_code || ' ' || c.display_name AS category_label,
                   paths.full_path AS category_path,v.version_number,v.source_origin,

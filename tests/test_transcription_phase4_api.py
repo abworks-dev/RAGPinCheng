@@ -52,6 +52,11 @@ def test_management_reads_require_admin_and_mutations_require_csrf_admin():
         "/admin/transcription/versions/{base_version_id}/revisions",
         "POST",
     )
+    metadata_revision = route_for(
+        transcription_router,
+        "/admin/transcription/media/{media_id}/metadata-revisions",
+        "POST",
+    )
     timeline = route_for(
         transcription_router,
         "/admin/transcription/versions/{version_id}/timeline",
@@ -66,6 +71,7 @@ def test_management_reads_require_admin_and_mutations_require_csrf_admin():
     assert require_csrf_admin in dependency_calls(cancel)
     assert require_csrf_admin in dependency_calls(retry)
     assert require_csrf_admin in dependency_calls(revision)
+    assert require_csrf_admin in dependency_calls(metadata_revision)
     assert require_admin in dependency_calls(timeline)
     assert require_csrf_admin in dependency_calls(upload)
     assert require_csrf_admin in dependency_calls(delete)
@@ -178,6 +184,9 @@ def test_application_runtime_registers_all_remote_provider_keys():
         "funasr-sensevoice-zh-experimental-v1",
         "qwen3-asr-zh-experimental-v1",
         "whisperx-large-v3-zh-align-experimental-v1",
+        "whisperx-large-v3-zh-balanced-v2",
+        "whisperx-large-v3-zh-fine-v2",
+        "whisperx-large-v3-zh-natural-v2",
     )
     assert tuple(item.provider_key for item in service.providers.factories) == (
         "faster-whisper",

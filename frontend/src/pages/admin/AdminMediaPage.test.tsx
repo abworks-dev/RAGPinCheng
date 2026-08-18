@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   deleteFailedMediaAsset: vi.fn(),
   uploadMediaVideo: vi.fn(),
   uploadAutomaticMediaVideo: vi.fn(),
+  uploadReplacementMediaVideo: vi.fn(),
   listTranscriptionProfiles: vi.fn(),
   listTranscriptionJobs: vi.fn(),
   listTranscriptVersions: vi.fn(),
@@ -105,6 +106,7 @@ describe("AdminMediaPage wizard", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    window.history.replaceState({}, "", "/admin/media");
     let sequence = 0;
     vi.stubGlobal("crypto", {
       randomUUID: vi.fn(() => `11111111-1111-4111-8111-${String(++sequence).padStart(12, "0")}`),
@@ -117,6 +119,11 @@ describe("AdminMediaPage wizard", () => {
       media_id: file.name,
       transcription_job_id: `job-${file.name}`,
     }));
+    mocks.uploadReplacementMediaVideo.mockResolvedValue({
+      ...assets[0],
+      media_id: "media-replacement-candidate",
+      transcription_job_id: "job-replacement",
+    });
     mocks.listTranscriptionProfiles.mockResolvedValue([availableProfile, secondProfile, unavailableProfile]);
     mocks.listTranscriptionJobs.mockResolvedValue([succeededJob]);
     mocks.listTranscriptVersions.mockResolvedValue([]);
@@ -133,6 +140,59 @@ describe("AdminMediaPage wizard", () => {
     expect(screen.getByText("未发布")).toBeInTheDocument();
     expect(screen.getByText("未开始")).toBeInTheDocument();
     expect(screen.getByText("草稿已生成，等待后续审核与发布。")).toBeInTheDocument();
+  });
+
+  it("opens the requested workbench from a library deep link and clears it on close", async () => {
+    window.history.replaceState({}, "", "/admin/media?media_id=media-ready&workbench=1");
+    render(<AdminMediaPage />);
+
+    const workbench = await screen.findByRole("dialog", { name: "项目交付培训" });
+    expect(workbench).toBeInTheDocument();
+    fireEvent.click(within(workbench).getByRole("button", { name: "关闭转写工作台" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "项目交付培训" })).not.toBeInTheDocument());
+    expect(window.location.search).toBe("");
+  });
+
+  it("opens replacement from a library deep link and reports upload versus server processing", async () => {
+    let callbacks: { onProgress: (progress: { loaded: number; total: number; ratio: number }) => void; onUploaded: () => void } | undefined;
+    let finishUpload: ((value: typeof assets[number] & { media_id: string; transcription_job_id: string }) => void) | undefined;
+    mocks.uploadReplacementMediaVideo.mockImplementation((_file, _title, _profile, _key, _source, nextCallbacks) => {
+      callbacks = nextCallbacks;
+      return new Promise((resolve) => { finishUpload = resolve; });
+    });
+    window.history.replaceState({}, "", "/admin/media?media_id=media-ready&action=replace");
+    render(<AdminMediaPage />);
+
+    const dialog = await screen.findByRole("dialog", { name: "替换视频" });
+    const profile = within(dialog).getByRole("combobox", { name: "替换视频转录 Profile" });
+    await waitFor(() => expect(profile).toHaveValue(availableProfile.profile_id));
+    expect(within(dialog).getByRole("option", { name: /不可用 Profile/ })).toBeDisabled();
+    const replacement = video("delivery-training-v2.mp4");
+    fireEvent.change(within(dialog).getByLabelText("选择替换视频"), { target: { files: [replacement] } });
+    fireEvent.change(profile, { target: { value: secondProfile.profile_id } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "上传并开始转录" }));
+
+    await waitFor(() => expect(mocks.uploadReplacementMediaVideo).toHaveBeenCalledWith(
+      replacement,
+      assets[0].title,
+      secondProfile.profile_id,
+      expect.any(String),
+      assets[0].media_id,
+      expect.objectContaining({ onProgress: expect.any(Function), onUploaded: expect.any(Function) }),
+    ));
+    act(() => callbacks?.onProgress({ loaded: 42, total: 100, ratio: 0.42 }));
+    expect(within(dialog).getByText("正在上传候选视频")).toBeInTheDocument();
+    expect(within(dialog).getByText("42%")).toBeInTheDocument();
+    expect(within(dialog).getByRole("progressbar", { name: "替换视频上传进度" })).toHaveAttribute("aria-valuenow", "42");
+
+    act(() => callbacks?.onUploaded());
+    expect(within(dialog).getByText("服务端正在准备转录任务")).toBeInTheDocument();
+    expect(within(dialog).getByRole("progressbar", { name: "替换视频上传进度" })).not.toHaveAttribute("aria-valuenow");
+
+    await act(async () => finishUpload?.({ ...assets[0], media_id: "media-replacement-candidate", transcription_job_id: "job-replacement" }));
+    await waitFor(() => expect(mocks.getTranscriptionJob).toHaveBeenCalledWith("job-replacement"));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "替换视频" })).not.toBeInTheDocument());
+    expect(window.location.search).toBe("");
   });
 
   it("shows filter counts and refreshes media and transcription state together", async () => {

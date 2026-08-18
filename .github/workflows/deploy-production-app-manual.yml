@@ -118,7 +118,7 @@ jobs:
               export TRANSCRIPTION_ADMITTED_PROFILE_IDS="funasr-sensevoice-zh-experimental-v1,faster-whisper-zh-experimental-v1"
               ;;
             ENABLE_FASTER_WHISPER_AND_WHISPERX)
-              export TRANSCRIPTION_ADMITTED_PROFILE_IDS="funasr-sensevoice-zh-experimental-v1,faster-whisper-zh-experimental-v1,whisperx-large-v3-zh-align-experimental-v1"
+              export TRANSCRIPTION_ADMITTED_PROFILE_IDS="funasr-sensevoice-zh-experimental-v1,faster-whisper-zh-experimental-v1,whisperx-large-v3-zh-balanced-v2"
               ;;
             *)
               echo "ERROR: unsupported transcription admission action"
@@ -305,6 +305,7 @@ jobs:
 
           active = {
               "content_index_jobs": ("pending", "parsing", "chunking", "summarizing", "embedding"),
+              "content_reclassification_jobs": ("pending", "applying", "committing", "rolling_back"),
               "index_jobs": ("pending", "running", "uploading", "queued_mineru", "parsing", "chunking", "embedding"),
               "transcript_publication_index_jobs": ("pending", "parsing", "chunking", "embedding"),
               "transcription_jobs": ("pending", "running", "processing"),
@@ -583,6 +584,10 @@ jobs:
                   "SELECT count(*) FROM content_index_jobs "
                   "WHERE status IN ('pending','parsing','chunking','summarizing','embedding')"
               ).fetchone()[0]
+              active_reclassifications = database.execute(
+                  "SELECT count(*) FROM content_reclassification_jobs "
+                  "WHERE status IN ('pending','applying','committing','rolling_back')"
+              ).fetchone()[0]
               permission_groups = database.execute(
                   "SELECT g.group_key,g.display_name,i.permission "
                   "FROM content_permission_groups g "
@@ -593,6 +598,7 @@ jobs:
           assert version == CURRENT_SCHEMA_VERSION
           assert [tuple(row) for row in categories] == expected_categories
           assert active_jobs == 0
+          assert active_reclassifications == 0
           actual_groups = {}
           for group_key, display_name, permission in permission_groups:
               actual_groups.setdefault((group_key, display_name), [])
@@ -687,15 +693,15 @@ jobs:
               FASTER_WHISPER_PROVIDER_KEY,
               FUNASR_SENSEVOICE_PROFILE_ID,
               QWEN3_ASR_PROFILE_ID,
-              WHISPERX_PROFILE_ID,
+              WHISPERX_BALANCED_PROFILE_ID,
           )
 
           expected = {
               FASTER_WHISPER_PROFILE_ID,
               FUNASR_SENSEVOICE_PROFILE_ID,
           }
-          if WHISPERX_PROFILE_ID in TRANSCRIPTION_ADMITTED_PROFILE_IDS:
-              expected.add(WHISPERX_PROFILE_ID)
+          if WHISPERX_BALANCED_PROFILE_ID in TRANSCRIPTION_ADMITTED_PROFILE_IDS:
+              expected.add(WHISPERX_BALANCED_PROFILE_ID)
           assert ASR_ENABLED is True
           assert set(TRANSCRIPTION_ADMITTED_PROFILE_IDS) == expected
           capabilities = RemoteAsrProviderFactory(
@@ -721,10 +727,10 @@ jobs:
           assert states[FASTER_WHISPER_PROFILE_ID] == ("enabled", "available")
           assert states[FUNASR_SENSEVOICE_PROFILE_ID] == ("enabled", "available")
           assert states[QWEN3_ASR_PROFILE_ID][0] == "disabled"
-          if WHISPERX_PROFILE_ID in expected:
-              assert states[WHISPERX_PROFILE_ID] == ("enabled", "available")
+          if WHISPERX_BALANCED_PROFILE_ID in expected:
+              assert states[WHISPERX_BALANCED_PROFILE_ID] == ("enabled", "available")
           else:
-              assert states[WHISPERX_PROFILE_ID][0] == "disabled"
+              assert states[WHISPERX_BALANCED_PROFILE_ID][0] == "disabled"
           registry = build_phase4_profile_registry(
               upload_part_bytes=ASR_UPLOAD_PART_BYTES,
               poll_interval_ms=ASR_POLL_INTERVAL_MS,
@@ -736,12 +742,12 @@ jobs:
               ProfileOperation.new_attempt,
           )
           assert resolved.profile.profile_id == FASTER_WHISPER_PROFILE_ID
-          if WHISPERX_PROFILE_ID in expected:
+          if WHISPERX_BALANCED_PROFILE_ID in expected:
               resolved = registry.resolve_profile(
-                  WHISPERX_PROFILE_ID,
+                  WHISPERX_BALANCED_PROFILE_ID,
                   ProfileOperation.new_attempt,
               )
-              assert resolved.profile.profile_id == WHISPERX_PROFILE_ID
+              assert resolved.profile.profile_id == WHISPERX_BALANCED_PROFILE_ID
           print("TRANSCRIPTION_ADMISSION status=verified profiles=" + ",".join(sorted(expected)))
           PY
           }
@@ -807,6 +813,7 @@ jobs:
             exit 1
           }
           printf '%s\n' "${OLD_IMAGE_ID}" > "${BACKUP_PATH}/backend-image.txt"
+          printf '%s\n' "${ROLLBACK_IMAGE_TAG}" > "${BACKUP_PATH}/backend-rollback-tag.txt"
           echo "APP_ONLY_BACKUP status=complete path=${BACKUP_PATH} rollback_image=retained"
 
           rollback_backend() {
@@ -954,5 +961,4 @@ jobs:
             echo "ERROR: App-only deployment failed strict verification"
             exit 1
           fi
-          docker image rm "${ROLLBACK_IMAGE_TAG}" >/dev/null 2>&1 || \
-            echo "WARNING: retained rollback tag could not be removed"
+          echo "APP_ONLY_ROLLBACK_READY status=retained backup=${BACKUP_PATH} image=${ROLLBACK_IMAGE_TAG}"

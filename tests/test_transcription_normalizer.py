@@ -4,8 +4,15 @@ from dataclasses import replace
 from src.transcription.candidate import CandidateSegment
 from src.transcription.normalizer import normalize_candidate
 from src.transcription.provider_protocol import ProviderCandidate
-from src.transcription.types import ContractValidationError, NormalizerConfig, TimeUnit, TranscriptWarningCode
-from tests.transcription_fixture_helpers import make_execution_bundle
+from src.transcription.types import (
+    ContractValidationError,
+    NormalizerConfig,
+    TerminologyCorrectionConfig,
+    TimeUnit,
+    TranscriptSegmentationConfig,
+    TranscriptWarningCode,
+)
+from tests.transcription_fixture_helpers import make_execution_bundle, make_profile
 
 
 def normalize(segments, *, config=None, duration=10_000):
@@ -67,3 +74,83 @@ def test_candidate_duration_and_identity_cannot_override_input_or_snapshot():
     i,p,e,s=make_execution_bundle(duration_ms=10000)
     with pytest.raises(ContractValidationError):
         normalize_candidate(i,ProviderCandidate("fake-alpha","zh-CN",9999,(seg(0,0,1,"x"),)),s,e)
+
+
+def normalize_engineering(text, *, preset="balanced", maximum_ms=30_000, maximum_chars=240, duration=60_000):
+    profile = make_profile(
+        normalizer_config=NormalizerConfig(0, 1000, 1000),
+        segmentation_config=TranscriptSegmentationConfig(
+            preset, maximum_ms, maximum_chars, 750
+        ),
+        terminology_config=TerminologyCorrectionConfig("bim-engineering-v1"),
+    )
+    input_ref, _profile, execution, snapshot = make_execution_bundle(
+        duration_ms=duration,
+        profile=profile,
+    )
+    candidate = ProviderCandidate(
+        execution.provider_key,
+        "zh-CN",
+        duration,
+        (seg(0, 0, duration / 1000, text),),
+    )
+    return normalize_candidate(input_ref, candidate, snapshot, execution)
+
+
+def test_engineering_terminology_correction_is_deterministic_and_bounded():
+    result = normalize_engineering(
+        "auto CAD、B I M、reVIT、NAVISWORKS、BIM 2026 0805、GB 50016 2014、12 . 5、95 %",
+        maximum_ms=None,
+        maximum_chars=500,
+    )
+    assert result.segments[0].text == (
+        "AutoCAD、BIM、Revit、Navisworks、BIM-2026-0805、GB 50016-2014、12.5、95%"
+    )
+    assert TranscriptWarningCode.terminology_corrected in {
+        item.code for item in result.warnings
+    }
+
+
+def test_engineering_terminology_negative_samples_are_not_rewritten():
+    text = "自动 CAD 图层，BIMMER，RevitAPI，navisworks2，版本 208，完成率95%，普通数字 12.5。"
+    result = normalize_engineering(text, maximum_ms=None, maximum_chars=500)
+    assert result.segments[0].text == text
+    assert TranscriptWarningCode.terminology_corrected not in {
+        item.code for item in result.warnings
+    }
+
+
+@pytest.mark.parametrize(
+    ("preset", "maximum_ms", "expected_segments"),
+    [
+        ("natural", None, 1),
+        ("balanced", 30_000, 2),
+        ("fine", 15_000, 4),
+    ],
+)
+def test_timestamp_presets_enforce_their_duration_bounds(
+    preset, maximum_ms, expected_segments
+):
+    result = normalize_engineering(
+        "模" * 60,
+        preset=preset,
+        maximum_ms=maximum_ms,
+        maximum_chars=500,
+    )
+    assert len(result.segments) == expected_segments
+    if maximum_ms is not None:
+        assert all(
+            item.end_ms - item.start_ms <= maximum_ms for item in result.segments
+        )
+
+
+def test_fixed_engineering_terms_are_not_split_across_timestamp_segments():
+    result = normalize_engineering(
+        "前缀 AutoCAD 12.5 208 95% 后缀",
+        preset="fine",
+        maximum_ms=None,
+        maximum_chars=6,
+    )
+    texts = [item.text for item in result.segments]
+    for term in ("AutoCAD", "12.5", "208", "95%"):
+        assert any(term in text for text in texts)

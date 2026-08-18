@@ -23,9 +23,10 @@
 1. 阅读与任务相关的入口、调用链、类型和配置；
 2. 只读任务先运行 `pwsh -NoProfile -File scripts/Test-CodexWorkspace.ps1 -Mode ReadOnly`；新写任务在编辑前运行 `-Mode Write -Intent New`，继续既有任务运行 `-Mode Write -Intent Continue -ExpectedBranch <branch>`；
 3. 检查 `git status --short --branch`，保护用户已有修改；workspace 预检失败时停止编辑，不得自动创建、切换、清理或修复 worktree；
-4. 区分只读调查、普通实现、高风险修改和破坏性操作；
-5. 说明最小修改面、验证方式和明确不做的内容；
-6. 中高风险任务先调查和计划，再实施。
+4. 新写任务优先使用 Codex App 在 `$CODEX_HOME/worktrees` 创建的受管 worktree；人工长期 worktree 只放在主仓库父目录的 `.worktrees/<仓库名>`，旧位置只用于继续原任务；
+5. 区分只读调查、普通实现、高风险修改和破坏性操作；
+6. 说明最小修改面、验证方式和明确不做的内容；
+7. 中高风险任务先调查和计划，再实施。
 
 不要因为发现邻近问题而自动扩大范围。
 

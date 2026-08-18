@@ -41,6 +41,8 @@ def test_empty_database_initializes_all_phase2_tables(tmp_path):
         "content_index_jobs",
         "content_item_heads",
         "content_audit_events",
+        "media_metadata_revisions",
+        "media_replacements",
         "content_permission_groups",
         "content_permission_group_items",
         "maintenance_settings",
@@ -111,7 +113,7 @@ def test_schema_10_database_migrates_manual_revision_columns_and_index(tmp_path,
     conn.close()
 
 
-def test_schema_14_database_migrates_answer_policy_as_version_15(tmp_path, monkeypatch):
+def test_schema_14_database_migrates_answer_policy_and_asr_profiles(tmp_path, monkeypatch):
     path = tmp_path / "app.sqlite"
     migrations = db_migrations.MIGRATIONS
     monkeypatch.setattr(
@@ -132,12 +134,213 @@ def test_schema_14_database_migrates_answer_policy_as_version_15(tmp_path, monke
     conn = sqlite3.connect(path)
     tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     columns = {row[1] for row in conn.execute("PRAGMA table_info(message_answer_versions)")}
-    assert conn.execute("SELECT max(version) FROM app_schema_migrations").fetchone()[0] == 15
-    assert {"upload_batch_entries", "answer_policy_settings", "answer_policy_audit"} <= tables
+    assert conn.execute("SELECT max(version) FROM app_schema_migrations").fetchone()[0] == db_migrations.CURRENT_SCHEMA_VERSION
+    assert {
+        "upload_batch_entries",
+        "answer_policy_settings",
+        "answer_policy_audit",
+        "asr_profile_release_requests",
+        "asr_profile_audit_events",
+    } <= tables
     assert {"policy_version", "policy_json"} <= columns
     assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     assert conn.execute("PRAGMA foreign_key_check").fetchone() is None
     conn.close()
+
+
+def test_schema_17_adds_reclassification_jobs_without_granting_custom_principals(
+    tmp_path, monkeypatch
+):
+    path = tmp_path / "app.sqlite"
+    migrations = db_migrations.MIGRATIONS
+    monkeypatch.setattr(
+        db_migrations, "MIGRATIONS", tuple(item for item in migrations if item.version <= 17),
+    )
+    init_db(path, backup_dir=tmp_path / "backups")
+    conn = sqlite3.connect(path)
+    user_id = conn.execute(
+        """INSERT INTO users(employee_id,real_name,password_hash,role,is_active,created_at)
+           VALUES ('custom','自定义用户','x','user',1,1)"""
+    ).lastrowid
+    conn.execute(
+        "INSERT INTO content_permissions(user_id,permission,created_at) VALUES (?,'item.publish',1)",
+        (user_id,),
+    )
+    conn.execute(
+        """INSERT INTO content_permission_groups
+           (id,group_key,display_name,is_system,is_active,created_at,updated_at)
+           VALUES ('custom-group','custom','自定义组',0,1,1,1)"""
+    )
+    conn.execute(
+        "INSERT INTO content_permission_group_items(group_id,permission) VALUES ('custom-group','item.publish')"
+    )
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(db_migrations, "MIGRATIONS", migrations)
+    init_db(path, backup_dir=tmp_path / "backups")
+    conn = sqlite3.connect(path)
+    assert (
+        conn.execute("SELECT max(version) FROM app_schema_migrations").fetchone()[0]
+        == db_migrations.CURRENT_SCHEMA_VERSION
+    )
+    assert conn.execute(
+        "SELECT 1 FROM content_permissions WHERE user_id=? AND permission='item.reclassify_published'",
+        (user_id,),
+    ).fetchone() is None
+    assert conn.execute(
+        """SELECT 1 FROM content_permission_group_items
+           WHERE group_id='custom-group' AND permission='item.reclassify_published'"""
+    ).fetchone() is None
+    assert {
+        row[0]
+        for row in conn.execute(
+            """SELECT g.group_key FROM content_permission_groups g
+               JOIN content_permission_group_items i ON i.group_id=g.id
+               WHERE i.permission='item.reclassify_published'"""
+        )
+    } == {"publisher", "system_admin"}
+    assert {
+        row[1] for row in conn.execute("PRAGMA table_info(content_reclassification_jobs)")
+    } >= {
+        "id", "item_id", "expected_version_id", "source_category_id",
+        "target_category_id", "status", "qdrant_point_count", "parent_count",
+        "error_code", "error_summary",
+    }
+    conn.close()
+
+
+def test_schema_18_adds_media_library_video_action_tables(tmp_path, monkeypatch):
+    path = tmp_path / "app.sqlite"
+    migrations = db_migrations.MIGRATIONS
+    monkeypatch.setattr(
+        db_migrations, "MIGRATIONS", tuple(item for item in migrations if item.version <= 18),
+    )
+    init_db(path, backup_dir=tmp_path / "backups")
+    conn = sqlite3.connect(path)
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert conn.execute("SELECT max(version) FROM app_schema_migrations").fetchone()[0] == 18
+    assert "media_metadata_revisions" not in tables
+    assert "media_replacements" not in tables
+    conn.close()
+
+    monkeypatch.setattr(db_migrations, "MIGRATIONS", migrations)
+    init_db(path, backup_dir=tmp_path / "backups")
+    backups = list((tmp_path / "backups").glob("*.sqlite"))
+    assert len(backups) == 1
+    verify_backup(backups[0])
+    conn = sqlite3.connect(path)
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert {"media_metadata_revisions", "media_replacements"} <= tables
+    assert conn.execute("SELECT max(version) FROM app_schema_migrations").fetchone()[0] == 20
+    assert {"content_trash_settings", "content_trash_purge_runs", "content_trash_purge_items"} <= tables
+    settings = conn.execute(
+        "SELECT cleanup_enabled,retention_days,warning_days,batch_limit FROM content_trash_settings"
+    ).fetchone()
+    assert settings == (0, 90, 7, 20)
+    assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    assert conn.execute("PRAGMA foreign_key_check").fetchone() is None
+    conn.close()
+
+
+def test_schema_15_backfills_published_media_catalog_without_document_or_index_rows(
+    tmp_path, monkeypatch
+):
+    path = tmp_path / "app.sqlite"
+    migrations = db_migrations.MIGRATIONS
+    monkeypatch.setattr(
+        db_migrations, "MIGRATIONS", tuple(item for item in migrations if item.version <= 15),
+    )
+    init_db(path, backup_dir=tmp_path / "backups")
+    conn = sqlite3.connect(path)
+    media_id = "123e4567-e89b-12d3-a456-426614174100"
+    version_id = "123e4567-e89b-12d3-a456-426614174101"
+    conn.execute(
+        """INSERT INTO media_assets(
+               media_id,title,original_filename,storage_rel_path,mime_type,file_size,sha256,
+               transcript_source_path,transcript_origin,status,created_by,created_at,updated_at,error
+           ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            media_id,
+            "历史培训视频",
+            "same-name.mp4",
+            "synthetic/video.mp4",
+            "video/mp4",
+            1024,
+            None,
+            None,
+            "generated",
+            "transcript_ready",
+            None,
+            10,
+            20,
+            None,
+        ),
+    )
+    conn.execute(
+        """INSERT INTO transcript_versions(
+               id,media_id,source,markdown_storage_kind,markdown_rel_path,markdown_sha256,
+               markdown_size_bytes,review_status,publication_status,published_at,created_at,updated_at
+           ) VALUES (?,?,'manual','managed_artifact','markdown/synthetic.md',?,10,
+                     'not_required','published',20,10,20)""",
+        (version_id, media_id, "a" * 64),
+    )
+    conn.execute(
+        "INSERT INTO media_transcript_heads(media_id,current_version_id,updated_at) VALUES (?,?,20)",
+        (media_id, version_id),
+    )
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setattr(db_migrations, "MIGRATIONS", migrations)
+    init_db(path, backup_dir=tmp_path / "backups")
+    init_db(path, backup_dir=tmp_path / "backups")
+
+    conn = sqlite3.connect(path)
+    catalog = conn.execute(
+        "SELECT id,content_kind,category_id,media_id,normalized_filename FROM content_items"
+    ).fetchall()
+    assert catalog == [
+        (f"media-transcript-{media_id}", "media_transcript", "cat-05", media_id, None)
+    ]
+    assert conn.execute("SELECT count(*) FROM content_versions").fetchone()[0] == 0
+    assert conn.execute("SELECT count(*) FROM content_item_heads").fetchone()[0] == 0
+    assert conn.execute("SELECT count(*) FROM content_publications").fetchone()[0] == 0
+    assert conn.execute("SELECT count(*) FROM content_index_jobs").fetchone()[0] == 0
+    assert conn.execute("SELECT count(*) FROM transcript_publication_index_jobs").fetchone()[0] == 0
+    assert conn.execute("PRAGMA foreign_key_check").fetchone() is None
+    conn.close()
+    assert len(list((tmp_path / "backups").glob("*.sqlite"))) == 1
+
+
+def test_schema_16_database_migrates_asr_profile_management(tmp_path, monkeypatch):
+    path = tmp_path / "app.sqlite"
+    migrations = db_migrations.MIGRATIONS
+    monkeypatch.setattr(
+        db_migrations, "MIGRATIONS", tuple(item for item in migrations if item.version <= 16),
+    )
+    init_db(path, backup_dir=tmp_path / "backups")
+
+    conn = sqlite3.connect(path)
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert conn.execute("SELECT max(version) FROM app_schema_migrations").fetchone()[0] == 16
+    assert "asr_profile_release_requests" not in tables
+    assert "asr_profile_audit_events" not in tables
+    conn.close()
+
+    monkeypatch.setattr(db_migrations, "MIGRATIONS", migrations)
+    init_db(path, backup_dir=tmp_path / "backups")
+
+    conn = sqlite3.connect(path)
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert (
+        conn.execute("SELECT max(version) FROM app_schema_migrations").fetchone()[0]
+        == db_migrations.CURRENT_SCHEMA_VERSION
+    )
+    assert {"asr_profile_release_requests", "asr_profile_audit_events"} <= tables
+    assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    assert conn.execute("PRAGMA foreign_key_check").fetchone() is None
+    conn.close()
+    assert len(list((tmp_path / "backups").glob("*.sqlite"))) == 1
 
 
 def test_schema_5_database_adds_later_tables_without_changing_users(tmp_path):
@@ -148,6 +351,8 @@ def test_schema_5_database_adds_later_tables_without_changing_users(tmp_path):
         "DELETE FROM app_schema_migrations WHERE version >= 6 AND version <= ?",
         (db_migrations.CURRENT_SCHEMA_VERSION,),
     )
+    conn.execute("DROP TABLE asr_profile_audit_events")
+    conn.execute("DROP TABLE asr_profile_release_requests")
     conn.execute("DROP TABLE maintenance_runs")
     conn.execute("DROP TABLE maintenance_settings")
     conn.execute("DROP TABLE content_folder_requests")

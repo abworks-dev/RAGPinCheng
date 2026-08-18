@@ -117,6 +117,7 @@ export function PdfPreview() {
   const prefetchQueueRef = useRef(Promise.resolve());
   const [numPages, setNumPages] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [scale, setScale] = useState(1);
   const [zoomMode, setZoomMode] = useState<ZoomMode>("fit-page");
   const [interactionMode, setInteractionMode] = useState<InteractionMode>("pan");
@@ -139,6 +140,7 @@ export function PdfPreview() {
     prefetchedPagesRef.current.clear();
     setNumPages(null);
     setLoading(true);
+    setLoadError(null);
     setScale(1);
     setZoomMode("fit-page");
     setInteractionMode("pan");
@@ -243,6 +245,7 @@ export function PdfPreview() {
     prefetchGenerationRef.current += 1;
     setNumPages(pdfDocument.numPages);
     setLoading(false);
+    setLoadError(null);
   }, []);
 
   const onDocumentLoadError = useCallback(() => {
@@ -250,7 +253,10 @@ export function PdfPreview() {
     pdfDocumentRef.current = null;
     prefetchedPagesRef.current.clear();
     setLoading(false);
-  }, []);
+    setLoadError(isPptx
+      ? "PPTX 预览暂不可用，请返回资料管理页面重新生成预览。"
+      : "PDF 加载失败，请稍后重试。");
+  }, [isPptx]);
 
   const onPageLoadSuccess = useCallback((page: { getViewport: (options: { scale: number }) => Size }) => {
     const viewport = page.getViewport({ scale: 1 });
@@ -387,8 +393,13 @@ export function PdfPreview() {
     </div>
   ) : null;
 
-  const backAction = state.returnTo === "managed-content-detail" ? (
-    <IconButton label="返回资料详情" onClick={close}>
+  const returnLabel = state.returnTo === "managed-content-detail"
+    ? "返回资料详情"
+    : state.returnTo === "managed-content-review"
+      ? "返回资料审核"
+      : null;
+  const backAction = returnLabel ? (
+    <IconButton label={returnLabel} onClick={close}>
       <ArrowLeft className="size-4" />
     </IconButton>
   ) : null;
@@ -475,6 +486,7 @@ export function PdfPreview() {
                   onLoadSuccess={onDocumentLoadSuccess}
                   onLoadError={onDocumentLoadError}
                   loading={<div className="flex h-full items-center justify-center text-sm text-muted-foreground">加载 PDF…</div>}
+                  error={<div className="flex h-full items-center justify-center px-6 text-center text-sm text-destructive" role="alert">{loadError || "文件预览加载失败"}</div>}
                 >
                   <div className="flex min-h-full min-w-max items-center justify-center p-4">
                     <Page
@@ -487,11 +499,6 @@ export function PdfPreview() {
                     />
                   </div>
                 </Document>
-              )}
-              {!loading && !numPages && (
-                <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-                  PDF 加载失败
-                </div>
               )}
             </>
           )}

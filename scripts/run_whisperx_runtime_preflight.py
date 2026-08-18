@@ -79,12 +79,31 @@ def _profile_admission() -> str:
         if isinstance(node, ast.Assign)
         and len(node.targets) == 1
         and isinstance(node.targets[0], ast.Name)
-        and node.targets[0].id == "WHISPERX_PROFILE_ID"
+        and node.targets[0].id == "WHISPERX_BALANCED_PROFILE_ID"
         and isinstance(node.value, ast.Constant)
         and isinstance(node.value.value, str)
     ]
-    if profile_id_matches != ["whisperx-large-v3-zh-align-experimental-v1"]:
+    if profile_id_matches != ["whisperx-large-v3-zh-balanced-v2"]:
         raise ValueError("profile-catalog-invalid")
+
+    common_admissions: list[ast.expr] = []
+    for node in ast.walk(catalog):
+        if not (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and node.targets[0].id == "whisperx_v2_common"
+            and isinstance(node.value, ast.Dict)
+        ):
+            continue
+        values = {
+            key.value: value
+            for key, value in zip(node.value.keys, node.value.values, strict=True)
+            if isinstance(key, ast.Constant) and isinstance(key.value, str)
+        }
+        admission = values.get("admission")
+        if admission is not None:
+            common_admissions.append(admission)
 
     admissions: list[str] = []
     for node in ast.walk(catalog):
@@ -99,14 +118,27 @@ def _profile_admission() -> str:
         keywords = {keyword.arg: keyword.value for keyword in node.keywords}
         profile_id = keywords.get("profile_id")
         admission = keywords.get("admission")
+        if not isinstance(profile_id, ast.Name) or (
+            profile_id.id != "WHISPERX_BALANCED_PROFILE_ID"
+        ):
+            continue
+        if admission is None:
+            common_expansions = [
+                keyword.value
+                for keyword in node.keywords
+                if keyword.arg is None
+                and isinstance(keyword.value, ast.Name)
+                and keyword.value.id == "whisperx_v2_common"
+            ]
+            if len(common_expansions) != 1 or len(common_admissions) != 1:
+                raise ValueError("profile-catalog-invalid")
+            admission = common_admissions[0]
         if not (
-            isinstance(profile_id, ast.Name)
-            and profile_id.id == "WHISPERX_PROFILE_ID"
-            and isinstance(admission, ast.Attribute)
+            isinstance(admission, ast.Attribute)
             and isinstance(admission.value, ast.Name)
             and admission.value.id == "ProfileAdmission"
         ):
-            continue
+            raise ValueError("profile-catalog-invalid")
         admissions.append(admission.attr)
     if admissions != ["disabled"]:
         raise ValueError("profile_admission_not_disabled")

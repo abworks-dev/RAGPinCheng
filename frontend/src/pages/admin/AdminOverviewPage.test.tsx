@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AdminOverviewPage } from "./AdminOverviewPage";
 
@@ -38,7 +38,7 @@ describe("AdminOverviewPage", () => {
       checked_at: 20,
       app: { status: "healthy", cpu_percent: 31.2, memory_used_bytes: 4 * 1024 ** 3, memory_total_bytes: 16 * 1024 ** 3, disk_used_bytes: 40 * 1024 ** 3, disk_total_bytes: 100 * 1024 ** 3, checked_at: 20, error_code: null },
       gpu: { status: "healthy", model_loaded: true, device_name: "合成 GPU", vram_used_bytes: 4 * 1024 ** 3, vram_total_bytes: 16 * 1024 ** 3, utilization_percent: 42, temperature_celsius: 53, inflight_requests: 1, checked_at: 20, data_age_seconds: 0, stale: false, error_code: null },
-      office_processing: { enabled: true, mode: "deployment_config", disabled_reason: null },
+      office_processing: { enabled: true, mode: "deployment_config", disabled_reason: null, status: "healthy", checked_at: 20, error_code: null },
     });
   });
 
@@ -118,8 +118,9 @@ describe("AdminOverviewPage", () => {
     expect(screen.getByText("分离部署")).toBeInTheDocument();
     expect(screen.getByText("合成 GPU")).toBeInTheDocument();
     expect(screen.queryByText(/node|节点 ID/i)).not.toBeInTheDocument();
-    expect(screen.getByText("Office 新资料处理")).toBeInTheDocument();
-    expect(screen.getByText("已开启")).toBeInTheDocument();
+    const officeHeading = screen.getByText("Office 新资料处理");
+    expect(officeHeading).toBeInTheDocument();
+    expect(within(officeHeading.parentElement!).getByText("运行正常")).toBeInTheDocument();
   });
 
   it("shows when new Office processing is disabled without hiding existing-content scope", async () => {
@@ -129,12 +130,26 @@ describe("AdminOverviewPage", () => {
       checked_at: 20,
       app: { status: "healthy", cpu_percent: null, memory_used_bytes: null, memory_total_bytes: null, disk_used_bytes: null, disk_total_bytes: null, checked_at: 20, error_code: null },
       gpu: { status: "unavailable", model_loaded: null, device_name: null, vram_used_bytes: null, vram_total_bytes: null, utilization_percent: null, temperature_celsius: null, inflight_requests: null, checked_at: 20, data_age_seconds: null, stale: false, error_code: "gpu_metrics_unreachable" },
-      office_processing: { enabled: false, mode: "deployment_config", disabled_reason: "office_processing_disabled" },
+      office_processing: { enabled: false, mode: "deployment_config", disabled_reason: "office_processing_disabled", status: "disabled", checked_at: 20, error_code: null },
     });
     render(<AdminOverviewPage />);
     expect(await screen.findByText("Office 新资料处理")).toBeInTheDocument();
     expect(screen.getByText("已停用")).toBeInTheDocument();
-    expect(screen.getByText(/既有资料仍可检索和预览/)).toBeInTheDocument();
+    expect(screen.getByText(/既有资料仍可检索/)).toBeInTheDocument();
+  });
+
+  it("shows when the Office conversion service is unreachable", async () => {
+    mocks.adminStats.mockResolvedValue(initialStats);
+    mocks.adminSystemOverview.mockResolvedValue({
+      topology: "unknown",
+      checked_at: 20,
+      app: { status: "healthy", cpu_percent: null, memory_used_bytes: null, memory_total_bytes: null, disk_used_bytes: null, disk_total_bytes: null, checked_at: 20, error_code: null },
+      gpu: { status: "unavailable", model_loaded: null, device_name: null, vram_used_bytes: null, vram_total_bytes: null, utilization_percent: null, temperature_celsius: null, inflight_requests: null, checked_at: 20, data_age_seconds: null, stale: false, error_code: "gpu_metrics_unreachable" },
+      office_processing: { enabled: true, mode: "deployment_config", disabled_reason: null, status: "unavailable", checked_at: 20, error_code: "office_service_unreachable" },
+    });
+    render(<AdminOverviewPage />);
+    expect(await screen.findByText("服务异常")).toBeInTheDocument();
+    expect(screen.getByText(/PPTX 预览生成可能失败/)).toBeInTheDocument();
   });
 
   it("keeps the overview usable when runtime metrics fail", async () => {

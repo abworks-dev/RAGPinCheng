@@ -10,6 +10,7 @@ import { LoginPage } from "./pages/LoginPage";
 import { RegisterPage } from "./pages/RegisterPage";
 import { AdminCategoriesPage } from "./pages/admin/AdminCategoriesPage";
 import { AdminAnswerPolicyPage } from "./pages/admin/AdminAnswerPolicyPage";
+import { AdminAsrSettingsPage } from "./pages/admin/AdminAsrSettingsPage";
 import { AdminConversationsPage } from "./pages/admin/AdminConversationsPage";
 import { AdminFeedbackPage } from "./pages/admin/AdminFeedbackPage";
 import { AdminLayout } from "./pages/admin/AdminLayout";
@@ -122,6 +123,7 @@ export default function App() {
                 <Route path="overview" element={<AdminOverviewRoute />} />
                 <Route path="maintenance" element={<AdminMaintenancePage />} />
                 <Route path="answer-policy" element={<RequireSystemAdmin><AdminAnswerPolicyPage /></RequireSystemAdmin>} />
+                <Route path="asr" element={<RequireSystemAdmin><AdminAsrSettingsPage /></RequireSystemAdmin>} />
                 <Route path="content" element={<AdminManagedContentPage />} />
                 <Route path="categories" element={<AdminCategoriesPage />} />
                 <Route path="media" element={<AdminMediaPage />} />

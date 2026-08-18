@@ -12,6 +12,8 @@ from .types import (
     NormalizerConfig,
     ProfileAdmission,
     ProfileQualification,
+    TerminologyCorrectionConfig,
+    TranscriptSegmentationConfig,
     TranscriptionInputRef,
     canonical_json_bytes,
     reject_unknown_fields,
@@ -321,11 +323,16 @@ class WhisperXRemoteConfig:
     poll_interval_ms: int = 1000
 
     def __post_init__(self) -> None:
-        if self.config_kind != "whisperx" or self.config_version != "1":
+        if self.config_kind != "whisperx" or self.config_version not in ("1", "2"):
             raise ContractValidationError(
                 "unsupported_provider_config", "provider_config"
             )
-        if self.service_profile_id != "whisperx-large-v3-zh-align-v1":
+        expected_service_profile_id = (
+            "whisperx-large-v3-zh-align-v1"
+            if self.config_version == "1"
+            else "whisperx-large-v3-zh-align-v2"
+        )
+        if self.service_profile_id != expected_service_profile_id:
             raise ContractValidationError(
                 "invalid_service_profile_id", "service_profile_id"
             )
@@ -488,7 +495,7 @@ def provider_config_from_json(data: object) -> ProviderTrustedConfig:
             obj["upload_part_bytes"],
             obj["poll_interval_ms"],
         )
-    if kind == "whisperx" and version == "1":
+    if kind == "whisperx" and version in ("1", "2"):
         obj = reject_unknown_fields(
             data,
             {
@@ -535,8 +542,10 @@ def _execution_payload_dict(
     canonical_schema_version: str,
     normalizer_version: str,
     formatter_version: str,
+    segmentation_config: TranscriptSegmentationConfig | None = None,
+    terminology_config: TerminologyCorrectionConfig | None = None,
 ) -> dict[str, Any]:
-    return {
+    payload = {
         "profile_id": profile_id,
         "provider_key": provider_key,
         "profile_definition_version": profile_definition_version,
@@ -547,6 +556,11 @@ def _execution_payload_dict(
         "normalizer_version": normalizer_version,
         "formatter_version": formatter_version,
     }
+    if segmentation_config is not None:
+        payload["segmentation_config"] = segmentation_config.to_json_dict()
+    if terminology_config is not None:
+        payload["terminology_config"] = terminology_config.to_json_dict()
+    return payload
 
 
 def compute_config_hash(**kwargs: Any) -> str:
@@ -571,6 +585,8 @@ class TranscriptionProfileDefinition:
     normalizer_version: str
     formatter_version: str
     evidence_refs: tuple[str, ...] = ()
+    segmentation_config: TranscriptSegmentationConfig | None = None
+    terminology_config: TerminologyCorrectionConfig | None = None
 
     def __post_init__(self) -> None:
         validate_profile_id(self.profile_id)
@@ -597,6 +613,10 @@ class TranscriptionProfileDefinition:
             raise ContractValidationError("mutable_collection", "evidence_refs")
         for item in self.evidence_refs:
             require_string(item, "evidence_refs")
+        if self.segmentation_config is not None and type(self.segmentation_config) is not TranscriptSegmentationConfig:
+            raise ContractValidationError("invalid_segmentation_config", "segmentation_config")
+        if self.terminology_config is not None and type(self.terminology_config) is not TerminologyCorrectionConfig:
+            raise ContractValidationError("invalid_terminology_config", "terminology_config")
         expected = compute_config_hash(
             profile_id=self.profile_id,
             provider_key=self.provider_key,
@@ -607,6 +627,8 @@ class TranscriptionProfileDefinition:
             canonical_schema_version=self.canonical_schema_version,
             normalizer_version=self.normalizer_version,
             formatter_version=self.formatter_version,
+            segmentation_config=self.segmentation_config,
+            terminology_config=self.terminology_config,
         )
         if not hmac.compare_digest(expected, self.config_hash):
             raise ContractValidationError("config_hash_mismatch", "config_hash")
@@ -630,6 +652,8 @@ class TranscriptionProfileDefinition:
         normalizer_version: str = "1",
         formatter_version: str = "1",
         evidence_refs: tuple[str, ...] = (),
+        segmentation_config: TranscriptSegmentationConfig | None = None,
+        terminology_config: TerminologyCorrectionConfig | None = None,
     ) -> "TranscriptionProfileDefinition":
         config_hash = compute_config_hash(
             profile_id=profile_id,
@@ -641,6 +665,8 @@ class TranscriptionProfileDefinition:
             canonical_schema_version=canonical_schema_version,
             normalizer_version=normalizer_version,
             formatter_version=formatter_version,
+            segmentation_config=segmentation_config,
+            terminology_config=terminology_config,
         )
         return cls(
             profile_id,
@@ -659,6 +685,8 @@ class TranscriptionProfileDefinition:
             normalizer_version,
             formatter_version,
             evidence_refs,
+            segmentation_config,
+            terminology_config,
         )
 
     def execution_payload_dict(self) -> dict[str, Any]:
@@ -672,6 +700,8 @@ class TranscriptionProfileDefinition:
             canonical_schema_version=self.canonical_schema_version,
             normalizer_version=self.normalizer_version,
             formatter_version=self.formatter_version,
+            segmentation_config=self.segmentation_config,
+            terminology_config=self.terminology_config,
         )
 
 
@@ -781,8 +811,10 @@ def _fingerprint_object(
     canonical_schema_version: str,
     normalizer_version: str,
     formatter_version: str,
+    segmentation_config: TranscriptSegmentationConfig | None = None,
+    terminology_config: TerminologyCorrectionConfig | None = None,
 ) -> dict[str, Any]:
-    return {
+    payload = {
         "profile_id": profile_id,
         "provider_key": provider_key,
         "profile_definition_version": profile_definition_version,
@@ -801,6 +833,11 @@ def _fingerprint_object(
         "normalizer_version": normalizer_version,
         "formatter_version": formatter_version,
     }
+    if segmentation_config is not None:
+        payload["segmentation_config"] = segmentation_config.to_json_dict()
+    if terminology_config is not None:
+        payload["terminology_config"] = terminology_config.to_json_dict()
+    return payload
 
 
 def compute_execution_fingerprint(input_ref: TranscriptionInputRef, **kwargs: Any) -> str:
@@ -823,6 +860,8 @@ class TranscriptionExecutionConfig:
     normalizer_version: str
     formatter_version: str
     execution_fingerprint: str
+    segmentation_config: TranscriptSegmentationConfig | None = None
+    terminology_config: TerminologyCorrectionConfig | None = None
 
     def __post_init__(self) -> None:
         validate_profile_id(self.profile_id)
@@ -838,6 +877,10 @@ class TranscriptionExecutionConfig:
         validate_version(self.normalizer_version, "normalizer_version")
         validate_version(self.formatter_version, "formatter_version")
         validate_sha256(self.execution_fingerprint, "execution_fingerprint")
+        if self.segmentation_config is not None and type(self.segmentation_config) is not TranscriptSegmentationConfig:
+            raise ContractValidationError("invalid_segmentation_config", "segmentation_config")
+        if self.terminology_config is not None and type(self.terminology_config) is not TerminologyCorrectionConfig:
+            raise ContractValidationError("invalid_terminology_config", "terminology_config")
 
     @classmethod
     def create(
@@ -863,11 +906,15 @@ class TranscriptionExecutionConfig:
             "normalizer_version": profile.normalizer_version,
             "formatter_version": profile.formatter_version,
         }
+        if profile.segmentation_config is not None:
+            kwargs["segmentation_config"] = profile.segmentation_config
+        if profile.terminology_config is not None:
+            kwargs["terminology_config"] = profile.terminology_config
         fingerprint = compute_execution_fingerprint(input_ref, **kwargs)
         return cls(**kwargs, execution_fingerprint=fingerprint)
 
     def fingerprint_kwargs(self) -> dict[str, Any]:
-        return {
+        payload = {
             "profile_id": self.profile_id,
             "provider_key": self.provider_key,
             "profile_definition_version": self.profile_definition_version,
@@ -880,10 +927,19 @@ class TranscriptionExecutionConfig:
             "normalizer_version": self.normalizer_version,
             "formatter_version": self.formatter_version,
         }
+        if self.segmentation_config is not None:
+            payload["segmentation_config"] = self.segmentation_config
+        if self.terminology_config is not None:
+            payload["terminology_config"] = self.terminology_config
+        return payload
 
     def to_json_dict(self) -> dict[str, Any]:
         return {
-            **{key: value for key, value in self.fingerprint_kwargs().items() if key not in ("provider_config", "normalizer_config")},
+            **{
+                key: (value.to_json_dict() if key in ("segmentation_config", "terminology_config") else value)
+                for key, value in self.fingerprint_kwargs().items()
+                if key not in ("provider_config", "normalizer_config")
+            },
             "provider_config": self.provider_config.to_json_dict(),
             "normalizer_config": self.normalizer_config.to_json_dict(),
             "execution_fingerprint": self.execution_fingerprint,

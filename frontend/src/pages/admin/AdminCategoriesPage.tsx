@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MutableRefObject, type ReactNode } from "react";
 import {
-  ArrowDown,
-  ArrowUp,
   ChevronDown,
   ChevronRight,
   ChevronsDown,
@@ -9,7 +7,7 @@ import {
   Folder,
   FolderOpen,
   FolderTree,
-  GripVertical,
+  ListOrdered,
   Move,
   Plus,
   RefreshCw,
@@ -17,22 +15,6 @@ import {
   Search,
   TriangleAlert,
 } from "lucide-react";
-import {
-  DndContext,
-  KeyboardSensor,
-  PointerSensor,
-  closestCenter,
-  useSensor,
-  useSensors,
-  type DragEndEvent,
-} from "@dnd-kit/core";
-import {
-  SortableContext,
-  sortableKeyboardCoordinates,
-  useSortable,
-  verticalListSortingStrategy,
-} from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
 import { adminContentApi } from "../../api/admin/content";
 import { Alert, AlertDescription, AlertTitle } from "../../components/ui/alert";
 import { Badge } from "../../components/ui/badge";
@@ -49,6 +31,7 @@ import { toast } from "../../components/ui/toast";
 import type { ManagedCategory } from "../../types";
 import {
   buildCategoryTree,
+  compareManagedCategories,
   collectCategoryAncestorIds,
   collectExpandableCategoryIds,
   countCategoryTreeNodes,
@@ -58,28 +41,24 @@ import {
 } from "../../lib/category-tree";
 
 type CategoryFilter = "all" | "active" | "inactive";
-type CategoryDraft = Pick<ManagedCategory, "display_code" | "display_name" | "sort_order" | "is_active">;
+type CategoryDraft = Pick<ManagedCategory, "display_name" | "is_active">;
+type CategoryCreateDraft = { parent_id: string; display_name: string; target_position: string };
 type PendingAction =
   | { kind: "select"; id: string }
   | { kind: "refresh" }
   | { kind: "close" }
   | { kind: "create"; parentId: string | null }
   | null;
-type CategoryMove = {
-  categoryId: string;
-  targetParentId: string | null;
-  beforeCategoryId: string | null;
-};
-
-const EMPTY_DRAFT: CategoryDraft = { display_code: "", display_name: "", sort_order: 0, is_active: true };
 
 function makeDraft(category: ManagedCategory): CategoryDraft {
   return {
-    display_code: category.display_code,
     display_name: category.display_name,
-    sort_order: category.sort_order,
     is_active: category.is_active,
   };
+}
+
+function positionCode(position: number, siblingCount: number) {
+  return String(position).padStart(Math.max(2, String(siblingCount).length), "0");
 }
 
 function filterTree(nodes: CategoryTreeNode[], query: string, filter: CategoryFilter): CategoryTreeNode[] {
@@ -110,32 +89,31 @@ export function AdminCategoriesPage() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [draft, setDraft] = useState<CategoryDraft | null>(null);
   const [draftCategoryId, setDraftCategoryId] = useState<string | null>(null);
+  const [draftCategoryVersion, setDraftCategoryVersion] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
-  const [createDraft, setCreateDraft] = useState({ parent_id: "", display_code: "", display_name: "", sort_order: "0" });
+  const [createDraft, setCreateDraft] = useState<CategoryCreateDraft>({ parent_id: "", display_name: "", target_position: "1" });
   const [createSaving, setCreateSaving] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+  const [createConfirming, setCreateConfirming] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
   const [discardOpen, setDiscardOpen] = useState(false);
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
-  const [structureMode, setStructureMode] = useState(false);
   const [moving, setMoving] = useState(false);
   const [moveError, setMoveError] = useState<string | null>(null);
   const [moveOpen, setMoveOpen] = useState(false);
   const [moveTargetParentId, setMoveTargetParentId] = useState("");
-  const [pendingMove, setPendingMove] = useState<CategoryMove | null>(null);
+  const [numberTarget, setNumberTarget] = useState<ManagedCategory | null>(null);
+  const [numberValue, setNumberValue] = useState("");
+  const [numberConfirming, setNumberConfirming] = useState(false);
+  const [numberSaving, setNumberSaving] = useState(false);
+  const [numberError, setNumberError] = useState<string | null>(null);
   const nodeRefs = useRef(new Map<string, HTMLDivElement>());
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
-  );
 
   const selectedCategory = categories.find((category) => category.id === selectedId) || null;
   const isDirty = Boolean(selectedCategory && draft && draftCategoryId === selectedCategory.id
-    && (draft.display_code !== selectedCategory.display_code
-      || draft.display_name !== selectedCategory.display_name
-      || draft.sort_order !== selectedCategory.sort_order
+    && (draft.display_name !== selectedCategory.display_name
       || draft.is_active !== selectedCategory.is_active));
 
   const load = useCallback(async (refresh = false) => {
@@ -162,14 +140,16 @@ export function AdminCategoriesPage() {
     if (!selectedCategory) {
       setDraft(null);
       setDraftCategoryId(null);
+      setDraftCategoryVersion(null);
       return;
     }
-    if (draftCategoryId !== selectedCategory.id || !isDirty) {
+    if (draftCategoryId !== selectedCategory.id || draftCategoryVersion !== selectedCategory.version) {
       setDraft(makeDraft(selectedCategory));
       setDraftCategoryId(selectedCategory.id);
+      setDraftCategoryVersion(selectedCategory.version);
       setSaveError(null);
     }
-  }, [draftCategoryId, isDirty, selectedCategory]);
+  }, [draftCategoryId, draftCategoryVersion, selectedCategory]);
 
   const tree = useMemo(() => filterTree(buildCategoryTree(categories), query, filter), [categories, filter, query]);
   const visibleNodes = useMemo(() => flattenVisibleCategoryTree(tree, expanded), [expanded, tree]);
@@ -181,16 +161,7 @@ export function AdminCategoriesPage() {
     categories.filter((category) => category.is_active && category.parent_id).forEach((category) => result.add(category.parent_id as string));
     return result;
   }, [categories]);
-  const selectedSiblings = useMemo(
-    () => selectedCategory
-      ? categories.filter((category) => category.parent_id === selectedCategory.parent_id).sort((left, right) => left.sort_order - right.sort_order)
-      : [],
-    [categories, selectedCategory],
-  );
-  const movingCategory = useMemo(
-    () => pendingMove ? categories.find((category) => category.id === pendingMove.categoryId) || null : selectedCategory,
-    [categories, pendingMove, selectedCategory],
-  );
+  const movingCategory = selectedCategory;
   const moveParentOptions = useMemo(() => {
     if (!movingCategory) return [];
     const descendants = new Set<string>();
@@ -205,6 +176,30 @@ export function AdminCategoriesPage() {
       && category.is_active
       && category.level + 1 + subtreeDepth <= 4);
   }, [categories, movingCategory]);
+  const createParentId = createDraft.parent_id || null;
+  const createSiblings = useMemo(
+    () => categories.filter((category) => category.parent_id === createParentId).sort(compareManagedCategories),
+    [categories, createParentId],
+  );
+  const createPosition = Number(createDraft.target_position);
+  const createPositionValid = Number.isInteger(createPosition)
+    && createPosition >= 1
+    && createPosition <= createSiblings.length + 1;
+  const createNumberConflict = createPositionValid && createPosition <= createSiblings.length
+    ? createSiblings[createPosition - 1]
+    : null;
+  const numberSiblings = useMemo(
+    () => numberTarget
+      ? categories.filter((category) => category.parent_id === numberTarget.parent_id).sort(compareManagedCategories)
+      : [],
+    [categories, numberTarget],
+  );
+  const parsedNumber = Number(numberValue);
+  const numberValid = Number.isInteger(parsedNumber) && parsedNumber >= 1 && parsedNumber <= numberSiblings.length;
+  const currentNumber = numberTarget
+    ? numberSiblings.findIndex((category) => category.id === numberTarget.id) + 1
+    : 0;
+  const numberConflict = numberValid ? numberSiblings[parsedNumber - 1] : null;
 
   useEffect(() => {
     if (!query.trim() && filter === "all") return;
@@ -248,9 +243,9 @@ export function AdminCategoriesPage() {
   const requestCreate = (parentId: string | null = null) => {
     if (!requestAction({ kind: "create", parentId })) return;
     const siblings = categories.filter((category) => category.parent_id === parentId);
-    const nextSort = siblings.length ? Math.max(...siblings.map((category) => category.sort_order)) + 10 : 10;
-    setCreateDraft({ parent_id: parentId || "", display_code: "", display_name: "", sort_order: String(nextSort) });
+    setCreateDraft({ parent_id: parentId || "", display_name: "", target_position: String(siblings.length + 1) });
     setCreateError(null);
+    setCreateConfirming(false);
     setCreateOpen(true);
   };
 
@@ -259,6 +254,7 @@ export function AdminCategoriesPage() {
     setPendingAction(null);
     if (selectedCategory) setDraft(makeDraft(selectedCategory));
     setDraftCategoryId(selectedCategory?.id || null);
+    setDraftCategoryVersion(selectedCategory?.version ?? null);
     setSaveError(null);
     const action = pendingAction;
     if (!action) return;
@@ -267,9 +263,9 @@ export function AdminCategoriesPage() {
     if (action.kind === "close") setEditorOpen(false);
     if (action.kind === "create") {
       const siblings = categories.filter((category) => category.parent_id === action.parentId);
-      const nextSort = siblings.length ? Math.max(...siblings.map((category) => category.sort_order)) + 10 : 10;
-      setCreateDraft({ parent_id: action.parentId || "", display_code: "", display_name: "", sort_order: String(nextSort) });
+      setCreateDraft({ parent_id: action.parentId || "", display_name: "", target_position: String(siblings.length + 1) });
       setCreateError(null);
+      setCreateConfirming(false);
       setCreateOpen(true);
     }
   };
@@ -280,13 +276,14 @@ export function AdminCategoriesPage() {
     setSaveError(null);
     try {
       const updated = await adminContentApi.updateCategory(selectedCategory.id, {
-        display_code: draft.display_code.trim(),
+        display_code: selectedCategory.display_code,
         display_name: draft.display_name.trim(),
-        sort_order: Number(draft.sort_order) || 0,
+        sort_order: selectedCategory.sort_order,
         is_active: draft.is_active,
         expected_version: selectedCategory.version,
       });
       setDraft(makeDraft(updated));
+      setDraftCategoryVersion(updated.version);
       await load(true);
       toast.success(`${updated.display_name}已保存`);
     } catch (saveErrorValue) {
@@ -296,27 +293,43 @@ export function AdminCategoriesPage() {
     }
   };
 
-  const create = async () => {
+  const create = async (confirmNumberShift = false) => {
+    if (!createPositionValid) return;
+    if (createNumberConflict && !confirmNumberShift) {
+      setCreateConfirming(true);
+      return;
+    }
     setCreateSaving(true);
     setCreateError(null);
     try {
       const created = await adminContentApi.createCategory({
-        parent_id: createDraft.parent_id || null,
-        display_code: createDraft.display_code.trim(),
+        parent_id: createParentId,
+        display_code: positionCode(createPosition, createSiblings.length + 1),
         display_name: createDraft.display_name.trim(),
-        sort_order: Number(createDraft.sort_order) || 0,
+        sort_order: createPosition * 10,
+        target_position: createPosition,
+        confirm_number_shift: confirmNumberShift,
       });
       const rows = await load(true);
       setCreateOpen(false);
+      setCreateConfirming(false);
       if (rows) {
         setSelectedId(created.id);
         setDraft(makeDraft(created));
         setDraftCategoryId(created.id);
+        setDraftCategoryVersion(created.version);
         setExpanded((current) => new Set([...current, ...collectCategoryAncestorIds(rows, created.id)]));
       }
       toast.success("分类已创建");
     } catch (createErrorValue) {
-      setCreateError(createErrorValue instanceof Error ? createErrorValue.message : "分类创建失败");
+      const code = typeof createErrorValue === "object" && createErrorValue !== null && "code" in createErrorValue
+        ? String(createErrorValue.code || "")
+        : "";
+      if (code === "category_number_confirmation_required") {
+        setCreateConfirming(true);
+      } else {
+        setCreateError(createErrorValue instanceof Error ? createErrorValue.message : "分类创建失败");
+      }
     } finally {
       setCreateSaving(false);
     }
@@ -325,25 +338,31 @@ export function AdminCategoriesPage() {
   const cancelEdit = () => {
     if (selectedCategory) setDraft(makeDraft(selectedCategory));
     setDraftCategoryId(selectedCategory?.id || null);
+    setDraftCategoryVersion(selectedCategory?.version ?? null);
     setSaveError(null);
   };
 
-  const executeMove = async (move: CategoryMove) => {
-    const category = categories.find((item) => item.id === move.categoryId);
-    if (!category) return;
+  const executeMove = async () => {
+    if (!selectedCategory) return;
     setMoving(true);
     setMoveError(null);
     try {
-      const rows = await adminContentApi.moveCategory(category.id, {
-        target_parent_id: move.targetParentId,
-        before_category_id: move.beforeCategoryId,
-        expected_version: category.version,
+      const targetParentId = moveTargetParentId || null;
+      const rows = await adminContentApi.moveCategory(selectedCategory.id, {
+        target_parent_id: targetParentId,
+        before_category_id: null,
+        expected_version: selectedCategory.version,
       });
       setCategories(rows);
-      setExpanded((current) => new Set([...current, ...collectCategoryAncestorIds(rows, category.id)]));
+      const updated = rows.find((category) => category.id === selectedCategory.id);
+      if (updated) {
+        setDraft(makeDraft(updated));
+        setDraftCategoryId(updated.id);
+        setDraftCategoryVersion(updated.version);
+      }
+      setExpanded((current) => new Set([...current, ...collectCategoryAncestorIds(rows, selectedCategory.id)]));
       setMoveOpen(false);
-      setPendingMove(null);
-      toast.success(`${category.display_name}已移动`);
+      toast.success(`${selectedCategory.display_name}已移动到目标目录末尾`);
     } catch (moveErrorValue) {
       setMoveError(moveErrorValue instanceof Error ? moveErrorValue.message : "分类移动失败");
     } finally {
@@ -351,51 +370,55 @@ export function AdminCategoriesPage() {
     }
   };
 
-  const moveRelative = (offset: -1 | 1) => {
-    if (!selectedCategory) return;
-    const index = selectedSiblings.findIndex((category) => category.id === selectedCategory.id);
-    const targetIndex = index + offset;
-    if (index < 0 || targetIndex < 0 || targetIndex >= selectedSiblings.length) return;
-    const beforeCategoryId = offset < 0
-      ? selectedSiblings[targetIndex].id
-      : selectedSiblings[targetIndex + 1]?.id || null;
-    void executeMove({ categoryId: selectedCategory.id, targetParentId: selectedCategory.parent_id, beforeCategoryId });
-  };
-
-  const openMoveDialog = (move?: CategoryMove) => {
-    const category = move ? categories.find((item) => item.id === move.categoryId) : selectedCategory;
-    if (!category || isDirty) return;
-    const targetParentId = move?.targetParentId ?? category.parent_id;
-    setPendingMove(move || null);
-    setMoveTargetParentId(targetParentId || "");
+  const openMoveDialog = () => {
+    if (!selectedCategory || isDirty) return;
+    setMoveTargetParentId(selectedCategory.parent_id || "");
     setMoveError(null);
     setMoveOpen(true);
   };
 
   const confirmMove = () => {
     if (!movingCategory) return;
-    const targetParentId = moveTargetParentId || null;
-    void executeMove(pendingMove
-      ? { ...pendingMove, targetParentId, beforeCategoryId: pendingMove.targetParentId === targetParentId ? pendingMove.beforeCategoryId : null }
-      : { categoryId: movingCategory.id, targetParentId, beforeCategoryId: null });
+    void executeMove();
   };
 
-  const handleDragEnd = ({ active, over }: DragEndEvent) => {
-    if (!over || active.id === over.id) return;
-    const dragged = categories.find((category) => category.id === active.id);
-    const target = categories.find((category) => category.id === over.id);
-    if (!dragged || !target) return;
-    if (dragged.parent_id !== target.parent_id) {
-      const targetParentId = target.is_active && target.level < 4 ? target.id : target.parent_id;
-      openMoveDialog({ categoryId: dragged.id, targetParentId, beforeCategoryId: null });
-      return;
+  const openNumberDialog = () => {
+    if (!selectedCategory || isDirty) return;
+    const siblings = categories
+      .filter((category) => category.parent_id === selectedCategory.parent_id)
+      .sort(compareManagedCategories);
+    setNumberTarget(selectedCategory);
+    setNumberValue(String(siblings.findIndex((category) => category.id === selectedCategory.id) + 1));
+    setNumberConfirming(false);
+    setNumberError(null);
+  };
+
+  const saveNumber = async () => {
+    if (!numberTarget || !numberValid || parsedNumber === currentNumber) return;
+    setNumberSaving(true);
+    setNumberError(null);
+    try {
+      const rows = await adminContentApi.updateCategoryNumber(numberTarget.id, {
+        target_position: parsedNumber,
+        confirm_number_shift: true,
+        expected_version: numberTarget.version,
+      });
+      setCategories(rows);
+      const updated = rows.find((category) => category.id === numberTarget.id);
+      if (updated) {
+        setDraft(makeDraft(updated));
+        setDraftCategoryId(updated.id);
+        setDraftCategoryVersion(updated.version);
+      }
+      setNumberTarget(null);
+      setNumberConfirming(false);
+      toast.success(`分类编号已调整为 ${positionCode(parsedNumber, numberSiblings.length)}`);
+    } catch (saveNumberError) {
+      setNumberConfirming(false);
+      setNumberError(saveNumberError instanceof Error ? saveNumberError.message : "调整分类编号失败");
+    } finally {
+      setNumberSaving(false);
     }
-    const siblings = categories.filter((category) => category.parent_id === dragged.parent_id)
-      .sort((left, right) => left.sort_order - right.sort_order);
-    const activeIndex = siblings.findIndex((category) => category.id === dragged.id);
-    const overIndex = siblings.findIndex((category) => category.id === target.id);
-    const beforeCategoryId = activeIndex < overIndex ? siblings[overIndex + 1]?.id || null : target.id;
-    void executeMove({ categoryId: dragged.id, targetParentId: dragged.parent_id, beforeCategoryId });
   };
 
   const handleEditorOpenChange = (open: boolean) => {
@@ -450,9 +473,6 @@ export function AdminCategoriesPage() {
                   {allExpanded ? <ChevronsUp className="size-4" aria-hidden="true" /> : <ChevronsDown className="size-4" aria-hidden="true" />}
                   {allExpanded ? "全部折叠" : "全部展开"}
                 </Button>}
-                <Button size="sm" variant={structureMode ? "secondary" : "ghost"} aria-pressed={structureMode} disabled={isDirty || moving} title={isDirty ? "请先保存或取消当前修改" : "调整分类顺序和父级"} onClick={() => setStructureMode((current) => !current)}>
-                  <Move className="size-4" aria-hidden="true" />{structureMode ? "完成调整" : "调整结构"}
-                </Button>
               </div>
             </div>
           </div>
@@ -460,30 +480,28 @@ export function AdminCategoriesPage() {
           {tree.length === 0 ? <EmptyState className="rounded-none border-0 border-t border-border bg-card" title="没有符合条件的分类" description="请调整搜索词或状态筛选。" /> : (
             <div className="grid min-h-[28rem] border-t border-border lg:h-[calc(100vh-20rem)] lg:min-h-[22rem] lg:max-h-[40rem] lg:grid-cols-[minmax(22rem,0.88fr)_minmax(25rem,1.12fr)]">
               <div className="min-h-0 min-w-0 border-border bg-background/30 lg:overflow-y-auto lg:border-r">
-                {structureMode && <div className="border-b border-border bg-primary/5 px-4 py-2 text-ui-xs text-muted-foreground" role="status">拖动手柄调整同级顺序；跨层级移动会要求确认。</div>}
-                {moveError && <Alert variant="destructive" className="m-3" role="alert"><AlertTitle>结构调整失败</AlertTitle><AlertDescription>{moveError}</AlertDescription></Alert>}
-                <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={({ active }) => setSelectedId(String(active.id))} onDragEnd={handleDragEnd}>
-                  <SortableContext items={visibleNodes.map((node) => node.category.id)} strategy={verticalListSortingStrategy}>
-                    <div role="tree" aria-label="分类层级" aria-busy={moving} className="border-b border-border">
-                      {tree.map((node, index) => <CategoryTreeNodeView key={node.category.id} node={node} level={1} index={index} siblingCount={tree.length} selectedId={selectedId} expanded={expanded} visibleNodes={visibleNodes} nodeRefs={nodeRefs} structureMode={structureMode} moving={moving} onSelect={selectCategory} onToggle={(id) => setExpanded((current) => { const next = new Set(current); next.has(id) ? next.delete(id) : next.add(id); return next; })} />)}
-                    </div>
-                  </SortableContext>
-                </DndContext>
+                <div role="tree" aria-label="分类层级" aria-busy={moving || numberSaving} className="border-b border-border">
+                  {tree.map((node, index) => <CategoryTreeNodeView key={node.category.id} node={node} level={1} index={index} siblingCount={tree.length} selectedId={selectedId} expanded={expanded} visibleNodes={visibleNodes} nodeRefs={nodeRefs} onSelect={selectCategory} onToggle={(id) => setExpanded((current) => { const next = new Set(current); next.has(id) ? next.delete(id) : next.add(id); return next; })} />)}
+                </div>
               </div>
               <div className="hidden min-h-0 min-w-0 overflow-hidden lg:block">
-                <CategoryDetail category={selectedCategory} draft={draft} categories={categories} saving={saving} moving={moving} error={saveError} hasActiveChild={selectedCategory ? activeChildIds.has(selectedCategory.id) : false} onChange={setDraft} onSave={() => void saveSelected()} onCancel={cancelEdit} onAddChild={() => selectedCategory && requestCreate(selectedCategory.id)} onMove={() => openMoveDialog()} onMoveUp={() => moveRelative(-1)} onMoveDown={() => moveRelative(1)} canMoveUp={Boolean(selectedCategory && selectedSiblings[0]?.id !== selectedCategory.id)} canMoveDown={Boolean(selectedCategory && selectedSiblings.at(-1)?.id !== selectedCategory.id)} />
+                <CategoryDetail category={selectedCategory} draft={draft} categories={categories} saving={saving} moving={moving || numberSaving} error={saveError} hasActiveChild={selectedCategory ? activeChildIds.has(selectedCategory.id) : false} onChange={setDraft} onSave={() => void saveSelected()} onCancel={cancelEdit} onAddChild={() => selectedCategory && requestCreate(selectedCategory.id)} onMove={openMoveDialog} onAdjustNumber={openNumberDialog} />
               </div>
             </div>
           )}
         </section>
       )}
 
-      <Sheet open={createOpen} onOpenChange={(open) => { if (!open && !createSaving) setCreateOpen(false); }}>
+      <Sheet open={createOpen} onOpenChange={(open) => { if (!open && !createSaving) { setCreateOpen(false); setCreateConfirming(false); } }}>
         <SheetContent className="max-w-xl overflow-y-auto">
           <SheetHeader><SheetTitle>新增分类</SheetTitle><SheetDescription>分类最多四级，稳定标识由系统自动生成。</SheetDescription></SheetHeader>
           <div className="space-y-5 p-6">
             {createError && <Alert variant="destructive" role="alert"><AlertTitle>分类创建失败</AlertTitle><AlertDescription>{createError}</AlertDescription></Alert>}
-            <CategoryCreateForm draft={createDraft} categories={categories} saving={createSaving} onChange={setCreateDraft} onCreate={() => void create()} />
+            {!createConfirming ? <CategoryCreateForm draft={createDraft} categories={categories} saving={createSaving} siblingCount={createSiblings.length} positionValid={createPositionValid} onChange={(nextDraft) => { setCreateDraft(nextDraft); setCreateConfirming(false); setCreateError(null); }} onCreate={() => void create()} /> : <div className="space-y-4">
+              <Alert variant="warning" role="status"><AlertTitle>{createNumberConflict ? `编号 ${positionCode(createPosition, createSiblings.length + 1)} 已被占用` : "同级分类编号需要连续整理"}</AlertTitle><AlertDescription>{createNumberConflict ? `当前由“${createNumberConflict.display_name}”使用。继续后新分类将插入该位置，后续同级分类编号自动顺延。` : "当前同级分类仍使用旧编号规则。继续创建后，系统会按现有顺序统一整理为连续编号，并将新分类追加到末尾。"}</AlertDescription></Alert>
+              <p className="text-ui-sm text-muted-foreground">分类内容、资料归属和稳定分类标识不会改变。</p>
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end"><Button variant="outline" onClick={() => setCreateConfirming(false)} disabled={createSaving}>返回修改</Button><Button onClick={() => void create(true)} disabled={createSaving}>{createSaving ? "创建中…" : "继续创建"}</Button></div>
+            </div>}
           </div>
         </SheetContent>
       </Sheet>
@@ -491,20 +509,43 @@ export function AdminCategoriesPage() {
       <Sheet open={editorOpen} onOpenChange={handleEditorOpenChange}>
         <SheetContent className="max-w-xl overflow-y-auto lg:hidden">
           <SheetHeader><SheetTitle>{selectedCategory?.display_name || "编辑分类"}</SheetTitle><SheetDescription>{selectedCategory?.full_path || "维护分类信息"}</SheetDescription></SheetHeader>
-          <div className="p-6"><CategoryDetail category={selectedCategory} draft={draft} categories={categories} saving={saving} moving={moving} error={saveError} hasActiveChild={selectedCategory ? activeChildIds.has(selectedCategory.id) : false} onChange={setDraft} onSave={() => void saveSelected()} onCancel={cancelEdit} onAddChild={() => selectedCategory && requestCreate(selectedCategory.id)} onMove={() => openMoveDialog()} onMoveUp={() => moveRelative(-1)} onMoveDown={() => moveRelative(1)} canMoveUp={Boolean(selectedCategory && selectedSiblings[0]?.id !== selectedCategory.id)} canMoveDown={Boolean(selectedCategory && selectedSiblings.at(-1)?.id !== selectedCategory.id)} /></div>
+          <div className="p-6"><CategoryDetail category={selectedCategory} draft={draft} categories={categories} saving={saving} moving={moving || numberSaving} error={saveError} hasActiveChild={selectedCategory ? activeChildIds.has(selectedCategory.id) : false} onChange={setDraft} onSave={() => void saveSelected()} onCancel={cancelEdit} onAddChild={() => selectedCategory && requestCreate(selectedCategory.id)} onMove={openMoveDialog} onAdjustNumber={openNumberDialog} /></div>
         </SheetContent>
       </Sheet>
 
-      <Dialog open={moveOpen} onOpenChange={(open) => { if (!open && !moving) { setMoveOpen(false); setPendingMove(null); setMoveError(null); } }}>
+      <Dialog open={moveOpen} onOpenChange={(open) => { if (!open && !moving) { setMoveOpen(false); setMoveError(null); } }}>
         <DialogContent>
-          <DialogHeader><DialogTitle>移动分类</DialogTitle><DialogDescription>移动会改变分类路径，但不会改变分类标识或资料归属。</DialogDescription></DialogHeader>
+          <DialogHeader><DialogTitle>移动分类</DialogTitle><DialogDescription>移动后分类将排在目标目录末尾，并自动获得连续编号；分类标识和资料归属不变。</DialogDescription></DialogHeader>
           <div className="space-y-4">
             {moveError && <Alert variant="destructive" role="alert"><AlertTitle>移动失败</AlertTitle><AlertDescription>{moveError}</AlertDescription></Alert>}
             <div className="rounded-ui-md border border-border bg-surface-muted/40 px-3 py-2 text-ui-sm"><p className="text-ui-xs text-muted-foreground">当前路径</p><p className="mt-1 break-words font-medium">{movingCategory?.full_path}</p></div>
             <Field label="目标父分类"><Select value={moveTargetParentId} onChange={(event) => setMoveTargetParentId(event.target.value)} aria-label="目标父分类"><option value="">一级分类</option>{moveParentOptions.map((category) => <option key={category.id} value={category.id}>{category.full_path}</option>)}</Select></Field>
-            <p className="text-ui-xs text-muted-foreground">新路径：{moveTargetParentId ? `${categories.find((category) => category.id === moveTargetParentId)?.full_path} / ` : ""}{movingCategory?.display_code} {movingCategory?.display_name}</p>
+            <p className="text-ui-xs text-muted-foreground">目标位置：{moveTargetParentId ? `${categories.find((category) => category.id === moveTargetParentId)?.full_path} / ` : "一级分类 / "}末尾（系统自动编号）</p>
           </div>
-          <DialogFooter><Button variant="outline" onClick={() => setMoveOpen(false)} disabled={moving}>取消</Button><Button onClick={confirmMove} disabled={moving || (!pendingMove && movingCategory?.parent_id === (moveTargetParentId || null))}><Move className="size-4" />{moving ? "移动中…" : "确认移动"}</Button></DialogFooter>
+          <DialogFooter><Button variant="outline" onClick={() => setMoveOpen(false)} disabled={moving}>取消</Button><Button onClick={confirmMove} disabled={moving || movingCategory?.parent_id === (moveTargetParentId || null)}><Move className="size-4" />{moving ? "移动中…" : "确认移动"}</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(numberTarget)} onOpenChange={(open) => { if (!open && !numberSaving) { setNumberTarget(null); setNumberConfirming(false); setNumberError(null); } }}>
+        <DialogContent>
+          {!numberConfirming ? <>
+            <DialogHeader><DialogTitle>调整分类编号</DialogTitle><DialogDescription>编号同时决定同级分类顺序，并显示在分类名称和目录路径中。</DialogDescription></DialogHeader>
+            {numberTarget && <div className="space-y-4">
+              <div className="rounded-ui-md border border-border bg-surface-muted/40 px-3 py-2 text-ui-sm"><p className="text-ui-xs text-muted-foreground">当前分类</p><p className="mt-1 break-words font-medium">{numberTarget.full_path}</p></div>
+              <Field label="目标编号"><Input type="number" min={1} max={numberSiblings.length} step={1} value={numberValue} onChange={(event) => { setNumberValue(event.target.value); setNumberError(null); }} aria-label="目标编号" /><span className="mt-1 block text-ui-xs font-normal text-muted-foreground">可填写 1 到 {numberSiblings.length}；调整后系统会保持同级编号连续。</span></Field>
+              {!numberValid && <p className="text-ui-sm text-destructive" role="alert">请输入 1 到 {numberSiblings.length} 之间的整数。</p>}
+              {numberError && <p className="text-ui-sm text-destructive" role="alert">{numberError}</p>}
+            </div>}
+            <DialogFooter><Button variant="outline" onClick={() => setNumberTarget(null)} disabled={numberSaving}>取消</Button><Button onClick={() => setNumberConfirming(true)} disabled={!numberValid || parsedNumber === currentNumber || numberSaving}>下一步</Button></DialogFooter>
+          </> : <>
+            <DialogHeader><DialogTitle>确认调整编号</DialogTitle><DialogDescription>目标编号当前已被占用，继续后将整体调整同级分类编号。</DialogDescription></DialogHeader>
+            {numberTarget && <div className="space-y-3">
+              <Alert variant="warning" role="status"><AlertTitle>编号 {positionCode(parsedNumber, numberSiblings.length)} 当前由“{numberConflict?.display_name}”使用</AlertTitle><AlertDescription>“{numberTarget.display_name}”将从第 {currentNumber} 位移动到第 {parsedNumber} 位，共 {Math.abs(currentNumber - parsedNumber) + 1} 个同级分类的编号可能变化。</AlertDescription></Alert>
+              <p className="text-ui-sm text-muted-foreground">分类内容、资料归属和稳定分类标识不会改变。</p>
+              {numberError && <p className="text-ui-sm text-destructive" role="alert">{numberError}</p>}
+            </div>}
+            <DialogFooter><Button variant="outline" onClick={() => { setNumberTarget(null); setNumberConfirming(false); }} disabled={numberSaving}>取消</Button><Button onClick={() => void saveNumber()} disabled={numberSaving}>{numberSaving ? "调整中…" : "继续调整"}</Button></DialogFooter>
+          </>}
         </DialogContent>
       </Dialog>
 
@@ -527,8 +568,6 @@ function CategoryTreeNodeView({
   expanded,
   visibleNodes,
   nodeRefs,
-  structureMode,
-  moving,
   onSelect,
   onToggle,
 }: {
@@ -540,8 +579,6 @@ function CategoryTreeNodeView({
   expanded: Set<string>;
   visibleNodes: CategoryTreeNode[];
   nodeRefs: MutableRefObject<Map<string, HTMLDivElement>>;
-  structureMode: boolean;
-  moving: boolean;
   onSelect: (id: string) => void;
   onToggle: (id: string) => void;
 }) {
@@ -549,7 +586,6 @@ function CategoryTreeNodeView({
   const isExpanded = expanded.has(category.id);
   const hasChildren = children.length > 0;
   const visibleIndex = visibleNodes.findIndex((item) => item.category.id === category.id);
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: category.id, disabled: !structureMode || moving });
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const currentIndex = visibleIndex < 0 ? index : visibleIndex;
     const previous = visibleNodes[Math.max(0, currentIndex - 1)]?.category.id;
@@ -580,7 +616,7 @@ function CategoryTreeNodeView({
 
   return <>
     <div
-      ref={(element) => { setNodeRef(element); if (element) nodeRefs.current.set(category.id, element); else nodeRefs.current.delete(category.id); }}
+      ref={(element) => { if (element) nodeRefs.current.set(category.id, element); else nodeRefs.current.delete(category.id); }}
       role="treeitem"
       aria-level={level}
       aria-setsize={siblingCount}
@@ -589,12 +625,10 @@ function CategoryTreeNodeView({
       aria-selected={selectedId === category.id}
       tabIndex={selectedId === category.id ? 0 : -1}
       data-testid={`category-tree-item-${category.id}`}
-      style={{ transform: CSS.Transform.toString(transform), transition, zIndex: isDragging ? 10 : undefined }}
       onClick={() => onSelect(category.id)}
       onKeyDown={onKeyDown}
-      className={`relative flex min-h-[3.25rem] cursor-pointer items-center gap-2 border-b border-l-2 border-b-border py-2 pr-3 outline-none transition-colors duration-normal focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${level === 1 ? "pl-3" : "pl-3 before:absolute before:left-0 before:top-1/2 before:w-3 before:border-t before:border-border"} ${selectedId === category.id ? "border-l-primary bg-primary/10" : "border-l-transparent hover:bg-surface-muted/60"} ${isDragging ? "bg-card opacity-80 shadow-ui-md" : ""}`}
+      className={`relative flex min-h-[3.25rem] cursor-pointer items-center gap-2 border-b border-l-2 border-b-border py-2 pr-3 outline-none transition-colors duration-normal focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${level === 1 ? "pl-3" : "pl-3 before:absolute before:left-0 before:top-1/2 before:w-3 before:border-t before:border-border"} ${selectedId === category.id ? "border-l-primary bg-primary/10" : "border-l-transparent hover:bg-surface-muted/60"}`}
     >
-      {structureMode && <button type="button" aria-label={`拖动${category.display_name}`} title="拖动调整顺序" onClick={(event) => event.stopPropagation()} className="hidden size-7 shrink-0 cursor-grab items-center justify-center rounded-ui-sm text-muted-foreground hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:cursor-grabbing lg:inline-flex" {...attributes} {...listeners}><GripVertical className="size-4" /></button>}
       <span className="flex w-11 shrink-0 items-center gap-1">
         {hasChildren ? <button type="button" aria-label={isExpanded ? `收起${category.display_name}` : `展开${category.display_name}`} title={isExpanded ? "收起" : "展开"} onClick={(event) => { event.stopPropagation(); onToggle(category.id); }} className="inline-flex size-6 items-center justify-center rounded-ui-sm text-muted-foreground hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{isExpanded ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}</button> : <span className="size-6" aria-hidden="true" />}
         {hasChildren && isExpanded ? <FolderOpen className="size-4 text-primary/80" aria-hidden="true" /> : <Folder className="size-4 text-muted-foreground" aria-hidden="true" />}
@@ -605,7 +639,7 @@ function CategoryTreeNodeView({
         <span className="hidden shrink-0 text-right text-ui-xs tabular-nums text-muted-foreground sm:block">{category.item_count} 份{hasChildren ? ` · ${children.length} 项` : ""}</span>
       </span>
     </div>
-    {hasChildren && isExpanded && <div role="group" className="ml-5 border-l border-border bg-surface-muted/10 sm:ml-6">{children.map((child, childIndex) => <CategoryTreeNodeView key={child.category.id} node={child} level={level + 1} index={childIndex} siblingCount={children.length} selectedId={selectedId} expanded={expanded} visibleNodes={visibleNodes} nodeRefs={nodeRefs} structureMode={structureMode} moving={moving} onSelect={onSelect} onToggle={onToggle} />)}</div>}
+    {hasChildren && isExpanded && <div role="group" className="ml-5 border-l border-border bg-surface-muted/10 sm:ml-6">{children.map((child, childIndex) => <CategoryTreeNodeView key={child.category.id} node={child} level={level + 1} index={childIndex} siblingCount={children.length} selectedId={selectedId} expanded={expanded} visibleNodes={visibleNodes} nodeRefs={nodeRefs} onSelect={onSelect} onToggle={onToggle} />)}</div>}
   </>;
 }
 
@@ -622,10 +656,7 @@ function CategoryDetail({
   onCancel,
   onAddChild,
   onMove,
-  onMoveUp,
-  onMoveDown,
-  canMoveUp,
-  canMoveDown,
+  onAdjustNumber,
 }: {
   category: ManagedCategory | null;
   draft: CategoryDraft | null;
@@ -639,13 +670,10 @@ function CategoryDetail({
   onCancel: () => void;
   onAddChild: () => void;
   onMove: () => void;
-  onMoveUp: () => void;
-  onMoveDown: () => void;
-  canMoveUp: boolean;
-  canMoveDown: boolean;
+  onAdjustNumber: () => void;
 }) {
   if (!category || !draft) return <EmptyState title="选择一个分类" description="从左侧选择分类后，在此维护分类信息。" />;
-  const isDirty = draft.display_code !== category.display_code || draft.display_name !== category.display_name || draft.sort_order !== category.sort_order || draft.is_active !== category.is_active;
+  const isDirty = draft.display_name !== category.display_name || draft.is_active !== category.is_active;
   const cannotDisable = draft.is_active && (category.item_count > 0 || hasActiveChild);
   const statusHelpId = `category-status-help-${category.id}`;
   const parent = categories.find((item) => item.id === category.parent_id);
@@ -655,7 +683,7 @@ function CategoryDetail({
       {error && <Alert variant="destructive" role="alert"><AlertTitle>保存失败</AlertTitle><AlertDescription>{error}</AlertDescription></Alert>}
       <section aria-labelledby={`category-fields-${category.id}`} className="space-y-4">
         <h4 id={`category-fields-${category.id}`} className="text-ui-sm font-semibold">基本信息</h4>
-        <div className="grid gap-4 sm:grid-cols-2"><Field label="显示编号"><Input value={draft.display_code} onChange={(event) => onChange({ ...draft, display_code: event.target.value })} aria-label="显示编号" /></Field><Field label="显示名称"><Input value={draft.display_name} onChange={(event) => onChange({ ...draft, display_name: event.target.value })} aria-label="显示名称" /></Field></div>
+        <div className="grid gap-4 sm:grid-cols-[minmax(0,0.7fr)_minmax(0,1.3fr)]"><Field label="编号"><div className="flex gap-2"><Input value={category.display_code} readOnly aria-label="当前编号" className="tabular-nums" /><Button type="button" variant="outline" className="shrink-0" onClick={onAdjustNumber} disabled={moving || isDirty}><ListOrdered className="size-4" />调整编号</Button></div><span className="mt-1 block text-ui-xs font-normal text-muted-foreground">编号决定同级顺序；调整时其他同级编号会自动连续排列。</span></Field><Field label="显示名称"><Input value={draft.display_name} maxLength={100} onChange={(event) => onChange({ ...draft, display_name: event.target.value })} aria-label="显示名称" /></Field></div>
       </section>
       <section aria-labelledby={`category-status-${category.id}`} className="space-y-3 border-t border-border pt-4">
         <h4 id={`category-status-${category.id}`} className="text-ui-sm font-semibold">可用状态</h4>
@@ -673,9 +701,9 @@ function CategoryDetail({
         </div>
         {cannotDisable && <div id={statusHelpId} className="flex gap-2 rounded-ui-md border border-border bg-surface-muted/50 px-3 py-2 text-ui-xs text-muted-foreground" role="status"><TriangleAlert className="mt-0.5 size-4 shrink-0 text-warning" aria-hidden="true" /><div className="space-y-1"><p className="font-medium text-foreground">暂不能停用</p>{category.item_count > 0 && <p>该分类有 {category.item_count} 份直接资料，需重新归类后才能停用。</p>}{hasActiveChild && <p>该分类仍有启用的子分类，请先停用子分类。</p>}</div></div>}
       </section>
-      <section aria-labelledby={`category-level-${category.id}`} className="space-y-3 border-t border-border pt-4"><div><h4 id={`category-level-${category.id}`} className="text-ui-sm font-semibold">目录结构</h4><p className="mt-1 break-words text-ui-xs text-muted-foreground">父分类：{parent ? `${parent.display_code} ${parent.display_name}` : "一级分类"} · 第 {category.level} 级 · {category.item_count} 份直接资料</p></div><div className="flex flex-wrap gap-2"><Button variant="outline" onClick={onAddChild} disabled={moving || category.level >= 4 || !category.is_active}><Plus className="size-4" />新增子分类</Button><Button variant="outline" onClick={onMove} disabled={moving || isDirty}><Move className="size-4" />移动至</Button><IconButton label="上移分类" onClick={onMoveUp} disabled={moving || isDirty || !canMoveUp}><ArrowUp className="size-4" /></IconButton><IconButton label="下移分类" onClick={onMoveDown} disabled={moving || isDirty || !canMoveDown}><ArrowDown className="size-4" /></IconButton></div></section>
+      <section aria-labelledby={`category-level-${category.id}`} className="space-y-3 border-t border-border pt-4"><div><h4 id={`category-level-${category.id}`} className="text-ui-sm font-semibold">目录结构</h4><p className="mt-1 break-words text-ui-xs text-muted-foreground">父分类：{parent ? `${parent.display_code} ${parent.display_name}` : "一级分类"} · 第 {category.level} 级 · {category.item_count} 份直接资料</p></div><div className="flex flex-wrap gap-2"><Button variant="outline" onClick={onAddChild} disabled={moving || category.level >= 4 || !category.is_active}><Plus className="size-4" />新增子分类</Button><Button variant="outline" onClick={onMove} disabled={moving || isDirty}><Move className="size-4" />移动至</Button></div></section>
     </div>
-    <div className="flex flex-col-reverse gap-2 border-t border-border px-5 py-4 sm:flex-row sm:justify-end"><Button variant="outline" onClick={onCancel} disabled={saving || moving || !isDirty}>取消</Button><Button onClick={onSave} disabled={saving || moving || !isDirty || !draft.display_code.trim() || !draft.display_name.trim()}><Save className="size-4" />{saving ? "保存中…" : "保存修改"}</Button></div>
+    <div className="flex flex-col-reverse gap-2 border-t border-border px-5 py-4 sm:flex-row sm:justify-end"><Button variant="outline" onClick={onCancel} disabled={saving || moving || !isDirty}>取消</Button><Button onClick={onSave} disabled={saving || moving || !isDirty || !draft.display_name.trim()}><Save className="size-4" />{saving ? "保存中…" : "保存修改"}</Button></div>
   </div>;
 }
 
@@ -683,17 +711,21 @@ function CategoryCreateForm({
   draft,
   categories,
   saving,
+  siblingCount,
+  positionValid,
   onChange,
   onCreate,
 }: {
-  draft: { parent_id: string; display_code: string; display_name: string; sort_order: string };
+  draft: CategoryCreateDraft;
   categories: ManagedCategory[];
   saving: boolean;
-  onChange: (draft: { parent_id: string; display_code: string; display_name: string; sort_order: string }) => void;
+  siblingCount: number;
+  positionValid: boolean;
+  onChange: (draft: CategoryCreateDraft) => void;
   onCreate: () => void;
 }) {
-  const canCreate = draft.display_code.trim() && draft.display_name.trim();
-  return <div className="space-y-4"><Field label="父分类"><Select value={draft.parent_id} onChange={(event) => onChange({ ...draft, parent_id: event.target.value })} aria-label="父分类"><option value="">一级分类</option>{categories.filter((category) => category.is_active && category.level < 4).map((category) => <option key={category.id} value={category.id}>{category.full_path}</option>)}</Select></Field><div className="grid gap-4 sm:grid-cols-2"><Field label="显示编号"><Input value={draft.display_code} onChange={(event) => onChange({ ...draft, display_code: event.target.value })} placeholder="例如 03" aria-label="显示编号" /></Field><Field label="分类名称"><Input value={draft.display_name} onChange={(event) => onChange({ ...draft, display_name: event.target.value })} placeholder="例如 公司内部标准" aria-label="分类名称" /></Field></div><Field label="同级排序"><Input type="number" value={draft.sort_order} onChange={(event) => onChange({ ...draft, sort_order: event.target.value })} aria-label="同级排序" /></Field><Button className="w-full" onClick={onCreate} disabled={saving || !canCreate}><Plus className="size-4" />{saving ? "新增中…" : "新增分类"}</Button></div>;
+  const canCreate = draft.display_name.trim() && positionValid;
+  return <div className="space-y-4"><Field label="父分类"><Select value={draft.parent_id} onChange={(event) => { const parentId = event.target.value; const nextSiblingCount = categories.filter((category) => category.parent_id === (parentId || null)).length; onChange({ ...draft, parent_id: parentId, target_position: String(nextSiblingCount + 1) }); }} aria-label="父分类"><option value="">一级分类</option>{categories.filter((category) => category.is_active && category.level < 4).map((category) => <option key={category.id} value={category.id}>{category.full_path}</option>)}</Select></Field><Field label="分类名称"><Input value={draft.display_name} maxLength={100} onChange={(event) => onChange({ ...draft, display_name: event.target.value })} placeholder="例如 公司内部标准" aria-label="分类名称" /></Field><Field label="编号"><Input type="number" min={1} max={siblingCount + 1} step={1} value={draft.target_position} onChange={(event) => onChange({ ...draft, target_position: event.target.value })} aria-label="编号" /><span className="mt-1 block text-ui-xs font-normal text-muted-foreground">可填写 1 到 {siblingCount + 1}；使用已有编号时，确认后同级分类会自动顺延。</span></Field>{!positionValid && <p className="text-ui-sm text-destructive" role="alert">请输入 1 到 {siblingCount + 1} 之间的整数。</p>}<Button className="w-full" onClick={onCreate} disabled={saving || !canCreate}><Plus className="size-4" />{saving ? "新增中…" : "新增分类"}</Button></div>;
 }
 
 function Field({ label, children }: { label: string; children: ReactNode }) {

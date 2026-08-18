@@ -46,6 +46,8 @@ from src.transcription.types import (
     ReviewStatus,
     TranscriptionJobStage,
     TranscriptionJobStatus,
+    TerminologyCorrectionConfig,
+    TranscriptSegmentationConfig,
     canonical_json_bytes,
     reject_unknown_fields,
     require_int,
@@ -53,6 +55,8 @@ from src.transcription.types import (
     validate_sha256,
     validate_uuid,
 )
+
+from .media_transcript_catalog import ensure_media_transcript_catalog_item
 
 
 class StoreConflictError(RuntimeError):
@@ -77,7 +81,7 @@ def _load_json(text: object, field: str) -> object:
 
 
 def _execution_from_json(data: object) -> TranscriptionExecutionConfig:
-    allowed = {
+    required = {
         "profile_id",
         "provider_key",
         "profile_definition_version",
@@ -91,7 +95,16 @@ def _execution_from_json(data: object) -> TranscriptionExecutionConfig:
         "formatter_version",
         "execution_fingerprint",
     }
-    obj = reject_unknown_fields(data, allowed, "execution_config")
+    optional = {"segmentation_config", "terminology_config"}
+    if type(data) is not dict:
+        raise ContractValidationError("invalid_object", "execution_config")
+    unknown = set(data) - required - optional
+    missing = required - set(data)
+    if unknown:
+        raise ContractValidationError("unknown_field", f"execution_config.{sorted(unknown)[0]}")
+    if missing:
+        raise ContractValidationError("missing_field", f"execution_config.{sorted(missing)[0]}")
+    obj = data
     return TranscriptionExecutionConfig(
         obj["profile_id"],
         obj["provider_key"],
@@ -105,6 +118,16 @@ def _execution_from_json(data: object) -> TranscriptionExecutionConfig:
         obj["normalizer_version"],
         obj["formatter_version"],
         obj["execution_fingerprint"],
+        (
+            TranscriptSegmentationConfig.from_json_dict(obj["segmentation_config"])
+            if "segmentation_config" in obj
+            else None
+        ),
+        (
+            TerminologyCorrectionConfig.from_json_dict(obj["terminology_config"])
+            if "terminology_config" in obj
+            else None
+        ),
     )
 
 
@@ -149,6 +172,12 @@ class SQLiteTranscriptionStore:
                         draft_markdown_sha256,created_at,started_at,finished_at,updated_at
                     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     self._job_values(record),
+                )
+                self._conn.execute(
+                    """UPDATE media_replacements
+                       SET status='pending',error_code=NULL,updated_at=?
+                       WHERE candidate_media_id=? AND status='failed'""",
+                    (record.created_at, record.media_id),
                 )
             except sqlite3.IntegrityError as exc:
                 raise StoreConflictError("job_uniqueness_conflict") from exc
@@ -299,6 +328,12 @@ class SQLiteTranscriptionStore:
             ).rowcount
             if changed != 1:
                 raise StoreConflictError("job_success_conflict")
+            self._conn.execute(
+                """UPDATE media_replacements
+                   SET status='pending',error_code=NULL,updated_at=?
+                   WHERE candidate_media_id=? AND status='failed'""",
+                (now, job.media_id),
+            )
         return self.load_version(version_id)
 
     def record_failure(
@@ -324,6 +359,13 @@ class SQLiteTranscriptionStore:
             ).rowcount
             if changed != 1:
                 raise StoreConflictError("job_failure_conflict")
+            self._conn.execute(
+                """UPDATE media_replacements
+                   SET status='failed',error_code=?,updated_at=?
+                   WHERE candidate_media_id=(SELECT media_id FROM transcription_jobs WHERE id=?)
+                     AND status='pending'""",
+                (error_code, now, job_id),
+            )
         return self.load_job(job_id)
 
     def record_provider_failure(self, job_id: str, failure: ProviderFailure, *, now: int) -> TranscriptionJobRecord:
@@ -347,6 +389,13 @@ class SQLiteTranscriptionStore:
             ).rowcount
             if changed != 1:
                 raise StoreConflictError("job_cancel_conflict")
+            self._conn.execute(
+                """UPDATE media_replacements
+                   SET status='failed',error_code='cancelled',updated_at=?
+                   WHERE candidate_media_id=(SELECT media_id FROM transcription_jobs WHERE id=?)
+                     AND status='pending'""",
+                (now, job_id),
+            )
         return self.load_job(job_id)
 
     def register_manual_version(
@@ -419,6 +468,18 @@ class SQLiteTranscriptionStore:
                     raise StoreConflictError("edit_idempotency_conflict")
                 return version
             base = self._load_version_row(base_version_id)
+            if self._conn.execute(
+                """SELECT 1 FROM media_replacements
+                   WHERE source_media_id=? AND status='pending'""",
+                (base.media_id,),
+            ).fetchone() is not None:
+                raise StoreConflictError("media_replacement_active")
+            if self._conn.execute(
+                """SELECT 1 FROM media_metadata_revisions
+                   WHERE media_id=? AND status='pending'""",
+                (base.media_id,),
+            ).fetchone() is not None:
+                raise StoreConflictError("metadata_revision_active")
             if base.markdown_ref.content_sha256 != base_markdown_sha256:
                 raise StoreConflictError("stale_base_markdown")
             if base.markdown_ref.content_sha256 == markdown_ref.content_sha256:
@@ -450,6 +511,205 @@ class SQLiteTranscriptionStore:
                 raise StoreConflictError("edited_version_uniqueness_conflict") from exc
         return self.load_version(version_id)
 
+    def register_metadata_revision(
+        self,
+        *,
+        revision_id: str,
+        version_id: str,
+        media_id: str,
+        base_version_id: str,
+        markdown_ref: ManagedMarkdownRef,
+        proposed_title: str,
+        proposed_original_filename: str,
+        requested_by: int,
+        request_idempotency_key: str,
+        now: int,
+    ) -> TranscriptVersionRecord:
+        validate_uuid(revision_id, "revision_id")
+        validate_uuid(version_id, "version_id")
+        validate_uuid(media_id, "media_id")
+        validate_uuid(base_version_id, "base_version_id")
+        validate_uuid(request_idempotency_key, "request_idempotency_key")
+        if (
+            type(markdown_ref) is not ManagedMarkdownRef
+            or not markdown_ref.relative_path.startswith("markdown/")
+        ):
+            raise ContractValidationError("invalid_managed_artifact_path", "markdown_ref")
+        validate_single_line(proposed_title, "proposed_title", maximum=200)
+        validate_single_line(
+            proposed_original_filename, "proposed_original_filename", maximum=255
+        )
+        require_int(requested_by, "requested_by", positive=True)
+        with self._transaction():
+            existing = self._conn.execute(
+                """SELECT transcript_version_id,media_id,base_version_id,proposed_title,
+                          proposed_original_filename,requested_by
+                   FROM media_metadata_revisions WHERE request_idempotency_key=?""",
+                (request_idempotency_key,),
+            ).fetchone()
+            if existing is not None:
+                expected = (
+                    media_id,
+                    base_version_id,
+                    proposed_title,
+                    proposed_original_filename,
+                    requested_by,
+                )
+                actual = (
+                    existing["media_id"],
+                    existing["base_version_id"],
+                    existing["proposed_title"],
+                    existing["proposed_original_filename"],
+                    existing["requested_by"],
+                )
+                if actual != expected:
+                    raise StoreConflictError("metadata_idempotency_conflict")
+                return self._load_version_row(str(existing["transcript_version_id"]))
+            head = self._conn.execute(
+                "SELECT current_version_id FROM media_transcript_heads WHERE media_id=?",
+                (media_id,),
+            ).fetchone()
+            if head is None or head["current_version_id"] != base_version_id:
+                raise StoreConflictError("metadata_base_version_conflict")
+            if self._conn.execute(
+                """SELECT 1 FROM media_replacements
+                   WHERE source_media_id=? AND status='pending'""",
+                (media_id,),
+            ).fetchone() is not None:
+                raise StoreConflictError("media_replacement_active")
+            base = self._load_version_row(base_version_id)
+            if base.media_id != media_id:
+                raise StoreConflictError("metadata_base_media_conflict")
+            if base.markdown_ref.content_sha256 != markdown_ref.content_sha256:
+                raise StoreConflictError("metadata_markdown_identity_conflict")
+            try:
+                self._conn.execute(
+                    """INSERT INTO transcript_versions(
+                        id,media_id,transcription_job_id,source,profile_id,provider_key,model_id,model_revision,
+                        config_hash,profile_snapshot_json,canonical_json,canonical_sha256,markdown_storage_kind,
+                        markdown_rel_path,markdown_sha256,markdown_size_bytes,review_status,reviewed_by,
+                        reviewed_at,review_note,publication_status,published_at,supersedes_version_id,
+                        created_at,updated_at,derived_from_version_id,edited_by,edit_idempotency_key
+                    ) VALUES (?,?,NULL,'manual',NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,'managed_artifact',
+                              ?,?,?,'awaiting_review',NULL,NULL,NULL,'not_published',NULL,NULL,?,?,?,?,?)""",
+                    (
+                        version_id,
+                        media_id,
+                        markdown_ref.relative_path,
+                        markdown_ref.content_sha256,
+                        markdown_ref.size_bytes,
+                        now,
+                        now,
+                        base.id,
+                        requested_by,
+                        request_idempotency_key,
+                    ),
+                )
+                self._conn.execute(
+                    """INSERT INTO media_metadata_revisions(
+                        id,media_id,transcript_version_id,base_version_id,proposed_title,
+                        proposed_original_filename,requested_by,request_idempotency_key,status,
+                        created_at,activated_at,updated_at
+                    ) VALUES (?,?,?,?,?,?,?,?,'pending',?,NULL,?)""",
+                    (
+                        revision_id,
+                        media_id,
+                        version_id,
+                        base_version_id,
+                        proposed_title,
+                        proposed_original_filename,
+                        requested_by,
+                        request_idempotency_key,
+                        now,
+                        now,
+                    ),
+                )
+            except sqlite3.IntegrityError as exc:
+                raise StoreConflictError("metadata_revision_active") from exc
+        return self.load_version(version_id)
+
+    def register_replacement(
+        self,
+        *,
+        replacement_id: str,
+        source_media_id: str,
+        candidate_media_id: str,
+        profile_id: str,
+        request_idempotency_key: str,
+        requested_by: int,
+        now: int,
+    ) -> None:
+        for field, value in (
+            ("replacement_id", replacement_id),
+            ("source_media_id", source_media_id),
+            ("candidate_media_id", candidate_media_id),
+            ("request_idempotency_key", request_idempotency_key),
+        ):
+            validate_uuid(value, field)
+        validate_single_line(profile_id, "profile_id", maximum=64)
+        require_int(requested_by, "requested_by", positive=True)
+        with self._transaction():
+            source = self._conn.execute(
+                """SELECT i.id AS item_id,h.current_version_id
+                   FROM media_assets m
+                   JOIN media_transcript_heads h ON h.media_id=m.media_id
+                   JOIN content_items i ON i.media_id=m.media_id
+                     AND i.content_kind='media_transcript' AND i.archived_at IS NULL
+                   WHERE m.media_id=? AND m.status<>'archived'""",
+                (source_media_id,),
+            ).fetchone()
+            if source is None:
+                raise StoreConflictError("replacement_source_unavailable")
+            if self._conn.execute(
+                """SELECT 1 FROM transcript_versions
+                   WHERE media_id=? AND publication_status='publishing'""",
+                (source_media_id,),
+            ).fetchone() is not None:
+                raise StoreConflictError("replacement_source_publishing")
+            if self._conn.execute(
+                """SELECT 1 FROM media_metadata_revisions
+                   WHERE media_id=? AND status='pending'""",
+                (source_media_id,),
+            ).fetchone() is not None:
+                raise StoreConflictError("metadata_revision_active")
+            candidate = self._conn.execute(
+                "SELECT media_id FROM media_assets WHERE media_id=? AND status<>'archived'",
+                (candidate_media_id,),
+            ).fetchone()
+            if candidate is None:
+                raise StoreConflictError("replacement_candidate_unavailable")
+            try:
+                self._conn.execute(
+                    """INSERT INTO media_replacements(
+                        id,source_media_id,candidate_media_id,source_catalog_item_id,
+                        source_head_version_id,profile_id,request_idempotency_key,requested_by,
+                        status,error_code,created_at,activated_at,updated_at
+                    ) VALUES (?,?,?,?,?,?,?,?,'pending',NULL,?,NULL,?)""",
+                    (
+                        replacement_id,
+                        source_media_id,
+                        candidate_media_id,
+                        source["item_id"],
+                        source["current_version_id"],
+                        profile_id,
+                        request_idempotency_key,
+                        requested_by,
+                        now,
+                        now,
+                    ),
+                )
+            except sqlite3.IntegrityError as exc:
+                raise StoreConflictError("media_replacement_active") from exc
+
+    def publication_title(self, version_id: str, fallback_title: str) -> str:
+        validate_uuid(version_id, "version_id")
+        row = self._conn.execute(
+            """SELECT proposed_title FROM media_metadata_revisions
+               WHERE transcript_version_id=?""",
+            (version_id,),
+        ).fetchone()
+        return str(row["proposed_title"]) if row is not None else fallback_title
+
     def review_version(
         self,
         version_id: str,
@@ -473,6 +733,13 @@ class SQLiteTranscriptionStore:
             ).rowcount
             if changed != 1:
                 raise StoreConflictError("review_transition_conflict")
+            if not approved:
+                self._conn.execute(
+                    """UPDATE media_metadata_revisions
+                       SET status='rejected',updated_at=?
+                       WHERE transcript_version_id=? AND status='pending'""",
+                    (now, version_id),
+                )
         return self.load_version(version_id)
 
     def begin_publication(
@@ -495,6 +762,12 @@ class SQLiteTranscriptionStore:
             raise ContractValidationError("target_identity_mismatch", "target_index_id")
         with self._transaction():
             version = self._load_version_row(version_id)
+            if self._conn.execute(
+                """SELECT 1 FROM media_replacements
+                   WHERE source_media_id=? AND status='pending'""",
+                (version.media_id,),
+            ).fetchone() is not None:
+                raise StoreConflictError("media_replacement_active")
             if version.publication_status not in (PublicationStatus.not_published, PublicationStatus.publication_failed):
                 raise ContractValidationError("publication_already_active", "publication_status")
             changed = self._conn.execute(
@@ -504,6 +777,12 @@ class SQLiteTranscriptionStore:
             ).rowcount
             if changed != 1:
                 raise StoreConflictError("publication_transition_conflict")
+            self._conn.execute(
+                """UPDATE media_metadata_revisions
+                   SET status='pending',updated_at=?
+                   WHERE transcript_version_id=? AND status='failed'""",
+                (now, version_id),
+            )
             self._conn.execute(
                 """INSERT INTO transcript_publication_index_jobs(
                     id,transcript_version_id,candidate_version_id,attempt_number,canonical_sha256,markdown_sha256,
@@ -559,6 +838,11 @@ class SQLiteTranscriptionStore:
                     "UPDATE transcript_versions SET publication_status='publication_failed',updated_at=? WHERE id=?",
                     (now, receipt.transcript_version_id),
                 )
+                self._conn.execute(
+                    """UPDATE media_metadata_revisions
+                       SET status='failed',updated_at=? WHERE transcript_version_id=?""",
+                    (now, receipt.transcript_version_id),
+                )
 
     def fail_publication_job(
         self,
@@ -591,6 +875,11 @@ class SQLiteTranscriptionStore:
             self._conn.execute(
                 """UPDATE transcript_versions SET publication_status='publication_failed',updated_at=?
                    WHERE id=? AND publication_status='publishing'""",
+                (now, row["transcript_version_id"]),
+            )
+            self._conn.execute(
+                """UPDATE media_metadata_revisions
+                   SET status='failed',updated_at=? WHERE transcript_version_id=?""",
                 (now, row["transcript_version_id"]),
             )
 
@@ -669,11 +958,55 @@ class SQLiteTranscriptionStore:
                 )
             if not allowed:
                 raise ContractValidationError("promotion_guard_rejected", "promotion")
-            old = self._conn.execute(
-                "SELECT current_version_id FROM media_transcript_heads WHERE media_id=?",
+            metadata_revision = self._conn.execute(
+                """SELECT * FROM media_metadata_revisions
+                   WHERE transcript_version_id=?""",
+                (version.id,),
+            ).fetchone()
+            replacement = self._conn.execute(
+                """SELECT * FROM media_replacements
+                   WHERE candidate_media_id=? AND status='pending'""",
                 (version.media_id,),
             ).fetchone()
-            old_version_id = old["current_version_id"] if old is not None else None
+            if metadata_revision is not None:
+                current = self._conn.execute(
+                    "SELECT current_version_id FROM media_transcript_heads WHERE media_id=?",
+                    (version.media_id,),
+                ).fetchone()
+                if (
+                    current is None
+                    or current["current_version_id"] != metadata_revision["base_version_id"]
+                ):
+                    raise StoreConflictError("metadata_base_version_conflict")
+            if replacement is not None:
+                source_head = self._conn.execute(
+                    "SELECT current_version_id FROM media_transcript_heads WHERE media_id=?",
+                    (replacement["source_media_id"],),
+                ).fetchone()
+                if (
+                    source_head is None
+                    or source_head["current_version_id"]
+                    != replacement["source_head_version_id"]
+                ):
+                    raise StoreConflictError("replacement_source_head_changed")
+                catalog = self._conn.execute(
+                    """SELECT media_id FROM content_items
+                       WHERE id=? AND content_kind='media_transcript' AND archived_at IS NULL""",
+                    (replacement["source_catalog_item_id"],),
+                ).fetchone()
+                if catalog is None or catalog["media_id"] != replacement["source_media_id"]:
+                    raise StoreConflictError("replacement_catalog_changed")
+                old_version_id = str(replacement["source_head_version_id"])
+                self._conn.execute(
+                    "DELETE FROM media_transcript_heads WHERE media_id=?",
+                    (replacement["source_media_id"],),
+                )
+            else:
+                old = self._conn.execute(
+                    "SELECT current_version_id FROM media_transcript_heads WHERE media_id=?",
+                    (version.media_id,),
+                ).fetchone()
+                old_version_id = old["current_version_id"] if old is not None else None
             self._conn.execute(
                 """INSERT INTO media_transcript_heads(media_id,current_version_id,updated_at) VALUES (?,?,?)
                    ON CONFLICT(media_id) DO UPDATE SET current_version_id=excluded.current_version_id,
@@ -687,6 +1020,59 @@ class SQLiteTranscriptionStore:
             ).rowcount
             if changed != 1:
                 raise StoreConflictError("promotion_transition_conflict")
+            if replacement is not None:
+                candidate = self._conn.execute(
+                    "SELECT title FROM media_assets WHERE media_id=?",
+                    (version.media_id,),
+                ).fetchone()
+                if candidate is None:
+                    raise StoreConflictError("replacement_candidate_unavailable")
+                self._conn.execute(
+                    """UPDATE content_items SET media_id=?,title=?,updated_at=?
+                       WHERE id=? AND media_id=?""",
+                    (
+                        version.media_id,
+                        candidate["title"],
+                        now,
+                        replacement["source_catalog_item_id"],
+                        replacement["source_media_id"],
+                    ),
+                )
+                self._conn.execute(
+                    "UPDATE media_assets SET status='archived',updated_at=? WHERE media_id=?",
+                    (now, replacement["source_media_id"]),
+                )
+                self._conn.execute(
+                    """UPDATE media_replacements
+                       SET status='activated',activated_at=?,updated_at=? WHERE id=?""",
+                    (now, now, replacement["id"]),
+                )
+            else:
+                ensure_media_transcript_catalog_item(
+                    self._conn,
+                    media_id=version.media_id,
+                    now=now,
+                )
+            if metadata_revision is not None:
+                self._conn.execute(
+                    """UPDATE media_assets SET title=?,original_filename=?,updated_at=?
+                       WHERE media_id=?""",
+                    (
+                        metadata_revision["proposed_title"],
+                        metadata_revision["proposed_original_filename"],
+                        now,
+                        version.media_id,
+                    ),
+                )
+                self._conn.execute(
+                    "UPDATE content_items SET title=?,updated_at=? WHERE media_id=?",
+                    (metadata_revision["proposed_title"], now, version.media_id),
+                )
+                self._conn.execute(
+                    """UPDATE media_metadata_revisions
+                       SET status='activated',activated_at=?,updated_at=? WHERE id=?""",
+                    (now, now, metadata_revision["id"]),
+                )
         return self.load_version(version_id)
 
     def list_jobs(

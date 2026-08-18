@@ -77,7 +77,7 @@ def test_candidate_version_is_never_exposed(tmp_path, monkeypatch):
     media_id = str(uuid.uuid4())
     version_id = str(uuid.uuid4())
     conn = sqlite3.connect(db_path)
-    conn.execute("INSERT INTO media_assets VALUES (?,?,NULL)", (media_id, "ready"))
+    conn.execute("INSERT INTO media_assets VALUES (?,?,NULL)", (media_id, "transcript_ready"))
     conn.execute(
         """INSERT INTO transcript_versions
            VALUES (?,?,?,?,?,?,?,?,?,?)""",
@@ -111,7 +111,7 @@ def test_canonical_hash_mismatch_is_integrity_error(tmp_path, monkeypatch):
     version_id = str(uuid.uuid4())
     canonical = json.dumps({"media_id": media_id})
     conn = sqlite3.connect(db_path)
-    conn.execute("INSERT INTO media_assets VALUES (?,?,NULL)", (media_id, "ready"))
+    conn.execute("INSERT INTO media_assets VALUES (?,?,NULL)", (media_id, "transcript_ready"))
     conn.execute(
         """INSERT INTO transcript_versions
            VALUES (?,?,?,?,?,?,?,?,?,?)""",
@@ -152,7 +152,7 @@ def test_published_managed_manual_revision_returns_edited_segments(tmp_path, mon
     media_id = str(uuid.uuid4())
     version_id = str(uuid.uuid4())
     conn = sqlite3.connect(db_path)
-    conn.execute("INSERT INTO media_assets VALUES (?,?,NULL)", (media_id, "ready"))
+    conn.execute("INSERT INTO media_assets VALUES (?,?,NULL)", (media_id, "transcript_ready"))
     conn.execute(
         "INSERT INTO transcript_versions VALUES (?,?,?,?,?,?,?,?,?,?)",
         (

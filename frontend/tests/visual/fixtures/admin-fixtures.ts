@@ -1,6 +1,6 @@
 import type { Page, Route } from "@playwright/test";
 
-export type AdminScenario = "normal" | "loading" | "empty" | "error" | "disabled" | "publication_failure" | "media_progress" | "media_upload";
+export type AdminScenario = "normal" | "loading" | "empty" | "error" | "disabled" | "publication_failure" | "media_progress" | "media_upload" | "media_library";
 export type WorkspaceUser = "admin" | "bim_engineer" | "member";
 
 const admin = {
@@ -12,7 +12,8 @@ const admin = {
   content_permissions: [
     "workspace.view", "item.view", "item.download", "category.view", "item.upload", "item.submit",
     "item.move_draft", "item.archive_draft", "item.review", "item.move_review",
-    "item.publish", "item.archive_published", "trash.view", "trash.restore",
+    "item.publish", "item.reclassify_published", "item.archive_published", "trash.view", "trash.restore",
+    "trash.purge", "trash.policy_manage",
     "category.manage", "folder.request", "folder.review", "import.server", "index.view",
   ],
 };
@@ -60,7 +61,8 @@ export const items = [
   category_label: index % 2 ? "04 项目资料" : "03 公司内部标准",
   category_path: index % 2 ? "04 项目资料 / 02 竣工交付 / 01 模型成果" : "03 公司内部标准 / 01 建模 / 02 机电",
   media_id: null,
-  preview_parent_id: index === 0 ? "parent-ready" : null,
+  preview_parent_id: index <= 1 ? "parent-ready" : null,
+  preview_status: index <= 1 ? "ready" : filename.endsWith(".pptx") || filename.endsWith(".xlsx") ? "pending" : "not_applicable",
   version_id: `version-${index + 1}`,
   version_number: index + 1,
   original_filename: filename,
@@ -74,9 +76,49 @@ export const items = [
   latest_publication_status: null,
   publication_attempt_count: 0,
   publication_failure: null,
+  latest_reviewed_by_name: index === 1 ? "合成审核员" : null,
+  latest_reviewed_at: index === 1 ? 1700000500 : null,
+  latest_review_decision: index === 1 ? "rejected" : null,
+  latest_review_note: index === 1 ? "请补充机电碰撞检查范围" : null,
+  reclassification_job_id: null,
+  reclassification_status: null,
   created_at: 1700000000,
   updated_at: 1700000000,
 }));
+
+const mediaLibraryItem = {
+  item_id: "media-transcript-media-library-1",
+  title: "BIM 项目交付培训视频（合成长标题用于响应式检查）",
+  content_kind: "media_transcript",
+  category_id: "cat-company",
+  category_key: "company_standard",
+  category_label: "03 公司内部标准",
+  category_path: "03 公司内部标准 / 01 建模 / 02 培训视频",
+  media_id: "media-library-1",
+  preview_parent_id: null,
+  preview_status: "not_applicable",
+  version_id: "66666666-6666-4666-8666-666666666666",
+  version_number: 3,
+  original_filename: "bim-project-delivery-training-long-responsive-name.mp4",
+  doc_type: "transcript",
+  lifecycle_status: "published",
+  object_sha256: null,
+  source_origin: "transcription",
+  source_batch_id: null,
+  source_rel_path: "bim-project-delivery-training-long-responsive-name.mp4",
+  is_current: true,
+  has_published_head: true,
+  latest_publication_status: "done",
+  publication_attempt_count: 2,
+  publication_failure: null,
+  media_duration_ms: 3_723_000,
+  media_file_size: 84_934_656,
+  has_pending_revision: true,
+  reclassification_job_id: null,
+  reclassification_status: null,
+  created_at: 1700000000,
+  updated_at: 1700000600,
+};
 
 const trashItems = [{
   ...items[4],
@@ -84,6 +126,13 @@ const trashItems = [{
   archived_at: 1700000600,
   archived_by_name: "合成资料员",
   pre_archive_lifecycle_status: "published",
+  retention_status: "expiring", retention_days_remaining: 4, purge_eligible_at: 1700346200,
+}, {
+  ...items[0], item_id: "item-trash-overdue", version_id: "version-trash-overdue",
+  title: "项目交付检查清单", original_filename: "项目交付检查清单.pdf",
+  archived_at: 1690000000, archived_by_name: "合成管理员",
+  pre_archive_lifecycle_status: "approved", retention_status: "overdue",
+  retention_days_remaining: -12, purge_eligible_at: 1697776000,
 }];
 
 const uploadTasks = [
@@ -150,9 +199,25 @@ const managedIndexJobs = [{
   title: "资料管理发布失败的合成长文件名资料", original_filename: "managed-publication-failure-with-long-name.pdf",
   doc_type: "pdf", category_id: "cat-03", category_label: "03 公司内部标准",
   category_path: "03 公司内部标准 / 01 建模标准", version_number: 4, file_size: 2_048_000,
-  source_origin: "legacy", is_current_head: false, is_latest_attempt: true,
+  source_origin: "legacy", is_archived: false, is_current_head: false, is_latest_attempt: true,
   parent_count: null, preview_parent_id: null,
 }];
+
+const archivedManagedIndexJob = {
+  ...managedIndexJobs[0],
+  id: "managed-job-archived",
+  publication_id: "publication-archived",
+  version_id: "version-archived",
+  status: "done",
+  error_code: null,
+  error_summary: null,
+  failure: null,
+  attempt_count: 1,
+  title: "已移入回收站的合成资料",
+  original_filename: "archived-managed-document.xlsx",
+  doc_type: "xlsx",
+  is_archived: true,
+};
 
 const mediaAssets = [
   {
@@ -175,11 +240,70 @@ const mediaAssets = [
   },
 ];
 
+const mediaLibraryAsset = {
+  ...mediaAssets[2],
+  media_id: mediaLibraryItem.media_id,
+  title: mediaLibraryItem.title,
+  original_filename: mediaLibraryItem.original_filename,
+  file_size: mediaLibraryItem.file_size,
+  review_status: "review_approved",
+  publication_status: "published",
+  publication_index_status: "done",
+  is_current_version: true,
+};
+
 const transcriptionProfiles = [{
   profile_id: "funasr-sensevoice-zh-experimental-v1", display_name: "受控中文转录", description: "合成服务端 Profile",
   qualification: "experimental", admission: "enabled", availability: "available", unavailable_reason_code: null,
   requires_review: true, auto_publish: false, auto_index: false,
 }];
+
+const asrProfiles = ([
+  ["natural", null, 500, 1000, "自然分段"],
+  ["balanced", 30_000, 240, 750, "均衡分段"],
+  ["fine", 15_000, 120, 500, "细分段"],
+] as const).map(([preset, maxDuration, maxChars, mergeGap, label]) => ({
+  profile_id: `whisperx-large-v3-zh-${preset}-v2`,
+  display_name: `WhisperX 工程转录 ${label} v2`,
+  description: `${label}合成配置，用于验证长中文名称、固定术语和响应式布局。`,
+  profile_version: "2",
+  application_config_hash: preset.padEnd(64, "a"),
+  qualification: "qualification_approved",
+  admission: preset === "balanced" ? "enabled" : "disabled",
+  availability: "available",
+  unavailable_reason_code: null,
+  release_eligible: true,
+  segmentation: {
+    preset,
+    max_segment_duration_ms: maxDuration,
+    max_segment_chars: maxChars,
+    max_merge_gap_ms: mergeGap,
+  },
+  terminology_rule_set: "bim-engineering-v1",
+  protected_terms: ["Revit", "Navisworks", "AutoCAD", "BIM", "BIM-2026-0805", "12.5", "208", "95%"],
+  decode: {
+    service_profile_id: "whisperx-large-v3-zh-align-v2",
+    model_name: "Whisper large-v3 + 中文对齐",
+    beam_size: 10,
+    temperature: 0.1,
+    hotword_count: 20,
+    prompt_asset_id: "asr_engineering_zh_v2",
+    service_profile_config_hash: "a".repeat(64),
+    qualification_policy: "whisperx-r3/1",
+  },
+}));
+
+const asrReleaseRequest = {
+  request_id: "11111111-1111-4111-8111-111111111111",
+  profile_id: "whisperx-large-v3-zh-balanced-v2",
+  profile_display_name: "WhisperX 工程转录 均衡分段 v2",
+  profile_config_hash: "balanced".padEnd(64, "a"),
+  status: "requested",
+  request_reason: "合成培训视频发布申请",
+  requested_by_name: "合成管理员",
+  created_at: 1700000000,
+  updated_at: 1700000000,
+};
 
 const transcriptionJobs = [{
   job_id: "media-failed-job", media_id: "media-failed-1", attempt_number: 1,
@@ -266,7 +390,7 @@ const permissionUsers = [
 ];
 
 const permissionCatalog = {
-  schema_version: 3,
+  schema_version: 5,
   permissions: [
     { key: "workspace.view", domain: "access", domain_label: "入口与查看", label: "进入资料工作台", description: "进入资料管理工作台。", dependencies: [] },
     { key: "item.view", domain: "access", domain_label: "入口与查看", label: "查看资料", description: "查看资料列表、详情和预览。", dependencies: ["workspace.view"] },
@@ -279,9 +403,12 @@ const permissionCatalog = {
     { key: "item.review", domain: "review", domain_label: "确认流程", label: "确认与退回", description: "确认或退回待确认资料。", dependencies: ["workspace.view", "item.view"] },
     { key: "item.move_review", domain: "review", domain_label: "确认流程", label: "移动待确认资料", description: "移动待确认状态的资料。", dependencies: ["workspace.view", "item.view", "category.view"] },
     { key: "item.publish", domain: "publish", domain_label: "发布流程", label: "发布资料", description: "发布或重新发布已确认资料。", dependencies: ["workspace.view", "item.view"] },
+    { key: "item.reclassify_published", domain: "publish", domain_label: "发布流程", label: "调整已发布资料分类", description: "调整已发布普通资料的分类，并同步正式索引和只读目录。", dependencies: ["workspace.view", "item.view", "category.view"] },
     { key: "item.archive_published", domain: "publish", domain_label: "发布流程", label: "下架正式资料", description: "将已确认、发布失败或已发布资料移入回收站。", dependencies: ["workspace.view", "item.view"] },
     { key: "trash.view", domain: "trash", domain_label: "回收站", label: "查看回收站", description: "查看和搜索已归档资料。", dependencies: ["workspace.view", "item.view"] },
     { key: "trash.restore", domain: "trash", domain_label: "回收站", label: "恢复资料", description: "从回收站恢复资料。", dependencies: ["workspace.view", "item.view", "trash.view"] },
+    { key: "trash.purge", domain: "trash", domain_label: "回收站", label: "永久删除资料", description: "永久删除回收站中的资料及关联索引。", dependencies: ["workspace.view", "item.view", "trash.view"] },
+    { key: "trash.policy_manage", domain: "trash", domain_label: "回收站", label: "管理清理策略", description: "配置自动清理策略并查看清理记录。", dependencies: ["workspace.view", "item.view", "trash.view"] },
     { key: "category.manage", domain: "category", domain_label: "分类与目录", label: "维护分类", description: "新增、修改、启用或停用资料分类。", dependencies: ["workspace.view", "category.view"] },
     { key: "folder.request", domain: "category", domain_label: "分类与目录", label: "申请目录", description: "提交子目录创建申请。", dependencies: ["workspace.view", "item.view", "category.view"] },
     { key: "folder.review", domain: "category", domain_label: "分类与目录", label: "审批目录", description: "查看、批准或退回目录申请。", dependencies: ["workspace.view", "item.view", "category.view"] },
@@ -295,7 +422,7 @@ const permissionGroups = [
   { id: "permission-group-viewer", group_key: "viewer", display_name: "资料浏览者", permissions: ["workspace.view", "item.view", "item.download", "category.view"], is_system: true, is_active: true, updated_at: 1700000000 },
   { id: "permission-group-bim-engineer", group_key: "bim_engineer", display_name: "BIM工程师", permissions: ["workspace.view", "item.view", "item.download", "category.view", "item.upload", "item.submit", "item.move_draft", "item.archive_draft", "folder.request"], is_system: true, is_active: true, updated_at: 1700000000 },
   { id: "permission-group-content-owner", group_key: "content_owner", display_name: "资料负责人", permissions: ["workspace.view", "item.view", "item.download", "category.view", "item.review", "item.move_review", "folder.review", "trash.view", "trash.restore"], is_system: true, is_active: true, updated_at: 1700000000 },
-  { id: "permission-group-publisher", group_key: "publisher", display_name: "发布负责人", permissions: ["workspace.view", "item.view", "item.download", "category.view", "item.publish", "item.archive_published", "trash.view", "index.view"], is_system: true, is_active: true, updated_at: 1700000000 },
+  { id: "permission-group-publisher", group_key: "publisher", display_name: "发布负责人", permissions: ["workspace.view", "item.view", "item.download", "category.view", "item.publish", "item.reclassify_published", "item.archive_published", "trash.view", "index.view"], is_system: true, is_active: true, updated_at: 1700000000 },
   { id: "permission-group-category-admin", group_key: "category_admin", display_name: "分类管理员", permissions: ["workspace.view", "item.view", "item.download", "category.view", "category.manage", "folder.review"], is_system: true, is_active: true, updated_at: 1700000000 },
   { id: "permission-group-system-admin", group_key: "system_admin", display_name: "系统管理员", permissions: admin.content_permissions, is_system: true, is_active: true, updated_at: 1700000000 },
 ];
@@ -314,8 +441,48 @@ const conversationState = {
 };
 
 const feedbackEntries = [
-  { feedback_id: "feedback-1", ts: "2026-08-15T10:00:00Z", kind: "answer", rating: "down", note: "合成反馈：回答需要补充来源", query: "如何归档？", answer_text: "请查阅归档指引。", status: "pending", resolution: null, admin_note: null, conversation_id: "conversation-1", turn_index: 2 },
-  { feedback_id: "feedback-2", ts: "2026-08-14T09:00:00Z", kind: "citation", rating: "up", note: "来源准确", status: "resolved", resolution: "no_action", admin_note: "合成已核对", conversation_id: "conversation-2", turn_index: 1 },
+  {
+    feedback_id: "feedback-1", ts: "2026-08-15T10:00:00Z", kind: "answer", rating: "down",
+    note: "回答给出了归档方向，但没有说明模型成果、图纸和交付清单的核对顺序，也缺少对应资料来源。",
+    query: "项目竣工交付前，BIM 模型和配套资料应该按什么顺序检查并归档？",
+    answer_text: "建议先确认交付范围，再依次核对模型完整性、图纸一致性、问题关闭情况和文件命名。完成内部复核后，按项目交付清单整理模型、图纸、报告和审批记录，并将最终版本归档到项目资料库。",
+    category: "回答完整性", status: "pending", resolution: null, admin_note: null,
+    conversation_id: "conversation-1", turn_index: 2, assignee_user_id: null, assignee_name: null,
+    updated_at: 1786788000, resolved_at: null,
+  },
+  {
+    feedback_id: "feedback-2", ts: "2026-08-15T08:35:00Z", kind: "citation", rating: "down",
+    note: "引用的章节只讲文件命名，没有覆盖问题中提到的模型质量检查，希望定位到交付检查章节。",
+    parent_id: "parent-ready", doc_title: "建筑信息模型交付标准（合成长资料名称用于响应式检查）",
+    section_path: "第三章 / 3.2 文件组织与命名 / 3.2.4 交付目录", start_time: null,
+    category: "来源准确性", status: "pending", resolution: null, admin_note: null,
+    conversation_id: "conversation-1", turn_index: 2, assignee_user_id: null, assignee_name: null,
+    updated_at: 1786782900, resolved_at: null,
+  },
+  {
+    feedback_id: "feedback-3", ts: "2026-08-14T16:20:00Z", kind: "answer", rating: "down",
+    note: "术语与公司标准不一致，正在核对最新发布版本。", query: "碰撞检查报告需要保留哪些字段？",
+    answer_text: "报告应记录问题编号、专业、位置、责任人、处理状态和关闭依据。",
+    category: "术语一致性", status: "in_progress", resolution: null, admin_note: "已领取，待资料员确认标准版本。",
+    conversation_id: "conversation-1", turn_index: 1, assignee_user_id: 9001, assignee_name: "合成管理员",
+    updated_at: 1786724400, resolved_at: null,
+  },
+  {
+    feedback_id: "feedback-4", ts: "2026-08-13T09:10:00Z", kind: "citation", rating: "up",
+    note: "来源位置准确，已确认无需调整。", parent_id: "parent-ready", doc_title: "项目资料归档指引",
+    section_path: "第五章 / 5.1 竣工资料归档", category: "来源准确性", status: "resolved",
+    resolution: "no_action", admin_note: "引用与当前发布版本一致，无需处理。",
+    conversation_id: "conversation-1", turn_index: 1, assignee_user_id: 9001, assignee_name: "合成管理员",
+    updated_at: 1786602600, resolved_at: 1786602600,
+  },
+  {
+    feedback_id: "feedback-5", ts: "2026-08-12T14:45:00Z", kind: "answer", rating: "up",
+    note: "重复反馈，已合并到同类问题。", query: "资料归档后还能重新分类吗？",
+    answer_text: "已发布资料可以按权限重新分类，系统会保留版本和操作记录。",
+    category: "重复反馈", status: "archived", resolution: "duplicate", admin_note: "与反馈 feedback-4 重复。",
+    conversation_id: "conversation-1", turn_index: 1, assignee_user_id: 9001, assignee_name: "合成管理员",
+    updated_at: 1786536300, resolved_at: null,
+  },
 ];
 
 function json(route: Route, body: unknown, status = 200) {
@@ -331,8 +498,10 @@ export async function installAdminRoutes(
   scenario: AdminScenario = "normal",
   workspaceUser: WorkspaceUser = "admin",
   currentUser: () => typeof admin = () => workspaceUsers[workspaceUser],
-  options: { includeChildFolder?: boolean; includeFolderRequest?: boolean } = {},
+  options: { includeChildFolder?: boolean; includeFolderRequest?: boolean; feedbackPatchDelayMs?: number } = {},
 ) {
+  const activeFeedbackEntries = feedbackEntries.map((entry) => ({ ...entry }));
+
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -347,6 +516,7 @@ export async function installAdminRoutes(
       || isIndexRead
       || path.startsWith("/api/admin/media")
       || path.startsWith("/api/admin/transcription/")
+      || path.startsWith("/api/admin/asr")
       || path.startsWith("/api/admin/feedback")
       || path.startsWith("/api/admin/conversations")
       || path.startsWith("/api/admin/stats")
@@ -408,6 +578,9 @@ export async function installAdminRoutes(
           enabled: false,
           mode: "deployment_config",
           disabled_reason: "office_processing_disabled",
+          status: "disabled",
+          checked_at: 1700000000,
+          error_code: null,
         },
       });
     }
@@ -451,10 +624,51 @@ export async function installAdminRoutes(
     if (request.method() === "GET" && /^\/api\/admin\/users\/\d+\/conversations$/.test(path)) return json(route, { conversations: scenario === "empty" ? [] : adminConversations.filter((conversation) => conversation.user_id === 9002) });
     if (request.method() === "GET" && /^\/api\/conversations\/[^/]+$/.test(path)) return json(route, conversationState);
     if (request.method() === "GET" && path === "/api/admin/feedback") {
-      const entries = scenario === "empty" ? [] : feedbackEntries;
-      return json(route, { entries, total: entries.length, page: 1, page_size: 20, counts: { pending: entries.filter((entry) => entry.status === "pending").length, in_progress: 0, resolved: entries.filter((entry) => entry.status === "resolved").length, archived: 0 } });
+      const sourceEntries = scenario === "empty" ? [] : activeFeedbackEntries;
+      const status = url.searchParams.get("status") || "pending";
+      const kind = url.searchParams.get("kind") || "";
+      const rating = url.searchParams.get("rating") || "";
+      const query = (url.searchParams.get("q") || "").trim().toLocaleLowerCase("zh-CN");
+      const pageNumber = Math.max(1, Number(url.searchParams.get("page")) || 1);
+      const pageSize = Math.max(1, Number(url.searchParams.get("page_size")) || 20);
+      const searchableFields = ["note", "query", "answer_text", "doc_title", "section_path", "category"] as const;
+      const filteredEntries = sourceEntries.filter((entry) => (
+        (status === "all" || entry.status === status)
+        && (!kind || entry.kind === kind)
+        && (!rating || entry.rating === rating)
+        && (!query || searchableFields.some((field) => String(entry[field] || "").toLocaleLowerCase("zh-CN").includes(query)))
+      ));
+      const offset = (pageNumber - 1) * pageSize;
+      return json(route, {
+        entries: filteredEntries.slice(offset, offset + pageSize),
+        total: filteredEntries.length,
+        page: pageNumber,
+        page_size: pageSize,
+        counts: {
+          pending: sourceEntries.filter((entry) => entry.status === "pending").length,
+          in_progress: sourceEntries.filter((entry) => entry.status === "in_progress").length,
+          resolved: sourceEntries.filter((entry) => entry.status === "resolved").length,
+          archived: sourceEntries.filter((entry) => entry.status === "archived").length,
+        },
+      });
     }
-    if (request.method() === "PATCH" && /^\/api\/admin\/feedback\/[^/]+$/.test(path)) return json(route, feedbackEntries[0]);
+    if (request.method() === "PATCH" && /^\/api\/admin\/feedback\/[^/]+$/.test(path)) {
+      const feedbackId = decodeURIComponent(path.split("/").pop() || "");
+      const entry = activeFeedbackEntries.find((candidate) => candidate.feedback_id === feedbackId);
+      if (!entry) return json(route, { detail: "合成反馈不存在" }, 404);
+      const payload = request.postDataJSON();
+      if (options.feedbackPatchDelayMs) {
+        await new Promise((resolve) => setTimeout(resolve, options.feedbackPatchDelayMs));
+      }
+      Object.assign(entry, payload, {
+        resolution: payload.status === "resolved" ? payload.resolution : null,
+        assignee_user_id: ["in_progress", "resolved"].includes(payload.status) ? 9001 : null,
+        assignee_name: ["in_progress", "resolved"].includes(payload.status) ? "合成管理员" : null,
+        updated_at: 1786953600,
+        resolved_at: payload.status === "resolved" ? 1786953600 : null,
+      });
+      return json(route, entry);
+    }
     if (request.method() === "POST" && path === "/api/admin/media" && scenario === "media_upload") {
       await new Promise((resolve) => setTimeout(resolve, 3_000));
       return json(route, { ...mediaAssets[2], media_id: "media-uploaded", transcription_job_id: "job-uploaded" });
@@ -462,9 +676,28 @@ export async function installAdminRoutes(
     if (request.method() === "GET" && path === "/api/admin/media") {
       if (scenario === "empty") return json(route, []);
       if (scenario === "media_progress") return json(route, [{ ...mediaAssets[2], status: "transcribing" }]);
+      if (scenario === "media_library") return json(route, [mediaLibraryAsset]);
       return json(route, mediaAssets);
     }
     if (request.method() === "GET" && path === "/api/admin/transcription/profiles") return json(route, transcriptionProfiles);
+    if (request.method() === "GET" && path === "/api/admin/asr") {
+      if (scenario === "empty") {
+        return json(route, { service: { status: "healthy", queue_depth: 0, queue_limit: 8, pause_reason: null }, profiles: [], release_requests: [], audit_events: [] });
+      }
+      const service = scenario === "disabled"
+        ? { status: "disabled", queue_depth: null, queue_limit: null, pause_reason: null }
+        : { status: "healthy", queue_depth: 1, queue_limit: 8, pause_reason: null };
+      const profiles = scenario === "disabled"
+        ? asrProfiles.map((profile) => ({ ...profile, release_eligible: false, availability: "unavailable", unavailable_reason_code: "asr_service_disabled" }))
+        : asrProfiles;
+      return json(route, { service, profiles, release_requests: [], audit_events: [] });
+    }
+    if (request.method() === "POST" && path === "/api/admin/asr/release-requests") {
+      await new Promise((resolve) => setTimeout(resolve, 800));
+      const body = request.postDataJSON() as { profile_id: string; request_reason?: string | null };
+      const selected = asrProfiles.find((profile) => profile.profile_id === body.profile_id) || asrProfiles[1];
+      return json(route, { ...asrReleaseRequest, profile_id: selected.profile_id, profile_display_name: selected.display_name, profile_config_hash: selected.application_config_hash, request_reason: body.request_reason || null });
+    }
     if (request.method() === "GET" && path === "/api/admin/transcription/jobs") {
       if (scenario === "empty" || scenario === "media_upload") return json(route, []);
       if (scenario === "media_progress") {
@@ -528,8 +761,21 @@ export async function installAdminRoutes(
     if (request.method() === "GET" && path.startsWith("/api/pdf/")) {
       return route.fulfill({ status: 404, contentType: "application/pdf", body: "" });
     }
+    if (request.method() === "GET" && path === "/api/source/parent-ready/raw") {
+      return route.fulfill({
+        status: 200,
+        contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        body: "synthetic docx fixture",
+      });
+    }
     if (request.method() === "GET" && /^\/api\/admin\/content\/versions\/[^/]+\/file$/.test(path)) {
       return route.fulfill({ status: 200, contentType: "application/pdf", body: "%PDF synthetic fixture" });
+    }
+    if (request.method() === "GET" && /^\/api\/admin\/content\/items\/[^/]+\/media-download$/.test(path)) {
+      const part = url.searchParams.get("part");
+      const filename = part === "video" ? "synthetic-video.mp4" : part === "transcript" ? "synthetic-transcript.md" : "synthetic-media.zip";
+      const contentType = part === "video" ? "video/mp4" : part === "transcript" ? "text/markdown" : "application/zip";
+      return route.fulfill({ status: 200, contentType, headers: { "content-disposition": `attachment; filename=${filename}` }, body: "synthetic media fixture" });
     }
     if (request.method() === "POST" && path === "/api/admin/content/bulk-download") {
       await new Promise((resolve) => setTimeout(resolve, 300));
@@ -568,19 +814,60 @@ export async function installAdminRoutes(
       return task ? json(route, task) : json(route, { detail: "合成任务不存在" }, 404);
     }
     if (path === "/api/admin/content/items-page") {
-      const rows = scenario === "empty" ? [] : items.map((item) => item.lifecycle_status === "publication_failed" && scenario === "publication_failure" ? { ...item, latest_publication_status: "failed", publication_attempt_count: 4, publication_failure: { code: "pdf_password_required", message: "PDF 需要密码才能解析。", retryable: false, recommended_action: "请上传已解除密码保护的 PDF。" } } : item);
+      const fixtureItems = scenario === "media_library" ? [mediaLibraryItem] : items;
+      const rows = scenario === "empty" ? [] : fixtureItems.map((item) => item.lifecycle_status === "publication_failed" && scenario === "publication_failure" ? { ...item, latest_publication_status: "failed", publication_attempt_count: 4, publication_failure: { code: "pdf_password_required", message: "PDF 需要密码才能解析。", retryable: false, recommended_action: "请上传已解除密码保护的 PDF。" } } : item);
       return json(route, { items: rows, total: rows.length, status_counts: rows.reduce<Record<string, number>>((counts, item) => ({ ...counts, [item.lifecycle_status]: (counts[item.lifecycle_status] || 0) + 1 }), {}) });
     }
     if (path === "/api/admin/content/trash") {
       const rows = scenario === "empty" ? [] : trashItems;
-      return json(route, { items: rows, total: rows.length, status_counts: rows.length ? { published: 1 } : {} });
+      return json(route, { items: rows, total: rows.length, status_counts: rows.length ? { published: 1, approved: 1 } : {}, retention_counts: rows.length ? { retained: 0, expiring: 1, overdue: 1 } : {} });
+    }
+    if (path === "/api/admin/content/trash/settings") {
+      return json(route, { cleanup_enabled: false, retention_days: 90, warning_days: 7, batch_limit: 20, updated_by: null, updated_at: 1700000000 });
+    }
+    if (path === "/api/admin/content/trash/purge-runs") return json(route, []);
+    if (path === "/api/admin/content/trash/purge-preview") {
+      const item = trashItems[1];
+      return json(route, { items: [{ item_id: item.item_id, version_id: item.version_id, status: "ready", reason: null, title: item.title, original_filename: item.original_filename, category_path: item.category_path, size_bytes: 2048000 }], ready_count: 1, blocked_count: 0, total_size_bytes: 2048000, confirmation_phrase: "永久删除 1 份资料" });
+    }
+    if (path === "/api/admin/content/trash/purge/preflight") {
+      const payload = request.postDataJSON() as { items: Array<{ item_id: string; expected_version_id: string }> };
+      const selected = trashItems.filter((item) => payload.items.some((entry) => entry.item_id === item.item_id));
+      return json(route, { items: selected.map((item) => ({ item_id: item.item_id, version_id: item.version_id, status: "ready", reason: null, title: item.title, original_filename: item.original_filename, category_path: item.category_path, size_bytes: 2048000 })), ready_count: selected.length, blocked_count: 0, total_size_bytes: selected.length * 2048000, confirmation_phrase: `永久删除 ${selected.length} 份资料` });
+    }
+    if (path === "/api/admin/content/bulk-restore/preflight") {
+      const payload = request.postDataJSON() as { items: Array<{ item_id: string; expected_version_id: string }> };
+      return json(route, { results: payload.items.map((item) => ({ ...item, version_id: item.expected_version_id, status: "ready", message: "可以恢复", target_category_path: "03 公司内部标准" })), ready: payload.items.length, blocked: 0 });
+    }
+    if (request.method() === "GET" && /^\/api\/admin\/content\/items\/[^/]+\/audit-events$/.test(path)) {
+      return json(route, [{
+        event_type: "content.archived",
+        actor_name: "合成资料员",
+        created_at: 1700000800,
+        previous_status: "published",
+        restored_status: null,
+        restore_strategy: null,
+        source_category_path: null,
+        target_category_path: null,
+        category_path: "03 公司内部标准 / 03-01 建模标准",
+        archive_reason: null,
+        replaced_title: null,
+        replaced_filename: null,
+      }]);
     }
     if (path === "/api/admin/content/folder-requests") {
       return json(route, options.includeFolderRequest ? folderRequests : []);
     }
     if (path === "/api/admin/content/index-jobs") {
-      const jobs = scenario === "empty" ? [] : managedIndexJobs;
-      return json(route, { jobs, total: jobs.length, status_counts: jobs.length ? { processing: 0, ready: 0, failed: 1 } : {} });
+      const includesArchived = url.searchParams.get("include_archived") === "true";
+      const jobs = scenario === "empty" ? [] : includesArchived ? [...managedIndexJobs, archivedManagedIndexJob] : managedIndexJobs;
+      return json(route, {
+        jobs,
+        total: jobs.length,
+        status_counts: jobs.length
+          ? { processing: 0, ready: includesArchived ? 1 : 0, failed: 1 }
+          : {},
+      });
     }
     if (path === "/api/admin/content/permissions") {
       return json(route, scenario === "empty" ? [] : permissionUsers);
@@ -593,6 +880,10 @@ export async function installAdminRoutes(
     }
     if (request.method() === "GET" && path === "/api/admin/index/category-tree") {
       return json(route, { categories: [{ name: "公司标准", two_level: false, subcategories: [] }, { name: "客户标准", two_level: true, subcategories: ["合成客户"] }, { name: "项目资料", two_level: false, subcategories: [] }], second_level_categories: ["客户标准"] });
+    }
+    if (request.method() === "POST" && /^\/api\/admin\/transcription\/media\/[^/]+\/metadata-revisions$/.test(path)) {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      return json(route, { ...baseTranscriptVersion, version_id: "77777777-7777-4777-8777-777777777777", media_id: mediaLibraryItem.media_id });
     }
     if (request.method() !== "GET" && path.startsWith("/api/admin/content/")) {
       await new Promise((resolve) => setTimeout(resolve, 800));
@@ -630,6 +921,27 @@ export async function installAdminRoutes(
           item_count: 0,
         };
         return json(route, created);
+      }
+      if (request.method() === "PATCH" && /^\/api\/admin\/content\/categories\/[^/]+\/number$/.test(path)) {
+        const categoryId = path.split("/").at(-2);
+        const body = request.postDataJSON() as { target_position: number; expected_version: number };
+        const current = categories.find((category) => category.id === categoryId) || categories[0];
+        const siblings = categories
+          .filter((category) => category.parent_id === current.parent_id)
+          .sort((left, right) => Number(left.display_code) - Number(right.display_code));
+        const ordered = siblings.filter((category) => category.id !== categoryId);
+        ordered.splice(body.target_position - 1, 0, current);
+        const positions = new Map(ordered.map((category, index) => [category.id, index + 1]));
+        return json(route, categories.map((category) => {
+          const position = positions.get(category.id);
+          return position ? {
+            ...category,
+            display_code: String(position).padStart(2, "0"),
+            sort_order: position * 10,
+            version: category.version + 1,
+            updated_at: 1700000600,
+          } : category;
+        }));
       }
       if (request.method() === "PATCH" && path.startsWith("/api/admin/content/categories/")) {
         const categoryId = path.split("/").at(-1);

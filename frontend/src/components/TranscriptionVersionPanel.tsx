@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { adminMediaApi } from "../api/admin/media";
 import { useTranscriptPublicationJob } from "../hooks/useTranscriptionJobs";
 import type { MediaTranscript, TranscriptVersion } from "../types";
@@ -52,7 +52,7 @@ type EditorState = {
   requestIdempotencyKey: string;
 };
 
-export function TranscriptionVersionPanel({ mediaId, refreshToken, embedded = false, onChanged, onDirtyChange }: { mediaId: string; refreshToken?: string | null; embedded?: boolean; onChanged?: () => void | Promise<void>; onDirtyChange?: (dirty: boolean) => void }) {
+export function TranscriptionVersionPanel({ mediaId, refreshToken, embedded = false, initialAction = null, initialVersionId = null, onChanged, onDirtyChange }: { mediaId: string; refreshToken?: string | null; embedded?: boolean; initialAction?: "edit-current" | null; initialVersionId?: string | null; onChanged?: () => void | Promise<void>; onDirtyChange?: (dirty: boolean) => void }) {
   const [expanded, setExpanded] = useState(embedded);
   const [versions, setVersions] = useState<TranscriptVersion[]>([]);
   const [loading, setLoading] = useState(false);
@@ -68,6 +68,7 @@ export function TranscriptionVersionPanel({ mediaId, refreshToken, embedded = fa
   const [busyVersionId, setBusyVersionId] = useState<string | null>(null);
   const [publicationJobId, setPublicationJobId] = useState<string | null>(null);
   const { job: publicationJob, error: publicationError } = useTranscriptPublicationJob(publicationJobId);
+  const initialOpenKeyRef = useRef<string | null>(null);
   const editorDirty = editor !== null && editor.markdown !== editor.savedMarkdown;
 
   useEffect(() => onDirtyChange?.(editorDirty), [editorDirty, onDirtyChange]);
@@ -96,6 +97,7 @@ export function TranscriptionVersionPanel({ mediaId, refreshToken, embedded = fa
     setTimeline(null);
     setTimelineError(null);
     setSaveSuccess(null);
+    initialOpenKeyRef.current = null;
   }, [mediaId]);
 
   useEffect(() => {
@@ -136,6 +138,18 @@ export function TranscriptionVersionPanel({ mediaId, refreshToken, embedded = fa
       setBusyVersionId(null);
     }
   };
+
+  useEffect(() => {
+    if (!expanded || loading || versions.length === 0) return;
+    const requestedVersionId = initialVersionId
+      || (initialAction === "edit-current" ? versions.find((version) => version.is_current)?.version_id : null);
+    if (!requestedVersionId) return;
+    const key = `${mediaId}:${requestedVersionId}`;
+    if (initialOpenKeyRef.current === key) return;
+    if (!versions.some((version) => version.version_id === requestedVersionId)) return;
+    initialOpenKeyRef.current = key;
+    void previewVersion(requestedVersionId);
+  }, [expanded, initialAction, initialVersionId, loading, mediaId, versions]);
 
   const saveRevision = async () => {
     if (!editor || !editorDirty) return;
