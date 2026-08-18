@@ -988,6 +988,47 @@ def test_managed_office_upload_limit_cleans_staging_and_creates_no_content(conte
         conn.close()
 
 
+def test_managed_pptx_upload_accepts_case_sensitive_relationship_paths(content_api):
+    client, sessions, _queued, db_path = content_api
+    office_bytes = io.BytesIO()
+    with zipfile.ZipFile(office_bytes, "w") as archive:
+        archive.writestr("[Content_Types].xml", "<Types />")
+        archive.writestr(
+            "ppt/slideMasters/_rels/slideMaster1.xml.rels",
+            "<Relationships />",
+        )
+
+    response = client.post(
+        "/api/admin/content/uploads",
+        data={"category_id": "cat-03"},
+        files=[
+            (
+                "files",
+                (
+                    "slides.pptx",
+                    office_bytes.getvalue(),
+                    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                ),
+            ),
+        ],
+        **_auth(sessions, "admin", csrf=True),
+    )
+
+    assert response.status_code == 200
+    entry = response.json()["entries"][0]
+    assert entry["filename"] == "slides.pptx"
+    assert entry["status"] == "accepted"
+    conn = connect(db_path)
+    try:
+        row = conn.execute(
+            "SELECT doc_type FROM content_versions WHERE id=?",
+            (entry["version_id"],),
+        ).fetchone()
+        assert row["doc_type"] == "pptx"
+    finally:
+        conn.close()
+
+
 def test_managed_upload_skips_office_but_accepts_markdown_when_disabled(content_api, monkeypatch):
     client, sessions, _queued, db_path = content_api
     monkeypatch.setattr(routes_content, "OFFICE_PROCESSING_ENABLED", False)
@@ -2614,10 +2655,26 @@ def test_managed_index_jobs_expose_current_head_parent_summary(content_api, monk
 
 def test_published_pptx_preview_status_and_regeneration(content_api, monkeypatch):
     client, sessions, _queued, db_path = content_api
+    office_bytes = io.BytesIO()
+    with zipfile.ZipFile(office_bytes, "w") as archive:
+        archive.writestr("[Content_Types].xml", "<Types />")
+        archive.writestr(
+            "ppt/slideMasters/_rels/slideMaster1.xml.rels",
+            "<Relationships />",
+        )
     upload = client.post(
         "/api/admin/content/uploads",
         data={"category_id": "cat-03"},
-        files=[("files", ("slides.pptx", b"synthetic-pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation"))],
+        files=[
+            (
+                "files",
+                (
+                    "slides.pptx",
+                    office_bytes.getvalue(),
+                    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                ),
+            ),
+        ],
         **_auth(sessions, "organizer", csrf=True),
     ).json()["entries"][0]
     version_id = upload["version_id"]
