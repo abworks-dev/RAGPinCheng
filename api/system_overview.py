@@ -17,6 +17,7 @@ from src.config import (
     LIBREOFFICE_HEALTH_TIMEOUT,
     LIBREOFFICE_URL,
     OFFICE_PROCESSING_ENABLED,
+    OFFICE_MIN_FREE_DISK_MB,
     SYSTEM_NODE_ID,
 )
 
@@ -197,6 +198,9 @@ def fetch_gpu_metrics(now: int | None = None) -> dict[str, Any]:
 
 def fetch_office_processing_health(now: int | None = None) -> dict[str, Any]:
     checked_at = int(time.time() if now is None else now)
+    disk = shutil.disk_usage(DATA_DIR)
+    free_mb = disk.free // (1024 * 1024)
+    disk_low = free_mb < OFFICE_MIN_FREE_DISK_MB
     if not OFFICE_PROCESSING_ENABLED:
         return {
             "enabled": False,
@@ -205,6 +209,8 @@ def fetch_office_processing_health(now: int | None = None) -> dict[str, Any]:
             "status": "disabled",
             "checked_at": checked_at,
             "error_code": None,
+            "disk_free_mb": free_mb,
+            "disk_minimum_mb": OFFICE_MIN_FREE_DISK_MB,
         }
     try:
         response = httpx.get(
@@ -219,9 +225,11 @@ def fetch_office_processing_health(now: int | None = None) -> dict[str, Any]:
             "enabled": True,
             "mode": "deployment_config",
             "disabled_reason": None,
-            "status": "healthy",
+            "status": "degraded" if disk_low else "healthy",
             "checked_at": checked_at,
-            "error_code": None,
+            "error_code": "office_disk_space_low" if disk_low else None,
+            "disk_free_mb": free_mb,
+            "disk_minimum_mb": OFFICE_MIN_FREE_DISK_MB,
         }
     except (httpx.HTTPError, ValueError, TypeError):
         return {
@@ -231,6 +239,8 @@ def fetch_office_processing_health(now: int | None = None) -> dict[str, Any]:
             "status": "unavailable",
             "checked_at": checked_at,
             "error_code": "office_service_unreachable",
+            "disk_free_mb": free_mb,
+            "disk_minimum_mb": OFFICE_MIN_FREE_DISK_MB,
         }
 
 

@@ -268,9 +268,11 @@ export type SystemOverview = {
     enabled: boolean;
     mode: "deployment_config";
     disabled_reason: "office_processing_disabled" | null;
-    status: "healthy" | "unavailable" | "disabled";
+    status: "healthy" | "degraded" | "unavailable" | "disabled";
     checked_at: number;
     error_code: string | null;
+    disk_free_mb?: number;
+    disk_minimum_mb?: number;
   };
 };
 

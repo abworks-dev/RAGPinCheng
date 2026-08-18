@@ -14,7 +14,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from services.libreoffice.app import _cleanup_dirs, _select_conversion_output, app
-from src.office_convert import convert_docx_to_markdown, convert_pptx_to_markdown, convert_pptx_to_pdf
+from src.office_convert import OfficeConversionError, convert_docx_to_markdown, convert_pptx_to_markdown, convert_pptx_to_pdf
 
 
 def _synthetic_ooxml(path: Path, content_type: str) -> Path:
@@ -52,6 +52,14 @@ def test_generated_docx_preserves_paragraph_anchors(tmp_path: Path, monkeypatch:
     assert markdown.startswith("# 总则")
     assert anchors[0]["text"] == "总则"
     assert len(anchors[0]["anchor"]) == 8
+
+
+def test_docx_parse_timeout_has_stable_failure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    source = _synthetic_ooxml(tmp_path / "slow.docx", "word")
+    _install_fake_docling(monkeypatch, "content")
+    monkeypatch.setattr("src.office_convert.OFFICE_PARSE_TIMEOUT_SECONDS", 0)
+    with pytest.raises(OfficeConversionError, match="office_parse_timeout"):
+        convert_docx_to_markdown(source)
 
 
 def test_generated_pptx_preserves_slide_metadata(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

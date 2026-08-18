@@ -122,7 +122,7 @@ export function ProductionRuntimeStatus({ data, loading, error, onRefresh }: Pro
             <FileSpreadsheet className="size-4 text-muted-foreground" />
             <span className="font-medium text-foreground">Office 新资料处理</span>
             <Badge variant={data.office_processing.status === "healthy" ? "success" : "warning"}>
-              {data.office_processing.status === "healthy" ? "运行正常" : data.office_processing.status === "disabled" ? "已停用" : "服务异常"}
+              {data.office_processing.status === "healthy" ? "运行正常" : data.office_processing.status === "disabled" ? "已停用" : data.office_processing.status === "degraded" ? "磁盘不足" : "服务异常"}
             </Badge>
           </div>
           <p className="max-w-xl text-ui-xs text-muted-foreground sm:text-right">
@@ -130,6 +130,8 @@ export function ProductionRuntimeStatus({ data, loading, error, onRefresh }: Pro
               ? "Office 转换服务可用，可处理新的 Word、Excel 和 PPT 文件。"
               : data.office_processing.status === "disabled"
                 ? "部署配置已停用 Office 新资料处理；既有资料仍可检索。"
+                : data.office_processing.status === "degraded"
+                  ? `剩余磁盘 ${data.office_processing.disk_free_mb ?? 0} MB，低于 ${data.office_processing.disk_minimum_mb ?? 0} MB 安全阈值；新 Office 解析将被拒绝。`
                 : "转换服务当前不可达，PPTX 预览生成可能失败；既有索引仍可检索。"}
           </p>
         </div>

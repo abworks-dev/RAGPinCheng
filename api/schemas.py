@@ -139,9 +139,11 @@ class OfficeProcessingStatusDTO(BaseModel):
     enabled: bool
     mode: Literal["deployment_config"] = "deployment_config"
     disabled_reason: Literal["office_processing_disabled"] | None = None
-    status: Literal["healthy", "unavailable", "disabled"]
+    status: Literal["healthy", "degraded", "unavailable", "disabled"]
     checked_at: int
     error_code: str | None = None
+    disk_free_mb: int = Field(ge=0)
+    disk_minimum_mb: int = Field(ge=0)
 
 
 class SystemOverviewResponse(BaseModel):
