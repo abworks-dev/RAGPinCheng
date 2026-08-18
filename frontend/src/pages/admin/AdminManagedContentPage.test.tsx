@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   capabilities: vi.fn(),
   categories: vi.fn(),
   items: vi.fn(),
+  preflightUpload: vi.fn(),
   upload: vi.fn(),
   uploadTasks: vi.fn(),
   uploadTask: vi.fn(),
@@ -97,6 +98,7 @@ vi.mock("../../api/client", () => ({
     managedContentCapabilities: mocks.capabilities,
     managedCategories: mocks.categories,
     managedContentItems: mocks.items,
+    preflightManagedContentUpload: mocks.preflightUpload,
     uploadManagedContent: mocks.upload,
     managedUploadTasks: mocks.uploadTasks,
     managedUploadTask: mocks.uploadTask,
@@ -268,6 +270,7 @@ describe("AdminManagedContentPage", () => {
     mocks.capabilities.mockResolvedValue({ enabled: true, max_upload_bytes: 1024, supported_extensions: [".pdf"] });
     mocks.categories.mockResolvedValue([category]);
     mocks.items.mockResolvedValue({ items: [item], total: 1, status_counts: { awaiting_review: 1 } });
+    mocks.preflightUpload.mockResolvedValue({ entries: [], folder_conflicts: [] });
     mocks.folderRequests.mockResolvedValue([]);
     mocks.review.mockResolvedValue({ ...item, lifecycle_status: "approved" });
     mocks.regeneratePreview.mockResolvedValue({ version_id: "version-1", preview_parent_id: "parent-pptx", preview_status: "ready" });
@@ -1150,8 +1153,79 @@ describe("AdminManagedContentPage", () => {
     fireEvent.change(input, { target: { files: [file] } });
     expect(screen.getByText("guide.md")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "确定上传" }));
-    await waitFor(() => expect(mocks.upload).toHaveBeenCalledWith([file], "cat-03", "files", expect.any(Function)));
+    await waitFor(() => expect(mocks.upload).toHaveBeenCalledWith([file], "cat-03", "files", expect.any(Function), { allowFolderMerge: false }));
     expect(mocks.success).toHaveBeenCalledWith("已接收 1 个文件");
+  });
+
+  it("opens the conflict review and sends a renamed file action", async () => {
+    mocks.permissions = ORGANIZER_PERMISSIONS;
+    mocks.items.mockResolvedValue({ items: [], total: 0, status_counts: {} });
+    mocks.upload.mockResolvedValue({ batch_id: "batch-conflict", entries: [] });
+    mocks.preflightUpload.mockResolvedValue({
+      entries: [{
+        sequence: 1,
+        filename: "guide.md",
+        relative_path: null,
+        status: "conflict",
+        reason: "当前目录下已存在同名资料",
+        reason_code: "content_filename_conflict",
+        suggested_filename: "guide (1).md",
+        conflict: {
+          item_id: "item-existing",
+          version_id: "version-existing",
+          title: "已有指南",
+          original_filename: "guide.md",
+          lifecycle_status: "draft",
+          has_published_head: false,
+          can_update: true,
+        },
+      }],
+      folder_conflicts: [],
+    });
+    render(<AdminManagedContentPage />);
+    await openRootFolder();
+    fireEvent.click(await screen.findByRole("button", { name: "上传文件" }));
+    const file = new File(["# Guide"], "guide.md", { type: "text/markdown" });
+    fireEvent.change(screen.getByLabelText("选择资料文件"), { target: { files: [file] } });
+    fireEvent.click(screen.getByRole("button", { name: "确定上传" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "处理上传冲突" });
+    expect(dialog).toHaveTextContent("已有指南");
+    expect(within(dialog).getByRole("combobox")).toHaveValue("skip");
+    fireEvent.change(within(dialog).getByRole("combobox"), { target: { value: "rename" } });
+    expect(within(dialog).getByLabelText("新文件名")).toHaveValue("guide (1).md");
+    fireEvent.click(within(dialog).getByRole("button", { name: "按选择上传" }));
+    await waitFor(() => expect(mocks.upload).toHaveBeenCalledWith(
+      [file], "cat-03", "files", expect.any(Function), {
+        allowFolderMerge: false,
+        conflictActions: [{ strategy: "rename", filename: "guide (1).md" }],
+      },
+    ));
+  });
+
+  it("lets a folder conflict be merged after the second preflight", async () => {
+    mocks.permissions = ORGANIZER_PERMISSIONS;
+    mocks.items.mockResolvedValue({ items: [], total: 0, status_counts: {} });
+    const folder = new File(["# Guide"], "guide.md", { type: "text/markdown" });
+    Object.defineProperty(folder, "webkitRelativePath", { value: "资料包/guide.md" });
+    mocks.preflightUpload
+      .mockResolvedValueOnce({
+        entries: [{ sequence: 1, filename: "guide.md", relative_path: "资料包/guide.md", status: "conflict", reason: "同名文件夹", reason_code: "folder_name_conflict", suggested_filename: null, conflict: null }],
+        folder_conflicts: [{ relative_path: "资料包", category_id: "cat-existing", category_path: "03 公司内部标准 / 资料包", display_name: "资料包", suggested_name: "资料包 (1)", can_rename: true }],
+      })
+      .mockResolvedValueOnce({ entries: [{ sequence: 1, filename: "guide.md", relative_path: "资料包/guide.md", status: "ready", reason: null, reason_code: null, suggested_filename: null, conflict: null }], folder_conflicts: [] });
+    mocks.upload.mockResolvedValue({ batch_id: "batch-folder-conflict", entries: [] });
+    render(<AdminManagedContentPage />);
+    await openRootFolder();
+    fireEvent.click(screen.getByRole("button", { name: "上传文件" }));
+    fireEvent.click(screen.getByRole("button", { name: "上传文件夹" }));
+    fireEvent.change(screen.getByLabelText("选择资料文件夹"), { target: { files: [folder] } });
+    fireEvent.click(await screen.findByRole("button", { name: "开始上传" }));
+    const dialog = await screen.findByRole("dialog", { name: "处理上传冲突" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "合并到现有目录" }));
+    await waitFor(() => expect(mocks.upload).toHaveBeenCalledWith(
+      [{ file: folder, relativePath: "资料包/guide.md" }], "cat-03", "folder", expect.any(Function), { allowFolderMerge: true },
+    ));
   });
 
   it("keeps the upload dialog and selected file after an upload failure", async () => {
@@ -1220,6 +1294,7 @@ describe("AdminManagedContentPage", () => {
       "cat-03",
       "folder",
       expect.any(Function),
+      { allowFolderMerge: false },
     ));
   });
 
@@ -1273,7 +1348,7 @@ describe("AdminManagedContentPage", () => {
     expect(mocks.upload).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: "确定上传" }));
-    await waitFor(() => expect(mocks.upload).toHaveBeenCalledWith([file], "cat-03", "files", expect.any(Function)));
+    await waitFor(() => expect(mocks.upload).toHaveBeenCalledWith([file], "cat-03", "files", expect.any(Function), { allowFolderMerge: false }));
   });
 
   it("shows the current folder in the list drop overlay and clears it after leaving", async () => {
@@ -1335,7 +1410,7 @@ describe("AdminManagedContentPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "上传文件" }));
     fireEvent.change(await screen.findByLabelText("选择资料文件"), { target: { files: [file] } });
     fireEvent.click(screen.getByRole("button", { name: "确定上传" }));
-    await waitFor(() => expect(mocks.upload).toHaveBeenCalledWith([file], "cat-03-01", "files", expect.any(Function)));
+    await waitFor(() => expect(mocks.upload).toHaveBeenCalledWith([file], "cat-03-01", "files", expect.any(Function), { allowFolderMerge: false }));
   });
 
   it("lets a category manager create a controlled child folder", async () => {

@@ -60,7 +60,7 @@ from .content_reclassification import (
     failure_summary as reclassification_failure_summary,
     retry_reclassification_job,
 )
-from .content_storage import ContentStorage
+from .content_storage import ContentStorage, StoredContentObject
 from .content_trash_cleanup import (
     get_trash_settings,
     list_purge_runs,
@@ -154,6 +154,12 @@ from .schemas import (
     ManagedPublicationDTO,
     ManagedPreviewDTO,
     ManagedUploadEntryDTO,
+    ManagedUploadConflictAction,
+    ManagedUploadFilenameConflictDTO,
+    ManagedUploadFolderConflictDTO,
+    ManagedUploadPreflightEntryDTO,
+    ManagedUploadPreflightRequest,
+    ManagedUploadPreflightResponse,
     ManagedUploadResponse,
     ManagedUploadTaskDTO,
     ManagedUploadTaskEntryDTO,
@@ -291,6 +297,8 @@ def _resolve_upload_category(
     relative_path: str | None,
     can_create_folders: bool,
     actor_user_id: int,
+    allow_existing_folders: bool = True,
+    created_category_ids: set[str] | None = None,
 ) -> str:
     upload_category_id = category_id
     if relative_path is None:
@@ -301,6 +309,11 @@ def _resolve_upload_category(
             conn, upload_category_id, name, active_only=True
         )
         if child is not None:
+            if (
+                not allow_existing_folders
+                and (created_category_ids is None or str(child["id"]) not in created_category_ids)
+            ):
+                raise ValueError("folder_name_conflict")
             upload_category_id = child["id"]
             continue
         if not can_create_folders:
@@ -315,7 +328,114 @@ def _resolve_upload_category(
             actor_user_id=actor_user_id,
         )
         upload_category_id = created["id"]
+        if created_category_ids is not None:
+            created_category_ids.add(str(created["id"]))
     return upload_category_id
+
+
+def _suggest_available_filename(
+    conn: sqlite3.Connection,
+    *,
+    category_id: str,
+    original_filename: str,
+) -> str:
+    path = Path(original_filename)
+    suffix = path.suffix
+    stem = path.stem or "资料"
+    for number in range(1, 10_000):
+        marker = f" ({number})"
+        available = 255 - len(suffix) - len(marker)
+        candidate = f"{stem[:available]}{marker}{suffix}"
+        if find_content_filename_conflict(
+            conn, category_id=category_id, original_filename=candidate
+        ) is None:
+            return candidate
+    raise ValueError("filename_suggestion_exhausted")
+
+
+def _suggest_available_folder_name(
+    conn: sqlite3.Connection,
+    *,
+    parent_id: str,
+    display_name: str,
+) -> str:
+    for number in range(1, 10_000):
+        marker = f" ({number})"
+        available = 100 - len(marker)
+        candidate = f"{display_name[:available]}{marker}"
+        if find_sibling_category_by_name(conn, parent_id, candidate) is None:
+            return candidate
+    raise ValueError("folder_name_suggestion_exhausted")
+
+
+def _can_update_upload_conflict(conn: sqlite3.Connection, row: sqlite3.Row) -> bool:
+    if str(row["lifecycle_status"]) == "publishing":
+        return False
+    if conn.execute(
+        """SELECT 1 FROM content_index_jobs
+           WHERE version_id=? AND status IN (
+               'pending','parsing','chunking','summarizing','embedding'
+           ) LIMIT 1""",
+        (row["version_id"],),
+    ).fetchone():
+        return False
+    return conn.execute(
+        """SELECT 1 FROM content_reclassification_jobs
+           WHERE item_id=? AND status IN ('pending','applying','committing','rolling_back')
+           LIMIT 1""",
+        (row["item_id"],),
+    ).fetchone() is None
+
+
+def _filename_conflict_dto(
+    conn: sqlite3.Connection,
+    row: sqlite3.Row,
+) -> ManagedUploadFilenameConflictDTO:
+    return ManagedUploadFilenameConflictDTO(
+        item_id=str(row["item_id"]),
+        version_id=str(row["version_id"]),
+        title=str(row["title"]),
+        original_filename=str(row["original_filename"]),
+        lifecycle_status=str(row["lifecycle_status"]),
+        has_published_head=bool(row["has_published_head"]),
+        can_update=_can_update_upload_conflict(conn, row),
+    )
+
+
+def _discard_unreferenced_upload(
+    conn: sqlite3.Connection,
+    stored: StoredContentObject | None,
+) -> None:
+    if stored is None or not stored.created:
+        return
+    if conn.execute(
+        "SELECT 1 FROM content_objects WHERE sha256=?", (stored.sha256,)
+    ).fetchone() is None:
+        stored.absolute_path.unlink(missing_ok=True)
+
+
+def _parse_upload_actions(
+    raw_actions: list[str] | None,
+    file_count: int,
+) -> list[ManagedUploadConflictAction]:
+    if raw_actions is None:
+        return [ManagedUploadConflictAction() for _ in range(file_count)]
+    if len(raw_actions) != file_count:
+        raise HTTPException(status_code=400, detail="文件和冲突处理数量不一致")
+    actions: list[ManagedUploadConflictAction] = []
+    try:
+        for raw in raw_actions:
+            actions.append(ManagedUploadConflictAction(**json.loads(raw)))
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=400, detail="冲突处理参数无效") from exc
+    for action in actions:
+        if action.strategy == "rename" and not action.filename:
+            raise HTTPException(status_code=400, detail="重命名处理缺少新文件名")
+        if action.strategy == "update" and not (
+            action.item_id and action.expected_version_id
+        ):
+            raise HTTPException(status_code=400, detail="更新处理缺少目标资料版本")
+    return actions
 
 
 def _managed_index_job_dto(
@@ -824,12 +944,179 @@ def post_folder_request_review(
     return _folder_request_dto(row)
 
 
+@router.post("/uploads/preflight", response_model=ManagedUploadPreflightResponse)
+def preflight_managed_document_upload(
+    body: ManagedUploadPreflightRequest,
+    user: CurrentUser = Depends(require_content_permission("item.upload", csrf=True)),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> ManagedUploadPreflightResponse:
+    _require_feature()
+    category = conn.execute(
+        "SELECT level FROM category_nodes WHERE id=? AND is_active=1",
+        (body.category_id,),
+    ).fetchone()
+    if category is None:
+        raise HTTPException(status_code=400, detail="目标目录不存在或已停用")
+    if body.upload_mode == "folder" and len(body.entries) > _MAX_FOLDER_UPLOAD_FILES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"文件夹最多上传 {_MAX_FOLDER_UPLOAD_FILES} 个文件",
+        )
+    total_size = sum(entry.size_bytes for entry in body.entries)
+    if body.upload_mode == "folder" and total_size > _MAX_FOLDER_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"文件夹总大小不能超过 {_MAX_FOLDER_UPLOAD_BYTES // (1024 * 1024)} MB",
+        )
+
+    can_create_folders = has_content_permission(conn, user, "category.manage")
+    folder_conflicts: dict[str, ManagedUploadFolderConflictDTO] = {}
+    results: list[ManagedUploadPreflightEntryDTO] = []
+    seen_paths: set[str] = set()
+    for sequence, entry in enumerate(body.entries, start=1):
+        try:
+            filename = _storage.validate_filename(entry.filename)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="文件名无效") from exc
+        relative_path = entry.relative_path
+        if body.upload_mode == "folder" and not relative_path:
+            raise HTTPException(status_code=400, detail="文件夹上传缺少相对路径")
+        if relative_path:
+            candidate = relative_path.replace("\\", "/")
+            parts = candidate.split("/")
+            if (
+                not candidate
+                or len(candidate) > _MAX_RELATIVE_PATH_LENGTH
+                or "\x00" in candidate
+                or candidate.startswith("/")
+                or re.match(r"^[A-Za-z]:", candidate)
+                or any(not part or part in {".", ".."} for part in parts)
+            ):
+                raise HTTPException(status_code=400, detail="文件夹路径无效")
+            if parts[-1] != filename:
+                raise HTTPException(status_code=400, detail="文件名与相对路径不一致")
+            if int(category["level"]) + len(parts) - 1 > 4:
+                raise HTTPException(status_code=400, detail="文件夹路径超过资料目录四级限制")
+            normalized_path = "/".join(parts)
+            if normalized_path in seen_paths:
+                raise HTTPException(status_code=400, detail="文件夹中存在重复的文件路径")
+            seen_paths.add(normalized_path)
+        else:
+            parts = [filename]
+            normalized_path = None
+
+        suffix = Path(filename).suffix.lower()
+        doc_type = _DOC_TYPES.get(suffix)
+        if doc_type is None:
+            results.append(ManagedUploadPreflightEntryDTO(
+                sequence=sequence, filename=filename, relative_path=normalized_path,
+                status="blocked", reason="不支持的文件格式",
+                reason_code="unsupported_file_type",
+            ))
+            continue
+        if doc_type in OFFICE_DOC_TYPES and not OFFICE_PROCESSING_ENABLED:
+            results.append(ManagedUploadPreflightEntryDTO(
+                sequence=sequence, filename=filename, relative_path=normalized_path,
+                status="blocked", reason="Office 处理当前已停用",
+                reason_code="office_processing_disabled",
+            ))
+            continue
+        if entry.size_bytes > _MAX_UPLOAD_BYTES:
+            results.append(ManagedUploadPreflightEntryDTO(
+                sequence=sequence, filename=filename, relative_path=normalized_path,
+                status="blocked", reason="文件超过上传大小上限",
+                reason_code="content_too_large",
+            ))
+            continue
+
+        upload_category_id: str | None = body.category_id
+        blocked_reason: str | None = None
+        root_conflict = False
+        for folder_index, folder_name in enumerate(parts[:-1]):
+            try:
+                _code, name = _parse_folder_name(folder_name)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail="文件夹名称不符合规则") from exc
+            child = find_sibling_category_by_name(
+                conn, upload_category_id, name, active_only=True
+            )
+            if child is not None:
+                if folder_index == 0 and not body.allow_folder_merge:
+                    key = str(child["id"])
+                    folder_conflicts.setdefault(key, ManagedUploadFolderConflictDTO(
+                        relative_path=folder_name,
+                        category_id=key,
+                        category_path=_category_path(conn, key),
+                        display_name=name,
+                        suggested_name=_suggest_available_folder_name(
+                            conn, parent_id=body.category_id, display_name=name
+                        ),
+                        can_rename=can_create_folders,
+                    ))
+                    root_conflict = True
+                    break
+                upload_category_id = str(child["id"])
+                continue
+            if not can_create_folders:
+                blocked_reason = "目录尚未批准，请联系资料负责人创建后重试"
+            upload_category_id = None
+            break
+
+        if root_conflict:
+            results.append(ManagedUploadPreflightEntryDTO(
+                sequence=sequence, filename=filename, relative_path=normalized_path,
+                status="conflict", reason="上传文件夹与当前目录的子文件夹重名",
+                reason_code="folder_name_conflict",
+            ))
+            continue
+        if blocked_reason:
+            results.append(ManagedUploadPreflightEntryDTO(
+                sequence=sequence, filename=filename, relative_path=normalized_path,
+                status="blocked", reason=blocked_reason,
+                reason_code="folder_approval_required",
+            ))
+            continue
+        if upload_category_id is None:
+            results.append(ManagedUploadPreflightEntryDTO(
+                sequence=sequence, filename=filename, relative_path=normalized_path,
+                status="ready",
+            ))
+            continue
+        conflict = find_content_filename_conflict(
+            conn, category_id=upload_category_id, original_filename=filename
+        )
+        if conflict is None:
+            results.append(ManagedUploadPreflightEntryDTO(
+                sequence=sequence, filename=filename, relative_path=normalized_path,
+                status="ready",
+            ))
+            continue
+        results.append(ManagedUploadPreflightEntryDTO(
+            sequence=sequence,
+            filename=filename,
+            relative_path=normalized_path,
+            status="conflict",
+            reason="当前目录下已存在同名资料",
+            reason_code="content_filename_conflict",
+            suggested_filename=_suggest_available_filename(
+                conn, category_id=upload_category_id, original_filename=filename
+            ),
+            conflict=_filename_conflict_dto(conn, conflict),
+        ))
+    return ManagedUploadPreflightResponse(
+        entries=results,
+        folder_conflicts=list(folder_conflicts.values()),
+    )
+
+
 @router.post("/uploads", response_model=ManagedUploadResponse)
 async def upload_managed_documents(
     files: list[UploadFile] = File(...),
     category_id: str = Form(...),
     relative_paths: list[str] | None = Form(None),
     upload_mode: str = Form("files"),
+    allow_folder_merge: bool = Form(False),
+    conflict_actions: list[str] | None = Form(None),
     user: CurrentUser = Depends(require_content_permission("item.upload", csrf=True)),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> ManagedUploadResponse:
@@ -843,6 +1130,7 @@ async def upload_managed_documents(
         relative_paths=relative_paths,
         upload_mode=upload_mode,
     )
+    actions = _parse_upload_actions(conflict_actions, len(files))
     upload_sizes = [_upload_size(upload) for upload in files]
     batch_id = create_web_batch(
         conn,
@@ -854,10 +1142,13 @@ async def upload_managed_documents(
     )
     entries: list[ManagedUploadEntryDTO] = []
     can_create_folders = has_content_permission(conn, user, "category.manage")
+    created_category_ids: set[str] = set()
     for index, upload in enumerate(files):
         filename = (upload.filename or "").strip()
         relative_path = normalized_paths[index]
         size_bytes = upload_sizes[index]
+        action = actions[index]
+        final_filename = action.filename.strip() if action.strategy == "rename" and action.filename else filename
         suffix = Path(filename).suffix.lower()
         doc_type = _DOC_TYPES.get(suffix)
         if doc_type is None:
@@ -882,15 +1173,70 @@ async def upload_managed_documents(
                 relative_path=relative_path, size_bytes=size_bytes, status="skipped", reason=reason,
             )
             continue
-        try:
-            if relative_path and not can_create_folders:
-                _resolve_upload_category(
-                    conn,
-                    category_id=category_id,
-                    relative_path=relative_path,
-                    can_create_folders=False,
-                    actor_user_id=user.id,
+        if action.strategy == "skip":
+            reason = "按用户选择跳过"
+            entries.append(ManagedUploadEntryDTO(
+                filename=filename,
+                status="skipped",
+                reason=reason,
+                reason_code="conflict_skipped",
+            ))
+            record_upload_batch_entry(
+                conn, batch_id=batch_id, sequence=index + 1, filename=filename,
+                relative_path=relative_path, size_bytes=size_bytes, status="skipped", reason=reason,
+            )
+            continue
+        if action.strategy == "rename":
+            try:
+                _storage.validate_filename(final_filename)
+            except ValueError:
+                reason = "新文件名无效"
+                entries.append(ManagedUploadEntryDTO(
+                    filename=filename, status="skipped", reason=reason,
+                    reason_code="invalid_filename",
+                ))
+                record_upload_batch_entry(
+                    conn, batch_id=batch_id, sequence=index + 1, filename=filename,
+                    relative_path=relative_path, size_bytes=size_bytes, status="skipped", reason=reason,
                 )
+                continue
+            if Path(final_filename).suffix.lower() != suffix:
+                reason = "重命名不能改变文件扩展名"
+                entries.append(ManagedUploadEntryDTO(
+                    filename=filename, status="skipped", reason=reason,
+                    reason_code="invalid_filename_extension",
+                ))
+                record_upload_batch_entry(
+                    conn, batch_id=batch_id, sequence=index + 1, filename=filename,
+                    relative_path=relative_path, size_bytes=size_bytes, status="skipped", reason=reason,
+                )
+                continue
+        stored: StoredContentObject | None = None
+        try:
+            upload_category_id = _resolve_upload_category(
+                conn,
+                category_id=category_id,
+                relative_path=relative_path,
+                can_create_folders=can_create_folders,
+                actor_user_id=user.id,
+                allow_existing_folders=allow_folder_merge,
+                created_category_ids=created_category_ids,
+            )
+            conflict = find_content_filename_conflict(
+                conn, category_id=upload_category_id, original_filename=final_filename
+            )
+            if action.strategy == "update":
+                if (
+                    conflict is None
+                    or str(conflict["item_id"]) != action.item_id
+                    or str(conflict["version_id"]) != action.expected_version_id
+                ):
+                    raise ValueError("content_upload_conflict_changed")
+                if not _can_update_upload_conflict(conn, conflict):
+                    raise ValueError("content_revision_in_progress")
+                final_filename = str(conflict["original_filename"])
+            elif conflict is not None:
+                raise ContentFilenameConflict(conflict)
             stored = await _storage.ingest_upload(
                 upload, batch_id=batch_id, max_bytes=_MAX_UPLOAD_BYTES
             )
@@ -900,47 +1246,75 @@ async def upload_managed_documents(
                     if stored.created:
                         stored.absolute_path.unlink(missing_ok=True)
                     raise ValueError(package_issue)
-            upload_category_id = _resolve_upload_category(
-                conn,
-                category_id=category_id,
-                relative_path=relative_path,
-                can_create_folders=can_create_folders,
-                actor_user_id=user.id,
-            )
-            result = register_uploaded_document(
-                conn,
-                batch_id=batch_id,
-                category_id=upload_category_id,
-                title=Path(filename).stem,
-                original_filename=filename,
-                doc_type=doc_type,
-                stored=stored,
-                actor_user_id=user.id,
-                source_rel_path=relative_path or filename,
-            )
-            entries.append(ManagedUploadEntryDTO(filename=filename, item_id=result.item_id,
-                version_id=result.version_id, sha256=stored.sha256, status="accepted"))
+            source_parts = relative_path.split("/") if relative_path else [filename]
+            source_parts[-1] = final_filename
+            source_rel_path = "/".join(source_parts)
+            if action.strategy == "update" and conflict is not None:
+                result = create_content_revision(
+                    conn,
+                    str(conflict["item_id"]),
+                    expected_version_id=str(conflict["version_id"]),
+                    title=str(conflict["title"]),
+                    original_filename=final_filename,
+                    actor_user_id=user.id,
+                    can_revise=True,
+                    can_archive_draft=False,
+                    can_archive_published=False,
+                    stored=stored,
+                    doc_type=doc_type,
+                    source_batch_id=batch_id,
+                )
+                item_id = str(conflict["item_id"])
+                version_id = result.version_id
+                resolution: Literal["created", "renamed", "updated"] = "updated"
+            else:
+                uploaded = register_uploaded_document(
+                    conn,
+                    batch_id=batch_id,
+                    category_id=upload_category_id,
+                    title=Path(final_filename).stem,
+                    original_filename=final_filename,
+                    doc_type=doc_type,
+                    stored=stored,
+                    actor_user_id=user.id,
+                    source_rel_path=source_rel_path,
+                )
+                item_id = uploaded.item_id
+                version_id = uploaded.version_id
+                resolution = "renamed" if action.strategy == "rename" else "created"
+            entries.append(ManagedUploadEntryDTO(
+                filename=final_filename, item_id=item_id, version_id=version_id,
+                sha256=stored.sha256, status="accepted", resolution=resolution,
+            ))
             record_upload_batch_entry(
-                conn, batch_id=batch_id, sequence=index + 1, filename=filename,
-                relative_path=relative_path, size_bytes=size_bytes, status="accepted",
-                item_id=result.item_id, version_id=result.version_id,
+                conn, batch_id=batch_id, sequence=index + 1, filename=final_filename,
+                relative_path=source_rel_path, size_bytes=size_bytes, status="accepted",
+                item_id=item_id, version_id=version_id,
             )
         except (ValueError, sqlite3.IntegrityError) as exc:
             conn.rollback()
+            _discard_unreferenced_upload(conn, stored)
+            reason_code = str(exc)
             reason = {
                 "folder_approval_required": "目录尚未批准，请联系资料负责人创建后重试",
+                "folder_name_conflict": "上传文件夹与当前目录的子文件夹重名，请先确认合并或重命名",
                 "invalid_relative_path": "文件夹路径无效或超过允许深度",
                 "invalid_folder_name": "文件夹名称不符合规则",
                 "category_depth_exceeded": "资料目录最多支持四级",
                 "content_filename_conflict": "当前目录下已存在同名资料",
+                "content_upload_conflict_changed": "同名资料已发生变化，请重新检查后处理",
+                "content_revision_in_progress": "同名资料正在发布，暂时不能更新",
                 "content_too_large": "文件超过上传大小上限",
                 "office_external_link": "Office 文件包含外部链接，已拒绝处理",
                 "office_embedded_object": "Office 文件包含嵌入对象，已拒绝处理",
                 "office_package_invalid": "Office 文件格式无效",
-            }.get(str(exc), str(exc))
-            entries.append(ManagedUploadEntryDTO(filename=filename, status="skipped", reason=reason))
+            }.get(reason_code, reason_code)
+            entries.append(ManagedUploadEntryDTO(
+                filename=final_filename, status="skipped", reason=reason,
+                reason_code=reason_code,
+            ))
             record_upload_batch_entry(
-                conn, batch_id=batch_id, sequence=index + 1, filename=filename,
+                conn, batch_id=batch_id, sequence=index + 1, filename=final_filename,
                 relative_path=relative_path, size_bytes=size_bytes, status="skipped", reason=reason,
             )
     if not any(entry.status == "accepted" for entry in entries):

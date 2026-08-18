@@ -961,6 +961,184 @@ def test_folder_upload_rejects_depth_count_and_total_size_limits(content_api, mo
     assert "文件夹总大小" in total.json()["detail"]
 
 
+def test_upload_preflight_reports_case_insensitive_conflict_and_rename_suggestion(content_api):
+    client, sessions, _queued, _db_path = content_api
+    auth = _auth(sessions, "organizer", csrf=True)
+    uploaded = client.post(
+        "/api/admin/content/uploads",
+        data={"category_id": "cat-03"},
+        files=[("files", ("guide.md", b"# original", "text/markdown"))],
+        **auth,
+    )
+    assert uploaded.status_code == 200
+
+    preflight = client.post(
+        "/api/admin/content/uploads/preflight",
+        json={
+            "category_id": "cat-03",
+            "entries": [
+                {"filename": "GUIDE.md", "size_bytes": 12},
+                {"filename": "other.md", "size_bytes": 10},
+            ],
+        },
+        **auth,
+    )
+    assert preflight.status_code == 200
+    entries = preflight.json()["entries"]
+    assert entries[0]["status"] == "conflict"
+    assert entries[0]["reason_code"] == "content_filename_conflict"
+    assert entries[0]["suggested_filename"] == "GUIDE (1).md"
+    assert entries[0]["conflict"]["original_filename"] == "guide.md"
+    assert entries[1]["status"] == "ready"
+
+
+def test_upload_conflict_actions_support_skip_rename_update_and_stale_version(content_api):
+    client, sessions, _queued, db_path = content_api
+    auth = _auth(sessions, "organizer", csrf=True)
+    first = client.post(
+        "/api/admin/content/uploads",
+        data={"category_id": "cat-03"},
+        files=[("files", ("guide.md", b"# original", "text/markdown"))],
+        **auth,
+    ).json()["entries"][0]
+
+    partial = client.post(
+        "/api/admin/content/uploads",
+        data={
+            "category_id": "cat-03",
+            "conflict_actions": [
+                json.dumps({"strategy": "skip"}),
+                json.dumps({"strategy": "create"}),
+            ],
+        },
+        files=[
+            ("files", ("GUIDE.md", b"# skipped", "text/markdown")),
+            ("files", ("other.md", b"# other", "text/markdown")),
+        ],
+        **auth,
+    )
+    assert partial.status_code == 200, partial.text
+    assert [(entry["status"], entry["reason_code"]) for entry in partial.json()["entries"]] == [
+        ("skipped", "conflict_skipped"), ("accepted", None)
+    ]
+
+    renamed = client.post(
+        "/api/admin/content/uploads",
+        data={
+            "category_id": "cat-03",
+            "conflict_actions": json.dumps({"strategy": "rename", "filename": "guide (1).md"}),
+        },
+        files=[("files", ("guide.md", b"# renamed", "text/markdown"))],
+        **auth,
+    )
+    assert renamed.status_code == 200
+    assert renamed.json()["entries"][0]["resolution"] == "renamed"
+    assert renamed.json()["entries"][0]["filename"] == "guide (1).md"
+
+    updated = client.post(
+        "/api/admin/content/uploads",
+        data={
+            "category_id": "cat-03",
+            "conflict_actions": json.dumps({
+                "strategy": "update",
+                "item_id": first["item_id"],
+                "expected_version_id": first["version_id"],
+            }),
+        },
+        files=[("files", ("GUIDE.md", b"# updated", "text/markdown"))],
+        **auth,
+    )
+    assert updated.status_code == 200
+    assert updated.json()["entries"][0]["resolution"] == "updated"
+    assert updated.json()["entries"][0]["filename"] == "guide.md"
+
+    stale = client.post(
+        "/api/admin/content/uploads",
+        data={
+            "category_id": "cat-03",
+            "conflict_actions": json.dumps({
+                "strategy": "update",
+                "item_id": first["item_id"],
+                "expected_version_id": first["version_id"],
+            }),
+        },
+        files=[("files", ("guide.md", b"# stale", "text/markdown"))],
+        **auth,
+    )
+    assert stale.status_code == 200
+    assert stale.json()["entries"][0]["reason_code"] == "content_upload_conflict_changed"
+    conn = connect(db_path)
+    try:
+        versions = conn.execute(
+            "SELECT version_number,original_filename FROM content_versions WHERE item_id=? ORDER BY version_number",
+            (first["item_id"],),
+        ).fetchall()
+        assert [(row[0], row[1]) for row in versions] == [(1, "guide.md"), (2, "guide.md")]
+    finally:
+        conn.close()
+
+
+def test_folder_upload_preflight_and_resolution_for_existing_root(content_api):
+    client, sessions, _queued, db_path = content_api
+    auth = _auth(sessions, "admin", csrf=True)
+    seeded = client.post(
+        "/api/admin/content/uploads",
+        data={"category_id": "cat-04", "relative_paths": "01 建筑/seed.md", "upload_mode": "folder"},
+        files=[("files", ("seed.md", b"# seed", "text/markdown"))],
+        **auth,
+    )
+    assert seeded.status_code == 200
+
+    preflight = client.post(
+        "/api/admin/content/uploads/preflight",
+        json={
+            "category_id": "cat-04",
+            "upload_mode": "folder",
+            "entries": [{"filename": "new.md", "relative_path": "01 建筑/new.md", "size_bytes": 6}],
+        },
+        **auth,
+    )
+    assert preflight.status_code == 200
+    assert preflight.json()["entries"][0]["reason_code"] == "folder_name_conflict"
+    assert preflight.json()["folder_conflicts"][0]["suggested_name"] == "建筑 (1)"
+
+    merged = client.post(
+        "/api/admin/content/uploads",
+        data={
+            "category_id": "cat-04",
+            "relative_paths": "01 建筑/new.md",
+            "upload_mode": "folder",
+            "allow_folder_merge": "true",
+        },
+        files=[("files", ("new.md", b"# merged", "text/markdown"))],
+        **auth,
+    )
+    assert merged.status_code == 200
+    assert merged.json()["entries"][0]["status"] == "accepted"
+
+    renamed_root = client.post(
+        "/api/admin/content/uploads",
+        data={
+            "category_id": "cat-04",
+            "relative_paths": "02 建筑 (1)/new.md",
+            "upload_mode": "folder",
+        },
+        files=[("files", ("new.md", b"# renamed root", "text/markdown"))],
+        **auth,
+    )
+    assert renamed_root.status_code == 200
+    assert renamed_root.json()["entries"][0]["status"] == "accepted", renamed_root.text
+    conn = connect(db_path)
+    try:
+        folders = conn.execute(
+            "SELECT display_code,display_name FROM category_nodes WHERE parent_id='cat-04' ORDER BY display_code"
+        ).fetchall()
+        assert ("01", "建筑") in [tuple(row) for row in folders]
+        assert ("02", "建筑 (1)") in [tuple(row) for row in folders]
+    finally:
+        conn.close()
+
+
 def test_managed_office_upload_limit_cleans_staging_and_creates_no_content(content_api, monkeypatch):
     client, sessions, _queued, db_path = content_api
     monkeypatch.setattr(routes_content, "_MAX_UPLOAD_BYTES", 4)

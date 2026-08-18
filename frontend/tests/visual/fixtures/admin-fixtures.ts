@@ -557,7 +557,7 @@ export async function installAdminRoutes(
   scenario: AdminScenario = "normal",
   workspaceUser: WorkspaceUser = "admin",
   currentUser: () => typeof admin = () => workspaceUsers[workspaceUser],
-  options: { includeChildFolder?: boolean; includeFolderRequest?: boolean; feedbackPatchDelayMs?: number } = {},
+  options: { includeChildFolder?: boolean; includeFolderRequest?: boolean; feedbackPatchDelayMs?: number; uploadConflict?: boolean } = {},
 ) {
   const activeFeedbackEntries = feedbackEntries.map((entry) => ({ ...entry }));
 
@@ -1017,7 +1017,50 @@ export async function installAdminRoutes(
         const body = request.postDataJSON() as Partial<typeof current>;
         return json(route, { ...current, ...body, version: current.version + 1, updated_at: 1700000600 });
       }
+      if (path === "/api/admin/content/uploads/preflight") {
+        const body = request.postDataJSON() as {
+          entries: Array<{ filename: string; relative_path: string | null }>;
+        };
+        if (options.uploadConflict) {
+          const entry = body.entries[0];
+          return json(route, {
+            entries: [{
+              sequence: 1,
+              filename: entry.filename,
+              relative_path: entry.relative_path,
+              status: "conflict",
+              reason: "当前目录下已存在同名资料",
+              reason_code: "content_filename_conflict",
+              suggested_filename: "synthetic (1).pdf",
+              conflict: {
+                item_id: "existing-item",
+                version_id: "existing-version",
+                title: "现有合成资料",
+                original_filename: "synthetic.pdf",
+                lifecycle_status: "draft",
+                has_published_head: false,
+                can_update: true,
+              },
+            }],
+            folder_conflicts: [],
+          });
+        }
+        return json(route, {
+          entries: body.entries.map((entry, index) => ({
+            sequence: index + 1,
+            filename: entry.filename,
+            relative_path: entry.relative_path,
+            status: "ready",
+            reason: null,
+            reason_code: null,
+            suggested_filename: null,
+            conflict: null,
+          })),
+          folder_conflicts: [],
+        });
+      }
       if (path === "/api/admin/content/uploads") {
+        await new Promise((resolve) => setTimeout(resolve, 800));
         return json(route, { batch_id: "synthetic-batch", entries: [{ filename: "synthetic.pdf", item_id: "new-item", version_id: "new-version", sha256: null, status: "accepted", reason: null }] });
       }
       if (path.endsWith("/bulk-review") || path.endsWith("/bulk-publish") || path.endsWith("/bulk-move") || path.endsWith("/bulk-archive")) {

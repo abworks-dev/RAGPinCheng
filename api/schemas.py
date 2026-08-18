@@ -478,6 +478,61 @@ class DeleteManagedCategoryResponse(BaseModel):
     categories: list[ManagedCategoryDTO]
 
 
+class ManagedUploadPreflightEntryRequest(BaseModel):
+    filename: str = Field(min_length=1, max_length=255)
+    relative_path: str | None = Field(default=None, max_length=1024)
+    size_bytes: int = Field(default=0, ge=0)
+
+
+class ManagedUploadPreflightRequest(BaseModel):
+    category_id: str = Field(min_length=1, max_length=128)
+    upload_mode: Literal["files", "folder"] = "files"
+    allow_folder_merge: bool = False
+    entries: list[ManagedUploadPreflightEntryRequest] = Field(min_length=1, max_length=500)
+
+
+class ManagedUploadFilenameConflictDTO(BaseModel):
+    item_id: str
+    version_id: str
+    title: str
+    original_filename: str
+    lifecycle_status: str
+    has_published_head: bool
+    can_update: bool
+
+
+class ManagedUploadFolderConflictDTO(BaseModel):
+    relative_path: str
+    category_id: str
+    category_path: str
+    display_name: str
+    suggested_name: str
+    can_rename: bool
+
+
+class ManagedUploadPreflightEntryDTO(BaseModel):
+    sequence: int
+    filename: str
+    relative_path: str | None = None
+    status: Literal["ready", "conflict", "blocked"]
+    reason: str | None = None
+    reason_code: str | None = None
+    suggested_filename: str | None = None
+    conflict: ManagedUploadFilenameConflictDTO | None = None
+
+
+class ManagedUploadPreflightResponse(BaseModel):
+    entries: list[ManagedUploadPreflightEntryDTO]
+    folder_conflicts: list[ManagedUploadFolderConflictDTO]
+
+
+class ManagedUploadConflictAction(BaseModel):
+    strategy: Literal["skip", "create", "rename", "update"] = "create"
+    filename: str | None = Field(default=None, max_length=255)
+    item_id: str | None = Field(default=None, max_length=128)
+    expected_version_id: str | None = Field(default=None, max_length=128)
+
+
 class ManagedUploadEntryDTO(BaseModel):
     filename: str
     item_id: str | None = None
@@ -486,6 +541,7 @@ class ManagedUploadEntryDTO(BaseModel):
     status: Literal["accepted", "skipped"]
     reason: str | None = None
     reason_code: str | None = None
+    resolution: Literal["created", "renamed", "updated"] | None = None
 
 
 class ManagedUploadResponse(BaseModel):

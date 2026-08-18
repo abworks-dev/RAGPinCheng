@@ -38,6 +38,8 @@ import type {
   TrashPurgeRun,
   TrashSettings,
   ManagedIndexJobList,
+  ManagedUploadConflictAction,
+  ManagedUploadPreflightResponse,
   ManagedUploadResponse,
   ManagedUploadTask,
   ManagedUploadTaskList,
@@ -100,6 +102,11 @@ export type ManagedUploadProgress = {
   phase: "uploading" | "processing";
   loaded: number;
   total: number;
+};
+
+export type ManagedUploadOptions = {
+  allowFolderMerge?: boolean;
+  conflictActions?: ManagedUploadConflictAction[];
 };
 
 export function setUnauthorizedHandler(fn: (() => void) | null) {
@@ -617,11 +624,33 @@ export const api = {
     jsonFetch<ContentTrashAuditEvent[]>(
       `/api/admin/content/items/${encodeURIComponent(itemId)}/audit-events`,
     ),
+  preflightManagedContentUpload: (
+    files: Array<File | ManagedContentUploadEntry>,
+    categoryId: string,
+    uploadMode: ManagedContentUploadMode = "files",
+    allowFolderMerge = false,
+  ) => jsonFetch<ManagedUploadPreflightResponse>("/api/admin/content/uploads/preflight", {
+    method: "POST",
+    body: JSON.stringify({
+      category_id: categoryId,
+      upload_mode: uploadMode,
+      allow_folder_merge: allowFolderMerge,
+      entries: files.map((entry) => {
+        const file = "file" in entry ? entry.file : entry;
+        return {
+          filename: file.name,
+          relative_path: "file" in entry ? entry.relativePath : file.webkitRelativePath || file.name,
+          size_bytes: file.size,
+        };
+      }),
+    }),
+  }),
   uploadManagedContent: async (
     files: Array<File | ManagedContentUploadEntry>,
     categoryId: string,
     uploadMode: ManagedContentUploadMode = "files",
     onProgress?: (progress: ManagedUploadProgress) => void,
+    options?: ManagedUploadOptions,
   ) => {
     const form = new FormData();
     files.forEach((entry) => {
@@ -632,6 +661,10 @@ export const api = {
     });
     form.append("category_id", categoryId);
     form.append("upload_mode", uploadMode);
+    form.append("allow_folder_merge", options?.allowFolderMerge ? "true" : "false");
+    options?.conflictActions?.forEach((action) => {
+      form.append("conflict_actions", JSON.stringify(action));
+    });
     if (!onProgress) {
       const headers: Record<string, string> = {};
       if (csrfToken) headers["X-CSRF-Token"] = csrfToken;
