@@ -15,14 +15,15 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Checkbox } from "../../components/ui/checkbox";
 import { TranscriptionWorkbenchSheet } from "../../components/TranscriptionWorkbenchSheet";
 import { ManagedSummaryCard } from "../../components/admin/ManagedSummaryCard";
+import { CategoryTreePicker } from "../../components/admin/CategoryTreePicker";
 import { useTranscriptionJobs } from "../../hooks/useTranscriptionJobs";
 import { useAdminMediaAssets } from "../../hooks/useAdminMediaAssets";
 import { createRequestId } from "../../lib/request-id";
-import type { MediaAsset, TranscriptionJob, TranscriptionSchemeOption } from "../../types";
+import type { ManagedCategory, MediaAsset, MediaUploadPreflightEntry, TranscriptionJob, TranscriptionSchemeOption } from "../../types";
 import { formatAdminDate, formatBytes } from "../../lib/admin-formatters";
 
 type UploadMode = "manual" | "automatic";
-type UploadState = "waiting" | "uploading" | "preparing" | "succeeded" | "failed";
+type UploadState = "waiting" | "uploading" | "preparing" | "succeeded" | "skipped" | "failed";
 type StatusVariant = "secondary" | "success" | "warning" | "destructive" | "info";
 type MediaFilter = "all" | "processing" | "review" | "publishing" | "failed";
 
@@ -30,6 +31,7 @@ type PendingVideo = {
   id: string;
   file: File;
   title: string;
+  originalFilename: string;
   selected: boolean;
   profileId: string;
   transcriptFile: File | null;
@@ -38,6 +40,13 @@ type PendingVideo = {
   state: UploadState;
   transferRatio: number;
   error: string | null;
+  replacementSourceMediaId: string | null;
+};
+
+type MediaConflictChoice = {
+  strategy: "skip" | "rename" | "update";
+  title: string;
+  originalFilename: string;
 };
 
 const mediaStatusMeta: Record<string, { label: string; variant: StatusVariant }> = {
@@ -158,6 +167,7 @@ function pendingFromFile(file: File, profileId: string): PendingVideo {
     id: createRequestId(),
     file,
     title: file.name.replace(/\.[^.]+$/, ""),
+    originalFilename: file.name,
     selected: true,
     profileId,
     transcriptFile: null,
@@ -166,6 +176,7 @@ function pendingFromFile(file: File, profileId: string): PendingVideo {
     state: "waiting",
     transferRatio: 0,
     error: null,
+    replacementSourceMediaId: null,
   };
 }
 
@@ -174,6 +185,10 @@ export function AdminMediaPage() {
   const [deleteTarget, setDeleteTarget] = useState<MediaAsset | null>(null);
   const [archiveTarget, setArchiveTarget] = useState<MediaAsset | null>(null);
   const [archiveAcknowledged, setArchiveAcknowledged] = useState(false);
+  const [moveTarget, setMoveTarget] = useState<MediaAsset | null>(null);
+  const [moveCategoryId, setMoveCategoryId] = useState("");
+  const [moveBusy, setMoveBusy] = useState(false);
+  const [moveError, setMoveError] = useState<string | null>(null);
   const [schemes, setSchemes] = useState<TranscriptionSchemeOption[]>([]);
   const [schemeError, setSchemeError] = useState<string | null>(null);
   const [step, setStep] = useState(1);
@@ -186,6 +201,10 @@ export function AdminMediaPage() {
   const [dragging, setDragging] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
+  const [categories, setCategories] = useState<ManagedCategory[]>([]);
+  const [targetCategoryId, setTargetCategoryId] = useState("cat-05");
+  const [conflictReview, setConflictReview] = useState<MediaUploadPreflightEntry[] | null>(null);
+  const [conflictChoices, setConflictChoices] = useState<Record<string, MediaConflictChoice>>({});
   const [mediaFilter, setMediaFilter] = useState<MediaFilter>("all");
   const [lastLoadedAt, setLastLoadedAt] = useState<number | null>(null);
   const [selectedMediaId, setSelectedMediaId] = useState<string | null>(() => {
@@ -241,6 +260,15 @@ export function AdminMediaPage() {
         setSchemeError(cause instanceof Error ? cause.message : "转录方案加载失败");
       });
   }, []);
+  useEffect(() => {
+    adminMediaApi.categories()
+      .then((items) => {
+        const active = items.filter((item) => item.is_active);
+        setCategories(active);
+        setTargetCategoryId((current) => active.some((item) => item.id === current) ? current : active.find((item) => item.id === "cat-05")?.id || active[0]?.id || "");
+      })
+      .catch((cause) => setUploadError(cause instanceof Error ? cause.message : "目录加载失败"));
+  }, []);
 
   const enabledSchemes = schemes.filter((item) => item.enabled && !item.archived && item.availability === "available");
   const editingItem = pending.find((item) => item.id === editingId);
@@ -254,6 +282,7 @@ export function AdminMediaPage() {
 
   function updatePending(id: string, change: Partial<PendingVideo>) {
     setPending((current) => current.map((item) => item.id === id ? { ...item, ...change } : item));
+    setConflictReview(null);
   }
 
   function chooseMode(nextMode: UploadMode) {
@@ -290,7 +319,7 @@ export function AdminMediaPage() {
     return null;
   }
 
-  const readyItems = pending.filter((item) => item.state !== "succeeded");
+  const readyItems = pending.filter((item) => item.state !== "succeeded" && item.state !== "skipped");
   const canSubmit = Boolean(mode && readyItems.length && readyItems.every((item) => !validateItem(item)) && !submitting);
   const mediaFilterOptions = [
     ["all", "全部"],
@@ -419,6 +448,17 @@ export function AdminMediaPage() {
   }
 
   async function archiveMedia(asset: MediaAsset) { setDeletingMediaId(asset.media_id); try { await adminMediaApi.archiveAsset(asset.media_id); removeAsset(asset.media_id); setArchiveTarget(null); setArchiveAcknowledged(false); await refreshMediaState(); } catch (e: any) { setUploadError(e?.message || String(e)); } finally { setDeletingMediaId(null); } }
+  async function moveMediaAsset() {
+    if (!moveTarget?.catalog_item_id || !moveTarget.current_version_id || !moveCategoryId) return;
+    setMoveBusy(true); setMoveError(null);
+    try {
+      await adminMediaApi.moveAsset(moveTarget.catalog_item_id, moveCategoryId, moveTarget.current_version_id);
+      setMoveTarget(null); setMoveCategoryId("");
+      await refresh();
+    } catch (cause) {
+      setMoveError(cause instanceof Error ? cause.message : "调整目录失败");
+    } finally { setMoveBusy(false); }
+  }
 
   async function uploadOne(item: PendingVideo) {
     const callbacks = {
@@ -436,7 +476,11 @@ export function AdminMediaPage() {
     updatePending(item.id, { state: "uploading", transferRatio: 0, error: null });
     try {
       if (mode === "automatic") {
-        const uploaded = await adminMediaApi.uploadAutomatic(item.file, item.title.trim(), item.profileId, item.requestId, callbacks);
+        const uploaded = await adminMediaApi.uploadAutomatic(item.file, item.title.trim(), item.profileId, item.requestId, callbacks, {
+          categoryId: targetCategoryId,
+          originalFilename: item.originalFilename,
+          replacementSourceMediaId: item.replacementSourceMediaId || undefined,
+        });
         if (uploaded.transcription_job_id) replaceJob(await adminMediaApi.getJob(uploaded.transcription_job_id));
       } else {
         const transcript = new File(
@@ -444,7 +488,10 @@ export function AdminMediaPage() {
           item.transcriptFile!.name,
           { type: "text/markdown" },
         );
-        await adminMediaApi.uploadManual(item.file, transcript, item.title.trim(), callbacks);
+        await adminMediaApi.uploadManual(item.file, transcript, item.title.trim(), callbacks, {
+          categoryId: targetCategoryId,
+          originalFilename: item.originalFilename,
+        });
       }
       updatePending(item.id, { state: "succeeded", transferRatio: 1, error: null });
     } catch (e: any) {
@@ -454,12 +501,73 @@ export function AdminMediaPage() {
 
   async function submitBatch() {
     if (!canSubmit) return;
+    if (!targetCategoryId) {
+      setUploadError("请选择发布后的归档目录");
+      return;
+    }
+    if (!conflictReview) {
+      try {
+        const preflight = await adminMediaApi.preflightUpload({
+          category_id: targetCategoryId,
+          items: readyItems.map((item) => ({
+            client_id: item.id,
+            title: item.title.trim(),
+            original_filename: item.originalFilename,
+          })),
+        });
+        const conflicts = preflight.entries.filter((entry) => entry.status !== "ready");
+        if (conflicts.length > 0) {
+          setConflictReview(conflicts);
+          setConflictChoices(Object.fromEntries(conflicts.map((entry) => [entry.client_id, {
+            strategy: "skip" as const,
+            title: entry.suggested_title || pending.find((item) => item.id === entry.client_id)?.title || "",
+            originalFilename: entry.suggested_filename || pending.find((item) => item.id === entry.client_id)?.originalFilename || "",
+          }])));
+          setUploadError(null);
+          return;
+        }
+      } catch (caught: any) {
+        setUploadError(caught?.message || "无法检查同名资料");
+        return;
+      }
+    } else {
+      setPending((current) => current.map((item) => {
+        const entry = conflictReview.find((candidate) => candidate.client_id === item.id);
+        if (!entry) return item;
+        const choice = conflictChoices[item.id];
+        if (!choice || choice.strategy === "skip") {
+          return { ...item, state: "skipped", error: null };
+        }
+        if (choice.strategy === "rename") {
+          return { ...item, title: choice.title.trim(), originalFilename: choice.originalFilename.trim(), requestId: createRequestId(), replacementSourceMediaId: null };
+        }
+        const conflict = entry.conflicts[0];
+        return { ...item, title: conflict.title, replacementSourceMediaId: conflict.media_id, requestId: createRequestId() };
+      }));
+      const resolved = readyItems.flatMap((item) => {
+        const entry = conflictReview.find((candidate) => candidate.client_id === item.id);
+        if (!entry) return [item];
+        const choice = conflictChoices[item.id];
+        if (!choice || choice.strategy === "skip") return [];
+        if (choice.strategy === "rename") return [{ ...item, title: choice.title.trim(), originalFilename: choice.originalFilename.trim(), requestId: createRequestId(), replacementSourceMediaId: null }];
+        const conflict = entry.conflicts[0];
+        return [{ ...item, title: conflict.title, replacementSourceMediaId: conflict.media_id, requestId: createRequestId() }];
+      });
+      setConflictReview(null);
+      if (resolved.length === 0) return;
+      await performUpload(resolved);
+      return;
+    }
+    await performUpload(readyItems);
+  }
+
+  async function performUpload(queue: PendingVideo[]) {
     if (mode === "automatic") {
       try {
         const current = await adminMediaApi.schemes();
         setSchemes(current);
         const available = new Set(current.filter((item) => item.enabled && item.availability === "available").map((item) => item.scheme_id));
-        const unavailable = readyItems.filter((item) => !available.has(item.profileId));
+        const unavailable = queue.filter((item) => !available.has(item.profileId));
         if (unavailable.length > 0) {
           setPending((items) => items.map((item) => unavailable.some((entry) => entry.id === item.id)
             ? { ...item, error: "所选转录方案已不可用，请重新选择" }
@@ -474,16 +582,16 @@ export function AdminMediaPage() {
     }
     setSubmitting(true);
     setUploadError(null);
-    const queue = [...readyItems];
-    setActiveBatchIds(queue.map((item) => item.id));
+    const uploadQueue = [...queue];
+    setActiveBatchIds(uploadQueue.map((item) => item.id));
     let cursor = 0;
     const worker = async () => {
-      while (cursor < queue.length) {
-        const item = queue[cursor++];
+      while (cursor < uploadQueue.length) {
+        const item = uploadQueue[cursor++];
         await uploadOne(item);
       }
     };
-    await Promise.all(Array.from({ length: Math.min(2, queue.length) }, worker));
+    await Promise.all(Array.from({ length: Math.min(2, uploadQueue.length) }, worker));
     setSubmitting(false);
     await Promise.all([refresh(), refreshJobs()]);
   }
@@ -523,11 +631,11 @@ export function AdminMediaPage() {
   const batchTransferProgress = batchTotalBytes > 0
     ? Math.min(100, Math.round((batchTransferredBytes / batchTotalBytes) * 100))
     : 0;
-  const batchSettledCount = activeBatchItems.filter((item) => item.state === "succeeded" || item.state === "failed").length;
+  const batchSettledCount = activeBatchItems.filter((item) => item.state === "succeeded" || item.state === "skipped" || item.state === "failed").length;
   const batchUploadingCount = activeBatchItems.filter((item) => item.state === "uploading").length;
   const batchPreparingCount = activeBatchItems.filter((item) => item.state === "preparing").length;
   const hasUploadDraft = pending.length > 0 || submitting;
-  const resetUploadDraft = () => { setStep(1); setMode(null); setPending([]); setEditingId(null); setSubmitting(false); setActiveBatchIds([]); setUploadError(null); };
+  const resetUploadDraft = () => { setStep(1); setMode(null); setPending([]); setEditingId(null); setSubmitting(false); setActiveBatchIds([]); setUploadError(null); setConflictReview(null); setConflictChoices({}); };
   const requestUploadDialogClose = (open: boolean) => {
     if (open) { setUploadDialogOpen(true); return; }
     if (hasUploadDraft && !submitting && !window.confirm("当前上传流程尚未完成，关闭窗口后进度会保留。点击“确定”关闭并保留进度，点击“取消”继续操作。")) return;
@@ -613,6 +721,12 @@ export function AdminMediaPage() {
 
           {step === 3 && mode && (
             <>
+              <CategoryTreePicker
+                categories={categories}
+                value={targetCategoryId}
+                onChange={(categoryId) => { setTargetCategoryId(categoryId); setConflictReview(null); }}
+                label="发布后的归档目录"
+              />
               <div className="flex flex-wrap items-end gap-3">
                 <Button variant="outline" size="sm" onClick={() => setPending((current) => current.map((item) => ({ ...item, selected: true })))}>全选</Button>
                 <Button variant="outline" size="sm" onClick={() => setPending((current) => current.map((item) => ({ ...item, selected: false })))}>取消全选</Button>
@@ -641,7 +755,7 @@ export function AdminMediaPage() {
                           <p className="truncate font-medium">{item.file.name}</p>
                           <p className="text-ui-xs text-muted-foreground">{formatBytes(item.file.size)}</p>
                         </div>
-                        <StatusBadge value={item.state} meta={{ waiting: { label: "待提交", variant: "secondary" }, uploading: { label: "上传中", variant: "warning" }, preparing: { label: "服务端处理中", variant: "info" }, succeeded: { label: "已提交", variant: "success" }, failed: { label: "提交失败", variant: "destructive" } }} />
+                        <StatusBadge value={item.state} meta={{ waiting: { label: "待提交", variant: "secondary" }, uploading: { label: "上传中", variant: "warning" }, preparing: { label: "服务端处理中", variant: "info" }, succeeded: { label: "已提交", variant: "success" }, skipped: { label: "已跳过", variant: "secondary" }, failed: { label: "提交失败", variant: "destructive" } }} />
                       </div>
                       {(item.state === "uploading" || item.state === "preparing") && (
                         <div className="mt-3 space-y-1.5" role="status" aria-live="polite" aria-atomic="true">
@@ -668,6 +782,9 @@ export function AdminMediaPage() {
                       <div className="mt-3 grid gap-3 lg:grid-cols-2">
                         <label className="text-ui-sm font-medium">视频标题
                           <Input aria-label={`${item.file.name} 的视频标题`} className="mt-1" value={item.title} disabled={submitting || item.state === "succeeded"} onChange={(event) => updatePending(item.id, { title: event.target.value, requestId: createRequestId(), state: "waiting", error: null })} />
+                        </label>
+                        <label className="text-ui-sm font-medium">源文件名
+                          <Input aria-label={`${item.file.name} 的源文件名`} className="mt-1" value={item.originalFilename} disabled={submitting || item.state === "succeeded"} onChange={(event) => updatePending(item.id, { originalFilename: event.target.value, requestId: createRequestId(), state: "waiting", error: null })} />
                         </label>
                         {mode === "automatic" ? (
                           <label className="text-ui-sm font-medium">转录方案
@@ -697,6 +814,19 @@ export function AdminMediaPage() {
                 })}
               </div>
 
+              {conflictReview && <div className="space-y-3 rounded-ui-lg border border-warning/50 bg-warning/10 p-4" role="status">
+                <div><p className="font-semibold">发现同名资料</p><p className="mt-1 text-ui-xs text-muted-foreground">每个视频可跳过、另存为新资料，或作为唯一命中资料的新版本。提交前会再次校验。</p></div>
+                <ul className="space-y-3">{conflictReview.map((entry) => {
+                  const item = pending.find((candidate) => candidate.id === entry.client_id);
+                  const choice = conflictChoices[entry.client_id];
+                  const canUpdate = mode === "automatic" && entry.status === "conflict" && entry.conflicts.length === 1 && Boolean(entry.conflicts[0].item_id && entry.conflicts[0].version_id);
+                  return <li key={entry.client_id} className="space-y-3 rounded-ui-md border border-border bg-background p-3">
+                    <div><p className="break-all font-medium">{item?.title}（{item?.originalFilename}）</p>{entry.conflicts.map((conflict) => <p key={conflict.media_id} className="mt-1 text-ui-xs text-muted-foreground">已有资料：{conflict.title}（{conflict.original_filename}）{conflict.title_matches ? " · 标题同名" : ""}{conflict.filename_matches ? " · 源文件同名" : ""}</p>)}{entry.conflicts.length === 0 && <p className="mt-1 text-ui-xs text-muted-foreground">本批次中存在相同标题或源文件名，请跳过或重命名。</p>}</div>
+                    <div className="grid gap-2 sm:grid-cols-2"><label className="text-ui-xs font-medium">处理方式<Select className="mt-1" value={choice?.strategy || "skip"} onChange={(event) => setConflictChoices((current) => ({ ...current, [entry.client_id]: { ...current[entry.client_id], strategy: event.target.value as MediaConflictChoice["strategy"] } }))}><option value="skip">跳过此视频</option><option value="rename">另存为新资料</option>{canUpdate && <option value="update">作为已有资料的新版本</option>}</Select></label>{choice?.strategy === "rename" && <><label className="text-ui-xs font-medium">新资料标题<Input className="mt-1" value={choice.title} onChange={(event) => setConflictChoices((current) => ({ ...current, [entry.client_id]: { ...current[entry.client_id], title: event.target.value } }))} /></label><label className="text-ui-xs font-medium">新源文件名<Input className="mt-1" value={choice.originalFilename} onChange={(event) => setConflictChoices((current) => ({ ...current, [entry.client_id]: { ...current[entry.client_id], originalFilename: event.target.value } }))} /></label></>}</div>
+                  </li>;
+                })}</ul>
+              </div>}
+
               {submitting && activeBatchItems.length > 0 && (
                 <div className="space-y-2 border-t border-border pt-4" role="status" aria-live="polite" aria-atomic="true">
                   <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-ui-xs">
@@ -717,7 +847,7 @@ export function AdminMediaPage() {
                 <div className="flex flex-wrap gap-2"><Button variant="outline" disabled={submitting} onClick={() => setStep(2)}>返回选择方式</Button><Button variant="ghost" disabled={submitting} onClick={() => { if (window.confirm("确定取消本次上传并清空已选择的文件吗？")) { resetUploadDraft(); setUploadDialogOpen(false); } }}>取消上传</Button></div>
                 <div className="text-right">
                   <p className="mb-2 text-ui-xs text-muted-foreground">{mode === "manual" ? "保持现有人工 Markdown 上传与索引路径。" : "每个文件使用独立幂等键；最多并发上传 2 个。"}</p>
-                  <Button disabled={!canSubmit} onClick={() => void submitBatch()}>{submitting ? "正在批量提交…" : mode === "manual" ? "上传视频与人工转写" : "上传并创建自动转录任务"}</Button>
+                  <Button disabled={!canSubmit || !targetCategoryId} onClick={() => void submitBatch()}>{submitting ? "正在批量提交…" : conflictReview ? "按选择上传" : mode === "manual" ? "上传视频与人工转写" : "上传并创建自动转录任务"}</Button>
                 </div>
               </div>
             </>
@@ -772,6 +902,7 @@ export function AdminMediaPage() {
                     <div className="min-w-0">
                       <p className="truncate font-medium" title={asset.title}>{asset.title}</p>
                       <p className="mt-1 truncate font-mono text-ui-xs text-muted-foreground" title={asset.original_filename}>{asset.original_filename}</p>
+                      <p className="mt-1 truncate text-ui-xs text-muted-foreground" title={categories.find((category) => category.id === asset.category_id)?.full_path}>{categories.find((category) => category.id === asset.category_id)?.full_path || "尚未选择归档目录"}</p>
                       <div className="mt-2 flex flex-wrap gap-2 text-ui-xs text-muted-foreground"><span>{formatBytes(asset.file_size)}</span>{sameNameCount > 1 && <Badge variant="secondary">同名记录 {sameNameCount} 条</Badge>}{asset.replacement_source_media_id && <Badge variant={asset.replacement_status === "activated" ? "success" : asset.replacement_status === "failed" ? "destructive" : "warning"}>{asset.replacement_status === "activated" ? "替换已生效" : asset.replacement_status === "failed" ? "替换候选失败" : "替换候选"}</Badge>}{asset.replacement_candidate_media_id && asset.replacement_status === "pending" && <Badge variant="warning">替换处理中</Badge>}</div>
                     </div>
                     <div className="min-w-0 space-y-2">
@@ -783,6 +914,7 @@ export function AdminMediaPage() {
                     <p className="text-ui-xs text-muted-foreground"><span className="sr-only">提交时间：</span>{formatAdminDate(asset.created_at)}</p>
                     <div className="flex flex-wrap gap-1.5 lg:justify-end" aria-label={`媒体操作：${asset.title}`}>
                       <Button className="min-h-10 sm:min-h-0" size="sm" variant="outline" onClick={() => openWorkbench(asset.media_id)}>进入转写工作台</Button>
+                      {asset.catalog_item_id && asset.current_version_id && <Button className="min-h-10 sm:min-h-0" size="sm" variant="outline" onClick={() => { setMoveTarget(asset); setMoveCategoryId(""); setMoveError(null); }}>调整目录</Button>}
                       {(job?.status === "pending" || job?.status === "running") && <Button className="min-h-10 sm:min-h-0" size="sm" variant="outline" onClick={() => void cancelJob(job)}>取消</Button>}
                       {(job?.status === "failed" || job?.status === "cancelled") && job.failure?.retryable !== false && <Button className="min-h-10 sm:min-h-0" size="sm" variant="outline" onClick={() => void retryJob(job)}>重试</Button>}
                       {canDelete && <Button className="min-h-10 sm:min-h-0" size="sm" variant="destructive" disabled={deletingMediaId === asset.media_id} onClick={() => setDeleteTarget(asset)}>{deletingMediaId === asset.media_id ? "删除中" : "完整删除"}</Button>}
@@ -796,6 +928,10 @@ export function AdminMediaPage() {
         {visibleMediaAssets.length === 0 && mediaAssets.length > 0 && <EmptyState title="没有符合条件的媒体" description="请切换其他快捷筛选条件。" />}
         </Card>
       </section>
+
+      <Dialog open={Boolean(moveTarget)} onOpenChange={(open) => { if (!open && !moveBusy) { setMoveTarget(null); setMoveCategoryId(""); setMoveError(null); } }}>
+        <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto"><DialogHeader><DialogTitle>调整归档目录</DialogTitle><DialogDescription>只调整资料库中的归档位置，不改变视频、转录稿、发布状态或索引。</DialogDescription></DialogHeader>{moveTarget && <CategoryTreePicker categories={categories} value={moveCategoryId} currentCategoryId={moveTarget.category_id} onChange={(categoryId) => { setMoveCategoryId(categoryId); setMoveError(null); }} label="目标目录" />}{moveError && <Alert variant="destructive" role="alert"><AlertTitle>调整失败</AlertTitle><AlertDescription>{moveError}</AlertDescription></Alert>}<DialogFooter><Button variant="outline" disabled={moveBusy} onClick={() => setMoveTarget(null)}>取消</Button><Button disabled={moveBusy || !moveCategoryId || moveCategoryId === moveTarget?.category_id} onClick={() => void moveMediaAsset()}>{moveBusy ? "处理中…" : "确认调整"}</Button></DialogFooter></DialogContent>
+      </Dialog>
       <TranscriptionWorkbenchSheet
         open={selectedAsset != null}
         title={selectedAsset?.title || "转写工作台"}

@@ -1,6 +1,6 @@
 import type { Page, Route } from "@playwright/test";
 
-export type AdminScenario = "normal" | "loading" | "empty" | "error" | "disabled" | "publication_failure" | "media_progress" | "media_upload" | "media_library";
+export type AdminScenario = "normal" | "loading" | "empty" | "error" | "disabled" | "publication_failure" | "media_progress" | "media_upload" | "media_conflict" | "media_library";
 export type WorkspaceUser = "admin" | "bim_engineer" | "member";
 
 const admin = {
@@ -738,6 +738,19 @@ export async function installAdminRoutes(
         resolved_at: payload.status === "resolved" ? 1786953600 : null,
       });
       return json(route, entry);
+    }
+    if (request.method() === "POST" && path === "/api/admin/media/preflight") {
+      const payload = request.postDataJSON() as { category_id: string; items: Array<{ client_id: string; title: string; original_filename: string }> };
+      return json(route, {
+        category_id: payload.category_id,
+        entries: payload.items.map((item) => scenario === "media_conflict" ? {
+          client_id: item.client_id,
+          status: "conflict",
+          suggested_title: `${item.title} (1)`,
+          suggested_filename: item.original_filename.replace(/\.mp4$/i, " (1).mp4"),
+          conflicts: [{ media_id: "media-ready", item_id: "media-item-ready", version_id: "version-ready", title: item.title, original_filename: item.original_filename, title_matches: true, filename_matches: true }],
+        } : { client_id: item.client_id, status: "ready", suggested_title: null, suggested_filename: null, conflicts: [] }),
+      });
     }
     if (request.method() === "POST" && path === "/api/admin/media" && scenario === "media_upload") {
       await new Promise((resolve) => setTimeout(resolve, 3_000));

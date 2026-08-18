@@ -52,6 +52,13 @@ def test_empty_database_initializes_all_phase2_tables(tmp_path):
     } <= tables
     assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     assert conn.execute("PRAGMA foreign_key_check").fetchone() is None
+    media_columns = {row[1] for row in conn.execute("PRAGMA table_info(media_assets)")}
+    assert {"target_category_id", "normalized_title", "normalized_original_filename"} <= media_columns
+    media_indexes = {row[1] for row in conn.execute("PRAGMA index_list(media_assets)")}
+    assert {
+        "uq_media_assets_active_category_title",
+        "uq_media_assets_active_category_filename",
+    } <= media_indexes
     conn.close()
     assert not (tmp_path / "backups").exists()
 

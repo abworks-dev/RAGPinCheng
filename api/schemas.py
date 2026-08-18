@@ -1049,6 +1049,48 @@ class MediaAssetDTO(BaseModel):
     replacement_source_media_id: str | None = None
     replacement_candidate_media_id: str | None = None
     replacement_status: str | None = None
+    category_id: str | None = None
+    category_path: str | None = None
+    catalog_item_id: str | None = None
+    current_version_id: str | None = None
+
+
+class MediaUploadPreflightItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    client_id: str = Field(min_length=1, max_length=100)
+    title: str = Field(min_length=1, max_length=200)
+    original_filename: str = Field(min_length=1, max_length=255)
+
+
+class MediaUploadPreflightRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    category_id: str = Field(min_length=1, max_length=100)
+    items: list[MediaUploadPreflightItem] = Field(min_length=1, max_length=100)
+
+
+class MediaUploadConflictDTO(BaseModel):
+    media_id: str
+    item_id: str | None = None
+    version_id: str | None = None
+    title: str
+    original_filename: str
+    title_matches: bool
+    filename_matches: bool
+
+
+class MediaUploadPreflightEntryDTO(BaseModel):
+    client_id: str
+    status: Literal["ready", "conflict", "ambiguous"]
+    suggested_title: str | None = None
+    suggested_filename: str | None = None
+    conflicts: list[MediaUploadConflictDTO]
+
+
+class MediaUploadPreflightResponse(BaseModel):
+    category_id: str
+    entries: list[MediaUploadPreflightEntryDTO]
 
 
 class MediaTranscriptSegmentDTO(BaseModel):

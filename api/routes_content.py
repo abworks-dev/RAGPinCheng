@@ -654,6 +654,8 @@ def _raise_domain_error(exc: Exception) -> None:
         raise HTTPException(status_code=403, detail="当前账号没有移动此状态资料的权限") from exc
     if message == "content_move_requires_republication":
         raise HTTPException(status_code=409, detail="已确认或已发布资料需要退回后重新归类") from exc
+    if message == "media_upload_name_conflict":
+        raise HTTPException(status_code=409, detail="目标目录已有同标题或同源文件名的视频资料") from exc
     if message == "review_note_required":
         raise HTTPException(status_code=400, detail="退回修改时必须填写原因") from exc
     if message == "content_reclassification_forbidden":

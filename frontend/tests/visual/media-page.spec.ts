@@ -86,6 +86,30 @@ test.describe("视频媒体", () => {
     await page.screenshot({ path: testInfo.outputPath(`media-upload-preparing-${viewport.width}x${viewport.height}.png`) });
   });
 
+  test("同名视频可逐项选择重命名且窗口保持可读", async ({ page }, testInfo) => {
+    await installAdminRoutes(page, "media_conflict");
+    await page.goto("/admin/media");
+    await page.getByRole("button", { name: "上传视频" }).click();
+    await page.getByLabel("选择视频文件").setInputFiles({
+      name: "same-training.mp4",
+      mimeType: "video/mp4",
+      buffer: Buffer.alloc(128, 1),
+    });
+    await page.getByRole("button", { name: "下一步：选择转写方式" }).click();
+    await page.getByRole("button", { name: /^自动转录/ }).click();
+    await page.getByRole("button", { name: "上传并创建自动转录任务" }).click();
+
+    await expect(page.getByText("发现同名资料")).toBeVisible();
+    const strategy = page.getByText("处理方式").locator("..").locator("select");
+    await strategy.selectOption("rename");
+    await expect(page.getByText("新资料标题")).toBeVisible();
+    await expect(page.getByText("新源文件名")).toBeVisible();
+    await expect(page.getByRole("button", { name: "按选择上传" })).toBeVisible();
+    await expectNoBodyOverflow(page);
+    const viewport = page.viewportSize()!;
+    await page.screenshot({ path: testInfo.outputPath(`media-upload-conflict-${viewport.width}x${viewport.height}.png`) });
+  });
+
   test("转写工作台 Markdown 校对布局", async ({ page }, testInfo) => {
     await installAdminRoutes(page);
     await page.goto("/admin/media");

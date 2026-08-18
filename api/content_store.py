@@ -2340,7 +2340,8 @@ def _move_media_transcript_item(
     try:
         conn.execute("BEGIN IMMEDIATE")
         row = conn.execute(
-            """SELECT i.id AS item_id,i.category_id,h.current_version_id
+            """SELECT i.id AS item_id,i.category_id,h.current_version_id,
+                      m.title,m.original_filename
                FROM content_items i
                JOIN media_assets m ON m.media_id=i.media_id AND m.status<>'archived'
                JOIN media_transcript_heads h ON h.media_id=i.media_id
@@ -2363,6 +2364,16 @@ def _move_media_transcript_item(
         if target is None:
             raise ValueError("active_category_not_found")
         if row["category_id"] != target_category_id:
+            from .media_upload_conflicts import find_media_upload_conflicts
+
+            conflicts = find_media_upload_conflicts(
+                conn,
+                category_id=target_category_id,
+                title=str(row["title"]),
+                original_filename=str(row["original_filename"]),
+            )
+            if conflicts:
+                raise ValueError("media_upload_name_conflict")
             conn.execute(
                 """UPDATE content_items
                    SET category_id=?,updated_at=?,normalized_filename=NULL WHERE id=?""",

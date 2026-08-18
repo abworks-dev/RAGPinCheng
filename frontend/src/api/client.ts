@@ -22,6 +22,7 @@ import type {
   Health,
   LlmHealth,
   MediaAsset,
+  MediaUploadPreflightResponse,
   ManagedCategory,
   CategoryDeletePreview,
   CategoryDeleteResult,
@@ -919,11 +920,14 @@ export const api = {
     transcript: File,
     title: string,
     callbacks?: MultipartUploadCallbacks,
+    options?: { categoryId?: string; originalFilename?: string },
   ) => {
     const fd = new FormData();
     fd.append("video", video, video.name);
     fd.append("transcript", transcript, transcript.name);
     fd.append("title", title);
+    if (options?.categoryId) fd.append("category_id", options.categoryId);
+    if (options?.originalFilename) fd.append("original_filename", options.originalFilename);
     return multipartFetch<MediaAsset>("/api/admin/media", fd, callbacks);
   },
   uploadAutomaticMediaVideo: async (
@@ -932,6 +936,7 @@ export const api = {
     profileId: string,
     requestIdempotencyKey: string,
     callbacks?: MultipartUploadCallbacks,
+    options?: { categoryId?: string; originalFilename?: string; replacementSourceMediaId?: string },
   ) => {
     const fd = new FormData();
     fd.append("video", video, video.name);
@@ -939,6 +944,9 @@ export const api = {
     fd.append("profile_id", profileId);
     fd.append("scheme_id", profileId);
     fd.append("request_idempotency_key", requestIdempotencyKey);
+    if (options?.categoryId) fd.append("category_id", options.categoryId);
+    if (options?.originalFilename) fd.append("original_filename", options.originalFilename);
+    if (options?.replacementSourceMediaId) fd.append("replacement_source_media_id", options.replacementSourceMediaId);
     return multipartFetch<MediaAsset>("/api/admin/media", fd, callbacks);
   },
   uploadReplacementMediaVideo: async (
@@ -959,6 +967,13 @@ export const api = {
     return multipartFetch<MediaAsset>("/api/admin/media", fd, callbacks);
   },
   listMediaAssets: () => jsonFetch<MediaAsset[]>("/api/admin/media"),
+  preflightMediaUpload: (body: {
+    category_id: string;
+    items: Array<{ client_id: string; title: string; original_filename: string }>;
+  }) => jsonFetch<MediaUploadPreflightResponse>("/api/admin/media/preflight", {
+    method: "POST",
+    body: JSON.stringify(body),
+  }),
   deleteFailedMediaAsset: (mediaId: string) =>
     jsonFetch<void>(`/api/admin/media/${mediaId}`, { method: "DELETE" }),
   archiveMediaAsset: (mediaId: string) => jsonFetch(`/api/admin/media/${mediaId}/archive`, { method: "POST", body: JSON.stringify({}) }),

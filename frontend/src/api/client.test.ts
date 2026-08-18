@@ -511,6 +511,32 @@ describe("Phase 4B transcription API contracts", () => {
     expect(form.get("transcript")).toBeNull();
   });
 
+  it("preflights media identities and sends directory-scoped upload options", async () => {
+    setCsrfToken("csrf-media-conflict");
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ category_id: "cat-05", entries: [] }))
+      .mockResolvedValueOnce(jsonResponse({ media_id: "media-1" }));
+    vi.stubGlobal("fetch", fetchMock);
+    await api.preflightMediaUpload({
+      category_id: "cat-05",
+      items: [{ client_id: "client-1", title: "培训", original_filename: "training.mp4" }],
+    });
+    const video = new File(["video"], "training.mp4", { type: "video/mp4" });
+    await api.uploadAutomaticMediaVideo(
+      video,
+      "培训 (1)",
+      "profile-1",
+      "11111111-1111-4111-8111-111111111111",
+      undefined,
+      { categoryId: "cat-05", originalFilename: "training (1).mp4" },
+    );
+
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/admin/media/preflight");
+    const form = fetchMock.mock.calls[1][1].body as FormData;
+    expect(form.get("category_id")).toBe("cat-05");
+    expect(form.get("original_filename")).toBe("training (1).mp4");
+  });
+
   it("binds a replacement upload to its source media and selected profile", async () => {
     setCsrfToken("csrf-replacement");
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ media_id: "candidate-1", transcription_job_id: "job-1" }));
