@@ -12,6 +12,7 @@ import { LoadingState } from "../../components/ui/loading-state";
 import { Progress } from "../../components/ui/progress";
 import { Select } from "../../components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../../components/ui/dialog";
+import { Checkbox } from "../../components/ui/checkbox";
 import { TranscriptionWorkbenchSheet } from "../../components/TranscriptionWorkbenchSheet";
 import { ManagedSummaryCard } from "../../components/admin/ManagedSummaryCard";
 import { useTranscriptionJobs } from "../../hooks/useTranscriptionJobs";
@@ -171,6 +172,8 @@ function pendingFromFile(file: File, profileId: string): PendingVideo {
 export function AdminMediaPage() {
   const [deletingMediaId, setDeletingMediaId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<MediaAsset | null>(null);
+  const [archiveTarget, setArchiveTarget] = useState<MediaAsset | null>(null);
+  const [archiveAcknowledged, setArchiveAcknowledged] = useState(false);
   const [schemes, setSchemes] = useState<TranscriptionSchemeOption[]>([]);
   const [schemeError, setSchemeError] = useState<string | null>(null);
   const [step, setStep] = useState(1);
@@ -414,6 +417,8 @@ export function AdminMediaPage() {
       setDeletingMediaId(null);
     }
   }
+
+  async function archiveMedia(asset: MediaAsset) { setDeletingMediaId(asset.media_id); try { await adminMediaApi.archiveAsset(asset.media_id); removeAsset(asset.media_id); setArchiveTarget(null); setArchiveAcknowledged(false); await refreshMediaState(); } catch (e: any) { setUploadError(e?.message || String(e)); } finally { setDeletingMediaId(null); } }
 
   async function uploadOne(item: PendingVideo) {
     const callbacks = {
@@ -781,6 +786,7 @@ export function AdminMediaPage() {
                       {(job?.status === "pending" || job?.status === "running") && <Button className="min-h-10 sm:min-h-0" size="sm" variant="outline" onClick={() => void cancelJob(job)}>取消</Button>}
                       {(job?.status === "failed" || job?.status === "cancelled") && job.failure?.retryable !== false && <Button className="min-h-10 sm:min-h-0" size="sm" variant="outline" onClick={() => void retryJob(job)}>重试</Button>}
                       {canDelete && <Button className="min-h-10 sm:min-h-0" size="sm" variant="destructive" disabled={deletingMediaId === asset.media_id} onClick={() => setDeleteTarget(asset)}>{deletingMediaId === asset.media_id ? "删除中" : "完整删除"}</Button>}
+                      {asset.publication_status === "published" && <Button className="min-h-10 sm:min-h-0" size="sm" variant="outline" onClick={() => { setArchiveTarget(asset); setArchiveAcknowledged(false); }}>移入回收站</Button>}
                     </div>
                   </div>
                 </li>;
@@ -829,6 +835,7 @@ export function AdminMediaPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <Dialog open={archiveTarget != null} onOpenChange={(open) => { if (!open && !deletingMediaId) setArchiveTarget(null); }}><DialogContent><DialogHeader><DialogTitle>将视频移入回收站？</DialogTitle><DialogDescription>“{archiveTarget?.title}”及其转写资料将从视频列表和知识库检索中隐藏，历史会保留，可从资料管理回收站恢复。</DialogDescription></DialogHeader><label className="flex items-start gap-2 rounded-ui-md border border-destructive/30 bg-destructive/5 p-3 text-ui-sm"><Checkbox checked={archiveAcknowledged} onChange={(event) => setArchiveAcknowledged(event.target.checked)} /><span>我已了解该视频移入回收站后将不再进入知识库检索。</span></label><DialogFooter><Button variant="outline" disabled={deletingMediaId != null} onClick={() => setArchiveTarget(null)}>取消</Button><Button variant="destructive" disabled={!archiveAcknowledged || deletingMediaId != null} onClick={() => archiveTarget && void archiveMedia(archiveTarget)}>{deletingMediaId ? "处理中…" : "确认移入回收站"}</Button></DialogFooter></DialogContent></Dialog>
     </section>
   );
 }
