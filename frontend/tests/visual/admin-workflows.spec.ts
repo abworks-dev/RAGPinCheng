@@ -591,7 +591,7 @@ test.describe("资料管理", () => {
     await page.getByRole("button", { name: "返回资料审核" }).click();
     await expect(dialog).toBeVisible();
 
-    await dialog.getByRole("button", { name: "选择退回修改" }).click();
+    await dialog.getByRole("button", { name: "退回修改" }).click();
     const confirm = dialog.getByRole("button", { name: "确认退回" });
     await expect(confirm).toBeDisabled();
     const reason = dialog.getByRole("textbox", { name: "退回原因" });

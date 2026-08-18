@@ -344,6 +344,7 @@ describe("AdminManagedContentPage", () => {
     expect(dialog).toHaveTextContent("03 公司内部标准");
     expect(dialog).toHaveTextContent("v1");
     expect(dialog).toHaveTextContent("网页上传");
+    expect(within(dialog).getByRole("group", { name: "审核操作" })).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole("button", { name: "预览文件" }));
     expect(mocks.openPreview).toHaveBeenCalledWith("parent-1", "建模标准", "pdf", 1, {}, "managed-content-review");
     fireEvent.change(within(dialog).getByRole("textbox", { name: "审核备注（可选）" }), { target: { value: "符合发布要求" } });
@@ -1802,7 +1803,7 @@ describe("AdminManagedContentPage", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "审核" })[0]);
     fireEvent.click(screen.getByRole("button", { name: "确认通过" }));
     expect(screen.getByRole("button", { name: "提交中…" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "选择退回修改" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "退回修改" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "提交中…" }));
     expect(mocks.review).toHaveBeenCalledTimes(1);
     resolveReview?.({ ...item, lifecycle_status: "approved" });
@@ -1815,7 +1816,7 @@ describe("AdminManagedContentPage", () => {
     await openRootFolder();
     fireEvent.click(screen.getAllByRole("button", { name: "审核" })[0]);
     const dialog = screen.getByRole("dialog", { name: "审核资料" });
-    fireEvent.click(within(dialog).getByRole("button", { name: "选择退回修改" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "退回修改" }));
     const submit = within(dialog).getByRole("button", { name: "确认退回" });
     expect(submit).toBeDisabled();
     const reason = within(dialog).getByRole("textbox", { name: "退回原因" });
