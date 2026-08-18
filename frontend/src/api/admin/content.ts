@@ -26,6 +26,7 @@ export const adminContentApi = {
   purgeTrash: (...args: Parameters<typeof api.purgeManagedContentTrash>) => api.purgeManagedContentTrash(...args),
   trashPurgeRuns: (...args: Parameters<typeof api.managedContentTrashPurgeRuns>) => api.managedContentTrashPurgeRuns(...args),
   folderRequests: (...args: Parameters<typeof api.managedFolderRequests>) => api.managedFolderRequests(...args),
+  preflightUpload: (...args: Parameters<typeof api.preflightManagedContentUpload>) => api.preflightManagedContentUpload(...args),
   upload: (...args: Parameters<typeof api.uploadManagedContent>) => api.uploadManagedContent(...args),
   uploadTasks: (...args: Parameters<typeof api.managedUploadTasks>) => api.managedUploadTasks(...args),
   uploadTask: (...args: Parameters<typeof api.managedUploadTask>) => api.managedUploadTask(...args),

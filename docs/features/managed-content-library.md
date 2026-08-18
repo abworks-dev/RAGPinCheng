@@ -28,6 +28,9 @@ multipart 上传 -> upload_batches + upload_batch_entries
 - `item.upload` 是上传任务页和接口的权限边界；普通用户只能查看自己创建的任务，全局管理员可查看全部任务。
 - 浏览器使用 XHR 显示字节传输进度；网络传输达到 100% 后切换为“服务端处理中…”。当前同步上传接口不承诺跨刷新恢复实时进度，但任务历史和文件明细可跨刷新查询。
 - 失败任务在原文件仍保留于当前页面时支持重试；刷新页面后需要重新选择原文件，服务端不保存可重试的浏览器临时文件。
+- 上传前调用 `POST /api/admin/content/uploads/preflight` 检查文件名、大小写规范化后的同名资料和文件夹根目录冲突。冲突保留在当前处理窗口，不自动跳转上传任务页；无冲突文件会与处理后的文件一起提交，任务页继续提供历史记录和逐文件失败明细。
+- 文件冲突默认选择跳过，也可另存为新资料（默认建议追加 ` (1)` 等后缀），或在已有资料没有活动发布/整理任务时作为其新草稿版本。文件夹根目录冲突默认不合并，支持合并到现有目录或整体重命名后重新预检；重命名不会改变文件夹内的相对层级。
+- 批量上传按文件独立处理：跳过或处理冲突不会阻断同批无冲突文件；全部文件被跳过时批次标记为失败并保留原因。服务端上传阶段会再次校验冲突和版本，预检后发生变化的资料会跳过并返回 `content_upload_conflict_changed`。
 
 ```text
 上传文件 -> content_objects + content_items + content_versions
@@ -68,6 +71,7 @@ Schema 19 增加 `media_metadata_revisions` 和 `media_replacements`。媒体标
 
 新增或扩展的管理接口：
 
+- `POST /api/admin/content/uploads/preflight`
 - `POST /api/admin/content/bulk-move`
 - `POST /api/admin/content/bulk-archive`
 - `POST /api/admin/content/bulk-restore`

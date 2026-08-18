@@ -363,6 +363,11 @@ describe("api client", () => {
       [{ file: guide, relativePath: "资料包/01 建筑/guide.md" }],
       "category-1",
       "folder",
+      undefined,
+      {
+        allowFolderMerge: true,
+        conflictActions: [{ strategy: "rename", filename: "guide (1).md" }],
+      },
     );
 
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
@@ -371,7 +376,37 @@ describe("api client", () => {
     expect(form.getAll("relative_paths")).toEqual(["资料包/01 建筑/guide.md"]);
     expect(form.get("category_id")).toBe("category-1");
     expect(form.get("upload_mode")).toBe("folder");
+    expect(form.get("allow_folder_merge")).toBe("true");
+    expect(form.getAll("conflict_actions")).toEqual([
+      JSON.stringify({ strategy: "rename", filename: "guide (1).md" }),
+    ]);
     expect(init.headers).toEqual({ "X-CSRF-Token": "csrf-folder" });
+  });
+
+  it("preflights managed uploads with relative paths and merge intent", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ entries: [], folder_conflicts: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const guide = new File(["guide"], "guide.md", { type: "text/markdown" });
+
+    await api.preflightManagedContentUpload(
+      [{ file: guide, relativePath: "资料包/guide.md" }],
+      "category-1",
+      "folder",
+      true,
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/admin/content/uploads/preflight",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          category_id: "category-1",
+          upload_mode: "folder",
+          allow_folder_merge: true,
+          entries: [{ filename: "guide.md", relative_path: "资料包/guide.md", size_bytes: guide.size }],
+        }),
+      }),
+    );
   });
 
   it("keeps ordinary file uploads compatible with filename paths", async () => {

@@ -587,6 +587,48 @@ export type ManagedIndexJobList = {
   status_counts: Record<string, number>;
 };
 
+export type ManagedUploadFilenameConflict = {
+  item_id: string;
+  version_id: string;
+  title: string;
+  original_filename: string;
+  lifecycle_status: string;
+  has_published_head: boolean;
+  can_update: boolean;
+};
+
+export type ManagedUploadFolderConflict = {
+  relative_path: string;
+  category_id: string;
+  category_path: string;
+  display_name: string;
+  suggested_name: string;
+  can_rename: boolean;
+};
+
+export type ManagedUploadPreflightEntry = {
+  sequence: number;
+  filename: string;
+  relative_path: string | null;
+  status: "ready" | "conflict" | "blocked";
+  reason: string | null;
+  reason_code: string | null;
+  suggested_filename: string | null;
+  conflict: ManagedUploadFilenameConflict | null;
+};
+
+export type ManagedUploadPreflightResponse = {
+  entries: ManagedUploadPreflightEntry[];
+  folder_conflicts: ManagedUploadFolderConflict[];
+};
+
+export type ManagedUploadConflictAction = {
+  strategy: "skip" | "create" | "rename" | "update";
+  filename?: string;
+  item_id?: string;
+  expected_version_id?: string;
+};
+
 export type ManagedUploadResponse = {
   batch_id: string;
   entries: {
@@ -597,6 +639,7 @@ export type ManagedUploadResponse = {
     status: "accepted" | "skipped";
     reason: string | null;
     reason_code: string | null;
+    resolution: "created" | "renamed" | "updated" | null;
   }[];
 };
 

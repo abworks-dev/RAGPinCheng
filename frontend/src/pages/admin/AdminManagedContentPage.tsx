@@ -20,8 +20,8 @@ import { toast } from "../../components/ui/toast";
 import { useAuth } from "../../context/AuthContext";
 import { usePdfPreview } from "../../hooks/usePdfPreview";
 import { useVideoPlayer } from "../../hooks/useVideoPlayer";
-import type { BulkManagedContentResult, BulkRestorePreflightResult, ContentPermission, ContentTrashAuditEvent, FolderRequest, ManagedCategory, ManagedContentItem, ManagedUploadTask, ManagedUploadTaskEntry, TrashPurgePreflight, TrashPurgeRun, TrashSettings } from "../../types";
-import type { ManagedUploadProgress } from "../../api/client";
+import type { BulkManagedContentResult, BulkRestorePreflightResult, ContentPermission, ContentTrashAuditEvent, FolderRequest, ManagedCategory, ManagedContentItem, ManagedUploadConflictAction, ManagedUploadPreflightResponse, ManagedUploadTask, ManagedUploadTaskEntry, TrashPurgePreflight, TrashPurgeRun, TrashSettings } from "../../types";
+import type { ManagedUploadOptions, ManagedUploadProgress } from "../../api/client";
 import { formatAdminDate } from "../../lib/admin-formatters";
 import { createRequestId } from "../../lib/request-id";
 import { AdminDocumentsPage } from "./AdminDocumentsPage";
@@ -45,6 +45,27 @@ type SortKey = "docType" | "title" | "updatedAt" | "status" | "source";
 type SortDirection = "asc" | "desc";
 type ManagedContentView = "library" | "trash" | "uploads" | "index";
 type MoveOperation = "move" | "reclassify" | "archive";
+type UploadConflictChoice = { strategy: "skip" | "rename" | "update"; filename?: string };
+type UploadConflictReview = {
+  files: Array<File | FolderUploadEntry>;
+  categoryId: string;
+  uploadMode: "files" | "folder";
+  allowFolderMerge: boolean;
+  preflight: ManagedUploadPreflightResponse;
+};
+
+function renameUploadRoots(
+  files: Array<File | FolderUploadEntry>,
+  rootRenames: Record<string, string>,
+): Array<File | FolderUploadEntry> {
+  return files.map((entry) => {
+    if (!("file" in entry)) return entry;
+    const parts = entry.relativePath.split("/");
+    const renamed = rootRenames[parts[0]]?.trim();
+    if (renamed) parts[0] = renamed;
+    return { ...entry, relativePath: parts.join("/") };
+  });
+}
 const ROOT_FOLDER_VALUE = "__root__";
 
 function normalizeFolderName(value: string) {
@@ -735,8 +756,14 @@ export function AdminManagedContentPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [uploadChecking, setUploadChecking] = useState(false);
   const [activeUpload, setActiveUpload] = useState<ActiveUploadState | null>(null);
   const [lastUploadAttempt, setLastUploadAttempt] = useState<{ batchId: string; files: Array<File | FolderUploadEntry>; categoryId: string; uploadMode: "files" | "folder" } | null>(null);
+  const [uploadConflictReview, setUploadConflictReview] = useState<UploadConflictReview | null>(null);
+  const [uploadConflictChoices, setUploadConflictChoices] = useState<Record<number, UploadConflictChoice>>({});
+  const [folderConflictMode, setFolderConflictMode] = useState<"merge" | "rename" | null>(null);
+  const [folderConflictRenames, setFolderConflictRenames] = useState<Record<string, string>>({});
+  const [uploadConflictError, setUploadConflictError] = useState<string | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [bulkAction, setBulkAction] = useState<BulkAction | null>(null);
@@ -927,6 +954,7 @@ export function AdminManagedContentPage() {
     targetFolderId = currentFolderId,
     uploadFiles: Array<File | FolderUploadEntry> = files,
     uploadMode: "files" | "folder" = "files",
+    options: ManagedUploadOptions = {},
   ) => {
     const totalBytes = uploadFiles.reduce((sum, entry) => sum + ("file" in entry ? entry.file.size : entry.size), 0);
     const targetPath = categories.find((category) => category.id === targetFolderId)?.full_path || "当前目录";
@@ -939,19 +967,22 @@ export function AdminManagedContentPage() {
         loadedBytes: progress.phase === "processing" ? current.totalBytes : progress.loaded,
       } : current);
       const result = uploadMode === "folder"
-        ? await adminContentApi.upload(uploadFiles, targetFolderId, "folder", onProgress)
-        : await adminContentApi.upload(uploadFiles, targetFolderId, "files", onProgress);
+        ? await adminContentApi.upload(uploadFiles, targetFolderId, "folder", onProgress, options)
+        : await adminContentApi.upload(uploadFiles, targetFolderId, "files", onProgress, options);
       const accepted = result.entries.filter((entry) => entry.status === "accepted").length;
       const skipped = result.entries.length - accepted;
       setActiveUpload((current) => current ? { ...current, batchId: result.batch_id, loadedBytes: current.totalBytes, phase: accepted ? "completed" : "failed", message: accepted ? undefined : "没有文件被接收，请查看任务详情" } : current);
-      if (!accepted) setLastUploadAttempt({ batchId: result.batch_id, files: uploadFiles, categoryId: targetFolderId, uploadMode });
+      if (skipped) setLastUploadAttempt({ batchId: result.batch_id, files: uploadFiles, categoryId: targetFolderId, uploadMode });
       else setLastUploadAttempt(null);
-      toast.success(skipped ? `已接收 ${accepted} 个文件，跳过 ${skipped} 个` : `已接收 ${accepted} 个文件`);
-      setFiles([]);
-      if (fileInputRef.current) fileInputRef.current.value = "";
-      if (folderInputRef.current) folderInputRef.current.value = "";
-      await load(true);
-      return true;
+      if (skipped) toast.error(`已接收 ${accepted} 个文件，${skipped} 个文件未完成，请查看上传任务`);
+      else toast.success(`已接收 ${accepted} 个文件`);
+      if (accepted) {
+        setFiles([]);
+        if (fileInputRef.current) fileInputRef.current.value = "";
+        if (folderInputRef.current) folderInputRef.current.value = "";
+        await load(true);
+      }
+      return accepted > 0;
     } catch (uploadError) {
       const message = uploadError instanceof Error ? uploadError.message : "上传失败";
       setActiveUpload((current) => current ? { ...current, phase: "failed", message } : current);
@@ -961,12 +992,159 @@ export function AdminManagedContentPage() {
     return false;
   };
 
+  const resetUploadConflictReview = () => {
+    setUploadConflictReview(null);
+    setUploadConflictChoices({});
+    setFolderConflictMode(null);
+    setFolderConflictRenames({});
+    setUploadConflictError(null);
+  };
+
+  const openUploadConflictReview = (
+    review: UploadConflictReview,
+  ) => {
+    setUploadDialogOpen(false);
+    setPendingUploadFiles([]);
+    setPendingUploadFolderId("");
+    setPendingFolderUpload(null);
+    setPendingFolderUploadFolderId("");
+    setUploadConflictReview(review);
+    setUploadConflictChoices(Object.fromEntries(
+      review.preflight.entries
+        .filter((entry) => entry.status === "conflict" && entry.reason_code === "content_filename_conflict")
+        .map((entry) => [entry.sequence, {
+          strategy: "skip" as const,
+          filename: entry.suggested_filename || entry.filename,
+        }]),
+    ));
+    setFolderConflictMode(review.preflight.folder_conflicts.length ? null : "merge");
+    setFolderConflictRenames(Object.fromEntries(
+      review.preflight.folder_conflicts.map((conflict) => [conflict.relative_path, conflict.suggested_name]),
+    ));
+    setUploadConflictError(null);
+  };
+
+  const preflightUpload = async (
+    targetFolderId: string,
+    uploadFiles: Array<File | FolderUploadEntry>,
+    uploadMode: "files" | "folder",
+    allowFolderMerge = false,
+  ) => {
+    setUploadChecking(true);
+    setUploadConflictError(null);
+    try {
+      const preflight = await adminContentApi.preflightUpload(
+        uploadFiles, targetFolderId, uploadMode, allowFolderMerge,
+      );
+      const hasActionableConflict = preflight.folder_conflicts.length > 0
+        || preflight.entries.some((entry) => entry.status !== "ready");
+      if (hasActionableConflict) {
+        openUploadConflictReview({
+          files: uploadFiles,
+          categoryId: targetFolderId,
+          uploadMode,
+          allowFolderMerge,
+          preflight,
+        });
+        return false;
+      }
+      return await upload(targetFolderId, uploadFiles, uploadMode, { allowFolderMerge });
+    } catch (preflightError) {
+      const message = preflightError instanceof Error ? preflightError.message : "上传预检失败";
+      setUploadConflictError(message);
+      toast.error(message);
+      return false;
+    } finally {
+      setUploadChecking(false);
+    }
+  };
+
+  const refreshConflictPreflight = async (
+    mode: "merge" | "rename",
+  ) => {
+    if (!uploadConflictReview) return;
+    const review = uploadConflictReview;
+    const rootRenames = mode === "rename" ? folderConflictRenames : {};
+    const nextFiles = mode === "rename"
+      ? renameUploadRoots(review.files, rootRenames)
+      : review.files;
+    setFolderConflictMode(mode);
+    setUploadChecking(true);
+    setUploadConflictError(null);
+    try {
+      const preflight = await adminContentApi.preflightUpload(
+        nextFiles, review.categoryId, review.uploadMode, mode === "merge",
+      );
+      const hasRemainingConflicts = preflight.folder_conflicts.length > 0
+        || preflight.entries.some((entry) => entry.status !== "ready");
+      if (!hasRemainingConflicts) {
+        resetUploadConflictReview();
+        await upload(review.categoryId, nextFiles, review.uploadMode, { allowFolderMerge: mode === "merge" });
+        return;
+      }
+      openUploadConflictReview({
+        files: nextFiles,
+        categoryId: review.categoryId,
+        uploadMode: review.uploadMode,
+        allowFolderMerge: mode === "merge",
+        preflight,
+      });
+    } catch (preflightError) {
+      setUploadConflictError(preflightError instanceof Error ? preflightError.message : "上传预检失败");
+    } finally {
+      setUploadChecking(false);
+    }
+  };
+
+  const confirmUploadConflictReview = async () => {
+    if (!uploadConflictReview || uploadChecking || uploading) return;
+    const review = uploadConflictReview;
+    if (review.preflight.folder_conflicts.length && !folderConflictMode) {
+      setUploadConflictError("请先选择同名文件夹的处理方式");
+      return;
+    }
+    if (review.preflight.folder_conflicts.length) {
+      await refreshConflictPreflight(folderConflictMode || "merge");
+      return;
+    }
+    const keptFiles: Array<File | FolderUploadEntry> = [];
+    const actions: ManagedUploadConflictAction[] = [];
+    review.preflight.entries.forEach((entry, index) => {
+      const choice = uploadConflictChoices[entry.sequence];
+      if (entry.status === "blocked" || choice?.strategy === "skip") return;
+      const file = review.files[index];
+      if (!file) return;
+      keptFiles.push(file);
+      if (choice?.strategy === "rename") {
+        actions.push({ strategy: "rename", filename: choice.filename });
+      } else if (choice?.strategy === "update" && entry.conflict) {
+        actions.push({
+          strategy: "update",
+          item_id: entry.conflict.item_id,
+          expected_version_id: entry.conflict.version_id,
+        });
+      } else {
+        actions.push({ strategy: "create" });
+      }
+    });
+    if (!keptFiles.length) {
+      toast.info("没有文件需要上传");
+      resetUploadConflictReview();
+      return;
+    }
+    resetUploadConflictReview();
+    await upload(review.categoryId, keptFiles, review.uploadMode, {
+      allowFolderMerge: review.allowFolderMerge,
+      conflictActions: actions,
+    });
+  };
+
   const retryUploadTask = async (task: ManagedUploadTask) => {
     if (!lastUploadAttempt || lastUploadAttempt.batchId !== task.batch_id) {
       toast.error("原始文件已不在当前页面，请重新选择后上传");
       return;
     }
-    await upload(lastUploadAttempt.categoryId, lastUploadAttempt.files, lastUploadAttempt.uploadMode);
+    await preflightUpload(lastUploadAttempt.categoryId, lastUploadAttempt.files, lastUploadAttempt.uploadMode);
   };
 
   const prepareFileDrop = (incoming: File[]) => {
@@ -984,7 +1162,7 @@ export function AdminManagedContentPage() {
   const confirmFileDropUpload = async () => {
     if (!pendingUploadFiles.length || !pendingUploadFolderId) return;
     const targetFolderId = pendingUploadFolderId;
-    if (await upload(targetFolderId, pendingUploadFiles)) {
+    if (await preflightUpload(targetFolderId, pendingUploadFiles, "files")) {
       setPendingUploadFiles([]);
       setPendingUploadFolderId("");
     }
@@ -1039,7 +1217,7 @@ export function AdminManagedContentPage() {
 
   const confirmFolderUpload = async () => {
     if (!pendingFolderUpload?.entries.length || !pendingFolderUploadFolderId) return;
-    if (await upload(pendingFolderUploadFolderId, pendingFolderUpload.entries, "folder")) {
+    if (await preflightUpload(pendingFolderUploadFolderId, pendingFolderUpload.entries, "folder")) {
       setPendingFolderUpload(null);
       setPendingFolderUploadFolderId("");
     }
@@ -1047,7 +1225,7 @@ export function AdminManagedContentPage() {
 
   const currentFolder = categories.find((category) => category.id === currentFolderId) || null;
   const currentFolderDropLabel = currentFolder ? `${currentFolder.display_code} ${currentFolder.display_name}`.trim() : "当前目录";
-  const listDropEnabled = enabled && can("item.upload") && Boolean(currentFolderId) && !uploading && !folderScanning;
+  const listDropEnabled = enabled && can("item.upload") && Boolean(currentFolderId) && !uploading && !uploadChecking && !folderScanning;
   const clearListDropState = () => {
     listDragDepthRef.current = 0;
     setListDropActive(false);
@@ -1386,7 +1564,7 @@ export function AdminManagedContentPage() {
   const confirmDialogUpload = async () => {
     if (!files.length || !currentFolderId) return;
     const targetFolderId = currentFolderId;
-    if (await upload(targetFolderId, files)) setUploadDialogOpen(false);
+    if (await preflightUpload(targetFolderId, files, "files")) setUploadDialogOpen(false);
   };
 
   const act = async (item: ManagedContentItem, action: string, operation: () => Promise<unknown>, success: string) => {
@@ -2185,7 +2363,7 @@ export function AdminManagedContentPage() {
           onClear={() => { setQueryInput(""); setStatusFilter(""); setSourceFilter(""); setKindFilter(""); }}
         />
         <div className="flex shrink-0 flex-wrap items-center gap-2">
-          {can("item.upload") && <Button size="sm" className="max-sm:h-control-md" onClick={openUploadDialog} disabled={!enabled || !currentFolderId || uploading || folderScanning}><Upload className="size-4" />{folderScanning ? "读取文件夹中…" : "上传文件"}</Button>}
+          {can("item.upload") && <Button size="sm" className="max-sm:h-control-md" onClick={openUploadDialog} disabled={!enabled || !currentFolderId || uploading || uploadChecking || folderScanning}><Upload className="size-4" />{folderScanning ? "读取文件夹中…" : "上传文件"}</Button>}
           <Button size="sm" variant="outline" className="max-sm:h-control-md" onClick={() => void load(true)} disabled={loading || refreshing}><RefreshCw className={refreshing ? "size-4 animate-spin" : "size-4"} />{refreshing ? "刷新中…" : "刷新列表"}</Button>
           {selected.length > 1 ? <BatchActionsMenu disabled={bulkDisabled} options={[
             { key: "move", label: bulkMoveLabel, icon: <FolderInput className="size-4" />, disabled: !hasMovableSelection, disabledReason: "所选资料必须属于同一状态且都可调整目录", onSelect: () => { setBulkFailures([]); setBulkMoveFolderId(""); setBulkNote(""); setBulkAction("move"); } },
@@ -2443,11 +2621,33 @@ export function AdminManagedContentPage() {
 
     <Dialog open={Boolean(updateTarget)} onOpenChange={(open) => { if (!open && busyAction !== "update") { setUpdateTarget(null); setUpdateConflict(null); setUpdateError(null); setUpdateFile(null); } }}><DialogContent><DialogHeader><DialogTitle>更新资料文件</DialogTitle><DialogDescription>上传替换文件后会创建新草稿版本，旧发布版本会继续检索，直到新版本发布成功。</DialogDescription></DialogHeader><div className="space-y-3"><label className="flex min-h-32 cursor-pointer flex-col items-center justify-center gap-2 rounded-ui-lg border border-dashed border-input bg-background px-4 py-5 text-center hover:bg-surface-muted focus-within:ring-2 focus-within:ring-ring"><FileUp className="size-6 text-primary" /><span className="text-ui-sm font-medium">{updateFile ? updateFile.name : "选择替换文件"}</span><span className="text-ui-xs text-muted-foreground">支持 PDF、Markdown、Word、Excel 和 PPT</span><input ref={updateFileInputRef} type="file" className="sr-only" aria-label="选择替换文件" accept=".pdf,.md,.docx,.xlsx,.pptx" onChange={(event) => { setUpdateFile(event.target.files?.[0] || null); setUpdateConflict(null); }} /></label>{updateFile && <div className="space-y-2"><p className="text-ui-sm font-medium">文件名处理</p><div className="grid grid-cols-2 gap-2" role="group" aria-label="文件名处理"><Button type="button" variant={updateFilenameMode === "old" ? "default" : "outline"} aria-pressed={updateFilenameMode === "old"} onClick={() => { setUpdateFilenameMode("old"); setUpdateConflict(null); }}>沿用原名称</Button><Button type="button" variant={updateFilenameMode === "new" ? "default" : "outline"} aria-pressed={updateFilenameMode === "new"} onClick={() => { setUpdateFilenameMode("new"); setUpdateConflict(null); }}>使用新文件名</Button></div><p className="break-all text-ui-xs text-muted-foreground">{updateFilenameMode === "old" ? `将使用原名称并匹配新格式：${filenameForOldMode(updateTarget?.original_filename || "", updateFile.name)}` : `将使用：${updateFile.name}`}</p></div>}{updateConflict && <div className="space-y-2 rounded-ui-md border border-warning/50 bg-warning/10 p-3 text-ui-sm" role="alert"><p className="font-medium">当前目录存在同名资料，是否替换？</p><p>{updateConflict.title}（{updateConflict.original_filename}）</p><p className="text-muted-foreground">替换会将上述资料移入回收站并停止检索。</p></div>}{updateError && <p className="text-ui-sm text-destructive" role="alert">{updateError}</p>}</div><DialogFooter><Button variant="outline" disabled={busyAction === "update"} onClick={() => setUpdateTarget(null)}>取消</Button>{updateConflict ? <Button variant="destructive" disabled={busyAction === "update"} onClick={() => void updateContent(true)}>{busyAction === "update" ? "替换中…" : "确认替换并更新"}</Button> : <Button disabled={!updateFile || busyAction === "update"} onClick={() => void updateContent()}>{busyAction === "update" ? "上传中…" : "确认更新"}</Button>}</DialogFooter></DialogContent></Dialog>
 
-    <Dialog open={uploadDialogOpen} onOpenChange={(open) => { if (!open) closeUploadDialog(); }}><DialogContent><DialogHeader><DialogTitle>上传文件</DialogTitle><DialogDescription>文件将上传到当前目录“{currentFolder?.full_path || "请选择目录"}”，上传后先进入待提交状态。</DialogDescription></DialogHeader><label onDragEnter={(event) => { event.preventDefault(); setDragActive(true); }} onDragOver={(event) => event.preventDefault()} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragActive(false); }} onDrop={(event) => { event.preventDefault(); setDragActive(false); void inspectDroppedUpload(event.dataTransfer, "select"); }} className={`flex min-h-36 cursor-pointer flex-col items-center justify-center gap-2 rounded-ui-lg border border-dashed px-4 py-6 text-center transition-colors duration-normal focus-within:ring-2 focus-within:ring-ring ${dragActive ? "border-primary bg-primary/5" : "border-input bg-background hover:bg-surface-muted"}`}><Upload className="size-6 text-primary" /><span className="text-ui-sm font-medium">{folderScanning ? "正在读取文件夹…" : "拖动文件到这里，或选择文件"}</span><span className="text-ui-xs text-muted-foreground">支持 PDF、Markdown、Word、Excel 和 PPT</span><input ref={fileInputRef} aria-label="选择资料文件" type="file" multiple accept=".pdf,.md,.docx,.xlsx,.pptx" className="sr-only" disabled={uploading || folderScanning} onChange={(event) => acceptFiles(Array.from(event.target.files || []))} /></label><Button type="button" variant="outline" className="w-full" onClick={() => folderInputRef.current?.click()} disabled={uploading || folderScanning}><Folder className="size-4" />上传文件夹</Button><input ref={folderInputRef} aria-label="选择资料文件夹" type="file" multiple className="sr-only" disabled={uploading || folderScanning} onChange={(event) => selectFolder(Array.from(event.target.files || []))} {...({ webkitdirectory: "", directory: "" } as React.InputHTMLAttributes<HTMLInputElement>)} />{files.length > 0 && <ul className="max-h-40 space-y-1 overflow-y-auto rounded-ui-md border border-border px-3 py-2 text-ui-sm">{files.map((file) => <li key={`${file.name}-${file.size}`} className="break-all">{file.name}<span className="ml-2 text-ui-xs text-muted-foreground">{formatUploadSize(file.size)}</span></li>)}</ul>}<DialogFooter><Button variant="outline" onClick={closeUploadDialog} disabled={uploading || folderScanning}>取消</Button><Button onClick={() => void confirmDialogUpload()} disabled={!files.length || uploading || folderScanning || !currentFolderId}>{uploading ? "上传中…" : "确定上传"}</Button></DialogFooter></DialogContent></Dialog>
+    <Dialog open={uploadDialogOpen} onOpenChange={(open) => { if (!open) closeUploadDialog(); }}><DialogContent><DialogHeader><DialogTitle>上传文件</DialogTitle><DialogDescription>文件将上传到当前目录“{currentFolder?.full_path || "请选择目录"}”，上传前会检查同名资料。</DialogDescription></DialogHeader><label onDragEnter={(event) => { event.preventDefault(); setDragActive(true); }} onDragOver={(event) => event.preventDefault()} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragActive(false); }} onDrop={(event) => { event.preventDefault(); setDragActive(false); void inspectDroppedUpload(event.dataTransfer, "select"); }} className={`flex min-h-36 cursor-pointer flex-col items-center justify-center gap-2 rounded-ui-lg border border-dashed px-4 py-6 text-center transition-colors duration-normal focus-within:ring-2 focus-within:ring-ring ${dragActive ? "border-primary bg-primary/5" : "border-input bg-background hover:bg-surface-muted"}`}><Upload className="size-6 text-primary" /><span className="text-ui-sm font-medium">{folderScanning ? "正在读取文件夹…" : "拖动文件到这里，或选择文件"}</span><span className="text-ui-xs text-muted-foreground">支持 PDF、Markdown、Word、Excel 和 PPT</span><input ref={fileInputRef} aria-label="选择资料文件" type="file" multiple accept=".pdf,.md,.docx,.xlsx,.pptx" className="sr-only" disabled={uploading || uploadChecking || folderScanning} onChange={(event) => acceptFiles(Array.from(event.target.files || []))} /></label><Button type="button" variant="outline" className="w-full" onClick={() => folderInputRef.current?.click()} disabled={uploading || uploadChecking || folderScanning}><Folder className="size-4" />上传文件夹</Button><input ref={folderInputRef} aria-label="选择资料文件夹" type="file" multiple className="sr-only" disabled={uploading || uploadChecking || folderScanning} onChange={(event) => selectFolder(Array.from(event.target.files || []))} {...({ webkitdirectory: "", directory: "" } as React.InputHTMLAttributes<HTMLInputElement>)} />{files.length > 0 && <ul className="max-h-40 space-y-1 overflow-y-auto rounded-ui-md border border-border px-3 py-2 text-ui-sm">{files.map((file) => <li key={`${file.name}-${file.size}`} className="break-all">{file.name}<span className="ml-2 text-ui-xs text-muted-foreground">{formatUploadSize(file.size)}</span></li>)}</ul>}<DialogFooter><Button variant="outline" onClick={closeUploadDialog} disabled={uploading || uploadChecking || folderScanning}>取消</Button><Button onClick={() => void confirmDialogUpload()} disabled={!files.length || uploading || uploadChecking || folderScanning || !currentFolderId}>{uploadChecking ? "检查冲突中…" : uploading ? "上传中…" : "确定上传"}</Button></DialogFooter></DialogContent></Dialog>
 
-    <Dialog open={pendingUploadFiles.length > 0} onOpenChange={(open) => { if (!open && !uploading) { setPendingUploadFiles([]); setPendingUploadFolderId(""); } }}><DialogContent><DialogHeader><DialogTitle>确认上传</DialogTitle><DialogDescription>将上传到“{categories.find((category) => category.id === pendingUploadFolderId)?.full_path || currentFolder?.full_path || "当前目录"}”，确认后文件会进入待提交状态。</DialogDescription></DialogHeader><div className="space-y-2 text-ui-sm"><p>共 {pendingUploadFiles.length} 个文件</p><ul className="max-h-48 space-y-1 overflow-y-auto rounded-ui-md border border-border px-3 py-2">{pendingUploadFiles.map((file) => <li key={`${file.name}-${file.size}`} className="break-all">{file.name}<span className="ml-2 text-ui-xs text-muted-foreground">{formatUploadSize(file.size)}</span></li>)}</ul></div><DialogFooter><Button variant="outline" onClick={() => { setPendingUploadFiles([]); setPendingUploadFolderId(""); }} disabled={uploading}>取消</Button><Button onClick={() => void confirmFileDropUpload()} disabled={uploading}>{uploading ? "上传中…" : "确定上传"}</Button></DialogFooter></DialogContent></Dialog>
+    <Dialog open={pendingUploadFiles.length > 0} onOpenChange={(open) => { if (!open && !uploading && !uploadChecking) { setPendingUploadFiles([]); setPendingUploadFolderId(""); } }}><DialogContent><DialogHeader><DialogTitle>确认上传</DialogTitle><DialogDescription>将上传到“{categories.find((category) => category.id === pendingUploadFolderId)?.full_path || currentFolder?.full_path || "当前目录"}”，确认后先检查同名资料。</DialogDescription></DialogHeader><div className="space-y-2 text-ui-sm"><p>共 {pendingUploadFiles.length} 个文件</p><ul className="max-h-48 space-y-1 overflow-y-auto rounded-ui-md border border-border px-3 py-2">{pendingUploadFiles.map((file) => <li key={`${file.name}-${file.size}`} className="break-all">{file.name}<span className="ml-2 text-ui-xs text-muted-foreground">{formatUploadSize(file.size)}</span></li>)}</ul></div><DialogFooter><Button variant="outline" onClick={() => { setPendingUploadFiles([]); setPendingUploadFolderId(""); }} disabled={uploading || uploadChecking}>取消</Button><Button onClick={() => void confirmFileDropUpload()} disabled={uploading || uploadChecking}>{uploadChecking ? "检查冲突中…" : uploading ? "上传中…" : "确定上传"}</Button></DialogFooter></DialogContent></Dialog>
 
-    <Dialog open={Boolean(pendingFolderUpload)} onOpenChange={(open) => { if (!open && !uploading) { setPendingFolderUpload(null); setPendingFolderUploadFolderId(""); } }}><DialogContent className="max-w-2xl"><DialogHeader><DialogTitle>上传文件夹</DialogTitle><DialogDescription>确认后将按相对路径上传到“{categories.find((category) => category.id === pendingFolderUploadFolderId)?.full_path || currentFolder?.full_path || "当前目录"}”。缺少的目录仍按当前账号权限创建，文件上传后进入待提交状态。</DialogDescription></DialogHeader>{pendingFolderUpload && <div className="space-y-4 text-ui-sm"><dl className="grid grid-cols-2 gap-2 rounded-ui-md border border-border bg-surface-muted/40 p-3 sm:grid-cols-4"><div className="col-span-2 sm:col-span-4"><dt className="text-ui-xs text-muted-foreground">根文件夹</dt><dd className="mt-1 break-all font-medium">{pendingFolderUpload.rootFolderNames.length > 1 ? `${pendingFolderUpload.rootFolderNames[0]} 等 ${pendingFolderUpload.rootFolderNames.length} 个根文件夹` : pendingFolderUpload.rootFolderNames[0] || "所选文件夹"}</dd></div><div><dt className="text-ui-xs text-muted-foreground">文件夹</dt><dd className="mt-1 font-medium tabular-nums">{pendingFolderUpload.folderCount} 个</dd></div><div><dt className="text-ui-xs text-muted-foreground">可上传文件</dt><dd className="mt-1 font-medium tabular-nums">{pendingFolderUpload.fileCount} 个</dd></div><div><dt className="text-ui-xs text-muted-foreground">已忽略</dt><dd className="mt-1 font-medium tabular-nums">{pendingFolderUpload.ignoredEntries.length} 个</dd></div><div><dt className="text-ui-xs text-muted-foreground">上传大小</dt><dd className="mt-1 font-medium tabular-nums">{formatUploadSize(pendingFolderUpload.totalSize)}</dd></div></dl>{pendingFolderUpload.ignoredEntries.length > 0 && <div className="space-y-1"><p className="text-ui-xs font-medium text-muted-foreground">以下格式不受支持，将被忽略</p><ul className="max-h-24 space-y-1 overflow-y-auto rounded-ui-md border border-warning/40 bg-warning/10 px-3 py-2 text-ui-xs">{pendingFolderUpload.ignoredEntries.map((entry) => <li key={entry.relativePath} className="break-all">{entry.relativePath}</li>)}</ul></div>}<div className="space-y-1"><p className="text-ui-xs font-medium text-muted-foreground">将上传的文件</p><ul className="max-h-40 space-y-1 overflow-y-auto rounded-ui-md border border-border px-3 py-2">{pendingFolderUpload.entries.map((entry) => <li key={entry.relativePath} className="flex items-start justify-between gap-3"><span className="min-w-0 break-all">{entry.relativePath}</span><span className="shrink-0 text-ui-xs text-muted-foreground">{formatUploadSize(entry.file.size)}</span></li>)}</ul></div></div>}<DialogFooter><Button variant="outline" onClick={() => { setPendingFolderUpload(null); setPendingFolderUploadFolderId(""); }} disabled={uploading}>取消</Button><Button onClick={() => void confirmFolderUpload()} disabled={uploading || !pendingFolderUpload?.fileCount}>{uploading ? "上传中…" : "开始上传"}</Button></DialogFooter></DialogContent></Dialog>
+    <Dialog open={Boolean(pendingFolderUpload)} onOpenChange={(open) => { if (!open && !uploading && !uploadChecking) { setPendingFolderUpload(null); setPendingFolderUploadFolderId(""); } }}><DialogContent className="max-w-2xl"><DialogHeader><DialogTitle>上传文件夹</DialogTitle><DialogDescription>确认后将按相对路径检查并上传到“{categories.find((category) => category.id === pendingFolderUploadFolderId)?.full_path || currentFolder?.full_path || "当前目录"}”。同名文件夹不会自动合并。</DialogDescription></DialogHeader>{pendingFolderUpload && <div className="space-y-4 text-ui-sm"><dl className="grid grid-cols-2 gap-2 rounded-ui-md border border-border bg-surface-muted/40 p-3 sm:grid-cols-4"><div className="col-span-2 sm:col-span-4"><dt className="text-ui-xs text-muted-foreground">根文件夹</dt><dd className="mt-1 break-all font-medium">{pendingFolderUpload.rootFolderNames.length > 1 ? `${pendingFolderUpload.rootFolderNames[0]} 等 ${pendingFolderUpload.rootFolderNames.length} 个根文件夹` : pendingFolderUpload.rootFolderNames[0] || "所选文件夹"}</dd></div><div><dt className="text-ui-xs text-muted-foreground">文件夹</dt><dd className="mt-1 font-medium tabular-nums">{pendingFolderUpload.folderCount} 个</dd></div><div><dt className="text-ui-xs text-muted-foreground">可上传文件</dt><dd className="mt-1 font-medium tabular-nums">{pendingFolderUpload.fileCount} 个</dd></div><div><dt className="text-ui-xs text-muted-foreground">已忽略</dt><dd className="mt-1 font-medium tabular-nums">{pendingFolderUpload.ignoredEntries.length} 个</dd></div><div><dt className="text-ui-xs text-muted-foreground">上传大小</dt><dd className="mt-1 font-medium tabular-nums">{formatUploadSize(pendingFolderUpload.totalSize)}</dd></div></dl>{pendingFolderUpload.ignoredEntries.length > 0 && <div className="space-y-1"><p className="text-ui-xs font-medium text-muted-foreground">以下格式不受支持，将被忽略</p><ul className="max-h-24 space-y-1 overflow-y-auto rounded-ui-md border border-warning/40 bg-warning/10 px-3 py-2 text-ui-xs">{pendingFolderUpload.ignoredEntries.map((entry) => <li key={entry.relativePath} className="break-all">{entry.relativePath}</li>)}</ul></div>}<div className="space-y-1"><p className="text-ui-xs font-medium text-muted-foreground">将上传的文件</p><ul className="max-h-40 space-y-1 overflow-y-auto rounded-ui-md border border-border px-3 py-2">{pendingFolderUpload.entries.map((entry) => <li key={entry.relativePath} className="flex items-start justify-between gap-3"><span className="min-w-0 break-all">{entry.relativePath}</span><span className="shrink-0 text-ui-xs text-muted-foreground">{formatUploadSize(entry.file.size)}</span></li>)}</ul></div></div>}<DialogFooter><Button variant="outline" onClick={() => { setPendingFolderUpload(null); setPendingFolderUploadFolderId(""); }} disabled={uploading || uploadChecking}>取消</Button><Button onClick={() => void confirmFolderUpload()} disabled={uploading || uploadChecking || !pendingFolderUpload?.fileCount}>{uploadChecking ? "检查冲突中…" : uploading ? "上传中…" : "开始上传"}</Button></DialogFooter></DialogContent></Dialog>
+    <Dialog open={Boolean(uploadConflictReview)} onOpenChange={(open) => { if (!open && !uploadChecking && !uploading) resetUploadConflictReview(); }}>
+      <DialogContent className="max-w-3xl">
+        <DialogHeader>
+          <DialogTitle>处理上传冲突</DialogTitle>
+          <DialogDescription>上传前发现需要确认的目录或文件。未冲突的文件会正常上传，跳过的文件不会发送到服务器。</DialogDescription>
+        </DialogHeader>
+        {uploadConflictReview && <div className="max-h-[60vh] space-y-5 overflow-y-auto pr-1 text-ui-sm">
+          {uploadConflictReview.preflight.folder_conflicts.length > 0 && <section className="space-y-3" aria-labelledby="upload-folder-conflicts-title">
+            <div><h3 id="upload-folder-conflicts-title" className="font-semibold">文件夹名称冲突</h3><p className="mt-1 text-ui-xs text-muted-foreground">默认不合并到现有目录，请明确选择处理方式。</p></div>
+            <ul className="space-y-2">{uploadConflictReview.preflight.folder_conflicts.map((conflict) => <li key={conflict.category_id} className="rounded-ui-md border border-warning/50 bg-warning/10 p-3"><p className="break-words font-medium">“{conflict.relative_path}”已存在</p><p className="mt-1 break-words text-ui-xs text-muted-foreground">现有目录：{conflict.category_path}</p><label className="mt-3 block space-y-1 text-ui-xs font-medium"><span>重命名整个文件夹</span><Input value={folderConflictRenames[conflict.relative_path] || ""} disabled={folderConflictMode !== "rename" || !conflict.can_rename} onChange={(event) => setFolderConflictRenames((current) => ({ ...current, [conflict.relative_path]: event.target.value }))} /></label></li>)}</ul>
+            <div className="flex flex-wrap gap-2" role="group" aria-label="文件夹冲突处理方式"><Button type="button" variant={folderConflictMode === "merge" ? "default" : "outline"} disabled={uploadChecking} aria-pressed={folderConflictMode === "merge"} onClick={() => void refreshConflictPreflight("merge")}>合并到现有目录</Button><Button type="button" variant={folderConflictMode === "rename" ? "default" : "outline"} disabled={uploadChecking || uploadConflictReview.preflight.folder_conflicts.some((conflict) => !conflict.can_rename)} aria-pressed={folderConflictMode === "rename"} onClick={() => setFolderConflictMode("rename")}>重命名文件夹</Button></div>
+          </section>}
+          {uploadConflictReview.preflight.entries.some((entry) => entry.status === "conflict" && entry.reason_code === "content_filename_conflict") && <section className="space-y-3" aria-labelledby="upload-file-conflicts-title">
+            <div className="flex flex-wrap items-end justify-between gap-2"><div><h3 id="upload-file-conflicts-title" className="font-semibold">文件名冲突</h3><p className="mt-1 text-ui-xs text-muted-foreground">每个文件可单独处理，也可以批量跳过。</p></div><Button size="sm" variant="outline" onClick={() => setUploadConflictChoices((current) => Object.fromEntries(Object.keys(current).map((key) => [key, { strategy: "skip" as const, filename: current[Number(key)]?.filename }])))}>全部跳过</Button></div>
+            <ul className="space-y-3">{uploadConflictReview.preflight.entries.filter((entry) => entry.status === "conflict" && entry.reason_code === "content_filename_conflict").map((entry) => { const choice = uploadConflictChoices[entry.sequence] || { strategy: "skip" as const, filename: entry.suggested_filename || entry.filename }; return <li key={entry.sequence} className="space-y-3 rounded-ui-md border border-warning/50 bg-warning/10 p-3"><div className="min-w-0"><p className="break-all font-medium">{entry.relative_path || entry.filename}</p>{entry.conflict && <p className="mt-1 break-words text-ui-xs text-muted-foreground">已有资料：{entry.conflict.title}（{entry.conflict.original_filename}）</p>}</div><div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]"><label className="space-y-1 text-ui-xs font-medium"><span>处理方式</span><Select value={choice.strategy} onChange={(event) => setUploadConflictChoices((current) => ({ ...current, [entry.sequence]: { ...current[entry.sequence], strategy: event.target.value as UploadConflictChoice["strategy"] } }))}><option value="skip">跳过此文件</option><option value="rename">另存为新资料</option>{entry.conflict?.can_update && <option value="update">作为已有资料的新版本</option>}</Select></label>{choice.strategy === "rename" && <label className="space-y-1 text-ui-xs font-medium"><span>新文件名</span><Input value={choice.filename || ""} onChange={(event) => setUploadConflictChoices((current) => ({ ...current, [entry.sequence]: { ...current[entry.sequence], strategy: "rename", filename: event.target.value } }))} /></label>}</div></li>; })}</ul>
+          </section>}
+          {uploadConflictReview.preflight.entries.some((entry) => entry.status === "blocked") && <section className="space-y-2"><h3 className="font-semibold">无法上传的文件</h3><ul className="space-y-1 rounded-ui-md border border-border px-3 py-2 text-ui-xs">{uploadConflictReview.preflight.entries.filter((entry) => entry.status === "blocked").map((entry) => <li key={entry.sequence} className="flex flex-wrap justify-between gap-2"><span className="break-all">{entry.relative_path || entry.filename}</span><span className="text-muted-foreground">{entry.reason}</span></li>)}</ul></section>}
+          {uploadConflictError && <p className="rounded-ui-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-ui-sm text-destructive" role="alert">{uploadConflictError}</p>}
+        </div>}
+        <DialogFooter><Button variant="outline" onClick={resetUploadConflictReview} disabled={uploadChecking || uploading}>取消</Button><Button onClick={() => void confirmUploadConflictReview()} disabled={uploadChecking || uploading}>{uploadChecking ? "检查中…" : uploading ? "上传中…" : uploadConflictReview?.preflight.folder_conflicts.length ? "继续检查文件冲突" : "按选择上传"}</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
 
     <Dialog open={deleteTargets.length > 0} onOpenChange={(open) => { if (!open && busyAction !== "archive") { setDeleteTargets([]); setDeleteAcknowledged(false); setDeleteError(null); } }}><DialogContent><DialogHeader><DialogTitle>{deleteTargets.length > 1 ? `将 ${deleteTargets.length} 份资料移入回收站？` : "将资料移入回收站？"}</DialogTitle><DialogDescription>以下资料将立即停止进入知识库检索。文件、版本及审核发布历史会保留，可从回收站恢复。</DialogDescription></DialogHeader><ul className="max-h-48 space-y-2 overflow-y-auto rounded-ui-md border border-border p-3 text-ui-sm">{deleteTargets.map((item) => <li key={item.item_id} className="min-w-0"><p className="break-words font-medium">{item.title}</p><p className="break-all text-ui-xs text-muted-foreground">{item.original_filename}</p></li>)}</ul><label className="flex items-start gap-2 rounded-ui-md border border-destructive/30 bg-destructive/5 p-3 text-ui-sm"><Checkbox className="mt-0.5" checked={deleteAcknowledged} onChange={(event) => setDeleteAcknowledged(event.target.checked)} /><span>我已了解这些资料移入回收站后将不再进入检索。</span></label>{deleteError && <p className="rounded-ui-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-ui-sm text-destructive" role="alert">{deleteError}</p>}<DialogFooter><Button variant="outline" disabled={busyAction === "archive"} onClick={() => setDeleteTargets([])}>取消</Button><Button variant="destructive" disabled={busyAction === "archive" || !deleteAcknowledged} onClick={() => void deleteContent()}>{busyAction === "archive" ? "处理中…" : "确认移入回收站"}</Button></DialogFooter></DialogContent></Dialog>
   </section>;
