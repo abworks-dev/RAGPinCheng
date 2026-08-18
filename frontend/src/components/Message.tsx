@@ -7,7 +7,20 @@ import rehypeKatex from "rehype-katex";
 import type { ChatMessage, Source } from "../types";
 import { stripMarkdown } from "../utils/markdown";
 import { FeedbackBar } from "./FeedbackBar";
-import { Check, ChevronLeft, ChevronRight, CircleAlert, CirclePlay, Copy, Files, Pencil, Send, X } from "lucide-react";
+import {
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  CircleAlert,
+  Copy,
+  Eye,
+  Files,
+  Pencil,
+  Play,
+  Send,
+  Video,
+  X,
+} from "lucide-react";
 import {
   CITATION_EVENT,
   CITATION_HOVER_EVENT,
@@ -19,12 +32,16 @@ import {
   type CitationTooltipActiveDetail,
 } from "./citations";
 import { copyText } from "../utils/clipboard";
+import { usePdfPreview } from "../hooks/usePdfPreview";
+import { timestampToSeconds, useVideoPlayer } from "../hooks/useVideoPlayer";
+import { sourceDisplayTitle, sourceLocator } from "../lib/source-export";
 
 const CITATION_TOOLTIP_CLOSE_DELAY_MS = 150;
 const CITATION_TOOLTIP_VIEWPORT_GUTTER = 8;
 const CITATION_TOOLTIP_GAP = 2;
 // Keep fixed previews below the 2.5rem top fade used by MessageList.
 const CITATION_TOOLTIP_TOP_FADE_HEIGHT = 40;
+const PREVIEWABLE_DOCUMENT_TYPES = new Set(["pdf", "docx", "xlsx", "pptx"]);
 
 export type CitationTooltipPlacementInput = {
   markerTop: number;
@@ -162,15 +179,19 @@ function CitationMarker({
 }) {
   const idx = resolveCitation(href, sources);
   const source = idx >= 0 ? sources[idx] : null;
-  const [isHovered, setIsHovered] = useState(false);
+  const { open: openDocument } = usePdfPreview();
+  const { open: openVideo } = useVideoPlayer();
+  const [isOpen, setIsOpen] = useState(false);
   const [isHighlighted, setIsHighlighted] = useState(false);
   const [showBelow, setShowBelow] = useState(false);
   const [tooltipPosition, setTooltipPosition] = useState({ top: 0, left: 0 });
   const [isPositioned, setIsPositioned] = useState(false);
   const markerRef = useRef<HTMLElement>(null);
-  const tooltipRef = useRef<HTMLSpanElement>(null);
+  const markerButtonRef = useRef<HTMLButtonElement>(null);
+  const tooltipRef = useRef<HTMLDivElement>(null);
   const closeTimerRef = useRef<number | null>(null);
   const tooltipActiveRef = useRef(false);
+  const suppressFocusOpenRef = useRef(false);
   const markerId = useId();
 
   const setTooltipActive = (active: boolean) => {
@@ -190,20 +211,48 @@ function CitationMarker({
   };
 
   const openTooltip = () => {
+    if (suppressFocusOpenRef.current) return;
     cancelClose();
     if (!tooltipActiveRef.current) setIsPositioned(false);
     setTooltipActive(true);
-    setIsHovered(true);
+    setIsOpen(true);
+  };
+
+  const closeTooltip = (restoreFocus = false) => {
+    cancelClose();
+    setIsOpen(false);
+    setIsPositioned(false);
+    setTooltipActive(false);
+    if (restoreFocus) {
+      suppressFocusOpenRef.current = true;
+      markerButtonRef.current?.focus({ preventScroll: true });
+      queueMicrotask(() => {
+        suppressFocusOpenRef.current = false;
+      });
+    }
   };
 
   const scheduleClose = () => {
     cancelClose();
     closeTimerRef.current = window.setTimeout(() => {
-      setIsHovered(false);
-      setIsPositioned(false);
-      setTooltipActive(false);
+      const activeElement = document.activeElement;
+      if (
+        (activeElement && markerRef.current?.contains(activeElement))
+        || (activeElement && tooltipRef.current?.contains(activeElement))
+      ) {
+        closeTimerRef.current = null;
+        return;
+      }
+      closeTooltip();
       closeTimerRef.current = null;
     }, CITATION_TOOLTIP_CLOSE_DELAY_MS);
+  };
+
+  const handleEscape = (event: React.KeyboardEvent) => {
+    if (event.key !== "Escape") return;
+    event.preventDefault();
+    event.stopPropagation();
+    closeTooltip(true);
   };
 
   useEffect(() => () => {
@@ -224,7 +273,7 @@ function CitationMarker({
 
   // Calculate while hidden so the first hover never visibly jumps into the fade layer.
   useLayoutEffect(() => {
-    if (!isHovered || !markerRef.current || !tooltipRef.current) {
+    if (!isOpen || !markerRef.current || !tooltipRef.current) {
       setIsPositioned(false);
       return;
     }
@@ -259,7 +308,7 @@ function CitationMarker({
       window.removeEventListener("resize", onViewportChange);
       window.removeEventListener("scroll", onViewportChange, true);
     };
-  }, [isHovered]);
+  }, [isOpen]);
 
   if (!source) {
     // Fallback: no matching source found — render as plain text.
@@ -269,6 +318,40 @@ function CitationMarker({
   // Tooltip preview text: first 120 chars of the source, with markdown syntax stripped.
   const cleanText = stripMarkdown(source.text);
   const preview = cleanText.length > 120 ? cleanText.slice(0, 120) + "…" : cleanText;
+  const isVideo = source.doc_type === "transcript";
+  const canPlayVideo = isVideo && Boolean(source.media_id);
+  const canPreviewDocument = PREVIEWABLE_DOCUMENT_TYPES.has(source.doc_type);
+  const popoverId = `${markerId}-source-preview`;
+
+  const playVideoAtCitation = (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    if (!source.media_id) return;
+    closeTooltip(true);
+    openVideo({
+      mediaId: source.media_id,
+      title: sourceDisplayTitle(source),
+      startSeconds: timestampToSeconds(source.start_time),
+      fromSource: true,
+    });
+  };
+
+  const previewDocumentAtCitation = (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    if (!canPreviewDocument) return;
+    closeTooltip(true);
+    openDocument(
+      source.parent_id,
+      source.doc_title,
+      source.doc_type,
+      source.doc_type === "pptx" && source.slide_number ? source.slide_number : 1,
+      {
+        sheetName: source.sheet_name,
+        cellRange: source.cell_range,
+        slideNumber: source.slide_number,
+        paragraphAnchor: source.paragraph_anchor,
+      },
+    );
+  };
 
   return (
     <>
@@ -277,8 +360,17 @@ function CitationMarker({
         className="relative top-[-0.35em] mx-px align-baseline"
         onMouseEnter={openTooltip}
         onMouseLeave={scheduleClose}
+        onFocus={openTooltip}
+        onBlur={scheduleClose}
+        onKeyDown={handleEscape}
       >
-        <a
+        <button
+          ref={markerButtonRef}
+          type="button"
+          aria-label={`查看来源 ${idx + 1}：${sourceDisplayTitle(source)}`}
+          aria-haspopup="dialog"
+          aria-expanded={isOpen}
+          aria-controls={isOpen ? popoverId : undefined}
           className={`inline-flex items-center justify-center cursor-pointer font-sans text-[11px] h-[18px] min-w-[18px] px-1 rounded transition-all ${
             isHighlighted
               ? "bg-accent text-white scale-110"
@@ -292,16 +384,21 @@ function CitationMarker({
           }}
         >
           {idx + 1}
-        </a>
+        </button>
 
       </sup>
-      {isHovered && typeof document !== "undefined" && createPortal(
-        <span
+      {isOpen && typeof document !== "undefined" && createPortal(
+        <div
+          id={popoverId}
           ref={tooltipRef}
-          role="tooltip"
+          role="dialog"
+          aria-label={`来源 ${idx + 1} 预览`}
           data-placement={showBelow ? "below" : "above"}
           onMouseEnter={openTooltip}
           onMouseLeave={scheduleClose}
+          onFocus={openTooltip}
+          onBlur={scheduleClose}
+          onKeyDown={handleEscape}
           style={{ top: tooltipPosition.top, left: tooltipPosition.left }}
           className={`fixed z-[100] block min-w-[200px] max-w-[320px] max-h-[min(80vh,22rem)] overflow-y-auto rounded-ui-lg border border-border bg-popover p-3 text-xs text-popover-foreground shadow-overlay break-words ${
             isPositioned
@@ -309,24 +406,45 @@ function CitationMarker({
               : "invisible pointer-events-none opacity-0"
           }`}
         >
-          <span className="mb-1 block truncate font-medium text-popover-foreground">{source.doc_title}</span>
+          <span className="mb-1 block truncate font-medium text-popover-foreground">{sourceDisplayTitle(source)}</span>
           <span className="mb-2 flex items-center gap-1.5 truncate text-muted-foreground">
-            {source.doc_type === "transcript" ? (
+            {isVideo ? (
               <>
-                {source.media_id && (
-                  <CirclePlay className="size-3.5 text-primary" aria-hidden="true" />
-                )}
-                @{source.start_time || ""}
+                <Video className="size-3.5" aria-hidden="true" />
+                视频来源 · {sourceLocator(source)}
               </>
             ) : (
-              `§${((source.section_path || "").replace(/<[^>]*>/g, ""))}`
+              `文档来源 · ${sourceLocator(source)}`
             )}
           </span>
           <span className="block whitespace-pre-wrap break-words leading-relaxed text-popover-foreground/85">{preview}</span>
-          <span className="mt-2 block text-[10px] text-muted-foreground">
-            点击打开来源核验
-          </span>
-        </span>,
+          {(canPlayVideo || canPreviewDocument) && (
+            <div className="mt-2 flex justify-end gap-1 border-t border-border pt-2">
+              {canPlayVideo && (
+                <button
+                  type="button"
+                  onClick={playVideoAtCitation}
+                  aria-label={`从 ${sourceLocator(source)} 播放视频`}
+                  title={`从 ${sourceLocator(source)} 播放视频`}
+                  className="inline-flex size-8 items-center justify-center rounded-ui-md text-primary transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <Play className="size-4" aria-hidden="true" />
+                </button>
+              )}
+              {canPreviewDocument && (
+                <button
+                  type="button"
+                  onClick={previewDocumentAtCitation}
+                  aria-label={`预览文档：${sourceDisplayTitle(source)}`}
+                  title="预览文档"
+                  className="inline-flex size-8 items-center justify-center rounded-ui-md text-primary transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <Eye className="size-4" aria-hidden="true" />
+                </button>
+              )}
+            </div>
+          )}
+        </div>,
         document.body,
       )}
     </>

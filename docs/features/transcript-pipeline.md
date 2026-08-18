@@ -5,7 +5,7 @@
 
 ## 用户可观察能力
 
-教学视频转录稿可以被索引和检索，回答能够显示带时间戳的视频引用，点击引用定位到来源卡片并打开视频播放器。管理员可通过三步向导批量暂存 MP4，再逐视频绑定、查看和编辑人工 Markdown，或批量应用并逐项覆盖服务端白名单 Profile 启动自动转录任务。
+教学视频转录稿可以被索引和检索，回答能够显示带时间戳的视频引用；点击引用定位到来源卡片，引用悬浮卡和来源详情中的独立播放按钮可打开视频播放器并跳到引用时间点。管理员可通过三步向导批量暂存 MP4，再逐视频绑定、查看和编辑人工 Markdown，或批量应用并逐项覆盖服务端白名单 Profile 启动自动转录任务。
 
 系统管理员可在 `/admin/asr` 的“转录配置”页比较三个服务器固定的 WhisperX v2 分段 Profile，查看固定工程词、Prompt 资产和应用/服务配置哈希，并提交只写审计记录的发布申请。页面不接受自由 Prompt、模型路径或任意解码参数；发布申请不持有部署凭据，也不直接触发生产 workflow。
 
@@ -32,7 +32,7 @@ Phase 5A/5B 已接通版本列表、Markdown 校对与渲染预览、人工审�
 - 正式 head 切换成功时在同一 SQLite 事务中创建或更新视频目录壳；历史正式视频由 Schema 16 幂等回填到 `05 培训资料`，之后可由具备发布权限的人员只调整资料库目录；
 - 资料库只列出未归档媒体的当前正式 head。较新的待审核或待发布稿不会替换旧条目，只显示待处理提醒；媒体归档或正式 head 移除后条目从资料库和分类计数中消失；
 - 普通登录用户可通过只读接口读取当前已发布转录版本；无版本头的既有人工上传媒体兼容读取其已登记、受控且完成索引的人工稿；
-- 引用角标点击自动打开视频播放器并跳转对应时间点；
+- 具备 `media_id` 的引用在悬浮卡中显示独立播放按钮，并跳转对应时间点；
 - 来源卡片显示”从 HH:MM:SS 播放”按钮；
 - 旧会话和未关联转录正常降级（无播放按钮，不报错）；
 - 管理端“视频媒体”标签页提供批量拖放/选择、转写方式分流和逐项配置向导；批量提交最多并发两个单视频请求，单项失败可保留重试；
@@ -196,7 +196,7 @@ candidate manifest 和 promotion workflow evidence 为准，不能把代码就�
 → RetrievedParent(media_id)
 → <source media_id=... time=... type="transcript">
 → SourceDTO(media_id)
-→ 视频引用角标 (点击 → 播放器 seek)
+→ 视频引用角标 (悬浮卡播放按钮 → 播放器 seek)
 → 来源卡片 (播放按钮)
 → GET /api/media/{media_id} (鉴权 Range 播放)
 → GET /api/media/{media_id}/transcript（鉴权读取正式/兼容人工转录稿）
@@ -260,7 +260,7 @@ candidate manifest 和 promotion workflow evidence 为准，不能把代码就�
   （单次 run 精确收缩、周期保留策略、路径安全检查与 JSON 审计）
 - `frontend/src/components/citations.ts`
 - `frontend/src/components/SourcesPanel.tsx`（播放按钮）
-- `frontend/src/components/Message.tsx`（引用 click seek）
+- `frontend/src/components/Message.tsx`（引用悬浮卡播放按钮）
 - `frontend/src/components/VideoPlayerDrawer.tsx`（新增）
 - `frontend/src/components/TranscriptPanel.tsx`（同步转录列表）
 - `frontend/src/hooks/useVideoPlayer.tsx`（新增）

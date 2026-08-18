@@ -35,11 +35,11 @@ test.describe("聊天工作台", () => {
     await expect(marker).toBeVisible();
     await marker.hover();
 
-    const tooltip = page.getByRole("tooltip");
-    await expect(tooltip).toBeVisible();
+    const preview = page.getByRole("dialog", { name: "来源 1 预览" });
+    await expect(preview).toBeVisible();
     await page.waitForTimeout(2_000);
-    await expect(tooltip).toBeVisible();
-    await expectInViewport(tooltip);
+    await expect(preview).toBeVisible();
+    await expectInViewport(preview);
     await expectNoBodyOverflow(page);
   });
 
@@ -54,16 +54,46 @@ test.describe("聊天工作台", () => {
     await marker.evaluate((element) => element.scrollIntoView({ block: "start" }));
     await marker.hover();
 
-    const tooltip = page.getByRole("tooltip");
-    await expect(tooltip).toBeVisible();
-    const [tooltipBox, scrollerBox] = await Promise.all([
-      tooltip.boundingBox(),
+    const preview = page.getByRole("dialog", { name: "来源 1 预览" });
+    await expect(preview).toBeVisible();
+    const [previewBox, scrollerBox] = await Promise.all([
+      preview.boundingBox(),
       scroller.boundingBox(),
     ]);
-    expect(tooltipBox).not.toBeNull();
+    expect(previewBox).not.toBeNull();
     expect(scrollerBox).not.toBeNull();
-    expect(tooltipBox!.y).toBeGreaterThanOrEqual(scrollerBox!.y + 40);
-    await expectInViewport(tooltip);
+    expect(previewBox!.y).toBeGreaterThanOrEqual(scrollerBox!.y + 40);
+    await expectInViewport(preview);
+    await expectNoBodyOverflow(page);
+  });
+
+  test("视频引用悬浮卡提供独立的时间点播放按钮", async ({ page }) => {
+    await installChatRoutes(page, "video");
+    await page.goto("/");
+    await page.getByPlaceholder("向企业知识库提问").fill("合成视频引用问题");
+    await page.getByRole("button", { name: "发送问题" }).click();
+
+    await page.getByRole("superscript").hover();
+    const preview = page.getByRole("dialog", { name: "来源 1 预览" });
+    await preview.getByRole("button", { name: "从 00:00:12 播放视频" }).click();
+
+    const player = page.getByRole("dialog").filter({ hasText: "从 00:12 开始播放" });
+    await expect(player).toBeVisible();
+    await expect(player.getByRole("heading", { name: "项目交付培训视频：移动端长标题适配验证" })).toBeVisible();
+    await expectNoBodyOverflow(page);
+  });
+
+  test("可预览文档的引用悬浮卡提供独立预览按钮", async ({ page }) => {
+    await installChatRoutes(page, "document");
+    await page.goto("/");
+    await page.getByPlaceholder("向企业知识库提问").fill("合成文档引用问题");
+    await page.getByRole("button", { name: "发送问题" }).click();
+
+    await page.getByRole("superscript").hover();
+    await page.getByRole("button", { name: "预览文档：项目交付检查清单" }).click();
+
+    await expect(page.getByRole("heading", { name: "项目交付检查清单" })).toBeVisible();
+    await expect(page.getByText("Word 文档", { exact: true })).toBeVisible();
     await expectNoBodyOverflow(page);
   });
 });

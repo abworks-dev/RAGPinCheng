@@ -4,6 +4,7 @@ import type { ChatMessage, Source } from "../types";
 import { calculateCitationTooltipPlacement, Message } from "./Message";
 
 const videoPlayerOpen = vi.hoisted(() => vi.fn());
+const documentPreviewOpen = vi.hoisted(() => vi.fn());
 
 vi.mock("./FeedbackBar", () => ({
   FeedbackBar: ({
@@ -39,8 +40,12 @@ vi.mock("./FeedbackBar", () => ({
 }));
 
 vi.mock("../hooks/useVideoPlayer", () => ({
-  timestampToSeconds: () => 0,
+  timestampToSeconds: (timestamp: string | null | undefined) => timestamp === "00:00:12" ? 12 : 0,
   useVideoPlayer: () => ({ open: videoPlayerOpen }),
+}));
+
+vi.mock("../hooks/usePdfPreview", () => ({
+  usePdfPreview: () => ({ open: documentPreviewOpen }),
 }));
 
 const source: Source = {
@@ -379,7 +384,7 @@ describe("Message assistant actions", () => {
     expect(viewVersion).toHaveBeenCalledWith("12", 1);
   });
 
-  it("keeps a citation tooltip open while moving from the marker into the tooltip", () => {
+  it("keeps a citation preview open while moving from the marker into the preview", () => {
     vi.useFakeTimers();
     render(
       <Message
@@ -391,9 +396,9 @@ describe("Message assistant actions", () => {
 
     const marker = screen.getByRole("superscript");
     fireEvent.mouseEnter(marker);
-    const tooltip = screen.getByRole("tooltip");
-    expect(tooltip).toHaveTextContent("测试标准");
-    expect(tooltip).toHaveClass(
+    const preview = screen.getByRole("dialog", { name: "来源 1 预览" });
+    expect(preview).toHaveTextContent("测试标准");
+    expect(preview).toHaveClass(
       "bg-popover",
       "text-popover-foreground",
       "fixed",
@@ -402,13 +407,13 @@ describe("Message assistant actions", () => {
     );
 
     fireEvent.mouseLeave(marker);
-    fireEvent.mouseEnter(tooltip);
+    fireEvent.mouseEnter(preview);
     act(() => vi.advanceTimersByTime(150));
-    expect(screen.getByRole("tooltip")).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "来源 1 预览" })).toBeInTheDocument();
 
-    fireEvent.mouseLeave(tooltip);
+    fireEvent.mouseLeave(preview);
     act(() => vi.advanceTimersByTime(150));
-    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "来源 1 预览" })).not.toBeInTheDocument();
     vi.useRealTimers();
   });
 
@@ -422,7 +427,7 @@ describe("Message assistant actions", () => {
     );
 
     fireEvent.mouseEnter(screen.getByRole("superscript"));
-    expect(screen.getByRole("tooltip")).toBeVisible();
+    expect(screen.getByRole("dialog", { name: "来源 1 预览" })).toBeVisible();
 
     rerender(
       <Message
@@ -432,7 +437,146 @@ describe("Message assistant actions", () => {
       />,
     );
 
-    expect(screen.getByRole("tooltip")).toBeVisible();
+    expect(screen.getByRole("dialog", { name: "来源 1 预览" })).toBeVisible();
+  });
+
+  it("opens a citation preview from keyboard focus and closes it with Escape", () => {
+    render(
+      <Message
+        msg={assistant({ content: "命名规则见[1]。" })}
+        conversationId="conversation-1"
+        turnIndex={1}
+      />,
+    );
+
+    const marker = screen.getByRole("button", { name: "查看来源 1：测试标准" });
+    fireEvent.focus(marker);
+    expect(screen.getByRole("dialog", { name: "来源 1 预览" })).toBeVisible();
+    expect(marker).toHaveAttribute("aria-expanded", "true");
+
+    fireEvent.keyDown(marker, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "来源 1 预览" })).not.toBeInTheDocument();
+    expect(marker).toHaveFocus();
+    expect(marker).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("plays a video citation from its independent action at the cited timestamp", () => {
+    videoPlayerOpen.mockClear();
+    const videoSource: Source = {
+      ...source,
+      doc_title: "Revit界面介绍__7d44513f",
+      doc_type: "transcript",
+      start_time: "00:00:12",
+      media_id: "media-1",
+    };
+    render(
+      <Message
+        msg={assistant({
+          content: "工具栏用法见[Revit界面介绍__7d44513f @00:00:12]。",
+          sources: [videoSource],
+        })}
+        conversationId="conversation-1"
+        turnIndex={1}
+      />,
+    );
+
+    fireEvent.mouseEnter(screen.getByRole("superscript"));
+    fireEvent.click(screen.getByRole("button", { name: "从 00:00:12 播放视频" }));
+
+    expect(videoPlayerOpen).toHaveBeenCalledWith({
+      mediaId: "media-1",
+      title: "Revit界面介绍",
+      startSeconds: 12,
+      fromSource: true,
+    });
+    expect(screen.queryByRole("dialog", { name: "来源 1 预览" })).not.toBeInTheDocument();
+  });
+
+  it("previews a supported document from its independent action with citation location", () => {
+    documentPreviewOpen.mockClear();
+    const presentationSource: Source = {
+      ...source,
+      parent_id: "presentation-parent",
+      doc_title: "项目汇报",
+      doc_type: "pptx",
+      section_path: "交付汇报",
+      slide_number: 7,
+    };
+    render(
+      <Message
+        msg={assistant({ content: "汇报要求见[1]。", sources: [presentationSource] })}
+        conversationId="conversation-1"
+        turnIndex={1}
+      />,
+    );
+
+    fireEvent.mouseEnter(screen.getByRole("superscript"));
+    fireEvent.click(screen.getByRole("button", { name: "预览文档：项目汇报" }));
+
+    expect(documentPreviewOpen).toHaveBeenCalledWith(
+      "presentation-parent",
+      "项目汇报",
+      "pptx",
+      7,
+      {
+        sheetName: null,
+        cellRange: null,
+        slideNumber: 7,
+        paragraphAnchor: null,
+      },
+    );
+  });
+
+  it.each(["pdf", "docx", "xlsx", "pptx"])(
+    "offers the preview action for %s citations",
+    (docType) => {
+      render(
+        <Message
+          msg={assistant({
+            content: "文档要求见[1]。",
+            sources: [{ ...source, doc_type: docType }],
+          })}
+          conversationId="conversation-1"
+          turnIndex={1}
+        />,
+      );
+
+      fireEvent.mouseEnter(screen.getByRole("superscript"));
+      expect(screen.getByRole("button", { name: "预览文档：测试标准" })).toBeVisible();
+    },
+  );
+
+  it("does not show misleading actions for unsupported or unlinked sources", () => {
+    const unsupportedSource: Source = { ...source, doc_type: "md" };
+    const { rerender } = render(
+      <Message
+        msg={assistant({ content: "说明见[1]。", sources: [unsupportedSource] })}
+        conversationId="conversation-1"
+        turnIndex={1}
+      />,
+    );
+
+    fireEvent.mouseEnter(screen.getByRole("superscript"));
+    expect(screen.queryByRole("button", { name: /预览文档/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /播放视频/ })).not.toBeInTheDocument();
+
+    rerender(
+      <Message
+        msg={assistant({
+          content: "视频说明见[培训视频 @00:00:12]。",
+          sources: [{
+            ...source,
+            doc_title: "培训视频",
+            doc_type: "transcript",
+            start_time: "00:00:12",
+            media_id: null,
+          }],
+        })}
+        conversationId="conversation-1"
+        turnIndex={1}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: /播放视频/ })).not.toBeInTheDocument();
   });
 
   it("opens source verification without opening the player for video citations", () => {
@@ -458,9 +602,8 @@ describe("Message assistant actions", () => {
       />,
     );
 
-    const marker = screen.getByRole("superscript").querySelector("a");
-    expect(marker).not.toBeNull();
-    fireEvent.click(marker!);
+    const marker = screen.getByRole("button", { name: /查看来源 1/ });
+    fireEvent.click(marker);
     expect(citationListener).toHaveBeenCalledTimes(1);
     expect(videoPlayerOpen).not.toHaveBeenCalled();
     window.removeEventListener("pincheng:citation-click", citationListener);

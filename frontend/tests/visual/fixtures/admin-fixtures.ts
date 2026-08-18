@@ -1111,7 +1111,7 @@ export async function installAuthRoutes(page: Page) {
   });
 }
 
-export async function installChatRoutes(page: Page, scenario: "normal" | "error" | "video" = "normal") {
+export async function installChatRoutes(page: Page, scenario: "normal" | "error" | "video" | "document" = "normal") {
   const chatUser = { ...workspaceUsers.member, csrf_token: "synthetic-chat-csrf" };
   const videoSource = {
     parent_id: "video-parent",
@@ -1129,6 +1129,22 @@ export async function installChatRoutes(page: Page, scenario: "normal" | "error"
     slide_number: null,
     paragraph_anchor: null,
   };
+  const documentSource = {
+    parent_id: "document-parent",
+    doc_title: "项目交付检查清单",
+    section_path: "交付检查 > 模型命名",
+    category: "公司标准",
+    score: 0.93,
+    rrf_score: 0.89,
+    text: "模型名称应包含专业、楼层和交付阶段。",
+    doc_type: "docx",
+    start_time: null,
+    media_id: null,
+    sheet_name: null,
+    cell_range: null,
+    slide_number: null,
+    paragraph_anchor: "model-naming",
+  };
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
@@ -1141,8 +1157,8 @@ export async function installChatRoutes(page: Page, scenario: "normal" | "error"
     if (path === "/api/conversations/conversation-chat" && request.method() === "GET") return json(route, { ...conversationState, id: "conversation-chat", title: "合成新对话", user_id: chatUser.id, messages: [] });
     if (path === "/api/conversations/conversation-chat/chat" && request.method() === "POST") {
       if (scenario === "error") return sse(route, `event: error\ndata: ${JSON.stringify({ message: "合成回答失败" })}\n\n`);
-      const sources = scenario === "video" ? [videoSource] : [];
-      const answerText = scenario === "video" ? "合成回答[1]" : "合成回答";
+      const sources = scenario === "video" ? [videoSource] : scenario === "document" ? [documentSource] : [];
+      const answerText = scenario === "video" || scenario === "document" ? "合成回答[1]" : "合成回答";
       return sse(route, [
         `event: prep\ndata: ${JSON.stringify({ search_query: "合成问题", rewrite_applied: false, history_chars: 0, budget: 1000, fresh_count: 1, final_count: 1, used_sources: sources, no_source_fallback: false })}\n\n`,
         `event: token\ndata: ${JSON.stringify({ text: answerText })}\n\n`,
@@ -1162,6 +1178,9 @@ export async function installChatRoutes(page: Page, scenario: "normal" | "error"
     }
     if (scenario === "video" && path === "/api/media/media-ready") {
       return route.fulfill({ status: 200, contentType: "video/mp4", body: "" });
+    }
+    if (scenario === "document" && path === "/api/source/document-parent/raw") {
+      return route.fulfill({ status: 200, contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", body: "" });
     }
     if (/^\/api\/conversations\/[^/]+$/.test(path) && request.method() === "DELETE") return route.fulfill({ status: 204 });
     throw new Error(`Chat fixture has no route for ${request.method()} ${path}`);
