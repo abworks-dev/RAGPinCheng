@@ -789,6 +789,11 @@ class TrashPurgeItemDTO(BaseModel):
     original_filename: str
     category_path: str
     size_bytes: int
+    content_kind: Literal["document", "media_transcript"] = "document"
+    media_count: int = 0
+    transcript_version_count: int = 0
+    artifact_count: int = 0
+    index_job_count: int = 0
 
 
 class TrashPurgePreflightResponse(BaseModel):
@@ -796,6 +801,10 @@ class TrashPurgePreflightResponse(BaseModel):
     ready_count: int
     blocked_count: int
     total_size_bytes: int
+    media_count: int = 0
+    transcript_version_count: int = 0
+    artifact_count: int = 0
+    index_job_count: int = 0
     confirmation_phrase: str
 
 

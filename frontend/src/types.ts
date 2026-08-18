@@ -501,6 +501,11 @@ export type TrashPurgeItem = {
   original_filename: string;
   category_path: string;
   size_bytes: number;
+  content_kind: "document" | "media_transcript";
+  media_count: number;
+  transcript_version_count: number;
+  artifact_count: number;
+  index_job_count: number;
 };
 
 export type TrashPurgePreflight = {
@@ -508,6 +513,10 @@ export type TrashPurgePreflight = {
   ready_count: number;
   blocked_count: number;
   total_size_bytes: number;
+  media_count: number;
+  transcript_version_count: number;
+  artifact_count: number;
+  index_job_count: number;
   confirmation_phrase: string;
 };
 

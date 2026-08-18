@@ -60,7 +60,7 @@ Schema 19 增加 `media_metadata_revisions` 和 `media_replacements`。媒体标
 - “发布”和“重新发布”先打开确认窗口，确认后才创建索引任务；历史发布失败信息继续在详情和确认窗口中展示。
 - PPTX 发布时通过 LibreOffice 生成同版本 `.preview.pdf` 派生产物。列表接口以预览文件的 PDF 签名为准返回 `preview_status`，缺失或损坏时不再开放预览按钮；发布负责人可在资料详情中单独重新生成预览，该操作不重新索引，也不改变资料发布状态。转换写入使用同目录临时文件和原子替换，失败不会破坏已有有效预览。
 - PPTX 预览生成失败仍不阻断资料索引与发布。PDF 预览窗口显示中文失败原因；系统概览实际探测 LibreOffice `/health`，区分“运行正常”“服务异常”和“已停用”。
-- 视频转录稿固定展示详情、播放、下载和移动目录；下载窗口可选择原始 MP4、当前正式 Markdown 或两者的 ZIP。系统管理员可从“更多”菜单直接编辑当前正式转录稿、创建媒体信息修订、进入替换视频流程或打开视频管理；普通发布负责人不会看到可进入管理员视频管理的伪入口。完整删除仍由视频管理负责，视频条目不显示普通文档的状态流程按钮。
+- 视频转录稿固定展示详情、播放、下载和移动目录；下载窗口可选择原始 MP4、当前正式 Markdown 或两者的 ZIP。系统管理员可从“更多”菜单直接编辑当前正式转录稿、创建媒体信息修订、进入替换视频流程或打开视频管理；普通发布负责人不会看到可进入管理员视频管理的伪入口。已正式发布的视频可先移入共享回收站，再由具备 `trash.purge` 权限的管理员永久删除；视频条目不显示普通文档的状态流程按钮。
 - 编辑媒体信息不会立即修改正式条目。候选稿必须重新审核、索引并发布，成功后标题、源文件名、目录壳和正式 head 同时生效；审核拒绝或索引/事务失败时旧名称和旧 head 保持不变。
 - 替换视频必须从视频管理选择新的 MP4 和当前可用的服务端 Profile。重复请求以幂等键同时绑定上传者、标题、文件名、文件内容、Profile 和源视频；转录或发布失败不会归档旧视频。候选正式发布后，原目录壳原地关联新媒体并保留目录位置。
 - 视频转录稿只展示 `media_transcript_heads` 指向的当前正式版本。产生较新的待处理稿时，旧正式稿继续在资料库和检索中可见，并显示“有新转录稿待处理”；待处理稿不会作为第二份资料出现。
@@ -87,7 +87,7 @@ Schema 19 增加 `media_metadata_revisions` 和 `media_replacements`。媒体标
 - 入口与查看：`workspace.view` 控制资料工作台入口；`item.view` 控制资料列表、详情和预览；`item.download` 控制单份附件下载和批量 ZIP 下载；`category.view` 控制分类树和路径。
 - 资料整理：`item.upload`、`item.submit`、`item.move_draft`、`item.archive_draft` 分别控制上传、提交、移动草稿/退回资料和将其移入回收站。
 - 确认与发布：`item.review` 控制确认和退回，`item.move_review` 控制移动待确认资料，`item.publish` 控制发布和重新生成当前已发布 PPTX 的预览，`item.archive_published` 控制将已确认、发布失败或已发布资料移入回收站。
-- 视频转录稿：`item.view` 控制资料库查看，已登录用户按当前正式 head 读取播放和转录预览；`item.download` 控制原视频、正式转录稿和组合 ZIP 下载；`item.publish` 同时允许只调整视频目录壳。转录校对、媒体信息修订、替换视频和视频管理沿用全局管理员边界。资料库接口拒绝对视频条目执行普通文档重命名、更新、发布、归档或恢复。
+- 视频转录稿：`item.view` 控制资料库查看，已登录用户按当前正式 head 读取播放和转录预览；`item.download` 控制原视频、正式转录稿和组合 ZIP 下载；`item.publish` 同时允许只调整视频目录壳。转录校对、媒体信息修订、替换视频和视频管理沿用全局管理员边界。视频归档要求 `item.archive_published`，恢复要求 `trash.restore`；资料库接口仍拒绝对视频条目执行普通文档重命名、更新或发布。
 - 回收站：`trash.view` 控制查看，`trash.restore` 独立控制恢复，`trash.purge` 控制永久删除，`trash.policy_manage` 控制自动清理策略和运行记录。后两项仅默认授予系统管理员。
 - 分类与目录：`category.manage` 控制分类维护，`folder.request` 控制目录申请，`folder.review` 控制目录审批。
 - 运维入口：`import.server` 控制服务器批次导入，`index.view` 控制索引任务页面和 API。
@@ -109,7 +109,7 @@ Schema 19 增加 `media_metadata_revisions` 和 `media_replacements`。媒体标
 4. 归档版本的文件 HTTP 入口返回 404；
 5. 保留 `content_objects`、`content_versions`、审核、发布、索引和审计记录，不物理删除共享对象或 Qdrant points。
 
-以上回收站语义只适用于普通文档。视频转录稿的下架或完整删除必须从视频管理执行；媒体归档或正式 head 消失后，对应目录壳即使保留也不会出现在资料列表、分类计数或搜索结果中。
+视频转录稿也使用同一回收站，但归档仅隐藏目录壳并把当前媒体标记为 `archived`，不撤销正式 head 或立即删除索引，因而可原样恢复。活动转录或发布索引任务会阻止归档和永久删除。
 
 正在发布或仍有活动索引任务的资料返回 `409`。版本不一致返回 `409`，权限不足返回 `403`，不存在或已归档返回 `404`。
 
@@ -125,9 +125,11 @@ Schema 19 增加 `media_metadata_revisions` 和 `media_replacements`。媒体标
 
 回收站默认保留期为 90 天，并在到期前 7 天标记“即将到期”；Schema 20 将策略保存到 `content_trash_settings`，自动清理默认关闭。列表返回 `purge_eligible_at`、`retention_status` 和 `retention_days_remaining`，并使用同一份数据库策略计算筛选和提示。保留状态及数量、原目录、归档人员和归档日期范围收纳在搜索框的筛选浮层内；归档时间通过“移入回收站”表头排序，保留期限显示在对应资料行内。原目录显示归档事件中的路径快照，目录后续改名、移动或停用不会改变历史含义；恢复仍使用目录 ID，并要求目标目录处于启用状态。
 
-系统管理员可对 1–20 份已选普通文档执行永久删除。`POST /api/admin/content/trash/purge/preflight` 检查归档状态、当前版本和活动索引/分类调整任务；`POST /api/admin/content/trash/purge` 再次执行相同检查，并要求输入精确的“永久删除 N 份资料”确认语句。清理逐版本删除 Qdrant points、`parents.sqlite` 行和发布产物，仅在无其他版本引用时删除对象文件，最后删除业务记录；运行及逐项结果保留在独立审计表中。
+系统管理员可对 1–20 份已选普通文档或视频执行永久删除。`POST /api/admin/content/trash/purge/preflight` 检查归档状态、当前版本、活动索引/分类调整任务，以及视频的活动转录、发布、待审核修订、媒体信息修订、替换任务和所有文件路径边界；`POST /api/admin/content/trash/purge` 再次执行相同检查。普通资料要求输入精确的“永久删除 N 份资料”，含视频的批次要求输入服务端返回的“永久删除 N 份资料（含 M 个视频）”。
 
-`PUT /api/admin/content/trash/settings` 配置保留天数、到期提醒天数、单批上限和自动清理开关。独立的每小时任务使用 SQLite 租约避免多实例重复执行，只在开关启用时批量处理已超期资料；迁移和应用启动本身不会执行清理。`GET /api/admin/content/trash/purge-runs` 返回最近的手动/自动清理记录。
+普通文档清理逐版本删除 Qdrant points、`parents.sqlite` 行和发布产物，仅在无其他版本引用时删除对象文件。视频清理覆盖同一目录壳关联的已完成替换谱系，删除 MP4/准备音频、全部转录 Markdown、Qdrant `transcript_version_id` points、`parents.sqlite` 行，以及媒体、转录、发布和替换记录；共享转录产物仍有其他版本引用时不会删除。两类清理都保留脱敏后的运行、逐项结果和原归档审计快照。永久删除完成后只能通过事先备份的 `app.sqlite`、`parents.sqlite`、媒体/转录文件和 Qdrant points 恢复。
+
+`PUT /api/admin/content/trash/settings` 配置保留天数、到期提醒天数、单批上限和自动清理开关。独立的每小时任务使用 SQLite 租约避免多实例重复执行，只在开关启用时批量处理已超期普通文档；媒体永久删除始终要求管理员手动选择和媒体专用确认语句。迁移、应用启动和生产部署本身不会执行清理。`GET /api/admin/content/trash/purge-runs` 返回最近的手动/自动清理记录。
 
 `POST /api/admin/content/trash/export` 按当前筛选导出带 UTF-8 BOM 的 CSV 到期处置清单，要求 `trash.view`、登录 Cookie 和 CSRF，并写入 `content.trash_exported` 审计事件。导出不改变资料状态，不代表清理审批或执行永久删除。
 
