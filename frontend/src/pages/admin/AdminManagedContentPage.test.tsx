@@ -1959,8 +1959,33 @@ describe("AdminManagedContentPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "批量操作" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "批量发布" }));
     expect(screen.getByRole("dialog")).toHaveTextContent("已选择 2 份资料");
-    fireEvent.click(screen.getByRole("button", { name: "确认执行" }));
+    expect(screen.getByLabelText("批量发布文件列表")).toHaveTextContent("建模标准2");
+    fireEvent.click(screen.getByRole("button", { name: "确认发布（2）" }));
     await waitFor(() => expect(mocks.bulkPublish).toHaveBeenCalledWith(["version-1", "version-2"]));
+  });
+
+  it("confirms the publishable files and skips already published selections", async () => {
+    mocks.permissions = PUBLISHER_PERMISSIONS;
+    const approvedItem = { ...item, lifecycle_status: "approved" };
+    const publishedItem = { ...item, item_id: "item-2", title: "已发布标准", version_id: "version-2", lifecycle_status: "published", has_published_head: true };
+    mocks.items.mockResolvedValue({ items: [approvedItem, publishedItem], total: 2, status_counts: { approved: 1, published: 1 } });
+    mocks.bulkPublish.mockResolvedValue({ results: [{ version_id: "version-1", status: "succeeded", message: null, index_job_id: "job-3" }], succeeded: 1, failed: 0 });
+    render(<AdminManagedContentPage />);
+    await openRootFolder();
+    fireEvent.click(screen.getAllByRole("checkbox", { name: "选择建模标准" })[0]);
+    fireEvent.click(screen.getAllByRole("checkbox", { name: "选择已发布标准" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "批量操作" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "批量发布" }));
+
+    const dialog = screen.getByRole("dialog", { name: "批量发布资料" });
+    expect(within(dialog).getByText("将发布 1")).toBeInTheDocument();
+    expect(within(dialog).getByText("已跳过 1")).toBeInTheDocument();
+    expect(within(dialog).getByLabelText("批量发布文件列表")).toHaveTextContent("建模标准");
+    expect(within(dialog).getByLabelText("批量发布跳过列表")).toHaveTextContent("已发布标准");
+    expect(within(dialog).getByLabelText("批量发布跳过列表")).toHaveTextContent("已发布，无需重复操作");
+    fireEvent.click(within(dialog).getByRole("button", { name: "确认发布（1）" }));
+
+    await waitFor(() => expect(mocks.bulkPublish).toHaveBeenCalledWith(["version-1"]));
   });
 
   it("opens the upload task page from a deep link and loads task details", async () => {
