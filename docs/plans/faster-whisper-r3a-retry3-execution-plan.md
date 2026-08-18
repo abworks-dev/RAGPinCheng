@@ -1,6 +1,6 @@
 # faster-whisper Phase 0 R3-A retry3 修订执行计划（fourth retry run / global fifth run）
 
-> 状态：**待用户重新审批；仅已完成本地设计、helper 验证和 new identity 预留，尚未连接生产或创建远端 RunRoot/staging**  
+> 状态：**历史 retry3 计划；仅完成本地设计与 helper 验证，未连接生产，不得作为当前生产执行入口**
 > 风险等级：**R3（生产 Windows GPU 主机、远端进程生命周期、外部下载、隔离安装、模型权重、GPU/BGE 与临时鉴权材料）**  
 > 编制日期与口径：**2026-08-01，Asia/Shanghai（UTC+08:00）**  
 > 计划性质：本文件取代 retry2 计划，作为下一次生产执行的唯一补充计划。只有用户核对本文件最终 SHA-256 并明确回复“批准执行”或同等授权后，Codex 才可创建本文件预留的远端 staging/RunRoot 并执行；本文件本身不构成生产执行授权。

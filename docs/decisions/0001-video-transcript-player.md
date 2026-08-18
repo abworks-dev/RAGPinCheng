@@ -224,7 +224,7 @@ type PlayerRequest = {
 - `.env.example`（存在时）
 - 相关 `docs/features/*.md`
 - `TODO.md`
-- `WORKLOG.md`
+- 任务交付摘要与 PR/workflow 证据（仓库不再跟踪 `WORKLOG.md`）
 
 ## 实施顺序
 

@@ -1,6 +1,6 @@
 # FunASR Phase 0 执行计划（生产 Windows GPU 主机开发调试窗口）
 
-- 状态：**R3 第一批已批准，待补充维护窗口后执行**
+- 状态：**历史 R3 执行计划；原维护窗口已过期，不得按本文重新执行，当前资格与部署状态以 workflow evidence 为准**
 - 父方案：`docs/plans/funasr-auto-transcription.md`
 - 前置预注册计划：`docs/plans/funasr-phase0-pre-registration.md`
 - 风险等级：**R2 → 已升格为 R3**（实际 GPU 实测、生产主机依赖安装、模型下载都属于 R3）；第三轮审查及 R2 收口已完成本地 CPU 验证，但不代表获准实测。
@@ -218,7 +218,7 @@ Codex 当前会话没有已确认的生产主机远程命令通道。代码经 G
 
 ## 9. 报告与归档
 
-- 每完成一步立即在 `WORKLOG.md` 追加 `### HH:mm — 步 N 名称`；
+- 每完成一步在任务最终回复和 workflow artifact 中保留结构化证据；不再更新 `WORKLOG.md`；
 - 最终报告：`${QUALIFICATION_SANDBOX_ROOT}\reports\phase0-report.md` + `metrics.csv` + `license-matrix.md` + `raw-logs/`；
 - 许可门禁使用 schema v2：优先采用 PEP 639 `License-Expression`、已识别 classifier、短许可证声明；长 NOTICE 单独留存摘要，不作为主许可证分类依据；
 - 模型必须从实际 `LICENSE` 或模型卡 `license:` 取得证据，并绑定模型 ID、固定 revision、全部文件 SHA-256 与配置 SHA-256；仅有预期许可证不得标为已验证；

@@ -1,6 +1,6 @@
 # 多引擎视频自动转录 Phase 2：任务、版本、发布与恢复详细实施计划
 
-- 状态：**已获用户 R2 代码实施批准；代码完成待远端 CI 验证，未授权真实数据库迁移或生产执行**
+- 状态：**历史 Phase 2 计划；持久化、任务、版本和恢复代码已在后续提交中实施，真实生产数据操作仍需独立审批**
 - 风险等级：**R2**
 - 编写日期：2026-08-03（Asia/Shanghai）
 - 批准日期：2026-08-03（Asia/Shanghai）
@@ -617,7 +617,7 @@ Phase 2 提供并测试 `verify_backup(path)` 和临时数据库恢复流程，�
 docs/plans/multi-engine-transcription-phase2.md
 ```
 
-并按协作规则最小追加 `WORKLOG.md`。本轮不修改任何代码、TODO、数据库或 CI。
+并按协作规则保留结构化交付摘要。本轮不修改任何代码、TODO、数据库或 CI。
 
 ### 12.2 未来获批代码实施范围
 
@@ -653,7 +653,7 @@ tests/test_transcription_static_boundaries.py
 tests/transcription_fixture_helpers.py
 docs/features/transcript-pipeline.md
 TODO.md
-WORKLOG.md
+任务最终回复与 workflow artifact
 ```
 
 实施时确认 Phase 1 static DAG/fixture 扫描会主动收集所有新增 `src/transcription/*.py` 和 transcription fixtures，因此必须最小扩展这两个既有测试文件的 Phase 2 模块白名单、临时 SQLite fixture 和 `.sql` fixture 类型；不降低 Phase 1 的 Provider、真实依赖、人工路径或 protected-path 禁止规则。
@@ -836,7 +836,7 @@ scripts/deploy-app.sh
 9. 实现 atomic promote 和失败注入测试；
 10. 实现 recovery audit/actions；
 11. 补齐人工 Markdown 回归和 protected path 检查；
-12. 更新 feature/TODO/WORKLOG；
+12. 更新 feature/TODO，并在 PR/workflow 中保留验证证据；
 13. 运行全部 Phase 1+2 tests、migration/backup tests、compile/diff/static checks；
 14. 停止，等待 Phase 3 独立审批，不接 API/UI/真实引擎。
 
@@ -915,7 +915,7 @@ Phase 2 不实现真实 Qdrant，因此只证明 SQLite head 和逻辑 candidate
 - protected path 出现非零 diff；
 - CI 需要新增第三方依赖才能运行。
 
-## 19. 待用户审批的冻结选择
+## 19. 历史冻结选择（当前实现以源码和 feature 文档为准）
 
 批准本计划即表示接受以下五项：
 

@@ -1,6 +1,6 @@
 # 受管知识资料库实施方案
 
-- 状态：已批准，生产基础能力已部署，待用户验收和旧资料迁移
+- 状态：已批准；生产基础能力、严格 head 切换和旧索引下线已由后续迁移 workflow 收口；来源链接验收与旧目录观察期仍待完成
 - 风险等级：R2
 - 批准日期：2026-08-11
 - 关联决策：`../decisions/0003-managed-content-library.md`
@@ -36,7 +36,7 @@ CONTENT_ROOT/
 └─ views/current/
 ```
 
-生产主机根目录为 `/data/business/ragpincheng/content`，容器内为 `/app/content`。生产基础能力已于 2026-08-11 部署到提交 `61ac39f5`，功能开关已启用且保持 `compat` head 模式；旧 `source/docs`、`source/media` 和旧索引尚未迁移。生产运行、权限、后续部署策略和旧资料迁移边界见 `../migrations/managed-content-production-runbook.md`。
+生产主机根目录为 `/data/business/ragpincheng/content`，容器内为 `/app/content`。生产基础能力、strict head 切换和旧索引下线的具体提交、备份与 workflow 证据以 `../migrations/managed-content-production-runbook.md` 为准；本方案只保留契约和回滚边界，不重复记录每次迁移的对象数量。
 
 ## 实施步骤
 

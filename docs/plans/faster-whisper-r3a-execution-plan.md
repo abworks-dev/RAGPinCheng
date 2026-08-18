@@ -1,6 +1,6 @@
 # faster-whisper Phase 0 R3-A 详细执行计划（artifact、隔离安装与 CUDA 最小冒烟）
 
-> 状态：**待用户审批；未执行 R3-A**  
+> 状态：**历史 R3-A 计划；未执行，维护窗口已过期，不得作为当前生产执行入口**
 > 风险等级：**R3（生产 Windows GPU 主机、外部下载、隔离依赖安装、模型权重、GPU/BGE 与临时鉴权材料）**  
 > 编制日期：**2026-07-31**  
 > 审批边界：本文件是候选执行方案，不构成 Codex 自行批准；只有用户在看到本计划、补齐 §18 的决定并明确回复“批准执行”或同等授权后，才能进入执行。计划发生实质变化、范围扩大或风险升高时重新审批。
@@ -22,7 +22,7 @@ R3-A 只验证 artifact、隔离安装和最小 CUDA 兼容性，**不评价冻�
 
 ### 1.2 已有静态依据
 
-依据 `project-docs/plans/faster-whisper-phase0-precheck.md`：
+依据历史预检文档 `docs/plans/faster-whisper-phase0-precheck.md`：
 
 - Python 3.10 / Windows x64 wheel 存在性：`STATIC_PASS`；
 - 与现有顶层依赖范围存在交集：`STATIC_PASS`；
@@ -98,8 +98,7 @@ GPU=RTX 5060 Ti 16 GiB
 
 只允许：
 
-- 新增 `project-docs/plans/faster-whisper-r3a-execution-plan.md`；
-- 在 `WORKLOG.md` 追加“计划已提交、待用户审批、R3-A 未执行”的记录。
+- 新增本计划文件；审批和执行状态以 Git/PR/workflow 证据为准。
 
 不修改 `TODO.md`、源码、依赖文件、现有 Phase 0 脚本或其他未提交文件。
 

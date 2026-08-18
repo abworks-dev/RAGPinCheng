@@ -516,7 +516,7 @@ samples[8]
 | `tests/test_asr_deployment_static.py` | 静态验证 workflow 默认关闭、固定 runner/目录/端口、无服务激活/防火墙/Ubuntu 改写、Secret 不回显 |
 | `docs/features/transcript-pipeline.md` | 仅在真实执行后按证据记录资格状态；失败不得写成可用 |
 | `TODO.md` | 维护 R3 审批、执行和后续 admission 决策 |
-| `WORKLOG.md` | 记录实际实现、CI 和真实执行结论 |
+| 任务最终回复、PR 与 workflow artifact | 记录实际实现、CI 和真实执行结论；不再使用 `WORKLOG.md` |
 
 现有 `.github/workflows/ci.yml` 的 `test-asr-service-contract` 已收集全部
 `asr_service/tests`，因此预计不需要修改；若新增测试没有被实际收集，才允许在同一
@@ -820,7 +820,7 @@ git diff --check
 11. 生产 8100/8200、Scheduled Task、防火墙和 Ubuntu 配置保持不变；
 12. 18200 关闭、资格进程无残留；
 13. application Profile 仍为 `experimental + disabled`；
-14. 形成脱敏单一 PASS/FAIL 报告并记录 WORKLOG。
+14. 形成脱敏单一 PASS/FAIL 报告并上传 workflow artifact。
 
 部分通过、工具通过但样本失败、单样本成功或资源未测均不得写成 R3 通过。
 

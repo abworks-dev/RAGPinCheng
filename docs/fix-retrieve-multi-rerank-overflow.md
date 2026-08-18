@@ -1,7 +1,7 @@
-# 修复方案：retrieve_multi passages>100 触发 rerank HTTP 422（R2，待批准）
+# 历史方案：retrieve_multi passages>100 触发 rerank HTTP 422
 
 ## 状态
-调查完成，方案待批准。**尚未修改任何代码。** 本文件仅为方案。
+状态：历史方案。相关评测保护和检索实现已在后续提交中落地；本文件仅保留问题背景和取舍，不构成当前执行授权。
 
 ## 问题现象
 开启 `QUERY_DECOMPOSE_ENABLED=true` 后，比较型查询走 `retrieve_multi`，偶发：

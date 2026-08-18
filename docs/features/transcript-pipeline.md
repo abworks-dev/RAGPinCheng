@@ -9,7 +9,7 @@
 
 系统管理员可在 `/admin/asr` 的“转录配置”页比较三个服务器固定的 WhisperX v2 分段 Profile，查看固定工程词、Prompt 资产和应用/服务配置哈希，并提交只写审计记录的发布申请。页面不接受自由 Prompt、模型路径或任意解码参数；发布申请不持有部署凭据，也不直接触发生产 workflow。
 
-Phase 5A/5B 已接通版本列表、Markdown 校对与渲染预览、人工审核、显式发布、候选索引与正式 head 检索过滤。校对保存始终创建新的受管人工修订稿，不覆盖 ASR 或历史版本；新稿必须重新审核并在候选索引成功后才能替换正式 head。转录成功、审核通过、发布中和正式检索可见仍是独立状态；真实 ASR/GPU/Qdrant 端到端尚未运行。
+Phase 5A/5B 已接通版本列表、Markdown 校对与渲染预览、人工审核、显式发布、候选索引与正式 head 检索过滤。校对保存始终创建新的受管人工修订稿，不覆盖 ASR 或历史版本；新稿必须重新审核并在候选索引成功后才能替换正式 head。转录成功、审核通过、发布中和正式检索可见仍是独立状态。真实 ASR/GPU/Qdrant 资格与生产准入状态只以当前 deployment workflow、capabilities 和本文件的“当前边界”核对，不以历史 run 数字推断。
 
 已发布的视频转录稿会通过 `content_items(content_kind=media_transcript)` 目录壳进入受管资料库，但不替代本链路。视频原件、转录版本、审核发布和正式 head 仍以 `media_assets`、`transcript_versions`、`transcript_publication_index_jobs` 与 `media_transcript_heads` 为唯一权威；目录壳不复制文件、版本、发布或索引记录，普通资料的 `content_item_heads` 仍是另一条独立可见性边界。
 
@@ -90,6 +90,8 @@ Phase 5A/5B 已接通版本列表、Markdown 校对与渲染预览、人工审�
   `Chinese`；资格脚本可显式启用固定 `auto-zh-en` 候选，模型输出必须包含
   Chinese 且语言集合只能由 Chinese/English 组成，Canonical 语言仍为 `zh-CN`。
   未知策略、English-only 或其他语言均失败关闭，application Profile 保持 disabled。
+
+> 以下资格 run、显存、样本和清理细节是历史审计摘要，不是当前运行状态或生产准入依据；当前状态以受控 workflow、capabilities 和 runtime manifest 为准。
 
 SenseVoice 已完成独立生产短媒体验收。Qwen3-ASR 已具备统一 R3 仓库资格工具，
 baseline R3 Run `31356827072` 已通过 Windows 隔离依赖、许可证、固定双模型、CUDA

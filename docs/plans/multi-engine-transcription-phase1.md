@@ -1,13 +1,13 @@
 # 多引擎视频自动转录 Phase 1 — 引擎无关契约详细实施计划
 
-- 状态：**详细计划文档已获准编写；Phase 1 代码实施待单独批准**
+- 状态：**历史 Phase 1 计划；契约代码已在后续提交中实施，当前事实以视频转录功能文档和源码为准**
 - 风险等级：**R2**（定义跨模块类型、运行时 Schema、状态边界和未来发布门禁）
 - 编写日期：2026-08-01
 - 上位方案：[多引擎视频自动转录总体实施方案](multi-engine-auto-transcription.md)
 - 关联决策：[0002 — 多引擎视频自动转录与管理员选择](../decisions/0002-multi-engine-transcription.md)
 - 历史候选方案：[FunASR 视频自动转录](funasr-auto-transcription.md)
 
-> 本文件只规定 Phase 1 的纯 Python 契约、Schema、归一化、确定性 formatter 与测试边界。批准或完成本文件不授权数据库迁移、任务 worker、API、UI、网络、真实 ASR、生产部署或真实数据操作。若本文件与旧 FunASR 方案的 Phase 1 范围冲突，以本文件为当前多引擎 Phase 1 的约束来源；ADR 的长期方向不因本计划自动改写。
+> 本文件只记录 Phase 1 的纯 Python 契约、Schema、归一化、确定性 formatter 与测试边界。真实 ASR、生产部署和真实数据操作仍不由本历史计划授权；当前契约以源码和 feature 文档为准。
 
 ## 1. 目标
 

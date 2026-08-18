@@ -1,6 +1,6 @@
 # faster-whisper Provider 接入 R2 实施基线
 
-> 状态：R2 仓库实现与 scoped review 完成，待远端 CI；Profile 准入保持关闭。
+> 状态：历史 R2 Provider 接入基线；代码已在后续提交中实施，Profile 准入与生产身份以当前转录功能文档和 deployment workflow 为准。
 > 日期口径：2026-08-05，Asia/Shanghai。
 > 风险等级：R2（跨应用 Profile、remote Provider 与独立 ASR service engine 契约）。
 

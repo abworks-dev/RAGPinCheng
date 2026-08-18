@@ -1,6 +1,6 @@
 # faster-whisper Phase 0 R3-A retry5 详细执行计划（仅本地编制，待生产审批）
 
-> 状态：**retry5 本地执行材料已编写并通过静态检查/模拟 SelfTest；尚未批准或执行生产操作**  
+> 状态：**历史 retry5 计划；仅完成本地静态检查/模拟 SelfTest，未批准或执行生产操作**
 > 风险等级：**R3（后续若获批将涉及生产 Windows GPU 主机、外部下载、隔离安装、模型权重、GPU/BGE、临时鉴权材料及远端进程生命周期）**  
 > 编制日期与口径：**2026-08-01，Asia/Shanghai（UTC+08:00）**  
 > 当前批准范围：仅本地计划、helper、foreground controller、静态检查和模拟 SelfTest。**本文件不构成生产执行授权。**  

@@ -1,6 +1,6 @@
 # 多引擎视频自动转录 Phase 5 — 隔离端到端与版本感知发布
 
-- 状态：**R2 已批准；Phase 5A/5B 首轮远端 CI 失败，最小修复待验证；Phase 5C 未授权**
+- 状态：**历史 Phase 5 计划；Phase 5A/5B 已实施并由当前功能文档维护，Phase 5C/真实适配器资格仍需独立审批**
 - 风险等级：**R2**（涉及转录版本审核/发布 API、后台索引编排、Parent/Child 与 Qdrant payload 兼容、检索可见性、管理端 UI 和 CI）
 - 调查日期：2026-08-03（Asia/Shanghai）
 - 代码调查基线：`origin/master@b323023aaf47e628379163470eb30c39f6d3554e`
@@ -9,7 +9,7 @@
 - 架构决策：[0002 — 多引擎视频自动转录与管理员选择](../decisions/0002-multi-engine-transcription.md)
 - 前置计划：[Phase 1](multi-engine-transcription-phase1.md)、[Phase 2](multi-engine-transcription-phase2.md)、[Phase 3](multi-engine-transcription-phase3.md)
 
-> 本计划是 Phase 5 的唯一详细实施基线。它首先补齐当前应用层缺失的“版本查看、审核、发布、候选索引与检索可见性”闭环，再分层验证隔离端到端。批准本计划只授权下文 Phase 5A/5B 的代码、测试、CI 和文档修改；不授权真实 ffmpeg、真实 ASR、GPU、Qdrant 服务、模型下载、生产数据、生产部署、索引重建或灰度。Phase 5C 的真实适配器资格验证必须另行提交环境、数据、资源、停止与回滚清单并再次审批。
+> 本文件记录 Phase 5 的历史实施基线。当前版本查看、审核、发布、候选索引与检索可见性以 `docs/features/transcript-pipeline.md` 和源码为准；真实适配器资格、生产数据、生产部署、索引重建和灰度仍需另行审批。
 
 ## 1. 目标
 
@@ -47,7 +47,7 @@ Phase 5 必须同时证明：
 
 ### 2.1 工作区事实
 
-主工作树当前位于 `codex/multi-engine-transcription-phase4@4eb2ee8`，并已有受保护的 `WORKLOG.md` 与用户端前端并行修改。本计划的代码事实来自干净 detached worktree：
+本计划中的工作树、分支和提交仅是历史调查上下文；当前代码事实必须重新核对最新 master，不得依赖旧 worktree 状态：
 
 ```text
 ${LOCAL_USER_PATH}\AppData\Local\Temp\RAGPinCheng-phase4b-main-4eb2ee8
@@ -419,7 +419,7 @@ Phase 5C 执行前必须明确：目标主机、数据分类、Profile 资格候
 | `docs/features/transcript-pipeline.md` | 实施完成后更新实际应用发布、versioned index 和检索可见性事实；不得提前写成已实现。 |
 | `docs/plans/multi-engine-auto-transcription.md` | 仅在实施完成后最小更新阶段状态和链接，不改总体架构。 |
 | `TODO.md` | 按实际审批/实施状态最小更新下一步与本计划链接。 |
-| `WORKLOG.md` | 按每次实际完成的调查/实施/验证记录；不把未运行的真实 E2E 写成成果。 |
+| 任务最终回复、PR 与 workflow artifact | 按实际完成的调查/实施/验证记录；不把未运行的真实 E2E 写成成果。 |
 
 ## 8. 明确不修改或不实施
 
@@ -672,7 +672,7 @@ build_index --reset
 8. 接管理端 version/review/publish UI 与 polling。
 9. 完成 Phase 5A fake application E2E、权限、幂等、恢复和人工稿回归。
 10. 增加独立 CI job，运行全部后端/前端回归。
-11. 更新 feature/TODO/WORKLOG，只记录已验证事实。
+11. 更新 feature/TODO，只记录已验证事实；交付证据保留在 PR 和 workflow artifact。
 12. scoped code review；独立提交/PR；CI 在最新 master 基线验证。
 13. 停止。不得自动运行 Phase 5C 或进入 Phase 6。
 

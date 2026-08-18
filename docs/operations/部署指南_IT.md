@@ -1,207 +1,92 @@
-# 品成 BIM 知识库 — 内网部署指南（IT 人员）
+# 品成 BIM 知识库：内网运维速查
 
-应用已迁移为双节点架构：
-- **Ubuntu 应用节点**（${APP_NODE_IP}）：运行 Web 服务 + Qdrant 向量数据库
-- **Windows GPU 节点**（${GPU_SERVICE_IP}）：运行 GPU 推理服务
+本文是 IT 人员的日常速查，不替代生产部署 workflow、备份方案或迁移
+Runbook。生产环境为双节点：Ubuntu 应用节点运行 backend、Qdrant 和
+LibreOffice；Windows GPU 节点运行独立的 Embedding/Rerank 服务。
 
-服务已由开发人员完成配置并启动。本文档说明基本验证和运维操作。
+## 访问与健康检查
 
----
-
-## 第一步：验证服务正常运行
-
-### Ubuntu 应用节点
+在任意能访问应用节点的机器执行：
 
 ```bash
 curl http://${APP_NODE_IP}/api/health
 ```
 
-应返回：`{"status":"ok","children":38488,"parents":20024}`
-
-### Windows GPU 节点
+GPU 节点只允许从受控网络检查：
 
 ```bash
 curl http://${GPU_SERVICE_IP}:8100/health
+curl http://${GPU_SERVICE_IP}:8100/model-info
 ```
 
-应返回：`{"status":"ok","model_loaded":true}`
+不要把响应中的计数值写入文档作为固定基线；parents、children 和模型状态
+会随索引与发布变化。
 
----
+## 日常操作
 
-## 第二步：开放防火墙端口
+所有 Ubuntu 命令在生产应用节点执行，使用实际的 Compose env 文件：
 
-**Ubuntu 应用节点（${APP_NODE_IP}）：**
+```bash
+cd ${PRODUCTION_APP_REPO_PATH}
+sudo docker compose -p ragpincheng-prod \
+  -f docker/docker-compose.yml \
+  -f ${PRODUCTION_APP_COMPOSE_OVERRIDE} \
+  --env-file ${PRODUCTION_APP_ENV_FILE} ps
 
-```powershell
-netsh advfirewall firewall add rule name="品成知识库 Port 80" dir=in action=allow protocol=TCP localport=80
+sudo docker compose -p ragpincheng-prod \
+  -f docker/docker-compose.yml \
+  -f ${PRODUCTION_APP_COMPOSE_OVERRIDE} \
+  --env-file ${PRODUCTION_APP_ENV_FILE} logs --tail 200 backend
 ```
 
-**方式二：图形界面**
+日常重启仅在确认没有索引、发布或迁移任务运行时执行：
 
-控制面板 → Windows Defender 防火墙 → 高级设置 → 入站规则 → 新建规则 → 端口 → TCP → 特定端口填 `80` → 允许连接 → 完成。
-
----
-
-## 第三步：确认内网 IP 并通知员工
-
-```cmd
-ipconfig
+```bash
+sudo docker compose -p ragpincheng-prod \
+  -f docker/docker-compose.yml \
+  -f ${PRODUCTION_APP_COMPOSE_OVERRIDE} \
+  --env-file ${PRODUCTION_APP_ENV_FILE} restart backend
 ```
 
-找到 `以太网适配器` 下的 `IPv4 地址`，记为 `${APP_NODE_IP}`。
+禁止使用 `docker compose down -v`，也不要直接操作 Qdrant volume。
 
-通知员工在浏览器访问：
+## 资料入口
 
-```
-http://${APP_NODE_IP}
-```
+日常资料通过管理后台上传、审核、发布和索引。文件系统批量导入只用于
+受控兼容目录，并必须由已批准的索引流程执行：
 
-首次访问可在 `/register` 页面自助注册账号，或由管理员在后台创建。
-
----
-
-## 日常维护
-
-**查看服务状态：**
-```cmd
-docker compose -f docker/docker-compose.yml ps
+```bash
+sudo docker compose -p ragpincheng-prod \
+  -f docker/docker-compose.yml \
+  -f ${PRODUCTION_APP_COMPOSE_OVERRIDE} \
+  --env-file ${PRODUCTION_APP_ENV_FILE} exec backend \
+  python scripts/build_index.py
 ```
 
-**重启服务：**
-```cmd
-docker compose -f docker/docker-compose.yml restart
-```
+真实资料、删除、索引 Reset、旧目录迁移和严格 head 切换不属于普通 IT
+操作，必须遵守 [受管资料生产迁移 Runbook](../migrations/managed-content-production-runbook.md)。
 
-**停止服务：**
-```cmd
-docker compose -f docker/docker-compose.yml down
-```
+## 网络与 HTTPS
 
-**更新代码后重新部署：**
-```cmd
-git pull
-docker compose -f docker/docker-compose.yml build
-docker compose -f docker/docker-compose.yml up -d
-```
+防火墙、反向代理、证书和 Cookie 安全属性由基础设施负责人按公司网络规范
+配置。纯 HTTP 调试时使用 `SESSION_COOKIE_SECURE=false`；启用 HTTPS 后必须
+改为 `true`，并重启 backend。不要在仓库文档中写入真实 IP、Token 或密码。
 
-**查看日志排查问题：**
-```cmd
-docker compose -f docker/docker-compose.yml logs -f backend
-```
+## 部署与回滚
 
----
+正常部署使用 [Git 同步部署与测试流程](Git同步部署与测试流程.md) 及其引用的
+GitHub Actions workflow。生产部署必须选择完整 master SHA、完成备份和健康
+检查，不能在生产机直接 `git checkout` 未审计提交。
 
-## 上传资料到知识库
+回滚、Qdrant 快照、SQLite 恢复和旧资料切换边界见：
 
-### 方式一：管理后台上传（推荐，日常使用）
+- [受管资料生产迁移 Runbook](../migrations/managed-content-production-runbook.md)；
+- [Ubuntu 应用与 Windows GPU 迁移手册](../migrations/ubuntu-app-windows-gpu-runbook.md)；
+- [用户验收规范](../USER_ACCEPTANCE.md)。
 
-使用管理员账号在浏览器操作，无需登录服务器：
+## 故障排查
 
-1. 访问 `http://<服务器IP>/admin`
-2. 进入「资料管理」标签
-3. 选择分类，上传 PDF 或 Markdown 文件
-4. 等待进度条显示「完成」
-
-### 方式二：批量导入（首次大批量上传时使用）
-
-**第一步：把文件放到 `content/legacy-docs/` 兼容目录下对应分类文件夹**
-
-```
-C:\RAGPinCheng\content\legacy-docs\
-  行业规范\        ← 行业标准、规范类 PDF
-  客户标准\
-    <客户名>\      ← 客户标准必须有二级目录，文件夹名为客户名
-  公司内部标准\    ← 公司内部标准 PDF
-  项目资料\        ← 项目交付物、复盘资料
-  教学视频\        ← 培训视频转写稿（.md 格式）
-```
-
-**第二步：在容器内运行索引脚本**
-
-```cmd
-cd C:\RAGPinCheng
-docker compose -f docker/docker-compose.yml exec backend python scripts/build_index.py
-```
-
-脚本是**增量的**，只处理新增文件，不会重复处理已有内容。索引过程中终端会显示每个文件的解析和向量化进度，全部完成后退出。
-
-> 注意：索引过程需要调用 MinerU API 解析 PDF，每个 PDF 约需 1 分钟，请确保服务器能访问外网。
-
----
-
-## 可提升项
-
-以下内容非部署必须，但能提升安全性和易用性，条件允许时建议实施。
-
-### 1. 内网域名（更易记的访问地址）
-
-让员工通过 `http://bim-kb` 或 `http://knowledge.pincheng.local` 访问，而不是记 IP。
-
-**方式一：修改每台员工电脑的 hosts 文件**（适合人少的团队）
-
-在每台员工电脑上，用管理员权限编辑 `C:\Windows\System32\drivers\etc\hosts`，追加一行：
-
-```
-${APP_NODE_IP}  bim-kb
-```
-
-之后员工访问 `http://bim-kb` 即可。
-
-**方式二：公司内网 DNS**（适合有 Windows Server / 路由器 DNS 的公司）
-
-在公司 DNS 服务器上添加一条 A 记录，将域名指向服务器 IP。员工无需任何设置，全公司立即生效。
-
----
-
-### 2. HTTPS 加密（防止内网明文传输）
-
-当前 HTTP 部署下，员工登录时账号密码在内网以明文传输。如果公司有 WiFi 环境或对数据安全有要求，建议加一层反向代理。
-
-**推荐工具：Caddy**（配置最简单）
-
-1. 下载 [Caddy for Windows](https://caddyserver.com/download)，放到服务器任意目录。
-
-2. 在同目录创建 `Caddyfile`：
-
-```
-# 用 IP 访问（自签名证书，浏览器会有一次警告）
-https://${APP_NODE_IP} {
-    tls internal
-    reverse_proxy localhost:80
-}
-
-# 或者配合内网域名使用
-https://bim-kb {
-    tls internal
-    reverse_proxy localhost:80
-}
-```
-
-3. 以管理员身份运行：
-
-```cmd
-caddy run
-```
-
-4. 在 `C:\RAGPinCheng\.env` 里删除 `SESSION_COOKIE_SECURE=false` 这一行（或改为 `true`），然后重启容器：
-
-```cmd
-docker compose -f docker/docker-compose.yml restart
-```
-
-5. 员工首次访问时浏览器会提示"证书不受信任"（自签名），点击「高级」→「继续访问」即可，之后不再提示。
-
-> 如果公司有自己的内部 CA 证书，可以用它签发证书替换 `tls internal`，员工就不会看到警告了。
-
----
-
-## 常见问题
-
-**Q：浏览器能访问 localhost 但别人访问不了？**
-A：检查防火墙是否放行了 80 端口（见第二步）。
-
-**Q：服务器重启后服务没自动启动？**
-A：Docker Desktop 设置里勾选「Start Docker Desktop when you log in」，且配置了 `restart: unless-stopped`，Docker 服务启动后容器会自动恢复。
-
-**Q：登录后一直跳回登录页？**
-A：确认 `C:\RAGPinCheng\.env` 里有 `SESSION_COOKIE_SECURE=false`（未启用 HTTPS 时必须）。
+- 应用不可用：先检查 backend health，再查看 backend 日志和 Qdrant health；
+- 引用或检索异常：确认 GPU `/health`、`/model-info` 与当前 runtime identity；
+- Office 失败：检查 LibreOffice 服务状态和磁盘空间，见 [Office 转换运维手册](OFFICE_CONVERSION.md)；
+- ASR 异常：保持 `ASR_ENABLED=false` 的回退能力，使用受控 ASR workflow，不要手工杀进程或修改共享 venv。

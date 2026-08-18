@@ -1,6 +1,6 @@
 # 多引擎视频自动转录 — 总体实施方案
 
-- 状态：**架构方向已批准；阶段 A 与 Phase 1 详细计划文档已授权；Phase 1～Phase 6 代码实施尚未授权**
+- 状态：**历史总体方案；架构方向已批准，Phase 1～5A/5B 已在后续提交中实施，Phase 5C 与真实生产操作仍需独立审批**
 - 风险等级：**R2**（涉及 ASR Provider、配置档案、`app.sqlite` Schema、后台任务、管理端 API/UI、版本发布、索引门禁和单卡 GPU 调度）
 - 批准日期：2026-08-01
 - 关联决策：[0002 — 多引擎视频自动转录与管理员选择](../decisions/0002-multi-engine-transcription.md)
@@ -8,7 +8,7 @@
 - FunASR 候选专项计划：[FunASR 视频自动转录](funasr-auto-transcription.md)
 - faster-whisper 候选材料：[faster-whisper Phase 0 静态预检](faster-whisper-phase0-precheck.md)
 
-> 本方案是自动转录的总方案。FunASR、faster-whisper 及未来模型均作为可插拔候选，不再以“选出唯一赢家”作为统一流水线开发的前置条件。候选通过技术验证不自动授权业务集成；Phase 1 以独立详细计划为当前约束来源，Phase 1～Phase 6 的代码实施仍须逐阶段单独审批。
+> 本方案是自动转录的总体历史基线。FunASR、faster-whisper 及未来模型均作为可插拔候选；候选通过技术验证不自动授权业务集成。当前能力、Profile 状态和未完成工作以 `docs/features/transcript-pipeline.md`、TODO 和受控 workflow 为准。
 
 ## 1. 目标
 

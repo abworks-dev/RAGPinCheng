@@ -1,13 +1,13 @@
 # 0002 — 多引擎视频自动转录与管理员选择
 
-- 状态：已批准（架构；实现尚未开始）
+- 状态：已批准（架构；Phase 1～5A/5B 已在后续实现中落地，真实引擎资格和生产准入仍由独立 workflow 管理）
 - 日期：2026-08-01
 - 关联功能：[视频转录链路](../features/transcript-pipeline.md)、[文档摄取与索引](../features/document-indexing.md)、[认证与授权](../features/authentication.md)
 - 关联方案：[多引擎视频自动转录总体实施方案](../plans/multi-engine-auto-transcription.md)
 
 ## 背景
 
-现有媒体链路要求管理员同时上传 MP4 与人工 Markdown，自动 ASR 尚未实现。FunASR Phase 0 已证明候选可以在目标 GPU 上运行，但 SenseVoiceSmall 在噪声 BIM 专业词样本未达到质量阈值，Contextual Paraformer 热词 A/B 虽有改善却存在收益覆盖不足和反例退化。faster-whisper 仅完成静态预检和执行材料准备，尚未完成真实模型和质量评测。
+现有媒体链路保留 MP4 与人工 Markdown 回退路径；自动 ASR、版本、审核、发布和索引能力已在后续 Phase 1～5A/5B 中实现。各引擎的真实资格、运行时身份和应用准入继续独立管理，不能把代码存在或历史候选评测当成当前生产能力。
 
 若继续采用“先选出唯一 ASR 赢家，才建设统一流水线”的方式，一个候选的失败会阻塞与模型无关的 JSON、版本、审核、发布和索引能力，也会把已实现候选误等同于应开放的正式功能。
 

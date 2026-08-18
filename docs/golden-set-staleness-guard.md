@@ -1,7 +1,7 @@
-# 方案：黄金集陈旧告警（Staleness Guard）—— R2，待批准
+# 历史方案：黄金集陈旧告警（Staleness Guard）
 
 ## 状态
-调查完成，方案待批准。**尚未修改任何代码。**
+状态：已实施的历史方案。当前实现见 `src/eval/fingerprint.py` 和 `scripts/run_eval_retrieval.py`；本文件不构成新的审批或执行授权。
 
 ## 目标
 让 `run_eval_retrieval.py` 在每次评测开始时，比对"当前索引指纹"与"黄金集被标注时的基准指纹"，不匹配时**显著告警**"黄金集可能已陈旧"，避免再次出现"全 0 命中却被静默接受"的事故。不阻断运行（评测应仍可产出指标供观察），但让"错"的数字难以被忽略。
@@ -72,7 +72,7 @@
 ## 仍需用户决定
 - `golden.fingerprint.json` 位置：用 `src/eval/` 下还是仓库根？默认建议 `src/eval/`，靠近被标的黄金集。
 - `--strict-staleness` 默认开关：建议**默认关**（仅打印告警），CI 再传开。
-- 是否把"重标必 freeze"写进 `docs/eval-workflow.md` 流程文档（若不存在则不建）。
+- 重标与 fingerprint freeze 的当前入口以 `scripts/relabel_golden.py` 和评测脚本帮助文本为准。
 
 ## R2 审批提示
 本方案改评测脚本 + 新增 sidecar 协议。**尚未获实施授权**，需用户看方案后明确"批准执行"。方案范围或风险升级时需重新审批。
