@@ -2046,7 +2046,16 @@ describe("AdminManagedContentPage", () => {
     expect(screen.getByRole("img", { name: "处理结果：已接收 1 个 · 跳过 1 个" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "详情" }));
     expect(await screen.findByText("文件明细")).toBeInTheDocument();
-    expect(screen.getByText("资料包/video.mp4")).toBeInTheDocument();
+    const detailDialog = screen.getByRole("dialog", { name: "上传任务详情" });
+    expect(within(detailDialog).getByRole("progressbar", { name: "任务处理进度 100%" })).toBeInTheDocument();
+    expect(within(detailDialog).getByText("资料包/video.mp4")).toBeInTheDocument();
+    fireEvent.click(within(detailDialog).getByRole("button", { name: "已接收 1" }));
+    expect(within(detailDialog).queryByText("资料包/video.mp4")).not.toBeInTheDocument();
+    fireEvent.change(within(detailDialog).getByRole("searchbox", { name: "搜索任务文件" }), { target: { value: "missing" } });
+    expect(within(detailDialog).getByText("没有符合条件的文件")).toBeInTheDocument();
+    fireEvent.click(within(detailDialog).getByRole("button", { name: "全部 2" }));
+    fireEvent.change(within(detailDialog).getByRole("searchbox", { name: "搜索任务文件" }), { target: { value: "video" } });
+    expect(within(detailDialog).getByText("资料包/video.mp4")).toBeInTheDocument();
     expect(mocks.uploadTask).toHaveBeenCalledWith("batch-upload-1");
 
     fireEvent.click(screen.getByRole("button", { name: "关闭" }));

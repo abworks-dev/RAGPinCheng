@@ -152,6 +152,19 @@ test.describe("资料管理", () => {
     await expect(retry).toBeDisabled();
     await expect(retry).toHaveAttribute("title", "原始文件仅保留在当前浏览器会话中，当前不可重试");
 
+    const partialRow = rows.filter({ hasText: "合成长目录名称用于响应式检查" });
+    await partialRow.getByRole("button", { name: "详情" }).click();
+    const detail = page.getByRole("dialog", { name: "上传任务详情" });
+    await expect(detail).toBeVisible();
+    await expect(detail.getByRole("progressbar", { name: "任务处理进度 100%" })).toBeVisible();
+    await expect(detail.getByText("当前目录下已存在同名资料")).toBeVisible();
+    await detail.getByRole("button", { name: "已跳过 1" }).click();
+    await expect(detail.getByText("项目资料归档检查表.xlsx")).toBeVisible();
+    await expect(detail.getByText("建筑信息模型交付标准.pdf")).toHaveCount(0);
+    await expectNoBodyOverflow(page);
+    await page.screenshot({ path: testInfo.outputPath("managed-content-upload-task-detail-partial.png"), fullPage: true });
+    await page.getByRole("button", { name: "关闭" }).click();
+
     await rows.nth(0).getByRole("checkbox").check();
     await rows.nth(1).getByRole("checkbox").check();
     await expect(page.getByText(/已选择\s*2\s*个/)).toBeVisible();

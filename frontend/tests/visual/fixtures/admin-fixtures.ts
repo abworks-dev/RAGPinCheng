@@ -162,7 +162,12 @@ const uploadTasks = [
     target_category_id: "cat-project", target_path: "04 项目资料 / 01 模型成果 / 合成长目录名称用于响应式检查",
     total_files: 3, accepted_files: 2, skipped_files: 1, total_bytes: 126_000, total_uploaded_bytes: 84_000,
     created_by_name: "合成管理员", created_at: 1786927500, updated_at: 1786927500,
-    error_summary: null, entries: null,
+    error_summary: "1 个文件与当前目录中的资料重名，已跳过。",
+    entries: [
+      { sequence: 1, filename: "建筑信息模型交付标准.pdf", relative_path: "合成长目录名称用于响应式检查/建筑信息模型交付标准.pdf", size_bytes: 42_000, status: "accepted", reason: null, item_id: "synthetic-item-1", version_id: "synthetic-version-1", created_at: 1786927500 },
+      { sequence: 2, filename: "机电专业协同检查清单.docx", relative_path: "合成长目录名称用于响应式检查/机电专业协同检查清单.docx", size_bytes: 42_000, status: "accepted", reason: null, item_id: "synthetic-item-2", version_id: "synthetic-version-2", created_at: 1786927500 },
+      { sequence: 3, filename: "项目资料归档检查表.xlsx", relative_path: "合成长目录名称用于响应式检查/项目资料归档检查表.xlsx", size_bytes: 42_000, status: "skipped", reason: "当前目录下已存在同名资料", item_id: null, version_id: null, created_at: 1786927500 },
+    ],
   },
   {
     batch_id: "batch-upload-completed", upload_mode: "files", status: "completed",
