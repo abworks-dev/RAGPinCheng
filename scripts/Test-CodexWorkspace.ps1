@@ -202,6 +202,13 @@ try {
     } else {
         $warnings.Add("origin/master is unavailable; base relationship was not calculated.")
     }
+    $baseFreshness = if ($null -eq $originMaster -or $null -eq $behind) {
+        "unknown"
+    } elseif ($behind -gt 0) {
+        "behind"
+    } else {
+        "current"
+    }
 
     if ($Mode -eq "Write") {
         if ([string]::IsNullOrWhiteSpace($Intent)) {
@@ -265,6 +272,56 @@ try {
         }
     }
 
+    $recommendedWorktreeAction = if ($Mode -eq "ReadOnly" -and $errors.Count -gt 0) {
+        "blocked"
+    } elseif ($Mode -eq "ReadOnly") {
+        if ($isPrimary) { "primary_read_only" } else { "reuse_existing" }
+    } elseif ($isPrimary) {
+        "create_new"
+    } elseif ($errors.Count -eq 0) {
+        "reuse_existing"
+    } elseif (
+        $Intent -eq "New" -and $sameRepository -and $isRegistered -and
+        -not ($reasonCodes -contains "WORKSPACE_INSPECTION_FAILED")
+    ) {
+        "create_new"
+    } else {
+        "blocked"
+    }
+
+    $currentVenv = Join-Path $repositoryRoot ".venv"
+    $primaryVenv = if ($null -ne $primaryPath) { Join-Path $primaryPath ".venv" } else { $null }
+    $recommendedEnvironment = if ($Mode -eq "ReadOnly") {
+        "none"
+    } elseif (Test-Path -LiteralPath $currentVenv -PathType Container) {
+        "isolated"
+    } elseif (
+        $null -ne $primaryVenv -and
+        (Test-Path -LiteralPath $primaryVenv -PathType Container)
+    ) {
+        "shared"
+    } else {
+        "missing"
+    }
+    $environmentPath = if ($recommendedEnvironment -eq "isolated") {
+        $currentVenv
+    } elseif ($recommendedEnvironment -eq "shared") {
+        $primaryVenv
+    } else {
+        $null
+    }
+    $recommendationReason = if ($Mode -eq "ReadOnly" -and $isPrimary) {
+        "PRIMARY_WORKTREE_READ_ONLY"
+    } elseif ($Mode -eq "ReadOnly") {
+        "CURRENT_WORKTREE_READ_ONLY"
+    } elseif ($recommendedWorktreeAction -eq "create_new") {
+        "CURRENT_WORKTREE_UNSUITABLE_FOR_NEW_WRITE_TASK"
+    } elseif ($recommendedWorktreeAction -eq "reuse_existing") {
+        "CURRENT_WORKTREE_ALLOWED"
+    } else {
+        "WORKSPACE_BLOCKED"
+    }
+
     $result = [ordered]@{
         schema_version = 1
         mode = $Mode
@@ -272,6 +329,7 @@ try {
         allowed = $errors.Count -eq 0
         repository_path = $repositoryRoot
         project_root = $projectRoot
+        primary_worktree_path = $primaryPath
         same_repository = $sameRepository
         registered_worktree = $isRegistered
         primary_worktree = $isPrimary
@@ -284,6 +342,7 @@ try {
         origin_master = $originMaster
         ahead = $ahead
         behind = $behind
+        base_freshness = $baseFreshness
         dirty = $isDirty
         change_count = $changes.Count
         expected_branch = if ([string]::IsNullOrWhiteSpace($ExpectedBranch)) { $null } else { $ExpectedBranch }
@@ -293,6 +352,10 @@ try {
         warnings = @($warnings)
         reason_codes = @($reasonCodes)
         recommended_action = $recommendedAction
+        recommended_worktree_action = $recommendedWorktreeAction
+        recommended_environment = $recommendedEnvironment
+        environment_path = $environmentPath
+        recommendation_reason = $recommendationReason
     }
 } catch {
     Add-WorkspaceError -Code "WORKSPACE_INSPECTION_FAILED" `
@@ -305,6 +368,7 @@ try {
         allowed = $false
         repository_path = $RepositoryPath
         project_root = $scriptProjectRoot
+        primary_worktree_path = $null
         same_repository = $false
         registered_worktree = $false
         primary_worktree = $false
@@ -317,6 +381,7 @@ try {
         origin_master = $null
         ahead = $null
         behind = $null
+        base_freshness = "unknown"
         dirty = $false
         change_count = 0
         expected_branch = if ([string]::IsNullOrWhiteSpace($ExpectedBranch)) { $null } else { $ExpectedBranch }
@@ -326,6 +391,10 @@ try {
         warnings = @($warnings)
         reason_codes = @($reasonCodes)
         recommended_action = $recommendedAction
+        recommended_worktree_action = "blocked"
+        recommended_environment = "missing"
+        environment_path = $null
+        recommendation_reason = "WORKSPACE_INSPECTION_FAILED"
     }
 }
 
