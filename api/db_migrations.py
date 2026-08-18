@@ -918,6 +918,25 @@ CONTENT_TRASH_LIFECYCLE_STATEMENTS = (
        ON content_trash_purge_runs(created_at DESC)""",
 )
 
+USAGE_STATEMENTS = (
+    """CREATE TABLE IF NOT EXISTS external_service_usage (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        provider TEXT NOT NULL,
+        operation TEXT NOT NULL,
+        success INTEGER NOT NULL CHECK (success IN (0, 1)),
+        request_count INTEGER NOT NULL DEFAULT 1,
+        prompt_tokens INTEGER NOT NULL DEFAULT 0,
+        completion_tokens INTEGER NOT NULL DEFAULT 0,
+        total_tokens INTEGER NOT NULL DEFAULT 0,
+        item_count INTEGER NOT NULL DEFAULT 0,
+        input_bytes INTEGER NOT NULL DEFAULT 0,
+        latency_ms INTEGER,
+        created_at INTEGER NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_external_service_usage_created ON external_service_usage(created_at)",
+    "CREATE INDEX IF NOT EXISTS idx_external_service_usage_provider ON external_service_usage(provider, operation, created_at)",
+)
+
 MIGRATIONS = (
     Migration(1, "multi_engine_transcription_phase2", PHASE2_STATEMENTS),
     Migration(2, "answer_regeneration_versions", ANSWER_VERSION_STATEMENTS),
@@ -939,6 +958,7 @@ MIGRATIONS = (
     Migration(18, "published_content_reclassification", CONTENT_RECLASSIFICATION_STATEMENTS),
     Migration(19, "media_library_video_actions", MEDIA_LIBRARY_VIDEO_ACTIONS_STATEMENTS),
     Migration(20, "content_trash_lifecycle", CONTENT_TRASH_LIFECYCLE_STATEMENTS),
+    Migration(21, "external_service_usage", USAGE_STATEMENTS),
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 PHASE2_TABLES = frozenset(

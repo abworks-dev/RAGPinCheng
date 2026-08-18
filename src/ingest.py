@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Callable, Iterator
 
 import requests
+from .external_usage import record_usage
 from pypdf import PdfReader, PdfWriter
 from pypdf.errors import DependencyError
 
@@ -289,10 +290,20 @@ def _cloud_parse(
     """Parse one PDF via the MinerU cloud API, splitting into ≤200-page parts
     if necessary and concatenating the resulting markdown."""
     split_dir = split_dir or PARSED_DIR / f"_split_{_safe_stem(pdf)}"
+    started = time.perf_counter()
     try:
         prepared = _prepare_pdf(pdf, split_dir / "preflight")
         parts = _split_pdf_for_cloud(prepared, split_dir / "parts")
-        markdowns = _cloud_parse_batch(parts, on_status=on_status)
+        try:
+            markdowns = _cloud_parse_batch(parts, on_status=on_status)
+        except Exception:
+            record_usage("mineru", "cloud_parse", success=False,
+                         item_count=len(parts), input_bytes=pdf.stat().st_size,
+                         latency_ms=int((time.perf_counter() - started) * 1000))
+            raise
+        record_usage("mineru", "cloud_parse", item_count=len(parts),
+                     input_bytes=pdf.stat().st_size,
+                     latency_ms=int((time.perf_counter() - started) * 1000))
         if len(markdowns) == 1:
             return markdowns[0]
         joined = []

@@ -60,6 +60,7 @@ from .maintenance import (
     save_settings,
 )
 from .system_overview import collect_system_overview
+from src.external_usage import usage_summary
 from .content_permission_catalog import CONTENT_PERMISSIONS
 from .db import get_db
 from .feedback import read_records
@@ -469,8 +470,11 @@ def maintenance_status(
 @router.get("/system-overview", response_model=SystemOverviewResponse)
 def system_overview(
     _admin: CurrentUser = Depends(require_admin),
+    conn: sqlite3.Connection = Depends(get_db),
 ) -> SystemOverviewResponse:
-    return SystemOverviewResponse(**collect_system_overview())
+    payload = collect_system_overview()
+    payload["external_usage"] = usage_summary(conn)
+    return SystemOverviewResponse(**payload)
 
 
 @router.patch("/maintenance/settings", response_model=MaintenanceSettingsDTO)

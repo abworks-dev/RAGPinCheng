@@ -21,10 +21,12 @@ i.e. graceful degradation back to pre-summary behavior.
 from __future__ import annotations
 
 import hashlib
+from time import perf_counter
 import sqlite3
 from typing import Callable
 
 from openai import OpenAI
+from .external_usage import record_usage
 
 from .chunk import Child, _stable_id
 from .config import (
@@ -91,15 +93,21 @@ def _call_llm(client: OpenAI, doc_title: str, section_path: str, table_text: str
         section_path=section_path or "(无章节)",
         table=truncated,
     )
-    resp = client.chat.completions.create(
-        model=TABLE_SUMMARY_MODEL,
-        temperature=0,
-        messages=[
-            {"role": "system", "content": load_prompt("table_summary_system")},
-            {"role": "user", "content": user_msg},
-        ],
-        extra_body={"thinking": {"type": "disabled"}},
-    )
+    started = perf_counter()
+    try:
+        resp = client.chat.completions.create(
+            model=TABLE_SUMMARY_MODEL, temperature=0,
+            messages=[{"role": "system", "content": load_prompt("table_summary_system")},
+                      {"role": "user", "content": user_msg}],
+            extra_body={"thinking": {"type": "disabled"}},
+        )
+    except Exception:
+        record_usage("zhipu", "table_summary", success=False, latency_ms=int((perf_counter() - started) * 1000))
+        raise
+    usage = getattr(resp, "usage", None)
+    usage_dict = {key: int(getattr(usage, key, 0) or 0) for key in
+                  ("prompt_tokens", "completion_tokens", "total_tokens")} if usage else {}
+    record_usage("zhipu", "table_summary", usage=usage_dict, latency_ms=int((perf_counter() - started) * 1000))
     text = (resp.choices[0].message.content or "").strip()
     # Strip stray wrapping quotes or leading "摘要：" the model might add.
     text = text.strip('"').strip("'").strip("“”‘’").strip()
