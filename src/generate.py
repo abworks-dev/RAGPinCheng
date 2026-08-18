@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from time import perf_counter
 from typing import Iterator
 
 import httpx
 from openai import OpenAI
+from .external_usage import record_usage
 
 from .config import (
     LLM_MODEL,
@@ -222,6 +224,7 @@ def rewrite_query(
         history="\n".join(convo_lines),
         question=question,
     )
+    started = perf_counter()
     try:
         client = _client()
         resp = client.chat.completions.create(
@@ -241,7 +244,9 @@ def rewrite_query(
         if usage_out is not None:
             usage_out.update(_extract_usage(resp))
             usage_out["model"] = LLM_REWRITE_MODEL
+        record_usage("zhipu", "rewrite", usage=_extract_usage(resp), latency_ms=int((perf_counter() - started) * 1000))
     except Exception:
+        record_usage("zhipu", "rewrite", success=False, latency_ms=int((perf_counter() - started) * 1000))
         return question
 
     rewritten = rewritten.strip().strip('"').strip("'").strip("“”‘’").strip()
@@ -267,13 +272,17 @@ def generate(
     """
     prep = _prepare_generation(query, parents, history, budget, policy)
     client = _client()
-    resp = client.chat.completions.create(
-        model=prep.model,
-        temperature=prep.policy.answer_temperature,
-        max_tokens=prep.policy.answer_max_output_tokens,
-        messages=prep.messages,
-        extra_body={"thinking": {"type": "disabled"}},
-    )
+    started = perf_counter()
+    try:
+        resp = client.chat.completions.create(
+            model=prep.model, temperature=prep.policy.answer_temperature,
+            max_tokens=prep.policy.answer_max_output_tokens, messages=prep.messages,
+            extra_body={"thinking": {"type": "disabled"}},
+        )
+    except Exception:
+        record_usage("zhipu", "answer", success=False, latency_ms=int((perf_counter() - started) * 1000))
+        raise
+    record_usage("zhipu", "answer", usage=_extract_usage(resp), latency_ms=int((perf_counter() - started) * 1000))
     return Answer(
         text=resp.choices[0].message.content or "",
         sources=prep.used_sources,
@@ -306,7 +315,9 @@ def stream_generate(
     """
     prep = _prepare_generation(query, parents, history, budget, policy)
     client = _client()
-    resp = client.chat.completions.create(
+    started = perf_counter()
+    try:
+        resp = client.chat.completions.create(
         model=prep.model,
         temperature=prep.policy.answer_temperature,
         max_tokens=prep.policy.answer_max_output_tokens,
@@ -314,20 +325,27 @@ def stream_generate(
         stream=True,
         # Ask the provider to send a final chunk carrying token usage.
         stream_options={"include_usage": True},
-        extra_body={"thinking": {"type": "disabled"}},
-    )
+            extra_body={"thinking": {"type": "disabled"}},
+        )
+    except Exception:
+        record_usage("zhipu", "answer", success=False, latency_ms=int((perf_counter() - started) * 1000))
+        raise
 
     def _iter() -> Iterator[str]:
-        for chunk in resp:
-            # Usage-only chunks have no `choices`; capture and continue.
-            usage = _extract_usage(chunk)
-            if usage:
-                prep.usage.update(usage)
-                prep.usage["model"] = prep.model
-            if not chunk.choices:
-                continue
-            delta = chunk.choices[0].delta.content
-            if delta:
-                yield delta
+        try:
+            for chunk in resp:
+                usage = _extract_usage(chunk)
+                if usage:
+                    prep.usage.update(usage)
+                    prep.usage["model"] = prep.model
+                if not chunk.choices:
+                    continue
+                delta = chunk.choices[0].delta.content
+                if delta:
+                    yield delta
+        except Exception:
+            record_usage("zhipu", "answer", success=False, latency_ms=int((perf_counter() - started) * 1000))
+            raise
+        record_usage("zhipu", "answer", usage=prep.usage, latency_ms=int((perf_counter() - started) * 1000))
 
     return prep, _iter()

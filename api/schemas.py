@@ -152,6 +152,7 @@ class SystemOverviewResponse(BaseModel):
     app: AppSystemMetricsDTO
     gpu: GpuSystemMetricsDTO
     office_processing: OfficeProcessingStatusDTO
+    external_usage: dict[str, dict[str, dict[str, int | None]]]
 
 
 class AdminConversationSummaryDTO(BaseModel):
