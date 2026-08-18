@@ -792,7 +792,7 @@ describe("AdminManagedContentPage", () => {
 
     const tabs = screen.getByRole("tablist", { name: "资料视图" });
     expect(within(tabs).getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
-      "资料库", "回收站", "上传任务", "索引任务",
+      "资料列表", "回收站", "上传任务", "索引任务",
     ]);
 
     fireEvent.click(within(tabs).getByRole("tab", { name: "索引任务" }));
@@ -817,7 +817,7 @@ describe("AdminManagedContentPage", () => {
     render(<AdminManagedContentPage />);
 
     await waitFor(() => expect(window.location.search).toBe(""));
-    expect(screen.getByRole("tab", { name: "资料库" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "资料列表" })).toHaveAttribute("aria-selected", "true");
     expect(screen.queryByRole("heading", { name: "索引任务" })).not.toBeInTheDocument();
   });
 
@@ -868,9 +868,10 @@ describe("AdminManagedContentPage", () => {
     render(<AdminManagedContentPage />);
     fireEvent.click(screen.getByRole("tab", { name: "回收站" }));
     fireEvent.click((await screen.findAllByRole("checkbox", { name: "选择恢复“建模标准”" }))[0]);
+    expect(screen.getByRole("button", { name: "恢复所选（1）" })).toBeVisible();
     fireEvent.click(screen.getAllByRole("checkbox", { name: "选择恢复“项目标准”" })[0]);
     expect(screen.getByRole("status")).toHaveTextContent("已选择 2 份，单次最多 20 份");
-    fireEvent.click(screen.getByRole("button", { name: "批量恢复（2）" }));
+    fireEvent.click(screen.getByRole("button", { name: "恢复所选（2）" }));
     const dialog = screen.getByRole("dialog", { name: "批量恢复" });
     expect(within(dialog).getByRole("combobox", { name: "恢复到" })).toHaveValue("original");
     fireEvent.click(within(dialog).getByRole("button", { name: "检查恢复条件" }));
@@ -894,7 +895,8 @@ describe("AdminManagedContentPage", () => {
     render(<AdminManagedContentPage />);
     fireEvent.click(screen.getByRole("tab", { name: "回收站" }));
     fireEvent.click((await screen.findAllByRole("checkbox", { name: "选择恢复“建模标准”" }))[0]);
-    fireEvent.click(screen.getByRole("button", { name: "永久删除（1）" }));
+    fireEvent.click(screen.getByRole("button", { name: "批量操作" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "永久删除所选（1）" }));
     const dialog = await screen.findByRole("dialog", { name: "永久删除资料" });
     const confirm = within(dialog).getByRole("button", { name: "永久删除" });
     expect(confirm).toBeDisabled();
@@ -1863,7 +1865,7 @@ describe("AdminManagedContentPage", () => {
     expect(mocks.uploadTask).toHaveBeenCalledWith("batch-upload-1");
 
     fireEvent.click(screen.getByRole("button", { name: "关闭" }));
-    fireEvent.click(screen.getByRole("tab", { name: "资料库" }));
+    fireEvent.click(screen.getByRole("tab", { name: "资料列表" }));
     expect(window.location.search).toBe("");
   });
 

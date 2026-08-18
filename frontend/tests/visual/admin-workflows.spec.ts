@@ -266,10 +266,10 @@ test.describe("资料管理", () => {
     await expect(page.getByRole("checkbox", { name: "选择恢复“企业知识库使用规范”" })).toBeVisible();
     await expect(page.getByRole("checkbox", { name: "选择恢复“项目交付检查清单”" })).toBeVisible();
     await page.getByRole("checkbox", { name: "选择恢复“企业知识库使用规范”" }).check();
-    await expect(page.getByText(/已选择 1 份/)).toBeVisible();
+    await expect(page.getByRole("status")).toContainText("已选择 1 份");
     await page.getByRole("checkbox", { name: "选择恢复“项目交付检查清单”" }).check();
-    await expect(page.getByRole("button", { name: "批量恢复（2）" })).toBeVisible();
-    await page.getByRole("button", { name: "批量恢复（2）" }).click();
+    await expect(page.getByRole("button", { name: "恢复所选（2）" })).toBeVisible();
+    await page.getByRole("button", { name: "恢复所选（2）" }).click();
     const batchRestore = page.getByRole("dialog", { name: "批量恢复" });
     await expect(batchRestore.getByRole("combobox", { name: "恢复到" })).toHaveValue("original");
     await batchRestore.getByRole("button", { name: "取消" }).click();
@@ -317,7 +317,8 @@ test.describe("资料管理", () => {
     await expectNoBodyOverflow(page);
     await page.screenshot({ path: testInfo.outputPath("trash-list-layout.png"), fullPage: true });
 
-    await page.getByRole("button", { name: "清理已超期资料" }).click();
+    await page.getByRole("button", { name: "回收站管理" }).click();
+    await page.getByRole("menuitem", { name: "清理已超期资料" }).click();
     const purgeDialog = page.getByRole("dialog", { name: "永久删除资料" });
     await expect(purgeDialog).toContainText("永久删除 1 份资料");
     await expect(purgeDialog.getByRole("button", { name: "永久删除" })).toBeDisabled();
@@ -325,7 +326,8 @@ test.describe("资料管理", () => {
     await page.screenshot({ path: testInfo.outputPath("trash-purge-confirmation.png"), fullPage: false });
     await purgeDialog.getByRole("button", { name: "取消" }).click();
 
-    await page.getByRole("button", { name: "清理策略" }).click();
+    await page.getByRole("button", { name: "回收站管理" }).click();
+    await page.getByRole("menuitem", { name: "清理策略" }).click();
     const settingsDialog = page.getByRole("dialog", { name: "回收站清理策略" });
     await expect(settingsDialog).toContainText("当前状态：已关闭");
     await expect(settingsDialog.getByRole("checkbox", { name: "启用自动清理" })).not.toBeChecked();
@@ -747,9 +749,10 @@ test.describe("索引任务", () => {
     await expect(page.getByRole("button", { name: "上传资料" })).toHaveCount(0);
     await expect(page.getByText("旧索引资料", { exact: true })).toHaveCount(0);
     await expect(page.getByRole("searchbox", { name: "搜索发布任务" })).toBeVisible();
+    await page.getByRole("button", { name: "展开索引任务筛选" }).click();
     await expect(page.getByRole("combobox", { name: "按数据库分类筛选" })).toBeVisible();
     await expect(page.getByRole("combobox", { name: "按资料来源筛选" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "查看历史尝试" })).toBeVisible();
+    await expect(page.getByRole("checkbox", { name: "查看历史尝试" })).toBeVisible();
     await expect(page.getByRole("link", { name: "查看文件" })).toBeVisible();
     await expect(page.getByRole("button", { name: "重新发布" })).toBeVisible();
 
@@ -763,6 +766,7 @@ test.describe("索引任务", () => {
     await openTab(page, "索引任务");
     await expect(page.getByText("已移入回收站的合成资料", { exact: true })).toHaveCount(0);
 
+    await page.getByRole("button", { name: "展开索引任务筛选" }).click();
     const includeArchived = page.getByRole("checkbox", { name: "包含回收站资料" });
     await includeArchived.click();
     const archivedTitle = page.getByText("已移入回收站的合成资料", { exact: true });
