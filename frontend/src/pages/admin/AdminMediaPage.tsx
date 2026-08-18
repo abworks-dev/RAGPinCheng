@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { FileUp, RefreshCw, Settings2 } from "lucide-react";
+import { ClipboardCheck, FileUp, Film, LoaderCircle, RefreshCw, Rocket, Settings2, Upload, XCircle } from "lucide-react";
 import { adminMediaApi } from "../../api/admin/media";
 import { Alert, AlertDescription, AlertTitle } from "../../components/ui/alert";
 import { Badge } from "../../components/ui/badge";
@@ -179,6 +179,7 @@ export function AdminMediaPage() {
   const [activeBatchIds, setActiveBatchIds] = useState<string[]>([]);
   const [dragging, setDragging] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
   const [mediaFilter, setMediaFilter] = useState<MediaFilter>("all");
   const [lastLoadedAt, setLastLoadedAt] = useState<number | null>(null);
   const [selectedMediaId, setSelectedMediaId] = useState<string | null>(() => {
@@ -484,6 +485,13 @@ export function AdminMediaPage() {
   const batchSettledCount = activeBatchItems.filter((item) => item.state === "succeeded" || item.state === "failed").length;
   const batchUploadingCount = activeBatchItems.filter((item) => item.state === "uploading").length;
   const batchPreparingCount = activeBatchItems.filter((item) => item.state === "preparing").length;
+  const hasUploadDraft = pending.length > 0 || submitting;
+  const resetUploadDraft = () => { setStep(1); setMode(null); setPending([]); setEditingId(null); setSubmitting(false); setActiveBatchIds([]); setUploadError(null); };
+  const requestUploadDialogClose = (open: boolean) => {
+    if (open) { setUploadDialogOpen(true); return; }
+    if (hasUploadDraft && !submitting && !window.confirm("当前上传流程尚未完成，关闭窗口后进度会保留。点击“确定”关闭并保留进度，点击“取消”继续操作。")) return;
+    setUploadDialogOpen(false);
+  };
 
   return (
     <section className="space-y-6" aria-labelledby="admin-media-title">
@@ -496,7 +504,9 @@ export function AdminMediaPage() {
         <a className={buttonVariants({ variant: "outline" })} href="/admin/asr"><Settings2 className="size-4" />转录配置</a>
       </header>
 
-      <Card className="shadow-surface">
+      <Dialog open={uploadDialogOpen} onOpenChange={requestUploadDialogClose}>
+      <DialogContent className="max-h-[90vh] max-w-4xl overflow-y-auto">
+      <Card className="border-0 shadow-none">
         <CardHeader className="p-4 pb-3 sm:p-5 sm:pb-4">
           <CardTitle className="text-ui-lg">上传视频与转写</CardTitle>
           <CardDescription className="mt-1">自动转录成功不代表已经审核、发布或进入索引。</CardDescription>
@@ -538,7 +548,7 @@ export function AdminMediaPage() {
                   ))}
                 </div>
               )}
-              <div className="flex justify-end"><Button disabled={!pending.length} onClick={() => setStep(2)}>下一步：选择转写方式</Button></div>
+                <div className="flex justify-end"><Button disabled={!pending.length} onClick={() => setStep(2)}>下一步：选择转写方式</Button></div>
             </>
           )}
 
@@ -632,7 +642,7 @@ export function AdminMediaPage() {
                                 {item.transcriptFile ? "更换转写文件" : "添加转写文件"}
                                 <input aria-label={`${item.file.name} 的人工转写`} className="sr-only" type="file" accept=".md,text/markdown" disabled={submitting || item.state === "succeeded"} onChange={(event) => void attachTranscript(item.id, event.target.files?.[0] || null)} />
                               </label>
-                              {item.transcriptFile && <Button variant="outline" onClick={() => setEditingId(item.id)}>打开并编辑</Button>}
+                              {item.transcriptFile && <Button variant="outline" onClick={() => { setEditingId(item.id); setUploadDialogOpen(false); }}>打开并编辑</Button>}
                             </div>
                             <p className="mt-1 text-ui-xs text-muted-foreground">{item.transcriptFile?.name || "尚未绑定 Markdown"}</p>
                           </div>
@@ -661,7 +671,7 @@ export function AdminMediaPage() {
               )}
 
               <div className="flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
-                <Button variant="outline" disabled={submitting} onClick={() => setStep(2)}>返回选择方式</Button>
+                <div className="flex flex-wrap gap-2"><Button variant="outline" disabled={submitting} onClick={() => setStep(2)}>返回选择方式</Button><Button variant="ghost" disabled={submitting} onClick={() => { if (window.confirm("确定取消本次上传并清空已选择的文件吗？")) { resetUploadDraft(); setUploadDialogOpen(false); } }}>取消上传</Button></div>
                 <div className="text-right">
                   <p className="mb-2 text-ui-xs text-muted-foreground">{mode === "manual" ? "保持现有人工 Markdown 上传与索引路径。" : "每个文件使用独立幂等键；最多并发上传 2 个。"}</p>
                   <Button disabled={!canSubmit} onClick={() => void submitBatch()}>{submitting ? "正在批量提交…" : mode === "manual" ? "上传视频与人工转写" : "上传并创建自动转录任务"}</Button>
@@ -671,9 +681,11 @@ export function AdminMediaPage() {
           )}
         </CardContent>
       </Card>
+      </DialogContent>
+      </Dialog>
 
       {editingItem && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-labelledby="transcript-editor-title">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" aria-labelledby="transcript-editor-title">
           <Card className="flex max-h-[90vh] w-full max-w-4xl flex-col">
             <CardHeader><CardTitle id="transcript-editor-title">编辑 {editingItem.transcriptFile?.name}</CardTitle><CardDescription>编辑只保存在本次浏览器待上传内容中。</CardDescription></CardHeader>
             <CardContent className="flex min-h-0 flex-1 flex-col gap-3">
@@ -687,22 +699,20 @@ export function AdminMediaPage() {
       {uploadError && <Alert variant="destructive" role="alert"><AlertTitle>操作失败</AlertTitle><AlertDescription>{uploadError}</AlertDescription></Alert>}
 
       <section className="space-y-3" aria-labelledby="media-assets-title">
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <div><h2 id="media-assets-title" className="text-ui-base font-semibold">媒体资源</h2><p className="mt-1 text-ui-xs text-muted-foreground">按每次提交分别记录媒体与处理进度；同名文件不会合并。</p></div>
+          <div className="flex flex-wrap items-end justify-between gap-3">
+          <div><h2 id="media-assets-title" className="text-ui-base font-semibold">媒体资源</h2><p className="mt-1 flex flex-wrap gap-x-2 text-ui-xs text-muted-foreground"><span>共 {mediaAssets.length} 个视频</span><span>·</span><span>按每次提交分别记录媒体与处理进度；同名文件不会合并。</span></p></div>
           <div className="flex items-center gap-2">
-            <span className="text-ui-xs text-muted-foreground">共 {mediaAssets.length} 个视频</span>
+            <Button size="sm" onClick={() => setUploadDialogOpen(true)}><Upload className="size-4" />{hasUploadDraft ? `继续上传${pending.length ? `（${pending.length}）` : ""}` : "上传视频"}</Button>
             <Button size="sm" variant="outline" aria-label="刷新媒体资源" title="刷新媒体资源" disabled={loading} onClick={() => void refreshMediaState()}>
               <RefreshCw className="size-4" aria-hidden="true" />
               刷新
             </Button>
           </div>
         </div>
-        <div className="flex flex-wrap gap-2" aria-label="媒体快捷筛选">
-          {mediaFilterOptions.map(([value, label]) => (
-            <Button key={value} size="sm" variant={mediaFilter === value ? "default" : "outline"} aria-pressed={mediaFilter === value} aria-label={`${label} ${filterCounts[value]} 条`} onClick={() => setMediaFilter(value)}>
-              {label}<span className="text-ui-xs opacity-75">{filterCounts[value]}</span>
-            </Button>
-          ))}
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5" aria-label="媒体快捷筛选">
+          {mediaFilterOptions.map(([value, label]) => { const icons = { all: <Film className="size-4" />, processing: <LoaderCircle className="size-4" />, review: <ClipboardCheck className="size-4" />, publishing: <Rocket className="size-4" />, failed: <XCircle className="size-4" /> }; return (
+            <button type="button" key={value} className={`rounded-ui-lg border bg-background p-3 text-left transition-colors hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${mediaFilter === value ? "border-primary ring-1 ring-primary/30" : "border-border"}`} aria-pressed={mediaFilter === value} aria-label={`${label} ${filterCounts[value]} 条`} onClick={() => setMediaFilter(value)}><span className="flex items-center justify-between text-ui-xs text-muted-foreground"><span>{label}</span>{icons[value]}</span><span className="mt-2 block text-ui-xl font-semibold tabular-nums">{filterCounts[value]}</span></button>
+          ); })}
         </div>
         <p className="text-ui-xs text-muted-foreground">当前显示 {visibleMediaAssets.length} / {mediaAssets.length} 条记录{lastLoadedAt ? ` · 最近刷新 ${new Date(lastLoadedAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}` : ""}。</p>
         {jobsError && <Alert role="alert"><AlertTitle>任务状态暂时无法刷新</AlertTitle><AlertDescription>{jobsError}</AlertDescription></Alert>}

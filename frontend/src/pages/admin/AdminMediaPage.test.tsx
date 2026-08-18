@@ -93,6 +93,7 @@ function readFile(file: File): Promise<string> {
 }
 
 async function addVideosAndOpenMode(files: File[], mode: "自动转录" | "人工转写") {
+  fireEvent.click(screen.getByRole("button", { name: /上传视频/ }));
   fireEvent.change(screen.getByLabelText("选择视频文件"), { target: { files } });
   fireEvent.click(screen.getByRole("button", { name: "下一步：选择转写方式" }));
   fireEvent.click(screen.getByRole("button", { name: new RegExp(`^${mode}`) }));
@@ -134,6 +135,7 @@ describe("AdminMediaPage wizard", () => {
 
   it("shows the three-step entry and keeps lifecycle states separate", async () => {
     render(<AdminMediaPage />);
+    fireEvent.click(screen.getByRole("button", { name: /上传视频/ }));
     expect(screen.getByLabelText("上传步骤")).toHaveTextContent("1. 上传视频");
     expect(await screen.findByText("项目交付培训")).toBeInTheDocument();
     expect(screen.getByText("待人工审核")).toBeInTheDocument();
@@ -323,6 +325,7 @@ describe("AdminMediaPage wizard", () => {
     fireEvent.click(screen.getByRole("button", { name: "打开并编辑" }));
     fireEvent.change(screen.getByLabelText("Markdown 转写内容"), { target: { value: "说话人 1 00:00:01 编辑后" } });
     fireEvent.click(screen.getByRole("button", { name: "保存并关闭" }));
+    fireEvent.click(screen.getByRole("button", { name: /继续上传/ }));
     fireEvent.click(screen.getByRole("button", { name: "上传视频与人工转写" }));
 
     await waitFor(() => expect(mocks.uploadMediaVideo).toHaveBeenCalledTimes(1));
