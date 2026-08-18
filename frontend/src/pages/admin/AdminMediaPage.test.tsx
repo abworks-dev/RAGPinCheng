@@ -15,6 +15,9 @@ const mocks = vi.hoisted(() => ({
   getTranscriptionJob: vi.fn(),
   cancelTranscriptionJob: vi.fn(),
   retryTranscription: vi.fn(),
+  managedCategories: vi.fn(),
+  preflightMediaUpload: vi.fn(),
+  moveManagedContent: vi.fn(),
 }));
 
 vi.mock("../../api/client", () => ({ api: mocks }));
@@ -138,6 +141,16 @@ describe("AdminMediaPage wizard", () => {
     mocks.getTranscriptionJob.mockResolvedValue(succeededJob);
     mocks.cancelTranscriptionJob.mockResolvedValue({ ...succeededJob, status: "cancelled" });
     mocks.retryTranscription.mockResolvedValue({ ...succeededJob, status: "pending" });
+    mocks.managedCategories.mockResolvedValue([{
+      id: "cat-05", category_key: "training", parent_id: null, display_code: "05",
+      display_name: "培训资料", sort_order: 50, level: 1, is_active: true,
+      full_path: "05 培训资料", item_count: 0, version: 1,
+    }]);
+    mocks.preflightMediaUpload.mockImplementation(async (body: { category_id: string; items: Array<{ client_id: string }> }) => ({
+      category_id: body.category_id,
+      entries: body.items.map((item) => ({ client_id: item.client_id, status: "ready", suggested_title: null, suggested_filename: null, conflicts: [] })),
+    }));
+    mocks.moveManagedContent.mockResolvedValue({});
   });
 
   it("shows the three-step entry and keeps lifecycle states separate", async () => {
@@ -281,6 +294,41 @@ describe("AdminMediaPage wizard", () => {
     await waitFor(() => expect(mocks.uploadAutomaticMediaVideo).toHaveBeenCalledTimes(2));
     expect(mocks.uploadAutomaticMediaVideo.mock.calls[0][2]).toBe(secondProfile.scheme_id);
     expect(mocks.uploadAutomaticMediaVideo.mock.calls[0][3]).not.toBe(mocks.uploadAutomaticMediaVideo.mock.calls[1][3]);
+  });
+
+  it("preflights same-name media and uploads the selected rename into the target directory", async () => {
+    mocks.preflightMediaUpload.mockImplementation(async (body: { category_id: string; items: Array<{ client_id: string }> }) => ({
+      category_id: body.category_id,
+      entries: [{
+        client_id: body.items[0].client_id,
+        status: "conflict",
+        suggested_title: "training (1)",
+        suggested_filename: "training (1).mp4",
+        conflicts: [{
+          media_id: "existing-media", item_id: "existing-item", version_id: "existing-version",
+          title: "training", original_filename: "training.mp4", title_matches: true, filename_matches: true,
+        }],
+      }],
+    }));
+    render(<AdminMediaPage />);
+    await addVideosAndOpenMode([video("training.mp4")], "自动转录");
+
+    fireEvent.click(screen.getByRole("button", { name: "上传并创建自动转录任务" }));
+    expect(await screen.findByText("发现同名资料")).toBeInTheDocument();
+    expect(mocks.uploadAutomaticMediaVideo).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByText("处理方式").closest("label")!.querySelector("select")!, { target: { value: "rename" } });
+    fireEvent.click(screen.getByRole("button", { name: "按选择上传" }));
+
+    await waitFor(() => expect(mocks.uploadAutomaticMediaVideo).toHaveBeenCalledTimes(1));
+    expect(mocks.uploadAutomaticMediaVideo).toHaveBeenCalledWith(
+      expect.any(File),
+      "training (1)",
+      availableProfile.scheme_id,
+      expect.any(String),
+      expect.any(Object),
+      expect.objectContaining({ categoryId: "cat-05", originalFilename: "training (1).mp4" }),
+    );
   });
 
   it("shows exact file transfer and then a separate server preparation state", async () => {

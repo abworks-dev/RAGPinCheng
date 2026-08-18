@@ -2397,7 +2397,7 @@ def test_published_media_transcripts_share_library_listing_without_document_mirr
         now=100,
         pending_revision=True,
     )
-    _insert_published_media(
+    second_item_id = _insert_published_media(
         conn,
         media_id=second_media_id,
         version_id=second_version_id,
@@ -2455,6 +2455,13 @@ def test_published_media_transcripts_share_library_listing_without_document_mirr
     assert moved.status_code == 200
     assert moved.json()["category_id"] == "cat-04"
     assert moved.json()["version_id"] == first_version_id
+    second_move = client.post(
+        f"/api/admin/content/items/{second_item_id}/move",
+        json={"target_category_id": "cat-04", "expected_version_id": second_version_id},
+        **_auth(sessions, "publisher", csrf=True),
+    )
+    assert second_move.status_code == 409
+    assert second_move.json()["detail"] == "目标目录已有同标题或同源文件名的视频资料"
 
     archived = client.request(
         "DELETE",

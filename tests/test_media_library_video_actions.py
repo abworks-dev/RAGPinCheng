@@ -8,7 +8,8 @@ import pytest
 from fastapi import HTTPException
 
 from api.auth import CurrentUser
-from api.routes_admin import upload_media
+from api.routes_admin import preflight_media_upload, upload_media
+from api.schemas import MediaUploadPreflightItem, MediaUploadPreflightRequest
 from api.transcription_store import StoreConflictError
 from src.transcription.formatter import format_transcript
 from src.transcription.normalizer import normalize_candidate
@@ -388,4 +389,87 @@ def test_replacement_upload_replays_before_active_state_checks_and_binds_the_sou
         )
     assert caught.value.status_code == 409
     assert caught.value.detail["code"] == "upload_idempotency_conflict"
+    conn.close()
+
+
+def test_media_upload_preflight_detects_directory_scoped_title_and_filename_conflicts(tmp_path):
+    conn, _store, _workflow, _profile, base = _published_base(tmp_path)
+    admin = CurrentUser(1, "admin", "Admin", "admin", "csrf")
+
+    result = preflight_media_upload(
+        MediaUploadPreflightRequest(
+            category_id="cat-05",
+            items=[
+                MediaUploadPreflightItem(
+                    client_id="title-match",
+                    title=" fixture VIDEO ",
+                    original_filename="another.mp4",
+                ),
+                MediaUploadPreflightItem(
+                    client_id="filename-match",
+                    title="另一个标题",
+                    original_filename="FIXTURE.MP4",
+                ),
+            ],
+        ),
+        admin,
+        conn,
+    )
+
+    assert [entry.status for entry in result.entries] == ["conflict", "conflict"]
+    assert result.entries[0].conflicts[0].media_id == base.media_id
+    assert result.entries[0].conflicts[0].title_matches is True
+    assert result.entries[0].conflicts[0].filename_matches is False
+    assert result.entries[1].conflicts[0].filename_matches is True
+    assert result.entries[0].suggested_title == "fixture VIDEO (1)"
+    assert result.entries[0].suggested_filename == "another (1).mp4"
+    conn.close()
+
+
+def test_media_upload_preflight_reserves_names_for_unpublished_media(tmp_path):
+    conn, _store, _workflow, _profile, _base = _published_base(tmp_path)
+    conn.execute(
+        """INSERT INTO media_assets(
+               media_id,title,original_filename,storage_rel_path,mime_type,file_size,sha256,
+               transcript_source_path,transcript_origin,status,created_by,created_at,updated_at,error,
+               target_category_id
+           ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            "123e4567-e89b-42d3-a456-426614174190",
+            "处理中视频",
+            "processing.mp4",
+            "processing/original.mp4",
+            "video/mp4",
+            10,
+            "a" * 64,
+            None,
+            "generated",
+            "uploaded",
+            1,
+            60,
+            60,
+            None,
+            "cat-05",
+        ),
+    )
+    conn.commit()
+    admin = CurrentUser(1, "admin", "Admin", "admin", "csrf")
+
+    result = preflight_media_upload(
+        MediaUploadPreflightRequest(
+            category_id="cat-05",
+            items=[MediaUploadPreflightItem(
+                client_id="pending-match",
+                title="处理中视频",
+                original_filename="new.mp4",
+            )],
+        ),
+        admin,
+        conn,
+    )
+
+    conflict = result.entries[0].conflicts[0]
+    assert result.entries[0].status == "conflict"
+    assert conflict.item_id is None
+    assert conflict.version_id is None
     conn.close()

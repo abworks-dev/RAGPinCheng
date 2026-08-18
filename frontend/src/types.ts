@@ -1052,6 +1052,33 @@ export type MediaAsset = {
   replacement_source_media_id?: string | null;
   replacement_candidate_media_id?: string | null;
   replacement_status?: "pending" | "failed" | "activated" | "cancelled" | null;
+  category_id?: string | null;
+  category_path?: string | null;
+  catalog_item_id?: string | null;
+  current_version_id?: string | null;
+};
+
+export type MediaUploadConflict = {
+  media_id: string;
+  item_id: string | null;
+  version_id: string | null;
+  title: string;
+  original_filename: string;
+  title_matches: boolean;
+  filename_matches: boolean;
+};
+
+export type MediaUploadPreflightEntry = {
+  client_id: string;
+  status: "ready" | "conflict" | "ambiguous";
+  suggested_title: string | null;
+  suggested_filename: string | null;
+  conflicts: MediaUploadConflict[];
+};
+
+export type MediaUploadPreflightResponse = {
+  category_id: string;
+  entries: MediaUploadPreflightEntry[];
 };
 
 export type MediaTranscriptSegment = {

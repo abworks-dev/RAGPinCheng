@@ -19,7 +19,7 @@ def ensure_media_transcript_catalog_item(
     now: int,
 ) -> str:
     media = conn.execute(
-        "SELECT title,created_by,created_at FROM media_assets WHERE media_id=?",
+        "SELECT title,created_by,created_at,target_category_id FROM media_assets WHERE media_id=?",
         (media_id,),
     ).fetchone()
     if media is None:
@@ -38,9 +38,10 @@ def ensure_media_transcript_catalog_item(
         )
         return str(existing["id"])
 
+    target_category_id = str(media["target_category_id"] or DEFAULT_MEDIA_TRANSCRIPT_CATEGORY_ID)
     category = conn.execute(
         "SELECT id FROM category_nodes WHERE id=? AND is_active=1",
-        (DEFAULT_MEDIA_TRANSCRIPT_CATEGORY_ID,),
+        (target_category_id,),
     ).fetchone()
     if category is None:
         raise ValueError("media_catalog_default_category_unavailable")
@@ -54,7 +55,7 @@ def ensure_media_transcript_catalog_item(
         (
             item_id,
             media["title"],
-            DEFAULT_MEDIA_TRANSCRIPT_CATEGORY_ID,
+            target_category_id,
             media_id,
             media["created_by"],
             media["created_at"],

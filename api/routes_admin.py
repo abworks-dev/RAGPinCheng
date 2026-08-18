@@ -62,13 +62,19 @@ from .maintenance import (
 from .system_overview import collect_system_overview
 from src.external_usage import usage_summary
 from .content_permission_catalog import CONTENT_PERMISSIONS
-from .content_store import archive_content_item
+from .content_store import archive_content_item, normalize_content_filename
 from .db import get_db
 from .feedback import read_records
 from .indexing import create_job, enqueue
 from .routes_transcription import build_transcription_service
 from .transcription_schemes import get_scheme
 from .routes_media import safe_join, stream_media_file
+from .media_transcript_catalog import DEFAULT_MEDIA_TRANSCRIPT_CATEGORY_ID
+from .media_upload_conflicts import (
+    find_media_upload_conflicts,
+    normalize_media_title,
+    require_active_category,
+)
 from .schemas import (
     AdminConversationListResponse,
     AdminConversationSummaryDTO,
@@ -93,6 +99,10 @@ from .schemas import (
     IndexedDocumentDTO,
     IndexedDocumentListResponse,
     MediaAssetDTO,
+    MediaUploadConflictDTO,
+    MediaUploadPreflightEntryDTO,
+    MediaUploadPreflightRequest,
+    MediaUploadPreflightResponse,
     CleanupPreviewResponse,
     CleanupResponse,
     MaintenanceRunDTO,
@@ -1193,6 +1203,93 @@ def _validate_transcript_markdown(md_bytes: bytes) -> None:
         )
 
 
+def _suggest_media_identity(
+    conn: sqlite3.Connection,
+    *,
+    category_id: str,
+    title: str,
+    original_filename: str,
+    reserved_titles: set[str] | None = None,
+    reserved_filenames: set[str] | None = None,
+) -> tuple[str, str]:
+    path = Path(original_filename)
+    for number in range(1, 10_000):
+        candidate_title = f"{title} ({number})"
+        candidate_filename = f"{path.stem} ({number}){path.suffix}"
+        title_key = normalize_media_title(candidate_title)[1]
+        filename_key = normalize_content_filename(candidate_filename)[1]
+        if (
+            title_key not in (reserved_titles or set())
+            and filename_key not in (reserved_filenames or set())
+            and not find_media_upload_conflicts(
+                conn,
+                category_id=category_id,
+                title=candidate_title,
+                original_filename=candidate_filename,
+            )
+        ):
+            return candidate_title, candidate_filename
+    raise HTTPException(status_code=409, detail="无法生成可用的重命名建议")
+
+
+@router.post("/media/preflight", response_model=MediaUploadPreflightResponse)
+def preflight_media_upload(
+    body: MediaUploadPreflightRequest,
+    _admin: CurrentUser = Depends(require_admin),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> MediaUploadPreflightResponse:
+    try:
+        require_active_category(conn, body.category_id)
+    except ValueError:
+        raise HTTPException(status_code=409, detail="所选目标目录当前不可用")
+    entries: list[MediaUploadPreflightEntryDTO] = []
+    batch_titles: set[str] = set()
+    batch_filenames: set[str] = set()
+    suggested_titles: set[str] = set()
+    suggested_filenames: set[str] = set()
+    for item in body.items:
+        try:
+            clean_title, title_key = normalize_media_title(item.title)
+            clean_filename, filename_key = normalize_content_filename(item.original_filename)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="视频标题或源文件名不合法")
+        conflicts = find_media_upload_conflicts(
+            conn,
+            category_id=body.category_id,
+            title=clean_title,
+            original_filename=clean_filename,
+        )
+        duplicate_in_batch = title_key in batch_titles or filename_key in batch_filenames
+        batch_titles.add(title_key)
+        batch_filenames.add(filename_key)
+        suggested_title = suggested_filename = None
+        if conflicts or duplicate_in_batch:
+            suggested_title, suggested_filename = _suggest_media_identity(
+                conn,
+                category_id=body.category_id,
+                title=clean_title,
+                original_filename=clean_filename,
+                reserved_titles=batch_titles | suggested_titles,
+                reserved_filenames=batch_filenames | suggested_filenames,
+            )
+            suggested_titles.add(normalize_media_title(suggested_title)[1])
+            suggested_filenames.add(normalize_content_filename(suggested_filename)[1])
+        entries.append(
+            MediaUploadPreflightEntryDTO(
+                client_id=item.client_id,
+                status=(
+                    "ambiguous"
+                    if duplicate_in_batch or len(conflicts) > 1
+                    else "conflict" if conflicts else "ready"
+                ),
+                suggested_title=suggested_title,
+                suggested_filename=suggested_filename,
+                conflicts=[MediaUploadConflictDTO(**asdict(conflict)) for conflict in conflicts],
+            )
+        )
+    return MediaUploadPreflightResponse(category_id=body.category_id, entries=entries)
+
+
 @router.post("/media", response_model=MediaAssetDTO, response_model_exclude_none=True)
 async def upload_media(
     video: UploadFile = File(...),
@@ -1204,13 +1301,19 @@ async def upload_media(
     conn: sqlite3.Connection = Depends(get_db),
     replacement_source_media_id: Annotated[str | None, Form()] = None,
     scheme_id: Annotated[str | None, Form()] = None,
+    category_id: Annotated[str | None, Form()] = None,
+    original_filename: Annotated[str | None, Form()] = None,
 ) -> MediaAssetDTO:
     """Upload one MP4 with either a manual transcript or a trusted Profile."""
     import uuid
 
-    video_name = (video.filename or "").strip()
+    video_name = (original_filename or video.filename or "").strip()
     transcript_name = (transcript.filename or "").strip() if transcript else ""
-    clean_title = title.strip()
+    try:
+        clean_title = normalize_media_title(title)[0]
+        video_name = normalize_content_filename(video_name)[0]
+    except ValueError:
+        raise HTTPException(status_code=400, detail="视频标题或源文件名不合法")
     automatic = transcript is None
 
     if automatic and scheme_id is not None:
@@ -1238,9 +1341,6 @@ async def upload_media(
             detail="严格资料版本模式下不再接受旧式人工转录，请使用自动转录流程。",
         )
 
-    if not clean_title or len(clean_title) > 200:
-        raise HTTPException(status_code=400, detail="标题不能为空且不能超过 200 字符")
-
     if not video_name or Path(video_name).suffix.lower() not in _ALLOWED_VIDEO_EXTS:
         raise HTTPException(status_code=400, detail="只支持 .mp4 视频文件")
 
@@ -1260,6 +1360,42 @@ async def upload_media(
         transcript_bytes = await transcript.read()
         _validate_transcript_markdown(transcript_bytes)
 
+    if category_id is None and replacement_source_media_id is not None:
+        source_category = conn.execute(
+            """SELECT i.category_id FROM content_items i
+               WHERE i.media_id=? AND i.content_kind='media_transcript' AND i.archived_at IS NULL""",
+            (replacement_source_media_id,),
+        ).fetchone()
+        category_id = str(source_category["category_id"]) if source_category is not None else None
+    target_category_id = category_id or DEFAULT_MEDIA_TRANSCRIPT_CATEGORY_ID
+    try:
+        require_active_category(conn, target_category_id)
+    except ValueError:
+        raise HTTPException(status_code=409, detail="所选目标目录当前不可用")
+
+    def validate_current_conflicts() -> None:
+        conflicts = find_media_upload_conflicts(
+            conn,
+            category_id=target_category_id,
+            title=clean_title,
+            original_filename=video_name,
+        )
+        if replacement_source_media_id is None and conflicts:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "media_upload_conflict_changed", "message": "目标目录中的同名资料已变化，请重新检查。"},
+            )
+        if replacement_source_media_id is not None and (
+            len(conflicts) != 1 or conflicts[0].media_id != replacement_source_media_id
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "media_upload_conflict_changed", "message": "待替换资料已变化，请重新检查。"},
+            )
+
+    if not automatic:
+        validate_current_conflicts()
+
     # A repeated automatic request must resolve before creating another media row
     # or writing another permanent media directory.  The uploaded bytes are read
     # only to verify the request identity bound to the existing key.
@@ -1270,6 +1406,7 @@ async def upload_media(
             SELECT j.id AS job_id,j.profile_id,j.scheme_id,j.created_by,
                    m.media_id,m.title,m.original_filename,m.mime_type,m.file_size,
                    m.sha256,m.transcript_origin,m.status,m.created_at,m.updated_at,m.error,
+                   m.target_category_id,
                    r.source_media_id AS replacement_source_media_id
             FROM transcription_jobs j
             JOIN media_assets m ON m.media_id=j.media_id
@@ -1303,6 +1440,7 @@ async def upload_media(
                 and existing["file_size"] == retry_size
                 and existing["sha256"] == retry_digest.hexdigest()
                 and existing["replacement_source_media_id"] == replacement_source_media_id
+                and (existing["target_category_id"] or DEFAULT_MEDIA_TRANSCRIPT_CATEGORY_ID) == target_category_id
             )
             if not same_identity:
                 raise HTTPException(
@@ -1325,7 +1463,9 @@ async def upload_media(
                 updated_at=existing["updated_at"],
                 error=existing["error"],
                 transcription_job_id=existing["job_id"],
+                category_id=existing["target_category_id"],
             )
+        validate_current_conflicts()
         if replacement_source_media_id is not None:
             source = conn.execute(
                 """SELECT m.title
@@ -1431,30 +1571,44 @@ async def upload_media(
                 pass
             raise HTTPException(status_code=500, detail=f"写入转录稿失败：{exc}")
 
-    conn.execute(
-        """
-        INSERT INTO media_assets
-        (media_id, title, original_filename, storage_rel_path,
-         mime_type, file_size, sha256, transcript_source_path,
-         transcript_origin, status, created_by, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            media_id,
-            clean_title,
-            video_name,
-            f"{media_id}/original.mp4",
-            "video/mp4",
-            total_video,
-            video_digest.hexdigest() if automatic else None,
-            None if transcript_path is None else str(transcript_path),
-            "generated" if automatic else "uploaded",
-            "uploaded" if automatic else "transcript_ready",
-            admin.id,
-            now,
-            now,
-        ),
-    )
+    try:
+        conn.execute(
+            """
+            INSERT INTO media_assets
+            (media_id, title, original_filename, storage_rel_path,
+             mime_type, file_size, sha256, transcript_source_path,
+             transcript_origin, status, created_by, created_at, updated_at, target_category_id,
+             normalized_title, normalized_original_filename)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                media_id,
+                clean_title,
+                video_name,
+                f"{media_id}/original.mp4",
+                "video/mp4",
+                total_video,
+                video_digest.hexdigest() if automatic else None,
+                None if transcript_path is None else str(transcript_path),
+                "generated" if automatic else "uploaded",
+                "uploaded" if automatic else "transcript_ready",
+                admin.id,
+                now,
+                now,
+                target_category_id,
+                None if replacement_source_media_id is not None else normalize_media_title(clean_title)[1],
+                None if replacement_source_media_id is not None else normalize_content_filename(video_name)[1],
+            ),
+        )
+    except sqlite3.IntegrityError:
+        conn.rollback()
+        if transcript_path is not None:
+            transcript_path.unlink(missing_ok=True)
+        shutil.rmtree(media_dir, ignore_errors=True)
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "media_upload_conflict_changed", "message": "目标目录中的同名资料已变化，请重新检查。"},
+        )
     conn.commit()
 
     if replacement_source_media_id is not None:
@@ -1554,6 +1708,7 @@ async def upload_media(
         updated_at=row["updated_at"],
         error=row["error"],
         transcription_job_id=transcription_job_id,
+        category_id=target_category_id,
     )
 
 
@@ -1568,6 +1723,8 @@ def list_media_assets(
         """
         SELECT m.media_id, m.title, m.original_filename, m.mime_type, m.file_size,
                m.transcript_origin, m.status, m.created_at, m.updated_at, m.error,
+               COALESCE(i.category_id,m.target_category_id) AS category_id,
+               i.id AS catalog_item_id,h.current_version_id,
                v.review_status, v.publication_status,
                CASE WHEN h.current_version_id=v.id THEN 1 ELSE 0 END AS is_current_version,
                (
@@ -1587,6 +1744,7 @@ def list_media_assets(
                 WHERE r.candidate_media_id=m.media_id OR r.source_media_id=m.media_id
                 ORDER BY r.created_at DESC,r.id DESC LIMIT 1) AS replacement_status
         FROM media_assets m
+        LEFT JOIN content_items i ON i.media_id=m.media_id AND i.archived_at IS NULL
         LEFT JOIN transcript_versions v ON v.id=(
             SELECT v2.id FROM transcript_versions v2
             WHERE v2.media_id=m.media_id
@@ -1619,6 +1777,9 @@ def list_media_assets(
             replacement_source_media_id=r["replacement_source_media_id"],
             replacement_candidate_media_id=r["replacement_candidate_media_id"],
             replacement_status=r["replacement_status"],
+            category_id=r["category_id"],
+            catalog_item_id=r["catalog_item_id"],
+            current_version_id=r["current_version_id"],
         )
         for r in rows
     ]

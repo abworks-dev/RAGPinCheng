@@ -1099,6 +1099,22 @@ MIGRATIONS = (
             "CREATE INDEX IF NOT EXISTS idx_category_force_delete_runs_created ON category_force_delete_runs(created_at DESC)",
         ),
     ),
+    Migration(
+        26,
+        "media_upload_directory_and_conflicts",
+        (
+            "ALTER TABLE media_assets ADD COLUMN target_category_id TEXT REFERENCES category_nodes(id) ON DELETE RESTRICT",
+            "ALTER TABLE media_assets ADD COLUMN normalized_title TEXT",
+            "ALTER TABLE media_assets ADD COLUMN normalized_original_filename TEXT",
+            "CREATE INDEX IF NOT EXISTS idx_media_assets_target_category ON media_assets(target_category_id)",
+            """CREATE UNIQUE INDEX IF NOT EXISTS uq_media_assets_active_category_title
+               ON media_assets(target_category_id,normalized_title)
+               WHERE status<>'archived' AND target_category_id IS NOT NULL AND normalized_title IS NOT NULL""",
+            """CREATE UNIQUE INDEX IF NOT EXISTS uq_media_assets_active_category_filename
+               ON media_assets(target_category_id,normalized_original_filename)
+               WHERE status<>'archived' AND target_category_id IS NOT NULL AND normalized_original_filename IS NOT NULL""",
+        ),
+    ),
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 PHASE2_TABLES = frozenset(

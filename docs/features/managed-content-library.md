@@ -50,6 +50,8 @@ Schema 16 为历史上已有正式 head 的未归档视频补建目录壳。目�
 
 Schema 19 增加 `media_metadata_revisions` 和 `media_replacements`。媒体标题/源文件名修订复用当前正式 Markdown 创建待审核候选；替换视频作为新的媒体、转录和索引候选处理。两类候选都在审核、索引和发布成功前保留旧 `media_transcript_heads`、目录壳和检索可见内容；最终激活在一个 SQLite 事务内切换 head 与目录关联，失败整笔回滚。旧视频只在替换成功后标记归档，物理文件不在该事务中删除。
 
+Schema 26 为媒体记录增加目标归档目录和规范化标题/源文件名，并以部分唯一索引保护新上传媒体的目录内身份。视频上传向导先选择发布后的归档目录，再通过 `POST /api/admin/media/preflight` 按 Unicode NFKC、去除首尾空格和不区分大小写规则检查资料标题与源文件名。冲突可逐项跳过、重命名后另存，或在唯一命中正式资料且使用自动转录时作为已有资料的新版本；上传接口会再次校验，预检后状态变化或并发唯一冲突返回 `media_upload_conflict_changed`。尚未发布但未归档的媒体也占用所选目录内的标题和源文件名，但不能作为更新目标。替换候选在旧媒体归档后于同一事务接管规范化身份。
+
 ## 列表与版本操作
 
 - 列表标题区显示当前目录、资料数量和选择摘要；搜索框位于标题右侧，状态与来源筛选收纳在搜索框展开层内，目录范围始终跟随当前地址栏；选择两份及以上资料时，“新建目录”切换为“批量操作”。
@@ -64,7 +66,7 @@ Schema 19 增加 `media_metadata_revisions` 和 `media_replacements`。媒体标
 - 编辑媒体信息不会立即修改正式条目。候选稿必须重新审核、索引并发布，成功后标题、源文件名、目录壳和正式 head 同时生效；审核拒绝或索引/事务失败时旧名称和旧 head 保持不变。
 - 替换视频必须从视频管理选择新的 MP4 和当前可用的服务端 Profile。重复请求以幂等键同时绑定上传者、标题、文件名、文件内容、Profile 和源视频；转录或发布失败不会归档旧视频。候选正式发布后，原目录壳原地关联新媒体并保留目录位置。
 - 视频转录稿只展示 `media_transcript_heads` 指向的当前正式版本。产生较新的待处理稿时，旧正式稿继续在资料库和检索中可见，并显示“有新转录稿待处理”；待处理稿不会作为第二份资料出现。
-- 历史视频默认进入 `05 培训资料`；发布负责人可移动视频目录壳，移动不会改变视频文件、转录发布状态、正式 head 或 Qdrant 索引。同名视频允许共存，不参与普通文档的目录文件名冲突约束。
+- 历史视频默认进入 `05 培训资料`；新上传视频可选择发布后的归档目录。发布负责人可从资料管理或视频管理列表移动视频目录壳，移动不会改变视频文件、转录发布状态、正式 head 或 Qdrant 索引。同一活动目录内的新上传视频按资料标题和源文件名执行同名预检；不同目录仍允许同名。
 - 重命名同时修改资料标题和源文件名；更新上传新对象，并可沿用原名称或使用上传文件名。两者都会新增递增的草稿版本，不覆盖历史版本或对象。
 - 已发布资料生成新草稿时，旧 `content_item_heads` 保持有效，直到新版本发布成功，避免检索空窗。此期间不能移动或由仅有整理权限的账号删除该资料。
 - 文件名按 Unicode NFKC 和不区分大小写形式规范化。同一活动目录下出现同名资料时返回结构化 `409`；用户确认替换后，冲突资料与新版本写入在同一事务中完成，冲突资料进入回收站并立即退出检索。
@@ -82,6 +84,7 @@ Schema 19 增加 `media_metadata_revisions` 和 `media_replacements`。媒体标
 - `POST /api/admin/content/items/{item_id}/versions`
 - `GET /api/admin/content/items/{item_id}/media-download?part=video|transcript|all`
 - `POST /api/admin/transcription/media/{media_id}/metadata-revisions`
+- `POST /api/admin/media/preflight`
 - `POST /api/admin/media`（替换时额外提交 `replacement_source_media_id`，且必须使用自动转录 Profile）
 
 ## 权限
@@ -159,6 +162,6 @@ Schema 19 增加 `media_metadata_revisions` 和 `media_replacements`。媒体标
 - 视频目录登记与访问：`tests/test_transcription_publication_transaction.py`、`tests/test_media_library_access.py`
 - 视频下载、媒体信息修订与替换事务：`tests/test_media_library_video_actions.py`、`tests/test_content_library_api.py`
 - 状态、对象与检索可见性：`tests/test_content_library_foundation.py`
-- 页面交互：`frontend/src/pages/admin/AdminManagedContentPage.test.tsx`
+- 页面交互：`frontend/src/pages/admin/AdminManagedContentPage.test.tsx`、`frontend/src/pages/admin/AdminMediaPage.test.tsx`
 - 浏览器布局：`frontend/tests/visual/admin-workflows.spec.ts`
 - Golden：`frontend/tests/visual/admin-golden.spec.ts`

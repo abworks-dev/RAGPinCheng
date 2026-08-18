@@ -1045,6 +1045,26 @@ class SQLiteTranscriptionStore:
                     "UPDATE media_assets SET status='archived',updated_at=? WHERE media_id=?",
                     (now, replacement["source_media_id"]),
                 )
+                from .content_store import normalize_content_filename
+                from .media_upload_conflicts import normalize_media_title
+
+                candidate_identity = self._conn.execute(
+                    "SELECT title,original_filename,target_category_id FROM media_assets WHERE media_id=?",
+                    (version.media_id,),
+                ).fetchone()
+                if candidate_identity is None:
+                    raise StoreConflictError("replacement_candidate_unavailable")
+                self._conn.execute(
+                    """UPDATE media_assets
+                       SET normalized_title=?,normalized_original_filename=?,updated_at=?
+                       WHERE media_id=?""",
+                    (
+                        normalize_media_title(str(candidate_identity["title"]))[1],
+                        normalize_content_filename(str(candidate_identity["original_filename"]))[1],
+                        now,
+                        version.media_id,
+                    ),
+                )
                 self._conn.execute(
                     """UPDATE media_replacements
                        SET status='activated',activated_at=?,updated_at=? WHERE id=?""",
