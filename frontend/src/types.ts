@@ -274,6 +274,11 @@ export type SystemOverview = {
     disk_free_mb?: number;
     disk_minimum_mb?: number;
   };
+  external_usage: Record<"today" | "month" | "all", Record<string, {
+    requests: number; successes: number; prompt_tokens: number;
+    completion_tokens: number; total_tokens: number; item_count: number;
+    input_bytes: number; avg_latency_ms: number | null;
+  }>>;
 };
 
 export type MaintenanceSettings = {

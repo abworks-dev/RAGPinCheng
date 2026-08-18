@@ -582,6 +582,11 @@ export async function installAdminRoutes(
           checked_at: 1700000000,
           error_code: null,
         },
+        external_usage: {
+          today: {},
+          month: {},
+          all: {},
+        },
       });
     }
     if (request.method() === "GET" && path === "/api/admin/maintenance") {

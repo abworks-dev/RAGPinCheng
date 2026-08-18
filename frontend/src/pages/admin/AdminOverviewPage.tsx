@@ -9,6 +9,7 @@ import { LoadingState } from "../../components/ui/loading-state";
 import type { AdminStats, MaintenanceStatus, SystemOverview } from "../../types";
 import { formatAdminDate } from "../../lib/admin-formatters";
 import { ProductionRuntimeStatus } from "./ProductionRuntimeStatus";
+import { formatBytes } from "../../lib/admin-formatters";
 
 const pageHeading = (
   <div>
@@ -124,6 +125,19 @@ export function AdminOverviewPage({ onOpenMaintenance }: AdminOverviewPageProps)
         error={runtimeError}
         onRefresh={() => void loadRuntime()}
       />
+
+      {runtime && <section aria-labelledby="external-usage-heading" className="space-y-3">
+        <div><h2 id="external-usage-heading" className="text-ui-base font-semibold text-foreground">联网服务用量</h2><p className="mt-1 text-ui-xs text-muted-foreground">本系统观测到的调用量，不代表供应商账单或账户余额。</p></div>
+        <div className="grid grid-cols-1 overflow-hidden rounded-ui-xl border border-border bg-card divide-y divide-border xl:grid-cols-2 xl:divide-x xl:divide-y-0">
+          {(["zhipu", "mineru"] as const).map(provider => {
+            const today = runtime.external_usage.today[provider];
+            const month = runtime.external_usage.month[provider];
+            const requests = today?.requests ?? 0;
+            const failures = requests - (today?.successes ?? 0);
+            return <div key={provider} className="p-4 sm:p-5"><div className="flex items-center justify-between gap-3"><h3 className="text-ui-sm font-semibold">{provider === "zhipu" ? "智谱 GLM" : "MinerU 云解析"}</h3><Badge variant={failures ? "warning" : "success"}>{failures ? `今日失败 ${failures}` : "今日正常"}</Badge></div><dl className="mt-4 grid grid-cols-2 gap-4"><div><dt className="text-ui-xs text-muted-foreground">今日调用</dt><dd className="mt-1 text-ui-lg font-semibold tabular-nums">{requests}</dd></div><div><dt className="text-ui-xs text-muted-foreground">近 30 天调用</dt><dd className="mt-1 text-ui-lg font-semibold tabular-nums">{month?.requests ?? 0}</dd></div>{provider === "zhipu" ? <><div><dt className="text-ui-xs text-muted-foreground">今日 Token</dt><dd className="mt-1 text-ui-sm font-semibold tabular-nums">{(today?.total_tokens ?? 0).toLocaleString()}</dd></div><div><dt className="text-ui-xs text-muted-foreground">近 30 天 Token</dt><dd className="mt-1 text-ui-sm font-semibold tabular-nums">{(month?.total_tokens ?? 0).toLocaleString()}</dd></div></> : <><div><dt className="text-ui-xs text-muted-foreground">近 30 天文件批次</dt><dd className="mt-1 text-ui-sm font-semibold tabular-nums">{month?.item_count ?? 0}</dd></div><div><dt className="text-ui-xs text-muted-foreground">近 30 天上传量</dt><dd className="mt-1 text-ui-sm font-semibold tabular-nums">{formatBytes(month?.input_bytes ?? 0)}</dd></div></>}</dl></div>;
+          })}
+        </div>
+      </section>}
 
       <section aria-labelledby="overview-maintenance-heading" className="space-y-3">
         <div className="flex items-center justify-between gap-4">
