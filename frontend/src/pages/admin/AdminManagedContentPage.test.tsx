@@ -1670,7 +1670,7 @@ describe("AdminManagedContentPage", () => {
     expect(screen.getAllByRole("button", { name: /调整“建模标准”的分类/ }).every((button) => button.hasAttribute("disabled"))).toBe(true);
   });
 
-  it("keeps the workflow button before common actions and moves secondary actions into More", async () => {
+  it("keeps workflow first and exposes secondary actions for wide and compact layouts", async () => {
     mocks.permissions = ORGANIZER_PERMISSIONS;
     mocks.items.mockResolvedValue({ items: [{ ...item, lifecycle_status: "draft" }], total: 1, status_counts: { draft: 1 } });
     render(<AdminManagedContentPage />);
@@ -1678,6 +1678,9 @@ describe("AdminManagedContentPage", () => {
 
     for (const actionName of ["查看“建模标准”的详细信息", "预览“建模标准”", "移动“建模标准”", "下载“建模标准”", "更多“建模标准”的操作"]) {
       expect(screen.getAllByRole("button", { name: actionName }).length).toBeGreaterThan(0);
+    }
+    for (const actionName of ["重命名“建模标准”", "更新“建模标准”", "删除“建模标准”"]) {
+      expect(screen.getAllByRole("button", { name: actionName, hidden: true }).length).toBeGreaterThan(0);
     }
     const moreMenu = openMoreActions("建模标准");
     for (const actionName of ["重命名", "更新资料", "移至回收站"]) {
