@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ClipboardCheck, FileUp, Film, LoaderCircle, RefreshCw, Rocket, Settings2, Upload, XCircle } from "lucide-react";
+import { ArrowLeft, CheckCircle2, ClipboardCheck, FileUp, Film, LoaderCircle, RefreshCw, Rocket, Settings2, Trash2, Upload, XCircle } from "lucide-react";
 import { adminMediaApi } from "../../api/admin/media";
 import { Alert, AlertDescription, AlertTitle } from "../../components/ui/alert";
 import { Badge } from "../../components/ui/badge";
@@ -201,6 +201,8 @@ export function AdminMediaPage() {
   const [dragging, setDragging] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
+  const [discardPromptOpen, setDiscardPromptOpen] = useState(false);
+  const [discardPromptMode, setDiscardPromptMode] = useState<"close" | "cancel">("close");
   const [categories, setCategories] = useState<ManagedCategory[]>([]);
   const [targetCategoryId, setTargetCategoryId] = useState("cat-05");
   const [conflictReview, setConflictReview] = useState<MediaUploadPreflightEntry[] | null>(null);
@@ -634,11 +636,24 @@ export function AdminMediaPage() {
   const batchSettledCount = activeBatchItems.filter((item) => item.state === "succeeded" || item.state === "skipped" || item.state === "failed").length;
   const batchUploadingCount = activeBatchItems.filter((item) => item.state === "uploading").length;
   const batchPreparingCount = activeBatchItems.filter((item) => item.state === "preparing").length;
-  const hasUploadDraft = pending.length > 0 || submitting;
+  const settledUploadStates = new Set<UploadState>(["succeeded", "skipped"]);
+  const allUploadItemsSettled = pending.length > 0 && pending.every((item) => settledUploadStates.has(item.state));
+  const hasUploadDraft = submitting || pending.some((item) => !settledUploadStates.has(item.state));
   const resetUploadDraft = () => { setStep(1); setMode(null); setPending([]); setEditingId(null); setSubmitting(false); setActiveBatchIds([]); setUploadError(null); setConflictReview(null); setConflictChoices({}); };
+  const requestDiscardUpload = (mode: "close" | "cancel") => {
+    setDiscardPromptMode(mode);
+    setDiscardPromptOpen(true);
+  };
+  const confirmDiscardUpload = () => {
+    resetUploadDraft();
+    setDiscardPromptOpen(false);
+    setUploadDialogOpen(false);
+  };
   const requestUploadDialogClose = (open: boolean) => {
     if (open) { setUploadDialogOpen(true); return; }
-    if (hasUploadDraft && !submitting && !window.confirm("当前上传流程尚未完成，关闭窗口后进度会保留。点击“确定”关闭并保留进度，点击“取消”继续操作。")) return;
+    if (submitting) { setUploadDialogOpen(false); return; }
+    if (allUploadItemsSettled) { resetUploadDraft(); setUploadDialogOpen(false); return; }
+    if (hasUploadDraft) { requestDiscardUpload("close"); return; }
     setUploadDialogOpen(false);
   };
 
@@ -656,20 +671,25 @@ export function AdminMediaPage() {
       {schemeError && <Alert variant="destructive" role="alert"><AlertTitle>转录方案加载失败</AlertTitle><AlertDescription>{schemeError}</AlertDescription></Alert>}
 
       <Dialog open={uploadDialogOpen} onOpenChange={requestUploadDialogClose}>
-      <DialogContent className="max-h-[90vh] max-w-4xl overflow-y-auto">
-      <Card className="border-0 shadow-none">
-        <CardHeader className="p-4 pb-3 sm:p-5 sm:pb-4">
-          <CardTitle className="text-ui-lg">上传视频与转写</CardTitle>
-          <CardDescription className="mt-1">自动转录成功不代表已经审核、发布或进入索引。</CardDescription>
+      <DialogContent className="flex max-h-[min(90vh,52rem)] max-w-5xl flex-col gap-0 overflow-hidden p-0">
+        <div className="shrink-0 border-b border-border px-4 py-4 sm:px-6 sm:py-5">
+          <div className="flex items-start justify-between gap-4 pr-8">
+            <div className="min-w-0">
+              <DialogTitle className="text-ui-lg sm:text-ui-xl">上传视频与转写</DialogTitle>
+              <DialogDescription className="mt-1">自动转录成功不代表已经审核、发布或进入索引。</DialogDescription>
+            </div>
+            {allUploadItemsSettled && <Badge variant="success" className="shrink-0"><CheckCircle2 className="size-3.5" />本批次已完成</Badge>}
+          </div>
           <ol className="mt-3 grid grid-cols-3 gap-1.5 sm:gap-2" aria-label="上传步骤">
             {["上传视频", "转写方式", "配置并提交"].map((label, index) => (
-              <li key={label} className={`rounded-ui-md border px-2 py-1.5 text-ui-xs sm:px-3 sm:py-2 sm:text-ui-sm ${step === index + 1 ? "border-primary bg-primary/10 font-medium text-primary" : "border-border text-muted-foreground"}`}>
+              <li key={label} className={`min-w-0 rounded-ui-md border px-2 py-2 text-ui-xs sm:px-3 sm:py-2.5 sm:text-ui-sm ${step === index + 1 ? "border-primary bg-primary/10 font-medium text-primary" : "border-border text-muted-foreground"}`}>
                 {index + 1}. {label}
               </li>
             ))}
           </ol>
-        </CardHeader>
-        <CardContent className="space-y-4 px-4 pb-4 pt-0 sm:space-y-5 sm:px-5 sm:pb-5">
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="space-y-4 px-4 py-4 sm:space-y-5 sm:px-6 sm:py-5">
           {step === 1 && (
             <>
               <div
@@ -747,10 +767,11 @@ export function AdminMediaPage() {
                 {pending.map((item) => {
                   const validationError = validateItem(item);
                   const scheme = schemes.find((entry) => entry.scheme_id === item.profileId);
+                  const itemSettled = settledUploadStates.has(item.state);
                   return (
                     <div key={item.id} className="rounded-ui-xl border border-border p-4">
                       <div className="flex gap-3">
-                        <input aria-label={`选择 ${item.file.name}`} type="checkbox" checked={item.selected} onChange={(event) => updatePending(item.id, { selected: event.target.checked })} />
+                        {!itemSettled && <Checkbox aria-label={`选择 ${item.file.name}`} checked={item.selected} onChange={(event) => updatePending(item.id, { selected: event.target.checked })} />}
                         <div className="min-w-0 flex-1">
                           <p className="truncate font-medium">{item.file.name}</p>
                           <p className="text-ui-xs text-muted-foreground">{formatBytes(item.file.size)}</p>
@@ -779,7 +800,13 @@ export function AdminMediaPage() {
                           />
                         </div>
                       )}
-                      <div className="mt-3 grid gap-3 lg:grid-cols-2">
+                      {itemSettled ? (
+                        <dl className="mt-3 grid gap-x-5 gap-y-2 border-t border-border pt-3 text-ui-xs sm:grid-cols-3">
+                          <div className="min-w-0"><dt className="text-muted-foreground">视频标题</dt><dd className="mt-0.5 truncate font-medium text-foreground" title={item.title}>{item.title}</dd></div>
+                          <div className="min-w-0"><dt className="text-muted-foreground">源文件名</dt><dd className="mt-0.5 truncate font-medium text-foreground" title={item.originalFilename}>{item.originalFilename}</dd></div>
+                          <div className="min-w-0"><dt className="text-muted-foreground">{mode === "automatic" ? "转录方案" : "人工转写"}</dt><dd className="mt-0.5 truncate font-medium text-foreground" title={mode === "automatic" ? scheme?.name : item.transcriptFile?.name}>{mode === "automatic" ? scheme?.name || "历史方案" : item.transcriptFile?.name || "未绑定"}</dd></div>
+                        </dl>
+                      ) : <><div className="mt-3 grid gap-3 lg:grid-cols-2">
                         <label className="text-ui-sm font-medium">视频标题
                           <Input aria-label={`${item.file.name} 的视频标题`} className="mt-1" value={item.title} disabled={submitting || item.state === "succeeded"} onChange={(event) => updatePending(item.id, { title: event.target.value, requestId: createRequestId(), state: "waiting", error: null })} />
                         </label>
@@ -808,7 +835,7 @@ export function AdminMediaPage() {
                           </div>
                         )}
                       </div>
-                      {(item.error || validationError) && <p className="mt-2 text-ui-xs text-destructive">{item.error || validationError}</p>}
+                      {(item.error || validationError) && <p className="mt-2 text-ui-xs text-destructive">{item.error || validationError}</p>}</>}
                     </div>
                   );
                 })}
@@ -843,18 +870,46 @@ export function AdminMediaPage() {
                 </div>
               )}
 
-              <div className="flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex flex-wrap gap-2"><Button variant="outline" disabled={submitting} onClick={() => setStep(2)}>返回选择方式</Button><Button variant="ghost" disabled={submitting} onClick={() => { if (window.confirm("确定取消本次上传并清空已选择的文件吗？")) { resetUploadDraft(); setUploadDialogOpen(false); } }}>取消上传</Button></div>
-                <div className="text-right">
-                  <p className="mb-2 text-ui-xs text-muted-foreground">{mode === "manual" ? "保持现有人工 Markdown 上传与索引路径。" : "每个文件使用独立幂等键；最多并发上传 2 个。"}</p>
-                  <Button disabled={!canSubmit || !targetCategoryId} onClick={() => void submitBatch()}>{submitting ? "正在批量提交…" : conflictReview ? "按选择上传" : mode === "manual" ? "上传视频与人工转写" : "上传并创建自动转录任务"}</Button>
+              <div className="sticky bottom-0 z-10 -mx-4 flex flex-col gap-3 border-t border-border bg-popover/95 px-4 pb-1 pt-4 backdrop-blur sm:-mx-6 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                  <Button variant="outline" className="w-full sm:w-auto" disabled={submitting || allUploadItemsSettled} onClick={() => setStep(2)}><ArrowLeft className="size-4" />返回选择方式</Button>
+                  {!allUploadItemsSettled && <Button variant="destructive" className="w-full sm:w-auto" disabled={submitting} onClick={() => requestDiscardUpload("cancel")}><Trash2 className="size-4" />放弃本次上传</Button>}
+                </div>
+                <div className="flex flex-col gap-2 sm:items-end">
+                  {!allUploadItemsSettled && <p className="text-ui-xs text-muted-foreground sm:text-right">{mode === "manual" ? "保持现有人工 Markdown 上传与索引路径。" : "每个文件使用独立幂等键；最多并发上传 2 个。"}</p>}
+                  {allUploadItemsSettled ? (
+                    <Button className="w-full sm:w-auto" onClick={() => requestUploadDialogClose(false)}><CheckCircle2 className="size-4" />完成并关闭</Button>
+                  ) : (
+                    <Button className="w-full sm:w-auto" disabled={!canSubmit || !targetCategoryId} onClick={() => void submitBatch()}>{submitting ? "正在批量提交…" : conflictReview ? "按选择上传" : mode === "manual" ? "上传视频与人工转写" : "上传并创建自动转录任务"}</Button>
+                  )}
                 </div>
               </div>
             </>
           )}
-        </CardContent>
-      </Card>
+        </div>
+        </div>
       </DialogContent>
+      </Dialog>
+
+      <Dialog open={discardPromptOpen} onOpenChange={setDiscardPromptOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{discardPromptMode === "cancel" ? "放弃本次上传？" : "暂时关闭上传流程？"}</DialogTitle>
+            <DialogDescription>
+              {discardPromptMode === "cancel"
+                ? "已提交的任务不会被撤回；未提交的视频将从当前浏览器流程中清除。"
+                : "关闭后未提交的视频和填写内容会保留，下次点击“继续上传”即可恢复。"}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex-col-reverse sm:flex-row">
+            <Button variant="outline" className="w-full sm:w-auto" onClick={() => setDiscardPromptOpen(false)}>继续操作</Button>
+            {discardPromptMode === "cancel" ? (
+              <Button variant="destructive" className="w-full sm:w-auto" onClick={confirmDiscardUpload}>放弃并清空</Button>
+            ) : (
+              <Button className="w-full sm:w-auto" onClick={() => { setDiscardPromptOpen(false); setUploadDialogOpen(false); }}>关闭并保留</Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
       </Dialog>
 
       {editingItem && (

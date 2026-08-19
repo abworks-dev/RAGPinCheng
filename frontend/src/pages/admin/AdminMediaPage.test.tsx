@@ -357,6 +357,44 @@ describe("AdminMediaPage wizard", () => {
     await waitFor(() => expect(screen.getByText("已提交")).toBeInTheDocument());
   });
 
+  it("closes a completed batch without treating it as an unfinished draft", async () => {
+    render(<AdminMediaPage />);
+    await addVideosAndOpenMode([video("completed.mp4")], "自动转录");
+
+    fireEvent.click(screen.getByRole("button", { name: "上传并创建自动转录任务" }));
+    await waitFor(() => expect(screen.getByText("已提交")).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "完成并关闭" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "完成并关闭" }));
+    expect(screen.queryByText("暂时关闭上传流程？")).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "上传视频与转写" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "上传视频" })).toBeInTheDocument();
+  });
+
+  it("offers an explicit preserve action when closing an unfinished batch", async () => {
+    render(<AdminMediaPage />);
+    await addVideosAndOpenMode([video("unfinished.mp4")], "自动转录");
+
+    fireEvent.click(screen.getByRole("button", { name: "关闭" }));
+
+    const prompt = await screen.findByRole("dialog", { name: "暂时关闭上传流程？" });
+    expect(within(prompt).getByText(/关闭后未提交的视频和填写内容会保留/)).toBeInTheDocument();
+    fireEvent.click(within(prompt).getByRole("button", { name: "关闭并保留" }));
+    expect(screen.queryByRole("dialog", { name: "上传视频与转写" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /继续上传/ })).toBeInTheDocument();
+  });
+
+  it("makes abandoning the local upload draft a visible destructive action", async () => {
+    render(<AdminMediaPage />);
+    await addVideosAndOpenMode([video("discard.mp4")], "自动转录");
+
+    fireEvent.click(screen.getByRole("button", { name: "放弃本次上传" }));
+    const prompt = await screen.findByRole("dialog", { name: "放弃本次上传？" });
+    fireEvent.click(within(prompt).getByRole("button", { name: "放弃并清空" }));
+    expect(screen.queryByRole("dialog", { name: "上传视频与转写" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "上传视频" })).toBeInTheDocument();
+  });
+
   it("allows each automatic row to override the batch scheme", async () => {
     render(<AdminMediaPage />);
     await addVideosAndOpenMode([video("one.mp4"), video("two.mp4")], "自动转录");

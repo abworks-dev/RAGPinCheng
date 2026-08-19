@@ -288,6 +288,12 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertIn("parse_transcription_admitted_profile_ids", workflow)
         self.assertIn("PREVIOUS_ASR_ENABLED", workflow)
         self.assertIn("APP_ONLY_ASR_STATE source=container-config", workflow)
+        self.assertIn("APP_ONLY_ASR_ADMISSION source=running-backend", workflow)
+        self.assertIn("APP_ONLY_ASR_ADMISSION source=container-config", workflow)
+        self.assertIn(
+            'export TRANSCRIPTION_ADMITTED_PROFILE_IDS="${PREVIOUS_TRANSCRIPTION_ADMITTED_PROFILE_IDS}"',
+            workflow,
+        )
         self.assertIn(".Config.Env", workflow)
         self.assertIn("export ASR_ENABLED=true", workflow)
         self.assertIn('export ASR_ENABLED="${PREVIOUS_ASR_ENABLED}"', workflow)
@@ -300,11 +306,8 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertIn("DEPLOY_STATUS=$?", workflow)
         self.assertIn('if [ "${DEPLOY_STATUS}" -ne 0 ]; then', workflow)
         self.assertNotIn("if ! (", workflow)
-        self.assertIn('states[FASTER_WHISPER_PROFILE_ID] == ("enabled", "available")', workflow)
-        self.assertIn(
-            'states[WHISPERX_BALANCED_PROFILE_ID] == ("enabled", "available")',
-            workflow,
-        )
+        self.assertIn('states[profile_id] == ("enabled", "available")', workflow)
+        self.assertIn("for profile_id in expected:", workflow)
         self.assertIn("profiles=\" + \",\".join(sorted(expected))", workflow)
 
         compose = (ROOT / "docker" / "docker-compose.yml").read_text(encoding="utf-8")
