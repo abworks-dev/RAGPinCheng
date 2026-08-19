@@ -477,7 +477,7 @@ test.describe("资料管理", () => {
     const dropOverlay = page.getByTestId("managed-content-drop-overlay");
     await expect(dropOverlay).toBeVisible();
     await expect(dropOverlay).toContainText("松开以上传文件到“03 公司内部标准”");
-    await expect(dropOverlay).toContainText("支持 PDF、Markdown、Word、Excel 和 PPT 文件");
+    await expect(dropOverlay).toContainText("支持 PDF、Markdown、Word、Excel、PPT 和 XMind 文件");
     await dropOverlay.scrollIntoViewIfNeeded();
     await folderBrowser.dispatchEvent("dragover", { dataTransfer });
     await expectInViewport(dropOverlay.getByText("松开以上传文件到“03 公司内部标准”"));
