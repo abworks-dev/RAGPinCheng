@@ -1305,6 +1305,19 @@ def _suggest_media_identity(
     raise HTTPException(status_code=409, detail="无法生成可用的重命名建议")
 
 
+def _cleanup_media_upload(
+    media_dir: Path,
+    *,
+    video_path: Path | None = None,
+    transcript_path: Path | None = None,
+) -> None:
+    """Remove files created by an upload attempt without touching other media."""
+    for path in (video_path, transcript_path):
+        if path is not None:
+            path.unlink(missing_ok=True)
+    shutil.rmtree(media_dir, ignore_errors=True)
+
+
 @router.post("/media/preflight", response_model=MediaUploadPreflightResponse)
 def preflight_media_upload(
     body: MediaUploadPreflightRequest,
@@ -1588,7 +1601,17 @@ async def upload_media(
 
     # Write video to disk in chunks (streaming, not loading all into memory)
     media_dir = MEDIA_DIR / media_id
-    media_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        media_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "media_storage_unavailable",
+                "message": "服务器暂时无法保存视频，请稍后重试。",
+                "retryable": True,
+            },
+        ) from exc
     video_path = media_dir / "original.mp4"
     total_video = 0
     video_digest = hashlib.sha256()
@@ -1601,8 +1624,7 @@ async def upload_media(
                 total_video += len(chunk)
                 if total_video > MAX_VIDEO_BYTES:
                     fh.close()
-                    video_path.unlink()
-                    media_dir.rmdir()
+                    _cleanup_media_upload(media_dir, video_path=video_path)
                     raise HTTPException(
                         status_code=400,
                         detail=f"视频文件超过 {MAX_VIDEO_UPLOAD_MB}MB 上限",
@@ -1610,24 +1632,32 @@ async def upload_media(
                 fh.write(chunk)
                 video_digest.update(chunk)
     except HTTPException:
+        _cleanup_media_upload(media_dir, video_path=video_path)
         raise
     except OSError as exc:
-        raise HTTPException(status_code=500, detail=f"写入视频失败：{exc}")
+        _cleanup_media_upload(media_dir, video_path=video_path)
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "media_storage_unavailable",
+                "message": "服务器暂时无法保存视频，请稍后重试。",
+                "retryable": True,
+            },
+        ) from exc
 
     if total_video == 0:
-        video_path.unlink()
-        media_dir.rmdir()
+        _cleanup_media_upload(media_dir, video_path=video_path)
         raise HTTPException(status_code=400, detail="视频文件不能为空")
 
     if automatic:
         try:
-            await asyncio.to_thread(build_transcription_service().preparer.prepare, media_id)
+            await asyncio.to_thread(
+                build_transcription_service().preparer.prepare,
+                media_id,
+                source_path=video_path,
+            )
         except ContractValidationError as exc:
-            video_path.unlink(missing_ok=True)
-            try:
-                media_dir.rmdir()
-            except OSError:
-                pass
+            _cleanup_media_upload(media_dir, video_path=video_path)
             media_error = {
                 "media_input_unavailable": ("media_audio_source_missing", "视频文件无法读取，请重新上传。", False),
                 "media_audio_preparation_timeout": ("media_audio_preparation_timeout", "音频准备超时，请压缩视频或重新导出后重试。", True),
@@ -1640,11 +1670,13 @@ async def upload_media(
                 detail={"code": media_error[0], "message": media_error[1], "retryable": media_error[2]},
             ) from exc
         except OSError as exc:
-            video_path.unlink(missing_ok=True)
-            try:
-                media_dir.rmdir()
-            except OSError:
-                pass
+            _cleanup_media_upload(media_dir, video_path=video_path)
+            raise HTTPException(
+                status_code=503,
+                detail={"code": "media_storage_unavailable", "message": "服务器暂时无法准备视频音频，请稍后重试。", "retryable": True},
+            ) from exc
+        except sqlite3.Error as exc:
+            _cleanup_media_upload(media_dir, video_path=video_path)
             raise HTTPException(
                 status_code=503,
                 detail={"code": "media_storage_unavailable", "message": "服务器暂时无法准备视频音频，请稍后重试。", "retryable": True},
@@ -1655,17 +1687,20 @@ async def upload_media(
         safe_title = re.sub(r"[\\/:*?\"<>|]", "_", clean_title)[:60]
         transcript_filename = f"{safe_title}__{media_id[:8]}.md"
         transcript_dir = DOCS_DIR / TRANSCRIPT_CATEGORY
-        transcript_dir.mkdir(parents=True, exist_ok=True)
         transcript_path = transcript_dir / transcript_filename
         try:
+            transcript_dir.mkdir(parents=True, exist_ok=True)
             transcript_path.write_bytes(transcript_bytes)
         except OSError as exc:
-            video_path.unlink(missing_ok=True)
-            try:
-                media_dir.rmdir()
-            except OSError:
-                pass
-            raise HTTPException(status_code=500, detail=f"写入转录稿失败：{exc}")
+            _cleanup_media_upload(media_dir, video_path=video_path, transcript_path=transcript_path)
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "media_storage_unavailable",
+                    "message": "服务器暂时无法保存转录稿，请稍后重试。",
+                    "retryable": True,
+                },
+            ) from exc
 
     try:
         conn.execute(
@@ -1696,16 +1731,25 @@ async def upload_media(
                 None if replacement_source_media_id is not None else normalize_content_filename(video_name)[1],
             ),
         )
+        conn.commit()
     except sqlite3.IntegrityError:
         conn.rollback()
-        if transcript_path is not None:
-            transcript_path.unlink(missing_ok=True)
-        shutil.rmtree(media_dir, ignore_errors=True)
+        _cleanup_media_upload(media_dir, video_path=video_path, transcript_path=transcript_path)
         raise HTTPException(
             status_code=409,
             detail={"code": "media_upload_conflict_changed", "message": "目标目录中的同名资料已变化，请重新检查。"},
         )
-    conn.commit()
+    except sqlite3.Error as exc:
+        conn.rollback()
+        _cleanup_media_upload(media_dir, video_path=video_path, transcript_path=transcript_path)
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "media_database_unavailable",
+                "message": "服务器暂时无法登记视频，请稍后重试。",
+                "retryable": True,
+            },
+        ) from exc
 
     if replacement_source_media_id is not None:
         try:
@@ -1718,7 +1762,7 @@ async def upload_media(
                 requested_by=admin.id,
                 now=now,
             )
-        except (ContractValidationError, StoreConflictError):
+        except (ContractValidationError, StoreConflictError, sqlite3.Error):
             conn.execute(
                 "UPDATE media_assets SET status='failed',error=?,updated_at=? WHERE media_id=?",
                 ("replacement request could not be registered", int(time.time()), media_id),
@@ -1757,7 +1801,7 @@ async def upload_media(
                     "retryable": False,
                 },
             )
-        except (ContractValidationError, OSError):
+        except (ContractValidationError, OSError, sqlite3.Error, RuntimeError):
             conn.execute(
                 "UPDATE media_assets SET status='failed',error=?,updated_at=? WHERE media_id=?",
                 ("automatic transcription job could not be created", int(time.time()), media_id),
@@ -1768,18 +1812,40 @@ async def upload_media(
                 (int(time.time()), media_id),
             )
             conn.commit()
-            raise HTTPException(status_code=500, detail="无法创建自动转录任务")
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "transcription_job_unavailable",
+                    "message": "服务器暂时无法创建转录任务，请稍后重试。",
+                    "retryable": True,
+                },
+            )
     else:
-        job_id = create_job(
-            user_id=admin.id,
-            filename=transcript_filename,
-            category=TRANSCRIPT_CATEGORY,
-            doc_type="transcript",
-            source_path=transcript_path,
-            file_size=len(transcript_bytes),
-            media_id=media_id,
-        )
-        enqueue(job_id)
+        try:
+            job_id = create_job(
+                user_id=admin.id,
+                filename=transcript_filename,
+                category=TRANSCRIPT_CATEGORY,
+                doc_type="transcript",
+                source_path=transcript_path,
+                file_size=len(transcript_bytes),
+                media_id=media_id,
+            )
+            enqueue(job_id)
+        except (OSError, sqlite3.Error, RuntimeError) as exc:
+            conn.execute(
+                "UPDATE media_assets SET status='failed',error=?,updated_at=? WHERE media_id=?",
+                ("transcript index job could not be created", int(time.time()), media_id),
+            )
+            conn.commit()
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "index_job_unavailable",
+                    "message": "服务器暂时无法创建转录稿索引任务，请稍后重试。",
+                    "retryable": True,
+                },
+            ) from exc
 
     # Return the media asset
     row = conn.execute(
