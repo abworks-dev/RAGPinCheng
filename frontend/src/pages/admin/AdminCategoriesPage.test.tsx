@@ -193,7 +193,7 @@ describe("AdminCategoriesPage", () => {
     fireEvent.click(await screen.findByRole("button", { name: "移动至" }));
     const dialog = await screen.findByRole("dialog", { name: "移动分类" });
     expect(within(dialog).getByText("01 行业规范与标准")).toBeInTheDocument();
-    fireEvent.change(within(dialog).getByLabelText("目标父分类"), { target: { value: "cat-02" } });
+    fireEvent.click(within(dialog).getByTestId("category-picker-item-cat-02"));
     expect(within(dialog).getByText(/目标位置：02 客户标准 \/ 末尾/)).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole("button", { name: "确认移动" }));
     await waitFor(() => expect(mocks.move).toHaveBeenCalledWith("cat-01", {
