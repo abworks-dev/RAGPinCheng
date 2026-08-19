@@ -341,6 +341,10 @@ export type ManagedCategory = {
   is_active: boolean;
   chat_search_enabled?: boolean;
   chat_filter_selectable?: boolean;
+  chat_search_effective?: boolean;
+  chat_filter_effective?: boolean;
+  chat_search_inherited?: boolean;
+  chat_filter_inherited?: boolean;
   version: number;
   created_at: number;
   updated_at: number;

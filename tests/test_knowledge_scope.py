@@ -80,7 +80,7 @@ def test_scope_listing_hides_categories_not_available_as_filters(tmp_path):
     conn.commit()
     scope_ids = {scope["id"] for scope in list_knowledge_scopes(conn)}
     assert "cat-03" not in scope_ids
-    assert "cat-child" in scope_ids
+    assert "cat-child" not in scope_ids
     conn.close()
 
 

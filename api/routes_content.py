@@ -503,7 +503,24 @@ def _validate_permissions(permissions: list[str]) -> set[str]:
     return requested
 
 
-def _category_dto(row: sqlite3.Row) -> ManagedCategoryDTO:
+def _category_effective_flags(conn: sqlite3.Connection, row: sqlite3.Row) -> tuple[bool, bool, bool, bool]:
+    search = bool(row["is_active"] and row["chat_search_enabled"])
+    selectable = bool(search and row["chat_filter_selectable"])
+    parent_id = row["parent_id"]
+    while parent_id:
+        parent = conn.execute("SELECT parent_id,is_active,chat_search_enabled,chat_filter_selectable FROM category_nodes WHERE id=? AND deleted_at IS NULL", (parent_id,)).fetchone()
+        if parent is None:
+            break
+        if not parent["is_active"] or not parent["chat_search_enabled"]:
+            search = selectable = False
+        elif not parent["chat_filter_selectable"]:
+            selectable = False
+        parent_id = parent["parent_id"]
+    return search, selectable, search != bool(row["is_active"] and row["chat_search_enabled"]), selectable != bool(row["is_active"] and row["chat_search_enabled"] and row["chat_filter_selectable"])
+
+
+def _category_dto(conn: sqlite3.Connection, row: sqlite3.Row) -> ManagedCategoryDTO:
+    search_effective, filter_effective, search_inherited, filter_inherited = _category_effective_flags(conn, row)
     return ManagedCategoryDTO(
         id=row["id"],
         category_key=row["category_key"],
@@ -515,6 +532,10 @@ def _category_dto(row: sqlite3.Row) -> ManagedCategoryDTO:
         is_active=bool(row["is_active"]),
         chat_search_enabled=bool(row["chat_search_enabled"]),
         chat_filter_selectable=bool(row["chat_filter_selectable"]),
+        chat_search_effective=search_effective,
+        chat_filter_effective=filter_effective,
+        chat_search_inherited=search_inherited,
+        chat_filter_inherited=filter_inherited,
         version=row["version"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
@@ -725,7 +746,7 @@ def get_categories(
     _user: CurrentUser = Depends(require_content_permission("category.view")),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> list[ManagedCategoryDTO]:
-    return [_category_dto(row) for row in list_categories(conn, include_inactive=include_inactive)]
+    return [_category_dto(conn, row) for row in list_categories(conn, include_inactive=include_inactive)]
 
 
 @router.post("/categories", response_model=ManagedCategoryDTO)
@@ -749,7 +770,7 @@ def post_category(
         )
     except (ValueError, sqlite3.IntegrityError) as exc:
         _raise_domain_error(exc)
-    return _category_dto(row)
+    return _category_dto(conn, row)
 
 
 @router.patch("/categories/{category_id}", response_model=ManagedCategoryDTO)
@@ -775,7 +796,7 @@ def patch_category(
         )
     except (ValueError, sqlite3.IntegrityError) as exc:
         _raise_domain_error(exc)
-    return _category_dto(row)
+    return _category_dto(conn, row)
 
 
 @router.patch("/categories/{category_id}/name", response_model=ManagedCategoryDTO)
@@ -796,7 +817,7 @@ def patch_category_name(
         )
     except (ValueError, sqlite3.IntegrityError) as exc:
         _raise_domain_error(exc)
-    return _category_dto(row)
+    return _category_dto(conn, row)
 
 
 @router.patch("/categories/{category_id}/sort-order", response_model=ManagedCategoryDTO)
@@ -817,7 +838,7 @@ def patch_category_sort_order(
         )
     except (ValueError, sqlite3.IntegrityError) as exc:
         _raise_domain_error(exc)
-    return _category_dto(row)
+    return _category_dto(conn, row)
 
 
 @router.patch("/categories/{category_id}/number", response_model=list[ManagedCategoryDTO])
@@ -839,7 +860,7 @@ def patch_category_number(
         )
     except (ValueError, sqlite3.IntegrityError) as exc:
         _raise_domain_error(exc)
-    return [_category_dto(row) for row in rows]
+    return [_category_dto(conn, row) for row in rows]
 
 
 @router.post("/categories/{category_id}/move", response_model=list[ManagedCategoryDTO])
@@ -861,7 +882,7 @@ def move_managed_category(
         )
     except (ValueError, sqlite3.IntegrityError) as exc:
         _raise_domain_error(exc)
-    return [_category_dto(row) for row in rows]
+    return [_category_dto(conn, row) for row in rows]
 
 
 @router.get(
@@ -924,7 +945,7 @@ def delete_managed_category(
         deleted_folder_count=int(result["deleted_folder_count"]),
         renumbered_sibling_count=int(result["renumbered_sibling_count"]),
         parent_id=result["parent_id"],
-        categories=[_category_dto(row) for row in result["categories"]],
+        categories=[_category_dto(conn, row) for row in result["categories"]],
         force_delete=bool(result.get("force_delete", False)),
         cleanup_status=result.get("cleanup_status"),
         cleanup_error_count=int(result.get("cleanup_error_count", 0)),
