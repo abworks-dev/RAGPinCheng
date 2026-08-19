@@ -1,40 +1,111 @@
-import { useEffect, useMemo, useState } from "react";
-import { ChevronDown, ChevronRight, Network } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Maximize2, Minus, Plus } from "lucide-react";
 import { adminContentApi } from "../api/admin/content";
 import type { XMindPreview as XMindPreviewData, XMindTopic } from "../types";
 import { Button } from "./ui/button";
 import { ErrorState } from "./ui/error-state";
 import { LoadingState } from "./ui/loading-state";
 
-function TopicBranch({ topic, depth = 0 }: { topic: XMindTopic; depth?: number }) {
-  const [expanded, setExpanded] = useState(depth < 2);
-  const hasChildren = topic.children.length > 0;
+type MindMapNode = {
+  data: Record<string, unknown>;
+  children: MindMapNode[];
+};
+
+type SimpleMindMapInstance = {
+  resize(): void;
+  destroy(): void;
+  view: { fit(): void; narrow(): void; enlarge(): void };
+};
+
+function toMindMapNode(topic: XMindTopic, depth = 0): MindMapNode {
+  return {
+    data: {
+      uid: topic.id,
+      text: topic.title,
+      note: topic.notes || undefined,
+      expand: depth < 4,
+      ...(depth === 0 ? {
+        color: "#ffffff",
+        fillColor: "#16a085",
+        borderColor: "#0f766e",
+        borderWidth: 2,
+        borderRadius: 8,
+        fontSize: 24,
+      } : {}),
+    },
+    children: topic.children.map((child) => toMindMapNode(child, depth + 1)),
+  };
+}
+
+function MindMapCanvas({ rootTopic }: { rootTopic: XMindTopic }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const instanceRef = useRef<SimpleMindMapInstance | null>(null);
+  const [ready, setReady] = useState(false);
+  const [renderError, setRenderError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let disposed = false;
+    let resizeObserver: ResizeObserver | null = null;
+    setReady(false);
+    setRenderError(null);
+
+    void import("simple-mind-map")
+      .then(({ default: SimpleMindMap }) => {
+        if (disposed || !containerRef.current) return;
+        const instance = new SimpleMindMap({
+          el: containerRef.current,
+          data: toMindMapNode(rootTopic),
+          layout: "mindMap",
+          readonly: true,
+          fit: true,
+          fitPadding: 48,
+          mousewheelAction: "move",
+          theme: "default",
+          themeConfig: {
+            backgroundColor: "#fbfaf7",
+            lineColor: "#8b95a5",
+            lineWidth: 1,
+            secondLineColor: "#8b95a5",
+            nodeUseLineStyle: false,
+          },
+        });
+        instanceRef.current = instance;
+        if (typeof ResizeObserver !== "undefined") {
+          resizeObserver = new ResizeObserver(() => instance.resize());
+          resizeObserver.observe(containerRef.current);
+        }
+        window.requestAnimationFrame(() => {
+          if (disposed) return;
+          instance.view.fit();
+          setReady(true);
+        });
+      })
+      .catch(() => {
+        if (!disposed) setRenderError("思维导图渲染器加载失败");
+      });
+
+    return () => {
+      disposed = true;
+      resizeObserver?.disconnect();
+      instanceRef.current?.destroy();
+      instanceRef.current = null;
+    };
+  }, [rootTopic]);
+
+  if (renderError) {
+    return <div className="flex h-full items-center justify-center p-6"><ErrorState title="无法渲染思维导图" description={renderError} /></div>;
+  }
 
   return (
-    <li className="min-w-0">
-      <div className="flex min-h-10 items-start gap-1.5 rounded-ui-md px-2 py-1.5 hover:bg-surface-muted">
-        {hasChildren ? (
-          <button
-            type="button"
-            className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-ui-md text-muted-foreground hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            aria-label={expanded ? `收起${topic.title}` : `展开${topic.title}`}
-            aria-expanded={expanded}
-            onClick={() => setExpanded((value) => !value)}
-          >
-            {expanded ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
-          </button>
-        ) : <span className="size-7 shrink-0" aria-hidden="true" />}
-        <div className="min-w-0 flex-1 pt-1">
-          <p className="break-words text-ui-sm font-medium leading-5">{topic.title}</p>
-          {topic.notes && <p className="mt-1 whitespace-pre-wrap break-words text-ui-xs leading-5 text-muted-foreground">{topic.notes}</p>}
-        </div>
+    <div className="relative h-full min-h-[320px] overflow-hidden bg-[#fbfaf7]" data-testid="xmind-map-canvas">
+      {!ready && <div className="absolute inset-0 z-10 bg-background"><LoadingState label="正在绘制思维导图…" /></div>}
+      <div ref={containerRef} className="h-full w-full touch-none" />
+      <div className="absolute bottom-4 right-4 z-20 flex items-center gap-1 rounded-ui-md border border-border bg-background/95 p-1 shadow-panel">
+        <Button size="icon" variant="ghost" aria-label="缩小思维导图" title="缩小" onClick={() => instanceRef.current?.view.narrow()}><Minus className="size-4" /></Button>
+        <Button size="icon" variant="ghost" aria-label="适配思维导图" title="适配画布" onClick={() => instanceRef.current?.view.fit()}><Maximize2 className="size-4" /></Button>
+        <Button size="icon" variant="ghost" aria-label="放大思维导图" title="放大" onClick={() => instanceRef.current?.view.enlarge()}><Plus className="size-4" /></Button>
       </div>
-      {hasChildren && expanded && (
-        <ul className="ml-5 border-l border-border pl-2">
-          {topic.children.map((child) => <TopicBranch key={child.id} topic={child} depth={depth + 1} />)}
-        </ul>
-      )}
-    </li>
+    </div>
   );
 }
 
@@ -74,27 +145,14 @@ export function XMindPreview({ versionId }: { versionId: string }) {
       {data.sheets.length > 1 && (
         <div className="flex shrink-0 gap-2 overflow-x-auto border-b border-border px-4 py-2" role="tablist" aria-label="XMind 画布">
           {data.sheets.map((sheet) => (
-            <Button
-              key={sheet.id}
-              size="sm"
-              variant={selectedSheet.id === sheet.id ? "secondary" : "ghost"}
-              role="tab"
-              aria-selected={selectedSheet.id === sheet.id}
-              onClick={() => setSelectedSheetId(sheet.id)}
-            >
+            <Button key={sheet.id} size="sm" variant={selectedSheet.id === sheet.id ? "secondary" : "ghost"} role="tab" aria-selected={selectedSheet.id === sheet.id} onClick={() => setSelectedSheetId(sheet.id)}>
               {sheet.title}
             </Button>
           ))}
         </div>
       )}
-      <div className="min-h-0 flex-1 overflow-auto px-3 py-4 sm:px-5" role="tabpanel" aria-label={selectedSheet.title}>
-        <div className="mx-auto max-w-4xl">
-          <div className="mb-3 flex items-center gap-2 text-ui-sm text-muted-foreground">
-            <Network className="size-4" aria-hidden="true" />
-            <span className="break-words">{selectedSheet.title}</span>
-          </div>
-          <ul><TopicBranch key={selectedSheet.id} topic={selectedSheet.root_topic} /></ul>
-        </div>
+      <div className="min-h-0 flex-1" role="tabpanel" aria-label={selectedSheet.title}>
+        <MindMapCanvas key={selectedSheet.id} rootTopic={selectedSheet.root_topic} />
       </div>
     </div>
   );

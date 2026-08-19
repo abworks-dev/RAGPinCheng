@@ -2,14 +2,34 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { XMindPreview } from "./XMindPreview";
 
-const mocks = vi.hoisted(() => ({ preview: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  preview: vi.fn(),
+  fit: vi.fn(),
+  narrow: vi.fn(),
+  enlarge: vi.fn(),
+  destroy: vi.fn(),
+}));
 
 vi.mock("../api/admin/content", () => ({
   adminContentApi: { xmindPreview: mocks.preview },
 }));
 
+vi.mock("simple-mind-map", () => ({
+  default: class {
+    view = { fit: mocks.fit, narrow: mocks.narrow, enlarge: mocks.enlarge };
+    resize() {}
+    destroy() { mocks.destroy(); }
+  },
+}));
+
 describe("XMindPreview", () => {
-  beforeEach(() => mocks.preview.mockReset());
+  beforeEach(() => {
+    mocks.preview.mockReset();
+    mocks.fit.mockReset();
+    mocks.narrow.mockReset();
+    mocks.enlarge.mockReset();
+    mocks.destroy.mockReset();
+  });
 
   it("switches sheets and expands nested topics", async () => {
     mocks.preview.mockResolvedValue({
@@ -22,11 +42,13 @@ describe("XMindPreview", () => {
 
     render(<XMindPreview versionId="version-1" />);
 
-    expect(await screen.findByText("中心")).toBeInTheDocument();
-    expect(screen.getByText("任务")).toBeInTheDocument();
+    expect(await screen.findByTestId("xmind-map-canvas")).toBeInTheDocument();
+    await waitFor(() => expect(mocks.fit).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole("button", { name: "放大思维导图" }));
+    expect(mocks.enlarge).toHaveBeenCalled();
     fireEvent.click(screen.getByRole("tab", { name: "风险" }));
-    expect(screen.getByText("风险中心")).toBeInTheDocument();
-    expect(screen.getByText("注意事项")).toBeInTheDocument();
+    expect(screen.getByRole("tabpanel", { name: "风险" })).toBeInTheDocument();
+    await waitFor(() => expect(mocks.destroy).toHaveBeenCalled());
   });
 
   it("offers a retry after the preview request fails", async () => {
@@ -39,7 +61,7 @@ describe("XMindPreview", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent("文件无法解析");
     fireEvent.click(screen.getByRole("button", { name: "重新加载" }));
-    await waitFor(() => expect(screen.getByText("已恢复")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("xmind-map-canvas")).toBeInTheDocument());
     expect(mocks.preview).toHaveBeenCalledTimes(2);
   });
 });
