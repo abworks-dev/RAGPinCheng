@@ -14,7 +14,27 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from services.libreoffice.app import _cleanup_dirs, _select_conversion_output, app
-from src.office_convert import OfficeConversionError, convert_docx_to_markdown, convert_pptx_to_markdown, convert_pptx_to_pdf
+from src.office_convert import (
+    OfficeConversionError,
+    _run_conversion_process,
+    convert_docx_to_markdown,
+    convert_pptx_to_markdown,
+    convert_pptx_to_pdf,
+)
+
+
+def _large_result_process_entry(_path: str, output) -> None:
+    output.put(("ok", "x" * (256 * 1024)))
+
+
+def _no_result_process_entry(_path: str, _output) -> None:
+    return
+
+
+def _slow_process_entry(_path: str, _output) -> None:
+    import time
+
+    time.sleep(5)
 
 
 def _synthetic_ooxml(path: Path, content_type: str) -> Path:
@@ -60,6 +80,34 @@ def test_docx_parse_timeout_has_stable_failure(monkeypatch: pytest.MonkeyPatch, 
     monkeypatch.setattr("src.office_convert.OFFICE_PARSE_TIMEOUT_SECONDS", 0)
     with pytest.raises(OfficeConversionError, match="office_parse_timeout"):
         convert_docx_to_markdown(source)
+
+
+def test_conversion_process_drains_large_result_before_join(tmp_path: Path):
+    source = tmp_path / "large-result.docx"
+    source.write_bytes(b"synthetic")
+
+    result = _run_conversion_process(_large_result_process_entry, source)
+
+    assert len(result) == 256 * 1024
+
+
+def test_conversion_process_reports_worker_exit_without_result(tmp_path: Path):
+    source = tmp_path / "no-result.docx"
+    source.write_bytes(b"synthetic")
+
+    with pytest.raises(OfficeConversionError, match="office_parse_failed: exit=0"):
+        _run_conversion_process(_no_result_process_entry, source)
+
+
+def test_conversion_process_terminates_timed_out_worker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    source = tmp_path / "slow.docx"
+    source.write_bytes(b"synthetic")
+    monkeypatch.setattr("src.office_convert.OFFICE_PARSE_TIMEOUT_SECONDS", 0.2)
+
+    with pytest.raises(OfficeConversionError, match="office_parse_timeout: 0.2s"):
+        _run_conversion_process(_slow_process_entry, source)
 
 
 def test_generated_pptx_preserves_slide_metadata(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

@@ -86,19 +86,35 @@ def _run_conversion_process(target: Any, path: Path) -> Any:
     context = multiprocessing.get_context("spawn")
     output = context.Queue(maxsize=1)
     process = context.Process(target=target, args=(str(path), output), daemon=True)
+    deadline = time.monotonic() + timeout
     process.start()
-    process.join(timeout)
-    if process.is_alive():
-        process.terminate()
-        process.join(5)
-        if process.is_alive():
-            process.kill()
-            process.join()
-        raise OfficeConversionError(f"office_parse_timeout: {timeout}s")
     try:
-        status, payload = output.get(timeout=1)
-    except queue.Empty as exc:
-        raise OfficeConversionError(f"office_parse_failed: exit={process.exitcode}") from exc
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise OfficeConversionError(f"office_parse_timeout: {timeout}s")
+            try:
+                status, payload = output.get(timeout=min(remaining, 0.1))
+                break
+            except queue.Empty as exc:
+                if not process.is_alive():
+                    process.join()
+                    raise OfficeConversionError(
+                        f"office_parse_failed: exit={process.exitcode}"
+                    ) from exc
+
+        process.join(max(0, deadline - time.monotonic()))
+        if process.is_alive():
+            raise OfficeConversionError(f"office_parse_timeout: {timeout}s")
+    finally:
+        if process.is_alive():
+            process.terminate()
+            process.join(5)
+            if process.is_alive():
+                process.kill()
+                process.join()
+        output.close()
+        output.join_thread()
     if status != "ok":
         raise OfficeConversionError(f"office_parse_failed: {payload}")
     return payload
