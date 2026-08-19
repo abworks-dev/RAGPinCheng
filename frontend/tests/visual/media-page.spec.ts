@@ -107,6 +107,55 @@ test.describe("视频媒体", () => {
     await page.screenshot({ path: testInfo.outputPath(`media-upload-complete-${viewport.width}x${viewport.height}.png`) });
   });
 
+  test("上传配置控件等高且底部操作栏不随内容滚动", async ({ page }, testInfo) => {
+    await installAdminRoutes(page, "media_upload");
+    await page.goto("/admin/media");
+    await page.getByRole("button", { name: "上传视频" }).click();
+    await page.getByLabel("选择视频文件").setInputFiles([
+      { name: "layout-one.mp4", mimeType: "video/mp4", buffer: Buffer.alloc(128, 1) },
+      { name: "layout-two.mp4", mimeType: "video/mp4", buffer: Buffer.alloc(128, 2) },
+      { name: "layout-three.mp4", mimeType: "video/mp4", buffer: Buffer.alloc(128, 3) },
+    ]);
+    await page.getByRole("button", { name: "下一步：选择转写方式" }).click();
+    await page.getByRole("button", { name: /^自动转录/ }).click();
+
+    const controls = [
+      page.getByRole("button", { name: "全选", exact: true }),
+      page.getByRole("button", { name: "取消全选" }),
+      page.getByLabel("批量转录方案"),
+      page.getByRole("button", { name: "应用到已选择视频" }),
+      page.getByRole("button", { name: "返回选择方式" }),
+      page.getByRole("button", { name: "放弃本次上传" }),
+      page.getByRole("button", { name: "上传并创建自动转录任务" }),
+    ];
+    const heights = await Promise.all(controls.map(async (control) => (await control.boundingBox())?.height));
+    expect(new Set(heights).size).toBe(1);
+    const viewport = page.viewportSize()!;
+    if (viewport.width >= 640) {
+      const schemeBounds = await page.getByLabel("批量转录方案").boundingBox();
+      const applyBounds = await page.getByRole("button", { name: "应用到已选择视频" }).boundingBox();
+      expect(schemeBounds).not.toBeNull();
+      expect(applyBounds).not.toBeNull();
+      expect(Math.abs((schemeBounds!.y + schemeBounds!.height) - (applyBounds!.y + applyBounds!.height))).toBeLessThanOrEqual(1);
+    }
+    await page.screenshot({ path: testInfo.outputPath(`media-upload-controls-${viewport.width}x${viewport.height}.png`) });
+
+    const actionBar = page.getByTestId("media-upload-action-bar");
+    const scrollRegion = page.getByTestId("media-upload-scroll-region");
+    const before = await actionBar.boundingBox();
+    await scrollRegion.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+    await expect.poll(() => scrollRegion.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+    const after = await actionBar.boundingBox();
+    expect(before).not.toBeNull();
+    expect(after).not.toBeNull();
+    expect(after!.y).toBe(before!.y);
+    expect(after!.height).toBe(before!.height);
+    await expectInViewport(actionBar);
+    await expectNoBodyOverflow(page);
+
+    await page.screenshot({ path: testInfo.outputPath(`media-upload-fixed-actions-${viewport.width}x${viewport.height}.png`) });
+  });
+
   test("同名视频可逐项选择重命名且窗口保持可读", async ({ page }, testInfo) => {
     await installAdminRoutes(page, "media_conflict");
     await page.goto("/admin/media");
