@@ -436,16 +436,15 @@ test.describe("资料管理", () => {
     ]);
 
     const dialog = page.getByRole("dialog", { name: "上传文件" });
-    await expect(dialog).toContainText("文档进入资料流程，MP4 进入独立转录任务");
-    await expect(dialog.getByLabel("视频转录方案")).not.toHaveValue("");
-    await expect(dialog).toContainText("视频会创建独立转录任务，不会进入普通索引任务");
+    await expect(dialog).toContainText("文档和视频都会先进入资料库；视频显示为待转录");
+    await expect(dialog.getByLabel("视频转录方案")).toHaveCount(0);
     await expectInViewport(dialog.getByRole("button", { name: "确定上传" }));
 
     const multipartUpload = page.waitForResponse((response) => response.request().method() === "POST" && new URL(response.url()).pathname === "/api/admin/content/uploads");
     await dialog.getByRole("button", { name: "确定上传" }).click();
     const request = (await multipartUpload).request();
     const body = request.postData() || "";
-    expect(body).toContain('name="video_scheme_id"');
+    expect(body).not.toContain('name="video_scheme_id"');
     expect(body).toContain('name="video_idempotency_keys"');
     expect(body).toContain("synthetic-video.mp4");
     await expect(page.getByText("已接收 2 个文件", { exact: true })).toBeVisible();
@@ -498,7 +497,7 @@ test.describe("资料管理", () => {
     await expect(dialog).toContainText("已忽略");
     await expect(dialog).toContainText("合成资料包/01 建筑/guide.md");
     await expect(dialog).toContainText("合成资料包/demo.mp4");
-    await expect(dialog.getByLabel("文件夹视频转录方案")).not.toHaveValue("");
+    await expect(dialog.getByLabel("文件夹视频转录方案")).toHaveCount(0);
     await expectInViewport(dialog.getByRole("button", { name: "开始上传" }));
     await expectNoBodyOverflow(page);
     await page.screenshot({ path: testInfo.outputPath("managed-content-folder-upload-confirmation.png"), fullPage: true });
@@ -527,7 +526,7 @@ test.describe("资料管理", () => {
     const dropOverlay = page.getByTestId("managed-content-drop-overlay");
     await expect(dropOverlay).toBeVisible();
     await expect(dropOverlay).toContainText("松开以上传文件到“03 公司内部标准”");
-    await expect(dropOverlay).toContainText("MP4 视频将进入转录任务");
+    await expect(dropOverlay).toContainText("MP4 视频上传后显示为待转录资料");
     await dropOverlay.scrollIntoViewIfNeeded();
     await folderBrowser.dispatchEvent("dragover", { dataTransfer });
     await expectInViewport(dropOverlay.getByText("松开以上传文件到“03 公司内部标准”"));
