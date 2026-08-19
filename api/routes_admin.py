@@ -1553,13 +1553,33 @@ async def upload_media(
     if automatic:
         try:
             await asyncio.to_thread(build_transcription_service().preparer.prepare, media_id)
-        except (ContractValidationError, OSError):
+        except ContractValidationError as exc:
             video_path.unlink(missing_ok=True)
             try:
                 media_dir.rmdir()
             except OSError:
                 pass
-            raise HTTPException(status_code=503, detail="无法准备视频音频轨道")
+            media_error = {
+                "media_input_unavailable": ("media_audio_source_missing", "视频文件无法读取，请重新上传。", False),
+                "media_audio_preparation_timeout": ("media_audio_preparation_timeout", "音频准备超时，请压缩视频或重新导出后重试。", True),
+                "media_audio_preparation_failed": ("media_audio_preparation_failed", "视频音频无法解码，请确认视频包含音轨，并尝试重新导出为 H.264 + AAC MP4。", False),
+                "invalid_prepared_audio": ("media_audio_invalid_output", "音频转换结果无效，请重新导出视频后重试。", True),
+                "empty_prepared_audio": ("media_audio_empty", "视频没有可用音频内容，请选择包含声音的文件。", False),
+            }.get(exc.code, ("media_audio_preparation_failed", "无法准备视频音频轨道，请确认视频格式和音轨后重试。", True))
+            raise HTTPException(
+                status_code=400 if not media_error[2] else 503,
+                detail={"code": media_error[0], "message": media_error[1], "retryable": media_error[2]},
+            ) from exc
+        except OSError as exc:
+            video_path.unlink(missing_ok=True)
+            try:
+                media_dir.rmdir()
+            except OSError:
+                pass
+            raise HTTPException(
+                status_code=503,
+                detail={"code": "media_storage_unavailable", "message": "服务器暂时无法准备视频音频，请稍后重试。", "retryable": True},
+            ) from exc
         transcript_filename = None
         transcript_path = None
     else:
