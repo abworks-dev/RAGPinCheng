@@ -20,6 +20,7 @@ import { timestampToSeconds, useVideoPlayer } from "../hooks/useVideoPlayer";
 import type { ChatMessage, Source } from "../types";
 import { useAutoHideScrollbar } from "../hooks/useAutoHideScrollbar";
 import { stripMarkdown } from "../utils/markdown";
+import { copyText } from "../utils/clipboard";
 import {
   CITATION_EVENT,
   CITATION_HOVER_EVENT,
@@ -98,7 +99,7 @@ export function SourceWorkspace({
   const copyAllSources = async () => {
     if (!activeSet?.sources.length) return;
     try {
-      await navigator.clipboard.writeText(formatSourcesAsMarkdown(activeSet.sources));
+      await copyText(formatSourcesAsMarkdown(activeSet.sources));
       setExportStatus(`已复制 ${activeSet.sources.length} 项来源`);
     } catch {
       setExportStatus("复制全部来源失败，请检查浏览器剪贴板权限。");
@@ -320,7 +321,7 @@ function SourceDetail({
 
   const copySource = async () => {
     try {
-      await navigator.clipboard.writeText(
+      await copyText(
         `[${source.doc_title}] ${sourceLocator(source)}\n${cleanSourceSection(source)}\n\n${text}`,
       );
       setCopied(true);

@@ -70,7 +70,8 @@ Phase 5A/5B 已接通版本列表、Markdown 校对与渲染预览、人工审�
   当前生产应用的准入由受控 deployment workflow 持久化并以实时 capabilities 复核：
   SenseVoice、faster-whisper 与 WhisperX 已准入，Qwen3-ASR 保持关闭。四者复用同一
   Remote Provider 与唯一 Candidate → Canonical 结果流；
-- 静态目录同时新增三个 `qualification_approved` WhisperX v2 Profile，默认均为 disabled；只有实时服务暴露 `whisperx-large-v3-zh-align-v2` 且运行身份哈希与仓库固定配置一致时，管理页才允许创建发布申请。`/v1/diagnostics` 继续只返回有界运行状态，不承载 Prompt 或配置身份。标准应用发布动作只准入均衡 Profile，自然和细分 Profile 继续保持只读候选。
+- 管理端转录方案以 `scheme_id` 作为用户选择和幂等身份，通过受控 Base 映射到固定运行 Profile；任务同时保存实际 `profile_id`、原始 `scheme_id` 与不可变参数快照。WhisperX 自然、均衡、精细及基于 `whisperx-v2` 创建的自定义方案统一使用已准入的均衡运行 Profile，再由快照覆盖分段参数，因此新增自定义方案无需修改环境 allowlist。SenseVoice 与 faster-whisper 方案采用相同映射原则；Qwen3 Base 保持禁用，未知、禁用或归档项失败关闭。重试复用原任务运行配置和方案快照，不读取方案当前状态。
+- 静态目录同时保留三个 `qualification_approved` WhisperX v2 Profile，默认均为 disabled；只有实时服务暴露 `whisperx-large-v3-zh-align-v2` 且运行身份哈希与仓库固定配置一致时，管理页才允许创建发布申请。`/v1/diagnostics` 继续只返回有界运行状态，不承载 Prompt 或配置身份。标准应用部署动作只准入作为固定运行身份的均衡 Profile。
 - ASR service 注册四个固定 service Profile；faster-whisper、Qwen3-ASR 或 WhisperX
   缓存/依赖缺失时仅相应 Profile 不可用，不阻止现有 SenseVoice 服务启动；
 - faster-whisper adapter 固定

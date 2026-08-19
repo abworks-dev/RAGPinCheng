@@ -5,6 +5,8 @@ import wave
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import pytest
+
 from api.db import connect, init_db
 from api.transcription_artifacts import LocalTranscriptionArtifactStore
 from api.transcription_media import FfmpegMediaAudioPreparer
@@ -18,6 +20,9 @@ from src.transcription.provider_registry import ProviderRegistry
 from src.transcription.runtime_ports import ProviderRuntimeState
 from src.transcription.profile_catalog import (
     FUNASR_SENSEVOICE_PROFILE_ID,
+    WHISPERX_BALANCED_PROFILE_ID,
+    WHISPERX_FINE_PROFILE_ID,
+    WHISPERX_NATURAL_PROFILE_ID,
     WHISPERX_PROFILE_ID,
 )
 from src.transcription.types import TimeUnit, TranscriptionJobStatus
@@ -187,7 +192,7 @@ def test_scheme_snapshot_is_persisted_and_retry_ignores_later_scheme_changes(tmp
 
     job = service.create_pending_job(
         media_id=MEDIA_ID,
-        profile_id=custom["id"],
+        profile_id=FUNASR_SENSEVOICE_PROFILE_ID,
         scheme_id=custom["id"],
         request_idempotency_key=REQUEST_ID,
         created_by=1,
@@ -234,6 +239,68 @@ def test_scheme_snapshot_is_persisted_and_retry_ignores_later_scheme_changes(tmp
     finally:
         conn.close()
 
+
+@pytest.mark.parametrize(
+    ("scheme_id", "preset", "max_duration_ms"),
+    (
+        (WHISPERX_NATURAL_PROFILE_ID, "natural", None),
+        (WHISPERX_BALANCED_PROFILE_ID, "balanced", 30_000),
+        (WHISPERX_FINE_PROFILE_ID, "fine", 15_000),
+    ),
+)
+def test_whisperx_system_schemes_use_one_admitted_runtime_profile(
+    tmp_path, scheme_id, preset, max_duration_ms
+):
+    service, _factory = make_service(tmp_path, (WHISPERX_BALANCED_PROFILE_ID,))
+
+    job = service.create_pending_job(
+        media_id=MEDIA_ID,
+        profile_id=WHISPERX_BALANCED_PROFILE_ID,
+        scheme_id=scheme_id,
+        request_idempotency_key=REQUEST_ID,
+        created_by=1,
+    )
+
+    assert job.profile_id == WHISPERX_BALANCED_PROFILE_ID
+    assert job.scheme_id == scheme_id
+    assert job.scheme_snapshot.scheme_id == scheme_id
+    assert job.execution_config.segmentation_config.preset == preset
+    assert job.execution_config.segmentation_config.max_segment_duration_ms == max_duration_ms
+
+
+def test_custom_whisperx_scheme_uses_fixed_runtime_and_frozen_parameters(tmp_path):
+    service, factory = make_service(tmp_path, (WHISPERX_BALANCED_PROFILE_ID,))
+    conn = factory()
+    try:
+        custom = create_scheme(
+            conn,
+            name="自定义 WhisperX",
+            description="固定运行身份",
+            base_id="whisperx-v2",
+            parameters={
+                "segmentation_preset": "custom",
+                "max_duration_ms": 22_000,
+                "max_chars": 260,
+                "merge_gap_ms": 650,
+            },
+            actor_id=1,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    job = service.create_pending_job(
+        media_id=MEDIA_ID,
+        profile_id=WHISPERX_BALANCED_PROFILE_ID,
+        scheme_id=custom["id"],
+        request_idempotency_key=REQUEST_ID,
+        created_by=1,
+    )
+
+    assert job.profile_id == WHISPERX_BALANCED_PROFILE_ID
+    assert job.scheme_id == custom["id"]
+    assert job.scheme_snapshot.parameters["max_duration_ms"] == 22_000
+    assert job.execution_config.segmentation_config.max_segment_chars == 260
 
 def test_cancelled_job_is_terminal_and_worker_does_not_revive_it(tmp_path):
     service, factory = make_service(tmp_path)

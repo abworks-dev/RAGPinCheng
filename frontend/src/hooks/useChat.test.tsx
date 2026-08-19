@@ -69,7 +69,7 @@ describe("useChat persisted message identity", () => {
       updated_at: 1,
       turn_index: 1,
       messages: [
-        { id: 10, role: "user", content: "原问题" },
+        { id: 10, role: "user", content: "原问题", created_at: 1_755_555_555 },
         {
           id: 11,
           role: "assistant",
@@ -100,6 +100,7 @@ describe("useChat persisted message identity", () => {
     });
     const { result } = renderHook(() => useChat({ conversationId: "conversation-1" }));
     await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.messages[0].createdAt).toBe(1_755_555_555);
 
     await act(async () => {
       await result.current.editQuestion("10", "编辑后的问题");

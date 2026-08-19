@@ -89,6 +89,29 @@ function prep(finalCount: number, noSourceFallback = false) {
 }
 
 describe("Message assistant actions", () => {
+  it("shows and delays hiding the message time on hover", () => {
+    vi.useFakeTimers();
+    const { container } = render(<Message msg={{ id: "m1", role: "user", content: "问题", createdAt: 1766000000 }} conversationId={null} turnIndex={1} />);
+    const article = container.querySelector("article")!;
+    expect(article.querySelector("time")).toHaveClass("opacity-0");
+    fireEvent.mouseEnter(article);
+    act(() => vi.advanceTimersByTime(399));
+    expect(article.querySelector("time")).toHaveClass("opacity-0");
+    fireEvent.mouseLeave(article);
+    act(() => vi.advanceTimersByTime(180));
+    expect(article.querySelector("time")).toHaveClass("opacity-0");
+    fireEvent.mouseEnter(article);
+    act(() => vi.advanceTimersByTime(399));
+    expect(article.querySelector("time")).toHaveClass("opacity-0");
+    act(() => vi.advanceTimersByTime(1));
+    expect(article.querySelector("time")).toHaveClass("opacity-100");
+    fireEvent.mouseLeave(article);
+    act(() => vi.advanceTimersByTime(179));
+    expect(article.querySelector("time")).toHaveClass("opacity-100");
+    act(() => vi.advanceTimersByTime(1));
+    expect(article.querySelector("time")).toHaveClass("opacity-0");
+    vi.useRealTimers();
+  });
   it("keeps a top-edge tooltip below the message fade boundary", () => {
     const placement = calculateCitationTooltipPlacement({
       markerTop: 340,
@@ -193,6 +216,26 @@ describe("Message assistant actions", () => {
     );
 
     expect(screen.getByRole("status")).toHaveTextContent("未检索到可用资料，本回答没有知识库来源");
+  });
+
+  it("does not present generation candidates as final answer sources", () => {
+    render(
+      <Message
+        msg={assistant({
+          content: "未找到相关内容。",
+          sources: [],
+          streaming: false,
+          stage: "done",
+          prep: prep(5),
+        })}
+        conversationId="conversation-1"
+        turnIndex={1}
+      />,
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent("未检索到可用资料，本回答没有知识库来源");
+    expect(screen.queryByText(/回答基于/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /查看 5 个来源/ })).not.toBeInTheDocument();
   });
 
   it("shows a destructive status when retrieval confidence blocks generation", () => {

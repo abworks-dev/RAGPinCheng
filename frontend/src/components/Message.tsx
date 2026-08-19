@@ -35,6 +35,7 @@ import { copyText } from "../utils/clipboard";
 import { usePdfPreview } from "../hooks/usePdfPreview";
 import { timestampToSeconds, useVideoPlayer } from "../hooks/useVideoPlayer";
 import { sourceDisplayTitle, sourceLocator } from "../lib/source-export";
+import { formatMessageTime, HIDE_DELAY_MS, SHOW_DELAY_MS } from "../lib/message-time";
 
 const CITATION_TOOLTIP_CLOSE_DELAY_MS = 150;
 const CITATION_TOOLTIP_VIEWPORT_GUTTER = 8;
@@ -109,9 +110,13 @@ function normalizeMath(src: string): string {
 function AnswerStatus({ msg }: { msg: ChatMessage }) {
   if (msg.error) return null;
 
-  const sources = msg.sources?.length ? msg.sources : msg.prep?.used_sources || [];
-  const sourceCount = sources.length || msg.prep?.final_count || 0;
   const stage = msg.stage || (msg.streaming ? "streaming" : msg.content ? "done" : undefined);
+  const sources = stage === "done"
+    ? msg.sources || []
+    : msg.sources?.length ? msg.sources : msg.prep?.used_sources || [];
+  const sourceCount = stage === "done"
+    ? sources.length
+    : sources.length || msg.prep?.final_count || 0;
   const noSources = msg.prep?.no_source_fallback === true || (stage !== "retrieving" && sourceCount === 0);
   const categories = Array.from(new Set(sources.map((source) => source.category).filter(Boolean)));
   const categoryLabel = categories.length > 0 ? categories.slice(0, 3).join("、") : "企业知识库";
@@ -514,10 +519,35 @@ export function Message({
   const viewingActiveUserVersion =
     !activeUserVersion || viewedUserVersionIndex === activeUserVersion.versionIndex;
   const copyResetTimer = useRef<number | null>(null);
+  const timeHideTimer = useRef<number | null>(null);
+  const timeShowTimer = useRef<number | null>(null);
+  const [showMessageTime, setShowMessageTime] = useState(false);
 
   useEffect(() => () => {
     if (copyResetTimer.current !== null) window.clearTimeout(copyResetTimer.current);
+    if (timeHideTimer.current !== null) window.clearTimeout(timeHideTimer.current);
+    if (timeShowTimer.current !== null) window.clearTimeout(timeShowTimer.current);
   }, []);
+
+  const showTime = () => {
+    if (timeHideTimer.current !== null) window.clearTimeout(timeHideTimer.current);
+    if (timeShowTimer.current !== null) window.clearTimeout(timeShowTimer.current);
+    timeShowTimer.current = window.setTimeout(() => setShowMessageTime(true), SHOW_DELAY_MS);
+  };
+  const hideTime = () => {
+    if (timeShowTimer.current !== null) window.clearTimeout(timeShowTimer.current);
+    if (timeHideTimer.current !== null) window.clearTimeout(timeHideTimer.current);
+    timeHideTimer.current = window.setTimeout(() => setShowMessageTime(false), HIDE_DELAY_MS);
+  };
+  const messageTime = msg.createdAt != null ? (
+    <time
+      dateTime={new Date(msg.createdAt * 1000).toISOString()}
+      className={`shrink-0 whitespace-nowrap text-[11px] text-muted-foreground transition-opacity ${showMessageTime ? "opacity-100" : "opacity-0"}`}
+      aria-hidden={!showMessageTime}
+    >
+      {formatMessageTime(msg.createdAt)}
+    </time>
+  ) : null;
 
   useEffect(() => {
     if (!editing) setDraft(msg.content);
@@ -554,7 +584,13 @@ export function Message({
     }
   };
   return (
-    <article className={`mx-auto flex w-full max-w-[50rem] ${isUser ? "justify-end" : "justify-start"} px-4 py-4`}>
+    <article
+      className={`relative mx-auto flex w-full max-w-[50rem] ${isUser ? "justify-end" : "justify-start"} px-4 py-4`}
+      onMouseEnter={showTime}
+      onMouseLeave={hideTime}
+      onFocus={showTime}
+      onBlur={hideTime}
+    >
       <div
         className={
           (isUser
@@ -610,8 +646,11 @@ export function Message({
               </div>
             ) : (
               <>
-                <div className="max-w-[70%] rounded-ui-lg bg-primary px-4 py-3 text-primary-foreground">
-                  <div className="whitespace-pre-wrap break-words">{msg.content}</div>
+                <div className="flex w-full items-center justify-end gap-3">
+                  {messageTime}
+                  <div className="max-w-[70%] rounded-ui-lg bg-primary px-4 py-3 text-primary-foreground">
+                    <div className="whitespace-pre-wrap break-words">{msg.content}</div>
+                  </div>
                 </div>
                 <div className="mt-2 flex w-full items-center justify-end gap-3">
                   {msg.userVersions && msg.userVersions.length > 1 && viewedUserVersionPosition >= 0 && (
@@ -704,12 +743,13 @@ export function Message({
                   <button
                     type="button"
                     onClick={() => onToggleSources?.(msg.id)}
-                    className={`inline-flex h-9 items-center gap-2 rounded-ui-md border px-3 text-xs font-medium shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${sourcesSelected ? "border-primary bg-primary/10 text-primary" : "border-border bg-card text-foreground hover:border-primary/40 hover:bg-secondary"}`}
+                    className={`inline-flex h-9 shrink-0 items-center gap-2 rounded-ui-md border px-3 text-xs font-medium shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${sourcesSelected ? "border-primary bg-primary/10 text-primary" : "border-border bg-card text-foreground hover:border-primary/40 hover:bg-secondary"}`}
                   >
                     <Files className="size-4 text-primary" />
                     查看 {msg.sources.length} 个来源
                   </button>
                 )}
+                {messageTime}
                 <FeedbackBar
                   msg={msg}
                   conversationId={conversationId}
