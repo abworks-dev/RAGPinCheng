@@ -40,6 +40,8 @@ import type {
   ContentReclassificationJob,
   ManagedContentList,
   BulkManagedContentResponse,
+  BulkOperation,
+  BulkOperationAction,
   BulkRestorePreflightResult,
   TrashPurgePreflight,
   TrashPurgeRun,
@@ -890,6 +892,36 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ version_ids: versionIds }),
     }),
+  preflightManagedContentBulkOperation: (
+    operation: BulkOperationAction,
+    categories: Array<{ category_id: string; expected_version: number }>,
+    items: Array<{ item_id: string; expected_version_id: string }>,
+  ) => jsonFetch<BulkOperation>("/api/admin/content/bulk-operations/preflight", {
+    method: "POST", body: JSON.stringify({ operation, categories, items }),
+  }),
+  managedContentBulkOperation: (runId: string, includeTree = true) =>
+    jsonFetch<BulkOperation>(`/api/admin/content/bulk-operations/${encodeURIComponent(runId)}?include_tree=${includeTree}`),
+  updateManagedContentBulkSelection: (runId: string, itemIds: string[], selected: boolean) =>
+    jsonFetch<BulkOperation>(`/api/admin/content/bulk-operations/${encodeURIComponent(runId)}/selection`, {
+      method: "PATCH", body: JSON.stringify({ item_ids: itemIds, selected }),
+    }),
+  executeManagedContentBulkOperation: (
+    runId: string,
+    options: { target_category_id?: string; note?: string; confirmation?: string } = {},
+  ) => jsonFetch<BulkOperation>(`/api/admin/content/bulk-operations/${encodeURIComponent(runId)}/execute`, {
+    method: "POST", body: JSON.stringify(options),
+  }),
+  reviewManagedContentBulkItem: (runId: string, itemId: string, approved: boolean, note?: string) =>
+    jsonFetch<BulkOperation>(
+      `/api/admin/content/bulk-operations/${encodeURIComponent(runId)}/items/${encodeURIComponent(itemId)}/review`,
+      { method: "POST", body: JSON.stringify({ approved, note: note?.trim() || null }) },
+    ),
+  cancelManagedContentBulkOperation: (runId: string) =>
+    jsonFetch<BulkOperation>(`/api/admin/content/bulk-operations/${encodeURIComponent(runId)}/cancel`, {
+      method: "POST", body: JSON.stringify({}),
+    }),
+  managedContentBulkArchiveUrl: (runId: string) =>
+    `/api/admin/content/bulk-operations/${encodeURIComponent(runId)}/archive`,
   downloadManagedCategory: (categoryId: string, fallbackFilename: string) =>
     fileFetch(`/api/admin/content/categories/${encodeURIComponent(categoryId)}/download`, fallbackFilename, {
       method: "POST",

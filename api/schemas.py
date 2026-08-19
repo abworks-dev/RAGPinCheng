@@ -869,6 +869,103 @@ class BulkDownloadManagedContentRequest(BaseModel):
     version_ids: list[str] = Field(min_length=1, max_length=20)
 
 
+class BulkOperationCategoryRef(BaseModel):
+    category_id: str = Field(min_length=1, max_length=128)
+    expected_version: int = Field(gt=0)
+
+
+class BulkOperationItemRef(BaseModel):
+    item_id: str = Field(min_length=1, max_length=128)
+    expected_version_id: str = Field(min_length=1, max_length=128)
+
+
+class BulkOperationPreflightRequest(BaseModel):
+    operation: Literal["move", "submit", "approve", "reject", "publish", "download", "delete", "force_delete"]
+    categories: list[BulkOperationCategoryRef] = Field(default_factory=list, max_length=20)
+    items: list[BulkOperationItemRef] = Field(default_factory=list, max_length=20)
+
+
+class BulkOperationSelectionRequest(BaseModel):
+    item_ids: list[str] = Field(min_length=1, max_length=5000)
+    selected: bool
+
+
+class BulkOperationExecuteRequest(BaseModel):
+    target_category_id: str | None = Field(default=None, max_length=128)
+    note: str | None = Field(default=None, max_length=2000)
+    confirmation: str | None = Field(default=None, max_length=2000)
+
+
+class BulkOperationCategoryDTO(BaseModel):
+    run_id: str
+    category_id: str
+    parent_id: str | None
+    full_path: str
+    archive_path: str
+    version: int
+    root_category_id: str
+    is_root: bool
+    eligible: bool
+    selected: bool
+    reason: str | None
+    result_status: str
+    result_message: str | None
+    sort_order: int
+
+
+class BulkOperationItemDTO(BaseModel):
+    run_id: str
+    item_id: str
+    version_id: str
+    category_id: str
+    category_path: str
+    archive_path: str
+    title: str
+    original_filename: str
+    content_kind: str
+    lifecycle_status: str
+    object_sha256: str | None
+    storage_rel_path: str | None
+    size_bytes: int
+    scope_source: Literal["category", "direct"]
+    root_category_id: str | None
+    eligible: bool
+    selected: bool
+    reason: str | None
+    result_status: str
+    result_message: str | None
+    index_job_id: str | None
+    sort_order: int
+
+
+class BulkOperationDTO(BaseModel):
+    id: str
+    operation: str
+    status: str
+    actor_user_id: int | None
+    target_category_id: str | None
+    note: str | None
+    source_json: str
+    confirmation_phrase: str | None
+    total_files: int
+    selected_files: int
+    completed_files: int
+    failed_files: int
+    total_folders: int
+    total_bytes: int
+    processed_bytes: int
+    archive_filename: str | None
+    error_summary: str | None
+    created_at: int
+    started_at: int | None
+    finished_at: int | None
+    expires_at: int | None
+    updated_at: int
+    max_archive_bytes: int
+    categories: list[BulkOperationCategoryDTO] = Field(default_factory=list)
+    items: list[BulkOperationItemDTO] = Field(default_factory=list)
+
+
 class CreateFolderRequest(BaseModel):
     parent_category_id: str = Field(min_length=1, max_length=100)
     display_name: str = Field(min_length=1, max_length=100)

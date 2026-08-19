@@ -186,7 +186,7 @@ test.describe("资料管理", () => {
     const fileEntry = isMobile ? fileTitle.locator("xpath=ancestor::li") : fileTitle.locator("xpath=ancestor::tr");
     await expect(folder).toBeVisible();
     await expect(fileEntry).toBeVisible();
-    await expect(folder.getByRole("checkbox")).toHaveCount(0);
+    await expect(folder.getByRole("checkbox", { name: /选择文件夹/ })).toBeVisible();
     await expect(page.getByText("共 5 份，第 1 / 1 页")).toBeVisible();
 
     const [folderBox, fileBox] = await Promise.all([folder.boundingBox(), fileEntry.boundingBox()]);
@@ -200,6 +200,28 @@ test.describe("资料管理", () => {
     await folder.getByRole("button").first().click();
     await childListing;
     await expect(page.getByRole("navigation", { name: "资料路径" })).toContainText("01 建模标准（长名称用于响应式检查）");
+  });
+
+  test("recursive folder review shows the complete impact workbench", async ({ page }, testInfo) => {
+    await openTab(page, "资料管理", "normal", "admin", { includeChildFolder: true });
+    await openRootFolder(page);
+    const folderCheckbox = page.getByRole("checkbox", { name: /选择文件夹01 建模标准/ }).filter({ visible: true });
+    await folderCheckbox.check();
+    await page.getByRole("button", { name: "批量操作" }).click();
+    await page.getByRole("menuitem", { name: "批量确认" }).click();
+
+    const dialog = page.getByRole("dialog", { name: "批量确认" });
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText("03 公司内部标准 / 01 建模标准（长名称用于响应式检查）");
+    await expect(dialog.getByText("不受影响 1 份")).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "通过" })).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "退回" })).toBeDisabled();
+    await expect(dialog.getByText("仅待确认资料可审核")).toBeVisible();
+    await page.screenshot({
+      path: testInfo.outputPath(`managed-content-recursive-review-${page.viewportSize()!.width}x${page.viewportSize()!.height}.png`),
+      fullPage: true,
+    });
+    await expectNoBodyOverflow(page);
   });
 
   test("single-file actions expose independent move, download, rename, and update flows", async ({ page }, testInfo) => {

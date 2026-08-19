@@ -41,6 +41,13 @@ const mocks = vi.hoisted(() => ({
   preflightBulkRestore: vi.fn(),
   exportTrash: vi.fn(),
   bulkDownload: vi.fn(),
+  preflightBulkOperation: vi.fn(),
+  bulkOperation: vi.fn(),
+  updateBulkSelection: vi.fn(),
+  executeBulkOperation: vi.fn(),
+  reviewBulkItem: vi.fn(),
+  cancelBulkOperation: vi.fn(),
+  bulkArchiveUrl: vi.fn(),
   downloadCategory: vi.fn(),
   downloadFile: vi.fn(),
   downloadMedia: vi.fn(),
@@ -133,6 +140,13 @@ vi.mock("../../api/client", () => ({
     preflightBulkRestoreManagedContent: mocks.preflightBulkRestore,
     exportManagedContentTrash: mocks.exportTrash,
     bulkDownloadManagedContent: mocks.bulkDownload,
+    preflightManagedContentBulkOperation: mocks.preflightBulkOperation,
+    managedContentBulkOperation: mocks.bulkOperation,
+    updateManagedContentBulkSelection: mocks.updateBulkSelection,
+    executeManagedContentBulkOperation: mocks.executeBulkOperation,
+    reviewManagedContentBulkItem: mocks.reviewBulkItem,
+    cancelManagedContentBulkOperation: mocks.cancelBulkOperation,
+    managedContentBulkArchiveUrl: mocks.bulkArchiveUrl,
     downloadManagedCategory: mocks.downloadCategory,
     downloadManagedContentFile: mocks.downloadFile,
     downloadManagedMedia: mocks.downloadMedia,
@@ -304,6 +318,7 @@ describe("AdminManagedContentPage", () => {
     mocks.bulkReclassify.mockResolvedValue({ results: [], succeeded: 2, failed: 0 });
     window.history.replaceState({}, "", "/admin/content");
     mocks.bulkDownload.mockResolvedValue({ blob: new Blob(["zip"]), filename: "资料批量下载.zip" });
+    mocks.bulkArchiveUrl.mockReturnValue("/api/admin/content/bulk-operations/bulk-1/archive");
     mocks.downloadCategory.mockResolvedValue({ blob: new Blob(["zip"]), filename: "03 公司内部标准-资料打包下载.zip" });
     mocks.downloadFile.mockResolvedValue({ blob: new Blob(["file"]), filename: "standard.pdf" });
     mocks.downloadMedia.mockResolvedValue({ blob: new Blob(["media"]), filename: "WhisperX 培训视频-视频资料.zip" });
@@ -589,7 +604,7 @@ describe("AdminManagedContentPage", () => {
     expect(within(table).getAllByRole("row")[1]).toHaveTextContent("较新资料");
   });
 
-  it("integrates folders before files without adding them to selection or pagination", async () => {
+  it("integrates selectable folders before files without adding them to file pagination", async () => {
     const folder = { ...childCategory, display_code: "02", display_name: "模型目录", item_count: 3, direct_child_count: 2, total_child_count: 4, total_item_count: 8 };
     mocks.categories.mockResolvedValue([category, folder]);
     render(<AdminManagedContentPage />);
@@ -602,9 +617,10 @@ describe("AdminManagedContentPage", () => {
     expect(within(folderRow).getByText("3 份直接资料 · 2 个直接子文件夹 · 共 4 个子文件夹 · 共 8 份资料")).toBeInTheDocument();
     const fileRow = within(table).getByText("standard.pdf · v1").closest("tr");
     expect(folderRow.compareDocumentPosition(fileRow!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
-    expect(within(folderRow).queryByRole("checkbox")).not.toBeInTheDocument();
+    expect(within(folderRow).getByRole("checkbox", { name: "选择文件夹02 模型目录" })).not.toBeChecked();
 
     fireEvent.click(within(table).getByRole("checkbox", { name: "选择当前页前20份资料" }));
+    expect(within(folderRow).getByRole("checkbox", { name: "选择文件夹02 模型目录" })).toBeChecked();
     expect(within(table).getByRole("checkbox", { name: "选择建模标准" })).toBeChecked();
     expect(screen.getByText("共 1 份，第 1 / 1 页")).toBeInTheDocument();
 
@@ -616,6 +632,89 @@ describe("AdminManagedContentPage", () => {
     fireEvent.change(within(screen.getByRole("dialog", { name: "搜索筛选" })).getByRole("combobox", { name: "状态" }), { target: { value: "published" } });
     await waitFor(() => expect(mocks.items).toHaveBeenLastCalledWith(expect.objectContaining({ lifecycle_status: "published" })));
     expect(await screen.findByTestId(`managed-folder-row-${folder.id}`)).toBeInTheDocument();
+  });
+
+  it("preflights a selected folder and supports per-file selection and review", async () => {
+    const folder = { ...childCategory, display_code: "02", display_name: "模型目录", item_count: 1, total_item_count: 1 };
+    mocks.categories.mockResolvedValue([category, folder]);
+    const bulkRun = {
+      id: "bulk-1",
+      operation: "approve" as const,
+      status: "awaiting_confirmation" as const,
+      actor_user_id: 2,
+      target_category_id: null,
+      note: null,
+      confirmation_phrase: null,
+      total_files: 1,
+      selected_files: 1,
+      completed_files: 0,
+      failed_files: 0,
+      total_folders: 1,
+      total_bytes: 64,
+      processed_bytes: 0,
+      archive_filename: null,
+      error_summary: null,
+      created_at: 1,
+      started_at: null,
+      finished_at: null,
+      expires_at: null,
+      updated_at: 1,
+      max_archive_bytes: 10 * 1024 ** 3,
+      categories: [{
+        run_id: "bulk-1", category_id: folder.id, parent_id: folder.parent_id,
+        full_path: folder.full_path, archive_path: "02 模型目录", version: 1,
+        root_category_id: folder.id, is_root: true, eligible: true, selected: false,
+        reason: null, result_status: "pending" as const, result_message: null, sort_order: 0,
+      }],
+      items: [{
+        run_id: "bulk-1", item_id: item.item_id, version_id: item.version_id,
+        category_id: folder.id, category_path: folder.full_path,
+        archive_path: "02 模型目录/standard.pdf", title: item.title,
+        original_filename: item.original_filename, content_kind: "document",
+        lifecycle_status: "awaiting_review", size_bytes: 64, scope_source: "category" as const,
+        root_category_id: folder.id, eligible: true, selected: true, reason: null,
+        result_status: "pending" as const, result_message: null, index_job_id: null, sort_order: 0,
+      }],
+    };
+    mocks.preflightBulkOperation.mockResolvedValue(bulkRun);
+    mocks.updateBulkSelection.mockResolvedValue({
+      ...bulkRun,
+      selected_files: 0,
+      total_bytes: 0,
+      items: [{ ...bulkRun.items[0], selected: false }],
+    });
+    mocks.reviewBulkItem.mockResolvedValue({
+      ...bulkRun,
+      status: "succeeded" as const,
+      selected_files: 0,
+      completed_files: 1,
+      items: [{ ...bulkRun.items[0], selected: false, result_status: "succeeded" as const }],
+    });
+
+    render(<AdminManagedContentPage />);
+    await openRootFolder();
+    const folderRow = screen.getByTestId(`managed-folder-row-${folder.id}`);
+    fireEvent.click(within(folderRow).getByRole("checkbox", { name: "选择文件夹02 模型目录" }));
+    fireEvent.click(screen.getByRole("button", { name: "批量操作" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "批量确认" }));
+
+    await waitFor(() => expect(mocks.preflightBulkOperation).toHaveBeenCalledWith(
+      "approve",
+      [{ category_id: folder.id, expected_version: folder.version }],
+      [],
+    ));
+    const dialog = await screen.findByRole("dialog", { name: "批量确认" });
+    expect(within(dialog).getByText(folder.full_path)).toBeInTheDocument();
+    expect(within(dialog).getByText(item.original_filename, { exact: false })).toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByRole("checkbox", { name: `选择${item.title}` }));
+    await waitFor(() => expect(mocks.updateBulkSelection).toHaveBeenCalledWith("bulk-1", [item.item_id], false));
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "通过" }));
+    await waitFor(() => expect(mocks.reviewBulkItem).toHaveBeenCalledWith("bulk-1", item.item_id, true, ""));
+    await waitFor(() => expect(within(dialog).getByText("批量操作已完成")).toBeInTheDocument());
+    expect(mocks.preflightBulkOperation).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(mocks.items.mock.calls.length).toBeGreaterThan(2));
   });
 
   it("shows a folder-only root instead of the empty state", async () => {

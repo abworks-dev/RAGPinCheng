@@ -14,7 +14,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from api import routes_content
+from api import content_bulk_operations, routes_content
 from api import content_trash_cleanup
 from api.content_permission_catalog import LEGACY_CONTENT_PERMISSION_MAP
 from api.content_storage import ContentStorage
@@ -81,7 +81,13 @@ def content_api(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     app.dependency_overrides[get_db] = override_db
     queued: list[str] = []
     monkeypatch.setattr(routes_content, "CONTENT_MANAGEMENT_ENABLED", True)
-    monkeypatch.setattr(routes_content, "_storage", ContentStorage(tmp_path / "content"))
+    storage = ContentStorage(tmp_path / "content")
+    monkeypatch.setattr(routes_content, "_storage", storage)
+    monkeypatch.setattr(content_bulk_operations, "_storage", storage)
+    monkeypatch.setattr(content_bulk_operations, "connect", lambda: connect(db_path))
+    monkeypatch.setattr(content_bulk_operations, "CONTENT_BULK_ARCHIVE_ROOT", tmp_path / "bulk-archives")
+    monkeypatch.setattr(content_bulk_operations, "CONTENT_BULK_ARCHIVE_MAX_BYTES", 10 * 1024 ** 3)
+    monkeypatch.setattr(content_bulk_operations, "CONTENT_BULK_ARCHIVE_RESERVE_BYTES", 0)
     media_dir = (tmp_path / "media").resolve()
     artifact_dir = (tmp_path / "transcription-artifacts").resolve()
     media_dir.mkdir(parents=True, exist_ok=True)
@@ -3514,3 +3520,506 @@ def test_category_key_is_server_generated_and_used_categories_cannot_be_disabled
     )
     assert disabled.status_code == 409
     assert "重新归类" in disabled.json()["detail"]
+
+
+def _create_bulk_test_category(client: TestClient, sessions, *, parent_id: str, code: str, name: str):
+    response = client.post(
+        "/api/admin/content/categories",
+        json={"parent_id": parent_id, "display_code": code, "display_name": name},
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def _upload_bulk_test_document(client: TestClient, sessions, *, category_id: str, filename: str):
+    response = client.post(
+        "/api/admin/content/uploads",
+        data={"category_id": category_id},
+        files=[("files", (filename, b"# synthetic managed content\n", "text/markdown"))],
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert response.status_code == 200, response.text
+    entry = response.json()["entries"][0]
+    assert entry["status"] == "accepted"
+    return entry
+
+
+def test_recursive_bulk_workflow_normalizes_roots_and_enforces_owner(content_api):
+    client, sessions, _queued, db_path = content_api
+    parent = _create_bulk_test_category(
+        client, sessions, parent_id="cat-03", code="01", name="递归批量父目录"
+    )
+    child = _create_bulk_test_category(
+        client, sessions, parent_id=parent["id"], code="01", name="递归批量子目录"
+    )
+    uploaded = _upload_bulk_test_document(
+        client, sessions, category_id=child["id"], filename="recursive.md"
+    )
+    body = {
+        "operation": "submit",
+        "categories": [
+            {"category_id": parent["id"], "expected_version": parent["version"]},
+            {"category_id": child["id"], "expected_version": child["version"]},
+        ],
+        "items": [],
+    }
+    preflight = client.post(
+        "/api/admin/content/bulk-operations/preflight",
+        json=body,
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert preflight.status_code == 200, preflight.text
+    snapshot = preflight.json()
+    assert sum(category["is_root"] for category in snapshot["categories"]) == 1
+    assert {category["category_id"] for category in snapshot["categories"]} == {parent["id"], child["id"]}
+    assert snapshot["items"][0]["item_id"] == uploaded["item_id"]
+    assert snapshot["items"][0]["scope_source"] == "category"
+
+    foreign = client.get(
+        f"/api/admin/content/bulk-operations/{snapshot['id']}",
+        **_auth(sessions, "reviewer"),
+    )
+    assert foreign.status_code == 403
+
+    execute = client.post(
+        f"/api/admin/content/bulk-operations/{snapshot['id']}/execute",
+        json={},
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert execute.status_code == 200, execute.text
+    assert execute.json()["status"] == "succeeded"
+    conn = connect(db_path)
+    try:
+        status = conn.execute(
+            "SELECT lifecycle_status FROM content_versions WHERE id=?", (uploaded["version_id"],)
+        ).fetchone()[0]
+        assert status == "awaiting_review"
+    finally:
+        conn.close()
+
+
+def test_recursive_bulk_move_keeps_descendant_items_in_their_folder(content_api):
+    client, sessions, _queued, db_path = content_api
+    parent = _create_bulk_test_category(
+        client, sessions, parent_id="cat-03", code="01", name="整体移动目录"
+    )
+    child = _create_bulk_test_category(
+        client, sessions, parent_id=parent["id"], code="01", name="整体移动子目录"
+    )
+    inside = _upload_bulk_test_document(
+        client, sessions, category_id=child["id"], filename="inside.md"
+    )
+    direct = _upload_bulk_test_document(
+        client, sessions, category_id="cat-05", filename="direct.md"
+    )
+    preflight = client.post(
+        "/api/admin/content/bulk-operations/preflight",
+        json={
+            "operation": "move",
+            "categories": [{"category_id": parent["id"], "expected_version": parent["version"]}],
+            "items": [{"item_id": direct["item_id"], "expected_version_id": direct["version_id"]}],
+        },
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert preflight.status_code == 200, preflight.text
+    snapshot = preflight.json()
+    sources = {item["item_id"]: item["scope_source"] for item in snapshot["items"]}
+    assert sources == {inside["item_id"]: "category", direct["item_id"]: "direct"}
+
+    execute = client.post(
+        f"/api/admin/content/bulk-operations/{snapshot['id']}/execute",
+        json={"target_category_id": "cat-04"},
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert execute.status_code == 200, execute.text
+    assert execute.json()["status"] == "succeeded"
+    conn = connect(db_path)
+    try:
+        moved_parent = conn.execute(
+            "SELECT parent_id FROM category_nodes WHERE id=?", (parent["id"],)
+        ).fetchone()[0]
+        inside_category = conn.execute(
+            "SELECT category_id FROM content_items WHERE id=?", (inside["item_id"],)
+        ).fetchone()[0]
+        direct_category = conn.execute(
+            "SELECT category_id FROM content_items WHERE id=?", (direct["item_id"],)
+        ).fetchone()[0]
+        assert moved_parent == "cat-04"
+        assert inside_category == child["id"]
+        assert direct_category == "cat-04"
+    finally:
+        conn.close()
+
+
+def test_recursive_bulk_archive_zip64_progress_range_limit_and_cancel(
+    content_api, monkeypatch: pytest.MonkeyPatch
+):
+    client, sessions, _queued, _db_path = content_api
+    folder = _create_bulk_test_category(
+        client, sessions, parent_id="cat-03", code="01", name="打包目录"
+    )
+    uploaded = _upload_bulk_test_document(
+        client, sessions, category_id=folder["id"], filename="archive.md"
+    )
+    queued: list[str] = []
+    monkeypatch.setattr(content_bulk_operations, "enqueue_archive", queued.append)
+
+    def create_download_run():
+        response = client.post(
+            "/api/admin/content/bulk-operations/preflight",
+            json={
+                "operation": "download",
+                "categories": [{"category_id": folder["id"], "expected_version": folder["version"]}],
+                "items": [],
+            },
+            **_auth(sessions, "admin", csrf=True),
+        )
+        assert response.status_code == 200, response.text
+        return response.json()
+
+    snapshot = create_download_run()
+    start = client.post(
+        f"/api/admin/content/bulk-operations/{snapshot['id']}/execute",
+        json={},
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert start.status_code == 200
+    assert start.json()["status"] == "queued"
+    assert queued == [snapshot["id"]]
+    content_bulk_operations._run_archive(snapshot["id"])
+
+    ready = client.get(
+        f"/api/admin/content/bulk-operations/{snapshot['id']}", **_auth(sessions, "admin")
+    ).json()
+    assert ready["status"] == "ready"
+    assert ready["processed_bytes"] == ready["total_bytes"]
+    archive_path = content_bulk_operations.CONTENT_BULK_ARCHIVE_ROOT / f"{snapshot['id']}.zip"
+    with zipfile.ZipFile(archive_path) as archive:
+        names = archive.namelist()
+        assert any(name.endswith("/") and "打包目录" in name for name in names)
+        file_name = next(name for name in names if name.endswith("archive.md"))
+        assert archive.read(file_name) == b"# synthetic managed content\n"
+
+    ranged = client.get(
+        f"/api/admin/content/bulk-operations/{snapshot['id']}/archive",
+        headers={**_auth(sessions, "admin")["headers"], "Range": "bytes=0-3"},
+        cookies=_auth(sessions, "admin")["cookies"],
+    )
+    assert ranged.status_code == 206
+    assert ranged.headers["content-range"].startswith("bytes 0-3/")
+    assert len(ranged.content) == 4
+
+    oversized = create_download_run()
+    monkeypatch.setattr(content_bulk_operations, "CONTENT_BULK_ARCHIVE_MAX_BYTES", 1)
+    rejected = client.post(
+        f"/api/admin/content/bulk-operations/{oversized['id']}/execute",
+        json={},
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert rejected.status_code == 413
+
+    monkeypatch.setattr(content_bulk_operations, "CONTENT_BULK_ARCHIVE_MAX_BYTES", 10 * 1024 ** 3)
+    cancelled = create_download_run()
+    client.post(
+        f"/api/admin/content/bulk-operations/{cancelled['id']}/execute",
+        json={},
+        **_auth(sessions, "admin", csrf=True),
+    )
+    cancel = client.post(
+        f"/api/admin/content/bulk-operations/{cancelled['id']}/cancel",
+        json={},
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert cancel.status_code == 200
+    assert cancel.json()["status"] == "cancelled"
+    content_bulk_operations._run_archive(cancelled["id"])
+    assert not (content_bulk_operations.CONTENT_BULK_ARCHIVE_ROOT / f"{cancelled['id']}.zip").exists()
+
+    corrupted = create_download_run()
+    object_path = content_bulk_operations._storage.resolve_object(
+        corrupted["items"][0]["storage_rel_path"]
+    )
+    object_path.write_bytes(b"corrupted")
+    client.post(
+        f"/api/admin/content/bulk-operations/{corrupted['id']}/execute",
+        json={},
+        **_auth(sessions, "admin", csrf=True),
+    )
+    content_bulk_operations._run_archive(corrupted["id"])
+    failed = client.get(
+        f"/api/admin/content/bulk-operations/{corrupted['id']}", **_auth(sessions, "admin")
+    ).json()
+    assert failed["status"] == "failed"
+    assert failed["error_summary"] == "资料文件完整性校验失败：archive.md"
+    assert not (
+        content_bulk_operations.CONTENT_BULK_ARCHIVE_ROOT / f"{corrupted['id']}.zip"
+    ).exists()
+
+
+def test_recursive_bulk_empty_folder_archive_and_force_delete_are_persistent_jobs(
+    content_api, monkeypatch: pytest.MonkeyPatch
+):
+    client, sessions, _queued, db_path = content_api
+    folder = _create_bulk_test_category(
+        client, sessions, parent_id="cat-03", code="01", name="空目录任务"
+    )
+    archive_queue: list[str] = []
+    force_delete_queue: list[str] = []
+    monkeypatch.setattr(content_bulk_operations, "enqueue_archive", archive_queue.append)
+    monkeypatch.setattr(content_bulk_operations, "enqueue_force_delete", force_delete_queue.append)
+
+    download = client.post(
+        "/api/admin/content/bulk-operations/preflight",
+        json={
+            "operation": "download",
+            "categories": [{"category_id": folder["id"], "expected_version": folder["version"]}],
+            "items": [],
+        },
+        **_auth(sessions, "admin", csrf=True),
+    ).json()
+    started = client.post(
+        f"/api/admin/content/bulk-operations/{download['id']}/execute",
+        json={},
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert started.status_code == 200
+    content_bulk_operations._run_archive(download["id"])
+    archive_path = content_bulk_operations.CONTENT_BULK_ARCHIVE_ROOT / f"{download['id']}.zip"
+    with zipfile.ZipFile(archive_path) as archive:
+        assert archive.namelist() == [f"{download['categories'][0]['archive_path']}/"]
+
+    force_delete = client.post(
+        "/api/admin/content/bulk-operations/preflight",
+        json={
+            "operation": "force_delete",
+            "categories": [{"category_id": folder["id"], "expected_version": folder["version"]}],
+            "items": [],
+        },
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert force_delete.status_code == 200
+    force_snapshot = force_delete.json()
+    wrong = client.post(
+        f"/api/admin/content/bulk-operations/{force_snapshot['id']}/execute",
+        json={"confirmation": "错误确认文字"},
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert wrong.status_code == 400
+    queued = client.post(
+        f"/api/admin/content/bulk-operations/{force_snapshot['id']}/execute",
+        json={"confirmation": force_snapshot["confirmation_phrase"]},
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert queued.status_code == 200
+    assert queued.json()["status"] == "queued"
+    assert force_delete_queue == [force_snapshot["id"]]
+    conn = connect(db_path)
+    try:
+        assert conn.execute(
+            "SELECT deleted_at FROM category_nodes WHERE id=?", (folder["id"],)
+        ).fetchone()[0] is None
+    finally:
+        conn.close()
+
+
+def test_recursive_bulk_single_review_finalizes_without_reprocessing(content_api):
+    client, sessions, _queued, _db_path = content_api
+    folder = _create_bulk_test_category(
+        client, sessions, parent_id="cat-03", code="01", name="单项审核目录"
+    )
+    uploaded = _upload_bulk_test_document(
+        client, sessions, category_id=folder["id"], filename="single-review.md"
+    )
+    submitted = client.post(
+        f"/api/admin/content/versions/{uploaded['version_id']}/submit",
+        json={},
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert submitted.status_code == 200, submitted.text
+
+    preflight = client.post(
+        "/api/admin/content/bulk-operations/preflight",
+        json={
+            "operation": "approve",
+            "categories": [{"category_id": folder["id"], "expected_version": folder["version"]}],
+            "items": [],
+        },
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert preflight.status_code == 200, preflight.text
+    run = preflight.json()
+
+    reviewed = client.post(
+        f"/api/admin/content/bulk-operations/{run['id']}/items/{uploaded['item_id']}/review",
+        json={"approved": True, "note": "单项确认"},
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert reviewed.status_code == 200, reviewed.text
+    result = reviewed.json()
+    assert result["status"] == "succeeded"
+    assert result["selected_files"] == 0
+    assert result["completed_files"] == 1
+    assert result["items"][0]["result_status"] == "succeeded"
+    assert result["items"][0]["selected"] is False
+
+
+def test_recursive_bulk_failure_counts_files_and_empty_roots_once(content_api):
+    client, sessions, _queued, db_path = content_api
+    populated = _create_bulk_test_category(
+        client, sessions, parent_id="cat-03", code="01", name="失败资料目录"
+    )
+    empty = _create_bulk_test_category(
+        client, sessions, parent_id="cat-03", code="02", name="失败空目录"
+    )
+    _upload_bulk_test_document(
+        client, sessions, category_id=populated["id"], filename="failed.md"
+    )
+    preflight = client.post(
+        "/api/admin/content/bulk-operations/preflight",
+        json={
+            "operation": "move",
+            "categories": [
+                {"category_id": populated["id"], "expected_version": populated["version"]},
+                {"category_id": empty["id"], "expected_version": empty["version"]},
+            ],
+            "items": [],
+        },
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert preflight.status_code == 200, preflight.text
+    run_id = preflight.json()["id"]
+    conn = connect(db_path)
+    try:
+        conn.execute(
+            """UPDATE content_bulk_operation_categories
+               SET result_status='failed',selected=0 WHERE run_id=? AND is_root=1""",
+            (run_id,),
+        )
+        conn.execute(
+            """UPDATE content_bulk_operation_items
+               SET result_status='failed',selected=0 WHERE run_id=?""",
+            (run_id,),
+        )
+        content_bulk_operations.finalize_sync_run(conn, run_id)
+    finally:
+        conn.close()
+    result = client.get(
+        f"/api/admin/content/bulk-operations/{run_id}", **_auth(sessions, "admin")
+    ).json()
+    assert result["status"] == "failed"
+    assert result["failed_files"] == 2
+
+
+def test_bulk_operation_boot_recovery_and_archive_expiration(
+    content_api, monkeypatch: pytest.MonkeyPatch
+):
+    client, sessions, _queued, db_path = content_api
+    folder = _create_bulk_test_category(
+        client, sessions, parent_id="cat-03", code="01", name="恢复任务目录"
+    )
+
+    def create_run(operation: str):
+        response = client.post(
+            "/api/admin/content/bulk-operations/preflight",
+            json={
+                "operation": operation,
+                "categories": [{"category_id": folder["id"], "expected_version": folder["version"]}],
+                "items": [],
+            },
+            **_auth(sessions, "admin", csrf=True),
+        )
+        assert response.status_code == 200, response.text
+        return response.json()
+
+    packaging = create_run("download")
+    force_delete = create_run("force_delete")
+    expired = create_run("download")
+    conn = connect(db_path)
+    try:
+        conn.execute(
+            "UPDATE content_bulk_operations SET status='packaging',processed_bytes=123 WHERE id=?",
+            (packaging["id"],),
+        )
+        conn.execute(
+            "UPDATE content_bulk_operations SET status='running' WHERE id=?",
+            (force_delete["id"],),
+        )
+        conn.execute(
+            "UPDATE content_bulk_operations SET status='ready',archive_filename='expired.zip',expires_at=? WHERE id=?",
+            (int(time.time()) - 1, expired["id"]),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    content_bulk_operations.CONTENT_BULK_ARCHIVE_ROOT.mkdir(parents=True, exist_ok=True)
+    expired_path = content_bulk_operations.CONTENT_BULK_ARCHIVE_ROOT / f"{expired['id']}.zip"
+    expired_path.write_bytes(b"expired")
+    archive_queue: list[str] = []
+    force_delete_queue: list[str] = []
+    monkeypatch.setattr(content_bulk_operations, "enqueue_archive", archive_queue.append)
+    monkeypatch.setattr(content_bulk_operations, "enqueue_force_delete", force_delete_queue.append)
+
+    content_bulk_operations.recover_bulk_operations_on_boot()
+
+    conn = connect(db_path)
+    try:
+        recovered = {
+            row["id"]: (row["status"], row["processed_bytes"])
+            for row in conn.execute(
+                "SELECT id,status,processed_bytes FROM content_bulk_operations"
+            ).fetchall()
+        }
+    finally:
+        conn.close()
+    assert recovered[packaging["id"]] == ("queued", 0)
+    assert recovered[force_delete["id"]][0] == "queued"
+    assert recovered[expired["id"]][0] == "expired"
+    assert archive_queue == [packaging["id"]]
+    assert force_delete_queue == [force_delete["id"]]
+    assert not expired_path.exists()
+
+
+def test_force_delete_worker_unexpected_failure_is_terminal_and_productized(
+    content_api, monkeypatch: pytest.MonkeyPatch
+):
+    client, sessions, _queued, _db_path = content_api
+    folder = _create_bulk_test_category(
+        client, sessions, parent_id="cat-03", code="01", name="异常永久删除目录"
+    )
+    queued: list[str] = []
+    monkeypatch.setattr(content_bulk_operations, "enqueue_force_delete", queued.append)
+    preflight = client.post(
+        "/api/admin/content/bulk-operations/preflight",
+        json={
+            "operation": "force_delete",
+            "categories": [{"category_id": folder["id"], "expected_version": folder["version"]}],
+            "items": [],
+        },
+        **_auth(sessions, "admin", csrf=True),
+    ).json()
+    started = client.post(
+        f"/api/admin/content/bulk-operations/{preflight['id']}/execute",
+        json={"confirmation": preflight["confirmation_phrase"]},
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert started.status_code == 200, started.text
+    monkeypatch.setattr(
+        content_bulk_operations,
+        "force_delete_category",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("synthetic worker failure")),
+    )
+    monkeypatch.setattr(
+        content_bulk_operations,
+        "_force_delete_error_message",
+        lambda _exc: (_ for _ in ()).throw(RuntimeError("synthetic formatter failure")),
+    )
+
+    content_bulk_operations._run_force_delete(preflight["id"])
+
+    result = client.get(
+        f"/api/admin/content/bulk-operations/{preflight['id']}", **_auth(sessions, "admin")
+    ).json()
+    assert result["status"] == "failed"
+    assert result["finished_at"] is not None
+    assert result["error_summary"] == "批量永久删除任务异常中止，请刷新后检查已完成目录"

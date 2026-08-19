@@ -40,6 +40,15 @@ export const categories = [
   { id: "cat-archive", category_key: "archived", parent_id: null, display_code: "99", display_name: "待确认资料", sort_order: 90, level: 1, is_active: false, chat_search_enabled: false, chat_filter_selectable: false, version: 1, created_at: 1700000000, updated_at: 1700000000, full_path: "99 待确认资料", item_count: 0, direct_child_count: 0, total_child_count: 0, total_item_count: 0 },
 ];
 
+export const managedChildFolder = {
+  id: "cat-company-modeling", category_key: "company_modeling", parent_id: "cat-company",
+  display_code: "01", display_name: "建模标准（长名称用于响应式检查）", sort_order: 10,
+  level: 2, is_active: true, chat_search_enabled: true, chat_filter_selectable: true,
+  version: 1, created_at: 1700000000, updated_at: 1700000000,
+  full_path: "03 公司内部标准 / 01 建模标准（长名称用于响应式检查）",
+  item_count: 2, direct_child_count: 0, total_child_count: 0, total_item_count: 2,
+};
+
 const knowledgeScopes = categories
   .filter((category) => category.is_active && category.chat_search_enabled && category.chat_filter_selectable)
   .map((category) => ({
@@ -900,8 +909,40 @@ export async function installAdminRoutes(
       return json(route, { enabled: scenario !== "disabled", max_upload_bytes: 10_000_000, supported_extensions: [".pdf", ".md", ".docx", ".xlsx", ".pptx"] });
     }
     if (request.method() === "GET" && path === "/api/admin/content/categories") {
-      const childFolder = { id: "cat-company-modeling", category_key: "company_modeling", parent_id: "cat-company", display_code: "01", display_name: "建模标准（长名称用于响应式检查）", sort_order: 10, level: 2, is_active: true, chat_search_enabled: true, chat_filter_selectable: true, version: 1, created_at: 1700000000, updated_at: 1700000000, full_path: "03 公司内部标准 / 01 建模标准（长名称用于响应式检查）", item_count: 1, direct_child_count: 0, total_child_count: 0, total_item_count: 1 };
-      return json(route, scenario === "empty" ? [] : options.includeChildFolder ? [...categories, childFolder] : categories);
+      return json(route, scenario === "empty" ? [] : options.includeChildFolder ? [...categories, managedChildFolder] : categories);
+    }
+    if (request.method() === "POST" && path === "/api/admin/content/bulk-operations/preflight") {
+      const payload = request.postDataJSON() as { operation: string };
+      const impacted = [
+        { ...items[1], category_id: managedChildFolder.id, category_path: managedChildFolder.full_path },
+        { ...items[0], category_id: managedChildFolder.id, category_path: managedChildFolder.full_path },
+      ];
+      return json(route, {
+        id: "bulk-visual-1", operation: payload.operation, status: "awaiting_confirmation",
+        actor_user_id: admin.id, target_category_id: null, note: null, source_json: "{}",
+        confirmation_phrase: null, total_files: 2, selected_files: 1, completed_files: 0,
+        failed_files: 0, total_folders: 1, total_bytes: 3145728, processed_bytes: 0,
+        archive_filename: null, error_summary: null, created_at: 1700000000, started_at: null,
+        finished_at: null, expires_at: null, updated_at: 1700000000, max_archive_bytes: 10737418240,
+        categories: [{
+          run_id: "bulk-visual-1", category_id: managedChildFolder.id,
+          parent_id: managedChildFolder.parent_id, full_path: managedChildFolder.full_path,
+          archive_path: `01 ${managedChildFolder.display_name}`, version: managedChildFolder.version,
+          root_category_id: managedChildFolder.id, is_root: true, eligible: true, selected: false,
+          reason: null, result_status: "pending", result_message: null, sort_order: 0,
+        }],
+        items: impacted.map((item, index) => ({
+          run_id: "bulk-visual-1", item_id: item.item_id, version_id: item.version_id,
+          category_id: managedChildFolder.id, category_path: managedChildFolder.full_path,
+          archive_path: `01 ${managedChildFolder.display_name}/${item.original_filename}`,
+          title: item.title, original_filename: item.original_filename, content_kind: "document",
+          lifecycle_status: item.lifecycle_status, object_sha256: null, storage_rel_path: `objects/${item.item_id}`,
+          size_bytes: index ? 1048576 : 2097152, scope_source: "category",
+          root_category_id: managedChildFolder.id, eligible: index === 0, selected: index === 0,
+          reason: index === 0 ? null : "仅待确认资料可审核", result_status: "pending",
+          result_message: null, index_job_id: null, sort_order: index,
+        })),
+      });
     }
     if (request.method() === "GET" && /^\/api\/admin\/content\/categories\/[^/]+\/delete-preview$/.test(path)) {
       const categoryId = path.split("/").at(-2)!;

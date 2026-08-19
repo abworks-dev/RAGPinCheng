@@ -42,6 +42,11 @@ from .content_publication import (
     recover_content_publications_on_boot,
     run_content_publication,
 )
+from .content_bulk_operations import (
+    cleanup_expired_archives,
+    recover_bulk_operations_on_boot,
+    stop_bulk_operation_worker,
+)
 from .routes import router as core_router
 from .routes_admin import router as admin_router
 from .routes_admin_asr import router as admin_asr_router
@@ -95,6 +100,8 @@ async def _trash_cleanup_loop() -> None:
         try:
             await asyncio.sleep(SWEEPER_INTERVAL_SECONDS)
             result = await asyncio.to_thread(run_automatic_cleanup)
+            if CONTENT_MANAGEMENT_ENABLED:
+                await asyncio.to_thread(cleanup_expired_archives)
             if result:
                 logger.info(
                     "automatic trash cleanup %s: %d succeeded, %d failed",
@@ -187,6 +194,7 @@ async def lifespan(app: FastAPI):
     if CONTENT_MANAGEMENT_ENABLED:
         recover_content_publications_on_boot(enqueue_content_publication)
         recover_reclassifications_on_boot(enqueue_content_reclassification)
+        recover_bulk_operations_on_boot()
     configure_transcription_worker(build_transcription_service)
     transcription_runtime_ready = ASR_ENABLED and bool(ASR_SERVICE_TOKEN)
     if transcription_runtime_ready:
@@ -215,6 +223,7 @@ async def lifespan(app: FastAPI):
             pass
         if transcription_runtime_ready:
             await stop_transcription_worker()
+        await asyncio.to_thread(stop_bulk_operation_worker)
         await stop_worker()
         configure_publication_runner(None)
         configure_content_publication_runner(None)
