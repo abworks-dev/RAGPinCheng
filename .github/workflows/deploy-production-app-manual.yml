@@ -297,6 +297,7 @@ jobs:
           active = {
               "content_index_jobs": ("pending", "parsing", "chunking", "summarizing", "embedding"),
               "content_reclassification_jobs": ("pending", "applying", "committing", "rolling_back"),
+              "content_bulk_operations": ("queued", "running", "packaging"),
               "index_jobs": ("pending", "running", "uploading", "queued_mineru", "parsing", "chunking", "embedding"),
               "transcript_publication_index_jobs": ("pending", "parsing", "chunking", "embedding"),
               "transcription_jobs": ("pending", "running", "processing"),
@@ -358,6 +359,16 @@ jobs:
             echo "ERROR: Docker did not create a valid production content root"
             exit 1
           }
+          CONTENT_AVAILABLE_KIB="$(df -Pk -- "${CONTENT_HOST_PATH}" | awk 'END {print $4}')"
+          [[ "${CONTENT_AVAILABLE_KIB}" =~ ^[0-9]+$ ]] || {
+            echo "ERROR: production content disk free space could not be determined"
+            exit 1
+          }
+          [ "${CONTENT_AVAILABLE_KIB}" -ge 12582912 ] || {
+            echo "ERROR: production content disk requires at least 12 GiB free for managed archive jobs"
+            exit 1
+          }
+          echo "APP_ONLY_CONTENT_DISK status=ready available_kib=${CONTENT_AVAILABLE_KIB} required_kib=12582912"
 
           ORIGINAL_COMPOSE_OVERRIDE="${COMPOSE_OVERRIDE}"
           if [ "${SOURCE_DECOUPLING_COMPLETE:-false}" = "true" ]; then

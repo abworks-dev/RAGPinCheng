@@ -14,6 +14,24 @@ load_dotenv()
 ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT / "data"
 CONTENT_ROOT = Path(os.getenv("CONTENT_ROOT", str(ROOT / "content"))).resolve()
+CONTENT_BULK_ARCHIVE_ROOT = Path(
+    os.getenv("CONTENT_BULK_ARCHIVE_ROOT", str(CONTENT_ROOT / ".bulk-archives"))
+).resolve()
+CONTENT_BULK_ARCHIVE_MAX_BYTES = int(
+    os.getenv("CONTENT_BULK_ARCHIVE_MAX_BYTES", str(10 * 1024 * 1024 * 1024))
+)
+CONTENT_BULK_ARCHIVE_RESERVE_BYTES = int(
+    os.getenv("CONTENT_BULK_ARCHIVE_RESERVE_BYTES", str(2 * 1024 * 1024 * 1024))
+)
+CONTENT_BULK_ARCHIVE_RETENTION_SECONDS = int(
+    os.getenv("CONTENT_BULK_ARCHIVE_RETENTION_SECONDS", str(6 * 60 * 60))
+)
+if CONTENT_BULK_ARCHIVE_MAX_BYTES <= 0:
+    raise ValueError("CONTENT_BULK_ARCHIVE_MAX_BYTES must be positive")
+if CONTENT_BULK_ARCHIVE_RESERVE_BYTES < 0:
+    raise ValueError("CONTENT_BULK_ARCHIVE_RESERVE_BYTES must not be negative")
+if CONTENT_BULK_ARCHIVE_RETENTION_SECONDS <= 0:
+    raise ValueError("CONTENT_BULK_ARCHIVE_RETENTION_SECONDS must be positive")
 # DOCS_DIR is retained as the legacy compatibility name. The default must not
 # overlap the repository's project documentation directory.
 DOCS_DIR = Path(os.getenv("DOCS_DIR", str(CONTENT_ROOT / "legacy-docs"))).resolve()

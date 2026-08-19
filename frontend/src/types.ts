@@ -397,6 +397,75 @@ export type CategoryDeleteResult = {
   deleted_object_count: number;
 };
 
+export type BulkOperationAction = "move" | "submit" | "approve" | "reject" | "publish" | "download" | "delete" | "force_delete";
+
+export type BulkOperationCategory = {
+  run_id: string;
+  category_id: string;
+  parent_id: string | null;
+  full_path: string;
+  archive_path: string;
+  version: number;
+  root_category_id: string;
+  is_root: boolean;
+  eligible: boolean;
+  selected: boolean;
+  reason: string | null;
+  result_status: "pending" | "succeeded" | "failed" | "skipped";
+  result_message: string | null;
+  sort_order: number;
+};
+
+export type BulkOperationItem = {
+  run_id: string;
+  item_id: string;
+  version_id: string;
+  category_id: string;
+  category_path: string;
+  archive_path: string;
+  title: string;
+  original_filename: string;
+  content_kind: string;
+  lifecycle_status: string;
+  size_bytes: number;
+  scope_source: "category" | "direct";
+  root_category_id: string | null;
+  eligible: boolean;
+  selected: boolean;
+  reason: string | null;
+  result_status: "pending" | "succeeded" | "failed" | "skipped";
+  result_message: string | null;
+  index_job_id: string | null;
+  sort_order: number;
+};
+
+export type BulkOperation = {
+  id: string;
+  operation: BulkOperationAction;
+  status: "awaiting_confirmation" | "queued" | "running" | "packaging" | "ready" | "succeeded" | "partial" | "failed" | "cancelled" | "expired";
+  actor_user_id: number | null;
+  target_category_id: string | null;
+  note: string | null;
+  confirmation_phrase: string | null;
+  total_files: number;
+  selected_files: number;
+  completed_files: number;
+  failed_files: number;
+  total_folders: number;
+  total_bytes: number;
+  processed_bytes: number;
+  archive_filename: string | null;
+  error_summary: string | null;
+  created_at: number;
+  started_at: number | null;
+  finished_at: number | null;
+  expires_at: number | null;
+  updated_at: number;
+  max_archive_bytes: number;
+  categories: BulkOperationCategory[];
+  items: BulkOperationItem[];
+};
+
 export type KnowledgeScope = {
   id: string;
   parent_id: string | null;

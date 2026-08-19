@@ -1195,6 +1195,91 @@ MIGRATIONS = (
         ),
     ),
     Migration(29, "xmind_managed_content", ("RELAX_CONTENT_VERSION_DOC_TYPE_XMIND",)),
+    Migration(
+        30,
+        "managed_content_bulk_operations",
+        (
+            """CREATE TABLE IF NOT EXISTS content_bulk_operations (
+                id TEXT PRIMARY KEY,
+                operation TEXT NOT NULL CHECK (operation IN (
+                    'move','submit','approve','reject','publish','download','delete','force_delete'
+                )),
+                status TEXT NOT NULL CHECK (status IN (
+                    'awaiting_confirmation','queued','running','packaging','ready',
+                    'succeeded','partial','failed','cancelled','expired'
+                )),
+                actor_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                target_category_id TEXT REFERENCES category_nodes(id) ON DELETE RESTRICT,
+                note TEXT,
+                source_json TEXT NOT NULL,
+                confirmation_phrase TEXT,
+                total_files INTEGER NOT NULL DEFAULT 0 CHECK (total_files >= 0),
+                selected_files INTEGER NOT NULL DEFAULT 0 CHECK (selected_files >= 0),
+                completed_files INTEGER NOT NULL DEFAULT 0 CHECK (completed_files >= 0),
+                failed_files INTEGER NOT NULL DEFAULT 0 CHECK (failed_files >= 0),
+                total_folders INTEGER NOT NULL DEFAULT 0 CHECK (total_folders >= 0),
+                total_bytes INTEGER NOT NULL DEFAULT 0 CHECK (total_bytes >= 0),
+                processed_bytes INTEGER NOT NULL DEFAULT 0 CHECK (processed_bytes >= 0),
+                archive_filename TEXT,
+                error_summary TEXT,
+                created_at INTEGER NOT NULL,
+                started_at INTEGER,
+                finished_at INTEGER,
+                expires_at INTEGER,
+                updated_at INTEGER NOT NULL
+            )""",
+            """CREATE TABLE IF NOT EXISTS content_bulk_operation_categories (
+                run_id TEXT NOT NULL REFERENCES content_bulk_operations(id) ON DELETE CASCADE,
+                category_id TEXT NOT NULL,
+                parent_id TEXT,
+                full_path TEXT NOT NULL,
+                archive_path TEXT NOT NULL,
+                version INTEGER NOT NULL,
+                root_category_id TEXT NOT NULL,
+                is_root INTEGER NOT NULL DEFAULT 0 CHECK (is_root IN (0,1)),
+                eligible INTEGER NOT NULL DEFAULT 1 CHECK (eligible IN (0,1)),
+                selected INTEGER NOT NULL DEFAULT 1 CHECK (selected IN (0,1)),
+                reason TEXT,
+                result_status TEXT NOT NULL DEFAULT 'pending' CHECK (result_status IN (
+                    'pending','succeeded','failed','skipped'
+                )),
+                result_message TEXT,
+                sort_order INTEGER NOT NULL,
+                PRIMARY KEY(run_id,category_id)
+            )""",
+            """CREATE TABLE IF NOT EXISTS content_bulk_operation_items (
+                run_id TEXT NOT NULL REFERENCES content_bulk_operations(id) ON DELETE CASCADE,
+                item_id TEXT NOT NULL,
+                version_id TEXT NOT NULL,
+                category_id TEXT NOT NULL,
+                category_path TEXT NOT NULL,
+                archive_path TEXT NOT NULL,
+                title TEXT NOT NULL,
+                original_filename TEXT NOT NULL,
+                content_kind TEXT NOT NULL,
+                lifecycle_status TEXT NOT NULL,
+                object_sha256 TEXT,
+                storage_rel_path TEXT,
+                size_bytes INTEGER NOT NULL DEFAULT 0 CHECK (size_bytes >= 0),
+                scope_source TEXT NOT NULL CHECK (scope_source IN ('category','direct')),
+                root_category_id TEXT,
+                eligible INTEGER NOT NULL DEFAULT 0 CHECK (eligible IN (0,1)),
+                selected INTEGER NOT NULL DEFAULT 0 CHECK (selected IN (0,1)),
+                reason TEXT,
+                result_status TEXT NOT NULL DEFAULT 'pending' CHECK (result_status IN (
+                    'pending','succeeded','failed','skipped'
+                )),
+                result_message TEXT,
+                index_job_id TEXT,
+                sort_order INTEGER NOT NULL,
+                PRIMARY KEY(run_id,item_id)
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_content_bulk_operations_actor_created ON content_bulk_operations(actor_user_id,created_at DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_content_bulk_operations_status ON content_bulk_operations(status,updated_at)",
+            "CREATE INDEX IF NOT EXISTS idx_content_bulk_items_run_sort ON content_bulk_operation_items(run_id,sort_order)",
+            "CREATE INDEX IF NOT EXISTS idx_content_bulk_categories_run_sort ON content_bulk_operation_categories(run_id,sort_order)",
+        ),
+    ),
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 PHASE2_TABLES = frozenset(
@@ -1227,6 +1312,13 @@ CONTENT_LIBRARY_TABLES = frozenset(
         "content_index_jobs",
         "content_item_heads",
         "content_audit_events",
+    }
+)
+CONTENT_BULK_OPERATION_TABLES = frozenset(
+    {
+        "content_bulk_operations",
+        "content_bulk_operation_categories",
+        "content_bulk_operation_items",
     }
 )
 UPLOAD_TASK_TABLES = frozenset({"upload_batch_entries"})
@@ -1458,6 +1550,8 @@ def has_pending_ddl(path: Path, *, base_tables: frozenset[str]) -> bool:
         raise RuntimeError("migration_schema_mismatch")
     if any(version == 28 for version, _name in applied) and not EXTERNAL_MEDIA_SOURCE_TABLES.issubset(tables):
         raise RuntimeError("migration_schema_mismatch")
+    if any(version == 30 for version, _name in applied) and not CONTENT_BULK_OPERATION_TABLES.issubset(tables):
+        raise RuntimeError("migration_schema_mismatch")
     if any(version == 10 for version, _name in applied):
         conn = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
         try:
@@ -1541,6 +1635,8 @@ def apply_all(conn: sqlite3.Connection, *, base_schema: str, applied_at: int) ->
         if 19 in applied_versions and not MEDIA_LIBRARY_VIDEO_ACTIONS_TABLES.issubset(tables):
             raise RuntimeError("migration_schema_mismatch")
         if 20 in applied_versions and not CONTENT_TRASH_LIFECYCLE_TABLES.issubset(tables):
+            raise RuntimeError("migration_schema_mismatch")
+        if 30 in applied_versions and not CONTENT_BULK_OPERATION_TABLES.issubset(tables):
             raise RuntimeError("migration_schema_mismatch")
         if 25 in applied_versions and not CATEGORY_FORCE_DELETE_TABLES.issubset(tables):
             raise RuntimeError("migration_schema_mismatch")

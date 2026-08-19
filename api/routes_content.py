@@ -62,6 +62,17 @@ from .content_reclassification import (
     failure_summary as reclassification_failure_summary,
     retry_reclassification_job,
 )
+from .content_bulk_operations import (
+    archive_file,
+    cancel_operation,
+    create_preflight as create_bulk_operation_preflight,
+    finalize_sync_run,
+    mark_item_result,
+    operation_snapshot,
+    start_archive,
+    start_force_delete,
+    update_item_selection,
+)
 from .content_storage import ContentStorage, StoredContentObject
 from .content_trash_cleanup import (
     get_trash_settings,
@@ -112,6 +123,10 @@ from .db import get_db
 from .routes_media import safe_join
 from .schemas import (
     BulkArchiveManagedContentRequest,
+    BulkOperationDTO,
+    BulkOperationExecuteRequest,
+    BulkOperationPreflightRequest,
+    BulkOperationSelectionRequest,
     BulkRestoreManagedContentRequest,
     BulkRestorePreflightResponse,
     BulkRestorePreflightResultDTO,
@@ -2660,6 +2675,350 @@ def _resolve_category_download_entries(
     return root_name, entries
 
 
+def _bulk_permissions(conn: sqlite3.Connection, user: CurrentUser) -> set[str]:
+    return {
+        permission
+        for permission in CONTENT_PERMISSIONS
+        if has_content_permission(conn, user, permission)
+    }
+
+
+def _bulk_operation_permission(operation: str) -> str:
+    return {
+        "submit": "item.submit",
+        "approve": "item.review",
+        "reject": "item.review",
+        "publish": "item.publish",
+        "download": "item.download",
+        "move": "category.view",
+        "delete": "category.manage",
+        "force_delete": "category.force_delete",
+    }[operation]
+
+
+def _raise_bulk_operation_error(exc: Exception) -> None:
+    message = str(exc)
+    status = 400
+    detail = {
+        "bulk_scope_empty": "请至少选择一个文件夹或资料",
+        "bulk_source_limit_exceeded": "单次最多选择 20 个文件夹或资料",
+        "bulk_scope_file_limit_exceeded": "递归影响资料超过 5000 份，请拆分操作",
+        "bulk_archive_size_exceeded": "打包资料总量不能超过 10 GiB",
+        "folder_delete_requires_categories": "批量删除文件夹不能混入散选资料",
+        "bulk_operation_not_found": "批量操作不存在或已过期",
+        "bulk_operation_owner_required": "只能查看和操作自己创建的批量任务",
+        "bulk_operation_already_started": "批量操作已经开始，请刷新状态",
+        "bulk_operation_no_selected_items": "没有勾选可操作的资料",
+        "bulk_archive_not_ready": "压缩包尚未准备完成",
+        "bulk_archive_expired": "压缩包已过期，请重新打包",
+        "bulk_archive_missing": "压缩包文件不存在，请重新打包",
+        "bulk_operation_confirmation_required": "强制删除确认文字不正确",
+        "bulk_operation_target_required": "请选择目标目录",
+    }.get(message, "批量操作状态已变化，请刷新后重试")
+    if isinstance(exc, PermissionError):
+        status = 403
+    elif message in {"bulk_operation_not_found", "bulk_archive_missing"}:
+        status = 404
+    elif message in {"category_version_conflict", "content_version_conflict", "bulk_operation_already_started"}:
+        status = 409
+    elif message in {"bulk_scope_file_limit_exceeded", "bulk_archive_size_exceeded"}:
+        status = 413
+    raise HTTPException(status_code=status, detail=detail)
+
+
+@router.post("/bulk-operations/preflight", response_model=BulkOperationDTO)
+def preflight_bulk_operation(
+    body: BulkOperationPreflightRequest,
+    user: CurrentUser = Depends(require_content_permission("workspace.view", csrf=True)),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> BulkOperationDTO:
+    _require_feature()
+    permission = (
+        "category.manage"
+        if body.operation == "move" and body.categories
+        else _bulk_operation_permission(body.operation)
+    )
+    if not has_content_permission(conn, user, permission):
+        raise HTTPException(status_code=403, detail="当前账号没有执行此批量操作的权限")
+    if body.operation == "force_delete" and (
+        not has_content_permission(conn, user, "category.manage")
+        or not has_content_permission(conn, user, "trash.purge")
+    ):
+        raise HTTPException(status_code=403, detail="强制删除还需要目录管理和永久删除权限")
+    try:
+        snapshot = create_bulk_operation_preflight(
+            conn,
+            operation=body.operation,
+            category_refs=[entry.model_dump() for entry in body.categories],
+            item_refs=[entry.model_dump() for entry in body.items],
+            actor_user_id=user.id,
+            permissions=_bulk_permissions(conn, user),
+        )
+    except (ValueError, PermissionError, sqlite3.IntegrityError) as exc:
+        _raise_bulk_operation_error(exc)
+    return BulkOperationDTO(**snapshot)
+
+
+@router.get("/bulk-operations/{run_id}", response_model=BulkOperationDTO)
+def get_bulk_operation(
+    run_id: str,
+    include_tree: bool = Query(default=True),
+    user: CurrentUser = Depends(require_content_permission("workspace.view")),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> BulkOperationDTO:
+    try:
+        return BulkOperationDTO(**operation_snapshot(
+            conn, run_id, actor_user_id=user.id, include_tree=include_tree,
+        ))
+    except (ValueError, PermissionError) as exc:
+        _raise_bulk_operation_error(exc)
+
+
+@router.patch("/bulk-operations/{run_id}/selection", response_model=BulkOperationDTO)
+def patch_bulk_operation_selection(
+    run_id: str,
+    body: BulkOperationSelectionRequest,
+    user: CurrentUser = Depends(require_content_permission("workspace.view", csrf=True)),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> BulkOperationDTO:
+    try:
+        return BulkOperationDTO(**update_item_selection(
+            conn, run_id, actor_user_id=user.id, item_ids=body.item_ids, selected=body.selected,
+        ))
+    except (ValueError, PermissionError) as exc:
+        _raise_bulk_operation_error(exc)
+
+
+@router.post("/bulk-operations/{run_id}/items/{item_id}/review", response_model=BulkOperationDTO)
+def review_bulk_operation_item(
+    run_id: str,
+    item_id: str,
+    body: ReviewManagedContentRequest,
+    user: CurrentUser = Depends(require_content_permission("item.review", csrf=True)),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> BulkOperationDTO:
+    try:
+        run = operation_snapshot(conn, run_id, actor_user_id=user.id)
+        if str(run["operation"]) not in {"approve", "reject"}:
+            raise ValueError("bulk_operation_item_unavailable")
+        if str(run["status"]) != "awaiting_confirmation":
+            raise ValueError("bulk_operation_already_started")
+        target = next((entry for entry in run["items"] if entry["item_id"] == item_id), None)
+        if target is None or not target["eligible"] or target["result_status"] != "pending":
+            raise ValueError("bulk_operation_item_unavailable")
+        review_version(
+            conn,
+            str(target["version_id"]),
+            approved=body.approved,
+            note=body.note,
+            category_id=body.category_id,
+            actor_user_id=user.id,
+        )
+        mark_item_result(conn, run_id, item_id, status="succeeded")
+        remaining = conn.execute(
+            """SELECT count(*) FROM content_bulk_operation_items
+               WHERE run_id=? AND selected=1 AND eligible=1 AND result_status='pending'""",
+            (run_id,),
+        ).fetchone()[0]
+        if int(remaining) == 0:
+            finalize_sync_run(conn, run_id)
+        else:
+            conn.commit()
+        return BulkOperationDTO(**operation_snapshot(conn, run_id, actor_user_id=user.id))
+    except (ValueError, PermissionError, sqlite3.IntegrityError) as exc:
+        conn.rollback()
+        _raise_bulk_operation_error(exc)
+
+
+@router.post("/bulk-operations/{run_id}/execute", response_model=BulkOperationDTO)
+def execute_bulk_operation(
+    run_id: str,
+    body: BulkOperationExecuteRequest,
+    user: CurrentUser = Depends(require_content_permission("workspace.view", csrf=True)),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> BulkOperationDTO:
+    try:
+        run = operation_snapshot(conn, run_id, actor_user_id=user.id)
+        operation = str(run["operation"])
+        has_folder_roots = any(category["is_root"] for category in run["categories"])
+        permission = (
+            "category.manage"
+            if operation == "move" and has_folder_roots
+            else _bulk_operation_permission(operation)
+        )
+        if not has_content_permission(conn, user, permission):
+            raise PermissionError("bulk_operation_permission_required")
+        if operation == "force_delete" and (
+            not has_content_permission(conn, user, "category.manage")
+            or not has_content_permission(conn, user, "trash.purge")
+        ):
+            raise PermissionError("bulk_operation_permission_required")
+        if str(run["status"]) != "awaiting_confirmation":
+            raise ValueError("bulk_operation_already_started")
+        if operation == "download":
+            return BulkOperationDTO(**start_archive(run_id, actor_user_id=user.id))
+        if operation == "force_delete":
+            return BulkOperationDTO(**start_force_delete(
+                conn,
+                run_id,
+                actor_user_id=user.id,
+                confirmation=body.confirmation,
+            ))
+        if operation == "move" and not body.target_category_id:
+            raise ValueError("bulk_operation_target_required")
+        selected_root_count = sum(
+            category["is_root"] and category["eligible"] and category["selected"]
+            for category in run["categories"]
+        )
+        if operation in {"submit", "approve", "reject", "publish"} and int(run["selected_files"]) < 1:
+            raise ValueError("bulk_operation_no_selected_items")
+        if operation == "move" and selected_root_count < 1 and int(run["selected_files"]) < 1:
+            raise ValueError("bulk_operation_no_selected_items")
+        if operation == "delete" and selected_root_count < 1:
+            raise ValueError("bulk_operation_no_selected_items")
+        if operation == "reject" and not (body.note or "").strip():
+            raise ValueError("review_note_required")
+
+        now = int(time.time())
+        conn.execute(
+            """UPDATE content_bulk_operations SET status='running',target_category_id=?,note=?,
+                   started_at=?,updated_at=? WHERE id=?""",
+            (body.target_category_id, (body.note or "").strip() or None, now, now, run_id),
+        )
+        conn.commit()
+
+        if operation in {"move", "delete"}:
+            root_rows = conn.execute(
+                """SELECT * FROM content_bulk_operation_categories
+                   WHERE run_id=? AND is_root=1 AND selected=1 AND eligible=1 ORDER BY sort_order""",
+                (run_id,),
+            ).fetchall()
+            for category in root_rows:
+                try:
+                    category_id = str(category["category_id"])
+                    if operation == "move":
+                        target_parent_id = None if body.target_category_id == "__root__" else body.target_category_id
+                        move_category(
+                            conn, category_id, target_parent_id=target_parent_id, before_category_id=None,
+                            expected_version=int(category["version"]), actor_user_id=user.id,
+                        )
+                    else:
+                        delete_category(
+                            conn, category_id, expected_version=int(category["version"]),
+                            confirmed=True, actor_user_id=user.id,
+                        )
+                    conn.execute(
+                        """UPDATE content_bulk_operation_categories SET result_status='succeeded',selected=0
+                           WHERE run_id=? AND root_category_id=?""",
+                        (run_id, category_id),
+                    )
+                    if operation == "move":
+                        conn.execute(
+                            """UPDATE content_bulk_operation_items
+                               SET result_status='succeeded',selected=0
+                               WHERE run_id=? AND root_category_id=?""",
+                            (run_id, category_id),
+                        )
+                    conn.commit()
+                except Exception as exc:  # continue with independent roots
+                    conn.rollback()
+                    message = _bulk_failure_message(exc)
+                    conn.execute(
+                        """UPDATE content_bulk_operation_categories SET result_status='failed',result_message=?,selected=0
+                           WHERE run_id=? AND root_category_id=?""",
+                        (message, run_id, category["category_id"]),
+                    )
+                    if operation == "move":
+                        conn.execute(
+                            """UPDATE content_bulk_operation_items
+                               SET result_status='failed',result_message=?,selected=0
+                               WHERE run_id=? AND root_category_id=?""",
+                            (message, run_id, category["category_id"]),
+                        )
+                    conn.commit()
+
+        if operation not in {"delete", "force_delete"}:
+            source_clause = "AND scope_source='direct'" if operation == "move" else ""
+            item_rows = conn.execute(
+                f"""SELECT * FROM content_bulk_operation_items
+                   WHERE run_id=? AND selected=1 AND eligible=1 AND result_status='pending'
+                   {source_clause} ORDER BY sort_order""",
+                (run_id,),
+            ).fetchall()
+            for item in item_rows:
+                try:
+                    item_id = str(item["item_id"])
+                    version_id = str(item["version_id"])
+                    index_job_id = None
+                    if operation == "submit":
+                        submit_version_for_review(conn, version_id, actor_user_id=user.id)
+                    elif operation in {"approve", "reject"}:
+                        review_version(
+                            conn, version_id, approved=operation == "approve", note=body.note,
+                            category_id=None, actor_user_id=user.id,
+                        )
+                    elif operation == "publish":
+                        _publication_id, index_job_id = create_publication_job(
+                            conn, version_id, actor_user_id=user.id,
+                        )
+                        enqueue_content_publication(index_job_id)
+                    elif operation == "move":
+                        if str(item["lifecycle_status"]) == "published":
+                            job = create_reclassification_job(
+                                conn, item_id, target_category_id=str(body.target_category_id),
+                                expected_version_id=version_id, actor_user_id=user.id,
+                                can_reclassify=has_content_permission(conn, user, "item.reclassify_published"),
+                            )
+                            index_job_id = str(job["id"])
+                            enqueue_content_reclassification(index_job_id)
+                        else:
+                            move_content_item(
+                                conn, item_id, target_category_id=str(body.target_category_id),
+                                expected_version_id=version_id, actor_user_id=user.id,
+                                can_move_draft=has_content_permission(conn, user, "item.move_draft"),
+                                can_move_review=has_content_permission(conn, user, "item.move_review"),
+                            )
+                    mark_item_result(conn, run_id, item_id, status="succeeded", index_job_id=index_job_id)
+                    conn.commit()
+                except Exception as exc:  # each item is an independent workflow transition
+                    conn.rollback()
+                    mark_item_result(
+                        conn, run_id, str(item["item_id"]), status="failed",
+                        message=_bulk_failure_message(exc),
+                    )
+                    conn.commit()
+        finalize_sync_run(conn, run_id)
+        return BulkOperationDTO(**operation_snapshot(conn, run_id, actor_user_id=user.id))
+    except (ValueError, PermissionError, sqlite3.IntegrityError) as exc:
+        conn.rollback()
+        _raise_bulk_operation_error(exc)
+
+
+@router.post("/bulk-operations/{run_id}/cancel", response_model=BulkOperationDTO)
+def cancel_bulk_operation_route(
+    run_id: str,
+    user: CurrentUser = Depends(require_content_permission("workspace.view", csrf=True)),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> BulkOperationDTO:
+    try:
+        return BulkOperationDTO(**cancel_operation(conn, run_id, actor_user_id=user.id))
+    except (ValueError, PermissionError) as exc:
+        _raise_bulk_operation_error(exc)
+
+
+@router.get("/bulk-operations/{run_id}/archive")
+def download_bulk_operation_archive(
+    run_id: str,
+    user: CurrentUser = Depends(require_content_permission("item.download")),
+    conn: sqlite3.Connection = Depends(get_db),
+):
+    try:
+        path, filename = archive_file(conn, run_id, actor_user_id=user.id)
+    except (ValueError, PermissionError) as exc:
+        _raise_bulk_operation_error(exc)
+    return FileResponse(path, media_type="application/zip", filename=filename)
+
+
 @router.post("/bulk-download")
 def bulk_download_content(
     body: BulkDownloadManagedContentRequest,
@@ -2806,6 +3165,12 @@ def _bulk_failure_message(exc: Exception) -> str:
         "content_delete_reclassification_in_progress": "资料正在调整分类，暂时不能移入回收站",
         "version_not_submittable": "仅草稿或已退回资料可以提交审核",
         "active_category_not_found": "目标目录不存在或已停用",
+        "category_not_found": "目录不存在或已停用",
+        "category_version_conflict": "目录版本已变化，请刷新后重新检查",
+        "category_move_cycle": "不能把目录移动到自身或其子目录",
+        "category_depth_exceeded": "移动后目录层级会超过四级",
+        "category_sibling_name_conflict": "目标位置已有同名目录",
+        "category_delete_blocked": "目录内仍有资料或进行中的任务",
     }.get(str(exc), "资料状态已变化，请刷新后重试")
 
 

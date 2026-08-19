@@ -20,13 +20,15 @@ import { toast } from "../../components/ui/toast";
 import { useAuth } from "../../context/AuthContext";
 import { usePdfPreview } from "../../hooks/usePdfPreview";
 import { useVideoPlayer } from "../../hooks/useVideoPlayer";
-import type { BulkManagedContentResult, BulkRestorePreflightResult, ContentPermission, ContentTrashAuditEvent, FolderRequest, ManagedCategory, ManagedContentItem, ManagedUploadConflictAction, ManagedUploadPreflightResponse, ManagedUploadTask, ManagedUploadTaskEntry, TrashPurgePreflight, TrashPurgeRun, TrashSettings } from "../../types";
+import type { BulkManagedContentResult, BulkOperationAction, BulkRestorePreflightResult, ContentPermission, ContentTrashAuditEvent, FolderRequest, ManagedCategory, ManagedContentItem, ManagedUploadConflictAction, ManagedUploadPreflightResponse, ManagedUploadTask, ManagedUploadTaskEntry, TrashPurgePreflight, TrashPurgeRun, TrashSettings } from "../../types";
 import type { ManagedUploadOptions, ManagedUploadProgress } from "../../api/client";
 import { formatAdminDate } from "../../lib/admin-formatters";
 import { createRequestId } from "../../lib/request-id";
 import { AdminDocumentsPage } from "./AdminDocumentsPage";
 import { ManagedSummaryCard } from "../../components/admin/ManagedSummaryCard";
 import { CategoryDeleteDialog } from "../../components/admin/CategoryDeleteDialog";
+import { CategoryDestinationPicker } from "../../components/admin/CategoryDestinationPicker";
+import { ManagedContentBulkOperationDialog } from "../../components/admin/ManagedContentBulkOperationDialog";
 import { ManagedItemType } from "../../components/admin/ManagedItemType";
 import { compareManagedCategories } from "../../lib/category-tree";
 import {
@@ -597,7 +599,7 @@ function BatchActionsMenu({
   options,
 }: {
   disabled: boolean;
-  options: Array<ActionMenuOption & { key: BulkAction; onSelect: () => void }>;
+  options: Array<ActionMenuOption & { key: string; onSelect: () => void }>;
 }) {
   return <ActionsMenu disabled={disabled} options={options} triggerLabel="批量操作" menuLabel="批量操作" />;
 }
@@ -831,6 +833,8 @@ export function AdminManagedContentPage() {
   const [uploadConflictError, setUploadConflictError] = useState<string | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
+  const [selectedFolders, setSelectedFolders] = useState<string[]>([]);
+  const [recursiveBulkAction, setRecursiveBulkAction] = useState<BulkOperationAction | null>(null);
   const [bulkAction, setBulkAction] = useState<BulkAction | null>(null);
   const [bulkFailures, setBulkFailures] = useState<Array<BulkManagedContentResult & { title: string }>>([]);
   const [bulkNote, setBulkNote] = useState("");
@@ -952,7 +956,7 @@ export function AdminManagedContentPage() {
     const timer = window.setTimeout(() => setQuery(queryInput.trim()), 250);
     return () => window.clearTimeout(timer);
   }, [queryInput]);
-  useEffect(() => { setPage(0); setSelected([]); }, [query, currentFolderId, statusFilter, sourceFilter, kindFilter, pageSize]);
+  useEffect(() => { setPage(0); setSelected([]); setSelectedFolders([]); }, [query, currentFolderId, statusFilter, sourceFilter, kindFilter, pageSize]);
 
   const load = useCallback(async (refresh = false) => {
     if (refresh) setRefreshing(true);
@@ -984,6 +988,7 @@ export function AdminManagedContentPage() {
       setCounts(listing.status_counts);
       setCurrentFolderId((current) => current && categoryRows.some((row) => row.id === current) ? current : "");
       setSelected((current) => current.filter((id) => listing.items.some((item) => item.version_id === id)));
+      setSelectedFolders((current) => current.filter((id) => categoryRows.some((category) => category.id === id)));
       if (can("folder.review")) {
         setFolderRequests(await adminContentApi.folderRequests("pending"));
       }
@@ -2209,8 +2214,42 @@ export function AdminManagedContentPage() {
 
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
   const selectable = items.filter((item) => item.content_kind === "document" || canMoveItem(item)).slice(0, BULK_LIMIT);
-  const allSelected = selectable.length > 0 && selectable.every((item) => selected.includes(item.version_id));
-  const toggleAll = () => setSelected(allSelected ? [] : selectable.map((item) => item.version_id));
+  const selectableCount = Math.min(BULK_LIMIT, sortedChildFolders.length + selectable.length);
+  const allSelected = selectableCount > 0
+    && sortedChildFolders.slice(0, BULK_LIMIT).every((folder) => selectedFolders.includes(folder.id))
+    && selectable.slice(0, Math.max(0, BULK_LIMIT - sortedChildFolders.length)).every((item) => selected.includes(item.version_id));
+  const toggleAll = () => {
+    if (allSelected) { setSelected([]); setSelectedFolders([]); return; }
+    const folders = sortedChildFolders.slice(0, BULK_LIMIT);
+    setSelectedFolders(folders.map((folder) => folder.id));
+    setSelected(selectable.slice(0, Math.max(0, BULK_LIMIT - folders.length)).map((item) => item.version_id));
+  };
+
+  const createDestinationFolder = async (parentId: string, displayName: string) => {
+    const siblings = categories.filter((category) => category.parent_id === parentId && category.is_active);
+    const siblingNumber = Math.max(
+      0,
+      ...siblings.map((category) => /^\d+$/.test(category.display_code) ? Number(category.display_code) : 0),
+    ) + 1;
+    const sortOrder = Math.max(0, ...siblings.map((category) => category.sort_order)) + 10;
+    const created = await adminContentApi.createCategory({
+      parent_id: parentId,
+      display_code: String(siblingNumber).padStart(2, "0"),
+      display_name: displayName,
+      sort_order: sortOrder,
+    });
+    setCategories((current) => [...current.filter((category) => category.id !== created.id), created]);
+    toast.success("文件夹已创建并选中");
+    return created;
+  };
+  const selectedFolderRows = categories.filter((category) => selectedFolders.includes(category.id));
+  const totalSelectedCount = selected.length + selectedFolders.length;
+  const toggleFolderSelection = (folderId: string) => {
+    setSelectedFolders((current) => current.includes(folderId)
+      ? current.filter((id) => id !== folderId)
+      : totalSelectedCount >= BULK_LIMIT ? current : [...current, folderId]);
+  };
+  const openRecursiveBulk = (action: BulkOperationAction) => setRecursiveBulkAction(action);
   const documentSelection = selectedItems.every((item) => item.content_kind === "document");
   const hasSubmittableSelection = documentSelection && selectedItems.some((item) => ["draft", "rejected"].includes(item.lifecycle_status));
   const hasReviewableSelection = documentSelection && selectedItems.some((item) => item.lifecycle_status === "awaiting_review");
@@ -2536,7 +2575,7 @@ export function AdminManagedContentPage() {
     {can("folder.review") && folderRequests.length > 0 && <Card className="overflow-hidden shadow-surface" aria-labelledby="folder-requests-title"><div className="border-b border-border px-4 py-3 sm:px-5"><h2 id="folder-requests-title" className="text-ui-base font-semibold">待处理目录申请</h2></div><ul className="divide-y divide-border">{folderRequests.map((request) => <li key={request.id} className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5"><div className="min-w-0"><p className="break-words text-ui-sm font-medium">{request.display_name}</p><p className="mt-0.5 text-ui-xs text-muted-foreground">上级目录：{request.parent_label} · 申请人：{request.requester_name || "未知"}</p></div><div className="flex gap-2"><Button size="sm" variant="outline" disabled={busyAction === `folder-request:${request.id}`} onClick={() => void reviewFolder(request, false)}><X className="size-4" />退回</Button><Button size="sm" disabled={busyAction === `folder-request:${request.id}`} onClick={() => void reviewFolder(request, true)}><Check className="size-4" />批准</Button></div></li>)}</ul></Card>}
     <Card className="shadow-surface [&_table]:!min-w-[56rem]" aria-labelledby="managed-list-title">
       <div className="grid gap-3 border-b border-border px-4 py-4 xl:grid-cols-[minmax(13rem,1fr)_18rem_auto] xl:items-end min-[1400px]:grid-cols-[minmax(13rem,1fr)_24rem_auto] sm:px-5">
-        <div className="min-w-0"><h2 id="managed-list-title" className="text-ui-base font-semibold">资料列表</h2><p className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-ui-xs text-muted-foreground"><span>共 {total} 份</span><span role="status" aria-live="polite">· {selected.length > 0 ? <>已选择 <strong>{selected.length}</strong> 份，单次最多 {BULK_LIMIT} 份</> : <>未选择资料，单次最多 {BULK_LIMIT} 份</>}</span></p></div>
+        <div className="min-w-0"><h2 id="managed-list-title" className="text-ui-base font-semibold">资料列表</h2><p className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-ui-xs text-muted-foreground"><span>共 {total} 份</span><span role="status" aria-live="polite">· {selectedFolders.length > 0 ? <>已选择 <strong>{selectedFolders.length}</strong> 个文件夹、<strong>{selected.length}</strong> 份资料，单次最多 {BULK_LIMIT} 项</> : selected.length > 0 ? <>已选择 <strong>{selected.length}</strong> 份，单次最多 {BULK_LIMIT} 份</> : <>未选择资料，单次最多 {BULK_LIMIT} 份</>}</span></p></div>
         <ManagedContentSearchFilters
           queryInput={queryInput}
           statusFilter={statusFilter}
@@ -2552,14 +2591,23 @@ export function AdminManagedContentPage() {
         <div className="flex shrink-0 flex-wrap items-center gap-2">
           {can("item.upload") && <Button size="sm" className="max-sm:h-control-md" onClick={openUploadDialog} disabled={!enabled || !currentFolderId || uploading || uploadChecking || folderScanning}><Upload className="size-4" />{folderScanning ? "读取文件夹中…" : "上传文件"}</Button>}
           <Button size="sm" variant="outline" className="max-sm:h-control-md" onClick={() => void load(true)} disabled={loading || refreshing}><RefreshCw className={refreshing ? "size-4 animate-spin" : "size-4"} />{refreshing ? "刷新中…" : "刷新列表"}</Button>
-          {selected.length > 1 ? <BatchActionsMenu disabled={bulkDisabled} options={[
+          {totalSelectedCount > 1 || selectedFolders.length > 0 ? <BatchActionsMenu disabled={bulkDisabled} options={selectedFolders.length > 0 ? [
+            { key: "move", label: "批量调整目录", icon: <FolderInput className="size-4" />, disabled: !can("category.manage"), disabledReason: "需要目录管理权限", onSelect: () => openRecursiveBulk("move") },
+            { key: "submit", label: "批量提交审核", icon: <Send className="size-4" />, disabled: !can("item.submit"), onSelect: () => openRecursiveBulk("submit") },
+            { key: "approve", label: "批量确认", icon: <Check className="size-4" />, disabled: !can("item.review"), onSelect: () => openRecursiveBulk("approve") },
+            { key: "reject", label: "批量退回", icon: <X className="size-4" />, disabled: !can("item.review"), onSelect: () => openRecursiveBulk("reject") },
+            { key: "publish", label: "批量发布", icon: <Rocket className="size-4" />, disabled: !can("item.publish"), onSelect: () => openRecursiveBulk("publish") },
+            { key: "download", label: "批量下载", icon: <Download className="size-4" />, disabled: !can("item.download"), onSelect: () => openRecursiveBulk("download") },
+            { key: "delete", label: "批量删除文件夹", icon: <Trash2 className="size-4" />, disabled: !can("category.manage"), destructive: true, onSelect: () => openRecursiveBulk("delete") },
+            ...(can("category.force_delete") && can("trash.purge") ? [{ key: "force-delete", label: "强制永久删除文件夹", icon: <Trash2 className="size-4" />, destructive: true, onSelect: () => openRecursiveBulk("force_delete" as const) }] : []),
+          ] : [
             { key: "move", label: bulkMoveLabel, icon: <FolderInput className="size-4" />, disabled: !hasMovableSelection, disabledReason: "所选资料必须属于同一状态且都可调整目录", onSelect: () => { setBulkFailures([]); setBulkMoveFolderId(""); setBulkNote(""); setBulkAction("move"); } },
-            { key: "submit", label: "批量提交审核", icon: <Send className="size-4" />, disabled: !can("item.submit") || !hasSubmittableSelection, disabledReason: "仅草稿或已退回文档可以提交审核", onSelect: () => openBulkWorkbench("submit") },
-            { key: "approve", label: "批量确认", icon: <Check className="size-4" />, disabled: !can("item.review") || !hasReviewableSelection, disabledReason: "仅文档支持批量确认，且至少包含一份待确认文档", onSelect: () => openBulkWorkbench("approve") },
-            { key: "reject", label: "批量退回", icon: <X className="size-4" />, disabled: !can("item.review") || !hasReviewableSelection, disabledReason: "仅文档支持批量退回，且至少包含一份待确认文档", onSelect: () => openBulkWorkbench("reject") },
-            { key: "publish", label: "批量发布", icon: <Rocket className="size-4" />, disabled: !can("item.publish") || !hasPublishableSelection, disabledReason: "仅已确认或发布失败的文档可批量发布", onSelect: () => { setBulkFailures([]); setBulkNote(""); setBulkAction("publish"); } },
-            { key: "download", label: "批量下载", icon: <Download className="size-4" />, disabled: !hasDownloadableSelection, disabledReason: "仅文档支持批量下载，且需要下载权限", onSelect: () => { void downloadSelected(); } },
-            { key: "archive", label: "批量删除", icon: <Trash2 className="size-4" />, disabled: !hasDeletableSelection, disabledReason: "视频转录稿需在视频管理中删除", destructive: true, onSelect: () => openDeleteDialog(selectedItems) },
+            { key: "submit", label: "批量提交审核", icon: <Send className="size-4" />, disabled: !can("item.submit") || !hasSubmittableSelection, onSelect: () => openBulkWorkbench("submit") },
+            { key: "approve", label: "批量确认", icon: <Check className="size-4" />, disabled: !can("item.review") || !hasReviewableSelection, onSelect: () => openBulkWorkbench("approve") },
+            { key: "reject", label: "批量退回", icon: <X className="size-4" />, disabled: !can("item.review") || !hasReviewableSelection, onSelect: () => openBulkWorkbench("reject") },
+            { key: "publish", label: "批量发布", icon: <Rocket className="size-4" />, disabled: !can("item.publish") || !hasPublishableSelection, onSelect: () => { setBulkFailures([]); setBulkNote(""); setBulkAction("publish"); } },
+            { key: "download", label: "批量下载", icon: <Download className="size-4" />, disabled: !hasDownloadableSelection, onSelect: () => { void downloadSelected(); } },
+            { key: "archive", label: "批量删除", icon: <Trash2 className="size-4" />, disabled: !hasDeletableSelection, destructive: true, onSelect: () => openDeleteDialog(selectedItems) },
           ]} /> : (can("folder.request") || can("category.manage")) && <Button size="sm" variant="outline" className="max-sm:h-control-md" onClick={() => can("category.manage") ? setNewFolderOpen(true) : setRequestFolderOpen(true)} disabled={!currentFolder || currentFolder.level >= 4}><FolderPlus className="size-4" />新建目录</Button>}
         </div>
       </div>
@@ -2571,12 +2619,12 @@ export function AdminManagedContentPage() {
         <div className="hidden overflow-x-auto border-t border-border lg:block"><table className="w-full min-w-[72rem] text-ui-sm"><thead className="border-b border-border bg-surface-muted text-left text-muted-foreground"><tr><th className="w-8 px-1.5 py-3"><Checkbox aria-label="选择当前页前20份资料" checked={allSelected} onChange={toggleAll} /></th>{([ ["docType", "类型"], ["title", "资料"], ["updatedAt", "更新时间"], ["status", "状态"], ["source", "来源"] ] as [SortKey, string][]).map(([key, label]) => <th key={key} aria-sort={sort?.key === key ? sort.direction === "asc" ? "ascending" : "descending" : "none"} className={key === "docType" ? "w-16 px-1 py-3 text-center font-medium" : key === "title" ? "px-1.5 py-3 font-medium" : "px-3 py-3 font-medium"}><button type="button" className="inline-flex items-center gap-1 rounded px-1 py-0.5 hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => toggleSort(key)}>{label}{sortIcon(key)}</button></th>)}<th className="px-3 py-3 text-right font-medium">操作</th></tr></thead><tbody className="divide-y divide-border">
           {sortedChildFolders.map((folder) => {
             const folderLabel = `${folder.display_code} ${folder.display_name}`;
-            return <tr key={folder.id} data-testid={`managed-folder-row-${folder.id}`} className={`cursor-pointer transition-colors duration-normal hover:bg-surface-muted/60 ${draggedItem ? "bg-primary/5 outline outline-1 -outline-offset-1 outline-primary/50" : ""}`} onClick={() => setCurrentFolderId(folder.id)} onDragOver={(event) => { if (draggedItem) { event.preventDefault(); event.stopPropagation(); } }} onDrop={(event) => { if (!draggedItem) return; event.preventDefault(); event.stopPropagation(); void moveItemTo(draggedItem, folder.id); }}><td className="px-1.5 py-3" /><td className="px-1 py-3"><ManagedItemType folder compact /></td><td className="max-w-xs px-1.5 py-3"><button type="button" className="block max-w-full rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setCurrentFolderId(folder.id)}><span className="block break-words font-medium">{folderLabel}</span><span className="mt-0.5 block text-ui-xs text-muted-foreground">{folderContentSummary(folder)}</span></button></td><td className="whitespace-nowrap px-3 py-3 tabular-nums">{formatManagedUpdatedAt(folder.updated_at)}</td><td className="px-3 py-3 text-muted-foreground">—</td><td className="px-3 py-3 text-muted-foreground">—</td><td className="px-3 py-3 text-right">{renderFolderActions(folder)}</td></tr>;
+            return <tr key={folder.id} data-testid={`managed-folder-row-${folder.id}`} className={`cursor-pointer transition-colors duration-normal hover:bg-surface-muted/60 ${selectedFolders.includes(folder.id) || draggedItem ? "bg-primary/5" : ""} ${draggedItem ? "outline outline-1 -outline-offset-1 outline-primary/50" : ""}`} onClick={() => setCurrentFolderId(folder.id)} onDragOver={(event) => { if (draggedItem) { event.preventDefault(); event.stopPropagation(); } }} onDrop={(event) => { if (!draggedItem) return; event.preventDefault(); event.stopPropagation(); void moveItemTo(draggedItem, folder.id); }}><td className="px-1.5 py-3"><Checkbox aria-label={`选择文件夹${folderLabel}`} checked={selectedFolders.includes(folder.id)} disabled={!selectedFolders.includes(folder.id) && totalSelectedCount >= BULK_LIMIT} onClick={(event) => event.stopPropagation()} onChange={() => toggleFolderSelection(folder.id)} /></td><td className="px-1 py-3"><ManagedItemType folder compact /></td><td className="max-w-xs px-1.5 py-3"><button type="button" className="block max-w-full rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setCurrentFolderId(folder.id)}><span className="block break-words font-medium">{folderLabel}</span><span className="mt-0.5 block text-ui-xs text-muted-foreground">{folderContentSummary(folder)}</span></button></td><td className="whitespace-nowrap px-3 py-3 tabular-nums">{formatManagedUpdatedAt(folder.updated_at)}</td><td className="px-3 py-3 text-muted-foreground">—</td><td className="px-3 py-3 text-muted-foreground">—</td><td className="px-3 py-3 text-right">{renderFolderActions(folder)}</td></tr>;
           })}
           {sortedItems.map((item, index) => { const movable = canMoveItem(item); const draggable = movable && moveOperation(item) !== "reclassify"; const rowSelectable = item.content_kind === "document" || movable; return <tr key={item.item_id} draggable={draggable} title={draggable ? "拖动到文件夹行可调整目录" : undefined} onDragStart={() => setDraggedItem(item)} onDragEnd={() => setDraggedItem(null)} className={`transition-colors duration-normal hover:bg-surface-muted/60 ${draggable ? "cursor-grab" : ""}`}><td className="px-1.5 py-3"><Checkbox aria-label={`选择${item.title}`} checked={selected.includes(item.version_id)} disabled={index >= BULK_LIMIT || !rowSelectable} title={!rowSelectable ? "视频转录稿需要发布权限才能批量调整归档目录" : undefined} onChange={() => setSelected((current) => current.includes(item.version_id) ? current.filter((id) => id !== item.version_id) : [...current, item.version_id].slice(0, BULK_LIMIT))} /></td><td className="px-1 py-3"><ManagedItemType docType={item.doc_type} compact /></td><td className="max-w-xs px-1.5 py-3"><ManagedItemIdentity item={item} /></td><td className="whitespace-nowrap px-3 py-3 tabular-nums">{formatManagedUpdatedAt(item.updated_at)}</td><td className="px-3 py-3">{renderItemStatus(item)}</td><td className="px-3 py-3">{sourceLabel[item.source_origin] || "其他来源"}</td><td className="px-3 py-3 text-right">{renderActions(item)}</td></tr>; })}</tbody></table></div>
         <ul className="divide-y divide-border border-t border-border lg:hidden">{sortedChildFolders.map((folder) => {
           const folderLabel = `${folder.display_code} ${folder.display_name}`;
-          return <li key={folder.id} data-testid={`managed-folder-mobile-${folder.id}`} className="min-h-16 space-y-2 px-4 py-3 sm:px-5"><button type="button" className="flex w-full min-w-0 items-center gap-3 rounded-ui-md text-left transition-colors hover:bg-surface-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setCurrentFolderId(folder.id)}><Folder className="size-5 shrink-0 text-primary" aria-hidden="true" /><span className="min-w-0 flex-1"><span className="block break-words font-medium">{folderLabel}</span><span className="mt-0.5 block text-ui-xs text-muted-foreground">{folderContentSummary(folder)}</span></span></button>{renderFolderActions(folder)}</li>;
+          return <li key={folder.id} data-testid={`managed-folder-mobile-${folder.id}`} className={`min-h-16 space-y-2 px-4 py-3 sm:px-5 ${selectedFolders.includes(folder.id) ? "bg-primary/5" : ""}`}><div className="flex items-start gap-3"><Checkbox className="mt-1" aria-label={`选择文件夹${folderLabel}`} checked={selectedFolders.includes(folder.id)} disabled={!selectedFolders.includes(folder.id) && totalSelectedCount >= BULK_LIMIT} onChange={() => toggleFolderSelection(folder.id)} /><button type="button" className="flex min-w-0 flex-1 items-center gap-3 rounded-ui-md text-left transition-colors hover:bg-surface-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setCurrentFolderId(folder.id)}><Folder className="size-5 shrink-0 text-primary" aria-hidden="true" /><span className="min-w-0 flex-1"><span className="block break-words font-medium">{folderLabel}</span><span className="mt-0.5 block text-ui-xs text-muted-foreground">{folderContentSummary(folder)}</span></span></button></div>{renderFolderActions(folder)}</li>;
         })}{sortedItems.map((item, index) => { const rowSelectable = item.content_kind === "document" || canMoveItem(item); return <li key={item.item_id} className="space-y-3 px-4 py-4 sm:px-5"><div className="flex items-start gap-2"><Checkbox className="mt-0.5" aria-label={`选择${item.title}`} checked={selected.includes(item.version_id)} disabled={index >= BULK_LIMIT || !rowSelectable} title={!rowSelectable ? "视频转录稿需要发布权限才能批量调整归档目录" : undefined} onChange={() => setSelected((current) => current.includes(item.version_id) ? current.filter((id) => id !== item.version_id) : [...current, item.version_id].slice(0, BULK_LIMIT))} /><ManagedItemType docType={item.doc_type} /><div className="min-w-0 flex-1"><ManagedItemIdentity item={item} /></div></div><dl className="grid grid-cols-[4rem_minmax(0,1fr)] gap-x-2 gap-y-1 text-ui-sm"><dt className="text-muted-foreground">状态</dt><dd>{renderItemStatus(item)}</dd><dt className="text-muted-foreground">更新时间</dt><dd className="whitespace-nowrap tabular-nums">{formatManagedUpdatedAt(item.updated_at)}</dd><dt className="text-muted-foreground">来源</dt><dd>{sourceLabel[item.source_origin] || "其他来源"}</dd></dl>{renderActions(item)}</li>; })}</ul>
         <div className="flex flex-col gap-2 border-t border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5"><p className="text-ui-xs text-muted-foreground">共 {total} 份，第 {page + 1} / {pageCount} 页</p><div className="flex flex-wrap items-center justify-end gap-2"><label className="flex items-center gap-2 text-ui-xs text-muted-foreground">每页<Select aria-label="每页条数" className="h-control-sm w-20" value={String(pageSize)} onChange={(event) => setPageSize(Number(event.target.value))}>{PAGE_SIZE_OPTIONS.map((size) => <option key={size} value={size}>{size} 条</option>)}</Select></label><Button size="sm" variant="outline" disabled={page === 0 || loading} onClick={() => setPage((value) => value - 1)}>上一页</Button><Select aria-label="跳转页码" className="h-control-sm w-24" value={String(page + 1)} onChange={(event) => setPage(Number(event.target.value) - 1)} disabled={loading}>{Array.from({ length: pageCount }, (_, index) => <option key={index + 1} value={index + 1}>第 {index + 1} 页</option>)}</Select><Button size="sm" variant="outline" disabled={page + 1 >= pageCount || loading} onClick={() => setPage((value) => value + 1)}>下一页</Button></div></div>
       </>}
@@ -2669,7 +2717,7 @@ export function AdminManagedContentPage() {
         <DialogHeader><DialogTitle>移动文件夹位置</DialogTitle><DialogDescription>移动会更新完整路径，但不会改变资料归属、发布状态或稳定分类标识。</DialogDescription></DialogHeader>
         {folderMoveTarget && <div className="space-y-4">
           <div className="rounded-ui-md border border-border bg-surface-muted/40 px-3 py-2 text-ui-sm"><p className="text-ui-xs text-muted-foreground">当前路径</p><p className="mt-1 break-words font-medium">{folderMoveTarget.full_path}</p></div>
-          <CategoryTreePicker categories={categories} value={folderMoveParentId} onChange={(value) => { setFolderMoveParentId(value); setFolderActionError(null); }} currentCategoryId={folderMoveTarget.parent_id} label="目标位置" rootOption={{ value: ROOT_FOLDER_VALUE, label: "根目录 /", disabledReason: folderMoveConstraints.rootReason }} disabledCategoryReasons={folderMoveConstraints.reasons} disabled={busyAction === `folder:${folderMoveTarget.id}:move`} />
+          <CategoryDestinationPicker categories={categories} value={folderMoveParentId} onChange={(value) => { setFolderMoveParentId(value); setFolderActionError(null); }} currentCategoryId={folderMoveTarget.parent_id} label="目标位置" rootOption={{ value: ROOT_FOLDER_VALUE, label: "根目录 /", disabledReason: folderMoveConstraints.rootReason }} disabledCategoryReasons={folderMoveConstraints.reasons} disabled={busyAction === `folder:${folderMoveTarget.id}:move`} onCreateFolder={can("category.manage") ? createDestinationFolder : undefined} />
           {folderMoveParentId && <p className="break-words text-ui-xs text-muted-foreground">目标目录：{folderMoveParentId === ROOT_FOLDER_VALUE ? "/" : categories.find((category) => category.id === folderMoveParentId)?.full_path}；移动后自动排在末尾并重新编号。</p>}
           {folderActionError && <p className="text-ui-sm text-destructive" role="alert">{folderActionError}</p>}
         </div>}
@@ -2692,7 +2740,7 @@ export function AdminManagedContentPage() {
           <DialogTitle>{bulkAction === "move" ? bulkMoveLabel : bulkAction === "publish" ? "批量发布资料" : bulkAction === "submit" ? "批量提交审核" : "批量审核资料"}</DialogTitle>
           <DialogDescription>{bulkAction === "publish" ? `已选择 ${selectedItems.length} 份资料，请确认本次实际发布范围。` : bulkAction === "submit" || bulkAction === "approve" || bulkAction === "reject" ? `本次工作台包含 ${bulkWorkbenchTargets.length} 份资料。单独处理成功的资料不会再被一键操作重复处理。` : `已选择 ${selectedItems.length} 份资料。系统会逐项执行，并保留不符合状态或权限要求的失败原因。`}</DialogDescription>
         </DialogHeader>
-        {bulkAction === "move" && <CategoryTreePicker categories={categories} value={bulkMoveFolderId} onChange={setBulkMoveFolderId} label="目标目录" />}
+        {bulkAction === "move" && <CategoryDestinationPicker categories={categories} value={bulkMoveFolderId} onChange={setBulkMoveFolderId} label="目标目录" onCreateFolder={can("category.manage") ? createDestinationFolder : undefined} />}
         {bulkAction === "publish" && <>
           <div className="flex flex-wrap gap-2 text-ui-xs" role="status">
             <Badge variant="success">将发布 {publishableSelectedItems.length}</Badge>
@@ -2882,7 +2930,7 @@ export function AdminManagedContentPage() {
 
     <Dialog open={newFolderOpen} onOpenChange={setNewFolderOpen}><DialogContent><DialogHeader><DialogTitle>新建文件夹</DialogTitle><DialogDescription>文件夹将建立在“{currentFolder?.display_name || "当前目录"}”下，最多支持四级目录。</DialogDescription></DialogHeader><label className="space-y-1.5 text-ui-sm font-medium"><span>文件夹名称</span><Input value={newFolderName} onChange={(event) => setNewFolderName(event.target.value)} placeholder="例如：净高分析" autoFocus /></label><DialogFooter><Button variant="outline" onClick={() => setNewFolderOpen(false)} disabled={busyAction === "new-folder"}>取消</Button><Button onClick={() => void createFolder()} disabled={!newFolderName.trim() || busyAction === "new-folder"}>{busyAction === "new-folder" ? "创建中…" : "创建"}</Button></DialogFooter></DialogContent></Dialog>
 
-    <Dialog open={Boolean(moveTarget)} onOpenChange={(open) => { if (!open && !busyAction?.endsWith(":move")) { setMoveTarget(null); setMoveFolderId(""); setMoveError(null); } }}><DialogContent className="max-w-2xl max-h-[calc(100vh-2rem)] overflow-y-auto"><DialogHeader><DialogTitle>{moveTarget?.content_kind === "media_transcript" ? "调整归档目录" : moveTarget?.has_published_head ? "调整分类" : "移动资料"}</DialogTitle><DialogDescription>{moveTarget?.content_kind === "media_transcript" ? `只调整“${moveTarget.title}”在资料库中的归档目录，不改变视频、转录发布状态或索引。` : moveTarget?.has_published_head ? `调整“${moveTarget.title}”的正式分类。同步完成前资料仍保留在原目录并继续正常检索。` : `将“${moveTarget?.title || "资料"}”从当前目录移动到另一个受控目录。`}</DialogDescription></DialogHeader>{moveTarget && <CategoryTreePicker categories={categories} value={moveFolderId} currentCategoryId={moveTarget.category_id} onChange={(categoryId) => { setMoveFolderId(categoryId); setMoveError(null); }} label="目标目录" />}{moveError && <p className="rounded-ui-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-ui-sm text-destructive" role="alert">{moveError}</p>}<DialogFooter><Button variant="outline" onClick={() => { setMoveTarget(null); setMoveFolderId(""); setMoveError(null); }} disabled={Boolean(busyAction?.endsWith(":move"))}>取消</Button><Button onClick={() => void moveContent()} disabled={!moveFolderId || moveFolderId === moveTarget?.category_id || Boolean(busyAction?.endsWith(":move"))}>{busyAction?.endsWith(":move") ? "处理中…" : moveTarget?.content_kind === "media_transcript" ? "确认调整" : moveTarget?.has_published_head ? "提交分类调整" : "确认移动"}</Button></DialogFooter></DialogContent></Dialog>
+    <Dialog open={Boolean(moveTarget)} onOpenChange={(open) => { if (!open && !busyAction?.endsWith(":move")) { setMoveTarget(null); setMoveFolderId(""); setMoveError(null); } }}><DialogContent className="max-w-2xl max-h-[calc(100vh-2rem)] overflow-y-auto"><DialogHeader><DialogTitle>{moveTarget?.content_kind === "media_transcript" ? "调整归档目录" : moveTarget?.has_published_head ? "调整分类" : "移动资料"}</DialogTitle><DialogDescription>{moveTarget?.content_kind === "media_transcript" ? `只调整“${moveTarget.title}”在资料库中的归档目录，不改变视频、转录发布状态或索引。` : moveTarget?.has_published_head ? `调整“${moveTarget.title}”的正式分类。同步完成前资料仍保留在原目录并继续正常检索。` : `将“${moveTarget?.title || "资料"}”从当前目录移动到另一个受控目录。`}</DialogDescription></DialogHeader>{moveTarget && <CategoryDestinationPicker categories={categories} value={moveFolderId} currentCategoryId={moveTarget.category_id} onChange={(categoryId) => { setMoveFolderId(categoryId); setMoveError(null); }} label="目标目录" onCreateFolder={can("category.manage") ? createDestinationFolder : undefined} />}{moveError && <p className="rounded-ui-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-ui-sm text-destructive" role="alert">{moveError}</p>}<DialogFooter><Button variant="outline" onClick={() => { setMoveTarget(null); setMoveFolderId(""); setMoveError(null); }} disabled={Boolean(busyAction?.endsWith(":move"))}>取消</Button><Button onClick={() => void moveContent()} disabled={!moveFolderId || moveFolderId === moveTarget?.category_id || Boolean(busyAction?.endsWith(":move"))}>{busyAction?.endsWith(":move") ? "处理中…" : moveTarget?.content_kind === "media_transcript" ? "确认调整" : moveTarget?.has_published_head ? "提交分类调整" : "确认移动"}</Button></DialogFooter></DialogContent></Dialog>
 
     <Dialog open={Boolean(downloadTarget)} onOpenChange={(open) => { if (!open && !busyAction?.endsWith(":download")) setDownloadTarget(null); }}><DialogContent><DialogHeader><DialogTitle>下载视频资料</DialogTitle><DialogDescription>选择“{downloadTarget?.title}”需要下载的内容。</DialogDescription></DialogHeader><div className="grid gap-2" role="radiogroup" aria-label="下载内容">{([
       { value: "video", title: "仅视频", description: "下载原始 MP4 视频文件", icon: <Film className="size-5" /> },
@@ -2925,5 +2973,14 @@ export function AdminManagedContentPage() {
     </Dialog>
 
     <Dialog open={deleteTargets.length > 0} onOpenChange={(open) => { if (!open && busyAction !== "archive") { setDeleteTargets([]); setDeleteAcknowledged(false); setDeleteError(null); } }}><DialogContent><DialogHeader><DialogTitle>{deleteTargets.length > 1 ? `将 ${deleteTargets.length} 份资料移入回收站？` : "将资料移入回收站？"}</DialogTitle><DialogDescription>以下资料将立即停止进入知识库检索。文件、版本及审核发布历史会保留，可从回收站恢复。</DialogDescription></DialogHeader><ul className="max-h-48 space-y-2 overflow-y-auto rounded-ui-md border border-border p-3 text-ui-sm">{deleteTargets.map((item) => <li key={item.item_id} className="min-w-0"><p className="break-words font-medium">{item.title}</p><p className="break-all text-ui-xs text-muted-foreground">{item.original_filename}</p></li>)}</ul><label className="flex items-start gap-2 rounded-ui-md border border-destructive/30 bg-destructive/5 p-3 text-ui-sm"><Checkbox className="mt-0.5" checked={deleteAcknowledged} onChange={(event) => setDeleteAcknowledged(event.target.checked)} /><span>我已了解这些资料移入回收站后将不再进入检索。</span></label>{deleteError && <p className="rounded-ui-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-ui-sm text-destructive" role="alert">{deleteError}</p>}<DialogFooter><Button variant="outline" disabled={busyAction === "archive"} onClick={() => setDeleteTargets([])}>取消</Button><Button variant="destructive" disabled={busyAction === "archive" || !deleteAcknowledged} onClick={() => void deleteContent()}>{busyAction === "archive" ? "处理中…" : "确认移入回收站"}</Button></DialogFooter></DialogContent></Dialog>
+    <ManagedContentBulkOperationDialog
+      action={recursiveBulkAction}
+      selectedFolders={selectedFolderRows}
+      selectedItems={selectedItems}
+      categories={categories}
+      onCreateFolder={can("category.manage") ? createDestinationFolder : undefined}
+      onClose={() => setRecursiveBulkAction(null)}
+      onCompleted={async () => { setSelected([]); setSelectedFolders([]); await load(true); }}
+    />
   </section>;
 }
