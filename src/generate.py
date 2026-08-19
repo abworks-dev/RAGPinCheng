@@ -1,6 +1,7 @@
 """GLM-4 generation with cited sources, via Zhipu's OpenAI-compatible API."""
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from time import perf_counter
 from typing import Iterator
@@ -18,6 +19,11 @@ from .config import (
 from .answer_policy import AnswerPolicy, load_answer_policy
 from .prompts import load_prompt, render_prompt
 from .retrieve import RetrievedParent
+
+
+_NUMBERED_CITATION_RE = re.compile(
+    r"\[(\d+(?:\s*[,，、]\s*\d+)*)\](?!\()"
+)
 
 
 @dataclass
@@ -50,6 +56,37 @@ class GenerationPrep:
     # Populated by the streaming iterator as it consumes the final
     # usage-bearing chunk. Empty until the stream is exhausted.
     usage: dict = field(default_factory=dict)
+
+
+def finalize_answer_sources(
+    text: str,
+    candidate_sources: list[RetrievedParent],
+) -> tuple[str, list[RetrievedParent]]:
+    """Keep only sources cited by the final answer and renumber citations.
+
+    Sources are ordered by first citation appearance so every published
+    citation remains aligned with ``sources[N-1]``. Invalid source numbers are
+    dropped instead of exposing unrelated retrieval candidates to the UI.
+    """
+    source_indexes: list[int] = []
+    source_number_by_index: dict[int, int] = {}
+
+    def replace(match: re.Match[str]) -> str:
+        rewritten: list[str] = []
+        for raw_number in re.split(r"\s*[,，、]\s*", match.group(1)):
+            source_index = int(raw_number) - 1
+            if source_index < 0 or source_index >= len(candidate_sources):
+                continue
+            if source_index not in source_number_by_index:
+                source_indexes.append(source_index)
+                source_number_by_index[source_index] = len(source_indexes)
+            marker = f"[{source_number_by_index[source_index]}]"
+            if marker not in rewritten:
+                rewritten.append(marker)
+        return "".join(rewritten)
+
+    normalized_text = _NUMBERED_CITATION_RE.sub(replace, text)
+    return normalized_text, [candidate_sources[index] for index in source_indexes]
 
 
 def _render_source(p: RetrievedParent, n: int) -> str:
@@ -283,9 +320,13 @@ def generate(
         record_usage("zhipu", "answer", success=False, latency_ms=int((perf_counter() - started) * 1000))
         raise
     record_usage("zhipu", "answer", usage=_extract_usage(resp), latency_ms=int((perf_counter() - started) * 1000))
+    answer_text, cited_sources = finalize_answer_sources(
+        resp.choices[0].message.content or "",
+        prep.used_sources,
+    )
     return Answer(
-        text=resp.choices[0].message.content or "",
-        sources=prep.used_sources,
+        text=answer_text,
+        sources=cited_sources,
         messages=prep.messages,
         model=prep.model,
         context_chars=prep.context_chars,

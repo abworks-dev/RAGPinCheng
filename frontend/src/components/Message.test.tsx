@@ -218,6 +218,26 @@ describe("Message assistant actions", () => {
     expect(screen.getByRole("status")).toHaveTextContent("未检索到可用资料，本回答没有知识库来源");
   });
 
+  it("does not present generation candidates as final answer sources", () => {
+    render(
+      <Message
+        msg={assistant({
+          content: "未找到相关内容。",
+          sources: [],
+          streaming: false,
+          stage: "done",
+          prep: prep(5),
+        })}
+        conversationId="conversation-1"
+        turnIndex={1}
+      />,
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent("未检索到可用资料，本回答没有知识库来源");
+    expect(screen.queryByText(/回答基于/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /查看 5 个来源/ })).not.toBeInTheDocument();
+  });
+
   it("shows a destructive status when retrieval confidence blocks generation", () => {
     render(
       <Message

@@ -110,9 +110,13 @@ function normalizeMath(src: string): string {
 function AnswerStatus({ msg }: { msg: ChatMessage }) {
   if (msg.error) return null;
 
-  const sources = msg.sources?.length ? msg.sources : msg.prep?.used_sources || [];
-  const sourceCount = sources.length || msg.prep?.final_count || 0;
   const stage = msg.stage || (msg.streaming ? "streaming" : msg.content ? "done" : undefined);
+  const sources = stage === "done"
+    ? msg.sources || []
+    : msg.sources?.length ? msg.sources : msg.prep?.used_sources || [];
+  const sourceCount = stage === "done"
+    ? sources.length
+    : sources.length || msg.prep?.final_count || 0;
   const noSources = msg.prep?.no_source_fallback === true || (stage !== "retrieving" && sourceCount === 0);
   const categories = Array.from(new Set(sources.map((source) => source.category).filter(Boolean)));
   const categoryLabel = categories.length > 0 ? categories.slice(0, 3).join("、") : "企业知识库";
