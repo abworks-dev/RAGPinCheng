@@ -67,7 +67,7 @@ from .db import get_db
 from .feedback import read_records
 from .indexing import create_job, enqueue
 from .routes_transcription import build_transcription_service
-from .transcription_schemes import get_scheme
+from .transcription_schemes import get_scheme, resolve_scheme_runtime
 from .routes_media import safe_join, stream_media_file
 from .media_transcript_catalog import DEFAULT_MEDIA_TRANSCRIPT_CATEGORY_ID
 from .media_upload_conflicts import (
@@ -1316,16 +1316,19 @@ async def upload_media(
         raise HTTPException(status_code=400, detail="视频标题或源文件名不合法")
     automatic = transcript is None
 
-    if automatic and scheme_id is not None:
-        scheme = get_scheme(conn, scheme_id)
-        if scheme is None or scheme["archived"] or not scheme["enabled"]:
-            raise HTTPException(status_code=409, detail="所选转录方案当前不可用")
-        # Seeded system scheme IDs remain the historical profile IDs.  This
-        # preserves the immutable job/profile snapshot contract while clients
-        # migrate from profile_id to scheme_id.
-        if profile_id is not None and profile_id != scheme_id:
-            raise HTTPException(status_code=400, detail="scheme_id 与 profile_id 不一致")
-        profile_id = scheme_id
+    if automatic:
+        # Legacy clients sent a seeded Scheme ID in profile_id. Resolve it as a
+        # Scheme while keeping custom Scheme UUIDs immediately usable.
+        if scheme_id is None and profile_id is not None and get_scheme(conn, profile_id):
+            scheme_id = profile_id
+        if scheme_id is not None:
+            try:
+                _scheme, runtime_profile_id = resolve_scheme_runtime(conn, scheme_id)
+            except ValueError:
+                raise HTTPException(status_code=409, detail="所选转录方案当前不可用")
+            if profile_id is not None and profile_id not in (scheme_id, runtime_profile_id):
+                raise HTTPException(status_code=400, detail="scheme_id 与 profile_id 不一致")
+            profile_id = runtime_profile_id
 
     if replacement_source_media_id is not None:
         if not automatic:

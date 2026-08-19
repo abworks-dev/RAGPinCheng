@@ -27,14 +27,6 @@ from src.transcription.profile import (
     TranscriptionProfileDefinition,
     WhisperXRemoteConfig,
 )
-from src.transcription.profile_catalog import (
-    FASTER_WHISPER_PROFILE_ID,
-    FUNASR_SENSEVOICE_PROFILE_ID,
-    QWEN3_ASR_PROFILE_ID,
-    WHISPERX_BALANCED_PROFILE_ID,
-    WHISPERX_FINE_PROFILE_ID,
-    WHISPERX_NATURAL_PROFILE_ID,
-)
 from src.transcription.scheme import TranscriptionSchemeSnapshot
 from src.transcription.provider_protocol import (
     ProviderErrorCode,
@@ -62,28 +54,7 @@ from .transcription_artifacts import LocalTranscriptionArtifactStore
 from .transcription_media import FfmpegMediaAudioPreparer, FileTranscriptionInputSource
 from .transcription_runtime import CompositeCancellationProbe, StoreCancellationProbe, StoreProgressSink
 from .transcription_store import SQLiteTranscriptionStore, StoreConflictError
-from .transcription_schemes import get_scheme
-
-
-_BASE_PROFILE_IDS = {
-    "sensevoice-v1": FUNASR_SENSEVOICE_PROFILE_ID,
-    "faster-whisper-v1": FASTER_WHISPER_PROFILE_ID,
-    "qwen3-asr-v1": QWEN3_ASR_PROFILE_ID,
-}
-
-
-def _scheme_profile_id(base_id: str, parameters: dict[str, object]) -> str:
-    if base_id != "whisperx-v2":
-        try:
-            return _BASE_PROFILE_IDS[base_id]
-        except KeyError as exc:
-            raise ContractValidationError("unknown_scheme_base", "scheme_id") from exc
-    return {
-        "natural": WHISPERX_NATURAL_PROFILE_ID,
-        "balanced": WHISPERX_BALANCED_PROFILE_ID,
-        "fine": WHISPERX_FINE_PROFILE_ID,
-        "custom": WHISPERX_BALANCED_PROFILE_ID,
-    }[str(parameters["segmentation_preset"])]
+from .transcription_schemes import resolve_scheme_runtime
 
 
 def _apply_scheme_parameters(
@@ -181,10 +152,12 @@ class TranscriptionApplicationService:
                 raise ContractValidationError("media_not_found", "media_id")
             scheme_snapshot = None
             if scheme_id is not None:
-                scheme = get_scheme(conn, scheme_id)
-                if scheme is None or scheme["archived"] or not scheme["enabled"]:
-                    raise ContractValidationError("scheme_unavailable", "scheme_id")
-                base_profile_id = _scheme_profile_id(scheme["base_id"], scheme["parameters"])
+                try:
+                    scheme, base_profile_id = resolve_scheme_runtime(conn, scheme_id)
+                except ValueError as exc:
+                    raise ContractValidationError("scheme_unavailable", "scheme_id") from exc
+                if profile_id != base_profile_id:
+                    raise ContractValidationError("scheme_profile_mismatch", "profile_id")
                 profile = _apply_scheme_parameters(
                     self.resolve_profile(base_profile_id, operation), scheme["parameters"]
                 )
