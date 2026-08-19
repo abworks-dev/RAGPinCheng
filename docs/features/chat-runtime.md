@@ -1,7 +1,7 @@
 # 对话运行时
 
 - 状态：已实现
-- 最后核对：2026-08-18
+- 最后核对：2026-08-19
 
 ## 用户可观察能力
 
@@ -14,7 +14,8 @@
 - `ChatSession` 统一编排查询守卫、重写、检索、上下文携带、预算和生成；
 - HTTP 请求通过 `api/conversation_runtime.py` 恢复会话、按会话加锁并持久化；
 - 同步与流式路径共享生成准备和状态收尾逻辑；
-- SSE 返回准备、正文、完成和错误状态，并保持来源 DTO 一致。
+- SSE 返回准备、正文、完成和错误状态，并保持来源 DTO 一致；`prep.used_sources`
+  表示生成时使用的上下文候选，`done.sources` 及持久化来源只包含最终正文实际引用的资料。
 - SSE `prep.relevance` 携带脱敏检索置信度快照；默认关闭的相关性门禁命中时，
   不调用回答模型，`done.finish_reason=retrieval_low_confidence`，且低相关来源不进入历史。
 - 系统管理员可在“回答策略”页面统一调整回答温度、最大输出 Token、上下文字符上限和相关性门禁阈值；策略按请求读取，正在进行的流不受后续保存影响。
@@ -68,6 +69,8 @@ POST /api/conversations/{id}/chat
 - SSE `prep`、文本、`done`、`error` 事件；
 - SSE `done.assistant_message_id` 将前端临时消息 ID 替换为持久化 ID，使回答完成后可立即重新生成；
 - `messages.sources_json` 只供 UI 恢复，不重新进入 LLM 上下文。
+- 最终正文中的数字引用会按首次出现顺序连续重编号，并与公开来源数组保持
+  `sources[N-1]` 对齐；无有效引用的回答不公开检索候选作为回答依据。
 - `message_answer_versions` 保存回答版本及对应来源/检索状态快照；
 - `message_answer_heads` 指向每轮当前有效回答；
 - `message_turn_requests` 保存重新生成和提问编辑时需要复用的原始目录 ID；旧会话中的分类名称仍可解析，缺失范围时按当前全部已纳入问答目录兼容。

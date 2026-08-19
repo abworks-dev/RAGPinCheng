@@ -24,7 +24,14 @@ from typing import Iterator
 from .config import DECOMPOSE_MAX_CONTEXT_CHARS, MAX_CONTEXT_CHARS, QUERY_DECOMPOSE_ENABLED
 from .decompose import maybe_decompose
 from .answer_policy import MAX_CONTEXT_CHARS_CONFIG, AnswerPolicy, load_answer_policy
-from .generate import Answer, GenerationPrep, generate, rewrite_query, stream_generate
+from .generate import (
+    Answer,
+    GenerationPrep,
+    finalize_answer_sources,
+    generate,
+    rewrite_query,
+    stream_generate,
+)
 from .query_guard import QueryValidation, validate_search_query
 from .relevance_gate import LOW_CONFIDENCE_MESSAGE, evaluate_relevance
 from .rerank import rerank_scores
@@ -780,7 +787,8 @@ class ChatSession:
             )
             return
 
-        sources_for_ui = self._sources_for_ui(gen_prep.used_sources)
+        full_text, cited_sources = finalize_answer_sources(full_text, gen_prep.used_sources)
+        sources_for_ui = self._sources_for_ui(cited_sources)
         policy_snapshot = gen_prep.policy.public_dict()
         self.state.append_turn(query, full_text, sources_for_ui=sources_for_ui, policy_snapshot=policy_snapshot)
         self.state.last_sources = final_sources
@@ -788,7 +796,7 @@ class ChatSession:
 
         answer = Answer(
             text=full_text,
-            sources=gen_prep.used_sources,
+            sources=cited_sources,
             messages=gen_prep.messages,
             model=gen_prep.model,
             context_chars=gen_prep.context_chars,
@@ -799,7 +807,7 @@ class ChatSession:
         usage_total, usage_by_call = _aggregate_usage(rewrite_usage, gen_prep.usage)
         self.last_turn_result = TurnResult(
             answer_text=full_text,
-            sources=gen_prep.used_sources,
+            sources=cited_sources,
             search_query=search_query,
             fresh_sources=fresh_sources,
             final_sources=final_sources,
