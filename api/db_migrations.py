@@ -1439,7 +1439,14 @@ def execute_migration_statement(conn: sqlite3.Connection, statement: str) -> Non
         if new in row[0]:
             return
         if old not in row[0]:
-            raise RuntimeError("migration_schema_mismatch")
+            # Migration 31 may be applied directly to a database that has
+            # not yet received the xmind relaxation from migration 29.
+            old = "'pdf','markdown','docx','xlsx','pptx','transcript'"
+            new = "'pdf','markdown','doc','docx','xls','xlsx','ppt','pptx','xmind','transcript'"
+            if new in row[0]:
+                return
+            if old not in row[0]:
+                raise RuntimeError("migration_schema_mismatch")
         conn.execute("PRAGMA writable_schema=ON")
         try:
             conn.execute(
@@ -1457,7 +1464,7 @@ def execute_migration_statement(conn: sqlite3.Connection, statement: str) -> Non
             raise RuntimeError("migration_schema_mismatch")
         old = "'pdf','markdown','docx','xlsx','pptx','transcript'"
         new = "'pdf','markdown','docx','xlsx','pptx','xmind','transcript'"
-        if new in row[0]:
+        if new in row[0] or "'pdf','markdown','doc','docx','xls','xlsx','ppt','pptx','xmind','transcript'" in row[0]:
             return
         if old not in row[0]:
             raise RuntimeError("migration_schema_mismatch")
