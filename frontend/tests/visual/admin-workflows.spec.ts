@@ -857,6 +857,12 @@ test.describe("分类管理", () => {
     const tree = page.getByRole("tree", { name: "分类层级" });
     await expect(tree).toHaveCSS("border-bottom-width", "1px");
     await expect(tree).toHaveCSS("border-bottom-style", "solid");
+    if (page.viewportSize()!.width >= 640) {
+      const disabledSearch = tree.getByLabel("企业知识问答关闭").first();
+      const disabledFilter = tree.getByLabel("对话筛选关闭").first();
+      if (await disabledSearch.count()) await expect(disabledSearch).toHaveCSS("text-decoration-line", "line-through");
+      if (await disabledFilter.count()) await expect(disabledFilter).toHaveCSS("text-decoration-line", "line-through");
+    }
     const treeBox = await tree.boundingBox();
     const lastRootBox = await tree.locator(":scope > [role='treeitem']").last().boundingBox();
     expect(treeBox).not.toBeNull();
@@ -923,11 +929,12 @@ test.describe("分类管理", () => {
     await editor.getByRole("button", { name: "移动至" }).click();
     const dialog = page.getByRole("dialog", { name: "移动分类" });
     await expect(dialog).toContainText("04 项目资料");
-    const parentSelect = dialog.getByRole("combobox", { name: "目标父分类" });
-    await expect(parentSelect).toHaveValue("");
-    await expect(parentSelect.locator("option[value='cat-project']")).toHaveCount(0);
-    await expect(parentSelect.locator("option[value='cat-archive']")).toHaveCount(0);
-    await parentSelect.selectOption("cat-company");
+    const destinationTree = dialog.getByRole("tree", { name: "目标目录树" });
+    await expect(destinationTree).toBeVisible();
+    await expect(dialog.getByRole("treeitem", { name: /一级分类/ })).toHaveAttribute("aria-selected", "true");
+    await expect(dialog.getByTestId("category-picker-item-cat-project")).toHaveCount(0);
+    await expect(dialog.getByTestId("category-picker-item-cat-archive")).toHaveCount(0);
+    await dialog.getByTestId("category-picker-item-cat-company").click();
     await expect(dialog).toContainText("目标位置：03 公司内部标准 / 末尾（系统自动编号）");
     const moveRequest = page.waitForRequest((request) => request.method() === "POST" && request.url().endsWith("/api/admin/content/categories/cat-project/move"));
     await dialog.getByRole("button", { name: "确认移动" }).click();

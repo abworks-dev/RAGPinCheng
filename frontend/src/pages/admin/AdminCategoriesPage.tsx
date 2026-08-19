@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { adminContentApi } from "../../api/admin/content";
 import { CategoryDeleteDialog } from "../../components/admin/CategoryDeleteDialog";
+import { CategoryTreePicker } from "../../components/admin/CategoryTreePicker";
 import { useAuth } from "../../context/AuthContext";
 import { Alert, AlertDescription, AlertTitle } from "../../components/ui/alert";
 import { Badge } from "../../components/ui/badge";
@@ -554,7 +555,20 @@ export function AdminCategoriesPage() {
           <div className="space-y-4">
             {moveError && <Alert variant="destructive" role="alert"><AlertTitle>移动失败</AlertTitle><AlertDescription>{moveError}</AlertDescription></Alert>}
             <div className="rounded-ui-md border border-border bg-surface-muted/40 px-3 py-2 text-ui-sm"><p className="text-ui-xs text-muted-foreground">当前路径</p><p className="mt-1 break-words font-medium">{movingCategory?.full_path}</p></div>
-            <Field label="目标父分类"><Select value={moveTargetParentId} onChange={(event) => setMoveTargetParentId(event.target.value)} aria-label="目标父分类"><option value="">一级分类</option>{moveParentOptions.map((category) => <option key={category.id} value={category.id}>{category.full_path}</option>)}</Select></Field>
+            <CategoryTreePicker
+              categories={moveParentOptions}
+              value={moveTargetParentId}
+              onChange={(categoryId) => { setMoveTargetParentId(categoryId); setMoveError(null); }}
+              currentCategoryId={movingCategory?.parent_id}
+              label="目标父分类"
+              rootOption={{
+                value: "",
+                label: "一级分类",
+                description: "移动到一级分类末尾",
+                disabledReason: movingCategory?.parent_id === null ? "该分类已经是一级分类" : undefined,
+              }}
+              disabled={moving}
+            />
             <p className="text-ui-xs text-muted-foreground">目标位置：{moveTargetParentId ? `${categories.find((category) => category.id === moveTargetParentId)?.full_path} / ` : "一级分类 / "}末尾（系统自动编号）</p>
           </div>
           <DialogFooter><Button variant="outline" onClick={() => setMoveOpen(false)} disabled={moving}>取消</Button><Button onClick={confirmMove} disabled={moving || movingCategory?.parent_id === (moveTargetParentId || null)}><Move className="size-4" />{moving ? "移动中…" : "确认移动"}</Button></DialogFooter>
@@ -672,12 +686,12 @@ function CategoryTreeNodeView({
       <span className="flex min-w-0 flex-1 items-center gap-2">
         <span className={`inline-flex w-11 shrink-0 items-center gap-1 text-ui-xs font-medium ${category.is_active ? "text-success" : "text-muted-foreground"}`}><span className={`size-2 rounded-full ${category.is_active ? "bg-success" : "bg-muted-foreground/60"}`} aria-hidden="true" />{category.is_active ? "启用" : "停用"}</span>
         <span className={`min-w-0 flex-1 break-words tabular-nums ${level === 1 ? "font-semibold" : "font-medium"}`}>{category.display_code} {category.display_name}</span>
-        <span className="hidden shrink-0 items-center gap-1 sm:inline-flex" aria-label="问答与筛选状态">
-          <Badge variant={category.chat_search_effective === false ? "secondary" : "success"}>{category.chat_search_effective === false ? "问答关" : "问答"}</Badge>
-          <Badge variant={category.chat_filter_effective === false ? "secondary" : "success"}>{category.chat_filter_effective === false ? "筛选关" : "筛选"}</Badge>
-          {(category.chat_search_inherited || category.chat_filter_inherited) && <span className="text-ui-xs text-muted-foreground">继承关闭</span>}
+        <span className="hidden w-[7.25rem] shrink-0 flex-wrap items-center justify-end gap-x-1 gap-y-0 sm:inline-flex" aria-label="问答与筛选状态">
+          <Badge aria-label={category.chat_search_effective === false ? "企业知识问答关闭" : "企业知识问答开启"} variant={category.chat_search_effective === false ? "secondary" : "success"} className={category.chat_search_effective === false ? "line-through" : undefined}>问答</Badge>
+          <Badge aria-label={category.chat_filter_effective === false ? "对话筛选关闭" : "对话筛选开启"} variant={category.chat_filter_effective === false ? "secondary" : "success"} className={category.chat_filter_effective === false ? "line-through" : undefined}>筛选</Badge>
+          {(category.chat_search_inherited || category.chat_filter_inherited) && <span className="w-full text-right text-ui-xs leading-tight text-muted-foreground">继承关闭</span>}
         </span>
-        <span className="hidden shrink-0 text-right text-ui-xs tabular-nums text-muted-foreground sm:block">{category.item_count} 份{hasChildren ? ` · ${children.length} 项` : ""}</span>
+        <span className="hidden w-[3.75rem] shrink-0 text-right text-ui-xs tabular-nums text-muted-foreground sm:block">{category.item_count} 份{hasChildren ? ` · ${children.length} 项` : ""}</span>
       </span>
     </div>
     {hasChildren && isExpanded && <div role="group" className="ml-5 border-l border-border bg-surface-muted/10 sm:ml-6">{children.map((child, childIndex) => <CategoryTreeNodeView key={child.category.id} node={child} level={level + 1} index={childIndex} siblingCount={children.length} selectedId={selectedId} expanded={expanded} visibleNodes={visibleNodes} nodeRefs={nodeRefs} onSelect={onSelect} onToggle={onToggle} />)}</div>}
