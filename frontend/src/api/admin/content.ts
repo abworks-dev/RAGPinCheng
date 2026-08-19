@@ -30,6 +30,7 @@ export const adminContentApi = {
   upload: (...args: Parameters<typeof api.uploadManagedContent>) => api.uploadManagedContent(...args),
   uploadTasks: (...args: Parameters<typeof api.managedUploadTasks>) => api.managedUploadTasks(...args),
   uploadTask: (...args: Parameters<typeof api.managedUploadTask>) => api.managedUploadTask(...args),
+  transcriptionSchemes: (...args: Parameters<typeof api.listTranscriptionSchemes>) => api.listTranscriptionSchemes(...args),
   move: (...args: Parameters<typeof api.moveManagedContent>) => api.moveManagedContent(...args),
   reclassify: (...args: Parameters<typeof api.reclassifyManagedContent>) => api.reclassifyManagedContent(...args),
   reclassificationJob: (...args: Parameters<typeof api.managedContentReclassificationJob>) => api.managedContentReclassificationJob(...args),

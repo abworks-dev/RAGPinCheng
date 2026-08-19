@@ -421,6 +421,29 @@ describe("api client", () => {
     expect(form.get("upload_mode")).toBe("files");
   });
 
+  it("keeps mixed-upload video idempotency keys aligned with document slots", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ batch_id: "batch-video", entries: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const guide = new File(["guide"], "guide.md", { type: "text/markdown" });
+    const video = new File(["video"], "training.mp4", { type: "video/mp4" });
+    const requestKey = "11111111-1111-4111-8111-111111111111";
+
+    await api.uploadManagedContent(
+      [guide, video],
+      "category-1",
+      "files",
+      undefined,
+      {
+        videoSchemeId: "scheme-1",
+        videoIdempotencyKeys: ["", requestKey],
+      },
+    );
+
+    const form = fetchMock.mock.calls[0][1]?.body as FormData;
+    expect(form.getAll("video_idempotency_keys")).toEqual(["", requestKey]);
+    expect(form.get("video_scheme_id")).toBe("scheme-1");
+  });
+
   it("serializes managed upload task filters and loads task details", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({ tasks: [], total: 0, status_counts: {} }))

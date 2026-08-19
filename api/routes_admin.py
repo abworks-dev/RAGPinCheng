@@ -126,6 +126,74 @@ _ADMIN_PREVIEWABLE_MEDIA_STATUSES = frozenset(
 )
 
 
+def _media_action_state(
+    *,
+    status: str,
+    job_status: str | None,
+    job_failure_classification: str | None = None,
+    review_status: str | None,
+    publication_status: str | None,
+    publication_index_status: str | None,
+    replacement_status: str | None = None,
+) -> tuple[list[str], dict[str, str]]:
+    available: list[str] = []
+    disabled: dict[str, str] = {}
+    if job_status in {"pending", "running"}:
+        available.append("cancel_transcription")
+    else:
+        disabled["cancel_transcription"] = "当前没有运行中的转录任务"
+    if job_status == "cancelled" or (job_status == "failed" and job_failure_classification != "permanent"):
+        available.append("retry_transcription")
+    else:
+        disabled["retry_transcription"] = "仅可重试失败或已取消且允许恢复的转录任务"
+    if review_status in {"awaiting_review", "review_rejected"}:
+        available.append("review_transcript")
+    else:
+        disabled["review_transcript"] = "当前没有待审核转录稿"
+    if review_status == "review_approved" and publication_status in {"not_published", "publication_failed"}:
+        available.append("publish_transcript")
+    else:
+        disabled["publish_transcript"] = "转录稿需审核通过且未处于发布中"
+    if publication_status == "published" and status not in {"archived"} and replacement_status != "pending":
+        available.append("replace_media")
+        available.append("archive_media")
+    else:
+        reason = "视频替换任务正在处理" if replacement_status == "pending" else "仅已发布且未归档的视频可操作"
+        disabled["replace_media"] = reason
+        disabled["archive_media"] = reason
+    if status == "failed" and job_status is None:
+        available.append("delete_failed")
+    else:
+        disabled["delete_failed"] = "仅从未创建转录任务的失败视频可删除"
+    if publication_index_status in {"pending", "parsing", "chunking", "embedding"}:
+        available[:] = [action for action in available if action != "publish_transcript"]
+        disabled["publish_transcript"] = "转录稿专属索引正在处理"
+    return available, disabled
+
+
+def _media_current_phase(
+    *,
+    status: str,
+    job_status: str | None,
+    review_status: str | None,
+    publication_status: str | None,
+    publication_index_status: str | None,
+) -> str:
+    if status == "failed" or job_status == "failed" or publication_status == "publication_failed" or publication_index_status == "failed":
+        return "failed"
+    if publication_index_status in {"pending", "parsing", "chunking", "embedding"}:
+        return "index"
+    if publication_status == "publishing":
+        return "publication"
+    if publication_status == "published" or status == "ready":
+        return "ready"
+    if review_status in {"awaiting_review", "review_approved", "review_rejected"}:
+        return "review"
+    if job_status in {"pending", "running", "succeeded", "cancelled"}:
+        return "transcription"
+    return "upload"
+
+
 def _user_permissions(conn: sqlite3.Connection, user_id: int, role: str) -> list[str]:
     if role == "admin":
         return sorted(CONTENT_PERMISSIONS)
@@ -1755,6 +1823,18 @@ def list_media_assets(
                e.relative_path AS external_relative_path, e.availability AS external_availability,
                COALESCE(i.category_id,m.target_category_id) AS category_id,
                i.id AS catalog_item_id,h.current_version_id,
+               (SELECT j.id FROM transcription_jobs j
+                WHERE j.media_id=m.media_id
+                ORDER BY j.attempt_number DESC,j.created_at DESC LIMIT 1) AS transcription_job_id,
+               (SELECT j.status FROM transcription_jobs j
+                WHERE j.media_id=m.media_id
+                ORDER BY j.attempt_number DESC,j.created_at DESC LIMIT 1) AS transcription_job_status,
+               (SELECT j.stage FROM transcription_jobs j
+                WHERE j.media_id=m.media_id
+                ORDER BY j.attempt_number DESC,j.created_at DESC LIMIT 1) AS transcription_stage,
+               (SELECT j.failure_classification FROM transcription_jobs j
+                WHERE j.media_id=m.media_id
+                ORDER BY j.attempt_number DESC,j.created_at DESC LIMIT 1) AS transcription_failure_classification,
                v.review_status, v.publication_status,
                CASE WHEN h.current_version_id=v.id THEN 1 ELSE 0 END AS is_current_version,
                (
@@ -1789,8 +1869,18 @@ def list_media_assets(
         """,
         (limit,),
     ).fetchall()
-    return [
-        MediaAssetDTO(
+    result: list[MediaAssetDTO] = []
+    for r in rows:
+        available_actions, disabled_actions = _media_action_state(
+            status=str(r["status"]),
+            job_status=r["transcription_job_status"],
+            job_failure_classification=r["transcription_failure_classification"],
+            review_status=r["review_status"],
+            publication_status=r["publication_status"],
+            publication_index_status=r["publication_index_status"],
+            replacement_status=r["replacement_status"],
+        )
+        result.append(MediaAssetDTO(
             media_id=r["media_id"],
             title=r["title"],
             original_filename=r["original_filename"],
@@ -1801,6 +1891,16 @@ def list_media_assets(
             created_at=r["created_at"],
             updated_at=r["updated_at"],
             error=r["error"],
+            transcription_job_id=r["transcription_job_id"],
+            transcription_job_status=r["transcription_job_status"],
+            transcription_stage=r["transcription_stage"],
+            current_phase=_media_current_phase(
+                status=str(r["status"]),
+                job_status=r["transcription_job_status"],
+                review_status=r["review_status"],
+                publication_status=r["publication_status"],
+                publication_index_status=r["publication_index_status"],
+            ),
             review_status=r["review_status"],
             publication_status=r["publication_status"],
             publication_index_status=r["publication_index_status"],
@@ -1815,9 +1915,10 @@ def list_media_assets(
             external_source_id=r["external_source_id"],
             external_relative_path=r["external_relative_path"],
             external_availability=r["external_availability"],
-        )
-        for r in rows
-    ]
+            available_actions=available_actions,
+            disabled_actions=disabled_actions,
+        ))
+    return result
 
 
 @router.get("/media/{media_id}/preview")

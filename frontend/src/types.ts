@@ -730,6 +730,7 @@ export type ManagedUploadPreflightEntry = {
   sequence: number;
   filename: string;
   relative_path: string | null;
+  kind?: "document" | "video";
   status: "ready" | "conflict" | "blocked";
   reason: string | null;
   reason_code: string | null;
@@ -753,8 +754,11 @@ export type ManagedUploadResponse = {
   batch_id: string;
   entries: {
     filename: string;
+    kind?: "document" | "video";
     item_id: string | null;
     version_id: string | null;
+    media_id?: string | null;
+    transcription_job_id?: string | null;
     sha256: string | null;
     status: "accepted" | "skipped";
     reason: string | null;
@@ -767,11 +771,15 @@ export type ManagedUploadTaskEntry = {
   sequence: number;
   filename: string;
   relative_path: string | null;
+  kind?: "document" | "video";
   size_bytes: number;
   status: "accepted" | "skipped";
   reason: string | null;
   item_id: string | null;
   version_id: string | null;
+  media_id?: string | null;
+  transcription_job_id?: string | null;
+  failure_code?: string | null;
   created_at: number;
 };
 
@@ -1145,6 +1153,9 @@ export type MediaAsset = {
   updated_at: number;
   error: string | null;
   transcription_job_id?: string | null;
+  transcription_job_status?: TranscriptionJobStatus | null;
+  transcription_stage?: string | null;
+  current_phase?: "upload" | "transcription" | "review" | "publication" | "index" | "ready" | "failed";
   review_status?: TranscriptReviewStatus | null;
   publication_status?: TranscriptPublicationStatus | null;
   publication_index_status?: "pending" | "parsing" | "chunking" | "embedding" | "done" | "failed" | null;
@@ -1160,6 +1171,8 @@ export type MediaAsset = {
   external_source_id?: string | null;
   external_relative_path?: string | null;
   external_availability?: "available" | "missing" | "superseded" | null;
+  available_actions?: string[];
+  disabled_actions?: Record<string, string>;
 };
 
 export type ExternalMediaRoot = { alias: string };

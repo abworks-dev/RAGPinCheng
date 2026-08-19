@@ -78,7 +78,7 @@ describe("AdminLayout route boundary", () => {
     renderAdmin();
     fireEvent.click(screen.getByRole("button", { name: "展开管理功能" }));
     const navigation = screen.getByRole("navigation", { name: "管理功能" });
-    expect(within(navigation).getAllByRole("link")).toHaveLength(10);
+    expect(within(navigation).getAllByRole("link")).toHaveLength(9);
     fireEvent.click(within(navigation).getByRole("link", { name: "分类管理" }));
     expect(screen.getByText("分类设置页面内容")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "展开管理功能" })).toBeInTheDocument();
@@ -91,7 +91,7 @@ describe("AdminLayout route boundary", () => {
     expect(within(navigation).getByText("内容管理")).toBeInTheDocument();
     expect(within(navigation).getByText("运营管理")).toBeInTheDocument();
     expect(within(navigation).getAllByRole("link").map((link) => link.textContent?.trim())).toEqual([
-      "系统概览", "系统维护", "回答策略", "转录配置", "资料管理", "分类管理", "视频管理", "用户管理", "对话记录", "用户反馈",
+      "系统概览", "系统维护", "回答策略", "转录配置", "资料管理", "分类管理", "用户管理", "对话记录", "用户反馈",
     ]);
     expect(screen.getByRole("link", { name: "对话记录" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByText("对话页面内容")).toBeInTheDocument();
@@ -136,6 +136,12 @@ describe("AdminLayout route boundary", () => {
     };
     renderAdmin("index");
     expect(screen.queryByRole("link", { name: "索引任务" })).not.toBeInTheDocument();
+    expect(await screen.findByText("资料库页面内容")).toBeInTheDocument();
+  });
+
+  it("redirects the legacy media route into the managed-content transcription view", async () => {
+    renderAdmin("media");
+    expect(screen.queryByRole("link", { name: "转录任务" })).not.toBeInTheDocument();
     expect(await screen.findByText("资料库页面内容")).toBeInTheDocument();
   });
 

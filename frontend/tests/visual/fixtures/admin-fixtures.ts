@@ -1,6 +1,6 @@
 import type { Page, Route } from "@playwright/test";
 
-export type AdminScenario = "normal" | "loading" | "empty" | "error" | "disabled" | "asr_identity_unavailable" | "publication_failure" | "media_progress" | "media_upload" | "media_conflict" | "media_library";
+export type AdminScenario = "normal" | "loading" | "empty" | "error" | "disabled" | "asr_identity_unavailable" | "publication_failure" | "media_progress" | "media_permanent_failure" | "media_upload" | "media_conflict" | "media_library";
 export type WorkspaceUser = "admin" | "bim_engineer" | "member";
 
 const admin = {
@@ -252,18 +252,26 @@ const mediaAssets = [
     media_id: "media-failed-1", title: "机电协同培训录像", original_filename: "mep-training-recording.mp4",
     mime_type: "video/mp4", file_size: 3_456_789, transcript_origin: "generated", status: "failed",
     review_status: "not_required", publication_status: "not_published", publication_index_status: "pending",
+    current_phase: "failed", transcription_job_id: "media-failed-job", transcription_job_status: "failed", transcription_stage: null,
+    available_actions: ["retry_transcription"],
+    disabled_actions: { cancel_transcription: "当前没有运行中的转录任务", delete_failed: "仅从未创建转录任务的失败视频可删除" },
     created_at: 1700000400, updated_at: 1700000400, error: "provider_unavailable",
   },
   {
     media_id: "media-failed-2", title: "机电协同培训录像（重复提交）", original_filename: "mep-training-recording.mp4",
     mime_type: "video/mp4", file_size: 3_456_789, transcript_origin: "generated", status: "failed",
     review_status: "not_required", publication_status: "not_published", publication_index_status: "pending",
+    current_phase: "failed", transcription_job_id: null, transcription_job_status: null, transcription_stage: null,
+    available_actions: ["delete_failed"],
+    disabled_actions: { retry_transcription: "仅可重试失败或已取消且允许恢复的转录任务" },
     created_at: 1700000300, updated_at: 1700000300, error: "provider_unavailable",
   },
   {
     media_id: "media-ready", title: "项目交付培训", original_filename: "project-delivery-training.mp4",
     mime_type: "video/mp4", file_size: 8_765_432, transcript_origin: "generated", status: "transcript_ready",
     review_status: "awaiting_review", publication_status: "not_published", publication_index_status: "pending",
+    current_phase: "review", transcription_job_id: null, transcription_job_status: null, transcription_stage: null,
+    available_actions: ["review_transcript"], disabled_actions: {},
     created_at: 1700000200, updated_at: 1700000200, error: null,
   },
 ];
@@ -771,7 +779,8 @@ export async function installAdminRoutes(
     }
     if (request.method() === "GET" && path === "/api/admin/media") {
       if (scenario === "empty") return json(route, []);
-      if (scenario === "media_progress") return json(route, [{ ...mediaAssets[2], status: "transcribing" }]);
+      if (scenario === "media_progress") return json(route, [{ ...mediaAssets[2], status: "transcribing", current_phase: "transcription", transcription_job_id: "media-running-job", transcription_job_status: "running", transcription_stage: "transcribing", available_actions: ["cancel_transcription"], disabled_actions: { retry_transcription: "仅可重试失败或已取消且允许恢复的转录任务" } }]);
+      if (scenario === "media_permanent_failure") return json(route, [{ ...mediaAssets[0], available_actions: [], disabled_actions: { retry_transcription: "仅可重试失败或已取消且允许恢复的转录任务" } }]);
       if (scenario === "media_library") return json(route, [mediaLibraryAsset]);
       return json(route, mediaAssets);
     }
@@ -826,6 +835,12 @@ export async function installAdminRoutes(
           started_at: Math.floor(Date.now() / 1000) - 125,
           finished_at: null,
           updated_at: Math.floor(Date.now() / 1000),
+        }]);
+      }
+      if (scenario === "media_permanent_failure") {
+        return json(route, [{
+          ...transcriptionJobs[0],
+          failure: { ...transcriptionJobs[0].failure, retryable: false },
         }]);
       }
       return json(route, transcriptionJobs);
@@ -1149,6 +1164,7 @@ export async function installAdminRoutes(
             sequence: index + 1,
             filename: entry.filename,
             relative_path: entry.relative_path,
+            kind: /\.mp4$/i.test(entry.filename) ? "video" : "document",
             status: "ready",
             reason: null,
             reason_code: null,
@@ -1160,7 +1176,12 @@ export async function installAdminRoutes(
       }
       if (path === "/api/admin/content/uploads") {
         await new Promise((resolve) => setTimeout(resolve, 800));
-        return json(route, { batch_id: "synthetic-batch", entries: [{ filename: "synthetic.pdf", item_id: "new-item", version_id: "new-version", sha256: null, status: "accepted", reason: null }] });
+        const multipart = request.postData() || "";
+        const hasVideo = multipart.includes("synthetic-video.mp4");
+        return json(route, { batch_id: "synthetic-batch", entries: [
+          { filename: "synthetic.pdf", kind: "document", item_id: "new-item", version_id: "new-version", sha256: null, status: "accepted", reason: null },
+          ...(hasVideo ? [{ filename: "synthetic-video.mp4", kind: "video", media_id: "media-uploaded", transcription_job_id: "job-uploaded", status: "accepted", reason: null }] : []),
+        ] });
       }
       if (path.endsWith("/bulk-review") || path.endsWith("/bulk-publish") || path.endsWith("/bulk-move") || path.endsWith("/bulk-archive")) {
         const body = request.postDataJSON() as { version_ids?: string[]; items?: Array<{ item_id: string; expected_version_id: string }> };

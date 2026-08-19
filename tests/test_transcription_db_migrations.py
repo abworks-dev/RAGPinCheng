@@ -59,6 +59,8 @@ def test_empty_database_initializes_all_phase2_tables(tmp_path):
         "uq_media_assets_active_category_title",
         "uq_media_assets_active_category_filename",
     } <= media_indexes
+    upload_entry_columns = {row[1] for row in conn.execute("PRAGMA table_info(upload_batch_entries)")}
+    assert {"entry_kind", "media_id", "transcription_job_id", "failure_code"} <= upload_entry_columns
     conn.close()
     assert not (tmp_path / "backups").exists()
 
@@ -110,6 +112,51 @@ def test_schema_29_relaxes_managed_content_doc_type_for_xmind(tmp_path, monkeypa
     conn = sqlite3.connect(path)
     schema = conn.execute("SELECT sql FROM sqlite_master WHERE name='content_versions'").fetchone()[0]
     assert "'xmind'" in schema
+    assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    assert conn.execute("PRAGMA foreign_key_check").fetchone() is None
+    conn.close()
+
+
+def test_schema_32_adds_video_upload_task_associations_without_rewriting_documents(
+    tmp_path, monkeypatch
+):
+    path = tmp_path / "app.sqlite"
+    migrations = db_migrations.MIGRATIONS
+    monkeypatch.setattr(
+        db_migrations, "MIGRATIONS", tuple(item for item in migrations if item.version <= 31),
+    )
+    init_db(path, backup_dir=tmp_path / "backups")
+    conn = sqlite3.connect(path)
+    assert "entry_kind" not in {
+        row[1] for row in conn.execute("PRAGMA table_info(upload_batch_entries)")
+    }
+    conn.close()
+
+    monkeypatch.setattr(db_migrations, "MIGRATIONS", migrations)
+    init_db(path, backup_dir=tmp_path / "backups")
+
+    conn = sqlite3.connect(path)
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(upload_batch_entries)")}
+    indexes = {row[1] for row in conn.execute("PRAGMA index_list(upload_batch_entries)")}
+    assert {"entry_kind", "media_id", "transcription_job_id", "failure_code"} <= columns
+    assert {
+        "idx_upload_batch_entries_media",
+        "idx_upload_batch_entries_transcription_job",
+    } <= indexes
+    conn.execute(
+        """INSERT INTO upload_batches(
+               id,origin,status,storage_rel_path,created_by,created_at,updated_at,
+               upload_mode,total_files,total_bytes
+           ) VALUES ('batch-doc','web','staging','inbox/web/batch-doc',NULL,1,1,'files',1,1)"""
+    )
+    conn.execute(
+        """INSERT INTO upload_batch_entries(
+               batch_id,sequence,filename,relative_path,size_bytes,status,created_at
+           ) VALUES ('batch-doc',1,'legacy.md',NULL,1,'accepted',1)"""
+    )
+    assert conn.execute(
+        "SELECT entry_kind,media_id,transcription_job_id,failure_code FROM upload_batch_entries"
+    ).fetchone() == ("document", None, None, None)
     assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     assert conn.execute("PRAGMA foreign_key_check").fetchone() is None
     conn.close()

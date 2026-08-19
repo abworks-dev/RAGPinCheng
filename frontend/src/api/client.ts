@@ -116,6 +116,8 @@ export type ManagedUploadProgress = {
 export type ManagedUploadOptions = {
   allowFolderMerge?: boolean;
   conflictActions?: ManagedUploadConflictAction[];
+  videoSchemeId?: string;
+  videoIdempotencyKeys?: string[];
 };
 
 export function setUnauthorizedHandler(fn: (() => void) | null) {
@@ -679,9 +681,19 @@ export const api = {
       form.append("files", file, file.name);
       form.append("relative_paths", relativePath);
     });
+    if (files.some((entry) => /\.mp4$/i.test("file" in entry ? entry.file.name : entry.name))) {
+      files.forEach((entry, index) => {
+        const file = "file" in entry ? entry.file : entry;
+        form.append(
+          "video_idempotency_keys",
+          /\.mp4$/i.test(file.name) ? options?.videoIdempotencyKeys?.[index] || crypto.randomUUID() : "",
+        );
+      });
+    }
     form.append("category_id", categoryId);
     form.append("upload_mode", uploadMode);
     form.append("allow_folder_merge", options?.allowFolderMerge ? "true" : "false");
+    if (options?.videoSchemeId) form.append("video_scheme_id", options.videoSchemeId);
     options?.conflictActions?.forEach((action) => {
       form.append("conflict_actions", JSON.stringify(action));
     });

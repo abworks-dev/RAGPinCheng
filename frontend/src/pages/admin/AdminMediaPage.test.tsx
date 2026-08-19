@@ -607,4 +607,32 @@ describe("AdminMediaPage wizard", () => {
     await waitFor(() => expect(mocks.deleteFailedMediaAsset).toHaveBeenCalledWith("media-upload-failed"));
     await waitFor(() => expect(screen.queryByText("上传失败视频")).not.toBeInTheDocument());
   });
+
+  it("uses the managed-content upload entry when embedded as transcription tasks", async () => {
+    render(<AdminMediaPage embedded />);
+    expect(await screen.findByRole("heading", { name: "转录任务" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /上传视频/ })).not.toBeInTheDocument();
+  });
+
+  it("keeps a permanent transcription failure retry button disabled from server capabilities", async () => {
+    const failed = {
+      ...succeededJob,
+      status: "failed" as const,
+      failure: { code: "invalid_media", message: "视频不可解析", retryable: false, recommended_action: "更换视频" },
+    };
+    mocks.listMediaAssets.mockResolvedValue([{
+      ...assets[0],
+      status: "failed",
+      available_actions: [],
+      disabled_actions: { retry_transcription: "仅可重试失败或已取消且允许恢复的转录任务" },
+    }]);
+    mocks.listTranscriptionJobs.mockResolvedValue([failed]);
+    render(<AdminMediaPage embedded />);
+
+    const retry = await screen.findByRole("button", { name: "重试" });
+    expect(retry).toBeDisabled();
+    expect(retry).toHaveAttribute("title", "仅可重试失败或已取消且允许恢复的转录任务");
+    fireEvent.click(retry);
+    expect(mocks.retryTranscription).not.toHaveBeenCalled();
+  });
 });

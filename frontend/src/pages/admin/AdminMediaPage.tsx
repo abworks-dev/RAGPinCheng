@@ -181,7 +181,7 @@ function pendingFromFile(file: File, profileId: string): PendingVideo {
   };
 }
 
-export function AdminMediaPage() {
+export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
   const [deletingMediaId, setDeletingMediaId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<MediaAsset | null>(null);
   const [archiveTarget, setArchiveTarget] = useState<MediaAsset | null>(null);
@@ -671,9 +671,9 @@ export function AdminMediaPage() {
     <section className="space-y-6" aria-labelledby="admin-media-title">
       <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <p className="text-ui-xs font-medium text-primary">内容管理</p>
-          <h1 id="admin-media-title" className="mt-1 text-ui-2xl font-semibold tracking-tight text-foreground">视频管理</h1>
-          <p className="mt-1 max-w-3xl text-ui-sm text-muted-foreground">分步骤批量上传视频，并选择人工 Markdown 或受控转录方案。</p>
+          <p className="text-ui-xs font-medium text-primary">资料管理 / 转录任务</p>
+          <h1 id="admin-media-title" className="mt-1 text-ui-2xl font-semibold tracking-tight text-foreground">转录任务</h1>
+          <p className="mt-1 max-w-3xl text-ui-sm text-muted-foreground">视频由资料列表上传，在这里跟踪转录、审核、发布、专属索引和恢复操作。</p>
         </div>
         <a className={buttonVariants({ variant: "outline" })} href="/admin/asr"><Settings2 className="size-4" />转录配置</a>
       </header>
@@ -954,7 +954,7 @@ export function AdminMediaPage() {
             <div className="min-w-0"><h2 id="media-assets-title" className="text-ui-base font-semibold">媒体资源</h2><p className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-ui-xs text-muted-foreground"><span>共 {mediaAssets.length} 个视频</span><span>·</span><span>按每次提交分别记录媒体与处理进度；同名文件不会合并。</span></p></div>
             <div className="flex flex-wrap items-center gap-2 lg:justify-end">
               <Button size="sm" variant="outline" aria-label="刷新媒体资源" title="刷新媒体资源" disabled={loading} onClick={() => void refreshMediaState()}><RefreshCw className="size-4" aria-hidden="true" />刷新列表</Button>
-              <Button size="sm" onClick={() => setUploadDialogOpen(true)}><Upload className="size-4" />{hasUploadDraft ? `继续上传${pending.length ? `（${pending.length}）` : ""}` : "上传视频"}</Button>
+              {!embedded && <Button size="sm" onClick={() => setUploadDialogOpen(true)}><Upload className="size-4" />{hasUploadDraft ? `继续上传${pending.length ? `（${pending.length}）` : ""}` : "上传视频"}</Button>}
             </div>
           </div>
           <p className="border-b border-border px-4 py-3 text-ui-xs text-muted-foreground sm:px-5">当前显示 {visibleMediaAssets.length} / {mediaAssets.length} 条记录{lastLoadedAt ? ` · 最近刷新 ${new Date(lastLoadedAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}` : ""}。</p>
@@ -970,7 +970,17 @@ export function AdminMediaPage() {
               {visibleMediaAssets.map((asset) => {
                 const job = jobsByMediaId.get(asset.media_id);
                 const sameNameCount = mediaAssets.filter((item) => item.original_filename === asset.original_filename).length;
-                const canDelete = asset.status === "failed" && !job;
+                const availableActions = new Set(asset.available_actions || []);
+                const disabledActions = asset.disabled_actions || {};
+                const hasServerCapabilities = Array.isArray(asset.available_actions);
+                const canCancel = hasServerCapabilities ? availableActions.has("cancel_transcription") : job?.status === "pending" || job?.status === "running";
+                const canRetry = hasServerCapabilities ? availableActions.has("retry_transcription") : (job?.status === "failed" || job?.status === "cancelled") && job.failure?.retryable !== false;
+                const canDelete = hasServerCapabilities ? availableActions.has("delete_failed") : asset.status === "failed" && !job;
+                const canReplace = hasServerCapabilities ? availableActions.has("replace_media") : asset.publication_status === "published";
+                const canArchive = hasServerCapabilities ? availableActions.has("archive_media") : asset.publication_status === "published";
+                const showCancel = canCancel || job?.status === "pending" || job?.status === "running";
+                const showRetry = canRetry || job?.status === "failed" || job?.status === "cancelled";
+                const showPublishedActions = canReplace || canArchive || asset.publication_status === "published";
                 return <li key={asset.media_id} className="p-4 sm:p-5" data-testid="media-record-row">
                   <div className="grid gap-4 lg:grid-cols-[minmax(0,31fr)_minmax(0,42fr)_minmax(0,12fr)_minmax(0,15fr)] lg:items-start">
                     <div className="min-w-0">
@@ -989,10 +999,11 @@ export function AdminMediaPage() {
                     <div className="flex flex-wrap gap-1.5 lg:justify-end" aria-label={`媒体操作：${asset.title}`}>
                       <Button className="min-h-10 sm:min-h-0" size="sm" variant="outline" onClick={() => openWorkbench(asset.media_id)}>进入转写工作台</Button>
                       {asset.catalog_item_id && asset.current_version_id && <Button className="min-h-10 sm:min-h-0" size="sm" variant="outline" onClick={() => { setMoveTarget(asset); setMoveCategoryId(""); setMoveError(null); }}>调整目录</Button>}
-                      {(job?.status === "pending" || job?.status === "running") && <Button className="min-h-10 sm:min-h-0" size="sm" variant="outline" onClick={() => void cancelJob(job)}>取消</Button>}
-                      {(job?.status === "failed" || job?.status === "cancelled") && job.failure?.retryable !== false && <Button className="min-h-10 sm:min-h-0" size="sm" variant="outline" onClick={() => void retryJob(job)}>重试</Button>}
-                      {canDelete && <Button className="min-h-10 sm:min-h-0" size="sm" variant="destructive" disabled={deletingMediaId === asset.media_id} onClick={() => setDeleteTarget(asset)}>{deletingMediaId === asset.media_id ? "删除中" : "完整删除"}</Button>}
-                      {asset.publication_status === "published" && <Button className="min-h-10 sm:min-h-0" size="sm" variant="outline" onClick={() => { setArchiveTarget(asset); setArchiveAcknowledged(false); }}>移入回收站</Button>}
+                      {showCancel && <Button className="min-h-10 sm:min-h-0" size="sm" variant="outline" title={canCancel ? "取消当前转录任务" : disabledActions.cancel_transcription || "当前状态不可取消"} disabled={!job || !canCancel || deletingMediaId === asset.media_id} onClick={() => job && void cancelJob(job)}>取消</Button>}
+                      {showRetry && <Button className="min-h-10 sm:min-h-0" size="sm" variant="outline" title={canRetry ? "按原转录方案重试" : disabledActions.retry_transcription || "当前状态不可重试"} disabled={!job || !canRetry || deletingMediaId === asset.media_id} onClick={() => job && void retryJob(job)}>重试</Button>}
+                      {showPublishedActions && <Button className="min-h-10 sm:min-h-0" size="sm" variant="outline" title={canReplace ? "上传候选视频并创建转录任务" : disabledActions.replace_media || "当前状态不可替换"} disabled={!canReplace || deletingMediaId === asset.media_id} onClick={() => setReplaceSourceMediaId(asset.media_id)}>替换视频</Button>}
+                      {asset.status === "failed" && <Button className="min-h-10 sm:min-h-0" size="sm" variant="destructive" title={canDelete ? "删除失败视频及其原文件" : disabledActions.delete_failed || "当前失败记录不可删除"} disabled={!canDelete || deletingMediaId === asset.media_id} onClick={() => setDeleteTarget(asset)}>{deletingMediaId === asset.media_id ? "删除中" : "完整删除"}</Button>}
+                      {showPublishedActions && <Button className="min-h-10 sm:min-h-0" size="sm" variant="outline" title={canArchive ? "移入资料回收站" : disabledActions.archive_media || "当前状态不可归档"} disabled={!canArchive || deletingMediaId === asset.media_id} onClick={() => { setArchiveTarget(asset); setArchiveAcknowledged(false); }}>移入回收站</Button>}
                     </div>
                   </div>
                 </li>;

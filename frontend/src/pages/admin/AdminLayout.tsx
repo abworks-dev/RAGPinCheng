@@ -10,7 +10,6 @@ import {
   SlidersHorizontal,
   Tags,
   Users,
-  Video,
   Wrench,
   X,
 } from "lucide-react";
@@ -24,7 +23,7 @@ import { useAuth } from "../../context/AuthContext";
 import { contentWorkspaceTabs, workspaceLabel } from "../../lib/workspace-access";
 import { Navigate, NavLink, Outlet, useLocation } from "react-router-dom";
 
-type Tab = "users" | "conversations" | "managed" | "categories" | "media" | "stats" | "feedback" | "maintenance" | "answer-policy" | "asr";
+type Tab = "users" | "conversations" | "managed" | "categories" | "stats" | "feedback" | "maintenance" | "answer-policy" | "asr";
 
 type TabDefinition = { key: Tab; label: string; path: string };
 
@@ -40,7 +39,6 @@ const navigationIcons: Record<Tab, LucideIcon> = {
   asr: AudioLines,
   managed: FileText,
   categories: Tags,
-  media: Video,
   users: Users,
   conversations: MessagesSquare,
   feedback: MessageSquareQuote,
@@ -58,7 +56,6 @@ const adminNavigation: NavigationGroup[] = [
     tabs: [
       { key: "managed", label: "资料管理", path: "content" },
       { key: "categories", label: "分类管理", path: "categories" },
-      { key: "media", label: "视频管理", path: "media" },
     ],
   },
   {
@@ -116,6 +113,11 @@ export function AdminLayout() {
   if (user && tabs.length === 0) return <Navigate to="/" replace />;
   if (user && currentPath === "index" && (isAdmin || permissions.includes("index.view"))) {
     return <Navigate to="/admin/content?view=index" replace />;
+  }
+  if (user && currentPath === "media" && isAdmin) {
+    const params = new URLSearchParams(location.search);
+    params.set("view", "transcription");
+    return <Navigate to={`/admin/content?${params.toString()}`} replace />;
   }
   if (user && currentPath && !currentTab) return <Navigate to={`/admin/${tabs[0].path}`} replace />;
 
