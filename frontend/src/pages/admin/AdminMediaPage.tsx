@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowLeft, CheckCircle2, ClipboardCheck, FileUp, Film, LoaderCircle, RefreshCw, Rocket, Settings2, Trash2, Upload, XCircle } from "lucide-react";
 import { adminMediaApi } from "../../api/admin/media";
+import { ApiError } from "../../api/client";
 import { Alert, AlertDescription, AlertTitle } from "../../components/ui/alert";
 import { Badge } from "../../components/ui/badge";
 import { Button, buttonVariants } from "../../components/ui/button";
@@ -498,7 +499,16 @@ export function AdminMediaPage() {
       }
       updatePending(item.id, { state: "succeeded", transferRatio: 1, error: null });
     } catch (e: any) {
-      updatePending(item.id, { state: "failed", error: e?.message || String(e) });
+        const mediaHints: Record<string, string> = {
+          media_audio_empty: "视频没有可用音频内容，请选择包含声音的文件。",
+          media_audio_preparation_failed: "视频音频无法解码，请确认包含音轨，或重新导出为 H.264 + AAC MP4。",
+          media_audio_invalid_output: "音频转换结果无效，请重新导出视频后重试。",
+          media_audio_preparation_timeout: "音频准备超时，请压缩视频或重新导出后重试。",
+          media_audio_source_missing: "视频文件无法读取，请重新上传。",
+          media_storage_unavailable: "服务器暂时无法准备视频音频，请稍后重试。",
+        };
+        const code = e instanceof ApiError ? e.code : null;
+        updatePending(item.id, { state: "failed", error: mediaHints[code || ""] || e?.message || String(e) });
     }
   }
 
