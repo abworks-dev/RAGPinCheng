@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowLeft, CheckCircle2, ClipboardCheck, FileUp, Film, LoaderCircle, RefreshCw, Rocket, Settings2, Trash2, Upload, XCircle } from "lucide-react";
 import { adminMediaApi } from "../../api/admin/media";
-import { ApiError } from "../../api/client";
 import { Alert, AlertDescription, AlertTitle } from "../../components/ui/alert";
 import { Badge } from "../../components/ui/badge";
 import { Button, buttonVariants } from "../../components/ui/button";
@@ -507,7 +506,7 @@ export function AdminMediaPage() {
           media_audio_source_missing: "视频文件无法读取，请重新上传。",
           media_storage_unavailable: "服务器暂时无法准备视频音频，请稍后重试。",
         };
-        const code = e instanceof ApiError ? e.code : null;
+        const code = typeof e?.code === "string" ? e.code : null;
         updatePending(item.id, { state: "failed", error: mediaHints[code || ""] || e?.message || String(e) });
     }
   }
