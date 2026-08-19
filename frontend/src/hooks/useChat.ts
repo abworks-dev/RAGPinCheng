@@ -259,6 +259,7 @@ export function useChat({
                 content: "",
                 sources: undefined,
                 error: undefined,
+                regenerationStopped: undefined,
                 streaming: true,
                 stage: "retrieving",
               }
@@ -338,11 +339,18 @@ export function useChat({
           }
         }
       } catch (e: any) {
-        const message = e?.name === "AbortError" ? "重新生成已中止" : e?.message || String(e);
+        const aborted = e?.name === "AbortError";
+        const message = e?.message || String(e);
         setMessages((prev) =>
           prev.map((item) =>
             item.id === assistantMessageId
-              ? { ...snapshot, error: message, streaming: false, stage: "done" }
+              ? {
+                  ...snapshot,
+                  error: aborted ? undefined : message,
+                  regenerationStopped: aborted || undefined,
+                  streaming: false,
+                  stage: "done",
+                }
               : item,
           ),
         );

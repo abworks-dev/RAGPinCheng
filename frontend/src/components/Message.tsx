@@ -119,7 +119,10 @@ function AnswerStatus({ msg }: { msg: ChatMessage }) {
   let tone: "warning" | "success" | "destructive" = "success";
   let pulse = false;
 
-  if (msg.stopped) {
+  if (msg.regenerationStopped) {
+    label = "已停止重新生成，仍显示上一次回答";
+    tone = "warning";
+  } else if (msg.stopped) {
     label = "用户已停止回答，以下为已生成内容";
     tone = "warning";
   } else if (stage === "retrieving") {

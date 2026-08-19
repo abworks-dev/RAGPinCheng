@@ -233,6 +233,22 @@ describe("Message assistant actions", () => {
     expect(status).not.toHaveTextContent("回答基于");
   });
 
+  it("shows a regeneration-stopped status and keeps answer actions", () => {
+    render(
+      <Message
+        msg={assistant({ regenerationStopped: true, streaming: false, stage: "done", prep: prep(7) })}
+        conversationId="conversation-1"
+        turnIndex={1}
+      />,
+    );
+
+    const status = screen.getByRole("status");
+    expect(status).toHaveTextContent("已停止重新生成，仍显示上一次回答");
+    expect(status.querySelector(".bg-warning")).toBeInTheDocument();
+    expect(screen.queryByText("重新生成已中止")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("回答操作")).toBeInTheDocument();
+  });
+
   it("copies a user question over the HTTP fallback and shows a temporary check", async () => {
     vi.useFakeTimers();
     Object.defineProperty(navigator, "clipboard", {
