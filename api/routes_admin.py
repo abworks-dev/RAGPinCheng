@@ -639,13 +639,8 @@ def _check_office_external_links_or_embeds(path: Path) -> str | None:
 
 def _verify_office_signature(path: Path, ext: str) -> bool:
     """Verify the file starts with PK\x03\x04 (ZIP header) for Office formats."""
-    if ext not in (".docx", ".xlsx", ".pptx"):
-        return True
-    try:
-        header = path.read_bytes()[:4]
-        return header.startswith(b"PK\x03\x04")
-    except OSError:
-        return False
+    from src.office_security import has_valid_office_signature
+    return has_valid_office_signature(path, ext)
 
 
 def _check_zip_bomb(path: Path) -> bool:
@@ -723,8 +718,8 @@ def _classify_doc_type(filename: str, category: str) -> str | None:
     header-anchored branch — semantically a markdown doc IS a parsed PDF.
 
     Office documents are accepted with their native doc_type:
-    `.docx` → "docx", `.xlsx` → "xlsx", `.pptx` → "pptx"
-    Legacy `.doc`/`.xls`/`.ppt` are NOT supported in the first version.
+    Legacy Office formats retain their native type and are converted in the
+    isolated LibreOffice service before parsing.
     """
     lower = filename.lower()
     if lower.endswith(".pdf"):
@@ -733,10 +728,16 @@ def _classify_doc_type(filename: str, category: str) -> str | None:
         return "transcript" if category == TRANSCRIPT_CATEGORY else "pdf"
     if lower.endswith(".docx"):
         return "docx"
+    if lower.endswith(".doc"):
+        return "doc"
     if lower.endswith(".xlsx"):
         return "xlsx"
+    if lower.endswith(".xls"):
+        return "xls"
     if lower.endswith(".pptx"):
         return "pptx"
+    if lower.endswith(".ppt"):
+        return "ppt"
     return None
 
 
@@ -834,7 +835,7 @@ async def upload_documents(
             continue
         doc_type = _classify_doc_type(name, cat)
         if doc_type is None:
-            skipped.append({"filename": name, "reason": "仅支持 .pdf、.md、.docx、.xlsx、.pptx"})
+            skipped.append({"filename": name, "reason": "仅支持 .pdf、.md、.doc、.docx、.xls、.xlsx、.ppt、.pptx"})
             continue
         if doc_type in OFFICE_DOC_TYPES and not OFFICE_PROCESSING_ENABLED:
             skipped.append({
@@ -878,7 +879,7 @@ async def upload_documents(
 
         # Office file security checks (after file is on disk)
         ext = Path(name).suffix.lower()
-        if ext in (".docx", ".xlsx", ".pptx"):
+        if ext in (".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx"):
             # 1. Magic bytes signature check
             if not _verify_office_signature(target, ext):
                 target.unlink()

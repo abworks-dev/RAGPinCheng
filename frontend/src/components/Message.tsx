@@ -42,7 +42,7 @@ const CITATION_TOOLTIP_VIEWPORT_GUTTER = 8;
 const CITATION_TOOLTIP_GAP = 2;
 // Keep fixed previews below the 2.5rem top fade used by MessageList.
 const CITATION_TOOLTIP_TOP_FADE_HEIGHT = 40;
-const PREVIEWABLE_DOCUMENT_TYPES = new Set(["pdf", "docx", "xlsx", "pptx"]);
+const PREVIEWABLE_DOCUMENT_TYPES = new Set(["pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx"]);
 
 export type CitationTooltipPlacementInput = {
   markerTop: number;

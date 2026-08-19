@@ -81,7 +81,7 @@ CONTENT_MANAGEMENT_ENABLED = os.getenv("CONTENT_MANAGEMENT_ENABLED", "").strip()
 OFFICE_PROCESSING_ENABLED = os.getenv("OFFICE_PROCESSING_ENABLED", "true").strip().lower() in (
     "1", "true", "yes", "on",
 )
-OFFICE_DOC_TYPES = frozenset({"docx", "xlsx", "pptx"})
+OFFICE_DOC_TYPES = frozenset({"doc", "docx", "xls", "xlsx", "ppt", "pptx"})
 OFFICE_PARSE_TIMEOUT_SECONDS = int(os.getenv("OFFICE_PARSE_TIMEOUT_SECONDS", "120"))
 OFFICE_MIN_FREE_DISK_MB = int(os.getenv("OFFICE_MIN_FREE_DISK_MB", "1024"))
 CONTENT_HEAD_ENFORCEMENT = os.getenv("CONTENT_HEAD_ENFORCEMENT", "compat").strip().lower()

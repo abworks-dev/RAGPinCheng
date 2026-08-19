@@ -559,7 +559,7 @@ export const api = {
     lifecycle_status?: string;
     source_origin?: string;
     content_kind?: "document" | "media_transcript";
-    doc_type?: "pdf" | "docx" | "xlsx" | "pptx" | "xmind" | "markdown" | "transcript" | "other";
+    doc_type?: "pdf" | "doc" | "docx" | "xls" | "xlsx" | "ppt" | "pptx" | "xmind" | "markdown" | "transcript" | "other";
     sort_by?: "doc_type";
     sort_direction?: "asc" | "desc";
     limit?: number;

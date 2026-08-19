@@ -18,6 +18,7 @@ import logging
 import os
 import sqlite3
 import tempfile
+import httpx
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable, Literal
@@ -34,6 +35,8 @@ from .config import (
     PARENTS_DB,
     PARSED_DIR,
     SECOND_LEVEL_CATEGORIES,
+    LIBREOFFICE_URL,
+    LIBREOFFICE_TIMEOUT,
 )
 from .index import (
     _client,
@@ -79,6 +82,40 @@ class ManagedIndexMetadata:
     category_display_name: str
     doc_title: str
     source_ref: str
+
+
+def _legacy_conversion(source_path: Path, target: str) -> Path:
+    converted = source_path.with_suffix(f".converted.{target}")
+    if converted.is_file() and converted.read_bytes()[:4] == b"PK\x03\x04":
+        return converted
+    mime = {"doc": "application/msword", "xls": "application/vnd.ms-excel", "ppt": "application/vnd.ms-powerpoint"}[source_path.suffix.lower().lstrip(".")]
+    with httpx.Client(timeout=LIBREOFFICE_TIMEOUT) as client:
+        with source_path.open("rb") as handle:
+            response = client.post(
+                f"{LIBREOFFICE_URL}/v1/convert?target_format={target}",
+                files={"file": (source_path.name, handle, mime)},
+            )
+        response.raise_for_status()
+    if response.content[:4] != b"PK\x03\x04":
+        raise RuntimeError("office_legacy_conversion_invalid")
+    converted.write_bytes(response.content)
+    return converted
+
+
+def _build_legacy_doc(source_path: Path, doc_type: str, on_status: StatusFn, *, parsed_dir: Path, write_preview: bool) -> ParsedDoc:
+    target = {"doc": "docx", "xls": "xlsx", "ppt": "pptx"}[doc_type]
+    converted = _legacy_conversion(source_path, target)
+    if doc_type == "doc":
+        doc = _build_docx_doc(converted, on_status, parsed_dir=parsed_dir)
+    elif doc_type == "xls":
+        doc = _build_xlsx_doc(converted, on_status, parsed_dir=parsed_dir, write_preview=write_preview)
+        preview = converted.with_suffix(".preview.xlsx")
+        if write_preview and preview.is_file(): preview.replace(source_path.with_suffix(".preview.xlsx"))
+    else:
+        doc = _build_pptx_doc(converted, on_status, parsed_dir=parsed_dir, write_preview=write_preview)
+        preview = converted.with_suffix(".preview.pdf")
+        if write_preview and preview.is_file(): preview.replace(source_path.with_suffix(".preview.pdf"))
+    return replace(doc, source_path=source_path, doc_type=doc_type, doc_title=source_path.stem)
 
 
 def _write_text_atomic(path: Path, content: str) -> None:
@@ -396,7 +433,7 @@ def index_single(
     transcript videos). When set, the Parent dataclass carries media_id
     through the pipeline so Sources can resolve playback URLs.
     """
-    if doc_type not in ("pdf", "transcript", "docx", "xlsx", "pptx", "xmind"):
+    if doc_type not in ("pdf", "transcript", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "xmind"):
         raise ValueError(f"unsupported doc_type: {doc_type!r}")
 
     if doc_type == "transcript":
@@ -405,6 +442,8 @@ def index_single(
         # Non-transcript markdown — already markdown, skip the parse pass.
         # Chunker still uses the PDF (header-anchored) branch via doc_type="pdf".
         doc = _build_markdown_doc(source_path)
+    elif doc_type in ("doc", "xls", "ppt"):
+        doc = _build_legacy_doc(source_path, doc_type, on_status, parsed_dir=PARSED_DIR, write_preview=True)
     elif doc_type == "docx":
         doc = _build_docx_doc(source_path, on_status)
     elif doc_type == "xlsx":
@@ -470,13 +509,15 @@ def index_managed_content(
     on_status: StatusFn = lambda _s: None,
 ) -> IndexResult:
     """Build a versioned candidate without deriving identity from its folder."""
-    if doc_type not in ("pdf", "markdown", "docx", "xlsx", "pptx", "xmind"):
+    if doc_type not in ("pdf", "markdown", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "xmind"):
         raise ValueError(f"unsupported managed doc_type: {doc_type!r}")
     if not source_path.is_file() or source_path.is_symlink():
         raise ValueError("managed_source_unavailable")
     parsed_dir = PARSED_DIR / "managed" / metadata.content_version_id
     if doc_type == "markdown":
         doc = _build_markdown_doc(source_path)
+    elif doc_type in ("doc", "xls", "ppt"):
+        doc = _build_legacy_doc(source_path, doc_type, on_status, parsed_dir=parsed_dir, write_preview=True)
     elif doc_type == "docx":
         doc = _build_docx_doc(source_path, on_status, parsed_dir=parsed_dir)
     elif doc_type == "xlsx":

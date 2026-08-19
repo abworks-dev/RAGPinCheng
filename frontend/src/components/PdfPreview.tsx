@@ -128,9 +128,9 @@ export function PdfPreview() {
   const [pageSize, setPageSize] = useState<Size>({ width: 0, height: 0 });
 
   const open = state.parentId !== null || state.versionId !== null;
-  const isDocx = state.docType === "docx";
-  const isXlsx = state.docType === "xlsx";
-  const isPptx = state.docType === "pptx";
+  const isDocx = state.docType === "docx" || state.docType === "doc";
+  const isXlsx = state.docType === "xlsx" || state.docType === "xls";
+  const isPptx = state.docType === "pptx" || state.docType === "ppt";
   const isXMind = state.docType === "xmind";
   // PPTX files are converted to PDF by the preview endpoint and use the same page controls.
   const isPdf = !isDocx && !isXlsx && !isXMind;

@@ -226,4 +226,4 @@ def test_service_rejects_unapproved_target_format_before_conversion():
     )
 
     assert response.status_code == 400
-    assert response.json()["detail"] == "Only PDF conversion is supported"
+    assert response.json()["detail"] == "Unsupported conversion: .pptx to docx"

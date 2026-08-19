@@ -2,7 +2,7 @@
 
 Provides two endpoints:
 - POST /v1/recalculate: recalculate XLSX formulas → return XLSX with cached values
-- POST /v1/convert: convert Office file to PDF
+- POST /v1/convert: convert Office files to an approved PDF/OOXML target
 - GET /health: health check
 
 Runs as a standalone container, accessed via HTTP by the backend.
@@ -41,6 +41,26 @@ _concurrency_sem = asyncio.Semaphore(MAX_CONCURRENT)
 # Supported extensions
 _SUPPORTED_INPUT = {".docx", ".xlsx", ".pptx", ".doc", ".xls", ".ppt"}
 _RECALC_EXTS = {".xlsx", ".xls"}
+_CONVERSION_TARGETS = {
+    ".doc": {"docx", "pdf"},
+    ".docx": {"pdf"},
+    ".xls": {"xlsx"},
+    ".xlsx": {"pdf"},
+    ".ppt": {"pptx", "pdf"},
+    ".pptx": {"pdf"},
+}
+_TARGET_FILTERS = {
+    "docx": "docx:Office Open XML Text",
+    "xlsx": "xlsx:Calc MS Excel 2007 XML",
+    "pptx": "pptx:Impress MS PowerPoint 2007 XML",
+    "pdf": "pdf",
+}
+_TARGET_MEDIA_TYPES = {
+    "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "pdf": "application/pdf",
+}
 
 
 async def _run_libreoffice(args: list[str], timeout: int = CONVERSION_TIMEOUT) -> str:
@@ -129,6 +149,14 @@ def _select_conversion_output(output_dir: Path, target_format: str) -> Path:
             raise HTTPException(status_code=500, detail=f"Cannot read conversion output: {exc}")
         if header != b"%PDF-":
             raise HTTPException(status_code=500, detail="Conversion produced an invalid PDF")
+    else:
+        try:
+            with output_path.open("rb") as output_file:
+                header = output_file.read(4)
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail=f"Cannot read conversion output: {exc}")
+        if header != b"PK\x03\x04":
+            raise HTTPException(status_code=500, detail="Conversion produced an invalid OOXML file")
     return output_path
 
 
@@ -210,12 +238,14 @@ async def convert(file: UploadFile, target_format: str = "pdf"):
 
     Supports: .docx, .pptx, .xlsx → .pdf
     """
-    if target_format != "pdf":
-        raise HTTPException(status_code=400, detail="Only PDF conversion is supported")
-
     ext = Path(file.filename or "input").suffix.lower()
     if ext not in _SUPPORTED_INPUT:
         raise HTTPException(status_code=400, detail=f"Unsupported input format: {ext}")
+    if target_format not in _CONVERSION_TARGETS.get(ext, set()):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported conversion: {ext} to {target_format}",
+        )
 
     content = await file.read()
     if len(content) > MAX_FILE_SIZE:
@@ -234,13 +264,13 @@ async def convert(file: UploadFile, target_format: str = "pdf"):
         async with _concurrency_sem:
             await _run_libreoffice([
                 "libreoffice", "--headless", "--norestore",
-                "--convert-to", target_format,
+                "--convert-to", _TARGET_FILTERS[target_format],
                 "--outdir", str(output_dir),
                 str(input_path),
             ])
 
         output_path = _select_conversion_output(output_dir, target_format)
-        media_type = "application/pdf" if target_format == "pdf" else "application/octet-stream"
+        media_type = _TARGET_MEDIA_TYPES[target_format]
         cleanup_dirs = [work_dir, output_dir]
 
         return FileResponse(
