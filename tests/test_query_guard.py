@@ -110,13 +110,19 @@ class TestValidateSearchQueryFirstTurn:
         result = validate_search_query("11", has_history=False)
         assert result.passed is False
         assert result.reason == "numeric_only"
-        assert "11" in result.message
+        assert result.message == (
+            "当前问题信息不足，暂无法检索到明确内容。"
+            "请补充具体的查询对象，例如规范名称、章节号、构件名称、材料型号或项目资料名称。"
+        )
 
     def test_pure_numeric_with_punctuation(self):
         result = validate_search_query("11.1", has_history=False)
         assert result.passed is False
         assert result.reason == "section_only"
-        assert "11.1" in result.message
+        assert result.message == (
+            "当前章节号缺少所属文档，暂无法检索到明确内容。"
+            "请补充对应的规范或文档名称，例如“GB 50017 第 8 节的要求是什么？”。"
+        )
 
     def test_deep_section_number(self):
         result = validate_search_query("9.3.3.1", has_history=False)
@@ -201,7 +207,10 @@ class TestChatSessionGuardIntegration:
         session = ChatSession()
         result = session.ask("11")
         assert result.guard_reason == "numeric_only"
-        assert "信息不足" in result.answer_text
+        assert result.answer_text == (
+            "当前问题信息不足，暂无法检索到明确内容。"
+            "请补充具体的查询对象，例如规范名称、章节号、构件名称、材料型号或项目资料名称。"
+        )
         assert result.fresh_sources == []
         assert result.final_sources == []
         # Verify sources weren't cleared (though on first turn they're empty anyway)
@@ -245,13 +254,19 @@ class TestChatSessionGuardIntegration:
         session = ChatSession()
         result = session.ask("11.1")
         assert result.guard_reason == "section_only"
-        assert "章节号" in result.answer_text
+        assert result.answer_text == (
+            "当前章节号缺少所属文档，暂无法检索到明确内容。"
+            "请补充对应的规范或文档名称，例如“GB 50017 第 8 节的要求是什么？”。"
+        )
 
     def test_too_short_question(self):
         session = ChatSession()
         result = session.ask("？")
         assert result.guard_reason == "too_short"
-        assert "过于简短" in result.answer_text
+        assert result.answer_text == (
+            "当前问题过于简短，暂无法检索到明确内容。"
+            "请补充具体的构件、材料、规范、软件操作或项目资料名称。"
+        )
 
 
 class TestChatSessionGuardIntegrationStream:
