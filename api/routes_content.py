@@ -520,6 +520,9 @@ def _category_dto(row: sqlite3.Row) -> ManagedCategoryDTO:
         updated_at=row["updated_at"],
         full_path=row["full_path"] if "full_path" in row.keys() else f"{row['display_code']} {row['display_name']}",
         item_count=int(row["item_count"]) if "item_count" in row.keys() else 0,
+        direct_child_count=int(row["direct_child_count"]) if "direct_child_count" in row.keys() else 0,
+        total_child_count=int(row["total_child_count"]) if "total_child_count" in row.keys() else 0,
+        total_item_count=int(row["total_item_count"]) if "total_item_count" in row.keys() else int(row["item_count"]) if "item_count" in row.keys() else 0,
     )
 
 
@@ -2475,6 +2478,73 @@ def _create_bulk_download_archive(entries: list[tuple[Path, str]]) -> Path:
     return archive_path
 
 
+def _resolve_category_download_entries(
+    conn: sqlite3.Connection,
+    category_id: str,
+) -> tuple[str, list[tuple[Path, str]]]:
+    category = conn.execute(
+        "SELECT display_code,display_name FROM category_nodes WHERE id=? AND is_active=1",
+        (category_id,),
+    ).fetchone()
+    if category is None:
+        raise HTTPException(status_code=404, detail="文件夹不存在或已停用")
+    root_name = _safe_bulk_archive_name(
+        f"{category['display_code']} {category['display_name']}",
+        set(),
+    )
+    rows = conn.execute(
+        """WITH RECURSIVE descendants(id, relative_path) AS (
+               SELECT id, display_code || ' ' || display_name
+               FROM category_nodes
+               WHERE id=? AND is_active=1
+               UNION ALL
+               SELECT c.id, d.relative_path || '/' || c.display_code || ' ' || c.display_name
+               FROM category_nodes c
+               JOIN descendants d ON d.id=c.parent_id
+               WHERE c.is_active=1
+           )
+           SELECT v.id AS version_id,
+                  v.original_filename,
+                  o.storage_rel_path,
+                  d.relative_path
+           FROM descendants d
+           JOIN content_items i ON i.category_id=d.id
+           JOIN content_versions v ON v.item_id=i.id
+            AND v.version_number=(
+                SELECT max(v2.version_number) FROM content_versions v2 WHERE v2.item_id=i.id
+            )
+           JOIN content_objects o ON o.sha256=v.object_sha256
+           WHERE i.archived_at IS NULL
+             AND i.content_kind='document'
+           ORDER BY d.relative_path COLLATE NOCASE, v.original_filename COLLATE NOCASE""",
+        (category_id,),
+    ).fetchall()
+    if not rows:
+        raise HTTPException(status_code=404, detail="文件夹内没有可下载的文档资料")
+    total_bytes = 0
+    entries: list[tuple[Path, str]] = []
+    used_names: set[str] = set()
+    for row in rows:
+        try:
+            path = _storage.resolve_object(row["storage_rel_path"])
+            size = path.stat().st_size
+        except (FileNotFoundError, OSError, ValueError):
+            raise HTTPException(status_code=404, detail="部分资料文件不可用，请刷新后重试")
+        if not path.is_file() or path.is_symlink():
+            raise HTTPException(status_code=404, detail="部分资料文件不可用，请刷新后重试")
+        total_bytes += size
+        if total_bytes > _MAX_BULK_DOWNLOAD_BYTES:
+            raise HTTPException(status_code=413, detail="批量下载文件总量不能超过 1 GiB")
+        folder_parts = [
+            _safe_bulk_archive_name(part, set())
+            for part in str(row["relative_path"]).split("/")
+            if part
+        ]
+        filename = _safe_bulk_archive_name(row["original_filename"], used_names)
+        entries.append((path, "/".join([*folder_parts, filename])))
+    return root_name, entries
+
+
 @router.post("/bulk-download")
 def bulk_download_content(
     body: BulkDownloadManagedContentRequest,
@@ -2491,6 +2561,26 @@ def bulk_download_content(
         archive_path,
         media_type="application/zip",
         filename=f"资料批量下载-{time.strftime('%Y%m%d-%H%M%S')}.zip",
+        background=BackgroundTask(archive_path.unlink, missing_ok=True),
+    )
+
+
+@router.post("/categories/{category_id}/download")
+def download_category_content(
+    category_id: str,
+    _user: CurrentUser = Depends(require_content_permission("item.download", csrf=True)),
+    conn: sqlite3.Connection = Depends(get_db),
+):
+    _require_feature()
+    folder_name, entries = _resolve_category_download_entries(conn, category_id)
+    try:
+        archive_path = _create_bulk_download_archive(entries)
+    except OSError as exc:
+        raise HTTPException(status_code=404, detail="资料文件不可用，请刷新后重试") from exc
+    return FileResponse(
+        archive_path,
+        media_type="application/zip",
+        filename=f"{folder_name}-资料打包下载-{time.strftime('%Y%m%d-%H%M%S')}.zip",
         background=BackgroundTask(archive_path.unlink, missing_ok=True),
     )
 

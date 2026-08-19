@@ -370,7 +370,40 @@ def list_categories(conn: sqlite3.Connection, *, include_inactive: bool = False)
                               WHERE m.media_id=i.media_id AND m.status<>'archived'
                                 AND v.publication_status='published'
                             )
-                          )) AS item_count
+                          )) AS item_count,
+                   (SELECT count(*) FROM category_nodes child
+                    WHERE child.parent_id=p.id
+                      AND ({1 if include_inactive else 0}=1 OR child.is_active=1)) AS direct_child_count,
+                   (WITH RECURSIVE descendants(id) AS (
+                        SELECT child.id FROM category_nodes child
+                        WHERE child.parent_id=p.id
+                          AND ({1 if include_inactive else 0}=1 OR child.is_active=1)
+                        UNION ALL
+                        SELECT child.id FROM category_nodes child
+                        JOIN descendants d ON d.id=child.parent_id
+                        WHERE {1 if include_inactive else 0}=1 OR child.is_active=1
+                    )
+                    SELECT count(*) FROM descendants) AS total_child_count,
+                   (WITH RECURSIVE descendants(id) AS (
+                        SELECT p.id
+                        UNION ALL
+                        SELECT child.id FROM category_nodes child
+                        JOIN descendants d ON d.id=child.parent_id
+                        WHERE {1 if include_inactive else 0}=1 OR child.is_active=1
+                    )
+                    SELECT count(*) FROM content_items i
+                    WHERE i.category_id IN (SELECT id FROM descendants)
+                      AND i.archived_at IS NULL
+                      AND (
+                        i.content_kind='document' OR EXISTS (
+                          SELECT 1 FROM media_assets m
+                          JOIN media_transcript_heads h ON h.media_id=m.media_id
+                          JOIN transcript_versions v
+                            ON v.id=h.current_version_id AND v.media_id=m.media_id
+                          WHERE m.media_id=i.media_id AND m.status<>'archived'
+                            AND v.publication_status='published'
+                        )
+                      )) AS total_item_count
             FROM paths p {where}
             """
     ).fetchall()

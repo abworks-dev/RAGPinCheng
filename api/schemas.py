@@ -390,6 +390,9 @@ class ManagedCategoryDTO(BaseModel):
     updated_at: int
     full_path: str = ""
     item_count: int = 0
+    direct_child_count: int = 0
+    total_child_count: int = 0
+    total_item_count: int = 0
 
 
 class CreateManagedCategoryRequest(BaseModel):

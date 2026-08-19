@@ -55,6 +55,7 @@ export const adminContentApi = {
   preflightBulkRestore: (...args: Parameters<typeof api.preflightBulkRestoreManagedContent>) => api.preflightBulkRestoreManagedContent(...args),
   exportTrash: (...args: Parameters<typeof api.exportManagedContentTrash>) => api.exportManagedContentTrash(...args),
   bulkDownload: (...args: Parameters<typeof api.bulkDownloadManagedContent>) => api.bulkDownloadManagedContent(...args),
+  downloadCategory: (...args: Parameters<typeof api.downloadManagedCategory>) => api.downloadManagedCategory(...args),
   downloadFile: (...args: Parameters<typeof api.downloadManagedContentFile>) => api.downloadManagedContentFile(...args),
   downloadMedia: (...args: Parameters<typeof api.downloadManagedMedia>) => api.downloadManagedMedia(...args),
   createMediaMetadataRevision: (...args: Parameters<typeof api.createMediaMetadataRevision>) => api.createMediaMetadataRevision(...args),

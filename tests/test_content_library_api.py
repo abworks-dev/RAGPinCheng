@@ -376,6 +376,11 @@ def test_download_permission_separates_preview_attachment_and_batch_download(con
         json={"version_ids": [uploaded["version_id"]]},
         **_auth(sessions, "organizer", csrf=True),
     ).status_code == 403
+    assert client.post(
+        "/api/admin/content/categories/cat-03/download",
+        json={},
+        **_auth(sessions, "organizer", csrf=True),
+    ).status_code == 403
 
     conn = connect(db_path)
     conn.execute(
@@ -411,6 +416,17 @@ def test_download_permission_separates_preview_attachment_and_batch_download(con
         assert archive.namelist() == ["shared.pdf", "shared (2).pdf"]
         assert archive.read("shared.pdf") == b"pdf-one"
         assert archive.read("shared (2).pdf") == b"pdf-two"
+    assert captured and all(not path.exists() for path in captured)
+    folder_download = client.post(
+        "/api/admin/content/categories/cat-03/download",
+        json={},
+        **_auth(sessions, "organizer", csrf=True),
+    )
+    assert folder_download.status_code == 200
+    assert folder_download.headers["content-type"].startswith("application/zip")
+    with zipfile.ZipFile(io.BytesIO(folder_download.content)) as archive:
+        assert archive.read("03 公司内部标准/shared.pdf") == b"pdf-one"
+        assert archive.read("03 公司内部标准/notes.md") == b"# notes"
     assert captured and all(not path.exists() for path in captured)
 
     assert client.post(
