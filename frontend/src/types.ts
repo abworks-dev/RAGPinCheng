@@ -911,6 +911,11 @@ export type AsrServiceStatus = {
   pause_reason: string | null;
 };
 
+export type AsrReleaseValidation = {
+  status: "disabled" | "ready" | "unavailable";
+  reason_code: "asr_disabled" | "profile_identity_unavailable" | null;
+};
+
 export type AsrProfileReleaseRequest = {
   request_id: string;
   profile_id: string;
@@ -934,6 +939,7 @@ export type AsrProfileAuditEvent = {
 
 export type AsrSettings = {
   service: AsrServiceStatus;
+  release_validation: AsrReleaseValidation;
   profiles: AsrManagedProfile[];
   release_requests: AsrProfileReleaseRequest[];
   audit_events: AsrProfileAuditEvent[];

@@ -274,6 +274,10 @@ def test_http_auth_csrf_and_runtime_identity_boundaries(asr_api, monkeypatch):
         "queue_limit": 8,
         "pause_reason": None,
     }
+    assert payload["release_validation"] == {
+        "status": "ready",
+        "reason_code": None,
+    }
     assert len(payload["profiles"]) == 3
     assert all(item["release_eligible"] is True for item in payload["profiles"])
     assert "BIM-2026-0805" in payload["profiles"][0]["protected_terms"]
@@ -304,6 +308,105 @@ def test_http_auth_csrf_and_runtime_identity_boundaries(asr_api, monkeypatch):
     assert conn.execute("SELECT COUNT(*) FROM asr_profile_release_requests").fetchone()[0] == 0
     assert conn.execute("SELECT COUNT(*) FROM asr_profile_audit_events").fetchone()[0] == 0
     conn.close()
+
+
+def test_legacy_service_identity_failure_does_not_hide_healthy_transcription(
+    asr_api, monkeypatch
+):
+    client, _ = asr_api
+    capabilities, diagnostics, _ = _runtime_state()
+    monkeypatch.setattr(
+        routes_admin_asr,
+        "_runtime_state",
+        lambda: (capabilities, diagnostics, None),
+    )
+
+    response = client.get("/api/admin/asr", **_auth("admin"))
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["service"]["status"] == "healthy"
+    assert payload["release_validation"] == {
+        "status": "unavailable",
+        "reason_code": "profile_identity_unavailable",
+    }
+    assert all(item["release_eligible"] is False for item in payload["profiles"])
+
+
+def test_missing_diagnostics_degrades_but_missing_capabilities_is_unavailable(
+    asr_api, monkeypatch
+):
+    client, _ = asr_api
+    capabilities, diagnostics, identities = _runtime_state()
+    monkeypatch.setattr(
+        routes_admin_asr,
+        "_runtime_state",
+        lambda: (capabilities, None, identities),
+    )
+    degraded = client.get("/api/admin/asr", **_auth("admin")).json()
+    assert degraded["service"]["status"] == "degraded"
+    assert degraded["release_validation"]["status"] == "ready"
+
+    monkeypatch.setattr(
+        routes_admin_asr,
+        "_runtime_state",
+        lambda: (None, diagnostics, identities),
+    )
+    unavailable = client.get("/api/admin/asr", **_auth("admin")).json()
+    assert unavailable["service"]["status"] == "unavailable"
+
+
+def test_unadvertised_unavailable_engine_does_not_degrade_service(asr_api, monkeypatch):
+    client, _ = asr_api
+    capabilities, diagnostics, identities = _runtime_state()
+    diagnostics = {
+        **diagnostics,
+        "profiles": [
+            *diagnostics["profiles"],
+            {
+                "service_profile_id": "qwen3-asr-06b-aligner-v1",
+                "available": False,
+                "unavailable_reason_code": "model_cache_missing",
+            },
+        ],
+    }
+    monkeypatch.setattr(
+        routes_admin_asr,
+        "_runtime_state",
+        lambda: (capabilities, diagnostics, identities),
+    )
+
+    payload = client.get("/api/admin/asr", **_auth("admin")).json()
+    assert payload["service"]["status"] == "healthy"
+
+
+def test_runtime_state_preserves_successful_calls_when_identity_endpoint_fails(
+    monkeypatch,
+):
+    capabilities, diagnostics, _ = _runtime_state()
+
+    class LegacyFactory:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def capabilities(self):
+            return capabilities
+
+        def diagnostics(self):
+            return diagnostics
+
+        def profile_identities(self):
+            raise RuntimeError("legacy endpoint missing")
+
+    monkeypatch.setattr(routes_admin_asr, "ASR_ENABLED", True)
+    monkeypatch.setattr(routes_admin_asr, "ASR_SERVICE_TOKEN", "configured")
+    monkeypatch.setattr(routes_admin_asr, "RemoteAsrProviderFactory", LegacyFactory)
+
+    actual_capabilities, actual_diagnostics, actual_identities = (
+        routes_admin_asr._runtime_state()
+    )
+    assert actual_capabilities is capabilities
+    assert actual_diagnostics is diagnostics
+    assert actual_identities is None
 
 
 def test_release_request_is_transactional_idempotent_and_replays_snapshot(asr_api, monkeypatch):
