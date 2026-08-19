@@ -1073,6 +1073,10 @@ class MediaAssetDTO(BaseModel):
     category_path: str | None = None
     catalog_item_id: str | None = None
     current_version_id: str | None = None
+    storage_kind: Literal["managed", "external"] = "managed"
+    external_source_id: str | None = None
+    external_relative_path: str | None = None
+    external_availability: Literal["available", "missing", "superseded"] | None = None
 
 
 class MediaUploadPreflightItem(BaseModel):
@@ -1111,6 +1115,103 @@ class MediaUploadPreflightEntryDTO(BaseModel):
 class MediaUploadPreflightResponse(BaseModel):
     category_id: str
     entries: list[MediaUploadPreflightEntryDTO]
+
+
+class ExternalMediaRootDTO(BaseModel):
+    alias: str
+
+
+class ExternalMediaSourceCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=100)
+    root_alias: str = Field(min_length=1, max_length=64)
+    relative_path: str = Field(default="", max_length=1000)
+    target_category_id: str = Field(min_length=1, max_length=100)
+    default_scheme_id: str = Field(min_length=1, max_length=100)
+    auto_enqueue: bool = False
+    scan_interval_seconds: int = Field(default=900, ge=60, le=86400)
+
+
+class ExternalMediaSourceUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=100)
+    target_category_id: str = Field(min_length=1, max_length=100)
+    default_scheme_id: str = Field(min_length=1, max_length=100)
+    auto_enqueue: bool
+    scan_interval_seconds: int = Field(ge=60, le=86400)
+    enabled: bool
+    expected_version: int = Field(gt=0)
+
+
+class ExternalMediaSourceDTO(BaseModel):
+    id: str
+    name: str
+    root_alias: str
+    relative_path: str
+    target_category_id: str
+    default_scheme_id: str
+    auto_enqueue: bool
+    scan_interval_seconds: int
+    enabled: bool
+    status: Literal["never_scanned", "scanning", "available", "unavailable", "scan_failed"]
+    total_files: int
+    available_files: int
+    missing_files: int
+    last_scan_at: int | None
+    last_successful_scan_at: int | None
+    last_error_code: str | None
+    created_at: int
+    updated_at: int
+    version: int
+
+
+class ExternalMediaScanDTO(BaseModel):
+    run_id: str
+    source_id: str
+    discovered_count: int
+    added_count: int
+    changed_count: int
+    missing_count: int
+    enqueued_count: int = 0
+    enqueue_failures: int = 0
+
+
+class ExternalMediaEntryDTO(BaseModel):
+    id: str
+    kind: Literal["folder", "video"]
+    name: str
+    relative_path: str
+    file_size: int | None = None
+    modified_ns: int | None = None
+    availability: Literal["available", "missing", "superseded"] | None = None
+    media_id: str | None = None
+    media_status: str | None = None
+    transcription_job_id: str | None = None
+    transcription_job_status: str | None = None
+    review_status: str | None = None
+    publication_status: str | None = None
+    index_status: str | None = None
+
+
+class ExternalMediaEntryListDTO(BaseModel):
+    source_id: str
+    parent_relative_path: str
+    entries: list[ExternalMediaEntryDTO]
+
+
+class ExternalMediaEnqueueRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    entry_ids: list[str] | None = Field(default=None, max_length=500)
+
+
+class ExternalMediaEnqueueResult(BaseModel):
+    requested: int
+    enqueued: int
+    failed: int
+    failures: dict[str, str]
 
 
 class MediaTranscriptSegmentDTO(BaseModel):

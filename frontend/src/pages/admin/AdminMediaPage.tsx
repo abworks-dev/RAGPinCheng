@@ -16,6 +16,7 @@ import { Checkbox } from "../../components/ui/checkbox";
 import { TranscriptionWorkbenchSheet } from "../../components/TranscriptionWorkbenchSheet";
 import { ManagedSummaryCard } from "../../components/admin/ManagedSummaryCard";
 import { CategoryTreePicker } from "../../components/admin/CategoryTreePicker";
+import { ExternalMediaSourcesPanel } from "../../components/admin/ExternalMediaSourcesPanel";
 import { useTranscriptionJobs } from "../../hooks/useTranscriptionJobs";
 import { useAdminMediaAssets } from "../../hooks/useAdminMediaAssets";
 import { createRequestId } from "../../lib/request-id";
@@ -929,6 +930,8 @@ export function AdminMediaPage() {
       )}
 
       {uploadError && <Alert variant="destructive" role="alert"><AlertTitle>操作失败</AlertTitle><AlertDescription>{uploadError}</AlertDescription></Alert>}
+
+      <ExternalMediaSourcesPanel categories={categories} schemes={schemes} onOpenWorkbench={openWorkbench} onMediaChanged={refreshMediaState} />
 
       <section className="space-y-5" aria-labelledby="media-assets-title">
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5" aria-label="媒体快捷筛选">

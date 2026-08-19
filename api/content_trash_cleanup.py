@@ -191,7 +191,7 @@ def _media_snapshot(conn: sqlite3.Connection, item_id: str) -> dict[str, Any] | 
     media_ids = _media_lineage_ids(conn, item_id, str(row["media_id"]))
     placeholders = ",".join("?" for _ in media_ids)
     media_rows = conn.execute(
-        f"SELECT media_id,file_size,storage_rel_path,transcript_source_path FROM media_assets WHERE media_id IN ({placeholders})",
+        f"SELECT media_id,file_size,storage_rel_path,transcript_source_path,storage_kind FROM media_assets WHERE media_id IN ({placeholders})",
         media_ids,
     ).fetchall()
     version_rows = conn.execute(
@@ -262,6 +262,7 @@ def _media_snapshot(conn: sqlite3.Connection, item_id: str) -> dict[str, Any] | 
         "transcript_version_count": len(version_rows),
         "artifact_count": len(artifact_paths),
         "index_job_count": index_job_count,
+        "has_external_media": any(media["storage_kind"] == "external" for media in media_rows),
         "unsafe_path": unsafe_path,
     })
     return result
@@ -293,6 +294,8 @@ def preflight_purge(
             status, reason = "blocked", "资料尚未超过保留期限"
         elif row["content_kind"] == "media_transcript" and row["unsafe_path"]:
             status, reason = "blocked", "视频或转录产物存储路径异常"
+        elif row["content_kind"] == "media_transcript" and row.get("has_external_media"):
+            status, reason = "blocked", "共享目录视频为只读外部资料，不能永久删除"
         elif row["content_kind"] == "media_transcript" and conn.execute(
             f"SELECT 1 FROM transcription_jobs WHERE media_id IN ({','.join('?' for _ in row['media_ids'])}) AND status IN ({','.join('?' for _ in _ACTIVE_TRANSCRIPTION_STATES)}) LIMIT 1",
             (*row["media_ids"], *_ACTIVE_TRANSCRIPTION_STATES),

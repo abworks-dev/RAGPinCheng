@@ -286,6 +286,7 @@ candidate manifest 和 promotion workflow evidence 为准，不能把代码就�
 
 - 依赖文档索引、检索、回答生成、引用与来源面板；
 - 依赖认证（`require_user`）和可配置媒体存储；代码默认仍使用 `media/` 兼容目录，T12-B 受控切换目标为 `CONTENT_ROOT/media`；旧媒体记录归档后从管理列表隐藏，历史 transcript version 和任务继续保留审计；
+- 可选的只读外部媒体源通过服务端根别名和相对路径解析原视频；ASR 仍只接收应用在本地媒体目录准备的音频，Provider、Canonical、Profile admission、审核、发布和索引契约不变；
 - 依赖 `media_assets` 表（`app.sqlite`）和 `media_id` 列迁移。
 
 ## 不变量与安全边界
