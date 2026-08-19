@@ -1,0 +1,81 @@
+name: Retire ASR Activation Only
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_id:
+        required: true
+        type: string
+      activation_id:
+        required: true
+        type: string
+      operation:
+        required: true
+        default: preview
+        type: choice
+        options: [preview, apply]
+      preview_run_id:
+        required: false
+        type: string
+      manifest_sha256:
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-gpu-exclusive
+  cancel-in-progress: false
+
+jobs:
+  retire:
+    runs-on: [self-hosted, windows, production, gpu]
+    environment: production-asr
+    timeout-minutes: 30
+    env:
+      DATA_ROOT: ${{ vars.PRODUCTION_ASR_DATA_ROOT }}
+      PROGRAM_ROOT: ${{ vars.PRODUCTION_ASR_PROGRAM_ROOT }}
+      BACKUP_ROOT: ${{ vars.PRODUCTION_ASR_BACKUP_ROOT }}
+      CANDIDATE_ID: ${{ inputs.candidate_id }}
+      ACTIVATION_ID: ${{ inputs.activation_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate exact activation-only target
+        shell: powershell
+        run: |
+          if ($env:CANDIDATE_ID -ne '31879196389' -or $env:ACTIVATION_ID -ne '31879926958') { throw 'Target outside approved activation-only boundary' }
+          if ('${{ inputs.operation }}' -eq 'apply' -and ('${{ inputs.preview_run_id }}' -notmatch '^[0-9]{1,20}$' -or '${{ inputs.manifest_sha256 }}' -notmatch '^[0-9a-fA-F]{64}$')) { throw 'apply requires preview_run_id and manifest_sha256' }
+      - if: ${{ inputs.operation == 'apply' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: asr-activation-only-${{ inputs.preview_run_id }}
+          path: ${{ runner.temp }}/asr-activation-only
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.preview_run_id }}
+      - name: Preview or apply activation-only retirement
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $env:RUNNER_TEMP 'asr-activation-only'; New-Item -ItemType Directory -Force $root | Out-Null
+          $activation = Join-Path $env:BACKUP_ROOT $env:ACTIVATION_ID
+          $statePath = Join-Path $activation 'candidate-activation-state.json'
+          $active = Get-Content (Join-Path $env:DATA_ROOT 'release-state\active.json') -Raw | ConvertFrom-Json
+          if ([string]$active.candidate_id -eq $env:CANDIDATE_ID) { throw 'Target candidate is active' }
+          if (Test-Path (Join-Path $env:DATA_ROOT "dependency-runs\candidate-$($env:CANDIDATE_ID)")) { throw 'Candidate directory unexpectedly exists' }
+          if (-not (Test-Path $statePath)) { throw 'Activation state is missing' }
+          $state = Get-Content $statePath -Raw | ConvertFrom-Json
+          if ([string]$state.status -ne 'rolled-back' -or ([string]$state.candidate_id -ne $env:CANDIDATE_ID -and [string]$state.previous_candidate_id -ne $env:CANDIDATE_ID)) { throw 'Activation state is not an exact rolled-back reference' }
+          $files = @(Get-ChildItem $activation -Recurse -File | ForEach-Object { [ordered]@{ path=$_.FullName.Substring($activation.Length).TrimStart('\'); sha256=(Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(); bytes=$_.Length } })
+          $manifest = [ordered]@{ schema_version='asr-activation-only-retirement/1'; candidate_id=$env:CANDIDATE_ID; activation_id=$env:ACTIVATION_ID; active_candidate_id=[string]$active.candidate_id; activation_state_sha256=(Get-FileHash $statePath -Algorithm SHA256).Hash.ToLowerInvariant(); files=$files }
+          $manifestPath = Join-Path $root 'manifest.json'; $manifest | ConvertTo-Json -Depth 10 | Set-Content $manifestPath -Encoding utf8
+          if ('${{ inputs.operation }}' -eq 'preview') { (Get-FileHash $manifestPath -Algorithm SHA256).Hash.ToLowerInvariant() | Set-Content (Join-Path $root 'manifest.sha256') -Encoding ascii; return }
+          $expected='${{ inputs.manifest_sha256 }}'; $actual=(Get-FileHash (Join-Path $root 'manifest.json') -Algorithm SHA256).Hash.ToLowerInvariant(); if ($actual -ne $expected) { throw 'Manifest hash mismatch' }
+          $quarantine=Join-Path $env:BACKUP_ROOT ".retirement-quarantine-activation-$($env:ACTIVATION_ID)-${{ github.run_id }}"; Move-Item $activation $quarantine
+          try { if (Test-Path $statePath) { throw 'Activation state remained after quarantine' }; Remove-Item $quarantine -Recurse -Force } catch { if ((Test-Path $quarantine) -and -not (Test-Path $activation)) { Move-Item $quarantine $activation }; throw }
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: asr-activation-only-${{ github.run_id }}
+          path: ${{ runner.temp }}/asr-activation-only
+          if-no-files-found: warn
