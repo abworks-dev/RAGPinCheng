@@ -1280,6 +1280,7 @@ MIGRATIONS = (
             "CREATE INDEX IF NOT EXISTS idx_content_bulk_categories_run_sort ON content_bulk_operation_categories(run_id,sort_order)",
         ),
     ),
+    Migration(31, "legacy_office_managed_content", ("RELAX_CONTENT_VERSION_DOC_TYPE_LEGACY_OFFICE",)),
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 PHASE2_TABLES = frozenset(
@@ -1427,6 +1428,27 @@ def split_sql_statements(script: str) -> tuple[str, ...]:
 
 
 def execute_migration_statement(conn: sqlite3.Connection, statement: str) -> None:
+    if statement == "RELAX_CONTENT_VERSION_DOC_TYPE_LEGACY_OFFICE":
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='content_versions'"
+        ).fetchone()
+        if row is None or not row[0]:
+            raise RuntimeError("migration_schema_mismatch")
+        old = "'pdf','markdown','docx','xlsx','pptx','xmind','transcript'"
+        new = "'pdf','markdown','doc','docx','xls','xlsx','ppt','pptx','xmind','transcript'"
+        if new in row[0]:
+            return
+        if old not in row[0]:
+            raise RuntimeError("migration_schema_mismatch")
+        conn.execute("PRAGMA writable_schema=ON")
+        try:
+            conn.execute(
+                "UPDATE sqlite_master SET sql=? WHERE type='table' AND name='content_versions'",
+                (row[0].replace(old, new),),
+            )
+        finally:
+            conn.execute("PRAGMA writable_schema=RESET")
+        return
     if statement == "RELAX_CONTENT_VERSION_DOC_TYPE_XMIND":
         row = conn.execute(
             "SELECT sql FROM sqlite_master WHERE type='table' AND name='content_versions'"

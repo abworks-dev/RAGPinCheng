@@ -6,7 +6,7 @@ export type Source = {
   score: number;
   rrf_score: number;
   text: string;
-  doc_type: string; // "pdf" | "transcript" | "docx" | "xlsx" | "pptx"
+  doc_type: string; // "pdf" | "transcript" | "doc" | "docx" | "xls" | "xlsx" | "ppt" | "pptx"
   start_time: string | null;
   media_id: string | null;
   company?: string | null;

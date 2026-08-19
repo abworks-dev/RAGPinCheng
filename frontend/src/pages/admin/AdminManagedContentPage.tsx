@@ -935,6 +935,11 @@ export function AdminManagedContentPage() {
   const [folderActionError, setFolderActionError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const updateFileInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    const accept = ".pdf,.md,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.xmind";
+    if (fileInputRef.current) fileInputRef.current.accept = accept;
+    if (updateFileInputRef.current) updateFileInputRef.current.accept = accept;
+  });
   const folderInputRef = useRef<HTMLInputElement>(null);
   const listDragDepthRef = useRef(0);
 
@@ -1227,7 +1232,7 @@ export function AdminManagedContentPage() {
   };
 
   const prepareFileDrop = (incoming: File[]) => {
-    const supported = incoming.filter((file) => /\.(pdf|md|docx|xlsx|pptx|xmind)$/i.test(file.name));
+    const supported = incoming.filter((file) => /\.(pdf|md|doc|docx|xls|xlsx|ppt|pptx|xmind)$/i.test(file.name));
     setListDropActive(false);
     if (!supported.length || !currentFolderId) {
       if (incoming.length) toast.error("没有可上传的支持格式，仅支持 PDF、Markdown、Word、Excel、PPT 和 XMind 文件");
@@ -1632,7 +1637,7 @@ export function AdminManagedContentPage() {
   };
 
   const acceptFiles = (incoming: File[]) => {
-    const supported = incoming.filter((file) => /\.(pdf|md|docx|xlsx|pptx|xmind)$/i.test(file.name));
+    const supported = incoming.filter((file) => /\.(pdf|md|doc|docx|xls|xlsx|ppt|pptx|xmind)$/i.test(file.name));
     const oversized = supported.filter((file) => file.size > uploadLimits.maxFileBytes);
     setFiles(supported.filter((file) => file.size <= uploadLimits.maxFileBytes));
     if (supported.length !== incoming.length) toast.error("已忽略不支持的文件格式");
@@ -2292,7 +2297,7 @@ export function AdminManagedContentPage() {
     const disabled = Boolean(busyAction) || refreshing || !enabled;
     const isMediaTranscript = item.content_kind === "media_transcript";
     const reclassifying = ACTIVE_RECLASSIFICATION_STATUSES.has(item.reclassification_status || "");
-    const previewable = item.doc_type === "xmind" || Boolean(item.preview_parent_id && ["pdf", "docx", "xlsx", "pptx"].includes(item.doc_type));
+    const previewable = item.doc_type === "xmind" || Boolean(item.preview_parent_id && ["pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx"].includes(item.doc_type));
     const movable = canMoveItem(item);
     const downloadable = can("item.download");
     const revisionAllowed = !isMediaTranscript && can("item.upload") && item.lifecycle_status !== "publishing" && !reclassifying;

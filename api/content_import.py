@@ -20,8 +20,11 @@ SUPPORTED_TYPES = {
     ".pdf": "pdf",
     ".md": "markdown",
     ".docx": "docx",
+    ".doc": "doc",
     ".xlsx": "xlsx",
+    ".xls": "xls",
     ".pptx": "pptx",
+    ".ppt": "ppt",
     ".xmind": "xmind",
 }
 
