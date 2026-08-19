@@ -81,6 +81,7 @@ export function useChat({
             id: m.id != null ? String(m.id) : newId(),
             role: m.role,
             content: m.content,
+            createdAt: m.created_at,
             sources: m.sources_for_ui || undefined,
             query: m.role === "assistant" ? lastUserContent : undefined,
             stage: "done",
@@ -136,12 +137,14 @@ export function useChat({
       const ctrl = new AbortController();
       abortRef.current = ctrl;
 
-      const userMsg: ChatMessage = { id: newId(), role: "user", content: trimmed };
+      const createdAt = Math.floor(Date.now() / 1000);
+      const userMsg: ChatMessage = { id: newId(), role: "user", content: trimmed, createdAt };
       const assistantId = newId();
       const assistantMsg: ChatMessage = {
         id: assistantId,
         role: "assistant",
         content: "",
+        createdAt,
         query: trimmed,
         streaming: true,
         stage: "retrieving",
@@ -259,6 +262,7 @@ export function useChat({
                 content: "",
                 sources: undefined,
                 error: undefined,
+                regenerationStopped: undefined,
                 streaming: true,
                 stage: "retrieving",
               }
@@ -338,11 +342,18 @@ export function useChat({
           }
         }
       } catch (e: any) {
-        const message = e?.name === "AbortError" ? "重新生成已中止" : e?.message || String(e);
+        const aborted = e?.name === "AbortError";
+        const message = e?.message || String(e);
         setMessages((prev) =>
           prev.map((item) =>
             item.id === assistantMessageId
-              ? { ...snapshot, error: message, streaming: false, stage: "done" }
+              ? {
+                  ...snapshot,
+                  error: aborted ? undefined : message,
+                  regenerationStopped: aborted || undefined,
+                  streaming: false,
+                  stage: "done",
+                }
               : item,
           ),
         );

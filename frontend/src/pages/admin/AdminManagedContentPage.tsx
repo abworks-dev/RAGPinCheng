@@ -100,6 +100,16 @@ function formatMediaDuration(milliseconds: number | null | undefined) {
   return [hours, minutes, seconds].map((value) => String(value).padStart(2, "0")).join(":");
 }
 
+function folderContentSummary(folder: ManagedCategory) {
+  const directChildCount = folder.direct_child_count ?? 0;
+  const totalChildCount = folder.total_child_count ?? directChildCount;
+  const totalItemCount = folder.total_item_count ?? folder.item_count;
+  const childLabel = directChildCount > 0 ? ` · ${directChildCount} 个直接子文件夹` : "";
+  const nestedLabel = totalChildCount > directChildCount ? ` · 共 ${totalChildCount} 个子文件夹` : "";
+  const totalLabel = totalItemCount !== folder.item_count ? ` · 共 ${totalItemCount} 份资料` : "";
+  return `${folder.item_count} 份直接资料${childLabel}${nestedLabel}${totalLabel}`;
+}
+
 type ActiveUploadState = {
   batchId: string | null;
   uploadMode: "files" | "folder";
@@ -912,6 +922,7 @@ export function AdminManagedContentPage() {
   const [folderNumberTarget, setFolderNumberTarget] = useState<ManagedCategory | null>(null);
   const [folderNumberValue, setFolderNumberValue] = useState("");
   const [folderNumberConfirming, setFolderNumberConfirming] = useState(false);
+  const [folderDetailTarget, setFolderDetailTarget] = useState<ManagedCategory | null>(null);
   const [folderMoveTarget, setFolderMoveTarget] = useState<ManagedCategory | null>(null);
   const [folderDeleteTarget, setFolderDeleteTarget] = useState<ManagedCategory | null>(null);
   const [folderMoveParentId, setFolderMoveParentId] = useState("");
@@ -1882,6 +1893,27 @@ export function AdminManagedContentPage() {
     }
   };
 
+  const downloadFolder = async (folder: ManagedCategory) => {
+    if (!can("item.download")) return;
+    const folderLabel = `${folder.display_code} ${folder.display_name}`;
+    const totalCount = folder.total_item_count ?? folder.item_count;
+    setBusyAction(`folder:${folder.id}:download`);
+    toast.info(`正在打包 ${totalCount} 份资料，请稍候…`, {
+      id: BULK_DOWNLOAD_TOAST_ID,
+      description: "文件较多时可能需要几秒。",
+      duration: Infinity,
+    });
+    try {
+      const result = await adminContentApi.downloadCategory(folder.id, `${folderLabel}-资料打包下载.zip`);
+      triggerManagedDownload(result.blob, result.filename);
+      toast.success(`已打包“${folderLabel}”并开始下载`, { id: BULK_DOWNLOAD_TOAST_ID, duration: 4000 });
+    } catch (downloadError) {
+      toast.error(downloadError instanceof Error ? downloadError.message : "文件夹打包下载失败", { id: BULK_DOWNLOAD_TOAST_ID, duration: 5000 });
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
   const openRestore = (target: ManagedContentItem) => {
     setRestoreTarget(target);
     setRestoreFolderId(categories.some((category) => category.id === target.category_id) ? target.category_id : "");
@@ -2336,6 +2368,7 @@ export function AdminManagedContentPage() {
   const renderFolderActions = (folder: ManagedCategory) => {
     const folderLabel = `${folder.display_code} ${folder.display_name}`;
     const disabled = Boolean(busyAction) || refreshing || !enabled;
+    const folderDownloading = busyAction === `folder:${folder.id}:download`;
     const unavailableReason = busyAction
       ? "正在处理其他操作，请稍候"
       : refreshing
@@ -2343,13 +2376,21 @@ export function AdminManagedContentPage() {
         : !enabled
           ? "资料管理功能当前不可用"
           : null;
+    const downloadTooltip = unavailableReason
+      || (!can("item.download")
+        ? "当前账号没有下载资料的权限"
+        : (folder.total_item_count ?? folder.item_count) < 1
+          ? "文件夹内没有可下载的资料"
+          : "打包下载整个文件夹");
     return <div className="ml-auto flex min-h-10 shrink-0 items-center justify-end gap-1" onClick={(event) => event.stopPropagation()}>
+      <IconButton label={`查看文件夹“${folderLabel}”的详细信息`} tooltip={unavailableReason || "查看文件夹详情"} className="border border-border max-sm:size-10" disabled={disabled} onClick={() => setFolderDetailTarget(folder)}><Info className="size-4" /></IconButton>
       {can("category.manage") && <>
         <IconButton label={`调整文件夹“${folderLabel}”的编号`} tooltip={unavailableReason || "调整文件夹编号"} className="border border-border max-sm:size-10" disabled={disabled} onClick={() => openFolderNumber(folder)}><ListOrdered className="size-4" /></IconButton>
         <IconButton label={`移动文件夹“${folderLabel}”`} tooltip={unavailableReason || "移动文件夹位置"} className="border border-border max-sm:size-10" disabled={disabled} onClick={() => openFolderMove(folder)}><FolderInput className="size-4" /></IconButton>
         <IconButton label={`重命名文件夹“${folderLabel}”`} tooltip={unavailableReason || "重命名文件夹"} className="border border-border max-sm:size-10" disabled={disabled} onClick={() => openFolderRename(folder)}><Pencil className="size-4" /></IconButton>
         <IconButton label={`删除文件夹“${folderLabel}”`} tooltip={unavailableReason || "删除文件夹"} className="border border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive max-sm:size-10" disabled={disabled} onClick={() => setFolderDeleteTarget(folder)}><Trash2 className="size-4" /></IconButton>
       </>}
+      <IconButton label={`打包下载文件夹“${folderLabel}”`} tooltip={downloadTooltip} className="border border-border max-sm:size-10" disabled={disabled || !can("item.download") || (folder.total_item_count ?? folder.item_count) < 1 || folderDownloading} onClick={() => void downloadFolder(folder)}><Download className={folderDownloading ? "size-4 animate-pulse" : "size-4"} /></IconButton>
       <IconButton label={`打开文件夹“${folderLabel}”`} tooltip={unavailableReason || "打开文件夹"} className="border border-border max-sm:size-10" disabled={disabled} onClick={() => setCurrentFolderId(folder.id)}><ChevronRight className="size-4" /></IconButton>
     </div>;
   };
@@ -2532,17 +2573,45 @@ export function AdminManagedContentPage() {
         <div className="hidden overflow-x-auto border-t border-border lg:block"><table className="w-full min-w-[72rem] text-ui-sm"><thead className="border-b border-border bg-surface-muted text-left text-muted-foreground"><tr><th className="w-8 px-1.5 py-3"><Checkbox aria-label="选择当前页前20份资料" checked={allSelected} onChange={toggleAll} /></th>{([ ["docType", "类型"], ["title", "资料"], ["updatedAt", "更新时间"], ["status", "状态"], ["source", "来源"] ] as [SortKey, string][]).map(([key, label]) => <th key={key} aria-sort={sort?.key === key ? sort.direction === "asc" ? "ascending" : "descending" : "none"} className={key === "docType" ? "w-16 px-1 py-3 text-center font-medium" : key === "title" ? "px-1.5 py-3 font-medium" : "px-3 py-3 font-medium"}><button type="button" className="inline-flex items-center gap-1 rounded px-1 py-0.5 hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => toggleSort(key)}>{label}{sortIcon(key)}</button></th>)}<th className="px-3 py-3 text-right font-medium">操作</th></tr></thead><tbody className="divide-y divide-border">
           {sortedChildFolders.map((folder) => {
             const folderLabel = `${folder.display_code} ${folder.display_name}`;
-            return <tr key={folder.id} data-testid={`managed-folder-row-${folder.id}`} className={`cursor-pointer transition-colors duration-normal hover:bg-surface-muted/60 ${draggedItem ? "bg-primary/5 outline outline-1 -outline-offset-1 outline-primary/50" : ""}`} onClick={() => setCurrentFolderId(folder.id)} onDragOver={(event) => { if (draggedItem) { event.preventDefault(); event.stopPropagation(); } }} onDrop={(event) => { if (!draggedItem) return; event.preventDefault(); event.stopPropagation(); void moveItemTo(draggedItem, folder.id); }}><td className="px-1.5 py-3" /><td className="px-1 py-3"><ManagedItemType folder compact /></td><td className="max-w-xs px-1.5 py-3"><button type="button" className="block max-w-full rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setCurrentFolderId(folder.id)}><span className="block break-words font-medium">{folderLabel}</span><span className="mt-0.5 block text-ui-xs text-muted-foreground">{folder.item_count} 份直接资料</span></button></td><td className="whitespace-nowrap px-3 py-3 tabular-nums">{formatManagedUpdatedAt(folder.updated_at)}</td><td className="px-3 py-3 text-muted-foreground">—</td><td className="px-3 py-3 text-muted-foreground">—</td><td className="px-3 py-3 text-right">{renderFolderActions(folder)}</td></tr>;
+            return <tr key={folder.id} data-testid={`managed-folder-row-${folder.id}`} className={`cursor-pointer transition-colors duration-normal hover:bg-surface-muted/60 ${draggedItem ? "bg-primary/5 outline outline-1 -outline-offset-1 outline-primary/50" : ""}`} onClick={() => setCurrentFolderId(folder.id)} onDragOver={(event) => { if (draggedItem) { event.preventDefault(); event.stopPropagation(); } }} onDrop={(event) => { if (!draggedItem) return; event.preventDefault(); event.stopPropagation(); void moveItemTo(draggedItem, folder.id); }}><td className="px-1.5 py-3" /><td className="px-1 py-3"><ManagedItemType folder compact /></td><td className="max-w-xs px-1.5 py-3"><button type="button" className="block max-w-full rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setCurrentFolderId(folder.id)}><span className="block break-words font-medium">{folderLabel}</span><span className="mt-0.5 block text-ui-xs text-muted-foreground">{folderContentSummary(folder)}</span></button></td><td className="whitespace-nowrap px-3 py-3 tabular-nums">{formatManagedUpdatedAt(folder.updated_at)}</td><td className="px-3 py-3 text-muted-foreground">—</td><td className="px-3 py-3 text-muted-foreground">—</td><td className="px-3 py-3 text-right">{renderFolderActions(folder)}</td></tr>;
           })}
           {sortedItems.map((item, index) => { const movable = canMoveItem(item); const draggable = movable && moveOperation(item) !== "reclassify"; const rowSelectable = item.content_kind === "document" || movable; return <tr key={item.item_id} draggable={draggable} title={draggable ? "拖动到文件夹行可调整目录" : undefined} onDragStart={() => setDraggedItem(item)} onDragEnd={() => setDraggedItem(null)} className={`transition-colors duration-normal hover:bg-surface-muted/60 ${draggable ? "cursor-grab" : ""}`}><td className="px-1.5 py-3"><Checkbox aria-label={`选择${item.title}`} checked={selected.includes(item.version_id)} disabled={index >= BULK_LIMIT || !rowSelectable} title={!rowSelectable ? "视频转录稿需要发布权限才能批量调整归档目录" : undefined} onChange={() => setSelected((current) => current.includes(item.version_id) ? current.filter((id) => id !== item.version_id) : [...current, item.version_id].slice(0, BULK_LIMIT))} /></td><td className="px-1 py-3"><ManagedItemType docType={item.doc_type} compact /></td><td className="max-w-xs px-1.5 py-3"><ManagedItemIdentity item={item} /></td><td className="whitespace-nowrap px-3 py-3 tabular-nums">{formatManagedUpdatedAt(item.updated_at)}</td><td className="px-3 py-3">{renderItemStatus(item)}</td><td className="px-3 py-3">{sourceLabel[item.source_origin] || "其他来源"}</td><td className="px-3 py-3 text-right">{renderActions(item)}</td></tr>; })}</tbody></table></div>
         <ul className="divide-y divide-border border-t border-border lg:hidden">{sortedChildFolders.map((folder) => {
           const folderLabel = `${folder.display_code} ${folder.display_name}`;
-          return <li key={folder.id} data-testid={`managed-folder-mobile-${folder.id}`} className="min-h-16 space-y-2 px-4 py-3 sm:px-5"><button type="button" className="flex w-full min-w-0 items-center gap-3 rounded-ui-md text-left transition-colors hover:bg-surface-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setCurrentFolderId(folder.id)}><Folder className="size-5 shrink-0 text-primary" aria-hidden="true" /><span className="min-w-0 flex-1"><span className="block break-words font-medium">{folderLabel}</span><span className="mt-0.5 block text-ui-xs text-muted-foreground">{folder.item_count} 份直接资料</span></span></button>{renderFolderActions(folder)}</li>;
+          return <li key={folder.id} data-testid={`managed-folder-mobile-${folder.id}`} className="min-h-16 space-y-2 px-4 py-3 sm:px-5"><button type="button" className="flex w-full min-w-0 items-center gap-3 rounded-ui-md text-left transition-colors hover:bg-surface-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setCurrentFolderId(folder.id)}><Folder className="size-5 shrink-0 text-primary" aria-hidden="true" /><span className="min-w-0 flex-1"><span className="block break-words font-medium">{folderLabel}</span><span className="mt-0.5 block text-ui-xs text-muted-foreground">{folderContentSummary(folder)}</span></span></button>{renderFolderActions(folder)}</li>;
         })}{sortedItems.map((item, index) => { const rowSelectable = item.content_kind === "document" || canMoveItem(item); return <li key={item.item_id} className="space-y-3 px-4 py-4 sm:px-5"><div className="flex items-start gap-2"><Checkbox className="mt-0.5" aria-label={`选择${item.title}`} checked={selected.includes(item.version_id)} disabled={index >= BULK_LIMIT || !rowSelectable} title={!rowSelectable ? "视频转录稿需要发布权限才能批量调整归档目录" : undefined} onChange={() => setSelected((current) => current.includes(item.version_id) ? current.filter((id) => id !== item.version_id) : [...current, item.version_id].slice(0, BULK_LIMIT))} /><ManagedItemType docType={item.doc_type} /><div className="min-w-0 flex-1"><ManagedItemIdentity item={item} /></div></div><dl className="grid grid-cols-[4rem_minmax(0,1fr)] gap-x-2 gap-y-1 text-ui-sm"><dt className="text-muted-foreground">状态</dt><dd>{renderItemStatus(item)}</dd><dt className="text-muted-foreground">更新时间</dt><dd className="whitespace-nowrap tabular-nums">{formatManagedUpdatedAt(item.updated_at)}</dd><dt className="text-muted-foreground">来源</dt><dd>{sourceLabel[item.source_origin] || "其他来源"}</dd></dl>{renderActions(item)}</li>; })}</ul>
         <div className="flex flex-col gap-2 border-t border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5"><p className="text-ui-xs text-muted-foreground">共 {total} 份，第 {page + 1} / {pageCount} 页</p><div className="flex flex-wrap items-center justify-end gap-2"><label className="flex items-center gap-2 text-ui-xs text-muted-foreground">每页<Select aria-label="每页条数" className="h-control-sm w-20" value={String(pageSize)} onChange={(event) => setPageSize(Number(event.target.value))}>{PAGE_SIZE_OPTIONS.map((size) => <option key={size} value={size}>{size} 条</option>)}</Select></label><Button size="sm" variant="outline" disabled={page === 0 || loading} onClick={() => setPage((value) => value - 1)}>上一页</Button><Select aria-label="跳转页码" className="h-control-sm w-24" value={String(page + 1)} onChange={(event) => setPage(Number(event.target.value) - 1)} disabled={loading}>{Array.from({ length: pageCount }, (_, index) => <option key={index + 1} value={index + 1}>第 {index + 1} 页</option>)}</Select><Button size="sm" variant="outline" disabled={page + 1 >= pageCount || loading} onClick={() => setPage((value) => value + 1)}>下一页</Button></div></div>
       </>}
       </div>
     </Card>
+
+    <Dialog open={Boolean(folderDetailTarget)} onOpenChange={(open) => { if (!open) setFolderDetailTarget(null); }}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>{folderDetailTarget ? `${folderDetailTarget.display_code} ${folderDetailTarget.display_name}` : "文件夹详情"}</DialogTitle>
+          <DialogDescription>查看文件夹路径、编号、层级和目录内容统计。</DialogDescription>
+        </DialogHeader>
+        {folderDetailTarget && <div className="space-y-4">
+          <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-2 text-ui-sm [&_dt]:whitespace-nowrap">
+            <dt className="text-muted-foreground">完整路径</dt><dd className="break-words">{folderDetailTarget.full_path}</dd>
+            <dt className="text-muted-foreground">当前编号</dt><dd>{folderDetailTarget.display_code}</dd>
+            <dt className="text-muted-foreground">层级</dt><dd>第 {folderDetailTarget.level} 级</dd>
+            <dt className="text-muted-foreground">状态</dt><dd>{folderDetailTarget.is_active ? <Badge variant="success">启用</Badge> : <Badge variant="secondary">停用</Badge>}</dd>
+            <dt className="text-muted-foreground">直接资料</dt><dd>{folderDetailTarget.item_count} 份</dd>
+            <dt className="text-muted-foreground">直接子文件夹</dt><dd>{folderDetailTarget.direct_child_count ?? 0} 个</dd>
+            <dt className="text-muted-foreground">全部子文件夹</dt><dd>{folderDetailTarget.total_child_count ?? folderDetailTarget.direct_child_count ?? 0} 个</dd>
+            <dt className="text-muted-foreground">全部资料</dt><dd>{folderDetailTarget.total_item_count ?? folderDetailTarget.item_count} 份</dd>
+            <dt className="text-muted-foreground">创建时间</dt><dd>{formatAdminDate(folderDetailTarget.created_at)}</dd>
+            <dt className="text-muted-foreground">最后更新时间</dt><dd>{formatAdminDate(folderDetailTarget.updated_at)}</dd>
+          </dl>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" onClick={() => { setCurrentFolderId(folderDetailTarget.id); setFolderDetailTarget(null); }}><Folder className="size-4" />打开文件夹</Button>
+            <Button variant="outline" disabled={!can("item.download") || (folderDetailTarget.total_item_count ?? folderDetailTarget.item_count) < 1 || Boolean(busyAction)} onClick={() => void downloadFolder(folderDetailTarget)}><Download className="size-4" />打包下载</Button>
+            {can("category.manage") && <Button variant="outline" disabled={Boolean(busyAction)} onClick={() => { const target = folderDetailTarget; setFolderDetailTarget(null); openFolderNumber(target); }}><ListOrdered className="size-4" />调整编号</Button>}
+          </div>
+        </div>}
+      </DialogContent>
+    </Dialog>
 
     <Dialog open={Boolean(folderNumberTarget)} onOpenChange={(open) => {
       if (!open && !busyAction?.startsWith("folder:")) {

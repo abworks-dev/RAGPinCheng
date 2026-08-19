@@ -82,12 +82,14 @@ export type ChatMessage = {
   id: string;
   role: "user" | "assistant" | "system";
   content: string;
+  createdAt?: number;
   query?: string;
   sources?: Source[];
   prep?: PrepData;
   done?: DoneData;
   streaming?: boolean;
   stopped?: boolean;
+  regenerationStopped?: boolean;
   stage?: ChatStage;
   error?: string;
   answerVersions?: AnswerVersion[];
@@ -344,6 +346,9 @@ export type ManagedCategory = {
   updated_at: number;
   full_path: string;
   item_count: number;
+  direct_child_count?: number;
+  total_child_count?: number;
+  total_item_count?: number;
 };
 
 export type CategoryDeletePreview = {

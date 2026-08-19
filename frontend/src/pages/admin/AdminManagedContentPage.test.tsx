@@ -41,6 +41,7 @@ const mocks = vi.hoisted(() => ({
   preflightBulkRestore: vi.fn(),
   exportTrash: vi.fn(),
   bulkDownload: vi.fn(),
+  downloadCategory: vi.fn(),
   downloadFile: vi.fn(),
   downloadMedia: vi.fn(),
   createMediaMetadataRevision: vi.fn(),
@@ -131,6 +132,7 @@ vi.mock("../../api/client", () => ({
     preflightBulkRestoreManagedContent: mocks.preflightBulkRestore,
     exportManagedContentTrash: mocks.exportTrash,
     bulkDownloadManagedContent: mocks.bulkDownload,
+    downloadManagedCategory: mocks.downloadCategory,
     downloadManagedContentFile: mocks.downloadFile,
     downloadManagedMedia: mocks.downloadMedia,
     createMediaMetadataRevision: mocks.createMediaMetadataRevision,
@@ -166,6 +168,9 @@ const category = {
   updated_at: 1,
   full_path: "03 公司内部标准",
   item_count: 1,
+  direct_child_count: 1,
+  total_child_count: 1,
+  total_item_count: 1,
 };
 
 const childCategory = {
@@ -178,6 +183,9 @@ const childCategory = {
   level: 2,
   full_path: "03 公司内部标准 / 01 建模标准",
   item_count: 0,
+  direct_child_count: 0,
+  total_child_count: 0,
+  total_item_count: 0,
 };
 
 const projectCategory = {
@@ -189,6 +197,9 @@ const projectCategory = {
   sort_order: 40,
   full_path: "04 项目资料",
   item_count: 0,
+  direct_child_count: 0,
+  total_child_count: 0,
+  total_item_count: 0,
 };
 
 const item = {
@@ -292,6 +303,7 @@ describe("AdminManagedContentPage", () => {
     mocks.bulkReclassify.mockResolvedValue({ results: [], succeeded: 2, failed: 0 });
     window.history.replaceState({}, "", "/admin/content");
     mocks.bulkDownload.mockResolvedValue({ blob: new Blob(["zip"]), filename: "资料批量下载.zip" });
+    mocks.downloadCategory.mockResolvedValue({ blob: new Blob(["zip"]), filename: "03 公司内部标准-资料打包下载.zip" });
     mocks.downloadFile.mockResolvedValue({ blob: new Blob(["file"]), filename: "standard.pdf" });
     mocks.downloadMedia.mockResolvedValue({ blob: new Blob(["media"]), filename: "WhisperX 培训视频-视频资料.zip" });
     mocks.createMediaMetadataRevision.mockResolvedValue({});
@@ -577,7 +589,7 @@ describe("AdminManagedContentPage", () => {
   });
 
   it("integrates folders before files without adding them to selection or pagination", async () => {
-    const folder = { ...childCategory, display_code: "02", display_name: "模型目录", item_count: 3 };
+    const folder = { ...childCategory, display_code: "02", display_name: "模型目录", item_count: 3, direct_child_count: 2, total_child_count: 4, total_item_count: 8 };
     mocks.categories.mockResolvedValue([category, folder]);
     render(<AdminManagedContentPage />);
     await openRootFolder();
@@ -586,6 +598,7 @@ describe("AdminManagedContentPage", () => {
     expect(within(table).queryByRole("columnheader", { name: "顺序" })).not.toBeInTheDocument();
     const folderRow = within(table).getByTestId(`managed-folder-row-${folder.id}`);
     expect(within(folderRow).getByText("02 模型目录")).toBeInTheDocument();
+    expect(within(folderRow).getByText("3 份直接资料 · 2 个直接子文件夹 · 共 4 个子文件夹 · 共 8 份资料")).toBeInTheDocument();
     const fileRow = within(table).getByText("standard.pdf · v1").closest("tr");
     expect(folderRow.compareDocumentPosition(fileRow!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
     expect(within(folderRow).queryByRole("checkbox")).not.toBeInTheDocument();
@@ -596,7 +609,7 @@ describe("AdminManagedContentPage", () => {
 
     const mobileList = screen.getByTestId(`managed-folder-mobile-${folder.id}`).parentElement!;
     expect(mobileList.firstElementChild).toBe(screen.getByTestId(`managed-folder-mobile-${folder.id}`));
-    expect(within(screen.getByTestId(`managed-folder-mobile-${folder.id}`)).getAllByRole("button", { name: /02 模型目录/ })).toHaveLength(2);
+    expect(within(screen.getByTestId(`managed-folder-mobile-${folder.id}`)).getByText("02 模型目录")).toBeInTheDocument();
 
     fireEvent.focus(screen.getByRole("textbox", { name: "搜索资料" }));
     fireEvent.change(within(screen.getByRole("dialog", { name: "搜索筛选" })).getByRole("combobox", { name: "状态" }), { target: { value: "published" } });
@@ -615,21 +628,44 @@ describe("AdminManagedContentPage", () => {
     expect(screen.getByText("共 0 份，第 1 / 1 页")).toBeInTheDocument();
   });
 
-  it("keeps folder management actions before the rightmost open button", async () => {
-    mocks.permissions = CATEGORY_MANAGER_PERMISSIONS;
-    mocks.categories.mockResolvedValue([category, childCategory]);
+  it("shows folder detail and keeps the number action next to it", async () => {
+    mocks.permissions = [...CATEGORY_MANAGER_PERMISSIONS, "item.download"];
+    const detailedFolder = { ...childCategory, item_count: 2, direct_child_count: 1, total_child_count: 3, total_item_count: 9 };
+    mocks.categories.mockResolvedValue([category, detailedFolder]);
     render(<AdminManagedContentPage />);
     await openRootFolder();
 
-    const row = screen.getByTestId(`managed-folder-row-${childCategory.id}`);
+    const row = screen.getByTestId(`managed-folder-row-${detailedFolder.id}`);
     const labels = within(row).getAllByRole("button").map((button) => button.getAttribute("aria-label") || button.textContent);
-    expect(labels.slice(-5)).toEqual([
+    expect(labels.slice(-7)).toEqual([
+      expect.stringContaining("查看文件夹"),
       expect.stringContaining("调整文件夹"),
       expect.stringContaining("移动文件夹"),
       expect.stringContaining("重命名文件夹"),
       expect.stringContaining("删除文件夹"),
+      expect.stringContaining("打包下载文件夹"),
       expect.stringContaining("打开文件夹"),
     ]);
+
+    fireEvent.click(within(row).getByRole("button", { name: /查看文件夹/ }));
+    const dialog = await screen.findByRole("dialog", { name: "01 建模标准" });
+    expect(within(dialog).getByText("03 公司内部标准 / 01 建模标准")).toBeInTheDocument();
+    expect(within(dialog).getByText("9 份")).toBeInTheDocument();
+  });
+
+  it("downloads a whole folder with the bulk packaging toast", async () => {
+    mocks.permissions = [...CATEGORY_MANAGER_PERMISSIONS, "item.download"];
+    const downloadableFolder = { ...childCategory, total_item_count: 4 };
+    mocks.categories.mockResolvedValue([category, downloadableFolder]);
+    render(<AdminManagedContentPage />);
+    await openRootFolder();
+
+    const row = screen.getByTestId(`managed-folder-row-${downloadableFolder.id}`);
+    fireEvent.click(within(row).getByRole("button", { name: /打包下载文件夹/ }));
+
+    await waitFor(() => expect(mocks.downloadCategory).toHaveBeenCalledWith("cat-03-01", "01 建模标准-资料打包下载.zip"));
+    expect(mocks.info).toHaveBeenCalledWith("正在打包 4 份资料，请稍候…", expect.objectContaining({ id: "managed-content-bulk-download" }));
+    expect(mocks.success).toHaveBeenCalledWith("已打包“01 建模标准”并开始下载", expect.objectContaining({ id: "managed-content-bulk-download" }));
   });
 
   it("confirms an occupied folder number and shifts sibling numbers", async () => {

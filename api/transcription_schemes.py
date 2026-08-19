@@ -6,6 +6,11 @@ import uuid
 from typing import Any
 
 from src.transcription.scheme import SchemeValidationError, canonical_parameters, parameters_hash
+from src.transcription.profile_catalog import (
+    FASTER_WHISPER_PROFILE_ID,
+    FUNASR_SENSEVOICE_PROFILE_ID,
+    WHISPERX_BALANCED_PROFILE_ID,
+)
 
 
 SYSTEM_SCHEMES = (
@@ -15,6 +20,13 @@ SYSTEM_SCHEMES = (
     ("whisperx-large-v3-zh-balanced-v2", "WhisperX 均衡分段", "WhisperX v2 均衡分段", "whisperx-v2", {"segmentation_preset": "balanced", "max_duration_ms": 30000, "max_chars": 500, "merge_gap_ms": 750}),
     ("whisperx-large-v3-zh-fine-v2", "WhisperX 精细分段", "WhisperX v2 精细分段", "whisperx-v2", {"segmentation_preset": "fine", "max_duration_ms": 15000, "max_chars": 240, "merge_gap_ms": 500}),
 )
+
+
+_BASE_RUNTIME_PROFILE_IDS = {
+    "sensevoice-v1": FUNASR_SENSEVOICE_PROFILE_ID,
+    "faster-whisper-v1": FASTER_WHISPER_PROFILE_ID,
+    "whisperx-v2": WHISPERX_BALANCED_PROFILE_ID,
+}
 
 
 def _now() -> int:
@@ -39,6 +51,27 @@ def list_schemes(conn, *, include_archived: bool = True) -> list[dict[str, Any]]
 def get_scheme(conn, scheme_id: str) -> dict[str, Any] | None:
     row = conn.execute("SELECT * FROM transcription_schemes WHERE id=?", (scheme_id,)).fetchone()
     return None if row is None else _row(row)
+
+
+def resolve_scheme_runtime(conn, scheme_id: str) -> tuple[dict[str, Any], str]:
+    scheme = get_scheme(conn, scheme_id)
+    if scheme is None or scheme["archived"] or not scheme["enabled"]:
+        raise SchemeValidationError("transcription scheme is unavailable")
+    base = conn.execute(
+        "SELECT admission,availability FROM transcription_bases WHERE id=?",
+        (scheme["base_id"],),
+    ).fetchone()
+    if (
+        base is None
+        or base["admission"] != "enabled"
+        or base["availability"] != "runtime"
+    ):
+        raise SchemeValidationError("transcription base is not admitted")
+    try:
+        runtime_profile_id = _BASE_RUNTIME_PROFILE_IDS[scheme["base_id"]]
+    except KeyError as exc:
+        raise SchemeValidationError("unknown transcription base runtime") from exc
+    return scheme, runtime_profile_id
 
 
 def available_schemes(conn) -> list[dict[str, Any]]:

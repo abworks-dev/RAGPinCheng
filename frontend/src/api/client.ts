@@ -878,6 +878,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ version_ids: versionIds }),
     }),
+  downloadManagedCategory: (categoryId: string, fallbackFilename: string) =>
+    fileFetch(`/api/admin/content/categories/${encodeURIComponent(categoryId)}/download`, fallbackFilename, {
+      method: "POST",
+      body: JSON.stringify({}),
+    }),
   downloadManagedContentFile: (versionId: string, fallbackFilename: string) =>
     fileFetch(`/api/admin/content/versions/${encodeURIComponent(versionId)}/file?download=true`, fallbackFilename),
   downloadManagedMedia: (

@@ -162,6 +162,36 @@ describe("SourceWorkspace video sources", () => {
     expect(writeText).not.toHaveBeenCalledWith(expect.stringContaining("构件清单"));
   });
 
+  it("falls back when clipboard permission is denied for source copies", async () => {
+    const writeText = vi.fn().mockRejectedValue(new DOMException("Permission denied", "NotAllowedError"));
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    const execCommand = vi.fn().mockReturnValue(true);
+    Object.defineProperty(document, "execCommand", { configurable: true, value: execCommand });
+    renderWorkspace(spreadsheetSource);
+
+    fireEvent.click(screen.getByRole("button", { name: "复制全部来源" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("已复制 1 项来源");
+
+    fireEvent.click(screen.getByRole("button", { name: "复制来源" }));
+    expect(await screen.findByText("已复制")).toBeInTheDocument();
+    expect(writeText).toHaveBeenCalledTimes(2);
+    expect(execCommand).toHaveBeenCalledTimes(2);
+    expect(document.querySelector("textarea")).not.toBeInTheDocument();
+  });
+
+  it("reports a copy failure when both clipboard methods fail", async () => {
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: undefined });
+    Object.defineProperty(document, "execCommand", { configurable: true, value: vi.fn().mockReturnValue(false) });
+    renderWorkspace(spreadsheetSource);
+
+    fireEvent.click(screen.getByRole("button", { name: "复制全部来源" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("复制全部来源失败");
+
+    fireEvent.click(screen.getByRole("button", { name: "复制来源" }));
+    expect(await screen.findByText("复制失败，请手动选择原文。")).toBeInTheDocument();
+    expect(document.querySelector("textarea")).not.toBeInTheDocument();
+  });
+
   it("disables bulk export when there are no sources", () => {
     render(<SourceWorkspace messages={[]} conversationId="conversation-1" />);
 

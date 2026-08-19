@@ -1,5 +1,8 @@
+import { useState } from "react";
 import type { Conversation } from "../types";
 import { Trash2 } from "lucide-react";
+import { Button } from "./ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "./ui/dialog";
 
 export function ConversationList({
   conversations,
@@ -14,6 +17,8 @@ export function ConversationList({
   onDelete: (id: string) => void;
   loading: boolean;
 }) {
+  const [deleteTarget, setDeleteTarget] = useState<Conversation | null>(null);
+
   if (loading && conversations.length === 0) {
     return <div className="px-2 py-3 text-xs text-muted">加载对话列表…</div>;
   }
@@ -61,9 +66,7 @@ export function ConversationList({
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (confirm(`删除对话 “${c.title}”？此操作不可恢复。`)) {
-                    onDelete(c.id);
-                  }
+                  setDeleteTarget(c);
                 }}
                 className="inline-flex size-7 items-center justify-center rounded-ui-sm text-muted opacity-0 hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
                 title="删除对话"
@@ -77,6 +80,30 @@ export function ConversationList({
           </ul>
         </section>
       ))}
+      <Dialog open={deleteTarget !== null} onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>删除对话</DialogTitle>
+            <DialogDescription>
+              删除对话“{deleteTarget?.title}”？此操作不可恢复。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteTarget(null)}>取消</Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                if (!deleteTarget) return;
+                onDelete(deleteTarget.id);
+                setDeleteTarget(null);
+              }}
+            >
+              <Trash2 className="size-4" />
+              确认删除
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
