@@ -8,6 +8,7 @@ import time
 import zipfile
 from collections.abc import Iterator
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
@@ -1146,7 +1147,9 @@ def test_folder_upload_rejects_depth_count_and_total_size_limits(content_api, mo
     assert depth.status_code == 400
     assert depth.json()["detail"] == "文件夹路径超过资料目录四级限制"
 
-    monkeypatch.setattr(routes_content, "_MAX_FOLDER_UPLOAD_FILES", 1)
+    monkeypatch.setattr(routes_content, "get_settings", lambda _conn: SimpleNamespace(
+        upload_max_file_mb=2000, upload_max_batch_files=1, upload_max_batch_mb=10240,
+    ))
     count = client.post(
         "/api/admin/content/uploads",
         data={"category_id": "cat-03", "upload_mode": "folder", "relative_paths": ["a/one.md", "a/two.md"]},
@@ -1159,8 +1162,9 @@ def test_folder_upload_rejects_depth_count_and_total_size_limits(content_api, mo
     assert count.status_code == 413
     assert "最多上传 1 个文件" in count.json()["detail"]
 
-    monkeypatch.setattr(routes_content, "_MAX_FOLDER_UPLOAD_FILES", 500)
-    monkeypatch.setattr(routes_content, "_MAX_FOLDER_UPLOAD_BYTES", 2)
+    monkeypatch.setattr(routes_content, "get_settings", lambda _conn: SimpleNamespace(
+        upload_max_file_mb=2000, upload_max_batch_files=500, upload_max_batch_mb=0,
+    ))
     total = client.post(
         "/api/admin/content/uploads",
         data={"category_id": "cat-03", "upload_mode": "folder", "relative_paths": "a/large.md"},
@@ -1351,12 +1355,14 @@ def test_folder_upload_preflight_and_resolution_for_existing_root(content_api):
 
 def test_managed_office_upload_limit_cleans_staging_and_creates_no_content(content_api, monkeypatch):
     client, sessions, _queued, db_path = content_api
-    monkeypatch.setattr(routes_content, "_MAX_UPLOAD_BYTES", 4)
+    monkeypatch.setattr(routes_content, "get_settings", lambda _conn: SimpleNamespace(
+        upload_max_file_mb=1, upload_max_batch_files=5000, upload_max_batch_mb=10240,
+    ))
 
     response = client.post(
         "/api/admin/content/uploads",
         data={"category_id": "cat-03"},
-        files=[("files", ("large.docx", b"PK123", "application/octet-stream"))],
+        files=[("files", ("large.docx", b"PK" + b"x" * (1024 * 1024), "application/octet-stream"))],
         **_auth(sessions, "admin", csrf=True),
     )
 

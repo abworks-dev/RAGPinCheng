@@ -43,6 +43,7 @@ from src.indexing_pipeline import (
 from src.office_convert import convert_pptx_to_pdf, is_valid_pdf_file
 
 from .auth import CurrentUser, require_admin, require_csrf, require_csrf_admin, require_user
+from .maintenance import get_settings
 from .content_permissions import (
     has_content_permission,
     require_content_permission,
@@ -179,9 +180,6 @@ from .transcription_artifacts import LocalTranscriptionArtifactStore
 router = APIRouter(prefix="/admin/content", tags=["managed-content"])
 logger = logging.getLogger(__name__)
 _storage = ContentStorage(CONTENT_ROOT)
-_MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_MB", "200")) * 1024 * 1024
-_MAX_FOLDER_UPLOAD_FILES = int(os.getenv("MAX_FOLDER_UPLOAD_FILES", "500"))
-_MAX_FOLDER_UPLOAD_BYTES = int(os.getenv("MAX_FOLDER_UPLOAD_MB", "1024")) * 1024 * 1024
 _MAX_BULK_DOWNLOAD_BYTES = int(os.getenv("MAX_BULK_DOWNLOAD_MB", "1024")) * 1024 * 1024
 _MAX_RELATIVE_PATH_LENGTH = 1024
 _DOC_TYPES = {
@@ -224,6 +222,7 @@ def _preflight_upload_paths(
     relative_paths: list[str] | None,
     upload_mode: str,
 ) -> list[str | None]:
+    settings = get_settings(conn)
     if upload_mode not in {"files", "folder"}:
         raise HTTPException(status_code=400, detail="上传模式无效")
     category = conn.execute(
@@ -277,16 +276,16 @@ def _preflight_upload_paths(
 
     is_folder_upload = upload_mode == "folder" or has_nested_path
     if is_folder_upload:
-        if len(files) > _MAX_FOLDER_UPLOAD_FILES:
+        if len(files) > settings.upload_max_batch_files:
             raise HTTPException(
                 status_code=413,
-                detail=f"文件夹最多上传 {_MAX_FOLDER_UPLOAD_FILES} 个文件",
+                detail=f"文件夹最多上传 {settings.upload_max_batch_files} 个文件",
             )
         total_size = sum(_upload_size(upload) for upload in files)
-        if total_size > _MAX_FOLDER_UPLOAD_BYTES:
+        if total_size > settings.upload_max_batch_mb * 1024 * 1024:
             raise HTTPException(
                 status_code=413,
-                detail=f"文件夹总大小不能超过 {_MAX_FOLDER_UPLOAD_BYTES // (1024 * 1024)} MB",
+                detail=f"文件夹总大小不能超过 {settings.upload_max_batch_mb} MB",
             )
     return normalized_paths
 
@@ -732,10 +731,14 @@ def _require_feature() -> None:
 @router.get("/capabilities")
 def content_capabilities(
     _user: CurrentUser = Depends(require_content_permission("item.view")),
+    conn: sqlite3.Connection = Depends(get_db),
 ) -> dict[str, object]:
+    settings = get_settings(conn)
     return {
         "enabled": CONTENT_MANAGEMENT_ENABLED,
-        "max_upload_bytes": _MAX_UPLOAD_BYTES,
+        "max_upload_bytes": settings.upload_max_file_mb * 1024 * 1024,
+        "max_batch_files": settings.upload_max_batch_files,
+        "max_batch_bytes": settings.upload_max_batch_mb * 1024 * 1024,
         "supported_extensions": sorted(_DOC_TYPES),
     }
 
@@ -1018,16 +1021,17 @@ def preflight_managed_document_upload(
     ).fetchone()
     if category is None:
         raise HTTPException(status_code=400, detail="目标目录不存在或已停用")
-    if body.upload_mode == "folder" and len(body.entries) > _MAX_FOLDER_UPLOAD_FILES:
+    settings = get_settings(conn)
+    if body.upload_mode == "folder" and len(body.entries) > settings.upload_max_batch_files:
         raise HTTPException(
             status_code=413,
-            detail=f"文件夹最多上传 {_MAX_FOLDER_UPLOAD_FILES} 个文件",
+            detail=f"文件夹最多上传 {settings.upload_max_batch_files} 个文件",
         )
     total_size = sum(entry.size_bytes for entry in body.entries)
-    if body.upload_mode == "folder" and total_size > _MAX_FOLDER_UPLOAD_BYTES:
+    if body.upload_mode == "folder" and total_size > settings.upload_max_batch_mb * 1024 * 1024:
         raise HTTPException(
             status_code=413,
-            detail=f"文件夹总大小不能超过 {_MAX_FOLDER_UPLOAD_BYTES // (1024 * 1024)} MB",
+            detail=f"文件夹总大小不能超过 {settings.upload_max_batch_mb} MB",
         )
 
     can_create_folders = has_content_permission(conn, user, "category.manage")
@@ -1082,7 +1086,7 @@ def preflight_managed_document_upload(
                 reason_code="office_processing_disabled",
             ))
             continue
-        if entry.size_bytes > _MAX_UPLOAD_BYTES:
+        if entry.size_bytes > settings.upload_max_file_mb * 1024 * 1024:
             results.append(ManagedUploadPreflightEntryDTO(
                 sequence=sequence, filename=filename, relative_path=normalized_path,
                 status="blocked", reason="文件超过上传大小上限",
@@ -1184,6 +1188,7 @@ async def upload_managed_documents(
     _require_feature()
     if not files:
         raise HTTPException(status_code=400, detail="至少选择一个文件")
+    settings = get_settings(conn)
     normalized_paths = _preflight_upload_paths(
         conn,
         files=files,
@@ -1299,7 +1304,7 @@ async def upload_managed_documents(
             elif conflict is not None:
                 raise ContentFilenameConflict(conflict)
             stored = await _storage.ingest_upload(
-                upload, batch_id=batch_id, max_bytes=_MAX_UPLOAD_BYTES
+                upload, batch_id=batch_id, max_bytes=settings.upload_max_file_mb * 1024 * 1024
             )
             if doc_type in OFFICE_DOC_TYPES:
                 package_issue = find_unsafe_office_content(stored.absolute_path)
@@ -2195,7 +2200,10 @@ async def update_managed_content_item(
 
     batch_id = create_web_batch(conn, actor_user_id=user.id)
     try:
-        stored = await _storage.ingest_upload(file, batch_id=batch_id, max_bytes=_MAX_UPLOAD_BYTES)
+        settings = get_settings(conn)
+        stored = await _storage.ingest_upload(
+            file, batch_id=batch_id, max_bytes=settings.upload_max_file_mb * 1024 * 1024
+        )
         create_content_revision(
             conn,
             item_id,

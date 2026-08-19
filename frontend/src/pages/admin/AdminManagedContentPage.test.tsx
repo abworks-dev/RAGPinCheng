@@ -280,7 +280,7 @@ describe("AdminManagedContentPage", () => {
     mocks.role = "user";
     mocks.permissions = REVIEWER_PERMISSIONS;
     mocks.previewState.parentId = null;
-    mocks.capabilities.mockResolvedValue({ enabled: true, max_upload_bytes: 1024, supported_extensions: [".pdf"] });
+    mocks.capabilities.mockResolvedValue({ enabled: true, max_upload_bytes: 1024, max_batch_files: 5000, max_batch_bytes: 10240, supported_extensions: [".pdf"] });
     mocks.categories.mockResolvedValue([category]);
     mocks.items.mockResolvedValue({ items: [item], total: 1, status_counts: { awaiting_review: 1 } });
     mocks.preflightUpload.mockResolvedValue({ entries: [], folder_conflicts: [] });
@@ -1896,11 +1896,11 @@ describe("AdminManagedContentPage", () => {
   });
 
   it("shows loading, empty, and recoverable error states", async () => {
-    let resolveCapabilities: ((value: { enabled: boolean; max_upload_bytes: number; supported_extensions: string[] }) => void) | undefined;
+    let resolveCapabilities: ((value: { enabled: boolean; max_upload_bytes: number; max_batch_files: number; max_batch_bytes: number; supported_extensions: string[] }) => void) | undefined;
     mocks.capabilities.mockReturnValueOnce(new Promise((resolve) => { resolveCapabilities = resolve; }));
     render(<AdminManagedContentPage />);
     expect(screen.getByText("正在加载资料…")).toBeInTheDocument();
-    resolveCapabilities?.({ enabled: true, max_upload_bytes: 1024, supported_extensions: [".pdf"] });
+    resolveCapabilities?.({ enabled: true, max_upload_bytes: 1024, max_batch_files: 5000, max_batch_bytes: 10240, supported_extensions: [".pdf"] });
     await openRootFolder();
     expect((await screen.findAllByText("建模标准")).length).toBeGreaterThan(0);
 

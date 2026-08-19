@@ -659,6 +659,9 @@ export async function installAdminRoutes(
         settings: {
           conversation_cleanup_enabled: true,
           conversation_retention_days: 30,
+          upload_max_file_mb: 2000,
+          upload_max_batch_files: 5000,
+          upload_max_batch_mb: 10240,
           updated_at: 1700000000,
           updated_by: 9001,
         },

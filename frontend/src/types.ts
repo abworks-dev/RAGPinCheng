@@ -288,6 +288,9 @@ export type SystemOverview = {
 export type MaintenanceSettings = {
   conversation_cleanup_enabled: boolean;
   conversation_retention_days: number | null;
+  upload_max_file_mb: number;
+  upload_max_batch_files: number;
+  upload_max_batch_mb: number;
   updated_at: number | null;
   updated_by: number | null;
 };

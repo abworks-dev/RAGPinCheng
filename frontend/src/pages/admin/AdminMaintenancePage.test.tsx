@@ -21,6 +21,9 @@ vi.mock("../../api/client", () => ({ api: {
 const settings = {
   conversation_cleanup_enabled: true,
   conversation_retention_days: 30,
+  upload_max_file_mb: 2000,
+  upload_max_batch_files: 5000,
+  upload_max_batch_mb: 10240,
   updated_at: null,
   updated_by: null,
 };
@@ -76,6 +79,23 @@ describe("AdminMaintenancePage", () => {
     fireEvent.click(screen.getByRole("button", { name: "确认永久删除" }));
     expect(await screen.findByText(/清理完成：删除 4 条对话/)).toBeInTheDocument();
     expect(mocks.cleanup).toHaveBeenCalledTimes(1);
+  });
+
+  it("validates and saves managed upload limits independently", async () => {
+    mocks.update.mockResolvedValue({
+      ...settings, upload_max_file_mb: 3000, upload_max_batch_files: 6000,
+      upload_max_batch_mb: 12000, updated_at: 10,
+    });
+    render(<AdminMaintenancePage />);
+    await screen.findByRole("heading", { name: "系统维护" });
+    fireEvent.change(screen.getByLabelText("单文件上限（MB）"), { target: { value: "3000" } });
+    fireEvent.change(screen.getByLabelText("单批文件数量"), { target: { value: "6000" } });
+    fireEvent.change(screen.getByLabelText("单批总大小（MB）"), { target: { value: "12000" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存上传限制" }));
+    await waitFor(() => expect(mocks.update).toHaveBeenCalledWith(expect.objectContaining({
+      upload_max_file_mb: 3000, upload_max_batch_files: 6000, upload_max_batch_mb: 12000,
+    })));
+    expect(await screen.findByText("资料上传限制已保存，新上传请求将立即使用当前设置。")).toBeInTheDocument();
   });
 
   it("shows duration and a sanitized reason for failed runs", async () => {
