@@ -628,7 +628,7 @@ describe("AdminManagedContentPage", () => {
     expect(screen.getByText("共 0 份，第 1 / 1 页")).toBeInTheDocument();
   });
 
-  it("shows folder detail and keeps the number action next to it", async () => {
+  it("shows folder detail and orders all folder actions", async () => {
     mocks.permissions = [...CATEGORY_MANAGER_PERMISSIONS, "item.download"];
     const detailedFolder = { ...childCategory, item_count: 2, direct_child_count: 1, total_child_count: 3, total_item_count: 9 };
     mocks.categories.mockResolvedValue([category, detailedFolder]);
@@ -638,13 +638,13 @@ describe("AdminManagedContentPage", () => {
     const row = screen.getByTestId(`managed-folder-row-${detailedFolder.id}`);
     const labels = within(row).getAllByRole("button").map((button) => button.getAttribute("aria-label") || button.textContent);
     expect(labels.slice(-7)).toEqual([
+      expect.stringContaining("打开文件夹"),
       expect.stringContaining("查看文件夹"),
+      expect.stringContaining("重命名文件夹"),
       expect.stringContaining("调整文件夹"),
       expect.stringContaining("移动文件夹"),
-      expect.stringContaining("重命名文件夹"),
-      expect.stringContaining("删除文件夹"),
       expect.stringContaining("打包下载文件夹"),
-      expect.stringContaining("打开文件夹"),
+      expect.stringContaining("删除文件夹"),
     ]);
 
     fireEvent.click(within(row).getByRole("button", { name: /查看文件夹/ }));
@@ -1076,7 +1076,7 @@ describe("AdminManagedContentPage", () => {
     await openRootFolder();
     await screen.findAllByText("建模标准");
 
-    fireEvent.click(within(openMoreActions("建模标准")).getByRole("menuitem", { name: "移至回收站" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "删除“建模标准”" })[0]);
     expect(screen.getByRole("dialog")).toHaveTextContent("将立即停止进入知识库检索");
     expect(screen.getByRole("dialog")).toHaveTextContent("文件、版本及审核发布历史会保留");
     fireEvent.click(screen.getByRole("checkbox"));
@@ -1091,7 +1091,7 @@ describe("AdminManagedContentPage", () => {
     const firstRender = render(<AdminManagedContentPage />);
     await openRootFolder();
     await screen.findAllByText("建模标准");
-    expect(within(openMoreActions("建模标准")).getByRole("menuitem", { name: "移至回收站" })).toBeDisabled();
+    expect(screen.getAllByRole("button", { name: "删除“建模标准”" }).every((button) => button.hasAttribute("disabled"))).toBe(true);
     firstRender.unmount();
 
     mocks.permissions = PUBLISHER_PERMISSIONS;
@@ -1102,9 +1102,9 @@ describe("AdminManagedContentPage", () => {
     });
     const { unmount } = render(<AdminManagedContentPage />);
     await openRootFolder();
-    const disabledDelete = within(openMoreActions("建模标准")).getByRole("menuitem", { name: "移至回收站" });
+    const disabledDelete = screen.getAllByRole("button", { name: "删除“建模标准”" })[0];
     expect(disabledDelete).toBeDisabled();
-    expect(disabledDelete).toHaveAttribute("title", "资料正在发布，暂不能移入回收站");
+    expect(disabledDelete.parentElement).toHaveAttribute("aria-label", "删除“建模标准”：资料正在发布，暂不能移入回收站");
     unmount();
   });
 
@@ -1149,7 +1149,7 @@ describe("AdminManagedContentPage", () => {
     render(<AdminManagedContentPage />);
     await openRootFolder();
     await screen.findAllByText("建模标准");
-    fireEvent.click(within(openMoreActions("建模标准")).getByRole("menuitem", { name: "移至回收站" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "删除“建模标准”" })[0]);
     fireEvent.click(screen.getByRole("checkbox"));
     fireEvent.click(screen.getByRole("button", { name: "确认移入回收站" }));
 
@@ -1706,26 +1706,27 @@ describe("AdminManagedContentPage", () => {
     expect(screen.getAllByRole("button", { name: /调整“建模标准”的分类/ }).every((button) => button.hasAttribute("disabled"))).toBe(true);
   });
 
-  it("keeps workflow first and exposes secondary actions for wide and compact layouts", async () => {
+  it("keeps workflow first and orders all file actions consistently", async () => {
     mocks.permissions = ORGANIZER_PERMISSIONS;
     mocks.items.mockResolvedValue({ items: [{ ...item, lifecycle_status: "draft" }], total: 1, status_counts: { draft: 1 } });
     render(<AdminManagedContentPage />);
     await openRootFolder();
 
-    for (const actionName of ["查看“建模标准”的详细信息", "预览“建模标准”", "移动“建模标准”", "下载“建模标准”", "更多“建模标准”的操作"]) {
+    for (const actionName of ["预览“建模标准”", "查看“建模标准”的详细信息", "重命名“建模标准”", "更新“建模标准”", "移动“建模标准”", "下载“建模标准”", "删除“建模标准”"]) {
       expect(screen.getAllByRole("button", { name: actionName }).length).toBeGreaterThan(0);
     }
-    for (const actionName of ["重命名“建模标准”", "更新“建模标准”", "删除“建模标准”"]) {
-      expect(screen.getAllByRole("button", { name: actionName, hidden: true }).length).toBeGreaterThan(0);
-    }
-    const moreMenu = openMoreActions("建模标准");
-    for (const actionName of ["重命名", "更新资料", "移至回收站"]) {
-      expect(within(moreMenu).getByRole("menuitem", { name: actionName })).toBeInTheDocument();
-    }
-    fireEvent.keyDown(document, { key: "Escape" });
     const detailsButton = screen.getAllByRole("button", { name: "查看“建模标准”的详细信息" })[0];
     const iconGroup = detailsButton.parentElement?.parentElement;
     expect(iconGroup).toHaveClass("ml-auto", "justify-end");
+    expect(within(iconGroup as HTMLElement).getAllByRole("button").map((button) => button.getAttribute("aria-label"))).toEqual([
+      "预览“建模标准”",
+      "查看“建模标准”的详细信息",
+      "重命名“建模标准”",
+      "更新“建模标准”",
+      "移动“建模标准”",
+      "下载“建模标准”",
+      "删除“建模标准”",
+    ]);
     const actionGroup = iconGroup?.parentElement;
     expect(actionGroup).not.toBeNull();
     expect(within(actionGroup as HTMLElement).getAllByRole("button")[0]).toHaveTextContent("提交");
@@ -1866,7 +1867,7 @@ describe("AdminManagedContentPage", () => {
     mocks.renameContent.mockResolvedValue({ ...item, title: "更新后的标题", original_filename: "renamed.pdf", version_number: 2 });
     render(<AdminManagedContentPage />);
     await openRootFolder();
-    fireEvent.click(within(openMoreActions("建模标准")).getByRole("menuitem", { name: "重命名" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "重命名“建模标准”" })[0]);
     fireEvent.change(screen.getByLabelText("资料标题"), { target: { value: "更新后的标题" } });
     fireEvent.change(screen.getByLabelText(/^源文件名/), { target: { value: "renamed.pdf" } });
     fireEvent.click(screen.getByRole("button", { name: "保存为新版本" }));
@@ -1883,7 +1884,7 @@ describe("AdminManagedContentPage", () => {
     mocks.updateVersion.mockResolvedValue({ ...item, original_filename: "replacement.pdf", version_number: 2 });
     render(<AdminManagedContentPage />);
     await openRootFolder();
-    fireEvent.click(within(openMoreActions("建模标准")).getByRole("menuitem", { name: "更新资料" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "更新“建模标准”" })[0]);
     const replacement = new File(["# replacement"], "replacement.md", { type: "text/markdown" });
     fireEvent.change(screen.getByLabelText("选择替换文件"), { target: { files: [replacement] } });
     expect(screen.getByText("将使用原名称并匹配新格式：standard.md")).toBeInTheDocument();

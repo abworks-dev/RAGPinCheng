@@ -62,28 +62,11 @@ test.describe("资料管理", () => {
     const longTitle = "建筑信息模型交付标准（合成长文件名用于响应式检查）";
     const title = page.getByText(longTitle, { exact: true }).filter({ visible: true });
     const item = page.viewportSize()!.width < 1024 ? title.locator("xpath=ancestor::li") : title.locator("xpath=ancestor::tr");
-    const wideActions = page.viewportSize()!.width >= 1440;
-    for (const actionName of [`查看“${longTitle}”的详细信息`, `预览“${longTitle}”`, `移动“${longTitle}”`, `下载“${longTitle}”`]) {
+    const orderedActions = [`预览“${longTitle}”`, `查看“${longTitle}”的详细信息`, `重命名“${longTitle}”`, `更新“${longTitle}”`, `移动“${longTitle}”`, `下载“${longTitle}”`, `删除“${longTitle}”`];
+    for (const actionName of orderedActions) {
       await expect(item.getByRole("button", { name: actionName, exact: true })).toBeVisible();
     }
-    const moreButton = item.getByRole("button", { name: `更多“${longTitle}”的操作`, exact: true });
-    const trailingAction = wideActions
-      ? item.getByRole("button", { name: `删除“${longTitle}”`, exact: true })
-      : moreButton;
-    if (wideActions) {
-      for (const actionName of [`重命名“${longTitle}”`, `更新“${longTitle}”`, `删除“${longTitle}”`]) {
-        await expect(item.getByRole("button", { name: actionName, exact: true })).toBeVisible();
-      }
-      await expect(moreButton).toBeHidden();
-    } else {
-      await expect(moreButton).toBeVisible();
-      await moreButton.click();
-      const moreMenu = page.getByRole("menu", { name: `“${longTitle}”的更多操作` });
-      await expect(moreMenu.getByRole("menuitem", { name: "重命名" })).toBeVisible();
-      await expect(moreMenu.getByRole("menuitem", { name: "更新资料" })).toBeVisible();
-      await expect(moreMenu.getByRole("menuitem", { name: "移至回收站" })).toBeVisible();
-      await page.keyboard.press("Escape");
-    }
+    const trailingAction = item.getByRole("button", { name: `删除“${longTitle}”`, exact: true });
     const previewButton = item.getByRole("button", { name: `预览“${longTitle}”`, exact: true });
     await previewButton.hover();
     const actionTooltip = page.getByRole("tooltip", { name: "预览文件" });
@@ -241,24 +224,14 @@ test.describe("资料管理", () => {
     await item.getByRole("button", { name: `下载“${longTitle}”`, exact: true }).click();
     expect((await downloadPromise).suggestedFilename()).toBe(`${longTitle}.pdf`);
 
-    if (page.viewportSize()!.width >= 1440) {
-      await item.getByRole("button", { name: `重命名“${longTitle}”`, exact: true }).click();
-    } else {
-      await item.getByRole("button", { name: `更多“${longTitle}”的操作`, exact: true }).click();
-      await page.getByRole("menu", { name: `“${longTitle}”的更多操作` }).getByRole("menuitem", { name: "重命名" }).click();
-    }
+    await item.getByRole("button", { name: `重命名“${longTitle}”`, exact: true }).click();
     const renameDialog = page.getByRole("dialog", { name: "重命名资料" });
     await expect(renameDialog.getByRole("textbox", { name: "资料标题" })).toHaveValue(longTitle);
     await expect(renameDialog.getByRole("textbox", { name: /^源文件名/ })).toHaveValue(`${longTitle}.pdf`);
     await expect(renameDialog).toContainText("需要重新确认并发布");
     await renameDialog.getByRole("button", { name: "取消" }).click();
 
-    if (page.viewportSize()!.width >= 1440) {
-      await item.getByRole("button", { name: `更新“${longTitle}”`, exact: true }).click();
-    } else {
-      await item.getByRole("button", { name: `更多“${longTitle}”的操作`, exact: true }).click();
-      await page.getByRole("menu", { name: `“${longTitle}”的更多操作` }).getByRole("menuitem", { name: "更新资料" }).click();
-    }
+    await item.getByRole("button", { name: `更新“${longTitle}”`, exact: true }).click();
     const updateDialog = page.getByRole("dialog", { name: "更新资料文件" });
     await updateDialog.getByLabel("选择替换文件").setInputFiles({ name: "replacement.md", mimeType: "text/markdown", buffer: Buffer.from("# synthetic") });
     await expect(updateDialog).toContainText(`将使用原名称并匹配新格式：${longTitle}.md`);
@@ -589,22 +562,20 @@ test.describe("资料管理", () => {
     const title = page.getByText("机电专业协同检查清单", { exact: true }).filter({ visible: true });
     const item = page.viewportSize()!.width < 1024 ? title.locator("xpath=ancestor::li") : title.locator("xpath=ancestor::tr");
     const workflow = item.getByRole("button", { name: "审核", exact: true });
+    const previewButton = item.getByRole("button", { name: "预览“机电专业协同检查清单”" });
     const detailButton = item.getByRole("button", { name: "查看“机电专业协同检查清单”的详细信息" });
-    const moreButton = item.getByRole("button", { name: "更多“机电专业协同检查清单”的操作" });
-    const trailingAction = page.viewportSize()!.width >= 1440
-      ? item.getByRole("button", { name: "删除“机电专业协同检查清单”" })
-      : moreButton;
+    const trailingAction = item.getByRole("button", { name: "删除“机电专业协同检查清单”" });
     await expect(workflow).toBeVisible();
     if (page.viewportSize()!.width >= 1024) {
       const workflowBox = await workflow.boundingBox();
-      const detailBox = await detailButton.boundingBox();
+      const firstActionBox = await previewButton.boundingBox();
       const actionCellBox = await item.locator("td").last().boundingBox();
       const trailingActionBox = await trailingAction.boundingBox();
       expect(workflowBox).not.toBeNull();
-      expect(detailBox).not.toBeNull();
+      expect(firstActionBox).not.toBeNull();
       expect(actionCellBox).not.toBeNull();
       expect(trailingActionBox).not.toBeNull();
-      const actionGap = detailBox!.x - (workflowBox!.x + workflowBox!.width);
+      const actionGap = firstActionBox!.x - (workflowBox!.x + workflowBox!.width);
       expect(actionGap).toBeGreaterThanOrEqual(4);
       expect(actionGap).toBeLessThanOrEqual(12);
       const rightGap = actionCellBox!.x + actionCellBox!.width - (trailingActionBox!.x + trailingActionBox!.width);
@@ -673,18 +644,10 @@ test.describe("资料管理", () => {
     await openRootFolder(page);
     const title = page.getByText("建筑信息模型交付标准（合成长文件名用于响应式检查）", { exact: true }).filter({ visible: true });
     const item = page.viewportSize()!.width < 1024 ? title.locator("xpath=ancestor::li") : title.locator("xpath=ancestor::tr");
-    if (page.viewportSize()!.width >= 1440) {
-      const remove = item.getByRole("button", { name: "删除“建筑信息模型交付标准（合成长文件名用于响应式检查）”", exact: true });
-      await remove.scrollIntoViewIfNeeded();
-      await expectInViewport(remove);
-      await remove.click();
-    } else {
-      const more = item.getByRole("button", { name: `更多“建筑信息模型交付标准（合成长文件名用于响应式检查）”的操作`, exact: true });
-      await more.scrollIntoViewIfNeeded();
-      await expectInViewport(more);
-      await more.click();
-      await page.getByRole("menu", { name: "“建筑信息模型交付标准（合成长文件名用于响应式检查）”的更多操作" }).getByRole("menuitem", { name: "移至回收站" }).click();
-    }
+    const remove = item.getByRole("button", { name: "删除“建筑信息模型交付标准（合成长文件名用于响应式检查）”", exact: true });
+    await remove.scrollIntoViewIfNeeded();
+    await expectInViewport(remove);
+    await remove.click();
     const dialog = page.getByRole("dialog", { name: "将资料移入回收站？" });
     await expect(dialog).toContainText("将立即停止进入知识库检索");
     await expect(dialog).toContainText("文件、版本及审核发布历史会保留");
